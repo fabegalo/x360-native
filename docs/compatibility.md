@@ -17,8 +17,7 @@ Títulos compilados em `RelWithDebInfo` (ver `docs/validation-iruka.md`).
 | Alvo | Identidade | Análise | Geração | Compilação | Inicialização | Menu | Gameplay | Save/load | Conclusão | Teste | Limitações |
 |---|---|---|---|---|---|---|---|---|---|---|---|
 | Amostra XDK "Dolphin" (`rexglue/demo-iruka@4d81580`) | `default.xex` SHA-256 `66ec34f2…cb61e31`, 2 658 304 bytes; sem title id | ok com os ajustes da demo (`titles/iruka/analysis/iruka.toml`); sem eles, falha em execução | ok (77 arquivos, 5222 funções, determinística) | ok com backport `b5e0cf8` | ok: renderiza e anima por 30–40 s sem crash | — (sem menu) | — (não interativa) | — | — | `docs/validation-iruka.md`; runs `20261011T070446Z`, `20261011T070909Z` | entrada, áudio, encerramento normal, execução longa e Release não validados |
-
-Nenhum jogo comercial testado.
+| Castle Crashers (XBLA, `584108B7`, v0.0.1.3) — experimental | `default.xex` SHA-256 `825e9c8c…f5d9ad` (pacote LIVE `ed7b65a8…c31d41e74`) | ok com 3 ajustes (`titles/castle_crashers/analysis/castle_crashers.toml`) | ok (41 arquivos, 3714 funções) | ok | ok: 60 s sem falha, 0 stubs | ok: menu principal renderizado (captura); navegação por teclado e controle **relatada pelo usuário** | **relatado pelo usuário** (teclado e controle); não observado por nós | não testado | não testado | `docs/validation-castle-crashers.md`; run `20261011T171213Z-cc-run-2` | provável modo trial (`license_mask` 0); 2 shaders `.xpu` ausentes no pacote; sem save/load, Live fora do escopo |
 
 ## Dashboard
 

@@ -14,6 +14,7 @@ XDK "Dolphin" da `rexglue/demo-iruka`), com as limitações abaixo.
 | Supervisor `x360n doctor / identify / run` | testes `x360n.*`, `env.doctor`; `identify` classifica XEX2/XEX1/outra variante/inválido; `run` grava hashes do exe e das DLLs ao lado dele, diagnóstico do log e, com `--crash-stack`, a pilha de uma exceção não tratada |
 | **Primeiro XEX real pelo fluxo completo** (identify → init → codegen → build → run) | `docs/validation-iruka.md`: `default.xex` `66ec34f2…` lido pelo carregador, 5222 funções geradas de novo pela v0.10.0 (determinístico), compilado, renderiza e anima por 30–40 s sem crash, 0 chamadas a stubs no log |
 | Entradas locais | `local.inventory …` classifica os 621 XEX de `.local/inputs` (609 XEX2 lidos, 4 XEX1, 7 outras variantes, 1 inválido — listados em `.local/runs/inventory/inventory.tsv`); `local.integration targets …` confere os alvos de `tests/local/integration_targets.tsv` |
+| **Segundo alvo: Castle Crashers (XBLA)** | `docs/validation-castle-crashers.md`: pacote LIVE extraído com `x360n-content` (708 arquivos), XEX criptografado + LZX lido pelo SDK, 3 bloqueios diagnosticados por desmontagem e corrigidos com ajustes de análise, menu principal renderizado; teclado e controle funcionando **segundo teste manual do usuário** |
 | Reprodução do zero | árvore nova: configure 416 s, build Debug 166 s, testes 29 s |
 
 Totais da última execução completa registrada (em d9b9c74; `ctest --preset win-amd64-debug -j 16`):
@@ -66,7 +67,7 @@ Detalhes, mensagens exatas e classificação de cada falha: `docs/validation-iru
 
 ## Não funciona / não existe ainda
 
-- Nenhum jogo comercial testado; nenhuma dashboard.
+- Nenhuma dashboard. Castle Crashers sem save/load, sem versão completa (licença) e sem teste automatizado de gameplay.
 - O `iruka` não foi validado em entrada, áudio, encerramento normal, execução longa nem Release.
 - `x360n` não encadeia `init/codegen/build` sozinho: `scripts/build-title.ps1`
   faz o build em quatro fases, mas `init` e o codegen inicial ainda são passos à mão.
@@ -75,15 +76,15 @@ Detalhes, mensagens exatas e classificação de cada falha: `docs/validation-iru
 
 ## Próximo incremento de maior valor
 
-Transformar o fluxo manual validado no `iruka` em um comando do supervisor
-(`x360n prepare <manifesto>`): identify de cada XEX do manifesto, codegen sem
-`--force`, configure/build com `REXSDK_DIR` e backports, com log e código de
-saída por etapa no relatório. Depois, rodar o mesmo comando num segundo XEX de
-características diferentes antes de qualquer título comercial ou da dashboard.
+1. Castle Crashers: teste de save/load em `.local/user/castle_crashers`
+   (gravar no jogo, encerrar, reabrir, conferir), que é a próxima etapa da matriz.
+2. Transformar `identify → init → codegen → build-title → run` num comando do
+   supervisor com relatório por etapa; os alvos já validados servem de regressão.
 
 ## Marcos
 
 - **M0** build reproduzível, SDK integrado, testes reais — feito.
 - **M1** um programa PowerPC autorizado em XEX pelo fluxo completo — feito para a amostra Dolphin (limitações acima).
 - **M2** dashboard — não iniciado (sem arquivos).
-- **M3–M5** — não iniciados.
+- **M3 (parcial, experimental)** Castle Crashers: inicia, menu renderizado, entrada relatada pelo usuário; save/load e integração com a dashboard não testados.
+- **M4–M5** — não iniciados.

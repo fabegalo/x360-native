@@ -1,0 +1,50 @@
+# Analysis hints for Castle Crashers default.xex (title 584108B7, version 0.0.1.3,
+# SHA-256 825e9c8cb951d62ce954901488c5b783349c98cc5c03bd08ea0739df3af5d9ad),
+# extracted from the user's LIVE package
+# (SHA-256 ed7b65a8de5a70fabd311df4e542cf21adad9a75ac568b5f0a8c404c31d41e74).
+
+[functions]
+# Codegen v0.10.0 without hints: "UnresolvedCall 0x820E15E8 from 0x820E0D04:
+# b 0x820E15E8 - target not in any function". Disassembly of the loaded image
+# (x360n-content dump-image + SDK objdump): 0x820E0D00 is an adjustor thunk
+# (addi r3,r3,-4; b 0x820E15E8), and 0x820E15E8 is a complete function between
+# padding words (lis/addi/stw ... blr at 0x820E1610). Entry only; boundaries
+# are left to discovery. No name: none is known.
+0x820E15E8 = {}
+
+# Run 1 (cc-run-1): "[FATAL] Call to invalid or unregistered function at guest
+# address 0x82114E20" ~4 s after start. Disassembly: frameless leaf function,
+# no .pdata entry, reached only through a pointer:
+#   mr r3,r4; lis r4,0x4E57; li r5,0; ori r4,r4,0x4D20; b 0x8214ACA4
+# between the previous function's final b (0x82114E1C) and padding (0x82114E34).
+# scripts/check-code-gaps.ps1 lists it as an uncovered 5-word gap.
+0x82114E20 = {}
+
+# Build with only the entry above: codegen succeeds, but
+# castle_crashers_recomp.*.cpp fails to compile with "use of undeclared label
+# 'loc_82112F90'" (and F78, F70): sub_82112BC0 was extended over the next
+# function sub_82112D10. scripts/check-pdata-overlap.ps1 finds it as the only
+# overrun among 2484 .pdata functions (.pdata: 0x82112BC0 length 0x150).
+#
+# Cause: sub_82112BC0 dispatches through a byte-offset jump table with no
+# bounds check (lwz r11,744(r31); addi r11,r11,-1; lbzx r0,0x8200AF18,r11;
+# target = 0x82112C08 + 4*byte; bctr at 0x82112C04). Auto-detection read 39
+# entries, past the table into neighbouring data; targets inside sub_82112D10
+# extended the function end (function_scanner.cpp: "Extend funcEnd for
+# out-of-line case blocks"). A [functions] size does not bound this: the size
+# is only passed to discoverBlocks as a hint (phase_discover.cpp), and
+# `0x82112BC0 = { size = 0x150 }` left the output unchanged.
+#
+# Manual table (authoritative per function_scanner.cpp). Bytes 0x8200AF18..AF27,
+# up to the next table at 0x8200AF28 (00 05 0a 0f ...):
+#   0c 0c 0c 0c 42 0c 0c 0c 0c 00 0c 0c 00 00 00 00
+# 0x0c -> 0x82112C38, 0x00 -> 0x82112C08, 0x42 -> 0x82112D10 (entry of the next
+# function: emitted as a tail call). The last four zero bytes may be padding;
+# keeping them reproduces what the original bctr would do for those indices.
+# Indices >= 16 hit the emitter's "Switch case out of range" trap.
+[[switch_tables]]
+address = 0x82112C04
+register = 11
+labels = [0x82112C38, 0x82112C38, 0x82112C38, 0x82112C38, 0x82112D10, 0x82112C38,
+          0x82112C38, 0x82112C38, 0x82112C38, 0x82112C08, 0x82112C38, 0x82112C38,
+          0x82112C08, 0x82112C08, 0x82112C08, 0x82112C08]
