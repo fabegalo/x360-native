@@ -21,9 +21,9 @@ Títulos compilados em `RelWithDebInfo` (ver `docs/validation-iruka.md`).
 
 ## Dashboard
 
-| Versão | SHA-256 | Etapas | Observação |
-|---|---|---|---|
-| — | — | não testado | nenhum arquivo disponível; ver `docs/dashboard.md` |
+| Versão | Identidade | Análise | Geração | Compilação | Inicialização | Teste | Limitações |
+|---|---|---|---|---|---|---|---|
+| 2.0.17559.0 (Metro), `FFFE07D1` | `dash.xex` SHA-256 `3ad8f38d…14f927`, 5 971 968 bytes (`dashbigger.xex` `fc4ad906…ebc8c2` tem a mesma imagem carregada) | ok com 30 entradas e 1 tabela de saltos (`titles/dash_17559/analysis/dash_17559.toml`); sem elas, 28 `UnresolvedCall` | ok (257 arquivos, 37 856 funções; limites 30/30; 0 sobreposições `.pdata`) | ok com 13 armadilhas no título para imports que o SDK não fornece; exe atual `f06a3c54…ed4c5300` | **falha**: sem patches, `Runtime setup failed: C0000001`; com os patches locais 0001/0002, setup ok e imagem carregada, mas `Registered 0 recompiled functions` (`PPCFuncMappings[0]` gerado em `0x0`) e `No function registered at 92196610`: nenhuma instrução da dashboard executou | `docs/dashboard.md` §0.4–0.7; runs `…dash17559-codegen-6`, `…dash17559-run-1`, `20261011T230202Z-dash17559-run-3` | 822 imports, 473 stubs; 5 ordinais fora da tabela e 8 `XUsbcam*` sem símbolo; dependências externas não demonstradas |
 
 ## Programas de teste sem conteúdo proprietário
 

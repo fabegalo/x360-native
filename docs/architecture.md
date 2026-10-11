@@ -214,27 +214,63 @@ diferentes têm executáveis diferentes. Pinyon Shift faz o mesmo
 7. **Mensagem enganosa do `codegen`** para manifesto ilegível: `IsManifest`
    devolve `false` para qualquer erro de leitura (`src/codegen/manifest.cpp:153-160`),
    então um caminho inexistente vira `… is not a manifest: no [project] section`.
-8. *(ambiente, não SDK)* O LLVM 22.1.8 fixado em `deps.lock.json` **não tem o
+8. **Ordinais do `xam` além da tabela**: a tabela de exports termina em `0x545`
+   no trecho `0x53x–0x54x`; a dashboard 17559 importa `0x546–0x549` e `0x54B`
+   (`docs/dashboard.md` §0.2). O codegen registra `Cannot resolve ordinal` e segue.
+9. *(ambiente, não SDK)* O LLVM 22.1.8 fixado em `deps.lock.json` **não tem o
    alvo PowerPC** (`llvm-mc: unable to get target for 'powerpc64-unknown-unknown'`);
    não serve para desmontar imagens. `x360n-content disasm` usa o decodificador
    binutils do próprio SDK (`thirdparty/disasm`, dialeto Xenon do codegen).
-9. **Tabela de funções sempre no heap `v80000000`** — *corrigido localmente pelo
+10. **Destino só de `b`, sem `.pdata`, não vira função**: a análise promove
+    destinos de `bl`, mas um código alcançado apenas por `b` (chamada de cauda,
+    thunk) e sem entrada no `.pdata` gera `UnresolvedCall`. Na dashboard 17559,
+    dos 65 stubs de duas tabelas, todos os que têm chamador `bl` foram aceitos e
+    todos os só-`b` foram reportados (`docs/dashboard.md` §0.4). Os erros aparecem
+    em cadeia: um alvo só é verificado quando a função que o chama passa a existir.
+11. **Tabela de saltos com limite verificado antes de uma cópia do índice**:
+    `cmplwi r4,22; …; mr r25,r4; lbzx r0,tabela,r25` não foi reconhecido como limite;
+    a detecção leu 512 entradas e invadiu a função seguinte
+    (`check-pdata-overlap.ps1` acusa; corrigido com `[[switch_tables]]`).
+12. **Desvio condicional para fora de qualquer código** é registrado só na fase
+    Write (`Unresolved conditional branch …`) e vira `REX_FATAL` no ponto do desvio;
+    a validação não o conta como erro.
+13. **Import sem ordinal na tabela não tem definição**: `Cannot resolve ordinal`
+    registra o thunk como `sub_<endereço>`, o código gerado o chama e nada o
+    define — o título não linka. A dashboard resolve no próprio título com
+    armadilhas (`titles/dash_17559/src/unresolved_imports.cpp`).
+14. **Fontes de kernel fora do build**: `src/kernel/CMakeLists.txt` deixa
+    comentados `xboxkrnl_usbcam.cpp`, `cert_monitor.cpp` e `debug_monitor.cpp`
+    (iguais no `development`); os 11 `XUsbcam*` ficam sem símbolo. Um título que
+    os importe não linka. `scripts/xex-imports.ps1` só conta fontes compiladas.
+15. **Tabela de funções sempre no heap `v80000000`** — *corrigido localmente pelo
     patch 0001*: `Memory::InitializeFunctionTable` (`src/system/xmemory.cpp:787-806`
     no original) a alocava em `image_base + image_size` no heap
     `0x80000000–0x8FFFFFFF`. Imagens acima de `0x90000000` (dashboard 17559 em
     `0x92000000`) faziam o setup falhar com `C0000001`. O endereço é contrato com o
     código gerado (`REX_LOOKUP_FUNC`, `_indirect_call.inja:19-20`) e não muda; o
     patch escolhe o heap XEX que contém a tabela inteira e valida o pedido.
-10. **Falha de setup derrubava o encerramento** — *corrigido localmente pelo patch
+16. **Falha de setup derrubava o encerramento** — *corrigido localmente pelo patch
     0002*: `Runtime::Setup` chamava `Shutdown()` ao falhar, destruindo o sistema
     gráfico antes de o `ReXApp` liberar o drawer, a textura de fonte do ImGui e o
     presenter feitos com ele; `ReXApp::OnDestroy` caía em violação de acesso no
     `D3D12Core` (pilha em `docs/dashboard.md` §0.6).
-11. **Cópia da DLL só ao relinkar**: `rexglue_setup_target` copia `rexruntime` e o
+17. **Cópia da DLL só ao relinkar**: `rexglue_setup_target` copia `rexruntime` e o
     plugin de GPU no POST_BUILD do executável (`cmake/rexglue_helpers.cmake:104-110,
     159-163`). Mudando só a DLL, o executável não relinka e a cópia ao lado dele
     fica velha — aconteceu com o teste do patch 0002. `x360n_stage_runtime_dlls()`
     copia em todo build; o `x360n run` grava o SHA-256 das DLLs usadas.
+
+18. **Import registrado no endereço 0** — *não corrigido*: um ordinal com o slot de
+    valor num registro de import e o thunk em outro (dashboard 17559: `xam 0x8E2`)
+    gera um símbolo em `thunk_address = 0` (`XexModule::PopulateBinaryData`,
+    `src/system/xex_module.cpp:1163-1171`); sendo função no SDK, o codegen o põe
+    em `PPCFuncMappings[0]` como `{ 0x0, … }`, e o runtime, que para no primeiro
+    `guest == 0`, registra **zero** funções (`Registered 0 recompiled functions`).
+19. **Saída normal destrói a janela antes do runtime** — *não corrigido*:
+    `ReXApp::OnDestroy` faz `window_.reset()` antes de `runtime_.reset()`
+    (`src/ui/rex_app.cpp:605-606`); `~MnkInputDriver` (`DetachFromWindow`) usa a
+    janela já destruída. Só depois de um setup bem-sucedido (o driver recebe a
+    janela por `AttachWindow`).
 
 Patches locais (base `f5337cdc`): `patches/rexglue-sdk/README.md`; aplicação
 reproduzível por `scripts/apply-sdk-patches.ps1` e verificação no CMake.

@@ -9,6 +9,7 @@ projeto gerado por `rexglue init` (v0.10.0) com as adaptações do x360-native
 |---|---|---|
 | `iruka/` | `default.xex` `66ec34f2…cb61e31` (amostra XDK, `rexglue/demo-iruka`) | `docs/validation-iruka.md` |
 | `castle_crashers/` | `default.xex` `825e9c8c…f5d9ad` (XBLA `584108B7`, v0.0.1.3) | `docs/validation-castle-crashers.md` |
+| `dash_17559/` | `dash.xex` `3ad8f38d…14f927` (dashboard 2.0.17559.0) | `docs/dashboard.md` |
 
 Em cada pasta:
 

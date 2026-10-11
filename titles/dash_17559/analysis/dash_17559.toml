@@ -1,0 +1,164 @@
+# Analysis hints for the Xbox 360 dashboard 2.0.17559.0 dash.xex
+# (title FFFE07D1, SHA-256 3ad8f38d070eaf63cadac0697e3e8802c565cbfd0825a485347c5d718014f927,
+# 5 971 968 bytes; dashbigger.xex fc4ad906... loads to the same image).
+#
+# Codegen v0.10.0 without hints (run 20261011T173807Z-dash17559-codegen-2):
+# "Validation failed: 28 unresolved calls", 28 x "b <target> - target not in any
+# function" for the 23 targets below. None of them has a .pdata entry (checked
+# against the 28 350 .pdata starts; known starts such as the entry point are found).
+#
+# Evidence per entry comes from `x360n-content disasm` (the SDK's binutils
+# decoder, Xenon dialect) on the loaded image. Each entry is the start only:
+# no size and no name, boundaries are left to discovery. The "bounds" line is
+# what the disassembly shows and is checked against the generated function
+# after codegen (docs/dashboard.md).
+#
+# Not added: other code without .pdata that nothing failed on (e.g. the
+# adjustor thunk at 0x9237E660). Entries are added only for observed failures.
+
+[functions]
+
+# --- Adjustor thunks: "addi r3,r3,8; b <function>" --------------------------------
+# Two runs of four 8-byte thunks (0x9237E660..0x9237E67F, 0x9237E708..0x9237E727; six are
+# targets here), each starting right after the previous unconditional b and ending at its own
+# b; the word after each run is a .pdata function (0x9237E680, 0x9237E728).
+# Callers are thunks the analysis did find: 8-byte "b <thunk>" slots in
+# 0x9236C2D8..0x9236C414 and "addi r3,r3,-8; b <thunk>" at 0x92382BB8..0x92382BEF.
+# Classification: thunk (this += 8, tail call). Bounds: 2 instructions each.
+0x9237E668 = {}   # b 0x92389400; from 0x9236C2E0, 0x92382BCC
+0x9237E670 = {}   # b 0x928B2AF8; from 0x9236C2E8
+0x9237E678 = {}   # b 0x9238D278; from 0x9236C2F0, 0x92382BEC
+0x9237E710 = {}   # b 0x923893F8; from 0x9236C300
+0x9237E718 = {}   # b 0x9238D270; from 0x9236C308, 0x92382BBC
+0x9237E720 = {}   # b 0x92389690; from 0x9236C40C
+
+# Virtual-base adjustor thunk: lwz r11,-12(r3); ori r8,r8,0x80; lwz r11,4(r11);
+# add r11,r11,r3; addi r3,r11,-12; b 0x92674B80. Starts after the previous code's
+# final b (0x926745AC), ends at its b (0x926745C4); 0x926745C8 is a .pdata function.
+# From 0x926747D8 and 0x9263E434. Classification: thunk. Bounds: 0x926745B0-0x926745C7.
+0x926745B0 = {}
+
+# Fixed-argument thunk: li r4,1; b 0x927CF778. Preceded by the thunk
+# "addi r3,r3,-8; b 0x927CFCE0" ending at 0x927CFCEC; followed by an unrelated
+# 8-byte "b 0x927CF828" slot. From the adjustor thunk at 0x927CFD50
+# ("addi r3,r3,-8; b 0x927CFCF0"). Classification: thunk. Bounds: 0x927CFCF0-0x927CFCF7.
+0x927CFCF0 = {}
+
+# --- Indirect jumps through pointers filled at run time ----------------------------
+# 16-byte stubs "lis r11,hi; lwz r11,lo(r11); mtctr r11; bctr" in two contiguous
+# arrays; each starts after the previous stub's bctr and ends at its own bctr.
+# Classification: thunk with a dynamic destination. Bounds: 4 instructions each.
+# The entry address is static;
+# the destination is not:
+#   * array A (0x9218B270..0x9218B47F) reads slots 0x92992C88..0x92992D0C, written
+#     only by 0x9218B4A8, which calls XdfLoadXexFromCache("dashnui.xex", 8, 0,
+#     &0x92992D10) (xam 0x655, a stub in the SDK) and then 0x92192C60 (a wrapper of
+#     XexGetProcedureAddress) once per procedure name;
+#   * array B (0x927B10B0..0x927B12AF) reads slots 0x92A77A28..0x92A77AB0, written
+#     by 0x927B12B0 (same pattern, "dashnui.xex", handle at 0x92A77ABC) and set to
+#     0 by 0x927B16A8 when the reference count at 0x92A77AB4 drops to zero.
+# Both slot ranges are zero in the loaded image. No destination is assumed here.
+0x9218B410 = {}   # slot 0x92992CF4 <- "NuiIdentityEnroll"; from 0x92187410 (8-byte b slot)
+0x927B11F0 = {}   # slot 0x92A77A58 <- "NuiSpeechProcessWaveInput"; from 0x927B1EB4 (mr r3,r4; b)
+0x927B1210 = {}   # slot 0x92A77A4C <- "SpeechOnlineEnable"; from 0x927BDA80 (8-byte b slot)
+0x927B1220 = {}   # slot 0x92A77A48 <- "SpeechOnlineDisable"; from 0x927BDA88 (8-byte b slot)
+0x927B1230 = {}   # slot 0x92A77A44 <- "SpeechOnlineRecognize"; from 0x927BDAA0 (argument shift; b)
+0x927B1240 = {}   # slot 0x92A77A40 <- "SpeechOnlineDestroyRecognition"; from 0x927BDAAC (mr r3,r4; b)
+0x927B1270 = {}   # slot 0x92A77A34 <- "SpeechOnlineSetRecognitionStateCallback"; from 0x927BDAD0
+0x927B1280 = {}   # slot 0x92A77A30 <- "SpeechOnlineGetShouldShowPrivacyDialog"; from 0x927BDADC
+0x927B12A0 = {}   # slot 0x92A77A28 <- "SpeechOnlineRecognizeWaveFile"; from 0x927BDAF8 (argument shift; b)
+# Run 3 (codegen-3, with the entries above) reported two more stubs of array B,
+# reached from callers next to the ones above:
+0x927B1250 = {}   # slot 0x92A77A3C <- "SpeechOnlineCancelRecognition"; from 0x927BDAB4 (mr r3,r4; b)
+0x927B1290 = {}   # slot 0x92A77A2C <- "SpeechOnlineSetPrivacyDialogShown"; from 0x927BDAE0 (8-byte b slot)
+# Run 4 (codegen-4) reported one more:
+0x927B1260 = {}   # slot 0x92A77A38 <- "SpeechOnlineSetProperty"; from 0x927BDAC0
+# Why only these: `x360n-content callers` on all 34 + 32 stubs of both arrays shows
+# that every stub with a bl caller was never reported (bl targets become functions)
+# and every reported stub has only b callers. 0x927B1260 was the last b-only stub.
+
+# --- Functions without .pdata reached only by a tail branch ------------------------
+# 0x922E3D88: lwz r11,4(r3); ... two virtual tail calls (bctr) and a final
+# "b 0x922E3D18" at 0x922E3DF8, padding at 0x922E3DFC; every conditional branch
+# inside targets 0x922E3D88..0x922E3DF8. Preceded by "b 0x922E3CB8" (0x922E3D84).
+# The next code (0x922E3E00) has the same shape and ends with "b 0x922E3D88"
+# (0x922E3E70): a sibling handler delegating to this one.
+# Classification: function. Bounds: 0x922E3D88-0x922E3DFB.
+0x922E3D88 = {}
+
+# 0x9234F658: leaf; conditional branches stay inside; blr at 0x9234F6B4.
+# Preceded by a bctr (0x9234F654). Reached by "addi r5,r4,8; lwz r4,16(r4);
+# b 0x9234F658" at 0x9234FBFC. Classification: function. Bounds: 0x9234F658-0x9234F6B7.
+0x9234F658 = {}
+
+# 0x92351430: frameless leaf: mr r11,r6; stw r5,112(r3); mr r6,r7; stw r9,120(r3);
+# stw r8,116(r3); mr r5,r11; b 0x92351BC8. Preceded by "b 0x92351BB8" (0x9235142C),
+# followed by padding and the .pdata function 0x92351450. From 0x9234FE64 and
+# 0x9235007C, both after setting r5/r7 as arguments.
+# Classification: function. Bounds: 0x92351430-0x9235144B.
+0x92351430 = {}
+
+# 0x923766B0: leaf: lwz r11,64(r3); cmplwi; beqlr; lwz r3,76(r3); mtctr r11; bctr;
+# blr. Preceded by a bctr, followed by padding and a sibling at 0x923766D0. From the
+# adjustor thunk "addi r3,r3,-4; b 0x923766B0" (0x92377148).
+# Classification: function. Bounds: 0x923766B0-0x923766C7 (the blr at 0x923766C8
+# follows an unconditional bctr and is unreachable; it is not part of the function).
+0x923766B0 = {}
+
+# 0x927AFE08: forwards to 0x927B2D60 if the pointer at 0x92A77A1C is set, otherwise
+# returns 0x80070015 (lis/ori; blr at 0x927AFE24); final b at 0x927AFE3C. The next
+# word starts a sibling with the same shape (0x927AFE40). Preceded by
+# "mr r3,r11; b 0x923C5110". From 0x927B718C (argument shift; b).
+# Classification: function. Bounds: 0x927AFE08-0x927AFE3F.
+0x927AFE08 = {}
+
+# 0x92837DE8: frameless leaf (list insertion at r3+296), blr at 0x92837E04.
+# The previous .pdata function ends exactly here (0x928379D0-0x92837DE8); the next
+# .pdata function starts at 0x92837E08. From "mr r4,r3; lwz r3,112(r3); b 0x92837DE8"
+# (0x92841D38). Classification: function. Bounds: 0x92837DE8-0x92837E07.
+0x92837DE8 = {}
+
+# 0x922E3D18 (run 3: "b 0x922E3D18 from 0x922E3DF8", the tail branch of 0x922E3D88
+# above). Same handler shape: lwz r11,4(r3); ... virtual tail calls; final
+# "b 0x922E3CB8" at 0x922E3D84. Preceded by "b 0x922E3C38" (0x922E3D14), the final
+# branch of the previous handler. The handlers in 0x922E3BC0..0x922E3E77 form a
+# chain E00 -> D88 -> D18 -> CB8 -> C38 -> BC0 (BC0 returns 0).
+# Classification: function. Bounds: 0x922E3D18-0x922E3D87.
+0x922E3D18 = {}
+
+# 0x922E3CB8 (run 4: "b 0x922E3CB8 from 0x922E3D84", the tail branch of 0x922E3D18).
+# Same handler shape; final "b 0x922E3C38" at 0x922E3D14. Preceded by the final b
+# of 0x922E3C38 (0x922E3CB4). Classification: function. Bounds: 0x922E3CB8-0x922E3D17.
+0x922E3CB8 = {}
+
+# The rest of the chain, added before codegen reports it (same evidence class, each
+# address checked individually): reached only by b (`x360n-content callers`), and,
+# like every handler of the chain (E00, D88, D18, CB8, C38, BC0), stored as a pointer
+# in .rdata at 0x9202BE00..0x9202BEDC (`x360n-content xref`, data words).
+# 0x922E3C38: final "b 0x922E3BC0" at 0x922E3CB4; preceded by padding (0x922E3C34).
+# Classification: function. Bounds: 0x922E3C38-0x922E3CB7.
+0x922E3C38 = {}
+# 0x922E3BC0: end of the chain: "li r3,0; blr" at 0x922E3C2C-0x922E3C30, padding at
+# 0x922E3C34; preceded by padding (0x922E3BBC) after the .pdata function
+# 0x922E3B68-0x922E3BBC. Classification: function. Bounds: 0x922E3BC0-0x922E3C33.
+0x922E3BC0 = {}
+
+# --- Jump table read past its end ---------------------------------------------------
+# After the run that passed validation (codegen-5), scripts/check-pdata-overlap.ps1
+# found one overrun out of 28 350 .pdata functions: sub_922B4890 (.pdata
+# 0x922B4890-0x922B4B50) had label loc_922B4B64 inside the next .pdata function
+# 0x922B4B50. The generated switch on r25 had 512 cases.
+# Disassembly: the table IS bounds-checked, on r4 before r4 is copied:
+#   0x922B48AC mr r25,r4   0x922B48B0 cmplwi cr6,r4,22   0x922B48C4 bgt cr6,0x922B4B40
+#   0x922B48D0 lbzx r0,0x920273D0,r25; target = 0x922B48F0 + 4*byte; bctr at 0x922B48EC.
+# 23 entries (0..22). Bytes at 0x920273D0:
+#   00 14 07 18 8f 8f 8f 7f 8f 8f 92 92 8f 92 8f 8f 8f 8f 8b 86 81 18 8f
+# followed by 00 00 56 00 69 00 64 00 65 (UTF-16 "Vide..."), i.e. other data.
+# All 23 targets are inside 0x922B48F0..0x922B4B38, within the function.
+[[switch_tables]]
+address = 0x922B48EC
+register = 25
+labels = [0x922B48F0, 0x922B4940, 0x922B490C, 0x922B4950, 0x922B4B2C, 0x922B4B2C,
+          0x922B4B2C, 0x922B4AEC, 0x922B4B2C, 0x922B4B2C, 0x922B4B38, 0x922B4B38,
+          0x922B4B2C, 0x922B4B38, 0x922B4B2C, 0x922B4B2C, 0x922B4B2C, 0x922B4B2C,
+          0x922B4B1C, 0x922B4B08, 0x922B4AF4, 0x922B4950, 0x922B4B2C]

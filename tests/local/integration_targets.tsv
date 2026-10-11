@@ -10,3 +10,5 @@
 # path (relative to .local/inputs)	sha256	size	title_id (- if none)	version
 titles/iruka/extracted/default.xex	66ec34f2f558fe4e419d926108bf458a5c634ea8b5f76771b48ba633ecb61e31	2658304	-	-
 titles/castle_crashers/extracted/default.xex	825e9c8cb951d62ce954901488c5b783349c98cc5c03bd08ea0739df3af5d9ad	765952	584108B7	0.0.1.3
+dashboard/17559/dash.xex	3ad8f38d070eaf63cadac0697e3e8802c565cbfd0825a485347c5d718014f927	5971968	FFFE07D1	2.0.17559.0
+dashboard/17559/dashbigger.xex	fc4ad90638a8fff7759734dee364a48964e164d567699ca7e7aca2dc06ebc8c2	15880192	FFFE07D1	2.0.17559.0
