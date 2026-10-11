@@ -76,6 +76,37 @@ x360n run .local\build\titles\iruka\iruka.exe --label iruka-B --timeout 30 --rex
 emulação de GPU (`rex_app.cpp:49-52`). O CMake do título passou a chamar
 `rexglue_setup_target(iruka GPU_PLUGINS xenos)` para copiar o plugin.
 
+## 3. Referência funcional e reprodução limpa
+
+Níveis verificados automaticamente por `scripts/regress-iruka.ps1`
+(CTest `local.iruka.regression`), separando "processo iniciou" de "funcionou":
+
+| Nível | Critério | Resultado |
+|---|---|---|
+| L1 processo iniciou | `launched` no relatório | ok |
+| L2 XEX carregado, guest iniciado | `Function table initialized for module` no log | ok |
+| L3 executou sem falha | terminado pelo timeout do supervisor; 0 `[critical]`/`[error]`; 0 STUB | ok |
+| L4 renderizou | captura com ≥ 32 cores quantizadas (calibração: quadro real 324, cor sólida 1) | ok (320–329) |
+| L5 animou | duas capturas a ~6 s diferem ≥ 0,5 (calibração: mesma imagem 0,0) | ok (5,6–6,9) |
+
+Reprodução em diretório de build limpo, incluindo a geração do código:
+
+1. Primeira tentativa (configure + build numa árvore nova, sem `generated/default`):
+   **falhou na ligação** com `lld-link: error: undefined symbol: struct rex::PPCImageInfo const PPCImageConfig`.
+   Causa: `generated/rexglue.cmake` só inclui `generated/default/sources.cmake`
+   se ele existir **no configure**; o codegen roda durante o build, e um novo
+   `cmake --build` não reconfigura (testado: mesma falha). A wiki ("rebuild to
+   pick up the generated sources") não basta nesta revisão.
+2. Correção: configurar de novo depois do codegen. Codificado em
+   `scripts/build-title.ps1` (configure → `<título>_codegen` → configure → build).
+3. `scripts/build-title.ps1 -Title iruka -BuildDir .local/build/titles/iruka-clean-repro-2`
+   numa árvore nova: exit 0 em 638 s (codegen 132 s, reconfigure 7 s, build 63 s),
+   L1–L5 ok.
+4. Duas gerações a partir do zero são **idênticas byte a byte** (0 de 80 arquivos).
+   Uma geração incremental (sem → com ajustes) gera o **mesmo código por função**
+   (5222/5222) e o mesmo conjunto de declarações; muda só a distribuição das
+   funções entre arquivos (`codegen.partition.json`).
+
 ## Não validado
 
 Entrada de controle, áudio, encerramento normal (o processo foi sempre terminado

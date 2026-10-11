@@ -186,6 +186,45 @@ TEST_CASE("rejects inputs that are not a valid XEX2 header block", "[xex]") {
   auto r = ParseXexIdentity(huge_count);
   CHECK_FALSE(r.identity);
   CHECK(r.error.find("header_count") != std::string::npos);
+  CHECK(r.format == XexFormat::kXex2);  // a malformed XEX2 is still classified as XEX2
+}
+
+TEST_CASE("classifies older XEX signatures apart from corrupt input", "[xex]") {
+  auto s = MakeSynthetic();
+  auto ok = ParseXexIdentity(s.bytes);
+  CHECK(ok.format == XexFormat::kXex2);
+  CHECK(ok.identity);
+  CHECK(ok.signature == "XEX2");
+
+  auto with_magic = [&](const char* m) {
+    auto v = s.bytes;
+    for (int i = 0; i < 4; ++i) v[size_t(i)] = uint8_t(m[i]);
+    return ParseXexIdentity(v);
+  };
+  auto x1 = with_magic("XEX1");
+  CHECK(x1.format == XexFormat::kXex1);
+  CHECK_FALSE(x1.identity);  // recognized, not read
+  CHECK(x1.error.find("XEX1") != std::string::npos);
+  for (const char* m : {"XEX0", "XEX?", "XEX-", "XEX%"}) {
+    INFO(m);
+    auto v = with_magic(m);
+    CHECK(v.format == XexFormat::kXexOtherVariant);
+    CHECK_FALSE(v.identity);
+    CHECK(v.signature == m);
+  }
+
+  // An XEX2 header that lost its first byte: invalid, with the hint.
+  std::vector<uint8_t> shifted(s.bytes.begin() + 1, s.bytes.end());
+  auto sh = ParseXexIdentity(shifted);
+  CHECK(sh.format == XexFormat::kInvalid);
+  CHECK(sh.error.find("missing its first byte") != std::string::npos);
+
+  auto zip = with_magic("PK\x03\x04");
+  CHECK(zip.format == XexFormat::kInvalid);
+  CHECK(zip.signature == "PK..");
+  CHECK(ParseXexIdentity(std::span(s.bytes).first(3)).format == XexFormat::kInvalid);
+  // Too short but with the XEX2 signature: a malformed XEX2, not something else.
+  CHECK(ParseXexIdentity(std::span(s.bytes).first(0x10)).format == XexFormat::kXex2);
 }
 
 TEST_CASE("skips malformed optional headers with a warning", "[xex]") {

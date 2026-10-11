@@ -41,9 +41,8 @@ add_executable(x360n_sdk_checks sdkcheck/depfile_escape_test.cpp)
 target_link_libraries(x360n_sdk_checks PRIVATE rexcodegen Catch2::Catch2WithMain)
 target_compile_options(x360n_sdk_checks PRIVATE
     -UTRACY_ENABLE -UREXGLUE_ENABLE_PROFILING -UREXGLUE_ENABLE_PERF_COUNTERS)
-add_custom_command(TARGET x360n_sdk_checks POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_RUNTIME_DLLS:x360n_sdk_checks> $<TARGET_FILE_DIR:x360n_sdk_checks>
-    COMMAND_EXPAND_LISTS)
+# Runtime DLLs staged on every build, not only when this executable relinks.
+x360n_stage_runtime_dlls(x360n_sdk_checks)
 catch_discover_tests(x360n_sdk_checks TEST_PREFIX "sdkcheck." PROPERTIES LABELS "project" TIMEOUT 60
     DISCOVERY_MODE PRE_TEST)
 

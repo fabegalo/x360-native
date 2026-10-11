@@ -6,6 +6,8 @@
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
 #include <windows.h>
+// DbgHelp after windows.h.
+#include <dbghelp.h>
 #endif
 
 namespace x360n {
@@ -107,6 +109,88 @@ HANDLE OpenForChild(const std::filesystem::path& p, bool write) {
                      FILE_ATTRIBUTE_NORMAL, nullptr);
 }
 
+std::string WideToUtf8(const wchar_t* w) {
+  if (!w || !*w) return {};
+  int n = WideCharToMultiByte(CP_UTF8, 0, w, -1, nullptr, 0, nullptr, nullptr);
+  std::string s(size_t(n > 0 ? n - 1 : 0), '\0');
+  if (n > 1) WideCharToMultiByte(CP_UTF8, 0, w, -1, s.data(), n, nullptr, nullptr);
+  return s;
+}
+
+// Called while the child is stopped at a second-chance exception: every thread
+// is suspended by the debug API, so its memory and the thread context are stable.
+void CaptureCrash(HANDLE process, const DEBUG_EVENT& ev, const std::filesystem::path& exe,
+                  CrashInfo& crash) {
+  const EXCEPTION_RECORD& er = ev.u.Exception.ExceptionRecord;
+  crash.captured = true;
+  crash.code = er.ExceptionCode;
+  crash.address = uint64_t(reinterpret_cast<uintptr_t>(er.ExceptionAddress));
+  crash.thread_id = ev.dwThreadId;
+  if (er.ExceptionCode == EXCEPTION_ACCESS_VIOLATION && er.NumberParameters >= 2) {
+    const char* kind = er.ExceptionInformation[0] == 0   ? "read"
+                       : er.ExceptionInformation[0] == 8 ? "execute"
+                                                         : "write";
+    crash.access = fmt::format("{} 0x{:016X}", kind, uint64_t(er.ExceptionInformation[1]));
+  }
+
+  Handle thread(OpenThread(THREAD_GET_CONTEXT | THREAD_QUERY_INFORMATION, FALSE, ev.dwThreadId));
+  if (!thread) {
+    crash.frames.push_back(LastError("OpenThread"));
+    return;
+  }
+  CONTEXT ctx{};
+  ctx.ContextFlags = CONTEXT_FULL;
+  if (!GetThreadContext(thread.h, &ctx)) {
+    crash.frames.push_back(LastError("GetThreadContext"));
+    return;
+  }
+
+  SymSetOptions(SYMOPT_UNDNAME | SYMOPT_DEFERRED_LOADS | SYMOPT_LOAD_LINES | SYMOPT_FAIL_CRITICAL_ERRORS);
+  std::wstring search = exe.parent_path().wstring();
+  if (!SymInitializeW(process, search.c_str(), TRUE)) {  // TRUE: enumerate the loaded modules
+    crash.frames.push_back(LastError("SymInitializeW"));
+    return;
+  }
+  STACKFRAME64 frame{};
+  frame.AddrPC.Offset = ctx.Rip;
+  frame.AddrPC.Mode = AddrModeFlat;
+  frame.AddrFrame.Offset = ctx.Rbp;
+  frame.AddrFrame.Mode = AddrModeFlat;
+  frame.AddrStack.Offset = ctx.Rsp;
+  frame.AddrStack.Mode = AddrModeFlat;
+  alignas(SYMBOL_INFOW) char sym_buf[sizeof(SYMBOL_INFOW) + 512 * sizeof(wchar_t)];
+  for (int i = 0; i < 64; ++i) {
+    if (!StackWalk64(IMAGE_FILE_MACHINE_AMD64, process, thread.h, &frame, &ctx, nullptr,
+                     SymFunctionTableAccess64, SymGetModuleBase64, nullptr) ||
+        frame.AddrPC.Offset == 0) {
+      break;
+    }
+    DWORD64 pc = frame.AddrPC.Offset;
+    std::string line = fmt::format("#{:<2} 0x{:016X}", i, pc);
+    IMAGEHLP_MODULEW64 mod{};
+    mod.SizeOfStruct = sizeof(mod);
+    std::string module = SymGetModuleInfoW64(process, pc, &mod) ? WideToUtf8(mod.ModuleName) : "?";
+    auto* sym = reinterpret_cast<SYMBOL_INFOW*>(sym_buf);
+    *sym = SYMBOL_INFOW{};
+    sym->SizeOfStruct = sizeof(SYMBOL_INFOW);
+    sym->MaxNameLen = 512;
+    DWORD64 disp = 0;
+    if (SymFromAddrW(process, pc, &disp, sym)) {
+      line += fmt::format(" {}!{}+0x{:X}", module, WideToUtf8(sym->Name), disp);
+    } else {
+      line += fmt::format(" {}+0x{:X}", module, pc - (mod.BaseOfImage ? mod.BaseOfImage : pc));
+    }
+    IMAGEHLP_LINEW64 src{};
+    src.SizeOfStruct = sizeof(src);
+    DWORD line_disp = 0;
+    if (SymGetLineFromAddrW64(process, pc, &line_disp, &src)) {
+      line += fmt::format(" ({}:{})", WideToUtf8(src.FileName), src.LineNumber);
+    }
+    crash.frames.push_back(std::move(line));
+  }
+  SymCleanup(process);
+}
+
 }  // namespace
 
 ProcessResult RunProcess(const ProcessSpec& spec) {
@@ -144,8 +228,9 @@ ProcessResult RunProcess(const ProcessSpec& spec) {
   // Crash dialogs would block unattended runs; the error mode is inherited.
   UINT old_mode = SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX);
   auto start = std::chrono::steady_clock::now();
-  BOOL ok = CreateProcessW(spec.exe.c_str(), cmd.data(), nullptr, nullptr, TRUE,
-                           CREATE_SUSPENDED | CREATE_UNICODE_ENVIRONMENT, nullptr,
+  DWORD flags = CREATE_SUSPENDED | CREATE_UNICODE_ENVIRONMENT;
+  if (spec.capture_crash) flags |= DEBUG_ONLY_THIS_PROCESS;
+  BOOL ok = CreateProcessW(spec.exe.c_str(), cmd.data(), nullptr, nullptr, TRUE, flags, nullptr,
                            cwd.empty() ? nullptr : cwd.c_str(), &si, &pi);
   SetErrorMode(old_mode);
   if (!ok) {
@@ -162,11 +247,55 @@ ProcessResult RunProcess(const ProcessSpec& spec) {
   ResumeThread(thread.h);
   r.launched = true;
 
-  DWORD wait_ms = spec.timeout.count() > 0 ? DWORD(spec.timeout.count()) : INFINITE;
-  if (WaitForSingleObject(process.h, wait_ms) == WAIT_TIMEOUT) {
-    r.timed_out = true;
-    TerminateJobObject(job.h, 1);
+  if (spec.capture_crash) {
+    // Debug loop: the debug events must be pumped by this thread until the
+    // child exits; a timeout kills the job and keeps pumping until the exit event.
+    auto deadline = spec.timeout.count() > 0 ? start + spec.timeout
+                                             : std::chrono::steady_clock::time_point::max();
+    bool initial_breakpoint = true;
+    for (bool exited = false; !exited;) {
+      DEBUG_EVENT ev{};
+      if (!WaitForDebugEvent(&ev, 100)) {
+        if (!r.timed_out && std::chrono::steady_clock::now() >= deadline) {
+          r.timed_out = true;
+          TerminateJobObject(job.h, 1);
+        }
+        continue;
+      }
+      DWORD cont = DBG_CONTINUE;
+      switch (ev.dwDebugEventCode) {
+        case CREATE_PROCESS_DEBUG_EVENT:
+          if (ev.u.CreateProcessInfo.hFile) CloseHandle(ev.u.CreateProcessInfo.hFile);
+          break;
+        case LOAD_DLL_DEBUG_EVENT:
+          if (ev.u.LoadDll.hFile) CloseHandle(ev.u.LoadDll.hFile);
+          break;
+        case EXCEPTION_DEBUG_EVENT:
+          if (initial_breakpoint && ev.u.Exception.ExceptionRecord.ExceptionCode == EXCEPTION_BREAKPOINT) {
+            initial_breakpoint = false;  // the loader's breakpoint for an attached debugger
+            break;
+          }
+          cont = DBG_EXCEPTION_NOT_HANDLED;  // let the child's own handlers run
+          if (!ev.u.Exception.dwFirstChance && !r.crash.captured) {
+            CaptureCrash(process.h, ev, spec.exe, r.crash);
+          }
+          break;
+        case EXIT_PROCESS_DEBUG_EVENT:
+          if (ev.dwProcessId == pi.dwProcessId) exited = true;
+          break;
+        default:
+          break;
+      }
+      ContinueDebugEvent(ev.dwProcessId, ev.dwThreadId, cont);
+    }
     WaitForSingleObject(process.h, 10000);
+  } else {
+    DWORD wait_ms = spec.timeout.count() > 0 ? DWORD(spec.timeout.count()) : INFINITE;
+    if (WaitForSingleObject(process.h, wait_ms) == WAIT_TIMEOUT) {
+      r.timed_out = true;
+      TerminateJobObject(job.h, 1);
+      WaitForSingleObject(process.h, 10000);
+    }
   }
   r.duration = std::chrono::duration_cast<std::chrono::milliseconds>(
       std::chrono::steady_clock::now() - start);

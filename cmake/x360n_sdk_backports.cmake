@@ -1,6 +1,9 @@
-# Backports of upstream ReXGlue fixes, applied from outside the SDK tree so
-# external/rexglue-sdk stays unmodified. Shared by the top-level project and by
-# title projects under titles/ that consume the SDK through REXSDK_DIR.
+# Integration with the pinned ReXGlue SDK, shared by the top-level project and by
+# title projects under titles/ that consume the SDK through REXSDK_DIR:
+#  - backports of upstream fixes, applied from outside the SDK tree (CMake only);
+#  - x360n_stage_runtime_dlls(), which keeps the DLLs next to an executable current.
+#
+# Backports keep external/rexglue-sdk unmodified.
 #
 # Each backport is tied to the exact pinned commit it is needed for and cites
 # the upstream commit that fixes it; moving the pin disables it automatically.
@@ -30,4 +33,30 @@ function(x360n_apply_sdk_backports sdk_dir)
             $<BUILD_INTERFACE:${sdk_dir}/thirdparty/xxHash>)
         message(STATUS "x360n: applied SDK backport b5e0cf8 (imgui/xxHash include dirs) for ${_commit}")
     endif()
+endfunction()
+
+# x360n_stage_runtime_dlls(<target> [PLUGIN_TARGETS <t>...])
+# The SDK copies an executable's runtime DLLs (rexruntime, ...) and GPU plugins
+# next to it only as a POST_BUILD step of that executable
+# (cmake/rexglue_helpers.cmake), which does not run when only a DLL changed: the
+# executable does not relink, and the copy next to it stays old. This adds a
+# target that runs on every build and copies them when they differ.
+function(x360n_stage_runtime_dlls target)
+    if(NOT WIN32)
+        return()
+    endif()
+    cmake_parse_arguments(ARG "" "" "PLUGIN_TARGETS" ${ARGN})
+    # For targets that link at least one DLL (rexruntime): copy_if_different
+    # needs a non-empty source list.
+    set(_cmds
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_RUNTIME_DLLS:${target}>
+                $<TARGET_FILE_DIR:${target}>)
+    foreach(_p IN LISTS ARG_PLUGIN_TARGETS)
+        list(APPEND _cmds COMMAND ${CMAKE_COMMAND} -E copy_if_different
+             $<TARGET_FILE:${_p}> $<TARGET_FILE_DIR:${target}>)
+    endforeach()
+    add_custom_target(${target}_stage_dlls ALL ${_cmds}
+        COMMENT "x360n: staging runtime DLLs next to ${target}"
+        COMMAND_EXPAND_LISTS VERBATIM)
+    add_dependencies(${target}_stage_dlls ${target} ${ARG_PLUGIN_TARGETS})
 endfunction()

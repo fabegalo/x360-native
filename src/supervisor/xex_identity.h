@@ -55,9 +55,22 @@ struct XexIdentity {
   std::vector<std::string> warnings;     // malformed optional data that was skipped
 };
 
+// What the first bytes say a file is. Only kXex2 is read; the others are told
+// apart so that a known older format is not reported as a corrupt file and a
+// corrupt file is not reported as an older format.
+enum class XexFormat {
+  kXex2,             // "XEX2": parsed (identity set) or malformed (error set)
+  kXex1,             // "XEX1": recognized by the SDK loader (xex_module.cpp), not read here
+  kXexOtherVariant,  // "XEX" + another variant byte ("XEX0", "XEX?", "XEX-", ...): not supported
+  kInvalid,          // none of the above, or too short
+};
+const char* XexFormatName(XexFormat f);  // "XEX2", "XEX1", "XEX variant", "invalid"
+
 struct XexParseResult {
   std::optional<XexIdentity> identity;
   std::string error;  // set when identity is empty
+  XexFormat format = XexFormat::kInvalid;
+  std::string signature;  // the first 4 bytes, printable characters only (others as '.')
 };
 
 // `header` must contain at least the first header_size bytes of the file;

@@ -11,12 +11,12 @@ XDK "Dolphin" da `rexglue/demo-iruka`), com as limitações abaixo.
 | Suíte PPC do SDK (166 arquivos `.s`) | 1458/1458 casos |
 | Testes unitários do SDK | 208 aprovados, 4 `SKIP` upstream, 1 falha (bug do teste, abaixo) |
 | Programa PowerPC próprio pelo `recompile-tests` | `x360n.ppc.*` 4/4 |
-| Supervisor `x360n doctor / identify / run` | 25 testes `x360n.*`, `env.doctor`; `run --rex-log` lê o log de apps GUI do ReXGlue |
+| Supervisor `x360n doctor / identify / run` | testes `x360n.*`, `env.doctor`; `identify` classifica XEX2/XEX1/outra variante/inválido; `run` grava hashes do exe e das DLLs ao lado dele, diagnóstico do log e, com `--crash-stack`, a pilha de uma exceção não tratada |
 | **Primeiro XEX real pelo fluxo completo** (identify → init → codegen → build → run) | `docs/validation-iruka.md`: `default.xex` `66ec34f2…` lido pelo carregador, 5222 funções geradas de novo pela v0.10.0 (determinístico), compilado, renderiza e anima por 30–40 s sem crash, 0 chamadas a stubs no log |
-| Identidade do XEX real | `local.*` passou a rodar e passa (não é mais *skip*) |
+| Entradas locais | `local.inventory …` classifica os 621 XEX de `.local/inputs` (609 XEX2 lidos, 4 XEX1, 7 outras variantes, 1 inválido — listados em `.local/runs/inventory/inventory.tsv`); `local.integration targets …` confere os alvos de `tests/local/integration_targets.tsv` |
 | Reprodução do zero | árvore nova: configure 416 s, build Debug 166 s, testes 29 s |
 
-Totais da última execução completa (`ctest --preset win-amd64-debug -j 16`):
+Totais da última execução completa registrada (em d9b9c74; `ctest --preset win-amd64-debug -j 16`):
 1703 testes, 1698 aprovados, 4 ignorados (upstream), 1 falha conhecida.
 
 ## Comandos executados (resumo)
@@ -51,6 +51,11 @@ Detalhes, mensagens exatas e classificação de cada falha: `docs/validation-iru
 7. A demo `demo-iruka` **como publicada** não compila com a v0.10.0 (foi escrita
    para v0.1.0): formato de configuração, `find_package` de SDK instalado e API C++
    mudaram. É incompatibilidade de integração, não do XEX.
+8. `.local/inputs/dashboard/Dashboards/` (1223 arquivos, adicionada pelo usuário)
+   tem 11 XEX de pré-lançamento que `x360n identify` reconhece mas não lê — `XEX0`,
+   `XEX?`, `XEX-` em `Blades/Beta/{0000,1529,1640}` e `XEX1` em `Blades/Beta/{1838,1839}`
+   — e 1 arquivo inválido, `NXE/Beta/8955/dash.xex` (cabeçalho XEX2 sem o primeiro
+   byte). Ficam no inventário como não suportados, com o motivo; nenhum foi alterado.
 
 ## Bloqueios
 
@@ -63,9 +68,10 @@ Detalhes, mensagens exatas e classificação de cada falha: `docs/validation-iru
 
 - Nenhum jogo comercial testado; nenhuma dashboard.
 - O `iruka` não foi validado em entrada, áudio, encerramento normal, execução longa nem Release.
-- `x360n` não encadeia `init/codegen/build` sozinho: as etapas foram executadas
-  uma a uma (o `run` recusa `cmake.exe`, que não é saída de build).
-- Ordinais de import não decodificados; canal título→supervisor inexistente.
+- `x360n` não encadeia `init/codegen/build` sozinho: `scripts/build-title.ps1`
+  faz o build em quatro fases, mas `init` e o codegen inicial ainda são passos à mão.
+- Canal título→supervisor inexistente (os imports por ordinal são decodificados por
+  `x360n-content imports` e classificados por `scripts/xex-imports.ps1`).
 
 ## Próximo incremento de maior valor
 

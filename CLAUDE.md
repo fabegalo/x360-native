@@ -29,8 +29,11 @@ scripts\devshell.cmd ctest --preset win-amd64-debug -L project   # só este repo
   `NoDefaultCurrentDirectoryInExePath=1`; o próprio script diz que não afeta o ambiente.
 - Se o build falhar, **não rode os testes** sobre binários antigos.
 
-Resultado de referência: 1703 testes, 1697 ok, 5 skip, 1 falha conhecida
-(`unit.Depfile escapes characters make treats as syntax`, bug do teste upstream).
+Resultado de referência (medido em d9b9c74): 1703 testes, 1697 ok, 5 skip, 1 falha
+conhecida (`unit.Depfile escapes characters make treats as syntax`, bug do teste upstream;
+é falha, não sucesso). `local.inventory …` lista XEX antigos como não suportados sem
+falhar; falha num XEX2 malformado. `local.integration targets …` falha se um alvo de
+`tests/local/integration_targets.tsv` presente não for exatamente o arquivo listado.
 Qualquer outra falha é regressão.
 
 ## Estrutura
@@ -39,6 +42,8 @@ Qualquer outra falha é regressão.
   Exceção documentada: cópias dos symlinks do libmspack (`scripts/materialize-symlinks.ps1`).
 - Correções do SDK vão no `CMakeLists.txt` raiz como backport condicionado ao
   commit fixado, citando o commit upstream equivalente.
+- Executáveis que ligam o runtime usam `x360n_stage_runtime_dlls()`: o SDK só copia
+  a DLL ao relinkar o executável, e uma DLL velha ao lado do `.exe` passa despercebida.
 - `src/supervisor` — `x360n` (doctor/identify/run). Não liga o runtime.
 - `tests/` — prefixos: `x360n.*`, `x360n.ppc.*`, `sdkcheck.*`, `env.*`, `local.*`.
   Um único label CTest (`project`): listas de labels quebram `catch_discover_tests`.

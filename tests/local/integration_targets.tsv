@@ -1,0 +1,11 @@
+# XEX2 integration targets: the executables this project builds and runs
+# (titles/ and docs/compatibility.md). Read by tests/local/inputs_test.cpp
+# ("local.integration targets ..."). A target that is present must have exactly
+# this SHA-256 and size, be XEX2 and read with this identity; any difference fails.
+# A target that is absent on this machine is reported and skipped.
+#
+# Everything else under .local/inputs is only inventoried (local.inventory ...),
+# where older formats are listed as unsupported, with the reason.
+#
+# path (relative to .local/inputs)	sha256	size	title_id (- if none)	version
+titles/iruka/extracted/default.xex	66ec34f2f558fe4e419d926108bf458a5c634ea8b5f76771b48ba633ecb61e31	2658304	-	-

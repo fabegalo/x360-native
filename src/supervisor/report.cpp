@@ -107,6 +107,12 @@ void LogScan::Merge(const LogScan& o) {
   critical_lines += o.critical_lines;
   for (auto& [k, v] : o.stubs_by_name) stubs_by_name[k] += v;
   for (auto& [k, v] : o.unimplemented_messages) unimplemented_messages[k] += v;
+  for (auto& [k, v] : o.failed_opens) failed_opens[k] += v;
+  for (auto& [k, v] : o.unregistered_calls) unregistered_calls[k] += v;
+  for (auto& [k, v] : o.unimplemented_variables) unimplemented_variables[k] += v;
+  error_lines += o.error_lines;
+  for (const auto& e : o.first_errors)
+    if (first_errors.size() < kMaxFirstErrors) first_errors.push_back(e);
 }
 
 namespace {
@@ -138,6 +144,37 @@ void ScanMessageLine(std::string_view line, LogScan& s) {
   ++s.unimplemented_messages[std::string(app) + " " + std::string(value)];
 }
 
+std::string_view TrimEnd(std::string_view v) {
+  while (!v.empty() && (v.back() == '\r' || v.back() == ' ')) v.remove_suffix(1);
+  return v;
+}
+
+// "[NtCreateFile] FAILED: path='game:\x.xzp' -> 0xc000000f" -> "game:\x.xzp -> 0xc000000f"
+void ScanOpenFailure(std::string_view line, LogScan& s) {
+  constexpr std::string_view kPrefix = "[NtCreateFile] FAILED: path='";
+  size_t at = line.find(kPrefix);
+  if (at == std::string_view::npos) return;
+  size_t begin = at + kPrefix.size();
+  size_t end = line.rfind("' -> ");
+  if (end == std::string_view::npos || end < begin) return;
+  std::string_view status = TrimEnd(line.substr(end + 5));
+  ++s.failed_opens[std::string(line.substr(begin, end - begin)) + " -> " + std::string(status)];
+}
+
+void ScanAfter(std::string_view line, std::string_view prefix, std::string_view stop,
+               std::map<std::string, uint64_t>& out) {
+  size_t at = line.find(prefix);
+  if (at == std::string_view::npos) return;
+  std::string_view rest = line.substr(at + prefix.size());
+  if (!stop.empty()) {
+    size_t end = rest.find(stop);
+    if (end == std::string_view::npos) return;
+    rest = rest.substr(0, end);
+  }
+  rest = TrimEnd(rest);
+  if (!rest.empty()) ++out[std::string(rest)];
+}
+
 }  // namespace
 
 LogScan ScanLogText(std::string_view text) {
@@ -150,6 +187,22 @@ LogScan ScanLogText(std::string_view text) {
     ScanStubLine(line, s);
     ScanMessageLine(line, s);
     if (line.find("] [critical] ") != std::string_view::npos) ++s.critical_lines;
+    ScanOpenFailure(line, s);
+    ScanAfter(line, "unregistered function at guest address ", {}, s.unregistered_calls);
+    ScanAfter(line, "Variable import ", " not implemented", s.unimplemented_variables);
+    // "[time] [error] [cat] [thread] message": keep the text after the last "] ".
+    if (size_t at = line.find("] [error] "); at != std::string_view::npos) {
+      ++s.error_lines;
+      if (s.first_errors.size() < LogScan::kMaxFirstErrors) {
+        std::string_view msg = line.substr(at + 2);
+        while (!msg.empty() && msg.front() == '[') {
+          size_t close = msg.find("] ");
+          if (close == std::string_view::npos) break;
+          msg.remove_prefix(close + 2);
+        }
+        s.first_errors.emplace_back(TrimEnd(msg));
+      }
+    }
   }
   return s;
 }

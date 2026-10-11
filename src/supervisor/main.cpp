@@ -304,7 +304,9 @@ int Identify(const fs::path& file, bool json) {
     in.read(reinterpret_cast<char*>(head.data()), std::streamsize(head.size()));
     head.resize(size_t(in.gcount()));
   }
-  if (is_xex) parsed = ParseXexIdentity(head);
+  // Every file is classified (XEX2 / XEX1 / other XEX variant / invalid); only
+  // XEX2 is read.
+  parsed = ParseXexIdentity(head);
   const XexIdentity* id = parsed.identity ? &*parsed.identity : nullptr;
 
   if (json) {
@@ -314,8 +316,13 @@ int Identify(const fs::path& file, bool json) {
     w.String("path", fs::absolute(file).string());
     w.Number("size", int64_t(digest->size));
     w.String("sha256", digest->sha256);
-    w.String("format", is_xex ? "xex2" : "unknown");
-    if (is_xex && !id) w.String("error", parsed.error);
+    // "xex2" | "xex1" | "xex-variant" | "invalid"
+    w.String("format", parsed.format == XexFormat::kXex2   ? "xex2"
+                       : parsed.format == XexFormat::kXex1 ? "xex1"
+                       : parsed.format == XexFormat::kXexOtherVariant ? "xex-variant"
+                                                                      : "invalid");
+    w.String("signature", parsed.signature);
+    if (!id) w.String("error", parsed.error);
     if (id) {
       w.BeginObject("xex");
       w.String("module_flags", fmt::format("0x{:08X}", id->module_flags));
@@ -361,8 +368,9 @@ int Identify(const fs::path& file, bool json) {
     std::cout << w.Take();
   } else {
     fmt::print("file          {}\nsize          {} bytes\nsha256        {}\nformat        {}\n",
-               fs::absolute(file).string(), digest->size, digest->sha256, is_xex ? "xex2" : "unknown");
-    if (is_xex && !id) fmt::print("error         {}\n", parsed.error);
+               fs::absolute(file).string(), digest->size, digest->sha256,
+               XexFormatName(parsed.format));
+    if (!id) fmt::print("error         {}\n", parsed.error);
     if (id) {
       std::string flags;
       for (auto& f : DescribeModuleFlags(id->module_flags)) flags += (flags.empty() ? "" : ", ") + f;
@@ -401,7 +409,7 @@ std::string UtcStamp() {
 }
 
 int Run(const ProjectPaths& p, const fs::path& exe_in, std::vector<std::string> args,
-        std::string label, int timeout_s, bool rex_log) {
+        std::string label, int timeout_s, bool rex_log, bool crash_stack) {
   fs::path exe = fs::absolute(exe_in);
   if (auto why = CheckLaunchable(p, exe)) {
     fmt::print(stderr, "run: {}\n", *why);
@@ -433,9 +441,13 @@ int Run(const ProjectPaths& p, const fs::path& exe_in, std::vector<std::string> 
   if (rex_log) args.insert(args.begin(), "--log_file=" + rex_log_file.string());
 
   auto exe_digest = DigestFile(exe);
+  // The child runs in its executable's directory: relative paths in its
+  // arguments resolve there, not in the caller's directory.
   ProcessSpec spec{exe, args, exe.parent_path(), dir / "stdout.log", dir / "stderr.log",
                    std::chrono::seconds(timeout_s)};
-  fmt::print("run: {} -> {}\n", exe.string(), dir.string());
+  spec.capture_crash = crash_stack;
+  fmt::print("run: {} (working dir {}) -> {}\n", exe.string(), spec.working_dir.string(),
+             dir.string());
   auto r = RunProcess(spec);
 
   LogScan scan;
@@ -468,9 +480,33 @@ int Run(const ProjectPaths& p, const fs::path& exe_in, std::vector<std::string> 
     w.String("exe_sha256", exe_digest->sha256);
     w.Number("exe_size", int64_t(exe_digest->size));
   }
+  // DLLs next to the executable (the runtime and GPU plugin a ReXGlue title
+  // loads first): which build of them this run actually used.
+  w.BeginArray("dlls");
+  {
+    std::vector<fs::path> dlls;
+    std::error_code dir_ec;
+    for (const auto& e : fs::directory_iterator(exe.parent_path(), dir_ec)) {
+      std::string ext = e.path().extension().string();
+      for (char& c : ext) c = char(std::tolower(static_cast<unsigned char>(c)));
+      if (e.is_regular_file() && ext == ".dll") dlls.push_back(e.path());
+    }
+    std::sort(dlls.begin(), dlls.end());
+    for (const auto& d : dlls) {
+      w.BeginObject();
+      w.String("name", d.filename().string());
+      if (auto dg = DigestFile(d)) {
+        w.Number("size", int64_t(dg->size));
+        w.String("sha256", dg->sha256);
+      }
+      w.EndObject();
+    }
+  }
+  w.EndArray();
   std::string joined;
   for (auto& a : args) joined += (joined.empty() ? "" : " ") + a;
   w.String("args", joined);
+  w.String("working_dir", spec.working_dir.string());
   w.Number("timeout_s", timeout_s);
   w.EndObject();
   w.BeginObject("result");
@@ -499,9 +535,46 @@ int Run(const ProjectPaths& p, const fs::path& exe_in, std::vector<std::string> 
   for (auto& [k, v] : scan.unimplemented_messages) w.Number(k, int64_t(v));
   w.EndObject();
   w.Number("critical_lines", int64_t(scan.critical_lines));
+  w.BeginObject("failed_opens");
+  for (auto& [k, v] : scan.failed_opens) w.Number(k, int64_t(v));
   w.EndObject();
+  w.BeginObject("unregistered_calls");
+  for (auto& [k, v] : scan.unregistered_calls) w.Number(k, int64_t(v));
+  w.EndObject();
+  w.BeginObject("unimplemented_variables");
+  for (auto& [k, v] : scan.unimplemented_variables) w.Number(k, int64_t(v));
+  w.EndObject();
+  w.Number("error_lines", int64_t(scan.error_lines));
+  w.BeginArray("first_errors");
+  for (const auto& e : scan.first_errors) w.String({}, e);
+  w.EndArray();
+  w.EndObject();
+  if (crash_stack) {
+    w.BeginObject("crash");
+    w.Bool("captured", r.crash.captured);
+    if (r.crash.captured) {
+      w.String("exception_code", fmt::format("0x{:08X}", r.crash.code));
+      w.String("exception", DescribeExitCode(r.crash.code));
+      w.String("address", fmt::format("0x{:016X}", r.crash.address));
+      if (!r.crash.access.empty()) w.String("access", r.crash.access);
+      w.Number("thread_id", r.crash.thread_id);
+      w.BeginArray("frames");
+      for (const auto& f : r.crash.frames) w.String({}, f);
+      w.EndArray();
+    }
+    w.EndObject();
+  } else {
+    w.Null("crash");
+  }
   w.EndObject();
   std::ofstream(dir / "report.json", std::ios::binary) << w.Take();
+  if (r.crash.captured) {
+    std::ofstream txt(dir / "crash.txt", std::ios::binary);
+    txt << fmt::format("exception 0x{:08X} ({}) at 0x{:016X}, thread {}\n", r.crash.code,
+                       DescribeExitCode(r.crash.code), r.crash.address, r.crash.thread_id);
+    if (!r.crash.access.empty()) txt << "access: " << r.crash.access << "\n";
+    for (const auto& f : r.crash.frames) txt << f << "\n";
+  }
 
   if (!r.launched) {
     fmt::print(stderr, "run: launch failed: {}\n", r.launch_error);
@@ -509,11 +582,23 @@ int Run(const ProjectPaths& p, const fs::path& exe_in, std::vector<std::string> 
   }
   size_t unimpl = 0;
   for (auto& [k, v] : scan.unimplemented_messages) unimpl += v;
-  fmt::print("run: {} after {} ms; {} stub line(s), {} unimplemented message(s), {} critical; report {}\n",
-             r.timed_out ? std::string("TIMEOUT, terminated by the supervisor")
-                         : DescribeExitCode(r.exit_code),
-             r.duration.count(), scan.stub_lines, unimpl, scan.critical_lines,
-             (dir / "report.json").string());
+  // The summary line stays last: callers take the report path from its end.
+  for (const auto& e : scan.first_errors) fmt::print("run:   error: {}\n", e);
+  if (r.crash.captured) {
+    fmt::print("run:   crash: 0x{:08X} at 0x{:016X}{}{}; stack in crash.txt\n", r.crash.code,
+               r.crash.address, r.crash.access.empty() ? "" : ", ", r.crash.access);
+    for (size_t i = 0; i < r.crash.frames.size() && i < 8; ++i)
+      fmt::print("run:   {}\n", r.crash.frames[i]);
+  } else if (crash_stack) {
+    fmt::print("run:   crash: none captured (no unhandled exception)\n");
+  }
+  fmt::print(
+      "run: {} after {} ms; {} stub line(s), {} unimplemented message(s), {} error(s), {} critical; "
+      "report {}\n",
+      r.timed_out ? std::string("TIMEOUT, terminated by the supervisor")
+                  : DescribeExitCode(r.exit_code),
+      r.duration.count(), scan.stub_lines, unimpl, scan.error_lines, scan.critical_lines,
+      (dir / "report.json").string());
   if (r.timed_out) return kExitTimeout;
   return r.exit_code == 0 ? kExitOk : kExitFailed;
 }
@@ -532,7 +617,10 @@ int main(int argc, char** argv) {
   doctor->add_option("--config", config, "SDK build configuration to check")
       ->check(CLI::IsMember({"Debug", "Release", "RelWithDebInfo"}));
 
-  auto* identify = app.add_subcommand("identify", "Hash a file and read its XEX2 identity");
+  auto* identify = app.add_subcommand(
+      "identify",
+      "Hash a file, classify it (XEX2 / XEX1 / other XEX variant / invalid) and read its XEX2 "
+      "identity; exit 1 only for a malformed XEX2");
   std::string file;
   bool json = false;
   identify->add_option("file", file, "File to identify")->required();
@@ -545,10 +633,16 @@ int main(int argc, char** argv) {
   run->add_option("exe", exe, "Executable (must be under .local/build or the SDK out/ dir)")->required();
   run->add_option("--label", label, "Run label used in the run directory name");
   run->add_option("--timeout", timeout_s, "Timeout in seconds (0 = none)")->check(CLI::NonNegativeNumber);
+  bool crash_stack = false;
+  run->add_flag("--crash-stack", crash_stack,
+                "Run the child under the debug API and record the stack of an unhandled "
+                "exception (crash.txt, report.json); slower");
   bool rex_log = false;
   run->add_flag("--rex-log", rex_log,
                 "ReXGlue app: pass --log_file=<run dir>/rex.log to the child and scan it for stubs");
-  run->add_option("args", child_args, "Arguments passed to the child (after --)");
+  run->add_option("args", child_args,
+                  "Arguments passed to the child (after --); it runs in the executable's "
+                  "directory, so pass absolute paths");
 
   try {
     app.parse(argc, argv);
@@ -565,6 +659,6 @@ int main(int argc, char** argv) {
     return kExitUsage;
   }
   if (doctor->parsed()) return Doctor(*paths, config);
-  if (run->parsed()) return Run(*paths, exe, child_args, label, timeout_s, rex_log);
+  if (run->parsed()) return Run(*paths, exe, child_args, label, timeout_s, rex_log, crash_stack);
   return kExitUsage;
 }

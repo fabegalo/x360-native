@@ -1,20 +1,27 @@
 # titles/
 
-Configurações e correções por título **e versão de executável**. Vazio: nenhum
-título foi preparado ainda.
+Configurações e correções por título **e versão de executável**. Cada pasta é um
+projeto gerado por `rexglue init` (v0.10.0) com as adaptações do x360-native
+(backport do SDK, plugin de GPU, preset com o LLVM fixado) e é compilada por
+`scripts/build-title.ps1 -Title <nome>`.
 
-Convenção planejada (será validada no M1):
+| Pasta | Executável de entrada (SHA-256) | Documento |
+|---|---|---|
+| `iruka/` | `default.xex` `66ec34f2…cb61e31` (amostra XDK, `rexglue/demo-iruka`) | `docs/validation-iruka.md` |
+
+Em cada pasta:
 
 ```
-titles/<title_id>-<nome-curto>/<sha256-do-xex-de-entrada>/
-  title.toml        identidade esperada: SHA-256 e tamanho de cada XEX, versão,
-                    base_version, media_id, região; revisão do SDK usada
-  analysis/*.toml   [functions], [[switch_tables]], [[midasm_hook]] etc. incluídos
-                    no manifesto do rexglue
-  src/              hooks e correções específicos desse executável
+<nome>_manifest.toml   entrada do rexglue codegen (caminhos para .local/inputs)
+analysis/<nome>.toml   [functions], [[switch_tables]] etc.; o cabeçalho cita o
+                       SHA-256 do XEX, e cada entrada a evidência (desmontagem,
+                       log do codegen ou da execução)
+src/                   app do título e correções específicas desse executável
+generated/rexglue.cmake  vem do template do SDK (versionado)
+generated/<módulo>/    código gerado a partir do XEX (ignorado pelo git)
 ```
 
-O title id serve só para organizar pastas: regiões, atualizações (`patch_delta`)
-e mídias diferentes têm executáveis diferentes, e a identidade é sempre o SHA-256
-(`x360n identify --json`). Nenhum arquivo de jogo entra aqui; os XEX ficam em
-`.local/inputs` e o código gerado em `.local/`.
+A identidade é sempre o SHA-256 do XEX (`x360n identify --json`); regiões,
+atualizações e mídias diferentes têm executáveis diferentes. Nenhum arquivo de
+jogo ou de sistema entra aqui: os XEX ficam em `.local/inputs`, o build em
+`.local/build/titles/<nome>`.

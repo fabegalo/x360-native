@@ -4,12 +4,14 @@
 //   sleep <ms>   sleep, then exit 0
 //   crash        write through a null pointer (access violation)
 //   stub-log     print lines in the format REX_STUB logs, exit 0
+//   cwd          print the working directory, exit 0
 // A leading --log_file=<path> (as passed by `x360n run --rex-log`) sends the
 // stub-log lines to that file instead of stdout, like a ReXGlue GUI app.
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <string>
@@ -50,6 +52,10 @@ int main(int argc, char** argv) {
       if (!log) return 65;
       log << lines;
     }
+    return 0;
+  }
+  if (!std::strcmp(argv[1], "cwd")) {
+    std::cout << "cwd " << std::filesystem::current_path().string() << "\n";
     return 0;
   }
   return 64;

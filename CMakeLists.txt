@@ -37,6 +37,7 @@ include(cmake/x360n_sdk_backports.cmake)
 x360n_apply_sdk_backports("${X360_REXGLUE_DIR}")
 
 add_subdirectory(src/supervisor)
+add_subdirectory(src/content)
 if(TARGET Catch2::Catch2WithMain)
     add_subdirectory(tests)
 else()

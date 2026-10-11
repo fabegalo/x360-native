@@ -62,6 +62,24 @@ std::optional<std::string> CheckLaunchable(const ProjectPaths& p, const fs::path
   return std::nullopt;
 }
 
+bool IsSafePackageEntryName(const std::string& name) {
+  if (name.empty() || name == "." || name == ".." || name.size() > 255) return false;
+  for (unsigned char c : name) {
+    if (c < 0x20 || c == '/' || c == '\\' || c == ':' || c == '*' || c == '?' || c == '"' ||
+        c == '<' || c == '>' || c == '|')
+      return false;
+  }
+  if (name.back() == ' ' || name.back() == '.') return false;
+  std::string stem = name.substr(0, name.find('.'));
+  for (auto& ch : stem) ch = char(std::toupper(static_cast<unsigned char>(ch)));
+  static const char* kReserved[] = {"CON",  "PRN",  "AUX",  "NUL",  "COM1", "COM2", "COM3", "COM4",
+                                    "COM5", "COM6", "COM7", "COM8", "COM9", "LPT1", "LPT2", "LPT3",
+                                    "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9"};
+  for (const char* r : kReserved)
+    if (stem == r) return false;
+  return true;
+}
+
 bool IsSafeLabel(const std::string& label) {
   if (label.empty() || label.size() > 64) return false;
   return std::all_of(label.begin(), label.end(), [](unsigned char c) {

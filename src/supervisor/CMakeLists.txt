@@ -12,6 +12,10 @@ target_include_directories(x360n_core SYSTEM PUBLIC
     ${X360_REXGLUE_DIR}/include
     ${X360_REXGLUE_DIR}/thirdparty/cli11/include)
 target_link_libraries(x360n_core PUBLIC fmt::fmt)
+if(WIN32)
+    # dbghelp: stack walk of a crashed child (x360n run --crash-stack); part of Windows.
+    target_link_libraries(x360n_core PUBLIC dbghelp)
+endif()
 target_compile_options(x360n_core PUBLIC -Wall -Wextra)
 target_compile_definitions(x360n_core PUBLIC
     X360N_VERSION="${PROJECT_VERSION}"

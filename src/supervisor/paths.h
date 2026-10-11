@@ -35,4 +35,10 @@ std::optional<std::string> CheckLaunchable(const ProjectPaths& p, const std::fil
 // Characters safe for a run label (used in a directory name).
 bool IsSafeLabel(const std::string& label);
 
+// One path component read from a content package (STFS entry name). Rejects
+// anything that could escape the extraction directory or alias a Windows
+// device: empty, ".", "..", separators, ':', wildcards, control characters,
+// trailing space/dot, reserved names (CON, NUL, COM1...).
+bool IsSafePackageEntryName(const std::string& name);
+
 }  // namespace x360n

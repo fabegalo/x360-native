@@ -59,6 +59,54 @@ TEST_CASE("log scanner counts unimplemented XAM app messages and critical lines"
   CHECK(s.unimplemented_messages["XLIVEBASE msg=0005008C"] == 1);
   CHECK(s.critical_lines == 1);
   CHECK(s.stub_lines == 0);
+  CHECK(s.unregistered_calls["0x82198CD8"] == 1);
+}
+
+TEST_CASE("log scanner records failed opens and unimplemented variable imports", "[report]") {
+  // Formats from xboxkrnl_io.cpp (REXKRNL_IMPORT_FAIL) and xex_module.cpp:1111.
+  auto s = ScanLogText(
+      "[2026-10-11 17:12:20.001] [warning] [krnl] [t3] [NtCreateFile] FAILED: "
+      "path='game:\\shaders\\SobelEdge.xpu' -> 0xc000000f\r\n"
+      "[2026-10-11 17:12:20.002] [warning] [krnl] [t3] [NtCreateFile] FAILED: "
+      "path='game:\\shaders\\SobelEdge.xpu' -> 0xc000000f\n"
+      "[2026-10-11 17:12:20.003] [warning] [krnl] [t3] [NtCreateFile] FAILED: "
+      "path='media:\\a' -> b.xtt' -> 0xc0000034\n"
+      "[2026-10-11 17:36:43.000] [warning] [core] Variable import xam:0x3db (g_XuiAutomation) not "
+      "implemented\n"
+      "[2026-10-11 17:36:43.000] [warning] [core] Variable import xboxkrnl:0x157 "
+      "(XboxKrnlBaseVersion) not implemented\n"
+      "[debug] [NtCreateFile] -> 0x0 handle=0xF8000010\n");
+  CHECK(s.failed_opens.size() == 2);
+  CHECK(s.failed_opens["game:\\shaders\\SobelEdge.xpu -> 0xc000000f"] == 2);
+  // The status is taken after the last "' -> ", so a path containing "' -> " stays whole.
+  CHECK(s.failed_opens["media:\\a' -> b.xtt -> 0xc0000034"] == 1);
+  CHECK(s.unimplemented_variables.size() == 2);
+  CHECK(s.unimplemented_variables["xam:0x3db (g_XuiAutomation)"] == 1);
+  CHECK(s.unimplemented_variables["xboxkrnl:0x157 (XboxKrnlBaseVersion)"] == 1);
+  CHECK(s.critical_lines == 0);
+}
+
+TEST_CASE("log scanner keeps error lines in order, message text only", "[report]") {
+  // Lines from the first dashboard 17559 run (docs/dashboard.md §0.6).
+  auto s = ScanLogText(
+      "[2026-10-11 19:04:07.328] [info] [sys] [t25196] Guest memory arena mapped\n"
+      "[2026-10-11 19:04:07.373] [error] [sys] [t25196] Failed to allocate function table at "
+      "93028000\r\n"
+      "[2026-10-11 19:04:07.373] [error] [core] [t25196] Failed to initialize guest memory "
+      "function table\n"
+      "[2026-10-11 19:04:11.506] [error] [core] [t25196] Runtime setup failed: C0000001\n");
+  CHECK(s.error_lines == 3);
+  REQUIRE(s.first_errors.size() == 3);
+  CHECK(s.first_errors[0] == "Failed to allocate function table at 93028000");
+  CHECK(s.first_errors[2] == "Runtime setup failed: C0000001");
+  CHECK(s.critical_lines == 0);
+
+  std::string many;
+  for (int i = 0; i < 25; ++i) many += "[t] [error] [core] [t1] e" + std::to_string(i) + "\n";
+  auto m = ScanLogText(many);
+  CHECK(m.error_lines == 25);
+  CHECK(m.first_errors.size() == LogScan::kMaxFirstErrors);
+  CHECK(m.first_errors.front() == "e0");
 }
 
 TEST_CASE("command lines follow CommandLineToArgvW quoting", "[process]") {

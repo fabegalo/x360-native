@@ -91,8 +91,8 @@ apresentada como interface do console.
 | Comando | O que faz | Validação |
 |---|---|---|
 | `doctor` | compara `external/rexglue-sdk` com `deps.lock.json`, verifica clang fixado, MSVC, `rexglue --version`, binutils PPC, permissão de symlink, diretórios | `env.doctor` |
-| `identify <arq>` | SHA-256 + tamanho; para XEX2: flags, title/media id, versões, disco, nome PE, entry point, base, formato, imports por biblioteca | testes com cabeçalhos sintéticos + 20 000 corrupções aleatórias |
-| `run <exe>` | executa **somente** saídas de build (`.local/build`, `external/rexglue-sdk/out`), recusa `.local/inputs`; Job Object com kill-on-close, timeout, stdout/stderr em arquivo, relatório JSON com hashes e revisões | testes de processo e ponta a ponta com um processo-fixture |
+| `identify <arq>` | SHA-256 + tamanho; classifica XEX2 / XEX1 / outra variante `XEX` / inválido (só o XEX2 é lido; o resto sai com o motivo); para XEX2: flags, title/media id, versões, disco, nome PE, entry point, base, formato, imports por biblioteca | testes com cabeçalhos sintéticos + 20 000 corrupções aleatórias; `local.inventory …` e `local.integration targets …` sobre `.local/inputs` |
+| `run <exe>` | executa **somente** saídas de build (`.local/build`, `external/rexglue-sdk/out`), recusa `.local/inputs`; Job Object com kill-on-close, timeout, stdout/stderr em arquivo, relatório JSON com hashes do executável **e das DLLs ao lado dele**, revisões, diretório de trabalho e diagnóstico do log (stubs, mensagens XAM, aberturas que falharam, chamadas não registradas, `[error]`). O filho roda no diretório do executável. `--crash-stack`: roda o filho pela API de debug e grava a pilha (DbgHelp + PDB) de uma exceção não tratada | testes de processo e ponta a ponta com um processo-fixture |
 
 **[fato]** O supervisor reutiliza as estruturas do SDK
 (`include/rex/system/util/xex2_info.h`) e CLI11/fmt do SDK, mas não liga o
@@ -211,6 +211,13 @@ diferentes têm executáveis diferentes. Pinyon Shift faz o mesmo
    (`resources/templates/init/rexglue_cmake.inja:40-47`). Diferenças de ponto
    flutuante/aliasing entre o que é testado e o que um título compila são
    possíveis; não demonstradas.
+7. **Mensagem enganosa do `codegen`** para manifesto ilegível: `IsManifest`
+   devolve `false` para qualquer erro de leitura (`src/codegen/manifest.cpp:153-160`),
+   então um caminho inexistente vira `… is not a manifest: no [project] section`.
+8. *(ambiente, não SDK)* O LLVM 22.1.8 fixado em `deps.lock.json` **não tem o
+   alvo PowerPC** (`llvm-mc: unable to get target for 'powerpc64-unknown-unknown'`);
+   não serve para desmontar imagens. `x360n-content disasm` usa o decodificador
+   binutils do próprio SDK (`thirdparty/disasm`, dialeto Xenon do codegen).
 
 ## 8. Pinyon Shift: o que é reutilizável
 

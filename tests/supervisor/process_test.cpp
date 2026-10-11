@@ -102,6 +102,7 @@ TEST_CASE("x360n run maps outcomes to its exit codes and writes a report", "[cli
   CHECK(report.find("\"__imp__XamFoo\": 2") != std::string::npos);
   CHECK(report.find("\"exit_code\": 0") != std::string::npos);
   CHECK(report.find("\"sdk_commit_locked\": \"" X360N_SDK_COMMIT_LOCKED "\"") != std::string::npos);
+  CHECK(report.find("\"dlls\": [") != std::string::npos);
 
   // --rex-log: the child logs to <run dir>/rex.log (stdout stays empty) and the
   // stub scan must still see it.
@@ -120,4 +121,59 @@ TEST_CASE("x360n run maps outcomes to its exit codes and writes a report", "[cli
   // A timeout is reported as the supervisor's doing, not as the child's code.
   CHECK(run({"run", X360N_TEST_CHILD, "--label", "selftest-timeout2", "--timeout", "1", "--", "sleep", "20000"}) == 2);
   CHECK(Slurp(s.dir / "cli.out").find("TIMEOUT, terminated by the supervisor") != std::string::npos);
+
+  // The child runs in its executable's directory (not the caller's, here the
+  // source root), and the report and the console line say so.
+  CHECK(run({"run", X360N_TEST_CHILD, "--label", "selftest-cwd", "--", "cwd"}) == 0);
+  out = Slurp(s.dir / "cli.out");
+  CHECK(out.find("(working dir ") != std::string::npos);
+  pos = out.find("report ");
+  REQUIRE(pos != std::string::npos);
+  report_path = out.substr(pos + 7);
+  while (!report_path.empty() && (report_path.back() == '\n' || report_path.back() == '\r'))
+    report_path.pop_back();
+  std::string child_out = Slurp(fs::path(report_path).parent_path() / "stdout.log");
+  REQUIRE(child_out.rfind("cwd ", 0) == 0);
+  std::string child_cwd = child_out.substr(4);
+  while (!child_cwd.empty() && (child_cwd.back() == '\n' || child_cwd.back() == '\r'))
+    child_cwd.pop_back();
+  CHECK(fs::equivalent(child_cwd, fs::path(X360N_TEST_CHILD).parent_path()));
+  CHECK(Slurp(report_path).find("\"working_dir\": ") != std::string::npos);
+}
+
+// --crash-stack: the child runs under the debug API; an unhandled access
+// violation is recorded with its stack (symbols from the fixture's PDB), and the
+// child still dies with the exception as its exit code. A clean exit records none.
+TEST_CASE("x360n run --crash-stack records the stack of an unhandled exception", "[cli]") {
+  Scratch s;
+  auto run = [&](std::vector<std::string> args) {
+    ProcessSpec spec{X360N_EXE, std::move(args), X360N_SOURCE_ROOT, s.dir / "cli.out", s.dir / "cli.err", 60s};
+    auto r = RunProcess(spec);
+    REQUIRE(r.launched);
+    return r.exit_code;
+  };
+  auto report_of = [&]() {
+    std::string out = Slurp(s.dir / "cli.out");
+    auto pos = out.rfind("report ");
+    REQUIRE(pos != std::string::npos);
+    std::string path = out.substr(pos + 7);
+    while (!path.empty() && (path.back() == '\n' || path.back() == '\r')) path.pop_back();
+    return fs::path(path);
+  };
+
+  CHECK(run({"run", X360N_TEST_CHILD, "--label", "selftest-crashstack", "--crash-stack", "--", "crash"}) == 1);
+  fs::path report = report_of();
+  std::string json = Slurp(report);
+  CHECK(json.find("\"exit_code_hex\": \"0xC0000005\"") != std::string::npos);
+  CHECK(json.find("\"exception_code\": \"0xC0000005\"") != std::string::npos);
+  CHECK(json.find("\"access\": \"write 0x0000000000000000\"") != std::string::npos);
+  std::string crash = Slurp(report.parent_path() / "crash.txt");
+  INFO(crash);
+  CHECK(crash.find("x360n_test_child!main+") != std::string::npos);
+  CHECK(crash.find("test_child.cpp:") != std::string::npos);
+
+  CHECK(run({"run", X360N_TEST_CHILD, "--label", "selftest-crashstack-ok", "--crash-stack", "--", "exit", "0"}) == 0);
+  json = Slurp(report_of());
+  CHECK(json.find("\"captured\": false") != std::string::npos);
+  CHECK_FALSE(fs::exists(report_of().parent_path() / "crash.txt"));
 }

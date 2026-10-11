@@ -31,3 +31,9 @@ endif()
 # GPU emulation is a runtime-loaded plugin (cvar gpu_plugin, empty = disabled);
 # stage it next to the executable so --gpu_plugin=xenos can load it.
 rexglue_setup_target(iruka GPU_PLUGINS xenos)
+
+# x360-native: copy rexruntime and the GPU plugin next to the executable on every
+# build, not only when it relinks (see cmake/x360n_sdk_backports.cmake).
+if(REXSDK_DIR)
+    x360n_stage_runtime_dlls(iruka PLUGIN_TARGETS rexgpu-xenos)
+endif()

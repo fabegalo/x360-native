@@ -62,6 +62,25 @@ TEST_CASE("only build outputs may be launched", "[paths]") {
   CHECK(CheckLaunchable(p, t.root / ".local" / "build" / ".." / "inputs" / "game" / "evil.exe"));
 }
 
+TEST_CASE("package entry names cannot escape or alias devices", "[paths]") {
+  // Names seen in the Castle Crashers package are accepted.
+  CHECK(IsSafePackageEntryName("default.xex"));
+  CHECK(IsSafePackageEntryName("SobelEdgePS.xpu"));
+  CHECK(IsSafePackageEntryName("Achievement10.png"));
+  // Traversal, separators, drive syntax.
+  for (const char* bad : {"", ".", "..", "../x", "a/b", "a\\b", "C:", "x:y", "a*", "a?", "a|b", "\"q\""})
+    CHECK_FALSE(IsSafePackageEntryName(bad));
+  // Control characters, trailing dot/space (Windows strips them silently).
+  CHECK_FALSE(IsSafePackageEntryName(std::string("a\x01", 2)));
+  CHECK_FALSE(IsSafePackageEntryName("name."));
+  CHECK_FALSE(IsSafePackageEntryName("name "));
+  // Reserved device names, any case, with or without extension.
+  for (const char* dev : {"CON", "nul", "Aux.txt", "COM1", "lpt9.dat", "PRN"})
+    CHECK_FALSE(IsSafePackageEntryName(dev));
+  CHECK(IsSafePackageEntryName("CONFIG.bin"));  // only the exact stem is reserved
+  CHECK_FALSE(IsSafePackageEntryName(std::string(256, 'a')));
+}
+
 TEST_CASE("run labels are restricted to safe directory-name characters", "[paths]") {
   CHECK(IsSafeLabel("ppc-smoke_1.0"));
   CHECK_FALSE(IsSafeLabel(""));

@@ -63,16 +63,48 @@ std::vector<std::string> DescribeModuleFlags(uint32_t flags) {
   return out;
 }
 
+const char* XexFormatName(XexFormat f) {
+  switch (f) {
+    case XexFormat::kXex2: return "XEX2";
+    case XexFormat::kXex1: return "XEX1";
+    case XexFormat::kXexOtherVariant: return "XEX variant";
+    case XexFormat::kInvalid: return "invalid";
+  }
+  return "invalid";
+}
+
 XexParseResult ParseXexIdentity(std::span<const uint8_t> b) {
   XexParseResult r;
+  for (size_t i = 0; i < 4 && i < b.size(); ++i)
+    r.signature += (b[i] >= 0x20 && b[i] < 0x7F) ? char(b[i]) : '.';
+  if (b.size() >= 4 && Be32(b, 0) != kXex2Magic) {
+    uint32_t magic = Be32(b, 0);
+    if (magic == 0x58455831u) {  // "XEX1"
+      r.format = XexFormat::kXex1;
+      r.error = "XEX1 file: a format older than XEX2 that the SDK loader recognizes "
+                "(src/system/xex_module.cpp); x360n identify reads XEX2 only";
+    } else if (b[0] == 'X' && b[1] == 'E' && b[2] == 'X') {
+      r.format = XexFormat::kXexOtherVariant;
+      r.error = fmt::format(
+          "XEX family signature '{}' (magic 0x{:08X}): a variant neither x360n nor the pinned "
+          "SDK reads; not supported",
+          r.signature, magic);
+    } else {
+      r.format = XexFormat::kInvalid;
+      r.error = fmt::format("not an XEX file (magic 0x{:08X})", magic);
+      // An XEX2 header that lost its first byte starts with "EX2" followed by the
+      // high byte of module_flags; say so, it is a common kind of damage.
+      if (b.size() >= 12 && b[0] == 'E' && b[1] == 'X' && b[2] == '2')
+        r.error += "; bytes 0-2 are \"EX2\": looks like an XEX2 header missing its first byte";
+    }
+    return r;
+  }
   if (b.size() < kFixedHeaderSize) {
+    r.format = b.size() >= 4 ? XexFormat::kXex2 : XexFormat::kInvalid;
     r.error = fmt::format("file too small for an XEX2 header ({} bytes)", b.size());
     return r;
   }
-  if (Be32(b, 0) != kXex2Magic) {
-    r.error = fmt::format("not an XEX2 file (magic 0x{:08X})", Be32(b, 0));
-    return r;
-  }
+  r.format = XexFormat::kXex2;
 
   XexIdentity id;
   id.module_flags = Be32(b, offsetof(xex2_header, module_flags));
