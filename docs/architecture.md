@@ -218,6 +218,26 @@ diferentes têm executáveis diferentes. Pinyon Shift faz o mesmo
    alvo PowerPC** (`llvm-mc: unable to get target for 'powerpc64-unknown-unknown'`);
    não serve para desmontar imagens. `x360n-content disasm` usa o decodificador
    binutils do próprio SDK (`thirdparty/disasm`, dialeto Xenon do codegen).
+9. **Tabela de funções sempre no heap `v80000000`** — *corrigido localmente pelo
+    patch 0001*: `Memory::InitializeFunctionTable` (`src/system/xmemory.cpp:787-806`
+    no original) a alocava em `image_base + image_size` no heap
+    `0x80000000–0x8FFFFFFF`. Imagens acima de `0x90000000` (dashboard 17559 em
+    `0x92000000`) faziam o setup falhar com `C0000001`. O endereço é contrato com o
+    código gerado (`REX_LOOKUP_FUNC`, `_indirect_call.inja:19-20`) e não muda; o
+    patch escolhe o heap XEX que contém a tabela inteira e valida o pedido.
+10. **Falha de setup derrubava o encerramento** — *corrigido localmente pelo patch
+    0002*: `Runtime::Setup` chamava `Shutdown()` ao falhar, destruindo o sistema
+    gráfico antes de o `ReXApp` liberar o drawer, a textura de fonte do ImGui e o
+    presenter feitos com ele; `ReXApp::OnDestroy` caía em violação de acesso no
+    `D3D12Core` (pilha em `docs/dashboard.md` §0.6).
+11. **Cópia da DLL só ao relinkar**: `rexglue_setup_target` copia `rexruntime` e o
+    plugin de GPU no POST_BUILD do executável (`cmake/rexglue_helpers.cmake:104-110,
+    159-163`). Mudando só a DLL, o executável não relinka e a cópia ao lado dele
+    fica velha — aconteceu com o teste do patch 0002. `x360n_stage_runtime_dlls()`
+    copia em todo build; o `x360n run` grava o SHA-256 das DLLs usadas.
+
+Patches locais (base `f5337cdc`): `patches/rexglue-sdk/README.md`; aplicação
+reproduzível por `scripts/apply-sdk-patches.ps1` e verificação no CMake.
 
 ## 8. Pinyon Shift: o que é reutilizável
 

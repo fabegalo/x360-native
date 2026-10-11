@@ -46,6 +46,19 @@ x360n_stage_runtime_dlls(x360n_sdk_checks)
 catch_discover_tests(x360n_sdk_checks TEST_PREFIX "sdkcheck." PROPERTIES LABELS "project" TIMEOUT 60
     DISCOVERY_MODE PRE_TEST)
 
+# SDK runtime checks (link rexruntime): behavior our local SDK patches fix
+# (patches/rexglue-sdk/). Synthetic inputs only.
+add_executable(x360n_sdk_runtime_checks
+    sdkcheck/function_table_test.cpp
+    sdkcheck/setup_failure_test.cpp)
+target_link_libraries(x360n_sdk_runtime_checks PRIVATE rexruntime Catch2::Catch2WithMain)
+target_compile_options(x360n_sdk_runtime_checks PRIVATE
+    -UTRACY_ENABLE -UREXGLUE_ENABLE_PROFILING -UREXGLUE_ENABLE_PERF_COUNTERS)
+# Runtime DLLs staged on every build, not only when this executable relinks.
+x360n_stage_runtime_dlls(x360n_sdk_runtime_checks)
+catch_discover_tests(x360n_sdk_runtime_checks TEST_PREFIX "sdkcheck." PROPERTIES LABELS "project" TIMEOUT 120
+    DISCOVERY_MODE PRE_TEST)
+
 add_test(NAME env.doctor COMMAND x360n doctor --config $<CONFIG>)
 set_tests_properties(env.doctor PROPERTIES LABELS "project" TIMEOUT 300)
 

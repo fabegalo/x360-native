@@ -1,0 +1,122 @@
+x360-native local patch 0001 for rexglue-sdk f5337cdc947ff6d4c4196737e2c807a48f2a1fc2 (v0.10.0)
+
+Function table: allocate in the XEX heap that holds the table, and validate it.
+
+Memory::InitializeFunctionTable placed the dispatch table at
+image_base + image_size (the address generated code hard-codes in
+REX_LOOKUP_FUNC) but always allocated it from the 0x80000000 XEX heap.
+Images in the 0x90000000 XEX heap (dashboard 2.0.17559.0 at 0x92000000)
+made Runtime::Setup fail: "Failed to allocate function table at 93028000".
+
+The table address and indexing are unchanged. The allocation now uses the
+kGuestXex heap that contains the whole range [table, table + size), with that
+heap's page size as alignment; requests that overflow 32 bits, leave the heap,
+are misaligned, have no code, or overlap an existing table are rejected with
+an error. DestroyFunctionTable releases from the same heap.
+
+Test: tests/sdkcheck/function_table_test.cpp (sdkcheck.* in ctest).
+No upstream equivalent at the time of writing (development branch identical).
+
+diff --git a/src/system/xmemory.cpp b/src/system/xmemory.cpp
+index 76cc877..81945a6 100644
+--- a/src/system/xmemory.cpp
++++ b/src/system/xmemory.cpp
+@@ -787,25 +787,70 @@ bool Memory::Restore(stream::ByteStream* stream) {
+ bool Memory::InitializeFunctionTable(uint32_t code_base, uint32_t code_size, uint32_t image_base,
+                                      uint32_t image_size) {
+   constexpr uint32_t kThunkReserveSize = runtime::FunctionDispatcher::kThunkReserveSize;
+-  uint32_t table_base = image_base + image_size;
+-  uint32_t table_size = (code_size + kThunkReserveSize) * 2;
+-
+-  REXSYS_DEBUG(
+-      "Initializing function table at {:08X}, size {:08X} for code {:08X}-{:08X} "
+-      "(+{:08X} thunk reserve)",
+-      table_base, table_size, code_base, code_base + code_size, kThunkReserveSize);
+-
+-  if (!heaps_.v80000000.AllocFixed(
+-          table_base, table_size, 0x10000,
+-          memory::kMemoryAllocationReserve | memory::kMemoryAllocationCommit,
+-          memory::kMemoryProtectRead | memory::kMemoryProtectWrite)) {
++  // x360-native patch 0001 (patches/rexglue-sdk/0001-function-table-xex-heap.patch).
++  // The table stays at image_base + image_size: generated code hard-codes that
++  // address (REX_LOOKUP_FUNC). It used to be allocated in v80000000 only, which
++  // rejects images in the v90000000 XEX heap; now it goes to the XEX heap that
++  // holds its whole range, and the range is checked (64-bit arithmetic, heap
++  // bounds, the heap's page alignment, overlap with existing tables).
++  const uint64_t table_begin = uint64_t(image_base) + image_size;
++  const uint64_t table_bytes = (uint64_t(code_size) + kThunkReserveSize) * 2;
++  const uint64_t table_end = table_begin + table_bytes;  // exclusive
++  const uint64_t code_end = uint64_t(code_base) + code_size + kThunkReserveSize;
++  if (code_size == 0 || table_end > 0x100000000ull || code_end > 0x100000000ull) {
++    REXSYS_ERROR(
++        "Function table rejected: code {:08X}+{:08X} / image {:08X}+{:08X} is empty or "
++        "exceeds the 32-bit guest space",
++        code_base, code_size, image_base, image_size);
++    return false;
++  }
++  const uint32_t table_base = uint32_t(table_begin);
++  const uint32_t table_size = uint32_t(table_bytes);
++
++  BaseHeap* heap = LookupHeap(table_base);
++  if (!heap || heap->heap_type() != HeapType::kGuestXex ||
++      table_end > uint64_t(heap->heap_base()) + heap->heap_size()) {
++    REXSYS_ERROR("Function table rejected: {:08X}-{:08X} is not inside one XEX heap", table_base,
++                 uint32_t(table_end - 1));
++    return false;
++  }
++  if (table_base % heap->page_size() != 0) {
++    REXSYS_ERROR(
++        "Function table rejected: {:08X} is not aligned to the {:X}-byte pages of heap {:08X}",
++        table_base, heap->page_size(), heap->heap_base());
++    return false;
++  }
++
++  std::lock_guard lock(function_tables_mutex_);
++  for (const auto& e : function_tables_) {
++    const uint64_t e_table_end =
++        uint64_t(e.table_base) + (uint64_t(e.code_size) + e.thunk_reserve) * 2;
++    const uint64_t e_code_end = uint64_t(e.code_base) + e.code_size + e.thunk_reserve;
++    if ((table_begin < e_table_end && table_end > e.table_base) ||
++        (code_base < e_code_end && code_end > e.code_base)) {
++      REXSYS_ERROR(
++          "Function table rejected: code {:08X}+{:08X} / table {:08X}+{:08X} overlaps the table for "
++          "code {:08X}",
++          code_base, code_size, table_base, table_size, e.code_base);
++      return false;
++    }
++  }
++
++  REXSYS_INFO(
++      "Function table at {:08X}-{:08X} in XEX heap {:08X} ({:X}-byte pages) for code "
++      "{:08X}-{:08X} (+{:08X} thunk reserve)",
++      table_base, uint32_t(table_end - 1), heap->heap_base(), heap->page_size(), code_base,
++      code_base + code_size, kThunkReserveSize);
++
++  if (!heap->AllocFixed(table_base, table_size, heap->page_size(),
++                        memory::kMemoryAllocationReserve | memory::kMemoryAllocationCommit,
++                        memory::kMemoryProtectRead | memory::kMemoryProtectWrite)) {
+     REXSYS_ERROR("Failed to allocate function table at {:08X}", table_base);
+     return false;
+   }
+ 
+   Zero(table_base, table_size);
+ 
+-  std::lock_guard lock(function_tables_mutex_);
+   function_tables_.push_back({
+       .table_base = table_base,
+       .code_base = code_base,
+@@ -839,7 +884,13 @@ bool Memory::DestroyFunctionTable(uint32_t code_base) {
+   REXSYS_DEBUG("Destroying function table at {:08X}, size {:08X} for code {:08X}-{:08X}",
+                table_base, table_size, logged_code_base, logged_code_base + logged_code_size);
+ 
+-  heaps_.v80000000.Release(table_base);
++  // x360-native patch 0001: release from the heap InitializeFunctionTable
++  // allocated from (the XEX heap that contains table_base).
++  BaseHeap* heap = LookupHeap(table_base);
++  if (!heap || !heap->Release(table_base)) {
++    REXSYS_ERROR("Failed to release function table at {:08X}", table_base);
++    return false;
++  }
+   return true;
+ }
+ 

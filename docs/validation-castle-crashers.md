@@ -61,6 +61,14 @@ como evidência.
   Castle Crashers; no `iruka`, que funciona, lista 28. Um candidato sozinho não é
   defeito: só corrigimos endereços com falha observada e desmontagem conferida.
 
+## Regressão com os patches locais do SDK (2026-10-11)
+
+Depois dos patches 0001/0002 (`patches/rexglue-sdk/`), o título foi recompilado e
+a execução 2 repetida nas mesmas condições (run `20261011T225432Z-cc-run-patched`,
+sem entrada): 60 s até o timeout do supervisor, 0 STUB, 0 erros, 0 críticas, menu
+principal na captura de 40 s. O log mostra a tabela de funções no mesmo heap de
+antes: `Function table at 822D0000-824E5C27 in XEX heap 80000000 (10000-byte pages)`.
+
 ## Não validado
 
 Gameplay além do relato do usuário, save/load, encerramento normal, sessão longa,

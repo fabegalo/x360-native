@@ -29,19 +29,23 @@ scripts\devshell.cmd ctest --preset win-amd64-debug -L project   # só este repo
   `NoDefaultCurrentDirectoryInExePath=1`; o próprio script diz que não afeta o ambiente.
 - Se o build falhar, **não rode os testes** sobre binários antigos.
 
-Resultado de referência (medido em d9b9c74): 1703 testes, 1697 ok, 5 skip, 1 falha
-conhecida (`unit.Depfile escapes characters make treats as syntax`, bug do teste upstream;
-é falha, não sucesso). `local.inventory …` lista XEX antigos como não suportados sem
-falhar; falha num XEX2 malformado. `local.integration targets …` falha se um alvo de
-`tests/local/integration_targets.tsv` presente não for exatamente o arquivo listado.
-Qualquer outra falha é regressão.
+Resultado de referência (2026-10-11, com os patches locais): 1716 testes, 1711 ok,
+4 skip, 1 falha conhecida (`unit.Depfile escapes characters make treats as syntax`,
+bug do teste upstream; é falha, não sucesso). `local.inventory …` lista XEX
+antigos como não suportados sem falhar; falha num XEX2 malformado.
+`local.integration targets …` falha se um alvo de `tests/local/integration_targets.tsv`
+presente não for exatamente o arquivo listado. Qualquer outra falha é regressão.
 
 ## Estrutura
 
-- `external/rexglue-sdk` — submódulo fixado em `deps.lock.json`. **Não editar.**
-  Exceção documentada: cópias dos symlinks do libmspack (`scripts/materialize-symlinks.ps1`).
+- `external/rexglue-sdk` — submódulo fixado em `deps.lock.json`. **Não editar à mão.**
+  Exceções documentadas: cópias dos symlinks do libmspack (`scripts/materialize-symlinks.ps1`)
+  e os patches locais de `patches/rexglue-sdk/` (autorizados em 2026-10-11), aplicados por
+  `scripts/apply-sdk-patches.ps1` e verificados pelo CMake no configure e em todo build.
 - Correções do SDK vão no `CMakeLists.txt` raiz como backport condicionado ao
-  commit fixado, citando o commit upstream equivalente.
+  commit fixado, citando o commit upstream equivalente. Sem equivalente upstream,
+  só como patch em `patches/rexglue-sdk/` com teste `sdkcheck.*` que falha sem ele
+  e entrada em `deps.lock.json` (hashes antes/depois).
 - Executáveis que ligam o runtime usam `x360n_stage_runtime_dlls()`: o SDK só copia
   a DLL ao relinkar o executável, e uma DLL velha ao lado do `.exe` passa despercebida.
 - `src/supervisor` — `x360n` (doctor/identify/run). Não liga o runtime.

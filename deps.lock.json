@@ -5,7 +5,32 @@
     "url": "https://github.com/rexglue/rexglue-sdk.git",
     "tag": "v0.10.0",
     "commit": "f5337cdc947ff6d4c4196737e2c807a48f2a1fc2",
-    "license": "BSD-3-Clause (portions derived from Xenia, BSD)"
+    "license": "BSD-3-Clause (portions derived from Xenia, BSD)",
+    "patches_note": "Local patches applied to the pinned commit by scripts/apply-sdk-patches.ps1 (also run by bootstrap.ps1); CMake refuses to configure unless each listed file has the recorded SHA-256 after all patches. See patches/rexglue-sdk/README.md.",
+    "patches": [
+      {
+        "file": "patches/rexglue-sdk/0001-function-table-xex-heap.patch",
+        "sha256": "8a1c4a81611e3c733e5e9697dc501e8acbab24efaf26d68a7df80fc10cc4cb8c",
+        "files": {
+          "src/system/xmemory.cpp": "51ab3dab707e4353fd93ecfe37b7de188f0448bd6e57716663a03e7a74905b71"
+        },
+        "base_files": {
+          "src/system/xmemory.cpp": "97d19808714c2cb656c8d3c053cfd29a42d9b399bae47c9b3652ae21807fbf48"
+        },
+        "test": "tests/sdkcheck/function_table_test.cpp"
+      },
+      {
+        "file": "patches/rexglue-sdk/0002-setup-failure-teardown.patch",
+        "sha256": "73480fa9b0645d7532f6bfbb471dc964a87590c1fcd5c20946ad38340f769a93",
+        "files": {
+          "src/system/runtime.cpp": "b78b9d278441a4f57c6a580cdc51067676846b1f7db9357618f2266fa11b3192"
+        },
+        "base_files": {
+          "src/system/runtime.cpp": "f55bd64cf055f7ad288c282883e94feec8fb53631a6807654f7a516ec7ab4af7"
+        },
+        "test": "tests/sdkcheck/setup_failure_test.cpp"
+      }
+    ]
   },
   "llvm": {
     "version": "22.1.8",

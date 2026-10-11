@@ -1,0 +1,58 @@
+x360-native local patch 0002 for rexglue-sdk f5337cdc947ff6d4c4196737e2c807a48f2a1fc2 (v0.10.0)
+
+Runtime::Setup: on failure, leave teardown to ~Runtime().
+
+A failure after the graphics system was handed over (function table,
+func_mappings, GPU setup) called Runtime::Shutdown() inside Setup, destroying
+the graphics system and its D3D12 device while ReXApp still held an immediate
+drawer, ImGui font texture and window presenter created from it.
+ReXApp::OnDestroy then released those and crashed with an access violation in
+D3D12Core (stack: ~D3D12ImmediateTexture <- ImGuiDrawer::SetImmediateDrawer <-
+ReXApp::OnDestroy). Setup now returns the error and keeps the partly set-up
+Runtime; its destructor runs Shutdown() after the owner released its objects,
+the same order as a normal exit.
+
+Test: tests/sdkcheck/setup_failure_test.cpp (sdkcheck.* in ctest).
+No upstream equivalent at the time of writing.
+
+diff --git a/src/system/runtime.cpp b/src/system/runtime.cpp
+index c10694c..2778dd9 100644
+--- a/src/system/runtime.cpp
++++ b/src/system/runtime.cpp
+@@ -95,9 +95,14 @@ X_STATUS Runtime::Setup(RuntimeConfig config) {
+   }
+   instance_ = this;
+ 
+-  auto fail = [this](X_STATUS status, std::string_view reason) {
++  // x360-native patch 0002 (patches/rexglue-sdk/0002-setup-failure-teardown.patch):
++  // a failed Setup does not tear the Runtime down. The caller may still hold
++  // objects made from what it handed over (ReXApp: immediate drawer, ImGui
++  // textures and window presenter from the graphics system), and must release
++  // them first; ~Runtime() runs Shutdown() afterwards, in the same order as a
++  // normal exit.
++  auto fail = [](X_STATUS status, std::string_view reason) {
+     REXSYS_ERROR("Runtime::Setup failed: {}", reason);
+-    Shutdown();
+     return status;
+   };
+ 
+@@ -209,8 +214,7 @@ X_STATUS Runtime::Setup(const rex::PPCImageInfo& image_info, RuntimeConfig confi
+                                                      image_info.image_base, image_info.image_size,
+                                                      /*is_entrypoint=*/true)) {
+     REXSYS_ERROR("Failed to initialize function table");
+-    Shutdown();
+-    return X_STATUS_UNSUCCESSFUL;
++    return X_STATUS_UNSUCCESSFUL;  // patch 0002: teardown is left to ~Runtime()
+   }
+ 
+   if (image_info.func_mappings) {
+@@ -237,8 +241,7 @@ X_STATUS Runtime::Setup(const rex::PPCImageInfo& image_info, RuntimeConfig confi
+                  duplicates, rejected);
+     if (rejected > 0) {
+       REXSYS_ERROR("PPCImageInfo registration: {} func_mappings entries rejected", rejected);
+-      Shutdown();
+-      return X_STATUS_UNSUCCESSFUL;
++      return X_STATUS_UNSUCCESSFUL;  // patch 0002: teardown is left to ~Runtime()
+     }
+   }
+ 

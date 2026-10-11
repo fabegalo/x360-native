@@ -1,12 +1,17 @@
 # Integration with the pinned ReXGlue SDK, shared by the top-level project and by
 # title projects under titles/ that consume the SDK through REXSDK_DIR:
 #  - backports of upstream fixes, applied from outside the SDK tree (CMake only);
+#  - verification of the local source patches in patches/rexglue-sdk/ (applied
+#    to the checkout by scripts/apply-sdk-patches.ps1), at configure and build time;
 #  - x360n_stage_runtime_dlls(), which keeps the DLLs next to an executable current.
-#
-# Backports keep external/rexglue-sdk unmodified.
 #
 # Each backport is tied to the exact pinned commit it is needed for and cites
 # the upstream commit that fixes it; moving the pin disables it automatically.
+
+include(${CMAKE_CURRENT_LIST_DIR}/x360n_verify_sdk_patches.cmake)
+set(X360N_LOCK_FILE "${CMAKE_CURRENT_LIST_DIR}/../deps.lock.json")
+get_filename_component(X360N_LOCK_FILE "${X360N_LOCK_FILE}" ABSOLUTE)
+set(X360N_VERIFY_PATCHES_SCRIPT "${CMAKE_CURRENT_LIST_DIR}/x360n_verify_sdk_patches.cmake")
 
 # x360n_sdk_commit(<out_var> <sdk_dir>): HEAD of the SDK checkout, or "" on error.
 function(x360n_sdk_commit out_var sdk_dir)
@@ -32,6 +37,33 @@ function(x360n_apply_sdk_backports sdk_dir)
             $<BUILD_INTERFACE:${sdk_dir}/thirdparty/imgui>
             $<BUILD_INTERFACE:${sdk_dir}/thirdparty/xxHash>)
         message(STATUS "x360n: applied SDK backport b5e0cf8 (imgui/xxHash include dirs) for ${_commit}")
+    endif()
+
+    # Local source patches (deps.lock.json "rexglue_sdk.patches") are for the
+    # locked commit only. X360N_SDK_PATCHES=OFF exists only to reproduce the
+    # state before the patches (their tests must then fail); it is never the
+    # supported configuration.
+    option(X360N_SDK_PATCHES "Require the local SDK patches in patches/rexglue-sdk" ON)
+    file(READ "${X360N_LOCK_FILE}" _lock)
+    string(JSON _locked GET "${_lock}" rexglue_sdk commit)
+    if(NOT X360N_SDK_PATCHES)
+        message(WARNING "x360n: X360N_SDK_PATCHES=OFF: the SDK is built as checked out, "
+                        "local patches not verified. Only for reproducing the unpatched state.")
+    elseif(_commit STREQUAL _locked)
+        x360n_verify_sdk_patches("${sdk_dir}" "${X360N_LOCK_FILE}")
+        message(STATUS "x360n: local SDK patches verified (patches/rexglue-sdk) for ${_commit}")
+        # Re-check on every build, before rexruntime compiles, so a patch reverted
+        # after configuring cannot be built silently.
+        if(NOT TARGET x360n_verify_sdk_patches)
+            add_custom_target(x360n_verify_sdk_patches
+                COMMAND ${CMAKE_COMMAND} -DSDK_DIR=${sdk_dir} -DLOCK_FILE=${X360N_LOCK_FILE}
+                        -P ${X360N_VERIFY_PATCHES_SCRIPT}
+                COMMENT "x360n: verifying local SDK patches"
+                VERBATIM)
+            add_dependencies(rexruntime x360n_verify_sdk_patches)
+        endif()
+    else()
+        message(WARNING "x360n: SDK at ${_commit}, local patches are for ${_locked}; not applied")
     endif()
 endfunction()
 
