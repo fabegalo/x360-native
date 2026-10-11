@@ -1,0 +1,34 @@
+{
+  "schema_version": 1,
+  "rexglue_sdk": {
+    "path": "external/rexglue-sdk",
+    "url": "https://github.com/rexglue/rexglue-sdk.git",
+    "tag": "v0.10.0",
+    "commit": "f5337cdc947ff6d4c4196737e2c807a48f2a1fc2",
+    "license": "BSD-3-Clause (portions derived from Xenia, BSD)"
+  },
+  "llvm": {
+    "version": "22.1.8",
+    "asset": "clang+llvm-22.1.8-x86_64-pc-windows-msvc.tar.xz",
+    "url": "https://github.com/llvm/llvm-project/releases/download/llvmorg-22.1.8/clang+llvm-22.1.8-x86_64-pc-windows-msvc.tar.xz",
+    "sha256": "d96c2cc1736f4eb7fa43cb9bbdf56d93551a9ae0a9aadb9c99c3c3b2b712a234",
+    "install_dir": ".local/toolchains/llvm-22.1.8",
+    "why": "ReXGlue v0.10.0 CMakeLists.txt rejects non-Clang compilers and Clang < 18; official win-amd64 CI installs upstream LLVM. 22.1.8 was the newest stable LLVM when v0.10.0 was tagged (2026-08-21)."
+  },
+  "reference_examples": {
+    "demo-iruka": {
+      "url": "https://github.com/rexglue/demo-iruka.git",
+      "commit": "4d81580dd546d56e53250244b35f517b4d29e40a",
+      "license": "BSD-3-Clause",
+      "written_for_sdk": "v0.1.0",
+      "assets_zip_sha256": "719156a5a2bdef413f8ea5858560ba033c0bde320b7b0171656d6df07f50d2e0",
+      "default_xex_sha256": "66ec34f2f558fe4e419d926108bf458a5c634ea8b5f76771b48ba633ecb61e31",
+      "local_checkout": ".local/reference/demo-iruka",
+      "extracted_to": ".local/inputs/titles/iruka/extracted"
+    }
+  },
+  "msvc": {
+    "note": "Not downloaded. Clang targets x86_64-pc-windows-msvc and uses the installed MSVC STL/CRT and Windows SDK through vcvars64.bat.",
+    "tested_with": "VS 2022 BuildTools 17.14.41, MSVC 14.44.35207, Windows SDK 10.0.26100.0"
+  }
+}

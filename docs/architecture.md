@@ -1,0 +1,240 @@
+# Arquitetura do x360-native
+
+Estado em 2026-10-11. Marcadores usados neste documento:
+
+- **[fato]** confirmado no código/execução, com referência;
+- **[hipótese]** decisão de projeto ainda não demonstrada;
+- **[não verificado]** comportamento esperado que nenhum teste exercitou.
+
+Referências de código são relativas a `external/rexglue-sdk` (ReXGlue v0.10.0,
+commit `f5337cdc947ff6d4c4196737e2c807a48f2a1fc2`) salvo indicação contrária.
+
+## 1. O que a recompilação estática resolve e o que não resolve
+
+ReXGlue traduz o código PowerPC de um XEX para C++ antes da execução; o C++ é
+compilado por Clang e ligado a um runtime nativo.
+
+- **[fato]** Não há JIT nem interpretação de instruções em tempo de execução: as
+  funções recompiladas são registradas numa tabela de despacho a partir de
+  `PPCFuncMappings[]` durante `Runtime::Setup()` (wiki *Runtime Architecture
+  Overview*; `src/system/function_dispatcher.cpp`).
+- **[fato]** O XEX continua sendo carregado em tempo de execução, mas só pelos
+  **dados** (seções inicializadas, TLS, tabela de imports). O código vem do
+  binário host (wiki *Kernel State & Objects*, "Code vs Data Loading").
+- **[fato]** O jogo continua dependendo de um ambiente que reproduza o console:
+  memória de 4 GB com layout de guest, kernel (`xboxkrnl`), XAM, sistema de
+  arquivos virtual, threads, áudio (XMA), entrada e GPU Xenos. No ReXGlue esses
+  serviços são implementações nativas de alto nível (HLE) derivadas do Xenia
+  (`src/kernel/xboxkrnl`, `src/kernel/xam`, `src/graphics`). A GPU continua
+  emulada: comandos PM4 e shaders Xenos são traduzidos para D3D12/Vulkan pelo
+  plugin `rexgpu-xenos`.
+- **[fato]** Cobertura de exports do kernel na v0.10.0, por contagem textual
+  (`grep`, aproximada): xam 177 `REX_EXPORT` para 1735 entradas da tabela
+  (1535 `REX_EXPORT_STUB`); xboxkrnl 261/922 (617 stubs); xbdm 0/255 (253 stubs).
+- **[fato]** Um stub (`REX_STUB`, `include/rex/hook.h:52-56`) só registra
+  `"<nome> STUB"` em nível *warning* e **não altera r3**: o guest recebe o valor
+  que já estava no registrador (normalmente o 1º argumento), não "sucesso".
+  O supervisor conta essas linhas em cada execução.
+
+Consequência: "compilou" não significa "funciona". Cada título exige análise,
+correções de fronteira de função, implementação de imports ausentes e validação
+de comportamento. Não fazemos afirmações de desempenho: nada foi medido.
+
+## 2. Componentes atuais
+
+```
+x360/
+├── deps.lock.json          revisões fixadas (SDK, LLVM) — fonte única
+├── CMakeLists.txt          projeto raiz; inclui o SDK via add_subdirectory
+├── CMakePresets.json       preset win-amd64 (espelha o windows-base do SDK)
+├── external/rexglue-sdk/   submódulo ReXGlue fixado (não editado)
+├── scripts/                bootstrap (LLVM, submódulos, symlinks), devshell
+├── src/supervisor/         x360n: doctor, identify, run
+├── tests/                  testes do projeto (ver README)
+├── titles/                 configurações por título/versão (vazio por ora)
+├── docs/                   este documento, dashboard, compatibilidade
+└── .local/                 ignorado pelo git: toolchains, build, inputs, runs
+```
+
+### 2.1 ReXGlue (dependência)
+
+**[fato]** Alvos usados (`src/*/CMakeLists.txt`): `rexglue` (CLI), `rexcodegen`
+(estático), `rexruntime` (DLL: memória, kernel, VFS, threads), `rexgpu-xenos`
+(DLL, plugin de GPU), `rexui`/`rexinput`/`rexaudio` (objetos). CLI real da
+v0.10.0 (`src/rexglue/main.cpp`, `src/rexglue/commands/*.cpp`):
+
+```
+rexglue [--log-level L] [--log-file F] [-v] [-f] <comando>
+  codegen [manifest.toml] [--target ...] [--ignore-stamp]
+  init --project-name N --xex-path P [--project-root R] [--game-root G] [--scan-dll] [--template-dir T]
+  init module --project-root R --xex-path P --guest-path G
+  init achievements <xex> [out_dir] [--language N]
+  recompile-tests --bin-dir B --asm-dir A --output O
+```
+
+Códigos de saída: 0 sucesso, 1 falha, 2 abortado pelo usuário (`main.cpp`).
+**[fato]** A wiki (commit `ebc5cc85`, 2026-06-04) descreve flags antigas
+(`--app_name`, `--app_root`) que não existem mais na v0.10.0; vale o código.
+
+**[fato]** O codegen da v0.10.0 só aceita XEX: `project_recompiler.cpp:262,289,310`
+usa `xex_module()` e grava `format = "xex"`. A menção a "ELF" na wiki não se aplica.
+
+**[fato]** Um título pode ter vários módulos (`[[modules]]` com `guest_path`,
+usados por `XexLoadImage`), criados por `rexglue init module`. Pinyon Shift usa
+isso para `SpeechFacade_default.xex` e `XMediaFacade_default.xex`.
+
+### 2.2 Supervisor `x360n`
+
+Ferramenta de desenvolvimento por terminal. **Não é a dashboard** e não deve ser
+apresentada como interface do console.
+
+| Comando | O que faz | Validação |
+|---|---|---|
+| `doctor` | compara `external/rexglue-sdk` com `deps.lock.json`, verifica clang fixado, MSVC, `rexglue --version`, binutils PPC, permissão de symlink, diretórios | `env.doctor` |
+| `identify <arq>` | SHA-256 + tamanho; para XEX2: flags, title/media id, versões, disco, nome PE, entry point, base, formato, imports por biblioteca | testes com cabeçalhos sintéticos + 20 000 corrupções aleatórias |
+| `run <exe>` | executa **somente** saídas de build (`.local/build`, `external/rexglue-sdk/out`), recusa `.local/inputs`; Job Object com kill-on-close, timeout, stdout/stderr em arquivo, relatório JSON com hashes e revisões | testes de processo e ponta a ponta com um processo-fixture |
+
+**[fato]** O supervisor reutiliza as estruturas do SDK
+(`include/rex/system/util/xex2_info.h`) e CLI11/fmt do SDK, mas não liga o
+runtime. O parser do SDK (`xex_module.cpp`, `user_module.cpp:308`) usa `assert`
+sobre dados confiáveis; o nosso verifica limites porque a entrada não é confiável.
+
+## 3. Fluxo de preparação de um título
+
+```
+arquivos locais (.local/inputs)
+ → identificação      x360n identify                      [implementado]
+ → análise + geração  rexglue codegen <manifest>          [SDK; sem entrada autorizada ainda]
+ → compilação         projeto CMake gerado por rexglue init [SDK; idem]
+ → execução           x360n run <exe recompilado>         [implementado; só testado com fixtures]
+ → relatório          .local/runs/<utc>-<label>/report.json [implementado]
+```
+
+Cada etapa grava a saída da ferramenta original e seu código de saída; nenhuma
+etapa promove o estado da seguinte.
+
+**[fato]** O caminho completo instrução→C++→nativo foi exercitado sem conteúdo
+proprietário por (a) 1458 casos do SDK (`tests/ppc`, 166 arquivos) e (b) um
+programa PowerPC nosso (`tests/ppc_smoke/asm/x360n_smoke.s`) com laço contado,
+acesso big-endian à memória, `stwbrx` e chamada `bl` entre funções. Isso valida
+tradução de instruções e arestas de chamada, **não** carga de XEX, imports,
+threads, VFS ou GPU.
+
+**[hipótese]** M1 exige um XEX autorizado. Alternativas, em ordem:
+1. homebrew com licença que permita uso, fornecido pelo usuário;
+2. gerar um XEX2 mínimo a partir de código nosso (formato sem criptografia e sem
+   compressão). Precisa demonstrar que `XexModule::Load` aceita a imagem; não
+   foi tentado.
+
+## 4. Modelo de processos (dashboard ↔ jogos)
+
+**[fato]** O código de um título é gerado e compilado antes da execução; o
+executável principal liga o módulo de entrada. Módulos DLL de guest
+(`[[modules]]`) viram bibliotecas nativas (`<projeto>_<alvo>.dll`) que
+`KernelState::LoadUserModule` carrega quando o guest chama `XexLoadImage`
+(`src/system/kernel_state.cpp:744-809`): resolve `ReXModule_Register` e
+`ReXModule_GetImageInfo`, confere `image_base`/`image_size` contra o XEX carregado
+e registra as funções. Só entram módulos presentes no registro gerado pelo
+codegen (`RegisterRecompiledModule`, template
+`resources/templates/codegen/module_registry_cpp.inja`; `project_recompiler.cpp:500`).
+Ou seja, há carga de código nativo em tempo de execução, mas restrita ao que foi
+preparado no build; um XEX desconhecido não executa.
+
+**[fato]** `XamLoaderLaunchTitle(path, flags)` (`src/kernel/xam/xam_info.cpp:263-289`)
+apenas grava `loader_data.launch_path` e chama `KernelState::TerminateTitle()`;
+com `path == NULL` (voltar à dashboard) dispara `assert_always`. `XamLoaderLaunchTitleEx`,
+`...ForReason` e `...OnDvd` são stubs (`xam_misc.cpp:537-539`).
+
+**[hipótese]** Dashboard e jogos rodam como processos separados; o supervisor
+faz a troca. Para isso falta, e precisa ser demonstrado:
+- um canal do título para o supervisor com o pedido de lançamento
+  (`loader_data.launch_path`, flags, launch data) no encerramento — candidato:
+  hook `OnGuestThreadExit` do `ReXApp` gravando um arquivo no diretório da execução;
+- tratamento de `XamLoaderLaunchTitle(NULL)` como "voltar ao menu" no lado do título,
+  em vez do `assert_always` atual;
+- `user_data_root` comum (perfis, saves) entre processos, sem escrita concorrente;
+- mapeamento caminho de guest → executável recompilado (por SHA-256 do XEX).
+
+Alternativa registrada, não escolhida: um único processo que carregaria títulos
+como bibliotecas, aproveitando o mecanismo de módulos acima. O runtime tem um
+único módulo executável por `KernelState` e o título ocupa o espaço de imagem de
+usuário (o pipeline de testes usa 0x82010000); trocar de título exigiria
+desmontar e recriar a memória de guest dentro do processo. Se a dashboard ocupa a
+mesma região não foi verificado.
+
+Nada disso está implementado; ver `docs/dashboard.md`.
+
+## 5. Identidade de uma recompilação
+
+**[fato, implementado]** O relatório de execução registra: SHA-256 e tamanho do
+executável, commit do SDK lido do submódulo e o fixado no lock, commit do
+projeto (nulo enquanto não houver commit), versão do supervisor e configuração.
+
+**[hipótese, a implementar no M1]** A identidade de um título preparado será a
+tupla (SHA-256 de cada XEX de entrada, versão/base_version/media_id do cabeçalho,
+commit do SDK, versão do LLVM, hash do manifesto e das inclusões `[functions]`).
+Configurações por título ficam em `titles/` e são indexadas pelo SHA-256 do XEX,
+não pelo title id: regiões, atualizações (`patch_delta` em XEXP) e mídias
+diferentes têm executáveis diferentes. Pinyon Shift faz o mesmo
+(`config/supported-dumps.json`: `exact_sha256_and_size`, dumps desconhecidos rejeitados).
+
+## 6. Decisões
+
+| # | Decisão | Motivo | Reversão |
+|---|---|---|---|
+| D1 | Fixar ReXGlue **v0.10.0** (`f5337cdc`) | última versão estável (2026-08-21); `development` muda diariamente; Pinyon Shift parte da mesma versão | trocar o commit em `deps.lock.json` e no submódulo |
+| D2 | LLVM **22.1.8** portátil em `.local/toolchains` | o SDK exige Clang ≥ 18 (`CMakeLists.txt:83-93`) e o CI usa LLVM upstream (`choco install llvm`); 22.1.8 era a última estável na data da tag; sem admin nem PATH global | apagar o diretório; ajustar o lock |
+| D3 | SDK via `add_subdirectory` (modo "Git Submodule" da wiki), sem `install` | `install` executa `reg add HKCU\Software\Kitware\CMake\Packages\rexglue` (`cmake/rexglue_install.cmake:194-217`) | rodar o install quando o usuário autorizar |
+| D4 | Backport do commit upstream `b5e0cf8` no nosso CMake, só para o pin v0.10.0 | `include/rex/hash.h` (público) inclui `<xxhash.h>`, mas xxHash é ligado como PRIVATE; `unit_tests` não compila | removido automaticamente ao trocar o pin |
+| D5 | Materializar 15 symlinks do libmspack como cópias verificadas (`scripts/materialize-symlinks.ps1`) | sem Developer Mode a conta não cria symlinks; o git os grava como texto e `lzxd.c` não compila | `git -C external/rexglue-sdk/thirdparty/libmspack checkout -- .` |
+| D6 | O supervisor não liga o runtime | identificar e supervisionar não precisa de memória de guest; a DLL do runtime acoplaria o supervisor a cada título | ligar quando houver necessidade demonstrada |
+| D7 | Teste PowerPC próprio pelo pipeline oficial `recompile-tests` | único caminho do SDK que recompila e executa código PPC sem XEX | — |
+
+## 7. Problemas conhecidos no SDK v0.10.0 (observados aqui)
+
+1. **Versão errada em modo submódulo**: `rex_resolve_version()` usa
+   `CMAKE_SOURCE_DIR` (`cmake/rex_version.cmake`), que é o nosso repositório;
+   resultado `0.10.0.0-dev.unknown`. Se este repositório tiver uma tag `vX.Y`
+   maior que 0.10, o configure do SDK aborta. Correção sugerida upstream: passar
+   `SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}`.
+2. **`unit_tests` não compila** sem o backport D4 (corrigido upstream em `b5e0cf8`).
+3. **Teste `unit.Depfile escapes characters make treats as syntax` falha**: o
+   literal `"has\ space.toml"` (`tests/unit/codegen/output_stamp_test.cpp:227-228`)
+   é um escape desconhecido; o clang o compila como `"has space.toml"`. A
+   implementação está correta (`sdkcheck.*` prova). Ainda presente em `development`.
+4. **4 testes `BitStream Write`** são `SKIP` upstream ("doesn't byte-swap on store").
+5. `catch_discover_tests(... PROPERTIES LABELS "ppc;instructions" TIMEOUT 60)` em
+   `tests/ppc/CMakeLists.txt` achata a lista de labels e o `TIMEOUT 60` não é aplicado.
+6. **[hipótese]** Flags diferentes entre testes e títulos: a suíte PPC do SDK
+   compila com `-ffp-model=strict -fno-strict-aliasing` (escopo do SDK), mas o
+   template de `rexglue init` só adiciona `-msse4.1`/`-fasync-exceptions`
+   (`resources/templates/init/rexglue_cmake.inja:40-47`). Diferenças de ponto
+   flutuante/aliasing entre o que é testado e o que um título compila são
+   possíveis; não demonstradas.
+
+## 8. Pinyon Shift: o que é reutilizável
+
+Lido em `arcanite24/pinyon-shift@cb26a0fe` (2026-10-07). É um port de um único
+título (Forza Horizon, title id `4D5309C9`) sobre **ShiftGlue**, um fork do
+ReXGlue fixado em `0038a402`.
+
+| Reutilizável (padrão, não código) | Específico do título |
+|---|---|
+| Identidade exata do dump: SHA-256 + tamanho de ISO e de cada XEX; dump desconhecido é rejeitado; entrada original nunca modificada (`config/supported-dumps.json`) | renderizador nativo próprio que substituiu o Xenos do SDK (`docs/DEVELOPMENT.md`; tag `xenos-rollback`) |
+| Manifesto com `[entrypoint]` e `[[modules]]` por `guest_path`, apontando para `.local/` (`config/rexglue/pinyon_shift_manifest.toml`) | plugin de GPU `fh1` e código do jogo **dentro do fork do SDK** (`src/graphics/fh1_shader_pack.cpp`) |
+| SDK por `add_subdirectory(... EXCLUDE_FROM_ALL)` a partir do fonte fixado (`cmake/PinyonShiftRexGlue.cmake:102-137`) | `[functions]`/hooks em `config/rexglue/analysis/*.toml`, trainer, DLL de DLC, saves `ForzaProfile` |
+| Exclusão do `*_register.cpp` gerado, já que `Runtime::Setup` registra via `PPCFuncMappings` (`PinyonShiftRexGlue.cmake:175-177`) | rotas roteirizadas `fh1-*`, medições de FPS e ferramentas `tools/*fh1*` |
+| Testes reproduzíveis a partir de uma semente de save copiada; nunca escrever no save real (`AGENTS.md`) | launcher WPF próprio |
+| Comparações só com hashes de binário, SDK e configuração congelados | — |
+| Opções do template do SDK para o código gerado, como `-fasync-exceptions` (`PinyonShiftRexGlue.cmake:202`) | — |
+
+Conclusão: o que se aproveita é a disciplina de identidade, de layout local e de
+integração com o SDK. O renderizador e as correções vivem no fork e no jogo;
+não são uma solução geral, e não os tratamos como tal.
+
+## 9. Fora do escopo atual
+
+Xbox Live, multiplayer online, Kinect e periféricos especiais. Títulos que
+dependem desses recursos não serão classificados como totalmente suportados.
+Xenia é apenas referência de comportamento; não é usado como executor, e não há
+JIT ou interpretador no caminho principal.

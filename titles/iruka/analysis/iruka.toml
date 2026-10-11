@@ -1,0 +1,14 @@
+# Analysis hints for default.xex of rexglue/demo-iruka (SHA-256
+# 66ec34f2f558fe4e419d926108bf458a5c634ea8b5f76771b48ba633ecb61e31).
+# Values copied from the demo's iruka_config.toml at demo-iruka@4d81580
+# (written for ReXGlue v0.1.0); in the v0.10.0 manifest they are included from
+# [entrypoint].includes. Keys exist in v0.10.0 src/codegen/config.cpp:124-130, 178.
+
+longjmp_address = 0x82264D30
+setjmp_address = 0x82265050
+
+[functions]
+# qsort comparator passed as a function pointer in Vectorize() at 0x821B216C
+# (demo comment). Without this entry codegen v0.10.0 emits no code for it:
+# the address does not appear anywhere in the generated sources.
+0x82198CD8 = { name = "SortCombineUnrelatedCandidates" }
