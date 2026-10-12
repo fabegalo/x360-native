@@ -1,0 +1,67 @@
+# Diagnostic mid-asm hooks: log every call the game makes into the XAM avatar
+# imports (src/avatar_trace.cpp). They read registers only; behavior is unchanged.
+# Call sites: x360n-content callers on each import thunk (one wrapper per import in
+# the game's avatar library, 0x82957BC0..0x82958B3C). Remove the include in
+# motocross_madness_manifest.toml to drop them.
+
+[[midasm_hook]]
+name = "x360n_avatar_trace_shutdown"
+address = 0x82957BF0
+registers = ["r3", "r4", "r5", "r6"]
+
+[[midasm_hook]]
+name = "x360n_avatar_trace_initialize_args"
+address = 0x82957D30
+registers = ["r3", "r4", "r5", "r6", "r7", "r8"]
+after_instruction = true
+
+[[midasm_hook]]
+name = "x360n_avatar_trace_initialize_result"
+address = 0x82957D34
+registers = ["r3"]
+after_instruction = true
+
+[[midasm_hook]]
+name = "x360n_avatar_trace_manifest_local_user"
+address = 0x82957E08
+registers = ["r3", "r4", "r5", "r6"]
+
+[[midasm_hook]]
+name = "x360n_avatar_trace_metadata_random"
+address = 0x82957EB0
+registers = ["r3", "r4", "r5", "r6"]
+
+[[midasm_hook]]
+name = "x360n_avatar_trace_body_type"
+address = 0x82957F04
+registers = ["r3", "r4", "r5", "r6"]
+
+[[midasm_hook]]
+name = "x360n_avatar_trace_body_type"
+address = 0x82957FB0
+registers = ["r3", "r4", "r5", "r6"]
+
+[[midasm_hook]]
+name = "x360n_avatar_trace_set_custom_asset"
+address = 0x82957F68
+registers = ["r3", "r4", "r5", "r6"]
+
+[[midasm_hook]]
+name = "x360n_avatar_trace_assets_result_size"
+address = 0x8295816C
+registers = ["r3", "r4", "r5", "r6"]
+
+[[midasm_hook]]
+name = "x360n_avatar_trace_get_assets"
+address = 0x8295823C
+registers = ["r3", "r4", "r5", "r6"]
+
+[[midasm_hook]]
+name = "x360n_avatar_trace_generate_mipmaps"
+address = 0x829582DC
+registers = ["r3", "r4", "r5", "r6"]
+
+[[midasm_hook]]
+name = "x360n_avatar_trace_load_animation"
+address = 0x82958AE8
+registers = ["r3", "r4", "r5", "r6"]

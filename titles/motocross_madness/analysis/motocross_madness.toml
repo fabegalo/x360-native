@@ -1,0 +1,72 @@
+# Analysis hints for Motocross Madness default.xex (title 58410B0F, version 0.0.0.3,
+# SHA-256 2a8406bcf9c223f9d7da732be617cc7cd46fbb587ef552f7fcacac2049b95dcd),
+# extracted from the user's LIVE package
+# (SHA-256 09a3173cfeb4cbd44bf58fc0800cae98aa9aa17584cd036d90d203f3b1d76408).
+#
+# Each entry cites its evidence (codegen log, run log, disassembly of the loaded
+# image: x360n-content disasm/xref). Entries are start addresses only; boundaries
+# are left to discovery. No names: none is known.
+
+[functions]
+# Codegen without hints (2026-10-12) stopped with 10 "UnresolvedCall ... target not
+# in any function". All ten targets are code with no .pdata entry.
+
+# 1-3. Frameless virtual methods with no .pdata entry, referenced only by .rdata
+# words (vtables without RTTI, so vtable_scanner does not see them). Each reported
+# target is the function's own "li r3,0; blr" epilogue, reached by "b" from a later
+# block of the same function; the entry is the real start, which the vtable holds:
+#   0x8292B95C from 0x8292B96C -> start 0x8292B8E8 (cmpwi r4,0 ... li r3,37; blr at
+#     0x8292B970), held by .rdata 0x82073808; previous .pdata function ends there.
+#   0x82948B7C from 0x82948B8C -> start 0x82948B10 (addic. r10,r4,-54 ... li r3,89;
+#     blr at 0x82948B90), held by .rdata 0x820743F8.
+#   0x82948C94 from 0x82948CA4 -> start 0x82948C28 (addic. r10,r4,-54 ... li r3,89;
+#     blr at 0x82948CA8), held by .rdata 0x82074458.
+0x8292B8E8 = {}
+0x82948B10 = {}
+0x82948C28 = {}
+
+# 4-8. Virtual-call thunks, 4 instructions each, between .pdata functions:
+#   lwz r11,0(r3); lwz r11,<off>(r11); mtctr r11; bctr
+# Reported targets are exactly their starts:
+#   0x829387E0 (off 56) from 0x82944B7C (mr r11,r4; mr r4,r3; mr r3,r11; b)
+#   0x82938890 (68), 0x829388A0 (72), 0x829388B0 (76), 0x829388C0 (80) from the
+#   "mr r4,r11; b" pairs at 0x82933948, 0x82933940, 0x82933938, 0x82933930.
+0x829387E0 = {}
+0x82938890 = {}
+0x829388A0 = {}
+0x829388B0 = {}
+0x829388C0 = {}
+
+# 9. 0x829430D8 from 0x82943EBC: adjustor thunk at 0x82943EB8
+# (addi r3,r3,-4; b 0x829430D8). The target starts right where the previous .pdata
+# function ends (0x82943048-0x829430D8): cmplwi cr6,r5,0 ... li r3,37; blr.
+0x829430D8 = {}
+
+# 10. 0x8262ADC8 from 0x8262C644: adjustor thunk at 0x8262C640
+# (addi r3,r3,40; b 0x8262ADC8). The target starts where the previous .pdata
+# function ends (0x8262AC98-0x8262ADC8): a frameless binary search
+# (lwz r11,12(r3); addic. r8,r11,-1; ... srawi/addze).
+0x8262ADC8 = {}
+
+# Build with the entries above: codegen succeeds, but motocross_madness_recomp.9.cpp
+# fails to compile with "use of undeclared label 'loc_82C687F8'" (and 82C68728,
+# 82C68730, 82C68738, 82C68600, 82C6862C). scripts/check-pdata-overlap.ps1 finds
+# the only overrun among 37353 .pdata functions: sub_82C680E0 (.pdata 0x82C680E0
+# length 0x150) has label loc_82C68234, inside the next .pdata function 0x82C68230.
+#
+# Cause, as in Castle Crashers (titles/castle_crashers/analysis/castle_crashers.toml):
+# a byte-offset jump table with no bounds check (lwz r11,272(r3); addi r11,r11,-1;
+# lbzx r0,0x821156B0,r11; target = 0x82C68128 + 4*byte; bctr at 0x82C68124).
+# Auto-detection read past the table and targets inside sub_82C68230 extended the
+# function end. The 16 table bytes 0x821156B0..BF, up to the next table at
+# 0x821156C0 (1f 25 2b 31 ...), are identical to the Castle Crashers table:
+#   0c 0c 0c 0c 42 0c 0c 0c 0c 00 0c 0c 00 00 00 00
+# 0x0c -> 0x82C68158, 0x00 -> 0x82C68128, 0x42 -> 0x82C68230 (entry of the next
+# function: emitted as a tail call). Indices >= 16 hit the emitter's
+# "Switch case out of range" trap.
+[[switch_tables]]
+address = 0x82C68124
+register = 11
+labels = [0x82C68158, 0x82C68158, 0x82C68158, 0x82C68158, 0x82C68230, 0x82C68158,
+          0x82C68158, 0x82C68158, 0x82C68158, 0x82C68128, 0x82C68158, 0x82C68158,
+          0x82C68128, 0x82C68128, 0x82C68128, 0x82C68128]
