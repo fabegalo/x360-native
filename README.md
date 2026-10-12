@@ -1,127 +1,228 @@
-# x360-native (nome provisório)
+# x360-native
 
-Plataforma para Windows x86-64, baseada em [ReXGlue](https://github.com/rexglue/rexglue-sdk),
-cujo objetivo de longo prazo é executar jogos de Xbox 360 recompilados
-estaticamente (AOT) para código nativo e executar a **dashboard original** do
-console, com lançamento de jogos e retorno ao menu.
+Plataforma experimental para executar a **dashboard original do Xbox 360** e
+jogos recompilados para código nativo, usando [ReXGlue](https://github.com/rexglue/rexglue-sdk).
+O primeiro ambiente funcional é Windows x86-64, com gráficos D3D12.
 
-**Estado atual: fundação (M0).** O SDK é compilado a partir de uma revisão fixada
-e sua suíte de testes roda; um programa PowerPC próprio passa por
-montagem → recompilação → compilação → execução. **Nenhum jogo e nenhuma versão
-da dashboard foram executados.** Ver [STATUS.md](STATUS.md).
+O fluxo já validado usa os menus e os pedidos de lançamento originais:
 
-Recompilar a CPU não elimina a emulação do resto do console: kernel, XAM,
-sistema de arquivos, áudio e GPU Xenos continuam sendo reproduzidos pelo runtime.
-Ver [docs/architecture.md](docs/architecture.md).
+**Intro com imagem e som → dashboard 17559 → My Games → Castle Crashers → retorno à dashboard.**
 
-## Requisitos (verificados nesta máquina)
+A sessão mantém a mesma janela e não repete a intro ao voltar do jogo.
+O projeto ainda está em desenvolvimento: não há uma distribuição pronta para
+o usuário final nem compatibilidade geral com o catálogo do console.
 
-- Windows 10/11 x64
-- Visual Studio 2022 Build Tools com a carga de trabalho C++ (MSVC x64, Windows SDK).
-  Testado: 17.14.41, MSVC 14.44.35207, SDK 10.0.26100. CMake 3.31 e Ninja 1.12
-  vêm junto com o VS.
-- Git. Não precisa de Python nem de privilégios de administrador.
-- LLVM/Clang **22.1.8**: baixado por `scripts/bootstrap-llvm.ps1` para
-  `.local/toolchains` (verificação SHA-256; sem alterar PATH nem registro).
-  O SDK recusa compiladores que não sejam Clang ≥ 18.
-- ~8 GB livres (LLVM ~3,9 GB extraído; build Debug).
+[Estado detalhado](STATUS.md) · [Checklist oficial](CHECKLIST_FUNCIONAL_x360-native.md) ·
+[Arquitetura](docs/architecture.md) · [Compatibilidade](docs/compatibility.md)
 
-## Comandos
+## O que funciona hoje
 
-Executados nesta ordem no PowerShell, na raiz do repositório:
+Resultados consolidados em **12 de outubro de 2026**, nos alvos e versões abaixo.
+Compilar, abrir um menu e validar gameplay são etapas distintas.
+
+| Alvo | Resultado observado | Limite atual |
+|---|---|---|
+| **Dashboard Retail 17559** | Menu Metro com atualização contínua, fonte original, navegação por teclado e controle. My Games enumera e lança Castle Crashers. | Guide, perfis e parte das configurações ainda estão incompletos. |
+| **Intro da 17559** | Módulo original recompilado: animação, áudio e término pelo caminho original, seguido da dashboard. | Validada para esse conjunto; não é uma intro global para outras versões. |
+| **Castle Crashers 0.0.1.3** | Inicia pela My Games original, chega ao menu, recebe teclado/controle e retorna pela opção do próprio jogo. | Gameplay completo, saves e load não estão validados nesse ciclo. |
+| **Dashboard Retail 6717** | Interface Blades renderiza, troca de blade e move a seleção. | Sem textos: falta XenonJKLatin.xtt correspondente. Lançamento de jogos não validado. |
+| **iruka / Dolphin** | Renderização e animação verificadas pela regressão L1–L5. | Alvo de referência técnica; não comprova compatibilidade de outros títulos. |
+
+A transição da 17559 usa o pedido original de preservar a imagem, a sequência
+de ajuste de gama do XAM e a drenagem do áudio pendente. O teste manual confirmou
+o ciclo sem os cortes anteriores; ainda não há medição de equivalência com o console.
+
+**Perfis locais continuam pendentes.** A cena original de GamerCard já é criada,
+ligada ao HUD e passa pelo layout, mas ainda falta o host contínuo de atualização,
+composição e entrada para apresentá-la. Criar perfil, entrar, sair e recuperar
+os dados após reiniciar não estão validados. O usuário fixo do SDK não conta como
+implementação desse fluxo. Evidências e bloqueios estão em [Dashboard](docs/dashboard.md).
+
+## Como a plataforma funciona
+
+O ReXGlue recompila estaticamente o código PowerPC de cada executável para código
+nativo (**AOT**). O runtime reproduz os serviços de kernel, XAM, arquivos, entrada,
+áudio e GPU Xenos necessários à execução. Xenia é referência técnica, não o executor.
+
+Cada título e versão têm um manifesto com a identidade do XEX, a recompilação,
+os recursos e as configurações correspondentes. O supervisor recebe o
+pedido original da dashboard e seleciona o alvo AOT verificado; a interface de
+lançamento continua sendo a My Games original.
+
+**Todas as versões originais da dashboard, incluindo antigas e betas, são objetivo
+permanente.** A 17559 é a primeira referência funcional. Trocar de versão exige
+seu próprio perfil e suas dependências: não basta trocar o executável e reutilizar
+silenciosamente XAM, intro ou fontes da 17559.
+
+## Preparar o ambiente de desenvolvimento
+
+- Windows 10/11 x64. A execução de referência foi feita no Windows 11.
+- Visual Studio 2022 Build Tools com C++, MSVC x64 e Windows SDK. Ambiente
+  verificado: MSVC 14.44.35207, SDK 10.0.26100, CMake 3.31 e Ninja 1.12.
+- Git e acesso à rede para preparar as dependências.
+- LLVM/Clang **22.1.8**, baixado e verificado pelo bootstrap em `.local/toolchains`.
+  Não exige instalação global do LLVM, Python ou privilégios administrativos.
+
+Execute no PowerShell, na raiz do repositório:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts\bootstrap.ps1
 scripts\devshell.cmd cmake --preset win-amd64
 scripts\devshell.cmd cmake --build --preset win-amd64-debug
-scripts\devshell.cmd ctest --preset win-amd64-debug -j 16
 ```
 
-- `bootstrap.ps1`: submódulos do SDK, LLVM fixado, cópia verificada dos symlinks
-  do libmspack (necessária quando a conta não pode criar symlinks).
-- `devshell.cmd`: executa um comando com o ambiente do MSVC (`vcvars64`) e o LLVM
-  fixado no PATH, só para aquele processo.
-- O configure leva ~7 min na primeira vez (submódulos grandes, FFmpeg); o build
-  Debug completo, ~3 min (medido: 166 s num Ryzen 7 5700X3D).
-- A linha `'vswhere.exe' não é reconhecido` pode aparecer: vem do `VsDevCmd.bat`
-  da Microsoft quando `NoDefaultCurrentDirectoryInExePath=1` e não afeta o ambiente.
+O bootstrap prepara os submódulos, a toolchain e os patches locais do SDK fixados
+em [deps.lock.json](deps.lock.json). O script de ambiente configura MSVC e LLVM apenas
+para o comando executado. Esse build produz as ferramentas e testes da plataforma;
+os títulos são compilados separadamente, depois de preparar os arquivos locais.
 
-Resultado esperado de `ctest` hoje: 1703 testes, 1697 aprovados, 5 ignorados,
-1 falha conhecida do SDK (`unit.Depfile escapes characters make treats as syntax`,
-bug no próprio teste; ver STATUS.md).
+## Onde colocar os arquivos
 
-Subconjuntos:
+Conteúdo original, pacotes, fontes, saves e logs ficam em **.local/**, ignorado
+pelo Git. O repositório não inclui jogos, dashboards ou módulos proprietários.
+Mantenha os pacotes de origem e os registros de procedência e hashes.
 
-```powershell
-scripts\devshell.cmd ctest --preset win-amd64-debug -L project   # testes deste repositório
-scripts\devshell.cmd ctest --preset win-amd64-debug -L ppc       # suíte PPC do SDK
-scripts\devshell.cmd ctest --preset win-amd64-debug -R "local[.]"  # exige arquivos em .local/inputs
-```
+### Jogos
 
-## Supervisor `x360n`
-
-Ferramenta de desenvolvimento por terminal (não é a dashboard).
-Executável: `.local\build\win-amd64\src\supervisor\Debug\x360n.exe`.
-
-```powershell
-x360n doctor                 # toolchain, SDK fixado, ferramentas do SDK
-x360n identify <arquivo>     # SHA-256 e identidade XEX2 (--json disponível)
-x360n run <exe> [--label L] [--timeout S] [-- args...]
-```
-
-`run` só aceita executáveis gerados pelo build (`.local/build` ou
-`external/rexglue-sdk/out`) e nunca arquivos de `.local/inputs`. Cada execução
-cria `.local/runs/<UTC>-<label>/` com `stdout.log`, `stderr.log` e `report.json`
-(hash do executável, revisões, código de saída, duração, contagem de stubs).
-
-Códigos de saída:
-
-| Comando | 0 | 1 | 2 | 3 |
-|---|---|---|---|---|
-| `doctor` | sem falhas | alguma verificação falhou | — | uso inválido |
-| `identify` | identificado (ou formato desconhecido) | erro de leitura ou XEX2 malformado | — | arquivo inexistente / uso |
-| `run` | filho saiu com 0 | filho saiu ≠ 0 | timeout | recusado ou não iniciado |
-
-## Arquivos locais
-
-Tudo que é da máquina ou derivado de conteúdo do usuário fica em `.local/`
-(ignorado pelo git): `toolchains/`, `build/`, `inputs/` (XEX, dashboard, jogos
-fornecidos pelo usuário com autorização), `runs/`, `logs/`. Nada de conteúdo
-proprietário entra no repositório.
-
-### Adicionar novos títulos
-
-Crie `.local/inputs/titles/<nome>/`, usando um nome simples como `meu_jogo`:
+Para um novo título, crie uma pasta por versão, região ou disco:
 
 ```text
 .local/inputs/titles/meu_jogo/
-  source/       pacote original, ISO, ZIP ou conjunto de arquivos original
-  extracted/    default.xex e todos os recursos, preservando a estrutura do jogo
-  metadata/     hashes e identificação produzidos durante a análise
+  source/       pacote original, ISO ou arquivos recebidos
+  extracted/    default.xex e todos os recursos, na estrutura original
+  metadata/     identidade, procedência e hashes
 ```
 
-Se já estiver extraído, copie o conteúdo completo para `extracted/`, com
-`default.xex` diretamente nessa pasta quando esse for seu nome original. Se
-estiver em pacote, guarde o conjunto completo em `source/`; a extração depende
-do formato. Não misture versões/regiões/discos: use uma pasta de título distinta
-para cada variante. `metadata/` pode ser criada depois, pela análise.
+Quando o executável se chamar `default.xex`, ele deve ficar diretamente em
+`extracted/`. Preserve todos os demais recursos e subdiretórios do jogo.
+Pacotes STFS (CON, LIVE, PIRS) podem ser extraídos com
+`x360n-content extract <pacote> <destino>`. A ferramenta fica em
+`.local/build/win-amd64/src/content/Debug/x360n-content.exe`.
 
-Adicionar os arquivos é a primeira etapa: cada novo título ainda precisa de
-identificação, configuração, geração AOT e compilação. A pasta `titles/` na raiz
-do repositório guarda essas configurações, não os arquivos do jogo.
-Dashboards ficam em `.local/inputs/dashboard/versions/<versão>/<variante>/`, com
-fontes em `dashboard/resources/fonts/` e catálogo em
-`dashboard/metadata/organization/catalog.csv`. O alvo ativo 17559 mantém
-`dashboard/17559/` para preservar o build. Saves e perfis do runtime ficam em
-`.local/user/<nome>/`. Há também um guia local em `.local/inputs/LEIA-ME.txt`.
+A extração de ISO/GDFX por `x360n-content extract-disc <imagem.iso> <destino>`
+está em desenvolvimento local, ainda não consolidada na versão publicada.
+Esse comando extrai a partição de jogo; não converte o título em um alvo executável.
 
-## Escopo
+**Copiar ou extrair arquivos não cria suporte ao jogo.** Ainda são necessários
+identificação, perfil em `titles/`, análise, geração AOT, compilação e validação.
+Consulte [Configurações por título](titles/README.md).
 
-Offline. Xbox Live, multiplayer online e periféricos especiais (Kinect etc.)
-estão fora do escopo atual. Xenia é usado apenas como referência técnica.
+### Dashboards e módulos do sistema
+
+O acervo usa `.local/inputs/dashboard/versions/<versão>/<variante>/`; seu catálogo
+local fica em `dashboard/metadata/organization/catalog.csv`. O perfil funcional
+17559 mantém `.local/inputs/dashboard/17559/` como raiz de execução.
+
+O [manifesto da 17559](titles/dash_17559/dash_17559_manifest.toml) registra os
+caminhos e associações de `dash.xex`, `bootanim.xex`, `SegoeXbox-Light.xtt` e
+módulos da interface. O XAM original é usado apenas pelas rotinas XUI explicitamente
+ligadas; seu entrypoint não é executado e os serviços do SDK continuam ativos.
+
+`dashboard/resources/fonts/` é um acervo local, não um pacote global de fontes
+para todas as versões. Compartilhe recursos somente quando sua identidade ou
+compatibilidade estiver demonstrada. Saves e dados de usuário ficam sob
+`.local/user/<perfil-de-execução>/`, conforme o manifesto.
+
+### DLC e atualizações
+
+DLC e addons (`00000002`) pertencem à pasta do jogo: pacote em
+`source/<TitleID>/00000002/`, extração em `dlc/<nome>/` e hashes em
+`metadata/dlc_<nome>.sha256`. Preserve ZIP/7z recebidos em `source/archives/`.
+Uma atualização de título (`000B0000`) pode mudar o executável: verifique sua
+identidade e prepare o alvo AOT correspondente, em vez de tratá-la como DLC.
+
+O SDK procura DLC extraída em
+`<user_data_root>/0000000000000000/<TitleID>/00000002/<pacote>/`.
+**Esse caminho ainda não foi validado com uma DLC real.**
+
+## Compilar e executar a sessão 17559
+
+Os arquivos locais precisam corresponder aos manifestos da
+[dashboard](titles/dash_17559/dash_17559_manifest.toml) e do
+[Castle Crashers](titles/castle_crashers/castle_crashers_manifest.toml).
+Os scripts não fornecem nem preparam automaticamente esse conteúdo.
+
+Compile os dois alvos em sequência; os builds compartilham saídas do SDK:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\build-title.ps1 -Title castle_crashers
+powershell -ExecutionPolicy Bypass -File scripts\build-title.ps1 -Title dash_17559
+```
+
+O script executa configure, codegen, reconfigure e build, interrompendo na primeira
+falha. Os executáveis ficam em `.local/build/titles/<nome>/`.
+
+Inicie a sessão pelo supervisor:
+
+```powershell
+$x360n = '.\.local\build\win-amd64\src\supervisor\Debug\x360n.exe'
+& $x360n doctor
+& $x360n session titles\dash_17559\dash_17559_manifest.toml --timeout 900
+```
+
+Após a intro, use **My Games → Castle Crashers**. Para voltar, use **Return to
+Arcade** no menu do jogo. Fechar a janela encerra a plataforma. O timeout do
+exemplo é de 900 segundos por título; `--timeout 0` desativa esse limite.
+
+A navegação foi confirmada com controle e teclado (`Shift` + setas na dashboard).
+A inicialização direta continua disponível para diagnóstico, executando o alvo
+com `--dash17559_boot_intro=false`; veja os detalhes em [Dashboard](docs/dashboard.md).
+
+## Testes e diagnóstico
+
+Após um build bem-sucedido, execute o subconjunto pertinente:
+
+```powershell
+scripts\devshell.cmd ctest --preset win-amd64-debug -L project
+scripts\devshell.cmd ctest --preset win-amd64-debug -R "local[.]"
+```
+
+Os testes `local.*` dependem dos arquivos de entrada correspondentes. A suíte
+completa pode ser executada com `ctest --preset win-amd64-debug -j 16` pelo mesmo
+`devshell.cmd`; não use binários antigos para validar um build que falhou.
+
+A consolidação de 12/10/2026 registrou **42 testes do SDK e 40 do supervisor
+aprovados**, regressão iruka L1–L5 e o ciclo real com Castle Crashers. Esses são
+resultados dos grupos exercitados, não uma aprovação recente da suíte inteira.
+Há uma falha conhecida no teste upstream `unit.Depfile escapes characters make treats as syntax`;
+consulte [STATUS.md](STATUS.md) para o contexto da execução.
+
+`x360n identify <arquivo> --json` registra identidade e SHA-256.
+`x360n run <exe> [--label L] [--timeout S] [-- args...]` executa um alvo compilado
+isoladamente; isso não valida a integração com My Games. O comando aceita saídas de
+build, nunca executáveis em `.local/inputs`.
+
+Cada execução gera `.local/runs/<UTC>-<label>/`, com logs e `report.json`
+contendo identidade do executável, revisões e resultado. Hipóteses experimentais,
+incluindo a região de memória específica da 17559, permanecem identificadas em
+[Dashboard](docs/dashboard.md); não são contratos comprovados do console.
+
+## Próximas etapas e documentação
+
+O [checklist funcional](CHECKLIST_FUNCIONAL_x360-native.md) orienta os incrementos:
+interface original de perfis e Guide, persistência, ampliação da compatibilidade
+por versão e distribuição com preparação guiada. Windows, Linux e macOS são
+objetivos, com validação separada por sistema e arquitetura; hoje a referência
+funcional é Windows x86-64.
+
+Títulos XNA/Xbox Live Indie Games exigem uma categoria própria e runtime gerenciado;
+não são tratados como jogos PowerPC nativos comuns. Esse suporte segue pendente.
+Xbox Live, multiplayer online e periféricos especiais também não estão validados.
+
+| Documento | Conteúdo |
+|---|---|
+| [STATUS.md](STATUS.md) | Estado consolidado, resultados e desvios conhecidos |
+| [Checklist funcional](CHECKLIST_FUNCIONAL_x360-native.md) | Requisitos, prioridades e critérios de aceite |
+| [Arquitetura](docs/architecture.md) | Recompilação, runtime e decisões técnicas |
+| [Compatibilidade](docs/compatibility.md) | Critérios e evidências por alvo |
+| [Dashboard](docs/dashboard.md) | Evolução da 17559 e da 6717, transições e XUI |
+| [Castle Crashers](docs/validation-castle-crashers.md) / [iruka](docs/validation-iruka.md) | Identidade dos arquivos e validações dos títulos |
+| [titles/](titles/README.md) | Organização dos manifestos e configurações por executável |
 
 ## Licenças
 
-ReXGlue: BSD-3-Clause (com partes derivadas do Xenia, BSD). Binutils PowerPC
-incluídos no SDK: GPL-3.0 (usados como ferramenta, não ligados). LLVM: Apache-2.0
-com exceção LLVM. A licença deste repositório ainda não foi definida.
+A licença própria deste repositório ainda não foi definida. ReXGlue e suas
+dependências mantêm suas licenças e avisos de terceiros; consulte os respectivos
+projetos. O repositório não concede direitos sobre jogos, fontes ou recursos
+originais do Xbox 360. Binários proprietários e código AOT gerado a partir deles
+não fazem parte da publicação.
