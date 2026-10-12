@@ -6,6 +6,7 @@
 #include <shellapi.h>
 #include <shlobj.h>
 #include <Xinput.h>
+#include <dwmapi.h>
 #include <atomic>
 #include <algorithm>
 #include <fstream>
@@ -21,7 +22,9 @@ using namespace x360n;
 using namespace x360n::desktop;
 namespace {
 constexpr UINT kFinished = WM_APP + 1, kProgress = WM_APP + 2, kDetected = WM_APP + 3;
-enum { kFolder = 101, kTargets, kCheck, kImport, kPrepare, kLaunch, kDetails, kData, kCancel, kLanguage, kInstall, kStorage };
+enum { kFolder = 101, kTargets, kCheck, kImport, kPrepare, kLaunch, kDetails, kData, kCancel, kLanguage, kInstall, kStorage, kPrimary, kSettings };
+constexpr COLORREF background = RGB(15, 20, 27), surface = RGB(24, 32, 42), foreground = RGB(236, 241, 247), muted = RGB(157, 171, 189), accent = RGB(169, 231, 154);
+HBRUSH background_brush = CreateSolidBrush(background), surface_brush = CreateSolidBrush(surface);
 bool english = false;
 std::string Tr(const char* pt, const char* en) { return english ? en : pt; }
 std::wstring Wide(const std::string& text) {
@@ -32,31 +35,41 @@ std::wstring Wide(const std::string& text) {
   return out;
 }
 struct App {
-  HWND window{}, title{}, subtitle{}, root_text{}, combo{}, status{}, details{};
-  HFONT font{}, title_font{};
+  HWND window{}, title{}, subtitle{}, root_text{}, combo{}, status{}, details{}, headline{}, footer{};
+  HFONT font{}, title_font{}, headline_font{};
   HICON icon{};
   std::vector<HWND> buttons;
   fs::path self, root, logs, preferences;
+  std::string startup_error;
   Environment environment;
   std::vector<Target> targets;
+  std::vector<size_t> dashboard_indices;
   Inspection current;
   size_t selected = 0;
   std::thread worker;
   std::atomic<bool> cancel{false};
+  std::atomic<bool> failed{false};
   bool busy = false, session = false, show_details = false;
   UINT dpi = 96;
   WORD buttons_down = 0;
   unsigned timer_ticks = 0;
   bool allow_downloads = false;
   bool installing = false;
-  ~App() { if (worker.joinable()) worker.join(); DeleteObject(font); DeleteObject(title_font); DestroyIcon(icon); }
+  bool settings = false;
+  int next_action = kFolder;
+  ~App() { if (worker.joinable()) worker.join(); DeleteObject(font); DeleteObject(title_font); DeleteObject(headline_font); DestroyIcon(icon); }
 };
 void Set(HWND h, const std::string& text) { SetWindowTextW(h, Wide(text).c_str()); }
+void SyncSelection(App& a) {
+  auto it = std::find(a.dashboard_indices.begin(), a.dashboard_indices.end(), a.selected);
+  SendMessageW(a.combo, CB_SETCURSEL, it == a.dashboard_indices.end() ? -1 : it - a.dashboard_indices.begin(), 0);
+}
 void Post(HWND window, UINT type, const std::string& text) {
   auto* value = new std::string(text);
   if (!PostMessageW(window, type, 0, reinterpret_cast<LPARAM>(value))) delete value;
 }
 HWND Control(App& a, const wchar_t* cls, const wchar_t* text, DWORD style, int id = 0) {
+  if (std::wstring_view(cls) == L"BUTTON") style |= BS_OWNERDRAW;
   auto h = CreateWindowExW(0, cls, text, WS_CHILD | WS_VISIBLE | style, 0, 0, 0, 0,
                          a.window, reinterpret_cast<HMENU>(INT_PTR(id)), GetModuleHandleW(nullptr), nullptr);
   SendMessageW(h, WM_SETFONT, reinterpret_cast<WPARAM>(a.font), TRUE);
@@ -65,26 +78,34 @@ HWND Control(App& a, const wchar_t* cls, const wchar_t* text, DWORD style, int i
 void Layout(App& a) {
   RECT client{}; GetClientRect(a.window, &client);
   auto px = [&](int x) { return MulDiv(x, int(a.dpi), 96); };
-  int width = client.right, margin = px(24);
-  auto move = [&](HWND h, int x, int y, int w, int height) { MoveWindow(h, px(x), px(y), w, px(height), TRUE); };
-  move(a.title, 24, 20, width - px(200), 34);
-  move(GetDlgItem(a.window, kLanguage), MulDiv(width, 96, a.dpi) - 182, 20, px(158), 32);
-  move(a.subtitle, 24, 60, width - 2 * margin, 46);
-  move(a.root_text, 24, 116, width - px(214), 28);
-  move(GetDlgItem(a.window, kFolder), MulDiv(width, 96, a.dpi) - 182, 110, px(158), 32);
-  move(a.combo, 24, 156, width - 2 * margin, 200);
-  move(a.status, 24, 202, width - 2 * margin, 172);
-  int x = 24;
-  for (int id : {kCheck, kImport, kPrepare, kLaunch}) {
-    move(GetDlgItem(a.window, id), x, 382, px(168), 36); x += 180;
-  }
-  move(GetDlgItem(a.window, kDetails), 24, 430, px(168), 32);
-  move(GetDlgItem(a.window, kData), 204, 430, px(168), 32);
-  move(GetDlgItem(a.window, kCancel), 384, 430, px(168), 32);
-  move(GetDlgItem(a.window, kStorage), 564, 430, px(168), 32);
-  MoveWindow(a.details, margin, px(476), width - 2 * margin,
-             std::max(px(64), int(client.bottom) - px(496)), TRUE);
+  int width = MulDiv(client.right, 96, a.dpi), height = MulDiv(client.bottom, 96, a.dpi);
+  auto move = [&](HWND h, int x, int y, int w, int hgt) { MoveWindow(h, px(x), px(y), px(w), px(hgt), TRUE); };
+  auto button = [&](int id, int x, int y, int w, int hgt, bool visible) {
+    auto h = GetDlgItem(a.window, id); move(h, x, y, w, hgt); ShowWindow(h, visible ? SW_SHOW : SW_HIDE);
+  };
+  move(a.title, 40, 28, 260, 32);
+  button(kLanguage, width - 378, 22, 100, 40, true);
+  button(kSettings, width - 270, 22, 140, 40, true);
+  button(kDetails, width - 122, 22, 90, 40, true);
+  move(a.headline, 60, 112, width - 120, 62);
+  move(a.subtitle, 60, 186, width - 120, 52);
+  button(kPrimary, 60, 264, 270, 54, !a.settings && !a.show_details);
+  button(kImport, 346, 264, 210, 54, !a.settings && !a.show_details && a.current.prepared && !a.busy);
+  button(kCancel, 346, 264, 190, 54, !a.settings && !a.show_details && a.busy && !a.session);
+  button(kPrepare, 0, 0, 0, 0, false); button(kLaunch, 0, 0, 0, 0, false);
+  button(kFolder, 84, 448, 208, 44, a.settings);
+  button(kStorage, 308, 448, 208, 44, a.settings);
+  button(kData, 532, 448, 208, 44, a.settings);
+  button(kCheck, 84, 508, 208, 40, a.settings);
+  move(a.root_text, 84, 406, width - 168, 32); ShowWindow(a.root_text, a.settings ? SW_SHOW : SW_HIDE);
+  move(a.combo, 84, 410, width - 168, 210);
+  ShowWindow(a.combo, !a.settings && !a.show_details ? SW_SHOW : SW_HIDE);
+  move(a.status, 84, 460, width - 168, 86);
+  ShowWindow(a.status, !a.settings && !a.show_details ? SW_SHOW : SW_HIDE);
+  move(a.details, 60, 266, width - 120, std::max(200, height - 348));
   ShowWindow(a.details, a.show_details ? SW_SHOW : SW_HIDE);
+  move(a.footer, 40, height - 42, width - 80, 28);
+  InvalidateRect(a.window, nullptr, TRUE);
 }
 void Enable(App& a) {
   bool has = a.selected < a.targets.size();
@@ -97,16 +118,28 @@ void Enable(App& a) {
   EnableWindow(GetDlgItem(a.window, kStorage), !a.busy && !a.root.empty());
   EnableWindow(GetDlgItem(a.window, kDetails), TRUE);
   EnableWindow(GetDlgItem(a.window, kCancel), a.busy && !a.session && !a.installing);
+  const bool action_ok = a.next_action == kFolder ||
+    (a.next_action == kImport && has && a.targets[a.selected].importable) ||
+    (a.next_action == kPrepare && a.current.inputs_ok && a.environment.writable && a.environment.architecture) ||
+    (a.next_action == kLaunch && a.current.prepared && a.environment.graphics);
+  EnableWindow(GetDlgItem(a.window, kPrimary), !a.busy && action_ok);
+  EnableWindow(GetDlgItem(a.window, kSettings), !a.busy);
+  Layout(a);
 }
 void InspectSelected(App& a) {
   a.current = {};
   a.current.inputs_ok = false;
   if (a.selected >= a.targets.size()) {
-    Set(a.status, Tr("Escolha uma pasta para o ambiente e seus dados. O aplicativo prepara os arquivos do projeto sem incluir jogos ou dashboards.\r\n\r\nUse uma pasta fora do aplicativo para preservar o conteúdo ao remover ou trocar o pacote.", "Choose a folder for your environment and data. The app prepares the project files; games and dashboards are not included.\r\n\r\nChoose a folder outside the app so removing or replacing the package preserves your data."));
+    a.next_action = kFolder;
+    Set(a.headline, Tr("Seu Xbox 360 começa aqui.", "Your Xbox 360 starts here."));
+    Set(a.subtitle, Tr("Escolha onde guardar seus arquivos. Depois, importe a dashboard e o jogo.\r\nA preparação acontece neste computador; seus arquivos não são enviados.", "Choose where to keep your files, then import the dashboard and game.\r\nPreparation happens on this computer; your files are never uploaded."));
+    Set(GetDlgItem(a.window, kPrimary), Tr("Escolher pasta", "Choose folder"));
+    Set(a.status, Tr("Você pode mudar a pasta e o idioma em Configurações.\r\nDashboard e jogos não estão incluídos no aplicativo.", "You can change the folder and language in Settings.\r\nDashboard and games are not included in the app."));
     Enable(a); return;
   }
   const auto& t = a.targets[a.selected];
   a.current = Inspect(ProjectPaths{a.root}, t);
+  std::string missing = a.current.inputs_ok ? "" : (english ? t.label_en : t.label);
   std::string detail;
   detail += a.environment.description + "\r\n";
   for (const auto& issue : a.current.issues) detail += issue + "\r\n";
@@ -118,6 +151,7 @@ void InspectSelected(App& a) {
       continue;
     }
     auto r = Inspect(ProjectPaths{a.root}, *it);
+    if (missing.empty() && !r.inputs_ok) missing = english ? it->label_en : it->label;
     a.current.inputs_ok = a.current.inputs_ok && r.inputs_ok;
     a.current.prepared = a.current.prepared && r.prepared;
     for (const auto& issue : r.issues) detail += dep + ": " + issue + "\r\n";
@@ -132,30 +166,39 @@ void InspectSelected(App& a) {
     a.current.prepared = false;
     detail += "Falta o supervisor ao lado do aplicativo: " + Utf8(supervisor) + "\r\n";
   }
-  std::string state = !a.current.inputs_ok ? Tr("Faltam componentes. Importe a pasta extraída da versão indicada. Veja detalhes para os arquivos necessários.", "Missing components. Import the extracted folder for this version. See details for required files.") :
-                      !a.current.prepared ? Tr("Precisa preparar. Os componentes verificados estão presentes.", "Needs preparation. Verified components are present.") :
-                      t.session ? Tr("Preparado para abrir a dashboard original.", "Prepared to open the original dashboard.") : Tr("Preparado para diagnóstico; sessão guiada indisponível neste alvo.", "Prepared for diagnostics; guided session unavailable for this target.");
-  state += "\r\n\r\n" + (english ? t.limitations_en : t.limitations);
-  if (!t.user_root.empty()) state += Tr("\r\n\r\nDados: ", "\r\n\r\nData: ") + Utf8(t.user_root);
-  std::error_code ec; auto space = fs::space(a.root, ec);
-  if (!ec) state += Tr("\r\nEspaço livre: ", "\r\nFree space: ") + std::to_string(space.available / (1024 * 1024 * 1024)) + " GiB.";
+  a.next_action = !a.current.inputs_ok ? kImport : !a.current.prepared ? kPrepare : t.session ? kLaunch : kPrepare;
+  Set(a.headline, !a.current.inputs_ok ? Tr("Traga seus arquivos.", "Bring your files.") :
+      !a.current.prepared ? Tr("Tudo pronto para preparar.", "Ready to prepare.") : Tr("Sua dashboard está pronta.", "Your dashboard is ready."));
+  Set(a.subtitle, !a.current.inputs_ok ? Tr("Selecione ou arraste a pasta extraída do conjunto abaixo.\r\nVamos identificar a versão e verificar os arquivos antes de copiar.", "Choose or drop the extracted folder for the set below.\r\nWe identify the version and verify every file before copying.") :
+      !a.current.prepared ? Tr("O aplicativo obtém as ferramentas e prepara a execução local.\r\nEssa etapa pode demorar na primeira vez; depois, é só abrir.", "The app obtains the tools and prepares local execution.\r\nThe first preparation can take a while; after that, just open it.") :
+      Tr("Abra o menu original do Xbox 360.\r\nSeus jogos continuam na My Games, dentro da dashboard.", "Open the original Xbox 360 menu.\r\nYour games stay in My Games, inside the dashboard."));
+  Set(GetDlgItem(a.window, kPrimary), a.next_action == kImport ? Tr("Selecionar arquivos", "Choose files") :
+      a.next_action == kPrepare ? Tr("Verificar e preparar", "Verify and prepare") : Tr("Abrir dashboard   →", "Open dashboard   →"));
+  std::string state = !missing.empty() ? Tr("Próximo conjunto: ", "Next set: ") + missing :
+    a.current.prepared ? Tr("Conteúdo verificado. Lance Castle Crashers pelo menu original.\r\nUse Return to Arcade no jogo para voltar à dashboard.", "Content verified. Launch Castle Crashers from the original menu.\r\nUse Return to Arcade in the game to return to the dashboard.") :
+    Tr("Conteúdo verificado. A preparação será feita nesta pasta.\r\nDownloads e instalações serão informados antes de começar.", "Content verified. Preparation will use this folder.\r\nDownloads and installations will be explained before they start.");
+  if (!t.importable || !t.session) state = english ? t.limitations_en : t.limitations;
+  detail += "\r\n" + (english ? t.limitations_en : t.limitations);
+  if (!t.user_root.empty()) detail += "\r\nData: " + Utf8(t.user_root);
   Set(a.status, state);
   Set(a.details, detail.empty() ? "Verificação concluída. Nenhum dado é enviado automaticamente.\r\nLogs de execução: " + Utf8(a.root / ".local/runs") : detail);
   Enable(a);
 }
 void Load(App& a, const fs::path& root) {
-  a.targets.clear(); a.selected = 0;
+  a.targets.clear(); a.dashboard_indices.clear(); a.selected = 0;
   SendMessageW(a.combo, CB_RESETCONTENT, 0, 0);
   a.root = root;
   a.environment = CheckEnvironment(root);
   SetWindowTextW(a.root_text, root.empty() ? L"Selecione um ambiente existente" : root.c_str());
   if (!root.empty()) a.targets = ReadCatalog(ProjectPaths{root});
   for (size_t i = 0; i < a.targets.size(); ++i) {
+    if (!a.targets[i].session && !a.targets[i].id.starts_with("dash_")) continue;
+    a.dashboard_indices.push_back(i);
     auto label = Wide(english ? a.targets[i].label_en : a.targets[i].label);
     SendMessageW(a.combo, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(label.c_str()));
     if (a.targets[i].session) a.selected = i;
   }
-  SendMessageW(a.combo, CB_SETCURSEL, a.selected, 0);
+  SyncSelection(a);
   InspectSelected(a);
 }
 void SavePreferences(const App& a) {
@@ -168,9 +211,12 @@ void Labels(App& a) {
   for (auto [id, pt, en] : {std::tuple{kFolder, "Selecionar ambiente", "Choose environment"},
        {kCheck, "Verificar novamente", "Check again"}, {kImport, "Importar conjunto", "Import content"},
        {kPrepare, "Preparar", "Prepare"}, {kLaunch, "Abrir dashboard", "Open dashboard"},
-       {kDetails, "Ver detalhes", "Show details"}, {kData, "Abrir dados locais", "Open local data"},
-       {kCancel, "Cancelar preparação", "Cancel preparation"}, {kStorage, "Pasta de saves", "Save data folder"}}) Set(GetDlgItem(a.window, id), Tr(pt, en));
-  Set(a.subtitle, Tr("Preparar o ambiente e abrir a dashboard original\r\nPrévia Windows x64 · D3D12 · perfis e save/load ainda não aprovados", "Prepare your environment and open the original dashboard\r\nWindows x64 preview · D3D12 · profiles and save/load not yet approved"));
+       {kDetails, "Detalhes", "Details"}, {kData, "Abrir dados locais", "Open local data"},
+       {kCancel, "Cancelar", "Cancel"}, {kStorage, "Pasta de saves", "Save data folder"},
+       {kSettings, "Configurações", "Settings"}}) Set(GetDlgItem(a.window, id), Tr(pt, en));
+  Set(GetDlgItem(a.window, kImport), Tr("Importar outro conjunto", "Import another set"));
+  Set(GetDlgItem(a.window, kLanguage), english ? "EN / PT" : "PT / EN");
+  Set(a.footer, Tr("PRÉVIA WINDOWS x64    ·    Perfis e save/load ainda não aprovados    ·    Seus arquivos ficam neste computador", "WINDOWS x64 PREVIEW    ·    Profiles and save/load not yet approved    ·    Your files stay on this computer"));
 }
 fs::path PickFolder(HWND owner, const wchar_t* title) {
   IFileOpenDialog* dialog = nullptr;
@@ -195,13 +241,18 @@ void Start(App& a, int action, fs::path source = {}) {
   if (a.worker.joinable()) a.worker.join();
   a.logs = a.root / ".local/logs/desktop" / std::to_string(GetTickCount64());
   fs::create_directories(a.logs);
-  a.cancel = false; a.busy = true; a.session = action == kLaunch; a.installing = action == kInstall;
+  a.cancel = false; a.failed = false; a.busy = true; a.session = action == kLaunch; a.installing = action == kInstall;
   const auto target = a.targets[a.selected];
   Enable(a);
+  Set(a.headline, action == kImport ? Tr("Conferindo seus arquivos.", "Checking your files.") :
+      action == kLaunch ? Tr("A sessão está aberta.", "Your session is open.") : Tr("Preparando para você.", "Preparing for you."));
+  Set(a.subtitle, action == kLaunch ? Tr("Continue na janela da dashboard original.\r\nO aplicativo continua aqui quando você encerrar a sessão.", "Continue in the original dashboard window.\r\nThis app stays here when you end your session.") :
+      Tr("Acompanhe a etapa atual abaixo. Você pode cancelar e continuar depois.\r\nSeus arquivos originais e saves são preservados.", "Follow the current step below. You can cancel and continue later.\r\nYour original files and saves are preserved."));
+  Set(GetDlgItem(a.window, kPrimary), action == kLaunch ? Tr("Em execução", "Running") : Tr("Em andamento…", "Working…"));
   Set(a.status, action == kImport ? Tr("Verificando o conjunto selecionado antes de copiar...", "Verifying the selected set before copying...") :
                 action == kLaunch ? Tr("Sessão em andamento. Use My Games para iniciar o jogo e o menu do jogo para voltar. Feche a janela da plataforma para encerrar.", "Session running. Use My Games to launch and the game's menu to return. Close the platform window to exit.") :
                 Tr("Preparação em andamento. As etapas reais serão registradas abaixo.", "Preparation running. Actual stages are recorded below."));
-  a.show_details = true; Layout(a);
+  a.show_details = false; a.settings = false; Layout(a);
   a.worker = std::thread([&a, target, action, source] {
     auto finish = [&](const std::string& message) {
       std::ofstream(a.logs / "result.txt", std::ios::binary) << message << '\n';
@@ -250,7 +301,9 @@ void Start(App& a, int action, fs::path source = {}) {
           const auto marker = PreparationMarker(ProjectPaths{a.root}, pending);
           fs::create_directories(marker.parent_path());
           { std::ofstream out(marker); if (!out) throw std::runtime_error("Não foi possível registrar o início da preparação."); out << "incomplete\n"; }
-          Post(a.window, kProgress, "Preparando " + id + ": configure → codegen → configure → build.\r\nLogs das etapas: " + Utf8(a.root / ".local/build/titles" / id));
+          auto item = std::find_if(a.targets.begin(), a.targets.end(), [&](const auto& t) { return t.id == id; });
+          auto label = item == a.targets.end() ? id : (english ? item->label_en : item->label);
+          Post(a.window, kProgress, Tr("Preparando ", "Preparing ") + label + Tr(".\r\nA primeira preparação pode levar vários minutos.", ".\r\nFirst-time preparation can take several minutes."));
           run(powershell, {"-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", Utf8(a.root / "scripts/build-title.ps1"), "-Title", id}, id);
           fs::remove(marker);
         };
@@ -260,7 +313,7 @@ void Start(App& a, int action, fs::path source = {}) {
         PrepareLibrary(ProjectPaths{a.root}, target, a.targets, [&] { return a.cancel.load(); });
         finish("Preparação concluída. A identidade dos componentes será conferida antes de habilitar a sessão.");
       }
-    } catch (const std::exception& error) { finish(error.what()); }
+    } catch (const std::exception& error) { a.failed = true; finish(error.what()); }
   });
 }
 HICON MakeIcon() {
@@ -275,6 +328,45 @@ HICON MakeIcon() {
   ICONINFO info{TRUE, 0, 0, mask, color}; auto icon = CreateIconIndirect(&info);
   SelectObject(mem, old); DeleteObject(mask); DeleteObject(color); DeleteDC(mem); ReleaseDC(nullptr, dc); return icon;
 }
+void Paint(App& a) {
+  PAINTSTRUCT ps{}; auto dc = BeginPaint(a.window, &ps);
+  RECT r{}; GetClientRect(a.window, &r); FillRect(dc, &r, background_brush);
+  auto px = [&](int n) { return MulDiv(n, a.dpi, 96); };
+  if (!a.show_details) {
+    RECT card{px(60), px(392), r.right - px(60), px(568)};
+    auto old_brush = SelectObject(dc, surface_brush); auto old_pen = SelectObject(dc, GetStockObject(NULL_PEN));
+    RoundRect(dc, card.left, card.top, card.right, card.bottom, px(18), px(18));
+    SelectObject(dc, old_brush); SelectObject(dc, old_pen);
+    if (!a.settings) {
+      auto old_font = SelectObject(dc, a.font); SetBkMode(dc, TRANSPARENT);
+      int span = (r.right - px(120)) / 3;
+      const std::string steps[] = {Tr("01  Conteúdo", "01  Content"), Tr("02  Preparação", "02  Preparation"), Tr("03  Dashboard", "03  Dashboard")};
+      for (int i = 0; i < 3; ++i) {
+        bool done = i == 0 ? a.current.inputs_ok : a.current.prepared;
+        auto brush = CreateSolidBrush(done ? accent : RGB(55, 70, 87));
+        RECT bar{px(60) + i * span, px(348), px(60) + (i + 1) * span - px(16), px(351)}; FillRect(dc, &bar, brush); DeleteObject(brush);
+        RECT label{bar.left, px(358), bar.right, px(383)}; SetTextColor(dc, done ? foreground : muted);
+        DrawTextW(dc, Wide(steps[i]).c_str(), -1, &label, DT_SINGLELINE | DT_LEFT);
+      }
+      SelectObject(dc, old_font);
+    }
+  }
+  EndPaint(a.window, &ps);
+}
+void DrawButton(App& a, const DRAWITEMSTRUCT& item) {
+  const bool primary = item.CtlID == kPrimary, disabled = item.itemState & ODS_DISABLED;
+  COLORREF fill = primary && !disabled ? accent : surface;
+  if ((item.itemState & ODS_SELECTED) && !disabled) fill = primary ? RGB(143, 204, 131) : RGB(40, 54, 69);
+  auto brush = CreateSolidBrush(fill); auto old_brush = SelectObject(item.hDC, brush);
+  auto old_pen = SelectObject(item.hDC, GetStockObject(NULL_PEN));
+  auto r = item.rcItem; RoundRect(item.hDC, r.left, r.top, r.right, r.bottom, 10, 10);
+  SelectObject(item.hDC, old_brush); SelectObject(item.hDC, old_pen); DeleteObject(brush);
+  SetBkMode(item.hDC, TRANSPARENT); SetTextColor(item.hDC, disabled ? RGB(92, 107, 124) : primary ? background : foreground);
+  auto old_font = SelectObject(item.hDC, a.font); wchar_t text[512]{}; GetWindowTextW(item.hwndItem, text, 512);
+  DrawTextW(item.hDC, text, -1, &r, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+  SelectObject(item.hDC, old_font);
+  if (item.itemState & ODS_FOCUS) { InflateRect(&r, -5, -5); DrawFocusRect(item.hDC, &r); }
+}
 LRESULT CALLBACK WndProc(HWND window, UINT message, WPARAM wp, LPARAM lp) {
   auto* a = reinterpret_cast<App*>(GetWindowLongPtrW(window, GWLP_USERDATA));
   if (message == WM_NCCREATE) {
@@ -284,17 +376,28 @@ LRESULT CALLBACK WndProc(HWND window, UINT message, WPARAM wp, LPARAM lp) {
   if (!a) return DefWindowProcW(window, message, wp, lp);
   try {
     switch (message) {
-      case WM_CTLCOLORSTATIC:
-        SetBkColor(reinterpret_cast<HDC>(wp), RGB(255, 255, 255));
-        return reinterpret_cast<LRESULT>(GetStockObject(WHITE_BRUSH));
+      case WM_ERASEBKGND: return 1;
+      case WM_PAINT: Paint(*a); return 0;
+      case WM_DRAWITEM: DrawButton(*a, *reinterpret_cast<DRAWITEMSTRUCT*>(lp)); return TRUE;
+      case WM_CTLCOLORSTATIC: case WM_CTLCOLOREDIT: case WM_CTLCOLORLISTBOX: {
+        auto h = reinterpret_cast<HWND>(lp); bool panel = h == a->status || h == a->root_text || h == a->details || message == WM_CTLCOLORLISTBOX;
+        SetTextColor(reinterpret_cast<HDC>(wp), h == a->headline || h == a->title ? foreground : muted);
+        SetBkColor(reinterpret_cast<HDC>(wp), panel ? surface : background);
+        return reinterpret_cast<LRESULT>(panel ? surface_brush : background_brush);
+      }
       case WM_CREATE: {
         a->dpi = GetDpiForWindow(window);
+        BOOL dark = TRUE; DwmSetWindowAttribute(window, 20, &dark, sizeof(dark));
         a->font = CreateFontW(-MulDiv(10, a->dpi, 72), 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Segoe UI");
         a->title_font = CreateFontW(-MulDiv(20, a->dpi, 72), 0, 0, 0, FW_SEMIBOLD, FALSE, FALSE, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Segoe UI");
+        a->headline_font = CreateFontW(-MulDiv(32, a->dpi, 72), 0, 0, 0, FW_SEMIBOLD, FALSE, FALSE, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Segoe UI");
         a->icon = MakeIcon(); SendMessageW(window, WM_SETICON, ICON_BIG, reinterpret_cast<LPARAM>(a->icon));
         a->title = Control(*a, L"STATIC", L"x360-native", 0);
         SendMessageW(a->title, WM_SETFONT, reinterpret_cast<WPARAM>(a->title_font), TRUE);
         a->subtitle = Control(*a, L"STATIC", L"", 0);
+        a->headline = Control(*a, L"STATIC", L"", 0);
+        SendMessageW(a->headline, WM_SETFONT, reinterpret_cast<WPARAM>(a->headline_font), TRUE);
+        a->footer = Control(*a, L"STATIC", L"", SS_ENDELLIPSIS);
         a->root_text = Control(*a, L"STATIC", L"", SS_PATHELLIPSIS);
         a->combo = Control(*a, WC_COMBOBOXW, L"", CBS_DROPDOWNLIST | WS_TABSTOP | WS_VSCROLL, kTargets);
         a->status = Control(*a, L"STATIC", L"", 0);
@@ -303,29 +406,47 @@ LRESULT CALLBACK WndProc(HWND window, UINT message, WPARAM wp, LPARAM lp) {
           a->buttons.push_back(Control(*a, L"BUTTON", pair.second, WS_TABSTOP, pair.first));
         a->buttons.push_back(Control(*a, L"BUTTON", L"English / Português", WS_TABSTOP, kLanguage));
         a->buttons.push_back(Control(*a, L"BUTTON", L"", WS_TABSTOP, kStorage));
+        a->buttons.push_back(Control(*a, L"BUTTON", L"", WS_TABSTOP, kPrimary));
+        a->buttons.push_back(Control(*a, L"BUTTON", L"", WS_TABSTOP, kSettings));
         DragAcceptFiles(window, TRUE); SetTimer(window, 1, 100, nullptr);
-        Labels(*a); Layout(*a); Load(*a, a->root); return 0;
+        Labels(*a); Layout(*a); Load(*a, a->root);
+        if (!a->startup_error.empty()) {
+          Set(a->status, Tr("Não foi possível usar a pasta padrão. Escolha outra pasta para continuar.", "The default folder could not be used. Choose another folder to continue."));
+          Set(a->details, a->startup_error);
+        }
+        return 0;
       }
       case WM_SIZE: if (a->title) Layout(*a); return 0;
       case WM_DPICHANGED: {
         a->dpi = HIWORD(wp);
-        auto old = a->font, old_title = a->title_font;
+        auto old = a->font, old_title = a->title_font, old_headline = a->headline_font;
         a->font = CreateFontW(-MulDiv(10, a->dpi, 72), 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Segoe UI");
         a->title_font = CreateFontW(-MulDiv(20, a->dpi, 72), 0, 0, 0, FW_SEMIBOLD, FALSE, FALSE, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Segoe UI");
+        a->headline_font = CreateFontW(-MulDiv(32, a->dpi, 72), 0, 0, 0, FW_SEMIBOLD, FALSE, FALSE, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Segoe UI");
         EnumChildWindows(window, [](HWND child, LPARAM font) -> BOOL { SendMessageW(child, WM_SETFONT, WPARAM(font), TRUE); return TRUE; }, reinterpret_cast<LPARAM>(a->font));
         SendMessageW(a->title, WM_SETFONT, reinterpret_cast<WPARAM>(a->title_font), TRUE);
-        DeleteObject(old); DeleteObject(old_title);
+        SendMessageW(a->headline, WM_SETFONT, reinterpret_cast<WPARAM>(a->headline_font), TRUE);
+        DeleteObject(old); DeleteObject(old_title); DeleteObject(old_headline);
         auto rect = reinterpret_cast<RECT*>(lp);
         SetWindowPos(window, nullptr, rect->left, rect->top, rect->right - rect->left, rect->bottom - rect->top, SWP_NOZORDER | SWP_NOACTIVATE);
         Layout(*a); return 0;
       }
       case WM_GETMINMAXINFO: {
-        auto* size = reinterpret_cast<MINMAXINFO*>(lp); size->ptMinTrackSize = {MulDiv(800, a->dpi, 96), MulDiv(640, a->dpi, 96)}; return 0;
+        auto* size = reinterpret_cast<MINMAXINFO*>(lp); size->ptMinTrackSize = {MulDiv(960, a->dpi, 96), MulDiv(700, a->dpi, 96)}; return 0;
       }
       case WM_COMMAND: {
         auto id = LOWORD(wp);
+        if (id == kPrimary) id = a->next_action;
         if (id == IDOK) { auto focus = GetFocus(); if (focus && focus != a->combo && IsWindowEnabled(focus)) SendMessageW(focus, BM_CLICK, 0, 0); return 0; }
-        if (id == kDetails) { a->show_details = !a->show_details; Layout(*a); return 0; }
+        if (id == kDetails || id == kSettings) {
+          if (id == kDetails) { a->show_details = !a->show_details; a->settings = false; }
+          else { a->settings = !a->settings; a->show_details = false; }
+          if (a->show_details || a->settings) {
+            Set(a->headline, a->settings ? Tr("Do seu jeito.", "Make it yours.") : Tr("Detalhes da preparação.", "Preparation details."));
+            Set(a->subtitle, a->settings ? Tr("Escolha a dashboard e onde seus arquivos ficam guardados.\r\nTrocar a pasta não apaga os dados existentes.", "Choose your dashboard and where your files are stored.\r\nChanging the folder never deletes existing data.") : Tr("O diagnóstico fica neste computador. Nada é enviado automaticamente.", "Diagnostics stay on this computer. Nothing is uploaded automatically."));
+          } else if (!a->busy) InspectSelected(*a);
+          Layout(*a); return 0;
+        }
         if (id == kData && !a->root.empty()) { auto p = a->root / ".local"; fs::create_directories(p); ShellExecuteW(window, L"open", p.c_str(), nullptr, nullptr, SW_SHOWNORMAL); return 0; }
         if (id == kCancel) { a->cancel = true; Set(a->status, "Cancelando a preparação..."); return 0; }
         if (a->busy) return 0;
@@ -336,8 +457,11 @@ LRESULT CALLBACK WndProc(HWND window, UINT message, WPARAM wp, LPARAM lp) {
           }
           return 0;
         }
-        if (id == kLanguage) { english = !english; Labels(*a); auto selected = a->selected; Load(*a, a->root); a->selected = selected; SendMessageW(a->combo, CB_SETCURSEL, selected, 0); InspectSelected(*a); SavePreferences(*a); return 0; }
-        if (id == kTargets && HIWORD(wp) == CBN_SELCHANGE) { a->selected = size_t(SendMessageW(a->combo, CB_GETCURSEL, 0, 0)); InspectSelected(*a); }
+        if (id == kLanguage) { english = !english; Labels(*a); auto selected = a->selected; Load(*a, a->root); a->selected = selected; SyncSelection(*a); InspectSelected(*a); SavePreferences(*a); return 0; }
+        if (id == kTargets && HIWORD(wp) == CBN_SELCHANGE) {
+          auto item = size_t(SendMessageW(a->combo, CB_GETCURSEL, 0, 0));
+          if (item < a->dashboard_indices.size()) { a->selected = a->dashboard_indices[item]; InspectSelected(*a); }
+        }
         if (id == kFolder) {
           auto root = PickFolder(window, Wide(Tr("Escolha uma pasta vazia para o ambiente ou uma existente do x360-native", "Choose an empty environment folder or an existing x360-native environment")).c_str());
           if (!root.empty()) {
@@ -377,7 +501,13 @@ LRESULT CALLBACK WndProc(HWND window, UINT message, WPARAM wp, LPARAM lp) {
             for (std::string line; std::getline(in, line);) if (line.starts_with("X360N_STAGE ")) stage = line.substr(12);
             if (!stage.empty()) { last = stage; latest = file.last_write_time(); }
           }
-          if (!last.empty()) Set(a->status, Tr("Preparação em andamento: ", "Preparation running: ") + last + "\r\n" + Tr("Pode cancelar com segurança. Os logs completos ficam em: ", "You can cancel safely. Full logs are in: ") + Utf8(a->logs));
+          if (!last.empty()) {
+            auto stage = last.find("codegen") != std::string::npos ? Tr("Traduzindo o código original do título…", "Translating the title's original code…") :
+                last.find("4-build") != std::string::npos ? Tr("Compilando a execução para este computador…", "Compiling native execution for this computer…") :
+                last.find("configure") != std::string::npos ? Tr("Verificando e configurando a preparação…", "Checking and configuring preparation…") :
+                Tr("Preparando e verificando as ferramentas necessárias…", "Preparing and verifying the required tools…");
+            Set(a->status, stage + "\r\n" + Tr("Você pode cancelar e continuar depois. O diagnóstico está em Detalhes.", "You can cancel and continue later. Diagnostics are available in Details."));
+          }
         }
         if (GetForegroundWindow() != window || a->busy) { a->buttons_down = 0; return 0; }
         XINPUT_STATE input{};
@@ -385,8 +515,8 @@ LRESULT CALLBACK WndProc(HWND window, UINT message, WPARAM wp, LPARAM lp) {
         auto pressed = input.Gamepad.wButtons & ~a->buttons_down; a->buttons_down = input.Gamepad.wButtons;
         if (GetFocus() == a->combo && SendMessageW(a->combo, CB_GETDROPPEDSTATE, 0, 0)) {
           if (pressed & (XINPUT_GAMEPAD_DPAD_UP | XINPUT_GAMEPAD_DPAD_DOWN)) {
-            int selected = int(a->selected) + ((pressed & XINPUT_GAMEPAD_DPAD_DOWN) ? 1 : -1);
-            if (selected >= 0 && selected < int(a->targets.size())) { a->selected = size_t(selected); SendMessageW(a->combo, CB_SETCURSEL, selected, 0); InspectSelected(*a); }
+            int selected = int(SendMessageW(a->combo, CB_GETCURSEL, 0, 0)) + ((pressed & XINPUT_GAMEPAD_DPAD_DOWN) ? 1 : -1);
+            if (selected >= 0 && selected < int(a->dashboard_indices.size())) { a->selected = a->dashboard_indices[selected]; SyncSelection(*a); InspectSelected(*a); }
           }
           if (pressed & (XINPUT_GAMEPAD_A | XINPUT_GAMEPAD_B)) SendMessageW(a->combo, CB_SHOWDROPDOWN, FALSE, 0);
           return 0;
@@ -401,12 +531,17 @@ LRESULT CALLBACK WndProc(HWND window, UINT message, WPARAM wp, LPARAM lp) {
         return 0;
       }
       case kProgress: {
-        std::unique_ptr<std::string> text(reinterpret_cast<std::string*>(lp)); Set(a->details, *text); return 0;
+        std::unique_ptr<std::string> text(reinterpret_cast<std::string*>(lp)); Set(a->details, *text); Set(a->status, *text); return 0;
       }
       case kDetected: {
         std::unique_ptr<std::string> id(reinterpret_cast<std::string*>(lp));
+        for (size_t i = 0; i < a->targets.size(); ++i) if (a->targets[i].session &&
+            std::find(a->targets[i].dependencies.begin(), a->targets[i].dependencies.end(), *id) != a->targets[i].dependencies.end()) {
+          a->selected = i; SyncSelection(*a); return 0;
+        }
         for (size_t i = 0; i < a->targets.size(); ++i) if (a->targets[i].id == *id) {
-          a->selected = i; SendMessageW(a->combo, CB_SETCURSEL, i, 0); break;
+          if (std::find(a->dashboard_indices.begin(), a->dashboard_indices.end(), i) != a->dashboard_indices.end()) { a->selected = i; SyncSelection(*a); }
+          break;
         }
         return 0;
       }
@@ -414,7 +549,13 @@ LRESULT CALLBACK WndProc(HWND window, UINT message, WPARAM wp, LPARAM lp) {
         std::unique_ptr<std::string> text(reinterpret_cast<std::string*>(lp));
         if (a->worker.joinable()) a->worker.join(); a->busy = false; a->session = false; a->installing = false;
         a->environment = CheckEnvironment(a->root);
-        InspectSelected(*a); Set(a->details, *text + "\r\nLogs: " + Utf8(a->logs)); Enable(*a); return 0;
+        InspectSelected(*a); Set(a->details, *text + "\r\nLogs: " + Utf8(a->logs));
+        if (a->failed) {
+          Set(a->headline, Tr("Vamos resolver esta etapa.", "Let's fix this step."));
+          Set(a->subtitle, Tr("A preparação não terminou. Seus arquivos foram preservados.\r\nVeja o motivo abaixo e tente novamente após corrigir o problema.", "Preparation did not finish. Your files were preserved.\r\nRead the reason below, then retry after fixing the issue."));
+          a->show_details = true;
+        }
+        Enable(*a); return 0;
       }
       case WM_CLOSE:
         if (a->busy) {
@@ -452,13 +593,28 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show) {
   int count = 0; auto** args = CommandLineToArgvW(GetCommandLineW(), &count);
   if (count == 3 && std::wstring(args[1]) == L"--root") app.root = args[2];
   LocalFree(args);
+  // A first-time user shouldn't need to choose a source repository. The package
+  // prepares its own verified source payload in the user's normal data folder.
+  // An existing installation is preserved; its location can be changed in Settings.
+  if (app.root.empty() && !app.preferences.empty()) {
+    const auto initial = app.preferences.parent_path() / "environment";
+    try {
+      InitializeEnvironment(app.self.parent_path() / "workspace", initial);
+      app.root = initial; SavePreferences(app);
+    } catch (const std::exception& error) {
+      // Leave the first-run folder action available. Never overwrite a different
+      // existing source version or hide it by deleting the user's environment.
+      app.startup_error = error.what();
+    }
+  }
   WNDCLASSW cls{}; cls.lpfnWndProc = WndProc; cls.hInstance = instance;
   cls.lpszClassName = L"X360NativePreparation"; cls.hCursor = LoadCursorW(nullptr, IDC_ARROW);
-  cls.hbrBackground = reinterpret_cast<HBRUSH>(COLOR_WINDOW + 1); RegisterClassW(&cls);
-  auto window = CreateWindowExW(WS_EX_CONTROLPARENT, cls.lpszClassName, L"x360-native — preparação", WS_OVERLAPPEDWINDOW,
-                               CW_USEDEFAULT, CW_USEDEFAULT, 960, 760, nullptr, nullptr, instance, &app);
+  cls.hbrBackground = background_brush; RegisterClassW(&cls);
+  auto window = CreateWindowExW(WS_EX_CONTROLPARENT, cls.lpszClassName, L"x360-native", WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN,
+                               CW_USEDEFAULT, CW_USEDEFAULT, 1120, 760, nullptr, nullptr, instance, &app);
   if (!window) { CoUninitialize(); return 1; }
   ShowWindow(window, show); UpdateWindow(window);
+  SetFocus(GetDlgItem(window, kPrimary));
   MSG msg{};
   while (GetMessageW(&msg, nullptr, 0, 0) > 0) {
     if (!IsDialogMessageW(window, &msg)) { TranslateMessage(&msg); DispatchMessageW(&msg); }

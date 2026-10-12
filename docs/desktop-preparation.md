@@ -10,10 +10,21 @@ O script recusa jogos, fontes, XEX, código AOT gerado e dados locais. O candida
 não é publicado automaticamente. Fontes e binários do aplicativo devem corresponder
 ao commit exportado. Nenhuma release está aprovada pelo §18.
 
-Na primeira abertura, escolha uma pasta para o ambiente. Os arquivos do pacote
+Na primeira abertura, o aplicativo prepara uma pasta de ambiente, que pode ser
+alterada em Configurações. Os arquivos do pacote
 são verificados antes da cópia; outra versão existente não é sobrescrita. Dados
 ficam fora do pacote. Remover o aplicativo não remove o ambiente. A opção de pasta
 de saves grava somente a seleção; dados anteriores não são movidos nem apagados.
+
+Revisão de interface após feedback do usuário: uma ação principal por estado,
+etapas Conteúdo → Preparação → Dashboard, configurações e diagnóstico separados.
+A seleção principal contém dashboards; importar Castle Crashers retorna ao fluxo
+da dashboard que depende dele. A primeira abertura do pacote oferece ambiente
+padrão em `%LOCALAPPDATA%/x360-native/environment`; outra pasta pode ser escolhida.
+Referência de fluxo conferida no `launcher/PinyonShift.Launcher/MainWindow.xaml`
+do Pinyon Shift (estado, ação principal e opções secundárias). Layout próprio;
+sem copiar arte do projeto ou substituir telas do Xbox. Revisão compilada;
+apresentação visual e navegação ainda aguardam teste, pois Computer Use foi interrompido.
 
 O catálogo é declarativo por versão. Importação aceita pastas extraídas da 17559
 e Castle Crashers 0.0.1.3, com detecção pelo XEX e hashes de todos os componentes
@@ -46,15 +57,20 @@ Não há telemetria, upload automático, serviço de atualização ou desinstala
 
 Validações executadas:
 
-- 15 testes / 61 asserções do modelo; 19 testes / 117 asserções de processos,
+- 16 testes / 64 asserções do modelo; 19 testes / 117 asserções de processos,
   sessão, caminhos, armazenamento e exclusividade, em Release.
 - Importação real do pacote em ambiente novo com espaços, acentos e caracteres
-  japoneses: 15 asserções passaram. Não utiliza executáveis de títulos do pacote.
+  japoneses: 19 asserções passaram, incluindo instalação da biblioteca. Não utiliza executáveis de títulos do pacote.
 - Dependência ausente recusou download sem consentimento; arquivo em cache
   corrompido foi rejeitado; save sintético foi preservado.
 - Ferramentas portáteis foram baixadas e verificadas; segunda preparação reutilizou
   caches e SDK sem download. Preparação incremental de Castle Crashers concluiu
   as quatro etapas; 17559 concluiu após liberar uma DLL que estava em uso.
+- Pacote `0.1.0-preview.2`: fontes copiadas para `.local/validation/Preparação João`,
+  SDK público e submódulos obtidos do zero, 34 patches aplicados, arquivos de download
+  verificados reaproveitados. Castle Crashers concluiu configure (422 s), codegen
+  (150 s), reconfigure (6 s) e build (55 s), sem usar os executáveis da árvore principal.
+  Isso usa MSVC já instalado nesta máquina, portanto não aprova máquina limpa.
 - Iruka: `20261012T152401Z-regress-iruka`, L1–L5, 328 cores, diferença 5,222,
   zero erros/críticas/stubs. Timeout foi término diagnóstico, não compatibilidade.
 - O mesmo iruka falhou antes de iniciar com caminho Unicode e passou a executar

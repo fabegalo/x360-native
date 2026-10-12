@@ -61,6 +61,10 @@ Já é gerado um candidato local `x360-native-0.1.0-preview.*-windows-x64.zip`, 
 para o ambiente, importe seus conjuntos extraídos e clique em **Preparar**.
 O jogo continua sendo iniciado pela **My Games original**.
 
+A tela principal orienta por **Conteúdo → Preparação → Dashboard**, com uma ação
+por vez. Pastas e diagnóstico ficam nas opções secundárias. O pacote pode criar
+seu ambiente na pasta de dados do usuário; não é preciso selecionar um repositório.
+
 O pacote inclui o aplicativo, o supervisor, dependências redistribuíveis e fontes
 do projeto; não inclui jogos, dashboard, fontes Xbox ou código AOT desses títulos.
 Git, CMake, Ninja, LLVM e SDK são preparados localmente, com versões verificadas

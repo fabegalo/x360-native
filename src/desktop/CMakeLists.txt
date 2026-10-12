@@ -6,7 +6,7 @@ if(WIN32)
   enable_language(RC)
   add_executable(x360-native WIN32 main_win32.cpp environment_win32.cpp desktop.rc)
   target_link_options(x360-native PRIVATE "LINKER:/MANIFESTINPUT:${CMAKE_CURRENT_SOURCE_DIR}/desktop.manifest")
-  target_link_libraries(x360-native PRIVATE x360n_desktop_model comctl32 ole32 shell32 uuid d3d12 dxgi xinput)
+  target_link_libraries(x360-native PRIVATE x360n_desktop_model comctl32 ole32 shell32 uuid d3d12 dxgi xinput advapi32 dwmapi)
   target_compile_definitions(x360-native PRIVATE UNICODE _UNICODE)
   add_dependencies(x360-native x360n)
   add_custom_command(TARGET x360-native POST_BUILD

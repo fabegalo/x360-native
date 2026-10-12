@@ -69,6 +69,21 @@ TEST_CASE("packaged environment rejects tampering and path traversal before writ
   Write(payload / "payload.sha256", Hash("different bytes") + "\t../outside\n");
   CHECK_THROWS(InitializeEnvironment(payload, destination)); CHECK_FALSE(fs::exists(destination));
 }
+TEST_CASE("interrupted source payload resumes without discarding partial bytes or saves") {
+  Fixture f; auto payload = f.root / "package/workspace"; auto destination = f.root / "environment";
+  Write(payload / "deps.lock.json", "fixture lock");
+  Write(payload / "payload.sha256", Hash("fixture lock") + "\tdeps.lock.json\n");
+  Write(destination / "deps.lock.json.x360n-tmp", "interrupted bytes");
+  Write(destination / ".local/user/save", "progress");
+  InitializeEnvironment(payload, destination);
+  CHECK(DigestFile(destination / "deps.lock.json")->sha256 == Hash("fixture lock"));
+  CHECK(DigestFile(destination / ".local/user/save")->sha256 == Hash("progress"));
+  bool retained = false;
+  for (const auto& item : fs::directory_iterator(destination))
+    if (Utf8(item.path().filename()).starts_with("deps.lock.json.x360n-tmp.interrupted-"))
+      retained = DigestFile(item.path())->sha256 == Hash("interrupted bytes");
+  CHECK(retained);
+}
 TEST_CASE("desktop opens an empty environment without inventing targets") {
   Fixture f;
   CHECK(ReadCatalog(f.paths).empty());
@@ -217,4 +232,18 @@ TEST_CASE("local packaged payload imports the complete validated sets into a fre
   PrepareLibrary(ProjectPaths{root}, *dash, targets);
   CHECK(InspectLibrary(*dash, targets).empty());
   CHECK_NOTHROW(PrepareLibrary(ProjectPaths{root}, *dash, targets));
+}
+
+TEST_CASE("local isolated prepared environment installs original library dependencies", "[.local-prepared]") {
+  const char* root = std::getenv("X360N_TEST_PREPARED_ROOT"); REQUIRE(root);
+  ProjectPaths paths{PathFromUtf8(root)};
+  const auto targets = ReadCatalog(paths);
+  const auto dash = std::find_if(targets.begin(), targets.end(), [](const auto& t) { return t.id == "dash_17559"; });
+  REQUIRE(dash != targets.end()); REQUIRE(Inspect(paths, *dash).prepared);
+  for (const auto& id : dash->dependencies) {
+    auto game = std::find_if(targets.begin(), targets.end(), [&](const auto& t) { return t.id == id; });
+    REQUIRE(game != targets.end()); REQUIRE(Inspect(paths, *game).prepared);
+  }
+  PrepareLibrary(paths, *dash, targets);
+  CHECK(InspectLibrary(*dash, targets).empty());
 }

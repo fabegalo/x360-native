@@ -46,6 +46,25 @@ Environment CheckEnvironment(const fs::path& root) {
   r.description += r.writable ? "Write / gravação: OK\r\n" : "Write / gravação: denied / negada\r\n";
   PWSTR program_files = nullptr;
   if (SUCCEEDED(SHGetKnownFolderPath(FOLDERID_ProgramFilesX86, 0, nullptr, &program_files))) {
+    // C++ tools alone do not include the Windows SDK. Check the headers,
+    // libraries and resource compiler used by the native title build.
+    bool windows_sdk = false;
+    auto kits = fs::path(program_files) / "Windows Kits/10";
+    wchar_t registered[32768]{}; DWORD length = sizeof(registered);
+    if (RegGetValueW(HKEY_LOCAL_MACHINE, L"SOFTWARE\\Microsoft\\Windows Kits\\Installed Roots", L"KitsRoot10",
+                    RRF_RT_REG_SZ | RRF_SUBKEY_WOW6432KEY, nullptr, registered, &length) == ERROR_SUCCESS)
+      kits = registered;
+    if (fs::is_directory(kits / "Include")) {
+      for (const auto& version : fs::directory_iterator(kits / "Include")) {
+        auto id = version.path().filename();
+        if (fs::is_regular_file(version.path() / "um/Windows.h") &&
+            fs::is_regular_file(version.path() / "um/d3d12.h") &&
+            fs::is_regular_file(kits / "Lib" / id / "um/x64/kernel32.lib") &&
+            fs::is_regular_file(kits / "Lib" / id / "ucrt/x64/ucrt.lib") &&
+            fs::is_regular_file(kits / "bin" / id / "x64/rc.exe")) { windows_sdk = true; break; }
+      }
+    }
+    r.description += windows_sdk ? "Windows SDK: OK\r\n" : "Windows SDK: installation required / instalação necessária\r\n";
     auto vswhere = fs::path(program_files) / "Microsoft Visual Studio/Installer/vswhere.exe";
     CoTaskMemFree(program_files);
     if (fs::is_regular_file(vswhere) && r.writable) {
@@ -56,7 +75,7 @@ Environment CheckEnvironment(const fs::path& root) {
       spec.no_console = true; spec.timeout = std::chrono::seconds(10);
       auto result = RunProcess(spec);
       std::ifstream text(out); std::string first; std::getline(text, first);
-      r.msvc = result.launched && result.exit_code == 0 && !first.empty();
+      r.msvc = windows_sdk && result.launched && result.exit_code == 0 && !first.empty();
       text.close(); fs::remove(out, ec); fs::remove(spec.stderr_file, ec);
     }
   }

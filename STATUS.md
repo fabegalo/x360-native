@@ -9,7 +9,7 @@ Preparação gráfica Windows (§§15–17): candidato ZIP local com aplicativo,
 supervisor, CRT e fontes permitidas; ferramentas fixadas obtidas pelo assistente
 com consentimento. Importa os conjuntos extraídos completos da 17559 e Castle
 Crashers, preserva originais e registra o jogo no catálogo da My Games original.
-15 testes / 61 asserções do modelo e 19 / 117 de processo/sessão passam;
+16 testes / 64 asserções do modelo e 19 / 117 de processo/sessão passam;
 iruka L1–L5 permanece aprovado. Corrigida a execução com caminhos Unicode por
 manifesto UTF-8 do runtime. Novo ciclo manual após esse incremento, primeira
 preparação completa em máquina limpa, perfis, save/load e atualização/rollback

@@ -1,5 +1,6 @@
 #include "catalog.h"
 #include "sha256.h"
+#include <chrono>
 #include <fstream>
 #include <stdexcept>
 #ifdef _WIN32
@@ -49,10 +50,15 @@ void InitializeEnvironment(const fs::path& payload, const fs::path& destination)
     fs::create_directories(file.output.parent_path());
     auto staging = file.output; staging += ".x360n-tmp";
     if (fs::exists(staging)) {
+      if (fs::is_symlink(staging) || !IsWithin(staging, destination))
+        throw std::runtime_error("Cópia temporária redirecionada; arquivos preservados.");
       auto previous = DigestFile(staging);
-      if (!previous || previous->sha256 != file.hash)
-        throw std::runtime_error("Cópia interrompida: preserve a pasta e selecione um novo ambiente.");
-    } else fs::copy_file(file.source, staging);
+      if (!previous || previous->sha256 != file.hash) {
+        auto interrupted = staging; interrupted += ".interrupted-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count());
+        fs::rename(staging, interrupted);
+      }
+    }
+    if (!fs::exists(staging)) fs::copy_file(file.source, staging);
     auto copied = DigestFile(staging);
     if (!copied || copied->sha256 != file.hash) throw std::runtime_error("Falha ao verificar a cópia do pacote.");
 #ifdef _WIN32
