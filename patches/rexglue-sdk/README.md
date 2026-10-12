@@ -225,3 +225,20 @@ WIN_UpdateWindowICCProfile -> free of the already-freed ICC filename. The parent
 probe and focus probe now reuse the supervisor's existing stack capture. Before:
 child-focus-debug.log (one failed assertion, teardown crash); after: 37 assertions
 passed in window-destroy-focus-after.log. Final sdkcheck: 31/31 passed, no skips.
+
+## System presentation and audio shutdown (0024–0025)
+
+0024 retains the completed guest image described by VdPersistDisplay instead of
+allocating a dummy buffer. The selected profile may present that image with a
+16-bit RGB LUT on the existing graphics worker, paced by guest vblank. No guest
+completion counters are synthesized. The 17559 profile implements the verified
+XAM loader LUT loop in HLE and calls its already recompiled matching D3D routines;
+it does not execute the original XAM module. Other versions do not inherit it.
+D3D12 exercised; Vulkan wiring is unvalidated. Ownership is in-process only.
+
+0025 drains already submitted audio through the existing SDL conversion/mix and
+flushes the stream before closing the device. No amplitude ramp is introduced.
+A two-second failure bound logs a failed drain, never completion. The focused
+test failed before (0/64 frames consumed), passed after (64/64); silent samples
+use the configured endpoint because this SDL build disables the dummy backend.
+Missing endpoint is an explicit skip. See docs/dashboard.md §0.21 for live limits.

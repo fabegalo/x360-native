@@ -1,0 +1,64 @@
+diff --git a/src/audio/sdl/sdl_audio_driver.cpp b/src/audio/sdl/sdl_audio_driver.cpp
+index e57feea..c2f99f2 100644
+--- a/src/audio/sdl/sdl_audio_driver.cpp
++++ b/src/audio/sdl/sdl_audio_driver.cpp
+@@ -140,15 +140,51 @@ void SDLAudioDriver::SubmitFrame(uint32_t frame_ptr) {
+ 
+ void SDLAudioDriver::Shutdown() {
+   if (sdl_stream_) {
+-    size_t pending_frames;
+-    {
+-      std::lock_guard lock(frames_mutex_);
+-      pending_frames = frames_queued_.size();
++    // The producer is stopped (or UnregisterClient holds the client lock).
++    // Detach the pull callback before draining: otherwise it keeps adding
++    // silence when the guest queue empties, so the stream can never drain.
++    // SDL serializes this change with any callback already in progress.
++    if (!SDL_SetAudioStreamGetCallback(sdl_stream_, nullptr, nullptr)) {
++      REXAPU_WARN("audio shutdown: could not detach callback: {}", SDL_GetError());
++    } else {
++      size_t pending_frames;
++      {
++        std::lock_guard lock(frames_mutex_);
++        pending_frames = frames_queued_.size();
++      }
++      const int output_bytes = int(channel_samples_ * sdl_device_channels_ * sizeof(float));
++      const int available_before = SDL_GetAudioStreamAvailable(sdl_stream_);
++      // Reuse the normal conversion/mix and semaphore completion for every
++      // frame already submitted by the guest. No amplitude ramp is added.
++      if (pending_frames)
++        SDLCallback(this, sdl_stream_, int(pending_frames) * output_bytes, 0);
++      bool drained = SDL_FlushAudioStream(sdl_stream_);
++      const uint64_t deadline = SDL_GetTicks() + 2000;
++      while (drained) {
++        const int queued = SDL_GetAudioStreamQueued(sdl_stream_);
++        const int available = SDL_GetAudioStreamAvailable(sdl_stream_);
++        if (queued < 0 || available < 0) { drained = false; break; }
++        if (!queued && !available) break;
++        if (SDL_GetTicks() >= deadline) { drained = false; break; }
++        SDL_Delay(1);
++      }
++      if (drained) {
++        // Empty stream means handed to the device, not necessarily played.
++        // Let the current device buffer finish before closing its endpoint.
++        SDL_AudioSpec format{};
++        int device_frames = 0;
++        if (SDL_GetAudioDeviceFormat(SDL_GetAudioStreamDevice(sdl_stream_),
++                                    &format, &device_frames) && format.freq > 0 && device_frames > 0)
++          SDL_Delay(uint32_t((uint64_t(device_frames) * 1000 + format.freq - 1) / format.freq));
++        REXAPU_INFO("audio shutdown: drained {} guest frames and {} queued output bytes",
++                    pending_frames, available_before);
++      } else {
++        // The bound only prevents a hung/lost device blocking shutdown forever.
++        // It is explicitly a failed drain, never reported as completion.
++        REXAPU_WARN("audio shutdown: drain failed/timed out; remaining audio discarded: {}",
++                    SDL_GetError());
++      }
+     }
+-    // SDL calls must be outside frames_mutex_: the audio callback takes it
+-    // while SDL owns its stream lock.
+-    REXAPU_INFO("audio shutdown: {} guest frames pending; {} output bytes available",
+-                pending_frames, SDL_GetAudioStreamAvailable(sdl_stream_));
+     SDL_DestroyAudioStream(sdl_stream_);
+     sdl_stream_ = nullptr;
+   }

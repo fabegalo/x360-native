@@ -77,6 +77,8 @@ target_sources(x360n_sdk_runtime_checks PRIVATE sdkcheck/storage_notification_te
 target_sources(x360n_sdk_runtime_checks PRIVATE sdkcheck/aggregate_content_test.cpp)
 target_sources(x360n_sdk_runtime_checks PRIVATE sdkcheck/title_return_test.cpp
     ../titles/common/launch_handoff.cpp)
+target_sources(x360n_sdk_runtime_checks PRIVATE sdkcheck/persist_display_test.cpp)
+target_sources(x360n_sdk_runtime_checks PRIVATE sdkcheck/audio_drain_test.cpp)
 target_sources(x360n_sdk_runtime_checks PRIVATE sdkcheck/dashboard_uri_test.cpp
     ../titles/dash_17559/src/launch_uri.cpp)
 target_sources(x360n_sdk_runtime_checks PRIVATE
@@ -85,7 +87,9 @@ target_sources(x360n_sdk_runtime_checks PRIVATE
     ${PROJECT_SOURCE_DIR}/titles/dash_17559/src/unresolved_imports.cpp)
 target_sources(x360n_sdk_runtime_checks PRIVATE sdkcheck/dashboard_6717_curl_bind_test.cpp
     ${PROJECT_SOURCE_DIR}/titles/dash_6717/src/curl_bind.cpp)
-target_link_libraries(x360n_sdk_runtime_checks PRIVATE rexruntime rexcodegen x360n_core Catch2::Catch2WithMain)
+# Exercise the SDL driver and its SDL instance in the same binary; a second SDL
+# instance in the test cannot configure/pause devices owned inside rexruntime.
+target_link_libraries(x360n_sdk_runtime_checks PRIVATE rexruntime rexcodegen rexaudio x360n_core Catch2::Catch2WithMain)
 target_compile_options(x360n_sdk_runtime_checks PRIVATE
     -UTRACY_ENABLE -UREXGLUE_ENABLE_PROFILING -UREXGLUE_ENABLE_PERF_COUNTERS)
 target_compile_definitions(x360n_sdk_runtime_checks PRIVATE

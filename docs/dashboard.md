@@ -1146,3 +1146,50 @@ remoção, ordem, metadados e rejeição de XEX sem execution info. Regressão i
 diagnóstico; não houve nova validação visual por captura. A instrumentação de
 VdPersistDisplay foi retirada do build. Os avisos de biblioteca bootanim ainda
 carregada/liberação de heap no teardown já ocorriam na tentativa anterior a 0022.
+
+### 0.21 Imagem persistida e drenagem de áudio (2026-10-12)
+
+0024 atende o descritor real de VdPersistDisplay e retém sua alocação convidada;
+remove a alocação fictícia de 64 bytes. Após a preparação original/sinal 0x200,
+o perfil 17559 implementa em HLE o loop XAM 816C9424–816C94C4: 33 LUTs RGB16,
+fator (32-step)/32, apresentadas pelo backend existente e cadenciadas pelo vblank
+convidado. Executa as rotinas D3D já recompiladas 92875B80 (cabeçalho), 921A8E60
+(gamma atual) e 921B3978 (conversão da LUT), correspondentes às do XAM. Não é
+execução do módulo XAM completo nem fade por opacidade/temporizador do host.
+Nenhum contador de conclusão do convidado é forçado. Falha de apresentação
+impede o lançamento; não retorna sucesso para encobri-la.
+
+Escopo: 17559/descritor 28280106, D3D12 no Windows x86-64; outras versões não
+herdam a sequência. Vulkan não foi exercitado. A imagem permanece no processo
+atual até o ponto preto; não há transferência geral de framebuffer entre
+processos. Recuperação da interface após falha intermediária permanece limitada.
+
+Execução 20261012T102117Z-session-0-dash_17559: intro termina e preserva imagem;
+My Games prepara Castle Crashers às 07:21:40.546, preserva FE272000/1280×720,
+e conclui as 33 apresentações às 07:21:41.125 antes de desmontar.
+20261012T102143Z-session-1-castle_crashers recebe 1020 bytes e pede retorno
+XamLoaderLaunchTitle(NULL,0x100) às 07:22:11.494; exit 0, zero stubs/erros/críticas.
+20261012T102213Z-session-2-dash_17559 importa o contexto e retorna sem intro.
+Usuário: “parece que melhorou”; ainda não é aprovação integral da fidelidade.
+
+O diagnóstico mostrou descarte de 8 frames convidados/1792 bytes após a intro
+e 256/1536 bytes de saída nas trocas. 0025 desliga o callback de preenchimento,
+processa a fila pelo conversor/mix normal, faz flush e aguarda esvaziamento antes
+de fechar o stream. Aguarda também um período do buffer do dispositivo; isso não
+é confirmação física de reprodução. Limite de 2 s registra falha, não sucesso.
+Sem fade de áudio. Teste silencioso: antes 0/64 frames consumidos; depois 64/64.
+Testes focados: 164 asserções/6 casos. Regressões: 35/35 sdkcheck, 40/40 supervisor.
+Logs em .local/logs/audio-drain-{before,focused}.log e transition-sdk-regressions.log.
+
+Regressão iruka 20261012T103413Z-iruka-transition-0025: 30207 ms até timeout
+diagnóstico, zero stubs/mensagens não implementadas/erros/críticas. Sem nova
+captura visual L4–L5. Os três títulos foram recompilados sequencialmente; o
+processo da nova dashboard carrega rexruntimerd.dll/rexgpu-xenosrd.dll da pasta
+.local/build/titles/dash_17559. Nenhum recurso proprietário foi alterado.
+
+Nova execução com 0025: 20261012T103500Z-session-0-dash_17559 drena 8 frames
+ao terminar a intro; às 07:35:33.164 termina as 33 apresentações e atende o
+pedido original de lançamento. Às 07:35:33.478 drena 1536 bytes pendentes, sem
+timeout. 20261012T103535Z-session-1-castle_crashers importa 1020 bytes e inicializa
+GPU/áudio/controle. Retorno desta última execução e percepção do estalo ainda
+aguardam teste manual; o ciclo anterior com 0024 está confirmado acima.

@@ -19,6 +19,10 @@ Retorno original agora confirmado: Castle Crashers chamou XamLoaderLaunchTitle(N
 31/31 sdkcheck e 40/40 x360n passaram. Iruka rodou 30 s sem erros/stubs, encerrado
 por timeout (sem nova captura visual). A continuidade visual entre títulos ainda
 tem corte relatado pelo usuário; o ciclo funcional não aprova essa fidelidade.
+Incremento §0.21: preservação da imagem e sequência de gamma da 17559 atendidas
+pelo perfil; usuário relatou melhora e ciclo repetiu sem intro na volta. Áudio
+pendente agora é drenado antes de fechar o stream; validação auditiva em curso.
+35/35 sdkcheck e 40/40 supervisor passam. Fidelidade integral ainda não aprovada.
 Checklist oficial de cobertura: `CHECKLIST_FUNCIONAL_x360-native.md`.
 Detalhes e limites: `docs/dashboard.md` §0.19. Sem XAM original executado e sem
 compartilhar silenciosamente recursos da 17559 com outras versões.

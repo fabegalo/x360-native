@@ -37,6 +37,11 @@ buffer sincronizada. Ciclo 17559 → Castle Crashers → 17559 sem intro repetid
 32/32 sdkcheck e 40/40 x360n passaram. **Corte e estalo de áudio continuam pendentes**:
 o pedido VdPersistDisplay agora chega, mas sua preservação e a apresentação do XAM
 ainda não são atendidas. Não marcar fidelidade da transição como concluída.
+Incremento §0.21: imagem convidada preservada e sequência de gamma do XAM 17559
+implementada no perfil, usando rotinas D3D originais recompiladas. Ciclo repetido
+sem intro no retorno; usuário relatou “parece que melhorou”, sem aprovar ainda
+fidelidade integral. Drenagem do áudio corrigida após reproduzir descarte de
+frames; 35/35 sdkcheck e 40/40 supervisor passam. Validação auditiva final pendente.
 Os itens gerais abaixo continuam pendentes quando a evidência cobre só este par.
 
 ## 1. Inicialização e seleção da dashboard — P0
@@ -134,7 +139,7 @@ Nome, identificador e estado de entrada precisam permanecer coerentes; as implem
 - [ ] Compartilhar limpeza de recursos quando apropriado, sem perder a identidade dos eventos.
 - [ ] Testar retorno original, fechamento de janela, saída normal e falha separadamente.
 - [ ] Repetir vários ciclos sem processos órfãos, pedidos antigos, controles presos ou crescimento indevido de recursos.
-- [ ] Preservar a transição visual original entre dashboard e jogo; a janela persistente atual ainda apresenta corte seco relatado pelo usuário.
+- [ ] Preservar a transição visual original entre dashboard e jogo; há melhora relatada após preservar a imagem e atender a sequência do XAM 17559 (§0.21), ainda sem aprovação integral.
 
 Diagnóstico da transição: a execução de 06:09 registrou callbacks originais de
 encerramento que o runtime armazena mas não executa; VdPersistDisplay apareceu

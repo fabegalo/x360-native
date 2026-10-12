@@ -27,6 +27,7 @@ set(DASH17559_SOURCES
     src/typeface.cpp
     src/launch_uri.cpp
     src/boot_intro.cpp
+    src/display_transition.cpp
 )
 
 if(WIN32)

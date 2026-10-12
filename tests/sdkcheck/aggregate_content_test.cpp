@@ -199,8 +199,22 @@ TEST_CASE("Aggregate all-types query enumerates installed titles with their real
   write32(0x708, 0x10203040); write32(0x70C, 0x12345678);
   std::ofstream(package / "default.xex", std::ios::binary | std::ios::trunc)
       .write(reinterpret_cast<const char*>(target.data()), target.size());
-  launch(0);  // successful launch terminates the calling guest thread
-  CHECK(preparation_calls == 1);
+  unsigned transition_calls = 0;
+  xam->launch_display_transition = [&] {
+    ++transition_calls;
+    CHECK(xam->launch_request_internal_flags.load() == 0x200);
+    CHECK(xam->loader_data().launch_path.empty());
+    CHECK_FALSE(rt.kernel_state()->is_terminating_title());
+    return X_RESULT_FROM_WIN32(1460);
+  };
+  CHECK(launch(0) == X_RESULT_FROM_WIN32(1460));
+  CHECK(transition_calls == 1);
+  CHECK(xam->loader_data().launch_path.empty());
+  CHECK(rt.kernel_state()->content_manager()->GetOpenPackagePath("XSYSLAUNCH").empty());
+  xam->launch_display_transition = [&] { ++transition_calls; return X_ERROR_SUCCESS; };
+  launch(0);  // only a completed transition may terminate the calling guest thread
+  CHECK(transition_calls == 2);
+  CHECK(preparation_calls == 2);
   CHECK(launch_preparation == std::array<uint32_t, 4>{0x12345678, 0x10203040, 1, 0});
   CHECK(preparation_before_shutdown);
   CHECK(xam->launch_request_internal_flags.load() == 0x200);
