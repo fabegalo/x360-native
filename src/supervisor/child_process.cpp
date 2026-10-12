@@ -290,11 +290,16 @@ ProcessResult RunProcess(const ProcessSpec& spec) {
     }
     WaitForSingleObject(process.h, 10000);
   } else {
-    DWORD wait_ms = spec.timeout.count() > 0 ? DWORD(spec.timeout.count()) : INFINITE;
-    if (WaitForSingleObject(process.h, wait_ms) == WAIT_TIMEOUT) {
-      r.timed_out = true;
-      TerminateJobObject(job.h, 1);
-      WaitForSingleObject(process.h, 10000);
+    const auto deadline = spec.timeout.count() > 0 ? start + spec.timeout
+        : std::chrono::steady_clock::time_point::max();
+    while (WaitForSingleObject(process.h, 100) == WAIT_TIMEOUT) {
+      r.cancelled = spec.should_cancel && spec.should_cancel();
+      r.timed_out = !r.cancelled && std::chrono::steady_clock::now() >= deadline;
+      if (r.cancelled || r.timed_out) {
+        TerminateJobObject(job.h, 1);
+        WaitForSingleObject(process.h, 10000);
+        break;
+      }
     }
   }
   r.duration = std::chrono::duration_cast<std::chrono::milliseconds>(

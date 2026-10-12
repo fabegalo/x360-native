@@ -1,0 +1,83 @@
+diff --git a/src/ui/window_sdl.cpp b/src/ui/window_sdl.cpp
+index 2251429..06a91dc 100644
+--- a/src/ui/window_sdl.cpp
++++ b/src/ui/window_sdl.cpp
+@@ -40,6 +40,8 @@
+ #include <rex/ui/surface_gnulinux.h>
+ #endif
+ 
++REXCVAR_DEFINE_UINT64(parent_window, 0, "UI", "Optional Windows parent HWND for an embedded title surface");
++
+ namespace rex::ui {
+ 
+ namespace {
+@@ -143,6 +145,17 @@ bool WindowSDL::OpenImpl() {
+ #else
+   int initial_width = int(SizeToPhysical(GetDesiredLogicalWidth()));
+   int initial_height = int(SizeToPhysical(GetDesiredLogicalHeight()));
++#endif
++#if REX_PLATFORM_WIN32
++  HWND parent = reinterpret_cast<HWND>(uintptr_t(REXCVAR_GET(parent_window)));
++  if (parent) {
++    if (!IsWindow(parent)) {
++      REXLOG_ERROR("parent_window does not identify a live window");
++      return false;
++    }
++    // Match DPI awareness before creating either HWND or swapchain.
++    SetThreadDpiAwarenessContext(GetWindowDpiAwarenessContext(parent));
++  }
+ #endif
+   sdl_window_ = SDL_CreateWindow(GetTitle().c_str(), initial_width, initial_height, flags);
+   if (!sdl_window_) {
+@@ -170,7 +183,7 @@ bool WindowSDL::OpenImpl() {
+     }
+   }
+ 
+-  if (IsFullscreen()) {
++  if (IsFullscreen() && !REXCVAR_GET(parent_window)) {
+     // Borderless desktop fullscreen (a NULL display mode is SDL3's default).
+     SDL_SetWindowFullscreen(sdl_window_, true);
+   }
+@@ -183,7 +196,34 @@ bool WindowSDL::OpenImpl() {
+   // desired state so a reopened window comes back with the state it had.
+   ApplyTextInputActiveNow();
+   ApplyCursorVisibilityNow();
++#if REX_PLATFORM_WIN32
++  if (parent) {
++    auto child = static_cast<HWND>(GetNativeWindowHandle());
++    auto style = GetWindowLongPtrW(child, GWL_STYLE);
++    SetWindowLongPtrW(child, GWL_STYLE,
++        (style & ~(WS_POPUP | WS_OVERLAPPEDWINDOW)) | WS_CHILD | WS_CLIPSIBLINGS);
++    SetLastError(0);
++    const auto previous = SetParent(child, parent);
++    if (!previous && GetLastError() != 0) {
++      REXLOG_ERROR("SetParent failed: {}", GetLastError());
++      DestroySDLWindow();
++      return false;
++    }
++    RECT rect{}; GetClientRect(parent, &rect);
++    SetWindowPos(child, nullptr, 0, 0, rect.right, rect.bottom,
++        SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
++    REXLOG_INFO("parent_window attached: parent={}, child={}",
++        uintptr_t(parent), uintptr_t(child));
++  }
++#endif
+   SDL_ShowWindow(sdl_window_);
++#if REX_PLATFORM_WIN32
++  if (parent) {
++    // Publish only after showing: SetFocus cannot target a hidden child.
++    PostMessageW(parent, WM_APP + 0x360,
++        reinterpret_cast<WPARAM>(GetNativeWindowHandle()), 0);
++  }
++#endif
+ 
+   // Actualize state for the common Window code. Listener dispatch is handled
+   // by Window::Open after OpenImpl returns; these only record initial state.
+@@ -292,6 +332,7 @@ uint32_t WindowSDL::GetLatestDpiImpl() const {
+ }
+ 
+ void WindowSDL::ApplyNewFullscreen() {
++  if (REXCVAR_GET(parent_window)) return;  // The persistent host owns its frame.
+   if (!sdl_window_) {
+     return;
+   }

@@ -1,5 +1,5 @@
 diff --git a/src/kernel/xam/xam_content.cpp b/src/kernel/xam/xam_content.cpp
-index c16f4a3..7c519ec 100644
+index c16f4a3..5445db1 100644
 --- a/src/kernel/xam/xam_content.cpp
 +++ b/src/kernel/xam/xam_content.cpp
 @@ -11,6 +11,8 @@
@@ -11,11 +11,10 @@ index c16f4a3..7c519ec 100644
  #include <rex/logging.h>
  #include <rex/math.h>
  #include <rex/hook.h>
-@@ -47,6 +49,47 @@ u32 XamContentGetAttributesInternal_entry(mapped_void content, mapped_void attri
-   return result;
+@@ -433,6 +435,46 @@ u32 XamContentDeleteInternal_entry(mapped_void content_data_ptr, mapped_void ove
+   }
  }
  
-+
 +// Original XAM 17559 0x294 -> 816EFED0: open the aggregate package under
 +// XSYSLAUNCH, then pass the requested image and flags to the loader.
 +u32 XamContentLaunchImageInternalEx_entry(mapped_void content, mapped_string image, u32 flags) {
@@ -56,10 +55,10 @@ index c16f4a3..7c519ec 100644
 +  return X_ERROR_SUCCESS;  // TerminateTitle does not return on a guest thread.
 +}
 +
- u32 XamContentGetLicenseMask_entry(mapped_u32 mask_ptr, mapped_void overlapped_ptr) {
-   // Each bit in the mask represents a granted license. Available licenses
-   // seems to vary from game to game, but most appear to use bit 0 to indicate
-@@ -473,7 +516,7 @@ REX_EXPORT_STUB(__imp__XamContentIsGameInstalledToHDD);
+ }  // namespace xam
+ }  // namespace kernel
+ }  // namespace rex
+@@ -473,7 +515,7 @@ REX_EXPORT_STUB(__imp__XamContentIsGameInstalledToHDD);
  REX_EXPORT_STUB(__imp__XamContentLaunchImage);
  REX_EXPORT_STUB(__imp__XamContentLaunchImageFromFileInternal);
  REX_EXPORT_STUB(__imp__XamContentLaunchImageInternal);

@@ -151,7 +151,9 @@ OnGuestThreadExit, preserva flags/launch data e resolve o destino por caminho
 e SHA-256 contra os perfis permitidos no manifesto da dashboard. Não segue
 crash/timeout. Saída normal do jogo ou fechamento explícito da janela retorna
 ao perfil inicial. Ciclo 17559 → Castle Crashers → 17559 confirmado pelo usuário
-(docs/dashboard.md §0.17). Ainda há janelas separadas.
+(docs/dashboard.md §0.18). A sessão mantém um frame Win32 e superfícies filhas SDL
+reais por título; --separate-windows preserva o diagnóstico. Fechar o frame encerra
+a plataforma. GuestExit ainda não prova retorno pedido pelo Guide.
 
 Pendências: XamLoaderLaunchTitle(NULL), Guide original e perfis locais persistentes.
 Os user_data_root anteriores foram preservados separadamente (sem migrar saves).

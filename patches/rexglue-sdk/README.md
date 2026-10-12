@@ -188,3 +188,21 @@ Opens XSYSLAUNCH, checks the requested image and preserves loader data before
 TerminateTitle. Missing files and unsupported modes fail; no license is granted.
 Before: 4/56 assertions fail; after: 56/56. Evidence: 0016-launch-{before,after}.log.
 The host session selects an existing AOT profile by path and exact XEX hash.
+
+## Persistent window and native child focus (0017–0018)
+
+0017 embeds the real SDL/D3D12 title surface in an optional Windows parent HWND.
+Default zero keeps standalone behavior; embedded fullscreen belongs to the host.
+Attachment is announced after showing the child, so host focus does not target a
+hidden window. The existing shutdown probe checks two consecutive child surfaces
+and survival of the same parent (26 assertions).
+
+0018 fixes SDL WIN_UpdateFocus for WS_CHILD: it requires GetFocus()==child and
+GetForegroundWindow()==GetAncestor(child,GA_ROOT). The old top-level comparison
+never recognized embedded focus. SDL also drops joystick events without keyboard
+focus (SDL_PrivateJoystickShouldIgnoreEvent); this explained both input failures.
+The user confirmed keyboard/controller and the original My Games cycle after the
+fix. The integration probe tests real SDK focus listeners (gain/loss/regain), but
+skips when Windows denies foreground activation; that test was skipped here, not
+counted as a validated focus test. See child-focus-sdk-final.log and dashboard §0.18.
+No background-input override, injected input, or replacement Xbox UI.

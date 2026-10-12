@@ -24,6 +24,7 @@
 #include <vector>
 
 #include "synthetic_xex.h"
+#include "session_window.h"
 
 using namespace x360n::test;
 
@@ -119,4 +120,38 @@ TEST_CASE("ReXApp shuts down cleanly after a failed Runtime::Setup", "[sdk][app]
   CHECK(Contains(r.log, "Runtime setup failed"));
   CHECK_FALSE(Contains(r.log, "Execution complete"));
   CHECK(r.exit_code == EXIT_FAILURE);  // OnInitialize failed; no unhandled exception
+}
+
+TEST_CASE("title surfaces reuse a persistent host window across guest exits", "[sdk][app][parent-window]") {
+  x360n::SessionWindow host(false);
+  const auto handle = host.handle();
+  for (unsigned i = 0; i < 2; ++i) {
+    Workdir w("x360n_parent_window", std::to_string(i).c_str());
+    PrepareGameRoot(w);
+    const auto r = RunProbe(w, L"--gpu_plugin=xenos --parent_window=" + std::to_wstring(handle));
+    REQUIRE(r.finished);
+    CHECK(r.exit_code == 0);
+    CHECK(Contains(r.log, "parent_window attached:"));
+    CHECK(Contains(r.log, "Execution complete"));
+    CHECK(IsWindow(reinterpret_cast<HWND>(handle)));
+    CHECK_FALSE(host.closed());
+    CHECK(host.attached_count() == i + 1);
+  }
+}
+
+TEST_CASE("embedded SDL surface recognizes actual keyboard focus and releases it", "[sdk][app][child-focus]") {
+  x360n::SessionWindow host;
+  Workdir w("x360n_child_focus", "native");
+  PrepareGameRoot(w);
+  const auto r = RunProbe(w, L"--x360n_probe_child_focus=true --parent_window=" +
+                            std::to_wstring(host.handle()));
+  INFO(r.log);
+  REQUIRE(r.finished);
+  CHECK(r.exit_code == 0);
+  if (Contains(r.log, "child-focus foreground root=false")) {
+    SKIP("Windows denied foreground activation; focus integration requires an interactive foreground session");
+  }
+  CHECK(Contains(r.log, "child-focus gain: native=true, sdk=true"));
+  CHECK(Contains(r.log, "child-focus loss: native=true, sdk=true"));
+  CHECK(Contains(r.log, "child-focus regain: native=true, sdk=true"));
 }

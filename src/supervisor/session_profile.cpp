@@ -30,7 +30,8 @@ SessionProfile LoadSessionProfile(const ProjectPaths& paths, const std::filesyst
     for (const auto& value : *array) {
       auto arg = text(value);
       if (arg.starts_with("--game_data_root") || arg.starts_with("--user_data_root") ||
-          arg.starts_with("--x360n_handoff") || arg.starts_with("--log_file"))
+          arg.starts_with("--x360n_handoff") || arg.starts_with("--log_file") ||
+          arg.starts_with("--parent_window"))
         throw std::runtime_error("reserved session argument: " + arg);
       p.args.push_back(arg);
     }

@@ -985,3 +985,37 @@ O mutex do escritor evita disputa entre saída do guest e fechamento da janela.
 
 Regressão iruka com 0016: 20261012T080209Z-iruka-launch-0016, 30 s,
 0 stubs/erros/críticas, encerrada por timeout; sem nova aferição visual.
+
+## 0.18. Janela persistente e regressão de entrada (2026-10-12)
+
+O supervisor mantém um HWND e hospeda as superfícies SDL/D3D12 reais dos títulos
+(patches 0017–0018); processos continuam separados. Inicialmente teclado e controle
+pararam: WIN_UpdateFocus comparava o HWND filho com GetForegroundWindow, que aponta
+para o supervisor. SDL também descarta joystick sem foco de teclado. Corrigido com
+foco real no filho e raiz ativa; a publicação do filho ocorre após ShowWindow.
+Usuário confirmou os dois dispositivos e o ciclo na mesma janela.
+
+Evidência: 20261012T082937Z-session-0-dash_17559 recebe foco e solicita
+XSYSLAUNCH:\default.xex por XamContentLaunchImageInternalEx;
+20261012T083006Z-session-1-castle_crashers importa 1020 bytes e sai em 35217 ms
+com código 0, 0 stubs/erros/críticas; 20261012T083043Z-session-2-dash_17559 retorna.
+Os três registram parent=3868796, com superfícies filhas distintas.
+Esse retorno foi GuestExit: ainda não comprova comando Xbox Home/Guide.
+Fechar a janela principal cancela a plataforma; --separate-windows mantém diagnóstico.
+
+Validação: 39/39 testes x360n no host; 28 sdkcheck passaram e 1 foi ignorado porque
+o Windows negou ativação de foco ao probe. Não tratar esse skip como teste de foco
+aprovado. A confirmação de entrada no alvo veio do usuário e dos eventos reais.
+A execução restrita do teste de handoff falhou na escrita/rename temporário; no
+host passou. Diagnósticos temporários de perfil foram preservados em .local/tmp
+e retirados do título.
+
+Perfil: Settings chamou XamShowGamerCardUI às 05:32:30.883, ainda stub. XAM 17559
+original 816C40F0 despacha app FE, mensagem 21008, bloco de 544 bytes. O SDK não
+implementa esse handler. Não houve XamShowSigninUI/UIp nessa tentativa; cartão de
+perfil não é seleção de usuário. UserProfile ainda fixa User/XUID/state=1; não há
+entrada/saída ou persistência real validada. Nenhuma conta/save foi alterada.
+
+Regressão iruka 0018: 20261012T083614Z-iruka-child-focus-0018, 30173 ms,
+0 stubs/erros/críticas, saída por timeout. Cobertura de processo/log; sem nova
+captura visual L4–L5. Dashboard recompilada sem os diagnósticos temporários.

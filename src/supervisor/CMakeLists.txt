@@ -7,6 +7,7 @@ add_library(x360n_core STATIC
     child_process.cpp
     report.cpp
     session_profile.cpp
+    session_window.cpp
 )
 target_include_directories(x360n_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_include_directories(x360n_core SYSTEM PUBLIC
@@ -15,7 +16,7 @@ target_include_directories(x360n_core SYSTEM PUBLIC
 target_link_libraries(x360n_core PUBLIC fmt::fmt PRIVATE tomlplusplus)
 if(WIN32)
     # dbghelp: stack walk of a crashed child (x360n run --crash-stack); part of Windows.
-    target_link_libraries(x360n_core PUBLIC dbghelp)
+    target_link_libraries(x360n_core PUBLIC dbghelp user32 gdi32)
 endif()
 target_compile_options(x360n_core PUBLIC -Wall -Wextra)
 target_compile_definitions(x360n_core PUBLIC

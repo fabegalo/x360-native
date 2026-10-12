@@ -13,8 +13,8 @@ Castle Crashers executou 45 s sem erro/crash; duas chamadas a AchievementsUI
 continuam stub. My Games agora exibe Castle Crashers 0.0.1.3 (confirmação do usuário);
 o ciclo dashboard → Castle Crashers → dashboard foi executado e confirmado pelo
 usuário (§0.17). O patch 0016 e o supervisor seguem o pedido original, com hash
-do XEX e launch data preservados. Janelas ainda separadas; Guide e perfis pendentes.
-Detalhes e limites: `docs/dashboard.md` §0.17. Sem XAM original executado e sem
+do XEX e launch data preservados. Janela principal persistente e entrada confirmadas após corrigir foco SDL; Guide e perfis pendentes.
+Detalhes e limites: `docs/dashboard.md` §0.18. Sem XAM original executado e sem
 compartilhar silenciosamente recursos da 17559 com outras versões.
 Segundo perfil: Retail 6717 apresenta quadros reais (blade "Xbox 360"), troca para
 a blade Mídia e move o destaque com entrada roteada; **nenhum texto aparece**:
@@ -24,7 +24,7 @@ montado; `docs/dashboard.md` §0.15.
 
 | Item | Evidência |
 |---|---|
-| ReXGlue v0.10.0 (`f5337cdc`) compila no Windows com LLVM 22.1.8 + MSVC 14.44, modo submódulo, com 16 patches locais | builds dos alvos afetados com saída 0; patches em `patches/rexglue-sdk/`, verificados no configure e em todo build |
+| ReXGlue v0.10.0 (`f5337cdc`) compila no Windows com LLVM 22.1.8 + MSVC 14.44, modo submódulo, com 18 patches locais | builds dos alvos afetados com saída 0; patches em `patches/rexglue-sdk/`, verificados no configure e em todo build |
 | Suíte PPC do SDK (166 arquivos `.s`) | 1458/1458 casos |
 | Testes unitários do SDK | 208 aprovados, 4 `SKIP` upstream, 1 falha (bug do teste, abaixo) |
 | Patches locais do SDK: 0001 tabela de funções no heap XEX certo; 0002 falha de setup sem desmontagem prematura; 0003 import com slot e thunk em registros diferentes; 0004 encerramento com a janela ainda viva; 0005 bit 0 de `KeGetImagePageTableEntry`; 0006 idioma e fallback UTF-16; 0007 despacho real de DPC | `sdkcheck.*`: testes antes/depois em `patches/rexglue-sdk/README.md`; o 0004 e o caminho do 0002 testados num `ReXApp` real (`tests/shutdown_probe`); 0006 tem 108 asserções em 2 casos |

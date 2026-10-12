@@ -1,0 +1,18 @@
+diff --git a/thirdparty/sdl3/src/video/windows/SDL_windowsevents.c b/thirdparty/sdl3/src/video/windows/SDL_windowsevents.c
+index ffcccfe..46bf0ea 100644
+--- a/thirdparty/sdl3/src/video/windows/SDL_windowsevents.c
++++ b/thirdparty/sdl3/src/video/windows/SDL_windowsevents.c
+@@ -328,6 +328,13 @@ static void WIN_UpdateFocus(SDL_Window *window, bool expect_focus, DWORD pos)
+     bool had_focus = (SDL_GetKeyboardFocus() == window);
+     bool has_focus = (GetForegroundWindow() == hwnd);
+ 
++    /* An embedded rendering window cannot itself be the foreground top-level
++       HWND. Require both the real child focus and its active root; do not
++       grant input merely because another child of the host is focused. */
++    if (GetWindowLongPtr(hwnd, GWL_STYLE) & WS_CHILD) {
++        has_focus = (GetFocus() == hwnd && GetForegroundWindow() == GetAncestor(hwnd, GA_ROOT));
++    }
++
+     if (had_focus == has_focus || has_focus != expect_focus) {
+         return;
+     }

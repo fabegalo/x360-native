@@ -6,6 +6,7 @@
 #include <chrono>
 #include <cstdint>
 #include <filesystem>
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -24,6 +25,7 @@ struct ProcessSpec {
   // them itself (MMIO access handlers), so only an unhandled one is a crash.
   // Slower than a plain run; meant for diagnosing a crash.
   bool capture_crash = false;
+  std::function<bool()> should_cancel;
 };
 
 struct CrashInfo {
@@ -39,6 +41,7 @@ struct ProcessResult {
   bool launched = false;
   std::string launch_error;
   bool timed_out = false;
+  bool cancelled = false;
   uint32_t exit_code = 0;  // raw; NTSTATUS values on crashes
   std::chrono::milliseconds duration{0};
   CrashInfo crash;  // only with ProcessSpec::capture_crash

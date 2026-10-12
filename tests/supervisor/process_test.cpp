@@ -57,6 +57,17 @@ TEST_CASE("kills the child on timeout", "[process]") {
   CHECK(r.duration < 10s);
 }
 
+TEST_CASE("session cancellation stops the child without reporting a timeout", "[process]") {
+  Scratch s;
+  auto spec = s.Spec({"sleep", "20000"});
+  spec.should_cancel = [] { return true; };
+  const auto r = RunProcess(spec);
+  REQUIRE(r.launched);
+  CHECK(r.cancelled);
+  CHECK_FALSE(r.timed_out);
+  CHECK(r.duration < 10s);
+}
+
 TEST_CASE("reports a crash as an NTSTATUS code without a dialog", "[process]") {
   Scratch s;
   auto r = RunProcess(s.Spec({"crash"}));

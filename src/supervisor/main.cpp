@@ -10,6 +10,7 @@
 #include <cstdio>
 #include <fstream>
 #include <iostream>
+#include <memory>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -24,6 +25,7 @@
 #include "sha256.h"
 #include "xex_identity.h"
 #include "session_profile.h"
+#include "session_window.h"
 
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
@@ -411,7 +413,7 @@ std::string UtcStamp() {
 
 int Run(const ProjectPaths& p, const fs::path& exe_in, std::vector<std::string> args,
         std::string label, int timeout_s, bool rex_log, bool crash_stack,
-        fs::path* handoff = nullptr) {
+        fs::path* handoff = nullptr, SessionWindow* window = nullptr) {
   fs::path exe = fs::absolute(exe_in);
   if (auto why = CheckLaunchable(p, exe)) {
     fmt::print(stderr, "run: {}\n", *why);
@@ -447,6 +449,7 @@ int Run(const ProjectPaths& p, const fs::path& exe_in, std::vector<std::string> 
     if (fs::exists(*handoff)) return kExitUsage;
     args.push_back("--x360n_handoff_out=" + handoff->string());
   }
+  if (window) args.push_back("--parent_window=" + std::to_string(window->handle()));
 
   auto exe_digest = DigestFile(exe);
   // The child runs in its executable's directory: relative paths in its
@@ -454,6 +457,7 @@ int Run(const ProjectPaths& p, const fs::path& exe_in, std::vector<std::string> 
   ProcessSpec spec{exe, args, exe.parent_path(), dir / "stdout.log", dir / "stderr.log",
                    std::chrono::seconds(timeout_s)};
   spec.capture_crash = crash_stack;
+  if (window) spec.should_cancel = [window] { return window->closed(); };
   fmt::print("run: {} (working dir {}) -> {}\n", exe.string(), spec.working_dir.string(),
              dir.string());
   auto r = RunProcess(spec);
@@ -522,9 +526,11 @@ int Run(const ProjectPaths& p, const fs::path& exe_in, std::vector<std::string> 
   w.Bool("launched", r.launched);
   if (!r.launched) w.String("launch_error", r.launch_error);
   w.Bool("timed_out", r.timed_out);
+  w.Bool("cancelled", r.cancelled);
   w.Number("exit_code", int64_t(int32_t(r.exit_code)));
   w.String("exit_code_hex", fmt::format("0x{:08X}", r.exit_code));
   w.String("exit_description", !r.launched ? "not launched"
+                                 : r.cancelled ? "session window closed by user"
                                  : r.timed_out ? "terminated by the supervisor after the timeout"
                                                : DescribeExitCode(r.exit_code));
   w.Number("duration_ms", r.duration.count());
@@ -606,7 +612,8 @@ int Run(const ProjectPaths& p, const fs::path& exe_in, std::vector<std::string> 
   fmt::print(
       "run: {} after {} ms; {} stub line(s), {} unimplemented message(s), {} error(s), {} critical; "
       "report {}\n",
-      r.timed_out ? std::string("TIMEOUT, terminated by the supervisor")
+      r.cancelled ? std::string("CANCELLED, session window closed")
+      : r.timed_out ? std::string("TIMEOUT, terminated by the supervisor")
                   : DescribeExitCode(r.exit_code),
       r.duration.count(), scan.stub_lines, unimpl, scan.error_lines, scan.critical_lines,
       (dir / "report.json").string());
@@ -614,13 +621,18 @@ int Run(const ProjectPaths& p, const fs::path& exe_in, std::vector<std::string> 
   return r.exit_code == 0 ? kExitOk : kExitFailed;
 }
 
-int Session(const ProjectPaths& paths, const fs::path& manifest, int timeout) {
+int Session(const ProjectPaths& paths, const fs::path& manifest, int timeout, bool separate_windows) {
   try {
     const auto dashboard = LoadSessionProfile(paths, manifest);
     std::vector<SessionProfile> targets;
     for (const auto& target : dashboard.launch_targets)
       targets.push_back(LoadSessionProfile(paths, target));
     auto active = dashboard;
+    std::unique_ptr<SessionWindow> window;
+    if (!separate_windows) {
+      window = std::make_unique<SessionWindow>();
+      fmt::print("session: persistent window {}\n", window->handle());
+    }
     fs::path incoming;
     for (unsigned step = 0; step < 32; ++step) {
       // Revalidate the profile and input bytes at every transition.
@@ -631,7 +643,8 @@ int Session(const ProjectPaths& paths, const fs::path& manifest, int timeout) {
       if (!incoming.empty()) args.push_back("--x360n_handoff_in=" + incoming.string());
       fs::path handoff;
       const auto result = Run(paths, active.exe, args,
-          fmt::format("session-{}-{}", step, active.name), timeout, true, false, &handoff);
+          fmt::format("session-{}-{}", step, active.name), timeout, true, false, &handoff, window.get());
+      if (window && window->closed()) return kExitOk;
       if (result != kExitOk) return result;  // never relaunch after timeout/crash
       LaunchRequest request;
       if (!ReadLaunchRequest(handoff, request)) {
@@ -691,7 +704,9 @@ int main(int argc, char** argv) {
   auto* session = app.add_subcommand("session", "Follow original title requests using a dashboard manifest");
   std::string session_manifest;
   int session_timeout = 600;
+  bool separate_windows = false;
   session->add_option("manifest", session_manifest)->required();
+  session->add_flag("--separate-windows", separate_windows, "Diagnostic mode: one window per title");
   session->add_option("--timeout", session_timeout, "Timeout per title; 0 disables it")
       ->check(CLI::NonNegativeNumber);
   std::string exe, label;
@@ -726,7 +741,7 @@ int main(int argc, char** argv) {
     return kExitUsage;
   }
   if (doctor->parsed()) return Doctor(*paths, config);
-  if (session->parsed()) return Session(*paths, session_manifest, session_timeout);
+  if (session->parsed()) return Session(*paths, session_manifest, session_timeout, separate_windows);
   if (run->parsed()) return Run(*paths, exe, child_args, label, timeout_s, rex_log, crash_stack);
   return kExitUsage;
 }
