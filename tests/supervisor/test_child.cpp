@@ -16,6 +16,10 @@
 #include <iostream>
 #include <string>
 #include <thread>
+#ifdef _WIN32
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+#endif
 
 int main(int argc, char** argv) {
   std::string log_path;
@@ -25,6 +29,12 @@ int main(int argc, char** argv) {
     --argc;
   }
   if (argc < 2) return 64;
+#ifdef _WIN32
+  if (!std::strcmp(argv[1], "console")) {
+    std::printf("console=%d\n", GetConsoleWindow() != nullptr);
+    return GetConsoleWindow() ? 1 : 0;
+  }
+#endif
   if (!std::strcmp(argv[1], "exit") && argc >= 3) {
     std::printf("child stdout\n");
     std::fprintf(stderr, "child stderr\n");

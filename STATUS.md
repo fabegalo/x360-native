@@ -5,6 +5,16 @@ XDK "Dolphin" da `rexglue/demo-iruka`), com as limitações abaixo.
 
 ## Funciona (com evidência)
 
+Prévia de preparação gráfica Windows (§§15–17): `x360-native.exe` abre sem
+terminal e sem conteúdo, verifica conjuntos por perfil, importa componentes
+extraídos da 17559 e aciona o supervisor original. 9 testes / 32 asserções do
+modelo e 11 / 62 de processo/sessão passam; iruka L1–L5 permanece aprovado.
+A execução pelo aplicativo passou da intro para a dashboard; novo ciclo completo
+com o jogo ainda não foi confirmado nesta tentativa. Toolchain gerenciada,
+pacote autônomo e aceite em máquina limpa continuam pendentes. Detalhes:
+[preparação gráfica](docs/desktop-preparation.md). Publicação privada e
+reconciliação do histórico concluídas; checklist §19.3 atualizado.
+
 Incremento atual: Retail 17559 com fonte original, entrega da URI My Games e
 intro original AOT com animação/som confirmados pelo usuário. Export 2(false)
 permite que a animação termine pelas próprias verificações e retorne ao menu;

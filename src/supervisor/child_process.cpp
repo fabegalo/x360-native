@@ -229,6 +229,7 @@ ProcessResult RunProcess(const ProcessSpec& spec) {
   UINT old_mode = SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX);
   auto start = std::chrono::steady_clock::now();
   DWORD flags = CREATE_SUSPENDED | CREATE_UNICODE_ENVIRONMENT;
+  if (spec.no_console) flags |= CREATE_NO_WINDOW;
   if (spec.capture_crash) flags |= DEBUG_ONLY_THIS_PROCESS;
   BOOL ok = CreateProcessW(spec.exe.c_str(), cmd.data(), nullptr, nullptr, TRUE, flags, nullptr,
                            cwd.empty() ? nullptr : cwd.c_str(), &si, &pi);

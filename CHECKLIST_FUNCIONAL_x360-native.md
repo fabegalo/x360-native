@@ -285,7 +285,7 @@ Estes são objetivos adicionais de cobertura, não pré-requisitos para concluir
 
 ## 15. Aplicativo e distribuição multiplataforma — P0/P1
 
-Os requisitos das seções 15–19 foram incorporados em 2026-10-12 e permanecem pendentes; não alteram os marcos funcionais já registrados. Esta atualização documental não autoriza iniciar ports, trocar o backend validado, migrar de SDK ou implementar todos os recursos agora.
+Os requisitos das seções 15–19 foram incorporados em 2026-10-12. A publicação privada e a reconciliação do histórico (§19) foram concluídas. Os §§15–17 têm um primeiro incremento executável de preparação gráfica no Windows; o pacote autônomo e o aceite do §18 continuam pendentes. A prévia ainda requer a árvore do projeto e as ferramentas de desenvolvimento. Não confundir esse resultado com uma release para usuários leigos. Backend e SDK permanecem os mesmos.
 
 Referência de facilidade de uso: [Pinyon Shift](https://github.com/arcanite24/pinyon-shift#play), com download do launcher, importação e preparação guiada descritos no README. Usar a experiência como referência, sem copiar a interface ou substituir nossa arquitetura para se parecer com ela. Um ZIP de código-fonte com instruções para montar um ambiente de desenvolvimento não satisfaz este requisito.
 
@@ -312,11 +312,11 @@ O requisito é **um download principal por sistema/arquitetura suportados**, nã
 
 - [ ] Identificar claramente o pacote principal por versão, sistema e arquitetura.
 - [ ] Oferecer aplicativo principal com nome e ícone claros.
-- [ ] Abrir a interface gráfica sem terminal no uso normal.
+- [x] Abrir a interface gráfica sem terminal no uso normal — demonstrado na prévia local Windows `x360-native.exe`; preparação e supervisor usam processos sem console. Distribuição autônoma ainda pendente.
 - [ ] Incluir dependências redistribuíveis ou obtê-las pelo assistente quando necessário e permitido.
 - [ ] Eliminar dependência de caminhos, arquivos ou ferramentas presentes apenas no computador do desenvolvedor.
 - [ ] Dar instruções curtas sobre qual pacote baixar e qual aplicativo abrir.
-- [ ] Distinguir o aplicativo pronto dos arquivos de código-fonte oferecidos pelo GitHub.
+- [x] Distinguir o aplicativo pronto dos arquivos de código-fonte oferecidos pelo GitHub — README e interface explicitam que não há pacote autônomo aprovado.
 - [ ] Apresentar requisitos mínimos e limitações da release antes de iniciar preparação demorada.
 - [ ] Distribuir apenas o aplicativo e componentes com redistribuição permitida; verificar as autorizações aplicáveis.
 - [ ] Excluir dashboards, jogos, fontes proprietárias, XAM, bootanim e código derivado desses binários quando não houver autorização aplicável. Recompilação para código nativo não concede direito de redistribuição.
@@ -326,23 +326,23 @@ O requisito é **um download principal por sistema/arquitetura suportados**, nã
 
 ### 16.1. Assistente e importação
 
-- [ ] Abrir a interface mesmo sem jogos ou dashboard preparados.
+- [x] Abrir a interface mesmo sem jogos ou dashboard preparados — janela executada também contra ambiente vazio, com ação de selecionar ambiente e lançamento desabilitado.
 - [ ] Verificar sistema, arquitetura, recursos gráficos, espaço, permissões e dependências relevantes.
 - [ ] Oferecer mensagens compreensíveis; PT-BR e inglês são os idiomas iniciais planejados.
 - [ ] Permitir seleção visual das pastas de conteúdo e dados.
-- [ ] Importar por seleção de arquivos/pastas e, quando apropriado, arrastar e soltar.
+- [x] Importar por seleção de arquivos/pastas e, quando apropriado, arrastar e soltar — primeiro formato: pasta com componentes extraídos e verificados da 17559. Arrastar/soltar, STFS pelo assistente e outros conjuntos continuam pendentes.
 - [ ] Identificar automaticamente versões e componentes.
 - [ ] Dispensar edição manual de TOML/JSON, renomeação de arquivos e montagem manual da estrutura de pastas.
-- [ ] Informar arquivo ausente, incompatível ou corrompido com ação concreta para prosseguir.
+- [x] Informar arquivo ausente, incompatível ou corrompido com ação concreta para prosseguir — componentes dos perfis de preparação são conferidos por SHA-256; DLL ausente e preparação interrompida impedem estado pronto. Isso não valida todos os assets de um jogo.
 - [ ] Preservar arquivos originais e conjuntos funcionais durante a importação e preparação.
-- [ ] Impedir mistura silenciosa de componentes de dashboards diferentes para completar conjuntos.
+- [x] Impedir mistura silenciosa de componentes de dashboards diferentes para completar conjuntos — importador aceita somente hashes declarados no perfil e recusa destino existente diferente. A 6717 não recebe componentes da 17559.
 - [ ] Mostrar o próximo passo em linguagem simples e reservar stack traces e informações técnicas para “Ver detalhes”.
 
 Reutilizar os arquivos, inventários e downloads já obtidos no projeto; não reiniciar buscas para preencher estes requisitos.
 
 ### 16.2. Preparação automatizada
 
-- [ ] Iniciar e acompanhar a preparação pela interface.
+- [x] Iniciar e acompanhar a preparação pela interface — aciona o script existente sem terminal, informa o alvo/etapas e mantém logs locais. Execução real alcançou configure do Castle Crashers; preparação completa pelo assistente ainda não validada.
 - [ ] Dispensar configuração manual de Git, CMake, compilador, Python ou SDK pelo usuário.
 - [ ] Gerenciar ferramentas indispensáveis pelo aplicativo, com fontes verificáveis e versões controladas.
 - [ ] Informar e obter consentimento quando instalação, download relevante ou elevação de privilégios forem necessários.
@@ -352,7 +352,7 @@ Reutilizar os arquivos, inventários e downloads já obtidos no projeto; não re
 - [ ] Distinguir trabalho em andamento, espera e erro.
 - [ ] Permitir cancelamento seguro e recuperação após interrupção.
 - [ ] Reaproveitar etapas válidas, reconstruindo somente o que precisa mudar.
-- [ ] Evitar recompilação desnecessária a cada abertura.
+- [x] Evitar recompilação desnecessária a cada abertura — abrir dashboard usa a sessão já preparada; preparar é uma ação separada e explícita.
 - [ ] Permitir uso offline do conteúdo preparado nas funcionalidades independentes de serviços externos.
 
 Ferramentas podem executar internamente; instalação, configuração e diagnóstico da cadeia de desenvolvimento não devem ser transferidos ao usuário leigo.
@@ -361,8 +361,8 @@ Ferramentas podem executar internamente; instalação, configuração e diagnós
 
 ### 17.1. Interface e limites do assistente externo
 
-- [ ] Selecionar a dashboard por uma interface compreensível.
-- [ ] Mostrar estados claros: pronto, precisa preparar, falta componente e ainda não suportado.
+- [x] Selecionar a dashboard por uma interface compreensível — catálogo declarativo por alvo; 17559 habilita sessão, 6717 aparece com limites e sem sessão guiada anunciada.
+- [x] Mostrar estados claros: pronto, precisa preparar, falta componente e ainda não suportado — limitados aos perfis de preparação cadastrados. Importação/execução indisponíveis permanecem desabilitadas.
 - [ ] Fornecer padrões seguros e separar configurações avançadas.
 - [ ] Manter textos legíveis e escala adequada à tela.
 - [ ] Permitir navegação por teclado e controle nas telas aplicáveis.
@@ -379,7 +379,7 @@ O assistente externo cuida de instalação, preparação, escolha do ambiente e 
 - [ ] Não enviar automaticamente conteúdo, saves, credenciais ou informações pessoais.
 - [ ] Guiar atualizações preservando perfis, saves, conteúdo e preparações ainda compatíveis.
 - [ ] Recuperar atualizações interrompidas e permitir retornar a uma versão anterior quando viável.
-- [ ] Informar claramente onde os dados ficam armazenados.
+- [x] Informar claramente onde os dados ficam armazenados — interface mostra a pasta do perfil e oferece abrir dados locais; detalhes e registros ficam em `.local/logs/desktop/` e `.local/runs/`.
 - [ ] Remover o aplicativo sem apagar dados pessoais sem escolha explícita.
 - [ ] Tratar verificações de segurança de cada sistema sem instruir a desativar antivírus ou proteções como procedimento normal.
 
@@ -400,6 +400,8 @@ Usar o **pacote real da release** em cada sistema/arquitetura anunciado como sup
 
 O aceite comprova facilidade de uso para o conjunto e o ambiente testados, não compatibilidade universal nem todos os jogos na primeira release.
 
+**Incremento gráfico de 2026-10-12:** implementação em `src/desktop`, com modelo separado da interface Windows e requisitos em `titles/*/preparation.toml`. Importação preserva originais, valida o conjunto antes da escrita e registra procedência local; cancelamento de build marca preparação incompleta para não aceitar um executável anterior. Testes e limites estão em `docs/desktop-preparation.md`. Não há pacote de release, instalador de toolchain, suporte anunciado a outros sistemas, nem aprovação de perfil/save/load. Todos os itens do §18 permanecem abertos.
+
 ## 19. Commits e preparação da primeira publicação — bloqueador obrigatório
 
 ### 19.1. Regra vigente para novos commits
@@ -410,7 +412,7 @@ Títulos, corpos e rodapés não devem atribuir autoria a Claude, Codex, Astra o
 
 ### 19.2. Revisão e reescrita antes do primeiro push
 
-**A primeira publicação está bloqueada até revisar e reescrever as mensagens de TODOS os commits locais próprios que serão publicados**, aplicando a regra acima — não apenas os mais recentes. Executar em momento exclusivo, sem outra sessão modificando o repositório que será reescrito. Em 2026-10-12, a preparação ocorreu em cópia isolada; a árvore de desenvolvimento continuou intacta para a sessão concorrente.
+**A primeira publicação exigiu revisar e reescrever as mensagens de TODOS os commits locais próprios publicados**, aplicando a regra acima — não apenas os mais recentes. Este portão foi cumprido em 2026-10-12. A preparação ocorreu em cópia isolada, preservando a árvore ativa; a reconciliação posterior ocorreu após confirmação de exclusividade. Qualquer nova reescrita continua exigindo exclusividade e preservação do trabalho local.
 
 - [x] Identificar todo o intervalo próprio ainda não publicado e verificar se há commits já compartilhados.
 - [x] Preservar backup recuperável e verificável fora do conjunto que será publicado.
@@ -431,17 +433,17 @@ Se houver commits já compartilhados, informar a situação antes de alterar ess
 
 **Portões de publicação:** revisão/reescrita e auditoria de todo o histórico próprio antes do primeiro push; conteúdo distribuível autorizado e aceite do pacote real (§15 e §18) antes de anunciar a release para usuários. A revisão de mensagens e a auditoria do candidato privado foram concluídas em 2026-10-12. Os portões de distribuição e aceite do pacote continuam pendentes; esta publicação de fontes não anuncia uma release funcional.
 
-### 19.3. Preparação da publicação privada — 2026-10-12
+### 19.3. Publicação privada e reconciliação concluídas — 2026-10-12
 
 - Destino autorizado: `fabegalo/x360-native`, privado até nova instrução do proprietário.
-- Base: último incremento consolidado da cena XUI; alterações concorrentes não commitadas permanecem locais. Não reescrever a árvore ativa enquanto a outra sessão trabalha.
-- Intervalo revisado: 32 commits próprios, desde a raiz. Sem remoto, branches remotas ou tags no repositório de origem; nenhum histórico upstream foi reescrito.
+- Base publicada: último incremento consolidado da cena XUI; alterações concorrentes não commitadas foram preservadas localmente. Não reescrever a árvore ativa enquanto outra sessão trabalha.
+- Intervalo revisado: 32 commits próprios, desde a raiz. Antes da primeira publicação não havia remoto, branches remotas ou tags no repositório de origem; nenhum histórico upstream foi reescrito.
 - Backup recuperado em cópia isolada e verificado por `git bundle verify` e `git fsck`. Bundle original, patches das alterações locais, cópias dos arquivos em andamento, auditoria e mapa antigo→novo permanecem fora do conjunto publicado, em `.local/publication/20261012-private/`.
 - Reescrita exclusiva de mensagens: 32/32 árvores, autores e datas idênticos. Títulos Conventional Commits; removidos os rodapés de autoria de assistente. Créditos humanos e referências técnicas preservados.
 - Auditoria de todos os snapshots: 422 blobs, 182 caminhos históricos; sem binários, recursos proprietários, conteúdo de `.local`, fontes AOT geradas ou padrões de credenciais detectados. Metadados do autor humano foram preservados conforme §19.2. Isto não constitui garantia universal de ausência de segredos.
 - SDK permanece gitlink público fixado em `f5337cdc947ff6d4c4196737e2c807a48f2a1fc2`; o histórico da dependência não integra a reescrita. Atualizadas apenas duas referências internas ao commit próprio do primeiro quadro.
-- Enviar somente a branch `main` revisada. Sem push de backup, espelhamento, force-push, tags, release ou mudança posterior automática de visibilidade.
-- Antes do próximo envio pela árvore de desenvolvimento, reconciliar seu histórico com o mapa local em sessão exclusiva; ela conserva os hashes antigos e não recebeu remoto automaticamente.
+- Publicada somente a branch `main` revisada: 32 commits reescritos e o registro da auditoria, até `b31aae906cd636fb793cc965d7dfbc9e1d5d1813`. Sem push de backup, espelhamento, force-push, tags ou release. Visibilidade `PRIVATE` reconfirmada pela API do GitHub.
+- Árvore de desenvolvimento reconciliada após o usuário confirmar que a outra sessão parou: `main` passou a acompanhar `origin/main`. Conferidos HEAD, diferenças locais, arquivos em andamento e SDK preservados. Evidência local em `.local/publication/20261012-private/reconciliation-1791814020853/after.json`; publicação em `published-verification.json`. Commits posteriores não significam envio automático nem mudança de visibilidade.
 
 ## 20. Títulos XNA / Xbox Live Indie Games — P1/P2
 

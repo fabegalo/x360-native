@@ -56,6 +56,13 @@ silenciosamente XAM, intro ou fontes da 17559.
 
 ## Preparar o ambiente de desenvolvimento
 
+Há uma **prévia gráfica de preparação para Windows**, que abre mesmo sem conteúdo,
+mostra os conjuntos cadastrados, verifica os componentes e inicia a sessão original.
+Depois do build abaixo, abra
+`.local/build/win-amd64/src/desktop/Debug/x360-native.exe`.
+Ela ainda depende do projeto e da toolchain local; a instalação autônoma e o pacote
+para usuários leigos seguem pendentes. [Funcionamento e limites](docs/desktop-preparation.md).
+
 - Windows 10/11 x64. A execução de referência foi feita no Windows 11.
 - Visual Studio 2022 Build Tools com C++, MSVC x64 e Windows SDK. Ambiente
   verificado: MSVC 14.44.35207, SDK 10.0.26100, CMake 3.31 e Ninja 1.12.

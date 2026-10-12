@@ -26,6 +26,7 @@ struct ProcessSpec {
   // Slower than a plain run; meant for diagnosing a crash.
   bool capture_crash = false;
   std::function<bool()> should_cancel;
+  bool no_console = false;  // Desktop preparation; does not hide a title's GUI.
 };
 
 struct CrashInfo {

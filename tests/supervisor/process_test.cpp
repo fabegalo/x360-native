@@ -49,6 +49,18 @@ TEST_CASE("captures stdout, stderr and the exit code", "[process]") {
   CHECK(Slurp(s.dir / "err.log").find("child stderr") != std::string::npos);
 }
 
+#ifdef _WIN32
+TEST_CASE("desktop child has no console and retains captured output", "[process]") {
+  Scratch s;
+  auto spec = s.Spec({"console"});
+  spec.no_console = true;
+  auto result = RunProcess(spec);
+  REQUIRE(result.launched);
+  CHECK(result.exit_code == 0);
+  CHECK(Slurp(s.dir / "out.log").find("console=0") != std::string::npos);
+}
+#endif
+
 TEST_CASE("kills the child on timeout", "[process]") {
   Scratch s;
   auto r = RunProcess(s.Spec({"sleep", "20000"}, 500ms));

@@ -1,0 +1,34 @@
+label = "Dashboard Retail 17559"
+session = true
+limitations = "Menu e ciclo com Castle Crashers validados. Perfis/Guide e saves ainda pendentes. Importação aceita somente os componentes deste conjunto; nenhum download de conteúdo original."
+dependencies = ["castle_crashers"]
+runtime_files = ["rexruntimerd.dll", "rexgpu-xenosrd.dll", "TracyClientrd.dll", "dash_17559_bootanim.dll", "dash_17559_gamerprofile.dll", "dash_17559_xam_ui.dll"]
+
+[[files]]
+path = "dash.xex"
+source_name = "dash.xex"
+sha256 = "3ad8f38d070eaf63cadac0697e3e8802c565cbfd0825a485347c5d718014f927"
+[[files]]
+path = "shrdres.xzp"
+source_name = "shrdres.xzp"
+sha256 = "179c5be167402297c6e137c08fefe3146f6f497964dc2bda94812596fc9aefe0"
+[[files]]
+path = "bootanim.xex"
+source_name = "bootanim.xex"
+sha256 = "45eb980c0f841b4807d43c07c766fae5e70b8e2fa4d13fb247a491897cfc6de7"
+[[files]]
+path = "SegoeXbox-Light.xtt"
+source_name = "SegoeXbox-Light.xtt"
+sha256 = "7b03c1731c6cb874adee50b17aa150f6ba3e0671fc8f612a2a970bf5ef4a542e"
+[[files]]
+path = "system/gamerprofile.xex"
+source_name = "gamerprofile.xex"
+sha256 = "a99fb2ae20c4b3ffab9fa5f6a73e5766b49fbed5716e8b4d3752d1b97b83aad4"
+[[files]]
+path = "system/xam_ui.xex"
+source_name = "xam.xex"
+sha256 = "78b3dbd8ae866f4258f5444205486ea9f8451afaa30f469c875dcf345f828467"
+[[files]]
+path = "system/huduiskin.xex"
+source_name = "huduiskin.xex"
+sha256 = "fdbe68d20fa6b013282ce8f21cebddc34fe4e3a92a71c28983d63f288d2252cc"

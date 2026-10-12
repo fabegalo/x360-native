@@ -1,0 +1,8 @@
+label = "Dashboard Retail 6717 (diagnóstico)"
+session = false
+importable = false
+limitations = "Blades renderiza e navega, mas falta XenonJKLatin.xtt correspondente. Ciclo com jogos não validado. Esta versão não usa os módulos nem fontes da 17559; sessão guiada ainda não disponível."
+[[files]]
+path = "dash.xex"
+source_name = "dash.xex"
+sha256 = "f8a51ea30406e3b8737e0cdbdad44867743869d59f58d4bc0f4b83e154cb87d8"
