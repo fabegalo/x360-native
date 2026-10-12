@@ -1,19 +1,25 @@
 // x360n-content: reads Xbox 360 content packages (STFS: CON/LIVE/PIRS) with the
-// SDK's StfsContainerDevice and extracts them safely.
+// SDK's StfsContainerDevice and disc images (GDFX/XDVDFS .iso) with its
+// DiscImageDevice, and extracts them safely.
 //
 //   info    <package>          header fields (magic, content type, execution info, names)
 //   extract <package> <dest>   copy every file out; <dest> must not exist
+//   extract-disc <image> <dest>  same for the game partition of a disc image
 //   dump-image <root> <xex> <out>  write the loaded (decrypted) XEX image, for diagnosis
 //   imports <root> <xex>       imports as decoded by the SDK loader, with the SDK export entry
 //   resources <root> <xex>     XEX resource table (what section:// locators resolve against)
 //   disasm <root> <xex> <addr> <n> [before]  SDK (binutils) disassembly with .pdata marks
 //   xref <root> <xex> <lo> <hi>  code that forms an address in [lo, hi]; data words holding one
 //   callers <root> <xex> <target>  direct branches (b/bl/bc) to <target>
+//   exports <root> <xex>       XEX export table: ordinal -> address (XexModule::GetProcAddress)
 //
 // The SDK's own dump routine (src/filesystem/vfs_dump.cpp, not built as a tool)
 // writes base_path / entry->path() without checking names from the package. Here
 // each name is validated before it touches the host filesystem, nothing is
 // overwritten, and a SHA-256 manifest is written next to <dest> (not inside it).
+// DiscImageFile::ReadSync copies from the mapped image without checking that the
+// entry's range lies inside it, so extract-disc checks every file range first.
+#include <algorithm>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
@@ -32,6 +38,8 @@
 #include <fmt/format.h>
 #include <ppc.h>
 #include <rex/filesystem.h>
+#include <rex/filesystem/devices/disc_image_device.h>
+#include <rex/filesystem/devices/disc_image_entry.h>
 #include <rex/filesystem/devices/stfs_container_device.h>
 #include <rex/filesystem/entry.h>
 #include <rex/filesystem/file.h>
@@ -45,10 +53,13 @@
 #include <rex/system/xmemory.h>
 
 #include "paths.h"
+#include "xex_patch.h"
 #include "sha256.h"
 
 namespace fs = std::filesystem;
 using rex::X_STATUS;  // X_STATUS_SUCCESS expands to a cast to it
+using rex::filesystem::DiscImageDevice;
+using rex::filesystem::DiscImageEntry;
 using rex::filesystem::StfsContainerDevice;
 
 namespace {
@@ -119,6 +130,9 @@ struct Extractor {
   std::ofstream manifest;
   uint64_t files = 0, bytes = 0;
   int errors = 0;
+  // Nonzero for a disc image: every entry is a DiscImageEntry whose data must lie
+  // inside the first disc_size bytes of the image.
+  uint64_t disc_size = 0;
   std::vector<uint8_t> buffer = std::vector<uint8_t>(4 << 20);
 
   void Walk(rex::filesystem::Entry* entry, const fs::path& rel) {
@@ -147,6 +161,16 @@ struct Extractor {
       fmt::print(stderr, "extract: refusing to overwrite {}\n", out.string());
       ++errors;
       return;
+    }
+    if (disc_size) {
+      auto* d = static_cast<DiscImageEntry*>(entry);
+      if (d->data_size() != entry->size() || d->data_offset() > disc_size ||
+          d->data_size() > disc_size - d->data_offset()) {
+        fmt::print(stderr, "extract: {} lies outside the image (offset {:#x}, {} bytes; image {} bytes)\n",
+                   rel.generic_string(), d->data_offset(), d->data_size(), disc_size);
+        ++errors;
+        return;
+      }
     }
     rex::filesystem::File* in = nullptr;
     if (entry->Open(rex::filesystem::FileAccess::kFileReadData, &in) != X_STATUS_SUCCESS || !in) {
@@ -187,32 +211,59 @@ struct Extractor {
   }
 };
 
-int Extract(const fs::path& package, const fs::path& dest_in) {
-  fs::path dest = fs::absolute(dest_in).lexically_normal();
-  std::error_code ec;
-  if (fs::exists(dest, ec)) {
-    fmt::print(stderr, "extract: destination already exists: {}\n", dest.string());
-    return 3;
-  }
-  StfsContainerDevice device("", package);
-  if (!device.Initialize()) {
-    fmt::print(stderr, "extract: StfsContainerDevice::Initialize failed for {}\n", package.string());
-    return 1;
-  }
-  auto* root = device.ResolvePath("/");
+int ExtractTree(rex::filesystem::Entry* root, const fs::path& dest, uint64_t disc_size) {
   if (!root) {
-    fmt::print(stderr, "extract: package has no root entry\n");
+    fmt::print(stderr, "extract: source has no root entry\n");
     return 1;
   }
   fs::create_directories(dest);
   Extractor x;
   x.dest = dest;
+  x.disc_size = disc_size;
   fs::path manifest_path = dest.parent_path() / (dest.filename().string() + ".sha256");
   x.manifest.open(manifest_path, std::ios::binary);
   x.Walk(root, {});
   fmt::print("extracted {} file(s), {} bytes, {} error(s); manifest {}\n", x.files, x.bytes,
              x.errors, manifest_path.string());
   return x.errors ? 1 : 0;
+}
+
+bool DestinationFree(const fs::path& dest) {
+  std::error_code ec;
+  if (fs::exists(dest, ec)) {
+    fmt::print(stderr, "extract: destination already exists: {}\n", dest.string());
+    return false;
+  }
+  return true;
+}
+
+int Extract(const fs::path& package, const fs::path& dest_in) {
+  fs::path dest = fs::absolute(dest_in).lexically_normal();
+  if (!DestinationFree(dest)) return 3;
+  StfsContainerDevice device("", package);
+  if (!device.Initialize()) {
+    fmt::print(stderr, "extract: StfsContainerDevice::Initialize failed for {}\n", package.string());
+    return 1;
+  }
+  return ExtractTree(device.ResolvePath("/"), dest, 0);
+}
+
+int ExtractDisc(const fs::path& image, const fs::path& dest_in) {
+  fs::path dest = fs::absolute(dest_in).lexically_normal();
+  if (!DestinationFree(dest)) return 3;
+  std::error_code ec;
+  const uint64_t size = fs::file_size(image, ec);
+  if (ec || size == 0) {
+    fmt::print(stderr, "extract-disc: cannot read the size of {}\n", image.string());
+    return 1;
+  }
+  DiscImageDevice device("", image);
+  if (!device.Initialize()) {
+    fmt::print(stderr, "extract-disc: DiscImageDevice::Initialize failed for {} (no GDFX game partition)\n",
+               image.string());
+    return 1;
+  }
+  return ExtractTree(device.ResolvePath("/"), dest, size);
 }
 
 // Loads an XEX the way `rexglue codegen` does (project_recompiler.cpp: Runtime in
@@ -369,7 +420,21 @@ int Xref(const fs::path& game_root, const std::string& xex_rel, uint32_t lo, uin
   if (!runtime) return 1;
   auto pdata = PdataEntries(runtime.get(), xex);
   auto in = [&](uint64_t v) { return v >= lo && v <= hi; };
-  for (const auto& sec : xex->pe_sections()) {
+  // A PE section can extend past the loaded image (Motocross Madness: .reloc ends
+  // at 0x83341560, the image at 0x83330000); only the mapped part is scanned.
+  const uint64_t img_lo = xex->base_address(), img_hi = img_lo + xex->image_size();
+  for (auto sec : xex->pe_sections()) {
+    const uint64_t sec_end = std::min<uint64_t>(uint64_t(sec.address) + sec.size, img_hi);
+    if (sec.address < img_lo || sec.address >= sec_end) {
+      fmt::print(stderr, "xref: section {} at 0x{:08X} is outside the loaded image; skipped\n",
+                 sec.name, sec.address);
+      continue;
+    }
+    if (uint64_t(sec.address) + sec.size > img_hi) {
+      fmt::print(stderr, "xref: section {} truncated to the loaded image (ends 0x{:08X})\n",
+                 sec.name, uint32_t(img_hi));
+      sec.size = uint32_t(sec_end - sec.address);
+    }
     bool code = (sec.flags & kXEPESectionMemoryExecute) != 0;
     if (!code) {
       for (uint32_t a = sec.address; a + 4 <= sec.address + sec.size; a += 4) {
@@ -491,6 +556,28 @@ int Callers(const fs::path& game_root, const std::string& xex_rel, uint32_t targ
 // Lists the XEX resource table (XEX_HEADER_RESOURCE_INFO): the sections that
 // XexGetModuleSection and section:// locators resolve against
 // (user_module.cpp:258-277). Prints name, address, size, first 4 bytes, SHA-256.
+// The module's XEX2 export table (xex2_export_table), resolved with the SDK's own
+// XexModule::GetProcAddress: one line per ordinal with a nonzero address.
+int Exports(const fs::path& game_root, const std::string& xex_rel) {
+  rex::runtime::XexModule* xex = nullptr;
+  auto runtime = LoadXex("exports", game_root, xex_rel, &xex);
+  if (!runtime) return 1;
+  const uint32_t table = xex->export_table_address();
+  if (!table) {
+    fmt::print(stderr, "exports: {} has no XEX export table\n", xex_rel);
+    return 1;
+  }
+  const uint32_t count = GuestWord(runtime.get(), table + 0x24);
+  const uint32_t base = GuestWord(runtime.get(), table + 0x28);
+  auto pdata = PdataEntries(runtime.get(), xex);
+  fmt::print("export table 0x{:08X}: base {} count {}\n", table, base, count);
+  for (uint32_t i = 0; i < count && base + i <= 0xFFFF; ++i) {
+    const uint32_t addr = xex->GetProcAddress(uint16_t(base + i));
+    if (addr) fmt::print("{:04X} 0x{:08X}  {}\n", base + i, addr, PdataContext(pdata, addr));
+  }
+  return 0;
+}
+
 int Resources(const fs::path& game_root, const std::string& xex_rel) {
   rex::runtime::XexModule* xex = nullptr;
   auto runtime = LoadXex("resources", game_root, xex_rel, &xex);
@@ -549,18 +636,33 @@ int main(int argc, char** argv) {
     rex::InitLoggingEarly();
     return Xref(Utf8Path(argv[2]), argv[3], ParseHex(argv[4]), ParseHex(argv[5]));
   }
+  if (argc == 4 && std::string(argv[1]) == "exports") {
+    rex::InitLoggingEarly();
+    return Exports(Utf8Path(argv[2]), argv[3]);
+  }
+  if ((argc == 5 || (argc == 7 && std::string(argv[5]) == "--keys")) &&
+      std::string(argv[1]) == "apply-patch")
+    return x360n::content::ApplyXexPatch(
+        Utf8Path(argv[2]), Utf8Path(argv[3]), Utf8Path(argv[4]),
+        argc == 7 ? Utf8Path(argv[6]) : x360n::content::DefaultXexKeyFile());
   rex::InitLoggingEarly();
   if (argc == 3 && std::string(argv[1]) == "info") return Info(Utf8Path(argv[2]));
   if (argc == 4 && std::string(argv[1]) == "extract")
     return Extract(Utf8Path(argv[2]), Utf8Path(argv[3]));
+  if (argc == 4 && std::string(argv[1]) == "extract-disc")
+    return ExtractDisc(Utf8Path(argv[2]), Utf8Path(argv[3]));
   fmt::print(stderr,
              "usage: x360n-content info <package>\n"
              "       x360n-content extract <package> <dest>\n"
+             "       x360n-content extract-disc <image.iso> <dest>\n"
              "       x360n-content dump-image <game_root> <xex relative to game_root> <out.bin>\n"
              "       x360n-content imports <game_root> <xex relative to game_root>\n"
              "       x360n-content resources <game_root> <xex>\n"
              "       x360n-content disasm <game_root> <xex> <hex addr> <count> [words before]\n"
              "       x360n-content xref <game_root> <xex> <hex lo> <hex hi>\n"
-             "       x360n-content callers <game_root> <xex> <hex target>\n");
+             "       x360n-content callers <game_root> <xex> <hex target>\n"
+             "       x360n-content exports <game_root> <xex>\n"
+             "       x360n-content apply-patch <base.xex> <patch.xexp> <out_dir> [--keys <file>]\n"
+             "         keys: local file, default $X360N_XEX_KEYS or .local\\keys\\xex-keys.txt\n");
   return 3;
 }
