@@ -1077,3 +1077,22 @@ preto. O log encerra a dashboard às 05:55:35.506 e anexa a superfície do jogo 
 05:55:38.539. Essa troca não está aprovada como apresentação original. O SDK
 VdPersistDisplay também não preserva pixels (somente aloca uma estrutura e retorna
 1); verificar seu uso real nesse caminho antes de atribuir o corte a essa API.
+
+Diagnóstico posterior `20261012T090847Z-session-0-dash_17559`, após o usuário
+repetir o lançamento: VdPersistDisplay aparece somente às 06:09:03.294, caller
+921A6148 (inicialização), não entre o clique e ContentLaunch às 06:09:19.407.
+Não está demonstrado que essa API seja a causa direta do corte. A dashboard
+registrou quatro callbacks ExRegisterTitleTerminateNotification; o SDK os armazena
+em terminate_notifications_, mas TerminateTitle não os percorre. Entre eles estão
+921B6160/921B6770 (registro gráfico) e 92187FA8 (encerramento da dashboard).
+A referência Xenia local também deixa a execução desses callbacks comentada, com
+ABI e sincronização pendentes; não serve como implementação pronta para copiar.
+O callback 921B6160 espera o ponteiro de registro em r3 para se remover: chamá-los
+sem argumentos, como no trecho comentado, estaria incorreto.
+
+O limite demonstrado é a desmontagem imediata pelo HLE e a perda da superfície
+entre processos. Ainda falta implementar/verificar o contrato de saída original
+e a apresentação durante a transição. Não foi acrescentado fade, screenshot de
+substituição ou espera arbitrária. Instrumentação temporária apenas encaminhava
+os exports originais; preservada em .local/tmp/transition_diag_tmp.cpp e retirada
+do build ao concluir a coleta.

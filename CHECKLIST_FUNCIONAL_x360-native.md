@@ -15,8 +15,8 @@ Windows x64; recompilação estática com ReXGlue; suporte progressivo a todas a
 | Intro + dashboard 17559 | Animação e áudio originais, conclusão pela exportação 2 e transição para a dashboard; fonte original integrada. | O tempo observado de cerca de 11 segundos não é um temporizador nem um requisito fixo. |
 | My Games | A dashboard chamou `XamContentLaunchImageInternalEx` para `XSYSLAUNCH:\default.xex`. | Comprova a origem do pedido; não aprova enumeração geral, resolução de qualquer título ou o ciclo completo. |
 | Supervisor | Conferiu caminho e hash da recompilação do Castle Crashers, segundo o agente. | Ainda falta explicitar qual hash e a ligação entre conteúdo selecionado, XEX e artefato nativo. |
-| Retorno original | Identificado assert em `XamLoaderLaunchTitle(NULL, flags)`. | Correção anunciada, sem resultado final apresentado. |
-| Motivo de encerramento | Saída normal e fechamento da janela ainda eram reunidos no mesmo caminho. | Separação dos eventos anunciada, sem teste final apresentado. |
+| Retorno original | Castle Crashers chamou `XamLoaderLaunchTitle(NULL, 0x100)` e voltou à 17559 sem intro; confirmado pelo usuário e logs (§0.19). | Guide, perfil selecionado e saves não validados. |
+| Motivo de encerramento | Protocolo distingue Dashboard, TitleTerminate, GuestExit e WindowClose; testes de exports e handoff passaram. | Ainda falta testar cada cenário e repetição na interface real; fechar janela não conta como retorno Xbox. |
 | Castle Crashers | Chega ao menu em execução separada; há regressões relatadas sem crash. | Não aprova, por si só, seleção genérica, perfil, saves ou retorno original pela dashboard. |
 | Dashboard 6717 | Perfil separado criado e executado. | Último bloqueio relatado: import XAM `0xAE6`, chamado em `0x9210F1F4`; sem novo resultado visual apresentado. |
 | Perfis e ciclo completo | Ainda sem demonstração completa nos relatos. | Não presumir implementação ausente nem marcar como concluído. |
@@ -128,6 +128,12 @@ Nome, identificador e estado de entrada precisam permanecer coerentes; as implem
 - [ ] Testar retorno original, fechamento de janela, saída normal e falha separadamente.
 - [ ] Repetir vários ciclos sem processos órfãos, pedidos antigos, controles presos ou crescimento indevido de recursos.
 - [ ] Preservar a transição visual original entre dashboard e jogo; a janela persistente atual ainda apresenta corte seco relatado pelo usuário.
+
+Diagnóstico da transição: a execução de 06:09 registrou callbacks originais de
+encerramento que o runtime armazena mas não executa; VdPersistDisplay apareceu
+somente na inicialização. O host perde a superfície entre títulos. A causa não
+deve ser reduzida a “falta um fade”; contrato e sincronização ainda precisam de
+correção verificada (`docs/dashboard.md` §0.19).
 
 **Aceite do ciclo completo:** dashboard → seleção original → Castle Crashers → gameplay → save → retorno original → mesma dashboard → relançamento → carregamento do save. Fechar a janela ou abrir o jogo por comando externo não aprova esse ciclo.
 
