@@ -29,10 +29,16 @@ target_compile_definitions(x360n_tests PRIVATE
     X360N_EXE="$<TARGET_FILE:x360n>"
     X360N_SOURCE_ROOT="${PROJECT_SOURCE_DIR}")
 add_dependencies(x360n_tests x360n x360n_test_child)
+# Avatar asset catalog reader shared by the titles (titles/common/avatar), synthetic data.
+target_sources(x360n_tests PRIVATE avatar/avatar_toc_test.cpp avatar/avatar_metadata_test.cpp
+    ${PROJECT_SOURCE_DIR}/titles/common/avatar/avatar_metadata.cpp
+    ${PROJECT_SOURCE_DIR}/titles/common/avatar/avatar_toc.cpp)
 catch_discover_tests(x360n_tests TEST_PREFIX "x360n." PROPERTIES LABELS "project" TIMEOUT 120)
 
 # Integration tests over user-supplied content in .local/inputs.
-add_executable(x360n_local_tests local/inputs_test.cpp)
+add_executable(x360n_local_tests local/inputs_test.cpp local/avatar_pack_test.cpp
+    ${PROJECT_SOURCE_DIR}/titles/common/avatar/avatar_metadata.cpp
+    ${PROJECT_SOURCE_DIR}/titles/common/avatar/avatar_toc.cpp)
 target_link_libraries(x360n_local_tests PRIVATE x360n_core Catch2::Catch2WithMain)
 target_compile_definitions(x360n_local_tests PRIVATE X360N_SOURCE_ROOT="${PROJECT_SOURCE_DIR}")
 catch_discover_tests(x360n_local_tests TEST_PREFIX "local." PROPERTIES LABELS "project" TIMEOUT 600)
