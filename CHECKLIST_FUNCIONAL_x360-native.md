@@ -410,26 +410,38 @@ Títulos, corpos e rodapés não devem atribuir autoria a Claude, Codex, Astra o
 
 ### 19.2. Revisão e reescrita antes do primeiro push
 
-**A primeira publicação está bloqueada até revisar e reescrever as mensagens de TODOS os commits locais próprios que serão publicados**, aplicando a regra acima — não apenas os mais recentes. Não executar nesta entrega: reservar um momento exclusivo, sem outra sessão modificando o repositório.
+**A primeira publicação está bloqueada até revisar e reescrever as mensagens de TODOS os commits locais próprios que serão publicados**, aplicando a regra acima — não apenas os mais recentes. Executar em momento exclusivo, sem outra sessão modificando o repositório que será reescrito. Em 2026-10-12, a preparação ocorreu em cópia isolada; a árvore de desenvolvimento continuou intacta para a sessão concorrente.
 
-- [ ] Identificar todo o intervalo próprio ainda não publicado e verificar se há commits já compartilhados.
-- [ ] Preservar backup recuperável e verificável fora do conjunto que será publicado.
-- [ ] Preservar separadamente alterações não commitadas e arquivos não rastreados necessários, sem limpeza destrutiva.
-- [ ] Reescrever mensagens com base no conteúdo real de cada commit.
-- [ ] Preservar commits úteis, sem reduzir tudo a um “initial commit” para esconder o histórico.
-- [ ] Preservar conteúdo, autores humanos e datas, sem falsificar resultados nem atribuir trabalho de terceiros ao projeto.
-- [ ] Não reescrever o histórico upstream das dependências.
-- [ ] Validar títulos, corpos e rodapés de todo o intervalo próprio.
-- [ ] Conferir que a reescrita exclusivamente de mensagens preservou os snapshots correspondentes.
-- [ ] Manter localmente o mapeamento entre hashes antigos e novos.
-- [ ] Atualizar referências internas afetadas de forma controlada, sem alterar hashes de dependências externas por engano.
-- [ ] Auditar todo o histórico a publicar, não só o último commit, para excluir credenciais, dados pessoais, conteúdo proprietário e demais arquivos indevidos.
-- [ ] Não publicar backups ou referências que reincorporem histórico anterior sem revisão.
-- [ ] Criar tags de release somente sobre o histórico final validado.
+- [x] Identificar todo o intervalo próprio ainda não publicado e verificar se há commits já compartilhados.
+- [x] Preservar backup recuperável e verificável fora do conjunto que será publicado.
+- [x] Preservar separadamente alterações não commitadas e arquivos não rastreados necessários, sem limpeza destrutiva.
+- [x] Reescrever mensagens com base no conteúdo real de cada commit.
+- [x] Preservar commits úteis, sem reduzir tudo a um “initial commit” para esconder o histórico.
+- [x] Preservar conteúdo, autores humanos e datas, sem falsificar resultados nem atribuir trabalho de terceiros ao projeto.
+- [x] Não reescrever o histórico upstream das dependências.
+- [x] Validar títulos, corpos e rodapés de todo o intervalo próprio.
+- [x] Conferir que a reescrita exclusivamente de mensagens preservou os snapshots correspondentes.
+- [x] Manter localmente o mapeamento entre hashes antigos e novos.
+- [x] Atualizar referências internas afetadas de forma controlada, sem alterar hashes de dependências externas por engano.
+- [x] Auditar todo o histórico a publicar, não só o último commit, para excluir credenciais, dados pessoais, conteúdo proprietário e demais arquivos indevidos.
+- [x] Não publicar backups ou referências que reincorporem histórico anterior sem revisão.
+- [ ] Criar tags de release somente sobre o histórico final validado. Não se aplica a esta publicação privada de fontes; nenhuma release/tag foi criada.
 
 Se houver commits já compartilhados, informar a situação antes de alterar esse histórico; não executar force-push automaticamente. Preparar o histórico não autoriza push, publicação de release ou mudança de visibilidade do repositório.
 
-**Portões de publicação:** revisão/reescrita e auditoria de todo o histórico próprio antes do primeiro push; conteúdo distribuível autorizado e aceite do pacote real (§15 e §18) antes de anunciar a release para usuários. Todos permanecem pendentes. Esta entrega modifica documentação, sem reescrita, publicação ou novos ports.
+**Portões de publicação:** revisão/reescrita e auditoria de todo o histórico próprio antes do primeiro push; conteúdo distribuível autorizado e aceite do pacote real (§15 e §18) antes de anunciar a release para usuários. A revisão de mensagens e a auditoria do candidato privado foram concluídas em 2026-10-12. Os portões de distribuição e aceite do pacote continuam pendentes; esta publicação de fontes não anuncia uma release funcional.
+
+### 19.3. Preparação da publicação privada — 2026-10-12
+
+- Destino autorizado: `fabegalo/x360-native`, privado até nova instrução do proprietário.
+- Base: último incremento consolidado da cena XUI; alterações concorrentes não commitadas permanecem locais. Não reescrever a árvore ativa enquanto a outra sessão trabalha.
+- Intervalo revisado: 32 commits próprios, desde a raiz. Sem remoto, branches remotas ou tags no repositório de origem; nenhum histórico upstream foi reescrito.
+- Backup recuperado em cópia isolada e verificado por `git bundle verify` e `git fsck`. Bundle original, patches das alterações locais, cópias dos arquivos em andamento, auditoria e mapa antigo→novo permanecem fora do conjunto publicado, em `.local/publication/20261012-private/`.
+- Reescrita exclusiva de mensagens: 32/32 árvores, autores e datas idênticos. Títulos Conventional Commits; removidos os rodapés de autoria de assistente. Créditos humanos e referências técnicas preservados.
+- Auditoria de todos os snapshots: 422 blobs, 182 caminhos históricos; sem binários, recursos proprietários, conteúdo de `.local`, fontes AOT geradas ou padrões de credenciais detectados. Metadados do autor humano foram preservados conforme §19.2. Isto não constitui garantia universal de ausência de segredos.
+- SDK permanece gitlink público fixado em `f5337cdc947ff6d4c4196737e2c807a48f2a1fc2`; o histórico da dependência não integra a reescrita. Atualizadas apenas duas referências internas ao commit próprio do primeiro quadro.
+- Enviar somente a branch `main` revisada. Sem push de backup, espelhamento, force-push, tags, release ou mudança posterior automática de visibilidade.
+- Antes do próximo envio pela árvore de desenvolvimento, reconciliar seu histórico com o mapa local em sessão exclusiva; ela conserva os hashes antigos e não recebeu remoto automaticamente.
 
 ## 20. Títulos XNA / Xbox Live Indie Games — P1/P2
 

@@ -622,7 +622,7 @@ o build final sem instrumentação não tem captura própria.
 
 ### 0.12 Navegação, textos e bloqueio da biblioteca (2026-10-12)
 
-O primeiro quadro permanece preservado no commit local `8c4f713`. Os patches
+O primeiro quadro permanece preservado no commit local `0195954`. Os patches
 0008–0010 corrigem a fila de teclas do driver MNK, o ABI de data/hora e o retorno
 de ponteiro nulo para strings comuns ausentes (sem aceitar confirmações).
 `sdkcheck`: **22/22** em `.local/logs/navigation-final-ctest.log`.
