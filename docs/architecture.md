@@ -258,7 +258,9 @@ diferentes têm executáveis diferentes. Pinyon Shift faz o mesmo
     plugin de GPU no POST_BUILD do executável (`cmake/rexglue_helpers.cmake:104-110,
     159-163`). Mudando só a DLL, o executável não relinka e a cópia ao lado dele
     fica velha — aconteceu com o teste do patch 0002. `x360n_stage_runtime_dlls()`
-    copia em todo build; o `x360n run` grava o SHA-256 das DLLs usadas.
+    copia antes de cada build do executável, também com `--target` (a primeira
+    versão só copiava num build completo, e um build de um alvo só deixou a DLL
+    velha ao lado do teste do patch 0003); o `x360n run` grava o SHA-256 das DLLs usadas.
 
 18. **Import registrado no endereço 0** — *não corrigido*: um ordinal com o slot de
     valor num registro de import e o thunk em outro (dashboard 17559: `xam 0x8E2`)

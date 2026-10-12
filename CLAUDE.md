@@ -48,6 +48,7 @@ presente não for exatamente o arquivo listado. Qualquer outra falha é regress�
   e entrada em `deps.lock.json` (hashes antes/depois).
 - Executáveis que ligam o runtime usam `x360n_stage_runtime_dlls()`: o SDK só copia
   a DLL ao relinkar o executável, e uma DLL velha ao lado do `.exe` passa despercebida.
+  A cópia roda antes do link, também num build com `--target`.
 - `src/supervisor` — `x360n` (doctor/identify/run). Não liga o runtime.
 - `tests/` — prefixos: `x360n.*`, `x360n.ppc.*`, `sdkcheck.*`, `env.*`, `local.*`.
   Um único label CTest (`project`): listas de labels quebram `catch_discover_tests`.

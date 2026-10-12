@@ -72,7 +72,8 @@ endfunction()
 # next to it only as a POST_BUILD step of that executable
 # (cmake/rexglue_helpers.cmake), which does not run when only a DLL changed: the
 # executable does not relink, and the copy next to it stays old. This adds a
-# target that runs on every build and copies them when they differ.
+# target that copies them when they differ, built before the executable itself:
+# building only that executable (--target) stages them too.
 function(x360n_stage_runtime_dlls target)
     if(NOT WIN32)
         return()
@@ -81,14 +82,18 @@ function(x360n_stage_runtime_dlls target)
     # For targets that link at least one DLL (rexruntime): copy_if_different
     # needs a non-empty source list.
     set(_cmds
+        COMMAND ${CMAKE_COMMAND} -E make_directory $<TARGET_FILE_DIR:${target}>
         COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_RUNTIME_DLLS:${target}>
                 $<TARGET_FILE_DIR:${target}>)
     foreach(_p IN LISTS ARG_PLUGIN_TARGETS)
         list(APPEND _cmds COMMAND ${CMAKE_COMMAND} -E copy_if_different
              $<TARGET_FILE:${_p}> $<TARGET_FILE_DIR:${target}>)
     endforeach()
-    add_custom_target(${target}_stage_dlls ALL ${_cmds}
+    add_custom_target(${target}_stage_dlls ${_cmds}
         COMMENT "x360n: staging runtime DLLs next to ${target}"
         COMMAND_EXPAND_LISTS VERBATIM)
-    add_dependencies(${target}_stage_dlls ${target} ${ARG_PLUGIN_TARGETS})
+    # The DLLs are built first (rexruntime links the other SDK DLLs); the
+    # executable waits for the copy. TARGET_FILE_DIR adds no dependency (CMP0112).
+    add_dependencies(${target}_stage_dlls rexruntime ${ARG_PLUGIN_TARGETS})
+    add_dependencies(${target} ${target}_stage_dlls)
 endfunction()
