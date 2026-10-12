@@ -134,7 +134,7 @@
         "file": "patches/rexglue-sdk/0011-xam-user-preference.patch",
         "sha256": "9cfbe27ea058fbcb5f80a63714dfd38a0127317398e461443ca6687ae7780120",
         "files": {
-          "src/kernel/xam/xam_user.cpp": "d959fadf4efff95c74c3d9f2dead9914d14ca80897f8d4f5bbf7bbf2b59e887f"
+          "src/kernel/xam/xam_user.cpp": "aee8024f578e96457f58051cddae10f7d23ef6db1852a81a12eebb93af5a6918"
         },
         "base_files": {
           "src/kernel/xam/xam_user.cpp": "7b84ddf00e12b1c9de33e00df75d8d692a686fcbbd939a0d706fecd36bc609e9"
@@ -335,6 +335,19 @@
           "src/audio/sdl/sdl_audio_driver.cpp": "79b389bb9f4e63441f424e9009fe21f9838eabf16498e16bf19067fb4d7614cb"
         },
         "test": "tests/sdkcheck/audio_drain_test.cpp"
+      },
+      {
+        "file": "patches/rexglue-sdk/0026-profile-ui-request-dispatch.patch",
+        "sha256": "29718edd960e4696e8f02dbf091768327f2f0c263c25df3f4e8f5ffde89fd134",
+        "base_files": {
+          "src/kernel/xam/xam_user.cpp": "d959fadf4efff95c74c3d9f2dead9914d14ca80897f8d4f5bbf7bbf2b59e887f",
+          "src/kernel/xam/xam_ui.cpp": "03e89d1119cb059d706b790304f2f26be668d1fce8660a2ff7a22e70c2c7b5d4"
+        },
+        "files": {
+          "src/kernel/xam/xam_user.cpp": "aee8024f578e96457f58051cddae10f7d23ef6db1852a81a12eebb93af5a6918",
+          "src/kernel/xam/xam_ui.cpp": "6e67a61665369e90a20c5b51c42d3148b9ffedc9af51d3a1d61961d65ea6b432"
+        },
+        "test": "tests/sdkcheck/profile_ui_request_test.cpp"
       }
     ]
   },

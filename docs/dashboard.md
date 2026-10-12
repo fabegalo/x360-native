@@ -1199,3 +1199,45 @@ responder, nao ouve mais cortes”, após relatar entrada temporariamente ausent
 Não foi isolada a causa dessa perda temporária; não houve patch de input neste
 incremento. A percepção de ausência de cortes está confirmada para esse ciclo,
 sem alegar equivalência audiovisual medida contra hardware ou outras versões.
+
+### 0.22 Pedidos de UI de perfil e bloqueio do serviço original (2026-10-12)
+
+Clique real em Settings/Profile: XamShowGamerCardUI, não seleção/Guide. Na revisão
+atual o export era stub; XamShowSigninUI retornava sucesso e emitia SIGNINCHANGED
+e UI-closed sem abrir interface nem alterar usuário. Patch 0026 encaminha os
+blocos originais BE à aplicação FE: 21008/544 bytes para cartão e 21001/20 bytes
+para seleção. Falhas seguem a conversão original de 816C16C8 (1627; OOM=14).
+Nenhuma notificação de mudança de usuário é emitida só por solicitar UI.
+Teste antes: 10/11 asserções falham; depois 11/11 passam. SDK: 36/36 passam.
+
+Execução 20261012T104941Z-session-0-dash_17559, 07:50:04.771 e 07:50:28.674:
+FE/21008, arg2=220, resposta 80004005, resultado 1627, User/state=1. Usuário
+confirma que nada abriu. A falha seguinte demonstrada é o handler de UI ausente
+em XamApp::DispatchMessageSync; o fluxo de entrar/sair **não está funcionando**.
+
+Referência local: XAM 816C7378 despacha signin.xex via 816CDD58; 816C78C4 despacha
+gamerprofile.xex pelo mesmo serviço. O loader verifica estado de UI em
+81AA20E0+B0/B4 antes de abrir o módulo. signin registra callback 90105000 por
+XamRegisterSysApp (90105170), também stub no SDK, e importa XuiInit,
+XuiRegisterClass, XuiSceneCreate etc., ainda stubs. Isso exige hospedar a aplicação
+e sua interface original; carregar o arquivo sozinho não implementa o serviço.
+Os arquivos já estão no pacote oficial extraído, ambos 2.0.17559.0:
+.local/tmp/system-assets-17559/work/su-extracted/$flash_signin.xex
+(SHA256 86695c6c36250cc4b4addb7ccc07d15d54492b352c979cf5c0934804109a6130) e
+$flash_gamerprofile.xex (a99fb2ae20c4b3ffab9fa5f6a73e5766b49fbed5716e8b4d3752d1b97b83aad4).
+Sem novo download ou substituição de recursos. Não foram carregados no runtime.
+
+UserProfile ainda fixa User/XUID/state=1; não houve criação, login, logout ou
+persistência validados. Saves e perfis existentes preservados. Guide é outra
+rota, não exercitada nesta tentativa. Nenhum item de perfis foi marcado concluído.
+
+Regressão real: My Games inicia Castle Crashers às 07:50:36.255 após 33 frames
+da transição; 20261012T105038Z-session-1-castle_crashers pede retorno às
+07:51:07.323, drena áudio e encerra. 20261012T105109Z-session-2-dash_17559
+importa 1020 bytes/kind=4/flags=100 às 07:51:13.822, sem intro. O usuário então
+fechou a janela. A dashboard mantém os stubs/erros de serviços já conhecidos.
+
+Iruka: 20261012T105152Z-iruka-profile-ui-0026, 30258 ms, timeout diagnóstico;
+zero stubs/mensagens não implementadas/erros/críticas. Sem captura visual nova.
+O patch cobre submissão síncrona e propagação da falha, não as permissões,
+ativação/fechamento nem o ciclo de vida completo do serviço de UI original.

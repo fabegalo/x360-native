@@ -242,3 +242,11 @@ A two-second failure bound logs a failed drain, never completion. The focused
 test failed before (0/64 frames consumed), passed after (64/64); silent samples
 use the configured endpoint because this SDL build disables the dummy backend.
 Missing endpoint is an explicit skip. See docs/dashboard.md §0.21 for live limits.
+
+## Profile UI request dispatch (0026)
+
+Routes the original signin/card request layouts to the existing FE application.
+Removes fabricated signin/UI-closed notifications and maps failed dispatch to
+the original wrapper's error result. Tests: 10 failures before, 11 assertions
+pass after; 36 SDK checks pass. This does NOT implement the original system-UI
+host, account changes or persistence. Live FE/21008 still fails; dashboard §0.22.

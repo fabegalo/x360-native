@@ -29,6 +29,10 @@ target_compile_definitions(x360n_tests PRIVATE
     X360N_EXE="$<TARGET_FILE:x360n>"
     X360N_SOURCE_ROOT="${PROJECT_SOURCE_DIR}")
 add_dependencies(x360n_tests x360n x360n_test_child)
+# x360n-content extract-disc over synthetic GDFX images (runs the tool as a process).
+target_sources(x360n_tests PRIVATE content/extract_disc_test.cpp)
+target_compile_definitions(x360n_tests PRIVATE X360N_CONTENT_EXE="$<TARGET_FILE:x360n-content>")
+add_dependencies(x360n_tests x360n-content)
 catch_discover_tests(x360n_tests TEST_PREFIX "x360n." PROPERTIES LABELS "project" TIMEOUT 120)
 
 # Integration tests over user-supplied content in .local/inputs.
@@ -79,6 +83,7 @@ target_sources(x360n_sdk_runtime_checks PRIVATE sdkcheck/title_return_test.cpp
     ../titles/common/launch_handoff.cpp)
 target_sources(x360n_sdk_runtime_checks PRIVATE sdkcheck/persist_display_test.cpp)
 target_sources(x360n_sdk_runtime_checks PRIVATE sdkcheck/audio_drain_test.cpp)
+target_sources(x360n_sdk_runtime_checks PRIVATE sdkcheck/profile_ui_request_test.cpp)
 target_sources(x360n_sdk_runtime_checks PRIVATE sdkcheck/dashboard_uri_test.cpp
     ../titles/dash_17559/src/launch_uri.cpp)
 target_sources(x360n_sdk_runtime_checks PRIVATE

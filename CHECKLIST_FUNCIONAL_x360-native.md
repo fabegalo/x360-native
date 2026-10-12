@@ -85,6 +85,12 @@ Nome, identificador e estado de entrada precisam permanecer coerentes; as implem
 - [ ] Manter saves e conquistas separados por usuário, sem misturar dados.
 - [ ] Tratar exclusão, importação e migração de perfis com confirmação e preservação dos dados originais.
 
+Diagnóstico 2026-10-12 (§0.22): Settings chama o cartão de jogador. O pedido
+FE/21008 agora preserva os argumentos e retorna falha real (1627), pois o serviço
+da interface original ainda falta. Seleção não emite mais notificações fictícias;
+User continua fixo no SDK. Entrada/saída/criação/persistência permanecem pendentes.
+O ciclo com Castle Crashers foi repetido, com retorno sem intro.
+
 **Aceite:** dois perfis diferentes entram no mesmo jogo, preservam dados próprios e continuam corretos após reiniciar. Perfil local não deve ser apresentado como conta autenticada no Xbox Live.
 
 ## 4. Biblioteca e My Games — P0
