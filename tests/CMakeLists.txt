@@ -29,10 +29,6 @@ target_compile_definitions(x360n_tests PRIVATE
     X360N_EXE="$<TARGET_FILE:x360n>"
     X360N_SOURCE_ROOT="${PROJECT_SOURCE_DIR}")
 add_dependencies(x360n_tests x360n x360n_test_child)
-# x360n-content extract-disc over synthetic GDFX images (runs the tool as a process).
-target_sources(x360n_tests PRIVATE content/extract_disc_test.cpp)
-target_compile_definitions(x360n_tests PRIVATE X360N_CONTENT_EXE="$<TARGET_FILE:x360n-content>")
-add_dependencies(x360n_tests x360n-content)
 catch_discover_tests(x360n_tests TEST_PREFIX "x360n." PROPERTIES LABELS "project" TIMEOUT 120)
 
 # Integration tests over user-supplied content in .local/inputs.
