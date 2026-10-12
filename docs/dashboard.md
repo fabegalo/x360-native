@@ -4,11 +4,12 @@ Estado em 2026-10-12. **A dashboard original não foi declarada funcionando.**
 Versão em trabalho: 2.0.17559.0 (Metro), arquivos fornecidos pelo usuário. A
 análise do codegen passou (sem `--force`) depois de 30 entradas `[functions]` e
 uma tabela de saltos conferidas uma a uma (§0.4); compila e linka (§0.5). Com os
-patches locais 0001–0005 do SDK o setup conclui, as 39 141 funções são registradas
-e **o código da dashboard executa**: inicializa áudio, idioma, fontes, perfil e
-abre arquivos, e para cerca de 2 s depois numa leitura de uma página de sistema
-em endereço fixo (`0x8E038630`) cujo conteúdo não está no pacote (§0.8). Nenhum
-quadro foi apresentado.
+patches locais 0001–0006 do SDK o setup conclui, as 39 141 funções são registradas
+e **o código da dashboard executa**. A região experimental de §0.10 ultrapassa a
+leitura em `0x8E038630`; os contratos de idioma foram corrigidos. A GPU chega ao
+caminho de apresentação, mas a janela fica preta e a inicialização espera um
+contador de conclusão que permanece zero. Menu e navegação não foram alcançados.
+§0.8 preserva o diagnóstico anterior; §0.10 registra o estado atual.
 
 Referências: ReXGlue v0.10.0 `f5337cdc` (caminhos relativos a
 `external/rexglue-sdk`) e Xenia Canary `04f85416e0f8` (consultado só como
@@ -456,7 +457,7 @@ Riscos já vistos, não corrigidos: 28 stubs diferentes foram chamados, e um stu
 define r3 (por exemplo `XamGetLanguage`); o caminho seguido depois deles pode não ser
 o do console. `DASHUSER:` não existe no SDK.
 
-### 0.9 Ainda desconhecido
+### 0.9 Ainda desconhecido (antes do experimento de §0.10)
 
 - o conteúdo e o dono da página `0x8E038600` (acima) e o que vem depois dela;
 - se a dashboard chega à primeira tela: nenhum quadro foi apresentado ainda;
@@ -466,6 +467,78 @@ o do console. `DASHUSER:` não existe no SDK.
 - o papel das dependências marcadas "desconhecida" em §0.3, e se ela chama os 12
   thunks dinâmicos, os imports-armadilha ou a função que lê `XboxKrnlBaseVersion`;
 - qual dos dois XEX o console carrega.
+
+### 0.10 Região experimental, idioma e espera de conclusão da GPU (2026-10-12)
+
+Continuação autorizada no último chat local do Claude (`63a7c2df-636d-461c-8d81-018cabd8be86`):
+aceitar a região zerada como hipótese explícita, seguir a inicialização e corrigir
+contratos demonstrados. O pin do SDK permanece `f5337cdc`.
+
+`titles/dash_17559/src/experimental_region.h` reserva e compromete exatamente
+64 KiB em `0x8E030000`, RW, antes de iniciar threads guest. A região é zerada uma
+única vez por runtime; chamadas posteriores preservam escritas. Qualquer
+sobreposição/reserva anterior ou falha de alocação aborta o setup. A hipótese
+fica apenas no título 17559, habilitada por padrão e desligável por
+`--dash17559_experimental_region=false`. Referência:
+[Xenia Canary 2372a54105d9, kernel_state.cc](https://github.com/xenia-canary/xenia-canary/blob/2372a54105d9d598ab5bc7ba94a72ef1bea4b271/src/xenia/kernel/kernel_state.cc).
+O conteúdo real continua desconhecido; não há tratamento genérico de access
+violation. Log e `report.json` (`diagnostics.compatibility_experiments`) registram
+literalmente **“região de compatibilidade experimental; conteúdo real desconhecido”**.
+
+Comparação controlada, mesmo EXE, mesmas DLLs e pastas de dados/usuário, timeout
+30 s e `--crash-stack`, mudando somente o sinalizador:
+
+| Run | Resultado |
+|---|---|
+| `20261012T020213Z-dash17559-region-off` | `0xC0000005`, leitura de `0x8E038630` em `sub_92185790` |
+| `20261012T020247Z-dash17559-region-on` | ultrapassa a leitura; timeout sem essa exceção; novas chamadas de inicialização |
+
+O teste `sdkcheck.dashboard experimental region...` verifica limites, proteção,
+zeros, preservação de escritas (inclusive bit `0x40` em `0x8E038630`), segunda
+instância e sobreposição com memória reservada. O teste do scanner confere a
+divulgação em UTF-8 e sua agregação.
+
+O patch SDK **0006** implementa os dois contratos de idioma efetivamente usados:
+`XamGetLanguage` lê `user_language`, e `XamGetLanguageLocaleFallbackString` retorna
+um ponteiro guest válido para UTF-16 big-endian. O stub deste último devolvia o
+ID de idioma residual em r3: com idioma 1, `sub_921CB1E8` tentava ler o endereço 1
+(run `20261012T020718Z-dash17559-language-trace`). Testes antes/depois e limites
+da implementação estão em `patches/rexglue-sdk/README.md`. Fontes continuam
+parciais; não se substituíram outros stubs por sucesso.
+
+**Resultado atual:** o log com trace (`20261012T021146Z-dash17559-fallback`)
+mostra criação do render target, resolve e textura 1280×720 em `0x1F6F8000`, no
+caminho de apresentação. A janela observada permanece preta. Isso não comprova
+uma tela funcional: **menu e navegação não foram alcançados**.
+
+O próximo bloqueio concreto é uma espera de conclusão no caminho de swap:
+
+```text
+sub_921A40B0 / sub_921AFF68
+  <- sub_921A5AD8 <- sub_92186D90 <- sub_92185790
+  <- sub_921870A0 <- xstart
+```
+
+Duas amostras de pilha no run `20261012T021300Z-dash17559-hang` e uma no run
+`20261012T021956Z-dash17559-fence-sample` mostram a mesma espera. No último, a
+leitura externa, sem escrever no processo, encontrou dispositivo `0x40002400`,
+ponteiro do contador (`+11024`) `0xFFCA3000`, contador emitido (`+11036`) `0x15`,
+alvo da espera (`+15344`) `0x0D`, e conclusão em `*0xFFCA3000` igual a zero.
+A thread `CommandProcessor::WorkerThreadMain` está esperando trabalho (linha 225),
+sem comandos pendentes. O run termina pelo timeout de 120 s, sem exceção não
+tratada, mas com 99 linhas STUB, 86 erros e 7 mensagens não implementadas.
+Evidência local: `.local/logs/dash17559-fence-state.txt` e os relatórios desses runs.
+
+Ainda não foi determinado qual pacote/registrador deveria atualizar esse contador.
+`VdGetSystemCommandBuffer` usa placeholders e
+`VdSetSystemCommandBufferGpuIdentifierAddress` é vazio; são candidatos, não causas
+comprovadas. O próximo diagnóstico é rastrear a emissão/consumo dos pacotes e o
+writeback do contador antes de alterar a sincronização. Forçar sua conclusão
+esconderia o bloqueio sem validar a renderização; nenhuma alteração assim foi feita.
+`DASHUSER:\\ThematicSkin`/`VisionEffect` continuam falhando, sem arquivos inventados.
+
+Builds recompilaram apenas componentes afetados e copiaram DLLs verificadas;
+codegen não foi forçado e os arquivos gerados permaneceram iguais.
 
 ## 1. Por que isto é um alvo próprio
 

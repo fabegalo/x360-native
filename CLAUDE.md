@@ -29,8 +29,8 @@ scripts\devshell.cmd ctest --preset win-amd64-debug -L project   # só este repo
   `NoDefaultCurrentDirectoryInExePath=1`; o próprio script diz que não afeta o ambiente.
 - Se o build falhar, **não rode os testes** sobre binários antigos.
 
-Resultado de referência (2026-10-12, com os patches locais 0001–0005): 1722 testes,
-1717 ok, 4 skip, 1 falha conhecida (`unit.Depfile escapes characters make treats as syntax`,
+Resultado de referência (2026-10-12, com os patches locais 0001–0006): 1726 testes,
+1721 ok, 4 skip, 1 falha conhecida (`unit.Depfile escapes characters make treats as syntax`,
 bug do teste upstream; é falha, não sucesso). `local.inventory …` lista XEX
 antigos como não suportados sem falhar; falha num XEX2 malformado.
 `local.integration targets …` falha se um alvo de `tests/local/integration_targets.tsv`
@@ -38,10 +38,20 @@ presente não for exatamente o arquivo listado. Qualquer outra falha é regress�
 
 ## Estrutura
 
+Dashboard atual: `docs/dashboard.md` §0.10. A região experimental `0x8E030000`
+(64 KiB RW) é exclusiva do título 17559, zerada uma vez, desligável por
+`--dash17559_experimental_region=false`; log/relatório dizem que o conteúdo real
+é desconhecido. Patch 0006 implementa idioma configurado e ponteiro de fallback
+UTF-16. A inicialização ultrapassa os crashes anteriores, mas espera conclusão
+no swap (`sub_921AFF68`, alvo `0x0D`, contador em `0xFFCA3000` permanece zero,
+GPU sem comandos pendentes). Janela preta; menu/navegação não alcançados.
+Próximo passo: rastrear pacotes/writeback; não forçar o contador nem inventar
+arquivos de `DASHUSER:`. Pilhas e valores em `.local/logs/dash17559-fence-state.txt`.
+
 - `external/rexglue-sdk` — submódulo fixado em `deps.lock.json`. **Não editar à mão.**
   Exceções documentadas: cópias dos symlinks do libmspack (`scripts/materialize-symlinks.ps1`)
   e os patches locais de `patches/rexglue-sdk/` (0001–0002 autorizados em 2026-10-11,
-  0003–0005 sob a autorização de 2026-10-12), aplicados por
+  0003–0006 sob a autorização de 2026-10-12), aplicados por
   `scripts/apply-sdk-patches.ps1` e verificados pelo CMake no configure e em todo build.
   `src/ui/rex_app.cpp` (patch 0004) é compilado em cada executável: recompile o título.
 - Correções do SDK vão no `CMakeLists.txt` raiz como backport condicionado ao

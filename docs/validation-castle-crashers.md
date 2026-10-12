@@ -75,6 +75,14 @@ Depois dos patches 0003–0005 (2026-10-12): o codegen corrigido, rodado com
 `20261012T012535Z-cc-run-patched-0005`, sem entrada): 60 s até o timeout, 0 STUB, 0
 erros, 0 críticas, menu principal na captura de 40 s.
 
+## Regressão com o patch 0006
+
+Regressão em 2026-10-12 com 0001–0006: título recompilado e DLLs copiadas pelo
+staging; codegen sem alterações. Run `20261012T023116Z-cc-regression-0006`: 90 s
+até timeout, sem crash, 0 stubs, 0 erros e 0 críticas. Menu principal observado;
+captura em `.local/logs/cc-regression-0006-menu.png`. Permanecem as duas aberturas
+de shaders ausentes já conhecidas. Não houve nova validação de entrada/gameplay.
+
 ## Não validado
 
 Gameplay além do relato do usuário, save/load, encerramento normal, sessão longa,

@@ -10,7 +10,7 @@ Ambiente de todas as linhas abaixo: Windows 11 Pro 10.0.26300, AMD Ryzen 7
 5700X3D, 40 GB RAM, RTX 4070; LLVM/Clang 22.1.8 + MSVC 14.44 (VS Build Tools
 17.14.41), Windows SDK 10.0.26100; configuração Debug.
 Revisão do projeto: commits locais de 2026-10-12; SDK `f5337cdc` (v0.10.0) com os
-patches locais 0001–0005 (`patches/rexglue-sdk/`).
+patches locais 0001–0006 (`patches/rexglue-sdk/`).
 Títulos compilados em `RelWithDebInfo` (ver `docs/validation-iruka.md`).
 
 ## Títulos e amostras
@@ -21,6 +21,14 @@ Títulos compilados em `RelWithDebInfo` (ver `docs/validation-iruka.md`).
 | Castle Crashers (XBLA, `584108B7`, v0.0.1.3) — experimental | `default.xex` SHA-256 `825e9c8c…f5d9ad` (pacote LIVE `ed7b65a8…c31d41e74`) | ok com 3 ajustes (`titles/castle_crashers/analysis/castle_crashers.toml`) | ok (41 arquivos, 3714 funções) | ok | ok: 60 s sem falha, 0 stubs | ok: menu principal renderizado (captura); navegação por teclado e controle **relatada pelo usuário** | **relatado pelo usuário** (teclado e controle); não observado por nós | não testado | não testado | `docs/validation-castle-crashers.md`; run `20261011T171213Z-cc-run-2` | provável modo trial (`license_mask` 0); 2 shaders `.xpu` ausentes no pacote; sem save/load, Live fora do escopo |
 
 ## Dashboard
+
+Atualização 2026-10-12 (substitui o bloqueio histórico da linha abaixo): com a
+região experimental de 64 KiB RW e o patch 0006 de idioma, a 17559 ultrapassa os
+crashes anteriores. A GPU chega ao caminho de apresentação 1280×720; a janela
+fica preta e há espera de conclusão no swap até timeout. Menu e navegação não
+alcançados. Evidência: `docs/dashboard.md` §0.10, comparação on/off e run
+`20261012T021956Z-dash17559-fence-sample`. Conteúdo real da região desconhecido;
+fontes e vários stubs parciais; `DASHUSER:` ausente.
 
 | Versão | Identidade | Análise | Geração | Compilação | Inicialização | Teste | Limitações |
 |---|---|---|---|---|---|---|---|
