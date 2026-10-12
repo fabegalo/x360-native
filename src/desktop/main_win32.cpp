@@ -22,8 +22,8 @@ namespace fs = std::filesystem;
 using namespace x360n;
 using namespace x360n::desktop;
 namespace {
-constexpr UINT kFinished = WM_APP + 1, kProgress = WM_APP + 2, kDetected = WM_APP + 3;
-enum { kFolder = 101, kTargets, kCheck, kImport, kPrepare, kLaunch, kDetails, kData, kCancel, kLanguage, kInstall, kStorage, kPrimary, kSettings, kImportFolder, kDashboards, kGames };
+constexpr UINT kFinished = WM_APP + 1, kProgress = WM_APP + 2, kDetected = WM_APP + 3, kInitialized = WM_APP + 4;
+enum { kFolder = 101, kTargets, kCheck, kImport, kPrepare, kLaunch, kDetails, kData, kCancel, kLanguage, kInstall, kStorage, kPrimary, kSettings, kImportFolder, kDashboards, kGames, kHome, kImportPage, kAddContent, kLibrary };
 constexpr COLORREF background = RGB(15, 20, 27), surface = RGB(24, 32, 42), foreground = RGB(236, 241, 247), muted = RGB(157, 171, 189), accent = RGB(169, 231, 154);
 HBRUSH background_brush = CreateSolidBrush(background), surface_brush = CreateSolidBrush(surface);
 bool english = false;
@@ -36,7 +36,7 @@ std::wstring Wide(const std::string& text) {
   return out;
 }
 struct App {
-  HWND window{}, title{}, subtitle{}, root_text{}, combo{}, status{}, details{}, headline{}, footer{};
+  HWND window{}, title{}, subtitle{}, root_text{}, combo{}, status{}, details{}, headline{}, footer{}, progress{};
   HFONT font{}, title_font{}, headline_font{};
   HICON icon{};
   std::vector<HWND> buttons;
@@ -56,7 +56,9 @@ struct App {
   unsigned timer_ticks = 0;
   bool allow_downloads = false;
   bool installing = false;
-  bool settings = false, games = false, importing = false;
+  bool settings = false, games = false, importing = false, initializing = false;
+  bool home = true, import_view = false;
+  bool import_recognized = false;
   int next_action = kFolder;
   ~App() { if (worker.joinable()) worker.join(); DeleteObject(font); DeleteObject(title_font); DeleteObject(headline_font); DestroyIcon(icon); }
 };
@@ -93,14 +95,19 @@ void Layout(App& a) {
   button(kLanguage, width - 378, 22, 100, 40, true);
   button(kSettings, width - 270, 22, 140, 40, true);
   button(kDetails, width - 122, 22, 90, 40, true);
-  move(a.headline, 60, 112, width - 120, 62);
-  move(a.subtitle, 60, 186, width - 120, 52);
+  move(a.headline, 60, 152, width - 120, 52);
+  move(a.subtitle, 60, 214, width - 120, 62);
   button(kPrimary, 60, 264, 270, 54, !a.settings && !a.show_details);
-  button(kImport, 346, 264, 210, 54, !a.settings && !a.show_details && a.next_action != kImport && !a.busy);
-  button(kImportFolder, a.next_action == kImport ? 346 : 572, 264, 210, 54, !a.settings && !a.show_details && !a.busy);
-  button(kDashboards, 60, 82, 140, 30, !a.settings && !a.show_details);
-  button(kGames, 212, 82, 140, 30, !a.settings && !a.show_details);
-  button(kCancel, 346, 264, 190, 54, !a.settings && !a.show_details && a.busy && !a.session);
+  button(kImport, 0, 0, 0, 0, false);
+  button(kImportFolder, 346, 284, 210, 54, !a.settings && !a.show_details && a.import_view && !a.busy);
+  button(kHome, 60, 88, 100, 34, !a.settings && !a.show_details);
+  button(kDashboards, 172, 88, 150, 34, !a.settings && !a.show_details);
+  button(kImportPage, 334, 88, 150, 34, !a.settings && !a.show_details);
+  button(kGames, 496, 88, 150, 34, !a.settings && !a.show_details);
+  button(kAddContent, 60, 568, 260, 48, a.home && !a.settings && !a.show_details && !a.busy);
+  button(kLibrary, 336, 568, 260, 48, a.home && !a.settings && !a.show_details && !a.busy);
+  button(kCancel, 346, 284, 190, 54, !a.settings && !a.show_details && a.busy && !a.session && !a.initializing);
+  move(GetDlgItem(a.window, kPrimary), 60, 284, 270, 54);
   button(kPrepare, 0, 0, 0, 0, false); button(kLaunch, 0, 0, 0, 0, false);
   button(kFolder, 84, 448, 208, 44, a.settings);
   button(kStorage, 308, 448, 208, 44, a.settings);
@@ -108,12 +115,14 @@ void Layout(App& a) {
   button(kCheck, 84, 508, 208, 40, a.settings);
   move(a.root_text, 84, 406, width - 168, 32); ShowWindow(a.root_text, a.settings ? SW_SHOW : SW_HIDE);
   move(a.combo, 84, 410, width - 168, 210);
-  ShowWindow(a.combo, !a.settings && !a.show_details ? SW_SHOW : SW_HIDE);
-  move(a.status, 84, 452, width - 168, 184);
+  ShowWindow(a.combo, !a.settings && !a.show_details && !a.home && !a.import_view && !a.dashboard_indices.empty() ? SW_SHOW : SW_HIDE);
+  move(a.status, 84, a.home || a.import_view || a.dashboard_indices.empty() ? 416 : 460, width - 168, 116);
   ShowWindow(a.status, !a.settings && !a.show_details ? SW_SHOW : SW_HIDE);
   move(a.details, 60, 266, width - 120, std::max(200, height - 348));
   ShowWindow(a.details, a.show_details ? SW_SHOW : SW_HIDE);
   move(a.footer, 40, height - 42, width - 80, 28);
+  move(a.progress, 60, 352, width - 120, 5);
+  ShowWindow(a.progress, a.busy && !a.settings && !a.show_details ? SW_SHOW : SW_HIDE);
   InvalidateRect(a.window, nullptr, TRUE);
 }
 void Enable(App& a) {
@@ -127,18 +136,27 @@ void Enable(App& a) {
   EnableWindow(GetDlgItem(a.window, kStorage), !a.busy && !a.root.empty());
   EnableWindow(GetDlgItem(a.window, kDetails), TRUE);
   EnableWindow(GetDlgItem(a.window, kCancel), a.busy && !a.session && !a.installing);
-  const bool action_ok = a.next_action == kFolder ||
-    (a.next_action == kImport && has) ||
+  const bool action_ok = a.next_action == kFolder || a.next_action == kDashboards || a.next_action == kImportPage ||
+    (a.next_action == kImport && !a.root.empty()) ||
     (a.next_action == kPrepare && has && a.targets[a.selected].importable && !a.current.prepared && a.current.inputs_ok && a.environment.writable && a.environment.architecture) ||
     (a.next_action == kLaunch && a.current.prepared && a.environment.graphics);
   EnableWindow(GetDlgItem(a.window, kPrimary), !a.busy && action_ok);
   EnableWindow(GetDlgItem(a.window, kSettings), !a.busy);
+  SendMessageW(a.progress, PBM_SETMARQUEE, a.busy, 40);
   Layout(a);
 }
 void InspectSelected(App& a) {
   a.current = {};
   a.current.inputs_ok = false;
   if (a.selected >= a.targets.size()) {
+    if (!a.root.empty() && a.games) {
+      a.next_action = kImportPage;
+      Set(a.headline, Tr("Sua biblioteca começa aqui.", "Your library starts here."));
+      Set(a.subtitle, Tr("Os jogos que você adicionar aparecerão aqui com seu estado de preparação.\r\nPara jogar, use a biblioteca da dashboard original.", "Games you add appear here with their preparation status.\r\nTo play, use the original dashboard's library."));
+      Set(GetDlgItem(a.window, kPrimary), Tr("Adicionar conteúdo", "Add content"));
+      Set(a.status, Tr("Nenhum jogo adicionado\r\n\r\nTítulos cadastrados como compatíveis não contam como jogos instalados.", "No games added\r\n\r\nCompatibility entries are not installed games."));
+      Enable(a); return;
+    }
     a.next_action = kFolder;
     Set(a.headline, Tr("Seu Xbox 360 começa aqui.", "Your Xbox 360 starts here."));
     Set(a.subtitle, Tr("Escolha onde guardar seus arquivos. Depois, adicione suas dashboards e jogos.\r\nA preparação acontece neste computador; seus arquivos não são enviados.", "Choose where to keep your files, then add dashboards and games.\r\nPreparation happens on this computer; your files are never uploaded."));
@@ -187,17 +205,11 @@ void InspectSelected(App& a) {
     a.current.prepared ? Tr("Conteúdo verificado. Inicie seus jogos pela My Games da dashboard.\r\nO menu do próprio jogo permite retornar à dashboard.", "Content verified. Launch games through the dashboard's My Games.\r\nReturn to the dashboard from the game's own menu.") :
     Tr("Conteúdo verificado. A preparação será feita nesta pasta.\r\nDownloads e instalações serão informados antes de começar.", "Content verified. Preparation will use this folder.\r\nDownloads and installations will be explained before they start.");
   if (!a.current.inputs_ok) {
-    size_t ready = 0; std::string names;
-    for (const auto& i : t.inputs) {
-      auto hash = DigestFile(i.destination);
-      if (hash && hash->sha256 == i.sha256) ++ready;
-      else if (names.size() < 180) { if (!names.empty()) names += ", "; names += i.source_name; }
-    }
-    state = std::to_string(ready) + Tr(" de ", " of ") + std::to_string(t.inputs.size()) + Tr(" componentes verificados", " verified components");
-    state += "\r\n" + Tr("Falta adicionar: ", "Still needed: ") + names;
-    state += "\r\n\r\n" + Tr("Este catálogo mostra as versões com integração cadastrada. Outras versões serão identificadas sem prometer compatibilidade.", "This catalog lists versions with integration profiles. Other versions are identified without claiming compatibility.");
+    const bool added = !t.inputs.empty() && fs::is_regular_file(t.inputs.front().destination);
+    state = added ? Tr("Conteúdo incompleto", "Content incomplete") : Tr("Aguardando seus arquivos", "Waiting for your files");
+    state += "\r\n\r\n" + Tr("Adicione seus arquivos originais para continuar. Você pode consultar os componentes necessários em Detalhes.", "Add your original files to continue. Required components are listed in Details.");
   }
-  if (!t.importable) state = english ? t.limitations_en : t.limitations;
+  if (!t.importable) state = Tr("Preparação ainda indisponível para esta versão.\r\nConsulte a pendência em Detalhes; seus arquivos serão preservados.", "Preparation is not yet available for this version.\r\nSee Details for its requirements; your files are preserved.");
   if (a.games && a.current.prepared) {
     Set(a.headline, Tr("Seu jogo está preparado.", "Your game is prepared."));
     Set(GetDlgItem(a.window, kPrimary), Tr("Preparado para My Games", "Prepared for My Games"));
@@ -206,6 +218,22 @@ void InspectSelected(App& a) {
   if (!t.user_root.empty()) detail += "\r\nData: " + Utf8(t.user_root);
   Set(a.status, state);
   Set(a.details, detail.empty() ? "Verificação concluída. Nenhum dado é enviado automaticamente.\r\nLogs de execução: " + Utf8(a.root / ".local/runs") : detail);
+  if (a.home) {
+    a.next_action = a.current.prepared ? kLaunch : kDashboards;
+    Set(a.headline, Tr("Seu Xbox 360, no PC.", "Your Xbox 360, on PC."));
+    Set(a.subtitle, Tr("Configure sua dashboard original e adicione seus jogos.\r\nA experiência de console continua nos menus originais do Xbox 360.", "Set up your original dashboard and add your games.\r\nThe console experience stays in the original Xbox 360 menus."));
+    Set(GetDlgItem(a.window, kPrimary), a.current.prepared ? Tr("Iniciar Xbox 360", "Start Xbox 360") : Tr("Configurar Xbox 360", "Set up Xbox 360"));
+    Set(a.status, a.current.prepared ? (english ? t.label_en : t.label) + "\r\n\r\n" + Tr("Pronta para iniciar", "Ready to start") : Tr("Xbox 360 Dashboard\r\n\r\nConfigure uma dashboard original para começar. Jogos são adicionados separadamente.", "Xbox 360 Dashboard\r\n\r\nSet up an original dashboard to get started. Games are added separately."));
+  } else if (a.import_view) {
+    a.next_action = kImport;
+    Set(a.headline, Tr("Adicione seu conteúdo.", "Add your content."));
+    Set(a.subtitle, Tr("Escolha um arquivo ou uma pasta extraída de dashboard ou jogo.\r\nA versão é reconhecida automaticamente. Os originais ficam preservados.", "Choose an extracted dashboard or game file or folder.\r\nThe version is identified automatically. Originals stay untouched."));
+    Set(GetDlgItem(a.window, kPrimary), Tr("Escolher arquivo", "Choose file"));
+    Set(a.status, Tr("Tudo acontece neste computador\r\n\r\nApenas conteúdos com uma preparação disponível poderão ser executados. Nenhum jogo ou dashboard está incluído.", "Everything stays on this computer\r\n\r\nOnly content with an available preparation can run. No games or dashboards are included."));
+  } else if (a.next_action == kImport) {
+    a.next_action = kImportPage; Set(GetDlgItem(a.window, kPrimary), Tr("Adicionar conteúdo", "Add content"));
+    Set(a.subtitle, a.games ? Tr("Gerencie a preparação dos jogos que você adicionou.\r\nO lançamento continua na dashboard original.", "Manage preparation for games you have added.\r\nLaunching stays in the original dashboard.") : Tr("Escolha a versão da sua dashboard e adicione os arquivos originais.\r\nCada versão mantém seus próprios componentes e configurações.", "Choose your dashboard version and add its original files.\r\nEach version keeps its own components and settings."));
+  }
   Enable(a);
 }
 void Load(App& a, const fs::path& root) {
@@ -215,8 +243,14 @@ void Load(App& a, const fs::path& root) {
   a.environment = CheckEnvironment(root);
   SetWindowTextW(a.root_text, root.empty() ? L"Selecione um ambiente existente" : root.c_str());
   if (!root.empty()) a.targets = ReadCatalog(ProjectPaths{root});
+  a.selected = a.targets.size();
   for (size_t i = 0; i < a.targets.size(); ++i) {
     if ((a.targets[i].kind != "dashboard") != a.games) continue;
+    if (a.games) {
+      if (a.targets[i].inputs.empty()) continue;
+      auto installed = DigestFile(a.targets[i].inputs.front().destination);
+      if (!installed || installed->sha256 != a.targets[i].inputs.front().sha256) continue;
+    }
     a.dashboard_indices.push_back(i);
     auto label = Wide(english ? a.targets[i].label_en : a.targets[i].label);
     SendMessageW(a.combo, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(label.c_str()));
@@ -229,7 +263,8 @@ void SavePreferences(const App& a) {
   if (a.preferences.empty()) return;
   fs::create_directories(a.preferences.parent_path());
   std::ofstream out(a.preferences, std::ios::binary);
-  out << (english ? "en" : "pt") << '\n' << Utf8(a.root) << '\n';
+  const bool portable = a.root == a.preferences.parent_path() / "environment";
+  out << (english ? "en" : "pt") << '\n' << (portable ? "." : Utf8(a.root)) << '\n';
 }
 void Labels(App& a) {
   for (auto [id, pt, en] : {std::tuple{kFolder, "Selecionar ambiente", "Choose environment"},
@@ -238,7 +273,8 @@ void Labels(App& a) {
        {kDetails, "Detalhes", "Details"}, {kData, "Abrir dados locais", "Open local data"},
        {kCancel, "Cancelar", "Cancel"}, {kStorage, "Pasta de saves", "Save data folder"},
        {kSettings, "Configurações", "Settings"}, {kImportFolder, "Adicionar pasta", "Add folder"},
-       {kDashboards, "Dashboards", "Dashboards"}, {kGames, "Jogos", "Games"}}) Set(GetDlgItem(a.window, id), Tr(pt, en));
+       {kDashboards, "Dashboard", "Dashboard"}, {kGames, "Biblioteca", "Library"}, {kHome, "Início", "Home"},
+       {kImportPage, "Importar", "Import"}, {kAddContent, "Adicionar conteúdo", "Add content"}, {kLibrary, "Ver biblioteca", "View library"}}) Set(GetDlgItem(a.window, id), Tr(pt, en));
   Set(GetDlgItem(a.window, kImport), Tr("Adicionar arquivo", "Add file"));
   Set(GetDlgItem(a.window, kLanguage), english ? "EN / PT" : "PT / EN");
   Set(a.footer, Tr("PRÉVIA WINDOWS x64    ·    Perfis e save/load ainda não aprovados    ·    Seus arquivos ficam neste computador", "WINDOWS x64 PREVIEW    ·    Profiles and save/load not yet approved    ·    Your files stay on this computer"));
@@ -266,7 +302,7 @@ void Start(App& a, int action, fs::path source = {}) {
   if (a.worker.joinable()) a.worker.join();
   a.logs = a.root / ".local/logs/desktop" / std::to_string(GetTickCount64());
   fs::create_directories(a.logs);
-  a.cancel = false; a.failed = false; a.busy = true; a.session = action == kLaunch; a.installing = action == kInstall; a.importing = action == kImport;
+  a.cancel = false; a.failed = false; a.busy = true; a.session = action == kLaunch; a.installing = action == kInstall; a.importing = action == kImport; a.import_recognized = false;
   const auto target = a.targets[a.selected];
   Enable(a);
   Set(a.headline, action == kImport ? Tr("Conferindo seus arquivos.", "Checking your files.") :
@@ -291,14 +327,15 @@ void Start(App& a, int action, fs::path source = {}) {
         if (ids.size() > 1) throw std::runtime_error(Tr("Há mais de uma versão nesta pasta. Escolha a subpasta da versão que deseja adicionar. Nada foi copiado.", "This folder contains multiple versions. Choose the version's subfolder. Nothing was copied."));
         if (ids.empty()) {
           std::string message = Tr("Nenhum conjunto pronto para importar. Selecione uma pasta de conteúdo extraído.", "No importable set found. Select an extracted content folder.");
-          if (!found.empty()) message = found.front().label + (found.front().version.empty() ? "" : " — " + found.front().version) + "\r\n" + found.front().problem;
+          if (!found.empty()) message = (english ? "Content identified" : found.front().label) + (found.front().version.empty() ? "" : " — " + found.front().version) + "\r\n" + (english ? "No preparation is available for this file. Select supported, complete extracted content." : found.front().problem);
           finish(message); return;
         }
         auto selected = *std::find_if(a.targets.begin(), a.targets.end(), [&](const auto& t) { return t.id == ids.front(); });
         Post(a.window, kDetected, selected.id);
-        if (!selected.importable) { finish(selected.label + "\r\n" + selected.limitations); return; }
-        auto count = Import(ProjectPaths{a.root}, selected, source, [&] { return a.cancel.load(); }, true);
-        finish(selected.label + "\r\n" + std::to_string(count) + Tr(" componentes adicionados e verificados. Originais preservados.", " verified components added. Originals preserved.")); return;
+        if (!selected.importable) { finish((english ? selected.label_en : selected.label) + "\r\n" + Tr("Esta versão foi reconhecida. Preparação ainda indisponível; consulte Detalhes.", "This version was recognized. Preparation is not yet available; see Details.")); return; }
+        Import(ProjectPaths{a.root}, selected, source, [&] { return a.cancel.load(); }, true);
+        a.import_recognized = true;
+        finish((english ? selected.label_en : selected.label) + "\r\n" + Tr("Conteúdo verificado e adicionado. Seus originais foram preservados.", "Content verified and added. Your originals are preserved.")); return;
       }
       auto run = [&](fs::path exe, std::vector<std::string> args, const std::string& label) {
         ProcessSpec spec;
@@ -344,7 +381,7 @@ void Start(App& a, int action, fs::path source = {}) {
         if (!target.session) for (const auto& dashboard : a.targets)
           if (dashboard.session && Inspect(ProjectPaths{a.root}, dashboard).inputs_ok)
             PrepareLibrary(ProjectPaths{a.root}, dashboard, a.targets, [&] { return a.cancel.load(); });
-        finish("Preparação concluída. A identidade dos componentes será conferida antes de habilitar a sessão.");
+        finish(Tr("Preparação concluída. Os componentes serão conferidos antes de habilitar a sessão.", "Preparation finished. Components will be checked before enabling the session."));
       }
     } catch (const std::exception& error) { a.failed = true; finish(error.what()); }
   });
@@ -366,11 +403,11 @@ void Paint(App& a) {
   RECT r{}; GetClientRect(a.window, &r); FillRect(dc, &r, background_brush);
   auto px = [&](int n) { return MulDiv(n, a.dpi, 96); };
   if (!a.show_details) {
-    RECT card{px(60), px(392), r.right - px(60), px(642)};
+    RECT card{px(60), px(392), r.right - px(60), px(548)};
     auto old_brush = SelectObject(dc, surface_brush); auto old_pen = SelectObject(dc, GetStockObject(NULL_PEN));
     RoundRect(dc, card.left, card.top, card.right, card.bottom, px(18), px(18));
     SelectObject(dc, old_brush); SelectObject(dc, old_pen);
-    if (!a.settings) {
+    if (!a.settings && !a.home && !a.games && !a.busy) {
       auto old_font = SelectObject(dc, a.font); SetBkMode(dc, TRANSPARENT);
       int span = (r.right - px(120)) / 3;
       const std::string steps[] = {Tr("01  Conteúdo", "01  Content"), Tr("02  Preparação", "02  Preparation"), Tr("03  Dashboard", "03  Dashboard")};
@@ -387,8 +424,12 @@ void Paint(App& a) {
   EndPaint(a.window, &ps);
 }
 void DrawButton(App& a, const DRAWITEMSTRUCT& item) {
-  const bool primary = item.CtlID == kPrimary || (item.CtlID == kGames && a.games) || (item.CtlID == kDashboards && !a.games), disabled = item.itemState & ODS_DISABLED;
+  FillRect(item.hDC, &item.rcItem, background_brush);
+  const bool primary = item.CtlID == kPrimary, disabled = item.itemState & ODS_DISABLED;
+  const bool selected = (item.CtlID == kHome && a.home) || (item.CtlID == kGames && a.games && !a.home && !a.import_view) ||
+    (item.CtlID == kDashboards && !a.games && !a.home && !a.import_view) || (item.CtlID == kImportPage && a.import_view);
   COLORREF fill = primary && !disabled ? accent : surface;
+  if (selected) fill = RGB(49, 64, 76);
   if ((item.itemState & ODS_SELECTED) && !disabled) fill = primary ? RGB(143, 204, 131) : RGB(40, 54, 69);
   auto brush = CreateSolidBrush(fill); auto old_brush = SelectObject(item.hDC, brush);
   auto old_pen = SelectObject(item.hDC, GetStockObject(NULL_PEN));
@@ -441,9 +482,20 @@ LRESULT CALLBACK WndProc(HWND window, UINT message, WPARAM wp, LPARAM lp) {
         a->buttons.push_back(Control(*a, L"BUTTON", L"", WS_TABSTOP, kStorage));
         a->buttons.push_back(Control(*a, L"BUTTON", L"", WS_TABSTOP, kPrimary));
         a->buttons.push_back(Control(*a, L"BUTTON", L"", WS_TABSTOP, kSettings));
-        for (auto id : {kDashboards, kGames, kImportFolder}) a->buttons.push_back(Control(*a, L"BUTTON", L"", WS_TABSTOP, id));
+        for (auto id : {kDashboards, kGames, kImportFolder, kHome, kImportPage, kAddContent, kLibrary}) a->buttons.push_back(Control(*a, L"BUTTON", L"", WS_TABSTOP, id));
+        a->progress = Control(*a, PROGRESS_CLASSW, L"", PBS_MARQUEE);
         DragAcceptFiles(window, TRUE); SetTimer(window, 1, 100, nullptr);
-        Labels(*a); Layout(*a); Load(*a, a->root);
+        Labels(*a); Layout(*a);
+        if (a->initializing) {
+          a->busy = true; Enable(*a);
+          Set(a->headline, Tr("Bem-vindo ao x360-native.", "Welcome to x360-native."));
+          Set(a->subtitle, Tr("Estamos organizando o aplicativo para a primeira utilização.\r\nEm seguida, você poderá adicionar suas dashboards e jogos.", "We are getting the app ready for its first use.\r\nNext, you can add your dashboards and games."));
+          Set(a->status, Tr("Verificando o pacote local. Nenhum download é necessário nesta etapa.", "Checking the local package. No download is needed for this step."));
+          a->worker = std::thread([a] {
+            try { InitializeEnvironment(Payload(*a), a->root); Post(a->window, kInitialized, ""); }
+            catch (const std::exception& error) { Post(a->window, kInitialized, error.what()); }
+          });
+        } else Load(*a, a->root);
         if (!a->startup_error.empty()) {
           Set(a->status, Tr("Não foi possível usar a pasta padrão. Escolha outra pasta para continuar.", "The default folder could not be used. Choose another folder to continue."));
           Set(a->details, a->startup_error);
@@ -484,7 +536,11 @@ LRESULT CALLBACK WndProc(HWND window, UINT message, WPARAM wp, LPARAM lp) {
         if (id == kData && !a->root.empty()) { auto p = a->root / ".local"; fs::create_directories(p); ShellExecuteW(window, L"open", p.c_str(), nullptr, nullptr, SW_SHOWNORMAL); return 0; }
         if (id == kCancel) { a->cancel = true; Set(a->status, "Cancelando a preparação..."); return 0; }
         if (a->busy) return 0;
-        if (id == kDashboards || id == kGames) { a->games = id == kGames; Load(*a, a->root); return 0; }
+        if (id == kHome || id == kDashboards || id == kGames || id == kImportPage || id == kAddContent || id == kLibrary) {
+          a->home = id == kHome; a->games = id == kGames || id == kLibrary;
+          a->import_view = id == kImportPage || id == kAddContent;
+          Load(*a, a->root); return 0;
+        }
         if (id == kStorage) {
           auto path = PickFolder(window, Wide(Tr("Selecione a pasta de saves e perfis", "Select the saves and profiles folder")).c_str());
           if (!path.empty() && MessageBoxW(window, Wide(Tr("Usar esta pasta nas próximas sessões? Os dados anteriores permanecem na pasta original e não serão movidos ou apagados. Para reutilizar saves existentes, escolha a pasta que contém os diretórios dos títulos.", "Use this folder in future sessions? Previous data stays in its original folder and will not be moved or deleted. To reuse existing saves, choose the folder containing the title directories.")).c_str(), L"x360-native", MB_YESNO | MB_ICONINFORMATION) == IDYES) {
@@ -524,11 +580,13 @@ LRESULT CALLBACK WndProc(HWND window, UINT message, WPARAM wp, LPARAM lp) {
         auto count = DragQueryFileW(drop, 0xFFFFFFFF, nullptr, 0);
         if (count == 1) DragQueryFileW(drop, 0, path, 32768);
         DragFinish(drop);
-        if (!a->busy && count == 1) Start(*a, kImport, path);
+        if (!a->busy && count == 1) {
+          a->home = false; a->import_view = true; a->games = false; Load(*a, a->root); Start(*a, kImport, path);
+        }
         return 0;
       }
       case WM_TIMER: {
-        if (a->busy && !a->session && (++a->timer_ticks % 10 == 0)) {
+        if (a->busy && !a->initializing && !a->session && (++a->timer_ticks % 10 == 0)) {
           std::string last; fs::file_time_type latest{};
           for (auto& file : fs::directory_iterator(a->logs)) {
             if (file.path().extension() != ".log" || file.last_write_time() < latest) continue;
@@ -568,6 +626,16 @@ LRESULT CALLBACK WndProc(HWND window, UINT message, WPARAM wp, LPARAM lp) {
       case kProgress: {
         std::unique_ptr<std::string> text(reinterpret_cast<std::string*>(lp)); Set(a->details, *text); Set(a->status, *text); return 0;
       }
+      case kInitialized: {
+        std::unique_ptr<std::string> error(reinterpret_cast<std::string*>(lp));
+        if (a->worker.joinable()) a->worker.join();
+        a->busy = false; a->initializing = false;
+        if (!error->empty()) { a->root.clear(); a->startup_error = *error; }
+        Load(*a, a->root);
+        if (error->empty()) SavePreferences(*a);
+        else { Set(a->subtitle, Tr("Não foi possível organizar esta pasta. Escolha outra pasta em Configurações.", "Could not prepare this folder. Choose another folder in Settings.")); Set(a->details, *error); }
+        return 0;
+      }
       case kDetected: {
         std::unique_ptr<std::string> id(reinterpret_cast<std::string*>(lp));
         // Keep the worker's immutable catalog intact while updating visible selection.
@@ -589,8 +657,16 @@ LRESULT CALLBACK WndProc(HWND window, UINT message, WPARAM wp, LPARAM lp) {
         std::unique_ptr<std::string> text(reinterpret_cast<std::string*>(lp));
         if (a->worker.joinable()) a->worker.join(); a->busy = false; a->session = false; a->installing = false;
         a->environment = CheckEnvironment(a->root);
-        InspectSelected(*a); Set(a->details, *text + "\r\nLogs: " + Utf8(a->logs));
-        if (a->importing) { Set(a->headline, Tr("Arquivos conferidos.", "Files checked.")); Set(a->subtitle, *text); }
+        InspectSelected(*a);
+        const auto report = Wide(*text + "\r\n\r\nLogs: " + Utf8(a->logs) + "\r\n\r\n");
+        SendMessageW(a->details, EM_SETSEL, 0, 0); SendMessageW(a->details, EM_REPLACESEL, FALSE, reinterpret_cast<LPARAM>(report.c_str()));
+        if (a->importing) {
+          Set(a->headline, Tr("Resultado da importação", "Import result")); Set(a->subtitle, *text);
+          if (a->import_recognized && a->selected < a->targets.size()) {
+            const auto state = Inspect(ProjectPaths{a->root}, a->targets[a->selected]);
+            Set(a->status, state.inputs_ok ? Tr("Conteúdo completo\r\n\r\nAcesse Dashboard ou Biblioteca para continuar a preparação.", "Content complete\r\n\r\nOpen Dashboard or Library to continue preparation.") : Tr("Conteúdo incompleto\r\n\r\nAdicione os arquivos restantes. Consulte Detalhes para saber o que falta.", "Content incomplete\r\n\r\nAdd the remaining files. See Details for what is missing."));
+          } else Set(a->status, Tr("Nenhum arquivo foi importado\r\n\r\nConsulte o resultado acima e selecione outro arquivo ou pasta. Os originais foram preservados.", "No files were imported\r\n\r\nCheck the result above and choose another file or folder. Originals were preserved."));
+        }
         if (a->failed) {
           Set(a->headline, Tr("Vamos resolver esta etapa.", "Let's fix this step."));
           Set(a->subtitle, Tr("A preparação não terminou. Seus arquivos foram preservados.\r\nVeja o motivo abaixo e tente novamente após corrigir o problema.", "Preparation did not finish. Your files were preserved.\r\nRead the reason below, then retry after fixing the issue."));
@@ -616,7 +692,7 @@ LRESULT CALLBACK WndProc(HWND window, UINT message, WPARAM wp, LPARAM lp) {
 int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show) {
   SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
   CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
-  INITCOMMONCONTROLSEX controls{sizeof(controls), ICC_STANDARD_CLASSES}; InitCommonControlsEx(&controls);
+  INITCOMMONCONTROLSEX controls{sizeof(controls), ICC_STANDARD_CLASSES | ICC_PROGRESS_CLASS}; InitCommonControlsEx(&controls);
   App app;
   wchar_t self[32768]{}; GetModuleFileNameW(nullptr, self, 32768); app.self = self;
   if (!fs::is_directory(Payload(app))) {
@@ -626,7 +702,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show) {
       app.preferences = app.self.parent_path() / "data/preferences.txt";
       std::ifstream in(app.preferences); std::string language, root;
       std::getline(in, language); std::getline(in, root); english = language == "en";
-      auto saved = fs::path(std::u8string(root.begin(), root.end()));
+      auto saved = root == "." ? app.preferences.parent_path() / "environment" : fs::path(std::u8string(root.begin(), root.end()));
       if (!root.empty() && fs::is_regular_file(saved / "deps.lock.json")) app.root = saved;
     }
   }
@@ -639,8 +715,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show) {
   if (app.root.empty() && !app.preferences.empty()) {
     const auto initial = app.preferences.parent_path() / "environment";
     try {
-      InitializeEnvironment(Payload(app), initial);
-      app.root = initial; SavePreferences(app);
+      app.root = initial; app.initializing = true;
     } catch (const std::exception& error) {
       // Leave the first-run folder action available. Never overwrite a different
       // existing source version or hide it by deleting the user's environment.
