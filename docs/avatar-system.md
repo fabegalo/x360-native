@@ -316,7 +316,16 @@ o leitor original decodificou **1103/1103** blobs do pacote oficial 17559 (vindo
 leitor iguais aos do blob lidos independentemente; 6618 chamadas sem quebra de ABI;
 assinatura alterada e versão 2 rejeitadas pelo XAM com as mensagens originais.
 
-**Próximo passo concreto:** chamar `0x81966030` + `0x81966FC8` a partir do C++ para um asset
+**Rotina de tamanhos do GetAssets** (`20261012T234936Z-mm-avatars-sizes-1`,
+`--motocross_xam_aot_probe_sizes`, branch `avatars/xam-aot`): `0x81965EC0(máscara, &resultado,
+&gpu)`, chamada pelo montador `0x81966030`, lê só os argumentos e a tabela `0x816332B8`. Em AOT
+deu o mesmo que `ResultSizeFor` (C++) nas **8191/8191** máscaras que os wrappers dos jogos
+aceitam (13 bits, não nula), sem quebra de ABI. Entrada real dos dois jogos: **0x1FFF**
+(Motocross `0x824377D4`, Keflings `0x8223F564`) → resultado 0x3787C, GPU 0xED000, iguais à
+conta manual sobre a tabela. Decisão: a versão C++ continua sendo a implementação; chamar a
+original não acrescenta nada aqui.
+
+**Próximo passo concreto (não iniciado):** chamar `0x81966030` + `0x81966FC8` a partir do C++ para um asset
 real, com o registro montado a partir do catálogo, buffers de resultado/GPU do tamanho de
 `ResultSizeFor`, versão 4 e os callbacks reais do jogo. Falta confirmar a semântica de +16 e
 +48 do registro (H: +48 = categoria `field_00`) e se outras funções da cadeia de texturas
