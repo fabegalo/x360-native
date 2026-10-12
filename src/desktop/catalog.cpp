@@ -199,11 +199,14 @@ size_t Import(const ProjectPaths& paths, const Target& t, const fs::path& source
   const bool single = fs::is_regular_file(source);
   if (!single && !fs::is_directory(source)) throw std::runtime_error("Selecione um arquivo ou uma pasta de conteúdo extraído.");
   std::map<fs::path, fs::path> copies;
+  // A renamed standalone file is compared against the whole inventory. Hash it
+  // once, not once per asset; the staged copy is independently verified below.
+  const auto single_digest = single ? DigestFile(source) : std::optional<FileDigest>{};
   auto consider = [&](const fs::path& file) {
     for (const auto& i : t.inputs) {
       if (!single && !i.source_relative.empty() && file.lexically_relative(source) != i.source_relative) continue;
       if (!single && file.filename() != PathFromUtf8(i.source_name) && file.filename() != i.destination.filename()) continue;
-      if (Matches(file, i.sha256)) copies[i.destination] = file;
+      if (single ? single_digest && single_digest->sha256 == i.sha256 : Matches(file, i.sha256)) copies[i.destination] = file;
     }
   };
   if (single) { stop(); consider(source); }
