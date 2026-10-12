@@ -58,6 +58,17 @@ $bad = 0
 foreach ($p in $ordered) {
     $path = PatchPath $p
     $applied = IsApplied $path
+    # A later patch may change lines introduced by this patch, so reverse-check
+    # alone is insufficient. Exact final hashes (also checked below) establish
+    # the fully applied state without accepting untracked edits. Revert still
+    # works strictly backwards, restoring each earlier patch's context.
+    if (-not $applied -and -not $Revert) {
+        $files = @($p.files.PSObject.Properties)
+        $applied = $files.Count -gt 0
+        foreach ($f in $files) {
+            if ((FileHash $f.Name) -ne $f.Value) { $applied = $false; break }
+        }
+    }
     if ($Check) {
         $state = if ($applied) { 'applied' } else { 'NOT applied' }
         Write-Host ("{0}: {1}" -f $p.file, $state)

@@ -3,6 +3,8 @@
 #include <filesystem>
 #include <fstream>
 #include <set>
+#include <array>
+#include <rex/system/function_dispatcher.h>
 #include <rex/kernel/init.h>
 #include <rex/kernel/xam/module.h>
 #include <rex/runtime.h>
@@ -18,8 +20,22 @@ extern "C" REX_FUNC(__imp__XamContentAggregateCreateEnumerator);
 extern "C" REX_FUNC(__imp__XamContentGetAttributesInternal);
 extern "C" REX_FUNC(__imp__XamContentCreateInternal);
 extern "C" REX_FUNC(__imp__XamContentLaunchImageInternalEx);
+extern "C" REX_FUNC(__imp__XamLoaderRegisterLaunchRequestCallback);
 using rex::X_STATUS;
 using rex::X_RESULT;
+
+namespace {
+std::array<uint32_t, 4> launch_preparation{};
+unsigned preparation_calls = 0;
+bool preparation_before_shutdown = false;
+void PrepareLaunch(PPCContext& ctx, uint8_t* base) {
+  auto* fields = reinterpret_cast<rex::be<uint32_t>*>(base + ctx.r3.u32);
+  for (unsigned i = 0; i < 4; ++i) launch_preparation[i] = fields[i];
+  ++preparation_calls;
+  preparation_before_shutdown = !rex::Runtime::instance()->kernel_state()->is_terminating_title();
+  fields[3] = 1;
+}
+}
 
 TEST_CASE("Aggregate all-types query enumerates installed titles with their real types",
           "[sdk][aggregate-content]") {
@@ -159,7 +175,36 @@ TEST_CASE("Aggregate all-types query enumerates installed titles with their real
   CHECK(launch(1) == X_RESULT_FROM_WIN32(50));  // unsupported loader semantics
   std::ofstream exe(package / "default.xex", std::ios::binary);
   exe.write(reinterpret_cast<const char*>(image.data()), image.size()); exe.close();
+  REQUIRE(rt.function_dispatcher()->InitializeFunctionTable(0x82010000, 0x1000, 0x82000000, 0x20000));
+  REQUIRE(rt.function_dispatcher()->SetFunction(0x82010000, PrepareLaunch));
+  PPCContext register_context{};
+  register_context.r3.u64 = 0x82010000;
+  __imp__XamLoaderRegisterLaunchRequestCallback(register_context, rt.memory()->virtual_membase());
+  CHECK(xam->launch_request_callback.load() == 0x82010000);
+  register_context.r3.u64 = 0;
+  __imp__XamLoaderRegisterLaunchRequestCallback(register_context, rt.memory()->virtual_membase());
+  CHECK(xam->launch_request_callback.load() == 0);
+  register_context.r3.u64 = 0x82010000;
+  __imp__XamLoaderRegisterLaunchRequestCallback(register_context, rt.memory()->virtual_membase());
+  preparation_calls = 0;
+  CHECK(launch(0) == X_RESULT_FROM_WIN32(193)); // missing execution info
+  CHECK(preparation_calls == 0);
+  CHECK(xam->loader_data().launch_path.empty());
+  auto target = image;
+  auto write32 = [&](size_t offset, uint32_t value) {
+    rex::memory::store_and_swap<uint32_t>(target.data() + offset, value);
+  };
+  // Add a fourth optional header to this synthetic fixture's unused space.
+  write32(0x14, 4); write32(0x30, 0x00040006); write32(0x34, 0x700);
+  write32(0x708, 0x10203040); write32(0x70C, 0x12345678);
+  std::ofstream(package / "default.xex", std::ios::binary | std::ios::trunc)
+      .write(reinterpret_cast<const char*>(target.data()), target.size());
   launch(0);  // successful launch terminates the calling guest thread
+  CHECK(preparation_calls == 1);
+  CHECK(launch_preparation == std::array<uint32_t, 4>{0x12345678, 0x10203040, 1, 0});
+  CHECK(preparation_before_shutdown);
+  CHECK(xam->launch_request_internal_flags.load() == 0x200);
+  CHECK(xam->loader_data().launch_flags == 0); // internal 0x200 is not a caller flag
   CHECK(xam->loader_data().launch_path == "XSYSLAUNCH:\\default.xex");
   CHECK(rt.kernel_state()->content_manager()->GetOpenPackagePath("XSYSLAUNCH") == package);
 

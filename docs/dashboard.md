@@ -1096,3 +1096,53 @@ e a apresentação durante a transição. Não foi acrescentado fade, screenshot
 substituição ou espera arbitrária. Instrumentação temporária apenas encaminhava
 os exports originais; preservada em .local/tmp/transition_diag_tmp.cpp e retirada
 do build ao concluir a coleta.
+
+### 0.20 Preparação original do lançamento e reinicialização gráfica (2026-10-12)
+
+Patches 0021–0023 corrigem três contratos, **sem resolver ainda o corte visual**:
+- TerminateTitle executa os registros de encerramento antes de cancelar threads,
+  com o endereço do registro em r3, prioridade decrescente e remoção por registro.
+  As quatro rotinas da 17559 completaram; o usuário confirmou que isso sozinho
+  não eliminou o corte (`20261012T092245Z-session-0-dash_17559`).
+- XamLoaderRegisterLaunchRequestCallback deixa de ser stub. ContentLaunch lê
+  título/base_version do XEX realmente selecionado e chama o callback registrado.
+  A estrutura big endian de 16 bytes e o sinal interno 0x200 seguem o XAM original
+  17559 em 8169D0C8/8169E158; flags do chamador continuam separados. O contexto de
+  processo de sistema ainda não é implementado e retorna não suportado.
+- A passagem bootanim → dash expôs leitura de comandos inválidos: a inicialização
+  do ring buffer alterava endereço/leitor em paralelo à thread gráfica e mantinha
+  o índice de escrita anterior. A reinicialização e o writeback agora são enviados
+  à thread gráfica e aguardados; os índices são zerados juntos ao iniciar a nova
+  fila. A fila de funções do CP também ganhou exclusão mútua. Nenhuma espera do
+  convidado foi pulada ou contador de conclusão avançado artificialmente.
+
+Tentativa com falha visual: `20261012T093417Z-session-0-dash_17559`. A intro
+retornou às 06:34:33.539, mas logo vieram overflows do ring buffer; o usuário viu
+a imagem da intro parada. Após 0023, `20261012T093836Z-session-0-dash_17559`
+reinicializou a fila anterior com read=write=3313, sem esses overflows, e abriu My Games.
+Às 06:39:01.503 chamou 92183C10 com title=584108B7/base=00000103/behalf=1.
+O caminho original 92183B18 → 92182120 → 921B1CA8 chegou a VdPersistDisplay,
+caller 921B1E84, descriptor buffer=FDEBA000, 1280×720, formato 28280106.
+O callback retornou display_prepared=1; isso **não comprova preservação no host**.
+
+Castle Crashers (`20261012T093903Z-session-1-castle_crashers`) executou e pediu
+XamLoaderLaunchTitle(NULL, 0x100), com 1020 bytes. Terminou com exit 0 e zero
+stubs/erros/críticas. A dashboard retornou em `20261012T093956Z-session-2-dash_17559`,
+contexto reason=23/user=FF, sem intro. O usuário confirmou corte persistente e
+estalo de áudio; nenhuma correção de áudio foi presumida ou aplicada.
+
+Bloqueio agora delimitado: VdPersistDisplay ainda não preserva o buffer solicitado;
+o host destrói a superfície antes de carregar o jogo. No XAM original, 8169CE20
+consulta o sinal interno 0x200, usado pela rotina 816C90F0–816C95B0. Seu trecho
+816C941C–816C94F4 aplica valores de gamma com fatores 32/32 até 0/32, sob condições
+do sistema e esperas em eventos. Esse código do XAM **não é executado** pelo runtime
+atual. Reproduzir só um fade temporizado no host não atenderia esse caminho.
+Disassembly e imports ficam em `.local/tmp/xam-display-transition*.txt` e
+`.local/tmp/xam-transition-imports.txt`. XAM continua referência, não módulo global.
+
+Validação: 32/32 sdkcheck e 40/40 x360n passaram; teste focado cobre registro,
+remoção, ordem, metadados e rejeição de XEX sem execution info. Regressão iruka
+`20261012T094856Z-iruka-transition-0023`: 30 s, zero stubs/erros/críticas, timeout
+diagnóstico; não houve nova validação visual por captura. A instrumentação de
+VdPersistDisplay foi retirada do build. Os avisos de biblioteca bootanim ainda
+carregada/liberação de heap no teardown já ocorriam na tentativa anterior a 0022.

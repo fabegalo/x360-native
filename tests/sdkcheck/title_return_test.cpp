@@ -5,6 +5,8 @@
 #include <rex/runtime.h>
 #include <rex/system/thread_state.h>
 #include <rex/system/xthread.h>
+#include <rex/system/function_dispatcher.h>
+#include <rex/system/xexception.h>
 #include "synthetic_xex.h"
 #include "../../titles/common/launch_handoff.h"
 #include "../../titles/common/launch_request.h"
@@ -13,8 +15,65 @@ using rex::X_STATUS;
 extern "C" REX_FUNC(__imp__XamLoaderSetLaunchData);
 extern "C" REX_FUNC(__imp__XamLoaderLaunchTitle);
 extern "C" REX_FUNC(__imp__XamLoaderTerminateTitle);
+extern "C" REX_FUNC(__imp__ExRegisterTitleTerminateNotification);
 REXCVAR_DECLARE(std::string, x360n_handoff_in);
 REXCVAR_DECLARE(std::string, x360n_handoff_out);
+
+namespace {
+std::vector<uint32_t> termination_calls;
+uint32_t termination_registrations;
+bool callbacks_before_thread_shutdown;
+void TerminationCallback(PPCContext& ctx, uint8_t* base) {
+  const auto address = ctx.r3.u32;
+  termination_calls.push_back(address);
+  callbacks_before_thread_shutdown &= !rex::Runtime::instance()->kernel_state()->is_terminating_title();
+  // Original D3D callback 921B6160 removes its own registration using r3.
+  ctx.r4.u64 = 0;
+  __imp__ExRegisterTitleTerminateNotification(ctx, base);
+  if (address == termination_registrations + 32) {
+    // Removing a later registration must prevent its dispatch; routine is shared.
+    ctx.r3.u64 = termination_registrations + 16;
+    ctx.r4.u64 = 0;
+    __imp__ExRegisterTitleTerminateNotification(ctx, base);
+  }
+}
+}
+
+TEST_CASE("title termination dispatches registered guest callbacks before stopping threads",
+          "[sdk][title-return]") {
+  x360n::test::Workdir work("x360n_title_return", "callbacks");
+  rex::Runtime rt(work.dir, work.dir);
+  rex::RuntimeConfig config{}; config.tool_mode = true;
+  config.kernel_init = rex::kernel::InitializeKernel;
+  REQUIRE(rt.Setup(std::move(config)) == X_STATUS_SUCCESS);
+  REQUIRE(rt.function_dispatcher()->InitializeFunctionTable(0x82010000, 0x1000, 0x82000000, 0x20000));
+  REQUIRE(rt.function_dispatcher()->SetFunction(0x82010000, TerminationCallback));
+  termination_registrations = rt.memory()->SystemHeapAlloc(64);
+  REQUIRE(termination_registrations != 0);
+  termination_calls.clear(); callbacks_before_thread_shutdown = true;
+  auto* regs = rt.memory()->TranslateVirtual<rex::system::X_EX_TITLE_TERMINATE_REGISTRATION*>(termination_registrations);
+  for (unsigned i = 0; i != 3; ++i) {
+    regs[i] = {}; regs[i].notification_routine = 0x82010000; regs[i].priority = (i + 1) * 10;
+  }
+  bool returned = false;
+  auto thread = rex::system::object_ref<rex::system::XHostThread>(new rex::system::XHostThread(
+      rt.kernel_state(), 128 * 1024, 0, [&]() {
+    auto* ctx = rex::system::XThread::GetCurrentThread()->thread_state()->context();
+    for (unsigned i = 0; i != 3; ++i) {
+      ctx->r3.u64 = termination_registrations + i * 16; ctx->r4.u64 = 1;
+      __imp__ExRegisterTitleTerminateNotification(*ctx, rt.memory()->virtual_membase());
+    }
+    __imp__XamLoaderTerminateTitle(*ctx, rt.memory()->virtual_membase());
+    returned = true;
+    return 0;
+  }));
+  REQUIRE(thread->Create() == X_STATUS_SUCCESS);
+  uint64_t timeout = uint64_t(-50'000'000ll);
+  REQUIRE(thread->Wait(0, 0, 0, &timeout) == X_STATUS_SUCCESS);
+  CHECK_FALSE(returned);
+  CHECK(termination_calls == std::vector<uint32_t>{termination_registrations + 32, termination_registrations});
+  CHECK(callbacks_before_thread_shutdown);
+}
 
 TEST_CASE("original loader return preserves flags and launch data through host handoff",
           "[sdk][title-return]") {

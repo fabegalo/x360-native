@@ -1,0 +1,151 @@
+diff --git a/include/rex/kernel/xam/module.h b/include/rex/kernel/xam/module.h
+index 0cef78b..21b1983 100644
+--- a/include/rex/kernel/xam/module.h
++++ b/include/rex/kernel/xam/module.h
+@@ -10,6 +10,7 @@
+  * @modified    Tom Clay, 2026 - Adapted for ReXGlue runtime
+  */
+ 
++#include <atomic>
+ #include <string>
+ 
+ #include <rex/ppc/function.h>
+@@ -28,6 +29,9 @@ class XamModule : public system::KernelModule {
+   XamModule(Runtime* emulator, system::KernelState* kernel_state);
+   virtual ~XamModule();
+ 
++  std::atomic<uint32_t> launch_request_callback{0};
++  std::atomic<uint32_t> launch_request_internal_flags{0};
++
+   static void RegisterExportTable(rex::runtime::ExportResolver* export_resolver);
+ 
+   struct LoaderData {
+diff --git a/src/kernel/xam/xam_content.cpp b/src/kernel/xam/xam_content.cpp
+index 5445db1..3984e48 100644
+--- a/src/kernel/xam/xam_content.cpp
++++ b/src/kernel/xam/xam_content.cpp
+@@ -9,6 +9,11 @@
+  * @modified    Tom Clay, 2026 - Adapted for ReXGlue runtime
+  */
+ 
++#include <array>
++#include <rex/filesystem.h>
++#include <rex/filesystem/file.h>
++#include <rex/system/function_dispatcher.h>
++#include <rex/system/xthread.h>
+ #include <rex/cvar.h>
+ #include <rex/kernel/xam/private.h>
+ #include <rex/kernel/xam/module.h>
+@@ -435,6 +440,80 @@ u32 XamContentDeleteInternal_entry(mapped_void content_data_ptr, mapped_void ove
+   }
+ }
+ 
++
++void XamLoaderRegisterLaunchRequestCallback_entry(u32 callback) {
++  auto xam = REX_KERNEL_STATE()->GetKernelModule<XamModule>("xam.xex");
++  xam->launch_request_callback.store(callback);
++  REXKRNL_INFO("Launch request callback registered: {:08X}", uint32_t(callback));
++}
++
++// XAM 17559 8169E158: {target title, target base version, on behalf of title,
++// display prepared (written by callback)}. Read the selected image's execution
++// header, not the current dashboard's header or a hard-coded title version.
++static X_RESULT PrepareContentLaunch(filesystem::Entry* entry, XamModule* xam) {
++  xam->launch_request_internal_flags.store(0);
++  const auto callback = xam->launch_request_callback.load();
++  if (!callback) return X_ERROR_SUCCESS;
++  auto* state = REX_KERNEL_STATE();
++  if (state->process_type() == 2) {
++    // The original system-process service context is not implemented yet.
++    return X_RESULT_FROM_WIN32(50);
++  }
++  auto* thread = XThread::GetCurrentThread();
++  if (!thread || !state->function_dispatcher()->GetFunction(callback)) {
++    return X_RESULT_FROM_WIN32(50);
++  }
++  filesystem::File* file = nullptr;
++  if (XFAILED(entry->Open(filesystem::FileAccess::kFileReadData, &file))) {
++    return X_ERROR_ACCESS_DENIED;
++  }
++  struct FileGuard { filesystem::File* file; ~FileGuard() { file->Destroy(); } } guard{file};
++  auto read = [&](uint32_t offset, std::span<uint8_t> bytes) {
++    if (uint64_t(offset) + bytes.size() > entry->size()) return false;
++    size_t count = 0;
++    return XSUCCEEDED(file->ReadSync(bytes, offset, &count)) && count == bytes.size();
++  };
++  std::array<uint8_t, 24> header{};
++  if (!read(0, header) || std::memcmp(header.data(), "XEX2", 4) != 0)
++    return X_RESULT_FROM_WIN32(193);
++  const auto image_offset = memory::load_and_swap<uint32_t>(header.data() + 8);
++  const auto count = memory::load_and_swap<uint32_t>(header.data() + 20);
++  if (image_offset > entry->size() || image_offset < 24 ||
++      count > (image_offset - 24) / 8) return X_RESULT_FROM_WIN32(193);
++  std::array<uint8_t, 24> execution{};
++  bool found = false;
++  for (uint32_t i = 0; i < count; ++i) {
++    std::array<uint8_t, 8> option{};
++    if (!read(24 + i * 8, option)) return X_RESULT_FROM_WIN32(193);
++    if (memory::load_and_swap<uint32_t>(option.data()) != 0x00040006) continue;
++    auto offset = memory::load_and_swap<uint32_t>(option.data() + 4);
++    if (offset < 24 + count * 8 || uint64_t(offset) + execution.size() > image_offset ||
++        !read(offset, execution)) return X_RESULT_FROM_WIN32(193);
++    found = true;
++    break;
++  }
++  if (!found) return X_RESULT_FROM_WIN32(193);
++  const auto request = state->memory()->SystemHeapAlloc(16);
++  if (!request) return X_RESULT_FROM_WIN32(8);
++  struct RequestGuard {
++    memory::Memory* memory; uint32_t address;
++    ~RequestGuard() { memory->SystemHeapFree(address); }
++  } request_guard{state->memory(), request};
++  auto* fields = state->memory()->TranslateVirtual<be<uint32_t>*>(request);
++  fields[0] = memory::load_and_swap<uint32_t>(execution.data() + 12);
++  fields[1] = memory::load_and_swap<uint32_t>(execution.data() + 8);
++  fields[2] = 1;  // Original XamExecutingOnBehalfOfTitle for non-system processes.
++  fields[3] = 0;
++  REXKRNL_INFO("Launch preparation begin: callback={:08X} title={:08X} base={:08X} behalf={}",
++              callback, uint32_t(fields[0]), uint32_t(fields[1]), uint32_t(fields[2]));
++  uint64_t args[] = {request};
++  state->function_dispatcher()->ExecuteTrap(thread->thread_state(), callback, args, 1);
++  // This is an internal XAM flag (0x200), not caller-supplied launch flags.
++  xam->launch_request_internal_flags.store(fields[3] ? 0x200 : 0);
++  REXKRNL_INFO("Launch preparation completed: display_prepared={}", uint32_t(fields[3]));
++  return X_ERROR_SUCCESS;
++}
++
+ // Original XAM 17559 0x294 -> 816EFED0: open the aggregate package under
+ // XSYSLAUNCH, then pass the requested image and flags to the loader.
+ u32 XamContentLaunchImageInternalEx_entry(mapped_void content, mapped_string image, u32 flags) {
+@@ -467,6 +546,11 @@ u32 XamContentLaunchImageInternalEx_entry(mapped_void content, mapped_string ima
+     return X_ERROR_FILE_NOT_FOUND;
+   }
+   auto xam = state->GetKernelModule<XamModule>("xam.xex");
++  result = PrepareContentLaunch(entry, xam.get());
++  if (result != X_ERROR_SUCCESS) {
++    manager->CloseContent("XSYSLAUNCH");
++    return result;
++  }
+   xam->loader_data().launch_path = path;
+   xam->loader_data().launch_flags = flags;
+   REXKRNL_INFO("Content launch requested: title={:08X}, path={}, flags={:08X}",
+@@ -479,6 +563,7 @@ u32 XamContentLaunchImageInternalEx_entry(mapped_void content, mapped_string ima
+ }  // namespace kernel
+ }  // namespace rex
+ 
++REX_EXPORT(__imp__XamLoaderRegisterLaunchRequestCallback, rex::kernel::xam::XamLoaderRegisterLaunchRequestCallback_entry)
+ REX_EXPORT(__imp__XamContentGetLicenseMask, rex::kernel::xam::XamContentGetLicenseMask_entry)
+ REX_EXPORT(__imp__XamContentResolve, rex::kernel::xam::XamContentResolve_entry)
+ REX_EXPORT(__imp__XamContentCreateEnumerator, rex::kernel::xam::XamContentCreateEnumerator_entry)
+diff --git a/src/kernel/xam/xam_misc.cpp b/src/kernel/xam/xam_misc.cpp
+index 7774283..525f1b8 100644
+--- a/src/kernel/xam/xam_misc.cpp
++++ b/src/kernel/xam/xam_misc.cpp
+@@ -539,7 +539,6 @@ REX_EXPORT_STUB(__imp__XamLoaderLaunchTitleForReason);
+ REX_EXPORT_STUB(__imp__XamLoaderLaunchTitleOnDvd);
+ REX_EXPORT_STUB(__imp__XamLoaderRebootToDash);
+ REX_EXPORT_STUB(__imp__XamLoaderRebootToServerDash);
+-REX_EXPORT_STUB(__imp__XamLoaderRegisterLaunchRequestCallback);
+ REX_EXPORT_STUB(__imp__XamLoaderSetClearCache);
+ REX_EXPORT_STUB(__imp__XamLoaderSetGameInfo);
+ REX_EXPORT_STUB(__imp__XamLoaderSetSpindleSpeed);

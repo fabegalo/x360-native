@@ -1,0 +1,125 @@
+diff --git a/include/rex/system/kernel_state.h b/include/rex/system/kernel_state.h
+index 9b9cf9e..a401acd 100644
+--- a/include/rex/system/kernel_state.h
++++ b/include/rex/system/kernel_state.h
+@@ -167,6 +167,7 @@ struct DPCImpersonationScope {
+ };
+ 
+ struct TerminateNotification {
++  uint32_t guest_registration;
+   uint32_t guest_routine;
+   uint32_t priority;
+ };
+@@ -230,8 +231,8 @@ class KernelState {
+   uint32_t AllocateTLS(PPCContext* context);
+   void FreeTLS(PPCContext* context, uint32_t slot);
+ 
+-  void RegisterTitleTerminateNotification(uint32_t routine, uint32_t priority);
+-  void RemoveTitleTerminateNotification(uint32_t routine);
++  void RegisterTitleTerminateNotification(uint32_t registration, uint32_t routine, uint32_t priority);
++  void RemoveTitleTerminateNotification(uint32_t registration);
+ 
+   void RegisterModule(XModule* module);
+   void UnregisterModule(XModule* module);
+diff --git a/src/system/kernel_state.cpp b/src/system/kernel_state.cpp
+index 78d8c94..e6cb3b3 100644
+--- a/src/system/kernel_state.cpp
++++ b/src/system/kernel_state.cpp
+@@ -9,6 +9,7 @@
+  * @modified    Tom Clay, 2026 - Adapted for ReXGlue runtime
+  */
+ 
++#include <algorithm>
+ #include <chrono>
+ #include <cstring>
+ #include <filesystem>
+@@ -434,21 +435,24 @@ void KernelState::FreeTLS(PPCContext* context, uint32_t slot) {
+   kernel::xboxkrnl::xeKeKfReleaseSpinLock(context, tls_lock, old_irql);
+ }
+ 
+-void KernelState::RegisterTitleTerminateNotification(uint32_t routine, uint32_t priority) {
+-  TerminateNotification notify;
+-  notify.guest_routine = routine;
+-  notify.priority = priority;
+-
+-  terminate_notifications_.push_back(notify);
+-}
+-
+-void KernelState::RemoveTitleTerminateNotification(uint32_t routine) {
+-  for (auto it = terminate_notifications_.begin(); it != terminate_notifications_.end(); it++) {
+-    if (it->guest_routine == routine) {
+-      terminate_notifications_.erase(it);
+-      break;
++void KernelState::RegisterTitleTerminateNotification(uint32_t registration, uint32_t routine,
++                                                     uint32_t priority) {
++  auto global_lock = global_critical_region_.Acquire();
++  // A registration, rather than its function, identifies a callback instance.
++  for (auto& notify : terminate_notifications_) {
++    if (notify.guest_registration == registration) {
++      notify = {registration, routine, priority};
++      return;
+     }
+   }
++  terminate_notifications_.push_back({registration, routine, priority});
++}
++
++void KernelState::RemoveTitleTerminateNotification(uint32_t registration) {
++  auto global_lock = global_critical_region_.Acquire();
++  std::erase_if(terminate_notifications_, [registration](const auto& notify) {
++    return notify.guest_registration == registration;
++  });
+ }
+ 
+ void KernelState::RegisterModule(XModule* module) {}
+@@ -979,6 +983,33 @@ void KernelState::WaitForThreadsToExit(const std::vector<object_ref<XThread>>& t
+ void KernelState::TerminateTitle() {
+   REXSYS_DEBUG("KernelState::TerminateTitle");
+ 
++  // Dispatch while guest synchronization and graphics are still alive. The
++  // original callbacks may wait, remove themselves, or remove a pending callback.
++  // Never hold the global lock across guest code and never cancel waits first.
++  if (XThread::IsInThread()) {
++    auto* thread_state = XThread::GetCurrentThread()->thread_state();
++    for (;;) {
++      TerminateNotification notify;
++      {
++        auto global_lock = global_critical_region_.Acquire();
++        if (terminate_notifications_.empty()) break;
++        // 17559 D3D registers its prepare/shutdown pair at 6E800001/6E800000.
++        auto next = std::max_element(terminate_notifications_.begin(), terminate_notifications_.end(),
++            [](const auto& a, const auto& b) { return a.priority < b.priority; });
++        notify = *next;
++        terminate_notifications_.erase(next);
++      }
++      REXSYS_INFO("Title terminate callback {:08X}, registration={:08X}, priority={:08X}",
++                  notify.guest_routine, notify.guest_registration, notify.priority);
++      if (!function_dispatcher_->GetFunction(notify.guest_routine)) {
++        REX_FATAL("Title terminate callback {:08X} has no recompiled function", notify.guest_routine);
++      }
++      uint64_t args[] = {notify.guest_registration};
++      function_dispatcher_->ExecuteTrap(thread_state, notify.guest_routine, args, 1);
++      REXSYS_INFO("Title terminate callback {:08X} completed", notify.guest_routine);
++    }
++  }
++
+   constexpr uint32_t kCooperativeExitTimeoutMs = 200;
+ 
+   // Guest threads poll this flag in the kernel wait primitives
+diff --git a/src/kernel/xboxkrnl/xboxkrnl_modules.cpp b/src/kernel/xboxkrnl/xboxkrnl_modules.cpp
+index dcd2001..251047f 100644
+--- a/src/kernel/xboxkrnl/xboxkrnl_modules.cpp
++++ b/src/kernel/xboxkrnl/xboxkrnl_modules.cpp
+@@ -201,11 +201,11 @@ void ExRegisterTitleTerminateNotification_entry(ppc_ptr_t<X_EX_TITLE_TERMINATE_R
+                                                 u32 create) {
+   if (create) {
+     // Adding.
+-    REX_KERNEL_STATE()->RegisterTitleTerminateNotification(reg->notification_routine,
++    REX_KERNEL_STATE()->RegisterTitleTerminateNotification(reg.guest_address(), reg->notification_routine,
+                                                            reg->priority);
+   } else {
+     // Removing.
+-    REX_KERNEL_STATE()->RemoveTitleTerminateNotification(reg->notification_routine);
++    REX_KERNEL_STATE()->RemoveTitleTerminateNotification(reg.guest_address());
+   }
+ }
+ 

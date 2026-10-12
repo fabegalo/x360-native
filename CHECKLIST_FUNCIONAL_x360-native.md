@@ -30,6 +30,11 @@ Castle Crashers → retorno pelo jogo → 17559 sem intro. Logs e limites em
 31/31 sdkcheck e 40/40 x360n passaram. Isso não aprova perfis, saves, Guide ou
 fidelidade visual da troca: o usuário relatou **corte seco ao lançar pela biblioteca**.
 A continuidade deve seguir o caminho original, sem fade ou tela inventados.
+Incremento §0.20: callbacks de encerramento/preparação restaurados e troca do ring
+buffer sincronizada. Ciclo 17559 → Castle Crashers → 17559 sem intro repetido;
+32/32 sdkcheck e 40/40 x360n passaram. **Corte e estalo de áudio continuam pendentes**:
+o pedido VdPersistDisplay agora chega, mas sua preservação e a apresentação do XAM
+ainda não são atendidas. Não marcar fidelidade da transição como concluída.
 Os itens gerais abaixo continuam pendentes quando a evidência cobre só este par.
 
 ## 1. Inicialização e seleção da dashboard — P0
