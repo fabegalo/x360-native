@@ -425,6 +425,31 @@ Se houver commits já compartilhados, informar a situação antes de alterar ess
 
 **Portões de publicação:** revisão/reescrita e auditoria de todo o histórico próprio antes do primeiro push; conteúdo distribuível autorizado e aceite do pacote real (§15 e §18) antes de anunciar a release para usuários. Todos permanecem pendentes. Esta entrega modifica documentação, sem reescrita, publicação ou novos ports.
 
+## 20. Títulos XNA / Xbox Live Indie Games — P1/P2
+
+Os títulos XNA devem ser tratados como uma categoria diferente dos executáveis nativos recompilados pelo ReXGlue.
+
+- [ ] Detectar automaticamente títulos XNA e diferenciá-los dos jogos nativos de Xbox 360.
+- [ ] Identificar a versão de XNA Framework e do runtime gerenciado exigida pelo título.
+- [ ] Carregar e executar assemblies gerenciados do jogo sem tratá-los como código PowerPC nativo comum.
+- [ ] Implementar ou integrar um ambiente compatível com o .NET Compact Framework usado pelo Xbox 360.
+- [ ] Implementar as APIs necessárias de Microsoft.Xna.Framework, incluindo ciclo Game.Initialize / Update / Draw.
+- [ ] Implementar GraphicsDevice e os serviços gráficos utilizados pelos títulos XNA sobre os backends do projeto.
+- [ ] Suportar o XNA Content Pipeline em runtime: localizar e carregar os assets compilados usados pelo jogo.
+- [ ] Suportar áudio, entrada, armazenamento e networking usados pelas APIs XNA, integrados com os serviços compartilhados do x360-native.
+- [ ] Mapear gamer services, profiles, storage e Guide chamados através das APIs XNA para o mesmo estado utilizado pela dashboard e pelos jogos nativos.
+- [ ] Preservar comportamento de threads e sincronização relevante do .NET Compact Framework do Xbox 360.
+- [ ] Validar exceções, garbage collection e semântica do runtime gerenciado nos caminhos realmente utilizados pelos jogos.
+- [ ] Lançar títulos XNA a partir da My Games original usando a mesma identidade de conteúdo e fluxo original da dashboard.
+- [ ] Retornar corretamente do título XNA à dashboard, sem criar um launcher paralelo específico para XNA.
+- [ ] Persistir saves, configurações e perfil utilizando a mesma infraestrutura de usuário da plataforma.
+- [ ] Registrar compatibilidade XNA separadamente: identificado → runtime carregado → inicia → menu → gameplay → save/load → jogável.
+- [ ] Testar diferentes gerações de XNA, sem assumir que um jogo funcionando valida todas as versões do framework.
+
+**Critério de aceite:** dashboard original → My Games → selecionar título XNA → runtime gerenciado inicia o jogo → gráficos/áudio/entrada funcionam → save persiste → retorno original à dashboard.
+
+Não classificar um título XNA como compatível apenas porque seus arquivos ou assemblies puderam ser extraídos.
+
 ## Marcos de entrega
 
 | Marco | Resultado a demonstrar |
