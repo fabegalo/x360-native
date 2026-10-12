@@ -16,13 +16,14 @@
 #include "child_process.h"
 #include "environment_win32.h"
 #include "workspace_lease.h"
+#include "sha256.h"
 
 namespace fs = std::filesystem;
 using namespace x360n;
 using namespace x360n::desktop;
 namespace {
 constexpr UINT kFinished = WM_APP + 1, kProgress = WM_APP + 2, kDetected = WM_APP + 3;
-enum { kFolder = 101, kTargets, kCheck, kImport, kPrepare, kLaunch, kDetails, kData, kCancel, kLanguage, kInstall, kStorage, kPrimary, kSettings };
+enum { kFolder = 101, kTargets, kCheck, kImport, kPrepare, kLaunch, kDetails, kData, kCancel, kLanguage, kInstall, kStorage, kPrimary, kSettings, kImportFolder, kDashboards, kGames };
 constexpr COLORREF background = RGB(15, 20, 27), surface = RGB(24, 32, 42), foreground = RGB(236, 241, 247), muted = RGB(157, 171, 189), accent = RGB(169, 231, 154);
 HBRUSH background_brush = CreateSolidBrush(background), surface_brush = CreateSolidBrush(surface);
 bool english = false;
@@ -55,11 +56,16 @@ struct App {
   unsigned timer_ticks = 0;
   bool allow_downloads = false;
   bool installing = false;
-  bool settings = false;
+  bool settings = false, games = false, importing = false;
   int next_action = kFolder;
   ~App() { if (worker.joinable()) worker.join(); DeleteObject(font); DeleteObject(title_font); DeleteObject(headline_font); DestroyIcon(icon); }
 };
 void Set(HWND h, const std::string& text) { SetWindowTextW(h, Wide(text).c_str()); }
+fs::path Payload(const App& a) { return a.self.parent_path() / "app/workspace"; }
+fs::path Supervisor(const App& a) {
+  const auto packaged = a.self.parent_path() / "app/x360n.exe";
+  return fs::is_regular_file(packaged) ? packaged : a.self.parent_path() / "x360n.exe";
+}
 void SyncSelection(App& a) {
   auto it = std::find(a.dashboard_indices.begin(), a.dashboard_indices.end(), a.selected);
   SendMessageW(a.combo, CB_SETCURSEL, it == a.dashboard_indices.end() ? -1 : it - a.dashboard_indices.begin(), 0);
@@ -90,7 +96,10 @@ void Layout(App& a) {
   move(a.headline, 60, 112, width - 120, 62);
   move(a.subtitle, 60, 186, width - 120, 52);
   button(kPrimary, 60, 264, 270, 54, !a.settings && !a.show_details);
-  button(kImport, 346, 264, 210, 54, !a.settings && !a.show_details && a.current.prepared && !a.busy);
+  button(kImport, 346, 264, 210, 54, !a.settings && !a.show_details && a.next_action != kImport && !a.busy);
+  button(kImportFolder, a.next_action == kImport ? 346 : 572, 264, 210, 54, !a.settings && !a.show_details && !a.busy);
+  button(kDashboards, 60, 82, 140, 30, !a.settings && !a.show_details);
+  button(kGames, 212, 82, 140, 30, !a.settings && !a.show_details);
   button(kCancel, 346, 264, 190, 54, !a.settings && !a.show_details && a.busy && !a.session);
   button(kPrepare, 0, 0, 0, 0, false); button(kLaunch, 0, 0, 0, 0, false);
   button(kFolder, 84, 448, 208, 44, a.settings);
@@ -100,7 +109,7 @@ void Layout(App& a) {
   move(a.root_text, 84, 406, width - 168, 32); ShowWindow(a.root_text, a.settings ? SW_SHOW : SW_HIDE);
   move(a.combo, 84, 410, width - 168, 210);
   ShowWindow(a.combo, !a.settings && !a.show_details ? SW_SHOW : SW_HIDE);
-  move(a.status, 84, 460, width - 168, 86);
+  move(a.status, 84, 452, width - 168, 184);
   ShowWindow(a.status, !a.settings && !a.show_details ? SW_SHOW : SW_HIDE);
   move(a.details, 60, 266, width - 120, std::max(200, height - 348));
   ShowWindow(a.details, a.show_details ? SW_SHOW : SW_HIDE);
@@ -111,7 +120,7 @@ void Enable(App& a) {
   bool has = a.selected < a.targets.size();
   for (auto b : a.buttons) EnableWindow(b, !a.busy);
   EnableWindow(a.combo, !a.busy);
-  EnableWindow(GetDlgItem(a.window, kImport), !a.busy && has && a.targets[a.selected].importable);
+  EnableWindow(GetDlgItem(a.window, kImport), !a.busy && has);
   EnableWindow(GetDlgItem(a.window, kPrepare), !a.busy && has && a.current.inputs_ok && a.environment.writable && a.environment.architecture);
   EnableWindow(GetDlgItem(a.window, kLaunch), !a.busy && has && a.current.prepared && a.targets[a.selected].session && a.environment.graphics);
   EnableWindow(GetDlgItem(a.window, kData), !a.root.empty());
@@ -119,8 +128,8 @@ void Enable(App& a) {
   EnableWindow(GetDlgItem(a.window, kDetails), TRUE);
   EnableWindow(GetDlgItem(a.window, kCancel), a.busy && !a.session && !a.installing);
   const bool action_ok = a.next_action == kFolder ||
-    (a.next_action == kImport && has && a.targets[a.selected].importable) ||
-    (a.next_action == kPrepare && a.current.inputs_ok && a.environment.writable && a.environment.architecture) ||
+    (a.next_action == kImport && has) ||
+    (a.next_action == kPrepare && has && a.targets[a.selected].importable && !a.current.prepared && a.current.inputs_ok && a.environment.writable && a.environment.architecture) ||
     (a.next_action == kLaunch && a.current.prepared && a.environment.graphics);
   EnableWindow(GetDlgItem(a.window, kPrimary), !a.busy && action_ok);
   EnableWindow(GetDlgItem(a.window, kSettings), !a.busy);
@@ -132,7 +141,7 @@ void InspectSelected(App& a) {
   if (a.selected >= a.targets.size()) {
     a.next_action = kFolder;
     Set(a.headline, Tr("Seu Xbox 360 começa aqui.", "Your Xbox 360 starts here."));
-    Set(a.subtitle, Tr("Escolha onde guardar seus arquivos. Depois, importe a dashboard e o jogo.\r\nA preparação acontece neste computador; seus arquivos não são enviados.", "Choose where to keep your files, then import the dashboard and game.\r\nPreparation happens on this computer; your files are never uploaded."));
+    Set(a.subtitle, Tr("Escolha onde guardar seus arquivos. Depois, adicione suas dashboards e jogos.\r\nA preparação acontece neste computador; seus arquivos não são enviados.", "Choose where to keep your files, then add dashboards and games.\r\nPreparation happens on this computer; your files are never uploaded."));
     Set(GetDlgItem(a.window, kPrimary), Tr("Escolher pasta", "Choose folder"));
     Set(a.status, Tr("Você pode mudar a pasta e o idioma em Configurações.\r\nDashboard e jogos não estão incluídos no aplicativo.", "You can change the folder and language in Settings.\r\nDashboard and games are not included in the app."));
     Enable(a); return;
@@ -161,23 +170,38 @@ void InspectSelected(App& a) {
       a.current.prepared = false; detail += issue + "\r\n";
     }
   }
-  auto supervisor = a.self.parent_path() / "x360n.exe";
+  auto supervisor = Supervisor(a);
   if (!fs::is_regular_file(supervisor)) {
     a.current.prepared = false;
     detail += "Falta o supervisor ao lado do aplicativo: " + Utf8(supervisor) + "\r\n";
   }
   a.next_action = !a.current.inputs_ok ? kImport : !a.current.prepared ? kPrepare : t.session ? kLaunch : kPrepare;
-  Set(a.headline, !a.current.inputs_ok ? Tr("Traga seus arquivos.", "Bring your files.") :
+  Set(a.headline, !a.current.inputs_ok ? (a.games ? Tr("Seus jogos, no menu original.", "Your games, in the original menu.") : Tr("Comece pela sua dashboard.", "Start with your dashboard.")) :
       !a.current.prepared ? Tr("Tudo pronto para preparar.", "Ready to prepare.") : Tr("Sua dashboard está pronta.", "Your dashboard is ready."));
-  Set(a.subtitle, !a.current.inputs_ok ? Tr("Selecione ou arraste a pasta extraída do conjunto abaixo.\r\nVamos identificar a versão e verificar os arquivos antes de copiar.", "Choose or drop the extracted folder for the set below.\r\nWe identify the version and verify every file before copying.") :
+  Set(a.subtitle, !a.current.inputs_ok ? Tr("Adicione um arquivo ou uma pasta. A versão será reconhecida automaticamente.\r\nVocê pode trazer os componentes aos poucos; os originais ficam preservados.", "Add a file or folder. Its version is identified automatically.\r\nYou can add components gradually; your originals stay untouched.") :
       !a.current.prepared ? Tr("O aplicativo obtém as ferramentas e prepara a execução local.\r\nEssa etapa pode demorar na primeira vez; depois, é só abrir.", "The app obtains the tools and prepares local execution.\r\nThe first preparation can take a while; after that, just open it.") :
       Tr("Abra o menu original do Xbox 360.\r\nSeus jogos continuam na My Games, dentro da dashboard.", "Open the original Xbox 360 menu.\r\nYour games stay in My Games, inside the dashboard."));
   Set(GetDlgItem(a.window, kPrimary), a.next_action == kImport ? Tr("Selecionar arquivos", "Choose files") :
       a.next_action == kPrepare ? Tr("Verificar e preparar", "Verify and prepare") : Tr("Abrir dashboard   →", "Open dashboard   →"));
   std::string state = !missing.empty() ? Tr("Próximo conjunto: ", "Next set: ") + missing :
-    a.current.prepared ? Tr("Conteúdo verificado. Lance Castle Crashers pelo menu original.\r\nUse Return to Arcade no jogo para voltar à dashboard.", "Content verified. Launch Castle Crashers from the original menu.\r\nUse Return to Arcade in the game to return to the dashboard.") :
+    a.current.prepared ? Tr("Conteúdo verificado. Inicie seus jogos pela My Games da dashboard.\r\nO menu do próprio jogo permite retornar à dashboard.", "Content verified. Launch games through the dashboard's My Games.\r\nReturn to the dashboard from the game's own menu.") :
     Tr("Conteúdo verificado. A preparação será feita nesta pasta.\r\nDownloads e instalações serão informados antes de começar.", "Content verified. Preparation will use this folder.\r\nDownloads and installations will be explained before they start.");
-  if (!t.importable || !t.session) state = english ? t.limitations_en : t.limitations;
+  if (!a.current.inputs_ok) {
+    size_t ready = 0; std::string names;
+    for (const auto& i : t.inputs) {
+      auto hash = DigestFile(i.destination);
+      if (hash && hash->sha256 == i.sha256) ++ready;
+      else if (names.size() < 180) { if (!names.empty()) names += ", "; names += i.source_name; }
+    }
+    state = std::to_string(ready) + Tr(" de ", " of ") + std::to_string(t.inputs.size()) + Tr(" componentes verificados", " verified components");
+    state += "\r\n" + Tr("Falta adicionar: ", "Still needed: ") + names;
+    state += "\r\n\r\n" + Tr("Este catálogo mostra as versões com integração cadastrada. Outras versões serão identificadas sem prometer compatibilidade.", "This catalog lists versions with integration profiles. Other versions are identified without claiming compatibility.");
+  }
+  if (!t.importable) state = english ? t.limitations_en : t.limitations;
+  if (a.games && a.current.prepared) {
+    Set(a.headline, Tr("Seu jogo está preparado.", "Your game is prepared."));
+    Set(GetDlgItem(a.window, kPrimary), Tr("Preparado para My Games", "Prepared for My Games"));
+  }
   detail += "\r\n" + (english ? t.limitations_en : t.limitations);
   if (!t.user_root.empty()) detail += "\r\nData: " + Utf8(t.user_root);
   Set(a.status, state);
@@ -192,11 +216,11 @@ void Load(App& a, const fs::path& root) {
   SetWindowTextW(a.root_text, root.empty() ? L"Selecione um ambiente existente" : root.c_str());
   if (!root.empty()) a.targets = ReadCatalog(ProjectPaths{root});
   for (size_t i = 0; i < a.targets.size(); ++i) {
-    if (!a.targets[i].session && !a.targets[i].id.starts_with("dash_")) continue;
+    if ((a.targets[i].kind != "dashboard") != a.games) continue;
     a.dashboard_indices.push_back(i);
     auto label = Wide(english ? a.targets[i].label_en : a.targets[i].label);
     SendMessageW(a.combo, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(label.c_str()));
-    if (a.targets[i].session) a.selected = i;
+    if (a.dashboard_indices.size() == 1 || a.targets[i].session) a.selected = i;
   }
   SyncSelection(a);
   InspectSelected(a);
@@ -213,16 +237,17 @@ void Labels(App& a) {
        {kPrepare, "Preparar", "Prepare"}, {kLaunch, "Abrir dashboard", "Open dashboard"},
        {kDetails, "Detalhes", "Details"}, {kData, "Abrir dados locais", "Open local data"},
        {kCancel, "Cancelar", "Cancel"}, {kStorage, "Pasta de saves", "Save data folder"},
-       {kSettings, "Configurações", "Settings"}}) Set(GetDlgItem(a.window, id), Tr(pt, en));
-  Set(GetDlgItem(a.window, kImport), Tr("Importar outro conjunto", "Import another set"));
+       {kSettings, "Configurações", "Settings"}, {kImportFolder, "Adicionar pasta", "Add folder"},
+       {kDashboards, "Dashboards", "Dashboards"}, {kGames, "Jogos", "Games"}}) Set(GetDlgItem(a.window, id), Tr(pt, en));
+  Set(GetDlgItem(a.window, kImport), Tr("Adicionar arquivo", "Add file"));
   Set(GetDlgItem(a.window, kLanguage), english ? "EN / PT" : "PT / EN");
   Set(a.footer, Tr("PRÉVIA WINDOWS x64    ·    Perfis e save/load ainda não aprovados    ·    Seus arquivos ficam neste computador", "WINDOWS x64 PREVIEW    ·    Profiles and save/load not yet approved    ·    Your files stay on this computer"));
 }
-fs::path PickFolder(HWND owner, const wchar_t* title) {
+fs::path PickFolder(HWND owner, const wchar_t* title, bool folder = true) {
   IFileOpenDialog* dialog = nullptr;
   if (FAILED(CoCreateInstance(CLSID_FileOpenDialog, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&dialog)))) return {};
   DWORD options = 0; dialog->GetOptions(&options);
-  dialog->SetOptions(options | FOS_PICKFOLDERS | FOS_FORCEFILESYSTEM | FOS_PATHMUSTEXIST);
+  dialog->SetOptions(options | (folder ? FOS_PICKFOLDERS : FOS_FILEMUSTEXIST) | FOS_FORCEFILESYSTEM | FOS_PATHMUSTEXIST);
   dialog->SetTitle(title);
   fs::path result;
   if (SUCCEEDED(dialog->Show(owner))) {
@@ -241,7 +266,7 @@ void Start(App& a, int action, fs::path source = {}) {
   if (a.worker.joinable()) a.worker.join();
   a.logs = a.root / ".local/logs/desktop" / std::to_string(GetTickCount64());
   fs::create_directories(a.logs);
-  a.cancel = false; a.failed = false; a.busy = true; a.session = action == kLaunch; a.installing = action == kInstall;
+  a.cancel = false; a.failed = false; a.busy = true; a.session = action == kLaunch; a.installing = action == kInstall; a.importing = action == kImport;
   const auto target = a.targets[a.selected];
   Enable(a);
   Set(a.headline, action == kImport ? Tr("Conferindo seus arquivos.", "Checking your files.") :
@@ -260,15 +285,20 @@ void Start(App& a, int action, fs::path source = {}) {
     };
     try {
       if (action == kImport) {
-        const auto detected = DetectImportTargets(a.targets, source, [&] { return a.cancel.load(); });
-        if (detected.size() > 1) throw std::runtime_error(Tr("A pasta contém mais de um conjunto reconhecido. Selecione a subpasta de uma única versão; nenhum arquivo foi copiado.", "The folder contains multiple recognized sets. Select one version's subfolder; no files were copied."));
-        auto selected = target;
-        if (detected.size() == 1) {
-          selected = *std::find_if(a.targets.begin(), a.targets.end(), [&](const auto& t) { return t.id == detected.front(); });
-          Post(a.window, kDetected, selected.id);
+        const auto found = IdentifyContent(a.targets, source, [&] { return a.cancel.load(); });
+        std::vector<std::string> ids;
+        for (const auto& item : found) if (item.recognized && std::find(ids.begin(), ids.end(), item.target_id) == ids.end()) ids.push_back(item.target_id);
+        if (ids.size() > 1) throw std::runtime_error(Tr("Há mais de uma versão nesta pasta. Escolha a subpasta da versão que deseja adicionar. Nada foi copiado.", "This folder contains multiple versions. Choose the version's subfolder. Nothing was copied."));
+        if (ids.empty()) {
+          std::string message = Tr("Nenhum conjunto pronto para importar. Selecione uma pasta de conteúdo extraído.", "No importable set found. Select an extracted content folder.");
+          if (!found.empty()) message = found.front().label + (found.front().version.empty() ? "" : " — " + found.front().version) + "\r\n" + found.front().problem;
+          finish(message); return;
         }
-        auto count = Import(ProjectPaths{a.root}, selected, source, [&] { return a.cancel.load(); });
-        finish("Importação concluída: " + std::to_string(count) + " componentes copiados. Originais preservados."); return;
+        auto selected = *std::find_if(a.targets.begin(), a.targets.end(), [&](const auto& t) { return t.id == ids.front(); });
+        Post(a.window, kDetected, selected.id);
+        if (!selected.importable) { finish(selected.label + "\r\n" + selected.limitations); return; }
+        auto count = Import(ProjectPaths{a.root}, selected, source, [&] { return a.cancel.load(); }, true);
+        finish(selected.label + "\r\n" + std::to_string(count) + Tr(" componentes adicionados e verificados. Originais preservados.", " verified components added. Originals preserved.")); return;
       }
       auto run = [&](fs::path exe, std::vector<std::string> args, const std::string& label) {
         ProcessSpec spec;
@@ -282,7 +312,7 @@ void Start(App& a, int action, fs::path source = {}) {
           throw std::runtime_error("A etapa " + label + " não concluiu. " + result.launch_error + " " + DescribeExitCode(result.exit_code) + "\r\nDiagnóstico local: " + Utf8(a.logs));
       };
       if (action == kLaunch) {
-        run(a.self.parent_path() / "x360n.exe", {"--root", Utf8(a.root), "session", Utf8(target.manifest), "--timeout", "0"}, "session");
+        run(Supervisor(a), {"--root", Utf8(a.root), "session", Utf8(target.manifest), "--timeout", "0"}, "session");
         finish("Sessão encerrada. Consulte os logs para os resultados da execução.");
       } else {
         wchar_t sys[MAX_PATH]{}; GetSystemDirectoryW(sys, MAX_PATH);
@@ -311,6 +341,9 @@ void Start(App& a, int action, fs::path source = {}) {
         prepare(target.id);
         Post(a.window, kProgress, Tr("Registrando conteúdo verificado na biblioteca original...", "Registering verified content in the original library..."));
         PrepareLibrary(ProjectPaths{a.root}, target, a.targets, [&] { return a.cancel.load(); });
+        if (!target.session) for (const auto& dashboard : a.targets)
+          if (dashboard.session && Inspect(ProjectPaths{a.root}, dashboard).inputs_ok)
+            PrepareLibrary(ProjectPaths{a.root}, dashboard, a.targets, [&] { return a.cancel.load(); });
         finish("Preparação concluída. A identidade dos componentes será conferida antes de habilitar a sessão.");
       }
     } catch (const std::exception& error) { a.failed = true; finish(error.what()); }
@@ -333,7 +366,7 @@ void Paint(App& a) {
   RECT r{}; GetClientRect(a.window, &r); FillRect(dc, &r, background_brush);
   auto px = [&](int n) { return MulDiv(n, a.dpi, 96); };
   if (!a.show_details) {
-    RECT card{px(60), px(392), r.right - px(60), px(568)};
+    RECT card{px(60), px(392), r.right - px(60), px(642)};
     auto old_brush = SelectObject(dc, surface_brush); auto old_pen = SelectObject(dc, GetStockObject(NULL_PEN));
     RoundRect(dc, card.left, card.top, card.right, card.bottom, px(18), px(18));
     SelectObject(dc, old_brush); SelectObject(dc, old_pen);
@@ -354,7 +387,7 @@ void Paint(App& a) {
   EndPaint(a.window, &ps);
 }
 void DrawButton(App& a, const DRAWITEMSTRUCT& item) {
-  const bool primary = item.CtlID == kPrimary, disabled = item.itemState & ODS_DISABLED;
+  const bool primary = item.CtlID == kPrimary || (item.CtlID == kGames && a.games) || (item.CtlID == kDashboards && !a.games), disabled = item.itemState & ODS_DISABLED;
   COLORREF fill = primary && !disabled ? accent : surface;
   if ((item.itemState & ODS_SELECTED) && !disabled) fill = primary ? RGB(143, 204, 131) : RGB(40, 54, 69);
   auto brush = CreateSolidBrush(fill); auto old_brush = SelectObject(item.hDC, brush);
@@ -408,6 +441,7 @@ LRESULT CALLBACK WndProc(HWND window, UINT message, WPARAM wp, LPARAM lp) {
         a->buttons.push_back(Control(*a, L"BUTTON", L"", WS_TABSTOP, kStorage));
         a->buttons.push_back(Control(*a, L"BUTTON", L"", WS_TABSTOP, kPrimary));
         a->buttons.push_back(Control(*a, L"BUTTON", L"", WS_TABSTOP, kSettings));
+        for (auto id : {kDashboards, kGames, kImportFolder}) a->buttons.push_back(Control(*a, L"BUTTON", L"", WS_TABSTOP, id));
         DragAcceptFiles(window, TRUE); SetTimer(window, 1, 100, nullptr);
         Labels(*a); Layout(*a); Load(*a, a->root);
         if (!a->startup_error.empty()) {
@@ -450,6 +484,7 @@ LRESULT CALLBACK WndProc(HWND window, UINT message, WPARAM wp, LPARAM lp) {
         if (id == kData && !a->root.empty()) { auto p = a->root / ".local"; fs::create_directories(p); ShellExecuteW(window, L"open", p.c_str(), nullptr, nullptr, SW_SHOWNORMAL); return 0; }
         if (id == kCancel) { a->cancel = true; Set(a->status, "Cancelando a preparação..."); return 0; }
         if (a->busy) return 0;
+        if (id == kDashboards || id == kGames) { a->games = id == kGames; Load(*a, a->root); return 0; }
         if (id == kStorage) {
           auto path = PickFolder(window, Wide(Tr("Selecione a pasta de saves e perfis", "Select the saves and profiles folder")).c_str());
           if (!path.empty() && MessageBoxW(window, Wide(Tr("Usar esta pasta nas próximas sessões? Os dados anteriores permanecem na pasta original e não serão movidos ou apagados. Para reutilizar saves existentes, escolha a pasta que contém os diretórios dos títulos.", "Use this folder in future sessions? Previous data stays in its original folder and will not be moved or deleted. To reuse existing saves, choose the folder containing the title directories.")).c_str(), L"x360-native", MB_YESNO | MB_ICONINFORMATION) == IDYES) {
@@ -465,13 +500,13 @@ LRESULT CALLBACK WndProc(HWND window, UINT message, WPARAM wp, LPARAM lp) {
         if (id == kFolder) {
           auto root = PickFolder(window, Wide(Tr("Escolha uma pasta vazia para o ambiente ou uma existente do x360-native", "Choose an empty environment folder or an existing x360-native environment")).c_str());
           if (!root.empty()) {
-            if (!fs::is_regular_file(root / "deps.lock.json")) InitializeEnvironment(a->self.parent_path() / "workspace", root);
+            if (!fs::is_regular_file(root / "deps.lock.json")) InitializeEnvironment(Payload(*a), root);
             Load(*a, root);
             SavePreferences(*a);
           }
         }
         if (id == kCheck) { a->environment = CheckEnvironment(a->root); InspectSelected(*a); }
-        if (id == kImport) { auto source = PickFolder(window, L"Selecione a pasta com o conjunto original extraído"); if (!source.empty()) Start(*a, id, source); }
+        if (id == kImport || id == kImportFolder) { auto source = PickFolder(window, id == kImport ? L"Selecione um arquivo original" : L"Selecione a pasta com seus arquivos originais", id == kImportFolder); if (!source.empty()) Start(*a, kImport, source); }
         if (id == kPrepare) {
           if (!a->environment.msvc) {
             if (MessageBoxW(window, Wide(Tr("Falta o componente C++ do Microsoft Build Tools 2022. Abrir o instalador oficial com os componentes necessários selecionados?\n\nEsta é uma instalação no sistema: o Windows pode pedir permissão de administrador. O instalador mostra espaço, downloads e termos antes da instalação. Use o próprio instalador para cancelar. Jogos e dados serão preservados.", "Microsoft Build Tools 2022 C++ is missing. Open the official installer with the required components preselected?\n\nThis changes the system: Windows may request administrator permission. The installer shows space, downloads and terms before installation. Cancel using the installer itself. Games and data are preserved.")).c_str(), L"Microsoft Build Tools 2022", MB_YESNO | MB_ICONINFORMATION) == IDYES) Start(*a, kInstall);
@@ -489,7 +524,7 @@ LRESULT CALLBACK WndProc(HWND window, UINT message, WPARAM wp, LPARAM lp) {
         auto count = DragQueryFileW(drop, 0xFFFFFFFF, nullptr, 0);
         if (count == 1) DragQueryFileW(drop, 0, path, 32768);
         DragFinish(drop);
-        if (!a->busy && count == 1 && fs::is_directory(path)) Start(*a, kImport, path);
+        if (!a->busy && count == 1) Start(*a, kImport, path);
         return 0;
       }
       case WM_TIMER: {
@@ -535,9 +570,14 @@ LRESULT CALLBACK WndProc(HWND window, UINT message, WPARAM wp, LPARAM lp) {
       }
       case kDetected: {
         std::unique_ptr<std::string> id(reinterpret_cast<std::string*>(lp));
-        for (size_t i = 0; i < a->targets.size(); ++i) if (a->targets[i].session &&
-            std::find(a->targets[i].dependencies.begin(), a->targets[i].dependencies.end(), *id) != a->targets[i].dependencies.end()) {
-          a->selected = i; SyncSelection(*a); return 0;
+        // Keep the worker's immutable catalog intact while updating visible selection.
+        auto match = std::find_if(a->targets.begin(), a->targets.end(), [&](const auto& t) { return t.id == *id; });
+        if (match == a->targets.end()) return 0;
+        a->games = match->kind != "dashboard";
+        a->dashboard_indices.clear(); SendMessageW(a->combo, CB_RESETCONTENT, 0, 0);
+        for (size_t i = 0; i < a->targets.size(); ++i) if ((a->targets[i].kind != "dashboard") == a->games) {
+          a->dashboard_indices.push_back(i); auto label = Wide(english ? a->targets[i].label_en : a->targets[i].label);
+          SendMessageW(a->combo, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(label.c_str()));
         }
         for (size_t i = 0; i < a->targets.size(); ++i) if (a->targets[i].id == *id) {
           if (std::find(a->dashboard_indices.begin(), a->dashboard_indices.end(), i) != a->dashboard_indices.end()) { a->selected = i; SyncSelection(*a); }
@@ -550,10 +590,11 @@ LRESULT CALLBACK WndProc(HWND window, UINT message, WPARAM wp, LPARAM lp) {
         if (a->worker.joinable()) a->worker.join(); a->busy = false; a->session = false; a->installing = false;
         a->environment = CheckEnvironment(a->root);
         InspectSelected(*a); Set(a->details, *text + "\r\nLogs: " + Utf8(a->logs));
+        if (a->importing) { Set(a->headline, Tr("Arquivos conferidos.", "Files checked.")); Set(a->subtitle, *text); }
         if (a->failed) {
           Set(a->headline, Tr("Vamos resolver esta etapa.", "Let's fix this step."));
           Set(a->subtitle, Tr("A preparação não terminou. Seus arquivos foram preservados.\r\nVeja o motivo abaixo e tente novamente após corrigir o problema.", "Preparation did not finish. Your files were preserved.\r\nRead the reason below, then retry after fixing the issue."));
-          a->show_details = true;
+          Set(a->subtitle, *text); a->show_details = false;
         }
         Enable(*a); return 0;
       }
@@ -578,12 +619,11 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show) {
   INITCOMMONCONTROLSEX controls{sizeof(controls), ICC_STANDARD_CLASSES}; InitCommonControlsEx(&controls);
   App app;
   wchar_t self[32768]{}; GetModuleFileNameW(nullptr, self, 32768); app.self = self;
-  if (!fs::is_directory(app.self.parent_path() / "workspace")) {
+  if (!fs::is_directory(Payload(app))) {
     if (auto root = FindProjectRoot(app.self)) app.root = root->root;
   } else {
-    PWSTR local = nullptr;
-    if (SUCCEEDED(SHGetKnownFolderPath(FOLDERID_LocalAppData, 0, nullptr, &local))) {
-      app.preferences = fs::path(local) / "x360-native/preparation.txt"; CoTaskMemFree(local);
+    {
+      app.preferences = app.self.parent_path() / "data/preferences.txt";
       std::ifstream in(app.preferences); std::string language, root;
       std::getline(in, language); std::getline(in, root); english = language == "en";
       auto saved = fs::path(std::u8string(root.begin(), root.end()));
@@ -599,7 +639,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show) {
   if (app.root.empty() && !app.preferences.empty()) {
     const auto initial = app.preferences.parent_path() / "environment";
     try {
-      InitializeEnvironment(app.self.parent_path() / "workspace", initial);
+      InitializeEnvironment(Payload(app), initial);
       app.root = initial; SavePreferences(app);
     } catch (const std::exception& error) {
       // Leave the first-run folder action available. Never overwrite a different

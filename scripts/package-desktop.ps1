@@ -17,7 +17,9 @@ if ($LASTEXITCODE -ne 0) { throw 'Commit the candidate implementation before pac
 & (Join-Path $PSScriptRoot 'devshell.cmd') cmake --build --preset win-amd64-release --target x360-native
 if ($LASTEXITCODE -ne 0) { throw 'Release frontend build failed' }
 New-Item -ItemType Directory -Force $destination | Out-Null
-$payload = Join-Path $destination 'workspace'
+$internal = Join-Path $destination 'app'
+New-Item -ItemType Directory $internal | Out-Null
+$payload = Join-Path $internal 'workspace'
 New-Item -ItemType Directory $payload | Out-Null
 $sourceArchive = Join-Path $destination 'source.zip'
 git -C $root archive --format=zip "--output=$sourceArchive" HEAD
@@ -33,37 +35,38 @@ foreach ($file in (Get-ChildItem -LiteralPath $payload -Recurse -File | Sort-Obj
 }
 [IO.File]::WriteAllLines((Join-Path $payload 'payload.sha256'), $index, [Text.UTF8Encoding]::new($false))
 $binaries = Join-Path $root '.local/build/win-amd64/src/desktop/Release'
-foreach ($file in @('x360-native.exe', 'x360n.exe')) { Copy-Item -LiteralPath (Join-Path $binaries $file) -Destination $destination }
-$vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio/Installer/vswhere.exe'
-$vs = (& $vswhere -latest -version '[17.0,18.0)' -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath).Trim()
-$redist = Get-ChildItem -LiteralPath (Join-Path $vs 'VC/Redist/MSVC') -Directory | Where-Object Name -Match '^14\.' | Sort-Object Name -Descending | Select-Object -First 1
-$crt = Join-Path $redist.FullName 'x64/Microsoft.VC143.CRT'
-foreach ($file in @('msvcp140.dll','msvcp140_1.dll','msvcp140_2.dll','msvcp140_atomic_wait.dll','vcruntime140.dll','vcruntime140_1.dll')) {
-    Copy-Item -LiteralPath (Join-Path $crt $file) -Destination $destination
-}
-$licenses = Join-Path $destination 'licenses'; New-Item -ItemType Directory $licenses | Out-Null
+Copy-Item -LiteralPath (Join-Path $binaries 'x360-native.exe') -Destination $destination
+Copy-Item -LiteralPath (Join-Path $binaries 'x360n.exe') -Destination $internal
+# Desktop-only Release statically links the compiler runtime; opening the UI
+# requires neither developer tools nor a redistributable installer.
+$cache = Get-Content -LiteralPath (Join-Path $root '.local/build/win-amd64/CMakeCache.txt')
+if (-not ($cache -contains 'X360_DESKTOP_ONLY:BOOL=ON')) { throw 'Use the isolated desktop-only configuration for distribution.' }
+$sdk = (($cache | Where-Object { $_ -like 'X360_REXGLUE_DIR:PATH=*' }) -replace '^X360_REXGLUE_DIR:PATH=', '')
+$licenses = Join-Path $internal 'licenses'; New-Item -ItemType Directory $licenses | Out-Null
 foreach ($component in @('fmt','cli11','tomlplusplus')) {
-    Copy-Item -LiteralPath (Join-Path $root "external/rexglue-sdk/thirdparty/$component/LICENSE") -Destination (Join-Path $licenses "$component.txt")
+    Copy-Item -LiteralPath (Join-Path $sdk "thirdparty/$component/LICENSE") -Destination (Join-Path $licenses "$component.txt")
 }
 [IO.File]::WriteAllText((Join-Path $destination 'READ-ME.txt'), @"
-x360-native $Version — Windows x64 preview
+x360-native $Version — prévia para Windows x64
 
-Open x360-native.exe. Choose a separate folder for your environment and data.
-Import your authorized extracted Retail 17559 set and Castle Crashers 0.0.1.3.
-Prepare, then open the original dashboard. Launch games through My Games.
-No dashboard, game, font, XAM, boot animation or derived native title is included.
-Tools are verified and obtained locally after consent. MSVC 2022 C++ / Windows SDK
-is required; the app offers the verified official installer when it is missing.
-Its system installation can require administrator consent; the regular app does not.
-Profiles and save/load acceptance are NOT complete. This is a test candidate,
-not a release approved for end users. No clean-machine acceptance is claimed.
+Abra x360-native.exe. Adicione seus arquivos ou pastas originais na janela.
+O aplicativo identifica as versões e mostra os componentes que ainda faltam.
+Dashboards e jogos são gerenciados separadamente. Inicie os jogos pela My Games
+original quando houver uma dashboard e uma preparação compatíveis disponíveis.
 
-To remove the app, delete only this package folder. Keep the environment folder
-to preserve imported content, builds, profiles and saves. No uninstaller deletes it.
-No telemetry or automatic uploads. Review logs locally before sharing them.
-SDK sources and licenses: https://github.com/rexglue/rexglue-sdk
-Microsoft runtime distribution: https://aka.ms/vs/17/redist.txt
-Private project source snapshot: $head
+A pasta app contém os componentes internos. A pasta data será criada ao abrir
+para guardar conteúdo, preparações e configurações. Não apague data para atualizar
+ou remover apenas o aplicativo. Saves e perfis existentes são preservados.
+
+Nenhum jogo, dashboard, módulo original, fonte ou recompilação proprietária é
+incluído. Nenhum arquivo é enviado. A preparação de títulos oferece as ferramentas
+verificadas com consentimento; a instalação dos componentes Microsoft pode exigir
+permissão de administrador. Abrir a interface e importar arquivos não exige isso.
+
+Esta prévia não comprova compatibilidade com todos os títulos nem instalação em
+Windows limpo. Perfis, Guide e save/load ainda têm pendências.
+Código correspondente: $head
+SDK e licenças: https://github.com/rexglue/rexglue-sdk
 "@, [Text.UTF8Encoding]::new($false))
 $metadata = @{ schema = 1; version = $Version; platform = 'windows-x64'; commit = $head; acceptance = 'pending'; files = @() }
 foreach ($file in (Get-ChildItem -LiteralPath $destination -Recurse -File | Sort-Object FullName)) {

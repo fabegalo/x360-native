@@ -60,11 +60,23 @@ void CheckSource(const Target& game) {
     if (!IsWithin(input.destination, game.game_root) || !Same(input.destination, input.sha256))
       throw std::runtime_error("Importe o conjunto completo antes de registrar na biblioteca: " + Utf8(input.destination));
 }
+std::vector<std::string> InstalledGames(const Target& session, const std::vector<Target>& catalog) {
+  auto ids = session.dependencies;
+  for (const auto& id : session.library_targets) {
+    const auto& game = Dependency(catalog, id);
+    // Optional games are advertised only after their complete contents and build
+    // exist. A dashboard can be installed with an empty game library.
+    if (!fs::is_regular_file(game.exe) || game.inputs.empty()) continue;
+    if (std::all_of(game.inputs.begin(), game.inputs.end(), [](const auto& i) { return Same(i.destination, i.sha256); }))
+      ids.push_back(id);
+  }
+  return ids;
+}
 }
 std::vector<std::string> InspectLibrary(const Target& session, const std::vector<Target>& catalog) {
   std::vector<std::string> issues;
   if (!session.session) return issues;
-  for (const auto& id : session.dependencies) {
+  for (const auto& id : InstalledGames(session, catalog)) {
     const auto& game = Dependency(catalog, id);
     if (game.library.title_id.empty()) continue;
     const auto entry = Describe(session, game);
@@ -82,7 +94,7 @@ void PrepareLibrary(const ProjectPaths& paths, const Target& session, const std:
   if (!session.session) return;
   WorkspaceLease lease(paths);
   auto stop = [&] { if (cancelled && cancelled()) throw std::runtime_error("Registro cancelado. Conteúdo e saves existentes foram preservados."); };
-  for (const auto& id : session.dependencies) {
+  for (const auto& id : InstalledGames(session, catalog)) {
     stop();
     const auto& game = Dependency(catalog, id);
     if (game.library.title_id.empty()) continue;

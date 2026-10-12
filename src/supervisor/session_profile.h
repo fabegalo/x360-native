@@ -10,6 +10,8 @@ struct SessionProfile {
   std::vector<std::filesystem::path> launch_targets;
   std::vector<uint32_t> dashboard_return_flags{0};
 };
-SessionProfile LoadSessionProfile(const ProjectPaths& paths, const std::filesystem::path& manifest);
+// Catalog reads retain routing metadata; execution always validates the files.
+SessionProfile LoadSessionProfile(const ProjectPaths& paths, const std::filesystem::path& manifest,
+                                  bool validate_execution = true);
 bool MatchesLaunch(const SessionProfile& profile, const LaunchRequest& request);
 }

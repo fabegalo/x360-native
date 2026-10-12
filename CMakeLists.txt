@@ -9,6 +9,30 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 # ctest must be enabled at the top level to see the SDK's tests.
 enable_testing()
 
+# The distributable UI does not link or rebuild the title runtime.
+option(X360_DESKTOP_ONLY "Build the desktop distribution without the title SDK runtime" OFF)
+if(X360_DESKTOP_ONLY)
+    set(X360_REXGLUE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/external/rexglue-sdk" CACHE PATH "Pinned SDK dependency sources")
+    set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+    file(READ "${CMAKE_CURRENT_SOURCE_DIR}/deps.lock.json" X360_LOCK)
+    string(JSON X360_SDK_COMMIT_LOCKED GET "${X360_LOCK}" rexglue_sdk commit)
+    string(JSON X360_SDK_TAG_LOCKED GET "${X360_LOCK}" rexglue_sdk tag)
+    string(JSON X360_LLVM_VERSION_LOCKED GET "${X360_LOCK}" llvm version)
+    execute_process(COMMAND git -C "${X360_REXGLUE_DIR}" rev-parse HEAD
+        OUTPUT_VARIABLE _desktop_sdk_commit OUTPUT_STRIP_TRAILING_WHITESPACE RESULT_VARIABLE _desktop_git_rc)
+    if(NOT _desktop_git_rc EQUAL 0 OR NOT _desktop_sdk_commit STREQUAL X360_SDK_COMMIT_LOCKED)
+        message(FATAL_ERROR "Desktop dependencies must come from the pinned SDK revision")
+    endif()
+    add_subdirectory("${X360_REXGLUE_DIR}/thirdparty/fmt" desktop-deps/fmt)
+    add_subdirectory("${X360_REXGLUE_DIR}/thirdparty/tomlplusplus" desktop-deps/toml)
+    add_library(tomlplusplus INTERFACE)
+    target_link_libraries(tomlplusplus INTERFACE tomlplusplus::tomlplusplus)
+    add_subdirectory("${X360_REXGLUE_DIR}/thirdparty/catch2" desktop-deps/catch2)
+    add_subdirectory(src/supervisor)
+    add_subdirectory(src/desktop)
+    return()
+endif()
+
 # ReXGlue consumed in its documented "Git Submodule" mode (wiki: SDK-Install-Modes).
 # Pinned revision: deps.lock.json / .gitmodules. We do not run the SDK install
 # target: it writes HKCU\Software\Kitware\CMake\Packages\rexglue.

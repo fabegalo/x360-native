@@ -1,9 +1,10 @@
 label = "Dashboard Retail 17559"
+kind = "dashboard"
 label_en = "Retail dashboard 17559"
 limitations_en = "Menu and Castle Crashers cycle validated locally. Profiles/Guide and saves are still pending. Only verified components from this set are accepted; original content is never downloaded."
 session = true
 limitations = "Menu e ciclo com Castle Crashers validados. Perfis/Guide e saves ainda pendentes. Importação aceita somente os componentes deste conjunto; nenhum download de conteúdo original."
-dependencies = ["castle_crashers"]
+library_targets = ["castle_crashers"]
 runtime_files = ["rexruntimerd.dll", "rexgpu-xenosrd.dll", "TracyClientrd.dll", "dash_17559_bootanim.dll", "dash_17559_gamerprofile.dll", "dash_17559_xam_ui.dll"]
 
 [[files]]

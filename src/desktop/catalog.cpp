@@ -1,6 +1,7 @@
 #include "catalog.h"
 #include "sha256.h"
 #include "workspace_lease.h"
+#include "xex_identity.h"
 #include <chrono>
 #include <algorithm>
 #include <fstream>
@@ -61,6 +62,7 @@ std::vector<Target> ReadCatalog(const ProjectPaths& paths) {
     t.label_en = info["label_en"].value_or(t.label);
     t.limitations_en = info["limitations_en"].value_or(t.limitations);
     t.session = info["session"].value_or(false);
+    t.kind = info["kind"].value_or(std::string("game"));
     t.importable = info["importable"].value_or(true);
     if (auto content = info["library"].as_table()) {
       t.library = {Text((*content)["title_id"]), Text((*content)["content_type"]),
@@ -130,6 +132,12 @@ std::vector<Target> ReadCatalog(const ProjectPaths& paths) {
         if (!IsSafeLabel(id)) throw std::runtime_error("Dependência inválida.");
         t.dependencies.push_back(id);
       }
+    if (const auto* library = info["library_targets"].as_array())
+      for (const auto& item : *library) {
+        auto id = Text(item);
+        if (!IsSafeLabel(id)) throw std::runtime_error("Identificador de biblioteca inválido.");
+        t.library_targets.push_back(id);
+      }
     result.push_back(std::move(t));
   }
   std::sort(result.begin(), result.end(), [](const auto& a, const auto& b) { return a.id < b.id; });
@@ -184,23 +192,28 @@ Inspection Inspect(const ProjectPaths& paths, const Target& t) {
   return r;
 }
 size_t Import(const ProjectPaths& paths, const Target& t, const fs::path& source,
-              const std::function<bool()>& cancelled) {
+              const std::function<bool()>& cancelled, bool allow_partial) {
   Inside(t.game_root, paths.inputs());
   if (!t.importable) throw std::runtime_error("Importação guiada ainda não disponível para este alvo.");
   auto stop = [&] { if (cancelled && cancelled()) throw std::runtime_error("Importação cancelada; arquivos já verificados foram preservados."); };
-  if (!fs::is_directory(source)) throw std::runtime_error("Selecione uma pasta de conteúdo extraído.");
+  const bool single = fs::is_regular_file(source);
+  if (!single && !fs::is_directory(source)) throw std::runtime_error("Selecione um arquivo ou uma pasta de conteúdo extraído.");
   std::map<fs::path, fs::path> copies;
+  auto consider = [&](const fs::path& file) {
+    for (const auto& i : t.inputs) {
+      if (!single && !i.source_relative.empty() && file.lexically_relative(source) != i.source_relative) continue;
+      if (!single && file.filename() != PathFromUtf8(i.source_name) && file.filename() != i.destination.filename()) continue;
+      if (Matches(file, i.sha256)) copies[i.destination] = file;
+    }
+  };
+  if (single) { stop(); consider(source); }
   // Search only the user-selected folder, never follow directory symlinks.
-  for (auto it = fs::recursive_directory_iterator(source); it != fs::recursive_directory_iterator(); ++it) {
+  for (auto it = single ? fs::recursive_directory_iterator{} : fs::recursive_directory_iterator(source); it != fs::recursive_directory_iterator(); ++it) {
     stop();
     const auto& entry = *it;
     if (entry.is_symlink() || !IsWithin(entry.path(), source)) { it.disable_recursion_pending(); continue; }
     if (!entry.is_regular_file()) continue;
-    for (const auto& i : t.inputs) {
-      if (!i.source_relative.empty() && entry.path().lexically_relative(source) != i.source_relative) continue;
-      if (entry.path().filename() != fs::path(std::u8string(i.source_name.begin(), i.source_name.end())) && entry.path().filename() != i.destination.filename()) continue;
-      if (Matches(entry.path(), i.sha256)) copies[i.destination] = entry.path();
-    }
+    consider(entry.path());
   }
   uintmax_t needed = 0;
   for (const auto& i : t.inputs) {
@@ -210,6 +223,7 @@ size_t Import(const ProjectPaths& paths, const Target& t, const fs::path& source
         throw std::runtime_error("Destino já contém outro arquivo; nada será sobrescrito: " + Utf8(i.destination));
       copies.erase(i.destination);
     } else if (!copies.contains(i.destination)) {
+      if (allow_partial) continue;
       throw std::runtime_error("Conjunto incompleto. Falta o arquivo verificado: " + i.source_name);
     } else needed += fs::file_size(copies.at(i.destination));
   }

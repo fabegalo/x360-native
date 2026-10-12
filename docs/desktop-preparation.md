@@ -1,46 +1,40 @@
-# Preparação gráfica — candidato Windows
+# Aplicativo gráfico — candidato Windows x64
 
-Incrementos locais de 2026-10-12 para os §§15–18. Referência de experiência:
-[Pinyon Shift](https://github.com/arcanite24/pinyon-shift#play): aplicativo e
-preparação local, preservando o runtime e a interface original do nosso projeto.
+O pacote tem um aplicativo principal `x360-native.exe`. Supervisor, licenças e
+fontes ficam em `app/`; a pasta `data/` criada na primeira abertura guarda o
+ambiente local. Preserve `data/` ao remover ou atualizar o aplicativo. Outra
+pasta de ambiente ou saves pode ser escolhida nas configurações sem apagar dados.
 
-`scripts/package-desktop.ps1` gera em `.local/packages/` um ZIP Windows x64 com
-`x360-native.exe`, `x360n.exe`, CRT Release, licenças e snapshot commitado das fontes.
-O script recusa jogos, fontes, XEX, código AOT gerado e dados locais. O candidato
-não é publicado automaticamente. Fontes e binários do aplicativo devem corresponder
-ao commit exportado. Nenhuma release está aprovada pelo §18.
+Dashboards e jogos têm seções distintas. É possível adicionar um arquivo ou uma
+pasta extraída, inclusive componentes separadamente. O catálogo usa identidades
+verificadas; versões desconhecidas passam pelo leitor XEX do supervisor e são
+mostradas como identificadas, sem preparação disponível. Formatos antigos são
+separados de arquivos corrompidos. Nenhum desses estados significa compatibilidade.
 
-Na primeira abertura, o aplicativo prepara uma pasta de ambiente, que pode ser
-alterada em Configurações. Os arquivos do pacote
-são verificados antes da cópia; outra versão existente não é sobrescrita. Dados
-ficam fora do pacote. Remover o aplicativo não remove o ambiente. A opção de pasta
-de saves grava somente a seleção; dados anteriores não são movidos nem apagados.
+17559 não depende de instalar um jogo. Os jogos opcionais são registrados na
+biblioteca original somente com conteúdo completo verificado e execução preparada.
+O supervisor lê o catálogo sem exigir todos os jogos instalados e mantém a
+validação completa de caminho, hash e executável na troca de título. A interface
+não oferece um launcher alternativo de jogos; o lançamento permanece na My Games.
+6717 continua identificada com sua pendência própria, sem herdar módulos da 17559.
 
-Revisão de interface após feedback do usuário: uma ação principal por estado,
-etapas Conteúdo → Preparação → Dashboard, configurações e diagnóstico separados.
-A seleção principal contém dashboards; importar Castle Crashers retorna ao fluxo
-da dashboard que depende dele. A primeira abertura do pacote oferece ambiente
-padrão em `%LOCALAPPDATA%/x360-native/environment`; outra pasta pode ser escolhida.
-Referência de fluxo conferida no `launcher/PinyonShift.Launcher/MainWindow.xaml`
-do Pinyon Shift (estado, ação principal e opções secundárias). Layout próprio;
-sem copiar arte do projeto ou substituir telas do Xbox. Revisão compilada;
-apresentação visual e navegação ainda aguardam teste, pois Computer Use foi interrompido.
+Referência examinada: [Pinyon Shift](https://github.com/arcanite24/pinyon-shift),
+README, `docs/INSTALLING.md`, as duas implementações em
+`launcher/PinyonShift.Launcher` e `launcher/PinyonShift.Launcher.Desktop`.
+Foram examinados seleção de conteúdo, estado/progresso real, cancelamento,
+instalação versionada, persistência e verificação antes de habilitar execução.
+A release v0.5.1 foi baixada e seu ZIP conferido contra o digest publicado:
+`88841e7741d2750fefea58400a4c28c972379b1080d6c0c3cd726001bd03d5d6`.
+Contém `PinyonShiftLauncher.exe` e `pinyon-shift-source.zip`. Licença BSD-3-Clause
+conferida; não copiamos código, arte ou dependências do launcher de referência.
+Adotamos a separação entre aplicativo e ferramentas internas, preservando nosso
+pipeline. A referência verifica a identidade das fontes que produziram o build;
+esse vínculo completo ainda não é um aceite do nosso estado de preparação.
 
-O catálogo é declarativo por versão. Importação aceita pastas extraídas da 17559
-e Castle Crashers 0.0.1.3, com detecção pelo XEX e hashes de todos os componentes
-declarados, incluindo os 707 assets do jogo. O inventário corresponde sem diferenças
-ao registro da extração já existente. Conjunto misturado é ambíguo, não é combinado.
-STFS/ISO diretamente na interface continuam pendentes. A 6717 aparece com seu
-bloqueio de fonte; não herda recursos da 17559.
-
-A preparação registra as dependências na pasta de conteúdo do SDK da dashboard
-selecionada. Antes faltava esse passo em ambientes novos, embora a instalação
-manual antiga funcionasse. Metadados declarados vêm do LIVE já inventariado;
-todos os assets importados são verificados e copiados antes de publicar o cabeçalho
-de enumeração. O cabeçalho coincide com o registro funcional existente, sem trailer
-de licença inventado. My Games continua enumerando e lançando pelo código original.
-Uma instalação existente diferente é preservada e impede a preparação silenciosa.
-
+`X360_DESKTOP_ONLY=ON` permite compilar apenas frontend, supervisor e testes,
+com bibliotecas redistribuíveis e runtime C++ estático. Não recompila o runtime
+nem os títulos e não aplica patches no SDK. O pacote recusa recursos proprietários,
+código gerado e dados locais. Publicação e instalação limpa continuam pendentes.
 Preparação gerencia MinGit 2.56.0.2, CMake 3.31.6, Ninja 1.13.1 e LLVM 22.1.8.
 Arquivos oficiais têm SHA-256 fixo; caches são reaproveitados. SDK e submódulos
 seguem a revisão fixada e os patches existentes. Downloads exigem consentimento.

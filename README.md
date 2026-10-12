@@ -56,31 +56,26 @@ silenciosamente XAM, intro ou fontes da 17559.
 
 ## Aplicativo de preparação para Windows
 
-Já é gerado um candidato local `x360-native-0.1.0-preview.*-windows-x64.zip`, em
-`.local/packages/`. Extraia e abra **x360-native.exe**. Escolha uma pasta separada
-para o ambiente, importe seus conjuntos extraídos e clique em **Preparar**.
-O jogo continua sendo iniciado pela **My Games original**.
+O candidato Windows x64 tem um aplicativo principal: **x360-native.exe**.
+Extraia o ZIP e abra esse arquivo. A interface abre sem conteúdo importado.
 
-A tela principal orienta por **Conteúdo → Preparação → Dashboard**, com uma ação
-por vez. Pastas e diagnóstico ficam nas opções secundárias. O pacote pode criar
-seu ambiente na pasta de dados do usuário; não é preciso selecionar um repositório.
+Em **Dashboards** ou **Jogos**, adicione um arquivo ou uma pasta extraída.
+A versão é identificada e os componentes são verificados antes da cópia;
+componentes podem ser adicionados por etapas. O aplicativo mostra o que falta
+antes de habilitar a preparação. Jogos continuam sendo iniciados pela **My Games
+original**; não é necessário instalar um jogo específico para preparar a dashboard.
 
-O pacote inclui o aplicativo, o supervisor, dependências redistribuíveis e fontes
-do projeto; não inclui jogos, dashboard, fontes Xbox ou código AOT desses títulos.
-Git, CMake, Ninja, LLVM e SDK são preparados localmente, com versões verificadas
-e consentimento para downloads. Se faltar C++/Windows SDK, o assistente oferece
-o instalador oficial da Microsoft, que pode pedir autorização de administrador.
-O uso normal e as ferramentas portáteis não exigem essa autorização.
+As ferramentas ficam internas e seus downloads exigem consentimento. A abertura
+e a identificação não exigem Git, CMake ou Visual Studio. Preparar títulos exige
+componentes adicionais; o aplicativo oferece as ferramentas fixadas e o instalador
+Microsoft quando necessário. Esse instalador pode solicitar elevação.
 
-Formatos guiados atuais: pasta extraída da Retail **17559** e pasta completa do
-**Castle Crashers 0.0.1.3**. O assistente identifica o conjunto, verifica os hashes
-e recusa componentes de outras versões. A pasta de saves pode ser escolhida
-separadamente; trocar a seleção não apaga nem move os dados anteriores.
-
-**Ainda é candidato de teste, sem release publicada ou aceite em máquina limpa.**
-Perfis, save/load e atualização/rollback continuam pendentes. Não anuncie outras
-plataformas como suportadas. [Evidências e limites](docs/desktop-preparation.md).
-
+A pasta **data** guarda conteúdo, preparações e configurações: preserve-a ao
+remover ou atualizar o aplicativo. Nenhum conteúdo original de Xbox é distribuído
+ou enviado. O catálogo tem perfis por versão; reconhecer um arquivo desconhecido
+não significa que ele poderá ser executado. STFS/ISO diretamente pela interface,
+instalação em Windows limpo e atualização/rollback ainda não estão aprovados.
+[Evidências e limites](docs/desktop-preparation.md).
 ## Preparar o ambiente de desenvolvimento
 
 Há uma **prévia gráfica de preparação para Windows**, que abre mesmo sem conteúdo,

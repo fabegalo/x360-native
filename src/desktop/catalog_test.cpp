@@ -1,6 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include "catalog.h"
 #include "sha256.h"
+#include "session_profile.h"
 #include <chrono>
 #include <fstream>
 #include <cstdlib>
@@ -45,6 +46,47 @@ TEST_CASE("asset inventory rejects missing data and same-name files in the wrong
   CHECK(Import(f.paths, f.target, f.source) == 3);
   Write(f.target.inputs.back().destination, "broken");
   CHECK_FALSE(Inspect(f.paths, f.target).inputs_ok);
+}
+TEST_CASE("individual renamed components are identified by bytes and imported incrementally") {
+  Fixture f;
+  auto file = f.source / "renamed.bin"; Write(file, "dashboard");
+  auto identity = IdentifyContent({f.target}, file);
+  REQUIRE(identity.size() == 1); CHECK(identity[0].recognized); CHECK(identity[0].target_id == f.target.id);
+  CHECK(Import(f.paths, f.target, file, {}, true) == 1);
+  CHECK_FALSE(Inspect(f.paths, f.target).inputs_ok);
+  CHECK(Import(f.paths, f.target, f.source / "system/xam.xex", {}, true) == 1);
+  CHECK(Inspect(f.paths, f.target).inputs_ok);
+  CHECK(Import(f.paths, f.target, file, {}, true) == 0);
+  CHECK(DigestFile(file)->sha256 == Hash("dashboard"));
+}
+TEST_CASE("unsupported and corrupt files are not copied or accepted as compatible") {
+  Fixture f; auto file = f.source / "unknown.xex";
+  Write(file, "XEX1older header");
+  auto old = IdentifyContent({f.target}, file);
+  REQUIRE(old.size() == 1); CHECK_FALSE(old[0].recognized); CHECK(old[0].label == "Formato antigo do Xbox 360");
+  Write(file, "XEX2bad");
+  auto bad = IdentifyContent({f.target}, file);
+  CHECK_FALSE(bad[0].recognized); CHECK(bad[0].label == "Arquivo incompleto ou inválido");
+  CHECK_FALSE(fs::exists(f.target.game_root));
+}
+TEST_CASE("optional games do not prevent an empty dashboard library") {
+  Fixture f; Target session; session.session = true; session.library_targets = {f.target.id};
+  session.user_root = f.paths.local() / "user/dashboard";
+  CHECK(InspectLibrary(session, {f.target}).empty());
+  CHECK_NOTHROW(PrepareLibrary(f.paths, session, {f.target}));
+  CHECK_FALSE(fs::exists(session.user_root));
+}
+TEST_CASE("catalog routing can describe an absent game but execution still rejects it") {
+  Fixture f; auto manifest = f.root / "profile.toml";
+  Write(manifest, "[project]\nname='sample'\ngame_root='.local/inputs/game'\n[entrypoint]\nfile_path='.local/inputs/game/default.xex'\n[x360n]\nnative_exe='.local/build/game.exe'\nuser_data_root='.local/user'\nxex_sha256='" + Hash("game") + "'\n");
+  auto profile = LoadSessionProfile(f.paths, manifest, false);
+  CHECK(profile.name == "sample");
+  CHECK_THROWS(LoadSessionProfile(f.paths, manifest));
+  LaunchRequest request; request.path = Utf8(profile.xex); CHECK_FALSE(MatchesLaunch(profile, request));
+  Write(profile.xex, "game"); CHECK(MatchesLaunch(profile, request));
+  CHECK_THROWS(LoadSessionProfile(f.paths, manifest));
+  Write(profile.exe, "synthetic executable"); CHECK_NOTHROW(LoadSessionProfile(f.paths, manifest));
+  Write(profile.xex, "changed game"); CHECK_THROWS(LoadSessionProfile(f.paths, manifest));
 }
 
 TEST_CASE("packaged environment is retryable and preserves existing sources and saves") {
@@ -210,7 +252,7 @@ TEST_CASE("local packaged payload imports the complete validated sets into a fre
   const char* original = std::getenv("X360N_TEST_SOURCE");
   REQUIRE(package); REQUIRE(original);
   Fixture f; auto root = f.root / fs::path(u8"Ambiente João 日本");
-  InitializeEnvironment(PathFromUtf8(package) / "workspace", root);
+  InitializeEnvironment(PathFromUtf8(package) / "app/workspace", root);
   auto targets = ReadCatalog(ProjectPaths{root});
   auto source_targets = ReadCatalog(ProjectPaths{PathFromUtf8(original)});
   REQUIRE(targets.size() >= 3);
@@ -228,7 +270,9 @@ TEST_CASE("local packaged payload imports the complete validated sets into a fre
   }
   auto dash = std::find_if(targets.begin(), targets.end(), [](const auto& t) { return t.id == "dash_17559"; });
   REQUIRE(dash != targets.end());
-  REQUIRE_FALSE(InspectLibrary(*dash, targets).empty());
+  // Imported games without a native build must not block the dashboard or be
+  // advertised as launchable content in its original library.
+  REQUIRE(InspectLibrary(*dash, targets).empty());
   PrepareLibrary(ProjectPaths{root}, *dash, targets);
   CHECK(InspectLibrary(*dash, targets).empty());
   CHECK_NOTHROW(PrepareLibrary(ProjectPaths{root}, *dash, targets));

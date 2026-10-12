@@ -5,7 +5,7 @@
 #include <toml++/toml.hpp>
 
 namespace x360n {
-SessionProfile LoadSessionProfile(const ProjectPaths& paths, const std::filesystem::path& file) {
+SessionProfile LoadSessionProfile(const ProjectPaths& paths, const std::filesystem::path& file, bool validate_execution) {
   const auto manifest = std::filesystem::canonical(file);
   std::ifstream input(manifest, std::ios::binary);
   if (!input) throw std::runtime_error("cannot open session profile: " + PathUtf8(manifest));
@@ -25,10 +25,15 @@ SessionProfile LoadSessionProfile(const ProjectPaths& paths, const std::filesyst
   p.user_root = UserDataRoot(paths, resolve(text(table["x360n"]["user_data_root"])));
   p.sha256 = text(table["x360n"]["xex_sha256"]);
   if (!IsSafeLabel(p.name)) throw std::runtime_error("invalid profile name");
-  if (auto error = CheckLaunchable(paths, p.exe)) throw std::runtime_error(*error);
-  auto digest = DigestFile(p.xex);
-  if (!digest || digest->sha256 != p.sha256) throw std::runtime_error("XEX hash mismatch: " + PathUtf8(p.xex));
-  if (!IsWithin(p.xex, p.game_root)) throw std::runtime_error("XEX outside profile game root");
+  if (validate_execution) {
+    if (auto error = CheckLaunchable(paths, p.exe)) throw std::runtime_error(*error);
+    auto digest = DigestFile(p.xex);
+    if (!digest || digest->sha256 != p.sha256) throw std::runtime_error("XEX hash mismatch: " + PathUtf8(p.xex));
+  }
+  const auto relative = p.xex.lexically_relative(p.game_root);
+  if (relative.empty() || relative.is_absolute() || *relative.begin() == ".." ||
+      (validate_execution && !IsWithin(p.xex, p.game_root)))
+    throw std::runtime_error("XEX outside profile game root");
   if (auto array = table["x360n"]["args"].as_array())
     for (const auto& value : *array) {
       auto arg = text(value);

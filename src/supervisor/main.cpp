@@ -628,7 +628,7 @@ int Session(const ProjectPaths& paths, const fs::path& manifest, int timeout, bo
     const auto dashboard = LoadSessionProfile(paths, manifest);
     std::vector<SessionProfile> targets;
     for (const auto& target : dashboard.launch_targets)
-      targets.push_back(LoadSessionProfile(paths, target));
+      targets.push_back(LoadSessionProfile(paths, target, false));
     auto active = dashboard;
     std::unique_ptr<SessionWindow> window;
     if (!separate_windows) {
