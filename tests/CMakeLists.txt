@@ -65,6 +65,10 @@ add_executable(x360n_sdk_runtime_checks
     sdkcheck/image_page_entry_test.cpp)
 target_sources(x360n_sdk_runtime_checks PRIVATE sdkcheck/dashboard_region_test.cpp)
 target_sources(x360n_sdk_runtime_checks PRIVATE sdkcheck/xam_language_test.cpp)
+target_sources(x360n_sdk_runtime_checks PRIVATE sdkcheck/dpc_dispatch_test.cpp)
+target_sources(x360n_sdk_runtime_checks PRIVATE
+    sdkcheck/dashboard_camera_test.cpp
+    ${PROJECT_SOURCE_DIR}/titles/dash_17559/src/unresolved_imports.cpp)
 target_link_libraries(x360n_sdk_runtime_checks PRIVATE rexruntime rexcodegen Catch2::Catch2WithMain)
 target_compile_options(x360n_sdk_runtime_checks PRIVATE
     -UTRACY_ENABLE -UREXGLUE_ENABLE_PROFILING -UREXGLUE_ENABLE_PERF_COUNTERS)

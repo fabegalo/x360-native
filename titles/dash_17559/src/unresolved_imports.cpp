@@ -4,8 +4,9 @@
 //
 // They are traps, not implementations: a call stops the process with the import,
 // the reason and the guest return address (LR). Nothing is emulated and no value
-// is returned, so a call can never pass for support (CLAUDE.md, rule 3). The one
-// exception, XUsbcamGetState, has a documented implementation below.
+// is returned, so a call can never pass for support (CLAUDE.md, rule 3). The
+// exceptions, the disconnected camera state and unsupported camera creation,
+// have explicit implementations below.
 // Title-specific: the placeholder names sub_<thunk> are this XEX's thunk
 // addresses. docs/dashboard.md §0.2 and §0.5 have the evidence.
 #include <cstdint>
@@ -13,6 +14,7 @@
 #include <rex/logging/assert.h>
 #include <rex/ppc/context.h>
 #include <rex/ppc/func.h>
+#include <rex/system/xtypes.h>
 
 namespace {
 
@@ -59,5 +61,13 @@ extern "C" REX_FUNC(__imp__XUsbcamGetState) {
 }
 extern "C" REX_FUNC(__imp__XUsbcamReadFrame) { Trap(ctx, "xboxkrnl 0x21E XUsbcamReadFrame", kNotBuilt); }
 extern "C" REX_FUNC(__imp__XUsbcamSetView) { Trap(ctx, "xboxkrnl 0x220 XUsbcamSetView", kNotBuilt); }
-extern "C" REX_FUNC(__imp__XUsbcamCreate) { Trap(ctx, "xboxkrnl 0x222 XUsbcamCreate", kNotBuilt); }
+// No camera backend exists. Report the unsupported operation, never the SDK's
+// unconditional success stub. The guest checks nonzero at 0x92368440, unwinds
+// its initialization reference at 0x92368448, and keeps its handle uncreated.
+// Do not allocate a fictional handle or touch the caller's buffer/output.
+extern "C" REX_FUNC(__imp__XUsbcamCreate) {
+  using rex::X_STATUS;
+  REXLOG_WARN("XUsbcamCreate: camera backend not implemented");
+  ctx.r3.u64 = X_STATUS_NOT_IMPLEMENTED;
+}
 extern "C" REX_FUNC(__imp__XUsbcamDestroy) { Trap(ctx, "xboxkrnl 0x223 XUsbcamDestroy", kNotBuilt); }

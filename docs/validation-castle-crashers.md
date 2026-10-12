@@ -84,6 +84,16 @@ até timeout, sem crash, 0 stubs, 0 erros e 0 críticas. Menu principal observad
 captura em `.local/logs/cc-regression-0006-menu.png`. Permanecem as duas aberturas
 de shaders ausentes já conhecidas. Não houve nova validação de entrada/gameplay.
 
+## Regressão com o patch 0007
+
+Em 2026-10-12, título e runtime recompilados com 0001–0007, sem os logs
+temporários de diagnóstico gráfico. Run `20261012T031646Z-cc-regression-0007`:
+45,332 s até timeout esperado, sem crash, erro ou crítica; 4 chamadas ao stub
+`XamShowMarketplaceUI`. Hashes das DLLs efetivas no `report.json` do run.
+A tentativa de inspeção visual foi cancelada pelo usuário com Escape e a
+automação foi parada. Portanto esta execução não comprova novamente o menu
+nem a entrada; as evidências visuais anteriores permanecem históricas.
+
 ## Não validado
 
 Gameplay além do relato do usuário, save/load, encerramento normal, sessão longa,

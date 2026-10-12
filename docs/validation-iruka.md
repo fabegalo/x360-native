@@ -5,6 +5,15 @@ LLVM/Clang 22.1.8 + MSVC 14.44. SDK: **ReXGlue v0.10.0, commit `f5337cdc947ff6d4
 (o `rexglue --version` imprime `0.10.0.0-dev.unknown`; ver STATUS.md, desvio 2).
 Nenhum downgrade do SDK foi usado para os resultados abaixo.
 
+## Regressão com o patch 0007
+
+Em 2026-10-12, título e runtime recompilados com 0001–0007 e sem os logs
+temporários de diagnóstico gráfico. `local.iruka.regression` passou L1–L5:
+run `20261012T031549Z-regress-iruka`, 20 s até timeout esperado, 309 cores
+quantizadas e diferença média entre quadros de 5,752. Zero stubs, erros e
+críticas. Log: `.local/logs/iruka-0007-regression.log`; hashes das DLLs efetivas
+no `report.json` do run. Não houve ampliação do escopo de validação de entrada.
+
 ## Regressão com o patch 0006
 
 Regressão em 2026-10-12 com os patches 0001–0006: build do título e staging das

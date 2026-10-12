@@ -1,0 +1,48 @@
+diff --git a/src/kernel/xboxkrnl/xboxkrnl_threading.cpp b/src/kernel/xboxkrnl/xboxkrnl_threading.cpp
+index 57fd161..3f3fcae 100644
+--- a/src/kernel/xboxkrnl/xboxkrnl_threading.cpp
++++ b/src/kernel/xboxkrnl/xboxkrnl_threading.cpp
+@@ -1176,8 +1176,6 @@ void KeInitializeDpc_entry(ppc_ptr_t<XDPC> dpc, mapped_void routine, mapped_void
+ }
+ 
+ u32 KeInsertQueueDpc_entry(ppc_ptr_t<XDPC> dpc, u32 arg1, u32 arg2) {
+-  assert_always("DPC does not dispatch yet; going to hang!");
+-
+   uint32_t list_entry_ptr = dpc.guest_address() + 4;
+ 
+   // Lock dispatcher.
+@@ -1193,7 +1191,33 @@ u32 KeInsertQueueDpc_entry(ppc_ptr_t<XDPC> dpc, u32 arg1, u32 arg2) {
+   dpc->arg1 = (uint32_t)arg1;
+   dpc->arg2 = (uint32_t)arg2;
+ 
+-  dpc_list->Insert(list_entry_ptr);
++  // Like Xenia Canary 2372a541, dispatch inline on the caller's valid KPCR.
++  // This is an HLE current-processor DPC, not a hardware per-CPU scheduler.
++  // Do not leave it in NativeList: execution has already begun and the callback
++  // may reuse or free the DPC. Never substitute a completion for the callback.
++  auto* kernel = REX_KERNEL_STATE();
++  auto* thread = XThread::GetCurrentThread();
++  const uint32_t routine = dpc->routine;
++  if (!thread || !kernel->function_dispatcher()->GetFunction(routine)) {
++    REX_FATAL("Cannot dispatch DPC {:08X}, routine {:08X}", dpc.guest_address(), routine);
++  }
++  auto* ctx = thread->thread_state()->context();
++  auto* pcr = kernel->memory()->TranslateVirtual<X_KPCR*>(ctx->r13.u32);
++  struct RestoreDpcState {
++    X_KPCR* pcr;
++    uint8_t irql;
++    uint32_t active;
++    ~RestoreDpcState() {
++      pcr->current_irql = irql;
++      pcr->prcb_data.dpc_active = active;
++    }
++  } restore{pcr, pcr->current_irql, pcr->prcb_data.dpc_active};
++  pcr->current_irql = IRQL_DISPATCH;
++  pcr->prcb_data.dpc_active = 1;
++  uint64_t args[] = {dpc.guest_address(), uint32_t(dpc->context), arg1, arg2};
++  REXKRNL_DEBUG("Dispatch DPC {:08X}, routine {:08X}, args {:08X}/{:08X}",
++                dpc.guest_address(), routine, arg1, arg2);
++  kernel->function_dispatcher()->ExecuteTrap(thread->thread_state(), routine, args, 4);
+ 
+   return 1;
+ }

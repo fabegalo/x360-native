@@ -18,6 +18,13 @@
 # Function starts reached only through data pointers (vtables without RTTI) are in
 # dash_17559_pointer_targets.toml, classified by scripts/check-pointer-targets.ps1.
 
+# The Lua protected call at 0x928E4028 saves a jump buffer via 0x9291C760;
+# 0x928E4A00 throws via 0x9291C330. These are the matching CRT routines
+# (save/restore f14-f31, r13-r31, v64-v127, SP+144, CR+304, LR+308).
+# A normal generated C++ return cannot implement the nonlocal guest return.
+longjmp_address = 0x9291C330
+setjmp_address = 0x9291C760
+
 [functions]
 
 # --- Adjustor thunks: "addi r3,r3,8; b <function>" --------------------------------

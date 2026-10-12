@@ -17,13 +17,13 @@ after (`files`), and its test. No two patches touch the same file.
 | `0004-app-teardown-order.patch` (`src/ui/rex_app.cpp`) | `ReXApp::OnDestroy` destroyed the window before the runtime. After a successful setup the input drivers are attached to the window, and `~MnkInputDriver` (from `Runtime::Shutdown`) detached from the destroyed window: access violation / `STATUS_HEAP_CORRUPTION` whenever the app quit by itself. The SDL window is destroyed without `OnClosing` to its listeners (`src/ui/window_sdl.cpp:131-134`). The runtime is now reset while the window exists, after the drawers made from the graphics device are released and the presenter is detached, and the window last | `tests/sdkcheck/app_shutdown_test.cpp`, which runs `tests/shutdown_probe` (a minimal `ReXApp`) without a GPU plugin and with `xenos` (D3D12) |
 | `0005-image-page-entry-bit0.patch` (`src/kernel/xboxkrnl/xboxkrnl_memory.cpp`) | `KeGetImagePageTableEntry` returned the page index (`\| 0x40000000` for 4 KB pages), so bit 0 was the index's parity. The dashboard checks bit 0 for the pages of its Lua chunks and calls `KeBugCheck(0xF7)` when it is clear (its chunk at `0x92FD2204`: `0x40002FD2`). Bit 0 is now set for the 4 KB-page XEX heap, as in Xenia Canary `331ddf79bf96` (the code this export came from); the 64 KB-page heap and non-XEX addresses are unchanged. The value stays an approximation; the meaning of bit 0 is not verified | `tests/sdkcheck/image_page_entry_test.cpp` |
 
-None has a ReXGlue upstream equivalent (the `development` branch, `bd833a2` in the
+Patches 0001–0005 have no ReXGlue upstream equivalent (the `development` branch, `bd833a2` in the
 local ref, has the same code in these functions). 0005 follows a Xenia Canary commit.
 
 `src/ui/rex_app.cpp` is compiled into each executable (`rexglue_configure_target`),
 not into `rexruntime`: a title picks up 0004 when it is rebuilt.
 
-## Apply, check, revert
+## Language exports (0006)
 
 Patch **0006-xam-language.patch** implements `XamGetLanguage` from the existing
 `user_language` configuration (IDs 1–17; invalid values warn and fall back to
@@ -44,6 +44,36 @@ pointer, read by `sub_921CB1E8`. The fallback test failed at `address > 0x10000`
 With both exports implemented, `tests/sdkcheck/xam_language_test.cpp` passes
 8 language checks and 100 fallback checks, including two runtime lifetimes.
 Its three SDK files are listed with base/result hashes in `deps.lock.json`.
+
+## DPC dispatch (0007)
+
+**0007-dpc-dispatch.patch** changes `src/kernel/xboxkrnl/xboxkrnl_threading.cpp`.
+`KeInsertQueueDpc` previously asserted that dispatch was missing, then inserted
+into a list with no consumer in builds without assertions. Dashboard callback
+`0x921C89B0` therefore never signaled its submission thread. The GPU completed
+the work already submitted (`EVENT_WRITE_SHD`, completion `0x0B`) and had no
+commands to produce the awaited `0x0D`. This was not a stuck host GPU.
+
+The patch invokes the registered guest routine through `ExecuteTrap`, with the
+four DPC arguments, the calling thread's KPCR, `IRQL_DISPATCH`, and `dpc_active`.
+It preserves interrupted PPC register state and restores IRQL/active state.
+It follows the inline HLE approach of [Xenia Canary 2372a54105d9,
+KeInsertQueueDpc](https://github.com/xenia-canary/xenia-canary/blob/2372a54105d9d598ab5bc7ba94a72ef1bea4b271/src/xenia/kernel/xboxkrnl/xboxkrnl_threading.cc),
+but does not leave an already executing DPC queued. Missing thread/routine is
+fatal, not a fabricated completion. This is **not a complete per-CPU DPC
+scheduler**: deferred timing and target-processor semantics remain limitations.
+
+`tests/sdkcheck/dpc_dispatch_test.cpp` executes a registered callback on a real
+`XHostThread`: 16 assertions cover arguments, two insertions/reuse, IRQL/active
+state, register preservation and removal after completion. Reverting only 0007
+reproduces the original assertion and failed wait in
+`20261012T030604Z-dpc-test-unpatched`. With 0007 it passes. The separate title
+camera test adds 4 assertions; related `sdkcheck` tests pass 17/17. Dashboard
+submissions then advance through `0x0D` and beyond. The subsequent title-local
+camera and setjmp/longjmp corrections reach actual rendered content, with the
+remaining limitations documented in `docs/dashboard.md` §0.11.
+
+## Apply, check, revert
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts\apply-sdk-patches.ps1          # apply (idempotent)

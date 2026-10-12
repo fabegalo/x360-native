@@ -83,6 +83,17 @@
           "include/rex/kernel/xam/module.h": "05c2361ed54ab805ed42df6f0a83bdf4d7e4922cac880fcdd874579c82caec63"
         },
         "test": "tests/sdkcheck/xam_language_test.cpp"
+      },
+      {
+        "file": "patches/rexglue-sdk/0007-dpc-dispatch.patch",
+        "sha256": "b30f499592e8985e25561f264525896983e9f32f7565282bd9fd7f0dd69f68d6",
+        "files": {
+          "src/kernel/xboxkrnl/xboxkrnl_threading.cpp": "5cdf4071423a963030fa20e95393d3132b28942a19893e8fbaa7a5cdfcb4eaa5"
+        },
+        "base_files": {
+          "src/kernel/xboxkrnl/xboxkrnl_threading.cpp": "687c0c5c4477c61c3e7fc8666cd65a0cfa98e145d37ca74c295580aca5da81fc"
+        },
+        "test": "tests/sdkcheck/dpc_dispatch_test.cpp"
       }
     ]
   },

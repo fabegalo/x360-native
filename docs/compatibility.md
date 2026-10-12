@@ -10,7 +10,7 @@ Ambiente de todas as linhas abaixo: Windows 11 Pro 10.0.26300, AMD Ryzen 7
 5700X3D, 40 GB RAM, RTX 4070; LLVM/Clang 22.1.8 + MSVC 14.44 (VS Build Tools
 17.14.41), Windows SDK 10.0.26100; configuração Debug.
 Revisão do projeto: commits locais de 2026-10-12; SDK `f5337cdc` (v0.10.0) com os
-patches locais 0001–0006 (`patches/rexglue-sdk/`).
+patches locais 0001–0007 (`patches/rexglue-sdk/`).
 Títulos compilados em `RelWithDebInfo` (ver `docs/validation-iruka.md`).
 
 ## Títulos e amostras
@@ -22,13 +22,21 @@ Títulos compilados em `RelWithDebInfo` (ver `docs/validation-iruka.md`).
 
 ## Dashboard
 
-Atualização 2026-10-12 (substitui o bloqueio histórico da linha abaixo): com a
-região experimental de 64 KiB RW e o patch 0006 de idioma, a 17559 ultrapassa os
-crashes anteriores. A GPU chega ao caminho de apresentação 1280×720; a janela
-fica preta e há espera de conclusão no swap até timeout. Menu e navegação não
-alcançados. Evidência: `docs/dashboard.md` §0.10, comparação on/off e run
-`20261012T021956Z-dash17559-fence-sample`. Conteúdo real da região desconhecido;
-fontes e vários stubs parciais; `DASHUSER:` ausente.
+Atualização 2026-10-12: **primeiro quadro real renderizado**, com blocos e ícones,
+e mudança de painel durante entrada (`20261012T030938Z-dash-jmp-fixed`). O patch
+0007 executa o DPC que libera novas submissões; a câmera retorna erro explícito
+de indisponibilidade e os endereços de setjmp/longjmp foram configurados. A
+espera anterior lia conclusão `0x0B` para alvo `0x0D`; zero era erro da sonda
+externa, corrigido. Nenhum contador foi forçado. Ver `docs/dashboard.md` §0.11.
+
+Compatibilidade ainda parcial: textos ausentes; `XamLookupCommonStringByIndex`
+devolve ID 272 como ponteiro `0x110`, provocando acesso inválido durante navegação;
+`media:\SegoeXbox-Light.xtt` é solicitado e não encontrado. A hipótese de região
+de 64 KiB zerada permanece inalterada; `DASHUSER:` ausente. O build final removeu
+logs de diagnóstico e teve hashes conferidos, mas não foi reinspecionado
+visualmente após o usuário cancelar a automação com Escape.
+
+A linha abaixo preserva o resultado histórico anterior a essas correções:
 
 | Versão | Identidade | Análise | Geração | Compilação | Inicialização | Teste | Limitações |
 |---|---|---|---|---|---|---|---|

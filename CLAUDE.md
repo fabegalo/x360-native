@@ -38,20 +38,22 @@ presente não for exatamente o arquivo listado. Qualquer outra falha é regress�
 
 ## Estrutura
 
-Dashboard atual: `docs/dashboard.md` §0.10. A região experimental `0x8E030000`
+Dashboard atual: `docs/dashboard.md` §0.11. A região experimental `0x8E030000`
 (64 KiB RW) é exclusiva do título 17559, zerada uma vez, desligável por
 `--dash17559_experimental_region=false`; log/relatório dizem que o conteúdo real
 é desconhecido. Patch 0006 implementa idioma configurado e ponteiro de fallback
-UTF-16. A inicialização ultrapassa os crashes anteriores, mas espera conclusão
-no swap (`sub_921AFF68`, alvo `0x0D`, contador em `0xFFCA3000` permanece zero,
-GPU sem comandos pendentes). Janela preta; menu/navegação não alcançados.
-Próximo passo: rastrear pacotes/writeback; não forçar o contador nem inventar
-arquivos de `DASHUSER:`. Pilhas e valores em `.local/logs/dash17559-fence-state.txt`.
+UTF-16. Patch 0007 despacha a DPC que deixava comandos gráficos sem envio;
+o contador correto era 0x0B, não zero (a amostra antiga omitia 4 KiB na tradução).
+Os hints setjmp/longjmp do título corrigem o retorno protegido da interface.
+Primeiro quadro real e mudança de painéis observados, mas faltam textos:
+`media:\SegoeXbox-Light.xtt` ausente. Navegação alcança stub
+`XamLookupCommonStringByIndex(272)` e lê ID residual 0x110 como ponteiro UTF-16.
+Próximo passo: contrato de strings/fontes; não inventar recursos de `DASHUSER:`.
 
 - `external/rexglue-sdk` — submódulo fixado em `deps.lock.json`. **Não editar à mão.**
   Exceções documentadas: cópias dos symlinks do libmspack (`scripts/materialize-symlinks.ps1`)
   e os patches locais de `patches/rexglue-sdk/` (0001–0002 autorizados em 2026-10-11,
-  0003–0006 sob a autorização de 2026-10-12), aplicados por
+  0003–0007 sob a autorização de 2026-10-12), aplicados por
   `scripts/apply-sdk-patches.ps1` e verificados pelo CMake no configure e em todo build.
   `src/ui/rex_app.cpp` (patch 0004) é compilado em cada executável: recompile o título.
 - Correções do SDK vão no `CMakeLists.txt` raiz como backport condicionado ao

@@ -1,15 +1,11 @@
 # Dashboard original: diagnóstico
 
-Estado em 2026-10-12. **A dashboard original não foi declarada funcionando.**
-Versão em trabalho: 2.0.17559.0 (Metro), arquivos fornecidos pelo usuário. A
-análise do codegen passou (sem `--force`) depois de 30 entradas `[functions]` e
-uma tabela de saltos conferidas uma a uma (§0.4); compila e linka (§0.5). Com os
-patches locais 0001–0006 do SDK o setup conclui, as 39 141 funções são registradas
-e **o código da dashboard executa**. A região experimental de §0.10 ultrapassa a
-leitura em `0x8E038630`; os contratos de idioma foram corrigidos. A GPU chega ao
-caminho de apresentação, mas a janela fica preta e a inicialização espera um
-contador de conclusão que permanece zero. Menu e navegação não foram alcançados.
-§0.8 preserva o diagnóstico anterior; §0.10 registra o estado atual.
+Estado em 2026-10-12. **Primeiro quadro real renderizado; interface ainda parcial.**
+A 17559 (Metro) apresenta fundo, blocos verdes e ícones, com mudança de painel
+observada durante o teste de entrada. Faltam textos e há crash em um caminho de
+navegação. §0.11 registra causa, correções, evidências e limites; as seções
+anteriores preservam a evolução do diagnóstico. A região zerada de §0.10
+continua sendo uma hipótese experimental, com conteúdo real desconhecido.
 
 Referências: ReXGlue v0.10.0 `f5337cdc` (caminhos relativos a
 `external/rexglue-sdk`) e Xenia Canary `04f85416e0f8` (consultado só como
@@ -515,7 +511,7 @@ ID de idioma residual em r3: com idioma 1, `sub_921CB1E8` tentava ler o endereç
 da implementação estão em `patches/rexglue-sdk/README.md`. Fontes continuam
 parciais; não se substituíram outros stubs por sucesso.
 
-**Resultado atual:** o log com trace (`20261012T021146Z-dash17559-fallback`)
+**Resultado histórico, antes de §0.11:** o log com trace (`20261012T021146Z-dash17559-fallback`)
 mostra criação do render target, resolve e textura 1280×720 em `0x1F6F8000`, no
 caminho de apresentação. A janela observada permanece preta. Isso não comprova
 uma tela funcional: **menu e navegação não foram alcançados**.
@@ -532,13 +528,15 @@ Duas amostras de pilha no run `20261012T021300Z-dash17559-hang` e uma no run
 `20261012T021956Z-dash17559-fence-sample` mostram a mesma espera. No último, a
 leitura externa, sem escrever no processo, encontrou dispositivo `0x40002400`,
 ponteiro do contador (`+11024`) `0xFFCA3000`, contador emitido (`+11036`) `0x15`,
-alvo da espera (`+15344`) `0x0D`, e conclusão em `*0xFFCA3000` igual a zero.
+alvo da espera (`+15344`) `0x0D`. A conclusão foi inicialmente registrada como
+zero, mas essa leitura externa estava incorreta: faltava o deslocamento host
+de 4 KiB do heap físico E/F no Windows. A amostra corrigida em §0.11 lê `0x0B`.
 A thread `CommandProcessor::WorkerThreadMain` está esperando trabalho (linha 225),
 sem comandos pendentes. O run termina pelo timeout de 120 s, sem exceção não
 tratada, mas com 99 linhas STUB, 86 erros e 7 mensagens não implementadas.
 Evidência local: `.local/logs/dash17559-fence-state.txt` e os relatórios desses runs.
 
-Ainda não foi determinado qual pacote/registrador deveria atualizar esse contador.
+Naquele momento ainda não havia sido determinado qual pacote atualizava o contador.
 `VdGetSystemCommandBuffer` usa placeholders e
 `VdSetSystemCommandBufferGpuIdentifierAddress` é vazio; são candidatos, não causas
 comprovadas. O próximo diagnóstico é rastrear a emissão/consumo dos pacotes e o
@@ -548,6 +546,79 @@ esconderia o bloqueio sem validar a renderização; nenhuma alteração assim fo
 
 Builds recompilaram apenas componentes afetados e copiaram DLLs verificadas;
 codegen não foi forçado e os arquivos gerados permaneceram iguais.
+
+### 0.11 Primeiro quadro real: DPC e retorno não local (2026-10-12)
+
+**Causa demonstrada da espera:** em `sub_921AFF68`, a partir de `0x921B0008`,
+o guest lê o ponteiro em dispositivo `0x40002400 + 11024`, o valor emitido em
+`+11036` e a conclusão nesse ponteiro. Espera enquanto
+`uint32_t(emitido - alvo) < uint32_t(emitido - concluído)`. A amostra correta
+(`.local/logs/dash-fence-alias-state.txt`) tem emitido `0x15`, alvo `0x0D`,
+ponteiro `0xFFCA3000`, concluído `0x0B`: `8 < 10` mantém a espera.
+
+`sub_921B0960` emite `EVENT_WRITE_SHD`, initiator 3, endereço físico
+`0x1FCA4000`, endian 2. A instrumentação confirmou submissão, consumo e escrita
+big-endian de 3, 5, 7, 9 e 11; a CPU vê 11. O endereço físico correto inclui o
+deslocamento de 4 KiB e não é o `SCRATCH_ADDR` separado (`0x1FCA3000`).
+O primeiro ponto quebrado é anterior à submissão seguinte: no run
+`20261012T025839Z-dash-dpc-before`, `KeInsertQueueDpc` enfileira `0x400051C4`,
+rotina `0x921C89B0`, contexto `0x400051A4`, argumento `0xDFAA0280`, mas o SDK
+nunca despacha a lista. Essa rotina guest deveria registrar o trabalho e
+sinalizar o evento da thread de submissão. Não era travamento da GPU do PC.
+
+**Patch 0007:** executa a rotina DPC real no contexto do chamador, em
+`IRQL_DISPATCH`, preservando registradores e restaurando IRQL/estado DPC.
+Usa o despacho inline do [Xenia Canary 2372a541 como referência](https://github.com/xenia-canary/xenia-canary/blob/2372a54105d9d598ab5bc7ba94a72ef1bea4b271/src/xenia/kernel/xboxkrnl/xboxkrnl_threading.cc).
+É HLE de DPC no processador corrente, não um escalonador completo por CPU.
+O callback executado não fica preso na lista. O contador não é tocado pelo patch:
+o guest envia os comandos e `EVENT_WRITE_SHD` continua fazendo o writeback.
+Run `20261012T030254Z-dash-dpc-after`: consumo passa do índice 49, conclusão
+ultrapassa `0x0D` e chega a `0x1D`; a inicialização avança.
+
+Dois bloqueios seguintes foram corrigidos separadamente:
+
+- `XUsbcamCreate`, antes uma armadilha local, informa `X_STATUS_NOT_IMPLEMENTED`.
+  Não cria handle nem retorna o sucesso incondicional do stub SDK/Xenia. O guest
+  executa seu caminho de falha em `0x92368448`; a câmera permanece desconectada.
+- O run `20261012T030446Z-dash-camera-unavailable` alcança o tratamento protegido
+  de erro da interface, mas termina em `KeBugCheck`: sem identificação do CRT,
+  `longjmp` era uma função C++ que retornava ao chamador errado. A análise do
+  buffer confirmou `setjmp=0x9291C760` e `longjmp=0x9291C330` (SP+144, CR+304,
+  LR+308, registradores não voláteis). Os dois endereços foram adicionados ao
+  TOML; o suporte existente do codegen agora emite `ppc_setjmp`/`ppc_longjmp`.
+  Não se ignora o erro: ele retorna ao tratador protegido original.
+
+**Resultado visual:** run `20261012T030938Z-dash-jmp-fixed` apresenta conteúdo
+real: fundo, blocos e ícones. Durante entradas direcionais e botão A foram
+observados painéis diferentes, inclusive o de configurações. Captura local:
+`.local/logs/dash17559-real-frame-input.png`. Isso demonstra renderização real
+e resposta parcial à entrada, não compatibilidade completa ou lançamento de jogos.
+
+**Limites concretos:** `media:\SegoeXbox-Light.xtt` falha com `0xC000000F`;
+esse nome não existe nos inputs locais, e não foi substituído por outra fonte
+renomeada. Também houve leitura inválida de `0x110` durante a navegação:
+`XamLookupCommonStringByIndex(272)` é um stub (`xam_misc.cpp`) que devolve o ID
+residual, tratado como ponteiro UTF-16 por `sub_92188D88` → `sub_921996F8`.
+Falta implementar o contrato de strings de sistema (também é pedido o ID 275).
+O relatório registra exceção e timeout; não é uma execução sem falhas.
+`DASHUSER:` e a região experimental permanecem como antes.
+
+**Validação e consolidação:** o teste DPC sem patch falha no assert upstream
+(`20261012T030604Z-dpc-test-unpatched`); com patch passa em 16 asserções.
+DPC + câmera: 20 asserções, 2 casos. `ctest -R sdkcheck`: 17/17 aprovados.
+Iruka: L1–L5, 309 cores, diferença 5,752, zero stubs/erros/críticas
+(`20261012T031549Z-regress-iruka`). Castle Crashers: 45 s, sem crash/erros/críticas,
+4 chamadas ao stub `XamShowMarketplaceUI` (`20261012T031646Z-cc-regression-0007`);
+a conferência visual dessa regressão foi interrompida pelo Escape físico.
+A suíte inteira não foi repetida neste incremento.
+
+A instrumentação de GPU foi removida e o título recompilado. Na árvore final,
+as DLLs ao lado do título e na saída do SDK têm hashes iguais: runtime
+`f80ab89c1e8aa21da60cfaebd59e497e65536ee04aebfdfd18974ace18509c34`, plugin
+`144de23270c1465bc2cc263330feaa4152e3090e0a5427a65078b4df9c0a55cb`.
+O run visual citado usou o runtime `9f13a427…57faf0b` com o mesmo patch e
+instrumentação temporária. Não houve outra sessão visual após o Escape;
+o build final sem instrumentação não tem captura própria.
 
 ## 1. Por que isto é um alvo próprio
 
