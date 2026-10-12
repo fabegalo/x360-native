@@ -59,6 +59,9 @@ REXCVAR_DEFINE_STRING(x360n_avatar_catalog_17559, "", "x360n",
 REXCVAR_DEFINE_BOOL(motocross_xam_aot_probe_strb, false, "Motocross Madness",
                     "Diagnostic, with the probe: decode every STRB blob of the 17559 catalog with "
                     "XAM's original Structured Binary reader and compare with the bytes");
+REXCVAR_DEFINE_BOOL(motocross_xam_aot_probe_sizes, false, "Motocross Madness",
+                    "Diagnostic, with the probe: run XAM's GetAssets size routine 0x81965EC0 on "
+                    "every valid component mask and compare with the C++ ResultSizeFor");
 
 namespace {
 
@@ -229,6 +232,54 @@ void RunStrbDecode(const x360n::avatar::AvatarToc& toc) {
   memory->SystemHeapFree(scratch);
 }
 
+// GetAssets buffer sizes: XAM's 0x81965EC0(mask, &result, &gpu), which the GetAssets
+// output builder (0x81966030) calls, reads only its arguments and the 13-entry component
+// table at 0x816332B8 (through 0x81970970). Every valid input is checked against the C++
+// ResultSizeFor: the games' wrappers accept only nonzero 13-bit masks (Motocross
+// 0x82958130, Keflings 0x822F9C18), and both games pass 0x1FFF (Motocross 0x824377D4,
+// Keflings 0x8223F564).
+void RunSizeCheck() {
+  auto* runtime = rex::Runtime::instance();
+  auto* thread = rex::runtime::ThreadState::Get();
+  auto* memory = runtime->memory();
+  auto* dispatcher = runtime->function_dispatcher();
+  const uint32_t out = memory->SystemHeapAlloc(8);
+  if (!out) {
+    Check(false, "sizes: allocate the output words");
+    return;
+  }
+  auto* host = memory->TranslateVirtual<uint8_t*>(out);
+  uint32_t abi = 0, equal = 0, first_mask = 0;
+  x360n::avatar::AssetsResultSize first_cpp{}, first_xam{}, real{};
+  for (uint32_t mask = 1; mask <= 0x1FFF; ++mask) {
+    std::memset(host, 0xA5, 8);  // both words are written by XAM
+    CallQuiet(dispatcher, thread, 0x81965EC0, {mask, out, out + 4}, &abi);
+    const x360n::avatar::AssetsResultSize xam{rex::memory::load_and_swap<uint32_t>(host),
+                                              rex::memory::load_and_swap<uint32_t>(host + 4)};
+    const auto cpp = x360n::avatar::ResultSizeFor(uint16_t(mask));
+    if (mask == 0x1FFF) real = xam;
+    if (xam.result == cpp.result && xam.gpu_resources == cpp.gpu_resources) {
+      ++equal;
+    } else if (!first_mask) {
+      first_mask = mask;
+      first_cpp = cpp;
+      first_xam = xam;
+    }
+  }
+  Check(equal == 0x1FFF,
+        fmt::format("sizes: XAM 0x81965EC0 = C++ ResultSizeFor for {}/8191 masks{}", equal,
+                    first_mask ? fmt::format("; first difference mask 0x{:04X}: XAM 0x{:X}/0x{:X}, "
+                                             "C++ 0x{:X}/0x{:X}",
+                                             first_mask, first_xam.result, first_xam.gpu_resources,
+                                             first_cpp.result, first_cpp.gpu_resources)
+                               : std::string()));
+  Check(abi == 0, fmt::format("sizes: ABI preserved in all 8191 XAM calls ({} breaks)", abi));
+  REXLOG_INFO("xam-aot-probe: sizes: games' mask 0x1FFF -> result 0x{:X}, GPU resources 0x{:X} "
+              "(XAM)",
+              real.result, real.gpu_resources);
+  memory->SystemHeapFree(out);
+}
+
 void Run() {
   auto* runtime = rex::Runtime::instance();
   auto* thread = rex::runtime::ThreadState::Get();
@@ -301,6 +352,7 @@ void Run() {
   }
   memory->SystemHeapFree(desc);
   if (REXCVAR_GET(motocross_xam_aot_probe_strb)) RunStrbDecode(*toc);
+  if (REXCVAR_GET(motocross_xam_aot_probe_sizes)) RunSizeCheck();
 
   // XAM -> game: the original vector iterator calls the game's constructor.
   constexpr uint32_t kCount = 4, kStride = 16;
