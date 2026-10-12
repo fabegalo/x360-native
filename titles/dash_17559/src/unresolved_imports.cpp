@@ -71,13 +71,3 @@ extern "C" REX_FUNC(__imp__XUsbcamCreate) {
   ctx.r3.u64 = X_STATUS_NOT_IMPLEMENTED;
 }
 extern "C" REX_FUNC(__imp__XUsbcamDestroy) { Trap(ctx, "xboxkrnl 0x223 XUsbcamDestroy", kNotBuilt); }
-
-// The title reaches this export for gameslibrary:_RootTitle=My Games; at
-// LR=0x92190354. The SDK has no URI router: its stub leaves user index 0 in
-// r3, which the caller mistakes for S_OK. Report the missing operation without
-// completing the OVERLAPPED or initiating a different title behind the menu.
-extern "C" REX_FUNC(__imp__XamLaunchURI) {
-  REXLOG_WARN("XamLaunchURI: URI dispatch not implemented; LR={:08X} user={} uri={:08X} flags={:08X}",
-              static_cast<uint32_t>(ctx.lr), ctx.r3.u32, ctx.r4.u32, ctx.r5.u32);
-  ctx.r3.u64 = 0x80004001;  // E_NOTIMPL, checked as an HRESULT by the guest.
-}

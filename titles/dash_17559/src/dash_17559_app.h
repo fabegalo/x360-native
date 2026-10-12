@@ -14,8 +14,10 @@
 #include <rex/cvar.h>
 #include <rex/logging/assert.h>
 #include "experimental_region.h"
+#include "boot_intro.h"
 
 REXCVAR_DECLARE(bool, dash17559_experimental_region);
+REXCVAR_DECLARE(bool, dash17559_boot_intro);
 
 class Dash17559App : public rex::ReXApp {
  public:
@@ -31,6 +33,10 @@ class Dash17559App : public rex::ReXApp {
   // the dashboard's executable is dash.xex, the same file the manifest's
   // [entrypoint] was generated from.
   void OnLoadXexImage(std::string& xex_image) override { xex_image = "game:\\dash.xex"; }
+
+  void OnPreLaunchModule() override {
+    if (REXCVAR_GET(dash17559_boot_intro)) dash17559::InstallBootIntro(*runtime());
+  }
 
   // x360-native: dash.xex links media: to \SystemRoot itself (ObCreateSymbolicLink,
   // "Registered symbolic link: media: => \SystemRoot") and opens media:\shrdres.xzp

@@ -38,7 +38,7 @@ presente não for exatamente o arquivo listado. Qualquer outra falha é regress�
 
 ## Estrutura
 
-Dashboard atual: `docs/dashboard.md` §0.12. A região experimental `0x8E030000`
+Dashboard atual: `docs/dashboard.md` §0.13. A região experimental `0x8E030000`
 (64 KiB RW) é exclusiva do título 17559, zerada uma vez, desligável por
 `--dash17559_experimental_region=false`; log/relatório dizem que o conteúdo real
 é desconhecido. Patch 0006 implementa idioma configurado e ponteiro de fallback
@@ -46,12 +46,12 @@ UTF-16. Patch 0007 despacha a DPC que deixava comandos gráficos sem envio;
 o contador correto era 0x0B, não zero (a amostra antiga omitia 4 KiB na tradução).
 Os hints setjmp/longjmp do título corrigem o retorno protegido da interface.
 Menu Metro renderiza continuamente; controle e Shift+setas confirmados pelo usuário.
-Textos aparecem pelo fallback real `Xenon*Latin.xtt`; a fonte principal
-`media:\SegoeXbox-Light.xtt` continua ausente. Patches 0008–0010 corrigem fila
-MNK, ABI de data/hora e retorno nulo para strings indisponíveis. My Games chama
-`XamLaunchURI("gameslibrary:_RootTitle=My Games;")`, mas falta o roteador: o
-título retorna E_NOTIMPL, sem sucesso ou conclusão fictícios. O callback de
-launch prepara saída, não recebe URI. Ciclo com Castle Crashers não executado.
+Fonte original SegoeXbox-Light.xtt agora associada ao perfil 17559. XAM 17559
+foi usado como referência para a rota gameslibrary (launch data + notificação),
+sem carregar código do módulo. My Games ainda aparece sem conteúdo. Intro
+original AOT opcional (`--dash17559_boot_intro=true`) tem imagem/som observados
+e retorna à dashboard por export 2(false), preservando o tempo/efeito do original.
+Boot direto é o padrão. Ciclo com Castle Crashers não executado.
 Algumas páginas de configurações ainda leem 0x1C após XConfig categoria 7.
 
 - `external/rexglue-sdk` — submódulo fixado em `deps.lock.json`. **Não editar à mão.**

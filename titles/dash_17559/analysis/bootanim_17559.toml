@@ -1,0 +1,21 @@
+# Retail 2.0.17559.0 bootanim.xex SHA256
+# 45eb980c0f841b4807d43c07c766fae5e70b8e2fa4d13fb247a491897cfc6de7.
+# Codegen reports an unresolved tail call from 0x98055764.
+# x360n-content disasm: one-instruction thunk b 0x98054FF0 at 0x98055398,
+# followed by zero padding at 0x9805539C; no .pdata entry. No forced analysis.
+[functions]
+0x98055398 = {}
+
+# First execution traps at 0x9804D678 (audio dispatch). Existing pointer checker
+# finds nine aligned targets held in data, outside .pdata/generated extents,
+# starting after a return/tail-call and ending in a return/tail-call. Confirmed
+# with x360n-content disasm; start hints only, no size and no behavior override.
+0x9804D678 = {} # dispatch leaf; full extent through tail call 0x9804D6F8
+0x98050B20 = {} # bounds check + virtual dispatch; ends 0x98050B64
+0x98050B68 = {} # indexed byte query
+0x98054A00 = {} # addi r3,r3,4; b 0x98052C68
+0x98055330 = {} # addi r3,r3,-16; b 0x98054A80
+0x98055358 = {} # addi r3,r3,-4; b 0x980549F8
+0x98055360 = {} # addi r3,r3,-16; b 0x98054FF0
+0x98055380 = {} # addi r3,r3,-4; b 0x98054A00
+0x98055388 = {} # addi r3,r3,-16; b 0x98054848

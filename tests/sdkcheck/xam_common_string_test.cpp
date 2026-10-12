@@ -25,12 +25,12 @@ TEST_CASE("Dashboard unsupported URI launch never reports success or completion"
   for (uint32_t user : {0u, 1u, 3u, 0xFFFFFFFFu}) {
     ctx->r3.u64 = user;
     ctx->r4.u64 = 0x40665620;  // Captured URI pointer; must not be dereferenced.
-    ctx->r5.u64 = 5;
+    ctx->r5.u64 = 0;  // Reboot/title-switch flags are outside this profile route.
     ctx->r6.u64 = 0x7015EDF0;  // Must not signal or write to OVERLAPPED.
     __imp__XamLaunchURI(*ctx, nullptr);
     CHECK(ctx->r3.u32 == 0x80004001);
     CHECK(ctx->r4.u64 == 0x40665620);
-    CHECK(ctx->r5.u64 == 5);
+    CHECK(ctx->r5.u64 == 0);
     CHECK(ctx->r6.u64 == 0x7015EDF0);
   }
 }

@@ -5,6 +5,15 @@ XDK "Dolphin" da `rexglue/demo-iruka`), com as limitações abaixo.
 
 ## Funciona (com evidência)
 
+Incremento atual: Retail 17559 com fonte original, entrega da URI My Games e
+intro original AOT com animação/som confirmados pelo usuário. Export 2(false)
+permite que a animação termine pelas próprias verificações e retorne ao menu;
+run `20261012T045539Z-dash-bootanim-graceful`. 23/23 sdkcheck e iruka L1–L5 passam.
+Castle Crashers executou 45 s sem erro/crash; duas chamadas a AchievementsUI
+continuam stub. Biblioteca ainda vazia e ciclo pelo menu não executado.
+Detalhes e limites: `docs/dashboard.md` §0.13. Sem XAM original executado e sem
+compartilhar silenciosamente recursos da 17559 com outras versões.
+
 | Item | Evidência |
 |---|---|
 | ReXGlue v0.10.0 (`f5337cdc`) compila no Windows com LLVM 22.1.8 + MSVC 14.44, modo submódulo, com 10 patches locais | builds dos alvos afetados com saída 0; patches em `patches/rexglue-sdk/`, verificados no configure e em todo build |

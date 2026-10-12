@@ -5,7 +5,25 @@ name = "dash_17559"
 sdk_version = "0.10.0"
 game_root = "../../.local/inputs/dashboard/17559"
 
+# Per-target system assets, extracted from Microsoft's SystemUpdate_17559_USB.zip.
+# Provenance and original packages remain under the ignored local directory
+# dashboard/versions/17559/retail_system_assets/metadata/manifest.json.
+# Resource read by dash: game_root/SegoeXbox-Light.xtt
+# SHA256 7b03c1731c6cb874adee50b17aa150f6ba3e0671fc8f612a2a970bf5ef4a542e.
+# xam.xex (2.0.17559.0) is an analysis reference, NOT a loaded module:
+# ../../.local/inputs/dashboard/versions/17559/retail_system_assets/extracted/xam.xex
+# SHA256 78b3dbd8ae866f4258f5444205486ea9f8451afaa30f469c875dcf345f828467.
+# These associations apply only to this profile; other versions need their own.
+
 [entrypoint]
 file_path = "../../.local/inputs/dashboard/17559/dash.xex"
 out_directory_path = "generated/dash"
 includes = ["analysis/dash_17559.toml", "analysis/dash_17559_pointer_targets.toml"]
+
+# Original Retail 17559 boot module; optional execution, never a global resource.
+# SHA256 45eb980c0f841b4807d43c07c766fae5e70b8e2fa4d13fb247a491897cfc6de7.
+[[modules]]
+guest_path = 'game:\bootanim.xex'
+file_path = "../../.local/inputs/dashboard/17559/bootanim.xex"
+out_directory_path = "generated/bootanim"
+includes = ["analysis/bootanim_17559.toml"]

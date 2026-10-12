@@ -1,10 +1,9 @@
 # Dashboard original: diagnóstico
 
-Estado em 2026-10-12. **Primeiro quadro real renderizado; interface ainda parcial.**
-A 17559 (Metro) apresenta fundo, blocos, ícones e textos pelo fallback de fonte,
-com mudança contínua de painéis durante entrada. My Games chega a XamLaunchURI,
-cujo roteador não existe; algumas configurações ainda causam crash.
-§0.12 registra navegação, correções e limites; as seções
+Estado em 2026-10-12. **Intro original e menu Metro; interface ainda parcial.**
+A 17559 usa agora SegoeXbox-Light.xtt original. My Games recebe a URI expandida,
+mas a biblioteca ainda aparece sem conteúdo; algumas configurações causam crash.
+§0.13 registra o incremento atual; as seções
 anteriores preservam a evolução do diagnóstico. A região zerada de §0.10
 continua sendo uma hipótese experimental, com conteúdo real desconhecido.
 
@@ -679,6 +678,47 @@ Outro bloqueio separado, reproduzido nos runs `dash-navigation-fixed` e
 e `sub_92281F80` copia uma lista com ponteiro residual `0x1C` em
 `sub_928113D8`. Continua sem correção. A região experimental `0x8E030000`
 permanece inalterada e identificada como hipótese.
+
+### 0.13. Recursos Retail 17559, URI e intro original
+
+Arquivos obtidos anteriormente do update oficial foram preservados com sua
+procedência em `versions/17559/retail_system_assets/`. O manifesto do título
+associa hashes e papéis: SegoeXbox-Light.xtt é recurso local do perfil;
+xam.xex é referência de análise e **não é carregado**; bootanim.xex é módulo
+AOT opcional da 17559. Não há recurso global aplicado a outras dashboards.
+
+`launch_uri.cpp` reproduz apenas `gameslibrary:` com flags 5: expansão original
+em `0x8199FEE8`, launch data de 1020 bytes (reason 12, usuário, payload em +12)
+e notificação `0x80040021`, conforme handler `0x819A0440` do XAM 17559.
+Entrega a requisição antes de concluir OVERLAPPED; isso não afirma abertura ou
+lançamento de jogo. Outros esquemas/flags continuam sem implementação.
+Run `20261012T044046Z-dash-uri-hub`: usuário viu somente Voltar na biblioteca.
+O crash posterior em 0x1C foi no caminho de configurações já registrado em §0.12.
+Ainda não houve solicitação real de lançamento de Castle Crashers.
+
+Intro: `--dash17559_boot_intro=true`; sem a opção continua o boot direto.
+O original não tem entry point e expõe três ordinais. Export 1 recebe hmodule
+e flags 0, inicializa/renderiza/toca o recurso `audio` embutido. Um thunk e
+nove alvos indiretos precisaram de hints de análise, conferidos com as
+ferramentas existentes; não houve `--force` nem alteração de instruções.
+Run `20261012T045242Z-dash-bootanim-pointers`: imagem, animação e som confirmados
+pelo usuário; logo final retido porque faltava a chamada de controle do host.
+Export 2(false) pede encerramento gradual. O próprio `0x9800EA10` verifica
+tempo >= 6, efeito terminado e hold >= 4.5 antes de limpar/retornar.
+Run `20261012T045539Z-dash-bootanim-graceful`: export 1 às 01:56:06.908,
+callback gráfico removido às 01:56:17.885, retorno às 01:56:17.941, novo
+callback da dashboard às 01:56:17.946; clique real em My Games às 01:56:26.212.
+Não há vídeo substituto, avanço de contador ou saída por timeout na transição.
+Os dois processos de diagnóstico foram encerrados pelo host depois da observação;
+isso não demonstra encerramento normal da dashboard. HalSendSMCMessage permanece stub.
+
+Validação: 23/23 sdkcheck, identidade dos alvos passou; iruka L1–L5 passou
+(`20261012T045814Z-regress-iruka`). Castle Crashers 0.0.1.3 executou 45 s
+(`20261012T045916Z-cc-regression-system-assets`), sem erro/crítica/crash;
+houve duas chamadas ao stub XamShowAchievementsUI durante entrada do usuário.
+Foi execução independente: **o ciclo dashboard → jogo → dashboard não ocorreu**.
+Todas as versões antigas/betas preservadas continuam candidatas, não compatíveis
+por associação com a 17559. A região experimental permanece inalterada.
 
 ## 1. Por que isto é um alvo próprio
 
