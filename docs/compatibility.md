@@ -10,7 +10,7 @@ Ambiente de todas as linhas abaixo: Windows 11 Pro 10.0.26300, AMD Ryzen 7
 5700X3D, 40 GB RAM, RTX 4070; LLVM/Clang 22.1.8 + MSVC 14.44 (VS Build Tools
 17.14.41), Windows SDK 10.0.26100; configuração Debug.
 Revisão do projeto: commits locais de 2026-10-12; SDK `f5337cdc` (v0.10.0) com os
-patches locais 0001–0007 (`patches/rexglue-sdk/`).
+patches locais 0001–0010 (`patches/rexglue-sdk/`).
 Títulos compilados em `RelWithDebInfo` (ver `docs/validation-iruka.md`).
 
 ## Títulos e amostras
@@ -29,12 +29,15 @@ de indisponibilidade e os endereços de setjmp/longjmp foram configurados. A
 espera anterior lia conclusão `0x0B` para alvo `0x0D`; zero era erro da sonda
 externa, corrigido. Nenhum contador foi forçado. Ver `docs/dashboard.md` §0.11.
 
-Compatibilidade ainda parcial: textos ausentes; `XamLookupCommonStringByIndex`
-devolve ID 272 como ponteiro `0x110`, provocando acesso inválido durante navegação;
-`media:\SegoeXbox-Light.xtt` é solicitado e não encontrado. A hipótese de região
-de 64 KiB zerada permanece inalterada; `DASHUSER:` ausente. O build final removeu
-logs de diagnóstico e teve hashes conferidos, mas não foi reinspecionado
-visualmente após o usuário cancelar a automação com Escape.
+Incremento de navegação (§0.12): textos confirmados pelo usuário usando a fonte
+alternativa original; controle e Shift+setas respondem, menu do sistema abre.
+Fila MNK e ABI de data/hora corrigidos; strings comuns ausentes agora retornam
+nulo. My Games emite `gameslibrary:_RootTitle=My Games;`, mas XamLaunchURI não
+tem roteador e retorna E_NOTIMPL. Biblioteca e ciclo com Castle Crashers não
+funcionam. Algumas páginas do sistema ainda leem 0x1C após XConfig categoria 7.
+`media:\SegoeXbox-Light.xtt` continua ausente; hipótese de região de 64 KiB
+zerada inalterada. Validação: 22/22 sdkcheck, iruka L1–L5, Castle Crashers com
+menu principal observado em 45 s; este último foi executado separadamente.
 
 A linha abaixo preserva o resultado histórico anterior a essas correções:
 

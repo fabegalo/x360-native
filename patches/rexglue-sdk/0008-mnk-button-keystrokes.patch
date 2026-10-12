@@ -1,0 +1,73 @@
+diff --git a/include/rex/input/mnk/mnk_input_driver.h b/include/rex/input/mnk/mnk_input_driver.h
+index c8751b7..054c2bf 100644
+--- a/include/rex/input/mnk/mnk_input_driver.h
++++ b/include/rex/input/mnk/mnk_input_driver.h
+@@ -59,6 +59,7 @@ class MnkInputDriver final : public InputDriver,
+  private:
+   bool IsEnabled() const;
+   void SetKeyState(uint16_t vk, bool down);
++  void QueueButtonTransitions(const bool (&previous)[256]);
+   void EnqueueKeystroke(uint16_t vk_pad, bool down);
+ 
+   // Called from the guest thread. The rest of the capture path stays on the UI
+diff --git a/src/input/mnk/mnk_input_driver.cpp b/src/input/mnk/mnk_input_driver.cpp
+index 3f9422d..73adf5b 100644
+--- a/src/input/mnk/mnk_input_driver.cpp
++++ b/src/input/mnk/mnk_input_driver.cpp
+@@ -476,7 +476,45 @@ void MnkInputDriver::RecenterCursorFromUIThread(int32_t x, int32_t y) {
+ 
+ void MnkInputDriver::SetKeyState(uint16_t vk, bool down) {
+   if (vk < 256) {
++    bool previous[256];
++    std::memcpy(previous, key_down_, sizeof(previous));
+     key_down_[vk] = down;
++    QueueButtonTransitions(previous);
++  }
++}
++
++void MnkInputDriver::QueueButtonTransitions(const bool (&previous)[256]) {
++  // GetState polling alone loses taps between polls. Deliver actual configured
++  // button transitions to GetKeystroke consumers too (e.g. the dashboard).
++  // Compare complete chords, so modifier changes and alternate bindings work.
++  struct Binding { VirtualKey pad; const std::string* keys; };
++  const Binding bindings[] = {
++      {VirtualKey::kXInputPadA, &REXCVAR_GET(keybind_a)},
++      {VirtualKey::kXInputPadB, &REXCVAR_GET(keybind_b)},
++      {VirtualKey::kXInputPadX, &REXCVAR_GET(keybind_x)},
++      {VirtualKey::kXInputPadY, &REXCVAR_GET(keybind_y)},
++      {VirtualKey::kXInputPadLShoulder, &REXCVAR_GET(keybind_left_shoulder)},
++      {VirtualKey::kXInputPadRShoulder, &REXCVAR_GET(keybind_right_shoulder)},
++      {VirtualKey::kXInputPadLThumbPress, &REXCVAR_GET(keybind_lstick_press)},
++      {VirtualKey::kXInputPadRThumbPress, &REXCVAR_GET(keybind_rstick_press)},
++      {VirtualKey::kXInputPadBack, &REXCVAR_GET(keybind_back)},
++      {VirtualKey::kXInputPadStart, &REXCVAR_GET(keybind_start)},
++      {VirtualKey::kXInputPadDpadUp, &REXCVAR_GET(keybind_dpad_up)},
++      {VirtualKey::kXInputPadDpadDown, &REXCVAR_GET(keybind_dpad_down)},
++      {VirtualKey::kXInputPadDpadLeft, &REXCVAR_GET(keybind_dpad_left)},
++      {VirtualKey::kXInputPadDpadRight, &REXCVAR_GET(keybind_dpad_right)},
++      {VirtualKey::kXInputPadLTrigger, &REXCVAR_GET(keybind_left_trigger)},
++      {VirtualKey::kXInputPadRTrigger, &REXCVAR_GET(keybind_right_trigger)},
++  };
++  // Release old chords before pressing new ones, like the SDL pad driver.
++  for (bool down : {false, true}) {
++    for (const auto& binding : bindings) {
++      const bool was = IsBindPressed(previous, *binding.keys);
++      const bool now = IsBindPressed(key_down_, *binding.keys);
++      if (was != now && now == down) {
++        EnqueueKeystroke(static_cast<uint16_t>(binding.pad), down);
++      }
++    }
+   }
+ }
+ 
+@@ -565,7 +603,10 @@ void MnkInputDriver::OnLostFocus(rex::ui::UISetupEvent&) {
+   mouse_capture_requested_.store(false, std::memory_order_relaxed);
+   {
+     std::lock_guard lock(state_mutex_);
++    bool previous[256];
++    std::memcpy(previous, key_down_, sizeof(previous));
+     std::memset(key_down_, 0, sizeof(key_down_));
++    QueueButtonTransitions(previous);
+     mouse_dx_ = 0.0f;
+     mouse_dy_ = 0.0f;
+   }

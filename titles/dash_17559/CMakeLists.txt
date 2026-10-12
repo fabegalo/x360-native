@@ -22,6 +22,7 @@ set(DASH17559_SOURCES
     src/main.cpp
     # Traps for imports the pinned SDK does not provide at link time (see the file).
     src/unresolved_imports.cpp
+    src/typeface.cpp
 )
 
 if(WIN32)

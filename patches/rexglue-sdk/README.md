@@ -23,6 +23,27 @@ local ref, has the same code in these functions). 0005 follows a Xenia Canary co
 `src/ui/rex_app.cpp` is compiled into each executable (`rexglue_configure_target`),
 not into `rexruntime`: a title picks up 0004 when it is rebuilt.
 
+## Navigation fixes (0008–0010)
+
+- **0008-mnk-button-keystrokes.patch** queues real configured button transitions
+  in the mouse/keyboard driver. Previously `GetDeviceKeystroke` always had an
+  empty queue. Chords, aliases and focus-loss releases are covered by 33 checks
+  (`mnk-before-test.log` fails with `X_ERROR_EMPTY`; `mnk-after-test.log` passes).
+  Analog-stick keystrokes and held-key repeat remain unimplemented.
+- **0009-dashboard-datetime-abi.patch** fixes the 17559 FILETIME-in-r3,
+  buffer-in-r4, byte-count-in-r5 ABI while retaining the legacy argument layout.
+  Raw wrappers preserve all 64 FILETIME bits. The former wrapper wrote to
+  guest 0x100. 122 checks cover both layouts, timestamps and buffer canaries;
+  67 failed before the patch. Format and timezone policy are unchanged.
+- **0010-common-string-unavailable.patch** returns a null pointer for a missing
+  common-string resource instead of the incoming integer ID. The guest's
+  confirmation dialog rejects null; it does not approve the action. Five of
+  ten checks failed before, all ten pass after. Actual common strings are
+  still unavailable.
+
+Title-local font locator and unsupported URI checks live under
+`titles/dash_17559/src/`, not in these SDK patches. See `docs/dashboard.md` §0.12.
+
 ## Language exports (0006)
 
 Patch **0006-xam-language.patch** implements `XamGetLanguage` from the existing

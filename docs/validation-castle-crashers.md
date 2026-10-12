@@ -94,6 +94,13 @@ A tentativa de inspeção visual foi cancelada pelo usuário com Escape e a
 automação foi parada. Portanto esta execução não comprova novamente o menu
 nem a entrada; as evidências visuais anteriores permanecem históricas.
 
+Regressão de navegação da dashboard, 2026-10-12, patches 0001–0010:
+`20261012T040834Z-cc-regression-navigation` apresentou o menu principal, observado
+por Computer Use, e executou por 45,297 s até timeout do supervisor, zero stubs,
+mensagens não implementadas, erros e críticas. DLL carregada: `rexruntimerd.dll`
+SHA-256 `8bdc873707ffac54985f2ab59dbb2f8a61be39639d942e6847c3425a73b73d4f`,
+igual à saída do SDK no build. Execução isolada: não valida o ciclo da dashboard.
+
 ## Não validado
 
 Gameplay além do relato do usuário, save/load, encerramento normal, sessão longa,

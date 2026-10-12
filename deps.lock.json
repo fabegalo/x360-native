@@ -94,6 +94,41 @@
           "src/kernel/xboxkrnl/xboxkrnl_threading.cpp": "687c0c5c4477c61c3e7fc8666cd65a0cfa98e145d37ca74c295580aca5da81fc"
         },
         "test": "tests/sdkcheck/dpc_dispatch_test.cpp"
+      },
+      {
+        "file": "patches/rexglue-sdk/0008-mnk-button-keystrokes.patch",
+        "sha256": "d5513222aeae0dba4869e84b6d024806acbd56af2d8a27247c797daf9e3b9483",
+        "files": {
+          "include/rex/input/mnk/mnk_input_driver.h": "7990608ea158fc89e97344140e4c20844c910437837399a38ad0ffc5af73a81f",
+          "src/input/mnk/mnk_input_driver.cpp": "997c76ab09d65c04b1b012910235caef7e19972e51a70a5824ba95904b150dfd"
+        },
+        "base_files": {
+          "include/rex/input/mnk/mnk_input_driver.h": "b91ac65d89760bdfb1a59d83a5dd2e5c1f1eb3f7d8ea93a514c68c49075fcf9c",
+          "src/input/mnk/mnk_input_driver.cpp": "3d1f0fb599817771dc583d790fd15630b54c51e068308e8b9260dfc31c6f9939"
+        },
+        "test": "tests/sdkcheck/mnk_keystroke_test.cpp"
+      },
+      {
+        "file": "patches/rexglue-sdk/0009-dashboard-datetime-abi.patch",
+        "sha256": "a5a71909fbbada4061bf228c09557f276f762dfc203efe71c41d61e1ad637a81",
+        "files": {
+          "src/kernel/xam/xam_info.cpp": "ed4550e0088c32f937873da1bb2f69878c77d74bbd64ca6a0b8ef4fdc73d9385"
+        },
+        "base_files": {
+          "src/kernel/xam/xam_info.cpp": "c847210dcec0d2a3ad07e459bd59a7b4acc38d8706187e597f398153a3d31981"
+        },
+        "test": "tests/sdkcheck/xam_datetime_test.cpp"
+      },
+      {
+        "file": "patches/rexglue-sdk/0010-common-string-unavailable.patch",
+        "sha256": "3862fa9674a74241d9b6dfccde6a1f706e5a2c7e614082350f2593af58616dea",
+        "files": {
+          "src/kernel/xam/xam_misc.cpp": "859c6904a0c0360e44eef7b6692fd845b73fe59f82a5f5221793c3d161cef9ce"
+        },
+        "base_files": {
+          "src/kernel/xam/xam_misc.cpp": "6f0a07784bf46a5e9dd9f3c387ef52a936c527c949057aae1fb97388e21ce68d"
+        },
+        "test": "tests/sdkcheck/xam_common_string_test.cpp"
       }
     ]
   },

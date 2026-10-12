@@ -1,9 +1,10 @@
 # Dashboard original: diagnóstico
 
 Estado em 2026-10-12. **Primeiro quadro real renderizado; interface ainda parcial.**
-A 17559 (Metro) apresenta fundo, blocos verdes e ícones, com mudança de painel
-observada durante o teste de entrada. Faltam textos e há crash em um caminho de
-navegação. §0.11 registra causa, correções, evidências e limites; as seções
+A 17559 (Metro) apresenta fundo, blocos, ícones e textos pelo fallback de fonte,
+com mudança contínua de painéis durante entrada. My Games chega a XamLaunchURI,
+cujo roteador não existe; algumas configurações ainda causam crash.
+§0.12 registra navegação, correções e limites; as seções
 anteriores preservam a evolução do diagnóstico. A região zerada de §0.10
 continua sendo uma hipótese experimental, com conteúdo real desconhecido.
 
@@ -619,6 +620,65 @@ as DLLs ao lado do título e na saída do SDK têm hashes iguais: runtime
 O run visual citado usou o runtime `9f13a427…57faf0b` com o mesmo patch e
 instrumentação temporária. Não houve outra sessão visual após o Escape;
 o build final sem instrumentação não tem captura própria.
+
+### 0.12 Navegação, textos e bloqueio da biblioteca (2026-10-12)
+
+O primeiro quadro permanece preservado no commit local `8c4f713`. Os patches
+0008–0010 corrigem a fila de teclas do driver MNK, o ABI de data/hora e o retorno
+de ponteiro nulo para strings comuns ausentes (sem aceitar confirmações).
+`sdkcheck`: **22/22** em `.local/logs/navigation-final-ctest.log`.
+Regressões com os patches: iruka L1–L5 aprovado (313 cores, diferença 7,144,
+run `20261012T040641Z-regress-iruka`); Castle Crashers apresentou o menu principal
+e permaneceu 45 s sem crash, stubs, erros ou críticas
+(`20261012T040834Z-cc-regression-navigation`). Ambos encerrados pelo timeout do
+supervisor. O teste isolado de Castle Crashers não valida o ciclo pela dashboard.
+A suíte inteira não foi repetida.
+
+**Tela real:** menu principal Metro, com transições entre painéis e atividade
+contínua de desenho observadas; não apenas um quadro. Espaço chega ao convidado
+(chamou `HalOpenCloseODDTray` no bloco do disco) e `3` muda para jogos.
+O usuário confirmou controle físico e Shift+setas, depois textos visíveis e
+abertura do menu do sistema. Voltar com B/Backspace ainda não foi confirmado
+isoladamente. Outros painéis não são declarados funcionais.
+
+**Fonte:** `XamGetLanguageTypeface` era stub: não preenchia o localizador da
+fonte alternativa. A integração do título agora escreve UTF-16BE limitado ao
+buffer e usa o mapeamento de Xenia Canary `2372a541`, `xam_locale.cc:666`:
+JKLatin para os demais idiomas, CLatin para 8, SCLatin para 17. O ponteiro de
+patch opcional é nulo, não o ID residual do idioma. Foram copiados, sem renomear,
+os arquivos fornecidos em `resources/fonts/Segoe UI (Kinect, Metro)/` (JKLatin,
+CLatin), e `versions/17559/metro_v2_retail_full_readme/XenonSCLatin.xtt`, para a
+raiz ativa `17559/`. O usuário confirmou os textos no run
+`20261012T035706Z-dash-typeface`. A fonte principal `media:\SegoeXbox-Light.xtt`
+ainda falha com `0xC000000F`; não foi fabricada nem substituída por arquivo
+renomeado. Esta validação comprova o fallback, não a fonte original.
+
+**Biblioteca não corrigida:** o clique real em My Games chamou `XamLaunchURI`
+em `LR=0x92190354`, r3=0, r5=5, com a string ASCII
+`gameslibrary:_RootTitle=My Games;` em r4 e OVERLAPPED em r6. Evidência:
+`20261012T035122Z-dash-uri-trace/rex.log`, 00:52:46.546. Nenhum trabalho era
+despachado; o stub deixava r3=0, confundido com sucesso. O diagnóstico temporário
+foi removido; o título agora retorna `E_NOTIMPL` sem escrever/sinalizar o
+OVERLAPPED. Isso torna a falha honesta, **não implementa o roteador**.
+O callback `0x92183C10` registrado em `XamLoaderRegisterLaunchRequestCallback`
+prepara a saída do título; não é um receptor de URI e não foi chamado à força.
+Falta o encaminhamento validado ao aplicativo interno da biblioteca, antes de
+qualquer solicitação do jogo. O ciclo dashboard → Castle Crashers → dashboard
+**não foi executado**. O supervisor existente supervisiona processos, mas ainda
+não recebe esse pedido da dashboard.
+
+Conferência de inputs: o inventário anterior à organização já listava 123
+arquivos em `17559 Full (Readme)` sem `xam.xex`. Os `.xzp` com esse nome são
+recursos, não o módulo. A deduplicação de 17559 retirou só cópias idênticas de
+`dash.xex` e `shrdres.xzp`. Não foi encontrado `xam.xex` 2.0.17559.0 para conferir
+o contrato do roteador; não é uma falha de abertura desse módulo pelo runtime,
+que atualmente fornece XAM por HLE. Não se misturaram versões na execução.
+
+Outro bloqueio separado, reproduzido nos runs `dash-navigation-fixed` e
+`dash-typeface`: configurações consultam XConfig categoria 7 não implementada,
+e `sub_92281F80` copia uma lista com ponteiro residual `0x1C` em
+`sub_928113D8`. Continua sem correção. A região experimental `0x8E030000`
+permanece inalterada e identificada como hipótese.
 
 ## 1. Por que isto é um alvo próprio
 

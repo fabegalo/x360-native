@@ -124,6 +124,11 @@ Reprodução em diretório de build limpo, incluindo a geração do código:
    (5222/5222) e o mesmo conjunto de declarações; muda só a distribuição das
    funções entre arquivos (`codegen.partition.json`).
 
+Regressão de navegação da dashboard, 2026-10-12, patches 0001–0010:
+`20261012T040641Z-regress-iruka` passou L1–L5, 313 cores e diferença 7,144;
+20,312 s até timeout, zero stubs, mensagens não implementadas, erros e críticas.
+Reutilizado o teste existente; não valida encerramento normal.
+
 ## Não validado
 
 Entrada de controle, áudio, encerramento normal (o processo foi sempre terminado
