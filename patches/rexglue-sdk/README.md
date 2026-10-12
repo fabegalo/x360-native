@@ -25,6 +25,26 @@ not into `rexruntime`: a title picks up 0004 when it is rebuilt.
 
 ## Apply, check, revert
 
+Patch **0006-xam-language.patch** implements `XamGetLanguage` from the existing
+`user_language` configuration (IDs 1–17; invalid values warn and fall back to
+English, 1), and `XamGetLanguageLocaleFallbackString`. The latter returns a
+runtime-owned, stable guest pointer to big-endian UTF-16, including an empty
+string for English. The table follows [Xenia Canary 2372a54105d9,
+XamState::LoadLanguageLocaleFallback](https://github.com/xenia-canary/xenia-canary/blob/2372a54105d9d598ab5bc7ba94a72ef1bea4b271/src/xenia/kernel/xam/xam_state.cc).
+Invalid fallback IDs and allocation failure return null with a diagnostic.
+This does not implement fonts, region-dependent language selection, or change
+`XGetLanguage`. The local configuration is an approximation of console settings.
+The table is allocated lazily under the module lock and freed with the module,
+so another runtime cannot reuse a stale guest address.
+
+Before 0006, all 8 `XamGetLanguage` checks failed (r3 retained its poisoned input).
+After implementing that export, dashboard run `20261012T020718Z-dash17559-language-trace`
+exposed the next failure: the fallback-string stub returned language ID 1 as a
+pointer, read by `sub_921CB1E8`. The fallback test failed at `address > 0x10000`.
+With both exports implemented, `tests/sdkcheck/xam_language_test.cpp` passes
+8 language checks and 100 fallback checks, including two runtime lifetimes.
+Its three SDK files are listed with base/result hashes in `deps.lock.json`.
+
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts\apply-sdk-patches.ps1          # apply (idempotent)
 powershell -ExecutionPolicy Bypass -File scripts\apply-sdk-patches.ps1 -Check   # report; exit 1 if not applied

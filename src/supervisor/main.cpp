@@ -528,6 +528,9 @@ int Run(const ProjectPaths& p, const fs::path& exe_in, std::vector<std::string> 
   w.EndObject();
   w.BeginObject("diagnostics");
   w.Number("stub_lines", int64_t(scan.stub_lines));
+  w.BeginObject("compatibility_experiments");
+  for (auto& [k, v] : scan.compatibility_experiments) w.Number(k, int64_t(v));
+  w.EndObject();
   w.BeginObject("stubs_by_name");
   for (auto& [k, v] : scan.stubs_by_name) w.Number(k, int64_t(v));
   w.EndObject();

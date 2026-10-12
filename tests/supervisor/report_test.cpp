@@ -121,3 +121,14 @@ TEST_CASE("exit codes are described", "[process]") {
   CHECK(DescribeExitCode(0x80000003).starts_with("STATUS_BREAKPOINT"));
   CHECK(DescribeExitCode(0xC0001234) == "NTSTATUS error 0xC0001234");
 }
+
+TEST_CASE("log scanner preserves experimental compatibility disclosures", "[report]") {
+  const std::string message = "dash17559_experimental_region=enabled; região de compatibilidade experimental; conteúdo real desconhecido";
+  auto scan = ScanLogText("[t] [warning] [core] [compatibility-experiment] " + message + "\r\n");
+  REQUIRE(scan.compatibility_experiments.size() == 1);
+  CHECK(scan.compatibility_experiments.at(message) == 1);
+  LogScan merged;
+  merged.Merge(scan);
+  merged.Merge(scan);
+  CHECK(merged.compatibility_experiments.at(message) == 2);
+}

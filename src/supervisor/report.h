@@ -49,6 +49,7 @@ class JsonWriter {
 //    loader wrote 0xD000BEEF|ordinal into the guest's slot.
 struct LogScan {
   uint64_t stub_lines = 0;
+  std::map<std::string, uint64_t> compatibility_experiments;
   std::map<std::string, uint64_t> stubs_by_name;
   std::map<std::string, uint64_t> unimplemented_messages;  // "XMP msg=00070044"
   uint64_t critical_lines = 0;

@@ -1,0 +1,110 @@
+diff --git a/include/rex/kernel/xam/module.h b/include/rex/kernel/xam/module.h
+index b2818f2..dc1bd70 100644
+--- a/include/rex/kernel/xam/module.h
++++ b/include/rex/kernel/xam/module.h
+@@ -40,8 +40,11 @@ class XamModule : public system::KernelModule {
+   const LoaderData& loader_data() const { return loader_data_; }
+   LoaderData& loader_data() { return loader_data_; }
+ 
++  uint32_t GetLanguageLocaleFallback(uint32_t language);
++
+  private:
+   LoaderData loader_data_;
++  uint32_t language_fallback_table_ = 0;  // Owned guest UTF16 strings, 16 bytes per ID.
+ };
+ 
+ }  // namespace xam
+diff --git a/src/kernel/xam/xam_locale.cpp b/src/kernel/xam/xam_locale.cpp
+index 4496ac3..0aa755a 100644
+--- a/src/kernel/xam/xam_locale.cpp
++++ b/src/kernel/xam/xam_locale.cpp
+@@ -13,10 +13,12 @@
+ 
+ #include <rex/cvar.h>
+ #include <rex/kernel/xam/private.h>
++#include <rex/kernel/xam/module.h>
+ #include <rex/logging.h>
+ #include <rex/hook.h>
+ #include <rex/types.h>
+ #include <rex/system/kernel_state.h>
++#include <rex/system/flags.h>
+ #include <rex/system/xenumerator.h>
+ #include <rex/system/xthread.h>
+ #include <rex/system/xtypes.h>
+@@ -385,6 +387,22 @@ u32 XamGetCountryFromOnlineCountry_entry(u32 id) {
+   return xeXamGetCountryFromOnlineCountry(static_cast<uint8_t>(id));
+ }
+ 
++// Xenia Canary 2372a54105d9: XamGetLanguage uses the configured system
++// language with extended IDs (1..17). ReXGlue's XConfig USER_LANGUAGE
++// already reads user_language. Invalid settings fall back to English;
++// this does not implement font resources or change XGetLanguage.
++u32 XamGetLanguage_entry() {
++  const uint32_t language = REXCVAR_GET(user_language);
++  if (language > 0 && language < 18) return language;
++  REXKRNL_WARN("XamGetLanguage: invalid user_language {}; using English (1)", language);
++  return 1;
++}
++
++u32 XamGetLanguageLocaleFallbackString_entry(u32 language) {
++  auto xam = REX_KERNEL_STATE()->GetKernelModule<XamModule>("xam.xex");
++  return xam->GetLanguageLocaleFallback(language);
++}
++
+ u32 XamGetLocaleEx_entry(u32 max_country_id, u32 max_locale_id) {
+   return xeXamGetLocaleEx(static_cast<uint8_t>(max_country_id),
+                           static_cast<uint8_t>(max_locale_id));
+@@ -418,8 +436,9 @@ REX_EXPORT_STUB(__imp__XamFormatMessage);
+ REX_EXPORT_STUB(__imp__XamFormatSystemDateString);
+ REX_EXPORT_STUB(__imp__XamGetCountry);
+ REX_EXPORT_STUB(__imp__XamGetCurrencyFormat);
+-REX_EXPORT_STUB(__imp__XamGetLanguage);
+-REX_EXPORT_STUB(__imp__XamGetLanguageLocaleFallbackString);
++REX_EXPORT(__imp__XamGetLanguage, rex::kernel::xam::XamGetLanguage_entry)
++REX_EXPORT(__imp__XamGetLanguageLocaleFallbackString,
++           rex::kernel::xam::XamGetLanguageLocaleFallbackString_entry)
+ REX_EXPORT_STUB(__imp__XamGetLanguageTypeface);
+ REX_EXPORT_STUB(__imp__XamGetLanguageTypefacePatch);
+ REX_EXPORT_STUB(__imp__XamGetLocaleDateFormat);
+diff --git a/src/kernel/xam/xam_module.cpp b/src/kernel/xam/xam_module.cpp
+index 6bad7c7..984211c 100644
+--- a/src/kernel/xam/xam_module.cpp
++++ b/src/kernel/xam/xam_module.cpp
+@@ -67,7 +67,36 @@ void XamModule::RegisterExportTable(rex::runtime::ExportResolver* export_resolve
+   export_resolver->RegisterTable("xam.xex", &xam_exports);
+ }
+ 
+-XamModule::~XamModule() {}
++uint32_t XamModule::GetLanguageLocaleFallback(uint32_t language) {
++  // Xenia Canary 2372a54105d9, XamState::LoadLanguageLocaleFallback.
++  // English is a pointer to an empty string, not a null or residual register.
++  static constexpr char16_t strings[18][8] = {
++      u"", u"", u"ja-JP", u"de-DE", u"fr-FR", u"es-ES", u"it-IT", u"ko-KR",
++      u"zh-TW", u"pt-BR", u"zh-CHS", u"pl-PL", u"ru-RU", u"sv-SE", u"tr-TR",
++      u"nb-NO", u"nl-NL", u"zh-CHS"};
++  if (!language || language >= 18) {
++    REXKRNL_WARN("XamGetLanguageLocaleFallbackString: invalid language {}", language);
++    return 0;
++  }
++  auto lock = global_critical_region_.Acquire();
++  if (!language_fallback_table_) {
++    const uint32_t address = memory_->SystemHeapAlloc(sizeof(strings));
++    if (!address) {
++      REXKRNL_ERROR("XamGetLanguageLocaleFallbackString: allocation failed");
++      return 0;
++    }
++    auto* dest = memory_->TranslateVirtual(address);
++    for (size_t i = 0; i < 18; ++i)
++      for (size_t j = 0; j < 8; ++j)
++        memory::store_and_swap<uint16_t>(dest + i * 16 + j * 2, strings[i][j]);
++    language_fallback_table_ = address;
++  }
++  return language_fallback_table_ + language * 16;
++}
++
++XamModule::~XamModule() {
++  memory_->SystemHeapFree(language_fallback_table_);
++}
+ 
+ }  // namespace xam
+ }  // namespace kernel

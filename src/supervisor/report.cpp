@@ -105,6 +105,7 @@ std::string JsonWriter::Take() {
 void LogScan::Merge(const LogScan& o) {
   stub_lines += o.stub_lines;
   critical_lines += o.critical_lines;
+  for (auto& [k, v] : o.compatibility_experiments) compatibility_experiments[k] += v;
   for (auto& [k, v] : o.stubs_by_name) stubs_by_name[k] += v;
   for (auto& [k, v] : o.unimplemented_messages) unimplemented_messages[k] += v;
   for (auto& [k, v] : o.failed_opens) failed_opens[k] += v;
@@ -186,6 +187,7 @@ LogScan ScanLogText(std::string_view text) {
     pos = eol == std::string_view::npos ? text.size() : eol + 1;
     ScanStubLine(line, s);
     ScanMessageLine(line, s);
+    ScanAfter(line, "[compatibility-experiment] ", {}, s.compatibility_experiments);
     if (line.find("] [critical] ") != std::string_view::npos) ++s.critical_lines;
     ScanOpenFailure(line, s);
     ScanAfter(line, "unregistered function at guest address ", {}, s.unregistered_calls);

@@ -68,6 +68,21 @@
           "src/kernel/xboxkrnl/xboxkrnl_memory.cpp": "80a1a7a55b75a6c05d0e57406cfe2db11ce97afc42140683e92ba400e516cc07"
         },
         "test": "tests/sdkcheck/image_page_entry_test.cpp"
+      },
+      {
+        "file": "patches/rexglue-sdk/0006-xam-language.patch",
+        "sha256": "349e7d2acd73e66917fe63439ada65751de34b717cce8076ec8cf984e830e97b",
+        "files": {
+          "src/kernel/xam/xam_locale.cpp": "fdd16610f747be363a874231e341ab2df977360a52fe8175f55b8beea01a7fd0",
+          "src/kernel/xam/xam_module.cpp": "af86f18bda7d014e11e9bf5511f0573c28304159673aa839aca5e1c549276e0f",
+          "include/rex/kernel/xam/module.h": "37218241915e9a13a467b7e8de867dc6ae50300f486b4bbff31c24009ba3a208"
+        },
+        "base_files": {
+          "src/kernel/xam/xam_locale.cpp": "5564ee2ca68a6e2b33a3b1c251030a28291cc6482362bea5e3f0ea82318ebfc4",
+          "src/kernel/xam/xam_module.cpp": "b514c9819b1b3d323a1bb0ab09902b452ec4ddb0bf026a94902d8915d3165673",
+          "include/rex/kernel/xam/module.h": "05c2361ed54ab805ed42df6f0a83bdf4d7e4922cac880fcdd874579c82caec63"
+        },
+        "test": "tests/sdkcheck/xam_language_test.cpp"
       }
     ]
   },

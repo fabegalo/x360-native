@@ -11,6 +11,11 @@
 #include <rex/logging.h>
 #include <rex/rex_app.h>
 #include <rex/runtime.h>
+#include <rex/cvar.h>
+#include <rex/logging/assert.h>
+#include "experimental_region.h"
+
+REXCVAR_DECLARE(bool, dash17559_experimental_region);
 
 class Dash17559App : public rex::ReXApp {
  public:
@@ -33,12 +38,25 @@ class Dash17559App : public rex::ReXApp {
   // the system partition with dash.xex and shrdres.xzp; here it is the package folder
   // (--game_data_root), the same files, mounted read-only.
   void OnPostSetup() override {
+    const auto result = experimental_region_.Map(*runtime()->memory(),
+        REXCVAR_GET(dash17559_experimental_region));
+    using Result = dash17559::ExperimentalRegion::Result;
+    if (result == Result::Overlap || result == Result::AllocationFailed) {
+      REX_FATAL("dash_17559: experimental region setup failed ({})", static_cast<int>(result));
+    }
+    REXLOG_WARN("[compatibility-experiment] dash17559_experimental_region={}; "
+                "0x8E030000 size=65536 RW; região de compatibilidade experimental; "
+                "conteúdo real desconhecido",
+                result == Result::Disabled ? "disabled" : "enabled");
     auto device = std::make_unique<rex::filesystem::HostPathDevice>("\\SystemRoot",
                                                                     game_data_root(), true);
     if (!device->Initialize() || !runtime()->file_system()->RegisterDevice(std::move(device))) {
       REXLOG_ERROR("dash_17559: could not mount {} at \\SystemRoot", game_data_root().string());
     }
   }
+
+ private:
+  dash17559::ExperimentalRegion experimental_region_;
 
   // Override virtual hooks for customization:
   // void OnPostInitLogging() override {}
