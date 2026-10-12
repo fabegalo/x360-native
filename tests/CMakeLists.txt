@@ -77,6 +77,8 @@ target_sources(x360n_sdk_runtime_checks PRIVATE
     sdkcheck/dashboard_camera_test.cpp
     ${PROJECT_SOURCE_DIR}/titles/common/camera_state.cpp
     ${PROJECT_SOURCE_DIR}/titles/dash_17559/src/unresolved_imports.cpp)
+target_sources(x360n_sdk_runtime_checks PRIVATE sdkcheck/dashboard_6717_curl_bind_test.cpp
+    ${PROJECT_SOURCE_DIR}/titles/dash_6717/src/curl_bind.cpp)
 target_link_libraries(x360n_sdk_runtime_checks PRIVATE rexruntime rexcodegen Catch2::Catch2WithMain)
 target_compile_options(x360n_sdk_runtime_checks PRIVATE
     -UTRACY_ENABLE -UREXGLUE_ENABLE_PROFILING -UREXGLUE_ENABLE_PERF_COUNTERS)

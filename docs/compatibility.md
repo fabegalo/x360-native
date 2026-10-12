@@ -28,8 +28,9 @@ My Games recebe a URI expandida e abre uma tela sem conteúdo; a enumeração
 de jogos ainda não foi observada e o ciclo com Castle Crashers não ocorreu.
 23/23 sdkcheck, iruka L1–L5 e execução separada do Castle Crashers por 45 s
 validaram esse incremento (duas chamadas ao stub AchievementsUI no jogo).
-Retail 6717 tem perfil separado: compila, passa da consulta de câmera e para
-no XAM ordinal 0xAE6, LR=0x9210F1F4, antes de quadro demonstrado.
+Retail 6717 tem perfil separado: apresenta quadros, troca de blade e move o
+destaque por entrada roteada (run `20261012T054645Z-dash6717-input`); sem texto
+(`XenonJKLatin.xtt` da 6717 ausente); lançamento não testado. `docs/dashboard.md` §0.15.
 
 Os parágrafos seguintes preservam os resultados históricos anteriores.
 

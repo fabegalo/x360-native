@@ -18,6 +18,7 @@ endif()
 set(DASH6717_SOURCES
     src/main.cpp
     src/unresolved_imports.cpp
+    src/curl_bind.cpp
     ../common/camera_state.cpp
 )
 

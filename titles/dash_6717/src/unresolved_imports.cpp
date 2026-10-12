@@ -1,5 +1,6 @@
-// The pinned SDK omits the camera implementation from its build and has no
-// xam ordinal 0xAE6. Fail at the call site rather than return fictional success.
+// The pinned SDK omits the camera implementation from its build. xam ordinal
+// 0xAE6, absent from its table, is in curl_bind.cpp. Fail at the call site rather
+// than return fictional success.
 // Imports/thunk addresses are from this Retail 6717 XEX, not from 17559.
 #include <rex/logging/assert.h>
 #include <rex/ppc/context.h>
@@ -10,8 +11,6 @@ namespace {
   REX_FATAL("dash_6717 unsupported import {}; LR={:08X}", name, uint32_t(ctx.lr));
 }
 }
-extern "C" REX_FUNC(sub_92739D94) { Missing(ctx, "xam ordinal 0xAE6 (absent from SDK)"); }
-extern "C" REX_FUNC(__imp__XUsbcamCreate) { Missing(ctx, "XUsbcamCreate"); }
 extern "C" REX_FUNC(__imp__XUsbcamDestroy) { Missing(ctx, "XUsbcamDestroy"); }
 extern "C" REX_FUNC(__imp__XUsbcamGetConfig) { Missing(ctx, "XUsbcamGetConfig"); }
 extern "C" REX_FUNC(__imp__XUsbcamSetConfig) { Missing(ctx, "XUsbcamSetConfig"); }

@@ -12,4 +12,4 @@ game_root = "../../.local/inputs/dashboard/versions/6717/blades_retail"
 [entrypoint]
 file_path = "../../.local/inputs/dashboard/versions/6717/blades_retail/dash.xex"
 out_directory_path = "generated/dash"
-includes = ["analysis/dash_6717.toml"]
+includes = ["analysis/dash_6717.toml", "analysis/dash_6717_pointer_targets.toml"]

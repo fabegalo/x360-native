@@ -760,6 +760,40 @@ Esse diagnóstico foi encerrado pelo supervisor aos 50 s, sem crítica/crash,
 mas com os stubs e erros de serviços já conhecidos. O timeout não é validação
 de encerramento normal; a transição da intro ocorreu antes dele.
 
+### 0.15. Retail 6717: primeiro quadro, troca de blade e navegação
+
+Boot direto, sem intro. Quatro correções, cada uma de uma parada observada:
+
+| Parada | Correção | Evidência |
+|---|---|---|
+| armadilha xam **0xAE6**, LR `0x9210F1F4` | `titles/dash_6717/src/curl_bind.cpp`: registra a tabela e não escreve resultado | único chamador passa `r3 = 0x927FC914` (de `0x92588028`): 7 funções do próprio `dash.xex` + `0x18`; o resultado não é lido. As 7 usam o estado de cache `0x928C6BE8` (iniciado por `0x925881D0`, chamado logo depois) sob a seção crítica `0x928E6C98`: a dashboard fornece o cache e o entrega ao XAM. Nome segundo o Xenia Canary `2372a54105d9`: `CurlBindFunctionTable`. O `xam.xex` 17559 não o exporta mais (offset 0) e a dash 17559 não o importa; o `xam.xex` 1888 local não carrega. Nada no XAM do SDK chamaria a tabela: **registrada, não usada** |
+| `Call to invalid or unregistered function at 0x9214C560` | `analysis/dash_6717_pointer_targets.toml`: 334 inícios só por ponteiro, mesmo script e critérios da 17559 (§0.8) | `mr r3,r5; b`; amostra de 10 conferida por desmontagem; 13 funções antigas viraram blocos das novas (sem `bl` nem referência); 0 sobreposições `.pdata`; codegen sem `--force` |
+| armadilha `XUsbcamCreate`, LR `0x92356E7C` | implementação "não implementado" movida para `titles/common/camera_state.cpp` (17559 e 6717) | 6717 `0x92356E78`: retorno ≠ 0 decrementa a referência de inicialização (`0x9288DD7C`) e volta como status de `0x92356DE0`, como na 17559 |
+| `media:\shrdres.xzp` e `media:\XenonJKLatin.xtt`: "device not found" | `\SystemRoot` montado só leitura na pasta do pacote 6717 (`src/dash_6717_app.h`) | a própria 6717 cria `media:` e `dashmedia:` → `\SystemRoot` (log debug, run `…T054514Z-dash6717-media-off-debug`). Uma tentativa de ligar `media:` pelo perfil foi descartada: era desnecessária |
+
+Teste focado: `sdkcheck.dash 6717 xam 0xAE6 records the bound table…` (14 asserções);
+o teste de câmera continua passando com a implementação comum. `sdkcheck`: 24/24.
+
+Resultado (run `20261012T054645Z-dash6717-input`, 55 s, sem crítica; DLLs iguais às do SDK):
+
+| Etapa | Situação |
+|---|---|
+| Processo aberto | sim |
+| Quadro apresentado | **sim**: blade verde "Xbox 360" (cartão de jogador, ícones, barra inferior) |
+| Interface atualizando | sim: fundo animado; ícone de disco com "?" aparece e some |
+| Navegação | `D` (analógico para a direita) troca para a blade **Mídia** (azul, 5 itens); `S` move o destaque para o 2º item. `A` chamou `XamShowGamerCardUI` (stub), sem efeito visível; depois a tela estava de novo na blade verde (causa não atribuída) |
+| Interface correta | **não**: nenhum texto aparece |
+| Lançamento de jogo | não testado |
+
+Bloqueio do texto: a 6717 abre `media:\XenonJKLatin.xtt` (58 mil tentativas em 45 s)
+e o arquivo não está no pacote 6717 (só `dash.xex` e `shrdres.xzp`). É dependência
+demonstrada; não foi copiada fonte da 17559 nem de outra pasta. O usuário informou
+que, no teste dele, "parece que está funcionando" (relato, não observado aqui).
+Também falham `DASHUSER:\DashStyle`, `ThematicSkin`, `VisionEffect` (não fatais).
+Regressões: 17559 com boot direto chega ao menu Metro com texto e o mesmo aviso de
+`XUsbcamCreate` (run `…T054945Z-dash17559-camshared`); iruka L1–L5; Castle Crashers
+45 s sem stubs/erros, menu na captura (run `…T055111Z-cc-regression-6717`).
+
 ## 1. Por que isto é um alvo próprio
 
 Executar a dashboard são três problemas diferentes:

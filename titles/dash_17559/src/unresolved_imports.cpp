@@ -59,13 +59,6 @@ extern "C" REX_FUNC(__imp__XUsbcamSetConfig) { Trap(ctx, "xboxkrnl 0x21C XUsbcam
 // Implementation shared with 6717 in titles/common/camera_state.cpp.
 extern "C" REX_FUNC(__imp__XUsbcamReadFrame) { Trap(ctx, "xboxkrnl 0x21E XUsbcamReadFrame", kNotBuilt); }
 extern "C" REX_FUNC(__imp__XUsbcamSetView) { Trap(ctx, "xboxkrnl 0x220 XUsbcamSetView", kNotBuilt); }
-// No camera backend exists. Report the unsupported operation, never the SDK's
-// unconditional success stub. The guest checks nonzero at 0x92368440, unwinds
-// its initialization reference at 0x92368448, and keeps its handle uncreated.
-// Do not allocate a fictional handle or touch the caller's buffer/output.
-extern "C" REX_FUNC(__imp__XUsbcamCreate) {
-  using rex::X_STATUS;
-  REXLOG_WARN("XUsbcamCreate: camera backend not implemented");
-  ctx.r3.u64 = X_STATUS_NOT_IMPLEMENTED;
-}
+// XUsbcamCreate reports the unsupported operation; implementation shared with 6717
+// in titles/common/camera_state.cpp.
 extern "C" REX_FUNC(__imp__XUsbcamDestroy) { Trap(ctx, "xboxkrnl 0x223 XUsbcamDestroy", kNotBuilt); }
