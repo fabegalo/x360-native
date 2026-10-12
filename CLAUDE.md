@@ -43,7 +43,7 @@ presente não for exatamente o arquivo listado. Qualquer outra falha é regress�
 
 ## Estrutura
 
-Dashboard atual: `docs/dashboard.md` §0.13. A região experimental `0x8E030000`
+Dashboard atual: `docs/dashboard.md` §0.16. A região experimental `0x8E030000`
 (64 KiB RW) é exclusiva do título 17559, zerada uma vez, desligável por
 `--dash17559_experimental_region=false`; log/relatório dizem que o conteúdo real
 é desconhecido. Patch 0006 implementa idioma configurado e ponteiro de fallback
@@ -53,7 +53,8 @@ Os hints setjmp/longjmp do título corrigem o retorno protegido da interface.
 Menu Metro renderiza continuamente; controle e Shift+setas confirmados pelo usuário.
 Fonte original SegoeXbox-Light.xtt agora associada ao perfil 17559. XAM 17559
 foi usado como referência para a rota gameslibrary (launch data + notificação),
-sem carregar código do módulo. My Games ainda aparece sem conteúdo. Intro
+sem carregar código do módulo. My Games exibe Castle Crashers 0.0.1.3 (usuário
+confirmou); o pedido real chega a XamContentLaunchImageInternalEx, ainda stub. Intro
 original AOT opcional (`--dash17559_boot_intro=true`) tem imagem/som observados
 e retorna à dashboard por export 2(false), preservando o tempo/efeito do original.
 Boot direto é o padrão. Ciclo com Castle Crashers não executado.
@@ -62,7 +63,7 @@ Algumas páginas de configurações ainda leem 0x1C após XConfig categoria 7.
 - `external/rexglue-sdk` — submódulo fixado em `deps.lock.json`. **Não editar à mão.**
   Exceções documentadas: cópias dos symlinks do libmspack (`scripts/materialize-symlinks.ps1`)
   e os patches locais de `patches/rexglue-sdk/` (0001–0002 autorizados em 2026-10-11,
-  0003–0010 sob a autorização de 2026-10-12), aplicados por
+  0003–0015 sob a autorização de 2026-10-12), aplicados por
   `scripts/apply-sdk-patches.ps1` e verificados pelo CMake no configure e em todo build.
   `src/ui/rex_app.cpp` (patch 0004) é compilado em cada executável: recompile o título.
 - Correções do SDK vão no `CMakeLists.txt` raiz como backport condicionado ao

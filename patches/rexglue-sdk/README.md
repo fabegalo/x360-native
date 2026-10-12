@@ -7,7 +7,9 @@ submodule. The patches are for that commit only; no upgrade or downgrade.
 The submodule's history is not changed: the patches are applied to its working
 tree from these files. `deps.lock.json` (`rexglue_sdk.patches`) records each patch
 file's SHA-256, the SHA-256 of every file it touches before (`base_files`) and
-after (`files`), and its test. No two patches touch the same file.
+after the complete patch stack (`files`), and its test. When patches share a
+file, `base_files` records the input to that patch and `files` records the final
+stack hash in every affected entry. Apply in order; revert in reverse order.
 
 | Patch | Fixes | Test (`ctest -R "sdkcheck[.]"`) |
 |---|---|---|
@@ -142,3 +144,38 @@ Executables copy `rexruntime*.dll` (and the GPU plugin) next to themselves befor
 they are linked, on every build of them, also with `--target`
 (`x360n_stage_runtime_dlls`), so a test or title does not keep running a DLL built
 before a patch.
+
+## Content-library increment (0011–0015)
+
+- 0011: complete unsupported user-preference requests with the real handler
+  error. The original 17559 XAM wrapper sends XGI message B0082; a stub left
+  the request appearing pending. Before: 7/19 assertions fail; after: 19/19.
+- 0012: include XN_SYS_STORAGEDEVICESCHANGED (0x0B) in the existing initial
+  system-notification batch. The dashboard's own handler signals its content
+  worker; no completion state or guest counter is forced. The test checks
+  notification delivery and its single consumption.
+- 0013: explicit all-types aggregate queries (FFFFFFFF) scan installed title/type
+  directories, respecting XUID and optional title filter. Original XAM 17559
+  81681EA0/81681F08 establishes those filters. Also compare header-read X_RESULT
+  with ERROR_SUCCESS: XSUCCEEDED incorrectly accepted FILE_NOT_FOUND. Before:
+  2/17 assertions fail; after: 23/23. Optical all-types enumeration is pending;
+  existing typed queries retain their prior behavior.
+- 0014: implement XamContentGetAttributesInternal for installed HDD content.
+  Original XAM 0x277 -> 816EE9D0 -> message 2001A -> 81684688 writes a packed
+  36-byte output (attributes, three FILETIMEs, size). The extracted-content
+  backend reports host timestamps and recursive payload size, not STFS allocation
+  size or license information. Missing paths fail; async requests carry the
+  actual result. Other devices return ERROR_NOT_SUPPORTED. Before: 6/36
+  assertions fail; after: 36/36. Test: aggregate_content_test.cpp.
+
+Evidence logs: .local/runs/sdk-patch-evidence/0011-*, 0013-*, 0014-* and 0015-*.
+No upstream equivalent claimed. XAM is a local reference, not executed by HLE.
+The aggregate ABI still returns the SDK's 328-byte structure where 17559 reads
+512 bytes; full extended metadata remains pending and must not be fabricated.
+
+- 0015: internal content creation preserves XUID=0 from the aggregate record.
+  Previously it resolved common XBLA content under the signed-in profile and
+  returned ERROR_PATH_NOT_FOUND. Original XAM path builder 8167F690 reads the
+  owner directly. Public XCONTENT_DATA calls retain their prior behavior.
+  Before: 2/40 assertions fail (real OPEN_EXISTING result 3); after: 40/40,
+  including verification of the mounted package path. No license is granted.

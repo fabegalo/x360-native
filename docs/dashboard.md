@@ -908,3 +908,47 @@ Resultado para a 17559: passos 1–4 feitos (§0.2–0.4; o projeto ficou em
 runtime, antes de executar código da dashboard (§0.6).
 Um processo de teste que abre e fecha valida apenas o supervisor e nunca será
 apresentado como execução da dashboard.
+
+## 0.16. Biblioteca 17559: enumeração e atributos (2026-10-12)
+
+A espera original da biblioteca foi localizada em 922C8330 -> 92272598 ->
+92264040: o serviço 92969878 aguardava estado +272=2 (com geração) ou 3.
+Faltava a notificação inicial de armazenamento 0x0B. O patch 0012 entrega a
+notificação; o handler original 92180388 -> 92263210 sinaliza o evento +36.
+Run 20261012T065301Z-dash17559-storage-notify chegou ao estado 3 e a página
+passou a mostrar No games found, confirmado pelo usuário.
+
+O patch 0013 corrige a consulta agregada de todos os tipos (FFFFFFFF) e a
+leitura de cabeçalho ausente. Castle Crashers 584108B7, versão 0.0.1.3, foi
+associado somente ao user_data_root da 17559 por junction para a extração já
+existente; o .header do SDK é metadata gerada a partir do pacote LIVE existente,
+não um recurso original. Procedência em .local/user/dash17559/castle-crashers-install.json.
+A enumeração retorna um item HDD; 922C8378 aceita tipo 000D0000 e título 584108B7.
+Mesmo assim o usuário ainda observou No games found.
+
+Bloqueio seguinte demonstrado: 922C61A0 chama XamContentGetAttributesInternal
+stub e retorna 80004005. Patch 0014 consulta atributos reais do pacote extraído
+(36 bytes big-endian, layout confirmado no XAM original 17559). Teste antes:
+6/36 falhas; depois: 36/36. A execução 20261012T072822Z-dash17559-real-content-attributes
+avança à preparação XBLA 922C7518 e retorna 80070003 (caminho não encontrado).
+A etapa de atributos não é mais o stub. 27/27 sdkcheck passaram.
+
+A estrutura agregada estendida de 512 bytes ainda não está implementada
+integralmente (SDK entrega 328). Não houve preenchimento fictício dos metadados,
+licença forçada, salto de espera ou alteração das hipóteses gráficas.
+Ciclo pelo menu ainda não executado; 6717 mantém seu perfil e pendências.
+
+O patch 0015 resolve esse 80070003: a abertura interna usava o XUID do perfil
+em vez do proprietário zero (conteúdo compartilhado) do registro enumerado.
+O XAM original lê esse proprietário em 8167F690. Teste antes: 2/40 falhas;
+depois: 40/40, incluindo a abertura e o caminho real montado.
+Run 20261012T073813Z-dash17559-shared-owner: 922C61A0 retorna 00000000;
+usuário confirmou Castle Crashers visível. Às 04:38:51 a confirmação do item
+chegou a XamContentLaunchImageInternalEx, ainda stub. Esse é o bloqueio atual,
+não mais enumeração ou montagem. O jogo ainda não iniciou pelo menu.
+
+Consolidação 0011–0015: 27/27 sdkcheck; iruka 30 s (20261012T074255Z-iruka-library-0015)
+e Castle Crashers 45 s (20261012T074353Z-cc-library-0015), ambos sem stubs, erros
+ou críticas, terminados pelo timeout. DLLs carregadas conferidas pelos hashes
+dos relatórios. Cobertura de processo/log, sem nova validação visual L4–L5.
+Diagnóstico temporário retirado e dashboard recompilada sem os wrappers.

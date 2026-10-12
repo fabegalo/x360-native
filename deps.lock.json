@@ -129,6 +129,69 @@
           "src/kernel/xam/xam_misc.cpp": "6f0a07784bf46a5e9dd9f3c387ef52a936c527c949057aae1fb97388e21ce68d"
         },
         "test": "tests/sdkcheck/xam_common_string_test.cpp"
+      },
+      {
+        "file": "patches/rexglue-sdk/0011-xam-user-preference.patch",
+        "sha256": "9cfbe27ea058fbcb5f80a63714dfd38a0127317398e461443ca6687ae7780120",
+        "files": {
+          "src/kernel/xam/xam_user.cpp": "d959fadf4efff95c74c3d9f2dead9914d14ca80897f8d4f5bbf7bbf2b59e887f"
+        },
+        "base_files": {
+          "src/kernel/xam/xam_user.cpp": "7b84ddf00e12b1c9de33e00df75d8d692a686fcbbd939a0d706fecd36bc609e9"
+        },
+        "test": "tests/sdkcheck/xam_user_preference_test.cpp"
+      },
+      {
+        "file": "patches/rexglue-sdk/0012-initial-storage-notification.patch",
+        "sha256": "fda1373d6b1218a99dee74097c18d7af3d7f5cad872036514c8b0e37c07f13bc",
+        "files": {
+          "src/system/kernel_state.cpp": "0f368751d7ca9654b6d137e6453648b900a1ccbc7d9f05ab685b849fde610136"
+        },
+        "base_files": {
+          "src/system/kernel_state.cpp": "9d4b787fe295c79ab12659c1ce42bb6310aa61cb8e5d83b10a32a36da9cde30a"
+        },
+        "test": "tests/sdkcheck/storage_notification_test.cpp"
+      },
+      {
+        "file": "patches/rexglue-sdk/0013-aggregate-all-content-types.patch",
+        "sha256": "2b0d9f55bc1d94c119f128a0e292ee8aa79e027956b30fd5613253fb889b7e8e",
+        "files": {
+          "include/rex/system/xam/content_manager.h": "32159f83359960010a138995d9864b166865b80bca932a79e76980f21a5de931",
+          "src/system/xam/content_manager.cpp": "5ded92dbe49bfd38c31287820d538633995a1f48af90179e364a79561eefbaf0",
+          "src/kernel/xam/xam_content_aggregate.cpp": "2f511f12296d619781ac62cc4cc67f559b3426e28fdadb502ee4329294321f1a"
+        },
+        "base_files": {
+          "include/rex/system/xam/content_manager.h": "6990884dead59294d9fd5761205782885e01efbc036038c4b29dab667d6b01c4",
+          "src/system/xam/content_manager.cpp": "dfbf096bd60bbac3a7d80da79d3129c8dcc9737b40a74318ec2dca404254b2c1",
+          "src/kernel/xam/xam_content_aggregate.cpp": "f120f9cb8a56d4d5d584fa7dd3bd29b9d92e36d8a3bd0d984c77d83a397a1b41"
+        },
+        "test": "tests/sdkcheck/aggregate_content_test.cpp"
+      },
+      {
+        "file": "patches/rexglue-sdk/0014-content-attributes.patch",
+        "sha256": "ec407f9d48abc036730da6884dd1fed9d75faab2153abf1f5012eeaae32e9279",
+        "files": {
+          "include/rex/system/xam/content_manager.h": "32159f83359960010a138995d9864b166865b80bca932a79e76980f21a5de931",
+          "src/system/xam/content_manager.cpp": "5ded92dbe49bfd38c31287820d538633995a1f48af90179e364a79561eefbaf0",
+          "src/kernel/xam/xam_content.cpp": "b531e5b14f79a7296d821344ee1d04da25b47711450c8bddb40ef86ea92aa012"
+        },
+        "base_files": {
+          "include/rex/system/xam/content_manager.h": "62bc5c3b2a9260b2691998453c4a8e2810b58e3925a2395297e98e0227167585",
+          "src/system/xam/content_manager.cpp": "afa580bc2e58583280e6d2694794e98d48a93ed2ca4ac619c86cf3cf1d65d0eb",
+          "src/kernel/xam/xam_content.cpp": "b82be564159e2025555e81138be070b962865e7265081d20e925e9ac0f8be272"
+        },
+        "test": "tests/sdkcheck/aggregate_content_test.cpp"
+      },
+      {
+        "file": "patches/rexglue-sdk/0015-internal-shared-content-owner.patch",
+        "sha256": "aff8a9357d60acca967f99f6a69cf74b8ce2e45f3d7a458929dacf1f155d70a5",
+        "files": {
+          "src/kernel/xam/xam_content.cpp": "b531e5b14f79a7296d821344ee1d04da25b47711450c8bddb40ef86ea92aa012"
+        },
+        "base_files": {
+          "src/kernel/xam/xam_content.cpp": "4bef33d3a5db8dbcda982c83da85d06a9cde9a6479188acbd39fbe2c5f01427e"
+        },
+        "test": "tests/sdkcheck/aggregate_content_test.cpp"
       }
     ]
   },

@@ -1,0 +1,106 @@
+diff --git a/include/rex/system/xam/content_manager.h b/include/rex/system/xam/content_manager.h
+index ee4d0f8..1448a47 100644
+--- a/include/rex/system/xam/content_manager.h
++++ b/include/rex/system/xam/content_manager.h
+@@ -155,6 +155,9 @@ class ContentManager {
+   std::unique_ptr<ContentPackage> ResolvePackage(const std::string_view root_name, uint64_t xuid,
+                                                  const XCONTENT_AGGREGATE_DATA& data);
+ 
++  // Packed 36-byte content attributes: flags, three FILETIMEs, size (all BE).
++  X_RESULT GetContentAttributes(const XCONTENT_AGGREGATE_DATA& data, uint8_t* output);
++
+   bool ContentExists(uint64_t xuid, const XCONTENT_AGGREGATE_DATA& data);
+   X_RESULT CreateContent(const std::string_view root_name, uint64_t xuid,
+                          const XCONTENT_AGGREGATE_DATA& data);
+diff --git a/src/system/xam/content_manager.cpp b/src/system/xam/content_manager.cpp
+index ea5ab75..af2ee6b 100644
+--- a/src/system/xam/content_manager.cpp
++++ b/src/system/xam/content_manager.cpp
+@@ -217,6 +217,49 @@ std::unique_ptr<ContentPackage> ContentManager::ResolvePackage(
+   return package;
+ }
+ 
++// xam 17559 0x277 -> message 0x2001A -> 0x81684688. The exported
++// layout has unaligned 64-bit values, so use byte stores rather than a C++ struct.
++// This backend exposes extracted packages: timestamps and byte size describe
++// the local installed tree, not the original STFS container or a license.
++X_RESULT ContentManager::GetContentAttributes(const XCONTENT_AGGREGATE_DATA& data,
++                                             uint8_t* output) {
++  const std::string name(data.file_name_raw,
++      std::find(data.file_name_raw, data.file_name_raw + 42, '\0'));
++  if (name.empty() || name == "." || name == ".." ||
++      name.find_first_of("/\\:") != std::string::npos) return X_ERROR_INVALID_PARAMETER;
++  const auto path = ResolvePackagePath(data.xuid, data);
++  filesystem::FileInfo info{};
++  if (!filesystem::GetInfo(path, &info)) {
++    std::error_code ec;
++    const bool exists = std::filesystem::exists(path, ec);
++    return !ec && !exists ? X_ERROR_FILE_NOT_FOUND : X_ERROR_ACCESS_DENIED;
++  }
++  uint64_t size = info.total_size;
++  const bool directory = info.type == filesystem::FileInfo::Type::kDirectory;
++  if (directory) {
++    std::error_code ec;
++    std::filesystem::recursive_directory_iterator it(path, ec), end;
++    if (ec) return X_ERROR_ACCESS_DENIED;
++    while (it != end) {
++      const bool regular = it->is_regular_file(ec);
++      if (ec) return X_ERROR_ACCESS_DENIED;
++      if (regular) {
++        const auto bytes = it->file_size(ec);
++        if (ec || bytes > UINT64_MAX - size) return X_ERROR_ACCESS_DENIED;
++        size += bytes;
++      }
++      it.increment(ec);
++      if (ec) return X_ERROR_ACCESS_DENIED;
++    }
++  }
++  memory::store_and_swap<uint32_t>(output, directory ? 0x10u : 0x80u);
++  memory::store_and_swap<uint64_t>(output + 4, info.create_timestamp);
++  memory::store_and_swap<uint64_t>(output + 12, info.access_timestamp);
++  memory::store_and_swap<uint64_t>(output + 20, info.write_timestamp);
++  memory::store_and_swap<uint64_t>(output + 28, size);
++  return X_ERROR_SUCCESS;
++}
++
+ bool ContentManager::ContentExists(uint64_t xuid, const XCONTENT_AGGREGATE_DATA& data) {
+   auto path = ResolvePackagePath(xuid, data);
+   return std::filesystem::exists(path);
+diff --git a/src/kernel/xam/xam_content.cpp b/src/kernel/xam/xam_content.cpp
+index 1fb1e16..be4b662 100644
+--- a/src/kernel/xam/xam_content.cpp
++++ b/src/kernel/xam/xam_content.cpp
+@@ -29,6 +29,24 @@ namespace xam {
+ using namespace rex::system;
+ using namespace rex::system::xam;
+ 
++u32 XamContentGetAttributesInternal_entry(mapped_void content, mapped_void attributes,
++                                        mapped_void overlapped) {
++  X_RESULT result = X_ERROR_INVALID_PARAMETER;
++  if (content && attributes) {
++    const auto* data = content.as<XCONTENT_AGGREGATE_DATA*>();
++    const auto* device = GetDummyDeviceInfo(data->device_id);
++    if (!device) result = X_ERROR_DEVICE_NOT_CONNECTED;
++    else if (device->device_type != DeviceType::HDD) result = X_RESULT_FROM_WIN32(50) /* ERROR_NOT_SUPPORTED */;
++    else result = REX_KERNEL_STATE()->content_manager()->GetContentAttributes(
++        *data, attributes.as<uint8_t*>());
++  }
++  if (overlapped) {
++    REX_KERNEL_STATE()->CompleteOverlappedImmediate(overlapped.guest_address(), result);
++    return X_ERROR_IO_PENDING;
++  }
++  return result;
++}
++
+ u32 XamContentGetLicenseMask_entry(mapped_u32 mask_ptr, mapped_void overlapped_ptr) {
+   // Each bit in the mask represents a granted license. Available licenses
+   // seems to vary from game to game, but most appear to use bit 0 to indicate
+@@ -440,7 +458,7 @@ REX_EXPORT_STUB(__imp__XamContentDuplicateFileHandle);
+ REX_EXPORT_STUB(__imp__XamContentExistsOnDeviceInternal);
+ REX_EXPORT_STUB(__imp__XamContentFlushPackage);
+ REX_EXPORT_STUB(__imp__XamContentGetAttributes);
+-REX_EXPORT_STUB(__imp__XamContentGetAttributesInternal);
++REX_EXPORT(__imp__XamContentGetAttributesInternal, rex::kernel::xam::XamContentGetAttributesInternal_entry)
+ REX_EXPORT_STUB(__imp__XamContentGetHeaderInternal);
+ REX_EXPORT_STUB(__imp__XamContentGetLocalizedString);
+ REX_EXPORT_STUB(__imp__XamContentGetMetaDataInternal);

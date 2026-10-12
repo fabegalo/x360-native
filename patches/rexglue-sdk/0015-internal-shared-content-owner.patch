@@ -1,0 +1,14 @@
+diff --git a/src/kernel/xam/xam_content.cpp b/src/kernel/xam/xam_content.cpp
+index be4b662..c16f4a3 100644
+--- a/src/kernel/xam/xam_content.cpp
++++ b/src/kernel/xam/xam_content.cpp
+@@ -144,6 +144,9 @@ u32 xeXamContentCreate(u32 user_index, mapped_string root_name, mapped_void cont
+     content_data = *content_data_ptr.as<XCONTENT_DATA*>();
+   } else if (content_data_size == sizeof(XCONTENT_AGGREGATE_DATA)) {
+     content_data = *content_data_ptr.as<XCONTENT_AGGREGATE_DATA*>();
++    // Internal records name their owner. Zero is shared content, not the
++    // current profile (original XAM 17559 path builder 0x8167F690).
++    if (content_data.xuid == uint64_t(0)) xuid = 0;
+   } else {
+     assert_always();
+     return X_ERROR_INVALID_PARAMETER;
