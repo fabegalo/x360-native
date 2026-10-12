@@ -27,6 +27,12 @@ endfunction()
 
 # Call after the SDK has been added with add_subdirectory().
 function(x360n_apply_sdk_backports sdk_dir)
+    if(WIN32 AND TARGET rexglue)
+        # The preparation tool consumes the same UTF-8 manifest/file paths as
+        # title processes. Do not change the machine's ANSI code page.
+        target_link_options(rexglue PRIVATE
+            "LINKER:/MANIFESTINPUT:${CMAKE_CURRENT_FUNCTION_LIST_DIR}/x360n_runtime.manifest")
+    endif()
     x360n_sdk_commit(_commit "${sdk_dir}")
     if(_commit STREQUAL "f5337cdc947ff6d4c4196737e2c807a48f2a1fc2")  # v0.10.0
         # upstream b5e0cf8 "expose the imgui and xxHash headers public SDK headers
@@ -77,6 +83,15 @@ endfunction()
 function(x360n_stage_runtime_dlls target)
     if(NOT WIN32)
         return()
+    endif()
+    # The SDK accepts UTF-8 cvars and uses narrow filesystem paths internally.
+    # Windows 10 1903+ can declare UTF-8 per process without changing the user's
+    # system locale. This covers every title using the common runtime staging.
+    # https://learn.microsoft.com/windows/apps/design/globalizing/use-utf8-code-page
+    get_target_property(_kind ${target} TYPE)
+    if(_kind STREQUAL "EXECUTABLE")
+        target_link_options(${target} PRIVATE
+            "LINKER:/MANIFESTINPUT:${CMAKE_CURRENT_FUNCTION_LIST_DIR}/x360n_runtime.manifest")
     endif()
     cmake_parse_arguments(ARG "" "" "PLUGIN_TARGETS" ${ARGN})
     # For targets that link at least one DLL (rexruntime): copy_if_different

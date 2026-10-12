@@ -285,7 +285,7 @@ Estes são objetivos adicionais de cobertura, não pré-requisitos para concluir
 
 ## 15. Aplicativo e distribuição multiplataforma — P0/P1
 
-Os requisitos das seções 15–19 foram incorporados em 2026-10-12. A publicação privada e a reconciliação do histórico (§19) foram concluídas. Os §§15–17 têm um primeiro incremento executável de preparação gráfica no Windows; o pacote autônomo e o aceite do §18 continuam pendentes. A prévia ainda requer a árvore do projeto e as ferramentas de desenvolvimento. Não confundir esse resultado com uma release para usuários leigos. Backend e SDK permanecem os mesmos.
+Os requisitos das seções 15–19 foram incorporados em 2026-10-12. A publicação privada e a reconciliação do histórico (§19) foram concluídas. Os §§15–17 têm candidato ZIP Windows x64, importação, ferramentas gerenciadas e preparação gráfica. O pacote carrega suas fontes e obtém dependências com consentimento; primeira preparação completa em máquina limpa e aceite do §18 seguem pendentes. Não confundir o candidato local com uma release aprovada. Backend e SDK permanecem os mesmos.
 
 Referência de facilidade de uso: [Pinyon Shift](https://github.com/arcanite24/pinyon-shift#play), com download do launcher, importação e preparação guiada descritos no README. Usar a experiência como referência, sem copiar a interface ou substituir nossa arquitetura para se parecer com ela. Um ZIP de código-fonte com instruções para montar um ambiente de desenvolvimento não satisfaz este requisito.
 
@@ -310,17 +310,17 @@ Arquiteturas candidatas só se tornam alvos suportados quando viáveis, implemen
 
 O requisito é **um download principal por sistema/arquitetura suportados**, não um executável universal. Exemplos de apresentação: ZIP com aplicativo principal no Windows, pacote de uso simples no Linux e `.app` em ZIP ou pacote adequado no macOS. Não exigir que o usuário escolha e combine downloads de DLLs, ferramentas e componentes internos.
 
-- [ ] Identificar claramente o pacote principal por versão, sistema e arquitetura.
-- [ ] Oferecer aplicativo principal com nome e ícone claros.
+- [x] Identificar claramente o pacote principal por versão, sistema e arquitetura — candidato local `x360-native-0.1.0-preview.*-windows-x64.zip`, com commit e hashes no manifesto.
+- [x] Oferecer aplicativo principal com nome e ícone claros — `x360-native.exe`, ícone próprio XN e metadados de versão.
 - [x] Abrir a interface gráfica sem terminal no uso normal — demonstrado na prévia local Windows `x360-native.exe`; preparação e supervisor usam processos sem console. Distribuição autônoma ainda pendente.
-- [ ] Incluir dependências redistribuíveis ou obtê-las pelo assistente quando necessário e permitido.
+- [x] Incluir dependências redistribuíveis ou obtê-las pelo assistente quando necessário e permitido — CRT Release incluído; Git/CMake/Ninja/LLVM/SDK fixados preparados localmente; instalador oficial C++ verificado e oferecido com consentimento. Instalação de MSVC ausente ainda não executada.
 - [ ] Eliminar dependência de caminhos, arquivos ou ferramentas presentes apenas no computador do desenvolvedor.
-- [ ] Dar instruções curtas sobre qual pacote baixar e qual aplicativo abrir.
+- [x] Dar instruções curtas sobre qual pacote baixar e qual aplicativo abrir — README do projeto e READ-ME do candidato.
 - [x] Distinguir o aplicativo pronto dos arquivos de código-fonte oferecidos pelo GitHub — README e interface explicitam que não há pacote autônomo aprovado.
 - [ ] Apresentar requisitos mínimos e limitações da release antes de iniciar preparação demorada.
 - [ ] Distribuir apenas o aplicativo e componentes com redistribuição permitida; verificar as autorizações aplicáveis.
-- [ ] Excluir dashboards, jogos, fontes proprietárias, XAM, bootanim e código derivado desses binários quando não houver autorização aplicável. Recompilação para código nativo não concede direito de redistribuição.
-- [ ] Explicar no assistente os arquivos externos necessários e aceitar conteúdo autorizado somente nos formatos efetivamente suportados, sem esconder a primeira preparação.
+- [x] Excluir dashboards, jogos, fontes proprietárias, XAM, bootanim e código derivado desses binários quando não houver autorização aplicável — empacotamento recusa essas extensões, `.local`, dependências locais e AOT gerado. Recompilação para código nativo não concede direito de redistribuição.
+- [x] Explicar no assistente os arquivos externos necessários e aceitar conteúdo autorizado somente nos formatos efetivamente suportados, sem esconder a primeira preparação — conjuntos extraídos declarados; STFS/ISO na interface seguem indisponíveis.
 
 ## 16. Primeira execução e preparação guiadas — P0
 
@@ -329,12 +329,12 @@ O requisito é **um download principal por sistema/arquitetura suportados**, nã
 - [x] Abrir a interface mesmo sem jogos ou dashboard preparados — janela executada também contra ambiente vazio, com ação de selecionar ambiente e lançamento desabilitado.
 - [ ] Verificar sistema, arquitetura, recursos gráficos, espaço, permissões e dependências relevantes.
 - [ ] Oferecer mensagens compreensíveis; PT-BR e inglês são os idiomas iniciais planejados.
-- [ ] Permitir seleção visual das pastas de conteúdo e dados.
-- [x] Importar por seleção de arquivos/pastas e, quando apropriado, arrastar e soltar — primeiro formato: pasta com componentes extraídos e verificados da 17559. Arrastar/soltar, STFS pelo assistente e outros conjuntos continuam pendentes.
-- [ ] Identificar automaticamente versões e componentes.
+- [x] Permitir seleção visual das pastas de conteúdo e dados — ambiente e armazenamento persistidos; mudar seleção não move nem apaga saves antigos.
+- [x] Importar por seleção de arquivos/pastas e, quando apropriado, arrastar e soltar — pastas extraídas da 17559 e Castle Crashers; handler de arrastar/soltar implementado. STFS pelo assistente e outros conjuntos continuam pendentes.
+- [x] Identificar automaticamente versões e componentes — identidade XEX nos perfis conhecidos; pasta contendo várias versões é recusada como ambígua. Não identifica todo o acervo.
 - [ ] Dispensar edição manual de TOML/JSON, renomeação de arquivos e montagem manual da estrutura de pastas.
 - [x] Informar arquivo ausente, incompatível ou corrompido com ação concreta para prosseguir — componentes dos perfis de preparação são conferidos por SHA-256; DLL ausente e preparação interrompida impedem estado pronto. Isso não valida todos os assets de um jogo.
-- [ ] Preservar arquivos originais e conjuntos funcionais durante a importação e preparação.
+- [x] Preservar arquivos originais e conjuntos funcionais durante a importação e preparação — hashes antes da escrita, publicação sem substituição e teste de retomada; conteúdo instalado divergente é preservado.
 - [x] Impedir mistura silenciosa de componentes de dashboards diferentes para completar conjuntos — importador aceita somente hashes declarados no perfil e recusa destino existente diferente. A 6717 não recebe componentes da 17559.
 - [ ] Mostrar o próximo passo em linguagem simples e reservar stack traces e informações técnicas para “Ver detalhes”.
 
@@ -342,16 +342,16 @@ Reutilizar os arquivos, inventários e downloads já obtidos no projeto; não re
 
 ### 16.2. Preparação automatizada
 
-- [x] Iniciar e acompanhar a preparação pela interface — aciona o script existente sem terminal, informa o alvo/etapas e mantém logs locais. Execução real alcançou configure do Castle Crashers; preparação completa pelo assistente ainda não validada.
+- [x] Iniciar e acompanhar a preparação pela interface — scripts sem terminal e logs locais; quatro etapas incrementais executadas para Castle Crashers e 17559. Preparação inicial completa no pacote ainda não aprovada.
 - [ ] Dispensar configuração manual de Git, CMake, compilador, Python ou SDK pelo usuário.
-- [ ] Gerenciar ferramentas indispensáveis pelo aplicativo, com fontes verificáveis e versões controladas.
-- [ ] Informar e obter consentimento quando instalação, download relevante ou elevação de privilégios forem necessários.
-- [ ] Preferir funcionamento sem privilégios administrativos.
+- [x] Gerenciar ferramentas indispensáveis pelo aplicativo, com fontes verificáveis e versões controladas — arquivos oficiais com hashes fixados; checkout e patches do SDK conferidos.
+- [x] Informar e obter consentimento quando instalação, download relevante ou elevação de privilégios forem necessários — downloads recusados sem consentimento; instalação interativa Microsoft separada e explicitada.
+- [x] Preferir funcionamento sem privilégios administrativos — aplicativo, importação e ferramentas locais; instalador C++ do sistema pode exigir elevação informada.
 - [ ] Informar espaço necessário e downloads antes de começar.
-- [ ] Exibir progresso por etapas reais, sem porcentagens inventadas.
+- [x] Exibir progresso por etapas reais, sem porcentagens inventadas — mensagens `X360N_STAGE` de download, verificação, configure, codegen e build.
 - [ ] Distinguir trabalho em andamento, espera e erro.
 - [ ] Permitir cancelamento seguro e recuperação após interrupção.
-- [ ] Reaproveitar etapas válidas, reconstruindo somente o que precisa mudar.
+- [x] Reaproveitar etapas válidas, reconstruindo somente o que precisa mudar — cache de ferramentas, patches idempotentes e build incremental executados; saída interrompida não é aceita como pronta.
 - [x] Evitar recompilação desnecessária a cada abertura — abrir dashboard usa a sessão já preparada; preparar é uma ação separada e explícita.
 - [ ] Permitir uso offline do conteúdo preparado nas funcionalidades independentes de serviços externos.
 
@@ -375,12 +375,12 @@ O assistente externo cuida de instalação, preparação, escolha do ambiente e 
 ### 17.2. Erros, atualização e privacidade
 
 - [ ] Explicar erros em linguagem simples e oferecer ações pertinentes: tentar novamente, selecionar arquivos ou abrir diagnóstico.
-- [ ] Permitir revisar relatórios de diagnóstico antes de compartilhar.
-- [ ] Não enviar automaticamente conteúdo, saves, credenciais ou informações pessoais.
+- [x] Permitir revisar relatórios de diagnóstico antes de compartilhar — detalhes e logs locais, sem ação automática de compartilhamento.
+- [x] Não enviar automaticamente conteúdo, saves, credenciais ou informações pessoais — preparação e supervisor não têm upload/telemetria.
 - [ ] Guiar atualizações preservando perfis, saves, conteúdo e preparações ainda compatíveis.
 - [ ] Recuperar atualizações interrompidas e permitir retornar a uma versão anterior quando viável.
 - [x] Informar claramente onde os dados ficam armazenados — interface mostra a pasta do perfil e oferece abrir dados locais; detalhes e registros ficam em `.local/logs/desktop/` e `.local/runs/`.
-- [ ] Remover o aplicativo sem apagar dados pessoais sem escolha explícita.
+- [x] Remover o aplicativo sem apagar dados pessoais sem escolha explícita — pacote portátil separado do ambiente; remoção do pacote mantém conteúdo e dados, instrução incluída.
 - [ ] Tratar verificações de segurança de cada sistema sem instruir a desativar antivírus ou proteções como procedimento normal.
 
 Não criar agora serviços de atualização, telemetria ou ferramentas apenas para preencher o checklist.
@@ -400,7 +400,7 @@ Usar o **pacote real da release** em cada sistema/arquitetura anunciado como sup
 
 O aceite comprova facilidade de uso para o conjunto e o ambiente testados, não compatibilidade universal nem todos os jogos na primeira release.
 
-**Incremento gráfico de 2026-10-12:** implementação em `src/desktop`, com modelo separado da interface Windows e requisitos em `titles/*/preparation.toml`. Importação preserva originais, valida o conjunto antes da escrita e registra procedência local; cancelamento de build marca preparação incompleta para não aceitar um executável anterior. Testes e limites estão em `docs/desktop-preparation.md`. Não há pacote de release, instalador de toolchain, suporte anunciado a outros sistemas, nem aprovação de perfil/save/load. Todos os itens do §18 permanecem abertos.
+**Incremento gráfico de 2026-10-12:** candidato local e ferramentas gerenciadas implementados; importação de conteúdo completo e registro do catálogo SDK por dashboard. Testes e limites em `docs/desktop-preparation.md`. Caminhos Unicode foram testados na importação e no runtime iruka; isso não equivale ao fluxo completo em máquina limpa. Perfis originais continuam bloqueados no host XUI de atualização/composição/entrada. Save/load e atualização/rollback não aprovados. Todos os itens do §18 permanecem abertos até teste do pacote nas condições exigidas.
 
 ## 19. Commits e preparação da primeira publicação — bloqueador obrigatório
 

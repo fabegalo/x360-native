@@ -20,7 +20,7 @@ namespace fs = std::filesystem;
 using namespace x360n;
 using namespace x360n::desktop;
 namespace {
-constexpr UINT kFinished = WM_APP + 1, kProgress = WM_APP + 2;
+constexpr UINT kFinished = WM_APP + 1, kProgress = WM_APP + 2, kDetected = WM_APP + 3;
 enum { kFolder = 101, kTargets, kCheck, kImport, kPrepare, kLaunch, kDetails, kData, kCancel, kLanguage, kInstall, kStorage };
 bool english = false;
 std::string Tr(const char* pt, const char* en) { return english ? en : pt; }
@@ -122,6 +122,11 @@ void InspectSelected(App& a) {
     a.current.prepared = a.current.prepared && r.prepared;
     for (const auto& issue : r.issues) detail += dep + ": " + issue + "\r\n";
   }
+  if (a.current.inputs_ok) {
+    for (const auto& issue : InspectLibrary(t, a.targets)) {
+      a.current.prepared = false; detail += issue + "\r\n";
+    }
+  }
   auto supervisor = a.self.parent_path() / "x360n.exe";
   if (!fs::is_regular_file(supervisor)) {
     a.current.prepared = false;
@@ -204,7 +209,14 @@ void Start(App& a, int action, fs::path source = {}) {
     };
     try {
       if (action == kImport) {
-        auto count = Import(ProjectPaths{a.root}, target, source, [&] { return a.cancel.load(); });
+        const auto detected = DetectImportTargets(a.targets, source, [&] { return a.cancel.load(); });
+        if (detected.size() > 1) throw std::runtime_error(Tr("A pasta contém mais de um conjunto reconhecido. Selecione a subpasta de uma única versão; nenhum arquivo foi copiado.", "The folder contains multiple recognized sets. Select one version's subfolder; no files were copied."));
+        auto selected = target;
+        if (detected.size() == 1) {
+          selected = *std::find_if(a.targets.begin(), a.targets.end(), [&](const auto& t) { return t.id == detected.front(); });
+          Post(a.window, kDetected, selected.id);
+        }
+        auto count = Import(ProjectPaths{a.root}, selected, source, [&] { return a.cancel.load(); });
         finish("Importação concluída: " + std::to_string(count) + " componentes copiados. Originais preservados."); return;
       }
       auto run = [&](fs::path exe, std::vector<std::string> args, const std::string& label) {
@@ -244,6 +256,8 @@ void Start(App& a, int action, fs::path source = {}) {
         };
         for (const auto& dep : target.dependencies) prepare(dep);
         prepare(target.id);
+        Post(a.window, kProgress, Tr("Registrando conteúdo verificado na biblioteca original...", "Registering verified content in the original library..."));
+        PrepareLibrary(ProjectPaths{a.root}, target, a.targets, [&] { return a.cancel.load(); });
         finish("Preparação concluída. A identidade dos componentes será conferida antes de habilitar a sessão.");
       }
     } catch (const std::exception& error) { finish(error.what()); }
@@ -280,7 +294,7 @@ LRESULT CALLBACK WndProc(HWND window, UINT message, WPARAM wp, LPARAM lp) {
         a->icon = MakeIcon(); SendMessageW(window, WM_SETICON, ICON_BIG, reinterpret_cast<LPARAM>(a->icon));
         a->title = Control(*a, L"STATIC", L"x360-native", 0);
         SendMessageW(a->title, WM_SETFONT, reinterpret_cast<WPARAM>(a->title_font), TRUE);
-        a->subtitle = Control(*a, L"STATIC", L"Preparar o ambiente e abrir a dashboard original\r\nPrévia para Windows x64 · perfis, saves e instalação autônoma ainda pendentes", 0);
+        a->subtitle = Control(*a, L"STATIC", L"", 0);
         a->root_text = Control(*a, L"STATIC", L"", SS_PATHELLIPSIS);
         a->combo = Control(*a, WC_COMBOBOXW, L"", CBS_DROPDOWNLIST | WS_TABSTOP | WS_VSCROLL, kTargets);
         a->status = Control(*a, L"STATIC", L"", 0);
@@ -388,6 +402,13 @@ LRESULT CALLBACK WndProc(HWND window, UINT message, WPARAM wp, LPARAM lp) {
       }
       case kProgress: {
         std::unique_ptr<std::string> text(reinterpret_cast<std::string*>(lp)); Set(a->details, *text); return 0;
+      }
+      case kDetected: {
+        std::unique_ptr<std::string> id(reinterpret_cast<std::string*>(lp));
+        for (size_t i = 0; i < a->targets.size(); ++i) if (a->targets[i].id == *id) {
+          a->selected = i; SendMessageW(a->combo, CB_SETCURSEL, i, 0); break;
+        }
+        return 0;
       }
       case kFinished: {
         std::unique_ptr<std::string> text(reinterpret_cast<std::string*>(lp));

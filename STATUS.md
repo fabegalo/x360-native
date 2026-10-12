@@ -5,13 +5,15 @@ XDK "Dolphin" da `rexglue/demo-iruka`), com as limitações abaixo.
 
 ## Funciona (com evidência)
 
-Prévia de preparação gráfica Windows (§§15–17): `x360-native.exe` abre sem
-terminal e sem conteúdo, verifica conjuntos por perfil, importa componentes
-extraídos da 17559 e aciona o supervisor original. 9 testes / 32 asserções do
-modelo e 11 / 62 de processo/sessão passam; iruka L1–L5 permanece aprovado.
-A execução pelo aplicativo passou da intro para a dashboard; novo ciclo completo
-com o jogo ainda não foi confirmado nesta tentativa. Toolchain gerenciada,
-pacote autônomo e aceite em máquina limpa continuam pendentes. Detalhes:
+Preparação gráfica Windows (§§15–17): candidato ZIP local com aplicativo,
+supervisor, CRT e fontes permitidas; ferramentas fixadas obtidas pelo assistente
+com consentimento. Importa os conjuntos extraídos completos da 17559 e Castle
+Crashers, preserva originais e registra o jogo no catálogo da My Games original.
+15 testes / 61 asserções do modelo e 19 / 117 de processo/sessão passam;
+iruka L1–L5 permanece aprovado. Corrigida a execução com caminhos Unicode por
+manifesto UTF-8 do runtime. Novo ciclo manual após esse incremento, primeira
+preparação completa em máquina limpa, perfis, save/load e atualização/rollback
+ainda não aprovados. Nenhuma release publicada. Detalhes:
 [preparação gráfica](docs/desktop-preparation.md). Publicação privada e
 reconciliação do histórico concluídas; checklist §19.3 atualizado.
 

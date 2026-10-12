@@ -91,17 +91,17 @@ bool IsWithin(const fs::path& path, const fs::path& base) {
 
 std::optional<std::string> CheckLaunchable(const ProjectPaths& p, const fs::path& exe) {
   std::error_code ec;
-  if (!fs::is_regular_file(exe, ec)) return "not an existing file: " + exe.string();
+  if (!fs::is_regular_file(exe, ec)) return "not an existing file: " + PathUtf8(exe);
   std::wstring ext = exe.extension().wstring();
   std::transform(ext.begin(), ext.end(), ext.begin(), [](wchar_t c) { return wchar_t(std::towlower(c)); });
-  if (ext != L".exe") return "only .exe build outputs can be launched: " + exe.string();
+  if (ext != L".exe") return "only .exe build outputs can be launched: " + PathUtf8(exe);
   if (fs::exists(p.inputs(), ec) && IsWithin(exe, p.inputs()))
-    return "refusing to launch a file from .local/inputs (untrusted content): " + exe.string();
+    return "refusing to launch a file from .local/inputs (untrusted content): " + PathUtf8(exe);
   bool in_build = fs::exists(p.build(), ec) && IsWithin(exe, p.build());
   bool in_sdk_out = fs::exists(p.sdk_out(), ec) && IsWithin(exe, p.sdk_out());
   if (!in_build && !in_sdk_out)
     return "executable is not a build output under .local/build or external/rexglue-sdk/out: " +
-           exe.string();
+           PathUtf8(exe);
   return std::nullopt;
 }
 

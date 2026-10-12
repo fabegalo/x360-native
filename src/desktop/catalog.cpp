@@ -1,5 +1,7 @@
 #include "catalog.h"
 #include "sha256.h"
+#include "workspace_lease.h"
+#include <chrono>
 #include <algorithm>
 #include <fstream>
 #include <map>
@@ -60,6 +62,17 @@ std::vector<Target> ReadCatalog(const ProjectPaths& paths) {
     t.limitations_en = info["limitations_en"].value_or(t.limitations);
     t.session = info["session"].value_or(false);
     t.importable = info["importable"].value_or(true);
+    if (auto content = info["library"].as_table()) {
+      t.library = {Text((*content)["title_id"]), Text((*content)["content_type"]),
+                   Text((*content)["file_name"]), Text((*content)["display_name"]),
+                   Text((*content)["source_sha256"])};
+      for (const auto& value : {t.library.title_id, t.library.content_type})
+        if (value.size() != 8 || value.find_first_not_of("0123456789ABCDEF") != std::string::npos)
+          throw std::runtime_error("Identidade de conteúdo inválida.");
+      if (!IsSafePackageEntryName(t.library.file_name) || t.library.file_name.size() > 42 ||
+          t.library.source_sha256.size() != 64 || t.library.source_sha256.find_first_not_of("0123456789abcdef") != std::string::npos)
+        throw std::runtime_error("Procedência de conteúdo inválida.");
+    }
     t.manifest = dir.path() / (t.id + "_manifest.toml");
     auto profile = Read(t.manifest);
     t.game_root = Resolve(dir.path(), Text(profile["project"]["game_root"]));
@@ -121,6 +134,22 @@ std::vector<Target> ReadCatalog(const ProjectPaths& paths) {
   }
   std::sort(result.begin(), result.end(), [](const auto& a, const auto& b) { return a.id < b.id; });
   return result;
+}
+std::vector<std::string> DetectImportTargets(const std::vector<Target>& targets, const fs::path& source,
+                                            const std::function<bool()>& cancelled) {
+  if (!fs::is_directory(source)) throw std::runtime_error("Selecione uma pasta de conteúdo extraído.");
+  std::vector<std::string> matches;
+  for (auto it = fs::recursive_directory_iterator(source); it != fs::recursive_directory_iterator(); ++it) {
+    if (cancelled && cancelled()) throw std::runtime_error("Importação cancelada.");
+    if (it->is_symlink() || !IsWithin(it->path(), source)) { it.disable_recursion_pending(); continue; }
+    if (!it->is_regular_file()) continue;
+    for (const auto& t : targets) {
+      if (t.inputs.empty() || std::find(matches.begin(), matches.end(), t.id) != matches.end()) continue;
+      const auto& anchor = t.inputs.front();
+      if (it->path().filename() == PathFromUtf8(anchor.source_name) && Matches(it->path(), anchor.sha256)) matches.push_back(t.id);
+    }
+  }
+  return matches;
 }
 fs::path PreparationMarker(const ProjectPaths& paths, const Target& t) {
   if (!IsSafeLabel(t.id)) throw std::runtime_error("Identificador inválido.");
@@ -184,6 +213,7 @@ size_t Import(const ProjectPaths& paths, const Target& t, const fs::path& source
       throw std::runtime_error("Conjunto incompleto. Falta o arquivo verificado: " + i.source_name);
     } else needed += fs::file_size(copies.at(i.destination));
   }
+  WorkspaceLease lease(paths);
   fs::create_directories(paths.inputs());
   if (fs::space(paths.inputs()).available < needed)
     throw std::runtime_error("Espaço insuficiente. Libere espaço na pasta de conteúdo e tente novamente.");
@@ -199,13 +229,25 @@ size_t Import(const ProjectPaths& paths, const Target& t, const fs::path& source
     fs::create_directories(destination.parent_path());
     // Unique temporary name; never truncate an existing original or destination.
     const auto staging = destination.parent_path() / (".x360n-import-" + Utf8(destination.filename()));
-    if (!fs::create_directory(staging))
-      throw std::runtime_error("Importação anterior ou concorrente encontrada: " + Utf8(staging));
     const auto temporary = staging / "verified.tmp";
+    const auto expected = std::find_if(t.inputs.begin(), t.inputs.end(), [&](const auto& i) { return i.destination == destination; });
+    if (expected == t.inputs.end()) throw std::runtime_error("Componente sem identidade.");
+    if (fs::exists(staging)) {
+      if (!fs::is_directory(staging) || fs::is_symlink(staging) || !IsWithin(staging, destination.parent_path()))
+        throw std::runtime_error("Pasta temporária inválida; conteúdo preservado.");
+      for (const auto& entry : fs::directory_iterator(staging))
+        if (entry.path() != temporary || entry.is_symlink() || !entry.is_regular_file())
+          throw std::runtime_error("Pasta temporária contém arquivos desconhecidos; conteúdo preservado.");
+      if (fs::exists(temporary) && !Matches(temporary, expected->sha256)) {
+        auto saved = staging; saved += ".interrupted-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count());
+        // Same verified parent; retain interrupted bytes rather than deleting them.
+        fs::rename(staging, saved);
+      }
+    }
+    fs::create_directory(staging);
     try {
-      fs::copy_file(input, temporary, fs::copy_options::none);
-      const auto expected = std::find_if(t.inputs.begin(), t.inputs.end(), [&](const auto& i) { return i.destination == destination; });
-      if (expected == t.inputs.end() || !Matches(temporary, expected->sha256))
+      if (!fs::exists(temporary)) fs::copy_file(input, temporary, fs::copy_options::none);
+      if (!Matches(temporary, expected->sha256))
         throw std::runtime_error("O conteúdo mudou durante a cópia. Tente novamente.");
       // Publish complete bytes atomically and never replace a concurrent file.
 #ifdef _WIN32
@@ -215,7 +257,10 @@ size_t Import(const ProjectPaths& paths, const Target& t, const fs::path& source
       fs::create_hard_link(temporary, destination);
       fs::remove(temporary);
 #endif
-      fs::remove(staging);
+      // Antivirus/indexing may keep the now-empty directory briefly busy after
+      // publication. Cleanup failure cannot invalidate an already verified file.
+      std::error_code cleanup;
+      fs::remove(staging, cleanup);
       log << expected->sha256 << '\t' << Utf8(input) << '\t' << Utf8(destination) << '\n';
       log.flush();
       if (!log) throw std::runtime_error("Componente copiado, mas falhou o registro local da procedência.");

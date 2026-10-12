@@ -137,7 +137,7 @@ fs::path RexglueExe(const ProjectPaths& p, const std::string& config) {
 std::optional<std::string> GitHead(const ProjectPaths& p, const fs::path& repo) {
   auto git = FindOnPath(L"git.exe");
   if (!git) return std::nullopt;
-  auto c = Capture(p, *git, {"-C", repo.string(), "rev-parse", "HEAD"});
+  auto c = Capture(p, *git, {"-C", PathUtf8(repo), "rev-parse", "HEAD"});
   if (!c.ok) return std::nullopt;
   return Trim(c.out);
 }
@@ -152,7 +152,7 @@ int Doctor(const ProjectPaths& p, const std::string& config) {
   auto warn = [&](const std::string& m) { ++warns; fmt::print("[WARN] {}\n", m); };
   auto fail = [&](const std::string& m) { ++fails; fmt::print("[FAIL] {}\n", m); };
 
-  fmt::print("x360n doctor  (root: {}, config: {})\n", p.root.string(), config);
+  fmt::print("x360n doctor  (root: {}, config: {})\n", PathUtf8(p.root), config);
 
   // Pinned SDK revision.
   auto git = FindOnPath(L"git.exe");
@@ -168,7 +168,7 @@ int Doctor(const ProjectPaths& p, const std::string& config) {
     } else {
       ok(fmt::format("ReXGlue SDK at pinned {} ({})", *head, X360N_SDK_TAG_LOCKED));
     }
-    auto st = Capture(p, *git, {"-C", p.sdk().string(), "status", "--porcelain", "--ignore-submodules=none"});
+    auto st = Capture(p, *git, {"-C", PathUtf8(p.sdk()), "status", "--porcelain", "--ignore-submodules=none"});
     if (st.ok) {
       std::istringstream lines(st.out);
       std::string line;
@@ -191,7 +191,7 @@ int Doctor(const ProjectPaths& p, const std::string& config) {
   // Toolchain.
   fs::path clang = p.local() / "toolchains" / ("llvm-" X360N_LLVM_VERSION_LOCKED) / "bin" / "clang++.exe";
   if (!fs::exists(clang)) {
-    fail("pinned clang++ missing at " + clang.string() + " (run scripts/bootstrap-llvm.ps1)");
+    fail("pinned clang++ missing at " + PathUtf8(clang) + " (run scripts/bootstrap-llvm.ps1)");
   } else {
     auto c = Capture(p, clang, {"--version"});
     std::string want = "clang version " X360N_LLVM_VERSION_LOCKED;
@@ -225,7 +225,7 @@ int Doctor(const ProjectPaths& p, const std::string& config) {
   // SDK tools built from the pinned revision.
   fs::path rexglue = RexglueExe(p, config);
   if (!fs::exists(rexglue)) {
-    fail("rexglue CLI not built: " + rexglue.string() + " (cmake --build --preset win-amd64-debug)");
+    fail("rexglue CLI not built: " + PathUtf8(rexglue) + " (cmake --build --preset win-amd64-debug)");
   } else {
     auto c = Capture(p, rexglue, {"--version"});
     std::string v = FirstLine(c.out + c.err);
@@ -241,7 +241,7 @@ int Doctor(const ProjectPaths& p, const std::string& config) {
   }
   fs::path as = p.sdk() / "tools" / "binutils" / "powerpc-none-elf-as.exe";
   if (!fs::exists(as)) {
-    fail("PowerPC assembler missing: " + as.string());
+    fail("PowerPC assembler missing: " + PathUtf8(as));
   } else {
     auto c = Capture(p, as, {"--version"});
     if (c.ok) ok("PowerPC binutils: " + FirstLine(c.out));
@@ -270,7 +270,7 @@ int Doctor(const ProjectPaths& p, const std::string& config) {
   // Local directories.
   for (auto& [name, dir] : {std::pair{"inputs", p.inputs()}, std::pair{"runs", p.runs()}}) {
     if (fs::is_directory(dir)) ok(fmt::format(".local/{} exists", name));
-    else warn(fmt::format(".local/{} does not exist yet ({})", name, dir.string()));
+    else warn(fmt::format(".local/{} does not exist yet ({})", name, PathUtf8(dir)));
   }
 
   fmt::print("\n{} failure(s), {} warning(s)\n", fails, warns);
@@ -284,12 +284,12 @@ int Doctor(const ProjectPaths& p, const std::string& config) {
 int Identify(const fs::path& file, bool json) {
   std::error_code ec;
   if (!fs::is_regular_file(file, ec)) {
-    fmt::print(stderr, "identify: not a regular file: {}\n", file.string());
+    fmt::print(stderr, "identify: not a regular file: {}\n", PathUtf8(file));
     return kExitUsage;
   }
   auto digest = DigestFile(file);
   if (!digest) {
-    fmt::print(stderr, "identify: cannot read {}\n", file.string());
+    fmt::print(stderr, "identify: cannot read {}\n", PathUtf8(file));
     return kExitFailed;
   }
 
@@ -317,7 +317,7 @@ int Identify(const fs::path& file, bool json) {
     JsonWriter w;
     w.BeginObject();
     w.Number("schema_version", 1);
-    w.String("path", fs::absolute(file).string());
+    w.String("path", PathUtf8(fs::absolute(file)));
     w.Number("size", int64_t(digest->size));
     w.String("sha256", digest->sha256);
     // "xex2" | "xex1" | "xex-variant" | "invalid"
@@ -372,7 +372,7 @@ int Identify(const fs::path& file, bool json) {
     std::cout << w.Take();
   } else {
     fmt::print("file          {}\nsize          {} bytes\nsha256        {}\nformat        {}\n",
-               fs::absolute(file).string(), digest->size, digest->sha256,
+               PathUtf8(fs::absolute(file)), digest->size, digest->sha256,
                XexFormatName(parsed.format));
     if (!id) fmt::print("error         {}\n", parsed.error);
     if (id) {
@@ -421,7 +421,7 @@ int Run(const ProjectPaths& p, const fs::path& exe_in, std::vector<std::string> 
     return kExitUsage;
   }
   if (label.empty()) {
-    label = exe.stem().string();
+    label = PathUtf8(exe.stem());
     for (char& c : label)
       if (!std::isalnum(static_cast<unsigned char>(c)) && c != '-' && c != '_') c = '_';
   }
@@ -435,7 +435,7 @@ int Run(const ProjectPaths& p, const fs::path& exe_in, std::vector<std::string> 
   std::error_code ec;
   fs::create_directories(dir, ec);
   if (ec) {
-    fmt::print(stderr, "run: cannot create {}: {}\n", dir.string(), ec.message());
+    fmt::print(stderr, "run: cannot create {}: {}\n", PathUtf8(dir), ec.message());
     return kExitUsage;
   }
 
@@ -459,8 +459,8 @@ int Run(const ProjectPaths& p, const fs::path& exe_in, std::vector<std::string> 
                    std::chrono::seconds(timeout_s)};
   spec.capture_crash = crash_stack;
   if (window) spec.should_cancel = [window] { return window->closed(); };
-  fmt::print("run: {} (working dir {}) -> {}\n", exe.string(), spec.working_dir.string(),
-             dir.string());
+  fmt::print("run: {} (working dir {}) -> {}\n", PathUtf8(exe), PathUtf8(spec.working_dir),
+             PathUtf8(dir));
   auto r = RunProcess(spec);
 
   LogScan scan;
@@ -488,7 +488,7 @@ int Run(const ProjectPaths& p, const fs::path& exe_in, std::vector<std::string> 
   w.EndObject();
   w.BeginObject("target");
   w.String("label", label);
-  w.String("exe", exe.string());
+  w.String("exe", PathUtf8(exe));
   if (exe_digest) {
     w.String("exe_sha256", exe_digest->sha256);
     w.Number("exe_size", int64_t(exe_digest->size));
@@ -507,7 +507,7 @@ int Run(const ProjectPaths& p, const fs::path& exe_in, std::vector<std::string> 
     std::sort(dlls.begin(), dlls.end());
     for (const auto& d : dlls) {
       w.BeginObject();
-      w.String("name", d.filename().string());
+      w.String("name", PathUtf8(d.filename()));
       if (auto dg = DigestFile(d)) {
         w.Number("size", int64_t(dg->size));
         w.String("sha256", dg->sha256);
@@ -519,7 +519,7 @@ int Run(const ProjectPaths& p, const fs::path& exe_in, std::vector<std::string> 
   std::string joined;
   for (auto& a : args) joined += (joined.empty() ? "" : " ") + a;
   w.String("args", joined);
-  w.String("working_dir", spec.working_dir.string());
+  w.String("working_dir", PathUtf8(spec.working_dir));
   w.Number("timeout_s", timeout_s);
   w.EndObject();
   w.BeginObject("result");
@@ -537,9 +537,9 @@ int Run(const ProjectPaths& p, const fs::path& exe_in, std::vector<std::string> 
   w.Number("duration_ms", r.duration.count());
   w.EndObject();
   w.BeginObject("logs");
-  w.String("stdout", spec.stdout_file.string());
-  w.String("stderr", spec.stderr_file.string());
-  if (rex_log) w.String("rex_log", rex_log_file.string());
+  w.String("stdout", PathUtf8(spec.stdout_file));
+  w.String("stderr", PathUtf8(spec.stderr_file));
+  if (rex_log) w.String("rex_log", PathUtf8(rex_log_file));
   w.EndObject();
   w.BeginObject("diagnostics");
   w.Number("stub_lines", int64_t(scan.stub_lines));
@@ -617,7 +617,7 @@ int Run(const ProjectPaths& p, const fs::path& exe_in, std::vector<std::string> 
       : r.timed_out ? std::string("TIMEOUT, terminated by the supervisor")
                   : DescribeExitCode(r.exit_code),
       r.duration.count(), scan.stub_lines, unimpl, scan.error_lines, scan.critical_lines,
-      (dir / "report.json").string());
+      PathUtf8((dir / "report.json")));
   if (r.timed_out) return kExitTimeout;
   return r.exit_code == 0 ? kExitOk : kExitFailed;
 }
@@ -650,7 +650,7 @@ int Session(const ProjectPaths& paths, const fs::path& manifest, int timeout, bo
       if (result != kExitOk) return result;  // never relaunch after timeout/crash
       LaunchRequest request;
       if (!ReadLaunchRequest(handoff, request)) {
-        fmt::print(stderr, "session: missing or invalid handoff: {}\n", handoff.string());
+        fmt::print(stderr, "session: missing or invalid handoff: {}\n", PathUtf8(handoff));
         return kExitFailed;
       }
       if (request.kind != LaunchRequest::Image) {
@@ -661,7 +661,7 @@ int Session(const ProjectPaths& paths, const fs::path& manifest, int timeout, bo
             std::find(dashboard.dashboard_return_flags.begin(), dashboard.dashboard_return_flags.end(),
                       request.flags) == dashboard.dashboard_return_flags.end()) {
           fmt::print(stderr, "session: dashboard return flags {:08X} are not implemented; request preserved in {}\n",
-                     request.flags, handoff.string());
+                     request.flags, PathUtf8(handoff));
           return kExitFailed;
         }
         fmt::print("session: {} {}; returning to {}\n", active.name,

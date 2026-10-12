@@ -91,6 +91,14 @@ TEST_CASE("wrong module version rejects the entire import before writing") {
   REQUIRE_THROWS(Import(f.paths, f.target, f.source));
   CHECK_FALSE(fs::exists(f.target.inputs[0].destination));
 }
+TEST_CASE("import detects the exact target and reports a mixed folder as ambiguous") {
+  Fixture f; auto older = f.target; older.id = "older"; older.inputs.front().sha256 = Hash("older dashboard");
+  auto ids = DetectImportTargets({f.target, older}, f.source);
+  REQUIRE(ids.size() == 1); CHECK(ids.front() == f.target.id);
+  Write(f.source / "older/dash.xex", "older dashboard");
+  CHECK(DetectImportTargets({f.target, older}, f.source).size() == 2);
+  CHECK_FALSE(fs::exists(f.target.inputs.front().destination));
+}
 TEST_CASE("an existing different destination is never overwritten") {
   Fixture f; Write(f.target.inputs[0].destination, "keep existing");
   REQUIRE_THROWS(Import(f.paths, f.target, f.source));
@@ -108,6 +116,18 @@ TEST_CASE("cancelled import is retryable without changing original data") {
   REQUIRE_THROWS(Import(f.paths, f.target, f.source, [] { return true; }));
   CHECK_FALSE(fs::exists(f.target.inputs[0].destination));
   CHECK(Import(f.paths, f.target, f.source) == 2);
+}
+TEST_CASE("interrupted copy is preserved and import resumes with verified bytes") {
+  Fixture f;
+  auto staging = f.target.game_root / ".x360n-import-dash.xex";
+  Write(staging / "verified.tmp", "partial bytes");
+  CHECK(Import(f.paths, f.target, f.source) == 2);
+  CHECK(DigestFile(f.target.inputs.front().destination)->sha256 == Hash("dashboard"));
+  bool preserved = false;
+  for (auto& entry : fs::directory_iterator(f.target.game_root))
+    if (Utf8(entry.path().filename()).starts_with(".x360n-import-dash.xex.interrupted-"))
+      preserved = DigestFile(entry.path() / "verified.tmp")->sha256 == Hash("partial bytes");
+  CHECK(preserved);
 }
 TEST_CASE("modified imported module disables prepared state") {
   Fixture f; Import(f.paths, f.target, f.source); Write(f.target.exe, "build fixture");
@@ -144,6 +164,32 @@ TEST_CASE("missing runtime and interrupted build never qualify an old exe as pre
   CHECK(Inspect(f.paths, f.target).prepared);
 }
 
+TEST_CASE("original library registration validates all bytes and publishes the header last") {
+  Fixture f; Import(f.paths, f.target, f.source);
+  auto game = f.target;
+  game.library = {"584108B7", "000D0000", "F9432A7FE407A3C196C95D0FFD4A540937FD4EEC58", "Castle Crashers", Hash("package provenance")};
+  Target session; session.session = true; session.user_root = f.paths.local() / "user/dashboard";
+  session.dependencies = {game.id};
+  auto base = session.user_root / "0000000000000000/584108B7";
+  auto header = base / "Headers/000D0000" / (game.library.file_name + ".header");
+  auto installed = base / "000D0000" / game.library.file_name;
+  CHECK_FALSE(InspectLibrary(session, {game}).empty());
+  Write(installed / "dash.xex.x360n-library-tmp", "interrupted");
+  CHECK_THROWS(PrepareLibrary(f.paths, session, {game}, [] { return true; }));
+  CHECK_FALSE(fs::exists(header));
+  PrepareLibrary(f.paths, session, {game});
+  CHECK(InspectLibrary(session, {game}).empty());
+  // Exact reference generated for the original LIVE metadata in the working
+  // dashboard, independent of these synthetic fixture content bytes.
+  CHECK(DigestFile(header)->sha256 == "3b5f5f95911839ccd0227af47c742dac659e2542d4d141cf9854ed4d37063b7c");
+  CHECK(fs::file_size(header) == 0x148); // no invented license trailer
+  CHECK_NOTHROW(PrepareLibrary(f.paths, session, {game}));
+  Write(installed / "dash.xex", "preserve installed data");
+  CHECK_THROWS(PrepareLibrary(f.paths, session, {game}));
+  CHECK(DigestFile(installed / "dash.xex")->sha256 == Hash("preserve installed data"));
+  CHECK_FALSE(InspectLibrary(session, {game}).empty());
+}
+
 TEST_CASE("local packaged payload imports the complete validated sets into a fresh Unicode environment", "[.local-package]") {
   const char* package = std::getenv("X360N_TEST_PACKAGE");
   const char* original = std::getenv("X360N_TEST_SOURCE");
@@ -159,9 +205,16 @@ TEST_CASE("local packaged payload imports the complete validated sets into a fre
     REQUIRE(it != source_targets.end());
     INFO(t.id);
     CHECK(Import(ProjectPaths{root}, t, it->game_root) == t.inputs.size());
-    CHECK(Inspect(ProjectPaths{root}, t).inputs_ok);
-    CHECK_FALSE(Inspect(ProjectPaths{root}, t).prepared);
+    const auto state = Inspect(ProjectPaths{root}, t);
+    CHECK(state.inputs_ok);
+    CHECK_FALSE(state.prepared);
     CHECK(Import(ProjectPaths{root}, t, it->game_root) == 0);
     CHECK(Inspect(ProjectPaths{PathFromUtf8(original)}, *it).inputs_ok);
   }
+  auto dash = std::find_if(targets.begin(), targets.end(), [](const auto& t) { return t.id == "dash_17559"; });
+  REQUIRE(dash != targets.end());
+  REQUIRE_FALSE(InspectLibrary(*dash, targets).empty());
+  PrepareLibrary(ProjectPaths{root}, *dash, targets);
+  CHECK(InspectLibrary(*dash, targets).empty());
+  CHECK_NOTHROW(PrepareLibrary(ProjectPaths{root}, *dash, targets));
 }

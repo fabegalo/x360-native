@@ -10,3 +10,12 @@ limitations = "Inicie o jogo pela My Games original. Selecione a pasta extraída
 path = "default.xex"
 source_name = "default.xex"
 sha256 = "825e9c8cb951d62ce954901488c5b783349c98cc5c03bd08ea0739df3af5d9ad"
+
+# Metadata previously read with x360n-content info from the original LIVE package.
+# This is SDK catalog metadata, not a replacement package or a license grant.
+[library]
+title_id = "584108B7"
+content_type = "000D0000"
+file_name = "F9432A7FE407A3C196C95D0FFD4A540937FD4EEC58"
+display_name = "Castle Crashers"
+source_sha256 = "ed7b65a8de5a70fabd311df4e542cf21adad9a75ac568b5f0a8c404c31d41e74"

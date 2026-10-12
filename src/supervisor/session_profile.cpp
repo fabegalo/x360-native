@@ -12,7 +12,7 @@ SessionProfile LoadSessionProfile(const ProjectPaths& paths, const std::filesyst
   auto table = toml::parse(input, PathUtf8(manifest));
   auto text = [&](const auto& node) {
     auto value = node.template value<std::string>();
-    if (!value || value->empty()) throw std::runtime_error("missing session profile field: " + manifest.string());
+    if (!value || value->empty()) throw std::runtime_error("missing session profile field: " + PathUtf8(manifest));
     return *value;
   };
   auto resolve = [&](const std::string& path) { return std::filesystem::weakly_canonical(manifest.parent_path() / PathFromUtf8(path)); };
@@ -27,7 +27,7 @@ SessionProfile LoadSessionProfile(const ProjectPaths& paths, const std::filesyst
   if (!IsSafeLabel(p.name)) throw std::runtime_error("invalid profile name");
   if (auto error = CheckLaunchable(paths, p.exe)) throw std::runtime_error(*error);
   auto digest = DigestFile(p.xex);
-  if (!digest || digest->sha256 != p.sha256) throw std::runtime_error("XEX hash mismatch: " + p.xex.string());
+  if (!digest || digest->sha256 != p.sha256) throw std::runtime_error("XEX hash mismatch: " + PathUtf8(p.xex));
   if (!IsWithin(p.xex, p.game_root)) throw std::runtime_error("XEX outside profile game root");
   if (auto array = table["x360n"]["args"].as_array())
     for (const auto& value : *array) {

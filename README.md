@@ -54,16 +54,39 @@ permanente.** A 17559 é a primeira referência funcional. Trocar de versão exi
 seu próprio perfil e suas dependências: não basta trocar o executável e reutilizar
 silenciosamente XAM, intro ou fontes da 17559.
 
+## Aplicativo de preparação para Windows
+
+Já é gerado um candidato local `x360-native-0.1.0-preview.*-windows-x64.zip`, em
+`.local/packages/`. Extraia e abra **x360-native.exe**. Escolha uma pasta separada
+para o ambiente, importe seus conjuntos extraídos e clique em **Preparar**.
+O jogo continua sendo iniciado pela **My Games original**.
+
+O pacote inclui o aplicativo, o supervisor, dependências redistribuíveis e fontes
+do projeto; não inclui jogos, dashboard, fontes Xbox ou código AOT desses títulos.
+Git, CMake, Ninja, LLVM e SDK são preparados localmente, com versões verificadas
+e consentimento para downloads. Se faltar C++/Windows SDK, o assistente oferece
+o instalador oficial da Microsoft, que pode pedir autorização de administrador.
+O uso normal e as ferramentas portáteis não exigem essa autorização.
+
+Formatos guiados atuais: pasta extraída da Retail **17559** e pasta completa do
+**Castle Crashers 0.0.1.3**. O assistente identifica o conjunto, verifica os hashes
+e recusa componentes de outras versões. A pasta de saves pode ser escolhida
+separadamente; trocar a seleção não apaga nem move os dados anteriores.
+
+**Ainda é candidato de teste, sem release publicada ou aceite em máquina limpa.**
+Perfis, save/load e atualização/rollback continuam pendentes. Não anuncie outras
+plataformas como suportadas. [Evidências e limites](docs/desktop-preparation.md).
+
 ## Preparar o ambiente de desenvolvimento
 
 Há uma **prévia gráfica de preparação para Windows**, que abre mesmo sem conteúdo,
 mostra os conjuntos cadastrados, verifica os componentes e inicia a sessão original.
 Depois do build abaixo, abra
 `.local/build/win-amd64/src/desktop/Debug/x360-native.exe`.
-Ela ainda depende do projeto e da toolchain local; a instalação autônoma e o pacote
-para usuários leigos seguem pendentes. [Funcionamento e limites](docs/desktop-preparation.md).
+Esta é a execução pela árvore de desenvolvimento; o candidato acima leva sua
+própria cópia das fontes. O aceite completo para usuários leigos segue pendente.
 
-- Windows 10/11 x64. A execução de referência foi feita no Windows 11.
+- Windows 10 (1903 ou posterior)/11 x64. A execução de referência foi feita no Windows 11.
 - Visual Studio 2022 Build Tools com C++, MSVC x64 e Windows SDK. Ambiente
   verificado: MSVC 14.44.35207, SDK 10.0.26100, CMake 3.31 e Ninja 1.12.
 - Git e acesso à rede para preparar as dependências.

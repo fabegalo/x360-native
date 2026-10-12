@@ -1,5 +1,5 @@
 # The preparation model is independent of the Windows frontend and title runtime.
-add_library(x360n_desktop_model STATIC catalog.cpp workspace.cpp)
+add_library(x360n_desktop_model STATIC catalog.cpp workspace.cpp library.cpp)
 target_link_libraries(x360n_desktop_model PUBLIC x360n_core PRIVATE tomlplusplus)
 target_include_directories(x360n_desktop_model PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 if(WIN32)
