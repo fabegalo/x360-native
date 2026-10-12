@@ -1,0 +1,44 @@
+diff --git a/include/rex/system/user_module.h b/include/rex/system/user_module.h
+index 49c7696..eb835b1 100644
+--- a/include/rex/system/user_module.h
++++ b/include/rex/system/user_module.h
+@@ -36,6 +36,8 @@ class UserModule : public XModule {
+ 
+   const std::string& path() const override { return path_; }
+   const std::string& name() const override { return name_; }
++  const std::string& recompiled_module_key() const { return recompiled_module_key_; }
++  void set_recompiled_module_key(std::string key) { recompiled_module_key_ = std::move(key); }
+ 
+   enum ModuleFormat {
+     kModuleFormatUndefined = 0,
+@@ -96,6 +98,7 @@ class UserModule : public XModule {
+ 
+   std::string name_;
+   std::string path_;
++  std::string recompiled_module_key_;
+ 
+   uint32_t guest_xex_header_ = 0;
+   ModuleFormat module_format_ = kModuleFormatUndefined;
+diff --git a/src/system/kernel_state.cpp b/src/system/kernel_state.cpp
+index e6cb3b3..e1836d6 100644
+--- a/src/system/kernel_state.cpp
++++ b/src/system/kernel_state.cpp
+@@ -799,6 +799,7 @@ object_ref<UserModule> KernelState::LoadUserModule(const std::string_view raw_na
+           auto lib_it = module_libraries_.find(lib_key);
+           assert_true(lib_it != module_libraries_.end());
+           lib_it->second = std::move(library_local);
++          module->set_recompiled_module_key(lib_key);
+           wired_recomp = true;
+         }
+       }
+@@ -857,7 +858,9 @@ void KernelState::UnloadUserModule(const object_ref<UserModule>& module, bool ca
+   {
+     auto global_lock = global_critical_region_.Acquire();
+ 
+-    auto recomp = FindRecompiledModule(module->path());
++    // LoadFromFile resolves the path to a VFS device path. Preserve the exact
++    // registration selected at load time rather than looking it up by that alias.
++    auto recomp = FindRecompiledModule(module->recompiled_module_key());
+     if (recomp) {
+       const std::string& key = recomp->guest_path;
+       auto cleared_range = function_dispatcher_->UnregisterModule(key);

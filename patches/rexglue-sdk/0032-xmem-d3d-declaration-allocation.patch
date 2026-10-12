@@ -1,0 +1,52 @@
+diff --git a/src/kernel/xam/xam_misc.cpp b/src/kernel/xam/xam_misc.cpp
+index ead11c1..994aa21 100644
+--- a/src/kernel/xam/xam_misc.cpp
++++ b/src/kernel/xam/xam_misc.cpp
+@@ -226,10 +226,10 @@ REX_EXPORT_STUB(__imp__XGetOverlappedExtendedError);
+ REX_EXPORT_STUB(__imp__XGetOverlappedResult);
+ REX_EXPORT_STUB(__imp__XGetSSLCertBypassEnabled);
+ REX_EXPORT_STUB(__imp__XMPRegisterCodec);
+-REX_EXPORT_STUB(__imp__XMemAlloc);
++
+ REX_EXPORT_STUB(__imp__XMemCpy);
+ REX_EXPORT_STUB(__imp__XMemCpyStreaming);
+-REX_EXPORT_STUB(__imp__XMemFree);
++
+ REX_EXPORT_STUB(__imp__XMemSet);
+ REX_EXPORT_STUB(__imp__XMemSize);
+ REX_EXPORT_STUB(__imp__XNetLogonClearTicketCaches);
+diff --git a/src/kernel/xam/xam_info.cpp b/src/kernel/xam/xam_info.cpp
+index 32e233e..6470e44 100644
+--- a/src/kernel/xam/xam_info.cpp
++++ b/src/kernel/xam/xam_info.cpp
+@@ -310,6 +310,23 @@ u32 XamAlloc_entry(u32 unk, u32 size, mapped_u32 out_ptr) {
+   return X_ERROR_SUCCESS;
+ }
+ 
++// XAM 17559 816E69E0 selects physical allocation with bit 31; otherwise it
++// decodes the owner/tag into an Rtl heap, with bit 30 requesting zeroed storage.
++// Reuse the existing guest heap for virtual allocations. Separate XAM pool
++// budgets/accounting are not modeled. Physical classes remain unsupported here.
++u32 XMemAlloc_entry(u32 size, u32 attributes) {
++  if (attributes & 0x80000000u) {
++    REXKRNL_WARN("XMemAlloc: unsupported attributes {:08X}", uint32_t(attributes));
++    return 0;
++  }
++  return REX_KERNEL_MEMORY()->SystemHeapAlloc(size, 0x20);
++}
++void XMemFree_entry(u32 pointer, u32 attributes) {
++  // The original free path identifies the allocation from the pointer and
++  // ignores the attributes argument (816E6AB0).
++  if (pointer) REX_KERNEL_MEMORY()->SystemHeapFree(pointer);
++}
++
+ u32 XamAllocEx_entry(u32 tag, u32 flags, u32 size, mapped_u32 out_ptr) {
+   if (!out_ptr) return 0x80070057u;
+   *out_ptr = 0;
+@@ -392,3 +409,6 @@ REX_EXPORT(__imp__XamLoaderGetDvdTrayState, rex::kernel::xam::XamLoaderGetDvdTra
+ REX_EXPORT(__imp__XamSwapDisc, rex::kernel::xam::XamSwapDisc_entry)
+ 
+ REX_EXPORT(__imp__XamAllocEx, rex::kernel::xam::XamAllocEx_entry)
++
++REX_EXPORT(__imp__XMemAlloc, rex::kernel::xam::XMemAlloc_entry)
++REX_EXPORT(__imp__XMemFree, rex::kernel::xam::XMemFree_entry)

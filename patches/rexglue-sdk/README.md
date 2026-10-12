@@ -250,3 +250,27 @@ Removes fabricated signin/UI-closed notifications and maps failed dispatch to
 the original wrapper's error result. Tests: 10 failures before, 11 assertions
 pass after; 36 SDK checks pass. This does NOT implement the original system-UI
 host, account changes or persistence. Live FE/21008 still fails; dashboard §0.22.
+
+## Original system UI prerequisites (0027–0034)
+
+0027 registers system applications with module ownership and routes the FE UI
+request to a title-provided host. 0028 implements the extended allocation ABI;
+0029 preserves the module registration identity across VFS aliases on unload.
+0030 adds registers/caller information to invalid indirect-call diagnostics.
+0031 allows an explicitly opted-in module to keep its AOT dispatch table on the
+host: the 17559 XAM table otherwise aliases and corrupts the dashboard image.
+0032 implements owned, zeroed virtual XMem storage; physical classes remain
+unsupported there and the 17559 binding preserves their original decoder.
+
+0033 loads structurally bounded, unencrypted resource-only DLL XEX images
+without requiring a PE header. Executable/code pages, imports, entry points,
+TLS and malformed resource ranges do not qualify. Actual 17559 huduiskin.xex
+decompresses to XUIZ data; the original skin loader returned success. Synthetic
+valid and malformed images test the boundary; hashes do not prove authenticity.
+0034 accepts the observed XamAllocEx system virtual pool flag 0x01000000, paired
+with XamFree. Its 4096-byte allocation failed before the patch and succeeds
+after; pool quotas are not modeled and other classes still fail explicitly.
+
+42 runtime checks / 1183 assertions passed with 0034 (local log
+profile-ui-sdk-0034-full.log); related group: 8 / 124. These prerequisites do
+not establish visible profile UI, signin/signout or persistence.

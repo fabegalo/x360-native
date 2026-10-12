@@ -34,7 +34,7 @@
         "file": "patches/rexglue-sdk/0003-import-records-across-libraries.patch",
         "sha256": "39ca70edb6444fa3a42495c8a9d7bd241b9972849e4ac2b35974ed4a6002d5bd",
         "files": {
-          "src/system/xex_module.cpp": "de376f50d35cb3e9559de41c95008b9bec53c1e9dedf8f983f6928f23effb561",
+          "src/system/xex_module.cpp": "5b2f2461371da8a46d4ae619212d58fb1cb40ac378a34234b90c6e22cadee6c0",
           "src/codegen/phase_register.cpp": "5cfccd37d29d8cc4eacad6f0b76b69f56526b90f19dfb216b2fe9dd383193935",
           "include/rex/codegen/analysis_errors.h": "088eb6768d0839b1fc3cc13c4d766f4f1130a4bf82556b7984d3b095b33e11eb",
           "src/codegen/analyze.cpp": "aea3234592d2b8076af8591d5244f4b934504049f27e53f1d68d2cae614f042a"
@@ -75,7 +75,7 @@
         "files": {
           "src/kernel/xam/xam_locale.cpp": "fdd16610f747be363a874231e341ab2df977360a52fe8175f55b8beea01a7fd0",
           "src/kernel/xam/xam_module.cpp": "af86f18bda7d014e11e9bf5511f0573c28304159673aa839aca5e1c549276e0f",
-          "include/rex/kernel/xam/module.h": "2959fd3bb6f7d579ee6107bd2c9448692159c77ef7bcd5d49b092826659bbdc6"
+          "include/rex/kernel/xam/module.h": "a4a9d1e22bd8c6f3c5f3685176168f8b583ada897d924aa1572ef5fe5167b2fa"
         },
         "base_files": {
           "src/kernel/xam/xam_locale.cpp": "5564ee2ca68a6e2b33a3b1c251030a28291cc6482362bea5e3f0ea82318ebfc4",
@@ -112,7 +112,7 @@
         "file": "patches/rexglue-sdk/0009-dashboard-datetime-abi.patch",
         "sha256": "a5a71909fbbada4061bf228c09557f276f762dfc203efe71c41d61e1ad637a81",
         "files": {
-          "src/kernel/xam/xam_info.cpp": "277fb5719969fdb5b2aa45d99b7fd21a4b29030ccc2361d0f9c345581e2d6107"
+          "src/kernel/xam/xam_info.cpp": "351255b8adbdd2c877077f0f01ae7607db5499e203aa217ed2090cfaee05a4a2"
         },
         "base_files": {
           "src/kernel/xam/xam_info.cpp": "c847210dcec0d2a3ad07e459bd59a7b4acc38d8706187e597f398153a3d31981"
@@ -123,7 +123,7 @@
         "file": "patches/rexglue-sdk/0010-common-string-unavailable.patch",
         "sha256": "3862fa9674a74241d9b6dfccde6a1f706e5a2c7e614082350f2593af58616dea",
         "files": {
-          "src/kernel/xam/xam_misc.cpp": "eec916898c3b9ef277d035c6fa7978504c5e96525367dda2a2cd834233290a8c"
+          "src/kernel/xam/xam_misc.cpp": "f58bfad48b00e00d9f19a55bfad45481035bb4a08343db73b07cdf45aa2543bb"
         },
         "base_files": {
           "src/kernel/xam/xam_misc.cpp": "6f0a07784bf46a5e9dd9f3c387ef52a936c527c949057aae1fb97388e21ce68d"
@@ -145,7 +145,7 @@
         "file": "patches/rexglue-sdk/0012-initial-storage-notification.patch",
         "sha256": "fda1373d6b1218a99dee74097c18d7af3d7f5cad872036514c8b0e37c07f13bc",
         "files": {
-          "src/system/kernel_state.cpp": "d894805474d86430c75914a2281c73eb1126143288fb8a8c133267d1a0d1b3b3"
+          "src/system/kernel_state.cpp": "f57d06b3ec047f0c2e458b70d8b28bb7f42546b98d524c59fde83a8d03dd8d9b"
         },
         "base_files": {
           "src/system/kernel_state.cpp": "9d4b787fe295c79ab12659c1ce42bb6310aa61cb8e5d83b10a32a36da9cde30a"
@@ -230,8 +230,8 @@
         "file": "patches/rexglue-sdk/0019-explicit-title-return.patch",
         "sha256": "eefb975605b2cbcf0337ddb716f0c53c2e327cf93a754394522ef2594600dc87",
         "files": {
-          "include/rex/kernel/xam/module.h": "2959fd3bb6f7d579ee6107bd2c9448692159c77ef7bcd5d49b092826659bbdc6",
-          "src/kernel/xam/xam_info.cpp": "277fb5719969fdb5b2aa45d99b7fd21a4b29030ccc2361d0f9c345581e2d6107"
+          "include/rex/kernel/xam/module.h": "a4a9d1e22bd8c6f3c5f3685176168f8b583ada897d924aa1572ef5fe5167b2fa",
+          "src/kernel/xam/xam_info.cpp": "351255b8adbdd2c877077f0f01ae7607db5499e203aa217ed2090cfaee05a4a2"
         },
         "base_files": {
           "include/rex/kernel/xam/module.h": "37218241915e9a13a467b7e8de867dc6ae50300f486b4bbff31c24009ba3a208",
@@ -255,7 +255,7 @@
         "sha256": "ef02b66496d18392200e241d9a2ed41cf901a5e359f9e85dc1272a2e0fe9f32d",
         "files": {
           "include/rex/system/kernel_state.h": "e47b22bc4b13dd8d114726e552b4c0f7534fdafdda2742b42289b91c825fb4fa",
-          "src/system/kernel_state.cpp": "d894805474d86430c75914a2281c73eb1126143288fb8a8c133267d1a0d1b3b3",
+          "src/system/kernel_state.cpp": "f57d06b3ec047f0c2e458b70d8b28bb7f42546b98d524c59fde83a8d03dd8d9b",
           "src/kernel/xboxkrnl/xboxkrnl_modules.cpp": "e70d0f87f723d29d0efa20307c8615448e80b767af6b654e22b2957cfe690dae"
         },
         "base_files": {
@@ -269,9 +269,9 @@
         "file": "patches/rexglue-sdk/0022-launch-request-callback.patch",
         "sha256": "ee7b05f1cca4cb5b54534aa5664e6e7256fb370a420d32bb302a4614b7acbdbb",
         "files": {
-          "include/rex/kernel/xam/module.h": "2959fd3bb6f7d579ee6107bd2c9448692159c77ef7bcd5d49b092826659bbdc6",
+          "include/rex/kernel/xam/module.h": "a4a9d1e22bd8c6f3c5f3685176168f8b583ada897d924aa1572ef5fe5167b2fa",
           "src/kernel/xam/xam_content.cpp": "a5a0e7b59c480bde04cf9d075f588d8cc49f9652ff6e196454c72ab1c784e300",
-          "src/kernel/xam/xam_misc.cpp": "eec916898c3b9ef277d035c6fa7978504c5e96525367dda2a2cd834233290a8c"
+          "src/kernel/xam/xam_misc.cpp": "f58bfad48b00e00d9f19a55bfad45481035bb4a08343db73b07cdf45aa2543bb"
         },
         "base_files": {
           "include/rex/kernel/xam/module.h": "a9cc652f87264f2b5137d81a1c600127e97224183e2200b15460946201f29f9b",
@@ -298,7 +298,7 @@
         "files": {
           "include/rex/system/kernel_state.h": "e47b22bc4b13dd8d114726e552b4c0f7534fdafdda2742b42289b91c825fb4fa",
           "src/kernel/xboxkrnl/xboxkrnl_video.cpp": "969ba88d7b17cd9fe500cebdd5a53602ebae0df3d7b01b3477a3b65e66c56729",
-          "include/rex/kernel/xam/module.h": "2959fd3bb6f7d579ee6107bd2c9448692159c77ef7bcd5d49b092826659bbdc6",
+          "include/rex/kernel/xam/module.h": "a4a9d1e22bd8c6f3c5f3685176168f8b583ada897d924aa1572ef5fe5167b2fa",
           "src/kernel/xam/xam_content.cpp": "a5a0e7b59c480bde04cf9d075f588d8cc49f9652ff6e196454c72ab1c784e300",
           "include/rex/system/interfaces/graphics.h": "491dffd35d938f9fde908ff693a383364d7255133722affe17b0a53cf813f9c3",
           "include/rex/graphics/graphics_system.h": "259d7acc4e6d6dc01eb546cf101389bf4cf352b54c78c392cb4a2a595531c53f",
@@ -348,6 +348,112 @@
           "src/kernel/xam/xam_ui.cpp": "6e67a61665369e90a20c5b51c42d3148b9ffedc9af51d3a1d61961d65ea6b432"
         },
         "test": "tests/sdkcheck/profile_ui_request_test.cpp"
+      },
+      {
+        "file": "patches/rexglue-sdk/0027-system-ui-module-registration.patch",
+        "sha256": "852930e66395cd54ee9d5d7c1d90195a9ccee303dc17e4a1c2d6a5cb0338d7f8",
+        "base_files": {
+          "include/rex/kernel/xam/module.h": "2959fd3bb6f7d579ee6107bd2c9448692159c77ef7bcd5d49b092826659bbdc6",
+          "src/kernel/xam/apps/xam_app.cpp": "1ed2fe59cc9cde5f4cb6c1fb95eac360e511f11c7411ea9552df556a7ab77648",
+          "src/kernel/xam/xam_misc.cpp": "eec916898c3b9ef277d035c6fa7978504c5e96525367dda2a2cd834233290a8c"
+        },
+        "files": {
+          "include/rex/kernel/xam/module.h": "a4a9d1e22bd8c6f3c5f3685176168f8b583ada897d924aa1572ef5fe5167b2fa",
+          "src/kernel/xam/apps/xam_app.cpp": "fdd173b7fd448dae593c5a1fa7c2cb6fffa0c539bacaf534e3628051bb15ec07",
+          "src/kernel/xam/xam_misc.cpp": "f58bfad48b00e00d9f19a55bfad45481035bb4a08343db73b07cdf45aa2543bb"
+        },
+        "test": "tests/sdkcheck/profile_ui_request_test.cpp"
+      },
+      {
+        "file": "patches/rexglue-sdk/0028-system-ui-extended-allocation.patch",
+        "sha256": "5830621161bdf733c6317c82e58198bbe3a71e8d5112d0d58639432f8e22881b",
+        "base_files": {
+          "src/kernel/xam/xam_info.cpp": "277fb5719969fdb5b2aa45d99b7fd21a4b29030ccc2361d0f9c345581e2d6107",
+          "src/kernel/xam/xam_misc.cpp": "5db9a56430f343d1379088f58e3585c4d938ff616b795d9b710cfcef40d5d0fa"
+        },
+        "files": {
+          "src/kernel/xam/xam_info.cpp": "351255b8adbdd2c877077f0f01ae7607db5499e203aa217ed2090cfaee05a4a2",
+          "src/kernel/xam/xam_misc.cpp": "f58bfad48b00e00d9f19a55bfad45481035bb4a08343db73b07cdf45aa2543bb"
+        },
+        "test": "tests/sdkcheck/profile_ui_request_test.cpp"
+      },
+      {
+        "file": "patches/rexglue-sdk/0029-retain-loaded-module-identity.patch",
+        "sha256": "e33d552957ae21ed44a9451b212088b894b48e14ed287a543ad6abfbad31c81a",
+        "base_files": {
+          "include/rex/system/user_module.h": "5cd8b09a4f08ae946d22758f5436467bace47ea2eecf7dee69d4c28fe0b33cda",
+          "src/system/kernel_state.cpp": "d894805474d86430c75914a2281c73eb1126143288fb8a8c133267d1a0d1b3b3"
+        },
+        "files": {
+          "include/rex/system/user_module.h": "49913f4feb1a39da314d79f644a9971e99612b99d4aff9ae3fcfbb019baaafc1",
+          "src/system/kernel_state.cpp": "f57d06b3ec047f0c2e458b70d8b28bb7f42546b98d524c59fde83a8d03dd8d9b"
+        },
+        "test": "live 17559 repeated profile open/unload"
+      },
+      {
+        "file": "patches/rexglue-sdk/0030-indirect-call-diagnostics.patch",
+        "sha256": "9c09dd1ee32a0effc08324062c4bef962bf4b028a4d21b8380c2f79d271f47fe",
+        "base_files": {
+          "src/system/function_dispatcher.cpp": "628485431855ec605420c134bace64e7361a03267a437512d8f14d689d65989b"
+        },
+        "files": {
+          "src/system/function_dispatcher.cpp": "4d1908666ae36a68b009eef802573934362730a78f472cfe0628c93ebb92c36d"
+        },
+        "test": "live profile UI crash stack; diagnostic only"
+      },
+      {
+        "file": "patches/rexglue-sdk/0031-host-only-module-dispatch.patch",
+        "sha256": "d514118b8b70e6df4ed29285f1de71037742ce126374091e4f9aeed5ef137a49",
+        "base_files": {
+          "include/rex/system/function_dispatcher.h": "875d661f855c2164f3d8a4d6bb3906c054b58fdb63f2a564160d95a44e487ad9",
+          "src/system/function_dispatcher.cpp": "747bd86581d1549a3a5347367849ad41d0d460b527d87c61b4661285f4fc5733",
+          "src/system/kernel_state.cpp": "edf4aee073b56f03ed3de691eb9fe1b3437523b4db7da69474860700f07c753c",
+          "resources/templates/codegen/_indirect_call.inja": "352a80771ca0d209235493d6c9144057ccf60d1f94dfb9e37a7f38a0b1f89bcf",
+          "resources/templates/codegen/register_cpp.inja": "a71d3e9b956954e540a87a02b55d1d38f1e33ae4ec7198ef18f8463e95ac9f2d"
+        },
+        "files": {
+          "include/rex/system/function_dispatcher.h": "9e504486d44bee777241055800a35330eada66e0b02f5edebe1909379ace9b88",
+          "src/system/function_dispatcher.cpp": "4d1908666ae36a68b009eef802573934362730a78f472cfe0628c93ebb92c36d",
+          "src/system/kernel_state.cpp": "f57d06b3ec047f0c2e458b70d8b28bb7f42546b98d524c59fde83a8d03dd8d9b",
+          "resources/templates/codegen/_indirect_call.inja": "de4c1576a91dd4b63913ab848fa1626da65a65cdccd71442765da271e67b7519",
+          "resources/templates/codegen/register_cpp.inja": "671dc785a40dc482a10160bdc311c2fe613ca6cee0b1f85c54c735a807865645"
+        },
+        "test": "sdkcheck.host-only dispatch preserves aliased guest images"
+      },
+      {
+        "file": "patches/rexglue-sdk/0032-xmem-d3d-declaration-allocation.patch",
+        "sha256": "2c6e46a906a51021f59a7bf77a91b99dcf24a3c527b60b9a685351c6cc96f5ae",
+        "base_files": {
+          "src/kernel/xam/xam_misc.cpp": "bc2d60fd2bdf5b7ae95c1925a9d03a103165dd5551ad0e1e26c81b320534a02c",
+          "src/kernel/xam/xam_info.cpp": "35ad6f47fe3ab4be8719b610de857b2b243a70de4d74c860f38823b050a3d4cb"
+        },
+        "files": {
+          "src/kernel/xam/xam_misc.cpp": "f58bfad48b00e00d9f19a55bfad45481035bb4a08343db73b07cdf45aa2543bb",
+          "src/kernel/xam/xam_info.cpp": "351255b8adbdd2c877077f0f01ae7607db5499e203aa217ed2090cfaee05a4a2"
+        },
+        "test": "sdkcheck XMem virtual allocations return aligned writable memory, honor zero initialization, and release storage; physical classes fail explicitly"
+      },
+      {
+        "file": "patches/rexglue-sdk/0033-resource-only-xex-modules.patch",
+        "sha256": "d2f1959b42a85adf3d5a43300c8d117e15d0617275032470dbece0b97812fae7",
+        "base_files": {
+          "src/system/xex_module.cpp": "de376f50d35cb3e9559de41c95008b9bec53c1e9dedf8f983f6928f23effb561"
+        },
+        "files": {
+          "src/system/xex_module.cpp": "5b2f2461371da8a46d4ae619212d58fb1cb40ac378a34234b90c6e22cadee6c0"
+        },
+        "test": "sdkcheck Resource-only XEX modules load bounded data without pretending to be PE code: valid resource failed before patch; malformed ranges, code pages and titles stay rejected."
+      },
+      {
+        "file": "patches/rexglue-sdk/0034-xam-system-pool-allocation.patch",
+        "sha256": "e290f910c09e6be21457cf43e73e852bd697ec30d9609a655ba591cc652f9357",
+        "base_files": {
+          "src/kernel/xam/xam_info.cpp": "ec043775700e6f2f910baa90a5bdd10200e5121ac0d7e85ffc37c748f8156b19"
+        },
+        "files": {
+          "src/kernel/xam/xam_info.cpp": "351255b8adbdd2c877077f0f01ae7607db5499e203aa217ed2090cfaee05a4a2"
+        },
+        "test": "sdkcheck.HUD allocation uses the system pool and remains owned until XamFree"
       }
     ]
   },

@@ -10,6 +10,7 @@
 // across the records of one library and makes a function import without any thunk a
 // codegen validation error instead of a function at address 0.
 #include <catch2/catch_test_macros.hpp>
+#include <cstring>
 
 #include <cstdint>
 #include <filesystem>
@@ -256,4 +257,42 @@ TEST_CASE("a function import with a value slot and no thunk is a codegen error, 
   auto written = pipeline->RunWrite(false);
   CHECK_FALSE(written.has_value());
   CHECK_FALSE(fs::exists(w.dir / "out" / "imports_init.cpp"));
+}
+
+TEST_CASE("Resource-only XEX modules load bounded data without pretending to be PE code",
+          "[sdk][xex-resources]") {
+  std::vector<Placed> placed;
+  auto bytes = BuildXex({}, &placed);
+  auto be32 = [&](size_t at, uint32_t v) { for (unsigned n=0;n<4;++n) bytes.at(at+n)=uint8_t(v>>(24-8*n)); };
+  be32(4, 8); // DLL, no title/patch flags.
+  be32(0x14, 2);
+  be32(0x18, 0x2FF); be32(0x1C, 0x100); // Resources replace entry point.
+  be32(0x100, 20);
+  std::fill(bytes.begin()+0x104,bytes.begin()+0x10C,0);
+  std::memcpy(bytes.data()+0x104,"skin",4);
+  be32(0x10C, kXexBase); be32(0x110, 16);
+  be32(0x800+0x184+0x18, (1u<<4)|3); // Only data pages.
+  std::fill(bytes.begin()+0x1000, bytes.end(), 0);
+  std::memcpy(bytes.data()+0x1000,"TEST_RESOURCE",13);
+  bool valid = true;
+  SECTION("data resource preserves bytes and exposes no entry point") {}
+  SECTION("out of image resource is rejected") { be32(0x10C,kXexBase+kXexImageSize-4); valid=false; }
+  SECTION("executable pages still require a PE") { be32(0x800+0x184+0x18,(1u<<4)|1); valid=false; }
+  SECTION("title with missing PE is rejected") { be32(4,1); valid=false; }
+  SECTION("malformed resource table is rejected") { be32(0x100,21); valid=false; }
+  Workdir w("x360n_resource_xex_test","load");
+  w.write("resource.xex",bytes);
+  rex::Runtime rt(w.dir);
+  rex::RuntimeConfig cfg{};cfg.tool_mode=true;cfg.kernel_init=rex::kernel::InitializeKernel;
+  REQUIRE(rt.Setup(std::move(cfg))==X_STATUS_SUCCESS);
+  auto module=rt.kernel_state()->LoadUserModule("game:\\resource.xex",false);
+  if (!valid) { REQUIRE_FALSE(module); return; }
+  REQUIRE(module);
+  CHECK(module->entry_point()==0);
+  CHECK(module->xex_module()->binary_symbols().empty());
+  uint32_t ptr=0,size=0;
+  REQUIRE(module->GetSection("skin",&ptr,&size)==X_STATUS_SUCCESS);
+  CHECK(ptr==kXexBase);CHECK(size==16);
+  CHECK(std::memcmp(rt.memory()->TranslateVirtual(ptr),"TEST_RESOURCE",13)==0);
+  rt.kernel_state()->UnloadUserModule(module,false);
 }

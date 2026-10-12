@@ -1,0 +1,185 @@
+diff --git a/include/rex/system/function_dispatcher.h b/include/rex/system/function_dispatcher.h
+index 916f3d6..56084a3 100644
+--- a/include/rex/system/function_dispatcher.h
++++ b/include/rex/system/function_dispatcher.h
+@@ -82,6 +82,9 @@ class FunctionDispatcher : public IModuleRegistrar {
+   // AllocateThunk(caller_address=0) can route to its pool.
+   bool InitializeFunctionTable(uint32_t code_base, uint32_t code_size, uint32_t image_base,
+                                uint32_t image_size, bool is_entrypoint = false);
++  // The module capability must match its generated indirect-call code.
++  bool InitializeFunctionTable(uint32_t code_base, uint32_t code_size, uint32_t image_base,
++                               uint32_t image_size, bool is_entrypoint, bool host_function_table);
+   bool SetFunction(uint32_t guest_address, ::PPCFunc* func) override;
+   ::PPCFunc* GetFunction(uint32_t guest_address);
+   bool HasAnyFunctionTable() const { return !module_tables_.empty(); }
+@@ -122,6 +125,7 @@ class FunctionDispatcher : public IModuleRegistrar {
+     uint32_t image_size;
+     uint32_t next_thunk_address;
+     uint32_t thunk_limit;
++    bool host_function_table;
+   };
+ 
+   ModuleTableInfo* FindModuleByAddress(uint32_t guest_address);
+diff --git a/src/system/function_dispatcher.cpp b/src/system/function_dispatcher.cpp
+index 8d5081a..e64b29a 100644
+--- a/src/system/function_dispatcher.cpp
++++ b/src/system/function_dispatcher.cpp
+@@ -180,9 +180,16 @@ uint64_t FunctionDispatcher::ExecuteInterrupt(ThreadState* thread_state, uint32_
+ 
+ // rexglue function table management
+ 
++// Retain the exported five-argument ABI used by existing recompiled titles.
+ bool FunctionDispatcher::InitializeFunctionTable(uint32_t code_base, uint32_t code_size,
+                                                  uint32_t image_base, uint32_t image_size,
+                                                  bool is_entrypoint) {
++  return InitializeFunctionTable(code_base, code_size, image_base, image_size, is_entrypoint, false);
++}
++
++bool FunctionDispatcher::InitializeFunctionTable(uint32_t code_base, uint32_t code_size,
++                                                 uint32_t image_base, uint32_t image_size,
++                                                 bool is_entrypoint, bool host_function_table) {
+   std::lock_guard<std::recursive_mutex> lock(dispatch_mutex_);
+ 
+   if (is_entrypoint && entrypoint_code_base_ != 0) {
+@@ -191,11 +198,14 @@ bool FunctionDispatcher::InitializeFunctionTable(uint32_t code_base, uint32_t co
+     return false;
+   }
+ 
+-  uint32_t new_table_end = image_base + image_size + (code_size + kThunkReserveSize) * 2;
++  if (!code_size || uint64_t(code_base) + code_size + kThunkReserveSize > UINT32_MAX ||
++      uint64_t(image_base) + image_size > UINT32_MAX) return false;
++  uint64_t new_table_end = uint64_t(image_base) + image_size +
++      (host_function_table ? 0 : (uint64_t(code_size) + kThunkReserveSize) * 2);
+   uint32_t new_code_end = code_base + code_size + kThunkReserveSize;
+   for (const auto& existing : module_tables_) {
+-    uint32_t existing_table_end =
+-        existing.image_base + existing.image_size + (existing.code_size + kThunkReserveSize) * 2;
++    uint64_t existing_table_end = uint64_t(existing.image_base) + existing.image_size +
++        (existing.host_function_table ? 0 : (uint64_t(existing.code_size) + kThunkReserveSize) * 2);
+     uint32_t existing_code_end = existing.code_base + existing.code_size + kThunkReserveSize;
+     if (image_base < existing_table_end && new_table_end > existing.image_base) {
+       REXLOG_ERROR("Module image range [{:08X}, {:08X}) overlaps existing [{:08X}, {:08X})",
+@@ -209,7 +219,7 @@ bool FunctionDispatcher::InitializeFunctionTable(uint32_t code_base, uint32_t co
+     }
+   }
+ 
+-  if (!memory_->InitializeFunctionTable(code_base, code_size, image_base, image_size)) {
++  if (!host_function_table && !memory_->InitializeFunctionTable(code_base, code_size, image_base, image_size)) {
+     REXLOG_ERROR("Failed to initialize guest memory function table");
+     return false;
+   }
+@@ -221,6 +231,7 @@ bool FunctionDispatcher::InitializeFunctionTable(uint32_t code_base, uint32_t co
+       .image_size = image_size,
+       .next_thunk_address = code_base + code_size,
+       .thunk_limit = code_base + code_size + kThunkReserveSize,
++      .host_function_table = host_function_table,
+   });
+ 
+   if (is_entrypoint) {
+@@ -254,14 +265,15 @@ bool FunctionDispatcher::SetFunction(uint32_t guest_address, ::PPCFunc* func) {
+   std::lock_guard<std::recursive_mutex> lock(dispatch_mutex_);
+   assert_true(!module_tables_.empty());
+ 
+-  if (!FindModuleByAddress(guest_address)) {
++  auto* table = FindModuleByAddress(guest_address);
++  if (!table) {
+     REXLOG_ERROR("SetFunction: address {:08X} outside all registered module ranges", guest_address);
+     return false;
+   }
+ 
+   function_table_[guest_address] = func;
+ 
+-  if (!memory_->SetFunction(guest_address, func)) {
++  if (!table->host_function_table && !memory_->SetFunction(guest_address, func)) {
+     REXLOG_ERROR("SetFunction: dispatcher / Memory module-table state out of sync at {:08X}",
+                  guest_address);
+     function_table_.erase(guest_address);
+@@ -373,7 +385,8 @@ std::optional<std::pair<uint32_t, uint32_t>> FunctionDispatcher::UnregisterModul
+ 
+   for (uint32_t addr : it->second.addresses) {
+     function_table_.erase(addr);
+-    memory_->SetFunction(addr, nullptr);
++    if (table_it != module_tables_.end() && !table_it->host_function_table)
++      memory_->SetFunction(addr, nullptr);
+   }
+ 
+   std::optional<std::pair<uint32_t, uint32_t>> cleared_range;
+@@ -382,14 +395,14 @@ std::optional<std::pair<uint32_t, uint32_t>> FunctionDispatcher::UnregisterModul
+     uint32_t pool_end = table_it->next_thunk_address;
+     for (uint32_t addr = pool_start; addr < pool_end; addr += 4) {
+       function_table_.erase(addr);
+-      memory_->SetFunction(addr, nullptr);
++      if (!table_it->host_function_table) memory_->SetFunction(addr, nullptr);
+     }
+     cleared_range = std::make_pair(pool_start, pool_end);
+ 
+     if (table_it->code_base == entrypoint_code_base_) {
+       entrypoint_code_base_ = 0;
+     }
+-    memory_->DestroyFunctionTable(table_it->code_base);
++    if (!table_it->host_function_table) memory_->DestroyFunctionTable(table_it->code_base);
+     module_tables_.erase(table_it);
+   }
+ 
+diff --git a/src/system/kernel_state.cpp b/src/system/kernel_state.cpp
+index e1836d6..0f2ee15 100644
+--- a/src/system/kernel_state.cpp
++++ b/src/system/kernel_state.cpp
+@@ -772,6 +772,10 @@ object_ref<UserModule> KernelState::LoadUserModule(const std::string_view raw_na
+       using GetImageInfoFn = const rex::PPCImageInfo* (*)();
+       auto get_image_info =
+           reinterpret_cast<GetImageInfoFn>(library_local.GetRawSymbol("ReXModule_GetImageInfo"));
++      // Optional capability export keeps existing PPCImageInfo binaries compatible.
++      using HostFunctionTableFn = bool (*)();
++      auto host_function_table = reinterpret_cast<HostFunctionTableFn>(
++          library_local.GetRawSymbol("ReXModule_UsesHostFunctionTable"));
+       if (!register_func) {
+         REXSYS_ERROR("ReXModule_Register not found in '{}'", recomp->shared_lib_name);
+       } else if (!get_image_info) {
+@@ -791,7 +795,8 @@ object_ref<UserModule> KernelState::LoadUserModule(const std::string_view raw_na
+               xex->base_address() + xex->image_size());
+         } else if (!function_dispatcher_->InitializeFunctionTable(
+                        image_info->code_base, image_info->code_size, image_info->image_base,
+-                       image_info->image_size)) {
++                       image_info->image_size, false,
++                       host_function_table && host_function_table())) {
+           REXSYS_ERROR("InitializeFunctionTable failed for module '{}'", recomp->pe_name);
+         } else {
+           function_dispatcher_->RegisterModule(lib_key, image_info->code_base, register_func);
+diff --git a/resources/templates/codegen/_indirect_call.inja b/resources/templates/codegen/_indirect_call.inja
+index d4b1830..81816b5 100644
+--- a/resources/templates/codegen/_indirect_call.inja
++++ b/resources/templates/codegen/_indirect_call.inja
+@@ -16,8 +16,13 @@
+ #define REX_PROFILE_INDIRECT_DISPATCH()
+ #endif
+ 
++#if defined(REX_HOST_FUNCTION_TABLE) && REX_HOST_FUNCTION_TABLE
++// The loader queries the matching module capability and omits the guest-resident table.
++#define REX_LOOKUP_FUNC(x, y) nullptr
++#else
+ #define REX_LOOKUP_FUNC(x, y) \
+   (*(PPCFunc**)(x + REX_IMAGE_BASE + REX_IMAGE_SIZE + (u64(u32(y) - REX_CODE_BASE) * 2)))
++#endif
+ 
+ #define REX_CALL_INDIRECT_FUNC(x)                                                          \
+   do {                                                                                     \
+diff --git a/resources/templates/codegen/register_cpp.inja b/resources/templates/codegen/register_cpp.inja
+index 0be31c4..76042bc 100644
+--- a/resources/templates/codegen/register_cpp.inja
++++ b/resources/templates/codegen/register_cpp.inja
+@@ -27,4 +27,14 @@ extern "C" REX_MODULE_EXPORT
+ const rex::PPCImageInfo* ReXModule_GetImageInfo() {
+   return &PPCImageConfig;
+ }
++
++// Optional capability queried by the loader; no PPCImageInfo ABI change.
++extern "C" REX_MODULE_EXPORT
++bool ReXModule_UsesHostFunctionTable() {
++#if defined(REX_HOST_FUNCTION_TABLE) && REX_HOST_FUNCTION_TABLE
++  return true;
++#else
++  return false;
++#endif
++}
+ {% endif %}

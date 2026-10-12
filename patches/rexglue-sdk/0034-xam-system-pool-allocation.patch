@@ -1,0 +1,19 @@
+diff --git a/src/kernel/xam/xam_info.cpp b/src/kernel/xam/xam_info.cpp
+index 6470e44..b60ad5e 100644
+--- a/src/kernel/xam/xam_info.cpp
++++ b/src/kernel/xam/xam_info.cpp
+@@ -331,9 +331,11 @@ u32 XamAllocEx_entry(u32 tag, u32 flags, u32 size, mapped_u32 out_ptr) {
+   if (!out_ptr) return 0x80070057u;
+   *out_ptr = 0;
+   // Original 17559 816E67E8: tag, allocation flags, byte size, output pointer.
+-  // The system UI CRT (9011C7A8) requests flags=0. Other allocation classes,
+-  // notably bit 0x40000000, use different original heaps and remain unsupported.
+-  if (flags != 0) {
++  // The CRT requests flags=0. HUD 816935E0 requests 0x01000000,
++  // selecting the system virtual pool (816E5F10 -> 816E5E40, pool 1).
++  // Both use owned guest virtual storage here; original pool quotas are not
++  // modeled. Physical/special classes such as 0x40000000 remain unsupported.
++  if (flags != 0 && flags != 0x01000000u) {
+     REXKRNL_WARN("XamAllocEx: unsupported flags {:08X}, tag {:08X}", uint32_t(flags), uint32_t(tag));
+     return 0x80004001u;
+   }

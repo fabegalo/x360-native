@@ -1,0 +1,124 @@
+diff --git a/include/rex/kernel/xam/module.h b/include/rex/kernel/xam/module.h
+index f49fc91..f795772 100644
+--- a/include/rex/kernel/xam/module.h
++++ b/include/rex/kernel/xam/module.h
+@@ -12,6 +12,9 @@
+ 
+ #include <atomic>
+ #include <string>
++#include <mutex>
++#include <optional>
++#include <unordered_map>
+ 
+ #include <rex/ppc/function.h>
+ #include <rex/system/export_resolver.h>
+@@ -34,6 +37,31 @@ class XamModule : public system::KernelModule {
+   // Optional, explicitly selected system-version implementation. No default fade.
+   std::function<X_RESULT()> launch_display_transition;
+ 
++  // The profile selects the original system UI module; the shared runtime only
++  // transports requests and tracks registrations. No UI/state change is implied.
++  std::function<X_HRESULT(uint32_t, uint32_t, uint32_t)> system_ui_request;
++  struct SystemApp { uint32_t module, slot, callback, resource_id; };
++  uint32_t RegisterSystemApp(SystemApp app) {
++    if (!app.module || !app.callback) return 1627;
++    std::lock_guard lock(system_apps_mutex_);
++    if (system_apps_.contains(app.slot)) return 1627;
++    system_apps_.emplace(app.slot, app);
++    return 0;
++  }
++  uint32_t UnregisterSystemApp(uint32_t module, uint32_t slot) {
++    std::lock_guard lock(system_apps_mutex_);
++    auto it = system_apps_.find(slot);
++    if (it == system_apps_.end()) return 1627;
++    if (it->second.module == module) system_apps_.erase(it);
++    return 0; // Original unregister leaves another owner's callback intact.
++  }
++  std::optional<SystemApp> FindSystemApp(uint32_t slot) {
++    std::lock_guard lock(system_apps_mutex_);
++    auto it = system_apps_.find(slot);
++    if (it == system_apps_.end()) return std::nullopt;
++    return it->second;
++  }
++
+   static void RegisterExportTable(rex::runtime::ExportResolver* export_resolver);
+ 
+   struct LoaderData {
+@@ -51,6 +79,8 @@ class XamModule : public system::KernelModule {
+   uint32_t GetLanguageLocaleFallback(uint32_t language);
+ 
+  private:
++  std::mutex system_apps_mutex_;
++  std::unordered_map<uint32_t, SystemApp> system_apps_;
+   LoaderData loader_data_;
+   uint32_t language_fallback_table_ = 0;  // Owned guest UTF16 strings, 16 bytes per ID.
+ };
+diff --git a/src/kernel/xam/apps/xam_app.cpp b/src/kernel/xam/apps/xam_app.cpp
+index 7f10ece..64d2254 100644
+--- a/src/kernel/xam/apps/xam_app.cpp
++++ b/src/kernel/xam/apps/xam_app.cpp
+@@ -10,6 +10,7 @@
+  */
+ 
+ #include <rex/kernel/xam/apps/app.h>
++#include <rex/kernel/xam/module.h>
+ #include <rex/logging.h>
+ #include <rex/system/kernel_state.h>
+ #include <rex/system/xenumerator.h>
+@@ -30,6 +31,13 @@ X_HRESULT XamApp::DispatchMessageSync(uint32_t message, uint32_t buffer_ptr,
+   // NOTE: buffer_length may be zero or valid.
+   auto buffer = memory_->TranslateVirtual(buffer_ptr);
+   switch (message) {
++    case 0x00021001:
++    case 0x00021008: {
++      auto xam = kernel_state_->GetKernelModule<rex::kernel::xam::XamModule>("xam.xex");
++      if (xam && xam->system_ui_request)
++        return xam->system_ui_request(message, buffer_ptr, buffer_length);
++      return X_E_NOTFOUND;
++    }
+     case 0x0002000E: {
+       struct message_data {
+         rex::be<uint32_t> user_index;
+diff --git a/src/kernel/xam/xam_misc.cpp b/src/kernel/xam/xam_misc.cpp
+index 525f1b8..0f29993 100644
+--- a/src/kernel/xam/xam_misc.cpp
++++ b/src/kernel/xam/xam_misc.cpp
+@@ -9,6 +9,7 @@
+  */
+ 
+ #include <rex/kernel/xam/private.h>
++#include <rex/kernel/xam/module.h>
+ #include <rex/logging.h>
+ #include <rex/hook.h>
+ 
+@@ -693,7 +694,20 @@ REX_EXPORT_STUB(__imp__XamReadTileEx);
+ REX_EXPORT_STUB(__imp__XamReadTileToTextureEx);
+ REX_EXPORT_STUB(__imp__XamRegisterSMCNotification);
+ REX_EXPORT_STUB(__imp__XamRegisterScreenSaverCallback);
+-REX_EXPORT_STUB(__imp__XamRegisterSysApp);
++namespace rex::kernel::xam {
++u32 XamRegisterSysApp_entry(u32 module, u32 slot, u32 callback, u32 resource_id) {
++  auto xam = REX_KERNEL_STATE()->GetKernelModule<XamModule>("xam.xex");
++  const auto result = xam->RegisterSystemApp({module, slot, callback, resource_id});
++  REXKRNL_INFO("XamRegisterSysApp(module={:08X}, slot={:08X}, callback={:08X}, resource={}) -> {}",
++               uint32_t(module), uint32_t(slot), uint32_t(callback), uint32_t(resource_id), result);
++  return result;
++}
++u32 XamUnregisterSysApp_entry(u32 module, u32 slot, u32 resource_id) {
++  return REX_KERNEL_STATE()->GetKernelModule<XamModule>("xam.xex")->UnregisterSystemApp(module, slot);
++}
++}
++REX_EXPORT(__imp__XamRegisterSysApp, rex::kernel::xam::XamRegisterSysApp_entry)
++REX_EXPORT(__imp__XamUnregisterSysApp, rex::kernel::xam::XamUnregisterSysApp_entry)
+ REX_EXPORT_STUB(__imp__XamReleaseCameraPreviewStuff);
+ REX_EXPORT_STUB(__imp__XamReloadSysApp);
+ REX_EXPORT_STUB(__imp__XamReminderClearCache);
+@@ -747,7 +761,7 @@ REX_EXPORT_STUB(__imp__XamTestShowNuiTroubleshooterUI);
+ REX_EXPORT_STUB(__imp__XamUIThreadDisableFontPatching);
+ REX_EXPORT_STUB(__imp__XamUIThreadEnableFontPatching);
+ REX_EXPORT_STUB(__imp__XamUnloadSysApp);
+-REX_EXPORT_STUB(__imp__XamUnregisterSysApp);
++
+ REX_EXPORT_STUB(__imp__XamUpdateAllocateExtenderBuffer);
+ REX_EXPORT_STUB(__imp__XamUpdateAttachExtenderInstance);
+ REX_EXPORT_STUB(__imp__XamUpdateChainPass3FromPass2);

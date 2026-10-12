@@ -122,3 +122,39 @@ TEST_CASE("invalid function table requests are rejected without side effects", "
   CreateRegisterLookupDestroy(m, kGame);
   CreateRegisterLookupDestroy(m, kSystem);
 }
+
+#include <rex/system/function_dispatcher.h>
+
+TEST_CASE("host-only dispatch preserves aliased guest images", "[sdk][memory][host-dispatch]") {
+  rex::memory::Memory memory;
+  REQUIRE(memory.Initialize());
+  auto* heap = memory.LookupHeap(0x92000000);
+  REQUIRE(heap->AllocFixed(0x92000000, 0x10000, 0x1000,
+      rex::memory::kMemoryAllocationReserve | rex::memory::kMemoryAllocationCommit,
+      rex::memory::kMemoryProtectRead | rex::memory::kMemoryProtectWrite));
+  auto* sentinel = memory.TranslateVirtual<uint32_t*>(0x92000F3C);
+  *sentinel = 0x13579BDF;
+  rex::runtime::FunctionDispatcher dispatcher(&memory, nullptr);
+  constexpr bool host_only = true;
+  REQUIRE(dispatcher.InitializeFunctionTable(0x81670000, 0x406A88,
+      0x815F0000, 0x610000, false, host_only));
+  REQUIRE(*sentinel == 0x13579BDF);
+  dispatcher.RegisterModule("synthetic", 0x81670000, [](auto* d) {
+    REQUIRE(d->SetFunction(0x81670000, &FnA));
+    REQUIRE(d->SetFunction(0x81A76A84, &FnB));
+  });
+  CHECK(dispatcher.GetFunction(0x81670000) == &FnA);
+  CHECK(dispatcher.GetFunction(0x81A76A84) == &FnB);
+  auto thunk = dispatcher.AllocateThunk(&FnB, 0x81670000);
+  REQUIRE(thunk == 0x81A76A88);
+  CHECK(dispatcher.GetFunction(thunk) == &FnB);
+  CHECK_FALSE(dispatcher.SetFunction(0x92000000, &FnA));
+  CHECK(*sentinel == 0x13579BDF);
+  CHECK(dispatcher.UnregisterModule("synthetic").has_value());
+  CHECK(dispatcher.GetFunction(0x81670000) == nullptr);
+  CHECK(dispatcher.GetFunction(thunk) == nullptr);
+  CHECK(*sentinel == 0x13579BDF);
+  CHECK(dispatcher.InitializeFunctionTable(0x81670000, 0x406A88,
+      0x815F0000, 0x610000, false, host_only));
+  CHECK(*sentinel == 0x13579BDF);
+}

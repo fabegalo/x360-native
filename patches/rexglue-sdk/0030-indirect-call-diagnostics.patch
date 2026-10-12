@@ -1,0 +1,12 @@
+diff --git a/src/system/function_dispatcher.cpp b/src/system/function_dispatcher.cpp
+index bd43109..8d5081a 100644
+--- a/src/system/function_dispatcher.cpp
++++ b/src/system/function_dispatcher.cpp
+@@ -35,6 +35,7 @@ FunctionDispatcher* GetBoundFunctionDispatcher() {
+ }  // namespace
+ 
+ static void InvalidFunctionTrap(PPCContext& ctx, uint8_t* /*base*/) {
++  REXLOG_ERROR("Indirect failure: LR={:08X} CTR={:08X} r3={:08X} r11={:08X} r29={:08X} r30={:08X}", uint32_t(ctx.lr), ctx.ctr.u32, ctx.r3.u32, ctx.r11.u32, ctx.r29.u32, ctx.r30.u32);
+   REX_FATAL("Call to invalid or unregistered function at guest address 0x{:08X}",
+             ctx.last_indirect_target);
+ }

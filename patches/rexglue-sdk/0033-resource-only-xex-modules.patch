@@ -1,0 +1,81 @@
+diff --git a/src/system/xex_module.cpp b/src/system/xex_module.cpp
+index 18178d1..214a3f1 100644
+--- a/src/system/xex_module.cpp
++++ b/src/system/xex_module.cpp
+@@ -60,6 +60,48 @@ namespace rex::runtime {
+ 
+ using rex::system::KernelState;
+ 
++namespace {
++// Resource DLLs (for example a system UI skin) may contain raw XUIZ data
++// instead of PE code. Accept only bounded, unencrypted, data-only images;
++// never interpret a failed executable load as a resource module.
++bool IsResourceOnly(const XexModule& module) {
++  const auto* header = module.xex_header();
++  if (header->module_flags != XEX_MODULE_DLL_MODULE ||
++      module.opt_file_format_info()->encryption_type != XEX_ENCRYPTION_NONE) return false;
++  void* unused = nullptr;
++  for (auto key : {XEX_HEADER_ENTRY_POINT, XEX_HEADER_IMPORT_LIBRARIES, XEX_HEADER_TLS_INFO})
++    if (module.GetOptHeader(key, &unused)) return false;
++  xex2_opt_resource_info* resources = nullptr;
++  if (!module.GetOptHeader(XEX_HEADER_RESOURCE_INFO, &resources)) return false;
++  const auto offset = uintptr_t(resources) - uintptr_t(header);
++  const uint32_t header_size = header->header_size;
++  if (offset > header_size || header_size - offset < 4) return false;
++  const uint32_t size = resources->size;
++  if (size < 20 || size > header_size - offset || (size - 4) % 16) return false;
++  const uint64_t start = module.base_address();
++  const uint64_t end = start + module.image_size();
++  if (!start || end > 0x100000000ull) return false;
++  for (uint32_t i = 0; i < (size - 4) / 16; ++i) {
++    const auto& resource = resources->resources[i];
++    const uint64_t address = resource.address;
++    if (!resource.name[0] || !resource.size || address < start ||
++        address + uint32_t(resource.size) > end) return false;
++  }
++  const auto* security = module.xex_security_info();
++  const uint32_t page_size = security->image_flags & XEX_IMAGE_PAGE_SIZE_4KB ? 4096 : 65536;
++  uint64_t covered = 0;
++  for (uint32_t i = 0; i < security->page_descriptor_count; ++i) {
++    xex2_page_descriptor page;
++    page.value = rex::byte_swap(security->page_descriptors[i].value);
++    if (!page.page_count || (page.info != XEX_SECTION_DATA && page.info != XEX_SECTION_READONLY_DATA)) return false;
++    covered += uint64_t(page.page_count) * page_size;
++    if (covered > module.image_size()) return false;
++  }
++  return covered == module.image_size();
++}
++}  // namespace
++
++
+ XexModule::XexModule(FunctionDispatcher* function_dispatcher, KernelState* kernel_state)
+     : Module(function_dispatcher), kernel_state_(kernel_state) {}
+ 
+@@ -486,7 +528,7 @@ int XexModule::ReadImage(const void* xex_addr, size_t xex_length, bool use_dev_k
+     return result_code;
+   }
+ 
+-  if (is_patch() || is_valid_executable()) {
++  if (is_patch() || is_valid_executable() || IsResourceOnly(*this)) {
+     return 0;
+   }
+ 
+@@ -928,7 +970,8 @@ bool XexModule::LoadContinue() {
+ 
+   finished_load_ = true;
+ 
+-  if (ReadPEHeaders()) {
++  const bool resource_only = IsResourceOnly(*this);
++  if (!resource_only && ReadPEHeaders()) {
+     REXLOG_ERROR("Failed to load XEX PE headers!");
+     return false;
+   }
+@@ -947,7 +990,7 @@ bool XexModule::LoadContinue() {
+   auto heap = memory()->LookupHeap(base_address_);
+   auto page_size = heap->page_size();
+ 
+-  low_address_ = UINT_MAX;
++  low_address_ = resource_only ? 0 : UINT_MAX;
+   high_address_ = 0;
+ 
+   auto sec_header = xex_security_info();
