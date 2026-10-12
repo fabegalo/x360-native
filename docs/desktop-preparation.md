@@ -5,7 +5,7 @@ fontes ficam em `app/`; a pasta `data/` criada na primeira abertura guarda o
 ambiente local. Preserve `data/` ao remover ou atualizar o aplicativo. Outra
 pasta de ambiente ou saves pode ser escolhida nas configurações sem apagar dados.
 
-Dashboards e jogos têm seções distintas. É possível adicionar um arquivo ou uma
+A tela inicial tem a ação Configurar/Iniciar Xbox 360. Dashboard, Importar e Biblioteca são áreas distintas; a biblioteca só inclui jogos cujo conteúdo foi adicionado, não todo o catálogo de compatibilidade. Estados resumidos e progresso real ficam na tela; listas de arquivos e diagnóstico ficam em Detalhes. É possível adicionar um arquivo ou uma
 pasta extraída, inclusive componentes separadamente. O catálogo usa identidades
 verificadas; versões desconhecidas passam pelo leitor XEX do supervisor e são
 mostradas como identificadas, sem preparação disponível. Formatos antigos são
@@ -79,3 +79,34 @@ instalar MSVC ausente, validar atualização/rollback, todos os erros de espaço
 e o ciclo completo com perfil, gameplay e save/load. Perfis originais ainda dependem
 do host XUI contínuo; esse serviço não foi substituído por uma tela do assistente.
 O candidato não comprova Linux, macOS, ARM64 nem suporte geral ao catálogo.
+
+## Revisão da experiência inicial — 2026-10-12
+
+Executado o ZIP preview.5 fora do repositório, em pasta temporária independente,
+com PATH somente do Windows e sem argumentos apontando para a árvore de trabalho.
+Dependências PE do aplicativo são apenas DLLs do Windows; não exige CRT separado.
+Computer Use verificou a janela comum (1106 × 754 pixels), biblioteca sem títulos
+instalados, navegação para Importar, seleção do `dash.xex` original no diálogo,
+identificação Retail 17559 e estado Conteúdo incompleto. Em seguida, a seleção de
+pasta importou os seis componentes restantes, registrou sete hashes/procedências
+e apresentou Conteúdo completo e a ação de preparar. A troca para inglês mostrou
+a navegação e a preparação em inglês. Nenhum jogo foi importado nesse ambiente.
+
+Correções obtidas no teste visual: verificação inicial em segundo plano com janela
+imediata; botões sem bordas residuais; atualização da aba selecionada; reaproveitar
+consulta de hardware entre páginas; texto contido no cartão em estados longos.
+34 testes existentes e focados passam, incluindo identidade, sessão, preservação
+de originais, importação incremental e catálogo opcional. As 20.213 asserções
+incluem o fuzz sintético do leitor de identidade, não milhares de títulos reais.
+
+O launcher da release Pinyon Shift foi iniciado para inspeção visual, mas Computer
+Use recusou acesso (`Computer Use was not approved to use pinyonshiftlauncher`).
+Não afirmamos ter controlado sua janela; a análise funcional foi da implementação,
+documentação e conteúdo real do ZIP, com licença e digest verificados.
+
+Limites deste incremento: preparação completa pelo novo fluxo ainda não validada;
+Windows limpo indisponível nesta execução (máquina de desenvolvimento com MSVC
+instalado). O ensaio com PATH restrito valida abertura/importação independentes,
+não substitui instalação limpa. STFS/ISO na interface, capas/metadados de todo o
+catálogo e equivalência visual com produto final seguem pendentes. Nenhuma release
+ou push foi feito; runtime, jogos e frente de avatares não foram recompilados.

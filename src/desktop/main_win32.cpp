@@ -116,7 +116,8 @@ void Layout(App& a) {
   move(a.root_text, 84, 406, width - 168, 32); ShowWindow(a.root_text, a.settings ? SW_SHOW : SW_HIDE);
   move(a.combo, 84, 410, width - 168, 210);
   ShowWindow(a.combo, !a.settings && !a.show_details && !a.home && !a.import_view && !a.dashboard_indices.empty() ? SW_SHOW : SW_HIDE);
-  move(a.status, 84, a.home || a.import_view || a.dashboard_indices.empty() ? 416 : 460, width - 168, 116);
+  const bool summary = a.home || a.import_view || a.dashboard_indices.empty();
+  move(a.status, 84, summary ? 416 : 460, width - 168, summary ? 116 : 80);
   ShowWindow(a.status, !a.settings && !a.show_details ? SW_SHOW : SW_HIDE);
   move(a.details, 60, 266, width - 120, std::max(200, height - 348));
   ShowWindow(a.details, a.show_details ? SW_SHOW : SW_HIDE);
@@ -124,6 +125,7 @@ void Layout(App& a) {
   move(a.progress, 60, 352, width - 120, 5);
   ShowWindow(a.progress, a.busy && !a.settings && !a.show_details ? SW_SHOW : SW_HIDE);
   InvalidateRect(a.window, nullptr, TRUE);
+  for (auto button : a.buttons) InvalidateRect(button, nullptr, TRUE);
 }
 void Enable(App& a) {
   bool has = a.selected < a.targets.size();
@@ -239,8 +241,9 @@ void InspectSelected(App& a) {
 void Load(App& a, const fs::path& root) {
   a.targets.clear(); a.dashboard_indices.clear(); a.selected = 0;
   SendMessageW(a.combo, CB_RESETCONTENT, 0, 0);
+  // Hardware probing is independent of navigation between pages.
+  if (a.environment.description.empty() || a.root != root) a.environment = CheckEnvironment(root);
   a.root = root;
-  a.environment = CheckEnvironment(root);
   SetWindowTextW(a.root_text, root.empty() ? L"Selecione um ambiente existente" : root.c_str());
   if (!root.empty()) a.targets = ReadCatalog(ProjectPaths{root});
   a.selected = a.targets.size();
@@ -562,7 +565,7 @@ LRESULT CALLBACK WndProc(HWND window, UINT message, WPARAM wp, LPARAM lp) {
           }
         }
         if (id == kCheck) { a->environment = CheckEnvironment(a->root); InspectSelected(*a); }
-        if (id == kImport || id == kImportFolder) { auto source = PickFolder(window, id == kImport ? L"Selecione um arquivo original" : L"Selecione a pasta com seus arquivos originais", id == kImportFolder); if (!source.empty()) Start(*a, kImport, source); }
+        if (id == kImport || id == kImportFolder) { auto source = PickFolder(window, Wide(id == kImport ? Tr("Selecione um arquivo original", "Select an original file") : Tr("Selecione a pasta com seus arquivos originais", "Select the folder with your original files")).c_str(), id == kImportFolder); if (!source.empty()) Start(*a, kImport, source); }
         if (id == kPrepare) {
           if (!a->environment.msvc) {
             if (MessageBoxW(window, Wide(Tr("Falta o componente C++ do Microsoft Build Tools 2022. Abrir o instalador oficial com os componentes necessários selecionados?\n\nEsta é uma instalação no sistema: o Windows pode pedir permissão de administrador. O instalador mostra espaço, downloads e termos antes da instalação. Use o próprio instalador para cancelar. Jogos e dados serão preservados.", "Microsoft Build Tools 2022 C++ is missing. Open the official installer with the required components preselected?\n\nThis changes the system: Windows may request administrator permission. The installer shows space, downloads and terms before installation. Cancel using the installer itself. Games and data are preserved.")).c_str(), L"Microsoft Build Tools 2022", MB_YESNO | MB_ICONINFORMATION) == IDYES) Start(*a, kInstall);
@@ -656,7 +659,7 @@ LRESULT CALLBACK WndProc(HWND window, UINT message, WPARAM wp, LPARAM lp) {
       case kFinished: {
         std::unique_ptr<std::string> text(reinterpret_cast<std::string*>(lp));
         if (a->worker.joinable()) a->worker.join(); a->busy = false; a->session = false; a->installing = false;
-        a->environment = CheckEnvironment(a->root);
+        if (!a->importing) a->environment = CheckEnvironment(a->root);
         InspectSelected(*a);
         const auto report = Wide(*text + "\r\n\r\nLogs: " + Utf8(a->logs) + "\r\n\r\n");
         SendMessageW(a->details, EM_SETSEL, 0, 0); SendMessageW(a->details, EM_REPLACESEL, FALSE, reinterpret_cast<LPARAM>(report.c_str()));
@@ -670,7 +673,7 @@ LRESULT CALLBACK WndProc(HWND window, UINT message, WPARAM wp, LPARAM lp) {
         if (a->failed) {
           Set(a->headline, Tr("Vamos resolver esta etapa.", "Let's fix this step."));
           Set(a->subtitle, Tr("A preparação não terminou. Seus arquivos foram preservados.\r\nVeja o motivo abaixo e tente novamente após corrigir o problema.", "Preparation did not finish. Your files were preserved.\r\nRead the reason below, then retry after fixing the issue."));
-          Set(a->subtitle, *text); a->show_details = false;
+          Set(a->status, Tr("Operação não concluída\r\n\r\nConsulte o motivo em Detalhes antes de tentar novamente. Seus arquivos existentes foram preservados.", "Operation incomplete\r\n\r\nCheck the reason in Details before trying again. Your existing files were preserved.")); a->show_details = false;
         }
         Enable(*a); return 0;
       }
