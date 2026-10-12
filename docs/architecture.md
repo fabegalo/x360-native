@@ -261,7 +261,6 @@ diferentes têm executáveis diferentes. Pinyon Shift faz o mesmo
     copia antes de cada build do executável, também com `--target` (a primeira
     versão só copiava num build completo, e um build de um alvo só deixou a DLL
     velha ao lado do teste do patch 0003); o `x360n run` grava o SHA-256 das DLLs usadas.
-
 18. **Import registrado no endereço 0** — *corrigido localmente pelo patch 0003*:
     o carregador pareava slot de valor e thunk de um import só dentro de um registro
     de biblioteca (`XexModule::SetupLibraryImports`). Com o slot num registro e o
@@ -288,6 +287,18 @@ diferentes têm executáveis diferentes. Pinyon Shift faz o mesmo
     `331ddf79bf96`, que liga o bit 0 nas páginas do heap XEX de 4 KB. A dashboard
     17559 exige esse bit para os buffers dos seus trechos Lua (`KeBugCheck(0xF7)`).
     O valor continua uma aproximação do que o hypervisor devolve.
+22. **Funções só alcançadas por ponteiro, sem `.pdata`, não são geradas**: o
+    `VTableScanner` (`src/codegen/vtable_scanner.cpp`) só acha vtables pelo RTTI
+    (Complete Object Locator) e o scan geral de ponteiros está desligado
+    (`src/codegen/analyze.cpp`, "too many false positives"). Thunks de ajuste e
+    folhas de vtables sem RTTI ficam fora, e a chamada falha com `Call to invalid or
+    unregistered function`. Castle Crashers teve 1; a dashboard 17559, 515.
+    `scripts/check-pointer-targets.ps1` lista os candidatos com critérios
+    verificáveis; as entradas vão para a análise do título, não para o SDK.
+23. **Página de sistema em endereço fixo `0x8E038600`** — *não resolvido*: a
+    dashboard lê sinalizadores em `0x8E038614`, `0x8E038630` e `0x8E038678` por
+    endereço absoluto. O SDK não mapeia nada ali (violação de acesso); o Xenia
+    aloca a página zerada com "Data is currently unknown". Conteúdo real desconhecido.
 
 Patches locais (base `f5337cdc`): `patches/rexglue-sdk/README.md`; aplicação
 reproduzível por `scripts/apply-sdk-patches.ps1` e verificação no CMake.

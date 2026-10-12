@@ -13,8 +13,10 @@
 # what the disassembly shows and is checked against the generated function
 # after codegen (docs/dashboard.md).
 #
-# Not added: other code without .pdata that nothing failed on (e.g. the
-# adjustor thunk at 0x9237E660). Entries are added only for observed failures.
+# Not added here: other code without .pdata that nothing failed on (e.g. the
+# adjustor thunk at 0x9237E660). Entries here are added only for observed failures.
+# Function starts reached only through data pointers (vtables without RTTI) are in
+# dash_17559_pointer_targets.toml, classified by scripts/check-pointer-targets.ps1.
 
 [functions]
 

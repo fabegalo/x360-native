@@ -69,6 +69,12 @@ sem entrada): 60 s até o timeout do supervisor, 0 STUB, 0 erros, 0 críticas, m
 principal na captura de 40 s. O log mostra a tabela de funções no mesmo heap de
 antes: `Function table at 822D0000-824E5C27 in XEX heap 80000000 (10000-byte pages)`.
 
+Depois dos patches 0003–0005 (2026-10-12): o codegen corrigido, rodado com
+`--ignore-stamp`, gera saída idêntica (`41 unchanged`); o título foi recompilado (o
+`rex_app.cpp` do 0004 entra no executável) e a execução 2 repetida (run
+`20261012T012535Z-cc-run-patched-0005`, sem entrada): 60 s até o timeout, 0 STUB, 0
+erros, 0 críticas, menu principal na captura de 40 s.
+
 ## Não validado
 
 Gameplay além do relato do usuário, save/load, encerramento normal, sessão longa,

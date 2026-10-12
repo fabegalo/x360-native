@@ -8,4 +8,4 @@ game_root = "../../.local/inputs/dashboard/17559"
 [entrypoint]
 file_path = "../../.local/inputs/dashboard/17559/dash.xex"
 out_directory_path = "generated/dash"
-includes = ["analysis/dash_17559.toml"]
+includes = ["analysis/dash_17559.toml", "analysis/dash_17559_pointer_targets.toml"]

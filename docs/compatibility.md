@@ -9,7 +9,8 @@ Um título só avança de etapa com evidência registrada; "compilou" não impli
 Ambiente de todas as linhas abaixo: Windows 11 Pro 10.0.26300, AMD Ryzen 7
 5700X3D, 40 GB RAM, RTX 4070; LLVM/Clang 22.1.8 + MSVC 14.44 (VS Build Tools
 17.14.41), Windows SDK 10.0.26100; configuração Debug.
-Revisão do projeto: árvore de trabalho sem commit (2026-10-11); SDK `f5337cdc` (v0.10.0).
+Revisão do projeto: commits locais de 2026-10-12; SDK `f5337cdc` (v0.10.0) com os
+patches locais 0001–0005 (`patches/rexglue-sdk/`).
 Títulos compilados em `RelWithDebInfo` (ver `docs/validation-iruka.md`).
 
 ## Títulos e amostras
@@ -23,7 +24,7 @@ Títulos compilados em `RelWithDebInfo` (ver `docs/validation-iruka.md`).
 
 | Versão | Identidade | Análise | Geração | Compilação | Inicialização | Teste | Limitações |
 |---|---|---|---|---|---|---|---|
-| 2.0.17559.0 (Metro), `FFFE07D1` | `dash.xex` SHA-256 `3ad8f38d…14f927`, 5 971 968 bytes (`dashbigger.xex` `fc4ad906…ebc8c2` tem a mesma imagem carregada) | ok com 30 entradas e 1 tabela de saltos (`titles/dash_17559/analysis/dash_17559.toml`); sem elas, 28 `UnresolvedCall` | ok (257 arquivos, 37 856 funções; limites 30/30; 0 sobreposições `.pdata`) | ok com 13 armadilhas no título para imports que o SDK não fornece; exe atual `f06a3c54…ed4c5300` | **falha**: sem patches, `Runtime setup failed: C0000001`; com os patches locais 0001/0002, setup ok e imagem carregada, mas `Registered 0 recompiled functions` (`PPCFuncMappings[0]` gerado em `0x0`) e `No function registered at 92196610`: nenhuma instrução da dashboard executou | `docs/dashboard.md` §0.4–0.7; runs `…dash17559-codegen-6`, `…dash17559-run-1`, `20261011T230202Z-dash17559-run-3` | 822 imports, 473 stubs; 5 ordinais fora da tabela e 8 `XUsbcam*` sem símbolo; dependências externas não demonstradas |
+| 2.0.17559.0 (Metro), `FFFE07D1` | `dash.xex` SHA-256 `3ad8f38d…14f927`, 5 971 968 bytes (`dashbigger.xex` `fc4ad906…ebc8c2` tem a mesma imagem carregada) | ok com 30 entradas conferidas uma a uma e 1 tabela de saltos (`titles/dash_17559/analysis/dash_17559.toml`) + 515 inícios só por ponteiro classificados por script (`dash_17559_pointer_targets.toml`) | ok (39 141 funções; 0 sobreposições `.pdata`; sem `--force`) | ok; 12 armadilhas e `XUsbcamGetState` implementado no título; exe `cec26d64…40bc12` | **parcial**: com os patches 0001–0005, 39 141 funções registradas e **o código executa** a partir de `xstart` (áudio, idioma, fontes, perfil, abre `shrdres.xzp`); para ~2 s depois lendo a página de sistema fixa `0x8E038630`, não mapeada (conteúdo desconhecido). Nenhum quadro apresentado | `docs/dashboard.md` §0.8; runs `…dash17559-codegen-10`, `20261012T012216Z-dash17559-run-10`, `…run-9-crashstack` | 28 stubs chamados (não definem r3); `DASHUSER:` ausente; menu, navegação, lançar jogo: não testados |
 
 ## Programas de teste sem conteúdo proprietário
 

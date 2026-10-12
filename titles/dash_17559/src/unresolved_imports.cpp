@@ -4,7 +4,8 @@
 //
 // They are traps, not implementations: a call stops the process with the import,
 // the reason and the guest return address (LR). Nothing is emulated and no value
-// is returned, so a call can never pass for support (CLAUDE.md, rule 3).
+// is returned, so a call can never pass for support (CLAUDE.md, rule 3). The one
+// exception, XUsbcamGetState, has a documented implementation below.
 // Title-specific: the placeholder names sub_<thunk> are this XEX's thunk
 // addresses. docs/dashboard.md §0.2 and §0.5 have the evidence.
 #include <cstdint>
@@ -44,7 +45,18 @@ extern "C" REX_FUNC(sub_9293CE6C) {
 extern "C" REX_FUNC(__imp__XUsbcamSetCaptureMode) { Trap(ctx, "xboxkrnl 0x21A XUsbcamSetCaptureMode", kNotBuilt); }
 extern "C" REX_FUNC(__imp__XUsbcamGetConfig) { Trap(ctx, "xboxkrnl 0x21B XUsbcamGetConfig", kNotBuilt); }
 extern "C" REX_FUNC(__imp__XUsbcamSetConfig) { Trap(ctx, "xboxkrnl 0x21C XUsbcamSetConfig", kNotBuilt); }
-extern "C" REX_FUNC(__imp__XUsbcamGetState) { Trap(ctx, "xboxkrnl 0x21D XUsbcamGetState", kNotBuilt); }
+
+// xboxkrnl 0x21D XUsbcamGetState() -> camera state. Implemented, not a trap: no Xbox
+// Live Vision camera is attached to this host and the runtime has no camera support,
+// so the real answer is "not connected", 0. That 0 means no camera is shown by
+// dash.xex itself: 0x92337AB8 computes present = (state != 0) and only when present
+// loads the "ThemeVisionEffect..." resource (UTF-16 at 0x92032D98); 0x92368568 sends
+// state 2 on to further camera setup. The SDK's unbuilt shim
+// (src/kernel/xboxkrnl/xboxkrnl_usbcam.cpp) and Xenia say "0 = not connected" as well.
+// First called during startup (run 20261012T002758Z-dash17559-run-4, LR=0x9236857C).
+extern "C" REX_FUNC(__imp__XUsbcamGetState) {
+  ctx.r3.u64 = 0;  // not connected
+}
 extern "C" REX_FUNC(__imp__XUsbcamReadFrame) { Trap(ctx, "xboxkrnl 0x21E XUsbcamReadFrame", kNotBuilt); }
 extern "C" REX_FUNC(__imp__XUsbcamSetView) { Trap(ctx, "xboxkrnl 0x220 XUsbcamSetView", kNotBuilt); }
 extern "C" REX_FUNC(__imp__XUsbcamCreate) { Trap(ctx, "xboxkrnl 0x222 XUsbcamCreate", kNotBuilt); }

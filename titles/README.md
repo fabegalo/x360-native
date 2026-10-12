@@ -18,6 +18,9 @@ Em cada pasta:
 analysis/<nome>.toml   [functions], [[switch_tables]] etc.; o cabeçalho cita o
                        SHA-256 do XEX, e cada entrada a evidência (desmontagem,
                        log do codegen ou da execução)
+analysis/<nome>_*.toml entradas geradas por script (ex.: dash_17559_pointer_targets.toml,
+                       scripts/check-pointer-targets.ps1), separadas das conferidas
+                       uma a uma; incluídas pelo manifesto
 src/                   app do título e correções específicas desse executável
 generated/rexglue.cmake  vem do template do SDK (versionado)
 generated/<módulo>/    código gerado a partir do XEX (ignorado pelo git)

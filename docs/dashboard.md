@@ -1,12 +1,14 @@
 # Dashboard original: diagnóstico
 
-Estado em 2026-10-11. **A dashboard original não foi declarada funcionando.**
+Estado em 2026-10-12. **A dashboard original não foi declarada funcionando.**
 Versão em trabalho: 2.0.17559.0 (Metro), arquivos fornecidos pelo usuário. A
 análise do codegen passou (sem `--force`) depois de 30 entradas `[functions]` e
 uma tabela de saltos conferidas uma a uma (§0.4); compila e linka (§0.5). Com os
-patches locais 0001/0002 do SDK o setup do runtime conclui e a imagem carrega,
-mas o código da dashboard **não chega a executar**: nenhuma função recompilada é
-registrada, por um defeito do codegen ainda não corrigido (§0.6–0.7).
+patches locais 0001–0005 do SDK o setup conclui, as 39 141 funções são registradas
+e **o código da dashboard executa**: inicializa áudio, idioma, fontes, perfil e
+abre arquivos, e para cerca de 2 s depois numa leitura de uma página de sistema
+em endereço fixo (`0x8E038630`) cujo conteúdo não está no pacote (§0.8). Nenhum
+quadro foi apresentado.
 
 Referências: ReXGlue v0.10.0 `f5337cdc` (caminhos relativos a
 `external/rexglue-sdk`) e Xenia Canary `04f85416e0f8` (consultado só como
@@ -50,9 +52,11 @@ SHA-256 em `.local/runs/dash-artifacts/dash-resources.csv`).
 
 Decodificados pelo carregador do SDK (`x360n-content imports`). O cabeçalho tem
 três registros — `xam.xex` 2.0.17559.0 duas vezes (623 e 421 entradas) e
-`xboxkrnl.exe` 2.0.17559.0 (584) — com 1628 registros. O carregador pareia por
-ordinal **dentro de cada registro** (`src/system/xex_module.cpp:1076-1135`);
-juntando os dois registros de `xam` por ordinal são **822 imports**.
+`xboxkrnl.exe` 2.0.17559.0 (584) — com 1628 registros. No SDK fixado o carregador
+pareia por ordinal **dentro de cada registro** (`src/system/xex_module.cpp:1076-1135`);
+juntando os dois registros de `xam` por ordinal são **822 imports**. O patch 0003
+passou a juntar as metades de um mesmo import entre registros da mesma biblioteca
+(§0.8).
 
 | Biblioteca | Implementado | Hook direto | Stub | Shim só em fonte não compilada | Variável com valor | Variável sem valor | Ausente no SDK | Total |
 |---|---|---|---|---|---|---|---|---|
@@ -322,10 +326,8 @@ Origem: o `xam 0x8E2` (`XamNuiGetSupportString`) tem o slot de valor num registr
 de import e o thunk no outro (§0.2). O registro sem thunk vira um símbolo de import
 com `address = thunk_address = 0` (`XexModule::PopulateBinaryData`,
 `src/system/xex_module.cpp:1163-1171`, sem teste de zero), e como o SDK declara
-`0x8E2` função, o codegen o registra no endereço 0. Defeito do SDK (codegen) **não
-corrigido**: fica fora do que foi autorizado. Correção proposta (patch 0003, com
-teste): não criar símbolo de import para registro sem thunk; depois, codegen e
-build da dashboard de novo.
+`0x8E2` função, o codegen o registra no endereço 0. Defeito do SDK (carregador e
+codegen), **corrigido depois pelo patch 0003** (§0.8).
 
 **(B) Encerramento normal usa a janela destruída.** Pilha (`--crash-stack`, run
 `20261011T225728Z-dash17559-run-2b-debug`):
@@ -336,9 +338,9 @@ build da dashboard de novo.
 `runtime_.reset()`, e o driver de teclado/mouse, ligado à janela por `AttachWindow`
 depois de um setup bem-sucedido, a usa ao ser destruído. Acontece quando o app sai
 sozinho (aqui, porque a thread principal do guest terminou); os runs do Castle
-Crashers sempre terminaram por timeout. **Não corrigido** (fora da autorização).
-Que o `STATUS_HEAP_CORRUPTION` sem depurador seja o mesmo uso após liberação é
-**hipótese** (mesmo ponto, logo após `Execution complete`).
+Crashers sempre terminaram por timeout. **Corrigido depois pelo patch 0004** (§0.8).
+Que o `STATUS_HEAP_CORRUPTION` sem depurador fosse o mesmo uso após liberação era
+hipótese; o app de teste do 0004 reproduz a mesma pilha e termina com `0xC0000005`.
 
 **Caminho de erro do setup (item autorizado), conferido de ponta a ponta:** com
 só o 0002 aplicado (0001 revertido para reproduzir a falha), o mesmo setup falha
@@ -350,14 +352,119 @@ ele só recebe a janela depois de um setup bem-sucedido (`rex_app.cpp:243-245`).
 Nenhuma abertura de arquivo nem carregamento de módulo pelo guest: o código da
 dashboard não executou (`failed_opens` vazio). As 13 armadilhas continuam no título.
 
-### 0.8 Ainda desconhecido
+### 0.8 Execução com os patches 0003, 0004 e 0005 (2026-10-12)
 
-- o que vem depois do registro das funções (§0.7 A); nenhuma instrução da
-  dashboard executou ainda;
-- tudo o que depende de executar código da dashboard: se o HLE de `xam` basta,
-  quais arquivos e módulos ela abre de fato, se chama os 12 thunks dinâmicos, os
-  imports-armadilha ou a função que lê `XboxKrnlBaseVersion`;
-- o papel das dependências marcadas "desconhecida" em §0.3;
+Mesmo comando de §0.6. Correções feitas nesta etapa, cada uma com a falha que a
+motivou; as do SDK estão em `patches/rexglue-sdk/README.md`, com teste que falha sem elas.
+
+| # | Correção | Onde | Motivo (fato) |
+|---|---|---|---|
+| 1 | patch 0003: o carregador junta slot e thunk de um import entre registros da mesma biblioteca; o codegen não mapeia import no endereço 0 | SDK | §0.7 (A) |
+| 2 | patch 0004: o `OnDestroy` desmonta o runtime antes da janela | SDK | §0.7 (B) |
+| 3 | `XUsbcamGetState` implementado (estado 0, "não conectado"); as outras 12 armadilhas ficam | título | ver abaixo |
+| 4 | 515 inícios de função alcançados só por ponteiro | análise do título | ver abaixo |
+| 5 | patch 0005: `KeGetImagePageTableEntry` com bit 0 nas páginas do heap XEX de 4 KB | SDK | ver abaixo |
+| 6 | `\SystemRoot` montado, só leitura, na pasta do pacote | título | ver abaixo |
+
+**Código gerado** (`codegen-8`, `rexglue codegen --ignore-stamp`, sem `--force`; o
+carimbo do codegen não inclui o próprio `rexglue`, `docs/architecture.md` §7 item 20):
+`dash_17559_init.cpp` passa de 38 662 para 38 661 mapeamentos, nenhum com `guest`
+0; `{ 0x9293B3CC, __imp__XamNuiGetSupportString }` uma vez; a entrada
+`{ 0x92196610, xstart }` existe. No runtime: `Paired import xam:0x8e2 across import
+library records (slot 920008DC, thunk 9293B3CC)` e `Registered 38661 recompiled
+functions (0 duplicates, 0 rejected)`. Com as entradas do item 4 (`codegen-9`,
+`codegen-10`): 39 141 funções, 0 sobreposições com `.pdata`
+(`check-pdata-overlap.ps1`), mesma única advertência de §0.4.
+
+| Run | Com | Até onde a dashboard chegou | Parada |
+|---|---|---|---|
+| `20261012T002758Z-dash17559-run-4` | 1, 2 | entrada executada: 2 mensagens `XLIVEBASE` não implementadas, 7 stubs (`XamGetLanguage`, `XamPackageManagerGetExperienceMode`, …), `XConfig` categoria 7 | armadilha `xboxkrnl 0x21D XUsbcamGetState`, LR `0x9236857C` |
+| `…T003040Z-…run-5` | + 3 | a própria dashboard liga `media:` → `\SystemRoot`, registra o callback de interrupção da GPU | `Call to invalid or unregistered function at guest address 0x92394200` |
+| `…T004635Z-…run-6` | + 4 (506) | registra um cliente de áudio; o callback de áudio dela roda | não registrada `0x921DC8F8` |
+| `…T010713Z-…run-7`, `…T010738Z-…run-7b-crashstack` | + 4 (9) | `NetDll_XHttpStartup`, `XamLoaderRegisterLaunchRequestCallback` (stubs) | `KeBugCheck` chamado pela dashboard (pilha `--crash-stack`) |
+| `…T011724Z-…run-8` | + 5 | idioma, fontes (`XamGetLanguageTypeface…`), configurações de perfil, `XConfig`; abre arquivos | `media:\shrdres.xzp` → `device not found`; violação de acesso |
+| `…T011850Z-…run-9-crashstack`, `…T012216Z-…run-10` | + 6 | `shrdres.xzp` deixa de falhar; abre `DASHUSER:\ThematicSkin` e `DASHUSER:\VisionEffect` (dispositivo ausente, não fatal até aqui) | `Unhandled guest access violation: read of guest 0x8E038630`, em `sub_92185790` ← `sub_921870A0` ← `xstart` |
+
+Executável final `cec26d64…40bc12`, `rexruntimerd.dll` `de2b6f17…dd9d013d` (idêntica à
+do SDK, registrada pelo relatório do `run`). Etapas, separadas:
+
+| Etapa | Resultado |
+|---|---|
+| Setup do runtime | concluído (tabela de funções em `93028000-93FC9917`) |
+| Imagem carregada | sim |
+| Funções registradas | 39 141, 0 duplicadas, 0 rejeitadas |
+| Entrada no código recompilado | **sim**: `xstart` (`0x92196610`) executa na thread principal do guest |
+| Primeira falha real depois da entrada | armadilha `XUsbcamGetState` (run-4), resolvida com implementação (item 3) |
+| Parada atual | leitura da página fixa `0x8E038600` (abaixo), ~2 s após o início, ainda na inicialização chamada por `xstart` |
+| Renderização | **não observada**: nenhum `VdSwap` no log, nenhum quadro; as capturas da janela não chegaram a ser feitas (o processo termina antes) |
+| Navegação | não observada |
+
+**Item 3, `XUsbcamGetState`.** A dashboard o chama na inicialização (run-4). Não há
+câmera neste PC nem suporte a câmera no runtime, e a resposta real é "não conectada".
+Que 0 significa isso vem do próprio `dash.xex`: `0x92337AB8` faz `presente = (estado
+!= 0)` e só então carrega o recurso `ThemeVisionEffect…` (texto UTF-16 em
+`0x92032D98`); `0x92368568` leva o estado 2 a mais configuração da câmera. O shim do
+SDK que não é compilado e o Xenia também dão "0 = not connected". As outras 7
+`XUsbcam*` e os 5 ordinais ausentes continuam armadilhas; nenhuma foi chamada.
+
+**Item 4, funções só por ponteiro.** `0x92394200` é uma folha de 6 instruções depois
+do `bctr` que termina `sub_923941E0`, guardada em `.rdata` (`0x9203A468`,
+`0x9204326C`), sem `.pdata`. O codegen só acha vtables pelo RTTI e tem o scan geral de
+ponteiros desligado (`docs/architecture.md` §7 item 22). Em vez de um endereço por
+execução, `scripts/check-pointer-targets.ps1` classifica todos os endereços de código
+guardados em dados (`x360n-content xref`, 54 410 palavras) e, numa segunda passada,
+os montados no código por `lis` + `addi`/`ori`: 506 + 9 passam em todos os critérios
+(alinhado; fora de `.pdata` e de função gerada; palavra anterior 0 ou fim de função;
+`blr`/`bctr`/`b` adiante sem cruzar outro início), 395 + 567 não. Ficam em
+`titles/dash_17559/analysis/dash_17559_pointer_targets.toml`, separado das entradas
+conferidas uma a uma, com o critério e o comando no cabeçalho. Conferi 9 + 9 por
+desmontagem (thunks de ajuste `addi r3,r3,-N; b`, thunks de despacho, folhas). Com
+elas, 35 funções que o preenchimento de lacunas tinha criado viraram blocos das novas
+(casos de `switch` e alvos de desvio condicional); nenhuma é alvo de `bl` nem guardada
+em dados.
+
+**Item 5, `KeGetImagePageTableEntry`.** `KeBugCheck(0xF7)` vem de `0x928EF408`, que o
+`luaZ_fill` (`0x928EA240`) chama para cada buffer de trecho Lua: o endereço tem de
+estar em `0x80000000–0x9FFFFFFF` e o bit 0 de `KeGetImagePageTableEntry` da página
+tem de estar ligado, senão bugcheck, salvo um sinalizador do estado global (0 aqui).
+Diagnóstico temporário (`…T011201Z-dash17559-diag-luabuf`, removido depois): o buffer
+é `0x92FD2204`, página de dados só-leitura da própria imagem (descritor tipo 3), e o
+SDK devolvia `0x40002FD2` — o índice da página, bit 0 limpo em toda página par. O
+Xenia Canary `331ddf79bf96` liga o bit 0 nesse heap ("dashboards 14xxx and higher"
+precisam dele); o patch 0005 faz o mesmo. O significado do bit (página válida ou
+só-leitura) não está verificado.
+
+**Item 6, `\SystemRoot`.** O próprio `dash.xex` liga `media:` a `\SystemRoot` e abre
+`media:\shrdres.xzp`; no console é a partição de sistema com `dash.xex` e
+`shrdres.xzp`. O título monta a pasta do pacote ali, só leitura
+(`src/dash_17559_app.h`, `OnPostSetup`). É a primeira dependência de arquivo
+**demonstrada**: `shrdres.xzp`, que já estava no pacote.
+
+**Parada atual: página de sistema em endereço fixo.** A dashboard lê, com endereço
+absoluto no código (`lis r11,0x8E04`), `0x8E038614` (16 bits; 3 funções), `0x8E038630`
+(64 bits, testa `0x40`; `0x92185790` e `0x92186310`) e `0x8E038678` (64 bits, testa
+`0x2`; 2 funções). Nada no SDK mapeia essa página, e a leitura falha. O Xenia Canary
+aloca a página `0x8E030000` zerada, com o comentário "fixed address referenced by
+dashboards. Data is currently unknown" (`kernel_state.h`, `strange_hardcoded_location_
+= 0x8E038634`). **Não foi mapeada aqui**: zerá-la seria escolher os valores desses
+sinalizadores por suposição. Para continuar é preciso o conteúdo dessa página como o
+sistema do console a preenche (qual componente o faz não foi determinado; não é
+arquivo do pacote), ou uma decisão explícita de aceitar a página zerada como
+suposição registrada, como faz o Xenia.
+
+Riscos já vistos, não corrigidos: 28 stubs diferentes foram chamados, e um stub não
+define r3 (por exemplo `XamGetLanguage`); o caminho seguido depois deles pode não ser
+o do console. `DASHUSER:` não existe no SDK.
+
+### 0.9 Ainda desconhecido
+
+- o conteúdo e o dono da página `0x8E038600` (acima) e o que vem depois dela;
+- se a dashboard chega à primeira tela: nenhum quadro foi apresentado ainda;
+- o papel de `DASHUSER:` (cache/usuário da dashboard) e se a falha dessas aberturas
+  importa;
+- o efeito dos stubs que não definem r3 no caminho seguido;
+- o papel das dependências marcadas "desconhecida" em §0.3, e se ela chama os 12
+  thunks dinâmicos, os imports-armadilha ou a função que lê `XboxKrnlBaseVersion`;
 - qual dos dois XEX o console carrega.
 
 ## 1. Por que isto é um alvo próprio
