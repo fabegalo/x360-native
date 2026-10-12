@@ -4,6 +4,7 @@
 #include <fstream>
 #include <set>
 #include <rex/kernel/init.h>
+#include <rex/kernel/xam/module.h>
 #include <rex/runtime.h>
 #include <rex/system/kernel_state.h>
 #include <rex/system/thread_state.h>
@@ -16,6 +17,7 @@
 extern "C" REX_FUNC(__imp__XamContentAggregateCreateEnumerator);
 extern "C" REX_FUNC(__imp__XamContentGetAttributesInternal);
 extern "C" REX_FUNC(__imp__XamContentCreateInternal);
+extern "C" REX_FUNC(__imp__XamContentLaunchImageInternalEx);
 using rex::X_STATUS;
 using rex::X_RESULT;
 
@@ -132,5 +134,33 @@ TEST_CASE("Aggregate all-types query enumerates installed titles with their real
   std::memset(rt.memory()->TranslateVirtual(output + 3072), 0, sizeof(rex::system::XAM_OVERLAPPED));
   CHECK(attributes(true) == X_ERROR_IO_PENDING);
   CHECK(*rt.memory()->TranslateVirtual<rex::be<uint32_t>*>(output + 3072) == X_ERROR_FILE_NOT_FOUND);
+
+  auto xam = rt.kernel_state()->GetKernelModule<rex::kernel::xam::XamModule>("xam.xex");
+  auto launch = [&](uint32_t flags) {
+    uint32_t result = ~0u;
+    auto thread = rex::system::object_ref<rex::system::XHostThread>(new rex::system::XHostThread(
+        rt.kernel_state(), 128 * 1024, 0, [&]() {
+      auto* ctx = rex::system::XThread::GetCurrentThread()->thread_state()->context();
+      ctx->r3.u64 = output + 1024; ctx->r4.u64 = 0; ctx->r5.u64 = flags;
+      __imp__XamContentLaunchImageInternalEx(*ctx, rt.memory()->virtual_membase());
+      result = ctx->r3.u32; return 0;
+    }));
+    REQUIRE(thread->Create() == X_STATUS_SUCCESS);
+    uint64_t timeout = uint64_t(-50'000'000ll);
+    REQUIRE(thread->Wait(0, 0, 0, &timeout) == X_STATUS_SUCCESS);
+    return result;
+  };
+  CHECK(launch(0) != 0);  // missing package must not request a transition
+  CHECK(xam->loader_data().launch_path.empty());
+  data->set_file_name("package-a");
+  CHECK(launch(0) == X_ERROR_FILE_NOT_FOUND);  // exists, but has no executable
+  CHECK(xam->loader_data().launch_path.empty());
+  CHECK(rt.kernel_state()->content_manager()->GetOpenPackagePath("XSYSLAUNCH").empty());
+  CHECK(launch(1) == X_RESULT_FROM_WIN32(50));  // unsupported loader semantics
+  std::ofstream exe(package / "default.xex", std::ios::binary);
+  exe.write(reinterpret_cast<const char*>(image.data()), image.size()); exe.close();
+  launch(0);  // successful launch terminates the calling guest thread
+  CHECK(xam->loader_data().launch_path == "XSYSLAUNCH:\\default.xex");
+  CHECK(rt.kernel_state()->content_manager()->GetOpenPackagePath("XSYSLAUNCH") == package);
 
 }

@@ -23,6 +23,7 @@ set(DASH17559_SOURCES
     # Traps for imports the pinned SDK does not provide at link time (see the file).
     src/unresolved_imports.cpp
     ../common/camera_state.cpp
+    ../common/launch_handoff.cpp
     src/typeface.cpp
     src/launch_uri.cpp
     src/boot_intro.cpp

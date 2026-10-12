@@ -20,6 +20,7 @@ endif()
 # Sources
 set(CASTLECRASHERS_SOURCES
     src/main.cpp
+    ../common/launch_handoff.cpp
 )
 
 if(WIN32)

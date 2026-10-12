@@ -21,6 +21,7 @@ add_executable(x360n_tests
     supervisor/paths_test.cpp
     supervisor/report_test.cpp
     supervisor/process_test.cpp
+    supervisor/session_test.cpp
 )
 target_link_libraries(x360n_tests PRIVATE x360n_core Catch2::Catch2WithMain)
 target_compile_definitions(x360n_tests PRIVATE

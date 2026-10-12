@@ -9,3 +9,9 @@ game_root = "../../.local/inputs/titles/castle_crashers/extracted"
 file_path = "../../.local/inputs/titles/castle_crashers/extracted/default.xex"
 out_directory_path = "generated/default"
 includes = ["analysis/castle_crashers.toml"]
+
+[x360n]
+xex_sha256 = "825e9c8cb951d62ce954901488c5b783349c98cc5c03bd08ea0739df3af5d9ad"
+native_exe = "../../.local/build/titles/castle_crashers/castle_crashers.exe"
+user_data_root = "../../.local/user/castle_crashers"
+args = ["--gpu_plugin=xenos", "--mnk_mode=true"]

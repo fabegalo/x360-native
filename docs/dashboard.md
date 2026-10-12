@@ -952,3 +952,36 @@ e Castle Crashers 45 s (20261012T074353Z-cc-library-0015), ambos sem stubs, erro
 ou críticas, terminados pelo timeout. DLLs carregadas conferidas pelos hashes
 dos relatórios. Cobertura de processo/log, sem nova validação visual L4–L5.
 Diagnóstico temporário retirado e dashboard recompilada sem os wrappers.
+
+## 0.17. Primeiro ciclo pelo menu original (2026-10-12)
+
+Patch 0016: XamContentLaunchImageInternalEx monta o conteúdo existente como
+XSYSLAUNCH e registra o executável antes de terminar o título. Contrato conferido
+no XAM local 17559 (816F00E8 -> 816EFED0). Suporta HDD extraído, imagem na raiz
+e flags 0; outros modos falham explicitamente. Não força licença.
+Teste antes: 4/56 falhas; depois: 56/56. 27/27 sdkcheck e 38/38 x360n passaram.
+
+O comando x360n session titles/dash_17559/dash_17559_manifest.toml lê as
+associações x360n dos manifestos existentes, valida caminho e SHA-256 do XEX,
+e reutiliza run para cada processo. O canal transfere os bytes reais de launch
+data; não executa um caminho arbitrário recebido do convidado. Fechamento da
+janela ou saída da thread principal do jogo retornam ao perfil que iniciou a
+sessão; timeout/crash não provocam retorno automático. Boot direto preservado.
+
+Execução real, confirmada visualmente pelo usuário:
+- 20261012T075539Z-session-0-dash_17559: clique em Castle Crashers, às 04:56:13,
+  solicita XSYSLAUNCH:\default.xex, flags 0; dashboard encerra com código 0.
+- 20261012T075615Z-session-1-castle_crashers: versão 0.0.1.3, importa 1020 bytes,
+  inicializa GPU/áudio; sai com código 0 após 47511 ms, sem stubs/erros/críticas.
+- 20261012T075704Z-session-2-dash_17559: menu retorna, confirmado pelo usuário;
+  sessão encerrada normalmente depois.
+
+A DLL carregada pelo jogo foi verificada em .local/build/titles/castle_crashers;
+os relatórios guardam hashes. Permanece a limitação de janelas separadas por
+título; a janela persistente e o Guide original ainda não estão implementados.
+XamShowGuideUI continua stub; XamLoaderLaunchTitle(NULL) ainda faz assert.
+O retorno observado foi GuestExit, não uma chamada validada pelo Guide.
+O mutex do escritor evita disputa entre saída do guest e fechamento da janela.
+
+Regressão iruka com 0016: 20261012T080209Z-iruka-launch-0016, 30 s,
+0 stubs/erros/críticas, encerrada por timeout; sem nova aferição visual.

@@ -27,3 +27,11 @@ guest_path = 'game:\bootanim.xex'
 file_path = "../../.local/inputs/dashboard/17559/bootanim.xex"
 out_directory_path = "generated/bootanim"
 includes = ["analysis/bootanim_17559.toml"]
+
+# Host session associations for this exact dashboard; no global system assets.
+[x360n]
+xex_sha256 = "3ad8f38d070eaf63cadac0697e3e8802c565cbfd0825a485347c5d718014f927"
+native_exe = "../../.local/build/titles/dash_17559/dash_17559.exe"
+user_data_root = "../../.local/user/dash17559"
+args = ["--gpu_plugin=xenos", "--mnk_mode=true"]
+launch_targets = ["../castle_crashers/castle_crashers_manifest.toml"]

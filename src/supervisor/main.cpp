@@ -23,6 +23,7 @@
 #include "report.h"
 #include "sha256.h"
 #include "xex_identity.h"
+#include "session_profile.h"
 
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
@@ -409,7 +410,8 @@ std::string UtcStamp() {
 }
 
 int Run(const ProjectPaths& p, const fs::path& exe_in, std::vector<std::string> args,
-        std::string label, int timeout_s, bool rex_log, bool crash_stack) {
+        std::string label, int timeout_s, bool rex_log, bool crash_stack,
+        fs::path* handoff = nullptr) {
   fs::path exe = fs::absolute(exe_in);
   if (auto why = CheckLaunchable(p, exe)) {
     fmt::print(stderr, "run: {}\n", *why);
@@ -439,6 +441,12 @@ int Run(const ProjectPaths& p, const fs::path& exe_in, std::vector<std::string> 
   // and scanned like the captured streams.
   fs::path rex_log_file = dir / "rex.log";
   if (rex_log) args.insert(args.begin(), "--log_file=" + rex_log_file.string());
+  if (handoff) {
+    *handoff = dir / "handoff.bin";
+    // Refuse stale records, including a same-second reused run label.
+    if (fs::exists(*handoff)) return kExitUsage;
+    args.push_back("--x360n_handoff_out=" + handoff->string());
+  }
 
   auto exe_digest = DigestFile(exe);
   // The child runs in its executable's directory: relative paths in its
@@ -606,6 +614,56 @@ int Run(const ProjectPaths& p, const fs::path& exe_in, std::vector<std::string> 
   return r.exit_code == 0 ? kExitOk : kExitFailed;
 }
 
+int Session(const ProjectPaths& paths, const fs::path& manifest, int timeout) {
+  try {
+    const auto dashboard = LoadSessionProfile(paths, manifest);
+    std::vector<SessionProfile> targets;
+    for (const auto& target : dashboard.launch_targets)
+      targets.push_back(LoadSessionProfile(paths, target));
+    auto active = dashboard;
+    fs::path incoming;
+    for (unsigned step = 0; step < 32; ++step) {
+      // Revalidate the profile and input bytes at every transition.
+      active = LoadSessionProfile(paths, active.manifest);
+      auto args = active.args;
+      args.push_back("--game_data_root=" + active.game_root.string());
+      args.push_back("--user_data_root=" + active.user_root.string());
+      if (!incoming.empty()) args.push_back("--x360n_handoff_in=" + incoming.string());
+      fs::path handoff;
+      const auto result = Run(paths, active.exe, args,
+          fmt::format("session-{}-{}", step, active.name), timeout, true, false, &handoff);
+      if (result != kExitOk) return result;  // never relaunch after timeout/crash
+      LaunchRequest request;
+      if (!ReadLaunchRequest(handoff, request)) {
+        fmt::print(stderr, "session: missing or invalid handoff: {}\n", handoff.string());
+        return kExitFailed;
+      }
+      if (request.kind != LaunchRequest::Image) {
+        if (active.manifest == dashboard.manifest) return kExitOk;
+        fmt::print("session: {} {}; returning to {}\n", active.name,
+            request.kind == LaunchRequest::WindowClose ? "window closed" : "guest exited",
+            dashboard.name);
+        active = dashboard; incoming.clear();
+        continue;
+      }
+      auto target = std::find_if(targets.begin(), targets.end(),
+          [&](const auto& profile) { return MatchesLaunch(profile, request); });
+      if (target == targets.end()) {
+        fmt::print(stderr, "session: no verified AOT profile for {} (flags {:08X})\n",
+                   request.path, request.flags);
+        return kExitFailed;
+      }
+      fmt::print("session: original request matched {} ({})\n", target->name, target->sha256);
+      incoming = handoff; active = *target;
+    }
+    fmt::print(stderr, "session: transition limit reached\n");
+    return kExitFailed;
+  } catch (const std::exception& e) {
+    fmt::print(stderr, "session: {}\n", e.what());
+    return kExitUsage;
+  }
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -630,6 +688,12 @@ int main(int argc, char** argv) {
   identify->add_flag("--json", json, "Emit JSON");
 
   auto* run = app.add_subcommand("run", "Launch a build output under supervision");
+  auto* session = app.add_subcommand("session", "Follow original title requests using a dashboard manifest");
+  std::string session_manifest;
+  int session_timeout = 600;
+  session->add_option("manifest", session_manifest)->required();
+  session->add_option("--timeout", session_timeout, "Timeout per title; 0 disables it")
+      ->check(CLI::NonNegativeNumber);
   std::string exe, label;
   int timeout_s = 600;
   std::vector<std::string> child_args;
@@ -662,6 +726,7 @@ int main(int argc, char** argv) {
     return kExitUsage;
   }
   if (doctor->parsed()) return Doctor(*paths, config);
+  if (session->parsed()) return Session(*paths, session_manifest, session_timeout);
   if (run->parsed()) return Run(*paths, exe, child_args, label, timeout_s, rex_log, crash_stack);
   return kExitUsage;
 }

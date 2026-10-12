@@ -145,15 +145,16 @@ apenas grava `loader_data.launch_path` e chama `KernelState::TerminateTitle()`;
 com `path == NULL` (voltar à dashboard) dispara `assert_always`. `XamLoaderLaunchTitleEx`,
 `...ForReason` e `...OnDvd` são stubs (`xam_misc.cpp:537-539`).
 
-**[hipótese]** Dashboard e jogos rodam como processos separados; o supervisor
-faz a troca. Para isso falta, e precisa ser demonstrado:
-- um canal do título para o supervisor com o pedido de lançamento
-  (`loader_data.launch_path`, flags, launch data) no encerramento — candidato:
-  hook `OnGuestThreadExit` do `ReXApp` gravando um arquivo no diretório da execução;
-- tratamento de `XamLoaderLaunchTitle(NULL)` como "voltar ao menu" no lado do título,
-  em vez do `assert_always` atual;
-- `user_data_root` comum (perfis, saves) entre processos, sem escrita concorrente;
-- mapeamento caminho de guest → executável recompilado (por SHA-256 do XEX).
+**[fato, 2026-10-12]** Dashboard e jogos rodam como processos separados.
+`x360n session <manifest>` recebe o registro binário emitido pelo hook
+OnGuestThreadExit, preserva flags/launch data e resolve o destino por caminho
+e SHA-256 contra os perfis permitidos no manifesto da dashboard. Não segue
+crash/timeout. Saída normal do jogo ou fechamento explícito da janela retorna
+ao perfil inicial. Ciclo 17559 → Castle Crashers → 17559 confirmado pelo usuário
+(docs/dashboard.md §0.17). Ainda há janelas separadas.
+
+Pendências: XamLoaderLaunchTitle(NULL), Guide original e perfis locais persistentes.
+Os user_data_root anteriores foram preservados separadamente (sem migrar saves).
 
 Alternativa registrada, não escolhida: um único processo que carregaria títulos
 como bibliotecas, aproveitando o mecanismo de módulos acima. O runtime tem um
@@ -162,7 +163,7 @@ usuário (o pipeline de testes usa 0x82010000); trocar de título exigiria
 desmontar e recriar a memória de guest dentro do processo. Se a dashboard ocupa a
 mesma região não foi verificado.
 
-Nada disso está implementado; ver `docs/dashboard.md`.
+A alternativa no mesmo processo não foi implementada; ver `docs/dashboard.md`.
 
 ## 5. Identidade de uma recompilação
 

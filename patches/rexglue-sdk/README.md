@@ -179,3 +179,12 @@ The aggregate ABI still returns the SDK's 328-byte structure where 17559 reads
   owner directly. Public XCONTENT_DATA calls retain their prior behavior.
   Before: 2/40 assertions fail (real OPEN_EXISTING result 3); after: 40/40,
   including verification of the mounted package path. No license is granted.
+
+## Content launch (0016)
+
+Implements only the demonstrated HDD/root-image/flags-zero path of
+XamContentLaunchImageInternalEx (original XAM 17559 816F00E8 -> 816EFED0).
+Opens XSYSLAUNCH, checks the requested image and preserves loader data before
+TerminateTitle. Missing files and unsupported modes fail; no license is granted.
+Before: 4/56 assertions fail; after: 56/56. Evidence: 0016-launch-{before,after}.log.
+The host session selects an existing AOT profile by path and exact XEX hash.

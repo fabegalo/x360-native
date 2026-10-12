@@ -5,10 +5,17 @@
 #pragma once
 
 #include <rex/rex_app.h>
+#include "../../common/launch_handoff.h"
 
 class CastleCrashersApp : public rex::ReXApp {
  public:
   using rex::ReXApp::ReXApp;
+
+  void OnPreLaunchModule() override { x360n::ImportLaunchData(*runtime()); }
+  void OnGuestThreadExit(rex::system::XThread*) override {
+    x360n::ExportLaunchRequest(*runtime());
+  }
+  bool OnWindowCloseRequested() override { x360n::ExportWindowClose(); return true; }
 
   static std::unique_ptr<rex::ui::WindowedApp> Create(
       rex::ui::WindowedAppContext& ctx) {

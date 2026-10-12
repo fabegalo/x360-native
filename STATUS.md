@@ -11,8 +11,10 @@ permite que a animação termine pelas próprias verificações e retorne ao men
 run `20261012T045539Z-dash-bootanim-graceful`. 23/23 sdkcheck e iruka L1–L5 passam.
 Castle Crashers executou 45 s sem erro/crash; duas chamadas a AchievementsUI
 continuam stub. My Games agora exibe Castle Crashers 0.0.1.3 (confirmação do usuário);
-a seleção chega a XamContentLaunchImageInternalEx, ainda stub. Ciclo não executado.
-Detalhes e limites: `docs/dashboard.md` §0.16. Sem XAM original executado e sem
+o ciclo dashboard → Castle Crashers → dashboard foi executado e confirmado pelo
+usuário (§0.17). O patch 0016 e o supervisor seguem o pedido original, com hash
+do XEX e launch data preservados. Janelas ainda separadas; Guide e perfis pendentes.
+Detalhes e limites: `docs/dashboard.md` §0.17. Sem XAM original executado e sem
 compartilhar silenciosamente recursos da 17559 com outras versões.
 Segundo perfil: Retail 6717 apresenta quadros reais (blade "Xbox 360"), troca para
 a blade Mídia e move o destaque com entrada roteada; **nenhum texto aparece**:
@@ -22,7 +24,7 @@ montado; `docs/dashboard.md` §0.15.
 
 | Item | Evidência |
 |---|---|
-| ReXGlue v0.10.0 (`f5337cdc`) compila no Windows com LLVM 22.1.8 + MSVC 14.44, modo submódulo, com 15 patches locais | builds dos alvos afetados com saída 0; patches em `patches/rexglue-sdk/`, verificados no configure e em todo build |
+| ReXGlue v0.10.0 (`f5337cdc`) compila no Windows com LLVM 22.1.8 + MSVC 14.44, modo submódulo, com 16 patches locais | builds dos alvos afetados com saída 0; patches em `patches/rexglue-sdk/`, verificados no configure e em todo build |
 | Suíte PPC do SDK (166 arquivos `.s`) | 1458/1458 casos |
 | Testes unitários do SDK | 208 aprovados, 4 `SKIP` upstream, 1 falha (bug do teste, abaixo) |
 | Patches locais do SDK: 0001 tabela de funções no heap XEX certo; 0002 falha de setup sem desmontagem prematura; 0003 import com slot e thunk em registros diferentes; 0004 encerramento com a janela ainda viva; 0005 bit 0 de `KeGetImagePageTableEntry`; 0006 idioma e fallback UTF-16; 0007 despacho real de DPC | `sdkcheck.*`: testes antes/depois em `patches/rexglue-sdk/README.md`; o 0004 e o caminho do 0002 testados num `ReXApp` real (`tests/shutdown_probe`); 0006 tem 108 asserções em 2 casos |
@@ -77,7 +79,7 @@ Detalhes, mensagens exatas e classificação de cada falha: `docs/validation-iru
    Continua falhando e é contada como falha, não como sucesso.
 2. `rexglue --version` informa `0.10.0.0-dev.unknown` em modo submódulo.
 3. Submódulo do SDK aparece modificado: 15 symlinks do libmspack materializados
-   como cópias verificadas (a conta não cria symlinks) e os 15 patches locais
+   como cópias verificadas (a conta não cria symlinks) e os 16 patches locais
    (arquivos listados em `patches/rexglue-sdk/README.md`), reaplicáveis por
    `scripts/apply-sdk-patches.ps1` e registrados com hashes em `deps.lock.json`.
 4. Backport do upstream `b5e0cf8` (include de xxHash **e imgui**) em
@@ -107,7 +109,7 @@ Detalhes, mensagens exatas e classificação de cada falha: `docs/validation-iru
 
 | Bloqueio | Impacto | O que destrava |
 |---|---|---|
-| **Dashboard 17559: lançamento** — Castle Crashers aparece; a seleção chama `XamContentLaunchImageInternalEx`, ainda stub (§0.16) | pedido real registrado; jogo não iniciado pelo menu | implementar o contrato do lançamento e o canal título→supervisor |
+| **Dashboard 17559: experiência de sistema** | ciclo com Castle Crashers confirmado; janelas separadas, Guide e perfis locais incompletos | manter apresentação contínua e seguir os caminhos originais de Guide/seleção de perfil |
 | Configurações e recursos parciais | algumas páginas leem 0x1C após XConfig categoria 7; strings comuns indisponíveis retornam nulo; fonte principal SegoeXbox-Light.xtt e DASHUSER: ausentes | corrigir contratos demonstrados; textos já funcionam pelo fallback. XAM real 17559 não consta da coleção, mas o runtime usa HLE; não há abertura dele que demonstre dependência obrigatória |
 | Sem symlinks no Windows | exige o passo de materialização | opcional: Developer Mode |
 
@@ -117,7 +119,7 @@ Detalhes, mensagens exatas e classificação de cada falha: `docs/validation-iru
 - O `iruka` não foi validado em entrada, áudio, encerramento normal, execução longa nem Release.
 - `x360n` não encadeia `init/codegen/build` sozinho: `scripts/build-title.ps1`
   faz o build em quatro fases, mas `init` e o codegen inicial ainda são passos à mão.
-- Canal título→supervisor inexistente.
+- Canal título→supervisor implementado em `x360n session`; o retorno pelo Guide e XamLoaderLaunchTitle(NULL) permanece pendente.
 
 ## Próximo incremento de maior valor
 

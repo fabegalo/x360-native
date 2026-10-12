@@ -6,12 +6,13 @@ add_library(x360n_core STATIC
     paths.cpp
     child_process.cpp
     report.cpp
+    session_profile.cpp
 )
 target_include_directories(x360n_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_include_directories(x360n_core SYSTEM PUBLIC
     ${X360_REXGLUE_DIR}/include
     ${X360_REXGLUE_DIR}/thirdparty/cli11/include)
-target_link_libraries(x360n_core PUBLIC fmt::fmt)
+target_link_libraries(x360n_core PUBLIC fmt::fmt PRIVATE tomlplusplus)
 if(WIN32)
     # dbghelp: stack walk of a crashed child (x360n run --crash-stack); part of Windows.
     target_link_libraries(x360n_core PUBLIC dbghelp)

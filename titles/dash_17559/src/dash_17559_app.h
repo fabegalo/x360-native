@@ -15,6 +15,7 @@
 #include <rex/logging/assert.h>
 #include "experimental_region.h"
 #include "boot_intro.h"
+#include "../../common/launch_handoff.h"
 
 REXCVAR_DECLARE(bool, dash17559_experimental_region);
 REXCVAR_DECLARE(bool, dash17559_boot_intro);
@@ -35,8 +36,14 @@ class Dash17559App : public rex::ReXApp {
   void OnLoadXexImage(std::string& xex_image) override { xex_image = "game:\\dash.xex"; }
 
   void OnPreLaunchModule() override {
+    x360n::ImportLaunchData(*runtime());
     if (REXCVAR_GET(dash17559_boot_intro)) dash17559::InstallBootIntro(*runtime());
   }
+
+  void OnGuestThreadExit(rex::system::XThread*) override {
+    x360n::ExportLaunchRequest(*runtime());
+  }
+  bool OnWindowCloseRequested() override { x360n::ExportWindowClose(); return true; }
 
   // x360-native: dash.xex links media: to \SystemRoot itself (ObCreateSymbolicLink,
   // "Registered symbolic link: media: => \SystemRoot") and opens media:\shrdres.xzp
