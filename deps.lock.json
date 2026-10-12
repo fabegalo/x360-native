@@ -46,6 +46,17 @@
           "src/codegen/analyze.cpp": "9818c473b7ab34d03f4ae96480b97648a6d6d4e3ab8ddf6ed69082065bea3c06"
         },
         "test": "tests/sdkcheck/import_records_test.cpp"
+      },
+      {
+        "file": "patches/rexglue-sdk/0004-app-teardown-order.patch",
+        "sha256": "f68d6d6e4e2cc4c7c218eac15cc7c29723c1fb357a735657bed68d312ade4ff1",
+        "files": {
+          "src/ui/rex_app.cpp": "a7b8bcbc3e1ec2456cfaf923857aef9e2a7cb5e8fe75e26b2e28f8184ee57570"
+        },
+        "base_files": {
+          "src/ui/rex_app.cpp": "0ebbd4c0e484eb865f94de37cc71a70e3f25068b78d072cd7f577cdb811020b7"
+        },
+        "test": "tests/sdkcheck/app_shutdown_test.cpp"
       }
     ]
   },

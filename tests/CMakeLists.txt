@@ -46,16 +46,28 @@ x360n_stage_runtime_dlls(x360n_sdk_checks)
 catch_discover_tests(x360n_sdk_checks TEST_PREFIX "sdkcheck." PROPERTIES LABELS "project" TIMEOUT 60
     DISCOVERY_MODE PRE_TEST)
 
+# Minimal ReXApp built like a title, for the teardown checks in
+# sdkcheck/app_shutdown_test.cpp (patches 0002 and 0004). It runs the synthetic
+# XEX that the test writes; see shutdown_probe/probe_app.cpp.
+add_executable(x360n_shutdown_probe WIN32 shutdown_probe/probe_app.cpp)
+target_link_libraries(x360n_shutdown_probe PRIVATE rex::runtime)
+rexglue_configure_target(x360n_shutdown_probe GPU_PLUGINS xenos)
+x360n_stage_runtime_dlls(x360n_shutdown_probe PLUGIN_TARGETS rexgpu-xenos)
+
 # SDK runtime checks (link rexruntime): behavior our local SDK patches fix
 # (patches/rexglue-sdk/). Synthetic inputs only.
 add_executable(x360n_sdk_runtime_checks
     sdkcheck/synthetic_xex.cpp
     sdkcheck/function_table_test.cpp
     sdkcheck/setup_failure_test.cpp
-    sdkcheck/import_records_test.cpp)
+    sdkcheck/import_records_test.cpp
+    sdkcheck/app_shutdown_test.cpp)
 target_link_libraries(x360n_sdk_runtime_checks PRIVATE rexruntime rexcodegen Catch2::Catch2WithMain)
 target_compile_options(x360n_sdk_runtime_checks PRIVATE
     -UTRACY_ENABLE -UREXGLUE_ENABLE_PROFILING -UREXGLUE_ENABLE_PERF_COUNTERS)
+target_compile_definitions(x360n_sdk_runtime_checks PRIVATE
+    X360N_SHUTDOWN_PROBE="$<TARGET_FILE:x360n_shutdown_probe>")
+add_dependencies(x360n_sdk_runtime_checks x360n_shutdown_probe)
 # Runtime DLLs staged on every build, not only when this executable relinks.
 x360n_stage_runtime_dlls(x360n_sdk_runtime_checks)
 catch_discover_tests(x360n_sdk_runtime_checks TEST_PREFIX "sdkcheck." PROPERTIES LABELS "project" TIMEOUT 120

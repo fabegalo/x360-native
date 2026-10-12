@@ -1,7 +1,8 @@
 // A minimal XEX2 built by the tests: no encryption, no compression, two 64 KB pages
 // at 0x82000000 (.rdata with value slots and one .pdata entry, .text with the entry
 // point and import thunks in the XDK linker layout). It holds no content of any
-// title. Used by sdkcheck/import_records_test.cpp (patch 0003).
+// title. Used by sdkcheck/import_records_test.cpp (patch 0003) and
+// sdkcheck/app_shutdown_test.cpp (patches 0002, 0004).
 #pragma once
 
 #include <cstddef>

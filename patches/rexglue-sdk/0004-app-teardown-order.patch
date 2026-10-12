@@ -1,0 +1,45 @@
+x360-native local patch 0004 for rexglue-sdk f5337cdc947ff6d4c4196737e2c807a48f2a1fc2 (v0.10.0)
+
+ReXApp::OnDestroy: shut the runtime down before destroying the window.
+
+OnDestroy destroyed the window (window_.reset()) and then the runtime. After a
+successful setup the input drivers are attached to the window (AttachWindow in
+ConstructRuntime), and ~MnkInputDriver, run from InputSystem::Shutdown inside
+~Runtime, detaches from it through window->app_context(). The SDL window is
+destroyed without OnClosing to its listeners, so the driver still held the
+destroyed window: access violation in WindowedAppContext::IsInUIThread
+(under a debugger) or STATUS_HEAP_CORRUPTION, whenever the app quit by itself
+(dash.xex 2.0.17559.0 after its main thread returned).
+
+The runtime is now reset while the window still exists, and the window last.
+The graphics device keeps its dependencies: the overlays, the ImGui drawer and
+the immediate drawer are released and the presenter is detached from the
+window before, as they were. A failed setup (patch 0002) takes the same order.
+
+Test: tests/sdkcheck/app_shutdown_test.cpp (sdkcheck.* in ctest) runs
+tests/shutdown_probe, a minimal ReXApp, on a synthetic XEX whose entry point
+returns: without a GPU plugin, with the xenos (D3D12) plugin, and with a setup
+that fails after the graphics system was handed over.
+No upstream equivalent at the time of writing (development bd833a2 has the same
+order in OnDestroy).
+
+diff --git a/src/ui/rex_app.cpp b/src/ui/rex_app.cpp
+index b94fe9e..ae55246 100644
+--- a/src/ui/rex_app.cpp
++++ b/src/ui/rex_app.cpp
+@@ -602,8 +602,14 @@ void ReXApp::OnDestroy() {
+     window_->RemoveInputListener(this);
+     window_->RemoveListener(this);
+   }
+-  window_.reset();
++  // patch 0004: the runtime goes first, while the window still exists. After a
++  // successful setup its input drivers are attached to the window (AttachWindow in
++  // ConstructRuntime) and ~MnkInputDriver detaches from it; the SDL window is
++  // destroyed without OnClosing to its listeners, so destroying it first left the
++  // driver with a dangling pointer. Nothing made from the graphics device is left by
++  // now: the drawers were released and the presenter detached from the window above.
+   runtime_.reset();
++  window_.reset();
+ }
+ 
+ void ReXApp::SetGuestFrameStats(ui::DebugOverlayDialog::FrameStatsProvider provider) {

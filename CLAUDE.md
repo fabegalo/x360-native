@@ -42,6 +42,7 @@ presente não for exatamente o arquivo listado. Qualquer outra falha é regress�
   Exceções documentadas: cópias dos symlinks do libmspack (`scripts/materialize-symlinks.ps1`)
   e os patches locais de `patches/rexglue-sdk/` (autorizados em 2026-10-11), aplicados por
   `scripts/apply-sdk-patches.ps1` e verificados pelo CMake no configure e em todo build.
+  `src/ui/rex_app.cpp` (patch 0004) é compilado em cada executável: recompile o título.
 - Correções do SDK vão no `CMakeLists.txt` raiz como backport condicionado ao
   commit fixado, citando o commit upstream equivalente. Sem equivalente upstream,
   só como patch em `patches/rexglue-sdk/` com teste `sdkcheck.*` que falha sem ele

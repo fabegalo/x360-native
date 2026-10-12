@@ -271,11 +271,14 @@ diferentes têm executáveis diferentes. Pinyon Shift faz o mesmo
     `guest == 0`, registrava **zero** funções. O patch completa a entrada da mesma
     biblioteca e faz do import-função sem nenhum thunk um erro de validação
     (`ImportWithoutThunk`) em vez de função no endereço 0.
-19. **Saída normal destrói a janela antes do runtime** — *não corrigido*:
-    `ReXApp::OnDestroy` faz `window_.reset()` antes de `runtime_.reset()`
-    (`src/ui/rex_app.cpp:605-606`); `~MnkInputDriver` (`DetachFromWindow`) usa a
-    janela já destruída. Só depois de um setup bem-sucedido (o driver recebe a
-    janela por `AttachWindow`).
+19. **Saída normal destruía a janela antes do runtime** — *corrigido localmente pelo
+    patch 0004*: `ReXApp::OnDestroy` fazia `window_.reset()` antes de
+    `runtime_.reset()`; `~MnkInputDriver` (`DetachFromWindow`) usava a janela já
+    destruída, que a SDL destrói sem `OnClosing` aos ouvintes
+    (`src/ui/window_sdl.cpp:131-134`). Só depois de um setup bem-sucedido (o driver
+    recebe a janela por `AttachWindow`). Agora o runtime sai antes, com a janela
+    viva e sem nada feito do device gráfico pendurado. O `rex_app.cpp` é compilado
+    em cada executável: o título precisa ser recompilado.
 20. **Carimbo do codegen não inclui o próprio codegen**: a impressão digital
     (`src/codegen/output_stamp.cpp:67-96`) usa versão do SDK, flags e conteúdo das
     entradas. Um `rexglue` corrigido pula a geração ("up to date"); regenerar com
