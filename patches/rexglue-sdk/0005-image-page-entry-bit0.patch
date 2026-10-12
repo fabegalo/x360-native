@@ -1,0 +1,41 @@
+x360-native local patch 0005 for rexglue-sdk f5337cdc947ff6d4c4196737e2c807a48f2a1fc2 (v0.10.0)
+
+KeGetImagePageTableEntry: set bit 0 for pages of the 4 KB-page XEX heap.
+
+The export returned (address - heap base) / page size, | 0x40000000 for heaps
+with pages under 64 KB, masked with 0x400FFFFF: bit 0 was the parity of the page
+index. dash.xex 2.0.17559.0 validates the buffers of its Lua chunks (0x928EF408):
+the address must be in 0x80000000-0x9FFFFFFF and bit 0 of this value for its page
+must be set, else KeBugCheck(0xF7). It stopped on its own chunk at 0x92FD2204
+(read-only data page of its image, value 0x40002FD2).
+
+Bit 0 is now set for that heap, as in Xenia Canary 331ddf79bf96 ("[Kernel]
+KeGetImagePageTableEntry: Added bit 0 set", 2026-05-13: dashboards 14xxx and
+later require it), the code this export was taken from. The 64 KB-page heap
+(titles at 0x82000000) and non-XEX addresses are unchanged. The value stays an
+approximation of the hypervisor's; whether bit 0 means a valid or a read-only
+page is not verified.
+
+Test: tests/sdkcheck/image_page_entry_test.cpp (sdkcheck.* in ctest).
+No ReXGlue upstream equivalent at the time of writing (development bd833a2 has
+the same code).
+
+diff --git a/src/kernel/xboxkrnl/xboxkrnl_memory.cpp b/src/kernel/xboxkrnl/xboxkrnl_memory.cpp
+index 8684eda..fd07bd8 100644
+--- a/src/kernel/xboxkrnl/xboxkrnl_memory.cpp
++++ b/src/kernel/xboxkrnl/xboxkrnl_memory.cpp
+@@ -629,6 +629,14 @@ u32 KeGetImagePageTableEntry_entry(mapped_void address) {
+   result /= heap->page_size();
+   if (heap->page_size() < 65536) {
+     result |= 0x40000000;
++    // patch 0005: bit 0 set for pages of the 4 KB-page XEX heap, as in Xenia Canary
++    // 331ddf79bf96 ("KeGetImagePageTableEntry: Added bit 0 set"; dashboards 14xxx and
++    // later require it). dash.xex 2.0.17559.0 checks bit 0 for the pages of its own
++    // Lua chunks (0x928EF408) and calls KeBugCheck(0xF7) when it is clear; with the
++    // page index alone that was the case for every even page (0x92FD2204). Like the
++    // rest of this value it approximates the hypervisor's; whether bit 0 means a
++    // valid or a read-only page is not verified.
++    result |= 1;
+   }
+   return result & 0x400FFFFF;
+ }

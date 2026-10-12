@@ -61,7 +61,8 @@ add_executable(x360n_sdk_runtime_checks
     sdkcheck/function_table_test.cpp
     sdkcheck/setup_failure_test.cpp
     sdkcheck/import_records_test.cpp
-    sdkcheck/app_shutdown_test.cpp)
+    sdkcheck/app_shutdown_test.cpp
+    sdkcheck/image_page_entry_test.cpp)
 target_link_libraries(x360n_sdk_runtime_checks PRIVATE rexruntime rexcodegen Catch2::Catch2WithMain)
 target_compile_options(x360n_sdk_runtime_checks PRIVATE
     -UTRACY_ENABLE -UREXGLUE_ENABLE_PROFILING -UREXGLUE_ENABLE_PERF_COUNTERS)

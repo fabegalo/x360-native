@@ -57,6 +57,17 @@
           "src/ui/rex_app.cpp": "0ebbd4c0e484eb865f94de37cc71a70e3f25068b78d072cd7f577cdb811020b7"
         },
         "test": "tests/sdkcheck/app_shutdown_test.cpp"
+      },
+      {
+        "file": "patches/rexglue-sdk/0005-image-page-entry-bit0.patch",
+        "sha256": "6cd4a216515760d55734ffef3095befadfcd7dcae32728ef7b570ee0523677d3",
+        "files": {
+          "src/kernel/xboxkrnl/xboxkrnl_memory.cpp": "9c6a7e403872f822da35db38567ddc65b72ad82dda2a2ae244c8fa4007fb1849"
+        },
+        "base_files": {
+          "src/kernel/xboxkrnl/xboxkrnl_memory.cpp": "80a1a7a55b75a6c05d0e57406cfe2db11ce97afc42140683e92ba400e516cc07"
+        },
+        "test": "tests/sdkcheck/image_page_entry_test.cpp"
       }
     ]
   },

@@ -283,6 +283,11 @@ diferentes têm executáveis diferentes. Pinyon Shift faz o mesmo
     (`src/codegen/output_stamp.cpp:67-96`) usa versão do SDK, flags e conteúdo das
     entradas. Um `rexglue` corrigido pula a geração ("up to date"); regenerar com
     `codegen --ignore-stamp` (não `--force`, que também desliga a validação).
+21. **`KeGetImagePageTableEntry` com bit 0 = paridade do índice da página** —
+    *corrigido localmente pelo patch 0005*: a fórmula veio do Xenia antes do commit
+    `331ddf79bf96`, que liga o bit 0 nas páginas do heap XEX de 4 KB. A dashboard
+    17559 exige esse bit para os buffers dos seus trechos Lua (`KeBugCheck(0xF7)`).
+    O valor continua uma aproximação do que o hypervisor devolve.
 
 Patches locais (base `f5337cdc`): `patches/rexglue-sdk/README.md`; aplicação
 reproduzível por `scripts/apply-sdk-patches.ps1` e verificação no CMake.
