@@ -1191,5 +1191,11 @@ Nova execução com 0025: 20261012T103500Z-session-0-dash_17559 drena 8 frames
 ao terminar a intro; às 07:35:33.164 termina as 33 apresentações e atende o
 pedido original de lançamento. Às 07:35:33.478 drena 1536 bytes pendentes, sem
 timeout. 20261012T103535Z-session-1-castle_crashers importa 1020 bytes e inicializa
-GPU/áudio/controle. Retorno desta última execução e percepção do estalo ainda
-aguardam teste manual; o ciclo anterior com 0024 está confirmado acima.
+GPU/áudio/controle. Às 07:36:56.812 o jogo pede XamLoaderLaunchTitle(NULL,0x100); às 07:36:56.971
+drena 768 bytes de áudio. Exit 0 em 81622 ms, zero stubs/erros/críticas.
+20261012T103658Z-session-2-dash_17559 importa os 1020 bytes, kind=4/flags=100,
+e retorna sem intro no mesmo HWND 18484624. Usuário confirmou: “voltaram a
+responder, nao ouve mais cortes”, após relatar entrada temporariamente ausente.
+Não foi isolada a causa dessa perda temporária; não houve patch de input neste
+incremento. A percepção de ausência de cortes está confirmada para esse ciclo,
+sem alegar equivalência audiovisual medida contra hardware ou outras versões.

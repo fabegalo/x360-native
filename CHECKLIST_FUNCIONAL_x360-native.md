@@ -38,10 +38,11 @@ buffer sincronizada. Ciclo 17559 → Castle Crashers → 17559 sem intro repetid
 o pedido VdPersistDisplay agora chega, mas sua preservação e a apresentação do XAM
 ainda não são atendidas. Não marcar fidelidade da transição como concluída.
 Incremento §0.21: imagem convidada preservada e sequência de gamma do XAM 17559
-implementada no perfil, usando rotinas D3D originais recompiladas. Ciclo repetido
-sem intro no retorno; usuário relatou “parece que melhorou”, sem aprovar ainda
-fidelidade integral. Drenagem do áudio corrigida após reproduzir descarte de
-frames; 35/35 sdkcheck e 40/40 supervisor passam. Validação auditiva final pendente.
+implementada no perfil, usando rotinas D3D originais recompiladas. Após corrigir
+a drenagem do áudio, ciclo completo repetido sem intro no retorno; usuário
+confirmou entrada recuperada e ausência de cortes. 35/35 sdkcheck e 40/40
+supervisor passam. Resultado limitado a 17559/Castle Crashers/D3D12 Windows;
+sem comparação audiovisual medida contra console nem aprovação das outras versões.
 Os itens gerais abaixo continuam pendentes quando a evidência cobre só este par.
 
 ## 1. Inicialização e seleção da dashboard — P0
@@ -139,7 +140,7 @@ Nome, identificador e estado de entrada precisam permanecer coerentes; as implem
 - [ ] Compartilhar limpeza de recursos quando apropriado, sem perder a identidade dos eventos.
 - [ ] Testar retorno original, fechamento de janela, saída normal e falha separadamente.
 - [ ] Repetir vários ciclos sem processos órfãos, pedidos antigos, controles presos ou crescimento indevido de recursos.
-- [ ] Preservar a transição visual original entre dashboard e jogo; há melhora relatada após preservar a imagem e atender a sequência do XAM 17559 (§0.21), ainda sem aprovação integral.
+- [ ] Preservar a transição visual original entre dashboard e jogo; ausência de cortes confirmada no ciclo 17559/Castle Crashers após §0.21; fidelidade geral e outras versões ainda pendentes.
 
 Diagnóstico da transição: a execução de 06:09 registrou callbacks originais de
 encerramento que o runtime armazena mas não executa; VdPersistDisplay apareceu

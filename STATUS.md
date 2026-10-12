@@ -20,9 +20,10 @@ Retorno original agora confirmado: Castle Crashers chamou XamLoaderLaunchTitle(N
 por timeout (sem nova captura visual). A continuidade visual entre títulos ainda
 tem corte relatado pelo usuário; o ciclo funcional não aprova essa fidelidade.
 Incremento §0.21: preservação da imagem e sequência de gamma da 17559 atendidas
-pelo perfil; usuário relatou melhora e ciclo repetiu sem intro na volta. Áudio
-pendente agora é drenado antes de fechar o stream; validação auditiva em curso.
-35/35 sdkcheck e 40/40 supervisor passam. Fidelidade integral ainda não aprovada.
+pelo perfil; ciclo repetiu sem intro na volta. Áudio pendente é drenado antes
+de fechar o stream. Usuário confirmou entrada recuperada e ausência de cortes.
+35/35 sdkcheck e 40/40 supervisor passam. Resultado restrito ao par testado;
+sem equivalência audiovisual medida contra console.
 Checklist oficial de cobertura: `CHECKLIST_FUNCIONAL_x360-native.md`.
 Detalhes e limites: `docs/dashboard.md` §0.19. Sem XAM original executado e sem
 compartilhar silenciosamente recursos da 17559 com outras versões.
