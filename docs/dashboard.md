@@ -695,6 +695,16 @@ lançamento de jogo. Outros esquemas/flags continuam sem implementação.
 Run `20261012T044046Z-dash-uri-hub`: usuário viu somente Voltar na biblioteca.
 O crash posterior em 0x1C foi no caminho de configurações já registrado em §0.12.
 Ainda não houve solicitação real de lançamento de Castle Crashers.
+Repetição com log debug `20261012T050600Z-dash-library-debug`: clique às
+02:06:28.426, notificação entregue a quatro listeners, construção de locators
+shrdres e novos listeners da interface. Não aparece chamada de enumeração de
+conteúdo nesse caminho. A causa da tela sem conteúdo ainda não está isolada;
+não se atribui essa ausência somente à instalação dos jogos.
+Conferência adicional do XAM: `0x819A07B0` consulta app FC, mensagem 58003.
+Resultado negativo ou 0x1510F1 seleciona a expansão BuiltIn; os demais valores
+selecionam Dash.MP.ContentExplorer.lex. O SDK atual retorna erro nessa consulta,
+coerente com a expansão BuiltIn usada. Isso não prova que o serviço 58003 esteja
+correto; a rota alternativa não foi forçada para tentar esconder a falha.
 
 Intro: `--dash17559_boot_intro=true`; sem a opção continua o boot direto.
 O original não tem entry point e expõe três ordinais. Export 1 recebe hmodule
@@ -719,6 +729,36 @@ houve duas chamadas ao stub XamShowAchievementsUI durante entrada do usuário.
 Foi execução independente: **o ciclo dashboard → jogo → dashboard não ocorreu**.
 Todas as versões antigas/betas preservadas continuam candidatas, não compatíveis
 por associação com a 17559. A região experimental permanece inalterada.
+
+### 0.14. Segundo perfil: Retail 6717 (Blades)
+
+`titles/dash_6717` usa apenas `versions/6717/blades_retail/dash.xex` e seus
+recursos. SHA-256 `f8a51ea30406e3b8737e0cdbdad44867743869d59f58d4bc0f4b83e154cb87d8`,
+2.0.6717.0, entry 0x92114CC8. Mesmo runtime, supervisor e scripts de build;
+sem XAM, fonte, intro ou região experimental emprestados da 17559.
+Nove entradas de análise conferidas permitiram gerar/compilar. Permanece
+aviso do writer: salto de unwind 0x9222D200 para epílogo 0x9222D1B0; o código
+gerado abortará se alcançar esse caminho. Não foi usado `--force`.
+
+Run `20261012T051619Z-dash6717-first-run`: parou em XUsbcamGetState,
+LR=92356FB4. A consulta de câmera desconectada já testada na 17559 agora está
+em `titles/common/camera_state.cpp`, ligada pelos dois perfis. Não cria câmera
+nem altera o comportamento da 17559. O chamador original 6717 em 0x92356FA0
+confere estado 2 antes de inicializar captura, como na 17559.
+Run `20261012T051841Z-dash6717-camera-state`: passou dessa consulta, registrou
+callback gráfico 0x92129940 e parou no import XAM ordinal **0xAE6**, thunk
+0x92739D94, LR=0x9210F1F4. A entrada não existe na tabela do SDK fixado;
+a armadilha é explícita. Ainda sem quadro demonstrado ou compatibilidade.
+Identidade passou no teste existente `local.integration targets`.
+Após extrair a consulta comum, 23/23 sdkcheck passaram novamente. A 17559 foi
+recompilada e repetiu a transição em `20261012T052114Z-dash17559-intro-shared-camera`:
+intro às 02:21:23.684, retorno original às 02:21:34.870 e callback da dashboard
+às 02:21:34.872. Os módulos carregados foram conferidos no processo: runtime,
+Xenos e bootanim vieram de `.local/build/titles/dash_17559/` (registro local em
+`.local/logs/dash17559-final-loaded-modules.txt`).
+Esse diagnóstico foi encerrado pelo supervisor aos 50 s, sem crítica/crash,
+mas com os stubs e erros de serviços já conhecidos. O timeout não é validação
+de encerramento normal; a transição da intro ocorreu antes dele.
 
 ## 1. Por que isto é um alvo próprio
 

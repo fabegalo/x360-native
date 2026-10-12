@@ -6,7 +6,7 @@
 // the reason and the guest return address (LR). Nothing is emulated and no value
 // is returned, so a call can never pass for support (CLAUDE.md, rule 3). The
 // exceptions, the disconnected camera state and unsupported camera creation,
-// have explicit implementations below.
+// have explicit implementations below and in ../common/camera_state.cpp.
 // Title-specific: the placeholder names sub_<thunk> are this XEX's thunk
 // addresses. docs/dashboard.md §0.2 and §0.5 have the evidence.
 #include <cstdint>
@@ -56,9 +56,7 @@ extern "C" REX_FUNC(__imp__XUsbcamSetConfig) { Trap(ctx, "xboxkrnl 0x21C XUsbcam
 // state 2 on to further camera setup. The SDK's unbuilt shim
 // (src/kernel/xboxkrnl/xboxkrnl_usbcam.cpp) and Xenia say "0 = not connected" as well.
 // First called during startup (run 20261012T002758Z-dash17559-run-4, LR=0x9236857C).
-extern "C" REX_FUNC(__imp__XUsbcamGetState) {
-  ctx.r3.u64 = 0;  // not connected
-}
+// Implementation shared with 6717 in titles/common/camera_state.cpp.
 extern "C" REX_FUNC(__imp__XUsbcamReadFrame) { Trap(ctx, "xboxkrnl 0x21E XUsbcamReadFrame", kNotBuilt); }
 extern "C" REX_FUNC(__imp__XUsbcamSetView) { Trap(ctx, "xboxkrnl 0x220 XUsbcamSetView", kNotBuilt); }
 // No camera backend exists. Report the unsupported operation, never the SDK's

@@ -75,6 +75,7 @@ target_sources(x360n_sdk_runtime_checks PRIVATE sdkcheck/dashboard_uri_test.cpp
     ../titles/dash_17559/src/launch_uri.cpp)
 target_sources(x360n_sdk_runtime_checks PRIVATE
     sdkcheck/dashboard_camera_test.cpp
+    ${PROJECT_SOURCE_DIR}/titles/common/camera_state.cpp
     ${PROJECT_SOURCE_DIR}/titles/dash_17559/src/unresolved_imports.cpp)
 target_link_libraries(x360n_sdk_runtime_checks PRIVATE rexruntime rexcodegen Catch2::Catch2WithMain)
 target_compile_options(x360n_sdk_runtime_checks PRIVATE

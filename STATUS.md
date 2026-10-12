@@ -13,6 +13,9 @@ Castle Crashers executou 45 s sem erro/crash; duas chamadas a AchievementsUI
 continuam stub. Biblioteca ainda vazia e ciclo pelo menu não executado.
 Detalhes e limites: `docs/dashboard.md` §0.13. Sem XAM original executado e sem
 compartilhar silenciosamente recursos da 17559 com outras versões.
+Segundo perfil: Retail 6717 compila e executa até o import XAM 0xAE6 ausente
+(LR=0x9210F1F4), após corrigir a consulta de câmera com a implementação comum
+de estado desconectado. Ainda sem quadro demonstrado; `docs/dashboard.md` §0.14.
 
 | Item | Evidência |
 |---|---|

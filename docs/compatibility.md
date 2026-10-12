@@ -22,6 +22,17 @@ Títulos compilados em `RelWithDebInfo` (ver `docs/validation-iruka.md`).
 
 ## Dashboard
 
+Estado atual (§0.13–0.14): 17559 usa a fonte original e a intro AOT original,
+com som/imagem confirmados e retorno natural à dashboard em cerca de 11 s.
+My Games recebe a URI expandida e abre uma tela sem conteúdo; a enumeração
+de jogos ainda não foi observada e o ciclo com Castle Crashers não ocorreu.
+23/23 sdkcheck, iruka L1–L5 e execução separada do Castle Crashers por 45 s
+validaram esse incremento (duas chamadas ao stub AchievementsUI no jogo).
+Retail 6717 tem perfil separado: compila, passa da consulta de câmera e para
+no XAM ordinal 0xAE6, LR=0x9210F1F4, antes de quadro demonstrado.
+
+Os parágrafos seguintes preservam os resultados históricos anteriores.
+
 Atualização 2026-10-12: **primeiro quadro real renderizado**, com blocos e ícones,
 e mudança de painel durante entrada (`20261012T030938Z-dash-jmp-fixed`). O patch
 0007 executa o DPC que libera novas submissões; a câmera retorna erro explícito

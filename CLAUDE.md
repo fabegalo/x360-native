@@ -9,6 +9,11 @@ código nativo e a **dashboard original** como alvo próprio (lançar jogo, salv
 encerrar, voltar ao menu). "Todos os jogos" é meta de longo prazo, nunca uma
 afirmação.
 
+Todas as versões originais da dashboard, inclusive antigas e betas do acervo,
+são objetivo permanente. 17559 é referência inicial; módulos, fontes e hipóteses
+ficam associados ao perfil correspondente. Versões não suportadas permanecem
+pendentes, sem herdar silenciosamente componentes da referência.
+
 ## Comandos (PowerShell, raiz do repositório)
 
 ```powershell

@@ -1,0 +1,16 @@
+# Retail 6717, first codegen: six unresolved tail calls to these five starts.
+# Confirmed via x360n-content disasm, outside .pdata, after return/tail-call.
+# Entries only: let discovery determine extent. No force or instruction patch.
+# Pending: writer warns about 0x9222D200 -> 0x9222D1B0, an unwind transfer
+# into the epilogue of .pdata function 0x9222D170. Generated code traps if hit;
+# do not treat this interior address as an independent function without analysis.
+[functions]
+0x92291100 = {} # selection leaf after bctr at 0x922910FC
+0x92292E90 = {} # argument adapter, ends b 0x92293618 at 0x92292EA8
+0x9255F278 = {} # output 10 or E_OUTOFMEMORY for null; final blr 0x9255F298
+0x925B2A78 = {} # increment object+8; blr at 0x925B2A88
+0x92249F08 = {} # tagged value dispatch, after tail-call at 0x92249F04
+0x92249EA8 = {} # tail target discovered from 0x92249F64; after b at 0x92249EA4
+0x92249E58 = {} # tail target from 0x92249F04, after b at 0x92249E54
+0x92249DE8 = {} # tail target from 0x92249EA4, after blr at 0x92249DE4
+0x92249D88 = {} # tail target from 0x92249E54, after prior .pdata end
