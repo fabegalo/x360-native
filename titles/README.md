@@ -30,3 +30,10 @@ A identidade é sempre o SHA-256 do XEX (`x360n identify --json`); regiões,
 atualizações e mídias diferentes têm executáveis diferentes. Nenhum arquivo de
 jogo ou de sistema entra aqui: os XEX ficam em `.local/inputs`, o build em
 `.local/build/titles/<nome>`.
+
+Para adicionar arquivos de um novo jogo, use
+`.local/inputs/titles/<nome>/source/` para o pacote original e
+`.local/inputs/titles/<nome>/extracted/` para o XEX e todos os recursos extraídos.
+Hashes e identificação ficam em `metadata/`, ao lado de `extracted/`. Veja
+“Adicionar novos títulos” no `README.md` da raiz. Colocar arquivos ali não cria
+automaticamente um projeto AOT nesta pasta.

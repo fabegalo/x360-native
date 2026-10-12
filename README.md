@@ -89,6 +89,32 @@ Tudo que é da máquina ou derivado de conteúdo do usuário fica em `.local/`
 fornecidos pelo usuário com autorização), `runs/`, `logs/`. Nada de conteúdo
 proprietário entra no repositório.
 
+### Adicionar novos títulos
+
+Crie `.local/inputs/titles/<nome>/`, usando um nome simples como `meu_jogo`:
+
+```text
+.local/inputs/titles/meu_jogo/
+  source/       pacote original, ISO, ZIP ou conjunto de arquivos original
+  extracted/    default.xex e todos os recursos, preservando a estrutura do jogo
+  metadata/     hashes e identificação produzidos durante a análise
+```
+
+Se já estiver extraído, copie o conteúdo completo para `extracted/`, com
+`default.xex` diretamente nessa pasta quando esse for seu nome original. Se
+estiver em pacote, guarde o conjunto completo em `source/`; a extração depende
+do formato. Não misture versões/regiões/discos: use uma pasta de título distinta
+para cada variante. `metadata/` pode ser criada depois, pela análise.
+
+Adicionar os arquivos é a primeira etapa: cada novo título ainda precisa de
+identificação, configuração, geração AOT e compilação. A pasta `titles/` na raiz
+do repositório guarda essas configurações, não os arquivos do jogo.
+Dashboards ficam em `.local/inputs/dashboard/versions/<versão>/<variante>/`, com
+fontes em `dashboard/resources/fonts/` e catálogo em
+`dashboard/metadata/organization/catalog.csv`. O alvo ativo 17559 mantém
+`dashboard/17559/` para preservar o build. Saves e perfis do runtime ficam em
+`.local/user/<nome>/`. Há também um guia local em `.local/inputs/LEIA-ME.txt`.
+
 ## Escopo
 
 Offline. Xbox Live, multiplayer online e periféricos especiais (Kinect etc.)

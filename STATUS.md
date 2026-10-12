@@ -14,7 +14,7 @@ XDK "Dolphin" da `rexglue/demo-iruka`), com as limitações abaixo.
 | Programa PowerPC próprio pelo `recompile-tests` | `x360n.ppc.*` 4/4 |
 | Supervisor `x360n doctor / identify / run` | testes `x360n.*`, `env.doctor`; `identify` classifica XEX2/XEX1/outra variante/inválido; `run` grava hashes do exe e das DLLs ao lado dele, diagnóstico do log e, com `--crash-stack`, a pilha de uma exceção não tratada |
 | **Primeiro XEX real pelo fluxo completo** (identify → init → codegen → build → run) | `docs/validation-iruka.md`: `default.xex` `66ec34f2…` lido pelo carregador, 5222 funções geradas de novo pela v0.10.0 (determinístico), compilado, renderiza e anima por 30–40 s sem crash, 0 chamadas a stubs no log |
-| Entradas locais | `local.inventory …` classifica os 621 XEX de `.local/inputs` (609 XEX2 lidos, 4 XEX1, 7 outras variantes, 1 inválido — listados em `.local/runs/inventory/inventory.tsv`); `local.integration targets …` confere os 4 alvos de `tests/local/integration_targets.tsv` |
+| Entradas locais | Após organizar e deduplicar as dashboards, `local.inventory …` classifica 484 XEX de `.local/inputs` (472 XEX2 lidos, 4 XEX1, 7 outras variantes, 1 inválido — listados em `.local/runs/inventory/inventory.tsv`); inventário passou com 956 asserções e `local.integration targets …` passou com 35, conferindo os 4 alvos de `tests/local/integration_targets.tsv` |
 | **Segundo alvo: Castle Crashers (XBLA)** | `docs/validation-castle-crashers.md`: pacote LIVE extraído com `x360n-content` (708 arquivos), XEX criptografado + LZX lido pelo SDK, 3 bloqueios diagnosticados por desmontagem e corrigidos com ajustes de análise, menu principal renderizado; teclado e controle funcionando **segundo teste manual do usuário**; mesmo resultado com o runtime corrigido (run `cc-run-patched`) |
 | Regressão da referência | `local.iruka.regression` (L1–L5) passa dentro da suíte completa, com o runtime corrigido |
 | **Dashboard 17559: inicialização avançou** | `docs/dashboard.md` §0.10: região experimental de 64 KiB RW, zerada uma vez, desligável, com teste on/off; patch 0006 corrige idioma e ponteiro de fallback. 39 141 funções registradas; GPU chega a resolve/textura 1280×720 no caminho de apresentação. Janela preta, thread principal espera conclusão; **menu e navegação não alcançados** |
@@ -68,11 +68,14 @@ Detalhes, mensagens exatas e classificação de cada falha: `docs/validation-iru
 7. A demo `demo-iruka` **como publicada** não compila com a v0.10.0 (foi escrita
    para v0.1.0): formato de configuração, `find_package` de SDK instalado e API C++
    mudaram. É incompatibilidade de integração, não do XEX.
-8. `.local/inputs/dashboard/Dashboards/` (1223 arquivos, adicionada pelo usuário)
-   tem 11 XEX de pré-lançamento que `x360n identify` reconhece mas não lê — `XEX0`,
-   `XEX?`, `XEX-` em `Blades/Beta/{0000,1529,1640}` e `XEX1` em `Blades/Beta/{1838,1839}`
-   — e 1 arquivo inválido, `NXE/Beta/8955/dash.xex` (cabeçalho XEX2 sem o primeiro
-   byte). Ficam no inventário como não suportados, com o motivo; nenhum foi alterado.
+8. A coleção de dashboards fornecida pelo usuário está organizada em
+   `.local/inputs/dashboard/versions/<versão>/<variante>/`, com fontes em
+   `resources/fonts/` e correspondência dos nomes antigos em
+   `metadata/organization/catalog.csv`. A 17559 ativa mantém `dashboard/17559/`.
+   Os XEX de pré-lançamento em variantes `blades_beta` continuam não suportados
+   (`XEX0`, `XEX?`, `XEX-`, `XEX1`); `versions/8955/nxe_beta/dash.xex` continua
+   inválido (cabeçalho XEX2 sem o primeiro byte). Organização e deduplicação não
+   corrigem esses formatos; os arquivos únicos foram preservados.
 9. Imports `XUsbcam*` sem símbolo no runtime (`src/kernel/CMakeLists.txt:53`) e
    ordinais fora da tabela sem definição gerada: títulos que os usam não linkam
    sem definições próprias (`docs/architecture.md` §7, itens 13–14).

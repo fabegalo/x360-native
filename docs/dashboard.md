@@ -18,11 +18,20 @@ referência de comportamento; não é usado como executor).
 ## 0. Pacote 17559
 
 Arquivos em `.local/inputs/dashboard/17559/` (ignorado pelo git). Nenhum foi
-alterado (hashes reconferidos); hashes em `.local/inputs/dashboard/17559.sha256`,
-identidade em `.local/inputs/dashboard/17559-*.identify.json`. Nenhum arquivo de
-outra versão foi usado — inclusive os de `.local/inputs/dashboard/Dashboards/`
-(Blades, NXE, Metro, Kinect, Fonts; 1223 arquivos), que apareceram durante o
-trabalho e não foram abertos além dos nomes de diretório.
+alterado (hashes reconferidos); hashes em `.local/inputs/dashboard/metadata/17559/17559.sha256`,
+identidade em `.local/inputs/dashboard/metadata/17559/17559-*.identify.json`. Nenhum arquivo de
+outra versão foi usado no alvo ativo. A coleção fornecida posteriormente está em
+`.local/inputs/dashboard/versions/<versão>/<variante>/`, e as fontes em
+`dashboard/resources/fonts/`.
+
+Na organização de 2026-10-12, os 311 conjuntos da coleção e o alvo ativo foram
+comparados por caminhos relativos, tamanhos e SHA-256: 242 conjuntos preservados,
+70 pastas redundantes removidas (205 arquivos, 364 861 233 bytes). Cada arquivo
+removido tem uma cópia verificada no destino indicado em
+`dashboard/metadata/organization/removed-duplicates.csv`; os nomes antigos e
+variantes permanecem em `catalog.csv`. Conjuntos com recursos diferentes não
+foram tratados como duplicados. O complemento `17559 Full` está separado em
+`versions/17559/metro_v2_retail_full_readme/`, sem misturá-lo ao alvo ativo.
 
 Ferramentas (todas sobre o carregador e o decodificador do próprio SDK):
 `x360n-content dump-image | imports | resources | disasm | xref | callers`,

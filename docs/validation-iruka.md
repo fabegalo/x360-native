@@ -22,7 +22,7 @@ diferença média entre capturas 7,016. DLLs e hashes estão no `report.json` do
 | Caminho real do XEX | `default.xex` está na **raiz** do zip; extraído em `assets/` fica `assets/default.xex`, como o `iruka_config.toml` espera |
 | `default.xex` | SHA-256 `66ec34f2f558fe4e419d926108bf458a5c634ea8b5f76771b48ba633ecb61e31`, 2 658 304 bytes |
 | Recursos preservados | `Media/Fonts/Arial_16.xpr`, `Media/Meshes/{Dolphin1,2,3,SeaFloor}.xbg`, `Media/Resource.xpr`, `Media/Shaders/{DolphinTween,SeaFloor}.xvu`, `ShadeCausticsPixel.xpu` |
-| Cópias | `.local/inputs/titles/iruka/extracted/` (nosso fluxo) e `assets/` da demo; hashes em `.local/inputs/titles/iruka/*.sha256`; após todas as execuções, idênticos e sem arquivos novos |
+| Cópias | `.local/inputs/titles/iruka/extracted/` (nosso fluxo) e `assets/` da demo; hashes em `.local/inputs/titles/iruka/metadata/*.sha256` (caminhos relativos às respectivas árvores de dados); pacote original em `source/assets.zip`; após todas as execuções, idênticos e sem arquivos novos |
 
 ## 1. A demo como publicada, contra o SDK v0.10.0
 

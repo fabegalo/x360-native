@@ -1,7 +1,8 @@
 # Validação experimental: Castle Crashers (XBLA)
 
 Segundo alvo experimental, a partir de arquivos fornecidos pelo usuário em
-`.local/inputs/titles/Castle Crashers (World) (XBLA)/` (não versionados).
+`.local/inputs/titles/castle_crashers/source/` (não versionados; pacote realocado
+da antiga pasta `Castle Crashers (World) (XBLA)`, com SHA-256 preservado).
 Data: 2026-10-11. SDK: ReXGlue v0.10.0 `f5337cdc`; LLVM 22.1.8; build `RelWithDebInfo`.
 
 ## Entrada
@@ -10,7 +11,7 @@ Data: 2026-10-11. SDK: ReXGlue v0.10.0 `f5337cdc`; LLVM 22.1.8; build `RelWithDe
 |---|---|
 | Pacote | `584108B7/000D0000/F9432A7FE407A3C196C95D0FFD4A540937FD4EEC58`, 146 616 320 bytes, SHA-256 `ed7b65a8de5a70fabd311df4e542cf21adad9a75ac568b5f0a8c404c31d41e74` |
 | Cabeçalho STFS (`x360n-content info`) | magic `LIVE`; content type `0x000D0000` (`kArcadeTitle`, `include/rex/system/xcontent.h:65`); title id `584108B7`; media id `1DF2F0B2`; versão `0x00000103`; volume type 0 (STFS); nome "Castle Crashers" |
-| Extração (`x360n-content extract`) | 708 arquivos, 143 818 078 bytes, 0 erros, em `.local/inputs/titles/castle_crashers/extracted/`; manifesto SHA-256 em `extracted.sha256`; o pacote original não é alterado |
+| Extração (`x360n-content extract`) | 708 arquivos, 143 818 078 bytes, 0 erros, em `.local/inputs/titles/castle_crashers/extracted/`; manifesto SHA-256 em `metadata/extracted.sha256` (caminhos relativos a `extracted/`); o pacote original não é alterado |
 | `default.xex` | 765 952 bytes, SHA-256 `825e9c8cb951d62ce954901488c5b783349c98cc5c03bd08ea0739df3af5d9ad`; único executável do pacote (nenhum outro `.xex`/`.dll`) |
 
 `x360n-content` usa o `StfsContainerDevice` do SDK. A rotina de dump do próprio
