@@ -2,7 +2,9 @@
 
 **Objetivo:** escolher uma dashboard original → executar a intro correspondente → entrar em um perfil → listar e selecionar um jogo pela interface original → atender ao pedido original de lançamento → jogar → salvar → atender ao pedido original de retorno → voltar à mesma dashboard, sem repetir a intro.
 
-Windows x64; recompilação estática com ReXGlue; suporte progressivo a todas as versões originais de dashboard, incluindo antigas e betas, e ao catálogo de jogos Xbox 360.
+Windows x86-64 é o primeiro alvo funcional relatado, não uma restrição permanente. Windows, Linux e macOS são objetivos, com estado separado por sistema e arquitetura. Recompilação estática com ReXGlue; suporte progressivo a todas as versões originais de dashboard, incluindo antigas e betas, e ao catálogo de jogos Xbox 360.
+
+**Objetivo de distribuição:** aplicativo pronto nas Releases do GitHub do proprietário do projeto. Uma pessoa sem conhecimento de programação deve conseguir baixar → extrair/instalar → abrir → seguir o assistente → fornecer conteúdo autorizado → preparar → entrar na dashboard → selecionar um jogo → jogar → salvar → voltar à dashboard. Facilidade de uso não significa compatibilidade universal; requisitos e limitações precisam ser claros antes da preparação.
 
 **Legenda:** `[x]` é um marco relatado pelo usuário/agentes, somente no alvo e no alcance indicados. Não houve verificação direta do repositório nesta elaboração. `[ ]` significa requisito ainda sem demonstração completa nos relatos; não prova ausência de implementação. Os itens gerais precisam ser validados por versão, jogo e funcionalidade. Um recurso só é exigido numa dashboard quando faz parte daquela versão.
 
@@ -269,6 +271,154 @@ Estes são objetivos adicionais de cobertura, não pré-requisitos para concluir
 - [ ] Manter a falha conhecida do teste `unit.Depfile escapes characters make treats as syntax` contada como falha enquanto não houver correção demonstrada.
 - [ ] Exigir evidência posterior para marcar as duas correções de retorno anunciadas pelo Astra; intenção de corrigir não conta como teste aprovado.
 
+## 15. Aplicativo e distribuição multiplataforma — P0/P1
+
+Os requisitos das seções 15–19 foram incorporados em 2026-10-12 e permanecem pendentes; não alteram os marcos funcionais já registrados. Esta atualização documental não autoriza iniciar ports, trocar o backend validado, migrar de SDK ou implementar todos os recursos agora.
+
+Referência de facilidade de uso: [Pinyon Shift](https://github.com/arcanite24/pinyon-shift#play), com download do launcher, importação e preparação guiada descritos no README. Usar a experiência como referência, sem copiar a interface ou substituir nossa arquitetura para se parecer com ela. Um ZIP de código-fonte com instruções para montar um ambiente de desenvolvimento não satisfaz este requisito.
+
+### 15.1. Estado por sistema e arquitetura
+
+| Sistema | Arquitetura candidata | Evidência funcional atual neste checklist | Pacote real e aceite para leigos |
+|---|---|---|---|
+| Windows | x86-64 | Execuções locais relatadas da 17559, intro e Castle Crashers, com os limites acima. | Pendente. |
+| Windows | ARM64 | Viabilidade, implementação e execução não demonstradas. | Pendente; não anunciado como suportado. |
+| Linux | x86-64 | Execução funcional não demonstrada. | Pendente; não anunciado como suportado. |
+| Linux | ARM64 | Viabilidade, implementação e execução não demonstradas. | Pendente; não anunciado como suportado. |
+| macOS | x86-64 | Viabilidade, implementação e execução não demonstradas. | Pendente; não anunciado como suportado. |
+| macOS | ARM64 | Viabilidade, implementação e execução não demonstradas. | Pendente; não anunciado como suportado. |
+
+Arquiteturas candidatas só se tornam alvos suportados quando viáveis, implementadas e testadas. Um preset ou build bem-sucedido não comprova suporte funcional. Registrar por combinação: interface, preparação, gráficos, áudio, controles, armazenamento, lançamento, retorno e atualização, com versões e limitações.
+
+- [ ] Preservar o núcleo compartilhado e isolar diferenças de sistema, implementando portabilidade progressivamente sem perder os resultados existentes.
+- [ ] Oferecer um caminho para os demais alvos sem tornar o fluxo normal exclusivamente dependente de PowerShell, Win32 ou D3D12; manter o backend validado durante a evolução.
+- [ ] Anunciar suporte somente para combinações de sistema/arquitetura com evidência funcional e aceite do pacote real.
+
+### 15.2. Pacote principal e conteúdo distribuível
+
+O requisito é **um download principal por sistema/arquitetura suportados**, não um executável universal. Exemplos de apresentação: ZIP com aplicativo principal no Windows, pacote de uso simples no Linux e `.app` em ZIP ou pacote adequado no macOS. Não exigir que o usuário escolha e combine downloads de DLLs, ferramentas e componentes internos.
+
+- [ ] Identificar claramente o pacote principal por versão, sistema e arquitetura.
+- [ ] Oferecer aplicativo principal com nome e ícone claros.
+- [ ] Abrir a interface gráfica sem terminal no uso normal.
+- [ ] Incluir dependências redistribuíveis ou obtê-las pelo assistente quando necessário e permitido.
+- [ ] Eliminar dependência de caminhos, arquivos ou ferramentas presentes apenas no computador do desenvolvedor.
+- [ ] Dar instruções curtas sobre qual pacote baixar e qual aplicativo abrir.
+- [ ] Distinguir o aplicativo pronto dos arquivos de código-fonte oferecidos pelo GitHub.
+- [ ] Apresentar requisitos mínimos e limitações da release antes de iniciar preparação demorada.
+- [ ] Distribuir apenas o aplicativo e componentes com redistribuição permitida; verificar as autorizações aplicáveis.
+- [ ] Excluir dashboards, jogos, fontes proprietárias, XAM, bootanim e código derivado desses binários quando não houver autorização aplicável. Recompilação para código nativo não concede direito de redistribuição.
+- [ ] Explicar no assistente os arquivos externos necessários e aceitar conteúdo autorizado somente nos formatos efetivamente suportados, sem esconder a primeira preparação.
+
+## 16. Primeira execução e preparação guiadas — P0
+
+### 16.1. Assistente e importação
+
+- [ ] Abrir a interface mesmo sem jogos ou dashboard preparados.
+- [ ] Verificar sistema, arquitetura, recursos gráficos, espaço, permissões e dependências relevantes.
+- [ ] Oferecer mensagens compreensíveis; PT-BR e inglês são os idiomas iniciais planejados.
+- [ ] Permitir seleção visual das pastas de conteúdo e dados.
+- [ ] Importar por seleção de arquivos/pastas e, quando apropriado, arrastar e soltar.
+- [ ] Identificar automaticamente versões e componentes.
+- [ ] Dispensar edição manual de TOML/JSON, renomeação de arquivos e montagem manual da estrutura de pastas.
+- [ ] Informar arquivo ausente, incompatível ou corrompido com ação concreta para prosseguir.
+- [ ] Preservar arquivos originais e conjuntos funcionais durante a importação e preparação.
+- [ ] Impedir mistura silenciosa de componentes de dashboards diferentes para completar conjuntos.
+- [ ] Mostrar o próximo passo em linguagem simples e reservar stack traces e informações técnicas para “Ver detalhes”.
+
+Reutilizar os arquivos, inventários e downloads já obtidos no projeto; não reiniciar buscas para preencher estes requisitos.
+
+### 16.2. Preparação automatizada
+
+- [ ] Iniciar e acompanhar a preparação pela interface.
+- [ ] Dispensar configuração manual de Git, CMake, compilador, Python ou SDK pelo usuário.
+- [ ] Gerenciar ferramentas indispensáveis pelo aplicativo, com fontes verificáveis e versões controladas.
+- [ ] Informar e obter consentimento quando instalação, download relevante ou elevação de privilégios forem necessários.
+- [ ] Preferir funcionamento sem privilégios administrativos.
+- [ ] Informar espaço necessário e downloads antes de começar.
+- [ ] Exibir progresso por etapas reais, sem porcentagens inventadas.
+- [ ] Distinguir trabalho em andamento, espera e erro.
+- [ ] Permitir cancelamento seguro e recuperação após interrupção.
+- [ ] Reaproveitar etapas válidas, reconstruindo somente o que precisa mudar.
+- [ ] Evitar recompilação desnecessária a cada abertura.
+- [ ] Permitir uso offline do conteúdo preparado nas funcionalidades independentes de serviços externos.
+
+Ferramentas podem executar internamente; instalação, configuração e diagnóstico da cadeia de desenvolvimento não devem ser transferidos ao usuário leigo.
+
+## 17. Uso normal, recuperação e dados — P0/P1
+
+### 17.1. Interface e limites do assistente externo
+
+- [ ] Selecionar a dashboard por uma interface compreensível.
+- [ ] Mostrar estados claros: pronto, precisa preparar, falta componente e ainda não suportado.
+- [ ] Fornecer padrões seguros e separar configurações avançadas.
+- [ ] Manter textos legíveis e escala adequada à tela.
+- [ ] Permitir navegação por teclado e controle nas telas aplicáveis.
+- [ ] Suportar espaços, acentos e caracteres não ASCII nos caminhos em todo o fluxo.
+- [ ] Tratar corretamente fechamento, perda de foco e retomada.
+- [ ] Oferecer recuperação sem perder perfis ou saves.
+
+O assistente externo cuida de instalação, preparação, escolha do ambiente e recuperação. Ele não substitui a dashboard original, My Games, Guide ou o fluxo de perfis por telas semelhantes para esconder funções ausentes. Lançamento e retorno continuam sujeitos às solicitações originais e aos critérios da seção 5.
+
+### 17.2. Erros, atualização e privacidade
+
+- [ ] Explicar erros em linguagem simples e oferecer ações pertinentes: tentar novamente, selecionar arquivos ou abrir diagnóstico.
+- [ ] Permitir revisar relatórios de diagnóstico antes de compartilhar.
+- [ ] Não enviar automaticamente conteúdo, saves, credenciais ou informações pessoais.
+- [ ] Guiar atualizações preservando perfis, saves, conteúdo e preparações ainda compatíveis.
+- [ ] Recuperar atualizações interrompidas e permitir retornar a uma versão anterior quando viável.
+- [ ] Informar claramente onde os dados ficam armazenados.
+- [ ] Remover o aplicativo sem apagar dados pessoais sem escolha explícita.
+- [ ] Tratar verificações de segurança de cada sistema sem instruir a desativar antivírus ou proteções como procedimento normal.
+
+Não criar agora serviços de atualização, telemetria ou ferramentas apenas para preencher o checklist.
+
+## 18. Aceite do pacote para usuários leigos — bloqueador da release
+
+Usar o **pacote real da release** em cada sistema/arquitetura anunciado como suportado, em computador com sistema e hardware suportados, usuário comum, sem o repositório e sem ambiente de desenvolvimento previamente configurado. A árvore do desenvolvedor não substitui este teste.
+
+- [ ] Demonstrar o fluxo completo: baixar o pacote correto → abrir → importar conjunto suportado → concluir preparação guiada → entrar na dashboard → usar o perfil → selecionar jogo validado → jogar e salvar → retornar pelo fluxo original → fechar → reabrir e recuperar progresso.
+- [ ] Testar dependência ausente, com diagnóstico e recuperação compreensíveis.
+- [ ] Testar espaço insuficiente sem comprometer originais ou dados existentes.
+- [ ] Testar caminho com espaços e acentos.
+- [ ] Interromper e recuperar a preparação com segurança.
+- [ ] Atualizar com dados existentes e verificar sua preservação.
+- [ ] Registrar cada intervenção técnica necessária; enquanto o fluxo normal exigir um desenvolvedor, este aceite permanece pendente.
+- [ ] Validar e registrar por sistema/arquitetura: interface, preparação, gráficos, áudio, controles, armazenamento, lançamento, retorno e atualização.
+
+O aceite comprova facilidade de uso para o conjunto e o ambiente testados, não compatibilidade universal nem todos os jogos na primeira release.
+
+## 19. Commits e preparação da primeira publicação — bloqueador obrigatório
+
+### 19.1. Regra vigente para novos commits
+
+Todos os novos commits próprios devem usar **Conventional Commits**: `tipo(escopo): descrição objetiva da mudança`, com tipo conforme o conteúdo real (`feat`, `fix`, `refactor`, `perf`, `test`, `docs`, `build`, `ci`, `chore`). Exemplos: `fix(launcher): preserve dashboard return requests` e `docs(checklist): add cross-platform usability requirements`.
+
+Títulos, corpos e rodapés não devem atribuir autoria a Claude, Codex, Astra ou outros assistentes, nem incluir “Generated with...”, “Implemented by...” ou `Co-Authored-By` de assistente. Preservar créditos humanos, licenças, avisos de terceiros e referências técnicas necessárias ao upstream. Não apagar instruções de agentes nem falsificar autoria de terceiros. Regra persistente também em `CLAUDE.md`.
+
+### 19.2. Revisão e reescrita antes do primeiro push
+
+**A primeira publicação está bloqueada até revisar e reescrever as mensagens de TODOS os commits locais próprios que serão publicados**, aplicando a regra acima — não apenas os mais recentes. Não executar nesta entrega: reservar um momento exclusivo, sem outra sessão modificando o repositório.
+
+- [ ] Identificar todo o intervalo próprio ainda não publicado e verificar se há commits já compartilhados.
+- [ ] Preservar backup recuperável e verificável fora do conjunto que será publicado.
+- [ ] Preservar separadamente alterações não commitadas e arquivos não rastreados necessários, sem limpeza destrutiva.
+- [ ] Reescrever mensagens com base no conteúdo real de cada commit.
+- [ ] Preservar commits úteis, sem reduzir tudo a um “initial commit” para esconder o histórico.
+- [ ] Preservar conteúdo, autores humanos e datas, sem falsificar resultados nem atribuir trabalho de terceiros ao projeto.
+- [ ] Não reescrever o histórico upstream das dependências.
+- [ ] Validar títulos, corpos e rodapés de todo o intervalo próprio.
+- [ ] Conferir que a reescrita exclusivamente de mensagens preservou os snapshots correspondentes.
+- [ ] Manter localmente o mapeamento entre hashes antigos e novos.
+- [ ] Atualizar referências internas afetadas de forma controlada, sem alterar hashes de dependências externas por engano.
+- [ ] Auditar todo o histórico a publicar, não só o último commit, para excluir credenciais, dados pessoais, conteúdo proprietário e demais arquivos indevidos.
+- [ ] Não publicar backups ou referências que reincorporem histórico anterior sem revisão.
+- [ ] Criar tags de release somente sobre o histórico final validado.
+
+Se houver commits já compartilhados, informar a situação antes de alterar esse histórico; não executar force-push automaticamente. Preparar o histórico não autoriza push, publicação de release ou mudança de visibilidade do repositório.
+
+**Portões de publicação:** revisão/reescrita e auditoria de todo o histórico próprio antes do primeiro push; conteúdo distribuível autorizado e aceite do pacote real (§15 e §18) antes de anunciar a release para usuários. Todos permanecem pendentes. Esta entrega modifica documentação, sem reescrita, publicação ou novos ports.
+
 ## Marcos de entrega
 
 | Marco | Resultado a demonstrar |
@@ -277,6 +427,7 @@ Estes são objetivos adicionais de cobertura, não pré-requisitos para concluir
 | M2 — plataforma multiversão | 6717 e 17559 utilizam a infraestrutura compartilhada com resultados separados e sem regressão. |
 | M3 — catálogo crescente | Outros jogos e versões, com atualizações, módulos e modos efetivamente testados. |
 | M4 — fidelidade ampliada | Funções locais adicionais da dashboard, rede e periféricos conforme sua disponibilidade e validação. |
+| M5 — distribuição utilizável | Pacote real aprovado pelo fluxo da seção 18 para cada sistema/arquitetura anunciado, com conteúdo distribuível autorizado e histórico final revisado. |
 
 ## Regra de trabalho para os agentes
 

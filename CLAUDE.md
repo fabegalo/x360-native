@@ -6,7 +6,9 @@ somente itens demonstrados, respeitando o alvo e o limite de cada execução.
 
 ## Objetivo
 
-Plataforma Windows x64 sobre ReXGlue: jogos de Xbox 360 recompilados AOT para
+Plataforma sobre ReXGlue, com Windows x86-64 como primeiro alvo funcional relatado
+e Windows, Linux e macOS como objetivos, com estados separados por sistema e
+arquitetura (x86-64 e ARM64 quando viáveis e implementados): jogos de Xbox 360 recompilados AOT para
 código nativo e a **dashboard original** como alvo próprio (lançar jogo, salvar,
 encerrar, voltar ao menu). "Todos os jogos" é meta de longo prazo, nunca uma
 afirmação.
@@ -15,6 +17,47 @@ Todas as versões originais da dashboard, inclusive antigas e betas do acervo,
 são objetivo permanente. 17559 é referência inicial; módulos, fontes e hipóteses
 ficam associados ao perfil correspondente. Versões não suportadas permanecem
 pendentes, sem herdar silenciosamente componentes da referência.
+
+A distribuição deve oferecer um aplicativo pronto nas Releases, com um download
+principal por sistema/arquitetura suportados e importação/preparação guiadas,
+sem exigir ambiente de desenvolvimento configurado pelo usuário. Um build ou
+preset não comprova suporte funcional. O assistente não substitui a dashboard,
+My Games, Guide ou perfis originais. Preservar o núcleo compartilhado, isolar
+diferenças de sistema e manter os resultados existentes; isso não autoriza troca
+imediata de backend/SDK ou ports paralelos. Requisitos e aceite do pacote real:
+`CHECKLIST_FUNCIONAL_x360-native.md` §§15–18, ainda pendentes. Não distribuir
+conteúdo proprietário ou código derivado dos binários sem autorização aplicável.
+
+## Commits e primeira publicação — regra permanente
+
+- Todos os novos commits próprios usam Conventional Commits:
+  `tipo(escopo): descrição objetiva da mudança`. Escolher o tipo pelo conteúdo
+  real: `feat`, `fix`, `refactor`, `perf`, `test`, `docs`, `build`, `ci` ou `chore`.
+  Exemplo: `docs(checklist): add cross-platform usability requirements`.
+- Não incluir referências a Claude, Codex, Astra ou outros assistentes como
+  autores no título, corpo ou rodapés. Não incluir “Generated with...”,
+  “Implemented by...” ou `Co-Authored-By` atribuído a assistente.
+- Preservar créditos humanos, licenças, avisos de terceiros e referências
+  técnicas necessárias ao upstream. Não apagar instruções de agentes nem
+  falsificar autoria de terceiros.
+- **Bloqueador antes do primeiro push:** revisar e reescrever as mensagens de
+  TODOS os commits locais próprios que serão publicados, aplicando estas regras,
+  não apenas os últimos. Não reescrever agora; fazê-lo em momento exclusivo,
+  sem outra sessão modificando o repositório, seguindo o checklist §19.2.
+- Antes da reescrita, identificar o intervalo, guardar backup recuperável e
+  verificável fora do conjunto a publicar e preservar separadamente alterações
+  não commitadas e arquivos não rastreados necessários, sem limpeza destrutiva.
+  Preservar commits úteis, conteúdo, autores humanos, datas e histórico upstream;
+  não condensar tudo num “initial commit” para esconder o histórico.
+- Validar todas as mensagens e snapshots correspondentes; guardar mapeamento
+  local de hashes antigos/novos e atualizar referências internas com cuidado,
+  sem mudar hashes de dependências externas por engano. Auditar todo o histórico
+  a publicar para credenciais, dados pessoais, conteúdo proprietário e arquivos
+  indevidos. Não publicar backups/referências que reincorporem histórico sem
+  revisão; criar tags de release sobre o histórico final validado.
+- Se houver commits já compartilhados, informar antes de alterar esse histórico;
+  não executar force-push automaticamente. A preparação não autoriza push,
+  publicação de release ou mudança de visibilidade do repositório.
 
 ## Comandos (PowerShell, raiz do repositório)
 
