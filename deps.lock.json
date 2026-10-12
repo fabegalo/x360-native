@@ -29,6 +29,23 @@
           "src/system/runtime.cpp": "f55bd64cf055f7ad288c282883e94feec8fb53631a6807654f7a516ec7ab4af7"
         },
         "test": "tests/sdkcheck/setup_failure_test.cpp"
+      },
+      {
+        "file": "patches/rexglue-sdk/0003-import-records-across-libraries.patch",
+        "sha256": "39ca70edb6444fa3a42495c8a9d7bd241b9972849e4ac2b35974ed4a6002d5bd",
+        "files": {
+          "src/system/xex_module.cpp": "de376f50d35cb3e9559de41c95008b9bec53c1e9dedf8f983f6928f23effb561",
+          "src/codegen/phase_register.cpp": "5cfccd37d29d8cc4eacad6f0b76b69f56526b90f19dfb216b2fe9dd383193935",
+          "include/rex/codegen/analysis_errors.h": "088eb6768d0839b1fc3cc13c4d766f4f1130a4bf82556b7984d3b095b33e11eb",
+          "src/codegen/analyze.cpp": "aea3234592d2b8076af8591d5244f4b934504049f27e53f1d68d2cae614f042a"
+        },
+        "base_files": {
+          "src/system/xex_module.cpp": "ad048f1db3afa24bed6989cd44c64a84724c3835b1e5b65faebef36008486e4e",
+          "src/codegen/phase_register.cpp": "84ef12f4746e32cbead96e8fc3d192e2f24f891d11aa4585b5317f7aa0770775",
+          "include/rex/codegen/analysis_errors.h": "6dcb746ccc0407b777941182f362a7170885d9aee198f21217090b9789d9977b",
+          "src/codegen/analyze.cpp": "9818c473b7ab34d03f4ae96480b97648a6d6d4e3ab8ddf6ed69082065bea3c06"
+        },
+        "test": "tests/sdkcheck/import_records_test.cpp"
       }
     ]
   },

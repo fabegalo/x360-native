@@ -49,9 +49,11 @@ catch_discover_tests(x360n_sdk_checks TEST_PREFIX "sdkcheck." PROPERTIES LABELS 
 # SDK runtime checks (link rexruntime): behavior our local SDK patches fix
 # (patches/rexglue-sdk/). Synthetic inputs only.
 add_executable(x360n_sdk_runtime_checks
+    sdkcheck/synthetic_xex.cpp
     sdkcheck/function_table_test.cpp
-    sdkcheck/setup_failure_test.cpp)
-target_link_libraries(x360n_sdk_runtime_checks PRIVATE rexruntime Catch2::Catch2WithMain)
+    sdkcheck/setup_failure_test.cpp
+    sdkcheck/import_records_test.cpp)
+target_link_libraries(x360n_sdk_runtime_checks PRIVATE rexruntime rexcodegen Catch2::Catch2WithMain)
 target_compile_options(x360n_sdk_runtime_checks PRIVATE
     -UTRACY_ENABLE -UREXGLUE_ENABLE_PROFILING -UREXGLUE_ENABLE_PERF_COUNTERS)
 # Runtime DLLs staged on every build, not only when this executable relinks.

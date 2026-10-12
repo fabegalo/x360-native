@@ -262,17 +262,24 @@ diferentes têm executáveis diferentes. Pinyon Shift faz o mesmo
     versão só copiava num build completo, e um build de um alvo só deixou a DLL
     velha ao lado do teste do patch 0003); o `x360n run` grava o SHA-256 das DLLs usadas.
 
-18. **Import registrado no endereço 0** — *não corrigido*: um ordinal com o slot de
-    valor num registro de import e o thunk em outro (dashboard 17559: `xam 0x8E2`)
-    gera um símbolo em `thunk_address = 0` (`XexModule::PopulateBinaryData`,
-    `src/system/xex_module.cpp:1163-1171`); sendo função no SDK, o codegen o põe
-    em `PPCFuncMappings[0]` como `{ 0x0, … }`, e o runtime, que para no primeiro
-    `guest == 0`, registra **zero** funções (`Registered 0 recompiled functions`).
+18. **Import registrado no endereço 0** — *corrigido localmente pelo patch 0003*:
+    o carregador pareava slot de valor e thunk de um import só dentro de um registro
+    de biblioteca (`XexModule::SetupLibraryImports`). Com o slot num registro e o
+    thunk em outro (dashboard 17559: `xam 0x8E2`), a metade sem thunk virava símbolo
+    em `thunk_address = 0` (`PopulateBinaryData`); sendo função no SDK, o codegen a
+    punha em `PPCFuncMappings[0]` como `{ 0x0, … }`, e o runtime, que para no primeiro
+    `guest == 0`, registrava **zero** funções. O patch completa a entrada da mesma
+    biblioteca e faz do import-função sem nenhum thunk um erro de validação
+    (`ImportWithoutThunk`) em vez de função no endereço 0.
 19. **Saída normal destrói a janela antes do runtime** — *não corrigido*:
     `ReXApp::OnDestroy` faz `window_.reset()` antes de `runtime_.reset()`
     (`src/ui/rex_app.cpp:605-606`); `~MnkInputDriver` (`DetachFromWindow`) usa a
     janela já destruída. Só depois de um setup bem-sucedido (o driver recebe a
     janela por `AttachWindow`).
+20. **Carimbo do codegen não inclui o próprio codegen**: a impressão digital
+    (`src/codegen/output_stamp.cpp:67-96`) usa versão do SDK, flags e conteúdo das
+    entradas. Um `rexglue` corrigido pula a geração ("up to date"); regenerar com
+    `codegen --ignore-stamp` (não `--force`, que também desliga a validação).
 
 Patches locais (base `f5337cdc`): `patches/rexglue-sdk/README.md`; aplicação
 reproduzível por `scripts/apply-sdk-patches.ps1` e verificação no CMake.

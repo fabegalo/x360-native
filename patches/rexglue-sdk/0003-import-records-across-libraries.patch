@@ -1,0 +1,150 @@
+x360-native local patch 0003 for rexglue-sdk f5337cdc947ff6d4c4196737e2c807a48f2a1fc2 (v0.10.0)
+
+Imports: pair a function import's slot and thunk across the records of one
+library; a function import without any thunk is a codegen validation error.
+
+XexModule::SetupLibraryImports paired the two records of a function import
+(type 0 = value slot, type 1 = thunk) by ordinal only inside one
+xex2_import_library record. dash.xex 2.0.17559.0 has xam split over two
+records, with the slot of xam 0x8E2 in the first and its thunk in the second.
+The slot half became an import symbol at address 0 (PopulateBinaryData), the
+codegen registered __imp__XamNuiGetSupportString there, and the first
+PPCFuncMappings entry was { 0x0, ... }: Runtime::Setup stops at guest == 0 and
+registered no recompiled function ("No function registered at 92196610").
+
+The loader now completes the half-filled entry of an earlier record of the
+same library (slot-only with thunk-only, either order) instead of keeping two
+halves; entries complete on both sides, or two halves of the same kind, stay
+separate. The Register phase no longer maps an import symbol at address 0: a
+known function import without a thunk adds an ImportWithoutThunk analysis
+error (generation is blocked unless --force), an unresolved one keeps its
+"Cannot resolve ordinal" error. Variable imports are unchanged.
+
+Test: tests/sdkcheck/import_records_test.cpp (sdkcheck.* in ctest), on a
+synthetic XEX2 built by the test.
+No upstream equivalent at the time of writing (development bd833a2 identical
+in these functions).
+
+diff --git a/include/rex/codegen/analysis_errors.h b/include/rex/codegen/analysis_errors.h
+index 8b28608..e9ce4a4 100644
+--- a/include/rex/codegen/analysis_errors.h
++++ b/include/rex/codegen/analysis_errors.h
+@@ -28,6 +28,7 @@ class AnalysisErrors {
+     JumpTargetOutOfBounds,
+     DiscontinuousFunction,
+     UnimplementedInsn,
++    ImportWithoutThunk,  // patch 0003: function import with a value slot only
+   };
+ 
+   struct Entry {
+diff --git a/src/codegen/analyze.cpp b/src/codegen/analyze.cpp
+index c5f3d14..a3c76cd 100644
+--- a/src/codegen/analyze.cpp
++++ b/src/codegen/analyze.cpp
+@@ -104,6 +104,8 @@ const char* AnalysisErrors::CategoryName(Category cat) {
+       return "DiscontinuousFunction";
+     case Category::UnimplementedInsn:
+       return "UnimplementedInsn";
++    case Category::ImportWithoutThunk:  // patch 0003
++      return "ImportWithoutThunk";
+     default:
+       return "Unknown";
+   }
+diff --git a/src/codegen/phase_register.cpp b/src/codegen/phase_register.cpp
+index 7d1fa44..ec87e4d 100644
+--- a/src/codegen/phase_register.cpp
++++ b/src/codegen/phase_register.cpp
+@@ -457,6 +457,7 @@ VoidResult registerEntryPoints(CodegenContext& ctx) {
+     size_t resolvedCount = 0;
+     size_t variableCount = 0;
+     size_t unresolvedCount = 0;
++    size_t unthunkedCount = 0;
+ 
+     for (const auto& sym : binary.importSymbols()) {
+       auto at_pos = sym.name.find('@');
+@@ -486,12 +487,29 @@ VoidResult registerEntryPoints(CodegenContext& ctx) {
+         }
+       }
+ 
+-      if (resolvedName.empty()) {
++      const bool resolved = !resolvedName.empty();
++      if (!resolved) {
+         REXCODEGEN_ERROR("Cannot resolve ordinal {} from {}", ordinal, lib_name);
+         resolvedName = fmt::format("sub_{:X}", sym.address);
+         unresolvedCount++;
+       }
+ 
++      // patch 0003: a symbol at address 0 is an import record with a value slot and no
++      // thunk; there is no guest code to map. Address 0 also ends PPCFuncMappings, so a
++      // function there left every recompiled function unregistered at runtime. A known
++      // function import without a thunk is a validation error (code may call it through
++      // the slot, which nothing fills); an unresolved one is already reported above.
++      if (sym.address == 0) {
++        if (resolved) {
++          ctx.errors.Add(AnalysisErrors::Category::ImportWithoutThunk, 0,
++                         fmt::format("import {} ({}) has a value slot and no thunk", sym.name,
++                                     resolvedName));
++        }
++        REXCODEGEN_ERROR("Import {} has no thunk; not registered as a function", sym.name);
++        unthunkedCount++;
++        continue;
++      }
++
+       auto* node = graph.addImportFunction(sym.address, resolvedName);
+       if (node && node->canDiscover()) {
+         node->discoverAsImport();
+@@ -503,8 +521,9 @@ VoidResult registerEntryPoints(CodegenContext& ctx) {
+     }
+ 
+     REXCODEGEN_TRACE(
+-        "Analyze: loaded {} imports ({} resolved, {} unresolved, {} variables skipped)",
+-        importCount, resolvedCount, unresolvedCount, variableCount);
++        "Analyze: loaded {} imports ({} resolved, {} unresolved, {} variables skipped, {} without "
++        "thunk)",
++        importCount, resolvedCount, unresolvedCount, variableCount, unthunkedCount);
+   }
+ 
+   // Register save/restore helpers
+diff --git a/src/system/xex_module.cpp b/src/system/xex_module.cpp
+index 0726516..18178d1 100644
+--- a/src/system/xex_module.cpp
++++ b/src/system/xex_module.cpp
+@@ -1120,6 +1120,38 @@ bool XexModule::SetupLibraryImports(const std::string_view name,
+     }
+   }
+ 
++  // patch 0003: one library can be split over several import library records, and
++  // the value slot (type 0) and the thunk (type 1) of one function import can fall in
++  // different records (dash.xex 2.0.17559.0, xam 0x8E2). Complete the half-filled
++  // entry of the earlier record instead of keeping two halves: the half without a
++  // thunk became an import symbol at address 0 (PopulateBinaryData), which the
++  // codegen mapped as a function there. Two halves of the same kind, or entries
++  // complete on both sides, stay separate.
++  for (auto& earlier : import_libs_) {
++    if (earlier.name != library_info.name) {
++      continue;
++    }
++    for (auto& prev : earlier.imports) {
++      auto it = import_map.find(static_cast<uint16_t>(prev.ordinal));
++      if (it == import_map.end()) {
++        continue;
++      }
++      const auto& cur = it->second;
++      const bool slot_then_thunk =
++          prev.value_address && !prev.thunk_address && !cur.value_address && cur.thunk_address;
++      const bool thunk_then_slot =
++          !prev.value_address && prev.thunk_address && cur.value_address && !cur.thunk_address;
++      if (!slot_then_thunk && !thunk_then_slot) {
++        continue;
++      }
++      prev.value_address |= cur.value_address;
++      prev.thunk_address |= cur.thunk_address;
++      REXLOG_DEBUG("Paired import {}:{:#x} across import library records (slot {:08X}, thunk {:08X})",
++                   base_name, prev.ordinal, prev.value_address, prev.thunk_address);
++      import_map.erase(it);
++    }
++  }
++
+   // Convert map to vector (sorted by ordinal for consistent output)
+   std::vector<uint16_t> ordinals;
+   ordinals.reserve(import_map.size());
