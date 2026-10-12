@@ -19,6 +19,7 @@
 //   ABI       r1, r2, r13-r31 and f14-f31 are unchanged across each XAM call
 //   errors    executing an unregistered address returns the dispatcher's failure
 //             value and leaves memory unchanged
+#include <algorithm>
 #include <array>
 #include <cstdint>
 #include <cstring>
@@ -55,6 +56,9 @@ REXCVAR_DEFINE_STRING(x360n_xam17559_root, "", "x360n",
                       "x360nsys:");
 REXCVAR_DEFINE_STRING(x360n_avatar_catalog_17559, "", "x360n",
                       "Host path of AvatarAssetPack.toc from the 17559 storage pack FFFE07DF00000002");
+REXCVAR_DEFINE_BOOL(motocross_xam_aot_probe_strb, false, "Motocross Madness",
+                    "Diagnostic, with the probe: decode every STRB blob of the 17559 catalog with "
+                    "XAM's original Structured Binary reader and compare with the bytes");
 
 namespace {
 
@@ -112,6 +116,117 @@ uint64_t Call(rex::runtime::FunctionDispatcher* d, rex::runtime::ThreadState* t,
   Check(SameNonVolatile(before, Snapshot(*ctx)),
         std::string("ABI: non-volatile registers preserved across ") + what);
   return r;
+}
+
+// Same as Call, for loops: ABI breaks are counted instead of logged one by one.
+uint64_t CallQuiet(rex::runtime::FunctionDispatcher* d, rex::runtime::ThreadState* t, uint32_t fn,
+                   std::initializer_list<uint64_t> args, uint32_t* abi_breaks) {
+  std::vector<uint64_t> a(args);
+  auto* ctx = t->context();
+  const auto before = Snapshot(*ctx);
+  const uint64_t r = d->Execute(t, fn, a.data(), a.size());
+  if (!SameNonVolatile(before, Snapshot(*ctx))) ++*abi_breaks;
+  return r;
+}
+
+// XAM's Structured Binary ("STRB") decoding, the first step of every asset in GetAssets
+// (0x81966FC8): a memory stream over the blob (0x8196D568: {vtable 0x816331C4, data,
+// size}, Read = memcpy at slot 1), the reader (0x8196DBE8: magic, version, 24-byte
+// header, error text at +40), its checks (0x8196D5E8 valid, 0x81930508 format GUID) and
+// the document parse (0x8196E610 + 0x8196EE50). They read only guest memory and XAM's
+// static vtables: no XAM global, heap, thread or service. The blobs come from the C++
+// catalog reader; the reference is the bytes themselves.
+struct StrbResult {
+  uint8_t valid, parsed;
+  uint8_t guid[16];
+  uint8_t version_bytes[3];  // reader +22, +23, +24
+  std::string error;         // reader +40
+};
+
+StrbResult DecodeStrb(rex::runtime::FunctionDispatcher* d, rex::runtime::ThreadState* t,
+                      rex::memory::Memory* memory, uint32_t scratch, std::span<const uint8_t> blob,
+                      uint32_t* abi_breaks) {
+  constexpr uint32_t kStream = 0x000, kReader = 0x040, kDoc = 0x240, kData = 0x400;
+  auto* host = memory->TranslateVirtual<uint8_t*>(scratch);
+  std::memset(host, 0, kData);
+  std::memcpy(host + kData, blob.data(), blob.size());
+  CallQuiet(d, t, 0x8196D568, {scratch + kStream, scratch + kData, blob.size()}, abi_breaks);
+  CallQuiet(d, t, 0x8196DBE8, {scratch + kReader, scratch + kStream}, abi_breaks);
+  StrbResult r{};
+  r.valid = uint8_t(CallQuiet(d, t, 0x8196D5E8, {scratch + kReader}, abi_breaks));
+  const uint32_t guid = uint32_t(CallQuiet(d, t, 0x81930508, {scratch + kReader}, abi_breaks));
+  if (guid >= scratch && guid + 16 <= scratch + kData)
+    std::memcpy(r.guid, memory->TranslateVirtual(guid), 16);
+  std::memcpy(r.version_bytes, host + kReader + 22, 3);
+  const char* text = reinterpret_cast<const char*>(host + kReader + 40);
+  r.error.assign(text, strnlen(text, 128));
+  if (r.valid) {
+    CallQuiet(d, t, 0x8196E610, {scratch + kDoc, 0, 0, 0, 0, 0}, abi_breaks);
+    r.parsed = uint8_t(CallQuiet(d, t, 0x8196EE50, {scratch + kDoc, scratch + kReader}, abi_breaks));
+  }
+  return r;
+}
+
+void RunStrbDecode(const x360n::avatar::AvatarToc& toc) {
+  auto* runtime = rex::Runtime::instance();
+  auto* thread = rex::runtime::ThreadState::Get();
+  auto* memory = runtime->memory();
+  auto* dispatcher = runtime->function_dispatcher();
+  size_t largest = 0, used = 0;
+  for (size_t i = 0; i < toc.size(); ++i) largest = std::max(largest, toc.Blob(i).size());
+  const uint32_t scratch = memory->SystemHeapAlloc(uint32_t(0x400 + largest));
+  if (!scratch) {
+    Check(false, "strb: allocate the scratch buffer");
+    return;
+  }
+  // The format GUID as XAM stores it (.rdata 0x81632EF8) and as the blobs carry it.
+  uint8_t xam_guid[16];
+  std::memcpy(xam_guid, memory->TranslateVirtual(0x81632EF8), 16);
+  uint32_t abi = 0, ok = 0, mismatched = 0;
+  std::string first_bad;
+  for (size_t i = 0; i < toc.size(); ++i) {
+    const auto blob = toc.Blob(i);
+    if (toc.record(i).empty) continue;
+    ++used;
+    const auto r = DecodeStrb(dispatcher, thread, memory, scratch, blob, &abi);
+    // Independent reading of the same bytes: "STRB", version 1, the format GUID at +6,
+    // and the bytes the reader copies (header +16, +17 and +20, i.e. blob +22, +23, +26).
+    const bool expected = blob.size() >= 30 && std::memcmp(blob.data(), "STRB", 4) == 0 &&
+                          blob[4] == 1 && std::memcmp(blob.data() + 6, xam_guid, 16) == 0;
+    const bool same = r.valid == 1 && r.parsed == 1 && r.error.empty() &&
+                      std::memcmp(r.guid, blob.data() + 6, 16) == 0 &&
+                      r.version_bytes[0] == blob[22] && r.version_bytes[1] == blob[23] &&
+                      r.version_bytes[2] == blob[26];
+    if (expected && same) {
+      ++ok;
+    } else if (++mismatched == 1) {
+      first_bad = fmt::format("record {}: expected {} valid {} parsed {} error '{}'", i, expected,
+                              r.valid, r.parsed, r.error);
+    }
+  }
+  Check(used > 0 && ok == used,
+        fmt::format("strb: XAM decoded {}/{} original 17559 blobs with header fields equal to "
+                    "the bytes{}",
+                    ok, used, first_bad.empty() ? "" : "; first difference " + first_bad));
+  Check(abi == 0, fmt::format("strb: ABI preserved in all {} XAM calls ({} breaks)", used * 6, abi));
+
+  // XAM's own error paths, on copies of the first blob with one byte changed.
+  for (size_t i = 0; i < toc.size(); ++i) {
+    if (toc.record(i).empty) continue;
+    std::vector<uint8_t> bad(toc.Blob(i).begin(), toc.Blob(i).end());
+    bad[3] = 'X';
+    auto r = DecodeStrb(dispatcher, thread, memory, scratch, bad, &abi);
+    Check(r.valid == 0 && r.parsed == 0 &&
+              r.error == "Location not recognized as a Structured Binary",
+          fmt::format("strb: magic STRX rejected by XAM: valid {} error '{}'", r.valid, r.error));
+    bad[3] = 'B';
+    bad[4] = 2;
+    r = DecodeStrb(dispatcher, thread, memory, scratch, bad, &abi);
+    Check(r.valid == 0 && r.parsed == 0 && r.error == "Structured Binary version too high",
+          fmt::format("strb: version 2 rejected by XAM: valid {} error '{}'", r.valid, r.error));
+    break;
+  }
+  memory->SystemHeapFree(scratch);
 }
 
 void Run() {
@@ -185,6 +300,7 @@ void Run() {
                       expected, body));
   }
   memory->SystemHeapFree(desc);
+  if (REXCVAR_GET(motocross_xam_aot_probe_strb)) RunStrbDecode(*toc);
 
   // XAM -> game: the original vector iterator calls the game's constructor.
   constexpr uint32_t kCount = 4, kStride = 16;

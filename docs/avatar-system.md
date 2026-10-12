@@ -290,3 +290,34 @@ e tamanhos, com testes, sem depender desse estado; o que lhe falta é o núcleo 
 rotinas puras de dados do XAM (decodificação `STRB`, montagem de recursos, mipmaps) com o
 contexto que elas leem, em vez de tentar fazer o XAM inteiro reconhecer o título. Não
 verificado: quanto estado global essas rotinas leem.
+
+## 9. Híbrido por função: dependências de GetAssets/GenerateMipMaps e primeiro teste (2026-10-12)
+
+Divisão adotada: o SDK continua dono do estado do console; o C++ fica com ciclo de vida,
+catálogo, IDs, tipo de corpo e tamanhos (§7); o AOT do XAM só executa rotinas cujas entradas
+o C++ consegue fornecer. Caminho do Motocross (F, desmontagem):
+
+| Parte | Função | Depende de |
+|---|---|---|
+| orquestração `GetAssets` | `0x81969848` | contexto de 0x2E210 bytes do pool `[0x81B4B1DC]`, ID do console (`0x81A72494`) e cache de perfil (`[0x81A81114]`, virtual +12) para o próprio avatar, cancelamento por virtual — **estado do XAM, fica no C++** |
+| carga do blob | `0x8196AFD8` → estados 1–5 (`0x8196AAB0`, `0x8196A2E0`, `0x8196A398`, `0x81969AC8`) | catálogo e pools `[0x81B4B1D4/D8]` do Initialize — **fica no C++** (`AvatarToc`) |
+| montador de saída | `0x81966030` | só buffers: rascunhos 0x10000/0x1CA0F, resultado (alinhado a 4), GPU, máscara; tamanhos por `0x81965EC0` (= `ResultSizeFor`) |
+| decodificação por asset | `0x81966FC8` → `0x819669A0` / `0x81966C98` (tipo 0x1000) → `0x81966450` | registro do asset (+16 estado, +32..+47 ID, +48 tipo, +400/+404 blob), versão do protocolo `[0x81B4B238]`, tipo de corpo |
+| leitura `STRB` | `0x8196D568`, `0x8196DBE8`, `0x8196D5E8`, `0x81930508`, `0x8196E610`, `0x8196EE50` | só memória guest e vtables estáticas — **nenhum global** |
+| texturas | `0x81966450` → `0x81974A90` → `0x81978680` | callbacks do jogo `[0x81A975CC..DC]` (gravados por `0x81977C80`): [2] layout da textura, [0] cópia/tiling |
+| `GenerateMipMaps` | `0x81964E20` → `0x8196B1E8` → `0x81978C90` | os 5 callbacks, global `[0x81B4B1F8]` (não lido), cancelamento por virtual |
+
+`STRB` é o formato "Structured Binary" do próprio XAM (mensagens em `0x816331EC` e
+`0x8163321C`); o jogo tem um leitor equivalente (strings em `0x8209BF14`).
+
+**Primeiro teste real** (`20261012T162158Z-mm-xam-strb-1`, `--motocross_xam_aot_probe_strb`):
+o leitor original decodificou **1103/1103** blobs do pacote oficial 17559 (vindos do
+`AvatarToc` em C++) — válido, documento aceito, GUID `59bde08b…` e os bytes copiados pelo
+leitor iguais aos do blob lidos independentemente; 6618 chamadas sem quebra de ABI;
+assinatura alterada e versão 2 rejeitadas pelo XAM com as mensagens originais.
+
+**Próximo passo concreto:** chamar `0x81966030` + `0x81966FC8` a partir do C++ para um asset
+real, com o registro montado a partir do catálogo, buffers de resultado/GPU do tamanho de
+`ResultSizeFor`, versão 4 e os callbacks reais do jogo. Falta confirmar a semântica de +16 e
++48 do registro (H: +48 = categoria `field_00`) e se outras funções da cadeia de texturas
+leem mais campos.
