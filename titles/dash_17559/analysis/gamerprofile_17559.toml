@@ -1,0 +1,8 @@
+# Retail 17559 original system app. Start hints only; no behavior overrides.
+[functions]
+0x9011C378 = {} # original message switch, outside .pdata
+0x9011CF0C = {} # memcpy byte remainder entry (9011CF0C-9011CF30), branch target outside .pdata
+0x901082B0 = {}  # refs=1; after 0x4BFFFF90; first end after 2 word(s)
+0x9010EBC8 = {}  # refs=1; after 0x4E800420; first end after 16 word(s)
+0x901195A8 = {}  # refs=1; after 0x4BFFFD2C; first end after 2 word(s)
+# 3 FUNC, 54 NO, of 57 unmapped code addresses referenced by data or code

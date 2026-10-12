@@ -24,9 +24,14 @@ pelo perfil; ciclo repetiu sem intro na volta. Áudio pendente é drenado antes
 de fechar o stream. Usuário confirmou entrada recuperada e ausência de cortes.
 35/35 sdkcheck e 40/40 supervisor passam. Resultado restrito ao par testado;
 sem equivalência audiovisual medida contra console.
+Incremento §0.23: GamerCardScene.xur original da 17559 cria, liga ao HUD e conclui
+o layout com resultado 0; **sem apresentação da tela ou signin/signout ainda**.
+XAM executado somente nas rotinas XUI selecionadas, sem inicializar o módulo inteiro.
+42/42 SDK e 40/40 supervisor passam; iruka L1–L5 e ciclo original Castle Crashers
+com retorno sem intro revalidados. Falta integrar o compositor/entrada do host XUI.
 Checklist oficial de cobertura: `CHECKLIST_FUNCIONAL_x360-native.md`.
-Detalhes e limites: `docs/dashboard.md` §0.19. Sem XAM original executado e sem
-compartilhar silenciosamente recursos da 17559 com outras versões.
+Detalhes e limites: `docs/dashboard.md` §§0.19–0.23. Recursos e código XUI
+da 17559 não são compartilhados silenciosamente com outras versões.
 Segundo perfil: Retail 6717 apresenta quadros reais (blade "Xbox 360"), troca para
 a blade Mídia e move o destaque com entrada roteada; **nenhum texto aparece**:
 falta `XenonJKLatin.xtt` da 6717 (aberto por `media:`, ausente do pacote).

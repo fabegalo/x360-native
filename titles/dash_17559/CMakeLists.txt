@@ -27,6 +27,7 @@ set(DASH17559_SOURCES
     src/typeface.cpp
     src/launch_uri.cpp
     src/boot_intro.cpp
+    src/system_ui.cpp
     src/display_transition.cpp
 )
 
@@ -44,4 +45,16 @@ rexglue_setup_target(dash_17559 GPU_PLUGINS xenos)
 # build, not only when it relinks (see cmake/x360n_sdk_backports.cmake).
 if(REXSDK_DIR)
     x360n_stage_runtime_dlls(dash_17559 PLUGIN_TARGETS rexgpu-xenos)
+endif()
+
+# Original system UI also queries the camera state; use the shared platform contract.
+if(TARGET dash_17559_gamerprofile)
+    target_sources(dash_17559_gamerprofile PRIVATE ../common/camera_state.cpp src/system_ui_imports.cpp)
+endif()
+
+if(TARGET dash_17559_xam_ui)
+    target_sources(dash_17559_xam_ui PRIVATE src/system_ui_memory.cpp)
+    # The guest 0x80000000 and 0x90000000 heaps alias: this module's
+    # auxiliary table would overwrite the resident dashboard image.
+    target_compile_definitions(dash_17559_xam_ui PRIVATE REX_HOST_FUNCTION_TABLE=1)
 endif()

@@ -1,0 +1,35 @@
+# Original Retail 17559 XAM; UI-only execution, no module startup.
+[functions]
+
+# Leaf wrappers and adjusting thunks outside .pdata; verified in the original image.
+0x81861570 = {}
+0x81861630 = {}
+0x81741630 = {}
+0x818615D0 = {}
+0x818614A0 = {}
+0x8197DD10 = {}
+0x81741718 = {}
+0x817417B0 = {}
+0x817121C8 = {}
+0x819B47A8 = {}
+0x819D6900 = {}
+# Text engine callback at vtable 81637B98+14; reached during XUI bootstrap.
+0x819A7090 = {}
+
+# Original XUI message callback: mr r3,r5; tail branch to 817DE098.
+# Reached while creating hudbkgnd.xur; absent from .pdata.
+0x817DE2F8 = {}
+
+# Config facade vtable 815F2FC0+20, used by the original HUD play-timer query.
+0x81672E78 = {}
+
+# GamerCard interface vtable 815FDDE8: leaf methods outside .pdata.
+# 8172B3B0 reached by the original property setter 81727C90.
+0x8172B3B0 = {}
+0x8172B3F0 = {}
+0x8172B408 = {}
+0x8172B420 = {}
+0x8172B4A0 = {}
+0x8172B4C0 = {}
+0x8172B4E8 = {}
+0x8172B520 = {}

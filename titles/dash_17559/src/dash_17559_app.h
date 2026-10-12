@@ -17,6 +17,7 @@
 #include "boot_intro.h"
 #include "launch_context.h"
 #include "display_transition.h"
+#include "system_ui.h"
 #include "../../common/launch_handoff.h"
 
 REXCVAR_DECLARE(bool, dash17559_experimental_region);
@@ -39,6 +40,7 @@ class Dash17559App : public rex::ReXApp {
 
   void OnPreLaunchModule() override {
     dash17559::InstallDisplayTransition(*runtime());
+    dash17559::InstallSystemUi(*runtime());
     x360n::ImportLaunchData(*runtime());
     if (x360n::IsDashboardReturn() && !dash17559::PrepareReturnContext(*runtime()))
       REX_FATAL("17559: unsupported dashboard return flags");

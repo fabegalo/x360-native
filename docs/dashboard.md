@@ -1241,3 +1241,43 @@ Iruka: 20261012T105152Z-iruka-profile-ui-0026, 30258 ms, timeout diagnóstico;
 zero stubs/mensagens não implementadas/erros/críticas. Sem captura visual nova.
 O patch cobre submissão síncrona e propagação da falha, não as permissões,
 ativação/fechamento nem o ciclo de vida completo do serviço de UI original.
+
+### 0.23 Cena original de perfil criada; composição ainda pendente (2026-10-12)
+
+Patches 0027–0034 e binding exclusivo da 17559: registro/desregistro de aplicações
+com identidade do módulo, alocadores virtuais, tabela AOT no host para evitar a
+colisão de memória com a dashboard e carregamento restrito de XEX de recursos.
+O XAM original é usado somente pelas rotinas XUI explicitamente ligadas, sem
+executar seu entrypoint nem substituir os serviços de usuário do SDK. A skin
+huduiskin e gamerprofile pertencem ao conjunto 17559; signin ainda não é carregado.
+
+O erro 8007000E do HUD foi localizado em XamAllocEx(tag=20160000,
+flags=01000000,size=4096): o alocador interno acessava um pool XAM não iniciado.
+A ponte agora usa a alocação real e pareada do SDK; outras classes permanecem
+explicitamente não implementadas. XuiGamerCard também usava o alocador interno;
+a ponte de XamAlloc e os hints dos métodos originais da vtable resolvem sua criação.
+
+Run 20261012T134511Z-profile-ui-scene-layout, 10:45:33: bootstrap, skin, fundo HUD,
+inicialização gamerprofile e GamerCardScene.xur retornam 0. Raiz 00010057,
+DC 300BE000; vínculo original 81694FF8 e layout 817BCAA0 retornam 0.
+**Ainda não há quadro visível de perfil.** A tentativa desmonta a cena e retorna
+falha explicitamente: falta o host contínuo de atualização, composição e entrada.
+O worker original 816CCF00 prepara o contexto D3D antes de 81695098; chamar apenas
+o render da cena sobre o dispositivo compartilhado não reproduz esse contrato.
+Entrar/sair/criar perfil e persistência continuam pendentes; nenhum sucesso ou
+notificação de mudança de usuário foi fabricado. Hipóteses anteriores inalteradas.
+
+Validação: 42 testes SDK / 1183 asserções; grupo focado 8 / 124. Supervisor
+40 / 20292 passou fora do sandbox, após duas falhas de escrita nos temporários
+na primeira execução restrita (registradas separadamente). Iruka recompilado:
+20261012T134747Z-regress-iruka, L1–L5 passam, 326 cores, diferença 6,956, zero
+stubs/erros/críticas, encerrado por timeout diagnóstico.
+
+Ciclo com Castle Crashers recompilado: 20261012T134846Z-session-0-dash_17559
+termina intro original, exercita Perfil e solicita o jogo 584108B7 às 10:49:28
+após os 33 quadros da transição. 20261012T134932Z-session-1-castle_crashers
+recebe 1020 bytes e pede retorno original às 10:50:20, flags 100.
+20261012T135022Z-session-2-dash_17559 recebe kind=4/flags=100 e os mesmos 1020
+bytes sem repetir intro. Usuário confirma entrada/transição/retorno funcionando.
+Caminhos dos runtimes carregados conferidos nos processos; hashes de executáveis
+e DLLs ficam nos report.json de cada run. Não é aprovação do fluxo de perfis.

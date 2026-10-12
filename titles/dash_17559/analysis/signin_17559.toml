@@ -1,0 +1,3 @@
+# Original message dispatcher has no .pdata entry; confirmed with disasm.
+[functions]
+0x90105198 = {}
