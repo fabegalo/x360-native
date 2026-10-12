@@ -1019,3 +1019,61 @@ entrada/saída ou persistência real validada. Nenhuma conta/save foi alterada.
 Regressão iruka 0018: 20261012T083614Z-iruka-child-focus-0018, 30173 ms,
 0 stubs/erros/críticas, saída por timeout. Cobertura de processo/log; sem nova
 captura visual L4–L5. Dashboard recompilada sem os diagnósticos temporários.
+
+## 0.19. Contrato de retorno original (2026-10-12)
+
+Patch 0019 distingue XamLoaderLaunchTitle(NULL, flags), XamLoaderTerminateTitle e
+retorno simples da thread. O protocolo preserva flags e launch data, inclusive na
+volta; fechar a janela do host encerra a plataforma. O retorno simples ainda é
+identificado como política do supervisor, sem alegar pedido Xbox Home/Guide.
+
+Castle Crashers usa XLNI_DASH_ARCADE em 820B6908, convertido em ponteiro nulo e
+flag 0x100. No XAM original 17559: export 1A4=816A1820 ->816A0D70 ->816A0798;
+816A0800..816A0840 produz 1020 bytes, reserved=0, reason=23, user=FF. O perfil
+17559 aceita esse sinalizador e prepara esse contexto para o código original da
+dashboard; o registro recebido do jogo permanece intacto. Outras versões não
+herdam o tratamento; flags desconhecidos falham explicitamente.
+
+A sessão 17559 agora pede intro original na inicialização. No retorno, o título
+reconhece o tipo de handoff e não instala o bootstrap da intro. Boot direto via
+x360n run sem --dash17559_boot_intro continua disponível. O XAM original segue
+como referência, não como módulo executado. Perfis continuam no usuário fixo do
+SDK; não há nova alegação de login, logout, persistência ou contexto de usuário
+selecionado. O bloqueio Settings/XamShowGamerCardUI FE/21008 permanece.
+
+Na regressão apareceu double-free do ICC filename ao destruir a janela filha:
+CleanupWindowData já o liberara, mas uma reentrada de foco chamava
+WIN_UpdateWindowICCProfile. Patch 0020 recusa foco em janela is_destroying.
+A pilha está em .local/logs/child-focus-debug.log. Depois: 37 asserções de foco e
+encerramento passaram; consolidação 31/31 sdkcheck e 40/40 x360n, sem skips.
+Testes focados de retorno/URI: 115 asserções em 4 casos.
+
+Ciclo executado e confirmado pelo usuário, sem fechar pelo X:
+- `20261012T085507Z-session-0-dash_17559`: intro original de cerca de 11 s;
+  My Games chama XamContentLaunchImageInternalEx para Castle Crashers,
+  XSYSLAUNCH:\default.xex, flags 0, às 05:55:35.
+- `20261012T085537Z-session-1-castle_crashers`: importa 1020 bytes, executa o
+  jogo e às 05:56:10 chama XamLoaderLaunchTitle(NULL, 0x100). Sai com código 0
+  após 33617 ms; 0 stubs/erros/críticas, dois avisos de shader já existentes.
+- `20261012T085612Z-session-2-dash_17559`: importa o pedido Dashboard, flags
+  0x100, prepara reason=23/user=FF e retorna ao menu sem executar a intro.
+  Usuário confirmou o retorno sem intro. Os três usam parent HWND 12650972.
+
+Os registros de ida e volta preservam os mesmos 1020 bytes, SHA-256
+`403e56dcadd8ac10eb9c7d09862ee1551c12ddc32fba578986b8c6f47bca5e5f`;
+o registro do jogo não é sobrescrito pela tradução de contexto da dashboard.
+Runtime das duas recompilações e saída do SDK idênticos: SHA-256
+`15cf617ef08011d723767d3909dab625fba1c3064c3fed0b631f78c6e1961604`.
+O caminho da DLL efetivamente carregada pela dashboard foi conferido no processo.
+
+Regressão iruka: `20261012T085714Z-iruka-original-return-0020`, 30218 ms,
+0 stubs/chamadas não implementadas/erros/críticas. Encerrada por timeout;
+valida execução e log, sem nova captura visual L4–L5 ou saída normal.
+
+Limite visual relatado pelo usuário após esse ciclo: há corte seco ao lançar um
+item da biblioteca. Mesmo HWND não garante continuidade: o processo da dashboard
+destrói sua superfície antes da criação da superfície do jogo; o host usa fundo
+preto. O log encerra a dashboard às 05:55:35.506 e anexa a superfície do jogo às
+05:55:38.539. Essa troca não está aprovada como apresentação original. O SDK
+VdPersistDisplay também não preserva pixels (somente aloca uma estrutura e retorna
+1); verificar seu uso real nesse caminho antes de atribuir o corte a essa API.

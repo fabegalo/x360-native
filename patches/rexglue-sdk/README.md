@@ -206,3 +206,22 @@ fix. The integration probe tests real SDK focus listeners (gain/loss/regain), bu
 skips when Windows denies foreground activation; that test was skipped here, not
 counted as a validated focus test. See child-focus-sdk-final.log and dashboard §0.18.
 No background-input override, injected input, or replacement Xbox UI.
+
+## Original loader requests and safe surface teardown (0019–0020)
+
+0019 records XamLoaderLaunchTitle(NULL, flags) as a dashboard request instead of
+asserting. XamLoaderTerminateTitle records a separate title-termination request.
+Both terminate through KernelState as before; neither returns fictional success.
+Flags and launch bytes survive the host handoff; unsupported dashboard flags are
+rejected according to the selected dashboard profile. The 17559 profile supports
+0 and 0x100: original XAM 816A0798/816A0800..816A0840 packs a 1020-byte context
+with reason 23 and user FF for XLNI_DASH_ARCADE. This translation is in the title
+profile integration, not the shared runtime. The original handoff remains intact.
+Tests exercise the real exports and data round trip, plus the per-version packing.
+
+0020 prevents WIN_UpdateFocus from reacquiring focus while window->is_destroying.
+The captured stack was CleanupWindowData -> DestroyWindow -> WIN_UpdateFocus ->
+WIN_UpdateWindowICCProfile -> free of the already-freed ICC filename. The parent
+probe and focus probe now reuse the supervisor's existing stack capture. Before:
+child-focus-debug.log (one failed assertion, teardown crash); after: 37 assertions
+passed in window-destroy-focus-after.log. Final sdkcheck: 31/31 passed, no skips.

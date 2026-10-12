@@ -41,3 +41,23 @@ TEST_CASE("session launch requires matching path and exact XEX bytes", "[session
   request.kind = LaunchRequest::WindowClose; CHECK_FALSE(MatchesLaunch(profile, request));
   fs::remove_all(dir);
 }
+
+TEST_CASE("handoff distinguishes title return from closing the platform", "[session]") {
+  auto dir = UniqueTempPath("return-handoff"); fs::create_directories(dir);
+  auto file = dir / "handoff.bin";
+  for (auto kind : {LaunchRequest::Dashboard, LaunchRequest::TitleTerminate,
+                    LaunchRequest::GuestExit, LaunchRequest::WindowClose}) {
+    LaunchRequest input; input.kind = kind; input.flags = 0x100;
+    input.data_present = true; input.data = {0, 0xFF, 3};
+    REQUIRE(WriteLaunchRequest(file, input));
+    LaunchRequest output;
+    REQUIRE(ReadLaunchRequest(file, output));
+    CHECK(output.kind == kind); CHECK(output.flags == input.flags);
+    CHECK(output.data == input.data);
+    fs::remove(file);
+  }
+  LaunchRequest invalid; invalid.kind = LaunchRequest::Dashboard; invalid.path = "other.xex";
+  REQUIRE(WriteLaunchRequest(file, invalid));
+  LaunchRequest output; CHECK_FALSE(ReadLaunchRequest(file, output));
+  fs::remove_all(dir);
+}

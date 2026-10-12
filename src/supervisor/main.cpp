@@ -652,11 +652,22 @@ int Session(const ProjectPaths& paths, const fs::path& manifest, int timeout, bo
         return kExitFailed;
       }
       if (request.kind != LaunchRequest::Image) {
+        // Closing a host window exits the platform, never impersonates Xbox Home.
+        if (request.kind == LaunchRequest::WindowClose) return kExitOk;
         if (active.manifest == dashboard.manifest) return kExitOk;
+        if (request.kind == LaunchRequest::Dashboard &&
+            std::find(dashboard.dashboard_return_flags.begin(), dashboard.dashboard_return_flags.end(),
+                      request.flags) == dashboard.dashboard_return_flags.end()) {
+          fmt::print(stderr, "session: dashboard return flags {:08X} are not implemented; request preserved in {}\n",
+                     request.flags, handoff.string());
+          return kExitFailed;
+        }
         fmt::print("session: {} {}; returning to {}\n", active.name,
-            request.kind == LaunchRequest::WindowClose ? "window closed" : "guest exited",
+            request.kind == LaunchRequest::Dashboard ? "requested dashboard" :
+            request.kind == LaunchRequest::TitleTerminate ? "requested title termination" :
+            "main thread returned (no explicit return request)",
             dashboard.name);
-        active = dashboard; incoming.clear();
+        active = dashboard; incoming = handoff;
         continue;
       }
       auto target = std::find_if(targets.begin(), targets.end(),

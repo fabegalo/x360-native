@@ -8,6 +8,7 @@ struct SessionProfile {
   std::string name, sha256;
   std::vector<std::string> args;
   std::vector<std::filesystem::path> launch_targets;
+  std::vector<uint32_t> dashboard_return_flags{0};
 };
 SessionProfile LoadSessionProfile(const ProjectPaths& paths, const std::filesystem::path& manifest);
 bool MatchesLaunch(const SessionProfile& profile, const LaunchRequest& request);

@@ -140,22 +140,27 @@ codegen (`RegisterRecompiledModule`, template
 Ou seja, há carga de código nativo em tempo de execução, mas restrita ao que foi
 preparado no build; um XEX desconhecido não executa.
 
-**[fato]** `XamLoaderLaunchTitle(path, flags)` (`src/kernel/xam/xam_info.cpp:263-289`)
-apenas grava `loader_data.launch_path` e chama `KernelState::TerminateTitle()`;
-com `path == NULL` (voltar à dashboard) dispara `assert_always`. `XamLoaderLaunchTitleEx`,
+**[fato, patch 0019]** `XamLoaderLaunchTitle(path, flags)` grava o pedido e chama
+`KernelState::TerminateTitle()`; `path == NULL` registra retorno à dashboard.
+`XamLoaderTerminateTitle` registra encerramento de título separadamente.
+`XamLoaderLaunchTitleEx`,
 `...ForReason` e `...OnDvd` são stubs (`xam_misc.cpp:537-539`).
 
 **[fato, 2026-10-12]** Dashboard e jogos rodam como processos separados.
 `x360n session <manifest>` recebe o registro binário emitido pelo hook
 OnGuestThreadExit, preserva flags/launch data e resolve o destino por caminho
 e SHA-256 contra os perfis permitidos no manifesto da dashboard. Não segue
-crash/timeout. Saída normal do jogo ou fechamento explícito da janela retorna
-ao perfil inicial. Ciclo 17559 → Castle Crashers → 17559 confirmado pelo usuário
-(docs/dashboard.md §0.18). A sessão mantém um frame Win32 e superfícies filhas SDL
+crash/timeout. Pedido de retorno ou término do título retorna ao perfil inicial;
+retorno simples da thread é identificado como política do supervisor. Fechamento
+da janela encerra a plataforma. Ciclo original 17559 → Castle Crashers → 17559
+confirmado pelo usuário (docs/dashboard.md §0.19), com NULL/flags 0x100 emitidos
+pelo jogo. Flags e launch data chegam ao perfil receptor, que traduz o contexto
+Arcade da 17559 conforme seu XAM; outras versões não herdam essa tradução.
+A intro só ocorre na entrada inicial. A sessão mantém um frame Win32 e superfícies filhas SDL
 reais por título; --separate-windows preserva o diagnóstico. Fechar o frame encerra
 a plataforma. GuestExit ainda não prova retorno pedido pelo Guide.
 
-Pendências: XamLoaderLaunchTitle(NULL), Guide original e perfis locais persistentes.
+Pendências: Guide original e perfis locais persistentes.
 Os user_data_root anteriores foram preservados separadamente (sem migrar saves).
 
 Alternativa registrada, não escolhida: um único processo que carregaria títulos

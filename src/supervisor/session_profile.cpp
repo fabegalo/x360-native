@@ -37,6 +37,15 @@ SessionProfile LoadSessionProfile(const ProjectPaths& paths, const std::filesyst
     }
   if (auto array = table["x360n"]["launch_targets"].as_array())
     for (const auto& value : *array) p.launch_targets.push_back(resolve(text(value)));
+  if (auto array = table["x360n"]["dashboard_return_flags"].as_array()) {
+    p.dashboard_return_flags.clear();
+    for (const auto& value : *array) {
+      const auto flags = value.value<int64_t>();
+      if (!flags || *flags < 0 || uint64_t(*flags) > UINT32_MAX)
+        throw std::runtime_error("invalid dashboard_return_flags");
+      p.dashboard_return_flags.push_back(uint32_t(*flags));
+    }
+  }
   return p;
 }
 bool MatchesLaunch(const SessionProfile& p, const LaunchRequest& request) {

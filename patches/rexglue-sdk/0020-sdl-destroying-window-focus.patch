@@ -1,0 +1,17 @@
+diff --git a/thirdparty/sdl3/src/video/windows/SDL_windowsevents.c b/thirdparty/sdl3/src/video/windows/SDL_windowsevents.c
+index 46bf0ea..ca2a8dc 100644
+--- a/thirdparty/sdl3/src/video/windows/SDL_windowsevents.c
++++ b/thirdparty/sdl3/src/video/windows/SDL_windowsevents.c
+@@ -323,6 +323,12 @@ static void WIN_CheckAsyncMouseRelease(Uint64 timestamp, SDL_WindowData *data)
+ 
+ static void WIN_UpdateFocus(SDL_Window *window, bool expect_focus, DWORD pos)
+ {
++    /* DestroyWindow can reenter focus handling after CleanupWindowData frees
++       the ICC filename. No input state may be reacquired during destruction. */
++    if (window->is_destroying) {
++        return;
++    }
++
+     SDL_WindowData *data = window->internal;
+     HWND hwnd = data->hwnd;
+     bool had_focus = (SDL_GetKeyboardFocus() == window);

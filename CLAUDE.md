@@ -1,6 +1,8 @@
 # CLAUDE.md — contexto persistente do x360-native
 
 Leia também `STATUS.md` (estado real) e `docs/architecture.md` (decisões D1–D7).
+`CHECKLIST_FUNCIONAL_x360-native.md` é o checklist oficial de cobertura; atualizar
+somente itens demonstrados, respeitando o alvo e o limite de cada execução.
 
 ## Objetivo
 
@@ -43,7 +45,7 @@ presente não for exatamente o arquivo listado. Qualquer outra falha é regress�
 
 ## Estrutura
 
-Dashboard atual: `docs/dashboard.md` §0.18. A região experimental `0x8E030000`
+Dashboard atual: `docs/dashboard.md` §0.19. A região experimental `0x8E030000`
 (64 KiB RW) é exclusiva do título 17559, zerada uma vez, desligável por
 `--dash17559_experimental_region=false`; log/relatório dizem que o conteúdo real
 é desconhecido. Patch 0006 implementa idioma configurado e ponteiro de fallback
@@ -57,13 +59,18 @@ sem carregar código do módulo. My Games exibe Castle Crashers 0.0.1.3 (usuári
 confirmou); patch 0016 e x360n session executam o ciclo real com Castle Crashers. Intro
 original AOT opcional (`--dash17559_boot_intro=true`) tem imagem/som observados
 e retorna à dashboard por export 2(false), preservando o tempo/efeito do original.
-Boot direto é o padrão. Ciclo confirmado visualmente pelo usuário; janela principal persistente e entrada corrigida (0017–0018); Guide e perfis locais pendentes.
+Boot direto continua disponível; a sessão usa intro somente na entrada inicial.
+Ciclo original confirmado: My Games → Castle Crashers → XamLoaderLaunchTitle(NULL,
+0x100) → dashboard, na mesma janela, sem repetir intro (0017–0020). Flags e 1020
+bytes de launch data preservados; contexto Arcade traduzido somente no perfil 17559.
+31/31 sdkcheck e 40/40 x360n passam. Guide e perfis locais seguem pendentes;
+Settings chegou a XamShowGamerCardUI (stub), não à seleção de perfil.
 Algumas páginas de configurações ainda leem 0x1C após XConfig categoria 7.
 
 - `external/rexglue-sdk` — submódulo fixado em `deps.lock.json`. **Não editar à mão.**
   Exceções documentadas: cópias dos symlinks do libmspack (`scripts/materialize-symlinks.ps1`)
   e os patches locais de `patches/rexglue-sdk/` (0001–0002 autorizados em 2026-10-11,
-  0003–0018 sob a autorização de 2026-10-12), aplicados por
+  0003–0020 sob a autorização de 2026-10-12), aplicados por
   `scripts/apply-sdk-patches.ps1` e verificados pelo CMake no configure e em todo build.
   `src/ui/rex_app.cpp` (patch 0004) é compilado em cada executável: recompile o título.
 - Correções do SDK vão no `CMakeLists.txt` raiz como backport condicionado ao

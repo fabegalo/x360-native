@@ -75,7 +75,7 @@
         "files": {
           "src/kernel/xam/xam_locale.cpp": "fdd16610f747be363a874231e341ab2df977360a52fe8175f55b8beea01a7fd0",
           "src/kernel/xam/xam_module.cpp": "af86f18bda7d014e11e9bf5511f0573c28304159673aa839aca5e1c549276e0f",
-          "include/rex/kernel/xam/module.h": "37218241915e9a13a467b7e8de867dc6ae50300f486b4bbff31c24009ba3a208"
+          "include/rex/kernel/xam/module.h": "a9cc652f87264f2b5137d81a1c600127e97224183e2200b15460946201f29f9b"
         },
         "base_files": {
           "src/kernel/xam/xam_locale.cpp": "5564ee2ca68a6e2b33a3b1c251030a28291cc6482362bea5e3f0ea82318ebfc4",
@@ -112,7 +112,7 @@
         "file": "patches/rexglue-sdk/0009-dashboard-datetime-abi.patch",
         "sha256": "a5a71909fbbada4061bf228c09557f276f762dfc203efe71c41d61e1ad637a81",
         "files": {
-          "src/kernel/xam/xam_info.cpp": "ed4550e0088c32f937873da1bb2f69878c77d74bbd64ca6a0b8ef4fdc73d9385"
+          "src/kernel/xam/xam_info.cpp": "277fb5719969fdb5b2aa45d99b7fd21a4b29030ccc2361d0f9c345581e2d6107"
         },
         "base_files": {
           "src/kernel/xam/xam_info.cpp": "c847210dcec0d2a3ad07e459bd59a7b4acc38d8706187e597f398153a3d31981"
@@ -219,10 +219,34 @@
         "file": "patches/rexglue-sdk/0018-sdl-child-window-focus.patch",
         "sha256": "99d7fce9d2852e33af827615fbc9375ae3fc7d6c898e8b2a6d289b99b9f069f9",
         "files": {
-          "thirdparty/sdl3/src/video/windows/SDL_windowsevents.c": "1ca0d88a74252653cffdedc7a4ac58a33b441d5b3a15f23a9983501d755d4c68"
+          "thirdparty/sdl3/src/video/windows/SDL_windowsevents.c": "c0d83ec8c3ea604283a1e162f4f6f1c2236f3708503fde6da0d3dff99e4b7876"
         },
         "base_files": {
           "thirdparty/sdl3/src/video/windows/SDL_windowsevents.c": "534943fe3de0a0d6e55b9435cccf30d690aa422c1a80edb115e1ad0f5cfa16dc"
+        },
+        "test": "tests/sdkcheck/app_shutdown_test.cpp"
+      },
+      {
+        "file": "patches/rexglue-sdk/0019-explicit-title-return.patch",
+        "sha256": "eefb975605b2cbcf0337ddb716f0c53c2e327cf93a754394522ef2594600dc87",
+        "files": {
+          "include/rex/kernel/xam/module.h": "a9cc652f87264f2b5137d81a1c600127e97224183e2200b15460946201f29f9b",
+          "src/kernel/xam/xam_info.cpp": "277fb5719969fdb5b2aa45d99b7fd21a4b29030ccc2361d0f9c345581e2d6107"
+        },
+        "base_files": {
+          "include/rex/kernel/xam/module.h": "37218241915e9a13a467b7e8de867dc6ae50300f486b4bbff31c24009ba3a208",
+          "src/kernel/xam/xam_info.cpp": "ed4550e0088c32f937873da1bb2f69878c77d74bbd64ca6a0b8ef4fdc73d9385"
+        },
+        "test": "tests/sdkcheck/title_return_test.cpp"
+      },
+      {
+        "file": "patches/rexglue-sdk/0020-sdl-destroying-window-focus.patch",
+        "sha256": "fb520dc2ed6e1ae8788a3aa10770cb2d8e4982d3102556af62746d3e62802520",
+        "files": {
+          "thirdparty/sdl3/src/video/windows/SDL_windowsevents.c": "c0d83ec8c3ea604283a1e162f4f6f1c2236f3708503fde6da0d3dff99e4b7876"
+        },
+        "base_files": {
+          "thirdparty/sdl3/src/video/windows/SDL_windowsevents.c": "1ca0d88a74252653cffdedc7a4ac58a33b441d5b3a15f23a9983501d755d4c68"
         },
         "test": "tests/sdkcheck/app_shutdown_test.cpp"
       }

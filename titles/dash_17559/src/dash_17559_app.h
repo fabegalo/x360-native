@@ -15,6 +15,7 @@
 #include <rex/logging/assert.h>
 #include "experimental_region.h"
 #include "boot_intro.h"
+#include "launch_context.h"
 #include "../../common/launch_handoff.h"
 
 REXCVAR_DECLARE(bool, dash17559_experimental_region);
@@ -37,7 +38,10 @@ class Dash17559App : public rex::ReXApp {
 
   void OnPreLaunchModule() override {
     x360n::ImportLaunchData(*runtime());
-    if (REXCVAR_GET(dash17559_boot_intro)) dash17559::InstallBootIntro(*runtime());
+    if (x360n::IsDashboardReturn() && !dash17559::PrepareReturnContext(*runtime()))
+      REX_FATAL("17559: unsupported dashboard return flags");
+    if (REXCVAR_GET(dash17559_boot_intro) && !x360n::IsDashboardReturn())
+      dash17559::InstallBootIntro(*runtime());
   }
 
   void OnGuestThreadExit(rex::system::XThread*) override {

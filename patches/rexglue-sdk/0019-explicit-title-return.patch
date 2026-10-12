@@ -1,0 +1,51 @@
+diff --git a/include/rex/kernel/xam/module.h b/include/rex/kernel/xam/module.h
+index dc1bd70..0cef78b 100644
+--- a/include/rex/kernel/xam/module.h
++++ b/include/rex/kernel/xam/module.h
+@@ -31,6 +31,8 @@ class XamModule : public system::KernelModule {
+   static void RegisterExportTable(rex::runtime::ExportResolver* export_resolver);
+ 
+   struct LoaderData {
++    enum class ExitRequest { None, Dashboard, Terminate };
++    ExitRequest exit_request = ExitRequest::None;
+     bool launch_data_present = false;
+     std::vector<uint8_t> launch_data;
+     uint32_t launch_flags = 0;
+diff --git a/src/kernel/xam/xam_info.cpp b/src/kernel/xam/xam_info.cpp
+index fc11084..a0d7667 100644
+--- a/src/kernel/xam/xam_info.cpp
++++ b/src/kernel/xam/xam_info.cpp
+@@ -260,6 +260,7 @@ void XamLoaderLaunchTitle_entry(mapped_string raw_name_ptr, u32 flags) {
+ 
+   auto& loader_data = xam->loader_data();
+   loader_data.launch_flags = flags;
++  loader_data.exit_request = XamModule::LoaderData::ExitRequest::None;
+ 
+   // Translate the launch path to a full path.
+   if (raw_name_ptr) {
+@@ -276,14 +277,24 @@ void XamLoaderLaunchTitle_entry(mapped_string raw_name_ptr, u32 flags) {
+       loader_data.launch_path = path;
+     }
+   } else {
+-    assert_always("Game requested exit to dashboard via XamLoaderLaunchTitle");
++    loader_data.launch_path.clear();
++    loader_data.exit_request = XamModule::LoaderData::ExitRequest::Dashboard;
+   }
+ 
++  REXKRNL_INFO("XamLoaderLaunchTitle: destination={} flags={:08X} data_present={} data_size={}",
++      raw_name_ptr ? loader_data.launch_path : "<dashboard>", uint32_t(flags),
++      loader_data.launch_data_present, loader_data.launch_data.size());
+   // This function does not return.
+   REX_KERNEL_STATE()->TerminateTitle();
+ }
+ 
+ void XamLoaderTerminateTitle_entry() {
++  auto xam = REX_KERNEL_STATE()->GetKernelModule<XamModule>("xam.xex");
++  auto& loader_data = xam->loader_data();
++  loader_data.launch_path.clear();
++  loader_data.launch_flags = 0;
++  loader_data.exit_request = XamModule::LoaderData::ExitRequest::Terminate;
++  REXKRNL_INFO("XamLoaderTerminateTitle: original title termination requested");
+   // This function does not return.
+   REX_KERNEL_STATE()->TerminateTitle();
+ }

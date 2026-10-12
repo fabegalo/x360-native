@@ -25,6 +25,7 @@
 
 #include "synthetic_xex.h"
 #include "session_window.h"
+#include "child_process.h"
 
 using namespace x360n::test;
 
@@ -42,33 +43,26 @@ ProbeResult RunProbe(const Workdir& w, const std::wstring& extra_args) {
   const fs::path probe = fs::path(X360N_SHUTDOWN_PROBE).make_preferred();
   REQUIRE(fs::is_regular_file(probe));
   const fs::path log = w.dir / "probe.log";
-  std::wstring cmd = L"\"" + probe.wstring() + L"\" --game_data_root=\"" +
-                     (w.dir / "game").wstring() + L"\" --user_data_root=\"" +
-                     (w.dir / "user").wstring() + L"\" --log_file=\"" + log.wstring() +
-                     L"\" --log_level=debug " + extra_args;
-  STARTUPINFOW si{};
-  si.cb = sizeof(si);
-  PROCESS_INFORMATION pi{};
-  // A crashing child must not wait on a Windows Error Reporting dialog; the child
-  // inherits this error mode.
-  const UINT old_mode = SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX);
-  const BOOL created = CreateProcessW(nullptr, cmd.data(), nullptr, nullptr, FALSE, 0, nullptr,
-                                      w.dir.c_str(), &si, &pi);
-  SetErrorMode(old_mode);
-  REQUIRE(created);
+  // Reuse the supervisor's debugger for native callback/teardown failures.
+  x360n::ProcessSpec spec;
+  spec.exe = probe; spec.working_dir = w.dir;
+  spec.stdout_file = w.dir / "stdout.log"; spec.stderr_file = w.dir / "stderr.log";
+  spec.timeout = std::chrono::seconds(60); spec.capture_crash = extra_args.find(L"--parent_window=") != std::wstring::npos;
+  spec.args = {"--game_data_root=" + (w.dir / "game").string(),
+               "--user_data_root=" + (w.dir / "user").string(),
+               "--log_file=" + log.string(), "--log_level=debug"};
+  std::wistringstream extras(extra_args);
+  for (std::wstring arg; extras >> arg;) spec.args.emplace_back(arg.begin(), arg.end());
+  const auto child = x360n::RunProcess(spec);
+  REQUIRE(child.launched);
   ProbeResult r;
-  r.finished = WaitForSingleObject(pi.hProcess, 60000) == WAIT_OBJECT_0;
-  if (!r.finished) {
-    TerminateProcess(pi.hProcess, 0xDEAD);
-    WaitForSingleObject(pi.hProcess, 10000);
-  }
-  GetExitCodeProcess(pi.hProcess, &r.exit_code);
-  CloseHandle(pi.hThread);
-  CloseHandle(pi.hProcess);
+  r.finished = !child.timed_out;
+  r.exit_code = child.exit_code;
   std::ifstream in(log);
   std::stringstream ss;
   ss << in.rdbuf();
   r.log = ss.str();
+  for (const auto& frame : child.crash.frames) r.log += "\n" + frame;
   return r;
 }
 
@@ -129,6 +123,7 @@ TEST_CASE("title surfaces reuse a persistent host window across guest exits", "[
     Workdir w("x360n_parent_window", std::to_string(i).c_str());
     PrepareGameRoot(w);
     const auto r = RunProbe(w, L"--gpu_plugin=xenos --parent_window=" + std::to_wstring(handle));
+    INFO(r.log);
     REQUIRE(r.finished);
     CHECK(r.exit_code == 0);
     CHECK(Contains(r.log, "parent_window attached:"));

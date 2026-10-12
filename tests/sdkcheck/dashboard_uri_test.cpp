@@ -9,9 +9,34 @@
 #include <rex/system/xio.h>
 #include <rex/system/xnotifylistener.h>
 #include <rex/system/xthread.h>
+#include "../../titles/dash_17559/src/launch_context.h"
 
 extern "C" REX_FUNC(__imp__XamLaunchURI);
 using rex::X_STATUS;
+
+TEST_CASE("17559 arcade return uses the original XAM dashboard context", "[sdk][uri]") {
+  rex::Runtime rt(std::filesystem::temp_directory_path());
+  rex::RuntimeConfig config{}; config.tool_mode = true;
+  config.kernel_init = rex::kernel::InitializeKernel;
+  REQUIRE(rt.Setup(std::move(config)) == X_STATUS_SUCCESS);
+  auto& loader = rt.kernel_state()->GetKernelModule<rex::kernel::xam::XamModule>("xam.xex")->loader_data();
+  const std::vector<uint8_t> original{1, 0, 0xFF, 4};
+  loader.launch_data = original; loader.launch_data_present = true;
+  CHECK(dash17559::PrepareReturnContext(rt));
+  CHECK(loader.launch_data == original);
+  loader.launch_flags = 0x200;
+  CHECK_FALSE(dash17559::PrepareReturnContext(rt));
+  CHECK(loader.launch_data == original);
+  loader.launch_flags = 0x100;
+  CHECK(dash17559::PrepareReturnContext(rt));
+  CHECK(loader.launch_flags == 0x100);
+  REQUIRE(loader.launch_data.size() == 1020);
+  CHECK(loader.launch_data_present);
+  CHECK(rex::memory::load_and_swap<uint32_t>(loader.launch_data.data()) == 0);
+  CHECK(rex::memory::load_and_swap<uint32_t>(loader.launch_data.data() + 4) == 23);
+  CHECK(rex::memory::load_and_swap<uint32_t>(loader.launch_data.data() + 8) == 0xFF);
+  CHECK(std::all_of(loader.launch_data.begin() + 12, loader.launch_data.end(), [](uint8_t b) { return b == 0; }));
+}
 
 TEST_CASE("17559 library URI delivers launch data before acknowledging the request", "[sdk][uri]") {
   rex::Runtime rt(std::filesystem::temp_directory_path());

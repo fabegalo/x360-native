@@ -14,7 +14,13 @@ continuam stub. My Games agora exibe Castle Crashers 0.0.1.3 (confirmação do u
 o ciclo dashboard → Castle Crashers → dashboard foi executado e confirmado pelo
 usuário (§0.17). O patch 0016 e o supervisor seguem o pedido original, com hash
 do XEX e launch data preservados. Janela principal persistente e entrada confirmadas após corrigir foco SDL; Guide e perfis pendentes.
-Detalhes e limites: `docs/dashboard.md` §0.18. Sem XAM original executado e sem
+Retorno original agora confirmado: Castle Crashers chamou XamLoaderLaunchTitle(NULL,
+0x100); a 17559 recebeu o contexto e voltou sem intro, na mesma janela (§0.19).
+31/31 sdkcheck e 40/40 x360n passaram. Iruka rodou 30 s sem erros/stubs, encerrado
+por timeout (sem nova captura visual). A continuidade visual entre títulos ainda
+tem corte relatado pelo usuário; o ciclo funcional não aprova essa fidelidade.
+Checklist oficial de cobertura: `CHECKLIST_FUNCIONAL_x360-native.md`.
+Detalhes e limites: `docs/dashboard.md` §0.19. Sem XAM original executado e sem
 compartilhar silenciosamente recursos da 17559 com outras versões.
 Segundo perfil: Retail 6717 apresenta quadros reais (blade "Xbox 360"), troca para
 a blade Mídia e move o destaque com entrada roteada; **nenhum texto aparece**:
@@ -24,7 +30,7 @@ montado; `docs/dashboard.md` §0.15.
 
 | Item | Evidência |
 |---|---|
-| ReXGlue v0.10.0 (`f5337cdc`) compila no Windows com LLVM 22.1.8 + MSVC 14.44, modo submódulo, com 18 patches locais | builds dos alvos afetados com saída 0; patches em `patches/rexglue-sdk/`, verificados no configure e em todo build |
+| ReXGlue v0.10.0 (`f5337cdc`) compila no Windows com LLVM 22.1.8 + MSVC 14.44, modo submódulo, com 20 patches locais | builds dos alvos afetados com saída 0; patches em `patches/rexglue-sdk/`, verificados no configure e em todo build |
 | Suíte PPC do SDK (166 arquivos `.s`) | 1458/1458 casos |
 | Testes unitários do SDK | 208 aprovados, 4 `SKIP` upstream, 1 falha (bug do teste, abaixo) |
 | Patches locais do SDK: 0001 tabela de funções no heap XEX certo; 0002 falha de setup sem desmontagem prematura; 0003 import com slot e thunk em registros diferentes; 0004 encerramento com a janela ainda viva; 0005 bit 0 de `KeGetImagePageTableEntry`; 0006 idioma e fallback UTF-16; 0007 despacho real de DPC | `sdkcheck.*`: testes antes/depois em `patches/rexglue-sdk/README.md`; o 0004 e o caminho do 0002 testados num `ReXApp` real (`tests/shutdown_probe`); 0006 tem 108 asserções em 2 casos |
@@ -79,7 +85,7 @@ Detalhes, mensagens exatas e classificação de cada falha: `docs/validation-iru
    Continua falhando e é contada como falha, não como sucesso.
 2. `rexglue --version` informa `0.10.0.0-dev.unknown` em modo submódulo.
 3. Submódulo do SDK aparece modificado: 15 symlinks do libmspack materializados
-   como cópias verificadas (a conta não cria symlinks) e os 16 patches locais
+   como cópias verificadas (a conta não cria symlinks) e os 20 patches locais
    (arquivos listados em `patches/rexglue-sdk/README.md`), reaplicáveis por
    `scripts/apply-sdk-patches.ps1` e registrados com hashes em `deps.lock.json`.
 4. Backport do upstream `b5e0cf8` (include de xxHash **e imgui**) em
@@ -109,23 +115,23 @@ Detalhes, mensagens exatas e classificação de cada falha: `docs/validation-iru
 
 | Bloqueio | Impacto | O que destrava |
 |---|---|---|
-| **Dashboard 17559: experiência de sistema** | ciclo com Castle Crashers confirmado; janelas separadas, Guide e perfis locais incompletos | manter apresentação contínua e seguir os caminhos originais de Guide/seleção de perfil |
-| Configurações e recursos parciais | algumas páginas leem 0x1C após XConfig categoria 7; strings comuns indisponíveis retornam nulo; fonte principal SegoeXbox-Light.xtt e DASHUSER: ausentes | corrigir contratos demonstrados; textos já funcionam pelo fallback. XAM real 17559 não consta da coleção, mas o runtime usa HLE; não há abertura dele que demonstre dependência obrigatória |
+| **Dashboard 17559: experiência de sistema** | ciclo original com Castle Crashers confirmado na mesma janela, mas há corte visual na troca; Guide e perfis incompletos | seguir a apresentação original na transição e o caminho de perfil (Settings chama XamShowGamerCardUI, stub FE/21008) |
+| Configurações parciais | algumas páginas leem 0x1C após XConfig categoria 7; strings comuns indisponíveis retornam nulo | corrigir contratos demonstrados; fonte original integrada e XAM 17559 disponível como referência, sem executar seu código |
 | Sem symlinks no Windows | exige o passo de materialização | opcional: Developer Mode |
 
 ## Não funciona / não existe ainda
 
-- Dashboard: menu Metro com textos e resposta parcial à entrada; biblioteca e ciclo com o jogo indisponíveis (§ Bloqueios). Região de sistema experimental, fonte principal e vários serviços ainda parciais. Castle Crashers sem save/load, sem versão completa (licença) e sem teste automatizado de gameplay.
+- Dashboard: biblioteca e ciclo original com Castle Crashers funcionam na 17559; transição visual, Guide e perfis ainda incompletos. Região de sistema experimental preservada. Castle Crashers sem save/load validado, sem versão completa (licença) e sem teste automatizado de gameplay.
 - O `iruka` não foi validado em entrada, áudio, encerramento normal, execução longa nem Release.
 - `x360n` não encadeia `init/codegen/build` sozinho: `scripts/build-title.ps1`
   faz o build em quatro fases, mas `init` e o codegen inicial ainda são passos à mão.
-- Canal título→supervisor implementado em `x360n session`; o retorno pelo Guide e XamLoaderLaunchTitle(NULL) permanece pendente.
+- Canal título→supervisor e XamLoaderLaunchTitle(NULL, 0x100) validados; Guide original permanece pendente.
 
 ## Próximo incremento de maior valor
 
-1. Dashboard 17559: implementar o encaminhamento real da URI de My Games à
-   biblioteca e então o pedido de Castle Crashers ao supervisor, sem launcher
-   substituto. A região zerada permanece hipótese explícita no log/relatório.
+1. Dashboard 17559: corrigir a continuidade visual pelo caminho original e seguir
+   Guide/perfis locais conforme o checklist oficial. A região zerada permanece
+   hipótese explícita no log/relatório; nenhum fade substituto aprova a transição.
 2. Castle Crashers: teste de save/load em `.local/user/castle_crashers`
    (gravar no jogo, encerrar, reabrir, conferir), que é a próxima etapa da matriz.
 3. Transformar `identify → init → codegen → build-title → run` num comando do
@@ -135,6 +141,6 @@ Detalhes, mensagens exatas e classificação de cada falha: `docs/validation-iru
 
 - **M0** build reproduzível, SDK integrado, testes reais — feito.
 - **M1** um programa PowerPC autorizado em XEX pelo fluxo completo — feito para a amostra Dolphin (limitações acima).
-- **M2 (parcial, experimental)** dashboard — versão 17559: primeiro quadro real renderizado e mudança de painel durante entrada; textos ausentes, navegação ainda falha e lançamento de jogo não validado.
-- **M3 (parcial, experimental)** Castle Crashers: inicia, menu renderizado, entrada relatada pelo usuário; save/load e integração com a dashboard não testados.
+- **M2 (parcial, experimental)** dashboard — versão 17559: renderização contínua, fonte original, navegação, My Games e ciclo original com Castle Crashers; transição visual, Guide e perfis pendentes.
+- **M3 (parcial, experimental)** Castle Crashers: inicia pelo menu original, entrada e retorno à 17559 confirmados; save/load e gameplay prolongado não validados.
 - **M4–M5** — não iniciados.

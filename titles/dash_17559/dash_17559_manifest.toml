@@ -33,5 +33,7 @@ includes = ["analysis/bootanim_17559.toml"]
 xex_sha256 = "3ad8f38d070eaf63cadac0697e3e8802c565cbfd0825a485347c5d718014f927"
 native_exe = "../../.local/build/titles/dash_17559/dash_17559.exe"
 user_data_root = "../../.local/user/dash17559"
-args = ["--gpu_plugin=xenos", "--mnk_mode=true"]
+args = ["--gpu_plugin=xenos", "--mnk_mode=true", "--dash17559_boot_intro=true"]
 launch_targets = ["../castle_crashers/castle_crashers_manifest.toml"]
+# Original XAM 17559 maps XLNI_DASH_ARCADE (0x100) to packed reason 23.
+dashboard_return_flags = [0, 0x100]

@@ -10,6 +10,22 @@
 #include <rex/ppc/func.h>
 #include <rex/runtime.h>
 #include <rex/system/kernel_state.h>
+#include "launch_context.h"
+
+bool dash17559::PrepareReturnContext(rex::Runtime& runtime) {
+  auto& loader = runtime.kernel_state()->GetKernelModule<rex::kernel::xam::XamModule>("xam.xex")->loader_data();
+  if (loader.launch_flags == 0) return true;
+  if (loader.launch_flags != 0x100) return false;
+  // Original 17559 XAM 816A0798 -> 816A0800..816A0840: for bit 8,
+  // a 1020-byte dashboard context, reserved=0, reason=65-42=23, user=FF.
+  // The immutable host handoff retains the game's original bytes and flags.
+  loader.launch_data.assign(1020, 0);
+  loader.launch_data[7] = 23;
+  loader.launch_data[11] = 0xFF;
+  loader.launch_data_present = true;
+  REXLOG_INFO("17559 return context: XLNI_DASH_ARCADE flags=00000100 reason=23 user=FF");
+  return true;
+}
 
 extern "C" REX_FUNC(__imp__XamLaunchURI) {
   constexpr uint32_t invalid = 0x80070057, unsupported = 0x80004001;
