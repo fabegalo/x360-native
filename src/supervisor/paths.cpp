@@ -4,10 +4,53 @@
 #include <cctype>
 #include <cwctype>
 #include <system_error>
+#include <fstream>
+#include <stdexcept>
+#ifdef _WIN32
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+#endif
 
 namespace fs = std::filesystem;
 
 namespace x360n {
+std::string PathUtf8(const fs::path& path) {
+  auto value = path.u8string(); return {value.begin(), value.end()};
+}
+fs::path PathFromUtf8(const std::string& value) {
+  return fs::path(std::u8string(value.begin(), value.end()));
+}
+fs::path UserDataRoot(const ProjectPaths& paths, const fs::path& default_root) {
+  const auto setting = paths.local() / "user-data-root.txt";
+  if (!fs::exists(setting)) return default_root;
+  std::ifstream in(setting, std::ios::binary); std::string value;
+  if (!std::getline(in, value) || value.empty()) throw std::runtime_error("User data setting unreadable; select the storage folder again.");
+  if (value.back() == '\r') value.pop_back();
+  auto root = PathFromUtf8(value);
+  if (!root.is_absolute()) throw std::runtime_error("User data path must be absolute.");
+  for (const auto& protected_root : {paths.inputs(), paths.build(), paths.root / "titles", paths.sdk()}) {
+    auto rel = fs::weakly_canonical(root).lexically_relative(fs::weakly_canonical(protected_root));
+    if (!rel.empty() && !rel.is_absolute() && *rel.begin() != "..") throw std::runtime_error("User data cannot share content, source or build directories.");
+  }
+  return root / default_root.filename();
+}
+void SetUserDataRoot(const ProjectPaths& paths, const fs::path& directory) {
+  if (!directory.is_absolute() || !fs::is_directory(directory)) throw std::runtime_error("Select an existing absolute storage folder.");
+  for (const auto& protected_root : {paths.inputs(), paths.build(), paths.root / "titles", paths.sdk()}) {
+    auto rel = fs::weakly_canonical(directory).lexically_relative(fs::weakly_canonical(protected_root));
+    if (!rel.empty() && !rel.is_absolute() && *rel.begin() != "..") throw std::runtime_error("Select storage outside content, source and build folders.");
+  }
+  fs::create_directories(paths.local());
+  const auto setting = paths.local() / "user-data-root.txt";
+  auto staging = setting; staging += ".tmp";
+  if (fs::exists(staging)) throw std::runtime_error("Unfinished storage setting found. Existing data was preserved.");
+  { std::ofstream out(staging, std::ios::binary); out << PathUtf8(directory) << '\n'; out.flush(); if (!out) throw std::runtime_error("Cannot save storage selection."); }
+#ifdef _WIN32
+  if (!MoveFileExW(staging.c_str(), setting.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) throw std::runtime_error("Cannot commit storage selection.");
+#else
+  fs::rename(staging, setting);
+#endif
+}
 namespace {
 
 std::wstring Folded(const fs::path& p) {

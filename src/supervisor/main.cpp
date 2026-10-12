@@ -26,6 +26,7 @@
 #include "xex_identity.h"
 #include "session_profile.h"
 #include "session_window.h"
+#include "workspace_lease.h"
 
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
@@ -442,12 +443,12 @@ int Run(const ProjectPaths& p, const fs::path& exe_in, std::vector<std::string> 
   // --rex-log points the log_file cvar into the run directory so it is kept
   // and scanned like the captured streams.
   fs::path rex_log_file = dir / "rex.log";
-  if (rex_log) args.insert(args.begin(), "--log_file=" + rex_log_file.string());
+  if (rex_log) args.insert(args.begin(), "--log_file=" + PathUtf8(rex_log_file));
   if (handoff) {
     *handoff = dir / "handoff.bin";
     // Refuse stale records, including a same-second reused run label.
     if (fs::exists(*handoff)) return kExitUsage;
-    args.push_back("--x360n_handoff_out=" + handoff->string());
+    args.push_back("--x360n_handoff_out=" + PathUtf8(*handoff));
   }
   if (window) args.push_back("--parent_window=" + std::to_string(window->handle()));
 
@@ -623,6 +624,7 @@ int Run(const ProjectPaths& p, const fs::path& exe_in, std::vector<std::string> 
 
 int Session(const ProjectPaths& paths, const fs::path& manifest, int timeout, bool separate_windows) {
   try {
+    WorkspaceLease lease(paths);
     const auto dashboard = LoadSessionProfile(paths, manifest);
     std::vector<SessionProfile> targets;
     for (const auto& target : dashboard.launch_targets)
@@ -638,9 +640,9 @@ int Session(const ProjectPaths& paths, const fs::path& manifest, int timeout, bo
       // Revalidate the profile and input bytes at every transition.
       active = LoadSessionProfile(paths, active.manifest);
       auto args = active.args;
-      args.push_back("--game_data_root=" + active.game_root.string());
-      args.push_back("--user_data_root=" + active.user_root.string());
-      if (!incoming.empty()) args.push_back("--x360n_handoff_in=" + incoming.string());
+      args.push_back("--game_data_root=" + PathUtf8(active.game_root));
+      args.push_back("--user_data_root=" + PathUtf8(active.user_root));
+      if (!incoming.empty()) args.push_back("--x360n_handoff_in=" + PathUtf8(incoming));
       fs::path handoff;
       const auto result = Run(paths, active.exe, args,
           fmt::format("session-{}-{}", step, active.name), timeout, true, false, &handoff, window.get());
@@ -692,6 +694,7 @@ int Session(const ProjectPaths& paths, const fs::path& manifest, int timeout, bo
 
 int main(int argc, char** argv) {
   CLI::App app{"x360n - x360-native development supervisor", "x360n"};
+  argv = app.ensure_utf8(argv);
   app.set_version_flag("--version", X360N_VERSION);
   app.require_subcommand(1);
   std::string root_opt;
@@ -744,15 +747,15 @@ int main(int argc, char** argv) {
     return rc == 0 ? kExitOk : kExitUsage;
   }
 
-  if (identify->parsed()) return Identify(file, json);
+  if (identify->parsed()) return Identify(PathFromUtf8(file), json);
 
-  auto paths = FindProjectRoot(root_opt.empty() ? SelfPath() : fs::path(root_opt));
+  auto paths = FindProjectRoot(root_opt.empty() ? SelfPath() : PathFromUtf8(root_opt));
   if (!paths) {
     fmt::print(stderr, "x360n: project root (deps.lock.json) not found; pass --root\n");
     return kExitUsage;
   }
   if (doctor->parsed()) return Doctor(*paths, config);
-  if (session->parsed()) return Session(*paths, session_manifest, session_timeout, separate_windows);
-  if (run->parsed()) return Run(*paths, exe, child_args, label, timeout_s, rex_log, crash_stack);
+  if (session->parsed()) return Session(*paths, PathFromUtf8(session_manifest), session_timeout, separate_windows);
+  if (run->parsed()) return Run(*paths, PathFromUtf8(exe), child_args, label, timeout_s, rex_log, crash_stack);
   return kExitUsage;
 }

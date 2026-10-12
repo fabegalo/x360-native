@@ -21,6 +21,12 @@ if (-not (Test-Path (Join-Path $titleDir 'CMakePresets.json'))) { throw "no titl
 if (-not $BuildDir) { $BuildDir = ".local/build/titles/$Title" }
 $build = [IO.Path]::GetFullPath((Join-Path $root $BuildDir))
 New-Item -ItemType Directory -Force $build | Out-Null
+$leasePath = Join-Path $root '.local/environment.lock'
+try { $lease = [IO.File]::Open($leasePath, [IO.FileMode]::OpenOrCreate, [IO.FileAccess]::ReadWrite, [IO.FileShare]::None) }
+catch { throw 'Environment in use. Close the platform or other preparation and retry. Ambiente em uso; feche a plataforma e tente novamente.' }
+$marker = Join-Path $root ".local/preparation/$Title.incomplete"
+New-Item -ItemType Directory -Force (Split-Path $marker) | Out-Null
+[IO.File]::WriteAllText($marker, 'incomplete')
 $devshell = Join-Path $root 'scripts\devshell.cmd'
 
 $steps = @(
@@ -32,6 +38,7 @@ $steps = @(
 Push-Location $titleDir
 try {
     foreach ($s in $steps) {
+        Write-Output "X360N_STAGE $Title $($s.name)"
         $log = Join-Path $build "x360n-build-$($s.name).log"
         $sw = [Diagnostics.Stopwatch]::StartNew()
         # Redirect inside cmd: in PowerShell 5.1 with ErrorActionPreference=Stop,
@@ -45,5 +52,6 @@ try {
             exit $rc
         }
     }
-} finally { Pop-Location }
+} finally { Pop-Location; $lease.Dispose() }
+Remove-Item -LiteralPath $marker
 Write-Host "built: $(Join-Path $build "$Title.exe")"

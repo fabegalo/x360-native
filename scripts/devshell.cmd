@@ -29,7 +29,7 @@ if errorlevel 1 (
   echo [devshell] vcvars64.bat failed. 1>&2
   exit /b 3
 )
-set "PATH=%X360_LLVM%\bin;%PATH%"
+set "PATH=%X360_LLVM%\bin;%X360_ROOT%\.local\toolchains\mingit-2.56.0.2\cmd;%X360_ROOT%\.local\toolchains\cmake-3.31.6\bin;%X360_ROOT%\.local\toolchains\ninja-1.13.1;%PATH%"
 
 %*
 exit /b %ERRORLEVEL%

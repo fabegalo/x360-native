@@ -7,9 +7,10 @@ namespace x360n::desktop {
 struct Input {
   std::filesystem::path destination;
   std::string source_name, sha256;
+  std::filesystem::path source_relative;
 };
 struct Target {
-  std::string id, label, limitations;
+  std::string id, label, limitations, label_en, limitations_en;
   std::filesystem::path manifest, game_root, user_root, exe;
   std::vector<Input> inputs;
   std::vector<std::string> dependencies;
@@ -31,4 +32,8 @@ std::filesystem::path PreparationMarker(const ProjectPaths& paths, const Target&
 size_t Import(const ProjectPaths& paths, const Target& target,
               const std::filesystem::path& source,
               const std::function<bool()>& cancelled = {});
+// A packaged source payload is separate from all user content. Existing files
+// must match; no update ever silently replaces a working environment.
+void InitializeEnvironment(const std::filesystem::path& payload,
+                           const std::filesystem::path& destination);
 }

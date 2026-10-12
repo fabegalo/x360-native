@@ -7,6 +7,8 @@
 #include <string>
 
 namespace x360n {
+std::string PathUtf8(const std::filesystem::path& path);
+std::filesystem::path PathFromUtf8(const std::string& value);
 
 struct ProjectPaths {
   std::filesystem::path root;  // directory containing deps.lock.json
@@ -40,5 +42,10 @@ bool IsSafeLabel(const std::string& label);
 // device: empty, ".", "..", separators, ':', wildcards, control characters,
 // trailing space/dot, reserved names (CON, NUL, COM1...).
 bool IsSafePackageEntryName(const std::string& name);
+// Optional user-selected storage, shared across source/package versions.
+// Defaults remain unchanged for existing environments without this setting.
+std::filesystem::path UserDataRoot(const ProjectPaths& paths,
+                                   const std::filesystem::path& default_root);
+void SetUserDataRoot(const ProjectPaths& paths, const std::filesystem::path& directory);
 
 }  // namespace x360n

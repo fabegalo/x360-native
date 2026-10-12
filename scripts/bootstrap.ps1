@@ -8,7 +8,7 @@ $root = Split-Path -Parent $PSScriptRoot
 git -C $root submodule update --init --recursive --jobs 8
 if ($LASTEXITCODE -ne 0) { throw "git submodule update failed ($LASTEXITCODE)" }
 
-& (Join-Path $PSScriptRoot 'bootstrap-llvm.ps1')
+& (Join-Path $PSScriptRoot 'bootstrap-llvm.ps1') -AllowDownloads
 & (Join-Path $PSScriptRoot 'materialize-symlinks.ps1')
 & (Join-Path $PSScriptRoot 'apply-sdk-patches.ps1')
 if ($LASTEXITCODE -ne 0) { throw "apply-sdk-patches.ps1 failed ($LASTEXITCODE)" }

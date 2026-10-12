@@ -4,6 +4,7 @@
 #include <fstream>
 #include <map>
 #include <stdexcept>
+#include <sstream>
 #include <toml++/toml.hpp>
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
@@ -55,6 +56,8 @@ std::vector<Target> ReadCatalog(const ProjectPaths& paths) {
     if (!IsSafeLabel(t.id)) throw std::runtime_error("Identificador inválido.");
     t.label = Text(info["label"]);
     t.limitations = Text(info["limitations"]);
+    t.label_en = info["label_en"].value_or(t.label);
+    t.limitations_en = info["limitations_en"].value_or(t.limitations);
     t.session = info["session"].value_or(false);
     t.importable = info["importable"].value_or(true);
     t.manifest = dir.path() / (t.id + "_manifest.toml");
@@ -74,6 +77,7 @@ std::vector<Target> ReadCatalog(const ProjectPaths& paths) {
     if (auto value = profile["x360n"]["user_data_root"].value<std::string>()) {
       t.user_root = Resolve(dir.path(), *value);
       Inside(t.user_root, paths.local() / "user");
+      t.user_root = UserDataRoot(paths, t.user_root);
     }
     const auto* files = info["files"].as_array();
     if (!files || files->empty()) throw std::runtime_error("Perfil sem componentes verificados.");
@@ -89,6 +93,23 @@ std::vector<Target> ReadCatalog(const ProjectPaths& paths) {
           i.sha256.find_first_not_of("0123456789abcdef") != std::string::npos)
         throw std::runtime_error("Identidade de componente inválida.");
       t.inputs.push_back(std::move(i));
+    }
+    if (auto inventory = info["inventory"].value<std::string>()) {
+      auto list = Resolve(dir.path(), *inventory);
+      Inside(list, dir.path());
+      std::ifstream stream(list, std::ios::binary);
+      if (!stream) throw std::runtime_error("Inventário de componentes ausente: " + Utf8(list));
+      for (std::string line; std::getline(stream, line);) {
+        if (!line.empty() && line.back() == '\r') line.pop_back();
+        if (line.empty() || line[0] == '#') continue;
+        if (line.size() < 67 || line[64] != '\t' || line.substr(0, 64).find_first_not_of("0123456789abcdef") != std::string::npos)
+          throw std::runtime_error("Inventário de componentes inválido.");
+        auto relative = fs::path(std::u8string(line.begin() + 65, line.end()));
+        for (const auto& component : relative)
+          if (!IsSafePackageEntryName(Utf8(component))) throw std::runtime_error("Caminho inválido no inventário.");
+        auto destination = Resolve(t.game_root, Utf8(relative)); Inside(destination, t.game_root);
+        t.inputs.push_back({destination, Utf8(relative.filename()), line.substr(0, 64), relative});
+      }
     }
     if (const auto* deps = info["dependencies"].as_array())
       for (const auto& dep : *deps) {
@@ -147,6 +168,7 @@ size_t Import(const ProjectPaths& paths, const Target& t, const fs::path& source
     if (entry.is_symlink() || !IsWithin(entry.path(), source)) { it.disable_recursion_pending(); continue; }
     if (!entry.is_regular_file()) continue;
     for (const auto& i : t.inputs) {
+      if (!i.source_relative.empty() && entry.path().lexically_relative(source) != i.source_relative) continue;
       if (entry.path().filename() != fs::path(std::u8string(i.source_name.begin(), i.source_name.end())) && entry.path().filename() != i.destination.filename()) continue;
       if (Matches(entry.path(), i.sha256)) copies[i.destination] = entry.path();
     }

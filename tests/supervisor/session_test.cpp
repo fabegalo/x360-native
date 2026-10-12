@@ -2,10 +2,51 @@
 #include "session_profile.h"
 #include "sha256.h"
 #include "scratch.h"
+#include "workspace_lease.h"
 #include <fstream>
 
 namespace fs = std::filesystem;
 using namespace x360n;
+TEST_CASE("selected storage persists without moving or deleting existing saves", "[session]") {
+  auto dir = UniqueTempPath("storage"); ProjectPaths paths{dir};
+  auto original = paths.local() / "user/dashboard"; fs::create_directories(original);
+  std::ofstream(original / "save") << "existing progress";
+  auto selected = dir / fs::path(u8"Saves João 日本"); fs::create_directories(selected);
+  CHECK(UserDataRoot(paths, original) == original);
+  SetUserDataRoot(paths, selected);
+  CHECK(UserDataRoot(ProjectPaths{dir}, original) == selected / "dashboard");
+  CHECK(fs::exists(original / "save"));
+  fs::create_directories(paths.inputs());
+  CHECK_THROWS(SetUserDataRoot(paths, paths.inputs()));
+  CHECK(UserDataRoot(paths, original) == selected / "dashboard");
+  fs::remove_all(dir);
+}
+TEST_CASE("environment lease rejects concurrent preparation and releases after exit", "[session]") {
+  auto dir = UniqueTempPath("lease"); ProjectPaths paths{dir};
+  {
+    WorkspaceLease first(paths);
+    CHECK_THROWS_AS(WorkspaceLease(paths), std::runtime_error);
+  }
+  CHECK_NOTHROW(WorkspaceLease(paths));
+  fs::remove_all(dir);
+}
+
+TEST_CASE("session profile and launch request preserve Unicode paths", "[session]") {
+  auto dir = UniqueTempPath("unicode") / fs::path(u8"João 日本");
+  fs::create_directories(dir / ".local/build"); fs::create_directories(dir / ".local/inputs");
+  auto xex = dir / ".local/inputs/default.xex"; std::ofstream(xex) << "test fixture";
+  auto exe = dir / ".local/build/test.exe"; std::ofstream(exe) << "synthetic executable";
+  auto manifest = dir / "profile.toml";
+  std::ofstream(manifest) << "[project]\nname = 'test'\ngame_root = '.local/inputs'\n"
+    "[entrypoint]\nfile_path = '.local/inputs/default.xex'\n"
+    "[x360n]\nnative_exe = '.local/build/test.exe'\nuser_data_root = '.local/user'\nxex_sha256 = '" << DigestFile(xex)->sha256 << "'\n";
+  auto profile = LoadSessionProfile(ProjectPaths{dir}, manifest);
+  CHECK(profile.exe == fs::canonical(exe));
+  LaunchRequest request; request.path = PathUtf8(xex);
+  CHECK(MatchesLaunch(profile, request));
+  CHECK(PathFromUtf8(PathUtf8(dir)) == dir);
+  fs::remove_all(dir.parent_path());
+}
 
 TEST_CASE("handoff preserves launch bytes and rejects truncated records", "[session]") {
   auto dir = UniqueTempPath("handoff"); fs::create_directories(dir);

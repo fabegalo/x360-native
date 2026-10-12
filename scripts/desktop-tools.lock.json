@@ -1,0 +1,29 @@
+{
+  "schema": 1,
+  "tools": [
+    {
+      "id": "git", "version": "2.56.0.2", "directory": "mingit-2.56.0.2",
+      "asset": "MinGit-2.56.0.2-64-bit.zip", "size": 39806486,
+      "url": "https://github.com/git-for-windows/git/releases/download/v2.56.0.windows.2/MinGit-2.56.0.2-64-bit.zip",
+      "sha256": "da35e72aa21c005a5a0d298cfbae110bc1609a815730ea0dde84b01a1b3cd3be",
+      "entry": "cmd/git.exe", "prefix": "",
+      "verification": "GitHub release asset digest, git-for-windows/git v2.56.0.windows.2"
+    },
+    {
+      "id": "cmake", "version": "3.31.6", "directory": "cmake-3.31.6",
+      "asset": "cmake-3.31.6-windows-x86_64.zip", "size": 46473549,
+      "url": "https://github.com/Kitware/CMake/releases/download/v3.31.6/cmake-3.31.6-windows-x86_64.zip",
+      "sha256": "d163cd3ab4959b0a53fa8988f2ddbd2e6c501658201e6a154386bad9dbe4f836",
+      "entry": "bin/cmake.exe", "prefix": "cmake-3.31.6-windows-x86_64",
+      "verification": "Kitware/CMake v3.31.6 cmake-3.31.6-SHA-256.txt"
+    },
+    {
+      "id": "ninja", "version": "1.13.1", "directory": "ninja-1.13.1",
+      "asset": "ninja-win.zip", "size": 289808,
+      "url": "https://github.com/ninja-build/ninja/releases/download/v1.13.1/ninja-win.zip",
+      "sha256": "26a40fa8595694dec2fad4911e62d29e10525d2133c9a4230b66397774ae25bf",
+      "entry": "ninja.exe", "prefix": "",
+      "verification": "GitHub release asset digest, ninja-build/ninja v1.13.1"
+    }
+  ]
+}

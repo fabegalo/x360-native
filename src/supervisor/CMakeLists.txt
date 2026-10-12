@@ -8,6 +8,7 @@ add_library(x360n_core STATIC
     report.cpp
     session_profile.cpp
     session_window.cpp
+    workspace_lease.cpp
 )
 target_include_directories(x360n_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_include_directories(x360n_core SYSTEM PUBLIC

@@ -1,4 +1,6 @@
 label = "Dashboard Retail 6717 (diagnóstico)"
+label_en = "Retail dashboard 6717 (diagnostics)"
+limitations_en = "Blades renders and navigates, but its matching XenonJKLatin.xtt is missing. Game cycle unvalidated. This version does not inherit 17559 modules or fonts; guided session unavailable."
 session = false
 importable = false
 limitations = "Blades renderiza e navega, mas falta XenonJKLatin.xtt correspondente. Ciclo com jogos não validado. Esta versão não usa os módulos nem fontes da 17559; sessão guiada ainda não disponível."

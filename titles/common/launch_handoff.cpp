@@ -16,12 +16,15 @@ namespace x360n {
 namespace {
 std::mutex handoff_mutex;
 bool dashboard_return = false;
+std::filesystem::path Utf8Path(const std::string& value) {
+  return std::filesystem::path(std::u8string(value.begin(), value.end()));
+}
 void Publish(const std::string& output, const LaunchRequest& request) {
   // Guest exit and the user's close request can arrive on different threads.
   // Preserve the first completed event, without racing on the temporary file.
   std::lock_guard lock(handoff_mutex);
-  if (std::filesystem::exists(output)) return;
-  if (!WriteLaunchRequest(output, request))
+  if (std::filesystem::exists(Utf8Path(output))) return;
+  if (!WriteLaunchRequest(Utf8Path(output), request))
     REXLOG_ERROR("[supervisor] could not write handoff {}", output);
   else REXLOG_INFO("[supervisor] handoff kind={}, path={}", uint32_t(request.kind), request.path);
 }
@@ -32,7 +35,7 @@ void ImportLaunchData(rex::Runtime& runtime) {
   auto input = REXCVAR_GET(x360n_handoff_in);
   if (input.empty()) return;
   LaunchRequest request;
-  if (!ReadLaunchRequest(input, request) || request.kind == LaunchRequest::WindowClose)
+  if (!ReadLaunchRequest(Utf8Path(input), request) || request.kind == LaunchRequest::WindowClose)
     REX_FATAL("Invalid supervisor launch-data record: {}", input);
   dashboard_return = request.kind != LaunchRequest::Image;
   auto xam = runtime.kernel_state()->GetKernelModule<rex::kernel::xam::XamModule>("xam.xex");
@@ -66,7 +69,8 @@ void ExportLaunchRequest(rex::Runtime& runtime) {
       REXLOG_ERROR("[supervisor] launch path has no host file: {}", data.launch_path);
       return;
     }
-    request.path = host->host_path().string();
+    auto path = host->host_path().u8string();
+    request.path.assign(path.begin(), path.end());
   }
   Publish(output, request);
 }

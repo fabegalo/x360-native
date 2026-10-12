@@ -1,8 +1,11 @@
 label = "Castle Crashers 0.0.1.3 (preparação)"
+label_en = "Castle Crashers 0.0.1.3 (preparation)"
+limitations_en = "Start the game from original My Games. Import the extracted 0.0.1.3 folder: the executable and 707 assets are verified before copying. Direct STFS import is still pending."
 session = false
-importable = false
+importable = true
+inventory = "assets.sha256"
 runtime_files = ["rexruntimerd.dll", "rexgpu-xenosrd.dll", "TracyClientrd.dll"]
-limitations = "Inicie o jogo pela My Games original. Importação guiada do pacote STFS ainda pendente; este diagnóstico confere o XEX, não a integridade de todos os assets. Preserve a extração completa em extracted/."
+limitations = "Inicie o jogo pela My Games original. Selecione a pasta extraída da versão 0.0.1.3: o executável e os 707 assets são verificados antes da cópia. Importação de STFS diretamente no assistente ainda pendente."
 [[files]]
 path = "default.xex"
 source_name = "default.xex"

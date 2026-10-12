@@ -1,6 +1,7 @@
 # Downloads the LLVM release pinned in deps.lock.json into .local/toolchains.
 # No admin rights, no global PATH or registry changes. Idempotent.
 # Usage: powershell -ExecutionPolicy Bypass -File scripts/bootstrap-llvm.ps1
+param([switch]$AllowDownloads)
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
 $lock = (Get-Content -Raw (Join-Path $root 'deps.lock.json') | ConvertFrom-Json).llvm
@@ -18,6 +19,7 @@ New-Item -ItemType Directory -Force $dlDir | Out-Null
 $archive = Join-Path $dlDir $lock.asset
 
 if (-not (Test-Path $archive)) {
+    if (-not $AllowDownloads) { throw "Download consent required: $($lock.url). Run with -AllowDownloads or use the preparation app." }
     Write-Host "Downloading $($lock.url)"
     & curl.exe -L --fail --retry 3 -o "$archive.part" $lock.url
     if ($LASTEXITCODE -ne 0) { throw "curl failed with exit code $LASTEXITCODE" }
@@ -31,8 +33,7 @@ if ($actual -ne $lock.sha256) {
 Write-Host "SHA-256 verified: $actual"
 
 # Extract into a staging dir, then rename, so a partial extract never looks installed.
-$staging = "$installDir.staging"
-if (Test-Path $staging) { Remove-Item -Recurse -Force $staging }
+$staging = "$installDir.staging-$([guid]::NewGuid().ToString('N'))"
 New-Item -ItemType Directory -Force $staging | Out-Null
 & "$env:SystemRoot\System32\tar.exe" -xf $archive -C $staging --strip-components 1
 if ($LASTEXITCODE -ne 0) { throw "tar failed with exit code $LASTEXITCODE" }

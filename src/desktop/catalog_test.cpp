@@ -3,6 +3,8 @@
 #include "sha256.h"
 #include <chrono>
 #include <fstream>
+#include <cstdlib>
+#include <algorithm>
 
 namespace fs = std::filesystem;
 using namespace x360n;
@@ -25,12 +27,47 @@ struct Fixture {
     fs::create_directories(source);
     target.id = "dash_test"; target.game_root = paths.inputs() / "dashboard/test";
     target.exe = paths.build() / "titles/dash_test/dash_test.exe";
-    target.inputs = {{target.game_root / "dash.xex", "dash.xex", Hash("dashboard")},
-                     {target.game_root / "system/xam_ui.xex", "xam.xex", Hash("module")}};
+    target.inputs = {{target.game_root / "dash.xex", "dash.xex", Hash("dashboard"), {}},
+                     {target.game_root / "system/xam_ui.xex", "xam.xex", Hash("module"), {}}};
     Write(source / "dash.xex", "dashboard"); Write(source / "system/xam.xex", "module");
   }
   ~Fixture() { std::error_code ec; fs::remove_all(root, ec); }
 };
+}
+
+TEST_CASE("asset inventory rejects missing data and same-name files in the wrong folder") {
+  Fixture f;
+  f.target.inputs.push_back({f.target.game_root / "art/texture.bin", "texture.bin", Hash("texture"), "art/texture.bin"});
+  Write(f.source / "other/texture.bin", "texture");
+  CHECK_THROWS(Import(f.paths, f.target, f.source));
+  CHECK_FALSE(fs::exists(f.target.inputs.front().destination));
+  Write(f.source / "art/texture.bin", "texture");
+  CHECK(Import(f.paths, f.target, f.source) == 3);
+  Write(f.target.inputs.back().destination, "broken");
+  CHECK_FALSE(Inspect(f.paths, f.target).inputs_ok);
+}
+
+TEST_CASE("packaged environment is retryable and preserves existing sources and saves") {
+  Fixture f; auto payload = f.root / "package/workspace"; auto destination = f.root / fs::path(u8"Dados do João 日本");
+  Write(payload / "deps.lock.json", "fixture lock");
+  Write(payload / "scripts/prepare.ps1", "fixture script");
+  Write(payload / "payload.sha256", Hash("fixture lock") + "\tdeps.lock.json\n" + Hash("fixture script") + "\tscripts/prepare.ps1\n");
+  InitializeEnvironment(payload, destination);
+  Write(destination / ".local/user/save", "progress");
+  CHECK_NOTHROW(InitializeEnvironment(payload, destination));
+  CHECK(DigestFile(destination / ".local/user/save")->sha256 == Hash("progress"));
+  Write(destination / "scripts/prepare.ps1", "preserve local change");
+  CHECK_THROWS(InitializeEnvironment(payload, destination));
+  CHECK(DigestFile(destination / "scripts/prepare.ps1")->sha256 == Hash("preserve local change"));
+}
+
+TEST_CASE("packaged environment rejects tampering and path traversal before writing") {
+  Fixture f; auto payload = f.root / "package/workspace"; auto destination = f.root / "empty";
+  Write(payload / "deps.lock.json", "different bytes");
+  Write(payload / "payload.sha256", Hash("fixture lock") + "\tdeps.lock.json\n");
+  CHECK_THROWS(InitializeEnvironment(payload, destination)); CHECK_FALSE(fs::exists(destination));
+  Write(payload / "payload.sha256", Hash("different bytes") + "\t../outside\n");
+  CHECK_THROWS(InitializeEnvironment(payload, destination)); CHECK_FALSE(fs::exists(destination));
 }
 TEST_CASE("desktop opens an empty environment without inventing targets") {
   Fixture f;
@@ -105,4 +142,26 @@ TEST_CASE("missing runtime and interrupted build never qualify an old exe as pre
   CHECK_FALSE(Inspect(f.paths, f.target).prepared);
   fs::remove(PreparationMarker(f.paths, f.target));
   CHECK(Inspect(f.paths, f.target).prepared);
+}
+
+TEST_CASE("local packaged payload imports the complete validated sets into a fresh Unicode environment", "[.local-package]") {
+  const char* package = std::getenv("X360N_TEST_PACKAGE");
+  const char* original = std::getenv("X360N_TEST_SOURCE");
+  REQUIRE(package); REQUIRE(original);
+  Fixture f; auto root = f.root / fs::path(u8"Ambiente João 日本");
+  InitializeEnvironment(PathFromUtf8(package) / "workspace", root);
+  auto targets = ReadCatalog(ProjectPaths{root});
+  auto source_targets = ReadCatalog(ProjectPaths{PathFromUtf8(original)});
+  REQUIRE(targets.size() >= 3);
+  for (const auto& t : targets) {
+    if (t.id != "castle_crashers" && t.id != "dash_17559") continue;
+    auto it = std::find_if(source_targets.begin(), source_targets.end(), [&](const auto& s) { return s.id == t.id; });
+    REQUIRE(it != source_targets.end());
+    INFO(t.id);
+    CHECK(Import(ProjectPaths{root}, t, it->game_root) == t.inputs.size());
+    CHECK(Inspect(ProjectPaths{root}, t).inputs_ok);
+    CHECK_FALSE(Inspect(ProjectPaths{root}, t).prepared);
+    CHECK(Import(ProjectPaths{root}, t, it->game_root) == 0);
+    CHECK(Inspect(ProjectPaths{PathFromUtf8(original)}, *it).inputs_ok);
+  }
 }
