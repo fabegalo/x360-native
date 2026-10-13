@@ -375,8 +375,8 @@ void Start(App& a, int action, fs::path source = {}) {
           auto item = std::find_if(a.targets.begin(), a.targets.end(), [&](const auto& t) { return t.id == id; });
           auto label = item == a.targets.end() ? id : (english ? item->label_en : item->label);
           Post(a.window, kProgress, Tr("Preparando ", "Preparing ") + label + Tr(".\r\nA primeira preparação pode levar vários minutos.", ".\r\nFirst-time preparation can take several minutes."));
-          run(powershell, {"-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", Utf8(a.root / "scripts/build-title.ps1"), "-Title", id}, id);
-          fs::remove(marker);
+          run(powershell, {"-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", Utf8(a.root / "scripts/build-title.ps1"), "-Title", id, "-KeepIncompleteMarker"}, id);
+          if (id != target.id) fs::remove(marker);
         };
         for (const auto& dep : target.dependencies) prepare(dep);
         prepare(target.id);
@@ -385,6 +385,7 @@ void Start(App& a, int action, fs::path source = {}) {
         if (!target.session) for (const auto& dashboard : a.targets)
           if (dashboard.session && Inspect(ProjectPaths{a.root}, dashboard).inputs_ok)
             PrepareLibrary(ProjectPaths{a.root}, dashboard, a.targets, [&] { return a.cancel.load(); });
+        fs::remove(PreparationMarker(ProjectPaths{a.root}, target));
         finish(Tr("Preparação concluída. Os componentes serão conferidos antes de habilitar a sessão.", "Preparation finished. Components will be checked before enabling the session."));
       }
     } catch (const std::exception& error) { a.failed = true; finish(error.what()); }

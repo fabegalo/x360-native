@@ -10,8 +10,20 @@
 namespace fs = std::filesystem;
 namespace x360n::desktop {
 namespace {
+fs::path LibraryPath(const fs::path& path) {
+#ifdef _WIN32
+  // Content IDs and temporary-copy suffixes exceed MAX_PATH even under an
+  // ordinary extracted ZIP. Do not require a machine-wide Windows setting.
+  auto name = fs::absolute(path).lexically_normal().make_preferred().native();
+  if (name.starts_with(L"\\\\?\\")) return name;
+  if (name.starts_with(L"\\\\")) return L"\\\\?\\UNC\\" + name.substr(2);
+  return L"\\\\?\\" + name;
+#else
+  return path;
+#endif
+}
 bool WithinNew(const fs::path& file, const fs::path& root) {
-  auto relative = fs::weakly_canonical(file).lexically_relative(fs::weakly_canonical(root));
+  auto relative = fs::weakly_canonical(LibraryPath(file)).lexically_relative(fs::weakly_canonical(LibraryPath(root)));
   return !relative.empty() && !relative.is_absolute() && *relative.begin() != "..";
 }
 const Target& Dependency(const std::vector<Target>& catalog, const std::string& id) {
@@ -44,7 +56,7 @@ Entry Describe(const Target& session, const Target& game) {
     bytes[8 + 2 * i] = char(name[i] >> 8); bytes[9 + 2 * i] = char(name[i]);
   }
   bytes.replace(0x108, c.file_name.size(), c.file_name);
-  auto base = session.user_root / "0000000000000000" / c.title_id;
+  auto base = LibraryPath(session.user_root) / "0000000000000000" / c.title_id;
   return {base / c.content_type / c.file_name,
           base / "Headers" / c.content_type / (c.file_name + ".header"), bytes};
 }
@@ -125,7 +137,7 @@ void PrepareLibrary(const ProjectPaths& paths, const Target& session, const std:
       fs::create_directories(dest.parent_path());
       auto tmp = dest; tmp += ".x360n-library-tmp";
       if (fs::exists(tmp) && !Same(tmp, input.sha256)) {
-        if (!IsWithin(tmp, session.user_root) || fs::is_symlink(tmp)) throw std::runtime_error("Cópia temporária redirecionada; preservada.");
+        if (!IsWithin(tmp, LibraryPath(session.user_root)) || fs::is_symlink(tmp)) throw std::runtime_error("Cópia temporária redirecionada; preservada.");
         auto interrupted = tmp; interrupted += ".interrupted-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count());
         fs::rename(tmp, interrupted);
       }

@@ -247,6 +247,19 @@ TEST_CASE("original library registration validates all bytes and publishes the h
   CHECK_FALSE(InspectLibrary(session, {game}).empty());
 }
 
+TEST_CASE("original library supports long content paths without Windows policy changes") {
+  Fixture f; Import(f.paths, f.target, f.source);
+  auto game = f.target;
+  game.library = {"584108B7", "000D0000", "F9432A7FE407A3C196C95D0FFD4A540937FD4EEC58", "Castle Crashers", Hash("package provenance")};
+  Target session; session.session = true;
+  session.user_root = f.root / std::string(110, 'x');
+  session.dependencies = {game.id};
+  REQUIRE((session.user_root / "0000000000000000/584108B7/000D0000" / game.library.file_name / "system/xam_ui.xex.x360n-library-tmp").native().size() > 260);
+  REQUIRE_NOTHROW(PrepareLibrary(f.paths, session, {game}));
+  CHECK(InspectLibrary(session, {game}).empty());
+  CHECK_NOTHROW(PrepareLibrary(f.paths, session, {game}));
+}
+
 TEST_CASE("local packaged payload imports the complete validated sets into a fresh Unicode environment", "[.local-package]") {
   const char* package = std::getenv("X360N_TEST_PACKAGE");
   const char* original = std::getenv("X360N_TEST_SOURCE");

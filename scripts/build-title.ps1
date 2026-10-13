@@ -11,7 +11,8 @@
 # Usage: scripts/build-title.ps1 -Title iruka [-BuildDir .local/build/titles/iruka]
 param(
     [Parameter(Mandatory)] [string]$Title,
-    [string]$BuildDir
+    [string]$BuildDir,
+    [switch]$KeepIncompleteMarker
 )
 $ErrorActionPreference = 'Stop'
 # Preparation uses only modules shipped with the selected PowerShell host.
@@ -80,5 +81,5 @@ try {
         }
     }
 } finally { Pop-Location; $lease.Dispose() }
-Remove-Item -LiteralPath $marker
+if (-not $KeepIncompleteMarker) { Remove-Item -LiteralPath $marker }
 Write-Host "built: $(Join-Path $build "$Title.exe")"
