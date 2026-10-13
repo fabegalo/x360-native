@@ -36,8 +36,15 @@ foreach ($tool in $lock.tools) {
     Stage "extract $($tool.id)"
     # A unique staging directory makes interruption retryable without deleting anything.
     $staging = Join-Path $tools ('.staging-' + $tool.id + '-' + [guid]::NewGuid().ToString('N'))
-    Expand-Archive -LiteralPath $archive -DestinationPath $staging
-    $payload = if ($tool.prefix) { Join-Path $staging $tool.prefix } else { $staging }
+    # Windows PowerShell's ZIP module fails at MAX_PATH inside a normal
+    # extracted package directory. Use the Windows tar already used for LLVM,
+    # removing the release's wrapper directory during extraction.
+    New-Item -ItemType Directory -Path $staging | Out-Null
+    $extractArgs = @('-xf', $archive, '-C', $staging)
+    if ($tool.prefix) { $extractArgs += @('--strip-components', '1') }
+    & "$env:SystemRoot\System32\tar.exe" @extractArgs
+    if ($LASTEXITCODE -ne 0) { throw "Tool archive extraction failed: $($tool.asset). Retry preparation." }
+    $payload = $staging
     if (-not (Test-Path -LiteralPath (Join-Path $payload $tool.entry))) { throw "Archive entry missing: $($tool.entry)" }
     [IO.File]::WriteAllText((Join-Path $payload '.x360n-archive-sha256'), $tool.sha256)
     Move-Item -LiteralPath $payload -Destination $destination
