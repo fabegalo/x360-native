@@ -4,6 +4,13 @@
 Publicação pública expressamente autorizada pelo mantenedor em 13/10/2026,
 substituindo a orientação anterior de manter o repositório privado.
 
+**Publicada em 13/10/2026 às 10:26 (America/Sao_Paulo) e verificada sem
+autenticação.** GitHub confirmou repositório público, pre-release não draft,
+tag no commit `ed60e5a1fa94d116a9e472e70dc366d665985b90` e exatamente dois assets.
+O download anônimo do ZIP de 3.160.669 bytes e do checksum foi conferido:
+`ea7c7269f1755c79ddae6c6f9678d90fb28da34e1ea084d2da01f172a3e6c874`.
+README na main e notas publicadas também foram comparados com os arquivos locais.
+
 - Repositório: https://github.com/fabegalo/x360-native
 - Release: https://github.com/fabegalo/x360-native/releases/tag/v0.1.0-preview.19
 - Tag: `v0.1.0-preview.19`, apontando para o commit usado no pacote.
@@ -14,8 +21,8 @@ substituindo a orientação anterior de manter o repositório privado.
 A identidade exata do código está em `package.json` dentro do ZIP e na tag.
 O SHA-256 definitivo está no asset `.sha256` e nas notas publicadas. Esta
 referência evita inserir no próprio payload o hash do ZIP que o contém.
-Os links designam o destino autorizado; a publicação só é considerada concluída
-após confirmação dos metadados e download anônimo dos assets no GitHub.
+Os links abaixo foram confirmados no GitHub, incluindo download anônimo dos assets.
+Este registro posterior é apenas documental; não move a tag nem altera o ZIP.
 
 ## Implementação encerrada e escopo
 
@@ -42,11 +49,15 @@ contém a GUI, o supervisor, o extrator e fontes/scripts/configuração de prepa
 com licenças, avisos e índices de integridade. Nenhuma alteração de runtime,
 SDK, dashboards, avatares ou jogos faz parte desta entrega.
 
-Para o artefato definitivo, a publicação exige: duas builds com ZIPs idênticos;
-CTest e gates existentes aprovados; revisão/payload/hash consistentes; negativos
-de licenciamento/conteúdo; instalação/atualização e recibos; GUI iniciada de uma
-extração persistente fora do repositório. Os resultados definitivos e o hash
-são registrados nas notas da Release. Evidências locais ficam em
+O artefato definitivo teve duas builds com ZIPs idênticos; cada uma passou 56
+casos/52.660 assertions e o gate de licenças/conteúdo (88 registros, três EXEs).
+Revisão, payload e SHA-256 foram conferidos. Por orientação final do mantenedor,
+os testes já realizados de GUI, instalação/atualização, recibos e os 21 negativos
+não foram repetidos integralmente; conservou-se a evidência do candidato anterior
+(incluindo 51 assertions locais). A repetição parcial dos negativos foi interrompida
+e não é declarada completa. Não houve alteração de código nativo desde aquele
+candidato, apenas documentação e metadados de publicação.
+Os resultados definitivos e o hash estão nas notas da Release. Evidências ficam em
 `.local/release-public-preview19/`, sem serem incluídas no pacote.
 
 A verificação pré-publicação cobre todos os objetos alcançáveis pelas refs que

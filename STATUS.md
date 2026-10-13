@@ -1,8 +1,10 @@
 # STATUS
 
 Primeira pre-release (2026-10-13): **`v0.1.0-preview.19`, Windows x64,
-First Technical Preview**, com publicação pública expressamente autorizada pelo
-mantenedor. Implementações técnicas de **C1/C3, C2, C5, C6, C9, C12, C4/C11 e
+First Technical Preview**, **publicada e verificada sem autenticação** em
+13/10/2026. Tag e pacote usam `ed60e5a1fa94d116a9e472e70dc366d665985b90`;
+repositório público, ZIP e SHA-256 acessíveis e conferidos por download anônimo.
+Implementações técnicas de **C1/C3, C2, C5, C6, C9, C12, C4/C11 e
 C10 concluídas**. Windows limpo continua **não validado**, como limitação desta
 prévia experimental. [Release e identidade dos artefatos](docs/FIRST_RELEASE.md).
 
