@@ -10,8 +10,8 @@ $compiler = "$Root/.local/toolchains/llvm-22.1.8/bin/clang++.exe"
 $eventName = 'Local\x360n-build-test-' + [Guid]::NewGuid().ToString('N')
 $event = [Threading.EventWaitHandle]::new($false, 'ManualReset', $eventName)
 function Assert($condition, $message) { if (-not $condition) { throw $message } }
-function Configure($dir, $identity) {
-    & $cmake -S $PSScriptRoot -B $dir -G Ninja "-DX360N_ROOT=$Root" "-DCMAKE_CXX_COMPILER=$compiler" "-DIDENTITY=$identity" -DCMAKE_BUILD_TYPE=Debug "-DTEST_GATE=$eventName" *> "$dir-configure.log"
+function Configure($dir, $identity, $revision=0) {
+    & $cmake -S $PSScriptRoot -B $dir -G Ninja "-DX360N_ROOT=$Root" "-DCMAKE_CXX_COMPILER=$compiler" "-DIDENTITY=$identity" "-DRUNTIME_REVISION=$revision" -DCMAKE_BUILD_TYPE=Debug "-DTEST_GATE=$eventName" *> "$dir-configure.log"
     Assert ($LASTEXITCODE -eq 0) "configure failed: $dir-configure.log"
 }
 function Build($dir, $label, $target='all') {
@@ -38,10 +38,12 @@ try {
     $bFiles = @(Get-ReceiptEntries @("$b/rexruntime.dll", "$b/consumer1.exe"))
     Finish (Build $a 'noop-a') 'noop-a'; Finish (Build $b 'noop-b') 'noop-b'
     Assert ((Test-ReceiptEntries $aFiles) -and (Test-ReceiptEntries $bFiles)) 'no-op changed artifacts'
-    Configure $b 29
+    Configure $b 23 1
     Finish (Build $b 'rebuild-b') 'rebuild-b'
     Assert (Test-ReceiptEntries $aFiles) 'another build overwrote independent artifacts'
     Assert (-not (Test-ReceiptEntries $bFiles)) 'changed component did not invalidate hashes'
+    Assert ((Get-ReceiptHash "$b/consumer1.exe") -eq $bFiles[1].sha256) 'runtime-only rebuild changed the executable'
+    Assert ((Get-ReceiptHash "$b/rexruntime.dll") -eq (Get-ReceiptHash "$b/sdk/Debug/rexruntime.dll")) 'runtime-only rebuild did not restage the DLL'
     & "$b/consumer1.exe"; Assert ($LASTEXITCODE -eq 0) 'consumer did not receive rebuilt DLL'
     # Hold a real Ninja invocation at a deterministic test barrier; a competing
     # cmake --build must fail before any build command can start.

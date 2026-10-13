@@ -118,13 +118,13 @@ Não foi demonstrado problema de severidade crítica. “Alto” abaixo signific
 - **Correção:** comparar identidade do payload instalado ao abrir/selecionar o ambiente; apresentar atualização explícita, preservar inputs/saves, invalidar somente preparações afetadas e permitir recuperação se interrompida.
 - **Ação imediata:** antes da primeira Release pública; coordenar com C2.
 
-### C5. Médio — staging concorrente de DLLs e saídas globais do SDK
+### C5. Médio — staging concorrente de DLLs e saídas globais do SDK — corrigido
 
 - **Local:** `cmake/x360n_sdk_backports.cmake:83–112`, `x360n_stage_runtime_dlls`; SDK `CMakeLists.txt:226–228`.
 - **Evidência:** vários targets fazem `copy_if_different` das mesmas DLLs para `tests/Debug`. O build paralelo padrão falhou copiando `rexruntimerd.dll`; o build serial no host concluiu. A topologia é compatível com corrida de cópias, embora o log isolado não exclua interferência externa. Builds distintos de títulos escrevem também em `${REXGLUE_ROOT}/out/${REX_PLATFORM}`.
 - **Impacto:** falhas intermitentes e possibilidade de uma configuração sobrescrever artefatos utilizados por outra. O lease da GUI/scripts não serializa invocações CMake diretas.
-- **Correção:** um produtor de staging por destino e saídas do SDK vinculadas ao diretório/configuração do build. Associar as DLLs ao recibo C2. Não tratar `--parallel 1` como solução permanente.
-- **Ação imediata:** antes de automatizar builds simultâneos/CI e publicar preparação para usuários.
+- **Correção implementada:** patch reproduzível 0038 mantém o pin e coloca todas as saídas do SDK no diretório do build/configuração. Um produtor de staging por diretório substitui os produtores concorrentes e publica DLLs por cópia temporária, SHA-256 e rename. `build-title` e o Ninja configurado pelo CMake compartilham leases por build/título; preparações independentes coexistem, enquanto o mesmo conjunto é rejeitado antes de escrever. O lease de ambiente é compartilhado entre builds e continua excluindo sessões/instalação de ferramentas. O recibo C2 permanece no schema 1; ver E8.
+- **Validação:** build completo paralelo, builds simultâneos de títulos, staging sem relink, hashes, recibos e regressões descritos em E8.
 
 ### C6. Médio — flags semânticas do código PPC não são uniformes
 
@@ -377,7 +377,7 @@ Limites: verificação executada em Windows x64; ramo POSIX inspecionado, sem bu
 ## E7. Correção de C2 — identidade da preparação
 
 - Recibo `<título>.exe.preparation.json`, adjacente ao executável, vincula título e versão pelos XEX exatos, análise transitiva/manifesto (depfile do SDK), registro existente, revisão/patches do SDK, fontes/headers da dependência real do Ninja, templates, compilador/ferramentas/configuração CMake, código gerado e EXE/DLLs finais. O inventário `CONFIGURE_DEPENDS` também detecta adição/remoção de fontes e templates. Não foi criado outro catálogo.
-- Publicação por arquivo temporário, flush e rename/replace no mesmo diretório; falhas mantêm o marcador `.incomplete`. Entradas e produtor são conferidos antes/depois do build; DLLs publicadas devem corresponder aos bytes e ao inventário das saídas do grafo. O gerador executado é uma cópia verificável no build do título, preservando sua identidade quando outro build substitui o staging compartilhado do SDK. C5 não foi resolvido nem a arquitetura do supervisor alterada.
+- Publicação por arquivo temporário, flush e rename/replace no mesmo diretório; falhas mantêm o marcador `.incomplete`. Entradas e produtor são conferidos antes/depois do build; DLLs publicadas devem corresponder aos bytes e ao inventário das saídas do grafo. O gerador executado é uma cópia verificável no build do título, preservando sua identidade quando outro build substitui o staging compartilhado do SDK. C5 não foi resolvido naquele incremento (resolvido posteriormente em E8); a arquitetura do supervisor não foi alterada.
 - Preparação válida é reutilizada diretamente, sem relink de intermediários não certificados. Preparação inválida reconstrói os produtos nativos somente do projeto solicitado; o codegen usa hashes por módulo existentes e `--ignore-stamp` quando muda o produtor, sem `--force` nem supressão de erros. Módulos gerados antigos fora do grafo não entram no recibo. Alterar análise de outro título não invalida este; alterar dependências compartilhadas invalida seus consumidores, que só são preparados quando solicitados.
 - A identificação permanece SHA-256, com o mesmo contrato de `DigestFile`; Windows usa BCrypt para tornar viável verificar ferramentas e dependências por conteúdo, inclusive em Debug, sem cache baseado em mtime. O supervisor continua sem linkar o runtime ReXGlue. O pin e os 37 patches de C1/C3 foram preservados.
 
@@ -398,17 +398,45 @@ Logs e recibos são locais em `.local/audit/c2` e `.local/build/titles`; conteú
 
 O teste de reutilização real encontrou uma comparação literal entre o caminho do compilador escrito pelo CMake com `/` e o inventário Windows com `\`. A normalização foi corrigida e coberta no teste PowerShell antes da conclusão. As tentativas em que os scripts mudaram durante a compilação recusaram a publicação e mantiveram o marcador incompleto, como esperado.
 
+## E8. Correção de C5 — builds e staging isolados
+
+A topologia anterior foi confirmada: quatro consumidores escreviam as mesmas DLLs em `tests/Debug`, e projetos diferentes produziam o SDK em `external/rexglue-sdk/out`. Em reprodução isolada, 64 produtores com duas versões reais de uma DLL, paralelismo 32, terminaram com código 0 mas 32 produtores ficaram com a versão errada no destino comum. O erro intermitente de `copy_if_different` não reapareceu nesta execução; a sobrescrita entre versões foi comprovada (`.local/audit/c5/before/result.json`).
+
+O patch 0038 acrescenta saídas por build/configuração e permite desativar os POST_BUILD redundantes do SDK. O helper do projeto mantém um produtor de staging, inclusive quando só uma DLL muda. A publicação confere o temporário e renomeia no mesmo volume; uma falha preserva a DLL anterior. Leases não bloqueantes protegem o banco do Ninja e o codegen compartilhado do mesmo título, incluindo `-BuildDir` alternativo. O wrapper preserva o Ninja selecionado no cache e permite sua reentrada durante regeneração do CMake. Não há serialização global entre builds, retries ou delays de produção.
+
+C2 continua verificando todas as entradas e os artefatos finais. Builds diretos marcam o título incompleto antes de qualquer escrita; um no-op só remove seu próprio marcador se o recibo anterior continuar íntegro. Inspeção mantém aberto o lease do título durante a conferência e recusa um produtor ativo; o lançamento avulso de título preparado usa o lease de ambiente já existente até terminar o filho. Troca de EXE/DLL, staging incompleto ou falha de publicação impedem lançamento; o schema e a publicação atômica do recibo não mudaram.
+
+| Validação | Resultado |
+|---|---|
+| Build completo isolado, Ninja Multi-Config Debug, `--parallel 12` | 1.502 etapas, código 0; repetição preservou os hashes de 32 EXE/DLLs. |
+| Desktop sem SDK, `--parallel 8` | 136 etapas, código 0. |
+| Configurações no mesmo cache | `TracyClient` em Release, paralelismo 4: código 0, saída em `Release`, hash de `Debug/TracyClientd.dll` inalterado. |
+| `tests/build_isolation/parallel_test.ps1` | Dois builds simultâneos, 16 consumidores em cada um, DLLs distintas e corretas. Mudança apenas na implementação do runtime republicou a DLL sem mudar o EXE; o outro build permaneceu byte a byte igual. |
+| Dois processos no mesmo build | Segundo `cmake --build` rejeitado enquanto o primeiro mantinha a barreira de teste; sem mudanças nos artefatos. Segunda preparação real de Iruka também rejeitada antes de escrever. Mesmo título em outro BuildDir e sessões são cobertos pelo teste de leases. |
+| Falha de staging | Destino bloqueado: erro controlado, hash anterior preservado, temporário removido. |
+| Recibos reais e catálogo | Castle: 2.748 entradas/4 artefatos; Iruka: 2.780/4; 17559: 3.155/7. Os três preparos foram reutilizados sem mudar recibos ou artefatos; `catalog::Inspect`/verificação real: 8/8. Finalizar 17559 preservou os hashes de recibos e artefatos dos outros dois. No-op direto de Iruka: código 0, marcador removido e recibo idêntico, inclusive com PSModulePath incompatível herdado. |
+| Troca real entre builds isolados | DLL de Castle colocada em Iruka e, depois, EXE de Castle no lugar de Iruka: ambos rejeitados com código 3 e sem criar run/filho. Originais restaurados byte a byte; recibo voltou a validar. |
+| Regressões automatizadas | 123/123 testes do projeto, em 46,69 s, preservando C1/C3/C2 e contratos de retorno. 12/12 testes de avatares, incluindo conteúdo local. Testes focados de preparação: 70 verificações/7 casos, incluindo lease ativo, marcador e temporário incompletos. |
+| Iruka | `20261013T080213Z-regress-iruka`: L1–L5, 312 cores, diferença de quadros 6,189; zero stubs/erros/críticas, timeout de 20,100 s. |
+| Castle Crashers | `20261013T080402Z-c5-castle`: saída normal 0 aos 31,248 s, zero stubs/erros/críticas (timeout máximo solicitado: 60 s). |
+| Dashboard 17559 e intro | `20261013T080438Z-c5-dash17559`: intro export 1 retornou 0 e iniciou a dashboard; timeout aos 45,192 s, zero críticas/crash. 10.481 stubs, 1.945 unimplemented e 1.982 erros dos serviços ainda incompletos, comparáveis a E7. |
+| Patch reproduzível | 0038 reaplicado aos dois arquivos originais do pin, respeitando `.gitattributes` LF do SDK: ambos os hashes finais coincidem com o lock. Verificação dos 38 patches aprovada. |
+
+Evidências em `.local/audit/c5`; builds novos em `.local/build/c5-main`, `c5-desktop` e `c5-titles`. Nenhum teste concorrente usou um build de outra sessão ativa. Os binários anteriores foram preservados; mudanças de patch/CMake/scripts invalidam os recibos antigos conforme C2 e exigem preparar somente os consumidores solicitados. Revisão ReXGlue e compilador preservados; os 37 patches anteriores continuam aplicados junto do 0038.
+
+Limites: coordenação validada em Windows x64 usando `build-title.ps1`, `cmake --build` ou o `CMAKE_MAKE_PROGRAM` configurado. Invocar deliberadamente o Ninja subjacente contorna esse ponto de coordenação; não executar dois desses processos no mesmo cache. Não houve validação Linux, migração do SDK, alteração de C6/C4/C11 nem nova aceitação funcional dos serviços incompletos da dashboard.
+
 ## F. Próximas prioridades
 
 | Ordem | Categoria | Entrega de maior impacto | Critério de conclusão |
 |---|---|---|---|
 | 1 | **Concluído: C1/C3** | Fronteira de conteúdo corrigida; ver E6 | ISO truncado, offsets extremos, ciclos e manifesto preexistente retornam erro controlado; nenhum crash/sobrescrita nos testes; extração válida preservada. |
-| 2 | **C2 concluído; C5/C6 pendentes** | Isolamento de build e premissas PPC — C5/C6 | Identidade/invalidação implementadas em E7; ainda faltam builds paralelos independentes e mesmas premissas PPC nos targets. |
+| 2 | **C2/C5 concluídos; C6 pendente** | Premissas PPC — C6 | Identidade/invalidação e isolamento implementados em E7/E8; uniformizar as premissas PPC será outro incremento. |
 | 3 | Antes da primeira Release | Pacote reproduzível, atualização segura e gate de publicação — C4/C9/C10/C11/C12/C14 | Licença/avisos presentes; fonte/binário vinculados; falhas da suíte resolvidas ou explicitamente bloqueantes; pacote do HEAD testado em Windows limpo, com importação/preparação/cancelamento/retomada e preservação dos dados numa atualização. |
 | 4 | Evoluir progressivamente; antes de anunciar console funcional | Completar uma fatia original de perfis, UI de sistema e armazenamento — C7 | Dois usuários, sign-in/out, save/load isolado, reabertura e retorno pelo fluxo original, com testes de ciclo de vida e input real. |
 | 5 | Evoluir progressivamente | Compatibilidade por evidência: estabilizar 6717 e segundo consumidor de avatar — C8/C13 | 6717 com recursos correspondentes e causa de crash isolada; Motocross com visual/animação aceitos; Keflings/protocolo 2 testado antes de generalizar backend. Depois ampliar versões e plataformas. |
 
-Na auditoria original, as próximas **três tarefas de desenvolvimento** eram: (1) extrator seguro, (2) preparação/artefatos confiáveis, (3) candidato Windows publicável e atualizável. C1/C3 e a identidade de preparação C2 foram concluídos; C5/C6 e o candidato publicável permanecem pendentes.
+Na auditoria original, as próximas **três tarefas de desenvolvimento** eram: (1) extrator seguro, (2) preparação/artefatos confiáveis, (3) candidato Windows publicável e atualizável. C1/C3, a identidade de preparação C2 e o isolamento C5 foram concluídos; C6 e o candidato publicável permanecem pendentes.
 
 **Não mexer agora:** migração de SDK, troca de linguagem/framework, fusão de todos os jogos no processo da GUI, universalização do backend de avatar ou implementação de XNA/portabilidade em paralelo à estabilização desses contratos. Também não reescrever histórico nem remover créditos.
 
