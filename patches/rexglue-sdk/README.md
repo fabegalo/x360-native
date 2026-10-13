@@ -313,3 +313,23 @@ The original audit fixture now returns error 1 without a crash; the valid
 fixture still extracts identical bytes and hashes. Patch apply/reverse hashes
 were checked in an isolated Git fixture; all 37 patches pass `-Check`.
 See `docs/PROJECT_AUDIT.md` E6 for C1/C3 before/after evidence and limits.
+
+## Sign-in foreground input (0040)
+
+`0040-signin-any-user-input.patch` extends the existing system UI session to
+accept the original Sign-in ANY_USER (`FF`) value. The title cannot drain any
+controller while that session is visible. Original system-app device-state
+queries retain their privileged high-bit path. `XamInputGetKeystrokeHudEx`
+uses the verified 17559 ABI at `816F4C78`: user value, flags, output in r5.
+An ANY_USER request performs at most four controller queries per invocation;
+there is no waiting loop, new thread, graphics copy, or additional presentation.
+User/account state and SIGNINCHANGED are untouched.
+
+Focused tests: `x360n_sdk_runtime_checks "[signin]"`, 3 cases / 76 assertions.
+They exercise original FE/21001 request bytes and failure/OOM propagation,
+application selection, ANY_USER ownership, neutral title state versus privileged
+HUD state, a real synthetic MnK B event delivered once through HudEx, invalid
+arguments, and deferred close/reopen. No game or visual session was run.
+The patch was reapplied to copies of its two pre-patch files with SDK-style LF
+line endings; both output hashes match the lock. All 40 patches pass `-Check`.
+The SDK pin is unchanged; this does not implement profile enumeration or login.

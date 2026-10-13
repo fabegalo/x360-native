@@ -1,6 +1,8 @@
 #include "system_ui.h"
+#include "system_ui_request.h"
 #include <rex/runtime.h>
 #include <rex/logging.h>
+#include <rex/cvar.h>
 #include <rex/kernel/xam/module.h>
 #include <rex/kernel/xboxkrnl/video.h>
 #include <rex/system/function_dispatcher.h>
@@ -13,22 +15,39 @@
 #include <functional>
 #include <rex/ppc/func.h>
 
+REXCVAR_DEFINE_BOOL(dash17559_signin_ui, false, "Dashboard 17559",
+                   "Submit the original Sign-in request once at the first dashboard frame (manual validation)");
+
 namespace dash17559 {
 using rex::X_HRESULT;
 using rex::X_RESULT;
 namespace {
 std::function<bool()> draw_ui;
+std::function<void()> request_signin;
 thread_local bool in_dashboard_frame = false;
 }
 void ReleaseSystemUiHost() {
   // Called after the dashboard guest thread has exited, before runtime teardown.
   draw_ui = {};
+  request_signin = {};
 }
 void InstallSystemUi(rex::Runtime& runtime) {
+  runtime.kernel_state()->RegisterRecompiledModule(
+      "signin.xex", "game:\\system\\signin.xex", "dash_17559_signin");
+  if (REXCVAR_GET(dash17559_signin_ui)) {
+    request_signin = [&runtime] {
+      auto* thread = rex::system::XThread::GetCurrentThread()->thread_state();
+      uint64_t args[] = {1, 0};
+      // Original dashboard import thunk -> XamShowSigninUI -> FE/21001.
+      const auto result = runtime.function_dispatcher()->ExecuteTrap(thread, 0x92192AE8, args, 2);
+      REXLOG_INFO("17559 system UI: manual original Sign-in request -> {}", result);
+    };
+  }
   auto xam = runtime.kernel_state()->GetKernelModule<rex::kernel::xam::XamModule>("xam.xex");
   xam->system_ui_request = [&runtime, ui_ready = false](uint32_t message, uint32_t request, uint32_t size) mutable -> rex::X_HRESULT {
-    if (message != 0x21008) return X_E_NOTFOUND;
-    if (!request || size != 544 || !rex::system::XThread::IsInThread()) return X_E_INVALIDARG;
+    const auto* application = SystemUiApplicationFor(message);
+    if (!application) return X_E_NOTFOUND;
+    if (!request || size != application->request_size || !rex::system::XThread::IsInThread()) return X_E_INVALIDARG;
     auto* state = runtime.kernel_state();
     auto xam = state->GetKernelModule<rex::kernel::xam::XamModule>("xam.xex");
     if (draw_ui || xam->FindSystemApp(0xFF)) return X_E_FAIL;
@@ -140,7 +159,7 @@ void InstallSystemUi(rex::Runtime& runtime) {
       if (static_cast<int32_t>(background_result) < 0) return background_result;
       ui_ready = true;
     }
-    auto module = state->LoadUserModule("game:\\system\\gamerprofile.xex", false);
+    auto module = state->LoadUserModule(application->path, false);
     if (!module) return X_E_NOTFOUND;
     uint64_t attach[] = {module->hmodule_ptr(), 1, 0};
     const auto attached = dispatcher->ExecuteTrap(thread, module->entry_point(), attach, 3);
@@ -150,9 +169,11 @@ void InstallSystemUi(rex::Runtime& runtime) {
       state->UnloadUserModule(module, false);
     };
     auto registration = xam->FindSystemApp(0xFF);
-    if (!attached || !registration || registration->module != module->hmodule_ptr()) {
+    if (!attached || !registration || registration->module != module->hmodule_ptr() ||
+        registration->resource_id != application->resource_id) {
       REXLOG_ERROR("17559 system UI: original DLL did not register its callback");
-      state->UnloadUserModule(module, false);
+      if (attached) unload();
+      else state->UnloadUserModule(module, false);
       return X_E_FAIL;
     }
     const auto owned_request = runtime.memory()->SystemHeapAlloc(size);
@@ -163,7 +184,7 @@ void InstallSystemUi(rex::Runtime& runtime) {
     uint64_t resource_registration[] = {registration->resource_id, module->hmodule_ptr()};
     dispatcher->ExecuteTrap(thread, 0x817DCBB8, resource_registration, 2);
     std::memcpy(runtime.memory()->TranslateVirtual(owned_request), runtime.memory()->TranslateVirtual(request), size);
-    const auto user = rex::memory::load_and_swap<uint32_t>(runtime.memory()->TranslateVirtual(owned_request));
+    const auto user = rex::memory::load_and_swap<uint32_t>(runtime.memory()->TranslateVirtual(owned_request + application->user_offset));
     auto release_module = [&runtime, dispatcher, thread, registration, owned_request, xam, unload] {
       uint64_t unregister_resource[] = {registration->resource_id};
       dispatcher->ExecuteTrap(thread, 0x817DCBD8, unregister_resource, 1);
@@ -187,11 +208,15 @@ void InstallSystemUi(rex::Runtime& runtime) {
     put(16, 0);
     uint64_t initialize[] = {0x80000004, context, context + 16};
     const auto result = static_cast<rex::X_HRESULT>(dispatcher->ExecuteTrap(thread, registration->callback, initialize, 3));
-    REXLOG_INFO("17559 system UI: gamerprofile original initialize -> {:08X}", uint32_t(result));
+    REXLOG_INFO("17559 system UI: {} original initialize -> {:08X}", application->name, uint32_t(result));
     runtime.memory()->SystemHeapFree(context);
     if (static_cast<int32_t>(result) < 0) {
-      uint64_t destroy[] = {0x80000005, 0, 0};
-      dispatcher->ExecuteTrap(thread, registration->callback, destroy, 3);
+      // Sign-in 901050FC-90105124 already deletes and clears its app on
+      // initialization failure. A destroy message would dereference that null.
+      if (application != &kSignin) {
+        uint64_t destroy[] = {0x80000005, 0, 0};
+        dispatcher->ExecuteTrap(thread, registration->callback, destroy, 3);
+      }
       release_module();
       return result;
     }
@@ -203,6 +228,7 @@ void InstallSystemUi(rex::Runtime& runtime) {
       return static_cast<rex::X_HRESULT>(0x8007000Eu);
     }
     const auto dc = rex::memory::load_and_swap<uint32_t>(runtime.memory()->TranslateVirtual(0x81AA2110));
+    rex::memory::store_and_swap<uint32_t>(runtime.memory()->TranslateVirtual(output), 0);
     // Original host 816CE5EC-816CE628 supplies its DC and receives the app's root.
     uint64_t prepare_scene[] = {0x8000000B, 0, 0};
     dispatcher->ExecuteTrap(thread, registration->callback, prepare_scene, 3);
@@ -299,6 +325,13 @@ extern "C" REX_FUNC(sub_92186D90) {
   dash17559::in_dashboard_frame = previous;
 }
 extern "C" void sub_9221CD90(PPCContext& ctx, uint8_t* base) {
+  if (dash17559::in_dashboard_frame && dash17559::request_signin) {
+    const PPCContext saved = ctx;
+    auto request = std::move(dash17559::request_signin);
+    request();
+    ctx = saved;
+    ctx.fpscr.restoreGuestBits(saved.fpscr.csr);
+  }
   if (dash17559::in_dashboard_frame && dash17559::draw_ui) {
     // The host accesses this context through ThreadState too, so this bridge
     // must not use REX_FUNC's restrict qualifier. Preserve the caller's context.

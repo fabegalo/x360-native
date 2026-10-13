@@ -1,0 +1,13 @@
+# Original Retail 17559 DLL, generated separately to avoid the resident
+# gamerprofile image at the same guest address during AOT analysis.
+# SHA256 86695c6c36250cc4b4addb7ccc07d15d54492b352c979cf5c0934804109a6130.
+[project]
+name = "dash_17559"
+sdk_version = "0.10.0"
+game_root = "../../../.local/inputs/dashboard/17559"
+
+[entrypoint]
+file_path = "../../../.local/inputs/dashboard/17559/system/signin.xex"
+out_directory_path = "../generated/signin"
+is_dll = true
+includes = ["../analysis/signin_17559.toml"]

@@ -1,3 +1,9 @@
 # Original message dispatcher has no .pdata entry; confirmed with disasm.
 [functions]
 0x90105198 = {}
+0x90105C6C = {} # memcpy byte remainder, branch at 90105CBC; outside .pdata
+# Original vtable thunks referenced by the module's read-only data, outside .pdata.
+0x90107AF8 = {}
+0x90116F38 = {}
+0x90116F40 = {}
+0x90116F50 = {}

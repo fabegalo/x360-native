@@ -1335,3 +1335,83 @@ aprovadas. Nenhum novo teste, build ou jogo foi executado para encerrar a tarefa
 O commit `4cc7303` do repositório principal já preserva a mudança do SDK em
 `0039-system-ui-session.patch`, com SHA-256 e hashes antes/depois no lock,
 mantendo o pin `f5337cdc`. Não depende de commit local exclusivo do submódulo.
+
+### 0.25 Sign-in original: integração C7.1 (2026-10-13)
+
+Implementado no perfil 17559: FE/21001 seleciona `game:\system\signin.xex`
+(20 bytes, usuário em +4), preservando o bloco original de `XamShowSigninUI`:
+`{0, FF, user_count, flags, 0}`. O callback `90105000`, registrado pelo DLL
+entrypoint em `90105170`, usa slot FF e recurso 3. O host confere essa identidade,
+copia o pedido e usa as mensagens originais de initialize/prepare/create/update/
+destroy, o mesmo HUD/DC, apresentação e fechamento diferido da GamerCard.
+O sucesso da solicitação só é devolvido após criação, vínculo e layout da cena;
+erros continuam propagados. Não há segundo kernel/XAM, perfil inventado,
+SIGNINCHANGED, nova janela, cópia gráfica ou laço de polling.
+
+Contrato conferido por desmontagem local: XAM `816C19C8`, `816C1868` e
+`816C7378`; Sign-in `90105000`, `90105198`, `90106CF8` e `90106F80`.
+A falha de initialize do Sign-in já destrói seu objeto em `901050FC–90105124`;
+o host não envia destroy novamente nesse caso. A cena de saída é zerada antes
+da chamada, impedindo que um retorno sem raiz seja aceito.
+
+Sign-in e GamerCard têm base `90100000`; não podem ser carregados juntos nem
+na análise AOT. O primeiro build demonstrou a colisão no gerador (267 chamadas
+não resolvidas atribuídas à GamerCard após a sobreposição), sem alterar seus
+hints. Sign-in passou a usar `signin/signin_17559_manifest.toml`, `is_dll=true`
+e registro explícito da DLL nativa no mesmo runtime. Seu diretório separado
+impede também que o codegen sobrescreva o CMake gerado da dashboard.
+A geração final da dashboard preservou seus 428 arquivos de saída sem alterações.
+Ajustados somente cinco pontos de entrada confirmados do Sign-in, ausentes da
+.pdata: restante de memcpy e quatro thunks de vtable.
+
+Patch reproduzível 0040, com pin inalterado: aceita ANY_USER FF, conserva entrada
+exclusiva e implementa o ABI `(user, flags, output)` de HudEx (`816F4C78`).
+Consulta no máximo quatro controles por chamada, sem espera; leituras de estado
+com o bit de sistema continuam chegando ao dispositivo. Novos imports XUI do
+Sign-in são encaminhados às funções do XAM 17559 já recompiladas.
+
+Validação focada: `x360n_sdk_runtime_checks.exe "[signin]" --reporter compact`,
+**3 testes / 76 asserções aprovadas**, incluindo entrega sintética de B, estado
+neutro para o título versus estado real para o HUD, argumentos inválidos,
+fechamento diferido, reabertura e propagação de falha/OOM sem notificações.
+Log: `.local/tmp/c71-tests.log`. Patch 0040 reaplicado em cópias dos dois arquivos
+base, com hashes finais idênticos; `apply-sdk-patches.ps1 -Check` aprova os 40.
+Build final via `scripts/devshell.cmd cmake --build .local/build/titles/dash_17559
+--target dash_17559 --parallel 8`: saída 0, com DLL Sign-in e host ligados.
+Log: `.local/tmp/c71-build-title.log`. O cabeçalho pré-compilado do alvo ficou
+obsoleto durante o ajuste da geração; somente esse artefato foi removido e
+reconstruído com o componente. Nenhum build completo do projeto foi executado.
+Não foram executados Computer Use, jogos, testes visuais ou suítes completas.
+
+**Não comprovado em execução:** criação da cena, pixels apresentados, navegação,
+B fechando o aplicativo original e retorno de foco. O teste de entrada comprova
+o transporte, não o consumo pelo código do Sign-in. C7/GamerCard conserva as
+três aberturas/fechamentos e 107 asserções anteriores, sem reexecução.
+
+Bloqueio conhecido fora do incremento: serviços de perfis ainda incompletos
+(`XamProfileCreateEnumerator`, `XamProfileEnumerate`, logon e tarefas associadas).
+O ordinal XAM 054B, importado em `9011DBEC`, não consta da tabela do SDK; sua
+implementação original `816DEF20` acessa o serviço de perfis. Há um trap explícito
+com LR se ele for alcançado, sem booleano de sucesso inventado. Ainda não há
+evidência de que esse ordinal seja atingido antes da primeira apresentação.
+Não foram implementados criação/persistência, Live ou Guide.
+
+Verificação manual, em PowerShell na raiz, após o build do componente:
+
+```powershell
+& .\.local\build\titles\dash_17559\dash_17559.exe --gpu_plugin=xenos --mnk_mode=true --game_data_root="$PWD\.local\inputs\dashboard\17559" --dash17559_boot_intro=false --dash17559_signin_ui=true
+```
+
+A opção é desligada por padrão e envia **uma única** solicitação através do thunk
+original da dashboard `92192AE8`, no primeiro quadro da dashboard. Ela permite
+validar a integração sem depender do caminho Settings/Profile (GamerCard) ou
+alterar o usuário fixo do SDK. Conferir a interface original, mover o foco e usar
+B (Backspace no mapeamento MnK); depois conferir o retorno do foco à dashboard.
+Fechar a janela se houver falha. Os logs distinguem initialize, create scene,
+attach/layout, composed frame e closed; retorno 0 de uma API não comprova pixels.
+
+Para uma preparação de desenvolvimento nova, gerar primeiro
+`titles/dash_17559/signin/signin_17559_manifest.toml` com `rexglue codegen`,
+depois o manifesto principal, e usar somente o alvo `dash_17559` no build.
+O CMake recusa explicitamente a ausência dessa geração; a distribuição publicada
+não foi alterada. Nenhum binário ou código derivado do XEX foi incluído no Git.

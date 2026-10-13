@@ -41,7 +41,9 @@ file_path = "../../.local/inputs/dashboard/17559/system/gamerprofile.xex"
 out_directory_path = "generated/gamerprofile"
 includes = ["analysis/gamerprofile_17559.toml"]
 
-# signin is staged locally; add its module after gamerprofile lifecycle is validated.
+# Sign-in is generated separately by signin/signin_17559_manifest.toml: it overlaps
+# gamerprofile at 90100000, and the SDK codegen loads all manifest modules at once.
+# The host registers its native DLL explicitly and loads only one UI app at a time.
 
 # Isolated original XAM image for the system XUI implementation only.
 # Its entry point is never called. SDK account, loader and input services remain

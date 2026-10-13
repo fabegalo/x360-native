@@ -1,0 +1,95 @@
+diff --git a/include/rex/kernel/xam/module.h b/include/rex/kernel/xam/module.h
+index f73329d..73b4acf 100644
+--- a/include/rex/kernel/xam/module.h
++++ b/include/rex/kernel/xam/module.h
+@@ -49,7 +49,7 @@ class XamModule : public system::KernelModule {
+   bool BeginSystemUi(uint32_t module, uint32_t slot, uint32_t user) {
+     std::lock_guard lock(system_apps_mutex_);
+     auto it = system_apps_.find(slot);
+-    if (system_ui_.module || user >= 4 || it == system_apps_.end() ||
++    if (system_ui_.module || (user >= 4 && user != 0xFF) || it == system_apps_.end() ||
+         it->second.module != module) return false;
+     system_ui_ = {module, user};
+     return true;
+@@ -66,7 +66,8 @@ class XamModule : public system::KernelModule {
+   }
+   bool EnableSystemUiInput(uint32_t user, bool enable) {
+     std::lock_guard lock(system_apps_mutex_);
+-    if (!system_ui_.module || user != system_ui_.user) return false;
++    if (!system_ui_.module || (user != system_ui_.user &&
++        !(system_ui_.user == 0xFF && user < 4))) return false;
+     system_ui_.input_enabled = enable;
+     return true;
+   }
+diff --git a/src/kernel/xam/xam_input.cpp b/src/kernel/xam/xam_input.cpp
+index 61953b7..83e494c 100644
+--- a/src/kernel/xam/xam_input.cpp
++++ b/src/kernel/xam/xam_input.cpp
+@@ -42,7 +42,7 @@ rex::input::InputSystem* input_system() {
+ bool SystemUiOwnsInput(uint32_t user) {
+   auto xam = REX_KERNEL_STATE()->GetKernelModule<XamModule>("xam.xex");
+   const auto ui = xam->GetSystemUiSession();
+-  return ui.visible && ui.user == user;
++  return ui.visible && (ui.user == user || ui.user == 0xFF);
+ }
+ 
+ void XamResetInactivity_entry() {
+@@ -119,7 +119,9 @@ u32 XamInputGetState_entry(u32 user_index, u32 flags, ppc_ptr_t<X_INPUT_STATE> i
+   }
+ 
+   auto* is = input_system();
+-  if (SystemUiOwnsInput(actual_user_index)) {
++  // Original system apps use the privileged high bit for device-state queries.
++  // Foreground title queries remain suppressed while the HUD owns input.
++  if (!(flags & 0x80000000u) && SystemUiOwnsInput(actual_user_index)) {
+     if (input_state) *input_state = {};
+     return X_ERROR_SUCCESS;
+   }
+@@ -234,14 +236,45 @@ extern "C" REX_FUNC(__imp__XamInputGetKeystrokeHud) {
+   const auto ui = xam->GetSystemUiSession();
+   const uint32_t user = ctx.r3.u32;
+   if (!ctx.r4.u32) { ctx.r3.u64 = X_ERROR_BAD_ARGUMENTS; return; }
+-  if (!ui.visible || !ui.input_enabled || user != ui.user) {
++  if (!ui.visible || !ui.input_enabled ||
++      (user != ui.user && !(ui.user == 0xFF && user < 4))) {
+     ctx.r3.u64 = X_ERROR_EMPTY;
+     return;
+   }
+   auto* stroke = reinterpret_cast<input::X_INPUT_KEYSTROKE*>(base + ctx.r4.u32);
+   ctx.r3.u64 = kernel::xam::input_system()->GetKeystroke(user, 1, stroke);
+ }
+-REX_EXPORT_STUB(__imp__XamInputGetKeystrokeHudEx);
++extern "C" REX_FUNC(__imp__XamInputGetKeystrokeHudEx) {
++  using namespace rex;
++  // XAM 17559 816F4C78: user value, flags, output (unlike KeystrokeEx,
++  // the first argument is not a pointer). FF selects any controller.
++  const uint32_t user = ctx.r3.u32;
++  if (!ctx.r5.u32 || (user >= 4 && user != 0xFF)) {
++    ctx.r3.u64 = X_ERROR_BAD_ARGUMENTS;
++    return;
++  }
++  auto xam = REX_KERNEL_STATE()->GetKernelModule<kernel::xam::XamModule>("xam.xex");
++  const auto ui = xam->GetSystemUiSession();
++  if (!ui.visible || !ui.input_enabled ||
++      (ui.user != 0xFF && user != ui.user)) {
++    ctx.r3.u64 = X_ERROR_EMPTY;
++    return;
++  }
++  auto* input_backend = kernel::xam::input_system();
++  if (!input_backend) { ctx.r3.u64 = X_ERROR_DEVICE_NOT_CONNECTED; return; }
++  auto* stroke = reinterpret_cast<input::X_INPUT_KEYSTROKE*>(base + ctx.r5.u32);
++  const uint32_t first = user == 0xFF ? 0 : user;
++  const uint32_t end = user == 0xFF ? 4 : user + 1;
++  for (uint32_t index = first; index < end; ++index) {
++    const auto result = input_backend->GetKeystroke(index, 1, stroke);
++    if (result == X_ERROR_SUCCESS) { ctx.r3.u64 = result; return; }
++    if (result != X_ERROR_EMPTY && result != X_ERROR_DEVICE_NOT_CONNECTED) {
++      ctx.r3.u64 = result;
++      return;
++    }
++  }
++  ctx.r3.u64 = X_ERROR_EMPTY;
++}
+ REX_EXPORT_STUB(__imp__XamInputGetUserVibrationLevel);
+ REX_EXPORT_STUB(__imp__XamInputNonControllerGetRaw);
+ REX_EXPORT_STUB(__imp__XamInputNonControllerGetRawEx);

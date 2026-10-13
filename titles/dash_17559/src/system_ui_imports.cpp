@@ -83,3 +83,12 @@ extern "C" REX_FUNC(__imp__GamerCardUnregisterControls) { CallUi(ctx, base, 0x81
 extern "C" REX_FUNC(__imp__XuiElementPlayNamedFrames) { CallUi(ctx, base, 0x817BDCE0); }
 extern "C" REX_FUNC(__imp__XuiElementLayoutTree) { CallUi(ctx, base, 0x817BCAA0); }
 extern "C" REX_FUNC(__imp__XuiBrushGetTexture) { CallUi(ctx, base, 0x8177E100); }
+extern "C" REX_FUNC(__imp__XuiElementGetFocus) { CallUi(ctx, base, 0x817BC600); }
+extern "C" REX_FUNC(__imp__XuiObjectGetProperty) { CallUi(ctx, base, 0x817AEC98); }
+extern "C" REX_FUNC(__imp__XuiTextElementSetText) { CallUi(ctx, base, 0x817C1240); }
+extern "C" REX_FUNC(__imp__XuiElementInputEnabled) { CallUi(ctx, base, 0x817BCB40); }
+extern "C" REX_FUNC(__imp__XuiBroadcastMessage) { CallUi(ctx, base, 0x817B3FB0); }
+extern "C" REX_FUNC(__imp__XuiElementSetOpacity) { CallUi(ctx, base, 0x817BD450); }
+extern "C" REX_FUNC(__imp__XuiControlAttachVisual) { CallUi(ctx, base, 0x817C0008); }
+extern "C" REX_FUNC(__imp__XuiElementTreeHasFocus) { CallUi(ctx, base, 0x817BFC10); }
+extern "C" REX_FUNC(__imp__XuiSceneIsInTransition) { CallUi(ctx, base, 0x817C0AA0); }

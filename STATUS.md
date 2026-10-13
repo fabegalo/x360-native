@@ -1,5 +1,15 @@
 # STATUS
 
+C7.1 (2026-10-13): integração de `signin.xex` 17559 ao host XUI existente,
+com geração AOT separada (mesma base de gamerprofile), pedido FE/21001 de
+20 bytes e usuário FF preservados. Patch 0040 cobre sessão ANY_USER e entrada
+HUD Ex; 3 testes focados / 76 asserções passam. **Criação, apresentação,
+navegação e fechamento da cena original ainda não validados em execução.**
+Build do alvo `dash_17559`, incluindo `dash_17559_signin.dll`, concluído com saída 0.
+Não houve Computer Use, sessão gráfica ou regressão de jogos. Serviço de perfis
+continua incompleto; ordinal XAM 054B tem trap explícito. Procedimento manual
+e limites em `docs/dashboard.md` §0.25. C7/GamerCard conserva sua evidência anterior.
+
 Primeira pre-release (2026-10-13): **`v0.1.0-preview.19`, Windows x64,
 First Technical Preview**, **publicada e verificada sem autenticação** em
 13/10/2026. Tag e pacote usam `ed60e5a1fa94d116a9e472e70dc366d665985b90`;

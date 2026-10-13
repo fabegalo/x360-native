@@ -5,12 +5,16 @@
 #include <rex/runtime.h>
 #include <rex/chrono/clock.h>
 #include <rex/input/input.h>
+#include <rex/input/input_system.h>
+#include <rex/input/mnk/mnk_input_driver.h>
+#include <rex/cvar.h>
 #include <rex/kernel/init.h>
 #include <rex/kernel/xam/module.h>
 #include <rex/ppc/func.h>
 #include <rex/system/kernel_state.h>
 #include <rex/system/xam/app_manager.h>
 #include <rex/system/xnotifylistener.h>
+#include "../../titles/dash_17559/src/system_ui_request.h"
 
 extern "C" REX_FUNC(__imp__XamShowSigninUI);
 extern "C" REX_FUNC(__imp__XamShowGamerCardUI);
@@ -22,6 +26,106 @@ extern "C" REX_FUNC(__imp__XamIsUIActive);
 extern "C" REX_FUNC(__imp__XamAppUnloadStack);
 extern "C" REX_FUNC(__imp__XamInputGetState);
 extern "C" REX_FUNC(__imp__GetTickCount);
+extern "C" REX_FUNC(__imp__XamInputGetKeystrokeHudEx);
+REXCVAR_DECLARE(bool, mnk_mode);
+
+TEST_CASE("Sign-in routes to its original application with the original user field", "[sdk][signin]") {
+  using namespace dash17559;
+  const auto* app = SystemUiApplicationFor(0x21001);
+  REQUIRE(app);
+  CHECK(std::string(app->path) == "game:\\system\\signin.xex");
+  CHECK(app->request_size == 20);
+  CHECK(app->user_offset == 4);
+  CHECK(app->resource_id == 3);
+  const auto* card = SystemUiApplicationFor(0x21008);
+  REQUIRE(card);
+  CHECK(card != app);
+  CHECK(card->request_size == 544);
+  CHECK(card->user_offset == 0);
+  CHECK(card->resource_id == 13);
+  CHECK_FALSE(SystemUiApplicationFor(0x21002));
+}
+
+TEST_CASE("Sign-in ANY_USER session preserves exclusivity and validates HUD Ex ABI", "[sdk][signin]") {
+  const bool saved_mnk = REXCVAR_GET(mnk_mode);
+  struct RestoreMnk { bool value; ~RestoreMnk() { REXCVAR_SET(mnk_mode, value); } } restore{saved_mnk};
+  REXCVAR_SET(mnk_mode, true);
+  rex::input::mnk::MnkInputDriver* keyboard = nullptr;
+  rex::Runtime rt(std::filesystem::temp_directory_path());
+  rex::RuntimeConfig config{};
+  config.tool_mode = true;
+  config.kernel_init = rex::kernel::InitializeKernel;
+  config.input_factory = [&keyboard](bool) {
+    auto input = std::make_unique<rex::input::InputSystem>(nullptr);
+    auto driver = std::make_unique<rex::input::mnk::MnkInputDriver>(nullptr, 0);
+    keyboard = driver.get();
+    input->AddDriver(std::move(driver));
+    input->SetDeviceAssignment(std::make_unique<rex::input::SlotAssignment>());
+    return input;
+  };
+  REQUIRE(rt.Setup(std::move(config)) == 0);
+  auto xam = rt.kernel_state()->GetKernelModule<rex::kernel::xam::XamModule>("xam.xex");
+  REQUIRE(xam->RegisterSystemApp({0x1000, 0xFF, 0x90105000, 3}) == 0);
+  CHECK_FALSE(xam->BeginSystemUi(0x1000, 0xFF, 4));
+  REQUIRE(xam->BeginSystemUi(0x1000, 0xFF, 0xFF));
+  CHECK(xam->GetSystemUiSession().user == 0xFF);
+  CHECK_FALSE(xam->BeginSystemUi(0x1000, 0xFF, 0));
+  REQUIRE(xam->EnableSystemUiInput(0xFF, true));
+  CHECK_FALSE(xam->EnableSystemUiInput(4, true));
+  PPCContext ctx{};
+  auto* memory = rt.memory();
+  const auto stroke = memory->SystemHeapAlloc(8);
+  REQUIRE(stroke);
+  std::memset(memory->TranslateVirtual(stroke), 0xA5, 8);
+  ctx.r3.u64 = 0xFF; ctx.r4.u64 = 0x20000000; ctx.r5.u64 = stroke;
+  __imp__XamInputGetKeystrokeHudEx(ctx, memory->virtual_membase());
+  CHECK(ctx.r3.u32 == 4306); // ERROR_EMPTY: not visible; no output write.
+  CHECK(memory->TranslateVirtual(stroke)[0] == 0xA5);
+  REQUIRE(xam->SetSystemUiVisible(0x1000));
+  rex::ui::KeyEvent key(nullptr, rex::ui::VirtualKey::kBack, 1, false, false, false, false, false);
+  keyboard->OnKeyDown(key);
+  const auto pad = memory->SystemHeapAlloc(sizeof(rex::input::X_INPUT_STATE));
+  REQUIRE(pad);
+  ctx.r3.u64 = 0; ctx.r4.u64 = 1; ctx.r5.u64 = pad;
+  __imp__XamInputGetState(ctx, memory->virtual_membase());
+  CHECK(ctx.r3.u32 == 0);
+  auto* pad_state = memory->TranslateVirtual<rex::input::X_INPUT_STATE*>(pad);
+  CHECK(uint16_t(pad_state->gamepad.buttons) == 0);
+  ctx.r3.u64 = 0; ctx.r4.u64 = 0x80000000; ctx.r5.u64 = pad;
+  __imp__XamInputGetState(ctx, memory->virtual_membase());
+  CHECK(ctx.r3.u32 == 0);
+  CHECK((uint16_t(pad_state->gamepad.buttons) & rex::input::X_INPUT_GAMEPAD_B) != 0);
+  memory->SystemHeapFree(pad);
+  // The foreground title cannot consume any controller while Sign-in owns FF.
+  for (uint32_t user = 0; user < 4; ++user) {
+    ctx.r3.u64 = user; ctx.r4.u64 = 1; ctx.r5.u64 = stroke;
+    __imp__XamInputGetKeystroke(ctx, memory->virtual_membase());
+    CHECK(ctx.r3.u32 == 4306);
+  }
+  ctx.r3.u64 = 0xFF; ctx.r4.u64 = 0x20000000; ctx.r5.u64 = stroke;
+  __imp__XamInputGetKeystrokeHudEx(ctx, memory->virtual_membase());
+  REQUIRE(ctx.r3.u32 == 0);
+  const auto* actual = memory->TranslateVirtual<rex::input::X_INPUT_KEYSTROKE*>(stroke);
+  CHECK(actual->virtual_key == uint16_t(rex::ui::VirtualKey::kXInputPadB));
+  CHECK(actual->user_index == 0);
+  ctx.r3.u64 = 0xFF; ctx.r4.u64 = 0x20000000; ctx.r5.u64 = stroke;
+  __imp__XamInputGetKeystrokeHudEx(ctx, memory->virtual_membase());
+  CHECK(ctx.r3.u32 == 4306); // bounded scan, no duplicate delivery
+  ctx.r3.u64 = 0xFF; ctx.r4.u64 = stroke; ctx.r5.u64 = 0;
+  __imp__XamInputGetKeystrokeHudEx(ctx, memory->virtual_membase());
+  CHECK(ctx.r3.u32 == 160); // BAD_ARGUMENTS: output is r5, not r4.
+  ctx.r3.u64 = 4; ctx.r5.u64 = stroke;
+  __imp__XamInputGetKeystrokeHudEx(ctx, memory->virtual_membase());
+  CHECK(ctx.r3.u32 == 160);
+  REQUIRE(xam->RequestSystemUiClose());
+  CHECK(xam->GetSystemUiSession().visible);
+  REQUIRE(xam->EndSystemUi(0x1000));
+  CHECK_FALSE(xam->GetSystemUiSession().visible);
+  CHECK(xam->BeginSystemUi(0x1000, 0xFF, 0xFF));
+  CHECK_FALSE(xam->GetSystemUiSession().close_requested);
+  CHECK(xam->EndSystemUi(0x1000));
+  memory->SystemHeapFree(stroke);
+}
 
 TEST_CASE("System UI host exports reject calls without an active session", "[sdk][profile-ui]") {
   using rex::X_STATUS;
@@ -167,6 +271,43 @@ TEST_CASE("Profile UI requests reach the system application without invented sig
   CHECK(probe->last_message == 0x21008);
   CHECK(probe->words == std::vector<uint32_t>(544 / 4, 0));
   CHECK_FALSE(listener->DequeueNotification(&id, &param));
+}
+
+TEST_CASE("Sign-in request propagates host outcomes without changing the user", "[sdk][signin]") {
+  rex::Runtime rt(std::filesystem::temp_directory_path());
+  rex::RuntimeConfig config{};
+  config.tool_mode = true;
+  config.kernel_init = rex::kernel::InitializeKernel;
+  REQUIRE(rt.Setup(std::move(config)) == 0);
+  auto xam = rt.kernel_state()->GetKernelModule<rex::kernel::xam::XamModule>("xam.xex");
+  auto listener = rex::system::object_ref<rex::system::XNotifyListener>(
+      new rex::system::XNotifyListener(rt.kernel_state()));
+  listener->Initialize(1, 10);
+  uint32_t id = 0, param = 0;
+  while (listener->DequeueNotification(&id, &param)) {}
+  for (const auto [host_result, expected] : {
+       std::pair<uint32_t, uint32_t>{0x80004005, 1627}, {0x8007000E, 14}, {0, 0}}) {
+    bool delivered = false;
+    xam->system_ui_request = [&](uint32_t message, uint32_t request, uint32_t size) {
+      delivered = true;
+      CHECK(message == 0x21001);
+      REQUIRE(size == 20);
+      auto* words = rt.memory()->TranslateVirtual<rex::be<uint32_t>*>(request);
+      CHECK(uint32_t(words[0]) == 0);
+      CHECK(uint32_t(words[1]) == 0xFF);
+      CHECK(uint32_t(words[2]) == 1);
+      CHECK(uint32_t(words[3]) == 2);
+      CHECK(uint32_t(words[4]) == 0);
+      return static_cast<rex::X_HRESULT>(host_result);
+    };
+    PPCContext ctx{};
+    ctx.r3.u64 = 1; ctx.r4.u64 = 2;
+    __imp__XamShowSigninUI(ctx, rt.memory()->virtual_membase());
+    CHECK(delivered);
+    CHECK(ctx.r3.u32 == expected);
+    CHECK_FALSE(listener->DequeueNotification(&id, &param));
+  }
+  xam->system_ui_request = {};
 }
 
 TEST_CASE("System UI registration preserves module ownership and rejects occupied slots", "[sdk][profile-ui]") {

@@ -52,6 +52,30 @@ if(TARGET dash_17559_gamerprofile)
     target_sources(dash_17559_gamerprofile PRIVATE ../common/camera_state.cpp src/system_ui_imports.cpp)
 endif()
 
+# Separate AOT image: the SDK generator intentionally rejects overlapping modules
+# in one manifest. Runtime session ownership still uses the one existing host.
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/generated/signin/sources.cmake")
+    include(generated/signin/sources.cmake)
+    add_custom_command(
+        OUTPUT "${CMAKE_CURRENT_SOURCE_DIR}/generated/signin/codegen.build.stamp"
+               ${GENERATED_SOURCES}
+        COMMAND $<TARGET_FILE:rex::rexglue> codegen
+                "${CMAKE_CURRENT_SOURCE_DIR}/signin/signin_17559_manifest.toml"
+        DEPFILE "${CMAKE_CURRENT_SOURCE_DIR}/generated/signin/codegen.d"
+        WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+        VERBATIM)
+    add_library(dash_17559_signin SHARED ${GENERATED_SOURCES}
+        src/system_ui_imports.cpp src/signin_imports.cpp)
+    target_include_directories(dash_17559_signin PRIVATE generated/signin)
+    target_link_libraries(dash_17559_signin PRIVATE rex::runtime)
+    rexglue_apply_recomp_settings(dash_17559_signin
+        "${CMAKE_CURRENT_SOURCE_DIR}/generated/signin/dash_17559_pch.h")
+    rexglue_configure_module_target(dash_17559_signin HOST dash_17559)
+    add_dependencies(dash_17559 dash_17559_signin)
+else()
+    message(FATAL_ERROR "Generate signin/signin_17559_manifest.toml with rexglue codegen before configuring this development target")
+endif()
+
 if(TARGET dash_17559_xam_ui)
     target_sources(dash_17559_xam_ui PRIVATE src/system_ui_memory.cpp)
     # The guest 0x80000000 and 0x90000000 heaps alias: this module's
