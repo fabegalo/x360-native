@@ -2,7 +2,7 @@
 
 Data: 13/10/2026. Base auditada: `main`, commit `55e326c77fd4a26f44d69468ea67ab1670e3c4cd`.
 
-**Atualização posterior à auditoria, 13/10/2026:** C1 e C3 foram corrigidos e validados no incremento de extração. O restante do relatório conserva o diagnóstico da base acima. Implementação, testes antes/depois e limites estão em E6; os demais achados continuam abertos.
+**Atualização posterior à auditoria, 13/10/2026:** C1/C3, C2, C5 e C6 foram corrigidos e validados. Implementação, testes e limites estão em E6–E8 e na seção C6. Os demais achados conservam o diagnóstico da base acima.
 
 Este relatório descreve o código nessa revisão, testes executados nesta auditoria e evidências históricas, identificadas separadamente. Não é uma declaração de compatibilidade geral. Nenhuma funcionalidade, patch de runtime ou correção de comportamento foi implementada durante a auditoria.
 
@@ -128,11 +128,24 @@ Não foi demonstrado problema de severidade crítica. “Alto” abaixo signific
 
 ### C6. Médio — flags semânticas do código PPC não são uniformes
 
+**Estado: corrigido e validado em 13/10/2026.** `cmake/x360n_ppc.cmake` centraliza `-fno-strict-aliasing -ffp-model=strict` em uma interface privada. O helper comum identifica os consumidores dos inventários de fontes geradas exportados pelo SDK, após declarar os targets: entrada, módulos e PCHs recebem o contrato, sem listas de títulos nem alteração dos arquivos gerados. Os testes PPC locais usam a mesma interface. Pin do SDK, LLVM 22.1.8, patch 0038 e `-O2` dos títulos permanecem intactos.
+
 - **Local:** SDK `CMakeLists.txt:133–134`; configuração de títulos em `titles/*/generated/rexglue.cmake` e CMake dos títulos.
 - **Evidência:** o SDK aplica `-fno-strict-aliasing` e `-ffp-model=strict`; os comandos Ninja inspecionados para código gerado de Iruka não contêm ambas. As opções de um subdiretório SDK não passam automaticamente ao target criado pelo pai.
 - **Impacto:** os testes PPC podem executar sob premissas de otimização diferentes das dos jogos. É risco de correção futura; não foi isolado um erro numérico causado por isso nesta auditoria.
 - **Correção:** explicitar o contrato de compilação dos targets PPC em um único helper/interface CMake realmente consumido por eles; verificar comandos efetivos e casos numéricos sensíveis.
-- **Ação imediata:** antes de atribuir equivalência semântica entre a suíte PPC e todos os builds de títulos.
+- **Ação imediata:** concluída neste incremento; evidência original acima, validação posterior abaixo.
+
+Validação posterior ao diagnóstico original:
+
+- Comandos Ninja anteriores: ambas as opções explícitas ausentes em **807** compilações geradas — Iruka 37, Castle 19, 17559 208, 6717 113, Motocross/XAM 330. SDK PPC, smoke e Vavguw já as tinham. Depois: **807/807 fontes e 9/9 PCHs** com ambas e `-O2`; os cinco builds concluíram. `clang++ -###` aplicado ao comando de Iruka confirma `-relaxed-aliasing -ffp-contract=off -frounding-math -ffp-exception-behavior=strict`. Windows já usa aliasing relaxado por padrão; a opção explícita fixa o contrato independentemente desse default. FP estrito preserva arredondamento dinâmico/exceções e impede contração implícita, conforme o [manual do Clang](https://clang.llvm.org/docs/UsersManual.html#controlling-floating-point-behavior). Nenhuma nova opção foi propagada aos cinco hosts nativos nem aos 17 comandos de launcher/supervisor inspecionados.
+- Semântica em `-O2`: **7/7** verificações de sobreposição word/halfword, arredondamento FPSCR, zero com sinal, infinito, NaN e subnormal. Com as opções anteriores, o arredondamento para cima falha; com `-fstrict-aliasing` explícito, o controle negativo também falha no acesso sobreposto. **1.472/1.472** testes PPC/avatares passaram; suíte do projeto: 127 aprovados e um teste de foco SDL pulado. O teste de hardlinks passou separadamente fora da restrição do sandbox. Não se incluiu doctor/inventário geral nesta aceitação de C6.
+- C2: `ninja -t inputs build.ninja` descartava arquivos CMake declarados como `phony`. A coleta agora reutiliza `Get-NinjaNodes`, conservando esses arquivos nos mesmos recibos SHA-256, sem novo fingerprint/schema. O teste compilado de contrato confirma entrada/módulo/PCH, ausência no host nativo, invalidação por `-fwrapv` num include com timestamp preservado, recompilação apenas do consumidor afetado e recibo independente intacto. Iruka/Castle/17559 reutilizaram recibos e artefatos sem reescrita; catálogo real: **8/8** verificações.
+- C5: teste com **32 consumidores em dois builds concorrentes** aprovado, incluindo mudança isolada de runtime, no-op, rejeição do segundo produtor no mesmo build e staging atômico. Builds reais de títulos também foram executados simultaneamente. Patch 0038, leases e staging preservados.
+- Fontes geradas preservadas: o caminho conservador de preparação C2 voltou a consultar o gerador após reconstruir seu produtor; os cinco resumos registram **0 escritos/0 removidos**, com 77/41/428/229/666 arquivos inalterados, respectivamente. Não se modificaram templates, manifests, analysis ou código dos jogos para compensar as flags.
+- Regressões reais: **Iruka L1–L5** (`20261013T090650Z-regress-iruka`), 324 cores, diferença 5,834, zero stubs/erros/críticas; **Castle**, 60,176 s, zero stubs/erros/críticas (`090751Z-c6-castle`); **17559**, intro export 1 retornou 0 e entrou na dashboard, fechamento normal da janela aos 27,950 s (`090923Z-c6-dash17559`), sem crash/críticas, com 2.498 stubs/641 erros dos serviços incompletos. **Motocross/XAM**: probe com zero falhas e contexto restaurado (`091053Z-c6-avatar-probe`); serviço habilitado com `Initialize`, `GetAssets` e `GenerateMipMaps` retornando 0 (`091146Z-c6-avatar-service`). Permanecem `GetManifestLocalUser=80070490` e limitações gráficas/de conteúdo; não se aprovou gameplay completo nem funcionamento da 6717. Todos os runs são de 13/10/2026.
+
+Evidências locais: `.local/audit/c6` (comandos antes/depois, driver, controles semânticos, recibos e logs). A primeira rodada ampla foi descartada por concorrência indevida entre testes e relink da própria suíte e restrições de temporários; a rodada acima foi repetida após concluir o build, com temporários no workspace. Isso não é uma aprovação da suíte completa nem amplia a compatibilidade dos títulos.
 
 ### C7. Alto — usuário fixo e UI de sistema incompleta impedem fidelidade dos fluxos
 
@@ -431,12 +444,12 @@ Limites: coordenação validada em Windows x64 usando `build-title.ps1`, `cmake 
 | Ordem | Categoria | Entrega de maior impacto | Critério de conclusão |
 |---|---|---|---|
 | 1 | **Concluído: C1/C3** | Fronteira de conteúdo corrigida; ver E6 | ISO truncado, offsets extremos, ciclos e manifesto preexistente retornam erro controlado; nenhum crash/sobrescrita nos testes; extração válida preservada. |
-| 2 | **C2/C5 concluídos; C6 pendente** | Premissas PPC — C6 | Identidade/invalidação e isolamento implementados em E7/E8; uniformizar as premissas PPC será outro incremento. |
+| 2 | **Concluído: C2/C5/C6** | Identidade, isolamento e premissas PPC | Recibos e isolamento em E7/E8; contrato PPC, comandos efetivos e regressões registrados em C6. |
 | 3 | Antes da primeira Release | Pacote reproduzível, atualização segura e gate de publicação — C4/C9/C10/C11/C12/C14 | Licença/avisos presentes; fonte/binário vinculados; falhas da suíte resolvidas ou explicitamente bloqueantes; pacote do HEAD testado em Windows limpo, com importação/preparação/cancelamento/retomada e preservação dos dados numa atualização. |
 | 4 | Evoluir progressivamente; antes de anunciar console funcional | Completar uma fatia original de perfis, UI de sistema e armazenamento — C7 | Dois usuários, sign-in/out, save/load isolado, reabertura e retorno pelo fluxo original, com testes de ciclo de vida e input real. |
 | 5 | Evoluir progressivamente | Compatibilidade por evidência: estabilizar 6717 e segundo consumidor de avatar — C8/C13 | 6717 com recursos correspondentes e causa de crash isolada; Motocross com visual/animação aceitos; Keflings/protocolo 2 testado antes de generalizar backend. Depois ampliar versões e plataformas. |
 
-Na auditoria original, as próximas **três tarefas de desenvolvimento** eram: (1) extrator seguro, (2) preparação/artefatos confiáveis, (3) candidato Windows publicável e atualizável. C1/C3, a identidade de preparação C2 e o isolamento C5 foram concluídos; C6 e o candidato publicável permanecem pendentes.
+Na auditoria original, as próximas **três tarefas de desenvolvimento** eram: (1) extrator seguro, (2) preparação/artefatos confiáveis, (3) candidato Windows publicável e atualizável. C1/C3, a identidade de preparação C2, o isolamento C5 e o contrato PPC C6 foram concluídos; o candidato publicável permanece pendente.
 
 **Não mexer agora:** migração de SDK, troca de linguagem/framework, fusão de todos os jogos no processo da GUI, universalização do backend de avatar ou implementação de XNA/portabilidade em paralelo à estabilização desses contratos. Também não reescrever histórico nem remover créditos.
 
