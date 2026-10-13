@@ -239,13 +239,14 @@ void InspectSelected(App& a) {
   Enable(a);
 }
 void Load(App& a, const fs::path& root) {
-  a.targets.clear(); a.dashboard_indices.clear(); a.selected = 0;
+  if (a.root != root) a.targets.clear();
+  a.dashboard_indices.clear(); a.selected = 0;
   SendMessageW(a.combo, CB_RESETCONTENT, 0, 0);
   // Hardware probing is independent of navigation between pages.
   if (a.environment.description.empty() || a.root != root) a.environment = CheckEnvironment(root);
   a.root = root;
   SetWindowTextW(a.root_text, root.empty() ? L"Selecione um ambiente existente" : root.c_str());
-  if (!root.empty()) a.targets = ReadCatalog(ProjectPaths{root});
+  if (!root.empty() && a.targets.empty()) a.targets = ReadCatalog(ProjectPaths{root});
   a.selected = a.targets.size();
   for (size_t i = 0; i < a.targets.size(); ++i) {
     if ((a.targets[i].kind != "dashboard") != a.games) continue;
@@ -280,7 +281,7 @@ void Labels(App& a) {
        {kImportPage, "Importar", "Import"}, {kAddContent, "Adicionar conteúdo", "Add content"}, {kLibrary, "Ver biblioteca", "View library"}}) Set(GetDlgItem(a.window, id), Tr(pt, en));
   Set(GetDlgItem(a.window, kImport), Tr("Adicionar arquivo", "Add file"));
   Set(GetDlgItem(a.window, kLanguage), english ? "EN / PT" : "PT / EN");
-  Set(a.footer, Tr("PRÉVIA WINDOWS x64    ·    Perfis e save/load ainda não aprovados    ·    Seus arquivos ficam neste computador", "WINDOWS x64 PREVIEW    ·    Profiles and save/load not yet approved    ·    Your files stay on this computer"));
+  Set(a.footer, Tr("PRÉVIA PARA WINDOWS    ·    Seus arquivos permanecem neste computador", "WINDOWS PREVIEW    ·    Your files stay on this computer"));
 }
 fs::path PickFolder(HWND owner, const wchar_t* title, bool folder = true) {
   IFileOpenDialog* dialog = nullptr;
@@ -547,7 +548,7 @@ LRESULT CALLBACK WndProc(HWND window, UINT message, WPARAM wp, LPARAM lp) {
         if (id == kStorage) {
           auto path = PickFolder(window, Wide(Tr("Selecione a pasta de saves e perfis", "Select the saves and profiles folder")).c_str());
           if (!path.empty() && MessageBoxW(window, Wide(Tr("Usar esta pasta nas próximas sessões? Os dados anteriores permanecem na pasta original e não serão movidos ou apagados. Para reutilizar saves existentes, escolha a pasta que contém os diretórios dos títulos.", "Use this folder in future sessions? Previous data stays in its original folder and will not be moved or deleted. To reuse existing saves, choose the folder containing the title directories.")).c_str(), L"x360-native", MB_YESNO | MB_ICONINFORMATION) == IDYES) {
-            WorkspaceLease lease(ProjectPaths{a->root}); SetUserDataRoot(ProjectPaths{a->root}, path); Load(*a, a->root);
+            WorkspaceLease lease(ProjectPaths{a->root}); SetUserDataRoot(ProjectPaths{a->root}, path); a->targets.clear(); Load(*a, a->root);
           }
           return 0;
         }
@@ -564,7 +565,7 @@ LRESULT CALLBACK WndProc(HWND window, UINT message, WPARAM wp, LPARAM lp) {
             SavePreferences(*a);
           }
         }
-        if (id == kCheck) { a->environment = CheckEnvironment(a->root); InspectSelected(*a); }
+        if (id == kCheck) { a->environment = CheckEnvironment(a->root); a->targets.clear(); Load(*a, a->root); }
         if (id == kImport || id == kImportFolder) { auto source = PickFolder(window, Wide(id == kImport ? Tr("Selecione um arquivo original", "Select an original file") : Tr("Selecione a pasta com seus arquivos originais", "Select the folder with your original files")).c_str(), id == kImportFolder); if (!source.empty()) Start(*a, kImport, source); }
         if (id == kPrepare) {
           if (!a->environment.msvc) {
