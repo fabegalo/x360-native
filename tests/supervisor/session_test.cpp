@@ -39,8 +39,8 @@ TEST_CASE("session profile and launch request preserve Unicode paths", "[session
   auto manifest = dir / "profile.toml";
   std::ofstream(manifest) << "[project]\nname = 'test'\ngame_root = '.local/inputs'\n"
     "[entrypoint]\nfile_path = '.local/inputs/default.xex'\n"
-    "[x360n]\nnative_exe = '.local/build/test.exe'\nuser_data_root = '.local/user'\nxex_sha256 = '" << DigestFile(xex)->sha256 << "'\n"
-    "[library]\ntitle_id = '12345678'\ncontent_type = '000D0000'\nfile_name = 'content'\n";
+    "[x360n]\nnative_exe = '.local/build/test.exe'\nuser_data_root = '.local/user'\nxex_sha256 = '" << DigestFile(xex)->sha256 << "'\n";
+  std::ofstream(dir / "preparation.toml") << "[library]\ntitle_id = '12345678'\ncontent_type = '000D0000'\nfile_name = 'content'\n";
   auto profile = LoadSessionProfile(ProjectPaths{dir}, manifest);
   CHECK(profile.exe == fs::canonical(exe));
   CHECK(profile.library_relative_xex == fs::path("0000000000000000/12345678/000D0000/content/default.xex"));

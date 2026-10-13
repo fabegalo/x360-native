@@ -34,7 +34,15 @@ SessionProfile LoadSessionProfile(const ProjectPaths& paths, const std::filesyst
   if (relative.empty() || relative.is_absolute() || *relative.begin() == ".." ||
       (validate_execution && !IsWithin(p.xex, p.game_root)))
     throw std::runtime_error("XEX outside profile game root");
-  if (auto library = table["library"].as_table()) {
+  // Registration identity belongs to preparation.toml, shared with the importer.
+  // Do not duplicate it in the AOT manifest or accept a hash at any arbitrary path.
+  toml::table preparation;
+  const auto setup = manifest.parent_path() / "preparation.toml";
+  if (std::filesystem::is_regular_file(setup)) {
+    std::ifstream registration(setup, std::ios::binary);
+    preparation = toml::parse(registration, PathUtf8(setup));
+  }
+  if (auto library = preparation["library"].as_table()) {
     const auto title = text((*library)["title_id"]);
     const auto type = text((*library)["content_type"]);
     const auto name = text((*library)["file_name"]);
