@@ -3,6 +3,9 @@
 #include <cstring>
 #include <filesystem>
 #include <rex/runtime.h>
+#include <rex/chrono/clock.h>
+#include <rex/input/input.h>
+#include <rex/kernel/init.h>
 #include <rex/kernel/xam/module.h>
 #include <rex/ppc/func.h>
 #include <rex/system/kernel_state.h>
@@ -11,6 +14,108 @@
 
 extern "C" REX_FUNC(__imp__XamShowSigninUI);
 extern "C" REX_FUNC(__imp__XamShowGamerCardUI);
+extern "C" REX_FUNC(__imp__XamInputGetKeystrokeHud);
+extern "C" REX_FUNC(__imp__XamAppUnloadSelf);
+extern "C" REX_FUNC(__imp__XamEnableSystemAppInput);
+extern "C" REX_FUNC(__imp__XamInputGetKeystroke);
+extern "C" REX_FUNC(__imp__XamIsUIActive);
+extern "C" REX_FUNC(__imp__XamAppUnloadStack);
+extern "C" REX_FUNC(__imp__XamInputGetState);
+extern "C" REX_FUNC(__imp__GetTickCount);
+
+TEST_CASE("System UI host exports reject calls without an active session", "[sdk][profile-ui]") {
+  using rex::X_STATUS;
+  using rex::X_RESULT;
+  rex::Runtime rt(std::filesystem::temp_directory_path());
+  rex::RuntimeConfig config{};
+  config.tool_mode = true;
+  config.kernel_init = rex::kernel::InitializeKernel;
+  REQUIRE(rt.Setup(std::move(config)) == X_STATUS_SUCCESS);
+  PPCContext ctx{};
+  auto* base = rt.memory()->virtual_membase();
+  ctx.r3.u64 = 0; ctx.r4.u64 = 1;
+  __imp__XamEnableSystemAppInput(ctx, base);
+  CHECK(ctx.r3.u32 == 1627);
+  ctx.r3.u64 = 0;
+  __imp__XamAppUnloadSelf(ctx, base);
+  CHECK(ctx.r3.u32 == 1627);
+  const auto stroke = rt.memory()->SystemHeapAlloc(8);
+  ctx.r3.u64 = 0; ctx.r4.u64 = stroke;
+  __imp__XamInputGetKeystrokeHud(ctx, base);
+  CHECK(ctx.r3.u32 == X_ERROR_EMPTY);
+  rt.memory()->SystemHeapFree(stroke);
+}
+
+TEST_CASE("System UI sessions isolate input and defer closure until the host releases ownership", "[sdk][profile-ui]") {
+  using rex::X_STATUS;
+  using rex::X_RESULT;
+  rex::Runtime rt(std::filesystem::temp_directory_path());
+  rex::RuntimeConfig config{};
+  config.tool_mode = true;
+  config.kernel_init = rex::kernel::InitializeKernel;
+  REQUIRE(rt.Setup(std::move(config)) == X_STATUS_SUCCESS);
+  auto xam = rt.kernel_state()->GetKernelModule<rex::kernel::xam::XamModule>("xam.xex");
+  REQUIRE(xam);
+  CHECK_FALSE(xam->BeginSystemUi(0x1000, 0xFF, 0));
+  REQUIRE(xam->RegisterSystemApp({0x1000, 0xFF, 0x9010D8A0, 13}) == 0);
+  CHECK_FALSE(xam->BeginSystemUi(0x2000, 0xFF, 0));
+  CHECK_FALSE(xam->BeginSystemUi(0x1000, 0xFF, 4));
+  REQUIRE(xam->BeginSystemUi(0x1000, 0xFF, 0));
+  CHECK_FALSE(xam->BeginSystemUi(0x1000, 0xFF, 0));
+  CHECK_FALSE(xam->SetSystemUiVisible(0x2000));
+  REQUIRE(xam->SetSystemUiVisible(0x1000));
+  PPCContext ctx{};
+  auto* base = rt.memory()->virtual_membase();
+  __imp__XamIsUIActive(ctx, base);
+  CHECK(ctx.r3.u32 == 1);
+  ctx.r3.u64 = 1; ctx.r4.u64 = 1;
+  __imp__XamEnableSystemAppInput(ctx, base);
+  CHECK(ctx.r3.u32 == 1627);
+  ctx.r3.u64 = 0; ctx.r4.u64 = 1;
+  __imp__XamEnableSystemAppInput(ctx, base);
+  CHECK(ctx.r3.u32 == 0);
+  CHECK(xam->GetSystemUiSession().input_enabled);
+  const auto state = rt.memory()->SystemHeapAlloc(sizeof(rex::input::X_INPUT_STATE));
+  std::memset(base + state, 0xA5, sizeof(rex::input::X_INPUT_STATE));
+  ctx.r3.u64 = 0; ctx.r4.u64 = 0; ctx.r5.u64 = state;
+  __imp__XamInputGetState(ctx, base);
+  CHECK(ctx.r3.u32 == 0);
+  CHECK(std::all_of(base + state, base + state + sizeof(rex::input::X_INPUT_STATE),
+                    [](uint8_t byte) { return byte == 0; }));
+  rt.memory()->SystemHeapFree(state);
+  const auto before = uint32_t(rex::chrono::Clock::QueryGuestUptimeMillis());
+  ctx.r3.u64 = 0xDEADC0DE;
+  __imp__GetTickCount(ctx, base);
+  const auto after = uint32_t(rex::chrono::Clock::QueryGuestUptimeMillis());
+  CHECK(uint32_t(ctx.r3.u32 - before) <= uint32_t(after - before));
+  const auto stroke = rt.memory()->SystemHeapAlloc(8);
+  std::memset(base + stroke, 0xA5, 8);
+  ctx.r3.u64 = 0; ctx.r4.u64 = 1; ctx.r5.u64 = stroke;
+  __imp__XamInputGetKeystroke(ctx, base);
+  CHECK(ctx.r3.u32 == X_ERROR_EMPTY); // foreground app cannot drain the HUD queue
+  CHECK(base[stroke] == 0xA5);
+  ctx.r3.u64 = 1; ctx.r4.u64 = stroke;
+  __imp__XamInputGetKeystrokeHud(ctx, base);
+  CHECK(ctx.r3.u32 == X_ERROR_EMPTY); // another user cannot consume this session
+  ctx.r3.u64 = 1;
+  __imp__XamAppUnloadStack(ctx, base);
+  CHECK(ctx.r3.u32 == 87);
+  CHECK_FALSE(xam->GetSystemUiSession().close_requested);
+  __imp__XamAppUnloadSelf(ctx, base);
+  CHECK(ctx.r3.u32 == 0);
+  CHECK(xam->GetSystemUiSession().close_requested);
+  CHECK(xam->GetSystemUiSession().visible);
+  CHECK_FALSE(xam->EndSystemUi(0x2000));
+  REQUIRE(xam->EndSystemUi(0x1000));
+  __imp__XamIsUIActive(ctx, base);
+  CHECK(ctx.r3.u32 == 0);
+  CHECK_FALSE(xam->GetSystemUiSession().input_enabled);
+  REQUIRE(xam->BeginSystemUi(0x1000, 0xFF, 0));
+  CHECK_FALSE(xam->GetSystemUiSession().close_requested);
+  CHECK_FALSE(xam->GetSystemUiSession().visible);
+  CHECK(xam->EndSystemUi(0x1000));
+  rt.memory()->SystemHeapFree(stroke);
+}
 
 namespace {
 class SystemUiProbe final : public rex::system::xam::App {

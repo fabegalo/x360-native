@@ -1,0 +1,210 @@
+diff --git a/include/rex/kernel/xam/module.h b/include/rex/kernel/xam/module.h
+index f795772..f73329d 100644
+--- a/include/rex/kernel/xam/module.h
++++ b/include/rex/kernel/xam/module.h
+@@ -40,6 +40,48 @@ class XamModule : public system::KernelModule {
+   // The profile selects the original system UI module; the shared runtime only
+   // transports requests and tracks registrations. No UI/state change is implied.
+   std::function<X_HRESULT(uint32_t, uint32_t, uint32_t)> system_ui_request;
++  struct SystemUiSession {
++    uint32_t module = 0, user = 0;
++    bool visible = false, input_enabled = false, close_requested = false;
++  };
++  // One foreground system application. Rendering and guest destruction belong
++  // to the selected original UI host, outside these locks and export calls.
++  bool BeginSystemUi(uint32_t module, uint32_t slot, uint32_t user) {
++    std::lock_guard lock(system_apps_mutex_);
++    auto it = system_apps_.find(slot);
++    if (system_ui_.module || user >= 4 || it == system_apps_.end() ||
++        it->second.module != module) return false;
++    system_ui_ = {module, user};
++    return true;
++  }
++  SystemUiSession GetSystemUiSession() {
++    std::lock_guard lock(system_apps_mutex_);
++    return system_ui_;
++  }
++  bool SetSystemUiVisible(uint32_t module) {
++    std::lock_guard lock(system_apps_mutex_);
++    if (!module || module != system_ui_.module) return false;
++    system_ui_.visible = true;
++    return true;
++  }
++  bool EnableSystemUiInput(uint32_t user, bool enable) {
++    std::lock_guard lock(system_apps_mutex_);
++    if (!system_ui_.module || user != system_ui_.user) return false;
++    system_ui_.input_enabled = enable;
++    return true;
++  }
++  bool RequestSystemUiClose() {
++    std::lock_guard lock(system_apps_mutex_);
++    if (!system_ui_.module) return false;
++    system_ui_.close_requested = true;
++    return true;
++  }
++  bool EndSystemUi(uint32_t module) {
++    std::lock_guard lock(system_apps_mutex_);
++    if (!module || module != system_ui_.module) return false;
++    system_ui_ = {};
++    return true;
++  }
+   struct SystemApp { uint32_t module, slot, callback, resource_id; };
+   uint32_t RegisterSystemApp(SystemApp app) {
+     if (!app.module || !app.callback) return 1627;
+@@ -83,6 +125,7 @@ class XamModule : public system::KernelModule {
+   std::unordered_map<uint32_t, SystemApp> system_apps_;
+   LoaderData loader_data_;
+   uint32_t language_fallback_table_ = 0;  // Owned guest UTF16 strings, 16 bytes per ID.
++  SystemUiSession system_ui_;
+ };
+ 
+ }  // namespace xam
+diff --git a/src/kernel/xam/xam_input.cpp b/src/kernel/xam/xam_input.cpp
+index 80c3634..61953b7 100644
+--- a/src/kernel/xam/xam_input.cpp
++++ b/src/kernel/xam/xam_input.cpp
+@@ -12,6 +12,7 @@
+ #include <rex/input/input.h>
+ #include <rex/input/input_system.h>
+ #include <rex/kernel/xam/private.h>
++#include <rex/kernel/xam/module.h>
+ #include <rex/logging.h>
+ #include <rex/hook.h>
+ #include <rex/types.h>
+@@ -38,6 +39,12 @@ rex::input::InputSystem* input_system() {
+   return static_cast<rex::input::InputSystem*>(REX_KERNEL_STATE()->emulator()->input_system());
+ }
+ 
++bool SystemUiOwnsInput(uint32_t user) {
++  auto xam = REX_KERNEL_STATE()->GetKernelModule<XamModule>("xam.xex");
++  const auto ui = xam->GetSystemUiSession();
++  return ui.visible && ui.user == user;
++}
++
+ void XamResetInactivity_entry() {
+   // Do we need to do anything?
+ }
+@@ -112,6 +119,10 @@ u32 XamInputGetState_entry(u32 user_index, u32 flags, ppc_ptr_t<X_INPUT_STATE> i
+   }
+ 
+   auto* is = input_system();
++  if (SystemUiOwnsInput(actual_user_index)) {
++    if (input_state) *input_state = {};
++    return X_ERROR_SUCCESS;
++  }
+   return is->GetState(actual_user_index, input_state);
+ }
+ 
+@@ -154,6 +165,7 @@ u32 XamInputGetKeystroke_entry(u32 user_index, u32 flags, ppc_ptr_t<X_INPUT_KEYS
+   }
+ 
+   auto* is = input_system();
++  if (SystemUiOwnsInput(actual_user_index)) return X_ERROR_EMPTY;
+   return is->GetKeystroke(actual_user_index, flags, keystroke);
+ }
+ 
+@@ -176,6 +188,7 @@ u32 XamInputGetKeystrokeEx_entry(mapped_u32 user_index_ptr, u32 flags,
+   }
+ 
+   auto* is = input_system();
++  if (SystemUiOwnsInput(user_index)) return X_ERROR_EMPTY;
+   auto result = is->GetKeystroke(user_index, flags, keystroke);
+   if (XSUCCEEDED(result)) {
+     *user_index_ptr = keystroke->user_index;
+@@ -215,7 +228,19 @@ REX_EXPORT_STUB(__imp__XamInputEnableAutobind);
+ REX_EXPORT_STUB(__imp__XamInputGetDeviceStats);
+ REX_EXPORT_STUB(__imp__XamInputGetFailedConnectionOrBind);
+ REX_EXPORT_STUB(__imp__XamInputGetKeyLocks);
+-REX_EXPORT_STUB(__imp__XamInputGetKeystrokeHud);
++extern "C" REX_FUNC(__imp__XamInputGetKeystrokeHud) {
++  using namespace rex;
++  auto xam = REX_KERNEL_STATE()->GetKernelModule<kernel::xam::XamModule>("xam.xex");
++  const auto ui = xam->GetSystemUiSession();
++  const uint32_t user = ctx.r3.u32;
++  if (!ctx.r4.u32) { ctx.r3.u64 = X_ERROR_BAD_ARGUMENTS; return; }
++  if (!ui.visible || !ui.input_enabled || user != ui.user) {
++    ctx.r3.u64 = X_ERROR_EMPTY;
++    return;
++  }
++  auto* stroke = reinterpret_cast<input::X_INPUT_KEYSTROKE*>(base + ctx.r4.u32);
++  ctx.r3.u64 = kernel::xam::input_system()->GetKeystroke(user, 1, stroke);
++}
+ REX_EXPORT_STUB(__imp__XamInputGetKeystrokeHudEx);
+ REX_EXPORT_STUB(__imp__XamInputGetUserVibrationLevel);
+ REX_EXPORT_STUB(__imp__XamInputNonControllerGetRaw);
+diff --git a/src/kernel/xam/xam_misc.cpp b/src/kernel/xam/xam_misc.cpp
+index 994aa21..8025e6d 100644
+--- a/src/kernel/xam/xam_misc.cpp
++++ b/src/kernel/xam/xam_misc.cpp
+@@ -12,6 +12,7 @@
+ #include <rex/kernel/xam/module.h>
+ #include <rex/logging.h>
+ #include <rex/hook.h>
++#include <rex/chrono/clock.h>
+ 
+ // kinda gross but oh well
+ REX_EXPORT_STUB(__imp__CancelWaitableTimer);
+@@ -125,7 +126,9 @@ REX_EXPORT_STUB(__imp__GetOverlappedResult);
+ REX_EXPORT_STUB(__imp__GetProcessHeap);
+ REX_EXPORT_STUB(__imp__GetSystemTime);
+ REX_EXPORT_STUB(__imp__GetSystemTimeAsFileTime);
+-REX_EXPORT_STUB(__imp__GetTickCount);
++extern "C" REX_FUNC(__imp__GetTickCount) {
++  ctx.r3.u64 = rex::chrono::Clock::QueryGuestUptimeMillis();
++}
+ REX_EXPORT_STUB(__imp__GetTimeZoneInformation);
+ REX_EXPORT_STUB(__imp__InjectConnectionServerNotification);
+ REX_EXPORT_STUB(__imp__IsBadReadPtr);
+@@ -296,8 +299,16 @@ REX_EXPORT_STUB(__imp__XamAppReportError);
+ REX_EXPORT_STUB(__imp__XamAppRequestLoad);
+ REX_EXPORT_STUB(__imp__XamAppRequestLoadEx);
+ REX_EXPORT_STUB(__imp__XamAppSetTestOption);
+-REX_EXPORT_STUB(__imp__XamAppUnloadSelf);
+-REX_EXPORT_STUB(__imp__XamAppUnloadStack);
++extern "C" REX_FUNC(__imp__XamAppUnloadSelf) {
++  auto xam = REX_KERNEL_STATE()->GetKernelModule<rex::kernel::xam::XamModule>("xam.xex");
++  ctx.r3.u64 = xam && xam->RequestSystemUiClose() ? 0 : 1627;
++}
++extern "C" REX_FUNC(__imp__XamAppUnloadStack) {
++  // The installed host currently owns one foreground app. Nonzero flags are
++  // not implemented; never unload guest code while its callback is executing.
++  if (ctx.r3.u32) { ctx.r3.u64 = 87; return; }
++  __imp__XamAppUnloadSelf(ctx, base);
++}
+ REX_EXPORT_STUB(__imp__XamAppUnrequestLoad);
+ REX_EXPORT_STUB(__imp__XamAreMixedAccountsSignedIn);
+ REX_EXPORT_STUB(__imp__XamAskUserForCSVDrainagePermission);
+@@ -394,7 +405,10 @@ REX_EXPORT_STUB(__imp__XamDownloadInSingleItemMode);
+ REX_EXPORT_STUB(__imp__XamDownloadMarketplaceStoresList);
+ REX_EXPORT_STUB(__imp__XamDownloadSingleItem);
+ REX_EXPORT_STUB(__imp__XamEnableOverdraw);
+-REX_EXPORT_STUB(__imp__XamEnableSystemAppInput);
++extern "C" REX_FUNC(__imp__XamEnableSystemAppInput) {
++  auto xam = REX_KERNEL_STATE()->GetKernelModule<rex::kernel::xam::XamModule>("xam.xex");
++  ctx.r3.u64 = xam && xam->EnableSystemUiInput(ctx.r3.u32, ctx.r4.u32 != 0) ? 0 : 1627;
++}
+ REX_EXPORT_STUB(__imp__XamEtxFlushLogs);
+ REX_EXPORT_STUB(__imp__XamExecuteChallenge);
+ REX_EXPORT_STUB(__imp__XamExecutingOnBehalfOfTitle);
+diff --git a/src/kernel/xam/xam_ui.cpp b/src/kernel/xam/xam_ui.cpp
+index d190068..b285a7a 100644
+--- a/src/kernel/xam/xam_ui.cpp
++++ b/src/kernel/xam/xam_ui.cpp
+@@ -20,6 +20,7 @@
+ REXCVAR_DEFINE_BOOL(headless, false, "Kernel",
+                     "Don't display any UI, using defaults for prompts as needed");
+ #include <rex/kernel/xam/private.h>
++#include <rex/kernel/xam/module.h>
+ #include <rex/hook.h>
+ #include <rex/types.h>
+ #include <rex/system/xtypes.h>
+@@ -205,7 +206,8 @@ X_RESULT xeXamDispatchHeadlessEx(std::function<X_RESULT(uint32_t&, uint32_t&)> r
+ }
+ 
+ u32 XamIsUIActive_entry() {
+-  return xeXamIsUIActive();
++  auto xam = REX_KERNEL_STATE()->GetKernelModule<XamModule>("xam.xex");
++  return xeXamIsUIActive() || (xam && xam->GetSystemUiSession().visible);
+ }
+ 
+ class MessageBoxDialog : public XamDialog {
