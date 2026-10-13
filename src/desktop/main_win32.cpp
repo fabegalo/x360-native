@@ -549,6 +549,11 @@ LRESULT CALLBACK WndProc(HWND window, UINT message, WPARAM wp, LPARAM lp) {
         Labels(*a); Layout(*a);
         if (a->initializing) {
           const auto state = InspectEnvironment(Payload(*a), a->root);
+          const auto installed = DigestFile(a->root / ".local/payload.sha256");
+          const auto packaged = DigestFile(Payload(*a) / "payload.sha256");
+          if (state.current && installed && packaged && installed->sha256 == packaged->sha256) {
+            a->initializing = false; Load(*a, a->root); return 0;
+          }
           if (!state.current && fs::exists(a->root / "deps.lock.json")) {
             std::string message = Tr("Esta instalação precisa ser atualizada para continuar. Seus jogos e dados serão preservados.\n\nComponentes: ", "This installation needs an update to continue. Your games and data will be preserved.\n\nComponents: ");
             for (const auto& component : state.components) message += "\n• " + component;
