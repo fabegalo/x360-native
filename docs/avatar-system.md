@@ -330,3 +330,73 @@ real, com o registro montado a partir do catálogo, buffers de resultado/GPU do 
 `ResultSizeFor`, versão 4 e os callbacks reais do jogo. Falta confirmar a semântica de +16 e
 +48 do registro (H: +48 = categoria `field_00`) e se outras funções da cadeia de texturas
 leem mais campos.
+
+## 10. Transformação real: tabelas de cores STRB em AOT (2026-10-12)
+
+Na worktree `x360-avatars`, branch `avatars/xam-aot`, a opção diagnóstica
+`--motocross_xam_aot_probe_colors=true` executa **`0x81976598`** do XAM 17559.
+Ela pertence ao caminho `GetAssets`: `0x81966FC8` → `0x819669A0`/`0x81966C98`
+→ `0x81966450` → leitura do campo 7 → `0x81976598`. Não é cálculo de tamanho:
+expande deltas compactados em triplas de cores ARGB de 32 bits.
+
+- Entrada: `r3` aponta para saída de 220 bytes; `r4`, para o stream do campo 7
+  construído por `0x81976080(reader, iterator, 0)` (com o objeto como primeiro argumento).
+  O leitor/iterador original é criado sobre o blob inteiro, não sobre dados sintéticos.
+- Saída: até 18 triplas de `u32` big-endian, contador em `+216`; retorno 1/0.
+- Dependências imediatas: `0x819761B0` (cabeçalho compactado), `0x81976308`
+  (expansão), `0x81976298`/`0x81971600`/`0x8197A388` (componentes e bits),
+  streams e vtables estáticas do leitor STRB. Sem inicializar heaps, apps,
+  gerenciadores de títulos/conteúdo ou o ponto de entrada do XAM.
+- Essa operação não precisa de callbacks de GPU. Os 20 bytes da tabela dos cinco
+  callbacks em `0x81A975CC` são comparados antes/depois; permanecem intactos.
+
+**PASS**, execução final `20261013T011122Z-mm-avatars-colors-3`:
+39/39 tabelas, 63 triplas (189 cores), 291 chamadas sem quebra da ABI verificada
+(r1, r2, r13–r31, f14–f31). Três tabelas têm deltas de 24 bits por componente:
+registros 72 e 300 (`Power Tee`) e 275 (`Tight Tee`), nove triplas cada. As outras
+36 têm uma tripla com larguras zero. No registro 72, campo em `+0x5430`, 109 bytes,
+a primeira tripla é `FF3286DA/FF3286DA/FF3286DA`; no 112, as cores são
+`FFFF0000/FF00FF00/FF0000FF`.
+
+A referência é uma leitura independente dos bytes originais: cabeçalho de sete
+palavras little-endian (contagem, base/largura para cada componente) e deltas
+extraídos **bit a bit**, LSB primeiro, somados às bases. Não usa a saída AOT nem
+chama o extrator de bits do XAM. Os 220 bytes são comparados integralmente,
+incluindo posições não utilizadas; sentinelas de 32 bytes verificam os limites,
+e o blob de entrada é comparado integralmente. O endereço da saída e os limites
+do iterador são conferidos/registrados em cada caso. O teste não é uma comparação
+visual contra console e não demonstra renderização.
+
+Três negativos: em cópias privadas dos registros 72, 275 e 300, reduzir o tamanho
+declarado do campo em um byte faz a rotina retornar **0**, sem tocar saída ou
+sentinelas. Antes das chamadas válidas, a sonda limita contagem, larguras,
+tamanho do payload e endereços. Isso não transforma o leitor original num parser
+genérico de entradas hostis.
+
+Fonte: `AvatarAssetPack.toc` do storage pack 17559 já autorizado, SHA-256
+`a8c90b3db5c6349a55fcb72eda47e08e4940f88fabda4ff73025d9728832daa8`.
+Relatórios em `.local/runs/` **da worktree de avatares**. O build privado voltou
+para `.local/build/titles/motocross_madness-avatars` nessa worktree; o SDK, as DLLs,
+o código gerado e o perfil de teste são separados da distribuição. A cópia antiga
+do build em `x360` foi preservada. Integração na `main` adiada por escolha do usuário.
+
+Reprodução: usar `x360n --root <worktree> run <exe-privado> --timeout 60 --rex-log --`
+com `--motocross_xam_aot_probe=true`, `--motocross_xam_aot_probe_colors=true`,
+`--gpu_plugin=xenos`, e os caminhos locais de `--game_data_root`,
+`--user_data_root`, `--x360n_xam17559_root` e `--x360n_avatar_catalog_17559`.
+O relatório JSON guarda os argumentos completos e hashes do executável/DLLs.
+A execução 1 expirou antes da sonda; a 2 validou as saídas; a 3 acrescentou os
+negativos. As duas últimas concluíram a sonda com zero falhas, antes do timeout
+controlado do jogo. Erros já conhecidos do título (XCTD, devkit) e o endereço
+inválido intencional da prova de integração continuam presentes no log.
+
+Regressão: os dez testes existentes `[avatar]` passaram (75 asserções unitárias
+e 1189 locais). A prova das 8191 máscaras **não foi repetida**; `ResultSizeFor`
+continua em C++. `XamAvatarInitialize` permaneceu em `0xFFFFFFFF`.
+
+**Progresso e próxima fronteira:** a expansão de dados reais de cores está
+executada e validada sem gerenciadores globais. Não houve bloqueio nessa rotina.
+Falta executar a montagem das malhas/texturas do campo 3 (`0x81974A90`, chamada
+por `0x81966450`), validar os ponteiros relocados nos buffers resultado/GPU e os
+callbacks reais do título. Essa cadeia completa não foi executada aqui; suporte
+funcional aos protocolos 2/4 e um avatar renderizado continuam pendentes.

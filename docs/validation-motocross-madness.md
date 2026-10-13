@@ -122,3 +122,14 @@ Xenia Canary `8d8ba9b6f71e` (2026-09-12), `src/xenia/kernel/xam/xam_avatar.cc`:
 - XAM 17559 original em AOT no mesmo processo (caminho 2): prova de conceito 21/21 e
   bloqueio atual do `XamAvatarInitialize` original em `docs/avatar-system.md` §8. Sem as
   opções da sonda, o jogo roda como na execução 3.
+
+### Incremento isolado: transformação STRB de cores (2026-10-12)
+
+`20261013T011122Z-mm-avatars-colors-3`, na worktree `x360-avatars`: o XAM
+17559 AOT `0x81976598` expandiu 39 tabelas originais em 63 triplas de cores,
+com comparação dos 220 bytes de cada saída contra extração independente dos
+bits. Três campos truncados foram rejeitados sem escrita; 291 chamadas
+preservaram a ABI verificada. Detalhes, dependências e limites em
+`docs/avatar-system.md` §10. O contexto do jogo foi restaurado e
+`XamAvatarInitialize` continuou retornando `0xFFFFFFFF`; ainda não há avatar
+renderizado nem novo marco de jogabilidade. O timeout após a sonda é controlado.

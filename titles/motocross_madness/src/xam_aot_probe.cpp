@@ -63,6 +63,9 @@ REXCVAR_DEFINE_BOOL(motocross_xam_aot_probe_sizes, false, "Motocross Madness",
                     "Diagnostic, with the probe: run XAM's GetAssets size routine 0x81965EC0 on "
                     "every valid component mask and compare with the C++ ResultSizeFor");
 
+REXCVAR_DEFINE_BOOL(motocross_xam_aot_probe_colors, false, "Motocross Madness",
+                    "Diagnostic: expand original STRB color palettes with XAM AOT and verify every byte");
+
 namespace {
 
 constexpr uint32_t kXamBase = 0x815F0000, kXamSize = 0x610000;
@@ -280,6 +283,147 @@ void RunSizeCheck() {
   memory->SystemHeapFree(out);
 }
 
+// Diagnostic only: GetAssets -> 0x81966450 -> 0x81976598 expands STRB field 7.
+// The reference reads the original field directly, without consulting AOT output:
+// seven little-endian header words, followed by LSB-first packed integer deltas.
+// Output is at most 18 triples of BE u32 ARGB values, then a BE count at +216.
+void RunStrbColors(const x360n::avatar::AvatarToc& toc) {
+  auto* rt = rex::Runtime::instance();
+  auto* memory = rt->memory();
+  auto* d = rt->function_dispatcher();
+  auto* t = rex::runtime::ThreadState::Get();
+  constexpr uint32_t kReader = 0x40, kIter = 0x100, kFieldStream = 0x180;
+  constexpr uint32_t kGuard = 0x200, kOut = kGuard + 32, kEnd = kOut + 220;
+  constexpr uint32_t kData = 0x400;
+  size_t largest = 0;
+  for (size_t i = 0; i < toc.size(); ++i) largest = std::max(largest, toc.Blob(i).size());
+  const uint32_t scratch = memory->SystemHeapAlloc(uint32_t(kData + largest + 32));
+  if (!scratch) { Check(false, "colors: allocate private memory"); return; }
+  auto* h = memory->TranslateVirtual<uint8_t*>(scratch);
+  auto be = [](const uint8_t* p) { return uint32_t(p[0]) << 24 | uint32_t(p[1]) << 16 |
+                                        uint32_t(p[2]) << 8 | p[3]; };
+  auto le = [](const uint8_t* p) { return uint32_t(p[3]) << 24 | uint32_t(p[2]) << 16 |
+                                        uint32_t(p[1]) << 8 | p[0]; };
+  auto put = [](uint8_t* p, uint32_t v) {
+    p[0] = uint8_t(v >> 24); p[1] = uint8_t(v >> 16);
+    p[2] = uint8_t(v >> 8); p[3] = uint8_t(v);
+  };
+  uint32_t abi = 0, calls = 0, tested = 0, packed = 0, triples = 0;
+  auto call = [&](uint32_t fn, std::initializer_list<uint64_t> args) {
+    ++calls; return CallQuiet(d, t, fn, args, &abi);
+  };
+  std::array<uint8_t, 20> callbacks{};
+  std::memcpy(callbacks.data(), memory->TranslateVirtual(0x81A975CC), callbacks.size());
+  for (size_t record = 0; record < toc.size(); ++record) {
+    const auto blob = toc.Blob(record);
+    if (blob.empty()) continue;
+    // This diagnostic deliberately supports only the observed 17559 encoding.
+    if (blob.size() < 32 || std::memcmp(blob.data(), "STRB", 4) || blob[4] != 1 ||
+        blob[5] != 0 || blob[22] != 1 || blob[23] != 4 || blob[26] != 4) {
+      Check(false, fmt::format("colors: unsupported STRB layout at record {}", record)); break;
+    }
+    size_t pos = 32;
+    uint32_t ordinal = 0;
+    while (pos + 12 <= blob.size() && blob[pos] != 7) {
+      const uint32_t len = be(blob.data() + pos + 1);
+      if (len > blob.size() - pos - 12) { pos = blob.size(); break; }
+      pos += 12 + ((size_t(len) + 3) & ~size_t(3));
+      ++ordinal;
+    }
+    if (pos + 12 > blob.size()) continue;  // no palette field in this asset
+    const uint32_t len = be(blob.data() + pos + 1);
+    if (len < 28 || len > blob.size() - pos - 12 || be(blob.data() + pos + 5) != 1) {
+      Check(false, "colors: field 7 bounds/element size"); break;
+    }
+    const auto* payload = blob.data() + pos + 12;
+    const uint32_t count = le(payload);
+    std::array<uint32_t, 3> bias{}, bits{};
+    uint32_t stride = 0;
+    for (size_t c = 0; c < 3; ++c) {
+      bias[c] = le(payload + 4 + c * 8);
+      bits[c] = le(payload + 8 + c * 8);
+      stride += bits[c];
+    }
+    // Bound inputs before giving them to the original trusted-data decoder.
+    if (!count || count > 18 || bits[0] > 32 || bits[1] > 32 || bits[2] > 32 ||
+        uint64_t(count) * stride > uint64_t(len - 28) * 8) {
+      Check(false, fmt::format("colors: unsupported palette count/width at {}", record)); break;
+    }
+    std::array<uint8_t, 220> expected;
+    expected.fill(0xA5);
+    size_t bit = 0;
+    for (uint32_t row = 0; row < count; ++row) {
+      for (size_t c = 0; c < 3; ++c) {
+        uint32_t delta = 0;
+        for (uint32_t b = 0; b < bits[c]; ++b, ++bit)
+          delta |= uint32_t((payload[28 + bit / 8] >> (bit % 8)) & 1) << b;
+        put(expected.data() + row * 12 + c * 4, bias[c] + delta);
+      }
+    }
+    put(expected.data() + 216, count);
+    std::memset(h, 0, kData);
+    std::memcpy(h + kData, blob.data(), blob.size());
+    std::memset(h + kGuard, 0xA5, kEnd + 32 - kGuard);
+    std::memset(h + kData + blob.size(), 0xA5, 32);
+    call(0x8196D568, {scratch, scratch + kData, blob.size()});
+    call(0x8196DBE8, {scratch + kReader, scratch});
+    call(0x8196E0E8, {scratch + kIter, scratch + kReader});
+    for (uint32_t n = 0; n < ordinal; ++n) call(0x8196F228, {scratch + kIter});
+    const bool iterator = rex::memory::load_and_swap<uint64_t>(h + kIter) == pos &&
+        rex::memory::load_and_swap<uint64_t>(h + kIter + 8) == 7 &&
+        rex::memory::load_and_swap<uint64_t>(h + kIter + 16) == len &&
+        rex::memory::load_and_swap<uint64_t>(h + kIter + 24) == 1 &&
+        be(h + kIter + 32) == scratch + kReader;
+    if (!iterator) { Check(false, fmt::format("colors: iterator bounds at {}", record)); break; }
+    call(0x81976080, {scratch + kFieldStream, scratch + kReader, scratch + kIter, 0});
+    const auto result = call(0x81976598, {scratch + kOut, scratch + kFieldStream});
+    const bool equal = std::memcmp(h + kOut, expected.data(), expected.size()) == 0;
+    const bool guards = std::all_of(h + kGuard, h + kOut, [](uint8_t b) { return b == 0xA5; }) &&
+        std::all_of(h + kEnd, h + kEnd + 32, [](uint8_t b) { return b == 0xA5; }) &&
+        std::all_of(h + kData + blob.size(), h + kData + blob.size() + 32,
+                    [](uint8_t b) { return b == 0xA5; });
+    const bool source = std::memcmp(h + kData, blob.data(), blob.size()) == 0;
+    if (result != 1 || !equal || !guards || !source) {
+      Check(false, fmt::format("colors: record {} result {} bytes {} guards {} source {} first "
+                               "{:08X}/{:08X} count {}/{}", record, result, equal, guards, source,
+                               be(h + kOut), be(expected.data()), be(h + kOut + 216), count));
+      break;
+    }
+    ++tested; triples += count;
+    if (stride) ++packed;
+    REXLOG_INFO("xam-aot-probe: colors: record {} blob {} field +0x{:X}/{} -> {} triples; "
+                "widths {}/{}/{}; first {:08X}/{:08X}/{:08X}; guest 0x{:08X}..0x{:08X}; "
+                "220 bytes/reference, guards and source equal", record, blob.size(), pos, len,
+                count, bits[0], bits[1], bits[2], be(h + kOut), be(h + kOut + 4),
+                be(h + kOut + 8), scratch + kOut, scratch + kEnd);
+    if (stride) {
+      // Shorten only the field's declared length in a private copy. The packed
+      // header still advertises all rows, so its final delta is unavailable.
+      put(h + kData + pos + 1, len - 1);
+      std::memset(h + kGuard, 0xA5, kEnd + 32 - kGuard);
+      call(0x8196DBE8, {scratch + kReader, scratch});
+      call(0x8196E0E8, {scratch + kIter, scratch + kReader});
+      for (uint32_t n = 0; n < ordinal; ++n) call(0x8196F228, {scratch + kIter});
+      call(0x81976080, {scratch + kFieldStream, scratch + kReader, scratch + kIter, 0});
+      const auto short_result = call(0x81976598, {scratch + kOut, scratch + kFieldStream});
+      const bool untouched = std::all_of(h + kGuard, h + kEnd + 32,
+                                         [](uint8_t b) { return b == 0xA5; });
+      Check(short_result == 0 && untouched,
+            fmt::format("colors: truncated record {} rejected (return {}), output and guards {}",
+                        record, short_result, untouched ? "untouched" : "CHANGED"));
+    }
+
+  }
+  Check(tested > 0 && packed > 0,
+        fmt::format("colors: 0x81976598 transformed {} real palettes ({} packed), {} triples",
+                    tested, packed, triples));
+  Check(abi == 0, fmt::format("colors: ABI preserved over {} calls ({} breaks)", calls, abi));
+  Check(std::memcmp(callbacks.data(), memory->TranslateVirtual(0x81A975CC), callbacks.size()) == 0,
+        "colors: all five title callbacks untouched; no GPU callback required by this routine");
+  memory->SystemHeapFree(scratch);
+}
+
+
 void Run() {
   auto* runtime = rex::Runtime::instance();
   auto* thread = rex::runtime::ThreadState::Get();
@@ -352,6 +496,7 @@ void Run() {
   }
   memory->SystemHeapFree(desc);
   if (REXCVAR_GET(motocross_xam_aot_probe_strb)) RunStrbDecode(*toc);
+  if (REXCVAR_GET(motocross_xam_aot_probe_colors)) RunStrbColors(*toc);
   if (REXCVAR_GET(motocross_xam_aot_probe_sizes)) RunSizeCheck();
 
   // XAM -> game: the original vector iterator calls the game's constructor.
