@@ -94,9 +94,13 @@ foreach ($component in @('fmt','cli11','tomlplusplus','inja')) { Copy-Item -Lite
 # logical roots. They describe this fresh build, not a second preparation cache.
 $commands = Get-Content -Raw -LiteralPath (Join-Path $build 'compile_commands.json') | ConvertFrom-Json
 $rcCompiler = ((Get-Content -LiteralPath (Join-Path $build 'CMakeCache.txt') | Where-Object { $_ -match '^CMAKE_RC_COMPILER:FILEPATH=' }) -replace '^CMAKE_RC_COMPILER:FILEPATH=', '')
+$rcCommand = $commands | Where-Object { $_.file -like '*.rc' } | Select-Object -First 1
+if ($rcCommand.command -notmatch '^\s*(?:"([^"]+)"|(\S+))') { throw 'Resource compiler command missing' }
+$rcActual = if ($Matches[1]) { $Matches[1] } else { $Matches[2] }
+if ((Hash $rcActual) -ne (Hash $rcCompiler)) { throw 'Resource compiler differs from configuration' }
 $portableCommands = @($commands | ForEach-Object {
     $entry = $_ | ConvertTo-Json -Compress
-    foreach ($mapping in @(@($source, '<source>'), @($build, '<build>'), @($llvm, '<llvm>'), @($rcCompiler, '<windows-sdk>/rc.exe'))) {
+    foreach ($mapping in @(@($source, '<source>'), @($build, '<build>'), @($llvm, '<llvm>'), @($rcCompiler, '<windows-sdk>/rc.exe'), @($rcActual, '<windows-sdk>/rc.exe'))) {
         $entry = $entry.Replace($mapping[0].Replace('\','/'), $mapping[1]).Replace($mapping[0].Replace('/','\').Replace('\','\\'), $mapping[1])
     }
     if ($entry -match '(?i)[a-z]:[/\\]') { throw 'Absolute developer path in distribution build evidence' }
