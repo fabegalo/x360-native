@@ -57,6 +57,9 @@ foreach($component in $inventory.components) {
             }
         }
     }
+    foreach($evidence in $component.source_evidence) {
+        if((Digest (Under $sdk $evidence.sdk_path)) -ne $evidence.sha256) { throw "SDK provenance source changed: $($component.id)" }
+    }
 }
 if((Digest (Join-Path $package 'licenses/rexglue-attributions.txt')) -ne $inventory.attributions_sha256) { throw 'Attribution text changed' }
 $sdkAttributions=Get-Content (Join-Path $package 'licenses/rexglue-attributions.txt') -Raw
@@ -65,6 +68,16 @@ foreach($unit in $inventory.sdk_translation_units) {
 }
 if(-not $ids.ContainsKey('nlohmann-json') -or -not $ids.ContainsKey('microsoft-stl') -or -not $ids.ContainsKey('microsoft-crt-sdk')) { throw 'Missing embedded component identity' }
 if((Digest (Join-Path $package 'licenses/header-attributions.txt')) -ne $inventory.header_attributions_sha256) { throw 'Header attribution text changed' }
+$icon=@($inventory.components | Where-Object id -eq 'desktop-icon')
+if($icon.Count -ne 1 -or $icon[0].spdx -ne 'BSD-3-Clause' -or
+   (Digest (Join-Path $payload 'src/desktop/desktop.ico')) -ne $icon[0].content_sha256) { throw 'Desktop icon provenance mismatch' }
+if(-not (Test-Path -LiteralPath (Join-Path $payload 'docs/ICON_PROVENANCE.md'))) { throw 'Missing desktop icon provenance' }
+& (Join-Path $PSScriptRoot 'generate-desktop-icon.ps1') -OutputPath (Join-Path $payload 'src/desktop/desktop.ico') -Check
+# Supplemental upstream texts travel with the exported source/environment too.
+foreach($id in @('tiny-aes-c','disruptorplus','dxc-headers','dxbc-md5','sha256','disasm')) {
+    $record=@($inventory.components | Where-Object id -eq $id)
+    if($record.Count -ne 1 -or -not $record[0].license_file) { throw "Missing supplemental SDK license: $id" }
+}
 $linkInputs=Get-Content (Join-Path $package 'app/link-inputs.json') -Raw | ConvertFrom-Json
 if(Compare-Object @($inventory.link_libraries | Sort-Object) @($linkInputs | Sort-Object -Unique)) { throw 'Unreviewed static link dependency' }
 foreach($dep in $metadata.dependencies.PSObject.Properties) {

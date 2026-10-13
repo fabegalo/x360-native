@@ -369,33 +369,126 @@
       "origin": "https://github.com/rexglue/rexglue-sdk",
       "revision": "f5337cdc947ff6d4c4196737e2c807a48f2a1fc2",
       "spdx": "GPL-2.0-or-later",
-      "original": "",
-      "license_file": null,
       "scope": "download",
       "integration": "static decoder in rexglue and x360n-content; thirdparty/disasm/ppc-dis.c",
-      "obligations": "Source-correspondence and GPL distribution obligations; standalone invocation is not linking."
+      "obligations": "GPL-2.0-or-later linked decoder: preserve notices and provide corresponding source under GPL when distributing linked tools. Such binaries are excluded from desktop ZIP.",
+      "license_file": "licenses/disasm.txt",
+      "license_sha256": "189b1af95d661151e054cea10c91b3d754e4de4d3fecfb074c1fb29476f7167b",
+      "original": "https://www.gnu.org/licenses/old-licenses/gpl-2.0.txt (text from pinned FFmpeg COPYING.GPLv2)"
     },
     {
       "id": "tiny-aes-c",
       "origin": "https://github.com/rexglue/rexglue-sdk",
       "revision": "f5337cdc947ff6d4c4196737e2c807a48f2a1fc2",
-      "spdx": "NOASSERTION",
-      "original": "",
-      "license_file": null,
+      "spdx": "Unlicense",
       "scope": "download",
-      "integration": "compiled static library, not present in observed rexruntime link; vendored terms absent",
-      "obligations": "Preserve inline notices; resolve missing terms/provenance before distributing full SDK binaries."
+      "integration": "Downloaded SDK only; aes.c, aes.h, aes.hpp byte-identical to pinned upstream reference; not in desktop ZIP binaries.",
+      "obligations": "Retain original Unlicense; not a claim that Xbox content is public domain.",
+      "license_file": "licenses/tiny-aes-c.txt",
+      "license_sha256": "7e12e5df4bae12cb21581ba157ced20e1986a0508dd10d0e8a4ab9a4cf94e85c",
+      "original": "https://raw.githubusercontent.com/kokke/tiny-AES-c/23856752fbd139da0b8ca6e471a13d5bcc99a08d/unlicense.txt",
+      "upstream_revision": "23856752fbd139da0b8ca6e471a13d5bcc99a08d",
+      "source_evidence": [
+        {
+          "sdk_path": "thirdparty/tiny-AES-c/aes.c",
+          "sha256": "f7f78b44654efd3542b6886923dd05194286807ebcfeb078ea05d21fe901ee9e",
+          "upstream_url": "https://raw.githubusercontent.com/kokke/tiny-AES-c/23856752fbd139da0b8ca6e471a13d5bcc99a08d/aes.c",
+          "upstream_sha256": "f7f78b44654efd3542b6886923dd05194286807ebcfeb078ea05d21fe901ee9e"
+        },
+        {
+          "sdk_path": "thirdparty/tiny-AES-c/aes.h",
+          "sha256": "9f74a4de3bd11621ff6e8fb9b352b060f699e6c1c67f81a22d104aacad61a23b",
+          "upstream_url": "https://raw.githubusercontent.com/kokke/tiny-AES-c/23856752fbd139da0b8ca6e471a13d5bcc99a08d/aes.h",
+          "upstream_sha256": "9f74a4de3bd11621ff6e8fb9b352b060f699e6c1c67f81a22d104aacad61a23b"
+        },
+        {
+          "sdk_path": "thirdparty/tiny-AES-c/aes.hpp",
+          "sha256": "d59bcf29c91a796aa735c4ca204e0140f98fac7b68006a78d900c14c344e0883",
+          "upstream_url": "https://raw.githubusercontent.com/kokke/tiny-AES-c/23856752fbd139da0b8ca6e471a13d5bcc99a08d/aes.hpp",
+          "upstream_sha256": "d59bcf29c91a796aa735c4ca204e0140f98fac7b68006a78d900c14c344e0883"
+        }
+      ]
     },
     {
       "id": "disruptorplus",
       "origin": "https://github.com/rexglue/rexglue-sdk",
       "revision": "f5337cdc947ff6d4c4196737e2c807a48f2a1fc2",
-      "spdx": "NOASSERTION",
-      "original": "",
-      "license_file": null,
+      "spdx": "MIT",
       "scope": "download",
-      "integration": "headers in runtime; vendored license missing",
-      "obligations": "Preserve inline notices; resolve missing terms/provenance before distributing full SDK binaries."
+      "integration": "Downloaded SDK runtime headers only. 10/11 byte-identical; multi_threaded_claim_strategy.hpp changes static_cast<sequence_t>(diff + 1) to static_cast<size_t>(diff + 1).",
+      "obligations": "Preserve Lewis Baker 2013 MIT copyright and permission; modification identified in docs/LICENSE_AUDIT.md.",
+      "license_file": "licenses/disruptorplus.txt",
+      "license_sha256": "a56f05c0dbd9489e928fd3ca22712f90b310fe749ceef47059e895f6a235100c",
+      "original": "https://raw.githubusercontent.com/xenia-project/disruptorplus/5787e9cb7551c8c79cf9ce14f7be860dc907e9a4/LICENSE.txt",
+      "upstream_revision": "5787e9cb7551c8c79cf9ce14f7be860dc907e9a4",
+      "source_evidence": [
+        {
+          "sdk_path": "thirdparty/disruptorplus/include/disruptorplus/blocking_wait_strategy.hpp",
+          "sha256": "b371bc0bd95dcc4acb8849df43d4a516c219bfdca6d86218360fcb98ae83aaa7",
+          "upstream_url": "https://raw.githubusercontent.com/xenia-project/disruptorplus/5787e9cb7551c8c79cf9ce14f7be860dc907e9a4/include/disruptorplus/blocking_wait_strategy.hpp",
+          "upstream_sha256": "b371bc0bd95dcc4acb8849df43d4a516c219bfdca6d86218360fcb98ae83aaa7"
+        },
+        {
+          "sdk_path": "thirdparty/disruptorplus/include/disruptorplus/config.hpp",
+          "sha256": "558177edc0f0f341aaf871464a9c4e1fdd3929f8612e51cefe074cc8640f06a5",
+          "upstream_url": "https://raw.githubusercontent.com/xenia-project/disruptorplus/5787e9cb7551c8c79cf9ce14f7be860dc907e9a4/include/disruptorplus/config.hpp",
+          "upstream_sha256": "558177edc0f0f341aaf871464a9c4e1fdd3929f8612e51cefe074cc8640f06a5"
+        },
+        {
+          "sdk_path": "thirdparty/disruptorplus/include/disruptorplus/multi_threaded_claim_strategy.hpp",
+          "sha256": "37c30d89939d9b2871c3090c64832324e42a01335f625edbe16d65a193bf2079",
+          "upstream_url": "https://raw.githubusercontent.com/xenia-project/disruptorplus/5787e9cb7551c8c79cf9ce14f7be860dc907e9a4/include/disruptorplus/multi_threaded_claim_strategy.hpp",
+          "upstream_sha256": "3fda4cd665f4b95a930c5739c01c25c342cf0751ed8016c57de2ef5aa7e3308d"
+        },
+        {
+          "sdk_path": "thirdparty/disruptorplus/include/disruptorplus/ring_buffer.hpp",
+          "sha256": "f80c4f206a45691131e77d36bfbdcdcccbcd5f8194338cfffa83a4f2ba3b0aab",
+          "upstream_url": "https://raw.githubusercontent.com/xenia-project/disruptorplus/5787e9cb7551c8c79cf9ce14f7be860dc907e9a4/include/disruptorplus/ring_buffer.hpp",
+          "upstream_sha256": "f80c4f206a45691131e77d36bfbdcdcccbcd5f8194338cfffa83a4f2ba3b0aab"
+        },
+        {
+          "sdk_path": "thirdparty/disruptorplus/include/disruptorplus/sequence_barrier_group.hpp",
+          "sha256": "424ca9697bf28b9ea5dea9f349f53de805fc9319aea5e8889e38ed653087b7b3",
+          "upstream_url": "https://raw.githubusercontent.com/xenia-project/disruptorplus/5787e9cb7551c8c79cf9ce14f7be860dc907e9a4/include/disruptorplus/sequence_barrier_group.hpp",
+          "upstream_sha256": "424ca9697bf28b9ea5dea9f349f53de805fc9319aea5e8889e38ed653087b7b3"
+        },
+        {
+          "sdk_path": "thirdparty/disruptorplus/include/disruptorplus/sequence_barrier.hpp",
+          "sha256": "cb52deba21afe52cd523140a7fab2622847ef79098bc0909d9c6ef4e07ac9989",
+          "upstream_url": "https://raw.githubusercontent.com/xenia-project/disruptorplus/5787e9cb7551c8c79cf9ce14f7be860dc907e9a4/include/disruptorplus/sequence_barrier.hpp",
+          "upstream_sha256": "cb52deba21afe52cd523140a7fab2622847ef79098bc0909d9c6ef4e07ac9989"
+        },
+        {
+          "sdk_path": "thirdparty/disruptorplus/include/disruptorplus/sequence_range.hpp",
+          "sha256": "1f8172b146b4ac84e1827fe59ef6ad0325735788c554fab60bfe419225538d74",
+          "upstream_url": "https://raw.githubusercontent.com/xenia-project/disruptorplus/5787e9cb7551c8c79cf9ce14f7be860dc907e9a4/include/disruptorplus/sequence_range.hpp",
+          "upstream_sha256": "1f8172b146b4ac84e1827fe59ef6ad0325735788c554fab60bfe419225538d74"
+        },
+        {
+          "sdk_path": "thirdparty/disruptorplus/include/disruptorplus/sequence.hpp",
+          "sha256": "a777cb4e8253f2c1437e1d3ad892948d2ed79a2b33a47482452be0daad90c556",
+          "upstream_url": "https://raw.githubusercontent.com/xenia-project/disruptorplus/5787e9cb7551c8c79cf9ce14f7be860dc907e9a4/include/disruptorplus/sequence.hpp",
+          "upstream_sha256": "a777cb4e8253f2c1437e1d3ad892948d2ed79a2b33a47482452be0daad90c556"
+        },
+        {
+          "sdk_path": "thirdparty/disruptorplus/include/disruptorplus/single_threaded_claim_strategy.hpp",
+          "sha256": "b9c255c06438966f9154c492ba5199a960616e6b34dfc6914f9ebfbc7bcd8162",
+          "upstream_url": "https://raw.githubusercontent.com/xenia-project/disruptorplus/5787e9cb7551c8c79cf9ce14f7be860dc907e9a4/include/disruptorplus/single_threaded_claim_strategy.hpp",
+          "upstream_sha256": "b9c255c06438966f9154c492ba5199a960616e6b34dfc6914f9ebfbc7bcd8162"
+        },
+        {
+          "sdk_path": "thirdparty/disruptorplus/include/disruptorplus/spin_wait_strategy.hpp",
+          "sha256": "41d2af942dae50d7e21cd206d90dc2d210ce598b749a742a905b26961ea5d873",
+          "upstream_url": "https://raw.githubusercontent.com/xenia-project/disruptorplus/5787e9cb7551c8c79cf9ce14f7be860dc907e9a4/include/disruptorplus/spin_wait_strategy.hpp",
+          "upstream_sha256": "41d2af942dae50d7e21cd206d90dc2d210ce598b749a742a905b26961ea5d873"
+        },
+        {
+          "sdk_path": "thirdparty/disruptorplus/include/disruptorplus/spin_wait.hpp",
+          "sha256": "4c20e01d88e9999b71f1be5dec75a77f766a4f5a7ef9949c7e1fa7df80c94d42",
+          "upstream_url": "https://raw.githubusercontent.com/xenia-project/disruptorplus/5787e9cb7551c8c79cf9ce14f7be860dc907e9a4/include/disruptorplus/spin_wait.hpp",
+          "upstream_sha256": "4c20e01d88e9999b71f1be5dec75a77f766a4f5a7ef9949c7e1fa7df80c94d42"
+        }
+      ]
     },
     {
       "id": "pe",
@@ -413,77 +506,114 @@
       "origin": "https://github.com/rexglue/rexglue-sdk",
       "revision": "f5337cdc947ff6d4c4196737e2c807a48f2a1fc2",
       "spdx": "NCSA",
-      "original": "",
-      "license_file": null,
       "scope": "download",
-      "integration": "UIUC declaration in dxcapi.h and DxbcConverter.h; referenced LICENSE.TXT missing",
-      "obligations": "Preserve inline notices; resolve missing terms/provenance before distributing full SDK binaries."
+      "integration": "Downloaded SDK headers only; both headers byte-identical to the commit in thirdparty/dxc/README.md.",
+      "obligations": "Preserve full upstream NCSA and third-party notice text; does not license proprietary Xbox software.",
+      "license_file": "licenses/dxc-headers.txt",
+      "license_sha256": "721cb11de618fcf9bbb7d25a389207bf2227357e6694bc326ab32a6699f9b951",
+      "original": "https://raw.githubusercontent.com/microsoft/DirectXShaderCompiler/6b6f40200bea5ed99367513f53f6a28e52fd3d0e/LICENSE.TXT",
+      "upstream_revision": "6b6f40200bea5ed99367513f53f6a28e52fd3d0e",
+      "source_evidence": [
+        {
+          "sdk_path": "thirdparty/dxc/include/dxcapi.h",
+          "sha256": "7b4e2d7bbf0fc3db84eac717846f9bf6686b7e231cb4f7bcde077390cca7fd78",
+          "upstream_url": "https://raw.githubusercontent.com/microsoft/DirectXShaderCompiler/6b6f40200bea5ed99367513f53f6a28e52fd3d0e/include/dxc/dxcapi.h",
+          "upstream_sha256": "7b4e2d7bbf0fc3db84eac717846f9bf6686b7e231cb4f7bcde077390cca7fd78"
+        },
+        {
+          "sdk_path": "thirdparty/dxc/include/DxbcConverter.h",
+          "sha256": "40d1a4f604cfa0e12ab17d234980ecfcf79f6232b85d5b6643c0d1deb5b2f4be",
+          "upstream_url": "https://raw.githubusercontent.com/microsoft/DirectXShaderCompiler/6b6f40200bea5ed99367513f53f6a28e52fd3d0e/projects/dxilconv/include/DxbcConverter.h",
+          "upstream_sha256": "40d1a4f604cfa0e12ab17d234980ecfcf79f6232b85d5b6643c0d1deb5b2f4be"
+        }
+      ]
     },
     {
       "id": "dxbc-md5",
       "origin": "https://github.com/rexglue/rexglue-sdk",
       "revision": "f5337cdc947ff6d4c4196737e2c807a48f2a1fc2",
-      "spdx": "LicenseRef-RSA-MD5-AMD",
-      "original": "",
-      "license_file": null,
+      "spdx": "MIT AND LicenseRef-RSA-MD5",
       "scope": "download",
-      "integration": "DXBCChecksum.cpp/h RSA attribution terms; AMD wrapper rights need clarification",
-      "obligations": "Preserve inline notices; resolve missing terms/provenance before distributing full SDK binaries."
+      "integration": "Downloaded SDK runtime only; derived from AMD DX10/DXBCChecksum.cpp/.h, ported away from Windows types; RSA-derived algorithm and notices retained.",
+      "obligations": "Preserve AMD MIT and embedded RSA notices; identify derived algorithm in documentation. No desktop link.",
+      "license_file": "licenses/dxbc-md5.txt",
+      "license_sha256": "b28fa52807cbd8c989f5927d1c1bd42632f7ce5a0abee7c23ba5bee3314ec292",
+      "original": "https://raw.githubusercontent.com/GPUOpen-Archive/common-src-ShaderUtils/545195d74ff0758f74ebf9a8b4c541f9390a1df7/LICENSE; SDK thirdparty/dxbc/DXBCChecksum.cpp initial notices",
+      "upstream_revision": "545195d74ff0758f74ebf9a8b4c541f9390a1df7",
+      "source_evidence": [
+        {
+          "sdk_path": "thirdparty/dxbc/DXBCChecksum.cpp",
+          "sha256": "73279b79725ea61ec1a04a059a9d954e0573a630491c475bf9b2aecd002cb29b",
+          "upstream_url": "https://raw.githubusercontent.com/GPUOpen-Archive/common-src-ShaderUtils/545195d74ff0758f74ebf9a8b4c541f9390a1df7/DX10/DXBCChecksum.cpp",
+          "upstream_sha256": "b643a548a60966b28bce280a3a9acf5961d2ae63dd28a68a72288dbe18085462"
+        },
+        {
+          "sdk_path": "thirdparty/dxbc/DXBCChecksum.h",
+          "sha256": "a5e0a60d90e09dcd397eaa3a389919898ec64725e7a547a0e13398d5339aee62",
+          "upstream_url": "https://raw.githubusercontent.com/GPUOpen-Archive/common-src-ShaderUtils/545195d74ff0758f74ebf9a8b4c541f9390a1df7/DX10/DXBCChecksum.h",
+          "upstream_sha256": "96b3d5d27e09a2c8d5eea860e9eac595c29a2b68f0f2233bf53afcb9a165fad1"
+        }
+      ]
     },
     {
       "id": "TinySHA1",
       "origin": "https://github.com/rexglue/rexglue-sdk",
       "revision": "f5337cdc947ff6d4c4196737e2c807a48f2a1fc2",
       "spdx": "ISC",
-      "original": "",
-      "license_file": null,
       "scope": "download",
       "integration": "thirdparty/crypto/TinySHA1.hpp full inline license; header in runtime",
-      "obligations": "Preserve inline notices; resolve missing terms/provenance before distributing full SDK binaries."
+      "obligations": "Preserve complete inline notice supplied here and in the downloaded source; not incorporated in desktop binaries.",
+      "license_file": "licenses/TinySHA1.txt",
+      "license_sha256": "ac2981808bb038e18467c4371b0afcba0b93821d32702d9aa20a7d42cf90c40f",
+      "original": "SDK thirdparty/crypto/TinySHA1.hpp initial comment"
     },
     {
       "id": "rc4",
       "origin": "https://github.com/rexglue/rexglue-sdk",
       "revision": "f5337cdc947ff6d4c4196737e2c807a48f2a1fc2",
       "spdx": "LicenseRef-Whistle",
-      "original": "",
-      "license_file": null,
       "scope": "download",
       "integration": "thirdparty/crypto/rc4.c and .h inline terms; runtime",
-      "obligations": "Preserve inline notices; resolve missing terms/provenance before distributing full SDK binaries."
+      "obligations": "Preserve complete inline notice supplied here and in the downloaded source; not incorporated in desktop binaries.",
+      "license_file": "licenses/rc4.txt",
+      "license_sha256": "8727a1b3626cfb31cb3c93c535054607e6552b9807d3c32c1c5c2e4bcf757c6b",
+      "original": "SDK thirdparty/crypto/rc4.c initial comment"
     },
     {
       "id": "sha256",
       "origin": "https://github.com/rexglue/rexglue-sdk",
       "revision": "f5337cdc947ff6d4c4196737e2c807a48f2a1fc2",
-      "spdx": "Zlib",
-      "original": "",
-      "license_file": null,
+      "spdx": "LicenseRef-Brumme-Zlib-like",
       "scope": "download",
-      "integration": "thirdparty/crypto/sha256.cpp/.h declaration only; complete acquired license pending",
-      "obligations": "Preserve inline notices; resolve missing terms/provenance before distributing full SDK binaries."
+      "integration": "Downloaded SDK runtime only; modified source declaration retained; author website license similar to zlib, not verbatim SPDX Zlib.",
+      "obligations": "Retain author attribution and mark modifications. Historical acquired license/date not independently established; current author terms supplied without silently relicensing the SDK copy.",
+      "license_file": "licenses/sha256.txt",
+      "license_sha256": "813ade3826f54839a297d911a3972032b1a2018c9a3e07c672e4e48aec4646ae",
+      "original": "https://create.stephan-brumme.com/disclaimer.html"
     },
     {
       "id": "rijndael",
       "origin": "https://github.com/rexglue/rexglue-sdk",
       "revision": "f5337cdc947ff6d4c4196737e2c807a48f2a1fc2",
       "spdx": "LicenseRef-Public-Domain",
-      "original": "",
-      "license_file": null,
       "scope": "download",
       "integration": "thirdparty/crypto/rijndael-alg-fst.c public-domain declaration and disclaimer; runtime",
-      "obligations": "Preserve inline notices; resolve missing terms/provenance before distributing full SDK binaries."
+      "obligations": "Preserve complete inline notice supplied here and in the downloaded source; not incorporated in desktop binaries.",
+      "license_file": "licenses/rijndael.txt",
+      "license_sha256": "d41ca4a99c47bca07d7a8c154e3a19ff3e5b1f00ce539aea4a9d9e9f5827e4d6",
+      "original": "SDK thirdparty/crypto/rijndael-alg-fst.c initial comment"
     },
     {
       "id": "renderdoc",
       "origin": "https://github.com/rexglue/rexglue-sdk",
       "revision": "f5337cdc947ff6d4c4196737e2c807a48f2a1fc2",
       "spdx": "MIT",
-      "original": "",
-      "license_file": null,
       "scope": "download",
       "integration": "thirdparty/renderdoc/renderdoc_app.h inline terms; runtime header",
-      "obligations": "Preserve inline notices; resolve missing terms/provenance before distributing full SDK binaries."
+      "obligations": "Preserve complete inline notice supplied here and in the downloaded source; not incorporated in desktop binaries.",
+      "license_file": "licenses/renderdoc.txt",
+      "license_sha256": "0dcc8c60f928a57044b035a580d7293483ccd7a875d1ae7d504e7ca289bdfe04",
+      "original": "SDK thirdparty/renderdoc/renderdoc_app.h initial comment"
     },
     {
       "id": "stb",
@@ -576,7 +706,7 @@
       "license_file": null,
       "scope": "binary",
       "integration": "Release static CRT /MT; Windows OS DLLs supplied by OS, not shipped",
-      "obligations": "Confirm distributor entitlement and applicable distributable-code terms before publication. Not open source under project BSD license."
+      "obligations": "Publication blocked pending distributor entitlement and review of protective end-user terms for static CRT/UCRT; Build Tools OSS dependency exception does not automatically cover proprietary local AOT. See docs/LICENSE_AUDIT.md."
     },
     {
       "id": "git/usr/share/licenses/gcc-libs",
@@ -1314,15 +1444,16 @@
     },
     {
       "id": "desktop-icon",
-      "origin": "src/desktop/desktop.ico; authorship not confirmed",
-      "revision": "b56e2d47a04a7c916b2b5aa95abeb29f576ac83f",
-      "spdx": "NOASSERTION",
+      "origin": "Original geometry in scripts/generate-desktop-icon.ps1; docs/ICON_PROVENANCE.md",
+      "revision": "original-2026-10-13",
+      "spdx": "BSD-3-Clause",
       "scope": "source-and-embedded-resource",
       "integration": "Compiled Windows icon resource and source payload",
       "original": "src/desktop/desktop.ico",
-      "license_file": null,
-      "content_sha256": "31ca993c85b0896369797c1b270de184b1b6c6250a78b4c4fb65b4e9658648bd",
-      "obligations": "Publication blocked until provenance and redistribution permission confirmed; do not infer rights from project license."
+      "license_file": "LICENSE",
+      "content_sha256": "20c4f1e07fe0102cff771f1687c4acd128371fe1703f54b2b3b42e816c476e6a",
+      "obligations": "Copyright (c) 2026, x360-native; public holder confirmed by maintainer. Preserve BSD-3-Clause notice. Old icon history is a separate unresolved provenance question.",
+      "license_sha256": "bc3a3590ae6dfa3fa6ff8bb0025f09466657cac73438d625e223269557ca4f37"
     }
   ],
   "sdk_inputs": [

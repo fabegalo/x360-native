@@ -120,7 +120,7 @@ mutados em diretórios isolados, incluindo índices recalculados para provar que
 um hash autoconsistente não autoriza conteúdo indevido. Resultados do pacote e
 testes são registrados na seção de aceitação ao final deste relatório.
 
-## Pendências que bloqueiam publicação
+## Pendências na primeira aceitação (histórico; atualização ao final)
 
 1. Confirmar origem/licença do ícone `src/desktop/desktop.ico`. É um recurso
    incorporado; o titular aprovado para o projeto não confirmou sua autoria.
@@ -200,3 +200,113 @@ licenciamento; as mudanças nativas se limitam a comentários de atribuição.
 Inspeção adicional dos binutils encontrou a string de versão **GNU Binutils 2.24**
 no `as.exe`; como sua execução falhou e faltam dados da montagem/distribuição,
 isso não resolve a proveniência ou o fornecimento de fonte correspondente.
+
+## Fechamento das pendências verificáveis — 13/10/2026
+
+Esta atualização reaproveita os **88 registros**, não refaz a auditoria geral.
+O mantenedor confirmou **x360-native** como identificação pública do titular das
+contribuições próprias. `LICENSE` continua BSD-3-Clause, sem atribuir a ele direitos
+de Microsoft, Xenia ou outros autores. A identificação civil e a titularidade de
+eventuais contribuições futuras não são inferidas desse nome público.
+
+### Ícone e avisos recuperados
+
+O ícone sem criação documentada foi substituído por geometria XN original,
+preservando monograma, cores e recurso Windows. O gerador não usa fontes ou
+imagens externas. [Procedência e reprodução](ICON_PROVENANCE.md) documentam também
+o blob antigo: ele permanece no histórico, fora do novo ZIP e de seu payload.
+Publicar esse histórico antigo requer decisão específica; não houve reescrita.
+O gate valida o ICO contra o inventário e contra a geometria reproduzível.
+
+| Pendência existente | Evidência obtida e correção |
+|---|---|
+| tiny-AES-c | `aes.c`, `aes.h`, `aes.hpp` byte a byte iguais a kokke/tiny-AES-c `23856752fbd139da0b8ca6e471a13d5bcc99a08d`. [Unlicense original](https://github.com/kokke/tiny-AES-c/blob/23856752fbd139da0b8ca6e471a13d5bcc99a08d/unlicense.txt) incluída. |
+| disruptorplus | Referência xenia-project/disruptorplus `5787e9cb7551c8c79cf9ce14f7be860dc907e9a4`: dez headers idênticos; em `multi_threaded_claim_strategy.hpp`, o cast de `diff + 1` passa de `sequence_t` para `size_t`. [MIT de Lewis Baker](https://github.com/xenia-project/disruptorplus/blob/5787e9cb7551c8c79cf9ce14f7be860dc907e9a4/LICENSE.txt) recuperada. |
+| DXC headers | Os dois headers são idênticos ao commit `6b6f40200bea5ed99367513f53f6a28e52fd3d0e` já documentado pelo SDK. [LICENSE.TXT integral](https://github.com/microsoft/DirectXShaderCompiler/blob/6b6f40200bea5ed99367513f53f6a28e52fd3d0e/LICENSE.TXT) incluída, com NCSA e demais avisos. |
+| DXBC checksum | Origem [AMD ShaderUtils](https://github.com/GPUOpen-Archive/common-src-ShaderUtils/tree/545195d74ff0758f74ebf9a8b4c541f9390a1df7/DX10) confirmada por diff dos dois arquivos. Adaptações Xenia removem Windows.h, usam tipos C++ e retorno void. MIT AMD recuperada junto dos avisos RSA originais; a documentação identifica a derivação do RSA Data Security, Inc. MD5 Message Digest Algorithm. |
+| SHA256 | Conservada a declaração do SDK de aquisição sob zlib e alteração para Xenia. Incluídos os [termos do próprio autor](https://create.stephan-brumme.com/disclaimer.html), semelhantes a zlib, sem rotulá-los como texto SPDX Zlib idêntico. A data/texto histórico da aquisição continua sem prova independente. |
+| GNU decoder e notices inline | GPL v2 integral adicionada para a opção GPL-2.0-or-later declarada no decoder. TinySHA1, RC4, Rijndael e RenderDoc agora têm seus comentários legais completos também em `licenses`, além dos fontes baixados. |
+
+As revisões acima são **referências de proveniência**, não atualizações do SDK.
+O inventário mantém a revisão ReXGlue original, registra URLs/hashes dos arquivos
+comparados e os textos entregues. A revisão `f5337cdc...`, os 38 patches e o
+compilador não foram alterados. Os suplementos acompanham a raiz do ZIP e o
+payload, portanto a pasta `licenses` dos ambientes criados/atualizados. Nada foi
+injetado no checkout SDK e não foi criado outro fingerprint de preparação.
+
+### Microsoft: alcance concreto dos termos consultados
+
+| Material | Presença e condição |
+|---|---|
+| Jogos ISO/STFS, dashboard, fontes, perfis e saves | Fornecidos pelo usuário, fora do ZIP. Posse não comprova autorização para qualquer extração, transformação ou redistribuição. Os contratos variam por produto/região. |
+| C++/binários AOT derivados desses arquivos | Gerados localmente, fora do ZIP. A geração local não transforma o código do jogo em contribuição própria BSD. A habilitação para usar ferramentas e os direitos sobre o conteúdo são perguntas separadas. |
+| Três EXEs desktop | Código próprio e componentes listados no inventário, incluindo STL Apache com exceção LLVM e CRT/UCRT **estático Release proprietário**. Não há redistribuível instalável ou DLL Microsoft copiada no ZIP. |
+| Build Tools e Windows SDK | Obtidos/instalados separadamente. São usados na compilação; seus executáveis, headers e bibliotecas não são exportados como arquivos do pacote. Seus objetos CRT/UCRT incorporados continuam sujeitos aos termos pertinentes. |
+| ReXGlue completo | Baixado upstream na revisão fixada; não exportado no ZIP. Headers DXC com NCSA não têm o mesmo regime de software proprietário Xbox. O loader do SDK contém constantes cuja análise jurídica não foi resolvida; o gate exclui essas constantes do pacote desktop. |
+
+Fontes oficiais conferidas em 13/10/2026:
+
+- [Build Tools 2022, termos de março/2024](https://visualstudio.microsoft.com/wp-content/uploads/2024/03/Visual-Studio-2022-Diagnostic-Build-Tools-Agent-License_Update-March-2024_EN.docx),
+  EULAID `VS_2022_Tools_2024Mar_ENU.1033`, seções 1 e 2. Exigem licença Visual Studio
+  válida como regra; a exceção sem essa licença cobre dependências C++ de terceiros
+  sob licença OSI e limita suas modificações. **Não demonstram autorização geral
+  para desenvolvimento próprio ou compilação AOT proprietária.** Clang não elimina
+  os termos dos componentes Microsoft usados no vínculo. Confirmar a habilitação
+  do responsável e o enquadramento do fluxo local antes da publicação.
+- [Visual Studio Community 2022](https://visualstudio.microsoft.com/wp-content/uploads/2021/11/Visual-Studio-2022-Community-License-EN.docx),
+  seções 1, 3 e 4, e [lista oficial de redistribuição](https://learn.microsoft.com/en-us/visualstudio/releases/2022/redistribution).
+  A lista depende da licença aplicável; debug_nonredist não pode entrar na
+  distribuição. O texto requer proteção contratual do código redistribuível aos
+  usuários e distribuidores. Os avisos BSD/Apache existentes não constituem,
+  sozinhos, esse acordo. Não foi criada uma EULA por suposição nem aceitos termos
+  em nome do mantenedor. A lista de DLLs não foi usada como prova automática para
+  toda biblioteca estática.
+- Contrato instalado **Windows SDK 10.0.26100.0**, em
+  `Windows Kits/10/Licenses/10.0.26100.0/sdk_license.rtf`, seções 1 e 2(a): contém
+  condições para código redistribuível, incluindo distribuir `.lib` apenas
+  incorporada por linker, funcionalidade principal adicional, avisos e proteção
+  contratual. O link REDIST `https://go.microsoft.com/fwlink/?LinkId=524842`
+  não retornou conteúdo verificável nesta consulta. Portanto a correspondência
+  completa da lista aplicável com CRT/UCRT e a habilitação não são dadas por
+  encerradas. [Documentação oficial UCRT](https://learn.microsoft.com/en-us/cpp/porting/upgrade-your-code-to-the-universal-crt?view=msvc-170)
+  distingue a UCRT do SDK e o vcruntime do Visual Studio.
+- [Manual/licença oficial Xbox 360 S](https://download.microsoft.com/download/4/A/6/4A631340-39F3-401F-8DE4-FF82C5879F6E/X175377601mnl-xbox-360s-console-manual-en-da-nl-fi-fr-de-it-no-pt-es-sb-we.pdf),
+  seção Software License: restringe o software do console e prevê limitações de
+  cópia, engenharia reversa e contorno de proteção. É evidência concreta para
+  revisão do uso de dashboards; não substitui o contrato específico de cada jogo,
+  console/região nem determina o efeito de exceções legais locais. Não se aplicou
+  por engano o contrato do aplicativo Xbox para PC a todo software Xbox 360.
+
+Evidência local dos textos consultados em `.local/audit/c10-provenance`:
+Build Tools DOCX SHA-256 `2f66b86a00e8d9833789897ce23d05a4a2dbea370cf39c8c1098dbc17d0e7bdc`;
+Community DOCX `41a207b10c8ab91d0d2f10a854715f73dca54509581692d2fe179aa3ffcb8540`;
+SDK RTF instalado `0f4a26ac9dc50066f8a1bfeAAF3f092d1b9e4791df5487b9f3c31e7c3dc4d7f5`.
+Essa evidência local não é dependência de execução nem arquivo obrigatório do ZIP.
+
+### Decisões humanas e limites ainda abertos
+
+1. **Antes de publicar o ZIP:** confirmar habilitação/licença Microsoft do
+   distribuidor, enquadramento CRT/UCRT e termos apropriados aos destinatários.
+   Revisar também o fluxo de preparação AOT proprietária e o uso de dashboards,
+   distinguindo contrato e legislação aplicável. Este relatório não dá parecer
+   jurídico definitivo nem autorização para distribuir originais Xbox.
+2. **SDK completo:** `thirdparty/pe/pe_image.h` continua com copyright Microsoft
+   sem licença explícita identificada; as constantes do loader e a fonte/versão
+   correspondente dos binutils/Cygwin continuam para revisão. A referência
+   histórica SHA256 está delimitada acima. Não foram espelhados esses binários,
+   substituídos por terceiros desconhecidos ou reclassificados como BSD.
+3. **Se houver distribuição futura de runtime/ferramentas completos:** cumprir
+   GPL do decoder e LGPL de FFmpeg/libmspack (fonte correspondente e possibilidade
+   de modificação/relinkedição conforme os termos), além das pendências acima.
+   Os avisos adicionados não aprovam tal distribuição. Para o candidato atual,
+   o gate mantém a exclusão desses binários e a lista estrita dos três EXEs.
+4. **Publicação do histórico Git:** resolver a procedência do ícone antigo ou
+   decidir uma forma autorizada de publicação do histórico. Não afeta os bytes
+   do novo ícone; não foi feita reescrita de histórico.
+5. **Compatibilidade para leigos:** Windows limpo continua pendente; esta tarefa
+   não promete nova compatibilidade de jogos ou suporte a saves. O teste inicial
+   da GUI e os testes focados do novo candidato são registrados abaixo.
+
+O bloqueio `blocked-C10` continua intencional. O gate técnico não substitui essas
+decisões e o inventário não declara que todos os componentes do SDK são livres de
+pendências. Nenhuma funcionalidade de execução foi modificada nesta atualização.
