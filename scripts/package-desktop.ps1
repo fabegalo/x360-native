@@ -54,7 +54,7 @@ if ($LASTEXITCODE -ne 0) { throw 'SDK snapshot failed' }
 git -c core.longpaths=true -C $sdk checkout --detach $lock.rexglue_sdk.commit
 if ($LASTEXITCODE -ne 0) { throw 'Pinned SDK checkout failed' }
 $dependencies = [ordered]@{}
-foreach ($component in @('fmt','tomlplusplus','cli11','catch2','inja','sdl3')) {
+foreach ($component in @('fmt','tomlplusplus','cli11','catch2','inja','sdl3','spdlog','simde','utfcpp')) {
     $tree = git -C $sdk ls-tree HEAD "thirdparty/$component"
     if ($LASTEXITCODE -ne 0 -or $tree -notmatch '^160000 commit ([a-f0-9]{40})') { throw "Unpinned dependency: $component" }
     $revision = $Matches[1]
@@ -80,8 +80,9 @@ if ($LASTEXITCODE -ne 0) { throw 'Distribution tests failed; ZIP withheld' }
 $binaries = Join-Path $build 'src/desktop'
 Copy-Item -LiteralPath (Join-Path $binaries 'x360-native.exe') -Destination $destination
 Copy-Item -LiteralPath (Join-Path $binaries 'x360n.exe') -Destination $internal
+Copy-Item -LiteralPath (Join-Path $build 'src/content/x360n-extract.exe') -Destination $internal
 # Static compiler runtime, explicit OS-only import allowlist. Never harvest DLLs.
-foreach ($binary in @((Join-Path $destination 'x360-native.exe'), (Join-Path $internal 'x360n.exe'))) {
+foreach ($binary in @((Join-Path $destination 'x360-native.exe'), (Join-Path $internal 'x360n.exe'), (Join-Path $internal 'x360n-extract.exe'))) {
     $imports = & (Join-Path $llvm 'bin/llvm-readobj.exe') --coff-imports $binary
     if ($LASTEXITCODE -ne 0) { throw 'Cannot inspect binary imports' }
     foreach ($line in $imports) {
@@ -90,6 +91,8 @@ foreach ($binary in @((Join-Path $destination 'x360-native.exe'), (Join-Path $in
 }
 $licenses = Join-Path $internal 'licenses'; New-Item -ItemType Directory $licenses | Out-Null
 foreach ($component in @('fmt','cli11','tomlplusplus','inja')) { Copy-Item -LiteralPath (Join-Path $sdk "thirdparty/$component/LICENSE") -Destination (Join-Path $licenses "$component.txt") }
+foreach ($component in @('spdlog','simde','utfcpp')) { Copy-Item -LiteralPath (Join-Path $sdk "thirdparty/$component/LICENSE") -Destination (Join-Path $licenses "$component.txt") }
+Copy-Item -LiteralPath (Join-Path $sdk 'LICENSE') -Destination (Join-Path $licenses 'rexglue-sdk.txt')
 # Keep the effective compiler commands as reviewable evidence, with portable
 # logical roots. They describe this fresh build, not a second preparation cache.
 $commands = Get-Content -Raw -LiteralPath (Join-Path $build 'compile_commands.json') | ConvertFrom-Json
@@ -111,6 +114,9 @@ $portableCommands = @($commands | ForEach-Object {
 x360-native $Version — prévia para Windows x64
 
 Extraia o ZIP inteiro em uma pasta vazia e abra x360-native.exe.
+Em Importar > Adicionar arquivo, selecione uma ISO ou um pacote Xbox 360
+(CON/LIVE/PIRS, incluindo XBLA). A extração é local e não requer instalar
+ferramentas de compilação. ZIP, RAR e 7z devem ser descompactados antes.
 Para atualizar, extraia em outra pasta e selecione seu ambiente anterior em
 Configurações > Selecionar ambiente. Confirme a atualização apresentada.
 Seus jogos, dashboards, perfis e saves serão preservados; preparações válidas

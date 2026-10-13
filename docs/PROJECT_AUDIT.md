@@ -110,13 +110,14 @@ Não foi demonstrado problema de severidade crítica. “Alto” abaixo signific
 - **Correção:** reservar pasta e manifesto com semântica de não sobrescrita, rejeitar links/reparse points relevantes, verificar erros de escrita e publicar o manifesto completo de forma atômica.
 - **Ação imediata:** concluída junto de C1.
 
-### C4. Alto — nova versão do aplicativo pode reutilizar ambiente antigo silenciosamente
+### C4. Alto — atualização de ambientes — implementada; aceitação gráfica pendente
 
 - **Local:** `src/desktop/main_win32.cpp:607` e `:766`; validação de payload em `src/desktop/workspace.cpp`, `InitializeEnvironment`.
 - **Evidência:** escolha/reabertura do ambiente pula `InitializeEnvironment` quando existe `deps.lock.json`. A validação de correspondência do payload dessa função não protege esse caminho. O ZIP disponível é anterior à integração final de avatares.
 - **Impacto:** a janela de uma versão nova pode preparar/executar fontes e ferramentas antigas; a biblioteca pode continuar marcando binários antigos como prontos. A atualização não tem contrato de migração/rollback.
 - **Correção:** comparar identidade do payload instalado ao abrir/selecionar o ambiente; apresentar atualização explícita, preservar inputs/saves, invalidar somente preparações afetadas e permitir recuperação se interrompida.
 - **Ação imediata:** antes da primeira Release pública; coordenar com C2.
+- **Correção implementada (13/10/2026):** abertura/seleção compara os arquivos com o payload verificado, apresenta os componentes divergentes e exige confirmação. Atualização com lease exclusivo, backup publicado antes de substituir arquivos e marcador persistente permite retomar a mesma versão após interrupção. Fontes obsoletas de ambientes sem índice também são preservadas em backup; `.local`, SDK, conteúdo importado e AOT gerado não são varridos. Ferramentas/SDK incompatíveis exigem autorização de preparação e mantêm cópias anteriores. C2 determina a validade das preparações por suas dependências reais, sem novo fingerprint. Marcadores de atualização impedem build e lançamento prematuros. Ver E9; confirmação final pela GUI ficou pendente após interrupção da automação pelo usuário.
 
 ### C5. Médio — staging concorrente de DLLs e saídas globais do SDK — corrigido
 
@@ -179,13 +180,14 @@ Evidências locais: `.local/audit/c6` (comandos antes/depois, driver, controles 
 - **Correção:** escolher licença do código próprio, inventariar o que efetivamente entra em cada pacote e preservar os avisos exigidos de terceiros, inclusive código derivado. Manter conteúdo proprietário e código AOT derivado fora da distribuição.
 - **Ação imediata:** antes de qualquer Release pública.
 
-### C11. Médio — empacotamento não estabelece sozinho binário/fonte correspondente
+### C11. Médio — correspondência fonte/binário e pacote reproduzível — corrigido
 
 - **Local:** `scripts/package-desktop.ps1:16–20,43–48`; ausência de `.github/workflows`.
 - **Evidência:** o script usa cache/preset geral, compila e só depois exige `X360_DESKTOP_ONLY=ON`. Na main usada nesta auditoria o cache é de build completo. O bloqueio de árvore suja cobre apenas parte das entradas; `git archive HEAD` exporta todo o fonte enquanto CMake/headers fora dessa lista podem influenciar o binário local. Não há pipeline versionado de release/CI.
 - **Impacto:** processo depende de preparação manual ou da worktree histórica e não garante, sozinho, que o pacote corresponda integralmente ao commit declarado. O ZIP anterior não valida a main consolidada.
 - **Correção:** diretório próprio de build de distribuição, configuração explícita desde o início, fonte imutável/entradas verificadas e gate de pacote. Executar em Windows limpo sem ferramentas prévias e registrar o caminho de instalação/recuperação das ferramentas.
 - **Ação imediata:** antes da primeira Release. Não é necessário introduzir uma infraestrutura grande de CI para corrigir o contrato local.
+- **Correção implementada (13/10/2026):** `package-desktop.ps1` exporta o commit, materializa SDK/subdependências de objetos Git fixados, aplica e verifica os 38 patches e configura desktop-only Release antes de compilar em diretório exclusivo. Não utiliza bytes do checkout SDK de desenvolvimento nem caches anteriores. Só copia os executáveis esperados e aceita imports de DLLs do Windows. Índices SHA-256, revisão/configuração/comandos normalizados e identidade de payload embutida na GUI vinculam a distribuição. O ZIP tem ordem/timestamps estáveis; dois builds independentes da revisão final geraram exatamente o mesmo ZIP. Windows limpo continua pendente e C10 continua bloqueando publicação; ver E9.
 
 ### C12. Médio — limite diagnóstico encerra sessões normais longas
 
@@ -438,6 +440,44 @@ C2 continua verificando todas as entradas e os artefatos finais. Builds diretos 
 Evidências em `.local/audit/c5`; builds novos em `.local/build/c5-main`, `c5-desktop` e `c5-titles`. Nenhum teste concorrente usou um build de outra sessão ativa. Os binários anteriores foram preservados; mudanças de patch/CMake/scripts invalidam os recibos antigos conforme C2 e exigem preparar somente os consumidores solicitados. Revisão ReXGlue e compilador preservados; os 37 patches anteriores continuam aplicados junto do 0038.
 
 Limites: coordenação validada em Windows x64 usando `build-title.ps1`, `cmake --build` ou o `CMAKE_MAKE_PROGRAM` configurado. Invocar deliberadamente o Ninja subjacente contorna esse ponto de coordenação; não executar dois desses processos no mesmo cache. Não houve validação Linux, migração do SDK, alteração de C6/C4/C11 nem nova aceitação funcional dos serviços incompletos da dashboard.
+
+## E9. Correção de C4/C11 — pacote e atualização — 13/10/2026
+
+Aceitação anterior à inclusão da extração gráfica descrita em E10.
+
+Revisão do pacote: `0a4738a70f91c4459dc83ab38fc59a542493751b`. Os commits posteriores de relatório não fazem parte de seu payload. SDK `f5337cdc947ff6d4c4196737e2c807a48f2a1fc2`, LLVM 22.1.8 e patch 0038 preservados. Não houve mudança na semântica PPC de C6, no runtime ou nos títulos.
+
+- ZIP: `.local/packages/c4-final-acceptance/x360-native-0.1.0-preview.4-windows-x64.zip` (candidato local, sem publicação).
+- SHA-256 ZIP: `ce5f4aeacc83a660a4c872149c8c02565e6910594d3e17da235148fe61ea7eb8`.
+- SHA-256 do índice do payload: `447b81d93929f50c839f5796c84b5c7a6f136da22a0505e57855820a332a742b`.
+- Repetição independente: `.local/packages/c4-final-repeat/`, mesmo hash do ZIP. Os builds `f50ab51c7315425c9652d1b25bf36e27` e `981b9f96742b40708cd5822ae652fb18` ficam em `.local/distribution/`, separados de todos os caches de desenvolvimento.
+
+O teste de reprodução encontrou inicialmente nomes RTTI de namespaces anônimos dependentes do caminho no Clang 22 e timestamps COFF. Um launcher CMake restrito à distribuição passa o caminho da fonte relativo ao build; `-mno-incremental-linker-compatible` e `/Brepro` eliminam timestamps variáveis. Otimização Release mantida. Comandos de compilação normalizados, hashes do compilador/rc.exe, SDK/subdependências e patches constam do pacote. Não foi alterado o compilador nem introduzido outro sistema de build.
+
+| Verificação | Resultado |
+|---|---|
+| Build/testes da distribuição final | 41 casos, 20.286 verificações; duas compilações limpas independentes e ZIPs idênticos. 290 arquivos do pacote final extraído conferidos. |
+| Instalação fora do repositório | Extração em `%LOCALAPPDATA%/Temp/x360-c4-20261013/`. GUI do candidato com o mesmo modelo de atualização abriu, criou ambiente e mostrou D3D12, Windows SDK e MSVC disponíveis, conteúdo/preparações ausentes corretamente. A abertura da revisão final pelo controlador gráfico foi interrompida pelo usuário. |
+| Atualização real anterior → final | Teste `[.local-update]` da própria distribuição final: 20 verificações passaram. Parte da revisão C6 `bda85ed`, importa conjuntos completos de Castle Crashers/17559, interrompe a atualização após publicação de arquivo e retoma. Conteúdo e sentinelas de perfil/save conservados; sem falsa preparação pronta. |
+| Negativos e seletividade C2 | Executáveis trocados, DLL estrangeira, payload/índice ausentes e identidade de outra revisão rejeitados. Interrupção bloqueia preparações; retomada mantém a independente válida e invalida a dependente do arquivo alterado. Fontes obsoletas/modificadas ficam em backup; AOT mantém timestamp. |
+| Ferramenta incompatível | Ninja incompatível recusado sem autorização; atualização explícita a partir do arquivo de download verificado preserva versão anterior e save. Atualização apenas de ferramentas não remove o marcador de ambiente incompleto. |
+| Regressões automatizadas | 84/86 CTest na invocação ampla: recibos/publicação C2, leases C5, contrato e semântica PPC C6, smoke PPC, avatares e catálogos passaram. Falha Unicode do inventário local já registrada em E2/C9 permanece; a invocação CTest de Iruka herdou PSModulePath incompatível e foi repetida separadamente com o host correto. |
+| Iruka | `20261013T101128Z-regress-iruka`: L1–L5 passaram; 307 cores, diferença 6,871; zero erros/stubs. A primeira captura no contexto restrito foi preta e não foi aceita como evidência de renderização. |
+| Castle Crashers | `20261013T100807Z-c4-castle`: 60,182 s, timeout previsto, zero erros/stubs/críticos. |
+| Dashboard 17559 | `20261013T101310Z-c4-dash17559`: intro original export 1 retorna zero e entra na dashboard; encerramento normal em 21,573 s, zero críticos. Persistem serviços incompletos: 2.666 stubs/521 erros; não é certificação de perfis/Guide/saves. |
+| Paralelismo/rebuilds | Iruka e Castle compilados simultaneamente com recibos publicados; dashboard e Motocross também recompilados. Codegen de Iruka/Castle: zero escritos, 77/41 inalterados. Isolamento e patch 0038 preservados. Motocross não recebeu nova execução gráfica nesta aceitação. |
+
+Evidência local: `.local/audit/c4-*.log`, inventários e reports de execução acima. Limites explícitos: a automação gráfica foi interrompida por Escape; não houve nova entrada na GUI após isso. A confirmação/retomada de atualização pela interface da revisão final e os negativos em janelas reais permanecem pendentes (o modelo e os arquivos reais foram testados). Windows limpo não estava disponível. A recuperação implementada é retomada da mesma versão, com backups; não há downgrade automático. C10 continua bloqueador da publicação. Preservar bytes de perfis/saves não comprova suporte funcional de save/load nos jogos.
+
+## E10. Importação de ISO e pacotes Xbox 360 — 13/10/2026
+
+O fluxo gráfico aceita ISO (GDFX) e pacotes CON/LIVE/PIRS, inclusive XBLA sem extensão, além dos arquivos/pastas já extraídos. Um processo `x360n-extract` acompanha o ZIP, compilado do mesmo snapshot com os leitores do SDK fixado; não exige ferramentas de compilação para extrair. O código de extração é compartilhado com `x360n-content`, preservando C1/C3. O modo desktop-only inclui somente os leitores e utilitários necessários, sem runtime de títulos nem DLLs herdadas. A identidade do pacote também exige e verifica o extrator.
+
+A extração usa uma pasta exclusiva da operação, suporta cancelamento e nunca altera o original. Só após sucesso com manifesto publicado, identificação do executável principal e conferência integral do inventário o conteúdo é importado. `$SystemUpdate` e módulos auxiliares não substituem a identidade de `default.xex`. Falhas deixam o ambiente sem falsa preparação pronta. A pasta temporária é removida ao terminar; resíduos de processo interrompido não são reutilizados como conteúdo instalado. Logs permanecem para diagnóstico. Caminhos Unicode foram corrigidos no extrator compartilhado.
+
+Validação inicial: 55 casos/20.628 verificações da suíte desktop, incluindo ISO/CON/LIVE/PIRS sintéticos, pastas Unicode, truncamento, cancelamento, tentativa interrompida, inventário incompleto e troca/ausência do extrator. C1/C3 no `x360n-content`: 15 casos/318 verificações; o teste de hardlink exige execução fora do sandbox restrito. Os oito checks de recibos locais C2 permaneceram válidos para Iruka, Castle e 17559 sem rebuild de títulos. Importação do pacote LIVE real de Castle em ambiente isolado: nove verificações, original e sentinela de save preservados.
+
+Limites: ZIP/RAR/7z devem ser descompactados primeiro. Extrair não adiciona compatibilidade de execução: somente versões com preparação no catálogo podem ser importadas como prontas para preparar. Motocross não possui perfil de preparação gráfica no catálogo atual. A aceitação gráfica final segue pendente após Escape do usuário; Windows limpo e C10 continuam bloqueadores de publicação.
 
 ## F. Próximas prioridades
 

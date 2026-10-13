@@ -97,7 +97,7 @@ void VerifyPackage(const fs::path& directory, const std::string& expected_payloa
   if (!expected_payload.empty() && !Matches(directory / "app/workspace/payload.sha256", expected_payload))
     throw std::runtime_error("Os componentes do aplicativo pertencem a versões diferentes. Extraia novamente o ZIP completo; seus dados serão preservados.");
   auto index = ReadIndex(directory / "package.sha256", false);
-  for (const auto& required : {"x360-native.exe", "app/x360n.exe", "app/workspace/payload.sha256", "package.json"})
+  for (const auto& required : {"x360-native.exe", "app/x360n.exe", "app/x360n-extract.exe", "app/workspace/payload.sha256", "package.json"})
     if (!index.contains(required)) throw std::runtime_error("Pacote incompleto. Extraia novamente o ZIP completo.");
   for (const auto& [rel, hash] : index) {
     Safe(directory, rel);

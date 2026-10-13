@@ -13,6 +13,7 @@
 #include <memory>
 #include <thread>
 #include "catalog.h"
+#include "import_source.h"
 #include "child_process.h"
 #include "environment_win32.h"
 #include "workspace_lease.h"
@@ -254,7 +255,7 @@ void InspectSelected(App& a) {
   } else if (a.import_view) {
     a.next_action = kImport;
     Set(a.headline, Tr("Adicione seu conteúdo.", "Add your content."));
-    Set(a.subtitle, Tr("Escolha um arquivo ou uma pasta extraída de dashboard ou jogo.\r\nA versão é reconhecida automaticamente. Os originais ficam preservados.", "Choose an extracted dashboard or game file or folder.\r\nThe version is identified automatically. Originals stay untouched."));
+    Set(a.subtitle, Tr("Escolha uma ISO, um pacote Xbox 360 (XBLA/STFS) ou uma pasta extraída.\r\nO jogo será extraído e conferido. Os originais ficam preservados.", "Choose an ISO, Xbox 360 package (XBLA/STFS), or extracted folder.\r\nThe game will be extracted and checked. Originals stay untouched."));
     Set(GetDlgItem(a.window, kPrimary), Tr("Escolher arquivo", "Choose file"));
     Set(a.status, Tr("Tudo acontece neste computador\r\n\r\nApenas conteúdos com uma preparação disponível poderão ser executados. Nenhum jogo ou dashboard está incluído.", "Everything stays on this computer\r\n\r\nOnly content with an available preparation can run. No games or dashboards are included."));
   } else if (a.next_action == kImport) {
@@ -380,19 +381,24 @@ void Start(App& a, int action, fs::path source = {}) {
           throw std::runtime_error(Tr("O conteúdo mudou desde a verificação. Confira os detalhes e prepare novamente.", "Content changed since verification. Check details and prepare again."));
       }
       if (action == kImport) {
-        const auto found = IdentifyContent(a.targets, source, [&] { return a.cancel.load(); });
+        ImportSource content(source, Supervisor(a).parent_path() / "x360n-extract.exe", a.logs,
+          [&] { return a.cancel.load(); }, [&] {
+            Post(a.window, kProgress, Tr("Extraindo o jogo...\r\nIsso pode levar alguns minutos. Você pode cancelar; o arquivo original será preservado.", "Extracting the game...\r\nThis may take a few minutes. You can cancel; the original file will be preserved."));
+          });
+        const auto found = IdentifyContent(a.targets, content.identity_path(), [&] { return a.cancel.load(); });
         std::vector<std::string> ids;
         for (const auto& item : found) if (item.recognized && std::find(ids.begin(), ids.end(), item.target_id) == ids.end()) ids.push_back(item.target_id);
         if (ids.size() > 1) throw std::runtime_error(Tr("Há mais de uma versão nesta pasta. Escolha a subpasta da versão que deseja adicionar. Nada foi copiado.", "This folder contains multiple versions. Choose the version's subfolder. Nothing was copied."));
         if (ids.empty()) {
-          std::string message = Tr("Nenhum conjunto pronto para importar. Selecione uma pasta de conteúdo extraído.", "No importable set found. Select an extracted content folder.");
+          std::string message = Tr("Nenhum jogo compatível foi encontrado. O original foi preservado. Selecione outra ISO, pacote Xbox 360 ou pasta extraída.", "No compatible game was found. The original was preserved. Choose another ISO, Xbox 360 package, or extracted folder.");
           if (!found.empty()) message = (english ? "Content identified" : found.front().label) + (found.front().version.empty() ? "" : " — " + found.front().version) + "\r\n" + (english ? "No preparation is available for this file. Select supported, complete extracted content." : found.front().problem);
           finish(message); return;
         }
         auto selected = *std::find_if(a.targets.begin(), a.targets.end(), [&](const auto& t) { return t.id == ids.front(); });
         Post(a.window, kDetected, selected.id);
         if (!selected.importable) { finish((english ? selected.label_en : selected.label) + "\r\n" + Tr("Esta versão foi reconhecida. Preparação ainda indisponível; consulte Detalhes.", "This version was recognized. Preparation is not yet available; see Details.")); return; }
-        Import(ProjectPaths{a.root}, selected, source, [&] { return a.cancel.load(); }, true);
+        Post(a.window, kProgress, Tr("Conferindo e adicionando o conteúdo extraído...", "Checking and adding the extracted content..."));
+        Import(ProjectPaths{a.root}, selected, content.path(), [&] { return a.cancel.load(); }, !content.extracted());
         a.import_recognized = true;
         finish((english ? selected.label_en : selected.label) + "\r\n" + Tr("Conteúdo verificado e adicionado. Seus originais foram preservados.", "Content verified and added. Your originals are preserved.")); return;
       }

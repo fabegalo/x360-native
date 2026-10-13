@@ -55,7 +55,7 @@ std::vector<ContentIdentity> IdentifyContent(const std::vector<Target>& targets,
       item.problem = "Não foi possível ler a identidade. Selecione novamente o arquivo original completo.";
     } else {
       item.label = "Arquivo não reconhecido";
-      item.problem = "Selecione os arquivos originais extraídos ou a pasta que os contém. Pacotes e imagens de disco ainda não são importados nesta tela.";
+      item.problem = "Selecione uma ISO, um pacote Xbox 360 (CON/LIVE/PIRS), um arquivo XEX ou uma pasta extraída. Arquivos ZIP, RAR e 7z precisam ser descompactados primeiro.";
     }
     result.push_back(std::move(item));
   };
