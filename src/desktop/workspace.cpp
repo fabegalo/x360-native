@@ -71,6 +71,27 @@ std::string Component(const fs::path& rel) {
   if (*rel.begin() == "titles") return "preparações de jogos e dashboards";
   return "componentes do aplicativo";
 }
+Index Retired(const fs::path& destination, const Index& index) {
+  Index old;
+  const auto previous = destination / ".local/payload.sha256";
+  Safe(destination, ".local/payload.sha256");
+  if (fs::exists(previous)) old = ReadIndex(previous);
+  // Legacy installations did not retain an index. Archive obsolete build inputs
+  // in managed source directories, but retain AOT outputs and all user content.
+  const std::set<std::string> extensions{".cpp", ".c", ".h", ".hpp", ".cmake", ".toml", ".json", ".ps1", ".cmd", ".py"};
+  for (auto top : {"cmake", "src", "scripts", "titles", "tests", "patches"}) {
+    Safe(destination, top);
+    if (!fs::is_directory(destination / top)) continue;
+    for (auto it = fs::recursive_directory_iterator(destination / top); it != fs::recursive_directory_iterator(); ++it) {
+      const auto rel = it->path().lexically_relative(destination);
+      Safe(destination, rel);
+      if (it->is_directory() && it->path().filename() == "generated") { it.disable_recursion_pending(); continue; }
+      if (it->is_regular_file() && !index.contains(rel) && (extensions.contains(Utf8(it->path().extension())) || it->path().filename() == "CMakeLists.txt")) old.emplace(rel, "");
+    }
+  }
+  for (const auto& [rel, hash] : index) old.erase(rel);
+  return old;
+}
 }
 void VerifyPackage(const fs::path& directory, const std::string& expected_payload) {
   if (!expected_payload.empty() && !Matches(directory / "app/workspace/payload.sha256", expected_payload))
@@ -101,9 +122,7 @@ PayloadStatus InspectEnvironment(const fs::path& payload, const fs::path& destin
     Safe(destination, rel);
     if (!Matches(destination / rel, hash)) components.insert(Component(rel));
   }
-  const auto previous = destination / ".local/payload.sha256";
-  Safe(destination, ".local/payload.sha256");
-  if (fs::exists(previous)) for (const auto& [rel, hash] : ReadIndex(previous)) {
+  for (const auto& [rel, hash] : Retired(destination, index)) {
     Safe(destination, rel);
     if (!index.contains(rel) && fs::exists(destination / rel)) components.insert(Component(rel));
   }
@@ -141,9 +160,13 @@ void InitializeEnvironment(const fs::path& payload, const fs::path& destination,
     Safe(destination, rel); Safe(txn, fs::path("backup") / rel);
     if (fs::exists(destination / rel) && !fs::exists(txn / "backup" / rel)) {
       fs::create_directories((txn / "backup" / rel).parent_path());
-      fs::copy_file(destination / rel, txn / "backup" / rel);
-      if (DigestFile(destination / rel)->sha256 != DigestFile(txn / "backup" / rel)->sha256)
+      const auto staged = txn / "backup-stage" / rel;
+      Safe(txn, fs::path("backup-stage") / rel);
+      fs::create_directories(staged.parent_path());
+      fs::copy_file(destination / rel, staged, fs::copy_options::overwrite_existing);
+      if (DigestFile(destination / rel)->sha256 != DigestFile(staged)->sha256)
         throw std::runtime_error("Não foi possível preservar os arquivos anteriores. Atualização interrompida com segurança.");
+      Publish(staged, txn / "backup" / rel);
     }
   };
   for (const auto& [rel, hash] : index) {
@@ -158,10 +181,8 @@ void InitializeEnvironment(const fs::path& payload, const fs::path& destination,
     Publish(stage, destination / rel);
     if (checkpoint) checkpoint();
   }
-  if (fs::exists(destination / ".local/payload.sha256")) {
-    for (const auto& [rel, hash] : ReadIndex(destination / ".local/payload.sha256")) {
-      if (!index.contains(rel) && fs::exists(destination / rel)) { backup(rel); fs::remove(destination / rel); if (checkpoint) checkpoint(); }
-    }
+  for (const auto& [rel, hash] : Retired(destination, index)) {
+    if (fs::exists(destination / rel)) { backup(rel); fs::remove(destination / rel); if (checkpoint) checkpoint(); }
   }
   for (const auto& [rel, hash] : index) if (!Matches(destination / rel, hash)) throw std::runtime_error("A atualização ainda não foi validada. Tente novamente.");
   fs::copy_file(payload / "payload.sha256", txn / "identity", fs::copy_options::overwrite_existing);

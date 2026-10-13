@@ -170,7 +170,13 @@ TEST_CASE("source update relies on C2 receipts and invalidates only affected pre
   WriteTestReceipt(f.paths, "other", manifest, other, {f.target.inputs[0].destination});
   auto payload = f.root / "package/workspace";
   Write(payload / "deps.lock.json", "fixture lock"); Write(payload / "titles/one.cpp", "new");
-  Write(payload / "payload.sha256", Hash("fixture lock") + "\tdeps.lock.json\n" + Hash("new") + "\ttitles/one.cpp\n");
+  auto manifestIndex = std::string{};
+  for (const auto& file : {f.target.manifest, manifest}) {
+    const auto rel = file.lexically_relative(f.root);
+    fs::create_directories((payload / rel).parent_path()); fs::copy_file(file, payload / rel);
+    manifestIndex += DigestFile(file)->sha256 + "\t" + rel.generic_string() + "\n";
+  }
+  Write(payload / "payload.sha256", Hash("fixture lock") + "\tdeps.lock.json\n" + Hash("new") + "\ttitles/one.cpp\n" + manifestIndex);
   REQUIRE(Inspect(f.paths, f.target).prepared);
   REQUIRE_FALSE(CheckPreparation(f.paths, "other", manifest, other));
   CHECK_THROWS(InitializeEnvironment(payload, f.root, true, [] { throw std::runtime_error("power loss"); }));
@@ -198,6 +204,65 @@ TEST_CASE("package identity rejects swapped binaries missing payload and foreign
   SECTION("swapped frontend") { Write(package / "x360-native.exe", "other version"); CHECK_THROWS(VerifyPackage(package)); }
   SECTION("incomplete payload") { fs::remove(package / "app/workspace/deps.lock.json"); CHECK_THROWS(VerifyPackage(package)); }
   SECTION("missing index") { fs::remove(package / "package.sha256"); CHECK_THROWS(VerifyPackage(package)); }
+}
+
+TEST_CASE("retired managed files and local edits are preserved in update backups") {
+  Fixture f; auto payload = f.root / "package/workspace", destination = f.root / "environment";
+  Write(payload / "deps.lock.json", "lock"); Write(payload / "obsolete.cpp", "old");
+  Write(payload / "payload.sha256", Hash("lock") + "\tdeps.lock.json\n" + Hash("old") + "\tobsolete.cpp\n");
+  InitializeEnvironment(payload, destination);
+  Write(destination / "obsolete.cpp", "local edit");
+  Write(payload / "payload.sha256", Hash("lock") + "\tdeps.lock.json\n");
+  CHECK_FALSE(InspectEnvironment(payload, destination).current);
+  InitializeEnvironment(payload, destination, true);
+  CHECK_FALSE(fs::exists(destination / "obsolete.cpp"));
+  CHECK(DigestFile(destination / ".local/payload-update/backup/obsolete.cpp")->sha256 == Hash("local edit"));
+  CHECK(InspectEnvironment(payload, destination).current);
+}
+
+TEST_CASE("legacy environment archives obsolete sources but keeps generated AOT and user data") {
+  Fixture f; auto payload = f.root / "package/workspace", destination = f.root / "environment";
+  Write(payload / "deps.lock.json", "lock"); Write(payload / "payload.sha256", Hash("lock") + "\tdeps.lock.json\n");
+  Write(destination / "deps.lock.json", "lock");
+  Write(destination / "src/old.cpp", "obsolete source");
+  Write(destination / "titles/game/generated/game.0.cpp", "preserved AOT");
+  const auto generatedTime = fs::last_write_time(destination / "titles/game/generated/game.0.cpp");
+  REQUIRE_FALSE(InspectEnvironment(payload, destination).current);
+  InitializeEnvironment(payload, destination, true);
+  CHECK(InspectEnvironment(payload, destination).current);
+  CHECK_FALSE(fs::exists(destination / "src/old.cpp"));
+  CHECK(DigestFile(destination / ".local/payload-update/backup/src/old.cpp")->sha256 == Hash("obsolete source"));
+  CHECK(fs::last_write_time(destination / "titles/game/generated/game.0.cpp") == generatedTime);
+}
+
+TEST_CASE("real distribution updates a previous source payload and preserves imported sets", "[.local-update]") {
+  const auto package = std::getenv("X360N_TEST_PACKAGE"), old = std::getenv("X360N_TEST_OLD_PAYLOAD"), original = std::getenv("X360N_TEST_SOURCE");
+  REQUIRE(package); REQUIRE(old); REQUIRE(original);
+  Fixture f; auto destination = f.root / fs::path(u8"Atualização João 日本");
+  const auto payload = PathFromUtf8(package) / "app/workspace";
+  VerifyPackage(PathFromUtf8(package));
+  InitializeEnvironment(PathFromUtf8(old), destination);
+  const auto before = ReadCatalog(ProjectPaths{destination});
+  const auto originals = ReadCatalog(ProjectPaths{PathFromUtf8(original)});
+  for (auto id : {"castle_crashers", "dash_17559"}) {
+    auto target = std::find_if(before.begin(), before.end(), [&](const auto& t) { return t.id == id; });
+    auto source = std::find_if(originals.begin(), originals.end(), [&](const auto& t) { return t.id == id; });
+    REQUIRE(target != before.end()); REQUIRE(source != originals.end());
+    REQUIRE(Import(ProjectPaths{destination}, *target, source->game_root) == target->inputs.size());
+  }
+  for (auto rel : {".local/user/profile", ".local/user/save"}) Write(destination / rel, "preserve user bytes");
+  CHECK_FALSE(InspectEnvironment(payload, destination).current);
+  CHECK_THROWS(InitializeEnvironment(payload, destination));
+  CHECK_THROWS(InitializeEnvironment(payload, destination, true, [] { throw std::runtime_error("interrupted update"); }));
+  CHECK_FALSE(InspectEnvironment(payload, destination).current);
+  InitializeEnvironment(payload, destination, true);
+  CHECK(InspectEnvironment(payload, destination).current);
+  for (const auto& t : ReadCatalog(ProjectPaths{destination})) {
+    if (t.id != "castle_crashers" && t.id != "dash_17559") continue;
+    CHECK(Inspect(ProjectPaths{destination}, t).inputs_ok);
+    CHECK_FALSE(Inspect(ProjectPaths{destination}, t).prepared);
+  }
+  for (auto rel : {".local/user/profile", ".local/user/save"}) CHECK(DigestFile(destination / rel)->sha256 == Hash("preserve user bytes"));
 }
 TEST_CASE("desktop opens an empty environment without inventing targets") {
   Fixture f;

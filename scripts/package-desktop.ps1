@@ -90,6 +90,18 @@ foreach ($binary in @((Join-Path $destination 'x360-native.exe'), (Join-Path $in
 }
 $licenses = Join-Path $internal 'licenses'; New-Item -ItemType Directory $licenses | Out-Null
 foreach ($component in @('fmt','cli11','tomlplusplus','inja')) { Copy-Item -LiteralPath (Join-Path $sdk "thirdparty/$component/LICENSE") -Destination (Join-Path $licenses "$component.txt") }
+# Keep the effective compiler commands as reviewable evidence, with portable
+# logical roots. They describe this fresh build, not a second preparation cache.
+$commands = Get-Content -Raw -LiteralPath (Join-Path $build 'compile_commands.json') | ConvertFrom-Json
+$portableCommands = @($commands | ForEach-Object {
+    $entry = $_ | ConvertTo-Json -Compress
+    foreach ($mapping in @(@($source, '<source>'), @($build, '<build>'), @($llvm, '<llvm>'))) {
+        $entry = $entry.Replace($mapping[0].Replace('\','/'), $mapping[1]).Replace($mapping[0].Replace('\','\\'), $mapping[1])
+    }
+    if ($entry -match '(?i)[a-z]:[/\\]') { throw 'Absolute developer path in distribution build evidence' }
+    $entry | ConvertFrom-Json
+})
+[IO.File]::WriteAllText((Join-Path $internal 'compile-commands.json'), ($portableCommands | ConvertTo-Json -Depth 5), [Text.UTF8Encoding]::new($false))
 [IO.File]::WriteAllText((Join-Path $destination 'READ-ME.txt'), @"
 x360-native $Version — prévia para Windows x64
 
