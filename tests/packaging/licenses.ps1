@@ -20,8 +20,9 @@ function Refresh($p) {
 }
 & $gate -PackageDirectory $PackageDirectory -SdkDirectory $SdkDirectory
 $cases=@(
- @{name='missing-license'; expected='Cannot find path|does not exist'; mutate={param($p) Remove-Item -LiteralPath (Join-Path $p 'licenses/nlohmann-json.txt')}},
+ @{name='missing-license'; expected='Missing required file'; mutate={param($p) Remove-Item -LiteralPath (Join-Path $p 'licenses/nlohmann-json.txt')}},
  @{name='changed-license'; expected='Missing or changed original license'; mutate={param($p) Add-Content (Join-Path $p 'licenses/fmt.txt') 'tamper'}},
+ @{name='missing-attribution'; expected='SDK file attribution missing'; mutate={param($p) foreach($base in @($p,(Join-Path $p 'app/workspace'))) { Set-Content (Join-Path $base 'licenses/rexglue-attributions.txt') 'empty'; $i=Get-Content (Join-Path $base 'licenses/inventory.json') -Raw | ConvertFrom-Json; $i.attributions_sha256=(Get-FileHash (Join-Path $base 'licenses/rexglue-attributions.txt')).Hash.ToLowerInvariant(); $i | ConvertTo-Json -Depth 10 | Set-Content (Join-Path $base 'licenses/inventory.json') }}},
  @{name='foreign-dll'; expected='Unidentified distributed file'; mutate={param($p) [IO.File]::WriteAllBytes((Join-Path $p 'foreign.dll'),[byte[]](77,90,0,0))}},
  @{name='extra-exe'; expected='Unidentified distributed file'; mutate={param($p) Copy-Item (Join-Path $p 'app/x360n.exe') (Join-Path $p 'surprise.exe')}},
  @{name='missing-exe'; expected='Missing inventoried executable'; mutate={param($p) Remove-Item -LiteralPath (Join-Path $p 'app/x360n-extract.exe')}},
@@ -30,7 +31,7 @@ $cases=@(
  @{name='generated-aot'; expected='Forbidden distribution content'; mutate={param($p) Set-Content (Join-Path $p 'app/workspace/titles/iruka/generated/foreign.cpp') '// synthetic AOT marker'}},
  @{name='header-scope'; expected='Unreviewed transitive header'; mutate={param($p) '["thirdparty/disasm/ppc.h"]' | Set-Content (Join-Path $p 'app/dependency-inputs.json')}},
  @{name='static-link-scope'; expected='Unreviewed static link dependency'; mutate={param($p) '["unidentified.lib"]' | Set-Content (Join-Path $p 'app/link-inputs.json')}},
- @{name='compiler-scope'; expected='Unreviewed third-party translation'; mutate={param($p) $c=@(Get-Content (Join-Path $p 'app/compile-commands.json') -Raw | ConvertFrom-Json); $c[0].file='<source>/external/rexglue-sdk/thirdparty/disasm/ppc-dis.c'; $c | ConvertTo-Json -Depth 5 | Set-Content (Join-Path $p 'app/compile-commands.json')}},
+ @{name='compiler-scope'; expected='Unreviewed third-party translation'; mutate={param($p) $c=Get-Content (Join-Path $p 'app/compile-commands.json') -Raw | ConvertFrom-Json; $c[0].file='<source>/external/rexglue-sdk/thirdparty/disasm/ppc-dis.c'; $c | ConvertTo-Json -Depth 5 | Set-Content (Join-Path $p 'app/compile-commands.json')}},
  @{name='inventory-revision'; expected='Dependency revision differs'; mutate={param($p) $m=Get-Content (Join-Path $p 'package.json') -Raw | ConvertFrom-Json; $m.dependencies.fmt='incorrect'; $m | ConvertTo-Json -Depth 10 | Set-Content (Join-Path $p 'package.json')}},
  @{name='unknown-component'; expected='Unidentified desktop component'; mutate={param($p) foreach($base in @($p,(Join-Path $p 'app/workspace'))) { $i=Get-Content (Join-Path $base 'licenses/inventory.json') -Raw | ConvertFrom-Json; ($i.components | Where-Object id -eq fmt).spdx='NOASSERTION'; $i | ConvertTo-Json -Depth 8 | Set-Content (Join-Path $base 'licenses/inventory.json') }}},
  @{name='loader-constant'; expected='Sensitive loader constant'; mutate={param($p) $s=Get-Content (Join-Path $SdkDirectory 'src/system/xex_module.cpp') -Raw; $m=[regex]::Match($s,'(?s)static const uint8_t xe_xex2_retail_key\[16\]\s*=\s*\{([^}]+)\}'); $b=[byte[]]@([regex]::Matches($m.Groups[1].Value,'0x([0-9a-fA-F]{2})') | ForEach-Object { [Convert]::ToByte($_.Groups[1].Value,16) }); [IO.File]::WriteAllBytes((Join-Path $p 'app/workspace/constant.dat'),$b)}}
@@ -50,6 +51,7 @@ foreach($case in $cases) {
 # Modification after index generation must also be rejected by existing integrity checks.
 $p=Join-Path $temp 'substituted-executable'
 Copy-Item -LiteralPath $PackageDirectory -Destination $p -Recurse
+Refresh $p
 Copy-Item (Join-Path $p 'app/x360n.exe') (Join-Path $p 'app/x360n-extract.exe') -Force
 $rejected=$false
 try { & $gate -PackageDirectory $p -SdkDirectory $SdkDirectory | Out-Null }

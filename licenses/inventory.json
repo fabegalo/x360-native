@@ -39,7 +39,7 @@
     "src/filesystem/devices/stfs_container_file.cpp",
     "src/filesystem/entry.cpp"
   ],
-  "attributions_sha256": "d5b514c4b427bd36624f014699b1145fb3cae9f05fa1c6e35a14dbdab234bf35",
+  "attributions_sha256": "a7ff3b7ce13deb4f6492e01e62eb9d0e98e0b0855bd92f609e192976a75207d9",
   "components": [
     {
       "id": "fmt",
@@ -1311,6 +1311,18 @@
       "integration": "Upstream verbatim notice includes all listed nested .NET/credential helper components and terms",
       "obligations": "Per-component notices retained; no uniform SPDX expression asserted for this mixed notice.",
       "license_sha256": "f573f5d21d5d8a054aad1ffcbe0165391a4d93a5aa3e23c3db0752759adfd50c"
+    },
+    {
+      "id": "desktop-icon",
+      "origin": "src/desktop/desktop.ico; authorship not confirmed",
+      "revision": "b56e2d47a04a7c916b2b5aa95abeb29f576ac83f",
+      "spdx": "NOASSERTION",
+      "scope": "source-and-embedded-resource",
+      "integration": "Compiled Windows icon resource and source payload",
+      "original": "src/desktop/desktop.ico",
+      "license_file": null,
+      "content_sha256": "31ca993c85b0896369797c1b270de184b1b6c6250a78b4c4fb65b4e9658648bd",
+      "obligations": "Publication blocked until provenance and redistribution permission confirmed; do not infer rights from project license."
     }
   ],
   "sdk_inputs": [

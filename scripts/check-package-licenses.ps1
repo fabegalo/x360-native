@@ -4,7 +4,10 @@ param([Parameter(Mandatory)][string]$PackageDirectory,
 $ErrorActionPreference = 'Stop'
 $package = (Resolve-Path -LiteralPath $PackageDirectory).Path
 $sdk = (Resolve-Path -LiteralPath $SdkDirectory).Path
-function Digest($path) { (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant() }
+function Digest($path) {
+    if(-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "Missing required file: $path" }
+    (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant()
+}
 function Under($base, $relative) {
     if ($relative -match '(^/|\\|:|(^|/)\.\.?(/|$))') { throw 'Unsafe inventory path' }
     $p = [IO.Path]::GetFullPath((Join-Path $base $relative))
@@ -56,8 +59,13 @@ foreach($component in $inventory.components) {
     }
 }
 if((Digest (Join-Path $package 'licenses/rexglue-attributions.txt')) -ne $inventory.attributions_sha256) { throw 'Attribution text changed' }
+$sdkAttributions=Get-Content (Join-Path $package 'licenses/rexglue-attributions.txt') -Raw
+foreach($unit in $inventory.sdk_translation_units) {
+    if(-not $sdkAttributions.Contains("--- $unit ---")) { throw 'SDK file attribution missing' }
+}
+if(-not $ids.ContainsKey('nlohmann-json') -or -not $ids.ContainsKey('microsoft-stl') -or -not $ids.ContainsKey('microsoft-crt-sdk')) { throw 'Missing embedded component identity' }
 if((Digest (Join-Path $package 'licenses/header-attributions.txt')) -ne $inventory.header_attributions_sha256) { throw 'Header attribution text changed' }
-$linkInputs=@(Get-Content (Join-Path $package 'app/link-inputs.json') -Raw | ConvertFrom-Json)
+$linkInputs=Get-Content (Join-Path $package 'app/link-inputs.json') -Raw | ConvertFrom-Json
 if(Compare-Object @($inventory.link_libraries | Sort-Object) @($linkInputs | Sort-Object -Unique)) { throw 'Unreviewed static link dependency' }
 foreach($dep in $metadata.dependencies.PSObject.Properties) {
     if($dep.Name -notin $inventory.desktop_dependencies) { throw "Unidentified build dependency: $($dep.Name)" }
@@ -74,13 +82,13 @@ foreach($command in (Get-Content (Join-Path $package 'app/compile-commands.json'
     } elseif($f -notmatch '^<source>/(src/(desktop|supervisor|content)/|tests/(supervisor|content)/)') { throw 'Unreviewed distribution translation unit' }
 }
 if(Compare-Object @($inventory.sdk_translation_units | Sort-Object) @($units | Sort-Object -Unique)) { throw 'SDK extraction source scope changed' }
-$dependencyInputs=@(Get-Content (Join-Path $package 'app/dependency-inputs.json') -Raw | ConvertFrom-Json)
-foreach($input in $dependencyInputs) {
-    if($input -notin $inventory.sdk_inputs) { throw 'Unreviewed transitive header dependency' }
-    if($input -match '^thirdparty/([^/]+)/') {
+$dependencyInputs=Get-Content (Join-Path $package 'app/dependency-inputs.json') -Raw | ConvertFrom-Json
+foreach($dependencyInput in $dependencyInputs) {
+    if($dependencyInput -notin $inventory.sdk_inputs) { throw 'Unreviewed transitive header dependency' }
+    if($dependencyInput -match '^thirdparty/([^/]+)/') {
         if($Matches[1] -notin $inventory.desktop_dependencies) { throw 'Unreviewed transitive header dependency' }
-        if($input -like 'thirdparty/inja/*' -and $input -notlike 'thirdparty/inja/third_party/include/nlohmann/*') { throw 'Unreviewed inja nested dependency' }
-    } elseif($input -notlike 'include/rex/*' -and $input -notin $inventory.sdk_translation_units) { throw 'Unreviewed SDK input' }
+        if($dependencyInput -like 'thirdparty/inja/*' -and $dependencyInput -notlike 'thirdparty/inja/third_party/include/nlohmann/*') { throw 'Unreviewed inja nested dependency' }
+    } elseif($dependencyInput -notlike 'include/rex/*' -and $dependencyInput -ne 'src/core/platform_win.h' -and $dependencyInput -notin $inventory.sdk_translation_units) { throw 'Unreviewed SDK input' }
 }
 # Read the known loader constants only into memory, never print or distribute them.
 # All-zero devkit values cannot be distinguished from ordinary zero-filled data.
