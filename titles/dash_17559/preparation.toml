@@ -23,6 +23,22 @@ sha256 = "45eb980c0f841b4807d43c07c766fae5e70b8e2fa4d13fb247a491897cfc6de7"
 path = "SegoeXbox-Light.xtt"
 source_name = "SegoeXbox-Light.xtt"
 sha256 = "7b03c1731c6cb874adee50b17aa150f6ba3e0671fc8f612a2a970bf5ef4a542e"
+# Language typefaces actually requested by this dashboard's original text path.
+# Existing 17559 set: resources/fonts/Segoe UI (Kinect, Metro) (JK/CLatin),
+# versions/17559/metro_v2_retail_full_readme (SCLatin); see docs/dashboard.md.
+# These hashes associate this tested set only, not other dashboard generations.
+[[files]]
+path = "XenonJKLatin.xtt"
+source_name = "xenonjklatin.xtt"
+sha256 = "9f20409bbe22ca92d483c24aa0930ac8ec761712c16d00c477f145071e707425"
+[[files]]
+path = "XenonCLatin.xtt"
+source_name = "xenonclatin.xtt"
+sha256 = "977bbe13d5545d300e57dacf9dff492476452f50880ef3868d3aa308d041187d"
+[[files]]
+path = "XenonSCLatin.xtt"
+source_name = "XenonSCLatin.xtt"
+sha256 = "6d44d6b65605bee7acfc96bb1d11bafdc3cc3abd57544eca560cd02c84abc590"
 [[files]]
 path = "system/gamerprofile.xex"
 source_name = "gamerprofile.xex"

@@ -267,6 +267,14 @@ TEST_CASE("local packaged payload imports the complete validated sets into a fre
     CHECK_FALSE(state.prepared);
     CHECK(Import(ProjectPaths{root}, t, it->game_root) == 0);
     CHECK(Inspect(ProjectPaths{PathFromUtf8(original)}, *it).inputs_ok);
+    if (t.id == "dash_17559") {
+      // The menu needs its language typeface as well as SegoeXbox-Light.
+      // A missing typeface must prevent a false "content complete" result.
+      REQUIRE(fs::remove(t.game_root / "XenonJKLatin.xtt"));
+      CHECK_FALSE(Inspect(ProjectPaths{root}, t).inputs_ok);
+      CHECK(Import(ProjectPaths{root}, t, it->game_root) == 1);
+      CHECK(Inspect(ProjectPaths{root}, t).inputs_ok);
+    }
   }
   auto dash = std::find_if(targets.begin(), targets.end(), [](const auto& t) { return t.id == "dash_17559"; });
   REQUIRE(dash != targets.end());
