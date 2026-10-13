@@ -1,5 +1,13 @@
 # STATUS
 
+Incremento de extração (2026-10-13): **C1 e C3 corrigidos**. Patch reproduzível
+0037 limita o parser GDFX e rejeita spans inválidos/ciclos antes de expor a árvore;
+o manifesto `.sha256` é publicado completo, sem substituir arquivo existente.
+66/66 testes relevantes passaram, incluindo 12 casos de extração/publicação;
+fixtures sintéticas da auditoria reutilizadas. SDK permanece na mesma revisão,
+agora com 37 patches verificados. Sem alterações funcionais dos títulos.
+Resultados antes/depois e limites: [auditoria, E6](docs/PROJECT_AUDIT.md#e6-correção-posterior-de-c1c3--13102026).
+
 Atualizado em 2026-10-13. Marcos: **M0 feito**; **M1 feito para um XEX** (amostra
 XDK "Dolphin" da `rexglue/demo-iruka`), com as limitações abaixo.
 

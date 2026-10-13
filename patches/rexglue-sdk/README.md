@@ -289,3 +289,27 @@ failure atomicity, bounds, reset lifecycle and two independent contexts.
 Original XAM compressed stream and GetAssets worker 0x81966450 passed on three
 real assets. Details and limitations: docs/avatar-system.md section 12. Prior
 completed suites were not rerun. No full GetAssets export or rendering claim.
+
+## Bounded GDFX parser (0037)
+
+`0037-gdfx-bounded-directory-parser.patch` fixes audit C1 in
+`DiscImageDevice`, before any mapped directory/file bytes are exposed to
+consumers. It validates complete header, root, record/name, child-table and file
+spans with checked sector arithmetic; iteratively walks siblings in the original
+in-order sequence; rejects repeated/overlapping records (including directory
+aliases/cycles); and only publishes the tree after complete validation.
+
+Directory tables retain the root's 32 MiB limit. Depth is bounded to 256 and the
+image to 1,048,576 entries, also bounding Entry destruction/path construction.
+Empty child directories and empty files remain supported when their zero-length
+range is within the image. Malformed file ranges now fail initialization instead
+of allowing partial extraction. The pinned SDK revision below is unchanged.
+
+Tests: `tests/content/extract_disc_test.cpp`, through the real content tool.
+23 malformed variants include truncated magic/descriptor/records, extreme
+sectors/lengths, sibling and directory cycles. Valid controls cover nesting,
+empty entries, a displaced game partition, traversal order and 300 siblings.
+The original audit fixture now returns error 1 without a crash; the valid
+fixture still extracts identical bytes and hashes. Patch apply/reverse hashes
+were checked in an isolated Git fixture; all 37 patches pass `-Check`.
+See `docs/PROJECT_AUDIT.md` E6 for C1/C3 before/after evidence and limits.
