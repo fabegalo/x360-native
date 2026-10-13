@@ -1,6 +1,6 @@
 # Local, pinned preparation. No elevation, global PATH changes or package manager.
 # Downloads are refused without explicit GUI/CLI consent; cached archives are reused.
-param([switch]$AllowDownloads, [switch]$ToolsOnly)
+param([switch]$AllowDownloads, [switch]$ToolsOnly, [switch]$UpdateDependencies)
 $ErrorActionPreference = 'Stop'
 # Use this host's built-in modules even when launched from PowerShell 7.
 # An inherited PSModulePath can hide Windows PowerShell's Get-FileHash.
@@ -13,7 +13,17 @@ New-Item -ItemType Directory -Force $tools, $cache | Out-Null
 try { $lease = [IO.File]::Open((Join-Path $root '.local/environment.lock'), [IO.FileMode]::OpenOrCreate, [IO.FileAccess]::ReadWrite, [IO.FileShare]::None) }
 catch { throw 'Environment in use. Close the platform or other preparation and retry.' }
 try {
+if (Test-Path -LiteralPath (Join-Path $root '.local/payload-update/pending')) { throw 'Atualizacao interrompida. Reabra o aplicativo antes de preparar.' }
 function Stage([string]$message) { Write-Output "X360N_STAGE $message" }
+function PreserveDependency([string]$Directory) {
+    if (-not $UpdateDependencies) { throw 'Esta instalacao precisa atualizar suas ferramentas. Confirme Preparar no aplicativo; seus jogos e dados serao preservados.' }
+    $resolved = [IO.Path]::GetFullPath($Directory)
+    if (-not $resolved.StartsWith($root + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) { throw 'Dependency outside environment' }
+    [IO.File]::WriteAllText((Join-Path $root '.local/dependency-update.pending'), 'incomplete')
+    $backup = $resolved + '.previous-' + [guid]::NewGuid().ToString('N')
+    Move-Item -LiteralPath $resolved -Destination $backup
+    Stage "preserved previous dependency: $backup"
+}
 foreach ($tool in $lock.tools) {
     $destination = Join-Path $tools $tool.directory
     $receipt = Join-Path $destination '.x360n-archive-sha256'
@@ -22,7 +32,7 @@ foreach ($tool in $lock.tools) {
         Stage "reuse $($tool.id) $($tool.version)"
         continue
     }
-    if (Test-Path -LiteralPath $destination) { throw "Incomplete or changed tool: $destination. Preserve it and choose a new environment." }
+    if ((Test-Path -LiteralPath $destination) -and -not $UpdateDependencies) { throw 'Ferramenta incompleta ou alterada. Confirme a atualizacao em Preparar; os arquivos anteriores serao preservados.' }
     $archive = Join-Path $cache $tool.asset
     if (-not (Test-Path -LiteralPath $archive)) {
         if (-not $AllowDownloads) { throw "Download consent required: $($tool.url) ($($tool.size) bytes)" }
@@ -47,14 +57,41 @@ foreach ($tool in $lock.tools) {
     $payload = $staging
     if (-not (Test-Path -LiteralPath (Join-Path $payload $tool.entry))) { throw "Archive entry missing: $($tool.entry)" }
     [IO.File]::WriteAllText((Join-Path $payload '.x360n-archive-sha256'), $tool.sha256)
+    if (Test-Path -LiteralPath $destination) { PreserveDependency $destination }
     Move-Item -LiteralPath $payload -Destination $destination
     if ($payload -ne $staging) { Remove-Item -LiteralPath $staging } # Empty directory only.
 }
 $git = Join-Path $tools 'mingit-2.56.0.2/cmd/git.exe'
 $env:PATH = (Split-Path $git) + ';' + $env:PATH
-if ($ToolsOnly) { Stage 'tools-ready'; exit 0 }
+if ($ToolsOnly) { Stage 'tools-ready'; exit 0 } # Cannot certify SDK/LLVM or clear a pending full update.
 $sdkLock = (Get-Content -Raw (Join-Path $root 'deps.lock.json') | ConvertFrom-Json).rexglue_sdk
 $sdk = Join-Path $root 'external/rexglue-sdk'
+if (Test-Path -LiteralPath $sdk) {
+    $sdkMatches = $false
+    if (Test-Path -LiteralPath (Join-Path $sdk '.git')) {
+        $currentHead = & $git -C $sdk rev-parse HEAD
+        $sdkMatches = $LASTEXITCODE -eq 0 -and $currentHead.Trim() -eq $sdkLock.commit
+        if ($sdkMatches) {
+            $sdkState = & $git -C $sdk submodule status --recursive
+            if ($LASTEXITCODE -ne 0 -or ($sdkState | Where-Object { $_ -match '^[+U]' })) { $sdkMatches = $false }
+        }
+        # An old patch set cannot be overlaid on an incompatible patched tree.
+        # Pristine or already matching files are safe for the existing applicator.
+        if ($sdkMatches) {
+            $changed = @(& $git -C $sdk diff --name-only HEAD)
+            foreach ($patch in $sdkLock.patches) { foreach ($file in $patch.files.PSObject.Properties) {
+                if ($changed -contains $file.Name) {
+                    $path = Join-Path $sdk $file.Name
+                    if (-not (Test-Path -LiteralPath $path) -or (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant() -ne $file.Value) { $sdkMatches = $false }
+                }
+            } }
+        }
+    }
+    if (-not $sdkMatches) {
+        if (-not $AllowDownloads) { throw 'O SDK precisa ser atualizado. Autorize os downloads em Preparar; a versao anterior e seus dados serao preservados.' }
+        PreserveDependency $sdk
+    }
+}
 if (-not (Test-Path -LiteralPath (Join-Path $sdk '.git'))) {
     if (Test-Path -LiteralPath $sdk) { throw "Unrecognized SDK directory, preserved: $sdk" }
     if (-not $AllowDownloads) { throw "Download consent required: ReXGlue SDK and its pinned submodules." }
@@ -84,5 +121,7 @@ if ($LASTEXITCODE -ne 0) { throw 'SDK patch verification failed.' }
 Stage 'prepare LLVM'
 & (Join-Path $PSScriptRoot 'bootstrap-llvm.ps1') -AllowDownloads:$AllowDownloads
 if ($LASTEXITCODE -ne 0) { throw 'LLVM preparation failed.' }
+$pending = Join-Path $root '.local/dependency-update.pending'
+if (Test-Path -LiteralPath $pending) { Remove-Item -LiteralPath $pending }
 Stage 'tools-ready'
 } finally { $lease.Dispose() }

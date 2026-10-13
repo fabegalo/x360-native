@@ -331,6 +331,11 @@ fs::path PickFolder(HWND owner, const wchar_t* title, bool folder = true) {
 }
 void Start(App& a, int action, fs::path source = {}) {
   if (a.busy || a.selected >= a.targets.size()) return;
+  if (!a.preferences.empty()) {
+    VerifyPackage(a.self.parent_path());
+    if (!InspectEnvironment(Payload(a), a.root).current)
+      throw std::runtime_error("Esta instalação precisa ser atualizada. Selecione novamente o ambiente em Configurações. Seus jogos e dados serão preservados.");
+  }
   if (action == kLaunch && !a.targets[a.selected].session) return;
   if (a.worker.joinable()) a.worker.join();
   a.logs = a.root / ".local/logs/desktop" / std::to_string(GetTickCount64());
@@ -406,6 +411,7 @@ void Start(App& a, int action, fs::path source = {}) {
           finish(Tr("Instalador encerrado. Verifique as dependências novamente antes de preparar.", "Installer closed. Recheck dependencies before preparing.")); return;
         }
         auto tool_args = std::vector<std::string>{"-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", Utf8(a.root / "scripts/prepare-tools.ps1")};
+        tool_args.push_back("-UpdateDependencies");
         if (a.allow_downloads) tool_args.push_back("-AllowDownloads");
         Post(a.window, kProgress, Tr("Verificando ferramentas e dependências...", "Checking tools and dependencies..."));
         run(powershell, tool_args, "tools");
@@ -535,12 +541,22 @@ LRESULT CALLBACK WndProc(HWND window, UINT message, WPARAM wp, LPARAM lp) {
         DragAcceptFiles(window, TRUE); SetTimer(window, 1, 100, nullptr);
         Labels(*a); Layout(*a);
         if (a->initializing) {
+          const auto state = InspectEnvironment(Payload(*a), a->root);
+          if (!state.current && fs::exists(a->root / "deps.lock.json")) {
+            std::string message = Tr("Esta instalação precisa ser atualizada para continuar. Seus jogos e dados serão preservados.\n\nComponentes: ", "This installation needs an update to continue. Your games and data will be preserved.\n\nComponents: ");
+            for (const auto& component : state.components) message += "\n• " + component;
+            if (state.interrupted) message += Tr("\nRetomar atualização interrompida.", "\nResume interrupted update.");
+            message += Tr("\n\nAtualizar agora? Preparações ainda válidas serão reutilizadas.", "\n\nUpdate now? Valid preparations will be reused.");
+            if (MessageBoxW(window, Wide(message).c_str(), L"x360-native", MB_YESNO | MB_ICONINFORMATION) != IDYES) {
+              a->root.clear(); a->initializing = false; Load(*a, a->root); return 0;
+            }
+          }
           a->busy = true; Enable(*a);
           Set(a->headline, Tr("Bem-vindo ao x360-native.", "Welcome to x360-native."));
           Set(a->subtitle, Tr("Estamos organizando o aplicativo para a primeira utilização.\r\nEm seguida, você poderá adicionar suas dashboards e jogos.", "We are getting the app ready for its first use.\r\nNext, you can add your dashboards and games."));
           Set(a->status, Tr("Verificando o pacote local. Nenhum download é necessário nesta etapa.", "Checking the local package. No download is needed for this step."));
           a->worker = std::thread([a] {
-            try { InitializeEnvironment(Payload(*a), a->root); Post(a->window, kInitialized, ""); }
+            try { InitializeEnvironment(Payload(*a), a->root, true); Post(a->window, kInitialized, ""); }
             catch (const std::exception& error) { Post(a->window, kInitialized, error.what()); }
           });
         } else Load(*a, a->root);
@@ -604,19 +620,39 @@ LRESULT CALLBACK WndProc(HWND window, UINT message, WPARAM wp, LPARAM lp) {
         if (id == kFolder) {
           auto root = PickFolder(window, Wide(Tr("Escolha uma pasta vazia para o ambiente ou uma existente do x360-native", "Choose an empty environment folder or an existing x360-native environment")).c_str());
           if (!root.empty()) {
-            if (!fs::is_regular_file(root / "deps.lock.json")) InitializeEnvironment(Payload(*a), root);
+            if (!a->preferences.empty()) {
+              VerifyPackage(a->self.parent_path());
+              const auto state = InspectEnvironment(Payload(*a), root);
+              if (!state.current && fs::exists(root / "deps.lock.json")) {
+                std::string message = Tr("Esta instalação precisa ser atualizada para continuar. Seus jogos e dados serão preservados.\n\nComponentes:", "This installation needs an update to continue. Your games and data will be preserved.\n\nComponents:");
+                for (const auto& component : state.components) message += "\n• " + component;
+                message += Tr("\n\nAtualizar agora?", "\n\nUpdate now?");
+                if (MessageBoxW(window, Wide(message).c_str(), L"x360-native", MB_YESNO | MB_ICONINFORMATION) != IDYES) return 0;
+              }
+              InitializeEnvironment(Payload(*a), root, true);
+            }
+            a->targets.clear(); a->checked.clear();
             Load(*a, root);
             SavePreferences(*a);
           }
         }
-        if (id == kCheck) { a->environment = CheckEnvironment(a->root); a->targets.clear(); Load(*a, a->root); }
+        if (id == kCheck) {
+          if (!a->preferences.empty()) {
+            VerifyPackage(a->self.parent_path());
+            if (!InspectEnvironment(Payload(*a), a->root).current) {
+              a->targets.clear(); a->checked.clear(); a->root.clear(); Load(*a, a->root);
+              throw std::runtime_error("O ambiente precisa de atualização. Selecione-o novamente em Configurações; seus dados serão preservados.");
+            }
+          }
+          a->environment = CheckEnvironment(a->root); a->targets.clear(); Load(*a, a->root);
+        }
         if (id == kImport || id == kImportFolder) { auto source = PickFolder(window, Wide(id == kImport ? Tr("Selecione um arquivo original", "Select an original file") : Tr("Selecione a pasta com seus arquivos originais", "Select the folder with your original files")).c_str(), id == kImportFolder); if (!source.empty()) Start(*a, kImport, source); }
         if (id == kPrepare) {
           if (!a->environment.msvc) {
             if (MessageBoxW(window, Wide(Tr("Falta o componente C++ do Microsoft Build Tools 2022. Abrir o instalador oficial com os componentes necessários selecionados?\n\nEsta é uma instalação no sistema: o Windows pode pedir permissão de administrador. O instalador mostra espaço, downloads e termos antes da instalação. Use o próprio instalador para cancelar. Jogos e dados serão preservados.", "Microsoft Build Tools 2022 C++ is missing. Open the official installer with the required components preselected?\n\nThis changes the system: Windows may request administrator permission. The installer shows space, downloads and terms before installation. Cancel using the installer itself. Games and data are preserved.")).c_str(), L"Microsoft Build Tools 2022", MB_YESNO | MB_ICONINFORMATION) == IDYES) Start(*a, kInstall);
             return 0;
           }
-          auto answer = MessageBoxW(window, Wide(Tr("Preparar verifica e obtém Git, CMake, Ninja, LLVM e o SDK fixados. Downloads de ferramentas: até 905 MiB; o SDK e suas dependências são adicionais. Arquivos verificados em cache são reutilizados. Reserve espaço para fontes e compilação (recomendação inicial: 30 GiB, não uma medição do mínimo).\n\nPermitir os downloads necessários? Não há instalação global nem elevação. Não = usar somente os arquivos já presentes.", "Preparation verifies and obtains pinned Git, CMake, Ninja, LLVM and SDK. Tool downloads: up to 905 MiB; SDK and its dependencies are additional. Verified cached files are reused. Reserve space for sources and compilation (initial recommendation: 30 GiB, not a measured minimum).\n\nAllow required downloads? No global installation or elevation. No = use only existing files.")).c_str(), L"x360-native", MB_YESNOCANCEL | MB_ICONINFORMATION);
+          auto answer = MessageBoxW(window, Wide(Tr("Preparar verifica e obtém Git, CMake, Ninja, LLVM e o SDK fixados. Downloads de ferramentas: até 905 MiB; o SDK e suas dependências são adicionais. Arquivos verificados em cache são reutilizados. Ferramentas incompatíveis serão atualizadas com uma cópia anterior preservada. Reserve espaço para fontes e compilação (recomendação inicial: 30 GiB, não uma medição do mínimo).\n\nPermitir os downloads necessários? Não há instalação global nem elevação. Não = usar somente os arquivos já presentes.", "Preparation verifies and obtains pinned Git, CMake, Ninja, LLVM and SDK. Tool downloads: up to 905 MiB; SDK and its dependencies are additional. Verified cached files are reused. Incompatible tools will be updated with their previous copies preserved. Reserve space for sources and compilation (initial recommendation: 30 GiB, not a measured minimum).\n\nAllow required downloads? No global installation or elevation. No = use only existing files.")).c_str(), L"x360-native", MB_YESNOCANCEL | MB_ICONINFORMATION);
           if (answer == IDCANCEL) return 0;
           a->allow_downloads = answer == IDYES;
         }
@@ -755,6 +791,16 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show) {
   INITCOMMONCONTROLSEX controls{sizeof(controls), ICC_STANDARD_CLASSES | ICC_PROGRESS_CLASS}; InitCommonControlsEx(&controls);
   App app;
   wchar_t self[32768]{}; GetModuleFileNameW(nullptr, self, 32768); app.self = self;
+  try {
+#ifdef X360N_DISTRIBUTION
+    VerifyPackage(app.self.parent_path());
+#else
+    if (fs::is_directory(Payload(app))) VerifyPackage(app.self.parent_path());
+#endif
+  } catch (const std::exception& error) {
+    MessageBoxW(nullptr, Wide(error.what()).c_str(), L"x360-native — pacote não validado", MB_OK | MB_ICONERROR);
+    CoUninitialize(); return 2;
+  }
   if (!fs::is_directory(Payload(app))) {
     if (auto root = FindProjectRoot(app.self)) app.root = root->root;
   } else {
@@ -772,10 +818,11 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show) {
   // A first-time user shouldn't need to choose a source repository. The package
   // prepares its own verified source payload in the user's normal data folder.
   // An existing installation is preserved; its location can be changed in Settings.
-  if (app.root.empty() && !app.preferences.empty()) {
+  if (!app.preferences.empty()) {
     const auto initial = app.preferences.parent_path() / "environment";
     try {
-      app.root = initial; app.initializing = true;
+      if (app.root.empty()) app.root = initial;
+      app.initializing = true;
     } catch (const std::exception& error) {
       // Leave the first-run folder action available. Never overwrite a different
       // existing source version or hide it by deleting the user's environment.

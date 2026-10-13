@@ -47,6 +47,8 @@ std::optional<std::string> CheckPreparation(const ProjectPaths& paths,
     return "Preparação inválida; prepare novamente. " + reason;
   };
   try {
+    if (fs::exists(paths.local() / "payload-update/pending") || fs::exists(paths.local() / "dependency-update.pending"))
+      return fail("A atualização do aplicativo foi interrompida. Reabra o aplicativo para concluí-la; seus dados foram preservados.");
     if (!IsSafeLabel(title) || manifest.empty()) return fail("Identidade do título ausente.");
     // On Windows the preparation/Ninja producer owns this file with no sharing.
     // Keep a reader open for the entire inspection, excluding replacement while

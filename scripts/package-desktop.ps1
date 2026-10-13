@@ -1,79 +1,143 @@
-# Build the local Windows candidate from committed, audited source only.
-# Does not publish a release or include any local game, SDK checkout or AOT output.
+# Build from committed source in a fresh distribution-only tree. Never publishes.
 param([string]$Version = '0.1.0-preview', [string]$OutputDirectory = '.local/packages')
 $ErrorActionPreference = 'Stop'
+$env:PSModulePath = Join-Path $PSHOME 'Modules'
 $root = (Resolve-Path (Split-Path -Parent $PSScriptRoot)).Path
 if ($Version -notmatch '^[a-zA-Z0-9._-]+$') { throw 'Invalid package version' }
 $base = [IO.Path]::GetFullPath((Join-Path $root $OutputDirectory))
 if (-not $base.StartsWith((Join-Path $root '.local') + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) { throw 'Packages must remain below .local' }
 $name = "x360-native-$Version-windows-x64"
 $destination = Join-Path $base $name
-if (Test-Path -LiteralPath $destination) { throw "Package already exists; use a new version: $destination" }
+if ((Test-Path -LiteralPath $destination) -or (Test-Path -LiteralPath "$destination.zip")) { throw 'Package already exists; choose another output directory.' }
 $head = (git -C $root rev-parse HEAD).Trim()
 if ($LASTEXITCODE -ne 0) { throw 'Cannot identify committed source' }
-git -C $root diff --quiet HEAD -- src/desktop src/supervisor scripts/package-desktop.ps1 scripts/prepare-tools.ps1 scripts/desktop-tools.lock.json
-if ($LASTEXITCODE -ne 0) { throw 'Commit the candidate implementation before packaging; binaries and exported source must match.' }
-# Build only the redistributable frontend/supervisor, not proprietary titles.
-& (Join-Path $PSScriptRoot 'devshell.cmd') cmake --build --preset win-amd64-release --target x360-native
-if ($LASTEXITCODE -ne 0) { throw 'Release frontend build failed' }
-New-Item -ItemType Directory -Force $destination | Out-Null
-$internal = Join-Path $destination 'app'
-New-Item -ItemType Directory $internal | Out-Null
-$payload = Join-Path $internal 'workspace'
-New-Item -ItemType Directory $payload | Out-Null
-$sourceArchive = Join-Path $destination 'source.zip'
-git -C $root archive --format=zip "--output=$sourceArchive" HEAD
-if ($LASTEXITCODE -ne 0) { throw 'Source export failed' }
-Expand-Archive -LiteralPath $sourceArchive -DestinationPath $payload
-Remove-Item -LiteralPath $sourceArchive
-$index = [Collections.Generic.List[string]]::new()
-foreach ($file in (Get-ChildItem -LiteralPath $payload -Recurse -File | Sort-Object FullName)) {
-    $rel = $file.FullName.Substring($payload.Length + 1).Replace('\', '/')
-    if ($rel -match '(^|/)(\.local|\.git|external)/' -or $rel -match '\.(xex|xexp|xtt|ttf|otf|pdb|dll|exe|stfs|iso)$' -or
-        ($rel -match '/generated/' -and $rel -notmatch '/generated/rexglue\.cmake$')) { throw "Non-distributable or unreviewed payload entry: $rel" }
-    $index.Add((Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash.ToLowerInvariant() + "`t" + $rel)
+git -C $root diff --quiet HEAD -- scripts/package-desktop.ps1
+if ($LASTEXITCODE -ne 0) { throw 'Commit the packaging script before using it.' }
+$job = Join-Path $root ('.local/distribution/' + [guid]::NewGuid().ToString('N'))
+$source = Join-Path $job 'source'
+$build = Join-Path $job 'build'
+New-Item -ItemType Directory -Force $source, $destination | Out-Null
+function ExportTree([string]$Repository, [string]$Revision, [string]$Directory) {
+    New-Item -ItemType Directory -Force $Directory | Out-Null
+    $archive = Join-Path $job ([guid]::NewGuid().ToString('N') + '.zip')
+    git -C $Repository archive --format=zip "--output=$archive" $Revision
+    if ($LASTEXITCODE -ne 0) { throw "Cannot export committed dependency: $Repository $Revision" }
+    Expand-Archive -LiteralPath $archive -DestinationPath $Directory
+    Remove-Item -LiteralPath $archive
 }
-[IO.File]::WriteAllLines((Join-Path $payload 'payload.sha256'), $index, [Text.UTF8Encoding]::new($false))
-$binaries = Join-Path $root '.local/build/win-amd64/src/desktop/Release'
+function Hash([string]$File) { (Get-FileHash -LiteralPath $File -Algorithm SHA256).Hash.ToLowerInvariant() }
+function WriteIndex([string]$Directory, [string]$Name) {
+    $lines = @(Get-ChildItem -LiteralPath $Directory -Recurse -File | Sort-Object FullName | ForEach-Object {
+        (Hash $_.FullName) + "`t" + $_.FullName.Substring($Directory.Length + 1).Replace('\','/')
+    })
+    [IO.File]::WriteAllText((Join-Path $Directory $Name), ($lines -join "`n") + "`n", [Text.UTF8Encoding]::new($false))
+}
+ExportTree $root $head $source
+$internal = Join-Path $destination 'app'
+$payload = Join-Path $internal 'workspace'
+New-Item -ItemType Directory -Force $payload | Out-Null
+# Separate source export: build coordination files must never enter the payload.
+ExportTree $root $head $payload
+foreach ($file in Get-ChildItem -LiteralPath $payload -Recurse -File) {
+    $rel = $file.FullName.Substring($payload.Length + 1).Replace('\','/')
+    if ($rel -match '(^|/)(\.local|\.git|external)/' -or $rel -match '\.(xex|xexp|xtt|ttf|otf|pdb|dll|exe|stfs|iso)$' -or
+        ($rel -match '/generated/' -and $rel -notmatch '/generated/rexglue\.cmake$')) { throw "Non-distributable payload entry: $rel" }
+}
+WriteIndex $payload 'payload.sha256'
+$lock = Get-Content -Raw (Join-Path $source 'deps.lock.json') | ConvertFrom-Json
+$sdk = Join-Path $source 'external/rexglue-sdk'
+# A private checkout uses only pinned Git objects, never developer working bytes.
+# Shared objects are build-time inputs only; no checkout or Git directory is shipped.
+git -c core.longpaths=true clone --shared --no-checkout (Join-Path $root 'external/rexglue-sdk') $sdk
+if ($LASTEXITCODE -ne 0) { throw 'SDK snapshot failed' }
+git -c core.longpaths=true -C $sdk checkout --detach $lock.rexglue_sdk.commit
+if ($LASTEXITCODE -ne 0) { throw 'Pinned SDK checkout failed' }
+$dependencies = [ordered]@{}
+foreach ($component in @('fmt','tomlplusplus','cli11','catch2','inja')) {
+    $tree = git -C $sdk ls-tree HEAD "thirdparty/$component"
+    if ($LASTEXITCODE -ne 0 -or $tree -notmatch '^160000 commit ([a-f0-9]{40})') { throw "Unpinned dependency: $component" }
+    $revision = $Matches[1]
+    ExportTree (Join-Path $root "external/rexglue-sdk/thirdparty/$component") $revision (Join-Path $sdk "thirdparty/$component")
+    $dependencies[$component] = $revision
+}
+& powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $source 'scripts/apply-sdk-patches.ps1')
+if ($LASTEXITCODE -ne 0) { throw 'Pinned SDK patch verification failed' }
+$llvm = Join-Path $root $lock.llvm.install_dir
+$clang = Join-Path $llvm 'bin/clang++.exe'
+$compilerVersion = (& $clang --version | Select-Object -First 1)
+if ($compilerVersion -notlike "* $($lock.llvm.version)*") { throw 'Compiler differs from the locked LLVM version' }
+$sourceMap = $source.Replace('\','/')
+$flags = "-march=x86-64-v2 -ffile-prefix-map=$sourceMap=/x360-source"
+$devshell = Join-Path $root 'scripts/devshell.cmd'
+& $devshell cmake -S $source -B $build -G Ninja -DX360_DESKTOP_ONLY=ON -DX360_DISTRIBUTION=ON -DCMAKE_BUILD_TYPE=Release "-DCMAKE_C_COMPILER=$llvm/bin/clang.exe" "-DCMAKE_CXX_COMPILER=$clang" "-DCMAKE_C_FLAGS=$flags" "-DCMAKE_CXX_FLAGS=$flags" '-DCMAKE_EXE_LINKER_FLAGS=-Wl,/Brepro' -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+if ($LASTEXITCODE -ne 0) { throw 'Distribution configure failed' }
+& $devshell cmake --build $build --target x360-native x360n_desktop_tests
+if ($LASTEXITCODE -ne 0) { throw 'Distribution build failed' }
+& $devshell ctest --test-dir $build --output-on-failure
+if ($LASTEXITCODE -ne 0) { throw 'Distribution tests failed; ZIP withheld' }
+$binaries = Join-Path $build 'src/desktop'
 Copy-Item -LiteralPath (Join-Path $binaries 'x360-native.exe') -Destination $destination
 Copy-Item -LiteralPath (Join-Path $binaries 'x360n.exe') -Destination $internal
-# Desktop-only Release statically links the compiler runtime; opening the UI
-# requires neither developer tools nor a redistributable installer.
-$cache = Get-Content -LiteralPath (Join-Path $root '.local/build/win-amd64/CMakeCache.txt')
-if (-not ($cache -contains 'X360_DESKTOP_ONLY:BOOL=ON')) { throw 'Use the isolated desktop-only configuration for distribution.' }
-$sdk = (($cache | Where-Object { $_ -like 'X360_REXGLUE_DIR:PATH=*' }) -replace '^X360_REXGLUE_DIR:PATH=', '')
-$licenses = Join-Path $internal 'licenses'; New-Item -ItemType Directory $licenses | Out-Null
-foreach ($component in @('fmt','cli11','tomlplusplus')) {
-    Copy-Item -LiteralPath (Join-Path $sdk "thirdparty/$component/LICENSE") -Destination (Join-Path $licenses "$component.txt")
+# Static compiler runtime, explicit OS-only import allowlist. Never harvest DLLs.
+foreach ($binary in @((Join-Path $destination 'x360-native.exe'), (Join-Path $internal 'x360n.exe'))) {
+    $imports = & (Join-Path $llvm 'bin/llvm-readobj.exe') --coff-imports $binary
+    if ($LASTEXITCODE -ne 0) { throw 'Cannot inspect binary imports' }
+    foreach ($line in $imports) {
+        if ($line -match '^  Name: (.+)$' -and $Matches[1] -notmatch '^(KERNEL32|USER32|GDI32|ADVAPI32|SHELL32|ole32|OLEAUT32|COMDLG32|COMCTL32|bcrypt|dbghelp|d3d12|dxgi|XINPUT1_4|dwmapi|WS2_32|ntdll|VERSION|IMM32|SHLWAPI)\.dll$' -and $Matches[1] -notmatch '^api-ms-win-.*\.dll$') { throw "Unexpected runtime dependency: $($Matches[1])" }
+    }
 }
+$licenses = Join-Path $internal 'licenses'; New-Item -ItemType Directory $licenses | Out-Null
+foreach ($component in @('fmt','cli11','tomlplusplus','inja')) { Copy-Item -LiteralPath (Join-Path $sdk "thirdparty/$component/LICENSE") -Destination (Join-Path $licenses "$component.txt") }
 [IO.File]::WriteAllText((Join-Path $destination 'READ-ME.txt'), @"
 x360-native $Version — prévia para Windows x64
 
-Abra x360-native.exe. Adicione seus arquivos ou pastas originais na janela.
-O aplicativo identifica as versões e mostra os componentes que ainda faltam.
-Dashboards e jogos são gerenciados separadamente. Inicie os jogos pela My Games
-original quando houver uma dashboard e uma preparação compatíveis disponíveis.
+Extraia o ZIP inteiro em uma pasta vazia e abra x360-native.exe.
+Para atualizar, extraia em outra pasta e selecione seu ambiente anterior em
+Configurações > Selecionar ambiente. Confirme a atualização apresentada.
+Seus jogos, dashboards, perfis e saves serão preservados; preparações válidas
+serão reutilizadas. Uma atualização interrompida pode ser retomada abrindo
+a mesma versão do aplicativo. Não misture arquivos de ZIPs diferentes.
 
-A pasta app contém os componentes internos. A pasta data será criada ao abrir
-para guardar conteúdo, preparações e configurações. Não apague data para atualizar
-ou remover apenas o aplicativo. Saves e perfis existentes são preservados.
+A pasta app contém componentes internos. data guarda o ambiente padrão e suas
+preferências. Não apague a pasta data anterior ao trocar o aplicativo.
+Os componentes substituídos são preservados em .local/payload-update/backup
+ou .local/payload-backups dentro do ambiente. Ferramentas/SDK também mantêm
+cópias anteriores ao serem atualizados com sua autorização de preparação.
 
-Nenhum jogo, dashboard, módulo original, fonte ou recompilação proprietária é
-incluído. Nenhum arquivo é enviado. A preparação de títulos oferece as ferramentas
-verificadas com consentimento; a instalação dos componentes Microsoft pode exigir
-permissão de administrador. Abrir a interface e importar arquivos não exige isso.
+Nenhum conteúdo proprietário do Xbox 360 está incluído. A preparação usa
+ferramentas verificadas e pede autorização para downloads. Componentes Microsoft
+podem exigir instalação adicional. Nada é enviado automaticamente.
 
-Esta prévia não comprova compatibilidade com todos os títulos nem instalação em
-Windows limpo. Perfis, Guide e save/load ainda têm pendências.
+Candidato local: publicação bloqueada pela revisão de licenciamento (C10).
+Windows limpo ainda requer validação. Serviços da dashboard, perfis e saves
+continuam com as limitações registradas no relatório do projeto.
 Código correspondente: $head
-SDK e licenças: https://github.com/rexglue/rexglue-sdk
 "@, [Text.UTF8Encoding]::new($false))
-$metadata = @{ schema = 1; version = $Version; platform = 'windows-x64'; commit = $head; acceptance = 'pending'; files = @() }
-foreach ($file in (Get-ChildItem -LiteralPath $destination -Recurse -File | Sort-Object FullName)) {
-    $metadata.files += @{ path = $file.FullName.Substring($destination.Length + 1).Replace('\','/'); size = $file.Length; sha256 = (Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash.ToLowerInvariant() }
+$metadata = [ordered]@{
+    schema = 2; version = $Version; platform = 'windows-x64'; commit = $head
+    payload_sha256 = Hash (Join-Path $payload 'payload.sha256')
+    sdk_commit = $lock.rexglue_sdk.commit; patches = @($lock.rexglue_sdk.patches | ForEach-Object { [ordered]@{ file = $_.file; sha256 = $_.sha256 } })
+    dependencies = $dependencies; compiler = [ordered]@{ version = $compilerVersion; sha256 = Hash $clang }
+    configuration = 'Release'; desktop_only = $true; compiler_flags = '-march=x86-64-v2 -ffile-prefix-map=<source>=/x360-source'; linker_flags = '-Wl,/Brepro'
+    publication = 'blocked-C10'; clean_windows = 'pending'
 }
-[IO.File]::WriteAllText((Join-Path $destination 'package.json'), ($metadata | ConvertTo-Json -Depth 5), [Text.UTF8Encoding]::new($false))
-$zip = Join-Path $base "$name.zip"
-Compress-Archive -LiteralPath $destination -DestinationPath $zip
-Get-FileHash -LiteralPath $zip -Algorithm SHA256
-Write-Output "Local candidate: $zip"
+[IO.File]::WriteAllText((Join-Path $destination 'package.json'), ($metadata | ConvertTo-Json -Depth 8), [Text.UTF8Encoding]::new($false))
+WriteIndex $destination 'package.sha256'
+# Deterministic ZIP: fixed timestamps, entry order and relative paths only.
+Add-Type -AssemblyName System.IO.Compression
+Add-Type -AssemblyName System.IO.Compression.FileSystem
+$zip = "$destination.zip"
+$stream = [IO.File]::Open($zip, 'CreateNew')
+$archive = [IO.Compression.ZipArchive]::new($stream, [IO.Compression.ZipArchiveMode]::Create)
+try {
+    foreach ($file in Get-ChildItem -LiteralPath $destination -Recurse -File | Sort-Object FullName) {
+        $rel = $name + '/' + $file.FullName.Substring($destination.Length + 1).Replace('\','/')
+        $entry = $archive.CreateEntry($rel, [IO.Compression.CompressionLevel]::Optimal)
+        $entry.LastWriteTime = [DateTimeOffset]::new(2000,1,1,0,0,0,[TimeSpan]::Zero)
+        $output = $entry.Open(); $input = [IO.File]::OpenRead($file.FullName)
+        try { $input.CopyTo($output) } finally { $input.Dispose(); $output.Dispose() }
+    }
+} finally { $archive.Dispose(); $stream.Dispose() }
+[IO.File]::WriteAllText("$zip.sha256", (Hash $zip) + '  ' + [IO.Path]::GetFileName($zip) + "`n")
+Write-Output "Candidate: $zip"
+Write-Output "Build evidence: $build"

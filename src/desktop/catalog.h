@@ -54,8 +54,16 @@ std::filesystem::path PreparationMarker(const ProjectPaths& paths, const Target&
 size_t Import(const ProjectPaths& paths, const Target& target,
               const std::filesystem::path& source,
               const std::function<bool()>& cancelled = {}, bool allow_partial = false);
-// A packaged source payload is separate from all user content. Existing files
-// must match; no update ever silently replaces a working environment.
+struct PayloadStatus {
+  bool current = false, interrupted = false;
+  std::vector<std::string> components;
+};
+PayloadStatus InspectEnvironment(const std::filesystem::path& payload,
+                                const std::filesystem::path& destination);
+void VerifyPackage(const std::filesystem::path& directory);
+// Replacement requires explicit consent; originals remain in local backups.
 void InitializeEnvironment(const std::filesystem::path& payload,
-                           const std::filesystem::path& destination);
+                           const std::filesystem::path& destination,
+                           bool allow_update = false,
+                           const std::function<void()>& checkpoint = {});
 }

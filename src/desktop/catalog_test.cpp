@@ -130,11 +130,72 @@ TEST_CASE("interrupted source payload resumes without discarding partial bytes o
   InitializeEnvironment(payload, destination);
   CHECK(DigestFile(destination / "deps.lock.json")->sha256 == Hash("fixture lock"));
   CHECK(DigestFile(destination / ".local/user/save")->sha256 == Hash("progress"));
-  bool retained = false;
-  for (const auto& item : fs::directory_iterator(destination))
-    if (Utf8(item.path().filename()).starts_with("deps.lock.json.x360n-tmp.interrupted-"))
-      retained = DigestFile(item.path())->sha256 == Hash("interrupted bytes");
-  CHECK(retained);
+  CHECK(DigestFile(destination / "deps.lock.json.x360n-tmp")->sha256 == Hash("interrupted bytes"));
+}
+
+TEST_CASE("payload update resumes after interruption and preserves content and original backups") {
+  Fixture f; auto payload = f.root / "package/workspace", destination = f.root / "environment";
+  auto publish = [&](const std::string& version) {
+    Write(payload / "deps.lock.json", "fixture lock");
+    Write(payload / "titles/one/source.cpp", version);
+    Write(payload / "scripts/prepare.ps1", version);
+    Write(payload / "payload.sha256", Hash("fixture lock") + "\tdeps.lock.json\n" + Hash(version) + "\ttitles/one/source.cpp\n" + Hash(version) + "\tscripts/prepare.ps1\n");
+  };
+  publish("old"); InitializeEnvironment(payload, destination);
+  for (auto rel : {".local/inputs/game/default.xex", ".local/inputs/dashboard/dash.xex", ".local/user/profile", ".local/user/save"}) Write(destination / rel, "keep");
+  publish("new");
+  CHECK_FALSE(InspectEnvironment(payload, destination).current);
+  CHECK_THROWS(InitializeEnvironment(payload, destination));
+  CHECK_THROWS(InitializeEnvironment(payload, destination, true, [] { throw std::runtime_error("power loss"); }));
+  CHECK(InspectEnvironment(payload, destination).interrupted);
+  CHECK_FALSE(InspectEnvironment(payload, destination).current);
+  CHECK_THROWS(InitializeEnvironment(payload, destination));
+  CHECK_NOTHROW(InitializeEnvironment(payload, destination, true));
+  CHECK(InspectEnvironment(payload, destination).current);
+  CHECK(DigestFile(destination / ".local/payload-update/backup/scripts/prepare.ps1")->sha256 == Hash("old"));
+  CHECK(DigestFile(destination / "titles/one/source.cpp")->sha256 == Hash("new"));
+  for (auto rel : {".local/inputs/game/default.xex", ".local/inputs/dashboard/dash.xex", ".local/user/profile", ".local/user/save"}) CHECK(DigestFile(destination / rel)->sha256 == Hash("keep"));
+  const auto time = fs::last_write_time(destination / "titles/one/source.cpp");
+  InitializeEnvironment(payload, destination);
+  CHECK(fs::last_write_time(destination / "titles/one/source.cpp") == time);
+}
+
+TEST_CASE("source update relies on C2 receipts and invalidates only affected preparations") {
+  Fixture f; Import(f.paths, f.target, f.source); Write(f.target.exe, "fixture exe"); f.Receipt();
+  Write(f.root / "titles/one.cpp", "old");
+  WriteTestReceipt(f.paths, f.target.id, f.target.manifest, f.target.exe,
+    {f.target.inputs[0].destination, f.target.inputs[1].destination, f.root / "titles/one.cpp"});
+  auto other = f.target.exe.parent_path() / "other.exe", manifest = f.root / "titles/other_manifest.toml";
+  Write(other, "independent exe"); Write(manifest, "[entrypoint]\nfile_path='../.local/inputs/dashboard/test/dash.xex'\n");
+  WriteTestReceipt(f.paths, "other", manifest, other, {f.target.inputs[0].destination});
+  auto payload = f.root / "package/workspace";
+  Write(payload / "deps.lock.json", "fixture lock"); Write(payload / "titles/one.cpp", "new");
+  Write(payload / "payload.sha256", Hash("fixture lock") + "\tdeps.lock.json\n" + Hash("new") + "\ttitles/one.cpp\n");
+  REQUIRE(Inspect(f.paths, f.target).prepared);
+  REQUIRE_FALSE(CheckPreparation(f.paths, "other", manifest, other));
+  CHECK_THROWS(InitializeEnvironment(payload, f.root, true, [] { throw std::runtime_error("power loss"); }));
+  CHECK_FALSE(Inspect(f.paths, f.target).prepared);
+  CHECK(CheckPreparation(f.paths, "other", manifest, other)); // pending blocks even valid receipts
+  InitializeEnvironment(payload, f.root, true);
+  CHECK_FALSE(Inspect(f.paths, f.target).prepared);
+  CHECK_FALSE(CheckPreparation(f.paths, "other", manifest, other));
+  CHECK(fs::exists(PreparationReceipt(f.target.exe))); // Never delete or re-sign a stale receipt.
+}
+
+TEST_CASE("package identity rejects swapped binaries missing payload and foreign DLLs") {
+  Fixture f; auto package = f.root / "distribution";
+  Write(package / "x360-native.exe", "frontend"); Write(package / "app/x360n.exe", "supervisor");
+  Write(package / "package.json", "metadata");
+  Write(package / "app/workspace/deps.lock.json", "lock");
+  auto payloadIndex = Hash("lock") + "\tdeps.lock.json\n";
+  Write(package / "app/workspace/payload.sha256", payloadIndex);
+  Write(package / "package.sha256", Hash("frontend") + "\tx360-native.exe\n" + Hash("supervisor") + "\tapp/x360n.exe\n" + Hash("metadata") + "\tpackage.json\n" + Hash(payloadIndex) + "\tapp/workspace/payload.sha256\n" + Hash("lock") + "\tapp/workspace/deps.lock.json\n");
+  REQUIRE_NOTHROW(VerifyPackage(package));
+  SECTION("foreign DLL") { Write(package / "app/fmt.dll", "incompatible"); CHECK_THROWS(VerifyPackage(package)); }
+  SECTION("swapped supervisor") { Write(package / "app/x360n.exe", "other version"); CHECK_THROWS(VerifyPackage(package)); }
+  SECTION("swapped frontend") { Write(package / "x360-native.exe", "other version"); CHECK_THROWS(VerifyPackage(package)); }
+  SECTION("incomplete payload") { fs::remove(package / "app/workspace/deps.lock.json"); CHECK_THROWS(VerifyPackage(package)); }
+  SECTION("missing index") { fs::remove(package / "package.sha256"); CHECK_THROWS(VerifyPackage(package)); }
 }
 TEST_CASE("desktop opens an empty environment without inventing targets") {
   Fixture f;
