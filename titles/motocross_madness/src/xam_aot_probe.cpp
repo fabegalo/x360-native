@@ -39,6 +39,8 @@
 #include <cstdint>
 #include <cstring>
 #include <fstream>
+#include <filesystem>
+#include "../../common/avatar/avatar_aot_catalog.h"
 #include <iterator>
 #include <memory>
 #include <span>
@@ -80,6 +82,7 @@ REXCVAR_DEFINE_BOOL(motocross_xam_aot_probe_ldi, false, "Motocross Madness",
 REXCVAR_DEFINE_BOOL(motocross_xam_aot_probe_aggregate, false, "Motocross Madness",
                     "Diagnostic: aggregate result and request lifecycle only" );
 
+REXCVAR_DEFINE_BOOL(motocross_avatar_service_probe, false, "Motocross Madness", "Diagnostic: avatar service integration" );
 namespace {
 
 constexpr uint32_t kXamBase = 0x815F0000, kXamSize = 0x610000;
@@ -1223,6 +1226,64 @@ void RunAggregateAssets(const x360n::avatar::AvatarToc& toc, uint32_t callbacks)
             abi));
 }
 
+void RunAvatarServiceProbe(const x360n::avatar::AvatarToc& toc,
+                           const std::string& catalog_path, uint32_t callbacks) {
+  using namespace x360n::avatar;
+  auto* rt = rex::Runtime::instance();
+  auto* thread = rex::runtime::ThreadState::Get();
+  uint32_t abi = 0;
+  AvatarAotCall call = [&](uint32_t fn, std::initializer_list<uint64_t> args) {
+    const auto hr = uint32_t(CallQuiet(rt->function_dispatcher(), thread, fn, args, &abi));
+    REXLOG_INFO("avatar-service: {:08X} -> {:08X}", fn, hr);
+    return hr;
+  };
+  auto device = std::make_unique<rex::filesystem::HostPathDevice>(
+      "\\Device\\X360nAvatarCatalog17559", std::filesystem::path(catalog_path).parent_path(), true);
+  if (!device->Initialize() || !rt->kernel_state()->file_system()->RegisterDevice(std::move(device))) {
+    Check(false, "avatar-service: mount read-only catalog");
+    return;
+  }
+  AotAvatarCatalog catalog(*rt->memory(), call);
+  auto hr = catalog.Open("\\Device\\X360nAvatarCatalog17559\\AvatarAssetPack.toc");
+  Check(hr == 0, fmt::format("avatar-service: open original generator HRESULT={:08X}", hr));
+  if (hr) return;
+  std::vector<std::array<uint8_t, kMetadataSize>> descriptions;
+  hr = catalog.Generate(3, 4, descriptions);
+  Check(hr == 0 && descriptions.size() == 4,
+        fmt::format("avatar-service: random metadata HRESULT={:08X}, count={}", hr, descriptions.size()));
+  // IDs have three layouts: modifiers, body/head refs and clothing refs.
+  for (size_t i = 0; i < descriptions.size(); ++i) {
+    const auto& md = descriptions[i];
+    std::vector<size_t> slots{12, 28, 44, 288, 320};
+    for (size_t n = 0; n < 6; ++n) slots.push_back(60 + n * 32);
+    for (size_t n = 0; n < 13; ++n) slots.push_back(352 + n * 32);
+    size_t resolved = 0;
+    for (auto offset : slots) {
+      const auto id = AssetId::FromBytes(std::span<const uint8_t, 16>(md.data() + offset, 16));
+      if (id.IsZero()) continue;
+      std::string error;
+      auto index = ResolveAsset(toc, id, &error);
+      Check(bool(index), fmt::format("avatar-service: avatar {} slot {} record {} category {:X}: {}",
+                                    i, offset, id.index, id.category, error));
+      resolved += bool(index);
+    }
+    REXLOG_INFO("avatar-service: avatar {} body {}: {} resolved assets", i, BodyType(md), resolved);
+  }
+  for (const auto& md : descriptions) {
+    AotAssetsStats stats;
+    auto backend = MakeAotMetadataAssetsBackend(*rt->memory(), call, toc, md, 0xFFF, callbacks, stats);
+    AssetsRequest request(std::move(backend));
+    for (int n = 0; n < 80 && request.status() == kAssetsPending; ++n) request.Step();
+    auto output = request.result();
+    uint32_t count = output.result ? MeshBE(rt->memory()->TranslateVirtual<const uint8_t*>(output.result + 8)) : 0;
+    Check(request.status() == 0 && count >= 2 && stats.applied > 0,
+          fmt::format("avatar-service: full metadata HRESULT={:08X}, meshes={}, decoded={}, modifiers={}, finalized={}",
+                      request.status(), count, stats.decoded, stats.applied, stats.finalized));
+  }
+  Check(abi == 0, "avatar-service: original generator ABI preserved");
+}
+
+
 void Run(uint32_t game_callbacks) {
   auto* runtime = rex::Runtime::instance();
   auto* thread = rex::runtime::ThreadState::Get();
@@ -1263,11 +1324,12 @@ void Run(uint32_t game_callbacks) {
         fmt::format("load: image 0x{:08X}+0x{:X} (expected 0x{:08X}+0x{:X})",
                     base, size, kXamBase, kXamSize));
 
-  if (REXCVAR_GET(motocross_xam_aot_probe_aggregate) || REXCVAR_GET(motocross_xam_aot_probe_meshes) || REXCVAR_GET(motocross_xam_aot_probe_ldi)) {
+  if (REXCVAR_GET(motocross_avatar_service_probe) || REXCVAR_GET(motocross_xam_aot_probe_aggregate) || REXCVAR_GET(motocross_xam_aot_probe_meshes) || REXCVAR_GET(motocross_xam_aot_probe_ldi)) {
     std::string error;
     auto toc = x360n::avatar::AvatarToc::Parse(Slurp(catalog_path), &error);
     if (!toc) { Check(false, "meshes: catalog: " + error); return; }
-    if (REXCVAR_GET(motocross_xam_aot_probe_aggregate)) RunAggregateAssets(*toc, game_callbacks);
+    if (REXCVAR_GET(motocross_avatar_service_probe)) RunAvatarServiceProbe(*toc, catalog_path, game_callbacks);
+    else if (REXCVAR_GET(motocross_xam_aot_probe_aggregate)) RunAggregateAssets(*toc, game_callbacks);
     else if (REXCVAR_GET(motocross_xam_aot_probe_ldi)) RunLdiAssets(*toc, game_callbacks);
     else RunMeshes(*toc, game_callbacks);
     return;
@@ -1462,7 +1524,7 @@ void MaybeRunXamAotProbe(PPCRegister& r3, PPCRegister& r4, PPCRegister& r5, PPCR
   PPCContext saved = *thread->context();
   Run(uint32_t(saved.r6.u64));
   if (REXCVAR_GET(motocross_xam_aot_probe_initialize) &&
-      !REXCVAR_GET(motocross_xam_aot_probe_aggregate) && !REXCVAR_GET(motocross_xam_aot_probe_meshes) && !REXCVAR_GET(motocross_xam_aot_probe_ldi)) {
+      !REXCVAR_GET(motocross_avatar_service_probe) && !REXCVAR_GET(motocross_xam_aot_probe_aggregate) && !REXCVAR_GET(motocross_xam_aot_probe_meshes) && !REXCVAR_GET(motocross_xam_aot_probe_ldi)) {
     *thread->context() = saved;
     RunOriginalInitialize(saved.r3, saved.r4, saved.r5, saved.r6, uint32_t(saved.r8.u64));
   }

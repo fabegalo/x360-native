@@ -22,11 +22,13 @@ set(MOTOCROSSMADNESS_SOURCES
     src/main.cpp
     src/unresolved_imports.cpp
     src/avatar_trace.cpp
+    src/avatar_service.cpp
     src/xam_aot_probe.cpp
     ../common/avatar/avatar_toc.cpp
     ../common/avatar/avatar_metadata.cpp
     ../common/avatar/avatar_assets_request.cpp
     ../common/avatar/avatar_aot_assets.cpp
+    ../common/avatar/avatar_aot_catalog.cpp
     ../common/camera_state.cpp
     ../common/launch_handoff.cpp
 )
@@ -47,7 +49,7 @@ rexglue_setup_target(motocross_madness GPU_PLUGINS xenos)
 if(TARGET motocross_madness_xam)
     target_compile_definitions(motocross_madness_xam PRIVATE REX_HOST_FUNCTION_TABLE=1)
     # Read-only diagnostic hooks of analysis/xam17559_avatar_trace.toml.
-    target_sources(motocross_madness_xam PRIVATE src/xam_avatar_trace.cpp)
+    target_sources(motocross_madness_xam PRIVATE src/xam_avatar_trace.cpp src/xam_avatar_memory.cpp)
 endif()
 
 # x360-native: copy rexruntime and the GPU plugin next to the executable on every
@@ -74,4 +76,6 @@ if(X360N_AVATAR_ASSETS_CHECKS)
         ../../tests/avatar/assets_request_test.cpp
         ../common/avatar/avatar_assets_request.cpp)
     add_test(NAME avatar.AssetsRequest COMMAND x360n_avatar_assets_checks)
+    add_test(NAME avatar.ModifierCounts COMMAND x360n_avatar_assets_checks --modifier-counts)
+    add_subdirectory(../../tests/sdkcheck/vavguw vavguw-checks)
 endif()

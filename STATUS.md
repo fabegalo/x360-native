@@ -1,17 +1,18 @@
 # STATUS
 
-Atualizado em 2026-10-12. Marcos: **M0 feito**; **M1 feito para um XEX** (amostra
+Atualizado em 2026-10-13. Marcos: **M0 feito**; **M1 feito para um XEX** (amostra
 XDK "Dolphin" da `rexglue/demo-iruka`), com as limitações abaixo.
 
-Frente isolada de avatares (`x360-avatars`, `avatars/xam-aot`): leitor/worker
-original e imports LDI agora ligados ao resultado agregado e ciclo de vida C++.
-Power Tee + MaleBody geraram dois descritores e 71 ossos; conclusão, cancelamento,
-erro real no segundo asset e propriedade dos buffers validados. Nova suíte de
-ciclo de vida: 61 verificações aprovadas; suítes anteriores não repetidas.
-Perfil diagnóstico 4/forma neutra. GetAssets export/overlapped, protocolo 2,
-componentes especiais/modificadores e renderização ainda pendentes.
-Initialize mantém falha; main não integrada. Evidência e limites:
-[avatares, seção 13](docs/avatar-system.md#13-resultado-agregado-e-ciclo-de-vida-getassets-2026-10-12).
+Frente isolada de avatares (`x360-avatars`, `avatars/xam-aot`): Motocross Madness
+chegou ao **gameplay do tutorial** em 2026-10-13. Contagem regressiva, movimento,
+88 MPH, 748 pontos e objetivos de volta/drift/manobra observados na interface.
+O serviço opt-in usa catálogo, malhas, modificadores, callbacks e mipmaps originais;
+Initialize só aceita depois de abrir o catálogo e montar um avatar completo.
+SDK conserva memória, arquivos e conclusão overlapped. A correção `vavguw`
+passou 66 560 verificações novas; suítes concluídas não foram repetidas.
+**Renderização ainda defeituosa:** chão preto e piloto deformado; corrida completa,
+save/load, animações do catálogo e componente especial continuam não validados.
+Main não integrada. Evidência e limites: [avatares, seção 14](docs/avatar-system.md#14-servico-real-e-entrada-no-tutorial-2026-10-13).
 
 ## Funciona (com evidência)
 

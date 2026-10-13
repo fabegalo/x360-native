@@ -65,7 +65,36 @@ void Drain(AssetsRequest& request) {
   }
 }
 }  // namespace
-int main() {
+int main(int argc, char** argv) {
+  if (argc == 2 && std::string(argv[1]) == "--modifier-counts") {
+    for (size_t count : {size_t(14), size_t(22), size_t(32)}) {
+      Trace trace;
+      trace.count = count;
+      auto request = Request(trace);
+      std::string expected = "B";
+      for (size_t i = 0; i < count; ++i) expected += char('0' + i);
+      for (size_t i = 0; i < count; ++i) expected += char('a' + i);
+      expected += 'F';
+      for (size_t i = 0; i < 2 * count + 4 &&
+                         request.status() == kAssetsPending; ++i)
+        request.Step();
+      Check(request.status() == 0 && trace.calls == expected,
+            "component plus modifier counts complete every phase in order");
+      Check(request.result().result == 0x1000 && trace.live == 1,
+            "extended count publishes only after finalize");
+      request.Release();
+      Check(!trace.live && trace.released == 1,
+            "extended count releases owned result once");
+    }
+    Trace invalid;
+    invalid.count = 33;
+    auto request = Request(invalid);
+    Check(request.Step() == kAssetsInvalid && invalid.calls.empty(),
+          "new upper bound rejects before any guest work");
+    std::cout << "modifier-counts: " << checks << " checks, " << failures
+              << " failures\n";
+    return failures ? 1 : 0;
+  }
   Trace success;
   {
     auto request = Request(success);
@@ -114,7 +143,7 @@ int main() {
               trace.released == (steps ? 1 : 0),
           "cancellation at every phase boundary releases unpublished work");
   }
-  for (size_t count : {size_t(0), size_t(14)}) {
+  for (size_t count : {size_t(0), size_t(33)}) {
     Trace trace;
     trace.count = count;
     auto request = Request(trace);

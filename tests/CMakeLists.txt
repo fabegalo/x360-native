@@ -138,4 +138,7 @@ set_tests_properties(sdkcheck.LDI PROPERTIES LABELS "project" TIMEOUT 30)
 add_executable(x360n_avatar_assets_checks avatar/assets_request_test.cpp
     ${PROJECT_SOURCE_DIR}/titles/common/avatar/avatar_assets_request.cpp)
 add_test(NAME avatar.AssetsRequest COMMAND x360n_avatar_assets_checks)
+    add_test(NAME avatar.ModifierCounts COMMAND x360n_avatar_assets_checks --modifier-counts)
 set_tests_properties(avatar.AssetsRequest PROPERTIES LABELS "project" TIMEOUT 15)
+
+add_subdirectory(sdkcheck/vavguw)

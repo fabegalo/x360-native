@@ -1,4 +1,7 @@
-# Sistema de avatares: contrato observado (etapa de leitura)
+# Sistema de avatares: contrato observado
+
+Estado atual: [serviço e gameplay do tutorial](#14-servico-real-e-entrada-no-tutorial-2026-10-13).
+As seções iniciais abaixo preservam o registro histórico da investigação.
 
 Data: 2026-10-12. Objetivo: entender o que os títulos em teste exigem do XAM para
 avatares antes de implementar qualquer coisa. Nada foi implementado; o SDK continua
@@ -665,3 +668,81 @@ incluindo concorrência e buffers do chamador. O export continua stub. Ainda fal
 protocolo 2, componente especial `0x1000`, modificadores independentes/campo 4 com
 dados reais, forma corporal não neutra e renderização. O sucesso demonstrado é do
 resultado privado no perfil acima; não constitui `GetAssets` completo do jogo.
+
+## 14. Servico real e entrada no tutorial (2026-10-13)
+
+Incremento exclusivamente na worktree `x360-avatars`, branch `avatars/xam-aot`.
+Opt-in `--motocross_avatar_service=true`; incompatível com o probe diagnóstico.
+Não houve integração na main, inicialização de DllMain, app manager, heap global
+ou workers originais do XAM. O SDK permanece responsável pelos serviços de console.
+
+### Contrato implementado
+
+- Leitor do catálogo original (`8197D1B0`, `8197D060`) e gerador de metadata
+  (`8197FD38`, `8197FDA0`, `8197FF28`) usam workspace privado e montagem somente
+  leitura. Initialize copia os cinco callbacks (a tabela do jogo está na pilha),
+  abre o catálogo, gera metadata e decodifica/aplica/finaliza um avatar completo
+  antes de publicar READY. Falhas reais são propagadas; não existe sucesso forçado.
+- `GetAssets` usa os buffers CPU/GPU do chamador; só scratch e cópias dos streams
+  são privados. Resultado inclui corpo, cabeça, roupas, cores, forma corporal,
+  modificadores de textura e vértices. Finalização original `819660A0/81966348`.
+  Release libera temporários e preserva o resultado entregue; falha invalida o header.
+- Mutex abrange a operação, troca/restauração dos globals do perfil e callbacks.
+  Contexto PPC/FPSCR do chamador é restaurado. Conclusão imediata real pelo SDK
+  escreve XOVERLAPPED/evento/APC; erro operacional é preservado em ExtendedError.
+  Ainda não é um worker assíncrono concorrente. Shutdown libera o serviço enquanto
+  Runtime está vivo; reinicialização/Shutdown durante uso não foi exercitada no jogo.
+- `GetManifestLocalUser` retorna ausência real de metadata de perfil. O jogo usa
+  seu próprio fallback; isso não cria um avatar persistido de usuário.
+- Mipmaps chamam `81978C90` para cada textura, ordenada como no original, com
+  callbacks reais do jogo. Retorno falso é erro, inclusive nos níveis pequenos.
+  Os alocadores internos `816E69E0/816E6AB0` e nothrow new `816E6B18` encaminham
+  ao XMem do SDK; delete `816E6B10` já chama o mesmo free. Assim o codec original
+  cria e destrói suas superfícies sem depender do heap global não inicializado.
+- `LoadAnimation` tem ponte ao leitor original, mas não foi chamado nestas sessões
+  e permanece não validado. `SetCustomAsset` retorna explicitamente não implementado.
+  Protocolo 2 e assets especiais `0x1000` seguem sem suporte; não há fallback falso.
+
+### Correção do codegen e evidência nova
+
+O codec BC1 original executa `vavguw`. O patch **0036** emite média arredondada
+para cima por lane uint32, com soma uint64 para evitar overflow, incluindo destinos
+aliased. O teste novo `sdkcheck.Vavguw` recompila quatro variantes PPC e compara
+com identidade independente: **66 560 verificações aprovadas**. Antes do patch,
+o mesmo teste falhou por instrução não implementada (exit 3). Nenhuma das suítes
+anteriores de STRB, cores, malhas, texturas, LDI ou lifecycle foi repetida.
+
+Runs locais:
+
+- `20261013T021743Z-mm-avatar-service-full-1`: quatro metadata completos, com
+  seis descritores/12 registros/seis modificadores por resultado; zero falhas ABI.
+- `20261013T025546Z-mm-mipmap-return`: falha real no nível BC1 2×2,
+  `81A1CE90 -> 80004005`. A fábrica de superfícies usava o new do heap XAM não
+  inicializado. O encaminhamento ao SDK removeu essa falha sem substituir o codec.
+- `20261013T030158Z-mm-codec-sdk-new`: `GetAssets` do jogo decodificou 13 registros,
+  aplicou sete modificadores, finalizou uma vez, guards intactos. Mipmaps:
+  sete texturas, 131 072 bytes, HRESULT 0. Processo permaneceu ativo até o limite
+  de 45 s do supervisor, sem crash; timeout não é encerramento normal do jogo.
+- `20261013T030314Z-mm-avatar-menu`: interface observada na pista do tutorial,
+  contagem regressiva e depois 88 MPH/748 pontos. Objetivos de volta, drift e uma
+  manobra aparecem concluídos. Isso confirma gameplay inicial, não conclusão do jogo.
+
+**Limitações visuais observadas:** chão preto e geometria do piloto deformada.
+Logs têm fetch constants inválidas, quatro stubs de voz, consultas XCTD ausentes
+e tentativa de caminho `media:/Tutorial_2k/...`. A causa de cada defeito gráfico
+ainda não foi isolada; não foi ativado bypass de fetch inválido para ocultá-lo.
+Save/load, corrida completa, multiplayer e persistência do avatar não aprovados.
+
+Build privado `RelWithDebInfo`: `.local/build/titles/motocross_madness-avatars`.
+Executar com o backend xenos, `--mnk_mode=true`, as raízes locais do jogo/usuário,
+`--motocross_avatar_service=true`, `--x360n_xam17559_root=<extração 17559>` e
+`--x360n_avatar_catalog_17559=<AvatarAssetPack.toc>`. Conteúdo original e arquivos
+gerados permanecem locais/ignorados. A correção do gerador exige codegen com
+`--ignore-stamp`; após uma alteração de analysis, conferir que o objeto C++ gerado
+foi recompilado (a regeneração já exigiu uma segunda passagem incremental).
+
+Sessão de gameplay encerrada com **exit code 0 após 456 534 ms** (7 min 36 s),
+sem timeout/crash no relatório do supervisor. O build final após a limpeza de logs
+é incremental; não se repetiu o percurso do jogo por uma alteração só de diagnóstico.
+
+Em complemento, o teste novo `avatar.ModifierCounts` exercita 14, 22 e 32 registros (componentes + modificadores) e rejeita 33 antes do backend: 10 verificações aprovadas, executadas separadamente da suíte de lifecycle anterior.

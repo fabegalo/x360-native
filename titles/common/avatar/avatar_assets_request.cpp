@@ -18,7 +18,7 @@ uint32_t AssetsRequest::Step() {
   uint32_t hr = 0;
   switch (state_) {
     case State::Queued:
-      if (!backend_ || !count_ || count_ > 13) {
+      if (!backend_ || !count_ || count_ > 32) {
         Fail(kAssetsInvalid);
         break;
       }
