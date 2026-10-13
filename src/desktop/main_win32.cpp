@@ -29,7 +29,7 @@ void VerifyDistribution(const fs::path& directory) {
   VerifyPackage(directory);
 #endif
 }
-constexpr UINT kFinished = WM_APP + 1, kProgress = WM_APP + 2, kDetected = WM_APP + 3, kInitialized = WM_APP + 4, kInspected = WM_APP + 5;
+constexpr UINT kFinished = WM_APP + 1, kProgress = WM_APP + 2, kDetected = WM_APP + 3, kInitialized = WM_APP + 4, kInspected = WM_APP + 5, kOpenEnvironment = WM_APP + 6;
 enum { kFolder = 101, kTargets, kCheck, kImport, kPrepare, kLaunch, kDetails, kData, kCancel, kLanguage, kInstall, kStorage, kPrimary, kSettings, kImportFolder, kDashboards, kGames, kHome, kImportPage, kAddContent, kLibrary };
 constexpr COLORREF background = RGB(15, 20, 27), surface = RGB(24, 32, 42), foreground = RGB(236, 241, 247), muted = RGB(157, 171, 189), accent = RGB(169, 231, 154);
 HBRUSH background_brush = CreateSolidBrush(background), surface_brush = CreateSolidBrush(surface);
@@ -547,6 +547,12 @@ LRESULT CALLBACK WndProc(HWND window, UINT message, WPARAM wp, LPARAM lp) {
         a->progress = Control(*a, PROGRESS_CLASSW, L"", PBS_MARQUEE);
         DragAcceptFiles(window, TRUE); SetTimer(window, 1, 100, nullptr);
         Labels(*a); Layout(*a);
+        // Show the main window before asking about an existing installation.
+        // A modal during WM_CREATE has an invisible owner and no taskbar entry.
+        PostMessageW(window, kOpenEnvironment, 0, 0);
+        return 0;
+      }
+      case kOpenEnvironment: {
         if (a->initializing) {
           const auto state = InspectEnvironment(Payload(*a), a->root);
           const auto installed = DigestFile(a->root / ".local/payload.sha256");
