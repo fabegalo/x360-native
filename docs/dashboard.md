@@ -1481,3 +1481,72 @@ quatro arquivos com os mesmos atributos LF do SDK, hashes base/finais conferidos
 O alvo `dash_17559`, incluindo `dash_17559_signin.dll`, também compilou com saída
 0 (`.local/tmp/c72-build-title.log`), sem execução gráfica. Os 41 patches passaram
 em `apply-sdk-patches.ps1 -Check` (`.local/tmp/c72-patches.log`).
+
+### 0.27 Enumeração real no Sign-in original: C7.3 (2026-10-13, parcial)
+
+Base: `468fc66`. Patch 0042 reutiliza UserProfile, KernelState, host XUI,
+DLL AOT e `profiles/local-v1.dat` do incremento anterior. Nenhuma tela,
+backend, formato de persistência ou perfil de produção foi criado.
+
+Contratos acrescentados e evidência estática dos binários locais 17559:
+
+- `XamProfileCreateEnumerator(0, handle)` e `XamProfileEnumerate(handle, 2,
+  record, 0)` atendem a sequência original `90118C3C–90118E98` via vtable
+  `901014A8`, thunks `90107920/90107930`. Cada enumerador de kernel tem seu
+  cursor e snapshot. Fim retorna NO_MORE_FILES; NtClose libera o handle.
+- O registro tem XUID local em +0, conta de 380 bytes em +8 e dispositivo em
+  +388. Nome UTF-16 em conta+8, XUID Live em conta+40 zerado. O único registro
+  vem do serviço persistido, mesmo quando está desconectado. Sem perfil, a
+  enumeração é vazia. O store não é anunciado como dispositivo removível.
+- FindAccount/LoadAccountInfo consultam essa identidade. Três adaptadores raw
+  preservam os 64 bits do XUID: o marshaler genérico do SDK fixado retorna
+  somente `ctx.rN.u32`, detectado pelos testes novos antes da correção.
+- A confirmação normal em `901186BC–90118720` usa LogonEx `0x120420`.
+  Original XAM `8199E884` segue `8199EEC0` quando não há bits 4/8, substituindo
+  os slots. Esse modo local passa pela transação existente, aceita apenas
+  slot zero e perfil conhecido, rejeita conta Live/modos não implementados.
+  Não copia a identidade fornecida pelo chamador sobre a persistência.
+- GetUserIndexMask, GetIndexFromXUID e GetDeviceId consultam o estado
+  compartilhado; não há outro kernel nem leitura de disco por quadro.
+- O log da execução revelou XMemCpy, XMemSet e lstrcpynW como stubs usados
+  pela cena. Os dois primeiros agora usam o CRT existente; lstrcpynW atende
+  cópia limitada/terminação UTF-16 conforme `81722F00`. Essas correções
+  posteriores à captura receberam teste unitário, sem segunda execução gráfica.
+
+**Execução única:** `.local/runs/c73-signin-profile/rex.log` registra a chamada
+real de enumeração pelo original e `1 record(s)` às 17:09:48.178. A captura
+`signin.png`, feita pelo script local `capture-window.ps1`, mostra `C73Local`
+na interface original. Foi usada uma fixture desconectada de 33 bytes em
+`.local/tmp/c73-dashboard-data/profiles/local-v1.dat` (XUID E00000000000C730),
+separada dos dados de uso. Esse nome veio da conta enumerada, não de texto
+substituído na cena. A sessão ficou desconectada e o arquivo não mudou.
+Processo PID 33708 encerrado pelo limite de aproximadamente 30 s; nenhum
+processo de dashboard ficou aberto. Não foram enviados cliques/teclas por
+scripts nem usado Computer Use.
+
+A primeira tentativa pelo supervisor foi recusada antes de lançar o título:
+“Preparação inválida; prepare novamente. A preparação anterior não terminou.”
+A única execução efetiva foi direta sobre o build de desenvolvimento, com
+WaitForExit limitado e Stop-Process em finally. Não se refez preparação/codegen
+para contornar recibos. Os comandos de build consultaram os carimbos existentes;
+seus resumos indicam zero arquivos de código gerado escritos.
+
+**Limite de aceite:** essa execução não confirmou o perfil pelo botão. Não
+comprova a sequência seleção → login → dashboard/GamerCard, nem cancelamento
+na cena. Os testes comprovam a fronteira de serviço (enumerar/fechar sem mudar,
+confirmar via export muda e persiste, consultas compartilham a identidade),
+não o tratamento do botão original. C7 continua parcial. As tarefas XAM e
+outros modos de logon, criação pela UI e ordinal 054B ainda estão incompletos;
+não foram substituídos por sucesso fictício. Não foi demonstrado que qualquer
+um deles bloqueia especificamente a confirmação normal nesta execução.
+
+Validação final focada: **5/5 `sdkcheck.Local profile`**, 1,27 s, timeout 30 s
+por teste (`.local/tmp/c73-tests.log`), incluindo os testes anteriores de
+persistência/falha e os novos contratos de enumeração, confirmação local,
+XUID, consultas, cursores, fechamento e cópia dos dados originais. Builds
+`x360n_sdk_runtime_checks` e `dash_17559` com seus componentes ligados, sem
+suíte completa ou regressões antigas. Logs `c73-build-tests.log` e
+`c73-build-title-final.log` em `.local/tmp`. Patch revertido/reaplicado em cópias
+isoladas: os três hashes base e final coincidem com o lock. Os 42 patches
+passam `apply-sdk-patches.ps1 -Check` (`c73-patches.log`). SDK pin preservado,
+sem push, sem alterar a Release publicada.

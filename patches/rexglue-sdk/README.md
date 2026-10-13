@@ -349,3 +349,26 @@ restart, XAM identity, sign-out, unsupported modes, corrupt data and write error
 All three focused tests pass via CTest (0.95 s, 30 s timeout per case). Patch
 reverse/apply verified in copied sources with SDK LF attributes and matching
 base/final hashes. There is no upstream equivalent identified; the pin is unchanged.
+
+## 0042 — original Sign-in profile enumeration (C7.3, partial)
+
+Exposes the existing local record through XamProfileCreateEnumerator/Enumerate,
+FindAccount and LoadAccountInfo. Uses one 392-byte record with a 380-byte account,
+UTF-16 name and no Live XUID. Each kernel enumerator owns its cursor and snapshot;
+opening, enumerating and closing do not change the session. Only filter 0 and
+enumeration flags 0/2 are supported. The store remains device-independent.
+
+The normal 17559 Sign-in LogonEx mode 0x120420 is mapped to the existing local
+session transaction (slot zero only). Preview/online/other modes fail explicitly.
+Index/mask/device queries use that session. Raw adapters preserve full XUIDs where
+the pinned typed argument marshaler otherwise truncates them. XAM memory imports
+reuse existing CRT implementations; bounded UTF-16 copy is implemented for the
+original request/identity buffers. No new kernel, UI or persistence format.
+
+Five focused `sdkcheck.Local profile` tests pass, including record bounds, cursor
+isolation/close, unsupported modes, real confirmation transaction, notification
+deduplication, identity queries/restart, and request/string copies. Reverse/apply
+on isolated copies matches all three base/final hashes; all 42 patches pass Check.
+One bounded graphical run demonstrated original enumeration and the stored name,
+not a button-driven login. The copy-import fixes were tested after that run, with
+no second visual execution. See dashboard §0.27 for the acceptance gap.

@@ -1,0 +1,281 @@
+diff --git a/src/kernel/xam/xam_enum.cpp b/src/kernel/xam/xam_enum.cpp
+index 9dcab94..c23d037 100644
+--- a/src/kernel/xam/xam_enum.cpp
++++ b/src/kernel/xam/xam_enum.cpp
+@@ -31,6 +31,91 @@ namespace xam {
+ using namespace rex::system;
+ using namespace rex::system::xam;
+ 
++// Profile enumeration has a fixed one-record ABI, not XamEnumerate's byte
++// buffer length. 17559 signin 90118C7C consumes XUID + 380-byte account +
++// device id (392 bytes); account+8 is WCHAR[16], account+40 is the Live XUID.
++#pragma pack(push, 4)
++struct LocalAccount {
++  uint8_t reserved[8];
++  be<uint16_t> name[16];
++  be<uint64_t> online_xuid;
++  uint8_t online_data[332];
++};
++static_assert_size(LocalAccount, 380);
++struct LocalProfileRecord {
++  be<uint64_t> xuid;
++  LocalAccount account;
++  be<uint32_t> device;
++};
++static_assert_size(LocalProfileRecord, 392);
++#pragma pack(pop)
++
++static LocalAccount AccountFor(const UserProfile::Identity& identity) {
++  LocalAccount account{};
++  for (size_t i = 0; i < identity.name.size() && i < 15; ++i)
++    account.name[i] = static_cast<uint8_t>(identity.name[i]);
++  return account;
++}
++
++u32 XamProfileCreateEnumerator_entry(u32 filter, mapped_u32 handle) {
++  if (!handle) return X_ERROR_INVALID_PARAMETER;
++  *handle = 0;
++  // The original Sign-in requests filter=0. Other enumeration filters are
++  // outside this local-only contract; do not silently ignore them.
++  if (filter) return X_ERROR_INVALID_PARAMETER;
++  auto e = make_object<XStaticEnumerator<LocalProfileRecord>>(REX_KERNEL_STATE(), 1);
++  auto status = e->Initialize(0xFF, 0xFE, 0x23001, 0x23003, 0);
++  if (XFAILED(status)) return X_ERROR_FUNCTION_FAILED;
++  const auto identity = REX_KERNEL_STATE()->user_profile()->identity();
++  if (identity.xuid) {
++    auto* record = e->AppendItem();
++    *record = {};
++    record->xuid = identity.xuid;
++    record->account = AccountFor(identity);
++  }
++  *handle = e->handle();
++  REXKRNL_INFO("Local profile enumeration: {} record(s)", e->item_count());
++  return X_ERROR_SUCCESS;
++}
++
++u32 XamProfileEnumerate_entry(u32 handle, u32 flags, mapped_void buffer, u32 overlapped) {
++  // 17559 uses flags=2 for synchronous enumeration; bit 1 selects direct
++  // dispatch in original XAM 816F1134. No buffer-size argument exists here.
++  if (flags != 0 && flags != 2) return X_ERROR_INVALID_PARAMETER;
++  auto e = REX_KERNEL_OBJECTS()->LookupObject<XEnumerator>(handle);
++  if (!e) return X_ERROR_INVALID_HANDLE;
++  auto* header = REX_KERNEL_MEMORY()->TranslateVirtual<X_KENUMERATOR*>(e->guest_object());
++  if (header->open_message != 0x23001 || e->item_size() != sizeof(LocalProfileRecord))
++    return X_ERROR_INVALID_HANDLE;
++  if (!buffer) return X_ERROR_INVALID_PARAMETER;
++  uint32_t count = 0;
++  const auto result = e->WriteItems(buffer.guest_address(), buffer.as<uint8_t*>(), &count);
++  if (overlapped) {
++    REX_KERNEL_STATE()->CompleteOverlappedImmediateEx(overlapped, result,
++        X_HRESULT_FROM_WIN32(result), count);
++    return X_ERROR_IO_PENDING;
++  }
++  return result;
++}
++
++u32 XamProfileFindAccount_entry(u64 xuid, ppc_ptr_t<LocalAccount> account, mapped_u32 device) {
++  if (!account) return X_ERROR_INVALID_PARAMETER;
++  const auto identity = REX_KERNEL_STATE()->user_profile()->identity();
++  if (!identity.xuid || xuid != identity.xuid) return X_ERROR_NO_SUCH_USER;
++  *account = AccountFor(identity);
++  if (device) *device = 0;
++  return X_ERROR_SUCCESS;
++}
++
++u32 XamProfileLoadAccountInfo_entry(u32 device, u64 xuid, ppc_ptr_t<LocalAccount> account) {
++  if (device) return X_ERROR_DEVICE_NOT_CONNECTED;
++  if (!account) return X_ERROR_INVALID_PARAMETER;
++  const auto identity = REX_KERNEL_STATE()->user_profile()->identity();
++  if (!identity.xuid || xuid != identity.xuid) return X_ERROR_NO_SUCH_USER;
++  *account = AccountFor(identity);
++  return X_ERROR_SUCCESS;
++}
++
+ // https://github.com/LestaD/SourceEngine2007/blob/master/se2007/engine/xboxsystem.cpp#L518
+ uint32_t xeXamEnumerate(uint32_t handle, uint32_t flags, mapped_void buffer_ptr,
+                         uint32_t buffer_size, uint32_t* items_returned, uint32_t overlapped_ptr) {
+@@ -110,6 +195,30 @@ u32 XamGetPrivateEnumStructureFromHandle_entry(u32 handle, mapped_u32 out_object
+ }  // namespace rex
+ 
+ REX_EXPORT(__imp__XamEnumerate, rex::kernel::xam::XamEnumerate_entry)
++REX_EXPORT(__imp__XamProfileCreateEnumerator, rex::kernel::xam::XamProfileCreateEnumerator_entry)
++REX_EXPORT(__imp__XamProfileEnumerate, rex::kernel::xam::XamProfileEnumerate_entry)
++// The pinned generic marshaler truncates integer arguments to 32 bits. These
++// three profile contracts carry a complete XUID in a single PPC register.
++extern "C" REX_FUNC(__imp__XamProfileFindAccount) {
++  using namespace rex;
++  using namespace rex::kernel::xam;
++  auto account = ppc_ptr_t<LocalAccount>(ctx.r4.u32 ?
++      reinterpret_cast<LocalAccount*>(base + ctx.r4.u32) : nullptr, ctx.r4.u32);
++  auto device = mapped_u32(ctx.r5.u32 ?
++      reinterpret_cast<be<uint32_t>*>(base + ctx.r5.u32) : nullptr, ctx.r5.u32);
++  ctx.r3.u64 = XamProfileFindAccount_entry(ctx.r3.u64, account, device);
++}
++static rex::ppc::detail::PPCFuncRegistrar profile_find_reg(
++    "__imp__XamProfileFindAccount", &__imp__XamProfileFindAccount);
++extern "C" REX_FUNC(__imp__XamProfileLoadAccountInfo) {
++  using namespace rex;
++  using namespace rex::kernel::xam;
++  auto account = ppc_ptr_t<LocalAccount>(ctx.r5.u32 ?
++      reinterpret_cast<LocalAccount*>(base + ctx.r5.u32) : nullptr, ctx.r5.u32);
++  ctx.r3.u64 = XamProfileLoadAccountInfo_entry(ctx.r3.u32, ctx.r4.u64, account);
++}
++static rex::ppc::detail::PPCFuncRegistrar profile_load_reg(
++    "__imp__XamProfileLoadAccountInfo", &__imp__XamProfileLoadAccountInfo);
+ REX_EXPORT(__imp__XamCreateEnumeratorHandle, rex::kernel::xam::XamCreateEnumeratorHandle_entry)
+ REX_EXPORT(__imp__XamGetPrivateEnumStructureFromHandle,
+            rex::kernel::xam::XamGetPrivateEnumStructureFromHandle_entry)
+diff --git a/src/kernel/xam/xam_user.cpp b/src/kernel/xam/xam_user.cpp
+index a5e77d2..8d0922a 100644
+--- a/src/kernel/xam/xam_user.cpp
++++ b/src/kernel/xam/xam_user.cpp
+@@ -59,17 +59,26 @@ i32 XamUserGetXUID_entry(u32 user_index, u32 type_mask, mapped_u64 xuid_ptr) {
+ 
+ // 17559: 8199C630 expands four XUIDs into 392-byte entries before LogonEx.
+ // 8199EEC0 replaces the slot array for flags=0 (zero XUID signs that slot out).
+-// Other modes involve preview/Live/account payloads and remain unsupported.
++// Original Sign-in 17559 (901186BC-90118720) uses 0x120420 for its
++// normal confirmation. With no bits 4/8 set, XAM follows the same replacement
++// path at 8199E884 -> 8199EEC0. Only this local mode is supported in addition
++// to flags=0; preview, Live and other account modes remain unsupported.
+ static uint32_t LocalLogon(mapped_void users, uint32_t flags, uint32_t overlapped,
+                            uint32_t stride) {
+   if (!users) return uint32_t(X_E_INVALIDARG);
+-  if (flags) return 0x80004001u; // E_NOTIMPL
++  if (flags && !(stride == 392 && flags == 0x120420)) return 0x80004001u;
+   auto* bytes = users.as<uint8_t*>();
+   for (unsigned i = 1; i < 4; ++i) {
+     if (rex::memory::load_and_swap<uint64_t>(bytes + i * stride))
+       return 0x80004001u; // E_NOTIMPL: never partially apply a multi-user request.
+   }
+   const auto xuid = rex::memory::load_and_swap<uint64_t>(bytes);
++  if (flags == 0x120420) {
++    // This path must select an existing local identity, never ingest account
++    // data supplied by the caller or silently enable an online account.
++    if (!xuid || rex::memory::load_and_swap<uint64_t>(bytes + 48))
++      return uint32_t(X_E_INVALIDARG);
++  }
+   const auto result = REX_KERNEL_STATE()->user_profile()->SetLocalSession(xuid);
+   const auto hr = X_HRESULT_FROM_WIN32(result);
+   if (overlapped) {
+@@ -79,6 +88,27 @@ static uint32_t LocalLogon(mapped_void users, uint32_t flags, uint32_t overlappe
+   return hr;
+ }
+ 
++u32 XamUserGetUserIndexMask_entry(u32 flags) {
++  const auto identity = REX_KERNEL_STATE()->user_profile()->identity();
++  return identity.signin_state && (uint32_t(flags) & ~1u) == 0 ? 1 : 0;
++}
++
++u32 XamUserGetIndexFromXUID_entry(u64 xuid, u32 flags, mapped_u32 index) {
++  if (!index) return X_E_INVALIDARG;
++  const auto identity = REX_KERNEL_STATE()->user_profile()->identity();
++  if (!identity.signin_state || !(flags & 1) || !xuid || xuid != identity.xuid)
++    return X_E_NO_SUCH_USER;
++  *index = 0;
++  return X_E_SUCCESS;
++}
++
++u32 XamUserGetDeviceId_entry(u32 user, mapped_u32 device) {
++  if (!device) return X_E_INVALIDARG;
++  *device = 0;  // existing local store is not on a removable content device
++  return user == 0 && REX_KERNEL_STATE()->user_profile()->signin_state()
++      ? X_E_SUCCESS : X_E_NO_SUCH_USER;
++}
++
+ u32 XamUserLogon_entry(mapped_void users, u32 flags, u32 overlapped) {
+   return LocalLogon(users, flags, overlapped, 8);
+ }
+@@ -840,8 +870,14 @@ REX_EXPORT_STUB(__imp__XamUserFlushLogonQueue);
+ REX_EXPORT_STUB(__imp__XamUserGetAge);
+ REX_EXPORT_STUB(__imp__XamUserGetAgeGroup);
+ REX_EXPORT_STUB(__imp__XamUserGetCachedUserFlags);
+-REX_EXPORT_STUB(__imp__XamUserGetDeviceId);
+-REX_EXPORT_STUB(__imp__XamUserGetIndexFromXUID);
++REX_EXPORT(__imp__XamUserGetDeviceId, rex::kernel::xam::XamUserGetDeviceId_entry)
++extern "C" REX_FUNC(__imp__XamUserGetIndexFromXUID) {
++  auto index = mapped_u32(ctx.r5.u32 ?
++      reinterpret_cast<rex::be<uint32_t>*>(base + ctx.r5.u32) : nullptr, ctx.r5.u32);
++  ctx.r3.u64 = rex::kernel::xam::XamUserGetIndexFromXUID_entry(ctx.r3.u64, ctx.r4.u32, index);
++}
++static rex::ppc::detail::PPCFuncRegistrar profile_index_reg(
++    "__imp__XamUserGetIndexFromXUID", &__imp__XamUserGetIndexFromXUID);
+ REX_EXPORT_STUB(__imp__XamUserGetMembershipTierFromXUID);
+ REX_EXPORT_STUB(__imp__XamUserGetOnlineCountryFromXUID);
+ REX_EXPORT_STUB(__imp__XamUserGetOnlineLanguageFromXUID);
+@@ -851,7 +887,7 @@ REX_EXPORT_STUB(__imp__XamUserGetRequestedUserIndexMask);
+ REX_EXPORT_STUB(__imp__XamUserGetSubscriptionType);
+ REX_EXPORT_STUB(__imp__XamUserGetUserFlags);
+ REX_EXPORT_STUB(__imp__XamUserGetUserFlagsFromXUID);
+-REX_EXPORT_STUB(__imp__XamUserGetUserIndexMask);
++REX_EXPORT(__imp__XamUserGetUserIndexMask, rex::kernel::xam::XamUserGetUserIndexMask_entry)
+ REX_EXPORT_STUB(__imp__XamUserGetUserTenure);
+ REX_EXPORT_STUB(__imp__XamUserGetUsersMissingAvatars);
+ REX_EXPORT_STUB(__imp__XamUserGetXUIDForTFA);
+diff --git a/src/kernel/xam/xam_misc.cpp b/src/kernel/xam/xam_misc.cpp
+index 8025e6d..1e45b49 100644
+--- a/src/kernel/xam/xam_misc.cpp
++++ b/src/kernel/xam/xam_misc.cpp
+@@ -230,10 +230,16 @@ REX_EXPORT_STUB(__imp__XGetOverlappedResult);
+ REX_EXPORT_STUB(__imp__XGetSSLCertBypassEnabled);
+ REX_EXPORT_STUB(__imp__XMPRegisterCodec);
+ 
+-REX_EXPORT_STUB(__imp__XMemCpy);
++// XAM imports used by the original Sign-in request/account copies. Reuse the
++// existing CRT implementation instead of leaving guest buffers untouched.
++extern "C" REX_FUNC(rexcrt_XMemCpy);
++extern "C" REX_FUNC(__imp__XMemCpy) { rexcrt_XMemCpy(ctx, base); }
++static rex::ppc::detail::PPCFuncRegistrar xam_memcpy_reg("__imp__XMemCpy", &__imp__XMemCpy);
+ REX_EXPORT_STUB(__imp__XMemCpyStreaming);
+ 
+-REX_EXPORT_STUB(__imp__XMemSet);
++extern "C" REX_FUNC(rexcrt_XMemSet);
++extern "C" REX_FUNC(__imp__XMemSet) { rexcrt_XMemSet(ctx, base); }
++static rex::ppc::detail::PPCFuncRegistrar xam_memset_reg("__imp__XMemSet", &__imp__XMemSet);
+ REX_EXPORT_STUB(__imp__XMemSize);
+ REX_EXPORT_STUB(__imp__XNetLogonClearTicketCaches);
+ REX_EXPORT_STUB(__imp__XNetLogonGetDnsString);
+@@ -674,17 +680,17 @@ REX_EXPORT_STUB(__imp__XamPrepareGamerTiles);
+ REX_EXPORT_STUB(__imp__XamProfileClose);
+ REX_EXPORT_STUB(__imp__XamProfileControlPec);
+ REX_EXPORT_STUB(__imp__XamProfileCreate);
+-REX_EXPORT_STUB(__imp__XamProfileCreateEnumerator);
++
+ REX_EXPORT_STUB(__imp__XamProfileDelete);
+-REX_EXPORT_STUB(__imp__XamProfileEnumerate);
+-REX_EXPORT_STUB(__imp__XamProfileFindAccount);
++
++
+ REX_EXPORT_STUB(__imp__XamProfileGetCachedWindowsLiveEmail);
+ REX_EXPORT_STUB(__imp__XamProfileGetCreationStatus);
+ REX_EXPORT_STUB(__imp__XamProfileGetLastSync);
+ REX_EXPORT_STUB(__imp__XamProfileGetLiveLegalLocale);
+ REX_EXPORT_STUB(__imp__XamProfileGetLocalTitleCount);
+ REX_EXPORT_STUB(__imp__XamProfileIsSaveWindowsLiveCredsEnabled);
+-REX_EXPORT_STUB(__imp__XamProfileLoadAccountInfo);
++
+ REX_EXPORT_STUB(__imp__XamProfileLoadWindowsLiveCredentials);
+ REX_EXPORT_STUB(__imp__XamProfileOpen);
+ REX_EXPORT_STUB(__imp__XamProfileRecoverTitle);
+@@ -1065,7 +1071,20 @@ REX_EXPORT_STUB(__imp__lstrcatW);
+ REX_EXPORT_STUB(__imp__lstrcpyA);
+ REX_EXPORT_STUB(__imp__lstrcpyW);
+ REX_EXPORT_STUB(__imp__lstrcpynA);
+-REX_EXPORT_STUB(__imp__lstrcpynW);
++extern "C" REX_FUNC(__imp__lstrcpynW) {
++  // Original 17559 81722F00: at most count-1 WCHARs plus terminator.
++  if (ctx.r5.s32 <= 0) return;
++  const auto dest = ctx.r3.u32;
++  const auto source = ctx.r4.u32;
++  uint32_t i = 0;
++  for (; i + 1 < ctx.r5.u32; ++i) {
++    const auto ch = rex::memory::load_and_swap<uint16_t>(base + source + i * 2);
++    rex::memory::store_and_swap<uint16_t>(base + dest + i * 2, ch);
++    if (!ch) return;
++  }
++  rex::memory::store_and_swap<uint16_t>(base + dest + i * 2, 0);
++}
++static rex::ppc::detail::PPCFuncRegistrar xam_strcpyn_reg("__imp__lstrcpynW", &__imp__lstrcpynW);
+ REX_EXPORT_STUB(__imp__lstrlenA);
+ REX_EXPORT_STUB(__imp__lstrlenW);
+ REX_EXPORT_STUB(__imp__wsprintfA);

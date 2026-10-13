@@ -1,5 +1,19 @@
 # STATUS
 
+C7.3 (2026-10-13), **parcial; confirmação pela cena ainda não demonstrada**:
+patch 0042 conecta os imports de enumeração/consulta de conta do Sign-in original
+ao perfil persistido do 0041, preservando XUID de 64 bits. Uma execução dirigida
+com timeout mostrou `C73Local`, vindo de uma fixture isolada em `local-v1.dat`,
+na interface original. A sessão permaneceu desconectada; nenhum botão foi
+acionado por automação. O contrato LogonEx `0x120420`, usado pela confirmação
+normal da 17559, altera a sessão real e é recuperado em outro runtime nos testes.
+Isso **não comprova seleção/confirmação pela UI nem atualização visual após login**.
+Cinco testes de perfil passam; SDK/persistência/host existentes reutilizados.
+Correções pequenas de XMemCpy/XMemSet/lstrcpynW, encontrados como stubs na execução,
+receberam testes focados; não houve segunda execução gráfica. Detalhes em
+`docs/dashboard.md` §0.27. Criação pela cena, outros modos de logon e tarefas
+XAM completas continuam pendentes. Nenhum aceite completo de C7 foi marcado.
+
 C7.2 (2026-10-13), **parcial; Sign-in funcional ainda não entregue**: patch
 0041 substitui a identidade fixa por um registro local persistente de um perfil,
 com criação no serviço C++, entrada/saída pelos exports XAM Logon/LogonEx no modo

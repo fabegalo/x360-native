@@ -20,6 +20,16 @@ extern "C" void __imp__XamUserLogonEx(PPCContext&, uint8_t*);
 extern "C" void __imp__XamUserGetSigninInfo(PPCContext&, uint8_t*);
 extern "C" void __imp__XamUserGetXUID(PPCContext&, uint8_t*);
 extern "C" void __imp__XamUserGetSigninState(PPCContext&, uint8_t*);
+extern "C" void __imp__XamProfileCreateEnumerator(PPCContext&, uint8_t*);
+extern "C" void __imp__XamProfileEnumerate(PPCContext&, uint8_t*);
+extern "C" void __imp__XamProfileFindAccount(PPCContext&, uint8_t*);
+extern "C" void __imp__XamProfileLoadAccountInfo(PPCContext&, uint8_t*);
+extern "C" void __imp__XamUserGetIndexFromXUID(PPCContext&, uint8_t*);
+extern "C" void __imp__XamUserGetUserIndexMask(PPCContext&, uint8_t*);
+extern "C" void __imp__NtClose(PPCContext&, uint8_t*);
+extern "C" void __imp__XMemCpy(PPCContext&, uint8_t*);
+extern "C" void __imp__XMemSet(PPCContext&, uint8_t*);
+extern "C" void __imp__lstrcpynW(PPCContext&, uint8_t*);
 
 namespace {
 struct Store {
@@ -35,6 +45,144 @@ void Setup(rex::Runtime& rt) {
   config.tool_mode = true;
   config.kernel_init = rex::kernel::InitializeKernel;
   REQUIRE(rt.Setup(std::move(config)) == X_STATUS_SUCCESS);
+}
+
+TEST_CASE("Local profile enumerates the original Sign-in record and commits only on confirmation",
+          "[sdk][local-profile][signin-profile]") {
+  Store store;
+  uint64_t xuid = 0;
+  {
+    rex::Runtime rt(store.path, store.path);
+    Setup(rt);
+    auto* profile = rt.kernel_state()->user_profile();
+    REQUIRE(profile->CreateLocal("Selected") == 0);
+    xuid = profile->xuid();
+    auto* memory = rt.memory();
+    const auto data = memory->SystemHeapAlloc(4096);
+    auto* bytes = memory->TranslateVirtual<uint8_t*>(data);
+    auto* base = memory->virtual_membase();
+    auto listener = rex::system::object_ref<rex::system::XNotifyListener>(
+        new rex::system::XNotifyListener(rt.kernel_state()));
+    listener->Initialize(1, 10);
+    PPCContext ctx{};
+    auto create_enum = [&] {
+      ctx.r3.u64 = 0; ctx.r4.u64 = data;
+      __imp__XamProfileCreateEnumerator(ctx, base);
+      REQUIRE(ctx.r3.u32 == 0);
+      return rex::memory::load_and_swap<uint32_t>(bytes);
+    };
+    const auto first = create_enum();
+    const auto second = create_enum();
+    auto enumerate = [&](uint32_t handle, uint32_t flags = 2) {
+      ctx.r3.u64 = handle; ctx.r4.u64 = flags;
+      ctx.r5.u64 = data + 16; ctx.r6.u64 = 0;
+      __imp__XamProfileEnumerate(ctx, base);
+      return ctx.r3.u32;
+    };
+    std::memset(bytes + 16, 0xCD, 393);
+    CHECK(enumerate(first, 4) == X_ERROR_INVALID_PARAMETER);
+    REQUIRE(enumerate(first) == 0);
+    CHECK(rex::memory::load_and_swap<uint64_t>(bytes + 16) == xuid);
+    for (unsigned i = 0; i < 8; ++i)
+      CHECK(rex::memory::load_and_swap<uint16_t>(bytes + 32 + i * 2) == uint16_t("Selected"[i]));
+    CHECK(rex::memory::load_and_swap<uint16_t>(bytes + 48) == 0);
+    CHECK(rex::memory::load_and_swap<uint64_t>(bytes + 64) == 0); // no Live identity
+    CHECK(rex::memory::load_and_swap<uint32_t>(bytes + 404) == 0);
+    CHECK(bytes[408] == 0xCD); // exactly 392 bytes
+    CHECK(enumerate(first) == X_ERROR_NO_MORE_FILES);
+    CHECK(enumerate(second) == 0); // cursors are independent
+    // Closing/canceling an enumeration must not select a user or emit a change.
+    ctx.r3.u64 = first; __imp__NtClose(ctx, base);
+    CHECK(ctx.r3.u32 == 0);
+    CHECK(enumerate(first) == X_ERROR_INVALID_HANDLE);
+    uint32_t param = 0;
+    CHECK(profile->signin_state() == 0);
+    CHECK_FALSE(listener->DequeueNotification(0xA, &param));
+
+    ctx.r3.u64 = xuid; ctx.r4.u64 = data + 512; ctx.r5.u64 = 0;
+    __imp__XamProfileFindAccount(ctx, base);
+    CHECK(ctx.r3.u32 == 0);
+    CHECK(std::memcmp(bytes + 24, bytes + 512, 380) == 0);
+    ctx.r3.u64 = 0; ctx.r4.u64 = xuid; ctx.r5.u64 = data + 1024;
+    __imp__XamProfileLoadAccountInfo(ctx, base);
+    CHECK(ctx.r3.u32 == 0);
+    CHECK(std::memcmp(bytes + 512, bytes + 1024, 380) == 0);
+
+    std::memset(bytes + 16 + 392, 0, 392 * 3);
+    auto confirm = [&](uint32_t flags) {
+      ctx.r3.u64 = data + 16; ctx.r4.u64 = flags; ctx.r5.u64 = 0;
+      __imp__XamUserLogonEx(ctx, base);
+      return ctx.r3.u32;
+    };
+    CHECK(confirm(0x120424) == 0x80004001u); // unsupported mode cannot mutate
+    CHECK(profile->signin_state() == 0);
+    REQUIRE(confirm(0x120420) == 0); // normal original Sign-in confirmation
+    REQUIRE(listener->DequeueNotification(0xA, &param));
+    CHECK(param == 1);
+    CHECK(confirm(0x120420) == 0);
+    CHECK_FALSE(listener->DequeueNotification(0xA, &param));
+    ctx.r3.u64 = xuid; ctx.r4.u64 = 1; ctx.r5.u64 = data;
+    __imp__XamUserGetIndexFromXUID(ctx, base);
+    CHECK(ctx.r3.u32 == 0);
+    CHECK(rex::memory::load_and_swap<uint32_t>(bytes) == 0);
+    ctx.r3.u64 = 1; __imp__XamUserGetUserIndexMask(ctx, base);
+    CHECK(ctx.r3.u32 == 1);
+    ctx.r3.u64 = 2; __imp__XamUserGetUserIndexMask(ctx, base);
+    CHECK(ctx.r3.u32 == 0);
+    ctx.r3.u64 = 0; ctx.r4.u64 = 0; ctx.r5.u64 = data + 2048;
+    __imp__XamUserGetSigninInfo(ctx, base);
+    CHECK(ctx.r3.u32 == 0);
+    CHECK(rex::memory::load_and_swap<uint64_t>(bytes + 2048) == xuid);
+    CHECK(std::string(reinterpret_cast<char*>(bytes + 2072)) == "Selected");
+    // Cancellation while already connected also preserves the session.
+    ctx.r3.u64 = second; __imp__NtClose(ctx, base);
+    CHECK(profile->signin_state() == 1);
+    CHECK_FALSE(listener->DequeueNotification(0xA, &param));
+    memory->SystemHeapFree(data);
+  }
+  rex::Runtime recovered(store.path, store.path);
+  Setup(recovered);
+  CHECK(recovered.kernel_state()->user_profile()->xuid() == xuid);
+  CHECK(recovered.kernel_state()->user_profile()->name() == "Selected");
+  CHECK(recovered.kernel_state()->user_profile()->signin_state() == 1);
+}
+
+TEST_CASE("Local profile Sign-in imports copy request and bounded UTF16 identity", "[sdk][local-profile][signin-profile]") {
+  Store store;
+  rex::Runtime rt(store.path, store.path);
+  Setup(rt);
+  auto* memory = rt.memory();
+  const auto address = memory->SystemHeapAlloc(128);
+  auto* bytes = memory->TranslateVirtual<uint8_t*>(address);
+  std::memset(bytes, 0xCD, 128);
+  const uint32_t request[] = {0, 0xFF, 1, 0, 0};
+  for (unsigned i = 0; i < 5; ++i)
+    rex::memory::store_and_swap<uint32_t>(bytes + i * 4, request[i]);
+  PPCContext ctx{};
+  ctx.r3.u64 = address + 32; ctx.r4.u64 = address; ctx.r5.u64 = 20;
+  __imp__XMemCpy(ctx, memory->virtual_membase());
+  CHECK(ctx.r3.u32 == address + 32);
+  CHECK(std::memcmp(bytes, bytes + 32, 20) == 0);
+  CHECK(bytes[52] == 0xCD);
+  ctx.r3.u64 = address + 32; ctx.r4.u64 = 0; ctx.r5.u64 = 20;
+  __imp__XMemSet(ctx, memory->virtual_membase());
+  CHECK(ctx.r3.u32 == address + 32);
+  for (unsigned i = 32; i < 52; ++i) CHECK(bytes[i] == 0);
+  CHECK(bytes[52] == 0xCD);
+  for (unsigned i = 0; i < 5; ++i)
+    rex::memory::store_and_swap<uint16_t>(bytes + i * 2, uint16_t(u"Name"[i]));
+  for (auto count : {0u, 1u, 3u, 8u}) {
+    std::memset(bytes + 32, 0xCD, 32);
+    ctx.r3.u64 = address + 32; ctx.r4.u64 = address; ctx.r5.u64 = count;
+    __imp__lstrcpynW(ctx, memory->virtual_membase());
+    CHECK(ctx.r3.u32 == address + 32);
+    const auto length = count ? std::min(count - 1, 4u) : 0;
+    for (unsigned i = 0; i < length; ++i)
+      CHECK(rex::memory::load_and_swap<uint16_t>(bytes + 32 + i * 2) == uint16_t(u"Name"[i]));
+    if (count) CHECK(rex::memory::load_and_swap<uint16_t>(bytes + 32 + length * 2) == 0);
+    CHECK(bytes[32 + (count ? length + 1 : 0) * 2] == 0xCD);
+  }
+  memory->SystemHeapFree(address);
 }
 }
 

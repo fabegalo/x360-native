@@ -107,6 +107,14 @@ entrada e fechamento das duas cenas; não foram revalidadas.
 
 **Aceite:** dois perfis diferentes entram no mesmo jogo, preservam dados próprios e continuam corretos após reiniciar. Perfil local não deve ser apresentado como conta autenticada no Xbox Live.
 
+Incremento C7.3 (2026-10-13, parcial): a cena original enumera o registro local
+persistido por meio de XamProfileCreateEnumerator/Enumerate (patch 0042).
+A execução limitada mostrou o nome da fixture `C73Local`, sem mudar a sessão.
+O contrato da confirmação normal LogonEx tem teste de mudança persistente e
+consulta pelos serviços compartilhados. Seleção/confirmação pelo botão, retorno
+à dashboard com essa identidade e cancelamento na cena **não demonstrados**;
+nenhum item adicional de aceite foi marcado. Ver dashboard §0.27.
+
 ## 4. Biblioteca e My Games — P0
 
 - [x] Fazer o pedido de lançamento partir de My Games original na 17559: chamada relatada a `XamContentLaunchImageInternalEx` para `XSYSLAUNCH:\default.xex`.
