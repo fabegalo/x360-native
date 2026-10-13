@@ -389,3 +389,36 @@ before the patch; both tests pass afterward. Reverse/apply in an isolated source
 copy matches the lock's base/final hashes; all 43 patches pass Check. No upstream
 equivalent identified. The only graphical run removed the false lock/passcode
 but did not complete login or cancellation; see dashboard §0.29.
+
+## 0044–0053 — existing local profile sign-in (C7.6)
+
+These patches complete the original 17559 sign-in path for the existing single
+local profile. No upstream equivalent was identified; the SDK pin is unchanged.
+
+| Patch | Contract |
+|---|---|
+| 0044 | Retail console mode, avoiding the erroneous data-center GetXUID branch. |
+| 0045 | Original merge confirmation (0x120424) and closing snapshot (0x63), through the durable local session. |
+| 0046 | Real guest task callbacks, cancellation/join, callback results, local account queries and FILETIME. |
+| 0047 | Native S_OK pending / S_FALSE completed task status; handle release. |
+| 0048 | Atomic persistent retail XConfig flags for original dialog decisions. |
+| 0049 | Local logon queue barrier, completing overlapped only after synchronous commits. |
+| 0050 | Retail NUI automation query, restoring ordinary animation updates. |
+| 0051 | Owned task/worker handle lifetime and publication before callback startup. |
+| 0052 | Initialized optional outputs and no pending online-auth demand in the local runtime. |
+| 0053 | Actual system notification broadcast with ID/parameter, mask/version filtering and waitable delivery. |
+
+The last fix delivers the original dashboard's 0x80040016 notification; the
+dashboard then closes its profile selection and navigates Home itself. No UI
+replacement, forced navigation, fabricated login or discarded persistence error.
+Account/worker results remain real, unsupported multi-user/online logon fails.
+The task implementation covers this original flow; additional queue APIs and
+the full XAM scheduler are not claimed as implemented.
+
+Fourteen focused cases pass across profile/session, retail queries, settings,
+HUD ownership, task cleanup and system broadcasts. Real bounded runs demonstrate
+original profile enumeration, A sign-in, Home, GamerCard identity, B cancellation
+and persistence after restarting. See dashboard §0.30 for exact evidence/scope.
+All 53 patches apply from pinned sources and match final hashes; new patch base
+hashes also match. `apply-sdk-patches.ps1 -Check` passes. Proprietary inputs,
+generated original code, profile fixtures, logs and screenshots remain local.

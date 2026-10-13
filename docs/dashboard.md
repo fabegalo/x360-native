@@ -1704,3 +1704,71 @@ callback por login direto, nem ampliada a implementação de tarefas/XUI sem
 causa demonstrada. O limite gráfico foi consumido. Próxima investigação deve
 instrumentar somente esse callback e a propagação de erro em `90106F80`, antes
 de qualquer nova sessão autorizada. C7.5 continua parcial, sem push ou Release.
+
+### 0.30 Sign-in local completo para perfil existente: C7.6 (2026-10-13)
+
+Base `15a0251`, SDK `f5337cdc947ff6d4c4196737e2c807a48f2a1fc2` preservado.
+**A seleção original agora conecta o perfil existente e retorna à Home.**
+GamerCard mostra a identidade conectada, B cancela/fecha e o reinício recupera
+a mesma sessão. Alcance comprovado: Retail 17559, Windows x64, um perfil local
+persistido no slot 0. Criação pela interface, múltiplas contas e Xbox Live não
+fazem parte deste resultado; o perfil não é apresentado como conectado ao Live.
+
+As causas e os contratos corrigidos são:
+
+- `signin.xex`: `90106F80 → 90114EA8 → 901073D0` consultava `GetXUID(0,1)`
+  pelo ramo de data center. `XamIsDataCenterMode` era stub e devolvia o ponteiro
+  recebido em r3 como verdadeiro. Modo retail seleciona a enumeração normal;
+  `GetXUID` continua retornando NO_SUCH_USER para slot desconectado.
+- LogonEx de confirmação usa `0x120424`, registros de 392 bytes e XUID de
+  64 bits. A seleção passa pelo armazenamento transacional existente; falhas
+  de disco não publicam sessão/notificação. Snapshot de fechamento `0x63`,
+  índices, flags locais e barreira overlapped usam o mesmo estado.
+- Tarefas XAM executam o callback original com contexto opaco e handles reais.
+  Status pendente/completo segue `S_OK/S_FALSE`; resultado vem do callback.
+  Cancelamento e espera aguardam o worker antes de liberar contexto/módulo.
+- O host executa a UI em contexto de processo system, carrega a tabela original
+  de strings e encaminha o diálogo original. Entrada HUD respeita a cena/modal
+  ativa. As decisões do diálogo são persistidas em XConfig, não pré-aprovadas.
+- `XamIsNuiAutomationEnabled` reproduz o falso da função retail `81964638`;
+  o stub anterior desviava a atualização normal das transições da dashboard.
+  A consulta de demanda inicializa os outputs e informa ausência de demanda
+  de autenticação online no runtime local.
+- **Causa final da tela vazia após A:** a dashboard enviava `XNotifyBroadcast`
+  com ID `0x80040016`, dado 0; o SDK descartava a chamada. A entrega real aos
+  listeners permite que a própria dashboard feche a seleção e navegue à Home.
+  Não há salto forçado, timer de fechamento ou substituição da interface.
+- As consultas internas da biblioteca XUI/GamerCard usam a identidade XAM
+  persistida, assim como os imports externos da dashboard e do Sign-in.
+
+Validação incremental: 14 casos focados distintos aprovados (7 de perfil,
+6 de Sign-in e o novo broadcast). A consulta de demanda e o broadcast receberam
+reteste após suas mudanças; não foi executada suíte completa nem outro jogo.
+Builds da dashboard/DLLs e do alvo `x360n_sdk_runtime_checks` concluídos.
+Os 53 patches foram reaplicados sobre fontes da revisão pinada, com hashes
+base/finais conferidos (base histórica SDL usa CRLF; SDK usa LF), e `-Check`
+passou. Evidências de build/teste/replay em `.local/tmp/c76-*`.
+
+Execuções com entrada por mensagens locais e PNGs reais por PrintWindow:
+
+| Diretório em `.local/runs/` | Evidência |
+|---|---|
+| `c76-notify-native` | Seleção normal da dashboard: perfil desconectado → A → sessão 1 → Home. |
+| `c76-accept-hosted` | `signin.xex` original lista C73Local; A, diálogo original/Yes, login, Home, GamerCard com C73Local e B voltando a Settings (40,849 s). |
+| `c76-accept-cancel` | B fecha o host original e devolve à seleção de boot subjacente; registro byte a byte inalterado (17,390 s). |
+| `c76-accept-cancel-native` | B na seleção normal de boot retorna à Home; registro desconectado inalterado (17,341 s). |
+| `c76-accept-restart` | Novo processo, sem flag de diagnóstico: Home, GamerCard com C73Local e B; sessão 1 preservada (25,965 s). |
+
+`before.dat`/capturas seguintes documentam o registro; nenhum teste altera
+diretamente seu byte de sessão. O backend só grava em resposta ao fluxo guest.
+`rex.log`, `keys.txt`, `result.txt`, `run.txt` e `binaries.txt` acompanham as
+capturas. Os testes usaram cópias isoladas do perfil existente. O teste hosted
+também persistiu a resposta de privacidade pelo diálogo original.
+
+Reprodução autorizada com `scripts/test-signin-17559.ps1 -UserDataRoot <cópia>
+-Out <evidência> -Mode Confirm -GamerCard`; `-Hosted -ConfirmPrivacy` exercita
+o módulo Sign-in sobre a dashboard e seu diálogo de primeiro uso. `-Mode Cancel`
+requer perfil desconectado; `-Mode Restart -GamerCard` reutiliza o registro
+conectado pelo teste anterior. O script limita cada processo a 60 s, encerra em
+`finally` e valida persistência; a navegação/conteúdo são conferidos nos PNGs.
+Nenhum Computer Use, processo remanescente, push ou publicação.

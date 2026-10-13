@@ -122,6 +122,18 @@ voltou, conforme o usuário. Sessão persistida permaneceu zero; login e identid
 na dashboard continuam **reprovados/não demonstrados**, sem marcar novos itens.
 O erro `80070525` na criação do host Sign-in permanece. Ver dashboard §0.29.
 
+Incremento C7.6 (2026-10-13): **login local existente comprovado na 17559**.
+
+- [x] Listar o perfil local persistido na interface original, sem usuário conectado.
+- [x] Selecionar com A, gravar a sessão real e retornar automaticamente à Home.
+- [x] Exibir a mesma identidade no GamerCard original e fechá-lo com B.
+- [x] Cancelar a seleção com B, preservando integralmente o registro desconectado.
+- [x] Reiniciar a dashboard e recuperar identidade/sessão no GamerCard.
+
+Evidência: dashboard §0.30, perfil `C73Local`, slot 0, Windows x64.
+Esses cinco critérios específicos não aprovam criação pela UI, troca entre
+dois perfis, saves/conquistas ou o aceite amplo de múltiplos usuários acima.
+
 ## 4. Biblioteca e My Games — P0
 
 - [x] Fazer o pedido de lançamento partir de My Games original na 17559: chamada relatada a `XamContentLaunchImageInternalEx` para `XSYSLAUNCH:\default.xex`.

@@ -1,5 +1,19 @@
 # STATUS
 
+C7.6 (2026-10-13), **Sign-in local existente funcional na Retail 17559/Windows x64**:
+partindo de `15a0251`, os patches 0044–0053 corrigem o modo retail, contratos
+de LogonEx, tarefas XAM, configuração persistente e notificações. `80070525`
+era consequência de um stub de `XamIsDataCenterMode` que ativava o ramo errado;
+a tela vazia após login era mantida pelo descarte de `XNotifyBroadcast`.
+Execuções locais com entrada e capturas reais demonstram o perfil existente
+`C73Local`, A realizando login, retorno automático à Home, GamerCard com o nome,
+B fechando/cancelando e recuperação da mesma identidade após reiniciar.
+14 testes focados distintos passam; 53 patches reaplicados sobre fontes do SDK
+pinado com hashes conferidos. Sem Computer Use, jogos, push ou Release.
+O alcance é um perfil local existente, slot 0; criação pela interface, múltiplos
+perfis e Xbox Live continuam fora desta comprovação. Evidências e reprodução:
+`docs/dashboard.md` §0.30. Os bloqueios C7.3–C7.5 abaixo são históricos.
+
 C7.5 (2026-10-13), **parcial; login original ainda bloqueado**: patch 0043
 corrige `RtlCompareMemoryUlong`, que retornava palavras iguais em vez de bytes
 do prefixo igual. A dashboard compara os quatro bytes zerados de passcode com
