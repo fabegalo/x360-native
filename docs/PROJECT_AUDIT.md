@@ -166,6 +166,8 @@ Evidências locais: `.local/audit/c6` (comandos antes/depois, driver, controles 
 
 ### C9. Médio — suíte completa depende de encoding e ambiente PowerShell
 
+**Estado: corrigido em 13/10/2026.** Conversões de caminhos do inventário/diagnósticos e leitura do TSV usam UTF-8 explícito. O harness Iruka inicializa os módulos do próprio host PowerShell e vincula cada execução a um relatório novo e exclusivo. Fixtures Unicode mantidas; nova fixture sintética inclui espaços, acento, japonês e emoji. Reprodução e revalidação em E11.
+
 - **Local:** `tests/local/inputs_test.cpp:50,78,92`; `scripts/regress-iruka.ps1:26`; contraste com normalização já existente em `prepare-tools.ps1`.
 - **Evidência:** inventário falhou com exceção de conversão Unicode, após 973 asserções, ao encontrar fixture local com caracteres não representáveis na página de códigos. O teste Iruka falhou antes de iniciar o jogo porque `Get-FileHash` não era encontrado pelo Windows PowerShell com `PSModulePath` herdado. Repetição focada com caminho de módulos correto passou.
 - **Impacto:** sinal de regressão confuso e falhas dependentes do nome de usuário/pasta/shell. Apagar a fixture Unicode esconderia um caso válido.
@@ -194,6 +196,8 @@ Evidências locais: `.local/audit/c6` (comandos antes/depois, driver, controles 
 - **Correção implementada (13/10/2026):** `package-desktop.ps1` exporta o commit, materializa SDK/subdependências de objetos Git fixados, aplica e verifica os 38 patches e configura desktop-only Release antes de compilar em diretório exclusivo. Não utiliza bytes do checkout SDK de desenvolvimento nem caches anteriores. Só copia os executáveis esperados e aceita imports de DLLs do Windows. Índices SHA-256, revisão/configuração/comandos normalizados e identidade de payload embutida na GUI vinculam a distribuição. O ZIP tem ordem/timestamps estáveis; dois builds independentes da revisão final geraram exatamente o mesmo ZIP. Windows limpo continua pendente e C10 continua bloqueando publicação; ver E9.
 
 ### C12. Médio — limite diagnóstico encerra sessões normais longas
+
+**Estado: corrigido em 13/10/2026.** Removido o teto vitalício de transições. O watchdog interrompe 32 transições consecutivas cujos processos duram menos de um segundo; qualquer execução de pelo menos um segundo reinicia o orçamento. É uma proteção contra relançamentos rápidos sem execução sustentada, não uma medida de progresso interno do guest. Falha/crash/timeout, handoff inválido, destino não registrado, flags incompatíveis e conteúdo alterado continuam encerrando a sessão, sem retry. Teste ponta a ponta com 80 transições em E11; protocolo original inalterado.
 
 - **Local:** `src/supervisor/main.cpp:639–685`, loop de sessão limitado a 32 transições.
 - **Evidência:** o limite também vale no fluxo normal da GUI, independentemente de timeout ilimitado. Ao atingir o teto, termina com `session: transition limit reached`.
@@ -494,6 +498,39 @@ Pacote final com extração: revisão `8051f31887fbf056f10c92c24f68469167b4c173`
 O primeiro empacotamento desta extensão foi retido porque o aviso do SIMDe chama-se `COPYING`; o script foi corrigido antes da geração final. A primeira asserção de tamanho da amostra Motocross esperava mais de 100 arquivos, embora seus 55 hashes já coincidissem; o teste passou a exigir inventário não vazio e igualdade integral, sendo repetido com o extrator do ZIP. As regressões de execução de E9 continuam sendo a evidência de Iruka/Castle/17559; não houve alteração de runtime nem novo codegen nesta extensão.
 
 Limites: ZIP/RAR/7z devem ser descompactados primeiro. Extrair não adiciona compatibilidade de execução: somente versões com preparação no catálogo podem ser importadas como prontas para preparar. Motocross não possui perfil de preparação gráfica no catálogo atual. A aceitação gráfica final segue pendente após Escape do usuário; Windows limpo e C10 continuam bloqueadores de publicação.
+
+## E11. C9/C12 — ambiente dos testes e sessões contínuas — 13/10/2026
+
+Incremento restrito ao supervisor, harness e testes. A aceitação anterior do ZIP `preview.7` permanece válida no ambiente disponível. **Windows limpo está adiado, não aprovado, e não foi testado nesta tarefa.** Não houve novo pacote, push, alteração de avatares, dashboards, jogos ou licenciamento. Alterações externas a este incremento, inclusive documentos, `window-route.ps1` e o submódulo, foram mantidas.
+
+### Reprodução e correção
+
+- C9: `local.inventory` voltou a falhar com exceção de conversão Unicode, com 972/973 asserções aprovadas; `local.iruka.regression` falhou antes do lançamento por `Get-FileHash` ausente no Windows PowerShell iniciado com ambiente herdado. O inventário agora usa UTF-8 nos caminhos, extensão, diagnósticos e TSV; erros de enumeração/escrita também são verificados. Nenhum input foi removido ou ignorado. O harness normaliza `PSModulePath` para os módulos do host selecionado.
+- C12: o novo teste, antes da correção, parou nas etapas 0–31 com `session: transition limit reached`. Depois, o mesmo fluxo percorreu 80 transições (40 ciclos dashboard–jogo–dashboard, 81 processos), com timeout desabilitado, e encerrou por `WindowClose`. Em cada etapa o teste conferiu kind, flags, caminho UTF-8, presença e bytes do payload, estado ativo e relatório. O filho também valida o handoff recebido antes de avançar. Caminhos sintéticos incluem `João 日本 🎮`.
+- A contagem vitalícia foi substituída por um watchdog de processos consecutivos com menos de um segundo de vida. O teste mantém rajadas rápidas e intercala uma permanência de 1,1 s a cada 16 processos, verificando que a proteção reinicia. O caso sem permanência é interrompido após 32 processos; o pedido final fica disponível. Um teste de fronteira exercita 1.000 reinicializações/32.000 decisões, inclusive 999 ms versus 1.000 ms. A duração considerada é a do processo, excluindo hashing e geração de relatórios. Não é detecção universal de loops lentos internos ao guest; timeout por processo continua disponível.
+- Os negativos de sessão verificam ausência de retry após erro do filho, timeout, handoff ausente, flags não suportadas, destino não registrado e alteração do XEX. Os testes existentes de crash, cancelamento, recibos e handoff original permanecem ativos.
+
+### Resultados
+
+| Verificação | Resultado após correções |
+|---|---|
+| `ctest --preset win-amd64-debug -L project -E local[.] -j 6` | 129/129 aprovados; inclui C1/C3, C2, C5, C6, C4/C11 e os novos testes de sessão. |
+| `ctest --preset win-amd64-debug -j 8` sem filtro | 1.807 testes: **1.802 aprovados, quatro skips preexistentes de BitStream e uma falha preexistente do SDK**. Todos os 136 testes `project` aprovados. |
+| Inventário local | 579 arquivos classificados: 567 XEX2 lidos, quatro XEX1, sete variantes e um inválido; fixture problemática preservada. Novo teste Unicode aprovado. |
+| Iruka dentro da suíte completa | Run `20261013T123322Z-regress-iruka-1bba71c7c905430c9540c67592bccd52`: L1–L5 aprovados, 314 cores, diferença 6,720, zero erros/críticas/stubs. |
+| C2/C4/C11 sobre preview.7 existente | `[.preparation-local],[.local-update],[.local-package]`: três casos/51 verificações aprovados, incluindo recibos locais, instalação, atualização interrompida/retomada, inputs e sentinelas preservados. |
+| C5 independente | 32 consumidores, dois builds paralelos, no-op, rebuild isolado, concorrência pelo mesmo build rejeitada e publicação atômica aprovados. A asserção antiga esperava `Build in use`; atualizada para `Build unavailable:` **e o caminho do lock específico**, conferindo também que o produtor original permanece ativo na barreira. Nenhuma proteção de produção foi alterada. |
+| Harness com `PSModulePath` deliberadamente inválido e supervisor sintético recusando lançamento | Falha explícita sem relatório novo; hashes dos 29 relatórios históricos de regressão permaneceram iguais. |
+
+A falha remanescente `unit.Depfile escapes characters make treats as syntax` é a mesma registrada em E2: literais upstream com escapes C++ inválidos nas linhas 227–228. O teste complementar `sdkcheck.WriteDepfile escapes space and hash with a backslash` passou. Não houve filtro, skip novo ou alteração do SDK para ocultá-la; **a suíte completa ainda não está integralmente verde**.
+
+### Ocorrências e preservação das evidências
+
+A preparação antiga de Iruka foi corretamente recusada por C2 após divergência em `cmake/x360n_sdk_backports.cmake`. Foi revalidada pelo fluxo normal `build-title.ps1 -Title iruka`, sem alterar fontes do título: codegen escreveu zero arquivos e manteve 77. Uma tentativa durante a preparação foi recusada pelo lease; a execução final acima ocorreu após sua conclusão.
+
+Essa recusa expôs um defeito adicional do harness antigo: buscava o último run histórico quando não havia relatório novo e regravava seu `regress.json`. O resumo de `20261013T101128Z-regress-iruka` foi reconstruído com os resultados originais comprovados por seu relatório, log e capturas preservados (L1–L5, 307 cores, diferença 6,871). A ocorrência incorreta foi guardada em `stale-report-incident.json`. O harness agora usa um UUID por invocação e falha explicitamente se não houver relatório correspondente; o negativo da tabela prova a preservação posterior.
+
+As primeiras execuções restritas tiveram falhas de rename/publicação em temporários do sandbox e um alvo PPC ainda não compilado. Houve também uma tentativa de relink concorrente com o próprio teste em execução e uma asserção nova que comparava separadores de caminho sem canonicalização; ambos foram corrigidos antes da validação final. Os testes foram recompilados e executados no host de desenvolvimento disponível, sem relaxar checks. Logs de todas as tentativas em `.local/audit/c9-c12/`, com a reprodução inicial de PowerShell em `.local/audit/c9-iruka-before.log`. Os resultados anteriores da auditoria e do preview.7 não foram promovidos a novos testes de compatibilidade.
 
 ## F. Próximas prioridades
 
