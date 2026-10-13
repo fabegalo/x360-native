@@ -69,7 +69,7 @@ $compilerVersion = (& $clang --version | Select-Object -First 1)
 if ($compilerVersion -notlike "* $($lock.llvm.version)*") { throw 'Compiler differs from the locked LLVM version' }
 $sourceMap = $source.Replace('\','/')
 $payloadHash = Hash (Join-Path $payload 'payload.sha256')
-$flags = "-march=x86-64-v2 -ffile-prefix-map=$sourceMap=/x360-source"
+$flags = "-march=x86-64-v2 -mno-incremental-linker-compatible -ffile-prefix-map=$sourceMap=/x360-source"
 $devshell = Join-Path $root 'scripts/devshell.cmd'
 & $devshell cmake -S $source -B $build -G Ninja -DX360_DESKTOP_ONLY=ON -DX360_DISTRIBUTION=ON "-DX360_PACKAGE_PAYLOAD_SHA256=$payloadHash" -DCMAKE_BUILD_TYPE=Release "-DCMAKE_C_COMPILER=$llvm/bin/clang.exe" "-DCMAKE_CXX_COMPILER=$clang" "-DCMAKE_C_FLAGS=$flags" "-DCMAKE_CXX_FLAGS=$flags" '-DCMAKE_EXE_LINKER_FLAGS=-Wl,/Brepro' -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
 if ($LASTEXITCODE -ne 0) { throw 'Distribution configure failed' }
@@ -137,7 +137,7 @@ $metadata = [ordered]@{
     payload_sha256 = Hash (Join-Path $payload 'payload.sha256')
     sdk_commit = $lock.rexglue_sdk.commit; patches = @($lock.rexglue_sdk.patches | ForEach-Object { [ordered]@{ file = $_.file; sha256 = $_.sha256 } })
     dependencies = $dependencies; compiler = [ordered]@{ version = $compilerVersion; sha256 = Hash $clang }; resource_compiler_sha256 = Hash $rcCompiler
-    configuration = 'Release'; desktop_only = $true; compiler_flags = '-march=x86-64-v2 -ffile-prefix-map=<source>=/x360-source'; linker_flags = '-Wl,/Brepro'
+    configuration = 'Release'; desktop_only = $true; relative_source_paths = $true; compiler_flags = '-march=x86-64-v2 -mno-incremental-linker-compatible -ffile-prefix-map=<source>=/x360-source'; linker_flags = '-Wl,/Brepro'
     publication = 'blocked-C10'; clean_windows = 'pending'
 }
 [IO.File]::WriteAllText((Join-Path $destination 'package.json'), ($metadata | ConvertTo-Json -Depth 8), [Text.UTF8Encoding]::new($false))

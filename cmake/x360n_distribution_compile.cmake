@@ -1,0 +1,25 @@
+# Clang 22's Microsoft ABI hashes the spelling of the main source filename for
+# anonymous namespaces, before prefix maps. Use a stable path relative to the
+# distribution build (a sibling of source), without changing compilation flags.
+# This launcher is restricted to the isolated distribution configuration.
+set(_command)
+set(_collect FALSE)
+math(EXPR _last "${CMAKE_ARGC} - 1")
+foreach(_i RANGE 0 ${_last})
+    if(_collect)
+        set(_arg "${CMAKE_ARGV${_i}}")
+        if(_i EQUAL _last)
+            if(NOT IS_ABSOLUTE "${_arg}" OR NOT EXISTS "${_arg}")
+                message(FATAL_ERROR "Distribution compiler source argument missing")
+            endif()
+            file(RELATIVE_PATH _arg "${CMAKE_CURRENT_BINARY_DIR}" "${_arg}")
+        endif()
+        list(APPEND _command "${_arg}")
+    elseif(CMAKE_ARGV${_i} STREQUAL "--")
+        set(_collect TRUE)
+    endif()
+endforeach()
+if(NOT _command)
+    message(FATAL_ERROR "Distribution compiler command missing")
+endif()
+execute_process(COMMAND ${_command} COMMAND_ERROR_IS_FATAL ANY)
