@@ -1,5 +1,10 @@
 # Aplicativo gráfico — candidato Windows x64
 
+**Distribuição de referência:** `v0.1.0-preview.19`, primeira prévia experimental
+com publicação pública autorizada. C4/C11 e C10 tecnicamente concluídos; Windows
+limpo continua não validado. As seções datadas abaixo preservam os testes dos
+candidatos anteriores. Estado ativo: [FIRST_RELEASE.md](FIRST_RELEASE.md).
+
 O pacote tem um aplicativo principal `x360-native.exe`. Supervisor, licenças e
 fontes ficam em `app/`; a pasta `data/` criada na primeira abertura guarda o
 ambiente local. Preserve `data/` ao remover ou atualizar o aplicativo. Outra
@@ -236,3 +241,48 @@ Limites mantidos: importação gráfica de jogos exige pasta extraída e prepara
 compatível com a versão identificada. Importação direta STFS/LIVE/ISO não foi
 implementada. Windows limpo e instalação de MSVC/Windows SDK ausentes continuam
 pendentes; o ciclo com um título não aprova o restante do catálogo.
+
+## Primeira utilização — verificação parcial em 13/10/2026
+
+O teste em Windows limpo foi **dispensado pelo usuário durante esta rodada,
+não executado e não aprovado tecnicamente**. Não foi encontrado Windows Sandbox
+(`System32/WindowsSandbox.exe` ausente), serviços vmms/vmcompute ou instalação
+de VMware/VirtualBox/QEMU nos locais e registros de instalação consultados.
+Nenhuma VM limpa foi fornecida. Não foi habilitado hipervisor nem alterado o host.
+
+Artefato verificado: `.local/packages/c10-provenance/x360-native-0.1.0-preview.7-windows-x64.zip`,
+3.219.126 bytes, revisão `d87b5c95f50fafd8058c8ce6f50b844cc238e75a`.
+SHA-256: `ff2dd3e8e1c8e9eaf901f774a34fd015596191d1dacb049e6e7ad85489d89cf1`.
+O ZIP em `c10-provenance-repeat` tem o mesmo hash; os builds não foram repetidos.
+`99fece1` altera somente `docs/LICENSE_AUDIT.md` e `docs/PROJECT_AUDIT.md`.
+A alteração local de `window-route.ps1` acrescenta teclas ao auxiliar de teste;
+os 49 arquivos cobertos pelos hashes finais dos patches do SDK coincidem com o lock.
+Não houve mudança funcional demonstrada que exigisse outro pacote nesta rodada.
+
+| Etapa | Resultado desta rodada |
+|---|---|
+| Extração do ZIP real | Passou no host de desenvolvimento; 399 arquivos conferidos contra `package.sha256`. |
+| Abertura da GUI | Passou no host; janela real observada por Computer Use, início e configurações acessíveis. |
+| Primeira configuração | Ambiente padrão e preferências criados automaticamente; 341 arquivos conferidos contra `payload.sha256`. Não houve edição manual de configuração. |
+| Verificação/obtenção guiada das ferramentas ausentes | Não validada em Windows limpo. O host tem ferramentas de desenvolvimento e não serve como evidência dessa instalação. |
+| Importação de dashboard original | Não repetida nesta rodada; nenhum conteúdo original foi incorporado ao ZIP. |
+| Preparação AOT sem comandos manuais | Não executada nesta rodada. |
+| Intro e dashboard | Não executadas nesta rodada. |
+| Reabertura reutilizando preparação | Não validada; nenhuma preparação AOT foi produzida nesta rodada. |
+| Importação/preparação de jogo suportado | Não executada nesta rodada. |
+| Lançamento e retorno pelo fluxo original | Não repetidos nesta rodada; evidências anteriores não equivalem a instalação limpa. |
+
+Evidências locais: `.local/validation/first-use-20261013/`, incluindo ZIP extraído,
+`zip-hashes.txt`, `extraction.txt` e `environment.txt`. O ambiente criado está
+dentro da extração e não recebeu caches, toolchains ou builds do checkout.
+Isso isola os dados do aplicativo, mas não torna o Windows do host limpo.
+
+Nenhum bloqueio de código foi reproduzido nas etapas executadas; nenhuma mudança
+em jogos, avatares, dashboards, runtime ou instalação de ferramentas foi feita.
+Para afirmar uso completo por leigos, ainda falta demonstrar a instalação guiada
+de Build Tools/Windows SDK ausentes e toda a preparação/execução pela interface,
+sem selecionar compiladores, executar comandos ou editar arquivos manualmente.
+A dispensa encerra essa exigência operacional nesta rodada, sem criar evidência
+de aprovação. Naquele ensaio não houve auditoria de licenciamento, push, Release
+ou reescrita do histórico. A autorização posterior da primeira publicação pública,
+incluindo o histórico existente, está registrada em `FIRST_RELEASE.md`.

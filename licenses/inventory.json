@@ -706,7 +706,7 @@
       "license_file": null,
       "scope": "binary",
       "integration": "Release static CRT /MT; Windows OS DLLs supplied by OS, not shipped",
-      "obligations": "Publication blocked pending distributor entitlement and review of protective end-user terms for static CRT/UCRT; Build Tools OSS dependency exception does not automatically cover proprietary local AOT. See docs/LICENSE_AUDIT.md."
+      "obligations": "Distributor entitlement and applicable protective end-user terms for static CRT/UCRT remain required; Build Tools OSS dependency exception does not automatically cover proprietary local AOT. Maintainer authorized the public technical preview; this does not grant rights over Microsoft or Xbox content. See docs/LICENSE_AUDIT.md."
     },
     {
       "id": "git/usr/share/licenses/gcc-libs",

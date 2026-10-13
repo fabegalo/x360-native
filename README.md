@@ -10,7 +10,7 @@ Performance improvements must be backed by measurements, not assumptions.
 
 > Independent, experimental, and under active development. **Windows x64 is the
 > currently tested platform**, using D3D12. Linux and macOS are roadmap goals.
-> Local preview packages exist; a public, end-user-ready release is still pending.
+> The first technical preview is `v0.1.0-preview.19`; it is experimental.
 
 [Current capabilities](#current-capabilities) · [Getting started](#download-and-installation) ·
 [Roadmap](#roadmap) · [Documentation](#documentation-and-contributing)
@@ -84,13 +84,14 @@ the complete original Microsoft kernel, XAM or firmware. See the
 
 ## Download and installation
 
-**GitHub Releases is the intended delivery channel. No public download is linked
-yet.** Existing ZIPs are local preview candidates. Installation on clean Windows,
-including obtaining missing Microsoft build components, has not been technically
-validated. Publication also depends on the [license audit](docs/LICENSE_AUDIT.md).
+**[Download v0.1.0-preview.19 — First Technical Preview](https://github.com/fabegalo/x360-native/releases/tag/v0.1.0-preview.19).**
+Choose the Windows x64 ZIP and its SHA-256 file. This is an experimental pre-release.
+Installation on clean Windows, including obtaining missing Microsoft build
+components, is **not validated**. See the [release record](docs/FIRST_RELEASE.md)
+and [license obligations](docs/LICENSE_AUDIT.md).
 
 The intended experience is **Download → Extract → Launch → Import → Prepare → Play**.
-For a future release, or an available local preview:
+For this technical preview:
 
 1. **Extract the whole Windows x64 application ZIP** and launch `x360-native.exe`.
    It opens without Xbox content. GitHub's source-code archives are not the app.
@@ -104,7 +105,7 @@ For a future release, or an available local preview:
    The confirmed reference is 17559 with Castle Crashers; use its **Return to
    Arcade** option to return. Closing the platform window ends the session.
 
-The candidate includes the graphical app, supervisor, content extractor,
+The package includes the graphical app, supervisor, content extractor,
 preparation sources/scripts, and license notices. It does **not** include games,
 dashboards, Xbox fonts, firmware, proprietary assets, generated game code, the
 complete ReXGlue runtime or build tools. Preparation obtains tools separately and
@@ -180,8 +181,9 @@ existing checklist rather than assuming that a compiled title is compatible.
 Original project code is licensed under [BSD-3-Clause](LICENSE). Dependencies and
 adapted code retain their own terms and credits; see
 [third-party notices](THIRD_PARTY_NOTICES.md) and the [license audit](docs/LICENSE_AUDIT.md).
-Redistribution and publication questions remain open; the notices do not resolve
-the audit's outstanding requirements.
+The maintainer authorized publication of this technical preview. That decision
+does not replace third-party license conditions or grant rights over Xbox content;
+the audit preserves the scope and limitations of the license evidence.
 
 x360-native is independent and is not affiliated with or endorsed by Microsoft.
 Xbox and related names belong to their respective owners. Proprietary Xbox content

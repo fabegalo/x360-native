@@ -1,5 +1,11 @@
 # Checklist funcional — x360-native
 
+**Estado da primeira pre-release, 13/10/2026:** C1/C3, C2, C5, C6, C9, C12,
+C4/C11 e C10 tecnicamente concluídos. O mantenedor autorizou a publicação
+pública de `v0.1.0-preview.19`, após validar pacote e histórico. Os requisitos
+de aceite amplo para leigos continuam como trabalho futuro, não como novos
+portões desta prévia. Windows limpo **não validado**. [Registro da Release](FIRST_RELEASE.md).
+
 **Objetivo:** escolher uma dashboard original → executar a intro correspondente → entrar em um perfil → listar e selecionar um jogo pela interface original → atender ao pedido original de lançamento → jogar → salvar → atender ao pedido original de retorno → voltar à mesma dashboard, sem repetir a intro.
 
 Windows x86-64 é o primeiro alvo funcional relatado, não uma restrição permanente. Windows, Linux e macOS são objetivos, com estado separado por sistema e arquitetura. Recompilação estática com ReXGlue; suporte progressivo a todas as versões originais de dashboard, incluindo antigas e betas, e ao catálogo de jogos Xbox 360.
@@ -389,7 +395,7 @@ O assistente externo cuida de instalação, preparação, escolha do ambiente e 
 
 Não criar agora serviços de atualização, telemetria ou ferramentas apenas para preencher o checklist.
 
-## 18. Aceite do pacote para usuários leigos — bloqueador da release
+## 18. Aceite amplo para usuários leigos — etapa futura, além da prévia experimental
 
 Usar o **pacote real da release** em cada sistema/arquitetura anunciado como suportado, em computador com sistema e hardware suportados, usuário comum, sem o repositório e sem ambiente de desenvolvimento previamente configurado. A árvore do desenvolvedor não substitui este teste.
 
@@ -406,7 +412,7 @@ O aceite comprova facilidade de uso para o conjunto e o ambiente testados, não 
 
 **Incremento gráfico de 2026-10-12:** candidato local e ferramentas gerenciadas implementados; importação de conteúdo completo e registro do catálogo SDK por dashboard. Testes e limites em `docs/desktop-preparation.md`. Caminhos Unicode foram testados na importação e no runtime iruka; isso não equivale ao fluxo completo em máquina limpa. Perfis originais continuam bloqueados no host XUI de atualização/composição/entrada. Save/load e atualização/rollback não aprovados. Todos os itens do §18 permanecem abertos até teste do pacote nas condições exigidas.
 
-## 19. Commits e preparação da primeira publicação — bloqueador obrigatório
+## 19. Commits e publicação — regras permanentes e histórico da preparação
 
 ### 19.1. Regra vigente para novos commits
 
@@ -431,11 +437,11 @@ Títulos, corpos e rodapés não devem atribuir autoria a Claude, Codex, Astra o
 - [x] Atualizar referências internas afetadas de forma controlada, sem alterar hashes de dependências externas por engano.
 - [x] Auditar todo o histórico a publicar, não só o último commit, para excluir credenciais, dados pessoais, conteúdo proprietário e demais arquivos indevidos.
 - [x] Não publicar backups ou referências que reincorporem histórico anterior sem revisão.
-- [ ] Criar tags de release somente sobre o histórico final validado. Não se aplica a esta publicação privada de fontes; nenhuma release/tag foi criada.
+- [x] Definir a tag da primeira Release sobre o commit exato validado: `v0.1.0-preview.19`, cuja revisão também consta no `package.json` do ZIP. A operação de publicação exige conferir a correspondência.
 
 Se houver commits já compartilhados, informar a situação antes de alterar esse histórico; não executar force-push automaticamente. Preparar o histórico não autoriza push, publicação de release ou mudança de visibilidade do repositório.
 
-**Portões de publicação:** revisão/reescrita e auditoria de todo o histórico próprio antes do primeiro push; conteúdo distribuível autorizado e aceite do pacote real (§15 e §18) antes de anunciar a release para usuários. A revisão de mensagens e a auditoria do candidato privado foram concluídas em 2026-10-12. Os portões de distribuição e aceite do pacote continuam pendentes; esta publicação de fontes não anuncia uma release funcional.
+**Estado atual de publicação:** revisão de mensagens e auditoria do primeiro push concluídas em 2026-10-12; implementações técnicas de distribuição concluídas. A primeira pre-release pública foi autorizada expressamente em 13/10/2026, com nova verificação objetiva do histórico e validação do pacote definitivo. O aceite completo do §18 continua futuro e não é reivindicado pela prévia experimental. Não reescrever novamente o histórico publicado.
 
 ### 19.3. Publicação privada e reconciliação concluídas — 2026-10-12
 

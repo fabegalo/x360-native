@@ -1,5 +1,11 @@
 # STATUS
 
+Primeira pre-release (2026-10-13): **`v0.1.0-preview.19`, Windows x64,
+First Technical Preview**, com publicação pública expressamente autorizada pelo
+mantenedor. Implementações técnicas de **C1/C3, C2, C5, C6, C9, C12, C4/C11 e
+C10 concluídas**. Windows limpo continua **não validado**, como limitação desta
+prévia experimental. [Release e identidade dos artefatos](docs/FIRST_RELEASE.md).
+
 Incremento de extração (2026-10-13): **C1 e C3 corrigidos**. Patch reproduzível
 0037 limita o parser GDFX e rejeita spans inválidos/ciclos antes de expor a árvore;
 o manifesto `.sha256` é publicado completo, sem substituir arquivo existente.

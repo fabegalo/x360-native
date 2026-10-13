@@ -88,5 +88,6 @@ não atende essas obrigações. O ZIP desktop não inclui esses binários.
 O inventário registra também bibliotecas opcionais/testes que não entram no ZIP.
 Não se autoriza aqui redistribuição dos arquivos fornecidos pelo usuário.
 Veja `app/workspace/docs/LICENSE_AUDIT.md` (ou `docs/LICENSE_AUDIT.md` no repositório)
-para evidências, pendências e limites da auditoria. A publicação segue bloqueada
-até resolver as pendências ali indicadas.
+para evidências, obrigações e limites da auditoria. O mantenedor autorizou a
+primeira pre-release pública; essa decisão não modifica as licenças aplicáveis
+nem concede direitos sobre arquivos originais Xbox ou componentes Microsoft.

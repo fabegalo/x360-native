@@ -20,5 +20,7 @@ O recurso anterior foi introduzido em
 `31ca993c85b0896369797c1b270de184b1b6c6250a78b4c4fb65b4e9658648bd`.
 O histórico disponível não documenta sua criação nem uma licença específica.
 Ele foi substituído, sem afirmar autoria retroativa. Não integra o novo ZIP ou
-seu arquivo de fontes. O histórico Git não foi reescrito: publicar o histórico
-antigo ainda exige decidir como tratar esse recurso sem proveniência comprovada.
+seu arquivo de fontes. O mantenedor autorizou expressamente a publicação pública
+do histórico existente, sem reescrita, para a primeira pre-release. O blob antigo
+é preservado como registro histórico, sem alegar autoria ou licença retroativa;
+a autorização não altera a procedência comprovada apenas do novo ícone.

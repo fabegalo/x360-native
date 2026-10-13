@@ -2,7 +2,7 @@
 
 Data: 13/10/2026. Base auditada: `main`, commit `55e326c77fd4a26f44d69468ea67ab1670e3c4cd`.
 
-**Atualização posterior à auditoria, 13/10/2026:** C1/C3, C2, C5 e C6 foram corrigidos e validados. Implementação, testes e limites estão em E6–E8 e na seção C6. Os demais achados conservam o diagnóstico da base acima.
+**Estado ativo em 13/10/2026:** implementações técnicas de C1/C3, C2, C5, C6, C9, C12, C4/C11 e C10 concluídas. O mantenedor autorizou a primeira pre-release pública `v0.1.0-preview.19`. Windows limpo e demais limitações funcionais continuam explicitamente não validados. O diagnóstico e os bloqueios registrados abaixo são históricos; o estado da distribuição está em [FIRST_RELEASE.md](FIRST_RELEASE.md).
 
 Este relatório descreve o código nessa revisão, testes executados nesta auditoria e evidências históricas, identificadas separadamente. Não é uma declaração de compatibilidade geral. Nenhuma funcionalidade, patch de runtime ou correção de comportamento foi implementada durante a auditoria.
 
@@ -176,6 +176,7 @@ Evidências locais: `.local/audit/c6` (comandos antes/depois, driver, controles 
 
 ### C10. Alto — publicação sem licença própria clara e inventário suficiente de terceiros
 
+- **Estado consolidado em 13/10/2026:** implementação técnica concluída (BSD-3-Clause, inventário, avisos/textos, novo ícone com procedência, gates de conteúdo e empacotamento reproduzível). Publicação da primeira prévia pública expressamente autorizada pelo mantenedor; obrigações legais preservadas. Estado da Release em [FIRST_RELEASE.md](FIRST_RELEASE.md).
 - **Correção em 13/10/2026:** BSD-3-Clause aprovada para o código próprio; titular público x360-native confirmado. Ícone substituído por geometria original reproduzível, com procedência e gate. Inventário existente complementado com textos/provas upstream de tiny-AES-c, disruptorplus, DXC, AMD/RSA, GPL do decoder e avisos inline. Escopos desktop, fonte exportada e downloads separados preservados. Termos Microsoft conferidos com fontes oficiais e contrato Windows SDK instalado; habilitação do distribuidor, termos ao usuário e questões do SDK completo ainda exigem decisão humana. Ver a atualização em [LICENSE_AUDIT.md](LICENSE_AUDIT.md). Os itens abaixo registram o diagnóstico original.
 - **Validação:** candidato `0.1.0-preview.6` da revisão `3b9cb59`, dois builds simultâneos isolados com ZIPs idênticos; 55 casos/20.628 assertions por build, 1 positivo/16 negativos do gate e 8 assertions dos recibos reais C2 aprovados. Textos acessíveis na raiz do ZIP; 88 registros de inventário. Extraído e verificado fora do repositório. C1/C3, C2, C5, C6 e C4/C11 preservados; Windows limpo continua pendente.
 - **Revalidação das pendências:** candidato `0.1.0-preview.7`, revisão `d87b5c9`: dois ZIPs idênticos, 55 casos/20.628 assertions por build, 1 positivo/21 negativos do gate, 8 verificações de recibos reais e 43 de instalação/atualização aprovadas. GUI aberta fora do repositório, ambiente padrão criado e 341 arquivos conferidos; sem downloads, recompilação de jogos ou regeneração AOT. Evidências e bloqueadores humanos em `LICENSE_AUDIT.md`.

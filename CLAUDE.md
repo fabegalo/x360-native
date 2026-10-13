@@ -40,10 +40,10 @@ conteúdo proprietário ou código derivado dos binários sem autorização apli
 - Preservar créditos humanos, licenças, avisos de terceiros e referências
   técnicas necessárias ao upstream. Não apagar instruções de agentes nem
   falsificar autoria de terceiros.
-- **Bloqueador antes do primeiro push:** revisar e reescrever as mensagens de
-  TODOS os commits locais próprios que serão publicados, aplicando estas regras,
-  não apenas os últimos. Não reescrever agora; fazê-lo em momento exclusivo,
-  sem outra sessão modificando o repositório, seguindo o checklist §19.2.
+- A revisão de mensagens anterior ao primeiro push foi concluída em 2026-10-12,
+  conforme checklist §19.2. Não reabrir esse trabalho nem reescrever commits
+  publicados. A primeira pre-release pública foi expressamente autorizada pelo
+  mantenedor em 2026-10-13; preservar avisos e executar os gates de distribuição.
 - Antes da reescrita, identificar o intervalo, guardar backup recuperável e
   verificável fora do conjunto a publicar e preservar separadamente alterações
   não commitadas e arquivos não rastreados necessários, sem limpeza destrutiva.

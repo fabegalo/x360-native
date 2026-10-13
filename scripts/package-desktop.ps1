@@ -1,5 +1,6 @@
 # Build from committed source in a fresh distribution-only tree. Never publishes.
-param([string]$Version = '0.1.0-preview', [string]$OutputDirectory = '.local/packages')
+param([string]$Version = '0.1.0-preview', [string]$OutputDirectory = '.local/packages',
+      [ValidateSet('local-candidate','public-prerelease')][string]$Publication = 'local-candidate')
 $ErrorActionPreference = 'Stop'
 $env:PSModulePath = Join-Path $PSHOME 'Modules'
 $root = (Resolve-Path (Split-Path -Parent $PSScriptRoot)).Path
@@ -154,7 +155,7 @@ conteúdo cuja utilização seja autorizada. O código próprio usa BSD-3-Clause
 consulte LICENSE. Avisos de terceiros: THIRD_PARTY_NOTICES.md e pasta licenses,
 ao lado deste arquivo. Essas licenças não abrangem os arquivos originais Xbox.
 
-Candidato local: publicação bloqueada pela revisão de licenciamento (C10).
+Prévia experimental. Consulte as licenças e os limites documentados do projeto.
 Windows limpo ainda requer validação. Serviços da dashboard, perfis e saves
 continuam com as limitações registradas no relatório do projeto.
 Código correspondente: $head
@@ -165,7 +166,7 @@ $metadata = [ordered]@{
     sdk_commit = $lock.rexglue_sdk.commit; patches = @($lock.rexglue_sdk.patches | ForEach-Object { [ordered]@{ file = $_.file; sha256 = $_.sha256 } })
     dependencies = $dependencies; compiler = [ordered]@{ version = $compilerVersion; sha256 = Hash $clang }; resource_compiler_sha256 = Hash $rcCompiler
     configuration = 'Release'; desktop_only = $true; relative_source_paths = $true; compiler_flags = '-march=x86-64-v2 -mno-incremental-linker-compatible -ffile-prefix-map=<source>=/x360-source'; linker_flags = '-Wl,/Brepro'
-    publication = 'blocked-C10'; clean_windows = 'pending'
+    publication = $Publication; clean_windows = 'pending'
 }
 [IO.File]::WriteAllText((Join-Path $destination 'package.json'), ($metadata | ConvertTo-Json -Depth 8), [Text.UTF8Encoding]::new($false))
 & (Join-Path $source 'scripts/check-package-licenses.ps1') -PackageDirectory $destination -SdkDirectory $sdk

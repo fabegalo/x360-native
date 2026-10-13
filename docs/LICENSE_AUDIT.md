@@ -1,7 +1,16 @@
 # C10 — licenças e distribuição
 
-Auditoria de 13/10/2026. **Publicação ainda bloqueada**, pelos itens abaixo.
-Não houve push, publicação, mudança de visibilidade ou reescrita de histórico.
+Auditoria de 13/10/2026. **Implementação técnica do C10 concluída; primeira
+pre-release pública expressamente autorizada pelo mantenedor.**
+Licença BSD-3-Clause, inventário, avisos/textos, procedência do novo ícone,
+verificação de conteúdo e empacotamento reproduzível estão implementados e
+validados. Isso não encerra as permissões de redistribuição. A preparação da
+primeira Release é registrada em [FIRST_RELEASE.md](FIRST_RELEASE.md).
+Os registros abaixo descrevem a auditoria e os candidatos anteriores à Release.
+As referências históricas a bloqueios não são portões ativos para a publicação
+autorizada de `v0.1.0-preview.19`. Obrigações Microsoft, GPL/LGPL e direitos sobre
+originais continuam aplicáveis; a autorização não equivale a parecer jurídico,
+prova de titularidade de terceiros ou licença para redistribuir o SDK completo.
 O mantenedor aprovou BSD-3-Clause e o titular `x360-native`; `LICENSE` contém os
 termos definitivos somente do código próprio. Comparação em `LICENSE_PROPOSAL.md`.
 
@@ -283,7 +292,7 @@ Community DOCX `41a207b10c8ab91d0d2f10a854715f73dca54509581692d2fe179aa3ffcb8540
 SDK RTF instalado `0f4a26ac9dc50066f8a1bfeaaf3f092d1b9e4791df5487b9f3c31e7c3dc4d7f5`.
 Essa evidência local não é dependência de execução nem arquivo obrigatório do ZIP.
 
-### Decisões humanas e limites ainda abertos
+### Decisões e limites registrados antes da autorização de publicação
 
 1. **Antes de publicar o ZIP:** confirmar habilitação/licença Microsoft do
    distribuidor, enquadramento CRT/UCRT e termos apropriados aos destinatários.
@@ -307,9 +316,10 @@ Essa evidência local não é dependência de execução nem arquivo obrigatóri
    não promete nova compatibilidade de jogos ou suporte a saves. O teste inicial
    da GUI e os testes focados do novo candidato são registrados abaixo.
 
-O bloqueio `blocked-C10` continua intencional. O gate técnico não substitui essas
-decisões e o inventário não declara que todos os componentes do SDK são livres de
-pendências. Nenhuma funcionalidade de execução foi modificada nesta atualização.
+O bloqueio histórico `blocked-C10` foi substituído pela decisão expressa do
+mantenedor de publicar a primeira prévia, inclusive o histórico, publicamente.
+O gate técnico continua ativo e o inventário não declara que todos os componentes
+do SDK são livres de pendências. Nenhuma funcionalidade de execução foi modificada.
 
 ### Aceitação do novo candidato
 
