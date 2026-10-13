@@ -171,3 +171,68 @@ sem localização de Build Tools retornou código 3 e a mensagem de dependência
 ausente; isso não valida o instalador oferecido pela GUI. Não há aceite de Windows
 limpo: `Get-VM` foi recusado por falta de permissão e nenhum ambiente limpo acessível
 foi utilizado. Não houve instalação administrativa, publicação ou push.
+
+## Biblioteca do pacote e navegação — 2026-10-12
+
+O ensaio foi estendido no ambiente independente `Temp/x360-first-use-4f785046`:
+pela interface, a pasta original extraída de Castle Crashers 0.0.1.3 foi
+identificada e seus 708 arquivos foram importados. O jogo foi gerado/compilado
+nesse ambiente, sem copiar recompilações ou DLLs da árvore de desenvolvimento.
+As ferramentas obtidas na primeira preparação da dashboard foram reutilizadas.
+
+Três bloqueios reais foram corrigidos na distribuição:
+
+- O extrator de exports do CMake 3.31.6 falhava ao abrir um objeto existente cujo
+  caminho absoluto tinha 263 caracteres. A lista `exports.def.objs` agora recebe
+  caminhos estendidos do Windows quando necessário, após cada configure. O mesmo
+  objeto falhou com caminho comum e passou com `\\?\`; não houve troca de símbolos
+  ou supressão da etapa. Referência: `Source/bindexplib.cxx` da versão fixada do CMake.
+- A cópia para a biblioteca também excedia MAX_PATH. O registro usa caminhos
+  estendidos sem exigir alteração de política do Windows. Publica o header após
+  concluir/verificar os assets e só então remove o marcador de preparação.
+  Biblioteca parcial deixou de aparecer como pronta, inclusive ao selecionar o jogo.
+- O supervisor exigia identidade física entre o XEX importado e o selecionado.
+  Isso atendia à junction antiga, mas recusava uma instalação por cópia. Agora lê
+  a identidade em `preparation.toml`, aceita somente o endereço registrado para
+  aquele perfil na dashboard da sessão e verifica o SHA-256 exato. Outro caminho,
+  outra dashboard, sinalizadores não suportados e bytes divergentes são recusados.
+  Dados de lançamento e contexto continuam pelo handoff original.
+
+O preview.18 foi extraído em `Temp/x360-library-preview18` e abriu o ambiente
+externo já preparado, sem recompilar novamente. É um teste de retomada e execução
+do pacote atualizado, não uma segunda preparação integral do zero dessa versão.
+O build retomado do jogo (`desktop/167976046`) concluiu configure/codegen/
+reconfigure/build em 5/21/5/19 s. Os logs anteriores preservam as falhas corrigidas.
+
+Pela My Games original, o ciclo executado foi:
+`20261013T015808Z-session-0-dash_17559` →
+`20261013T015826Z-session-1-castle_crashers` →
+`20261013T015854Z-session-2-dash_17559`.
+O supervisor registrou correspondência com o XEX `825e9c8c…f5d9ad`, execução do
+binário compilado no ambiente externo e pedido explícito de retorno à dashboard.
+A dashboard recebeu 1.020 bytes, `kind=4`, `flags=0x100`, `dashboard_return=true`.
+O usuário confirmou o ciclo; houve novo lançamento pela biblioteca na mesma
+sessão (`session-3`). A mesma janela foi preservada e o retorno não repetiu a intro.
+O primeiro jogo executou por 28,3 s, saída 0, sem erros/stubs; isso não valida
+gameplay prolongado, save/load ou licença completa. O header não cria licenças.
+
+A lentidão relatada na troca de telas veio da revalidação integral de conteúdo
+em `Load`/`InspectSelected`: hashes dos imports e da biblioteca eram repetidos
+a cada aba. A interface usa agora um resultado em memória, preenchido pelo worker
+ao abrir/atualizar o ambiente e após operações. Trocar abas não relê o conjunto;
+preparar/iniciar continuam verificando os arquivos em segundo plano antes do uso.
+O usuário confirmou a resposta das telas e o ciclo na versão corrigida. Não há
+benchmark de latência nem cache de integridade persistente que dispense validação.
+
+Candidato: `0.1.0-preview.18`, código `9ecc073`, ZIP 1.740.090 bytes,
+SHA-256 `8f1ed08b71b89c97a26b4238b81f0a7d62b9463d359c78b012379def85519d75`.
+35 testes existentes/focados passam (20.226 asserções), incluindo cópia registrada,
+recusa de caminho/versão divergentes, retomada e registro em caminho longo.
+Capturas locais `x360-library-preview16-ready.png` (biblioteca registrada) e
+`x360-preview18-game.png` (jogo executado pelo menu), em `.local/packages`.
+Commits locais, sem push; runtime e frente de avatares preservados.
+
+Limites mantidos: importação gráfica de jogos exige pasta extraída e preparação
+compatível com a versão identificada. Importação direta STFS/LIVE/ISO não foi
+implementada. Windows limpo e instalação de MSVC/Windows SDK ausentes continuam
+pendentes; o ciclo com um título não aprova o restante do catálogo.

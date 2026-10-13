@@ -16,6 +16,13 @@ reabriu pronto sem recompilar. Fontes de idioma omitidas foram incluídas no
 manifesto 17559; textos conferidos na execução, sem distribuir as fontes.
 Windows limpo e instalação de MSVC ausente permanecem pendentes. Sem alterações
 no runtime ou na frente de avatares neste incremento.
+Preview.18 estendeu o teste à biblioteca: importou os 708 arquivos originais de
+Castle Crashers 0.0.1.3 e compilou no ambiente externo. Após corrigir caminhos
+longos, prontidão parcial e correspondência da cópia instalada ao perfil, o ciclo
+My Games → jogo → retorno original à 17559 foi executado e confirmado pelo usuário.
+Trocar abas deixou de recalcular hashes; conferências ocorrem no worker e antes
+das operações. 35 testes passam. STFS/ISO pelo assistente continuam pendentes;
+esta validação usou pasta extraída, sem ampliar a compatibilidade do catálogo.
 [Preparação gráfica](docs/desktop-preparation.md). Publicação privada e
 reconciliação do histórico anteriores permanecem registradas no checklist §19.3.
 Incremento atual: Retail 17559 com fonte original, entrega da URI My Games e

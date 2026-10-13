@@ -343,6 +343,7 @@ Reutilizar os arquivos, inventários e downloads já obtidos no projeto; não re
 ### 16.2. Preparação automatizada
 
 - [x] Iniciar e acompanhar a preparação pela interface — scripts sem terminal e logs locais; preview.13 executou importação, downloads, geração e compilação do zero da 17559 fora do repositório, com intro/menu e textos conferidos. MSVC/Windows SDK já instalados; Windows limpo permanece pendente.
+  - Extensão executada no preview.18: pasta extraída de Castle Crashers 0.0.1.3 importada (708 arquivos), compilada no ambiente externo e registrada na My Games original. Ciclo dashboard → jogo → retorno solicitado pelo jogo confirmado, mesma janela e sem repetir intro. Caminhos longos e estado pronto após registro parcial corrigidos; navegação das abas não repete os hashes. STFS/ISO, outros títulos e Windows limpo não estão aprovados por esse ensaio.
 - [ ] Dispensar configuração manual de Git, CMake, compilador, Python ou SDK pelo usuário.
 - [x] Gerenciar ferramentas indispensáveis pelo aplicativo, com fontes verificáveis e versões controladas — arquivos oficiais com hashes fixados; checkout e patches do SDK conferidos.
 - [x] Informar e obter consentimento quando instalação, download relevante ou elevação de privilégios forem necessários — downloads recusados sem consentimento; instalação interativa Microsoft separada e explicitada.
