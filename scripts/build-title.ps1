@@ -53,6 +53,31 @@ try {
             Get-Content $log | Select-String -Pattern 'error|FAILED' | Select-Object -First 10 | Out-Host
             exit $rc
         }
+        if ($s.name -in @('1-configure', '3-reconfigure')) {
+            # CMake 3.31's __create_def calls CreateFileW without converting long
+            # object paths (Source/bindexplib.cxx). Keep its generated object list
+            # and symbol extraction; only spell paths >= MAX_PATH in extended form.
+            # Configure regenerates these lists, so repeat after both configure steps.
+            # Use CMake's target list: PowerShell 5's recursive directory walk
+            # also rejects the long object directories that caused this failure.
+            foreach ($directory in [IO.File]::ReadAllLines((Join-Path $build 'CMakeFiles/TargetDirectories.txt'))) {
+                $list = Join-Path $directory 'exports.def.objs'
+                if (-not [IO.File]::Exists($list)) { continue }
+                $changed = $false
+                $entries = foreach ($entry in [IO.File]::ReadAllLines($list)) {
+                    if (-not $entry -or $entry.StartsWith('\\?\')) { $entry; continue }
+                    $absolute = [IO.Path]::GetFullPath((Join-Path $build $entry))
+                    if ($absolute.Length -lt 260) { $entry; continue }
+                    $changed = $true
+                    if ($absolute.StartsWith('\\')) { '\\?\UNC\' + $absolute.Substring(2) }
+                    else { '\\?\' + $absolute }
+                }
+                if ($changed) {
+                    [IO.File]::WriteAllLines($list, [string[]]$entries, [Text.UTF8Encoding]::new($false))
+                    Write-Host "Extended object paths for CMake exports: $list"
+                }
+            }
+        }
     }
 } finally { Pop-Location; $lease.Dispose() }
 Remove-Item -LiteralPath $marker
