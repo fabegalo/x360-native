@@ -92,11 +92,13 @@ Não foi demonstrado problema de severidade crítica. “Alto” abaixo signific
 
 ### C2. Alto — “pronto” não vincula XEX, código gerado, executável e DLLs
 
+**Estado: corrigido no incremento C2.** `scripts/build-title.ps1` publica um recibo SHA-256 por título/build, verificado por `catalog::Inspect`, pelos perfis de sessão e por `x360n run` antes de criar o processo. Recibo ausente, incompleto ou divergente exige preparar novamente; a existência do executável não basta. Ver E7 para escopo e validação.
+
 - **Local:** `src/desktop/catalog.cpp:166`, `Inspect`; `src/supervisor/paths.cpp:92`, `CheckLaunchable`; `src/supervisor/session_profile.cpp:29`; SDK `src/codegen/output_stamp.cpp:67`, `ComputeInputFingerprint`.
 - **Evidência:** a inspeção verifica SHA dos inputs, existência/localização do `.exe` e existência das DLLs. Não compara seus hashes com um recibo do build esperado. `catalog_test.cpp` aceita executável sintético para testar esse estado. O fingerprint do codegen agrega inputs, flags e string de versão do SDK; não inclui digest do gerador, templates ou conjunto de patches. Builds locais reportam versão `dev.unknown` e módulos já atualizados.
 - **Impacto:** mudar um patch como 0031/0036, analysis ou toolchain pode deixar código gerado/binário antigo reutilizável. Os hashes registrados pelo supervisor ajudam investigação posterior, mas não impedem execução incompatível. Não atribuo o crash da 6717 a essa hipótese sem prova.
 - **Correção:** recibo atômico por preparação contendo identidade de inputs/analysis, commit e patches do SDK, gerador/templates, toolchain/opções, executável e DLLs. Compará-lo em `Inspect` e a cada lançamento; invalidar codegen quando seu produtor mudar. Distinguir “conteúdo reconhecido” de “preparação válida”.
-- **Ação imediata:** sim, antes de ampliar catálogo e antes da Release.
+- **Ação imediata:** concluída para C2; isolamento das saídas concorrentes de build (C5) permanece para o próximo incremento.
 
 ### C3. Médio — extração sobrescreve o manifesto lateral existente
 
@@ -372,17 +374,41 @@ A revisão independente encontrou um caso de compatibilidade com separador final
 
 Limites: verificação executada em Windows x64; ramo POSIX inspecionado, sem build/execução Linux. Falha de escrita foi exercitada por estado de erro do stream, não por encher um disco. Não houve nova suíte completa, execução de jogos/dashboards, fuzzing exaustivo ou nova validação de STFS proprietário. O publicador e a normalização de destino são comuns aos comandos `extract` e `extract-disc`; o parser STFS não foi alterado. As falhas gerais da auditoria fora de C1/C3 permanecem abertas.
 
+## E7. Correção de C2 — identidade da preparação
+
+- Recibo `<título>.exe.preparation.json`, adjacente ao executável, vincula título e versão pelos XEX exatos, análise transitiva/manifesto (depfile do SDK), registro existente, revisão/patches do SDK, fontes/headers da dependência real do Ninja, templates, compilador/ferramentas/configuração CMake, código gerado e EXE/DLLs finais. O inventário `CONFIGURE_DEPENDS` também detecta adição/remoção de fontes e templates. Não foi criado outro catálogo.
+- Publicação por arquivo temporário, flush e rename/replace no mesmo diretório; falhas mantêm o marcador `.incomplete`. Entradas e produtor são conferidos antes/depois do build; DLLs publicadas devem corresponder aos bytes e ao inventário das saídas do grafo. O gerador executado é uma cópia verificável no build do título, preservando sua identidade quando outro build substitui o staging compartilhado do SDK. C5 não foi resolvido nem a arquitetura do supervisor alterada.
+- Preparação válida é reutilizada diretamente, sem relink de intermediários não certificados. Preparação inválida reconstrói os produtos nativos somente do projeto solicitado; o codegen usa hashes por módulo existentes e `--ignore-stamp` quando muda o produtor, sem `--force` nem supressão de erros. Módulos gerados antigos fora do grafo não entram no recibo. Alterar análise de outro título não invalida este; alterar dependências compartilhadas invalida seus consumidores, que só são preparados quando solicitados.
+- A identificação permanece SHA-256, com o mesmo contrato de `DigestFile`; Windows usa BCrypt para tornar viável verificar ferramentas e dependências por conteúdo, inclusive em Debug, sem cache baseado em mtime. O supervisor continua sem linkar o runtime ReXGlue. O pin e os 37 patches de C1/C3 foram preservados.
+
+| Evidência | Resultado |
+|---|---|
+| Antes/depois em `.local/audit/c2/baseline` | Supervisor anterior iniciou o executável substituto e registrou saída 42 do filho. Supervisor corrigido retornou 3 por falta de recibo e não criou outro run. |
+| Troca deliberada de EXE/DLL em fixture isolada | Recibo correto permite executar o filho; substituir o EXE por outro PE ou os bytes da DLL retorna 3, sem criar diretório de run/processo de título. |
+| XEX, análise, manifesto, patch, template, compilador, codegen, configuração e artefatos | Mudanças de bytes, inclusive com mesmo tamanho/mtime, são rejeitadas; revisão diferente, DLL adicional/ausente, recibo parcial, título errado e marcador incompleto também. Análise de um título não invalida o outro; patch compartilhado invalida ambos. |
+| Testes focados | 68 verificações em 9 casos SHA-256/recibo; 104 verificações em 22 casos do catálogo; publicação PowerShell testa criação, substituição, falha preservando recibo anterior, inventário de templates, invalidação de headers gerados e recusa de DLL divergente/fora do grafo. |
+| Regressões do projeto | `ctest -C Debug -L project -E "local[.]|env[.]" --output-on-failure -j 4`: 121/121 aprovados, incluindo C1/C3 e contratos de handoff/retorno, em 49,90 s. |
+| Castle Crashers | Build completo com 2.871 entradas e quatro artefatos no recibo; run `20261013T061343Z-c2-castle`, timeout diagnóstico de 60 s (62,282 s medidos), zero stubs/erros/críticas. Repetição com artefatos finais `20261013T063826Z-c2-final-castle`: fechamento normal aos 59,604 s, código 0, também zero stubs/erros/críticas. |
+| Iruka | Run final ocioso `20261013T065116Z-regress-iruka`: L1–L5 aprovados, 330 cores, diferença entre quadros 5,219, zero stubs/erros/críticas; timeout diagnóstico de 20 s. Uma repetição durante compilação pesada capturou o primeiro quadro preto (L4 falhou); critérios e script de regressão não foram alterados. |
+| Dashboard 17559 | Run final `20261013T065337Z-c2-final-dash17559`: intro original retornou 0 e iniciou a dashboard; timeout diagnóstico de 45 s (45,181 s medidos), sem críticas/crash. Persistem 10.473 stubs, 1.934 mensagens unimplemented e 1.971 erros dos serviços incompletos, comparáveis à auditoria original. Não é aceitação desses serviços nem repetição do ciclo interativo My Games/retorno. |
+| Catálogo real após builds sequenciais | Teste `[.preparation-local]`: 8/8 verificações aprovadas; Castle Crashers, Iruka e 17559 reconhecidos como preparados, mesmo após a reconstrução do SDK pelo título seguinte. |
+| Reutilização real final | Segundo preparo de cada título retornou `reused verified preparation`, sem executar build nem mudar o hash do recibo ou qualquer EXE/DLL. Castle: 2.871 entradas/4 artefatos; Iruka: 2.903/4; 17559: 3.282/7. Resultados em `.local/audit/c2/reuse-results.json`. |
+
+Logs e recibos são locais em `.local/audit/c2` e `.local/build/titles`; conteúdo proprietário não foi alterado ou versionado. A auditoria original subestimou o fingerprint do SDK: ele já inclui o hash dos templates embutidos; faltava vincular o produtor real e o conjunto completo da preparação aos artefatos aceitos pelo aplicativo.
+
+O teste de reutilização real encontrou uma comparação literal entre o caminho do compilador escrito pelo CMake com `/` e o inventário Windows com `\`. A normalização foi corrigida e coberta no teste PowerShell antes da conclusão. As tentativas em que os scripts mudaram durante a compilação recusaram a publicação e mantiveram o marcador incompleto, como esperado.
+
 ## F. Próximas prioridades
 
 | Ordem | Categoria | Entrega de maior impacto | Critério de conclusão |
 |---|---|---|---|
 | 1 | **Concluído: C1/C3** | Fronteira de conteúdo corrigida; ver E6 | ISO truncado, offsets extremos, ciclos e manifesto preexistente retornam erro controlado; nenhum crash/sobrescrita nos testes; extração válida preservada. |
-| 2 | Corrigir imediatamente | Identidade integral da preparação, invalidação e isolamento de build — C2/C5/C6 | Mudar input, analysis, patch, template ou toolchain invalida exatamente o necessário; artefato/DLL divergente não fica “pronto”; builds paralelos independentes; mesmas premissas PPC nos targets. |
+| 2 | **C2 concluído; C5/C6 pendentes** | Isolamento de build e premissas PPC — C5/C6 | Identidade/invalidação implementadas em E7; ainda faltam builds paralelos independentes e mesmas premissas PPC nos targets. |
 | 3 | Antes da primeira Release | Pacote reproduzível, atualização segura e gate de publicação — C4/C9/C10/C11/C12/C14 | Licença/avisos presentes; fonte/binário vinculados; falhas da suíte resolvidas ou explicitamente bloqueantes; pacote do HEAD testado em Windows limpo, com importação/preparação/cancelamento/retomada e preservação dos dados numa atualização. |
 | 4 | Evoluir progressivamente; antes de anunciar console funcional | Completar uma fatia original de perfis, UI de sistema e armazenamento — C7 | Dois usuários, sign-in/out, save/load isolado, reabertura e retorno pelo fluxo original, com testes de ciclo de vida e input real. |
 | 5 | Evoluir progressivamente | Compatibilidade por evidência: estabilizar 6717 e segundo consumidor de avatar — C8/C13 | 6717 com recursos correspondentes e causa de crash isolada; Motocross com visual/animação aceitos; Keflings/protocolo 2 testado antes de generalizar backend. Depois ampliar versões e plataformas. |
 
-Na auditoria original, as próximas **três tarefas de desenvolvimento** eram: (1) extrator seguro, (2) preparação/artefatos confiáveis, (3) candidato Windows publicável e atualizável. A primeira foi concluída no incremento C1/C3; as seguintes não foram iniciadas neste trabalho.
+Na auditoria original, as próximas **três tarefas de desenvolvimento** eram: (1) extrator seguro, (2) preparação/artefatos confiáveis, (3) candidato Windows publicável e atualizável. C1/C3 e a identidade de preparação C2 foram concluídos; C5/C6 e o candidato publicável permanecem pendentes.
 
 **Não mexer agora:** migração de SDK, troca de linguagem/framework, fusão de todos os jogos no processo da GUI, universalização do backend de avatar ou implementação de XNA/portabilidade em paralelo à estabilização desses contratos. Também não reescrever histórico nem remover créditos.
 
