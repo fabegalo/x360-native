@@ -36,6 +36,8 @@ target_sources(x360n_tests PRIVATE avatar/avatar_toc_test.cpp avatar/avatar_meta
 # x360n-content extract-disc over synthetic GDFX images and apply-patch key file
 # handling (runs the tool as a process; no key material).
 target_sources(x360n_tests PRIVATE content/extract_disc_test.cpp content/apply_patch_keys_test.cpp)
+target_sources(x360n_tests PRIVATE content/extraction_manifest_test.cpp
+    ${PROJECT_SOURCE_DIR}/src/content/extraction_manifest.cpp)
 target_compile_definitions(x360n_tests PRIVATE X360N_CONTENT_EXE="$<TARGET_FILE:x360n-content>")
 add_dependencies(x360n_tests x360n-content)
 catch_discover_tests(x360n_tests TEST_PREFIX "x360n." PROPERTIES LABELS "project" TIMEOUT 120)

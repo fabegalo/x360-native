@@ -480,6 +480,19 @@
           "src/codegen/builders/vector.cpp": "6e934f5079823e648722fa177308995ded09ba475972bf0c5316990e01b77cbf"
         },
         "test": "sdkcheck.Vavguw: assemble, recompile and execute unsigned rounded averages, overflow boundaries and destination aliasing; pre-patch throws REX_UNIMPLEMENTED"
+      },
+      {
+        "file": "patches/rexglue-sdk/0037-gdfx-bounded-directory-parser.patch",
+        "sha256": "d3828f9f185e60279e304b14ec5ffd83f1ee806dff2602332067349258b02076",
+        "base_files": {
+          "include/rex/filesystem/devices/disc_image_device.h": "6f8201b1fa4979b4e71d99535217ab9e5a67e0a82b4c3a66cc86962d770b135c",
+          "src/filesystem/devices/disc_image_device.cpp": "b7fc96d160d8af1a14b9e4c3e0dc8b497a1d3f2c5caa919ba6d71acfc814031d"
+        },
+        "files": {
+          "include/rex/filesystem/devices/disc_image_device.h": "bb2fb8755748c0ccfef7dd666526b9a7442ec7472ff2b05784292c8d87f3ab44",
+          "src/filesystem/devices/disc_image_device.cpp": "d04b038e79e6285b31350d525274380bacdf52e3fab8df744639fc131359b632"
+        },
+        "test": "tests/content/extract_disc_test.cpp: truncated headers, extreme sectors, bounded records, sibling/directory cycles, depth limit, valid nested and partition-relative extraction"
       }
     ]
   },

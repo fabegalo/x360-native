@@ -1,0 +1,263 @@
+diff --git a/include/rex/filesystem/devices/disc_image_device.h b/include/rex/filesystem/devices/disc_image_device.h
+index 2183212..9ee9552 100644
+--- a/include/rex/filesystem/devices/disc_image_device.h
++++ b/include/rex/filesystem/devices/disc_image_device.h
+@@ -81,9 +81,7 @@ class DiscImageDevice : public Device {
+ 
+   Error Verify(ParseState* state);
+   bool VerifyMagic(ParseState* state, size_t offset);
+-  Error ReadAllEntries(ParseState* state, const uint8_t* root_buffer);
+-  bool ReadEntry(ParseState* state, const uint8_t* buffer, uint16_t entry_ordinal,
+-                 DiscImageEntry* parent);
++  Error ReadAllEntries(ParseState* state);
+ };
+ 
+ }  // namespace rex::filesystem
+diff --git a/src/filesystem/devices/disc_image_device.cpp b/src/filesystem/devices/disc_image_device.cpp
+index 9d47734..fe90a6a 100644
+--- a/src/filesystem/devices/disc_image_device.cpp
++++ b/src/filesystem/devices/disc_image_device.cpp
+@@ -12,6 +12,9 @@
+ #include <rex/filesystem/devices/disc_image_device.h>
+ #include <rex/filesystem/devices/disc_image_entry.h>
+ 
++#include <map>
++#include <vector>
++
+ #include <rex/literals.h>
+ #include <rex/logging.h>
+ #include <rex/math.h>
+@@ -23,6 +26,22 @@ using namespace rex::literals;
+ 
+ const size_t kXESectorSize = 2_KiB;
+ 
++namespace {
++bool Contains(size_t size, size_t offset, size_t length) {
++  return offset <= size && length <= size - offset;
++}
++
++// Widen before multiplying (also on 32-bit hosts), and only narrow a verified
++// offset. Never construct a pointer before checking the entire span.
++bool SectorRange(size_t size, size_t game_offset, uint32_t sector, size_t length,
++                 size_t* offset) {
++  const uint64_t relative = uint64_t(sector) * kXESectorSize;
++  if (game_offset > size || relative > size - game_offset) return false;
++  *offset = game_offset + static_cast<size_t>(relative);
++  return Contains(size, *offset, length);
++}
++}  // namespace
++
+ DiscImageDevice::DiscImageDevice(const std::string_view mount_path,
+                                  const std::filesystem::path& host_path)
+     : Device(mount_path), name_("GDFX"), host_path_(host_path) {}
+@@ -30,6 +49,9 @@ DiscImageDevice::DiscImageDevice(const std::string_view mount_path,
+ DiscImageDevice::~DiscImageDevice() = default;
+ 
+ bool DiscImageDevice::Initialize() {
++  root_entry_.reset();
++  disc_info_ = {};
++  file_count_ = total_file_size_ = 0;
+   mmap_ = memory::MappedMemory::Open(host_path_, memory::MappedMemory::Mode::kRead);
+   if (!mmap_) {
+     REXFS_ERROR("Disc image could not be mapped");
+@@ -45,7 +67,7 @@ bool DiscImageDevice::Initialize() {
+     return false;
+   }
+ 
+-  result = ReadAllEntries(&state, state.ptr + state.root_offset);
++  result = ReadAllEntries(&state);
+   if (result != Error::kSuccess) {
+     REXFS_ERROR("Failed to read all GDFX entries: {}", static_cast<int>(result));
+     return false;
+@@ -67,7 +89,7 @@ Entry* DiscImageDevice::ResolvePath(const std::string_view path) {
+   // be in the form:
+   // some\PATH.foo
+   REXFS_DEBUG("DiscImageDevice::ResolvePath({})", path);
+-  return root_entry_->ResolvePath(path);
++  return root_entry_ ? root_entry_->ResolvePath(path) : nullptr;
+ }
+ 
+ DiscImageDevice::Error DiscImageDevice::Verify(ParseState* state) {
+@@ -89,14 +111,15 @@ DiscImageDevice::Error DiscImageDevice::Verify(ParseState* state) {
+   }
+ 
+   // Read sector 32 to get FS state.
+-  if (state->size < state->game_offset + (32 * kXESectorSize)) {
++  if (!Contains(state->size, state->game_offset + (32 * kXESectorSize), 28)) {
+     return Error::kErrorReadError;
+   }
+   uint8_t* fs_ptr = state->ptr + state->game_offset + (32 * kXESectorSize);
+   state->root_sector = memory::load<uint32_t>(fs_ptr + 20);
+   state->root_size = memory::load<uint32_t>(fs_ptr + 24);
+-  state->root_offset = state->game_offset + (state->root_sector * kXESectorSize);
+-  if (state->root_size < 13 || state->root_size > 32_MiB) {
++  if (state->root_size < 14 || state->root_size > 32_MiB ||
++      !SectorRange(state->size, state->game_offset, uint32_t(state->root_sector),
++                   state->root_size, &state->root_offset)) {
+     return Error::kErrorDamagedFile;
+   }
+ 
+@@ -109,7 +132,7 @@ DiscImageDevice::Error DiscImageDevice::Verify(ParseState* state) {
+ }
+ 
+ bool DiscImageDevice::VerifyMagic(ParseState* state, size_t offset) {
+-  if (offset >= state->size) {
++  if (!Contains(state->size, offset, 20)) {
+     return false;
+   }
+ 
+@@ -117,80 +140,85 @@ bool DiscImageDevice::VerifyMagic(ParseState* state, size_t offset) {
+   return std::memcmp(state->ptr + offset, "MICROSOFT*XBOX*MEDIA", 20) == 0;
+ }
+ 
+-DiscImageDevice::Error DiscImageDevice::ReadAllEntries(ParseState* state,
+-                                                       const uint8_t* root_buffer) {
+-  auto root_entry = new DiscImageEntry(this, nullptr, "", mmap_.get());
++DiscImageDevice::Error DiscImageDevice::ReadAllEntries(ParseState* state) {
++  auto root_entry = std::make_unique<DiscImageEntry>(this, nullptr, "", mmap_.get());
+   root_entry->attributes_ = kFileAttributeDirectory;
+-  root_entry_ = std::unique_ptr<Entry>(root_entry);
+-
+-  if (!ReadEntry(state, root_buffer, 0, root_entry)) {
+-    return Error::kErrorOutOfMemory;
+-  }
+-
+-  return Error::kSuccess;
+-}
+-
+-bool DiscImageDevice::ReadEntry(ParseState* state, const uint8_t* buffer, uint16_t entry_ordinal,
+-                                DiscImageEntry* parent) {
+-  const uint8_t* p = buffer + (entry_ordinal * 4);
+-
+-  uint16_t node_l = memory::load<uint16_t>(p + 0);
+-  uint16_t node_r = memory::load<uint16_t>(p + 2);
+-  size_t sector = memory::load<uint32_t>(p + 4);
+-  size_t length = memory::load<uint32_t>(p + 8);
+-  uint8_t attributes = memory::load<uint8_t>(p + 12);
+-  uint8_t name_length = memory::load<uint8_t>(p + 13);
+-  auto name_buffer = reinterpret_cast<const char*>(p + 14);
+-
+-  if (node_l && !ReadEntry(state, buffer, node_l, parent)) {
+-    return false;
+-  }
+-
+-  auto name = std::string(name_buffer, name_length);
+-
+-  auto entry = DiscImageEntry::Create(this, parent, name, mmap_.get());
+-  entry->attributes_ = attributes | kFileAttributeReadOnly;
+-  entry->size_ = length;
+-  entry->allocation_size_ = rex::round_up(length, bytes_per_sector());
+-
+-  // Set to January 1, 1970 (UTC) in 100-nanosecond intervals
+-  entry->create_timestamp_ = 10000 * 11644473600000LL;
+-  entry->access_timestamp_ = 10000 * 11644473600000LL;
+-  entry->write_timestamp_ = 10000 * 11644473600000LL;
+-
+-  if (attributes & kFileAttributeDirectory) {
+-    // Folder.
+-    entry->data_offset_ = 0;
+-    entry->data_size_ = 0;
+-    if (length) {
+-      // Not a leaf - read in children.
+-      if (state->size < state->game_offset + (sector * kXESectorSize)) {
+-        // Out of bounds read.
+-        return false;
+-      }
+-      // Read child list.
+-      uint8_t* folder_ptr = state->ptr + state->game_offset + (sector * kXESectorSize);
+-      if (!ReadEntry(state, folder_ptr, 0, entry.get())) {
+-        return false;
+-      }
++  struct Work {
++    size_t table, size;
++    uint16_t ordinal;
++    DiscImageEntry* parent;
++    size_t depth;
++    bool emit;
++  };
++  std::vector<Work> pending{{state->root_offset, state->root_size, 0,
++                            root_entry.get(), 0, false}};
++  // Global record intervals reject overlapping records and aliases back into
++  // previously visited directory tables, including both kinds of cycle.
++  std::map<size_t, size_t> records;
++  // Bound allocations and recursive Entry destruction/path construction too.
++  constexpr size_t kMaxEntries = 1 << 20, kMaxDepth = 256;
++  uint64_t file_count = 0, total_file_size = 0;
++  while (!pending.empty()) {
++    const auto work = pending.back();
++    pending.pop_back();
++    const size_t relative = size_t(work.ordinal) * 4;
++    if (work.depth > kMaxDepth || !Contains(work.size, relative, 14))
++      return Error::kErrorDamagedFile;
++    const size_t offset = work.table + relative;  // table span already verified
++    const auto* p = state->ptr + offset;
++    const uint16_t left = memory::load<uint16_t>(p);
++    const uint16_t right = memory::load<uint16_t>(p + 2);
++    const uint32_t sector = memory::load<uint32_t>(p + 4);
++    const size_t length = memory::load<uint32_t>(p + 8);
++    const uint8_t attributes = p[12], name_length = p[13];
++    const size_t record_size = 14 + size_t(name_length);
++    size_t data_offset;
++    if (!name_length || !Contains(work.size, relative, record_size) ||
++        !SectorRange(state->size, state->game_offset, sector, length, &data_offset) ||
++        std::memchr(p + 14, 0, name_length))
++      return Error::kErrorDamagedFile;
++    const bool directory = (attributes & kFileAttributeDirectory) != 0;
++    if (directory && length && (length < 14 || length > 32_MiB))
++      return Error::kErrorDamagedFile;
++
++    if (!work.emit) {
++      auto next = records.lower_bound(offset);
++      if (records.size() >= kMaxEntries ||
++          (next != records.end() && next->first < offset + record_size) ||
++          (next != records.begin() && std::prev(next)->second > offset))
++        return Error::kErrorDamagedFile;
++      records.emplace(offset, offset + record_size);
++      // Preserve in-order traversal without recursive sibling calls.
++      if (right) pending.push_back({work.table, work.size, right, work.parent, work.depth, false});
++      pending.push_back({work.table, work.size, work.ordinal, work.parent, work.depth, true});
++      if (left) pending.push_back({work.table, work.size, left, work.parent, work.depth, false});
++      continue;
+     }
+-  } else {
+-    // File.
+-    entry->data_offset_ = state->game_offset + (sector * kXESectorSize);
+-    entry->data_size_ = length;
+-    ++file_count_;
+-    total_file_size_ += length;
+-  }
+ 
+-  // Add to parent.
+-  parent->children_.emplace_back(std::move(entry));
+-
+-  // Read next file in the list.
+-  if (node_r && !ReadEntry(state, buffer, node_r, parent)) {
+-    return false;
++    auto entry = DiscImageEntry::Create(
++        this, work.parent, std::string_view(reinterpret_cast<const char*>(p + 14), name_length),
++        mmap_.get());
++    entry->attributes_ = attributes | kFileAttributeReadOnly;
++    entry->size_ = length;
++    entry->allocation_size_ = rex::round_up(uint64_t(length), uint64_t(bytes_per_sector()));
++    entry->create_timestamp_ = entry->access_timestamp_ = entry->write_timestamp_ =
++        10000 * 11644473600000LL;
++    if (directory) {
++      if (length) pending.push_back({data_offset, length, 0, entry.get(), work.depth + 1, false});
++    } else {
++      entry->data_offset_ = data_offset;
++      entry->data_size_ = length;
++      ++file_count;
++      total_file_size += length;
++    }
++    work.parent->children_.emplace_back(std::move(entry));
+   }
+ 
+-  return true;
++  // Never expose a partial tree following a failed Initialize().
++  root_entry_ = std::move(root_entry);
++  file_count_ = file_count;
++  total_file_size_ = total_file_size;
++  return Error::kSuccess;
+ }
+ 
+ }  // namespace rex::filesystem

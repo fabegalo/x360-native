@@ -87,9 +87,12 @@ struct Scratch {
     return p;
   }
   ProcessResult Extract(const fs::path& image, const fs::path& dest) const {
-    return RunProcess({X360N_CONTENT_EXE,
+    auto result = RunProcess({X360N_CONTENT_EXE,
                        {"extract-disc", image.string(), dest.string()},
-                       dir, dir / "out.log", dir / "err.log", 60s});
+                       dir, dir / "out.log", dir / "err.log", 10s});
+    REQUIRE(result.launched);
+    REQUIRE_FALSE(result.timed_out);
+    return result;
   }
   std::string Err() const { return Slurp(dir / "err.log"); }
 };
@@ -116,11 +119,12 @@ TEST_CASE("extract-disc refuses file ranges outside the image", "[content]") {
   auto r = s.Extract(s.Write(img), s.dir / "out");
   REQUIRE(r.launched);
   CHECK(r.exit_code == 1);
-  CHECK(fs::exists(s.dir / "out" / "ok.bin"));
+  // The SDK rejects the entire malformed filesystem before exposing entries.
+  CHECK_FALSE(fs::exists(s.dir / "out" / "ok.bin"));
   CHECK_FALSE(fs::exists(s.dir / "out" / "far.bin"));
   CHECK_FALSE(fs::exists(s.dir / "out" / "long.bin"));
-  CHECK(s.Err().find("far.bin lies outside the image") != std::string::npos);
-  CHECK(s.Err().find("long.bin lies outside the image") != std::string::npos);
+  CHECK(s.Err().find("DiscImageDevice::Initialize failed") != std::string::npos);
+  CHECK_FALSE(fs::exists(s.dir / "out.sha256"));
 }
 
 TEST_CASE("extract-disc refuses unsafe names", "[content]") {
@@ -129,6 +133,155 @@ TEST_CASE("extract-disc refuses unsafe names", "[content]") {
   REQUIRE(r.launched);
   CHECK(r.exit_code == 1);
   CHECK(s.Err().find("refusing unsafe entry name '..'") != std::string::npos);
+  CHECK_FALSE(fs::exists(s.dir / "out.sha256"));
+}
+
+TEST_CASE("extract-disc rejects malformed GDFX without crashing or looping", "[content]") {
+  Scratch s;
+  auto img = MakeImage({{"a", 34, 1}, {"b", 34, 1}, {"c", 34, 1}}, 35);
+  constexpr size_t v = 32 * kSector, r = kRootSector * kSector;
+  SECTION("truncated magic") { img.resize(v + 19); }
+  SECTION("truncated descriptor") { img.resize(v + 24); }
+  SECTION("audit root sector") { Put32(img, v + 20, 2097152); }
+  SECTION("maximum root sector") { Put32(img, v + 20, UINT32_MAX); }
+  SECTION("root span beyond EOF") { Put32(img, v + 24, 3 * kSector); }
+  SECTION("short root header") { Put32(img, v + 24, 13); }
+  SECTION("name outside declared directory") { Put32(img, v + 24, 14); }
+  SECTION("empty name") { img[r + 13] = 0; }
+  SECTION("embedded NUL name") { img[r + 14] = 0; }
+  SECTION("child ordinal outside table") { Put16(img, r + 2, UINT16_MAX); }
+  SECTION("entry header crosses table end") { Put16(img, r + 2, (kSector - 4) / 4); }
+  SECTION("overlapping records") { Put16(img, r + 2, 1); }
+  SECTION("sibling self cycle") { Put16(img, r + 16 + 2, 4); }
+  SECTION("two sibling cycle") { Put16(img, r + 32 + 2, 4); }
+  SECTION("left sibling cycle") { Put16(img, r + 16, 4); }
+  SECTION("directory points to root") {
+    img[r + 12] = 0x10; Put32(img, r + 4, kRootSector); Put32(img, r + 8, kSector);
+  }
+  SECTION("directory starts at EOF") {
+    img[r + 12] = 0x10; Put32(img, r + 4, 35); Put32(img, r + 8, 16);
+  }
+  SECTION("directory span exceeds EOF") {
+    img[r + 12] = 0x10; Put32(img, r + 8, 2 * kSector);
+  }
+  SECTION("two directory cycle") {
+    img[r + 12] = 0x10; Put32(img, r + 8, 16);
+    const size_t c = 34 * kSector;
+    Put32(img, c + 4, 33); Put32(img, c + 8, kSector);
+    img[c + 12] = 0x10; img[c + 13] = 1; img[c + 14] = 'd';
+  }
+  SECTION("directory shorter than entry") {
+    img[r + 12] = 0x10; Put32(img, r + 8, 13);
+  }
+  SECTION("file maximum offset") { Put32(img, r + 4, UINT32_MAX); }
+  SECTION("file maximum length") { Put32(img, r + 8, UINT32_MAX); }
+  SECTION("file span exceeds EOF") { Put32(img, r + 8, kSector + 1); }
+  auto result = s.Extract(s.Write(img), s.dir / "out");
+  REQUIRE(result.launched);
+  CHECK_FALSE(result.timed_out);
+  CHECK(result.exit_code == 1);
+  CHECK(s.Err().find("DiscImageDevice::Initialize failed") != std::string::npos);
+  CHECK_FALSE(fs::exists(s.dir / "out"));
+  CHECK_FALSE(fs::exists(s.dir / "out.sha256"));
+}
+
+TEST_CASE("extract-disc preserves existing sidecars and rejects output errors", "[content]") {
+  Scratch s;
+  auto image = s.Write(MakeImage({{"a", 34, 1}}, 35));
+  SECTION("existing manifest") {
+    std::ofstream(s.dir / "out.sha256") << "sentinel";
+    auto result = s.Extract(image, s.dir / "out");
+    CHECK(result.exit_code == 3);
+    CHECK(Slurp(s.dir / "out.sha256") == "sentinel");
+    CHECK_FALSE(fs::exists(s.dir / "out"));
+  }
+  SECTION("manifest is directory") {
+    fs::create_directory(s.dir / "out.sha256");
+    auto result = s.Extract(image, s.dir / "out");
+    CHECK(result.exit_code == 3);
+    CHECK(fs::is_directory(s.dir / "out.sha256"));
+  }
+  SECTION("parent is a file") {
+    std::ofstream(s.dir / "parent") << "sentinel";
+    auto result = s.Extract(image, s.dir / "parent" / "out");
+    CHECK((result.exit_code == 1 || result.exit_code == 3));
+    CHECK(Slurp(s.dir / "parent") == "sentinel");
+  }
+  SECTION("occupied staging name") {
+    std::ofstream(s.dir / "out.sha256.partial") << "sentinel";
+    auto result = s.Extract(image, s.dir / "out");
+    CHECK(result.exit_code == 1);
+    CHECK(Slurp(s.dir / "out.sha256.partial") == "sentinel");
+    CHECK_FALSE(fs::exists(s.dir / "out.sha256"));
+    CHECK_FALSE(fs::exists(s.dir / "out"));
+  }
+}
+
+TEST_CASE("extract-disc bounds deep directories but accepts long sibling chains", "[content]") {
+  Scratch s;
+  SECTION("deep directory chain") {
+    auto img = MakeImage({{"d", 34, 16}}, 300);
+    for (size_t sector = 33; sector < 299; ++sector) {
+      const size_t o = sector * kSector;
+      Put32(img, o + 4, uint32_t(sector + 1)); Put32(img, o + 8, 16);
+      img[o + 12] = 0x10; img[o + 13] = 1; img[o + 14] = 'd';
+    }
+    auto result = s.Extract(s.Write(img), s.dir / "out");
+    CHECK(result.exit_code == 1);
+    CHECK(s.Err().find("DiscImageDevice::Initialize failed") != std::string::npos);
+    CHECK_FALSE(fs::exists(s.dir / "out"));
+  }
+  SECTION("300 siblings") {
+    std::vector<DiscFile> files;
+    for (int i = 0; i < 300; ++i) files.push_back({"f" + std::to_string(i), 0, 0});
+    auto img = MakeImage(files, 40);
+    Put32(img, 32 * kSector + 24, 4 * kSector);
+    auto result = s.Extract(s.Write(img), s.dir / "out");
+    REQUIRE(result.exit_code == 0);
+    CHECK(std::distance(fs::directory_iterator(s.dir / "out"), fs::directory_iterator{}) == 300);
+  }
+}
+
+TEST_CASE("extract-disc preserves partition-relative sectors and tree order", "[content]") {
+  Scratch s;
+  auto img = MakeImage({{"b", 0, 0}, {"a", 0, 0}, {"c", 0, 0}}, 35);
+  Put16(img, 33 * kSector, 4); Put16(img, 33 * kSector + 2, 8);
+  Put16(img, 33 * kSector + 16 + 2, 0);
+  img.insert(img.begin(), 0xFB20, 0);
+  auto result = s.Extract(s.Write(img), s.dir / "out");
+  REQUIRE(result.exit_code == 0);
+  auto manifest = Slurp(s.dir / "out.sha256");
+  CHECK(manifest.find(" *a\n") < manifest.find(" *b\n"));
+  CHECK(manifest.find(" *b\n") < manifest.find(" *c\n"));
+}
+
+TEST_CASE("extract-disc normalizes trailing directory separators before publication", "[content]") {
+  Scratch s;
+  auto destination = s.dir / "out";
+  SECTION("separator") { destination /= ""; }
+  SECTION("dot") { destination /= "."; }
+  auto result = s.Extract(s.Write(MakeImage({{"zero", 0, 0}}, 35)), destination);
+  REQUIRE(result.exit_code == 0);
+  CHECK(fs::is_regular_file(s.dir / "out" / "zero"));
+  CHECK(fs::is_regular_file(s.dir / "out.sha256"));
+  CHECK_FALSE(fs::exists(s.dir / "out" / ".sha256"));
+  CHECK_FALSE(fs::exists(s.dir / "out.sha256.partial"));
+}
+
+TEST_CASE("extract-disc preserves nested empty directories and empty files", "[content]") {
+  Scratch s;
+  auto img = MakeImage({{"folder", 34, 16}, {"empty", 0, 0}, {"zero", 0, 0}}, 36);
+  img[33 * kSector + 12] = 0x10;
+  img[33 * kSector + 20 + 12] = 0x10;
+  const size_t child = 34 * kSector;
+  Put32(img, child + 4, 35); Put32(img, child + 8, 5);
+  img[child + 12] = 0x80; img[child + 13] = 1; img[child + 14] = 'a';
+  std::memcpy(&img[35 * kSector], "hello", 5);
+  auto result = s.Extract(s.Write(img), s.dir / "out");
+  REQUIRE(result.exit_code == 0);
+  CHECK(Slurp(s.dir / "out" / "folder" / "a") == "hello");
+  CHECK(fs::is_directory(s.dir / "out" / "empty"));
+  CHECK(fs::file_size(s.dir / "out" / "zero") == 0);
 }
 
 TEST_CASE("extract-disc refuses an existing destination and a non-GDFX file", "[content]") {
