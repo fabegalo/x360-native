@@ -49,6 +49,7 @@ class Dash17559App : public rex::ReXApp {
   }
 
   void OnGuestThreadExit(rex::system::XThread*) override {
+    dash17559::ReleaseSystemUiHost();
     x360n::ExportLaunchRequest(*runtime());
   }
   bool OnWindowCloseRequested() override { x360n::ExportWindowClose(); return true; }

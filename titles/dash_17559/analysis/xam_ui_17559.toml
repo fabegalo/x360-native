@@ -1,6 +1,9 @@
 # Original Retail 17559 XAM; UI-only execution, no module startup.
 [functions]
 
+# XUI render DC vtable 81604CC0+CC; reached by image rendering after first timer.
+0x8177C980 = {}
+
 # Leaf wrappers and adjusting thunks outside .pdata; verified in the original image.
 0x81861570 = {}
 0x81861630 = {}
