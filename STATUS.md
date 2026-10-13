@@ -10,8 +10,12 @@ importação e biblioteca separadas. O catálogo de compatibilidade não aparece
 jogos instalados. ZIP executado fora do repositório com PATH do Windows; importação
 real por arquivo e pasta da Retail 17559 confirmou estados incompleto/completo e
 originais preservados, sem instalar jogos. 34 testes de identidade, importação e
-sessão passam. Preparação completa pela nova interface e Windows limpo permanecem
-pendentes. Sem alterações no runtime ou na frente de avatares neste incremento.
+sessão passam. Preview.13 completou importação, downloads, geração e compilação
+do zero fora do repositório; iniciou a intro/menu originais pela interface e
+reabriu pronto sem recompilar. Fontes de idioma omitidas foram incluídas no
+manifesto 17559; textos conferidos na execução, sem distribuir as fontes.
+Windows limpo e instalação de MSVC ausente permanecem pendentes. Sem alterações
+no runtime ou na frente de avatares neste incremento.
 [Preparação gráfica](docs/desktop-preparation.md). Publicação privada e
 reconciliação do histórico anteriores permanecem registradas no checklist §19.3.
 Incremento atual: Retail 17559 com fonte original, entrega da URI My Games e

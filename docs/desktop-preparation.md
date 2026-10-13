@@ -118,3 +118,56 @@ fora do repositório. Capturas em `.local/packages/x360-native-*-preview8.png`
 na árvore principal, sem conteúdo proprietário na imagem. O teste adicional de
 importação real do pacote passou com 19 asserções; o backend não mudou entre
 preview.7 e preview.8. Nenhum ciclo de jogo novo é reivindicado por esse teste.
+
+## Primeira preparação fora do repositório — 2026-10-12
+
+O ZIP preview.12 foi extraído em `Temp/x360-first-use-74492181`, sem junctions,
+SDK, ferramentas, código gerado ou DLLs copiados da árvore de desenvolvimento.
+O aplicativo foi iniciado com PATH limitado ao Windows e sem variáveis de SDK,
+CMake, LLVM ou Visual Studio. Pela interface, importou os originais da 17559,
+obteve Git/CMake/Ninja/LLVM e SDK fixados, mostrou as etapas e compilou do zero:
+configure 383 s, codegen 136 s, reconfigure 6 s, build 190 s. O supervisor e as
+DLLs carregadas vieram dessa extração. O usuário confirmou intro com som; o menu
+original apareceu, mas seus textos estavam incompletos.
+
+Os bloqueios encontrados e corrigidos ficaram nos scripts de preparação:
+isolamento de PSModulePath do PowerShell filho; extração por tar para caminhos
+longos; `core.longpaths=true` apenas nos comandos Git locais; retomada do download
+LLVM com hash integral obrigatório. O download final terminou normalmente; a
+nova recuperação automática de conexão lenta ainda não teve aceite específico.
+
+A falha de texto foi demonstrada no log: `media:\XenonJKLatin.xtt` retornou
+`0xc000000f` 11.228 vezes na sessão `20261013T004336Z-session-0-dash_17559`.
+O manifesto importava SegoeXbox-Light, mas omitia as fontes de idioma. Preview.13
+associa XenonJKLatin, XenonCLatin e XenonSCLatin aos hashes do conjunto 17559
+já existente. Não altera o renderizador nem distribui essas fontes. Os 34 testes
+do frontend passam (20.213 asserções); o teste de importação do pacote real passa
+com 23 asserções, incluindo detectar fonte ausente e recuperar só esse arquivo.
+
+Preview.13 foi extraído novamente em `Temp/x360-first-use-4f785046`: importação
+gráfica dos dez componentes, novos downloads/SDK e geração/compilação completas,
+sem reaproveitar o ambiente preview.12. As quatro etapas terminaram com código 0
+em 435/199/7/208 s. A ação Abrir dashboard iniciou a sessão
+`20261013T011004Z-session-0-dash_17559`; a intro original retornou em 10,9 s e o
+menu mostrou Open Tray, My Pins, Recent e os textos de instrução. Não houve falha
+de abertura de fonte no relatório; os stubs de serviços de sistema permanecem.
+A sessão fechou sem processo remanescente. O supervisor registra fechamento de
+janela como cancelamento, código 1; isso não comprova Turn Off pelo menu original.
+O aplicativo também foi fechado e reaberto: mostrou Pronta para iniciar, sem
+nova preparação, com tamanho/data dos sete binários inalterados.
+A ação Iniciar Xbox 360 abriu uma segunda sessão (`20261013T011156Z`); o log
+confirma novamente retorno da intro e entrada na dashboard, seguida de fechamento
+da janela. Não foi necessário preparar, baixar ou recompilar novamente.
+
+Candidato final: `0.1.0-preview.13`, código `434ab65`, ZIP de 1.720.013 bytes,
+SHA-256 `0aa1ec684ab9fb44e6f8b23080363bb40151e4d4050b7c44786abdc75ad11268`.
+Capturas locais `x360-preview13-fonts.png`, `x360-preview13-ready.png` e
+`x360-preview13-reopened.png`, junto do ZIP na pasta ignorada `.local/packages`.
+Nenhum jogo foi importado neste ensaio: não aprova perfil, save/load ou catálogo.
+
+Limites de dependências: Git/CMake/Ninja/LLVM ausentes foram obtidos e utilizados
+pelo aplicativo. MSVC e Windows SDK já estavam instalados. Um processo de teste
+sem localização de Build Tools retornou código 3 e a mensagem de dependência
+ausente; isso não valida o instalador oferecido pela GUI. Não há aceite de Windows
+limpo: `Get-VM` foi recusado por falta de permissão e nenhum ambiente limpo acessível
+foi utilizado. Não houve instalação administrativa, publicação ou push.

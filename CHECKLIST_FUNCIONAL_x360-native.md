@@ -342,7 +342,7 @@ Reutilizar os arquivos, inventários e downloads já obtidos no projeto; não re
 
 ### 16.2. Preparação automatizada
 
-- [x] Iniciar e acompanhar a preparação pela interface — scripts sem terminal e logs locais; quatro etapas incrementais executadas para Castle Crashers e 17559. Preparação inicial completa no pacote ainda não aprovada.
+- [x] Iniciar e acompanhar a preparação pela interface — scripts sem terminal e logs locais; preview.13 executou importação, downloads, geração e compilação do zero da 17559 fora do repositório, com intro/menu e textos conferidos. MSVC/Windows SDK já instalados; Windows limpo permanece pendente.
 - [ ] Dispensar configuração manual de Git, CMake, compilador, Python ou SDK pelo usuário.
 - [x] Gerenciar ferramentas indispensáveis pelo aplicativo, com fontes verificáveis e versões controladas — arquivos oficiais com hashes fixados; checkout e patches do SDK conferidos.
 - [x] Informar e obter consentimento quando instalação, download relevante ou elevação de privilégios forem necessários — downloads recusados sem consentimento; instalação interativa Microsoft separada e explicitada.
