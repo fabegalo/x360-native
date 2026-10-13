@@ -91,7 +91,8 @@ foreach ($binary in @((Join-Path $destination 'x360-native.exe'), (Join-Path $in
 }
 $licenses = Join-Path $internal 'licenses'; New-Item -ItemType Directory $licenses | Out-Null
 foreach ($component in @('fmt','cli11','tomlplusplus','inja')) { Copy-Item -LiteralPath (Join-Path $sdk "thirdparty/$component/LICENSE") -Destination (Join-Path $licenses "$component.txt") }
-foreach ($component in @('spdlog','simde','utfcpp')) { Copy-Item -LiteralPath (Join-Path $sdk "thirdparty/$component/LICENSE") -Destination (Join-Path $licenses "$component.txt") }
+foreach ($component in @('spdlog','utfcpp')) { Copy-Item -LiteralPath (Join-Path $sdk "thirdparty/$component/LICENSE") -Destination (Join-Path $licenses "$component.txt") }
+Copy-Item -LiteralPath (Join-Path $sdk 'thirdparty/simde/COPYING') -Destination (Join-Path $licenses 'simde.txt')
 Copy-Item -LiteralPath (Join-Path $sdk 'LICENSE') -Destination (Join-Path $licenses 'rexglue-sdk.txt')
 # Keep the effective compiler commands as reviewable evidence, with portable
 # logical roots. They describe this fresh build, not a second preparation cache.

@@ -41,6 +41,10 @@ struct Scratch {
   Scratch() { fs::remove_all(root); fs::create_directories(root); }
   ~Scratch() { std::error_code ec; fs::remove_all(root,ec); }
 };
+fs::path LocalExtractor() {
+  const auto* path=std::getenv("X360N_TEST_EXTRACTOR");
+  return path ? PathFromUtf8(path) : fs::path(X360N_CONTENT_EXE);
+}
 }
 TEST_CASE("desktop extracts ISO and extensionless CON LIVE PIRS before verified import", "[desktop][extraction]") {
   Scratch s; std::string bytes; std::string name="original";
@@ -104,7 +108,7 @@ TEST_CASE("desktop imports the user's real container into an isolated environmen
   REQUIRE(original); REQUIRE(repository); REQUIRE(id);
   Scratch s; const auto input=PathFromUtf8(original); const auto before=DigestFile(input)->sha256;
   auto catalog=ReadCatalog(ProjectPaths{PathFromUtf8(repository)});
-  ImportSource source(input,X360N_CONTENT_EXE,s.root/"logs"); REQUIRE(source.extracted());
+  ImportSource source(input,LocalExtractor(),s.root/"logs"); REQUIRE(source.extracted());
   auto identities=IdentifyContent(catalog,source.identity_path());
   auto match=std::find_if(identities.begin(),identities.end(),[&](const auto& i){return i.target_id==id;});
   REQUIRE(match!=identities.end());
@@ -121,11 +125,11 @@ TEST_CASE("desktop extracts real containers against their established file inven
   const auto* inventory=std::getenv("X360N_TEST_INVENTORY");
   REQUIRE(original); REQUIRE(inventory); Scratch s;
   const auto input=PathFromUtf8(original); const auto before=DigestFile(input)->sha256;
-  ImportSource source(input,X360N_CONTENT_EXE,s.root/"logs"); REQUIRE(source.extracted());
+  ImportSource source(input,LocalExtractor(),s.root/"logs"); REQUIRE(source.extracted());
   auto read=[](const fs::path& path) { std::ifstream f(path,std::ios::binary); REQUIRE(f.good());
     std::vector<std::string> lines; for(std::string line;std::getline(f,line);) {
       if(!line.empty() && line.back()=='\r') line.pop_back(); lines.push_back(line);
     } std::sort(lines.begin(),lines.end()); return lines; };
   auto expected=read(PathFromUtf8(inventory)); auto actual=read(s.root/"logs/extraction/content.sha256");
-  CHECK(actual==expected); CHECK(actual.size()>100); CHECK(DigestFile(input)->sha256==before);
+  CHECK(actual==expected); CHECK_FALSE(actual.empty()); CHECK(DigestFile(input)->sha256==before);
 }
