@@ -22,7 +22,7 @@ namespace fs = std::filesystem;
 using namespace x360n;
 using namespace x360n::desktop;
 namespace {
-constexpr UINT kFinished = WM_APP + 1, kProgress = WM_APP + 2, kDetected = WM_APP + 3, kInitialized = WM_APP + 4;
+constexpr UINT kFinished = WM_APP + 1, kProgress = WM_APP + 2, kDetected = WM_APP + 3, kInitialized = WM_APP + 4, kInspected = WM_APP + 5;
 enum { kFolder = 101, kTargets, kCheck, kImport, kPrepare, kLaunch, kDetails, kData, kCancel, kLanguage, kInstall, kStorage, kPrimary, kSettings, kImportFolder, kDashboards, kGames, kHome, kImportPage, kAddContent, kLibrary };
 constexpr COLORREF background = RGB(15, 20, 27), surface = RGB(24, 32, 42), foreground = RGB(236, 241, 247), muted = RGB(157, 171, 189), accent = RGB(169, 231, 154);
 HBRUSH background_brush = CreateSolidBrush(background), surface_brush = CreateSolidBrush(surface);
@@ -44,6 +44,8 @@ struct App {
   std::string startup_error;
   Environment environment;
   std::vector<Target> targets;
+  struct CheckedTarget { Inspection state; std::vector<std::string> library; bool added = false; };
+  std::vector<CheckedTarget> checked;
   std::vector<size_t> dashboard_indices;
   Inspection current;
   size_t selected = 0;
@@ -147,6 +149,22 @@ void Enable(App& a) {
   SendMessageW(a.progress, PBM_SETMARQUEE, a.busy, 40);
   Layout(a);
 }
+// A snapshot is for presentation only. Navigation never hashes the content.
+// Populate it on the worker; operations revalidate before using the files.
+void CheckContents(App& a) {
+  std::vector<App::CheckedTarget> checked;
+  for (const auto& target : a.targets) {
+    App::CheckedTarget item;
+    item.state = Inspect(ProjectPaths{a.root}, target);
+    if (item.state.inputs_ok) item.library = InspectLibrary(target, a.targets);
+    if (!target.inputs.empty()) {
+      auto anchor = DigestFile(target.inputs.front().destination);
+      item.added = anchor && anchor->sha256 == target.inputs.front().sha256;
+    }
+    checked.push_back(std::move(item));
+  }
+  a.checked = std::move(checked);
+}
 void InspectSelected(App& a) {
   a.current = {};
   a.current.inputs_ok = false;
@@ -167,7 +185,7 @@ void InspectSelected(App& a) {
     Enable(a); return;
   }
   const auto& t = a.targets[a.selected];
-  a.current = Inspect(ProjectPaths{a.root}, t);
+  a.current = a.checked.at(a.selected).state;
   std::string missing = a.current.inputs_ok ? "" : (english ? t.label_en : t.label);
   std::string detail;
   detail += a.environment.description + "\r\n";
@@ -179,14 +197,14 @@ void InspectSelected(App& a) {
       detail += "Perfil necessário não encontrado: " + dep + "\r\n";
       continue;
     }
-    auto r = Inspect(ProjectPaths{a.root}, *it);
+    auto r = a.checked.at(size_t(it - a.targets.begin())).state;
     if (missing.empty() && !r.inputs_ok) missing = english ? it->label_en : it->label;
     a.current.inputs_ok = a.current.inputs_ok && r.inputs_ok;
     a.current.prepared = a.current.prepared && r.prepared;
     for (const auto& issue : r.issues) detail += dep + ": " + issue + "\r\n";
   }
   if (a.current.inputs_ok) {
-    for (const auto& issue : InspectLibrary(t, a.targets)) {
+    for (const auto& issue : a.checked.at(a.selected).library) {
       a.current.prepared = false; detail += issue + "\r\n";
     }
   }
@@ -239,21 +257,32 @@ void InspectSelected(App& a) {
   Enable(a);
 }
 void Load(App& a, const fs::path& root) {
-  if (a.root != root) a.targets.clear();
+  if (a.root != root) { a.targets.clear(); a.checked.clear(); }
   a.dashboard_indices.clear(); a.selected = 0;
   SendMessageW(a.combo, CB_RESETCONTENT, 0, 0);
   // Hardware probing is independent of navigation between pages.
   if (a.environment.description.empty() || a.root != root) a.environment = CheckEnvironment(root);
   a.root = root;
   SetWindowTextW(a.root_text, root.empty() ? L"Selecione um ambiente existente" : root.c_str());
-  if (!root.empty() && a.targets.empty()) a.targets = ReadCatalog(ProjectPaths{root});
+  if (!root.empty() && a.targets.empty()) { a.targets = ReadCatalog(ProjectPaths{root}); a.checked.clear(); }
+  if (a.checked.size() != a.targets.size()) {
+    if (a.worker.joinable()) a.worker.join();
+    a.busy = true; a.initializing = true; Enable(a);
+    Set(a.headline, Tr("Conferindo seu conteúdo.", "Checking your content."));
+    Set(a.subtitle, Tr("Verificamos seus arquivos ao abrir ou atualizar o ambiente.\r\nTrocar de tela não repete essa verificação.", "Files are checked when opening or refreshing the environment.\r\nSwitching pages does not repeat this check."));
+    Set(a.status, Tr("Verificação em andamento…", "Checking…"));
+    a.worker = std::thread([&a] {
+      try { CheckContents(a); Post(a.window, kInspected, ""); }
+      catch (const std::exception& error) { Post(a.window, kInspected, error.what()); }
+    });
+    return;
+  }
   a.selected = a.targets.size();
   for (size_t i = 0; i < a.targets.size(); ++i) {
     if ((a.targets[i].kind != "dashboard") != a.games) continue;
     if (a.games) {
       if (a.targets[i].inputs.empty()) continue;
-      auto installed = DigestFile(a.targets[i].inputs.front().destination);
-      if (!installed || installed->sha256 != a.targets[i].inputs.front().sha256) continue;
+      if (!a.checked.at(i).added) continue;
     }
     a.dashboard_indices.push_back(i);
     auto label = Wide(english ? a.targets[i].label_en : a.targets[i].label);
@@ -320,10 +349,24 @@ void Start(App& a, int action, fs::path source = {}) {
   a.show_details = false; a.settings = false; Layout(a);
   a.worker = std::thread([&a, target, action, source] {
     auto finish = [&](const std::string& message) {
+      try { CheckContents(a); }
+      catch (const std::exception& error) { a.failed = true; Post(a.window, kFinished, error.what()); return; }
       std::ofstream(a.logs / "result.txt", std::ios::binary) << message << '\n';
       Post(a.window, kFinished, message);
     };
     try {
+      if (action == kLaunch || action == kPrepare) {
+        auto state = Inspect(ProjectPaths{a.root}, target);
+        for (const auto& dep : target.dependencies) {
+          auto it = std::find_if(a.targets.begin(), a.targets.end(), [&](const auto& t) { return t.id == dep; });
+          if (it == a.targets.end()) throw std::runtime_error("Required preparation profile is missing: " + dep);
+          auto dependency = Inspect(ProjectPaths{a.root}, *it);
+          state.inputs_ok = state.inputs_ok && dependency.inputs_ok;
+          state.prepared = state.prepared && dependency.prepared;
+        }
+        if (!state.inputs_ok || (action == kLaunch && (!state.prepared || !InspectLibrary(target, a.targets).empty())))
+          throw std::runtime_error(Tr("O conteúdo mudou desde a verificação. Confira os detalhes e prepare novamente.", "Content changed since verification. Check details and prepare again."));
+      }
       if (action == kImport) {
         const auto found = IdentifyContent(a.targets, source, [&] { return a.cancel.load(); });
         std::vector<std::string> ids;
@@ -631,6 +674,18 @@ LRESULT CALLBACK WndProc(HWND window, UINT message, WPARAM wp, LPARAM lp) {
       case kProgress: {
         std::unique_ptr<std::string> text(reinterpret_cast<std::string*>(lp)); Set(a->details, *text); Set(a->status, *text); return 0;
       }
+      case kInspected: {
+        std::unique_ptr<std::string> error(reinterpret_cast<std::string*>(lp));
+        if (a->worker.joinable()) a->worker.join();
+        a->busy = false; a->initializing = false;
+        if (error->empty()) Load(*a, a->root);
+        else {
+          a->current = {}; a->current.inputs_ok = false; a->next_action = kFolder;
+          Set(a->status, Tr("Não foi possível conferir o conteúdo. Consulte Detalhes.", "Could not check content. See Details."));
+          Set(a->details, *error); Enable(*a);
+        }
+        return 0;
+      }
       case kInitialized: {
         std::unique_ptr<std::string> error(reinterpret_cast<std::string*>(lp));
         if (a->worker.joinable()) a->worker.join();
@@ -668,7 +723,7 @@ LRESULT CALLBACK WndProc(HWND window, UINT message, WPARAM wp, LPARAM lp) {
         if (a->importing) {
           Set(a->headline, Tr("Resultado da importação", "Import result")); Set(a->subtitle, *text);
           if (a->import_recognized && a->selected < a->targets.size()) {
-            const auto state = Inspect(ProjectPaths{a->root}, a->targets[a->selected]);
+            const auto state = a->checked.at(a->selected).state;
             Set(a->status, state.inputs_ok ? Tr("Conteúdo completo\r\n\r\nAcesse Dashboard ou Biblioteca para continuar a preparação.", "Content complete\r\n\r\nOpen Dashboard or Library to continue preparation.") : Tr("Conteúdo incompleto\r\n\r\nAdicione os arquivos restantes. Consulte Detalhes para saber o que falta.", "Content incomplete\r\n\r\nAdd the remaining files. See Details for what is missing."));
           } else Set(a->status, Tr("Nenhum arquivo foi importado\r\n\r\nConsulte o resultado acima e selecione outro arquivo ou pasta. Os originais foram preservados.", "No files were imported\r\n\r\nCheck the result above and choose another file or folder. Originals were preserved."));
         }
