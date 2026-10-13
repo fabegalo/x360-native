@@ -1,0 +1,32 @@
+diff --git a/src/kernel/xam/xam_user.cpp b/src/kernel/xam/xam_user.cpp
+index 8d0922a..d5116a9 100644
+--- a/src/kernel/xam/xam_user.cpp
++++ b/src/kernel/xam/xam_user.cpp
+@@ -66,20 +66,25 @@ i32 XamUserGetXUID_entry(u32 user_index, u32 type_mask, mapped_u64 xuid_ptr) {
+ static uint32_t LocalLogon(mapped_void users, uint32_t flags, uint32_t overlapped,
+                            uint32_t stride) {
+   if (!users) return uint32_t(X_E_INVALIDARG);
+-  if (flags && !(stride == 392 && flags == 0x120420)) return 0x80004001u;
++  const bool append = stride == 392 && flags == 0x120424;
++  if (flags && !(stride == 392 && (flags == 0x120420 || append)) &&
++      !(stride == 8 && flags == 0x63)) return 0x80004001u;
+   auto* bytes = users.as<uint8_t*>();
+   for (unsigned i = 1; i < 4; ++i) {
+     if (rex::memory::load_and_swap<uint64_t>(bytes + i * stride))
+       return 0x80004001u; // E_NOTIMPL: never partially apply a multi-user request.
+   }
+   const auto xuid = rex::memory::load_and_swap<uint64_t>(bytes);
+-  if (flags == 0x120420) {
++  if (flags == 0x120420 || append) {
+     // This path must select an existing local identity, never ingest account
+     // data supplied by the caller or silently enable an online account.
+     if (!xuid || rex::memory::load_and_swap<uint64_t>(bytes + 48))
+       return uint32_t(X_E_INVALIDARG);
+   }
++  // 17559 8199E884 / 8199E8C4: bit 4 merges the supplied accounts;
++  // with one local slot this selects the persisted identity without clearing peers.
+   const auto result = REX_KERNEL_STATE()->user_profile()->SetLocalSession(xuid);
++  REXKRNL_INFO("Local logon flags={:08X} xuid={:016X} result={}", flags, xuid, result);
+   const auto hr = X_HRESULT_FROM_WIN32(result);
+   if (overlapped) {
+     // Original LogonEx returns HRESULT acceptance, with result in XOVERLAPPED.

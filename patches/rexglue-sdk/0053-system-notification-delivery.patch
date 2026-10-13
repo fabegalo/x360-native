@@ -1,0 +1,18 @@
+diff --git a/src/kernel/xam/xam_notify.cpp b/src/kernel/xam/xam_notify.cpp
+index 9abcef6..01a0231 100644
+--- a/src/kernel/xam/xam_notify.cpp
++++ b/src/kernel/xam/xam_notify.cpp
+@@ -115,7 +115,12 @@ REX_EXPORT(__imp__XNotifyGetNext, rex::kernel::xam::XNotifyGetNext_entry)
+ REX_EXPORT(__imp__XNotifyDelayUI, rex::kernel::xam::XNotifyDelayUI_entry)
+ REX_EXPORT(__imp__XNotifyPositionUI, rex::kernel::xam::XNotifyPositionUI_entry)
+ 
+-REX_EXPORT_STUB(__imp__XNotifyBroadcast);
++// The system caller supplies the full notification ID (including its private
++// bit) and a 32-bit parameter. Delivery uses the same mask/version filtering
++// and waitable queues as kernel-originated sign-in notifications.
++extern "C" REX_FUNC(__imp__XNotifyBroadcast) {
++  REX_KERNEL_STATE()->BroadcastNotification(ctx.r3.u32, ctx.r4.u32);
++}
+ REX_EXPORT_STUB(__imp__XNotifyQueueUI);
+ REX_EXPORT_STUB(__imp__XNotifyQueueUIEx);
+ REX_EXPORT_STUB(__imp__XNotifyRegisterArea);

@@ -18,6 +18,7 @@ using rex::X_RESULT;
 using rex::X_HRESULT;
 extern "C" void __imp__XamUserLogon(PPCContext&, uint8_t*);
 extern "C" void __imp__XamUserLogonEx(PPCContext&, uint8_t*);
+extern "C" void __imp__XamUserFlushLogonQueue(PPCContext&, uint8_t*);
 extern "C" void __imp__XamUserGetSigninInfo(PPCContext&, uint8_t*);
 extern "C" void __imp__XamUserGetXUID(PPCContext&, uint8_t*);
 extern "C" void __imp__XamUserGetSigninState(PPCContext&, uint8_t*);
@@ -32,6 +33,16 @@ extern "C" void __imp__XMemCpy(PPCContext&, uint8_t*);
 extern "C" void __imp__XMemSet(PPCContext&, uint8_t*);
 extern "C" void __imp__lstrcpynW(PPCContext&, uint8_t*);
 extern "C" void __imp__RtlCompareMemoryUlong(PPCContext&, uint8_t*);
+extern "C" void __imp__XamIsDataCenterMode(PPCContext&, uint8_t*);
+extern "C" void __imp__XamIsNuiAutomationEnabled(PPCContext&, uint8_t*);
+extern "C" void __imp__XamGetCurrentDemand(PPCContext&, uint8_t*);
+extern "C" void __imp__XNotifyBroadcast(PPCContext&, uint8_t*);
+extern "C" void __imp__XamAreMixedAccountsSignedIn(PPCContext&, uint8_t*);
+extern "C" void __imp__XamGetUserNeedTFA(PPCContext&, uint8_t*);
+extern "C" void __imp__XamUserGetUserFlags(PPCContext&, uint8_t*);
+extern "C" void __imp__GetSystemTimeAsFileTime(PPCContext&, uint8_t*);
+extern "C" void __imp__ExGetXConfigSetting(PPCContext&, uint8_t*);
+extern "C" void __imp__ExReadModifyWriteXConfigSettingUlong(PPCContext&, uint8_t*);
 
 TEST_CASE("Local profile passcode comparison returns matching bytes in guest order",
           "[sdk][passcode-contract]") {
@@ -71,6 +82,35 @@ void Setup(rex::Runtime& rt) {
   config.tool_mode = true;
   config.kernel_init = rex::kernel::InitializeKernel;
   REQUIRE(rt.Setup(std::move(config)) == X_STATUS_SUCCESS);
+}
+
+TEST_CASE("Sign-in system broadcasts reach matching listeners", "[sdk][signin]") {
+  Store store;
+  rex::Runtime rt(store.path, store.path);
+  Setup(rt);
+  auto make_listener = [&](uint64_t mask, uint32_t version) {
+    auto listener = rex::system::object_ref<rex::system::XNotifyListener>(
+        new rex::system::XNotifyListener(rt.kernel_state()));
+    listener->Initialize(mask, version);
+    return listener;
+  };
+  auto system = make_listener(1, 10);
+  auto other = make_listener(2, 10);
+  auto older = make_listener(1, 3);
+  uint32_t id = 0, parameter = 0;
+  // Listener registration queues the runtime's initial UI/system state.
+  for (auto* listener : {system.get(), other.get(), older.get()})
+    while (listener->DequeueNotification(&id, &parameter)) {}
+  PPCContext ctx{};
+  ctx.r3.u64 = 0x80040016;
+  ctx.r4.u64 = 0x00FF0002;
+  __imp__XNotifyBroadcast(ctx, rt.memory()->virtual_membase());
+  REQUIRE(system->DequeueNotification(&id, &parameter));
+  CHECK(id == 0x80040016);
+  CHECK(parameter == 0x00FF0002);
+  CHECK_FALSE(system->DequeueNotification(&id, &parameter));
+  CHECK_FALSE(other->DequeueNotification(&id, &parameter));
+  CHECK_FALSE(older->DequeueNotification(&id, &parameter));
 }
 
 TEST_CASE("Local profile enumerated account has no passcode without changing session",
@@ -175,12 +215,20 @@ TEST_CASE("Local profile enumerates the original Sign-in record and commits only
       __imp__XamUserLogonEx(ctx, base);
       return ctx.r3.u32;
     };
-    CHECK(confirm(0x120424) == 0x80004001u); // unsupported mode cannot mutate
+    CHECK(confirm(0x120428) == 0x80004001u); // unsupported removal mode cannot mutate
     CHECK(profile->signin_state() == 0);
-    REQUIRE(confirm(0x120420) == 0); // normal original Sign-in confirmation
+    REQUIRE(confirm(0x120424) == 0); // original Sign-in merges the selected local account
     REQUIRE(listener->DequeueNotification(0xA, &param));
     CHECK(param == 1);
     CHECK(confirm(0x120420) == 0);
+    CHECK_FALSE(listener->DequeueNotification(0xA, &param));
+    // The original closing snapshot preserves the selection and emits no new change.
+    std::memset(bytes + 3072, 0, 32);
+    rex::memory::store_and_swap<uint64_t>(bytes + 3072, xuid);
+    ctx.r3.u64 = data + 3072; ctx.r4.u64 = 0x63; ctx.r5.u64 = 0;
+    __imp__XamUserLogon(ctx, base);
+    CHECK(ctx.r3.u32 == 0);
+    CHECK(profile->signin_state() == 1);
     CHECK_FALSE(listener->DequeueNotification(0xA, &param));
     ctx.r3.u64 = xuid; ctx.r4.u64 = 1; ctx.r5.u64 = data;
     __imp__XamUserGetIndexFromXUID(ctx, base);
@@ -206,6 +254,93 @@ TEST_CASE("Local profile enumerates the original Sign-in record and commits only
   CHECK(recovered.kernel_state()->user_profile()->xuid() == xuid);
   CHECK(recovered.kernel_state()->user_profile()->name() == "Selected");
   CHECK(recovered.kernel_state()->user_profile()->signin_state() == 1);
+}
+
+TEST_CASE("Sign-in retail mode and local account queries do not leak input registers",
+          "[sdk][signin-contract]") {
+  Store store;
+  rex::Runtime rt(store.path, store.path);
+  Setup(rt);
+  auto* profile = rt.kernel_state()->user_profile();
+  REQUIRE(profile->CreateLocal("Retail") == 0);
+  auto* base = rt.memory()->virtual_membase();
+  auto address = rt.memory()->SystemHeapAlloc(32);
+  auto* bytes = base + address;
+  PPCContext ctx{};
+  ctx.r3.u64 = 0x90100000; // original scene's this pointer
+  __imp__XamIsDataCenterMode(ctx, base);
+  CHECK(ctx.r3.u64 == 0);
+  ctx.r3.u64 = 0x40123450; // normal frame's object pointer is not automation state
+  __imp__XamIsNuiAutomationEnabled(ctx, base);
+  CHECK(ctx.r3.u64 == 0);
+  std::memset(bytes, 0xCD, 8);
+  ctx.r3.u64 = address; ctx.r4.u64 = address + 4;
+  __imp__XamGetCurrentDemand(ctx, base);
+  CHECK(ctx.r3.u64 == 0);
+  CHECK(rex::memory::load_and_swap<uint64_t>(bytes) == 0);
+  CHECK(profile->signin_state() == 0);
+  ctx.r3.u64 = 0; ctx.r4.u64 = 1; ctx.r5.u64 = address;
+  __imp__XamUserGetXUID(ctx, base);
+  CHECK(ctx.r3.u32 == uint32_t(X_E_NO_SUCH_USER)); // no fabricated signed-in user
+  REQUIRE(profile->SetLocalSession(profile->xuid()) == 0);
+  for (uint32_t slot = 0; slot < 4; ++slot) {
+    std::memset(bytes, 0xCD, 8);
+    ctx.r3.u64 = slot; ctx.r4.u64 = address; ctx.r5.u64 = address + 4;
+    __imp__XamGetUserNeedTFA(ctx, base);
+    CHECK(ctx.r3.u32 == (slot ? uint32_t(X_E_NO_SUCH_USER) : 0));
+    CHECK(rex::memory::load_and_swap<uint64_t>(bytes) == (slot ? 0xCDCDCDCDCDCDCDCDull : 0));
+    ctx.r3.u64 = slot;
+    __imp__XamUserGetUserFlags(ctx, base);
+    CHECK(ctx.r3.u32 == 0);
+  }
+  ctx.r3.u64 = 0xFFFFFFFF;
+  __imp__XamAreMixedAccountsSignedIn(ctx, base);
+  CHECK(ctx.r3.u32 == 0);
+  ctx.r3.u64 = address;
+  __imp__GetSystemTimeAsFileTime(ctx, base);
+  const auto first = rex::memory::load_and_swap<uint64_t>(bytes);
+  CHECK(first > 116444736000000000ull); // FILETIME epoch, not milliseconds or untouched bytes
+  ctx.r3.u64 = address;
+  __imp__GetSystemTimeAsFileTime(ctx, base);
+  CHECK(rex::memory::load_and_swap<uint64_t>(bytes) >= first);
+  rt.memory()->SystemHeapFree(address);
+}
+
+TEST_CASE("Sign-in console settings persist original dialog decisions", "[sdk][signin-config]") {
+  Store store;
+  auto exercise = [&](bool recovered) {
+    rex::Runtime rt(store.path, store.path);
+    Setup(rt);
+    auto* base = rt.memory()->virtual_membase();
+    const auto address = rt.memory()->SystemHeapAlloc(16);
+    PPCContext ctx{};
+    auto read = [&] {
+      ctx.r3.u64 = 3; ctx.r4.u64 = 12; ctx.r5.u64 = address;
+      ctx.r6.u64 = 4; ctx.r7.u64 = address + 8;
+      __imp__ExGetXConfigSetting(ctx, base);
+      REQUIRE(ctx.r3.u32 == 0);
+      CHECK(rex::memory::load_and_swap<uint16_t>(base + address + 8) == 4);
+      return rex::memory::load_and_swap<uint32_t>(base + address);
+    };
+    CHECK(read() == (recovered ? 0x10000044u : 0x40u));
+    if (!recovered) {
+      for (auto [mask, value] : {std::pair{~4u, 4u}, std::pair{0xEFFFFFFFu, 0x10000000u}}) {
+        ctx.r3.u64 = 3; ctx.r4.u64 = 12; ctx.r5.u64 = mask; ctx.r6.u64 = value;
+        __imp__ExReadModifyWriteXConfigSettingUlong(ctx, base);
+        REQUIRE(ctx.r3.u32 == 0);
+      }
+      CHECK(read() == 0x10000044u);
+      // Never claim a write to an unsupported setting succeeded.
+      ctx.r3.u64 = 3; ctx.r4.u64 = 0xFFFF; ctx.r5.u64 = 0; ctx.r6.u64 = ~0u;
+      __imp__ExReadModifyWriteXConfigSettingUlong(ctx, base);
+      CHECK(ctx.r3.u32 == X_STATUS_INVALID_PARAMETER_2);
+      CHECK(read() == 0x10000044u);
+    }
+    CHECK(rt.kernel_state()->user_profile()->signin_state() == 0);
+    rt.memory()->SystemHeapFree(address);
+  };
+  exercise(false);
+  exercise(true);
 }
 
 TEST_CASE("Local profile Sign-in imports copy request and bounded UTF16 identity", "[sdk][local-profile][signin-profile]") {
@@ -377,6 +512,7 @@ TEST_CASE("Local profile logon completes overlapped with the real result", "[sdk
   std::memset(memory->TranslateVirtual(users), 0, 32);
   auto* ov = memory->TranslateVirtual<rex::system::XAM_OVERLAPPED*>(overlap);
   uint32_t result = ~0u, failure = 0, success_result = ~0u, failure_result = 0;
+  uint32_t barrier = ~0u, barrier_result = ~0u;
   auto thread = rex::system::object_ref<rex::system::XHostThread>(
       new rex::system::XHostThread(rt.kernel_state(), 128 * 1024, 0, [&]() {
     auto* ctx = rex::system::XThread::GetCurrentThread()->thread_state()->context();
@@ -392,6 +528,12 @@ TEST_CASE("Local profile logon completes overlapped with the real result", "[sdk
     success_result = ov->result;
     failure = call(profile->xuid() + 2);
     failure_result = ov->result;
+    *ov = {};
+    ov->result = 997;
+    ctx->r3.u64 = overlap;
+    __imp__XamUserFlushLogonQueue(*ctx, memory->virtual_membase());
+    barrier = ctx->r3.u32;
+    barrier_result = ov->result;
     return 0;
   }));
   REQUIRE(thread->Create() == X_STATUS_SUCCESS);
@@ -401,6 +543,8 @@ TEST_CASE("Local profile logon completes overlapped with the real result", "[sdk
   CHECK(success_result == 0);
   CHECK(failure == uint32_t(X_E_NO_SUCH_USER));
   CHECK(failure_result == uint32_t(X_ERROR_NO_SUCH_USER));
+  CHECK(barrier == 0);
+  CHECK(barrier_result == 0);
   CHECK(profile->signin_state() == 1);
   memory->SystemHeapFree(overlap);
   memory->SystemHeapFree(users);

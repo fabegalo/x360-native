@@ -1,0 +1,32 @@
+diff --git a/src/kernel/xam/xam_task.cpp b/src/kernel/xam/xam_task.cpp
+index 1a894fe..a245b88 100644
+--- a/src/kernel/xam/xam_task.cpp
++++ b/src/kernel/xam/xam_task.cpp
+@@ -97,8 +97,8 @@ u32 XamTaskSchedule_entry(mapped_void callback, u32 context,
+       callback.guest_address(), context, task->state));
+   const auto result = task->thread->Create();
+   if (XFAILED(result)) {
+-    task->thread->Delete();
+-    task->Delete();
++    task->thread->ReleaseHandle();
++    task->ReleaseHandle();
+     return result;
+   }
+   *handle_ptr = task->handle();
+@@ -125,13 +125,14 @@ u32 XamTaskWaitOnCompletion_entry(u32 handle) {
+ u32 XamTaskCloseHandle_entry(u32 handle) {
+   auto task = LookupTask(handle);
+   if (!task) return X_E_INVALIDARG;
+-  task->Delete();
++  task->ReleaseHandle();
+   return 0;
+ }
+ u32 XamTaskGetStatus_entry(u32 handle) {
+   auto task = LookupTask(handle);
+   if (!task) return X_E_INVALIDARG;
+-  return task->state->completed ? 0 : 0x8000000A;
++  // 816B7B98: idle/completed state 0 returns S_FALSE; queued/running returns S_OK.
++  return task->state->completed ? 1 : 0;
+ }
+ u32 XamTaskGetCompletionStatus_entry(u32 handle) {
+   auto task = LookupTask(handle);

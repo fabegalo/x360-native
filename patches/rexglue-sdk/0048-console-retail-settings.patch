@@ -1,0 +1,129 @@
+diff --git a/src/kernel/xboxkrnl/xboxkrnl_xconfig.cpp b/src/kernel/xboxkrnl/xboxkrnl_xconfig.cpp
+index f4ad126..c702936 100644
+--- a/src/kernel/xboxkrnl/xboxkrnl_xconfig.cpp
++++ b/src/kernel/xboxkrnl/xboxkrnl_xconfig.cpp
+@@ -21,9 +21,74 @@
+ #include <rex/system/kernel_state.h>
+ #include <rex/system/user_module.h>
+ #include <rex/system/xtypes.h>
++#include <rex/runtime.h>
++#include <rex/filesystem.h>
++#include <array>
++#include <mutex>
++#if REX_PLATFORM_WIN32
++#include <windows.h>
++#include <io.h>
++#else
++#include <unistd.h>
++#endif
+ 
+ namespace rex::kernel::xboxkrnl {
+ 
++namespace {
++std::mutex retail_flags_mutex;
++std::filesystem::path RetailFlagsPath() {
++  return Runtime::instance()->user_data_root() / "console" / "retail-flags-v1.dat";
++}
++bool ReadRetailFlags(uint32_t& flags) {
++  const auto path = RetailFlagsPath();
++  std::error_code error;
++  const bool exists = std::filesystem::exists(path, error);
++  if (error) return false;
++  if (!exists) { flags = 0x40; return true; } // Existing console default; no consent bit.
++  std::array<uint8_t, 12> record{};
++  auto* file = filesystem::OpenFile(path, "rb");
++  if (!file) return false;
++  const auto count = fread(record.data(), 1, record.size(), file);
++  const auto extra = fgetc(file);
++  const bool ok = count == record.size() && extra == EOF && !ferror(file) &&
++      std::memcmp(record.data(), "X360XC01", 8) == 0;
++  fclose(file);
++  if (ok) flags = memory::load_and_swap<uint32_t>(record.data() + 8);
++  return ok;
++}
++bool WriteRetailFlags(uint32_t flags) {
++  auto path = RetailFlagsPath();
++  std::error_code error;
++  std::filesystem::create_directories(path.parent_path(), error);
++  if (error) return false;
++  std::array<uint8_t, 12> record{};
++  std::memcpy(record.data(), "X360XC01", 8);
++  memory::store_and_swap<uint32_t>(record.data() + 8, flags);
++  auto temporary = path;
++  temporary += ".tmp";
++  auto* file = filesystem::OpenFile(temporary, "wb");
++  if (!file) return false;
++  bool ok = fwrite(record.data(), 1, record.size(), file) == record.size() && fflush(file) == 0;
++#if REX_PLATFORM_WIN32
++  if (ok) ok = _commit(_fileno(file)) == 0;
++#else
++  if (ok) ok = fsync(fileno(file)) == 0;
++#endif
++  if (fclose(file)) ok = false;
++  if (ok) {
++#if REX_PLATFORM_WIN32
++    ok = MoveFileExW(temporary.c_str(), path.c_str(),
++                    MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH) != 0;
++#else
++    std::filesystem::rename(temporary, path, error);
++    ok = !error;
++#endif
++  }
++  if (!ok) std::filesystem::remove(temporary, error);
++  return ok;
++}
++}
++
+ X_STATUS xeExGetXConfigSetting(uint16_t category, uint16_t setting, void* buffer,
+                                uint16_t buffer_size, uint16_t* required_size) {
+   uint16_t setting_size = 0;
+@@ -72,9 +137,14 @@ X_STATUS xeExGetXConfigSetting(uint16_t category, uint16_t setting, void* buffer
+           memory::store_and_swap<uint32_t>(value, 0x00010001);
+           break;
+         case 0x000C:  // XCONFIG_USER_RETAIL_FLAGS
++        {
++          std::lock_guard lock(retail_flags_mutex);
++          uint32_t flags;
++          if (!ReadRetailFlags(flags)) return X_STATUS_UNSUCCESSFUL;
+           setting_size = 4;
+-          memory::store_and_swap<uint32_t>(value, 0x40);
++          memory::store_and_swap<uint32_t>(value, flags);
+           break;
++        }
+         case 0x000E:  // XCONFIG_USER_COUNTRY
+           setting_size = 1;
+           value[0] = static_cast<uint8_t>(REXCVAR_GET(user_country));
+@@ -125,7 +195,21 @@ u32 ExGetXConfigSetting_entry(u16 category, u16 setting, mapped_void buffer_ptr,
+   return result;
+ }
+ 
++u32 ExReadModifyWriteXConfigSettingUlong_entry(u16 category, u16 setting, u32 mask, u32 value) {
++  if (category != 3) return X_STATUS_INVALID_PARAMETER_1;
++  if (setting != 0xC) return X_STATUS_INVALID_PARAMETER_2;
++  std::lock_guard lock(retail_flags_mutex);
++  uint32_t flags;
++  if (!ReadRetailFlags(flags)) return X_STATUS_UNSUCCESSFUL;
++  const uint32_t next = (flags & uint32_t(mask)) | uint32_t(value);
++  if (next != flags && !WriteRetailFlags(next)) return X_STATUS_UNSUCCESSFUL;
++  REXKRNL_INFO("Console retail flags {:08X} -> {:08X}", flags, next);
++  return X_STATUS_SUCCESS;
++}
++
+ }  // namespace rex::kernel::xboxkrnl
+ 
+ REX_EXPORT(__imp__ExGetXConfigSetting, rex::kernel::xboxkrnl::ExGetXConfigSetting_entry)
++REX_EXPORT(__imp__ExReadModifyWriteXConfigSettingUlong,
++           rex::kernel::xboxkrnl::ExReadModifyWriteXConfigSettingUlong_entry)
+ REX_EXPORT_STUB(__imp__ExSetXConfigSetting);
+diff --git a/src/kernel/xboxkrnl/xboxkrnl_misc.cpp b/src/kernel/xboxkrnl/xboxkrnl_misc.cpp
+index 58b6000..372e5a9 100644
+--- a/src/kernel/xboxkrnl/xboxkrnl_misc.cpp
++++ b/src/kernel/xboxkrnl/xboxkrnl_misc.cpp
+@@ -64,7 +64,6 @@ REX_EXPORT_STUB(__imp__EmaExecute);
+ REX_EXPORT_STUB(__imp__ExRegisterThreadNotification);
+ REX_EXPORT_STUB(__imp__ExTerminateTitleProcess);
+ REX_EXPORT_STUB(__imp__ExFreeDebugPool);
+-REX_EXPORT_STUB(__imp__ExReadModifyWriteXConfigSettingUlong);
+ REX_EXPORT_STUB(__imp__ExRegisterXConfigNotification);
+ REX_EXPORT_STUB(__imp__ExCancelAlarm);
+ REX_EXPORT_STUB(__imp__ExInitializeAlarm);

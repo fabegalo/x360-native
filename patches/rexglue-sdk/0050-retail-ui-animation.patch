@@ -1,0 +1,17 @@
+diff --git a/src/kernel/xam/xam_misc.cpp b/src/kernel/xam/xam_misc.cpp
+index 5272679..5692ee3 100644
+--- a/src/kernel/xam/xam_misc.cpp
++++ b/src/kernel/xam/xam_misc.cpp
+@@ -556,7 +556,11 @@ REX_EXPORT_STUB(__imp__XamIsDvrRecording);
+ REX_EXPORT_STUB(__imp__XamIsIptvEnabled);
+ REX_EXPORT_STUB(__imp__XamIsNatalPlaybackEnabled);
+ REX_EXPORT_STUB(__imp__XamIsNetworkCaptivePortal);
+-REX_EXPORT_STUB(__imp__XamIsNuiAutomationEnabled);
++extern "C" REX_FUNC(__imp__XamIsNuiAutomationEnabled) {
++  // Retail 17559 81964638 returns false (li r3,0; blr). Leaking r3 makes the dashboard
++  // skip its normal animation/input updates (92776D70 / 927727F8).
++  ctx.r3.u64 = 0;
++}
+ REX_EXPORT_STUB(__imp__XamIsOnPrivateNetwork);
+ REX_EXPORT_STUB(__imp__XamIsOptionalMediaUpdateInstalled);
+ REX_EXPORT_STUB(__imp__XamIsScreenSaverActive);

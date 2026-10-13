@@ -123,7 +123,7 @@
         "file": "patches/rexglue-sdk/0010-common-string-unavailable.patch",
         "sha256": "3862fa9674a74241d9b6dfccde6a1f706e5a2c7e614082350f2593af58616dea",
         "files": {
-          "src/kernel/xam/xam_misc.cpp": "33bfbe1ae23956af73db5c1c394d87f0118378eb8d8932d15eddcedfb405dfce"
+          "src/kernel/xam/xam_misc.cpp": "bc3ec8270144fad237c97e0d298f76c1564ad0a47157165338a8d0218be413ed"
         },
         "base_files": {
           "src/kernel/xam/xam_misc.cpp": "6f0a07784bf46a5e9dd9f3c387ef52a936c527c949057aae1fb97388e21ce68d"
@@ -134,7 +134,7 @@
         "file": "patches/rexglue-sdk/0011-xam-user-preference.patch",
         "sha256": "9cfbe27ea058fbcb5f80a63714dfd38a0127317398e461443ca6687ae7780120",
         "files": {
-          "src/kernel/xam/xam_user.cpp": "ee961c8e3af100e5fbc79abf60d7d9c0761d91c9548c1a033ce99846b9605d8d"
+          "src/kernel/xam/xam_user.cpp": "26adf3ab567d1b9101ce052ee6c4a977d297c6b93231c08f431862554cd7addc"
         },
         "base_files": {
           "src/kernel/xam/xam_user.cpp": "7b84ddf00e12b1c9de33e00df75d8d692a686fcbbd939a0d706fecd36bc609e9"
@@ -271,7 +271,7 @@
         "files": {
           "include/rex/kernel/xam/module.h": "275824dc355c9f12c00837cc096f232b7400567e92e80a7e68dac47be9bf576d",
           "src/kernel/xam/xam_content.cpp": "a5a0e7b59c480bde04cf9d075f588d8cc49f9652ff6e196454c72ab1c784e300",
-          "src/kernel/xam/xam_misc.cpp": "33bfbe1ae23956af73db5c1c394d87f0118378eb8d8932d15eddcedfb405dfce"
+          "src/kernel/xam/xam_misc.cpp": "bc3ec8270144fad237c97e0d298f76c1564ad0a47157165338a8d0218be413ed"
         },
         "base_files": {
           "include/rex/kernel/xam/module.h": "a9cc652f87264f2b5137d81a1c600127e97224183e2200b15460946201f29f9b",
@@ -344,7 +344,7 @@
           "src/kernel/xam/xam_ui.cpp": "03e89d1119cb059d706b790304f2f26be668d1fce8660a2ff7a22e70c2c7b5d4"
         },
         "files": {
-          "src/kernel/xam/xam_user.cpp": "ee961c8e3af100e5fbc79abf60d7d9c0761d91c9548c1a033ce99846b9605d8d",
+          "src/kernel/xam/xam_user.cpp": "26adf3ab567d1b9101ce052ee6c4a977d297c6b93231c08f431862554cd7addc",
           "src/kernel/xam/xam_ui.cpp": "0f40331f5139d72ea58eb65370eb736463b08e8a16a861688ba2f9bc133931fc"
         },
         "test": "tests/sdkcheck/profile_ui_request_test.cpp"
@@ -360,7 +360,7 @@
         "files": {
           "include/rex/kernel/xam/module.h": "275824dc355c9f12c00837cc096f232b7400567e92e80a7e68dac47be9bf576d",
           "src/kernel/xam/apps/xam_app.cpp": "fdd173b7fd448dae593c5a1fa7c2cb6fffa0c539bacaf534e3628051bb15ec07",
-          "src/kernel/xam/xam_misc.cpp": "33bfbe1ae23956af73db5c1c394d87f0118378eb8d8932d15eddcedfb405dfce"
+          "src/kernel/xam/xam_misc.cpp": "bc3ec8270144fad237c97e0d298f76c1564ad0a47157165338a8d0218be413ed"
         },
         "test": "tests/sdkcheck/profile_ui_request_test.cpp"
       },
@@ -373,7 +373,7 @@
         },
         "files": {
           "src/kernel/xam/xam_info.cpp": "351255b8adbdd2c877077f0f01ae7607db5499e203aa217ed2090cfaee05a4a2",
-          "src/kernel/xam/xam_misc.cpp": "33bfbe1ae23956af73db5c1c394d87f0118378eb8d8932d15eddcedfb405dfce"
+          "src/kernel/xam/xam_misc.cpp": "bc3ec8270144fad237c97e0d298f76c1564ad0a47157165338a8d0218be413ed"
         },
         "test": "tests/sdkcheck/profile_ui_request_test.cpp"
       },
@@ -428,7 +428,7 @@
           "src/kernel/xam/xam_info.cpp": "35ad6f47fe3ab4be8719b610de857b2b243a70de4d74c860f38823b050a3d4cb"
         },
         "files": {
-          "src/kernel/xam/xam_misc.cpp": "33bfbe1ae23956af73db5c1c394d87f0118378eb8d8932d15eddcedfb405dfce",
+          "src/kernel/xam/xam_misc.cpp": "bc3ec8270144fad237c97e0d298f76c1564ad0a47157165338a8d0218be413ed",
           "src/kernel/xam/xam_info.cpp": "351255b8adbdd2c877077f0f01ae7607db5499e203aa217ed2090cfaee05a4a2"
         },
         "test": "sdkcheck XMem virtual allocations return aligned writable memory, honor zero initialization, and release storage; physical classes fail explicitly"
@@ -519,7 +519,7 @@
         "files": {
           "include/rex/kernel/xam/module.h": "275824dc355c9f12c00837cc096f232b7400567e92e80a7e68dac47be9bf576d",
           "src/kernel/xam/xam_input.cpp": "c194bd782927f6057e8a5d97611d6fa64d8d67a2de5753fb76ae4b481bea44c7",
-          "src/kernel/xam/xam_misc.cpp": "33bfbe1ae23956af73db5c1c394d87f0118378eb8d8932d15eddcedfb405dfce",
+          "src/kernel/xam/xam_misc.cpp": "bc3ec8270144fad237c97e0d298f76c1564ad0a47157165338a8d0218be413ed",
           "src/kernel/xam/xam_ui.cpp": "0f40331f5139d72ea58eb65370eb736463b08e8a16a861688ba2f9bc133931fc"
         },
         "test": "sdkcheck.System UI host exports and session input/lifecycle isolation"
@@ -550,7 +550,7 @@
           "include/rex/system/xam/user_profile.h": "6bf6ab6037c962d7a3a60340afacb3fe2e93322562430c24a0cf609dc80f168a",
           "src/system/xam/user_profile.cpp": "2d0dc2a1af7e636acfec38cd6d439f90aaae221afde7406362eb0ac97f02eb10",
           "src/system/kernel_state.cpp": "77350e84b81e851703be5777494df5d64d820a335ed2460adf484de8cf8a23bf",
-          "src/kernel/xam/xam_user.cpp": "ee961c8e3af100e5fbc79abf60d7d9c0761d91c9548c1a033ce99846b9605d8d"
+          "src/kernel/xam/xam_user.cpp": "26adf3ab567d1b9101ce052ee6c4a977d297c6b93231c08f431862554cd7addc"
         },
         "test": "sdkcheck.Local profile: persistent identity, XAM logon/logoff, restart, corruption and write failure"
       },
@@ -564,8 +564,8 @@
         },
         "files": {
           "src/kernel/xam/xam_enum.cpp": "6bb65e2d31f26a3535f8fa3a86ddd57fdc6533a308a8fee361471dfa3499aebc",
-          "src/kernel/xam/xam_user.cpp": "ee961c8e3af100e5fbc79abf60d7d9c0761d91c9548c1a033ce99846b9605d8d",
-          "src/kernel/xam/xam_misc.cpp": "33bfbe1ae23956af73db5c1c394d87f0118378eb8d8932d15eddcedfb405dfce"
+          "src/kernel/xam/xam_user.cpp": "26adf3ab567d1b9101ce052ee6c4a977d297c6b93231c08f431862554cd7addc",
+          "src/kernel/xam/xam_misc.cpp": "bc3ec8270144fad237c97e0d298f76c1564ad0a47157165338a8d0218be413ed"
         },
         "test": "sdkcheck.Local profile: original Sign-in enumeration ABI, confirmation, cancellation boundary and restart"
       },
@@ -579,6 +579,124 @@
           "src/kernel/xboxkrnl/xboxkrnl_rtl.cpp": "cc3465358f282bac696302c7bba32781385735202ec84b5afc79717df183c5cf"
         },
         "test": "sdkcheck.Local profile passcode: byte count, matching prefix and guest order"
+      },
+      {
+        "file": "patches/rexglue-sdk/0044-retail-console-mode.patch",
+        "sha256": "11700fef5261ec18ddecbeff40d93b04ed7143d5e8a2453c097c2ab50e0d6b8f",
+        "base_files": {
+          "src/kernel/xam/xam_misc.cpp": "33bfbe1ae23956af73db5c1c394d87f0118378eb8d8932d15eddcedfb405dfce"
+        },
+        "files": {
+          "src/kernel/xam/xam_misc.cpp": "bc3ec8270144fad237c97e0d298f76c1564ad0a47157165338a8d0218be413ed"
+        },
+        "test": "sdkcheck.Sign-in retail mode and local account queries do not leak input registers"
+      },
+      {
+        "file": "patches/rexglue-sdk/0045-local-signin-merge.patch",
+        "sha256": "c70bd9b93b40bd9dca6d6970cbcd4cd7f8750645550d62748f482a5c0249ccff",
+        "base_files": {
+          "src/kernel/xam/xam_user.cpp": "ee961c8e3af100e5fbc79abf60d7d9c0761d91c9548c1a033ce99846b9605d8d"
+        },
+        "files": {
+          "src/kernel/xam/xam_user.cpp": "26adf3ab567d1b9101ce052ee6c4a977d297c6b93231c08f431862554cd7addc"
+        },
+        "test": "sdkcheck.Local profile enumerates the original Sign-in record and commits only on confirmation"
+      },
+      {
+        "file": "patches/rexglue-sdk/0046-signin-task-completion.patch",
+        "sha256": "d7e8e32e4b40354b4fbccd92432e863ceebba06baa54242310aaf7bff867f48b",
+        "base_files": {
+          "src/kernel/xam/xam_task.cpp": "ec32d20b2a0c1fd90d02f048fde54a28671877ff983f0c2c779ae1dbe702a3b5",
+          "include/rex/system/xobject.h": "a6bb24d43aea373e0ced84fd3b4edeb4ad2ee57c092308604b5d32796f1f0f6e",
+          "src/kernel/xam/xam_misc.cpp": "081334e7a869fa734d83a31f4112b431be5a888335b61639c8b0312899017004",
+          "src/kernel/xam/xam_user.cpp": "564d8f29af11bfe2bc490d84118df94d03b0f39c9ea569ede13160d339f5ba3b"
+        },
+        "files": {
+          "src/kernel/xam/xam_task.cpp": "bf53e54767cdac3e0acf94334a98690777dabe426cad696e538cc5b45829710c",
+          "include/rex/system/xobject.h": "446f59c412e6006181f6dbba90b8742f0a5bf81715c32039431a04e139d10933",
+          "src/kernel/xam/xam_misc.cpp": "bc3ec8270144fad237c97e0d298f76c1564ad0a47157165338a8d0218be413ed",
+          "src/kernel/xam/xam_user.cpp": "26adf3ab567d1b9101ce052ee6c4a977d297c6b93231c08f431862554cd7addc"
+        },
+        "test": "sdkcheck.Sign-in task lifetime and local session contracts"
+      },
+      {
+        "file": "patches/rexglue-sdk/0047-task-status-contract.patch",
+        "sha256": "10fc3b5b6e3603b7eff9a37038c52f1a5f5171f90390dcd9ccc72b15f9459f2b",
+        "base_files": {
+          "src/kernel/xam/xam_task.cpp": "88337a1fa39adbfe75b4098c3d5b557f9e999b922cce7203d3cd5622620fe252"
+        },
+        "files": {
+          "src/kernel/xam/xam_task.cpp": "bf53e54767cdac3e0acf94334a98690777dabe426cad696e538cc5b45829710c"
+        },
+        "test": "sdkcheck.Sign-in task cancellation joins callback before releasing its module"
+      },
+      {
+        "file": "patches/rexglue-sdk/0048-console-retail-settings.patch",
+        "sha256": "706abe661a8feb32c7cb97c44a969ad9ef1970149fdda3320f4411dc5f98f2b7",
+        "base_files": {
+          "src/kernel/xboxkrnl/xboxkrnl_xconfig.cpp": "ab86ce248d7c28c01c6ba218c891c4cc766acd82f9f75bc799fa917b50a4340a",
+          "src/kernel/xboxkrnl/xboxkrnl_misc.cpp": "936e4d337325c87d9201b6f1fd1fba347934a2719a8279530b3cfba2fc9b1a04"
+        },
+        "files": {
+          "src/kernel/xboxkrnl/xboxkrnl_xconfig.cpp": "75b9988abb1d920821b5de5da29c4d94383e8fd54ca08386cd52601587d90b0e",
+          "src/kernel/xboxkrnl/xboxkrnl_misc.cpp": "927dada66a64d7f4ddcd9cd090b5d5da4458e0a97721aea095d4145afc27cc9e"
+        },
+        "test": "sdkcheck.Sign-in console settings persist original dialog decisions"
+      },
+      {
+        "file": "patches/rexglue-sdk/0049-local-logon-barrier.patch",
+        "sha256": "8da4263bbb25176e393f75caea1c9bcc5f5f7afdb9872f2a33d374cc7af7accf",
+        "base_files": {
+          "src/kernel/xam/xam_user.cpp": "770dff46e6ad83abcfeaa76fb213b493b0a939feaac0544340ec196de295becb"
+        },
+        "files": {
+          "src/kernel/xam/xam_user.cpp": "26adf3ab567d1b9101ce052ee6c4a977d297c6b93231c08f431862554cd7addc"
+        },
+        "test": "sdkcheck.Local profile logon completes overlapped with the real result"
+      },
+      {
+        "file": "patches/rexglue-sdk/0050-retail-ui-animation.patch",
+        "sha256": "c3fd5914a0121ea29f99a4ad18bf1e9e3169fd4aa54479b0b2e4944bcc1efb3a",
+        "base_files": {
+          "src/kernel/xam/xam_misc.cpp": "abe8472af0d84456047a52ed7cc91c4d131965c76ca06582107f2d15f3517386"
+        },
+        "files": {
+          "src/kernel/xam/xam_misc.cpp": "bc3ec8270144fad237c97e0d298f76c1564ad0a47157165338a8d0218be413ed"
+        },
+        "test": "sdkcheck.Sign-in retail mode and local account queries do not leak input registers"
+      },
+      {
+        "file": "patches/rexglue-sdk/0051-task-handle-lifetime.patch",
+        "sha256": "6a51991904a30852f544eb45e1ecbba274588fac15d8048145542a3032772d7e",
+        "base_files": {
+          "src/kernel/xam/xam_task.cpp": "507c02b4b969ae4289afd7ba3f799421d34d6d978611e4f9f779b6cc178c959f"
+        },
+        "files": {
+          "src/kernel/xam/xam_task.cpp": "bf53e54767cdac3e0acf94334a98690777dabe426cad696e538cc5b45829710c"
+        },
+        "test": "sdkcheck.Sign-in task cancellation joins callback before releasing its module"
+      },
+      {
+        "file": "patches/rexglue-sdk/0052-local-demand-query.patch",
+        "sha256": "2bb1aad0002035c30c7f82500256cba5720a9aa95423deff974e4b9a296193b6",
+        "base_files": {
+          "src/kernel/xam/xam_misc.cpp": "8c6934c669484b99a937df04e6777475fd9403f04cc458414ab5a411e6a9ca44"
+        },
+        "files": {
+          "src/kernel/xam/xam_misc.cpp": "bc3ec8270144fad237c97e0d298f76c1564ad0a47157165338a8d0218be413ed"
+        },
+        "test": "sdkcheck.Sign-in retail mode and local account queries do not leak input registers"
+      },
+      {
+        "file": "patches/rexglue-sdk/0053-system-notification-delivery.patch",
+        "sha256": "b87a01f8e6cbc536efde04154601ccdd19242ff912dd6dcad1f9cc588881ed2a",
+        "base_files": {
+          "src/kernel/xam/xam_notify.cpp": "c093e2392188288850208a0eb02ced761ee42502ea478dfa2c180a5b472fe132"
+        },
+        "files": {
+          "src/kernel/xam/xam_notify.cpp": "7ebc15da0b13759e041d5751c3b9147fd617f635b111188632af928f51422fd1"
+        },
+        "test": "sdkcheck.Sign-in system broadcasts reach matching listeners"
       }
     ]
   },

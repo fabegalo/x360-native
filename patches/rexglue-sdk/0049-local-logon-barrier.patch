@@ -1,0 +1,37 @@
+diff --git a/src/kernel/xam/xam_user.cpp b/src/kernel/xam/xam_user.cpp
+index 9ef7674..fda6c8f 100644
+--- a/src/kernel/xam/xam_user.cpp
++++ b/src/kernel/xam/xam_user.cpp
+@@ -65,6 +65,7 @@ i32 XamUserGetXUID_entry(u32 user_index, u32 type_mask, mapped_u64 xuid_ptr) {
+ // unsupported; all supported modes go through the persistent local store.
+ static uint32_t LocalLogon(mapped_void users, uint32_t flags, uint32_t overlapped,
+                            uint32_t stride) {
++  REXKRNL_INFO("LocalLogon request flags={:08X} stride={} overlap={:08X}", flags, stride, overlapped);
+   if (!users) return uint32_t(X_E_INVALIDARG);
+   const bool append = stride == 392 && flags == 0x120424;
+   if (flags && !(stride == 392 && (flags == 0x120420 || append)) &&
+@@ -121,6 +122,15 @@ u32 XamUserLogonEx_entry(mapped_void users, u32 flags, u32 overlapped) {
+   return LocalLogon(users, flags, overlapped, 392);
+ }
+ 
++u32 XamUserFlushLogonQueue_entry(u32 overlapped) {
++  // 17559 816D91B0 / 816D9178 schedules a barrier and completes XOVERLAPPED.
++  // LocalLogon commits synchronously, so no accepted local operation remains
++  // queued when it returns. Publish that completion to the original caller.
++  if (overlapped)
++    REX_KERNEL_STATE()->CompleteOverlappedImmediateEx(overlapped, 0, 0, 0);
++  return 0;
++}
++
+ 
+ u32 XamUserGetSigninState_entry(u32 user_index) {
+   return user_index == 0 ? REX_KERNEL_STATE()->user_profile()->signin_state() : 0;
+@@ -871,7 +881,7 @@ REX_EXPORT_STUB(__imp__XamUserCreateAvatarAssetEnumerator);
+ REX_EXPORT_STUB(__imp__XamUserCreatePlayerEnumerator);
+ REX_EXPORT_STUB(__imp__XamUserCreateStatsEnumerator);
+ REX_EXPORT_STUB(__imp__XamUserCreateTitlesPlayedEnumerator);
+-REX_EXPORT_STUB(__imp__XamUserFlushLogonQueue);
++REX_EXPORT(__imp__XamUserFlushLogonQueue, rex::kernel::xam::XamUserFlushLogonQueue_entry)
+ REX_EXPORT_STUB(__imp__XamUserGetAge);
+ REX_EXPORT_STUB(__imp__XamUserGetAgeGroup);
+ REX_EXPORT_STUB(__imp__XamUserGetCachedUserFlags);

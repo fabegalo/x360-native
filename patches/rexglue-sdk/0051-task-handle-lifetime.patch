@@ -1,0 +1,33 @@
+diff --git a/src/kernel/xam/xam_task.cpp b/src/kernel/xam/xam_task.cpp
+index a245b88..369c2a8 100644
+--- a/src/kernel/xam/xam_task.cpp
++++ b/src/kernel/xam/xam_task.cpp
+@@ -71,6 +71,11 @@ class Task final : public XObject {
+  public:
+   static constexpr Type kObjectType = Type::XamTask;
+   explicit Task(KernelState* kernel) : XObject(kernel, kObjectType) {}
++  ~Task() override {
++    // Create retains a separate running-thread reference. Release the private
++    // handle owned by this task too, including when closed after completion.
++    if (thread) thread->ReleaseHandle();
++  }
+   std::shared_ptr<TaskState> state = std::make_shared<TaskState>();
+   object_ref<TaskThread> thread;
+ };
+@@ -95,13 +100,14 @@ u32 XamTaskSchedule_entry(mapped_void callback, u32 context,
+   uint32_t stack = module ? module->stack_size() : 0x4000;
+   task->thread = object_ref<TaskThread>(new TaskThread(kernel, stack,
+       callback.guest_address(), context, task->state));
++  // The callback may start immediately and inspect its owner's task handle.
++  *handle_ptr = task->handle();
+   const auto result = task->thread->Create();
+   if (XFAILED(result)) {
+-    task->thread->ReleaseHandle();
++    *handle_ptr = 0;
+     task->ReleaseHandle();
+     return result;
+   }
+-  *handle_ptr = task->handle();
+   REXKRNL_DEBUG("XAM task {:08X} callback={:08X} attributes={:08X}/{:08X}",
+       task->handle(), callback.guest_address(), task->state->attributes[0],
+       task->state->attributes[1]);

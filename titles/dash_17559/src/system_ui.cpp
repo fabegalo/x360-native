@@ -25,6 +25,29 @@ namespace {
 std::function<bool()> draw_ui;
 std::function<void()> request_signin;
 thread_local bool in_dashboard_frame = false;
+// XAM's HUD runs in the system process (2). The local host borrows the
+// dashboard thread for a frame, restoring its process context on return.
+class SystemProcessScope {
+ public:
+  explicit SystemProcessScope(rex::Runtime& runtime)
+      : thread_(rex::system::XThread::GetCurrentThread()->guest_object<rex::system::X_KTHREAD>()),
+        pcr_(runtime.memory()->TranslateVirtual<rex::system::X_KPCR*>(
+            rex::system::XThread::GetCurrentThread()->thread_state()->context()->r13.u32)),
+        previous_(thread_->process_type), previous_dup_(thread_->process_type_dup),
+        previous_dpc_(pcr_->processtype_value_in_dpc) {
+    thread_->process_type = thread_->process_type_dup = 2;
+    pcr_->processtype_value_in_dpc = 2;
+  }
+  ~SystemProcessScope() {
+    thread_->process_type = previous_;
+    thread_->process_type_dup = previous_dup_;
+    pcr_->processtype_value_in_dpc = previous_dpc_;
+  }
+ private:
+  rex::system::X_KTHREAD* thread_;
+  rex::system::X_KPCR* pcr_;
+  uint8_t previous_, previous_dup_, previous_dpc_;
+};
 }
 void ReleaseSystemUiHost() {
   // Called after the dashboard guest thread has exited, before runtime teardown.
@@ -48,6 +71,7 @@ void InstallSystemUi(rex::Runtime& runtime) {
     const auto* application = SystemUiApplicationFor(message);
     if (!application) return X_E_NOTFOUND;
     if (!request || size != application->request_size || !rex::system::XThread::IsInThread()) return X_E_INVALIDARG;
+    SystemProcessScope system_process(runtime);
     auto* state = runtime.kernel_state();
     auto xam = state->GetKernelModule<rex::kernel::xam::XamModule>("xam.xex");
     if (draw_ui || xam->FindSystemApp(0xFF)) return X_E_FAIL;
@@ -116,6 +140,10 @@ void InstallSystemUi(rex::Runtime& runtime) {
       memory->SystemHeapFree(font);
       REXLOG_INFO("17559 system UI: original default typeface -> {:08X}", uint32_t(font_result));
       if (static_cast<int32_t>(font_result) < 0) return font_result;
+      // Original 816C8474 loads xamstrings.xus from XAM's language resource.
+      // The Sign-in dialogs require this table, including first-use questions.
+      uint64_t common_strings_lock[] = {0x81A83050};
+      dispatcher->ExecuteTrap(thread, 0x81A723A4, common_strings_lock, 1);
       // CRT 81A6F888 constructs the configuration facade used by the HUD
       // clock/play-timer query; 81A71190 constructs the queried timer object.
       // Run their constructor bodies without starting XAM or registering atexit.
@@ -139,6 +167,11 @@ void InstallSystemUi(rex::Runtime& runtime) {
         REXLOG_ERROR("17559 system UI: could not load original game:\\system\\huduiskin.xex as resource module");
         return X_E_NOTFOUND;
       }
+      uint64_t common_strings[] = {skin->hmodule_ptr()};
+      dispatcher->ExecuteTrap(thread, 0x816E0B68, common_strings, 1);
+      const auto strings = rex::memory::load_and_swap<uint32_t>(memory->TranslateVirtual(0x81AA3EC4));
+      REXLOG_INFO("17559 system UI: original common strings table={:08X}", strings);
+      if (!strings) return X_E_NOTFOUND;
       const auto locator = memory->SystemHeapAlloc(256);
       if (!locator) return static_cast<X_HRESULT>(0x8007000Eu);
       uint64_t locate_skin[] = {skin->hmodule_ptr(), 0x815FA684, 0x815FA6C0, locator, 128};
@@ -272,8 +305,15 @@ void InstallSystemUi(rex::Runtime& runtime) {
         // image copy, window, blocking loop, or per-frame resource creation.
         draw_ui = [&runtime, dispatcher, thread, hud, registration, xam, destroy_scene,
                    previous_frame = rex::chrono::Clock::QueryGuestUptimeMillis(), frame = 0u]() mutable -> bool {
+          SystemProcessScope system_process(runtime);
+          // A stacked HUD dialog owns input ahead of the app. Otherwise the
+          // app's update handles its A/B commands before XUI navigation.
+          uint64_t input[] = {hud};
+          if (dispatcher->ExecuteTrap(thread, 0x81693E20, input, 1))
+            dispatcher->ExecuteTrap(thread, 0x816927C0, input, 1);
           uint64_t update[] = {0x8000000A, 0, 0};
           dispatcher->ExecuteTrap(thread, registration->callback, update, 3);
+          dispatcher->ExecuteTrap(thread, 0x816927C0, input, 1);
           if (xam->GetSystemUiSession().close_requested) {
             destroy_scene();
             runtime.kernel_state()->BroadcastNotification(0x9, false);

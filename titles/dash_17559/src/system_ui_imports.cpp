@@ -12,6 +12,8 @@ void CallUi(PPCContext& ctx, uint8_t* base, uint32_t address) {
 }
 }
 extern "C" REX_FUNC(__imp__XamGetOnlineSchema) { CallUi(ctx, base, 0x816E2030); }
+extern "C" REX_FUNC(__imp__XamLookupCommonStringByIndex) { CallUi(ctx, base, 0x816E0BF0); }
+extern "C" REX_FUNC(__imp__XamShowMessageBox) { CallUi(ctx, base, 0x816CB168); }
 extern "C" REX_FUNC(__imp__XuiControlSetItemAssociation) { CallUi(ctx, base, 0x817C04B0); }
 extern "C" REX_FUNC(__imp__XamBuildDynamicResourceLocator) { CallUi(ctx, base, 0x816C8B00); }
 extern "C" REX_FUNC(__imp__XuiAnimRun) { CallUi(ctx, base, 0x817AB6D0); }

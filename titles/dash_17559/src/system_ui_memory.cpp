@@ -5,6 +5,34 @@
 #include <rex/system/kernel_state.h>
 #include <rex/system/user_module.h>
 
+// XuiGamerCard calls XAM services internally, without an import thunk. Use the
+// same identity and settings service as the dashboard and system applications.
+#define BRIDGE_XAM_SERVICE(address, name) \
+  extern "C" REX_FUNC(__imp__##name); \
+  extern "C" REX_FUNC(sub_##address) { __imp__##name(ctx, base); }
+BRIDGE_XAM_SERVICE(816D8590, XamUserGetXUID)
+BRIDGE_XAM_SERVICE(816D8698, XamUserGetIndexFromXUID)
+BRIDGE_XAM_SERVICE(816D86A8, XamUserGetGamerTag)
+BRIDGE_XAM_SERVICE(816DD040, XamUserGetName)
+BRIDGE_XAM_SERVICE(816DD118, XamUserGetSigninState)
+BRIDGE_XAM_SERVICE(816DDB20, XamUserGetSigninInfo)
+BRIDGE_XAM_SERVICE(816B1F28, XamUserReadProfileSettings)
+BRIDGE_XAM_SERVICE(816B16A8, XamUserReadProfileSettingsEx)
+#undef BRIDGE_XAM_SERVICE
+
+// The original HUD polls the system input queue, rather than the suspended
+// title's queue. Bridge the device boundary; original XuiProcessInput retains
+// focus, navigation, button dispatch and dialog completion.
+extern "C" REX_FUNC(__imp__XamInputGetKeystrokeHudEx);
+extern "C" REX_FUNC(__imp__sub_816F4AB8);
+extern "C" REX_FUNC(sub_816F4AB8) {
+  if (ctx.r4.u32 == 0x400000FFu) {
+    ctx.r3.u64 = 0xFF; // ANY_USER in the native flags, a value in the HUD Ex ABI.
+    __imp__XamInputGetKeystrokeHudEx(ctx, base);
+  } else
+    __imp__sub_816F4AB8(ctx, base);
+}
+
 // The XUI library's private malloc/free/size/realloc boundary (tag 0x248E).
 // Back allocations with the existing guest heap; never start XAM's system heap
 // or replace account services. Strong symbols override only these AOT functions.

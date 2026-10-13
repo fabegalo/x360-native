@@ -1,0 +1,19 @@
+diff --git a/src/kernel/xam/xam_misc.cpp b/src/kernel/xam/xam_misc.cpp
+index 5692ee3..405e46e 100644
+--- a/src/kernel/xam/xam_misc.cpp
++++ b/src/kernel/xam/xam_misc.cpp
+@@ -470,7 +470,13 @@ REX_EXPORT_STUB(__imp__XamGetCachedTitleNameEx);
+ REX_EXPORT_STUB(__imp__XamGetClosedCaptioningSettings);
+ REX_EXPORT_STUB(__imp__XamGetClosedCaptioningState);
+ REX_EXPORT_STUB(__imp__XamGetConsoleFriendlyName);
+-REX_EXPORT_STUB(__imp__XamGetCurrentDemand);
++extern "C" REX_FUNC(__imp__XamGetCurrentDemand) {
++  // 17559 81994C40 returns whether a demand is queued and writes the optional
++  // user/type outputs. The local runtime has no queued online-auth demand.
++  if (ctx.r3.u32) rex::memory::store_and_swap<uint32_t>(base + ctx.r3.u32, 0);
++  if (ctx.r4.u32) rex::memory::store_and_swap<uint32_t>(base + ctx.r4.u32, 0);
++  ctx.r3.u64 = 0;
++}
+ REX_EXPORT_STUB(__imp__XamGetCurrentSystemOnlineManifestRevision);
+ REX_EXPORT_STUB(__imp__XamGetDashBackstackData);
+ REX_EXPORT_STUB(__imp__XamGetDashBackstackNodesCount);

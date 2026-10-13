@@ -1,0 +1,15 @@
+diff --git a/src/kernel/xam/xam_misc.cpp b/src/kernel/xam/xam_misc.cpp
+index 1e45b49..9627e32 100644
+--- a/src/kernel/xam/xam_misc.cpp
++++ b/src/kernel/xam/xam_misc.cpp
+@@ -527,7 +527,9 @@ REX_EXPORT_STUB(__imp__XamIsCurrentTitleDash);
+ REX_EXPORT_STUB(__imp__XamIsCurrentTitleDatacenterClient);
+ REX_EXPORT_STUB(__imp__XamIsCurrentTitleDatacenterDash);
+ REX_EXPORT_STUB(__imp__XamIsCurrentTitleIptv);
+-REX_EXPORT_STUB(__imp__XamIsDataCenterMode);
++// This runtime hosts a local retail console, not the data-center console mode.
++// 17559 export 8168AF28 queries bit 2 of the console-mode flags; absent here.
++extern "C" REX_FUNC(__imp__XamIsDataCenterMode) { ctx.r3.u64 = 0; }
+ REX_EXPORT_STUB(__imp__XamIsDvrRecording);
+ REX_EXPORT_STUB(__imp__XamIsIptvEnabled);
+ REX_EXPORT_STUB(__imp__XamIsNatalPlaybackEnabled);
