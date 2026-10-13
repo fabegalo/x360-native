@@ -133,3 +133,14 @@ preservaram a ABI verificada. Detalhes, dependências e limites em
 `docs/avatar-system.md` §10. O contexto do jogo foi restaurado e
 `XamAvatarInitialize` continuou retornando `0xFFFFFFFF`; ainda não há avatar
 renderizado nem novo marco de jogabilidade. O timeout após a sonda é controlado.
+### Incremento isolado: malhas/texturas e callbacks reais (2026-10-12)
+
+`20261013T012506Z-mm-avatars-mesh-2`: o leitor XAM `0x81974A90` montou os
+589 assets de campo 3 (634 malhas, 1619 texturas), usando callbacks reais do jogo:
+275 chamadas de tiling e 1612 de layout. Validados 1.189.998 índices e 2.871.296
+bytes tiled, buffers/ponteiros/ABI e três negativos. Transporte LZX em C++ com a
+biblioteca existente do SDK; imports LDI continuam pendentes. Sonda com zero
+falhas; jogo encerrado pelo supervisor em 45 s, com os erros XCTD/devkit já
+conhecidos. Sem novo marco de renderização ou jogabilidade. A nova opção
+`motocross_xam_aot_probe_meshes` pula as suítes anteriores, que não foram repetidas.
+Detalhes e limites em `docs/avatar-system.md` seção 11. Somente `x360-avatars`.

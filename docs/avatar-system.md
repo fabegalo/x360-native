@@ -400,3 +400,98 @@ Falta executar a montagem das malhas/texturas do campo 3 (`0x81974A90`, chamada
 por `0x81966450`), validar os ponteiros relocados nos buffers resultado/GPU e os
 callbacks reais do título. Essa cadeia completa não foi executada aqui; suporte
 funcional aos protocolos 2/4 e um avatar renderizado continuam pendentes.
+
+## 11. Malhas e texturas reais do campo 3, callbacks do jogo (2026-10-12)
+
+Continuação na **`x360-avatars` / `avatars/xam-aot`**, sem integrar a `main`.
+`--motocross_xam_aot_probe_meshes=true`, junto da opção principal do probe,
+seleciona uma rota exclusiva após montar/carregar XAM e ler o catálogo. Pula as
+provas anteriores de integração, tamanhos, STRB e cores. Não combinar com a opção
+experimental `motocross_xam_aot_probe_initialize`.
+
+**PASS**, run `20261013T012506Z-mm-avatars-mesh-2`: todos os **589 assets com
+campo 3** encontrados nos 1282 registros do catálogo 17559 foram montados pelo
+leitor original **`0x81974A90`**. Resultado: **634 malhas, 1619 texturas**,
+**1.189.998 índices** dentro do intervalo de vértices da respectiva malha e
+**2.871.296 bytes tiled** comparados com uma referência independente. Zero falhas
+da sonda e da ABI verificada (r1/r2/r13–r31, f14–f31). Cada stream foi consumido
+integralmente, sem leitura fora do intervalo.
+
+### Transporte LZX e fronteira preservada
+
+O stream comprimido original `0x819766B0` depende dos imports de kernel
+`LDICreateDecompression`, `LDIDecompress`, `LDIResetDecompression` e
+`LDIDestroyDecompression`, ainda stubs no SDK fixado. **Não foram implementados
+nem substituídos por sucesso.** A sonda usa `lzx_decompress` já existente no SDK,
+com janela de 0x8000 e novo decoder por bloco, como o reset observado em
+`0x81976888` após cada descompressão. Cada bloco tem três `u32` little-endian:
+tamanho comprimido (até 0x9800), offset descomprimido e tamanho de saída (até
+0x8000), seguidos do payload. Limites e contiguidade são verificados antes de
+descomprimir; saída total limitada a 16 MiB.
+
+Um adaptador sequencial C++ com cinco slots (destruir, resetar, posição, avançar,
+ler) entrega os bytes descomprimidos ao XAM. A leitura é limitada ao stream e
+preenche a quantidade realmente copiada. A interpretação/expansão de malhas,
+vértices, índices, texturas e a montagem dos descritores continuam no AOT original:
+`0x81974A90` → `0x819747D8` / `0x81978680` / `0x81971CA8`. Não é ainda a cadeia
+completa do export `GetAssets`, nem valida equivalência do decoder LZX com console.
+
+### Descritores e buffers
+
+O cabeçalho descomprimido contém 12 palavras LE. As primeiras sete viram os
+campos `+0..+24` do descritor de saída de 52 bytes. `+28/+32` são os buffers CPU/GPU
+privados. As palavras 7/8 são offsets GPU, relocados em `+36/+40`; palavras 9/10
+são offsets CPU, relocados em `+44/+48`; palavra 11 informa o scratch necessário.
+
+Cada malha ocupa 512 bytes, com quantidade de triângulos em `+484`, vértices em
+`+488`, stride em `+496`, ponteiros de vértices/índices em `+504/+508`. Verificam-se
+os intervalos completos, os índices BE de 16 bits e os ponteiros relocados. Cada
+textura ocupa 44 bytes: dimensões `+4/+8`, tamanho `+12`, ponteiro `+36`, todos
+conferidos contra o buffer GPU. Sentinelas de 32 bytes após cada capacidade
+declarada e páginas de guarda por padrão de bytes nas bordas das alocações
+permaneceram intactas (não são páginas protegidas pelo SO). Limite privado: 2 MiB
+por buffer. Não é validação byte a byte dos vértices contra uma segunda implementação.
+
+### Callbacks reais, sem respostas simuladas
+
+A tabela recebida em `r6` no callsite de `XamAvatarInitialize` é validada contra
+os cinco endereços AOT do jogo e instalada pela rotina original **`0x81977C80`**.
+Observadores temporários no dispatcher encaminham o mesmo contexto ao código
+original e verificam a ABI. Chamadas observadas:
+
+| Slot | Rotina do jogo | Função | Chamadas pelo XAM |
+|---|---|---|---:|
+| 0 | `0x8295B630` | tiling, via `XGTileTextureLevel` | 275 |
+| 1 | `0x8295B720` | detiling | 0 |
+| 2 | `0x8295B3C0` | layout de textura | 1612 |
+| 3 | `0x8295B458` | tamanho/alinhamento | 0 |
+| 4 | `0x8295B500` | cabeçalho/mip | 0 |
+
+A referência calcula o tamanho da linha e o número de linhas pelos blocos do
+formato Xenos. Para tiling, confere cada bloco na posição calculada pela fórmula
+de endereçamento 2D também documentada em `texture_util::GetTiledOffset2D` do SDK,
+contra os bytes lineares no scratch. Não chama o detiler do jogo como oráculo.
+Os sete descritores sem callback de layout seguem o ramo de textura zerada.
+Os outros três callbacks estão registrados, **mas não exercitados** neste caminho.
+A tabela global XAM é restaurada byte a byte, os dispatches voltam às funções
+originais, os buffers são liberados e o contexto PPC do jogo é restaurado.
+
+Três negativos novos, no registro 72: capacidade CPU um byte menor retorna 0 e
+restaura o descritor; cabeçalho descomprimido de 47 bytes retorna 0 sem alterá-lo;
+frame LZX truncado em um byte é rejeitado antes do AOT. A primeira execução
+`20261013T012130Z-mm-avatars-mesh-1` apenas estabeleceu a chamada de três assets;
+a segunda acrescentou as verificações de conteúdo, limites e negativos e cobriu
+todo o campo 3. As suítes já concluídas antes deste incremento não foram repetidas.
+
+Reprodução: mesma linha da seção 10, trocando a opção de cores pela opção de
+malhas acima. Build e perfil ficam em `.local/` da worktree de avatares. O
+supervisor terminou o jogo por timeout de 45 s após a sonda completar; os quatro
+erros XCTD/devkit e quatro stubs de voz conhecidos do título persistem. Isso não
+é um resultado funcional do jogo completo. Catálogo original e hash permanecem
+os da seção 10; nenhum asset proprietário ou fonte AOT gerada entra no commit.
+
+**Próxima fronteira:** conectar esse caminho ao processamento completo de assets
+e à entrega dos buffers ao jogo, decidir a implementação fiel dos contratos LDI
+para usar o stream comprimido original, e resolver a inicialização/gerência exigida
+por `GetAssets`. `XamAvatarInitialize` continua retornando `0xFFFFFFFF`; protocolos
+2/4 completos, avatar renderizado, edição e equivalência visual continuam pendentes.

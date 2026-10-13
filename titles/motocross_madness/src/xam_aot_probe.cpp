@@ -19,6 +19,21 @@
 //   ABI       r1, r2, r13-r31 and f14-f31 are unchanged across each XAM call
 //   errors    executing an unregistered address returns the dispatcher's failure
 //             value and leaves memory unchanged
+#include <fmt/format.h>
+#include <fmt/ranges.h>
+#include <rex/cvar.h>
+#include <rex/filesystem/devices/host_path_device.h>
+#include <rex/logging.h>
+#include <rex/memory.h>
+#include <rex/ppc/context.h>
+#include <rex/runtime.h>
+#include <rex/system/function_dispatcher.h>
+#include <rex/system/kernel_state.h>
+#include <rex/system/lzx.h>
+#include <rex/system/thread_state.h>
+#include <rex/system/user_module.h>
+#include <rex/system/xex_module.h>
+
 #include <algorithm>
 #include <array>
 #include <cstdint>
@@ -29,19 +44,6 @@
 #include <span>
 #include <string>
 #include <vector>
-
-#include <fmt/format.h>
-#include <rex/cvar.h>
-#include <rex/filesystem/devices/host_path_device.h>
-#include <rex/logging.h>
-#include <rex/memory.h>
-#include <rex/ppc/context.h>
-#include <rex/runtime.h>
-#include <rex/system/function_dispatcher.h>
-#include <rex/system/kernel_state.h>
-#include <rex/system/thread_state.h>
-#include <rex/system/user_module.h>
-#include <rex/system/xex_module.h>
 
 #include "../../common/avatar/avatar_metadata.h"
 #include "../../common/avatar/avatar_toc.h"
@@ -65,6 +67,10 @@ REXCVAR_DEFINE_BOOL(motocross_xam_aot_probe_sizes, false, "Motocross Madness",
 
 REXCVAR_DEFINE_BOOL(motocross_xam_aot_probe_colors, false, "Motocross Madness",
                     "Diagnostic: expand original STRB color palettes with XAM AOT and verify every byte");
+
+REXCVAR_DEFINE_BOOL(motocross_xam_aot_probe_meshes, false, "Motocross Madness",
+                    "Diagnostic: only field 3 meshes/textures with real game "
+                    "callbacks; skip prior suites");
 
 namespace {
 
@@ -423,8 +429,430 @@ void RunStrbColors(const x360n::avatar::AvatarToc& toc) {
   memory->SystemHeapFree(scratch);
 }
 
+// Field 3 transport: 12-byte LE headers (compressed size, output offset, output
+// size), each followed by an independently reset LZX block. This diagnostic
+// uses the SDK's existing decoder because the kernel LDI imports are still
+// stubs.
+uint32_t MeshLE(const uint8_t* p) {
+  return uint32_t(p[0]) | uint32_t(p[1]) << 8 | uint32_t(p[2]) << 16 |
+         uint32_t(p[3]) << 24;
+}
+uint32_t MeshBE(const uint8_t* p) {
+  return rex::memory::load_and_swap<uint32_t>(p);
+}
+void MeshPut(uint8_t* p, uint32_t v) {
+  rex::memory::store_and_swap<uint32_t>(p, v);
+}
 
-void Run() {
+bool MeshInflate(std::span<const uint8_t> src, std::vector<uint8_t>& dst) {
+  dst.clear();
+  while (!src.empty()) {
+    if (src.size() < 12) return false;
+    const uint32_t packed = MeshLE(src.data()), offset = MeshLE(src.data() + 4),
+                   size = MeshLE(src.data() + 8);
+    if (!packed || packed > 0x9800 || packed > src.size() - 12 || !size ||
+        size > 0x8000 || offset != dst.size() ||
+        offset > 16 * 1024 * 1024 - size)
+      return false;
+    dst.resize(offset + size);
+    if (lzx_decompress(src.data() + 12, packed, dst.data() + offset, size,
+                       0x8000, nullptr, 0))
+      return false;
+    src = src.subspan(12 + packed);
+  }
+  return dst.size() >= 48;
+}
+
+// A bounded sequential memory stream, with the same five slots used by XAM's
+// compressed stream. Slot 3 advances, rather than seeking absolutely. All mesh,
+// index, vertex and texture interpretation remains in original XAM AOT code.
+struct MeshStreamState {
+  std::span<const uint8_t> bytes;
+  size_t pos = 0;
+  uint32_t misses = 0;
+};
+MeshStreamState* g_mesh_stream = nullptr;
+void MeshStreamDestroy(PPCContext& c, uint8_t*) { c.r3.u64 = 0; }
+void MeshStreamReset(PPCContext& c, uint8_t*) {
+  g_mesh_stream->pos = 0;
+  c.r3.u64 = 1;
+}
+void MeshStreamTell(PPCContext& c, uint8_t*) { c.r3.u64 = g_mesh_stream->pos; }
+void MeshStreamSkip(PPCContext& c, uint8_t*) {
+  auto& s = *g_mesh_stream;
+  const uint32_t n = uint32_t(c.r4.u64);
+  c.r3.u64 = n <= s.bytes.size() - s.pos;
+  if (c.r3.u64)
+    s.pos += n;
+  else
+    ++s.misses;
+}
+void MeshStreamRead(PPCContext& c, uint8_t* base) {
+  auto& s = *g_mesh_stream;
+  const uint32_t n = uint32_t(c.r5.u64);
+  MeshPut(base + uint32_t(c.r6.u64), 0);
+  if (n > s.bytes.size() - s.pos) {
+    ++s.misses;
+    c.r3.u64 = 0;
+    return;
+  }
+  std::memcpy(base + uint32_t(c.r4.u64), s.bytes.data() + s.pos, n);
+  s.pos += n;
+  MeshPut(base + uint32_t(c.r6.u64), n);
+  c.r3.u64 = 1;
+}
+
+std::array<PPCFunc*, 5> g_mesh_callbacks{};
+std::array<uint32_t, 5> g_mesh_callback_calls{};
+uint32_t g_mesh_callback_abi = 0;
+struct MeshTextureChecks {
+  uint32_t gpu, gpu_size, scratch, scratch_size;
+  uint32_t failures = 0, tiled = 0, layouts = 0;
+  uint64_t compared = 0;
+};
+MeshTextureChecks* g_mesh_texture_checks = nullptr;
+
+// Independent of game AOT: Xenos 2D address bit layout, also documented by
+// rex/graphics/pipeline/texture/util.cpp::GetTiledOffset2D in the pinned SDK.
+uint32_t MeshTiledAddress(uint32_t x, uint32_t y, uint32_t width,
+                          uint32_t log_bytes) {
+  const uint32_t macro = (x / 32 + y / 32 * ((width + 31) / 32))
+                         << (log_bytes + 7);
+  const uint32_t micro = ((x % 8) + (y & 14) * 4) << log_bytes;
+  const uint32_t combined =
+      macro + (micro & ~15u) * 2 + (micro & 15) + (y % 2) * 16;
+  return (combined & ~511u) * 8 + (y & 16) * 128 + (combined & 448) * 4 +
+         (((y & 8) / 4 + x / 8) % 4) * 64 + (combined & 63);
+}
+
+bool MeshFormat(uint32_t format, uint32_t& block, uint32_t& log_bytes) {
+  switch (format & 63) {
+    case 2:
+      block = 1;
+      log_bytes = 0;
+      return true;  // 8
+    case 6:
+      block = 1;
+      log_bytes = 2;
+      return true;  // 8_8_8_8
+    case 18:
+    case 58:
+    case 59:
+      block = 4;
+      log_bytes = 3;
+      return true;
+    case 19:
+    case 20:
+      block = 4;
+      log_bytes = 4;
+      return true;
+    default:
+      return false;
+  }
+}
+bool MeshRange(uint32_t p, uint64_t n, uint32_t start, uint32_t size) {
+  return p >= start && uint64_t(p) + n <= uint64_t(start) + size;
+}
+
+template <size_t I>
+void MeshObserveCallback(PPCContext& c, uint8_t* base) {
+  const auto before = Snapshot(c);
+  const std::array<uint32_t, 8> a = {uint32_t(c.r3.u64), uint32_t(c.r4.u64),
+                                     uint32_t(c.r5.u64), uint32_t(c.r6.u64),
+                                     uint32_t(c.r7.u64), uint32_t(c.r8.u64),
+                                     uint32_t(c.r9.u64), uint32_t(c.r10.u64)};
+  ++g_mesh_callback_calls[I];
+  g_mesh_callbacks[I](
+      c,
+      base);  // Execute the saved real function with the unchanged guest ABI.
+  if (!SameNonVolatile(before, Snapshot(c))) ++g_mesh_callback_abi;
+  auto* checks = g_mesh_texture_checks;
+  if (!checks) return;
+  uint32_t block = 0, log_bytes = 0;
+  if constexpr (I == 0 || I == 2) {
+    if (!MeshFormat(a[0], block, log_bytes) || a[3] != 0) {
+      ++checks->failures;
+      REXLOG_ERROR(
+          "xam-aot-probe: meshes: unsupported reference format {:08X} mip {}",
+          a[0], a[3]);
+      return;
+    }
+    const uint32_t columns = (a[1] + block - 1) / block,
+                   rows = (a[2] + block - 1) / block;
+    const uint32_t row_bytes = columns << log_bytes;
+    if constexpr (I == 2) {
+      ++checks->layouts;
+      const bool ok = MeshBE(base + a[4]) == row_bytes &&
+                      MeshBE(base + a[6]) == rows &&
+                      MeshBE(base + a[5]) >= row_bytes;
+      if (!ok) ++checks->failures;
+    } else {
+      ++checks->tiled;
+      bool ok = c.r3.u64 == 1 && a[4] >= row_bytes &&
+                MeshRange(a[6], uint64_t(a[4]) * rows, checks->scratch,
+                          checks->scratch_size) &&
+                MeshRange(a[7], a[5], checks->gpu, checks->gpu_size);
+      for (uint32_t y = 0; ok && y < rows; ++y)
+        for (uint32_t x = 0; ok && x < columns; ++x) {
+          const uint32_t tiled = MeshTiledAddress(x, y, columns, log_bytes);
+          const uint32_t n = 1u << log_bytes;
+          ok = uint64_t(tiled) + n <= a[5] &&
+               !std::memcmp(base + a[7] + tiled,
+                            base + a[6] + y * a[4] + (x << log_bytes), n);
+          if (ok) checks->compared += n;
+        }
+      if (!ok) {
+        ++checks->failures;
+        REXLOG_ERROR(
+            "xam-aot-probe: meshes: tiled bytes mismatch format "
+            "{:08X} {}x{} pitch {} capacity {}",
+            a[0], a[1], a[2], a[4], a[5]);
+      }
+    }
+  }
+}
+
+bool MeshValidateBuffers(const uint8_t* base, const std::array<uint32_t, 12>& h,
+                         uint32_t cpu, uint32_t gpu, uint64_t& indices) {
+  for (uint32_t i = 0; i < h[5]; ++i) {
+    const uint8_t* mesh = base + cpu + h[9] + i * 512;
+    const uint32_t triangles = MeshBE(mesh + 484),
+                   vertices = MeshBE(mesh + 488), stride = MeshBE(mesh + 496),
+                   vp = MeshBE(mesh + 504), ip = MeshBE(mesh + 508);
+    if (!stride || !MeshRange(vp, uint64_t(vertices) * stride, gpu, h[1]) ||
+        !MeshRange(ip, uint64_t(triangles) * 6, gpu, h[1]))
+      return false;
+    for (uint64_t j = 0; j < uint64_t(triangles) * 3; ++j) {
+      if (rex::memory::load_and_swap<uint16_t>(base + ip + j * 2) >= vertices)
+        return false;
+      ++indices;
+    }
+  }
+  for (uint32_t i = 0; i < h[6]; ++i) {
+    const uint8_t* tex = base + cpu + h[10] + i * 44;
+    if (!MeshRange(MeshBE(tex + 36), MeshBE(tex + 12), gpu, h[1]) ||
+        !MeshBE(tex + 4) || !MeshBE(tex + 8))
+      return false;
+  }
+  return true;
+}
+
+void RunMeshes(const x360n::avatar::AvatarToc& toc, uint32_t game_callbacks) {
+  auto* rt = rex::Runtime::instance();
+  auto* m = rt->memory();
+  auto* d = rt->function_dispatcher();
+  auto* t = rex::runtime::ThreadState::Get();
+  constexpr std::array<uint32_t, 5> expected = {
+      0x8295B630, 0x8295B720, 0x8295B3C0, 0x8295B458, 0x8295B500};
+  if (!game_callbacks) {
+    Check(false, "meshes: game callback table is null");
+    return;
+  }
+  const auto* table = m->TranslateVirtual<const uint8_t*>(game_callbacks);
+  for (size_t i = 0; i < 5; ++i) {
+    if (MeshBE(table + i * 4) != expected[i] ||
+        !(g_mesh_callbacks[i] = d->GetFunction(expected[i]))) {
+      Check(false,
+            "meshes: unrecognized/unregistered real game callback table");
+      return;
+    }
+  }
+  std::array<uint8_t, 20> saved_callbacks{};
+  std::memcpy(saved_callbacks.data(), m->TranslateVirtual(0x81A975CC), 20);
+  uint32_t abi = 0;
+  CallQuiet(d, t, 0x81977C80, {game_callbacks}, &abi);
+  const std::array<PPCFunc*, 5> observers = {
+      MeshObserveCallback<0>, MeshObserveCallback<1>, MeshObserveCallback<2>,
+      MeshObserveCallback<3>, MeshObserveCallback<4>};
+  for (size_t i = 0; i < 5; ++i) d->SetFunction(expected[i], observers[i]);
+  // Fixed private allocations are capped independently of the input's
+  // capacities.
+  constexpr uint32_t cap = 0x200000, guard = 0x1000;
+  std::vector<uint32_t> allocations;
+  auto alloc = [&](uint32_t n) {
+    auto p = m->SystemHeapAlloc(n, 0x1000);
+    if (p) allocations.push_back(p);
+    return p;
+  };
+  const uint32_t state = alloc(0x1000), cpu_alloc = alloc(cap + 2 * guard),
+                 gpu_alloc = alloc(cap + 2 * guard),
+                 tmp_alloc = alloc(cap + 2 * guard);
+  const uint32_t cpu = cpu_alloc + guard, gpu = gpu_alloc + guard,
+                 tmp = tmp_alloc + guard;
+  uint32_t tested = 0, meshes = 0, textures = 0, negatives = 0;
+  uint64_t indices = 0, texture_bytes = 0;
+  if (!state || !cpu_alloc || !gpu_alloc || !tmp_alloc) {
+    Check(false, "meshes: private allocations");
+  } else {
+    auto* h = m->TranslateVirtual<uint8_t*>(state);
+    const std::array<PPCFunc*, 5> methods = {MeshStreamDestroy, MeshStreamReset,
+                                             MeshStreamTell, MeshStreamSkip,
+                                             MeshStreamRead};
+    bool registered = true;
+    for (size_t i = 0; i < 5; ++i) {
+      const uint32_t thunk = d->AllocateThunk(methods[i], 0x81974A90);
+      MeshPut(h + 0x100 + i * 4, thunk);
+      registered &= thunk != 0;
+    }
+    MeshPut(h + 0x80, state + 0x100);
+    Check(registered, "meshes: bounded sequential stream registered");
+    if (registered)
+      for (size_t record = 0; record < toc.size(); ++record) {
+        const auto blob = toc.Blob(record);
+        if (blob.empty()) continue;
+        if (blob.size() < 32 || std::memcmp(blob.data(), "STRB", 4) ||
+            blob[4] != 1 || blob[5] != 0 || blob[22] != 1 || blob[23] != 4 ||
+            blob[26] != 4) {
+          Check(false, "meshes: unsupported STRB layout");
+          break;
+        }
+        size_t pos = 32;
+        while (pos + 12 <= blob.size() && blob[pos] != 3) {
+          const auto len = MeshBE(blob.data() + pos + 1);
+          if (len > blob.size() - pos - 12) {
+            pos = blob.size();
+            break;
+          }
+          pos += 12 + ((size_t(len) + 3) & ~size_t(3));
+        }
+        if (pos + 12 > blob.size()) continue;
+        const uint32_t len = MeshBE(blob.data() + pos + 1);
+        std::vector<uint8_t> expanded;
+        if (len > blob.size() - pos - 12 ||
+            MeshBE(blob.data() + pos + 5) != 1 ||
+            !MeshInflate(blob.subspan(pos + 12, len), expanded)) {
+          Check(false,
+                fmt::format("meshes: LZX framing/decode record {}", record));
+          break;
+        }
+        std::array<uint32_t, 12> header{};
+        for (size_t i = 0; i < 12; ++i)
+          header[i] = MeshLE(expanded.data() + i * 4);
+        REXLOG_DEBUG(
+            "xam-aot-probe: meshes: record {} LZX {} -> {} bytes; header {:X}",
+            record, len, expanded.size(), fmt::join(header, "/"));
+        const bool bounds =
+            header[0] <= cap && header[1] <= cap && header[11] <= cap &&
+            uint64_t(header[9]) + uint64_t(header[5]) * 512 <= header[0] &&
+            uint64_t(header[10]) + uint64_t(header[6]) * 44 <= header[0] &&
+            header[7] <= header[1] && header[8] <= header[1];
+        if (!bounds) {
+          Check(false, "meshes: decoded header capacities/offsets");
+          break;
+        }
+        for (auto p : {cpu_alloc, gpu_alloc, tmp_alloc})
+          std::memset(m->TranslateVirtual(p), 0xCD, cap + 2 * guard);
+        std::memset(m->TranslateVirtual(cpu), 0, header[0]);
+        std::memset(m->TranslateVirtual(gpu), 0, header[1]);
+        std::memset(m->TranslateVirtual(tmp), 0, header[11]);
+        std::memset(h, 0, 52);
+        MeshPut(h, header[0]);
+        MeshPut(h + 4, header[1]);
+        MeshPut(h + 28, cpu);
+        MeshPut(h + 32, gpu);
+        MeshStreamState stream{expanded};
+        g_mesh_stream = &stream;
+        MeshTextureChecks texture_check{gpu, header[1], tmp, header[11]};
+        g_mesh_texture_checks = &texture_check;
+        const uint32_t result = uint32_t(CallQuiet(
+            d, t, 0x81974A90, {state, state + 0x80, header[11], tmp}, &abi));
+        if (result != 1 || stream.misses || stream.pos != expanded.size())
+          Check(false, fmt::format("meshes: record {} original reader={} "
+                                   "consumed {}/{} misses={}",
+                                   record, result, stream.pos, expanded.size(),
+                                   stream.misses));
+        bool descriptors = true;
+        for (size_t i = 0; i < 7; ++i)
+          descriptors &= MeshBE(h + i * 4) == header[i];
+        descriptors &= MeshBE(h + 36) == gpu + header[7] &&
+                       MeshBE(h + 40) == gpu + header[8] &&
+                       MeshBE(h + 44) == cpu + header[9] &&
+                       MeshBE(h + 48) == cpu + header[10];
+        bool guards = true;
+        for (auto p : {cpu_alloc, gpu_alloc, tmp_alloc}) {
+          const auto* b = m->TranslateVirtual<const uint8_t*>(p);
+          for (uint32_t i = 0; i < guard; ++i)
+            guards &= b[i] == 0xCD && b[guard + cap + i] == 0xCD;
+        }
+        for (auto pair : {std::pair{cpu, header[0]}, std::pair{gpu, header[1]},
+                          std::pair{tmp, header[11]}}) {
+          const auto* b =
+              m->TranslateVirtual<const uint8_t*>(pair.first + pair.second);
+          for (uint32_t i = 0; i < 32; ++i) guards &= b[i] == 0xCD;
+        }
+        descriptors &= MeshValidateBuffers(m->virtual_membase(), header, cpu,
+                                           gpu, indices);
+        if (!descriptors || !guards || texture_check.failures)
+          Check(false, fmt::format("meshes: record {} descriptors={} guards={} "
+                                   "texture failures={}",
+                                   record, descriptors, guards,
+                                   texture_check.failures));
+        texture_bytes += texture_check.compared;
+        g_mesh_texture_checks = nullptr;
+        if (record == 72 && result == 1) {
+          std::array<uint8_t, 52> original{};
+          std::memcpy(original.data(), h, original.size());
+          MeshPut(h, header[0] - 1);
+          std::array<uint8_t, 52> short_desc{};
+          std::memcpy(short_desc.data(), h, short_desc.size());
+          const auto rejected = CallQuiet(
+              d, t, 0x81974A90, {state, state + 0x80, header[11], tmp}, &abi);
+          const bool capacity_ok =
+              rejected == 0 &&
+              !std::memcmp(h, short_desc.data(), short_desc.size());
+          Check(capacity_ok,
+                "meshes negative: insufficient CPU capacity "
+                "rejects and restores descriptor");
+          negatives += capacity_ok;
+          std::memcpy(h, original.data(), original.size());
+          stream =
+              MeshStreamState{std::span<const uint8_t>(expanded).first(47)};
+          const auto short_read = CallQuiet(
+              d, t, 0x81974A90, {state, state + 0x80, header[11], tmp}, &abi);
+          const bool short_ok =
+              short_read == 0 && stream.misses == 1 &&
+              !std::memcmp(h, original.data(), original.size());
+          Check(short_ok,
+                "meshes negative: truncated decoded header rejects "
+                "without descriptor writes");
+          negatives += short_ok;
+          std::vector<uint8_t> unused;
+          const bool lzx_ok =
+              !MeshInflate(blob.subspan(pos + 12, len - 1), unused);
+          Check(lzx_ok,
+                "meshes negative: truncated LZX frame rejects before AOT");
+          negatives += lzx_ok;
+        }
+        g_mesh_stream = nullptr;
+        if (!result || !descriptors || !guards || texture_check.failures) break;
+        ++tested;
+        meshes += header[5];
+        textures += header[6];
+        if (tested % 100 == 0)
+          REXLOG_INFO("xam-aot-probe: meshes: {} assets validated", tested);
+      }
+  }
+  for (size_t i = 0; i < 5; ++i)
+    d->SetFunction(expected[i], g_mesh_callbacks[i]);
+  std::memcpy(m->TranslateVirtual(0x81A975CC), saved_callbacks.data(), 20);
+  for (auto p : allocations) m->SystemHeapFree(p);
+  Check(
+      tested > 3 && meshes > 0 && textures > 0 && texture_bytes > 0 &&
+          negatives == 3,
+      fmt::format("meshes: coverage {} assets, {} meshes, {} textures, {} "
+                  "indices, {} tiled bytes, {} negatives",
+                  tested, meshes, textures, indices, texture_bytes, negatives));
+  Check(abi == 0 && g_mesh_callback_abi == 0,
+        "meshes: XAM and real callback non-volatile ABI");
+  REXLOG_INFO(
+      "xam-aot-probe: meshes: {} assets, {} meshes, {} textures; real "
+      "callbacks {}/{}/{}/{}/{}",
+      tested, meshes, textures, g_mesh_callback_calls[0],
+      g_mesh_callback_calls[1], g_mesh_callback_calls[2],
+      g_mesh_callback_calls[3], g_mesh_callback_calls[4]);
+}
+
+void Run(uint32_t game_callbacks) {
   auto* runtime = rex::Runtime::instance();
   auto* thread = rex::runtime::ThreadState::Get();
   if (!runtime || !thread) {
@@ -459,6 +887,13 @@ void Run() {
         fmt::format("load: image 0x{:08X}+0x{:X} (expected 0x{:08X}+0x{:X})", base, size, kXamBase,
                     kXamSize));
 
+  if (REXCVAR_GET(motocross_xam_aot_probe_meshes)) {
+    std::string error;
+    auto toc = x360n::avatar::AvatarToc::Parse(Slurp(catalog_path), &error);
+    if (!toc) { Check(false, "meshes: catalog: " + error); return; }
+    RunMeshes(*toc, game_callbacks);
+    return;
+  }
   Check(dispatcher->GetFunction(kBodyTypeExport) != nullptr, "registry: 0x816753C8 registered");
   Check(dispatcher->GetFunction(kVectorIterator) != nullptr, "registry: 0x81670000 registered");
   Check(dispatcher->GetFunction(kMidFunction) == nullptr, "registry: mid-function 0x816753CC absent");
@@ -647,7 +1082,7 @@ void MaybeRunXamAotProbe(PPCRegister& r3, PPCRegister& r4, PPCRegister& r5, PPCR
         "context: hook registers are the guest thread's PPCContext");
   (void)r7;
   PPCContext saved = *thread->context();
-  Run();
+  Run(uint32_t(saved.r6.u64));
   if (REXCVAR_GET(motocross_xam_aot_probe_initialize)) {
     *thread->context() = saved;
     RunOriginalInitialize(saved.r3, saved.r4, saved.r5, saved.r6, uint32_t(saved.r8.u64));

@@ -3,6 +3,13 @@
 Atualizado em 2026-10-12. Marcos: **M0 feito**; **M1 feito para um XEX** (amostra
 XDK "Dolphin" da `rexglue/demo-iruka`), com as limitações abaixo.
 
+Frente isolada de avatares (`x360-avatars`, `avatars/xam-aot`): o leitor original
+XAM 17559 montou 589 assets do campo 3, com 634 malhas e 1619 texturas; callbacks
+reais de layout/tiling do Motocross e bytes tiled validados. Transporte LZX usa
+biblioteca existente do SDK; imports LDI ainda stubs. `GetAssets` completo e
+renderização continuam pendentes; Initialize mantém falha. Main não integrada.
+Evidência e limites: [avatares, seção 11](docs/avatar-system.md#11-malhas-e-texturas-reais-do-campo-3-callbacks-do-jogo-2026-10-12).
+
 ## Funciona (com evidência)
 
 Preparação gráfica Windows (§§15–17): candidato ZIP local com aplicativo,
