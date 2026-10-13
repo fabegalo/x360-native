@@ -54,7 +54,9 @@ try {
     $second=Build $a 'rejected'
     Assert ($second.WaitForExit(10000)) 'competing build did not reject promptly'
     $second.Refresh(); Assert ($second.ExitCode -ne 0) 'two producers accepted the same build'
-    Assert (([IO.File]::ReadAllText("$scratch/rejected.err") + [IO.File]::ReadAllText("$scratch/rejected.log")) -match 'Build in use') 'wrong reason for rejection'
+    $rejection = [IO.File]::ReadAllText("$scratch/rejected.err") + [IO.File]::ReadAllText("$scratch/rejected.log")
+    Assert ($rejection.Contains('Build unavailable:') -and $rejection.Contains((Join-Path $a '.x360n-build.lock'))) 'wrong reason for rejection'
+    Assert (-not $first.HasExited) 'owner exited before releasing the barrier'
     [void]$event.Set(); Finish $first 'owner'
     Assert (Test-ReceiptEntries $aFiles) 'rejected producer changed artifacts'
     # A loaded/locked destination rejects publication and keeps its old bytes.

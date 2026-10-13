@@ -23,6 +23,8 @@
 #include <fmt/format.h>
 
 #include "sha256.h"
+#include "paths.h"
+#include "../supervisor/scratch.h"
 #include "xex_identity.h"
 
 namespace fs = std::filesystem;
@@ -30,7 +32,7 @@ using namespace x360n;
 
 namespace {
 
-fs::path Inputs() { return fs::path(X360N_SOURCE_ROOT) / ".local" / "inputs"; }
+fs::path Inputs() { return PathFromUtf8(X360N_SOURCE_ROOT) / ".local" / "inputs"; }
 
 struct Classified {
   FileDigest digest;
@@ -47,11 +49,25 @@ std::optional<Classified> Classify(const fs::path& p) {
   return Classified{*digest, ParseXexIdentity(head)};
 }
 
-std::string Rel(const fs::path& p) {
-  return fs::relative(p, Inputs()).generic_string();
+std::string Rel(const fs::path& p, const fs::path& root = Inputs()) {
+  auto value = fs::relative(p, root).generic_u8string();
+  return {value.begin(), value.end()};
 }
 
 }  // namespace
+
+TEST_CASE("inventory diagnostics and classification preserve Unicode paths", "[local]") {
+  auto root = UniqueTempPath("inventory-unicode");
+  auto file = root / fs::path(u8"João 日本 🎮/amostra.xex");
+  fs::create_directories(file.parent_path());
+  std::ofstream(file, std::ios::binary) << "XEX1fixture";
+  INFO(PathUtf8(file));
+  REQUIRE(Classify(file));
+  CHECK(Classify(file)->parsed.format == XexFormat::kXex1);
+  CHECK(Rel(file, root) == PathUtf8(fs::path(u8"João 日本 🎮")) + "/amostra.xex");
+  CHECK(PathFromUtf8(PathUtf8(file)) == file);
+  fs::remove_all(root);
+}
 
 TEST_CASE("inventory of .local/inputs classifies every XEX", "[local]") {
   std::vector<fs::path> xexes;
@@ -60,22 +76,24 @@ TEST_CASE("inventory of .local/inputs classifies every XEX", "[local]") {
     for (auto it = fs::recursive_directory_iterator(Inputs(), fs::directory_options::skip_permission_denied, ec);
          it != fs::recursive_directory_iterator(); it.increment(ec)) {
       if (ec) break;
-      std::string ext = it->path().extension().string();
+      std::string ext = PathUtf8(it->path().extension());
       std::transform(ext.begin(), ext.end(), ext.begin(), [](unsigned char c) { return char(std::tolower(c)); });
       if (it->is_regular_file(ec) && ext == ".xex") xexes.push_back(it->path());
     }
   }
-  if (xexes.empty()) SKIP("no .xex files under " << Inputs().string());
+  REQUIRE_FALSE(ec);
+  if (xexes.empty()) SKIP("no .xex files under " << PathUtf8(Inputs()));
   std::sort(xexes.begin(), xexes.end());
 
-  fs::path report_dir = fs::path(X360N_SOURCE_ROOT) / ".local" / "runs" / "inventory";
+  fs::path report_dir = PathFromUtf8(X360N_SOURCE_ROOT) / ".local" / "runs" / "inventory";
   fs::create_directories(report_dir, ec);
   std::ofstream report(report_dir / "inventory.tsv", std::ios::binary);
+  REQUIRE(report);
   report << "# x360n inventory of .local/inputs (.xex files); written by local.inventory\n"
             "path\tsize\tsha256\tformat\tsignature\tstatus\n";
   std::map<std::string, int> counts;
   for (const auto& p : xexes) {
-    INFO(p.string());
+    INFO(PathUtf8(p));
     auto c = Classify(p);
     REQUIRE(c);  // every file must be readable
     const auto& r = c->parsed;
@@ -96,11 +114,13 @@ TEST_CASE("inventory of .local/inputs classifies every XEX", "[local]") {
   for (const auto& [k, v] : counts) summary += fmt::format("{} {}; ", v, k);
   report << "# " << xexes.size() << " files: " << summary << '\n';
   WARN("inventory: " << xexes.size() << " .xex files: " << summary << "report "
-                     << (report_dir / "inventory.tsv").string());
+                     << PathUtf8(report_dir / "inventory.tsv"));
+  report.flush();
+  REQUIRE(report);
 }
 
 TEST_CASE("integration targets are the expected XEX2 files", "[local]") {
-  std::ifstream list(fs::path(X360N_SOURCE_ROOT) / "tests" / "local" / "integration_targets.tsv");
+  std::ifstream list(PathFromUtf8(X360N_SOURCE_ROOT) / "tests" / "local" / "integration_targets.tsv");
   REQUIRE(list);
   int present = 0, absent = 0;
   std::string line;
@@ -115,7 +135,7 @@ TEST_CASE("integration targets are the expected XEX2 files", "[local]") {
     std::getline(cols, title_id, '\t');
     std::getline(cols, version, '\t');
     REQUIRE_FALSE(version.empty());  // malformed list line
-    fs::path p = Inputs() / fs::path(rel);
+    fs::path p = Inputs() / PathFromUtf8(rel);
     std::error_code ec;
     if (!fs::is_regular_file(p, ec)) {
       ++absent;
@@ -140,5 +160,5 @@ TEST_CASE("integration targets are the expected XEX2 files", "[local]") {
       CHECK(id.version.ToString() == version);
     }
   }
-  if (present == 0) SKIP("none of the " << absent << " integration targets is present under " << Inputs().string());
+  if (present == 0) SKIP("none of the " << absent << " integration targets is present under " << PathUtf8(Inputs()));
 }

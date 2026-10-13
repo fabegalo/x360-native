@@ -13,6 +13,9 @@ param(
     [int]$Seconds = 20
 )
 $ErrorActionPreference = 'Stop'
+# The harness can be launched by CTest from PowerShell 7; its module paths
+# must not hide the built-in modules of this Windows PowerShell process.
+$env:PSModulePath = Join-Path $PSHOME 'Modules'
 $root = (Resolve-Path (Split-Path -Parent $PSScriptRoot)).Path
 Set-Location $root
 
@@ -33,17 +36,24 @@ $userRoot = Join-Path $root '.local\user\iruka-regress'
 New-Item -ItemType Directory -Force $userRoot | Out-Null
 
 $shotA = Join-Path $tmp 'frame-a.png'; $shotB = Join-Path $tmp 'frame-b.png'
+# A unique label binds this invocation to its own report, even when preparation
+# is rejected before Run creates one. Never inspect or rewrite an older run.
+$runLabel = 'regress-iruka-' + [Guid]::NewGuid().ToString('N')
 $capture = Start-Process powershell -WindowStyle Hidden -PassThru -ArgumentList @(
     '-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command',
     "Start-Sleep 8; & '$root\scripts\capture-window.ps1' -ProcessName iruka -Out '$shotA' -WaitSeconds 5; Start-Sleep 5; & '$root\scripts\capture-window.ps1' -ProcessName iruka -Out '$shotB' -WaitSeconds 3")
 
-& $x360n run $exe --label regress-iruka --timeout $Seconds --rex-log -- `
+& $x360n run $exe --label $runLabel --timeout $Seconds --rex-log -- `
     --gpu_plugin=xenos "--game_data_root=$gameRoot" "--user_data_root=$userRoot" | Out-Host
 $runExit = $LASTEXITCODE
 [void]$capture.WaitForExit(30000)
 
-$runDir = Get-ChildItem (Join-Path $root '.local\runs') -Directory -Filter '*-regress-iruka' |
+$runDir = Get-ChildItem (Join-Path $root '.local\runs') -Directory -Filter "*-$runLabel" |
     Sort-Object Name | Select-Object -Last 1
+if (-not $runDir) {
+    Write-Host "FAIL: supervisor exited $runExit without a report for $runLabel"
+    exit 1
+}
 $report = Get-Content -Raw (Join-Path $runDir.FullName 'report.json') | ConvertFrom-Json
 $log = Get-Content -Raw (Join-Path $runDir.FullName 'rex.log') -ErrorAction SilentlyContinue
 if (-not $log) { $log = '' }
