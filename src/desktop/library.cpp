@@ -87,7 +87,21 @@ std::vector<std::string> InstalledGames(const Target& session, const std::vector
 }
 std::vector<std::string> InspectLibrary(const Target& session, const std::vector<Target>& catalog) {
   std::vector<std::string> issues;
-  if (!session.session) return issues;
+  if (!session.session) {
+    // A compiled game can still have an interrupted registration. Check only
+    // this game in dashboards already imported, without making unrelated games
+    // dependencies of its ready state.
+    for (const auto& dashboard : catalog) {
+      if (!dashboard.session || dashboard.inputs.empty() || !fs::is_regular_file(dashboard.inputs.front().destination)) continue;
+      const auto has = [&](const auto& ids) { return std::find(ids.begin(), ids.end(), session.id) != ids.end(); };
+      if (!has(dashboard.dependencies) && !has(dashboard.library_targets)) continue;
+      auto selected = dashboard;
+      selected.dependencies = {session.id}; selected.library_targets.clear();
+      auto missing = InspectLibrary(selected, catalog);
+      issues.insert(issues.end(), missing.begin(), missing.end());
+    }
+    return issues;
+  }
   for (const auto& id : InstalledGames(session, catalog)) {
     const auto& game = Dependency(catalog, id);
     if (game.library.title_id.empty()) continue;

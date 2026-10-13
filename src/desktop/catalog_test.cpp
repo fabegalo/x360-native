@@ -227,6 +227,8 @@ TEST_CASE("original library registration validates all bytes and publishes the h
   game.library = {"584108B7", "000D0000", "F9432A7FE407A3C196C95D0FFD4A540937FD4EEC58", "Castle Crashers", Hash("package provenance")};
   Target session; session.session = true; session.user_root = f.paths.local() / "user/dashboard";
   session.dependencies = {game.id};
+  session.inputs = game.inputs;
+  CHECK_FALSE(InspectLibrary(game, {game, session}).empty());
   auto base = session.user_root / "0000000000000000/584108B7";
   auto header = base / "Headers/000D0000" / (game.library.file_name + ".header");
   auto installed = base / "000D0000" / game.library.file_name;
@@ -236,6 +238,7 @@ TEST_CASE("original library registration validates all bytes and publishes the h
   CHECK_FALSE(fs::exists(header));
   PrepareLibrary(f.paths, session, {game});
   CHECK(InspectLibrary(session, {game}).empty());
+  CHECK(InspectLibrary(game, {game, session}).empty());
   // Exact reference generated for the original LIVE metadata in the working
   // dashboard, independent of these synthetic fixture content bytes.
   CHECK(DigestFile(header)->sha256 == "3b5f5f95911839ccd0227af47c742dac659e2542d4d141cf9854ed4d37063b7c");
@@ -245,6 +248,7 @@ TEST_CASE("original library registration validates all bytes and publishes the h
   CHECK_THROWS(PrepareLibrary(f.paths, session, {game}));
   CHECK(DigestFile(installed / "dash.xex")->sha256 == Hash("preserve installed data"));
   CHECK_FALSE(InspectLibrary(session, {game}).empty());
+  CHECK_FALSE(InspectLibrary(game, {game, session}).empty());
 }
 
 TEST_CASE("original library supports long content paths without Windows policy changes") {
