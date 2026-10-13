@@ -6,9 +6,11 @@ XDK "Dolphin" da `rexglue/demo-iruka`), com as limitações abaixo.
 Frente isolada de avatares (`x360-avatars`, `avatars/xam-aot`): o leitor original
 XAM 17559 montou 589 assets do campo 3, com 634 malhas e 1619 texturas; callbacks
 reais de layout/tiling do Motocross e bytes tiled validados. Transporte LZX usa
-biblioteca existente do SDK; imports LDI ainda stubs. `GetAssets` completo e
+biblioteca existente do SDK. Patch 0035 implementa o perfil LDI com workspace do
+chamador e reset por bloco: 46 verificações sintéticas novas; stream comprimido
+original e worker `0x81966450` aprovados em três assets. `GetAssets` completo e
 renderização continuam pendentes; Initialize mantém falha. Main não integrada.
-Evidência e limites: [avatares, seção 11](docs/avatar-system.md#11-malhas-e-texturas-reais-do-campo-3-callbacks-do-jogo-2026-10-12).
+Evidência e limites: [avatares, seção 12](docs/avatar-system.md#12-imports-ldi-e-worker-original-de-getassets-2026-10-12).
 
 ## Funciona (com evidência)
 

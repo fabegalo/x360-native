@@ -53,3 +53,13 @@ endif()
 if(REXSDK_DIR)
     x360n_stage_runtime_dlls(motocross_madness PLUGIN_TARGETS rexgpu-xenos)
 endif()
+
+# Optional focused import checks; no title boot and no previously completed suites.
+option(X360N_LDI_CHECKS "Build synthetic LDI import checks" OFF)
+if(X360N_LDI_CHECKS)
+    enable_testing()
+    add_executable(x360n_ldi_checks ../../tests/sdkcheck/ldi_test.cpp)
+    target_link_libraries(x360n_ldi_checks PRIVATE rexruntime)
+    x360n_stage_runtime_dlls(x360n_ldi_checks)
+    add_test(NAME sdkcheck.LDI COMMAND x360n_ldi_checks)
+endif()

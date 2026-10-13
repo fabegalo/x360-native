@@ -495,3 +495,87 @@ e à entrega dos buffers ao jogo, decidir a implementação fiel dos contratos L
 para usar o stream comprimido original, e resolver a inicialização/gerência exigida
 por `GetAssets`. `XamAvatarInitialize` continua retornando `0xFFFFFFFF`; protocolos
 2/4 completos, avatar renderizado, edição e equivalência visual continuam pendentes.
+
+## 12. Imports LDI e worker original de GetAssets (2026-10-12)
+
+Implementado na worktree `x360-avatars`, sem integração na `main`: patch local
+**0035-ldi-caller-workspace**, aplicado por `scripts/apply-sdk-patches.ps1`, com
+hashes anteriores/finais em `deps.lock.json`. Substitui os quatro stubs LDI no
+runtime privado; nenhum outro gerenciador do XAM é inicializado.
+
+### Contrato implementado e limites
+
+`LDICreateDecompression` aceita o perfil observado em `0x819766B0`: ponteiro para
+tamanho de bloco 0x8000, configuração de duas palavras 0x8000/0x8000, callbacks de
+alocação/liberação nulos, workspace do chamador alinhado a 16 bytes, tamanho do
+workspace e ponteiro de saída para contexto. Exige 0x9800 bytes; se insuficiente,
+informa esse tamanho e mantém o contexto de saída nulo. O contexto ocupa somente
+16 bytes do workspace e não guarda ponteiro host nem alocação persistente.
+
+`LDIDecompress` aceita blocos independentes com entrada até 0x9800 e saída até
+0x8000, via `lzx_decompress` existente no SDK. Usa saída temporária e só publica
+os bytes após sucesso. Um erro do decoder devolve contagem zero e deixa o buffer
+de destino intacto. `LDIResetDecompression` prepara o próximo bloco, inclusive
+após erro; `LDIDestroyDecompression` invalida o contexto sem liberar memória que
+pertence ao chamador. Contexto nulo/destruído e tamanhos inválidos são rejeitados.
+
+**Implementação parcial explícita:** outros tamanhos/configurações, callbacks de
+alocação e continuação de dicionário sem reset são rejeitados com status não zero.
+Não é suporte LDI geral. Sucesso é zero; equivalência dos códigos específicos de
+erro do kernel original não foi demonstrada. A necessidade de reset é satisfeita
+pelo stream do XAM, que o chama após cada bloco. O nome/interpretação completa dos
+campos de configuração fora do perfil observado permanece não verificado.
+
+### Teste sintético novo
+
+`tests/sdkcheck/ldi_test.cpp` chama os quatro imports pela ABI PPC, com um bloco
+LZX literal construído pelo próprio teste (sem assets proprietários). Falhou
+antes do patch na criação, após duas verificações; depois passou em **46
+verificações**: bytes/contagem de saída, sentinelas, reset e nova leitura, truncamento,
+falha sem escrita parcial, tamanhos, alinhamento, modo de callbacks não suportado,
+dois contextos independentes, destruição, uso após destruição e contexto nulo.
+
+Alvo `x360n_ldi_checks`, teste CTest `sdkcheck.LDI`; disponível no projeto raiz e,
+com `-DX360N_LDI_CHECKS=ON`, no build privado do Motocross. Resultado local:
+`.local/ldi-synthetic-result.log`. Não foram reexecutadas as suítes anteriores.
+
+### Cadeia real executada
+
+Nova opção exclusiva `--motocross_xam_aot_probe_ldi=true` (com a opção principal
+do probe), execução **`20261013T014125Z-mm-avatars-ldi-1`**, zero falhas:
+
+1. Leitor STRB original → campo 3 (`0x81976080`) → stream comprimido original
+   **`0x819766B0`**, agora chamando os imports implementados. Verificados leitura
+   do cabeçalho, avanço, leitura de 96 bytes atravessando 0x8000, reset, releitura
+   do início e destruição (`0x81976648`). A comparação usa a rota de transporte
+   anterior; compartilha o decoder LZX, portanto verifica a semântica do stream,
+   não constitui uma segunda implementação independente do algoritmo LZX.
+2. Worker original **`0x81966450`**, do caminho `GetAssets`, cria os próprios
+   streams, chama `0x81974A90`, aplica escolhas de materiais e trata o campo de
+   paleta. **HRESULT 0** nos registros 0 (`MaleBody`), 1 (`FemaleBody`) e 72
+   (`Power Tee`). Os índices conferidos foram 6792, 7362 e 1860; no registro 72,
+   24576 bytes tiled foram comparados com a referência de endereçamento Xenos.
+3. Validados cabeçalhos, ponteiros CPU/GPU, limites dos descritores, buffers,
+   entrada preservada, contexto LDI invalidado pelo destrutor e ABI verificada.
+   Os callbacks reais do jogo permanecem no caminho; tabela e dispatches são
+   restaurados ao fim. Não há adaptador C++ substituindo o stream de entrada
+   usado pelo worker nessa rota.
+
+O contexto privado de alocação tem dez palavras: capacidades CPU/GPU/scratch/LDI,
+respectivos quatro ponteiros e dois cursores CPU/GPU. `0x81966298/0x819662F0`
+fazem as reservas originais. A seleção usa a máscara do registro em `+48` e três
+escolhas diagnósticas de material (IDs 22–24, RGB 0.5 e alfa 1), explicitamente
+inicializadas; **não representa o avatar de um usuário**. Buffers privados evitam
+alterar o estado de jogo. A suíte ampla anterior de 589 assets não foi repetida.
+
+Build incremental passou. O supervisor encerrou o jogo após 45 s, depois da sonda
+concluir, com os quatro erros XCTD/devkit e quatro stubs de voz conhecidos; nenhum
+stub LDI foi chamado. `XamAvatarInitialize` continuou em `0xFFFFFFFF`.
+
+**Próxima fronteira concreta:** `XamAvatarGetAssets` ainda é stub em
+`xam_avatar.cpp`; o export original envia a mensagem 0x600006 à app 0xF2. Falta
+ligar o worker validado à orquestração C++ e ao resultado agregado por protocolo,
+preservando conclusão/cancelamento e propriedade dos buffers. As camadas
+`0x81966FC8`/`0x819669A0` e o formato agregado dos protocolos 2/4 ainda não foram
+exercitados nesta etapa. Sem sucesso artificial no Initialize, avatar renderizado
+ou alegação de `GetAssets` completo.

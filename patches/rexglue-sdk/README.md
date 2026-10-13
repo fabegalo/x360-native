@@ -274,3 +274,18 @@ after; pool quotas are not modeled and other classes still fail explicitly.
 42 runtime checks / 1183 assertions passed with 0034 (local log
 profile-ui-sdk-0034-full.log); related group: 8 / 124. These prerequisites do
 not establish visible profile UI, signin/signout or persistence.
+
+## Avatar LDI caller-owned workspace (0035)
+
+Implements Create/Decompress/Reset/Destroy for the observed XAM 17559 profile:
+32 KiB independent LZX blocks, explicit reset between calls, 0x9800 caller-owned
+workspace and null allocator callbacks. Other configurations/continuation modes
+fail explicitly. No persistent host allocation or guest-owned memory free.
+Failure status is nonzero; exact original error-code parity is unverified.
+
+New `sdkcheck.LDI` test constructs a synthetic literal LZX block and calls the
+actual imports. Before: fails at creation. After: 46 checks pass, including
+failure atomicity, bounds, reset lifecycle and two independent contexts.
+Original XAM compressed stream and GetAssets worker 0x81966450 passed on three
+real assets. Details and limitations: docs/avatar-system.md section 12. Prior
+completed suites were not rerun. No full GetAssets export or rendering claim.

@@ -72,6 +72,10 @@ REXCVAR_DEFINE_BOOL(motocross_xam_aot_probe_meshes, false, "Motocross Madness",
                     "Diagnostic: only field 3 meshes/textures with real game "
                     "callbacks; skip prior suites");
 
+REXCVAR_DEFINE_BOOL(motocross_xam_aot_probe_ldi, false, "Motocross Madness",
+                    "Diagnostic: original compressed stream and per-asset "
+                    "GetAssets worker only");
+
 namespace {
 
 constexpr uint32_t kXamBase = 0x815F0000, kXamSize = 0x610000;
@@ -852,6 +856,209 @@ void RunMeshes(const x360n::avatar::AvatarToc& toc, uint32_t game_callbacks) {
       g_mesh_callback_calls[3], g_mesh_callback_calls[4]);
 }
 
+// New route: original STRB field stream -> original LDI stream -> the GetAssets
+// per-asset worker. The previous mesh/color/size/integration suites are not
+// run.
+void RunLdiAssets(const x360n::avatar::AvatarToc& toc,
+                  uint32_t game_callbacks) {
+  auto* rt = rex::Runtime::instance();
+  auto* m = rt->memory();
+  auto* d = rt->function_dispatcher();
+  auto* t = rex::runtime::ThreadState::Get();
+  uint32_t abi = 0;
+  auto call = [&](uint32_t fn, std::initializer_list<uint64_t> args) {
+    return uint32_t(CallQuiet(d, t, fn, args, &abi));
+  };
+  constexpr uint32_t cap = 0x200000, guard = 0x1000, ldi_size = 0x1CA0F;
+  std::vector<uint32_t> owned;
+  auto alloc = [&](uint32_t size) {
+    const auto p = m->SystemHeapAlloc(size, 0x1000);
+    if (p) owned.push_back(p);
+    return p;
+  };
+  const auto control = alloc(0x40000), cpu_alloc = alloc(cap + 2 * guard),
+             gpu_alloc = alloc(cap + 2 * guard),
+             temp_alloc = alloc(cap + 2 * guard),
+             ldi_alloc = alloc(ldi_size + 2 * guard);
+  if (!control || !cpu_alloc || !gpu_alloc || !temp_alloc || !ldi_alloc) {
+    Check(false, "ldi-assets: private allocations");
+    for (auto p : owned) m->SystemHeapFree(p);
+    return;
+  }
+  auto* h = m->TranslateVirtual<uint8_t*>(control);
+  const uint32_t cpu = cpu_alloc + guard, gpu = gpu_alloc + guard,
+                 temp = temp_alloc + guard, ldi = ldi_alloc + guard;
+  const uint32_t reader = control + 0x40, iter = control + 0x100,
+                 field = control + 0x180, compressed = control + 0x200,
+                 output = control + 0x300, allocator = control + 0x400,
+                 selection = control + 0x500;
+  constexpr std::array<uint32_t, 5> addresses = {
+      0x8295B630, 0x8295B720, 0x8295B3C0, 0x8295B458, 0x8295B500};
+  const std::array<PPCFunc*, 5> observers = {
+      MeshObserveCallback<0>, MeshObserveCallback<1>, MeshObserveCallback<2>,
+      MeshObserveCallback<3>, MeshObserveCallback<4>};
+  const auto* game_table = m->TranslateVirtual<const uint8_t*>(game_callbacks);
+  bool registered = game_callbacks != 0;
+  for (size_t i = 0; registered && i < 5; ++i) {
+    g_mesh_callbacks[i] = d->GetFunction(addresses[i]);
+    registered =
+        MeshBE(game_table + i * 4) == addresses[i] && g_mesh_callbacks[i];
+  }
+  std::array<uint8_t, 20> saved{};
+  std::memcpy(saved.data(), m->TranslateVirtual(0x81A975CC), saved.size());
+  if (registered) {
+    call(0x81977C80, {game_callbacks});
+    for (size_t i = 0; i < 5; ++i)
+      registered &= d->SetFunction(addresses[i], observers[i]);
+  }
+  Check(registered, "ldi-assets: real game callbacks installed");
+  uint32_t assets = 0, seeks = 0;
+  for (size_t record : {size_t(0), size_t(1), size_t(72)}) {
+    if (!registered) break;
+    const auto blob = toc.Blob(record);
+    if (blob.size() > 0x3F000) {
+      Check(false, "ldi-assets: blob capacity");
+      break;
+    }
+    size_t pos = 32;
+    uint32_t ordinal = 0;
+    while (pos + 12 <= blob.size() && blob[pos] != 3) {
+      const uint32_t len = MeshBE(blob.data() + pos + 1);
+      if (len > blob.size() - pos - 12) {
+        pos = blob.size();
+        break;
+      }
+      pos += 12 + ((size_t(len) + 3) & ~size_t(3));
+      ++ordinal;
+    }
+    if (pos + 12 > blob.size()) {
+      Check(false, "ldi-assets: missing field 3");
+      break;
+    }
+    const auto len = MeshBE(blob.data() + pos + 1);
+    std::vector<uint8_t> reference;
+    if (len > blob.size() - pos - 12 ||
+        !MeshInflate(blob.subspan(pos + 12, len), reference)) {
+      Check(false, "ldi-assets: bounded reference transport");
+      break;
+    }
+    std::array<uint32_t, 12> header{};
+    for (size_t i = 0; i < 12; ++i)
+      header[i] = MeshLE(reference.data() + i * 4);
+    if (header[0] > cap || header[1] > cap || header[11] > cap ||
+        uint64_t(header[9]) + uint64_t(header[5]) * 512 > header[0] ||
+        uint64_t(header[10]) + uint64_t(header[6]) * 44 > header[0]) {
+      Check(false, "ldi-assets: header capacity");
+      break;
+    }
+    std::memset(h, 0, 0x1000);
+    std::memcpy(h + 0x1000, blob.data(), blob.size());
+    call(0x8196D568, {control, control + 0x1000, blob.size()});
+    call(0x8196DBE8, {reader, control});
+    call(0x8196E0E8, {iter, reader});
+    for (uint32_t i = 0; i < ordinal; ++i) call(0x8196F228, {iter});
+    // Exercise new compressed-stream position/reset behavior across a 32 KiB
+    // boundary. Reference is transport-only: it does not call this stream.
+    if (record == 72) {
+      call(0x81976080, {field, reader, iter, 0});
+      call(0x819766B0, {compressed, field, ldi_size, ldi});
+      const uint32_t context = MeshBE(h + 0x20C), vtable = MeshBE(h + 0x200);
+      Check(context != 0,
+            "ldi-assets: original stream created a live LDI context");
+      if (!context) break;
+      const auto* v = m->TranslateVirtual<const uint8_t*>(vtable);
+      auto read = [&](uint32_t n) {
+        return call(MeshBE(v + 16),
+                    {compressed, control + 0x800, n, control + 0x900});
+      };
+      const bool first =
+          read(48) == 1 && !std::memcmp(h + 0x800, reference.data(), 48);
+      const bool skipped =
+          call(MeshBE(v + 12), {compressed, 0x8000 - 32 - 48}) == 1;
+      const bool crossed =
+          read(96) == 1 &&
+          !std::memcmp(h + 0x800, reference.data() + 0x8000 - 32, 96);
+      const bool reset = call(MeshBE(v + 4), {compressed}) == 1;
+      const bool again =
+          read(48) == 1 && !std::memcmp(h + 0x800, reference.data(), 48);
+      call(0x81976648, {compressed});
+      const bool destroyed =
+          MeshBE(m->TranslateVirtual<const uint8_t*>(context)) == 0;
+      Check(first && skipped && crossed && reset && again && destroyed,
+            fmt::format("ldi-assets: original stream header={} skip={} "
+                        "cross-block={} rewind={} reread={} destroy={}",
+                        first, skipped, crossed, reset, again, destroyed));
+      seeks += first && skipped && crossed && reset && again && destroyed;
+    }
+    // The original worker receives a private bump allocator and explicit
+    // diagnostic material choices; these do not represent a user's avatar.
+    for (auto p : {cpu_alloc, gpu_alloc, temp_alloc})
+      std::memset(m->TranslateVirtual(p), 0xCD, cap + 2 * guard);
+    std::memset(m->TranslateVirtual(cpu), 0, cap);
+    std::memset(m->TranslateVirtual(gpu), 0, cap);
+    std::memset(m->TranslateVirtual(temp), 0, cap);
+    std::memset(m->TranslateVirtual(ldi_alloc), 0xCD, ldi_size + 2 * guard);
+    const std::array<uint32_t, 10> pool = {
+        cap, cap, header[11], ldi_size, cpu, gpu, temp, ldi, cpu, gpu};
+    for (size_t i = 0; i < pool.size(); ++i)
+      MeshPut(h + 0x400 + i * 4, pool[i]);
+    rex::memory::store_and_swap<uint16_t>(
+        h + 0x500 + 48, uint16_t(toc.record(record).field_00));
+    for (uint32_t i = 0; i < 3; ++i) {
+      MeshPut(h + 0x500 + 80 + i * 32, 22 + i);
+      for (uint32_t j = 0; j < 4; ++j)
+        rex::memory::store_and_swap<float>(h + 0x500 + 64 + i * 32 + j * 4,
+                                           j == 3 ? 1.0f : 0.5f);
+    }
+    MeshTextureChecks texture_check{gpu, cap, temp, header[11]};
+    g_mesh_texture_checks = &texture_check;
+    const uint32_t result =
+        call(0x81966450, {allocator, selection, 0, reader, iter, output});
+    g_mesh_texture_checks = nullptr;
+    bool output_ok = result == 0;
+    for (size_t i = 0; i < 7; ++i)
+      output_ok &= MeshBE(h + 0x300 + i * 4) == header[i];
+    output_ok &= MeshBE(h + 0x31C) == cpu && MeshBE(h + 0x320) == gpu &&
+                 MeshBE(h + 0x32C) == cpu + header[9] &&
+                 MeshBE(h + 0x330) == cpu + header[10];
+    uint64_t indices = 0;
+    if (output_ok)
+      output_ok =
+          MeshValidateBuffers(m->virtual_membase(), header, cpu, gpu, indices);
+    bool guards = true;
+    for (auto p : {cpu_alloc, gpu_alloc, temp_alloc}) {
+      const auto* b = m->TranslateVirtual<const uint8_t*>(p);
+      for (uint32_t i = 0; i < guard; ++i)
+        guards &= b[i] == 0xCD && b[guard + cap + i] == 0xCD;
+    }
+    const auto* l = m->TranslateVirtual<const uint8_t*>(ldi_alloc);
+    for (uint32_t i = 0; i < guard; ++i)
+      guards &= l[i] == 0xCD && l[guard + ldi_size + i] == 0xCD;
+    const bool source = !std::memcmp(h + 0x1000, blob.data(), blob.size());
+    const bool destroyed =
+        MeshBE(m->TranslateVirtual<const uint8_t*>(ldi + 0x11800)) == 0;
+    Check(
+        output_ok && guards && source && destroyed && !texture_check.failures,
+        fmt::format(
+            "ldi-assets: GetAssets worker record {} HRESULT={:08X}, output={}, "
+            "guards={}, source={}, destroyed={}, indices={}, tiled-bytes={}",
+            record, result, output_ok, guards, source, destroyed, indices,
+            texture_check.compared));
+    if (!output_ok || !guards || !source || !destroyed ||
+        texture_check.failures)
+      break;
+    ++assets;
+  }
+  for (size_t i = 0; i < 5; ++i)
+    if (g_mesh_callbacks[i]) d->SetFunction(addresses[i], g_mesh_callbacks[i]);
+  std::memcpy(m->TranslateVirtual(0x81A975CC), saved.data(), saved.size());
+  for (auto p : owned) m->SystemHeapFree(p);
+  Check(assets == 3 && seeks == 1 && abi == 0 && g_mesh_callback_abi == 0,
+        fmt::format("ldi-assets: {} workers, {} stream seek/reset case, ABI "
+                    "breaks={}/{}; callbacks restored",
+                    assets, seeks, abi, g_mesh_callback_abi));
+}
+
 void Run(uint32_t game_callbacks) {
   auto* runtime = rex::Runtime::instance();
   auto* thread = rex::runtime::ThreadState::Get();
@@ -887,11 +1094,12 @@ void Run(uint32_t game_callbacks) {
         fmt::format("load: image 0x{:08X}+0x{:X} (expected 0x{:08X}+0x{:X})", base, size, kXamBase,
                     kXamSize));
 
-  if (REXCVAR_GET(motocross_xam_aot_probe_meshes)) {
+  if (REXCVAR_GET(motocross_xam_aot_probe_meshes) || REXCVAR_GET(motocross_xam_aot_probe_ldi)) {
     std::string error;
     auto toc = x360n::avatar::AvatarToc::Parse(Slurp(catalog_path), &error);
     if (!toc) { Check(false, "meshes: catalog: " + error); return; }
-    RunMeshes(*toc, game_callbacks);
+    if (REXCVAR_GET(motocross_xam_aot_probe_ldi)) RunLdiAssets(*toc, game_callbacks);
+    else RunMeshes(*toc, game_callbacks);
     return;
   }
   Check(dispatcher->GetFunction(kBodyTypeExport) != nullptr, "registry: 0x816753C8 registered");
@@ -1083,7 +1291,8 @@ void MaybeRunXamAotProbe(PPCRegister& r3, PPCRegister& r4, PPCRegister& r5, PPCR
   (void)r7;
   PPCContext saved = *thread->context();
   Run(uint32_t(saved.r6.u64));
-  if (REXCVAR_GET(motocross_xam_aot_probe_initialize)) {
+  if (REXCVAR_GET(motocross_xam_aot_probe_initialize) &&
+      !REXCVAR_GET(motocross_xam_aot_probe_meshes) && !REXCVAR_GET(motocross_xam_aot_probe_ldi)) {
     *thread->context() = saved;
     RunOriginalInitialize(saved.r3, saved.r4, saved.r5, saved.r6, uint32_t(saved.r8.u64));
   }

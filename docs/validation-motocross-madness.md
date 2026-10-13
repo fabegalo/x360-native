@@ -144,3 +144,14 @@ falhas; jogo encerrado pelo supervisor em 45 s, com os erros XCTD/devkit já
 conhecidos. Sem novo marco de renderização ou jogabilidade. A nova opção
 `motocross_xam_aot_probe_meshes` pula as suítes anteriores, que não foram repetidas.
 Detalhes e limites em `docs/avatar-system.md` seção 11. Somente `x360-avatars`.
+
+### Incremento isolado: LDI e worker GetAssets (2026-10-12)
+
+`20261013T014125Z-mm-avatars-ldi-1`: patch 0035 implementa o perfil LDI com
+workspace do chamador e reset por bloco. Stream comprimido original validado em
+avanço/cruzamento de 32 KiB/reset/releitura/destruição. Worker `0x81966450` retornou
+HRESULT 0 para MaleBody, FemaleBody e Power Tee, com buffers/índices/callbacks/ABI
+válidos. Sonda com zero falhas; 46 verificações sintéticas LDI novas passaram.
+Initialize permanece em `0xFFFFFFFF`; GetAssets agregado/export e renderização
+pendentes. Nenhuma suíte anterior repetida; detalhes e limites na seção 12 de
+`docs/avatar-system.md`. Toda a execução ficou na worktree de avatares.

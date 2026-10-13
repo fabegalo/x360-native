@@ -126,3 +126,10 @@ set_tests_properties(local.iruka.regression PROPERTIES
     LABELS "project" TIMEOUT 180 SKIP_RETURN_CODE 77 RUN_SERIAL TRUE)
 
 add_subdirectory(ppc_smoke)
+
+# Independent synthetic LDI import contract (no proprietary input).
+add_executable(x360n_ldi_checks sdkcheck/ldi_test.cpp)
+target_link_libraries(x360n_ldi_checks PRIVATE rexruntime)
+x360n_stage_runtime_dlls(x360n_ldi_checks)
+add_test(NAME sdkcheck.LDI COMMAND x360n_ldi_checks)
+set_tests_properties(sdkcheck.LDI PROPERTIES LABELS "project" TIMEOUT 30)

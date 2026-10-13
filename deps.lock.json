@@ -256,7 +256,7 @@
         "files": {
           "include/rex/system/kernel_state.h": "e47b22bc4b13dd8d114726e552b4c0f7534fdafdda2742b42289b91c825fb4fa",
           "src/system/kernel_state.cpp": "f57d06b3ec047f0c2e458b70d8b28bb7f42546b98d524c59fde83a8d03dd8d9b",
-          "src/kernel/xboxkrnl/xboxkrnl_modules.cpp": "e70d0f87f723d29d0efa20307c8615448e80b767af6b654e22b2957cfe690dae"
+          "src/kernel/xboxkrnl/xboxkrnl_modules.cpp": "6d9f646288d6e9cfc78b03dcd720137b8606a76c76eab7a31b03edadbd38669a"
         },
         "base_files": {
           "include/rex/system/kernel_state.h": "9e45cc465fd5a010a8dc59621e8d7788b1bb21ee36f5b4301175a84b1de7e000",
@@ -454,6 +454,17 @@
           "src/kernel/xam/xam_info.cpp": "351255b8adbdd2c877077f0f01ae7607db5499e203aa217ed2090cfaee05a4a2"
         },
         "test": "sdkcheck.HUD allocation uses the system pool and remains owned until XamFree"
+      },
+      {
+        "file": "patches/rexglue-sdk/0035-ldi-caller-workspace.patch",
+        "sha256": "616ddc4f3599f5cc82001275660a24bc8078064122aa5957978c629a4219f508",
+        "base_files": {
+          "src/kernel/xboxkrnl/xboxkrnl_modules.cpp": "e70d0f87f723d29d0efa20307c8615448e80b767af6b654e22b2957cfe690dae"
+        },
+        "files": {
+          "src/kernel/xboxkrnl/xboxkrnl_modules.cpp": "6d9f646288d6e9cfc78b03dcd720137b8606a76c76eab7a31b03edadbd38669a"
+        },
+        "test": "tests/sdkcheck/ldi_test.cpp: synthetic LZX literal frame, reset lifecycle, bounds and failure atomicity; fails with pre-patch stubs"
       }
     ]
   },
