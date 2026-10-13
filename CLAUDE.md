@@ -59,6 +59,20 @@ conteúdo proprietário ou código derivado dos binários sem autorização apli
   não executar force-push automaticamente. A preparação não autoriza push,
   publicação de release ou mudança de visibilidade do repositório.
 
+## Trabalho dos agentes — regras permanentes
+
+- Computer Use é proibido sem autorização explícita do usuário.
+- Testes visuais e sessões longas de jogos somente quando indispensáveis ao
+  incremento e previamente autorizados.
+- Não repetir regressões já aprovadas sem uma mudança que realmente possa
+  afetá-las. Priorizar testes unitários e focados, usando logs e evidências existentes.
+- Não rodar suítes completas automaticamente. Os comandos abaixo são referências,
+  não autorização para executá-los.
+- Nenhum processo em segundo plano sem acompanhamento e limite de duração.
+- Se uma ferramenta exigir interação não autorizada, interromper e informar
+  o bloqueio imediatamente. Não esperar horas por aprovação.
+- Não ampliar o escopo nem começar outra funcionalidade antes de concluir a atual.
+
 ## Comandos (PowerShell, raiz do repositório)
 
 ```powershell
@@ -142,8 +156,9 @@ Algumas páginas de configurações ainda leem 0x1C após XConfig categoria 7.
    define r3. Implementação parcial exige comportamento documentado e teste.
 4. Não remover verificações nem afrouxar testes. Não usar `--force` no codegen sem
    registrar e sem marcar o resultado como não validado.
-5. Para corrigir: reproduzir a falha → hipótese → mudança pequena → teste
-   relevante → suíte completa.
+5. Para corrigir: usar evidências existentes ou reprodução focada → hipótese →
+   mudança pequena → teste relevante, respeitando as regras de trabalho dos
+   agentes. Não executar suíte completa automaticamente.
 6. Caminho principal AOT. Sem Xenia como executor, sem JIT/interpretador, sem
    autorização explícita. Xenia é referência.
 7. Um processo de teste que abre e fecha valida o supervisor, nunca a dashboard.

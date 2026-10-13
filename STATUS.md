@@ -78,13 +78,19 @@ pelo perfil; ciclo repetiu sem intro na volta. Áudio pendente é drenado antes
 de fechar o stream. Usuário confirmou entrada recuperada e ausência de cortes.
 35/35 sdkcheck e 40/40 supervisor passam. Resultado restrito ao par testado;
 sem equivalência audiovisual medida contra console.
-Incremento §0.23: GamerCardScene.xur original da 17559 cria, liga ao HUD e conclui
-o layout com resultado 0; **sem apresentação da tela ou signin/signout ainda**.
-XAM executado somente nas rotinas XUI selecionadas, sem inicializar o módulo inteiro.
-42/42 SDK e 40/40 supervisor passam; iruka L1–L5 e ciclo original Castle Crashers
-com retorno sem intro revalidados. Falta integrar o compositor/entrada do host XUI.
+Incremento §0.24 (C7): GamerCardScene.xur original da 17559 aparece sobre a
+dashboard, atualiza, navega e fecha por B. Três ciclos de abertura/fechamento
+na mesma execução devolveram o foco à dashboard sem crash. O host usa o mesmo
+dispositivo, quadro e apresentação; executa somente rotinas XUI selecionadas,
+sem iniciar outro XAM/kernel. Patch 0039 mantém sessão, entrada exclusiva e
+pedido de fechamento diferido no runtime. **Sign-in, criação/persistência e
+troca de usuários continuam pendentes**; a identidade fixa do SDK não mudou.
+Tarefa C7 encerrada em 2026-10-13 por solicitação do usuário, no escopo da
+GamerCard: três ciclos e 107 asserções já aprovados, sem nova execução no
+encerramento. `4cc7303` pertence ao repositório principal e já inclui o patch
+reproduzível 0039 e seu registro no lock; pin do SDK `f5337cdc` preservado.
 Checklist oficial de cobertura: `docs/CHECKLIST_FUNCIONAL_x360-native.md`.
-Detalhes e limites: `docs/dashboard.md` §§0.19–0.23. Recursos e código XUI
+Detalhes, regressões e limites: `docs/dashboard.md` §§0.19–0.24. Recursos e código XUI
 da 17559 não são compartilhados silenciosamente com outras versões.
 Segundo perfil: Retail 6717 apresenta quadros reais (blade "Xbox 360"), troca para
 a blade Mídia e move o destaque com entrada roteada; **nenhum texto aparece**:

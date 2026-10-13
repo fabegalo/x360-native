@@ -150,8 +150,14 @@ Evidências locais: `.local/audit/c6` (comandos antes/depois, driver, controles 
 
 ### C7. Alto — usuário fixo e UI de sistema incompleta impedem fidelidade dos fluxos
 
+**Estado da tarefa: encerrada em 13/10/2026 no escopo GamerCard**, por solicitação
+do usuário. Três ciclos de abertura/fechamento e 107 asserções já aprovados;
+nenhum teste repetido no encerramento. O achado mais amplo de perfis permanece
+parcial, com as limitações abaixo. SDK entregue como patch 0039 no commit
+`4cc7303` do repositório principal, com hashes no lock e pin `f5337cdc` preservado.
+
 - **Local:** SDK `include/rex/system/xam/user_profile.h:221`, `signin_state`; `src/system/xam/user_profile.cpp:28`; `KernelState::user_profile_`; bindings de UI em `titles/dash_17559/src`.
-- **Evidência:** estado conectado constante, XUID `0xB13EBABEBABEBABE` e um único perfil no kernel. Criação/layout de GamerCardScene já existem, mas a implementação ainda desmonta a cena sem host contínuo de composição/input, conforme código e `docs/dashboard.md`, seção final de UI.
+- **Evidência:** estado conectado constante, XUID `0xB13EBABEBABEBABE` e um único perfil no kernel. Incremento de 13/10/2026: o host original da GamerCard agora compõe sobre a dashboard, atualiza, recebe entrada e fecha; três aberturas/fechamentos reais foram observados na mesma sessão (`20261013T144103Z-c7-context-safe`). Ver `docs/dashboard.md` §0.24. Isso não implementa a aplicação `signin.xex`, criação de usuários nem persistência.
 - **Impacto:** perfis reais, troca de usuário, isolamento de saves e avatar do usuário não estão concluídos. Não se resolve apenas desenhando uma caixa no launcher.
 - **Correção:** uma fatia ponta a ponta: UI original, criar/selecionar dois usuários, eventos de sign-in/sign-out e save/load persistente separado. Conectar identidade, armazenamento e metadata de avatar ao mesmo usuário.
 - **Ação imediata:** antes de anunciar console funcional; pode permanecer limitação explícita em uma prévia técnica restrita.

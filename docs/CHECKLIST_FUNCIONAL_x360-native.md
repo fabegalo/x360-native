@@ -91,11 +91,12 @@ Nome, identificador e estado de entrada precisam permanecer coerentes; as implem
 - [ ] Manter saves e conquistas separados por usuário, sem misturar dados.
 - [ ] Tratar exclusão, importação e migração de perfis com confirmação e preservação dos dados originais.
 
-Diagnóstico 2026-10-12 (§0.22): Settings chama o cartão de jogador. O pedido
-FE/21008 agora preserva os argumentos e retorna falha real (1627), pois o serviço
-da interface original ainda falta. Seleção não emite mais notificações fictícias;
-User continua fixo no SDK. Entrada/saída/criação/persistência permanecem pendentes.
-O ciclo com Castle Crashers foi repetido, com retorno sem intro.
+Incremento 2026-10-13 (§0.24): Settings/Profile abre a GamerCard original por
+FE/21008; composição contínua, navegação e três ciclos de fechamento/reabertura
+foram observados na mesma dashboard. O host devolve o foco e usa a apresentação
+existente. Isso é GamerCard, não seleção/sign-in nem Guide. User continua fixo
+no SDK; entrada/saída/criação/persistência permanecem pendentes. O host só emite
+notificações de visibilidade da UI, sem inventar SIGNINCHANGED.
 
 **Aceite:** dois perfis diferentes entram no mesmo jogo, preservam dados próprios e continuam corretos após reiniciar. Perfil local não deve ser apresentado como conta autenticada no Xbox Live.
 
@@ -492,7 +493,7 @@ Não classificar um título XNA como compatível apenas porque seus arquivos ou 
 
 ## Regra de trabalho para os agentes
 
-Este arquivo é um mapa de cobertura, não uma ordem para implementar tudo numa sessão. Escolher um bloqueio funcional, reproduzir, corrigir, testar e executar novamente. Reutilizar ferramentas e testes existentes; atualizar apenas os itens sustentados pelo resultado. Não criar infraestrutura ou documentação extra só para preencher o checklist. As correções locais pequenas, reversíveis e testadas continuam dentro da autonomia já concedida.
+Este arquivo é um mapa de cobertura, não uma ordem para implementar tudo numa sessão. Escolher um bloqueio funcional e usar evidências existentes e testes focados quando necessários e autorizados. Seguir a seção de trabalho dos agentes em `CLAUDE.md` e `AGENTS.md`: não repetir regressões aprovadas sem mudança relevante nem executar suítes completas automaticamente. Reutilizar ferramentas e testes existentes; atualizar apenas os itens sustentados pelo resultado. Não criar infraestrutura ou documentação extra só para preencher o checklist. As correções locais pequenas, reversíveis e testadas continuam dentro da autonomia já concedida.
 
 ## Referências técnicas
 

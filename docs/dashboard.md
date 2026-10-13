@@ -1281,3 +1281,57 @@ recebe 1020 bytes e pede retorno original às 10:50:20, flags 100.
 bytes sem repetir intro. Usuário confirma entrada/transição/retorno funcionando.
 Caminhos dos runtimes carregados conferidos nos processos; hashes de executáveis
 e DLLs ficam nos report.json de cada run. Não é aprovação do fluxo de perfis.
+
+### 0.24 GamerCard original visível, navegável e com fechamento (2026-10-13)
+
+C7, primeira fatia: Settings/Profile → FE/21008 → `gamerprofile.xex` →
+`GamerCardScene.xur` agora permanece ligada ao HUD original e aparece sobre a
+dashboard. `xam_ui.xex` continua restrito às rotinas selecionadas, sem entrypoint,
+segundo kernel, gerenciadores globais ou janela adicional. Sign-in/Guide e criação
+de perfil são contratos distintos e não foram habilitados neste incremento.
+
+O ponto de composição é o `XuiPresent` da dashboard (9221CD90), somente dentro
+de seu quadro 92186D90, depois de RenderEnd e antes do resolve/swap original.
+O HUD 81695098 compartilha o dispositivo/contexto existentes. Cada quadro chama
+o callback original 8000000A, os timers 817DA398 e animações 817AB6D0 com delta
+em **milissegundos**, conforme 816C8108. Sem polling independente, sincronização
+bloqueante ou cópia de imagem. O host também inicializa o lock original do cache
+de imagens, registra a fonte original resolvida por 81699810/817DEA18 e inclui
+o método 8177C980 da vtable do DC, necessário a partir do segundo quadro.
+
+Patch 0039: sessão compartilhada com módulo proprietário/usuário, visibilidade,
+habilitação de input e fechamento diferido. `XamInputGetKeystrokeHud` recebe os
+eventos da infraestrutura de entrada existente; GetState/GetKeystroke/Ex da
+dashboard ficam neutros para esse usuário enquanto a UI possui o foco.
+`XamIsUIActive` inclui essa sessão. `XamEnableSystemAppInput`, `XamAppUnloadSelf`
+e o caso flags=0 de `XamAppUnloadStack` têm efeitos reais; casos sem sessão ou
+flags não implementadas falham explicitamente. `GetTickCount` usa o relógio
+guest, permitindo o polling original de notificações. Nenhum SIGNINCHANGED é
+emitido: apenas XN_SYS_UI quando a visibilidade muda.
+
+O pedido FE é copiado e permanece válido até fechar. Após o pedido original de
+saída, o host desliga a cena, limpa a referência HUD, chama 80000005, desregistra
+o recurso, executa o detach original e descarrega o módulo. O detach usa
+ExecuteTrap e o bridge não declara `restrict` sobre um contexto que também é
+acessado por ThreadState. Isso corrige o crash reproduzido ao devolver r3=1 ao
+XuiPresent da dashboard. Falhas de layout/render também liberam a sessão.
+
+Evidência real: `.local/runs/20261013T144103Z-c7-context-safe/`, três cenas
+criadas, compostas continuamente e fechadas após 1817, 3645 e 1309 quadros.
+Na segunda abertura, o teclado moveu View Games → Edit Profile; após a terceira
+saída, Settings recebeu o comando e moveu Profile → Preferences. Sem crash.
+Capturas: `.local/logs/c7-reopened-navigation.png` e
+`.local/logs/c7-close-dashboard.png`. Esses contadores comprovam atualização,
+não constituem benchmark de desempenho nem medição de vazamentos.
+
+Limites: nome, estatísticas e imagem do usuário ainda não estão completos;
+subpáginas de gerenciamento não foram aprovadas. SDK mantém o usuário fixo.
+Trabalho futuro, fora desta tarefa encerrada: ligar FE/21001 à aplicação original `signin.xex`
+com o contrato correspondente e introduzir estado real de usuários no núcleo,
+antes de criação/persistência/sign-out. Não reutilizar essa ABI em outra dashboard.
+
+Encerramento C7 em 2026-10-13: usuário confirmou três ciclos e 107 asserções
+aprovadas. Nenhum novo teste, build ou jogo foi executado para encerrar a tarefa.
+O commit `4cc7303` do repositório principal já preserva a mudança do SDK em
+`0039-system-ui-session.patch`, com SHA-256 e hashes antes/depois no lock,
+mantendo o pin `f5337cdc`. Não depende de commit local exclusivo do submódulo.
