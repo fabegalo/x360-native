@@ -143,3 +143,60 @@ Referências primárias: [FFmpeg legal](https://ffmpeg.org/legal.html),
 [BSD-3-Clause](https://spdx.org/licenses/BSD-3-Clause.html),
 [STL VS 17.14](https://raw.githubusercontent.com/microsoft/STL/vs-2022-17.14/LICENSE.txt).
 Os termos integrais copiados, e não esta síntese, são as condições das licenças.
+
+## Aceitação do candidato local
+
+Revisão de código do pacote: `3b9cb59228d9a73277c924ae5012377f43706488`.
+O commit posterior desta seção é somente documentação dos resultados, sem
+substituir a identidade registrada no ZIP. Foram geradas duas builds novas,
+simultâneas, com oito workers cada, nos diretórios isolados
+`.local/distribution/81dca564065f4be29439e76b00b1f43b/build` e
+`.local/distribution/1217a50d613a4e13af405ddf23908587/build`.
+
+- ZIP: `.local/packages/c10-validated/x360-native-0.1.0-preview.6-windows-x64.zip`.
+- Repetição: `.local/packages/c10-validated-repeat/x360-native-0.1.0-preview.6-windows-x64.zip`.
+- Ambos têm **3.086.785 bytes**, **378 arquivos**, e SHA-256 idêntico:
+  `80f43bb1da2fd74ef8eb8efd2789c45268a1d38a4eb4835730f44dde3d34d8fb`.
+- Identidade do payload:
+  `9bcb8699b29c78c040522662b7a4cc018ce18518e81d5efdbb6faf2d02d0ed0c`.
+- Inventário final: **88 registros**, incluindo recursos com pendência explícita;
+  **102 blocos originais de atribuição SDK**, textos de terceiros e copyrights
+  dos headers. Não implica que os 88 componentes estejam vinculados à GUI.
+- Escopo real: **20 unidades SDK**, **481 inputs SDK** descobertos pelo compilador,
+  **4 bibliotecas estáticas próprias/de terceiros** no grafo de vínculo, além
+  do runtime estático Microsoft; **3 EXEs**, sem DLLs adicionais no ZIP.
+
+| Verificação executada | Resultado |
+|---|---|
+| CTest de cada build final | 55 casos, 20.628 assertions aprovadas em cada build. |
+| Gate original/licenças/conteúdo | Aprovado nas duas builds; índices e avisos completos. |
+| ZIP extraído fora do repositório | Aprovado em `C:/Users/fabeg/AppData/Local/Temp/x360-c10-acceptance/x360-native-0.1.0-preview.6-windows-x64`. |
+| Testes PowerShell 5.1 sobre o pacote extraído | **1 positivo + 16 negativos aprovados**. |
+| Inicialização dos componentes de console com PATH apenas Windows | Supervisor `--help` retorna 0; extrator imprime uso e retorna 3, conforme seu contrato. Não foi um novo teste gráfico. |
+| Recibos C2 reais de Castle Crashers, dashboard 17559 e Iruka | **8 assertions aprovadas**, usando a nova suíte desktop contra `.local/build/c5-titles`. Nenhuma preparação recompilada/invalidação artificial. |
+| Isolamento C5 e reprodução C4/C11 | Duas builds simultâneas isoladas, ZIPs idênticos. |
+| Contratos anteriores | SDK/LLVM, 38 patches, CMake PPC/C6, leases/C5 e código dos recibos/C2 sem alterações. Patch 0038 conserva SHA-256 `b4c6a4fd27ee6ec4207cc2180aa7ca98b5b36f560484d608c59ea72b03e9d6b6`. |
+
+Os negativos cobrem licença ausente/alterada, atribuição SDK ausente, DLL extra,
+EXE extra/ausente/substituído, XEX sintético renomeado, fonte proibida, arquivo
+generated, novo header, biblioteca estática desconhecida, nova unidade de
+compilação, revisão divergente, componente sem identificação e constante do
+loader. Os índices são recalculados nos testes de conteúdo: a rejeição não
+depende apenas de hashes antigos. Nenhum dado real de usuário foi modificado.
+
+Logs: `.local/audit/c10-package-validated.log`,
+`c10-package-validated-repeat.log`, `c10-license-tests-final.log`,
+`c10-receipts.log`, `c10-result.json` e `c10-preserved-contracts.json`.
+Os candidatos intermediários que falharam no gate não produziram ZIP.
+
+Limite da ferramenta de auditoria: o Windows PowerShell 5.1 encontrou seu limite
+legado de caminho ao ler um arquivo sob o diretório temporário longo do sandbox.
+A extração e a bateria final foram repetidas com sucesso no caminho curto acima.
+Isso não comprova o comportamento da GUI em caminhos longos; o gate de produção
+foi validado nos caminhos isolados registrados. Windows limpo não estava
+disponível. Não foram repetidas regressões gráficas de jogos nesta tarefa de
+licenciamento; as mudanças nativas se limitam a comentários de atribuição.
+
+Inspeção adicional dos binutils encontrou a string de versão **GNU Binutils 2.24**
+no `as.exe`; como sua execução falhou e faltam dados da montagem/distribuição,
+isso não resolve a proveniência ou o fornecimento de fonte correspondente.

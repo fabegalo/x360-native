@@ -175,6 +175,7 @@ Evidências locais: `.local/audit/c6` (comandos antes/depois, driver, controles 
 ### C10. Alto — publicação sem licença própria clara e inventário suficiente de terceiros
 
 - **Correção em 13/10/2026:** BSD-3-Clause aprovada pelo mantenedor para o código próprio, titular x360-native. Avisos originais, inventário com revisões/hashes e gates do empacotamento implementados; nlohmann/json incluído. O inventário diferencia desktop, SDK completo e ferramentas baixadas, inclusive vínculo GPL do decoder e LGPL estática no runtime. Publicação continua bloqueada por proveniência do ícone, termos Microsoft e lacunas do SDK completo; ver [LICENSE_AUDIT.md](LICENSE_AUDIT.md). Os itens abaixo registram o diagnóstico original.
+- **Validação:** candidato `0.1.0-preview.6` da revisão `3b9cb59`, dois builds simultâneos isolados com ZIPs idênticos; 55 casos/20.628 assertions por build, 1 positivo/16 negativos do gate e 8 assertions dos recibos reais C2 aprovados. Textos acessíveis na raiz do ZIP; 88 registros de inventário. Extraído e verificado fora do repositório. C1/C3, C2, C5, C6 e C4/C11 preservados; Windows limpo continua pendente.
 
 - **Local:** raiz do repositório; `scripts/package-desktop.ps1:49–53`; `deps.lock.json`.
 - **Evidência:** não há `LICENSE`/`NOTICE` próprio versionado. O pacote copia licenças de fmt, CLI11 e toml++, mas seu payload exporta também patches/código e aponta o SDK por URL; não há inventário completo de avisos ReXGlue/Xenia e demais componentes aplicáveis ao material distribuído.
