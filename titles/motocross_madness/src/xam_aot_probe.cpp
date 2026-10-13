@@ -19,18 +19,8 @@
 //   ABI       r1, r2, r13-r31 and f14-f31 are unchanged across each XAM call
 //   errors    executing an unregistered address returns the dispatcher's failure
 //             value and leaves memory unchanged
-#include <algorithm>
-#include <array>
-#include <cstdint>
-#include <cstring>
-#include <fstream>
-#include <iterator>
-#include <memory>
-#include <span>
-#include <string>
-#include <vector>
-
 #include <fmt/format.h>
+#include <fmt/ranges.h>
 #include <rex/cvar.h>
 #include <rex/filesystem/devices/host_path_device.h>
 #include <rex/logging.h>
@@ -39,10 +29,25 @@
 #include <rex/runtime.h>
 #include <rex/system/function_dispatcher.h>
 #include <rex/system/kernel_state.h>
+#include <rex/system/lzx.h>
 #include <rex/system/thread_state.h>
 #include <rex/system/user_module.h>
 #include <rex/system/xex_module.h>
 
+#include <algorithm>
+#include <array>
+#include <cstdint>
+#include <cstring>
+#include <fstream>
+#include <filesystem>
+#include "../../common/avatar/avatar_aot_catalog.h"
+#include <iterator>
+#include <memory>
+#include <span>
+#include <string>
+#include <vector>
+
+#include "../../common/avatar/avatar_aot_assets.h"
 #include "../../common/avatar/avatar_metadata.h"
 #include "../../common/avatar/avatar_toc.h"
 #include "../../dash_17559/src/experimental_region.h"
@@ -59,7 +64,25 @@ REXCVAR_DEFINE_STRING(x360n_avatar_catalog_17559, "", "x360n",
 REXCVAR_DEFINE_BOOL(motocross_xam_aot_probe_strb, false, "Motocross Madness",
                     "Diagnostic, with the probe: decode every STRB blob of the 17559 catalog with "
                     "XAM's original Structured Binary reader and compare with the bytes");
+REXCVAR_DEFINE_BOOL(motocross_xam_aot_probe_sizes, false, "Motocross Madness",
+                    "Diagnostic, with the probe: run XAM's GetAssets size routine 0x81965EC0 on "
+                    "every valid component mask and compare with the C++ ResultSizeFor");
 
+REXCVAR_DEFINE_BOOL(motocross_xam_aot_probe_colors, false, "Motocross Madness",
+                    "Diagnostic: expand original STRB color palettes with XAM AOT and verify every byte");
+
+REXCVAR_DEFINE_BOOL(motocross_xam_aot_probe_meshes, false, "Motocross Madness",
+                    "Diagnostic: only field 3 meshes/textures with real game "
+                    "callbacks; skip prior suites");
+
+REXCVAR_DEFINE_BOOL(motocross_xam_aot_probe_ldi, false, "Motocross Madness",
+                    "Diagnostic: original compressed stream and per-asset "
+                    "GetAssets worker only");
+
+REXCVAR_DEFINE_BOOL(motocross_xam_aot_probe_aggregate, false, "Motocross Madness",
+                    "Diagnostic: aggregate result and request lifecycle only" );
+
+REXCVAR_DEFINE_BOOL(motocross_avatar_service_probe, false, "Motocross Madness", "Diagnostic: avatar service integration" );
 namespace {
 
 constexpr uint32_t kXamBase = 0x815F0000, kXamSize = 0x610000;
@@ -229,7 +252,1039 @@ void RunStrbDecode(const x360n::avatar::AvatarToc& toc) {
   memory->SystemHeapFree(scratch);
 }
 
-void Run() {
+// GetAssets buffer sizes: XAM's 0x81965EC0(mask, &result, &gpu), which the GetAssets
+// output builder (0x81966030) calls, reads only its arguments and the 13-entry component
+// table at 0x816332B8 (through 0x81970970). Every valid input is checked against the C++
+// ResultSizeFor: the games' wrappers accept only nonzero 13-bit masks (Motocross
+// 0x82958130, Keflings 0x822F9C18), and both games pass 0x1FFF (Motocross 0x824377D4,
+// Keflings 0x8223F564).
+void RunSizeCheck() {
+  auto* runtime = rex::Runtime::instance();
+  auto* thread = rex::runtime::ThreadState::Get();
+  auto* memory = runtime->memory();
+  auto* dispatcher = runtime->function_dispatcher();
+  const uint32_t out = memory->SystemHeapAlloc(8);
+  if (!out) {
+    Check(false, "sizes: allocate the output words");
+    return;
+  }
+  auto* host = memory->TranslateVirtual<uint8_t*>(out);
+  uint32_t abi = 0, equal = 0, first_mask = 0;
+  x360n::avatar::AssetsResultSize first_cpp{}, first_xam{}, real{};
+  for (uint32_t mask = 1; mask <= 0x1FFF; ++mask) {
+    std::memset(host, 0xA5, 8);  // both words are written by XAM
+    CallQuiet(dispatcher, thread, 0x81965EC0, {mask, out, out + 4}, &abi);
+    const x360n::avatar::AssetsResultSize xam{rex::memory::load_and_swap<uint32_t>(host),
+                                              rex::memory::load_and_swap<uint32_t>(host + 4)};
+    const auto cpp = x360n::avatar::ResultSizeFor(uint16_t(mask));
+    if (mask == 0x1FFF) real = xam;
+    if (xam.result == cpp.result && xam.gpu_resources == cpp.gpu_resources) {
+      ++equal;
+    } else if (!first_mask) {
+      first_mask = mask;
+      first_cpp = cpp;
+      first_xam = xam;
+    }
+  }
+  Check(equal == 0x1FFF,
+        fmt::format("sizes: XAM 0x81965EC0 = C++ ResultSizeFor for {}/8191 masks{}", equal,
+                    first_mask ? fmt::format("; first difference mask 0x{:04X}: XAM 0x{:X}/0x{:X}, "
+                                             "C++ 0x{:X}/0x{:X}",
+                                             first_mask, first_xam.result, first_xam.gpu_resources,
+                                             first_cpp.result, first_cpp.gpu_resources)
+                               : std::string()));
+  Check(abi == 0, fmt::format("sizes: ABI preserved in all 8191 XAM calls ({} breaks)", abi));
+  REXLOG_INFO("xam-aot-probe: sizes: games' mask 0x1FFF -> result 0x{:X}, GPU resources 0x{:X} "
+              "(XAM)",
+              real.result, real.gpu_resources);
+  memory->SystemHeapFree(out);
+}
+
+// Diagnostic only: GetAssets -> 0x81966450 -> 0x81976598 expands STRB field 7.
+// The reference reads the original field directly, without consulting AOT output:
+// seven little-endian header words, followed by LSB-first packed integer deltas.
+// Output is at most 18 triples of BE u32 ARGB values, then a BE count at +216.
+void RunStrbColors(const x360n::avatar::AvatarToc& toc) {
+  auto* rt = rex::Runtime::instance();
+  auto* memory = rt->memory();
+  auto* d = rt->function_dispatcher();
+  auto* t = rex::runtime::ThreadState::Get();
+  constexpr uint32_t kReader = 0x40, kIter = 0x100, kFieldStream = 0x180;
+  constexpr uint32_t kGuard = 0x200, kOut = kGuard + 32, kEnd = kOut + 220;
+  constexpr uint32_t kData = 0x400;
+  size_t largest = 0;
+  for (size_t i = 0; i < toc.size(); ++i) largest = std::max(largest, toc.Blob(i).size());
+  const uint32_t scratch = memory->SystemHeapAlloc(uint32_t(kData + largest + 32));
+  if (!scratch) { Check(false, "colors: allocate private memory"); return; }
+  auto* h = memory->TranslateVirtual<uint8_t*>(scratch);
+  auto be = [](const uint8_t* p) { return uint32_t(p[0]) << 24 | uint32_t(p[1]) << 16 |
+                                        uint32_t(p[2]) << 8 | p[3]; };
+  auto le = [](const uint8_t* p) { return uint32_t(p[3]) << 24 | uint32_t(p[2]) << 16 |
+                                        uint32_t(p[1]) << 8 | p[0]; };
+  auto put = [](uint8_t* p, uint32_t v) {
+    p[0] = uint8_t(v >> 24); p[1] = uint8_t(v >> 16);
+    p[2] = uint8_t(v >> 8); p[3] = uint8_t(v);
+  };
+  uint32_t abi = 0, calls = 0, tested = 0, packed = 0, triples = 0;
+  auto call = [&](uint32_t fn, std::initializer_list<uint64_t> args) {
+    ++calls; return CallQuiet(d, t, fn, args, &abi);
+  };
+  std::array<uint8_t, 20> callbacks{};
+  std::memcpy(callbacks.data(), memory->TranslateVirtual(0x81A975CC), callbacks.size());
+  for (size_t record = 0; record < toc.size(); ++record) {
+    const auto blob = toc.Blob(record);
+    if (blob.empty()) continue;
+    // This diagnostic deliberately supports only the observed 17559 encoding.
+    if (blob.size() < 32 || std::memcmp(blob.data(), "STRB", 4) || blob[4] != 1 ||
+        blob[5] != 0 || blob[22] != 1 || blob[23] != 4 || blob[26] != 4) {
+      Check(false, fmt::format("colors: unsupported STRB layout at record {}", record)); break;
+    }
+    size_t pos = 32;
+    uint32_t ordinal = 0;
+    while (pos + 12 <= blob.size() && blob[pos] != 7) {
+      const uint32_t len = be(blob.data() + pos + 1);
+      if (len > blob.size() - pos - 12) { pos = blob.size(); break; }
+      pos += 12 + ((size_t(len) + 3) & ~size_t(3));
+      ++ordinal;
+    }
+    if (pos + 12 > blob.size()) continue;  // no palette field in this asset
+    const uint32_t len = be(blob.data() + pos + 1);
+    if (len < 28 || len > blob.size() - pos - 12 || be(blob.data() + pos + 5) != 1) {
+      Check(false, "colors: field 7 bounds/element size"); break;
+    }
+    const auto* payload = blob.data() + pos + 12;
+    const uint32_t count = le(payload);
+    std::array<uint32_t, 3> bias{}, bits{};
+    uint32_t stride = 0;
+    for (size_t c = 0; c < 3; ++c) {
+      bias[c] = le(payload + 4 + c * 8);
+      bits[c] = le(payload + 8 + c * 8);
+      stride += bits[c];
+    }
+    // Bound inputs before giving them to the original trusted-data decoder.
+    if (!count || count > 18 || bits[0] > 32 || bits[1] > 32 || bits[2] > 32 ||
+        uint64_t(count) * stride > uint64_t(len - 28) * 8) {
+      Check(false, fmt::format("colors: unsupported palette count/width at {}", record)); break;
+    }
+    std::array<uint8_t, 220> expected;
+    expected.fill(0xA5);
+    size_t bit = 0;
+    for (uint32_t row = 0; row < count; ++row) {
+      for (size_t c = 0; c < 3; ++c) {
+        uint32_t delta = 0;
+        for (uint32_t b = 0; b < bits[c]; ++b, ++bit)
+          delta |= uint32_t((payload[28 + bit / 8] >> (bit % 8)) & 1) << b;
+        put(expected.data() + row * 12 + c * 4, bias[c] + delta);
+      }
+    }
+    put(expected.data() + 216, count);
+    std::memset(h, 0, kData);
+    std::memcpy(h + kData, blob.data(), blob.size());
+    std::memset(h + kGuard, 0xA5, kEnd + 32 - kGuard);
+    std::memset(h + kData + blob.size(), 0xA5, 32);
+    call(0x8196D568, {scratch, scratch + kData, blob.size()});
+    call(0x8196DBE8, {scratch + kReader, scratch});
+    call(0x8196E0E8, {scratch + kIter, scratch + kReader});
+    for (uint32_t n = 0; n < ordinal; ++n) call(0x8196F228, {scratch + kIter});
+    const bool iterator = rex::memory::load_and_swap<uint64_t>(h + kIter) == pos &&
+        rex::memory::load_and_swap<uint64_t>(h + kIter + 8) == 7 &&
+        rex::memory::load_and_swap<uint64_t>(h + kIter + 16) == len &&
+        rex::memory::load_and_swap<uint64_t>(h + kIter + 24) == 1 &&
+        be(h + kIter + 32) == scratch + kReader;
+    if (!iterator) { Check(false, fmt::format("colors: iterator bounds at {}", record)); break; }
+    call(0x81976080, {scratch + kFieldStream, scratch + kReader, scratch + kIter, 0});
+    const auto result = call(0x81976598, {scratch + kOut, scratch + kFieldStream});
+    const bool equal = std::memcmp(h + kOut, expected.data(), expected.size()) == 0;
+    const bool guards = std::all_of(h + kGuard, h + kOut, [](uint8_t b) { return b == 0xA5; }) &&
+        std::all_of(h + kEnd, h + kEnd + 32, [](uint8_t b) { return b == 0xA5; }) &&
+        std::all_of(h + kData + blob.size(), h + kData + blob.size() + 32,
+                    [](uint8_t b) { return b == 0xA5; });
+    const bool source = std::memcmp(h + kData, blob.data(), blob.size()) == 0;
+    if (result != 1 || !equal || !guards || !source) {
+      Check(false, fmt::format("colors: record {} result {} bytes {} guards {} source {} first "
+                               "{:08X}/{:08X} count {}/{}", record, result, equal, guards, source,
+                               be(h + kOut), be(expected.data()), be(h + kOut + 216), count));
+      break;
+    }
+    ++tested; triples += count;
+    if (stride) ++packed;
+    REXLOG_INFO("xam-aot-probe: colors: record {} blob {} field +0x{:X}/{} -> {} triples; "
+                "widths {}/{}/{}; first {:08X}/{:08X}/{:08X}; guest 0x{:08X}..0x{:08X}; "
+                "220 bytes/reference, guards and source equal", record, blob.size(), pos, len,
+                count, bits[0], bits[1], bits[2], be(h + kOut), be(h + kOut + 4),
+                be(h + kOut + 8), scratch + kOut, scratch + kEnd);
+    if (stride) {
+      // Shorten only the field's declared length in a private copy. The packed
+      // header still advertises all rows, so its final delta is unavailable.
+      put(h + kData + pos + 1, len - 1);
+      std::memset(h + kGuard, 0xA5, kEnd + 32 - kGuard);
+      call(0x8196DBE8, {scratch + kReader, scratch});
+      call(0x8196E0E8, {scratch + kIter, scratch + kReader});
+      for (uint32_t n = 0; n < ordinal; ++n) call(0x8196F228, {scratch + kIter});
+      call(0x81976080, {scratch + kFieldStream, scratch + kReader, scratch + kIter, 0});
+      const auto short_result = call(0x81976598, {scratch + kOut, scratch + kFieldStream});
+      const bool untouched = std::all_of(h + kGuard, h + kEnd + 32,
+                                         [](uint8_t b) { return b == 0xA5; });
+      Check(short_result == 0 && untouched,
+            fmt::format("colors: truncated record {} rejected (return {}), output and guards {}",
+                        record, short_result, untouched ? "untouched" : "CHANGED"));
+    }
+
+  }
+  Check(tested > 0 && packed > 0,
+        fmt::format("colors: 0x81976598 transformed {} real palettes ({} packed), {} triples",
+                    tested, packed, triples));
+  Check(abi == 0, fmt::format("colors: ABI preserved over {} calls ({} breaks)", calls, abi));
+  Check(std::memcmp(callbacks.data(), memory->TranslateVirtual(0x81A975CC), callbacks.size()) == 0,
+        "colors: all five title callbacks untouched; no GPU callback required by this routine");
+  memory->SystemHeapFree(scratch);
+}
+
+// Field 3 transport: 12-byte LE headers (compressed size, output offset, output
+// size), each followed by an independently reset LZX block. This diagnostic
+// uses the SDK's existing decoder because the kernel LDI imports are still
+// stubs.
+uint32_t MeshLE(const uint8_t* p) {
+  return uint32_t(p[0]) | uint32_t(p[1]) << 8 | uint32_t(p[2]) << 16 |
+         uint32_t(p[3]) << 24;
+}
+uint32_t MeshBE(const uint8_t* p) {
+  return rex::memory::load_and_swap<uint32_t>(p);
+}
+void MeshPut(uint8_t* p, uint32_t v) {
+  rex::memory::store_and_swap<uint32_t>(p, v);
+}
+
+bool MeshInflate(std::span<const uint8_t> src, std::vector<uint8_t>& dst) {
+  dst.clear();
+  while (!src.empty()) {
+    if (src.size() < 12) return false;
+    const uint32_t packed = MeshLE(src.data()), offset = MeshLE(src.data() + 4),
+                   size = MeshLE(src.data() + 8);
+    if (!packed || packed > 0x9800 || packed > src.size() - 12 || !size ||
+        size > 0x8000 || offset != dst.size() ||
+        offset > 16 * 1024 * 1024 - size)
+      return false;
+    dst.resize(offset + size);
+    if (lzx_decompress(src.data() + 12, packed, dst.data() + offset, size,
+                       0x8000, nullptr, 0))
+      return false;
+    src = src.subspan(12 + packed);
+  }
+  return dst.size() >= 48;
+}
+
+// A bounded sequential memory stream, with the same five slots used by XAM's
+// compressed stream. Slot 3 advances, rather than seeking absolutely. All mesh,
+// index, vertex and texture interpretation remains in original XAM AOT code.
+struct MeshStreamState {
+  std::span<const uint8_t> bytes;
+  size_t pos = 0;
+  uint32_t misses = 0;
+};
+MeshStreamState* g_mesh_stream = nullptr;
+void MeshStreamDestroy(PPCContext& c, uint8_t*) { c.r3.u64 = 0; }
+void MeshStreamReset(PPCContext& c, uint8_t*) {
+  g_mesh_stream->pos = 0;
+  c.r3.u64 = 1;
+}
+void MeshStreamTell(PPCContext& c, uint8_t*) { c.r3.u64 = g_mesh_stream->pos; }
+void MeshStreamSkip(PPCContext& c, uint8_t*) {
+  auto& s = *g_mesh_stream;
+  const uint32_t n = uint32_t(c.r4.u64);
+  c.r3.u64 = n <= s.bytes.size() - s.pos;
+  if (c.r3.u64)
+    s.pos += n;
+  else
+    ++s.misses;
+}
+void MeshStreamRead(PPCContext& c, uint8_t* base) {
+  auto& s = *g_mesh_stream;
+  const uint32_t n = uint32_t(c.r5.u64);
+  MeshPut(base + uint32_t(c.r6.u64), 0);
+  if (n > s.bytes.size() - s.pos) {
+    ++s.misses;
+    c.r3.u64 = 0;
+    return;
+  }
+  std::memcpy(base + uint32_t(c.r4.u64), s.bytes.data() + s.pos, n);
+  s.pos += n;
+  MeshPut(base + uint32_t(c.r6.u64), n);
+  c.r3.u64 = 1;
+}
+
+std::array<PPCFunc*, 5> g_mesh_callbacks{};
+std::array<uint32_t, 5> g_mesh_callback_calls{};
+uint32_t g_mesh_callback_abi = 0;
+struct MeshTextureChecks {
+  uint32_t gpu, gpu_size, scratch, scratch_size;
+  uint32_t failures = 0, tiled = 0, layouts = 0;
+  uint64_t compared = 0;
+};
+MeshTextureChecks* g_mesh_texture_checks = nullptr;
+
+// Independent of game AOT: Xenos 2D address bit layout, also documented by
+// rex/graphics/pipeline/texture/util.cpp::GetTiledOffset2D in the pinned SDK.
+uint32_t MeshTiledAddress(uint32_t x, uint32_t y, uint32_t width,
+                          uint32_t log_bytes) {
+  const uint32_t macro = (x / 32 + y / 32 * ((width + 31) / 32))
+                         << (log_bytes + 7);
+  const uint32_t micro = ((x % 8) + (y & 14) * 4) << log_bytes;
+  const uint32_t combined =
+      macro + (micro & ~15u) * 2 + (micro & 15) + (y % 2) * 16;
+  return (combined & ~511u) * 8 + (y & 16) * 128 + (combined & 448) * 4 +
+         (((y & 8) / 4 + x / 8) % 4) * 64 + (combined & 63);
+}
+
+bool MeshFormat(uint32_t format, uint32_t& block, uint32_t& log_bytes) {
+  switch (format & 63) {
+    case 2:
+      block = 1;
+      log_bytes = 0;
+      return true;  // 8
+    case 6:
+      block = 1;
+      log_bytes = 2;
+      return true;  // 8_8_8_8
+    case 18:
+    case 58:
+    case 59:
+      block = 4;
+      log_bytes = 3;
+      return true;
+    case 19:
+    case 20:
+      block = 4;
+      log_bytes = 4;
+      return true;
+    default:
+      return false;
+  }
+}
+bool MeshRange(uint32_t p, uint64_t n, uint32_t start, uint32_t size) {
+  return p >= start && uint64_t(p) + n <= uint64_t(start) + size;
+}
+
+template <size_t I>
+void MeshObserveCallback(PPCContext& c, uint8_t* base) {
+  const auto before = Snapshot(c);
+  const std::array<uint32_t, 8> a = {uint32_t(c.r3.u64), uint32_t(c.r4.u64),
+                                     uint32_t(c.r5.u64), uint32_t(c.r6.u64),
+                                     uint32_t(c.r7.u64), uint32_t(c.r8.u64),
+                                     uint32_t(c.r9.u64), uint32_t(c.r10.u64)};
+  ++g_mesh_callback_calls[I];
+  g_mesh_callbacks[I](
+      c,
+      base);  // Execute the saved real function with the unchanged guest ABI.
+  if (!SameNonVolatile(before, Snapshot(c))) ++g_mesh_callback_abi;
+  auto* checks = g_mesh_texture_checks;
+  if (!checks) return;
+  uint32_t block = 0, log_bytes = 0;
+  if constexpr (I == 0 || I == 2) {
+    if (!MeshFormat(a[0], block, log_bytes) || a[3] != 0) {
+      ++checks->failures;
+      REXLOG_ERROR(
+          "xam-aot-probe: meshes: unsupported reference format {:08X} mip {}",
+          a[0], a[3]);
+      return;
+    }
+    const uint32_t columns = (a[1] + block - 1) / block,
+                   rows = (a[2] + block - 1) / block;
+    const uint32_t row_bytes = columns << log_bytes;
+    if constexpr (I == 2) {
+      ++checks->layouts;
+      const bool ok = MeshBE(base + a[4]) == row_bytes &&
+                      MeshBE(base + a[6]) == rows &&
+                      MeshBE(base + a[5]) >= row_bytes;
+      if (!ok) ++checks->failures;
+    } else {
+      ++checks->tiled;
+      bool ok = c.r3.u64 == 1 && a[4] >= row_bytes &&
+                MeshRange(a[6], uint64_t(a[4]) * rows, checks->scratch,
+                          checks->scratch_size) &&
+                MeshRange(a[7], a[5], checks->gpu, checks->gpu_size);
+      for (uint32_t y = 0; ok && y < rows; ++y)
+        for (uint32_t x = 0; ok && x < columns; ++x) {
+          const uint32_t tiled = MeshTiledAddress(x, y, columns, log_bytes);
+          const uint32_t n = 1u << log_bytes;
+          ok = uint64_t(tiled) + n <= a[5] &&
+               !std::memcmp(base + a[7] + tiled,
+                            base + a[6] + y * a[4] + (x << log_bytes), n);
+          if (ok) checks->compared += n;
+        }
+      if (!ok) {
+        ++checks->failures;
+        REXLOG_ERROR(
+            "xam-aot-probe: meshes: tiled bytes mismatch format "
+            "{:08X} {}x{} pitch {} capacity {}",
+            a[0], a[1], a[2], a[4], a[5]);
+      }
+    }
+  }
+}
+
+bool MeshValidateBuffers(const uint8_t* base, const std::array<uint32_t, 12>& h,
+                         uint32_t cpu, uint32_t gpu, uint64_t& indices) {
+  for (uint32_t i = 0; i < h[5]; ++i) {
+    const uint8_t* mesh = base + cpu + h[9] + i * 512;
+    const uint32_t triangles = MeshBE(mesh + 484),
+                   vertices = MeshBE(mesh + 488), stride = MeshBE(mesh + 496),
+                   vp = MeshBE(mesh + 504), ip = MeshBE(mesh + 508);
+    if (!stride || !MeshRange(vp, uint64_t(vertices) * stride, gpu, h[1]) ||
+        !MeshRange(ip, uint64_t(triangles) * 6, gpu, h[1]))
+      return false;
+    for (uint64_t j = 0; j < uint64_t(triangles) * 3; ++j) {
+      if (rex::memory::load_and_swap<uint16_t>(base + ip + j * 2) >= vertices)
+        return false;
+      ++indices;
+    }
+  }
+  for (uint32_t i = 0; i < h[6]; ++i) {
+    const uint8_t* tex = base + cpu + h[10] + i * 44;
+    if (!MeshRange(MeshBE(tex + 36), MeshBE(tex + 12), gpu, h[1]) ||
+        !MeshBE(tex + 4) || !MeshBE(tex + 8))
+      return false;
+  }
+  return true;
+}
+
+void RunMeshes(const x360n::avatar::AvatarToc& toc, uint32_t game_callbacks) {
+  auto* rt = rex::Runtime::instance();
+  auto* m = rt->memory();
+  auto* d = rt->function_dispatcher();
+  auto* t = rex::runtime::ThreadState::Get();
+  constexpr std::array<uint32_t, 5> expected = {
+      0x8295B630, 0x8295B720, 0x8295B3C0, 0x8295B458, 0x8295B500};
+  if (!game_callbacks) {
+    Check(false, "meshes: game callback table is null");
+    return;
+  }
+  const auto* table = m->TranslateVirtual<const uint8_t*>(game_callbacks);
+  for (size_t i = 0; i < 5; ++i) {
+    if (MeshBE(table + i * 4) != expected[i] ||
+        !(g_mesh_callbacks[i] = d->GetFunction(expected[i]))) {
+      Check(false,
+            "meshes: unrecognized/unregistered real game callback table");
+      return;
+    }
+  }
+  std::array<uint8_t, 20> saved_callbacks{};
+  std::memcpy(saved_callbacks.data(), m->TranslateVirtual(0x81A975CC), 20);
+  uint32_t abi = 0;
+  CallQuiet(d, t, 0x81977C80, {game_callbacks}, &abi);
+  const std::array<PPCFunc*, 5> observers = {
+      MeshObserveCallback<0>, MeshObserveCallback<1>, MeshObserveCallback<2>,
+      MeshObserveCallback<3>, MeshObserveCallback<4>};
+  for (size_t i = 0; i < 5; ++i) d->SetFunction(expected[i], observers[i]);
+  // Fixed private allocations are capped independently of the input's
+  // capacities.
+  constexpr uint32_t cap = 0x200000, guard = 0x1000;
+  std::vector<uint32_t> allocations;
+  auto alloc = [&](uint32_t n) {
+    auto p = m->SystemHeapAlloc(n, 0x1000);
+    if (p) allocations.push_back(p);
+    return p;
+  };
+  const uint32_t state = alloc(0x1000), cpu_alloc = alloc(cap + 2 * guard),
+                 gpu_alloc = alloc(cap + 2 * guard),
+                 tmp_alloc = alloc(cap + 2 * guard);
+  const uint32_t cpu = cpu_alloc + guard, gpu = gpu_alloc + guard,
+                 tmp = tmp_alloc + guard;
+  uint32_t tested = 0, meshes = 0, textures = 0, negatives = 0;
+  uint64_t indices = 0, texture_bytes = 0;
+  if (!state || !cpu_alloc || !gpu_alloc || !tmp_alloc) {
+    Check(false, "meshes: private allocations");
+  } else {
+    auto* h = m->TranslateVirtual<uint8_t*>(state);
+    const std::array<PPCFunc*, 5> methods = {MeshStreamDestroy, MeshStreamReset,
+                                             MeshStreamTell, MeshStreamSkip,
+                                             MeshStreamRead};
+    bool registered = true;
+    for (size_t i = 0; i < 5; ++i) {
+      const uint32_t thunk = d->AllocateThunk(methods[i], 0x81974A90);
+      MeshPut(h + 0x100 + i * 4, thunk);
+      registered &= thunk != 0;
+    }
+    MeshPut(h + 0x80, state + 0x100);
+    Check(registered, "meshes: bounded sequential stream registered");
+    if (registered)
+      for (size_t record = 0; record < toc.size(); ++record) {
+        const auto blob = toc.Blob(record);
+        if (blob.empty()) continue;
+        if (blob.size() < 32 || std::memcmp(blob.data(), "STRB", 4) ||
+            blob[4] != 1 || blob[5] != 0 || blob[22] != 1 || blob[23] != 4 ||
+            blob[26] != 4) {
+          Check(false, "meshes: unsupported STRB layout");
+          break;
+        }
+        size_t pos = 32;
+        while (pos + 12 <= blob.size() && blob[pos] != 3) {
+          const auto len = MeshBE(blob.data() + pos + 1);
+          if (len > blob.size() - pos - 12) {
+            pos = blob.size();
+            break;
+          }
+          pos += 12 + ((size_t(len) + 3) & ~size_t(3));
+        }
+        if (pos + 12 > blob.size()) continue;
+        const uint32_t len = MeshBE(blob.data() + pos + 1);
+        std::vector<uint8_t> expanded;
+        if (len > blob.size() - pos - 12 ||
+            MeshBE(blob.data() + pos + 5) != 1 ||
+            !MeshInflate(blob.subspan(pos + 12, len), expanded)) {
+          Check(false,
+                fmt::format("meshes: LZX framing/decode record {}", record));
+          break;
+        }
+        std::array<uint32_t, 12> header{};
+        for (size_t i = 0; i < 12; ++i)
+          header[i] = MeshLE(expanded.data() + i * 4);
+        REXLOG_DEBUG(
+            "xam-aot-probe: meshes: record {} LZX {} -> {} bytes; header {:X}",
+            record, len, expanded.size(), fmt::join(header, "/"));
+        const bool bounds =
+            header[0] <= cap && header[1] <= cap && header[11] <= cap &&
+            uint64_t(header[9]) + uint64_t(header[5]) * 512 <= header[0] &&
+            uint64_t(header[10]) + uint64_t(header[6]) * 44 <= header[0] &&
+            header[7] <= header[1] && header[8] <= header[1];
+        if (!bounds) {
+          Check(false, "meshes: decoded header capacities/offsets");
+          break;
+        }
+        for (auto p : {cpu_alloc, gpu_alloc, tmp_alloc})
+          std::memset(m->TranslateVirtual(p), 0xCD, cap + 2 * guard);
+        std::memset(m->TranslateVirtual(cpu), 0, header[0]);
+        std::memset(m->TranslateVirtual(gpu), 0, header[1]);
+        std::memset(m->TranslateVirtual(tmp), 0, header[11]);
+        std::memset(h, 0, 52);
+        MeshPut(h, header[0]);
+        MeshPut(h + 4, header[1]);
+        MeshPut(h + 28, cpu);
+        MeshPut(h + 32, gpu);
+        MeshStreamState stream{expanded};
+        g_mesh_stream = &stream;
+        MeshTextureChecks texture_check{gpu, header[1], tmp, header[11]};
+        g_mesh_texture_checks = &texture_check;
+        const uint32_t result = uint32_t(CallQuiet(
+            d, t, 0x81974A90, {state, state + 0x80, header[11], tmp}, &abi));
+        if (result != 1 || stream.misses || stream.pos != expanded.size())
+          Check(false, fmt::format("meshes: record {} original reader={} "
+                                   "consumed {}/{} misses={}",
+                                   record, result, stream.pos, expanded.size(),
+                                   stream.misses));
+        bool descriptors = true;
+        for (size_t i = 0; i < 7; ++i)
+          descriptors &= MeshBE(h + i * 4) == header[i];
+        descriptors &= MeshBE(h + 36) == gpu + header[7] &&
+                       MeshBE(h + 40) == gpu + header[8] &&
+                       MeshBE(h + 44) == cpu + header[9] &&
+                       MeshBE(h + 48) == cpu + header[10];
+        bool guards = true;
+        for (auto p : {cpu_alloc, gpu_alloc, tmp_alloc}) {
+          const auto* b = m->TranslateVirtual<const uint8_t*>(p);
+          for (uint32_t i = 0; i < guard; ++i)
+            guards &= b[i] == 0xCD && b[guard + cap + i] == 0xCD;
+        }
+        for (auto pair : {std::pair{cpu, header[0]}, std::pair{gpu, header[1]},
+                          std::pair{tmp, header[11]}}) {
+          const auto* b =
+              m->TranslateVirtual<const uint8_t*>(pair.first + pair.second);
+          for (uint32_t i = 0; i < 32; ++i) guards &= b[i] == 0xCD;
+        }
+        descriptors &= MeshValidateBuffers(m->virtual_membase(), header, cpu,
+                                           gpu, indices);
+        if (!descriptors || !guards || texture_check.failures)
+          Check(false, fmt::format("meshes: record {} descriptors={} guards={} "
+                                   "texture failures={}",
+                                   record, descriptors, guards,
+                                   texture_check.failures));
+        texture_bytes += texture_check.compared;
+        g_mesh_texture_checks = nullptr;
+        if (record == 72 && result == 1) {
+          std::array<uint8_t, 52> original{};
+          std::memcpy(original.data(), h, original.size());
+          MeshPut(h, header[0] - 1);
+          std::array<uint8_t, 52> short_desc{};
+          std::memcpy(short_desc.data(), h, short_desc.size());
+          const auto rejected = CallQuiet(
+              d, t, 0x81974A90, {state, state + 0x80, header[11], tmp}, &abi);
+          const bool capacity_ok =
+              rejected == 0 &&
+              !std::memcmp(h, short_desc.data(), short_desc.size());
+          Check(capacity_ok,
+                "meshes negative: insufficient CPU capacity "
+                "rejects and restores descriptor");
+          negatives += capacity_ok;
+          std::memcpy(h, original.data(), original.size());
+          stream =
+              MeshStreamState{std::span<const uint8_t>(expanded).first(47)};
+          const auto short_read = CallQuiet(
+              d, t, 0x81974A90, {state, state + 0x80, header[11], tmp}, &abi);
+          const bool short_ok =
+              short_read == 0 && stream.misses == 1 &&
+              !std::memcmp(h, original.data(), original.size());
+          Check(short_ok,
+                "meshes negative: truncated decoded header rejects "
+                "without descriptor writes");
+          negatives += short_ok;
+          std::vector<uint8_t> unused;
+          const bool lzx_ok =
+              !MeshInflate(blob.subspan(pos + 12, len - 1), unused);
+          Check(lzx_ok,
+                "meshes negative: truncated LZX frame rejects before AOT");
+          negatives += lzx_ok;
+        }
+        g_mesh_stream = nullptr;
+        if (!result || !descriptors || !guards || texture_check.failures) break;
+        ++tested;
+        meshes += header[5];
+        textures += header[6];
+        if (tested % 100 == 0)
+          REXLOG_INFO("xam-aot-probe: meshes: {} assets validated", tested);
+      }
+  }
+  for (size_t i = 0; i < 5; ++i)
+    d->SetFunction(expected[i], g_mesh_callbacks[i]);
+  std::memcpy(m->TranslateVirtual(0x81A975CC), saved_callbacks.data(), 20);
+  for (auto p : allocations) m->SystemHeapFree(p);
+  Check(
+      tested > 3 && meshes > 0 && textures > 0 && texture_bytes > 0 &&
+          negatives == 3,
+      fmt::format("meshes: coverage {} assets, {} meshes, {} textures, {} "
+                  "indices, {} tiled bytes, {} negatives",
+                  tested, meshes, textures, indices, texture_bytes, negatives));
+  Check(abi == 0 && g_mesh_callback_abi == 0,
+        "meshes: XAM and real callback non-volatile ABI");
+  REXLOG_INFO(
+      "xam-aot-probe: meshes: {} assets, {} meshes, {} textures; real "
+      "callbacks {}/{}/{}/{}/{}",
+      tested, meshes, textures, g_mesh_callback_calls[0],
+      g_mesh_callback_calls[1], g_mesh_callback_calls[2],
+      g_mesh_callback_calls[3], g_mesh_callback_calls[4]);
+}
+
+// New route: original STRB field stream -> original LDI stream -> the GetAssets
+// per-asset worker. The previous mesh/color/size/integration suites are not
+// run.
+void RunLdiAssets(const x360n::avatar::AvatarToc& toc,
+                  uint32_t game_callbacks) {
+  auto* rt = rex::Runtime::instance();
+  auto* m = rt->memory();
+  auto* d = rt->function_dispatcher();
+  auto* t = rex::runtime::ThreadState::Get();
+  uint32_t abi = 0;
+  auto call = [&](uint32_t fn, std::initializer_list<uint64_t> args) {
+    return uint32_t(CallQuiet(d, t, fn, args, &abi));
+  };
+  constexpr uint32_t cap = 0x200000, guard = 0x1000, ldi_size = 0x1CA0F;
+  std::vector<uint32_t> owned;
+  auto alloc = [&](uint32_t size) {
+    const auto p = m->SystemHeapAlloc(size, 0x1000);
+    if (p) owned.push_back(p);
+    return p;
+  };
+  const auto control = alloc(0x40000), cpu_alloc = alloc(cap + 2 * guard),
+             gpu_alloc = alloc(cap + 2 * guard),
+             temp_alloc = alloc(cap + 2 * guard),
+             ldi_alloc = alloc(ldi_size + 2 * guard);
+  if (!control || !cpu_alloc || !gpu_alloc || !temp_alloc || !ldi_alloc) {
+    Check(false, "ldi-assets: private allocations");
+    for (auto p : owned) m->SystemHeapFree(p);
+    return;
+  }
+  auto* h = m->TranslateVirtual<uint8_t*>(control);
+  const uint32_t cpu = cpu_alloc + guard, gpu = gpu_alloc + guard,
+                 temp = temp_alloc + guard, ldi = ldi_alloc + guard;
+  const uint32_t reader = control + 0x40, iter = control + 0x100,
+                 field = control + 0x180, compressed = control + 0x200,
+                 output = control + 0x300, allocator = control + 0x400,
+                 selection = control + 0x500;
+  constexpr std::array<uint32_t, 5> addresses = {
+      0x8295B630, 0x8295B720, 0x8295B3C0, 0x8295B458, 0x8295B500};
+  const std::array<PPCFunc*, 5> observers = {
+      MeshObserveCallback<0>, MeshObserveCallback<1>, MeshObserveCallback<2>,
+      MeshObserveCallback<3>, MeshObserveCallback<4>};
+  const auto* game_table = m->TranslateVirtual<const uint8_t*>(game_callbacks);
+  bool registered = game_callbacks != 0;
+  for (size_t i = 0; registered && i < 5; ++i) {
+    g_mesh_callbacks[i] = d->GetFunction(addresses[i]);
+    registered =
+        MeshBE(game_table + i * 4) == addresses[i] && g_mesh_callbacks[i];
+  }
+  std::array<uint8_t, 20> saved{};
+  std::memcpy(saved.data(), m->TranslateVirtual(0x81A975CC), saved.size());
+  if (registered) {
+    call(0x81977C80, {game_callbacks});
+    for (size_t i = 0; i < 5; ++i)
+      registered &= d->SetFunction(addresses[i], observers[i]);
+  }
+  Check(registered, "ldi-assets: real game callbacks installed");
+  uint32_t assets = 0, seeks = 0;
+  for (size_t record : {size_t(0), size_t(1), size_t(72)}) {
+    if (!registered) break;
+    const auto blob = toc.Blob(record);
+    if (blob.size() > 0x3F000) {
+      Check(false, "ldi-assets: blob capacity");
+      break;
+    }
+    size_t pos = 32;
+    uint32_t ordinal = 0;
+    while (pos + 12 <= blob.size() && blob[pos] != 3) {
+      const uint32_t len = MeshBE(blob.data() + pos + 1);
+      if (len > blob.size() - pos - 12) {
+        pos = blob.size();
+        break;
+      }
+      pos += 12 + ((size_t(len) + 3) & ~size_t(3));
+      ++ordinal;
+    }
+    if (pos + 12 > blob.size()) {
+      Check(false, "ldi-assets: missing field 3");
+      break;
+    }
+    const auto len = MeshBE(blob.data() + pos + 1);
+    std::vector<uint8_t> reference;
+    if (len > blob.size() - pos - 12 ||
+        !MeshInflate(blob.subspan(pos + 12, len), reference)) {
+      Check(false, "ldi-assets: bounded reference transport");
+      break;
+    }
+    std::array<uint32_t, 12> header{};
+    for (size_t i = 0; i < 12; ++i)
+      header[i] = MeshLE(reference.data() + i * 4);
+    if (header[0] > cap || header[1] > cap || header[11] > cap ||
+        uint64_t(header[9]) + uint64_t(header[5]) * 512 > header[0] ||
+        uint64_t(header[10]) + uint64_t(header[6]) * 44 > header[0]) {
+      Check(false, "ldi-assets: header capacity");
+      break;
+    }
+    std::memset(h, 0, 0x1000);
+    std::memcpy(h + 0x1000, blob.data(), blob.size());
+    call(0x8196D568, {control, control + 0x1000, blob.size()});
+    call(0x8196DBE8, {reader, control});
+    call(0x8196E0E8, {iter, reader});
+    for (uint32_t i = 0; i < ordinal; ++i) call(0x8196F228, {iter});
+    // Exercise new compressed-stream position/reset behavior across a 32 KiB
+    // boundary. Reference is transport-only: it does not call this stream.
+    if (record == 72) {
+      call(0x81976080, {field, reader, iter, 0});
+      call(0x819766B0, {compressed, field, ldi_size, ldi});
+      const uint32_t context = MeshBE(h + 0x20C), vtable = MeshBE(h + 0x200);
+      Check(context != 0,
+            "ldi-assets: original stream created a live LDI context");
+      if (!context) break;
+      const auto* v = m->TranslateVirtual<const uint8_t*>(vtable);
+      auto read = [&](uint32_t n) {
+        return call(MeshBE(v + 16),
+                    {compressed, control + 0x800, n, control + 0x900});
+      };
+      const bool first =
+          read(48) == 1 && !std::memcmp(h + 0x800, reference.data(), 48);
+      const bool skipped =
+          call(MeshBE(v + 12), {compressed, 0x8000 - 32 - 48}) == 1;
+      const bool crossed =
+          read(96) == 1 &&
+          !std::memcmp(h + 0x800, reference.data() + 0x8000 - 32, 96);
+      const bool reset = call(MeshBE(v + 4), {compressed}) == 1;
+      const bool again =
+          read(48) == 1 && !std::memcmp(h + 0x800, reference.data(), 48);
+      call(0x81976648, {compressed});
+      const bool destroyed =
+          MeshBE(m->TranslateVirtual<const uint8_t*>(context)) == 0;
+      Check(first && skipped && crossed && reset && again && destroyed,
+            fmt::format("ldi-assets: original stream header={} skip={} "
+                        "cross-block={} rewind={} reread={} destroy={}",
+                        first, skipped, crossed, reset, again, destroyed));
+      seeks += first && skipped && crossed && reset && again && destroyed;
+    }
+    // The original worker receives a private bump allocator and explicit
+    // diagnostic material choices; these do not represent a user's avatar.
+    for (auto p : {cpu_alloc, gpu_alloc, temp_alloc})
+      std::memset(m->TranslateVirtual(p), 0xCD, cap + 2 * guard);
+    std::memset(m->TranslateVirtual(cpu), 0, cap);
+    std::memset(m->TranslateVirtual(gpu), 0, cap);
+    std::memset(m->TranslateVirtual(temp), 0, cap);
+    std::memset(m->TranslateVirtual(ldi_alloc), 0xCD, ldi_size + 2 * guard);
+    const std::array<uint32_t, 10> pool = {
+        cap, cap, header[11], ldi_size, cpu, gpu, temp, ldi, cpu, gpu};
+    for (size_t i = 0; i < pool.size(); ++i)
+      MeshPut(h + 0x400 + i * 4, pool[i]);
+    rex::memory::store_and_swap<uint16_t>(
+        h + 0x500 + 48, uint16_t(toc.record(record).field_00));
+    for (uint32_t i = 0; i < 3; ++i) {
+      MeshPut(h + 0x500 + 80 + i * 32, 22 + i);
+      for (uint32_t j = 0; j < 4; ++j)
+        rex::memory::store_and_swap<float>(h + 0x500 + 64 + i * 32 + j * 4,
+                                           j == 3 ? 1.0f : 0.5f);
+    }
+    MeshTextureChecks texture_check{gpu, cap, temp, header[11]};
+    g_mesh_texture_checks = &texture_check;
+    const uint32_t result =
+        call(0x81966450, {allocator, selection, 0, reader, iter, output});
+    g_mesh_texture_checks = nullptr;
+    bool output_ok = result == 0;
+    for (size_t i = 0; i < 7; ++i)
+      output_ok &= MeshBE(h + 0x300 + i * 4) == header[i];
+    output_ok &= MeshBE(h + 0x31C) == cpu && MeshBE(h + 0x320) == gpu &&
+                 MeshBE(h + 0x32C) == cpu + header[9] &&
+                 MeshBE(h + 0x330) == cpu + header[10];
+    uint64_t indices = 0;
+    if (output_ok)
+      output_ok =
+          MeshValidateBuffers(m->virtual_membase(), header, cpu, gpu, indices);
+    bool guards = true;
+    for (auto p : {cpu_alloc, gpu_alloc, temp_alloc}) {
+      const auto* b = m->TranslateVirtual<const uint8_t*>(p);
+      for (uint32_t i = 0; i < guard; ++i)
+        guards &= b[i] == 0xCD && b[guard + cap + i] == 0xCD;
+    }
+    const auto* l = m->TranslateVirtual<const uint8_t*>(ldi_alloc);
+    for (uint32_t i = 0; i < guard; ++i)
+      guards &= l[i] == 0xCD && l[guard + ldi_size + i] == 0xCD;
+    const bool source = !std::memcmp(h + 0x1000, blob.data(), blob.size());
+    const bool destroyed =
+        MeshBE(m->TranslateVirtual<const uint8_t*>(ldi + 0x11800)) == 0;
+    Check(
+        output_ok && guards && source && destroyed && !texture_check.failures,
+        fmt::format(
+            "ldi-assets: GetAssets worker record {} HRESULT={:08X}, output={}, "
+            "guards={}, source={}, destroyed={}, indices={}, tiled-bytes={}",
+            record, result, output_ok, guards, source, destroyed, indices,
+            texture_check.compared));
+    if (!output_ok || !guards || !source || !destroyed ||
+        texture_check.failures)
+      break;
+    ++assets;
+  }
+  for (size_t i = 0; i < 5; ++i)
+    if (g_mesh_callbacks[i]) d->SetFunction(addresses[i], g_mesh_callbacks[i]);
+  std::memcpy(m->TranslateVirtual(0x81A975CC), saved.data(), saved.size());
+  for (auto p : owned) m->SystemHeapFree(p);
+  Check(assets == 3 && seeks == 1 && abi == 0 && g_mesh_callback_abi == 0,
+        fmt::format("ldi-assets: {} workers, {} stream seek/reset case, ABI "
+                    "breaks={}/{}; callbacks restored",
+                    assets, seeks, abi, g_mesh_callback_abi));
+}
+
+// Only the new aggregate/lifecycle route, with original compressed assets.
+void RunAggregateAssets(const x360n::avatar::AvatarToc& toc, uint32_t callbacks) {
+  using namespace x360n::avatar;
+  auto* rt = rex::Runtime::instance();
+  auto* m = rt->memory();
+  auto* d = rt->function_dispatcher();
+  auto* t = rex::runtime::ThreadState::Get();
+  uint32_t abi = 0, calls = 0;
+  const auto saved_protocol = MeshBE(m->TranslateVirtual<const uint8_t*>(0x81B4B238));
+  std::array<uint8_t, 20> saved_callbacks{};
+  std::memcpy(saved_callbacks.data(), m->TranslateVirtual(0x81A975CC), 20);
+  bool corrupt_second = false;
+  uint32_t decode_calls = 0;
+  AvatarAotCall call = [&](uint32_t fn, std::initializer_list<uint64_t> args) {
+    ++calls;
+    uint8_t* corrupt = nullptr;
+    uint8_t original = 0;
+    if (fn == 0x81966FC8 && ++decode_calls == 2 && corrupt_second) {
+      const auto selection = uint32_t(*(args.begin() + 1));
+      const auto source = MeshBE(m->TranslateVirtual<const uint8_t*>(selection + 400));
+      // Corrupt only the private copy's GUID, after one asset already populated
+      // the aggregate. The actual AOT entry must reject it; no injected HRESULT.
+      corrupt = m->TranslateVirtual<uint8_t*>(source + 8);
+      original = *corrupt;
+      *corrupt ^= 0x80;
+    }
+    auto hr = uint32_t(CallQuiet(d, t, fn, args, &abi));
+    if (corrupt) *corrupt = original;
+    if (fn == 0x81967628 || fn == 0x81966FC8 || fn == 0x819672F8)
+      REXLOG_INFO("xam-aot-probe: aggregate: fn={:08X} HRESULT={:08X}", fn, hr);
+    return hr;
+  };
+  std::vector<AssetSelection> selection;
+  for (size_t index : {size_t(72), size_t(0)}) {
+    AssetSelection s;
+    s.id = {toc.record(index).field_00, uint16_t(index), 0,
+            toc.Opaque(index)[0], AssetStampFor(toc)};
+    for (size_t i = 0; i < 3; ++i)
+      s.materials[i] = {uint32_t(22 + i), {0.5f, 0.5f, 0.5f, 1.0f}};
+    selection.push_back(s);
+  }
+  auto make = [&](AotAssetsStats& stats, uint32_t protocol = 4) {
+    decode_calls = 0;
+    return MakeAotAssetsBackend(*m, call, toc, selection, protocol, 1,
+                                callbacks, stats);
+  };
+  auto drain = [&](AssetsRequest& request) {
+    bool unpublished = true;
+    for (int i = 0; i < 32 && request.status() == kAssetsPending; ++i) {
+      unpublished &= request.result().result == 0;
+      request.Step();
+    }
+    Check(unpublished && request.status() != kAssetsPending,
+          "aggregate: partial output stays private; bounded completion");
+  };
+  AotAssetsStats success;
+  {
+    AssetsRequest request(make(success));
+    drain(request);
+    auto result = request.result();
+    bool aggregate = request.status() == 0 && result.result && result.gpu;
+    uint32_t count = 0, bones = 0;
+    if (aggregate) {
+      const auto* root = m->TranslateVirtual<const uint8_t*>(result.result);
+      count = MeshBE(root + 8);
+      bones = MeshBE(m->TranslateVirtual<const uint8_t*>(MeshBE(root)));
+      aggregate &= count == 2 && bones > 0 && success.decoded == 2 &&
+                   success.finalized == 1;
+      const auto refs = MeshBE(root + 12), descriptors = MeshBE(root + 16);
+      uint32_t last_cpu_end = 0, last_gpu_end = 0;
+      for (uint32_t i = 0; aggregate && i < 2; ++i) {
+        const auto id = selection[i].id.ToBytes();
+        const auto* ref = m->TranslateVirtual<const uint8_t*>(refs + i * 32);
+        const auto* desc =
+            m->TranslateVirtual<const uint8_t*>(descriptors + i * 52);
+        const auto cpu = MeshBE(desc + 28), gpu = MeshBE(desc + 32);
+        aggregate &= !std::memcmp(ref, id.data(), 16) && cpu >= last_cpu_end &&
+                     gpu >= last_gpu_end;
+        last_cpu_end = cpu + MeshBE(desc);
+        last_gpu_end = gpu + MeshBE(desc + 4);
+      }
+    }
+    Check(aggregate,
+          fmt::format("aggregate: HRESULT={:08X}, assets={}, bones={}, "
+                      "decoded={}, field4={}, finalized={}",
+                      request.status(), count, bones, success.decoded,
+                      success.applied, success.finalized));
+    const auto before = calls;
+    request.Step();
+    request.Cancel();
+    Check(calls == before && request.result().result == result.result,
+          "aggregate: terminal polling/cancel do not rerun or release the "
+          "result");
+    request.Release();
+    request.Release();
+    Check(!request.result().result && success.allocations == success.frees &&
+              success.guards,
+          "aggregate: explicit release frees all buffers exactly once");
+  }
+  for (int steps : {0, 2, 3}) {
+    AotAssetsStats stats;
+    AssetsRequest request(make(stats));
+    for (int i = 0; i < steps; ++i) request.Step();
+    const bool pending = request.status() == kAssetsPending;
+    request.Cancel();
+    const auto before = calls;
+    request.Cancel();
+    request.Step();
+    Check(pending && request.status() == kAssetsAbort &&
+              !request.result().result && calls == before &&
+              stats.allocations == stats.frees && stats.guards &&
+              stats.finalized == 0,
+          fmt::format("aggregate: cancel after {} steps discards partial "
+                      "result ({} assets)",
+                      steps, stats.decoded));
+  }
+  AotAssetsStats failed;
+  {
+    corrupt_second = true;
+    AssetsRequest request(make(failed));
+    drain(request);
+    const auto before = calls;
+    request.Step();
+    Check(request.state() == AssetsRequest::State::Failed &&
+              request.status() == kAssetsFailure && failed.decoded == 2 &&
+              !request.result().result && failed.allocations == failed.frees &&
+              calls == before && failed.finalized == 0 && failed.guards,
+          "aggregate: real AOT error on second asset discards first asset and "
+          "preserves HRESULT");
+    corrupt_second = false;
+  }
+  AotAssetsStats unsupported;
+  {
+    AssetsRequest request(make(unsupported, 2));
+    const auto before = calls;
+    request.Step();
+    Check(request.status() == kAssetsInvalid && !unsupported.allocations &&
+              calls == before,
+          "aggregate: unsupported protocol rejected before guest allocation or "
+          "execution");
+  }
+  AotAssetsStats abandoned;
+  {
+    AssetsRequest request(make(abandoned));
+    request.Step();
+    request.Step();
+  }
+  Check(abandoned.decoded == 1 && abandoned.allocations == abandoned.frees &&
+            abandoned.guards,
+        "aggregate: destruction of pending request releases private output");
+  Check(abi == 0 &&
+            MeshBE(m->TranslateVirtual<const uint8_t*>(0x81B4B238)) ==
+                saved_protocol &&
+            !std::memcmp(saved_callbacks.data(),
+                         m->TranslateVirtual(0x81A975CC), 20),
+        fmt::format(
+            "aggregate: ABI breaks={}; protocol and callback table restored",
+            abi));
+}
+
+void RunAvatarServiceProbe(const x360n::avatar::AvatarToc& toc,
+                           const std::string& catalog_path, uint32_t callbacks) {
+  using namespace x360n::avatar;
+  auto* rt = rex::Runtime::instance();
+  auto* thread = rex::runtime::ThreadState::Get();
+  uint32_t abi = 0;
+  AvatarAotCall call = [&](uint32_t fn, std::initializer_list<uint64_t> args) {
+    const auto hr = uint32_t(CallQuiet(rt->function_dispatcher(), thread, fn, args, &abi));
+    REXLOG_INFO("avatar-service: {:08X} -> {:08X}", fn, hr);
+    return hr;
+  };
+  auto device = std::make_unique<rex::filesystem::HostPathDevice>(
+      "\\Device\\X360nAvatarCatalog17559", std::filesystem::path(catalog_path).parent_path(), true);
+  if (!device->Initialize() || !rt->kernel_state()->file_system()->RegisterDevice(std::move(device))) {
+    Check(false, "avatar-service: mount read-only catalog");
+    return;
+  }
+  AotAvatarCatalog catalog(*rt->memory(), call);
+  auto hr = catalog.Open("\\Device\\X360nAvatarCatalog17559\\AvatarAssetPack.toc");
+  Check(hr == 0, fmt::format("avatar-service: open original generator HRESULT={:08X}", hr));
+  if (hr) return;
+  std::vector<std::array<uint8_t, kMetadataSize>> descriptions;
+  hr = catalog.Generate(3, 4, descriptions);
+  Check(hr == 0 && descriptions.size() == 4,
+        fmt::format("avatar-service: random metadata HRESULT={:08X}, count={}", hr, descriptions.size()));
+  // IDs have three layouts: modifiers, body/head refs and clothing refs.
+  for (size_t i = 0; i < descriptions.size(); ++i) {
+    const auto& md = descriptions[i];
+    std::vector<size_t> slots{12, 28, 44, 288, 320};
+    for (size_t n = 0; n < 6; ++n) slots.push_back(60 + n * 32);
+    for (size_t n = 0; n < 13; ++n) slots.push_back(352 + n * 32);
+    size_t resolved = 0;
+    for (auto offset : slots) {
+      const auto id = AssetId::FromBytes(std::span<const uint8_t, 16>(md.data() + offset, 16));
+      if (id.IsZero()) continue;
+      std::string error;
+      auto index = ResolveAsset(toc, id, &error);
+      Check(bool(index), fmt::format("avatar-service: avatar {} slot {} record {} category {:X}: {}",
+                                    i, offset, id.index, id.category, error));
+      resolved += bool(index);
+    }
+    REXLOG_INFO("avatar-service: avatar {} body {}: {} resolved assets", i, BodyType(md), resolved);
+  }
+  for (const auto& md : descriptions) {
+    AotAssetsStats stats;
+    auto backend = MakeAotMetadataAssetsBackend(*rt->memory(), call, toc, md, 0xFFF, callbacks, stats);
+    AssetsRequest request(std::move(backend));
+    for (int n = 0; n < 80 && request.status() == kAssetsPending; ++n) request.Step();
+    auto output = request.result();
+    uint32_t count = output.result ? MeshBE(rt->memory()->TranslateVirtual<const uint8_t*>(output.result + 8)) : 0;
+    Check(request.status() == 0 && count >= 2 && stats.applied > 0,
+          fmt::format("avatar-service: full metadata HRESULT={:08X}, meshes={}, decoded={}, modifiers={}, finalized={}",
+                      request.status(), count, stats.decoded, stats.applied, stats.finalized));
+  }
+  Check(abi == 0, "avatar-service: original generator ABI preserved");
+}
+
+
+void Run(uint32_t game_callbacks) {
   auto* runtime = rex::Runtime::instance();
   auto* thread = rex::runtime::ThreadState::Get();
   if (!runtime || !thread) {
@@ -242,16 +1297,21 @@ void Run() {
   const std::string root = REXCVAR_GET(x360n_xam17559_root);
   const std::string catalog_path = REXCVAR_GET(x360n_avatar_catalog_17559);
   if (root.empty() || catalog_path.empty()) {
-    Check(false, "--x360n_xam17559_root and --x360n_avatar_catalog_17559 are required");
+    Check(
+        false,
+        "--x360n_xam17559_root and --x360n_avatar_catalog_17559 are required");
     return;
   }
 
-  // Mount and load. Name lookups of "xam.xex" still reach the SDK's kernel module
-  // first (KernelState::GetModule searches kernel modules before user modules).
-  auto device = std::make_unique<rex::filesystem::HostPathDevice>("\\Device\\X360nSystem17559",
-                                                                   root, true);
-  const bool mounted = device->Initialize() && ks->file_system()->RegisterDevice(std::move(device)) &&
-                       ks->file_system()->RegisterSymbolicLink("x360nsys:", "\\Device\\X360nSystem17559");
+  // Mount and load. Name lookups of "xam.xex" still reach the SDK's kernel
+  // module first (KernelState::GetModule searches kernel modules before user
+  // modules).
+  auto device = std::make_unique<rex::filesystem::HostPathDevice>(
+      "\\Device\\X360nSystem17559", root, true);
+  const bool mounted = device->Initialize() &&
+                       ks->file_system()->RegisterDevice(std::move(device)) &&
+                       ks->file_system()->RegisterSymbolicLink(
+                           "x360nsys:", "\\Device\\X360nSystem17559");
   Check(mounted, "mount " + root + " as x360nsys: (read-only)");
   if (!mounted) return;
   auto module = ks->LoadUserModule("x360nsys:\\xam.xex", false);
@@ -261,9 +1321,19 @@ void Run() {
   const uint32_t size = module->xex_module()->image_size();
   g_xam_hmodule = module->hmodule_ptr();
   Check(base == kXamBase && size == kXamSize,
-        fmt::format("load: image 0x{:08X}+0x{:X} (expected 0x{:08X}+0x{:X})", base, size, kXamBase,
-                    kXamSize));
+        fmt::format("load: image 0x{:08X}+0x{:X} (expected 0x{:08X}+0x{:X})",
+                    base, size, kXamBase, kXamSize));
 
+  if (REXCVAR_GET(motocross_avatar_service_probe) || REXCVAR_GET(motocross_xam_aot_probe_aggregate) || REXCVAR_GET(motocross_xam_aot_probe_meshes) || REXCVAR_GET(motocross_xam_aot_probe_ldi)) {
+    std::string error;
+    auto toc = x360n::avatar::AvatarToc::Parse(Slurp(catalog_path), &error);
+    if (!toc) { Check(false, "meshes: catalog: " + error); return; }
+    if (REXCVAR_GET(motocross_avatar_service_probe)) RunAvatarServiceProbe(*toc, catalog_path, game_callbacks);
+    else if (REXCVAR_GET(motocross_xam_aot_probe_aggregate)) RunAggregateAssets(*toc, game_callbacks);
+    else if (REXCVAR_GET(motocross_xam_aot_probe_ldi)) RunLdiAssets(*toc, game_callbacks);
+    else RunMeshes(*toc, game_callbacks);
+    return;
+  }
   Check(dispatcher->GetFunction(kBodyTypeExport) != nullptr, "registry: 0x816753C8 registered");
   Check(dispatcher->GetFunction(kVectorIterator) != nullptr, "registry: 0x81670000 registered");
   Check(dispatcher->GetFunction(kMidFunction) == nullptr, "registry: mid-function 0x816753CC absent");
@@ -301,6 +1371,8 @@ void Run() {
   }
   memory->SystemHeapFree(desc);
   if (REXCVAR_GET(motocross_xam_aot_probe_strb)) RunStrbDecode(*toc);
+  if (REXCVAR_GET(motocross_xam_aot_probe_colors)) RunStrbColors(*toc);
+  if (REXCVAR_GET(motocross_xam_aot_probe_sizes)) RunSizeCheck();
 
   // XAM -> game: the original vector iterator calls the game's constructor.
   constexpr uint32_t kCount = 4, kStride = 16;
@@ -450,8 +1522,9 @@ void MaybeRunXamAotProbe(PPCRegister& r3, PPCRegister& r4, PPCRegister& r5, PPCR
         "context: hook registers are the guest thread's PPCContext");
   (void)r7;
   PPCContext saved = *thread->context();
-  Run();
-  if (REXCVAR_GET(motocross_xam_aot_probe_initialize)) {
+  Run(uint32_t(saved.r6.u64));
+  if (REXCVAR_GET(motocross_xam_aot_probe_initialize) &&
+      !REXCVAR_GET(motocross_avatar_service_probe) && !REXCVAR_GET(motocross_xam_aot_probe_aggregate) && !REXCVAR_GET(motocross_xam_aot_probe_meshes) && !REXCVAR_GET(motocross_xam_aot_probe_ldi)) {
     *thread->context() = saved;
     RunOriginalInitialize(saved.r3, saved.r4, saved.r5, saved.r6, uint32_t(saved.r8.u64));
   }

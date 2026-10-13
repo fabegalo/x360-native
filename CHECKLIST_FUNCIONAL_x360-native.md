@@ -189,7 +189,10 @@ O VFS do SDK é a camada que relaciona caminhos do Xbox 360 a arquivos locais. A
 - [ ] Alterar temas, imagens de jogador e preferências visuais quando presentes na dashboard.
 - [ ] Exibir cartão de jogador, histórico de jogos e conquistas locais reais.
 - [ ] Registrar conquistas emitidas pelo jogo, persistir o progresso e mostrar as notificações correspondentes.
-- [ ] Suportar avatares e sua edição nas versões em que existirem.
+- [ ] Suportar avatares e sua edição nas versões em que existirem. Em 2026-10-13,
+  serviço original 17559 isolado levou Motocross ao tutorial; chão preto e piloto
+  deformado ainda impedem aprovação visual. Edição/persistência não validadas
+  ([evidência](docs/avatar-system.md#14-servico-real-e-entrada-no-tutorial-2026-10-13)).
 - [ ] Navegar no gerenciamento original de armazenamento e conteúdo.
 - [ ] Reproduzir música, fotos e vídeos locais nas interfaces e formatos que forem suportados por cada versão.
 - [ ] Implementar as opções de família/privacidade locais presentes, ou informar claramente as que ainda não têm efeito.

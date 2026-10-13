@@ -21,3 +21,14 @@ registers = ["r3"]
 name = "x360n_xam_avatar_init_pack"    # after bl 0x8196B8C8 (pack source and mount)
 address = 0x8196BA24
 registers = ["r3"]
+
+# New mipmap failure path; capture the last original call before returning false.
+[[midasm_hook]]
+name = "x360n_xam_mipmap_failure"
+address = 0x81979138
+registers = ["r3", "r27", "r31"]
+
+[[midasm_hook]]
+name = "x360n_xam_convert_return"
+address = 0x81A1D99C
+registers = ["r3"]

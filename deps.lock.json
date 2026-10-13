@@ -256,7 +256,7 @@
         "files": {
           "include/rex/system/kernel_state.h": "e47b22bc4b13dd8d114726e552b4c0f7534fdafdda2742b42289b91c825fb4fa",
           "src/system/kernel_state.cpp": "f57d06b3ec047f0c2e458b70d8b28bb7f42546b98d524c59fde83a8d03dd8d9b",
-          "src/kernel/xboxkrnl/xboxkrnl_modules.cpp": "e70d0f87f723d29d0efa20307c8615448e80b767af6b654e22b2957cfe690dae"
+          "src/kernel/xboxkrnl/xboxkrnl_modules.cpp": "6d9f646288d6e9cfc78b03dcd720137b8606a76c76eab7a31b03edadbd38669a"
         },
         "base_files": {
           "include/rex/system/kernel_state.h": "9e45cc465fd5a010a8dc59621e8d7788b1bb21ee36f5b4301175a84b1de7e000",
@@ -454,6 +454,32 @@
           "src/kernel/xam/xam_info.cpp": "351255b8adbdd2c877077f0f01ae7607db5499e203aa217ed2090cfaee05a4a2"
         },
         "test": "sdkcheck.HUD allocation uses the system pool and remains owned until XamFree"
+      },
+      {
+        "file": "patches/rexglue-sdk/0035-ldi-caller-workspace.patch",
+        "sha256": "616ddc4f3599f5cc82001275660a24bc8078064122aa5957978c629a4219f508",
+        "base_files": {
+          "src/kernel/xboxkrnl/xboxkrnl_modules.cpp": "e70d0f87f723d29d0efa20307c8615448e80b767af6b654e22b2957cfe690dae"
+        },
+        "files": {
+          "src/kernel/xboxkrnl/xboxkrnl_modules.cpp": "6d9f646288d6e9cfc78b03dcd720137b8606a76c76eab7a31b03edadbd38669a"
+        },
+        "test": "tests/sdkcheck/ldi_test.cpp: synthetic LZX literal frame, reset lifecycle, bounds and failure atomicity; fails with pre-patch stubs"
+      },
+      {
+        "file": "patches/rexglue-sdk/0036-vavguw-codegen.patch",
+        "sha256": "6358b0568bde8918fcb463c55a6e7aaeb95d3b68b4f6bef1190cea05bbc7c21b",
+        "base_files": {
+          "src/codegen/builders.h": "40f7e551eef6483a2216143c178beb5b9ffbfb039aca25f8c51df03eb346574f",
+          "src/codegen/instruction_dispatch.cpp": "8c95cbee3e3c5bdd6e3651bf3be290113d8f5ce144c2e7eaf7732704f08f6499",
+          "src/codegen/builders/vector.cpp": "b3528ed4a7e0642e2f390cf3d745e18d6e496f14d1707afef6f7049bb84fb39d"
+        },
+        "files": {
+          "src/codegen/builders.h": "e4492b48164e711c51f35ff044047359474c61419a215e10013bfdbb4b354477",
+          "src/codegen/instruction_dispatch.cpp": "43ac3ab7967b4c1b93bd3834253266e520da5c4038ac583cf173b35225acd493",
+          "src/codegen/builders/vector.cpp": "6e934f5079823e648722fa177308995ded09ba475972bf0c5316990e01b77cbf"
+        },
+        "test": "sdkcheck.Vavguw: assemble, recompile and execute unsigned rounded averages, overflow boundaries and destination aliasing; pre-patch throws REX_UNIMPLEMENTED"
       }
     ]
   },

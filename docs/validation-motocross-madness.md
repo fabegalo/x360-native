@@ -122,3 +122,49 @@ Xenia Canary `8d8ba9b6f71e` (2026-09-12), `src/xenia/kernel/xam/xam_avatar.cc`:
 - XAM 17559 original em AOT no mesmo processo (caminho 2): prova de conceito 21/21 e
   bloqueio atual do `XamAvatarInitialize` original em `docs/avatar-system.md` §8. Sem as
   opções da sonda, o jogo roda como na execução 3.
+
+### Incremento isolado: transformação STRB de cores (2026-10-12)
+
+`20261013T011122Z-mm-avatars-colors-3`, na worktree `x360-avatars`: o XAM
+17559 AOT `0x81976598` expandiu 39 tabelas originais em 63 triplas de cores,
+com comparação dos 220 bytes de cada saída contra extração independente dos
+bits. Três campos truncados foram rejeitados sem escrita; 291 chamadas
+preservaram a ABI verificada. Detalhes, dependências e limites em
+`docs/avatar-system.md` §10. O contexto do jogo foi restaurado e
+`XamAvatarInitialize` continuou retornando `0xFFFFFFFF`; ainda não há avatar
+renderizado nem novo marco de jogabilidade. O timeout após a sonda é controlado.
+### Incremento isolado: malhas/texturas e callbacks reais (2026-10-12)
+
+`20261013T012506Z-mm-avatars-mesh-2`: o leitor XAM `0x81974A90` montou os
+589 assets de campo 3 (634 malhas, 1619 texturas), usando callbacks reais do jogo:
+275 chamadas de tiling e 1612 de layout. Validados 1.189.998 índices e 2.871.296
+bytes tiled, buffers/ponteiros/ABI e três negativos. Transporte LZX em C++ com a
+biblioteca existente do SDK; imports LDI continuam pendentes. Sonda com zero
+falhas; jogo encerrado pelo supervisor em 45 s, com os erros XCTD/devkit já
+conhecidos. Sem novo marco de renderização ou jogabilidade. A nova opção
+`motocross_xam_aot_probe_meshes` pula as suítes anteriores, que não foram repetidas.
+Detalhes e limites em `docs/avatar-system.md` seção 11. Somente `x360-avatars`.
+
+### Incremento isolado: LDI e worker GetAssets (2026-10-12)
+
+`20261013T014125Z-mm-avatars-ldi-1`: patch 0035 implementa o perfil LDI com
+workspace do chamador e reset por bloco. Stream comprimido original validado em
+avanço/cruzamento de 32 KiB/reset/releitura/destruição. Worker `0x81966450` retornou
+HRESULT 0 para MaleBody, FemaleBody e Power Tee, com buffers/índices/callbacks/ABI
+válidos. Sonda com zero falhas; 46 verificações sintéticas LDI novas passaram.
+Initialize permanece em `0xFFFFFFFF`; GetAssets agregado/export e renderização
+pendentes. Nenhuma suíte anterior repetida; detalhes e limites na seção 12 de
+`docs/avatar-system.md`. Toda a execução ficou na worktree de avatares.
+
+### Incremento isolado: resultado agregado e ciclo de vida (2026-10-12)
+
+`20261013T015915Z-mm-avatars-aggregate-1`: `0x81967628` inicializou o agregado;
+`0x81966FC8/0x819669A0` montaram Power Tee + MaleBody pelo worker e stream LDI
+originais; `0x819660A0/0x81966348` finalizaram dois descritores e 71 ossos.
+Ponteiros/IDs/limites/propriedade/ABI aprovados. Cancelamento e erro AOT real no
+segundo asset descartaram a saída privada; liberação/polling terminal conferidos.
+Novo coordenador compartilhado C++ com 61 verificações sintéticas aprovadas.
+Nenhuma suíte anterior repetida. Build final passou. Export GetAssets/overlapped,
+protocolo 2, componentes especiais/modificadores e renderização continuam
+pendentes; Initialize mantém `0xFFFFFFFF`. Perfil diagnóstico 4, forma neutra,
+apenas na x360-avatars. Evidência, comando e limites em `docs/avatar-system.md` §13.

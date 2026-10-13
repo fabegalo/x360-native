@@ -1,0 +1,108 @@
+diff --git a/src/kernel/xboxkrnl/xboxkrnl_modules.cpp b/src/kernel/xboxkrnl/xboxkrnl_modules.cpp
+index 251047f..c7e3a74 100644
+--- a/src/kernel/xboxkrnl/xboxkrnl_modules.cpp
++++ b/src/kernel/xboxkrnl/xboxkrnl_modules.cpp
+@@ -9,6 +9,8 @@
+  * @modified    Tom Clay, 2026 - Adapted for ReXGlue runtime
+  */
+ 
++#include <array>
++#include <rex/system/lzx.h>
+ #include <rex/kernel/xboxkrnl/private.h>
+ #include <rex/logging.h>
+ #include <rex/hook.h>
+@@ -214,6 +216,82 @@ u32 XexLoadImageHeaders_entry(mapped_string path, mapped_void headers) {
+   return X_STATUS_NOT_IMPLEMENTED;
+ }
+ 
++// LDI caller-owned workspace profile used by XAM 17559's avatar stream.
++// Observed ABI: (block_bytes*, {window_bytes, partition_bytes}*, alloc, free,
++// workspace, workspace_bytes*, context*). Both sizes are 32 KiB in this profile.
++// Only independent blocks with an explicit Reset between them are implemented.
++// Nonzero status is failure; finer proprietary error-code parity is not claimed.
++namespace {
++constexpr uint32_t kLdiMagic = 0x4C444931, kLdiWindow = 0x8000, kLdiWorkspace = 0x9800;
++bool LdiContext(mapped_u32 context) {
++  return context && context[0] == kLdiMagic && context[1] == context.guest_address();
++}
++bool LdiRange(uint32_t address, uint32_t size) {
++  return address && uint64_t(address) + size <= 0x100000000ull;
++}
++bool LdiOverlaps(uint32_t a, uint32_t n, uint32_t b, uint32_t m) {
++  return uint64_t(a) < uint64_t(b) + m && uint64_t(b) < uint64_t(a) + n;
++}
++}  // namespace
++
++u32 LDICreateDecompression_entry(mapped_u32 block_bytes, mapped_u32 config, u32 alloc,
++                                 u32 free, mapped_u32 workspace, mapped_u32 workspace_bytes,
++                                 mapped_u32 context_out) {
++  if (!context_out) return 1;
++  *context_out = 0;
++  if (!block_bytes || !config || !workspace_bytes || alloc || free ||
++      *block_bytes != kLdiWindow || config[0] != kLdiWindow || config[1] != kLdiWindow)
++    return 1;
++  const uint32_t available = *workspace_bytes;
++  *workspace_bytes = kLdiWorkspace;
++  if (!workspace || (workspace.guest_address() & 15) || available < kLdiWorkspace ||
++      !LdiRange(workspace.guest_address(), kLdiWorkspace) ||
++      LdiOverlaps(workspace.guest_address(), kLdiWorkspace, context_out.guest_address(), 4))
++    return 1;
++  workspace[0] = kLdiMagic;
++  workspace[1] = workspace.guest_address();
++  workspace[2] = 0;  // Ready for an independent frame.
++  workspace[3] = kLdiWindow;
++  *context_out = workspace.guest_address();
++  return 0;
++}
++
++u32 LDIDecompress_entry(mapped_u32 context, mapped_void source, u32 source_bytes,
++                        mapped_void destination, mapped_u32 output_bytes) {
++  if (!output_bytes || !LdiContext(context)) return 1;
++  const uint32_t requested = *output_bytes;
++  // Do not silently discard history on a second call: this profile requires Reset.
++  if (context[2] != 0 || !requested || requested > kLdiWindow || !source_bytes ||
++      source_bytes > kLdiWorkspace || !source || !destination ||
++      !LdiRange(source.guest_address(), source_bytes) ||
++      !LdiRange(destination.guest_address(), requested) ||
++      LdiOverlaps(context.guest_address(), 16, output_bytes.guest_address(), 4) ||
++      LdiOverlaps(context.guest_address(), 16, destination.guest_address(), requested))
++    return 1;
++  *output_bytes = 0;
++  context[2] = 1;  // Reset is also required after a failed decode.
++  std::array<uint8_t, kLdiWindow> decoded{};
++  if (lzx_decompress(source.host_address(), source_bytes, decoded.data(), requested,
++                     kLdiWindow, nullptr, 0)) return 1;
++  std::memcpy(destination.host_address(), decoded.data(), requested);
++  *output_bytes = requested;
++  return 0;
++}
++
++u32 LDIResetDecompression_entry(mapped_u32 context) {
++  if (!LdiContext(context)) return 1;
++  context[2] = 0;
++  return 0;
++}
++
++u32 LDIDestroyDecompression_entry(mapped_u32 context) {
++  if (!LdiContext(context)) return 1;
++  // Storage belongs to the caller. No host pointer or persistent host allocation.
++  for (uint32_t i = 0; i < 4; ++i) context[i] = 0;
++  return 0;
++}
++
++
+ }  // namespace rex::kernel::xboxkrnl
+ 
+ REX_EXPORT(__imp__XexCheckExecutablePrivilege,
+@@ -258,7 +336,7 @@ REX_EXPORT_STUB(__imp__XexTitleHashOpen);
+ REX_EXPORT_STUB(__imp__XexReserveCodeBuffer);
+ REX_EXPORT_STUB(__imp__XexCommitCodeBuffer);
+ REX_EXPORT_STUB(__imp__XexRegisterUsermodeModule);
+-REX_EXPORT_STUB(__imp__LDICreateDecompression);
+-REX_EXPORT_STUB(__imp__LDIDecompress);
+-REX_EXPORT_STUB(__imp__LDIDestroyDecompression);
+-REX_EXPORT_STUB(__imp__LDIResetDecompression);
++REX_EXPORT(__imp__LDICreateDecompression, rex::kernel::xboxkrnl::LDICreateDecompression_entry)
++REX_EXPORT(__imp__LDIDecompress, rex::kernel::xboxkrnl::LDIDecompress_entry)
++REX_EXPORT(__imp__LDIDestroyDecompression, rex::kernel::xboxkrnl::LDIDestroyDecompression_entry)
++REX_EXPORT(__imp__LDIResetDecompression, rex::kernel::xboxkrnl::LDIResetDecompression_entry)

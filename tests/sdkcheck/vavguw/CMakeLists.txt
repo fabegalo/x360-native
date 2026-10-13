@@ -1,0 +1,18 @@
+set(vavguw_sdk "${CMAKE_CURRENT_SOURCE_DIR}/../../../external/rexglue-sdk")
+set(vavguw_bin "${CMAKE_CURRENT_BINARY_DIR}/bin")
+set(vavguw_gen "${CMAKE_CURRENT_BINARY_DIR}/generated")
+file(MAKE_DIRECTORY "${vavguw_bin}" "${vavguw_gen}" "${CMAKE_CURRENT_BINARY_DIR}/obj")
+block(SCOPE_FOR VARIABLES)
+  set(PROJECT_SOURCE_DIR "${vavguw_sdk}")
+  include("${vavguw_sdk}/cmake/ppc_test_pipeline.cmake")
+  ppc_add_test_binary("${CMAKE_CURRENT_SOURCE_DIR}/asm/vavguw.s" "${CMAKE_CURRENT_BINARY_DIR}/obj" "${vavguw_bin}")
+endblock()
+add_custom_command(OUTPUT "${vavguw_gen}/ppc_test_functions.cpp" "${vavguw_gen}/ppc_test_decls.h"
+  COMMAND $<TARGET_FILE:rexglue> recompile-tests --output=${vavguw_gen} --bin-dir=${vavguw_bin} --asm-dir=${CMAKE_CURRENT_SOURCE_DIR}/asm
+  DEPENDS "${vavguw_bin}/vavguw.bin" "${vavguw_bin}/vavguw.map" rexglue VERBATIM)
+add_executable(x360n_vavguw_checks main.cpp "${vavguw_gen}/ppc_test_functions.cpp")
+target_include_directories(x360n_vavguw_checks PRIVATE "${vavguw_gen}")
+target_link_libraries(x360n_vavguw_checks PRIVATE rexruntime simde fmt::fmt)
+target_compile_options(x360n_vavguw_checks PRIVATE -fno-strict-aliasing -ffp-model=strict -fno-char8_t -msse4.1 -mssse3 -UTRACY_ENABLE -UREXGLUE_ENABLE_PROFILING -UREXGLUE_ENABLE_PERF_COUNTERS)
+x360n_stage_runtime_dlls(x360n_vavguw_checks)
+add_test(NAME sdkcheck.Vavguw COMMAND x360n_vavguw_checks)
