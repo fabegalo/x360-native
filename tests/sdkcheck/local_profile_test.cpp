@@ -1,4 +1,5 @@
 #include <catch2/catch_test_macros.hpp>
+#include <array>
 #include <filesystem>
 #include <fstream>
 #include <chrono>
@@ -30,6 +31,31 @@ extern "C" void __imp__NtClose(PPCContext&, uint8_t*);
 extern "C" void __imp__XMemCpy(PPCContext&, uint8_t*);
 extern "C" void __imp__XMemSet(PPCContext&, uint8_t*);
 extern "C" void __imp__lstrcpynW(PPCContext&, uint8_t*);
+extern "C" void __imp__RtlCompareMemoryUlong(PPCContext&, uint8_t*);
+
+TEST_CASE("Local profile passcode comparison returns matching bytes in guest order",
+          "[sdk][passcode-contract]") {
+  // 17559's profile constructor tests account+56 against four zero bytes.
+  // Returning one word instead of four bytes incorrectly marks it protected.
+  std::array<uint8_t, 64> bytes{};
+  PPCContext ctx{};
+  auto compare = [&](uint32_t offset, uint32_t length, uint32_t pattern) {
+    ctx.r3.u64 = offset; ctx.r4.u64 = length; ctx.r5.u64 = pattern;
+    __imp__RtlCompareMemoryUlong(ctx, bytes.data());
+    return ctx.r3.u32;
+  };
+  CHECK(compare(16, 4, 0) == 4);
+  CHECK(compare(16, 16, 0) == 16);
+  CHECK(compare(16, 0, 0) == 0);
+  rex::memory::store_and_swap<uint32_t>(bytes.data() + 16, 0x01020304u);
+  CHECK(compare(16, 4, 0) == 0); // configured passcode stays protected
+  CHECK(compare(16, 4, 0x01020304u) == 4);
+  rex::memory::store_and_swap<uint32_t>(bytes.data() + 24, 0x01020304u);
+  CHECK(compare(16, 12, 0x01020304u) == 4); // stop at first differing word
+  CHECK(compare(16, 12, 0) == 0);
+  CHECK(compare(17, 4, 0) == 0); // preserve alignment rejection
+  CHECK(compare(16, 3, 0) == 0);
+}
 
 namespace {
 struct Store {
@@ -45,6 +71,41 @@ void Setup(rex::Runtime& rt) {
   config.tool_mode = true;
   config.kernel_init = rex::kernel::InitializeKernel;
   REQUIRE(rt.Setup(std::move(config)) == X_STATUS_SUCCESS);
+}
+
+TEST_CASE("Local profile enumerated account has no passcode without changing session",
+          "[sdk][passcode-contract]") {
+  Store store;
+  rex::Runtime rt(store.path, store.path);
+  Setup(rt);
+  auto* profile = rt.kernel_state()->user_profile();
+  REQUIRE(profile->CreateLocal("NoPasscode") == 0);
+  auto* memory = rt.memory();
+  auto* base = memory->virtual_membase();
+  const auto data = memory->SystemHeapAlloc(512);
+  auto* bytes = memory->TranslateVirtual<uint8_t*>(data);
+  PPCContext ctx{};
+  ctx.r3.u64 = 0; ctx.r4.u64 = data;
+  __imp__XamProfileCreateEnumerator(ctx, base);
+  REQUIRE(ctx.r3.u32 == 0);
+  const auto handle = rex::memory::load_and_swap<uint32_t>(bytes);
+  ctx.r3.u64 = handle; ctx.r4.u64 = 2;
+  ctx.r5.u64 = data + 16; ctx.r6.u64 = 0;
+  __imp__XamProfileEnumerate(ctx, base);
+  REQUIRE(ctx.r3.u32 == 0);
+  CHECK(rex::memory::load_and_swap<uint64_t>(bytes + 16) == profile->xuid());
+  CHECK(rex::memory::load_and_swap<uint64_t>(bytes + 24) == 0); // account control fields
+  CHECK(rex::memory::load_and_swap<uint64_t>(bytes + 64) == 0); // Live XUID
+  // Original 92925530 stores the account at object+24; 92925658 compares
+  // object+80 (account+56). Its vtable+20 method returns (matched != 4).
+  ctx.r3.u64 = data + 24 + 56; ctx.r4.u64 = 4; ctx.r5.u64 = 0;
+  __imp__RtlCompareMemoryUlong(ctx, base);
+  REQUIRE(ctx.r3.u32 == 4);
+  CHECK(profile->signin_state() == 0);
+  ctx.r3.u64 = handle;
+  __imp__NtClose(ctx, base);
+  CHECK(ctx.r3.u32 == 0);
+  memory->SystemHeapFree(data);
 }
 
 TEST_CASE("Local profile enumerates the original Sign-in record and commits only on confirmation",

@@ -372,3 +372,20 @@ on isolated copies matches all three base/final hashes; all 42 patches pass Chec
 One bounded graphical run demonstrated original enumeration and the stored name,
 not a button-driven login. The copy-import fixes were tested after that run, with
 no second visual execution. See dashboard §0.27 for the acceptance gap.
+
+## 0043 — byte count for the original passcode check (C7.5, partial)
+
+RtlCompareMemoryUlong returned a count of matching ULONGs instead of the byte
+length of the matching prefix. The 17559 profile constructor compares its four
+zero passcode bytes and requires a return value of 4; the old result of 1 marked
+an unprotected profile as protected. Return bytes, stop at the first differing
+word and retain guest-endian access and alignment rejection. No profile data,
+XAM session, UI logic, persistence format or SDK pin changes.
+
+Two focused tests tagged `[passcode-contract]` cover the export's zero/nonzero
+patterns, first mismatch, byte units, alignment, and the real enumerated local
+account with its session untouched. The comparison test failed five assertions
+before the patch; both tests pass afterward. Reverse/apply in an isolated source
+copy matches the lock's base/final hashes; all 43 patches pass Check. No upstream
+equivalent identified. The only graphical run removed the false lock/passcode
+but did not complete login or cancellation; see dashboard §0.29.

@@ -1616,3 +1616,91 @@ local, cópias do perfil, `binaries.txt` com hashes dos três binários utilizad
 Não foram executados testes unitários/backend, builds, suítes completas, jogos
 ou outra dashboard: nenhuma implementação mudou. Somente documentação de
 resultado/bloqueio foi alterada; Release publicada preservada, sem push.
+
+### 0.29 Falso passcode corrigido: C7.5 (2026-10-13, parcial)
+
+Base `b445001`; HEAD local preservado. **O objetivo de login pela interface
+original não foi alcançado.** Há uma correção funcional comprovada do bloqueio
+anterior, mas a única execução autorizada encontrou outro bloqueio. Nenhum
+login artificial, chamada de confirmação pelo host ou edição de sessão foi feita.
+
+**Causa determinada do “Enter Pass Code”:**
+
+- A confirmação da dashboard em `928B4A88` chama `928B4220` em `928B4B08`.
+  O método virtual +20 do item selecionado decide se deve chamar `92189268`,
+  responsável pelo MessageBox com flags `0x00020003` e textos 160/161.
+- A vtable `9213F8CC`, observada na imagem original local, aponta +20 para
+  `92925498` e +52 para `92925508`. O primeiro lê o booleano do item em +704;
+  o segundo copia os 380 bytes da conta, armazenados em item+24.
+- O construtor `92925530` copia a conta enumerada. Em `92925650–92925674`,
+  chama `RtlCompareMemoryUlong(item+80, 4, 0)` e grava em item+704 se o
+  resultado **difere de 4**. Item+80 é conta+56, os quatro bytes de passcode.
+  Conta+40 (XUID Live) determina outro booleano, em item+700, não esse teste.
+- `AccountFor` do patch 0042 já entrega os quatro bytes zerados, o XUID Live
+  zerado e os campos iniciais de controle zerados. O perfil persistido não tem
+  senha configurada. O defeito estava em `xboxkrnl_rtl.cpp`: a função retornava
+  **uma palavra** correspondente, e não **quatro bytes**. Isso explica tanto
+  o cadeado como a entrada indevida no ramo do modal. Não foi necessário
+  mudar flags da conta, armazenar uma senha nem implementar teclado de passcode.
+
+**Contrato corrigido:** patch reproduzível 0043, registrado em `deps.lock.json`,
+retorna o comprimento em bytes do prefixo de ULONGs iguais, parando na primeira
+palavra diferente. A ordem big-endian já era tratada por `as_array`; foi
+preservada, assim como a rejeição de endereço/comprimento desalinhados. A
+mudança não toca `RtlCompareMemory`, serviços de conta ou outros modos de login.
+O pin `f5337cdc947ff6d4c4196737e2c807a48f2a1fc2` permanece.
+
+**Validação focada:** `sdkcheck.Local profile passcode comparison returns
+matching bytes in guest order` falhou antes da correção (5/9 asserções; quatro
+zeros retornavam 1). Depois, esse teste e `sdkcheck.Local profile enumerated
+account has no passcode without changing session` passaram: **2/2**, 0,70 s
+CTest, timeout 30 s por caso. O segundo exercita a conta realmente enumerada
+pelo runtime, seu XUID, controle/Live/passcode zerados, o export corrigido e a
+sessão desconectada preservada. Logs privados em `.local/tmp/c75-test-before.log`
+e `c75-tests-final.log`. Builds incrementais dos alvos `x360n_sdk_runtime_checks`
+e `dash_17559` concluídos com saída 0 (`c75-build-focused.log`,
+`c75-build-title.log`); codegen do título reportou zero arquivos escritos.
+O primeiro build do teste acusou include de `<array>` ausente, corrigido antes
+de executar o teste; não foram usados binários antigos após essa falha.
+Reverse/apply em cópia isolada conferiu hashes base/final (`c75-replay.log`).
+Os 43 patches passaram `apply-sdk-patches.ps1 -Check`. Não foram repetidas
+regressões anteriores, testes dos jogos ou suítes completas.
+
+**Única execução gráfica:** `.local/runs/c75-original-confirm/`, PID 29820,
+56,114 s, encerramento pelo script `.local/tmp/c75-run.ps1`, sem processos
+remanescentes. Entrada manual do usuário, capturas reais por
+`scripts/capture-window.ps1`; nenhum Computer Use ou entrada por script.
+Dados isolados copiados da fixture existente, nome `C73Local`, XUID
+`E00000000000C730`. `state-8.png` mostra o perfil sem cadeado. `state-35.png`
+e `state-50.png` mostram o corpo vazio do Sign-in. Não há chamada a
+`XamShowMessageBoxUI` no log. O usuário relatou: “entrou em uma tela vazia e b
+nao voltava”. **A não concluiu login; B não cancelou corretamente.**
+As cópias de perfil em 8/20/35/50 s e ao final mantêm o byte de sessão zero.
+`before.dat` e `after.dat` têm SHA-256
+`B3199E283D5AAB0A6F6DC8DFC4543752812B5AF485D711527C12478ADE1675FA`.
+Logo, não há evidência de XUID conectado nem identidade conectada na dashboard;
+preservar um arquivo desconectado não aprova cancelamento de sessão conectada.
+Hashes dos binários estão em `binaries.txt`; `rex.log` tem SHA-256
+`60664355D973F644BCF07511B30E9EA1EA5B04B41F9C6DDD4E28980F3F8B87D2`.
+
+**Bloqueio restante e limites da causa:** às 18:19:26.406 (horário do log),
+o host ainda retorna `original create scene -> 80070525, root=00010057`,
+seguido de desmontagem e FE/21001=1627. `80070525` corresponde a
+HRESULT_FROM_WIN32(NO_SUCH_USER/1317). Ocorre antes de pressionar A e permanece
+após corrigir a comparação; não é prova de senha incorreta. **A chamada que
+origina esse HRESULT não foi determinada nesta investigação**; não atribuir
+causalidade a um import específico sem evidência. A interface visível é a rota
+da dashboard, não uma criação bem-sucedida desse host `signin.xex`.
+
+A continuação estática imediatamente após a decisão de passcode é
+`928B4B14–928B4B58`: prepara estado e agenda o callback `928B4958` por método
+virtual. Esse callback chama o método de login em `928B49B4` e publica estado
+6 somente em `928B4A40–928B4A64`. Não há rastreamento dinâmico suficiente para
+atribuir a tela vazia a uma dessas operações. O log contém consultas repetidas
+FC/58003 não implementadas e cancelamento/espera de tarefa incompletos durante
+a desmontagem do host; **isso não demonstra que sejam a causa da tela vazia**.
+Não foram preenchidos esses serviços com sucesso fictício, substituído o
+callback por login direto, nem ampliada a implementação de tarefas/XUI sem
+causa demonstrada. O limite gráfico foi consumido. Próxima investigação deve
+instrumentar somente esse callback e a propagação de erro em `90106F80`, antes
+de qualquer nova sessão autorizada. C7.5 continua parcial, sem push ou Release.

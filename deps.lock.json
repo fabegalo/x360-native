@@ -568,6 +568,17 @@
           "src/kernel/xam/xam_misc.cpp": "33bfbe1ae23956af73db5c1c394d87f0118378eb8d8932d15eddcedfb405dfce"
         },
         "test": "sdkcheck.Local profile: original Sign-in enumeration ABI, confirmation, cancellation boundary and restart"
+      },
+      {
+        "file": "patches/rexglue-sdk/0043-rtl-passcode-byte-count.patch",
+        "sha256": "491d5d8de325f064122cdb3bec8b5deba2eb6eb830951244fc4cbf452347ae53",
+        "base_files": {
+          "src/kernel/xboxkrnl/xboxkrnl_rtl.cpp": "5b4b547f56a05f14b7df8c807f89908a399131294af217dffc9cca158c37af1b"
+        },
+        "files": {
+          "src/kernel/xboxkrnl/xboxkrnl_rtl.cpp": "cc3465358f282bac696302c7bba32781385735202ec84b5afc79717df183c5cf"
+        },
+        "test": "sdkcheck.Local profile passcode: byte count, matching prefix and guest order"
       }
     ]
   },

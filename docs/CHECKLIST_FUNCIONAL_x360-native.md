@@ -115,6 +115,13 @@ consulta pelos serviços compartilhados. Seleção/confirmação pelo botão, re
 à dashboard com essa identidade e cancelamento na cena **não demonstrados**;
 nenhum item adicional de aceite foi marcado. Ver dashboard §0.27.
 
+Incremento C7.5 (2026-10-13, parcial): corrigido o falso passcode na comparação
+do kernel (patch 0043), sem alterar a conta. Dois testes focados passam. Uma
+execução de 56,114 s mostrou o perfil sem cadeado; A levou a tela vazia e B não
+voltou, conforme o usuário. Sessão persistida permaneceu zero; login e identidade
+na dashboard continuam **reprovados/não demonstrados**, sem marcar novos itens.
+O erro `80070525` na criação do host Sign-in permanece. Ver dashboard §0.29.
+
 ## 4. Biblioteca e My Games — P0
 
 - [x] Fazer o pedido de lançamento partir de My Games original na 17559: chamada relatada a `XamContentLaunchImageInternalEx` para `XSYSLAUNCH:\default.xex`.

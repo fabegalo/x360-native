@@ -1,5 +1,18 @@
 # STATUS
 
+C7.5 (2026-10-13), **parcial; login original ainda bloqueado**: patch 0043
+corrige `RtlCompareMemoryUlong`, que retornava palavras iguais em vez de bytes
+do prefixo igual. A dashboard compara os quatro bytes zerados de passcode com
+retorno 4; receber 1 criava um falso cadeado. Metadata/persistência estavam
+corretas e foram preservadas. Dois testes focados passam; o teste de comparação
+falhou antes do patch. Na única sessão gráfica (56,114 s), o perfil apareceu
+sem cadeado e não houve pedido de passcode. O usuário confirmou que A levou a
+uma tela vazia e B não voltou. Arquivo idêntico, sessão zero; dashboard conectada
+não demonstrada. O host `signin.xex` ainda falha com `80070525` (NO_SUCH_USER),
+antes da confirmação; a origem dessa falha não foi determinada. Limite gráfico
+consumido, nenhum processo remanescente. Evidências e próximo ponto exato de
+rastreamento em `docs/dashboard.md` §0.29; nenhum aceite funcional promovido.
+
 C7.4 (2026-10-13), **bloqueado; login original não entregue**: uma única
 execução manual de 58,153 s, a partir de `3d6045c`, mostrou `C73Local` e o
 modal “Enter Pass Code”. O usuário confirmou que A não entrou e B não fechou.

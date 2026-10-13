@@ -1,0 +1,30 @@
+diff --git a/src/kernel/xboxkrnl/xboxkrnl_rtl.cpp b/src/kernel/xboxkrnl/xboxkrnl_rtl.cpp
+index 8b862fc..bbaed0e 100644
+--- a/src/kernel/xboxkrnl/xboxkrnl_rtl.cpp
++++ b/src/kernel/xboxkrnl/xboxkrnl_rtl.cpp
+@@ -60,16 +60,15 @@ u32 RtlCompareMemoryUlong_entry(mapped_void source, u32 length, u32 pattern) {
+     return 0;
+   }
+
+-  uint32_t n = 0;
+-  for (uint32_t i = 0; i < (length / 4); i++) {
+-    // FIXME: This assumes as_array returns rex::be
+-    uint32_t val = source.as_array<uint32_t>()[i];
+-    if (val == pattern) {
+-      n++;
+-    }
+-  }
+-
+-  return n;
++  // The result is the length of the matching prefix in BYTES, not words.
++  // 17559 tests its four passcode bytes against zero and expects exactly 4.
++  // as_array uses guest-endian elements; stop at the first differing ULONG.
++  uint32_t matched = 0;
++  const auto words = source.as_array<uint32_t>();
++  while (matched < length && uint32_t(words[matched / 4]) == pattern) {
++    matched += 4;
++  }
++  return matched;
+ }
+
+ // https://msdn.microsoft.com/en-us/library/ff552263
