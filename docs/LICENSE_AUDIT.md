@@ -280,7 +280,7 @@ Fontes oficiais conferidas em 13/10/2026:
 Evidência local dos textos consultados em `.local/audit/c10-provenance`:
 Build Tools DOCX SHA-256 `2f66b86a00e8d9833789897ce23d05a4a2dbea370cf39c8c1098dbc17d0e7bdc`;
 Community DOCX `41a207b10c8ab91d0d2f10a854715f73dca54509581692d2fe179aa3ffcb8540`;
-SDK RTF instalado `0f4a26ac9dc50066f8a1bfeAAF3f092d1b9e4791df5487b9f3c31e7c3dc4d7f5`.
+SDK RTF instalado `0f4a26ac9dc50066f8a1bfeaaf3f092d1b9e4791df5487b9f3c31e7c3dc4d7f5`.
 Essa evidência local não é dependência de execução nem arquivo obrigatório do ZIP.
 
 ### Decisões humanas e limites ainda abertos
@@ -310,3 +310,44 @@ Essa evidência local não é dependência de execução nem arquivo obrigatóri
 O bloqueio `blocked-C10` continua intencional. O gate técnico não substitui essas
 decisões e o inventário não declara que todos os componentes do SDK são livres de
 pendências. Nenhuma funcionalidade de execução foi modificada nesta atualização.
+
+### Aceitação do novo candidato
+
+Código empacotado: **`d87b5c95f50fafd8058c8ce6f50b844cc238e75a`**.
+O commit que registra estes resultados é documental; não altera a revisão
+declarada dentro do ZIP. Arquivo:
+`.local/packages/c10-provenance/x360-native-0.1.0-preview.7-windows-x64.zip`.
+Repetição em `.local/packages/c10-provenance-repeat`, com **3.219.126 bytes e
+400 arquivos**, idêntica byte a byte.
+
+- ZIP SHA-256: `ff2dd3e8e1c8e9eaf901f774a34fd015596191d1dacb049e6e7ad85489d89cf1`.
+- Payload SHA-256: `2f17390f13b9ddefe6578910d48140ed7d88a275394173e31e749df3237d5088`.
+- Builds novas simultâneas: `.local/distribution/4005261fe11449b69b4befaa1a2f9eb5/build`
+  e `.local/distribution/5c0c0444dcc34b57b2e1c5dcfb9f7957/build`.
+
+| Verificação | Resultado observado |
+|---|---|
+| CTest desktop em ambas as builds | 55 casos, 20.628 assertions aprovadas em cada uma. |
+| Índices, escopo, originais e licenças | Aprovados nos builds e na extração externa. 88 registros, 18 arquivos de proveniência SDK comparados; três EXEs e nenhuma DLL adicional. Gate exclui conteúdo Xbox e constantes conhecidas do loader, conforme seu escopo documentado. |
+| PowerShell 5.1 / testes de pacote | 1 positivo + **21 negativos** aprovados. Novos casos: ICO alterado, ICO com hash recalculado, procedência ausente, texto DXC ausente e registro DXC sem licença. |
+| Ícone | Gerador verificado também no PowerShell 5.1; recurso visível na barra de título da GUI. |
+| GUI real fora do repositório | Aberta em `C:/Users/fabeg/AppData/Local/Temp/x360-c10-p7b/x360-native-0.1.0-preview.7-windows-x64`. Verificou o pacote, criou `data/environment`, exibiu início com controles habilitados e fechou normalmente. Sem downloads. Os **341 arquivos** do ambiente, inclusive licenças, coincidiram com o índice do payload. |
+| Instalação/atualização via modelo real | **43 assertions / 2 casos**, usando ZIP extraído separado (`x360-c10-p7c`), payload anterior preview.6, conteúdo real importado de Castle Crashers/dashboard 17559 e perfis/saves sintéticos. Atualização detectada, confirmação exigida, interrupção/retomada e preservação dos dados verificadas. Não é alegação de funcionamento de save/load em jogos. |
+| Recibos C2 reais | **8 assertions** aprovadas para Castle Crashers, dashboard 17559 e Iruka em `.local/build/c5-titles`. Preparações reutilizáveis; sem recompilar jogos nem regenerar codegen. |
+| Inicialização console com PATH apenas Windows | Supervisor `--help` retorna 0; extrator imprime uso e retorna 3, conforme contrato existente. |
+| Preservação | Código C1/C3, C2, C5, C6 e C4/C11 sem alterações; SDK/LLVM e 38 patches mantidos. Isolamento C5 confirmado pelas duas builds simultâneas. |
+
+As primeiras tentativas da bateria externa revelaram dois problemas do próprio
+procedimento de teste, corrigidos antes do aceite: usar o checkout SDK de
+desenvolvimento causou rejeição por bytes CRLF diferentes numa licença; a fonte
+correta da comparação é o snapshot fixado da distribuição. Abrir a GUI na mesma
+extração enquanto os negativos a copiavam encontrou o lock do ambiente criado.
+A bateria final foi executada em outra extração imutável, separada da GUI, e passou
+integralmente. Não se enfraqueceu o gate nem o lock para contornar essas rejeições.
+
+Logs/evidências locais: `.local/audit/c10-provenance-package.log`,
+`c10-provenance-repeat.log`, `c10-p7-extracted-gate.log`, `c10-p7-negatives.log`,
+`c10-p7-receipts.log`, `c10-p7-environments.log`, `c10-p7-result.json`,
+`c10-p7-gui.json` e `c10-p7-contracts.json`.
+Não houve Windows limpo disponível, nova regressão gráfica de jogos, aceite
+jurídico, push ou publicação de Release.
