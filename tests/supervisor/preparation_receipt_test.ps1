@@ -56,6 +56,14 @@ try {
     $failed = $false
     try { Get-PreparedArtifacts $build $exe @($dll) | Out-Null } catch { $failed = $true }
     Assert $failed 'publisher certified a DLL outside the build graph'
+    [IO.File]::Delete((Join-Path $build 'obsolete.dll'))
+    $manifest = Join-Path $scratch 'profile.toml'; [IO.File]::WriteAllText($manifest, 'fixture')
+    $receipt = "$exe.preparation.json"
+    Publish-PreparationReceipt $receipt @{schema=1; title='sample'; manifest=$manifest; exe=$exe;
+        roles=@{compiler=$inputFile.Replace('\','/'); codegen=$second; build_config=$second};
+        inputs=@(Get-ReceiptEntries @($manifest,$inputFile,$second));
+        artifacts=@(Get-PreparedArtifacts $build $exe @($dll))}
+    Assert ($null -ne (Get-PreviousReceipt $receipt 'sample' $manifest $exe)) 'CMake forward-slash compiler path prevented reuse'
     Write-Output 'PASS: hash substitution, create, replace, publication failure atomicity and path resolution'
 } finally {
     $resolved = [IO.Path]::GetFullPath($scratch)

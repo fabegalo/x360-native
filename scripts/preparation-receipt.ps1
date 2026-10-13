@@ -152,7 +152,7 @@ function Get-PreviousReceipt([string]$File, [string]$Title, [string]$Manifest, [
         $r = [IO.File]::ReadAllText($File) | ConvertFrom-Json
         if ($r.schema -ne 1 -or $r.title -ne $Title -or $r.manifest -ne $Manifest -or $r.exe -ne $Exe -or -not $r.inputs -or -not $r.artifacts) { return $null }
         foreach ($required in @($Manifest, $r.roles.compiler, $r.roles.codegen, $r.roles.build_config)) {
-            if (-not $required -or $required -notin @($r.inputs.path)) { return $null }
+            if (-not $required -or [IO.Path]::GetFullPath($required) -notin @($r.inputs.path)) { return $null }
         }
         if ($Exe -notin @($r.artifacts.path)) { return $null }
         $registration = Join-Path (Split-Path $Manifest) 'preparation.toml'
