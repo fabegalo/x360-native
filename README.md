@@ -1,267 +1,192 @@
-# x360-native
+# x360-native — Xbox 360 Native Recompilation Platform
 
-Plataforma experimental para executar a **dashboard original do Xbox 360** e
-jogos recompilados para código nativo, usando [ReXGlue](https://github.com/rexglue/rexglue-sdk).
-O primeiro ambiente funcional é Windows x86-64, com gráficos D3D12.
+Run original Xbox 360 software on modern computers through **static PowerPC
+recompilation to native code**, with a compatibility environment based on
+[ReXGlue](https://github.com/rexglue/rexglue-sdk).
 
-Projeto independente, sem afiliação oficial com a Microsoft. Jogos, dashboards,
-fontes, firmware e outros arquivos originais do Xbox 360 não acompanham o
-aplicativo. O usuário deve fornecer conteúdo cuja utilização seja autorizada.
+**Performance-first, correctness-preserving.** We aim for the best native
+performance possible while preserving the original programs' correct behavior.
+Performance improvements must be backed by measurements, not assumptions.
 
-O código próprio está sob [BSD-3-Clause](LICENSE), aprovada pelo mantenedor.
-As dependências conservam seus termos: consulte [avisos de terceiros](THIRD_PARTY_NOTICES.md)
-e [auditoria de licenças](docs/LICENSE_AUDIT.md). No ZIP, os avisos e a pasta
-`licenses` ficam ao lado do executável principal. A publicação permanece bloqueada
-pelas pendências da auditoria; a licença própria não autoriza distribuir conteúdo Xbox.
+> Independent, experimental, and under active development. **Windows x64 is the
+> currently tested platform**, using D3D12. Linux and macOS are roadmap goals.
+> Local preview packages exist; a public, end-user-ready release is still pending.
 
-O fluxo já validado usa os menus e os pedidos de lançamento originais:
+[Current capabilities](#current-capabilities) · [Getting started](#download-and-installation) ·
+[Roadmap](#roadmap) · [Documentation](#documentation-and-contributing)
 
-**Intro com imagem e som → dashboard 17559 → My Games → Castle Crashers → retorno à dashboard.**
+## The original experience
 
-A sessão mantém a mesma janela e não repete a intro ao voltar do jogo.
-O projeto ainda está em desenvolvimento: não há uma distribuição pronta para
-o usuário final nem compatibilidade geral com o catálogo do console.
+The desktop app imports and prepares your content, then starts the original
+console interface. The demonstrated reference flow is:
 
-[Estado detalhado](STATUS.md) · [Checklist oficial](CHECKLIST_FUNCIONAL_x360-native.md) ·
-[Arquitetura](docs/architecture.md) · [Compatibilidade](docs/compatibility.md)
+**Original boot animation with sound → Dashboard 17559 → My Games → Castle Crashers → Dashboard.**
 
-## O que funciona hoje
+That cycle preserves the same host window and returns without replaying the
+intro. Original launch and return requests drive the transition. This is a
+validated combination of versions, not a claim that every dashboard or game works.
 
-Resultados consolidados em **12 de outubro de 2026**, nos alvos e versões abaixo.
-Compilar, abrir um menu e validar gameplay são etapas distintas.
+## Current capabilities
 
-| Alvo | Resultado observado | Limite atual |
+Evidence reviewed on **13 October 2026**. Results below combine recorded manual
+sessions and automated checks on `main`; they are not a new gameplay certification.
+
+**Compiled** means a native build succeeded. **Boots** means the original program
+starts. **Renders** means visible output was verified. **In-game** means gameplay
+was reached. **Playable** requires sustained gameplay validation, including relevant
+progression and persistence. **Fully Functional** requires all relevant features
+and end-to-end flows to be verified. No game below is claimed Playable or Fully
+Functional; a timed smoke test cannot establish either status.
+
+| Target or feature | Verified result | Current limits |
 |---|---|---|
-| **Dashboard Retail 17559** | Menu Metro com atualização contínua, fonte original, navegação por teclado e controle. My Games enumera e lança Castle Crashers. | Guide, perfis e parte das configurações ainda estão incompletos. |
-| **Intro da 17559** | Módulo original recompilado: animação, áudio e término pelo caminho original, seguido da dashboard. | Validada para esse conjunto; não é uma intro global para outras versões. |
-| **Castle Crashers 0.0.1.3** | Inicia pela My Games original, chega ao menu, recebe teclado/controle e retorna pela opção do próprio jogo. | Gameplay completo, saves e load não estão validados nesse ciclo. |
-| **Dashboard Retail 6717** | Interface Blades renderiza, troca de blade e move a seleção. | Sem textos: falta XenonJKLatin.xtt correspondente. Lançamento de jogos não validado. |
-| **iruka / Dolphin** | Renderização e animação verificadas pela regressão L1–L5. | Alvo de referência técnica; não comprova compatibilidade de outros títulos. |
+| **Dashboard 17559 (Metro)** | **Renders** — original text, continuous rendering, keyboard/controller navigation and My Games launching Castle Crashers. | Some settings, profiles and Guide remain incomplete. |
+| **Original 17559 boot animation** | **Renders + audio** — original AOT module completes and enters the dashboard. | Validated for the 17559 content set; not a universal intro for other versions. |
+| **Dashboard 6717 (Blades)** | **Compiled**; historical rendering and blade navigation. | A later audit smoke crashed; cause unresolved. Matching font missing; diagnostic target, no guided session. |
+| **Iruka / Dolphin sample** | **Renders** — automated L1–L5 checks verify startup, rendering and animation. | Technical reference sample; input, audio and long sessions unvalidated. |
+| **Castle Crashers 0.0.1.3** | **Renders** — menu, keyboard/controller input, original launch and return verified. Gameplay was user-reported. | Sustained gameplay, save/load and full-game entitlement unvalidated; smoke results do not prove playability. |
+| **Motocross Madness** | **In-game** — tutorial movement and objectives observed, including after integration into `main`. | Black terrain and deformed rider; full races and save/load unvalidated. No graphical preparation profile yet. |
+| **Avatars** | Experimental opt-in service completes real `Initialize`, asset assembly and mipmap generation in Motocross. | Visual fidelity, catalog animations and persistent user avatars unvalidated; not a universal avatar service. |
+| **Original launch and return** | 17559 ↔ Castle cycle verified; launch flags/data preserved, failures distinguished from normal return. | Other title/dashboard combinations require their own validation. |
+| **Profiles and Guide** | Partial system UI bindings and original profile scene creation. | No complete original UI flow or real local sign-in/out; per-user saves and achievements unvalidated. |
+| **Desktop app** | Windows GUI opens from an extracted preview, imports content and manages the installed library. | Clean Windows installation and the complete first-use experience remain unvalidated. |
+| **Content preparation** | Identity/integrity checks, guided AOT preparation and reuse of verified artifacts implemented. | Exact supported versions only; recognition or extraction does not make a title runnable. |
 
-A transição da 17559 usa o pedido original de preservar a imagem, a sequência
-de ajuste de gama do XAM e a drenagem do áudio pendente. O teste manual confirmou
-o ciclo sem os cortes anteriores; ainda não há medição de equivalência com o console.
+See the [technical audit and subsequent validations](docs/PROJECT_AUDIT.md),
+[dashboard evidence](docs/dashboard.md) and [avatar integration results](docs/avatar-system.md).
+Older entries in the technical documents are historical; later dated validations
+take precedence. Xbox Live, online multiplayer and special peripherals are not validated.
 
-**Perfis locais continuam pendentes.** A cena original de GamerCard já é criada,
-ligada ao HUD e passa pelo layout, mas ainda falta o host contínuo de atualização,
-composição e entrada para apresentá-la. Criar perfil, entrar, sair e recuperar
-os dados após reiniciar não estão validados. O usuário fixo do SDK não conta como
-implementação desse fluxo. Evidências e bloqueios estão em [Dashboard](docs/dashboard.md).
+## What makes the platform useful
 
-## Como a plataforma funciona
+- **Native AOT execution.** PowerPC code is translated ahead of time and compiled
+  for the host. A modified, pinned ReXGlue runtime provides console compatibility.
+- **Original dashboard and boot sequence.** The GUI handles preparation; the
+  original dashboard and My Games remain the console experience.
+- **A library tied to exact content.** Title/version profiles identify executables
+  and resources. Original launch requests select a verified, prepared target.
+- **Guided import and preparation.** Import extracted files/folders, ISO game
+  images (GDFX), or Xbox 360 CON/LIVE/PIRS packages, including extensionless XBLA
+  packages. Originals are preserved; incomplete or unknown sets cannot become ready.
+- **Verified reuse and reproducible preparation.** Pinned tools, SDK revisions and
+  patches, isolated builds and preparation receipts connect inputs to native
+  executables and their dependencies. Valid artifacts can be reused. Independent
+  builds of the documented Windows preview produced byte-identical ZIPs; this is
+  evidence for those candidates, not a guarantee for every build or machine.
+- **Experimental original system modules.** Selected original routines are
+  recompiled AOT for boot animation, XUI and avatar work, with version-specific
+  bindings and explicit limits.
 
-O ReXGlue recompila estaticamente o código PowerPC de cada executável para código
-nativo (**AOT**). O runtime reproduz os serviços de kernel, XAM, arquivos, entrada,
-áudio e GPU Xenos necessários à execução. Xenia é referência técnica, não o executor.
+AOT does **not** remove all emulation: the runtime still reproduces console
+services and translates Xenos GPU commands and shaders. The project does not boot
+the complete original Microsoft kernel, XAM or firmware. See the
+[architecture](docs/architecture.md) for the division of responsibilities.
 
-Cada título e versão têm um manifesto com a identidade do XEX, a recompilação,
-os recursos e as configurações correspondentes. O supervisor recebe o
-pedido original da dashboard e seleciona o alvo AOT verificado; a interface de
-lançamento continua sendo a My Games original.
+## Download and installation
 
-**Todas as versões originais da dashboard, incluindo antigas e betas, são objetivo
-permanente.** A 17559 é a primeira referência funcional. Trocar de versão exige
-seu próprio perfil e suas dependências: não basta trocar o executável e reutilizar
-silenciosamente XAM, intro ou fontes da 17559.
+**GitHub Releases is the intended delivery channel. No public download is linked
+yet.** Existing ZIPs are local preview candidates. Installation on clean Windows,
+including obtaining missing Microsoft build components, has not been technically
+validated. Publication also depends on the [license audit](docs/LICENSE_AUDIT.md).
 
-## Aplicativo de preparação para Windows
+The intended experience is **Download → Extract → Launch → Import → Prepare → Play**.
+For a future release, or an available local preview:
 
-O candidato Windows x64 tem um aplicativo principal: **x360-native.exe**.
-Extraia o ZIP e abra esse arquivo. A interface abre sem conteúdo importado.
+1. **Extract the whole Windows x64 application ZIP** and launch `x360-native.exe`.
+   It opens without Xbox content. GitHub's source-code archives are not the app.
+2. **Import your own authorized content.** Supply the matching original dashboard
+   files and any supported games. The app identifies versions, checks components
+   and shows what is missing. Unpack ZIP/RAR/7z archives first.
+3. **Prepare supported content.** The app checks/downloads pinned tools with your
+   consent and builds native code locally. Additional Microsoft C++ components may
+   require their official installer. Preparing a dashboard does not require a game.
+4. **Start Xbox 360**, then use the original **My Games** to launch prepared games.
+   The confirmed reference is 17559 with Castle Crashers; use its **Return to
+   Arcade** option to return. Closing the platform window ends the session.
 
-Em **Dashboards** ou **Jogos**, adicione um arquivo ou uma pasta extraída.
-A versão é identificada e os componentes são verificados antes da cópia;
-componentes podem ser adicionados por etapas. O aplicativo mostra o que falta
-antes de habilitar a preparação. Jogos continuam sendo iniciados pela **My Games
-original**; não é necessário instalar um jogo específico para preparar a dashboard.
+The candidate includes the graphical app, supervisor, content extractor,
+preparation sources/scripts, and license notices. It does **not** include games,
+dashboards, Xbox fonts, firmware, proprietary assets, generated game code, the
+complete ReXGlue runtime or build tools. Preparation obtains tools separately and
+uses the content you provide locally.
 
-As ferramentas ficam internas e seus downloads exigem consentimento. A abertura
-e a identificação não exigem Git, CMake ou Visual Studio. Preparar títulos exige
-componentes adicionais; o aplicativo oferece as ferramentas fixadas e o instalador
-Microsoft quando necessário. Esse instalador pode solicitar elevação.
+Keep the **`data/` folder** when updating or removing the app: it contains the local
+environment, imported content, preparations and settings. Reopening can reuse
+valid preparations. Update recovery has automated coverage, but complete GUI
+acceptance and automatic downgrade are not established. See
+[desktop preparation and package validation](docs/desktop-preparation.md) and the
+[later audit results](docs/PROJECT_AUDIT.md) for the exact scope of each preview.
 
-A pasta **data** guarda conteúdo, preparações e configurações: preserve-a ao
-remover ou atualizar o aplicativo. Nenhum conteúdo original de Xbox é distribuído
-ou enviado. O catálogo tem perfis por versão; reconhecer um arquivo desconhecido
-não significa que ele poderá ser executado. STFS/ISO diretamente pela interface,
-instalação em Windows limpo e atualização/rollback ainda não estão aprovados.
-[Evidências e limites](docs/desktop-preparation.md).
-## Preparar o ambiente de desenvolvimento
+## Demonstrations
 
-Há uma **prévia gráfica de preparação para Windows**, que abre mesmo sem conteúdo,
-mostra os conjuntos cadastrados, verifica os componentes e inicia a sessão original.
-Depois do build abaixo, abra
-`.local/build/win-amd64/src/desktop/Debug/x360-native.exe`.
-Esta é a execução pela árvore de desenvolvimento; o candidato acima leva sua
-própria cópia das fontes. O aceite completo para usuários leigos segue pendente.
+Public screenshots and videos are pending provenance and publication-permission
+review. The planned gallery covers Dashboard 17559, the original intro, the desktop
+app and verified gameplay. No illustrative mockups are presented as execution evidence.
+For now, the linked validation documents record observations and their limits.
 
-- Windows 10 (1903 ou posterior)/11 x64. A execução de referência foi feita no Windows 11.
-- Visual Studio 2022 Build Tools com C++, MSVC x64 e Windows SDK. Ambiente
-  verificado: MSVC 14.44.35207, SDK 10.0.26100, CMake 3.31 e Ninja 1.12.
-- Git e acesso à rede para preparar as dependências.
-- LLVM/Clang **22.1.8**, baixado e verificado pelo bootstrap em `.local/toolchains`.
-  Não exige instalação global do LLVM, Python ou privilégios administrativos.
+## Roadmap
 
-Execute no PowerShell, na raiz do repositório:
+These are **long-term goals**, not completed features or compatibility promises:
 
-```powershell
-powershell -ExecutionPolicy Bypass -File scripts\bootstrap.ps1
-scripts\devshell.cmd cmake --preset win-amd64
-scripts\devshell.cmd cmake --build --preset win-amd64-debug
-```
+- Progressively support original **Blades, NXE, Kinect and Metro dashboards**, including betas.
+- Expand compatibility across the Xbox 360 catalog, validating each title and version.
+- Complete original local profiles, Guide, avatars, achievements and storage services.
+- Support additional original system modules while preserving original launch/return behavior.
+- Support **XNA / Xbox Live Indie Games**, including their managed runtime requirements.
+- Investigate backward compatibility with **original Xbox (2001) games**.
+- Bring the complete application and preparation experience to **Windows, Linux and macOS**, with separate validation per platform.
+- Optimize against **real benchmarks**, preserving correctness rather than claiming unmeasured superiority.
 
-O bootstrap prepara os submódulos, a toolchain e os patches locais do SDK fixados
-em [deps.lock.json](deps.lock.json). O script de ambiente configura MSVC e LLVM apenas
-para o comando executado. Esse build produz as ferramentas e testes da plataforma;
-os títulos são compilados separadamente, depois de preparar os arquivos locais.
+The [functional checklist](docs/CHECKLIST_FUNCIONAL_x360-native.md) tracks coverage
+and acceptance criteria. Immediate needs include reliable first-use installation,
+complete profile/storage flows and resolution of the documented visual defects.
 
-## Onde colocar os arquivos
+## Tests and quality
 
-Conteúdo original, pacotes, fontes, saves e logs ficam em **.local/**, ignorado
-pelo Git. O repositório não inclui jogos, dashboards ou módulos proprietários.
-Mantenha os pacotes de origem e os registros de procedência e hashes.
+The latest recorded full suite after C9/C12, on **13 October 2026**, contains
+**1,807 tests: 1,802 passed, 4 skipped and 1 pre-existing failure** in
+`unit.Depfile escapes characters make treats as syntax`. All **136 project tests**
+passed. The suite is **not fully passing**. These counts were checked against the
+recorded log; see [audit E11](docs/PROJECT_AUDIT.md#e11-c9c12--ambiente-dos-testes-e-sessões-contínuas--13102026).
 
-### Jogos
+Testing combines PowerPC translation checks, runtime/ABI regressions, content and
+artifact integrity checks, and session/import/update tests. Per-title runs add
+logs, rendering checks and manual input/gameplay observations. Synthetic session
+cycles test handoff contracts; they do not certify long gameplay sessions or saves.
 
-Para um novo título, crie uma pasta por versão, região ou disco:
+## Documentation and contributing
 
-```text
-.local/inputs/titles/meu_jogo/
-  source/       pacote original, ISO ou arquivos recebidos
-  extracted/    default.xex e todos os recursos, na estrutura original
-  metadata/     identidade, procedência e hashes
-```
+Most detailed engineering records are currently in Portuguese.
 
-Quando o executável se chamar `default.xex`, ele deve ficar diretamente em
-`extracted/`. Preserve todos os demais recursos e subdiretórios do jogo.
-Pacotes STFS (CON, LIVE, PIRS) podem ser extraídos com
-`x360n-content extract <pacote> <destino>`. A ferramenta fica em
-`.local/build/win-amd64/src/content/Debug/x360n-content.exe`.
-
-A extração de ISO/GDFX por `x360n-content extract-disc <imagem.iso> <destino>`
-está em desenvolvimento local, ainda não consolidada na versão publicada.
-Esse comando extrai a partição de jogo; não converte o título em um alvo executável.
-
-**Copiar ou extrair arquivos não cria suporte ao jogo.** Ainda são necessários
-identificação, perfil em `titles/`, análise, geração AOT, compilação e validação.
-Consulte [Configurações por título](titles/README.md).
-
-### Dashboards e módulos do sistema
-
-O acervo usa `.local/inputs/dashboard/versions/<versão>/<variante>/`; seu catálogo
-local fica em `dashboard/metadata/organization/catalog.csv`. O perfil funcional
-17559 mantém `.local/inputs/dashboard/17559/` como raiz de execução.
-
-O [manifesto da 17559](titles/dash_17559/dash_17559_manifest.toml) registra os
-caminhos e associações de `dash.xex`, `bootanim.xex`, `SegoeXbox-Light.xtt` e
-módulos da interface. O XAM original é usado apenas pelas rotinas XUI explicitamente
-ligadas; seu entrypoint não é executado e os serviços do SDK continuam ativos.
-
-`dashboard/resources/fonts/` é um acervo local, não um pacote global de fontes
-para todas as versões. Compartilhe recursos somente quando sua identidade ou
-compatibilidade estiver demonstrada. Saves e dados de usuário ficam sob
-`.local/user/<perfil-de-execução>/`, conforme o manifesto.
-
-### DLC e atualizações
-
-DLC e addons (`00000002`) pertencem à pasta do jogo: pacote em
-`source/<TitleID>/00000002/`, extração em `dlc/<nome>/` e hashes em
-`metadata/dlc_<nome>.sha256`. Preserve ZIP/7z recebidos em `source/archives/`.
-Uma atualização de título (`000B0000`) pode mudar o executável: verifique sua
-identidade e prepare o alvo AOT correspondente, em vez de tratá-la como DLC.
-
-O SDK procura DLC extraída em
-`<user_data_root>/0000000000000000/<TitleID>/00000002/<pacote>/`.
-**Esse caminho ainda não foi validado com uma DLC real.**
-
-## Compilar e executar a sessão 17559
-
-Os arquivos locais precisam corresponder aos manifestos da
-[dashboard](titles/dash_17559/dash_17559_manifest.toml) e do
-[Castle Crashers](titles/castle_crashers/castle_crashers_manifest.toml).
-Os scripts não fornecem nem preparam automaticamente esse conteúdo.
-
-Compile os dois alvos em sequência; os builds compartilham saídas do SDK:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File scripts\build-title.ps1 -Title castle_crashers
-powershell -ExecutionPolicy Bypass -File scripts\build-title.ps1 -Title dash_17559
-```
-
-O script executa configure, codegen, reconfigure e build, interrompendo na primeira
-falha. Os executáveis ficam em `.local/build/titles/<nome>/`.
-
-Inicie a sessão pelo supervisor:
-
-```powershell
-$x360n = '.\.local\build\win-amd64\src\supervisor\Debug\x360n.exe'
-& $x360n doctor
-& $x360n session titles\dash_17559\dash_17559_manifest.toml --timeout 900
-```
-
-Após a intro, use **My Games → Castle Crashers**. Para voltar, use **Return to
-Arcade** no menu do jogo. Fechar a janela encerra a plataforma. O timeout do
-exemplo é de 900 segundos por título; `--timeout 0` desativa esse limite.
-
-A navegação foi confirmada com controle e teclado (`Shift` + setas na dashboard).
-A inicialização direta continua disponível para diagnóstico, executando o alvo
-com `--dash17559_boot_intro=false`; veja os detalhes em [Dashboard](docs/dashboard.md).
-
-## Testes e diagnóstico
-
-Após um build bem-sucedido, execute o subconjunto pertinente:
-
-```powershell
-scripts\devshell.cmd ctest --preset win-amd64-debug -L project
-scripts\devshell.cmd ctest --preset win-amd64-debug -R "local[.]"
-```
-
-Os testes `local.*` dependem dos arquivos de entrada correspondentes. A suíte
-completa pode ser executada com `ctest --preset win-amd64-debug -j 16` pelo mesmo
-`devshell.cmd`; não use binários antigos para validar um build que falhou.
-
-A consolidação de 12/10/2026 registrou **42 testes do SDK e 40 do supervisor
-aprovados**, regressão iruka L1–L5 e o ciclo real com Castle Crashers. Esses são
-resultados dos grupos exercitados, não uma aprovação recente da suíte inteira.
-Há uma falha conhecida no teste upstream `unit.Depfile escapes characters make treats as syntax`;
-consulte [STATUS.md](STATUS.md) para o contexto da execução.
-
-`x360n identify <arquivo> --json` registra identidade e SHA-256.
-`x360n run <exe> [--label L] [--timeout S] [-- args...]` executa um alvo compilado
-isoladamente; isso não valida a integração com My Games. O comando aceita saídas de
-build, nunca executáveis em `.local/inputs`.
-
-Cada execução gera `.local/runs/<UTC>-<label>/`, com logs e `report.json`
-contendo identidade do executável, revisões e resultado. Hipóteses experimentais,
-incluindo a região de memória específica da 17559, permanecem identificadas em
-[Dashboard](docs/dashboard.md); não são contratos comprovados do console.
-
-## Próximas etapas e documentação
-
-O [checklist funcional](CHECKLIST_FUNCIONAL_x360-native.md) orienta os incrementos:
-interface original de perfis e Guide, persistência, ampliação da compatibilidade
-por versão e distribuição com preparação guiada. Windows, Linux e macOS são
-objetivos, com validação separada por sistema e arquitetura; hoje a referência
-funcional é Windows x86-64.
-
-Títulos XNA/Xbox Live Indie Games exigem uma categoria própria e runtime gerenciado;
-não são tratados como jogos PowerPC nativos comuns. Esse suporte segue pendente.
-Xbox Live, multiplayer online e periféricos especiais também não estão validados.
-
-| Documento | Conteúdo |
+| Document | Purpose |
 |---|---|
-| [STATUS.md](STATUS.md) | Estado consolidado, resultados e desvios conhecidos |
-| [Checklist funcional](CHECKLIST_FUNCIONAL_x360-native.md) | Requisitos, prioridades e critérios de aceite |
-| [Arquitetura](docs/architecture.md) | Recompilação, runtime e decisões técnicas |
-| [Compatibilidade](docs/compatibility.md) | Critérios e evidências por alvo |
-| [Dashboard](docs/dashboard.md) | Evolução da 17559 e da 6717, transições e XUI |
-| [Castle Crashers](docs/validation-castle-crashers.md) / [iruka](docs/validation-iruka.md) | Identidade dos arquivos e validações dos títulos |
-| [titles/](titles/README.md) | Organização dos manifestos e configurações por executável |
+| [Building](docs/BUILDING.md) | Development setup, content layout, build commands, tests and diagnostics |
+| [Architecture](docs/architecture.md) | AOT, runtime boundaries and process model |
+| [Technical status](STATUS.md) / [Audit](docs/PROJECT_AUDIT.md) | Milestones, dated evidence, later corrections and unresolved issues |
+| [Functional checklist](docs/CHECKLIST_FUNCIONAL_x360-native.md) | Coverage, priorities and acceptance criteria |
+| [Compatibility](docs/compatibility.md) / [Title profiles](titles/README.md) | Compatibility stages, historical results and per-version configuration |
+| [Dashboard](docs/dashboard.md) / [Avatars](docs/avatar-system.md) | Original UI, transitions, modules and avatar evidence |
+| [Iruka](docs/validation-iruka.md) / [Castle Crashers](docs/validation-castle-crashers.md) / [Motocross](docs/validation-motocross-madness.md) | Title investigations; later Motocross results are in the avatar document |
+| [Desktop preparation](docs/desktop-preparation.md) | Application workflow and preview validation |
 
-## Licenças
+Contributions should reproduce a concrete issue, preserve existing title behavior
+and include relevant validation. Report the exact content version/hash, project
+revision, platform and reproduction steps; keep proprietary files and private data
+out of submissions. Use Conventional Commits. Start with the build guide and the
+existing checklist rather than assuming that a compiled title is compatible.
 
-A licença própria deste repositório ainda não foi definida. ReXGlue e suas
-dependências mantêm suas licenças e avisos de terceiros; consulte os respectivos
-projetos. O repositório não concede direitos sobre jogos, fontes ou recursos
-originais do Xbox 360. Binários proprietários e código AOT gerado a partir deles
-não fazem parte da publicação.
+## License and acknowledgments
+
+Original project code is licensed under [BSD-3-Clause](LICENSE). Dependencies and
+adapted code retain their own terms and credits; see
+[third-party notices](THIRD_PARTY_NOTICES.md) and the [license audit](docs/LICENSE_AUDIT.md).
+Redistribution and publication questions remain open; the notices do not resolve
+the audit's outstanding requirements.
+
+x360-native is independent and is not affiliated with or endorsed by Microsoft.
+Xbox and related names belong to their respective owners. Proprietary Xbox content
+is not included: users must supply files they are authorized to use. Recompilation
+does not grant redistribution rights over the original software or its assets.
+
+Thanks to ReXGlue and its contributors, and to the Xenia work on which its
+compatibility runtime is based.

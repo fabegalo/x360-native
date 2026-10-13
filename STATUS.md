@@ -75,7 +75,7 @@ o layout com resultado 0; **sem apresentação da tela ou signin/signout ainda**
 XAM executado somente nas rotinas XUI selecionadas, sem inicializar o módulo inteiro.
 42/42 SDK e 40/40 supervisor passam; iruka L1–L5 e ciclo original Castle Crashers
 com retorno sem intro revalidados. Falta integrar o compositor/entrada do host XUI.
-Checklist oficial de cobertura: `CHECKLIST_FUNCIONAL_x360-native.md`.
+Checklist oficial de cobertura: `docs/CHECKLIST_FUNCIONAL_x360-native.md`.
 Detalhes e limites: `docs/dashboard.md` §§0.19–0.23. Recursos e código XUI
 da 17559 não são compartilhados silenciosamente com outras versões.
 Segundo perfil: Retail 6717 apresenta quadros reais (blade "Xbox 360"), troca para

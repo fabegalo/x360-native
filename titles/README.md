@@ -36,5 +36,5 @@ Para adicionar arquivos de um novo jogo, use
 `.local/inputs/titles/<nome>/source/` para o pacote original e
 `.local/inputs/titles/<nome>/extracted/` para o XEX e todos os recursos extraídos.
 Hashes e identificação ficam em `metadata/`, ao lado de `extracted/`. Veja
-“Adicionar novos títulos” no `README.md` da raiz. Colocar arquivos ali não cria
+[Onde colocar os arquivos](../docs/BUILDING.md#onde-colocar-os-arquivos). Colocar arquivos ali não cria
 automaticamente um projeto AOT nesta pasta.

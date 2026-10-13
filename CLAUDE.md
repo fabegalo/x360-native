@@ -1,7 +1,7 @@
 # CLAUDE.md — contexto persistente do x360-native
 
 Leia também `STATUS.md` (estado real) e `docs/architecture.md` (decisões D1–D7).
-`CHECKLIST_FUNCIONAL_x360-native.md` é o checklist oficial de cobertura; atualizar
+`docs/CHECKLIST_FUNCIONAL_x360-native.md` é o checklist oficial de cobertura; atualizar
 somente itens demonstrados, respeitando o alvo e o limite de cada execução.
 
 ## Objetivo
@@ -25,7 +25,7 @@ preset não comprova suporte funcional. O assistente não substitui a dashboard,
 My Games, Guide ou perfis originais. Preservar o núcleo compartilhado, isolar
 diferenças de sistema e manter os resultados existentes; isso não autoriza troca
 imediata de backend/SDK ou ports paralelos. Requisitos e aceite do pacote real:
-`CHECKLIST_FUNCIONAL_x360-native.md` §§15–18, ainda pendentes. Não distribuir
+`docs/CHECKLIST_FUNCIONAL_x360-native.md` §§15–18, ainda pendentes. Não distribuir
 conteúdo proprietário ou código derivado dos binários sem autorização aplicável.
 
 ## Commits e primeira publicação — regra permanente
