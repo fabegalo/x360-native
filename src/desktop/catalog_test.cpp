@@ -191,6 +191,8 @@ TEST_CASE("package identity rejects swapped binaries missing payload and foreign
   Write(package / "app/workspace/payload.sha256", payloadIndex);
   Write(package / "package.sha256", Hash("frontend") + "\tx360-native.exe\n" + Hash("supervisor") + "\tapp/x360n.exe\n" + Hash("metadata") + "\tpackage.json\n" + Hash(payloadIndex) + "\tapp/workspace/payload.sha256\n" + Hash("lock") + "\tapp/workspace/deps.lock.json\n");
   REQUIRE_NOTHROW(VerifyPackage(package));
+  CHECK_NOTHROW(VerifyPackage(package, Hash(payloadIndex)));
+  CHECK_THROWS(VerifyPackage(package, Hash("another source revision")));
   SECTION("foreign DLL") { Write(package / "app/fmt.dll", "incompatible"); CHECK_THROWS(VerifyPackage(package)); }
   SECTION("swapped supervisor") { Write(package / "app/x360n.exe", "other version"); CHECK_THROWS(VerifyPackage(package)); }
   SECTION("swapped frontend") { Write(package / "x360-native.exe", "other version"); CHECK_THROWS(VerifyPackage(package)); }

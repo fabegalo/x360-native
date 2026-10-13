@@ -60,7 +60,7 @@ struct PayloadStatus {
 };
 PayloadStatus InspectEnvironment(const std::filesystem::path& payload,
                                 const std::filesystem::path& destination);
-void VerifyPackage(const std::filesystem::path& directory);
+void VerifyPackage(const std::filesystem::path& directory, const std::string& expected_payload = {});
 // Replacement requires explicit consent; originals remain in local backups.
 void InitializeEnvironment(const std::filesystem::path& payload,
                            const std::filesystem::path& destination,

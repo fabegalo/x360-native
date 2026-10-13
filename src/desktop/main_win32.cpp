@@ -22,6 +22,13 @@ namespace fs = std::filesystem;
 using namespace x360n;
 using namespace x360n::desktop;
 namespace {
+void VerifyDistribution(const fs::path& directory) {
+#ifdef X360N_DISTRIBUTION
+  VerifyPackage(directory, X360N_PACKAGE_PAYLOAD);
+#else
+  VerifyPackage(directory);
+#endif
+}
 constexpr UINT kFinished = WM_APP + 1, kProgress = WM_APP + 2, kDetected = WM_APP + 3, kInitialized = WM_APP + 4, kInspected = WM_APP + 5;
 enum { kFolder = 101, kTargets, kCheck, kImport, kPrepare, kLaunch, kDetails, kData, kCancel, kLanguage, kInstall, kStorage, kPrimary, kSettings, kImportFolder, kDashboards, kGames, kHome, kImportPage, kAddContent, kLibrary };
 constexpr COLORREF background = RGB(15, 20, 27), surface = RGB(24, 32, 42), foreground = RGB(236, 241, 247), muted = RGB(157, 171, 189), accent = RGB(169, 231, 154);
@@ -332,7 +339,7 @@ fs::path PickFolder(HWND owner, const wchar_t* title, bool folder = true) {
 void Start(App& a, int action, fs::path source = {}) {
   if (a.busy || a.selected >= a.targets.size()) return;
   if (!a.preferences.empty()) {
-    VerifyPackage(a.self.parent_path());
+    VerifyDistribution(a.self.parent_path());
     if (!InspectEnvironment(Payload(a), a.root).current)
       throw std::runtime_error("Esta instalação precisa ser atualizada. Selecione novamente o ambiente em Configurações. Seus jogos e dados serão preservados.");
   }
@@ -621,7 +628,7 @@ LRESULT CALLBACK WndProc(HWND window, UINT message, WPARAM wp, LPARAM lp) {
           auto root = PickFolder(window, Wide(Tr("Escolha uma pasta vazia para o ambiente ou uma existente do x360-native", "Choose an empty environment folder or an existing x360-native environment")).c_str());
           if (!root.empty()) {
             if (!a->preferences.empty()) {
-              VerifyPackage(a->self.parent_path());
+              VerifyDistribution(a->self.parent_path());
               const auto state = InspectEnvironment(Payload(*a), root);
               if (!state.current && fs::exists(root / "deps.lock.json")) {
                 std::string message = Tr("Esta instalação precisa ser atualizada para continuar. Seus jogos e dados serão preservados.\n\nComponentes:", "This installation needs an update to continue. Your games and data will be preserved.\n\nComponents:");
@@ -638,7 +645,7 @@ LRESULT CALLBACK WndProc(HWND window, UINT message, WPARAM wp, LPARAM lp) {
         }
         if (id == kCheck) {
           if (!a->preferences.empty()) {
-            VerifyPackage(a->self.parent_path());
+            VerifyDistribution(a->self.parent_path());
             if (!InspectEnvironment(Payload(*a), a->root).current) {
               a->targets.clear(); a->checked.clear(); a->root.clear(); Load(*a, a->root);
               throw std::runtime_error("O ambiente precisa de atualização. Selecione-o novamente em Configurações; seus dados serão preservados.");
@@ -793,9 +800,9 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show) {
   wchar_t self[32768]{}; GetModuleFileNameW(nullptr, self, 32768); app.self = self;
   try {
 #ifdef X360N_DISTRIBUTION
-    VerifyPackage(app.self.parent_path());
+    VerifyDistribution(app.self.parent_path());
 #else
-    if (fs::is_directory(Payload(app))) VerifyPackage(app.self.parent_path());
+    if (fs::is_directory(Payload(app))) VerifyDistribution(app.self.parent_path());
 #endif
   } catch (const std::exception& error) {
     MessageBoxW(nullptr, Wide(error.what()).c_str(), L"x360-native — pacote não validado", MB_OK | MB_ICONERROR);

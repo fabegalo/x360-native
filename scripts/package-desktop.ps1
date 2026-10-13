@@ -22,7 +22,8 @@ function ExportTree([string]$Repository, [string]$Revision, [string]$Directory) 
     $archive = Join-Path $job ([guid]::NewGuid().ToString('N') + '.zip')
     git -C $Repository archive --format=zip "--output=$archive" $Revision
     if ($LASTEXITCODE -ne 0) { throw "Cannot export committed dependency: $Repository $Revision" }
-    Expand-Archive -LiteralPath $archive -DestinationPath $Directory
+    & "$env:SystemRoot\System32\tar.exe" -xf $archive -C $Directory
+    if ($LASTEXITCODE -ne 0) { throw 'Source snapshot extraction failed' }
     Remove-Item -LiteralPath $archive
 }
 function Hash([string]$File) { (Get-FileHash -LiteralPath $File -Algorithm SHA256).Hash.ToLowerInvariant() }
@@ -53,7 +54,7 @@ if ($LASTEXITCODE -ne 0) { throw 'SDK snapshot failed' }
 git -c core.longpaths=true -C $sdk checkout --detach $lock.rexglue_sdk.commit
 if ($LASTEXITCODE -ne 0) { throw 'Pinned SDK checkout failed' }
 $dependencies = [ordered]@{}
-foreach ($component in @('fmt','tomlplusplus','cli11','catch2','inja')) {
+foreach ($component in @('fmt','tomlplusplus','cli11','catch2','inja','sdl3')) {
     $tree = git -C $sdk ls-tree HEAD "thirdparty/$component"
     if ($LASTEXITCODE -ne 0 -or $tree -notmatch '^160000 commit ([a-f0-9]{40})') { throw "Unpinned dependency: $component" }
     $revision = $Matches[1]
@@ -67,9 +68,10 @@ $clang = Join-Path $llvm 'bin/clang++.exe'
 $compilerVersion = (& $clang --version | Select-Object -First 1)
 if ($compilerVersion -notlike "* $($lock.llvm.version)*") { throw 'Compiler differs from the locked LLVM version' }
 $sourceMap = $source.Replace('\','/')
+$payloadHash = Hash (Join-Path $payload 'payload.sha256')
 $flags = "-march=x86-64-v2 -ffile-prefix-map=$sourceMap=/x360-source"
 $devshell = Join-Path $root 'scripts/devshell.cmd'
-& $devshell cmake -S $source -B $build -G Ninja -DX360_DESKTOP_ONLY=ON -DX360_DISTRIBUTION=ON -DCMAKE_BUILD_TYPE=Release "-DCMAKE_C_COMPILER=$llvm/bin/clang.exe" "-DCMAKE_CXX_COMPILER=$clang" "-DCMAKE_C_FLAGS=$flags" "-DCMAKE_CXX_FLAGS=$flags" '-DCMAKE_EXE_LINKER_FLAGS=-Wl,/Brepro' -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+& $devshell cmake -S $source -B $build -G Ninja -DX360_DESKTOP_ONLY=ON -DX360_DISTRIBUTION=ON "-DX360_PACKAGE_PAYLOAD_SHA256=$payloadHash" -DCMAKE_BUILD_TYPE=Release "-DCMAKE_C_COMPILER=$llvm/bin/clang.exe" "-DCMAKE_CXX_COMPILER=$clang" "-DCMAKE_C_FLAGS=$flags" "-DCMAKE_CXX_FLAGS=$flags" '-DCMAKE_EXE_LINKER_FLAGS=-Wl,/Brepro' -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
 if ($LASTEXITCODE -ne 0) { throw 'Distribution configure failed' }
 & $devshell cmake --build $build --target x360-native x360n_desktop_tests
 if ($LASTEXITCODE -ne 0) { throw 'Distribution build failed' }
