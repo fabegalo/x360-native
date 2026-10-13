@@ -1,0 +1,474 @@
+diff --git a/include/rex/system/xam/user_profile.h b/include/rex/system/xam/user_profile.h
+index ec37017..62e9a2d 100644
+--- a/include/rex/system/xam/user_profile.h
++++ b/include/rex/system/xam/user_profile.h
+@@ -12,6 +12,8 @@
+ #pragma once
+ 
+ #include <memory>
++#include <filesystem>
++#include <mutex>
+ #include <string>
+ #include <unordered_map>
+ #include <vector>
+@@ -216,10 +218,21 @@ class UserProfile {
+ 
+   UserProfile();
+ 
+-  uint64_t xuid() const { return xuid_; }
+-  std::string name() const { return name_; }
+-  uint32_t signin_state() const { return 1; }
+-  uint32_t type() const { return 1 | 2; /* local | online profile? */ }
++  struct Identity {
++    uint64_t xuid = 0;
++    std::string name;
++    uint32_t signin_state = 0;
++  };
++  Identity identity() const;
++  uint64_t xuid() const { std::lock_guard lock(identity_mutex_); return identity_.xuid; }
++  std::string name() const { std::lock_guard lock(identity_mutex_); return identity_.name; }
++  uint32_t signin_state() const { std::lock_guard lock(identity_mutex_); return identity_.signin_state; }
++  uint32_t type() const { return signin_state() ? 1 : 0; }
++
++  // Single local account, slot zero. Disk errors never publish a new session.
++  bool InitializeLocal(const std::filesystem::path& root);
++  uint32_t CreateLocal(const std::string& name);
++  uint32_t SetLocalSession(uint64_t xuid);
+ 
+   void set_kernel_state(KernelState* ks) { kernel_state_ = ks; }
+ 
+@@ -227,8 +240,11 @@ class UserProfile {
+   Setting* GetSetting(uint32_t setting_id);
+ 
+  private:
+-  uint64_t xuid_;
+-  std::string name_;
++  mutable std::mutex identity_mutex_;
++  Identity identity_;
++  std::filesystem::path profile_path_;
++  bool storage_ready_ = false;
++  bool PersistIdentity(const Identity& next);
+   std::vector<std::unique_ptr<Setting>> setting_list_;
+   std::unordered_map<uint32_t, Setting*> settings_;
+   KernelState* kernel_state_ = nullptr;
+diff --git a/src/system/xam/user_profile.cpp b/src/system/xam/user_profile.cpp
+index a77f5e6..3d324a5 100644
+--- a/src/system/xam/user_profile.cpp
++++ b/src/system/xam/user_profile.cpp
+@@ -10,6 +10,17 @@
+  */
+ 
+ #include <sstream>
++#include <algorithm>
++#include <array>
++#include <cstring>
++#include <random>
++#include <rex/platform.h>
++#if REX_PLATFORM_WIN32
++#include <windows.h>
++#include <io.h>
++#else
++#include <unistd.h>
++#endif
+ 
+ #include <fmt/format.h>
+ 
+@@ -22,12 +33,6 @@ namespace system {
+ namespace xam {
+ 
+ UserProfile::UserProfile() {
+-  // 58410A1F checks the user XUID against a mask of 0x00C0000000000000 (3<<54),
+-  // if non-zero, it prevents the user from playing the game.
+-  // "You do not have permissions to perform this operation."
+-  xuid_ = 0xB13EBABEBABEBABE;
+-  name_ = "User";
+-
+   // https://cs.rin.ru/forum/viewtopic.php?f=38&t=60668&hilit=gfwl+live&start=195
+   // https://github.com/arkem/py360/blob/master/py360/constants.py
+   // XPROFILE_GAMER_YAXIS_INVERSION
+@@ -39,7 +44,7 @@ UserProfile::UserProfile() {
+   // XPROFILE_GAMERCARD_REGION
+   AddSetting(std::make_unique<Int32Setting>(0x10040005, 0));
+   // XPROFILE_GAMERCARD_CRED
+-  AddSetting(std::make_unique<Int32Setting>(0x10040006, 0xFA));
++  AddSetting(std::make_unique<Int32Setting>(0x10040006, 0));
+   // XPROFILE_GAMERCARD_REP
+   AddSetting(std::make_unique<FloatSetting>(0x5004000B, 0.0f));
+   // XPROFILE_OPTION_VOICE_MUTED
+@@ -51,7 +56,7 @@ UserProfile::UserProfile() {
+   // XPROFILE_GAMERCARD_MOTTO
+   AddSetting(std::make_unique<UnicodeSetting>(0x402C0011, u""));
+   // XPROFILE_GAMERCARD_TITLES_PLAYED
+-  AddSetting(std::make_unique<Int32Setting>(0x10040012, 1));
++  AddSetting(std::make_unique<Int32Setting>(0x10040012, 0));
+   // XPROFILE_GAMERCARD_ACHIEVEMENTS_EARNED
+   AddSetting(std::make_unique<Int32Setting>(0x10040013, 0));
+   // XPROFILE_GAMER_DIFFICULTY
+@@ -83,7 +88,7 @@ UserProfile::UserProfile() {
+ 
+   // If we set this, games will try to get it.
+   // XPROFILE_GAMERCARD_PICTURE_KEY
+-  AddSetting(std::make_unique<UnicodeSetting>(0x4064000F, u"gamercard_picture_key"));
++  AddSetting(std::make_unique<UnicodeSetting>(0x4064000F, u""));
+ 
+   // XPROFILE_TITLE_SPECIFIC1
+   AddSetting(std::make_unique<BinarySetting>(0x63E83FFF));
+@@ -93,6 +98,124 @@ UserProfile::UserProfile() {
+   AddSetting(std::make_unique<BinarySetting>(0x63E83FFD));
+ }
+ 
++namespace {
++bool ValidLocalName(const std::string& name) {
++  // Initial local contract: printable ASCII, 1-15 bytes, no edge spaces.
++  return !name.empty() && name.size() <= 15 && name.front() != ' ' && name.back() != ' ' &&
++         std::all_of(name.begin(), name.end(), [](unsigned char c) { return c >= 32 && c <= 126; });
++}
++bool ValidLocalXuid(uint64_t xuid) {
++  return (xuid & 0xFFF0000000000000ull) == 0xE000000000000000ull &&
++         (xuid & 0x000FFFFFFFFFFFFFull) != 0;
++}
++}
++
++UserProfile::Identity UserProfile::identity() const {
++  std::lock_guard lock(identity_mutex_);
++  return identity_;
++}
++
++bool UserProfile::InitializeLocal(const std::filesystem::path& root) {
++  std::lock_guard lock(identity_mutex_);
++  identity_ = {};
++  storage_ready_ = false;
++  if (root.empty()) return false;
++  profile_path_ = root / "profiles" / "local-v1.dat";
++  std::error_code error;
++  const bool exists = std::filesystem::exists(profile_path_, error);
++  if (error) return false;
++  if (!exists) { storage_ready_ = true; return true; }
++  // Fixed-size record: magic/version, big-endian XUID, sign-in byte, name[16].
++  // No unbounded parser allocation and no silent replacement of corrupt data.
++  std::array<uint8_t, 33> record{};
++  auto* file = rex::filesystem::OpenFile(profile_path_, "rb");
++  if (!file) return false;
++  const auto read = fread(record.data(), 1, record.size(), file);
++  const auto trailing = fgetc(file);
++  const bool bad = ferror(file) != 0;
++  fclose(file);
++  if (read != record.size() || trailing != EOF || bad ||
++      std::memcmp(record.data(), "X360LP01", 8) || record[16] > 1 || record[32]) return false;
++  uint64_t xuid = 0;
++  for (unsigned i = 8; i < 16; ++i) xuid = (xuid << 8) | record[i];
++  const std::string name(reinterpret_cast<const char*>(record.data() + 17));
++  if (!ValidLocalXuid(xuid) || !ValidLocalName(name)) return false;
++  for (size_t i = 17 + name.size(); i < record.size(); ++i) if (record[i]) return false;
++  identity_ = {xuid, name, record[16]};
++  storage_ready_ = true;
++  return true;
++}
++
++bool UserProfile::PersistIdentity(const Identity& next) {
++  if (!storage_ready_) { REXSYS_ERROR("Local profile store is not initialized"); return false; }
++  std::error_code error;
++  std::filesystem::create_directories(profile_path_.parent_path(), error);
++  if (error) { REXSYS_ERROR("Local profile directory: {}", error.message()); return false; }
++  std::array<uint8_t, 33> record{};
++  std::memcpy(record.data(), "X360LP01", 8);
++  for (unsigned i = 0; i < 8; ++i) record[8 + i] = uint8_t(next.xuid >> (56 - i * 8));
++  record[16] = uint8_t(next.signin_state);
++  std::memcpy(record.data() + 17, next.name.data(), next.name.size());
++  auto temporary = profile_path_;
++  temporary += ".tmp";
++  auto* file = rex::filesystem::OpenFile(temporary, "wb");
++  if (!file) { REXSYS_ERROR("Local profile staging open failed: {}", errno); return false; }
++  bool ok = fwrite(record.data(), 1, record.size(), file) == record.size() && fflush(file) == 0;
++#if REX_PLATFORM_WIN32
++  if (ok) ok = _commit(_fileno(file)) == 0;
++#else
++  if (ok) ok = fsync(fileno(file)) == 0;
++#endif
++  if (!ok) REXSYS_ERROR("Local profile flush failed: {}", errno);
++  if (fclose(file)) { REXSYS_ERROR("Local profile close failed: {}", errno); ok = false; }
++  if (ok) {
++#if REX_PLATFORM_WIN32
++    ok = MoveFileExW(temporary.c_str(), profile_path_.c_str(),
++                    MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH) != 0;
++    if (!ok) REXSYS_ERROR("Local profile replace failed: {}", GetLastError());
++#else
++    std::filesystem::rename(temporary, profile_path_, error);
++    ok = !error;
++#endif
++  }
++  if (!ok) std::filesystem::remove(temporary, error);
++  return ok;
++}
++
++uint32_t UserProfile::CreateLocal(const std::string& name) {
++  std::lock_guard lock(identity_mutex_);
++  if (!ValidLocalName(name)) return X_ERROR_INVALID_PARAMETER;
++  if (identity_.xuid) return X_ERROR_ALREADY_EXISTS;
++  // Identity is generated once and survives every subsequent session.
++  uint64_t random = 0;
++  try {
++    std::random_device source;
++    random = (uint64_t(source()) << 32) | source();
++  } catch (const std::exception& error) {
++    REXSYS_ERROR("Local profile identity generation: {}", error.what());
++    return X_ERROR_FUNCTION_FAILED;
++  }
++  Identity next{0xE000000000000000ull | ((random & 0x000FFFFFFFFFFFFFull) | 1), name, 0};
++  if (!PersistIdentity(next)) return X_ERROR_FUNCTION_FAILED;
++  identity_ = std::move(next);
++  return X_ERROR_SUCCESS;
++}
++
++uint32_t UserProfile::SetLocalSession(uint64_t xuid) {
++  std::lock_guard lock(identity_mutex_);
++  if (!identity_.xuid || (xuid && xuid != identity_.xuid)) return X_ERROR_NO_SUCH_USER;
++  const uint32_t state = xuid ? 1 : 0;
++  if (identity_.signin_state == state) return X_ERROR_SUCCESS;
++  auto next = identity_;
++  next.signin_state = state;
++  if (!PersistIdentity(next)) return X_ERROR_FUNCTION_FAILED;
++  identity_ = std::move(next);
++  // Publication follows durable replacement; failures and repeats emit nothing.
++  if (kernel_state_) kernel_state_->BroadcastNotification(0xA, 1);
++  return X_ERROR_SUCCESS;
++}
++
++
+ void UserProfile::AddSetting(std::unique_ptr<Setting> setting) {
+   Setting* previous_setting = setting.get();
+   std::swap(settings_[setting->setting_id], previous_setting);
+diff --git a/src/system/kernel_state.cpp b/src/system/kernel_state.cpp
+index 0f2ee15..46983a4 100644
+--- a/src/system/kernel_state.cpp
++++ b/src/system/kernel_state.cpp
+@@ -74,6 +74,9 @@ KernelState::KernelState(Runtime* emulator)
+     user_data_root = std::filesystem::absolute(user_data_root);
+   }
+   content_manager_ = std::make_unique<xam::ContentManager>(this, user_data_root);
++  if (!user_profile_->InitializeLocal(user_data_root)) {
++    REXSYS_ERROR("Local profile store unavailable or invalid; keeping user signed out");
++  }
+ 
+   if (shared_kernel_state_ != nullptr) {
+     REXSYS_ERROR("KernelState constructed but shared_kernel_state_ already set");
+@@ -1135,9 +1138,7 @@ void KernelState::RegisterNotifyListener(XNotifyListener* listener) {
+     // XN_SYS_UI (on, off)
+     listener->EnqueueNotification(0x00000009, 1);
+     listener->EnqueueNotification(0x00000009, 0);
+-    // XN_SYS_SIGNINCHANGED x2
+-    listener->EnqueueNotification(0x0000000A, 1);
+-    listener->EnqueueNotification(0x0000000A, 1);
++    // Session changes are emitted only after a successful profile transaction.
+     // The content devices exposed by XamContentCreateDeviceEnumerator are
+     // already available. Notify the initial system consumer so it can perform
+     // its own enumeration. This is not content-enumeration completion: the
+diff --git a/src/kernel/xam/xam_user.cpp b/src/kernel/xam/xam_user.cpp
+index bf5a9d9..a5e77d2 100644
+--- a/src/kernel/xam/xam_user.cpp
++++ b/src/kernel/xam/xam_user.cpp
+@@ -37,26 +37,18 @@ using namespace rex::system;
+ using namespace rex::system::xam;
+ 
+ i32 XamUserGetXUID_entry(u32 user_index, u32 type_mask, mapped_u64 xuid_ptr) {
+-  assert_true(type_mask == 1 || type_mask == 2 || type_mask == 3 || type_mask == 4 ||
+-              type_mask == 7);
++  if (!(type_mask == 1 || type_mask == 2 || type_mask == 3 || type_mask == 4 ||
++        type_mask == 7)) return X_E_INVALIDARG;
+   if (!xuid_ptr) {
+     return X_E_INVALIDARG;
+   }
+   uint32_t result = X_E_NO_SUCH_USER;
+   uint64_t xuid = 0;
+   if (user_index < 4) {
+-    if (user_index == 0) {
+-      const auto& user_profile = REX_KERNEL_STATE()->user_profile();
+-      auto type = user_profile->type() & type_mask;
+-      if (type & (2 | 4)) {
+-        // maybe online profile?
+-        xuid = user_profile->xuid();
+-        result = X_E_SUCCESS;
+-      } else if (type & 1) {
+-        // maybe offline profile?
+-        xuid = user_profile->xuid();
+-        result = X_E_SUCCESS;
+-      }
++    const auto identity = REX_KERNEL_STATE()->user_profile()->identity();
++    if (user_index == 0 && identity.signin_state && (type_mask & 1)) {
++      xuid = identity.xuid;
++      result = X_E_SUCCESS;
+     }
+   } else {
+     result = X_E_INVALIDARG;
+@@ -65,15 +57,38 @@ i32 XamUserGetXUID_entry(u32 user_index, u32 type_mask, mapped_u64 xuid_ptr) {
+   return result;
+ }
+ 
+-u32 XamUserGetSigninState_entry(u32 user_index) {
+-  uint32_t signin_state = 0;
+-  if (user_index < 4) {
+-    if (user_index == 0) {
+-      const auto& user_profile = REX_KERNEL_STATE()->user_profile();
+-      signin_state = user_profile->signin_state();
+-    }
++// 17559: 8199C630 expands four XUIDs into 392-byte entries before LogonEx.
++// 8199EEC0 replaces the slot array for flags=0 (zero XUID signs that slot out).
++// Other modes involve preview/Live/account payloads and remain unsupported.
++static uint32_t LocalLogon(mapped_void users, uint32_t flags, uint32_t overlapped,
++                           uint32_t stride) {
++  if (!users) return uint32_t(X_E_INVALIDARG);
++  if (flags) return 0x80004001u; // E_NOTIMPL
++  auto* bytes = users.as<uint8_t*>();
++  for (unsigned i = 1; i < 4; ++i) {
++    if (rex::memory::load_and_swap<uint64_t>(bytes + i * stride))
++      return 0x80004001u; // E_NOTIMPL: never partially apply a multi-user request.
++  }
++  const auto xuid = rex::memory::load_and_swap<uint64_t>(bytes);
++  const auto result = REX_KERNEL_STATE()->user_profile()->SetLocalSession(xuid);
++  const auto hr = X_HRESULT_FROM_WIN32(result);
++  if (overlapped) {
++    // Original LogonEx returns HRESULT acceptance, with result in XOVERLAPPED.
++    REX_KERNEL_STATE()->CompleteOverlappedImmediateEx(overlapped, result, hr, 0);
+   }
+-  return signin_state;
++  return hr;
++}
++
++u32 XamUserLogon_entry(mapped_void users, u32 flags, u32 overlapped) {
++  return LocalLogon(users, flags, overlapped, 8);
++}
++u32 XamUserLogonEx_entry(mapped_void users, u32 flags, u32 overlapped) {
++  return LocalLogon(users, flags, overlapped, 392);
++}
++
++
++u32 XamUserGetSigninState_entry(u32 user_index) {
++  return user_index == 0 ? REX_KERNEL_STATE()->user_profile()->signin_state() : 0;
+ }
+ 
+ typedef struct {
+@@ -92,23 +107,22 @@ i32 XamUserGetSigninInfo_entry(u32 user_index, u32 flags, ppc_ptr_t<X_USER_SIGNI
+   }
+ 
+   std::memset(info, 0, sizeof(X_USER_SIGNIN_INFO));
+-  if (user_index) {
++  const auto identity = REX_KERNEL_STATE()->user_profile()->identity();
++  if (user_index || !identity.signin_state) {
+     return X_E_NO_SUCH_USER;
+   }
+-
+-  const auto& user_profile = REX_KERNEL_STATE()->user_profile();
+-  info->xuid = user_profile->xuid();
+-  info->signin_state = user_profile->signin_state();
+-  rex::string::copy_truncating(info->name, user_profile->name(), rex::countof(info->name));
++  info->xuid = identity.xuid;
++  info->signin_state = identity.signin_state;
++  rex::string::copy_truncating(info->name, identity.name, rex::countof(info->name));
+   return X_E_SUCCESS;
+ }
+ 
+ u32 XamUserGetName_entry(u32 user_index, mapped_string buffer, u32 buffer_len) {
+-  if (user_index >= 4) {
++  if (user_index >= 4 || !buffer || !buffer_len) {
+     return X_E_INVALIDARG;
+   }
+ 
+-  if (user_index) {
++  if (user_index || !REX_KERNEL_STATE()->user_profile()->signin_state()) {
+     return X_E_NO_SUCH_USER;
+   }
+ 
+@@ -123,7 +137,7 @@ u32 XamUserGetGamerTag_entry(u32 user_index, mapped_wstring buffer, u32 buffer_l
+     return X_E_INVALIDARG;
+   }
+ 
+-  if (user_index) {
++  if (user_index || !REX_KERNEL_STATE()->user_profile()->signin_state()) {
+     return X_E_NO_SUCH_USER;
+   }
+ 
+@@ -149,6 +163,7 @@ uint32_t XamUserReadProfileSettingsEx(uint32_t title_id, uint32_t user_index, ui
+                                       be<uint32_t>* setting_ids, uint32_t unk,
+                                       be<uint32_t>* buffer_size_ptr, uint8_t* buffer,
+                                       XAM_OVERLAPPED* overlapped) {
++  if (!REX_KERNEL_STATE()->user_profile()->signin_state()) return X_ERROR_NOT_LOGGED_ON;
+   if (!xuid_count) {
+     assert_null(xuids);
+   } else {
+@@ -308,7 +323,7 @@ u32 XamUserWriteProfileSettings_entry(u32 title_id, u32 user_index, u32 setting_
+     return X_ERROR_INVALID_PARAMETER;
+   }
+ 
+-  if (user_index) {
++  if (user_index || !REX_KERNEL_STATE()->user_profile()->signin_state()) {
+     // Only support user 0.
+     if (overlapped) {
+       REX_KERNEL_STATE()->CompleteOverlappedImmediate(overlapped.guest_address(),
+@@ -377,7 +392,7 @@ u32 XamUserCheckPrivilege_entry(u32 user_index, u32 mask, mapped_u32 out_value)
+       return X_ERROR_INVALID_PARAMETER;
+     }
+ 
+-    if (user_index) {
++    if (user_index || !REX_KERNEL_STATE()->user_profile()->signin_state()) {
+       return X_ERROR_NO_SUCH_USER;
+     }
+   }
+@@ -388,7 +403,7 @@ u32 XamUserCheckPrivilege_entry(u32 user_index, u32 mask, mapped_u32 out_value)
+ }
+ 
+ u32 XamUserContentRestrictionGetFlags_entry(u32 user_index, mapped_u32 out_flags) {
+-  if (user_index) {
++  if (user_index || !REX_KERNEL_STATE()->user_profile()->signin_state()) {
+     return X_ERROR_NO_SUCH_USER;
+   }
+ 
+@@ -399,7 +414,7 @@ u32 XamUserContentRestrictionGetFlags_entry(u32 user_index, mapped_u32 out_flags
+ 
+ u32 XamUserContentRestrictionGetRating_entry(u32 user_index, u32 unk1, mapped_u32 out_unk2,
+                                              mapped_u32 out_unk3) {
+-  if (user_index) {
++  if (user_index || !REX_KERNEL_STATE()->user_profile()->signin_state()) {
+     return X_ERROR_NO_SUCH_USER;
+   }
+ 
+@@ -423,17 +438,17 @@ u32 XamUserContentRestrictionCheckAccess_entry(u32 user_index, u32 unk1, u32 unk
+ }
+ 
+ u32 XamUserIsOnlineEnabled_entry(u32 user_index) {
+-  return 1;
++  return 0;
+ }
+ 
+ u32 XamUserGetMembershipTier_entry(u32 user_index) {
+   if (user_index >= 4) {
+     return X_ERROR_INVALID_PARAMETER;
+   }
+-  if (user_index) {
++  if (user_index || !REX_KERNEL_STATE()->user_profile()->signin_state()) {
+     return X_ERROR_NO_SUCH_USER;
+   }
+-  return 6 /* 6 appears to be Gold */;
++  return 0; // Local profiles have no Live membership.
+ }
+ 
+ u32 XamUserAreUsersFriends_entry(u32 user_index, u32 unk1, u32 unk2, mapped_u32 out_value,
+@@ -444,7 +459,7 @@ u32 XamUserAreUsersFriends_entry(u32 user_index, u32 unk1, u32 unk2, mapped_u32
+   if (user_index >= 4) {
+     result = X_ERROR_INVALID_PARAMETER;
+   } else {
+-    if (user_index == 0) {
++    if (user_index == 0 && REX_KERNEL_STATE()->user_profile()->signin_state()) {
+       const auto& user_profile = REX_KERNEL_STATE()->user_profile();
+       if (user_profile->signin_state() == 0) {
+         result = X_ERROR_NOT_LOGGED_ON;
+@@ -848,8 +863,8 @@ REX_EXPORT_STUB(__imp__XamUserIsPartial);
+ REX_EXPORT_STUB(__imp__XamUserIsPartialProfile);
+ REX_EXPORT_STUB(__imp__XamUserIsUnsafeProgrammingAllowed);
+ REX_EXPORT_STUB(__imp__XamUserLockLogonPreviewMode);
+-REX_EXPORT_STUB(__imp__XamUserLogon);
+-REX_EXPORT_STUB(__imp__XamUserLogonEx);
++REX_EXPORT(__imp__XamUserLogon, rex::kernel::xam::XamUserLogon_entry)
++REX_EXPORT(__imp__XamUserLogonEx, rex::kernel::xam::XamUserLogonEx_entry)
+ REX_EXPORT_STUB(__imp__XamUserLookupDevice);
+ REX_EXPORT_STUB(__imp__XamUserNuiBind);
+ REX_EXPORT_STUB(__imp__XamUserNuiEnableBiometric);

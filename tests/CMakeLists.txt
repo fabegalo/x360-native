@@ -109,6 +109,7 @@ target_sources(x360n_sdk_runtime_checks PRIVATE sdkcheck/title_return_test.cpp
 target_sources(x360n_sdk_runtime_checks PRIVATE sdkcheck/persist_display_test.cpp)
 target_sources(x360n_sdk_runtime_checks PRIVATE sdkcheck/audio_drain_test.cpp)
 target_sources(x360n_sdk_runtime_checks PRIVATE sdkcheck/profile_ui_request_test.cpp)
+target_sources(x360n_sdk_runtime_checks PRIVATE sdkcheck/local_profile_test.cpp)
 target_sources(x360n_sdk_runtime_checks PRIVATE sdkcheck/dashboard_uri_test.cpp
     ../titles/dash_17559/src/launch_uri.cpp)
 target_sources(x360n_sdk_runtime_checks PRIVATE

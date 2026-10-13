@@ -1,5 +1,21 @@
 # STATUS
 
+C7.2 (2026-10-13), **parcial; Sign-in funcional ainda não entregue**: patch
+0041 substitui a identidade fixa por um registro local persistente de um perfil,
+com criação no serviço C++, entrada/saída pelos exports XAM Logon/LogonEx no modo
+local flags=0, consultas de identidade e notificações após mudança gravada.
+Sem registro, o runtime inicia desconectado. Persistência em
+`<user_data_root>/profiles/local-v1.dat`; erro de gravação não publica sessão.
+**Bloqueio da interface:** enumeração, dados de conta e tarefas de criação do
+Sign-in original continuam ausentes. Não há caminho de criação/seleção utilizável
+pelo usuário neste incremento; não criar um perfil fixo para esconder essa lacuna.
+Detalhes e validação focada em `docs/dashboard.md` §0.26.
+Três testes `sdkcheck.Local profile` passam (0,95 s, timeout 30 s por caso),
+cobrindo XAM, reinicialização, overlapped e falhas de persistência.
+Build de `dash_17559` e DLL Sign-in concluído, sem execução; 41 patches verificados.
+O usuário confirmou que GamerCard e Sign-in originais aparecem, recebem entrada
+e fecham; essa evidência substitui a pendência visual abaixo, sem revalidação.
+
 C7.1 (2026-10-13): integração de `signin.xex` 17559 ao host XUI existente,
 com geração AOT separada (mesma base de gamerprofile), pedido FE/21001 de
 20 bytes e usuário FF preservados. Patch 0040 cobre sessão ANY_USER e entrada

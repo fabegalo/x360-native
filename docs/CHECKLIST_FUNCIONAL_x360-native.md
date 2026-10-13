@@ -98,6 +98,13 @@ existente. Isso é GamerCard, não seleção/sign-in nem Guide. User continua fi
 no SDK; entrada/saída/criação/persistência permanecem pendentes. O host só emite
 notificações de visibilidade da UI, sem inventar SIGNINCHANGED.
 
+Incremento C7.2 (2026-10-13, parcial): patch 0041 remove a identidade fixa e
+persiste um perfil local no serviço compartilhado; entrada/saída pelos exports
+XAM e recuperação do runtime recebem testes focados. A criação C++ ainda não
+está ligada à criação/enumeração de contas do Sign-in original. Nenhum item de
+aceite desta seção foi marcado como concluído. O usuário já confirmou aparência,
+entrada e fechamento das duas cenas; não foram revalidadas.
+
 **Aceite:** dois perfis diferentes entram no mesmo jogo, preservam dados próprios e continuam corretos após reiniciar. Perfil local não deve ser apresentado como conta autenticada no Xbox Live.
 
 ## 4. Biblioteca e My Games — P0

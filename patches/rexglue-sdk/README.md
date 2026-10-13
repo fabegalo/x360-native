@@ -333,3 +333,19 @@ arguments, and deferred close/reopen. No game or visual session was run.
 The patch was reapplied to copies of its two pre-patch files with SDK-style LF
 line endings; both output hashes match the lock. All 40 patches pass `-Check`.
 The SDK pin is unchanged; this does not implement profile enumeration or login.
+
+## 0041 — local profile session (C7.2, partial)
+
+Adds a single persistent local identity to UserProfile and initializes it in the
+existing KernelState. Local XamUserLogon/Ex (flags=0) update slot zero only after
+the disk transaction succeeds. Identity queries use that state, and only real
+session changes emit SIGNINCHANGED. No automatic/fixed profile is created.
+
+The original Sign-in imports already resolve to these shared exports. Its
+enumeration/account creation task contracts are still missing: this patch does
+not make the original UI's complete sign-in flow functional. See dashboard §0.26.
+Focused coverage: `x360n_sdk_runtime_checks "[local-profile]"` (persistence,
+restart, XAM identity, sign-out, unsupported modes, corrupt data and write errors).
+All three focused tests pass via CTest (0.95 s, 30 s timeout per case). Patch
+reverse/apply verified in copied sources with SDK LF attributes and matching
+base/final hashes. There is no upstream equivalent identified; the pin is unchanged.

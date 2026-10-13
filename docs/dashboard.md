@@ -1415,3 +1415,69 @@ Para uma preparação de desenvolvimento nova, gerar primeiro
 depois o manifesto principal, e usar somente o alvo `dash_17559` no build.
 O CMake recusa explicitamente a ausência dessa geração; a distribuição publicada
 não foi alterada. Nenhum binário ou código derivado do XEX foi incluído no Git.
+
+### 0.26 Perfil local: backend persistente C7.2 (2026-10-13, parcial)
+
+O usuário confirmou apresentação, entrada e fechamento do Sign-in e GamerCard
+originais. Não foram repetidas essas validações. O critério funcional de C7
+**permanece pendente**: não existe ainda criação/seleção utilizável pela cena.
+
+Patch 0041 no mesmo SDK/kernel, sem launcher ou UI nova:
+
+- `UserProfile::CreateLocal(nome)` cria um único registro local desconectado,
+  com XUID aleatório gerado uma vez, prefixo local E000 e nome ASCII de 1–15
+  caracteres (sem espaços nas extremidades). Não cria automaticamente “User”.
+- `SetLocalSession(xuid)` entra nesse registro; zero desconecta, preservando
+  identidade. XUID desconhecido e segundo perfil são rejeitados. Não há catálogo
+  de múltiplos perfis, exclusão ou migração de saves.
+- `KernelState` recupera o registro na inicialização. As consultas XAM de estado,
+  XUID, nome, gamertag e SigninInfo usam esse serviço; perfil desconectado não é
+  anunciado como usuário conectado. Perfil local não anuncia Live/Gold nem os
+  250 pontos fictícios anteriores.
+- `XamUserLogon`/`Ex` deixam de ser stubs no subconjunto local flags=0. O primeiro
+  recebe quatro XUIDs; Ex recebe quatro entradas de 392 bytes. Só slot 0 pode ser
+  preenchido. Modos não implementados retornam E_NOTIMPL antes de alterar estado.
+  Confirmações repetidas não geram SIGNINCHANGED; inicialização de listener deixou
+  de fabricar duas mudanças de usuário. Não há leitura de disco por quadro.
+
+Persistência: `<user_data_root>/profiles/local-v1.dat`, registro binário de 33
+bytes (`X360LP01`, XUID big-endian, byte de sessão, nome terminado em zero).
+Grava arquivo temporário na mesma pasta, faz flush e substitui o registro antes
+de publicar o estado/notificar. Windows usa `_commit` e `MoveFileExW` com
+REPLACE_EXISTING/WRITE_THROUGH. Arquivo inválido é preservado, e a sessão permanece
+desconectada; não há recuperação silenciosa que sobrescreva dados. A implementação
+supõe um runtime escritor por pasta. O caminho segue a configuração existente;
+sem `user_data_root` explícito, o runtime usa `game_data_root`. Unificar pastas
+de dados entre títulos e integrar saves por usuário continuam fora deste passo.
+
+Evidência estática do ABI, obtida dos arquivos locais já fornecidos: Sign-in
+`90107440`/`90107450` encaminham as chamadas aos imports Logon/LogonEx; XAM
+`8199C630` expande quatro XUIDs para entradas de 392 bytes, `8199EEC0` substitui
+os slots no modo flags=0 e `8199EF14` trata a entrada zero. O backend usa os
+exports compartilhados já ligados à DLL AOT. Não há hook de botão ou confirmação
+artificial no host XUI. Isso **não demonstra** que uma seleção na cena percorreu
+o novo serviço.
+
+Bloqueio preservado para o próximo incremento: `XamProfileCreateEnumerator`
+(`816DB860`) e `XamProfileEnumerate` (`816D7860`) dependem de registros de conta;
+`XamProfileCreate` (`816DC468`) cria uma tarefa assíncrona com payload de conta de
+380 bytes e saída de tarefa. Implementar somente um retorno zero não produziria
+um perfil. Faltam esses contratos, consulta/conclusão de tarefas e a identificação
+do modo de logon efetivamente escolhido pela cena. Ordinal 054B mantém o trap.
+Criação pelo serviço C++ serve aos testes; não foi exposta como alternativa de UI.
+Cancelamento da cena não foi exercitado neste incremento. O backend só muda com
+uma chamada explícita de sessão, nunca ao abrir/fechar a UI.
+
+Não executados: Computer Use, dashboard, jogos ou suítes completas. Testes
+sintéticos focados cobrem serviço + exports compartilhados e reinicialização do
+runtime, sem elevar o aceite visual/funcional do Sign-in original.
+
+Validação: **3/3 `sdkcheck.Local profile` aprovados**, 0,95 s via CTest com timeout
+de 30 s por caso; log `.local/tmp/c72-tests.log`. A fixture usa pasta isolada no
+build: a tentativa em `%TEMP%` expôs `MoveFileExW` negado (erro 5) neste ambiente,
+sem publicar estado. Build de `x360n_sdk_runtime_checks` concluído, saída 0
+(`.local/tmp/c72-build-final.log`). Patch 0041 revertido/reaplicado em cópias dos
+quatro arquivos com os mesmos atributos LF do SDK, hashes base/finais conferidos.
+O alvo `dash_17559`, incluindo `dash_17559_signin.dll`, também compilou com saída
+0 (`.local/tmp/c72-build-title.log`), sem execução gráfica. Os 41 patches passaram
+em `apply-sdk-patches.ps1 -Check` (`.local/tmp/c72-patches.log`).
