@@ -746,3 +746,85 @@ sem timeout/crash no relatório do supervisor. O build final após a limpeza de 
 é incremental; não se repetiu o percurso do jogo por uma alteração só de diagnóstico.
 
 Em complemento, o teste novo `avatar.ModifierCounts` exercita 14, 22 e 32 registros (componentes + modificadores) e rejeita 33 antes do backend: 10 verificações aprovadas, executadas separadamente da suíte de lifecycle anterior.
+
+## 15. Integração na main (2026-10-13)
+
+O merge `5ee0f3d` preserva os sete commits `536f5f8`, `582cb16`, `dffa97f`,
+`65c7bf1`, `7fbcf94`, `7db63ae` e `1a4608a`, incluindo os experimentos opt-in.
+Não houve squash nem reescrita. A base principal `2b4b9b8`, com as mudanças de
+distribuição, SDK, supervisor e runtime, foi preservada. A alteração local de
+`scripts/window-route.ps1`, pertencente a outra sessão, ficou fora dos commits.
+
+Validação própria da integração, autorizada separadamente dos incrementos acima:
+
+- SDK fixado em `f5337cdc`: os 36 patches foram reaplicados em uma cópia limpa,
+  incluindo o SDL na revisão fixada; o aplicador conferiu os hashes finais.
+  Os 45 arquivos cobertos pelos patches coincidem com a antiga worktree.
+- Build `RelWithDebInfo` novo em `.local/build/integration-avatars`, com saídas
+  do SDK também isoladas. Nenhuma DLL foi reutilizada do build de outra worktree.
+  Codegen dos quatro títulos reexecutado com o gerador novo e `--ignore-stamp`.
+- **104/104 testes aprovados**: 54 `x360n`, 45 `sdkcheck`, três catálogos locais
+  de avatar e dois testes de lifecycle/contagem. Incluem LDI, `vavguw`, callbacks,
+  supervisor, identidade de títulos, retorno à dashboard e foco SDL.
+  A suíte completa upstream não foi repetida; isso não altera os resultados
+  históricos nem a falha conhecida de `unit.Depfile` registrada em STATUS.
+- `motocross_avatar_service` e todos os probes continuam `false` por padrão.
+  Initialize só publica READY depois da abertura e montagem reais. Os limites
+  funcionais e visuais da seção 14 permanecem explícitos.
+- Quatro títulos compilados com o SDK novo: Iruka, Castle Crashers, dashboard
+  17559 (incluindo bootanim) e Motocross Madness. Os cinco probes originais
+  passaram **128 verificações, zero falhas**: base 32, malhas/texturas 10,
+  LDI 11, agregado 16 e serviço completo 59. Runs `20261013T034335Z` a
+  `20261013T034546Z`, sufixos `integration-mm-*`. O serviço normal fica desligado
+  nestes probes; sua falha de Initialize ao retomar o jogo é esperada.
+- Iruka L1–L5: `20261013T034230Z-integration-iruka`, 60 s sem crash, erros ou
+  stubs, encerrado pelo timeout previsto. Capturas pela API Sky: 374 cores
+  quantizadas, diferença média 9,801 (limiares 32 e 0,5).
+- Motocross: `20261013T034627Z-integration-mm-live`, tutorial em movimento a
+  36 MPH, Initialize/GetAssets reais com HRESULT 0 e sete texturas/131 072 bytes
+  de mipmaps. Janela fechada normalmente após 46,406 s, exit 0. Quatro stubs de
+  voz e seis erros de recursos/heap, além do chão preto e piloto deformado,
+  permanecem limitações conhecidas; não se declara compatibilidade completa.
+- Ciclo 17559 → Castle Crashers → 17559 confirmado na mesma janela. Intro
+  original retornou 0; My Games abriu o jogo e seu menu. O usuário executou
+  Return to Arcade, porque os toques curtos da automação não moviam esse menu.
+  Castle Crashers (`20261013T034922Z-session-1-castle_crashers`) encerrou com
+  exit 0 após 98,318 s, zero erros/stubs/críticas. A volta
+  (`20261013T035100Z-session-2-dash_17559`) recebeu flags `0x100`, motivo 23 e
+  1 020 bytes de launch data; menu reapareceu sem repetir a intro. Os stubs
+  conhecidos da dashboard permanecem. Não houve medição audiovisual contra
+  console nem ampliação da validação de save/load ou gameplay de Castle Crashers.
+
+Logs e fixtures privados: `.local/integration-avatars/`; dados de usuário e
+caches desta validação: `.local/user/integration-avatars/`. Originais, AOT
+gerado, builds e logs não fazem parte dos commits.
+
+### Encerramento da worktree
+
+Após esses resultados, a branch foi confirmada como ancestral da main e não
+havia processo de build/jogo ou outra sessão ativa usando seus diretórios.
+As diferenças pendentes eram finais de linha e o SDK já coberto pelos patches;
+não havia código funcional exclusivo sem commit.
+
+Todo o diretório foi movido, sem exclusão recursiva, para o arquivo local ignorado
+`.local/preserved/x360-avatars-20261013/`. Os inventários de 25 095 entradas
+(arquivos, diretórios e links), incluindo tamanhos e destinos das junções,
+coincidem antes/depois. Os 23 057 arquivos regulares (3 564 848 724 bytes),
+logs, dados de usuário, experimentos, AOT e SDK privado permanecem recuperáveis.
+O marcador `.git` virou `.git.worktree-archived`, para que essa cópia não seja
+confundida com uma worktree ativa. As duas junções `.local/inputs` e
+`.local/toolchains` continuam apontando para os dados reais da main, que não
+foram removidos. O SDK era um diretório físico independente, também preservado.
+
+`git worktree remove` retirou o registro do caminho antigo, e
+`git branch -d avatars/xam-aot` removeu a branch sem forçar. A inspeção final de
+metadados não apontou entradas obsoletas. A worktree de distribuição ficou no
+mesmo caminho e commit `2b4b9b8`. Nenhum push ou release foi realizado.
+
+A main volta a ser a referência de desenvolvimento. O SDK continua aparecendo
+modificado pelos patches/materialização esperados. A alteração de outra sessão
+em `scripts/window-route.ps1` permanece sem commit e com SHA-256
+`c307f4bac6ec049967c445d7672c4357d009419303a372a77ae10cba67863201` inalterado.
+O bundle `.local/integration-avatars/avatars-history.bundle` conserva também
+as referências anteriores à integração. Nenhuma pendência funcional exclusiva
+ficou apenas na branch eliminada.

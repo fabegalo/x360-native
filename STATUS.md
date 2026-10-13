@@ -3,16 +3,23 @@
 Atualizado em 2026-10-13. Marcos: **M0 feito**; **M1 feito para um XEX** (amostra
 XDK "Dolphin" da `rexglue/demo-iruka`), com as limitações abaixo.
 
-Frente isolada de avatares (`x360-avatars`, `avatars/xam-aot`): Motocross Madness
+Frente de avatares integrada à `main` por merge com histórico: Motocross Madness
 chegou ao **gameplay do tutorial** em 2026-10-13. Contagem regressiva, movimento,
 88 MPH, 748 pontos e objetivos de volta/drift/manobra observados na interface.
 O serviço opt-in usa catálogo, malhas, modificadores, callbacks e mipmaps originais;
 Initialize só aceita depois de abrir o catálogo e montar um avatar completo.
 SDK conserva memória, arquivos e conclusão overlapped. A correção `vavguw`
-passou 66 560 verificações novas; suítes concluídas não foram repetidas.
+passou 66 560 verificações. A integração recompilou o SDK e executou 104 testes
+pertinentes, todos aprovados, em build próprio; os 36 patches foram reaplicados
+em uma cópia limpa do SDK fixado, com hashes conferidos.
+Na main integrada, os quatro títulos compilaram; 128 verificações dos probes
+originais, Iruka L1–L5, tutorial do Motocross e ciclo intro → 17559 → Castle
+Crashers → 17559 passaram no escopo documentado na seção 15 de avatares.
+Branch e worktree temporárias removidas pelo Git; conteúdo privado preservado
+em `.local/preserved/x360-avatars-20261013/`. A main volta a ser a referência.
 **Renderização ainda defeituosa:** chão preto e piloto deformado; corrida completa,
 save/load, animações do catálogo e componente especial continuam não validados.
-Main não integrada. Evidência e limites: [avatares, seção 14](docs/avatar-system.md#14-servico-real-e-entrada-no-tutorial-2026-10-13).
+Evidência e limites: [avatares, seção 14](docs/avatar-system.md#14-servico-real-e-entrada-no-tutorial-2026-10-13).
 
 ## Funciona (com evidência)
 
@@ -126,7 +133,7 @@ Detalhes, mensagens exatas e classificação de cada falha: `docs/validation-iru
    Continua falhando e é contada como falha, não como sucesso.
 2. `rexglue --version` informa `0.10.0.0-dev.unknown` em modo submódulo.
 3. Submódulo do SDK aparece modificado: 15 symlinks do libmspack materializados
-   como cópias verificadas (a conta não cria symlinks) e os 20 patches locais
+   como cópias verificadas (a conta não cria symlinks) e os 36 patches locais
    (arquivos listados em `patches/rexglue-sdk/README.md`), reaplicáveis por
    `scripts/apply-sdk-patches.ps1` e registrados com hashes em `deps.lock.json`.
 4. Backport do upstream `b5e0cf8` (include de xxHash **e imgui**) em
