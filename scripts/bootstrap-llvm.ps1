@@ -21,8 +21,16 @@ $archive = Join-Path $dlDir $lock.asset
 if (-not (Test-Path $archive)) {
     if (-not $AllowDownloads) { throw "Download consent required: $($lock.url). Run with -AllowDownloads or use the preparation app." }
     Write-Host "Downloading $($lock.url)"
-    & curl.exe -L --fail --retry 3 -o "$archive.part" $lock.url
-    if ($LASTEXITCODE -ne 0) { throw "curl failed with exit code $LASTEXITCODE" }
+    # Resume an interrupted transfer instead of discarding hundreds of MiB.
+    # Renew stalled connections; only the locked full-file hash permits use.
+    for ($attempt = 1; $attempt -le 4; $attempt++) {
+        & "$env:SystemRoot\System32\curl.exe" -L --fail --continue-at - --connect-timeout 30 --speed-limit 262144 --speed-time 30 -o "$archive.part" $lock.url
+        if ($LASTEXITCODE -eq 0) { break }
+        if ($LASTEXITCODE -notin @(18,28,52,55,56) -or $attempt -eq 4) {
+            throw "LLVM download interrupted (curl $LASTEXITCODE). Partial bytes preserved; retry preparation."
+        }
+        Write-Host "X360N_STAGE resume LLVM download (attempt $($attempt + 1))"
+    }
     Move-Item "$archive.part" $archive
 }
 
