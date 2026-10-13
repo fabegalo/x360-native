@@ -20,7 +20,7 @@ New-Item -ItemType Directory -Force $source, $destination | Out-Null
 function ExportTree([string]$Repository, [string]$Revision, [string]$Directory) {
     New-Item -ItemType Directory -Force $Directory | Out-Null
     $archive = Join-Path $job ([guid]::NewGuid().ToString('N') + '.zip')
-    git -c core.autocrlf=false -C $Repository archive --format=zip "--output=$archive" $Revision
+    git -c core.autocrlf=false -c core.eol=lf -C $Repository archive --format=zip "--output=$archive" $Revision
     if ($LASTEXITCODE -ne 0) { throw "Cannot export committed dependency: $Repository $Revision" }
     & "$env:SystemRoot\System32\tar.exe" -xf $archive -C $Directory
     if ($LASTEXITCODE -ne 0) { throw 'Source snapshot extraction failed' }
@@ -51,7 +51,7 @@ $sdk = Join-Path $source 'external/rexglue-sdk'
 # Shared objects are build-time inputs only; no checkout or Git directory is shipped.
 git -c core.longpaths=true clone --shared --no-checkout (Join-Path $root 'external/rexglue-sdk') $sdk
 if ($LASTEXITCODE -ne 0) { throw 'SDK snapshot failed' }
-git -c core.longpaths=true -c core.autocrlf=false -C $sdk checkout --detach $lock.rexglue_sdk.commit
+git -c core.longpaths=true -c core.autocrlf=false -c core.eol=lf -C $sdk checkout --detach $lock.rexglue_sdk.commit
 if ($LASTEXITCODE -ne 0) { throw 'Pinned SDK checkout failed' }
 $dependencies = [ordered]@{}
 foreach ($component in @('fmt','tomlplusplus','cli11','catch2','inja','sdl3','spdlog','simde','utfcpp')) {
@@ -103,6 +103,12 @@ $sdkInputs = @($ninjaInputs | ForEach-Object {
 } | Sort-Object -Unique)
 if (-not $sdkInputs.Count) { throw 'Compiler dependency evidence is empty' }
 [IO.File]::WriteAllText((Join-Path $internal 'dependency-inputs.json'), (ConvertTo-Json -InputObject $sdkInputs), [Text.UTF8Encoding]::new($false))
+$links = & $devshell ninja -C $build -t query src/desktop/x360-native.exe src/supervisor/x360n.exe src/content/x360n-extract.exe
+if ($LASTEXITCODE -ne 0) { throw 'Cannot inspect linker dependency evidence' }
+$libraries = @($links | ForEach-Object {
+    if ($_ -match '^\s+\|\s+(.+\.(?:lib|a))$') { $Matches[1].Replace('\','/') }
+} | Sort-Object -Unique)
+[IO.File]::WriteAllText((Join-Path $internal 'link-inputs.json'), (ConvertTo-Json -InputObject $libraries), [Text.UTF8Encoding]::new($false))
 # Keep the effective compiler commands as reviewable evidence, with portable
 # logical roots. They describe this fresh build, not a second preparation cache.
 $commands = Get-Content -Raw -LiteralPath (Join-Path $build 'compile_commands.json') | ConvertFrom-Json

@@ -2,4 +2,4 @@
 # deps.lock.json: keep their bytes exactly as committed (no CRLF conversion).
 patches/**/*.patch -text
 # Preserve the exact upstream legal texts and their recorded SHA-256 values.
-/licenses/*.txt -text
+/licenses/*.txt -text -whitespace

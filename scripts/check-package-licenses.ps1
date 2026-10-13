@@ -36,7 +36,7 @@ if((Digest (Join-Path $payload 'payload.sha256')) -ne $metadata.payload_sha256) 
 foreach($required in @('LICENSE','THIRD_PARTY_NOTICES.md')) {
     if((Digest (Join-Path $package $required)) -ne (Digest (Join-Path $payload $required))) { throw "Notice differs from committed payload: $required" }
 }
-$expected=@('LICENSE','THIRD_PARTY_NOTICES.md','READ-ME.txt','package.json','package.sha256','app/compile-commands.json','app/dependency-inputs.json','licenses/inventory.json','licenses/rexglue-attributions.txt') + @($inventory.executables)
+$expected=@('LICENSE','THIRD_PARTY_NOTICES.md','READ-ME.txt','package.json','package.sha256','app/compile-commands.json','app/dependency-inputs.json','app/link-inputs.json','licenses/inventory.json','licenses/rexglue-attributions.txt','licenses/header-attributions.txt') + @($inventory.executables)
 $ids=@{}
 foreach($component in $inventory.components) {
     if($ids.ContainsKey($component.id)) { throw 'Duplicate component identity' }; $ids[$component.id]=$true
@@ -47,7 +47,7 @@ foreach($component in $inventory.components) {
             if((Digest (Under $base $component.license_file)) -ne $component.license_sha256) { throw "Missing or changed original license: $($component.id)" }
         }
         # Compare original legal texts in the freshly pinned SDK snapshot where present.
-        if($component.original -and ($component.original -eq 'LICENSE' -or $component.original -like 'thirdparty/*')) {
+        if($component.original -and ($component.id -eq 'rexglue-sdk' -or $component.original -like 'thirdparty/*')) {
             $original=Under $sdk $component.original
             if(Test-Path -LiteralPath $original) {
                 if((Digest $original) -ne $component.license_sha256) { throw "Upstream license changed: $($component.id)" }
@@ -56,6 +56,9 @@ foreach($component in $inventory.components) {
     }
 }
 if((Digest (Join-Path $package 'licenses/rexglue-attributions.txt')) -ne $inventory.attributions_sha256) { throw 'Attribution text changed' }
+if((Digest (Join-Path $package 'licenses/header-attributions.txt')) -ne $inventory.header_attributions_sha256) { throw 'Header attribution text changed' }
+$linkInputs=@(Get-Content (Join-Path $package 'app/link-inputs.json') -Raw | ConvertFrom-Json)
+if(Compare-Object @($inventory.link_libraries | Sort-Object) @($linkInputs | Sort-Object -Unique)) { throw 'Unreviewed static link dependency' }
 foreach($dep in $metadata.dependencies.PSObject.Properties) {
     if($dep.Name -notin $inventory.desktop_dependencies) { throw "Unidentified build dependency: $($dep.Name)" }
     $record=@($inventory.components | Where-Object id -eq $dep.Name)
@@ -71,7 +74,9 @@ foreach($command in (Get-Content (Join-Path $package 'app/compile-commands.json'
     } elseif($f -notmatch '^<source>/(src/(desktop|supervisor|content)/|tests/(supervisor|content)/)') { throw 'Unreviewed distribution translation unit' }
 }
 if(Compare-Object @($inventory.sdk_translation_units | Sort-Object) @($units | Sort-Object -Unique)) { throw 'SDK extraction source scope changed' }
-foreach($input in (Get-Content (Join-Path $package 'app/dependency-inputs.json') -Raw | ConvertFrom-Json)) {
+$dependencyInputs=@(Get-Content (Join-Path $package 'app/dependency-inputs.json') -Raw | ConvertFrom-Json)
+foreach($input in $dependencyInputs) {
+    if($input -notin $inventory.sdk_inputs) { throw 'Unreviewed transitive header dependency' }
     if($input -match '^thirdparty/([^/]+)/') {
         if($Matches[1] -notin $inventory.desktop_dependencies) { throw 'Unreviewed transitive header dependency' }
         if($input -like 'thirdparty/inja/*' -and $input -notlike 'thirdparty/inja/third_party/include/nlohmann/*') { throw 'Unreviewed inja nested dependency' }

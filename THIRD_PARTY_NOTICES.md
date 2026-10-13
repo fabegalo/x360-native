@@ -17,14 +17,18 @@ forma de uso, texto e SHA-256. Os índices existentes `package.sha256` e
 | toml++ | Headers compilados | [MIT](licenses/tomlplusplus.txt) |
 | nlohmann/json 3.11.3, vendorizado por inja | Headers compilados no supervisor; copyright 2013–2023 Niels Lohmann no header | [MIT original vendorizada](licenses/nlohmann-json.txt) |
 | spdlog | Biblioteca estática | [MIT](licenses/spdlog.txt); fmt externo listado acima |
-| SIMDe | Headers usados pelo extrator | [MIT](licenses/simde.txt) |
+| SIMDe | Disponível no include path; nenhum header observado nos comandos de dependências desktop | [MIT](licenses/simde.txt); não atribuído a código incorporado |
 | utfcpp | Headers usados pelo extrator | [BSL-1.0](licenses/utfcpp.txt) |
 | Microsoft C++ Standard Library | Templates/objetos incorporados | [Apache-2.0 WITH LLVM-exception](licenses/microsoft-stl.txt), copyright Microsoft Corporation |
 | CRT/UCRT Microsoft | Runtime estático Release | Termos de redistribuição Visual Studio/Windows SDK; não é coberto pela licença própria |
 | SDL | Somente trechos de patches; não há SDL.dll no ZIP desktop | [Zlib](licenses/sdl3.txt) |
 
 Preservar os copyrights, condições e disclaimers nos formatos exigidos pelos
-textos originais. Patches em `app/workspace/patches/rexglue-sdk` identificam
+textos originais. [Atribuições dos headers](licenses/header-attributions.txt)
+preservam também Paul Dreik (fmt), Alexander Dalshov (spdlog), Evan Nemerson,
+Florian Loitsch e Björn Hoehrmann (JSON/toml). O trecho Abseil do JSON está
+desabilitado em C++23; seu aviso Apache também é conservado no inventário.
+Patches em `app/workspace/patches/rexglue-sdk` identificam
 modificações locais; seus hashes e a base estão no lock e em `package.json`.
 O código adaptado em `src/content/xex_patch.cpp` deriva do ReXGlue/Xenia e conserva
 esses avisos; não é compilado nos três executáveis deste ZIP.

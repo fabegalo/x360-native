@@ -1,0 +1,154 @@
+Original copyright lines from compiler-observed headers at the revisions in inventory.json.
+Applicable original terms: fmt.txt, cli11.txt, tomlplusplus.txt, spdlog.txt, utfcpp.txt, nlohmann-json.txt. Abseil fallback code is disabled by C++23; original Apache terms are in abseil.txt.
+
+thirdparty/cli11/include/CLI/App.hpp // Copyright (c) 2017-2025, University of Cincinnati, developed by Henry Schreiner
+thirdparty/cli11/include/CLI/Argv.hpp // Copyright (c) 2017-2025, University of Cincinnati, developed by Henry Schreiner
+thirdparty/cli11/include/CLI/CLI.hpp // Copyright (c) 2017-2025, University of Cincinnati, developed by Henry Schreiner
+thirdparty/cli11/include/CLI/Config.hpp // Copyright (c) 2017-2025, University of Cincinnati, developed by Henry Schreiner
+thirdparty/cli11/include/CLI/ConfigFwd.hpp // Copyright (c) 2017-2025, University of Cincinnati, developed by Henry Schreiner
+thirdparty/cli11/include/CLI/Encoding.hpp // Copyright (c) 2017-2025, University of Cincinnati, developed by Henry Schreiner
+thirdparty/cli11/include/CLI/Error.hpp // Copyright (c) 2017-2025, University of Cincinnati, developed by Henry Schreiner
+thirdparty/cli11/include/CLI/ExtraValidators.hpp // Copyright (c) 2017-2025, University of Cincinnati, developed by Henry Schreiner
+thirdparty/cli11/include/CLI/Formatter.hpp // Copyright (c) 2017-2025, University of Cincinnati, developed by Henry Schreiner
+thirdparty/cli11/include/CLI/FormatterFwd.hpp // Copyright (c) 2017-2025, University of Cincinnati, developed by Henry Schreiner
+thirdparty/cli11/include/CLI/impl/App_inl.hpp // Copyright (c) 2017-2025, University of Cincinnati, developed by Henry Schreiner
+thirdparty/cli11/include/CLI/impl/Argv_inl.hpp // Copyright (c) 2017-2025, University of Cincinnati, developed by Henry Schreiner
+thirdparty/cli11/include/CLI/impl/Config_inl.hpp // Copyright (c) 2017-2025, University of Cincinnati, developed by Henry Schreiner
+thirdparty/cli11/include/CLI/impl/Encoding_inl.hpp // Copyright (c) 2017-2025, University of Cincinnati, developed by Henry Schreiner
+thirdparty/cli11/include/CLI/impl/ExtraValidators_inl.hpp // Copyright (c) 2017-2025, University of Cincinnati, developed by Henry Schreiner
+thirdparty/cli11/include/CLI/impl/Formatter_inl.hpp // Copyright (c) 2017-2025, University of Cincinnati, developed by Henry Schreiner
+thirdparty/cli11/include/CLI/impl/Option_inl.hpp // Copyright (c) 2017-2025, University of Cincinnati, developed by Henry Schreiner
+thirdparty/cli11/include/CLI/impl/Split_inl.hpp // Copyright (c) 2017-2025, University of Cincinnati, developed by Henry Schreiner
+thirdparty/cli11/include/CLI/impl/StringTools_inl.hpp // Copyright (c) 2017-2025, University of Cincinnati, developed by Henry Schreiner
+thirdparty/cli11/include/CLI/impl/Validators_inl.hpp // Copyright (c) 2017-2025, University of Cincinnati, developed by Henry Schreiner
+thirdparty/cli11/include/CLI/Macros.hpp // Copyright (c) 2017-2025, University of Cincinnati, developed by Henry Schreiner
+thirdparty/cli11/include/CLI/Option.hpp // Copyright (c) 2017-2025, University of Cincinnati, developed by Henry Schreiner
+thirdparty/cli11/include/CLI/Split.hpp // Copyright (c) 2017-2025, University of Cincinnati, developed by Henry Schreiner
+thirdparty/cli11/include/CLI/StringTools.hpp // Copyright (c) 2017-2025, University of Cincinnati, developed by Henry Schreiner
+thirdparty/cli11/include/CLI/TypeTools.hpp // Copyright (c) 2017-2025, University of Cincinnati, developed by Henry Schreiner
+thirdparty/cli11/include/CLI/Validators.hpp // Copyright (c) 2017-2025, University of Cincinnati, developed by Henry Schreiner
+thirdparty/cli11/include/CLI/Version.hpp // Copyright (c) 2017-2025, University of Cincinnati, developed by Henry Schreiner
+thirdparty/fmt/include/fmt/base.h // Copyright (c) 2012 - present, Victor Zverovich
+thirdparty/fmt/include/fmt/chrono.h // Copyright (c) 2012 - present, Victor Zverovich
+thirdparty/fmt/include/fmt/chrono.h // Copyright Paul Dreik 2019
+thirdparty/fmt/include/fmt/format-inl.h // Copyright (c) 2012 - 2016, Victor Zverovich
+thirdparty/fmt/include/fmt/format.h Copyright (c) 2012 - present, Victor Zverovich
+thirdparty/fmt/include/fmt/os.h // Copyright (c) 2012 - present, Victor Zverovich
+thirdparty/fmt/src/format.cc // Copyright (c) 2012 - 2016, Victor Zverovich
+thirdparty/fmt/src/os.cc // Copyright (c) 2012 - 2016, Victor Zverovich
+thirdparty/inja/third_party/include/nlohmann/json.hpp @copyright Copyright (c) 2008-2009 Bjoern Hoehrmann <bjoern@hoehrmann.de>
+thirdparty/inja/third_party/include/nlohmann/json.hpp // SPDX-FileCopyrightText: 2008-2009 Björn Hoehrmann <bjoern@hoehrmann.de>
+thirdparty/inja/third_party/include/nlohmann/json.hpp // SPDX-FileCopyrightText: 2009 Florian Loitsch <https://florian.loitsch.com/>
+thirdparty/inja/third_party/include/nlohmann/json.hpp // SPDX-FileCopyrightText: 2013-2023 Niels Lohmann <https://nlohmann.me>
+thirdparty/inja/third_party/include/nlohmann/json.hpp // SPDX-FileCopyrightText: 2016-2021 Evan Nemerson <evan@nemerson.com>
+thirdparty/inja/third_party/include/nlohmann/json.hpp // SPDX-FileCopyrightText: 2018 The Abseil Authors
+thirdparty/inja/third_party/include/nlohmann/json.hpp The code is distributed under the MIT license, Copyright (c) 2009 Florian Loitsch.
+thirdparty/spdlog/include/spdlog/async_logger-inl.h // Copyright(c) 2015-present, Gabi Melman & spdlog contributors.
+thirdparty/spdlog/include/spdlog/async_logger.h // Copyright(c) 2015-present, Gabi Melman & spdlog contributors.
+thirdparty/spdlog/include/spdlog/async.h // Copyright(c) 2015-present, Gabi Melman & spdlog contributors.
+thirdparty/spdlog/include/spdlog/cfg/helpers-inl.h // Copyright(c) 2015-present, Gabi Melman & spdlog contributors.
+thirdparty/spdlog/include/spdlog/cfg/helpers.h // Copyright(c) 2015-present, Gabi Melman & spdlog contributors.
+thirdparty/spdlog/include/spdlog/common-inl.h // Copyright(c) 2015-present, Gabi Melman & spdlog contributors.
+thirdparty/spdlog/include/spdlog/common.h // Copyright(c) 2015-present, Gabi Melman & spdlog contributors.
+thirdparty/spdlog/include/spdlog/details/backtracer-inl.h // Copyright(c) 2015-present, Gabi Melman & spdlog contributors.
+thirdparty/spdlog/include/spdlog/details/backtracer.h // Copyright(c) 2015-present, Gabi Melman & spdlog contributors.
+thirdparty/spdlog/include/spdlog/details/circular_q.h // Copyright(c) 2015-present, Gabi Melman & spdlog contributors.
+thirdparty/spdlog/include/spdlog/details/console_globals.h // Copyright(c) 2015-present, Gabi Melman & spdlog contributors.
+thirdparty/spdlog/include/spdlog/details/file_helper-inl.h // Copyright(c) 2015-present, Gabi Melman & spdlog contributors.
+thirdparty/spdlog/include/spdlog/details/file_helper.h // Copyright(c) 2015-present, Gabi Melman & spdlog contributors.
+thirdparty/spdlog/include/spdlog/details/fmt_helper.h // Copyright(c) 2015-present, Gabi Melman & spdlog contributors.
+thirdparty/spdlog/include/spdlog/details/log_msg_buffer-inl.h // Copyright(c) 2015-present, Gabi Melman & spdlog contributors.
+thirdparty/spdlog/include/spdlog/details/log_msg_buffer.h // Copyright(c) 2015-present, Gabi Melman & spdlog contributors.
+thirdparty/spdlog/include/spdlog/details/log_msg-inl.h // Copyright(c) 2015-present, Gabi Melman & spdlog contributors.
+thirdparty/spdlog/include/spdlog/details/log_msg.h // Copyright(c) 2015-present, Gabi Melman & spdlog contributors.
+thirdparty/spdlog/include/spdlog/details/mpmc_blocking_q.h // Copyright(c) 2015-present, Gabi Melman & spdlog contributors.
+thirdparty/spdlog/include/spdlog/details/null_mutex.h // Copyright(c) 2015-present, Gabi Melman & spdlog contributors.
+thirdparty/spdlog/include/spdlog/details/os-inl.h // Copyright(c) 2015-present, Gabi Melman & spdlog contributors.
+thirdparty/spdlog/include/spdlog/details/os.h // Copyright(c) 2015-present, Gabi Melman & spdlog contributors.
+thirdparty/spdlog/include/spdlog/details/periodic_worker-inl.h // Copyright(c) 2015-present, Gabi Melman & spdlog contributors.
+thirdparty/spdlog/include/spdlog/details/periodic_worker.h // Copyright(c) 2015-present, Gabi Melman & spdlog contributors.
+thirdparty/spdlog/include/spdlog/details/registry-inl.h // Copyright(c) 2015-present, Gabi Melman & spdlog contributors.
+thirdparty/spdlog/include/spdlog/details/registry.h // Copyright(c) 2015-present, Gabi Melman & spdlog contributors.
+thirdparty/spdlog/include/spdlog/details/synchronous_factory.h // Copyright(c) 2015-present, Gabi Melman & spdlog contributors.
+thirdparty/spdlog/include/spdlog/details/thread_pool-inl.h // Copyright(c) 2015-present, Gabi Melman & spdlog contributors.
+thirdparty/spdlog/include/spdlog/details/thread_pool.h // Copyright(c) 2015-present, Gabi Melman & spdlog contributors.
+thirdparty/spdlog/include/spdlog/fmt/fmt.h // Copyright(c) 2016-2018 Gabi Melman.
+thirdparty/spdlog/include/spdlog/formatter.h // Copyright(c) 2015-present, Gabi Melman & spdlog contributors.
+thirdparty/spdlog/include/spdlog/logger-inl.h // Copyright(c) 2015-present, Gabi Melman & spdlog contributors.
+thirdparty/spdlog/include/spdlog/logger.h // Copyright(c) 2015-present, Gabi Melman & spdlog contributors.
+thirdparty/spdlog/include/spdlog/mdc.h // Copyright(c) 2015-present, Gabi Melman & spdlog contributors.
+thirdparty/spdlog/include/spdlog/pattern_formatter-inl.h // Copyright(c) 2015-present, Gabi Melman & spdlog contributors.
+thirdparty/spdlog/include/spdlog/pattern_formatter.h // Copyright(c) 2015-present, Gabi Melman & spdlog contributors.
+thirdparty/spdlog/include/spdlog/sinks/base_sink-inl.h // Copyright(c) 2015-present, Gabi Melman & spdlog contributors.
+thirdparty/spdlog/include/spdlog/sinks/base_sink.h // Copyright(c) 2015-present, Gabi Melman & spdlog contributors.
+thirdparty/spdlog/include/spdlog/sinks/basic_file_sink-inl.h // Copyright(c) 2015-present, Gabi Melman & spdlog contributors.
+thirdparty/spdlog/include/spdlog/sinks/basic_file_sink.h // Copyright(c) 2015-present, Gabi Melman & spdlog contributors.
+thirdparty/spdlog/include/spdlog/sinks/msvc_sink.h // Copyright(c) 2016 Alexander Dalshov & spdlog contributors.
+thirdparty/spdlog/include/spdlog/sinks/rotating_file_sink-inl.h // Copyright(c) 2015-present, Gabi Melman & spdlog contributors.
+thirdparty/spdlog/include/spdlog/sinks/rotating_file_sink.h // Copyright(c) 2015-present, Gabi Melman & spdlog contributors.
+thirdparty/spdlog/include/spdlog/sinks/sink-inl.h // Copyright(c) 2015-present, Gabi Melman & spdlog contributors.
+thirdparty/spdlog/include/spdlog/sinks/sink.h // Copyright(c) 2015-present, Gabi Melman & spdlog contributors.
+thirdparty/spdlog/include/spdlog/sinks/stdout_color_sinks-inl.h // Copyright(c) 2015-present, Gabi Melman & spdlog contributors.
+thirdparty/spdlog/include/spdlog/sinks/stdout_color_sinks.h // Copyright(c) 2015-present, Gabi Melman & spdlog contributors.
+thirdparty/spdlog/include/spdlog/sinks/stdout_sinks-inl.h // Copyright(c) 2015-present, Gabi Melman & spdlog contributors.
+thirdparty/spdlog/include/spdlog/sinks/stdout_sinks.h // Copyright(c) 2015-present, Gabi Melman & spdlog contributors.
+thirdparty/spdlog/include/spdlog/sinks/wincolor_sink-inl.h // Copyright(c) 2015-present, Gabi Melman & spdlog contributors.
+thirdparty/spdlog/include/spdlog/sinks/wincolor_sink.h // Copyright(c) 2015-present, Gabi Melman & spdlog contributors.
+thirdparty/spdlog/include/spdlog/spdlog-inl.h // Copyright(c) 2015-present, Gabi Melman & spdlog contributors.
+thirdparty/spdlog/include/spdlog/spdlog.h // Copyright(c) 2015-present, Gabi Melman & spdlog contributors.
+thirdparty/spdlog/include/spdlog/tweakme.h // Copyright(c) 2015-present, Gabi Melman & spdlog contributors.
+thirdparty/spdlog/include/spdlog/version.h // Copyright(c) 2015-present, Gabi Melman & spdlog contributors.
+thirdparty/spdlog/src/async.cpp // Copyright(c) 2015-present, Gabi Melman & spdlog contributors.
+thirdparty/spdlog/src/cfg.cpp // Copyright(c) 2015-present, Gabi Melman & spdlog contributors.
+thirdparty/spdlog/src/color_sinks.cpp // Copyright(c) 2015-present, Gabi Melman & spdlog contributors.
+thirdparty/spdlog/src/file_sinks.cpp // Copyright(c) 2015-present, Gabi Melman & spdlog contributors.
+thirdparty/spdlog/src/spdlog.cpp // Copyright(c) 2015-present, Gabi Melman & spdlog contributors.
+thirdparty/spdlog/src/stdout_sinks.cpp // Copyright(c) 2015-present, Gabi Melman & spdlog contributors.
+thirdparty/tomlplusplus/include/toml++/impl/array.hpp //# Copyright (c) Mark Gillard <mark.gillard@outlook.com.au>
+thirdparty/tomlplusplus/include/toml++/impl/array.inl //# Copyright (c) Mark Gillard <mark.gillard@outlook.com.au>
+thirdparty/tomlplusplus/include/toml++/impl/at_path.hpp //# Copyright (c) Mark Gillard <mark.gillard@outlook.com.au>
+thirdparty/tomlplusplus/include/toml++/impl/at_path.inl //# Copyright (c) Mark Gillard <mark.gillard@outlook.com.au>
+thirdparty/tomlplusplus/include/toml++/impl/date_time.hpp //# Copyright (c) Mark Gillard <mark.gillard@outlook.com.au>
+thirdparty/tomlplusplus/include/toml++/impl/formatter.hpp //# Copyright (c) Mark Gillard <mark.gillard@outlook.com.au>
+thirdparty/tomlplusplus/include/toml++/impl/formatter.inl //# Copyright (c) Mark Gillard <mark.gillard@outlook.com.au>
+thirdparty/tomlplusplus/include/toml++/impl/forward_declarations.hpp //# Copyright (c) Mark Gillard <mark.gillard@outlook.com.au>
+thirdparty/tomlplusplus/include/toml++/impl/json_formatter.hpp //# Copyright (c) Mark Gillard <mark.gillard@outlook.com.au>
+thirdparty/tomlplusplus/include/toml++/impl/json_formatter.inl //# Copyright (c) Mark Gillard <mark.gillard@outlook.com.au>
+thirdparty/tomlplusplus/include/toml++/impl/key.hpp //# Copyright (c) Mark Gillard <mark.gillard@outlook.com.au>
+thirdparty/tomlplusplus/include/toml++/impl/make_node.hpp //# Copyright (c) Mark Gillard <mark.gillard@outlook.com.au>
+thirdparty/tomlplusplus/include/toml++/impl/node_view.hpp //# Copyright (c) Mark Gillard <mark.gillard@outlook.com.au>
+thirdparty/tomlplusplus/include/toml++/impl/node.hpp //# Copyright (c) Mark Gillard <mark.gillard@outlook.com.au>
+thirdparty/tomlplusplus/include/toml++/impl/node.inl //# Copyright (c) Mark Gillard <mark.gillard@outlook.com.au>
+thirdparty/tomlplusplus/include/toml++/impl/parse_error.hpp //# Copyright (c) Mark Gillard <mark.gillard@outlook.com.au>
+thirdparty/tomlplusplus/include/toml++/impl/parse_result.hpp //# Copyright (c) Mark Gillard <mark.gillard@outlook.com.au>
+thirdparty/tomlplusplus/include/toml++/impl/parser.hpp //# Copyright (c) Mark Gillard <mark.gillard@outlook.com.au>
+thirdparty/tomlplusplus/include/toml++/impl/parser.inl //# Copyright (c) Mark Gillard <mark.gillard@outlook.com.au>
+thirdparty/tomlplusplus/include/toml++/impl/path.hpp //# Copyright (c) Mark Gillard <mark.gillard@outlook.com.au>
+thirdparty/tomlplusplus/include/toml++/impl/path.inl //# Copyright (c) Mark Gillard <mark.gillard@outlook.com.au>
+thirdparty/tomlplusplus/include/toml++/impl/preprocessor.hpp //# Copyright (c) Mark Gillard <mark.gillard@outlook.com.au>
+thirdparty/tomlplusplus/include/toml++/impl/print_to_stream.hpp //# Copyright (c) Mark Gillard <mark.gillard@outlook.com.au>
+thirdparty/tomlplusplus/include/toml++/impl/print_to_stream.inl //# Copyright (c) Mark Gillard <mark.gillard@outlook.com.au>
+thirdparty/tomlplusplus/include/toml++/impl/simd.hpp //# Copyright (c) Mark Gillard <mark.gillard@outlook.com.au>
+thirdparty/tomlplusplus/include/toml++/impl/source_region.hpp //# Copyright (c) Mark Gillard <mark.gillard@outlook.com.au>
+thirdparty/tomlplusplus/include/toml++/impl/std_except.hpp //# Copyright (c) Mark Gillard <mark.gillard@outlook.com.au>
+thirdparty/tomlplusplus/include/toml++/impl/std_initializer_list.hpp //# Copyright (c) Mark Gillard <mark.gillard@outlook.com.au>
+thirdparty/tomlplusplus/include/toml++/impl/std_map.hpp //# Copyright (c) Mark Gillard <mark.gillard@outlook.com.au>
+thirdparty/tomlplusplus/include/toml++/impl/std_new.hpp //# Copyright (c) Mark Gillard <mark.gillard@outlook.com.au>
+thirdparty/tomlplusplus/include/toml++/impl/std_optional.hpp //# Copyright (c) Mark Gillard <mark.gillard@outlook.com.au>
+thirdparty/tomlplusplus/include/toml++/impl/std_string.hpp //# Copyright (c) Mark Gillard <mark.gillard@outlook.com.au>
+thirdparty/tomlplusplus/include/toml++/impl/std_string.inl //# Copyright (c) Mark Gillard <mark.gillard@outlook.com.au>
+thirdparty/tomlplusplus/include/toml++/impl/std_utility.hpp //# Copyright (c) Mark Gillard <mark.gillard@outlook.com.au>
+thirdparty/tomlplusplus/include/toml++/impl/std_vector.hpp //# Copyright (c) Mark Gillard <mark.gillard@outlook.com.au>
+thirdparty/tomlplusplus/include/toml++/impl/table.hpp //# Copyright (c) Mark Gillard <mark.gillard@outlook.com.au>
+thirdparty/tomlplusplus/include/toml++/impl/table.inl //# Copyright (c) Mark Gillard <mark.gillard@outlook.com.au>
+thirdparty/tomlplusplus/include/toml++/impl/toml_formatter.hpp //# Copyright (c) Mark Gillard <mark.gillard@outlook.com.au>
+thirdparty/tomlplusplus/include/toml++/impl/toml_formatter.inl //# Copyright (c) Mark Gillard <mark.gillard@outlook.com.au>
+thirdparty/tomlplusplus/include/toml++/impl/unicode_autogenerated.hpp //# Copyright (c) Mark Gillard <mark.gillard@outlook.com.au>
+thirdparty/tomlplusplus/include/toml++/impl/unicode.hpp // Copyright (c) 2008-2009 Bjoern Hoehrmann <bjoern@hoehrmann.de>
+thirdparty/tomlplusplus/include/toml++/impl/unicode.hpp //# Copyright (c) Mark Gillard <mark.gillard@outlook.com.au>
+thirdparty/tomlplusplus/include/toml++/impl/unicode.inl //# Copyright (c) Mark Gillard <mark.gillard@outlook.com.au>
+thirdparty/tomlplusplus/include/toml++/impl/value.hpp //# Copyright (c) Mark Gillard <mark.gillard@outlook.com.au>
+thirdparty/tomlplusplus/include/toml++/impl/version.hpp //# Copyright (c) Mark Gillard <mark.gillard@outlook.com.au>
+thirdparty/tomlplusplus/include/toml++/impl/yaml_formatter.hpp //# Copyright (c) Mark Gillard <mark.gillard@outlook.com.au>
+thirdparty/tomlplusplus/include/toml++/impl/yaml_formatter.inl //# Copyright (c) Mark Gillard <mark.gillard@outlook.com.au>
+thirdparty/tomlplusplus/include/toml++/toml.hpp //# Copyright (c) Mark Gillard <mark.gillard@outlook.com.au>

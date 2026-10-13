@@ -24,7 +24,7 @@ já fixados em `deps.lock.json`. LLVM 22.1.8, MSVC 14.44.35207 e SDK Windows
 | ReXGlue/Xenia | BSD-3-Clause, 20 unidades dos leitores ISO/STFS e utilitários no extrator, headers; conservar copyright, termos, disclaimer e não endosso. Atribuições originais por arquivo em `licenses/rexglue-attributions.txt`. |
 | fmt | MIT, estática; texto e copyright. |
 | CLI11 | **BSD-3-Clause**, headers; não MIT. Texto e copyright. |
-| toml++, spdlog, SIMDe | MIT; toml/SIMDe headers, spdlog estática com fmt externo. Texto e copyright. |
+| toml++, spdlog | MIT; toml headers, spdlog estática com fmt externo. Texto e copyright, incluindo contribuições transitivas listadas em `header-attributions.txt`. |
 | utfcpp | **BSL-1.0**, headers; texto preservado, inclusive exceção de código objeto. |
 | nlohmann/json 3.11.3 | MIT, header vendorizado por inja; faltava no ZIP anterior. Texto original da árvore fixada (2013–2021) e atribuição do header (2013–2023 Niels Lohmann) conservados separadamente. |
 | Microsoft STL | Apache-2.0 WITH LLVM-exception, templates/objetos; texto original VS 17.14 incluído. A exceção trata partes incorporadas em objetos, não licencia o CRT proprietário. |
@@ -33,6 +33,10 @@ já fixados em `deps.lock.json`. LLVM 22.1.8, MSVC 14.44.35207 e SDK Windows
 | Código próprio/patches locais | BSD-3-Clause aprovada; avisos de arquivos de terceiros continuam aplicáveis. Adicionada atribuição explícita ao `xex_patch.cpp` adaptado do SDK/Xenia. Nenhuma semântica alterada. |
 
 Inja não é usado como engine no desktop: somente seu nlohmann/json vendorizado.
+SIMDe está no include path, mas nenhum header seu apareceu nos 481 inputs SDK
+reais do desktop; seu texto é incluído preventivamente, não como prova de vínculo.
+O header JSON inclui avisos Hedley, Grisu2, UTF-8 e Abseil; foram preservados.
+O trecho Apache Abseil só é habilitado sem C++14, portanto não é compilado em C++23.
 Catch2 é BSL-1.0 e só entra nos executáveis de testes, que não são distribuídos.
 Os textos destes componentes também são conservados para transparência.
 
