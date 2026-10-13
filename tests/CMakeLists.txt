@@ -14,6 +14,8 @@ include(Catch)
 
 # Helper child process for supervisor tests (test fixture, not a title).
 add_executable(x360n_test_child supervisor/test_child.cpp)
+add_executable(x360n_session_child supervisor/session_child.cpp)
+target_link_libraries(x360n_session_child PRIVATE x360n_core)
 
 add_executable(x360n_tests
     supervisor/sha256_test.cpp
@@ -22,14 +24,16 @@ add_executable(x360n_tests
     supervisor/report_test.cpp
     supervisor/process_test.cpp
     supervisor/session_test.cpp
+    supervisor/session_process_test.cpp
     supervisor/preparation_test.cpp
 )
 target_link_libraries(x360n_tests PRIVATE x360n_core Catch2::Catch2WithMain)
 target_compile_definitions(x360n_tests PRIVATE
     X360N_TEST_CHILD="$<TARGET_FILE:x360n_test_child>"
+    X360N_SESSION_CHILD="$<TARGET_FILE:x360n_session_child>"
     X360N_EXE="$<TARGET_FILE:x360n>"
     X360N_SOURCE_ROOT="${PROJECT_SOURCE_DIR}")
-add_dependencies(x360n_tests x360n x360n_test_child)
+add_dependencies(x360n_tests x360n x360n_test_child x360n_session_child)
 # Avatar asset catalog reader shared by the titles (titles/common/avatar), synthetic data.
 target_sources(x360n_tests PRIVATE avatar/avatar_toc_test.cpp avatar/avatar_metadata_test.cpp
     ${PROJECT_SOURCE_DIR}/titles/common/avatar/avatar_metadata.cpp

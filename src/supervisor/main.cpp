@@ -26,6 +26,7 @@
 #include "sha256.h"
 #include "xex_identity.h"
 #include "session_profile.h"
+#include "session_progress.h"
 #include "session_window.h"
 #include "workspace_lease.h"
 
@@ -416,7 +417,8 @@ std::string UtcStamp() {
 
 int Run(const ProjectPaths& p, const fs::path& exe_in, std::vector<std::string> args,
         std::string label, int timeout_s, bool rex_log, bool crash_stack,
-        fs::path* handoff = nullptr, SessionWindow* window = nullptr) {
+        fs::path* handoff = nullptr, SessionWindow* window = nullptr,
+        std::chrono::milliseconds* child_lifetime = nullptr) {
   fs::path exe = fs::absolute(exe_in);
   if (auto why = CheckPreparedLaunch(p, exe)) {
     fmt::print(stderr, "run: {}\n", *why);
@@ -468,6 +470,7 @@ int Run(const ProjectPaths& p, const fs::path& exe_in, std::vector<std::string> 
   fmt::print("run: {} (working dir {}) -> {}\n", PathUtf8(exe), PathUtf8(spec.working_dir),
              PathUtf8(dir));
   auto r = RunProcess(spec);
+  if (child_lifetime) *child_lifetime = r.duration;
 
   LogScan scan;
   if (r.launched) {
@@ -642,7 +645,8 @@ int Session(const ProjectPaths& paths, const fs::path& manifest, int timeout, bo
       fmt::print("session: persistent window {}\n", window->handle());
     }
     fs::path incoming;
-    for (unsigned step = 0; step < 32; ++step) {
+    SessionProgress progress;
+    for (uint64_t step = 0; ; ++step) {
       // Revalidate the profile and input bytes at every transition.
       active = LoadSessionProfile(paths, active.manifest);
       auto args = active.args;
@@ -650,8 +654,9 @@ int Session(const ProjectPaths& paths, const fs::path& manifest, int timeout, bo
       args.push_back("--user_data_root=" + PathUtf8(active.user_root));
       if (!incoming.empty()) args.push_back("--x360n_handoff_in=" + PathUtf8(incoming));
       fs::path handoff;
+      std::chrono::milliseconds child_lifetime{};
       const auto result = Run(paths, active.exe, args,
-          fmt::format("session-{}-{}", step, active.name), timeout, true, false, &handoff, window.get());
+          fmt::format("session-{}-{}", step, active.name), timeout, true, false, &handoff, window.get(), &child_lifetime);
       if (window && window->closed()) return kExitOk;
       if (result != kExitOk) return result;  // never relaunch after timeout/crash
       LaunchRequest request;
@@ -659,6 +664,12 @@ int Session(const ProjectPaths& paths, const fs::path& manifest, int timeout, bo
         fmt::print(stderr, "session: missing or invalid handoff: {}\n", PathUtf8(handoff));
         return kExitFailed;
       }
+      const auto can_continue = [&] {
+        if (progress.CanContinue(child_lifetime)) return true;
+        fmt::print(stderr, "session: repeated transitions without sustained execution; request preserved in {}\n",
+                   PathUtf8(handoff));
+        return false;
+      };
       if (request.kind != LaunchRequest::Image) {
         // Closing a host window exits the platform, never impersonates Xbox Home.
         if (request.kind == LaunchRequest::WindowClose) return kExitOk;
@@ -675,6 +686,7 @@ int Session(const ProjectPaths& paths, const fs::path& manifest, int timeout, bo
             request.kind == LaunchRequest::TitleTerminate ? "requested title termination" :
             "main thread returned (no explicit return request)",
             dashboard.name);
+        if (!can_continue()) return kExitFailed;
         active = dashboard; incoming = handoff;
         continue;
       }
@@ -686,10 +698,9 @@ int Session(const ProjectPaths& paths, const fs::path& manifest, int timeout, bo
         return kExitFailed;
       }
       fmt::print("session: original request matched {} ({})\n", target->name, target->sha256);
+      if (!can_continue()) return kExitFailed;
       incoming = handoff; active = *target;
     }
-    fmt::print(stderr, "session: transition limit reached\n");
-    return kExitFailed;
   } catch (const std::exception& e) {
     fmt::print(stderr, "session: {}\n", e.what());
     return kExitUsage;

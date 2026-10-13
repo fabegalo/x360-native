@@ -1,5 +1,6 @@
 #include <catch2/catch_test_macros.hpp>
 #include "session_profile.h"
+#include "session_progress.h"
 #include "sha256.h"
 #include "scratch.h"
 #include "workspace_lease.h"
@@ -8,6 +9,17 @@
 
 namespace fs = std::filesystem;
 using namespace x360n;
+TEST_CASE("session watchdog resets after sustained execution without a lifetime limit", "[session]") {
+  SessionProgress progress;
+  for (unsigned cycle = 0; cycle < 1000; ++cycle) {
+    for (unsigned step = 0; step < 31; ++step)
+      REQUIRE(progress.CanContinue(std::chrono::milliseconds(999)));
+    REQUIRE(progress.CanContinue(std::chrono::milliseconds(1000)));
+  }
+  for (unsigned step = 0; step < 31; ++step)
+    REQUIRE(progress.CanContinue(std::chrono::milliseconds(0)));
+  CHECK_FALSE(progress.CanContinue(std::chrono::milliseconds(999)));
+}
 TEST_CASE("selected storage persists without moving or deleting existing saves", "[session]") {
   auto dir = UniqueTempPath("storage"); ProjectPaths paths{dir};
   auto original = paths.local() / "user/dashboard"; fs::create_directories(original);
