@@ -1,0 +1,51 @@
+name: Bug Report
+description: Report a reproducible problem in x360-native.
+title: "[Bug]: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Search existing issues first. For vulnerabilities, follow [SECURITY.md](https://github.com/fabegalo/x360-native/security/policy).
+        Share sanitized text only; do not upload games, XEX, firmware, keys or other proprietary files.
+  - type: input
+    id: version
+    attributes:
+      label: Project version
+      description: Release tag or commit SHA; mention local patches.
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Operating system and hardware
+      description: OS version, architecture, CPU, GPU and driver where relevant.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: observed
+    attributes:
+      label: Observed behavior
+      description: Include exact error messages and the last successful step.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to reproduce
+      description: Include commands/settings and frequency. Use content identities/hashes, not files.
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs
+      description: Paste a short sanitized excerpt, or explain why no log is available. Remove personal paths, account IDs and secrets.
+      render: text
+    validations:
+      required: true

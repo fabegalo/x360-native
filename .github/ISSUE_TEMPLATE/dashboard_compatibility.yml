@@ -1,0 +1,58 @@
+name: Dashboard Compatibility
+description: Report a dashboard version, reached stage and blockers.
+title: "[Dashboard]: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Keep evidence specific to this version; results from 17559 do not imply support for other dashboards.
+        Do not upload dashboards, XEX, firmware, fonts, keys or other proprietary files. Share identities and sanitized logs.
+  - type: textarea
+    id: identity
+    attributes:
+      label: Dashboard version and variant
+      description: Full version, retail/beta variant, dash executable SHA-256 and relevant module/resource versions or hashes. Mark unknown values explicitly.
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Project and environment
+      description: Release/commit, local patches, OS/architecture, CPU/GPU/driver, build configuration and flags.
+    validations:
+      required: true
+  - type: textarea
+    id: features
+    attributes:
+      label: Features and resources used
+      description: For example intro, navigation, My Games, launch/return, Guide, profiles, fonts or system modules. Describe only what you used.
+    validations:
+      required: true
+  - type: dropdown
+    id: stage
+    attributes:
+      label: Highest stage reached
+      options:
+        - Identify, analysis, codegen or build blocked
+        - Compiled
+        - Boots
+        - Renders
+        - Navigation responds
+        - Launch and return demonstrated
+        - System flows demonstrated (specify which below)
+    validations:
+      required: true
+  - type: textarea
+    id: blockers
+    attributes:
+      label: Observed behavior, blockers and reproduction
+      description: Expected versus observed behavior, exact steps, duration, errors and untested flows. Write none observed if appropriate; that does not imply full support.
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidence
+      description: Sanitized log excerpts and run details; optional permitted screenshots/video links. No proprietary dumps, files or personal data.
+    validations:
+      required: true

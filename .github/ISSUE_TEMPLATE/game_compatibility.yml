@@ -1,0 +1,65 @@
+name: Game Compatibility
+description: Record evidence for one exact game version.
+title: "[Game]: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Report only stages demonstrated by your evidence. A build or short boot does not prove playability.
+        Never upload games, XEX, firmware, saves, proprietary dumps or assets; share hashes and sanitized logs.
+  - type: input
+    id: game
+    attributes:
+      label: Game name
+    validations:
+      required: true
+  - type: input
+    id: title_id
+    attributes:
+      label: Title ID
+      description: Eight hexadecimal digits, or unknown if unavailable.
+    validations:
+      required: true
+  - type: textarea
+    id: identity
+    attributes:
+      label: Game version and hash
+      description: Version, region/disc, title update and executable SHA-256. Mark unknown values explicitly; do not attach the executable.
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Project and environment
+      description: Release/commit, local patches, OS/architecture, CPU/GPU/driver, build configuration and settings.
+    validations:
+      required: true
+  - type: dropdown
+    id: stage
+    attributes:
+      label: Highest demonstrated compatibility stage
+      description: Use README definitions; describe what remains untested below.
+      options:
+        - Not compiled (identify, analysis, codegen or build blocked)
+        - Compiled
+        - Boots
+        - Renders
+        - In-game
+        - Playable
+        - Fully Functional
+    validations:
+      required: true
+  - type: textarea
+    id: observed
+    attributes:
+      label: Observed behavior and reproduction
+      description: Steps, duration, failures and untested features. Distinguish input, audio, progression, save/load and return to dashboard.
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidence
+      description: Sanitized log excerpts and run details; optional permitted screenshots/video links. Explain any missing evidence. No proprietary files or personal data.
+    validations:
+      required: true

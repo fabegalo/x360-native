@@ -159,6 +159,10 @@ cycles test handoff contracts; they do not certify long gameplay sessions or sav
 
 Most detailed engineering records are currently in Portuguese.
 
+Start with the [contribution guide](CONTRIBUTING.md) to report issues, prepare a
+focused change and open a pull request. Report vulnerabilities through the
+[security policy](SECURITY.md).
+
 | Document | Purpose |
 |---|---|
 | [Building](docs/BUILDING.md) | Development setup, content layout, build commands, tests and diagnostics |

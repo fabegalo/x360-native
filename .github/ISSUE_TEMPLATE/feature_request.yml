@@ -1,0 +1,30 @@
+name: Feature Request
+description: Propose a focused improvement and explain why it matters.
+title: "[Feature]: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Check existing issues and the roadmap first. No implementation is required to propose an idea.
+        Do not upload games, XEX, firmware or other proprietary files, or link unauthorized downloads.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem to solve
+      description: Who encounters the problem, and in what workflow?
+    validations:
+      required: true
+  - type: textarea
+    id: desired
+    attributes:
+      label: Desired behavior
+      description: Describe a concrete outcome and any scope limits.
+    validations:
+      required: true
+  - type: textarea
+    id: rationale
+    attributes:
+      label: Rationale and alternatives
+      description: Why is this useful? Include alternatives, tradeoffs and relevant evidence or upstream links.
+    validations:
+      required: true
