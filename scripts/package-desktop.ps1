@@ -20,7 +20,7 @@ New-Item -ItemType Directory -Force $source, $destination | Out-Null
 function ExportTree([string]$Repository, [string]$Revision, [string]$Directory) {
     New-Item -ItemType Directory -Force $Directory | Out-Null
     $archive = Join-Path $job ([guid]::NewGuid().ToString('N') + '.zip')
-    git -C $Repository archive --format=zip "--output=$archive" $Revision
+    git -c core.autocrlf=false -C $Repository archive --format=zip "--output=$archive" $Revision
     if ($LASTEXITCODE -ne 0) { throw "Cannot export committed dependency: $Repository $Revision" }
     & "$env:SystemRoot\System32\tar.exe" -xf $archive -C $Directory
     if ($LASTEXITCODE -ne 0) { throw 'Source snapshot extraction failed' }
@@ -51,7 +51,7 @@ $sdk = Join-Path $source 'external/rexglue-sdk'
 # Shared objects are build-time inputs only; no checkout or Git directory is shipped.
 git -c core.longpaths=true clone --shared --no-checkout (Join-Path $root 'external/rexglue-sdk') $sdk
 if ($LASTEXITCODE -ne 0) { throw 'SDK snapshot failed' }
-git -c core.longpaths=true -C $sdk checkout --detach $lock.rexglue_sdk.commit
+git -c core.longpaths=true -c core.autocrlf=false -C $sdk checkout --detach $lock.rexglue_sdk.commit
 if ($LASTEXITCODE -ne 0) { throw 'Pinned SDK checkout failed' }
 $dependencies = [ordered]@{}
 foreach ($component in @('fmt','tomlplusplus','cli11','catch2','inja','sdl3','spdlog','simde','utfcpp')) {
@@ -89,11 +89,20 @@ foreach ($binary in @((Join-Path $destination 'x360-native.exe'), (Join-Path $in
         if ($line -match '^  Name: (.+)$' -and $Matches[1] -notmatch '^(KERNEL32|USER32|GDI32|ADVAPI32|SHELL32|ole32|OLEAUT32|COMDLG32|COMCTL32|bcrypt|dbghelp|d3d12|dxgi|XINPUT1_4|dwmapi|WS2_32|ntdll|VERSION|IMM32|SHLWAPI)\.dll$' -and $Matches[1] -notmatch '^api-ms-win-.*\.dll$') { throw "Unexpected runtime dependency: $($Matches[1])" }
     }
 }
-$licenses = Join-Path $internal 'licenses'; New-Item -ItemType Directory $licenses | Out-Null
-foreach ($component in @('fmt','cli11','tomlplusplus','inja')) { Copy-Item -LiteralPath (Join-Path $sdk "thirdparty/$component/LICENSE") -Destination (Join-Path $licenses "$component.txt") }
-foreach ($component in @('spdlog','utfcpp')) { Copy-Item -LiteralPath (Join-Path $sdk "thirdparty/$component/LICENSE") -Destination (Join-Path $licenses "$component.txt") }
-Copy-Item -LiteralPath (Join-Path $sdk 'thirdparty/simde/COPYING') -Destination (Join-Path $licenses 'simde.txt')
-Copy-Item -LiteralPath (Join-Path $sdk 'LICENSE') -Destination (Join-Path $licenses 'rexglue-sdk.txt')
+# Legal material is visible at the ZIP root, and comes from the same commit.
+Copy-Item -LiteralPath (Join-Path $source 'licenses') -Destination $destination -Recurse
+foreach ($notice in @('LICENSE','THIRD_PARTY_NOTICES.md')) {
+    Copy-Item -LiteralPath (Join-Path $source $notice) -Destination $destination
+}
+# Actual compiler-discovered transitive SDK inputs, for the scope check below.
+$ninjaInputs = & $devshell ninja -C $build -t deps
+if ($LASTEXITCODE -ne 0) { throw 'Cannot inspect compiler dependency evidence' }
+$sdkInputs = @($ninjaInputs | ForEach-Object {
+    $line = $_.Trim().Replace('\','/')
+    if ($line -match '/external/rexglue-sdk/([^:]+)$') { $Matches[1] }
+} | Sort-Object -Unique)
+if (-not $sdkInputs.Count) { throw 'Compiler dependency evidence is empty' }
+[IO.File]::WriteAllText((Join-Path $internal 'dependency-inputs.json'), (ConvertTo-Json -InputObject $sdkInputs), [Text.UTF8Encoding]::new($false))
 # Keep the effective compiler commands as reviewable evidence, with portable
 # logical roots. They describe this fresh build, not a second preparation cache.
 $commands = Get-Content -Raw -LiteralPath (Join-Path $build 'compile_commands.json') | ConvertFrom-Json
@@ -134,6 +143,11 @@ Nenhum conteúdo proprietário do Xbox 360 está incluído. A preparação usa
 ferramentas verificadas e pede autorização para downloads. Componentes Microsoft
 podem exigir instalação adicional. Nada é enviado automaticamente.
 
+Projeto independente, sem afiliação oficial com a Microsoft. Forneça apenas
+conteúdo cuja utilização seja autorizada. O código próprio usa BSD-3-Clause:
+consulte LICENSE. Avisos de terceiros: THIRD_PARTY_NOTICES.md e pasta licenses,
+ao lado deste arquivo. Essas licenças não abrangem os arquivos originais Xbox.
+
 Candidato local: publicação bloqueada pela revisão de licenciamento (C10).
 Windows limpo ainda requer validação. Serviços da dashboard, perfis e saves
 continuam com as limitações registradas no relatório do projeto.
@@ -148,6 +162,7 @@ $metadata = [ordered]@{
     publication = 'blocked-C10'; clean_windows = 'pending'
 }
 [IO.File]::WriteAllText((Join-Path $destination 'package.json'), ($metadata | ConvertTo-Json -Depth 8), [Text.UTF8Encoding]::new($false))
+& (Join-Path $source 'scripts/check-package-licenses.ps1') -PackageDirectory $destination -SdkDirectory $sdk
 WriteIndex $destination 'package.sha256'
 # Deterministic ZIP: fixed timestamps, entry order and relative paths only.
 Add-Type -AssemblyName System.IO.Compression

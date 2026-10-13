@@ -1,0 +1,115 @@
+# Offline release-candidate gate. Reuses package/payload indices; no preparation fingerprint.
+param([Parameter(Mandatory)][string]$PackageDirectory,
+      [Parameter(Mandatory)][string]$SdkDirectory)
+$ErrorActionPreference = 'Stop'
+$package = (Resolve-Path -LiteralPath $PackageDirectory).Path
+$sdk = (Resolve-Path -LiteralPath $SdkDirectory).Path
+function Digest($path) { (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant() }
+function Under($base, $relative) {
+    if ($relative -match '(^/|\\|:|(^|/)\.\.?(/|$))') { throw 'Unsafe inventory path' }
+    $p = [IO.Path]::GetFullPath((Join-Path $base $relative))
+    if (-not $p.StartsWith($base + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) { throw 'Inventory path escapes package' }
+    return $p
+}
+function VerifyIndex($base, $name) {
+    $seen = @{}
+    foreach ($line in [IO.File]::ReadAllLines((Join-Path $base $name))) {
+        if ($line -notmatch '^([a-f0-9]{64})\t(.+)$') { throw "Malformed $name" }
+        $hash=$Matches[1]; $rel=$Matches[2]
+        if ($seen.ContainsKey($rel)) { throw "Duplicate index entry: $rel" }
+        $seen[$rel]=$true
+        if ((Digest (Under $base $rel)) -ne $hash) { throw "Index mismatch: $rel" }
+    }
+    foreach($f in Get-ChildItem -LiteralPath $base -Recurse -File) {
+        $r=$f.FullName.Substring($base.Length+1).Replace('\','/')
+        if ($r -ne $name -and -not $seen.ContainsKey($r)) { throw "Unindexed package entry: $r" }
+    }
+}
+$payload=Join-Path $package 'app/workspace'
+$inventory=Get-Content -LiteralPath (Join-Path $package 'licenses/inventory.json') -Raw | ConvertFrom-Json
+$metadata=Get-Content -LiteralPath (Join-Path $package 'package.json') -Raw | ConvertFrom-Json
+$lock=Get-Content -LiteralPath (Join-Path $payload 'deps.lock.json') -Raw | ConvertFrom-Json
+if($inventory.schema -ne 1 -or $metadata.sdk_commit -ne $inventory.sdk_commit -or $lock.rexglue_sdk.commit -ne $inventory.sdk_commit) { throw 'License inventory SDK revision mismatch' }
+if(-not $metadata.desktop_only) { throw 'License scope only covers the desktop distribution' }
+if((Digest (Join-Path $package 'licenses/inventory.json')) -ne (Digest (Join-Path $payload 'licenses/inventory.json'))) { throw 'Payload/license inventory mismatch' }
+if((Digest (Join-Path $payload 'payload.sha256')) -ne $metadata.payload_sha256) { throw 'Payload identity mismatch' }
+foreach($required in @('LICENSE','THIRD_PARTY_NOTICES.md')) {
+    if((Digest (Join-Path $package $required)) -ne (Digest (Join-Path $payload $required))) { throw "Notice differs from committed payload: $required" }
+}
+$expected=@('LICENSE','THIRD_PARTY_NOTICES.md','READ-ME.txt','package.json','package.sha256','app/compile-commands.json','app/dependency-inputs.json','licenses/inventory.json','licenses/rexglue-attributions.txt') + @($inventory.executables)
+$ids=@{}
+foreach($component in $inventory.components) {
+    if($ids.ContainsKey($component.id)) { throw 'Duplicate component identity' }; $ids[$component.id]=$true
+    if($component.scope -like 'binary*' -and $component.spdx -eq 'NOASSERTION') { throw "Unidentified desktop component: $($component.id)" }
+    if($component.license_file) {
+        $expected += $component.license_file
+        foreach($base in @($package,$payload)) {
+            if((Digest (Under $base $component.license_file)) -ne $component.license_sha256) { throw "Missing or changed original license: $($component.id)" }
+        }
+        # Compare original legal texts in the freshly pinned SDK snapshot where present.
+        if($component.original -and ($component.original -eq 'LICENSE' -or $component.original -like 'thirdparty/*')) {
+            $original=Under $sdk $component.original
+            if(Test-Path -LiteralPath $original) {
+                if((Digest $original) -ne $component.license_sha256) { throw "Upstream license changed: $($component.id)" }
+            }
+        }
+    }
+}
+if((Digest (Join-Path $package 'licenses/rexglue-attributions.txt')) -ne $inventory.attributions_sha256) { throw 'Attribution text changed' }
+foreach($dep in $metadata.dependencies.PSObject.Properties) {
+    if($dep.Name -notin $inventory.desktop_dependencies) { throw "Unidentified build dependency: $($dep.Name)" }
+    $record=@($inventory.components | Where-Object id -eq $dep.Name)
+    if($record.Count -ne 1 -or $record[0].revision -ne $dep.Value) { throw "Dependency revision differs from license inventory: $($dep.Name)" }
+}
+if(@($metadata.dependencies.PSObject.Properties).Count -ne @($inventory.desktop_dependencies).Count) { throw 'Missing build dependency identity' }
+$units=@()
+foreach($command in (Get-Content (Join-Path $package 'app/compile-commands.json') -Raw | ConvertFrom-Json)) {
+    $f=$command.file.Replace('\','/')
+    if($f -match '^<source>/external/rexglue-sdk/(src/.+)$') { $units += $Matches[1] }
+    elseif($f -match '^<source>/external/rexglue-sdk/thirdparty/([^/]+)/') {
+        if($Matches[1] -notin @('fmt','spdlog','catch2')) { throw 'Unreviewed third-party translation unit' }
+    } elseif($f -notmatch '^<source>/(src/(desktop|supervisor|content)/|tests/(supervisor|content)/)') { throw 'Unreviewed distribution translation unit' }
+}
+if(Compare-Object @($inventory.sdk_translation_units | Sort-Object) @($units | Sort-Object -Unique)) { throw 'SDK extraction source scope changed' }
+foreach($input in (Get-Content (Join-Path $package 'app/dependency-inputs.json') -Raw | ConvertFrom-Json)) {
+    if($input -match '^thirdparty/([^/]+)/') {
+        if($Matches[1] -notin $inventory.desktop_dependencies) { throw 'Unreviewed transitive header dependency' }
+        if($input -like 'thirdparty/inja/*' -and $input -notlike 'thirdparty/inja/third_party/include/nlohmann/*') { throw 'Unreviewed inja nested dependency' }
+    } elseif($input -notlike 'include/rex/*' -and $input -notin $inventory.sdk_translation_units) { throw 'Unreviewed SDK input' }
+}
+# Read the known loader constants only into memory, never print or distribute them.
+# All-zero devkit values cannot be distinguished from ordinary zero-filled data.
+$loader=Get-Content -LiteralPath (Join-Path $sdk 'src/system/xex_module.cpp') -Raw
+$needles=@([regex]::Matches($loader,'(?s)static const uint8_t xe_xex\w+_key\[16\]\s*=\s*\{([^}]+)\}') | ForEach-Object {
+    $bytes=[byte[]]@([regex]::Matches($_.Groups[1].Value,'0x([0-9a-fA-F]{2})') | ForEach-Object { [Convert]::ToByte($_.Groups[1].Value,16) })
+    if($bytes.Length -eq 16 -and @($bytes | Where-Object { $_ -ne 0 }).Count) { ,$bytes }
+})
+if(-not $needles.Count) { throw 'SDK constant exclusion evidence missing' }
+if(-not ('X360LicenseBytes' -as [type])) {
+    Add-Type 'public static class X360LicenseBytes { public static bool Contains(byte[] b, byte[] n) { for(int i=0;i<=b.Length-n.Length;i++){if(b[i]!=n[0])continue; int j=1;while(j<n.Length&&b[i+j]==n[j])j++;if(j==n.Length)return true;}return false;} }'
+}
+foreach($file in Get-ChildItem -LiteralPath $package -Recurse -File) {
+    $rel=$file.FullName.Substring($package.Length+1).Replace('\','/')
+    if($file.Attributes -band [IO.FileAttributes]::ReparsePoint) { throw 'Reparse point in package' }
+    if($rel -notlike 'app/workspace/*' -and $rel -notin $expected) { throw "Unidentified distributed file: $rel" }
+    if($rel -match '\.(xex|xexp|xtt|ttf|otf|stfs|iso|nand|key|pem|pfx|bin)$' -or $rel -match '(^|/)(\.git|\.local|external)/' -or ($rel -match '/generated/' -and $rel -notmatch '/generated/rexglue\.cmake$')) { throw "Forbidden distribution content: $rel" }
+    if($rel -match '\.(exe|dll|lib|pdb)$' -and $rel -notin $inventory.executables) { throw "Unidentified binary: $rel" }
+    $bytes=[IO.File]::ReadAllBytes($file.FullName)
+    $magic=[Text.Encoding]::ASCII.GetString($bytes,0,[Math]::Min(4,$bytes.Length))
+    if($magic -in @('XEX1','XEX2','CON ','LIVE','PIRS') -or ($magic.StartsWith('MZ') -and $rel -notin $inventory.executables)) { throw "Embedded executable/container: $rel" }
+    foreach($needle in $needles) {
+        if([X360LicenseBytes]::Contains($bytes,$needle)) { throw "Sensitive loader constant in: $rel" }
+    }
+    if($rel -match '\.(cpp|h|hpp|c|patch|json|toml|ps1|md|txt)$') {
+        $text=[Text.Encoding]::UTF8.GetString($bytes)
+        if($text -match '-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----') { throw "Private key material in: $rel" }
+        foreach($needle in $needles) {
+            $pattern=(@($needle | ForEach-Object { '0x'+$_.ToString('x2')+'\s*' }) -join ',\s*')
+            if($text -match $pattern -or $text -match (($needle | ForEach-Object { $_.ToString('x2') }) -join '')) { throw "Sensitive loader constant text in: $rel" }
+        }
+    }
+}
+foreach($exe in $inventory.executables) { if(-not (Test-Path -LiteralPath (Under $package $exe))) { throw 'Missing inventoried executable' } }
+VerifyIndex $payload 'payload.sha256'
+if(Test-Path (Join-Path $package 'package.sha256')) { VerifyIndex $package 'package.sha256' }
+Write-Output "License/content gate passed: $($inventory.components.Count) components; $($inventory.executables.Count) executables; original notices and existing payload identity verified. Publication approval remains separate."

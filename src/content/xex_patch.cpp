@@ -1,3 +1,6 @@
+// Portions adapted from ReXGlue/Xenia, under BSD-3-Clause:
+// Copyright (c) 2021 Ben Vanik; Copyright (c) 2026 Tom Clay.
+// See licenses/rexglue-sdk.txt and THIRD_PARTY_NOTICES.md.
 // x360n-content apply-patch. Same steps as the SDK's XexModule::ReadImageCompressed
 // and XexModule::ApplyPatch (external/rexglue-sdk/src/system/xex_module.cpp), on
 // files instead of guest memory, with two differences that only add checks:

@@ -1,3 +1,5 @@
 # Local SDK patches are applied with `git apply` and pinned by SHA-256 in
 # deps.lock.json: keep their bytes exactly as committed (no CRLF conversion).
 patches/**/*.patch -text
+# Preserve the exact upstream legal texts and their recorded SHA-256 values.
+/licenses/*.txt -text

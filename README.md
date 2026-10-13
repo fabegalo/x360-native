@@ -4,6 +4,16 @@ Plataforma experimental para executar a **dashboard original do Xbox 360** e
 jogos recompilados para código nativo, usando [ReXGlue](https://github.com/rexglue/rexglue-sdk).
 O primeiro ambiente funcional é Windows x86-64, com gráficos D3D12.
 
+Projeto independente, sem afiliação oficial com a Microsoft. Jogos, dashboards,
+fontes, firmware e outros arquivos originais do Xbox 360 não acompanham o
+aplicativo. O usuário deve fornecer conteúdo cuja utilização seja autorizada.
+
+O código próprio está sob [BSD-3-Clause](LICENSE), aprovada pelo mantenedor.
+As dependências conservam seus termos: consulte [avisos de terceiros](THIRD_PARTY_NOTICES.md)
+e [auditoria de licenças](docs/LICENSE_AUDIT.md). No ZIP, os avisos e a pasta
+`licenses` ficam ao lado do executável principal. A publicação permanece bloqueada
+pelas pendências da auditoria; a licença própria não autoriza distribuir conteúdo Xbox.
+
 O fluxo já validado usa os menus e os pedidos de lançamento originais:
 
 **Intro com imagem e som → dashboard 17559 → My Games → Castle Crashers → retorno à dashboard.**

@@ -1,0 +1,1280 @@
+{
+  "schema": 1,
+  "sdk_commit": "f5337cdc947ff6d4c4196737e2c807a48f2a1fc2",
+  "executables": [
+    "x360-native.exe",
+    "app/x360n.exe",
+    "app/x360n-extract.exe"
+  ],
+  "desktop_dependencies": [
+    "fmt",
+    "tomlplusplus",
+    "cli11",
+    "catch2",
+    "inja",
+    "sdl3",
+    "spdlog",
+    "simde",
+    "utfcpp"
+  ],
+  "sdk_translation_units": [
+    "src/core/cvar.cpp",
+    "src/core/filesystem_wildcard.cpp",
+    "src/core/filesystem_win.cpp",
+    "src/core/filesystem.cpp",
+    "src/core/logging.cpp",
+    "src/core/mapped_memory_win.cpp",
+    "src/core/memory_win.cpp",
+    "src/core/memory.cpp",
+    "src/core/mutex.cpp",
+    "src/core/platform/env_win.cpp",
+    "src/core/string_buffer.cpp",
+    "src/core/utf8.cpp",
+    "src/filesystem/device.cpp",
+    "src/filesystem/devices/disc_image_device.cpp",
+    "src/filesystem/devices/disc_image_entry.cpp",
+    "src/filesystem/devices/disc_image_file.cpp",
+    "src/filesystem/devices/stfs_container_device.cpp",
+    "src/filesystem/devices/stfs_container_entry.cpp",
+    "src/filesystem/devices/stfs_container_file.cpp",
+    "src/filesystem/entry.cpp"
+  ],
+  "attributions_sha256": "d5b514c4b427bd36624f014699b1145fb3cae9f05fa1c6e35a14dbdab234bf35",
+  "components": [
+    {
+      "id": "fmt",
+      "origin": "https://github.com/fmtlib/fmt.git",
+      "revision": "407c905e45ad75fc29bf0f9bb7c5c2fd3475976f",
+      "spdx": "MIT",
+      "original": "thirdparty/fmt/LICENSE",
+      "license_file": "licenses/fmt.txt",
+      "scope": "binary",
+      "integration": "static; three desktop executables",
+      "obligations": "Preserve original notices and applicable source/binary license conditions.",
+      "license_sha256": "07580f2a3b35709ce703d523f447b242f6dfec7582a8c0df102c7fa2849375f8"
+    },
+    {
+      "id": "cli11",
+      "origin": "https://github.com/CLIUtils/CLI11",
+      "revision": "bfffd37e1f804ca4fae1caae106935791696b6a9",
+      "spdx": "BSD-3-Clause",
+      "original": "thirdparty/cli11/LICENSE",
+      "license_file": "licenses/cli11.txt",
+      "scope": "binary",
+      "integration": "header-only; command line parsers",
+      "obligations": "Preserve original notices and applicable source/binary license conditions.",
+      "license_sha256": "3a70a5dffdaefe4c434660a8270f679ae18dd3c34208fb0b461a665bfcfe3e97"
+    },
+    {
+      "id": "tomlplusplus",
+      "origin": "https://github.com/marzer/tomlplusplus.git",
+      "revision": "30172438cee64926dc41fdd9c11fb3ba5b2ba9de",
+      "spdx": "MIT",
+      "original": "thirdparty/tomlplusplus/LICENSE",
+      "license_file": "licenses/tomlplusplus.txt",
+      "scope": "binary",
+      "integration": "header-only; supervisor/desktop/extractor",
+      "obligations": "Preserve original notices and applicable source/binary license conditions.",
+      "license_sha256": "529bc3900a9571e49db285b0df432397e70b881cc3bf48de6667ae74ff4b06d8"
+    },
+    {
+      "id": "spdlog",
+      "origin": "https://github.com/gabime/spdlog.git",
+      "revision": "79524ddd08a4ec981b7fea76afd08ee05f83755d",
+      "spdx": "MIT",
+      "original": "thirdparty/spdlog/LICENSE",
+      "license_file": "licenses/spdlog.txt",
+      "scope": "binary",
+      "integration": "static; extractor; external fmt",
+      "obligations": "Preserve original notices and applicable source/binary license conditions.",
+      "license_sha256": "d678c20826e1392578508e1c78649a1e3c31bda05ef4388d967dbd654461b140"
+    },
+    {
+      "id": "simde",
+      "origin": "https://github.com/simd-everywhere/simde.git",
+      "revision": "71fd833d9666141edcd1d3c109a80e228303d8d7",
+      "spdx": "MIT",
+      "original": "thirdparty/simde/COPYING",
+      "license_file": "licenses/simde.txt",
+      "scope": "binary",
+      "integration": "header-only; extractor",
+      "obligations": "Preserve original notices and applicable source/binary license conditions.",
+      "license_sha256": "75ce0a8c5a7bff42fbd6f8f3b469b518132132c4f4948fb8d02b1ccb5d0df9d8"
+    },
+    {
+      "id": "utfcpp",
+      "origin": "https://github.com/nemtrif/utfcpp.git",
+      "revision": "63d64de49fd6b829f7c8694df5ab2ee625cb7134",
+      "spdx": "BSL-1.0",
+      "original": "thirdparty/utfcpp/LICENSE",
+      "license_file": "licenses/utfcpp.txt",
+      "scope": "binary",
+      "integration": "header-only; extractor",
+      "obligations": "Preserve original notices and applicable source/binary license conditions.",
+      "license_sha256": "c9bff75738922193e67fa726fa225535870d2aa1059f91452c411736284ad566"
+    },
+    {
+      "id": "inja",
+      "origin": "https://github.com/pantor/inja.git",
+      "revision": "7d1b4600b68595085a949743331c2e5673f511ea",
+      "spdx": "MIT",
+      "original": "thirdparty/inja/LICENSE",
+      "license_file": "licenses/inja.txt",
+      "scope": "download",
+      "integration": "template engine in rexglue; desktop uses its vendored JSON only",
+      "obligations": "Preserve original notices and applicable source/binary license conditions.",
+      "license_sha256": "ebc4a262d03d4b914e031060c163095deda0d9767ac6ce7758b98293e19591b3"
+    },
+    {
+      "id": "sdl3",
+      "origin": "https://github.com/libsdl-org/SDL",
+      "revision": "8bf3b7215ad9fc3deb583c6a3a37c6c67f2e24e4",
+      "spdx": "Zlib",
+      "original": "thirdparty/sdl3/LICENSE.txt",
+      "license_file": "licenses/sdl3.txt",
+      "scope": "source-patches",
+      "integration": "static in runtime; patch excerpts in payload",
+      "obligations": "Preserve original notices and applicable source/binary license conditions.",
+      "license_sha256": "1c040b8271b37e5076359f8fd54240e371114112924d2df81ef87c7d6a1dfdfd"
+    },
+    {
+      "id": "catch2",
+      "origin": "https://github.com/catchorg/Catch2.git",
+      "revision": "88abf9bf325c798c33f54f6b9220ef885b267f4f",
+      "spdx": "BSL-1.0",
+      "original": "thirdparty/catch2/LICENSE.txt",
+      "license_file": "licenses/catch2.txt",
+      "scope": "build-only",
+      "integration": "test-only static; test binaries withheld",
+      "obligations": "Preserve original notices and applicable source/binary license conditions.",
+      "license_sha256": "c9bff75738922193e67fa726fa225535870d2aa1059f91452c411736284ad566"
+    },
+    {
+      "id": "FFmpeg",
+      "origin": "https://github.com/wmarti/FFmpeg.git",
+      "revision": "0604b464c7cb4ebc94940cf1f324a3b26b87717c",
+      "spdx": "LGPL-2.1-or-later",
+      "original": "thirdparty/FFmpeg/COPYING.LGPLv2.1",
+      "license_file": "licenses/FFmpeg.txt",
+      "scope": "download",
+      "integration": "static avcodec/avutil inside rexruntime DLL; GPL=0 NONFREE=0 VERSION3=0",
+      "obligations": "Source, notices, modification/relinking route if redistributing combined runtime; review license section 6.",
+      "license_sha256": "b634ab5640e258563c536e658cad87080553df6f34f62269a21d554844e58bfe"
+    },
+    {
+      "id": "libmspack",
+      "origin": "https://github.com/kyz/libmspack.git",
+      "revision": "305907723a4e7ab2018e58040059ffb5e77db837",
+      "spdx": "LGPL-2.1-only",
+      "original": "thirdparty/libmspack/libmspack/COPYING.LIB",
+      "license_file": "licenses/libmspack.txt",
+      "scope": "download",
+      "integration": "cabextract/mspack/lzxd.c statically in runtime",
+      "obligations": "Source, notices, modification/relinking route if redistributing combined runtime; review license section 6.",
+      "license_sha256": "a190dc9c8043755d90f8b0a75fa66b9e42d4af4c980bf5ddc633f0124db3cee7"
+    },
+    {
+      "id": "imgui",
+      "origin": "https://github.com/ocornut/imgui.git",
+      "revision": "6d910d5487d11ca567b61c7824b0c78c569d62f0",
+      "spdx": "MIT",
+      "original": "thirdparty/imgui/LICENSE.txt",
+      "license_file": "licenses/imgui.txt",
+      "scope": "download",
+      "integration": "static in runtime",
+      "obligations": "Preserve original notices and applicable source/binary license conditions.",
+      "license_sha256": "c80c5789748d955c4a650562baa0d750494e2c7128c2ca66aaebe2e3c4e198bf"
+    },
+    {
+      "id": "o1heap",
+      "origin": "https://github.com/pavel-kirienko/o1heap.git",
+      "revision": "388a73fd9007300e5130c5fe352d9ce3288b6dde",
+      "spdx": "MIT",
+      "original": "thirdparty/o1heap/LICENSE",
+      "license_file": "licenses/o1heap.txt",
+      "scope": "download",
+      "integration": "static in runtime",
+      "obligations": "Preserve original notices and applicable source/binary license conditions.",
+      "license_sha256": "9b853befdac9b2907131427795b66e0dbfdd0cfa8ecd25a58167893b8c1f0f4d"
+    },
+    {
+      "id": "xxHash",
+      "origin": "https://github.com/Cyan4973/xxHash.git",
+      "revision": "e626a72bc2321cd320e953a0ccf1584cad60f363",
+      "spdx": "BSD-2-Clause",
+      "original": "thirdparty/xxHash/LICENSE",
+      "license_file": "licenses/xxHash.txt",
+      "scope": "download",
+      "integration": "static library in runtime; xxhsum GPL CLI not built",
+      "obligations": "Preserve original notices and applicable source/binary license conditions.",
+      "license_sha256": "6ffedbc0f7878612d2b23589f1ff2ab15633e1df7963a5d9fc750ec5500c7e7a"
+    },
+    {
+      "id": "tracy",
+      "origin": "https://github.com/wolfpld/tracy.git",
+      "revision": "05cceee0df3b8d7c6fa87e9638af311dbabc63cb",
+      "spdx": "BSD-3-Clause",
+      "original": "thirdparty/tracy/LICENSE",
+      "license_file": "licenses/tracy.txt",
+      "scope": "download",
+      "integration": "profiling client in Debug runtime; disabled distribution",
+      "obligations": "Preserve original notices and applicable source/binary license conditions.",
+      "license_sha256": "16f7df4828bd89c880c17dd2f45e834b754b6d5e8c9a9ee886af1be4b89475ca"
+    },
+    {
+      "id": "glslang",
+      "origin": "https://github.com/KhronosGroup/glslang.git",
+      "revision": "f4f1d8a352ca1908943aea2ad8c54b39b4879080",
+      "spdx": "NOASSERTION",
+      "original": "thirdparty/glslang/LICENSE.txt",
+      "license_file": "licenses/glslang.txt",
+      "scope": "download-optional",
+      "integration": "optional Vulkan disabled; mixed per-file licenses",
+      "obligations": "Per-file review required before redistribution; not in desktop binaries.",
+      "license_sha256": "130b2e98901db02a83e5e83c132b22d22d9279155feb53c49d6471b75af3c352"
+    },
+    {
+      "id": "spirv-headers",
+      "origin": "https://github.com/KhronosGroup/SPIRV-Headers.git",
+      "revision": "29981f65241605e08b0ede4cfeb999fe3b723c6a",
+      "spdx": "NOASSERTION",
+      "original": "thirdparty/spirv-headers/LICENSE",
+      "license_file": "licenses/spirv-headers.txt",
+      "scope": "download-optional",
+      "integration": "optional Vulkan disabled; mixed notices",
+      "obligations": "Per-file review required before redistribution; not in desktop binaries.",
+      "license_sha256": "ea43b1de38a6f90c488800d66dec1ed671e68cda530266bc96951fb5b6307613"
+    },
+    {
+      "id": "spirv-tools",
+      "origin": "https://github.com/KhronosGroup/SPIRV-Tools.git",
+      "revision": "9a49b0883b9b635689a85b5647dbfcb223268151",
+      "spdx": "Apache-2.0",
+      "original": "thirdparty/spirv-tools/LICENSE",
+      "license_file": "licenses/spirv-tools.txt",
+      "scope": "download-optional",
+      "integration": "optional Vulkan disabled",
+      "obligations": "Preserve original notices and applicable source/binary license conditions.",
+      "license_sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+    },
+    {
+      "id": "vulkan-headers",
+      "origin": "https://github.com/KhronosGroup/Vulkan-Headers.git",
+      "revision": "e3b1eec08173d6b825cd3ac88c885a63b621504a",
+      "spdx": "NOASSERTION",
+      "original": "thirdparty/vulkan-headers/",
+      "license_file": null,
+      "scope": "download-optional",
+      "integration": "optional Vulkan disabled; per-file Apache/MIT",
+      "obligations": "Per-file review required before redistribution; not in desktop binaries."
+    },
+    {
+      "id": "vulkan-loader",
+      "origin": "https://github.com/KhronosGroup/Vulkan-Loader.git",
+      "revision": "5f157b62e333c63260d05d81bf66faa216ab0fb8",
+      "spdx": "NOASSERTION",
+      "original": "thirdparty/vulkan-loader/LICENSE.txt",
+      "license_file": "licenses/vulkan-loader.txt",
+      "scope": "download-optional",
+      "integration": "optional Vulkan disabled; mixed notices",
+      "obligations": "Per-file review required before redistribution; not in desktop binaries.",
+      "license_sha256": "43c0a37e6a0fa7ff3c843b3ec5a4fac84b712558ddac103fbd4c1649662a9ece"
+    },
+    {
+      "id": "vulkan-memory-allocator",
+      "origin": "https://github.com/GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator.git",
+      "revision": "1d8f600fd424278486eade7ed3e877c99f0846b1",
+      "spdx": "MIT",
+      "original": "thirdparty/vulkan-memory-allocator/LICENSE.txt",
+      "license_file": "licenses/vulkan-memory-allocator.txt",
+      "scope": "download-optional",
+      "integration": "optional Vulkan disabled",
+      "obligations": "Preserve original notices and applicable source/binary license conditions.",
+      "license_sha256": "8d70e4cf2a9941f6454da71cd60e38484dd3e34810c824760d550e982af6d97a"
+    },
+    {
+      "id": "moltenvk",
+      "origin": "https://github.com/KhronosGroup/MoltenVK.git",
+      "revision": "db445ff2042d9ce348c439ad8451112f354b8d2a",
+      "spdx": "Apache-2.0",
+      "original": "thirdparty/moltenvk/LICENSE",
+      "license_file": "licenses/moltenvk.txt",
+      "scope": "download-optional",
+      "integration": "not built on Windows; downloaded recursively",
+      "obligations": "Preserve original notices and applicable source/binary license conditions.",
+      "license_sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+    },
+    {
+      "id": "rexglue-sdk",
+      "origin": "https://github.com/rexglue/rexglue-sdk",
+      "revision": "f5337cdc947ff6d4c4196737e2c807a48f2a1fc2",
+      "spdx": "BSD-3-Clause",
+      "original": "LICENSE",
+      "license_file": "licenses/rexglue-sdk.txt",
+      "scope": "binary-and-source-patches",
+      "integration": "20 SDK translation units in extractor, headers and 38 local patches; full SDK downloaded separately",
+      "obligations": "Preserve copyright, conditions, disclaimer, no endorsement. Root license does not override thirdparty licenses.",
+      "license_sha256": "8e065be1da2ff9a16b1f063d4636d8b67e6a654bb90583ea4332e66ac421bb18"
+    },
+    {
+      "id": "nlohmann-json",
+      "origin": "https://github.com/nlohmann/json",
+      "revision": "3.11.3; inja 7d1b4600b68595085a949743331c2e5673f511ea",
+      "spdx": "MIT",
+      "original": "thirdparty/inja/third_party/include/nlohmann/LICENSE.MIT",
+      "license_file": "licenses/nlohmann-json.txt",
+      "scope": "binary",
+      "integration": "header-only in supervisor; header copyright 2013-2023 Niels Lohmann; vendored license retains 2013-2021",
+      "obligations": "Retain MIT notice and header attribution.",
+      "license_sha256": "c983d69523377819db3c377b390d5644f5ec53bec9b7c4a0f1ed893bb743d045"
+    },
+    {
+      "id": "aes_128",
+      "origin": "https://github.com/rexglue/rexglue-sdk",
+      "revision": "f5337cdc947ff6d4c4196737e2c807a48f2a1fc2",
+      "spdx": "MIT",
+      "original": "thirdparty/aes_128/LICENSE",
+      "license_file": "licenses/aes_128.txt",
+      "scope": "download",
+      "integration": "static in runtime; openluopworld/aes_128",
+      "obligations": "Preserve inline notices; resolve missing terms/provenance before distributing full SDK binaries.",
+      "license_sha256": "756965be50afde53fe51d47da4fe180f82fdfaa5e72ed591d84d05df5bef4e3c"
+    },
+    {
+      "id": "des",
+      "origin": "https://github.com/rexglue/rexglue-sdk",
+      "revision": "f5337cdc947ff6d4c4196737e2c807a48f2a1fc2",
+      "spdx": "MIT",
+      "original": "thirdparty/crypto/des/LICENSE",
+      "license_file": "licenses/des.txt",
+      "scope": "download",
+      "integration": "static in runtime; Faraz Fallahi",
+      "obligations": "Preserve inline notices; resolve missing terms/provenance before distributing full SDK binaries.",
+      "license_sha256": "61445c2be57daec4b5a09a7e21ef05376406f2163c4a7c7b663c409664c17857"
+    },
+    {
+      "id": "binutils-powerpc",
+      "origin": "https://github.com/rexglue/rexglue-sdk",
+      "revision": "f5337cdc947ff6d4c4196737e2c807a48f2a1fc2",
+      "spdx": "GPL-3.0-or-later",
+      "original": "tools/binutils/LICENSE",
+      "license_file": "licenses/binutils-powerpc.txt",
+      "scope": "download",
+      "integration": "standalone tool, not linked; binary origin/version/source correspondence unresolved",
+      "obligations": "Source-correspondence and GPL distribution obligations; standalone invocation is not linking.",
+      "license_sha256": "8ceb4b9ee5adedde47b31e975c1d90c73ad27b6b165a1dcd80c7c545eb65b903"
+    },
+    {
+      "id": "disasm",
+      "origin": "https://github.com/rexglue/rexglue-sdk",
+      "revision": "f5337cdc947ff6d4c4196737e2c807a48f2a1fc2",
+      "spdx": "GPL-2.0-or-later",
+      "original": "",
+      "license_file": null,
+      "scope": "download",
+      "integration": "static decoder in rexglue and x360n-content; thirdparty/disasm/ppc-dis.c",
+      "obligations": "Source-correspondence and GPL distribution obligations; standalone invocation is not linking."
+    },
+    {
+      "id": "tiny-aes-c",
+      "origin": "https://github.com/rexglue/rexglue-sdk",
+      "revision": "f5337cdc947ff6d4c4196737e2c807a48f2a1fc2",
+      "spdx": "NOASSERTION",
+      "original": "",
+      "license_file": null,
+      "scope": "download",
+      "integration": "compiled static library, not present in observed rexruntime link; vendored terms absent",
+      "obligations": "Preserve inline notices; resolve missing terms/provenance before distributing full SDK binaries."
+    },
+    {
+      "id": "disruptorplus",
+      "origin": "https://github.com/rexglue/rexglue-sdk",
+      "revision": "f5337cdc947ff6d4c4196737e2c807a48f2a1fc2",
+      "spdx": "NOASSERTION",
+      "original": "",
+      "license_file": null,
+      "scope": "download",
+      "integration": "headers in runtime; vendored license missing",
+      "obligations": "Preserve inline notices; resolve missing terms/provenance before distributing full SDK binaries."
+    },
+    {
+      "id": "pe",
+      "origin": "https://github.com/rexglue/rexglue-sdk",
+      "revision": "f5337cdc947ff6d4c4196737e2c807a48f2a1fc2",
+      "spdx": "NOASSERTION",
+      "original": "",
+      "license_file": null,
+      "scope": "download",
+      "integration": "Microsoft copyright in pe_image.h; explicit terms missing",
+      "obligations": "Preserve inline notices; resolve missing terms/provenance before distributing full SDK binaries."
+    },
+    {
+      "id": "dxc-headers",
+      "origin": "https://github.com/rexglue/rexglue-sdk",
+      "revision": "f5337cdc947ff6d4c4196737e2c807a48f2a1fc2",
+      "spdx": "NCSA",
+      "original": "",
+      "license_file": null,
+      "scope": "download",
+      "integration": "UIUC declaration in dxcapi.h and DxbcConverter.h; referenced LICENSE.TXT missing",
+      "obligations": "Preserve inline notices; resolve missing terms/provenance before distributing full SDK binaries."
+    },
+    {
+      "id": "dxbc-md5",
+      "origin": "https://github.com/rexglue/rexglue-sdk",
+      "revision": "f5337cdc947ff6d4c4196737e2c807a48f2a1fc2",
+      "spdx": "LicenseRef-RSA-MD5-AMD",
+      "original": "",
+      "license_file": null,
+      "scope": "download",
+      "integration": "DXBCChecksum.cpp/h RSA attribution terms; AMD wrapper rights need clarification",
+      "obligations": "Preserve inline notices; resolve missing terms/provenance before distributing full SDK binaries."
+    },
+    {
+      "id": "TinySHA1",
+      "origin": "https://github.com/rexglue/rexglue-sdk",
+      "revision": "f5337cdc947ff6d4c4196737e2c807a48f2a1fc2",
+      "spdx": "ISC",
+      "original": "",
+      "license_file": null,
+      "scope": "download",
+      "integration": "thirdparty/crypto/TinySHA1.hpp full inline license; header in runtime",
+      "obligations": "Preserve inline notices; resolve missing terms/provenance before distributing full SDK binaries."
+    },
+    {
+      "id": "rc4",
+      "origin": "https://github.com/rexglue/rexglue-sdk",
+      "revision": "f5337cdc947ff6d4c4196737e2c807a48f2a1fc2",
+      "spdx": "LicenseRef-Whistle",
+      "original": "",
+      "license_file": null,
+      "scope": "download",
+      "integration": "thirdparty/crypto/rc4.c and .h inline terms; runtime",
+      "obligations": "Preserve inline notices; resolve missing terms/provenance before distributing full SDK binaries."
+    },
+    {
+      "id": "sha256",
+      "origin": "https://github.com/rexglue/rexglue-sdk",
+      "revision": "f5337cdc947ff6d4c4196737e2c807a48f2a1fc2",
+      "spdx": "Zlib",
+      "original": "",
+      "license_file": null,
+      "scope": "download",
+      "integration": "thirdparty/crypto/sha256.cpp/.h declaration only; complete acquired license pending",
+      "obligations": "Preserve inline notices; resolve missing terms/provenance before distributing full SDK binaries."
+    },
+    {
+      "id": "rijndael",
+      "origin": "https://github.com/rexglue/rexglue-sdk",
+      "revision": "f5337cdc947ff6d4c4196737e2c807a48f2a1fc2",
+      "spdx": "LicenseRef-Public-Domain",
+      "original": "",
+      "license_file": null,
+      "scope": "download",
+      "integration": "thirdparty/crypto/rijndael-alg-fst.c public-domain declaration and disclaimer; runtime",
+      "obligations": "Preserve inline notices; resolve missing terms/provenance before distributing full SDK binaries."
+    },
+    {
+      "id": "renderdoc",
+      "origin": "https://github.com/rexglue/rexglue-sdk",
+      "revision": "f5337cdc947ff6d4c4196737e2c807a48f2a1fc2",
+      "spdx": "MIT",
+      "original": "",
+      "license_file": null,
+      "scope": "download",
+      "integration": "thirdparty/renderdoc/renderdoc_app.h inline terms; runtime header",
+      "obligations": "Preserve inline notices; resolve missing terms/provenance before distributing full SDK binaries."
+    },
+    {
+      "id": "stb",
+      "origin": "https://github.com/rexglue/rexglue-sdk",
+      "revision": "f5337cdc947ff6d4c4196737e2c807a48f2a1fc2",
+      "spdx": "MIT OR Unlicense",
+      "original": "",
+      "license_file": null,
+      "scope": "download",
+      "integration": "thirdparty/stb headers inline dual terms; runtime",
+      "obligations": "Preserve inline notices; resolve missing terms/provenance before distributing full SDK binaries."
+    },
+    {
+      "id": "cygwin-binutils-dlls",
+      "origin": "https://github.com/rexglue/rexglue-sdk",
+      "revision": "f5337cdc947ff6d4c4196737e2c807a48f2a1fc2",
+      "spdx": "NOASSERTION",
+      "original": "",
+      "license_file": null,
+      "scope": "download",
+      "integration": "cygwin1.dll, cygiconv-2.dll, cygintl-8.dll under tools/binutils; separate programs, version/source provenance unresolved",
+      "obligations": "Preserve inline notices; resolve missing terms/provenance before distributing full SDK binaries."
+    },
+    {
+      "id": "llvm",
+      "origin": "https://raw.githubusercontent.com/llvm/llvm-project/llvmorg-22.1.8/llvm/LICENSE.TXT",
+      "revision": "22.1.8",
+      "spdx": "Apache-2.0 WITH LLVM-exception",
+      "original": "https://raw.githubusercontent.com/llvm/llvm-project/llvmorg-22.1.8/llvm/LICENSE.TXT",
+      "license_file": "licenses/llvm.txt",
+      "scope": "download",
+      "integration": "standalone compiler; additional third-party notices in original text",
+      "obligations": "Preserve upstream notices; downloaded tool archive identities in existing locks. If mirroring binaries, fulfill their source and other distribution obligations.",
+      "license_sha256": "8d85c1057d742e597985c7d4e6320b015a9139385cff4cbae06ffc0ebe89afee"
+    },
+    {
+      "id": "microsoft-stl",
+      "origin": "https://raw.githubusercontent.com/microsoft/STL/vs-2022-17.14/LICENSE.txt",
+      "revision": "MSVC 14.44.35207 / VS 17.14",
+      "spdx": "Apache-2.0 WITH LLVM-exception",
+      "original": "https://raw.githubusercontent.com/microsoft/STL/vs-2022-17.14/LICENSE.txt",
+      "license_file": "licenses/microsoft-stl.txt",
+      "scope": "binary",
+      "integration": "templates and static objects; LLVM exception for embedded compiled portions",
+      "obligations": "Preserve upstream notices; downloaded tool archive identities in existing locks. If mirroring binaries, fulfill their source and other distribution obligations.",
+      "license_sha256": "1fc6b6db121d4555d8f661937d7f6013693cd8fd67495d5e5d98c1d18fb83eda"
+    },
+    {
+      "id": "cmake",
+      "origin": "https://github.com/Kitware/CMake",
+      "revision": "3.31.6",
+      "spdx": "BSD-3-Clause",
+      "original": "https://github.com/Kitware/CMake",
+      "license_file": "licenses/cmake.txt",
+      "scope": "download",
+      "integration": "standalone; doc/cmake carries bundled third-party notices",
+      "obligations": "Preserve upstream notices; downloaded tool archive identities in existing locks. If mirroring binaries, fulfill their source and other distribution obligations.",
+      "license_sha256": "1fdeb38075c36e6c6f14c7c625a6e3b1bc111f08da58c0b7ae85084906eadd8e"
+    },
+    {
+      "id": "ninja",
+      "origin": "https://raw.githubusercontent.com/ninja-build/ninja/v1.13.1/COPYING",
+      "revision": "1.13.1",
+      "spdx": "Apache-2.0",
+      "original": "https://raw.githubusercontent.com/ninja-build/ninja/v1.13.1/COPYING",
+      "license_file": "licenses/ninja.txt",
+      "scope": "download",
+      "integration": "standalone",
+      "obligations": "Preserve upstream notices; downloaded tool archive identities in existing locks. If mirroring binaries, fulfill their source and other distribution obligations.",
+      "license_sha256": "eb7e9ab9690124c5c9f42bdc81383d886a3dede26345b6ed15bbad7caf81f7ea"
+    },
+    {
+      "id": "mingit",
+      "origin": "https://github.com/git-for-windows/git",
+      "revision": "2.56.0.2",
+      "spdx": "GPL-2.0-only",
+      "original": "https://github.com/git-for-windows/git",
+      "license_file": "licenses/mingit.txt",
+      "scope": "download",
+      "integration": "standalone Git plus transitive licenses; archives preserved whole",
+      "obligations": "Preserve upstream notices; downloaded tool archive identities in existing locks. If mirroring binaries, fulfill their source and other distribution obligations.",
+      "license_sha256": "454649ddc02b5cc098513cea28db6592b45ac0a906386287c4d48cf8dbde651c"
+    },
+    {
+      "id": "microsoft-crt-sdk",
+      "origin": "https://learn.microsoft.com/cpp/windows/redistributing-visual-cpp-files",
+      "revision": "MSVC 14.44.35207; Windows SDK 10.0.26100.0",
+      "spdx": "LicenseRef-Microsoft-VisualStudio",
+      "original": "Installed Visual Studio/Windows SDK license and redist list",
+      "license_file": null,
+      "scope": "binary",
+      "integration": "Release static CRT /MT; Windows OS DLLs supplied by OS, not shipped",
+      "obligations": "Confirm distributor entitlement and applicable distributable-code terms before publication. Not open source under project BSD license."
+    },
+    {
+      "id": "git/usr/share/licenses/gcc-libs",
+      "origin": "https://github.com/git-for-windows/git/releases/download/v2.56.0.windows.2/MinGit-2.56.0.2-64-bit.zip",
+      "revision": "Bundled in 2.56.0.2; archive identity da35e72aa21c005a5a0d298cfbae110bc1609a815730ea0dde84b01a1b3cd3be; individual upstream version not established",
+      "spdx": "GPL-3.0-or-later WITH GCC-exception-3.1",
+      "scope": "download-transitive",
+      "integration": "In unchanged upstream tool archive; never in desktop ZIP. Mixed-license entries require per-file/source review before mirroring.",
+      "original": "usr/share/licenses/gcc-libs/RUNTIME.LIBRARY.EXCEPTION",
+      "license_file": null,
+      "license_evidence": [
+        {
+          "path": "usr/share/licenses/gcc-libs/RUNTIME.LIBRARY.EXCEPTION",
+          "sha256": "9d6b43ce4d8de0c878bf16b54d8e7a10d9bd42b75178153e3af6a815bdc90f74"
+        }
+      ],
+      "obligations": "Keep upstream archive notices; fulfill individual source/redistribution requirements if republishing these binaries. NOASSERTION is an unresolved SPDX expression, not permission to relicense."
+    },
+    {
+      "id": "git/usr/share/licenses/libopenssl",
+      "origin": "https://github.com/git-for-windows/git/releases/download/v2.56.0.windows.2/MinGit-2.56.0.2-64-bit.zip",
+      "revision": "Bundled in 2.56.0.2; archive identity da35e72aa21c005a5a0d298cfbae110bc1609a815730ea0dde84b01a1b3cd3be; individual upstream version not established",
+      "spdx": "Apache-2.0",
+      "scope": "download-transitive",
+      "integration": "In unchanged upstream tool archive; never in desktop ZIP. Mixed-license entries require per-file/source review before mirroring.",
+      "original": "usr/share/licenses/libopenssl/LICENSE.txt",
+      "license_file": null,
+      "license_evidence": [
+        {
+          "path": "usr/share/licenses/libopenssl/LICENSE.txt",
+          "sha256": "7d5450cb2d142651b8afa315b5f238efc805dad827d91ba367d8516bc9d49e7a"
+        }
+      ],
+      "obligations": "Keep upstream archive notices; fulfill individual source/redistribution requirements if republishing these binaries. NOASSERTION is an unresolved SPDX expression, not permission to relicense."
+    },
+    {
+      "id": "git/usr/share/licenses/libsqlite",
+      "origin": "https://github.com/git-for-windows/git/releases/download/v2.56.0.windows.2/MinGit-2.56.0.2-64-bit.zip",
+      "revision": "Bundled in 2.56.0.2; archive identity da35e72aa21c005a5a0d298cfbae110bc1609a815730ea0dde84b01a1b3cd3be; individual upstream version not established",
+      "spdx": "LicenseRef-Public-Domain",
+      "scope": "download-transitive",
+      "integration": "In unchanged upstream tool archive; never in desktop ZIP. Mixed-license entries require per-file/source review before mirroring.",
+      "original": "usr/share/licenses/libsqlite/LICENSE",
+      "license_file": null,
+      "license_evidence": [
+        {
+          "path": "usr/share/licenses/libsqlite/LICENSE",
+          "sha256": "0b76663a90e034f3d7f2af5bfada4cedec5ebc275361899eccc5c18e6f01ff1f"
+        }
+      ],
+      "obligations": "Keep upstream archive notices; fulfill individual source/redistribution requirements if republishing these binaries. NOASSERTION is an unresolved SPDX expression, not permission to relicense."
+    },
+    {
+      "id": "git/usr/share/licenses/ncurses",
+      "origin": "https://github.com/git-for-windows/git/releases/download/v2.56.0.windows.2/MinGit-2.56.0.2-64-bit.zip",
+      "revision": "Bundled in 2.56.0.2; archive identity da35e72aa21c005a5a0d298cfbae110bc1609a815730ea0dde84b01a1b3cd3be; individual upstream version not established",
+      "spdx": "MIT",
+      "scope": "download-transitive",
+      "integration": "In unchanged upstream tool archive; never in desktop ZIP. Mixed-license entries require per-file/source review before mirroring.",
+      "original": "usr/share/licenses/ncurses/LICENSE",
+      "license_file": null,
+      "license_evidence": [
+        {
+          "path": "usr/share/licenses/ncurses/LICENSE",
+          "sha256": "708999f95527e1ffa670c6fce288c6c600cb477dd04afcc1171422b3dd4ee226"
+        }
+      ],
+      "obligations": "Keep upstream archive notices; fulfill individual source/redistribution requirements if republishing these binaries. NOASSERTION is an unresolved SPDX expression, not permission to relicense."
+    },
+    {
+      "id": "git/usr/share/licenses/openssh",
+      "origin": "https://github.com/git-for-windows/git/releases/download/v2.56.0.windows.2/MinGit-2.56.0.2-64-bit.zip",
+      "revision": "Bundled in 2.56.0.2; archive identity da35e72aa21c005a5a0d298cfbae110bc1609a815730ea0dde84b01a1b3cd3be; individual upstream version not established",
+      "spdx": "NOASSERTION",
+      "scope": "download-transitive",
+      "integration": "In unchanged upstream tool archive; never in desktop ZIP. Mixed-license entries require per-file/source review before mirroring.",
+      "original": "usr/share/licenses/openssh/LICENCE",
+      "license_file": null,
+      "license_evidence": [
+        {
+          "path": "usr/share/licenses/openssh/LICENCE",
+          "sha256": "5bb5b160726ef5756e4f32fe95b35249c294962419650f48d05134b486d27ccb"
+        }
+      ],
+      "obligations": "Keep upstream archive notices; fulfill individual source/redistribution requirements if republishing these binaries. NOASSERTION is an unresolved SPDX expression, not permission to relicense."
+    },
+    {
+      "id": "git/usr/share/licenses/zlib",
+      "origin": "https://github.com/git-for-windows/git/releases/download/v2.56.0.windows.2/MinGit-2.56.0.2-64-bit.zip",
+      "revision": "Bundled in 2.56.0.2; archive identity da35e72aa21c005a5a0d298cfbae110bc1609a815730ea0dde84b01a1b3cd3be; individual upstream version not established",
+      "spdx": "Zlib",
+      "scope": "download-transitive",
+      "integration": "In unchanged upstream tool archive; never in desktop ZIP. Mixed-license entries require per-file/source review before mirroring.",
+      "original": "usr/share/licenses/zlib/LICENSE",
+      "license_file": null,
+      "license_evidence": [
+        {
+          "path": "usr/share/licenses/zlib/LICENSE",
+          "sha256": "e32ff4e00d9d94930537635291da39e7e612703334bf6fde8c7f1686fe8a45a2"
+        }
+      ],
+      "obligations": "Keep upstream archive notices; fulfill individual source/redistribution requirements if republishing these binaries. NOASSERTION is an unresolved SPDX expression, not permission to relicense."
+    },
+    {
+      "id": "git/ucrt64/share/licenses/brotli",
+      "origin": "https://github.com/git-for-windows/git/releases/download/v2.56.0.windows.2/MinGit-2.56.0.2-64-bit.zip",
+      "revision": "Bundled in 2.56.0.2; archive identity da35e72aa21c005a5a0d298cfbae110bc1609a815730ea0dde84b01a1b3cd3be; individual upstream version not established",
+      "spdx": "MIT",
+      "scope": "download-transitive",
+      "integration": "In unchanged upstream tool archive; never in desktop ZIP. Mixed-license entries require per-file/source review before mirroring.",
+      "original": "ucrt64/share/licenses/brotli/LICENSE",
+      "license_file": null,
+      "license_evidence": [
+        {
+          "path": "ucrt64/share/licenses/brotli/LICENSE",
+          "sha256": "3d180008e36922a4e8daec11c34c7af264fed5962d07924aea928c38e8663c94"
+        }
+      ],
+      "obligations": "Keep upstream archive notices; fulfill individual source/redistribution requirements if republishing these binaries. NOASSERTION is an unresolved SPDX expression, not permission to relicense."
+    },
+    {
+      "id": "git/ucrt64/share/licenses/curl",
+      "origin": "https://github.com/git-for-windows/git/releases/download/v2.56.0.windows.2/MinGit-2.56.0.2-64-bit.zip",
+      "revision": "Bundled in 2.56.0.2; archive identity da35e72aa21c005a5a0d298cfbae110bc1609a815730ea0dde84b01a1b3cd3be; individual upstream version not established",
+      "spdx": "curl",
+      "scope": "download-transitive",
+      "integration": "In unchanged upstream tool archive; never in desktop ZIP. Mixed-license entries require per-file/source review before mirroring.",
+      "original": "ucrt64/share/licenses/curl/LICENSE",
+      "license_file": null,
+      "license_evidence": [
+        {
+          "path": "ucrt64/share/licenses/curl/LICENSE",
+          "sha256": "82f2f4427d6545ee5aaac4f0b80428da6cc8ba41c2cf5da3a03680ec327b9681"
+        }
+      ],
+      "obligations": "Keep upstream archive notices; fulfill individual source/redistribution requirements if republishing these binaries. NOASSERTION is an unresolved SPDX expression, not permission to relicense."
+    },
+    {
+      "id": "git/ucrt64/share/licenses/docx2txt-rs",
+      "origin": "https://github.com/git-for-windows/git/releases/download/v2.56.0.windows.2/MinGit-2.56.0.2-64-bit.zip",
+      "revision": "Bundled in 2.56.0.2; archive identity da35e72aa21c005a5a0d298cfbae110bc1609a815730ea0dde84b01a1b3cd3be; individual upstream version not established",
+      "spdx": "NOASSERTION",
+      "scope": "download-transitive",
+      "integration": "In unchanged upstream tool archive; never in desktop ZIP. Mixed-license entries require per-file/source review before mirroring.",
+      "original": "ucrt64/share/licenses/docx2txt-rs/COPYING",
+      "license_file": null,
+      "license_evidence": [
+        {
+          "path": "ucrt64/share/licenses/docx2txt-rs/COPYING",
+          "sha256": "8ceb4b9ee5adedde47b31e975c1d90c73ad27b6b165a1dcd80c7c545eb65b903"
+        }
+      ],
+      "obligations": "Keep upstream archive notices; fulfill individual source/redistribution requirements if republishing these binaries. NOASSERTION is an unresolved SPDX expression, not permission to relicense."
+    },
+    {
+      "id": "git/ucrt64/share/licenses/expat",
+      "origin": "https://github.com/git-for-windows/git/releases/download/v2.56.0.windows.2/MinGit-2.56.0.2-64-bit.zip",
+      "revision": "Bundled in 2.56.0.2; archive identity da35e72aa21c005a5a0d298cfbae110bc1609a815730ea0dde84b01a1b3cd3be; individual upstream version not established",
+      "spdx": "MIT",
+      "scope": "download-transitive",
+      "integration": "In unchanged upstream tool archive; never in desktop ZIP. Mixed-license entries require per-file/source review before mirroring.",
+      "original": "ucrt64/share/licenses/expat/COPYING",
+      "license_file": null,
+      "license_evidence": [
+        {
+          "path": "ucrt64/share/licenses/expat/COPYING",
+          "sha256": "31b15de82aa19a845156169a17a5488bf597e561b2c318d159ed583139b25e87"
+        }
+      ],
+      "obligations": "Keep upstream archive notices; fulfill individual source/redistribution requirements if republishing these binaries. NOASSERTION is an unresolved SPDX expression, not permission to relicense."
+    },
+    {
+      "id": "git/ucrt64/share/licenses/gettext-runtime",
+      "origin": "https://github.com/git-for-windows/git/releases/download/v2.56.0.windows.2/MinGit-2.56.0.2-64-bit.zip",
+      "revision": "Bundled in 2.56.0.2; archive identity da35e72aa21c005a5a0d298cfbae110bc1609a815730ea0dde84b01a1b3cd3be; individual upstream version not established",
+      "spdx": "NOASSERTION",
+      "scope": "download-transitive",
+      "integration": "In unchanged upstream tool archive; never in desktop ZIP. Mixed-license entries require per-file/source review before mirroring.",
+      "original": "ucrt64/share/licenses/gettext-runtime/COPYING; ucrt64/share/licenses/gettext-runtime/intl/COPYING.LIB; ucrt64/share/licenses/gettext-runtime/libasprintf/COPYING; ucrt64/share/licenses/gettext-runtime/libasprintf/COPYING.LIB",
+      "license_file": null,
+      "license_evidence": [
+        {
+          "path": "ucrt64/share/licenses/gettext-runtime/COPYING",
+          "sha256": "7ef2cdfe58e0c0460657b6598b49af29d4e03c1e41cbaf0e1da1eb8ad74b95d0"
+        },
+        {
+          "path": "ucrt64/share/licenses/gettext-runtime/intl/COPYING.LIB",
+          "sha256": "20e50fe7aae3e56378ebf0417d9de904f55a0e61e4df315333e632a4d3555d95"
+        },
+        {
+          "path": "ucrt64/share/licenses/gettext-runtime/libasprintf/COPYING",
+          "sha256": "03133addae5b99a6148c538300e6d97074453089be1423b741bd081f18e2b298"
+        },
+        {
+          "path": "ucrt64/share/licenses/gettext-runtime/libasprintf/COPYING.LIB",
+          "sha256": "20e50fe7aae3e56378ebf0417d9de904f55a0e61e4df315333e632a4d3555d95"
+        }
+      ],
+      "obligations": "Keep upstream archive notices; fulfill individual source/redistribution requirements if republishing these binaries. NOASSERTION is an unresolved SPDX expression, not permission to relicense."
+    },
+    {
+      "id": "git/ucrt64/share/licenses/libatomic",
+      "origin": "https://github.com/git-for-windows/git/releases/download/v2.56.0.windows.2/MinGit-2.56.0.2-64-bit.zip",
+      "revision": "Bundled in 2.56.0.2; archive identity da35e72aa21c005a5a0d298cfbae110bc1609a815730ea0dde84b01a1b3cd3be; individual upstream version not established",
+      "spdx": "GPL-3.0-or-later WITH GCC-exception-3.1",
+      "scope": "download-transitive",
+      "integration": "In unchanged upstream tool archive; never in desktop ZIP. Mixed-license entries require per-file/source review before mirroring.",
+      "original": "ucrt64/share/licenses/libatomic/COPYING.RUNTIME; ucrt64/share/licenses/libatomic/COPYING3",
+      "license_file": null,
+      "license_evidence": [
+        {
+          "path": "ucrt64/share/licenses/libatomic/COPYING.RUNTIME",
+          "sha256": "9d6b43ce4d8de0c878bf16b54d8e7a10d9bd42b75178153e3af6a815bdc90f74"
+        },
+        {
+          "path": "ucrt64/share/licenses/libatomic/COPYING3",
+          "sha256": "8ceb4b9ee5adedde47b31e975c1d90c73ad27b6b165a1dcd80c7c545eb65b903"
+        }
+      ],
+      "obligations": "Keep upstream archive notices; fulfill individual source/redistribution requirements if republishing these binaries. NOASSERTION is an unresolved SPDX expression, not permission to relicense."
+    },
+    {
+      "id": "git/ucrt64/share/licenses/libffi",
+      "origin": "https://github.com/git-for-windows/git/releases/download/v2.56.0.windows.2/MinGit-2.56.0.2-64-bit.zip",
+      "revision": "Bundled in 2.56.0.2; archive identity da35e72aa21c005a5a0d298cfbae110bc1609a815730ea0dde84b01a1b3cd3be; individual upstream version not established",
+      "spdx": "MIT",
+      "scope": "download-transitive",
+      "integration": "In unchanged upstream tool archive; never in desktop ZIP. Mixed-license entries require per-file/source review before mirroring.",
+      "original": "ucrt64/share/licenses/libffi/LICENSE",
+      "license_file": null,
+      "license_evidence": [
+        {
+          "path": "ucrt64/share/licenses/libffi/LICENSE",
+          "sha256": "17b64dc60f3b6897a60f971e288b973f655c2edcdf08b25f3c3dd5549857881c"
+        }
+      ],
+      "obligations": "Keep upstream archive notices; fulfill individual source/redistribution requirements if republishing these binaries. NOASSERTION is an unresolved SPDX expression, not permission to relicense."
+    },
+    {
+      "id": "git/ucrt64/share/licenses/libgcc",
+      "origin": "https://github.com/git-for-windows/git/releases/download/v2.56.0.windows.2/MinGit-2.56.0.2-64-bit.zip",
+      "revision": "Bundled in 2.56.0.2; archive identity da35e72aa21c005a5a0d298cfbae110bc1609a815730ea0dde84b01a1b3cd3be; individual upstream version not established",
+      "spdx": "GPL-3.0-or-later WITH GCC-exception-3.1",
+      "scope": "download-transitive",
+      "integration": "In unchanged upstream tool archive; never in desktop ZIP. Mixed-license entries require per-file/source review before mirroring.",
+      "original": "ucrt64/share/licenses/libgcc/COPYING.RUNTIME; ucrt64/share/licenses/libgcc/COPYING3",
+      "license_file": null,
+      "license_evidence": [
+        {
+          "path": "ucrt64/share/licenses/libgcc/COPYING.RUNTIME",
+          "sha256": "9d6b43ce4d8de0c878bf16b54d8e7a10d9bd42b75178153e3af6a815bdc90f74"
+        },
+        {
+          "path": "ucrt64/share/licenses/libgcc/COPYING3",
+          "sha256": "8ceb4b9ee5adedde47b31e975c1d90c73ad27b6b165a1dcd80c7c545eb65b903"
+        }
+      ],
+      "obligations": "Keep upstream archive notices; fulfill individual source/redistribution requirements if republishing these binaries. NOASSERTION is an unresolved SPDX expression, not permission to relicense."
+    },
+    {
+      "id": "git/ucrt64/share/licenses/libgomp",
+      "origin": "https://github.com/git-for-windows/git/releases/download/v2.56.0.windows.2/MinGit-2.56.0.2-64-bit.zip",
+      "revision": "Bundled in 2.56.0.2; archive identity da35e72aa21c005a5a0d298cfbae110bc1609a815730ea0dde84b01a1b3cd3be; individual upstream version not established",
+      "spdx": "GPL-3.0-or-later WITH GCC-exception-3.1",
+      "scope": "download-transitive",
+      "integration": "In unchanged upstream tool archive; never in desktop ZIP. Mixed-license entries require per-file/source review before mirroring.",
+      "original": "ucrt64/share/licenses/libgomp/COPYING.RUNTIME; ucrt64/share/licenses/libgomp/COPYING3",
+      "license_file": null,
+      "license_evidence": [
+        {
+          "path": "ucrt64/share/licenses/libgomp/COPYING.RUNTIME",
+          "sha256": "9d6b43ce4d8de0c878bf16b54d8e7a10d9bd42b75178153e3af6a815bdc90f74"
+        },
+        {
+          "path": "ucrt64/share/licenses/libgomp/COPYING3",
+          "sha256": "8ceb4b9ee5adedde47b31e975c1d90c73ad27b6b165a1dcd80c7c545eb65b903"
+        }
+      ],
+      "obligations": "Keep upstream archive notices; fulfill individual source/redistribution requirements if republishing these binaries. NOASSERTION is an unresolved SPDX expression, not permission to relicense."
+    },
+    {
+      "id": "git/ucrt64/share/licenses/libiconv",
+      "origin": "https://github.com/git-for-windows/git/releases/download/v2.56.0.windows.2/MinGit-2.56.0.2-64-bit.zip",
+      "revision": "Bundled in 2.56.0.2; archive identity da35e72aa21c005a5a0d298cfbae110bc1609a815730ea0dde84b01a1b3cd3be; individual upstream version not established",
+      "spdx": "NOASSERTION",
+      "scope": "download-transitive",
+      "integration": "In unchanged upstream tool archive; never in desktop ZIP. Mixed-license entries require per-file/source review before mirroring.",
+      "original": "ucrt64/share/licenses/libiconv/COPYING; ucrt64/share/licenses/libiconv/COPYING.LIB; ucrt64/share/licenses/libiconv/README; ucrt64/share/licenses/libiconv/libcharset/COPYING.LIB",
+      "license_file": null,
+      "license_evidence": [
+        {
+          "path": "ucrt64/share/licenses/libiconv/COPYING",
+          "sha256": "8ceb4b9ee5adedde47b31e975c1d90c73ad27b6b165a1dcd80c7c545eb65b903"
+        },
+        {
+          "path": "ucrt64/share/licenses/libiconv/COPYING.LIB",
+          "sha256": "20e50fe7aae3e56378ebf0417d9de904f55a0e61e4df315333e632a4d3555d95"
+        },
+        {
+          "path": "ucrt64/share/licenses/libiconv/README",
+          "sha256": "4ae66e61d1c6593c84c47105b368d579bcee1af566dbb959ec63a0c48425dcf4"
+        },
+        {
+          "path": "ucrt64/share/licenses/libiconv/libcharset/COPYING.LIB",
+          "sha256": "20e50fe7aae3e56378ebf0417d9de904f55a0e61e4df315333e632a4d3555d95"
+        }
+      ],
+      "obligations": "Keep upstream archive notices; fulfill individual source/redistribution requirements if republishing these binaries. NOASSERTION is an unresolved SPDX expression, not permission to relicense."
+    },
+    {
+      "id": "git/ucrt64/share/licenses/libpsl",
+      "origin": "https://github.com/git-for-windows/git/releases/download/v2.56.0.windows.2/MinGit-2.56.0.2-64-bit.zip",
+      "revision": "Bundled in 2.56.0.2; archive identity da35e72aa21c005a5a0d298cfbae110bc1609a815730ea0dde84b01a1b3cd3be; individual upstream version not established",
+      "spdx": "MIT",
+      "scope": "download-transitive",
+      "integration": "In unchanged upstream tool archive; never in desktop ZIP. Mixed-license entries require per-file/source review before mirroring.",
+      "original": "ucrt64/share/licenses/libpsl/COPYING",
+      "license_file": null,
+      "license_evidence": [
+        {
+          "path": "ucrt64/share/licenses/libpsl/COPYING",
+          "sha256": "322392e6001b2b3b0fca705dc9f11f26e12441188ecde50eb1d22909980b2925"
+        }
+      ],
+      "obligations": "Keep upstream archive notices; fulfill individual source/redistribution requirements if republishing these binaries. NOASSERTION is an unresolved SPDX expression, not permission to relicense."
+    },
+    {
+      "id": "git/ucrt64/share/licenses/libquadmath",
+      "origin": "https://github.com/git-for-windows/git/releases/download/v2.56.0.windows.2/MinGit-2.56.0.2-64-bit.zip",
+      "revision": "Bundled in 2.56.0.2; archive identity da35e72aa21c005a5a0d298cfbae110bc1609a815730ea0dde84b01a1b3cd3be; individual upstream version not established",
+      "spdx": "NOASSERTION",
+      "scope": "download-transitive",
+      "integration": "In unchanged upstream tool archive; never in desktop ZIP. Mixed-license entries require per-file/source review before mirroring.",
+      "original": "ucrt64/share/licenses/libquadmath/COPYING.LIB",
+      "license_file": null,
+      "license_evidence": [
+        {
+          "path": "ucrt64/share/licenses/libquadmath/COPYING.LIB",
+          "sha256": "32434afcc8666ba060e111d715bfdb6c2d5dd8a35fa4d3ab8ad67d8f850d2f2b"
+        }
+      ],
+      "obligations": "Keep upstream archive notices; fulfill individual source/redistribution requirements if republishing these binaries. NOASSERTION is an unresolved SPDX expression, not permission to relicense."
+    },
+    {
+      "id": "git/ucrt64/share/licenses/libssh2",
+      "origin": "https://github.com/git-for-windows/git/releases/download/v2.56.0.windows.2/MinGit-2.56.0.2-64-bit.zip",
+      "revision": "Bundled in 2.56.0.2; archive identity da35e72aa21c005a5a0d298cfbae110bc1609a815730ea0dde84b01a1b3cd3be; individual upstream version not established",
+      "spdx": "BSD-3-Clause",
+      "scope": "download-transitive",
+      "integration": "In unchanged upstream tool archive; never in desktop ZIP. Mixed-license entries require per-file/source review before mirroring.",
+      "original": "ucrt64/share/licenses/libssh2/LICENSE",
+      "license_file": null,
+      "license_evidence": [
+        {
+          "path": "ucrt64/share/licenses/libssh2/LICENSE",
+          "sha256": "f7f9633cf9ff2f1333f3d7ce46973a8716a4d2a2815ad56f30d437d5fea7bafe"
+        }
+      ],
+      "obligations": "Keep upstream archive notices; fulfill individual source/redistribution requirements if republishing these binaries. NOASSERTION is an unresolved SPDX expression, not permission to relicense."
+    },
+    {
+      "id": "git/ucrt64/share/licenses/libstdc++",
+      "origin": "https://github.com/git-for-windows/git/releases/download/v2.56.0.windows.2/MinGit-2.56.0.2-64-bit.zip",
+      "revision": "Bundled in 2.56.0.2; archive identity da35e72aa21c005a5a0d298cfbae110bc1609a815730ea0dde84b01a1b3cd3be; individual upstream version not established",
+      "spdx": "GPL-3.0-or-later WITH GCC-exception-3.1",
+      "scope": "download-transitive",
+      "integration": "In unchanged upstream tool archive; never in desktop ZIP. Mixed-license entries require per-file/source review before mirroring.",
+      "original": "ucrt64/share/licenses/libstdc++/COPYING.RUNTIME; ucrt64/share/licenses/libstdc++/COPYING3",
+      "license_file": null,
+      "license_evidence": [
+        {
+          "path": "ucrt64/share/licenses/libstdc++/COPYING.RUNTIME",
+          "sha256": "9d6b43ce4d8de0c878bf16b54d8e7a10d9bd42b75178153e3af6a815bdc90f74"
+        },
+        {
+          "path": "ucrt64/share/licenses/libstdc++/COPYING3",
+          "sha256": "8ceb4b9ee5adedde47b31e975c1d90c73ad27b6b165a1dcd80c7c545eb65b903"
+        }
+      ],
+      "obligations": "Keep upstream archive notices; fulfill individual source/redistribution requirements if republishing these binaries. NOASSERTION is an unresolved SPDX expression, not permission to relicense."
+    },
+    {
+      "id": "git/ucrt64/share/licenses/libtasn1",
+      "origin": "https://github.com/git-for-windows/git/releases/download/v2.56.0.windows.2/MinGit-2.56.0.2-64-bit.zip",
+      "revision": "Bundled in 2.56.0.2; archive identity da35e72aa21c005a5a0d298cfbae110bc1609a815730ea0dde84b01a1b3cd3be; individual upstream version not established",
+      "spdx": "NOASSERTION",
+      "scope": "download-transitive",
+      "integration": "In unchanged upstream tool archive; never in desktop ZIP. Mixed-license entries require per-file/source review before mirroring.",
+      "original": "ucrt64/share/licenses/libtasn1/COPYING; ucrt64/share/licenses/libtasn1/COPYING.LESSERv2",
+      "license_file": null,
+      "license_evidence": [
+        {
+          "path": "ucrt64/share/licenses/libtasn1/COPYING",
+          "sha256": "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986"
+        },
+        {
+          "path": "ucrt64/share/licenses/libtasn1/COPYING.LESSERv2",
+          "sha256": "20e50fe7aae3e56378ebf0417d9de904f55a0e61e4df315333e632a4d3555d95"
+        }
+      ],
+      "obligations": "Keep upstream archive notices; fulfill individual source/redistribution requirements if republishing these binaries. NOASSERTION is an unresolved SPDX expression, not permission to relicense."
+    },
+    {
+      "id": "git/ucrt64/share/licenses/libunistring",
+      "origin": "https://github.com/git-for-windows/git/releases/download/v2.56.0.windows.2/MinGit-2.56.0.2-64-bit.zip",
+      "revision": "Bundled in 2.56.0.2; archive identity da35e72aa21c005a5a0d298cfbae110bc1609a815730ea0dde84b01a1b3cd3be; individual upstream version not established",
+      "spdx": "NOASSERTION",
+      "scope": "download-transitive",
+      "integration": "In unchanged upstream tool archive; never in desktop ZIP. Mixed-license entries require per-file/source review before mirroring.",
+      "original": "ucrt64/share/licenses/libunistring/LICENSE; ucrt64/share/licenses/libunistring/LICENSE.LIB",
+      "license_file": null,
+      "license_evidence": [
+        {
+          "path": "ucrt64/share/licenses/libunistring/LICENSE",
+          "sha256": "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986"
+        },
+        {
+          "path": "ucrt64/share/licenses/libunistring/LICENSE.LIB",
+          "sha256": "a853c2ffec17057872340eee242ae4d96cbf2b520ae27d903e1b2fef1a5f9d1c"
+        }
+      ],
+      "obligations": "Keep upstream archive notices; fulfill individual source/redistribution requirements if republishing these binaries. NOASSERTION is an unresolved SPDX expression, not permission to relicense."
+    },
+    {
+      "id": "git/ucrt64/share/licenses/libwinpthread",
+      "origin": "https://github.com/git-for-windows/git/releases/download/v2.56.0.windows.2/MinGit-2.56.0.2-64-bit.zip",
+      "revision": "Bundled in 2.56.0.2; archive identity da35e72aa21c005a5a0d298cfbae110bc1609a815730ea0dde84b01a1b3cd3be; individual upstream version not established",
+      "spdx": "NOASSERTION",
+      "scope": "download-transitive",
+      "integration": "In unchanged upstream tool archive; never in desktop ZIP. Mixed-license entries require per-file/source review before mirroring.",
+      "original": "ucrt64/share/licenses/libwinpthread/COPYING",
+      "license_file": null,
+      "license_evidence": [
+        {
+          "path": "ucrt64/share/licenses/libwinpthread/COPYING",
+          "sha256": "63263614cdd29f2f93cba85e992f041b31f9fc7b4033692f31269489a8a1b177"
+        }
+      ],
+      "obligations": "Keep upstream archive notices; fulfill individual source/redistribution requirements if republishing these binaries. NOASSERTION is an unresolved SPDX expression, not permission to relicense."
+    },
+    {
+      "id": "git/ucrt64/share/licenses/nghttp2",
+      "origin": "https://github.com/git-for-windows/git/releases/download/v2.56.0.windows.2/MinGit-2.56.0.2-64-bit.zip",
+      "revision": "Bundled in 2.56.0.2; archive identity da35e72aa21c005a5a0d298cfbae110bc1609a815730ea0dde84b01a1b3cd3be; individual upstream version not established",
+      "spdx": "MIT",
+      "scope": "download-transitive",
+      "integration": "In unchanged upstream tool archive; never in desktop ZIP. Mixed-license entries require per-file/source review before mirroring.",
+      "original": "ucrt64/share/licenses/nghttp2/COPYING",
+      "license_file": null,
+      "license_evidence": [
+        {
+          "path": "ucrt64/share/licenses/nghttp2/COPYING",
+          "sha256": "6b94f3abc1aabd0c72a7c7d92a77f79dda7c8a0cb3df839a97890b4116a2de2a"
+        }
+      ],
+      "obligations": "Keep upstream archive notices; fulfill individual source/redistribution requirements if republishing these binaries. NOASSERTION is an unresolved SPDX expression, not permission to relicense."
+    },
+    {
+      "id": "git/ucrt64/share/licenses/openssl",
+      "origin": "https://github.com/git-for-windows/git/releases/download/v2.56.0.windows.2/MinGit-2.56.0.2-64-bit.zip",
+      "revision": "Bundled in 2.56.0.2; archive identity da35e72aa21c005a5a0d298cfbae110bc1609a815730ea0dde84b01a1b3cd3be; individual upstream version not established",
+      "spdx": "Apache-2.0",
+      "scope": "download-transitive",
+      "integration": "In unchanged upstream tool archive; never in desktop ZIP. Mixed-license entries require per-file/source review before mirroring.",
+      "original": "ucrt64/share/licenses/openssl/LICENSE",
+      "license_file": null,
+      "license_evidence": [
+        {
+          "path": "ucrt64/share/licenses/openssl/LICENSE",
+          "sha256": "7d5450cb2d142651b8afa315b5f238efc805dad827d91ba367d8516bc9d49e7a"
+        }
+      ],
+      "obligations": "Keep upstream archive notices; fulfill individual source/redistribution requirements if republishing these binaries. NOASSERTION is an unresolved SPDX expression, not permission to relicense."
+    },
+    {
+      "id": "git/ucrt64/share/licenses/pcre2",
+      "origin": "https://github.com/git-for-windows/git/releases/download/v2.56.0.windows.2/MinGit-2.56.0.2-64-bit.zip",
+      "revision": "Bundled in 2.56.0.2; archive identity da35e72aa21c005a5a0d298cfbae110bc1609a815730ea0dde84b01a1b3cd3be; individual upstream version not established",
+      "spdx": "NOASSERTION",
+      "scope": "download-transitive",
+      "integration": "In unchanged upstream tool archive; never in desktop ZIP. Mixed-license entries require per-file/source review before mirroring.",
+      "original": "ucrt64/share/licenses/pcre2/COPYING; ucrt64/share/licenses/pcre2/LICENCE.md",
+      "license_file": null,
+      "license_evidence": [
+        {
+          "path": "ucrt64/share/licenses/pcre2/COPYING",
+          "sha256": "99272c55f3dcfa07a8a7e15a5c1a33096e4727de74241d65fa049fccfdd59507"
+        },
+        {
+          "path": "ucrt64/share/licenses/pcre2/LICENCE.md",
+          "sha256": "197d8a73ffee0d6b09adba2f9c677b5f5aede24edf89258a68e48248d010d811"
+        }
+      ],
+      "obligations": "Keep upstream archive notices; fulfill individual source/redistribution requirements if republishing these binaries. NOASSERTION is an unresolved SPDX expression, not permission to relicense."
+    },
+    {
+      "id": "git/ucrt64/share/licenses/zlib",
+      "origin": "https://github.com/git-for-windows/git/releases/download/v2.56.0.windows.2/MinGit-2.56.0.2-64-bit.zip",
+      "revision": "Bundled in 2.56.0.2; archive identity da35e72aa21c005a5a0d298cfbae110bc1609a815730ea0dde84b01a1b3cd3be; individual upstream version not established",
+      "spdx": "Zlib",
+      "scope": "download-transitive",
+      "integration": "In unchanged upstream tool archive; never in desktop ZIP. Mixed-license entries require per-file/source review before mirroring.",
+      "original": "ucrt64/share/licenses/zlib/LICENSE",
+      "license_file": null,
+      "license_evidence": [
+        {
+          "path": "ucrt64/share/licenses/zlib/LICENSE",
+          "sha256": "e32ff4e00d9d94930537635291da39e7e612703334bf6fde8c7f1686fe8a45a2"
+        }
+      ],
+      "obligations": "Keep upstream archive notices; fulfill individual source/redistribution requirements if republishing these binaries. NOASSERTION is an unresolved SPDX expression, not permission to relicense."
+    },
+    {
+      "id": "git/ucrt64/share/licenses/zstd",
+      "origin": "https://github.com/git-for-windows/git/releases/download/v2.56.0.windows.2/MinGit-2.56.0.2-64-bit.zip",
+      "revision": "Bundled in 2.56.0.2; archive identity da35e72aa21c005a5a0d298cfbae110bc1609a815730ea0dde84b01a1b3cd3be; individual upstream version not established",
+      "spdx": "BSD-3-Clause",
+      "scope": "download-transitive",
+      "integration": "In unchanged upstream tool archive; never in desktop ZIP. Mixed-license entries require per-file/source review before mirroring.",
+      "original": "ucrt64/share/licenses/zstd/LICENSE",
+      "license_file": null,
+      "license_evidence": [
+        {
+          "path": "ucrt64/share/licenses/zstd/LICENSE",
+          "sha256": "7055266497633c9025b777c78eb7235af13922117480ed5c674677adc381c9d8"
+        }
+      ],
+      "obligations": "Keep upstream archive notices; fulfill individual source/redistribution requirements if republishing these binaries. NOASSERTION is an unresolved SPDX expression, not permission to relicense."
+    },
+    {
+      "id": "cmake/doc/cmake/cmcppdap",
+      "origin": "https://github.com/Kitware/CMake/releases/download/v3.31.6/cmake-3.31.6-windows-x86_64.zip",
+      "revision": "Bundled in 3.31.6; archive identity d163cd3ab4959b0a53fa8988f2ddbd2e6c501658201e6a154386bad9dbe4f836; individual upstream version not established",
+      "spdx": "Apache-2.0",
+      "scope": "download-transitive",
+      "integration": "In unchanged upstream tool archive; never in desktop ZIP. Mixed-license entries require per-file/source review before mirroring.",
+      "original": "doc/cmake/cmcppdap/NOTICE",
+      "license_file": null,
+      "license_evidence": [
+        {
+          "path": "doc/cmake/cmcppdap/NOTICE",
+          "sha256": "47bc4ee3ca11c006ac8b38d90d97455d18c0a0c3eafdf7f98c3623e4dada1f19"
+        }
+      ],
+      "obligations": "Keep upstream archive notices; fulfill individual source/redistribution requirements if republishing these binaries. NOASSERTION is an unresolved SPDX expression, not permission to relicense."
+    },
+    {
+      "id": "cmake/doc/cmake/cmcurl",
+      "origin": "https://github.com/Kitware/CMake/releases/download/v3.31.6/cmake-3.31.6-windows-x86_64.zip",
+      "revision": "Bundled in 3.31.6; archive identity d163cd3ab4959b0a53fa8988f2ddbd2e6c501658201e6a154386bad9dbe4f836; individual upstream version not established",
+      "spdx": "curl",
+      "scope": "download-transitive",
+      "integration": "In unchanged upstream tool archive; never in desktop ZIP. Mixed-license entries require per-file/source review before mirroring.",
+      "original": "doc/cmake/cmcurl/COPYING",
+      "license_file": null,
+      "license_evidence": [
+        {
+          "path": "doc/cmake/cmcurl/COPYING",
+          "sha256": "1b3254d53d27ef613e4e1b85789f7a441dc431e26c8bec6f4ba8e68f401d1eda"
+        }
+      ],
+      "obligations": "Keep upstream archive notices; fulfill individual source/redistribution requirements if republishing these binaries. NOASSERTION is an unresolved SPDX expression, not permission to relicense."
+    },
+    {
+      "id": "cmake/doc/cmake/cmlibarchive",
+      "origin": "https://github.com/Kitware/CMake/releases/download/v3.31.6/cmake-3.31.6-windows-x86_64.zip",
+      "revision": "Bundled in 3.31.6; archive identity d163cd3ab4959b0a53fa8988f2ddbd2e6c501658201e6a154386bad9dbe4f836; individual upstream version not established",
+      "spdx": "NOASSERTION",
+      "scope": "download-transitive",
+      "integration": "In unchanged upstream tool archive; never in desktop ZIP. Mixed-license entries require per-file/source review before mirroring.",
+      "original": "doc/cmake/cmlibarchive/COPYING",
+      "license_file": null,
+      "license_evidence": [
+        {
+          "path": "doc/cmake/cmlibarchive/COPYING",
+          "sha256": "63fc0527f0f414cac078daaba199f872760372dd3fcb1f902f12fbcada51f98b"
+        }
+      ],
+      "obligations": "Keep upstream archive notices; fulfill individual source/redistribution requirements if republishing these binaries. NOASSERTION is an unresolved SPDX expression, not permission to relicense."
+    },
+    {
+      "id": "cmake/doc/cmake/cmliblzma",
+      "origin": "https://github.com/Kitware/CMake/releases/download/v3.31.6/cmake-3.31.6-windows-x86_64.zip",
+      "revision": "Bundled in 3.31.6; archive identity d163cd3ab4959b0a53fa8988f2ddbd2e6c501658201e6a154386bad9dbe4f836; individual upstream version not established",
+      "spdx": "NOASSERTION",
+      "scope": "download-transitive",
+      "integration": "In unchanged upstream tool archive; never in desktop ZIP. Mixed-license entries require per-file/source review before mirroring.",
+      "original": "doc/cmake/cmliblzma/COPYING",
+      "license_file": null,
+      "license_evidence": [
+        {
+          "path": "doc/cmake/cmliblzma/COPYING",
+          "sha256": "ac024c350183a8253934be0145ae0fa1c567ab5b7d5a8e45bd644978e3651ea8"
+        }
+      ],
+      "obligations": "Keep upstream archive notices; fulfill individual source/redistribution requirements if republishing these binaries. NOASSERTION is an unresolved SPDX expression, not permission to relicense."
+    },
+    {
+      "id": "cmake/doc/cmake/cmlibrhash",
+      "origin": "https://github.com/Kitware/CMake/releases/download/v3.31.6/cmake-3.31.6-windows-x86_64.zip",
+      "revision": "Bundled in 3.31.6; archive identity d163cd3ab4959b0a53fa8988f2ddbd2e6c501658201e6a154386bad9dbe4f836; individual upstream version not established",
+      "spdx": "0BSD",
+      "scope": "download-transitive",
+      "integration": "In unchanged upstream tool archive; never in desktop ZIP. Mixed-license entries require per-file/source review before mirroring.",
+      "original": "doc/cmake/cmlibrhash/COPYING",
+      "license_file": null,
+      "license_evidence": [
+        {
+          "path": "doc/cmake/cmlibrhash/COPYING",
+          "sha256": "62fd8327a27a4170361e097fbbfafaf68cdacadfdcad993ca251238112947a8f"
+        }
+      ],
+      "obligations": "Keep upstream archive notices; fulfill individual source/redistribution requirements if republishing these binaries. NOASSERTION is an unresolved SPDX expression, not permission to relicense."
+    },
+    {
+      "id": "cmake/doc/cmake/cmlibuv",
+      "origin": "https://github.com/Kitware/CMake/releases/download/v3.31.6/cmake-3.31.6-windows-x86_64.zip",
+      "revision": "Bundled in 3.31.6; archive identity d163cd3ab4959b0a53fa8988f2ddbd2e6c501658201e6a154386bad9dbe4f836; individual upstream version not established",
+      "spdx": "NOASSERTION",
+      "scope": "download-transitive",
+      "integration": "In unchanged upstream tool archive; never in desktop ZIP. Mixed-license entries require per-file/source review before mirroring.",
+      "original": "doc/cmake/cmlibuv/LICENSE",
+      "license_file": null,
+      "license_evidence": [
+        {
+          "path": "doc/cmake/cmlibuv/LICENSE",
+          "sha256": "d1e1ff2c19bae35cd337d7333a5cebf7ba3ab3d0d4250c76b8bd0cf12c081b43"
+        }
+      ],
+      "obligations": "Keep upstream archive notices; fulfill individual source/redistribution requirements if republishing these binaries. NOASSERTION is an unresolved SPDX expression, not permission to relicense."
+    },
+    {
+      "id": "cmake/doc/cmake/cmnghttp2",
+      "origin": "https://github.com/Kitware/CMake/releases/download/v3.31.6/cmake-3.31.6-windows-x86_64.zip",
+      "revision": "Bundled in 3.31.6; archive identity d163cd3ab4959b0a53fa8988f2ddbd2e6c501658201e6a154386bad9dbe4f836; individual upstream version not established",
+      "spdx": "MIT",
+      "scope": "download-transitive",
+      "integration": "In unchanged upstream tool archive; never in desktop ZIP. Mixed-license entries require per-file/source review before mirroring.",
+      "original": "doc/cmake/cmnghttp2/COPYING",
+      "license_file": null,
+      "license_evidence": [
+        {
+          "path": "doc/cmake/cmnghttp2/COPYING",
+          "sha256": "296913fdae167d19f8c463622b7d4ce4012781b9a13d9dcf21a2c7541a96dc39"
+        }
+      ],
+      "obligations": "Keep upstream archive notices; fulfill individual source/redistribution requirements if republishing these binaries. NOASSERTION is an unresolved SPDX expression, not permission to relicense."
+    },
+    {
+      "id": "cmake/doc/cmake/cmsys",
+      "origin": "https://github.com/Kitware/CMake/releases/download/v3.31.6/cmake-3.31.6-windows-x86_64.zip",
+      "revision": "Bundled in 3.31.6; archive identity d163cd3ab4959b0a53fa8988f2ddbd2e6c501658201e6a154386bad9dbe4f836; individual upstream version not established",
+      "spdx": "BSD-3-Clause",
+      "scope": "download-transitive",
+      "integration": "In unchanged upstream tool archive; never in desktop ZIP. Mixed-license entries require per-file/source review before mirroring.",
+      "original": "doc/cmake/cmsys/Copyright.txt",
+      "license_file": null,
+      "license_evidence": [
+        {
+          "path": "doc/cmake/cmsys/Copyright.txt",
+          "sha256": "0998690e8dc877e5d9d79d852f85630ba42b4061962baefc9651675ecf972082"
+        }
+      ],
+      "obligations": "Keep upstream archive notices; fulfill individual source/redistribution requirements if republishing these binaries. NOASSERTION is an unresolved SPDX expression, not permission to relicense."
+    },
+    {
+      "id": "cmake/doc/cmake/cmzlib",
+      "origin": "https://github.com/Kitware/CMake/releases/download/v3.31.6/cmake-3.31.6-windows-x86_64.zip",
+      "revision": "Bundled in 3.31.6; archive identity d163cd3ab4959b0a53fa8988f2ddbd2e6c501658201e6a154386bad9dbe4f836; individual upstream version not established",
+      "spdx": "Zlib",
+      "scope": "download-transitive",
+      "integration": "In unchanged upstream tool archive; never in desktop ZIP. Mixed-license entries require per-file/source review before mirroring.",
+      "original": "doc/cmake/cmzlib/Copyright.txt",
+      "license_file": null,
+      "license_evidence": [
+        {
+          "path": "doc/cmake/cmzlib/Copyright.txt",
+          "sha256": "d5bbd7748a19e3fed6ea31242e8de9814e69a0125ae7758a7491057d5fe76f34"
+        }
+      ],
+      "obligations": "Keep upstream archive notices; fulfill individual source/redistribution requirements if republishing these binaries. NOASSERTION is an unresolved SPDX expression, not permission to relicense."
+    },
+    {
+      "id": "cmake/doc/cmake/cmzstd",
+      "origin": "https://github.com/Kitware/CMake/releases/download/v3.31.6/cmake-3.31.6-windows-x86_64.zip",
+      "revision": "Bundled in 3.31.6; archive identity d163cd3ab4959b0a53fa8988f2ddbd2e6c501658201e6a154386bad9dbe4f836; individual upstream version not established",
+      "spdx": "BSD-3-Clause",
+      "scope": "download-transitive",
+      "integration": "In unchanged upstream tool archive; never in desktop ZIP. Mixed-license entries require per-file/source review before mirroring.",
+      "original": "doc/cmake/cmzstd/LICENSE",
+      "license_file": null,
+      "license_evidence": [
+        {
+          "path": "doc/cmake/cmzstd/LICENSE",
+          "sha256": "d3baadc2e1dd7a7e0b483633e6b39743c16a16f28d696baff507fcd451f3d4ad"
+        }
+      ],
+      "obligations": "Keep upstream archive notices; fulfill individual source/redistribution requirements if republishing these binaries. NOASSERTION is an unresolved SPDX expression, not permission to relicense."
+    }
+  ]
+}
