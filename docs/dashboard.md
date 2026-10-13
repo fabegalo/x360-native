@@ -1550,3 +1550,69 @@ suíte completa ou regressões antigas. Logs `c73-build-tests.log` e
 isoladas: os três hashes base e final coincidem com o lock. Os 42 patches
 passam `apply-sdk-patches.ps1 -Check` (`c73-patches.log`). SDK pin preservado,
 sem push, sem alterar a Release publicada.
+
+### 0.28 Confirmação original: C7.4 (2026-10-13, bloqueado)
+
+Base `3d6045c`; nenhuma alteração funcional neste incremento. O objetivo
+seleção → login real → identidade da dashboard **não foi alcançado**.
+
+Uma única execução gráfica de desenvolvimento, autorizada para entrada manual,
+durou 58,153 s (PID 30384, encerrado pelo script; nenhum processo remanescente).
+Computer Use e envio de entrada por scripts não foram utilizados. Dados isolados
+em `.local/tmp/c74-dashboard-data/profiles/local-v1.dat`: perfil existente
+`C73Local`, XUID `E00000000000C730`, sessão inicialmente zero. Os arquivos
+`before.dat` e `after.dat` em `.local/runs/c74-original-confirm/` têm o mesmo
+SHA-256 `B3199E283D5AAB0A6F6DC8DFC4543752812B5AF485D711527C12478ADE1675FA`;
+o byte de sessão permaneceu zero. O usuário informou: “O Sign-in apareceu,
+mas A não entrou” e “Pressionei B, mas não fechou”. Cancelamento sem mudança
+de arquivo não equivale a cancelamento funcional: a interface não fechou.
+
+**Bloqueio observado e contrato ausente:** as capturas locais `state-20.png`,
+`state-35.png` e `state-50.png` preservam a sessão; as de 20 e 50 s mostram o
+perfil com cadeado e o modal “Enter Pass Code / Enter your Xbox Live pass code”.
+Às 17:25:30.437 o log registra `XamShowMessageBoxUI(FF, 40070DF0, 40070D80,
+0, 0, 0, 00020003, 7015F0F8, 7015F100)`. Em
+`external/rexglue-sdk/src/kernel/xam/xam_ui.cpp`, esse export só interpreta
+`flags & 0xF` para ícone e cria `MessageBoxDialog`. Não implementa a entrada
+especial solicitada por esse fluxo. `OnDraw` fecha por botões ImGui; aqui a
+lista está vazia, não há tratamento de B, e o popup não oferece fechamento.
+`xeXamDispatchDialog` aguarda a fence de fechamento antes de concluir o
+overlapped. A linha “running completion” às 17:25:30.537 indica entrada nessa
+espera, não conclusão bem-sucedida do pedido.
+
+Rastreamento estático do original local 17559, sem executar callbacks à parte:
+
+- Na dashboard, `928B4220` consulta o item selecionado (XUID/dispositivo),
+  verifica seu método virtual `+20` e, quando verdadeiro, copia a conta pelo
+  método `+52` e chama `92189268`. Este monta quatro símbolos a partir de
+  conta+56, solicita os textos 160/161, chama `XamShowMessageBoxUI` em
+  `92189384` com flags `0x00020003` e espera o overlapped em `92189398–921893C0`.
+  É o contrato compatível com a chamada e o modal observados. **A causa de o
+  perfil local entrar no ramo de pass code ainda não foi determinada**;
+  não se concluiu que a conta tenha senha configurada nem se alteraram flags
+  para forçar a passagem.
+- Na DLL `signin.xex`, a rota normal encontrada foi `90115EE8` (guarda
+  XUID/dispositivo selecionados) → tarefa/callback `901159C8` → método de
+  login `901183E0` → `XamUserLogonEx` em `90118720`. Isso é evidência estática,
+  não demonstra que A tenha executado essa tarefa na sessão acima.
+- A rota do host para essa DLL falhou antes: `original create scene ->
+  80070525, root=00010057` às 17:25:23.396, seguida de desmontagem e resultado
+  FE/21001=1627, estado=0. A tela visível da dashboard não comprova sucesso
+  desse host. A origem exata desse HRESULT permanece pendente; tarefas XAM
+  incompletas foram encontradas, mas não demonstradas como sua causa.
+
+Continuar pelo modal exigiria tratar o contrato de entrada, cancelamento e
+conclusão da UI XAM original, além de esclarecer o ramo de pass code; corrigir
+somente o serviço de login não desbloqueia a espera. A investigação foi
+interrompida nessa dependência, conforme o limite de escopo. Não foi acrescentado
+outro serviço, UI substituta, conclusão automática, notificação de login ou
+infraestrutura de perfis. Dashboard/GamerCard com o XUID conectado **não
+demonstrados**. A e B **reprovados na sessão manual**.
+
+Evidências privadas em `.local/runs/c74-original-confirm/`: capturas por script
+local, cópias do perfil, `binaries.txt` com hashes dos três binários utilizados e
+`rex.log` SHA-256
+`6FD8E1DD4D4FCFB694D5D2884CBB7D8A944C6263AB18EA8720A5B61647E5D40E`.
+Não foram executados testes unitários/backend, builds, suítes completas, jogos
+ou outra dashboard: nenhuma implementação mudou. Somente documentação de
+resultado/bloqueio foi alterada; Release publicada preservada, sem push.

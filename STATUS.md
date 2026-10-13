@@ -1,5 +1,16 @@
 # STATUS
 
+C7.4 (2026-10-13), **bloqueado; login original não entregue**: uma única
+execução manual de 58,153 s, a partir de `3d6045c`, mostrou `C73Local` e o
+modal “Enter Pass Code”. O usuário confirmou que A não entrou e B não fechou.
+A sessão isolada permaneceu desconectada, com arquivo idêntico antes/depois.
+O pedido real `XamShowMessageBoxUI` (`0x00020003`, zero botões) entra no
+modal genérico do SDK, sem tratamento desse modo de entrada/cancelamento;
+a conclusão overlapped depende de fechar esse modal. A rota separada do host
+`signin.xex` também falhou na criação com `80070525`. Dependências e limites
+em `docs/dashboard.md` §0.28. Investigação encerrada sem ampliar subsistemas,
+sem patch funcional, sem repetir backend/builds ou executar outra sessão.
+
 C7.3 (2026-10-13), **parcial; confirmação pela cena ainda não demonstrada**:
 patch 0042 conecta os imports de enumeração/consulta de conta do Sign-in original
 ao perfil persistido do 0041, preservando XUID de 64 bits. Uma execução dirigida
