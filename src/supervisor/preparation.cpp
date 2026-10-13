@@ -48,6 +48,15 @@ std::optional<std::string> CheckPreparation(const ProjectPaths& paths,
   };
   try {
     if (!IsSafeLabel(title) || manifest.empty()) return fail("Identidade do título ausente.");
+    // On Windows the preparation/Ninja producer owns this file with no sharing.
+    // Keep a reader open for the entire inspection, excluding replacement while
+    // hashes are collected. Legacy receipts still follow all C2 validations.
+    const auto lease_path = paths.local() / "preparation" / (title + ".lock");
+    std::ifstream build_lease;
+    if (fs::exists(lease_path)) {
+      build_lease.open(lease_path, std::ios::binary);
+      if (!build_lease) return fail("O título está sendo compilado; aguarde a preparação.");
+    }
     if (fs::exists(paths.local() / "preparation" / (title + ".incomplete")))
       return fail("A preparação anterior não terminou.");
     std::ifstream input(PreparationReceipt(exe), std::ios::binary);
@@ -118,6 +127,8 @@ std::optional<std::string> CheckPreparation(const ProjectPaths& paths,
       if (ext == ".dll" && !artifacts.contains(Key(file.path())))
         return fail("DLL sem identidade verificada: " + PathUtf8(file.path()));
     }
+    if (fs::exists(paths.local() / "preparation" / (title + ".incomplete")))
+      return fail("A preparação ainda não terminou.");
     return std::nullopt;
   } catch (const std::exception&) { return fail("Não foi possível verificar o recibo e suas dependências."); }
 }

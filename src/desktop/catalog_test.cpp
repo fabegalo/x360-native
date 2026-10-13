@@ -218,16 +218,21 @@ TEST_CASE("local receipts keep Castle Crashers dashboard and Iruka ready", "[.pr
   const char* root = std::getenv("X360N_TEST_PREPARED_ROOT"); REQUIRE(root);
   ProjectPaths paths{PathFromUtf8(root)};
   auto targets = ReadCatalog(paths);
+  const char* alternate = std::getenv("X360N_TEST_PREPARED_BUILDS");
+  const auto builds = alternate ? PathFromUtf8(alternate) : paths.build() / "titles";
   for (auto id : {"castle_crashers", "dash_17559"}) {
     CAPTURE(id);
     const auto target = std::find_if(targets.begin(), targets.end(), [&](const auto& t) { return t.id == id; });
     REQUIRE(target != targets.end());
-    auto state = Inspect(paths, *target);
+    auto selected = *target;
+    selected.exe = builds / id / (std::string(id) + ".exe");
+    for (auto& file : selected.runtime_files) file = selected.exe.parent_path() / file.filename();
+    auto state = Inspect(paths, selected);
     for (const auto& issue : state.issues) INFO(issue);
     CHECK(state.inputs_ok); CHECK(state.prepared);
   }
   CHECK_FALSE(CheckPreparation(paths, "iruka", paths.root / "titles/iruka/iruka_manifest.toml",
-      paths.build() / "titles/iruka/iruka.exe"));
+      builds / "iruka/iruka.exe"));
 }
 TEST_CASE("catalog is per target and accepts Unicode workspace paths") {
   Fixture f;

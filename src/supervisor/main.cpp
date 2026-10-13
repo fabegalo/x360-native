@@ -132,7 +132,8 @@ std::string ConfigPostfix(const std::string& config) {
 }
 
 fs::path RexglueExe(const ProjectPaths& p, const std::string& config) {
-  return p.sdk_out() / "win-amd64" / config / ("rexglue" + ConfigPostfix(config) + ".exe");
+  return p.build() / "win-amd64" / "rexglue-sdk" / "out" / "win-amd64" / config /
+         ("rexglue" + ConfigPostfix(config) + ".exe");
 }
 
 std::optional<std::string> GitHead(const ProjectPaths& p, const fs::path& repo) {
@@ -761,6 +762,19 @@ int main(int argc, char** argv) {
   }
   if (doctor->parsed()) return Doctor(*paths, config);
   if (session->parsed()) return Session(*paths, PathFromUtf8(session_manifest), session_timeout, separate_windows);
-  if (run->parsed()) return Run(*paths, PathFromUtf8(exe), child_args, label, timeout_s, rex_log, crash_stack);
+  if (run->parsed()) {
+    try {
+      // Session already owns this lease. Standalone prepared-title launches
+      // need the same exclusion, through validation and child lifetime.
+      const auto native = fs::absolute(PathFromUtf8(exe));
+      std::optional<WorkspaceLease> lease;
+      if (fs::exists(PreparationReceipt(native)) || IsWithin(native, paths->build() / "titles"))
+        lease.emplace(*paths);
+      return Run(*paths, PathFromUtf8(exe), child_args, label, timeout_s, rex_log, crash_stack);
+    } catch (const std::exception& e) {
+      fmt::print(stderr, "run: {}\n", e.what());
+      return kExitUsage;
+    }
+  }
   return kExitUsage;
 }

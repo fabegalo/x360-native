@@ -27,6 +27,11 @@ endfunction()
 
 # Call after the SDK has been added with add_subdirectory().
 function(x360n_apply_sdk_backports sdk_dir)
+    # One staging producer per destination, including hosts configured by the SDK.
+    set(REXGLUE_EXTERNAL_STAGING ON PARENT_SCOPE)
+    include(${CMAKE_CURRENT_FUNCTION_LIST_DIR}/x360n_build_isolation.cmake)
+    x360n_guard_ninja()
+
     if(WIN32 AND TARGET rexglue)
         # The preparation tool consumes the same UTF-8 manifest/file paths as
         # title processes. Do not change the machine's ANSI code page.
@@ -94,21 +99,37 @@ function(x360n_stage_runtime_dlls target)
             "LINKER:/MANIFESTINPUT:${CMAKE_CURRENT_FUNCTION_LIST_DIR}/x360n_runtime.manifest")
     endif()
     cmake_parse_arguments(ARG "" "" "PLUGIN_TARGETS" ${ARGN})
-    # For targets that link at least one DLL (rexruntime): copy_if_different
-    # needs a non-empty source list.
-    set(_cmds
-        COMMAND ${CMAKE_COMMAND} -E make_directory $<TARGET_FILE_DIR:${target}>
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_RUNTIME_DLLS:${target}>
-                $<TARGET_FILE_DIR:${target}>)
+    # All callers in this directory share one producer. Each configuration gets
+    # a generated staging script; no executable post-link copy competes with it.
+    string(SHA256 _key "${CMAKE_CURRENT_BINARY_DIR}")
+    set(_stage "x360n_stage_${_key}")
+    if(NOT TARGET ${_stage})
+        add_custom_target(${_stage}
+            COMMAND ${CMAKE_COMMAND} -P "${CMAKE_CURRENT_BINARY_DIR}/x360n-stage-$<CONFIG>.cmake"
+            COMMENT "x360n: staging runtime DLLs in ${CMAKE_CURRENT_BINARY_DIR}"
+            VERBATIM)
+        cmake_language(DEFER CALL x360n_finish_staging)
+    endif()
+    set_property(DIRECTORY APPEND PROPERTY X360N_STAGE_TARGETS ${target})
     foreach(_p IN LISTS ARG_PLUGIN_TARGETS)
-        list(APPEND _cmds COMMAND ${CMAKE_COMMAND} -E copy_if_different
-             $<TARGET_FILE:${_p}> $<TARGET_FILE_DIR:${target}>)
+        set_property(DIRECTORY APPEND PROPERTY X360N_STAGE_EXTRA "$<TARGET_FILE:${_p}>")
     endforeach()
-    add_custom_target(${target}_stage_dlls ${_cmds}
-        COMMENT "x360n: staging runtime DLLs next to ${target}"
-        COMMAND_EXPAND_LISTS VERBATIM)
-    # The DLLs are built first (rexruntime links the other SDK DLLs); the
-    # executable waits for the copy. TARGET_FILE_DIR adds no dependency (CMP0112).
-    add_dependencies(${target}_stage_dlls rexruntime ${ARG_PLUGIN_TARGETS})
-    add_dependencies(${target} ${target}_stage_dlls)
+    foreach(_fx amd_fidelityfx_vk amd_fidelityfx_dx12)
+        if(TARGET ${_fx})
+            set_property(DIRECTORY APPEND PROPERTY X360N_STAGE_EXTRA "$<TARGET_FILE:${_fx}>")
+            add_dependencies(${_stage} ${_fx})
+        endif()
+    endforeach()
+    add_dependencies(${_stage} rexruntime ${ARG_PLUGIN_TARGETS})
+    add_dependencies(${target} ${_stage})
+endfunction()
+
+function(x360n_finish_staging)
+    get_property(_targets DIRECTORY PROPERTY X360N_STAGE_TARGETS)
+    get_property(_extra DIRECTORY PROPERTY X360N_STAGE_EXTRA)
+    set(_content "")
+    foreach(_target IN LISTS _targets)
+        string(APPEND _content "set(sources \"$<TARGET_RUNTIME_DLLS:${_target}>;${_extra}\")\nset(destination \"$<TARGET_FILE_DIR:${_target}>\")\ninclude(\"${CMAKE_CURRENT_FUNCTION_LIST_DIR}/x360n_stage_files.cmake\")\n")
+    endforeach()
+    file(GENERATE OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/x360n-stage-$<CONFIG>.cmake" CONTENT "${_content}")
 endfunction()

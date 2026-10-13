@@ -1,8 +1,14 @@
 #include <catch2/catch_test_macros.hpp>
 #include "preparation_fixture.h"
 #include "child_process.h"
+#include "workspace_lease.h"
 #include "scratch.h"
 #include <chrono>
+#ifdef _WIN32
+#define WIN32_LEAN_AND_MEAN
+#define NOMINMAX
+#include <windows.h>
+#endif
 
 namespace fs = std::filesystem;
 using namespace x360n;
@@ -96,6 +102,20 @@ TEST_CASE("explicit alternate build remains bound to the registered title", "[pr
   std::ofstream(exe) << "wrong native version";
   CHECK(CheckPreparedLaunch(f.paths, exe));
 }
+#ifdef _WIN32
+TEST_CASE("inspection rejects the title producer lease and recovers after release", "[preparation]") {
+  Fixture f;
+  fs::create_directories(f.paths.local() / "preparation");
+  const auto file = f.paths.local() / "preparation/sample.lock";
+  auto owner = CreateFileW(file.c_str(), GENERIC_READ | GENERIC_WRITE, 0, nullptr,
+      OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+  REQUIRE(owner != INVALID_HANDLE_VALUE);
+  const auto error = f.Check();
+  CloseHandle(owner);
+  CHECK(error);
+  CHECK_FALSE(f.Check());
+}
+#endif
 TEST_CASE("supervisor blocks an exchanged executable or DLL before creating a child run", "[preparation][process]") {
   Fixture f;
   fs::copy_file(X360N_TEST_CHILD, f.exe, fs::copy_options::overwrite_existing); f.Sign();
@@ -112,6 +132,17 @@ TEST_CASE("supervisor blocks an exchanged executable or DLL before creating a ch
   }
   SECTION("different DLL") {
     fs::copy_file(X360N_TEST_CHILD, f.exe.parent_path() / "runtime.dll", fs::copy_options::overwrite_existing);
+    auto r = RunProcess(spec); CHECK(r.launched); CHECK(r.exit_code == 3); CHECK_FALSE(fs::exists(f.paths.runs()));
+  }
+  SECTION("build owns the environment") {
+    WorkspaceLease owner(f.paths);
+    auto r = RunProcess(spec); CHECK(r.launched); CHECK(r.exit_code == 3); CHECK_FALSE(fs::exists(f.paths.runs()));
+  }
+  SECTION("incomplete staging never launches even with unchanged final artifacts") {
+    fs::create_directories(f.paths.local() / "preparation");
+    std::ofstream(f.paths.local() / "preparation/sample.incomplete") << "incomplete";
+    std::ofstream(f.exe.parent_path() / "runtime.dll.stage-tmp") << "partial replacement";
+    CHECK(f.Check());
     auto r = RunProcess(spec); CHECK(r.launched); CHECK(r.exit_code == 3); CHECK_FALSE(fs::exists(f.paths.runs()));
   }
 }

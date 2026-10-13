@@ -12,6 +12,8 @@ enable_testing()
 # The distributable UI does not link or rebuild the title runtime.
 option(X360_DESKTOP_ONLY "Build the desktop distribution without the title SDK runtime" OFF)
 if(X360_DESKTOP_ONLY)
+    include(cmake/x360n_build_isolation.cmake)
+    x360n_guard_ninja()
     set(X360_REXGLUE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/external/rexglue-sdk" CACHE PATH "Pinned SDK dependency sources")
     set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
     file(READ "${CMAKE_CURRENT_SOURCE_DIR}/deps.lock.json" X360_LOCK)

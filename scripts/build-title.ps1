@@ -21,15 +21,16 @@ $env:PSModulePath = Join-Path $PSHOME 'Modules'
 [Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)
 $root = (Resolve-Path (Split-Path -Parent $PSScriptRoot)).Path
 . (Join-Path $PSScriptRoot 'preparation-receipt.ps1')
+. (Join-Path $PSScriptRoot 'build-lease.ps1')
 if ($Title -notmatch '^[a-z][a-z0-9_]*$') { throw "invalid title name '$Title'" }
 $titleDir = Join-Path $root "titles\$Title"
 if (-not (Test-Path (Join-Path $titleDir 'CMakePresets.json'))) { throw "no title project at $titleDir" }
 if (-not $BuildDir) { $BuildDir = ".local/build/titles/$Title" }
 $build = [IO.Path]::GetFullPath((Join-Path $root $BuildDir))
 New-Item -ItemType Directory -Force $build | Out-Null
-$leasePath = Join-Path $root '.local/environment.lock'
-try { $lease = [IO.File]::Open($leasePath, [IO.FileMode]::OpenOrCreate, [IO.FileAccess]::ReadWrite, [IO.FileShare]::None) }
-catch { throw 'Environment in use. Close the platform or other preparation and retry. Ambiente em uso; feche a plataforma e tente novamente.' }
+$lease = Enter-BuildLease $root $build $Title
+$previousOwnedBuild = $env:X360N_OWNED_BUILD
+$env:X360N_OWNED_BUILD = $build
 $marker = Join-Path $root ".local/preparation/$Title.incomplete"
 New-Item -ItemType Directory -Force (Split-Path $marker) | Out-Null
 [IO.File]::WriteAllText($marker, 'incomplete')
@@ -173,5 +174,9 @@ try {
             build_config = (Join-Path $build 'CMakeCache.txt') } }
     Publish-PreparationReceipt $receiptFile $receipt
     if (-not $KeepIncompleteMarker) { Remove-Item -LiteralPath $marker }
-} finally { Pop-Location; $lease.Dispose() }
+} finally {
+    Pop-Location
+    $env:X360N_OWNED_BUILD = $previousOwnedBuild
+    foreach ($handle in $lease) { $handle.Dispose() }
+}
 Write-Host "built: $(Join-Path $build "$Title.exe")"

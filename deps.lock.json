@@ -493,6 +493,19 @@
           "src/filesystem/devices/disc_image_device.cpp": "d04b038e79e6285b31350d525274380bacdf52e3fab8df744639fc131359b632"
         },
         "test": "tests/content/extract_disc_test.cpp: truncated headers, extreme sectors, bounded records, sibling/directory cycles, depth limit, valid nested and partition-relative extraction"
+      },
+      {
+        "file": "patches/rexglue-sdk/0038-build-local-sdk-outputs.patch",
+        "sha256": "b4c6a4fd27ee6ec4207cc2180aa7ca98b5b36f560484d608c59ea72b03e9d6b6",
+        "base_files": {
+          "cmake/rexglue_helpers.cmake": "5f376660b61bd95b122a03a93bab59e1b7b25434e3b703597fe982437b7adac3",
+          "CMakeLists.txt": "a83dd6b97e700271dd7d8b16537bdd560791f7ab497c2bfc12fa739914b0c888"
+        },
+        "files": {
+          "cmake/rexglue_helpers.cmake": "9b4a5408eb1e363be24e509f5b091ae13c48ff827f53020b49deac4472dfbec4",
+          "CMakeLists.txt": "32728b0c02bfd06d6bcddec55fd08f05c013cea1ea7e5dc1e777b195e85b589e"
+        },
+        "test": "C5: isolated parallel SDK builds and one atomic staging producer per destination"
       }
     ]
   },

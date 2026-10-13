@@ -9,6 +9,7 @@
 # Exit codes: 0 all levels pass, 1 a level failed, 77 prerequisites missing (skip).
 param(
     [string]$BuildDir = '.local/build/titles/iruka',
+    [string]$Supervisor = '.local/build/win-amd64/src/supervisor/Debug/x360n.exe',
     [int]$Seconds = 20
 )
 $ErrorActionPreference = 'Stop'
@@ -17,7 +18,7 @@ Set-Location $root
 
 $xexSha = '66ec34f2f558fe4e419d926108bf458a5c634ea8b5f76771b48ba633ecb61e31'
 $gameRoot = Join-Path $root '.local\inputs\titles\iruka\extracted'
-$x360n = Join-Path $root '.local\build\win-amd64\src\supervisor\Debug\x360n.exe'
+$x360n = Join-Path $root $Supervisor
 $exe = Join-Path (Join-Path $root $BuildDir) 'iruka.exe'
 
 foreach ($req in @($x360n, $exe, (Join-Path $gameRoot 'default.xex'))) {

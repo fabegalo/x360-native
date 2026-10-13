@@ -44,8 +44,6 @@ target_compile_options(x360n_ppc_smoke PRIVATE
     -UTRACY_ENABLE -UREXGLUE_ENABLE_PROFILING
     -UREXGLUE_ENABLE_PERF_COUNTERS -UREXGLUE_PROFILE_GUEST_FUNCTIONS
     -msse4.1 -mssse3)
-add_custom_command(TARGET x360n_ppc_smoke POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_RUNTIME_DLLS:x360n_ppc_smoke> $<TARGET_FILE_DIR:x360n_ppc_smoke>
-    COMMAND_EXPAND_LISTS)
+x360n_stage_runtime_dlls(x360n_ppc_smoke)
 catch_discover_tests(x360n_ppc_smoke TEST_PREFIX "x360n.ppc." PROPERTIES LABELS "project" TIMEOUT 60
     DISCOVERY_MODE PRE_TEST)

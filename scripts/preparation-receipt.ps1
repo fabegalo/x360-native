@@ -65,10 +65,11 @@ function Get-BuildInputs([string]$Root, [string]$Title, [string]$Build, [string[
         $full = (Resolve-BuildPath $Build $file)
         if ([IO.File]::Exists($full)) { [void]$files.Add($full) }
     }
-    foreach ($name in @('CMAKE_CXX_COMPILER','CMAKE_C_COMPILER','CMAKE_LINKER','CMAKE_AR','CMAKE_MAKE_PROGRAM','CMAKE_COMMAND','CMAKE_RC_COMPILER')) {
+    foreach ($name in @('CMAKE_CXX_COMPILER','CMAKE_C_COMPILER','CMAKE_LINKER','CMAKE_AR','CMAKE_MAKE_PROGRAM','X360N_REAL_NINJA','CMAKE_COMMAND','CMAKE_RC_COMPILER')) {
         if ($cache[$name] -and [IO.File]::Exists($cache[$name])) { [void]$files.Add([IO.Path]::GetFullPath($cache[$name])) }
     }
     foreach ($file in @('deps.lock.json','scripts/build-title.ps1','scripts/preparation-receipt.ps1','scripts/devshell.cmd',
+                       'scripts/build-lease.ps1','scripts/ninja-guard.ps1','cmake/x360n_stage_files.cmake',
                        "titles/$Title/CMakePresets.json", "titles/$Title/${Title}_manifest.toml")) {
         [void]$files.Add([IO.Path]::GetFullPath((Join-Path $Root $file)))
     }
