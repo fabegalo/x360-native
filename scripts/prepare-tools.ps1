@@ -2,6 +2,9 @@
 # Downloads are refused without explicit GUI/CLI consent; cached archives are reused.
 param([switch]$AllowDownloads, [switch]$ToolsOnly)
 $ErrorActionPreference = 'Stop'
+# Use this host's built-in modules even when launched from PowerShell 7.
+# An inherited PSModulePath can hide Windows PowerShell's Get-FileHash.
+$env:PSModulePath = Join-Path $PSHOME 'Modules'
 $root = (Resolve-Path (Split-Path -Parent $PSScriptRoot)).Path
 $tools = Join-Path $root '.local/toolchains'
 $cache = Join-Path $root '.local/downloads'

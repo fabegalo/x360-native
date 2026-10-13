@@ -2,6 +2,8 @@
 # The Microsoft installer owns elevation, license acceptance and component progress.
 param([switch]$AllowInstallation, [switch]$DownloadOnly)
 $ErrorActionPreference = 'Stop'
+# Do not inherit incompatible module versions from a parent PowerShell 7.
+$env:PSModulePath = Join-Path $PSHOME 'Modules'
 if (-not ($AllowInstallation -or $DownloadOnly)) { throw 'Explicit installation/download consent is required.' }
 $root = (Resolve-Path (Split-Path -Parent $PSScriptRoot)).Path
 $cache = Join-Path $root '.local/downloads'

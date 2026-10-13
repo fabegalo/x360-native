@@ -14,6 +14,8 @@ param(
     [string]$BuildDir
 )
 $ErrorActionPreference = 'Stop'
+# Preparation uses only modules shipped with the selected PowerShell host.
+$env:PSModulePath = Join-Path $PSHOME 'Modules'
 $root = (Resolve-Path (Split-Path -Parent $PSScriptRoot)).Path
 if ($Title -notmatch '^[a-z][a-z0-9_]*$') { throw "invalid title name '$Title'" }
 $titleDir = Join-Path $root "titles\$Title"
