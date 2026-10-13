@@ -2,6 +2,7 @@
 # CLI11) and fmt; does not link the ReXGlue runtime.
 add_library(x360n_core STATIC
     sha256.cpp
+    preparation.cpp
     xex_identity.cpp
     paths.cpp
     child_process.cpp
@@ -11,13 +12,14 @@ add_library(x360n_core STATIC
     workspace_lease.cpp
 )
 target_include_directories(x360n_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+target_include_directories(x360n_core SYSTEM PRIVATE ${X360_REXGLUE_DIR}/thirdparty/inja/third_party/include)
 target_include_directories(x360n_core SYSTEM PUBLIC
     ${X360_REXGLUE_DIR}/include
     ${X360_REXGLUE_DIR}/thirdparty/cli11/include)
 target_link_libraries(x360n_core PUBLIC fmt::fmt PRIVATE tomlplusplus)
 if(WIN32)
     # dbghelp: stack walk of a crashed child (x360n run --crash-stack); part of Windows.
-    target_link_libraries(x360n_core PUBLIC dbghelp user32 gdi32)
+    target_link_libraries(x360n_core PUBLIC dbghelp user32 gdi32 bcrypt)
 endif()
 target_compile_options(x360n_core PUBLIC -Wall -Wextra)
 target_compile_definitions(x360n_core PUBLIC

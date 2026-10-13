@@ -1,4 +1,5 @@
 #include "catalog.h"
+#include "preparation.h"
 #include "sha256.h"
 #include "workspace_lease.h"
 #include "xex_identity.h"
@@ -178,6 +179,10 @@ Inspection Inspect(const ProjectPaths& paths, const Target& t) {
     r.issues.push_back("Precisa preparar: " + Utf8(t.exe));
   } else {
     r.prepared = r.inputs_ok;
+    if (auto error = CheckPreparation(paths, t.id, t.manifest, t.exe)) {
+      r.prepared = false;
+      r.issues.push_back(*error);
+    }
   }
   for (const auto& file : t.runtime_files) {
     if (!fs::is_regular_file(file)) {

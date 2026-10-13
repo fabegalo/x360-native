@@ -2,6 +2,11 @@
 
 #include <fstream>
 #include <vector>
+#ifdef _WIN32
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+#include <bcrypt.h>
+#endif
 
 namespace x360n {
 namespace {
@@ -105,18 +110,45 @@ std::string Sha256Hex(std::span<const uint8_t> data) {
 std::optional<FileDigest> DigestFile(const std::filesystem::path& path) {
   std::ifstream in(path, std::ios::binary);
   if (!in) return std::nullopt;
+#ifdef _WIN32
+  // Preparation checks stream the compiler and full build dependency closure.
+  // Use Windows' SHA-256 implementation without a timestamp/hash cache, retaining
+  // the same digest contract and the portable implementation on other hosts.
+  struct Algorithm {
+    BCRYPT_ALG_HANDLE handle = nullptr;
+    Algorithm() { if (BCryptOpenAlgorithmProvider(&handle, BCRYPT_SHA256_ALGORITHM, nullptr, 0) < 0) handle = nullptr; }
+    ~Algorithm() { if (handle) BCryptCloseAlgorithmProvider(handle, 0); }
+  };
+  static const Algorithm algorithm;
+  struct Hash {
+    BCRYPT_HASH_HANDLE handle = nullptr;
+    ~Hash() { if (handle) BCryptDestroyHash(handle); }
+  } hash;
+  if (!algorithm.handle || BCryptCreateHash(algorithm.handle, &hash.handle, nullptr, 0, nullptr, 0, 0) < 0)
+    return std::nullopt;
+#else
   Sha256 h;
+#endif
   std::vector<uint8_t> buf(1 << 20);
   uint64_t size = 0;
   while (in) {
     in.read(reinterpret_cast<char*>(buf.data()), std::streamsize(buf.size()));
     auto n = size_t(in.gcount());
     if (n == 0) break;
+#ifdef _WIN32
+    if (BCryptHashData(hash.handle, buf.data(), static_cast<ULONG>(n), 0) < 0) return std::nullopt;
+#else
     h.Update({buf.data(), n});
+#endif
     size += n;
   }
   if (in.bad()) return std::nullopt;
+#ifdef _WIN32
+  std::array<uint8_t, 32> d{};
+  if (BCryptFinishHash(hash.handle, d.data(), static_cast<ULONG>(d.size()), 0) < 0) return std::nullopt;
+#else
   auto d = h.Finish();
+#endif
   return FileDigest{size, ToHex(d)};
 }
 

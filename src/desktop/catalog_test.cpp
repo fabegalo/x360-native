@@ -2,6 +2,7 @@
 #include "catalog.h"
 #include "sha256.h"
 #include "session_profile.h"
+#include "../../tests/supervisor/preparation_fixture.h"
 #include <chrono>
 #include <fstream>
 #include <cstdlib>
@@ -33,6 +34,12 @@ struct Fixture {
     Write(source / "dash.xex", "dashboard"); Write(source / "system/xam.xex", "module");
   }
   ~Fixture() { std::error_code ec; fs::remove_all(root, ec); }
+  void Receipt() {
+    target.manifest = root / "titles/dash_test/dash_test_manifest.toml";
+    Write(target.manifest, "[project]\nname='dash_test'\n[entrypoint]\nfile_path='../../.local/inputs/dashboard/test/dash.xex'\n");
+    WriteTestReceipt(paths, target.id, target.manifest, target.exe,
+        {target.inputs[0].destination, target.inputs[1].destination});
+  }
 };
 }
 
@@ -85,7 +92,10 @@ TEST_CASE("catalog routing can describe an absent game but execution still rejec
   LaunchRequest request; request.path = Utf8(profile.xex); CHECK_FALSE(MatchesLaunch(profile, request));
   Write(profile.xex, "game"); CHECK(MatchesLaunch(profile, request));
   CHECK_THROWS(LoadSessionProfile(f.paths, manifest));
-  Write(profile.exe, "synthetic executable"); CHECK_NOTHROW(LoadSessionProfile(f.paths, manifest));
+  Write(profile.exe, "synthetic executable");
+  CHECK_THROWS(LoadSessionProfile(f.paths, manifest));
+  WriteTestReceipt(f.paths, "sample", manifest, profile.exe, {profile.xex});
+  CHECK_NOTHROW(LoadSessionProfile(f.paths, manifest));
   Write(profile.xex, "changed game"); CHECK_THROWS(LoadSessionProfile(f.paths, manifest));
 }
 
@@ -141,6 +151,8 @@ TEST_CASE("import preserves originals and aliases only a matching module") {
   auto state = Inspect(f.paths, f.target);
   CHECK(state.inputs_ok); CHECK_FALSE(state.prepared);
   Write(f.target.exe, "synthetic build fixture");
+  CHECK_FALSE(Inspect(f.paths, f.target).prepared);
+  f.Receipt();
   CHECK(Inspect(f.paths, f.target).prepared);
 }
 TEST_CASE("wrong module version rejects the entire import before writing") {
@@ -188,9 +200,34 @@ TEST_CASE("interrupted copy is preserved and import resumes with verified bytes"
 }
 TEST_CASE("modified imported module disables prepared state") {
   Fixture f; Import(f.paths, f.target, f.source); Write(f.target.exe, "build fixture");
+  f.Receipt();
   REQUIRE(Inspect(f.paths, f.target).prepared);
   Write(f.target.inputs[1].destination, "wrong module");
   CHECK_FALSE(Inspect(f.paths, f.target).prepared);
+}
+TEST_CASE("catalog requires the receipt and rejects replaced native artifacts") {
+  Fixture f; Import(f.paths, f.target, f.source); Write(f.target.exe, "build fixture");
+  CHECK_FALSE(Inspect(f.paths, f.target).prepared);
+  f.Receipt(); REQUIRE(Inspect(f.paths, f.target).prepared);
+  Write(f.target.exe, "other version");
+  auto state = Inspect(f.paths, f.target);
+  CHECK(state.inputs_ok); CHECK_FALSE(state.prepared);
+  REQUIRE_FALSE(state.issues.empty()); CHECK(state.issues.front().find("prepare novamente") != std::string::npos);
+}
+TEST_CASE("local receipts keep Castle Crashers dashboard and Iruka ready", "[.preparation-local]") {
+  const char* root = std::getenv("X360N_TEST_PREPARED_ROOT"); REQUIRE(root);
+  ProjectPaths paths{PathFromUtf8(root)};
+  auto targets = ReadCatalog(paths);
+  for (auto id : {"castle_crashers", "dash_17559"}) {
+    CAPTURE(id);
+    const auto target = std::find_if(targets.begin(), targets.end(), [&](const auto& t) { return t.id == id; });
+    REQUIRE(target != targets.end());
+    auto state = Inspect(paths, *target);
+    for (const auto& issue : state.issues) INFO(issue);
+    CHECK(state.inputs_ok); CHECK(state.prepared);
+  }
+  CHECK_FALSE(CheckPreparation(paths, "iruka", paths.root / "titles/iruka/iruka_manifest.toml",
+      paths.build() / "titles/iruka/iruka.exe"));
 }
 TEST_CASE("catalog is per target and accepts Unicode workspace paths") {
   Fixture f;
@@ -214,6 +251,7 @@ TEST_CASE("missing runtime and interrupted build never qualify an old exe as pre
   f.target.runtime_files = {f.target.exe.parent_path() / "runtime.dll"};
   CHECK_FALSE(Inspect(f.paths, f.target).prepared);
   Write(f.target.runtime_files.front(), "runtime fixture");
+  f.Receipt();
   REQUIRE(Inspect(f.paths, f.target).prepared);
   Write(PreparationMarker(f.paths, f.target), "incomplete");
   CHECK_FALSE(Inspect(f.paths, f.target).prepared);

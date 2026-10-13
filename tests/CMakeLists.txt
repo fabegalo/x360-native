@@ -22,6 +22,7 @@ add_executable(x360n_tests
     supervisor/report_test.cpp
     supervisor/process_test.cpp
     supervisor/session_test.cpp
+    supervisor/preparation_test.cpp
 )
 target_link_libraries(x360n_tests PRIVATE x360n_core Catch2::Catch2WithMain)
 target_compile_definitions(x360n_tests PRIVATE
@@ -41,6 +42,11 @@ target_sources(x360n_tests PRIVATE content/extraction_manifest_test.cpp
 target_compile_definitions(x360n_tests PRIVATE X360N_CONTENT_EXE="$<TARGET_FILE:x360n-content>")
 add_dependencies(x360n_tests x360n-content)
 catch_discover_tests(x360n_tests TEST_PREFIX "x360n." PROPERTIES LABELS "project" TIMEOUT 120)
+if(WIN32)
+  add_test(NAME x360n.preparation-receipt-publication COMMAND powershell -NoProfile -ExecutionPolicy Bypass
+    -File ${CMAKE_CURRENT_SOURCE_DIR}/supervisor/preparation_receipt_test.ps1)
+  set_tests_properties(x360n.preparation-receipt-publication PROPERTIES LABELS project TIMEOUT 60)
+endif()
 
 # Integration tests over user-supplied content in .local/inputs.
 add_executable(x360n_local_tests local/inputs_test.cpp local/avatar_pack_test.cpp

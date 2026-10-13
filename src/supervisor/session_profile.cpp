@@ -1,5 +1,6 @@
 #include "session_profile.h"
 #include "sha256.h"
+#include "preparation.h"
 #include <stdexcept>
 #include <fstream>
 #include <toml++/toml.hpp>
@@ -29,6 +30,7 @@ SessionProfile LoadSessionProfile(const ProjectPaths& paths, const std::filesyst
     if (auto error = CheckLaunchable(paths, p.exe)) throw std::runtime_error(*error);
     auto digest = DigestFile(p.xex);
     if (!digest || digest->sha256 != p.sha256) throw std::runtime_error("XEX hash mismatch: " + PathUtf8(p.xex));
+    if (auto error = CheckPreparation(paths, p.name, manifest, p.exe)) throw std::runtime_error(*error);
   }
   const auto relative = p.xex.lexically_relative(p.game_root);
   if (relative.empty() || relative.is_absolute() || *relative.begin() == ".." ||

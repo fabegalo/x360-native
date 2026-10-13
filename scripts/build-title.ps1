@@ -17,7 +17,10 @@ param(
 $ErrorActionPreference = 'Stop'
 # Preparation uses only modules shipped with the selected PowerShell host.
 $env:PSModulePath = Join-Path $PSHOME 'Modules'
+# Ninja emits UTF-8 dependency paths, including on Windows PowerShell 5.1.
+[Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)
 $root = (Resolve-Path (Split-Path -Parent $PSScriptRoot)).Path
+. (Join-Path $PSScriptRoot 'preparation-receipt.ps1')
 if ($Title -notmatch '^[a-z][a-z0-9_]*$') { throw "invalid title name '$Title'" }
 $titleDir = Join-Path $root "titles\$Title"
 if (-not (Test-Path (Join-Path $titleDir 'CMakePresets.json'))) { throw "no title project at $titleDir" }
@@ -31,16 +34,89 @@ $marker = Join-Path $root ".local/preparation/$Title.incomplete"
 New-Item -ItemType Directory -Force (Split-Path $marker) | Out-Null
 [IO.File]::WriteAllText($marker, 'incomplete')
 $devshell = Join-Path $root 'scripts\devshell.cmd'
+$exe = Join-Path $build "$Title.exe"
+$manifest = Join-Path $titleDir "${Title}_manifest.toml"
+$receiptFile = "$exe.preparation.json"
+$previous = Get-PreviousReceipt $receiptFile $Title $manifest $exe
+$reuse = $previous -and (Test-ReceiptEntries @($previous.inputs + $previous.artifacts)) -and (Test-ReceiptGlobs $previous.globs)
+if ($reuse) {
+    $head = & git -C (Join-Path $root 'external/rexglue-sdk') rev-parse HEAD
+    $reuse = $LASTEXITCODE -eq 0 -and $head.Trim() -eq $previous.sdk_commit
+}
+$sourceSnapshot = @()
 
 $steps = @(
     @{ name = '1-configure';  args = "cmake --preset x360n-win-amd64 -B `"$build`"" },
-    @{ name = '2-codegen';    args = "cmake --build `"$build`" --target ${Title}_codegen" },
+    @{ name = '2-tool';       args = "cmake --build `"$build`" --target rexglue" },
+    @{ name = '2-codegen';    args = '' },
     @{ name = '3-reconfigure'; args = "cmake --preset x360n-win-amd64 -B `"$build`"" },
     @{ name = '4-build';      args = "cmake --build `"$build`"" }
 )
 Push-Location $titleDir
 try {
+    if ($reuse) {
+        # A verified final build needs no relink from unverified intermediates or
+        # mutable shared SDK outputs. Keep the exact certified producer/products.
+        if (-not $KeepIncompleteMarker) { Remove-Item -LiteralPath $marker }
+        Write-Host "reused verified preparation: $exe"
+        return
+    }
     foreach ($s in $steps) {
+        if ($s.name -eq '2-tool') {
+            $cache = Get-BuildCache $build
+            if (-not $reuse) {
+                # Native objects cannot be trusted after an uncertified build or
+                # a content change with preserved mtime. Keep SDK codegen stamps:
+                # its per-module input hashes still select the necessary modules.
+                $rules = @(& $cache.CMAKE_MAKE_PROGRAM -C $build -t rules | Where-Object { $_ -match '(_COMPILER__|_LINKER__)' })
+                & $cache.CMAKE_MAKE_PROGRAM -C $build -t clean -r @rules
+                if ($LASTEXITCODE) { throw 'Cannot invalidate stale native products' }
+                # Embedded templates and other custom outputs also require a
+                # content-safe rebuild when input mtimes were preserved.
+                $generated = @(& $cache.CMAKE_MAKE_PROGRAM -C $build -t targets rule CUSTOM_COMMAND)
+                if ($LASTEXITCODE) { throw 'Cannot identify generated build products' }
+                Reset-GeneratedBuildOutputs $build $generated
+            }
+            $sourceSnapshot = @(Get-ReceiptEntries @(Get-BuildInputs $root $Title $build @($Title) | Where-Object {
+                [IO.File]::Exists($_) -and
+                -not $_.StartsWith($build, [StringComparison]::OrdinalIgnoreCase) -and
+                -not $_.StartsWith((Join-Path $titleDir 'generated'), [StringComparison]::OrdinalIgnoreCase)
+            }))
+        }
+        if ($s.name -eq '2-codegen') {
+            $tool = @(Get-NinjaNodes $build @('rexglue') | Where-Object { $_ -match '[\\/]rexglue[^\\/]*\.exe$' })[0]
+            if (-not $tool) { throw 'Codegen executable missing from build graph' }
+            # Keep the exact producer used by this preparation. The SDK's shared
+            # output directory is replaced by other title builds (C5); provenance
+            # must not depend on that mutable staging location. Its source and
+            # compiler dependency closure is still checked by the receipt.
+            $producerDir = Join-Path $build '.preparation/codegen'
+            [void][IO.Directory]::CreateDirectory($producerDir)
+            $producerFiles = @($tool) + @(Get-NinjaNodes $build @('rexglue') | Where-Object { $_ -match '\.dll$' -and [IO.File]::Exists($_) })
+            $copies = foreach ($file in $producerFiles) {
+                $copy = Join-Path $producerDir ([IO.Path]::GetFileName($file))
+                if (-not [IO.File]::Exists($copy) -or (Get-ReceiptHash $copy) -ne (Get-ReceiptHash $file)) { [IO.File]::Copy($file, $copy, $true) }
+                $copy
+            }
+            $tool = Join-Path $producerDir ([IO.Path]::GetFileName($tool))
+            $producer = @(Get-ReceiptEntries $copies)
+            $sameProducer = $previous -and $previous.producer -and (Test-ReceiptEntries $previous.producer)
+            # Codegen's sdkVersion alone is not a producer identity. Force only
+            # this title when the actual producer changes or has no provenance.
+            $ignore = if ($sameProducer) { '' } else { '--ignore-stamp' }
+            if ($sameProducer) {
+                foreach ($entry in $previous.inputs) {
+                    if ($entry.path.StartsWith((Join-Path $titleDir 'generated'), [StringComparison]::OrdinalIgnoreCase) -and
+                        (-not [IO.File]::Exists($entry.path) -or (Get-ReceiptHash $entry.path) -ne $entry.sha256)) {
+                        $stamp = Join-Path (Split-Path $entry.path) 'codegen.stamp'
+                        if ([IO.File]::Exists($stamp)) { [IO.File]::Delete($stamp) }
+                    }
+                }
+            }
+            # Invoke even when Ninja's timestamp test says up-to-date: SDK hashes
+            # the XEX and analysis and skips unchanged modules by content.
+            $s.args = "`"$tool`" codegen `"$manifest`" $ignore"
+        }
         Write-Output "X360N_STAGE $Title $($s.name)"
         $log = Join-Path $build "x360n-build-$($s.name).log"
         $sw = [Diagnostics.Stopwatch]::StartNew()
@@ -52,7 +128,7 @@ try {
         Write-Host ("step {0}: exit {1} in {2} s (log {3})" -f $s.name, $rc, [int]$sw.Elapsed.TotalSeconds, $log)
         if ($rc -ne 0) {
             Get-Content $log | Select-String -Pattern 'error|FAILED' | Select-Object -First 10 | Out-Host
-            exit $rc
+            throw "Preparation failed at $($s.name), exit $rc"
         }
         if ($s.name -in @('1-configure', '3-reconfigure')) {
             # CMake 3.31's __create_def calls CreateFileW without converting long
@@ -80,6 +156,22 @@ try {
             }
         }
     }
+    if (-not (Test-ReceiptEntries $sourceSnapshot)) { throw 'An input changed during preparation; prepare again. No receipt published.' }
+    $inputs = @(Get-ReceiptEntries @(Get-BuildInputs $root $Title $build @($Title)))
+    $dllOutputs = @(Get-NinjaNodes $build @($Title) | Where-Object { $_ -match '\.dll$' } | Sort-Object -Unique)
+    $artifacts = @(Get-PreparedArtifacts $build $exe $dllOutputs | Sort-Object path -Unique)
+    $sdkCommit = (& git -C (Join-Path $root 'external/rexglue-sdk') rev-parse HEAD).Trim()
+    if ($LASTEXITCODE) { throw 'Cannot identify SDK revision' }
+    $globs = @(Get-BuildGlobs $build)
+    if (-not (Test-ReceiptGlobs $globs)) { throw 'Build source inventory changed; prepare again. No receipt published.' }
+    if (-not (Test-ReceiptEntries $sourceSnapshot) -or -not (Test-ReceiptEntries $producer)) {
+        throw 'Inputs or codegen changed while collecting the receipt; prepare again. No receipt published.'
+    }
+    $receipt = @{ schema = 1; title = $Title; manifest = $manifest; exe = $exe; sdk_commit = $sdkCommit; globs = $globs;
+        inputs = @($inputs + $producer | Sort-Object path -Unique); artifacts = $artifacts; producer = $producer;
+        roles = @{ compiler = (Get-BuildCache $build).CMAKE_CXX_COMPILER; codegen = $tool;
+            build_config = (Join-Path $build 'CMakeCache.txt') } }
+    Publish-PreparationReceipt $receiptFile $receipt
+    if (-not $KeepIncompleteMarker) { Remove-Item -LiteralPath $marker }
 } finally { Pop-Location; $lease.Dispose() }
-if (-not $KeepIncompleteMarker) { Remove-Item -LiteralPath $marker }
 Write-Host "built: $(Join-Path $build "$Title.exe")"

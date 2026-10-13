@@ -20,6 +20,7 @@
 #include <fmt/format.h>
 
 #include "paths.h"
+#include "preparation.h"
 #include "child_process.h"
 #include "report.h"
 #include "sha256.h"
@@ -416,6 +417,10 @@ int Run(const ProjectPaths& p, const fs::path& exe_in, std::vector<std::string> 
         std::string label, int timeout_s, bool rex_log, bool crash_stack,
         fs::path* handoff = nullptr, SessionWindow* window = nullptr) {
   fs::path exe = fs::absolute(exe_in);
+  if (auto why = CheckPreparedLaunch(p, exe)) {
+    fmt::print(stderr, "run: {}\n", *why);
+    return kExitUsage;
+  }
   if (auto why = CheckLaunchable(p, exe)) {
     fmt::print(stderr, "run: {}\n", *why);
     return kExitUsage;
