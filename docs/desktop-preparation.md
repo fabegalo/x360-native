@@ -110,3 +110,11 @@ instalado). O ensaio com PATH restrito valida abertura/importação independente
 não substitui instalação limpa. STFS/ISO na interface, capas/metadados de todo o
 catálogo e equivalência visual com produto final seguem pendentes. Nenhuma release
 ou push foi feito; runtime, jogos e frente de avatares não foram recompilados.
+Entrega consolidada: `0.1.0-preview.8`, código `67214d4`, ZIP SHA-256
+`dc771db3bf13692272ab8d22a27248b7a02882b66236cd3c9b21e01f320f607f`.
+Abertura vazia, navegação, biblioteca vazia, seleção/importação real de arquivo e
+painel com os seis componentes faltantes foram novamente executados nesse ZIP
+fora do repositório. Capturas em `.local/packages/x360-native-*-preview8.png`
+na árvore principal, sem conteúdo proprietário na imagem. O teste adicional de
+importação real do pacote passou com 19 asserções; o backend não mudou entre
+preview.7 e preview.8. Nenhum ciclo de jogo novo é reivindicado por esse teste.

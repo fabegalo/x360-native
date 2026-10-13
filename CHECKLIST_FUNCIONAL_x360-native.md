@@ -330,7 +330,7 @@ O requisito é **um download principal por sistema/arquitetura suportados**, nã
 - [ ] Verificar sistema, arquitetura, recursos gráficos, espaço, permissões e dependências relevantes.
 - [ ] Oferecer mensagens compreensíveis; PT-BR e inglês são os idiomas iniciais planejados.
 - [x] Permitir seleção visual das pastas de conteúdo e dados — ambiente e armazenamento persistidos; mudar seleção não move nem apaga saves antigos.
-- [x] Importar por seleção de arquivos/pastas e, quando apropriado, arrastar e soltar — pastas extraídas da 17559 e Castle Crashers; handler de arrastar/soltar implementado. STFS pelo assistente e outros conjuntos continuam pendentes.
+- [x] Importar por seleção de arquivos/pastas e, quando apropriado, arrastar e soltar — arquivos individuais e pastas extraídas, com importação incremental; arquivo e pasta da 17559 testados pela GUI do ZIP independente. Biblioteca vazia não exibe títulos apenas cadastrados. Handler de arrastar/soltar implementado. STFS pelo assistente e outros conjuntos continuam pendentes.
 - [x] Identificar automaticamente versões e componentes — identidade XEX nos perfis conhecidos; pasta contendo várias versões é recusada como ambígua. Não identifica todo o acervo.
 - [ ] Dispensar edição manual de TOML/JSON, renomeação de arquivos e montagem manual da estrutura de pastas.
 - [x] Informar arquivo ausente, incompatível ou corrompido com ação concreta para prosseguir — componentes dos perfis de preparação são conferidos por SHA-256; DLL ausente e preparação interrompida impedem estado pronto. Isso não valida todos os assets de um jogo.
