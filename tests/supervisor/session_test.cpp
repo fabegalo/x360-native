@@ -39,9 +39,11 @@ TEST_CASE("session profile and launch request preserve Unicode paths", "[session
   auto manifest = dir / "profile.toml";
   std::ofstream(manifest) << "[project]\nname = 'test'\ngame_root = '.local/inputs'\n"
     "[entrypoint]\nfile_path = '.local/inputs/default.xex'\n"
-    "[x360n]\nnative_exe = '.local/build/test.exe'\nuser_data_root = '.local/user'\nxex_sha256 = '" << DigestFile(xex)->sha256 << "'\n";
+    "[x360n]\nnative_exe = '.local/build/test.exe'\nuser_data_root = '.local/user'\nxex_sha256 = '" << DigestFile(xex)->sha256 << "'\n"
+    "[library]\ntitle_id = '12345678'\ncontent_type = '000D0000'\nfile_name = 'content'\n";
   auto profile = LoadSessionProfile(ProjectPaths{dir}, manifest);
   CHECK(profile.exe == fs::canonical(exe));
+  CHECK(profile.library_relative_xex == fs::path("0000000000000000/12345678/000D0000/content/default.xex"));
   LaunchRequest request; request.path = PathUtf8(xex);
   CHECK(MatchesLaunch(profile, request));
   CHECK(PathFromUtf8(PathUtf8(dir)) == dir);
@@ -77,6 +79,17 @@ TEST_CASE("session launch requires matching path and exact XEX bytes", "[session
   request.path = (dir / "missing.xex").string(); CHECK_FALSE(MatchesLaunch(profile, request));
   auto other = dir / "other.xex"; fs::copy_file(file, other);
   request.path = other.string(); CHECK_FALSE(MatchesLaunch(profile, request));
+  profile.library_relative_xex = "0000000000000000/12345678/000D0000/content/default.xex";
+  const auto library = dir / "user/dashboard";
+  const auto installed = library / profile.library_relative_xex;
+  fs::create_directories(installed.parent_path()); fs::copy_file(file, installed);
+  request.path = installed.string();
+  CHECK_FALSE(MatchesLaunch(profile, request));
+  CHECK(MatchesLaunch(profile, request, library));
+  CHECK_FALSE(MatchesLaunch(profile, request, dir / "another-dashboard"));
+  request.path = other.string(); CHECK_FALSE(MatchesLaunch(profile, request, library));
+  request.path = installed.string(); std::ofstream(installed) << "wrong version";
+  CHECK_FALSE(MatchesLaunch(profile, request, library));
   request.path = file.string(); std::ofstream(file) << "different fixture";
   CHECK_FALSE(MatchesLaunch(profile, request));
   request.kind = LaunchRequest::WindowClose; CHECK_FALSE(MatchesLaunch(profile, request));

@@ -673,7 +673,7 @@ int Session(const ProjectPaths& paths, const fs::path& manifest, int timeout, bo
         continue;
       }
       auto target = std::find_if(targets.begin(), targets.end(),
-          [&](const auto& profile) { return MatchesLaunch(profile, request); });
+          [&](const auto& profile) { return MatchesLaunch(profile, request, dashboard.user_root); });
       if (target == targets.end()) {
         fmt::print(stderr, "session: no verified AOT profile for {} (flags {:08X})\n",
                    request.path, request.flags);

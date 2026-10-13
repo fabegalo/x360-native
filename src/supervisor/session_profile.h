@@ -5,6 +5,7 @@
 namespace x360n {
 struct SessionProfile {
   std::filesystem::path manifest, exe, xex, game_root, user_root;
+  std::filesystem::path library_relative_xex;
   std::string name, sha256;
   std::vector<std::string> args;
   std::vector<std::filesystem::path> launch_targets;
@@ -13,5 +14,6 @@ struct SessionProfile {
 // Catalog reads retain routing metadata; execution always validates the files.
 SessionProfile LoadSessionProfile(const ProjectPaths& paths, const std::filesystem::path& manifest,
                                   bool validate_execution = true);
-bool MatchesLaunch(const SessionProfile& profile, const LaunchRequest& request);
+bool MatchesLaunch(const SessionProfile& profile, const LaunchRequest& request,
+                   const std::filesystem::path& dashboard_user_root = {});
 }

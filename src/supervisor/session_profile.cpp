@@ -34,6 +34,17 @@ SessionProfile LoadSessionProfile(const ProjectPaths& paths, const std::filesyst
   if (relative.empty() || relative.is_absolute() || *relative.begin() == ".." ||
       (validate_execution && !IsWithin(p.xex, p.game_root)))
     throw std::runtime_error("XEX outside profile game root");
+  if (auto library = table["library"].as_table()) {
+    const auto title = text((*library)["title_id"]);
+    const auto type = text((*library)["content_type"]);
+    const auto name = text((*library)["file_name"]);
+    for (const auto& id : {title, type})
+      if (id.size() != 8 || id.find_first_not_of("0123456789ABCDEF") != std::string::npos)
+        throw std::runtime_error("invalid library identity");
+    if (!IsSafePackageEntryName(name) || name.size() > 42)
+      throw std::runtime_error("invalid library content name");
+    p.library_relative_xex = std::filesystem::path("0000000000000000") / title / type / name / relative;
+  }
   if (auto array = table["x360n"]["args"].as_array())
     for (const auto& value : *array) {
       auto arg = text(value);
@@ -56,11 +67,29 @@ SessionProfile LoadSessionProfile(const ProjectPaths& paths, const std::filesyst
   }
   return p;
 }
-bool MatchesLaunch(const SessionProfile& p, const LaunchRequest& request) {
+bool MatchesLaunch(const SessionProfile& p, const LaunchRequest& request,
+                   const std::filesystem::path& dashboard_user_root) {
   if (request.kind != LaunchRequest::Image || request.flags != 0) return false;
+  auto native = [](const std::filesystem::path& file) -> std::filesystem::path {
+#ifdef _WIN32
+    auto name = std::filesystem::absolute(file).lexically_normal().make_preferred().native();
+    if (name.starts_with(L"\\\\?\\")) return name;
+    if (name.starts_with(L"\\\\")) return L"\\\\?\\UNC\\" + name.substr(2);
+    return L"\\\\?\\" + name;
+#else
+    return file;
+#endif
+  };
   std::error_code ec;
-  const auto path = PathFromUtf8(request.path);
-  if (!std::filesystem::equivalent(p.xex, path, ec) || ec) return false;
+  const auto path = native(PathFromUtf8(request.path));
+  bool matches = std::filesystem::equivalent(native(p.xex), path, ec) && !ec;
+  // Normal library installs are verified copies, not junctions to the import.
+  // Permit only this profile's registered content address in this dashboard.
+  if (!matches && !dashboard_user_root.empty() && !p.library_relative_xex.empty()) {
+    ec.clear();
+    matches = std::filesystem::equivalent(native(dashboard_user_root / p.library_relative_xex), path, ec) && !ec;
+  }
+  if (!matches) return false;
   auto digest = DigestFile(path);
   return digest && digest->sha256 == p.sha256;
 }
