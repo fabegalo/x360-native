@@ -93,10 +93,11 @@ foreach ($component in @('fmt','cli11','tomlplusplus','inja')) { Copy-Item -Lite
 # Keep the effective compiler commands as reviewable evidence, with portable
 # logical roots. They describe this fresh build, not a second preparation cache.
 $commands = Get-Content -Raw -LiteralPath (Join-Path $build 'compile_commands.json') | ConvertFrom-Json
+$rcCompiler = ((Get-Content -LiteralPath (Join-Path $build 'CMakeCache.txt') | Where-Object { $_ -match '^CMAKE_RC_COMPILER:FILEPATH=' }) -replace '^CMAKE_RC_COMPILER:FILEPATH=', '')
 $portableCommands = @($commands | ForEach-Object {
     $entry = $_ | ConvertTo-Json -Compress
-    foreach ($mapping in @(@($source, '<source>'), @($build, '<build>'), @($llvm, '<llvm>'))) {
-        $entry = $entry.Replace($mapping[0].Replace('\','/'), $mapping[1]).Replace($mapping[0].Replace('\','\\'), $mapping[1])
+    foreach ($mapping in @(@($source, '<source>'), @($build, '<build>'), @($llvm, '<llvm>'), @($rcCompiler, '<windows-sdk>/rc.exe'))) {
+        $entry = $entry.Replace($mapping[0].Replace('\','/'), $mapping[1]).Replace($mapping[0].Replace('/','\').Replace('\','\\'), $mapping[1])
     }
     if ($entry -match '(?i)[a-z]:[/\\]') { throw 'Absolute developer path in distribution build evidence' }
     $entry | ConvertFrom-Json
@@ -131,7 +132,7 @@ $metadata = [ordered]@{
     schema = 2; version = $Version; platform = 'windows-x64'; commit = $head
     payload_sha256 = Hash (Join-Path $payload 'payload.sha256')
     sdk_commit = $lock.rexglue_sdk.commit; patches = @($lock.rexglue_sdk.patches | ForEach-Object { [ordered]@{ file = $_.file; sha256 = $_.sha256 } })
-    dependencies = $dependencies; compiler = [ordered]@{ version = $compilerVersion; sha256 = Hash $clang }
+    dependencies = $dependencies; compiler = [ordered]@{ version = $compilerVersion; sha256 = Hash $clang }; resource_compiler_sha256 = Hash $rcCompiler
     configuration = 'Release'; desktop_only = $true; compiler_flags = '-march=x86-64-v2 -ffile-prefix-map=<source>=/x360-source'; linker_flags = '-Wl,/Brepro'
     publication = 'blocked-C10'; clean_windows = 'pending'
 }
