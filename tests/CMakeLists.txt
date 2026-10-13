@@ -49,6 +49,9 @@ if(WIN32)
   add_test(NAME x360n.preparation-receipt-publication COMMAND powershell -NoProfile -ExecutionPolicy Bypass
     -File ${CMAKE_CURRENT_SOURCE_DIR}/supervisor/preparation_receipt_test.ps1)
   set_tests_properties(x360n.preparation-receipt-publication PROPERTIES LABELS project TIMEOUT 60)
+  add_test(NAME x360n.ppc.compile-contract COMMAND powershell -NoProfile -ExecutionPolicy Bypass
+    -File ${CMAKE_CURRENT_SOURCE_DIR}/ppc_contract/contract_test.ps1)
+  set_tests_properties(x360n.ppc.compile-contract PROPERTIES LABELS project TIMEOUT 180)
 endif()
 
 # Integration tests over user-supplied content in .local/inputs.

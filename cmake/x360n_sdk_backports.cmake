@@ -27,6 +27,11 @@ endfunction()
 
 # Call after the SDK has been added with add_subdirectory().
 function(x360n_apply_sdk_backports sdk_dir)
+    include(${CMAKE_CURRENT_FUNCTION_LIST_DIR}/x360n_ppc.cmake)
+    cmake_language(DEFER CALL x360n_configure_generated_ppc)
+    if(TARGET ppc_tests)
+        target_link_libraries(ppc_tests PRIVATE x360n_ppc_options)
+    endif()
     # One staging producer per destination, including hosts configured by the SDK.
     set(REXGLUE_EXTERNAL_STAGING ON PARENT_SCOPE)
     include(${CMAKE_CURRENT_FUNCTION_LIST_DIR}/x360n_build_isolation.cmake)

@@ -59,8 +59,11 @@ function Get-BuildInputs([string]$Root, [string]$Title, [string]$Build, [string[
             [void]$files.Add((Resolve-BuildPath $Build $line.Substring(4)))
         }
     }
-    $configs = & $cache.CMAKE_MAKE_PROGRAM -C $Build -t inputs build.ninja
-    if ($LASTEXITCODE) { throw 'Cannot read configuration dependencies' }
+    # CMake declares its input files as phony outputs too. Ninja -t inputs
+    # follows those empty edges and drops the files. Keep all graph nodes so
+    # changing a compile option in an included .cmake invalidates the receipt
+    # before configure, even when its mtime is preserved.
+    $configs = @(Get-NinjaNodes $Build @('build.ninja'))
     foreach ($file in $configs) {
         $full = (Resolve-BuildPath $Build $file)
         if ([IO.File]::Exists($full)) { [void]$files.Add($full) }
