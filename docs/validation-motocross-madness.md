@@ -155,3 +155,16 @@ válidos. Sonda com zero falhas; 46 verificações sintéticas LDI novas passara
 Initialize permanece em `0xFFFFFFFF`; GetAssets agregado/export e renderização
 pendentes. Nenhuma suíte anterior repetida; detalhes e limites na seção 12 de
 `docs/avatar-system.md`. Toda a execução ficou na worktree de avatares.
+
+### Incremento isolado: resultado agregado e ciclo de vida (2026-10-12)
+
+`20261013T015915Z-mm-avatars-aggregate-1`: `0x81967628` inicializou o agregado;
+`0x81966FC8/0x819669A0` montaram Power Tee + MaleBody pelo worker e stream LDI
+originais; `0x819660A0/0x81966348` finalizaram dois descritores e 71 ossos.
+Ponteiros/IDs/limites/propriedade/ABI aprovados. Cancelamento e erro AOT real no
+segundo asset descartaram a saída privada; liberação/polling terminal conferidos.
+Novo coordenador compartilhado C++ com 61 verificações sintéticas aprovadas.
+Nenhuma suíte anterior repetida. Build final passou. Export GetAssets/overlapped,
+protocolo 2, componentes especiais/modificadores e renderização continuam
+pendentes; Initialize mantém `0xFFFFFFFF`. Perfil diagnóstico 4, forma neutra,
+apenas na x360-avatars. Evidência, comando e limites em `docs/avatar-system.md` §13.

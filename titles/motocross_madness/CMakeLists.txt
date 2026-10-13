@@ -25,6 +25,8 @@ set(MOTOCROSSMADNESS_SOURCES
     src/xam_aot_probe.cpp
     ../common/avatar/avatar_toc.cpp
     ../common/avatar/avatar_metadata.cpp
+    ../common/avatar/avatar_assets_request.cpp
+    ../common/avatar/avatar_aot_assets.cpp
     ../common/camera_state.cpp
     ../common/launch_handoff.cpp
 )
@@ -62,4 +64,14 @@ if(X360N_LDI_CHECKS)
     target_link_libraries(x360n_ldi_checks PRIVATE rexruntime)
     x360n_stage_runtime_dlls(x360n_ldi_checks)
     add_test(NAME sdkcheck.LDI COMMAND x360n_ldi_checks)
+endif()
+
+# Standalone lifecycle checks; independent of LDI and the existing avatar suites.
+option(X360N_AVATAR_ASSETS_CHECKS "Build avatar request lifecycle checks" OFF)
+if(X360N_AVATAR_ASSETS_CHECKS)
+    enable_testing()
+    add_executable(x360n_avatar_assets_checks
+        ../../tests/avatar/assets_request_test.cpp
+        ../common/avatar/avatar_assets_request.cpp)
+    add_test(NAME avatar.AssetsRequest COMMAND x360n_avatar_assets_checks)
 endif()

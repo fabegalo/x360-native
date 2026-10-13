@@ -3,14 +3,15 @@
 Atualizado em 2026-10-12. Marcos: **M0 feito**; **M1 feito para um XEX** (amostra
 XDK "Dolphin" da `rexglue/demo-iruka`), com as limitações abaixo.
 
-Frente isolada de avatares (`x360-avatars`, `avatars/xam-aot`): o leitor original
-XAM 17559 montou 589 assets do campo 3, com 634 malhas e 1619 texturas; callbacks
-reais de layout/tiling do Motocross e bytes tiled validados. Transporte LZX usa
-biblioteca existente do SDK. Patch 0035 implementa o perfil LDI com workspace do
-chamador e reset por bloco: 46 verificações sintéticas novas; stream comprimido
-original e worker `0x81966450` aprovados em três assets. `GetAssets` completo e
-renderização continuam pendentes; Initialize mantém falha. Main não integrada.
-Evidência e limites: [avatares, seção 12](docs/avatar-system.md#12-imports-ldi-e-worker-original-de-getassets-2026-10-12).
+Frente isolada de avatares (`x360-avatars`, `avatars/xam-aot`): leitor/worker
+original e imports LDI agora ligados ao resultado agregado e ciclo de vida C++.
+Power Tee + MaleBody geraram dois descritores e 71 ossos; conclusão, cancelamento,
+erro real no segundo asset e propriedade dos buffers validados. Nova suíte de
+ciclo de vida: 61 verificações aprovadas; suítes anteriores não repetidas.
+Perfil diagnóstico 4/forma neutra. GetAssets export/overlapped, protocolo 2,
+componentes especiais/modificadores e renderização ainda pendentes.
+Initialize mantém falha; main não integrada. Evidência e limites:
+[avatares, seção 13](docs/avatar-system.md#13-resultado-agregado-e-ciclo-de-vida-getassets-2026-10-12).
 
 ## Funciona (com evidência)
 

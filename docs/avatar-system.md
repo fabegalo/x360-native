@@ -579,3 +579,89 @@ preservando conclusão/cancelamento e propriedade dos buffers. As camadas
 `0x81966FC8`/`0x819669A0` e o formato agregado dos protocolos 2/4 ainda não foram
 exercitados nesta etapa. Sem sucesso artificial no Initialize, avatar renderizado
 ou alegação de `GetAssets` completo.
+
+## 13. Resultado agregado e ciclo de vida GetAssets (2026-10-12)
+
+Incremento apenas na `x360-avatars`, branch `avatars/xam-aot`. Novos componentes
+compartilhados em `titles/common/avatar/avatar_assets_request.*` e
+`avatar_aot_assets.*`; nenhuma alteração de SDK ou de `Initialize` nesta etapa.
+
+O coordenador C++ `AssetsRequest` executa preparação → decodificação de todos os
+assets → aplicação dos campos dependentes → finalização. Uma chamada `Step`
+executa uma fase/asset. O status fica pendente (`0x8000000A`) até a finalização;
+endereços do resultado só ficam visíveis após sucesso. Falhas mantêm o HRESULT
+recebido e liberam toda a montagem privada. Cancelamento cooperativo entre passos
+retorna `0x80004004`, sem publicar saída parcial. Polling de estado terminal não
+reexecuta o AOT. `Release` é idempotente; a destruição libera inclusive requisições
+pendentes. Endereços publicados são emprestados até `Release`/destruição, e todos
+os buffers (CPU, GPU, scratch, LDI, controle e cópias de entrada) pertencem à
+requisição. O catálogo e o runtime precisam sobreviver a ela.
+
+### Backend original e resultado
+
+O adaptador experimental aceita protocolo **4**, componentes comuns com máscara
+única, corpo 1/2 e forma corporal neutra explícita. Resolve IDs pelo catálogo,
+rejeita categorias repetidas/especial `0x1000`, verifica enquadramento STRB e
+reserva capacidades por `ResultSizeFor`, que permanece C++. Usa os blobs
+comprimidos originais, copiados para memória privada; não há inflação prévia
+substituindo o stream original. Materiais são fornecidos explicitamente.
+
+- `0x81965FD0`: inicializa o contexto privado de transformação.
+- **`0x81967628`**: monta o resultado agregado e os cursores CPU/GPU. Cabeçalho
+  de 20 bytes: ponteiro do esqueleto, objeto especial, quantidade, referências
+  (13 × 32 bytes), descritores (13 × 52 bytes). Reserva 6928 bytes para esqueleto.
+- **`0x81966FC8` → `0x819669A0` → `0x81966450`**: valida documento/categoria/corpo,
+  acrescenta referência e descritor, decodifica malhas/texturas via stream LDI
+  original e aplica materiais usando callbacks reais do jogo. O aumento de
+  contagem feito pelo AOT antes do worker permanece privado em caso de erro.
+- `0x819672F8`: conexão da segunda fase para assets que sinalizem campo 4,
+  executada somente depois de todos os descritores estarem presentes. **Não
+  exercitada com asset real nesta etapa**: nenhum blob do catálogo inspecionado
+  contém simultaneamente campos 3 e 4. A ordem/erros/cancelamento dessa fase foram
+  testados com backend sintético; assets exclusivamente modificadores continuam
+  fora do perfil aceito.
+- **`0x819660A0` → `0x81975C00`**, seguido de **`0x81966348`**: cria o esqueleto
+  com forma neutra e remove descritores vazios antes da publicação.
+
+Somente durante cada passo AOT, são instalados protocolo 4 em `0x81B4B238` e a
+tabela real de callbacks em `0x81A975CC`; ambos são restaurados por escopo. Isso
+é válido para a sonda síncrona na thread do jogo, **não é sincronização suficiente
+para um serviço SDK concorrente**. Nenhum gerenciador global ou DllMain foi iniciado.
+
+### Evidência nova
+
+Opção exclusiva `--motocross_xam_aot_probe_aggregate=true`, junto à opção principal
+do probe. Execução **`20261013T015915Z-mm-avatars-aggregate-1`**, zero falhas:
+
+- Registros **72 (Power Tee) e 0 (MaleBody)**, nessa ordem, geraram um único
+  resultado com **dois descritores e 71 ossos**, HRESULT 0. Seleção diagnóstica:
+  materiais 22–24, RGB 0.5/alfa 1; não é o avatar de um usuário.
+- Referências/IDs, categorias, contagem, ausência de sobreposição entre assets,
+  ponteiros de malhas/texturas e esqueleto dentro dos buffers compartilhados,
+  cursores, sentinelas e preservação das entradas conferidos. Não é comprovação
+  visual nem nova validação completa dos bytes de malhas/texturas já testados.
+- Cancelamento antes da preparação, após um asset e após ambos; destruição
+  pendente; liberação repetida; polling após conclusão/falha. Nenhuma saída
+  parcial publicada, nenhuma alocação privada remanescente nesses casos.
+- GUID alterado **só na cópia privada do segundo asset**: o próprio AOT devolveu
+  `0x80004005`, preservado pelo coordenador, descartando também o primeiro asset.
+  Protocolo 2 rejeitado antes de alocar/executar; não há fallback silencioso.
+- Zero violações da ABI verificada; tabela/protocolo/contexto do jogo restaurados.
+  `XamAvatarInitialize` continuou retornando **`0xFFFFFFFF`**. Supervisor encerrou
+  após 45 s, com os quatro erros XCTD/devkit e quatro stubs de voz conhecidos.
+
+Teste novo `tests/avatar/assets_request_test.cpp`, alvo
+`x360n_avatar_assets_checks`, CTest `avatar.AssetsRequest`: **61 verificações,
+zero falhas**. Cobre ordem de aplicação após todos os decodes, erro em cada fase,
+cancelamento em cada fronteira, rejeição de sucesso sem buffers, contagem inválida,
+backend nulo e propriedade/liberação. Disponível no projeto raiz e no build do
+Motocross com `-DX360N_AVATAR_ASSETS_CHECKS=ON`; log local
+`.local/aggregate-lifecycle-result.log`. Build incremental final aprovado.
+Suítes anteriores de tamanhos, STRB, cores, malhas e imports LDI não foram repetidas.
+
+**Próximo bloqueio concreto:** conectar o serviço C++ ao contrato do export
+`XamAvatarGetAssets`/overlapped e a um estado de inicialização realmente funcional,
+incluindo concorrência e buffers do chamador. O export continua stub. Ainda faltam
+protocolo 2, componente especial `0x1000`, modificadores independentes/campo 4 com
+dados reais, forma corporal não neutra e renderização. O sucesso demonstrado é do
+resultado privado no perfil acima; não constitui `GetAssets` completo do jogo.

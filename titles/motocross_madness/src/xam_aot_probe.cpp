@@ -45,6 +45,7 @@
 #include <string>
 #include <vector>
 
+#include "../../common/avatar/avatar_aot_assets.h"
 #include "../../common/avatar/avatar_metadata.h"
 #include "../../common/avatar/avatar_toc.h"
 #include "../../dash_17559/src/experimental_region.h"
@@ -75,6 +76,9 @@ REXCVAR_DEFINE_BOOL(motocross_xam_aot_probe_meshes, false, "Motocross Madness",
 REXCVAR_DEFINE_BOOL(motocross_xam_aot_probe_ldi, false, "Motocross Madness",
                     "Diagnostic: original compressed stream and per-asset "
                     "GetAssets worker only");
+
+REXCVAR_DEFINE_BOOL(motocross_xam_aot_probe_aggregate, false, "Motocross Madness",
+                    "Diagnostic: aggregate result and request lifecycle only" );
 
 namespace {
 
@@ -1059,6 +1063,166 @@ void RunLdiAssets(const x360n::avatar::AvatarToc& toc,
                     assets, seeks, abi, g_mesh_callback_abi));
 }
 
+// Only the new aggregate/lifecycle route, with original compressed assets.
+void RunAggregateAssets(const x360n::avatar::AvatarToc& toc, uint32_t callbacks) {
+  using namespace x360n::avatar;
+  auto* rt = rex::Runtime::instance();
+  auto* m = rt->memory();
+  auto* d = rt->function_dispatcher();
+  auto* t = rex::runtime::ThreadState::Get();
+  uint32_t abi = 0, calls = 0;
+  const auto saved_protocol = MeshBE(m->TranslateVirtual<const uint8_t*>(0x81B4B238));
+  std::array<uint8_t, 20> saved_callbacks{};
+  std::memcpy(saved_callbacks.data(), m->TranslateVirtual(0x81A975CC), 20);
+  bool corrupt_second = false;
+  uint32_t decode_calls = 0;
+  AvatarAotCall call = [&](uint32_t fn, std::initializer_list<uint64_t> args) {
+    ++calls;
+    uint8_t* corrupt = nullptr;
+    uint8_t original = 0;
+    if (fn == 0x81966FC8 && ++decode_calls == 2 && corrupt_second) {
+      const auto selection = uint32_t(*(args.begin() + 1));
+      const auto source = MeshBE(m->TranslateVirtual<const uint8_t*>(selection + 400));
+      // Corrupt only the private copy's GUID, after one asset already populated
+      // the aggregate. The actual AOT entry must reject it; no injected HRESULT.
+      corrupt = m->TranslateVirtual<uint8_t*>(source + 8);
+      original = *corrupt;
+      *corrupt ^= 0x80;
+    }
+    auto hr = uint32_t(CallQuiet(d, t, fn, args, &abi));
+    if (corrupt) *corrupt = original;
+    if (fn == 0x81967628 || fn == 0x81966FC8 || fn == 0x819672F8)
+      REXLOG_INFO("xam-aot-probe: aggregate: fn={:08X} HRESULT={:08X}", fn, hr);
+    return hr;
+  };
+  std::vector<AssetSelection> selection;
+  for (size_t index : {size_t(72), size_t(0)}) {
+    AssetSelection s;
+    s.id = {toc.record(index).field_00, uint16_t(index), 0,
+            toc.Opaque(index)[0], AssetStampFor(toc)};
+    for (size_t i = 0; i < 3; ++i)
+      s.materials[i] = {uint32_t(22 + i), {0.5f, 0.5f, 0.5f, 1.0f}};
+    selection.push_back(s);
+  }
+  auto make = [&](AotAssetsStats& stats, uint32_t protocol = 4) {
+    decode_calls = 0;
+    return MakeAotAssetsBackend(*m, call, toc, selection, protocol, 1,
+                                callbacks, stats);
+  };
+  auto drain = [&](AssetsRequest& request) {
+    bool unpublished = true;
+    for (int i = 0; i < 32 && request.status() == kAssetsPending; ++i) {
+      unpublished &= request.result().result == 0;
+      request.Step();
+    }
+    Check(unpublished && request.status() != kAssetsPending,
+          "aggregate: partial output stays private; bounded completion");
+  };
+  AotAssetsStats success;
+  {
+    AssetsRequest request(make(success));
+    drain(request);
+    auto result = request.result();
+    bool aggregate = request.status() == 0 && result.result && result.gpu;
+    uint32_t count = 0, bones = 0;
+    if (aggregate) {
+      const auto* root = m->TranslateVirtual<const uint8_t*>(result.result);
+      count = MeshBE(root + 8);
+      bones = MeshBE(m->TranslateVirtual<const uint8_t*>(MeshBE(root)));
+      aggregate &= count == 2 && bones > 0 && success.decoded == 2 &&
+                   success.finalized == 1;
+      const auto refs = MeshBE(root + 12), descriptors = MeshBE(root + 16);
+      uint32_t last_cpu_end = 0, last_gpu_end = 0;
+      for (uint32_t i = 0; aggregate && i < 2; ++i) {
+        const auto id = selection[i].id.ToBytes();
+        const auto* ref = m->TranslateVirtual<const uint8_t*>(refs + i * 32);
+        const auto* desc =
+            m->TranslateVirtual<const uint8_t*>(descriptors + i * 52);
+        const auto cpu = MeshBE(desc + 28), gpu = MeshBE(desc + 32);
+        aggregate &= !std::memcmp(ref, id.data(), 16) && cpu >= last_cpu_end &&
+                     gpu >= last_gpu_end;
+        last_cpu_end = cpu + MeshBE(desc);
+        last_gpu_end = gpu + MeshBE(desc + 4);
+      }
+    }
+    Check(aggregate,
+          fmt::format("aggregate: HRESULT={:08X}, assets={}, bones={}, "
+                      "decoded={}, field4={}, finalized={}",
+                      request.status(), count, bones, success.decoded,
+                      success.applied, success.finalized));
+    const auto before = calls;
+    request.Step();
+    request.Cancel();
+    Check(calls == before && request.result().result == result.result,
+          "aggregate: terminal polling/cancel do not rerun or release the "
+          "result");
+    request.Release();
+    request.Release();
+    Check(!request.result().result && success.allocations == success.frees &&
+              success.guards,
+          "aggregate: explicit release frees all buffers exactly once");
+  }
+  for (int steps : {0, 2, 3}) {
+    AotAssetsStats stats;
+    AssetsRequest request(make(stats));
+    for (int i = 0; i < steps; ++i) request.Step();
+    const bool pending = request.status() == kAssetsPending;
+    request.Cancel();
+    const auto before = calls;
+    request.Cancel();
+    request.Step();
+    Check(pending && request.status() == kAssetsAbort &&
+              !request.result().result && calls == before &&
+              stats.allocations == stats.frees && stats.guards &&
+              stats.finalized == 0,
+          fmt::format("aggregate: cancel after {} steps discards partial "
+                      "result ({} assets)",
+                      steps, stats.decoded));
+  }
+  AotAssetsStats failed;
+  {
+    corrupt_second = true;
+    AssetsRequest request(make(failed));
+    drain(request);
+    const auto before = calls;
+    request.Step();
+    Check(request.state() == AssetsRequest::State::Failed &&
+              request.status() == kAssetsFailure && failed.decoded == 2 &&
+              !request.result().result && failed.allocations == failed.frees &&
+              calls == before && failed.finalized == 0 && failed.guards,
+          "aggregate: real AOT error on second asset discards first asset and "
+          "preserves HRESULT");
+    corrupt_second = false;
+  }
+  AotAssetsStats unsupported;
+  {
+    AssetsRequest request(make(unsupported, 2));
+    const auto before = calls;
+    request.Step();
+    Check(request.status() == kAssetsInvalid && !unsupported.allocations &&
+              calls == before,
+          "aggregate: unsupported protocol rejected before guest allocation or "
+          "execution");
+  }
+  AotAssetsStats abandoned;
+  {
+    AssetsRequest request(make(abandoned));
+    request.Step();
+    request.Step();
+  }
+  Check(abandoned.decoded == 1 && abandoned.allocations == abandoned.frees &&
+            abandoned.guards,
+        "aggregate: destruction of pending request releases private output");
+  Check(abi == 0 &&
+            MeshBE(m->TranslateVirtual<const uint8_t*>(0x81B4B238)) ==
+                saved_protocol &&
+            !std::memcmp(saved_callbacks.data(),
+                         m->TranslateVirtual(0x81A975CC), 20),
+        fmt::format(
+            "aggregate: ABI breaks={}; protocol and callback table restored",
+            abi));
+}
+
 void Run(uint32_t game_callbacks) {
   auto* runtime = rex::Runtime::instance();
   auto* thread = rex::runtime::ThreadState::Get();
@@ -1072,16 +1236,21 @@ void Run(uint32_t game_callbacks) {
   const std::string root = REXCVAR_GET(x360n_xam17559_root);
   const std::string catalog_path = REXCVAR_GET(x360n_avatar_catalog_17559);
   if (root.empty() || catalog_path.empty()) {
-    Check(false, "--x360n_xam17559_root and --x360n_avatar_catalog_17559 are required");
+    Check(
+        false,
+        "--x360n_xam17559_root and --x360n_avatar_catalog_17559 are required");
     return;
   }
 
-  // Mount and load. Name lookups of "xam.xex" still reach the SDK's kernel module
-  // first (KernelState::GetModule searches kernel modules before user modules).
-  auto device = std::make_unique<rex::filesystem::HostPathDevice>("\\Device\\X360nSystem17559",
-                                                                   root, true);
-  const bool mounted = device->Initialize() && ks->file_system()->RegisterDevice(std::move(device)) &&
-                       ks->file_system()->RegisterSymbolicLink("x360nsys:", "\\Device\\X360nSystem17559");
+  // Mount and load. Name lookups of "xam.xex" still reach the SDK's kernel
+  // module first (KernelState::GetModule searches kernel modules before user
+  // modules).
+  auto device = std::make_unique<rex::filesystem::HostPathDevice>(
+      "\\Device\\X360nSystem17559", root, true);
+  const bool mounted = device->Initialize() &&
+                       ks->file_system()->RegisterDevice(std::move(device)) &&
+                       ks->file_system()->RegisterSymbolicLink(
+                           "x360nsys:", "\\Device\\X360nSystem17559");
   Check(mounted, "mount " + root + " as x360nsys: (read-only)");
   if (!mounted) return;
   auto module = ks->LoadUserModule("x360nsys:\\xam.xex", false);
@@ -1091,14 +1260,15 @@ void Run(uint32_t game_callbacks) {
   const uint32_t size = module->xex_module()->image_size();
   g_xam_hmodule = module->hmodule_ptr();
   Check(base == kXamBase && size == kXamSize,
-        fmt::format("load: image 0x{:08X}+0x{:X} (expected 0x{:08X}+0x{:X})", base, size, kXamBase,
-                    kXamSize));
+        fmt::format("load: image 0x{:08X}+0x{:X} (expected 0x{:08X}+0x{:X})",
+                    base, size, kXamBase, kXamSize));
 
-  if (REXCVAR_GET(motocross_xam_aot_probe_meshes) || REXCVAR_GET(motocross_xam_aot_probe_ldi)) {
+  if (REXCVAR_GET(motocross_xam_aot_probe_aggregate) || REXCVAR_GET(motocross_xam_aot_probe_meshes) || REXCVAR_GET(motocross_xam_aot_probe_ldi)) {
     std::string error;
     auto toc = x360n::avatar::AvatarToc::Parse(Slurp(catalog_path), &error);
     if (!toc) { Check(false, "meshes: catalog: " + error); return; }
-    if (REXCVAR_GET(motocross_xam_aot_probe_ldi)) RunLdiAssets(*toc, game_callbacks);
+    if (REXCVAR_GET(motocross_xam_aot_probe_aggregate)) RunAggregateAssets(*toc, game_callbacks);
+    else if (REXCVAR_GET(motocross_xam_aot_probe_ldi)) RunLdiAssets(*toc, game_callbacks);
     else RunMeshes(*toc, game_callbacks);
     return;
   }
@@ -1292,7 +1462,7 @@ void MaybeRunXamAotProbe(PPCRegister& r3, PPCRegister& r4, PPCRegister& r5, PPCR
   PPCContext saved = *thread->context();
   Run(uint32_t(saved.r6.u64));
   if (REXCVAR_GET(motocross_xam_aot_probe_initialize) &&
-      !REXCVAR_GET(motocross_xam_aot_probe_meshes) && !REXCVAR_GET(motocross_xam_aot_probe_ldi)) {
+      !REXCVAR_GET(motocross_xam_aot_probe_aggregate) && !REXCVAR_GET(motocross_xam_aot_probe_meshes) && !REXCVAR_GET(motocross_xam_aot_probe_ldi)) {
     *thread->context() = saved;
     RunOriginalInitialize(saved.r3, saved.r4, saved.r5, saved.r6, uint32_t(saved.r8.u64));
   }
