@@ -477,6 +477,18 @@ A extração usa uma pasta exclusiva da operação, suporta cancelamento e nunca
 
 Validação inicial: 55 casos/20.628 verificações da suíte desktop, incluindo ISO/CON/LIVE/PIRS sintéticos, pastas Unicode, truncamento, cancelamento, tentativa interrompida, inventário incompleto e troca/ausência do extrator. C1/C3 no `x360n-content`: 15 casos/318 verificações; o teste de hardlink exige execução fora do sandbox restrito. Os oito checks de recibos locais C2 permaneceram válidos para Iruka, Castle e 17559 sem rebuild de títulos. Importação do pacote LIVE real de Castle em ambiente isolado: nove verificações, original e sentinela de save preservados.
 
+Pacote final com extração: revisão `8051f31887fbf056f10c92c24f68469167b4c173`, `.local/packages/c4-extraction-final/x360-native-0.1.0-preview.5-windows-x64.zip` (2.816.093 bytes). Substitui o candidato de E9; commits posteriores deste relatório não integram o payload.
+
+- SHA-256 ZIP: `1a9fe7b1acb86d6da1bc5adf15ad43c9cc2453f745a73ec6ef9b77bc0d41a20c`.
+- SHA-256 do índice do payload: `6d4a58de491dbe74aeff154ea6bd79ddaa1f50bfbc5c57e95acd800213d5ff6e`.
+- Reprodução: `.local/packages/c4-extraction-final-repeat/`, ZIP idêntico. Builds paralelos exclusivos `e582d8323499410f8bd33ccff2c2516f` e `26f6b9ce395c49189d3b529b15ad9246`; 55 casos/20.628 verificações passaram em ambos. Nenhuma DLL externa ao Windows é necessária ao extrator distribuído.
+- Aceitação fora do repositório: `%LOCALAPPDATA%/Temp/x360-c4-20261013/extraction-final/`, 301 arquivos indexados verificados e identidade do payload conferida; PATH limitado ao Windows. Instalação nova + atualização anterior com interrupção/retomada: 43 verificações. Conteúdo original de Castle/17559, perfil e save sentinelas preservados; preparações ausentes não aparecem prontas. Evidência `.local/audit/extract-final-acceptance.log`.
+- Castle LIVE real, usando o extrator do ZIP: importação completa em ambiente isolado, nove verificações, original/save preservados. Motocross LIVE real: 55 arquivos com hashes idênticos ao inventário estabelecido, oito verificações; não é nova compatibilidade de preparação gráfica.
+- ISO real de Forza Horizon, extraída fora do repositório: 2.432 arquivos idênticos ao inventário anterior e ISO original inalterada, oito verificações (`.local/audit/extract-iso-real.log`). O extrator usado é byte a byte idêntico ao empacotado, conferido na aceitação final. Isso valida extração, não execução de Forza.
+- Os negativos (DLL estrangeira, executáveis/extrator substituídos, payload/extrator incompletos, atualização interrompida, preparação incompatível, imagens truncadas, cancelamento e importação incompleta) permanecem recusados pelos testes; nenhum recebe estado pronto.
+
+O primeiro empacotamento desta extensão foi retido porque o aviso do SIMDe chama-se `COPYING`; o script foi corrigido antes da geração final. A primeira asserção de tamanho da amostra Motocross esperava mais de 100 arquivos, embora seus 55 hashes já coincidissem; o teste passou a exigir inventário não vazio e igualdade integral, sendo repetido com o extrator do ZIP. As regressões de execução de E9 continuam sendo a evidência de Iruka/Castle/17559; não houve alteração de runtime nem novo codegen nesta extensão.
+
 Limites: ZIP/RAR/7z devem ser descompactados primeiro. Extrair não adiciona compatibilidade de execução: somente versões com preparação no catálogo podem ser importadas como prontas para preparar. Motocross não possui perfil de preparação gráfica no catálogo atual. A aceitação gráfica final segue pendente após Escape do usuário; Windows limpo e C10 continuam bloqueadores de publicação.
 
 ## F. Próximas prioridades
