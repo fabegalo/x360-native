@@ -60,9 +60,9 @@ if (-not (Test-Path -LiteralPath (Join-Path $sdk '.git'))) {
     if (-not $AllowDownloads) { throw "Download consent required: ReXGlue SDK and its pinned submodules." }
     Stage 'download SDK'
     $stageSdk = Join-Path $root ('external/.sdk-' + [guid]::NewGuid().ToString('N'))
-    & $git clone --no-checkout $sdkLock.url $stageSdk
+    & $git -c core.longpaths=true clone --no-checkout $sdkLock.url $stageSdk
     if ($LASTEXITCODE -ne 0) { throw 'SDK clone failed; retry preparation.' }
-    & $git -C $stageSdk checkout --detach $sdkLock.commit
+    & $git -c core.longpaths=true -C $stageSdk checkout --detach $sdkLock.commit
     if ($LASTEXITCODE -ne 0) { throw 'Pinned SDK revision unavailable.' }
     Move-Item -LiteralPath $stageSdk -Destination $sdk
 }
@@ -74,7 +74,7 @@ if ($submodules | Where-Object { $_ -match '^[+U]' }) { throw 'SDK submodule rev
 if ($submodules | Where-Object { $_ -match '^-' }) {
     if (-not $AllowDownloads) { throw 'Download consent required for missing SDK dependencies.' }
     Stage 'download SDK dependencies'
-    & $git -C $sdk submodule update --init --recursive --jobs 8
+    & $git -c core.longpaths=true -C $sdk submodule update --init --recursive --jobs 8
     if ($LASTEXITCODE -ne 0) { throw 'SDK dependency download failed; retry preparation.' }
 }
 Stage 'verify SDK patches'
