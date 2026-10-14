@@ -17,7 +17,12 @@
 #include "../../titles/dash_17559/src/system_ui_request.h"
 
 extern "C" REX_FUNC(__imp__XamShowSigninUI);
+extern "C" REX_FUNC(__imp__XamShowGuideUI);
+extern "C" REX_FUNC(__imp__XamShowSigninUIp);
+extern "C" REX_FUNC(__imp__XamHudGetUserIndex);
 extern "C" REX_FUNC(__imp__XamShowGamerCardUI);
+extern "C" REX_FUNC(__imp__XamShowCreateProfileUI);
+extern "C" REX_FUNC(__imp__XamShowCreateProfileUIEx);
 extern "C" REX_FUNC(__imp__XamInputGetKeystrokeHud);
 extern "C" REX_FUNC(__imp__XamAppUnloadSelf);
 extern "C" REX_FUNC(__imp__XamEnableSystemAppInput);
@@ -44,6 +49,17 @@ TEST_CASE("Sign-in routes to its original application with the original user fie
   CHECK(card->user_offset == 0);
   CHECK(card->resource_id == 13);
   CHECK_FALSE(SystemUiApplicationFor(0x21002));
+  const auto* create = SystemUiApplicationFor(0x2100E);
+  REQUIRE(create);
+  CHECK(std::string(create->path) == "game:\\system\\createprofile.xex");
+  CHECK(create->request_size == 136);
+  CHECK(create->resource_id == 14);
+  const auto* guide = SystemUiApplicationFor(0x21015);
+  REQUIRE(guide);
+  CHECK(std::string(guide->path) == "game:\\system\\hud.xex");
+  CHECK(guide->request_size == 12);
+  CHECK(guide->user_offset == 4);
+  CHECK(guide->resource_id == 0);
 }
 
 TEST_CASE("Sign-in ANY_USER session preserves exclusivity and validates HUD Ex ABI", "[sdk][signin]") {
@@ -124,6 +140,29 @@ TEST_CASE("Sign-in ANY_USER session preserves exclusivity and validates HUD Ex A
   CHECK(xam->BeginSystemUi(0x1000, 0xFF, 0xFF));
   CHECK_FALSE(xam->GetSystemUiSession().close_requested);
   CHECK(xam->EndSystemUi(0x1000));
+  // Guide requests Sign-in for controller 0. XUI still polls ANY_USER;
+  // that query must be restricted to the session owner, not rejected.
+  REQUIRE(xam->BeginSystemUi(0x1000, 0xFF, 1));
+  REQUIRE(xam->EnableSystemUiInput(1, true));
+  REQUIRE(xam->SetSystemUiVisible(0x1000));
+  keyboard->OnKeyUp(key);
+  ctx.r3.u64 = 0xFF; ctx.r4.u64 = 0x20000000; ctx.r5.u64 = stroke;
+  __imp__XamInputGetKeystrokeHudEx(ctx, memory->virtual_membase());
+  CHECK(ctx.r3.u32 == 4306); // controller 1 cannot consume controller 0's event
+  REQUIRE(xam->EndSystemUi(0x1000));
+  REQUIRE(xam->BeginSystemUi(0x1000, 0xFF, 0));
+  REQUIRE(xam->EnableSystemUiInput(0xFF, true)); // original Sign-in enables all controllers
+  CHECK(xam->GetSystemUiSession().user == 0); // enable does not transfer ownership
+  REQUIRE(xam->SetSystemUiVisible(0x1000));
+  ctx.r3.u64 = 1; ctx.r4.u64 = 0x20000000; ctx.r5.u64 = stroke;
+  __imp__XamInputGetKeystrokeHudEx(ctx, memory->virtual_membase());
+  CHECK(ctx.r3.u32 == 4306);
+  ctx.r3.u64 = 0xFF; ctx.r4.u64 = 0x20000000; ctx.r5.u64 = stroke;
+  __imp__XamInputGetKeystrokeHudEx(ctx, memory->virtual_membase());
+  REQUIRE(ctx.r3.u32 == 0);
+  CHECK(actual->user_index == 0);
+  CHECK(actual->virtual_key == uint16_t(rex::ui::VirtualKey::kXInputPadB));
+  REQUIRE(xam->EndSystemUi(0x1000));
   memory->SystemHeapFree(stroke);
 }
 
@@ -168,8 +207,15 @@ TEST_CASE("System UI sessions isolate input and defer closure until the host rel
   CHECK_FALSE(xam->BeginSystemUi(0x1000, 0xFF, 0));
   CHECK_FALSE(xam->SetSystemUiVisible(0x2000));
   REQUIRE(xam->SetSystemUiVisible(0x1000));
+  CHECK_FALSE(xam->RequestSystemUiResume(0x2000));
+  REQUIRE(xam->RequestSystemUiResume(0x1000));
+  CHECK_FALSE(xam->ConsumeSystemUiResume(0x2000));
+  CHECK(xam->ConsumeSystemUiResume(0x1000));
+  CHECK_FALSE(xam->ConsumeSystemUiResume(0x1000));
   PPCContext ctx{};
   auto* base = rt.memory()->virtual_membase();
+  __imp__XamHudGetUserIndex(ctx, base);
+  CHECK(ctx.r3.u32 == 0);
   __imp__XamIsUIActive(ctx, base);
   CHECK(ctx.r3.u32 == 1);
   ctx.r3.u64 = 1; ctx.r4.u64 = 1;
@@ -211,6 +257,9 @@ TEST_CASE("System UI sessions isolate input and defer closure until the host rel
   CHECK(xam->GetSystemUiSession().visible);
   CHECK_FALSE(xam->EndSystemUi(0x2000));
   REQUIRE(xam->EndSystemUi(0x1000));
+  CHECK_FALSE(xam->RequestSystemUiResume(0x1000));
+  __imp__XamHudGetUserIndex(ctx, base);
+  CHECK(ctx.r3.u32 == 0xFF);
   __imp__XamIsUIActive(ctx, base);
   CHECK(ctx.r3.u32 == 0);
   CHECK_FALSE(xam->GetSystemUiSession().input_enabled);
@@ -271,6 +320,42 @@ TEST_CASE("Profile UI requests reach the system application without invented sig
   CHECK(probe->last_message == 0x21008);
   CHECK(probe->words == std::vector<uint32_t>(544 / 4, 0));
   CHECK_FALSE(listener->DequeueNotification(&id, &param));
+  ctx.r3.u64 = 0; ctx.r4.u64 = 1;
+  __imp__XamShowCreateProfileUI(ctx, rt.memory()->virtual_membase());
+  CHECK(ctx.r3.u32 == 1627);
+  CHECK(probe->calls == 3);
+  CHECK(probe->last_message == 0x2100E);
+  auto expected = std::vector<uint32_t>(34, 0);
+  expected[1] = 1;
+  CHECK(probe->words == expected);
+  const auto extra = rt.memory()->SystemHeapAlloc(114);
+  std::memset(rt.memory()->TranslateVirtual(extra), 0xAC, 114);
+  ctx.r3.u64 = 2; ctx.r4.u64 = 11; ctx.r5.u64 = extra;
+  __imp__XamShowCreateProfileUIEx(ctx, rt.memory()->virtual_membase());
+  CHECK(ctx.r3.u32 == 1627);
+  CHECK(probe->words[0] == 2);
+  CHECK(probe->words[1] == 11);
+  CHECK(probe->words[4] == 0xACACACAC);
+  CHECK(probe->words[32] == 0xACAC0000);
+  CHECK(probe->words[33] == 0);
+  rt.memory()->SystemHeapFree(extra);
+  CHECK_FALSE(listener->DequeueNotification(&id, &param));
+  ctx.r3.u64 = 0;
+  __imp__XamShowGuideUI(ctx, rt.memory()->virtual_membase());
+  CHECK(ctx.r3.u32 == 1627);
+  CHECK(probe->last_message == 0x21015);
+  CHECK(probe->words == std::vector<uint32_t>{0, 0, 0});
+  const auto count = probe->calls;
+  ctx.r3.u64 = 4;
+  __imp__XamShowGuideUI(ctx, rt.memory()->virtual_membase());
+  CHECK(ctx.r3.u32 == 87);
+  CHECK(probe->calls == count);
+  CHECK_FALSE(listener->DequeueNotification(&id, &param));
+  ctx.r3.u64 = 0; ctx.r4.u64 = 1; ctx.r5.u64 = 0x1010002;
+  __imp__XamShowSigninUIp(ctx, rt.memory()->virtual_membase());
+  CHECK(ctx.r3.u32 == 1627);
+  CHECK(probe->last_message == 0x21001);
+  CHECK(probe->words == std::vector<uint32_t>{0, 0, 1, 0x1010002, 0});
 }
 
 TEST_CASE("Sign-in request propagates host outcomes without changing the user", "[sdk][signin]") {

@@ -1,0 +1,48 @@
+--- a/src/kernel/xam/xam_misc.cpp
++++ b/src/kernel/xam/xam_misc.cpp
+@@ -229,8 +229,6 @@
+ REX_EXPORT_STUB(__imp__XGSetTextureHeaderEx);
+ REX_EXPORT_STUB(__imp__XGetAudioFlags);
+ REX_EXPORT_STUB(__imp__XGetDisplaySize);
+-REX_EXPORT_STUB(__imp__XGetOverlappedExtendedError);
+-REX_EXPORT_STUB(__imp__XGetOverlappedResult);
+ REX_EXPORT_STUB(__imp__XGetSSLCertBypassEnabled);
+ REX_EXPORT_STUB(__imp__XMPRegisterCodec);
+ 
+--- a/src/kernel/xam/xam_msg.cpp
++++ b/src/kernel/xam/xam_msg.cpp
+@@ -125,6 +125,27 @@
+   return result;
+ }
+ 
++// Original 17559 exports 81722390/817223B8. Unlike Xam's internal
++// helper the public query honors wait=false and exposes extended_error.
++u32 XGetOverlappedExtendedError_entry(ppc_ptr_t<XAM_OVERLAPPED> overlapped) {
++  if (!overlapped) return X_ERROR_INVALID_PARAMETER;
++  return overlapped->result == X_ERROR_IO_PENDING ? X_ERROR_IO_INCOMPLETE
++                                                : uint32_t(overlapped->extended_error);
++}
++u32 XGetOverlappedResult_entry(ppc_ptr_t<XAM_OVERLAPPED> overlapped,
++                               mapped_u32 length, u32 wait) {
++  if (!overlapped) return X_ERROR_INVALID_PARAMETER;
++  if (overlapped->result == X_ERROR_IO_PENDING) {
++    if (!wait || !overlapped->event) return X_ERROR_IO_INCOMPLETE;
++    auto event = REX_KERNEL_OBJECTS()->LookupObject<XEvent>(overlapped->event);
++    if (!event) return X_ERROR_INVALID_HANDLE;
++    const auto status = event->Wait(0, 0, 0, nullptr);
++    if (XFAILED(status)) return xboxkrnl::xeRtlNtStatusToDosError(status);
++  }
++  if (length) *length = overlapped->length;
++  return overlapped->result;
++}
++
+ }  // namespace xam
+ }  // namespace kernel
+ }  // namespace rex
+@@ -140,3 +161,6 @@
+ REX_EXPORT_STUB(__imp__XMsgAcquireAsyncMessageFromOverlapped);
+ REX_EXPORT_STUB(__imp__XMsgProcessRequest);
+ REX_EXPORT_STUB(__imp__XMsgReleaseAsyncMessageToOverlapped);
++
++REX_EXPORT(__imp__XGetOverlappedExtendedError, rex::kernel::xam::XGetOverlappedExtendedError_entry)
++REX_EXPORT(__imp__XGetOverlappedResult, rex::kernel::xam::XGetOverlappedResult_entry)

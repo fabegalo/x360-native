@@ -1,0 +1,10 @@
+# Original Retail 17559 keyboard dependency from the official SystemUpdate package.
+[project]
+name = "dash_17559"
+sdk_version = "0.10.0"
+game_root = "../../../.local/inputs/dashboard/17559"
+[entrypoint]
+file_path = "../../../.local/inputs/dashboard/17559/vk.xex"
+out_directory_path = "../generated/vk"
+is_dll = true
+includes = ["../analysis/vk_17559.toml"]

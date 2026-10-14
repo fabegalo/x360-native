@@ -1,0 +1,290 @@
+--- a/include/rex/system/xam/user_profile.h
++++ b/include/rex/system/xam/user_profile.h
+@@ -229,9 +229,11 @@
+   uint32_t signin_state() const { std::lock_guard lock(identity_mutex_); return identity_.signin_state; }
+   uint32_t type() const { return signin_state() ? 1 : 0; }
+ 
+-  // Single local account, slot zero. Disk errors never publish a new session.
++  // Local account collection; one active account in slot zero. Commit before publication.
+   bool InitializeLocal(const std::filesystem::path& root);
+-  uint32_t CreateLocal(const std::string& name);
++  uint32_t CreateLocal(const std::string& name, uint64_t* created_xuid = nullptr);
++  std::vector<Identity> local_profiles() const;
++  Identity FindLocal(uint64_t xuid) const;
+   uint32_t SetLocalSession(uint64_t xuid);
+ 
+   void set_kernel_state(KernelState* ks) { kernel_state_ = ks; }
+@@ -242,9 +244,10 @@
+  private:
+   mutable std::mutex identity_mutex_;
+   Identity identity_;
++  std::vector<Identity> profiles_;
+   std::filesystem::path profile_path_;
+   bool storage_ready_ = false;
+-  bool PersistIdentity(const Identity& next);
++  bool PersistProfiles(const std::vector<Identity>& next, const Identity& selected);
+   std::vector<std::unique_ptr<Setting>> setting_list_;
+   std::unordered_map<uint32_t, Setting*> settings_;
+   KernelState* kernel_state_ = nullptr;
+--- a/src/kernel/xam/xam_enum.cpp
++++ b/src/kernel/xam/xam_enum.cpp
+@@ -66,8 +66,7 @@
+   auto e = make_object<XStaticEnumerator<LocalProfileRecord>>(REX_KERNEL_STATE(), 1);
+   auto status = e->Initialize(0xFF, 0xFE, 0x23001, 0x23003, 0);
+   if (XFAILED(status)) return X_ERROR_FUNCTION_FAILED;
+-  const auto identity = REX_KERNEL_STATE()->user_profile()->identity();
+-  if (identity.xuid) {
++  for (const auto& identity : REX_KERNEL_STATE()->user_profile()->local_profiles()) {
+     auto* record = e->AppendItem();
+     *record = {};
+     record->xuid = identity.xuid;
+@@ -100,7 +99,7 @@
+ 
+ u32 XamProfileFindAccount_entry(u64 xuid, ppc_ptr_t<LocalAccount> account, mapped_u32 device) {
+   if (!account) return X_ERROR_INVALID_PARAMETER;
+-  const auto identity = REX_KERNEL_STATE()->user_profile()->identity();
++  const auto identity = REX_KERNEL_STATE()->user_profile()->FindLocal(xuid);
+   if (!identity.xuid || xuid != identity.xuid) return X_ERROR_NO_SUCH_USER;
+   *account = AccountFor(identity);
+   if (device) *device = 0;
+@@ -110,7 +109,7 @@
+ u32 XamProfileLoadAccountInfo_entry(u32 device, u64 xuid, ppc_ptr_t<LocalAccount> account) {
+   if (device) return X_ERROR_DEVICE_NOT_CONNECTED;
+   if (!account) return X_ERROR_INVALID_PARAMETER;
+-  const auto identity = REX_KERNEL_STATE()->user_profile()->identity();
++  const auto identity = REX_KERNEL_STATE()->user_profile()->FindLocal(xuid);
+   if (!identity.xuid || xuid != identity.xuid) return X_ERROR_NO_SUCH_USER;
+   *account = AccountFor(identity);
+   return X_ERROR_SUCCESS;
+--- a/src/system/xam/user_profile.cpp
++++ b/src/system/xam/user_profile.cpp
+@@ -13,6 +13,7 @@
+ #include <algorithm>
+ #include <array>
+ #include <cstring>
++#include <cctype>
+ #include <random>
+ #include <rex/platform.h>
+ #if REX_PLATFORM_WIN32
+@@ -115,48 +116,104 @@
+   return identity_;
+ }
+ 
++std::vector<UserProfile::Identity> UserProfile::local_profiles() const {
++  std::lock_guard lock(identity_mutex_);
++  return profiles_;
++}
++UserProfile::Identity UserProfile::FindLocal(uint64_t xuid) const {
++  std::lock_guard lock(identity_mutex_);
++  for (const auto& p : profiles_) if (p.xuid == xuid) return p;
++  return {};
++}
++
+ bool UserProfile::InitializeLocal(const std::filesystem::path& root) {
+   std::lock_guard lock(identity_mutex_);
+   identity_ = {};
++  profiles_.clear();
+   storage_ready_ = false;
+   if (root.empty()) return false;
+   profile_path_ = root / "profiles" / "local-v1.dat";
++  const auto v2 = root / "profiles" / "local-v2.dat";
+   std::error_code error;
++  const bool version2 = std::filesystem::exists(v2, error);
++  if (error) return false;
++  if (version2) profile_path_ = v2;
+   const bool exists = std::filesystem::exists(profile_path_, error);
+   if (error) return false;
+   if (!exists) { storage_ready_ = true; return true; }
+-  // Fixed-size record: magic/version, big-endian XUID, sign-in byte, name[16].
+-  // No unbounded parser allocation and no silent replacement of corrupt data.
+-  std::array<uint8_t, 33> record{};
++  // Bounded parser. A bad v2 never silently falls back to the migration source.
++  std::array<uint8_t, 20 + 64 * 25> record{};
+   auto* file = rex::filesystem::OpenFile(profile_path_, "rb");
+   if (!file) return false;
+-  const auto read = fread(record.data(), 1, record.size(), file);
+-  const auto trailing = fgetc(file);
+-  const bool bad = ferror(file) != 0;
++  const auto size = fread(record.data(), 1, record.size(), file);
++  const bool bad = ferror(file) != 0 || fgetc(file) != EOF;
+   fclose(file);
+-  if (read != record.size() || trailing != EOF || bad ||
+-      std::memcmp(record.data(), "X360LP01", 8) || record[16] > 1 || record[32]) return false;
+-  uint64_t xuid = 0;
+-  for (unsigned i = 8; i < 16; ++i) xuid = (xuid << 8) | record[i];
+-  const std::string name(reinterpret_cast<const char*>(record.data() + 17));
+-  if (!ValidLocalXuid(xuid) || !ValidLocalName(name)) return false;
+-  for (size_t i = 17 + name.size(); i < record.size(); ++i) if (record[i]) return false;
+-  identity_ = {xuid, name, record[16]};
++  if (bad) return false;
++  auto u64 = [&](size_t offset) {
++    uint64_t value = 0;
++    for (size_t i = 0; i < 8; ++i) value = (value << 8) | record[offset+i];
++    return value;
++  };
++  size_t count = 1, offset = 8;
++  uint64_t selected = 0;
++  if (version2) {
++    if (size < 20 || std::memcmp(record.data(), "X360LP02", 8)) return false;
++    count = (uint32_t(record[8]) << 24) | (uint32_t(record[9]) << 16) |
++            (uint32_t(record[10]) << 8) | record[11];
++    if (!count || count > 64 || size != 20 + count * 25) return false;
++    selected = u64(12);
++    offset = 20;
++  } else if (size != 33 || std::memcmp(record.data(), "X360LP01", 8)) return false;
++  std::vector<Identity> loaded;
++  unsigned signed_in = 0;
++  for (size_t i = 0; i < count; ++i, offset += 25) {
++    const auto xuid = u64(offset);
++    const auto state = record[offset + 8];
++    if (state > 1 || record[offset + 24]) return false;
++    const std::string name(reinterpret_cast<const char*>(record.data() + offset + 9));
++    if (!ValidLocalXuid(xuid) || !ValidLocalName(name)) return false;
++    for (size_t j = offset + 9 + name.size(); j <= offset + 24; ++j)
++      if (record[j]) return false;
++    for (const auto& p : loaded) if (p.xuid == xuid) return false;
++    signed_in += state;
++    loaded.push_back({xuid, name, state});
++  }
++  if (signed_in > 1) return false;
++  if (!version2) selected = loaded.front().xuid;
++  const auto it = std::find_if(loaded.begin(), loaded.end(),
++      [&](const auto& p) { return p.xuid == selected; });
++  if (it == loaded.end() || (signed_in && !it->signin_state)) return false;
++  identity_ = *it;
++  profiles_ = std::move(loaded);
+   storage_ready_ = true;
+   return true;
+ }
+ 
+-bool UserProfile::PersistIdentity(const Identity& next) {
++bool UserProfile::PersistProfiles(const std::vector<Identity>& next, const Identity& selected) {
+   if (!storage_ready_) { REXSYS_ERROR("Local profile store is not initialized"); return false; }
+   std::error_code error;
+   std::filesystem::create_directories(profile_path_.parent_path(), error);
+   if (error) { REXSYS_ERROR("Local profile directory: {}", error.message()); return false; }
+-  std::array<uint8_t, 33> record{};
+-  std::memcpy(record.data(), "X360LP01", 8);
+-  for (unsigned i = 0; i < 8; ++i) record[8 + i] = uint8_t(next.xuid >> (56 - i * 8));
+-  record[16] = uint8_t(next.signin_state);
+-  std::memcpy(record.data() + 17, next.name.data(), next.name.size());
+-  auto temporary = profile_path_;
++  const bool version2 = next.size() > 1 || profile_path_.filename() == "local-v2.dat";
++  const auto destination = profile_path_.parent_path() / (version2 ? "local-v2.dat" : "local-v1.dat");
++  std::vector<uint8_t> record(version2 ? 20 + next.size() * 25 : 33, 0);
++  std::memcpy(record.data(), version2 ? "X360LP02" : "X360LP01", 8);
++  auto put64 = [&](size_t offset, uint64_t value) {
++    for (unsigned i = 0; i < 8; ++i) record[offset+i] = uint8_t(value >> (56-i*8));
++  };
++  size_t offset = 8;
++  if (version2) {
++    record[11] = uint8_t(next.size());
++    put64(12, selected.xuid);
++    offset = 20;
++  }
++  for (const auto& p : next) {
++    put64(offset, p.xuid);
++    record[offset+8] = uint8_t(p.signin_state);
++    std::memcpy(record.data()+offset+9, p.name.data(), p.name.size());
++    offset += 25;
++  }
++  auto temporary = destination;
+   temporary += ".tmp";
+   auto* file = rex::filesystem::OpenFile(temporary, "wb");
+   if (!file) { REXSYS_ERROR("Local profile staging open failed: {}", errno); return false; }
+@@ -170,47 +227,77 @@
+   if (fclose(file)) { REXSYS_ERROR("Local profile close failed: {}", errno); ok = false; }
+   if (ok) {
+ #if REX_PLATFORM_WIN32
+-    ok = MoveFileExW(temporary.c_str(), profile_path_.c_str(),
++    ok = MoveFileExW(temporary.c_str(), destination.c_str(),
+                     MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH) != 0;
+     if (!ok) REXSYS_ERROR("Local profile replace failed: {}", GetLastError());
+ #else
+-    std::filesystem::rename(temporary, profile_path_, error);
++    std::filesystem::rename(temporary, destination, error);
+     ok = !error;
+ #endif
+   }
+   if (!ok) std::filesystem::remove(temporary, error);
++  if (ok) profile_path_ = destination;
+   return ok;
+ }
+ 
+-uint32_t UserProfile::CreateLocal(const std::string& name) {
+-  std::lock_guard lock(identity_mutex_);
++uint32_t UserProfile::CreateLocal(const std::string& name, uint64_t* created_xuid) {
++  std::lock_guard lock(identity_mutex_);
++  if (created_xuid) *created_xuid = 0;
+   if (!ValidLocalName(name)) return X_ERROR_INVALID_PARAMETER;
+-  if (identity_.xuid) return X_ERROR_ALREADY_EXISTS;
+-  // Identity is generated once and survives every subsequent session.
+-  uint64_t random = 0;
++  for (const auto& p : profiles_) {
++    if (p.name.size() == name.size() && std::equal(name.begin(), name.end(), p.name.begin(),
++        [](unsigned char a, unsigned char b) { return std::tolower(a) == std::tolower(b); }))
++      return X_ERROR_ALREADY_EXISTS;
++  }
++  if (profiles_.size() >= 64) return X_ERROR_FUNCTION_FAILED;
++  uint64_t xuid = 0;
+   try {
+     std::random_device source;
+-    random = (uint64_t(source()) << 32) | source();
++    do {
++      xuid = 0xE000000000000000ull | ((((uint64_t(source()) << 32) | source()) &
++          0x000FFFFFFFFFFFFFull) | 1);
++    } while (std::any_of(profiles_.begin(), profiles_.end(),
++        [&](const auto& p) { return p.xuid == xuid; }));
+   } catch (const std::exception& error) {
+     REXSYS_ERROR("Local profile identity generation: {}", error.what());
+     return X_ERROR_FUNCTION_FAILED;
+   }
+-  Identity next{0xE000000000000000ull | ((random & 0x000FFFFFFFFFFFFFull) | 1), name, 0};
+-  if (!PersistIdentity(next)) return X_ERROR_FUNCTION_FAILED;
+-  identity_ = std::move(next);
++  auto next = profiles_;
++  next.push_back({xuid, name, 0});
++  auto selected = identity_.xuid ? identity_ : next.back();
++  if (!PersistProfiles(next, selected)) return X_ERROR_FUNCTION_FAILED;
++  profiles_ = std::move(next);
++  identity_ = std::move(selected);
++  if (created_xuid) *created_xuid = xuid;
+   return X_ERROR_SUCCESS;
+ }
+ 
+ uint32_t UserProfile::SetLocalSession(uint64_t xuid) {
+   std::lock_guard lock(identity_mutex_);
+-  if (!identity_.xuid || (xuid && xuid != identity_.xuid)) return X_ERROR_NO_SUCH_USER;
++  if (!identity_.xuid) return xuid ? X_ERROR_NO_SUCH_USER : X_ERROR_SUCCESS;
++  auto next = profiles_;
++  auto it = std::find_if(next.begin(), next.end(),
++      [&](const auto& p) { return p.xuid == (xuid ? xuid : identity_.xuid); });
++  if (it == next.end()) return X_ERROR_NO_SUCH_USER;
+   const uint32_t state = xuid ? 1 : 0;
+-  if (identity_.signin_state == state) return X_ERROR_SUCCESS;
+-  auto next = identity_;
+-  next.signin_state = state;
+-  if (!PersistIdentity(next)) return X_ERROR_FUNCTION_FAILED;
+-  identity_ = std::move(next);
+-  // Publication follows durable replacement; failures and repeats emit nothing.
++  if (identity_.xuid == it->xuid && identity_.signin_state == state) return X_ERROR_SUCCESS;
++  for (auto& p : next) p.signin_state = 0;
++  it->signin_state = state;
++  const auto selected = *it;
++  if (!PersistProfiles(next, selected)) return X_ERROR_FUNCTION_FAILED;
++  const bool changed_identity = identity_.xuid != selected.xuid;
++  profiles_ = std::move(next);
++  identity_ = selected;
++  if (changed_identity) {
++    // Do not expose the previous account's cached title data after a switch.
++    for (auto& setting : setting_list_) if (setting->is_title_specific()) {
++      setting->loaded_title_id = 0;
++      if (setting->type == Setting::Type::BINARY) {
++        static_cast<BinarySetting*>(setting.get())->value.clear();
++        setting->is_set = false;
++      }
++    }
++  }
+   if (kernel_state_) kernel_state_->BroadcastNotification(0xA, 1);
+   return X_ERROR_SUCCESS;
+ }

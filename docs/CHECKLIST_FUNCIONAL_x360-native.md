@@ -27,7 +27,7 @@ Windows x86-64 é o primeiro alvo funcional relatado, não uma restrição perma
 | Motivo de encerramento | Protocolo distingue Dashboard, TitleTerminate, GuestExit e WindowClose; testes de exports e handoff passaram. | Ainda falta testar cada cenário e repetição na interface real; fechar janela não conta como retorno Xbox. |
 | Castle Crashers | Chega ao menu em execução separada; há regressões relatadas sem crash. | Não aprova, por si só, seleção genérica, perfil, saves ou retorno original pela dashboard. |
 | Dashboard 6717 | Perfil separado criado e executado. | Último bloqueio relatado: import XAM `0xAE6`, chamado em `0x9210F1F4`; sem novo resultado visual apresentado. |
-| Perfis e ciclo completo | Ainda sem demonstração completa nos relatos. | Não presumir implementação ausente nem marcar como concluído. |
+| Perfis locais 17559 | C7.7: criação de dois perfis pela UI original, lista, troca, GamerCard, Sign-out e recuperação após reiniciar. | Um ativo no slot 0; ciclo com jogos, saves/conquistas e usuários simultâneos não aprovados por este resultado. |
 
 **Critério de fidelidade:** o código original da dashboard/jogo deve originar os pedidos, e o ambiente deve respeitar sua identidade, seus argumentos e seus efeitos. O supervisor pode ser uma implementação interna no PC; clique interceptado, jogo fixo e fechamento de janela não substituem os pedidos originais. Usar um ou mais processos, isoladamente, não comprova nem invalida essa fidelidade.
 
@@ -133,6 +133,21 @@ Incremento C7.6 (2026-10-13): **login local existente comprovado na 17559**.
 Evidência: dashboard §0.30, perfil `C73Local`, slot 0, Windows x64.
 Esses cinco critérios específicos não aprovam criação pela UI, troca entre
 dois perfis, saves/conquistas ou o aceite amplo de múltiplos usuários acima.
+
+Incremento C7.7 (2026-10-13): **dois perfis locais pela UI original da 17559**.
+
+- [x] Criar Player1 e Player2 pelo teclado e Save Profile originais, partindo de armazenamento vazio.
+- [x] Listar ambos no Sign-in, com nomes e XUIDs distintos persistidos.
+- [x] Entrar, sair pelo Guide/Sign-out e entrar no outro perfil sem encerrar o processo.
+- [x] Atualizar a sessão da dashboard e mostrar Player1/Player2 nas respectivas GamerCards originais.
+- [x] Reiniciar com sessão conectada e recuperar a identidade ativa.
+- [x] Reiniciar após Sign-out, recuperar ambos os perfis e manter os dois desconectados.
+- [x] Preservar o contrato de um perfil no slot 0 e migrar o armazenamento sem publicar alterações que falharam no disco (testes focados).
+
+Evidência: dashboard §0.31, série `multi-final66-*`, scripts locais autorizados,
+sem Computer Use. Estes critérios cobrem a dashboard Retail 17559/Windows x64,
+um usuário ativo no slot 0. Não aprovam o aceite amplo de jogo/saves desta seção,
+usuários simultâneos, todas as funções do Guide ou edição de avatar.
 
 ## 4. Biblioteca e My Games — P0
 

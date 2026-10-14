@@ -1,0 +1,11 @@
+--- a/src/kernel/xam/xam_enum.cpp
++++ b/src/kernel/xam/xam_enum.cpp
+@@ -156,7 +156,7 @@
+   if (!operation) return X_E_INVALIDARG;
+   *xuid = operation->xuid;
+   const auto result = X_HRESULT_FROM_WIN32(operation->result);
+-  operation->Delete();
++  operation->ReleaseHandle();
+   return result;
+ }
+ 

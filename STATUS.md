@@ -1,5 +1,22 @@
 # STATUS
 
+C7.7 (2026-10-13), **múltiplos perfis locais funcionais pela UI original da
+Retail 17559/Windows x64**: partindo do HEAD local `c132d12`, dois perfis foram
+criados do zero por Guide → Sign-in → Create Profile → teclado original → Done.
+Player1 e Player2 aparecem na seleção, entram alternadamente, têm a identidade
+correta na GamerCard e saem pelo Sign-out original. Reinícios recuperam os dois
+XUIDs e o estado conectado/desconectado; uma execução adicional demonstrou
+Player1 → Sign-out → Player2 no mesmo processo. Nenhuma fixture criou os perfis.
+O backend mantém uma conta ativa no slot 0, migra o registro C7 de um perfil
+para a coleção v2 e publica mudanças somente após gravar. Patches 0054–0066,
+SDK pinado inalterado; 17 casos focados distintos aprovados ao longo dos
+incrementos e replay dos 66 patches com hashes base/finais conferidos.
+Builds incrementais e sessões por scripts locais de até 60 s, com PNGs, logs,
+hashes dos binários e snapshots. Sem Computer Use, jogos, push ou Release.
+Evidências, contratos e reprodução: `docs/dashboard.md` §0.31. Xbox Live,
+Guide completo, edição de avatar, saves/conquistas e vários jogadores
+simultâneos continuam fora deste aceite. Os resultados anteriores são históricos.
+
 C7.6 (2026-10-13), **Sign-in local existente funcional na Retail 17559/Windows x64**:
 partindo de `15a0251`, os patches 0044–0053 corrigem o modo retail, contratos
 de LogonEx, tarefas XAM, configuração persistente e notificações. `80070525`

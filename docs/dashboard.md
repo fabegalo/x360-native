@@ -1772,3 +1772,150 @@ requer perfil desconectado; `-Mode Restart -GamerCard` reutiliza o registro
 conectado pelo teste anterior. O script limita cada processo a 60 s, encerra em
 `finally` e valida persistência; a navegação/conteúdo são conferidos nos PNGs.
 Nenhum Computer Use, processo remanescente, push ou publicação.
+
+### 0.31 Múltiplos perfis locais pela interface original: C7.7 (2026-10-13)
+
+Base local `c132d125d6938b98f968aecdef2e89d59b097ed1`; SDK permanece em
+`f5337cdc947ff6d4c4196737e2c807a48f2a1fc2`. **Aceite demonstrado na Retail
+17559/Windows x64:** criar dois perfis pela interface original, listar, entrar,
+alternar, mostrar a identidade correta na GamerCard, sair e recuperar ambos
+após reiniciar. As contas são locais, com uma ativa no slot 0.
+
+O fluxo usa `hud.xex`, `signin.xex`, `createprofile.xex`, `vk.xex` e
+`gamerprofile.xex` originais recompilados, com o host XUI existente. Os nomes
+Player1/Player2 foram sugeridos pelo próprio CreateProfile e confirmados no
+teclado original. Não houve criação C++ de fixture, edição do arquivo de
+perfil, substituição de telas, salto de callback ou login forçado pelo host.
+Guide abre com o botão correspondente; no teclado, G é o padrão quando não
+há vínculo configurado. X abre Sign-in/Sign-out, A confirma e B volta.
+
+**Implementação e contratos:**
+
+- Patches 0054–0066, aplicados pelo mecanismo existente e registrados em
+  `deps.lock.json`. A enumeração retorna todas as identidades; consultas de
+  conta resolvem pelo XUID, independentemente da seleção atual. Criação valida
+  o nome e produz um XUID estável, sem conectar a conta por conta própria.
+- `XamProfileCreate` recebe a conta guest e produz um handle real de operação;
+  `XamProfileGetCreationStatus` devolve resultado/XUID e consome esse handle.
+  O CreateProfile original confirma com Logon `0x24` (array de XUIDs); o
+  Sign-in usa LogonEx `0x120424`; Guide remove a identidade ativa com `0x28`.
+  Resultados overlapped e notificações refletem a operação efetiva.
+- O primeiro perfil conserva `profiles/local-v1.dat` (33 bytes). Ao criar o
+  segundo, a gravação migra atomicamente para `local-v2.dat`: magic `X360LP02`,
+  quantidade BE32, XUID selecionado BE64, registros de 25 bytes com XUID,
+  estado e nome. O v1 fica preservado como origem da migração. V2 inválido
+  não provoca fallback silencioso nem substituição. Limite: 64 perfis,
+  nomes ASCII de 1–15 caracteres, duplicatas sem distinção de caixa rejeitadas.
+  Falhas de gravação não alteram identidade/sessão publicada. A troca invalida
+  o cache binário específico de título da identidade anterior.
+- O host copia pedidos entre aplicativos e descarrega a cena anterior antes
+  de carregar outra imagem na mesma base. Após selecionar armazenamento,
+  executa o ciclo original de serialização, destruição, restauração, criação
+  e layout. O teclado compartilha recursos com CreateProfile sem substituir
+  o callback do aplicativo. O registro original de pacotes informa a ausência
+  de AvatarMiniCreator; o código original apresenta a página Save Profile.
+- O Guide revelou um erro de memória: `XamNuiGetDeviceStatus` escrevia 24 bytes
+  em um resultado original de 16, sobrescrevendo r29 salvo em `913F80F8`.
+  Patch 0064 limita a estrutura ao tamanho original; o teste com sentinelas
+  falhou antes e passou depois. O callback de Sign-out `913E9200`, fora da
+  tabela pdata, foi incluído na análise AOT do HUD.
+- Sign-in aberto pelo Guide pertence ao controlador 0, mas habilita e consulta
+  entrada com ANY_USER (`FF`). Patches 0065/0066 aceitam esse pedido mantendo
+  a exclusividade do dono; não consomem eventos de outro controle. O teste
+  com driver de teclado real detectou o bloqueio antes da correção.
+- `XamLoaderGetGameInfo` continua sem provedor no host local e agora informa
+  `E_NOTIMPL` explicitamente neste título. O Guide segue seu ramo original de
+  ausência de informação; o antigo stub deixava r3 como falso sucesso e
+  tentava decodificar uma imagem em endereço zero. Isso não implementa game-info.
+
+**Evidência real do aceite**, sob `.local/runs/`, com armazenamento inicialmente
+vazio `.local/tmp/multi-final66-data`. Todas estas execuções usaram o botão Guide
+normal, sem a flag de diagnóstico `dash17559_signin_ui`:
+
+| Diretório | Duração | Resultado e captura conferida |
+|---|---:|---|
+| `multi-final66-create1-guide` | 34,267 s | Criação de Player1 pelo teclado e Save Profile originais; conclusão conecta a conta e fecha a cena. `step-2.png` mostra o teclado. |
+| `multi-final66-create2-guide` | 52,424 s | Sign-out de Player1, criação de Player2 e Done. `step-11.png` mostra Save Profile/Player2; `step-12.png`, Home. |
+| `multi-final66-player2-card` | 30,803 s | Reinício conectado em Player2; `step-4.png` mostra a GamerCard com Player2, B retorna a Settings. |
+| `multi-final66-switch1` | 42,469 s | Sign-out de Player2, seleção de Player1, confirmação do diálogo original de privacidade e retorno à Home. |
+| `multi-final66-player1-card-signout` | 51,385 s | `step-4.png`: GamerCard Player1. Depois B, Guide, Sign-out/Yes. `step-12.png`: ambos listados, ambos desconectados no snapshot. |
+| `multi-final66-restart-signedout` | 18,938 s | Novo processo recupera os dois perfis desconectados; `step-1.png` mostra ambos no Sign-in original. |
+
+XUIDs conferidos antes/depois dos reinícios:
+
+| Nome | XUID | Estado após Sign-out e último reinício |
+|---|---|---|
+| Player1 | `E00E0FF7A26F67C3` | Desconectado |
+| Player2 | `E00D0506D8328811` | Desconectado |
+
+Cada diretório contém `rex.log`, `keys.txt`, `run.txt`, `result.txt`,
+`binaries.txt` (SHA-256 do executável e DLLs), PNGs e snapshots JSON/DAT por
+passo. O script lê os registros para verificar o efeito; todas as gravações
+são consequência da UI guest. A execução adicional
+`multi-acceptance-switch-same-session` (48,945 s, outro armazenamento isolado)
+comprova no mesmo processo: desconectado → Player1 → Sign-out → Player2.
+O log registra os três pedidos reais e os snapshots mostram as transições.
+
+As tentativas intermediárias permanecem como diagnóstico. Em particular,
+`multi-acceptance-signout` persistiu a saída, mas encontrou o callback AOT
+ausente; seu resultado foi corrigido para FAIL e o detector de falhas passou
+a incluir `[FATAL]`/`Indirect failure`. Não é contado como aceite. Algumas
+capturas PrintWindow durante transições ficaram pretas; não são usadas como
+prova visual. Os PNGs identificados na tabela acima foram inspecionados.
+
+**Builds e testes:** builds incrementais de `dash_17559` e
+`x360n_sdk_runtime_checks` concluídos. Dezessete casos focados distintos
+aprovados ao longo dos incrementos: identidade/sessão/reinício, enumeração e
+conta, passcode, criação/handles, duplicatas, migração/falhas/corrupção,
+overlapped, pedidos originais, isolamento/resume de UI, entrada ANY_USER e
+limite de memória do NUI. Logs em `.local/tmp/`:
+`multi-tests.log`, `multi-test-overlapped-retry.log`,
+`multi-create-service-test-fixed.log`, `multi-migration-test.log`,
+`multi-filter-test.log`, `multi-queries-test.log`, `multi-ui-requests-test.log`,
+`multi-resume-test.log`, `multi-logon-tests-fixed.log`, `multi-guide-tests.log`,
+`multi-nui-after.log`, `multi-enable-tests.log`.
+O primeiro lote teve uma falha de substituição de arquivo no Windows; o caso
+overlapped passou no reteste focado. Os testes NUI/entrada falharam antes de
+seus patches e passaram depois. Não foi executada suíte completa.
+Builds finais: `multi-build-enable-title.log` e `multi-build-enable-test.log`.
+`multi-replay-66.log` confirma reaplicação dos 66 patches sobre fontes do SDK
+pinado, com hashes base e finais iguais aos registrados no lock.
+
+**Reprodução local autorizada:** os novos manifests ficam em
+`titles/dash_17559/{createprofile,vk,hud}/`; Sign-in conserva o manifest próprio.
+São imagens AOT separadas porque suas bases guest podem se sobrepor.
+Para preparar esses fontes gerados antes do configure do alvo de desenvolvimento,
+execute `rexglue codegen` em cada um dos quatro manifests, usando a ferramenta
+compilada do SDK pinado. Os hashes dos XEX originais e as DLLs necessárias
+constam de `titles/dash_17559/preparation.toml`; código gerado e conteúdo
+original ficam ignorados. O build incremental existente é:
+
+```powershell
+scripts/devshell.cmd cmake --build .local/build/titles/dash_17559 --target dash_17559
+```
+
+Com uma pasta de dados vazia já criada, o roteiro do aceite é:
+
+```powershell
+$data = '.local/tmp/perfis-novos' # criar vazia; não reutilizar dados pessoais
+New-Item -ItemType Directory $data
+scripts/test-local-profiles-17559.ps1 -UserDataRoot $data -Out .local/runs/perfis-create1 -Sequence '71,76,32,13,74,74,32' -ExpectedProfiles Player1 -ExpectedActive Player1
+scripts/test-local-profiles-17559.ps1 -UserDataRoot $data -Out .local/runs/perfis-create2 -Sequence '71,76,85,32,wait:2500,71,76,74,32,13,74,74,32' -ExpectedProfiles Player1,Player2 -ExpectedActive Player2
+scripts/test-local-profiles-17559.ps1 -UserDataRoot $data -Out .local/runs/perfis-card2 -Sequence '51,51,51,72,32,8' -ExpectedProfiles Player1,Player2 -ExpectedActive Player2
+scripts/test-local-profiles-17559.ps1 -UserDataRoot $data -Out .local/runs/perfis-switch1 -Sequence '71,76,85,32,wait:2500,71,76,32,85,32' -ExpectedProfiles Player1,Player2 -ExpectedActive Player1
+scripts/test-local-profiles-17559.ps1 -UserDataRoot $data -Out .local/runs/perfis-card1-signout -Sequence '51,51,51,72,32,8,71,76,85,32,wait:2500,71,76' -ExpectedProfiles Player1,Player2 -ExpectedActive ''
+scripts/test-local-profiles-17559.ps1 -UserDataRoot $data -Out .local/runs/perfis-restart -Sequence '71,76' -ExpectedProfiles Player1,Player2 -ExpectedActive ''
+```
+
+O script limita cada processo a 60 s, acompanha sua execução, captura por
+PrintWindow e encerra em `finally`. A sequência usa as teclas remapeadas pelo
+próprio teste (A=Space, B=Backspace, Start=Enter, X=L, Guide=G, Up=U, Down=J,
+Right=H, Left=K, RB=3). Conferir PNGs além das asserções de persistência.
+Novas execuções visuais continuam exigindo autorização conforme CLAUDE.md.
+
+Limites: offline, um usuário ativo no slot 0. Xbox Live, cobertura completa
+do Guide, personalização de avatar, preferências completas, exclusão/importação,
+saves/conquistas e vários jogadores simultâneos não foram aprovados. C7 com
+um perfil conserva formato e contratos nos testes; regressões de jogos já
+aprovadas não foram repetidas. Sem Computer Use, processos remanescentes,
+push ou Release.

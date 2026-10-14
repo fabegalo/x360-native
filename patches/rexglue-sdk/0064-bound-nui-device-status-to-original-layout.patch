@@ -1,0 +1,21 @@
+--- a/src/kernel/xam/xam_nui.cpp
++++ b/src/kernel/xam/xam_nui.cpp
+@@ -21,15 +21,15 @@
+ 
+ extern std::atomic<int> xam_dialogs_shown_;
+ 
++// Original Retail XAM 817FC990/817FC750 writes four dwords. Guide
++// 913F80F8 allocates exactly 16 bytes immediately before saved r29.
+ struct X_NUI_DEVICE_STATUS {
+   rex::be<uint32_t> unk0;
+   rex::be<uint32_t> unk1;
+   rex::be<uint32_t> unk2;
+   rex::be<uint32_t> status;
+-  rex::be<uint32_t> unk4;
+-  rex::be<uint32_t> unk5;
+ };
+-static_assert(sizeof(X_NUI_DEVICE_STATUS) == 24, "Size matters");
++static_assert(sizeof(X_NUI_DEVICE_STATUS) == 16, "Size matters");
+ 
+ void XamNuiGetDeviceStatus_entry(ppc_ptr_t<X_NUI_DEVICE_STATUS> status_ptr) {
+   status_ptr.Zero();

@@ -1,0 +1,85 @@
+--- a/src/kernel/xam/xam_misc.cpp
++++ b/src/kernel/xam/xam_misc.cpp
+@@ -528,7 +528,7 @@
+ REX_EXPORT_STUB(__imp__XamGetWCNConfigFile);
+ REX_EXPORT_STUB(__imp__XamGetXSTSTokenExpiryPeriodMS);
+ REX_EXPORT_STUB(__imp__XamGetXTweakManager);
+-REX_EXPORT_STUB(__imp__XamHudGetUserIndex);
++
+ REX_EXPORT_STUB(__imp__XamHudSetUserIndex);
+ REX_EXPORT_STUB(__imp__XamInactivityEnablePowerDown);
+ REX_EXPORT_STUB(__imp__XamInactivityGetInactivityInterruptTime);
+--- a/src/kernel/xam/xam_ui.cpp
++++ b/src/kernel/xam/xam_ui.cpp
+@@ -694,7 +694,7 @@
+ REX_EXPORT_STUB(__imp__XamShowRecentMessageUIEx);
+ REX_EXPORT_STUB(__imp__XamShowReputationUI);
+ REX_EXPORT_STUB(__imp__XamShowSigninUIEx);
+-REX_EXPORT_STUB(__imp__XamShowSigninUIp);
++
+ REX_EXPORT_STUB(__imp__XamShowSignupCreditCardUI);
+ REX_EXPORT_STUB(__imp__XamShowSocialPostUI);
+ REX_EXPORT_STUB(__imp__XamShowStorePickerUI);
+--- a/src/kernel/xam/xam_user.cpp
++++ b/src/kernel/xam/xam_user.cpp
+@@ -16,6 +16,7 @@
+ 
+ #include <rex/cvar.h>
+ #include <rex/kernel/xam/private.h>
++#include <rex/kernel/xam/module.h>
+ #include <rex/logging.h>
+ #include <rex/math.h>
+ #include <rex/hook.h>
+@@ -68,9 +69,10 @@
+                            uint32_t stride) {
+   REXKRNL_INFO("LocalLogon request flags={:08X} stride={} overlap={:08X}", flags, stride, overlapped);
+   if (!users) return uint32_t(X_E_INVALIDARG);
++  const bool remove = stride == 8 && flags == 0x28;
+   const bool append = stride == 392 && flags == 0x120424;
+   if (flags && !(stride == 392 && (flags == 0x120420 || append)) &&
+-      !(stride == 8 && (flags == 0x63 || flags == 0x24))) return 0x80004001u;
++      !(stride == 8 && (flags == 0x63 || flags == 0x24 || remove))) return 0x80004001u;
+   auto* bytes = users.as<uint8_t*>();
+   for (unsigned i = 1; i < 4; ++i) {
+     if (rex::memory::load_and_swap<uint64_t>(bytes + i * stride))
+@@ -85,7 +87,12 @@
+   }
+   // 17559 8199E884 / 8199E8C4: bit 0x4 merges the supplied accounts;
+   // with one local slot this selects the persisted identity without clearing peers.
+-  const auto result = REX_KERNEL_STATE()->user_profile()->SetLocalSession(xuid);
++  auto* profile = REX_KERNEL_STATE()->user_profile();
++  // Original Guide 913F847C-913F84AC supplies the current XUID and 0x28.
++  // Removal is by identity, never a request to sign that identity back in.
++  const auto active = profile->identity();
++  const auto result = remove && (!xuid || xuid != active.xuid || !active.signin_state)
++      ? X_ERROR_NO_SUCH_USER : profile->SetLocalSession(remove ? 0 : xuid);
+   REXKRNL_INFO("Local logon flags={:08X} xuid={:016X} result={}", flags, xuid, result);
+   const auto hr = X_HRESULT_FROM_WIN32(result);
+   if (overlapped) {
+@@ -561,6 +568,19 @@
+   if (user >= 4) return X_ERROR_INVALID_PARAMETER;
+   const uint32_t request[] = {0, user, 0};
+   return DispatchProfileUi(0x21015, request, 3);
++}
++
++// Private wrapper 816C19C8 preserves the requesting controller.
++u32 XamShowSigninUIp_entry(u32 user, u32 count, u32 flags) {
++  if (user >= 4 && user != 0xFF) return X_ERROR_INVALID_PARAMETER;
++  const uint32_t request[] = {0, user, count, flags, 0};
++  return DispatchProfileUi(0x21001, request, 5);
++}
++
++u32 XamHudGetUserIndex_entry() {
++  auto xam = REX_KERNEL_STATE()->GetKernelModule<XamModule>("xam.xex");
++  const auto session = xam->GetSystemUiSession();
++  return session.module ? session.user : 0xFF;
+ }
+ 
+ u32 XamShowSigninUI_entry(u32 user_count, u32 flags) {
+@@ -977,3 +997,6 @@
+ REX_EXPORT(__imp__XamShowCreateProfileUIEx, rex::kernel::xam::XamShowCreateProfileUIEx_entry)
+ 
+ REX_EXPORT(__imp__XamShowGuideUI, rex::kernel::xam::XamShowGuideUI_entry)
++
++REX_EXPORT(__imp__XamShowSigninUIp, rex::kernel::xam::XamShowSigninUIp_entry)
++REX_EXPORT(__imp__XamHudGetUserIndex, rex::kernel::xam::XamHudGetUserIndex_entry)

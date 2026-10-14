@@ -13,7 +13,14 @@
 #include <rex/chrono/clock.h>
 #include <cstring>
 #include <functional>
+#include <memory>
+#include <vector>
 #include <rex/ppc/func.h>
+#include <rex/input/input_system.h>
+#include <rex/input/flags.h>
+
+extern "C" REX_FUNC(__imp__XamShowGuideUI);
+REXCVAR_DECLARE(std::string, keybind_guide);
 
 REXCVAR_DEFINE_BOOL(dash17559_signin_ui, false, "Dashboard 17559",
                    "Submit the original Sign-in request once at the first dashboard frame (manual validation)");
@@ -24,6 +31,8 @@ using rex::X_RESULT;
 namespace {
 std::function<bool()> draw_ui;
 std::function<void()> request_signin;
+std::function<void()> pending_ui;
+std::function<void()> poll_guide;
 thread_local bool in_dashboard_frame = false;
 // XAM's HUD runs in the system process (2). The local host borrows the
 // dashboard thread for a frame, restoring its process context on return.
@@ -53,10 +62,34 @@ void ReleaseSystemUiHost() {
   // Called after the dashboard guest thread has exited, before runtime teardown.
   draw_ui = {};
   request_signin = {};
+  pending_ui = {};
+  poll_guide = {};
 }
 void InstallSystemUi(rex::Runtime& runtime) {
+  // XAM normally handles the physical Guide button outside the foreground
+  // title. Poll its edge here because the original XAM scheduler is not run.
+  REXCVAR_SET(guide_button, true);
+  if (REXCVAR_GET(keybind_guide).empty()) REXCVAR_SET(keybind_guide, "G");
+  poll_guide = [&runtime, held = false]() mutable {
+    rex::input::X_INPUT_STATE input{};
+    auto* system = static_cast<rex::input::InputSystem*>(runtime.input_system());
+    const bool pressed = system && system->GetState(0, &input) == 0 &&
+        (uint16_t(input.gamepad.buttons) & rex::input::X_INPUT_GAMEPAD_GUIDE);
+    const bool edge = pressed && !held;
+    held = pressed;
+    if (!edge || draw_ui || pending_ui) return;
+    auto* ctx = rex::system::XThread::GetCurrentThread()->thread_state()->context();
+    ctx->r3.u64 = 0;
+    __imp__XamShowGuideUI(*ctx, runtime.memory()->virtual_membase());
+  };
+  runtime.kernel_state()->RegisterRecompiledModule(
+      "hud.xex", "game:\\system\\hud.xex", "dash_17559_hud");
+  runtime.kernel_state()->RegisterRecompiledModule("vk.xex", "game:\\vk.xex", "dash_17559_vk");
+  runtime.kernel_state()->RegisterRecompiledModule("vk.xex", "\\Device\\Harddisk0\\Partition1\\vk.xex", "dash_17559_vk");
   runtime.kernel_state()->RegisterRecompiledModule(
       "signin.xex", "game:\\system\\signin.xex", "dash_17559_signin");
+  runtime.kernel_state()->RegisterRecompiledModule(
+      "createprofile.xex", "game:\\system\\createprofile.xex", "dash_17559_createprofile");
   if (REXCVAR_GET(dash17559_signin_ui)) {
     request_signin = [&runtime] {
       auto* thread = rex::system::XThread::GetCurrentThread()->thread_state();
@@ -74,7 +107,25 @@ void InstallSystemUi(rex::Runtime& runtime) {
     SystemProcessScope system_process(runtime);
     auto* state = runtime.kernel_state();
     auto xam = state->GetKernelModule<rex::kernel::xam::XamModule>("xam.xex");
-    if (draw_ui || xam->FindSystemApp(0xFF)) return X_E_FAIL;
+    if (draw_ui) {
+      if (pending_ui) return X_E_FAIL;
+      // System apps occupy the same guest image. Copy the request now, then
+      // unload the current app at the frame boundary before loading its successor.
+      std::vector<uint8_t> bytes(size);
+      std::memcpy(bytes.data(), runtime.memory()->TranslateVirtual(request), size);
+      pending_ui = [&runtime, message, bytes = std::move(bytes)] {
+        auto xam = runtime.kernel_state()->GetKernelModule<rex::kernel::xam::XamModule>("xam.xex");
+        const auto buffer = runtime.memory()->SystemHeapAlloc(uint32_t(bytes.size()));
+        if (!buffer) { REXLOG_ERROR("17559 system UI: queued request allocation failed"); return; }
+        std::memcpy(runtime.memory()->TranslateVirtual(buffer), bytes.data(), bytes.size());
+        const auto result = xam->system_ui_request(message, buffer, uint32_t(bytes.size()));
+        runtime.memory()->SystemHeapFree(buffer);
+        REXLOG_INFO("17559 system UI: queued request {:08X} -> {:08X}", message, uint32_t(result));
+      };
+      xam->RequestSystemUiClose();
+      return 0;
+    }
+    if (xam->FindSystemApp(0xFF)) return X_E_FAIL;
     // Execute on the requesting guest thread, preserving its register context.
     auto* thread = rex::system::XThread::GetCurrentThread()->thread_state();
     auto* dispatcher = runtime.function_dispatcher();
@@ -151,6 +202,11 @@ void InstallSystemUi(rex::Runtime& runtime) {
       dispatcher->ExecuteTrap(thread, 0x81672C98, config_facade, 1);
       uint64_t play_timer[] = {0x81B52130};
       dispatcher->ExecuteTrap(thread, 0x819951A0, play_timer, 1);
+      // CRT 81A6FF90 constructs the package registry queried by CreateProfile.
+      // This host has no installed system package; the original query reports
+      // absence and the app selects its own completion flow.
+      uint64_t packages[] = {0x81AAC110};
+      dispatcher->ExecuteTrap(thread, 0x816EA660, packages, 1);
       // Original visual host from 816CE9BC-816CE9E4. Reuse the active DC.
       const auto hud = memory->SystemHeapAlloc(72);
       if (!hud) return static_cast<X_HRESULT>(0x8007000Eu);
@@ -242,6 +298,7 @@ void InstallSystemUi(rex::Runtime& runtime) {
     uint64_t initialize[] = {0x80000004, context, context + 16};
     const auto result = static_cast<rex::X_HRESULT>(dispatcher->ExecuteTrap(thread, registration->callback, initialize, 3));
     REXLOG_INFO("17559 system UI: {} original initialize -> {:08X}", application->name, uint32_t(result));
+    const auto saved_size = rex::memory::load_and_swap<uint32_t>(runtime.memory()->TranslateVirtual(context + 16));
     runtime.memory()->SystemHeapFree(context);
     if (static_cast<int32_t>(result) < 0) {
       // Sign-in 901050FC-90105124 already deletes and clears its app on
@@ -278,11 +335,15 @@ void InstallSystemUi(rex::Runtime& runtime) {
       const auto linked = dispatcher->ExecuteTrap(thread, 0x81694FF8, attach_scene, 2);
       REXLOG_INFO("17559 system UI: original attach scene -> {:08X}", uint32_t(linked));
       if (static_cast<int32_t>(linked) >= 0) {
-        auto destroy_scene = [&runtime, dispatcher, thread, hud, scene, registration, release_module] {
+        auto active_scene = std::make_shared<uint32_t>(scene);
+        auto destroy_scene = [&runtime, dispatcher, thread, hud, active_scene, registration, release_module] {
           // App owns the scene. Unlink and clear the host's reference before
           // its destroy callback and original DLL detach release the app.
-          uint64_t unlink[] = {scene};
-          dispatcher->ExecuteTrap(thread, 0x817BCBE8, unlink, 1);
+          if (*active_scene) {
+            uint64_t unlink[] = {*active_scene};
+            dispatcher->ExecuteTrap(thread, 0x817BCBE8, unlink, 1);
+            *active_scene = 0;
+          }
           rex::memory::store_and_swap<uint32_t>(runtime.memory()->TranslateVirtual(hud + 0x3C), 0);
           const auto container = rex::memory::load_and_swap<uint32_t>(runtime.memory()->TranslateVirtual(hud + 0x40));
           uint64_t hide[] = {container, 0};
@@ -303,9 +364,71 @@ void InstallSystemUi(rex::Runtime& runtime) {
         // The original dashboard resolves/presents this target after its XUI
         // present call. Composite the original HUD here, with no extra swap,
         // image copy, window, blocking loop, or per-frame resource creation.
-        draw_ui = [&runtime, dispatcher, thread, hud, registration, xam, destroy_scene,
+        draw_ui = [&runtime, dispatcher, thread, hud, registration, xam, destroy_scene, active_scene, saved_size, user,
                    previous_frame = rex::chrono::Clock::QueryGuestUptimeMillis(), frame = 0u]() mutable -> bool {
           SystemProcessScope system_process(runtime);
+          if (xam->ConsumeSystemUiResume(registration->module)) {
+            // Match the original XAM stack lifecycle: serialize (80000009),
+            // destroy the application, then restore a new instance with flags=2.
+            const auto resume = saved_size && saved_size <= 1024 * 1024
+                ? runtime.memory()->SystemHeapAlloc(24 + saved_size) : 0;
+            if (!resume) {
+              REXLOG_ERROR("17559 system UI: invalid save size or allocation failure ({})", saved_size);
+              destroy_scene();
+              runtime.kernel_state()->BroadcastNotification(0x9, false);
+              return false;
+            }
+            uint64_t save[] = {0x80000009, resume + 24, 0};
+            const auto saved = dispatcher->ExecuteTrap(thread, registration->callback, save, 3);
+            if (static_cast<int32_t>(saved) < 0) {
+              runtime.memory()->SystemHeapFree(resume);
+              destroy_scene();
+              runtime.kernel_state()->BroadcastNotification(0x9, false);
+              return false;
+            }
+            uint64_t unlink[] = {*active_scene};
+            dispatcher->ExecuteTrap(thread, 0x817BCBE8, unlink, 1);
+            *active_scene = 0;
+            rex::memory::store_and_swap<uint32_t>(runtime.memory()->TranslateVirtual(hud + 0x3C), 0);
+            uint64_t destroy[] = {0x80000005, 0, 0};
+            dispatcher->ExecuteTrap(thread, registration->callback, destroy, 3);
+            auto* words = runtime.memory()->TranslateVirtual<rex::be<uint32_t>*>(resume);
+            words[0] = 2; words[1] = resume + 24; words[2] = registration->module;
+            words[3] = user; words[4] = 0; words[5] = 0;
+            uint64_t args[] = {0x80000004, resume, resume + 16};
+            const auto result = dispatcher->ExecuteTrap(thread, registration->callback, args, 3);
+            auto failed_restore = [&](const char* stage, uint32_t error) {
+              REXLOG_ERROR("17559 system UI: original restore {} failed {:08X}", stage, error);
+              runtime.memory()->SystemHeapFree(resume);
+              destroy_scene();
+              runtime.kernel_state()->BroadcastNotification(0x9, false);
+              return false;
+            };
+            if (static_cast<int32_t>(result) < 0)
+              return failed_restore("init", uint32_t(result));
+            uint64_t prepare[] = {0x8000000B, 0, 0};
+            const auto prepared = dispatcher->ExecuteTrap(thread, registration->callback, prepare, 3);
+            if (static_cast<int32_t>(prepared) < 0)
+              return failed_restore("prepare", uint32_t(prepared));
+            const auto dc = rex::memory::load_and_swap<uint32_t>(runtime.memory()->TranslateVirtual(0x81AA2110));
+            uint64_t create[] = {0x80000008, dc, resume + 20};
+            const auto created = dispatcher->ExecuteTrap(thread, registration->callback, create, 3);
+            *active_scene = words[5];
+            if (static_cast<int32_t>(created) < 0 || !*active_scene)
+              return failed_restore("scene", uint32_t(created));
+            uint64_t attach[] = {hud, resume + 20};
+            const auto attached = dispatcher->ExecuteTrap(thread, 0x81694FF8, attach, 2);
+            if (static_cast<int32_t>(attached) < 0)
+              return failed_restore("attach", uint32_t(attached));
+            const auto root = rex::memory::load_and_swap<uint32_t>(runtime.memory()->TranslateVirtual(hud + 8));
+            uint64_t layout[] = {root};
+            const auto laid_out = dispatcher->ExecuteTrap(thread, 0x817BCAA0, layout, 1);
+            if (static_cast<int32_t>(laid_out) < 0)
+              return failed_restore("layout", uint32_t(laid_out));
+            runtime.memory()->SystemHeapFree(resume);
+            REXLOG_INFO("17559 system UI: original restore save={:08X} init={:08X} scene={:08X} attach={:08X}",
+                        uint32_t(saved), uint32_t(result), uint32_t(created), uint32_t(attached));
+          }
           // A stacked HUD dialog owns input ahead of the app. Otherwise the
           // app's update handles its A/B commands before XUI navigation.
           uint64_t input[] = {hud};
@@ -365,6 +488,19 @@ extern "C" REX_FUNC(sub_92186D90) {
   dash17559::in_dashboard_frame = previous;
 }
 extern "C" void sub_9221CD90(PPCContext& ctx, uint8_t* base) {
+  if (dash17559::in_dashboard_frame && dash17559::poll_guide) {
+    const PPCContext saved = ctx;
+    dash17559::poll_guide();
+    ctx = saved;
+    ctx.fpscr.restoreGuestBits(saved.fpscr.csr);
+  }
+  if (dash17559::in_dashboard_frame && !dash17559::draw_ui && dash17559::pending_ui) {
+    const PPCContext saved = ctx;
+    auto request = std::move(dash17559::pending_ui);
+    request();
+    ctx = saved;
+    ctx.fpscr.restoreGuestBits(saved.fpscr.csr);
+  }
   if (dash17559::in_dashboard_frame && dash17559::request_signin) {
     const PPCContext saved = ctx;
     auto request = std::move(dash17559::request_signin);

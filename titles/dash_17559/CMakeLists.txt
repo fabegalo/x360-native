@@ -82,3 +82,51 @@ if(TARGET dash_17559_xam_ui)
     # auxiliary table would overwrite the resident dashboard image.
     target_compile_definitions(dash_17559_xam_ui PRIVATE REX_HOST_FUNCTION_TABLE=1)
 endif()
+
+include(generated/createprofile/sources.cmake)
+add_custom_command(
+    OUTPUT "${CMAKE_CURRENT_SOURCE_DIR}/generated/createprofile/codegen.build.stamp" ${GENERATED_SOURCES}
+    COMMAND $<TARGET_FILE:rex::rexglue> codegen
+            "${CMAKE_CURRENT_SOURCE_DIR}/createprofile/createprofile_17559_manifest.toml"
+    DEPFILE "${CMAKE_CURRENT_SOURCE_DIR}/generated/createprofile/codegen.d"
+    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+    VERBATIM)
+add_library(dash_17559_createprofile SHARED ${GENERATED_SOURCES} src/system_ui_imports.cpp)
+target_include_directories(dash_17559_createprofile PRIVATE generated/createprofile)
+target_link_libraries(dash_17559_createprofile PRIVATE rex::runtime)
+rexglue_apply_recomp_settings(dash_17559_createprofile
+    "${CMAKE_CURRENT_SOURCE_DIR}/generated/createprofile/dash_17559_pch.h")
+rexglue_configure_module_target(dash_17559_createprofile HOST dash_17559)
+add_dependencies(dash_17559 dash_17559_createprofile)
+
+include(generated/vk/sources.cmake)
+add_custom_command(
+    OUTPUT "${CMAKE_CURRENT_SOURCE_DIR}/generated/vk/codegen.build.stamp" ${GENERATED_SOURCES}
+    COMMAND $<TARGET_FILE:rex::rexglue> codegen
+            "${CMAKE_CURRENT_SOURCE_DIR}/vk/vk_17559_manifest.toml"
+    DEPFILE "${CMAKE_CURRENT_SOURCE_DIR}/generated/vk/codegen.d"
+    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+    VERBATIM)
+add_library(dash_17559_vk SHARED ${GENERATED_SOURCES} src/system_ui_imports.cpp src/vk_imports.cpp)
+target_include_directories(dash_17559_vk PRIVATE generated/vk)
+target_link_libraries(dash_17559_vk PRIVATE rex::runtime)
+rexglue_apply_recomp_settings(dash_17559_vk
+    "${CMAKE_CURRENT_SOURCE_DIR}/generated/vk/dash_17559_pch.h")
+rexglue_configure_module_target(dash_17559_vk HOST dash_17559)
+add_dependencies(dash_17559 dash_17559_vk)
+
+include(generated/hud/sources.cmake)
+add_custom_command(
+    OUTPUT "${CMAKE_CURRENT_SOURCE_DIR}/generated/hud/codegen.build.stamp" ${GENERATED_SOURCES}
+    COMMAND $<TARGET_FILE:rex::rexglue> codegen
+            "${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_17559_manifest.toml"
+    DEPFILE "${CMAKE_CURRENT_SOURCE_DIR}/generated/hud/codegen.d"
+    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+    VERBATIM)
+add_library(dash_17559_hud SHARED ${GENERATED_SOURCES} src/system_ui_imports.cpp)
+target_include_directories(dash_17559_hud PRIVATE generated/hud)
+target_link_libraries(dash_17559_hud PRIVATE rex::runtime)
+rexglue_apply_recomp_settings(dash_17559_hud
+    "${CMAKE_CURRENT_SOURCE_DIR}/generated/hud/dash_17559_pch.h")
+rexglue_configure_module_target(dash_17559_hud HOST dash_17559)
+add_dependencies(dash_17559 dash_17559_hud)

@@ -1,0 +1,60 @@
+--- a/src/kernel/xam/xam_ui.cpp
++++ b/src/kernel/xam/xam_ui.cpp
+@@ -596,8 +596,8 @@
+ REX_EXPORT_STUB(__imp__XamShowBrandedKeyboardUI);
+ REX_EXPORT_STUB(__imp__XamShowChangeGamerTileUI);
+ REX_EXPORT_STUB(__imp__XamShowComplaintUI);
+-REX_EXPORT_STUB(__imp__XamShowCreateProfileUI);
+-REX_EXPORT_STUB(__imp__XamShowCreateProfileUIEx);
++
++
+ REX_EXPORT_STUB(__imp__XamShowCsvTransitionUI);
+ REX_EXPORT_STUB(__imp__XamShowCustomMessageComposeUI);
+ REX_EXPORT_STUB(__imp__XamShowCustomPlayerListUI);
+--- a/src/kernel/xam/xam_user.cpp
++++ b/src/kernel/xam/xam_user.cpp
+@@ -566,6 +566,27 @@
+   uint32_t request[544 / 4]{};
+   request[0] = user_index;
+   return DispatchProfileUi(0x21008, request, 544 / 4);
++}
++
++// Original 17559 816C34D8: user, mode, optional 114-byte payload.
++u32 XamShowCreateProfileUIEx_entry(u32 user, u32 mode, mapped_void extra) {
++  if (user >= 4) return X_ERROR_INVALID_PARAMETER;
++  uint32_t request[136 / 4]{};
++  request[0] = user;
++  request[1] = mode;
++  if (extra) {
++    uint8_t bytes[136]{};
++    std::memcpy(bytes + 16, extra.as<uint8_t*>(), 114);
++    for (size_t i = 4; i < 34; ++i)
++      request[i] = rex::memory::load_and_swap<uint32_t>(bytes + i * 4);
++  }
++  return DispatchProfileUi(0x2100E, request, 34);
++}
++u32 XamShowCreateProfileUI_entry(u32 user, u32 mode) {
++  if (user >= 4) return X_ERROR_INVALID_PARAMETER;
++  uint32_t request[136 / 4]{};
++  request[0] = user; request[1] = mode;
++  return DispatchProfileUi(0x2100E, request, 34);
+ }
+ 
+ // TODO(gibbed): probably a FILETIME/LARGE_INTEGER, unknown currently
+@@ -943,3 +964,6 @@
+ REX_EXPORT_STUB(__imp__XamVerifyPasscode);
+ 
+ REX_EXPORT(__imp__XamShowGamerCardUI, rex::kernel::xam::XamShowGamerCardUI_entry)
++
++REX_EXPORT(__imp__XamShowCreateProfileUI, rex::kernel::xam::XamShowCreateProfileUI_entry)
++REX_EXPORT(__imp__XamShowCreateProfileUIEx, rex::kernel::xam::XamShowCreateProfileUIEx_entry)
+--- a/src/kernel/xam/apps/xam_app.cpp
++++ b/src/kernel/xam/apps/xam_app.cpp
+@@ -32,6 +32,7 @@
+   auto buffer = memory_->TranslateVirtual(buffer_ptr);
+   switch (message) {
+     case 0x00021001:
++    case 0x0002100E:
+     case 0x00021008: {
+       auto xam = kernel_state_->GetKernelModule<rex::kernel::xam::XamModule>("xam.xex");
+       if (xam && xam->system_ui_request)

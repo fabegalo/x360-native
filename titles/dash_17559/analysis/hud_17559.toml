@@ -1,0 +1,3 @@
+[functions]
+0x913F987C = {} # memcpy byte remainder reached by branch at 913F98CC
+0x913E9200 = {} # original Guide class callback reached after sign-out, outside .pdata

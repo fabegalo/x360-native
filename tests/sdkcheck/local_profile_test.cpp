@@ -23,6 +23,8 @@ extern "C" void __imp__XamUserGetSigninInfo(PPCContext&, uint8_t*);
 extern "C" void __imp__XamUserGetXUID(PPCContext&, uint8_t*);
 extern "C" void __imp__XamUserGetSigninState(PPCContext&, uint8_t*);
 extern "C" void __imp__XamProfileCreateEnumerator(PPCContext&, uint8_t*);
+extern "C" void __imp__XamProfileCreate(PPCContext&, uint8_t*);
+extern "C" void __imp__XamProfileGetCreationStatus(PPCContext&, uint8_t*);
 extern "C" void __imp__XamProfileEnumerate(PPCContext&, uint8_t*);
 extern "C" void __imp__XamProfileFindAccount(PPCContext&, uint8_t*);
 extern "C" void __imp__XamProfileLoadAccountInfo(PPCContext&, uint8_t*);
@@ -43,6 +45,20 @@ extern "C" void __imp__XamUserGetUserFlags(PPCContext&, uint8_t*);
 extern "C" void __imp__GetSystemTimeAsFileTime(PPCContext&, uint8_t*);
 extern "C" void __imp__ExGetXConfigSetting(PPCContext&, uint8_t*);
 extern "C" void __imp__ExReadModifyWriteXConfigSettingUlong(PPCContext&, uint8_t*);
+extern "C" void __imp__XamNuiGetDeviceStatus(PPCContext&, uint8_t*);
+
+TEST_CASE("Guide device status preserves the caller stack after its 16-byte output",
+          "[sdk][guide-contract]") {
+  // Retail 17559 HUD 913F80F8 places the 16-byte status immediately before
+  // saved r29. The previous 24-byte SDK layout zeroed that saved register.
+  std::array<uint8_t, 48> bytes;
+  bytes.fill(0xA5);
+  PPCContext ctx{};
+  ctx.r3.u64 = 16;
+  __imp__XamNuiGetDeviceStatus(ctx, bytes.data());
+  for (unsigned i = 0; i < bytes.size(); ++i)
+    CHECK(bytes[i] == (i >= 16 && i < 32 ? 0 : 0xA5));
+}
 
 TEST_CASE("Local profile passcode comparison returns matching bytes in guest order",
           "[sdk][passcode-contract]") {
@@ -382,6 +398,160 @@ TEST_CASE("Local profile Sign-in imports copy request and bounded UTF16 identity
 }
 }
 
+TEST_CASE("Local profiles enumerate independently switch atomically and survive restart", "[sdk][local-profile]") {
+  Store store;
+  uint64_t first = 0, second = 0;
+  {
+    rex::Runtime rt(store.path, store.path);
+    Setup(rt);
+    auto* p = rt.kernel_state()->user_profile();
+    REQUIRE(p->CreateLocal("Alpha", &first) == 0);
+    REQUIRE(p->SetLocalSession(first) == 0);
+    REQUIRE(p->CreateLocal("Bravo", &second) == 0);
+    REQUIRE(first != second);
+    CHECK(p->xuid() == first);
+    CHECK(p->signin_state() == 1);
+    CHECK(p->CreateLocal("ALPHA") == X_ERROR_ALREADY_EXISTS);
+    auto* mem = rt.memory();
+    auto* base = mem->virtual_membase();
+    const auto data = mem->SystemHeapAlloc(4096);
+    PPCContext ctx{};
+    ctx.r3.u64 = 1; // selected local device from CreateProfile
+    ctx.r4.u64 = data;
+    __imp__XamProfileCreateEnumerator(ctx, base);
+    REQUIRE(ctx.r3.u32 == 0);
+    const auto handle = rex::memory::load_and_swap<uint32_t>(base + data);
+    for (auto xuid : {first, second}) {
+      ctx.r3.u64 = handle; ctx.r4.u64 = 2; ctx.r5.u64 = data + 16; ctx.r6.u64 = 0;
+      __imp__XamProfileEnumerate(ctx, base);
+      REQUIRE(ctx.r3.u32 == 0);
+      CHECK(rex::memory::load_and_swap<uint64_t>(base + data + 16) == xuid);
+    }
+    ctx.r3.u64 = handle; ctx.r4.u64 = 2; ctx.r5.u64 = data + 16; ctx.r6.u64 = 0;
+    __imp__XamProfileEnumerate(ctx, base);
+    CHECK(ctx.r3.u32 == X_ERROR_NO_MORE_FILES);
+    ctx.r3.u64 = handle; __imp__NtClose(ctx, base);
+    std::memset(base + data, 0, 392 * 4);
+    rex::memory::store_and_swap<uint64_t>(base + data, second);
+    ctx.r3.u64 = data; ctx.r4.u64 = 0x120424; ctx.r5.u64 = 0;
+    __imp__XamUserLogonEx(ctx, base);
+    REQUIRE(ctx.r3.u32 == 0);
+    CHECK(p->name() == "Bravo");
+    CHECK(p->FindLocal(first).signin_state == 0);
+    CHECK(p->FindLocal(second).signin_state == 1);
+    REQUIRE(p->SetLocalSession(first) == 0);
+    CHECK(p->name() == "Alpha");
+    REQUIRE(p->SetLocalSession(second) == 0);
+    mem->SystemHeapFree(data);
+  }
+  {
+    rex::Runtime rt(store.path, store.path);
+    Setup(rt);
+    auto* p = rt.kernel_state()->user_profile();
+    CHECK(p->local_profiles().size() == 2);
+    CHECK(p->xuid() == second);
+    CHECK(p->signin_state() == 1);
+    CHECK(p->FindLocal(first).name == "Alpha");
+    REQUIRE(p->SetLocalSession(0) == 0);
+  }
+  {
+    rex::Runtime rt(store.path, store.path);
+    Setup(rt);
+    auto* p = rt.kernel_state()->user_profile();
+    CHECK(p->local_profiles().size() == 2);
+    CHECK(p->signin_state() == 0);
+    REQUIRE(p->SetLocalSession(first) == 0);
+    CHECK(p->name() == "Alpha");
+  }
+}
+
+TEST_CASE("Local profile creation uses guest account and consumable operation handles", "[sdk][local-profile]") {
+  Store store;
+  rex::Runtime rt(store.path, store.path);
+  Setup(rt);
+  auto* mem = rt.memory();
+  const auto data = mem->SystemHeapAlloc(1024);
+  auto* base = mem->virtual_membase();
+  std::memset(base + data, 0, 1024);
+  auto* profile = rt.kernel_state()->user_profile();
+  PPCContext ctx{};
+  auto create = [&](const std::u16string& name) {
+    std::memset(base + data + 24, 0, 32);
+    for (size_t i = 0; i < name.size(); ++i)
+      rex::memory::store_and_swap<uint16_t>(base + data + 24 + i * 2, name[i]);
+    ctx.r3.u64 = 1; ctx.r4.u64 = data; ctx.r5.u64 = 0; ctx.r6.u64 = data + 16;
+    ctx.r7.u64 = 0; ctx.r8.u64 = 0; ctx.r9.u64 = 0; ctx.r10.u64 = data + 512;
+    __imp__XamProfileCreate(ctx, base);
+    REQUIRE(ctx.r3.u32 == 0);
+    const auto handle = rex::memory::load_and_swap<uint32_t>(base + data + 512);
+    REQUIRE(handle != 0);
+    ctx.r3.u64 = handle; ctx.r4.u64 = data + 520;
+    __imp__XamProfileGetCreationStatus(ctx, base);
+    const auto result = ctx.r3.u32;
+    const auto xuid = rex::memory::load_and_swap<uint64_t>(base + data + 520);
+    ctx.r3.u64 = handle; ctx.r4.u64 = data + 520;
+    __imp__XamProfileGetCreationStatus(ctx, base);
+    CHECK(ctx.r3.u32 == uint32_t(X_E_INVALIDARG));
+    return std::pair{result, xuid};
+  };
+  const auto [r1, x1] = create(u"CreateOne");
+  REQUIRE(r1 == 0);
+  CHECK(profile->FindLocal(x1).name == "CreateOne");
+  const auto [r2, x2] = create(u"CreateTwo");
+  REQUIRE(r2 == 0);
+  CHECK(x1 != x2);
+  CHECK(profile->local_profiles().size() == 2);
+  CHECK(profile->signin_state() == 0);
+  const auto [duplicate, invalid] = create(u"CREATEONE");
+  CHECK(duplicate == uint32_t(X_HRESULT_FROM_WIN32(X_ERROR_ALREADY_EXISTS)));
+  CHECK(invalid == 0);
+  CHECK(profile->local_profiles().size() == 2);
+  // Original CreateProfile 17559 confirms its newly created account with
+  // four XUIDs and Logon flags 0x24.
+  std::memset(base + data + 600, 0, 96);
+  rex::memory::store_and_swap<uint64_t>(base + data + 600, x2);
+  ctx.r3.u64 = data + 600; ctx.r4.u64 = 0x24; ctx.r5.u64 = 0;
+  __imp__XamUserLogon(ctx, base);
+  REQUIRE(ctx.r3.u32 == 0);
+  CHECK(profile->identity().xuid == x2);
+  CHECK(profile->identity().name == "CreateTwo");
+  CHECK(profile->signin_state() == 1);
+  mem->SystemHeapFree(data);
+}
+
+TEST_CASE("Guide sign-out removes only the active local identity", "[sdk][local-profile]") {
+  Store store;
+  rex::Runtime rt(store.path, store.path);
+  Setup(rt);
+  auto* profile = rt.kernel_state()->user_profile();
+  uint64_t alpha = 0, bravo = 0;
+  REQUIRE(profile->CreateLocal("Alpha", &alpha) == 0);
+  REQUIRE(profile->CreateLocal("Bravo", &bravo) == 0);
+  REQUIRE(profile->SetLocalSession(alpha) == 0);
+  const auto users = rt.memory()->SystemHeapAlloc(32);
+  auto* base = rt.memory()->virtual_membase();
+  std::memset(base + users, 0, 32);
+  auto remove = [&](uint64_t xuid) {
+    rex::memory::store_and_swap<uint64_t>(base + users, xuid);
+    PPCContext ctx{};
+    ctx.r3.u64 = users; ctx.r4.u64 = 0x28; ctx.r5.u64 = 0;
+    __imp__XamUserLogon(ctx, base);
+    return ctx.r3.u32;
+  };
+  CHECK(remove(bravo) == uint32_t(X_HRESULT_FROM_WIN32(X_ERROR_NO_SUCH_USER)));
+  CHECK(profile->identity().xuid == alpha);
+  CHECK(profile->signin_state() == 1);
+  REQUIRE(remove(alpha) == 0);
+  CHECK(profile->signin_state() == 0);
+  CHECK(profile->local_profiles().size() == 2);
+  rex::system::xam::UserProfile recovered;
+  REQUIRE(recovered.InitializeLocal(store.path));
+  CHECK(recovered.signin_state() == 0);
+  CHECK(recovered.FindLocal(alpha).name == "Alpha");
+  CHECK(recovered.FindLocal(bravo).name == "Bravo");
+  rt.memory()->SystemHeapFree(users);
+}
+
 TEST_CASE("Local profile commits real XAM identity and recovers session on restart", "[sdk][local-profile]") {
   Store store;
   uint64_t saved_xuid = 0;
@@ -400,7 +570,7 @@ TEST_CASE("Local profile commits real XAM identity and recovers session on resta
     CHECK((saved_xuid & 0xFFF0000000000000ull) == 0xE000000000000000ull);
     CHECK((saved_xuid & 0x00C0000000000000ull) == 0);
     CHECK_FALSE(listener->DequeueNotification(0xA, &param));
-    CHECK(profile->CreateLocal("Another") == X_ERROR_ALREADY_EXISTS);
+    CHECK(profile->CreateLocal("marina") == X_ERROR_ALREADY_EXISTS);
 
     auto* mem = rt.memory();
     const auto users = mem->SystemHeapAlloc(392 * 4);
@@ -520,7 +690,7 @@ TEST_CASE("Local profile logon completes overlapped with the real result", "[sdk
       *ov = {};
       ov->result = 997;
       rex::memory::store_and_swap<uint64_t>(memory->TranslateVirtual(users), xuid);
-      ctx->r3.u64 = users; ctx->r4.u64 = 0; ctx->r5.u64 = overlap;
+      ctx->r3.u64 = users; ctx->r4.u64 = 0x24; ctx->r5.u64 = overlap;
       __imp__XamUserLogon(*ctx, memory->virtual_membase());
       return ctx->r3.u32;
     };
@@ -548,4 +718,67 @@ TEST_CASE("Local profile logon completes overlapped with the real result", "[sdk
   CHECK(profile->signin_state() == 1);
   memory->SystemHeapFree(overlap);
   memory->SystemHeapFree(users);
+}
+
+extern "C" void __imp__XGetOverlappedResult(PPCContext&, uint8_t*);
+extern "C" void __imp__XGetOverlappedExtendedError(PPCContext&, uint8_t*);
+TEST_CASE("Profile device completion queries return results and honor nonblocking waits", "[sdk][local-profile]") {
+  Store store;
+  rex::Runtime rt(store.path, store.path);
+  Setup(rt);
+  auto* mem = rt.memory();
+  const auto data = mem->SystemHeapAlloc(64);
+  auto* ov = mem->TranslateVirtual<rex::system::XAM_OVERLAPPED*>(data);
+  *ov = {};
+  ov->result = X_ERROR_IO_PENDING;
+  PPCContext ctx{};
+  ctx.r3.u64 = data; ctx.r4.u64 = data + 32; ctx.r5.u64 = 0;
+  __imp__XGetOverlappedResult(ctx, mem->virtual_membase());
+  CHECK(ctx.r3.u32 == X_ERROR_IO_INCOMPLETE);
+  ctx.r3.u64 = data;
+  __imp__XGetOverlappedExtendedError(ctx, mem->virtual_membase());
+  CHECK(ctx.r3.u32 == X_ERROR_IO_INCOMPLETE);
+  ov->result = X_ERROR_SUCCESS; ov->length = 7; ov->extended_error = 0;
+  ctx.r3.u64 = data; ctx.r4.u64 = data + 32; ctx.r5.u64 = 1;
+  __imp__XGetOverlappedResult(ctx, mem->virtual_membase());
+  CHECK(ctx.r3.u32 == 0);
+  CHECK(rex::memory::load_and_swap<uint32_t>(mem->TranslateVirtual(data + 32)) == 7);
+  ov->result = X_ERROR_CANCELLED; ov->extended_error = X_ERROR_CANCELLED;
+  ctx.r3.u64 = data;
+  __imp__XGetOverlappedExtendedError(ctx, mem->virtual_membase());
+  CHECK(ctx.r3.u32 == X_ERROR_CANCELLED);
+  mem->SystemHeapFree(data);
+}
+
+TEST_CASE("Multi-profile migration and failed writes preserve the last committed identities", "[sdk][local-profile]") {
+  Store store;
+  rex::system::xam::UserProfile profile;
+  REQUIRE(profile.InitializeLocal(store.path));
+  REQUIRE(profile.CreateLocal("First") == 0);
+  const auto first = profile.xuid();
+  REQUIRE(profile.SetLocalSession(first) == 0);
+  const auto staging = store.path / "profiles/local-v2.dat.tmp";
+  std::filesystem::create_directory(staging);
+  CHECK(profile.CreateLocal("Second") == X_ERROR_FUNCTION_FAILED);
+  CHECK(profile.local_profiles().size() == 1);
+  CHECK(profile.signin_state() == 1);
+  CHECK_FALSE(std::filesystem::exists(store.path / "profiles/local-v2.dat"));
+  std::filesystem::remove(staging);
+  uint64_t second = 0;
+  REQUIRE(profile.CreateLocal("Second", &second) == 0);
+  std::filesystem::create_directory(staging);
+  CHECK(profile.SetLocalSession(second) == X_ERROR_FUNCTION_FAILED);
+  CHECK(profile.xuid() == first);
+  rex::system::xam::UserProfile recovered;
+  REQUIRE(recovered.InitializeLocal(store.path));
+  CHECK(recovered.local_profiles().size() == 2);
+  CHECK(recovered.xuid() == first);
+  CHECK(recovered.signin_state() == 1);
+  std::filesystem::remove(staging);
+  { std::ofstream corrupt(store.path / "profiles/local-v2.dat", std::ios::binary); corrupt << "broken"; }
+  CHECK_FALSE(recovered.InitializeLocal(store.path));
+  CHECK(recovered.local_profiles().empty());
+  CHECK(recovered.CreateLocal("Replacement") == X_ERROR_FUNCTION_FAILED);
+  CHECK(std::filesystem::file_size(store.path / "profiles/local-v2.dat") == 6);
+  CHECK(std::filesystem::file_size(store.path / "profiles/local-v1.dat") == 33);
 }

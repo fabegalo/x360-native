@@ -1,0 +1,13 @@
+--- a/include/rex/kernel/xam/module.h
++++ b/include/rex/kernel/xam/module.h
+@@ -66,7 +66,9 @@
+   }
+   bool EnableSystemUiInput(uint32_t user, bool enable) {
+     std::lock_guard lock(system_apps_mutex_);
+-    if (!system_ui_.module || (user != system_ui_.user &&
++    // XAM 816F24F8 enables all controllers for FF; original Sign-in uses
++    // this regardless of its requesting user. Ownership remains unchanged.
++    if (!system_ui_.module || (user != 0xFF && user != system_ui_.user &&
+         !(system_ui_.user == 0xFF && user < 4))) return false;
+     system_ui_.input_enabled = enable;
+     return true;

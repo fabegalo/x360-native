@@ -1,11 +1,11 @@
 label = "Dashboard Retail 17559"
 kind = "dashboard"
 label_en = "Retail dashboard 17559"
-limitations_en = "Menu and Castle Crashers cycle validated locally. Profiles/Guide and saves are still pending. Only verified components from this set are accepted; original content is never downloaded."
+limitations_en = "Menu, Castle Crashers cycle and local profile creation/switching through the original UI validated locally. One active local profile in slot 0; Xbox Live, full Guide coverage and game saves remain pending. Original content is never downloaded."
 session = true
-limitations = "Menu e ciclo com Castle Crashers validados. Perfis/Guide e saves ainda pendentes. Importação aceita somente os componentes deste conjunto; nenhum download de conteúdo original."
+limitations = "Menu, ciclo com Castle Crashers e criação/troca de perfis locais pela interface original validados. Um perfil local ativo no slot 0; Xbox Live, cobertura completa do Guide e saves de jogos seguem pendentes. Nenhum download de conteúdo original."
 library_targets = ["castle_crashers"]
-runtime_files = ["rexruntimerd.dll", "rexgpu-xenosrd.dll", "TracyClientrd.dll", "dash_17559_bootanim.dll", "dash_17559_gamerprofile.dll", "dash_17559_xam_ui.dll"]
+runtime_files = ["rexruntimerd.dll", "rexgpu-xenosrd.dll", "TracyClientrd.dll", "dash_17559_bootanim.dll", "dash_17559_gamerprofile.dll", "dash_17559_xam_ui.dll", "dash_17559_signin.dll", "dash_17559_createprofile.dll", "dash_17559_vk.dll", "dash_17559_hud.dll"]
 
 [[files]]
 path = "dash.xex"
@@ -51,3 +51,19 @@ sha256 = "78b3dbd8ae866f4258f5444205486ea9f8451afaa30f469c875dcf345f828467"
 path = "system/huduiskin.xex"
 source_name = "huduiskin.xex"
 sha256 = "fdbe68d20fa6b013282ce8f21cebddc34fe4e3a92a71c28983d63f288d2252cc"
+[[files]]
+path = "system/signin.xex"
+source_name = "signin.xex"
+sha256 = "86695c6c36250cc4b4addb7ccc07d15d54492b352c979cf5c0934804109a6130"
+[[files]]
+path = "system/createprofile.xex"
+source_name = "createprofile.xex"
+sha256 = "c5dae66e2e7b408ef6d84d659a2232ad89f01d78fa38c365d8732f2e0a221bbd"
+[[files]]
+path = "vk.xex"
+source_name = "vk.xex"
+sha256 = "876ddbb333d83f408ab7c69267703e623daef6da5b1eb3302bd94d246155724e"
+[[files]]
+path = "system/hud.xex"
+source_name = "hud.xex"
+sha256 = "37e10612afde211e1d349838704f7cc2648ad5a4d1f8ca459f18ecd2c1f31ac7"

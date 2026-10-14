@@ -1,0 +1,4 @@
+[functions]
+0x90109DAC = {} # memcpy byte remainder reached by branch at 90109DFC
+0x90103378 = {} # original operation-result HRESULT callback, outside .pdata
+0x90103368 = {} # original operation destructor dispatch

@@ -12,6 +12,8 @@ void CallUi(PPCContext& ctx, uint8_t* base, uint32_t address) {
 }
 }
 extern "C" REX_FUNC(__imp__XamGetOnlineSchema) { CallUi(ctx, base, 0x816E2030); }
+extern "C" REX_FUNC(__imp__XuiNavButtonGetPressPath) { CallUi(ctx, base, 0x817C08C0); }
+extern "C" REX_FUNC(__imp__XUIElementPropVal_SetUint) { CallUi(ctx, base, 0x817A9238); }
 extern "C" REX_FUNC(__imp__XamLookupCommonStringByIndex) { CallUi(ctx, base, 0x816E0BF0); }
 extern "C" REX_FUNC(__imp__XamShowMessageBox) { CallUi(ctx, base, 0x816CB168); }
 extern "C" REX_FUNC(__imp__XuiControlSetItemAssociation) { CallUi(ctx, base, 0x817C04B0); }
@@ -76,6 +78,7 @@ extern "C" REX_FUNC(__imp__XuiResourceLoadAll) { CallUi(ctx, base, 0x817DB7A8); 
 extern "C" REX_FUNC(__imp__XuiImageElementSetImagePath) { CallUi(ctx, base, 0x817C1348); }
 extern "C" REX_FUNC(__imp__XuiControlGetVisual) { CallUi(ctx, base, 0x817BFF00); }
 extern "C" REX_FUNC(__imp__XuiLookupStringTableByIndex) { CallUi(ctx, base, 0x817BE098); }
+extern "C" REX_FUNC(__imp__XuiLookupStringTable) { CallUi(ctx, base, 0x817BE0D8); }
 extern "C" REX_FUNC(__imp__XuiCreateSolidBrush) { CallUi(ctx, base, 0x8177DF20); }
 extern "C" REX_FUNC(__imp__XuiSceneInterruptTransitions) { CallUi(ctx, base, 0x817C0B70); }
 extern "C" REX_FUNC(__imp__GamerCardStartup) { CallUi(ctx, base, 0x81725388); }
@@ -94,3 +97,36 @@ extern "C" REX_FUNC(__imp__XuiElementSetOpacity) { CallUi(ctx, base, 0x817BD450)
 extern "C" REX_FUNC(__imp__XuiControlAttachVisual) { CallUi(ctx, base, 0x817C0008); }
 extern "C" REX_FUNC(__imp__XuiElementTreeHasFocus) { CallUi(ctx, base, 0x817BFC10); }
 extern "C" REX_FUNC(__imp__XuiSceneIsInTransition) { CallUi(ctx, base, 0x817C0AA0); }
+extern "C" REX_FUNC(__imp__XuiEditSetTextLimit) { CallUi(ctx, base, 0x817D6FD8); }
+extern "C" REX_FUNC(__imp__XuiControlGetNavigation) { CallUi(ctx, base, 0x817C0560); }
+extern "C" REX_FUNC(__imp__XuiElementHasFocus) { CallUi(ctx, base, 0x817BC668); }
+extern "C" REX_FUNC(__imp__XuiEditSetTextFormatInfo) { CallUi(ctx, base, 0x817D31A8); }
+extern "C" REX_FUNC(__imp__XuiSetMessageFilter) { CallUi(ctx, base, 0x817ACA80); }
+extern "C" REX_FUNC(__imp__XuiElementSetPosition) { CallUi(ctx, base, 0x817BD1B0); }
+extern "C" REX_FUNC(__imp__XuiFreeUnusedTextures) { CallUi(ctx, base, 0x8177E228); }
+extern "C" REX_FUNC(__imp__XuiElementGetPosition) { CallUi(ctx, base, 0x817BD140); }
+extern "C" REX_FUNC(__imp__XuiElementGetId) { CallUi(ctx, base, 0x817BD6A8); }
+extern "C" REX_FUNC(__imp__XuiElementGetNext) { CallUi(ctx, base, 0x817BCE00); }
+extern "C" REX_FUNC(__imp__XuiElementInsertChild) { CallUi(ctx, base, 0x817BCF30); }
+// Query the original package registry. An absent AvatarMiniCreator package
+// takes CreateProfile's original completion page instead of a stub's stale r3.
+extern "C" REX_FUNC(__imp__XamPackageManagerGetFileSize) { CallUi(ctx, base, 0x816EA4A0); }
+extern "C" REX_FUNC(__imp__XamIsGuideDisabled) { CallUi(ctx, base, 0x816E16F0); }
+// The local dashboard host has no XAM game-info provider. Report that boundary
+// honestly: Guide 913E5518 checks HRESULT before using its icon memory key.
+// A stub's unchanged positive r3 was treated as a populated icon and decoded
+// address zero as PNG. The original Guide supplies its own absent-info branch.
+extern "C" REX_FUNC(__imp__XamLoaderGetGameInfo) { ctx.r3.u64 = 0x80004001u; }
+extern "C" REX_FUNC(__imp__XuiElementGetLastChild) { CallUi(ctx, base, 0x817BCD68); }
+extern "C" REX_FUNC(__imp__XuiScenePlayBackToTransition) { CallUi(ctx, base, 0x817C4DE8); }
+extern "C" REX_FUNC(__imp__XuiScenePlayFromTransition) { CallUi(ctx, base, 0x817C4E98); }
+extern "C" REX_FUNC(__imp__XuiDefault_EmptyString) { CallUi(ctx, base, 0x817B41D8); }
+extern "C" REX_FUNC(__imp__XuiDefault_IntegerZero) { CallUi(ctx, base, 0x817B4328); }
+extern "C" REX_FUNC(__imp__XuiSliderSetValue) { CallUi(ctx, base, 0x817C1720); }
+extern "C" REX_FUNC(__imp__XuiSliderGetValue) { CallUi(ctx, base, 0x817C1788); }
+extern "C" REX_FUNC(__imp__XuiSliderSetRange) { CallUi(ctx, base, 0x817C1608); }
+extern "C" REX_FUNC(__imp__XuiSliderGetRange) { CallUi(ctx, base, 0x817C1690); }
+extern "C" REX_FUNC(__imp__XuiElementGetTimeline) { CallUi(ctx, base, 0x817BDBC0); }
+extern "C" REX_FUNC(__imp__XuiTabSceneGoto) { CallUi(ctx, base, 0x817C1C18); }
+extern "C" REX_FUNC(__imp__XuiTabSceneGetCurrentTab) { CallUi(ctx, base, 0x817C1D40); }
+extern "C" REX_FUNC(__imp__XUITimeline_Run) { CallUi(ctx, base, 0x817AB190); }

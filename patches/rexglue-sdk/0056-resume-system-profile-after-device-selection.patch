@@ -1,0 +1,51 @@
+--- a/include/rex/kernel/xam/module.h
++++ b/include/rex/kernel/xam/module.h
+@@ -42,7 +42,7 @@
+   std::function<X_HRESULT(uint32_t, uint32_t, uint32_t)> system_ui_request;
+   struct SystemUiSession {
+     uint32_t module = 0, user = 0;
+-    bool visible = false, input_enabled = false, close_requested = false;
++    bool visible = false, input_enabled = false, close_requested = false, resume_requested = false;
+   };
+   // One foreground system application. Rendering and guest destruction belong
+   // to the selected original UI host, outside these locks and export calls.
+@@ -75,6 +75,18 @@
+     std::lock_guard lock(system_apps_mutex_);
+     if (!system_ui_.module) return false;
+     system_ui_.close_requested = true;
++    return true;
++  }
++  bool RequestSystemUiResume(uint32_t module) {
++    std::lock_guard lock(system_apps_mutex_);
++    if (!module || module != system_ui_.module) return false;
++    system_ui_.resume_requested = true;
++    return true;
++  }
++  bool ConsumeSystemUiResume(uint32_t module) {
++    std::lock_guard lock(system_apps_mutex_);
++    if (!module || module != system_ui_.module || !system_ui_.resume_requested) return false;
++    system_ui_.resume_requested = false;
+     return true;
+   }
+   bool EndSystemUi(uint32_t module) {
+--- a/src/kernel/xam/xam_ui.cpp
++++ b/src/kernel/xam/xam_ui.cpp
+@@ -509,6 +509,18 @@
+                 uint32_t(user_index), uint32_t(content_type), uint32_t(content_flags),
+                 uint64_t(total_requested), device_id_ptr.guest_address(),
+                 overlapped.guest_address());
++  if (!device_id_ptr) return X_ERROR_INVALID_PARAMETER;
++  auto xam = REX_KERNEL_STATE()->GetKernelModule<XamModule>("xam.xex");
++  const auto session = xam->GetSystemUiSession();
++  if (session.module && content_type == 0x10000 && content_flags == 0x40200) {
++    // The existing local content service has one device. The original system
++    // app resumes initialization after this nested selector has completed.
++    *device_id_ptr = 1;
++    if (overlapped)
++      REX_KERNEL_STATE()->CompleteOverlappedImmediate(overlapped.guest_address(), 0);
++    xam->RequestSystemUiResume(session.module);
++    return overlapped ? X_ERROR_IO_PENDING : X_ERROR_SUCCESS;
++  }
+   return xeXamDispatchHeadless(
+       [device_id_ptr]() -> X_RESULT {
+         // NOTE: 0x00000001 is our dummy device ID from xam_content.cc

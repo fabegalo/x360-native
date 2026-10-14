@@ -1,0 +1,21 @@
+--- a/src/kernel/xam/xam_user.cpp
++++ b/src/kernel/xam/xam_user.cpp
+@@ -61,7 +61,8 @@
+ // 8199EEC0 replaces the slot array for flags=0 (zero XUID signs that slot out).
+ // Original Sign-in 17559 (901186BC-90118720) uses 0x120420 for its
+ // replacement confirmation and 0x120424 for merge confirmation. The closing
+-// snapshot uses Logon(0x63) with four XUIDs. Live and additional slots remain
++// snapshot uses Logon(0x63) with four XUIDs. CreateProfile 17559 uses
++// Logon(0x24) to select the newly persisted local identity. Live and additional slots remain
+ // unsupported; all supported modes go through the persistent local store.
+ static uint32_t LocalLogon(mapped_void users, uint32_t flags, uint32_t overlapped,
+                            uint32_t stride) {
+@@ -69,7 +70,7 @@
+   if (!users) return uint32_t(X_E_INVALIDARG);
+   const bool append = stride == 392 && flags == 0x120424;
+   if (flags && !(stride == 392 && (flags == 0x120420 || append)) &&
+-      !(stride == 8 && flags == 0x63)) return 0x80004001u;
++      !(stride == 8 && (flags == 0x63 || flags == 0x24))) return 0x80004001u;
+   auto* bytes = users.as<uint8_t*>();
+   for (unsigned i = 1; i < 4; ++i) {
+     if (rex::memory::load_and_swap<uint64_t>(bytes + i * stride))
