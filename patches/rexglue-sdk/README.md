@@ -521,6 +521,13 @@ with instrumentation disabled.
 
 ## 0073 — Index immutable GPU register metadata
 
+**Withdrawn at P3 close (2026-10-14).** This file is retained as experimental
+evidence but is not listed in `deps.lock.json` and must not be applied. The
+original switch is restored byte-for-byte. The accepted pair reduced CPU by
+3.97% but worsened 1% low by 27.78%; existing repeats cannot establish that
+this is only noise. No simple correction with consistent benefit was identified.
+The probe, instrumentation and all benchmark results remain available.
+
 `RegisterFile::GetRegisterInfo` uses a constant indexed table generated from the
 same register definitions instead of a large switch. Known names/types, stable
 metadata pointers and null results for unknown/out-of-range registers are

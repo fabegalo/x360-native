@@ -994,17 +994,6 @@
                                                       },
                                             "file":  "patches/rexglue-sdk/0072-isolate-performance-counter-cache-lines.patch",
                                             "test":  "sdkcheck.Performance counters; sdkcheck.Performance snapshots"
-                                        },
-                                        {
-                                          "file": "patches/rexglue-sdk/0073-index-gpu-register-metadata.patch",
-                                          "sha256": "6e104ec590ce99cce073795c6f545aec7a723dbe325deed684c1f09a40fd375d",
-                                          "base_files": {
-                                            "src/graphics/register_file.cpp": "cc88114b73b98f7eecbd3af37b9f6a0b206b82fbb941bef236192916923bc5e0"
-                                          },
-                                          "files": {
-                                            "src/graphics/register_file.cpp": "dbd1f10b419a2f7bfafbcb43cc1c69c6cbbafe4ba929ddb7d017208baca89e42"
-                                          },
-                                          "test": "x360n_register_info_probe: exhaustive metadata equivalence and explicit before/after lookup benchmark"
                                         }
                                     ]
                     },

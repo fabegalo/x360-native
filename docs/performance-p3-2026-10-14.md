@@ -1,11 +1,45 @@
 # P3 — perfil real e consulta de registradores GPU
 
-Estado: validação em andamento; não interpretar resultados parciais como aceite.
+Decisão de encerramento: **retirar a otimização 0073**, preservando a
+instrumentação, os probes e todas as capturas. Não há ganho global aprovado.
 Continuação de `feed952`, preservando a P2 e o SDK fixado em `f5337cdc`.
 
-## Situação do aceite
+## Decisão final
 
-P3 **não concluída**. O primeiro par aceito apresenta redução de CPU, mas pior
+O par válido tem CPU −3,97%, mas 1% low −27,78%. A revisão direta dos CSVs
+existentes encontrou 0/2/2/1 frames acima de 50 ms em before-01, after-01,
+after-03 e before-02, respectivamente. Os máximos são 49,176 / 131,693 /
+145,770 / 50,191 ms. Os dois picos acima de 100 ms da candidata coincidem
+com criação de pipeline (114.696 e 244.668 us). Isso é associação temporal,
+não prova causal contra a tabela de registradores. O segundo par continua
+recusado: não se pode certificar regressão reproduzível em condições equivalentes
+nem descartá-la como ruído estatístico. Não se juntaram frames como réplicas
+independentes nem se retiraram os picos dos resultados.
+
+Sem correção simples respaldada pelas evidências, foi escolhida a reversão
+conservadora solicitada, sem nova rodada de 16 sessões ou investigação adicional.
+`register_file.cpp` voltou ao SHA-256 anterior
+`cc88114b73b98f7eecbd3af37b9f6a0b206b82fbb941bef236192916923bc5e0`.
+0073 foi removido somente da lista ativa do lock; seu arquivo fica como histórico
+explicitamente retirado. Os 72 patches restantes passaram na verificação.
+O probe recompilado via devshell passou nos 65.540 índices/3.434 registradores,
+checksum 93604644. O teste e seu alvo CMake permanecem disponíveis.
+
+Forza e dashboard foram preparados pelo driver normal, ambos com saída 0 e
+recibos reais; não se copiaram executáveis congelados para a preparação.
+Na checagem iniciada, a 17559 abriu My Games e lançou o Forza na mesma janela,
+com o perfil existente e endpoint de áudio estéreo a 48 kHz. A tela PRESS START
+renderizou, mas as tentativas roteadas não avançaram para gameplay nessa sessão.
+O mantenedor então restringiu expressamente o encerramento a **frame pacing**:
+o ciclo foi encerrado, sem afirmar controles/retorno aprovados nessa execução,
+sem repetir Castle e sem iniciar outra investigação. As evidências funcionais
+anteriores continuam documentadas em `validation-forza-horizon.md`.
+Os arquivos persistentes acompanhados foram preservados, com cópia local anterior.
+Evidência local do encerramento: `.local/validation/p3-close/`.
+
+## Situação histórica antes da reversão
+
+Antes deste encerramento, P3 estava **não concluída**. O primeiro par aceito apresenta redução de CPU, mas pior
 frame pacing. A repetição não encerra essa investigação. Ainda faltam equivalência
 do ambiente nas repetições, aprovação do pacing e validação pós-mudança de
 controles, áudio e Dashboard → Forza → Dashboard. O executável na preparação
@@ -152,3 +186,18 @@ fonte SDK corrente. Não faz parte dos benchmarks automáticos.
 
 Evidência pública em `benchmarks/results/2026-10-14/p3`; logs, PNGs, CSVs e dados
 privados continuam em `.local/benchmarks/p3-*`. Sem push ou Release.
+
+## Coleta única de encerramento
+
+`p3-restored-final`: 881 intervalos, 29,964 s, 29,402 FPS, 1% low 10,329,
+P95 35,672 ms e P99 48,547 ms. Captura inicial na cinemática do diner e final
+na cena dirigível, cockpit a 105 MPH/3,1 mi: a janela atravessou a transição,
+diferentemente da baseline estacionária. Portanto **não comprova pacing normal**
+e não entra como par equivalente; `scene_verified=false` preservado. Não houve
+nova tentativa após a ordem de encerrar. JSON e dados brutos foram preservados.
+
+**P3 encerrada pela retirada integral da otimização, com a implementação
+anterior restaurada**, não por aprovação de desempenho da candidata. Não há
+P3 adicional nem compromisso de investigação. Nenhum push/Release ou trabalho
+no renderer Native. Os 11 arquivos persistentes acompanhados permaneceram
+byte a byte iguais. Os runners terminaram e seus filhos foram encerrados.

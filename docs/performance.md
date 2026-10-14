@@ -235,3 +235,6 @@ de benchmark durante builds ou outros jogos. Testar apenas regressões pertinent
    com identidade/versionamento/invalidação comprovados.
 
 Resultados: [2026-10-14](performance-results-2026-10-14.md).
+P3: [encerramento por reversão da otimização 0073](performance-p3-2026-10-14.md).
+Instrumentação e benchmarks preservados; a redução isolada de CPU não foi aceita
+como ganho global diante da piora observada de 1% low.

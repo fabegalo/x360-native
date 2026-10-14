@@ -1,19 +1,13 @@
 # STATUS
 
-P3 de performance em validação (2026-10-14), **não concluída**: patch candidato
-0073 troca o switch de metadata GPU por tabela constante, com equivalência em
-65.540 índices e build somente do plugin afetado. Perfil real local identificou
-espera ativa guest e consultas de registradores na thread de comandos; sem
-mudança PPC ou sincronização. Primeiro par válido: CPU −3,97%, porém 1% low pior;
-ganho global ainda não aprovado. Segundo par recusado pelo comparador por
-metadados/contexto de ambiente divergentes; uma tentativa não chegou à cena.
-ETW recusado pelo token Windows; frames OFF e tempo GPU por frame indisponíveis.
-WDDM coletado com limites explícitos. Castle menu passou a 60,002 FPS, sem erros.
-Faltam estabilizar a comparação/pacing e revalidar controles, áudio e ciclo
-Dashboard → Forza → Dashboard na candidata. Preparação normal do Forza permanece
-incompleta; não foi substituída por binário congelado nem recibo fabricado.
-P2, originais, saves e caches-semente preservados. Evidências e pendências:
-`docs/performance-p3-2026-10-14.md`.
+P3 encerrada por **reversão da otimização 0073** (2026-10-14). O ganho isolado
+de CPU de 3,97% não compensou a piora observada de 1% low; não há ganho global
+aprovado. Switch anterior restaurado byte a byte, 72 patches ativos verificados
+e probe de 65.540 índices aprovado. Instrumentação, benchmarks e evidências
+preservados. Forza e dashboard preparados normalmente com saída 0 e recibos
+reais. O mantenedor restringiu a checagem final a frame pacing: sem nova
+certificação de controles/retorno, sem repetir Castle e sem iniciar o renderer
+Native. Resultado da coleta única e limites: `docs/performance-p3-2026-10-14.md`.
 
 P2 de performance real concluída com limites explícitos (2026-10-14): 16 coletas
 OFF/ON intercaladas nos binários SDK0072 existentes, oito por jogo, com warmup e

@@ -1,0 +1,15 @@
+{
+  "decision": "withdraw_0073_restore_previous_behavior",
+  "sdk_commit": "f5337cdc947ff6d4c4196737e2c807a48f2a1fc2",
+  "active_patches": 72,
+  "register_source_sha256": "cc88114b73b98f7eecbd3af37b9f6a0b206b82fbb941bef236192916923bc5e0",
+  "restored_source_matches": true,
+  "removed_from_active_lock": true,
+  "patch_preserved": true,
+  "benchmark_history_preserved": true,
+  "causal_regression_proven": false,
+  "noise_only_proven": false,
+  "reason": "No consistently demonstrated overall benefit; withdraw according to requested acceptance rule.",
+  "restored_gpu_dll_sha256": "60c8dc0a13623966947e5cf4812088162d396fbcea15d7bf4763d8bd6761d527",
+  "build_note": "Normal Forza preparation completed with exit 0; DLL rebuilt, not required to be byte-identical to the previous linked artifact. Source function is byte-identical."
+}

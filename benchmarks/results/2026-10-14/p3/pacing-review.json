@@ -1,0 +1,222 @@
+[
+  {
+    "label": "p3-before-01",
+    "worst_nine": [
+      {
+        "ms": 49.176,
+        "pipeline_us": 0,
+        "shaders": 0
+      },
+      {
+        "ms": 37.212,
+        "pipeline_us": 0,
+        "shaders": 0
+      },
+      {
+        "ms": 36.217,
+        "pipeline_us": 0,
+        "shaders": 0
+      },
+      {
+        "ms": 36.206,
+        "pipeline_us": 0,
+        "shaders": 0
+      },
+      {
+        "ms": 36.141,
+        "pipeline_us": 0,
+        "shaders": 0
+      },
+      {
+        "ms": 36.106,
+        "pipeline_us": 0,
+        "shaders": 0
+      },
+      {
+        "ms": 36.102,
+        "pipeline_us": 0,
+        "shaders": 0
+      },
+      {
+        "ms": 36.06,
+        "pipeline_us": 0,
+        "shaders": 0
+      },
+      {
+        "ms": 35.946,
+        "pipeline_us": 0,
+        "shaders": 0
+      }
+    ],
+    "frames": 899,
+    "over_50ms": 0,
+    "over_100ms": 0,
+    "frames_csv_sha256": "68a098229e1c4e14b501bebdc59c3932e585000bff0a18f9ecca872739244218",
+    "scope": "Original 30-second window; includes all complete intervals, no outlier removal"
+  },
+  {
+    "label": "p3-after-01",
+    "worst_nine": [
+      {
+        "ms": 131.693,
+        "pipeline_us": 114696,
+        "shaders": 2
+      },
+      {
+        "ms": 52.309,
+        "pipeline_us": 0,
+        "shaders": 0
+      },
+      {
+        "ms": 49.715,
+        "pipeline_us": 0,
+        "shaders": 0
+      },
+      {
+        "ms": 49.428,
+        "pipeline_us": 0,
+        "shaders": 0
+      },
+      {
+        "ms": 37.733,
+        "pipeline_us": 0,
+        "shaders": 0
+      },
+      {
+        "ms": 37.451,
+        "pipeline_us": 0,
+        "shaders": 0
+      },
+      {
+        "ms": 37.191,
+        "pipeline_us": 0,
+        "shaders": 0
+      },
+      {
+        "ms": 37.053,
+        "pipeline_us": 0,
+        "shaders": 0
+      },
+      {
+        "ms": 37.05,
+        "pipeline_us": 0,
+        "shaders": 0
+      }
+    ],
+    "frames": 895,
+    "over_50ms": 2,
+    "over_100ms": 1,
+    "frames_csv_sha256": "1bc0d6ca3e8fcb8c40869e215b03e866257c59402c277e2f97a2854792f992e1",
+    "scope": "Original 30-second window; includes all complete intervals, no outlier removal"
+  },
+  {
+    "label": "p3-after-03",
+    "worst_nine": [
+      {
+        "ms": 145.77,
+        "pipeline_us": 244668,
+        "shaders": 6
+      },
+      {
+        "ms": 51.112,
+        "pipeline_us": 0,
+        "shaders": 0
+      },
+      {
+        "ms": 37.55,
+        "pipeline_us": 0,
+        "shaders": 0
+      },
+      {
+        "ms": 37.486,
+        "pipeline_us": 0,
+        "shaders": 0
+      },
+      {
+        "ms": 37.112,
+        "pipeline_us": 0,
+        "shaders": 0
+      },
+      {
+        "ms": 37.061,
+        "pipeline_us": 0,
+        "shaders": 0
+      },
+      {
+        "ms": 36.76,
+        "pipeline_us": 0,
+        "shaders": 0
+      },
+      {
+        "ms": 36.703,
+        "pipeline_us": 0,
+        "shaders": 0
+      },
+      {
+        "ms": 36.7,
+        "pipeline_us": 0,
+        "shaders": 0
+      }
+    ],
+    "frames": 895,
+    "over_50ms": 2,
+    "over_100ms": 1,
+    "frames_csv_sha256": "3664cdb77216a952ebf64f71907bd7ff6312c762a4bd483055c7a6d94c09147f",
+    "scope": "Original 30-second window; includes all complete intervals, no outlier removal"
+  },
+  {
+    "label": "p3-before-02",
+    "worst_nine": [
+      {
+        "ms": 50.191,
+        "pipeline_us": 0,
+        "shaders": 0
+      },
+      {
+        "ms": 48.605,
+        "pipeline_us": 0,
+        "shaders": 0
+      },
+      {
+        "ms": 36.748,
+        "pipeline_us": 0,
+        "shaders": 0
+      },
+      {
+        "ms": 36.434,
+        "pipeline_us": 0,
+        "shaders": 0
+      },
+      {
+        "ms": 36.387,
+        "pipeline_us": 0,
+        "shaders": 0
+      },
+      {
+        "ms": 36.225,
+        "pipeline_us": 0,
+        "shaders": 0
+      },
+      {
+        "ms": 36.113,
+        "pipeline_us": 0,
+        "shaders": 0
+      },
+      {
+        "ms": 36.074,
+        "pipeline_us": 0,
+        "shaders": 0
+      },
+      {
+        "ms": 36.007,
+        "pipeline_us": 0,
+        "shaders": 0
+      }
+    ],
+    "frames": 898,
+    "over_50ms": 1,
+    "over_100ms": 0,
+    "frames_csv_sha256": "57bac08549b1528fdbc90a2744a80021be6b411627be262fb1b5aedacefe79b3",
+    "scope": "Original 30-second window; includes all complete intervals, no outlier removal"
+  }
+]
