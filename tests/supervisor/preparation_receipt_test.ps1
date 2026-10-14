@@ -39,6 +39,20 @@ try {
     [IO.File]::WriteAllText((Join-Path $templates 'new.inja'), 'new template')
     Assert (-not (Test-ReceiptGlobs @($glob))) 'new template missing from graph was accepted'
     $build = Join-Path $scratch 'build'; [void][IO.Directory]::CreateDirectory($build)
+    $project = Join-Path $scratch 'title with spaces'; [void][IO.Directory]::CreateDirectory($project)
+    Assert (@(Get-AdditionalCodegenManifests $project $build).Count -eq 0) 'ordinary title requires an additional manifest list'
+    $manifest = Join-Path $project 'signin_17559_manifest.toml'
+    [IO.File]::WriteAllText($manifest, '[project]')
+    $manifestList = Join-Path $build 'x360n-codegen-manifests.txt'
+    [IO.File]::WriteAllLines($manifestList, @($manifest.Replace('\','/'), $manifest, ''))
+    $manifests = @(Get-AdditionalCodegenManifests $project $build)
+    Assert ($manifests.Count -eq 1 -and $manifests[0] -eq $manifest) 'explicit module list mishandled spaces or duplicates'
+    foreach ($invalid in @((Join-Path $scratch 'outside_manifest.toml'), (Join-Path $project 'missing_manifest.toml'))) {
+        [IO.File]::WriteAllText($manifestList, $invalid)
+        $failed = $false
+        try { Get-AdditionalCodegenManifests $project $build } catch { $failed = $true }
+        Assert $failed 'missing or out-of-project module accepted'
+    }
     $generated = Join-Path $build 'embedded.inja.h'; [IO.File]::WriteAllText($generated, 'stale generated template')
     Reset-GeneratedBuildOutputs $build @($generated, $inputFile)
     Assert (-not [IO.File]::Exists($generated)) 'stale generated template survived invalidation'

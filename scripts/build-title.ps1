@@ -51,10 +51,10 @@ if ($reuse) {
 $sourceSnapshot = @()
 
 $steps = @(
-    @{ name = '1-configure';  args = "cmake --preset x360n-win-amd64 -B `"$build`"" },
+    @{ name = '1-configure';  args = "cmake --preset x360n-win-amd64 -B `"$build`" -DX360N_CODEGEN_BOOTSTRAP=ON" },
     @{ name = '2-tool';       args = "cmake --build `"$build`" --target rexglue" },
     @{ name = '2-codegen';    args = '' },
-    @{ name = '3-reconfigure'; args = "cmake --preset x360n-win-amd64 -B `"$build`"" },
+    @{ name = '3-reconfigure'; args = "cmake --preset x360n-win-amd64 -B `"$build`" -DX360N_CODEGEN_BOOTSTRAP=OFF" },
     @{ name = '4-build';      args = "cmake --build `"$build`"" }
 )
 Push-Location $titleDir
@@ -123,21 +123,30 @@ try {
             # the XEX and analysis and skips unchanged modules by content.
             $s.args = "`"$tool`" codegen `"$manifest`" $ignore"
         }
-        Write-Output "X360N_STAGE $Title $($s.name)"
-        $log = Join-Path $build "x360n-build-$($s.name).log"
-        [IO.File]::WriteAllText($marker, "Preparing: $($s.name)`nLog: $log")
-        $sw = [Diagnostics.Stopwatch]::StartNew()
-        # Redirect inside cmd: in PowerShell 5.1 with ErrorActionPreference=Stop,
-        # native stderr (e.g. VsDevCmd's "'vswhere.exe' is not recognized") would
-        # otherwise become a terminating NativeCommandError.
-        cmd /c "`"$devshell`" $($s.args) > `"$log`" 2>&1"
-        $rc = $LASTEXITCODE
-        Write-Host ("step {0}: exit {1} in {2} s (log {3})" -f $s.name, $rc, [int]$sw.Elapsed.TotalSeconds, $log)
-        if ($rc -ne 0) {
-            [IO.File]::WriteAllText($marker, "Error: $($s.name), exit $rc`nLog: $log`n" + ((Get-Content $log -Tail 25) -join "`n"))
-            Get-Content $log | Select-String -Pattern 'error|FAILED' | Select-Object -First 10 | Out-Host
-            throw "Preparation failed at $($s.name), exit $rc"
+        $invocations = @($s)
+        if ($s.name -eq '2-codegen') {
+            $invocations += @(Get-AdditionalCodegenManifests $titleDir $build | ForEach-Object {
+                @{ name = '2-codegen-' + [IO.Path]::GetFileNameWithoutExtension($_);
+                   args = "`"$tool`" codegen `"$_`" $ignore" }
+            })
         }
+        foreach ($invocation in $invocations) {
+            Write-Output "X360N_STAGE $Title $($invocation.name)"
+            $log = Join-Path $build "x360n-build-$($invocation.name).log"
+            [IO.File]::WriteAllText($marker, "Preparing: $($invocation.name)`nLog: $log")
+            $sw = [Diagnostics.Stopwatch]::StartNew()
+            # Redirect inside cmd: in PowerShell 5.1 with ErrorActionPreference=Stop,
+            # native stderr (e.g. VsDevCmd's "'vswhere.exe' is not recognized") would
+            # otherwise become a terminating NativeCommandError.
+            cmd /c "`"$devshell`" $($invocation.args) > `"$log`" 2>&1"
+            $rc = $LASTEXITCODE
+            Write-Host ("step {0}: exit {1} in {2} s (log {3})" -f $invocation.name, $rc, [int]$sw.Elapsed.TotalSeconds, $log)
+            if ($rc -ne 0) {
+                [IO.File]::WriteAllText($marker, "Error: $($invocation.name), exit $rc`nLog: $log`n" + ((Get-Content $log -Tail 25) -join "`n"))
+                Get-Content $log | Select-String -Pattern 'error|FAILED' | Select-Object -First 10 | Out-Host
+                throw "Preparation failed at $($invocation.name), exit $rc"
+            }
+            }
         if ($s.name -in @('1-configure', '3-reconfigure')) {
             # CMake 3.31's __create_def calls CreateFileW without converting long
             # object paths (Source/bindexplib.cxx). Keep its generated object list

@@ -36,6 +36,20 @@ function Get-NinjaNodes([string]$Build, [string[]]$Targets) {
         }
     }
 }
+function Get-AdditionalCodegenManifests([string]$Project, [string]$Build) {
+    $list = Join-Path $Build 'x360n-codegen-manifests.txt'
+    if (-not [IO.File]::Exists($list)) { return }
+    $boundary = [IO.Path]::GetFullPath($Project).TrimEnd('\','/') + [IO.Path]::DirectorySeparatorChar
+    $seen = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    foreach ($line in [IO.File]::ReadAllLines($list)) {
+        if (-not $line.Trim()) { continue }
+        $file = [IO.Path]::GetFullPath($line)
+        if (-not $file.StartsWith($boundary, [StringComparison]::OrdinalIgnoreCase) -or
+            [IO.Path]::GetFileName($file) -notmatch '^[a-z][a-z0-9_]*_manifest\.toml$' -or
+            -not [IO.File]::Exists($file)) { throw "Invalid additional codegen manifest: $line" }
+        if ($seen.Add($file)) { $file }
+    }
+}
 function Get-BuildInputs([string]$Root, [string]$Title, [string]$Build, [string[]]$Targets) {
     $projectDirectory = (Get-BuildCache $Build).CMAKE_HOME_DIRECTORY
     $cache = Get-BuildCache $Build
@@ -85,6 +99,9 @@ function Get-BuildInputs([string]$Root, [string]$Title, [string]$Build, [string[
     }
     $registration = Join-Path $projectDirectory 'preparation.toml'
     if ([IO.File]::Exists($registration)) { [void]$files.Add($registration) }
+    $manifestList = Join-Path $Build 'x360n-codegen-manifests.txt'
+    if ([IO.File]::Exists($manifestList)) { [void]$files.Add($manifestList) }
+    foreach ($file in Get-AdditionalCodegenManifests $projectDirectory $Build) { [void]$files.Add($file) }
     foreach ($file in @('CMakeCache.txt','build.ninja','CMakeFiles/rules.ninja')) { [void]$files.Add((Join-Path $Build $file)) }
     $lock = Get-Content -Raw (Join-Path $Root 'deps.lock.json') | ConvertFrom-Json
     foreach ($patch in $lock.rexglue_sdk.patches) {
