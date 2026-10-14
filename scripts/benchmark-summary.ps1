@@ -19,7 +19,8 @@ function Get-BenchmarkSummary {
   $dt=($t-$p)*1000
   if($dt -le 0){throw 'Non-monotonic frame timestamps'}
   $frames.Add($dt)
-  if($r.process_cpu_us -ne '' -and $prev.process_cpu_us -ne '') {
+  if($null -ne $r.process_cpu_us -and $null -ne $prev.process_cpu_us -and
+     $r.process_cpu_us -ne '' -and $prev.process_cpu_us -ne '') {
    $delta=([double]$r.process_cpu_us-[double]$prev.process_cpu_us)/1000
    if($delta -lt 0){throw 'Non-monotonic process CPU time'}
    $cpu.Add($delta)
@@ -40,6 +41,8 @@ function Get-BenchmarkSummary {
   $cpuMean=$cpuSum/$frames.Count
   $cpuPercent=100*$cpuSum/$sum/$LogicalProcessors
  }
+ $unavailable=[ordered]@{gpu_ms_per_frame='No GPU timestamp queries wired';vram_bytes='No process VRAM provider wired';gameplay_ready_ms='No semantic ready signal; runtime-to-first-swap is separate';cpu_critical_path_ms='Process CPU is aggregate across all threads';hardware_cache_misses='No PMU sampling';pipeline_fast_path_hits='Existing counter excludes consecutive identical pipeline fast path'}
+ if($null -eq $cpuMean){$unavailable['process_cpu_ms_per_frame']='Missing process CPU samples in measurement window';$unavailable['process_cpu_percent_machine']='Missing process CPU samples in measurement window'}
  [ordered]@{
   frame_source='completed guest XE_SWAP cadence, not display scanout or GPU duration'
   frames=$frames.Count;measured_seconds=$sum/1000
@@ -51,7 +54,7 @@ function Get-BenchmarkSummary {
   process_cpu_ms_per_frame=$cpuMean;process_cpu_percent_machine=$cpuPercent
   runtime_to_first_swap_ms=[double]$rows[0].runtime_elapsed_us/1000
   gpu_ms_per_frame=$null;vram_bytes=$null;gameplay_ready_ms=$null
-  unavailable=[ordered]@{gpu_ms_per_frame='No GPU timestamp queries wired';vram_bytes='No process VRAM provider wired';gameplay_ready_ms='No semantic ready signal; runtime-to-first-swap is separate';cpu_critical_path_ms='Process CPU is aggregate across all threads';hardware_cache_misses='No PMU sampling';pipeline_fast_path_hits='Existing counter excludes consecutive identical pipeline fast path'}
+  unavailable=$unavailable
   counters=$totals
   whole_capture_counters=$captureTotals
  }

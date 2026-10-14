@@ -12,11 +12,36 @@ $ErrorActionPreference='Stop'
 $root=(Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 . "$PSScriptRoot/benchmark-summary.ps1"
 . "$PSScriptRoot/benchmark-window.ps1"
+function Save-BoundedCapture([int]$ProcessId,[string]$Path) {
+ # PrintWindow may block on an unresponsive title. Keep it in an owned helper
+ # so a capture cannot defeat the title's bounded execution contract.
+ $captureInfo=[Diagnostics.ProcessStartInfo]::new()
+ $captureInfo.FileName=(Get-Process -Id $PID).Path
+ $captureInfo.UseShellExecute=$false;$captureInfo.CreateNoWindow=$true
+ $captureInfo.RedirectStandardOutput=$true;$captureInfo.RedirectStandardError=$true
+ foreach($arg in @('-NoProfile','-File',"$PSScriptRoot/benchmark-window.ps1",'-CaptureProcessId',"$ProcessId",'-CapturePath',$Path)){$captureInfo.ArgumentList.Add($arg)}
+ $helper=[Diagnostics.Process]::Start($captureInfo)
+ $helperOut=$helper.StandardOutput.ReadToEndAsync();$helperErr=$helper.StandardError.ReadToEndAsync()
+ try {
+  if(!$helper.WaitForExit(5000)){throw 'Window capture exceeded 5 seconds'}
+  if($helper.ExitCode -ne 0 -or !(Test-Path $Path)){throw "Window capture failed: $($helperErr.Result)"}
+ } finally {
+  if(!$helper.HasExited){$helper.Kill($true);[void]$helper.WaitForExit(1000)}
+  $helper.Dispose()
+ }
+}
 if(!$ScenarioFile){$ScenarioFile=Join-Path $root 'benchmarks/scenarios.json'}
 $scenario=(Get-Content $ScenarioFile -Raw | ConvertFrom-Json).scenarios.$Title
 if(!$scenario){throw 'Scenario missing'}
 $start=[double]$scenario.start_seconds;$duration=[double]$scenario.duration_seconds
-if($start -lt 5 -or $duration -lt 5 -or $start+$duration -gt 280){throw 'Scenario plus cleanup must finish within 300 seconds'}
+if(![double]::IsFinite($start) -or ![double]::IsFinite($duration) -or $start -lt 5 -or $duration -lt 5 -or $start+$duration -gt 280){throw 'Scenario plus cleanup must finish within 300 seconds'}
+if(!$NoCapture -and $start -lt 8){throw 'Window capture requires at least 8 seconds of warmup'}
+foreach($event in $scenario.events){
+ if(![double]::IsFinite([double]$event.seconds) -or ![double]::IsFinite([double]$event.hold_seconds)){throw 'Input times must be finite'}
+ if([double]$event.hold_seconds -le 0 -or [double]$event.hold_seconds -gt 3){throw 'Input hold must be within (0, 3] seconds'}
+ if([double]$event.seconds -lt 0 -or [double]$event.seconds+[double]$event.hold_seconds -ge $start+$duration){throw 'Input event falls outside the bounded scenario'}
+ if([int]$event.vk -le 0 -or [int]$event.vk -gt 255 -or [int]$event.scan -le 0 -or [int]$event.scan -gt 127){throw 'Invalid input key/scan code'}
+}
 $out=Join-Path $root ".local/benchmarks/$Label/$Title"
 if(Test-Path $out){throw "Refusing to overwrite $out"}
 New-Item -ItemType Directory -Force $out | Out-Null
@@ -50,6 +75,9 @@ $csv=Join-Path $out 'frames.csv'
 $argsList=@('--gpu_plugin=xenos','--mnk_mode=true','--log_level=info',"--log_file=$out/rex.log","--game_data_root=$(Join-Path $root $scenario.game_root)","--user_data_root=$user","--cache_root=$user/cache","--perf_log_csv=$csv")+@($scenario.arguments)
 $metadata=[ordered]@{schema=1;title=$Title;label=$Label;utc=[DateTime]::UtcNow.ToString('o');head=(& git -C $root rev-parse HEAD).Trim();sdk_head=(& git -C "$root/external/rexglue-sdk" rev-parse HEAD).Trim();lock_sha256=(Get-FileHash "$root/deps.lock.json").Hash.ToLower();scenario=$scenario;scenario_sha256=(Get-FileHash $ScenarioFile).Hash.ToLower();hardware=$hardware;artifacts=$artifacts;arguments=$argsList;seed=$seedInventory;cache_condition='identical existing cache seed, OS filesystem cache uncontrolled';termination=$null;scene_verified=$false;runtime_origin_approx_ms=$null}
 $metadata | ConvertTo-Json -Depth 15 | Set-Content "$out/environment.json" -Encoding utf8
+$metadata['collector']=@('benchmark-runtime.ps1','benchmark-window.ps1','benchmark-summary.ps1' | ForEach-Object {
+ @{file=$_;sha256=(Get-FileHash (Join-Path $PSScriptRoot $_)).Hash.ToLower()}
+})
 $metadata['failure']=$null
 $gameRoot=Join-Path $root $scenario.game_root
 $metadata['original_xex']=@(Get-ChildItem -LiteralPath $gameRoot -Filter '*.xex' -File -Recurse | Sort-Object FullName | ForEach-Object {
@@ -62,9 +90,15 @@ $si=[Diagnostics.ProcessStartInfo]::new();$si.FileName=$exe;$si.WorkingDirectory
 $si.UseShellExecute=$false;$si.CreateNoWindow=$true
 $si.RedirectStandardOutput=$true;$si.RedirectStandardError=$true
 foreach($arg in $argsList){$si.ArgumentList.Add($arg)}
+$samples=[Collections.Generic.List[object]]::new();$events=[Collections.Generic.List[object]]::new()
+$pressId=0
+foreach($event in $scenario.events){
+ $pressId++
+ $events.Add(@{at=[double]$event.seconds;vk=[int]$event.vk;scan=[int]$event.scan;down=$true;sent=$false;press=$pressId;hold=[double]$event.hold_seconds})
+ $events.Add(@{at=[double]$event.seconds+[double]$event.hold_seconds;vk=[int]$event.vk;scan=[int]$event.scan;down=$false;sent=$false;press=$pressId})
+}
 $p=[Diagnostics.Process]::Start($si);$stdout=$p.StandardOutput.ReadToEndAsync();$stderr=$p.StandardError.ReadToEndAsync()
-$clock=[Diagnostics.Stopwatch]::StartNew();$samples=[Collections.Generic.List[object]]::new();$events=[Collections.Generic.List[object]]::new()
-foreach($event in $scenario.events){$events.Add(@{at=[double]$event.seconds;vk=[int]$event.vk;scan=[int]$event.scan;down=$true;sent=$false});$events.Add(@{at=[double]$event.seconds+[double]$event.hold_seconds;vk=[int]$event.vk;scan=[int]$event.scan;down=$false;sent=$false})}
+$clock=[Diagnostics.Stopwatch]::StartNew()
 $before=$false;$after=$false;$nextSample=0;$runtimeOffset=$null
 # Only the external 1-Hz RAM sample alignment uses NTFS file creation time.
 # All FPS/CPU reductions use native monotonic timestamps and native CPU totals.
@@ -73,8 +107,13 @@ $metadata['pid']=$p.Id
 try {
  while(!$p.HasExited -and $clock.Elapsed.TotalSeconds -lt $start+$duration+20) {
   $t=$clock.Elapsed.TotalSeconds
-  foreach($event in $events){if(!$event.sent -and $t -ge $event.at){Send-BenchmarkKey $p.Id $event.vk $event.scan $event.down;$event.sent=$true;$event.actual_seconds=$t}}
-  if(!$NoCapture -and !$before -and $t -ge $start-2){Save-BenchmarkWindow $p.Id "$out/before.png";$before=$true}
+  foreach($event in $events){if(!$event.sent -and $t -ge $event.at){
+   Send-BenchmarkKey $p.Id $event.vk $event.scan $event.down
+   $event.sent=$true;$event.actual_seconds=$clock.Elapsed.TotalSeconds
+   # Preserve the requested hold after asynchronous foreground/focus delivery.
+   if($event.down){foreach($release in $events){if(!$release.down -and $release.press -eq $event.press){$release.at=$event.actual_seconds+$event.hold}}}
+  }}
+  if(!$NoCapture -and !$before -and $t -ge $start-6){Save-BoundedCapture $p.Id "$out/before.png";$before=$true}
   if($t -ge $nextSample){
    if(Test-Path $csv){
     if($null -eq $runtimeOffset){$runtimeOffset=([IO.File]::GetCreationTimeUtc($csv)-$processStartUtc).TotalSeconds;$metadata.runtime_origin_approx_ms=1000*$runtimeOffset}
@@ -84,7 +123,7 @@ try {
   # The SDK FILE stream may deny concurrent reads. Read timestamps only after
   # cleanup; use its creation timestamp plus generous margin to bound capture.
   if($null -ne $runtimeOffset -and $t-$runtimeOffset -ge $start+$duration+5){
-   if(!$NoCapture){Save-BenchmarkWindow $p.Id "$out/after.png";$after=$true}
+   if(!$NoCapture){Save-BoundedCapture $p.Id "$out/after.png";$after=$true}
    break
   }
   Start-Sleep -Milliseconds 40

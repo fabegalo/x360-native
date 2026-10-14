@@ -15,6 +15,10 @@ if(!$a.window_complete -or !$b.window_complete){$reasons.Add('Incomplete measure
 if(!$a.scene_verified -or !$b.scene_verified){$reasons.Add('Scene captures not reviewed')}
 if($ea.failure -or $eb.failure){$reasons.Add('Runner reported a failure')}
 if($a.counters.swap_failures -gt 0 -or $b.counters.swap_failures -gt 0){$reasons.Add('Failed swaps require investigation')}
+if(!$ea.collector -or !$eb.collector){$reasons.Add('Missing collector provenance')}
+$collectorA=@($ea.collector | ForEach-Object {"$($_.file):$($_.sha256)"} | Sort-Object)
+$collectorB=@($eb.collector | ForEach-Object {"$($_.file):$($_.sha256)"} | Sort-Object)
+if(($collectorA -join "`n") -ne ($collectorB -join "`n")){$reasons.Add('Different measurement implementation')}
 if($ea.title -ne $eb.title -or ($ea.scenario | ConvertTo-Json -Depth 8 -Compress) -ne ($eb.scenario | ConvertTo-Json -Depth 8 -Compress)){$reasons.Add('Different title/scenario')}
 if(($ea.hardware | ConvertTo-Json -Depth 10 -Compress) -ne ($eb.hardware | ConvertTo-Json -Depth 10 -Compress)){$reasons.Add('Different hardware/configuration')}
 $seeda=@($ea.seed | ForEach-Object {"$($_.path):$($_.sha256)"} | Sort-Object)
@@ -28,6 +32,7 @@ $argsB=@($eb.arguments | Where-Object {$_ -notmatch '^--(log_file|user_data_root
 if(($argsA -join "`n") -ne ($argsB -join "`n")){$reasons.Add('Different runtime settings')}
 $originalA=@($ea.original_xex | ForEach-Object {"$($_.path):$($_.sha256)"} | Sort-Object)
 $originalB=@($eb.original_xex | ForEach-Object {"$($_.path):$($_.sha256)"} | Sort-Object)
+if(!$ea.original_xex -or !$eb.original_xex){$reasons.Add('Missing original module provenance')}
 if(($originalA -join "`n") -ne ($originalB -join "`n")){$reasons.Add('Different original modules')}
 $delta=[ordered]@{}
 foreach($name in @('fps_mean','fps_1pct_low','frame_ms_mean','frame_ms_p95','frame_ms_p99','process_cpu_ms_per_frame','runtime_to_first_swap_ms','ram_working_set_peak_bytes')) {

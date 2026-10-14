@@ -14,19 +14,19 @@
       "description": "Castle Crashers title/menu idle after Start; no gameplay claim",
       "game_root": ".local/inputs/titles/castle_crashers/extracted",
       "user_root": ".local/user/castle_crashers",
-      "start_seconds": 45,
+      "start_seconds": 75,
       "duration_seconds": 30,
       "arguments": [],
       "events": [{"seconds": 15, "vk": 13, "scan": 28, "hold_seconds": 0.12}]
     },
     "forza_horizon": {
-      "description": "Forza opening driving scene, existing connected profile, Start at 22 s; verify scene captures",
+      "description": "Forza opening driving scene, existing connected profile, Start at 30 s; verify scene captures",
       "game_root": ".local/inputs/titles/forza_horizon/extracted",
       "user_root": ".local/user/forza_horizon",
       "start_seconds": 240,
       "duration_seconds": 30,
       "arguments": [],
-      "events": [{"seconds": 22, "vk": 13, "scan": 28, "hold_seconds": 0.12}]
+      "events": [{"seconds": 30, "vk": 13, "scan": 28, "hold_seconds": 0.25}]
     }
   }
 }

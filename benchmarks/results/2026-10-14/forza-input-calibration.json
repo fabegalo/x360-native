@@ -1,0 +1,324 @@
+{
+  "schema": 1,
+  "title": "forza_horizon",
+  "label": "baseline-3",
+  "utc": "2026-10-14T10:23:37.1704027Z",
+  "workspace_head": "98d45960e1514b9cf146e70474b7278181d0067c",
+  "sdk_head": "f5337cdc947ff6d4c4196737e2c807a48f2a1fc2",
+  "workspace_lock_sha256": "f33a0239a7d9cf00d1bcf24275799b9fb0f54dda469e2ebf39a8d092fd1208d6",
+  "binary_provenance": {
+    "schema": 1,
+    "recorded_utc": "2026-10-14T10:09:58.1255258Z",
+    "runtime": "SDK pinned f5337cdc947ff6d4c4196737e2c807a48f2a1fc2 with patch 0070, built 2026-10-14T09:32:04Z",
+    "runtime_sha256": "327fad3f65389ffec46ffe7e8760ae56d85f2a3735ca15b99bd692e5f746cb38",
+    "aot": "Frozen title artifacts; Forza compiled with early uncommitted Guide integration present, feature disabled for measurements",
+    "clean_checkout": false,
+    "build_log_sha256": "1047c9035799da0b81f02a65d1e413fc41b0ad7bef3d208b5737aa3c178c14e7",
+    "note": "Retrospective provenance. Reuse identical AOT and dependency hashes for A/B. A new shared runtime baseline requires fresh measurements."
+  },
+  "hardware": {
+    "logical_processors": 16,
+    "os": "Microsoft Windows NT 10.0.26300.0",
+    "cpu": [
+      {
+        "Name": "AMD Ryzen 7 5700X3D 8-Core Processor           ",
+        "NumberOfCores": 8,
+        "NumberOfLogicalProcessors": 16
+      }
+    ],
+    "ram_bytes": 42856640512,
+    "gpu": [
+      {
+        "Name": "NVIDIA GeForce RTX 4070",
+        "DriverVersion": "32.0.16.1742",
+        "CurrentHorizontalResolution": 1920,
+        "CurrentVerticalResolution": 1080,
+        "CurrentRefreshRate": 279
+      }
+    ],
+    "power_plan": "GUID do Esquema de Energia: 381b4222-f694-41f0-9685-ff5bb260df2e  (Equilibrado)"
+  },
+  "artifacts": [
+    {
+      "file": "forza_horizon_SpeechFacade_default.dll",
+      "sha256": "f29f4df2b7c6ca0adada6f5c5abdf79c3826c216b4722797c18698f5f11c5950"
+    },
+    {
+      "file": "forza_horizon_XMediaFacade_default.dll",
+      "sha256": "ec4b07053f7fdf81f96dcd706a11a89a1e5d75ad5f0f513ddb21736abf648cc4"
+    },
+    {
+      "file": "forza_horizon.exe",
+      "sha256": "34fc5b6afff95952decb9ef7ae7ab4285e4f7c38f074f91f68acdb283092a53c"
+    },
+    {
+      "file": "rexgpu-xenosrd.dll",
+      "sha256": "8aa0ea1d1da3bf00244814a7248a5b58269b024afce73432b105a9d2ce0bff34"
+    },
+    {
+      "file": "rexruntimerd.dll",
+      "sha256": "327fad3f65389ffec46ffe7e8760ae56d85f2a3735ca15b99bd692e5f746cb38"
+    },
+    {
+      "file": "TracyClientrd.dll",
+      "sha256": "3f345b64da155057dee049186237cea9866a7bec5e14840ea56d29298189d6f2"
+    }
+  ],
+  "scenario": {
+    "duration_seconds": 30,
+    "events": [
+      {
+        "seconds": 22,
+        "vk": 13,
+        "scan": 28,
+        "hold_seconds": 0.12
+      }
+    ],
+    "start_seconds": 240,
+    "description": "Forza opening driving scene, existing connected profile, Start at 22 s; verify scene captures"
+  },
+  "settings": [
+    "--gpu_plugin=xenos",
+    "--mnk_mode=true",
+    "--log_level=info"
+  ],
+  "seed_inventory_sha256": "6625484f30522106e03dc9221c7b5bd38f2977ec2cb8f21f15e1b3a70a1a9706",
+  "seed_files": 9,
+  "original_xex": [
+    {
+      "sha256": "072648dc53aa8680787e61398cbab7c36a14d4a8e71c009eb43267bd4ea0233f",
+      "path": "$SystemUpdate\\AvatarEditor.xex"
+    },
+    {
+      "sha256": "e9507ebdc8ee51257dabb789e98fc523a0823092b15246b98322e274bcf91434",
+      "path": "$SystemUpdate\\BiometricSetup.xex"
+    },
+    {
+      "sha256": "7681d7bd1ca01ff89138c57a22cb50d99fd179329b4ce40b33177b7b3a198d1c",
+      "path": "$SystemUpdate\\dash.ExtraAVCodecs.xex"
+    },
+    {
+      "sha256": "b95e9741f015307e83136bfb92c6ebd988c1343c61f9ce0433ad3560d6cbd0bb",
+      "path": "$SystemUpdate\\dash.firstuse.xex"
+    },
+    {
+      "sha256": "e315c9d36dfdeffe60039ad15a027044992006e634a7a55ab3d554434648b8d8",
+      "path": "$SystemUpdate\\dash.natalpregame.xex"
+    },
+    {
+      "sha256": "b3d591e3352fa81e5e599819775a74f45ae5d818e06fdd926dfbfd59ad8ea323",
+      "path": "$SystemUpdate\\dash.NuiFirstUse.xex"
+    },
+    {
+      "sha256": "e973df7ca6c782384c47efb0a80798c72bb4bcc54ceebd00272ae252d3b7ddbf",
+      "path": "$SystemUpdate\\Dash.Search.xex"
+    },
+    {
+      "sha256": "ce5e9ed694df5cfde996cd32a9f1b104f23b7094b333dbf7599102a81941d208",
+      "path": "$SystemUpdate\\dashnui.xex"
+    },
+    {
+      "sha256": "f31e45bcd58b6db254cbe673e0cae55387cc91a20d57b200fe23cfb29b739ee4",
+      "path": "$SystemUpdate\\Guide.AccountRecovery.xex"
+    },
+    {
+      "sha256": "803896e68ffa2fba5736aacaa80f8fe0c364156ef0f8e38a8dc4341cca5f819e",
+      "path": "$SystemUpdate\\Guide.AvatarMiniCreator.xex"
+    },
+    {
+      "sha256": "cf840b226e9b8f19eecc3f7d69dc48790f1cd45e62a2e7d81e8548d70edbdcf6",
+      "path": "$SystemUpdate\\Guide.Fitness.xex"
+    },
+    {
+      "sha256": "73d9def735dca17e706757904730e63255ff0ce83ba9ec9fff47f4d5a349c540",
+      "path": "$SystemUpdate\\Guide.NuiTroubleshooter.xex"
+    },
+    {
+      "sha256": "2b5b83a0c5a0c4d3e3d1a044b3a3555971b6a0afe3a823b573a5c230a5b08b09",
+      "path": "$SystemUpdate\\livepack.xex"
+    },
+    {
+      "sha256": "a2d955ac3ce46bb4c8a37802ec51cc8bfb8f04c8f68efecd0d25943d1bf729d0",
+      "path": "$SystemUpdate\\natalsu.xex"
+    },
+    {
+      "sha256": "b547505b4e329e904aad8e9bda36216bc7b87c5ef4ab42f097f67d4cacdf8775",
+      "path": "$SystemUpdate\\nuihud.xex"
+    },
+    {
+      "sha256": "94fd72932df0a073bd9fe1ebbaee1a85a2a92fe95d6c22cacd65e16c42a56503",
+      "path": "$SystemUpdate\\Xam.Community.xex"
+    },
+    {
+      "sha256": "95eb051e9d55f20f542d34238ef51251b92e20d7089183a873f82191c1424981",
+      "path": "$SystemUpdate\\Xam.LiveMessenger.xex"
+    },
+    {
+      "sha256": "3852e1bb9f76e408e6746f0b18b5b58b024442da9f17602af37172ebcc5dfdd1",
+      "path": "$SystemUpdate\\Xam.WordRegister.xex"
+    },
+    {
+      "sha256": "0f5a45c6c9446fdb175440c78e5e7f9ea8876636132fa1b1155eacbdb5135134",
+      "path": "$SystemUpdate\\XimeDic.xex"
+    },
+    {
+      "sha256": "0cf2610290b2b161aa043646f603d911993935a125a3493c4f04c92ac6751593",
+      "path": "$SystemUpdate\\XimeDicCh.xex"
+    },
+    {
+      "sha256": "2f9ff47e15734d72385332740fe1333cb77c14e1248cfff1d93cb48d9baa149a",
+      "path": "$SystemUpdate\\ximedicex.xex"
+    },
+    {
+      "sha256": "5da55eaa1c9512094cc48711d14796fe2d258e0e5cf7b7a423c02e3c6de38ceb",
+      "path": "$SystemUpdate\\Xna_TitleLauncher.xex"
+    },
+    {
+      "sha256": "db40df605ade49a612b35a7a24c38f6004bcb17a88ed6b48288de16df9e3987c",
+      "path": "default.xex"
+    },
+    {
+      "sha256": "d54f6aae6ae2fd6da9b8c37d48f0a6bb295caa18ad82d0d9df66026141a41594",
+      "path": "SpeechFacade_default.xex"
+    },
+    {
+      "sha256": "ed285beefeafcdc90cf64d6085d19c874e3f1e15072c12cdf9ba2237c88e2ce5",
+      "path": "XMediaFacade_default.xex"
+    }
+  ],
+  "cache_condition": "identical existing cache seed, OS filesystem cache uncontrolled",
+  "scene_review": "Rejected for gameplay: before capture shows PRESS START, after capture attract movie; scripted Start did not enter the session. More warmup alone is insufficient.",
+  "result": {
+    "frame_source": "completed guest XE_SWAP cadence, not display scanout or GPU duration",
+    "frames": 897,
+    "measured_seconds": 29.997335999999965,
+    "window_complete": true,
+    "fps_mean": 29.902655355795627,
+    "fps_1pct_low": 15.39390435596357,
+    "frame_ms_mean": 33.441846153846114,
+    "frame_ms_p95": 48.84399999997413,
+    "frame_ms_p99": 49.704999999960364,
+    "process_cpu_ms_per_frame": 55.46265328874024,
+    "process_cpu_percent_machine": 10.365503790069903,
+    "runtime_to_first_swap_ms": 1336.524,
+    "gpu_ms_per_frame": null,
+    "vram_bytes": null,
+    "gameplay_ready_ms": null,
+    "unavailable": {
+      "gpu_ms_per_frame": "No GPU timestamp queries wired",
+      "vram_bytes": "No process VRAM provider wired",
+      "gameplay_ready_ms": "No semantic ready signal; runtime-to-first-swap is separate",
+      "cpu_critical_path_ms": "Process CPU is aggregate across all threads",
+      "hardware_cache_misses": "No PMU sampling",
+      "pipeline_fast_path_hits": "Existing counter excludes consecutive identical pipeline fast path"
+    },
+    "counters": {
+      "draw_calls": 92641,
+      "command_buffer_stalls": 0,
+      "vertices_processed": 10038966,
+      "functions_dispatched": 387902605,
+      "interrupt_dispatches": 6285,
+      "texture_cache_hits": 43859,
+      "texture_cache_misses": 0,
+      "pipeline_cache_hits": 29515,
+      "pipeline_cache_misses": 0,
+      "shader_translation_us": 0,
+      "shader_translations": 0,
+      "pipeline_creation_us": 0,
+      "pipeline_creations": 0,
+      "swap_failures": 0
+    },
+    "whole_capture_counters": {
+      "draw_calls": 856552,
+      "command_buffer_stalls": 0,
+      "vertices_processed": 81833354,
+      "functions_dispatched": 3260069247,
+      "interrupt_dispatches": 56947,
+      "texture_cache_hits": 364694,
+      "texture_cache_misses": 50,
+      "pipeline_cache_hits": 251524,
+      "pipeline_cache_misses": 0,
+      "shader_translation_us": 129116,
+      "shader_translations": 527,
+      "pipeline_creation_us": 1101198,
+      "pipeline_creations": 481,
+      "swap_failures": 0
+    },
+    "ram_working_set_peak_bytes": 814092288.0,
+    "private_commit_peak_bytes": 1807839232.0,
+    "title": "forza_horizon",
+    "label": "baseline-3",
+    "termination": "bounded_forced_stop",
+    "scene_verified": false,
+    "log_counts": {
+      "critical": 0,
+      "error": 87695,
+      "warning": 23
+    },
+    "log_count_scope": "Retained rex*.log files only; rotation may discard earlier messages",
+    "scene_review": "Rejected for gameplay: before capture shows PRESS START, after capture attract movie; scripted Start did not enter the session. More warmup alone is insufficient."
+  },
+  "evidence": [
+    {
+      "file": "after.png",
+      "bytes": 3718744,
+      "sha256": "6ef400fa487481072e833aac62c604dd05385c9984169fda5c76627060ec9a55"
+    },
+    {
+      "file": "before.png",
+      "bytes": 2780446,
+      "sha256": "19f1214a8cc3e4f7fa14bd400dbb409ff6067d7f25f35e48e9b6e8f743a22fd1"
+    },
+    {
+      "file": "environment.json",
+      "bytes": 9737,
+      "sha256": "776ecfccd8ac8177003b1559895f4a5b9e00aa35586e4be37e38cda5c05836b8"
+    },
+    {
+      "file": "frames.csv",
+      "bytes": 753285,
+      "sha256": "69f3b06928b75b535fa496b2cb31b2c0ff95c62762670408ca1b8daf8fbf5159"
+    },
+    {
+      "file": "input-events.json",
+      "bytes": 271,
+      "sha256": "a95309f1d461a76c2573721d463bf22ffd8975380d616d3fd862e59f09e3b784"
+    },
+    {
+      "file": "process-samples.json",
+      "bytes": 46554,
+      "sha256": "59ae5fed9c164dfca6fcba338fc4d81135f399c8b6f35139315fa3918cc7c05e"
+    },
+    {
+      "file": "result.json",
+      "bytes": 2625,
+      "sha256": "de63a03eb1f4579a09c8784e5511921e3aea7ea5fdba118c2ed6082a0d26e777"
+    },
+    {
+      "file": "rex.1.log",
+      "bytes": 5242799,
+      "sha256": "a59372092ff926558d300544df16636b9811ffa7c68488c156e044a1822d14c3"
+    },
+    {
+      "file": "rex.2.log",
+      "bytes": 5242837,
+      "sha256": "97366e4f7275e2c174317956457f94ebc04a0e3ad538ecb2bc410f998818e4a5"
+    },
+    {
+      "file": "rex.log",
+      "bytes": 174157,
+      "sha256": "ead62a27e617107202dcb647776db056438d423cbb42442196eb4135bf53b530"
+    },
+    {
+      "file": "stderr.log",
+      "bytes": 2,
+      "sha256": "7eb70257593da06f682a3ddda54a9d260d4fc514f645237f5ca74b08f8da61a6"
+    },
+    {
+      "file": "stdout.log",
+      "bytes": 2,
+      "sha256": "7eb70257593da06f682a3ddda54a9d260d4fc514f645237f5ca74b08f8da61a6"
+    }
+  ],
+  "note": "Raw evidence stays local; profiles, saves, screenshots, logs and absolute paths are not embedded. Workspace HEAD/lock identify the checkout at launch, not necessarily the frozen binary build."
+}

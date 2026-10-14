@@ -15,7 +15,7 @@ $public=[ordered]@{
  workspace_head=$environment.head;sdk_head=$environment.sdk_head
  workspace_lock_sha256=$environment.lock_sha256
  binary_provenance=$environment.binary_provenance
- hardware=$environment.hardware;artifacts=$environment.artifacts
+ hardware=$environment.hardware;artifacts=$environment.artifacts;collector=$environment.collector
  scenario=@{description=$environment.scenario.description;start_seconds=$environment.scenario.start_seconds;duration_seconds=$environment.scenario.duration_seconds;events=$environment.scenario.events}
  settings=@($environment.arguments | Where-Object {$_ -notmatch '^--(game_data_root|log_file|user_data_root|cache_root|perf_log_csv)='})
  seed_inventory_sha256=$seedHash;seed_files=@($environment.seed).Count

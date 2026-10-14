@@ -107,7 +107,7 @@ x360n_stage_runtime_dlls(x360n_shutdown_probe PLUGIN_TARGETS rexgpu-xenos)
 
 # SDK runtime checks (link rexruntime): behavior our local SDK patches fix
 # (patches/rexglue-sdk/). Synthetic inputs only.
-add_executable(x360n_perf_counter_probe performance/counter_probe.cpp)
+add_executable(x360n_perf_counter_probe EXCLUDE_FROM_ALL performance/counter_probe.cpp)
 target_link_libraries(x360n_perf_counter_probe PRIVATE rexruntime)
 x360n_stage_runtime_dlls(x360n_perf_counter_probe)
 # A benchmark is an explicit command, never an automatic CTest workload.

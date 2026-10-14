@@ -57,6 +57,8 @@ pwsh -File scripts/benchmark-runtime.ps1 -Title forza_horizon -Label baseline-1
 O runner recusa sobrescrita, sessões existentes e cenários acima de 300 s. Usa
 ProcessStartInfo sem console, entrada/captura por scripts locais e PID exato,
 deadline e cleanup em finally. Sem Computer Use. Capturas fora da janela medida.
+PrintWindow roda em helper próprio com timeout de 5 s e cleanup, para que um
+jogo sem resposta não bloqueie indefinidamente a coleta.
 Uma seed imutável em `.local/benchmarks/seeds/<title>` alimenta cópias de perfis,
 saves e caches por execução, preservando dados reais. A condição inicial de cache
 é idêntica; cache do SO/driver não é controlado. Outra condição exige outro conjunto
@@ -88,6 +90,9 @@ pwsh -File scripts/export-benchmark.ps1 -Run .local/benchmarks/before/dash_17559
 
 A comparação exige a mesma cena revisada, janela completa, seed, configuração,
 hardware e AOT; permite explicitamente apenas as DLLs de runtime modificadas.
+Exige também hashes dos coletores e dos módulos originais, recusando mudança na
+implementação da medição. Conferir o diff do runtime continua necessário: a lista
+de DLLs permitidas, por si só, não prova que apenas uma otimização mudou.
 Falhas de swap invalidam a comparação automática. Os erros de draw/resolve e
 demais logs permanecem no resultado para revisão; contagens abrangem apenas os
 arquivos retidos pela rotação. Exportação mantém métricas e hashes de evidências,

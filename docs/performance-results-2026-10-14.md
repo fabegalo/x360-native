@@ -30,10 +30,20 @@ procedência. Não houve alteração dos originais ou publicação de recibos.
 | Dashboard Retail 17559 Home | 25–55 s | 60,003 / 54,487 | 16,666 / 18,036 / 18,209 | 35,810 | Home estável nas duas capturas |
 | Castle Crashers | 30–60 s | 59,996 / 49,980 | 16,668 / 18,146 / 19,795 | 16,806 | Calibração: loading → menu |
 | Forza Horizon | 145–175 s | 30,001 / 19,693 | 33,332 / 48,791 / 50,194 | 52,246 | Calibração: cinematic → transição preta |
+| Castle Crashers, menu | 75–105 s | 59,998 / 50,843 | 16,667 / 18,112 / 18,772 | 17,319 | Local Game estável nas duas capturas |
+| Forza Horizon, nova calibração | 240–270 s | 29,903 / 15,394 | 33,442 / 48,844 / 49,705 | 55,463 | Rejeitado: PRESS START / attract movie |
 
 Castle e Forza **não são referências definitivas** de menu/cena jogável nessas
-coletas. O aquecimento dos cenários foi aumentado para 45 e 240 s respectivamente;
-o aceite continua dependendo de capturas reais. Não inferir gameplay de um timer.
+coletas iniciais. Com 75 s de aquecimento, Castle confirmou menu estável, 0 erros,
+3 avisos e 0 swaps falhos. RAM amostrada 485.072.896 bytes, private commit
+941.715.456 bytes; primeiro swap em 415,594 ms desde Runtime::Setup.
+
+Forza com 240 s continuou no ciclo de apresentação: o Start não iniciou a sessão.
+Aquecimento adicional sozinho não resolve. O roteiro foi ajustado para esperar
+o foco, rotear para a janela filha do PID, preservar o hold após o foco e enviar
+Start aos 30 s por 250 ms. Esse roteiro ainda precisa ser conferido em gameplay;
+os 87.695 erros/23 avisos retidos da nova calibração não foram ocultados.
+O aceite continua dependendo de capturas reais. Não inferir gameplay de um timer.
 A primeira tentativa da dashboard abortou por leitura concorrente negada do CSV;
 foi descartada. O runner foi corrigido para ler o arquivo após o encerramento.
 
@@ -46,8 +56,11 @@ Evidências estruturadas sanitizadas:
 [Dashboard](../benchmarks/results/2026-10-14/dashboard-baseline.json),
 [Castle/calibração](../benchmarks/results/2026-10-14/castle-calibration.json),
 [Forza/calibração](../benchmarks/results/2026-10-14/forza-calibration.json).
+[Castle/menu](../benchmarks/results/2026-10-14/castle-baseline.json) e
+[Forza/entrada não aceita](../benchmarks/results/2026-10-14/forza-input-calibration.json)
+registram a segunda rodada.
 CSV, logs, entrada temporizada e capturas originais permanecem sob
-`.local/benchmarks/baseline-1` e `baseline-2`, com hashes nos exports.
+`.local/benchmarks/baseline-1`, `baseline-2` e `baseline-3`, com hashes nos exports.
 
 ## Gargalos observados e limites
 
@@ -64,13 +77,43 @@ CSV, logs, entrada temporizada e capturas originais permanecem sob
    nem atraso sequencial de inicialização. A carga se concentrou fora da janela.
 4. Logs retidos: dashboard 3.639 erros/12.167 avisos; Castle 0 erros/3 avisos;
    Forza 57.515 erros/23 avisos. A rotação pode descartar mensagens anteriores.
-   Há limitações já existentes de resolve/draw no Forza e exports não resolvidos
-   da dashboard. Nenhum erro foi suprimido para melhorar números; não há alegação
+   Há limitações já existentes de resolve/draw no Forza e chamadas a stubs XAM
+   preexistentes da dashboard. Nenhum erro foi suprimido para melhorar números; não há alegação
    de execução graficamente correta ou livre de erros.
 5. Tempo GPU, VRAM, PMU, caminho crítico de CPU e marco semântico de gameplay
    ainda indisponíveis; os JSON usam null e motivo. Não substituir por zero.
 
 ## Validação pertinente
+
+O candidato de layout de contadores foi medido com o fonte real do SDK compilado
+em dois executáveis isolados, mesmas flags/dependências, mudando apenas slots
+alinhados a 64 bytes. A DLL de suporte permaneceu idêntica; essa medição ainda
+não corresponde à integração na DLL de produção. Ordem A/B/B/A, sete trials por
+execução, um milhão de eventos por writer, totais exatos conferidos em cada trial.
+ns/evento é parede total dividida pelo total de eventos das threads; mede custo
+amortizado da carga, não latência individual de uma chamada concorrente.
+
+| Contadores / writers | Mediana antes (ns/evento) | Depois | Amostras por lado |
+|---|---:|---:|---:|
+| Desligados / 1 | 2,03545 | 2,06210 | 14 |
+| Desligados / 4 | 0,53911 | 0,53285 | 14 |
+| Ligados / 1 | 2,57975 | 2,51785 | 14 |
+| Ligados / 4 independentes | 6,95052 | 0,65908 | 14 |
+
+Na carga concorrente habilitada, a redução mediana foi 90,518%; faixas
+6,517–8,904 antes e 0,631–0,803 depois. É evidência de contenção entre linhas de
+cache compartilhadas por contadores independentes. Os mesmos atômicos, ordens
+de memória e snapshots são mantidos; writers do **mesmo** contador continuam
+compartilhando o atômico. Não extrapolar esse resultado para ganho de FPS ou
+execução normal com contadores desligados. JSON integral:
+[experimento dos contadores](../benchmarks/results/2026-10-14/counter-candidate.json).
+
+O mesmo candidato passou 15 asserções em dois casos, incluindo snapshots durante
+escritas concorrentes, sem perda de eventos. Log local:
+`.local/logs/perf-counter-candidate-tests.log`.
+
+Integração no SDK compartilhado e A/B dos jogos ainda pendentes enquanto a
+validação independente do Guide reserva a GPU e modifica a pilha de patches.
 
 O build nativo Forza com instrumentação passou. Os testes dos contadores passaram
 15 asserções em dois casos: desabilitação, soma com writers concorrentes,

@@ -22,5 +22,8 @@ try {
  $rows[50].process_cpu_us='';$rows | Export-Csv -NoTypeInformation $temp
  $r=Get-BenchmarkSummary $temp 0 2 4
  if($null -ne $r.process_cpu_ms_per_frame){throw 'Missing CPU fabricated'}
+ $rows | Select-Object -ExcludeProperty process_cpu_us -Property * | Export-Csv -NoTypeInformation $temp
+ $r=Get-BenchmarkSummary $temp 0 2 4
+ if($null -ne $r.process_cpu_ms_per_frame -or !$r.unavailable.process_cpu_ms_per_frame){throw 'Absent CPU provider fabricated'}
  'Benchmark reduction: FPS, tail, CPU, missing data and incomplete window passed'
 } finally {Remove-Item -LiteralPath $temp -ErrorAction SilentlyContinue}

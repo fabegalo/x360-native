@@ -1,0 +1,784 @@
+{
+  "schema": 1,
+  "experiment": "Real SDK counter source with/without 64-byte aligned slots",
+  "linkage": "Counter implementation compiled into probe executable; unchanged runtime DLL supplies supporting cvar/filesystem services. Not a production DLL measurement.",
+  "order": [
+    "a1",
+    "b1",
+    "b2",
+    "a2"
+  ],
+  "hardware": {
+    "logical_processors": 16,
+    "os": "Microsoft Windows NT 10.0.26300.0",
+    "cpu": [
+      {
+        "Name": "AMD Ryzen 7 5700X3D 8-Core Processor           ",
+        "NumberOfCores": 8,
+        "NumberOfLogicalProcessors": 16
+      }
+    ],
+    "ram_bytes": 42856640512,
+    "gpu": [
+      {
+        "Name": "NVIDIA GeForce RTX 4070",
+        "DriverVersion": "32.0.16.1742",
+        "CurrentHorizontalResolution": 1920,
+        "CurrentVerticalResolution": 1080,
+        "CurrentRefreshRate": 279
+      }
+    ],
+    "power_plan": "GUID do Esquema de Energia: 381b4222-f694-41f0-9685-ff5bb260df2e  (Equilibrado)"
+  },
+  "compiler": "LLVM 22.1.8, -std=c++23 -O2 -fms-runtime-lib=dll, no LTO",
+  "before_source_sha256": "8990bfaf2d571ffb8b5a5bd67ccccd247735e331a45a6a20346475f084ebfa13",
+  "after_source_sha256": "df95e01382113fcd10e5698b8f6985f7d14486a834e542be95dfc1e59b611268",
+  "probe_source_sha256": "41521777f34f7d979cb9e333e3fd2cd0addfd20339aba6cd356d2f0e63bbce70",
+  "runs": [
+    {
+      "measurements": {
+        "iterations_per_thread": 1000000,
+        "trials": [
+          {
+            "enabled": false,
+            "workers": 1,
+            "trial": 0,
+            "ns_per_event": 2.2076
+          },
+          {
+            "enabled": false,
+            "workers": 1,
+            "trial": 1,
+            "ns_per_event": 2.0208
+          },
+          {
+            "enabled": false,
+            "workers": 1,
+            "trial": 2,
+            "ns_per_event": 2.0345
+          },
+          {
+            "enabled": false,
+            "workers": 1,
+            "trial": 3,
+            "ns_per_event": 2.0355
+          },
+          {
+            "enabled": false,
+            "workers": 1,
+            "trial": 4,
+            "ns_per_event": 2.0833
+          },
+          {
+            "enabled": false,
+            "workers": 1,
+            "trial": 5,
+            "ns_per_event": 2.0375
+          },
+          {
+            "enabled": false,
+            "workers": 1,
+            "trial": 6,
+            "ns_per_event": 2.0489
+          },
+          {
+            "enabled": false,
+            "workers": 4,
+            "trial": 0,
+            "ns_per_event": 0.545925
+          },
+          {
+            "enabled": false,
+            "workers": 4,
+            "trial": 1,
+            "ns_per_event": 0.547425
+          },
+          {
+            "enabled": false,
+            "workers": 4,
+            "trial": 2,
+            "ns_per_event": 0.52495
+          },
+          {
+            "enabled": false,
+            "workers": 4,
+            "trial": 3,
+            "ns_per_event": 0.541025
+          },
+          {
+            "enabled": false,
+            "workers": 4,
+            "trial": 4,
+            "ns_per_event": 0.5452
+          },
+          {
+            "enabled": false,
+            "workers": 4,
+            "trial": 5,
+            "ns_per_event": 0.533875
+          },
+          {
+            "enabled": false,
+            "workers": 4,
+            "trial": 6,
+            "ns_per_event": 0.5243
+          },
+          {
+            "enabled": true,
+            "workers": 1,
+            "trial": 0,
+            "ns_per_event": 2.6034
+          },
+          {
+            "enabled": true,
+            "workers": 1,
+            "trial": 1,
+            "ns_per_event": 2.5941
+          },
+          {
+            "enabled": true,
+            "workers": 1,
+            "trial": 2,
+            "ns_per_event": 2.594
+          },
+          {
+            "enabled": true,
+            "workers": 1,
+            "trial": 3,
+            "ns_per_event": 2.6338
+          },
+          {
+            "enabled": true,
+            "workers": 1,
+            "trial": 4,
+            "ns_per_event": 2.5427
+          },
+          {
+            "enabled": true,
+            "workers": 1,
+            "trial": 5,
+            "ns_per_event": 2.5551
+          },
+          {
+            "enabled": true,
+            "workers": 1,
+            "trial": 6,
+            "ns_per_event": 2.6837
+          },
+          {
+            "enabled": true,
+            "workers": 4,
+            "trial": 0,
+            "ns_per_event": 6.69982
+          },
+          {
+            "enabled": true,
+            "workers": 4,
+            "trial": 1,
+            "ns_per_event": 6.90875
+          },
+          {
+            "enabled": true,
+            "workers": 4,
+            "trial": 2,
+            "ns_per_event": 8.8549
+          },
+          {
+            "enabled": true,
+            "workers": 4,
+            "trial": 3,
+            "ns_per_event": 8.79335
+          },
+          {
+            "enabled": true,
+            "workers": 4,
+            "trial": 4,
+            "ns_per_event": 6.6991
+          },
+          {
+            "enabled": true,
+            "workers": 4,
+            "trial": 5,
+            "ns_per_event": 6.7867
+          },
+          {
+            "enabled": true,
+            "workers": 4,
+            "trial": 6,
+            "ns_per_event": 7.0019
+          }
+        ],
+        "utc": "2026-10-14T10:13:08.2106271Z",
+        "probe_sha256": "4c0c2be629c015ae92e717316619daf4e467dde0125fb4a8c8ee9ea2b0df1ce4",
+        "runtime": [
+          {
+            "sha256": "327fad3f65389ffec46ffe7e8760ae56d85f2a3735ca15b99bd692e5f746cb38",
+            "file": "rexruntimerd.dll"
+          }
+        ],
+        "logical_processors": 16,
+        "description": "Real runtime counter calls; synthetic independent counters, not game FPS"
+      },
+      "label": "a1"
+    },
+    {
+      "measurements": {
+        "iterations_per_thread": 1000000,
+        "trials": [
+          {
+            "enabled": false,
+            "workers": 1,
+            "trial": 0,
+            "ns_per_event": 2.1368
+          },
+          {
+            "enabled": false,
+            "workers": 1,
+            "trial": 1,
+            "ns_per_event": 2.0324
+          },
+          {
+            "enabled": false,
+            "workers": 1,
+            "trial": 2,
+            "ns_per_event": 2.0678
+          },
+          {
+            "enabled": false,
+            "workers": 1,
+            "trial": 3,
+            "ns_per_event": 2.0717
+          },
+          {
+            "enabled": false,
+            "workers": 1,
+            "trial": 4,
+            "ns_per_event": 2.014
+          },
+          {
+            "enabled": false,
+            "workers": 1,
+            "trial": 5,
+            "ns_per_event": 2.0579
+          },
+          {
+            "enabled": false,
+            "workers": 1,
+            "trial": 6,
+            "ns_per_event": 2.0221
+          },
+          {
+            "enabled": false,
+            "workers": 4,
+            "trial": 0,
+            "ns_per_event": 0.527875
+          },
+          {
+            "enabled": false,
+            "workers": 4,
+            "trial": 1,
+            "ns_per_event": 0.53165
+          },
+          {
+            "enabled": false,
+            "workers": 4,
+            "trial": 2,
+            "ns_per_event": 0.527725
+          },
+          {
+            "enabled": false,
+            "workers": 4,
+            "trial": 3,
+            "ns_per_event": 0.531775
+          },
+          {
+            "enabled": false,
+            "workers": 4,
+            "trial": 4,
+            "ns_per_event": 0.535675
+          },
+          {
+            "enabled": false,
+            "workers": 4,
+            "trial": 5,
+            "ns_per_event": 0.55705
+          },
+          {
+            "enabled": false,
+            "workers": 4,
+            "trial": 6,
+            "ns_per_event": 0.557125
+          },
+          {
+            "enabled": true,
+            "workers": 1,
+            "trial": 0,
+            "ns_per_event": 2.5384
+          },
+          {
+            "enabled": true,
+            "workers": 1,
+            "trial": 1,
+            "ns_per_event": 2.5681
+          },
+          {
+            "enabled": true,
+            "workers": 1,
+            "trial": 2,
+            "ns_per_event": 2.38
+          },
+          {
+            "enabled": true,
+            "workers": 1,
+            "trial": 3,
+            "ns_per_event": 2.5243
+          },
+          {
+            "enabled": true,
+            "workers": 1,
+            "trial": 4,
+            "ns_per_event": 2.3594
+          },
+          {
+            "enabled": true,
+            "workers": 1,
+            "trial": 5,
+            "ns_per_event": 2.2215
+          },
+          {
+            "enabled": true,
+            "workers": 1,
+            "trial": 6,
+            "ns_per_event": 2.3715
+          },
+          {
+            "enabled": true,
+            "workers": 4,
+            "trial": 0,
+            "ns_per_event": 0.6381
+          },
+          {
+            "enabled": true,
+            "workers": 4,
+            "trial": 1,
+            "ns_per_event": 0.660825
+          },
+          {
+            "enabled": true,
+            "workers": 4,
+            "trial": 2,
+            "ns_per_event": 0.65905
+          },
+          {
+            "enabled": true,
+            "workers": 4,
+            "trial": 3,
+            "ns_per_event": 0.6503
+          },
+          {
+            "enabled": true,
+            "workers": 4,
+            "trial": 4,
+            "ns_per_event": 0.70685
+          },
+          {
+            "enabled": true,
+            "workers": 4,
+            "trial": 5,
+            "ns_per_event": 0.6925
+          },
+          {
+            "enabled": true,
+            "workers": 4,
+            "trial": 6,
+            "ns_per_event": 0.6556
+          }
+        ],
+        "utc": "2026-10-14T10:13:09.1131673Z",
+        "probe_sha256": "91c4d2b66340708ee9b9dec099a3e1166355ffd874e8320f5388653e578358ad",
+        "runtime": [
+          {
+            "sha256": "327fad3f65389ffec46ffe7e8760ae56d85f2a3735ca15b99bd692e5f746cb38",
+            "file": "rexruntimerd.dll"
+          }
+        ],
+        "logical_processors": 16,
+        "description": "Real runtime counter calls; synthetic independent counters, not game FPS"
+      },
+      "label": "b1"
+    },
+    {
+      "measurements": {
+        "iterations_per_thread": 1000000,
+        "trials": [
+          {
+            "enabled": false,
+            "workers": 1,
+            "trial": 0,
+            "ns_per_event": 2.2756
+          },
+          {
+            "enabled": false,
+            "workers": 1,
+            "trial": 1,
+            "ns_per_event": 2.1597
+          },
+          {
+            "enabled": false,
+            "workers": 1,
+            "trial": 2,
+            "ns_per_event": 2.0663
+          },
+          {
+            "enabled": false,
+            "workers": 1,
+            "trial": 3,
+            "ns_per_event": 2.0384
+          },
+          {
+            "enabled": false,
+            "workers": 1,
+            "trial": 4,
+            "ns_per_event": 2.0547
+          },
+          {
+            "enabled": false,
+            "workers": 1,
+            "trial": 5,
+            "ns_per_event": 2.1183
+          },
+          {
+            "enabled": false,
+            "workers": 1,
+            "trial": 6,
+            "ns_per_event": 2.0147
+          },
+          {
+            "enabled": false,
+            "workers": 4,
+            "trial": 0,
+            "ns_per_event": 0.533925
+          },
+          {
+            "enabled": false,
+            "workers": 4,
+            "trial": 1,
+            "ns_per_event": 0.5284
+          },
+          {
+            "enabled": false,
+            "workers": 4,
+            "trial": 2,
+            "ns_per_event": 0.5241
+          },
+          {
+            "enabled": false,
+            "workers": 4,
+            "trial": 3,
+            "ns_per_event": 0.52905
+          },
+          {
+            "enabled": false,
+            "workers": 4,
+            "trial": 4,
+            "ns_per_event": 0.5459
+          },
+          {
+            "enabled": false,
+            "workers": 4,
+            "trial": 5,
+            "ns_per_event": 0.540525
+          },
+          {
+            "enabled": false,
+            "workers": 4,
+            "trial": 6,
+            "ns_per_event": 0.55125
+          },
+          {
+            "enabled": true,
+            "workers": 1,
+            "trial": 0,
+            "ns_per_event": 2.2405
+          },
+          {
+            "enabled": true,
+            "workers": 1,
+            "trial": 1,
+            "ns_per_event": 2.5241
+          },
+          {
+            "enabled": true,
+            "workers": 1,
+            "trial": 2,
+            "ns_per_event": 2.5951
+          },
+          {
+            "enabled": true,
+            "workers": 1,
+            "trial": 3,
+            "ns_per_event": 2.3798
+          },
+          {
+            "enabled": true,
+            "workers": 1,
+            "trial": 4,
+            "ns_per_event": 2.5512
+          },
+          {
+            "enabled": true,
+            "workers": 1,
+            "trial": 5,
+            "ns_per_event": 2.5116
+          },
+          {
+            "enabled": true,
+            "workers": 1,
+            "trial": 6,
+            "ns_per_event": 2.5695
+          },
+          {
+            "enabled": true,
+            "workers": 4,
+            "trial": 0,
+            "ns_per_event": 0.6625
+          },
+          {
+            "enabled": true,
+            "workers": 4,
+            "trial": 1,
+            "ns_per_event": 0.6912
+          },
+          {
+            "enabled": true,
+            "workers": 4,
+            "trial": 2,
+            "ns_per_event": 0.6591
+          },
+          {
+            "enabled": true,
+            "workers": 4,
+            "trial": 3,
+            "ns_per_event": 0.644925
+          },
+          {
+            "enabled": true,
+            "workers": 4,
+            "trial": 4,
+            "ns_per_event": 0.633575
+          },
+          {
+            "enabled": true,
+            "workers": 4,
+            "trial": 5,
+            "ns_per_event": 0.80335
+          },
+          {
+            "enabled": true,
+            "workers": 4,
+            "trial": 6,
+            "ns_per_event": 0.631075
+          }
+        ],
+        "utc": "2026-10-14T10:13:09.9642633Z",
+        "probe_sha256": "91c4d2b66340708ee9b9dec099a3e1166355ffd874e8320f5388653e578358ad",
+        "runtime": [
+          {
+            "sha256": "327fad3f65389ffec46ffe7e8760ae56d85f2a3735ca15b99bd692e5f746cb38",
+            "file": "rexruntimerd.dll"
+          }
+        ],
+        "logical_processors": 16,
+        "description": "Real runtime counter calls; synthetic independent counters, not game FPS"
+      },
+      "label": "b2"
+    },
+    {
+      "measurements": {
+        "iterations_per_thread": 1000000,
+        "trials": [
+          {
+            "enabled": false,
+            "workers": 1,
+            "trial": 0,
+            "ns_per_event": 2.2474
+          },
+          {
+            "enabled": false,
+            "workers": 1,
+            "trial": 1,
+            "ns_per_event": 2.0166
+          },
+          {
+            "enabled": false,
+            "workers": 1,
+            "trial": 2,
+            "ns_per_event": 2.0126
+          },
+          {
+            "enabled": false,
+            "workers": 1,
+            "trial": 3,
+            "ns_per_event": 2.0163
+          },
+          {
+            "enabled": false,
+            "workers": 1,
+            "trial": 4,
+            "ns_per_event": 2.0354
+          },
+          {
+            "enabled": false,
+            "workers": 1,
+            "trial": 5,
+            "ns_per_event": 2.0552
+          },
+          {
+            "enabled": false,
+            "workers": 1,
+            "trial": 6,
+            "ns_per_event": 2.0332
+          },
+          {
+            "enabled": false,
+            "workers": 4,
+            "trial": 0,
+            "ns_per_event": 0.535475
+          },
+          {
+            "enabled": false,
+            "workers": 4,
+            "trial": 1,
+            "ns_per_event": 0.53055
+          },
+          {
+            "enabled": false,
+            "workers": 4,
+            "trial": 2,
+            "ns_per_event": 0.5372
+          },
+          {
+            "enabled": false,
+            "workers": 4,
+            "trial": 3,
+            "ns_per_event": 0.62535
+          },
+          {
+            "enabled": false,
+            "workers": 4,
+            "trial": 4,
+            "ns_per_event": 0.553
+          },
+          {
+            "enabled": false,
+            "workers": 4,
+            "trial": 5,
+            "ns_per_event": 0.54755
+          },
+          {
+            "enabled": false,
+            "workers": 4,
+            "trial": 6,
+            "ns_per_event": 0.532125
+          },
+          {
+            "enabled": true,
+            "workers": 1,
+            "trial": 0,
+            "ns_per_event": 2.4531
+          },
+          {
+            "enabled": true,
+            "workers": 1,
+            "trial": 1,
+            "ns_per_event": 2.503
+          },
+          {
+            "enabled": true,
+            "workers": 1,
+            "trial": 2,
+            "ns_per_event": 2.4762
+          },
+          {
+            "enabled": true,
+            "workers": 1,
+            "trial": 3,
+            "ns_per_event": 2.5688
+          },
+          {
+            "enabled": true,
+            "workers": 1,
+            "trial": 4,
+            "ns_per_event": 2.5937
+          },
+          {
+            "enabled": true,
+            "workers": 1,
+            "trial": 5,
+            "ns_per_event": 2.4733
+          },
+          {
+            "enabled": true,
+            "workers": 1,
+            "trial": 6,
+            "ns_per_event": 2.5907
+          },
+          {
+            "enabled": true,
+            "workers": 4,
+            "trial": 0,
+            "ns_per_event": 6.99228
+          },
+          {
+            "enabled": true,
+            "workers": 4,
+            "trial": 1,
+            "ns_per_event": 6.78075
+          },
+          {
+            "enabled": true,
+            "workers": 4,
+            "trial": 2,
+            "ns_per_event": 8.90385
+          },
+          {
+            "enabled": true,
+            "workers": 4,
+            "trial": 3,
+            "ns_per_event": 8.57498
+          },
+          {
+            "enabled": true,
+            "workers": 4,
+            "trial": 4,
+            "ns_per_event": 6.51673
+          },
+          {
+            "enabled": true,
+            "workers": 4,
+            "trial": 5,
+            "ns_per_event": 6.63413
+          },
+          {
+            "enabled": true,
+            "workers": 4,
+            "trial": 6,
+            "ns_per_event": 7.30288
+          }
+        ],
+        "utc": "2026-10-14T10:13:11.0062168Z",
+        "probe_sha256": "4c0c2be629c015ae92e717316619daf4e467dde0125fb4a8c8ee9ea2b0df1ce4",
+        "runtime": [
+          {
+            "sha256": "327fad3f65389ffec46ffe7e8760ae56d85f2a3735ca15b99bd692e5f746cb38",
+            "file": "rexruntimerd.dll"
+          }
+        ],
+        "logical_processors": 16,
+        "description": "Real runtime counter calls; synthetic independent counters, not game FPS"
+      },
+      "label": "a2"
+    }
+  ],
+  "conclusion": "Four independent enabled writers: median 6.950515 to 0.659075 ns/event across 14 samples per side. Exact totals checked each trial. This is synthetic instrumentation overhead, not a game-speed claim."
+}
