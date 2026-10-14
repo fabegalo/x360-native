@@ -1,0 +1,101 @@
+name: Windows release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Package version (without v); manual runs never publish a Release'
+        required: true
+        default: '0.1.0-ci'
+        type: string
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  package:
+    name: Build and validate Windows x64
+    runs-on: windows-2022
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: powershell
+    outputs:
+      version: ${{ steps.identity.outputs.version }}
+      artifact: ${{ steps.identity.outputs.artifact }}
+    steps:
+      - name: Check out the exact event commit
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          submodules: false
+          persist-credentials: false
+          lfs: false
+      - name: Test release tooling
+        run: python -m unittest discover -s .github/scripts -p test_release.py
+      - name: Validate commit, tag and release notes
+        id: identity
+        env:
+          PACKAGE_VERSION: ${{ inputs.version }}
+        run: python .github/scripts/release.py identity
+      - name: Prepare pinned distribution dependencies
+        run: .github/scripts/prepare-release.ps1
+      - name: Record hosted toolchain versions
+        run: |
+          $environment = & scripts/devshell.cmd powershell -NoProfile -Command 'Write-Output ($env:VCToolsVersion + ";" + $env:WindowsSDKVersion)'
+          if ($LASTEXITCODE -ne 0) { throw 'Cannot identify Microsoft build environment' }
+          python .github/scripts/release.py environment --versions ($environment | Select-Object -Last 1)
+      - name: Build and test the existing desktop distribution
+        env:
+          PACKAGE_VERSION: ${{ steps.identity.outputs.version }}
+        run: |
+          & scripts/package-desktop.ps1 -Version $env:PACKAGE_VERSION -OutputDirectory .local/packages -ProvenanceFile .local/release/provenance.json
+      - name: Verify final ZIP, checksums, payload and provenance
+        env:
+          PACKAGE_VERSION: ${{ steps.identity.outputs.version }}
+        run: python .github/scripts/release.py verify --directory .local/packages --version $env:PACKAGE_VERSION --commit $env:GITHUB_SHA --ref $env:GITHUB_REF --run-id $env:GITHUB_RUN_ID
+      - name: Upload only complete verified deliverables
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: ${{ steps.identity.outputs.artifact }}
+          path: |
+            .local/packages/*.zip
+            .local/packages/*.zip.sha256
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
+
+  publish:
+    name: Publish validated tag assets
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    needs: package
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - name: Check out the same exact tag commit and notes
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+          submodules: false
+          lfs: false
+      - name: Download the verified build from this run
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: ${{ needs.package.outputs.artifact }}
+          path: .local/packages
+      - name: Verify downloaded assets and publish atomically through a draft
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PACKAGE_VERSION: ${{ needs.package.outputs.version }}
+        run: python3 .github/scripts/release.py publish

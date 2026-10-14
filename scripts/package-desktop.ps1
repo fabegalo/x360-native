@@ -1,6 +1,7 @@
 # Build from committed source in a fresh distribution-only tree. Never publishes.
 param([string]$Version = '0.1.0-preview', [string]$OutputDirectory = '.local/packages',
-      [ValidateSet('local-candidate','public-prerelease')][string]$Publication = 'local-candidate')
+      [ValidateSet('local-candidate','public-prerelease')][string]$Publication = 'local-candidate',
+      [string]$ProvenanceFile = '')
 $ErrorActionPreference = 'Stop'
 $env:PSModulePath = Join-Path $PSHOME 'Modules'
 $root = (Resolve-Path (Split-Path -Parent $PSScriptRoot)).Path
@@ -12,6 +13,11 @@ $destination = Join-Path $base $name
 if ((Test-Path -LiteralPath $destination) -or (Test-Path -LiteralPath "$destination.zip")) { throw 'Package already exists; choose another output directory.' }
 $head = (git -C $root rev-parse HEAD).Trim()
 if ($LASTEXITCODE -ne 0) { throw 'Cannot identify committed source' }
+$provenance = $null
+if ($ProvenanceFile) {
+    $provenance = Get-Content -Raw -LiteralPath $ProvenanceFile | ConvertFrom-Json
+    if ($provenance.commit -ne $head -or $provenance.version -ne $Version) { throw 'CI provenance differs from the committed package source/version' }
+}
 git -C $root diff --quiet HEAD -- scripts/package-desktop.ps1
 if ($LASTEXITCODE -ne 0) { throw 'Commit the packaging script before using it.' }
 $job = Join-Path $root ('.local/distribution/' + [guid]::NewGuid().ToString('N'))
@@ -66,6 +72,9 @@ foreach ($component in @('fmt','tomlplusplus','cli11','catch2','inja','sdl3','sp
 if ($LASTEXITCODE -ne 0) { throw 'Pinned SDK patch verification failed' }
 $llvm = Join-Path $root $lock.llvm.install_dir
 $clang = Join-Path $llvm 'bin/clang++.exe'
+foreach ($tool in @($clang, (Join-Path $llvm 'bin/llvm-readobj.exe'))) {
+    if (-not (Test-Path -LiteralPath $tool -PathType Leaf)) { throw "Locked LLVM dependency missing: $tool" }
+}
 $compilerVersion = (& $clang --version | Select-Object -First 1)
 if ($compilerVersion -notlike "* $($lock.llvm.version)*") { throw 'Compiler differs from the locked LLVM version' }
 $sourceMap = $source.Replace('\','/')
@@ -76,7 +85,8 @@ $devshell = Join-Path $root 'scripts/devshell.cmd'
 if ($LASTEXITCODE -ne 0) { throw 'Distribution configure failed' }
 & $devshell cmake --build $build --target x360-native x360n_desktop_tests
 if ($LASTEXITCODE -ne 0) { throw 'Distribution build failed' }
-& $devshell ctest --test-dir $build --output-on-failure
+# This isolated tree registers only distribution tests, never SDK/game suites.
+& $devshell ctest --test-dir $build -R desktop.catalog --no-tests=error --output-on-failure
 if ($LASTEXITCODE -ne 0) { throw 'Distribution tests failed; ZIP withheld' }
 $binaries = Join-Path $build 'src/desktop'
 Copy-Item -LiteralPath (Join-Path $binaries 'x360-native.exe') -Destination $destination
@@ -168,6 +178,7 @@ $metadata = [ordered]@{
     configuration = 'Release'; desktop_only = $true; relative_source_paths = $true; compiler_flags = '-march=x86-64-v2 -mno-incremental-linker-compatible -ffile-prefix-map=<source>=/x360-source'; linker_flags = '-Wl,/Brepro'
     publication = $Publication; clean_windows = 'pending'
 }
+if ($provenance) { $metadata.provenance = $provenance }
 [IO.File]::WriteAllText((Join-Path $destination 'package.json'), ($metadata | ConvertTo-Json -Depth 8), [Text.UTF8Encoding]::new($false))
 & (Join-Path $source 'scripts/check-package-licenses.ps1') -PackageDirectory $destination -SdkDirectory $sdk
 WriteIndex $destination 'package.sha256'
