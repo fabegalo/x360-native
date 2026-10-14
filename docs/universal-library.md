@@ -169,6 +169,20 @@ without opening the UI, preparing AOT or running a game. The earlier successful
 ISO extraction supplies evidence for the unchanged extractor; it was not
 repeated. Forza AOT/runtime/gameplay compatibility remains untested.
 
+The local package `0.1.0-preview.20-hotfix.2` was produced from commit
+`990d8727f3a3d0b8b1d693aa0aa19be2af5ccbfc`. Its distribution test and
+license/content gates passed (`.local/logs/forza-import-hotfix-package.log`);
+ZIP SHA-256 `e4a57013494f959ef9b7836bce365d374bd81a005614dbd8b7b86ce41a54fed9`.
+After the user closed the app and authorized application, the same installation
+received the verified package and 432 indexed source files. Four persistent
+catalog/profile/save/preference files retained their SHA-256 values. The previous
+package and changed sources were preserved under
+`.local/preserved/forza-import-hotfix2-package/`; application evidence is
+`.local/logs/forza-import-installed-update.log`. The user reported antivirus
+removal of the standalone native update helper; deployment therefore used
+PowerShell with verified indexes, backups and the environment's exclusive lock,
+without changing antivirus settings. The updated UI was not opened by an agent.
+
 Use the normal managed environment update from the extracted preview.20 ZIP.
 Do not move/delete `.local` to update sources. Catalogs, imports, generated
 projects, profiles, saves and preferences remain local. Updated sources may
