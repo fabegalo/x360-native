@@ -1,5 +1,19 @@
 # STATUS
 
+P2 de performance real concluída com limites explícitos (2026-10-14): 16 coletas
+OFF/ON intercaladas nos binários SDK0072 existentes, oito por jogo, com warmup e
+janela de 30 s. Castle menu: CPU 1.032,72 → 1.008,78 ms/s (−2,32%); Forza primeira
+cena dirigível: 2.393,67 → 2.388,37 ms/s (−0,22%). Ambos os IC95% exploratórios
+incluem zero: nenhum ganho nem overhead causal demonstrado. CPU/RAM externas
+funcionam nos dois modos; FPS ON de swaps guest: 60,000/29,982. FPS OFF, custo
+por quadro e GPU/VRAM continuam indisponíveis; ETW sem permissão no token atual.
+Runner corrigido para OFF verdadeiro e prazo independente do CSV; redutor,
+comparador com incerteza e exportação validados por seis grupos de testes focados.
+Uma tentativa CLI inválida preservada/excluída; 16 cenas e hashes auditados,
+nenhum processo restante. Sem rebuild, mudança PPC/XAM/fidelidade, Computer Use,
+push ou Release. SDK, perfis/saves e ciclo aprovado Dashboard → Forza → Dashboard
+preservados. Resultados, JSON e reprodução: `docs/performance-p2-2026-10-14.md`.
+
 Performance retomada e auditada (2026-10-14): infraestrutura opcional 0070 e
 isolamento de contadores 0072 recuperados com seus resultados locais. Redutor,
 comparador e exportação concluídos; rejeição de dados inválidos fora da janela,

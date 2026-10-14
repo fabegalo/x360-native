@@ -4,6 +4,10 @@ Política: **Performance-first, correctness-preserving**. Metodologia e comandos
 em [performance.md](performance.md). Estes resultados descrevem os limites
 observados; FPS de swaps não comprova fidelidade gráfica ou GPU sem erros.
 
+Continuação: [P2 — instrumentação OFF/ON em jogos reais](performance-p2-2026-10-14.md)
+mede CPU/RAM externa com o mesmo SDK0072 dos dois lados. As pendências e números
+abaixo descrevem esta rodada anterior; o microbenchmark não prova ganho de FPS.
+
 ## Ambiente e procedência
 
 - Ryzen 7 5700X3D, 8 cores/16 processadores lógicos; RAM 42.856.640.512 bytes.

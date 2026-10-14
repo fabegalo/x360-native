@@ -1,0 +1,172 @@
+{
+  "schema": 1,
+  "comparable": true,
+  "reasons": [],
+  "title": "forza_horizon",
+  "labels": [
+    "p2-measured-01-off",
+    "p2-measured-02-on",
+    "p2-measured-03-on",
+    "p2-measured-04-off"
+  ],
+  "order": [
+    "off",
+    "on",
+    "on",
+    "off"
+  ],
+  "metrics": {
+    "external_process_cpu_ms_per_second": {
+      "on": {
+        "min": 2401.343005138432,
+        "mean": 2412.939376055131,
+        "max": 2424.53574697183,
+        "n": 2,
+        "sd": 16.399745024704668
+      },
+      "change_percent": -0.6941528248020634,
+      "off": {
+        "min": 2402.3539136658965,
+        "mean": 2429.8059426431973,
+        "max": 2457.2579716204978,
+        "n": 2,
+        "sd": 38.82303169435777
+      }
+    },
+    "external_process_cpu_percent_machine": {
+      "on": {
+        "min": 15.0083937821152,
+        "mean": 15.08087110034457,
+        "max": 15.15334841857394,
+        "n": 2,
+        "sd": 0.10249840640440594
+      },
+      "change_percent": -0.6941528248020523,
+      "off": {
+        "min": 15.014711960411853,
+        "mean": 15.186287141519982,
+        "max": 15.35786232262811,
+        "n": 2,
+        "sd": 0.24264394808973508
+      }
+    },
+    "ram_working_set_peak_bytes": {
+      "on": {
+        "min": 1221091328.0,
+        "mean": 1237600256.0,
+        "max": 1254109184.0,
+        "n": 2,
+        "sd": 23347149.877840936
+      },
+      "change_percent": 1.212275503760929,
+      "off": {
+        "min": 1221189632.0,
+        "mean": 1222776832.0,
+        "max": 1224364032.0,
+        "n": 2,
+        "sd": 2244639.7661985764
+      }
+    },
+    "private_commit_peak_bytes": {
+      "on": {
+        "min": 2584236032.0,
+        "mean": 2602762240.0,
+        "max": 2621288448.0,
+        "n": 2,
+        "sd": 26200014.61294493
+      },
+      "change_percent": 0.45330772362062177,
+      "off": {
+        "min": 2587394048.0,
+        "mean": 2591016960.0,
+        "max": 2594639872.0,
+        "n": 2,
+        "sd": 5123571.285684234
+      }
+    },
+    "fps_mean": {
+      "on": {
+        "min": 29.96506833837486,
+        "mean": 29.965852296733175,
+        "max": 29.966636255091487,
+        "n": 2,
+        "sd": 0.0011086845426631175
+      },
+      "change_percent": null,
+      "off": null
+    },
+    "fps_1pct_low": {
+      "on": {
+        "min": 25.603313637747164,
+        "mean": 25.675940865635916,
+        "max": 25.74856809352467,
+        "n": 2,
+        "sd": 0.1027104106778372
+      },
+      "change_percent": null,
+      "off": null
+    },
+    "frame_ms_mean": {
+      "on": {
+        "min": 33.370445434298446,
+        "mean": 33.3713184855234,
+        "max": 33.37219153674837,
+        "n": 2,
+        "sd": 0.0012346808829857517
+      },
+      "change_percent": null,
+      "off": null
+    },
+    "frame_ms_p95": {
+      "on": {
+        "min": 35.55399999999054,
+        "mean": 35.565500000018346,
+        "max": 35.577000000046155,
+        "n": 2,
+        "sd": 0.01626345600661805
+      },
+      "change_percent": null,
+      "off": null
+    },
+    "frame_ms_p99": {
+      "on": {
+        "min": 36.09599999998636,
+        "mean": 36.15299999999877,
+        "max": 36.21000000001118,
+        "n": 2,
+        "sd": 0.08061017307281432
+      },
+      "change_percent": null,
+      "off": null
+    }
+  },
+  "paired_cpu_differences": [
+    {
+      "on_label": "p2-measured-02-on",
+      "change_percent": 0.9233374474822975,
+      "off_label": "p2-measured-01-off",
+      "delta_cpu_ms_per_second": 22.18183330593365
+    },
+    {
+      "on_label": "p2-measured-03-on",
+      "change_percent": -2.2755024961905512,
+      "off_label": "p2-measured-04-off",
+      "delta_cpu_ms_per_second": -55.914966482065665
+    }
+  ],
+  "cpu_difference_ms_per_second": {
+    "min": -55.914966482065665,
+    "mean": -16.866566588066007,
+    "max": 22.18183330593365,
+    "n": 2,
+    "sd": 55.222776719062445
+  },
+  "cpu_difference_ci95": {
+    "confidence": 0.95,
+    "low": -513.0235302544263,
+    "high": 479.29039707829435,
+    "method": "Paired Student t, adjacent runs; exploratory normal-independent-pair assumption, not a frame-level CI"
+  },
+  "interpretation": "CPU difference is unresolved within observed run-to-run variation",
+  "scope": "Observed total process CPU per wall second with counters, snapshots, native CPU timestamps and buffered CSV ON versus runtime OFF, under the same external sampler. Not compile-time removal of disabled callsites. Without independent OFF frames this does not establish equal throughput or cost per frame; FPS overhead remains unavailable."
+}
