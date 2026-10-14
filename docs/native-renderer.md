@@ -1,5 +1,8 @@
 # Native renderer — primeiro incremento executável
 
+Este documento registra N1. O incremento posterior já demonstrou Home e
+navegação originais: [Native N2, evidências e limites](native-renderer-n2.md).
+
 Estado em 2026-10-14, a partir de `c6bb760`: plugin independente com **scanout
 D3D12 real**, executado na RTX 4070. Ainda não renderiza geometria de jogos nem
 a dashboard. Xenos continua padrão e referência de correção. Native só aparece

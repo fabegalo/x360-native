@@ -1,5 +1,17 @@
 # STATUS
 
+Native N2 demonstrou renderização original Retail 17559 (2026-10-14): Home,
+fontes, ícones e navegação Home → Games pelo executor D3D12 próprio. Shaders
+guest traduzidos, draws/estados/texturas, EDRAM e resolve executados sem delegar
+ao Xenos. Quatro capturas GPU Native/Xenos, testes focados de payload/ABI/scanout
+aprovados e dashboard preparada oficialmente com recibo válido. Não há equivalência
+pixel a pixel certificada, transição para jogo ou ganho de performance demonstrado.
+Vulkan segue sem implementação, com fronteira de backend preservada e recusa
+explícita. Native continua experimental; seleção global e Xenos padrão mantidos.
+74 patches SDK ativos, pin inalterado, 0073 retirado. Sem Computer Use, push ou
+Release. Evidências, diferenças e limites: `docs/native-renderer-n2.md`.
+
+Histórico N1:
 Native iniciado com incremento executável (2026-10-14): plugin ABI 1 independente,
 scanout compute D3D12, texturas guest RGBA8 linear/tiled/endian/swizzle/gamma,
 fences e apresentação real. 48 envios/24 capturas e 2.359.296 canais verificados

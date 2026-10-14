@@ -1,0 +1,117 @@
+{
+  "note": "Real GPU presenter readbacks, RGB preserved. Animated guest scenes are not frame synchronized. No FPS measurement.",
+  "images": [
+    {
+      "backend": "native",
+      "scene": "home",
+      "source": ".local/validation/native-n2/native-prepared-navigation-gpu/frame-16.ppm",
+      "file": "native-home.png",
+      "width": 1280,
+      "height": 720,
+      "sha256": "75573a33aaa0a6ea01cd24141e7873595ce2679bda61678a66fbbce74a13d97f",
+      "source_ppm_sha256": "d4214a6aeaa1cf39c459b5c82cc58e286e80eab8f396ae55b36e9785223c33c7"
+    },
+    {
+      "backend": "native",
+      "scene": "games",
+      "source": ".local/validation/native-n2/native-prepared-navigation-gpu/frame-30.ppm",
+      "file": "native-games.png",
+      "width": 1280,
+      "height": 720,
+      "sha256": "df398bebd6692dd28100d022e58a3894de95e136c37cbb7a61a1d317bef669de",
+      "source_ppm_sha256": "35c0b2e9c07b07e92d516a9f47bd33612dfa16f283ce4b79566c2f1c0cefbd28"
+    },
+    {
+      "backend": "xenos",
+      "scene": "home",
+      "source": ".local/validation/native-n2/xenos-navigation-final-gpu/frame-16.ppm",
+      "file": "xenos-home.png",
+      "width": 1280,
+      "height": 720,
+      "sha256": "1998dcf568db2b75681d791ebcac9af19abcc42cceb116b579c78efa2346e140",
+      "source_ppm_sha256": "bc263b6cdc02fdc60a4b6ea978e2b3e4ade11985045332589b13a04ce1f88d04"
+    },
+    {
+      "backend": "xenos",
+      "scene": "games",
+      "source": ".local/validation/native-n2/xenos-navigation-final-gpu/frame-30.ppm",
+      "file": "xenos-games.png",
+      "width": 1280,
+      "height": 720,
+      "sha256": "7e4fe451e865d1052960eec19fd5ad07edd082b7e904b105ecc2dfe72070da59",
+      "source_ppm_sha256": "16ee0526042613c71bd34638c59dd5de6a35db7d59e3a7b29507a6306198e43d"
+    }
+  ],
+  "comparisons": [
+    {
+      "scene": "home",
+      "full_frame_mean_absolute_rgb_error": 0.29845196759259257,
+      "full_frame_max_channel_error": 55,
+      "select_label_rect_xyxy": [
+        90,
+        640,
+        190,
+        690
+      ],
+      "select_label_mean_absolute_rgb_error": 0.5124666666666666,
+      "select_label_max_channel_error": 2
+    },
+    {
+      "scene": "games",
+      "full_frame_mean_absolute_rgb_error": 2.3226229745370373,
+      "full_frame_max_channel_error": 202,
+      "select_label_rect_xyxy": [
+        90,
+        640,
+        190,
+        690
+      ],
+      "select_label_mean_absolute_rgb_error": 0.5124666666666666,
+      "select_label_max_channel_error": 2
+    }
+  ],
+  "runs": {
+    "native": {
+      "id": "20261014T215155Z-n2-native-prepared-navigation",
+      "exe_sha256": "d350d892aab873dd38a776d636f1c88717a7f77920c5c2ef2ec03d52d65581c4",
+      "dlls": [
+        {
+          "name": "rexgpu-nativerd.dll",
+          "size": 1736192,
+          "sha256": "b90076599b041b6eeba011e788d9913544666d7118d760ab124777731cc3a06c"
+        },
+        {
+          "name": "rexgpu-xenosrd.dll",
+          "size": 2980864,
+          "sha256": "6ca62de48c88401e8287e16a19925453038f39ad6435da1a928a779fa334928b"
+        },
+        {
+          "name": "rexruntimerd.dll",
+          "size": 11722240,
+          "sha256": "52d0f15031779488dcc39f377d239fbd47a8723a2174e4a5a19dc0fb2202077d"
+        }
+      ]
+    },
+    "xenos": {
+      "id": "20261014T214653Z-n2-xenos-navigation-final",
+      "exe_sha256": "77f50e64a52ce70b6fc7ac43fc9b954453281c823d09d6dedf317658f5efc6af",
+      "dlls": [
+        {
+          "name": "rexgpu-nativerd.dll",
+          "size": 1735680,
+          "sha256": "49b01fccd06a66ea808373b251f71d95a1d3887cea503a173920fdfa1bcc522e"
+        },
+        {
+          "name": "rexgpu-xenosrd.dll",
+          "size": 2980864,
+          "sha256": "cffa7698494875e52104e3c4efafc8c535e4a18eb0170f40bb026b072cd1c0ac"
+        },
+        {
+          "name": "rexruntimerd.dll",
+          "size": 11722240,
+          "sha256": "f6e4ab38b28f861e8369d2cde82b5ad24c72fb9466a37dbce96e58123d91325a"
+        }
+      ]
+    }
+  }
+}

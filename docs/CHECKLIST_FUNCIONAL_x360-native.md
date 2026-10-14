@@ -330,6 +330,12 @@ O runtime documentado separa memória, funções do sistema, threads, arquivos, 
 
 **Aceite:** comparar cenas e comportamentos reproduzíveis com uma referência confiável. Uma imagem colorida ou um contador avançando não comprova correção.
 
+**Evidência parcial Native N2 (2026-10-14):** Home, fontes, ícones e navegação
+Home → Games da Retail 17559 renderizados pelo executor D3D12 independente,
+com capturas reais comparadas ao Xenos e testes focados. Os itens gerais acima
+continuam abertos: diferenças de pixels, Guide/avatares, transições para jogos,
+Vulkan e desempenho não estão certificados. [Resultados e limites](native-renderer-n2.md).
+
 ## 12. Rede e periféricos especiais — P2
 
 Estes são objetivos adicionais de cobertura, não pré-requisitos para concluir o primeiro ciclo offline. Dependências de serviços externos devem permanecer separadas do suporte local.
