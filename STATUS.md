@@ -1,5 +1,24 @@
 # STATUS
 
+Automação de Releases no GitHub Actions (2026-10-14): workflow manual e por
+tag `v*` implementado em `.github/workflows/release.yml`, reutilizando
+`scripts/package-desktop.ps1`. O runner Windows prepara ferramentas/SDK
+fixados, aplica/verifica os 67 patches, compila Release e executa os gates
+focados de distribuição, licenças/conteúdo e ZIP/procedência. Execução manual
+`38515926098` aprovada no commit `3615c7aa277f367187ce0b00d32a078615c95b43`:
+17 testes de tooling, `desktop.catalog`, 88 componentes/3 executáveis e upload
+passaram. ZIP Windows x64 e SHA-256 baixados e reconferidos, 491 arquivos,
+3.516.821 bytes; digest `b7c6d196aace73b5ca6be3462403942f67f6328423c3d877149ad762503039f0`.
+Preparação corrigida do LLVM: 67 s após substituir a decodificação XZ lenta
+do TAR do Windows pelo 7-Zip do runner, mantendo arquivo/hash/staging.
+Comparação de caminho no teste AOT corrigida para identidade física diante
+do alias Windows `RUNNER~1`, preservando o contrato do entrypoint. Workflow
+rápido de PRs e isolamento de versões preservados. Publicação por tag exige
+notas correspondentes, verifica assets em draft e trata previews como
+pre-releases; somente simulada nos testes, sem criar tag ou publicar Release.
+Sem Computer Use, sessão de jogo ou suíte completa. Evidências e operação:
+`docs/release-automation.md` e `.local/validation/ci-release-success.log`.
+
 Correção da importação do Forza Horizon na instalação preview.20 (2026-10-14):
 a ISO extraía 2.432 arquivos sem erro, mas o caminho temporário de cópia excedia
 MAX_PATH no diretório longo do pacote. A mensagem localizada do filesystem

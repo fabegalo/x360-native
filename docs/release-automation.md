@@ -78,6 +78,46 @@ Jobs have bounded timeouts and runs for the same ref cannot overlap. The fast
 Pull Request workflow is unchanged. A hosted build does not establish clean
 Windows first-use, gameplay or broader platform compatibility.
 
+## Verified manual run — October 14, 2026
+
+[Run 38515926098](https://github.com/fabegalo/x360-native/actions/runs/38515926098)
+completed successfully in approximately five minutes, building source commit
+`3615c7aa277f367187ce0b00d32a078615c95b43` on hosted Windows Server 2022 image
+`20261004.326.1`. Dependency preparation took 67 seconds; distribution build,
+tests and packaging took 204 seconds. The 17 synthetic release-tooling tests,
+focused `desktop.catalog` CTest, original license/content gate (88 components,
+three executables), ZIP verification and upload all passed. The publisher was
+skipped because the event was `workflow_dispatch`.
+
+Artifact: `x360-native-0.1.0-ci-windows-x64`, GitHub artifact ID `11871269847`.
+Its two deliverables were downloaded and independently checked:
+
+| Deliverable | Bytes | SHA-256 |
+|---|---:|---|
+| `x360-native-0.1.0-ci-windows-x64.zip` | 3,516,821 | `b7c6d196aace73b5ca6be3462403942f67f6328423c3d877149ad762503039f0` |
+| `x360-native-0.1.0-ci-windows-x64.zip.sha256` | 103 | Contains the ZIP hash and exact filename |
+
+All 491 ZIP entries, both complete indices, x64 executable headers and source,
+SDK, patch and tool provenance were verified after download. Recorded Microsoft
+tools: MSVC `14.44.35207`, Windows SDK `10.0.26100.0`; LLVM `22.1.8`, ReXGlue
+`f5337cdc947ff6d4c4196737e2c807a48f2a1fc2`, all 67 patches and nine desktop
+dependency revisions. No original Xbox content or title runtime is included.
+
+Real implementation issues resolved before success: hidden output directories
+in upload-artifact, shell quoting for Microsoft environment collection, PATH
+persistence between steps, the Windows TAR XZ decoding stall, and a test's
+textual comparison between `runneradmin` and its `RUNNER~1` path alias. That
+test now compares physical file identity and still requires the correct
+`default.xex` entrypoint in the XContent hierarchy. The failing test withheld
+the ZIP; it was not skipped or converted into a successful result.
+
+Local evidence: `.local/validation/ci-release-success.log` and
+`.local/validation/ci-release-38515926098/`. GitHub artifacts expire after 14
+days; the recorded run, source revision and hashes identify this validation.
+The Release list was unchanged before/after validation. No release tag was
+created and no Release was published. Publication paths were tested with
+mocked CLI calls only; a real tag publication awaits maintainer authorization.
+
 ## Architectural reference
 
 Studied at Pinyon Shift commit `a72a92a5f215a32875386b824b8b6f0f34e1caf9`:
