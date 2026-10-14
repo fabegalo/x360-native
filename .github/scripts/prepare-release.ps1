@@ -1,8 +1,14 @@
 # Distribution dependencies only; no full runtime, title codegen or installation.
+param([switch]$RecordEnvironment)
 $ErrorActionPreference = 'Stop'
 $env:PSModulePath = Join-Path $PSHOME 'Modules'
 $root = (Resolve-Path (Join-Path $PSScriptRoot '../..')).Path
 Set-Location -LiteralPath $root
+if ($RecordEnvironment) {
+    if (-not $env:VCToolsVersion -or -not $env:WindowsSDKVersion) { throw 'Microsoft C++/Windows SDK environment missing' }
+    python .github/scripts/release.py environment --versions "$env:VCToolsVersion;$env:WindowsSDKVersion"
+    exit $LASTEXITCODE
+}
 $env:GIT_CONFIG_COUNT = '3'
 $env:GIT_CONFIG_KEY_0 = 'core.autocrlf'; $env:GIT_CONFIG_VALUE_0 = 'false'
 $env:GIT_CONFIG_KEY_1 = 'core.eol'; $env:GIT_CONFIG_VALUE_1 = 'lf'

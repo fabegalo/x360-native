@@ -49,9 +49,8 @@ jobs:
         run: .github/scripts/prepare-release.ps1
       - name: Record hosted toolchain versions
         run: |
-          $environment = & scripts/devshell.cmd powershell -NoProfile -Command 'Write-Output ($env:VCToolsVersion + ";" + $env:WindowsSDKVersion)'
+          & scripts/devshell.cmd powershell -NoProfile -ExecutionPolicy Bypass -File .github/scripts/prepare-release.ps1 -RecordEnvironment
           if ($LASTEXITCODE -ne 0) { throw 'Cannot identify Microsoft build environment' }
-          python .github/scripts/release.py environment --versions ($environment | Select-Object -Last 1)
       - name: Build and test the existing desktop distribution
         env:
           PACKAGE_VERSION: ${{ steps.identity.outputs.version }}
