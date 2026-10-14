@@ -1,5 +1,18 @@
 # STATUS
 
+C8 (2026-10-13), **saves XContent por perfil/título implementados e validados
+pelo caminho XAM → NT/VFS → disco em Windows x64**: patch 0067 usa o XUID
+conectado do C7 e Title ID do XEX, isola enumeração/mounts, invalida handles
+antigos ao trocar de perfil e efetua flush real. Dois processos independentes
+gravam/recuperam payloads diferentes para Player1/Player2; exclusão de um não
+atinge o outro. Treze casos focados distintos cobrem armazenamento, C7 e
+conteúdo instalado; replay dos 67 patches com hashes conferidos. Layout e dados
+anteriores preservados. Castle Crashers recompilado e iniciado por scripts,
+mas **save/load comercial ainda não comprovado**: as sessões chegaram ao menu
+sem produzir save. Sem Computer Use ou regressão completa. Contratos, reprodução,
+evidências e limites em `docs/save-storage.md`; o aceite amplo do ciclo de jogo
+permanece pendente.
+
 C7.8 (2026-10-13), **isolamento obrigatório dos originais por versão**:
 `AGENTS.md`/`CLAUDE.md` registram a regra permanente. O vk.xex efetivamente
 integrado é Retail **2.0.17559.0**, SHA-256 `876ddbb333d83f408ab7c69267703e623daef6da5b1eb3302bd94d246155724e`.

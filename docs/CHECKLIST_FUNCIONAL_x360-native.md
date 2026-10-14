@@ -233,6 +233,14 @@ O VFS do SDK é a camada que relaciona caminhos do Xbox 360 a arquivos locais. A
 
 **Aceite:** salvar progresso real, encerrar totalmente a plataforma, reabrir e continuar do ponto salvo.
 
+**C8 — comprovação limitada ao serviço, 2026-10-13:** exports originais XAM/NT
+criam, leem, escrevem, enumeram, fazem flush e excluem arquivos reais por XUID e
+Title ID; dois processos separados demonstram persistência e isolamento de
+Player1/Player2. C7 e conteúdo instalado preservados nos testes focados.
+O save/load de progresso comercial e o ciclo completo acima continuam pendentes;
+os testes do serviço não promovem esse aceite. Evidências e limites:
+`docs/save-storage.md`.
+
 ## 7. Controles e uso no PC — P0/P1
 
 - [ ] Suportar botões, direcionais, analógicos, gatilhos e vibração dos controles usados no projeto.

@@ -422,3 +422,20 @@ and persistence after restarting. See dashboard §0.30 for exact evidence/scope.
 All 53 patches apply from pinned sources and match final hashes; new patch base
 hashes also match. `apply-sdk-patches.ps1 -Check` passes. Proprietary inputs,
 generated original code, profile fixtures, logs and screenshots remain local.
+
+## 0067 — profile and title save storage (C8)
+
+No upstream equivalent identified; the pinned SDK is unchanged. Public save
+operations resolve the signed-in C7 XUID and executable Title ID. Enumeration
+excludes shared saves; session epochs revoke old mounts, file I/O and enumerators.
+VFS devices have shared lifetime while host files reference their entries, so
+revocation/unmount does not leave dangling pointers or retain whole retired mounts.
+Flush reaches the host and reports failures. Create dispositions, headers, occupied
+aliases and storage failures no longer produce fabricated success.
+
+Tests: `sdkcheck.Save storage uses XAM and NT file contracts across profiles and restarts`,
+`sdkcheck.Save storage reports real failures and completes overlapped operations`,
+and `sdkcheck.save-storage-processes`. Real PPC export calls, NT file handles,
+host payloads and independent processes; no game-specific save adapters. Existing
+profile and installed-content tests remain green. See `docs/save-storage.md` for
+evidence and the explicit limit: commercial-game save/load is not yet demonstrated.
