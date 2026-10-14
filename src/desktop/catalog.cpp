@@ -47,11 +47,15 @@ bool Matches(const fs::path& path, const std::string& hash) {
   auto d = DigestFile(path);
   return d && d->sha256 == hash;
 }
+std::string FileKey(const fs::path& path) {
+  auto value = path.generic_u8string(); std::string key(value.begin(), value.end());
+  for (auto& c : key) if (c >= 'A' && c <= 'Z') c += 'a' - 'A';
+  return key;
+}
 }
 std::vector<Target> ReadCatalog(const ProjectPaths& paths) {
   std::vector<Target> result;
-  if (!fs::is_directory(paths.root / "titles")) return result;
-  for (const auto& dir : fs::directory_iterator(paths.root / "titles")) {
+  if (fs::is_directory(paths.root / "titles")) for (const auto& dir : fs::directory_iterator(paths.root / "titles")) {
     auto setup = dir.path() / "preparation.toml";
     if (!fs::is_regular_file(setup)) continue;
     auto info = Read(setup);
@@ -133,14 +137,9 @@ std::vector<Target> ReadCatalog(const ProjectPaths& paths) {
         if (!IsSafeLabel(id)) throw std::runtime_error("Dependência inválida.");
         t.dependencies.push_back(id);
       }
-    if (const auto* library = info["library_targets"].as_array())
-      for (const auto& item : *library) {
-        auto id = Text(item);
-        if (!IsSafeLabel(id)) throw std::runtime_error("Identificador de biblioteca inválido.");
-        t.library_targets.push_back(id);
-      }
     result.push_back(std::move(t));
   }
+  ReadImportedGames(paths, result);
   std::sort(result.begin(), result.end(), [](const auto& a, const auto& b) { return a.id < b.id; });
   return result;
 }
@@ -166,15 +165,18 @@ fs::path PreparationMarker(const ProjectPaths& paths, const Target& t) {
 }
 Inspection Inspect(const ProjectPaths& paths, const Target& t) {
   Inspection r;
+  if (!t.import_error.empty()) { r.inputs_ok = false; r.issues.push_back(t.import_error); }
   for (const auto& i : t.inputs) {
-    if (!fs::is_regular_file(i.destination)) {
+    auto file = t.preparation_source.empty() ? i.destination : t.preparation_source / i.destination.lexically_relative(t.game_root);
+    if (!fs::is_regular_file(file)) {
       r.inputs_ok = false;
       r.issues.push_back("Falta componente: " + Utf8(i.destination));
-    } else if (!Matches(i.destination, i.sha256)) {
+    } else if (!Matches(file, i.sha256)) {
       r.inputs_ok = false;
       r.issues.push_back("Arquivo diferente do conjunto verificado; preserve-o e selecione a versão correta: " + Utf8(i.destination));
     }
   }
+  if (!t.aot) return r;
   if (auto error = CheckLaunchable(paths, t.exe)) {
     r.issues.push_back("Precisa preparar: " + Utf8(t.exe));
   } else {
@@ -192,7 +194,17 @@ Inspection Inspect(const ProjectPaths& paths, const Target& t) {
   }
   if (fs::exists(PreparationMarker(paths, t))) {
     r.prepared = false;
+    r.interrupted = true;
     r.issues.push_back("Preparação anterior incompleta. Clique em Preparar para retomar; o executável antigo não valida essa tentativa.");
+    std::ifstream log(PreparationMarker(paths, t));
+    std::string line;
+    for (unsigned n = 0; n < 30 && std::getline(log, line); ++n) r.issues.push_back(line);
+  }
+  const auto runtime_error = paths.local() / "preparation" / (t.id + ".runtime-error");
+  if (fs::is_regular_file(runtime_error)) {
+    r.prepared = false; r.interrupted = true;
+    std::ifstream in(runtime_error); std::string line;
+    for (unsigned n = 0; n < 30 && std::getline(in, line); ++n) r.issues.push_back(line);
   }
   return r;
 }
@@ -207,12 +219,21 @@ size_t Import(const ProjectPaths& paths, const Target& t, const fs::path& source
   // A renamed standalone file is compared against the whole inventory. Hash it
   // once, not once per asset; the staged copy is independently verified below.
   const auto single_digest = single ? DigestFile(source) : std::optional<FileDigest>{};
+  std::map<std::string, std::vector<const Input*>> by_name;
+  for (const auto& i : t.inputs) {
+    by_name[FileKey(PathFromUtf8(i.source_name))].push_back(&i);
+    if (FileKey(PathFromUtf8(i.source_name)) != FileKey(i.destination.filename())) by_name[FileKey(i.destination.filename())].push_back(&i);
+  }
   auto consider = [&](const fs::path& file) {
-    for (const auto& i : t.inputs) {
-      if (!single && !i.source_relative.empty() && file.lexically_relative(source) != i.source_relative) continue;
-      if (!single && file.filename() != PathFromUtf8(i.source_name) && file.filename() != i.destination.filename()) continue;
-      if (single ? single_digest && single_digest->sha256 == i.sha256 : Matches(file, i.sha256)) copies[i.destination] = file;
-    }
+    if (!single && !by_name.contains(FileKey(file.filename()))) return;
+    const auto digest = single ? single_digest : DigestFile(file);
+    if (!digest) throw std::runtime_error("Could not read import source: " + Utf8(file));
+    auto check = [&](const Input& i) {
+      if (!single && !i.source_relative.empty() && FileKey(file.lexically_relative(source)) != FileKey(i.source_relative)) return;
+      if (digest->sha256 == i.sha256) copies[i.destination] = file;
+    };
+    if (single) for (const auto& i : t.inputs) check(i);
+    else if (auto it = by_name.find(FileKey(file.filename())); it != by_name.end()) for (const auto* i : it->second) check(*i);
   };
   if (single) { stop(); consider(source); }
   // Search only the user-selected folder, never follow directory symlinks.
@@ -245,6 +266,8 @@ size_t Import(const ProjectPaths& paths, const Target& t, const fs::path& source
   if (!IsSafeLabel(t.id)) throw std::runtime_error("Identificador inválido.");
   std::ofstream log(records / (t.id + ".tsv"), std::ios::binary | std::ios::app);
   if (!log) throw std::runtime_error("Não foi possível registrar a procedência local da importação.");
+  std::map<fs::path, const Input*> expected_files;
+  for (const auto& i : t.inputs) expected_files.emplace(i.destination, &i);
   for (const auto& [destination, input] : copies) {
     stop();
     Inside(destination, paths.inputs());
@@ -252,8 +275,7 @@ size_t Import(const ProjectPaths& paths, const Target& t, const fs::path& source
     // Unique temporary name; never truncate an existing original or destination.
     const auto staging = destination.parent_path() / (".x360n-import-" + Utf8(destination.filename()));
     const auto temporary = staging / "verified.tmp";
-    const auto expected = std::find_if(t.inputs.begin(), t.inputs.end(), [&](const auto& i) { return i.destination == destination; });
-    if (expected == t.inputs.end()) throw std::runtime_error("Componente sem identidade.");
+    const auto expected = expected_files.at(destination);
     if (fs::exists(staging)) {
       if (!fs::is_directory(staging) || fs::is_symlink(staging) || !IsWithin(staging, destination.parent_path()))
         throw std::runtime_error("Pasta temporária inválida; conteúdo preservado.");

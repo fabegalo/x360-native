@@ -49,6 +49,8 @@ fs::path LocalExtractor() {
 TEST_CASE("desktop extracts ISO and extensionless CON LIVE PIRS before verified import", "[desktop][extraction]") {
   Scratch s; std::string bytes; std::string name="original";
   SECTION("ISO") { bytes=Iso(); name+=".ISO"; }
+  SECTION("GDFX") { bytes=Iso(); name+=".gdfx"; }
+  SECTION("extensionless GDFX") { bytes=Iso(); }
   SECTION("CON") { bytes=Stfs(rex::filesystem::XContentPackageType::kCon); }
   SECTION("LIVE") { bytes=Stfs(rex::filesystem::XContentPackageType::kLive); }
   SECTION("PIRS") { bytes=Stfs(rex::filesystem::XContentPackageType::kPirs); }

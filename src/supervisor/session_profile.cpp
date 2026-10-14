@@ -66,6 +66,31 @@ SessionProfile LoadSessionProfile(const ProjectPaths& paths, const std::filesyst
     }
   if (auto array = table["x360n"]["launch_targets"].as_array())
     for (const auto& value : *array) p.launch_targets.push_back(resolve(text(value)));
+  if (table["x360n"]["launch_library"].value_or(false)) {
+    // Optional compatibility profiles and automatically generated local projects
+    // share the same receipt-verified launch path. Metadata alone never launches.
+    for (const auto& root : {paths.root / "titles", paths.local() / "aot"}) {
+    if (!std::filesystem::is_directory(root)) continue;
+    for (const auto& dir : std::filesystem::directory_iterator(root)) {
+      try {
+      const auto setup_file = dir.path() / "preparation.toml";
+      if (!std::filesystem::is_regular_file(setup_file)) continue;
+      std::ifstream in(setup_file); const auto recipe = toml::parse(in, PathUtf8(setup_file));
+      if (!recipe["library"].is_table() || recipe["kind"].value_or(std::string("game")) != "game") continue;
+      const auto id = PathUtf8(dir.path().filename());
+      const auto candidate = dir.path() / PathFromUtf8(id + "_manifest.toml");
+      if (root == paths.local() / "aot" &&
+          CheckPreparation(paths, id, candidate, paths.build() / "titles" / id / (id + ".exe"))) continue;
+      if (std::filesystem::weakly_canonical(candidate) != manifest)
+        p.launch_targets.push_back(candidate);
+      } catch (const std::exception&) {
+        // An interrupted or malformed optional game project must not prevent
+        // starting the original dashboard or another already verified title.
+        continue;
+      }
+    }
+    }
+  }
   if (auto array = table["x360n"]["dashboard_return_flags"].as_array()) {
     p.dashboard_return_flags.clear();
     for (const auto& value : *array) {

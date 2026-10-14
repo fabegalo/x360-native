@@ -72,37 +72,33 @@ void CheckSource(const Target& game) {
     if (!IsWithin(input.destination, game.game_root) || !Same(input.destination, input.sha256))
       throw std::runtime_error("Importe o conjunto completo antes de registrar na biblioteca: " + Utf8(input.destination));
 }
-std::vector<std::string> InstalledGames(const Target& session, const std::vector<Target>& catalog) {
-  auto ids = session.dependencies;
-  for (const auto& id : session.library_targets) {
-    const auto& game = Dependency(catalog, id);
-    // Optional games are advertised only after their complete contents and build
-    // exist. A dashboard can be installed with an empty game library.
-    if (!fs::is_regular_file(game.exe) || game.inputs.empty()) continue;
-    if (std::all_of(game.inputs.begin(), game.inputs.end(), [](const auto& i) { return Same(i.destination, i.sha256); }))
-      ids.push_back(id);
+std::vector<std::string> InstalledGames(const ProjectPaths& paths, const std::vector<Target>& catalog) {
+  std::vector<std::string> ids;
+  for (const auto& game : catalog) {
+    if (!game.aot || game.kind != "game" || game.library.title_id.empty() || game.inputs.empty()) continue;
+    // Most imported games have never been built. Do not rehash their multi-GB
+    // inventories for each dashboard while discovering executable entries.
+    if (!fs::is_regular_file(game.exe) || fs::exists(PreparationMarker(paths, game))) continue;
+    if (Inspect(paths, game).prepared) ids.push_back(game.id);
   }
   return ids;
 }
 }
-std::vector<std::string> InspectLibrary(const Target& session, const std::vector<Target>& catalog) {
+std::vector<std::string> InspectLibrary(const ProjectPaths& paths, const Target& session, const std::vector<Target>& catalog) {
   std::vector<std::string> issues;
   if (!session.session) {
+    if (!fs::is_regular_file(session.exe) || fs::exists(PreparationMarker(paths, session))) return issues;
     // A compiled game can still have an interrupted registration. Check only
     // this game in dashboards already imported, without making unrelated games
     // dependencies of its ready state.
     for (const auto& dashboard : catalog) {
       if (!dashboard.session || dashboard.inputs.empty() || !fs::is_regular_file(dashboard.inputs.front().destination)) continue;
-      const auto has = [&](const auto& ids) { return std::find(ids.begin(), ids.end(), session.id) != ids.end(); };
-      if (!has(dashboard.dependencies) && !has(dashboard.library_targets)) continue;
-      auto selected = dashboard;
-      selected.dependencies = {session.id}; selected.library_targets.clear();
-      auto missing = InspectLibrary(selected, catalog);
+      auto missing = InspectLibrary(paths, dashboard, {session});
       issues.insert(issues.end(), missing.begin(), missing.end());
     }
     return issues;
   }
-  for (const auto& id : InstalledGames(session, catalog)) {
+  for (const auto& id : InstalledGames(paths, catalog)) {
     const auto& game = Dependency(catalog, id);
     if (game.library.title_id.empty()) continue;
     const auto entry = Describe(session, game);
@@ -120,7 +116,23 @@ void PrepareLibrary(const ProjectPaths& paths, const Target& session, const std:
   if (!session.session) return;
   WorkspaceLease lease(paths);
   auto stop = [&] { if (cancelled && cancelled()) throw std::runtime_error("Registro cancelado. Conteúdo e saves existentes foram preservados."); };
-  for (const auto& id : InstalledGames(session, catalog)) {
+  const auto installed = InstalledGames(paths, catalog);
+  // Withdraw only headers owned by our exact recipe. Keep the game files,
+  // profiles and saves intact when a preparation becomes stale or interrupted.
+  for (const auto& game : catalog) {
+    stop();
+    if (!game.aot || game.library.title_id.empty() ||
+        std::find(installed.begin(), installed.end(), game.id) != installed.end()) continue;
+    const auto entry = Describe(session, game);
+    if (!fs::exists(entry.header)) continue;
+    if (!Same(entry.header, Hash(entry.bytes)) || !WithinNew(entry.header, session.user_root))
+      throw std::runtime_error("Existing library header differs; preserved. Repair the registration before launching.");
+    const auto saved = LibraryPath(session.user_root) / ".x360n-inactive-headers" /
+        (game.id + "-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()) + ".header");
+    if (!WithinNew(saved, session.user_root)) throw std::runtime_error("Redirected library archive");
+    fs::create_directories(saved.parent_path()); fs::rename(entry.header, saved);
+  }
+  for (const auto& id : installed) {
     stop();
     const auto& game = Dependency(catalog, id);
     if (game.library.title_id.empty()) continue;

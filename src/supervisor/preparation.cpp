@@ -137,7 +137,8 @@ std::optional<std::string> CheckPreparation(const ProjectPaths& paths,
 std::optional<std::string> CheckPreparedLaunch(const ProjectPaths& paths, const fs::path& exe) {
   try {
     const auto titles = paths.root / "titles";
-    if (fs::is_directory(titles)) for (const auto& dir : fs::directory_iterator(titles)) {
+    for (const auto& profiles : {titles, paths.local() / "aot"}) {
+    if (fs::is_directory(profiles)) for (const auto& dir : fs::directory_iterator(profiles)) {
       if (!dir.is_directory()) continue;
       const auto id = PathUtf8(dir.path().filename());
       const auto manifest = dir.path() / PathFromUtf8(id + "_manifest.toml");
@@ -152,6 +153,7 @@ std::optional<std::string> CheckPreparedLaunch(const ProjectPaths& paths, const 
         // with no matching valid registration is still rejected below.
         continue;
       }
+    }
     }
     if (fs::exists(PreparationReceipt(exe))) {
       // build-title -BuildDir may produce an explicitly selected diagnostic

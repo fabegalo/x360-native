@@ -15,6 +15,17 @@ using System;
 using System.Runtime.InteropServices;
 public static class X360nKeys {
   [DllImport("user32.dll")] public static extern bool PostMessage(IntPtr h, uint msg, IntPtr w, IntPtr l);
+  public delegate bool Callback(IntPtr h, IntPtr p);
+  [DllImport("user32.dll")] public static extern bool EnumWindows(Callback cb, IntPtr p);
+  [DllImport("user32.dll")] public static extern bool EnumChildWindows(IntPtr w, Callback cb, IntPtr p);
+  [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr w, out uint pid);
+  [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr w);
+  public static IntPtr Find(int pid) {
+    IntPtr result=IntPtr.Zero;
+    Callback visit=(h,p)=> { uint owner; GetWindowThreadProcessId(h,out owner); if(owner==pid && IsWindowVisible(h)) result=h; return true; };
+    EnumWindows((h,p)=> { visit(h,p); EnumChildWindows(h,visit,p); return true; },IntPtr.Zero);
+    return result;
+  }
 }
 '@
 # Virtual-key code and set-1 scan code (SDL maps keys from the scan code in lParam).
@@ -27,12 +38,11 @@ $keys = @{
 $deadline = (Get-Date).AddSeconds($WaitSeconds)
 $proc = $null
 while ((Get-Date) -lt $deadline) {
-    $proc = Get-Process -Name $ProcessName -ErrorAction SilentlyContinue | Where-Object { $_.MainWindowHandle -ne [IntPtr]::Zero } | Select-Object -First 1
-    if ($proc) { break }
+    $proc = Get-Process -Name $ProcessName -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($proc) { $hwnd=[X360nKeys]::Find($proc.Id); if ($hwnd -ne [IntPtr]::Zero) { break } }
     Start-Sleep -Milliseconds 250
 }
-if (-not $proc) { Write-Error "no window for '$ProcessName'"; exit 1 }
-$hwnd = $proc.MainWindowHandle
+if (-not $proc -or $hwnd -eq [IntPtr]::Zero) { Write-Error "no window for '$ProcessName'"; exit 1 }
 $t0 = Get-Date
 foreach ($step in $Steps.Split(',')) {
     $parts = $step.Trim().Split(':', 3)

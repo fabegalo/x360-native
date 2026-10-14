@@ -22,8 +22,12 @@ $env:PSModulePath = Join-Path $PSHOME 'Modules'
 $root = (Resolve-Path (Split-Path -Parent $PSScriptRoot)).Path
 . (Join-Path $PSScriptRoot 'preparation-receipt.ps1')
 . (Join-Path $PSScriptRoot 'build-lease.ps1')
+$driverSnapshot = @(Get-ReceiptEntries @($PSCommandPath, (Join-Path $PSScriptRoot 'preparation-receipt.ps1'), (Join-Path $PSScriptRoot 'build-lease.ps1')))
 if ($Title -notmatch '^[a-z][a-z0-9_]*$') { throw "invalid title name '$Title'" }
 $titleDir = Join-Path $root "titles\$Title"
+if (-not (Test-Path (Join-Path $titleDir 'CMakePresets.json'))) {
+    $titleDir = Join-Path $root ".local/aot/$Title"
+}
 if (-not (Test-Path (Join-Path $titleDir 'CMakePresets.json'))) { throw "no title project at $titleDir" }
 if (-not $BuildDir) { $BuildDir = ".local/build/titles/$Title" }
 $build = [IO.Path]::GetFullPath((Join-Path $root $BuildDir))
@@ -59,6 +63,7 @@ try {
         # A verified final build needs no relink from unverified intermediates or
         # mutable shared SDK outputs. Keep the exact certified producer/products.
         if (-not $KeepIncompleteMarker) { Remove-Item -LiteralPath $marker }
+        [IO.File]::Delete((Join-Path $root ".local/preparation/$Title.runtime-error"))
         Write-Host "reused verified preparation: $exe"
         return
     }
@@ -120,6 +125,7 @@ try {
         }
         Write-Output "X360N_STAGE $Title $($s.name)"
         $log = Join-Path $build "x360n-build-$($s.name).log"
+        [IO.File]::WriteAllText($marker, "Preparing: $($s.name)`nLog: $log")
         $sw = [Diagnostics.Stopwatch]::StartNew()
         # Redirect inside cmd: in PowerShell 5.1 with ErrorActionPreference=Stop,
         # native stderr (e.g. VsDevCmd's "'vswhere.exe' is not recognized") would
@@ -128,6 +134,7 @@ try {
         $rc = $LASTEXITCODE
         Write-Host ("step {0}: exit {1} in {2} s (log {3})" -f $s.name, $rc, [int]$sw.Elapsed.TotalSeconds, $log)
         if ($rc -ne 0) {
+            [IO.File]::WriteAllText($marker, "Error: $($s.name), exit $rc`nLog: $log`n" + ((Get-Content $log -Tail 25) -join "`n"))
             Get-Content $log | Select-String -Pattern 'error|FAILED' | Select-Object -First 10 | Out-Host
             throw "Preparation failed at $($s.name), exit $rc"
         }
@@ -157,7 +164,7 @@ try {
             }
         }
     }
-    if (-not (Test-ReceiptEntries $sourceSnapshot)) { throw 'An input changed during preparation; prepare again. No receipt published.' }
+    if (-not (Test-ReceiptEntries $driverSnapshot) -or -not (Test-ReceiptEntries $sourceSnapshot)) { throw 'An input changed during preparation; prepare again. No receipt published.' }
     $inputs = @(Get-ReceiptEntries @(Get-BuildInputs $root $Title $build @($Title)))
     $dllOutputs = @(Get-NinjaNodes $build @($Title) | Where-Object { $_ -match '\.dll$' } | Sort-Object -Unique)
     $artifacts = @(Get-PreparedArtifacts $build $exe $dllOutputs | Sort-Object path -Unique)
@@ -173,7 +180,11 @@ try {
         roles = @{ compiler = (Get-BuildCache $build).CMAKE_CXX_COMPILER; codegen = $tool;
             build_config = (Join-Path $build 'CMakeCache.txt') } }
     Publish-PreparationReceipt $receiptFile $receipt
+    [IO.File]::Delete((Join-Path $root ".local/preparation/$Title.runtime-error"))
     if (-not $KeepIncompleteMarker) { Remove-Item -LiteralPath $marker }
+} catch {
+    [IO.File]::AppendAllText($marker, "`nError: $($_.Exception.Message)`n")
+    throw
 } finally {
     Pop-Location
     $env:X360N_OWNED_BUILD = $previousOwnedBuild

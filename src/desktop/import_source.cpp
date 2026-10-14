@@ -18,7 +18,14 @@ ImportSource::ImportSource(const fs::path& original, const fs::path& extractor,
   const bool package = magic == "CON " || magic == "LIVE" || magic == "PIRS";
   auto extension = original.extension().wstring();
   std::transform(extension.begin(), extension.end(), extension.begin(), ::towlower);
-  if (!package && extension != L".iso") return;
+  bool disc = extension == L".iso" || extension == L".gdfx";
+  // GDFX may be supplied without an extension, at any supported disc offset.
+  for (uint64_t offset : {0ull, 0xFB20ull, 0x20600ull, 0xFD90000ull, 0x2080000ull}) {
+    char signature[20]{}; input.clear(); input.seekg(offset + 32 * 2048);
+    input.read(signature, 20);
+    if (std::string_view(signature, 20) == std::string_view("MICROSOFT*XBOX*MEDIA", 20)) disc = true;
+  }
+  if (!package && !disc) return;
   if (!fs::is_regular_file(extractor))
     throw std::runtime_error("Falta o componente de extração. Extraia novamente o ZIP completo do aplicativo; seus jogos e dados serão preservados.");
   fs::create_directories(logs);

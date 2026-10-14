@@ -37,6 +37,7 @@ function Get-NinjaNodes([string]$Build, [string[]]$Targets) {
     }
 }
 function Get-BuildInputs([string]$Root, [string]$Title, [string]$Build, [string[]]$Targets) {
+    $projectDirectory = (Get-BuildCache $Build).CMAKE_HOME_DIRECTORY
     $cache = Get-BuildCache $Build
     $files = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
     $nodes = @(Get-NinjaNodes $Build $Targets)
@@ -72,11 +73,17 @@ function Get-BuildInputs([string]$Root, [string]$Title, [string]$Build, [string[
         if ($cache[$name] -and [IO.File]::Exists($cache[$name])) { [void]$files.Add([IO.Path]::GetFullPath($cache[$name])) }
     }
     foreach ($file in @('deps.lock.json','scripts/build-title.ps1','scripts/preparation-receipt.ps1','scripts/devshell.cmd',
-                       'scripts/build-lease.ps1','scripts/ninja-guard.ps1','cmake/x360n_stage_files.cmake',
-                       "titles/$Title/CMakePresets.json", "titles/$Title/${Title}_manifest.toml")) {
+                       'scripts/build-lease.ps1','scripts/ninja-guard.ps1','cmake/x360n_stage_files.cmake')) {
         [void]$files.Add([IO.Path]::GetFullPath((Join-Path $Root $file)))
     }
-    $registration = Join-Path $Root "titles/$Title/preparation.toml"
+    if ($projectDirectory.StartsWith((Join-Path $Root '.local/aot').Replace('\','/'), [StringComparison]::OrdinalIgnoreCase)) {
+        foreach ($name in @('CMakeLists.txt','main.cpp')) { [void]$files.Add((Join-Path $Root "titles/common/generic/$name")) }
+    }
+    foreach ($name in @('CMakePresets.json', "${Title}_manifest.toml", 'assets.sha256')) {
+        $file = Join-Path $projectDirectory $name
+        if ([IO.File]::Exists($file)) { [void]$files.Add($file) }
+    }
+    $registration = Join-Path $projectDirectory 'preparation.toml'
     if ([IO.File]::Exists($registration)) { [void]$files.Add($registration) }
     foreach ($file in @('CMakeCache.txt','build.ninja','CMakeFiles/rules.ninja')) { [void]$files.Add((Join-Path $Build $file)) }
     $lock = Get-Content -Raw (Join-Path $Root 'deps.lock.json') | ConvertFrom-Json
@@ -85,7 +92,11 @@ function Get-BuildInputs([string]$Root, [string]$Title, [string]$Build, [string[
         foreach ($file in $patch.files.PSObject.Properties.Name) { [void]$files.Add((Join-Path $Root "external/rexglue-sdk/$file")) }
     }
     foreach ($file in Get-ChildItem -LiteralPath (Join-Path $Root 'external/rexglue-sdk/resources/templates') -Recurse -File) { [void]$files.Add($file.FullName) }
-    foreach ($depfile in Get-ChildItem -LiteralPath (Join-Path $Root "titles/$Title/generated") -Filter codegen.d -Recurse -File) {
+    $depfiles = @()
+    if (Test-Path -LiteralPath (Join-Path $projectDirectory 'generated')) {
+        $depfiles = @(Get-ChildItem -LiteralPath (Join-Path $projectDirectory 'generated') -Filter codegen.d -Recurse -File)
+    }
+    foreach ($depfile in $depfiles) {
         # Old generated modules may remain on disk after removal from a manifest.
         # Only a stamp reachable from this target contributes dependencies.
         if ((Join-Path $depfile.DirectoryName 'codegen.build.stamp') -notin $nodes) { continue }

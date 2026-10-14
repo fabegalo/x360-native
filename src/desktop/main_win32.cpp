@@ -31,7 +31,7 @@ void VerifyDistribution(const fs::path& directory) {
 #endif
 }
 constexpr UINT kFinished = WM_APP + 1, kProgress = WM_APP + 2, kDetected = WM_APP + 3, kInitialized = WM_APP + 4, kInspected = WM_APP + 5, kOpenEnvironment = WM_APP + 6;
-enum { kFolder = 101, kTargets, kCheck, kImport, kPrepare, kLaunch, kDetails, kData, kCancel, kLanguage, kInstall, kStorage, kPrimary, kSettings, kImportFolder, kDashboards, kGames, kHome, kImportPage, kAddContent, kLibrary };
+enum { kFolder = 101, kTargets, kCheck, kImport, kPrepare, kLaunch, kDetails, kData, kCancel, kLanguage, kInstall, kStorage, kPrimary, kSettings, kImportFolder, kDashboards, kGames, kHome, kImportPage, kAddContent, kLibrary, kGameList };
 constexpr COLORREF background = RGB(15, 20, 27), surface = RGB(24, 32, 42), foreground = RGB(236, 241, 247), muted = RGB(157, 171, 189), accent = RGB(169, 231, 154);
 HBRUSH background_brush = CreateSolidBrush(background), surface_brush = CreateSolidBrush(surface);
 bool english = false;
@@ -44,7 +44,7 @@ std::wstring Wide(const std::string& text) {
   return out;
 }
 struct App {
-  HWND window{}, title{}, subtitle{}, root_text{}, combo{}, status{}, details{}, headline{}, footer{}, progress{};
+  HWND library_list{}, window{}, title{}, subtitle{}, root_text{}, combo{}, status{}, details{}, headline{}, footer{}, progress{};
   HFONT font{}, title_font{}, headline_font{};
   HICON icon{};
   std::vector<HWND> buttons;
@@ -69,6 +69,7 @@ struct App {
   bool settings = false, games = false, importing = false, initializing = false;
   bool home = true, import_view = false;
   bool import_recognized = false;
+  std::string imported_id;
   int next_action = kFolder;
   ~App() { if (worker.joinable()) worker.join(); DeleteObject(font); DeleteObject(title_font); DeleteObject(headline_font); DestroyIcon(icon); }
 };
@@ -81,6 +82,7 @@ fs::path Supervisor(const App& a) {
 void SyncSelection(App& a) {
   auto it = std::find(a.dashboard_indices.begin(), a.dashboard_indices.end(), a.selected);
   SendMessageW(a.combo, CB_SETCURSEL, it == a.dashboard_indices.end() ? -1 : it - a.dashboard_indices.begin(), 0);
+  SendMessageW(a.library_list, LB_SETCURSEL, it == a.dashboard_indices.end() ? -1 : it - a.dashboard_indices.begin(), 0);
 }
 void Post(HWND window, UINT type, const std::string& text) {
   auto* value = new std::string(text);
@@ -125,9 +127,12 @@ void Layout(App& a) {
   button(kCheck, 84, 508, 208, 40, a.settings);
   move(a.root_text, 84, 406, width - 168, 32); ShowWindow(a.root_text, a.settings ? SW_SHOW : SW_HIDE);
   move(a.combo, 84, 410, width - 168, 210);
-  ShowWindow(a.combo, !a.settings && !a.show_details && !a.home && !a.import_view && !a.dashboard_indices.empty() ? SW_SHOW : SW_HIDE);
+  ShowWindow(a.combo, !a.games && !a.settings && !a.show_details && !a.home && !a.import_view && !a.dashboard_indices.empty() ? SW_SHOW : SW_HIDE);
+  move(a.library_list, 84, 402, width - 168, 132);
+  ShowWindow(a.library_list, a.games && !a.settings && !a.show_details && !a.home && !a.import_view ? SW_SHOW : SW_HIDE);
   const bool summary = a.home || a.import_view || a.dashboard_indices.empty();
   move(a.status, 84, summary ? 416 : 460, width - 168, summary ? 116 : 80);
+  if (a.games && !summary) move(a.status, 84, 550, width - 168, 105);
   ShowWindow(a.status, !a.settings && !a.show_details ? SW_SHOW : SW_HIDE);
   move(a.details, 60, 266, width - 120, std::max(200, height - 348));
   ShowWindow(a.details, a.show_details ? SW_SHOW : SW_HIDE);
@@ -141,6 +146,7 @@ void Enable(App& a) {
   bool has = a.selected < a.targets.size();
   for (auto b : a.buttons) EnableWindow(b, !a.busy);
   EnableWindow(a.combo, !a.busy);
+  EnableWindow(a.library_list, !a.busy);
   EnableWindow(GetDlgItem(a.window, kImport), !a.busy && has);
   EnableWindow(GetDlgItem(a.window, kPrepare), !a.busy && has && a.current.inputs_ok && a.environment.writable && a.environment.architecture);
   EnableWindow(GetDlgItem(a.window, kLaunch), !a.busy && has && a.current.prepared && a.targets[a.selected].session && a.environment.graphics);
@@ -150,7 +156,7 @@ void Enable(App& a) {
   EnableWindow(GetDlgItem(a.window, kCancel), a.busy && !a.session && !a.installing);
   const bool action_ok = a.next_action == kFolder || a.next_action == kDashboards || a.next_action == kImportPage ||
     (a.next_action == kImport && !a.root.empty()) ||
-    (a.next_action == kPrepare && has && a.targets[a.selected].importable && !a.current.prepared && a.current.inputs_ok && a.environment.writable && a.environment.architecture) ||
+    (a.next_action == kPrepare && has && (a.targets[a.selected].importable || a.targets[a.selected].generic_aot) && !a.current.prepared && a.current.inputs_ok && a.environment.writable && a.environment.architecture) ||
     (a.next_action == kLaunch && a.current.prepared && a.environment.graphics);
   EnableWindow(GetDlgItem(a.window, kPrimary), !a.busy && action_ok);
   EnableWindow(GetDlgItem(a.window, kSettings), !a.busy);
@@ -164,11 +170,12 @@ void CheckContents(App& a) {
   for (const auto& target : a.targets) {
     App::CheckedTarget item;
     item.state = Inspect(ProjectPaths{a.root}, target);
-    if (item.state.inputs_ok) item.library = InspectLibrary(target, a.targets);
-    if (!target.inputs.empty()) {
+    if (item.state.inputs_ok) item.library = InspectLibrary(ProjectPaths{a.root}, target, a.targets);
+    if (!target.catalogued && !target.inputs.empty()) {
       auto anchor = DigestFile(target.inputs.front().destination);
       item.added = anchor && anchor->sha256 == target.inputs.front().sha256;
     }
+    item.added = item.added || target.catalogued;
     checked.push_back(std::move(item));
   }
   a.checked = std::move(checked);
@@ -194,6 +201,18 @@ void InspectSelected(App& a) {
   }
   const auto& t = a.targets[a.selected];
   a.current = a.checked.at(a.selected).state;
+  if (a.games && !a.import_view && !a.home && !t.aot) {
+    a.next_action = kImportPage;
+    Set(a.headline, Tr("Sua biblioteca de jogos.", "Your game library."));
+    Set(a.subtitle, Tr("Este jogo foi cadastrado, mas não tem preparação AOT disponível.\r\nEle não pode ser executado nem aparece na My Games.", "This game is catalogued but has no available AOT preparation.\r\nIt cannot run and does not appear in My Games."));
+    Set(GetDlgItem(a.window, kPrimary), Tr("Adicionar conteúdo", "Add content"));
+    Set(a.status, (a.current.inputs_ok ? Tr("Não suportado", "Not supported") : Tr("Erro", "Error")) +
+        "\r\nTitle ID: " + (t.title_id.empty() ? "—" : t.title_id) + "    " + Tr("Versão: ", "Version: ") + (t.version.empty() ? "—" : t.version));
+    std::string details = english ? t.limitations_en : t.limitations;
+    details += "\r\nMedia ID: " + t.media_id + "\r\nOriginal PE: " + t.original_name + "\r\n" + Utf8(t.game_root);
+    for (const auto& issue : a.current.issues) details += "\r\n" + issue;
+    Set(a.details, details); Enable(a); return;
+  }
   std::string missing = a.current.inputs_ok ? "" : (english ? t.label_en : t.label);
   std::string detail;
   detail += a.environment.description + "\r\n";
@@ -237,12 +256,19 @@ void InspectSelected(App& a) {
     state = added ? Tr("Conteúdo incompleto", "Content incomplete") : Tr("Aguardando seus arquivos", "Waiting for your files");
     state += "\r\n\r\n" + Tr("Adicione seus arquivos originais para continuar. Você pode consultar os componentes necessários em Detalhes.", "Add your original files to continue. Required components are listed in Details.");
   }
-  if (!t.importable) state = Tr("Preparação ainda indisponível para esta versão.\r\nConsulte a pendência em Detalhes; seus arquivos serão preservados.", "Preparation is not yet available for this version.\r\nSee Details for its requirements; your files are preserved.");
+  if (!t.importable && !t.generic_aot) state = Tr("Preparação ainda indisponível para esta versão.\r\nConsulte a pendência em Detalhes; seus arquivos serão preservados.", "Preparation is not yet available for this version.\r\nSee Details for its requirements; your files are preserved.");
+  if (t.generic_aot) state = a.current.prepared ? Tr("Build AOT verificado. Compatibilidade de execução ainda não comprovada.\r\nTente iniciar pela My Games original.", "AOT build verified. Runtime compatibility is not yet proven.\r\nTry launching through original My Games.") :
+      Tr("Preparação AOT automática disponível. Compilar não garante execução.\r\nFalhas e estágios ficam registrados em Detalhes para nova tentativa.", "Automatic AOT preparation available. Compilation does not guarantee execution.\r\nErrors and stages are saved in Details for retry.");
   if (a.games && a.current.prepared) {
     Set(a.headline, Tr("Seu jogo está preparado.", "Your game is prepared."));
     Set(GetDlgItem(a.window, kPrimary), Tr("Preparado para My Games", "Prepared for My Games"));
   }
   detail += "\r\n" + (english ? t.limitations_en : t.limitations);
+  if (t.catalogued) {
+    detail += "\r\nTitle ID: " + (t.title_id.empty() ? "—" : t.title_id) +
+      "\r\nVersion: " + (t.version.empty() ? "—" : t.version) +
+      "\r\nMedia ID: " + (t.media_id.empty() ? "—" : t.media_id) + "\r\nOriginal PE: " + t.original_name;
+  }
   if (!t.user_root.empty()) detail += "\r\nData: " + Utf8(t.user_root);
   Set(a.status, state);
   Set(a.details, detail.empty() ? "Verificação concluída. Nenhum dado é enviado automaticamente.\r\nLogs de execução: " + Utf8(a.root / ".local/runs") : detail);
@@ -268,6 +294,7 @@ void Load(App& a, const fs::path& root) {
   if (a.root != root) { a.targets.clear(); a.checked.clear(); }
   a.dashboard_indices.clear(); a.selected = 0;
   SendMessageW(a.combo, CB_RESETCONTENT, 0, 0);
+  SendMessageW(a.library_list, LB_RESETCONTENT, 0, 0);
   // Hardware probing is independent of navigation between pages.
   if (a.environment.description.empty() || a.root != root) a.environment = CheckEnvironment(root);
   a.root = root;
@@ -289,12 +316,16 @@ void Load(App& a, const fs::path& root) {
   for (size_t i = 0; i < a.targets.size(); ++i) {
     if ((a.targets[i].kind != "dashboard") != a.games) continue;
     if (a.games) {
-      if (a.targets[i].inputs.empty()) continue;
       if (!a.checked.at(i).added) continue;
     }
     a.dashboard_indices.push_back(i);
     auto label = Wide(english ? a.targets[i].label_en : a.targets[i].label);
     SendMessageW(a.combo, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(label.c_str()));
+    const auto& state = a.checked.at(i).state;
+    const auto status = !state.inputs_ok || state.interrupted ? Tr("Erro", "Error") : !a.targets[i].aot ? Tr("Não suportado", "Not supported") :
+        state.prepared && a.checked.at(i).library.empty() ? Tr("Pronto", "Ready") : Tr("Importado", "Imported");
+    auto row = Wide((english ? a.targets[i].label_en : a.targets[i].label) + "    |    " + status);
+    SendMessageW(a.library_list, LB_ADDSTRING, 0, reinterpret_cast<LPARAM>(row.c_str()));
     if (a.dashboard_indices.size() == 1 || a.targets[i].session) a.selected = i;
   }
   SyncSelection(a);
@@ -338,7 +369,8 @@ fs::path PickFolder(HWND owner, const wchar_t* title, bool folder = true) {
   dialog->Release(); return result;
 }
 void Start(App& a, int action, fs::path source = {}) {
-  if (a.busy || a.selected >= a.targets.size()) return;
+  if (a.busy || (action != kImport && a.selected >= a.targets.size())) return;
+  if (a.root.empty()) throw std::runtime_error("Choose an environment before importing content.");
   if (!a.preferences.empty()) {
     VerifyDistribution(a.self.parent_path());
     if (!InspectEnvironment(Payload(a), a.root).current)
@@ -348,9 +380,18 @@ void Start(App& a, int action, fs::path source = {}) {
   if (a.worker.joinable()) a.worker.join();
   a.logs = a.root / ".local/logs/desktop" / std::to_string(GetTickCount64());
   fs::create_directories(a.logs);
-  a.cancel = false; a.failed = false; a.busy = true; a.session = action == kLaunch; a.installing = action == kInstall; a.importing = action == kImport; a.import_recognized = false;
-  const auto target = a.targets[a.selected];
+  a.cancel = false; a.failed = false; a.busy = true; a.session = action == kLaunch; a.installing = action == kInstall; a.importing = action == kImport; a.import_recognized = false; a.imported_id.clear();
+  const auto target = a.selected < a.targets.size() ? a.targets[a.selected] : Target{};
   Enable(a);
+  if (action == kPrepare && a.games) {
+    const auto row = SendMessageW(a.library_list, LB_GETCURSEL, 0, 0);
+    if (row != LB_ERR) {
+      auto text = Wide((english ? target.label_en : target.label) + "    |    " + Tr("Preparando", "Preparing"));
+      SendMessageW(a.library_list, LB_DELETESTRING, row, 0);
+      SendMessageW(a.library_list, LB_INSERTSTRING, row, reinterpret_cast<LPARAM>(text.c_str()));
+      SendMessageW(a.library_list, LB_SETCURSEL, row, 0);
+    }
+  }
   Set(a.headline, action == kImport ? Tr("Conferindo seus arquivos.", "Checking your files.") :
       action == kLaunch ? Tr("A sessão está aberta.", "Your session is open.") : Tr("Preparando para você.", "Preparing for you."));
   Set(a.subtitle, action == kLaunch ? Tr("Continue na janela da dashboard original.\r\nO aplicativo continua aqui quando você encerrar a sessão.", "Continue in the original dashboard window.\r\nThis app stays here when you end your session.") :
@@ -362,12 +403,15 @@ void Start(App& a, int action, fs::path source = {}) {
   a.show_details = false; a.settings = false; Layout(a);
   a.worker = std::thread([&a, target, action, source] {
     auto finish = [&](const std::string& message) {
-      try { CheckContents(a); }
+      try { if (action == kImport) a.targets = ReadCatalog(ProjectPaths{a.root}); CheckContents(a); }
       catch (const std::exception& error) { a.failed = true; Post(a.window, kFinished, error.what()); return; }
       std::ofstream(a.logs / "result.txt", std::ios::binary) << message << '\n';
       Post(a.window, kFinished, message);
     };
     try {
+      if (action == kPrepare && !target.aot) throw std::runtime_error("Import a valid XEX game before preparation.");
+      if (action == kPrepare && !target.preparation_source.empty())
+        Import(ProjectPaths{a.root}, target, target.preparation_source, [&] { return a.cancel.load(); });
       if (action == kLaunch || action == kPrepare) {
         auto state = Inspect(ProjectPaths{a.root}, target);
         for (const auto& dep : target.dependencies) {
@@ -377,7 +421,7 @@ void Start(App& a, int action, fs::path source = {}) {
           state.inputs_ok = state.inputs_ok && dependency.inputs_ok;
           state.prepared = state.prepared && dependency.prepared;
         }
-        if (!state.inputs_ok || (action == kLaunch && (!state.prepared || !InspectLibrary(target, a.targets).empty())))
+        if (!state.inputs_ok || (action == kLaunch && (!state.prepared || !InspectLibrary(ProjectPaths{a.root}, target, a.targets).empty())))
           throw std::runtime_error(Tr("O conteúdo mudou desde a verificação. Confira os detalhes e prepare novamente.", "Content changed since verification. Check details and prepare again."));
       }
       if (action == kImport) {
@@ -385,6 +429,11 @@ void Start(App& a, int action, fs::path source = {}) {
           [&] { return a.cancel.load(); }, [&] {
             Post(a.window, kProgress, Tr("Extraindo o jogo...\r\nIsso pode levar alguns minutos. Você pode cancelar; o arquivo original será preservado.", "Extracting the game...\r\nThis may take a few minutes. You can cancel; the original file will be preserved."));
           });
+        if (fs::is_directory(content.path()) && fs::is_regular_file(content.path() / "default.xex")) {
+          a.imported_id = ImportGame(ProjectPaths{a.root}, a.targets, content.path(), source, [&] { return a.cancel.load(); });
+          a.import_recognized = true;
+          finish(Tr("Jogo adicionado à Biblioteca. Importar não significa poder executar.", "Game added to Library. Importing does not mean it can run.")); return;
+        }
         const auto found = IdentifyContent(a.targets, content.identity_path(), [&] { return a.cancel.load(); });
         std::vector<std::string> ids;
         for (const auto& item : found) if (item.recognized && std::find(ids.begin(), ids.end(), item.target_id) == ids.end()) ids.push_back(item.target_id);
@@ -395,7 +444,7 @@ void Start(App& a, int action, fs::path source = {}) {
           finish(message); return;
         }
         auto selected = *std::find_if(a.targets.begin(), a.targets.end(), [&](const auto& t) { return t.id == ids.front(); });
-        Post(a.window, kDetected, selected.id);
+        a.imported_id = selected.id;
         if (!selected.importable) { finish((english ? selected.label_en : selected.label) + "\r\n" + Tr("Esta versão foi reconhecida. Preparação ainda indisponível; consulte Detalhes.", "This version was recognized. Preparation is not yet available; see Details.")); return; }
         Post(a.window, kProgress, Tr("Conferindo e adicionando o conteúdo extraído...", "Checking and adding the extracted content..."));
         Import(ProjectPaths{a.root}, selected, content.path(), [&] { return a.cancel.load(); }, !content.extracted());
@@ -414,6 +463,7 @@ void Start(App& a, int action, fs::path source = {}) {
           throw std::runtime_error("A etapa " + label + " não concluiu. " + result.launch_error + " " + DescribeExitCode(result.exit_code) + "\r\nDiagnóstico local: " + Utf8(a.logs));
       };
       if (action == kLaunch) {
+        PrepareLibrary(ProjectPaths{a.root}, target, a.targets);
         run(Supervisor(a), {"--root", Utf8(a.root), "session", Utf8(target.manifest), "--timeout", "0"}, "session");
         finish("Sessão encerrada. Consulte os logs para os resultados da execução.");
       } else {
@@ -426,8 +476,12 @@ void Start(App& a, int action, fs::path source = {}) {
         auto tool_args = std::vector<std::string>{"-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", Utf8(a.root / "scripts/prepare-tools.ps1")};
         tool_args.push_back("-UpdateDependencies");
         if (a.allow_downloads) tool_args.push_back("-AllowDownloads");
+        const auto marker = PreparationMarker(ProjectPaths{a.root}, target);
+        fs::create_directories(marker.parent_path());
+        { std::ofstream out(marker); out << "Preparing: tools\nLog: " << Utf8(a.logs / "tools.log") << '\n'; }
         Post(a.window, kProgress, Tr("Verificando ferramentas e dependências...", "Checking tools and dependencies..."));
         run(powershell, tool_args, "tools");
+        if (target.generic_aot) GenerateAotProject(ProjectPaths{a.root}, target);
         auto prepare = [&](const std::string& id) {
           if (a.cancel) throw std::runtime_error("Preparação cancelada.");
           Target pending; pending.id = id;
@@ -443,6 +497,7 @@ void Start(App& a, int action, fs::path source = {}) {
         for (const auto& dep : target.dependencies) prepare(dep);
         prepare(target.id);
         Post(a.window, kProgress, Tr("Registrando conteúdo verificado na biblioteca original...", "Registering verified content in the original library..."));
+        fs::remove(PreparationMarker(ProjectPaths{a.root}, target));
         PrepareLibrary(ProjectPaths{a.root}, target, a.targets, [&] { return a.cancel.load(); });
         if (!target.session) for (const auto& dashboard : a.targets)
           if (dashboard.session && Inspect(ProjectPaths{a.root}, dashboard).inputs_ok)
@@ -450,7 +505,14 @@ void Start(App& a, int action, fs::path source = {}) {
         fs::remove(PreparationMarker(ProjectPaths{a.root}, target));
         finish(Tr("Preparação concluída. Os componentes serão conferidos antes de habilitar a sessão.", "Preparation finished. Components will be checked before enabling the session."));
       }
-    } catch (const std::exception& error) { a.failed = true; finish(error.what()); }
+    } catch (const std::exception& error) {
+      if (action == kPrepare) {
+        const auto marker = PreparationMarker(ProjectPaths{a.root}, target);
+        std::error_code ec; fs::create_directories(marker.parent_path(), ec);
+        std::ofstream(marker, std::ios::app) << error.what() << '\n';
+      }
+      a.failed = true; finish(error.what());
+    }
   });
 }
 HICON MakeIcon() {
@@ -540,6 +602,7 @@ LRESULT CALLBACK WndProc(HWND window, UINT message, WPARAM wp, LPARAM lp) {
         SendMessageW(a->headline, WM_SETFONT, reinterpret_cast<WPARAM>(a->headline_font), TRUE);
         a->footer = Control(*a, L"STATIC", L"", SS_ENDELLIPSIS);
         a->root_text = Control(*a, L"STATIC", L"", SS_PATHELLIPSIS);
+        a->library_list = Control(*a, L"LISTBOX", L"", LBS_NOTIFY | WS_VSCROLL | WS_TABSTOP | LBS_NOINTEGRALHEIGHT, kGameList);
         a->combo = Control(*a, WC_COMBOBOXW, L"", CBS_DROPDOWNLIST | WS_TABSTOP | WS_VSCROLL, kTargets);
         a->status = Control(*a, L"STATIC", L"", 0);
         a->details = Control(*a, L"EDIT", L"", ES_MULTILINE | ES_READONLY | ES_AUTOVSCROLL | WS_VSCROLL | WS_BORDER | WS_TABSTOP);
@@ -639,6 +702,10 @@ LRESULT CALLBACK WndProc(HWND window, UINT message, WPARAM wp, LPARAM lp) {
         if (id == kLanguage) { english = !english; Labels(*a); auto selected = a->selected; Load(*a, a->root); a->selected = selected; SyncSelection(*a); InspectSelected(*a); SavePreferences(*a); return 0; }
         if (id == kTargets && HIWORD(wp) == CBN_SELCHANGE) {
           auto item = size_t(SendMessageW(a->combo, CB_GETCURSEL, 0, 0));
+          if (item < a->dashboard_indices.size()) { a->selected = a->dashboard_indices[item]; InspectSelected(*a); }
+        }
+        if (id == kGameList && HIWORD(wp) == LBN_SELCHANGE) {
+          auto item = size_t(SendMessageW(a->library_list, LB_GETCURSEL, 0, 0));
           if (item < a->dashboard_indices.size()) { a->selected = a->dashboard_indices[item]; InspectSelected(*a); }
         }
         if (id == kFolder) {
@@ -777,6 +844,12 @@ LRESULT CALLBACK WndProc(HWND window, UINT message, WPARAM wp, LPARAM lp) {
         std::unique_ptr<std::string> text(reinterpret_cast<std::string*>(lp));
         if (a->worker.joinable()) a->worker.join(); a->busy = false; a->session = false; a->installing = false;
         if (!a->importing) a->environment = CheckEnvironment(a->root);
+        if (a->importing) {
+          Load(*a, a->root);
+          for (size_t i = 0; i < a->targets.size(); ++i) if (a->targets[i].id == a->imported_id) {
+            a->selected = i; SyncSelection(*a); break;
+          }
+        }
         InspectSelected(*a);
         const auto report = Wide(*text + "\r\n\r\nLogs: " + Utf8(a->logs) + "\r\n\r\n");
         SendMessageW(a->details, EM_SETSEL, 0, 0); SendMessageW(a->details, EM_REPLACESEL, FALSE, reinterpret_cast<LPARAM>(report.c_str()));
@@ -785,6 +858,8 @@ LRESULT CALLBACK WndProc(HWND window, UINT message, WPARAM wp, LPARAM lp) {
           if (a->import_recognized && a->selected < a->targets.size()) {
             const auto state = a->checked.at(a->selected).state;
             Set(a->status, state.inputs_ok ? Tr("Conteúdo completo\r\n\r\nAcesse Dashboard ou Biblioteca para continuar a preparação.", "Content complete\r\n\r\nOpen Dashboard or Library to continue preparation.") : Tr("Conteúdo incompleto\r\n\r\nAdicione os arquivos restantes. Consulte Detalhes para saber o que falta.", "Content incomplete\r\n\r\nAdd the remaining files. See Details for what is missing."));
+            if (!a->targets[a->selected].aot && state.inputs_ok)
+              Set(a->status, Tr("Importado — Não suportado\r\n\r\nO jogo aparece na Biblioteca. A execução depende de uma preparação AOT verificada.", "Imported — Not supported\r\n\r\nThe game appears in Library. Execution requires a verified AOT preparation."));
           } else Set(a->status, Tr("Nenhum arquivo foi importado\r\n\r\nConsulte o resultado acima e selecione outro arquivo ou pasta. Os originais foram preservados.", "No files were imported\r\n\r\nCheck the result above and choose another file or folder. Originals were preserved."));
         }
         if (a->failed) {

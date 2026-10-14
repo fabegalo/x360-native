@@ -16,35 +16,49 @@ struct Target {
   std::string id, label, limitations, label_en, limitations_en;
   std::string kind = "game";
   std::filesystem::path manifest, game_root, user_root, exe;
+  std::filesystem::path preparation_source;
   std::vector<Input> inputs;
   std::vector<std::string> dependencies;
-  std::vector<std::string> library_targets;
   std::vector<std::filesystem::path> runtime_files;
   LibraryContent library;
   bool session = false;
   bool importable = true;
+  bool aot = true, catalogued = false, generic_aot = false;
+  std::string title_id, version, media_id, original_name, import_error;
 };
 struct Inspection {
-  bool inputs_ok = true, prepared = false;
+  bool inputs_ok = true, prepared = false, interrupted = false;
   std::vector<std::string> issues;
 };
 struct ContentIdentity {
   std::filesystem::path file;
   std::string target_id, label, version, kind, problem;
   bool recognized = false;
+  bool valid = false;
+  std::string sha256, title_id, media_id, original_name;
+  std::string base_version, region;
+  unsigned disc_number = 0, disc_count = 0;
+  std::vector<std::string> imports;
 };
 // Read-only inspection; recognizing a format is never a compatibility claim.
 std::vector<ContentIdentity> IdentifyContent(const std::vector<Target>& targets,
     const std::filesystem::path& source, const std::function<bool()>& cancelled = {});
 std::string Utf8(const std::filesystem::path& path);
 std::vector<Target> ReadCatalog(const ProjectPaths& paths);
+// Durable local game inventory, independent of the AOT recipe catalog.
+void ReadImportedGames(const ProjectPaths& paths, std::vector<Target>& targets);
+// Generate a deterministic local project from verified content and the pinned SDK.
+void GenerateAotProject(const ProjectPaths& paths, const Target& target);
+std::string ImportGame(const ProjectPaths& paths, const std::vector<Target>& targets,
+    const std::filesystem::path& source, const std::filesystem::path& original,
+    const std::function<bool()>& cancelled = {});
 std::vector<std::string> DetectImportTargets(const std::vector<Target>& targets,
                                             const std::filesystem::path& source,
                                             const std::function<bool()>& cancelled = {});
 Inspection Inspect(const ProjectPaths& paths, const Target& target);
 // Installs verified dependencies into the selected dashboard's SDK content store.
 // The original dashboard still enumerates and launches them through XAM.
-std::vector<std::string> InspectLibrary(const Target& session, const std::vector<Target>& catalog);
+std::vector<std::string> InspectLibrary(const ProjectPaths& paths, const Target& session, const std::vector<Target>& catalog);
 void PrepareLibrary(const ProjectPaths& paths, const Target& session, const std::vector<Target>& catalog,
                     const std::function<bool()>& cancelled = {});
 std::filesystem::path PreparationMarker(const ProjectPaths& paths, const Target& target);

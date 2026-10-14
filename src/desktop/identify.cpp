@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <fstream>
 #include <stdexcept>
+#include <fmt/format.h>
 
 namespace fs = std::filesystem;
 namespace x360n::desktop {
@@ -21,12 +22,13 @@ std::vector<ContentIdentity> IdentifyContent(const std::vector<Target>& targets,
     ContentIdentity item; item.file = file;
     auto digest = DigestFile(file);
     if (!digest) throw std::runtime_error("Não foi possível ler: " + Utf8(file.filename()));
+    item.sha256 = digest->sha256;
     for (const auto& t : targets) {
+      if (!t.aot) continue;
       const auto match = std::find_if(t.inputs.begin(), t.inputs.end(), [&](const auto& i) { return i.sha256 == digest->sha256; });
       if (match != t.inputs.end()) {
         item.recognized = true; item.target_id = t.id; item.label = t.label; item.kind = t.kind;
-        result.push_back(item);
-        return;
+        break;
       }
     }
     // Bound header allocation, exactly as the supervisor's identity reader does.
@@ -43,10 +45,23 @@ std::vector<ContentIdentity> IdentifyContent(const std::vector<Target>& targets,
     auto parsed = ParseXexIdentity(header);
     if (parsed.identity) {
       const auto& identity = *parsed.identity;
+      item.valid = true;
+      item.original_name = identity.original_pe_name.value_or("");
+      for (const auto& dependency : identity.imports)
+        item.imports.push_back(dependency.name + " " + dependency.version.ToString() + " (minimum " + dependency.version_min.ToString() + ")");
+      if (identity.region) item.region = fmt::format("{:08X}", *identity.region);
       item.kind = IsDashboardTitleId(identity.title_id) ? "dashboard" : "game";
-      item.label = item.kind == "dashboard" ? "Dashboard Xbox 360" : "Título Xbox 360";
-      if (identity.has_execution_info) item.version = identity.version.ToString();
+      if (!item.recognized) item.label = item.kind == "dashboard" ? "Dashboard Xbox 360" : "Título Xbox 360";
+      if (identity.has_execution_info) {
+        item.version = identity.version.ToString();
+        item.title_id = fmt::format("{:08X}", identity.title_id);
+        item.media_id = fmt::format("{:08X}", identity.media_id);
+        item.base_version = identity.base_version.ToString();
+        item.disc_number = identity.disc_number; item.disc_count = identity.disc_count;
+      }
       item.problem = "Versão identificada, mas sem preparação disponível neste catálogo. Seus arquivos foram preservados.";
+    } else if (item.recognized) {
+      // Hash-verified system resources need not be XEX files.
     } else if (parsed.format == XexFormat::kXex1 || parsed.format == XexFormat::kXexOtherVariant) {
       item.label = "Formato antigo do Xbox 360";
       item.problem = "Formato reconhecido. Leitura de versão e preparação ainda não disponíveis.";

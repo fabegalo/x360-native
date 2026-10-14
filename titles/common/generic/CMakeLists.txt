@@ -1,0 +1,12 @@
+# Shared automatic AOT host. No title-specific compatibility claims or overrides.
+cmake_minimum_required(VERSION 3.25)
+project(@TITLE@ LANGUAGES CXX)
+set(CMAKE_CXX_STANDARD 23)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+include(generated/rexglue.cmake)
+include("@ROOT@/cmake/x360n_sdk_backports.cmake")
+x360n_apply_sdk_backports("${REXSDK_DIR}")
+add_executable(@TITLE@ WIN32 main.cpp "@ROOT@/titles/common/launch_handoff.cpp")
+target_include_directories(@TITLE@ PRIVATE "@ROOT@/titles/common")
+rexglue_setup_target(@TITLE@ GPU_PLUGINS xenos)
+x360n_stage_runtime_dlls(@TITLE@ PLUGIN_TARGETS rexgpu-xenos)

@@ -77,9 +77,9 @@ TEST_CASE("unsupported and corrupt files are not copied or accepted as compatibl
   CHECK_FALSE(fs::exists(f.target.game_root));
 }
 TEST_CASE("optional games do not prevent an empty dashboard library") {
-  Fixture f; Target session; session.session = true; session.library_targets = {f.target.id};
+  Fixture f; Target session; session.session = true;
   session.user_root = f.paths.local() / "user/dashboard";
-  CHECK(InspectLibrary(session, {f.target}).empty());
+  CHECK(InspectLibrary(f.paths, session, {f.target}).empty());
   CHECK_NOTHROW(PrepareLibrary(f.paths, session, {f.target}));
   CHECK_FALSE(fs::exists(session.user_root));
 }
@@ -397,22 +397,23 @@ TEST_CASE("missing runtime and interrupted build never qualify an old exe as pre
 
 TEST_CASE("original library registration validates all bytes and publishes the header last") {
   Fixture f; Import(f.paths, f.target, f.source);
+  Write(f.target.exe, "prepared fixture"); f.Receipt();
   auto game = f.target;
   game.library = {"584108B7", "000D0000", "F9432A7FE407A3C196C95D0FFD4A540937FD4EEC58", "Castle Crashers", Hash("package provenance")};
   Target session; session.session = true; session.user_root = f.paths.local() / "user/dashboard";
   session.dependencies = {game.id};
   session.inputs = game.inputs;
-  CHECK_FALSE(InspectLibrary(game, {game, session}).empty());
+  CHECK_FALSE(InspectLibrary(f.paths, game, {game, session}).empty());
   auto base = session.user_root / "0000000000000000/584108B7";
   auto header = base / "Headers/000D0000" / (game.library.file_name + ".header");
   auto installed = base / "000D0000" / game.library.file_name;
-  CHECK_FALSE(InspectLibrary(session, {game}).empty());
+  CHECK_FALSE(InspectLibrary(f.paths, session, {game}).empty());
   Write(installed / "dash.xex.x360n-library-tmp", "interrupted");
   CHECK_THROWS(PrepareLibrary(f.paths, session, {game}, [] { return true; }));
   CHECK_FALSE(fs::exists(header));
   PrepareLibrary(f.paths, session, {game});
-  CHECK(InspectLibrary(session, {game}).empty());
-  CHECK(InspectLibrary(game, {game, session}).empty());
+  CHECK(InspectLibrary(f.paths, session, {game}).empty());
+  CHECK(InspectLibrary(f.paths, game, {game, session}).empty());
   // Exact reference generated for the original LIVE metadata in the working
   // dashboard, independent of these synthetic fixture content bytes.
   CHECK(DigestFile(header)->sha256 == "3b5f5f95911839ccd0227af47c742dac659e2542d4d141cf9854ed4d37063b7c");
@@ -421,12 +422,13 @@ TEST_CASE("original library registration validates all bytes and publishes the h
   Write(installed / "dash.xex", "preserve installed data");
   CHECK_THROWS(PrepareLibrary(f.paths, session, {game}));
   CHECK(DigestFile(installed / "dash.xex")->sha256 == Hash("preserve installed data"));
-  CHECK_FALSE(InspectLibrary(session, {game}).empty());
-  CHECK_FALSE(InspectLibrary(game, {game, session}).empty());
+  CHECK_FALSE(InspectLibrary(f.paths, session, {game}).empty());
+  CHECK_FALSE(InspectLibrary(f.paths, game, {game, session}).empty());
 }
 
 TEST_CASE("original library supports long content paths without Windows policy changes") {
   Fixture f; Import(f.paths, f.target, f.source);
+  Write(f.target.exe, "prepared fixture"); f.Receipt();
   auto game = f.target;
   game.library = {"584108B7", "000D0000", "F9432A7FE407A3C196C95D0FFD4A540937FD4EEC58", "Castle Crashers", Hash("package provenance")};
   Target session; session.session = true;
@@ -434,8 +436,33 @@ TEST_CASE("original library supports long content paths without Windows policy c
   session.dependencies = {game.id};
   REQUIRE((session.user_root / "0000000000000000/584108B7/000D0000" / game.library.file_name / "system/xam_ui.xex.x360n-library-tmp").native().size() > 260);
   REQUIRE_NOTHROW(PrepareLibrary(f.paths, session, {game}));
-  CHECK(InspectLibrary(session, {game}).empty());
+  CHECK(InspectLibrary(f.paths, session, {game}).empty());
   CHECK_NOTHROW(PrepareLibrary(f.paths, session, {game}));
+}
+
+TEST_CASE("original library withdraws stale builds and discovers additional recipes") {
+  Fixture f; Import(f.paths, f.target, f.source);
+  Write(f.target.exe, "prepared fixture"); f.Receipt();
+  auto game = f.target;
+  game.library = {"12345678", "000D0000", "first", "First game", Hash("package")};
+  auto second = game; second.id = "second";
+  second.library = {"87654321", "000D0000", "second", "Second game", Hash("package2")};
+  second.manifest = f.root / "titles/second/second_manifest.toml";
+  second.exe = f.paths.build()/"titles/second/second.exe";
+  Write(second.manifest, "[project]\nname='second'\n[entrypoint]\nfile_path='../../.local/inputs/dashboard/test/dash.xex'\n");
+  Write(second.exe,"second build");
+  WriteTestReceipt(f.paths,second.id,second.manifest,second.exe,{second.inputs[0].destination,second.inputs[1].destination});
+  Target dashboard; dashboard.session=true; dashboard.user_root=f.paths.local()/"user/dashboard";
+  const auto first_header=dashboard.user_root/"0000000000000000/12345678/Headers/000D0000/first.header";
+  const auto second_header=dashboard.user_root/"0000000000000000/87654321/Headers/000D0000/second.header";
+  PrepareLibrary(f.paths,dashboard,{game,second});
+  CHECK(fs::exists(first_header)); CHECK(fs::exists(second_header));
+  Write(PreparationMarker(f.paths,second),"interrupted");
+  PrepareLibrary(f.paths,dashboard,{game,second});
+  CHECK(fs::exists(first_header)); CHECK_FALSE(fs::exists(second_header));
+  CHECK(fs::exists(dashboard.user_root/"0000000000000000/87654321/000D0000/second/dash.xex"));
+  fs::remove(PreparationMarker(f.paths,second));
+  PrepareLibrary(f.paths,dashboard,{game,second}); CHECK(fs::exists(second_header));
 }
 
 TEST_CASE("local packaged payload imports the complete validated sets into a fresh Unicode environment", "[.local-package]") {
@@ -471,9 +498,9 @@ TEST_CASE("local packaged payload imports the complete validated sets into a fre
   REQUIRE(dash != targets.end());
   // Imported games without a native build must not block the dashboard or be
   // advertised as launchable content in its original library.
-  REQUIRE(InspectLibrary(*dash, targets).empty());
+  REQUIRE(InspectLibrary(ProjectPaths{root}, *dash, targets).empty());
   PrepareLibrary(ProjectPaths{root}, *dash, targets);
-  CHECK(InspectLibrary(*dash, targets).empty());
+  CHECK(InspectLibrary(ProjectPaths{root}, *dash, targets).empty());
   CHECK_NOTHROW(PrepareLibrary(ProjectPaths{root}, *dash, targets));
 }
 
@@ -488,5 +515,5 @@ TEST_CASE("local isolated prepared environment installs original library depende
     REQUIRE(game != targets.end()); REQUIRE(Inspect(paths, *game).prepared);
   }
   PrepareLibrary(paths, *dash, targets);
-  CHECK(InspectLibrary(*dash, targets).empty());
+  CHECK(InspectLibrary(paths, *dash, targets).empty());
 }

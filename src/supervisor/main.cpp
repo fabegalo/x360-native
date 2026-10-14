@@ -658,7 +658,16 @@ int Session(const ProjectPaths& paths, const fs::path& manifest, int timeout, bo
       const auto result = Run(paths, active.exe, args,
           fmt::format("session-{}-{}", step, active.name), timeout, true, false, &handoff, window.get(), &child_lifetime);
       if (window && window->closed()) return kExitOk;
-      if (result != kExitOk) return result;  // never relaunch after timeout/crash
+      if (result != kExitOk) {
+        // A successful compilation is not a compatibility verdict. Preserve a
+        // real failed run for the imported game's next desktop inspection.
+        if (result != kExitTimeout && IsWithin(active.manifest, paths.local() / "aot")) {
+          fs::create_directories(paths.local() / "preparation");
+          std::ofstream(paths.local() / "preparation" / (active.name + ".runtime-error"))
+              << "Runtime failed; supervisor result " << result << "\nReports: " << PathUtf8(paths.local() / "runs") << '\n';
+        }
+        return result;  // never relaunch after timeout/crash
+      }
       LaunchRequest request;
       if (!ReadLaunchRequest(handoff, request)) {
         fmt::print(stderr, "session: missing or invalid handoff: {}\n", PathUtf8(handoff));
