@@ -1,6 +1,8 @@
 #pragma once
 #include "texture.h"
+#include "draw_types.h"
 #include <memory>
+#include <rex/graphics/command_processor.h>
 namespace rex::ui { class GraphicsProvider; class Presenter; }
 namespace x360n::native {
 // Commands and guest formats do not depend on a host API. A Vulkan backend
@@ -11,6 +13,10 @@ class ScanoutBackend {
   virtual void Present(rex::ui::Presenter&, const ScanoutTexture&, const void* pixels,
                        const uint32_t* lut) = 0;
   virtual void Drain() = 0;
+  virtual rex::graphics::Shader* LoadShader(rex::graphics::xenos::ShaderType, const uint32_t*, uint32_t) = 0;
+  virtual void Draw(const rex::graphics::RegisterFile&, rex::memory::Memory&, rex::graphics::Shader*, rex::graphics::Shader*,
+      rex::graphics::xenos::PrimitiveType, uint32_t, const DrawIndices*) = 0;
+  virtual void Resolve(const rex::graphics::RegisterFile&, rex::memory::Memory&) = 0;
 };
 using ScanoutFactory = std::unique_ptr<ScanoutBackend> (*)(rex::ui::GraphicsProvider&);
 std::unique_ptr<ScanoutBackend> CreateD3D12Scanout(rex::ui::GraphicsProvider& provider);

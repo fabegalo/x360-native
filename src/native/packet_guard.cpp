@@ -1,10 +1,12 @@
 #include "command_processor.h"
 #include <rex/graphics/register_file.h>
+#include <rex/memory/ring_buffer.h>
 #include <cstdio>
 namespace rex::graphics {
 // Called only by SDK sources compiled for Native with REX_GPU_VALIDATE_PACKET.
 // The Xenos plugin has no extra branch, virtual call, or instrumentation.
-void ValidatePacketForBackend(uint32_t header, size_t remaining_dwords) {
+void ValidatePacketForBackend(uint32_t header, const rex::memory::RingBuffer& payload) {
+  const auto remaining_dwords = payload.read_count() / 4;
   if (!header) return;
   const uint32_t type = header >> 30;
   const uint32_t count = type == 2 ? 0 : type == 1 ? 2 : ((header >> 16) & 0x3fff) + 1;
@@ -25,7 +27,11 @@ void ValidatePacketForBackend(uint32_t header, size_t remaining_dwords) {
     case PM4_ME_INIT: case PM4_NOP: return;
     case PM4_INTERRUPT: required = 1; break;
     case PM4_XE_SWAP: required = 4; variable = true; break;
-    case PM4_INDIRECT_BUFFER: case PM4_REG_TO_MEM: case PM4_IM_LOAD: required = 2; break;
+    case PM4_INDIRECT_BUFFER: case PM4_INDIRECT_BUFFER_PFD: case PM4_REG_TO_MEM: case PM4_IM_LOAD:
+    case PM4_SET_BIN_MASK: case PM4_SET_BIN_SELECT: required = 2; break;
+    case PM4_SET_BIN_MASK_LO: case PM4_SET_BIN_MASK_HI:
+    case PM4_SET_BIN_SELECT_LO: case PM4_SET_BIN_SELECT_HI:
+    case PM4_EVENT_WRITE: required = 1; break;
     case PM4_REG_RMW: case PM4_EVENT_WRITE_SHD: required = 3; break;
     case PM4_WAIT_REG_MEM: required = 5; break;
     case PM4_COND_WRITE: required = 6; break;
@@ -33,8 +39,9 @@ void ValidatePacketForBackend(uint32_t header, size_t remaining_dwords) {
     case PM4_SET_CONSTANT: case PM4_SET_CONSTANT2: case PM4_SET_SHADER_CONSTANTS: required = 2; variable = true; break;
     case PM4_LOAD_ALU_CONSTANT: required = 3; break;
     case PM4_INVALIDATE_STATE: required = 1; break;
-    case PM4_IM_LOAD_IMMEDIATE: x360n::native::Unsupported("inline guest shaders are not implemented");
-    case PM4_DRAW_INDX: case PM4_DRAW_INDX_2: x360n::native::Unsupported("guest draw/EDRAM operation is not implemented");
+    case PM4_IM_LOAD_IMMEDIATE: required = 3; variable = true; break;
+    case PM4_DRAW_INDX: required = 2; variable = true; break;
+    case PM4_DRAW_INDX_2: required = 1; variable = true; break;
     default: {
       char message[96];
       std::snprintf(message, sizeof(message), "PM4 opcode 0x%02X is not supported by Native", opcode);
@@ -43,5 +50,48 @@ void ValidatePacketForBackend(uint32_t header, size_t remaining_dwords) {
   }
   if (count < required || (!variable && count != required))
     x360n::native::Unsupported("invalid PM4 payload size");
+  // Inspect a cursor copy: validation must not consume the guest command.
+  auto cursor = payload;
+  auto word = [&]() { return cursor.ReadAndSwap<uint32_t>(); };
+  if (opcode == PM4_IM_LOAD || opcode == PM4_IM_LOAD_IMMEDIATE) {
+    auto source = word(), size = word();
+    auto type = opcode == PM4_IM_LOAD ? source & 3 : source;
+    if (type > 1 || (size >> 16) || !(size & 65535))
+      x360n::native::Unsupported("invalid shader type, start or length");
+    if (opcode == PM4_IM_LOAD_IMMEDIATE) {
+      if (count != size + 2 || uint64_t(cursor.read_offset()) + size * 4 > cursor.capacity())
+        x360n::native::Unsupported("inline shader exceeds contiguous packet extent");
+    } else if (uint64_t(source & ~3u) + size * 4 > 0x20000000)
+      x360n::native::Unsupported("shader outside guest physical memory");
+  }
+  if (opcode == PM4_DRAW_INDX || opcode == PM4_DRAW_INDX_2) {
+    unsigned prefix = opcode == PM4_DRAW_INDX ? 1 : 0;
+    if (prefix && (word() & 0x100)) x360n::native::Unsupported("conditional visibility draw not implemented");
+    reg::VGT_DRAW_INITIATOR draw; draw.value = word();
+    if (draw.source_select == SourceSelect::kAutoIndex) {
+      if (count != prefix + 1) x360n::native::Unsupported("invalid auto-index draw size");
+    } else if (draw.source_select == SourceSelect::kDMA) {
+      if (count != prefix + 3) x360n::native::Unsupported("invalid DMA draw size");
+      auto address = word(); reg::VGT_DMA_SIZE size; size.value = word();
+      unsigned width = draw.index_size == IndexFormat::kInt16 ? 2 : 4;
+      if (draw.num_indices > size.num_words || uint64_t(address & ~(width - 1)) + uint64_t(size.num_words) * width > 0x20000000)
+        x360n::native::Unsupported("DMA index buffer extent invalid");
+    } else x360n::native::Unsupported("immediate index source not implemented");
+  }
+  if (opcode == PM4_SET_CONSTANT || opcode == PM4_SET_CONSTANT2 || opcode == PM4_SET_SHADER_CONSTANTS || opcode == PM4_LOAD_ALU_CONSTANT) {
+    uint32_t address = opcode == PM4_LOAD_ALU_CONSTANT ? word() & 0x3fffffff : 0;
+    auto offset = word();
+    uint32_t length = opcode == PM4_LOAD_ALU_CONSTANT ? word() & 0xfff : count - 1;
+    uint32_t base;
+    if (opcode == PM4_SET_CONSTANT2 || opcode == PM4_SET_SHADER_CONSTANTS) base = offset & 65535;
+    else {
+      constexpr unsigned banks[]{0x4000, 0x4800, 0x4900, 0x4908, 0x2000};
+      unsigned bank = (offset >> 16) & 255;
+      if (bank >= 5) x360n::native::Unsupported("invalid constant register bank");
+      base = banks[bank] + (offset & 0x7ff);
+    }
+    if (base >= RegisterFile::kRegisterCount || length > RegisterFile::kRegisterCount - base || uint64_t(address) + length * 4 > 0x20000000)
+      x360n::native::Unsupported("constant register or memory extent invalid");
+  }
 }
 }

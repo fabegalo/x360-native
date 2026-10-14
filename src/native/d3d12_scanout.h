@@ -1,5 +1,6 @@
 #pragma once
 #include "scanout_backend.h"
+#include "d3d12_render.h"
 #include <array>
 #include <memory>
 #include <rex/ui/d3d12/d3d12_provider.h>
@@ -12,6 +13,10 @@ class D3D12Scanout final : public ScanoutBackend {
   void Present(rex::ui::Presenter& presenter, const ScanoutTexture& texture,
                const void* pixels, const uint32_t* lut) override;
   void Drain() override;
+  rex::graphics::Shader* LoadShader(rex::graphics::xenos::ShaderType type, const uint32_t* data, uint32_t count) override;
+  void Draw(const rex::graphics::RegisterFile& regs, rex::memory::Memory& memory, rex::graphics::Shader* vs, rex::graphics::Shader* ps,
+      rex::graphics::xenos::PrimitiveType primitive, uint32_t count, const DrawIndices* indices) override;
+  void Resolve(const rex::graphics::RegisterFile& regs, rex::memory::Memory& memory) override;
  private:
   template<class T> using Ptr = Microsoft::WRL::ComPtr<T>;
   struct Slot {
@@ -29,5 +34,6 @@ class D3D12Scanout final : public ScanoutBackend {
   HANDLE event_ = nullptr;
   uint64_t serial_ = 0;
   std::array<Slot, 3> slots_;
+  std::unique_ptr<D3D12Render> render_;
 };
 }

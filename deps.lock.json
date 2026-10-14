@@ -285,7 +285,7 @@
                                             "sha256":  "60f4dd12ada95717e385d3edf449b5bb3abae69bbc8c7ff05f0bec07bdfa04fb",
                                             "files":  {
                                                           "include/rex/graphics/command_processor.h":  "3067c137b6cb05a38195c2e85cf1cf4ef8346097810af2c4a032ca7a4bd929e8",
-                                                          "src/graphics/command_processor.cpp":  "79658b4f25a195a8f1e7e29bda143d75551e0b2127596eac50babb2538c78c9a"
+                                                          "src/graphics/command_processor.cpp":  "18889d89b79e42fdc2d494bd36874d83bd54719b978f5133d2b5c60d6fe5f461"
                                                       },
                                             "base_files":  {
                                                                "include/rex/graphics/command_processor.h":  "eb02162883373a0d2ce5d93bd6c12d9931ff26dc27df473249bec85a186c7cfe",
@@ -304,7 +304,7 @@
                                                           "include/rex/graphics/graphics_system.h":  "259d7acc4e6d6dc01eb546cf101389bf4cf352b54c78c392cb4a2a595531c53f",
                                                           "src/graphics/graphics_system.cpp":  "fb3256cec0bbf518125245b180508aa40587ab239f2db47aeea6981d1a3174de",
                                                           "include/rex/graphics/command_processor.h":  "3067c137b6cb05a38195c2e85cf1cf4ef8346097810af2c4a032ca7a4bd929e8",
-                                                          "src/graphics/command_processor.cpp":  "79658b4f25a195a8f1e7e29bda143d75551e0b2127596eac50babb2538c78c9a",
+                                                          "src/graphics/command_processor.cpp":  "18889d89b79e42fdc2d494bd36874d83bd54719b978f5133d2b5c60d6fe5f461",
                                                           "src/graphics/d3d12/command_processor.cpp":  "1581c55fa2481c78778fb0d584c8785e817ce7472b34a3b43d7f9a19c970ea2e",
                                                           "src/graphics/vulkan/command_processor.cpp":  "56d2acf73af58e68fcc9fe0f17bec6816460e2b6c8872851d58da1813d61cb7d",
                                                           "src/audio/sdl/sdl_audio_driver.cpp":  "b563c3686247199c274e55531429f3657a4426a76536c1ebe048910c13eef690"
@@ -944,7 +944,7 @@
                                                           "CMakeLists.txt":  "92c180ed4a4f8c3c2ded043733b8365c356f16746bd64b34860e1ab7af578ae7",
                                                           "include/rex/perf/counter.h":  "c8820222ffe4c5c639269d949c8be9326a78ab046ad2abf6405ab891835716fc",
                                                           "src/core/perf/counter.cpp":  "df95e01382113fcd10e5698b8f6985f7d14486a834e542be95dfc1e59b611268",
-                                                          "src/graphics/command_processor.cpp":  "79658b4f25a195a8f1e7e29bda143d75551e0b2127596eac50babb2538c78c9a",
+                                                          "src/graphics/command_processor.cpp":  "18889d89b79e42fdc2d494bd36874d83bd54719b978f5133d2b5c60d6fe5f461",
                                                           "src/graphics/d3d12/pipeline_cache.cpp":  "37d0ee1c01c689f941676b19e3f5049c436f1f50c411a2a32720e2bdc7bac80d",
                                                           "src/system/runtime.cpp":  "e182e32e3e80c7bb308401bdb95348253e31b0c64c3afbaaaa9e5c3beeb37641"
                                                       },
@@ -1002,10 +1002,21 @@
                                             "src/graphics/command_processor.cpp": "98014a045bc4a9403827d0c4de044d7b79b052921f485e0dd8719577d5d0bc91"
                                           },
                                           "files": {
-                                            "src/graphics/command_processor.cpp": "79658b4f25a195a8f1e7e29bda143d75551e0b2127596eac50babb2538c78c9a"
+                                            "src/graphics/command_processor.cpp": "18889d89b79e42fdc2d494bd36874d83bd54719b978f5133d2b5c60d6fe5f461"
                                           },
                                           "test": "sdkcheck.Native-packet-guard"
-                                        }
+                                        },
+{
+  "file": "patches/rexglue-sdk/0075-native-packet-payload-validation.patch",
+  "sha256": "1e02b2b31c4967b317e5619cbcdce4784976c003621ac94c4111a1919e053e10",
+  "base_files": {
+    "src/graphics/command_processor.cpp": "79658b4f25a195a8f1e7e29bda143d75551e0b2127596eac50babb2538c78c9a"
+  },
+  "files": {
+    "src/graphics/command_processor.cpp": "18889d89b79e42fdc2d494bd36874d83bd54719b978f5133d2b5c60d6fe5f461"
+  },
+  "test": "sdkcheck.Native-packet-guard; native.packet-payload"
+}
                                     ]
                     },
     "llvm":  {

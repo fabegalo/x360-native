@@ -1,0 +1,21 @@
+diff --git a/src/graphics/command_processor.cpp b/src/graphics/command_processor.cpp
+--- a/src/graphics/command_processor.cpp
++++ b/src/graphics/command_processor.cpp
+@@ -86,7 +86,7 @@
+ 
+ #if defined(REX_GPU_VALIDATE_PACKET)
+ // Optional backend capability gate. Absent in the original Xenos build.
+-void ValidatePacketForBackend(uint32_t header, size_t remaining_dwords);
++void ValidatePacketForBackend(uint32_t header, const memory::RingBuffer& payload);
+ #endif
+ 
+ namespace {
+@@ -700,7 +700,7 @@
+ bool CommandProcessor::ExecutePacket(memory::RingBuffer* reader) {
+   const uint32_t packet = reader->ReadAndSwap<uint32_t>();
+ #if defined(REX_GPU_VALIDATE_PACKET)
+-  ValidatePacketForBackend(packet, reader->read_count() / sizeof(uint32_t));
++  ValidatePacketForBackend(packet, *reader);
+ #endif
+   const uint32_t packet_type = packet >> 30;
+   if (packet == 0) {

@@ -94,12 +94,20 @@ int wmain(int argc, wchar_t** argv) {
     auto* mmio = memory->LookupVirtualMappedRange(0x7fc80714);
     Require(mmio != nullptr, "GPU MMIO registration");
     if (argc == 4) {
-      Require(std::wstring_view(argv[3]) == L"--reject", "unknown probe mode");
-      const uint32_t words[] = {Packet(0x7e, 1), 0, Packet(PM4_MEM_WRITE, 2), physical_done, 1};
-      for (unsigned i = 0; i < 5; ++i)
+      std::vector<uint32_t> words;
+      const std::wstring_view mode(argv[3]);
+      if (mode == L"--reject") words = {Packet(0x7e, 1), 0};
+      else if (mode == L"--reject-inline") words = {Packet(PM4_IM_LOAD_IMMEDIATE, 3), 0, 9, 0};
+      else if (mode == L"--reject-draw") {
+        reg::VGT_DRAW_INITIATOR draw{}; draw.prim_type = PrimitiveType::kTriangleList;
+        draw.source_select = SourceSelect::kImmediate; draw.num_indices = 3;
+        words = {Packet(PM4_DRAW_INDX_2, 1), draw.value};
+      } else throw std::runtime_error("unknown probe mode");
+      words.insert(words.end(), {Packet(PM4_MEM_WRITE, 2), physical_done, 1});
+      for (unsigned i = 0; i < words.size(); ++i)
         rex::memory::store_and_swap<uint32_t>(memory->TranslateVirtual(ring + i * 4), words[i]);
       gpu->InitializeRingBuffer(physical_ring, 10);
-      mmio->write(nullptr, mmio->callback_context, 0x7fc80714, 5);
+      mmio->write(nullptr, mmio->callback_context, 0x7fc80714, unsigned(words.size()));
       auto* marker = memory->TranslateVirtual<volatile uint32_t*>(done);
       const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
       while (*marker != 1 && std::chrono::steady_clock::now() < deadline)

@@ -72,9 +72,23 @@ void D3D12Scanout::Wait(uint64_t serial) {
     throw std::runtime_error("Native: GPU fence exceeded 5 seconds");
   Check(provider_.GetDevice()->GetDeviceRemovedReason(), "device status");
 }
-void D3D12Scanout::Drain() { Wait(serial_); }
+void D3D12Scanout::Drain() { if (render_) render_->Flush(); Wait(serial_); }
+rex::graphics::Shader* D3D12Scanout::LoadShader(rex::graphics::xenos::ShaderType type, const uint32_t* data, uint32_t count) {
+  if (!render_) render_ = std::make_unique<D3D12Render>(provider_);
+  return render_->shaders.Load(type, data, count);
+}
+void D3D12Scanout::Draw(const rex::graphics::RegisterFile& regs, rex::memory::Memory& memory, rex::graphics::Shader* vs, rex::graphics::Shader* ps,
+    rex::graphics::xenos::PrimitiveType primitive, uint32_t count, const DrawIndices* indices) {
+  if (!render_) render_ = std::make_unique<D3D12Render>(provider_);
+  render_->Draw(regs, memory, vs, ps, primitive, count, indices);
+}
+void D3D12Scanout::Resolve(const rex::graphics::RegisterFile& regs, rex::memory::Memory& memory) {
+  if (!render_) render_ = std::make_unique<D3D12Render>(provider_);
+  render_->Resolve(regs, memory);
+}
 void D3D12Scanout::Present(rex::ui::Presenter& presenter, const ScanoutTexture& t,
                          const void* pixels, const uint32_t* lut) {
+  if (render_) render_->Flush();
   const unsigned index = unsigned(serial_ % slots_.size());
   auto& slot = slots_[index];
   Wait(slot.serial);
