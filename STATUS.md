@@ -12,9 +12,12 @@ aprovados; geração real passou 11 asserções. Na instalação afetada, config
 passou em 406 s e o produtor em 148 s. Forza parou no codegen (86 s): 12 chamadas
 sem função correspondente, em 11 destinos únicos; não compilado nem jogável.
 O CLI do SDK regrava seu glue; a integração própria agora usa arquivo separado.
-Hotfix.3 aplicada com hashes de catálogo/perfis/saves/preferências preservados;
-empacotamento final da integração ainda em validação. Sem iniciar jogo ou
-Computer Use. Evidências e limites: `docs/universal-library.md`.
+Hotfix.4 final passou nos gates do pacote, foi aplicada na mesma instalação e
+preservou os quatro hashes de catálogo/perfis/saves/preferências. Regeneração
+final passou 11 asserções; configure com glue do SDK regravado também passou
+(4,8 s de configure/generate), mantendo o diagnóstico real do codegen. Backups
+dos pacotes/fontes anteriores verificados. Sem iniciar jogo, Computer Use ou
+publicação. Evidências e limites: `docs/universal-library.md`.
 
 Automação de Releases no GitHub Actions (2026-10-14): workflow manual e por
 tag `v*` implementado em `.github/workflows/release.yml`, reutilizando

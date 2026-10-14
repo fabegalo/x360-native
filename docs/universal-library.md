@@ -180,7 +180,24 @@ catalog/profile/save/preference hashes preserved:
 `.local/logs/forza-aot-installed-update.log`. Its package gates passed, including
 88 license/content components and three executables; source commit `04c5174`.
 The earlier failed build and user data remain at their original paths. The
-final package for the separately owned integration is still being validated.
+final package `0.1.0-preview.20-hotfix.4` was generated from commit `845f08a`,
+passed its distribution and license/content gates, and was applied to the same
+installation. ZIP SHA-256
+`1d0f6efa4525a3da49c95f907b6a3dd5087c4d08ef521643e0ebf46ee51b1a02`.
+Logs: `.local/logs/forza-aot-final-package.log` and
+`.local/logs/forza-aot-final-installed-update.log`. All four persistent hashes
+remained identical; package/source backup is
+`.local/preserved/forza-aot-hotfix4-package/`.
+
+Final project generation passed 11 assertions
+(`.local/logs/forza-aot-final-real-generation.log`). A focused warm configure
+with the SDK-refreshed glue still present passed in 3.0 seconds of configure
+plus 1.8 seconds of generation (`.local/logs/forza-aot-final-configure.log`).
+CMake still warns about long object filenames from the complete native title
+name; native Forza compilation has not been reached. The real `2-codegen`
+failure marker and its log were retained for the Library; no success receipt or
+My Games registration was synthesized, and the unchanged failing analysis was
+not repeated. Forza requires specific analysis support before it can prepare.
 
 ### Long installed paths: Forza Horizon import recovery (2026-10-14)
 
