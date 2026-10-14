@@ -50,6 +50,12 @@ target_compile_definitions(x360n_tests PRIVATE X360N_CONTENT_EXE="$<TARGET_FILE:
 add_dependencies(x360n_tests x360n-content)
 catch_discover_tests(x360n_tests TEST_PREFIX "x360n." PROPERTIES LABELS "project" TIMEOUT 120)
 if(WIN32)
+  add_test(NAME x360n.benchmark-process-summary COMMAND pwsh -NoProfile -File
+    ${CMAKE_CURRENT_SOURCE_DIR}/performance/process_summary_test.ps1)
+  set_tests_properties(x360n.benchmark-process-summary PROPERTIES LABELS project TIMEOUT 30)
+  add_test(NAME x360n.benchmark-instrumentation COMMAND pwsh -NoProfile -File
+    ${CMAKE_CURRENT_SOURCE_DIR}/performance/instrumentation_test.ps1)
+  set_tests_properties(x360n.benchmark-instrumentation PROPERTIES LABELS project TIMEOUT 30)
   add_test(NAME x360n.benchmark-summary COMMAND powershell -NoProfile -ExecutionPolicy Bypass
     -File ${CMAKE_CURRENT_SOURCE_DIR}/performance/summary_test.ps1)
   set_tests_properties(x360n.benchmark-summary PROPERTIES LABELS project TIMEOUT 30)

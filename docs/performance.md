@@ -42,6 +42,7 @@ com verificação de overflow, sem arredondamento intermediário para double.
 | Frame time médio/P95/P99 | diferenças entre timestamps; percentil nearest-rank |
 | CPU por frame | CPU agregada de todas as threads entre swaps; pode exceder parede |
 | Uso de CPU | CPU agregada / parede / processadores lógicos × 100 |
+| CPU externa P2 | TotalProcessorTime / janela de parede comum OFF/ON; ms de CPU/s e percentual da máquina |
 | RAM | pico observado de working set e private commit em amostras de 1 s |
 | Inicialização | Runtime::Setup até primeiro swap; não é gameplay pronto nem inclui criação do processo |
 | Shader/pipeline | parede somada de tradução/criação D3D12, incluindo falhas/workers; não é duração GPU |
@@ -57,6 +58,59 @@ Não interpretar contadores sem callsites no backend como ausência de gargalo.
 Tracy existente pode aprofundar investigações; não é necessário para o benchmark.
 
 ## Metodologia e execução
+
+### Instrumentação OFF/ON em jogos reais (P2)
+
+`benchmark-runtime.ps1 -Instrumentation Off|On` usa o mesmo executável e DLLs.
+OFF passa `--perf_counters=false` e omite `perf_log_csv` (o parser CLI11 recusa
+`--perf_log_csv=` vazio). Configurações TOML com override de CSV são recusadas
+em OFF. ON habilita contadores, snapshots, timestamps de CPU e CSV bufferizado.
+Não é comparação com remoção dos callsites em compile time. O runner exige
+um log de runtime em até 10 s para detectar falha de inicialização/CLI.
+
+CPU/RAM são coletadas externamente em **ambos** os modos, aproximadamente a
+cada segundo. A janela usa o relógio monotônico do runner após Process.Start;
+o custo agregado de CPU vem de `Process.TotalProcessorTime`, interpolado nas
+duas bordas entre amostras. A interpolação assume taxa local aproximadamente
+constante no intervalo de até ~1 s; não é CPU por frame ou caminho crítico.
+São exigidas cobertura das bordas, CPU/timestamps monotônicos, RAM válida e
+intervalos de amostragem de no máximo 2,5 s. Working set e private commit são
+picos **amostrados**, não máximos absolutos. Uma CPU ocupada corresponde a
+1000 ms de CPU/s; uso da máquina divide também pelos processadores lógicos.
+
+O CSV nativo continua medindo frames somente em ON. A origem aproximada do
+runtime (criação do CSV) alinha a janela de frames à janela externa; os intervalos
+e percentis usam timestamps nativos. OFF tem FPS/1% low/P95/P99 `null`, com motivo:
+não há coletor independente de frames validado. Assim, a comparação quantifica
+CPU total e RAM da instrumentação, **não** seu efeito em FPS. GPU/VRAM também
+continuam indisponíveis; identidade da placa/driver não é medição de uso.
+
+```powershell
+pwsh -NoProfile -File scripts/benchmark-instrumentation.ps1 -Label p2-measured -Samples 4
+# Ampliar a mesma série após examinar dispersão, sem sobrescrever as primeiras:
+pwsh -NoProfile -File scripts/benchmark-instrumentation.ps1 -Label p2-measured -Samples 8 -FirstSample 5
+```
+
+Quatro amostras usam OFF/ON/ON/OFF; oito acrescentam ON/OFF/OFF/ON. O driver
+executa títulos sequencialmente, com watchdog de 330 s por filho; o runner limita
+o jogo a menos de 300 s. Revisar `before.png`, `after.png`, eventos e logs de
+cada coleta, registrar `scene_verified` e `scene_review` no ambiente e resultado,
+e só então executar `compare-instrumentation.ps1 -Runs <diretórios-em-ordem>
+-Output <json>`. O parâmetro `Runs` é um array PowerShell, passado por uma chamada
+de script dentro de PowerShell, não como string contendo vírgulas em `pwsh -File`.
+
+Esse comparador exige identidade de **todos** os binários, inclusive runtime,
+originais, seeds, hardware, configuração, coletor e janela. Só admite variação
+dos switches de instrumentação e caminhos de saída isolados. Reporta médias,
+desvios, min/max e diferenças de CPU entre pares adjacentes. O IC95% t pareado
+é exploratório: pressupõe diferenças aproximadamente normais e independentes;
+2 ou 4 pares não certificam ausência de overhead nem determinismo da cena.
+Frames individuais não são tratados como milhares de execuções independentes.
+O redutor e o exportador preservam os dois modos e os hashes da evidência.
+
+Os benchmarks são diagnósticos diretos com encerramento limitado forçado.
+Não substituem nem alteram o ciclo original Dashboard → Forza → Dashboard.
+Reusar a evidência funcional existente quando runtime/AOT/sessão não mudaram.
 
 Usar PowerShell 7 e binários compilados por `scripts/devshell.cmd`, com SDK fixado
 em `deps.lock.json`. Cenários: `benchmarks/scenarios.json`.
@@ -102,9 +156,11 @@ registrados no lançamento identificam o checkout naquele momento; não comprova
 a origem de um executável congelado anteriormente.
 
 O CSV nativo pode negar leitura concorrente no Windows; o runner só o lê depois
-de encerrar o processo. O horário de criação do CSV aproxima a origem do runtime
-exclusivamente para agendar término e amostras externas de RAM. Os cálculos de
-FPS/CPU usam somente timestamps e CPU acumulada nativos. Encerramento limitado
+de encerrar o processo. O horário de criação do CSV aproxima a origem do runtime.
+Nas capturas anteriores à P2, servia para agendar término e alinhar RAM ao runtime;
+na P2, alinha a janela nativa ON ao relógio externo comum, sem controlar o prazo
+ou a CPU/RAM externas. FPS e CPU por frame usam timestamps e CPU acumulada
+nativos; os campos `external_*` usam as amostras do processo. Encerramento limitado
 forçado é explicitado e não equivale a um retorno normal à dashboard.
 
 ```powershell

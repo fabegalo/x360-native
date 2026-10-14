@@ -23,6 +23,7 @@ $public=[ordered]@{
  schema=1;title=$environment.title;label=$environment.label;utc=$environment.utc
  workspace_head=$environment.head;sdk_head=$environment.sdk_head
  workspace_lock_sha256=$environment.lock_sha256
+ instrumentation=$environment.instrumentation;measurement_clock=$environment.measurement_clock
  binary_provenance=$provenance
  hardware=$environment.hardware;artifacts=$environment.artifacts;collector=$environment.collector;reduction=$environment.reduction
  scenario=@{description=$environment.scenario.description;start_seconds=$environment.scenario.start_seconds;duration_seconds=$environment.scenario.duration_seconds;events=$environment.scenario.events}

@@ -6,11 +6,13 @@ param(
  [Parameter(Mandatory)][ValidatePattern('^[a-zA-Z0-9_-]+$')][string]$Label,
  [string]$ScenarioFile,
  [string]$BinaryDirectory,
+ [ValidateSet('Off','On')][string]$Instrumentation='On',
  [switch]$NoCapture
 )
 $ErrorActionPreference='Stop'
 $root=(Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 . "$PSScriptRoot/benchmark-summary.ps1"
+. "$PSScriptRoot/benchmark-process-summary.ps1"
 . "$PSScriptRoot/benchmark-window.ps1"
 function Save-BoundedCapture([int]$ProcessId,[string]$Path) {
  # PrintWindow may block on an unresponsive title. Keep it in an owned helper
@@ -72,10 +74,22 @@ try {
 }catch{$hardware['query_error']=$_.Exception.Message}
 $artifacts=@(Get-ChildItem -LiteralPath (Split-Path $exe) -File | Where-Object {$_.Extension -in @('.exe','.dll','.toml')} | ForEach-Object {@{file=$_.Name;sha256=(Get-FileHash $_.FullName).Hash.ToLower()}})
 $csv=Join-Path $out 'frames.csv'
-$argsList=@('--gpu_plugin=xenos','--mnk_mode=true','--log_level=info',"--log_file=$out/rex.log","--game_data_root=$(Join-Path $root $scenario.game_root)","--user_data_root=$user","--cache_root=$user/cache","--perf_log_csv=$csv")+@($scenario.arguments)
+$argsList=@('--gpu_plugin=xenos','--mnk_mode=true','--log_level=info',"--log_file=$out/rex.log","--game_data_root=$(Join-Path $root $scenario.game_root)","--user_data_root=$user","--cache_root=$user/cache")+@($scenario.arguments)
+if(@($scenario.arguments | Where-Object {$_ -match '^--perf_'}).Count){throw 'Scenario must not override instrumentation mode'}
+if($Instrumentation -eq 'On'){$argsList+=@('--perf_counters=true',"--perf_log_csv=$csv")}
+else{
+ # CLI11 rejects an empty string option. Use the empty default, and reject
+ # configurations which could silently enable CSV collection from a file.
+ foreach($config in Get-ChildItem (Split-Path $exe) -Filter '*.toml' -File) {
+  if(Select-String $config.FullName -Pattern '^\s*perf_log_csv\s*=' -Quiet){throw 'OFF requires a configuration without perf_log_csv override'}
+ }
+ $argsList+='--perf_counters=false'
+}
 $metadata=[ordered]@{schema=1;title=$Title;label=$Label;utc=[DateTime]::UtcNow.ToString('o');head=(& git -C $root rev-parse HEAD).Trim();sdk_head=(& git -C "$root/external/rexglue-sdk" rev-parse HEAD).Trim();lock_sha256=(Get-FileHash "$root/deps.lock.json").Hash.ToLower();scenario=$scenario;scenario_sha256=(Get-FileHash $ScenarioFile).Hash.ToLower();hardware=$hardware;artifacts=$artifacts;arguments=$argsList;seed=$seedInventory;cache_condition='identical existing cache seed, OS filesystem cache uncontrolled';termination=$null;scene_verified=$false;runtime_origin_approx_ms=$null}
 $metadata | ConvertTo-Json -Depth 15 | Set-Content "$out/environment.json" -Encoding utf8
-$metadata['collector']=@('benchmark-runtime.ps1','benchmark-window.ps1','benchmark-summary.ps1' | ForEach-Object {
+$metadata['instrumentation']=$Instrumentation.ToLowerInvariant()
+$metadata['measurement_clock']='Runner monotonic clock immediately after Process.Start; same external CPU/RAM window in both modes'
+$metadata['collector']=@('benchmark-runtime.ps1','benchmark-window.ps1','benchmark-summary.ps1','benchmark-process-summary.ps1' | ForEach-Object {
  @{file=$_;sha256=(Get-FileHash (Join-Path $PSScriptRoot $_)).Hash.ToLower()}
 })
 $metadata['failure']=$null
@@ -107,6 +121,7 @@ $metadata['pid']=$p.Id
 try {
  while(!$p.HasExited -and $clock.Elapsed.TotalSeconds -lt $start+$duration+20) {
   $t=$clock.Elapsed.TotalSeconds
+  if($t -gt 10 -and !(Get-ChildItem $out -Filter 'rex*.log' -File)){throw 'No runtime log after 10 seconds; title initialization or CLI parsing failed'}
   foreach($event in $events){if(!$event.sent -and $t -ge $event.at){
    Send-BenchmarkKey $p.Id $event.vk $event.scan $event.down
    $event.sent=$true;$event.actual_seconds=$clock.Elapsed.TotalSeconds
@@ -122,7 +137,7 @@ try {
   }
   # The SDK FILE stream may deny concurrent reads. Read timestamps only after
   # cleanup; use its creation timestamp plus generous margin to bound capture.
-  if($null -ne $runtimeOffset -and $t-$runtimeOffset -ge $start+$duration+5){
+  if($t -ge $start+$duration+5){
    if(!$NoCapture){Save-BoundedCapture $p.Id "$out/after.png";$after=$true}
    break
   }
@@ -141,15 +156,27 @@ try {
 }
 try {
  if($metadata.failure){throw $metadata.failure}
- $summary=Get-BenchmarkSummary $csv $start $duration $hardware.logical_processors
+ $processSummary=Get-BenchmarkProcessSummary $samples $start $duration $hardware.logical_processors
+ if($Instrumentation -eq 'On') {
+  if($null -eq $runtimeOffset){throw 'Missing native runtime origin'}
+  $summary=Get-BenchmarkSummary $csv ($start-$runtimeOffset) $duration $hardware.logical_processors
+ } else {
+  if(Test-Path $csv){throw 'OFF unexpectedly produced a frame CSV'}
+  $summary=[ordered]@{schema=1;window_complete=$processSummary.external_window_complete;unavailable=@{};counters=$null}
+  foreach($metric in @('fps_mean','fps_1pct_low','frame_ms_mean','frame_ms_p95','frame_ms_p99','process_cpu_ms_per_frame','runtime_to_first_swap_ms')) {
+   $summary[$metric]=$null;$summary.unavailable[$metric]='Instrumentation OFF; no independent frame provider installed'
+  }
+ }
+ foreach($key in $processSummary.Keys){$summary[$key]=$processSummary[$key]}
+ $summary['instrumentation']=$Instrumentation.ToLowerInvariant()
+ $summary['gpu_ms_per_frame']=$null;$summary['vram_peak_bytes']=$null
+ $summary.unavailable['gpu_ms_per_frame']='No validated per-process GPU timing provider'
+ $summary.unavailable['vram_peak_bytes']='No validated per-process VRAM provider'
 }catch{
  @{schema=1;title=$Title;label=$Label;window_complete=$false;scene_verified=$false;measurement_error=$_.Exception.Message;termination=$metadata.termination} |
   ConvertTo-Json | Set-Content "$out/result.json"
  throw
 }
-$selected=@($samples | Where-Object {$null -ne $_.runtime_seconds -and $_.runtime_seconds -ge $start -and $_.runtime_seconds -le $start+$duration})
-$summary['ram_working_set_peak_bytes']=($selected.working_set_bytes | Measure-Object -Maximum).Maximum
-$summary['private_commit_peak_bytes']=($selected.private_bytes | Measure-Object -Maximum).Maximum
 $summary['title']=$Title;$summary['label']=$Label;$summary['termination']=$metadata.termination
 $summary['scene_verified']=$false
 $summary['log_counts']=@{error=0;warning=0;critical=0}
