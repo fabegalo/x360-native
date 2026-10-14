@@ -140,8 +140,10 @@ TEST_CASE("automatic AOT generates a stable project without a manual recipe", "[
   REQUIRE(t.generic_aot); REQUIRE(t.aot);
   GenerateAotProject(f.paths,t);
   auto profile=LoadSessionProfile(f.paths,t.manifest,false);
-  CHECK(profile.name==t.id); CHECK(profile.xex==t.game_root/"default.xex");
-  CHECK_FALSE(profile.library_relative_xex.empty());
+  CHECK(profile.name==t.id);
+  // Session paths are canonicalized; Windows TEMP may use an 8.3 alias.
+  CHECK(fs::equivalent(profile.xex,t.game_root/"default.xex"));
+  CHECK(profile.library_relative_xex=="default.xex");
   CHECK(Inspect(f.paths,t).interrupted); CHECK_FALSE(Inspect(f.paths,t).prepared);
   const auto integration=t.manifest.parent_path()/"generated/rexglue.cmake";
   std::ifstream in(integration); const std::string text{std::istreambuf_iterator<char>(in),{}};
