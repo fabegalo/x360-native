@@ -1,0 +1,208 @@
+{
+  "schema": 1,
+  "title": "forza_horizon",
+  "label": "baseline-1",
+  "utc": "2026-10-14T09:49:40.0699151Z",
+  "workspace_head": "38ec6870ec1ea4a89bf5ea943d88f58dee818889",
+  "sdk_head": "f5337cdc947ff6d4c4196737e2c807a48f2a1fc2",
+  "workspace_lock_sha256": "6f0bca3fd705dd40ffe8e9f78dd2e811f47745f3b0b9376c4175cba315314482",
+  "binary_provenance": null,
+  "hardware": {
+    "logical_processors": 16,
+    "os": "Microsoft Windows NT 10.0.26300.0",
+    "cpu": [
+      {
+        "Name": "AMD Ryzen 7 5700X3D 8-Core Processor           ",
+        "NumberOfCores": 8,
+        "NumberOfLogicalProcessors": 16
+      }
+    ],
+    "ram_bytes": 42856640512,
+    "gpu": [
+      {
+        "Name": "NVIDIA GeForce RTX 4070",
+        "DriverVersion": "32.0.16.1742",
+        "CurrentHorizontalResolution": 1920,
+        "CurrentVerticalResolution": 1080,
+        "CurrentRefreshRate": 279
+      }
+    ],
+    "power_plan": "GUID do Esquema de Energia: 381b4222-f694-41f0-9685-ff5bb260df2e  (Equilibrado)"
+  },
+  "artifacts": [
+    {
+      "file": "forza_horizon_SpeechFacade_default.dll",
+      "sha256": "f29f4df2b7c6ca0adada6f5c5abdf79c3826c216b4722797c18698f5f11c5950"
+    },
+    {
+      "file": "forza_horizon_XMediaFacade_default.dll",
+      "sha256": "ec4b07053f7fdf81f96dcd706a11a89a1e5d75ad5f0f513ddb21736abf648cc4"
+    },
+    {
+      "file": "forza_horizon.exe",
+      "sha256": "34fc5b6afff95952decb9ef7ae7ab4285e4f7c38f074f91f68acdb283092a53c"
+    },
+    {
+      "file": "rexgpu-xenosrd.dll",
+      "sha256": "8aa0ea1d1da3bf00244814a7248a5b58269b024afce73432b105a9d2ce0bff34"
+    },
+    {
+      "file": "rexruntimerd.dll",
+      "sha256": "327fad3f65389ffec46ffe7e8760ae56d85f2a3735ca15b99bd692e5f746cb38"
+    },
+    {
+      "file": "TracyClientrd.dll",
+      "sha256": "3f345b64da155057dee049186237cea9866a7bec5e14840ea56d29298189d6f2"
+    }
+  ],
+  "scenario": {
+    "description": "Forza opening driving scene, existing connected profile, Start at 22 s; verify scene captures",
+    "start_seconds": 145,
+    "events": [
+      {
+        "seconds": 22,
+        "vk": 13,
+        "scan": 28,
+        "hold_seconds": 0.12
+      }
+    ],
+    "duration_seconds": 30
+  },
+  "settings": [
+    "--gpu_plugin=xenos",
+    "--mnk_mode=true",
+    "--log_level=info"
+  ],
+  "seed_inventory_sha256": "6625484f30522106e03dc9221c7b5bd38f2977ec2cb8f21f15e1b3a70a1a9706",
+  "seed_files": 9,
+  "original_xex": null,
+  "cache_condition": "identical existing cache seed, OS filesystem cache uncontrolled",
+  "scene_review": null,
+  "result": {
+    "frame_source": "completed guest XE_SWAP cadence, not display scanout or GPU duration",
+    "frames": 899,
+    "measured_seconds": 29.965644999999977,
+    "window_complete": true,
+    "fps_mean": 30.001022837986657,
+    "fps_1pct_low": 19.69305097874643,
+    "frame_ms_mean": 33.33219688542823,
+    "frame_ms_p95": 48.790999999994256,
+    "frame_ms_p99": 50.19399999997631,
+    "process_cpu_ms_per_frame": 52.245550611790875,
+    "process_cpu_percent_machine": 9.796374731797037,
+    "runtime_to_first_swap_ms": 1725.956,
+    "gpu_ms_per_frame": null,
+    "vram_bytes": null,
+    "gameplay_ready_ms": null,
+    "unavailable": {
+      "gpu_ms_per_frame": "No GPU timestamp queries wired",
+      "vram_bytes": "No process VRAM provider wired",
+      "gameplay_ready_ms": "No semantic ready signal; runtime-to-first-swap is separate",
+      "cpu_critical_path_ms": "Process CPU is aggregate across all threads",
+      "hardware_cache_misses": "No PMU sampling",
+      "pipeline_fast_path_hits": "Existing counter excludes consecutive identical pipeline fast path"
+    },
+    "counters": {
+      "draw_calls": 93496,
+      "command_buffer_stalls": 0,
+      "vertices_processed": 10076891,
+      "functions_dispatched": 401585493,
+      "interrupt_dispatches": 6293,
+      "texture_cache_hits": 44051,
+      "texture_cache_misses": 0,
+      "pipeline_cache_hits": 30566,
+      "pipeline_cache_misses": 0,
+      "shader_translation_us": 0,
+      "shader_translations": 0,
+      "pipeline_creation_us": 0,
+      "pipeline_creations": 0,
+      "swap_failures": 0
+    },
+    "whole_capture_counters": {
+      "draw_calls": 556163,
+      "command_buffer_stalls": 0,
+      "vertices_processed": 53582622,
+      "functions_dispatched": 2165743559,
+      "interrupt_dispatches": 36979,
+      "texture_cache_hits": 238322,
+      "texture_cache_misses": 44,
+      "pipeline_cache_hits": 165374,
+      "pipeline_cache_misses": 0,
+      "shader_translation_us": 126116,
+      "shader_translations": 527,
+      "pipeline_creation_us": 7562317,
+      "pipeline_creations": 481,
+      "swap_failures": 0
+    },
+    "ram_working_set_peak_bytes": 818950144.0,
+    "private_commit_peak_bytes": 1808703488.0,
+    "title": "forza_horizon",
+    "label": "baseline-1",
+    "termination": "bounded_forced_stop",
+    "scene_verified": false,
+    "log_counts": {
+      "error": 57515,
+      "warning": 23,
+      "critical": 0
+    },
+    "scene_review": "Calibration only: cinematic before the window and black transition after; not gameplay"
+  },
+  "evidence": [
+    {
+      "file": "after.png",
+      "bytes": 10143,
+      "sha256": "a5d8fab8a2f28589ebac021211379ffee5bedd8c2066bb6a9b192ec87b51d1a9"
+    },
+    {
+      "file": "before.png",
+      "bytes": 3197254,
+      "sha256": "b36042522019a8970b43e7fd01940b07f67398606a21e2403a80fe3937248227"
+    },
+    {
+      "file": "environment.json",
+      "bytes": 5054,
+      "sha256": "46ded343bfa84a8356801e0ad622dc1cc26e4ea0e3d870ee0962f91966ddd140"
+    },
+    {
+      "file": "frames.csv",
+      "bytes": 484057,
+      "sha256": "f89ed7bb4906c338a4aca5fbe305a750f3c2ed5b8b96d061fb11c9facc2579ec"
+    },
+    {
+      "file": "input-events.json",
+      "bytes": 271,
+      "sha256": "d1101e32d2015b0964f74b41b1269a7f6674201bc66061a12cb0c6b6368ffd6a"
+    },
+    {
+      "file": "process-samples.json",
+      "bytes": 30533,
+      "sha256": "85b4d0244ac807c5becab6842b5529808541b25b3abb3659d82ef5e5cf6610cc"
+    },
+    {
+      "file": "result.json",
+      "bytes": 2455,
+      "sha256": "68aa252af9d3807e0b05191e02c8961b8e2f545a7c948ddc757fa2d858236455"
+    },
+    {
+      "file": "rex.1.log",
+      "bytes": 5242837,
+      "sha256": "292194068e6bb088dbefee618b06c80236ef9a9ef07053585dd941ac429ab7e8"
+    },
+    {
+      "file": "rex.log",
+      "bytes": 1750086,
+      "sha256": "caf89507e90ac9268ce6e51ec9715651384a5f19c525f70454233abf1f3c1f48"
+    },
+    {
+      "file": "stderr.log",
+      "bytes": 2,
+      "sha256": "7eb70257593da06f682a3ddda54a9d260d4fc514f645237f5ca74b08f8da61a6"
+    },
+    {
+      "file": "stdout.log",
+      "bytes": 2,
+      "sha256": "7eb70257593da06f682a3ddda54a9d260d4fc514f645237f5ca74b08f8da61a6"
+    }
+  ],
+  "note": "Raw evidence stays local; profiles, saves, screenshots, logs and absolute paths are not embedded. Workspace HEAD/lock identify the checkout at launch, not necessarily the frozen binary build."
+}

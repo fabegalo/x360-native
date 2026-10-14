@@ -69,6 +69,36 @@ e seed. É diagnóstico direto com guardas de originais do título; não publica
 recibos nem comprova a biblioteca. Binários alterados exigem preparação normal
 antes de uso em sessão certificada ou distribuição.
 
+`-BinaryDirectory` permite congelar os mesmos AOT/DLLs por variante. Um
+`provenance.json` opcional nessa pasta é incorporado ao ambiente: registrar a
+origem real do build, inclusive alterações não commitadas. HEAD e hash do lock
+registrados no lançamento identificam o checkout naquele momento; não comprovam
+a origem de um executável congelado anteriormente.
+
+O CSV nativo pode negar leitura concorrente no Windows; o runner só o lê depois
+de encerrar o processo. O horário de criação do CSV aproxima a origem do runtime
+exclusivamente para agendar término e amostras externas de RAM. Os cálculos de
+FPS/CPU usam somente timestamps e CPU acumulada nativos. Encerramento limitado
+forçado é explicitado e não equivale a um retorno normal à dashboard.
+
+```powershell
+pwsh -File scripts/compare-benchmarks.ps1 -Before .local/benchmarks/before/dash_17559 -After .local/benchmarks/after/dash_17559 -Output .local/benchmarks/delta.json
+pwsh -File scripts/export-benchmark.ps1 -Run .local/benchmarks/before/dash_17559 -Output .local/benchmarks/public.json
+```
+
+A comparação exige a mesma cena revisada, janela completa, seed, configuração,
+hardware e AOT; permite explicitamente apenas as DLLs de runtime modificadas.
+Falhas de swap invalidam a comparação automática. Os erros de draw/resolve e
+demais logs permanecem no resultado para revisão; contagens abrangem apenas os
+arquivos retidos pela rotação. Exportação mantém métricas e hashes de evidências,
+sem copiar perfis, saves, capturas ou caminhos de entrada para o documento público.
+
+`x360n_perf_counter_probe` é um alvo explícito, fora dos benchmarks automáticos:
+executa chamadas reais de `rex::perf`, valida totais e registra sete amostras de
+um/quatro writers com contadores independentes, habilitados/desabilitados.
+`scripts/benchmark-counters.ps1 -Executable <probe.exe> -Output <resultado.json>`
+limita a execução a 30 s. É uma carga sintética do runtime, não FPS de um jogo.
+
 Conferir capturas e logs antes do aceite: `scene_verified` nasce false. Se a cena
 não for a pedida, classificar o resultado como diagnóstico inválido para ela.
 Registrar falhas de draw/resolve do Forza, nunca tratá-las como otimização.

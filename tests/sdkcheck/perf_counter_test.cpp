@@ -4,6 +4,7 @@
 #include <fstream>
 #include <thread>
 #include <vector>
+#include <atomic>
 
 TEST_CASE("Performance counters are optional and preserve concurrent totals", "[perf]") {
   using namespace rex::perf;
@@ -39,5 +40,28 @@ TEST_CASE("Performance counters are optional and preserve concurrent totals", "[
   REQUIRE_FALSE(row.empty());
   REQUIRE(GetSnapshotCounter(CounterId::kShaderTranslations) == 1);
   input.close(); std::filesystem::remove(path);
+  SetEnabled(false);
+}
+
+TEST_CASE("Performance snapshots retain events from concurrent writers", "[perf]") {
+  using namespace rex::perf;
+  Init(); SetEnabled(true);
+  constexpr CounterId ids[] = {CounterId::kDrawCalls, CounterId::kXmaFramesDecoded,
+      CounterId::kFunctionsDispatched, CounterId::kInterruptDispatches};
+  std::atomic<int> done{0};
+  std::vector<std::thread> workers;
+  for (auto id : ids) workers.emplace_back([&, id] {
+    for (int i = 0; i < 100000; ++i) IncrementCounter(id);
+    done.fetch_add(1);
+  });
+  int64_t totals[4]{};
+  auto collect = [&] {
+    ResetFrameCounters();
+    for (int i = 0; i < 4; ++i) totals[i] += GetSnapshotCounter(ids[i]);
+  };
+  while (done.load() < 4) { collect(); std::this_thread::yield(); }
+  for (auto& worker : workers) worker.join();
+  collect();
+  for (auto total : totals) REQUIRE(total == 100000);
   SetEnabled(false);
 }

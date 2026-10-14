@@ -1,0 +1,216 @@
+{
+  "schema": 1,
+  "title": "dash_17559",
+  "label": "baseline-2",
+  "utc": "2026-10-14T09:53:51.677169Z",
+  "workspace_head": "38ec6870ec1ea4a89bf5ea943d88f58dee818889",
+  "sdk_head": "f5337cdc947ff6d4c4196737e2c807a48f2a1fc2",
+  "workspace_lock_sha256": "6f0bca3fd705dd40ffe8e9f78dd2e811f47745f3b0b9376c4175cba315314482",
+  "binary_provenance": null,
+  "hardware": {
+    "logical_processors": 16,
+    "os": "Microsoft Windows NT 10.0.26300.0",
+    "cpu": [
+      {
+        "Name": "AMD Ryzen 7 5700X3D 8-Core Processor           ",
+        "NumberOfCores": 8,
+        "NumberOfLogicalProcessors": 16
+      }
+    ],
+    "ram_bytes": 42856640512,
+    "gpu": [
+      {
+        "Name": "NVIDIA GeForce RTX 4070",
+        "DriverVersion": "32.0.16.1742",
+        "CurrentHorizontalResolution": 1920,
+        "CurrentVerticalResolution": 1080,
+        "CurrentRefreshRate": 279
+      }
+    ],
+    "power_plan": "GUID do Esquema de Energia: 381b4222-f694-41f0-9685-ff5bb260df2e  (Equilibrado)"
+  },
+  "artifacts": [
+    {
+      "file": "dash_17559_bootanim.dll",
+      "sha256": "1e9c84aa05f047ae73d8237e3a8fa3cc1b6260d1caaa7891bb70908c21170ee3"
+    },
+    {
+      "file": "dash_17559_createprofile.dll",
+      "sha256": "42a059b5a3f777dee24cab15c836da4d42c06ff5579bdb4462ebd34da53c8f84"
+    },
+    {
+      "file": "dash_17559_gamerprofile.dll",
+      "sha256": "b94dc9d5a40dc2f6764faa542f090aa8e98135e5d6cc159bc3cc6232ccec43c4"
+    },
+    {
+      "file": "dash_17559_hud.dll",
+      "sha256": "e24aabf2e95027199060e4b228e21b819de9f95b55dc24b2649007e1fb40ea91"
+    },
+    {
+      "file": "dash_17559_session_ui.dll",
+      "sha256": "31f9f2192c2d3943e8bf807aff7ea97fa0056505264d890fa136c665bb6cc046"
+    },
+    {
+      "file": "dash_17559_signin.dll",
+      "sha256": "8744fc5800df7f05c19fe1fb255e15031a24b6969fe22218599f10216d77fcc6"
+    },
+    {
+      "file": "dash_17559_vk.dll",
+      "sha256": "a76d0617195687fd466e856facd42828b6a785ae14a77a87133b76ee4009ff90"
+    },
+    {
+      "file": "dash_17559_xam_ui.dll",
+      "sha256": "6ac789af5d94531dae1400b9939aa9144271d581eb95e92d8015625447f7db91"
+    },
+    {
+      "file": "dash_17559.exe",
+      "sha256": "c1c1896b869f652e9cc652d48f492f8291e06a62e379448ccad03e38ac8c806a"
+    },
+    {
+      "file": "rexgpu-xenosrd.dll",
+      "sha256": "8aa0ea1d1da3bf00244814a7248a5b58269b024afce73432b105a9d2ce0bff34"
+    },
+    {
+      "file": "rexruntimerd.dll",
+      "sha256": "327fad3f65389ffec46ffe7e8760ae56d85f2a3735ca15b99bd692e5f746cb38"
+    },
+    {
+      "file": "TracyClientrd.dll",
+      "sha256": "3f345b64da155057dee049186237cea9866a7bec5e14840ea56d29298189d6f2"
+    }
+  ],
+  "scenario": {
+    "duration_seconds": 30,
+    "start_seconds": 25,
+    "description": "Retail 17559 Home, direct boot, no navigation",
+    "events": []
+  },
+  "settings": [
+    "--gpu_plugin=xenos",
+    "--mnk_mode=true",
+    "--log_level=info",
+    "--dash17559_boot_intro=false"
+  ],
+  "seed_inventory_sha256": "fd349f839141eb7f55dbdf9c26c29ea97d0e80be49dafd71059d53a1de494e8e",
+  "seed_files": 4137,
+  "original_xex": null,
+  "cache_condition": "identical existing cache seed, OS filesystem cache uncontrolled",
+  "scene_review": null,
+  "result": {
+    "frame_source": "completed guest XE_SWAP cadence, not display scanout or GPU duration",
+    "frames": 1799,
+    "measured_seconds": 29.98183500000001,
+    "window_complete": true,
+    "fps_mean": 60.00299848224765,
+    "fps_1pct_low": 54.48733472175406,
+    "frame_ms_mean": 16.665833796553645,
+    "frame_ms_p95": 18.03599999999861,
+    "frame_ms_p99": 18.20899999999881,
+    "process_cpu_ms_per_frame": 35.80982490272373,
+    "process_cpu_percent_machine": 13.42935543304804,
+    "runtime_to_first_swap_ms": 788.65,
+    "gpu_ms_per_frame": null,
+    "vram_bytes": null,
+    "gameplay_ready_ms": null,
+    "unavailable": {
+      "gpu_ms_per_frame": "No GPU timestamp queries wired",
+      "vram_bytes": "No process VRAM provider wired",
+      "gameplay_ready_ms": "No semantic ready signal; runtime-to-first-swap is separate",
+      "cpu_critical_path_ms": "Process CPU is aggregate across all threads",
+      "hardware_cache_misses": "No PMU sampling",
+      "pipeline_fast_path_hits": "Existing counter excludes consecutive identical pipeline fast path"
+    },
+    "counters": {
+      "draw_calls": 91460,
+      "command_buffer_stalls": 0,
+      "vertices_processed": 1478843,
+      "functions_dispatched": 20172453,
+      "interrupt_dispatches": 3598,
+      "texture_cache_hits": 42887,
+      "texture_cache_misses": 0,
+      "pipeline_cache_hits": 78867,
+      "pipeline_cache_misses": 0,
+      "shader_translation_us": 0,
+      "shader_translations": 0,
+      "pipeline_creation_us": 0,
+      "pipeline_creations": 0,
+      "swap_failures": 0
+    },
+    "whole_capture_counters": {
+      "draw_calls": 178909,
+      "command_buffer_stalls": 0,
+      "vertices_processed": 2893718,
+      "functions_dispatched": 39885364,
+      "interrupt_dispatches": 7092,
+      "texture_cache_hits": 83711,
+      "texture_cache_misses": 17,
+      "pipeline_cache_hits": 154210,
+      "pipeline_cache_misses": 0,
+      "shader_translation_us": 4603,
+      "shader_translations": 55,
+      "pipeline_creation_us": 640708,
+      "pipeline_creations": 56,
+      "swap_failures": 0
+    },
+    "ram_working_set_peak_bytes": 431509504.0,
+    "private_commit_peak_bytes": 963866624.0,
+    "title": "dash_17559",
+    "label": "baseline-2",
+    "termination": "bounded_forced_stop",
+    "scene_verified": true,
+    "log_counts": {
+      "critical": 0,
+      "error": 3639,
+      "warning": 12167
+    },
+    "scene_review": "before.png and after.png show Retail17559 Home; existing blank avatar panel retained"
+  },
+  "evidence": [
+    {
+      "bytes": 448569,
+      "sha256": "6e140646df7cb0964fc79cd83bbb5f1821fe59e644ba1f664aed8d7b37edf443",
+      "file": "after.png"
+    },
+    {
+      "bytes": 451408,
+      "sha256": "41070292b1ed4a385d3e0e8c2c9a3f671d4a50554bd48410d9f0403bc19b921b",
+      "file": "before.png"
+    },
+    {
+      "bytes": 1083531,
+      "sha256": "27130840b6fd24cfe5bf7a11093d921ac5bf35ae83314e7afabc5f6ea0f836c8",
+      "file": "environment.json"
+    },
+    {
+      "bytes": 275708,
+      "sha256": "79f73531d1a8562e43758956089662bc6a80c1cc5273c8ccf77bed6fef5fdff7",
+      "file": "frames.csv"
+    },
+    {
+      "bytes": 10236,
+      "sha256": "7e6decbc4476b5a9b4cbf39084fb283bd04592ae5c5b7497f7cc8473735bd698",
+      "file": "process-samples.json"
+    },
+    {
+      "bytes": 2434,
+      "sha256": "96f7ce4980bd5e26f8d5b1658c978466cfba382e14de5974335f8906bcdcc636",
+      "file": "result.json"
+    },
+    {
+      "bytes": 1564103,
+      "sha256": "f8452fe22577c87f1da9221794a5fc2978a6fc788ad2f5051d5a58228402acd7",
+      "file": "rex.log"
+    },
+    {
+      "bytes": 2,
+      "sha256": "7eb70257593da06f682a3ddda54a9d260d4fc514f645237f5ca74b08f8da61a6",
+      "file": "stderr.log"
+    },
+    {
+      "bytes": 2,
+      "sha256": "7eb70257593da06f682a3ddda54a9d260d4fc514f645237f5ca74b08f8da61a6",
+      "file": "stdout.log"
+    }
+  ],
+  "note": "Raw evidence stays local; profiles, saves, screenshots, logs and absolute paths are not embedded. Workspace HEAD/lock identify the checkout at launch, not necessarily the frozen binary build."
+}

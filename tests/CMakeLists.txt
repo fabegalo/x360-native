@@ -53,6 +53,12 @@ if(WIN32)
   add_test(NAME x360n.benchmark-summary COMMAND powershell -NoProfile -ExecutionPolicy Bypass
     -File ${CMAKE_CURRENT_SOURCE_DIR}/performance/summary_test.ps1)
   set_tests_properties(x360n.benchmark-summary PROPERTIES LABELS project TIMEOUT 30)
+  add_test(NAME x360n.benchmark-comparison COMMAND powershell -NoProfile -ExecutionPolicy Bypass
+    -File ${CMAKE_CURRENT_SOURCE_DIR}/performance/compare_test.ps1)
+  set_tests_properties(x360n.benchmark-comparison PROPERTIES LABELS project TIMEOUT 30)
+  add_test(NAME x360n.benchmark-export COMMAND pwsh -NoProfile -File
+    ${CMAKE_CURRENT_SOURCE_DIR}/performance/export_test.ps1)
+  set_tests_properties(x360n.benchmark-export PROPERTIES LABELS project TIMEOUT 30)
   add_test(NAME x360n.dashboard-assets-build-gate COMMAND powershell -NoProfile -ExecutionPolicy Bypass
     -File ${CMAKE_CURRENT_SOURCE_DIR}/build_isolation/dashboard_assets.ps1)
   set_tests_properties(x360n.dashboard-assets-build-gate PROPERTIES LABELS project TIMEOUT 30)
@@ -101,6 +107,11 @@ x360n_stage_runtime_dlls(x360n_shutdown_probe PLUGIN_TARGETS rexgpu-xenos)
 
 # SDK runtime checks (link rexruntime): behavior our local SDK patches fix
 # (patches/rexglue-sdk/). Synthetic inputs only.
+add_executable(x360n_perf_counter_probe performance/counter_probe.cpp)
+target_link_libraries(x360n_perf_counter_probe PRIVATE rexruntime)
+x360n_stage_runtime_dlls(x360n_perf_counter_probe)
+# A benchmark is an explicit command, never an automatic CTest workload.
+
 add_executable(x360n_sdk_runtime_checks
     sdkcheck/perf_counter_test.cpp
     sdkcheck/synthetic_xex.cpp

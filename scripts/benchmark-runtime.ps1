@@ -23,7 +23,7 @@ New-Item -ItemType Directory -Force $out | Out-Null
 if(!$BinaryDirectory){$BinaryDirectory=Join-Path $root ".local/build/titles/$Title"}
 $exe=Join-Path ([IO.Path]::GetFullPath($BinaryDirectory)) "$Title.exe"
 if(!(Test-Path $exe)){throw "Missing $exe"}
-if(Get-Process -Name $Title -ErrorAction SilentlyContinue){throw 'Title already running; benchmark requires exclusive session'}
+if(Get-Process -Name dash_17559,castle_crashers,forza_horizon -ErrorAction SilentlyContinue){throw 'A reference title is already running; benchmark requires exclusive session'}
 function Inventory([string]$Directory) {
  @(Get-ChildItem -LiteralPath $Directory -File -Recurse | Sort-Object FullName | ForEach-Object {
   @{path=$_.FullName.Substring($Directory.Length).TrimStart('\','/');bytes=$_.Length;sha256=(Get-FileHash -LiteralPath $_.FullName).Hash.ToLower()}
@@ -50,6 +50,14 @@ $csv=Join-Path $out 'frames.csv'
 $argsList=@('--gpu_plugin=xenos','--mnk_mode=true','--log_level=info',"--log_file=$out/rex.log","--game_data_root=$(Join-Path $root $scenario.game_root)","--user_data_root=$user","--cache_root=$user/cache","--perf_log_csv=$csv")+@($scenario.arguments)
 $metadata=[ordered]@{schema=1;title=$Title;label=$Label;utc=[DateTime]::UtcNow.ToString('o');head=(& git -C $root rev-parse HEAD).Trim();sdk_head=(& git -C "$root/external/rexglue-sdk" rev-parse HEAD).Trim();lock_sha256=(Get-FileHash "$root/deps.lock.json").Hash.ToLower();scenario=$scenario;scenario_sha256=(Get-FileHash $ScenarioFile).Hash.ToLower();hardware=$hardware;artifacts=$artifacts;arguments=$argsList;seed=$seedInventory;cache_condition='identical existing cache seed, OS filesystem cache uncontrolled';termination=$null;scene_verified=$false;runtime_origin_approx_ms=$null}
 $metadata | ConvertTo-Json -Depth 15 | Set-Content "$out/environment.json" -Encoding utf8
+$metadata['failure']=$null
+$gameRoot=Join-Path $root $scenario.game_root
+$metadata['original_xex']=@(Get-ChildItem -LiteralPath $gameRoot -Filter '*.xex' -File -Recurse | Sort-Object FullName | ForEach-Object {
+ @{path=$_.FullName.Substring($gameRoot.Length).TrimStart('\','/');sha256=(Get-FileHash $_.FullName).Hash.ToLower()}
+})
+if(Test-Path (Join-Path $BinaryDirectory 'provenance.json')) {
+ $metadata['binary_provenance']=Get-Content (Join-Path $BinaryDirectory 'provenance.json') -Raw | ConvertFrom-Json
+}
 $si=[Diagnostics.ProcessStartInfo]::new();$si.FileName=$exe;$si.WorkingDirectory=$out
 $si.UseShellExecute=$false;$si.CreateNoWindow=$true
 $si.RedirectStandardOutput=$true;$si.RedirectStandardError=$true
@@ -57,10 +65,11 @@ foreach($arg in $argsList){$si.ArgumentList.Add($arg)}
 $p=[Diagnostics.Process]::Start($si);$stdout=$p.StandardOutput.ReadToEndAsync();$stderr=$p.StandardError.ReadToEndAsync()
 $clock=[Diagnostics.Stopwatch]::StartNew();$samples=[Collections.Generic.List[object]]::new();$events=[Collections.Generic.List[object]]::new()
 foreach($event in $scenario.events){$events.Add(@{at=[double]$event.seconds;vk=[int]$event.vk;scan=[int]$event.scan;down=$true;sent=$false});$events.Add(@{at=[double]$event.seconds+[double]$event.hold_seconds;vk=[int]$event.vk;scan=[int]$event.scan;down=$false;sent=$false})}
-$before=$false;$after=$false;$nextSample=0;$runtimeOffset=$null;$lastRuntime=0
+$before=$false;$after=$false;$nextSample=0;$runtimeOffset=$null
 # Only the external 1-Hz RAM sample alignment uses NTFS file creation time.
 # All FPS/CPU reductions use native monotonic timestamps and native CPU totals.
 $processStartUtc=$p.StartTime.ToUniversalTime()
+$metadata['pid']=$p.Id
 try {
  while(!$p.HasExited -and $clock.Elapsed.TotalSeconds -lt $start+$duration+20) {
   $t=$clock.Elapsed.TotalSeconds
@@ -69,18 +78,21 @@ try {
   if($t -ge $nextSample){
    if(Test-Path $csv){
     if($null -eq $runtimeOffset){$runtimeOffset=([IO.File]::GetCreationTimeUtc($csv)-$processStartUtc).TotalSeconds;$metadata.runtime_origin_approx_ms=1000*$runtimeOffset}
-    $line=Get-Content -LiteralPath $csv -Tail 1
-    if($line -match '^(\d+),'){$lastRuntime=[double]$matches[1]/1e6}
    }
    $p.Refresh();$samples.Add(@{seconds=$t;runtime_seconds=if($null -ne $runtimeOffset){$t-$runtimeOffset}else{$null};working_set_bytes=$p.WorkingSet64;private_bytes=$p.PrivateMemorySize64;cpu_ms=$p.TotalProcessorTime.TotalMilliseconds});$nextSample=$t+1
   }
-  if($lastRuntime -ge $start+$duration){
+  # The SDK FILE stream may deny concurrent reads. Read timestamps only after
+  # cleanup; use its creation timestamp plus generous margin to bound capture.
+  if($null -ne $runtimeOffset -and $t-$runtimeOffset -ge $start+$duration+5){
    if(!$NoCapture){Save-BenchmarkWindow $p.Id "$out/after.png";$after=$true}
    break
   }
   Start-Sleep -Milliseconds 40
  }
  if($p.HasExited){$metadata.termination="early_exit:$($p.ExitCode)"}else{$metadata.termination='bounded_forced_stop';$p.Kill($true);[void]$p.WaitForExit(5000)}
+}catch{
+ $metadata.termination='runner_error'
+ $metadata.failure=$_.Exception.Message
 }finally{
  if(!$p.HasExited){$p.Kill($true);[void]$p.WaitForExit(5000)}
  $stdout.Result | Set-Content "$out/stdout.log";$stderr.Result | Set-Content "$out/stderr.log"
@@ -88,13 +100,21 @@ try {
  $events | ConvertTo-Json -Depth 5 | Set-Content "$out/input-events.json"
  $metadata | ConvertTo-Json -Depth 15 | Set-Content "$out/environment.json" -Encoding utf8
 }
-$summary=Get-BenchmarkSummary $csv $start $duration $hardware.logical_processors
+try {
+ if($metadata.failure){throw $metadata.failure}
+ $summary=Get-BenchmarkSummary $csv $start $duration $hardware.logical_processors
+}catch{
+ @{schema=1;title=$Title;label=$Label;window_complete=$false;scene_verified=$false;measurement_error=$_.Exception.Message;termination=$metadata.termination} |
+  ConvertTo-Json | Set-Content "$out/result.json"
+ throw
+}
 $selected=@($samples | Where-Object {$null -ne $_.runtime_seconds -and $_.runtime_seconds -ge $start -and $_.runtime_seconds -le $start+$duration})
 $summary['ram_working_set_peak_bytes']=($selected.working_set_bytes | Measure-Object -Maximum).Maximum
 $summary['private_commit_peak_bytes']=($selected.private_bytes | Measure-Object -Maximum).Maximum
 $summary['title']=$Title;$summary['label']=$Label;$summary['termination']=$metadata.termination
 $summary['scene_verified']=$false
 $summary['log_counts']=@{error=0;warning=0;critical=0}
+$summary['log_count_scope']='Retained rex*.log files only; rotation may discard earlier messages'
 foreach($log in Get-ChildItem $out -Filter 'rex*.log') {
  foreach($level in @('error','warning','critical')) {$summary.log_counts[$level]+=@(Select-String -LiteralPath $log.FullName -Pattern "\[$level\]").Count}
 }

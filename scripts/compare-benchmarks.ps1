@@ -13,7 +13,9 @@ $eb=Get-Content (Join-Path $After 'environment.json') -Raw | ConvertFrom-Json
 $reasons=[Collections.Generic.List[string]]::new()
 if(!$a.window_complete -or !$b.window_complete){$reasons.Add('Incomplete measurement window')}
 if(!$a.scene_verified -or !$b.scene_verified){$reasons.Add('Scene captures not reviewed')}
-if($ea.title -ne $eb.title -or $ea.scenario_sha256 -ne $eb.scenario_sha256){$reasons.Add('Different title/scenario')}
+if($ea.failure -or $eb.failure){$reasons.Add('Runner reported a failure')}
+if($a.counters.swap_failures -gt 0 -or $b.counters.swap_failures -gt 0){$reasons.Add('Failed swaps require investigation')}
+if($ea.title -ne $eb.title -or ($ea.scenario | ConvertTo-Json -Depth 8 -Compress) -ne ($eb.scenario | ConvertTo-Json -Depth 8 -Compress)){$reasons.Add('Different title/scenario')}
 if(($ea.hardware | ConvertTo-Json -Depth 10 -Compress) -ne ($eb.hardware | ConvertTo-Json -Depth 10 -Compress)){$reasons.Add('Different hardware/configuration')}
 $seeda=@($ea.seed | ForEach-Object {"$($_.path):$($_.sha256)"} | Sort-Object)
 $seedb=@($eb.seed | ForEach-Object {"$($_.path):$($_.sha256)"} | Sort-Object)
@@ -21,6 +23,12 @@ if(($seeda -join "`n") -ne ($seedb -join "`n")){$reasons.Add('Different user/cac
 $artifactsA=@($ea.artifacts | Where-Object {$_.file -notin $ChangedArtifacts} | ForEach-Object {"$($_.file):$($_.sha256)"} | Sort-Object)
 $artifactsB=@($eb.artifacts | Where-Object {$_.file -notin $ChangedArtifacts} | ForEach-Object {"$($_.file):$($_.sha256)"} | Sort-Object)
 if(($artifactsA -join "`n") -ne ($artifactsB -join "`n")){$reasons.Add('Unapproved binary/configuration changes')}
+$argsA=@($ea.arguments | Where-Object {$_ -notmatch '^--(log_file|user_data_root|cache_root|perf_log_csv)='} | Sort-Object)
+$argsB=@($eb.arguments | Where-Object {$_ -notmatch '^--(log_file|user_data_root|cache_root|perf_log_csv)='} | Sort-Object)
+if(($argsA -join "`n") -ne ($argsB -join "`n")){$reasons.Add('Different runtime settings')}
+$originalA=@($ea.original_xex | ForEach-Object {"$($_.path):$($_.sha256)"} | Sort-Object)
+$originalB=@($eb.original_xex | ForEach-Object {"$($_.path):$($_.sha256)"} | Sort-Object)
+if(($originalA -join "`n") -ne ($originalB -join "`n")){$reasons.Add('Different original modules')}
 $delta=[ordered]@{}
 foreach($name in @('fps_mean','fps_1pct_low','frame_ms_mean','frame_ms_p95','frame_ms_p99','process_cpu_ms_per_frame','runtime_to_first_swap_ms','ram_working_set_peak_bytes')) {
  $pct=$null
