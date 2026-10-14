@@ -5,6 +5,15 @@ param([Parameter(Mandatory)][string]$Run,
 $ErrorActionPreference='Stop'
 $environment=Get-Content (Join-Path $Run 'environment.json') -Raw | ConvertFrom-Json
 $result=Get-Content (Join-Path $Run 'result.json') -Raw | ConvertFrom-Json
+$provenance=$null
+if($environment.binary_provenance) {
+ # Frozen-binary metadata can include local build paths. Export only the
+ # documented provenance fields, never arbitrary added properties.
+ $provenance=[ordered]@{}
+ foreach($name in @('schema','recorded_utc','utc','head','lock_sha256','runtime','runtime_sha256','aot','clean_checkout','dirty_source','build_log_sha256','description','note')) {
+  if($environment.binary_provenance.PSObject.Properties.Name -contains $name){$provenance[$name]=$environment.binary_provenance.$name}
+ }
+}
 $seedText=(@($environment.seed | ForEach-Object {"$($_.path):$($_.bytes):$($_.sha256)"} | Sort-Object) -join "`n")
 $seedHash=[Convert]::ToHexString([Security.Cryptography.SHA256]::HashData([Text.Encoding]::UTF8.GetBytes($seedText))).ToLower()
 $evidence=@(Get-ChildItem -LiteralPath $Run -File | Where-Object {$_.Extension -in @('.csv','.json','.png','.log')} | Sort-Object Name | ForEach-Object {
@@ -14,8 +23,8 @@ $public=[ordered]@{
  schema=1;title=$environment.title;label=$environment.label;utc=$environment.utc
  workspace_head=$environment.head;sdk_head=$environment.sdk_head
  workspace_lock_sha256=$environment.lock_sha256
- binary_provenance=$environment.binary_provenance
- hardware=$environment.hardware;artifacts=$environment.artifacts;collector=$environment.collector
+ binary_provenance=$provenance
+ hardware=$environment.hardware;artifacts=$environment.artifacts;collector=$environment.collector;reduction=$environment.reduction
  scenario=@{description=$environment.scenario.description;start_seconds=$environment.scenario.start_seconds;duration_seconds=$environment.scenario.duration_seconds;events=$environment.scenario.events}
  settings=@($environment.arguments | Where-Object {$_ -notmatch '^--(game_data_root|log_file|user_data_root|cache_root|perf_log_csv)='})
  seed_inventory_sha256=$seedHash;seed_files=@($environment.seed).Count

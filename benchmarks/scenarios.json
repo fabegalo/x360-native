@@ -20,13 +20,19 @@
       "events": [{"seconds": 15, "vk": 13, "scan": 28, "hold_seconds": 0.12}]
     },
     "forza_horizon": {
-      "description": "Forza opening driving scene, existing connected profile, Start at 30 s; verify scene captures",
+      "description": "Forza opening driving scene, existing connected profile, scripted Start and Single Player confirmations; verify scene captures",
       "game_root": ".local/inputs/titles/forza_horizon/extracted",
       "user_root": ".local/user/forza_horizon",
       "start_seconds": 240,
       "duration_seconds": 30,
       "arguments": [],
-      "events": [{"seconds": 30, "vk": 13, "scan": 28, "hold_seconds": 0.25}]
+      "events": [
+        {"seconds": 30, "vk": 13, "scan": 28, "hold_seconds": 0.25},
+        {"seconds": 45, "vk": 13, "scan": 28, "hold_seconds": 0.25},
+        {"seconds": 55, "vk": 32, "scan": 57, "hold_seconds": 0.25},
+        {"seconds": 110, "vk": 32, "scan": 57, "hold_seconds": 0.25},
+        {"seconds": 190, "vk": 32, "scan": 57, "hold_seconds": 0.25}
+      ]
     }
   }
 }

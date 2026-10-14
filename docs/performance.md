@@ -26,6 +26,14 @@ Intervalos que cruzam as bordas são excluídos dos percentis; o JSON informa
 o CSV cobre início/fim e os intervalos inteiros somam pelo menos 95% da duração
 pedida. Perda maior nas bordas permanece registrada e invalida a comparação,
 em vez de transformar uma longa espera atravessando o início em FPS artificial.
+O gravador termina cada registro com newline. Um último fragmento sem newline,
+possível no cleanup forçado, é descartado e contado em
+`discarded_unterminated_records`. A cobertura continua obrigatória; linhas
+internas inválidas e timestamps não monotônicos não são ignorados.
+Essa validação cobre também aquecimento e linhas completas após a janela;
+timestamps/contadores ausentes, negativos ou não inteiros invalidam a captura.
+CPU ausente continua indisponível. Totais dos contadores usam inteiros de 64 bits
+com verificação de overflow, sem arredondamento intermediário para double.
 
 | Métrica | Definição e limite |
 |---|---|
@@ -59,6 +67,17 @@ pwsh -File scripts/benchmark-runtime.ps1 -Title castle_crashers -Label baseline-
 pwsh -File scripts/benchmark-runtime.ps1 -Title forza_horizon -Label baseline-1
 ```
 
+Na retomada local de 2026-10-14, o prepare anterior do Forza foi interrompido
+durante o build e seu diretório padrão está sem executável. Os artefatos
+congelados, auditados e suficientes para o benchmark estão disponíveis:
+
+```powershell
+pwsh -File scripts/benchmark-runtime.ps1 -Title forza_horizon -Label nova-coleta -BinaryDirectory .local/benchmarks/binaries/sdk72/forza_horizon
+```
+
+Usar `sdk71/forza_horizon` para o outro lado desse A/B. Não copiar executáveis
+congelados para uma preparação incompleta nem emitir recibos a partir deles.
+
 O runner recusa sobrescrita, sessões existentes e cenários acima de 300 s. Usa
 ProcessStartInfo sem console, entrada/captura por scripts locais e PID exato,
 deadline e cleanup em finally. Sem Computer Use. Capturas fora da janela medida.
@@ -91,6 +110,7 @@ forçado é explicitado e não equivale a um retorno normal à dashboard.
 ```powershell
 pwsh -File scripts/compare-benchmarks.ps1 -Before .local/benchmarks/before/dash_17559 -After .local/benchmarks/after/dash_17559 -Output .local/benchmarks/delta.json
 pwsh -File scripts/export-benchmark.ps1 -Run .local/benchmarks/before/dash_17559 -Output .local/benchmarks/public.json
+pwsh -File scripts/reduce-benchmark.ps1 -Run .local/benchmarks/before/dash_17559
 ```
 
 A comparação exige a mesma cena revisada, janela completa, seed, configuração,
@@ -98,10 +118,25 @@ hardware e AOT; permite explicitamente apenas as DLLs de runtime modificadas.
 Exige também hashes dos coletores e dos módulos originais, recusando mudança na
 implementação da medição. Conferir o diff do runtime continua necessário: a lista
 de DLLs permitidas, por si só, não prova que apenas uma otimização mudou.
+`reduce-benchmark.ps1` reprocessa evidência existente sem iniciar o título ou
+alterar o CSV, preserva `result.initial.json` e registra hashes do CSV/redutor.
+Reprocessar ambos os lados com a mesma versão antes de comparar; o comparador
+recusa redutores divergentes. A procedência original da coleta permanece intacta.
+Reduções repetidas preservam o erro de `result.initial.json`, inclusive após a
+recuperação de uma cauda truncada. RAM sem amostras fica null com motivo. O
+comparador recusa métricas obrigatórias ou identidade do executável ausentes,
+além de erros explícitos de redução; dois registros incompletos iguais não
+constituem evidência comparável.
 Falhas de swap invalidam a comparação automática. Os erros de draw/resolve e
 demais logs permanecem no resultado para revisão; contagens abrangem apenas os
 arquivos retidos pela rotação. Exportação mantém métricas e hashes de evidências,
 sem copiar perfis, saves, capturas ou caminhos de entrada para o documento público.
+Execuções com entrada adicional durante calibração recebem `calibration_only=true`
+no ambiente/resultado e são recusadas pelo comparador, mesmo com gameplay visível.
+O cenário Forza confirma Start e Single Player antes da introdução; mede a primeira
+cena dirigível após o carro parar, com HUD e tráfego ativos, sem entrada na janela.
+O roteiro não é um replay determinístico: conferir também posição e estado nas
+capturas antes de aceitar um par, sem atribuir variações de uma execução a ganho.
 
 `x360n_perf_counter_probe` é um alvo explícito, fora dos benchmarks automáticos:
 executa chamadas reais de `rex::perf`, valida totais e registra sete amostras de
@@ -129,8 +164,9 @@ de benchmark durante builds ou outros jogos. Testar apenas regressões pertinent
 
 ## Roadmap priorizado
 
-1. Estabelecer referências, validar coleta/overhead e medir custo de contadores e
-   caches com concorrência sintética e cenários reais.
+1. Base implementada: referências, coleta opcional e patch 0072 contra false
+   sharing dos contadores. Manter A/B de overhead e capturas de referência para
+   cada mudança relevante; investigar caudas de frame antes de alegar ganho.
 2. GPU timestamps D3D12 e memória DXGI, leitura atrasada sem introduzir esperas;
    distinguir GPU busy, pacing, fila e tempo CPU.
 3. Medir fast path do pipeline, uploads/cópias, waits e PSOs; separar cache hit,

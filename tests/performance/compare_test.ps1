@@ -7,10 +7,11 @@ try {
   original_xex=@(@{path='default.xex';sha256='same'});
   collector=@(@{file='benchmark-runtime.ps1';sha256='same'});
   artifacts=@(@{file='game.exe';sha256='same'},@{file='rexruntimerd.dll';sha256='old'})}
- $result=@{window_complete=$true;scene_verified=$true;fps_mean=60;fps_1pct_low=50}
+ $result=@{window_complete=$true;scene_verified=$true;fps_mean=60;fps_1pct_low=50;
+  frame_ms_mean=16.667;frame_ms_p95=18;frame_ms_p99=20;measured_seconds=30;frames=1800;counters=@{swap_failures=0}}
  foreach($side in @('a','b')) {
   $envData | ConvertTo-Json -Depth 10 | Set-Content "$temp/$side/environment.json"
-  $result | ConvertTo-Json | Set-Content "$temp/$side/result.json"
+  $result | ConvertTo-Json -Depth 5 | Set-Content "$temp/$side/result.json"
  }
  $script=Join-Path $PSScriptRoot '../../scripts/compare-benchmarks.ps1'
  & $script -Before "$temp/a" -After "$temp/b" -Output "$temp/comparison.json" | Out-Null
@@ -34,6 +35,24 @@ try {
  & $script -Before "$temp/a" -After "$temp/b" -Output "$temp/comparison.json" | Out-Null
  $r=Get-Content "$temp/comparison.json" -Raw | ConvertFrom-Json
  if('Different original modules' -notin $r.reasons -or 'Failed swaps require investigation' -notin $r.reasons){throw 'Original mismatch/failed swap accepted'}
+ $result.calibration_only=$true
+ $result | ConvertTo-Json -Depth 5 | Set-Content "$temp/b/result.json"
+ & $script -Before "$temp/a" -After "$temp/b" -Output "$temp/comparison.json" | Out-Null
+ $r=Get-Content "$temp/comparison.json" -Raw | ConvertFrom-Json
+ if('Calibration run excluded from comparison' -notin $r.reasons){throw 'Calibration accepted'}
+ $envData.reduction=@{script_sha256='reducer';summary_sha256='new-summary'}
+ $envData | ConvertTo-Json -Depth 10 | Set-Content "$temp/b/environment.json"
+ & $script -Before "$temp/a" -After "$temp/b" -Output "$temp/comparison.json" | Out-Null
+ $r=Get-Content "$temp/comparison.json" -Raw | ConvertFrom-Json
+ if('Different postprocessing implementation' -notin $r.reasons){throw 'Different reduction accepted'}
+ $result.Remove('frame_ms_p99');$result.Remove('counters');$result.measurement_error='fixture failure'
+ $result | ConvertTo-Json -Depth 5 | Set-Content "$temp/b/result.json"
+ $envData.Remove('artifacts');$envData | ConvertTo-Json -Depth 10 | Set-Content "$temp/b/environment.json"
+ & $script -Before "$temp/a" -After "$temp/b" -Output "$temp/comparison.json" | Out-Null
+ $r=Get-Content "$temp/comparison.json" -Raw | ConvertFrom-Json
+ foreach($reason in @('Missing or invalid measurement: frame_ms_p99','Missing swap failure measurement','Missing executable provenance','Reduction reported a failure')) {
+  if($reason -notin $r.reasons){throw "Incomplete evidence accepted: $reason"}
+ }
  'Comparison: identity, settings, reviewed scenes and explicit runtime allowlist passed'
 } finally {
  foreach($side in @('a','b')) {Remove-Item -LiteralPath "$temp/$side/result.json","$temp/$side/environment.json" -ErrorAction SilentlyContinue;Remove-Item -LiteralPath "$temp/$side"}

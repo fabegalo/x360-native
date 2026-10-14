@@ -11,6 +11,20 @@ $b=Get-Content (Join-Path $After 'result.json') -Raw | ConvertFrom-Json
 $ea=Get-Content (Join-Path $Before 'environment.json') -Raw | ConvertFrom-Json
 $eb=Get-Content (Join-Path $After 'environment.json') -Raw | ConvertFrom-Json
 $reasons=[Collections.Generic.List[string]]::new()
+foreach($result in @($a,$b)) {
+ if($result.measurement_error){$reasons.Add('Reduction reported a failure')}
+ foreach($name in @('fps_mean','fps_1pct_low','frame_ms_mean','frame_ms_p95','frame_ms_p99','measured_seconds','frames')) {
+  $value=[double]0
+  if($null -eq $result.$name -or ![double]::TryParse([string]$result.$name,[Globalization.NumberStyles]::Float,[Globalization.CultureInfo]::InvariantCulture,[ref]$value) -or
+     [double]::IsNaN($value) -or [double]::IsInfinity($value) -or $value -le 0){$reasons.Add("Missing or invalid measurement: $name")}
+ }
+ if($null -eq $result.counters.swap_failures){$reasons.Add('Missing swap failure measurement')}
+}
+foreach($envData in @($ea,$eb)) {
+ if(!$envData.artifacts -or !@($envData.artifacts | Where-Object {$_.file -like '*.exe'}).Count){$reasons.Add('Missing executable provenance')}
+ if(!$envData.hardware -or !$envData.scenario -or !$envData.title){$reasons.Add('Missing environment provenance')}
+}
+if($a.calibration_only -or $b.calibration_only -or $ea.calibration_only -or $eb.calibration_only){$reasons.Add('Calibration run excluded from comparison')}
 if(!$a.window_complete -or !$b.window_complete){$reasons.Add('Incomplete measurement window')}
 if(!$a.scene_verified -or !$b.scene_verified){$reasons.Add('Scene captures not reviewed')}
 if($ea.failure -or $eb.failure){$reasons.Add('Runner reported a failure')}
@@ -19,6 +33,9 @@ if(!$ea.collector -or !$eb.collector){$reasons.Add('Missing collector provenance
 $collectorA=@($ea.collector | ForEach-Object {"$($_.file):$($_.sha256)"} | Sort-Object)
 $collectorB=@($eb.collector | ForEach-Object {"$($_.file):$($_.sha256)"} | Sort-Object)
 if(($collectorA -join "`n") -ne ($collectorB -join "`n")){$reasons.Add('Different measurement implementation')}
+if($ea.reduction -or $eb.reduction) {
+ if(!$ea.reduction -or !$eb.reduction -or $ea.reduction.script_sha256 -ne $eb.reduction.script_sha256 -or $ea.reduction.summary_sha256 -ne $eb.reduction.summary_sha256){$reasons.Add('Different postprocessing implementation')}
+}
 if($ea.title -ne $eb.title -or ($ea.scenario | ConvertTo-Json -Depth 8 -Compress) -ne ($eb.scenario | ConvertTo-Json -Depth 8 -Compress)){$reasons.Add('Different title/scenario')}
 if(($ea.hardware | ConvertTo-Json -Depth 10 -Compress) -ne ($eb.hardware | ConvertTo-Json -Depth 10 -Compress)){$reasons.Add('Different hardware/configuration')}
 $seeda=@($ea.seed | ForEach-Object {"$($_.path):$($_.sha256)"} | Sort-Object)

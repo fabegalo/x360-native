@@ -59,6 +59,9 @@ if(WIN32)
   add_test(NAME x360n.benchmark-export COMMAND pwsh -NoProfile -File
     ${CMAKE_CURRENT_SOURCE_DIR}/performance/export_test.ps1)
   set_tests_properties(x360n.benchmark-export PROPERTIES LABELS project TIMEOUT 30)
+  add_test(NAME x360n.benchmark-reduction COMMAND pwsh -NoProfile -File
+    ${CMAKE_CURRENT_SOURCE_DIR}/performance/reduce_test.ps1)
+  set_tests_properties(x360n.benchmark-reduction PROPERTIES LABELS project TIMEOUT 30)
   add_test(NAME x360n.dashboard-assets-build-gate COMMAND powershell -NoProfile -ExecutionPolicy Bypass
     -File ${CMAKE_CURRENT_SOURCE_DIR}/build_isolation/dashboard_assets.ps1)
   set_tests_properties(x360n.dashboard-assets-build-gate PROPERTIES LABELS project TIMEOUT 30)
