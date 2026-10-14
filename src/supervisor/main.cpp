@@ -26,6 +26,7 @@
 #include "sha256.h"
 #include "xex_identity.h"
 #include "session_profile.h"
+#include "renderer_settings.h"
 #include "session_progress.h"
 #include "session_window.h"
 #include "workspace_lease.h"
@@ -636,7 +637,13 @@ int Run(const ProjectPaths& p, const fs::path& exe_in, std::vector<std::string> 
 int Session(const ProjectPaths& paths, const fs::path& manifest, int timeout, bool separate_windows) {
   try {
     WorkspaceLease lease(paths);
+    // Immutable for this session, including Guide and all title transitions.
+    const auto renderer_settings = LoadRendererSettings(paths);
     const auto dashboard = LoadSessionProfile(paths, manifest);
+    CheckSessionRenderer(dashboard.exe, renderer_settings);
+    fmt::print("session: global renderer {}{}\n",
+        renderer_settings.renderer == Renderer::Native ? "Native" : "Xenos",
+        renderer_settings.experimental ? " (explicit experimental development access)" : "");
     std::vector<SessionProfile> targets;
     for (const auto& target : dashboard.launch_targets)
       targets.push_back(LoadSessionProfile(paths, target, false));
@@ -651,7 +658,8 @@ int Session(const ProjectPaths& paths, const fs::path& manifest, int timeout, bo
     for (uint64_t step = 0; ; ++step) {
       // Revalidate the profile and input bytes at every transition.
       active = LoadSessionProfile(paths, active.manifest);
-      auto args = active.args;
+      CheckSessionRenderer(active.exe, renderer_settings);
+      auto args = SessionRendererArguments(active.args, renderer_settings);
       args.push_back("--game_data_root=" + PathUtf8(active.game_root));
       args.push_back("--user_data_root=" + PathUtf8(active.user_root));
       // Identity follows the platform session; game content and saves keep

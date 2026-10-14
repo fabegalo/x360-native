@@ -15,6 +15,7 @@ int main(int argc, char** argv) {
     return std::string{};
   };
   const auto mode = arg("--mode=");
+  if (arg("--gpu_plugin=") != "xenos") return 76;
   const bool dashboard = arg("--role=") == "dashboard";
   const auto root = PathFromUtf8(arg("--game_data_root="));
   if (PathFromUtf8(arg("--x360n_profile_root=")) != root.parent_path() / "user/dashboard") return 75;

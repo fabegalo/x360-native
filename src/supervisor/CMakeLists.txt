@@ -8,6 +8,7 @@ add_library(x360n_core STATIC
     child_process.cpp
     report.cpp
     session_profile.cpp
+    renderer_settings.cpp
     session_window.cpp
     workspace_lease.cpp
 )

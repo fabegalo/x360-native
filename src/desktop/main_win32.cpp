@@ -18,6 +18,7 @@
 #include "environment_win32.h"
 #include "workspace_lease.h"
 #include "sha256.h"
+#include "renderer_settings.h"
 
 namespace fs = std::filesystem;
 using namespace x360n;
@@ -31,7 +32,7 @@ void VerifyDistribution(const fs::path& directory) {
 #endif
 }
 constexpr UINT kFinished = WM_APP + 1, kProgress = WM_APP + 2, kDetected = WM_APP + 3, kInitialized = WM_APP + 4, kInspected = WM_APP + 5, kOpenEnvironment = WM_APP + 6;
-enum { kFolder = 101, kTargets, kCheck, kImport, kPrepare, kLaunch, kDetails, kData, kCancel, kLanguage, kInstall, kStorage, kPrimary, kSettings, kImportFolder, kDashboards, kGames, kHome, kImportPage, kAddContent, kLibrary, kGameList };
+enum { kFolder = 101, kTargets, kCheck, kImport, kPrepare, kLaunch, kDetails, kData, kCancel, kLanguage, kInstall, kStorage, kPrimary, kSettings, kImportFolder, kDashboards, kGames, kHome, kImportPage, kAddContent, kLibrary, kGameList, kRenderer, kNativeDevelopment };
 constexpr COLORREF background = RGB(15, 20, 27), surface = RGB(24, 32, 42), foreground = RGB(236, 241, 247), muted = RGB(157, 171, 189), accent = RGB(169, 231, 154);
 HBRUSH background_brush = CreateSolidBrush(background), surface_brush = CreateSolidBrush(surface);
 bool english = false;
@@ -51,6 +52,8 @@ struct App {
   fs::path self, root, logs, preferences;
   std::string startup_error;
   Environment environment;
+  RendererSettings renderer_settings;
+  HWND renderer_combo{}, renderer_label{}, native_development{};
   std::vector<Target> targets;
   struct CheckedTarget { Inspection state; std::vector<std::string> library; bool added = false; };
   std::vector<CheckedTarget> checked;
@@ -89,7 +92,7 @@ void Post(HWND window, UINT type, const std::string& text) {
   if (!PostMessageW(window, type, 0, reinterpret_cast<LPARAM>(value))) delete value;
 }
 HWND Control(App& a, const wchar_t* cls, const wchar_t* text, DWORD style, int id = 0) {
-  if (std::wstring_view(cls) == L"BUTTON") style |= BS_OWNERDRAW;
+  if (std::wstring_view(cls) == L"BUTTON" && (style & BS_TYPEMASK) != BS_AUTOCHECKBOX) style |= BS_OWNERDRAW;
   auto h = CreateWindowExW(0, cls, text, WS_CHILD | WS_VISIBLE | style, 0, 0, 0, 0,
                          a.window, reinterpret_cast<HMENU>(INT_PTR(id)), GetModuleHandleW(nullptr), nullptr);
   SendMessageW(h, WM_SETFONT, reinterpret_cast<WPARAM>(a.font), TRUE);
@@ -125,6 +128,11 @@ void Layout(App& a) {
   button(kStorage, 308, 448, 208, 44, a.settings);
   button(kData, 532, 448, 208, 44, a.settings);
   button(kCheck, 84, 508, 208, 40, a.settings);
+  move(a.renderer_label, 84, 282, width - 168, 24);
+  move(a.renderer_combo, 84, 312, 280, 100);
+  move(a.native_development, 84, 346, width - 168, 38);
+  for (auto control : {a.renderer_label, a.renderer_combo, a.native_development})
+    ShowWindow(control, a.settings ? SW_SHOW : SW_HIDE);
   move(a.root_text, 84, 406, width - 168, 32); ShowWindow(a.root_text, a.settings ? SW_SHOW : SW_HIDE);
   move(a.combo, 84, 410, width - 168, 210);
   ShowWindow(a.combo, !a.games && !a.settings && !a.show_details && !a.home && !a.import_view && !a.dashboard_indices.empty() ? SW_SHOW : SW_HIDE);
@@ -160,6 +168,8 @@ void Enable(App& a) {
     (a.next_action == kLaunch && a.current.prepared && a.environment.graphics);
   EnableWindow(GetDlgItem(a.window, kPrimary), !a.busy && action_ok);
   EnableWindow(GetDlgItem(a.window, kSettings), !a.busy);
+  EnableWindow(a.renderer_combo, !a.busy && !a.root.empty());
+  EnableWindow(a.native_development, !a.busy && !a.root.empty());
   SendMessageW(a.progress, PBM_SETMARQUEE, a.busy, 40);
   Layout(a);
 }
@@ -290,6 +300,17 @@ void InspectSelected(App& a) {
   }
   Enable(a);
 }
+void UpdateRendererControls(App& a) {
+  SendMessageW(a.renderer_combo, CB_RESETCONTENT, 0, 0);
+  SendMessageW(a.renderer_combo, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"Xenos (ReXGlue)"));
+  if (a.renderer_settings.experimental)
+    SendMessageW(a.renderer_combo, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"Native (Experimental)"));
+  SendMessageW(a.renderer_combo, CB_SETCURSEL, a.renderer_settings.renderer == Renderer::Native ? 1 : 0, 0);
+  SendMessageW(a.native_development, BM_SETCHECK, a.renderer_settings.experimental ? BST_CHECKED : BST_UNCHECKED, 0);
+  Set(a.renderer_label, Tr("Gráficos — renderer global (próxima sessão)", "Graphics — global renderer (next session)"));
+  Set(a.native_development, Tr("Acesso de desenvolvimento: Native experimental; dashboard ainda não suportada",
+                              "Development access: experimental Native; dashboard not yet supported"));
+}
 void Load(App& a, const fs::path& root) {
   if (a.root != root) { a.targets.clear(); a.checked.clear(); }
   a.dashboard_indices.clear(); a.selected = 0;
@@ -298,6 +319,8 @@ void Load(App& a, const fs::path& root) {
   // Hardware probing is independent of navigation between pages.
   if (a.environment.description.empty() || a.root != root) a.environment = CheckEnvironment(root);
   a.root = root;
+  a.renderer_settings = root.empty() ? RendererSettings{} : LoadRendererSettings(ProjectPaths{root});
+  UpdateRendererControls(a);
   SetWindowTextW(a.root_text, root.empty() ? L"Selecione um ambiente existente" : root.c_str());
   if (!root.empty() && a.targets.empty()) { a.targets = ReadCatalog(ProjectPaths{root}); a.checked.clear(); }
   if (a.checked.size() != a.targets.size()) {
@@ -599,6 +622,10 @@ LRESULT CALLBACK WndProc(HWND window, UINT message, WPARAM wp, LPARAM lp) {
         SendMessageW(a->title, WM_SETFONT, reinterpret_cast<WPARAM>(a->title_font), TRUE);
         a->subtitle = Control(*a, L"STATIC", L"", 0);
         a->headline = Control(*a, L"STATIC", L"", 0);
+        a->renderer_label = Control(*a, L"STATIC", L"", 0);
+        a->renderer_combo = Control(*a, L"COMBOBOX", L"", CBS_DROPDOWNLIST | WS_TABSTOP | WS_VSCROLL, kRenderer);
+        a->native_development = Control(*a, L"BUTTON", L"", BS_AUTOCHECKBOX | WS_TABSTOP, kNativeDevelopment);
+        UpdateRendererControls(*a);
         SendMessageW(a->headline, WM_SETFONT, reinterpret_cast<WPARAM>(a->headline_font), TRUE);
         a->footer = Control(*a, L"STATIC", L"", SS_ENDELLIPSIS);
         a->root_text = Control(*a, L"STATIC", L"", SS_PATHELLIPSIS);
@@ -687,6 +714,21 @@ LRESULT CALLBACK WndProc(HWND window, UINT message, WPARAM wp, LPARAM lp) {
         if (id == kData && !a->root.empty()) { auto p = a->root / ".local"; fs::create_directories(p); ShellExecuteW(window, L"open", p.c_str(), nullptr, nullptr, SW_SHOWNORMAL); return 0; }
         if (id == kCancel) { a->cancel = true; Set(a->status, "Cancelando a preparação..."); return 0; }
         if (a->busy) return 0;
+        if (id == kRenderer || id == kNativeDevelopment) {
+          if (a->root.empty()) return 0;
+          auto settings = a->renderer_settings;
+          if (id == kNativeDevelopment) {
+            settings.experimental = SendMessageW(a->native_development, BM_GETCHECK, 0, 0) == BST_CHECKED;
+            if (!settings.experimental) settings.renderer = Renderer::Xenos;
+          } else {
+            if (HIWORD(wp) != CBN_SELCHANGE) return 0;
+            settings.renderer = SendMessageW(a->renderer_combo, CB_GETCURSEL, 0, 0) == 1 ? Renderer::Native : Renderer::Xenos;
+          }
+          SaveRendererSettings(ProjectPaths{a->root}, settings);
+          a->renderer_settings = settings;
+          UpdateRendererControls(*a);
+          return 0;
+        }
         if (id == kHome || id == kDashboards || id == kGames || id == kImportPage || id == kAddContent || id == kLibrary) {
           a->home = id == kHome; a->games = id == kGames || id == kLibrary;
           a->import_view = id == kImportPage || id == kAddContent;

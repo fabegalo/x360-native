@@ -34,7 +34,7 @@ struct Fixture {
           << "[entrypoint]\nfile_path = '../../.local/inputs/" << role << ".xex'\n"
           << "[x360n]\nnative_exe = '../../.local/build/" << role << ".exe'\n"
           << "user_data_root = '../../.local/user/" << role << "'\nxex_sha256 = '" << DigestFile(xex)->sha256 << "'\n"
-          << "args = ['--role=" << role << "', '--mode=" << mode << "']\n";
+          << "args = ['--gpu_plugin=native', '--role=" << role << "', '--mode=" << mode << "']\n";
       if (role == "dashboard") out << "launch_targets = ['../game/game_manifest.toml']\ndashboard_return_flags = [256]\n";
       out.close();
       WriteTestReceipt(paths, role, manifest, exe, {xex});
