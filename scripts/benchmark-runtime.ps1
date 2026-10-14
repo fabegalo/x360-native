@@ -1,0 +1,102 @@
+#requires -Version 7.0
+# Bounded real-title diagnostic. Uses original hash guards, isolated copies of
+# user/cache state, current native artifacts; does not publish preparation receipts.
+param(
+ [Parameter(Mandatory)][ValidateSet('dash_17559','castle_crashers','forza_horizon')][string]$Title,
+ [Parameter(Mandatory)][ValidatePattern('^[a-zA-Z0-9_-]+$')][string]$Label,
+ [string]$ScenarioFile,
+ [string]$BinaryDirectory,
+ [switch]$NoCapture
+)
+$ErrorActionPreference='Stop'
+$root=(Resolve-Path (Join-Path $PSScriptRoot '..')).Path
+. "$PSScriptRoot/benchmark-summary.ps1"
+. "$PSScriptRoot/benchmark-window.ps1"
+if(!$ScenarioFile){$ScenarioFile=Join-Path $root 'benchmarks/scenarios.json'}
+$scenario=(Get-Content $ScenarioFile -Raw | ConvertFrom-Json).scenarios.$Title
+if(!$scenario){throw 'Scenario missing'}
+$start=[double]$scenario.start_seconds;$duration=[double]$scenario.duration_seconds
+if($start -lt 5 -or $duration -lt 5 -or $start+$duration -gt 280){throw 'Scenario plus cleanup must finish within 300 seconds'}
+$out=Join-Path $root ".local/benchmarks/$Label/$Title"
+if(Test-Path $out){throw "Refusing to overwrite $out"}
+New-Item -ItemType Directory -Force $out | Out-Null
+if(!$BinaryDirectory){$BinaryDirectory=Join-Path $root ".local/build/titles/$Title"}
+$exe=Join-Path ([IO.Path]::GetFullPath($BinaryDirectory)) "$Title.exe"
+if(!(Test-Path $exe)){throw "Missing $exe"}
+if(Get-Process -Name $Title -ErrorAction SilentlyContinue){throw 'Title already running; benchmark requires exclusive session'}
+function Inventory([string]$Directory) {
+ @(Get-ChildItem -LiteralPath $Directory -File -Recurse | Sort-Object FullName | ForEach-Object {
+  @{path=$_.FullName.Substring($Directory.Length).TrimStart('\','/');bytes=$_.Length;sha256=(Get-FileHash -LiteralPath $_.FullName).Hash.ToLower()}
+ })
+}
+# Immutable seed reused for both sides; never change real profiles, saves or caches.
+$seed=Join-Path $root ".local/benchmarks/seeds/$Title"
+if(!(Test-Path $seed)) {
+ New-Item -ItemType Directory -Force $seed | Out-Null
+ Get-ChildItem -LiteralPath (Join-Path $root $scenario.user_root) | Copy-Item -Destination $seed -Recurse
+}
+$seedInventory=Inventory $seed
+$user=Join-Path $out 'user';New-Item -ItemType Directory $user | Out-Null
+Get-ChildItem -LiteralPath $seed | Copy-Item -Destination $user -Recurse
+$hardware=[ordered]@{logical_processors=[Environment]::ProcessorCount;os=[Environment]::OSVersion.VersionString;cpu=$null;ram_bytes=$null;gpu=$null;power_plan=$null}
+try {
+ $hardware.cpu=@(Get-CimInstance Win32_Processor | Select-Object Name,NumberOfCores,NumberOfLogicalProcessors)
+ $hardware.ram_bytes=(Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory
+ $hardware.gpu=@(Get-CimInstance Win32_VideoController | Select-Object Name,DriverVersion,CurrentHorizontalResolution,CurrentVerticalResolution,CurrentRefreshRate)
+ $hardware.power_plan=(& powercfg /getactivescheme) -join ' '
+}catch{$hardware['query_error']=$_.Exception.Message}
+$artifacts=@(Get-ChildItem -LiteralPath (Split-Path $exe) -File | Where-Object {$_.Extension -in @('.exe','.dll','.toml')} | ForEach-Object {@{file=$_.Name;sha256=(Get-FileHash $_.FullName).Hash.ToLower()}})
+$csv=Join-Path $out 'frames.csv'
+$argsList=@('--gpu_plugin=xenos','--mnk_mode=true','--log_level=info',"--log_file=$out/rex.log","--game_data_root=$(Join-Path $root $scenario.game_root)","--user_data_root=$user","--cache_root=$user/cache","--perf_log_csv=$csv")+@($scenario.arguments)
+$metadata=[ordered]@{schema=1;title=$Title;label=$Label;utc=[DateTime]::UtcNow.ToString('o');head=(& git -C $root rev-parse HEAD).Trim();sdk_head=(& git -C "$root/external/rexglue-sdk" rev-parse HEAD).Trim();lock_sha256=(Get-FileHash "$root/deps.lock.json").Hash.ToLower();scenario=$scenario;scenario_sha256=(Get-FileHash $ScenarioFile).Hash.ToLower();hardware=$hardware;artifacts=$artifacts;arguments=$argsList;seed=$seedInventory;cache_condition='identical existing cache seed, OS filesystem cache uncontrolled';termination=$null;scene_verified=$false;runtime_origin_approx_ms=$null}
+$metadata | ConvertTo-Json -Depth 15 | Set-Content "$out/environment.json" -Encoding utf8
+$si=[Diagnostics.ProcessStartInfo]::new();$si.FileName=$exe;$si.WorkingDirectory=$out
+$si.UseShellExecute=$false;$si.CreateNoWindow=$true
+$si.RedirectStandardOutput=$true;$si.RedirectStandardError=$true
+foreach($arg in $argsList){$si.ArgumentList.Add($arg)}
+$p=[Diagnostics.Process]::Start($si);$stdout=$p.StandardOutput.ReadToEndAsync();$stderr=$p.StandardError.ReadToEndAsync()
+$clock=[Diagnostics.Stopwatch]::StartNew();$samples=[Collections.Generic.List[object]]::new();$events=[Collections.Generic.List[object]]::new()
+foreach($event in $scenario.events){$events.Add(@{at=[double]$event.seconds;vk=[int]$event.vk;scan=[int]$event.scan;down=$true;sent=$false});$events.Add(@{at=[double]$event.seconds+[double]$event.hold_seconds;vk=[int]$event.vk;scan=[int]$event.scan;down=$false;sent=$false})}
+$before=$false;$after=$false;$nextSample=0;$runtimeOffset=$null;$lastRuntime=0
+# Only the external 1-Hz RAM sample alignment uses NTFS file creation time.
+# All FPS/CPU reductions use native monotonic timestamps and native CPU totals.
+$processStartUtc=$p.StartTime.ToUniversalTime()
+try {
+ while(!$p.HasExited -and $clock.Elapsed.TotalSeconds -lt $start+$duration+20) {
+  $t=$clock.Elapsed.TotalSeconds
+  foreach($event in $events){if(!$event.sent -and $t -ge $event.at){Send-BenchmarkKey $p.Id $event.vk $event.scan $event.down;$event.sent=$true;$event.actual_seconds=$t}}
+  if(!$NoCapture -and !$before -and $t -ge $start-2){Save-BenchmarkWindow $p.Id "$out/before.png";$before=$true}
+  if($t -ge $nextSample){
+   if(Test-Path $csv){
+    if($null -eq $runtimeOffset){$runtimeOffset=([IO.File]::GetCreationTimeUtc($csv)-$processStartUtc).TotalSeconds;$metadata.runtime_origin_approx_ms=1000*$runtimeOffset}
+    $line=Get-Content -LiteralPath $csv -Tail 1
+    if($line -match '^(\d+),'){$lastRuntime=[double]$matches[1]/1e6}
+   }
+   $p.Refresh();$samples.Add(@{seconds=$t;runtime_seconds=if($null -ne $runtimeOffset){$t-$runtimeOffset}else{$null};working_set_bytes=$p.WorkingSet64;private_bytes=$p.PrivateMemorySize64;cpu_ms=$p.TotalProcessorTime.TotalMilliseconds});$nextSample=$t+1
+  }
+  if($lastRuntime -ge $start+$duration){
+   if(!$NoCapture){Save-BenchmarkWindow $p.Id "$out/after.png";$after=$true}
+   break
+  }
+  Start-Sleep -Milliseconds 40
+ }
+ if($p.HasExited){$metadata.termination="early_exit:$($p.ExitCode)"}else{$metadata.termination='bounded_forced_stop';$p.Kill($true);[void]$p.WaitForExit(5000)}
+}finally{
+ if(!$p.HasExited){$p.Kill($true);[void]$p.WaitForExit(5000)}
+ $stdout.Result | Set-Content "$out/stdout.log";$stderr.Result | Set-Content "$out/stderr.log"
+ $samples | ConvertTo-Json -Depth 5 | Set-Content "$out/process-samples.json"
+ $events | ConvertTo-Json -Depth 5 | Set-Content "$out/input-events.json"
+ $metadata | ConvertTo-Json -Depth 15 | Set-Content "$out/environment.json" -Encoding utf8
+}
+$summary=Get-BenchmarkSummary $csv $start $duration $hardware.logical_processors
+$selected=@($samples | Where-Object {$null -ne $_.runtime_seconds -and $_.runtime_seconds -ge $start -and $_.runtime_seconds -le $start+$duration})
+$summary['ram_working_set_peak_bytes']=($selected.working_set_bytes | Measure-Object -Maximum).Maximum
+$summary['private_commit_peak_bytes']=($selected.private_bytes | Measure-Object -Maximum).Maximum
+$summary['title']=$Title;$summary['label']=$Label;$summary['termination']=$metadata.termination
+$summary['scene_verified']=$false
+$summary['log_counts']=@{error=0;warning=0;critical=0}
+foreach($log in Get-ChildItem $out -Filter 'rex*.log') {
+ foreach($level in @('error','warning','critical')) {$summary.log_counts[$level]+=@(Select-String -LiteralPath $log.FullName -Pattern "\[$level\]").Count}
+}
+$summary | ConvertTo-Json -Depth 15 | Set-Content "$out/result.json" -Encoding utf8
+$summary | ConvertTo-Json -Depth 6

@@ -1,5 +1,17 @@
 # Trabalho dos agentes
 
+## Performance-first, correctness-preserving — regra permanente
+
+Performance é objetivo central do x360-native. Toda otimização deve preservar
+correção, compatibilidade, fidelidade gráfica, semântica PowerPC e contratos XAM.
+Medir antes/depois com cenários e condições equivalentes; registrar também
+resultados sem ganho. Evitar overhead desnecessário no runtime; instrumentação
+opcional, desligada normalmente. Melhorias compartilhadas devem beneficiar jogos
+genericamente, sem hacks por título. Avaliar continuamente compilador/AOT, CPU,
+memória, GPU e carregamento conforme gargalos medidos. Preservar C7/C8, perfis,
+saves, biblioteca, isolamento de versões e SDK pinado com patches reproduzíveis.
+Metodologia e roadmap: `docs/performance.md`.
+
 Leia e siga `CLAUDE.md`, especialmente a seção **Trabalho dos agentes — regras
 permanentes**, e `STATUS.md` antes de atuar neste repositório. Essas regras se
 aplicam a todos os agentes: Computer Use exige autorização explícita; testes

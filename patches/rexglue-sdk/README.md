@@ -1,5 +1,18 @@
 # Local patches to ReXGlue SDK
 
+## 0070 — optional runtime benchmarks
+
+Connects the existing `perf_log_csv` setting to Runtime::Setup, makes counters
+opt-in at runtime, and permits instrumentation in Release builds. Records
+monotonic completed guest swap timestamps, Windows aggregate process CPU time,
+D3D12 shader translation / pipeline creation wall time and failed swaps. Reuses
+existing cache/draw/dispatch counters. GPU execution time and VRAM are not
+fabricated. No upstream equivalent identified; SDK revision unchanged.
+
+Focused test: `sdkcheck.Performance counters are optional and preserve concurrent totals`.
+The reduction and scenario runner are covered/documented in `docs/performance.md`.
+The CSV includes failed rendering attempts: cadence is not proof of fidelity.
+
 Base revision: **`f5337cdc947ff6d4c4196737e2c807a48f2a1fc2`** (tag `v0.10.0`), the
 commit pinned in `deps.lock.json` and checked out as the `external/rexglue-sdk`
 submodule. The patches are for that commit only; no upgrade or downgrade.

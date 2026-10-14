@@ -1,5 +1,16 @@
 # Arquitetura do x360-native
 
+## Política permanente de performance
+
+**Performance-first, correctness-preserving.** Performance é objetivo central:
+evitar overhead desnecessário, medir antes/depois e preservar correção,
+compatibilidade e fidelidade dos originais. Otimizações compartilhadas devem
+servir genericamente aos títulos. Avaliar continuamente compilador/AOT, CPU,
+memória, GPU e carregamento, sem modificar semântica PPC/XAM ou enfraquecer
+sincronização. Instrumentação opcional e desligada normalmente. Preservar C7/C8,
+isolamento de versões, SDK pinado e patches reproduzíveis. Metodologia, limites
+das métricas e roadmap: [Performance](performance.md).
+
 Estado em 2026-10-11. Marcadores usados neste documento:
 
 - **[fato]** confirmado no código/execução, com referência;

@@ -1,0 +1,32 @@
+{
+  "schema": 1,
+  "scenarios": {
+    "dash_17559": {
+      "description": "Retail 17559 Home, direct boot, no navigation",
+      "game_root": ".local/inputs/dashboard/17559",
+      "user_root": ".local/user/dash17559",
+      "start_seconds": 25,
+      "duration_seconds": 30,
+      "arguments": ["--dash17559_boot_intro=false"],
+      "events": []
+    },
+    "castle_crashers": {
+      "description": "Castle Crashers title/menu idle after Start; no gameplay claim",
+      "game_root": ".local/inputs/titles/castle_crashers/extracted",
+      "user_root": ".local/user/castle_crashers",
+      "start_seconds": 30,
+      "duration_seconds": 30,
+      "arguments": [],
+      "events": [{"seconds": 15, "vk": 13, "scan": 28, "hold_seconds": 0.12}]
+    },
+    "forza_horizon": {
+      "description": "Forza opening driving scene, existing connected profile, Start at 22 s; verify scene captures",
+      "game_root": ".local/inputs/titles/forza_horizon/extracted",
+      "user_root": ".local/user/forza_horizon",
+      "start_seconds": 145,
+      "duration_seconds": 30,
+      "arguments": [],
+      "events": [{"seconds": 22, "vk": 13, "scan": 28, "hold_seconds": 0.12}]
+    }
+  }
+}

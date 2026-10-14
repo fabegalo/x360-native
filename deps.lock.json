@@ -23,7 +23,7 @@
         "file": "patches/rexglue-sdk/0002-setup-failure-teardown.patch",
         "sha256": "73480fa9b0645d7532f6bfbb471dc964a87590c1fcd5c20946ad38340f769a93",
         "files": {
-          "src/system/runtime.cpp": "b78b9d278441a4f57c6a580cdc51067676846b1f7db9357618f2266fa11b3192"
+          "src/system/runtime.cpp": "e182e32e3e80c7bb308401bdb95348253e31b0c64c3afbaaaa9e5c3beeb37641"
         },
         "base_files": {
           "src/system/runtime.cpp": "f55bd64cf055f7ad288c282883e94feec8fb53631a6807654f7a516ec7ab4af7"
@@ -285,7 +285,7 @@
         "sha256": "60f4dd12ada95717e385d3edf449b5bb3abae69bbc8c7ff05f0bec07bdfa04fb",
         "files": {
           "include/rex/graphics/command_processor.h": "3067c137b6cb05a38195c2e85cf1cf4ef8346097810af2c4a032ca7a4bd929e8",
-          "src/graphics/command_processor.cpp": "28db59225e3065a3d83029d9d3ddbc0de73ede3de56896198fddead50a02ef53"
+          "src/graphics/command_processor.cpp": "98014a045bc4a9403827d0c4de044d7b79b052921f485e0dd8719577d5d0bc91"
         },
         "base_files": {
           "include/rex/graphics/command_processor.h": "eb02162883373a0d2ce5d93bd6c12d9931ff26dc27df473249bec85a186c7cfe",
@@ -304,7 +304,7 @@
           "include/rex/graphics/graphics_system.h": "259d7acc4e6d6dc01eb546cf101389bf4cf352b54c78c392cb4a2a595531c53f",
           "src/graphics/graphics_system.cpp": "fb3256cec0bbf518125245b180508aa40587ab239f2db47aeea6981d1a3174de",
           "include/rex/graphics/command_processor.h": "3067c137b6cb05a38195c2e85cf1cf4ef8346097810af2c4a032ca7a4bd929e8",
-          "src/graphics/command_processor.cpp": "28db59225e3065a3d83029d9d3ddbc0de73ede3de56896198fddead50a02ef53",
+          "src/graphics/command_processor.cpp": "98014a045bc4a9403827d0c4de044d7b79b052921f485e0dd8719577d5d0bc91",
           "src/graphics/d3d12/command_processor.cpp": "1581c55fa2481c78778fb0d584c8785e817ce7472b34a3b43d7f9a19c970ea2e",
           "src/graphics/vulkan/command_processor.cpp": "56d2acf73af58e68fcc9fe0f17bec6816460e2b6c8872851d58da1813d61cb7d",
           "src/audio/sdl/sdl_audio_driver.cpp": "b563c3686247199c274e55531429f3657a4426a76536c1ebe048910c13eef690"
@@ -503,7 +503,7 @@
         },
         "files": {
           "cmake/rexglue_helpers.cmake": "9b4a5408eb1e363be24e509f5b091ae13c48ff827f53020b49deac4472dfbec4",
-          "CMakeLists.txt": "32728b0c02bfd06d6bcddec55fd08f05c013cea1ea7e5dc1e777b195e85b589e"
+          "CMakeLists.txt": "92c180ed4a4f8c3c2ded043733b8365c356f16746bd64b34860e1ab7af578ae7"
         },
         "test": "C5: isolated parallel SDK builds and one atomic staging producer per destination"
       },
@@ -937,6 +937,27 @@
           "src/kernel/xam/xam_content.cpp": "7d8b3c7516223c258024303e3f2d8ce93e34a0c5b85da3495f13dcce977f0033"
         },
         "test": "sdkcheck.Extracted executable metadata preserves disc and arcade identities"
+      },
+      {
+        "test": "sdkcheck.Performance counters are optional and preserve concurrent totals",
+        "files": {
+          "CMakeLists.txt": "92c180ed4a4f8c3c2ded043733b8365c356f16746bd64b34860e1ab7af578ae7",
+          "include/rex/perf/counter.h": "c8820222ffe4c5c639269d949c8be9326a78ab046ad2abf6405ab891835716fc",
+          "src/core/perf/counter.cpp": "8990bfaf2d571ffb8b5a5bd67ccccd247735e331a45a6a20346475f084ebfa13",
+          "src/graphics/command_processor.cpp": "98014a045bc4a9403827d0c4de044d7b79b052921f485e0dd8719577d5d0bc91",
+          "src/graphics/d3d12/pipeline_cache.cpp": "37d0ee1c01c689f941676b19e3f5049c436f1f50c411a2a32720e2bdc7bac80d",
+          "src/system/runtime.cpp": "e182e32e3e80c7bb308401bdb95348253e31b0c64c3afbaaaa9e5c3beeb37641"
+        },
+        "base_files": {
+          "CMakeLists.txt": "32728b0c02bfd06d6bcddec55fd08f05c013cea1ea7e5dc1e777b195e85b589e",
+          "include/rex/perf/counter.h": "ef361db73f4a5a047e8509077151883073ecc9bec09de754740eb903ddcd8a91",
+          "src/core/perf/counter.cpp": "f6b0a852c0a0d33ee4dca86122d12828a62567bbe27aae92c9fce53ac778ce01",
+          "src/graphics/command_processor.cpp": "28db59225e3065a3d83029d9d3ddbc0de73ede3de56896198fddead50a02ef53",
+          "src/graphics/d3d12/pipeline_cache.cpp": "6a4bc1393947ef6124d0a39f44ab332bb8620a4652d81af233b7186530833a9e",
+          "src/system/runtime.cpp": "b78b9d278441a4f57c6a580cdc51067676846b1f7db9357618f2266fa11b3192"
+        },
+        "sha256": "6a4c28788575807d27e0d23f49e9b949da68cb2a2fac0ce952589ed1a61292aa",
+        "file": "patches/rexglue-sdk/0070-optional-runtime-benchmarks.patch"
       }
     ]
   },

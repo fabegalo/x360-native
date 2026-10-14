@@ -50,6 +50,9 @@ target_compile_definitions(x360n_tests PRIVATE X360N_CONTENT_EXE="$<TARGET_FILE:
 add_dependencies(x360n_tests x360n-content)
 catch_discover_tests(x360n_tests TEST_PREFIX "x360n." PROPERTIES LABELS "project" TIMEOUT 120)
 if(WIN32)
+  add_test(NAME x360n.benchmark-summary COMMAND powershell -NoProfile -ExecutionPolicy Bypass
+    -File ${CMAKE_CURRENT_SOURCE_DIR}/performance/summary_test.ps1)
+  set_tests_properties(x360n.benchmark-summary PROPERTIES LABELS project TIMEOUT 30)
   add_test(NAME x360n.dashboard-assets-build-gate COMMAND powershell -NoProfile -ExecutionPolicy Bypass
     -File ${CMAKE_CURRENT_SOURCE_DIR}/build_isolation/dashboard_assets.ps1)
   set_tests_properties(x360n.dashboard-assets-build-gate PROPERTIES LABELS project TIMEOUT 30)
@@ -99,6 +102,7 @@ x360n_stage_runtime_dlls(x360n_shutdown_probe PLUGIN_TARGETS rexgpu-xenos)
 # SDK runtime checks (link rexruntime): behavior our local SDK patches fix
 # (patches/rexglue-sdk/). Synthetic inputs only.
 add_executable(x360n_sdk_runtime_checks
+    sdkcheck/perf_counter_test.cpp
     sdkcheck/synthetic_xex.cpp
     sdkcheck/function_table_test.cpp
     sdkcheck/setup_failure_test.cpp

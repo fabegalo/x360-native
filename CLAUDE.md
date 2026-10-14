@@ -6,6 +6,16 @@ somente itens demonstrados, respeitando o alvo e o limite de cada execução.
 
 ## Objetivo
 
+**Performance-first, correctness-preserving** é política permanente. Performance
+é objetivo central, preservando execução correta e compatível dos originais.
+Evitar overhead desnecessário no runtime; instrumentação opcional e desligada
+normalmente. Toda otimização exige medição antes/depois em condições equivalentes,
+sem reduzir fidelidade, ocultar erros, retirar sincronização necessária ou alterar
+contratos PPC/XAM. Melhorias compartilhadas devem servir genericamente aos jogos,
+sem hacks específicos. Avaliar continuamente compilador/AOT, CPU, memória, GPU e
+carregamento pelos gargalos demonstrados. Preservar C7/C8, isolamento dos originais,
+SDK pinado e patches reproduzíveis. Metodologia e roadmap: `docs/performance.md`.
+
 Plataforma sobre ReXGlue, com Windows x86-64 como primeiro alvo funcional relatado
 e Windows, Linux e macOS como objetivos, com estados separados por sistema e
 arquitetura (x86-64 e ARM64 quando viáveis e implementados): jogos de Xbox 360 recompilados AOT para

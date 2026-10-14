@@ -1,0 +1,262 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -28,7 +28,7 @@ if(REXGLUE_ENABLE_TRACY)
+     add_compile_definitions($<$<NOT:$<CONFIG:Release>>:REXGLUE_ENABLE_PROFILING>)
+ endif()
+ if(REXGLUE_ENABLE_PERF_COUNTERS)
+-    add_compile_definitions($<$<NOT:$<CONFIG:Release>>:REXGLUE_ENABLE_PERF_COUNTERS>)
++    add_compile_definitions(REXGLUE_ENABLE_PERF_COUNTERS)
+ endif()
+ 
+ # Graphics backend selection
+diff --git a/include/rex/perf/counter.h b/include/rex/perf/counter.h
+--- a/include/rex/perf/counter.h
++++ b/include/rex/perf/counter.h
+@@ -11,6 +11,7 @@
+ #pragma once
+ 
+ #include <cstdint>
++#include <chrono>
+ #include <string>
+ 
+ #ifdef REXGLUE_ENABLE_PROFILING
+@@ -48,6 +49,11 @@ enum class CounterId : uint16_t {
+   kTextureCacheMisses,
+   kPipelineCacheHits,
+   kPipelineCacheMisses,
++  kShaderTranslationUs,
++  kShaderTranslations,
++  kPipelineCreationUs,
++  kPipelineCreations,
++  kSwapFailures,
+ 
+   kCount  // sentinel -- must be last
+ };
+@@ -73,6 +79,28 @@ int64_t GetSnapshotCounter(CounterId id);
+ 
+ // Initialize the counter system (zeroes everything). Safe to call multiple times.
+ void Init();
++// Configure before starting workers; disabled in normal execution.
++bool IsEnabled();
++void SetEnabled(bool enabled);
++
++// Wall time summed across calls (including failures), not GPU execution time.
++class ScopedCounterTimer {
++ public:
++  ScopedCounterTimer(CounterId duration, CounterId calls)
++      : duration_(duration), calls_(calls), enabled_(IsEnabled()) {
++    if (enabled_) start_ = std::chrono::steady_clock::now();
++  }
++  ~ScopedCounterTimer() {
++    if (!enabled_) return;
++    IncrementCounter(duration_, std::chrono::duration_cast<std::chrono::microseconds>(
++        std::chrono::steady_clock::now() - start_).count());
++    IncrementCounter(calls_);
++  }
++ private:
++  CounterId duration_, calls_;
++  bool enabled_;
++  std::chrono::steady_clock::time_point start_;
++};
+ 
+ // CSV logging
+ void SetCsvLogPath(const std::string& path);
+@@ -107,8 +135,10 @@ class Profiler {
+     }
+ #endif
+ #ifdef REXGLUE_ENABLE_PERF_COUNTERS
+-    ResetFrameCounters();
+-    WriteCsvFrame();
++    if (IsEnabled()) {
++      ResetFrameCounters();
++      WriteCsvFrame();
++    }
+ #endif
+   }
+   static void Flush() {}
+diff --git a/src/core/perf/counter.cpp b/src/core/perf/counter.cpp
+--- a/src/core/perf/counter.cpp
++++ b/src/core/perf/counter.cpp
+@@ -18,9 +18,14 @@
+ #include <atomic>
+ #include <cstdio>
+ #include <cstring>
++#include <chrono>
++#ifdef _WIN32
++#include <windows.h>
++#endif
+ 
+ REXCVAR_DEFINE_STRING(perf_log_csv, "", "Perf",
+                       "Path to write per-frame CSV log (empty = disabled)");
++REXCVAR_DEFINE_BOOL(perf_counters, false, "Perf", "Enable runtime performance counters");
+ 
+ namespace rex::perf {
+ 
+@@ -30,6 +35,8 @@ constexpr size_t kNumCounters = static_cast<size_t>(CounterId::kCount);
+ 
+ std::array<std::atomic<int64_t>, kNumCounters> g_counters{};
+ std::array<std::atomic<int64_t>, kNumCounters> g_snapshot{};
++std::atomic<bool> g_enabled{false};
++std::chrono::steady_clock::time_point g_start;
+ 
+ constexpr const char* kCounterNames[] = {
+     "frame_time_us",
+@@ -49,6 +56,8 @@ constexpr const char* kCounterNames[] = {
+     "texture_cache_misses",
+     "pipeline_cache_hits",
+     "pipeline_cache_misses",
++    "shader_translation_us", "shader_translations",
++    "pipeline_creation_us", "pipeline_creations", "swap_failures",
+ };
+ static_assert(std::size(kCounterNames) == kNumCounters, "kCounterNames must match CounterId enum");
+ 
+@@ -72,6 +81,7 @@ constexpr bool kIsGauge[] = {
+     false,  // kTextureCacheMisses
+     false,  // kPipelineCacheHits
+     false,  // kPipelineCacheMisses
++    false, false, false, false, false,
+ };
+ static_assert(std::size(kIsGauge) == kNumCounters, "kIsGauge must match CounterId enum");
+ 
+@@ -90,10 +100,12 @@ const char* CounterName(CounterId id) {
+ }
+ 
+ void SetCounter(CounterId id, int64_t value) {
++  if (!IsEnabled()) return;
+   g_counters[static_cast<size_t>(id)].store(value, std::memory_order_relaxed);
+ }
+ 
+ void IncrementCounter(CounterId id, int64_t delta) {
++  if (!IsEnabled()) return;
+   g_counters[static_cast<size_t>(id)].fetch_add(delta, std::memory_order_relaxed);
+ }
+ 
+@@ -119,12 +131,19 @@ int64_t GetSnapshotCounter(CounterId id) {
+ }
+ 
+ void Init() {
++  g_start = std::chrono::steady_clock::now();
+   for (auto& c : g_counters)
+     c.store(0, std::memory_order_relaxed);
+   for (auto& s : g_snapshot)
+     s.store(0, std::memory_order_relaxed);
++  const auto path = REXCVAR_GET(perf_log_csv);
++  SetEnabled(REXCVAR_GET(perf_counters) || !path.empty());
++  SetCsvLogPath(path);
+ }
+ 
++bool IsEnabled() { return g_enabled.load(std::memory_order_relaxed); }
++void SetEnabled(bool enabled) { g_enabled.store(enabled, std::memory_order_relaxed); }
++
+ void SetCsvLogPath(const std::string& path) {
+   if (g_csv_file) {
+     std::fflush(g_csv_file);
+@@ -145,6 +164,7 @@ void SetCsvLogPath(const std::string& path) {
+   }
+ 
+   // Write header
++  std::fputs("runtime_elapsed_us,process_cpu_us,", g_csv_file);
+   for (size_t i = 0; i < kNumCounters; ++i) {
+     if (i > 0)
+       std::fputc(',', g_csv_file);
+@@ -157,6 +177,19 @@ void WriteCsvFrame() {
+   if (!g_csv_file)
+     return;
+ 
++  const auto elapsed = std::chrono::duration_cast<std::chrono::microseconds>(
++      std::chrono::steady_clock::now() - g_start).count();
++  std::fprintf(g_csv_file, "%lld,", static_cast<long long>(elapsed));
++#ifdef _WIN32
++  FILETIME created, exited, kernel, user;
++  if (GetProcessTimes(GetCurrentProcess(), &created, &exited, &kernel, &user)) {
++    const uint64_t cpu = ((uint64_t(kernel.dwHighDateTime) << 32) | kernel.dwLowDateTime) +
++                         ((uint64_t(user.dwHighDateTime) << 32) | user.dwLowDateTime);
++    std::fprintf(g_csv_file, "%llu", static_cast<unsigned long long>(cpu / 10));
++  }
++#endif
++  std::fputc(',', g_csv_file);
++
+   for (size_t i = 0; i < kNumCounters; ++i) {
+     if (i > 0)
+       std::fputc(',', g_csv_file);
+diff --git a/src/graphics/command_processor.cpp b/src/graphics/command_processor.cpp
+--- a/src/graphics/command_processor.cpp
++++ b/src/graphics/command_processor.cpp
+@@ -982,20 +982,7 @@ bool CommandProcessor::ExecutePacketType3_XE_SWAP(memory::RingBuffer* reader, ui
+                                                   uint32_t count) {
+   SCOPE_profile_cpu_f("gpu");
+ 
+-#ifdef REXGLUE_ENABLE_PERF_COUNTERS
+-  {
+-    static uint64_t last_frame_tick = 0;
+-    uint64_t now = rex::chrono::Clock::QueryHostTickCount();
+-    if (last_frame_tick) {
+-      uint64_t freq = rex::chrono::Clock::QueryHostTickFrequency();
+-      int64_t dt_us = static_cast<int64_t>((now - last_frame_tick) * 1000000 / freq);
+-      PROFILE_FRAME_TIME_US(dt_us);
+-      PROFILE_FPS(freq / (now - last_frame_tick));
+-    }
+-    last_frame_tick = now;
+-  }
+-#endif
+-  rex::perf::Profiler::Flip();
++
+ 
+   // Xenia-specific VdSwap hook.
+   // VdSwap will post this to tell us we need to swap the screen/fire an
+@@ -1012,6 +999,22 @@ bool CommandProcessor::ExecutePacketType3_XE_SWAP(memory::RingBuffer* reader, ui
+ 
+   IssueSwap(frontbuffer_ptr, frontbuffer_width, frontbuffer_height);
+ 
++#ifdef REXGLUE_ENABLE_PERF_COUNTERS
++  if (rex::perf::IsEnabled()) {
++    static uint64_t last_frame_tick = 0;
++    uint64_t now = rex::chrono::Clock::QueryHostTickCount();
++    if (last_frame_tick && now > last_frame_tick) {
++      uint64_t freq = rex::chrono::Clock::QueryHostTickFrequency();
++      int64_t dt_us = static_cast<int64_t>((now - last_frame_tick) * 1000000 / freq);
++      PROFILE_FRAME_TIME_US(dt_us);
++      PROFILE_FPS(freq / (now - last_frame_tick));
++    }
++    last_frame_tick = now;
++  }
++#endif
++  if (!last_swap_succeeded_) PERF_counter_inc(kSwapFailures);
++  rex::perf::Profiler::Flip();
++
+   ++counter_;
+   return true;
+ }
+diff --git a/src/graphics/d3d12/pipeline_cache.cpp b/src/graphics/d3d12/pipeline_cache.cpp
+--- a/src/graphics/d3d12/pipeline_cache.cpp
++++ b/src/graphics/d3d12/pipeline_cache.cpp
+@@ -1059,6 +1059,8 @@ bool PipelineCache::TranslateAnalyzedShader(DxbcShaderTranslator& translator,
+                                             D3D12Shader::D3D12Translation& translation,
+                                             IDxbcConverter* dxbc_converter, IDxcUtils* dxc_utils,
+                                             IDxcCompiler* dxc_compiler) {
++  rex::perf::ScopedCounterTimer timer(rex::perf::CounterId::kShaderTranslationUs,
++                                    rex::perf::CounterId::kShaderTranslations);
+   D3D12Shader& shader = static_cast<D3D12Shader&>(translation.shader());
+ 
+   // Perform translation.
+@@ -2677,6 +2679,8 @@ const std::vector<uint32_t>& PipelineCache::GetGeometryShader(GeometryShaderKey
+ 
+ ID3D12PipelineState* PipelineCache::CreateD3D12Pipeline(
+     const PipelineRuntimeDescription& runtime_description) {
++  rex::perf::ScopedCounterTimer timer(rex::perf::CounterId::kPipelineCreationUs,
++                                    rex::perf::CounterId::kPipelineCreations);
+   const PipelineDescription& description = runtime_description.description;
+ 
+   if (runtime_description.pixel_shader != nullptr) {
+diff --git a/src/system/runtime.cpp b/src/system/runtime.cpp
+--- a/src/system/runtime.cpp
++++ b/src/system/runtime.cpp
+@@ -94,6 +94,7 @@ X_STATUS Runtime::Setup(RuntimeConfig config) {
+     return X_STATUS_UNSUCCESSFUL;
+   }
+   instance_ = this;
++  rex::perf::Init();
+ 
+   // x360-native patch 0002 (patches/rexglue-sdk/0002-setup-failure-teardown.patch):
+   // a failed Setup does not tear the Runtime down. The caller may still hold
