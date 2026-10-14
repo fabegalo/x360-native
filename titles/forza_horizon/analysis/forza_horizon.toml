@@ -1,0 +1,40 @@
+# Forza Horizon 4D5309C9, media 2DC7007B, 0.0.0.10.
+# XEX SHA-256 db40df605ade49a612b35a7a24c38f6004bcb17a88ed6b48288de16df9e3987c.
+# Entry seeds only: discovery follows the original instructions; no invented sizes.
+[functions]
+# Frameless getter (lis/ori/lwzx/blr), after an independent two-word thunk.
+0x82B1ABD0 = {}
+# Adjustor thunks: addi r3,272; tail branch to 82B3B8B0/B8/C0/C8.
+0x82B1ABE8 = {}
+0x82B1ABF0 = {}
+0x82B1ABF8 = {}
+0x82B1AC00 = {}
+# addis/addi/blr; followed by zero padding at 82B1AC14.
+0x82B1AC08 = {}
+# Two-word adjustor thunk between .pdata end 82CF87F8 and start 82CF8800.
+0x82CF87F8 = {}
+# Virtual-base adjustment, ori r8,128; tail branch at 82F1ED44 to 82F1F300.
+# Called by b at both 82F029F4 and 82F1EF58.
+0x82F1ED30 = {}
+# Complete frameless entries 82F5CC68, 82F76188 and 82F762A0 are discovered
+# by SDK patch 0068 at the preceding .pdata ends. Their float paths branch
+# back to internal epilogues; none of those epilogues is a separate function.
+# Next tail-call layer reached by the four adjustors above. Three lwz/b
+# wrappers, then rlwinm/add/stfs/stw/blr ending at 82B3B8DC padding.
+0x82B3B8B0 = {}
+0x82B3B8B8 = {}
+0x82B3B8C0 = {}
+0x82B3B8C8 = {}
+# Original context-save entry reached by the one-instruction thunk 830EBE90.
+# lwz r4,256(r13); lwz r5,356(r4); save CR/LR, GPR/FPR/VMX state.
+# Discovered during emission as an unresolved tail target despite Validate passing.
+0x830ED910 = {}
+
+# cmplwi cr6,r4,9 at 826B5D3C; mr r30,r4 at 826B5D38. The automatic
+# bounds analysis loses the alias and reads beyond the ten bytes at 82041470.
+# Each byte is multiplied by four and added to 826B5D70 (original bctr).
+[[switch_tables]]
+address = 0x826B5D6C
+register = 30
+labels = [0x826B5D70, 0x826B5DFC, 0x826B5D70, 0x826B5DFC, 0x826B5D70,
+          0x826B5DFC, 0x826B5D70, 0x826B5DFC, 0x826B5D70, 0x826B5DFC]

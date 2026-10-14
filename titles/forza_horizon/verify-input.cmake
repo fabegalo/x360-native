@@ -1,0 +1,12 @@
+# The analysis seeds apply only to this exact original executable.
+if(NOT DEFINED XEX)
+    set(XEX "${CMAKE_CURRENT_LIST_DIR}/../../.local/inputs/titles/forza_horizon/extracted/default.xex")
+endif()
+set(expected db40df605ade49a612b35a7a24c38f6004bcb17a88ed6b48288de16df9e3987c)
+if(NOT EXISTS "${XEX}")
+    message(FATAL_ERROR "Forza Horizon 4D5309C9/2DC7007B/0.0.0.10: default.xex missing")
+endif()
+file(SHA256 "${XEX}" actual)
+if(NOT actual STREQUAL expected)
+    message(FATAL_ERROR "Forza Horizon analysis requires XEX ${expected}; found ${actual}")
+endif()

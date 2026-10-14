@@ -1,0 +1,19 @@
+label = "Forza Horizon 0.0.0.10 (experimental)"
+label_en = "Forza Horizon 0.0.0.10 (experimental)"
+limitations = "Preparação experimental; execução, menu e gameplay ainda não validados. Inicie pela My Games original."
+limitations_en = "Experimental preparation; runtime, menu and gameplay not yet validated. Launch through original My Games."
+kind = "game"
+session = false
+importable = true
+inventory = "assets.sha256"
+runtime_files = ["rexruntimerd.dll", "rexgpu-xenosrd.dll", "TracyClientrd.dll"]
+[[files]]
+path = "default.xex"
+source_name = "default.xex"
+sha256 = "db40df605ade49a612b35a7a24c38f6004bcb17a88ed6b48288de16df9e3987c"
+[library]
+title_id = "4D5309C9"
+content_type = "00004000"
+file_name = "83DFC7D0B58B804232385DE6F794D9ACB92B89A3"
+display_name = "Forza Horizon"
+source_sha256 = "83dfc7d0b58b804232385de6f794d9acb92b89a37cf13da14b824b286c824490"
