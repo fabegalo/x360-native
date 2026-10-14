@@ -17,6 +17,7 @@ int main(int argc, char** argv) {
   const auto mode = arg("--mode=");
   const bool dashboard = arg("--role=") == "dashboard";
   const auto root = PathFromUtf8(arg("--game_data_root="));
+  if (PathFromUtf8(arg("--x360n_profile_root=")) != root.parent_path() / "user/dashboard") return 75;
   const auto output = PathFromUtf8(arg("--x360n_handoff_out="));
   const auto input = arg("--x360n_handoff_in=");
   unsigned step = 0;

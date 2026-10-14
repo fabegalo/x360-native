@@ -61,6 +61,9 @@ TEST_CASE("session profile and launch request preserve Unicode paths", "[session
   LaunchRequest request; request.path = PathUtf8(xex);
   CHECK(MatchesLaunch(profile, request));
   CHECK(PathFromUtf8(PathUtf8(dir)) == dir);
+  // A title manifest cannot replace the profile authority selected by Session.
+  std::ofstream(manifest, std::ios::app) << "args = ['--x360n_profile_root=other-user']\n";
+  CHECK_THROWS(LoadSessionProfile(ProjectPaths{dir}, manifest, false));
   fs::remove_all(dir.parent_path());
 }
 

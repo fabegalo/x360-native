@@ -18,6 +18,7 @@ extern "C" REX_FUNC(__imp__XamLoaderTerminateTitle);
 extern "C" REX_FUNC(__imp__ExRegisterTitleTerminateNotification);
 REXCVAR_DECLARE(std::string, x360n_handoff_in);
 REXCVAR_DECLARE(std::string, x360n_handoff_out);
+REXCVAR_DECLARE(std::string, x360n_profile_root);
 
 namespace {
 std::vector<uint32_t> termination_calls;
@@ -37,6 +38,41 @@ void TerminationCallback(PPCContext& ctx, uint8_t* base) {
     __imp__ExRegisterTitleTerminateNotification(ctx, base);
   }
 }
+}
+
+TEST_CASE("session identity follows the dashboard store without replacing title profiles", "[sdk][title-return]") {
+  x360n::test::Workdir work("x360n_title_return", "profile-source");
+  const auto platform = work.dir / "platform";
+  const auto game = work.dir / "game";
+  std::filesystem::create_directories(platform);
+  std::filesystem::create_directories(game);
+  rex::system::xam::UserProfile owner;
+  REQUIRE(owner.InitializeLocal(platform));
+  uint64_t owner_id = 0;
+  REQUIRE(owner.CreateLocal("Session", &owner_id) == 0);
+  REQUIRE(owner.SetLocalSession(owner_id) == 0);
+  rex::system::xam::UserProfile local;
+  REQUIRE(local.InitializeLocal(game));
+  uint64_t local_id = 0;
+  REQUIRE(local.CreateLocal("Preserved", &local_id) == 0);
+  REQUIRE(local.SetLocalSession(local_id) == 0);
+  rex::Runtime rt(game, game);
+  rex::RuntimeConfig config{}; config.tool_mode = true; config.kernel_init = rex::kernel::InitializeKernel;
+  REQUIRE(rt.Setup(std::move(config)) == X_STATUS_SUCCESS);
+  REQUIRE(rt.kernel_state()->user_profile()->identity().xuid == local_id);
+  const auto previous = REXCVAR_GET(x360n_profile_root);
+  struct Reset { std::string value; ~Reset() { REXCVAR_SET(x360n_profile_root, value); } } reset{previous};
+  REXCVAR_SET(x360n_profile_root, platform.string());
+  x360n::ImportLaunchData(rt);
+  CHECK(rt.kernel_state()->user_profile()->identity().xuid == owner_id);
+  CHECK(rt.kernel_state()->user_profile()->identity().signin_state == 1);
+  CHECK(rt.user_data_root() == game);
+  REQUIRE(rt.kernel_state()->user_profile()->SetLocalSession(0) == 0);
+  REQUIRE(owner.InitializeLocal(platform));
+  CHECK(owner.identity().signin_state == 0);
+  REQUIRE(local.InitializeLocal(game));
+  CHECK(local.identity().xuid == local_id);
+  CHECK(local.identity().signin_state == 1);
 }
 
 TEST_CASE("title termination dispatches registered guest callbacks before stopping threads",

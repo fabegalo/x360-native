@@ -11,6 +11,7 @@
 
 REXCVAR_DEFINE_STRING(x360n_handoff_out, "", "Supervisor", "Per-run host handoff output");
 REXCVAR_DEFINE_STRING(x360n_handoff_in, "", "Supervisor", "Previous title's launch data");
+REXCVAR_DEFINE_STRING(x360n_profile_root, "", "Supervisor", "Profile store owned by this dashboard session");
 
 namespace x360n {
 namespace {
@@ -32,6 +33,15 @@ void Publish(const std::string& output, const LaunchRequest& request) {
 bool IsDashboardReturn() { return dashboard_return; }
 void ImportLaunchData(rex::Runtime& runtime) {
   dashboard_return = false;
+  const auto profile_root = REXCVAR_GET(x360n_profile_root);
+  if (!profile_root.empty()) {
+    auto* user = runtime.kernel_state()->user_profile();
+    if (!user->InitializeLocal(Utf8Path(profile_root)))
+      REX_FATAL("Invalid dashboard session profile store: {}", profile_root);
+    const auto identity = user->identity();
+    REXLOG_INFO("[supervisor] session profile xuid={:016X} state={} root={}",
+        identity.xuid, identity.signin_state, profile_root);
+  }
   auto input = REXCVAR_GET(x360n_handoff_in);
   if (input.empty()) return;
   LaunchRequest request;

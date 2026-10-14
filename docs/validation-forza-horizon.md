@@ -27,6 +27,16 @@ the original My Games list consumes keystrokes, so left-stick taps did not move
 its selection. The earlier diagnostic attempts selected the first XBLA entry;
 they are not Forza launches.
 
+Session identity now comes from the dashboard's profile store for every child,
+while each title retains its content/save root and untouched standalone profile
+store. The root is reserved against manifest argument overrides. Focused checks:
+17 identity assertions, 48 original-return assertions, 47 session-contract
+assertions and 895 assertions across 80 synthetic process transitions. These
+process tests establish routing/persistence contracts, not a real game cycle.
+Logs: `.local/logs/forza-session-identity-test.log`,
+`forza-handoff-regression.log`, `forza-session-tests.log` and
+`forza-session-process-test.log` in the same directory.
+
 Original input: Title ID `4D5309C9`, media `2DC7007B`, version/base `0.0.0.10`,
 20,856,832-byte XEX, SHA-256
 `db40df605ade49a612b35a7a24c38f6004bcb17a88ed6b48288de16df9e3987c`.

@@ -654,6 +654,9 @@ int Session(const ProjectPaths& paths, const fs::path& manifest, int timeout, bo
       auto args = active.args;
       args.push_back("--game_data_root=" + PathUtf8(active.game_root));
       args.push_back("--user_data_root=" + PathUtf8(active.user_root));
+      // Identity follows the platform session; game content and saves keep
+      // their existing title roots. Never copy or replace a game's profiles.
+      args.push_back("--x360n_profile_root=" + PathUtf8(dashboard.user_root));
       if (!incoming.empty()) args.push_back("--x360n_handoff_in=" + PathUtf8(incoming));
       fs::path handoff;
       std::chrono::milliseconds child_lifetime{};
