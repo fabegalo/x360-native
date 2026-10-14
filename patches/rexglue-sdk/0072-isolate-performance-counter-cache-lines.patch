@@ -1,0 +1,146 @@
+diff --git a/src/core/perf/counter.cpp b/src/core/perf/counter.cpp
+--- a/src/core/perf/counter.cpp
++++ b/src/core/perf/counter.cpp
+@@ -33,7 +33,9 @@ namespace {
+ 
+ constexpr size_t kNumCounters = static_cast<size_t>(CounterId::kCount);
+ 
+-std::array<std::atomic<int64_t>, kNumCounters> g_counters{};
++// Independent writers must not contend on the same cache line.
++struct alignas(64) CounterSlot { std::atomic<int64_t> value{0}; };
++std::array<CounterSlot, kNumCounters> g_counters{};
+ std::array<std::atomic<int64_t>, kNumCounters> g_snapshot{};
+ std::atomic<bool> g_enabled{false};
+ std::chrono::steady_clock::time_point g_start;
+@@ -101,26 +103,26 @@ const char* CounterName(CounterId id) {
+ 
+ void SetCounter(CounterId id, int64_t value) {
+   if (!IsEnabled()) return;
+-  g_counters[static_cast<size_t>(id)].store(value, std::memory_order_relaxed);
++  g_counters[static_cast<size_t>(id)].value.store(value, std::memory_order_relaxed);
+ }
+ 
+ void IncrementCounter(CounterId id, int64_t delta) {
+   if (!IsEnabled()) return;
+-  g_counters[static_cast<size_t>(id)].fetch_add(delta, std::memory_order_relaxed);
++  g_counters[static_cast<size_t>(id)].value.fetch_add(delta, std::memory_order_relaxed);
+ }
+ 
+ int64_t GetCounter(CounterId id) {
+-  return g_counters[static_cast<size_t>(id)].load(std::memory_order_relaxed);
++  return g_counters[static_cast<size_t>(id)].value.load(std::memory_order_relaxed);
+ }
+ 
+ void ResetFrameCounters() {
+   for (size_t i = 0; i < kNumCounters; ++i) {
+     if (kIsGauge[i]) {
+       // Gauges: snapshot the current value, don't zero
+-      g_snapshot[i].store(g_counters[i].load(std::memory_order_relaxed), std::memory_order_relaxed);
++      g_snapshot[i].store(g_counters[i].value.load(std::memory_order_relaxed), std::memory_order_relaxed);
+     } else {
+       // Accumulators: snapshot and zero for next frame
+-      g_snapshot[i].store(g_counters[i].exchange(0, std::memory_order_relaxed),
++      g_snapshot[i].store(g_counters[i].value.exchange(0, std::memory_order_relaxed),
+                           std::memory_order_relaxed);
+     }
+   }
+@@ -133,7 +135,7 @@ int64_t GetSnapshotCounter(CounterId id) {
+ void Init() {
+   g_start = std::chrono::steady_clock::now();
+   for (auto& c : g_counters)
+-    c.store(0, std::memory_order_relaxed);
++    c.value.store(0, std::memory_order_relaxed);
+   for (auto& s : g_snapshot)
+     s.store(0, std::memory_order_relaxed);
+   const auto path = REXCVAR_GET(perf_log_csv);
+diff --git a/src/ui/overlay/debug_overlay.cpp b/src/ui/overlay/debug_overlay.cpp
+--- a/src/ui/overlay/debug_overlay.cpp
++++ b/src/ui/overlay/debug_overlay.cpp
+@@ -42,47 +42,46 @@ void DebugOverlayDialog::OnDraw(ImGuiIO& io) {
+ #ifdef REXGLUE_ENABLE_PERF_COUNTERS
+     ImGui::Separator();
+ 
+-    // Frame time graph
+-    auto ft_us = rex::perf::GetSnapshotCounter(rex::perf::CounterId::kFrameTimeUs);
+-    float ft_ms = static_cast<float>(ft_us) / 1000.0f;
+-    frame_time_history_[frame_history_idx_] = ft_ms;
+-    frame_history_idx_ = (frame_history_idx_ + 1) % kFrameHistorySize;
+-    ImGui::PlotLines("##ft", frame_time_history_.data(), kFrameHistorySize,
+-                     static_cast<int>(frame_history_idx_), "Frame (ms)", 0.0f, 50.0f,
+-                     ImVec2(200, 40));
+-
+-    // GPU
+-    ImGui::Text("Draw: %" PRId64 "  Stalls: %" PRId64 "  Verts: %" PRId64,
+-                rex::perf::GetSnapshotCounter(rex::perf::CounterId::kDrawCalls),
+-                rex::perf::GetSnapshotCounter(rex::perf::CounterId::kCommandBufferStalls),
+-                rex::perf::GetSnapshotCounter(rex::perf::CounterId::kVerticesProcessed));
+-
+-    // Audio
+-    ImGui::Text("XMA: %" PRId64 "  Lat: %.1fms  BufQ: %" PRId64,
+-                rex::perf::GetSnapshotCounter(rex::perf::CounterId::kXmaFramesDecoded),
+-                static_cast<float>(
+-                    rex::perf::GetSnapshotCounter(rex::perf::CounterId::kAudioFrameLatencyUs)) /
+-                    1000.0f,
+-                rex::perf::GetSnapshotCounter(rex::perf::CounterId::kBufferQueueDepth));
+-
+-    // Dispatch
+-    ImGui::Text("Dispatch: %" PRId64 "  IRQ: %" PRId64,
+-                rex::perf::GetSnapshotCounter(rex::perf::CounterId::kFunctionsDispatched),
+-                rex::perf::GetSnapshotCounter(rex::perf::CounterId::kInterruptDispatches));
+-
+-    // Threading
+-    ImGui::Text("Threads: %" PRId64 "  APC: %" PRId64 "  Contention: %" PRId64,
+-                rex::perf::GetSnapshotCounter(rex::perf::CounterId::kActiveThreads),
+-                rex::perf::GetSnapshotCounter(rex::perf::CounterId::kApcQueueDepth),
+-                rex::perf::GetSnapshotCounter(rex::perf::CounterId::kCriticalRegionContentions));
+-
+-    // Caches
+-    auto tex_h = rex::perf::GetSnapshotCounter(rex::perf::CounterId::kTextureCacheHits);
+-    auto tex_m = rex::perf::GetSnapshotCounter(rex::perf::CounterId::kTextureCacheMisses);
+-    auto pip_h = rex::perf::GetSnapshotCounter(rex::perf::CounterId::kPipelineCacheHits);
+-    auto pip_m = rex::perf::GetSnapshotCounter(rex::perf::CounterId::kPipelineCacheMisses);
+-    ImGui::Text("TexCache: %" PRId64 "/%" PRId64 "  PipeCache: %" PRId64 "/%" PRId64, tex_h,
+-                tex_h + tex_m, pip_h, pip_h + pip_m);
++    if (!rex::perf::IsEnabled()) {
++      ImGui::TextUnformatted("Counters disabled (--perf_counters=true)");
++    } else {
++      // Frame time graph
++      auto ft_us = rex::perf::GetSnapshotCounter(rex::perf::CounterId::kFrameTimeUs);
++      float ft_ms = static_cast<float>(ft_us) / 1000.0f;
++      frame_time_history_[frame_history_idx_] = ft_ms;
++      frame_history_idx_ = (frame_history_idx_ + 1) % kFrameHistorySize;
++      ImGui::PlotLines("##ft", frame_time_history_.data(), kFrameHistorySize,
++                       static_cast<int>(frame_history_idx_), "Frame (ms)", 0.0f, 50.0f,
++                       ImVec2(200, 40));
++      // GPU
++      ImGui::Text("Draw: %" PRId64 "  Stalls: %" PRId64 "  Verts: %" PRId64,
++                  rex::perf::GetSnapshotCounter(rex::perf::CounterId::kDrawCalls),
++                  rex::perf::GetSnapshotCounter(rex::perf::CounterId::kCommandBufferStalls),
++                  rex::perf::GetSnapshotCounter(rex::perf::CounterId::kVerticesProcessed));
++      // Audio
++      ImGui::Text("XMA: %" PRId64 "  Lat: %.1fms  BufQ: %" PRId64,
++                  rex::perf::GetSnapshotCounter(rex::perf::CounterId::kXmaFramesDecoded),
++                  static_cast<float>(
++                      rex::perf::GetSnapshotCounter(rex::perf::CounterId::kAudioFrameLatencyUs)) /
++                      1000.0f,
++                  rex::perf::GetSnapshotCounter(rex::perf::CounterId::kBufferQueueDepth));
++      // Dispatch
++      ImGui::Text("Dispatch: %" PRId64 "  IRQ: %" PRId64,
++                  rex::perf::GetSnapshotCounter(rex::perf::CounterId::kFunctionsDispatched),
++                  rex::perf::GetSnapshotCounter(rex::perf::CounterId::kInterruptDispatches));
++      // Threading
++      ImGui::Text("Threads: %" PRId64 "  APC: %" PRId64 "  Contention: %" PRId64,
++                  rex::perf::GetSnapshotCounter(rex::perf::CounterId::kActiveThreads),
++                  rex::perf::GetSnapshotCounter(rex::perf::CounterId::kApcQueueDepth),
++                  rex::perf::GetSnapshotCounter(rex::perf::CounterId::kCriticalRegionContentions));
++      // Caches
++      auto tex_h = rex::perf::GetSnapshotCounter(rex::perf::CounterId::kTextureCacheHits);
++      auto tex_m = rex::perf::GetSnapshotCounter(rex::perf::CounterId::kTextureCacheMisses);
++      auto pip_h = rex::perf::GetSnapshotCounter(rex::perf::CounterId::kPipelineCacheHits);
++      auto pip_m = rex::perf::GetSnapshotCounter(rex::perf::CounterId::kPipelineCacheMisses);
++      ImGui::Text("TexCache: %" PRId64 "/%" PRId64 "  PipeCache: %" PRId64 "/%" PRId64, tex_h,
++                  tex_h + tex_m, pip_h, pip_h + pip_m);
++    }
+ #endif
+   }
+   ImGui::End();

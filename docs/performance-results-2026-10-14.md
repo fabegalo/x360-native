@@ -112,8 +112,33 @@ O mesmo candidato passou 15 asserções em dois casos, incluindo snapshots duran
 escritas concorrentes, sem perda de eventos. Log local:
 `.local/logs/perf-counter-candidate-tests.log`.
 
-Integração no SDK compartilhado e A/B dos jogos ainda pendentes enquanto a
-validação independente do Guide reserva a GPU e modifica a pilha de patches.
+Após o commit `dd0e9b6` e o ciclo final do Guide, o candidato foi integrado
+como patch 0072, sem mudar o SDK pinado. A/B dos jogos registrado abaixo.
+
+## Comparação das DLLs reais (0071 → 0072)
+
+Mesmo `counter_probe.exe`, mesmo TracyClient e mesmas opções; apenas a DLL
+`rexruntimerd.dll` muda. Ordem A/B/B/A, sete repetições por execução e 14 por
+variante/caso. Os testes com a DLL otimizada passaram 15 asserções em dois casos,
+incluindo snapshots concorrentes sem perda. Log:
+`.local/logs/perf72-dll-tests.log`. O build incremental compilou os dois arquivos
+alterados e relinkou o runtime; não usou a DLL do experimento de fontes.
+
+| Contadores / writers | Antes (ns/evento, mediana) | Depois | Variação |
+|---|---:|---:|---:|
+| Desligados / 1 | 2,37635 | 2,36425 | −0,51% |
+| Desligados / 4 | 0,63274 | 0,61055 | −3,51% |
+| Ligados / 1 | 2,59000 | 2,55150 | −1,49% |
+| Ligados / 4 independentes | 11,99665 | 0,65208 | **−94,56%** |
+
+Na carga concorrente habilitada, todas as amostras depois (0,643–0,665) ficaram
+abaixo das anteriores (11,532–12,484). As variações pequenas dos outros casos
+não fundamentam alegação de ganho. São nanossegundos amortizados por evento
+(tempo total / total de eventos), não latência de uma chamada isolada.
+O resultado demonstra redução do custo da instrumentação habilitada,
+sem alegar ganho de FPS ou da execução normal com contadores desligados.
+Dados integrais e hashes:
+[comparação das DLLs](../benchmarks/results/2026-10-14/counter-dll-comparison.json).
 
 O build nativo Forza com instrumentação passou. Os testes dos contadores passaram
 15 asserções em dois casos: desabilitação, soma com writers concorrentes,

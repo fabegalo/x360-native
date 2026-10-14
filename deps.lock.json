@@ -943,7 +943,7 @@
                                             "files":  {
                                                           "CMakeLists.txt":  "92c180ed4a4f8c3c2ded043733b8365c356f16746bd64b34860e1ab7af578ae7",
                                                           "include/rex/perf/counter.h":  "c8820222ffe4c5c639269d949c8be9326a78ab046ad2abf6405ab891835716fc",
-                                                          "src/core/perf/counter.cpp":  "8990bfaf2d571ffb8b5a5bd67ccccd247735e331a45a6a20346475f084ebfa13",
+                                                          "src/core/perf/counter.cpp":  "df95e01382113fcd10e5698b8f6985f7d14486a834e542be95dfc1e59b611268",
                                                           "src/graphics/command_processor.cpp":  "98014a045bc4a9403827d0c4de044d7b79b052921f485e0dd8719577d5d0bc91",
                                                           "src/graphics/d3d12/pipeline_cache.cpp":  "37d0ee1c01c689f941676b19e3f5049c436f1f50c411a2a32720e2bdc7bac80d",
                                                           "src/system/runtime.cpp":  "e182e32e3e80c7bb308401bdb95348253e31b0c64c3afbaaaa9e5c3beeb37641"
@@ -981,6 +981,19 @@
                                                           "src/system/xthread.cpp":  "c388661f37b91c04168e2a154f106a7791e7ed6dc9f46269e9b66751acd7c8ba"
                                                       },
                                             "test":  "sdkcheck.original HUD reboot preserves its packed dashboard context"
+                                        },
+                                        {
+                                            "sha256":  "c30ea6bb25868a25abd831c65fe3bf68b85226ba0316e03ee157e1bfe59dcb83",
+                                            "base_files":  {
+                                                               "src/core/perf/counter.cpp":  "8990bfaf2d571ffb8b5a5bd67ccccd247735e331a45a6a20346475f084ebfa13",
+                                                               "src/ui/overlay/debug_overlay.cpp":  "3b3c10f6f2ba1b4077f886a40eb3013ddceac2234481f0a1cae169fa89a1b6d7"
+                                                           },
+                                            "files":  {
+                                                          "src/core/perf/counter.cpp":  "df95e01382113fcd10e5698b8f6985f7d14486a834e542be95dfc1e59b611268",
+                                                          "src/ui/overlay/debug_overlay.cpp":  "22728612119fd3a63cb10dd890a77b86cca25f019d7b0f6bf38a90b0df2033dc"
+                                                      },
+                                            "file":  "patches/rexglue-sdk/0072-isolate-performance-counter-cache-lines.patch",
+                                            "test":  "sdkcheck.Performance counters; sdkcheck.Performance snapshots"
                                         }
                                     ]
                     },

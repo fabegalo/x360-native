@@ -502,3 +502,19 @@ files replay from their recorded base hashes to the recorded final hashes.
 The 17559 host separately initializes the original audio CRT lock. Evidence and
 the distinction between direct diagnostics and full UI acceptance are recorded
 in `docs/validation-forza-horizon.md`.
+
+## 0072 — Isolate performance counter cache lines
+
+Independent runtime counters now occupy separate 64-byte aligned slots on the
+measured x64 target. This removes false sharing between independent writers;
+the atomics, memory orders, exact sums, snapshot exchanges and gauge semantics
+are unchanged. Same-counter contention remains. The debug overlay explicitly
+labels counters disabled instead of displaying fabricated zero measurements.
+
+No upstream equivalent identified; the SDK pin is unchanged. Focused
+`sdkcheck.Performance` tests cover disabled counters, concurrent sums, gauges,
+CSV and snapshots while writers are active. The before/after experiment uses
+identical probe executables and frozen title binaries, changing only the runtime
+DLL. Results and limits are in `docs/performance-results-2026-10-14.md`.
+This reduces instrumentation overhead; it does not establish an FPS improvement
+with instrumentation disabled.
