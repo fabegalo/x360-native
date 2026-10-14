@@ -14,10 +14,12 @@
 #include <rex/system/xenumerator.h>
 #include <rex/system/xthread.h>
 #include <rex/system/user_module.h>
+#include <rex/filesystem/devices/stfs_xbox.h>
 #include "synthetic_xex.h"
 
 extern "C" REX_FUNC(__imp__XamContentAggregateCreateEnumerator);
 extern "C" REX_FUNC(__imp__XamContentGetAttributesInternal);
+extern "C" REX_FUNC(__imp__XamContentGetMetaDataInternal);
 extern "C" REX_FUNC(__imp__XamContentCreateInternal);
 extern "C" REX_FUNC(__imp__XamContentLaunchImageInternalEx);
 extern "C" REX_FUNC(__imp__XamLoaderRegisterLaunchRequestCallback);
@@ -35,6 +37,75 @@ void PrepareLaunch(PPCContext& ctx, uint8_t* base) {
   preparation_before_shutdown = !rex::Runtime::instance()->kernel_state()->is_terminating_title();
   fields[3] = 1;
 }
+}
+
+TEST_CASE("Extracted executable metadata preserves disc and arcade identities", "[sdk][aggregate-content]") {
+  const auto root = std::filesystem::temp_directory_path() /
+      ("x360n-metadata-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+  struct Cleanup { std::filesystem::path path; ~Cleanup() { std::error_code ec; std::filesystem::remove_all(path, ec); } } cleanup{root};
+  std::filesystem::create_directories(root);
+  rex::Runtime rt(root, root);
+  rex::RuntimeConfig config{};
+  config.tool_mode = true; config.kernel_init = rex::kernel::InitializeKernel;
+  REQUIRE(rt.Setup(std::move(config)) == X_STATUS_SUCCESS);
+  const auto output = rt.memory()->SystemHeapAlloc(0xA000);
+  REQUIRE(output);
+  auto* bytes = rt.memory()->TranslateVirtual<uint8_t*>(output);
+  auto* data = reinterpret_cast<rex::system::xam::XCONTENT_AGGREGATE_DATA*>(bytes);
+  *data = {}; data->device_id = 1; data->title_id = 0x12345678;
+  data->set_file_name("package"); data->set_display_name(u"Disc test");
+  auto query = [&](bool async) {
+    uint32_t result = ~0u;
+    auto thread = rex::system::object_ref<rex::system::XHostThread>(new rex::system::XHostThread(
+        rt.kernel_state(), 128 * 1024, 0, [&]() {
+      auto* ctx = rex::system::XThread::GetCurrentThread()->thread_state()->context();
+      ctx->r3.u64 = output; ctx->r4.u64 = output + 0x400;
+      ctx->r5.u64 = async ? output + 0x200 : 0;
+      __imp__XamContentGetMetaDataInternal(*ctx, rt.memory()->virtual_membase());
+      result = ctx->r3.u32; return 0;
+    }));
+    REQUIRE(thread->Create() == X_STATUS_SUCCESS);
+    uint64_t timeout = uint64_t(-50'000'000ll);
+    REQUIRE(thread->Wait(0, 0, 0, &timeout) == X_STATUS_SUCCESS);
+    return result;
+  };
+  for (const auto type : {0x4000u, 0xD0000u}) {
+    data->content_type = rex::system::XContentType(type);
+    auto path = root / "0000000000000000/12345678" / (type == 0x4000 ? "00004000" : "000D0000") / "package";
+    std::filesystem::create_directories(path);
+    auto xex = x360n::test::BuildXex({}, nullptr, 0, x360n::test::Entry::kReturnZero);
+    auto put = [&](size_t offset, uint32_t value) { rex::memory::store_and_swap<uint32_t>(xex.data() + offset, value); };
+    put(0x14, 4); put(0x30, 0x40006); put(0x34, 0x700);
+    put(0x700, 0x23456789); put(0x704, 10); put(0x708, 9); put(0x70C, 0x12345678);
+    xex[0x710] = 2; xex[0x712] = 1; xex[0x713] = 2;
+    auto save = [&] { std::ofstream(path / "default.xex", std::ios::binary | std::ios::trunc).write(reinterpret_cast<const char*>(xex.data()), xex.size()); };
+    save();
+    std::ofstream(path / "payload", std::ios::binary).write("abc", 3);
+    std::memset(bytes + 0x400, 0xA5, 0x93D7);
+    CHECK(query(false) == 0);
+    const auto* metadata = reinterpret_cast<const rex::filesystem::XContentMetadata*>(bytes + 0x400);
+    CHECK(uint32_t(metadata->content_type.get()) == type);
+    CHECK(metadata->execution_info.title_id == 0x12345678);
+    CHECK(metadata->execution_info.media_id == 0x23456789);
+    CHECK(metadata->execution_info.version_value == 10);
+    CHECK(metadata->execution_info.base_version_value == 9);
+    CHECK(metadata->execution_info.disc_count == 2);
+    CHECK(metadata->content_size == xex.size() + 3);
+    CHECK(metadata->display_name(rex::system::XLanguage(1)) == u"Disc test");
+    CHECK(bytes[0x400 + 0x93D6] == 0xA5);
+    std::memset(bytes + 0x200, 0, sizeof(rex::system::XAM_OVERLAPPED));
+    CHECK(query(true) == X_ERROR_IO_PENDING);
+    CHECK(rex::memory::load_and_swap<uint32_t>(bytes + 0x200) == 0);
+    put(0x70C, 0x87654321); save();
+    std::memset(bytes + 0x400, 0xA5, 0x93D7);
+    CHECK(query(false) == 13);
+    CHECK(bytes[0x400] == 0xA5);
+    put(0x34, 0xFFFFFFF0); save();
+    CHECK(query(false) == 13);
+    data->set_file_name("../escape"); CHECK(query(false) == X_ERROR_INVALID_PARAMETER);
+    data->set_file_name("missing"); CHECK(query(false) == X_ERROR_FILE_NOT_FOUND);
+    data->set_file_name("package");
+  }
 }
 
 TEST_CASE("Aggregate all-types query enumerates installed titles with their real types",

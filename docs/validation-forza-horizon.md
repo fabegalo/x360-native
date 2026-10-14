@@ -1,5 +1,32 @@
 # Forza Horizon — Windows x64 investigation, 2026-10-14
 
+## Original-library cycle investigation (in progress)
+
+The first demonstrated blocker is the missing `XamContentGetMetaDataInternal`
+contract. Retail 17559 requests metadata before constructing its installed-disc
+entry. SDK patch 0069 projects execution identity, installed byte size and the
+registered display name into the packed 0x93D6 metadata result, preserving the
+original content type. Unknown artwork/publisher/volume information stays absent;
+this is a partial extracted-content implementation, not an invented STFS license.
+Malformed headers and a mismatched Title ID fail without publishing output.
+
+Focused tests: metadata 68 assertions; existing aggregate/content-launch contract
+80 assertions. Logs: `.local/logs/sdk69-tests.log` and
+`.local/logs/sdk69-aggregate-regression.log`.
+
+Real My Games now lists three entries, including Forza:
+`.local/validation/forza-runtime/metadata-ui/my-games.png`. The subsequent
+`disc-launch-bound/selected.png` shows Forza selected. Its `rex.log` records the
+original request with title `4D5309C9`, base version `0000000A`,
+`XSYSLAUNCH:\default.xex`, flags zero, 33 display-transition frames and the four
+completed dashboard termination callbacks. This raw-dashboard diagnostic does
+not establish a supervisor handoff or playable scene. No ISO was re-extracted.
+
+Keyboard scripts use explicit digital-pad bindings for deterministic navigation:
+the original My Games list consumes keystrokes, so left-stick taps did not move
+its selection. The earlier diagnostic attempts selected the first XBLA entry;
+they are not Forza launches.
+
 Original input: Title ID `4D5309C9`, media `2DC7007B`, version/base `0.0.0.10`,
 20,856,832-byte XEX, SHA-256
 `db40df605ade49a612b35a7a24c38f6004bcb17a88ed6b48288de16df9e3987c`.

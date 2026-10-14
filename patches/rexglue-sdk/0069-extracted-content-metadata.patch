@@ -1,0 +1,129 @@
+diff --git "a/include/rex/system/xam/content_manager.h" "b/include/rex/system/xam/content_manager.h"
+index df62688..cc9ba01 100644
+--- "a/include/rex/system/xam/content_manager.h"
++++ "b/include/rex/system/xam/content_manager.h"
+@@ -164,6 +164,8 @@ class ContentManager {
+   // Packed 36-byte content attributes: flags, three FILETIMEs, size (all BE).
+   X_RESULT GetContentAttributes(const XCONTENT_AGGREGATE_DATA& data, uint8_t* output);
+ 
++  X_RESULT GetContentMetadata(const XCONTENT_AGGREGATE_DATA& data, uint8_t* output);
++
+   bool ContentExists(uint64_t xuid, const XCONTENT_AGGREGATE_DATA& data);
+   X_RESULT CreateContent(const std::string_view root_name, uint64_t xuid,
+                          const XCONTENT_AGGREGATE_DATA& data);
+diff --git "a/src/system/xam/content_manager.cpp" "b/src/system/xam/content_manager.cpp"
+index 74fc02e..081a57a 100644
+--- "a/src/system/xam/content_manager.cpp"
++++ "b/src/system/xam/content_manager.cpp"
+@@ -10,6 +10,7 @@
+  */
+ 
+ #include <array>
++#include <rex/filesystem/devices/stfs_xbox.h>
+ #include <cstring>
+ #include <queue>
+ #include <string>
+@@ -329,6 +330,61 @@ X_RESULT ContentManager::GetContentAttributes(const XCONTENT_AGGREGATE_DATA& dat
+   return X_ERROR_SUCCESS;
+ }
+ 
++// Extracted executable packages have no STFS header. Project only facts from
++// their XEX execution header and installed files into the packed metadata ABI.
++// This neither changes the content type nor manufactures package licenses.
++X_RESULT ContentManager::GetContentMetadata(const XCONTENT_AGGREGATE_DATA& data,
++                                          uint8_t* output) try {
++  if (!ValidName(data.file_name())) return X_ERROR_INVALID_PARAMETER;
++  const auto type = uint32_t(data.content_type.get());
++  if (type != 0x4000 && type != 0x7000 && type != 0x80000 && type != 0xD0000)
++    return X_RESULT_FROM_WIN32(50);
++  const auto path = ResolvePackagePath(data.xuid, data);
++  auto file = filesystem::OpenFile(path / "default.xex", "rb");
++  if (!file) return X_ERROR_FILE_NOT_FOUND;
++  struct Guard { FILE* file; ~Guard() { fclose(file); } } guard{file};
++  const auto size = std::filesystem::file_size(path / "default.xex");
++  auto read = [&](uint32_t offset, void* bytes, size_t count) {
++    return uint64_t(offset) + count <= size && !fseek(file, offset, SEEK_SET) &&
++           fread(bytes, 1, count, file) == count;
++  };
++  std::array<uint8_t, 24> header{};
++  if (!read(0, header.data(), header.size()) || memcmp(header.data(), "XEX2", 4))
++    return 13 /* ERROR_INVALID_DATA */;
++  const auto image = memory::load_and_swap<uint32_t>(header.data() + 8);
++  const auto count = memory::load_and_swap<uint32_t>(header.data() + 20);
++  if (image < 24 || image > size || count > (image - 24) / 8)
++    return 13 /* ERROR_INVALID_DATA */;
++  filesystem::XContentMetadata metadata{};
++  bool found = false;
++  for (uint32_t i = 0; i < count; ++i) {
++    std::array<be<uint32_t>, 2> option{};
++    if (!read(24 + i * 8, option.data(), sizeof(option))) return 13 /* ERROR_INVALID_DATA */;
++    if (option[0] != 0x40006) continue;
++    const uint32_t offset = option[1];
++    if (found || offset < 24 + count * 8 || uint64_t(offset) + 24 > image ||
++        !read(offset, &metadata.execution_info, 24)) return 13 /* ERROR_INVALID_DATA */;
++    found = true;
++  }
++  if (!found || metadata.execution_info.title_id != data.title_id)
++    return 13 /* ERROR_INVALID_DATA */;
++  std::array<uint8_t, 36> attributes{};
++  auto result = GetContentAttributes(data, attributes.data());
++  if (result) return result;
++  metadata.content_type = data.content_type;
++  metadata.metadata_version = 2;
++  metadata.content_size = memory::load_and_swap<uint64_t>(attributes.data() + 28);
++  metadata.profile_id = data.xuid;
++  for (uint32_t language = 1; language <= 12; ++language)
++    metadata.set_display_name(XLanguage(language), data.display_name());
++  metadata.set_title_name(data.display_name());
++  memcpy(output, &metadata, sizeof(metadata));
++  return X_ERROR_SUCCESS;
++} catch (const std::filesystem::filesystem_error&) {
++  return X_ERROR_ACCESS_DENIED;
++}
++
++
+ bool ContentManager::ContentExists(uint64_t xuid, const XCONTENT_AGGREGATE_DATA& data) {
+   auto path = ResolvePackagePath(xuid, data);
+   return std::filesystem::exists(path);
+diff --git "a/src/kernel/xam/xam_content.cpp" "b/src/kernel/xam/xam_content.cpp"
+index 78184bc..3c3718f 100644
+--- "a/src/kernel/xam/xam_content.cpp"
++++ "b/src/kernel/xam/xam_content.cpp"
+@@ -84,6 +84,28 @@ u32 XamContentGetAttributesInternal_entry(mapped_void content, mapped_void attri
+   return result;
+ }
+ 
++// Retail 17559 export 0x26E (816EF338): aggregate, 0x93D6 metadata, overlapped.
++u32 XamContentGetMetaDataInternal_entry(mapped_void content, mapped_void metadata,
++                                      mapped_void overlapped) {
++  X_RESULT result = X_ERROR_INVALID_PARAMETER;
++  if (content && metadata) {
++    const auto& data = *content.as<XCONTENT_AGGREGATE_DATA*>();
++    const auto* device = GetDummyDeviceInfo(data.device_id);
++    if (!device) result = X_ERROR_DEVICE_NOT_CONNECTED;
++    else if (device->device_type != DeviceType::HDD) result = X_RESULT_FROM_WIN32(50);
++    else result = REX_KERNEL_STATE()->content_manager()->GetContentMetadata(
++        data, metadata.as<uint8_t*>());
++    REXKRNL_INFO("Content metadata: title={:08X} type={:08X} name={} result={:08X}",
++                uint32_t(data.title_id), uint32_t(data.content_type.get()), data.file_name(), result);
++  }
++  if (overlapped) {
++    REX_KERNEL_STATE()->CompleteOverlappedImmediate(overlapped.guest_address(), result);
++    return X_ERROR_IO_PENDING;
++  }
++  return result;
++}
++
++
+ u32 XamContentGetLicenseMask_entry(mapped_u32 mask_ptr, mapped_void overlapped_ptr) {
+   // Each bit in the mask represents a granted license. Available licenses
+   // seems to vary from game to game, but most appear to use bit 0 to indicate
+@@ -678,7 +700,7 @@ REX_EXPORT_STUB(__imp__XamContentGetAttributes);
+ REX_EXPORT(__imp__XamContentGetAttributesInternal, rex::kernel::xam::XamContentGetAttributesInternal_entry)
+ REX_EXPORT_STUB(__imp__XamContentGetHeaderInternal);
+ REX_EXPORT_STUB(__imp__XamContentGetLocalizedString);
+-REX_EXPORT_STUB(__imp__XamContentGetMetaDataInternal);
++REX_EXPORT(__imp__XamContentGetMetaDataInternal, rex::kernel::xam::XamContentGetMetaDataInternal_entry)
+ REX_EXPORT_STUB(__imp__XamContentGetMountedPackageByRootName);
+ REX_EXPORT_STUB(__imp__XamContentGetOnlineCreator);
+ REX_EXPORT_STUB(__imp__XamContentInstall);

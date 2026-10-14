@@ -156,8 +156,8 @@
         "file": "patches/rexglue-sdk/0013-aggregate-all-content-types.patch",
         "sha256": "2b0d9f55bc1d94c119f128a0e292ee8aa79e027956b30fd5613253fb889b7e8e",
         "files": {
-          "include/rex/system/xam/content_manager.h": "320a6ec27832f50d407665f1c5ed885a57420d3d7b5a685291f870091bb101b9",
-          "src/system/xam/content_manager.cpp": "1c05dc67b68821251c9a3bf7ff01a4017f433e045dfb582bac449e77140543c7",
+          "include/rex/system/xam/content_manager.h": "bdf1e86f8d7ca5cfce30613ff3595a76f1fb15819fe44c41788e625d3566e938",
+          "src/system/xam/content_manager.cpp": "497db31a7aa6caee8e5aaf4fb632ddfc3bc7f72b839d818c95dc6531bbef559b",
           "src/kernel/xam/xam_content_aggregate.cpp": "2f511f12296d619781ac62cc4cc67f559b3426e28fdadb502ee4329294321f1a"
         },
         "base_files": {
@@ -171,9 +171,9 @@
         "file": "patches/rexglue-sdk/0014-content-attributes.patch",
         "sha256": "ec407f9d48abc036730da6884dd1fed9d75faab2153abf1f5012eeaae32e9279",
         "files": {
-          "include/rex/system/xam/content_manager.h": "320a6ec27832f50d407665f1c5ed885a57420d3d7b5a685291f870091bb101b9",
-          "src/system/xam/content_manager.cpp": "1c05dc67b68821251c9a3bf7ff01a4017f433e045dfb582bac449e77140543c7",
-          "src/kernel/xam/xam_content.cpp": "5f5eaf357d2ca6ffd4b927080c61e334cd62ae3bde10cd76294a11f22b627743"
+          "include/rex/system/xam/content_manager.h": "bdf1e86f8d7ca5cfce30613ff3595a76f1fb15819fe44c41788e625d3566e938",
+          "src/system/xam/content_manager.cpp": "497db31a7aa6caee8e5aaf4fb632ddfc3bc7f72b839d818c95dc6531bbef559b",
+          "src/kernel/xam/xam_content.cpp": "7d8b3c7516223c258024303e3f2d8ce93e34a0c5b85da3495f13dcce977f0033"
         },
         "base_files": {
           "include/rex/system/xam/content_manager.h": "62bc5c3b2a9260b2691998453c4a8e2810b58e3925a2395297e98e0227167585",
@@ -186,7 +186,7 @@
         "file": "patches/rexglue-sdk/0015-internal-shared-content-owner.patch",
         "sha256": "aff8a9357d60acca967f99f6a69cf74b8ce2e45f3d7a458929dacf1f155d70a5",
         "files": {
-          "src/kernel/xam/xam_content.cpp": "5f5eaf357d2ca6ffd4b927080c61e334cd62ae3bde10cd76294a11f22b627743"
+          "src/kernel/xam/xam_content.cpp": "7d8b3c7516223c258024303e3f2d8ce93e34a0c5b85da3495f13dcce977f0033"
         },
         "base_files": {
           "src/kernel/xam/xam_content.cpp": "4bef33d3a5db8dbcda982c83da85d06a9cde9a6479188acbd39fbe2c5f01427e"
@@ -197,7 +197,7 @@
         "file": "patches/rexglue-sdk/0016-content-launch-image.patch",
         "sha256": "382677db936c677c864e759f565f0d9f28276b9428c7f4a51bf8306c42bfc4e6",
         "files": {
-          "src/kernel/xam/xam_content.cpp": "5f5eaf357d2ca6ffd4b927080c61e334cd62ae3bde10cd76294a11f22b627743"
+          "src/kernel/xam/xam_content.cpp": "7d8b3c7516223c258024303e3f2d8ce93e34a0c5b85da3495f13dcce977f0033"
         },
         "base_files": {
           "src/kernel/xam/xam_content.cpp": "b531e5b14f79a7296d821344ee1d04da25b47711450c8bddb40ef86ea92aa012"
@@ -270,7 +270,7 @@
         "sha256": "ee7b05f1cca4cb5b54534aa5664e6e7256fb370a420d32bb302a4614b7acbdbb",
         "files": {
           "include/rex/kernel/xam/module.h": "2547409edaa44b2f7ab2972a0504de4fb6bbd0b87a62cad0a5d0a663a25c1d2d",
-          "src/kernel/xam/xam_content.cpp": "5f5eaf357d2ca6ffd4b927080c61e334cd62ae3bde10cd76294a11f22b627743",
+          "src/kernel/xam/xam_content.cpp": "7d8b3c7516223c258024303e3f2d8ce93e34a0c5b85da3495f13dcce977f0033",
           "src/kernel/xam/xam_misc.cpp": "85729bc08acb4f9aa95aba495c17a29148e8081bf19a095729b3ae50898fd866"
         },
         "base_files": {
@@ -299,7 +299,7 @@
           "include/rex/system/kernel_state.h": "e47b22bc4b13dd8d114726e552b4c0f7534fdafdda2742b42289b91c825fb4fa",
           "src/kernel/xboxkrnl/xboxkrnl_video.cpp": "969ba88d7b17cd9fe500cebdd5a53602ebae0df3d7b01b3477a3b65e66c56729",
           "include/rex/kernel/xam/module.h": "2547409edaa44b2f7ab2972a0504de4fb6bbd0b87a62cad0a5d0a663a25c1d2d",
-          "src/kernel/xam/xam_content.cpp": "5f5eaf357d2ca6ffd4b927080c61e334cd62ae3bde10cd76294a11f22b627743",
+          "src/kernel/xam/xam_content.cpp": "7d8b3c7516223c258024303e3f2d8ce93e34a0c5b85da3495f13dcce977f0033",
           "include/rex/system/interfaces/graphics.h": "491dffd35d938f9fde908ff693a383364d7255133722affe17b0a53cf813f9c3",
           "include/rex/graphics/graphics_system.h": "259d7acc4e6d6dc01eb546cf101389bf4cf352b54c78c392cb4a2a595531c53f",
           "src/graphics/graphics_system.cpp": "fb3256cec0bbf518125245b180508aa40587ab239f2db47aeea6981d1a3174de",
@@ -906,9 +906,9 @@
           "src/filesystem/devices/host_path_device.cpp": "b1bfaed54b2140d4259e715d0333dc0d925ff89124c8aa6b530149d9415d937d",
           "include/rex/system/xam/user_profile.h": "1aaae9190f78c62f1dd8a88015c54ddcbca8157847032da3c90c5065e4eee03b",
           "src/system/xam/user_profile.cpp": "84f4ce2dfc72816a695ed18447fa47032489acd50efec30dd1475ac428f365da",
-          "include/rex/system/xam/content_manager.h": "320a6ec27832f50d407665f1c5ed885a57420d3d7b5a685291f870091bb101b9",
-          "src/system/xam/content_manager.cpp": "1c05dc67b68821251c9a3bf7ff01a4017f433e045dfb582bac449e77140543c7",
-          "src/kernel/xam/xam_content.cpp": "5f5eaf357d2ca6ffd4b927080c61e334cd62ae3bde10cd76294a11f22b627743"
+          "include/rex/system/xam/content_manager.h": "bdf1e86f8d7ca5cfce30613ff3595a76f1fb15819fe44c41788e625d3566e938",
+          "src/system/xam/content_manager.cpp": "497db31a7aa6caee8e5aaf4fb632ddfc3bc7f72b839d818c95dc6531bbef559b",
+          "src/kernel/xam/xam_content.cpp": "7d8b3c7516223c258024303e3f2d8ce93e34a0c5b85da3495f13dcce977f0033"
         },
         "test": "sdkcheck.Save storage uses XAM and NT file contracts across profiles and restarts"
       },
@@ -922,6 +922,21 @@
           "src/codegen/phase_gapfill.cpp": "878a120c08c772e005f92ec44ed5121c65b5b5764c4725896dfe2d7d5e7d20e3"
         },
         "test": "sdkcheck.GapFill preserves a leaf after a pdata out-of-line return"
+      },
+      {
+        "file": "patches/rexglue-sdk/0069-extracted-content-metadata.patch",
+        "sha256": "7822d4333b3a3dbf1611ca092c88b999fe910215af69f4fe365edee17f1c0f57",
+        "base_files": {
+          "include/rex/system/xam/content_manager.h": "320a6ec27832f50d407665f1c5ed885a57420d3d7b5a685291f870091bb101b9",
+          "src/system/xam/content_manager.cpp": "1c05dc67b68821251c9a3bf7ff01a4017f433e045dfb582bac449e77140543c7",
+          "src/kernel/xam/xam_content.cpp": "5f5eaf357d2ca6ffd4b927080c61e334cd62ae3bde10cd76294a11f22b627743"
+        },
+        "files": {
+          "include/rex/system/xam/content_manager.h": "bdf1e86f8d7ca5cfce30613ff3595a76f1fb15819fe44c41788e625d3566e938",
+          "src/system/xam/content_manager.cpp": "497db31a7aa6caee8e5aaf4fb632ddfc3bc7f72b839d818c95dc6531bbef559b",
+          "src/kernel/xam/xam_content.cpp": "7d8b3c7516223c258024303e3f2d8ce93e34a0c5b85da3495f13dcce977f0033"
+        },
+        "test": "sdkcheck.Extracted executable metadata preserves disc and arcade identities"
       }
     ]
   },
