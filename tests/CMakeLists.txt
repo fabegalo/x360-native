@@ -118,6 +118,7 @@ target_sources(x360n_sdk_runtime_checks PRIVATE sdkcheck/persist_display_test.cp
 target_sources(x360n_sdk_runtime_checks PRIVATE sdkcheck/audio_drain_test.cpp)
 target_sources(x360n_sdk_runtime_checks PRIVATE sdkcheck/profile_ui_request_test.cpp)
 target_sources(x360n_sdk_runtime_checks PRIVATE sdkcheck/local_profile_test.cpp)
+target_sources(x360n_sdk_runtime_checks PRIVATE sdkcheck/save_storage_test.cpp)
 target_sources(x360n_sdk_runtime_checks PRIVATE sdkcheck/signin_task_test.cpp)
 target_sources(x360n_sdk_runtime_checks PRIVATE sdkcheck/dashboard_uri_test.cpp
     ../titles/dash_17559/src/launch_uri.cpp)
@@ -139,6 +140,12 @@ add_dependencies(x360n_sdk_runtime_checks x360n_shutdown_probe)
 x360n_stage_runtime_dlls(x360n_sdk_runtime_checks)
 catch_discover_tests(x360n_sdk_runtime_checks TEST_PREFIX "sdkcheck." PROPERTIES LABELS "project" TIMEOUT 120
     DISCOVERY_MODE PRE_TEST)
+if(WIN32)
+  add_test(NAME sdkcheck.save-storage-processes COMMAND powershell -NoProfile -ExecutionPolicy Bypass
+    -File ${CMAKE_CURRENT_SOURCE_DIR}/local/save-storage-process.ps1
+    -Executable $<TARGET_FILE:x360n_sdk_runtime_checks>)
+  set_tests_properties(sdkcheck.save-storage-processes PROPERTIES LABELS project TIMEOUT 75)
+endif()
 
 add_test(NAME env.doctor COMMAND x360n doctor --config $<CONFIG>)
 set_tests_properties(env.doctor PROPERTIES LABELS "project" TIMEOUT 300)

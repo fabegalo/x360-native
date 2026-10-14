@@ -1,0 +1,1182 @@
+--- a/include/rex/filesystem.h
++++ b/include/rex/filesystem.h
+@@ -102,7 +102,7 @@
+   virtual bool SetLength(size_t length) = 0;
+ 
+   // Flushes any pending write buffers to the underlying filesystem.
+-  virtual void Flush() = 0;
++  virtual bool Flush() = 0;
+ 
+  protected:
+   explicit FileHandle(const std::filesystem::path& path) : path_(path) {}
+--- a/src/core/filesystem_win.cpp
++++ b/src/core/filesystem_win.cpp
+@@ -166,7 +166,7 @@
+     }
+     return true;
+   }
+-  void Flush() override { FlushFileBuffers(handle_); }
++  bool Flush() override { return FlushFileBuffers(handle_) != 0; }
+ 
+  private:
+   HANDLE handle_ = nullptr;
+--- a/src/core/filesystem_posix.cpp
++++ b/src/core/filesystem_posix.cpp
+@@ -208,7 +208,7 @@
+     return true;
+   }
+   bool SetLength(size_t length) override { return ftruncate(handle_, length) >= 0 ? true : false; }
+-  void Flush() override { fsync(handle_); }
++  bool Flush() override { return fsync(handle_) == 0; }
+ 
+  private:
+   int handle_ = -1;
+--- a/include/rex/filesystem/device.h
++++ b/include/rex/filesystem/device.h
+@@ -20,7 +20,7 @@
+ 
+ namespace rex::filesystem {
+ 
+-class Device {
++class Device : public std::enable_shared_from_this<Device> {
+  public:
+   explicit Device(const std::string_view mount_path);
+   virtual ~Device();
+@@ -28,6 +28,7 @@
+   virtual bool Initialize() = 0;
+ 
+   const std::string& mount_path() const { return mount_path_; }
++  virtual bool is_accessible() const { return true; }
+   virtual bool is_read_only() const { return true; }
+ 
+   virtual void Dump(string::StringBuffer* string_buffer) = 0;
+--- a/include/rex/filesystem/vfs.h
++++ b/include/rex/filesystem/vfs.h
+@@ -50,7 +50,7 @@
+ 
+  private:
+   rex::thread::global_critical_region global_critical_region_;
+-  std::vector<std::unique_ptr<Device>> devices_;
++  std::vector<std::shared_ptr<Device>> devices_;
+   std::unordered_map<std::string, std::string> symlinks_;
+ 
+   bool ResolveSymbolicLink(const std::string_view path, std::string& result);
+--- a/include/rex/filesystem/file.h
++++ b/include/rex/filesystem/file.h
+@@ -52,6 +52,8 @@
+     return X_STATUS_NOT_IMPLEMENTED;
+   }
+ 
++  virtual X_STATUS Flush() { return X_STATUS_NOT_IMPLEMENTED; }
++
+   virtual X_STATUS SetLength(size_t length) {
+     (void)length;
+     return X_STATUS_NOT_IMPLEMENTED;
+--- a/include/rex/filesystem/devices/host_path_file.h
++++ b/include/rex/filesystem/devices/host_path_file.h
+@@ -19,6 +19,7 @@
+ 
+ namespace rex::filesystem {
+ 
++class Device;
+ class HostPathEntry;
+ 
+ class HostPathFile : public File {
+@@ -32,9 +33,11 @@
+   X_STATUS ReadSync(std::span<uint8_t> buffer, size_t byte_offset, size_t* out_bytes_read) override;
+   X_STATUS WriteSync(std::span<const uint8_t> buffer, size_t byte_offset,
+                      size_t* out_bytes_written) override;
++  X_STATUS Flush() override;
+   X_STATUS SetLength(size_t length) override;
+ 
+  private:
++  std::shared_ptr<Device> device_owner_;
+   std::unique_ptr<rex::filesystem::FileHandle> file_handle_;
+ };
+ 
+--- a/src/filesystem/devices/host_path_file.cpp
++++ b/src/filesystem/devices/host_path_file.cpp
+@@ -11,12 +11,13 @@
+ 
+ #include <rex/filesystem/devices/host_path_entry.h>
+ #include <rex/filesystem/devices/host_path_file.h>
++#include <rex/filesystem/device.h>
+ 
+ namespace rex::filesystem {
+ 
+ HostPathFile::HostPathFile(uint32_t file_access, HostPathEntry* entry,
+                            std::unique_ptr<rex::filesystem::FileHandle> file_handle)
+-    : File(file_access, entry), file_handle_(std::move(file_handle)) {}
++    : File(file_access, entry), device_owner_(entry->device()->weak_from_this().lock()), file_handle_(std::move(file_handle)) {}
+ 
+ HostPathFile::~HostPathFile() = default;
+ 
+@@ -26,6 +27,7 @@
+ 
+ X_STATUS HostPathFile::ReadSync(std::span<uint8_t> buffer, size_t byte_offset,
+                                 size_t* out_bytes_read) {
++  if (!entry_->device()->is_accessible()) return X_STATUS_ACCESS_DENIED;
+   if (!(file_access_ & (FileAccess::kGenericRead | FileAccess::kFileReadData))) {
+     return X_STATUS_ACCESS_DENIED;
+   }
+@@ -39,6 +41,7 @@
+ 
+ X_STATUS HostPathFile::WriteSync(std::span<const uint8_t> buffer, size_t byte_offset,
+                                  size_t* out_bytes_written) {
++  if (!entry_->device()->is_accessible()) return X_STATUS_ACCESS_DENIED;
+   if (!(file_access_ &
+         (FileAccess::kGenericWrite | FileAccess::kFileWriteData | FileAccess::kFileAppendData))) {
+     return X_STATUS_ACCESS_DENIED;
+@@ -52,6 +55,7 @@
+ }
+ 
+ X_STATUS HostPathFile::SetLength(size_t length) {
++  if (!entry_->device()->is_accessible()) return X_STATUS_ACCESS_DENIED;
+   if (!(file_access_ & (FileAccess::kGenericWrite | FileAccess::kFileWriteData))) {
+     return X_STATUS_ACCESS_DENIED;
+   }
+@@ -63,4 +67,11 @@
+   }
+ }
+ 
++X_STATUS HostPathFile::Flush() {
++  if (!entry_->device()->is_accessible()) return X_STATUS_ACCESS_DENIED;
++  if (!(file_access_ & (FileAccess::kGenericWrite | FileAccess::kFileWriteData |
++                       FileAccess::kFileAppendData))) return X_STATUS_SUCCESS;
++  return file_handle_->Flush() ? X_STATUS_SUCCESS : X_STATUS_UNSUCCESSFUL;
++}
++
+ }  // namespace rex::filesystem
+--- a/include/rex/system/xfile.h
++++ b/include/rex/system/xfile.h
+@@ -99,6 +99,7 @@
+   X_STATUS Write(uint32_t buffer_guess_address, uint32_t buffer_length, uint64_t byte_offset,
+                  uint32_t* out_bytes_written, uint32_t apc_context);
+ 
++  X_STATUS Flush();
+   X_STATUS SetLength(size_t length);
+   X_STATUS Rename(const std::filesystem::path& file_path);
+ 
+--- a/src/system/xfile.cpp
++++ b/src/system/xfile.cpp
+@@ -10,6 +10,7 @@
+  */
+ 
+ #include <rex/filesystem/vfs.h>
++#include <rex/filesystem/device.h>
+ #include <rex/logging.h>
+ #include <rex/math.h>
+ #include <rex/memory.h>
+@@ -40,6 +41,11 @@
+   file_->Destroy();
+ }
+ 
++X_STATUS XFile::Flush() {
++  std::lock_guard<std::mutex> lock(file_lock_);
++  return file_->Flush();
++}
++
+ uint64_t XFile::position() const {
+   std::lock_guard<std::mutex> lock(file_lock_);
+   return position_;
+@@ -54,6 +60,7 @@
+                                const std::string_view file_name, bool restart) {
+   std::lock_guard<std::mutex> lock(file_lock_);
+   assert_not_null(out_info);
++  if (!device()->is_accessible()) return X_STATUS_ACCESS_DENIED;
+ 
+   rex::filesystem::Entry* entry = nullptr;
+ 
+--- a/src/kernel/xboxkrnl/xboxkrnl_io.cpp
++++ b/src/kernel/xboxkrnl/xboxkrnl_io.cpp
+@@ -136,7 +136,7 @@
+   if (object_attrs->root_directory != 0xFFFFFFFD &&  // ObDosDevices
+       object_attrs->root_directory != 0) {
+     auto root_file = REX_KERNEL_OBJECTS()->LookupObject<XFile>(object_attrs->root_directory);
+-    assert_not_null(root_file);
++    if (!root_file || !root_file->device()->is_accessible()) return X_STATUS_INVALID_HANDLE;
+     assert_true(root_file->type() == XObject::Type::File);
+ 
+     root_entry = root_file->entry();
+@@ -523,7 +523,7 @@
+   if (obj_attribs->root_directory != 0xFFFFFFFD &&  // ObDosDevices
+       obj_attribs->root_directory != 0) {
+     root_file = REX_KERNEL_OBJECTS()->LookupObject<XFile>(obj_attribs->root_directory);
+-    assert_not_null(root_file);
++    if (!root_file || !root_file->device()->is_accessible()) return X_STATUS_INVALID_HANDLE;
+     assert_true(root_file->type() == XObject::Type::File);
+     assert_always();
+   }
+@@ -598,7 +598,8 @@
+ }
+ 
+ u32 NtFlushBuffersFile_entry(u32 file_handle, ppc_ptr_t<X_IO_STATUS_BLOCK> io_status_block_ptr) {
+-  auto result = X_STATUS_SUCCESS;
++  auto file = REX_KERNEL_OBJECTS()->LookupObject<XFile>(file_handle);
++  auto result = file ? file->Flush() : X_STATUS_INVALID_HANDLE;
+ 
+   if (io_status_block_ptr) {
+     io_status_block_ptr->status = result;
+--- a/src/kernel/xboxkrnl/xboxkrnl_io_info.cpp
++++ b/src/kernel/xboxkrnl/xboxkrnl_io_info.cpp
+@@ -116,7 +116,7 @@
+   }
+ 
+   auto file = REX_KERNEL_OBJECTS()->LookupObject<XFile>(file_handle);
+-  if (!file) {
++  if (!file || !file->device()->is_accessible()) {
+     return X_STATUS_INVALID_HANDLE;
+   }
+ 
+@@ -243,7 +243,7 @@
+   }
+ 
+   auto file = REX_KERNEL_OBJECTS()->LookupObject<XFile>(file_handle);
+-  if (!file) {
++  if (!file || !file->device()->is_accessible()) {
+     return X_STATUS_INVALID_HANDLE;
+   }
+ 
+@@ -382,7 +382,7 @@
+   }
+ 
+   auto file = REX_KERNEL_OBJECTS()->LookupObject<XFile>(file_handle);
+-  if (!file) {
++  if (!file || !file->device()->is_accessible()) {
+     return X_STATUS_INVALID_HANDLE;
+   }
+ 
+--- a/src/filesystem/devices/host_path_entry.cpp
++++ b/src/filesystem/devices/host_path_entry.cpp
+@@ -51,6 +51,7 @@
+ }
+ 
+ X_STATUS HostPathEntry::Open(uint32_t desired_access, File** out_file) {
++  if (!device_->is_accessible()) return X_STATUS_ACCESS_DENIED;
+   if (is_read_only() &&
+       (desired_access & (FileAccess::kFileWriteData | FileAccess::kFileAppendData))) {
+     REXFS_ERROR("Attempting to open file for write access on read-only device");
+@@ -72,7 +73,7 @@
+ }
+ 
+ bool HostPathEntry::Truncate() {
+-  if (is_read_only() || (attributes_ & kFileAttributeDirectory)) {
++  if (!device_->is_accessible() || is_read_only() || (attributes_ & kFileAttributeDirectory)) {
+     return false;
+   }
+   auto file = rex::filesystem::OpenFile(host_path_, "wb");
+@@ -87,6 +88,7 @@
+ 
+ std::unique_ptr<Entry> HostPathEntry::CreateEntryInternal(const std::string_view name,
+                                                           uint32_t attributes) {
++  if (!device_->is_accessible()) return nullptr;
+   auto full_path = host_path_ / rex::to_path(name);
+   if (attributes & kFileAttributeDirectory) {
+     if (!std::filesystem::create_directories(full_path)) {
+@@ -107,6 +109,7 @@
+ }
+ 
+ bool HostPathEntry::DeleteEntryInternal(Entry* entry) {
++  if (!device_->is_accessible()) return false;
+   auto full_path = host_path_ / rex::to_path(entry->name());
+   std::error_code ec;  // avoid exception on remove/remove_all failure
+   if (entry->attributes() & kFileAttributeDirectory) {
+@@ -120,6 +123,7 @@
+ }
+ 
+ X_STATUS HostPathEntry::RenameEntryInternal(const std::vector<std::string_view>& path_parts) {
++  if (!device_->is_accessible()) return X_STATUS_ACCESS_DENIED;
+   auto new_host_path = static_cast<HostPathDevice*>(device_)->host_path();
+   for (const auto& path_part : path_parts) {
+     new_host_path /= rex::to_path(path_part);
+@@ -149,7 +153,7 @@
+ }
+ 
+ bool HostPathEntry::SetAttributes(uint64_t attributes) {
+-  if (device_->is_read_only()) {
++  if (!device_->is_accessible() || device_->is_read_only()) {
+     return false;
+   }
+   attributes_ = static_cast<uint32_t>(attributes);
+@@ -157,7 +161,7 @@
+ }
+ 
+ bool HostPathEntry::SetCreateTimestamp(uint64_t timestamp) {
+-  if (device_->is_read_only()) {
++  if (!device_->is_accessible() || device_->is_read_only()) {
+     return false;
+   }
+   create_timestamp_ = timestamp;
+@@ -165,7 +169,7 @@
+ }
+ 
+ bool HostPathEntry::SetAccessTimestamp(uint64_t timestamp) {
+-  if (device_->is_read_only()) {
++  if (!device_->is_accessible() || device_->is_read_only()) {
+     return false;
+   }
+   access_timestamp_ = timestamp;
+@@ -173,7 +177,7 @@
+ }
+ 
+ bool HostPathEntry::SetWriteTimestamp(uint64_t timestamp) {
+-  if (device_->is_read_only()) {
++  if (!device_->is_accessible() || device_->is_read_only()) {
+     return false;
+   }
+   write_timestamp_ = timestamp;
+--- a/src/filesystem/devices/host_path_device.cpp
++++ b/src/filesystem/devices/host_path_device.cpp
+@@ -60,6 +60,7 @@
+   // The filesystem will have stripped our prefix off already, so the path will
+   // be in the form:
+   // some\PATH.foo
++  if (!is_accessible()) return nullptr;
+   auto* resolved = root_entry_->ResolvePath(path);
+   if (resolved) {
+     return resolved;
+--- a/include/rex/system/xam/user_profile.h
++++ b/include/rex/system/xam/user_profile.h
+@@ -12,6 +12,7 @@
+ #pragma once
+ 
+ #include <memory>
++#include <atomic>
+ #include <filesystem>
+ #include <mutex>
+ #include <string>
+@@ -223,6 +224,7 @@
+     std::string name;
+     uint32_t signin_state = 0;
+   };
++  uint64_t storage_epoch() const { return storage_epoch_.load(); }
+   Identity identity() const;
+   uint64_t xuid() const { std::lock_guard lock(identity_mutex_); return identity_.xuid; }
+   std::string name() const { std::lock_guard lock(identity_mutex_); return identity_.name; }
+@@ -244,6 +246,7 @@
+  private:
+   mutable std::mutex identity_mutex_;
+   Identity identity_;
++  std::atomic<uint64_t> storage_epoch_{0};
+   std::vector<Identity> profiles_;
+   std::filesystem::path profile_path_;
+   bool storage_ready_ = false;
+--- a/src/system/xam/user_profile.cpp
++++ b/src/system/xam/user_profile.cpp
+@@ -273,6 +273,7 @@
+ }
+ 
+ uint32_t UserProfile::SetLocalSession(uint64_t xuid) {
++  auto storage_lock = rex::thread::global_critical_region::AcquireDirect();
+   std::lock_guard lock(identity_mutex_);
+   if (!identity_.xuid) return xuid ? X_ERROR_NO_SUCH_USER : X_ERROR_SUCCESS;
+   auto next = profiles_;
+@@ -285,6 +286,7 @@
+   it->signin_state = state;
+   const auto selected = *it;
+   if (!PersistProfiles(next, selected)) return X_ERROR_FUNCTION_FAILED;
++  ++storage_epoch_; // Existing save mounts and enumerators never revive after sign-in.
+   const bool changed_identity = identity_.xuid != selected.xuid;
+   profiles_ = std::move(next);
+   identity_ = selected;
+--- a/include/rex/system/xam/content_manager.h
++++ b/include/rex/system/xam/content_manager.h
+@@ -24,6 +24,7 @@
+ #include <rex/thread/mutex.h>
+ 
+ namespace rex {
++namespace filesystem { class Device; }
+ namespace system {
+ class KernelState;
+ }  // namespace system
+@@ -69,7 +70,7 @@
+ 
+   std::string file_name() const {
+     std::string value;
+-    value.assign(file_name_raw, std::min(strlen(file_name_raw), countof(file_name_raw)));
++    value.assign(file_name_raw, std::find(file_name_raw, file_name_raw + countof(file_name_raw), char(0)) - file_name_raw);
+     return value;
+   }
+ 
+@@ -100,7 +101,7 @@
+   XCONTENT_AGGREGATE_DATA(const XCONTENT_DATA& other) {
+     device_id = other.device_id;
+     content_type = other.content_type;
+-    set_display_name(other.display_name());
++    std::memcpy(&display_name_raw, &other.display_name_raw, sizeof(display_name_raw));
+     set_file_name(other.file_name());
+     padding[0] = padding[1] = 0;
+     xuid = 0;
+@@ -127,6 +128,9 @@
+   const XCONTENT_AGGREGATE_DATA& GetPackageContentData() const { return content_data_; }
+ 
+   const std::filesystem::path& package_path() const { return package_path_; }
++
++  bool accessible() const;
++  void DetachRoot();
+ 
+   uint32_t GetPackageLicense() const { return license_; }
+ 
+@@ -137,6 +141,8 @@
+   std::filesystem::path package_path_;
+   XCONTENT_AGGREGATE_DATA content_data_;
+   uint32_t license_ = 0;
++  bool attached_ = true;
++  filesystem::Device* device_ = nullptr;
+ };
+ 
+ class ContentManager {
+@@ -163,6 +169,9 @@
+                          const XCONTENT_AGGREGATE_DATA& data);
+   X_RESULT OpenContent(const std::string_view root_name, uint64_t xuid,
+                        const XCONTENT_AGGREGATE_DATA& data, uint32_t& content_license);
++  X_RESULT FlushContent(const std::string_view root_name);
++  void RetireStaleSaves();
++  static bool ValidName(std::string_view name);
+   X_RESULT CloseContent(const std::string_view root_name);
+   X_RESULT GetContentThumbnail(uint64_t xuid, const XCONTENT_AGGREGATE_DATA& data,
+                                std::vector<uint8_t>* buffer);
+--- a/src/system/xam/content_manager.cpp
++++ b/src/system/xam/content_manager.cpp
+@@ -36,7 +36,29 @@
+ 
+ static const char* kGameContentHeaderDirName = "Headers";
+ 
+-static int content_device_id_ = 0;
++static std::atomic<uint64_t> content_device_id_{0};
++
++// Guest files retain the device, so unmounting cannot invalidate their Entry
++// pointers. Revocation denies I/O even if a duplicated handle survives close.
++class SaveDevice final : public filesystem::HostPathDevice {
++ public:
++  SaveDevice(std::string_view mount, const std::filesystem::path& path, UserProfile* user)
++      : HostPathDevice(mount, path, false, true), user_(user), epoch_(user->storage_epoch()) {}
++  bool is_accessible() const override { return !revoked_ && epoch_ == user_->storage_epoch(); }
++  void Revoke() { revoked_ = true; }
++ private:
++  UserProfile* user_;
++  uint64_t epoch_;
++  std::atomic<bool> revoked_{false};
++};
++
++bool ContentManager::ValidName(std::string_view name) {
++  if (name.empty() || name == "." || name == ".." || name.back() == '.' || name.back() == ' ')
++    return false;
++  return std::none_of(name.begin(), name.end(), [](unsigned char c) {
++    return c < 32 || c >= 127 || std::string_view("/\\:*?\"<>|").find(c) != std::string_view::npos;
++  });
++}
+ 
+ ContentPackage::ContentPackage(KernelState* kernel_state, const std::string_view root_name,
+                                const XCONTENT_AGGREGATE_DATA& data,
+@@ -46,17 +68,29 @@
+   content_data_ = data;
+ 
+   auto fs = kernel_state_->file_system();
+-  auto device = std::make_unique<rex::filesystem::HostPathDevice>(device_path_, package_path, false,
+-                                                                  /*allow_share_delete=*/true);
+-  device->Initialize();
++  std::unique_ptr<filesystem::HostPathDevice> device;
++  if (data.content_type == XContentType::kSavedGame)
++    device = std::make_unique<SaveDevice>(device_path_, package_path, kernel_state_->user_profile());
++  else device = std::make_unique<filesystem::HostPathDevice>(device_path_, package_path, false, true);
++  if (!device->Initialize()) throw std::filesystem::filesystem_error(
++      "content mount", package_path, std::make_error_code(std::errc::io_error));
++  device_ = device.get();
+   fs->RegisterDevice(std::move(device));
+   fs->RegisterSymbolicLink(root_name_ + ":", device_path_);
+ }
+ 
+ ContentPackage::~ContentPackage() {
+   auto fs = kernel_state_->file_system();
+-  fs->UnregisterSymbolicLink(root_name_ + ":");
++  if (attached_) fs->UnregisterSymbolicLink(root_name_ + ":");
+   fs->UnregisterDevice(device_path_);
++}
++
++bool ContentPackage::accessible() const { return device_->is_accessible(); }
++
++void ContentPackage::DetachRoot() {
++  if (attached_) kernel_state_->file_system()->UnregisterSymbolicLink(root_name_ + ":");
++  attached_ = false;
++  if (auto* save = dynamic_cast<SaveDevice*>(device_)) save->Revoke();
+ }
+ 
+ void ContentPackage::LoadPackageLicenseMask(const std::filesystem::path header_path) {
+@@ -83,7 +117,35 @@
+ ContentManager::ContentManager(KernelState* kernel_state, const std::filesystem::path& root_path)
+     : kernel_state_(kernel_state), root_path_(root_path) {}
+ 
+-ContentManager::~ContentManager() = default;
++ContentManager::~ContentManager() {
++  for (auto& [name, package] : open_packages_) delete package;
++}
++
++void ContentManager::RetireStaleSaves() {
++  auto lock = global_critical_region_.Acquire();
++  for (auto it = open_packages_.begin(); it != open_packages_.end();) {
++    if (!it->second->accessible()) {
++      it->second->DetachRoot();
++      delete it->second;
++      it = open_packages_.erase(it);
++    } else ++it;
++  }
++}
++
++X_RESULT ContentManager::FlushContent(std::string_view root_name) {
++  auto lock = global_critical_region_.Acquire();
++  auto it = open_packages_.find(string::string_key_case(root_name));
++  if (it == open_packages_.end()) return X_ERROR_FILE_NOT_FOUND;
++  if (!it->second->accessible()) return X_ERROR_ACCESS_DENIED;
++  std::string device;
++  if (!kernel_state_->file_system()->FindSymbolicLink(std::string(root_name) + ':', device))
++    return X_ERROR_FILE_NOT_FOUND;
++  for (const auto& file : kernel_state_->object_table()->GetObjectsByType<XFile>(XObject::Type::File)) {
++    if (rex::string::utf8_starts_with(file->entry()->absolute_path(), device) &&
++        XFAILED(file->Flush())) return X_ERROR_ACCESS_DENIED;
++  }
++  return X_ERROR_SUCCESS;
++}
+ 
+ std::filesystem::path ContentManager::ResolvePackageRoot(uint64_t xuid, XContentType content_type,
+                                                          uint32_t title_id) {
+@@ -110,8 +172,18 @@
+ 
+   // Content path:
+   // content_root/xuid/title_id/content_type/data_file_name/
++  if (!ValidName(data.file_name())) throw std::filesystem::filesystem_error(
++      "invalid content name", std::make_error_code(std::errc::invalid_argument));
+   auto package_root = ResolvePackageRoot(used_xuid, data.content_type, data.title_id);
+-  return package_root / rex::to_path(data.file_name());
++  auto path = package_root / rex::to_path(data.file_name());
++  // Never follow an existing junction/symlink into another owner's storage.
++  for (auto p = path; p != root_path_ && !p.empty(); p = p.parent_path()) {
++    std::error_code ec;
++    auto status = std::filesystem::symlink_status(p, ec);
++    if (std::filesystem::is_symlink(status)) throw std::filesystem::filesystem_error(
++        "linked content path", p, std::make_error_code(std::errc::permission_denied));
++  }
++  return path;
+ }
+ 
+ std::filesystem::path ContentManager::ResolvePackageHeaderPath(const std::string_view file_name,
+@@ -148,26 +220,23 @@
+   // Search path:
+   // content_root/xuid/title_id/type_name/*
+   auto package_root = ResolvePackageRoot(xuid, content_type, title_id);
+-  auto file_infos = rex::filesystem::ListFiles(package_root);
+-  for (const auto& file_info : file_infos) {
+-    if (file_info.type != rex::filesystem::FileInfo::Type::kDirectory) {
+-      // Directories only.
+-      continue;
+-    }
+-
++  if (!std::filesystem::exists(package_root)) return result;
++  // A denied directory is a storage failure, never an empty save catalog.
++  for (const auto& entry : std::filesystem::directory_iterator(package_root)) {
++    if (entry.is_symlink() || !entry.is_directory()) continue;
++    const auto name = entry.path().filename();
++    if (!ValidName(rex::path_to_utf8(name))) continue;
+     XCONTENT_AGGREGATE_DATA content_data{};
+-    if (ReadContentHeaderFile(rex::path_to_utf8(file_info.name), xuid, title_id,
+-                              content_type, content_data) == X_ERROR_SUCCESS) {
+-      result.emplace_back(std::move(content_data));
+-    } else {
+-      content_data.device_id = device_id;
+-      content_data.content_type = content_type;
+-      content_data.set_display_name(rex::path_to_utf16(file_info.name));
+-      content_data.set_file_name(rex::path_to_utf8(file_info.name));
+-      content_data.title_id = title_id;
+-      content_data.xuid = xuid;
+-      result.emplace_back(std::move(content_data));
+-    }
++    if (ReadContentHeaderFile(rex::path_to_utf8(name), xuid, title_id,
++                              content_type, content_data) != X_ERROR_SUCCESS)
++      content_data.set_display_name(rex::path_to_utf16(name));
++    // Routing comes from the directory being enumerated, never an old header.
++    content_data.device_id = device_id;
++    content_data.xuid = xuid;
++    content_data.title_id = title_id;
++    content_data.content_type = content_type;
++    content_data.set_file_name(rex::path_to_utf8(name));
++    result.emplace_back(std::move(content_data));
+   }
+ 
+   return result;
+@@ -266,11 +335,11 @@
+ }
+ 
+ X_RESULT ContentManager::WriteContentHeaderFile(uint64_t xuid, XCONTENT_AGGREGATE_DATA data,
+-                                                uint32_t license_mask) {
++                                                uint32_t license_mask) try {
+   if (data.title_id == uint32_t(-1)) {
+     data.title_id = kernel_state_->title_id();
+   }
+-  if (data.xuid == uint64_t(-1)) {
++  if (data.xuid == uint64_t(-1) || data.xuid == 0) {
+     data.xuid = xuid;
+   }
+   uint64_t used_xuid = (data.xuid != uint64_t(-1) && data.xuid != 0) ? uint64_t(data.xuid) : xuid;
+@@ -285,19 +354,15 @@
+     }
+   }
+ 
+-  rex::filesystem::CreateEmptyFile(header_path);
+-
+   auto file = rex::filesystem::OpenFile(header_path, "wb");
+   if (!file) {
+-    return X_ERROR_FILE_NOT_FOUND;
+-  }
+-  fwrite(&data, 1, sizeof(XCONTENT_AGGREGATE_DATA), file);
+-  if (license_mask != 0) {
+-    fwrite(&license_mask, 1, sizeof(license_mask), file);
+-  }
+-  fclose(file);
+-  return X_ERROR_SUCCESS;
+-}
++    return X_ERROR_ACCESS_DENIED;
++  }
++  bool ok = fwrite(&data, 1, sizeof(data), file) == sizeof(data);
++  if (license_mask != 0) ok = ok && fwrite(&license_mask, 1, sizeof(license_mask), file) == sizeof(license_mask);
++  if (fclose(file)) ok = false;
++  return ok ? X_ERROR_SUCCESS : X_ERROR_ACCESS_DENIED;
++} catch (const std::filesystem::filesystem_error&) { return X_ERROR_ACCESS_DENIED; }
+ 
+ X_RESULT ContentManager::ReadContentHeaderFile(const std::string_view file_name, uint64_t xuid,
+                                                uint32_t title_id, XContentType content_type,
+@@ -333,7 +398,14 @@
+ }
+ 
+ X_RESULT ContentManager::CreateContent(const std::string_view root_name, uint64_t xuid,
+-                                       const XCONTENT_AGGREGATE_DATA& data) {
++                                       const XCONTENT_AGGREGATE_DATA& data) try {
++  auto storage_lock = global_critical_region_.Acquire();
++  RetireStaleSaves();
++  std::string occupied;
++  if (!ValidName(root_name)) return X_ERROR_INVALID_PARAMETER;
++  if (kernel_state_->file_system()->FindSymbolicLink(std::string(root_name) + ':', occupied))
++    return X_ERROR_ALREADY_EXISTS;
++
+   {
+     auto global_lock = global_critical_region_.Acquire();
+     if (open_packages_.count(string::string_key_case(root_name))) {
+@@ -348,6 +420,14 @@
+   if (!std::filesystem::create_directories(package_path)) {
+     return X_ERROR_ACCESS_DENIED;
+   }
++  const auto header_result = WriteContentHeaderFile(xuid, data);
++  if (header_result != X_ERROR_SUCCESS) {
++    // The mount has not been published. Remove only our empty new directory;
++    // never recursively remove a path after a failed metadata transaction.
++    std::error_code ec;
++    std::filesystem::remove(package_path, ec);
++    return header_result;
++  }
+   auto package = ResolvePackage(root_name, xuid, data);
+   assert_not_null(package);
+ 
+@@ -359,11 +439,18 @@
+     open_packages_.insert({string::string_key_case::create(root_name), package.release()});
+   }
+   return X_ERROR_SUCCESS;
+-}
++} catch (const std::filesystem::filesystem_error&) { return X_ERROR_ACCESS_DENIED; }
+ 
+ X_RESULT ContentManager::OpenContent(const std::string_view root_name, uint64_t xuid,
+                                      const XCONTENT_AGGREGATE_DATA& data,
+-                                     uint32_t& content_license) {
++                                     uint32_t& content_license) try {
++  auto storage_lock = global_critical_region_.Acquire();
++  RetireStaleSaves();
++  std::string occupied;
++  if (!ValidName(root_name)) return X_ERROR_INVALID_PARAMETER;
++  if (kernel_state_->file_system()->FindSymbolicLink(std::string(root_name) + ':', occupied))
++    return X_ERROR_ALREADY_EXISTS;
++
+   {
+     auto global_lock = global_critical_region_.Acquire();
+     if (open_packages_.count(string::string_key_case(root_name))) {
+@@ -389,7 +476,7 @@
+     open_packages_.insert({string::string_key_case::create(root_name), package.release()});
+   }
+   return X_ERROR_SUCCESS;
+-}
++} catch (const std::filesystem::filesystem_error&) { return X_ERROR_ACCESS_DENIED; }
+ 
+ X_RESULT ContentManager::CloseContent(const std::string_view root_name) {
+   ContentPackage* package = nullptr;
+@@ -400,48 +487,54 @@
+     if (it == open_packages_.end()) {
+       return X_ERROR_FILE_NOT_FOUND;
+     }
++    const auto flushed = FlushContent(it->first.view());
++    if (flushed != X_ERROR_SUCCESS) return flushed;
+     package = DetachPackage(it);
++  }
++  if (package->GetPackageContentData().content_type == XContentType::kSavedGame) {
++    package->DetachRoot();
+   }
+   delete package;
+   return X_ERROR_SUCCESS;
+ }
+ 
+ X_RESULT ContentManager::GetContentThumbnail(uint64_t xuid, const XCONTENT_AGGREGATE_DATA& data,
+-                                             std::vector<uint8_t>* buffer) {
++                                             std::vector<uint8_t>* buffer) try {
+   auto global_lock = global_critical_region_.Acquire();
+   auto package_path = ResolvePackagePath(xuid, data);
+   auto thumb_path = package_path / kThumbnailFileName;
+   if (std::filesystem::exists(thumb_path)) {
+     auto file = rex::filesystem::OpenFile(thumb_path, "rb");
++    if (!file) return X_ERROR_ACCESS_DENIED;
+     fseek(file, 0, SEEK_END);
+     size_t file_len = ftell(file);
+     fseek(file, 0, SEEK_SET);
+     buffer->resize(file_len);
+-    fread(const_cast<uint8_t*>(buffer->data()), 1, buffer->size(), file);
++    const bool ok = fread(buffer->data(), 1, buffer->size(), file) == buffer->size();
+     fclose(file);
+-    return X_ERROR_SUCCESS;
++    return ok ? X_ERROR_SUCCESS : X_ERROR_ACCESS_DENIED;
+   } else {
+     return X_ERROR_FILE_NOT_FOUND;
+   }
+-}
++} catch (const std::filesystem::filesystem_error&) { return X_ERROR_ACCESS_DENIED; }
+ 
+ X_RESULT ContentManager::SetContentThumbnail(uint64_t xuid, const XCONTENT_AGGREGATE_DATA& data,
+-                                             std::vector<uint8_t> buffer) {
++                                             std::vector<uint8_t> buffer) try {
+   auto global_lock = global_critical_region_.Acquire();
+   auto package_path = ResolvePackagePath(xuid, data);
+-  std::filesystem::create_directories(package_path);
+   if (std::filesystem::exists(package_path)) {
+     auto thumb_path = package_path / kThumbnailFileName;
+     auto file = rex::filesystem::OpenFile(thumb_path, "wb");
+-    fwrite(buffer.data(), 1, buffer.size(), file);
+-    fclose(file);
+-    return X_ERROR_SUCCESS;
++    if (!file) return X_ERROR_ACCESS_DENIED;
++    bool ok = fwrite(buffer.data(), 1, buffer.size(), file) == buffer.size();
++    if (fclose(file)) ok = false;
++    return ok ? X_ERROR_SUCCESS : X_ERROR_ACCESS_DENIED;
+   } else {
+     return X_ERROR_FILE_NOT_FOUND;
+   }
+-}
+-
+-X_RESULT ContentManager::DeleteContent(uint64_t xuid, const XCONTENT_AGGREGATE_DATA& data) {
++} catch (const std::filesystem::filesystem_error&) { return X_ERROR_ACCESS_DENIED; }
++
++X_RESULT ContentManager::DeleteContent(uint64_t xuid, const XCONTENT_AGGREGATE_DATA& data) try {
+   auto global_lock = global_critical_region_.Acquire();
+ 
+   if (IsContentOpen(data)) {
+@@ -461,12 +554,13 @@
+       ResolvePackageHeaderPath(data.file_name(), used_xuid, data.title_id, data.content_type);
+   std::error_code ec2;
+   bool header_removed = std::filesystem::remove(header_path, ec2);
++  if (ec2) return X_ERROR_ACCESS_DENIED;
+ 
+   if (dir_removed > 0 || header_removed) {
+     return X_ERROR_SUCCESS;
+   }
+   return X_ERROR_FILE_NOT_FOUND;
+-}
++} catch (const std::filesystem::filesystem_error&) { return X_ERROR_ACCESS_DENIED; }
+ 
+ X_RESULT ContentManager::UnmountContent(uint64_t xuid, const XCONTENT_AGGREGATE_DATA& data) {
+   ContentPackage* package = nullptr;
+@@ -476,7 +570,12 @@
+     if (it == open_packages_.end()) {
+       return X_ERROR_FILE_NOT_FOUND;
+     }
++    const auto flushed = FlushContent(it->first.view());
++    if (flushed != X_ERROR_SUCCESS) return flushed;
+     package = DetachPackage(it);
++  }
++  if (package->GetPackageContentData().content_type == XContentType::kSavedGame) {
++    package->DetachRoot();
+   }
+   delete package;
+   return X_ERROR_SUCCESS;
+@@ -510,6 +609,7 @@
+ 
+   std::error_code ec2;
+   bool header_removed = std::filesystem::remove(header_path, ec2);
++  if (ec2) return X_ERROR_ACCESS_DENIED;
+ 
+   if (dir_removed > 0 || header_removed) {
+     return X_ERROR_SUCCESS;
+@@ -546,7 +646,7 @@
+     // Match on content_type + file_name + resolved title_id.
+     // device_id is a virtual storage selector, not a content identifier.
+     if (data.content_type == pkg.content_type && data.file_name() == pkg.file_name() &&
+-        query_title == pkg_title) {
++        query_title == pkg_title && data.xuid == pkg.xuid) {
+       return it;
+     }
+   }
+@@ -556,7 +656,9 @@
+ ContentPackage* ContentManager::DetachPackage(
+     std::unordered_map<string::string_key_case, ContentPackage*,
+                        string::string_key_case::Hash>::iterator it) {
+-  CloseOpenedFilesFromContent(it->first.view());
++  // Save devices retain entry ownership for outstanding/duplicated handles.
++  if (it->second->GetPackageContentData().content_type != XContentType::kSavedGame)
++    CloseOpenedFilesFromContent(it->first.view());
+   ContentPackage* package = it->second;
+   open_packages_.erase(it);
+   return package;
+@@ -564,7 +666,8 @@
+ 
+ bool ContentManager::IsContentOpen(const XCONTENT_AGGREGATE_DATA& data) const {
+   return std::any_of(open_packages_.cbegin(), open_packages_.cend(), [&data](const auto& content) {
+-    return data == content.second->GetPackageContentData();
++    return data.xuid == content.second->GetPackageContentData().xuid &&
++           data == content.second->GetPackageContentData();
+   });
+ }
+ 
+@@ -583,7 +686,8 @@
+       kernel_state_->object_table()->GetObjectsByType<XFile>(XObject::Type::File);
+ 
+   std::string resolved_path = "";
+-  kernel_state_->file_system()->FindSymbolicLink(std::string(root_name) + ':', resolved_path);
++  if (!kernel_state_->file_system()->FindSymbolicLink(std::string(root_name) + ':', resolved_path) ||
++      resolved_path.empty()) return;
+ 
+   for (const object_ref<XFile>& file : all_files_handles) {
+     std::string file_path = file->entry()->absolute_path();
+--- a/src/kernel/xam/xam_content.cpp
++++ b/src/kernel/xam/xam_content.cpp
+@@ -36,6 +36,36 @@
+ using namespace rex::system;
+ using namespace rex::system::xam;
+ 
++// A save operation captures a real connected identity, never a display name.
++static X_RESULT ContentUser(uint32_t index, XCONTENT_AGGREGATE_DATA& data, uint64_t& xuid) {
++  if (!ContentManager::ValidName(data.file_name())) return X_ERROR_INVALID_PARAMETER;
++  if (!GetDummyDeviceInfo(data.device_id) || data.device_id != 1)
++    return X_ERROR_DEVICE_NOT_CONNECTED;
++  if (data.content_type == XContentType::kSavedGame) {
++    auto identity = REX_KERNEL_STATE()->user_profile()->identity();
++    if (index != 0 || !identity.signin_state) return X_ERROR_NO_SUCH_USER;
++    xuid = identity.xuid;
++    data.xuid = xuid;
++    data.title_id = REX_KERNEL_STATE()->title_id();
++  } else xuid = REX_KERNEL_STATE()->user_profile()->xuid();
++  return X_ERROR_SUCCESS;
++}
++
++class SaveEnumerator final : public XStaticEnumerator<XCONTENT_DATA> {
++ public:
++  SaveEnumerator(KernelState* state, size_t count, bool saved)
++      : XStaticEnumerator(state, count), user_(saved ? state->user_profile() : nullptr),
++        epoch_(user_ ? user_->storage_epoch() : 0) {}
++  uint32_t WriteItems(uint32_t address, uint8_t* bytes, uint32_t* count) override {
++    auto lock = rex::thread::global_critical_region::AcquireDirect();
++    if (user_ && epoch_ != user_->storage_epoch()) { *count = 0; return X_ERROR_NO_SUCH_USER; }
++    return XStaticEnumerator::WriteItems(address, bytes, count);
++  }
++ private:
++  UserProfile* user_;
++  uint64_t epoch_;
++};
++
+ u32 XamContentGetAttributesInternal_entry(mapped_void content, mapped_void attributes,
+                                         mapped_void overlapped) {
+   X_RESULT result = X_ERROR_INVALID_PARAMETER;
+@@ -86,7 +116,13 @@
+ u32 XamContentCreateEnumerator_entry(u32 user_index, u32 device_id, u32 content_type,
+                                      u32 content_flags, u32 items_per_enumerate,
+                                      mapped_u32 buffer_size_ptr, mapped_u32 handle_out) {
+-  assert_not_null(handle_out);
++  auto storage_lock = rex::thread::global_critical_region::AcquireDirect();
++  if (!handle_out || !items_per_enumerate || items_per_enumerate > UINT32_MAX / sizeof(XCONTENT_DATA))
++    return X_ERROR_INVALID_PARAMETER;
++  *handle_out = 0;
++  const bool saved = content_type == uint32_t(XContentType::kSavedGame);
++  const auto identity = REX_KERNEL_STATE()->user_profile()->identity();
++  if (saved && (user_index != 0 || !identity.signin_state)) return X_ERROR_NO_SUCH_USER;
+ 
+   auto device_info = device_id == 0 ? nullptr : GetDummyDeviceInfo(device_id);
+   if ((device_id && device_info == nullptr) || !handle_out) {
+@@ -102,12 +138,13 @@
+ 
+   uint64_t xuid = REX_KERNEL_STATE()->user_profile()->xuid();
+ 
+-  auto e = make_object<XStaticEnumerator<XCONTENT_DATA>>(REX_KERNEL_STATE(), items_per_enumerate);
++  auto e = make_object<SaveEnumerator>(REX_KERNEL_STATE(), items_per_enumerate, saved);
+   auto result = e->Initialize(0xFF, 0xFE, 0x20005, 0x20007, 0);
+   if (XFAILED(result)) {
+     return result;
+   }
+ 
++  try {
+   if (!device_info || device_info->device_id == DummyDeviceId::HDD) {
+     // Enumerate user-specific content
+     auto content_datas = REX_KERNEL_STATE()->content_manager()->ListContent(
+@@ -118,7 +155,7 @@
+     }
+ 
+     // Also enumerate common content (xuid=0)
+-    if (xuid != 0) {
++    if (!saved && xuid != 0) {
+       auto common_datas = REX_KERNEL_STATE()->content_manager()->ListContent(
+           static_cast<uint32_t>(DummyDeviceId::HDD), 0, XContentType(uint32_t(content_type)));
+       for (const auto& content_data : common_datas) {
+@@ -132,6 +169,11 @@
+     // TODO(gibbed): disc drive content
+   }
+ 
++  } catch (const std::filesystem::filesystem_error&) {
++    e->ReleaseHandle();
++    if (buffer_size_ptr) *buffer_size_ptr = 0;
++    return X_ERROR_ACCESS_DENIED;
++  }
+   REXKRNL_DEBUG("XamContentCreateEnumerator: added {} items to enumerator", e->item_count());
+ 
+   *handle_out = e->handle();
+@@ -144,21 +186,21 @@
+                        u32 content_data_size, u32 flags, mapped_u32 disposition_ptr,
+                        mapped_u32 license_mask_ptr, u32 cache_size, u64 content_size,
+                        mapped_void overlapped_ptr) {
+-  uint64_t xuid = REX_KERNEL_STATE()->user_profile()->xuid();
+-
++  auto storage_lock = rex::thread::global_critical_region::AcquireDirect();
++  if (!content_data_ptr || !root_name || !ContentManager::ValidName(root_name.value()))
++    return X_ERROR_INVALID_PARAMETER;
++  uint64_t xuid = 0;
+   XCONTENT_AGGREGATE_DATA content_data;
+   if (content_data_size == sizeof(XCONTENT_DATA)) {
+     content_data = *content_data_ptr.as<XCONTENT_DATA*>();
++    auto error = ContentUser(user_index, content_data, xuid);
++    if (error) return error;
+   } else if (content_data_size == sizeof(XCONTENT_AGGREGATE_DATA)) {
+     content_data = *content_data_ptr.as<XCONTENT_AGGREGATE_DATA*>();
+-    // Internal records name their owner. Zero is shared content, not the
+-    // current profile (original XAM 17559 path builder 0x8167F690).
+-    if (content_data.xuid == uint64_t(0)) xuid = 0;
+-  } else {
+-    assert_always();
+-    return X_ERROR_INVALID_PARAMETER;
+-  }
+-
++    if (!ContentManager::ValidName(content_data.file_name())) return X_ERROR_INVALID_PARAMETER;
++    xuid = content_data.xuid;
++  } else return X_ERROR_INVALID_PARAMETER;
++  const auto epoch = REX_KERNEL_STATE()->user_profile()->storage_epoch();
+   if (content_data.content_type == XContentType::kMarketplaceContent) {
+     xuid = 0;
+   }
+@@ -169,10 +211,22 @@
+     *disposition_ptr = 0;
+   }
+ 
+-  auto run = [content_manager, xuid, root_name = root_name.value(), flags, content_data,
++  auto run = [content_manager, xuid, epoch, root_name = std::string(root_name.value()), flags, content_data,
+               disposition_ptr,
+               license_mask_ptr](uint32_t& extended_error, uint32_t& length) -> X_RESULT {
++    auto lock = rex::thread::global_critical_region::AcquireDirect();
++    extended_error = X_HRESULT_FROM_WIN32(X_ERROR_NO_SUCH_USER);
++    length = 0;
++    if (content_data.content_type == XContentType::kSavedGame &&
++        epoch != REX_KERNEL_STATE()->user_profile()->storage_epoch()) return X_ERROR_NO_SUCH_USER;
++    content_manager->RetireStaleSaves();
+     X_RESULT result = X_ERROR_INVALID_PARAMETER;
++    try {
++    std::string occupied;
++    if (REX_KERNEL_STATE()->file_system()->FindSymbolicLink(root_name + ':', occupied)) {
++      extended_error = X_HRESULT_FROM_WIN32(X_ERROR_ALREADY_EXISTS);
++      return X_ERROR_ALREADY_EXISTS;
++    }
+     kDispositionState disposition = kDispositionState::Unknown;
+     switch (flags & 0xF) {
+       case 1:  // CREATE_NEW
+@@ -183,21 +237,15 @@
+           disposition = kDispositionState::Create;
+         }
+         break;
+-      case 2:  // CREATE_ALWAYS
+-               // Overwrite existing, if any.
+-        // Close any existing mount under this root name first.
+-        // Games may reuse the same root without explicitly closing.
+-        content_manager->CloseContent(root_name);
++      case 2:  // CREATE_ALWAYS: failure must not become a successful open.
++        if (!content_manager->GetOpenPackagePath(root_name).empty()) {
++          result = X_ERROR_ALREADY_EXISTS; break;
++        }
+         if (content_manager->ContentExists(xuid, content_data)) {
+-          content_manager->DeleteContent(xuid, content_data);
++          result = content_manager->DeleteContent(xuid, content_data);
++          if (result != X_ERROR_SUCCESS) break;
+         }
+-        // Check filesystem state after deletion attempt to decide
+-        // whether to create fresh or open existing.
+-        if (content_manager->ContentExists(xuid, content_data)) {
+-          disposition = kDispositionState::Open;
+-        } else {
+-          disposition = kDispositionState::Create;
+-        }
++        disposition = kDispositionState::Create;
+         break;
+       case 3:  // OPEN_EXISTING
+                // Open only if exists.
+@@ -220,34 +268,31 @@
+         if (!content_manager->ContentExists(xuid, content_data)) {
+           result = X_ERROR_PATH_NOT_FOUND;
+         } else {
+-          content_manager->CloseContent(root_name);
+-          content_manager->DeleteContent(xuid, content_data);
+-          if (content_manager->ContentExists(xuid, content_data)) {
+-            disposition = kDispositionState::Open;
+-          } else {
+-            disposition = kDispositionState::Create;
++          if (!content_manager->GetOpenPackagePath(root_name).empty()) {
++            result = X_ERROR_ALREADY_EXISTS; break;
+           }
++          result = content_manager->DeleteContent(xuid, content_data);
++          if (result == X_ERROR_SUCCESS) disposition = kDispositionState::Create;
+         }
+         break;
+       default:
+-        assert_unhandled_case(flags & 0xF);
++        result = X_ERROR_INVALID_PARAMETER;
+         break;
+     }
+ 
+     uint32_t content_license = 0;
+     if (disposition == kDispositionState::Create) {
+       result = content_manager->CreateContent(root_name, xuid, content_data);
+-      if (XSUCCEEDED(result)) {
+-        content_manager->WriteContentHeaderFile(xuid, content_data);
+-      }
++
+     } else if (disposition == kDispositionState::Open) {
+       result = content_manager->OpenContent(root_name, xuid, content_data, content_license);
+     }
+ 
+-    if (license_mask_ptr && XSUCCEEDED(result)) {
++    if (license_mask_ptr && result == X_ERROR_SUCCESS) {
+       *license_mask_ptr = content_license;
+     }
+ 
++    if (result != X_ERROR_SUCCESS) disposition = kDispositionState::Unknown;
+     if (disposition_ptr) {
+       *disposition_ptr = static_cast<uint32_t>(disposition);
+     }
+@@ -255,6 +300,11 @@
+     extended_error = X_HRESULT_FROM_WIN32(result);
+     length = static_cast<uint32_t>(disposition);
+     return result;
++    } catch (const std::filesystem::filesystem_error&) {
++      extended_error = X_HRESULT_FROM_WIN32(X_ERROR_ACCESS_DENIED);
++      length = 0;
++      return X_ERROR_ACCESS_DENIED;
++    }
+   };
+ 
+   if (!overlapped_ptr) {
+@@ -297,7 +347,8 @@
+ }
+ 
+ u32 XamContentFlush_entry(mapped_string root_name, mapped_void overlapped_ptr) {
+-  X_RESULT result = X_ERROR_SUCCESS;
++  X_RESULT result = root_name ? REX_KERNEL_STATE()->content_manager()->FlushContent(root_name.value())
++                              : X_ERROR_INVALID_PARAMETER;
+   if (overlapped_ptr) {
+     REX_KERNEL_STATE()->CompleteOverlappedImmediate(overlapped_ptr.guest_address(), result);
+     return X_ERROR_IO_PENDING;
+@@ -320,11 +371,16 @@
+ 
+ u32 XamContentGetCreator_entry(u32 user_index, mapped_void content_data_ptr,
+                                mapped_u32 is_creator_ptr, mapped_u64 creator_xuid_ptr,
+-                               mapped_void overlapped_ptr) {
++                               mapped_void overlapped_ptr) try {
+   auto result = X_ERROR_SUCCESS;
+ 
+-  uint64_t xuid = REX_KERNEL_STATE()->user_profile()->xuid();
++  auto storage_lock = rex::thread::global_critical_region::AcquireDirect();
++  if (!content_data_ptr) return X_ERROR_INVALID_PARAMETER;
++  uint64_t xuid = 0;
+   XCONTENT_AGGREGATE_DATA content_data = *content_data_ptr.as<XCONTENT_DATA*>();
++  const auto identity_error = ContentUser(user_index, content_data, xuid);
++  if (identity_error) return identity_error;
++  REX_KERNEL_STATE()->content_manager()->RetireStaleSaves();
+ 
+   bool content_exists = REX_KERNEL_STATE()->content_manager()->ContentExists(xuid, content_data);
+ 
+@@ -351,15 +407,27 @@
+   } else {
+     return result;
+   }
+-}
++ } catch (const std::filesystem::filesystem_error&) {
++  if (overlapped_ptr) {
++    REX_KERNEL_STATE()->CompleteOverlappedImmediate(overlapped_ptr.guest_address(), X_ERROR_ACCESS_DENIED);
++    return X_ERROR_IO_PENDING;
++  }
++  return X_ERROR_ACCESS_DENIED;
++}
++
+ 
+ u32 XamContentGetThumbnail_entry(u32 user_index, mapped_void content_data_ptr,
+                                  mapped_void buffer_ptr, mapped_u32 buffer_size_ptr,
+                                  mapped_void overlapped_ptr) {
+-  assert_not_null(buffer_size_ptr);
++  if (!buffer_size_ptr) return X_ERROR_INVALID_PARAMETER;
+   uint32_t buffer_size = *buffer_size_ptr;
+-  uint64_t xuid = REX_KERNEL_STATE()->user_profile()->xuid();
++  auto storage_lock = rex::thread::global_critical_region::AcquireDirect();
++  if (!content_data_ptr) return X_ERROR_INVALID_PARAMETER;
++  uint64_t xuid = 0;
+   XCONTENT_AGGREGATE_DATA content_data = *content_data_ptr.as<XCONTENT_DATA*>();
++  const auto identity_error = ContentUser(user_index, content_data, xuid);
++  if (identity_error) return identity_error;
++  REX_KERNEL_STATE()->content_manager()->RetireStaleSaves();
+ 
+   // Get thumbnail (if it exists).
+   std::vector<uint8_t> buffer;
+@@ -368,7 +436,7 @@
+ 
+   *buffer_size_ptr = uint32_t(buffer.size());
+ 
+-  if (XSUCCEEDED(result)) {
++  if (result == X_ERROR_SUCCESS) {
+     // Write data, if we were given a pointer.
+     // This may have just been a size query.
+     if (buffer_ptr) {
+@@ -393,9 +461,15 @@
+ u32 XamContentSetThumbnail_entry(u32 user_index, mapped_void content_data_ptr,
+                                  mapped_void buffer_ptr, u32 buffer_size,
+                                  mapped_void overlapped_ptr) {
+-  uint64_t xuid = REX_KERNEL_STATE()->user_profile()->xuid();
++  auto storage_lock = rex::thread::global_critical_region::AcquireDirect();
++  if (!content_data_ptr) return X_ERROR_INVALID_PARAMETER;
++  uint64_t xuid = 0;
+   XCONTENT_AGGREGATE_DATA content_data = *content_data_ptr.as<XCONTENT_DATA*>();
+-
++  const auto identity_error = ContentUser(user_index, content_data, xuid);
++  if (identity_error) return identity_error;
++  REX_KERNEL_STATE()->content_manager()->RetireStaleSaves();
++
++  if (!buffer_ptr && buffer_size) return X_ERROR_INVALID_PARAMETER;
+   // Buffer is PNG data.
+   auto buffer = std::vector<uint8_t>((uint8_t*)buffer_ptr, (uint8_t*)buffer_ptr + buffer_size);
+   auto result = REX_KERNEL_STATE()->content_manager()->SetContentThumbnail(xuid, content_data,
+@@ -411,8 +485,13 @@
+ 
+ u32 XamContentDelete_entry(u32 user_index, mapped_void content_data_ptr,
+                            mapped_void overlapped_ptr) {
+-  uint64_t xuid = REX_KERNEL_STATE()->user_profile()->xuid();
++  auto storage_lock = rex::thread::global_critical_region::AcquireDirect();
++  if (!content_data_ptr) return X_ERROR_INVALID_PARAMETER;
++  uint64_t xuid = 0;
+   XCONTENT_AGGREGATE_DATA content_data = *content_data_ptr.as<XCONTENT_DATA*>();
++  const auto identity_error = ContentUser(user_index, content_data, xuid);
++  if (identity_error) return identity_error;
++  REX_KERNEL_STATE()->content_manager()->RetireStaleSaves();
+ 
+   auto result = REX_KERNEL_STATE()->content_manager()->DeleteContent(xuid, content_data);
+ 
