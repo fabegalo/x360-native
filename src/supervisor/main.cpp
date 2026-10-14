@@ -110,6 +110,7 @@ Captured Capture(const ProjectPaths& p, const fs::path& exe, std::vector<std::st
   fs::create_directories(tmp, ec);
   ProcessSpec spec{exe, std::move(args), {}, tmp / "out.txt", tmp / "err.txt",
                    std::chrono::seconds(60)};
+  spec.no_console = true;  // Helper output is captured; no auxiliary console.
   auto r = RunProcess(spec);
   Captured c;
   if (!r.launched) {
@@ -466,6 +467,7 @@ int Run(const ProjectPaths& p, const fs::path& exe_in, std::vector<std::string> 
   ProcessSpec spec{exe, args, exe.parent_path(), dir / "stdout.log", dir / "stderr.log",
                    std::chrono::seconds(timeout_s)};
   spec.capture_crash = crash_stack;
+  spec.no_console = true;  // Keep the title GUI, with logs in the run directory.
   if (window) spec.should_cancel = [window] { return window->closed(); };
   fmt::print("run: {} (working dir {}) -> {}\n", PathUtf8(exe), PathUtf8(spec.working_dir),
              PathUtf8(dir));
