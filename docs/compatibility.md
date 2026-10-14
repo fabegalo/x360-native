@@ -1,5 +1,17 @@
 # Matriz de resultados
 
+## Native D3D12 — N3, 2026-10-14
+
+Resultado separado do Xenos: Retail 17559 (boot direto) → My Games → Castle
+Crashers 584108B7/0.0.1.3 → retorno original à dashboard demonstrado. Imagens
+originais, seleção de personagem/cena/pausa e entrada manual confirmada pelo
+mantenedor, no modo trial do conteúdo local. Mesma janela, perfil e Native
+global; Castle exit 0, sem timeout. Desempenho ainda lento, campanha e save/load
+não certificados. Forza foi lançado pela My Games; scanout/amostragem RGB10
+corrigidos, mas o próximo draw PointList ainda é recusado com exit 78, sem
+gameplay. Não herda a compatibilidade Xenos. Vulkan indisponível.
+[Evidências e limites](native-renderer-n3.md).
+
 ## Universal Library — preview.20 candidate
 
 Import capability is separate from execution compatibility. Valid ISO/GDFX,

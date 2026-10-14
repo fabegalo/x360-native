@@ -14,7 +14,9 @@ executado, com fronteira própria para Vulkan futuro e Xenos mantido como padrã
 o fixture com readback não é benchmark de FPS. A meta competitiva frente ao
 Pinyon exige cenas equivalentes, mesma fidelidade, 1% low/P95/P99, CPU/GPU,
 RAM/VRAM e pacing, sem mudar física/áudio/simulação. Ainda não há resultado
-competitivo nem suporte gráfico Native a dashboard/Forza; P1/P2/P3 preservados.
+competitivo. Native N3 demonstrou dashboard e ciclo Castle em modo trial, mas
+continua lento; Forza Native não está certificado. [Resultados N3](native-renderer-n3.md).
+P1/P2/P3 preservados.
 
 ## Instrumentação
 

@@ -336,6 +336,13 @@ com capturas reais comparadas ao Xenos e testes focados. Os itens gerais acima
 continuam abertos: diferenças de pixels, Guide/avatares, transições para jogos,
 Vulkan e desempenho não estão certificados. [Resultados e limites](native-renderer-n2.md).
 
+**Evidência parcial Native N3 (2026-10-14):** ciclo original 17559 (boot direto)
+→ My Games → Castle Crashers em modo trial → dashboard confirmado com participação
+manual do mantenedor, gráficos reais e entrada; janela, perfil e renderer global
+preservados. Castle encerrou pelo loader original com exit 0, sem timeout.
+Lentidão permanece; não fecha os itens gerais de fidelidade, campanha, áudio,
+simulação ou Vulkan. [Evidências e limites](native-renderer-n3.md).
+
 ## 12. Rede e periféricos especiais — P2
 
 Estes são objetivos adicionais de cobertura, não pré-requisitos para concluir o primeiro ciclo offline. Dependências de serviços externos devem permanecer separadas do suporte local.

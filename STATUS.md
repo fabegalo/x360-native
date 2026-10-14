@@ -1,5 +1,17 @@
 # STATUS
 
+Native N3 confirmou o primeiro ciclo de título comercial (2026-10-14): Retail
+17559 em boot direto → My Games → Castle Crashers 0.0.1.3 (trial original) →
+dashboard, com imagens reais e entrada manual confirmada pelo mantenedor.
+Mesmo HWND 1443902, XUID e Native global nos três processos; loader original
+retornou flags 0x100/1020 bytes, Castle exit 0 sem timeout. Correções de linkage
+VS/GS e RGBA4, cache com comparação integral de bytes e páginas de upload
+reutilizadas após fence. Desempenho ainda lento e não aprovado. Intro opcional
+para em screen extent query 0x5A; Vulkan continua indisponível. Forza Native foi
+lançado pela My Games; scanout/amostragem RGB10 corrigidos, próximo bloqueio
+real é PointList (primitiva 1, um vértice), sem gameplay. SDK/pin e 74
+patches preservados. [Evidências e limites](docs/native-renderer-n3.md).
+
 Native N2 demonstrou renderização original Retail 17559 (2026-10-14): Home,
 fontes, ícones e navegação Home → Games pelo executor D3D12 próprio. Shaders
 guest traduzidos, draws/estados/texturas, EDRAM e resolve executados sem delegar
