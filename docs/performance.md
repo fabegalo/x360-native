@@ -21,6 +21,11 @@ de CPU do processo (GetProcessTimes no Windows). CSV bufferizado, flush a cada
 60 swaps; encerramento forçado pode perder o final. O runner conserva margem
 após a janela e verifica cobertura. CSV e CPU por frame só são coletados quando
 habilitados. Configurar antes dos workers; flush após o produtor parar.
+Intervalos que cruzam as bordas são excluídos dos percentis; o JSON informa
+`boundary_excluded_ms` e `window_coverage_fraction`. Uma janela só é completa se
+o CSV cobre início/fim e os intervalos inteiros somam pelo menos 95% da duração
+pedida. Perda maior nas bordas permanece registrada e invalida a comparação,
+em vez de transformar uma longa espera atravessando o início em FPS artificial.
 
 | Métrica | Definição e limite |
 |---|---|
@@ -103,6 +108,16 @@ executa chamadas reais de `rex::perf`, valida totais e registra sete amostras de
 um/quatro writers com contadores independentes, habilitados/desabilitados.
 `scripts/benchmark-counters.ps1 -Executable <probe.exe> -Output <resultado.json>`
 limita a execução a 30 s. É uma carga sintética do runtime, não FPS de um jogo.
+
+```powershell
+scripts/devshell.cmd cmake --build .local/build/win-amd64 --config Release --target x360n_perf_counter_probe
+pwsh -File scripts/benchmark-counters.ps1 -Executable .local/build/win-amd64/tests/Release/x360n_perf_counter_probe.exe -Output .local/benchmarks/counters.json
+scripts/devshell.cmd ctest --test-dir .local/build/win-amd64 -C Release -R "x360n[.]benchmark"
+```
+
+O probe é `EXCLUDE_FROM_ALL`: compilado apenas quando solicitado. Testes CTest
+dos scripts são sintéticos e não lançam jogos. Os testes SDK dos contadores usam
+`sdkcheck.Performance` como filtro; não é necessário executar toda a suíte.
 
 Conferir capturas e logs antes do aceite: `scene_verified` nasce false. Se a cena
 não for a pedida, classificar o resultado como diagnóstico inválido para ela.

@@ -1,6 +1,7 @@
 # Pure reduction of the runtime CSV. No game launch or machine access.
 function Get-BenchmarkSummary {
  param([string]$Csv,[double]$StartSeconds,[double]$DurationSeconds,[int]$LogicalProcessors)
+ if($DurationSeconds -le 0 -or $StartSeconds -lt 0 -or $LogicalProcessors -lt 1){throw 'Invalid measurement window or processor count'}
  $rows=@(Import-Csv -LiteralPath $Csv)
  if($rows.Count -lt 2){throw 'Insufficient runtime frames'}
  $frames=[Collections.Generic.List[double]]::new()
@@ -46,7 +47,12 @@ function Get-BenchmarkSummary {
  [ordered]@{
   frame_source='completed guest XE_SWAP cadence, not display scanout or GPU duration'
   frames=$frames.Count;measured_seconds=$sum/1000
-  window_complete=([double]$rows[-1].runtime_elapsed_us/1e6 -ge $StartSeconds+$DurationSeconds)
+  requested_seconds=$DurationSeconds
+  window_coverage_fraction=$sum/(1000*$DurationSeconds)
+  boundary_excluded_ms=[Math]::Max(0,1000*$DurationSeconds-$sum)
+  window_complete=([double]$rows[0].runtime_elapsed_us/1e6 -le $StartSeconds -and
+    [double]$rows[-1].runtime_elapsed_us/1e6 -ge $StartSeconds+$DurationSeconds -and
+    $sum -ge .95*1000*$DurationSeconds)
   fps_mean=1000*$frames.Count/$sum;fps_1pct_low=1000/$slowMean
   frame_ms_mean=$sum/$frames.Count
   frame_ms_p95=$sorted[[Math]::Ceiling(.95*$sorted.Count)-1]

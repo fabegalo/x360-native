@@ -25,5 +25,14 @@ try {
  $rows | Select-Object -ExcludeProperty process_cpu_us -Property * | Export-Csv -NoTypeInformation $temp
  $r=Get-BenchmarkSummary $temp 0 2 4
  if($null -ne $r.process_cpu_ms_per_frame -or !$r.unavailable.process_cpu_ms_per_frame){throw 'Absent CPU provider fabricated'}
+ foreach($row in $rows){$row.runtime_elapsed_us+=200000}
+ $rows | Export-Csv -NoTypeInformation $temp
+ $r=Get-BenchmarkSummary $temp 0 1 4
+ if($r.window_complete -or $r.boundary_excluded_ms -lt 199){throw 'Late-starting CSV accepted as a full window'}
+ # A long interval crossing warmup must not silently remove most of a hitch.
+ $rows[0].runtime_elapsed_us=0
+ $rows | Export-Csv -NoTypeInformation $temp
+ $r=Get-BenchmarkSummary $temp .05 1 4
+ if($r.window_complete -or $r.window_coverage_fraction -ge .95){throw 'Boundary stall hidden'}
  'Benchmark reduction: FPS, tail, CPU, missing data and incomplete window passed'
 } finally {Remove-Item -LiteralPath $temp -ErrorAction SilentlyContinue}
