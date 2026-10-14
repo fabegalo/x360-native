@@ -20,6 +20,8 @@ public static class X360nKeys {
   [DllImport("user32.dll")] public static extern bool EnumChildWindows(IntPtr w, Callback cb, IntPtr p);
   [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr w, out uint pid);
   [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr w);
+  [DllImport("user32.dll")] public static extern IntPtr GetAncestor(IntPtr w, uint flags);
+  [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr w);
   public static IntPtr Find(int pid) {
     IntPtr result=IntPtr.Zero;
     Callback visit=(h,p)=> { uint owner; GetWindowThreadProcessId(h,out owner); if(owner==pid && IsWindowVisible(h)) result=h; return true; };
@@ -34,6 +36,8 @@ $keys = @{
     'W' = @(0x57, 0x11); 'A' = @(0x41, 0x1E); 'S' = @(0x53, 0x1F); 'D' = @(0x44, 0x20)
     'Backspace' = @(0x08, 0x0E); 'Semicolon' = @(0xBA, 0x27)
     'D1' = @(0x31, 0x02); 'D3' = @(0x33, 0x04)   # default LB / RB in --mnk_mode
+    'ShiftRight' = @(0x27, 0x4D); 'ShiftLeft' = @(0x25, 0x4B)
+    'ShiftDown' = @(0x28, 0x50); 'ShiftUp' = @(0x26, 0x48)
 }
 $deadline = (Get-Date).AddSeconds($WaitSeconds)
 $proc = $null
@@ -43,6 +47,9 @@ while ((Get-Date) -lt $deadline) {
     Start-Sleep -Milliseconds 250
 }
 if (-not $proc -or $hwnd -eq [IntPtr]::Zero) { Write-Error "no window for '$ProcessName'"; exit 1 }
+[void][X360nKeys]::SetForegroundWindow([X360nKeys]::GetAncestor($hwnd,2))
+[void][X360nKeys]::PostMessage($hwnd,0x0007,[IntPtr]::Zero,[IntPtr]::Zero)
+Start-Sleep -Milliseconds 200
 $t0 = Get-Date
 foreach ($step in $Steps.Split(',')) {
     $parts = $step.Trim().Split(':', 3)
@@ -51,13 +58,23 @@ foreach ($step in $Steps.Split(',')) {
     if ($wait -gt 0) { Start-Sleep -Milliseconds ([int]($wait * 1000)) }
     if (-not (Get-Process -Id $proc.Id -ErrorAction SilentlyContinue)) { Write-Host "process exited before step '$step'"; exit 2 }
     if ($parts[1] -eq 'key') {
+        [void][X360nKeys]::SetForegroundWindow([X360nKeys]::GetAncestor($hwnd,2))
+        [void][X360nKeys]::PostMessage($hwnd,0x0007,[IntPtr]::Zero,[IntPtr]::Zero)
+        Start-Sleep -Milliseconds 50
         $k = $keys[$parts[2]]
         if (-not $k) { throw "unknown key $($parts[2])" }
+        $shifted=$parts[2].StartsWith('Shift')
+        if ($shifted) {
+            [void][X360nKeys]::PostMessage($hwnd,0x0100,[IntPtr]0x10,[IntPtr](1 -bor (0x2A -shl 16)))
+            Start-Sleep -Milliseconds 30
+        }
         $down = [IntPtr](1 -bor ($k[1] -shl 16))
         $up = [IntPtr]([int64](1 -bor ($k[1] -shl 16) -bor (1 -shl 30)) -bor 0x80000000)
+        if ($shifted) { $down=[IntPtr]($down.ToInt64() -bor 0x01000000); $up=[IntPtr]($up.ToInt64() -bor 0x01000000) }
         [void][X360nKeys]::PostMessage($hwnd, 0x0100, [IntPtr]$k[0], $down)   # WM_KEYDOWN
         Start-Sleep -Milliseconds 120
         [void][X360nKeys]::PostMessage($hwnd, 0x0101, [IntPtr]$k[0], $up)     # WM_KEYUP
+        if ($shifted) { [void][X360nKeys]::PostMessage($hwnd,0x0101,[IntPtr]0x10,[IntPtr]([int64]0xC02A0001)) }
         Write-Host ("{0,6:N1}s key {1}" -f ((Get-Date) - $t0).TotalSeconds, $parts[2])
     } elseif ($parts[1] -eq 'shot') {
         & (Join-Path $PSScriptRoot 'capture-window.ps1') -ProcessName $ProcessName -Out $parts[2] -WaitSeconds 2 | Out-Null
