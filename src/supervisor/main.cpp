@@ -664,7 +664,7 @@ int Session(const ProjectPaths& paths, const fs::path& manifest, int timeout, bo
         if (result != kExitTimeout && IsWithin(active.manifest, paths.local() / "aot")) {
           fs::create_directories(paths.local() / "preparation");
           std::ofstream(paths.local() / "preparation" / (active.name + ".runtime-error"))
-              << "Runtime failed; supervisor result " << result << "\nReports: " << PathUtf8(paths.local() / "runs") << '\n';
+              << "Runtime failed; supervisor result " << result << "\nReport: " << PathUtf8(handoff.parent_path() / "report.json") << '\n';
         }
         return result;  // never relaunch after timeout/crash
       }

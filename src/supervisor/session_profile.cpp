@@ -80,7 +80,8 @@ SessionProfile LoadSessionProfile(const ProjectPaths& paths, const std::filesyst
       const auto id = PathUtf8(dir.path().filename());
       const auto candidate = dir.path() / PathFromUtf8(id + "_manifest.toml");
       if (root == paths.local() / "aot" &&
-          CheckPreparation(paths, id, candidate, paths.build() / "titles" / id / (id + ".exe"))) continue;
+          (std::filesystem::exists(paths.local() / "preparation" / (id + ".runtime-error")) ||
+           CheckPreparation(paths, id, candidate, paths.build() / "titles" / id / (id + ".exe")))) continue;
       if (std::filesystem::weakly_canonical(candidate) != manifest)
         p.launch_targets.push_back(candidate);
       } catch (const std::exception&) {

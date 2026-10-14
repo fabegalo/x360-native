@@ -395,6 +395,18 @@ TEST_CASE("missing runtime and interrupted build never qualify an old exe as pre
   CHECK(Inspect(f.paths, f.target).prepared);
 }
 
+TEST_CASE("runtime failure remains visible without discarding a verified build", "[generic-aot]") {
+  Fixture f; REQUIRE(Import(f.paths, f.target, f.source) == 2);
+  Write(f.target.exe, "native build"); f.Receipt();
+  REQUIRE(Inspect(f.paths, f.target).prepared);
+  const auto error = f.paths.local()/"preparation"/(f.target.id+".runtime-error");
+  Write(error, "Runtime failed\nReport: run/report.json\n");
+  const auto state=Inspect(f.paths,f.target);
+  CHECK_FALSE(state.prepared); CHECK(state.inputs_ok); CHECK(state.interrupted);
+  CHECK(std::find(state.issues.begin(),state.issues.end(),"Report: run/report.json")!=state.issues.end());
+  CHECK(fs::exists(f.target.exe));
+  fs::remove(error); CHECK(Inspect(f.paths,f.target).prepared);
+}
 TEST_CASE("original library registration validates all bytes and publishes the header last") {
   Fixture f; Import(f.paths, f.target, f.source);
   Write(f.target.exe, "prepared fixture"); f.Receipt();
