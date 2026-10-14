@@ -1,6 +1,248 @@
 # Forza Horizon — Windows x64 investigation, 2026-10-14
 
-## Original-library cycle investigation (in progress)
+## Completed original-library cycle — Retail 17559, Windows x64
+
+The complete requested Forza cycle passed in a normal `x360n session`, started
+through the original My Games UI, with prepared receipts and no alternate
+launcher, including revalidation after the shared initial-CPU correction.
+Final evidence: `.local/validation/forza-runtime/final-sdk-cycle/`.
+The observer attached to the already-launched game only collected exceptions;
+it did not launch the title, replace the supervisor or issue its return.
+
+| Transition | Run under `.local/runs/` | Observed result |
+|---|---|---|
+| Dashboard → My Games → Forza | `20261014T121150Z-session-0-dash_17559` | Original selection, content hash match; exit 0, no cancellation/timeout |
+| Forza → gameplay → Guide/Xbox Home | `20261014T121331Z-session-1-forza_horizon` | Rendering/input, original confirmation and reboot; exit 0, no cancellation/timeout; 344.832 seconds |
+| Return to Dashboard → My Games | `20261014T121923Z-session-2-dash_17559` | Same 17559, no repeated intro, profile retained and navigation responsive |
+
+All three children used parent HWND **7341630** and XUID **E00AD9FD043F47E5**
+(profile **Forza**). The game imported 1020 bytes, kind Image, flags zero.
+The original HUD called `XamLoaderRebootToDash` at **09:19:15.599 local time**,
+reason/user/flags zero and 1020 bytes. Five original termination callbacks
+completed; eight game audio frames drained, callbacks quiesced at 09:19:15.656,
+and execution completed at 09:19:15.662. The attached observer recorded
+`exit=0 captured=0`. The supervisor consumed kind Dashboard/flags zero and
+the next dashboard imported the same 1020-byte handoff at 09:19:25.276.
+
+Real screenshots, all from that single session:
+
+- `home.png`, `my-games.png`, `forza-selected.png`: original navigation/selection.
+- `forza-launch.png`, `start-screen.png`, `single-player.png`, `introduction.png`:
+  actual title launch and original menus.
+- `scene-progress.png`: car, road, traffic, minimap and HUD, 98 MPH in third gear.
+- `brake-response.png`: LT held 2500 ms, car moving in reverse at 22 MPH.
+- `acceleration-steering-response.png`: RT held 2500 ms then left steering 500 ms,
+  forward motion at 15 MPH in first gear and changed orientation/position.
+- `guide.png`, `xbox-home-confirmation.png`: original Guide over the race and Yes.
+- `dashboard-return.png`, `my-games-after-return.png`: actual returned dashboard
+  and responsive library with all three items still present.
+
+The captures include elapsed simulation time; they are functional input evidence,
+not a calibrated performance measurement. `actions.jsonl` records input duration,
+timestamp, PID and root/child window handles. `cycle-records.json` records process
+results and decoded handoffs. Launch-data SHA-256 is
+`403e56dcadd8ac10eb9c7d09862ee1551c12ddc32fba578986b8c6f47bca5e5f` outbound,
+and `1cfc9251644a358213d808b8088517b87a9f024bdf46198a3ed692b98b7373a7`
+for the original HUD's new return context. These are different contexts by design.
+
+Only after return and a new My Games capture, the test closed the platform window.
+The final dashboard report therefore says cancelled/kind WindowClose; that is
+explicit cleanup **after** acceptance, not evidence of the game's return.
+
+Normal final preparations: `.local/logs/dash-main-cpu-preparation.log`,
+`castle-main-cpu-preparation.log` and `forza-main-cpu-preparation.log`.
+Neither ISO extraction nor original
+module versions changed. All 71 SDK patches check successfully; patch 0071's
+seven files replay to the locked hashes (`sdk71-main-cpu-replay.log`). Focused tests:
+165 assertions/7 title-return cases, 5 assertions/1 SDL-drain case,
+790 assertions/20 C7/C8 cases and 127 assertions/4 ownership/version cases.
+Earlier metadata and content-launch checks are recorded below.
+
+The persistent-file comparison (`persistent-files-after.json`) retained all
+11 tracked paths: both profile stores, installed-content headers and five of the
+six Forza save/header files were byte-identical (10/11 hashes unchanged). The
+game's own `ForzaProfile` payload changed during play; it was not restored or
+replaced by the test. This does not certify a commercial save/load round trip.
+
+Remaining limits are explicit: GPU resolve/fetch warnings and module heap-release
+warnings remain; full visual fidelity, campaign and commercial save/load are
+outside this acceptance. One earlier AV at the scene transition had no captured
+stack and did not recur in two diagnostics or the final observed session; its
+cause is not claimed resolved. The original contents of experimental system
+region `8E030000` remain unknown. The host rejects a conflicting title-owned
+`media:` mapping, and other titles need their own verified presentation boundary
+to host Guide; generic launch routing and loader services have no Forza-ID branch.
+Reason 72/flag 0x100000 transport is tested but not an accepted dashboard route.
+The unprepared Charlie Murder item remains present, but the final library capture
+shows its package filename as the display fallback. Its installed header is
+byte-identical; launch is correctly rejected for missing prepared AOT. This
+cycle does not certify that title's metadata display or execution.
+
+The earlier complete cycle remains in `original-cycle-verified/`, runs
+`20261014T112333Z`, `112434Z`, `112947Z`, HWND 8586482. Both observed full cycles
+returned with game exit 0. The final run's verbose GPU logs rotated away its
+earliest startup lines; process arguments, binary hashes, input/window records,
+original loader return, debugger exit and returned-dashboard import are retained.
+
+## Investigation history (earlier partial results)
+
+### Shared-SDK Castle regression: initial processor
+
+The final shared-SDK regression selected Castle in original My Games, but run
+`20261014T113944Z-session-1-castle_crashers` failed before its menu. The bounded
+diagnostic in `castle-sdk71-crash/crash.txt` reproduced the null heap access at
+`8209BDD8`, called by `820A71E8`. Original `820B5EB8` reads PCR+0x10C to select
+the heap initialized for the initial processor. Fixing the audio worker on CPU4
+had removed one increment from the SDK's global default-CPU round robin, so the
+title's main thread no longer started on CPU0. This is a shared loader defect,
+not a disc/XBLA metadata or profile difference.
+
+Patch 0071 now gives `PrepareModuleLaunch` an explicit CPU0 creation mask;
+host-worker creation order cannot select the initial title processor. The test
+`initial title processor does not depend on preceding host workers` alternates
+default and CPU4 host workers and checks the main KTHREAD and guest-visible PCR.
+Replay with the SDK's LF policy matches all seven locked file hashes in
+`.local/logs/sdk71-main-cpu-replay.log`. Both real cycles were revalidated
+after this shared change; the final Forza acceptance is recorded above.
+
+Castle's final regression then passed in normal session HWND **7274664**:
+`20261014T115914Z-session-0-dash_17559` →
+`20261014T115940Z-session-1-castle_crashers` →
+`20261014T120025Z-session-2-dash_17559`. The user operated this session and
+explicitly confirmed Castle was normal. The Castle process ran 37.340 seconds,
+exit 0, no timeout/cancellation, zero stubs/errors/criticals. Its original
+`XamLoaderLaunchTitle(NULL, 0x100)` at 09:00:17.725 dispatched all three
+termination callbacks and exported 1020 bytes; the returned dashboard imported
+kind Dashboard/flags 0x100 with the same XUID E00AD9FD043F47E5. It then accepted
+another original-library request for Forza. That subsequent launch correctly
+failed receipt validation because Forza had not yet been prepared with the final
+lock. Evidence: `castle-final-cycle/supervisor.log`, `cycle-records.json`, and
+the three run reports. This final Castle regression has logs and human
+confirmation, **not new menu screenshots from the script**; do not repeat it.
+The preceding `115628Z` attempt selected Charlie Murder and was rejected for
+missing verified AOT; it is not a Castle failure or a successful game launch.
+
+Final focused tests after the CPU correction: 165 assertions in 7 title-return
+cases (`sdk71-main-cpu-return-tests.log`) and 790 assertions in 20 C7/C8 cases
+(`sdk71-main-cpu-c7-c8.log`). The latter used an isolated synthetic store under
+`.local/tmp/`, not the user's persistent profiles or saves.
+
+### Real launch from My Games and remaining return work
+
+The normal supervisor session `20261014T091835Z-session-0-dash_17559`
+launched `20261014T092009Z-session-1-forza_horizon` after selecting Forza in
+the original library. Both children used HWND `31394104` and the dashboard's
+XUID `E00AD9FD043F47E5`. The request used flags zero and 1020 launch-data bytes;
+the supervisor matched the installed XEX hash and launched the prepared AOT.
+The normal preparation logs are `forza-cycle-dashboard-preparation.log` and
+`forza-cycle-game-preparation.log` under `.local/logs/`.
+
+Real screenshots and timestamped input/window records are in
+`.local/validation/forza-runtime/original-cycle-1/`:
+`home.png`, `my-games.png`, `forza-selected.png`, `single-player.png`,
+`gameplay-start.png` and `brake-response.png`. The driving scene shows the
+car, road, traffic and HUD. After LT input, the displayed speed fell from
+159 to 19 MPH (captures include elapsed simulation time).
+
+The original pause menu's **Quit** explicitly says it returns to the title
+screen (`quit-dialog.png`); accepting it did exactly that (`title-after-quit.png`).
+It did not issue a loader/dashboard request. Closing the bounded test afterward
+was cleanup, not a demonstrated return. The full cycle remains unproven until
+the original system Guide can request Dashboard from the game's process.
+
+The in-progress host reuses the 17559 XUI/HUD implementations and verifies that
+dashboard's original assets. Forza's original swap wrapper `82C3F200` identifies
+the two front-buffer texture headers. Composition runs once before the original
+`824079B8` resolve of one of those headers; drawing at the swap itself was too
+late. An earlier diagnostic hook at `829F0298` was never reached. Original XUI
+initialization exposed a dependency on `8E03860A`, inside the existing 17559
+experimental system region. Its original contents remain unknown; this is not
+a newly verified system-memory implementation. Diagnostics are separate from
+the normal supervisor acceptance session.
+
+### Original Guide return diagnostics (not acceptance)
+
+The first final-preparation attempt (`original-cycle-final/`, runs
+`20261014T105645Z-session-0-dash_17559` and
+`20261014T105803Z-session-1-forza_horizon`) launched from My Games with the same
+HWND `2883814`, XUID and 1020-byte context. Dashboard exited normally, but Forza
+exited with `STATUS_ACCESS_VIOLATION` at the introduction/scene transition.
+That normal run did not capture a stack; it is a failed acceptance attempt.
+
+`gameplay-crash-1/` then reached gameplay with the same binaries and real launch
+data under a debugger, without reproducing that fault. Guide input did not open
+the HUD during driving, and the bounded diagnostic required timeout cleanup.
+The original engine wrapper was too narrow a frame boundary and its front-buffer
+state was thread-local. The integration now observes D3D Swap `829EFB30` directly
+and shares the observed buffer headers atomically across submitting threads,
+composing once before their matching `824079B8` Resolve.
+
+The incremental build log is `forza-gameplay-guide-boundary-build.log`.
+`gameplay-guide-boundary-1/` reached the driving scene, opened the actual Guide
+over gameplay (`guide.png`) and accepted its Xbox Home dialog (`yes-selected.png`).
+At 08:12:07, all five callbacks completed and audio quiesced before thread
+shutdown. The debugger finished with `exit=0 captured=0`, without timeout or
+cleanup. This is still a direct diagnostic. The isolated AV above is not claimed
+to have been diagnosed merely because these subsequent runs passed.
+
+`guide-host-5/guide-menu.png`, `home-confirmation.png` and `yes-selected.png`
+under the same evidence directory show the actual 17559 Guide over Forza and
+its original Xbox Home confirmation. The request reaches `XamLoaderRebootToDash`
+with reason/user/flags zero and 1020 bytes. All five original termination
+callbacks run, but the audio worker subsequently faults at guest `0x14`.
+The debugger in `guide-exit-debug-2/crash.txt` identifies the original XAM mixer
+callback `819A5878` and the null buffer dereference at `819A4210`. A raw process
+exit of zero in an earlier attempt did not establish a clean return.
+
+The first audio join diagnostic (`guide-audio-join-1/threads.txt`) exposed a
+worker blocked in `RtlEnterCriticalSection` at `819A5878`. The system UI host
+had omitted the audio lock initialization from CRT constructor `81A71288`.
+The original mixer setup `819A4570` also allocates the system callback buffers
+for guest processor 4, whereas the SDK assigned its audio worker a rotating
+processor. The pending correction initializes that original lock, pins the
+generic XAudio callback worker to processor 4, and joins callbacks after
+termination notifications but before retiring guest threads. This diagnostic
+reached its time limit and is not a Dashboard return.
+
+With the lock and processor corrected, `guide-audio-affinity-1/crash.txt`
+exposed `STATUS_FLOAT_INEXACT_RESULT` in the original mixer's `819B8888`.
+`XHostThread::Execute` omitted the FPSCR host-policy initialization already
+performed by `XThread::Execute`; a guest flush-mode update could therefore
+unmask host exceptions. Patch 0071 initializes that policy once on host workers.
+
+`guide-audio-fpscr-1/` then opened the original Guide and confirmed Xbox Home.
+Its log at 07:37:40 records the reboot request, all five completed callbacks,
+eight drained game audio frames, the audio join and normal execution completion.
+The debugger reports `exit=0 captured=0`; there was no cleanup input or timeout.
+This establishes clean original exit in a direct diagnostic, **not** the full
+supervisor cycle. Known heap-release warnings during module teardown remain
+separate from the fixed access violation and floating-point exception.
+
+Focused logs in `.local/logs/`: `sdk71-fpscr-return-tests.log` (120 assertions,
+six cases), `sdk71-c7-c8-regression.log` (790 assertions, 20 cases), and the
+earlier host ownership/version checks in `sdk71-session-isolation-tests.log`
+(127 assertions, four cases). Full original-library acceptance remains pending.
+
+The host is selected from the dashboard preparation receipt, mounts only that
+profile's hash-verified originals, and refuses an existing title-owned `media:`
+alias rather than replacing it. Titles opt into a frame integration boundary
+through their manifest; launch routing remains based on registered XEX hashes.
+
+### Disc versus XBLA launch contracts
+
+| Contract | Forza Horizon disc | Castle Crashers XBLA |
+|---|---|---|
+| Source | ISO/GDFX extraction, reused | Extracted original LIVE/STFS content |
+| Identity | `4D5309C9`, `0.0.0.10`, type `00004000` | `584108B7`, `0.0.1.3`, type `000D0000` |
+| Original library | Required missing executable metadata before displaying the entry | Already displayed via existing XBLA path |
+| Launch | `XamContentLaunchImageInternalEx`, `XSYSLAUNCH:\default.xex`, flags `0` | Same service, path alias and flags |
+| Native transition | Exact installed XEX digest resolves its registered prepared executable | Same supervisor contract |
+| Original title Quit | Returns to Forza title screen | Calls `XamLoaderLaunchTitle(NULL, 0x100)` for Arcade dashboard context |
+
+The fix does not reclassify the disc as XBLA or fabricate package licenses.
+The return differences explain why copying Castle's menu interaction cannot
+complete Forza's cycle. Guide's original Home command needs the system HUD and
+`XamLoaderRebootToDash`, independently of the game's own pause-menu Quit.
 
 The first demonstrated blocker is the missing `XamContentGetMetaDataInternal`
 contract. Retail 17559 requests metadata before constructing its installed-disc

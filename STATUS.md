@@ -1,5 +1,20 @@
 # STATUS
 
+Forza pela My Games original (2026-10-14): ciclo real Retail 17559 → My Games →
+Forza Horizon 4D5309C9/0.0.0.10 → cena jogável → Guide/Xbox Home → Retail 17559
+comprovado no SDK final. Runs `20261014T121150Z`, `121331Z` e `121923Z`, mesma janela
+HWND 7341630 e XUID E00AD9FD043F47E5. Entrada real de freio/ré, acelerador e direção;
+retorno explícito por XamLoaderRebootToDash, cinco callbacks e drenagem de áudio,
+exit 0 sem timeout/cancelamento, debugger anexado sem exceção capturada.
+A dashboard retornada respondeu à navegação para My Games, sem repetir intro.
+Patches 0069/0071, host dos originais 17559 e perfil da sessão compartilhado.
+Regressão Castle no SDK final confirmada pelo usuário e logs: `115914Z` →
+`115940Z` → `120025Z`, retorno 0x100, exit 0/zero erros no título. CPU inicial
+fixada genericamente em 0 após regressão diagnosticada; Forza revalidado depois.
+Avisos gráficos/teardown e uma
+AV anterior não reproduzida permanecem separados do ciclo aprovado; campanha e
+save/load comercial não certificados. Evidências: `docs/validation-forza-horizon.md`.
+
 Auditoria AOT e Forza Horizon (2026-10-14, trabalho local): os 12 UnresolvedCall
 originais foram resolvidos com entradas verificadas no XEX e patch genérico 0068
 para respeitar fins de .pdata no GapFill. Isolamento de build/recibos corrigido;

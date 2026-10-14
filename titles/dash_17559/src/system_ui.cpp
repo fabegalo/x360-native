@@ -20,7 +20,6 @@
 #include <rex/input/flags.h>
 
 extern "C" REX_FUNC(__imp__XamShowGuideUI);
-REXCVAR_DECLARE(std::string, keybind_guide);
 
 REXCVAR_DEFINE_BOOL(dash17559_signin_ui, false, "Dashboard 17559",
                    "Submit the original Sign-in request once at the first dashboard frame (manual validation)");
@@ -34,6 +33,10 @@ std::function<void()> request_signin;
 std::function<void()> pending_ui;
 std::function<void()> poll_guide;
 thread_local bool in_dashboard_frame = false;
+std::string system_drive = "game:";
+std::string UiPath(const char* path) {
+  return system_drive + std::string(path).substr(5);
+}
 // XAM's HUD runs in the system process (2). The local host borrows the
 // dashboard thread for a frame, restoring its process context on return.
 class SystemProcessScope {
@@ -65,11 +68,12 @@ void ReleaseSystemUiHost() {
   pending_ui = {};
   poll_guide = {};
 }
-void InstallSystemUi(rex::Runtime& runtime) {
+void InstallSystemUi(rex::Runtime& runtime, std::string drive, std::string native_directory) {
+  system_drive = std::move(drive);
   // XAM normally handles the physical Guide button outside the foreground
   // title. Poll its edge here because the original XAM scheduler is not run.
-  REXCVAR_SET(guide_button, true);
-  if (REXCVAR_GET(keybind_guide).empty()) REXCVAR_SET(keybind_guide, "G");
+  rex::cvar::SetFlagByName("guide_button", "true");
+  if (rex::cvar::GetFlagByName("keybind_guide").empty()) rex::cvar::SetFlagByName("keybind_guide", "G");
   poll_guide = [&runtime, held = false]() mutable {
     rex::input::X_INPUT_STATE input{};
     auto* system = static_cast<rex::input::InputSystem*>(runtime.input_system());
@@ -82,14 +86,22 @@ void InstallSystemUi(rex::Runtime& runtime) {
     ctx->r3.u64 = 0;
     __imp__XamShowGuideUI(*ctx, runtime.memory()->virtual_membase());
   };
-  runtime.kernel_state()->RegisterRecompiledModule(
-      "hud.xex", "game:\\system\\hud.xex", "dash_17559_hud");
-  runtime.kernel_state()->RegisterRecompiledModule("vk.xex", "game:\\vk.xex", "dash_17559_vk");
-  runtime.kernel_state()->RegisterRecompiledModule("vk.xex", "\\Device\\Harddisk0\\Partition1\\vk.xex", "dash_17559_vk");
-  runtime.kernel_state()->RegisterRecompiledModule(
-      "signin.xex", "game:\\system\\signin.xex", "dash_17559_signin");
-  runtime.kernel_state()->RegisterRecompiledModule(
-      "createprofile.xex", "game:\\system\\createprofile.xex", "dash_17559_createprofile");
+  auto bind = [&](const char* pe, const char* path, const char* name) {
+    const auto library = native_directory.empty() ? std::string(name)
+        : native_directory + "/" + name;
+    runtime.kernel_state()->RegisterRecompiledModule(pe, UiPath(path).c_str(), library.c_str());
+  };
+  bind("hud.xex", "game:\\system\\hud.xex", "dash_17559_hud");
+  bind("vk.xex", "game:\\vk.xex", "dash_17559_vk");
+  const auto keyboard_library = native_directory.empty() ? std::string("dash_17559_vk")
+      : native_directory + "/dash_17559_vk";
+  runtime.kernel_state()->RegisterRecompiledModule("vk.xex", "\\Device\\Harddisk0\\Partition1\\vk.xex", keyboard_library.c_str());
+  bind("signin.xex", "game:\\system\\signin.xex", "dash_17559_signin");
+  bind("createprofile.xex", "game:\\system\\createprofile.xex", "dash_17559_createprofile");
+  if (!native_directory.empty()) {
+    bind("xam.xex", "game:\\system\\xam_ui.xex", "dash_17559_xam_ui");
+    bind("gamerprofile.xex", "game:\\system\\gamerprofile.xex", "dash_17559_gamerprofile");
+  }
   if (REXCVAR_GET(dash17559_signin_ui)) {
     request_signin = [&runtime] {
       auto* thread = rex::system::XThread::GetCurrentThread()->thread_state();
@@ -104,6 +116,7 @@ void InstallSystemUi(rex::Runtime& runtime) {
     const auto* application = SystemUiApplicationFor(message);
     if (!application) return X_E_NOTFOUND;
     if (!request || size != application->request_size || !rex::system::XThread::IsInThread()) return X_E_INVALIDARG;
+    REXLOG_INFO("17559 system UI: original application request {:08X} size={}", message, size);
     SystemProcessScope system_process(runtime);
     auto* state = runtime.kernel_state();
     auto xam = state->GetKernelModule<rex::kernel::xam::XamModule>("xam.xex");
@@ -129,11 +142,12 @@ void InstallSystemUi(rex::Runtime& runtime) {
     // Execute on the requesting guest thread, preserving its register context.
     auto* thread = rex::system::XThread::GetCurrentThread()->thread_state();
     auto* dispatcher = runtime.function_dispatcher();
-    auto ui = state->GetModule("game:\\system\\xam_ui.xex");
+    auto ui = state->GetModule(UiPath("game:\\system\\xam_ui.xex"));
     if (ui && !ui_ready) return X_E_FAIL;
     if (!ui) {
-      ui = state->LoadUserModule("game:\\system\\xam_ui.xex", false);
+      ui = state->LoadUserModule(UiPath("game:\\system\\xam_ui.xex"), false);
       if (!ui) return X_E_NOTFOUND;
+      rex::cvar::SetFlagByName("dash17559_ui_self", std::to_string(ui->hmodule_ptr()));
       // XUI-specific static constructor from 81A70370. It initializes the
       // library's critical sections; starting the whole XAM module is unnecessary.
       uint64_t constructor[] = {0x81AC8324};
@@ -148,6 +162,11 @@ void InstallSystemUi(rex::Runtime& runtime) {
       // Text service lock initialized by the original CRT entry 81A712C0.
       uint64_t text_lock[] = {0x81A97700};
       dispatcher->ExecuteTrap(thread, 0x81A723A4, text_lock, 1);
+      // Audio's CRT constructor 81A71288 initializes the render callback
+      // lock at 81A976E0. Without it the worker waits on zero-filled state;
+      // signalling all objects during exit only concealed that missing init.
+      uint64_t audio_lock[] = {0x81A976E0};
+      dispatcher->ExecuteTrap(thread, 0x81A723A4, audio_lock, 1);
       // Image-cache constructor 81A70450. The first asynchronous image timer
       // enters this lock; zero-initialized storage is not an initialized lock.
       uint64_t image_cache_lock[] = {0x81ACA3F4};
@@ -218,7 +237,7 @@ void InstallSystemUi(rex::Runtime& runtime) {
       if (!hud_ready) return X_E_FAIL;
       rex::memory::store_and_swap<uint32_t>(memory->TranslateVirtual(0x81AA2160), hud);
       // Original host loads huduiskin as data (816CE9E8-816CEA54).
-      auto skin = state->LoadUserModule("game:\\system\\huduiskin.xex", false);
+      auto skin = state->LoadUserModule(UiPath("game:\\system\\huduiskin.xex"), false);
       if (!skin) {
         REXLOG_ERROR("17559 system UI: could not load original game:\\system\\huduiskin.xex as resource module");
         return X_E_NOTFOUND;
@@ -248,7 +267,7 @@ void InstallSystemUi(rex::Runtime& runtime) {
       if (static_cast<int32_t>(background_result) < 0) return background_result;
       ui_ready = true;
     }
-    auto module = state->LoadUserModule(application->path, false);
+    auto module = state->LoadUserModule(UiPath(application->path), false);
     if (!module) return X_E_NOTFOUND;
     uint64_t attach[] = {module->hmodule_ptr(), 1, 0};
     const auto attached = dispatcher->ExecuteTrap(thread, module->entry_point(), attach, 3);
@@ -479,36 +498,28 @@ void InstallSystemUi(rex::Runtime& runtime) {
 }
 }
 
-extern "C" REX_FUNC(__imp__sub_92186D90);
-extern "C" REX_FUNC(__imp__sub_9221CD90);
-extern "C" REX_FUNC(sub_92186D90) {
-  const auto previous = dash17559::in_dashboard_frame;
-  dash17559::in_dashboard_frame = true;
-  __imp__sub_92186D90(ctx, base);
-  dash17559::in_dashboard_frame = previous;
-}
-extern "C" void sub_9221CD90(PPCContext& ctx, uint8_t* base) {
-  if (dash17559::in_dashboard_frame && dash17559::poll_guide) {
+void dash17559::DrawSystemUiFrame(PPCContext& ctx) {
+  if (dash17559::poll_guide) {
     const PPCContext saved = ctx;
     dash17559::poll_guide();
     ctx = saved;
     ctx.fpscr.restoreGuestBits(saved.fpscr.csr);
   }
-  if (dash17559::in_dashboard_frame && !dash17559::draw_ui && dash17559::pending_ui) {
+  if (!dash17559::draw_ui && dash17559::pending_ui) {
     const PPCContext saved = ctx;
     auto request = std::move(dash17559::pending_ui);
     request();
     ctx = saved;
     ctx.fpscr.restoreGuestBits(saved.fpscr.csr);
   }
-  if (dash17559::in_dashboard_frame && dash17559::request_signin) {
+  if (dash17559::request_signin) {
     const PPCContext saved = ctx;
     auto request = std::move(dash17559::request_signin);
     request();
     ctx = saved;
     ctx.fpscr.restoreGuestBits(saved.fpscr.csr);
   }
-  if (dash17559::in_dashboard_frame && dash17559::draw_ui) {
+  if (dash17559::draw_ui) {
     // The host accesses this context through ThreadState too, so this bridge
     // must not use REX_FUNC's restrict qualifier. Preserve the caller's context.
     const PPCContext saved = ctx;
@@ -518,5 +529,20 @@ extern "C" void sub_9221CD90(PPCContext& ctx, uint8_t* base) {
     ctx.fpscr.restoreGuestBits(saved.fpscr.csr);
     if (!active) REXLOG_INFO("17559 system UI: restored present context r3={:08X}", ctx.r3.u32);
   }
+
+}
+
+#ifndef X360N_SYSTEM_UI_PLUGIN
+extern "C" REX_FUNC(__imp__sub_92186D90);
+extern "C" REX_FUNC(__imp__sub_9221CD90);
+extern "C" REX_FUNC(sub_92186D90) {
+  const auto previous = dash17559::in_dashboard_frame;
+  dash17559::in_dashboard_frame = true;
+  __imp__sub_92186D90(ctx, base);
+  dash17559::in_dashboard_frame = previous;
+}
+extern "C" void sub_9221CD90(PPCContext& ctx, uint8_t* base) {
+  if (dash17559::in_dashboard_frame) dash17559::DrawSystemUiFrame(ctx);
   __imp__sub_9221CD90(ctx, base);
 }
+#endif

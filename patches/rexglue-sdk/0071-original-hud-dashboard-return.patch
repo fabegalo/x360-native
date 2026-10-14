@@ -1,0 +1,215 @@
+diff --git a/src/kernel/xam/xam_info.cpp b/src/kernel/xam/xam_info.cpp
+index b60ad5e..625ac3d 100644
+--- a/src/kernel/xam/xam_info.cpp
++++ b/src/kernel/xam/xam_info.cpp
+@@ -299,6 +299,38 @@ void XamLoaderTerminateTitle_entry() {
+   REX_KERNEL_STATE()->TerminateTitle();
+ }
+ 
++u32 XamLoaderRebootToDash_entry(mapped_void context) {
++  // Retail 17559 export 0x839 (816A1330): copy the packed 1020-byte
++  // dashboard context before leaving the title. The original HUD owns the
++  // confirmation and supplies reason/user; do not substitute a host menu.
++  constexpr uint32_t size = 1020;
++  const uint32_t address = context.guest_address();
++  if (!address || uint64_t(address) + size > 0x100000000ull)
++    return X_ERROR_INVALID_PARAMETER;
++  for (uint32_t offset = 0; offset < size;) {
++    auto* heap = REX_KERNEL_MEMORY()->LookupHeap(address + offset);
++    rex::memory::HeapAllocationInfo region{};
++    if (!heap || !heap->QueryRegionInfo(address + offset, &region) ||
++        !(region.state & rex::memory::kMemoryAllocationCommit) ||
++        !(region.protect & rex::memory::kMemoryProtectRead))
++      return X_ERROR_INVALID_PARAMETER;
++    offset += std::min(size - offset, 4096u - ((address + offset) & 4095u));
++  }
++  const auto* bytes = static_cast<const uint8_t*>(context.host_address());
++  const auto reason = memory::load_and_swap<uint32_t>(bytes + 4);
++  const auto user = memory::load_and_swap<uint32_t>(bytes + 8);
++  auto& loader = REX_KERNEL_STATE()->GetKernelModule<XamModule>("xam.xex")->loader_data();
++  loader.launch_data.assign(bytes, bytes + size);
++  loader.launch_data_present = true;
++  loader.launch_path.clear();
++  loader.launch_flags = reason == 72 ? 0x100000 : 0;
++  loader.exit_request = XamModule::LoaderData::ExitRequest::Dashboard;
++  REXKRNL_INFO("XamLoaderRebootToDash: reason={} user={:08X} flags={:08X} data_size={}",
++      reason, user, loader.launch_flags, loader.launch_data.size());
++  REX_KERNEL_STATE()->TerminateTitle();
++  return X_ERROR_SUCCESS;
++}
++
+ u32 XamAlloc_entry(u32 unk, u32 size, mapped_u32 out_ptr) {
+   assert_true(unk == 0);
+ 
+@@ -403,6 +435,7 @@ REX_EXPORT(__imp__XamLoaderSetLaunchData, rex::kernel::xam::XamLoaderSetLaunchDa
+ REX_EXPORT(__imp__XamLoaderGetLaunchDataSize, rex::kernel::xam::XamLoaderGetLaunchDataSize_entry)
+ REX_EXPORT(__imp__XamLoaderGetLaunchData, rex::kernel::xam::XamLoaderGetLaunchData_entry)
+ REX_EXPORT(__imp__XamLoaderLaunchTitle, rex::kernel::xam::XamLoaderLaunchTitle_entry)
++REX_EXPORT(__imp__XamLoaderRebootToDash, rex::kernel::xam::XamLoaderRebootToDash_entry)
+ REX_EXPORT(__imp__XamLoaderTerminateTitle, rex::kernel::xam::XamLoaderTerminateTitle_entry)
+ REX_EXPORT(__imp__XamAlloc, rex::kernel::xam::XamAlloc_entry)
+ REX_EXPORT(__imp__XamFree, rex::kernel::xam::XamFree_entry)
+diff --git a/src/kernel/xam/xam_misc.cpp b/src/kernel/xam/xam_misc.cpp
+index d0194dc..6aaec97 100644
+--- a/src/kernel/xam/xam_misc.cpp
++++ b/src/kernel/xam/xam_misc.cpp
+@@ -590,7 +590,6 @@ REX_EXPORT_STUB(__imp__XamLoaderIsTitleTerminatePending);
+ REX_EXPORT_STUB(__imp__XamLoaderLaunchTitleEx);
+ REX_EXPORT_STUB(__imp__XamLoaderLaunchTitleForReason);
+ REX_EXPORT_STUB(__imp__XamLoaderLaunchTitleOnDvd);
+-REX_EXPORT_STUB(__imp__XamLoaderRebootToDash);
+ REX_EXPORT_STUB(__imp__XamLoaderRebootToServerDash);
+ REX_EXPORT_STUB(__imp__XamLoaderSetClearCache);
+ REX_EXPORT_STUB(__imp__XamLoaderSetGameInfo);
+diff --git a/include/rex/audio/audio_system.h b/include/rex/audio/audio_system.h
+index 33fd32c..61ab6c4 100644
+--- a/include/rex/audio/audio_system.h
++++ b/include/rex/audio/audio_system.h
+@@ -12,6 +12,8 @@
+ #pragma once
+ 
+ #include <atomic>
++#include <condition_variable>
++#include <mutex>
+ #include <queue>
+ 
+ #include <rex/kernel.h>
+@@ -43,6 +45,7 @@ class AudioSystem : public system::IAudioSystem {
+ 
+   virtual X_STATUS Setup(system::KernelState* kernel_state);
+   virtual void Shutdown();
++  void QuiesceTitleCallbacks() override;
+ 
+   X_STATUS RegisterClient(uint32_t callback, uint32_t callback_arg, size_t* out_index);
+   void UnregisterClient(size_t index);
+@@ -74,6 +77,10 @@ class AudioSystem : public system::IAudioSystem {
+   uint32_t queued_frames_;
+ 
+   std::atomic<bool> worker_running_ = {false};
++  std::mutex callback_mutex_;
++  std::condition_variable callback_finished_;
++  bool callback_active_ = false;
++  bool callbacks_quiesced_ = false;
+   system::object_ref<system::XHostThread> worker_thread_;
+ 
+   rex::thread::global_critical_region global_critical_region_;
+diff --git a/include/rex/system/interfaces/audio.h b/include/rex/system/interfaces/audio.h
+index a934066..b499518 100644
+--- a/include/rex/system/interfaces/audio.h
++++ b/include/rex/system/interfaces/audio.h
+@@ -24,6 +24,8 @@ class IAudioSystem {
+   virtual ~IAudioSystem() = default;
+   virtual X_STATUS Setup(KernelState* kernel_state) = 0;
+   virtual void Shutdown() = 0;
++  // Finish any in-flight guest callback before kernel objects/threads go away.
++  virtual void QuiesceTitleCallbacks() = 0;
+ };
+ 
+ }  // namespace rex::system
+diff --git a/src/audio/audio_system.cpp b/src/audio/audio_system.cpp
+index 7a711a8..b7a5a4c 100644
+--- a/src/audio/audio_system.cpp
++++ b/src/audio/audio_system.cpp
+@@ -84,8 +84,12 @@ X_STATUS AudioSystem::Setup(system::KernelState* kernel_state) {
+   }
+ 
+   worker_running_ = true;
++  callbacks_quiesced_ = false;
+   worker_thread_ = system::object_ref<system::XHostThread>(
+-      new system::XHostThread(kernel_state, 128 * 1024, 0, [this]() {
++      // XAudio's render callback runs on guest hardware thread 4. Original
++      // mixers allocate their callback buffers for that processor, including
++      // the system mixer (17559 819A4570), rather than an arbitrary fake CPU.
++      new system::XHostThread(kernel_state, 128 * 1024, 0x10000000, [this]() {
+         WorkerThreadMain();
+         return 0;
+       }));
+@@ -134,6 +138,24 @@ void AudioSystem::WorkerThreadMain() {
+     if (result.first == rex::thread::WaitResult::kSuccess) {
+       auto index = result.second;
+ 
++      // Keep guest execution alive until the current callback returns, then
++      // prevent another dispatch before title threads and objects are retired.
++      {
++        std::lock_guard callback_lock(callback_mutex_);
++        if (callbacks_quiesced_) continue;
++        callback_active_ = true;
++      }
++      // No host mutex may be held while executing guest code, which can make
++      // a non-returning loader call from the callback itself.
++      struct CallbackScope {
++        AudioSystem* audio;
++        ~CallbackScope() {
++          std::lock_guard lock(audio->callback_mutex_);
++          audio->callback_active_ = false;
++          audio->callback_finished_.notify_all();
++        }
++      } callback_scope{this};
++
+       auto global_lock = global_critical_region_.Acquire();
+       uint32_t client_callback = clients_[index].callback;
+       uint32_t client_callback_arg = clients_[index].wrapped_callback_arg;
+@@ -186,6 +208,20 @@ int AudioSystem::FindFreeClient() {
+ 
+ void AudioSystem::Initialize() {}
+ 
++void AudioSystem::QuiesceTitleCallbacks() {
++  std::unique_lock callback_lock(callback_mutex_);
++  callbacks_quiesced_ = true;
++  if (worker_thread_ && system::XThread::IsInThread(worker_thread_.get())) {
++    // A loader call on the callback thread cannot join itself. It will not
++    // return to guest code; release the dispatch lease before that thread exits.
++    callback_active_ = false;
++    callback_finished_.notify_all();
++  } else {
++    callback_finished_.wait(callback_lock, [this] { return !callback_active_; });
++  }
++  REXAPU_INFO("Audio guest callbacks quiesced before title thread shutdown");
++}
++
+ void AudioSystem::Shutdown() {
+   if (!worker_running_) {
+     return;
+diff --git a/src/system/kernel_state.cpp b/src/system/kernel_state.cpp
+index 46983a4..42fa4dd 100644
+--- a/src/system/kernel_state.cpp
++++ b/src/system/kernel_state.cpp
+@@ -563,7 +563,10 @@ object_ref<XThread> KernelState::PrepareModuleLaunch(object_ref<UserModule> modu
+   // Create a thread to run in.
+   // We start suspended so the caller can inspect/attach before resume.
+   auto thread = object_ref<XThread>(new XThread(
+-      this, module->stack_size(), 0, module->entry_point(), 0, X_CREATE_SUSPENDED, true, true));
++      // The initial title thread starts on hardware thread 0. Its processor
++      // must not depend on how many host GPU/audio workers were created first.
++      this, module->stack_size(), 0, module->entry_point(), 0,
++      X_CREATE_SUSPENDED | 0x01000000, true, true));
+ 
+   // We know this is the 'main thread'.
+   thread->set_name("Main XThread");
+@@ -1021,6 +1024,11 @@ void KernelState::TerminateTitle() {
+     }
+   }
+ 
++  // Original termination notifications may still need audio to drain. Once
++  // they finish, join the active audio callback before waking/cancelling guest
++  // waits: the host audio worker otherwise keeps using torn-down XAM state.
++  if (emulator_->audio_system()) emulator_->audio_system()->QuiesceTitleCallbacks();
++
+   constexpr uint32_t kCooperativeExitTimeoutMs = 200;
+ 
+   // Guest threads poll this flag in the kernel wait primitives
+diff --git a/src/system/xthread.cpp b/src/system/xthread.cpp
+index 77bce25..905c0e9 100644
+--- a/src/system/xthread.cpp
++++ b/src/system/xthread.cpp
+@@ -1449,6 +1449,10 @@ void XHostThread::Execute() {
+   // Let the kernel know we are starting.
+   kernel_state_->OnThreadExecute(this);
+ 
++  // Host workers also dispatch guest callbacks (audio, GPU, DPC). Seed their
++  // FPSCR policy just like XThread::Execute before a guest flush-mode update
++  // can copy an otherwise zero CSR into MXCSR and unmask host FP exceptions.
++  thread_state_->context()->fpscr.InitHost();
+   int ret = host_fn_();
+ 
+   // Exit.

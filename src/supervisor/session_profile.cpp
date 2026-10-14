@@ -25,6 +25,15 @@ SessionProfile LoadSessionProfile(const ProjectPaths& paths, const std::filesyst
   p.exe = resolve(text(table["x360n"]["native_exe"]));
   p.user_root = UserDataRoot(paths, resolve(text(table["x360n"]["user_data_root"])));
   p.sha256 = text(table["x360n"]["xex_sha256"]);
+  p.system_ui_frames = table["x360n"]["system_ui_frames"].value_or(false);
+  if (auto host = table["x360n"]["system_ui_host"].value<std::string>()) {
+    const auto relative_host = PathFromUtf8(*host);
+    if (relative_host.empty() || relative_host.has_parent_path() || relative_host.is_absolute())
+      throw std::runtime_error("system UI host must belong to this dashboard build");
+    p.system_ui_host = p.exe.parent_path() / relative_host;
+    if (validate_execution && !std::filesystem::is_regular_file(p.system_ui_host))
+      throw std::runtime_error("missing dashboard system UI host: " + PathUtf8(p.system_ui_host));
+  }
   if (!IsSafeLabel(p.name)) throw std::runtime_error("invalid profile name");
   if (validate_execution) {
     if (auto error = CheckLaunchable(paths, p.exe)) throw std::runtime_error(*error);
@@ -44,6 +53,13 @@ SessionProfile LoadSessionProfile(const ProjectPaths& paths, const std::filesyst
     std::ifstream registration(setup, std::ios::binary);
     preparation = toml::parse(registration, PathUtf8(setup));
   }
+  if (!p.system_ui_host.empty()) {
+    bool recorded = false;
+    if (auto files = preparation["runtime_files"].as_array())
+      for (const auto& value : *files)
+        if (value.value<std::string>() == PathUtf8(p.system_ui_host.filename())) recorded = true;
+    if (!recorded) throw std::runtime_error("system UI host is not owned by the dashboard preparation receipt");
+  }
   if (auto library = preparation["library"].as_table()) {
     const auto title = text((*library)["title_id"]);
     const auto type = text((*library)["content_type"]);
@@ -61,6 +77,7 @@ SessionProfile LoadSessionProfile(const ProjectPaths& paths, const std::filesyst
       if (arg.starts_with("--game_data_root") || arg.starts_with("--user_data_root") ||
           arg.starts_with("--x360n_handoff") || arg.starts_with("--log_file") ||
           arg.starts_with("--x360n_profile_root") ||
+          arg.starts_with("--x360n_system_ui_") ||
           arg.starts_with("--parent_window"))
         throw std::runtime_error("reserved session argument: " + arg);
       p.args.push_back(arg);

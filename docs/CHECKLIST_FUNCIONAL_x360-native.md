@@ -182,7 +182,7 @@ mapeamento e evidências em dashboard §0.32. Não amplia o aceite de jogos.
 - [ ] Verificar que XEX, configuração e artefato nativo pertencem ao mesmo alvo; conferir apenas o hash de um EXE não aprova essa associação.
 - [ ] Recusar conteúdo inexistente, versão incompatível ou recompilação ausente com erro controlado, sem abrir outro jogo por padrão.
 - [ ] Testar a resolução negativa com dados isolados, sem alterar os originais; um teste sintético não aprova outro jogo como compatível.
-- [ ] Demonstrar a entrada no código do título correto e o gameplay após seleção na dashboard original.
+- [x] Demonstrar a entrada no código do título correto e o gameplay após seleção na dashboard original: Forza Horizon 4D5309C9/0.0.0.10, Retail 17559, Windows x64, em 2026-10-14.
 - [ ] Evitar disputa entre dashboard e jogo por entrada, áudio, janela e apresentação gráfica.
 
 **Aceite:** a seleção original, e não um atalho específico, determina qual jogo e versão começam a executar.
@@ -194,12 +194,22 @@ mapeamento e evidências em dashboard §0.32. Não amplia o aceite de jogos.
 - [ ] Preservar destino, flags e dados aplicáveis antes da desmontagem do runtime, sem depender de memória destruída.
 - [ ] Consumir cada pedido uma única vez e impedir reaproveitamento de pedidos de uma execução anterior.
 - [ ] Manter o pedido explícito quando ele for seguido pelo encerramento normal do processo; a saída não deve apagá-lo.
-- [x] Acionar o retorno pelo caminho original disponível no jogo: Castle Crashers chamou `XamLoaderLaunchTitle(NULL, 0x100)` na execução confirmada pelo usuário. Guide continua pendente.
-- [ ] Retornar à mesma versão da dashboard com o perfil e o contexto pertinente preservados.
+- [x] Acionar o retorno pelo caminho original disponível no jogo: Castle Crashers chamou `XamLoaderLaunchTitle(NULL, 0x100)`; Forza usou o Guide original 17559 → Xbox Home → `XamLoaderRebootToDash` no ciclo de 2026-10-14.
+- [x] Retornar à mesma versão da dashboard com o perfil e o contexto pertinente preservados: Forza → 17559, mesmo XUID/HWND e 1020 bytes de contexto, em 2026-10-14.
 - [x] Não repetir a intro ao retornar do Castle Crashers para a 17559, confirmado pelo usuário e pelo log.
 - [ ] Distinguir retorno ao menu de encerramento da plataforma.
 
 **Aceite:** pedido real do jogo/Guide → encerramento controlado do título → dashboard correta, com contexto preservado e sem intro.
+
+Evidência Forza no SDK final (2026-10-14): runs `20261014T121150Z-session-0-dash_17559`,
+`20261014T121331Z-session-1-forza_horizon` e `20261014T121923Z-session-2-dash_17559`.
+Seleção original, cena com carro/pista/tráfego/HUD e LT/RT/direção, Guide e
+confirmação Xbox Home, cinco callbacks, drenagem de áudio e exit 0 sem timeout
+ou cancelamento do jogo; coletor anexado sem exceção capturada. Retorno sem
+intro, mesmo HWND 7341630/XUID E00AD9FD043F47E5 e My Games novamente responsiva.
+Screenshots/relatórios e uma AV anterior não reproduzida estão separados em
+`docs/validation-forza-horizon.md`. Não aprova fidelidade gráfica completa,
+fechar/reabrir Guide com B, outros títulos/versões ou o ciclo com save/load de §5.3.
 
 ### 5.3. Fechamento da janela, falhas e repetição
 

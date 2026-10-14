@@ -1,8 +1,10 @@
 #pragma once
+struct PPCContext;
 namespace rex { class Runtime; }
 namespace x360n {
 void ImportLaunchData(rex::Runtime& runtime);
 bool IsDashboardReturn();
 void ExportLaunchRequest(rex::Runtime& runtime);
 void ExportWindowClose();
+void DrawSessionSystemUi(PPCContext& ctx);
 }

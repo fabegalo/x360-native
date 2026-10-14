@@ -44,6 +44,15 @@ endif()
 # stage it next to the executable so --gpu_plugin=xenos can load it.
 rexglue_setup_target(dash_17559 GPU_PLUGINS xenos)
 
+add_library(dash_17559_session_ui SHARED src/session_ui_host.cpp src/system_ui.cpp
+    ../common/dashboard_assets.cpp ../../src/supervisor/sha256.cpp)
+target_compile_definitions(dash_17559_session_ui PRIVATE X360N_SYSTEM_UI_PLUGIN=1)
+target_link_libraries(dash_17559_session_ui PRIVATE rex::runtime)
+if(WIN32)
+    target_link_libraries(dash_17559_session_ui PRIVATE bcrypt)
+endif()
+add_dependencies(dash_17559 dash_17559_session_ui)
+
 # x360-native: copy rexruntime and the GPU plugin next to the executable on every
 # build, not only when it relinks (see cmake/x360n_sdk_backports.cmake).
 if(REXSDK_DIR)

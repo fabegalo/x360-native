@@ -466,3 +466,39 @@ original synthetic PPC fixture: failed with one unresolved call before the patch
 passed 10 assertions after it. Castle Crashers codegen with the patched producer
 left all 41 generated files unchanged. Forza's three affected entries are
 `82F5CC68`, `82F76188`, `82F762A0`; their internal epilogues are not functions.
+
+## 0069 — executable metadata for the original content library
+
+The Retail 17559 library queries `XamContentGetMetaDataInternal` before showing
+installed disc content. Project the registered content name, size and verified
+XEX execution identity into its packed metadata result, retaining the real
+content type. Reject malformed or mismatched identities. This does not invent
+STFS licenses, artwork or publisher information. The same contract covers
+executable disc and XBLA content; routing still matches the installed XEX hash.
+See `docs/validation-forza-horizon.md` for focused tests and actual UI evidence.
+
+## 0071 — original HUD reboot and audio callback lifetime
+
+Implement `XamLoaderRebootToDash` from the original 17559 HUD contract: validate
+and copy its 1020-byte context before title termination, preserve reason/user,
+and publish an explicit Dashboard request. The original HUD owns confirmation.
+Normal Xbox Home uses reason/flags zero; the special reason 72 is transported
+with flag 0x100000 but is not certified by the dashboard session adapter.
+
+After original termination notifications finish, join active audio callbacks
+before retiring guest threads or waking their waits. No host mutex spans guest
+execution; a callback can quiesce itself without joining itself. XAudio's worker
+uses guest processor 4, matching the original mixers' buffer ownership.
+The initial title thread explicitly starts on processor 0, independent of the
+number or affinity of previously created host workers. Otherwise fixing audio's
+processor shifts the default round robin and breaks Castle's initial heap index.
+`XHostThread` initializes FPSCR host policy just as `XThread` does, preventing
+guest flush-mode changes from accidentally unmasking native FP exceptions.
+
+No upstream equivalent identified; the SDK pin is unchanged. Tests cover packed
+context validation/preservation, original notifications, concurrent and self
+quiescence, processor identity, FP policy and SDL drainage. The seven patched
+files replay from their recorded base hashes to the recorded final hashes.
+The 17559 host separately initializes the original audio CRT lock. Evidence and
+the distinction between direct diagnostics and full UI acceptance are recorded
+in `docs/validation-forza-horizon.md`.

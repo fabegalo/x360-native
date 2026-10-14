@@ -63,10 +63,9 @@ extern "C" REX_FUNC(sub_817AB8D8) {
   ctx.r3.u64 = next;
 }
 // XAM's self-module getter, used by its original section:// resource builders.
-extern "C" REX_FUNC(sub_816E03A8) {
-  auto module = REX_KERNEL_STATE()->GetModule("game:\\system\\xam_ui.xex");
-  ctx.r3.u64 = module ? module->hmodule_ptr() : 0;
-}
+#include <rex/cvar.h>
+REXCVAR_DEFINE_UINT32(dash17559_ui_self, 0, "Dashboard 17559", "Verified original XUI module handle");
+extern "C" REX_FUNC(sub_816E03A8) { ctx.r3.u64 = REXCVAR_GET(dash17559_ui_self); }
 
 #include <rex/logging.h>
 // Temporary stage diagnostics: execute the original body and preserve its result.

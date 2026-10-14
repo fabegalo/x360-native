@@ -85,6 +85,33 @@ TEST_CASE("handoff preserves launch bytes and rejects truncated records", "[sess
   fs::remove_all(dir);
 }
 
+TEST_CASE("session UI host belongs to its dashboard build and receipt", "[session]") {
+  auto dir = UniqueTempPath("session-ui");
+  fs::create_directories(dir);
+  const auto manifest = dir / "profile.toml";
+  const auto setup = dir / "preparation.toml";
+  auto write = [&](const std::string& host, const std::string& args = "") {
+    std::ofstream(manifest) << "[project]\nname='test'\ngame_root='originals'\n"
+      "[entrypoint]\nfile_path='originals/dash.xex'\n[x360n]\n"
+      "native_exe='build/dash.exe'\nuser_data_root='user'\nxex_sha256='"
+      << std::string(64, '0') << "'\nsystem_ui_frames=true\nsystem_ui_host='"
+      << host << "'\n" << args;
+  };
+  write("system_ui.dll");
+  CHECK_THROWS(LoadSessionProfile(ProjectPaths{dir}, manifest, false));
+  std::ofstream(setup) << "runtime_files=['system_ui.dll']\n";
+  const auto profile = LoadSessionProfile(ProjectPaths{dir}, manifest, false);
+  CHECK(profile.system_ui_host == dir / "build/system_ui.dll");
+  CHECK(profile.system_ui_frames);
+  for (const auto* host : {"../other-version/system_ui.dll", "C:/other/system_ui.dll", ""}) {
+    write(host);
+    CHECK_THROWS(LoadSessionProfile(ProjectPaths{dir}, manifest, false));
+  }
+  write("system_ui.dll", "args=['--x360n_system_ui_root=another-dashboard']\n");
+  CHECK_THROWS(LoadSessionProfile(ProjectPaths{dir}, manifest, false));
+  fs::remove_all(dir);
+}
+
 TEST_CASE("session launch requires matching path and exact XEX bytes", "[session]") {
   auto dir = UniqueTempPath("launch-match"); fs::create_directories(dir);
   auto file = dir / "default.xex";

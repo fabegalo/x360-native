@@ -112,6 +112,8 @@ extern "C" REX_FUNC(__imp__XuiElementInsertChild) { CallUi(ctx, base, 0x817BCF30
 // takes CreateProfile's original completion page instead of a stub's stale r3.
 extern "C" REX_FUNC(__imp__XamPackageManagerGetFileSize) { CallUi(ctx, base, 0x816EA4A0); }
 extern "C" REX_FUNC(__imp__XamIsGuideDisabled) { CallUi(ctx, base, 0x816E16F0); }
+// Original title/privilege/context decision; the HUD keeps its own confirmation.
+extern "C" REX_FUNC(__imp__XamLoaderShouldConfirmReboot) { CallUi(ctx, base, 0x8169D250); }
 // The local dashboard host has no XAM game-info provider. Report that boundary
 // honestly: Guide 913E5518 checks HRESULT before using its icon memory key.
 // A stub's unchanged positive r3 was treated as a populated icon and decoded

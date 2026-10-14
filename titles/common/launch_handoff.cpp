@@ -8,15 +8,22 @@
 #include <rex/kernel/xam/module.h>
 #include <rex/filesystem/vfs.h>
 #include <rex/filesystem/devices/host_path_entry.h>
+#include <rex/platform/dynlib.h>
+#include <rex/ppc/func.h>
 
 REXCVAR_DEFINE_STRING(x360n_handoff_out, "", "Supervisor", "Per-run host handoff output");
 REXCVAR_DEFINE_STRING(x360n_handoff_in, "", "Supervisor", "Previous title's launch data");
 REXCVAR_DEFINE_STRING(x360n_profile_root, "", "Supervisor", "Profile store owned by this dashboard session");
+REXCVAR_DEFINE_STRING(x360n_system_ui_host, "", "Supervisor", "Verified dashboard session UI host");
+REXCVAR_DEFINE_STRING(x360n_system_ui_root, "", "Supervisor", "Original assets of the session dashboard");
 
 namespace x360n {
 namespace {
 std::mutex handoff_mutex;
 bool dashboard_return = false;
+rex::platform::DynamicLibrary system_ui_host;
+void (*system_ui_frame)(PPCContext*) = nullptr;
+void (*system_ui_release)() = nullptr;
 std::filesystem::path Utf8Path(const std::string& value) {
   return std::filesystem::path(std::u8string(value.begin(), value.end()));
 }
@@ -31,8 +38,26 @@ void Publish(const std::string& output, const LaunchRequest& request) {
 }
 }
 bool IsDashboardReturn() { return dashboard_return; }
+void DrawSessionSystemUi(PPCContext& ctx) {
+  if (system_ui_frame) system_ui_frame(&ctx);
+}
 void ImportLaunchData(rex::Runtime& runtime) {
   dashboard_return = false;
+  const auto ui_host = REXCVAR_GET(x360n_system_ui_host);
+  if (!ui_host.empty()) {
+    const auto root = REXCVAR_GET(x360n_system_ui_root);
+    const auto path = Utf8Path(ui_host);
+    if (root.empty() || !path.is_absolute() || !system_ui_host.Load(path))
+      REX_FATAL("Missing verified dashboard system UI host: {}", ui_host);
+    using Install = bool (*)(rex::Runtime*, const char*, const char*);
+    auto install = system_ui_host.GetSymbol<Install>("X360nSystemUiInstall");
+    system_ui_frame = system_ui_host.GetSymbol<decltype(system_ui_frame)>("X360nSystemUiFrame");
+    system_ui_release = system_ui_host.GetSymbol<decltype(system_ui_release)>("X360nSystemUiRelease");
+    const auto directory = path.parent_path().u8string();
+    if (!install || !system_ui_frame || !system_ui_release ||
+        !install(&runtime, root.c_str(), reinterpret_cast<const char*>(directory.c_str())))
+      REX_FATAL("Invalid dashboard system UI host or original assets: {}", ui_host);
+  }
   const auto profile_root = REXCVAR_GET(x360n_profile_root);
   if (!profile_root.empty()) {
     auto* user = runtime.kernel_state()->user_profile();
@@ -57,6 +82,7 @@ void ImportLaunchData(rex::Runtime& runtime) {
       data.launch_data.size(), uint32_t(request.kind), request.flags, dashboard_return);
 }
 void ExportLaunchRequest(rex::Runtime& runtime) {
+  if (system_ui_release) { system_ui_release(); system_ui_frame = nullptr; }
   const auto output = REXCVAR_GET(x360n_handoff_out);
   if (output.empty()) return;
   auto xam = runtime.kernel_state()->GetKernelModule<rex::kernel::xam::XamModule>("xam.xex");

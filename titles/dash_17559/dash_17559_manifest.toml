@@ -61,5 +61,6 @@ native_exe = "../../.local/build/titles/dash_17559/dash_17559.exe"
 user_data_root = "../../.local/user/dash17559"
 args = ["--gpu_plugin=xenos", "--mnk_mode=true", "--dash17559_boot_intro=true"]
 launch_library = true
+system_ui_host = "dash_17559_session_ui.dll"
 # Original XAM 17559 maps XLNI_DASH_ARCADE (0x100) to packed reason 23.
 dashboard_return_flags = [0, 0x100]
