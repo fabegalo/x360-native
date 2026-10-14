@@ -1,5 +1,17 @@
 # STATUS
 
+Correção da importação do Forza Horizon na instalação preview.20 (2026-10-14):
+a ISO extraía 2.432 arquivos sem erro, mas o caminho temporário de cópia excedia
+MAX_PATH no diretório longo do pacote. A mensagem localizada do filesystem
+também quebrava a serialização UTF-8 do catálogo e ocultava a causa. A cópia
+agora usa caminhos estendidos do Windows para staging/publicação; erros de
+arquivo persistem com código e caminhos UTF-8, e o JSON é serializado antes
+de abrir o temporário. Reprodução sintética falhou antes da mudança; seis
+testes focados passaram (31 asserções). A retomada real na instalação informada
+pelo usuário passou (8 asserções), reaproveitou arquivos e conferiu o inventário
+completo de 7.320.461.527 bytes. Sem executar jogo, Computer Use ou regressão
+completa. Evidências e limites: `docs/universal-library.md`.
+
 Correção da preparação limpa da preview.20 (2026-10-14): a primeira configuração
 exigia AOT pré-existente de signin/createprofile/vk/hud. O driver agora configura
 o produtor, gera explicitamente todos os manifests da própria dashboard e só

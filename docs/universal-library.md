@@ -133,6 +133,42 @@ after the maintainer confirmed the Charlie Murder attempt.
 
 ## Updating
 
+### Long installed paths: Forza Horizon import recovery (2026-10-14)
+
+The user's extracted preview.20 installation lived at
+`C:\Users\fabeg\Desktop\Xbox 360 Native\x360-native-0.1.0-preview.20-windows-x64`.
+Its ISO extractor completed 2,432 files / 7,320,461,527 bytes with zero errors
+(`data/environment/.local/logs/desktop/35410437/extraction.log`). Both ISO and
+folder imports then failed in the shared verified-copy stage: a final asset
+filename could fit the traditional Windows limit while the longer
+`.x360n-import-<filename>/verified.tmp` path did not. Saving MSVC's localized
+`filesystem_error::what()` as UTF-8 JSON produced a secondary
+`invalid UTF-8 byte` error, leaving the durable catalog incomplete.
+
+Import staging, retry validation, copy and atomic publication now use extended
+Windows paths, including UNC conversion. Content roots, inventory identities,
+hash verification, refusal to overwrite different bytes and dashboard-version
+isolation remain in force. Filesystem failures persist their numeric error code
+and Unicode paths as UTF-8. Serialization runs before opening the JSON staging
+file, so an encoding failure cannot truncate it.
+
+A synthetic 250-character final filename reproduced the failure before the fix:
+`.local/logs/forza-import-long-path-before.log`. Six focused tests passed with
+31 assertions after the fix, covering long staging paths, interrupted staging,
+catalog diagnostics/retry, conflicting destinations and mismatched original
+modules: `.local/logs/forza-import-focused-tests-host.log`. The restricted
+sandbox blocked extended-path rename/publication; the successful run used the
+host against test-owned temporary files.
+
+The production model resumed the real folder import into that existing
+installation, reused verified copies and checked all 2,432 files. The persistent
+record `72c219d7fa539e44a3b1b9d84c53b04d99cd95a8b911d75e525d47b26efb8eff`
+is complete; Title ID `4D5309C9`, version `0.0.0.10`. The bounded 180-second
+process passed 8 assertions (`.local/logs/forza-installed-folder-recovery.log`)
+without opening the UI, preparing AOT or running a game. The earlier successful
+ISO extraction supplies evidence for the unchanged extractor; it was not
+repeated. Forza AOT/runtime/gameplay compatibility remains untested.
+
 Use the normal managed environment update from the extracted preview.20 ZIP.
 Do not move/delete `.local` to update sources. Catalogs, imports, generated
 projects, profiles, saves and preferences remain local. Updated sources may

@@ -329,6 +329,22 @@ TEST_CASE("interrupted copy is preserved and import resumes with verified bytes"
       preserved = DigestFile(entry.path() / "verified.tmp")->sha256 == Hash("partial bytes");
   CHECK(preserved);
 }
+TEST_CASE("import stages long Windows paths without exceeding the legacy path limit") {
+  Fixture f;
+  const auto relative = fs::path("media/audio/cars/Engines/Soundbanks/LOD1/Traffic_8D1_Duramax_EngAmb.fsb");
+  // Final filenames fit MAX_PATH, while the verified staging path exceeds it.
+  const auto base = f.paths.inputs() / "library";
+  REQUIRE((base / "x" / relative).native().size() < 250);
+  const auto padding = 250 - (base / "x" / relative).native().size();
+  f.target.game_root = base / std::string(padding + 1, 'p');
+  f.target.inputs = {{f.target.game_root / relative, Utf8(relative.filename()), Hash("audio"), relative}};
+  Write(f.source / relative, "audio");
+  REQUIRE(f.target.inputs.front().destination.native().size() == 250);
+  REQUIRE(Import(f.paths, f.target, f.source) == 1);
+  CHECK(DigestFile(f.target.inputs.front().destination)->sha256 == Hash("audio"));
+  CHECK(Import(f.paths, f.target, f.source) == 0);
+  CHECK(DigestFile(f.source / relative)->sha256 == Hash("audio"));
+}
 TEST_CASE("modified imported module disables prepared state") {
   Fixture f; Import(f.paths, f.target, f.source); Write(f.target.exe, "build fixture");
   f.Receipt();

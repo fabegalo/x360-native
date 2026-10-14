@@ -52,6 +52,18 @@ std::string FileKey(const fs::path& path) {
   for (auto& c : key) if (c >= 'A' && c <= 'Z') c += 'a' - 'A';
   return key;
 }
+fs::path ImportIoPath(const fs::path& path) {
+#ifdef _WIN32
+  // The final game filename can fit MAX_PATH while its verified staging path
+  // does not. Extended paths work without registry or process-manifest changes.
+  auto value = fs::absolute(path).lexically_normal().make_preferred().native();
+  if (value.starts_with(L"\\\\?\\")) return fs::path(value);
+  if (value.starts_with(L"\\\\")) return fs::path(L"\\\\?\\UNC\\" + value.substr(2));
+  return fs::path(L"\\\\?\\" + value);
+#else
+  return path;
+#endif
+}
 }
 std::vector<Target> ReadCatalog(const ProjectPaths& paths) {
   std::vector<Target> result;
@@ -273,11 +285,11 @@ size_t Import(const ProjectPaths& paths, const Target& t, const fs::path& source
     Inside(destination, paths.inputs());
     fs::create_directories(destination.parent_path());
     // Unique temporary name; never truncate an existing original or destination.
-    const auto staging = destination.parent_path() / (".x360n-import-" + Utf8(destination.filename()));
+    const auto staging = ImportIoPath(destination.parent_path() / (".x360n-import-" + Utf8(destination.filename())));
     const auto temporary = staging / "verified.tmp";
     const auto expected = expected_files.at(destination);
     if (fs::exists(staging)) {
-      if (!fs::is_directory(staging) || fs::is_symlink(staging) || !IsWithin(staging, destination.parent_path()))
+      if (!fs::is_directory(staging) || fs::is_symlink(staging) || !IsWithin(staging, ImportIoPath(destination.parent_path())))
         throw std::runtime_error("Pasta temporária inválida; conteúdo preservado.");
       for (const auto& entry : fs::directory_iterator(staging))
         if (entry.path() != temporary || entry.is_symlink() || !entry.is_regular_file())
@@ -290,12 +302,12 @@ size_t Import(const ProjectPaths& paths, const Target& t, const fs::path& source
     }
     fs::create_directory(staging);
     try {
-      if (!fs::exists(temporary)) fs::copy_file(input, temporary, fs::copy_options::none);
+      if (!fs::exists(temporary)) fs::copy_file(ImportIoPath(input), temporary, fs::copy_options::none);
       if (!Matches(temporary, expected->sha256))
         throw std::runtime_error("O conteúdo mudou durante a cópia. Tente novamente.");
       // Publish complete bytes atomically and never replace a concurrent file.
 #ifdef _WIN32
-      if (!MoveFileExW(temporary.c_str(), destination.c_str(), MOVEFILE_WRITE_THROUGH))
+      if (!MoveFileExW(temporary.c_str(), ImportIoPath(destination).c_str(), MOVEFILE_WRITE_THROUGH))
         throw std::runtime_error("Não foi possível publicar o componente; erro Windows " + std::to_string(GetLastError()));
 #else
       fs::create_hard_link(temporary, destination);

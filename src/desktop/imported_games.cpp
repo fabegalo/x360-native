@@ -50,7 +50,9 @@ void Save(const ProjectPaths& paths, const std::string& id, const Json& record) 
   const auto file = root / (id + ".json");
   Safe(file, paths.local()); fs::create_directories(root);
   const auto tmp = root / (id + ".tmp"); Safe(tmp, paths.local());
-  std::ofstream out(tmp, std::ios::binary); out << record.dump(2) << '\n'; out.close();
+  // Validate serialization before opening/truncating a recoverable staging file.
+  const auto text = record.dump(2);
+  std::ofstream out(tmp, std::ios::binary); out << text << '\n'; out.close();
   if (!out) throw std::runtime_error("Could not persist the game catalog");
 #ifdef _WIN32
   if (!MoveFileExW(tmp.c_str(), file.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH))
@@ -176,6 +178,15 @@ std::string ImportGame(const ProjectPaths& paths, const std::vector<Target>& tar
   try {
     Import(paths, target, source, cancelled);
     stop(); record["complete"] = true; record.erase("error"); Save(paths, id, record);
+  } catch (const fs::filesystem_error& e) {
+    // MSVC's what() contains local-code-page Windows diagnostics. JSON and the
+    // desktop use UTF-8; retain the actual code and Unicode paths without letting
+    // serialization replace the original failure with invalid-UTF-8 errors.
+    auto message = "Erro de arquivo durante a importação (código " + std::to_string(e.code().value()) + ").";
+    if (!e.path1().empty()) message += " Caminho: " + Utf8(e.path1());
+    if (!e.path2().empty()) message += " Destino: " + Utf8(e.path2());
+    if (!previously_complete) { record["error"] = message; Save(paths, id, record); }
+    throw std::runtime_error(message);
   } catch (const std::exception& e) {
     if (!previously_complete) { record["error"] = e.what(); Save(paths, id, record); }
     throw;

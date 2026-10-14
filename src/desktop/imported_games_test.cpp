@@ -74,6 +74,23 @@ TEST_CASE("universal library never overwrites changed installed content", "[univ
   CHECK(fs::file_size(games[0].game_root/"default.xex")==11);
   CHECK_FALSE(Inspect(f.paths,ReadCatalog(f.paths)[0]).inputs_ok);
 }
+TEST_CASE("universal library persists filesystem failures as readable UTF8 diagnostics", "[universal]") {
+  Fixture f;
+  // An ordinary file blocks the destination directory and produces an OS error.
+  Write(f.paths.inputs() / "library", "preserve this obstruction");
+  const auto before = DigestFile(f.paths.inputs() / "library")->sha256;
+  std::string diagnostic;
+  try { ImportGame(f.paths, {}, f.source, f.source); }
+  catch (const std::runtime_error& e) { diagnostic = e.what(); }
+  REQUIRE(diagnostic.find("Erro de arquivo") != std::string::npos);
+  auto games = ReadCatalog(f.paths); REQUIRE(games.size() == 1);
+  CHECK(games[0].import_error == diagnostic);
+  CHECK(DigestFile(f.paths.inputs() / "library")->sha256 == before);
+  fs::rename(f.paths.inputs() / "library", f.paths.inputs() / "preserved");
+  CHECK_NOTHROW(ImportGame(f.paths, games, f.source, f.source));
+  games = ReadCatalog(f.paths); REQUIRE(games.size() == 1);
+  CHECK(games[0].import_error.empty()); CHECK(Inspect(f.paths, games[0]).inputs_ok);
+}
 TEST_CASE("universal library does not infer AOT from title id or executable alone", "[universal]") {
   Fixture f; Target recipe; recipe.id="supported"; recipe.kind="game";
   recipe.game_root=f.paths.inputs()/"supported";
