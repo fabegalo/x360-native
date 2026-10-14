@@ -1,0 +1,48 @@
+diff --git a/src/graphics/register_file.cpp b/src/graphics/register_file.cpp
+index 03ce18c..84ffa20 100644
+--- a/src/graphics/register_file.cpp
++++ b/src/graphics/register_file.cpp
+@@ -9,6 +9,7 @@
+  * @modified    Tom Clay, 2026 - Adapted for ReXGlue runtime
+  */
+ 
++#include <array>
+ #include <cstring>
+ 
+ #include <rex/graphics/register_file.h>
+@@ -20,21 +21,23 @@ RegisterFile::RegisterFile() {
+   std::memset(values, 0, sizeof(values));
+ }
+ 
+-const RegisterInfo* RegisterFile::GetRegisterInfo(uint32_t index) {
+-  switch (index) {
++namespace {
++// Register metadata is immutable. Indexing avoids the large switch on every
++// command-processor register write, including writes with debug logging off.
++constexpr auto kRegisterInfo = [] {
++  std::array<RegisterInfo, RegisterFile::kRegisterCount> table{};
+ #define XE_GPU_REGISTER(index, type, name) \
+-  case index: {                            \
+-    static const RegisterInfo reg_info = { \
+-        RegisterInfo::Type::type,          \
+-        #name,                             \
+-    };                                     \
+-    return &reg_info;                      \
+-  }
++  table[index] = {RegisterInfo::Type::type, #name};
+ #include <rex/graphics/register_table.inc>
+ #undef XE_GPU_REGISTER
+-    default:
+-      return nullptr;
++  return table;
++}();
++}  // namespace
++
++const RegisterInfo* RegisterFile::GetRegisterInfo(uint32_t index) {
++  if (index >= kRegisterInfo.size() || !kRegisterInfo[index].name) {
++    return nullptr;
+   }
++  return &kRegisterInfo[index];
+ }
+-
+ }  // namespace rex::graphics

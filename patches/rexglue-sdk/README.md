@@ -518,3 +518,17 @@ identical probe executables and frozen title binaries, changing only the runtime
 DLL. Results and limits are in `docs/performance-results-2026-10-14.md`.
 This reduces instrumentation overhead; it does not establish an FPS improvement
 with instrumentation disabled.
+
+## 0073 — Index immutable GPU register metadata
+
+`RegisterFile::GetRegisterInfo` uses a constant indexed table generated from the
+same register definitions instead of a large switch. Known names/types, stable
+metadata pointers and null results for unknown/out-of-range registers are
+preserved. Register writes, diagnostics, barriers and rendering are unchanged.
+The table is shared immutable host metadata, not original dashboard resources.
+
+No upstream equivalent identified; SDK pin unchanged. The explicit
+`x360n_register_info_probe` checks all 65,536 low indices plus four large boundary
+values against the definitions and reports a bounded synthetic lookup benchmark.
+Real-game evidence is required separately; a faster synthetic lookup alone does
+not establish better game performance.
