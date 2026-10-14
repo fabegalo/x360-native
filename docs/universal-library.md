@@ -133,6 +133,33 @@ after the maintainer confirmed the Charlie Murder attempt.
 
 ## Updating
 
+### Compact generic build paths (2026-10-14, validation in progress)
+
+Forza's next preparation failed at `1-configure` in SDL's CPU-detection
+`try_compile`: the old build path used the complete 64-character title identifier
+and its nested temporary directory reached 265 characters. Evidence is the
+installed desktop log `37403250` and its `x360n-build-1-configure.log`.
+
+Generic builds now use `.local/build/aot/<first 17 title-id characters>/`, while
+the catalog, manifest filename, title name, original inventory, user data and
+final executable filename retain their existing identities. The full title and
+inventory identity are recorded in `.x360n-aot-owner`; a prefix collision or an
+unidentified existing build directory fails before replacement. Generated code
+lives in that build's `generated/default/`, avoiding the long source path too.
+Previous build files remain preserved at their old locations; re-preparation
+produces the newly declared native path.
+
+The build driver reads the generated preset's `binaryDir`, verifies ownership,
+retains codegen source/stamp files during native invalidation, and certifies
+dependencies from both legacy and compact codegen locations. Automatic launch
+discovery follows the manifest's declared `native_exe` and its receipt. An orphan
+executable under the compact AOT build root remains unlaunchable. No dashboard
+module, original content or SDK revision is substituted by this path change.
+
+Focused evidence: `.local/logs/forza-aot-short-focused-tests.log` and
+`.local/logs/forza-aot-short-receipt-tests.log`. Real preparation and delivery of
+this correction are being validated; this does not assert Forza compatibility.
+
 ### Long installed paths: Forza Horizon import recovery (2026-10-14)
 
 The user's extracted preview.20 installation lived at

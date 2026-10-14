@@ -2,6 +2,7 @@
 #include "sha256.h"
 #include "import_source.h"
 #include "session_profile.h"
+#include "preparation.h"
 #include "../../tests/supervisor/scratch.h"
 #include <catch2/catch_test_macros.hpp>
 #include <fstream>
@@ -138,6 +139,9 @@ TEST_CASE("automatic AOT generates a stable project without a manual recipe", "[
   }
   ImportGame(f.paths,{},f.source,f.source); const auto t=ReadCatalog(f.paths).front();
   REQUIRE(t.generic_aot); REQUIRE(t.aot);
+  CHECK(t.id.size() == 64);
+  CHECK(t.exe.parent_path() == f.paths.build()/"aot"/t.id.substr(0,17));
+  const auto user_root = t.user_root;
   GenerateAotProject(f.paths,t);
   auto profile=LoadSessionProfile(f.paths,t.manifest,false);
   CHECK(profile.name==t.id);
@@ -150,9 +154,24 @@ TEST_CASE("automatic AOT generates a stable project without a manual recipe", "[
   std::ifstream in(integration); const std::string text{std::istreambuf_iterator<char>(in),{}};
   CHECK(text.find("${CMAKE_CURRENT_SOURCE_DIR}")!=std::string::npos);
   CHECK(text.find("{{")==std::string::npos);
+  CHECK(text.find("include(\"${X360N_GENERATED_ROOT}/sources.cmake\")")!=std::string::npos);
+  CHECK(text.find("${CMAKE_CURRENT_SOURCE_DIR}/generated/default")==std::string::npos);
+  CHECK(fs::weakly_canonical(profile.exe)==fs::weakly_canonical(t.exe));
+  CHECK(fs::weakly_canonical(profile.user_root)==fs::weakly_canonical(user_root));
   const auto stamp=fs::last_write_time(t.manifest); const auto hash=DigestFile(integration)->sha256;
   GenerateAotProject(f.paths,t);
   CHECK(fs::last_write_time(t.manifest)==stamp); CHECK(DigestFile(integration)->sha256==hash);
+  auto collision = t;
+  collision.id = t.id.substr(0,17) + std::string(47,'f');
+  REQUIRE(collision.id != t.id);
+  collision.manifest = f.paths.local()/"aot"/collision.id/(collision.id+"_manifest.toml");
+  collision.exe = t.exe.parent_path()/(collision.id+".exe");
+  CHECK_THROWS(GenerateAotProject(f.paths,collision));
+  CHECK_FALSE(fs::exists(collision.manifest));
+  CHECK(DigestFile(integration)->sha256==hash);
+  const auto orphan = f.paths.build()/"aot/orphan/unregistered.exe";
+  Write(orphan,"uncertified native fixture");
+  CHECK(CheckPreparedLaunch(f.paths,orphan));
   auto dashboard=f.root/"titles/dashboard/dashboard_manifest.toml";
   Write(dashboard,"[project]\nname='dashboard'\ngame_root='../../.local/inputs/dash'\n[entrypoint]\nfile_path='../../.local/inputs/dash/dash.xex'\n[x360n]\nnative_exe='../../.local/build/dash.exe'\nuser_data_root='../../.local/user/dash'\nxex_sha256='"+std::string(64,'0')+"'\nlaunch_library=true\n");
   CHECK(LoadSessionProfile(f.paths,dashboard,false).launch_targets.empty());
@@ -163,4 +182,22 @@ TEST_CASE("automatic AOT generates a stable project without a manual recipe", "[
   Write(t.game_root/"default.xex",Xex(9));
   CHECK_THROWS(GenerateAotProject(f.paths,t));
   CHECK(fs::last_write_time(t.manifest)==stamp);
+}
+TEST_CASE("local AOT regenerates an existing imported title without copying content", "[.local-existing-aot]") {
+  const char* root = std::getenv("X360N_AOT_ROOT"), *id = std::getenv("X360N_AOT_TITLE");
+  REQUIRE(root); REQUIRE(id);
+  ProjectPaths paths{PathFromUtf8(root)};
+  const auto games = ReadCatalog(paths);
+  const auto game = std::find_if(games.begin(),games.end(),[&](const auto& t){return t.id==id;});
+  REQUIRE(game!=games.end()); REQUIRE(game->generic_aot);
+  const auto catalog = paths.local()/"catalog"/(Utf8(game->game_root.filename())+".json");
+  const auto before = DigestFile(catalog); REQUIRE(before);
+  GenerateAotProject(paths,*game);
+  const auto profile = LoadSessionProfile(paths,game->manifest,false);
+  CHECK(profile.name==game->id);
+  CHECK(fs::weakly_canonical(profile.exe)==fs::weakly_canonical(game->exe));
+  CHECK(fs::equivalent(profile.xex,game->game_root/"default.xex"));
+  CHECK(fs::weakly_canonical(profile.user_root)==fs::weakly_canonical(game->user_root));
+  CHECK(DigestFile(catalog)->sha256==before->sha256);
+  CHECK(fs::is_regular_file(game->exe.parent_path()/".x360n-aot-owner"));
 }

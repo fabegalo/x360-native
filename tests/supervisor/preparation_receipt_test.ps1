@@ -57,6 +57,14 @@ try {
     Reset-GeneratedBuildOutputs $build @($generated, $inputFile)
     Assert (-not [IO.File]::Exists($generated)) 'stale generated template survived invalidation'
     Assert ([IO.File]::Exists($inputFile)) 'input outside build was deleted'
+    $aotRoot = Join-Path $build 'generated/default'; [void][IO.Directory]::CreateDirectory($aotRoot)
+    $aotSource = Join-Path $aotRoot 'sample.cpp'; [IO.File]::WriteAllText($aotSource, 'verified generated source')
+    $aotStamp = Join-Path $aotRoot 'codegen.stamp'; [IO.File]::WriteAllText($aotStamp, 'per-module fingerprint')
+    [IO.File]::WriteAllText((Join-Path $build '.x360n-aot-owner'), 'full catalog identity')
+    [IO.File]::WriteAllText($generated, 'stale embedded template')
+    Reset-GeneratedBuildOutputs $build @($aotSource,$aotStamp,$generated)
+    Assert ([IO.File]::Exists($aotSource) -and [IO.File]::Exists($aotStamp)) 'compact AOT source/stamp lost during SDK invalidation'
+    Assert (-not [IO.File]::Exists($generated)) 'compact AOT incorrectly preserved an unrelated generated template'
     $exe = Join-Path $build 'sample.exe'; [IO.File]::WriteAllText($exe, 'native output')
     $dll = Join-Path $scratch 'runtime.dll'; [IO.File]::WriteAllText($dll, 'built runtime')
     $staged = Join-Path $build 'runtime.dll'; [IO.File]::Copy($dll, $staged)

@@ -1,5 +1,15 @@
 # STATUS
 
+Correção candidata da configuração AOT genérica em caminhos longos (2026-10-14):
+o Forza importado falhou no try_compile do SDL porque o build usava o ID completo
+como diretório. O catálogo e os dados mantêm a identidade completa; o build usa
+uma chave curta com proprietário verificado, e o codegen vai para esse build.
+O driver segue o binaryDir declarado no preset, preserva fontes/stamps e inclui
+as novas dependências no recibo. Roteamento segue o native_exe do manifesto;
+executáveis sem registro no novo diretório continuam recusados. Testes focados
+de geração/identidade/sessão e de recibos aprovados; preparação real e entrega
+da atualização ainda em validação. Sem iniciar jogo ou Computer Use.
+
 Automação de Releases no GitHub Actions (2026-10-14): workflow manual e por
 tag `v*` implementado em `.github/workflows/release.yml`, reutilizando
 `scripts/package-desktop.ps1`. O runner Windows prepara ferramentas/SDK

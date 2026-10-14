@@ -9,10 +9,13 @@ function Get-ReceiptHash([string]$File) {
 }
 function Reset-GeneratedBuildOutputs([string]$Build, [string[]]$Outputs) {
     $boundary = [IO.Path]::GetFullPath($Build).TrimEnd('\') + '\'
+    $aot = [IO.File]::Exists((Join-Path $Build '.x360n-aot-owner'))
+    $aotBoundary = [IO.Path]::GetFullPath((Join-Path $Build 'generated')).TrimEnd('\') + '\'
     foreach ($output in $Outputs) {
         $file = Resolve-BuildPath $Build $output
-        # Only Ninja-declared generated files inside this build. The title's AOT
-        # sources/stamps live outside it and retain their per-module fingerprints.
+        # Retain title AOT sources/stamps and their per-module fingerprints,
+        # including compact generic outputs now located inside the build tree.
+        if ($aot -and $file.StartsWith($aotBoundary, [StringComparison]::OrdinalIgnoreCase)) { continue }
         if ($file.StartsWith($boundary, [StringComparison]::OrdinalIgnoreCase) -and [IO.File]::Exists($file)) {
             [IO.File]::Delete($file)
         }
@@ -110,8 +113,10 @@ function Get-BuildInputs([string]$Root, [string]$Title, [string]$Build, [string[
     }
     foreach ($file in Get-ChildItem -LiteralPath (Join-Path $Root 'external/rexglue-sdk/resources/templates') -Recurse -File) { [void]$files.Add($file.FullName) }
     $depfiles = @()
-    if (Test-Path -LiteralPath (Join-Path $projectDirectory 'generated')) {
-        $depfiles = @(Get-ChildItem -LiteralPath (Join-Path $projectDirectory 'generated') -Filter codegen.d -Recurse -File)
+    foreach ($generatedRoot in @((Join-Path $projectDirectory 'generated'), (Join-Path $Build 'generated'))) {
+        if (Test-Path -LiteralPath $generatedRoot) {
+            $depfiles += @(Get-ChildItem -LiteralPath $generatedRoot -Filter codegen.d -Recurse -File)
+        }
     }
     foreach ($depfile in $depfiles) {
         # Old generated modules may remain on disk after removal from a manifest.

@@ -79,9 +79,14 @@ SessionProfile LoadSessionProfile(const ProjectPaths& paths, const std::filesyst
       if (!recipe["library"].is_table() || recipe["kind"].value_or(std::string("game")) != "game") continue;
       const auto id = PathUtf8(dir.path().filename());
       const auto candidate = dir.path() / PathFromUtf8(id + "_manifest.toml");
+      // Generated projects declare their native output. It can use a compact
+      // build directory while retaining the complete catalog/title identity.
+      const auto native = root == paths.local() / "aot"
+          ? LoadSessionProfile(paths, candidate, false).exe
+          : paths.build() / "titles" / id / (id + ".exe");
       if (root == paths.local() / "aot" &&
           (std::filesystem::exists(paths.local() / "preparation" / (id + ".runtime-error")) ||
-           CheckPreparation(paths, id, candidate, paths.build() / "titles" / id / (id + ".exe")))) continue;
+           CheckPreparation(paths, id, candidate, native))) continue;
       if (std::filesystem::weakly_canonical(candidate) != manifest)
         p.launch_targets.push_back(candidate);
       } catch (const std::exception&) {

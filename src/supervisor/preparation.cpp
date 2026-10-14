@@ -166,7 +166,8 @@ std::optional<std::string> CheckPreparedLaunch(const ProjectPaths& paths, const 
         if (fs::is_regular_file(manifest)) return CheckPreparation(paths, id, manifest, exe);
       }
     }
-    if (fs::exists(PreparationReceipt(exe)) || IsWithin(exe, paths.build() / "titles"))
+    if (fs::exists(PreparationReceipt(exe)) || IsWithin(exe, paths.build() / "titles") ||
+        IsWithin(exe, paths.build() / "aot"))
       return "Preparação inválida; prepare novamente. Executável sem título correspondente.";
     return std::nullopt;
   } catch (const std::exception&) { return "Preparação inválida; prepare novamente. Não foi possível verificar o título."; }

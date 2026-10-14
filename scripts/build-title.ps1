@@ -29,8 +29,25 @@ if (-not (Test-Path (Join-Path $titleDir 'CMakePresets.json'))) {
     $titleDir = Join-Path $root ".local/aot/$Title"
 }
 if (-not (Test-Path (Join-Path $titleDir 'CMakePresets.json'))) { throw "no title project at $titleDir" }
+$ownerSnapshot = @()
+if ($titleDir.StartsWith((Join-Path $root '.local\aot\'), [StringComparison]::OrdinalIgnoreCase)) {
+        $preset = Get-Content -LiteralPath (Join-Path $titleDir 'CMakePresets.json') -Raw | ConvertFrom-Json
+        $declared = @($preset.configurePresets | Where-Object { $_.name -eq 'x360n-win-amd64' })
+        if ($declared.Count -ne 1 -or -not $declared[0].binaryDir) { throw 'Generated AOT build directory missing' }
+        $declaredBuild = [IO.Path]::GetFullPath($declared[0].binaryDir)
+        if (-not $declaredBuild.StartsWith((Join-Path $root '.local\build\'), [StringComparison]::OrdinalIgnoreCase)) {
+            throw 'Generated AOT build directory escaped the environment'
+        }
+        $ownerFile = Join-Path $declaredBuild '.x360n-aot-owner'
+        if (-not [IO.File]::Exists($ownerFile) -or [IO.File]::ReadAllLines($ownerFile)[0] -ne $Title) {
+            throw 'Generated AOT build identity missing or different; regenerate the project before building.'
+        }
+        $ownerSnapshot = @(Get-ReceiptEntries @($ownerFile))
+        if (-not $BuildDir) { $BuildDir = $declaredBuild }
+}
 if (-not $BuildDir) { $BuildDir = ".local/build/titles/$Title" }
-$build = [IO.Path]::GetFullPath((Join-Path $root $BuildDir))
+$build = if ([IO.Path]::IsPathRooted($BuildDir)) { [IO.Path]::GetFullPath($BuildDir) }
+         else { [IO.Path]::GetFullPath((Join-Path $root $BuildDir)) }
 New-Item -ItemType Directory -Force $build | Out-Null
 $lease = Enter-BuildLease $root $build $Title
 $previousOwnedBuild = $env:X360N_OWNED_BUILD
@@ -112,7 +129,8 @@ try {
             $ignore = if ($sameProducer) { '' } else { '--ignore-stamp' }
             if ($sameProducer) {
                 foreach ($entry in $previous.inputs) {
-                    if ($entry.path.StartsWith((Join-Path $titleDir 'generated'), [StringComparison]::OrdinalIgnoreCase) -and
+                    if (($entry.path.StartsWith((Join-Path $titleDir 'generated'), [StringComparison]::OrdinalIgnoreCase) -or
+                         $entry.path.StartsWith((Join-Path $build 'generated'), [StringComparison]::OrdinalIgnoreCase)) -and
                         (-not [IO.File]::Exists($entry.path) -or (Get-ReceiptHash $entry.path) -ne $entry.sha256)) {
                         $stamp = Join-Path (Split-Path $entry.path) 'codegen.stamp'
                         if ([IO.File]::Exists($stamp)) { [IO.File]::Delete($stamp) }
@@ -173,7 +191,8 @@ try {
             }
         }
     }
-    if (-not (Test-ReceiptEntries $driverSnapshot) -or -not (Test-ReceiptEntries $sourceSnapshot)) { throw 'An input changed during preparation; prepare again. No receipt published.' }
+    if (-not (Test-ReceiptEntries $driverSnapshot) -or -not (Test-ReceiptEntries $ownerSnapshot) -or
+        -not (Test-ReceiptEntries $sourceSnapshot)) { throw 'An input changed during preparation; prepare again. No receipt published.' }
     $inputs = @(Get-ReceiptEntries @(Get-BuildInputs $root $Title $build @($Title)))
     $dllOutputs = @(Get-NinjaNodes $build @($Title) | Where-Object { $_ -match '\.dll$' } | Sort-Object -Unique)
     $artifacts = @(Get-PreparedArtifacts $build $exe $dllOutputs | Sort-Object path -Unique)
@@ -185,7 +204,7 @@ try {
         throw 'Inputs or codegen changed while collecting the receipt; prepare again. No receipt published.'
     }
     $receipt = @{ schema = 1; title = $Title; manifest = $manifest; exe = $exe; sdk_commit = $sdkCommit; globs = $globs;
-        inputs = @($inputs + $producer | Sort-Object path -Unique); artifacts = $artifacts; producer = $producer;
+        inputs = @($inputs + $producer + $ownerSnapshot | Sort-Object path -Unique); artifacts = $artifacts; producer = $producer;
         roles = @{ compiler = (Get-BuildCache $build).CMAKE_CXX_COMPILER; codegen = $tool;
             build_config = (Join-Path $build 'CMakeCache.txt') } }
     Publish-PreparationReceipt $receiptFile $receipt

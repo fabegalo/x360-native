@@ -48,12 +48,21 @@ void GenerateAotProject(const ProjectPaths& paths, const Target& t) {
     throw std::runtime_error("XEX identity changed before project generation");
   WorkspaceLease lease(paths);
   const auto dir = paths.local() / "aot" / t.id;
+  const auto generated = t.exe.parent_path() / "generated/default";
+  const auto owner_file = t.exe.parent_path() / ".x360n-aot-owner";
+  const auto owner = t.id + "\n" + Utf8(t.game_root.filename()) + "\n";
+  if (fs::exists(owner_file) && ReadText(owner_file) != owner)
+    throw std::runtime_error("AOT build directory belongs to another content identity; existing files were preserved.");
+  if (!fs::exists(owner_file) && fs::is_directory(t.exe.parent_path()) &&
+      fs::directory_iterator(t.exe.parent_path()) != fs::directory_iterator())
+    throw std::runtime_error("AOT build directory has no verified owner; existing files were preserved.");
+  Write(owner_file, owner, paths.local());
   fs::create_directories(PreparationMarker(paths, t).parent_path());
   Write(PreparationMarker(paths, t), "project-generation\n", paths.local());
   const auto xex_hash = identities[0].sha256;
   toml::table manifest{
     {"project", toml::table{{"name", t.id}, {"sdk_version", "0.10.0"}, {"game_root", Path(t.game_root)}}},
-    {"entrypoint", toml::table{{"file_path", Path(t.game_root / "default.xex")}, {"out_directory_path", "generated/default"}}},
+    {"entrypoint", toml::table{{"file_path", Path(t.game_root / "default.xex")}, {"out_directory_path", Path(generated)}}},
     {"x360n", toml::table{{"xex_sha256", xex_hash}, {"native_exe", Path(t.exe)},
       {"user_data_root", Path(paths.local() / "user" / t.id)}, {"args", toml::array{"--gpu_plugin=xenos", "--mnk_mode=true"}}}}
   };
@@ -77,6 +86,11 @@ void GenerateAotProject(const ProjectPaths& paths, const Target& t) {
   // This pinned SDK template has only scalar substitutions and cmake_var calls.
   // Reject unfamiliar directives instead of silently emitting a broken project.
   auto integration = ReadText(paths.root / "external/rexglue-sdk/resources/templates/init/rexglue_cmake.inja");
+  Replace(integration, "{{ cmake_var(\"CMAKE_CURRENT_SOURCE_DIR\") }}/{{ entrypoint_out_dir }}",
+      "{{ cmake_var(\"X360N_GENERATED_ROOT\") }}");
+  for (const auto& file : {"sources.cmake", "dll_targets.cmake"})
+    Replace(integration, std::string("include({{ entrypoint_out_dir }}/") + file + ")",
+        std::string("include(\"{{ cmake_var(\"X360N_GENERATED_ROOT\") }}/") + file + "\")");
   integration = std::regex_replace(integration, std::regex(R"re(\{\{ cmake_var\("([A-Za-z0-9_]+)"\) \}\})re"), "$${$1}");
   Replace(integration, "{{ names.snake_case }}", t.id);
   Replace(integration, "{{ entrypoint_out_dir }}", "generated/default");
@@ -89,6 +103,7 @@ void GenerateAotProject(const ProjectPaths& paths, const Target& t) {
     Replace(text, "@TITLE@", t.id);
     // CMake bracket arguments avoid interpolation of imported display names.
     Replace(text, "@ROOT@", "${CMAKE_CURRENT_SOURCE_DIR}/../../..");
+    Replace(text, "@GENERATED@", Path(generated));
     Write(dir / name, text, paths.local());
   }
   using J = nlohmann::json;
