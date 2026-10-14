@@ -655,8 +655,12 @@ int Session(const ProjectPaths& paths, const fs::path& manifest, int timeout, bo
       if (!incoming.empty()) args.push_back("--x360n_handoff_in=" + PathUtf8(incoming));
       fs::path handoff;
       std::chrono::milliseconds child_lifetime{};
+      const auto run_prefix = fmt::format("session-{}-", step);
+      // Content-derived project IDs may already occupy the complete safe-label
+      // budget. Shorten only the diagnostic label, never the routed identity.
+      const auto run_label = run_prefix + active.name.substr(0, 64 - run_prefix.size());
       const auto result = Run(paths, active.exe, args,
-          fmt::format("session-{}-{}", step, active.name), timeout, true, false, &handoff, window.get(), &child_lifetime);
+          run_label, timeout, true, false, &handoff, window.get(), &child_lifetime);
       if (window && window->closed()) return kExitOk;
       if (result != kExitOk) {
         // A successful compilation is not a compatibility verdict. Preserve a
