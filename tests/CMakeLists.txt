@@ -28,6 +28,9 @@ add_executable(x360n_tests
     supervisor/preparation_test.cpp
 )
 target_link_libraries(x360n_tests PRIVATE x360n_core Catch2::Catch2WithMain)
+target_sources(x360n_tests PRIVATE supervisor/dashboard_assets_test.cpp
+    ../titles/common/dashboard_assets.cpp)
+target_link_libraries(x360n_tests PRIVATE tomlplusplus)
 target_compile_definitions(x360n_tests PRIVATE
     X360N_TEST_CHILD="$<TARGET_FILE:x360n_test_child>"
     X360N_SESSION_CHILD="$<TARGET_FILE:x360n_session_child>"
@@ -47,6 +50,9 @@ target_compile_definitions(x360n_tests PRIVATE X360N_CONTENT_EXE="$<TARGET_FILE:
 add_dependencies(x360n_tests x360n-content)
 catch_discover_tests(x360n_tests TEST_PREFIX "x360n." PROPERTIES LABELS "project" TIMEOUT 120)
 if(WIN32)
+  add_test(NAME x360n.dashboard-assets-build-gate COMMAND powershell -NoProfile -ExecutionPolicy Bypass
+    -File ${CMAKE_CURRENT_SOURCE_DIR}/build_isolation/dashboard_assets.ps1)
+  set_tests_properties(x360n.dashboard-assets-build-gate PROPERTIES LABELS project TIMEOUT 30)
   add_test(NAME x360n.build-leases COMMAND powershell -NoProfile -ExecutionPolicy Bypass
     -File ${CMAKE_CURRENT_SOURCE_DIR}/build_isolation/leases_test.ps1)
   set_tests_properties(x360n.build-leases PROPERTIES LABELS project TIMEOUT 30)
@@ -63,6 +69,8 @@ add_executable(x360n_local_tests local/inputs_test.cpp local/avatar_pack_test.cp
     ${PROJECT_SOURCE_DIR}/titles/common/avatar/avatar_metadata.cpp
     ${PROJECT_SOURCE_DIR}/titles/common/avatar/avatar_toc.cpp)
 target_link_libraries(x360n_local_tests PRIVATE x360n_core Catch2::Catch2WithMain)
+target_sources(x360n_local_tests PRIVATE local/dashboard_assets_test.cpp
+    ../titles/common/dashboard_assets.cpp)
 target_compile_definitions(x360n_local_tests PRIVATE X360N_SOURCE_ROOT="${PROJECT_SOURCE_DIR}")
 catch_discover_tests(x360n_local_tests TEST_PREFIX "local." PROPERTIES LABELS "project" TIMEOUT 600)
 

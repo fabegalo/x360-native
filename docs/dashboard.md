@@ -1919,3 +1919,113 @@ saves/conquistas e vários jogadores simultâneos não foram aprovados. C7 com
 um perfil conserva formato e contratos nos testes; regressões de jogos já
 aprovadas não foram repetidas. Sem Computer Use, processos remanescentes,
 push ou Release.
+
+### 0.32 Isolamento obrigatório por versão e teclado 17559: C7.8 (2026-10-13)
+
+Base `daa5bf0`. A regra permanente está em `AGENTS.md` e `CLAUDE.md`:
+**uma dashboard, seus módulos originais correspondentes; sem mistura de versões**.
+Compartilhar infraestrutura genérica ReXGlue continua permitido.
+
+A conferência do arquivo efetivamente usado, `.local/inputs/dashboard/17559/vk.xex`,
+mostrou XEX2 de 45.056 bytes, versão e base **2.0.17559.0**, PE `vk.dll`,
+base `917D0000`, entry `917DFBA8`. Os imports XAM e kernel também declaram
+2.0.17559.0. SHA-256:
+`876ddbb333d83f408ab7c69267703e623daef6da5b1eb3302bd94d246155724e`.
+Esse já era o arquivo usado no aceite C7.7; não houve troca para 13604 neste
+incremento. **13604 não é substituto permitido**, mesmo com nome/base/exports
+iguais. Registro da inspeção: `.local/tmp/version-guard-vk-identity.txt`.
+
+O perfil 17559 associa os seguintes originais, também registrados em
+`preparation.toml` e na tabela compilada `src/original_assets.h`:
+
+| Caminho relativo à pasta 17559 | SHA-256 |
+|---|---|
+| `dash.xex` | `3ad8f38d070eaf63cadac0697e3e8802c565cbfd0825a485347c5d718014f927` |
+| `shrdres.xzp` | `179c5be167402297c6e137c08fefe3146f6f497964dc2bda94812596fc9aefe0` |
+| `bootanim.xex` | `45eb980c0f841b4807d43c07c766fae5e70b8e2fa4d13fb247a491897cfc6de7` |
+| `SegoeXbox-Light.xtt` | `7b03c1731c6cb874adee50b17aa150f6ba3e0671fc8f612a2a970bf5ef4a542e` |
+| `XenonJKLatin.xtt` | `9f20409bbe22ca92d483c24aa0930ac8ec761712c16d00c477f145071e707425` |
+| `XenonCLatin.xtt` | `977bbe13d5545d300e57dacf9dff492476452f50880ef3868d3aa308d041187d` |
+| `XenonSCLatin.xtt` | `6d44d6b65605bee7acfc96bb1d11bafdc3cc3abd57544eca560cd02c84abc590` |
+| `system/gamerprofile.xex` | `a99fb2ae20c4b3ffab9fa5f6a73e5766b49fbed5716e8b4d3752d1b97b83aad4` |
+| `system/xam_ui.xex` | `78b3dbd8ae866f4258f5444205486ea9f8451afaa30f469c875dcf345f828467` |
+| `system/huduiskin.xex` | `fdbe68d20fa6b013282ce8f21cebddc34fe4e3a92a71c28983d63f288d2252cc` |
+| `system/signin.xex` | `86695c6c36250cc4b4addb7ccc07d15d54492b352c979cf5c0934804109a6130` |
+| `system/createprofile.xex` | `c5dae66e2e7b408ef6d84d659a2232ad89f01d78fa38c365d8732f2e0a221bbd` |
+| `vk.xex` | `876ddbb333d83f408ab7c69267703e623daef6da5b1eb3302bd94d246155724e` |
+| `system/hud.xex` | `37e10612afde211e1d349838704f7cc2648ad5a4d1f8ca459f18ecd2c1f31ac7` |
+
+Os módulos são do pacote Retail 17559 local; procedência da extração e hashes
+permanecem em `versions/17559/retail_system_assets/metadata/`. As fontes não
+têm versão XEX: a associação e os bytes do conjunto existente são explícitos
+no perfil. SegoeXbox-Light veio do pacote oficial; SCLatin está no conjunto
+17559 e no ZIP da atualização. JK/CLatin conservam a procedência do acervo
+`resources/fonts/Segoe UI (Kinect, Metro)` já registrada na preparação; não
+atribuir a elas uma versão interna não identificada. O runtime não busca
+fontes nesse diretório compartilhado: só aceita as cópias locais de hash fixado.
+
+A 6717 mantém `dash.xex` SHA-256
+`f8a51ea30406e3b8737e0cdbdad44867743869d59f58d4bc0f4b83e154cb87d8` e
+seu `shrdres.xzp` SHA-256
+`c411c9f29e6b6031c2e4ce9a3e38e1d3fc9a9ec4d17bf99ba80fb2260a1fb12e`.
+`XenonJKLatin.xtt` correspondente segue sem identificação: consta como
+dependência não verificada e agora impede build/início, com erro explícito.
+Isso preserva a evidência histórica de Blades, mas não permite ocultar a
+dependência usando uma fonte de outra versão. Não houve sessão 6717 neste
+incremento. 13604 não tem alvo integrado nem fallback para 17559.
+
+**Proteções e custo:** `cmake/x360n_dashboard_assets.cmake` confere os originais
+na configuração e antes dos alvos AOT/build. `VerifyDashboardAssets` verifica
+a tabela compilada antes de construir Runtime, inclusive na execução direta
+com `--game_data_root`. Arquivo ausente, hash incompatível ou caminho que
+resolve fora da pasta resulta em erro com versão, dependência e hash esperado.
+O diálogo de erro usa o mecanismo existente do host. Não existe busca por
+basename em outras pastas nem fallback. As associações `game:`, `media:` e
+`Harddisk0/Partition1` continuam apontando para a pasta da dashboard ativa.
+
+Os hashes são calculados por streaming uma vez por início, usando o SHA-256
+existente (BCrypt no Windows), sem trabalho no caminho de renderização/entrada.
+Não há cache global de validação por nome/tamanho/mtime. Caches recebem
+`dashboard-<versão>`; metadados padrão ficam em `<game_data_root>/metadata`,
+desativando a busca no diretório pai do SDK. Metadados explicitamente fornecidos
+também recebem o sufixo da versão. Overlays `update_data_root` são recusados
+para estes alvos: requerem o pacote completo correspondente. Os originais
+devem permanecer imutáveis durante a execução; isto não é uma proteção contra
+alteração externa concorrente de arquivos após a verificação.
+
+**Quatro testes focados distintos aprovados:** mistura/ausência/arquivo trocado
+com mesmo tamanho e mtime, coerência entre tabela e preparação/caminhos AOT,
+hashes reais mais versão/imports do teclado, e rejeições do gate CMake.
+Logs: `.local/tmp/version-guard-tests.log`, `version-guard-tests-final.log`,
+`version-guard-build-gate-test.log`. Builds incrementais concluídos em
+`version-guard-title-final-build.log`, `version-guard-title-metadata-build.log`
+e `version-guard-tests-final-build.log`. SDK pinado e patches 0001–0066
+inalterados; os 17 testes anteriores continuam como evidência C7.7, sem repetir
+automaticamente aquela bateria nem jogos.
+
+**Teclado e perfis reais**, armazenamento novo `.local/tmp/version-guard-profiles`,
+somente UI original e scripts locais autorizados, processos limitados a 60 s:
+
+- `version-guard-create-as`: escolher a/s na grade, Done e salvar produziu
+  `asPlayer1`, XUID `E006ACB25043B19F` (48,896 s). A asserção esperava `as` e
+  falhou: a grade inseriu caracteres antes do nome sugerido. O erro era da
+  expectativa do roteiro; `step-7.png` e o snapshot final registram o nome real.
+- `version-guard-as-card-signout`: novo processo recuperou `asPlayer1`, GamerCard
+  correta em `step-4.png`, B e Sign-out original concluídos (45,852 s, PASS).
+- `version-guard-create-qw`: escolher q/w produziu `qwPlayer1`, XUID
+  `E00AC037A95DE171`, preservando asPlayer1 desconectado (49,509 s, PASS).
+  `step-7.png` mostra o teclado; `step-11.json` confirma as duas contas.
+- `version-guard-qw-card-signout`: GamerCard `qwPlayer1` após reiniciar em
+  `step-4.png`, seguida de Sign-out real, PASS.
+- `version-guard-switch-same-process`: tentativa de roteiro longa, 56,101 s;
+  a sequência avançou enquanto o diálogo de primeiro uso ainda estava ativo.
+  Terminou conectado em asPlayer1, contrariando a expectativa de qwPlayer1;
+  permanece como tentativa reprovada, não como prova da troca completa.
+- `version-guard-switch-qw`: 39,428 s, PASS; inicia em asPlayer1, faz Sign-out
+  (`0x28`), lista ambos, seleciona qwPlayer1 e conecta (`0x120424`) no mesmo
+  processo. Snapshot final: asPlayer1 desconectado, qwPlayer1 conectado.
+
+Os diretórios sob `.local/runs/` contêm PNGs, log guest, teclas, snapshots e
+hashes dos binários. Não houve escrita direta no backend para produzir esses
+perfis. Os limites de C7.7 permanecem: offline, um usuário ativo no slot 0,
+sem aprovação de saves, Xbox Live, Guide completo ou usuários simultâneos.

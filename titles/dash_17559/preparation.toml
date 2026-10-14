@@ -1,5 +1,6 @@
 label = "Dashboard Retail 17559"
 kind = "dashboard"
+dashboard_version = "2.0.17559.0"
 label_en = "Retail dashboard 17559"
 limitations_en = "Menu, Castle Crashers cycle and local profile creation/switching through the original UI validated locally. One active local profile in slot 0; Xbox Live, full Guide coverage and game saves remain pending. Original content is never downloaded."
 session = true

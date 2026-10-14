@@ -1,5 +1,7 @@
 label = "Dashboard Retail 6717 (diagnóstico)"
 kind = "dashboard"
+dashboard_version = "2.0.6717.0"
+unverified_dependencies = ["XenonJKLatin.xtt"]
 label_en = "Retail dashboard 6717 (diagnostics)"
 limitations_en = "Blades renders and navigates, but its matching XenonJKLatin.xtt is missing. Game cycle unvalidated. This version does not inherit 17559 modules or fonts; guided session unavailable."
 session = false
@@ -9,3 +11,7 @@ limitations = "Blades renderiza e navega, mas falta XenonJKLatin.xtt corresponde
 path = "dash.xex"
 source_name = "dash.xex"
 sha256 = "f8a51ea30406e3b8737e0cdbdad44867743869d59f58d4bc0f4b83e154cb87d8"
+[[files]]
+path = "shrdres.xzp"
+source_name = "shrdres.xzp"
+sha256 = "c411c9f29e6b6031c2e4ce9a3e38e1d3fc9a9ec4d17bf99ba80fb2260a1fb12e"

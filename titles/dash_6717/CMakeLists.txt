@@ -17,6 +17,8 @@ endif()
 # Sources
 set(DASH6717_SOURCES
     src/main.cpp
+    ../common/dashboard_assets.cpp
+    ../../src/supervisor/sha256.cpp
     src/unresolved_imports.cpp
     src/curl_bind.cpp
     ../common/camera_state.cpp
@@ -24,11 +26,14 @@ set(DASH6717_SOURCES
 
 if(WIN32)
     add_executable(dash_6717 WIN32 ${DASH6717_SOURCES})
+    target_link_libraries(dash_6717 PRIVATE bcrypt)
 else()
     add_executable(dash_6717 ${DASH6717_SOURCES})
 endif()
 
 rexglue_setup_target(dash_6717 GPU_PLUGINS xenos)
+include(../../cmake/x360n_dashboard_assets.cmake)
+x360n_guard_dashboard(dash_6717 6717 "${CMAKE_CURRENT_SOURCE_DIR}/../../.local/inputs/dashboard/versions/6717/blades_retail")
 if(REXSDK_DIR)
     x360n_stage_runtime_dlls(dash_6717 PLUGIN_TARGETS rexgpu-xenos)
 endif()

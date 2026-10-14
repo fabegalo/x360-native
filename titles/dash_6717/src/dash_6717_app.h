@@ -11,10 +11,18 @@
 #include <rex/logging.h>
 #include <rex/rex_app.h>
 #include <rex/runtime.h>
+#include "../../common/dashboard_paths.h"
+#include "original_assets.h"
 
 class Dash6717App : public rex::ReXApp {
  public:
   using rex::ReXApp::ReXApp;
+
+  bool ConstructRuntime(const rex::PathConfig& defaults) override {
+    auto paths = defaults;
+    return x360n::PrepareDashboardPaths(paths, "6717", dash6717::kOriginalAssets) &&
+           rex::ReXApp::ConstructRuntime(paths);
+  }
 
   static std::unique_ptr<rex::ui::WindowedApp> Create(
       rex::ui::WindowedAppContext& ctx) {

@@ -1,0 +1,45 @@
+# Exact original inputs, checked before codegen/build as well as at runtime.
+# The compiled table is checked against preparation.toml by dashboard-assets tests.
+function(x360n_verify_dashboard_assets root header version)
+    file(STRINGS "${header}" entries REGEX "^  \\{")
+    if(NOT entries)
+        message(FATAL_ERROR "Dashboard ${version}: no original dependency identities")
+    endif()
+    foreach(entry IN LISTS entries)
+        if(NOT entry MATCHES "^  \\{\"([^\"]+)\", \"([0-9a-f]*)\"\\},$")
+            message(FATAL_ERROR "Dashboard ${version}: invalid original dependency identity: ${entry}")
+        endif()
+        set(path "${CMAKE_MATCH_1}")
+        set(expected "${CMAKE_MATCH_2}")
+        string(LENGTH "${expected}" length)
+        if(NOT length EQUAL 64)
+            message(FATAL_ERROR "Dashboard Retail ${version}: ${path} has no verified matching version/hash; no fallback")
+        endif()
+        if(NOT EXISTS "${root}/${path}")
+            message(FATAL_ERROR "Dashboard Retail ${version}: required original dependency ${path} is missing; expected SHA-256 ${expected}")
+        endif()
+        file(SHA256 "${root}/${path}" actual)
+        if(NOT actual STREQUAL expected)
+            message(FATAL_ERROR "Dashboard Retail ${version}: incompatible ${path}: ${actual}; expected ${expected}; no fallback")
+        endif()
+    endforeach()
+endfunction()
+
+function(x360n_guard_dashboard target version root)
+    set(header "${CMAKE_CURRENT_SOURCE_DIR}/src/original_assets.h")
+    x360n_verify_dashboard_assets("${root}" "${header}" "${version}")
+    add_custom_target(${target}_original_assets_check
+        COMMAND ${CMAKE_COMMAND} "-DROOT=${root}" "-DHEADER=${header}" "-DVERSION=${version}"
+            -P "${CMAKE_CURRENT_FUNCTION_LIST_FILE}"
+        VERBATIM)
+    # Includes separate overlapping AOT images, before their source generation.
+    foreach(suffix "" _codegen _bootanim _gamerprofile _xam_ui _signin _createprofile _vk _hud)
+        if(TARGET ${target}${suffix})
+            add_dependencies(${target}${suffix} ${target}_original_assets_check)
+        endif()
+    endforeach()
+endfunction()
+
+if(CMAKE_SCRIPT_MODE_FILE)
+    x360n_verify_dashboard_assets("${ROOT}" "${HEADER}" "${VERSION}")
+endif()

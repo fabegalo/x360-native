@@ -1,5 +1,18 @@
 # STATUS
 
+C7.8 (2026-10-13), **isolamento obrigatório dos originais por versão**:
+`AGENTS.md`/`CLAUDE.md` registram a regra permanente. O vk.xex efetivamente
+integrado é Retail **2.0.17559.0**, SHA-256 `876ddbb333d83f408ab7c69267703e623daef6da5b1eb3302bd94d246155724e`.
+Build/codegen e executável direto agora recusam dependências ausentes ou com
+hash divergente antes de usar originais; runtime verifica uma vez por início,
+sem cache global de validação, e mantém caches/metadados dentro da versão.
+A 6717 recusa a fonte ainda não identificada, sem herdar fonte da 17559.
+Quatro testes focados distintos aprovados, incluindo arquivos reais e versão
+interna/imports do teclado. Criação com caracteres escolhidos no teclado 17559
+e GamerCards de `asPlayer1`/`qwPlayer1` demonstradas por scripts locais.
+Mapeamento, limites e evidências em `docs/dashboard.md` §0.32. SDK e patches
+0001–0066 preservados, sem Computer Use, jogos, push ou Release.
+
 C7.7 (2026-10-13), **múltiplos perfis locais funcionais pela UI original da
 Retail 17559/Windows x64**: partindo do HEAD local `c132d12`, dois perfis foram
 criados do zero por Guide → Sign-in → Create Profile → teclado original → Done.

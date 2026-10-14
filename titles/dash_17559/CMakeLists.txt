@@ -20,6 +20,8 @@ endif()
 # Sources
 set(DASH17559_SOURCES
     src/main.cpp
+    ../common/dashboard_assets.cpp
+    ../../src/supervisor/sha256.cpp
     # Traps for imports the pinned SDK does not provide at link time (see the file).
     src/unresolved_imports.cpp
     ../common/camera_state.cpp
@@ -33,6 +35,7 @@ set(DASH17559_SOURCES
 
 if(WIN32)
     add_executable(dash_17559 WIN32 ${DASH17559_SOURCES})
+    target_link_libraries(dash_17559 PRIVATE bcrypt)
 else()
     add_executable(dash_17559 ${DASH17559_SOURCES})
 endif()
@@ -130,3 +133,6 @@ rexglue_apply_recomp_settings(dash_17559_hud
     "${CMAKE_CURRENT_SOURCE_DIR}/generated/hud/dash_17559_pch.h")
 rexglue_configure_module_target(dash_17559_hud HOST dash_17559)
 add_dependencies(dash_17559 dash_17559_hud)
+
+include(../../cmake/x360n_dashboard_assets.cmake)
+x360n_guard_dashboard(dash_17559 17559 "${CMAKE_CURRENT_SOURCE_DIR}/../../.local/inputs/dashboard/17559")

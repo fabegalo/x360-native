@@ -149,6 +149,13 @@ sem Computer Use. Estes critérios cobrem a dashboard Retail 17559/Windows x64,
 um usuário ativo no slot 0. Não aprovam o aceite amplo de jogo/saves desta seção,
 usuários simultâneos, todas as funções do Guide ou edição de avatar.
 
+Incremento C7.8 (2026-10-13): vk.xex **2.0.17559.0** conferido por hash,
+versão e imports; bloqueios por versão/hash no build e antes do runtime.
+Quatro testes focados de isolamento aprovados. Teclado original recebeu
+caracteres escolhidos, criando asPlayer1/qwPlayer1; GamerCards, Sign-out e
+troca no mesmo processo demonstrados. Regra permanente em AGENTS.md/CLAUDE.md;
+mapeamento e evidências em dashboard §0.32. Não amplia o aceite de jogos.
+
 ## 4. Biblioteca e My Games — P0
 
 - [x] Fazer o pedido de lançamento partir de My Games original na 17559: chamada relatada a `XamContentLaunchImageInternalEx` para `XSYSLAUNCH:\default.xex`.

@@ -28,6 +28,21 @@ imediata de backend/SDK ou ports paralelos. Requisitos e aceite do pacote real:
 `docs/CHECKLIST_FUNCIONAL_x360-native.md` §§15–18, ainda pendentes. Não distribuir
 conteúdo proprietário ou código derivado dos binários sem autorização aplicável.
 
+## Isolamento de versões — regra arquitetural permanente
+
+**Uma dashboard, seus módulos originais correspondentes. Sem mistura de versões.**
+Retail 17559 usa apenas módulos/recursos da 17559, 13604 apenas da 13604,
+6717 apenas da 6717; vale para toda versão futura. Inclui teclado vk.xex,
+signin.xex, gamerprofile.xex, XUI, skins, fontes e demais recursos específicos.
+Igualdade de nomes, ordinais ou exports não é evidência de compatibilidade.
+O vk.xex 13604 é incompatível e não substitui o vk.xex Retail 17559 encontrado.
+Registrar versão, procedência e SHA-256 no perfil. Recusar dependências
+divergentes/ausentes antes do runtime, com mensagem identificando versão e
+arquivo necessário; proibir fallback silencioso, caminhos compartilhados e
+caches globais de módulos originais. Adicionar/preservar verificação automática.
+ReXGlue e infraestrutura genérica podem continuar compartilhados. Mapeamento
+e guardas atuais: `docs/dashboard.md` §0.32 e `titles/dash_*/preparation.toml`.
+
 ## Commits e primeira publicação — regra permanente
 
 - Todos os novos commits próprios usam Conventional Commits:

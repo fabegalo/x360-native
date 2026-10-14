@@ -19,6 +19,8 @@
 #include "display_transition.h"
 #include "system_ui.h"
 #include "../../common/launch_handoff.h"
+#include "../../common/dashboard_paths.h"
+#include "original_assets.h"
 
 REXCVAR_DECLARE(bool, dash17559_experimental_region);
 REXCVAR_DECLARE(bool, dash17559_boot_intro);
@@ -26,6 +28,12 @@ REXCVAR_DECLARE(bool, dash17559_boot_intro);
 class Dash17559App : public rex::ReXApp {
  public:
   using rex::ReXApp::ReXApp;
+
+  bool ConstructRuntime(const rex::PathConfig& defaults) override {
+    auto paths = defaults;
+    return x360n::PrepareDashboardPaths(paths, "17559", dash17559::kOriginalAssets) &&
+           rex::ReXApp::ConstructRuntime(paths);
+  }
 
   static std::unique_ptr<rex::ui::WindowedApp> Create(
       rex::ui::WindowedAppContext& ctx) {
