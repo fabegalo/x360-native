@@ -1,5 +1,20 @@
 # STATUS
 
+Native iniciado com incremento executável (2026-10-14): plugin ABI 1 independente,
+scanout compute D3D12, texturas guest RGBA8 linear/tiled/endian/swizzle/gamma,
+fences e apresentação real. 48 envios/24 capturas e 2.359.296 canais verificados
+sem diferença para Xenos; três pares de PNGs com hashes idênticos. Configuração
+global persistente no desktop, congelada pelo supervisor por sessão e acima dos
+manifests. Xenos permanece padrão; Native requer acesso explícito de desenvolvimento.
+Vulkan tem fronteira de backend independente de API, mas ainda não implementação;
+solicitação explícita é recusada, sem fallback. Teste real limitado da 17559
+parou em shader inline ausente, exit 78: dashboard/Forza/transições gráficas Native
+ainda não suportados. Sem ganho de performance alegado. 73 patches SDK ativos
+(0074 é gate de comandos compilado só no Native; 0073 permanece retirado).
+Evidências, testes, limites e próximo bloqueio: `docs/native-renderer.md`.
+Esta solicitação posterior autoriza iniciar Native; a restrição histórica da P3
+abaixo descreve somente aquela etapa. Sem Computer Use, push ou Release.
+
 P3 encerrada por **reversão da otimização 0073** (2026-10-14). O ganho isolado
 de CPU de 3,97% não compensou a piora observada de 1% low; não há ganho global
 aprovado. Switch anterior restaurado byte a byte, 72 patches ativos verificados

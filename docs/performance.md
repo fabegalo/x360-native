@@ -8,6 +8,14 @@ necessárias ou usar stubs para obter números melhores. Preservar C7/C8, perfis
 saves e biblioteca. Compilador, AOT, CPU, memória, GPU e carregamento são frentes
 contínuas, priorizadas por evidência.
 
+Native é a prioridade gráfica iniciada em 2026-10-14: primeiro scanout D3D12
+executado, com fronteira própria para Vulkan futuro e Xenos mantido como padrão.
+[Resultados e limites](native-renderer.md). A comparação de pixels passou;
+o fixture com readback não é benchmark de FPS. A meta competitiva frente ao
+Pinyon exige cenas equivalentes, mesma fidelidade, 1% low/P95/P99, CPU/GPU,
+RAM/VRAM e pacing, sem mudar física/áudio/simulação. Ainda não há resultado
+competitivo nem suporte gráfico Native a dashboard/Forza; P1/P2/P3 preservados.
+
 ## Instrumentação
 
 O patch 0070 reutiliza `rex::perf` e seu CSV. `perf_log_csv` passa a ser conectado
