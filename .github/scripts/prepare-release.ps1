@@ -21,7 +21,11 @@ if ($LASTEXITCODE -ne 0 -or $tree -notmatch '^160000 commit ([0-9a-f]{40})' -or 
 & powershell -NoProfile -ExecutionPolicy Bypass -File scripts/prepare-tools.ps1 -AllowDownloads -ToolsOnly
 if ($LASTEXITCODE -ne 0) { throw 'Pinned Git/CMake/Ninja preparation failed' }
 $tools = Join-Path $root '.local/toolchains'
-$env:PATH = (Join-Path $tools 'mingit-2.56.0.2/cmd') + ';' + $env:PATH
+$gitDirectory = Join-Path $tools 'mingit-2.56.0.2/cmd'
+$env:PATH = $gitDirectory + ';' + $env:PATH
+# Each Actions step starts a new shell; retain the locked Git for archive/clone
+# calls outside devshell in the existing packager as well.
+if ($env:GITHUB_PATH) { [IO.File]::AppendAllText($env:GITHUB_PATH, $gitDirectory + "`n", [Text.UTF8Encoding]::new($false)) }
 git submodule update --init --depth 1 external/rexglue-sdk
 if ($LASTEXITCODE -ne 0) { throw 'Pinned ReXGlue checkout failed' }
 $sdk = Join-Path $root $lock.rexglue_sdk.path
