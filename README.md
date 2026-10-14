@@ -12,7 +12,7 @@ Performance improvements must be backed by measurements, not assumptions.
 > currently tested platform**, using D3D12. Linux and macOS are roadmap goals.
 > The first technical preview is `v0.1.0-preview.19`; it is experimental.
 
-The next **local candidate, v0.1.0-preview.20**, adds a persistent game Library
+**v0.1.0-preview.20** adds a persistent game Library
 with automatic generic AOT preparation. Import valid ISO/GDFX images, CON/LIVE/PIRS packages
 or extracted game folders. Different versions remain separate; exact duplicates
 reuse verified content. **Importing a game does not mean it can run.** Unsupported
@@ -20,8 +20,9 @@ games stay visible in the desktop Library. Preparing generates a local project,
 runs the pinned ReXGlue codegen and compiles it without manual TOML/CMake/C++ edits.
 Existing title profiles are optional compatibility overrides. Failed stages and
 logs remain available for retry; compilation is not a compatibility claim. Only verified, prepared games enter
-the original dashboard's My Games. This candidate is not published yet.
-See the [candidate notes](docs/releases/0.1.0-preview.20.md).
+the original dashboard's My Games. The corrected preview.20 package also fixes
+first-time dashboard preparation when no generated guest modules exist.
+See the [release notes](docs/releases/0.1.0-preview.20.md).
 
 [Current capabilities](#current-capabilities) · [Getting started](#download-and-installation) ·
 [Roadmap](#roadmap) · [Documentation](#documentation-and-contributing)

@@ -1,5 +1,17 @@
 # STATUS
 
+Correção da preparação limpa da preview.20 (2026-10-14): a primeira configuração
+exigia AOT pré-existente de signin/createprofile/vk/hud. O driver agora configura
+o produtor, gera explicitamente todos os manifests da própria dashboard e só
+então exige seus módulos na reconfiguração final. Identidades originais e os 67
+patches preservados. Instalação extraída afetada, com espaços no caminho e sem
+fontes geradas: configure 9 s, produtor 119 s, codegen principal 45 s, módulos
+4/3/3/3 s, reconfigure 9 s, build 198 s; executável, DLLs e recibo produzidos.
+Logs locais: `.local/logs/preview20-installed-prepare.log` e
+`.local/logs/preview20-cold-receipt-tests.log`. Substituição da Release quebrada
+autorizada pelo usuário; pacote corrigido mantém a versão preview.20 e recebe
+novo commit/tag e SHA-256. Sem nova sessão de jogo ou Computer Use.
+
 Biblioteca universal + AOT automático (2026-10-14), **candidata local preview.20**:
 catálogo persistente por inventário SHA-256, importação ISO/GDFX/STFS/pasta,
 metadados verificados, versões/duplicatas e retomada sem destruir dados.
