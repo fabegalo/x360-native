@@ -123,6 +123,13 @@ std::optional<std::string> CheckPreparation(const ProjectPaths& paths,
     const auto registration = manifest.parent_path() / "preparation.toml";
     if (fs::is_regular_file(registration) && !inputs.contains(Key(registration)))
       return fail("O registro do título mudou.");
+    if (IsWithin(exe, paths.build() / "aot")) {
+      const auto owner = exe.parent_path() / ".x360n-aot-owner";
+      if (!inputs.contains(Key(owner))) return fail("Propriedade do build AOT ausente do recibo.");
+      std::ifstream owner_input(owner); std::string owner_title;
+      std::getline(owner_input, owner_title);
+      if (owner_title != title) return fail("O build AOT pertence a outro título.");
+    }
     for (const auto& file : fs::directory_iterator(exe.parent_path())) {
       auto ext = file.path().extension().string();
       for (auto& c : ext) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));

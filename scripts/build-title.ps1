@@ -43,7 +43,8 @@ if ($titleDir.StartsWith((Join-Path $root '.local\aot\'), [StringComparison]::Or
             throw 'Generated AOT build identity missing or different; regenerate the project before building.'
         }
         $ownerSnapshot = @(Get-ReceiptEntries @($ownerFile))
-        if (-not $BuildDir) { $BuildDir = $declaredBuild }
+        Assert-AotBuildDirectory $root $declaredBuild $BuildDir
+        $BuildDir = $declaredBuild
 }
 if (-not $BuildDir) { $BuildDir = ".local/build/titles/$Title" }
 $build = if ([IO.Path]::IsPathRooted($BuildDir)) { [IO.Path]::GetFullPath($BuildDir) }
@@ -103,7 +104,8 @@ try {
             $sourceSnapshot = @(Get-ReceiptEntries @(Get-BuildInputs $root $Title $build @($Title) | Where-Object {
                 [IO.File]::Exists($_) -and
                 -not $_.StartsWith($build, [StringComparison]::OrdinalIgnoreCase) -and
-                -not $_.StartsWith((Join-Path $titleDir 'generated'), [StringComparison]::OrdinalIgnoreCase)
+                (-not $_.StartsWith((Join-Path $titleDir 'generated'), [StringComparison]::OrdinalIgnoreCase) -or
+                 $_ -eq (Join-Path $titleDir 'generated/x360n_rexglue.cmake'))
             }))
         }
         if ($s.name -eq '2-codegen') {

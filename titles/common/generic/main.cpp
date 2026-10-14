@@ -1,4 +1,4 @@
-#include "generated/default/@TITLE@_init.h"
+#include "@TITLE@_init.h"
 #include <rex/rex_app.h>
 #include "launch_handoff.h"
 

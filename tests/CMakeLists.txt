@@ -56,6 +56,9 @@ if(WIN32)
   add_test(NAME x360n.build-leases COMMAND powershell -NoProfile -ExecutionPolicy Bypass
     -File ${CMAKE_CURRENT_SOURCE_DIR}/build_isolation/leases_test.ps1)
   set_tests_properties(x360n.build-leases PROPERTIES LABELS project TIMEOUT 30)
+  add_test(NAME x360n.generic-aot-build-lease COMMAND powershell -NoProfile -ExecutionPolicy Bypass
+    -File ${CMAKE_CURRENT_SOURCE_DIR}/build_isolation/generic_aot.ps1)
+  set_tests_properties(x360n.generic-aot-build-lease PROPERTIES LABELS project TIMEOUT 30)
   add_test(NAME x360n.preparation-receipt-publication COMMAND powershell -NoProfile -ExecutionPolicy Bypass
     -File ${CMAKE_CURRENT_SOURCE_DIR}/supervisor/preparation_receipt_test.ps1)
   set_tests_properties(x360n.preparation-receipt-publication PROPERTIES LABELS project TIMEOUT 60)
@@ -76,6 +79,7 @@ catch_discover_tests(x360n_local_tests TEST_PREFIX "local." PROPERTIES LABELS "p
 
 # SDK behavior checks (link the SDK codegen library).
 add_executable(x360n_sdk_checks sdkcheck/depfile_escape_test.cpp)
+target_sources(x360n_sdk_checks PRIVATE sdkcheck/gapfill_boundary_test.cpp sdkcheck/synthetic_xex.cpp)
 target_link_libraries(x360n_sdk_checks PRIVATE rexcodegen Catch2::Catch2WithMain)
 target_compile_options(x360n_sdk_checks PRIVATE
     -UTRACY_ENABLE -UREXGLUE_ENABLE_PROFILING -UREXGLUE_ENABLE_PERF_COUNTERS)

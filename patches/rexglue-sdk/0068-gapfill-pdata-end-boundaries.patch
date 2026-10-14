@@ -1,0 +1,45 @@
+diff --git a/src/codegen/phase_gapfill.cpp b/src/codegen/phase_gapfill.cpp
+index f3da777..fb5972a 100644
+--- a/src/codegen/phase_gapfill.cpp
++++ b/src/codegen/phase_gapfill.cpp
+@@ -38,11 +38,19 @@ namespace {
+ // Split a code region into function segments based on terminators (blr, tail calls).
+ std::vector<CodeRegion> splitRegionOnTerminators(
+     const CodeRegion& region, const BinaryView& binary,
+-    const std::unordered_set<uint32_t>& knownCallables) {
++    const std::unordered_set<uint32_t>& knownCallables,
++    const std::unordered_set<uint32_t>& pdataEnds) {
+   std::vector<CodeRegion> segments;
+   uint32_t segmentStart = region.start;
+ 
+   for (uint32_t addr = region.start; addr < region.end; addr += 4) {
++    // An out-of-line return can end a pdata function with b to an earlier
++    // epilogue. Do not let that trailing block hide the following leaf's
++    // entry until its first blr. The original metadata supplies this boundary.
++    if (addr > segmentStart && pdataEnds.contains(addr)) {
++      segments.push_back({segmentStart, addr});
++      segmentStart = addr;
++    }
+     const uint8_t* data = binary.translate(addr);
+     if (!data)
+       break;
+@@ -132,12 +140,18 @@ void gapFillCodeRegions(CodegenContext& ctx) {
+     knownCallables.insert(addr);
+   }
+ 
++  std::unordered_set<uint32_t> pdataEnds;
++  for (const auto& [start, size] : scan.pdataSizes) {
++    if (size != 0 && start + size > start)
++      pdataEnds.insert(start + size);
++  }
++
+   size_t gapsFound = 0;
+   size_t segmentsCreated = 0;
+ 
+   for (const auto& region : scan.codeRegions) {
+     // Split region on terminators (blr, tail calls), then check each segment
+-    auto segments = splitRegionOnTerminators(region, binary, knownCallables);
++    auto segments = splitRegionOnTerminators(region, binary, knownCallables, pdataEnds);
+ 
+     for (const auto& segment : segments) {
+       // Skip if this segment's start is already a registered function entry

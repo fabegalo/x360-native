@@ -34,6 +34,9 @@ try {
         . (Join-Path $PSScriptRoot 'preparation-receipt.ps1')
         $exe = Join-Path $build "$title.exe"
         $manifest = Join-Path $root "titles/$title/${title}_manifest.toml"
+        if (-not [IO.File]::Exists($manifest)) {
+            $manifest = Join-Path $root ".local/aot/$title/${title}_manifest.toml"
+        }
         $receipt = Get-PreviousReceipt "$exe.preparation.json" $title $manifest $exe
         if ($receipt -and (Test-ReceiptEntries @($receipt.inputs + $receipt.artifacts)) -and (Test-ReceiptGlobs $receipt.globs)) {
             [IO.File]::Delete($marker)

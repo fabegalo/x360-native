@@ -156,6 +156,10 @@ TEST_CASE("automatic AOT generates a stable project without a manual recipe", "[
   CHECK(text.find("{{")==std::string::npos);
   CHECK(text.find("include(\"${X360N_GENERATED_ROOT}/sources.cmake\")")!=std::string::npos);
   CHECK(text.find("${CMAKE_CURRENT_SOURCE_DIR}/generated/default")==std::string::npos);
+  std::ifstream host_input(t.manifest.parent_path()/"main.cpp");
+  const std::string host{std::istreambuf_iterator<char>(host_input),{}};
+  CHECK(host.find("#include \"" + t.id + "_init.h\"") != std::string::npos);
+  CHECK(host.find("generated/default/") == std::string::npos);
   CHECK(fs::weakly_canonical(profile.exe)==fs::weakly_canonical(t.exe));
   CHECK(fs::weakly_canonical(profile.user_root)==fs::weakly_canonical(user_root));
   const auto stamp=fs::last_write_time(t.manifest); const auto hash=DigestFile(integration)->sha256;

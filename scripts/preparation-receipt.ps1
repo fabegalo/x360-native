@@ -4,6 +4,11 @@ function Resolve-BuildPath([string]$Build, [string]$File) {
     if ([IO.Path]::IsPathRooted($File)) { [IO.Path]::GetFullPath($File) }
     else { [IO.Path]::GetFullPath((Join-Path $Build $File)) }
 }
+function Assert-AotBuildDirectory([string]$Root, [string]$Declared, [string]$Requested) {
+    if ($Requested -and (Resolve-BuildPath $Root $Requested) -ne [IO.Path]::GetFullPath($Declared)) {
+        throw 'Generated AOT output is bound to its declared build directory; regenerate the project to relocate it.'
+    }
+}
 function Get-ReceiptHash([string]$File) {
     (Get-FileHash -LiteralPath $File -Algorithm SHA256).Hash.ToLowerInvariant()
 }

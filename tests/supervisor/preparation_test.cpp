@@ -102,6 +102,21 @@ TEST_CASE("explicit alternate build remains bound to the registered title", "[pr
   std::ofstream(exe) << "wrong native version";
   CHECK(CheckPreparedLaunch(f.paths, exe));
 }
+TEST_CASE("compact AOT receipts require the matching directory owner", "[preparation]") {
+  Fixture f;
+  const auto exe = f.paths.build() / "aot/short/sample.exe";
+  fs::create_directories(exe.parent_path()); fs::copy_file(f.exe, exe);
+  const auto owner = exe.parent_path() / ".x360n-aot-owner";
+  std::ofstream(owner) << "sample\nfull-content-identity\n";
+  WriteTestReceipt(f.paths, "sample", f.manifest, exe, f.inputs);
+  CHECK(CheckPreparation(f.paths, "sample", f.manifest, exe));
+  f.inputs.push_back(owner);
+  WriteTestReceipt(f.paths, "sample", f.manifest, exe, f.inputs);
+  CHECK_FALSE(CheckPreparation(f.paths, "sample", f.manifest, exe));
+  std::ofstream(owner) << "another\nfull-content-identity\n";
+  WriteTestReceipt(f.paths, "sample", f.manifest, exe, f.inputs);
+  CHECK(CheckPreparation(f.paths, "sample", f.manifest, exe));
+}
 #ifdef _WIN32
 TEST_CASE("inspection rejects the title producer lease and recovers after release", "[preparation]") {
   Fixture f;

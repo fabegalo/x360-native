@@ -911,6 +911,17 @@
           "src/kernel/xam/xam_content.cpp": "5f5eaf357d2ca6ffd4b927080c61e334cd62ae3bde10cd76294a11f22b627743"
         },
         "test": "sdkcheck.Save storage uses XAM and NT file contracts across profiles and restarts"
+      },
+      {
+        "file": "patches/rexglue-sdk/0068-gapfill-pdata-end-boundaries.patch",
+        "sha256": "9632659ad82cf7da44c026ce7e61d7f3b6071e16976dea3a7c29041d0483dc30",
+        "files": {
+          "src/codegen/phase_gapfill.cpp": "3b89f9a207f52ae832403a84aa52b9683fbdb32800c9ab3423096dbb16c4c457"
+        },
+        "base_files": {
+          "src/codegen/phase_gapfill.cpp": "878a120c08c772e005f92ec44ed5121c65b5b5764c4725896dfe2d7d5e7d20e3"
+        },
+        "test": "sdkcheck.GapFill preserves a leaf after a pdata out-of-line return"
       }
     ]
   },

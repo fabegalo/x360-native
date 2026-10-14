@@ -39,6 +39,12 @@ try {
     [IO.File]::WriteAllText((Join-Path $templates 'new.inja'), 'new template')
     Assert (-not (Test-ReceiptGlobs @($glob))) 'new template missing from graph was accepted'
     $build = Join-Path $scratch 'build'; [void][IO.Directory]::CreateDirectory($build)
+    Assert-AotBuildDirectory $scratch $build ''
+    Assert-AotBuildDirectory $scratch $build 'build'
+    Assert-AotBuildDirectory $scratch $build $build
+    $failed = $false
+    try { Assert-AotBuildDirectory $scratch $build 'another' } catch { $failed = $true }
+    Assert $failed 'generated codegen output accepted an alternate native build owner'
     $project = Join-Path $scratch 'title with spaces'; [void][IO.Directory]::CreateDirectory($project)
     Assert (@(Get-AdditionalCodegenManifests $project $build).Count -eq 0) 'ordinary title requires an additional manifest list'
     $manifest = Join-Path $project 'signin_17559_manifest.toml'

@@ -439,3 +439,17 @@ and `sdkcheck.save-storage-processes`. Real PPC export calls, NT file handles,
 host payloads and independent processes; no game-specific save adapters. Existing
 profile and installed-content tests remain green. See `docs/save-storage.md` for
 evidence and the explicit limit: commercial-game save/load is not yet demonstrated.
+
+## 0068 — preserve pdata ends during gap filling
+
+The pinned GapFill split only on returns and known tail targets. A pdata function
+ending with an out-of-line backward branch could therefore hide the next leaf's
+entry, and register only its trailing block as a separate function. Honor the
+metadata end boundary while splitting existing code regions; do not infer new
+code from data or manufacture function lengths. No upstream equivalent identified.
+
+`sdkcheck.GapFill preserves a leaf after a pdata out-of-line return` uses an
+original synthetic PPC fixture: failed with one unresolved call before the patch,
+passed 10 assertions after it. Castle Crashers codegen with the patched producer
+left all 41 generated files unchanged. Forza's three affected entries are
+`82F5CC68`, `82F76188`, `82F762A0`; their internal epilogues are not functions.
