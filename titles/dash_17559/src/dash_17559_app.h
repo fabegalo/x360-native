@@ -20,10 +20,12 @@
 #include "system_ui.h"
 #include "../../common/launch_handoff.h"
 #include "../../common/dashboard_paths.h"
+#include "../../common/guest_capture.h"
 #include "original_assets.h"
 
 REXCVAR_DECLARE(bool, dash17559_experimental_region);
 REXCVAR_DECLARE(bool, dash17559_boot_intro);
+REXCVAR_DEFINE_STRING(x360n_guest_capture, "", "Diagnostics", "Capture actual GPU output every two seconds for up to thirty seconds");
 
 class Dash17559App : public rex::ReXApp {
  public:
@@ -47,6 +49,7 @@ class Dash17559App : public rex::ReXApp {
   void OnLoadXexImage(std::string& xex_image) override { xex_image = "game:\\dash.xex"; }
 
   void OnPreLaunchModule() override {
+    guest_capture_.Start(*runtime(), REXCVAR_GET(x360n_guest_capture));
     dash17559::InstallDisplayTransition(*runtime());
     dash17559::InstallSystemUi(*runtime());
     x360n::ImportLaunchData(*runtime());
@@ -61,6 +64,7 @@ class Dash17559App : public rex::ReXApp {
     x360n::ExportLaunchRequest(*runtime());
   }
   bool OnWindowCloseRequested() override { x360n::ExportWindowClose(); return true; }
+  void OnShutdown() override { guest_capture_.Stop(); }
 
   // x360-native: dash.xex links media: to \SystemRoot itself (ObCreateSymbolicLink,
   // "Registered symbolic link: media: => \SystemRoot") and opens media:\shrdres.xzp
@@ -86,6 +90,7 @@ class Dash17559App : public rex::ReXApp {
   }
 
  private:
+  x360n::GuestCapture guest_capture_;
   dash17559::ExperimentalRegion experimental_region_;
 
   // Override virtual hooks for customization:
