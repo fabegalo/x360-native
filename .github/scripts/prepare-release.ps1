@@ -46,7 +46,7 @@ foreach ($path in $paths) {
 if ($LASTEXITCODE -ne 0) { throw 'Reproducible SDK patch application failed' }
 & powershell -NoProfile -ExecutionPolicy Bypass -File scripts/apply-sdk-patches.ps1 -Check
 if ($LASTEXITCODE -ne 0) { throw 'SDK patch hash verification failed' }
-& powershell -NoProfile -ExecutionPolicy Bypass -File scripts/bootstrap-llvm.ps1 -AllowDownloads
+& powershell -NoProfile -ExecutionPolicy Bypass -File scripts/bootstrap-llvm.ps1 -AllowDownloads -Extractor 7zip
 if ($LASTEXITCODE -ne 0) { throw 'Pinned LLVM preparation failed' }
 # devshell requires the hosted VS C++ workload; fail before building if absent.
 & scripts/devshell.cmd cmake --version

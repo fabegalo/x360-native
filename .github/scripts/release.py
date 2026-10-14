@@ -110,6 +110,7 @@ def environment(versions):
         provenance["tools"].append({key: tool[key] for key in ("id", "version", "sha256")})
     llvm = json.loads(Path("deps.lock.json").read_text(encoding="utf-8"))["llvm"]
     provenance["llvm_archive_sha256"] = llvm["sha256"]
+    provenance["llvm_extractor"] = json.loads(Path(".local/release/llvm-extractor.json").read_text(encoding="utf-8"))
     provenance["msvc_tools_version"], provenance["windows_sdk_version"] = msvc, sdk.rstrip("\\")
     path.write_text(json.dumps(provenance, indent=2) + "\n", encoding="utf-8")
 

@@ -56,6 +56,11 @@ Inspect/remove that draft before retrying; do not move a published tag.
   Missing components fail before compilation. Microsoft tool/SDK versions and
   runner image versions are recorded; hosted image updates mean these components
   are identified, not promised to be byte-for-byte immutable.
+- LLVM's verified XZ is decoded by the runner's 7-Zip and extracted into staging
+  using the existing bootstrap's TAR/layout handling. The Windows Server TAR XZ
+  decoder failed to finish in a bounded 15-minute diagnostic attempt. The hosted
+  7-Zip binary SHA-256 is recorded; missing 7-Zip fails explicitly. Local bootstrap
+  keeps its existing default extractor.
 - The existing Release desktop build, focused `desktop.catalog` tests and
   license/content gate run before creating a ZIP. No complete SDK/game suite,
   visual test or Computer Use runs. Original dashboard version isolation remains
