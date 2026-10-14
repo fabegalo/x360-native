@@ -1,12 +1,14 @@
 #pragma once
 #include "shader_cache.h"
 #include "draw_types.h"
+#include "texture_snapshot.h"
 #include <rex/graphics/command_processor.h>
 #include <rex/graphics/util/draw.h>
 #include <rex/ui/d3d12/d3d12_provider.h>
 #include <wrl/client.h>
 #include <map>
 #include <d3d12sdklayers.h>
+#include <chrono>
 namespace x360n::native {
 class D3D12Render {
  public:
@@ -21,7 +23,15 @@ class D3D12Render {
  private:
   template<class T> using Ptr = Microsoft::WRL::ComPtr<T>;
   Ptr<ID3D12Resource> Buffer(uint64_t, D3D12_HEAP_TYPE, D3D12_RESOURCE_STATES, D3D12_RESOURCE_FLAGS = D3D12_RESOURCE_FLAG_NONE);
-  Ptr<ID3D12Resource> Upload(const void*, size_t);
+  struct UploadSlice {
+    Ptr<ID3D12Resource> resource;
+    uint64_t offset;
+    D3D12_GPU_VIRTUAL_ADDRESS Address() const { return resource->GetGPUVirtualAddress() + offset; }
+  };
+  UploadSlice Upload(const void*, size_t);
+  struct UploadPage { Ptr<ID3D12Resource> resource; uint8_t* mapped; uint64_t size, used; };
+  std::vector<UploadPage> upload_pages_;
+  size_t upload_page_index_ = 0;
   D3D12_GPU_VIRTUAL_ADDRESS Constants(const void*, size_t);
   void Transition(ID3D12Resource*, D3D12_RESOURCE_STATES&, D3D12_RESOURCE_STATES);
   void Barrier();
@@ -50,10 +60,28 @@ class D3D12Render {
   std::vector<Ptr<ID3D12Resource>> transient_;
   std::map<std::string, Ptr<ID3D12PipelineState>> pipelines_;
   std::map<unsigned, std::vector<uint8_t>> rectangles_;
+  struct CachedTexture {
+    TextureSnapshot source;
+    Ptr<ID3D12Resource> resource;
+    D3D12_SHADER_RESOURCE_VIEW_DESC view{};
+    uint64_t bytes = 0;
+  };
+  std::map<std::string, CachedTexture> textures_;
+  uint64_t texture_cache_bytes_ = 0, texture_cache_hits_ = 0;
+  bool texture_cache_enabled_ = true;
   std::vector<uint8_t> depth_shader_;
   const std::vector<uint8_t>& RectangleShader(unsigned interpolators, unsigned clip_planes);
   std::array<Ptr<ID3D12PipelineState>, 9> copy_pipelines_;
   std::array<Ptr<ID3D12PipelineState>, 2> clear_pipelines_;
   uint64_t draw_count_ = 0, resolve_count_ = 0;
+  bool stats_enabled_ = false;
+  uint64_t texture_ns_ = 0, resolve_ns_ = 0, flush_ns_ = 0;
+  uint64_t texture_uploads_ = 0, texture_upload_bytes_ = 0;
+  uint64_t draw_ns_ = 0, guest_upload_ns_ = 0, guest_upload_bytes_ = 0;
+  struct Timer {
+    bool enabled; uint64_t& total; std::chrono::steady_clock::time_point start{};
+    Timer(bool on, uint64_t& result) : enabled(on), total(result) { if (enabled) start = std::chrono::steady_clock::now(); }
+    ~Timer() { if (enabled) total += std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - start).count(); }
+  };
 };
 }

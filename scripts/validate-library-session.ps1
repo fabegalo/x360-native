@@ -5,7 +5,8 @@
 param(
     [Parameter(Mandatory)][string]$OutputDirectory,
     [string]$Game = 'forza_horizon',
-    [ValidateRange(30,600)][int]$Seconds = 300
+    [ValidateRange(30,600)][int]$Seconds = 300,
+    [switch]$SkipBootIntro
 )
 $ErrorActionPreference='Stop'
 $root=(Resolve-Path (Join-Path $PSScriptRoot '..')).Path
@@ -46,6 +47,7 @@ $si.FileName=Join-Path $root '.local/build/win-amd64/src/supervisor/Release/x360
 $si.WorkingDirectory=$root;$si.UseShellExecute=$false;$si.CreateNoWindow=$true
 $si.RedirectStandardOutput=$true;$si.RedirectStandardError=$true
 $si.Arguments='session titles/dash_17559/dash_17559_manifest.toml --timeout '+$Seconds
+if ($SkipBootIntro) { $si.Arguments += ' --skip-boot-intro' }
 foreach($binding in @{UP='U';DOWN='J';RIGHT='H';LEFT='N'}.GetEnumerator()) {
  $si.EnvironmentVariables['REX_KEYBIND_DPAD_'+$binding.Key]=$binding.Value
 }

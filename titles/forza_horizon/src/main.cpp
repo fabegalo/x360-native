@@ -3,6 +3,10 @@
 #include <rex/logging.h>
 #include "../../../src/supervisor/sha256.h"
 #include "launch_handoff.h"
+#include "guest_capture.h"
+
+REXCVAR_DEFINE_STRING(x360n_guest_capture, "", "Diagnostics", "Capture actual GPU output every two seconds (thirty seconds by default)");
+REXCVAR_DEFINE_UINT32(x360n_guest_capture_seconds, 30, "Diagnostics", "GPU capture duration, limited to 300 seconds");
 
 class ImportedGameApp : public rex::ReXApp {
  public:
@@ -26,11 +30,17 @@ class ImportedGameApp : public rex::ReXApp {
     }
     return rex::ReXApp::ConstructRuntime(paths);
   }
-  void OnPreLaunchModule() override { x360n::ImportLaunchData(*runtime()); }
+  void OnPreLaunchModule() override {
+    x360n::ImportLaunchData(*runtime());
+    guest_capture_.Start(*runtime(), REXCVAR_GET(x360n_guest_capture), REXCVAR_GET(x360n_guest_capture_seconds));
+  }
+  void OnShutdown() override { guest_capture_.Stop(); }
   void OnGuestThreadExit(rex::system::XThread*) override { x360n::ExportLaunchRequest(*runtime()); }
   bool OnWindowCloseRequested() override { x360n::ExportWindowClose(); return true; }
   static std::unique_ptr<rex::ui::WindowedApp> Create(rex::ui::WindowedAppContext& ctx) {
     return std::unique_ptr<ImportedGameApp>(new ImportedGameApp(ctx, "forza_horizon", PPCImageConfig));
   }
+ private:
+  x360n::GuestCapture guest_capture_;
 };
 REX_DEFINE_APP(forza_horizon, ImportedGameApp::Create)

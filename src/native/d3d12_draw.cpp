@@ -1,10 +1,13 @@
 #include "d3d12_render.h"
+#include "rectangle_shader.h"
 #include <rex/graphics/pipeline/render_target/cache.h>
 #include <rex/logging.h>
 #include <rex/graphics/pipeline/texture/util.h>
 #include <cmath>
 #include <bit>
 #include <d3dcompiler.h>
+#include <rex/graphics/flags.h>
+#include <fstream>
 #include <stdexcept>
 namespace x360n::native {
 using namespace rex::graphics;
@@ -16,36 +19,13 @@ void Require(bool v, const char* what) { if (!v) throw std::runtime_error(std::s
 const std::vector<uint8_t>& D3D12Render::RectangleShader(unsigned interpolators, unsigned clip_planes) {
   auto& binary = rectangles_[interpolators | (clip_planes << 8)];
   if (!binary.empty()) return binary;
-  // Xenos rectangles provide three corners. Reflect the remaining corner
-  // across the longest edge, preserving the guest's interpolated attributes.
-  std::string source = "struct V { float4 p:SV_Position;";
-  for (unsigned i = 0; i < interpolators; ++i)
-    source += "float4 t" + std::to_string(i) + ":TEXCOORD" + std::to_string(i) + ";";
-  for (unsigned i = 0; i < clip_planes; i += 4)
-    source += "float" + std::to_string(std::min(4u, clip_planes - i)) + " c" + std::to_string(i / 4) + ":SV_ClipDistance" + std::to_string(i / 4) + ";";
-  source += "}; [maxvertexcount(4)] void main(triangle V v[3], inout TriangleStream<V> s) {"
-    "float2 a=v[2].p.xy-v[1].p.xy,b=v[0].p.xy-v[2].p.xy,c=v[1].p.xy-v[0].p.xy;"
-    "float x=dot(a,a),y=dot(b,b),z=dot(c,c); uint j=(x>y && x>z)?0:((y>z)?1:2);"
-    "V q0=v[j],q1=v[(j+1)%3],q2=v[(j+2)%3],q;"
-    "s.Append(q0);s.Append(q1);s.Append(q2);q.p=(-q0.p+q1.p)+q2.p;";
-  for (unsigned i = 0; i < interpolators; ++i) {
-    auto t = "t" + std::to_string(i);
-    source += "q." + t + "=(-q0." + t + "+q1." + t + ")+q2." + t + ";";
-  }
-  for (unsigned i = 0; i < clip_planes; i += 4) {
-    auto t = "c" + std::to_string(i / 4);
-    source += "q." + t + "=(-q0." + t + "+q1." + t + ")+q2." + t + ";";
-  }
-  source += "s.Append(q);s.RestartStrip();}";
-  Ptr<ID3DBlob> code, error;
-  if (FAILED(D3DCompile(source.data(), source.size(), "NativeRectangle", nullptr, nullptr,
-      "main", "gs_5_1", D3DCOMPILE_OPTIMIZATION_LEVEL3 | D3DCOMPILE_IEEE_STRICTNESS, 0, &code, &error)))
-    throw std::runtime_error(error ? static_cast<const char*>(error->GetBufferPointer()) : "Native rectangle compilation failed");
-  auto* bytes = static_cast<const uint8_t*>(code->GetBufferPointer());
-  binary.assign(bytes, bytes + code->GetBufferSize()); return binary;
+  binary = CompileRectangleShader(interpolators, clip_planes);
+  return binary;
 }
+
 void D3D12Render::Draw(const RegisterFile& r, rex::memory::Memory& memory, Shader* vertex, Shader* pixel,
     PrimitiveType primitive, uint32_t count, const DrawIndices* indices) {
+  Timer timer(stats_enabled_, draw_ns_);
   Require(vertex, "missing vertex shader");
   auto& vs = *static_cast<DxbcShader*>(vertex);
   auto* ps = static_cast<DxbcShader*>(pixel);
@@ -58,7 +38,10 @@ void D3D12Render::Draw(const RegisterFile& r, rex::memory::Memory& memory, Shade
   Require(msaa <= MsaaSamples::k4X, "invalid MSAA sample count");
   const bool fan = primitive == PrimitiveType::kTriangleFan;
   const bool quad = primitive == PrimitiveType::kQuadList;
-  Require(primitive == PrimitiveType::kTriangleList || primitive == PrimitiveType::kTriangleStrip || primitive == PrimitiveType::kRectangleList || fan || quad, "primitive conversion not implemented");
+  if (primitive != PrimitiveType::kTriangleList && primitive != PrimitiveType::kTriangleStrip &&
+      primitive != PrimitiveType::kRectangleList && !fan && !quad)
+    throw std::runtime_error("Native draw: primitive conversion not implemented (primitive=" +
+        std::to_string(uint32_t(primitive)) + ", count=" + std::to_string(count) + ")");
   if (view_count_ > 60000 || sampler_count_ > 1700 || transient_.size() > 5000) Flush();
   auto program = r.Get<reg::SQ_PROGRAM_CNTL>();
   uint32_t param = kMaxInterpolators;
@@ -95,7 +78,29 @@ void D3D12Render::Draw(const RegisterFile& r, rex::memory::Memory& memory, Shade
   // Pointer identity is stable in the shader cache. The zeroed descriptor also includes every pipeline state.
   std::string key(reinterpret_cast<const char*>(&pd), sizeof(pd));
   auto& pipeline = pipelines_[key];
-  if (!pipeline) Require(SUCCEEDED(device_->CreateGraphicsPipelineState(&pd, IID_PPV_ARGS(&pipeline))), "graphics pipeline creation failed");
+  if (!pipeline) {
+    auto hr = device_->CreateGraphicsPipelineState(&pd, IID_PPV_ARGS(&pipeline));
+    if (FAILED(hr)) {
+      REXLOG_ERROR("Native PSO HRESULT={:08X} VS={:016X} PS={:016X} primitive={} MSAA={} clip={} interpolators={:X}",
+          uint32_t(hr), vs.ucode_data_hash(), ps ? ps->ucode_data_hash() : 0,
+          uint32_t(primitive), uint32_t(msaa), planes, mask);
+      if (!REXCVAR_GET(dump_shaders).empty()) {
+        const char* names[]{"failed-vs", "failed-ps", "failed-gs"};
+        D3D12_SHADER_BYTECODE stages[]{pd.VS, pd.PS, pd.GS};
+        for (unsigned i = 0; i < 3; ++i) if (stages[i].BytecodeLength) {
+          auto path = std::filesystem::path(REXCVAR_GET(dump_shaders)) / names[i];
+          std::ofstream binary(path.string() + ".dxbc", std::ios::binary);
+          binary.write(static_cast<const char*>(stages[i].pShaderBytecode), stages[i].BytecodeLength);
+          Ptr<ID3DBlob> disassembly;
+          if (SUCCEEDED(D3DDisassemble(stages[i].pShaderBytecode, stages[i].BytecodeLength, 0, nullptr, &disassembly))) {
+            std::ofstream text(path.string() + ".txt");
+            text.write(static_cast<const char*>(disassembly->GetBufferPointer()), disassembly->GetBufferSize());
+          }
+        }
+      }
+      throw std::runtime_error("Native draw: graphics pipeline creation failed HRESULT=" + std::to_string(uint32_t(hr)));
+    }
+  }
   for (const auto& b : vs.vertex_bindings()) {
     auto f = r.GetVertexFetch(b.fetch_constant);
     Require(f.type == FetchConstantType::kVertex, "invalid vertex fetch type");
@@ -135,7 +140,7 @@ void D3D12Render::Draw(const RegisterFile& r, rex::memory::Memory& memory, Shade
       if (expanded.empty()) return;
     } else for (uint32_t i = 0; i < count; ++i) expanded.push_back(index(i));
     auto data = Upload(expanded.data(), expanded.size() * 4);
-    ib = {data->GetGPUVirtualAddress(), UINT(expanded.size() * 4), DXGI_FORMAT_R32_UINT};
+    ib = {data.Address(), UINT(expanded.size() * 4), DXGI_FORMAT_R32_UINT};
     count = uint32_t(expanded.size());
   }
   Transition(memory_.Get(), memory_state_, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_INDEX_BUFFER);

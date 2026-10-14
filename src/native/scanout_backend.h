@@ -10,6 +10,7 @@ namespace x360n::native {
 class ScanoutBackend {
  public:
   virtual ~ScanoutBackend() = default;
+  // lut: 256 packed RGB10 entries for RGBA8; 128 RGB base/delta triples for RGB10A2.
   virtual void Present(rex::ui::Presenter&, const ScanoutTexture&, const void* pixels,
                        const uint32_t* lut) = 0;
   virtual void Drain() = 0;

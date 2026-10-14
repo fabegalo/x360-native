@@ -634,7 +634,7 @@ int Run(const ProjectPaths& p, const fs::path& exe_in, std::vector<std::string> 
   return r.exit_code == 0 ? kExitOk : kExitFailed;
 }
 
-int Session(const ProjectPaths& paths, const fs::path& manifest, int timeout, bool separate_windows) {
+int Session(const ProjectPaths& paths, const fs::path& manifest, int timeout, bool separate_windows, bool skip_boot_intro) {
   try {
     WorkspaceLease lease(paths);
     // Immutable for this session, including Guide and all title transitions.
@@ -660,6 +660,12 @@ int Session(const ProjectPaths& paths, const fs::path& manifest, int timeout, bo
       active = LoadSessionProfile(paths, active.manifest);
       CheckSessionRenderer(active.exe, renderer_settings);
       auto args = SessionRendererArguments(active.args, renderer_settings);
+      // Explicit diagnostic session choice. Preserve the normal manifest and
+      // receipt, and do not change any graphics commands within the guest.
+      if (skip_boot_intro && active.manifest == dashboard.manifest) {
+        for (auto& arg : args)
+          if (arg == "--dash17559_boot_intro=true") arg = "--dash17559_boot_intro=false";
+      }
       args.push_back("--game_data_root=" + PathUtf8(active.game_root));
       args.push_back("--user_data_root=" + PathUtf8(active.user_root));
       // Identity follows the platform session; game content and saves keep
@@ -769,9 +775,11 @@ int main(int argc, char** argv) {
   auto* session = app.add_subcommand("session", "Follow original title requests using a dashboard manifest");
   std::string session_manifest;
   int session_timeout = 600;
+  bool skip_boot_intro = false;
   bool separate_windows = false;
   session->add_option("manifest", session_manifest)->required();
   session->add_flag("--separate-windows", separate_windows, "Diagnostic mode: one window per title");
+  session->add_flag("--skip-boot-intro", skip_boot_intro, "Diagnostic mode: skip the optional dashboard boot animation");
   session->add_option("--timeout", session_timeout, "Timeout per title; 0 disables it")
       ->check(CLI::NonNegativeNumber);
   std::string exe, label;
@@ -806,7 +814,7 @@ int main(int argc, char** argv) {
     return kExitUsage;
   }
   if (doctor->parsed()) return Doctor(*paths, config);
-  if (session->parsed()) return Session(*paths, PathFromUtf8(session_manifest), session_timeout, separate_windows);
+  if (session->parsed()) return Session(*paths, PathFromUtf8(session_manifest), session_timeout, separate_windows, skip_boot_intro);
   if (run->parsed()) {
     try {
       // Session already owns this lease. Standalone prepared-title launches

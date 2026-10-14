@@ -94,7 +94,8 @@ void D3D12Scanout::Present(rex::ui::Presenter& presenter, const ScanoutTexture& 
   Wait(slot.serial);
   auto* device = provider_.GetDevice();
   const uint64_t lut_offset = (uint64_t(t.bytes) + 255) & ~255ull;
-  const uint64_t required = lut_offset + 1024;
+  const uint32_t lut_bytes = (t.rgb10 ? 128 * 3 : 256) * sizeof(uint32_t);
+  const uint64_t required = lut_offset + lut_bytes;
   if (slot.capacity < required) {
     slot.upload.Reset();
     D3D12_HEAP_PROPERTIES heap{}; heap.Type = D3D12_HEAP_TYPE_UPLOAD;
@@ -109,11 +110,12 @@ void D3D12Scanout::Present(rex::ui::Presenter& presenter, const ScanoutTexture& 
   void* mapped = nullptr; D3D12_RANGE read_range{};
   Check(slot.upload->Map(0, &read_range, &mapped), "map upload");
   std::memcpy(mapped, pixels, t.bytes);
-  std::memcpy(static_cast<uint8_t*>(mapped) + lut_offset, lut, 1024);
+  std::memcpy(static_cast<uint8_t*>(mapped) + lut_offset, lut, lut_bytes);
   slot.upload->Unmap(0, nullptr);
   if (!presenter.RefreshGuestOutput(t.width, t.height, t.width, t.height,
       [&](rex::ui::Presenter::GuestOutputRefreshContext& context) {
     using Presenter = rex::ui::d3d12::D3D12Presenter;
+    context.SetIs8bpc(!t.rgb10);
     auto* output = static_cast<Presenter::D3D12GuestOutputRefreshContext&>(context).resource_uav_capable();
     Check(slot.allocator->Reset(), "reset allocator");
     Check(slot.list->Reset(slot.allocator.Get(), pipeline_.Get()), "reset list");
@@ -132,7 +134,7 @@ void D3D12Scanout::Present(rex::ui::Presenter& presenter, const ScanoutTexture& 
     slot.list->SetComputeRootShaderResourceView(0, slot.upload->GetGPUVirtualAddress());
     slot.list->SetComputeRootShaderResourceView(1, slot.upload->GetGPUVirtualAddress() + lut_offset);
     slot.list->SetComputeRootDescriptorTable(2, gpu);
-    const uint32_t constants[] = {t.width, t.height, t.pitch, t.tiled, t.endian, t.swizzle, 0, 0};
+    const uint32_t constants[] = {t.width, t.height, t.pitch, t.tiled, t.endian, t.swizzle, t.rgb10, 0};
     slot.list->SetComputeRoot32BitConstants(3, 8, constants, 0);
     slot.list->Dispatch((t.width + 7) / 8, (t.height + 7) / 8, 1);
     auto after = Transition(output, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, Presenter::kGuestOutputInternalState);

@@ -25,7 +25,8 @@
 
 REXCVAR_DECLARE(bool, dash17559_experimental_region);
 REXCVAR_DECLARE(bool, dash17559_boot_intro);
-REXCVAR_DEFINE_STRING(x360n_guest_capture, "", "Diagnostics", "Capture actual GPU output every two seconds for up to thirty seconds");
+REXCVAR_DEFINE_STRING(x360n_guest_capture, "", "Diagnostics", "Capture actual GPU output every two seconds (thirty seconds by default)");
+REXCVAR_DEFINE_UINT32(x360n_guest_capture_seconds, 30, "Diagnostics", "GPU capture duration, limited to 300 seconds");
 
 class Dash17559App : public rex::ReXApp {
  public:
@@ -49,7 +50,7 @@ class Dash17559App : public rex::ReXApp {
   void OnLoadXexImage(std::string& xex_image) override { xex_image = "game:\\dash.xex"; }
 
   void OnPreLaunchModule() override {
-    guest_capture_.Start(*runtime(), REXCVAR_GET(x360n_guest_capture));
+    guest_capture_.Start(*runtime(), REXCVAR_GET(x360n_guest_capture), REXCVAR_GET(x360n_guest_capture_seconds));
     dash17559::InstallDisplayTransition(*runtime());
     dash17559::InstallSystemUi(*runtime());
     x360n::ImportLaunchData(*runtime());

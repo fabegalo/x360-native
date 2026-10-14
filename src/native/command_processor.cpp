@@ -47,8 +47,14 @@ void CommandProcessor::IssueSwap(uint32_t, uint32_t width, uint32_t height) {
     if (GetActualSwapPostEffect() != SwapPostEffect::kNone)
       throw std::runtime_error("Native post-processing is not implemented");
     const auto texture = DecodeScanout(register_file_->GetTextureFetch(0), width, height);
-    uint32_t lut[256];
-    for (unsigned i = 0; i < 256; ++i) {
+    uint32_t lut[128 * 3];
+    // Original D3D presentation uses PWL for both RGB10A2 fetch formats.
+    if (texture.rgb10) {
+      for (unsigned i = 0; i < 128 * 3; ++i) {
+        const auto& c = gamma_ramp_pwl_rgb()[i];
+        lut[i] = c.base | (c.delta << 16);
+      }
+    } else for (unsigned i = 0; i < 256; ++i) {
       const auto& c = gamma_ramp_256_entry_table()[i];
       lut[i] = c.color_10_red | (c.color_10_green << 10) | (c.color_10_blue << 20);
     }

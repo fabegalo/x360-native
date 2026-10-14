@@ -41,6 +41,7 @@ D3D12Render::Ptr<ID3D12PipelineState> D3D12Render::ComputePSO(ID3D12RootSignatur
   Ptr<ID3D12PipelineState> p; Check(device_->CreateComputePipelineState(&desc, IID_PPV_ARGS(&p)), "pipeline"); return p;
 }
 void D3D12Render::Resolve(const RegisterFile& r, rex::memory::Memory& memory) {
+  Timer timer(stats_enabled_, resolve_ns_);
   draw_util::ResolveInfo info;
   if (!draw_util::GetResolveInfo(r, memory, 1, 1, false, false, info)) throw std::runtime_error("Native: invalid resolve registers/vertices");
   if (!copy_root_) copy_root_ = ComputeRoot(sizeof(draw_util::ResolveCopyShaderConstants) / 4, true);

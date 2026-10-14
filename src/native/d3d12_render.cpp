@@ -5,6 +5,8 @@
 #include <stdexcept>
 #include <bit>
 #include <cmath>
+REXCVAR_DEFINE_BOOL(native_stats, false, "GPU/Native", "Log cumulative Native CPU submission costs for bounded diagnostics");
+REXCVAR_DEFINE_BOOL(native_texture_cache, true, "GPU/Native", "Reuse textures only while every guest source byte matches; disable for diagnostics");
 namespace x360n::native {
 using namespace rex::graphics;
 using namespace rex::graphics::xenos;
@@ -24,12 +26,26 @@ D3D12Render::Ptr<ID3D12Resource> D3D12Render::Buffer(uint64_t bytes, D3D12_HEAP_
   Check(device_->CreateCommittedResource(&heap, D3D12_HEAP_FLAG_NONE, &d, state, nullptr, IID_PPV_ARGS(&r)), "buffer");
   return r;
 }
-D3D12Render::Ptr<ID3D12Resource> D3D12Render::Upload(const void* data, size_t bytes) {
-  auto r = Buffer((bytes + 255) & ~size_t(255), D3D12_HEAP_TYPE_UPLOAD, D3D12_RESOURCE_STATE_GENERIC_READ);
-  void* p; D3D12_RANGE empty{}; Check(r->Map(0, &empty, &p), "map upload");
-  std::memcpy(p, data, bytes); r->Unmap(0, nullptr); transient_.push_back(r); return r;
+D3D12Render::UploadSlice D3D12Render::Upload(const void* data, size_t bytes) {
+  // Suballocate immutable ranges for this submission. Reuse only after Flush
+  // has waited for the fence, including texture copies and root CBVs.
+  const uint64_t aligned = (uint64_t(bytes) + 511) & ~uint64_t(511);
+  while (upload_page_index_ < upload_pages_.size() &&
+      upload_pages_[upload_page_index_].size - upload_pages_[upload_page_index_].used < aligned)
+    ++upload_page_index_;
+  if (upload_page_index_ == upload_pages_.size()) {
+    uint64_t size = std::max(aligned, uint64_t(4 * 1024 * 1024));
+    auto resource = Buffer(size, D3D12_HEAP_TYPE_UPLOAD, D3D12_RESOURCE_STATE_GENERIC_READ);
+    void* mapped; D3D12_RANGE empty{};
+    Check(resource->Map(0, &empty, &mapped), "map upload arena");
+    upload_pages_.push_back({resource, static_cast<uint8_t*>(mapped), size, 0});
+  }
+  auto& page = upload_pages_[upload_page_index_];
+  const uint64_t offset = page.used; page.used += aligned;
+  std::memcpy(page.mapped + offset, data, bytes);
+  return {page.resource, offset};
 }
-D3D12_GPU_VIRTUAL_ADDRESS D3D12Render::Constants(const void* p, size_t n) { return Upload(p, n)->GetGPUVirtualAddress(); }
+D3D12_GPU_VIRTUAL_ADDRESS D3D12Render::Constants(const void* p, size_t n) { return Upload(p, n).Address(); }
 void D3D12Render::Transition(ID3D12Resource* r, D3D12_RESOURCE_STATES& before, D3D12_RESOURCE_STATES after) {
   if (before == after) return;
   D3D12_RESOURCE_BARRIER b{}; b.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
@@ -51,6 +67,8 @@ D3D12_GPU_DESCRIPTOR_HANDLE D3D12Render::Gpu(uint32_t i, bool s) {
 uint32_t D3D12Render::Views(uint32_t n) { Require(view_count_ + n <= 65536, "view heap exhausted"); auto i = view_count_; view_count_ += n; return i; }
 uint32_t D3D12Render::Samplers(uint32_t n) { Require(sampler_count_ + n <= 2048, "sampler heap exhausted"); auto i = sampler_count_; sampler_count_ += n; return i; }
 D3D12Render::D3D12Render(rex::ui::d3d12::D3D12Provider& provider) : provider_(provider), device_(provider.GetDevice()) {
+  stats_enabled_ = REXCVAR_GET(native_stats);
+  texture_cache_enabled_ = REXCVAR_GET(native_texture_cache);
   device_->QueryInterface(IID_PPV_ARGS(&debug_));
   D3D12_FEATURE_DATA_D3D12_OPTIONS options{};
   Check(device_->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS, &options, sizeof(options)), "feature query");
@@ -89,6 +107,7 @@ D3D12Render::D3D12Render(rex::ui::d3d12::D3D12Provider& provider) : provider_(pr
 }
 D3D12Render::~D3D12Render() { if (event_) CloseHandle(event_); }
 void D3D12Render::Flush() {
+  Timer timer(stats_enabled_, flush_ns_);
   Check(list_->Close(), "close"); ID3D12CommandList* lists[]{list_.Get()};
   provider_.GetDirectQueue()->ExecuteCommandLists(1, lists);
   Check(provider_.GetDirectQueue()->Signal(fence_.Get(), ++serial_), "signal");
@@ -108,13 +127,26 @@ void D3D12Render::Flush() {
     debug_->ClearStoredMessages();
   }
   transient_.clear(); view_count_ = sampler_count_ = 0;
+  uint64_t retained = 0;
+  for (auto& page : upload_pages_) { page.used = 0; retained += page.size; }
+  if (retained > 64 * 1024 * 1024) upload_pages_.clear();
+  upload_page_index_ = 0;
   Check(allocator_->Reset(), "reset allocator"); Check(list_->Reset(allocator_.Get(), nullptr), "reset list");
+  if (stats_enabled_ && serial_ % 30 == 0)
+    REXLOG_INFO("Native costs draws={} resolves={} submits={} texture_uploads={} texture_bytes={} texture_ms={} resolve_ms={} flush_ms={} cache_hits={} (flush overlaps resolve)",
+        draw_count_, resolve_count_, serial_, texture_uploads_, texture_upload_bytes_, texture_ns_ / 1000000,
+        resolve_ns_ / 1000000, flush_ns_ / 1000000, texture_cache_hits_);
+  if (stats_enabled_ && serial_ % 30 == 0)
+    REXLOG_INFO("Native draw costs draw_ms={} guest_upload_ms={} guest_upload_bytes={} (draw includes textures; uploads include resolve preservation)",
+        draw_ns_ / 1000000, guest_upload_ns_ / 1000000, guest_upload_bytes_);
 }
 void D3D12Render::UploadGuest(rex::memory::Memory& m, uint32_t address, uint32_t bytes) {
+  Timer timer(stats_enabled_, guest_upload_ns_);
   Require(uint64_t(address) + bytes <= 0x20000000, "guest upload bounds");
   if (!bytes) return;
+  if (stats_enabled_) guest_upload_bytes_ += bytes;
   auto data = Upload(m.TranslatePhysical(address), bytes);
   Transition(memory_.Get(), memory_state_, D3D12_RESOURCE_STATE_COPY_DEST);
-  list_->CopyBufferRegion(memory_.Get(), address, data.Get(), 0, bytes);
+  list_->CopyBufferRegion(memory_.Get(), address, data.resource.Get(), data.offset, bytes);
 }
 }

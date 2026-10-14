@@ -119,10 +119,12 @@ int wmain(int argc, wchar_t** argv) {
     uint16_t gamma[768];
     uint64_t tested = 0;
     const auto start = std::chrono::steady_clock::now();
-    for (unsigned frame = 0; frame < 24; ++frame) {
+    for (unsigned frame = 0; frame < 48; ++frame) {
+      const bool pwl = frame >= 24;
       xe_gpu_texture_fetch_t fetch{};
       fetch.type = FetchConstantType::kTexture; fetch.dimension = DataDimension::k2DOrStacked;
       fetch.format = TextureFormat::k_8_8_8_8; fetch.pitch = pitch / 32;
+      if (pwl) fetch.format = frame & 2 ? TextureFormat::k_2_10_10_10 : TextureFormat::k_2_10_10_10_AS_16_16_16_16;
       fetch.base_address = physical_image >> 12;
       fetch.size_2d.width = width - 1; fetch.size_2d.height = height - 1;
       fetch.swizzle = frame & 1 ? 0x60a : 0x688; // BGRA / RGBA
@@ -132,6 +134,8 @@ int wmain(int argc, wchar_t** argv) {
       std::memset(data, 0, pitch * height * 4);
       for (unsigned y = 0; y < height; ++y) for (unsigned x = 0; x < width; ++x) {
         uint32_t color = x | ((y * 2) << 8) | (((x ^ y ^ frame) & 255) << 16) | 0xff000000;
+        if (pwl) color = (x * 4 + (y & 3)) | ((y * 8 + (x & 7)) << 10) |
+            (((x ^ y ^ frame) * 4 + (y & 3)) << 20) | 0xc0000000;
         color = GpuSwap(color, fetch.endianness);
         const auto offset = fetch.tiled ? texture_util::GetTiledOffset2D(x, y, pitch, 2) : (y * pitch + x) * 4;
         std::memcpy(data + offset, &color, 4);
@@ -139,11 +143,22 @@ int wmain(int argc, wchar_t** argv) {
       for (unsigned c = 0; c < 3; ++c) for (unsigned i = 0; i < 256; ++i)
         gamma[c * 256 + i] = uint16_t((i * 65535u / 255u) >> (frame >= 16 ? c : 0));
       // The same ABI system-frame path used by original dashboard transitions.
-      Require(gpu->PresentSystemFrame(reinterpret_cast<const uint32_t*>(&fetch), gamma), "system frame");
+      if (!pwl) Require(gpu->PresentSystemFrame(reinterpret_cast<const uint32_t*>(&fetch), gamma), "system frame");
       // Then a real guest ring: TYPE0 fetch, XE_SWAP from VdSwap, MEM_WRITE completion.
       std::vector<uint32_t> words{(5u << 16) | XE_GPU_REG_SHADER_CONSTANT_FETCH_00_0};
       const auto* raw = reinterpret_cast<const uint32_t*>(&fetch);
       words.insert(words.end(), raw, raw + 6);
+      if (pwl) {
+        // Exercise actual guest PWL programming, with independent RGB slopes.
+        words.insert(words.end(), {XE_GPU_REG_DC_LUT_RW_MODE, 1,
+            XE_GPU_REG_DC_LUT_WRITE_EN_MASK, 7, XE_GPU_REG_DC_LUT_RW_INDEX, 0});
+        for (unsigned i = 0; i < 128; ++i) for (unsigned c = 0; c < 3; ++c) {
+          const unsigned shift = frame >= 40 ? c : 0;
+          const unsigned base = ((i * 512) >> shift) & ~63u;
+          const unsigned delta = 512 >> shift;
+          words.insert(words.end(), {XE_GPU_REG_DC_LUT_PWL_DATA, base | (delta << 16)});
+        }
+      }
       words.insert(words.end(), {Packet(PM4_WAIT_REG_MEM, 5), 7, 0, 0, 0, 0});
       words.insert(words.end(), {Packet(PM4_XE_SWAP, 4), kSwapSignature, physical_image,
           width, height, Packet(PM4_MEM_WRITE, 2), physical_done, frame + 1});
@@ -162,17 +177,28 @@ int wmain(int argc, wchar_t** argv) {
       unsigned max_error = 0;
       for (unsigned y = 0; y < height; ++y) for (unsigned x = 0; x < width; ++x) {
         unsigned expected[] = {x, y * 2, (x ^ y ^ frame) & 255};
+        if (pwl) {
+          expected[0] = x * 4 + (y & 3);
+          expected[1] = y * 8 + (x & 7);
+          expected[2] = (x ^ y ^ frame) * 4 + (y & 3);
+        }
         if (frame & 1) std::swap(expected[0], expected[2]);
         for (unsigned c = 0; c < 3; ++c) {
           // Hardware LUT is 10-bit, exposed to the guest as 16-bit entries.
-          const unsigned value = gamma[c * 256 + expected[c]] >> 6;
-          const int reference = int((value * 255 + 511) / 1023);
+          const unsigned value = pwl ? 0 : gamma[c * 256 + expected[c]] >> 6;
+          int reference = int((value * 255 + 511) / 1023);
+          if (pwl) {
+            const unsigned shift = frame >= 40 ? c : 0;
+            const unsigned base = (((expected[c] >> 3) * 512) >> shift) & ~63u;
+            const double linear = base + double(512 >> shift) * (expected[c] & 7) / 8;
+            reference = int(std::min(1.0, linear / 65472.0) * 255 + 0.5);
+          }
           const int actual = capture.data[y * capture.stride + x * 4 + c];
           max_error = std::max(max_error, unsigned(std::abs(reference - actual)));
           ++tested;
         }
       }
-      if (frame == 0 || frame == 7 || frame == 23) {
+      if (frame == 0 || frame == 7 || frame == 23 || frame == 31 || frame == 47) {
         WritePNG(output / ("frame-" + std::to_string(frame) + ".png"), capture);
       }
       std::cout << "frame=" << frame << " tiled=" << fetch.tiled << " endian=" << uint32_t(fetch.endianness)
@@ -183,7 +209,7 @@ int wmain(int argc, wchar_t** argv) {
     memory->SystemHeapFree(image); memory->SystemHeapFree(ring); memory->SystemHeapFree(done);
     rt.Shutdown();
     rex::FlushLogging();
-    std::cout << "PASS plugin=" << plugin << " frames=48 checked_channels=" << tested
+    std::cout << "PASS plugin=" << plugin << " frames=72 checked_channels=" << tested
               << " elapsed_ms=" << std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now()-start).count()
               << " shutdown=clean (diagnostic, not an FPS benchmark)\n";
     return 0;
