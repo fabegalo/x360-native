@@ -81,9 +81,14 @@ SessionProfile LoadSessionProfile(const ProjectPaths& paths, const std::filesyst
       const auto candidate = dir.path() / PathFromUtf8(id + "_manifest.toml");
       // Generated projects declare their native output. It can use a compact
       // build directory while retaining the complete catalog/title identity.
-      const auto native = root == paths.local() / "aot"
-          ? LoadSessionProfile(paths, candidate, false).exe
-          : paths.build() / "titles" / id / (id + ".exe");
+      auto native = paths.build() / "titles" / id / (id + ".exe");
+      if (root == paths.local() / "aot") {
+        std::ifstream manifest_input(candidate, std::ios::binary);
+        const auto registration = toml::parse(manifest_input, PathUtf8(candidate));
+        const auto configured = registration["x360n"]["native_exe"].value<std::string>();
+        if (!configured || configured->empty()) continue;
+        native = std::filesystem::weakly_canonical(dir.path() / PathFromUtf8(*configured));
+      }
       if (root == paths.local() / "aot" &&
           (std::filesystem::exists(paths.local() / "preparation" / (id + ".runtime-error")) ||
            CheckPreparation(paths, id, candidate, native))) continue;

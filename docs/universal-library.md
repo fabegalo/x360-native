@@ -133,7 +133,7 @@ after the maintainer confirmed the Charlie Murder attempt.
 
 ## Updating
 
-### Compact generic build paths (2026-10-14, validation in progress)
+### Compact generic build paths (2026-10-14)
 
 Forza's next preparation failed at `1-configure` in SDL's CPU-detection
 `try_compile`: the old build path used the complete 64-character title identifier
@@ -158,7 +158,29 @@ module, original content or SDK revision is substituted by this path change.
 
 Focused evidence: `.local/logs/forza-aot-short-focused-tests.log` and
 `.local/logs/forza-aot-short-receipt-tests.log`. Real preparation and delivery of
-this correction are being validated; this does not assert Forza compatibility.
+this correction were exercised in the affected installed environment. Project
+generation passed 11 assertions (`.local/logs/forza-aot-real-generation.log`).
+The real configure passed in 406 seconds and the codegen producer built in
+148 seconds. The SDK then rejected Forza's analysis after 86 seconds with
+12 `UnresolvedCall` errors at 11 distinct destinations. The game remains
+incomplete and was neither compiled nor started. Evidence is
+`.local/logs/forza-aot-real-preparation.log` and the installed compact build's
+`x360n-build-2-codegen.log`.
+
+That execution also demonstrated that the pinned CLI refreshes
+`generated/rexglue.cmake` even when its template does not support an absolute
+entrypoint output path. The native project therefore includes the separately
+owned `generated/x360n_rexglue.cmake`; codegen may refresh its own file without
+replacing the integration used by CMake. A focused test covers that refresh and
+optional registration without recursive discovery
+(`.local/logs/forza-aot-producer-glue-tests.log`, 31 assertions).
+
+Hotfix.3's package and source update were applied with all four persistent
+catalog/profile/save/preference hashes preserved:
+`.local/logs/forza-aot-installed-update.log`. Its package gates passed, including
+88 license/content components and three executables; source commit `04c5174`.
+The earlier failed build and user data remain at their original paths. The
+final package for the separately owned integration is still being validated.
 
 ### Long installed paths: Forza Horizon import recovery (2026-10-14)
 

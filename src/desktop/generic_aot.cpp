@@ -97,7 +97,10 @@ void GenerateAotProject(const ProjectPaths& paths, const Target& t) {
   Replace(integration, "{{ sdk_version }}", "0.10.0");
   if (integration.find("{{") != std::string::npos || integration.find("{%") != std::string::npos)
     throw std::runtime_error("Unsupported pinned SDK project template");
-  Write(dir / "generated/rexglue.cmake", integration, paths.local());
+  // The pinned CLI refreshes generated/rexglue.cmake unconditionally from its
+  // source-relative template. Keep our absolute-output integration separate so
+  // that codegen cannot undo the compact paths before the second configure.
+  Write(dir / "generated/x360n_rexglue.cmake", integration, paths.local());
   for (const auto& name : {"CMakeLists.txt", "main.cpp"}) {
     auto text = ReadText(paths.root / "titles/common/generic" / name);
     Replace(text, "@TITLE@", t.id);

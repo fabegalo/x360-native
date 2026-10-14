@@ -150,7 +150,7 @@ TEST_CASE("automatic AOT generates a stable project without a manual recipe", "[
   CHECK_FALSE(profile.library_relative_xex.empty());
   CHECK(profile.library_relative_xex.filename()=="default.xex");
   CHECK(Inspect(f.paths,t).interrupted); CHECK_FALSE(Inspect(f.paths,t).prepared);
-  const auto integration=t.manifest.parent_path()/"generated/rexglue.cmake";
+  const auto integration=t.manifest.parent_path()/"generated/x360n_rexglue.cmake";
   std::ifstream in(integration); const std::string text{std::istreambuf_iterator<char>(in),{}};
   CHECK(text.find("${CMAKE_CURRENT_SOURCE_DIR}")!=std::string::npos);
   CHECK(text.find("{{")==std::string::npos);
@@ -161,6 +161,9 @@ TEST_CASE("automatic AOT generates a stable project without a manual recipe", "[
   const auto stamp=fs::last_write_time(t.manifest); const auto hash=DigestFile(integration)->sha256;
   GenerateAotProject(f.paths,t);
   CHECK(fs::last_write_time(t.manifest)==stamp); CHECK(DigestFile(integration)->sha256==hash);
+  Write(t.manifest.parent_path()/"generated/rexglue.cmake","SDK-owned regenerated glue");
+  GenerateAotProject(f.paths,t);
+  CHECK(DigestFile(integration)->sha256==hash);
   auto collision = t;
   collision.id = t.id.substr(0,17) + std::string(47,'f');
   REQUIRE(collision.id != t.id);
@@ -175,13 +178,21 @@ TEST_CASE("automatic AOT generates a stable project without a manual recipe", "[
   auto dashboard=f.root/"titles/dashboard/dashboard_manifest.toml";
   Write(dashboard,"[project]\nname='dashboard'\ngame_root='../../.local/inputs/dash'\n[entrypoint]\nfile_path='../../.local/inputs/dash/dash.xex'\n[x360n]\nnative_exe='../../.local/build/dash.exe'\nuser_data_root='../../.local/user/dash'\nxex_sha256='"+std::string(64,'0')+"'\nlaunch_library=true\n");
   CHECK(LoadSessionProfile(f.paths,dashboard,false).launch_targets.empty());
+  std::string recursive;
+  { std::ifstream manifest_input(t.manifest); recursive.assign(std::istreambuf_iterator<char>(manifest_input),{}); }
+  const auto section = recursive.find("[x360n]"); REQUIRE(section!=std::string::npos);
+  recursive.insert(section+std::string("[x360n]").size(),"\nlaunch_library = true\n");
+  Write(t.manifest,recursive);
+  CHECK(LoadSessionProfile(f.paths,dashboard,false).launch_targets.empty());
+  GenerateAotProject(f.paths,t);
+  const auto repaired_stamp = fs::last_write_time(t.manifest);
   Write(t.manifest.parent_path()/"preparation.toml","broken optional project");
   CHECK(LoadSessionProfile(f.paths,dashboard,false).launch_targets.empty());
   GenerateAotProject(f.paths,t); // repair interrupted project without touching content
-  CHECK(fs::last_write_time(t.manifest)==stamp);
+  CHECK(fs::last_write_time(t.manifest)==repaired_stamp);
   Write(t.game_root/"default.xex",Xex(9));
   CHECK_THROWS(GenerateAotProject(f.paths,t));
-  CHECK(fs::last_write_time(t.manifest)==stamp);
+  CHECK(fs::last_write_time(t.manifest)==repaired_stamp);
 }
 TEST_CASE("local AOT regenerates an existing imported title without copying content", "[.local-existing-aot]") {
   const char* root = std::getenv("X360N_AOT_ROOT"), *id = std::getenv("X360N_AOT_TITLE");

@@ -1,14 +1,20 @@
 # STATUS
 
-Correção candidata da configuração AOT genérica em caminhos longos (2026-10-14):
+Correção da configuração AOT genérica em caminhos longos (2026-10-14):
 o Forza importado falhou no try_compile do SDL porque o build usava o ID completo
 como diretório. O catálogo e os dados mantêm a identidade completa; o build usa
 uma chave curta com proprietário verificado, e o codegen vai para esse build.
 O driver segue o binaryDir declarado no preset, preserva fontes/stamps e inclui
 as novas dependências no recibo. Roteamento segue o native_exe do manifesto;
 executáveis sem registro no novo diretório continuam recusados. Testes focados
-de geração/identidade/sessão e de recibos aprovados; preparação real e entrega
-da atualização ainda em validação. Sem iniciar jogo ou Computer Use.
+de geração/identidade/sessão (6 casos/99 asserções), recibos e regravação do glue
+aprovados; geração real passou 11 asserções. Na instalação afetada, configure
+passou em 406 s e o produtor em 148 s. Forza parou no codegen (86 s): 12 chamadas
+sem função correspondente, em 11 destinos únicos; não compilado nem jogável.
+O CLI do SDK regrava seu glue; a integração própria agora usa arquivo separado.
+Hotfix.3 aplicada com hashes de catálogo/perfis/saves/preferências preservados;
+empacotamento final da integração ainda em validação. Sem iniciar jogo ou
+Computer Use. Evidências e limites: `docs/universal-library.md`.
 
 Automação de Releases no GitHub Actions (2026-10-14): workflow manual e por
 tag `v*` implementado em `.github/workflows/release.yml`, reutilizando
