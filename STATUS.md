@@ -1,5 +1,19 @@
 # STATUS
 
+Performance retomada e auditada (2026-10-14): infraestrutura opcional 0070 e
+isolamento de contadores 0072 recuperados com seus resultados locais. Redutor,
+comparador e exportação concluídos; rejeição de dados inválidos fora da janela,
+totais inteiros, preservação do erro inicial e comparação com dados obrigatórios
+cobertos por quatro testes focados. Oito coletas preservadas de Home 17559,
+Castle menu e Forza na primeira cena dirigível foram reprocessadas, quatro
+pares aceitos por procedência. Novo A/B/B/A das DLLs comprova −94,59% no custo
+sintético de quatro contadores independentes habilitados; nenhum ganho de FPS
+comercial demonstrado. 15 asserções nativas passam por DLL e 72 patches conferidos.
+GPU/VRAM e overhead total ligado/desligado nos jogos continuam pendentes.
+Sem alterar AOT/PPC, originais, C7/C8, saves, biblioteca ou ciclo aprovado;
+sem novos jogos, recompilação de títulos, Computer Use, push ou Release nesta
+retomada. Evidências e limites: `docs/performance-results-2026-10-14.md`.
+
 Forza pela My Games original (2026-10-14): ciclo real Retail 17559 → My Games →
 Forza Horizon 4D5309C9/0.0.0.10 → cena jogável → Guide/Xbox Home → Retail 17559
 comprovado no SDK final. Runs `20261014T121150Z`, `121331Z` e `121923Z`, mesma janela

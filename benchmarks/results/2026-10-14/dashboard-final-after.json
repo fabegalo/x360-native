@@ -1,0 +1,302 @@
+{
+  "schema": 1,
+  "title": "dash_17559",
+  "label": "final-after",
+  "utc": "2026-10-14T12:48:09.9441925Z",
+  "workspace_head": "d1c12c459a9b09b2a255e48655eab035130ed8c9",
+  "sdk_head": "f5337cdc947ff6d4c4196737e2c807a48f2a1fc2",
+  "workspace_lock_sha256": "d5af319a5370deb9f185faa709810cd5015fe6c1c9e642c6d60bcce209d5e052",
+  "binary_provenance": {
+    "utc": "2026-10-14T12:22:18.2584892Z",
+    "head": "a372ba6d2a770972be7d124a72c7e090adbf87c8",
+    "lock_sha256": "d5af319a5370deb9f185faa709810cd5015fe6c1c9e642c6d60bcce209d5e052",
+    "runtime_sha256": "a1159404a7aac4c5ff0c0ff6ffd3dcea9f2cf72391fc1d21e2161c3088baa96f",
+    "dirty_source": true,
+    "description": "Same frozen SDK0071 title and GPU artifacts; only runtime replaced by SDK0072 counter cache-line isolation build"
+  },
+  "hardware": {
+    "logical_processors": 16,
+    "os": "Microsoft Windows NT 10.0.26300.0",
+    "cpu": [
+      {
+        "Name": "AMD Ryzen 7 5700X3D 8-Core Processor           ",
+        "NumberOfCores": 8,
+        "NumberOfLogicalProcessors": 16
+      }
+    ],
+    "ram_bytes": 42856640512,
+    "gpu": [
+      {
+        "Name": "NVIDIA GeForce RTX 4070",
+        "DriverVersion": "32.0.16.1742",
+        "CurrentHorizontalResolution": 1920,
+        "CurrentVerticalResolution": 1080,
+        "CurrentRefreshRate": 279
+      }
+    ],
+    "power_plan": "GUID do Esquema de Energia: 381b4222-f694-41f0-9685-ff5bb260df2e  (Equilibrado)"
+  },
+  "artifacts": [
+    {
+      "file": "dash_17559_bootanim.dll",
+      "sha256": "695215ccb4be589fceed498b9b150006b0577a1860af9e5a9c83ab925318ea02"
+    },
+    {
+      "file": "dash_17559_createprofile.dll",
+      "sha256": "59bf3f2fbc89b2c650ffd7c4cc6c6cbaf3f12b572c9e9efee06675a06504a3dc"
+    },
+    {
+      "file": "dash_17559_gamerprofile.dll",
+      "sha256": "ef706096818343a6f389bf5468793f4fdc44642e27191b6459e8224589b58265"
+    },
+    {
+      "file": "dash_17559_hud.dll",
+      "sha256": "9b28735aa8ddee6367b9029a80264c2a4f1767e4c498f31cb2f7b806a91aca4c"
+    },
+    {
+      "file": "dash_17559_session_ui.dll",
+      "sha256": "0495e06d0b7e948f3da171cf81e80496d49dab2d1394ba84e9fdbdb627fc3eb2"
+    },
+    {
+      "file": "dash_17559_signin.dll",
+      "sha256": "bdbe0e84ae5aaf8b8ca73b64d90cd350e64534239076f7d08f64f4850fe5b4bd"
+    },
+    {
+      "file": "dash_17559_vk.dll",
+      "sha256": "fd026eae1e85c4a02f970a4fdc9061f4996cd674f28af19988f22127f8ca1939"
+    },
+    {
+      "file": "dash_17559_xam_ui.dll",
+      "sha256": "361471bb673ce98b6197cea8684da177baf3c9b125f67f703c29e14f13006a5b"
+    },
+    {
+      "file": "dash_17559.exe",
+      "sha256": "28b12f2600d38569592c151275690b59d602ab8d685686b16188a7960e220060"
+    },
+    {
+      "file": "rexgpu-xenosrd.dll",
+      "sha256": "1e01a57c96ee603dfcf7926ac60e694a579f954f0cc1abfe398b94495a04dea9"
+    },
+    {
+      "file": "rexruntimerd.dll",
+      "sha256": "a1159404a7aac4c5ff0c0ff6ffd3dcea9f2cf72391fc1d21e2161c3088baa96f"
+    },
+    {
+      "file": "TracyClientrd.dll",
+      "sha256": "249759cd1ac2a66e5fa2be33603d8c9e312090af891daef3b2aa9791af85e9a1"
+    }
+  ],
+  "collector": [
+    {
+      "file": "benchmark-runtime.ps1",
+      "sha256": "d979eb665a6ff4f6df87fba3be92b6861d1d7308d5f57a5d755601767fd9f272"
+    },
+    {
+      "file": "benchmark-window.ps1",
+      "sha256": "3b615430b38241ea519201467e3cfcf1593d831e735fde0277c175f39b50369b"
+    },
+    {
+      "file": "benchmark-summary.ps1",
+      "sha256": "b28781ac0d3ba7b9ad36da3195338264c39a441a4d37b9c99fdcf084724f9aa0"
+    }
+  ],
+  "reduction": {
+    "script_sha256": "601306eb9d8581b5c42809344b34e3a76e344d7e693baa3bbad101e750e6038b",
+    "summary_sha256": "6e0c5a5a733f419bf1ff88c396d48bd8550a24c94ec116216cae3e71f3a3cfdc",
+    "initial_measurement_error": null,
+    "utc": "2026-10-14T18:02:58.0532925Z",
+    "raw_csv_sha256": "b42347860ebf62a49b80c888cf328e67ceb2e024be7d121cf7658a6e6eb981d0"
+  },
+  "scenario": {
+    "duration_seconds": 30,
+    "description": "Retail 17559 Home, direct boot, no navigation",
+    "start_seconds": 25,
+    "events": []
+  },
+  "settings": [
+    "--gpu_plugin=xenos",
+    "--mnk_mode=true",
+    "--log_level=info",
+    "--dash17559_boot_intro=false"
+  ],
+  "seed_inventory_sha256": "fd349f839141eb7f55dbdf9c26c29ea97d0e80be49dafd71059d53a1de494e8e",
+  "seed_files": 4137,
+  "original_xex": [
+    {
+      "path": "bootanim.xex",
+      "sha256": "45eb980c0f841b4807d43c07c766fae5e70b8e2fa4d13fb247a491897cfc6de7"
+    },
+    {
+      "path": "dash.xex",
+      "sha256": "3ad8f38d070eaf63cadac0697e3e8802c565cbfd0825a485347c5d718014f927"
+    },
+    {
+      "path": "dashbigger.xex",
+      "sha256": "fc4ad90638a8fff7759734dee364a48964e164d567699ca7e7aca2dc06ebc8c2"
+    },
+    {
+      "path": "system\\createprofile.xex",
+      "sha256": "c5dae66e2e7b408ef6d84d659a2232ad89f01d78fa38c365d8732f2e0a221bbd"
+    },
+    {
+      "path": "system\\gamerprofile.xex",
+      "sha256": "a99fb2ae20c4b3ffab9fa5f6a73e5766b49fbed5716e8b4d3752d1b97b83aad4"
+    },
+    {
+      "path": "system\\hud.xex",
+      "sha256": "37e10612afde211e1d349838704f7cc2648ad5a4d1f8ca459f18ecd2c1f31ac7"
+    },
+    {
+      "path": "system\\huduiskin.xex",
+      "sha256": "fdbe68d20fa6b013282ce8f21cebddc34fe4e3a92a71c28983d63f288d2252cc"
+    },
+    {
+      "path": "system\\signin.xex",
+      "sha256": "86695c6c36250cc4b4addb7ccc07d15d54492b352c979cf5c0934804109a6130"
+    },
+    {
+      "path": "system\\xam_ui.xex",
+      "sha256": "78b3dbd8ae866f4258f5444205486ea9f8451afaa30f469c875dcf345f828467"
+    },
+    {
+      "path": "vk.xex",
+      "sha256": "876ddbb333d83f408ab7c69267703e623daef6da5b1eb3302bd94d246155724e"
+    }
+  ],
+  "cache_condition": "identical existing cache seed, OS filesystem cache uncontrolled",
+  "scene_review": "Reviewed both captures: original Retail 17559 Home idle, Open Tray selected; existing empty content/avatar region unchanged.",
+  "result": {
+    "frame_source": "completed guest XE_SWAP cadence, not display scanout or GPU duration",
+    "discarded_unterminated_records": 0,
+    "frames": 1799,
+    "measured_seconds": 29.98321800000006,
+    "requested_seconds": 30.0,
+    "window_coverage_fraction": 0.9994406000000021,
+    "boundary_excluded_ms": 16.781999999937398,
+    "window_complete": true,
+    "fps_mean": 60.000230795773696,
+    "fps_1pct_low": 53.49818700588271,
+    "frame_ms_mean": 16.666602556976134,
+    "frame_ms_p95": 18.281999999999243,
+    "frame_ms_p99": 18.564999999998832,
+    "process_cpu_ms_per_frame": 36.13118399110617,
+    "process_cpu_percent_machine": 13.549246114943339,
+    "runtime_to_first_swap_ms": 799.89,
+    "gpu_ms_per_frame": null,
+    "vram_bytes": null,
+    "gameplay_ready_ms": null,
+    "unavailable": {
+      "gpu_ms_per_frame": "No GPU timestamp queries wired",
+      "vram_bytes": "No process VRAM provider wired",
+      "gameplay_ready_ms": "No semantic ready signal; runtime-to-first-swap is separate",
+      "cpu_critical_path_ms": "Process CPU is aggregate across all threads",
+      "hardware_cache_misses": "No PMU sampling",
+      "pipeline_fast_path_hits": "Existing counter excludes consecutive identical pipeline fast path"
+    },
+    "counters": {
+      "draw_calls": 91465,
+      "command_buffer_stalls": 0,
+      "vertices_processed": 1478873,
+      "functions_dispatched": 20285661,
+      "interrupt_dispatches": 3598,
+      "texture_cache_hits": 42892,
+      "texture_cache_misses": 0,
+      "pipeline_cache_hits": 78872,
+      "pipeline_cache_misses": 0,
+      "shader_translation_us": 0,
+      "shader_translations": 0,
+      "pipeline_creation_us": 0,
+      "pipeline_creations": 0,
+      "swap_failures": 0
+    },
+    "whole_capture_counters": {
+      "draw_calls": 185012,
+      "command_buffer_stalls": 0,
+      "vertices_processed": 2992378,
+      "functions_dispatched": 41384252,
+      "interrupt_dispatches": 7330,
+      "texture_cache_hits": 86578,
+      "texture_cache_misses": 17,
+      "pipeline_cache_hits": 159476,
+      "pipeline_cache_misses": 0,
+      "shader_translation_us": 5478,
+      "shader_translations": 55,
+      "pipeline_creation_us": 772276,
+      "pipeline_creations": 56,
+      "swap_failures": 0
+    },
+    "ram_working_set_peak_bytes": 434601984.0,
+    "private_commit_peak_bytes": 960995328.0,
+    "scene_verified": true,
+    "title": "dash_17559",
+    "label": "final-after",
+    "termination": "bounded_forced_stop",
+    "scene_review": "Reviewed both captures: original Retail 17559 Home idle, Open Tray selected; existing empty content/avatar region unchanged.",
+    "log_counts": {
+      "warning": 12467,
+      "critical": 0,
+      "error": 3736
+    },
+    "log_count_scope": "Retained rex*.log files only; rotation may discard earlier messages",
+    "reduction": {
+      "script_sha256": "601306eb9d8581b5c42809344b34e3a76e344d7e693baa3bbad101e750e6038b",
+      "summary_sha256": "6e0c5a5a733f419bf1ff88c396d48bd8550a24c94ec116216cae3e71f3a3cfdc",
+      "initial_measurement_error": null,
+      "utc": "2026-10-14T18:02:58.0532925Z",
+      "raw_csv_sha256": "b42347860ebf62a49b80c888cf328e67ceb2e024be7d121cf7658a6e6eb981d0"
+    }
+  },
+  "evidence": [
+    {
+      "file": "after.png",
+      "bytes": 450598,
+      "sha256": "e5ca85868af8e94bd44468da83e7f4f75fbe659509e3e03acdd6719893e9fa39"
+    },
+    {
+      "file": "before.png",
+      "bytes": 452928,
+      "sha256": "02193cf19a16ca726664d7852e46f8965489203260534332e2112b4cb5190af0"
+    },
+    {
+      "file": "environment.json",
+      "bytes": 1086387,
+      "sha256": "67c1023a573d8dfe8302587e55937dda5809ff15beed36ab13c1d15738890c72"
+    },
+    {
+      "file": "frames.csv",
+      "bytes": 285282,
+      "sha256": "b42347860ebf62a49b80c888cf328e67ceb2e024be7d121cf7658a6e6eb981d0"
+    },
+    {
+      "file": "process-samples.json",
+      "bytes": 10093,
+      "sha256": "409b219afdf1bc99ba9cfc0a9857900dcd3c0337e90bce7d6f3577590299d4f0"
+    },
+    {
+      "file": "result.initial.json",
+      "bytes": 2684,
+      "sha256": "46179a4c2bda32b226263e9bd0e82cd0919f1544d624ffa6dc03a0976edded7b"
+    },
+    {
+      "file": "result.json",
+      "bytes": 3119,
+      "sha256": "80a84e1ebb74a4e824a2d97ac11abe56f88f924a04cdfe3261314756163a79d4"
+    },
+    {
+      "file": "rex.log",
+      "bytes": 1603215,
+      "sha256": "4bad0eb291942c9297a209fb7a270e96600c84da151aa5d9e18724bd7f8be750"
+    },
+    {
+      "file": "stderr.log",
+      "bytes": 2,
+      "sha256": "7eb70257593da06f682a3ddda54a9d260d4fc514f645237f5ca74b08f8da61a6"
+    },
+    {
+      "file": "stdout.log",
+      "bytes": 2,
+      "sha256": "7eb70257593da06f682a3ddda54a9d260d4fc514f645237f5ca74b08f8da61a6"
+    }
+  ],
+  "note": "Raw evidence stays local; profiles, saves, screenshots, logs and absolute paths are not embedded. Workspace HEAD/lock identify the checkout at launch, not necessarily the frozen binary build."
+}

@@ -1,0 +1,244 @@
+{
+  "schema": 1,
+  "title": "castle_crashers",
+  "label": "final-before",
+  "utc": "2026-10-14T12:51:46.5581539Z",
+  "workspace_head": "d1c12c459a9b09b2a255e48655eab035130ed8c9",
+  "sdk_head": "f5337cdc947ff6d4c4196737e2c807a48f2a1fc2",
+  "workspace_lock_sha256": "d5af319a5370deb9f185faa709810cd5015fe6c1c9e642c6d60bcce209d5e052",
+  "binary_provenance": {
+    "utc": "2026-10-14T12:22:18.7949782Z",
+    "head": "a372ba6d2a770972be7d124a72c7e090adbf87c8",
+    "lock_sha256": "8F794E34E5DAE38816ED95C1E749CE3503F2E2070FCBD8C27E53E2FA6441ADFF",
+    "dirty_source": true,
+    "description": "Frozen final SDK0071 binaries after validated Guide/CPU0 correction; same AOT and GPU libraries must be used for both counter variants"
+  },
+  "hardware": {
+    "logical_processors": 16,
+    "os": "Microsoft Windows NT 10.0.26300.0",
+    "cpu": [
+      {
+        "Name": "AMD Ryzen 7 5700X3D 8-Core Processor           ",
+        "NumberOfCores": 8,
+        "NumberOfLogicalProcessors": 16
+      }
+    ],
+    "ram_bytes": 42856640512,
+    "gpu": [
+      {
+        "Name": "NVIDIA GeForce RTX 4070",
+        "DriverVersion": "32.0.16.1742",
+        "CurrentHorizontalResolution": 1920,
+        "CurrentVerticalResolution": 1080,
+        "CurrentRefreshRate": 279
+      }
+    ],
+    "power_plan": "GUID do Esquema de Energia: 381b4222-f694-41f0-9685-ff5bb260df2e  (Equilibrado)"
+  },
+  "artifacts": [
+    {
+      "file": "castle_crashers.exe",
+      "sha256": "7a2e46145b5aeb49583d9e84dd65afb1000f425389f9823bb446ab4cead55dff"
+    },
+    {
+      "file": "rexgpu-xenosrd.dll",
+      "sha256": "1e01a57c96ee603dfcf7926ac60e694a579f954f0cc1abfe398b94495a04dea9"
+    },
+    {
+      "file": "rexruntimerd.dll",
+      "sha256": "1480364ce9c123cd9b5d44ae1109ef08306ee982d68ff53d162862e5d1a1ecc8"
+    },
+    {
+      "file": "TracyClientrd.dll",
+      "sha256": "249759cd1ac2a66e5fa2be33603d8c9e312090af891daef3b2aa9791af85e9a1"
+    }
+  ],
+  "collector": [
+    {
+      "file": "benchmark-runtime.ps1",
+      "sha256": "d979eb665a6ff4f6df87fba3be92b6861d1d7308d5f57a5d755601767fd9f272"
+    },
+    {
+      "file": "benchmark-window.ps1",
+      "sha256": "3b615430b38241ea519201467e3cfcf1593d831e735fde0277c175f39b50369b"
+    },
+    {
+      "file": "benchmark-summary.ps1",
+      "sha256": "b28781ac0d3ba7b9ad36da3195338264c39a441a4d37b9c99fdcf084724f9aa0"
+    }
+  ],
+  "reduction": {
+    "script_sha256": "601306eb9d8581b5c42809344b34e3a76e344d7e693baa3bbad101e750e6038b",
+    "summary_sha256": "6e0c5a5a733f419bf1ff88c396d48bd8550a24c94ec116216cae3e71f3a3cfdc",
+    "initial_measurement_error": null,
+    "utc": "2026-10-14T18:02:55.3080262Z",
+    "raw_csv_sha256": "880ccbfa816125d3d0673a23a0a8475346967af0e58a1f948a2e57a76181fbff"
+  },
+  "scenario": {
+    "duration_seconds": 30,
+    "description": "Castle Crashers title/menu idle after Start; no gameplay claim",
+    "start_seconds": 75,
+    "events": [
+      {
+        "seconds": 15,
+        "vk": 13,
+        "scan": 28,
+        "hold_seconds": 0.12
+      }
+    ]
+  },
+  "settings": [
+    "--gpu_plugin=xenos",
+    "--mnk_mode=true",
+    "--log_level=info"
+  ],
+  "seed_inventory_sha256": "881163540f640d5a1d3f9104c20b64d97b684684b465d2931e940cf4862c6e89",
+  "seed_files": 2,
+  "original_xex": [
+    {
+      "sha256": "825e9c8cb951d62ce954901488c5b783349c98cc5c03bd08ea0739df3af5d9ad",
+      "path": "default.xex"
+    }
+  ],
+  "cache_condition": "identical existing cache seed, OS filesystem cache uncontrolled",
+  "scene_review": "Reviewed both captures: original Castle Crashers main menu, Local Game selected, animated background; no gameplay claim.",
+  "result": {
+    "frame_source": "completed guest XE_SWAP cadence, not display scanout or GPU duration",
+    "discarded_unterminated_records": 0,
+    "frames": 1799,
+    "measured_seconds": 29.985331999999982,
+    "requested_seconds": 30.0,
+    "window_coverage_fraction": 0.999511066666666,
+    "boundary_excluded_ms": 14.668000000019674,
+    "window_complete": true,
+    "fps_mean": 59.99600071128114,
+    "fps_1pct_low": 50.42567675459766,
+    "frame_ms_mean": 16.66777765425235,
+    "frame_ms_p95": 18.51899999999773,
+    "frame_ms_p99": 19.105000000010364,
+    "process_cpu_ms_per_frame": 18.413007226236797,
+    "process_cpu_percent_machine": 6.904417466513299,
+    "runtime_to_first_swap_ms": 441.337,
+    "gpu_ms_per_frame": null,
+    "vram_bytes": null,
+    "gameplay_ready_ms": null,
+    "unavailable": {
+      "gpu_ms_per_frame": "No GPU timestamp queries wired",
+      "vram_bytes": "No process VRAM provider wired",
+      "gameplay_ready_ms": "No semantic ready signal; runtime-to-first-swap is separate",
+      "cpu_critical_path_ms": "Process CPU is aggregate across all threads",
+      "hardware_cache_misses": "No PMU sampling",
+      "pipeline_fast_path_hits": "Existing counter excludes consecutive identical pipeline fast path"
+    },
+    "counters": {
+      "draw_calls": 471907,
+      "command_buffer_stalls": 0,
+      "vertices_processed": 1885829,
+      "functions_dispatched": 6123552,
+      "interrupt_dispatches": 3598,
+      "texture_cache_hits": 61121,
+      "texture_cache_misses": 0,
+      "pipeline_cache_hits": 5397,
+      "pipeline_cache_misses": 0,
+      "shader_translation_us": 0,
+      "shader_translations": 0,
+      "pipeline_creation_us": 0,
+      "pipeline_creations": 0,
+      "swap_failures": 0
+    },
+    "whole_capture_counters": {
+      "draw_calls": 1424660,
+      "command_buffer_stalls": 0,
+      "vertices_processed": 5692098,
+      "functions_dispatched": 20501881,
+      "interrupt_dispatches": 13254,
+      "texture_cache_hits": 189698,
+      "texture_cache_misses": 144,
+      "pipeline_cache_hits": 19844,
+      "pipeline_cache_misses": 0,
+      "shader_translation_us": 497,
+      "shader_translations": 9,
+      "pipeline_creation_us": 70894,
+      "pipeline_creations": 6,
+      "swap_failures": 0
+    },
+    "ram_working_set_peak_bytes": 485257216.0,
+    "private_commit_peak_bytes": 940662784.0,
+    "scene_verified": true,
+    "title": "castle_crashers",
+    "label": "final-before",
+    "termination": "bounded_forced_stop",
+    "scene_review": "Reviewed both captures: original Castle Crashers main menu, Local Game selected, animated background; no gameplay claim.",
+    "log_counts": {
+      "warning": 3,
+      "critical": 0,
+      "error": 0
+    },
+    "log_count_scope": "Retained rex*.log files only; rotation may discard earlier messages",
+    "reduction": {
+      "script_sha256": "601306eb9d8581b5c42809344b34e3a76e344d7e693baa3bbad101e750e6038b",
+      "summary_sha256": "6e0c5a5a733f419bf1ff88c396d48bd8550a24c94ec116216cae3e71f3a3cfdc",
+      "initial_measurement_error": null,
+      "utc": "2026-10-14T18:02:55.3080262Z",
+      "raw_csv_sha256": "880ccbfa816125d3d0673a23a0a8475346967af0e58a1f948a2e57a76181fbff"
+    }
+  },
+  "evidence": [
+    {
+      "file": "after.png",
+      "bytes": 911435,
+      "sha256": "9538430d6c10a3b8f553054cbab99028d98aa5c84b278821ffaaf93294313084"
+    },
+    {
+      "file": "before.png",
+      "bytes": 911960,
+      "sha256": "49ab50befb399fff0f48ef18e07117bf99b786afd07198eda2b987c47f1a9618"
+    },
+    {
+      "file": "environment.json",
+      "bytes": 4982,
+      "sha256": "f32c3d2bb23ec8fff54dd15e1709d381f8bbc93ffcc44a8ba4032c20593c9c4c"
+    },
+    {
+      "file": "frames.csv",
+      "bytes": 510610,
+      "sha256": "880ccbfa816125d3d0673a23a0a8475346967af0e58a1f948a2e57a76181fbff"
+    },
+    {
+      "file": "input-events.json",
+      "bytes": 336,
+      "sha256": "aba6bbf174cccd915a7d22595cc48f48cf3c9def8c5f5a99937aa56349ce016c"
+    },
+    {
+      "file": "process-samples.json",
+      "bytes": 18391,
+      "sha256": "21660b5949862d27f5b17aa371f1a77d97fbb353f42ddc2bbc04809c2ac1e11d"
+    },
+    {
+      "file": "result.initial.json",
+      "bytes": 2675,
+      "sha256": "5c89047270964cf1d6a354a4ad4b4e4d06ec7464b518dcb89b6636eff5abf19c"
+    },
+    {
+      "file": "result.json",
+      "bytes": 3110,
+      "sha256": "512921d74c552b6b2fc52ccbee1a4e21ea1e798b371e15af076aea3fa7875bf0"
+    },
+    {
+      "file": "rex.log",
+      "bytes": 2162,
+      "sha256": "c18da3af074e6aeff2dac67589d2b42da40d3804837d09e8d7ef58b36251f62b"
+    },
+    {
+      "file": "stderr.log",
+      "bytes": 2,
+      "sha256": "7eb70257593da06f682a3ddda54a9d260d4fc514f645237f5ca74b08f8da61a6"
+    },
+    {
+      "file": "stdout.log",
+      "bytes": 2,
+      "sha256": "7eb70257593da06f682a3ddda54a9d260d4fc514f645237f5ca74b08f8da61a6"
+    }
+  ],
+  "note": "Raw evidence stays local; profiles, saves, screenshots, logs and absolute paths are not embedded. Workspace HEAD/lock identify the checkout at launch, not necessarily the frozen binary build."
+}

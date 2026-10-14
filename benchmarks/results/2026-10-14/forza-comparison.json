@@ -1,0 +1,94 @@
+{
+  "schema": 1,
+  "comparable": true,
+  "reasons": [],
+  "allowed_changed_artifacts": [
+    "rexruntimerd.dll",
+    "rexruntime.dll"
+  ],
+  "metrics": {
+    "fps_mean": {
+      "change_percent": -0.6772393050526682,
+      "before": 30.00134422040624,
+      "after": 29.798163325301502
+    },
+    "fps_1pct_low": {
+      "change_percent": -37.262699926211184,
+      "before": 27.494768356576174,
+      "after": 17.249475328458328
+    },
+    "frame_ms_mean": {
+      "change_percent": 0.6818571094018289,
+      "before": 33.33183982202446,
+      "after": 33.559115341545365
+    },
+    "frame_ms_p95": {
+      "change_percent": 0.5485649654226377,
+      "before": 35.36500000001297,
+      "after": 35.55900000003476
+    },
+    "frame_ms_p99": {
+      "change_percent": 0.6476074502698825,
+      "before": 36.13300000000663,
+      "after": 36.367000000012695
+    },
+    "process_cpu_ms_per_frame": {
+      "change_percent": 6.818269887926576,
+      "before": 78.85497775305896,
+      "after": 84.23152295632698
+    },
+    "runtime_to_first_swap_ms": {
+      "change_percent": 48.17334910249447,
+      "before": 1182.054,
+      "after": 1751.489
+    },
+    "ram_working_set_peak_bytes": {
+      "change_percent": 0.29553269184636743,
+      "before": 1229357056.0,
+      "after": 1232990208.0
+    }
+  },
+  "before_counters": {
+    "draw_calls": 2509410,
+    "command_buffer_stalls": 0,
+    "vertices_processed": 1117883707,
+    "functions_dispatched": 80254349,
+    "interrupt_dispatches": 6293,
+    "texture_cache_hits": 2206554,
+    "texture_cache_misses": 7,
+    "pipeline_cache_hits": 910919,
+    "pipeline_cache_misses": 2,
+    "shader_translation_us": 325,
+    "shader_translations": 2,
+    "pipeline_creation_us": 13979,
+    "pipeline_creations": 2,
+    "swap_failures": 0
+  },
+  "after_counters": {
+    "draw_calls": 2575503,
+    "command_buffer_stalls": 0,
+    "vertices_processed": 1113966510,
+    "functions_dispatched": 80846439,
+    "interrupt_dispatches": 6263,
+    "texture_cache_hits": 2216459,
+    "texture_cache_misses": 2,
+    "pipeline_cache_hits": 940692,
+    "pipeline_cache_misses": 0,
+    "shader_translation_us": 0,
+    "shader_translations": 0,
+    "pipeline_creation_us": 0,
+    "pipeline_creations": 0,
+    "swap_failures": 0
+  },
+  "before_log_counts": {
+    "warning": 95622,
+    "critical": 0,
+    "error": 177891
+  },
+  "after_log_counts": {
+    "warning": 95400,
+    "critical": 0,
+    "error": 177666
+  },
+  "note": "Single-run delta; repeat alternating A/B and report dispersion before claiming a game-speed gain"
+}

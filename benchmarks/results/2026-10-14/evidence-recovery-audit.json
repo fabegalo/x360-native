@@ -1,0 +1,169 @@
+{
+  "schema": 1,
+  "description": "Independent integer-microsecond reduction and on-disk SHA-256 audit of eight preserved captures; no game launch",
+  "utc": "2026-10-14T18:07:19.8160688Z",
+  "workspace_head": "d1c12c459a9b09b2a255e48655eab035130ed8c9",
+  "script_sha256": "c632299313f69edc90244e6f3f5b7802a915148e37b7b6001a0c8f5f52f5d4c3",
+  "checks": [
+    {
+      "label": "final-before",
+      "title": "dash_17559",
+      "frames": 1799,
+      "raw_csv_sha256": "2edc0e915f4e7ca328b01f927d8fc9f27f3cf6e055d8df2353078c9d4cf7f141",
+      "metrics_verified": [
+        "fps_1pct_low",
+        "fps_mean",
+        "frame_ms_mean",
+        "frame_ms_p95",
+        "frame_ms_p99",
+        "measured_seconds",
+        "process_cpu_ms_per_frame",
+        "process_cpu_percent_machine"
+      ],
+      "counter_totals_verified": 14,
+      "artifacts_verified": 12,
+      "originals_verified": 10,
+      "seed_files_verified": 4137
+    },
+    {
+      "label": "final-before",
+      "title": "castle_crashers",
+      "frames": 1799,
+      "raw_csv_sha256": "880ccbfa816125d3d0673a23a0a8475346967af0e58a1f948a2e57a76181fbff",
+      "metrics_verified": [
+        "fps_1pct_low",
+        "fps_mean",
+        "frame_ms_mean",
+        "frame_ms_p95",
+        "frame_ms_p99",
+        "measured_seconds",
+        "process_cpu_ms_per_frame",
+        "process_cpu_percent_machine"
+      ],
+      "counter_totals_verified": 14,
+      "artifacts_verified": 4,
+      "originals_verified": 1,
+      "seed_files_verified": 2
+    },
+    {
+      "label": "final-before",
+      "title": "forza_horizon",
+      "frames": 899,
+      "raw_csv_sha256": "f60d0bae6f09d1ce246c5e4312c2c4163026155146e630f2f5132bef3f8e6ccd",
+      "metrics_verified": [
+        "fps_1pct_low",
+        "fps_mean",
+        "frame_ms_mean",
+        "frame_ms_p95",
+        "frame_ms_p99",
+        "measured_seconds",
+        "process_cpu_ms_per_frame",
+        "process_cpu_percent_machine"
+      ],
+      "counter_totals_verified": 14,
+      "artifacts_verified": 6,
+      "originals_verified": 25,
+      "seed_files_verified": 9
+    },
+    {
+      "label": "final-after",
+      "title": "dash_17559",
+      "frames": 1799,
+      "raw_csv_sha256": "b42347860ebf62a49b80c888cf328e67ceb2e024be7d121cf7658a6e6eb981d0",
+      "metrics_verified": [
+        "fps_1pct_low",
+        "fps_mean",
+        "frame_ms_mean",
+        "frame_ms_p95",
+        "frame_ms_p99",
+        "measured_seconds",
+        "process_cpu_ms_per_frame",
+        "process_cpu_percent_machine"
+      ],
+      "counter_totals_verified": 14,
+      "artifacts_verified": 12,
+      "originals_verified": 10,
+      "seed_files_verified": 4137
+    },
+    {
+      "label": "final-after",
+      "title": "castle_crashers",
+      "frames": 1799,
+      "raw_csv_sha256": "9ad4808613653ece4d4bc966001fde3a60b3edd19c77382463dafe60a788408a",
+      "metrics_verified": [
+        "fps_1pct_low",
+        "fps_mean",
+        "frame_ms_mean",
+        "frame_ms_p95",
+        "frame_ms_p99",
+        "measured_seconds",
+        "process_cpu_ms_per_frame",
+        "process_cpu_percent_machine"
+      ],
+      "counter_totals_verified": 14,
+      "artifacts_verified": 4,
+      "originals_verified": 1,
+      "seed_files_verified": 2
+    },
+    {
+      "label": "final-after",
+      "title": "forza_horizon",
+      "frames": 893,
+      "raw_csv_sha256": "107f11f9068e5ccab155a940d457b646d6a2d319f0f2fcb123a2a7d86d381d62",
+      "metrics_verified": [
+        "fps_1pct_low",
+        "fps_mean",
+        "frame_ms_mean",
+        "frame_ms_p95",
+        "frame_ms_p99",
+        "measured_seconds",
+        "process_cpu_ms_per_frame",
+        "process_cpu_percent_machine"
+      ],
+      "counter_totals_verified": 14,
+      "artifacts_verified": 6,
+      "originals_verified": 25,
+      "seed_files_verified": 9
+    },
+    {
+      "label": "final-before2",
+      "title": "forza_horizon",
+      "frames": 899,
+      "raw_csv_sha256": "85edfe6671879035729e749dfb741cd8ef49f505532894c68fc79062d2d48594",
+      "metrics_verified": [
+        "fps_1pct_low",
+        "fps_mean",
+        "frame_ms_mean",
+        "frame_ms_p95",
+        "frame_ms_p99",
+        "measured_seconds",
+        "process_cpu_ms_per_frame",
+        "process_cpu_percent_machine"
+      ],
+      "counter_totals_verified": 14,
+      "artifacts_verified": 6,
+      "originals_verified": 25,
+      "seed_files_verified": 9
+    },
+    {
+      "label": "final-after2",
+      "title": "forza_horizon",
+      "frames": 899,
+      "raw_csv_sha256": "51e6e79f95eab7c39f2516a2fdad6620caeb7c72948c0103f76541e4d3580a3c",
+      "metrics_verified": [
+        "fps_1pct_low",
+        "fps_mean",
+        "frame_ms_mean",
+        "frame_ms_p95",
+        "frame_ms_p99",
+        "measured_seconds",
+        "process_cpu_ms_per_frame",
+        "process_cpu_percent_machine"
+      ],
+      "counter_totals_verified": 14,
+      "artifacts_verified": 6,
+      "originals_verified": 25,
+      "seed_files_verified": 9
+    }
+  ]
+}
