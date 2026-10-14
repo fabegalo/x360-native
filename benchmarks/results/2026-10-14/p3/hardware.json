@@ -1,0 +1,19 @@
+{
+  "note": "Supplemental host query; per-run original hardware collection errors preserved",
+  "ram_bytes": 42856640512,
+  "gpu": [
+    {
+      "Name": "NVIDIA GeForce RTX 4070",
+      "DriverVersion": "32.0.16.1742"
+    }
+  ],
+  "captured_utc": "2026-10-14T19:58:06.0547661Z",
+  "cpu": [
+    {
+      "Name": "AMD Ryzen 7 5700X3D 8-Core Processor           ",
+      "NumberOfCores": 8,
+      "NumberOfLogicalProcessors": 16
+    }
+  ],
+  "power_plan": "GUID do Esquema de Energia: 381b4222-f694-41f0-9685-ff5bb260df2e  (Equilibrado)"
+}

@@ -1,0 +1,14 @@
+{
+  "permissions_changed": false,
+  "schema": 1,
+  "host_token_elevated_administrator": false,
+  "limitation": "ETW profiling unavailable under actual Windows token. No validated independent OFF frame provider. PresentMon not installed or represented as measured.",
+  "error": "Failed to enable the policy to profile system performance.",
+  "initial_status": "WPR is not recording",
+  "command": "wpr -start CPU -filemode",
+  "date": "2026-10-14",
+  "tested_in_sandbox_and_host": true,
+  "off_frame_times": null,
+  "host_token_performance_log_users": false,
+  "error_code": "0xc5585011"
+}

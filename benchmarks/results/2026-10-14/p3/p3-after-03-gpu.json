@@ -1,0 +1,121 @@
+{
+  "gpu_ms_per_frame": null,
+  "source": "Windows GPU Performance Counters, per PID and adapter/engine",
+  "duration_seconds": 30.0,
+  "memory": [
+    {
+      "shared_usage_peak_bytes": 103034880.0,
+      "total_committed_peak_bytes": 1236668416.0,
+      "samples": 21,
+      "dedicated_usage_peak_bytes": 1133633536.0,
+      "adapter": "luid_0x00000000_0x0001172E_phys_0"
+    }
+  ],
+  "raw_sha256": "862024b83a25ee1b4baf4cc90690eecae4f55826d0f224e09439a24c22141766",
+  "failure": null,
+  "samples": 21,
+  "boundary_excluded_samples": 0,
+  "engines": [
+    {
+      "utilization_percent_min": 25.0,
+      "utilization_percent_mean": 28.0,
+      "utilization_percent_max": 32.0,
+      "engine": "luid_0x00000000_0x0001172E_phys_0_eng_0_engtype_3D",
+      "samples": 21
+    },
+    {
+      "utilization_percent_min": 0.0,
+      "utilization_percent_mean": 0.0,
+      "utilization_percent_max": 0.0,
+      "engine": "luid_0x00000000_0x0001172E_phys_0_eng_1_engtype_LegacyOverlay",
+      "samples": 21
+    },
+    {
+      "utilization_percent_min": 0.0,
+      "utilization_percent_mean": 0.0,
+      "utilization_percent_max": 0.0,
+      "engine": "luid_0x00000000_0x0001172E_phys_0_eng_10_engtype_Copy",
+      "samples": 21
+    },
+    {
+      "utilization_percent_min": 0.0,
+      "utilization_percent_mean": 0.0,
+      "utilization_percent_max": 0.0,
+      "engine": "luid_0x00000000_0x0001172E_phys_0_eng_11_engtype_Copy",
+      "samples": 21
+    },
+    {
+      "utilization_percent_min": 0.0,
+      "utilization_percent_mean": 0.0,
+      "utilization_percent_max": 0.0,
+      "engine": "luid_0x00000000_0x0001172E_phys_0_eng_12_engtype_Copy",
+      "samples": 21
+    },
+    {
+      "utilization_percent_min": 0.0,
+      "utilization_percent_mean": 0.0,
+      "utilization_percent_max": 0.0,
+      "engine": "luid_0x00000000_0x0001172E_phys_0_eng_13_engtype_Security_1",
+      "samples": 21
+    },
+    {
+      "utilization_percent_min": 0.0,
+      "utilization_percent_mean": 0.0,
+      "utilization_percent_max": 0.0,
+      "engine": "luid_0x00000000_0x0001172E_phys_0_eng_2_engtype_VideoDecode",
+      "samples": 21
+    },
+    {
+      "utilization_percent_min": 0.0,
+      "utilization_percent_mean": 0.0,
+      "utilization_percent_max": 0.0,
+      "engine": "luid_0x00000000_0x0001172E_phys_0_eng_3_engtype_Copy",
+      "samples": 21
+    },
+    {
+      "utilization_percent_min": 0.0,
+      "utilization_percent_mean": 0.0,
+      "utilization_percent_max": 0.0,
+      "engine": "luid_0x00000000_0x0001172E_phys_0_eng_4_engtype_Copy",
+      "samples": 21
+    },
+    {
+      "utilization_percent_min": 0.0,
+      "utilization_percent_mean": 0.0,
+      "utilization_percent_max": 0.0,
+      "engine": "luid_0x00000000_0x0001172E_phys_0_eng_5_engtype_Security",
+      "samples": 21
+    },
+    {
+      "utilization_percent_min": 0.0,
+      "utilization_percent_mean": 0.0,
+      "utilization_percent_max": 0.0,
+      "engine": "luid_0x00000000_0x0001172E_phys_0_eng_6_engtype_VideoEncode",
+      "samples": 21
+    },
+    {
+      "utilization_percent_min": 0.0,
+      "utilization_percent_mean": 0.0,
+      "utilization_percent_max": 0.0,
+      "engine": "luid_0x00000000_0x0001172E_phys_0_eng_7_engtype_OFA_0",
+      "samples": 21
+    },
+    {
+      "utilization_percent_min": 0.0,
+      "utilization_percent_mean": 0.0,
+      "utilization_percent_max": 0.0,
+      "engine": "luid_0x00000000_0x0001172E_phys_0_eng_8_engtype_VR",
+      "samples": 21
+    },
+    {
+      "utilization_percent_min": 0.0,
+      "utilization_percent_mean": 0.0,
+      "utilization_percent_max": 0.0,
+      "engine": "luid_0x00000000_0x0001172E_phys_0_eng_9_engtype_Copy",
+      "samples": 21
+    }
+  ],
+  "limitations": "Sampled WDDM dedicated/shared usage and engine utilization; not GPU timestamp queries, residency proof, scanout or GPU ms/frame. Queries are sequential and asynchronously refreshed by Windows.",
+  "start_seconds": 240.0,
+  "schema": 1
+}

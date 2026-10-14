@@ -1,0 +1,14 @@
+{
+  "memory": [],
+  "boundary_excluded_samples": 0,
+  "samples": 0,
+  "raw_sha256": "37594e624bcbd162a7a5d6745e4ee71d2f50eaebf38b0fc93079b283ed3fcabe",
+  "gpu_ms_per_frame": null,
+  "duration_seconds": 30.0,
+  "limitations": "Sampled WDDM dedicated/shared usage and engine utilization; not GPU timestamp queries, residency proof, scanout or GPU ms/frame. Queries are sequential and asynchronously refreshed by Windows.",
+  "schema": 1,
+  "start_seconds": 240.0,
+  "failure": "Tempo limite expirou ",
+  "source": "Windows GPU Performance Counters, per PID and adapter/engine",
+  "engines": []
+}

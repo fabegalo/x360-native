@@ -1,0 +1,413 @@
+{
+  "schema": 1,
+  "title": "forza_horizon",
+  "label": "p3-after-03",
+  "utc": "2026-10-14T19:47:34.1185625Z",
+  "workspace_head": "feed9523be55166a97f10e8960e7d4800e689b25",
+  "sdk_head": "f5337cdc947ff6d4c4196737e2c807a48f2a1fc2",
+  "workspace_lock_sha256": "b0372954dffd964149d575bd23d9fec91c817cef475cd0605734599dc94609f6",
+  "instrumentation": "on",
+  "measurement_clock": "Runner monotonic clock immediately after Process.Start; same external CPU/RAM window in both modes",
+  "binary_provenance": {
+    "head": "feed9523be55166a97f10e8960e7d4800e689b25",
+    "dirty_source": true,
+    "description": "Same frozen P2 SDK72 AOT/runtime as p3-before; only GPU changed by patch0073, built target rexgpu-xenos in existing Forza tree"
+  },
+  "hardware": {
+    "logical_processors": 16,
+    "os": "Microsoft Windows NT 10.0.26300.0",
+    "cpu": null,
+    "ram_bytes": null,
+    "gpu": null,
+    "power_plan": null,
+    "query_error": "Acesso a um recurso CIM não estava disponível para o cliente."
+  },
+  "artifacts": [
+    {
+      "sha256": "71e34c413f344983299c6ed1e9739e5d745cc132c92675a92c81ba358abf527c",
+      "file": "forza_horizon_SpeechFacade_default.dll"
+    },
+    {
+      "sha256": "1aa56f20fc319ac25357df83c1924b16e6a689227ba0d6931d8c169c92b54cb6",
+      "file": "forza_horizon_XMediaFacade_default.dll"
+    },
+    {
+      "sha256": "5a5455fcec3c1f522ec349986217fa81a2ab340be74264184ed6fbdfc9c65d59",
+      "file": "forza_horizon.exe"
+    },
+    {
+      "sha256": "dc93efd8192afa17448e291b280d8ecd551c43b3d2d93fffc7f5af1abf6f6ab6",
+      "file": "rexgpu-xenosrd.dll"
+    },
+    {
+      "sha256": "a1159404a7aac4c5ff0c0ff6ffd3dcea9f2cf72391fc1d21e2161c3088baa96f",
+      "file": "rexruntimerd.dll"
+    },
+    {
+      "sha256": "249759cd1ac2a66e5fa2be33603d8c9e312090af891daef3b2aa9791af85e9a1",
+      "file": "TracyClientrd.dll"
+    }
+  ],
+  "collector": [
+    {
+      "sha256": "576067e5c2da16dbbfe62049e65c9c3399c57ab3ebe0f1f4309adca16301a1c7",
+      "file": "benchmark-runtime.ps1"
+    },
+    {
+      "sha256": "3b615430b38241ea519201467e3cfcf1593d831e735fde0277c175f39b50369b",
+      "file": "benchmark-window.ps1"
+    },
+    {
+      "sha256": "6e0c5a5a733f419bf1ff88c396d48bd8550a24c94ec116216cae3e71f3a3cfdc",
+      "file": "benchmark-summary.ps1"
+    },
+    {
+      "sha256": "bac7e89f2c7843062b67a11e48f54d39abdc700a5aebf4381de78edba6e3b5bf",
+      "file": "benchmark-process-summary.ps1"
+    }
+  ],
+  "reduction": null,
+  "scenario": {
+    "events": [
+      {
+        "seconds": 30,
+        "vk": 13,
+        "scan": 28,
+        "hold_seconds": 0.25
+      },
+      {
+        "seconds": 45,
+        "vk": 13,
+        "scan": 28,
+        "hold_seconds": 0.25
+      },
+      {
+        "seconds": 55,
+        "vk": 32,
+        "scan": 57,
+        "hold_seconds": 0.25
+      },
+      {
+        "seconds": 110,
+        "vk": 32,
+        "scan": 57,
+        "hold_seconds": 0.25
+      },
+      {
+        "seconds": 190,
+        "vk": 32,
+        "scan": 57,
+        "hold_seconds": 0.25
+      }
+    ],
+    "description": "Forza opening driving scene, existing connected profile, scripted Start and Single Player confirmations; verify scene captures",
+    "start_seconds": 240,
+    "duration_seconds": 30
+  },
+  "settings": [
+    "--gpu_plugin=xenos",
+    "--mnk_mode=true",
+    "--log_level=info",
+    "--perf_counters=true"
+  ],
+  "seed_inventory_sha256": "6625484f30522106e03dc9221c7b5bd38f2977ec2cb8f21f15e1b3a70a1a9706",
+  "seed_files": 9,
+  "original_xex": [
+    {
+      "path": "$SystemUpdate\\AvatarEditor.xex",
+      "sha256": "072648dc53aa8680787e61398cbab7c36a14d4a8e71c009eb43267bd4ea0233f"
+    },
+    {
+      "path": "$SystemUpdate\\BiometricSetup.xex",
+      "sha256": "e9507ebdc8ee51257dabb789e98fc523a0823092b15246b98322e274bcf91434"
+    },
+    {
+      "path": "$SystemUpdate\\dash.ExtraAVCodecs.xex",
+      "sha256": "7681d7bd1ca01ff89138c57a22cb50d99fd179329b4ce40b33177b7b3a198d1c"
+    },
+    {
+      "path": "$SystemUpdate\\dash.firstuse.xex",
+      "sha256": "b95e9741f015307e83136bfb92c6ebd988c1343c61f9ce0433ad3560d6cbd0bb"
+    },
+    {
+      "path": "$SystemUpdate\\dash.natalpregame.xex",
+      "sha256": "e315c9d36dfdeffe60039ad15a027044992006e634a7a55ab3d554434648b8d8"
+    },
+    {
+      "path": "$SystemUpdate\\dash.NuiFirstUse.xex",
+      "sha256": "b3d591e3352fa81e5e599819775a74f45ae5d818e06fdd926dfbfd59ad8ea323"
+    },
+    {
+      "path": "$SystemUpdate\\Dash.Search.xex",
+      "sha256": "e973df7ca6c782384c47efb0a80798c72bb4bcc54ceebd00272ae252d3b7ddbf"
+    },
+    {
+      "path": "$SystemUpdate\\dashnui.xex",
+      "sha256": "ce5e9ed694df5cfde996cd32a9f1b104f23b7094b333dbf7599102a81941d208"
+    },
+    {
+      "path": "$SystemUpdate\\Guide.AccountRecovery.xex",
+      "sha256": "f31e45bcd58b6db254cbe673e0cae55387cc91a20d57b200fe23cfb29b739ee4"
+    },
+    {
+      "path": "$SystemUpdate\\Guide.AvatarMiniCreator.xex",
+      "sha256": "803896e68ffa2fba5736aacaa80f8fe0c364156ef0f8e38a8dc4341cca5f819e"
+    },
+    {
+      "path": "$SystemUpdate\\Guide.Fitness.xex",
+      "sha256": "cf840b226e9b8f19eecc3f7d69dc48790f1cd45e62a2e7d81e8548d70edbdcf6"
+    },
+    {
+      "path": "$SystemUpdate\\Guide.NuiTroubleshooter.xex",
+      "sha256": "73d9def735dca17e706757904730e63255ff0ce83ba9ec9fff47f4d5a349c540"
+    },
+    {
+      "path": "$SystemUpdate\\livepack.xex",
+      "sha256": "2b5b83a0c5a0c4d3e3d1a044b3a3555971b6a0afe3a823b573a5c230a5b08b09"
+    },
+    {
+      "path": "$SystemUpdate\\natalsu.xex",
+      "sha256": "a2d955ac3ce46bb4c8a37802ec51cc8bfb8f04c8f68efecd0d25943d1bf729d0"
+    },
+    {
+      "path": "$SystemUpdate\\nuihud.xex",
+      "sha256": "b547505b4e329e904aad8e9bda36216bc7b87c5ef4ab42f097f67d4cacdf8775"
+    },
+    {
+      "path": "$SystemUpdate\\Xam.Community.xex",
+      "sha256": "94fd72932df0a073bd9fe1ebbaee1a85a2a92fe95d6c22cacd65e16c42a56503"
+    },
+    {
+      "path": "$SystemUpdate\\Xam.LiveMessenger.xex",
+      "sha256": "95eb051e9d55f20f542d34238ef51251b92e20d7089183a873f82191c1424981"
+    },
+    {
+      "path": "$SystemUpdate\\Xam.WordRegister.xex",
+      "sha256": "3852e1bb9f76e408e6746f0b18b5b58b024442da9f17602af37172ebcc5dfdd1"
+    },
+    {
+      "path": "$SystemUpdate\\XimeDic.xex",
+      "sha256": "0f5a45c6c9446fdb175440c78e5e7f9ea8876636132fa1b1155eacbdb5135134"
+    },
+    {
+      "path": "$SystemUpdate\\XimeDicCh.xex",
+      "sha256": "0cf2610290b2b161aa043646f603d911993935a125a3493c4f04c92ac6751593"
+    },
+    {
+      "path": "$SystemUpdate\\ximedicex.xex",
+      "sha256": "2f9ff47e15734d72385332740fe1333cb77c14e1248cfff1d93cb48d9baa149a"
+    },
+    {
+      "path": "$SystemUpdate\\Xna_TitleLauncher.xex",
+      "sha256": "5da55eaa1c9512094cc48711d14796fe2d258e0e5cf7b7a423c02e3c6de38ceb"
+    },
+    {
+      "path": "default.xex",
+      "sha256": "db40df605ade49a612b35a7a24c38f6004bcb17a88ed6b48288de16df9e3987c"
+    },
+    {
+      "path": "SpeechFacade_default.xex",
+      "sha256": "d54f6aae6ae2fd6da9b8c37d48f0a6bb295caa18ad82d0d9df66026141a41594"
+    },
+    {
+      "path": "XMediaFacade_default.xex",
+      "sha256": "ed285beefeafcdc90cf64d6085d19c874e3f1e15072c12cdf9ba2237c88e2ce5"
+    }
+  ],
+  "cache_condition": "identical existing cache seed, OS filesystem cache uncontrolled",
+  "scene_review": "Reviewed before/after PNG: yellow car stationary 0 mph, 2.5 MI, same initial playable roadside scene; traffic simulation is not deterministic.",
+  "result": {
+    "frame_source": "completed guest XE_SWAP cadence, not display scanout or GPU duration",
+    "discarded_unterminated_records": 0,
+    "frames": 895,
+    "measured_seconds": 29.94877299999998,
+    "requested_seconds": 30.0,
+    "window_coverage_fraction": 0.9982924333333327,
+    "boundary_excluded_ms": 51.22700000001714,
+    "window_complete": true,
+    "fps_mean": 29.88436287523367,
+    "fps_1pct_low": 19.72585445826346,
+    "frame_ms_mean": 33.4623162011173,
+    "frame_ms_p95": 35.650000000003956,
+    "frame_ms_p99": 36.69999999999618,
+    "process_cpu_ms_per_frame": 75.9427374301676,
+    "process_cpu_percent_machine": 14.184377019385744,
+    "runtime_to_first_swap_ms": 8442.04,
+    "gpu_ms_per_frame": null,
+    "vram_bytes": null,
+    "gameplay_ready_ms": null,
+    "unavailable": {
+      "gpu_ms_per_frame": "No validated per-process GPU timing provider",
+      "vram_bytes": "No process VRAM provider wired",
+      "gameplay_ready_ms": "No semantic ready signal; runtime-to-first-swap is separate",
+      "cpu_critical_path_ms": "Process CPU is aggregate across all threads",
+      "hardware_cache_misses": "No PMU sampling",
+      "pipeline_fast_path_hits": "Existing counter excludes consecutive identical pipeline fast path",
+      "vram_peak_bytes": "No validated per-process VRAM provider"
+    },
+    "counters": {
+      "draw_calls": 2519309,
+      "command_buffer_stalls": 0,
+      "vertices_processed": 1108933851,
+      "functions_dispatched": 81244080,
+      "interrupt_dispatches": 6272,
+      "texture_cache_hits": 2198156,
+      "texture_cache_misses": 6,
+      "pipeline_cache_hits": 911711,
+      "pipeline_cache_misses": 6,
+      "shader_translation_us": 1321,
+      "shader_translations": 10,
+      "pipeline_creation_us": 244856,
+      "pipeline_creations": 6,
+      "swap_failures": 0
+    },
+    "whole_capture_counters": {
+      "draw_calls": 12668592,
+      "command_buffer_stalls": 0,
+      "vertices_processed": 5632039608,
+      "functions_dispatched": 788947255,
+      "interrupt_dispatches": 54996,
+      "texture_cache_hits": 11224864,
+      "texture_cache_misses": 1191,
+      "pipeline_cache_hits": 4618088,
+      "pipeline_cache_misses": 6,
+      "shader_translation_us": 101529,
+      "shader_translations": 537,
+      "pipeline_creation_us": 43782698,
+      "pipeline_creations": 487,
+      "swap_failures": 0
+    },
+    "external_window_complete": true,
+    "external_start_seconds": 240.0,
+    "external_measured_seconds": 30.0,
+    "external_process_cpu_ms": 68004.59757035627,
+    "external_process_cpu_ms_per_second": 2266.8199190118758,
+    "external_process_cpu_percent_machine": 14.167624493824224,
+    "external_max_sample_gap_seconds": 1.060083700000007,
+    "external_sample_count": 29,
+    "external_cpu_source": "System.Diagnostics.Process.TotalProcessorTime; linear interpolation of cumulative CPU at window boundaries",
+    "ram_working_set_peak_bytes": 1350537216.0,
+    "private_commit_peak_bytes": 2724147200.0,
+    "instrumentation": "on",
+    "vram_peak_bytes": null,
+    "title": "forza_horizon",
+    "label": "p3-after-03",
+    "termination": "bounded_forced_stop",
+    "scene_verified": true,
+    "log_counts": {
+      "warning": 94252,
+      "critical": 0,
+      "error": 175714
+    },
+    "log_count_scope": "Retained rex*.log files only; rotation may discard earlier messages",
+    "scene_review": "Reviewed before/after PNG: yellow car stationary 0 mph, 2.5 MI, same initial playable roadside scene; traffic simulation is not deterministic."
+  },
+  "evidence": [
+    {
+      "sha256": "2769d0e150669189ff6c4ebbc6ecd147c85354d54a6c3e37948c1b1ef020ac38",
+      "bytes": 3916428,
+      "file": "after.png"
+    },
+    {
+      "sha256": "81793e2b1fb608230ac7a0e9fb4fd5fff6d9b1c244b114ecde09bdc87a15f0c4",
+      "bytes": 3913973,
+      "file": "before.png"
+    },
+    {
+      "sha256": "424a190a290e51ff185eba688e3929c65f906e69f38a8f7bbc7842569763269c",
+      "bytes": 10308,
+      "file": "environment.json"
+    },
+    {
+      "sha256": "3664cdb77216a952ebf64f71907bd7ff6312c762a4bd483055c7a6d94c09147f",
+      "bytes": 731967,
+      "file": "frames.csv"
+    },
+    {
+      "sha256": "862024b83a25ee1b4baf4cc90690eecae4f55826d0f224e09439a24c22141766",
+      "bytes": 51559,
+      "file": "gpu.json"
+    },
+    {
+      "sha256": "d3a069ddcb44663c4d7cdd451faa4b94b8e18934b2a5953e6bd91f796824a0a5",
+      "bytes": 1633,
+      "file": "input-events.json"
+    },
+    {
+      "sha256": "2eaca097c4cfcd6c517a069f6f651db7172de58acb1548ce3941aa1c58a96a8a",
+      "bytes": 46485,
+      "file": "process-samples.json"
+    },
+    {
+      "sha256": "621832d50518fe2184b5b60cd188d7c4529f58ed83ceb5c7dbecd97fdd047951",
+      "bytes": 3440,
+      "file": "result.json"
+    },
+    {
+      "sha256": "29baad6b485064d713489e6de519d0caee265f6077c71da67134b0f829dd485b",
+      "bytes": 5242828,
+      "file": "rex.1.log"
+    },
+    {
+      "sha256": "b8b7a165550141589f21da40afa5dd1f2897ae1b39165a412cfa0debf47f0626",
+      "bytes": 5242735,
+      "file": "rex.2.log"
+    },
+    {
+      "sha256": "c79c21e3afce3e025f030eb6e12927359f4255ad9d09e645858f8a2367cab6bb",
+      "bytes": 5242753,
+      "file": "rex.3.log"
+    },
+    {
+      "sha256": "406b4ac487d2ae4004f4b5eeee4c5c4003500a02ac81fbaff953c6a91d381c72",
+      "bytes": 5242753,
+      "file": "rex.4.log"
+    },
+    {
+      "sha256": "65e0c6a35967c1779cf84e8cc550164de4641afcf010388d3a8d6684f3d68ce2",
+      "bytes": 5242728,
+      "file": "rex.5.log"
+    },
+    {
+      "sha256": "086397e23c4b57270686fef12b84af83341a77d4b1ddf5367c18c39573b3bf7c",
+      "bytes": 5242828,
+      "file": "rex.6.log"
+    },
+    {
+      "sha256": "ed72485b554cbcb5384f7747a61aeda3573df460b1ac3761b4618687f234e0fb",
+      "bytes": 5242759,
+      "file": "rex.7.log"
+    },
+    {
+      "sha256": "6c9cafc4cf0e5fe0524162377633476c53aeeafe07ee968eaedc983c44fc0da4",
+      "bytes": 5242716,
+      "file": "rex.8.log"
+    },
+    {
+      "sha256": "bda17a9d7d2ab17f3af0d6237eb8a0f6ff6caee1c4f0776bfc946a8b1c18b110",
+      "bytes": 5242876,
+      "file": "rex.9.log"
+    },
+    {
+      "sha256": "27b65d5f27bc8b81907de9df550f10816318af90409275348c0e99b8507541f4",
+      "bytes": 266828,
+      "file": "rex.log"
+    },
+    {
+      "sha256": "53b65bd2d9dc2f9d9c79e01fbae2e544e8e94bb4a1f88a87f6685b4fff6a09d4",
+      "bytes": 3185328,
+      "file": "startup-75.png"
+    },
+    {
+      "sha256": "7eb70257593da06f682a3ddda54a9d260d4fc514f645237f5ca74b08f8da61a6",
+      "bytes": 2,
+      "file": "stderr.log"
+    },
+    {
+      "sha256": "7eb70257593da06f682a3ddda54a9d260d4fc514f645237f5ca74b08f8da61a6",
+      "bytes": 2,
+      "file": "stdout.log"
+    }
+  ],
+  "note": "Raw evidence stays local; profiles, saves, screenshots, logs and absolute paths are not embedded. Workspace HEAD/lock identify the checkout at launch, not necessarily the frozen binary build."
+}

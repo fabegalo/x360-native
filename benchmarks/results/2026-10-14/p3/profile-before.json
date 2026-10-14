@@ -1,0 +1,1525 @@
+{
+  "raw_csv_sha256": "6964d37e1db381d96b41af35c83772d86b362e98b69a7c5732565bd9bec6795c",
+  "sampler_exe_sha256": "1b51ffa6cca45bc5796e79bafbc308a7a83af34a7da3e46f0ab5e5e135335fab",
+  "sampling_seconds": 20,
+  "sampler_source_sha256": "235375486b2c8913201127e89bd2a4e8040129e9fcc795e7dfbd3447ff2face6",
+  "start_seconds": 240,
+  "label": "p3-profile-01",
+  "note": "Wall-clock RIP samples include waits; CPU times are separate per-thread totals, not weighted sampled stacks. Fixed 11ms sleeps can alias. Diagnostic excluded from benchmark comparison.",
+  "context_errors": 0,
+  "title": "forza_horizon",
+  "threads": [
+    {
+      "top_symbols": [
+        {
+          "symbol": "forza_horizon, __imp__sub_829F04A8",
+          "count": 594.0
+        },
+        {
+          "symbol": "forza_horizon, __imp__sub_823E91F0",
+          "count": 371.0
+        },
+        {
+          "symbol": "forza_horizon, __imp____restgprlr_29",
+          "count": 80.0
+        },
+        {
+          "symbol": "forza_horizon, __imp____savegprlr_29",
+          "count": 56.0
+        },
+        {
+          "symbol": "forza_horizon, __imp__sub_82441690",
+          "count": 33.0
+        },
+        {
+          "symbol": "forza_horizon, __imp__sub_824365B0",
+          "count": 8.0
+        },
+        {
+          "symbol": "forza_horizon, __imp__sub_824168B0",
+          "count": 5.0
+        },
+        {
+          "symbol": "forza_horizon, __imp__sub_82435E78",
+          "count": 4.0
+        },
+        {
+          "symbol": "ntdll, RtlSleepConditionVariableSRW",
+          "count": 4.0
+        },
+        {
+          "symbol": "ntdll, ZwSetEvent",
+          "count": 3.0
+        },
+        {
+          "symbol": "forza_horizon, __imp__sub_82417418",
+          "count": 3.0
+        },
+        {
+          "symbol": "ntdll, RtlReleaseSRWLockExclusive",
+          "count": 3.0
+        }
+      ],
+      "thread": 35296,
+      "cpu_ms": 19421.875,
+      "sample_count": 1267.0
+    },
+    {
+      "top_symbols": [
+        {
+          "symbol": "ntdll, ZwDelayExecution",
+          "count": 409.0
+        },
+        {
+          "symbol": "rexgpu-xenosrd, rex::graphics::RegisterFile::GetRegisterInfo",
+          "count": 131.0
+        },
+        {
+          "symbol": "rexgpu-xenosrd, rex::graphics::CommandProcessor::WriteRegister",
+          "count": 115.0
+        },
+        {
+          "symbol": "rexgpu-xenosrd, rex::graphics::d3d12::D3D12CommandProcessor::WriteRegister",
+          "count": 99.0
+        },
+        {
+          "symbol": "nvwgf2umx, OpenAdapter10",
+          "count": 54.0
+        },
+        {
+          "symbol": "rexgpu-xenosrd, rex::graphics::CommandProcessor::ExecutePacketType0",
+          "count": 35.0
+        },
+        {
+          "symbol": "rexgpu-xenosrd, rex::graphics::CommandProcessor::ExecutePacket",
+          "count": 32.0
+        },
+        {
+          "symbol": "rexgpu-xenosrd, rex::graphics::d3d12::D3D12CommandProcessor::UpdateBindings",
+          "count": 29.0
+        },
+        {
+          "symbol": "nvwgf2umx, NVAPI_Thunk",
+          "count": 27.0
+        },
+        {
+          "symbol": "VCRUNTIME140, _NLG_Return2",
+          "count": 27.0
+        },
+        {
+          "symbol": "rexgpu-xenosrd, rex::graphics::d3d12::D3D12CommandProcessor::IssueDraw",
+          "count": 15.0
+        },
+        {
+          "symbol": "D3D12Core, D3D12GetInterface",
+          "count": 14.0
+        }
+      ],
+      "thread": 1680,
+      "cpu_ms": 13546.875,
+      "sample_count": 1267.0
+    },
+    {
+      "top_symbols": [
+        {
+          "symbol": "ntdll, ZwDelayExecution",
+          "count": 959.0
+        },
+        {
+          "symbol": "forza_horizon, __imp__sub_82FC6CC0",
+          "count": 45.0
+        },
+        {
+          "symbol": "forza_horizon, __imp__sub_82FAE0B8",
+          "count": 44.0
+        },
+        {
+          "symbol": "forza_horizon, __imp__sub_82FC9120",
+          "count": 39.0
+        },
+        {
+          "symbol": "forza_horizon, __imp__sub_82FB76C0",
+          "count": 24.0
+        },
+        {
+          "symbol": "forza_horizon, __imp__sub_82FCD580",
+          "count": 16.0
+        },
+        {
+          "symbol": "forza_horizon, __imp__sub_8300D580",
+          "count": 15.0
+        },
+        {
+          "symbol": "forza_horizon, __imp__sub_82FCEAB0",
+          "count": 13.0
+        },
+        {
+          "symbol": "forza_horizon, __imp__sub_82FAC780",
+          "count": 9.0
+        },
+        {
+          "symbol": "forza_horizon, __imp__sub_8301CC08",
+          "count": 8.0
+        },
+        {
+          "symbol": "ucrtbase, fma",
+          "count": 8.0
+        },
+        {
+          "symbol": "rexruntimerd, rex::ppc::HostToGuestFunction<&rex::kernel::crt::SwitchToFiber_entry>",
+          "count": 8.0
+        }
+      ],
+      "thread": 17668,
+      "cpu_ms": 4312.5,
+      "sample_count": 1267.0
+    },
+    {
+      "top_symbols": [
+        {
+          "symbol": "ntdll, NtWaitForSingleObject",
+          "count": 1104.0
+        },
+        {
+          "symbol": "forza_horizon, __imp__sub_823F4B30",
+          "count": 10.0
+        },
+        {
+          "symbol": "forza_horizon, __imp__sub_823F3138",
+          "count": 9.0
+        },
+        {
+          "symbol": "forza_horizon, __imp__sub_823F5040",
+          "count": 4.0
+        },
+        {
+          "symbol": "forza_horizon, __imp__sub_82CE3328",
+          "count": 4.0
+        },
+        {
+          "symbol": "forza_horizon, __imp__sub_824E3B38",
+          "count": 3.0
+        },
+        {
+          "symbol": "forza_horizon, __imp__sub_82F2DDC8",
+          "count": 3.0
+        },
+        {
+          "symbol": "forza_horizon, __imp__sub_82526248",
+          "count": 2.0
+        },
+        {
+          "symbol": "forza_horizon, __imp__sub_82E641B8",
+          "count": 2.0
+        },
+        {
+          "symbol": "forza_horizon, __imp__sub_82E5C4D0",
+          "count": 2.0
+        },
+        {
+          "symbol": "forza_horizon, __imp__sub_82A7D730",
+          "count": 2.0
+        },
+        {
+          "symbol": "forza_horizon, __imp__sub_82DE7330",
+          "count": 2.0
+        }
+      ],
+      "thread": 4736,
+      "cpu_ms": 3000.0,
+      "sample_count": 1267.0
+    },
+    {
+      "top_symbols": [
+        {
+          "symbol": "ntdll, ZwWaitForAlertByThreadId",
+          "count": 1107.0
+        },
+        {
+          "symbol": "win32u, NtGdiDdDDISubmitSignalSyncObjectsToHwQueue",
+          "count": 31.0
+        },
+        {
+          "symbol": "win32u, NtGdiDdDDISubmitCommandToHwQueue",
+          "count": 25.0
+        },
+        {
+          "symbol": "nvwgf2umx, OpenAdapter10",
+          "count": 14.0
+        },
+        {
+          "symbol": "win32u, NtGdiDdDDIEscape",
+          "count": 12.0
+        },
+        {
+          "symbol": "nvwgf2umx, NVDEV_Thunk",
+          "count": 12.0
+        },
+        {
+          "symbol": "win32u, NtDxgkSubmitPresentToHwQueue",
+          "count": 10.0
+        },
+        {
+          "symbol": "nvwgf2umx, NVAPI_DirectMethods",
+          "count": 7.0
+        },
+        {
+          "symbol": "nvwgf2umx, NVAPI_Thunk",
+          "count": 6.0
+        },
+        {
+          "symbol": "ntdll, NtOpenSection",
+          "count": 5.0
+        },
+        {
+          "symbol": "nvwgf2umx, NVENCODEAPI_Thunk",
+          "count": 4.0
+        },
+        {
+          "symbol": "win32u, NtGdiDdDDISubmitWaitForSyncObjectsToHwQueue",
+          "count": 4.0
+        }
+      ],
+      "thread": 7044,
+      "cpu_ms": 2203.125,
+      "sample_count": 1267.0
+    },
+    {
+      "top_symbols": [
+        {
+          "symbol": "rexruntimerd, disruptorplus::spin_wait_strategy::wait_until_published<std::chrono::steady_clock,std::chrono::duration<__int64,std::ratio<1,1000000000> > >",
+          "count": 682.0
+        },
+        {
+          "symbol": "ntdll, ZwDelayExecution",
+          "count": 578.0
+        },
+        {
+          "symbol": "ntdll, NtQuerySystemInformationEx",
+          "count": 3.0
+        },
+        {
+          "symbol": "KERNELBASE, Sleep",
+          "count": 1.0
+        },
+        {
+          "symbol": "ntdll, RtlAllocateHeap",
+          "count": 1.0
+        },
+        {
+          "symbol": "rexruntimerd, rex::chrono::Clock::QueryGuestUptimeMillis",
+          "count": 1.0
+        },
+        {
+          "symbol": "ucrtbase, free",
+          "count": 1.0
+        }
+      ],
+      "thread": 12600,
+      "cpu_ms": 1953.125,
+      "sample_count": 1267.0
+    },
+    {
+      "top_symbols": [
+        {
+          "symbol": "ntdll, NtWaitForSingleObject",
+          "count": 785.0
+        },
+        {
+          "symbol": "ntdll, ZwDelayExecution",
+          "count": 415.0
+        },
+        {
+          "symbol": "forza_horizon, __imp__sub_82C7C098",
+          "count": 13.0
+        },
+        {
+          "symbol": "forza_horizon, __imp__sub_82FABDC8",
+          "count": 11.0
+        },
+        {
+          "symbol": "forza_horizon, __imp__sub_82FA62D8",
+          "count": 2.0
+        },
+        {
+          "symbol": "forza_horizon, __imp__sub_82C7C390",
+          "count": 2.0
+        },
+        {
+          "symbol": "forza_horizon, __imp__sub_830250D0",
+          "count": 2.0
+        },
+        {
+          "symbol": "forza_horizon, __imp__sub_8259A1E8",
+          "count": 2.0
+        },
+        {
+          "symbol": "forza_horizon, __imp__sub_82F76690",
+          "count": 2.0
+        },
+        {
+          "symbol": "forza_horizon, __imp__sub_82FA6F50",
+          "count": 2.0
+        },
+        {
+          "symbol": "forza_horizon, __imp__sub_82F77608",
+          "count": 1.0
+        },
+        {
+          "symbol": "forza_horizon, __imp__sub_82F876E0",
+          "count": 1.0
+        }
+      ],
+      "thread": 22256,
+      "cpu_ms": 1281.25,
+      "sample_count": 1267.0
+    },
+    {
+      "top_symbols": [
+        {
+          "symbol": "ntdll, ZwDelayExecution",
+          "count": 1223.0
+        },
+        {
+          "symbol": "forza_horizon, __imp__sub_8302A1B8",
+          "count": 20.0
+        },
+        {
+          "symbol": "forza_horizon, __imp__sub_830142C8",
+          "count": 5.0
+        },
+        {
+          "symbol": "rexruntimerd, rex::ppc::HostToGuestFunction<&rex::kernel::crt::SwitchToFiber_entry>",
+          "count": 3.0
+        },
+        {
+          "symbol": "forza_horizon, __imp__sub_82F8A740",
+          "count": 2.0
+        },
+        {
+          "symbol": "forza_horizon, __imp__sub_82FB4AF8",
+          "count": 2.0
+        },
+        {
+          "symbol": "forza_horizon, __imp__sub_82FF3750",
+          "count": 2.0
+        },
+        {
+          "symbol": "forza_horizon, __imp__sub_83012A18",
+          "count": 2.0
+        },
+        {
+          "symbol": "forza_horizon, __imp____savegprlr_18",
+          "count": 1.0
+        },
+        {
+          "symbol": "forza_horizon, __imp__sub_82FFB3F8",
+          "count": 1.0
+        },
+        {
+          "symbol": "forza_horizon, __imp__sub_83011C50",
+          "count": 1.0
+        },
+        {
+          "symbol": "forza_horizon, __imp__sub_83029B48",
+          "count": 1.0
+        }
+      ],
+      "thread": 1644,
+      "cpu_ms": 500.0,
+      "sample_count": 1267.0
+    },
+    {
+      "top_symbols": [
+        {
+          "symbol": "ntdll, NtWaitForSingleObject",
+          "count": 1252.0
+        },
+        {
+          "symbol": "forza_horizon, __imp__sub_824400B0",
+          "count": 4.0
+        },
+        {
+          "symbol": "forza_horizon, __imp__sub_8243EB10",
+          "count": 3.0
+        },
+        {
+          "symbol": "forza_horizon, __imp__sub_8243FF70",
+          "count": 2.0
+        },
+        {
+          "symbol": "ntdll, ZwReleaseSemaphore",
+          "count": 2.0
+        },
+        {
+          "symbol": "forza_horizon, __imp____restgprlr_14",
+          "count": 1.0
+        },
+        {
+          "symbol": "forza_horizon, __imp__sub_8243EC70",
+          "count": 1.0
+        },
+        {
+          "symbol": "forza_horizon, __imp__sub_82440C10",
+          "count": 1.0
+        },
+        {
+          "symbol": "rexruntimerd, rex::system::XObject::Wait",
+          "count": 1.0
+        }
+      ],
+      "thread": 31236,
+      "cpu_ms": 296.875,
+      "sample_count": 1267.0
+    },
+    {
+      "top_symbols": [
+        {
+          "symbol": "ntdll, NtWaitForSingleObject",
+          "count": 1264.0
+        },
+        {
+          "symbol": "forza_horizon, __imp__sub_82E1FD00",
+          "count": 2.0
+        },
+        {
+          "symbol": "ntdll, NtReleaseMutant",
+          "count": 1.0
+        }
+      ],
+      "thread": 10284,
+      "cpu_ms": 265.625,
+      "sample_count": 1267.0
+    },
+    {
+      "top_symbols": [
+        {
+          "symbol": "ntdll, NtWaitForSingleObject",
+          "count": 1248.0
+        },
+        {
+          "symbol": "ntdll, RtlSleepConditionVariableSRW",
+          "count": 3.0
+        },
+        {
+          "symbol": "forza_horizon, __imp__sub_8243CB38",
+          "count": 2.0
+        },
+        {
+          "symbol": "forza_horizon, __imp__sub_824AFB20",
+          "count": 2.0
+        },
+        {
+          "symbol": "forza_horizon, __imp____restgprlr_14",
+          "count": 1.0
+        },
+        {
+          "symbol": "forza_horizon, __imp____savegprlr_26",
+          "count": 1.0
+        },
+        {
+          "symbol": "forza_horizon, __imp__sub_823FF3C8",
+          "count": 1.0
+        },
+        {
+          "symbol": "forza_horizon, __imp__sub_82408408",
+          "count": 1.0
+        },
+        {
+          "symbol": "forza_horizon, __imp__sub_82409B40",
+          "count": 1.0
+        },
+        {
+          "symbol": "forza_horizon, __imp__sub_82410A70",
+          "count": 1.0
+        },
+        {
+          "symbol": "forza_horizon, __imp__sub_82444B18",
+          "count": 1.0
+        },
+        {
+          "symbol": "forza_horizon, __imp__sub_8244A0E8",
+          "count": 1.0
+        }
+      ],
+      "thread": 17960,
+      "cpu_ms": 265.625,
+      "sample_count": 1267.0
+    },
+    {
+      "top_symbols": [
+        {
+          "symbol": "ntdll, NtWaitForSingleObject",
+          "count": 1264.0
+        },
+        {
+          "symbol": "ntdll, ZwReleaseSemaphore",
+          "count": 1.0
+        },
+        {
+          "symbol": "rexruntimerd, rex::system::XThread::CheckTitleTermination",
+          "count": 1.0
+        },
+        {
+          "symbol": "rexruntimerd, rex::thread::global_critical_region::mutex",
+          "count": 1.0
+        }
+      ],
+      "thread": 31640,
+      "cpu_ms": 187.5,
+      "sample_count": 1267.0
+    },
+    {
+      "top_symbols": [
+        {
+          "symbol": "ntdll, NtWaitForSingleObject",
+          "count": 1257.0
+        },
+        {
+          "symbol": "forza_horizon, __imp__sub_8243EE58",
+          "count": 2.0
+        },
+        {
+          "symbol": "forza_horizon, __imp__sub_8243FA20",
+          "count": 1.0
+        },
+        {
+          "symbol": "forza_horizon, __imp__sub_8243FD70",
+          "count": 1.0
+        },
+        {
+          "symbol": "forza_horizon, __imp__sub_8243FDD0",
+          "count": 1.0
+        },
+        {
+          "symbol": "forza_horizon, __imp__sub_8243FF70",
+          "count": 1.0
+        },
+        {
+          "symbol": "forza_horizon, __imp__sub_824400B0",
+          "count": 1.0
+        },
+        {
+          "symbol": "forza_horizon, __imp__sub_824412D0",
+          "count": 1.0
+        },
+        {
+          "symbol": "forza_horizon, __imp__sub_824415F0",
+          "count": 1.0
+        },
+        {
+          "symbol": "forza_horizon, __imp__sub_82448BA0",
+          "count": 1.0
+        }
+      ],
+      "thread": 34768,
+      "cpu_ms": 171.875,
+      "sample_count": 1267.0
+    },
+    {
+      "top_symbols": [
+        {
+          "symbol": "ntdll, NtWaitForSingleObject",
+          "count": 1257.0
+        },
+        {
+          "symbol": "forza_horizon, __imp__sub_82D42198",
+          "count": 2.0
+        },
+        {
+          "symbol": "forza_horizon, __imp____savegprlr_20",
+          "count": 1.0
+        },
+        {
+          "symbol": "forza_horizon, __imp__sub_82D123D0",
+          "count": 1.0
+        },
+        {
+          "symbol": "forza_horizon, __imp__sub_82D41A30",
+          "count": 1.0
+        },
+        {
+          "symbol": "forza_horizon, __imp__sub_82D49798",
+          "count": 1.0
+        },
+        {
+          "symbol": "forza_horizon, __imp__sub_82DE7330",
+          "count": 1.0
+        },
+        {
+          "symbol": "KERNELBASE, SetEvent",
+          "count": 1.0
+        },
+        {
+          "symbol": "ntdll, NtClearEvent",
+          "count": 1.0
+        },
+        {
+          "symbol": "rexruntimerd, rex::thread::global_critical_region::mutex",
+          "count": 1.0
+        }
+      ],
+      "thread": 3988,
+      "cpu_ms": 171.875,
+      "sample_count": 1267.0
+    },
+    {
+      "top_symbols": [
+        {
+          "symbol": "ntdll, ZwDelayExecution",
+          "count": 1267.0
+        }
+      ],
+      "thread": 4068,
+      "cpu_ms": 171.875,
+      "sample_count": 1267.0
+    },
+    {
+      "top_symbols": [
+        {
+          "symbol": "ntdll, NtWaitForSingleObject",
+          "count": 1264.0
+        },
+        {
+          "symbol": "rexruntimerd, rex::audio::XmaContext::Work",
+          "count": 2.0
+        },
+        {
+          "symbol": "KERNELBASE, WaitForSingleObjectEx",
+          "count": 1.0
+        }
+      ],
+      "thread": 6548,
+      "cpu_ms": 140.625,
+      "sample_count": 1267.0
+    },
+    {
+      "top_symbols": [
+        {
+          "symbol": "win32u, NtGdiDdDDIWaitForVerticalBlankEvent",
+          "count": 1267.0
+        }
+      ],
+      "thread": 13328,
+      "cpu_ms": 93.75,
+      "sample_count": 1267.0
+    },
+    {
+      "top_symbols": [
+        {
+          "symbol": "ntdll, NtWaitForSingleObject",
+          "count": 1265.0
+        },
+        {
+          "symbol": "KERNELBASE, WaitForSingleObject",
+          "count": 1.0
+        },
+        {
+          "symbol": "nvwgf2umx, NVDEV_Thunk",
+          "count": 1.0
+        }
+      ],
+      "thread": 10248,
+      "cpu_ms": 93.75,
+      "sample_count": 1267.0
+    },
+    {
+      "top_symbols": [
+        {
+          "symbol": "ntdll, NtWaitForSingleObject",
+          "count": 1267.0
+        }
+      ],
+      "thread": 1736,
+      "cpu_ms": 62.5,
+      "sample_count": 1267.0
+    },
+    {
+      "top_symbols": [
+        {
+          "symbol": "ntdll, NtWaitForSingleObject",
+          "count": 1265.0
+        },
+        {
+          "symbol": "forza_horizon, __imp__sub_82D0BAE0",
+          "count": 1.0
+        },
+        {
+          "symbol": "rexruntimerd, rex::thread::global_critical_region::mutex",
+          "count": 1.0
+        }
+      ],
+      "thread": 28000,
+      "cpu_ms": 62.5,
+      "sample_count": 1267.0
+    },
+    {
+      "top_symbols": [
+        {
+          "symbol": "ntdll, NtWaitForSingleObject",
+          "count": 1267.0
+        }
+      ],
+      "thread": 19160,
+      "cpu_ms": 62.5,
+      "sample_count": 1267.0
+    },
+    {
+      "top_symbols": [
+        {
+          "symbol": "ntdll, NtWaitForSingleObject",
+          "count": 1263.0
+        },
+        {
+          "symbol": "forza_horizon, __imp__sub_823F18B8",
+          "count": 1.0
+        },
+        {
+          "symbol": "forza_horizon, __imp__sub_8245E4A0",
+          "count": 1.0
+        },
+        {
+          "symbol": "forza_horizon, __imp__sub_82AC39A8",
+          "count": 1.0
+        },
+        {
+          "symbol": "KERNEL32, GetCurrentThreadId",
+          "count": 1.0
+        }
+      ],
+      "thread": 2072,
+      "cpu_ms": 62.5,
+      "sample_count": 1267.0
+    },
+    {
+      "top_symbols": [
+        {
+          "symbol": "ntdll, NtWaitForSingleObject",
+          "count": 1267.0
+        }
+      ],
+      "thread": 29896,
+      "cpu_ms": 46.875,
+      "sample_count": 1267.0
+    },
+    {
+      "top_symbols": [
+        {
+          "symbol": "ntdll, NtWaitForSingleObject",
+          "count": 1267.0
+        }
+      ],
+      "thread": 11572,
+      "cpu_ms": 46.875,
+      "sample_count": 1267.0
+    },
+    {
+      "top_symbols": [
+        {
+          "symbol": "ntdll, ZwWaitForAlertByThreadId",
+          "count": 1267.0
+        }
+      ],
+      "thread": 33048,
+      "cpu_ms": 46.875,
+      "sample_count": 1267.0
+    },
+    {
+      "top_symbols": [
+        {
+          "symbol": "ntdll, NtWaitForSingleObject",
+          "count": 1267.0
+        }
+      ],
+      "thread": 26700,
+      "cpu_ms": 46.875,
+      "sample_count": 1267.0
+    },
+    {
+      "top_symbols": [
+        {
+          "symbol": "ntdll, ZwWaitForAlertByThreadId",
+          "count": 1267.0
+        }
+      ],
+      "thread": 25472,
+      "cpu_ms": 46.875,
+      "sample_count": 1267.0
+    },
+    {
+      "top_symbols": [
+        {
+          "symbol": "ntdll, NtWaitForSingleObject",
+          "count": 1267.0
+        }
+      ],
+      "thread": 22464,
+      "cpu_ms": 31.25,
+      "sample_count": 1267.0
+    },
+    {
+      "top_symbols": [
+        {
+          "symbol": "ntdll, NtWaitForSingleObject",
+          "count": 1267.0
+        }
+      ],
+      "thread": 33284,
+      "cpu_ms": 31.25,
+      "sample_count": 1267.0
+    },
+    {
+      "top_symbols": [
+        {
+          "symbol": "ntdll, NtWaitForSingleObject",
+          "count": 1267.0
+        }
+      ],
+      "thread": 16596,
+      "cpu_ms": 31.25,
+      "sample_count": 1267.0
+    },
+    {
+      "top_symbols": [
+        {
+          "symbol": "ntdll, NtWaitForSingleObject",
+          "count": 1264.0
+        },
+        {
+          "symbol": "forza_horizon, __imp__sub_829F56D0",
+          "count": 2.0
+        },
+        {
+          "symbol": "ntdll, ZwSetEvent",
+          "count": 1.0
+        }
+      ],
+      "thread": 25844,
+      "cpu_ms": 31.25,
+      "sample_count": 1267.0
+    },
+    {
+      "top_symbols": [
+        {
+          "symbol": "ntdll, ZwWaitForMultipleObjects",
+          "count": 1267.0
+        }
+      ],
+      "thread": 31020,
+      "cpu_ms": 31.25,
+      "sample_count": 1267.0
+    },
+    {
+      "top_symbols": [
+        {
+          "symbol": "ntdll, NtWaitForSingleObject",
+          "count": 1267.0
+        }
+      ],
+      "thread": 2520,
+      "cpu_ms": 31.25,
+      "sample_count": 1267.0
+    },
+    {
+      "top_symbols": [
+        {
+          "symbol": "ntdll, ZwWaitForAlertByThreadId",
+          "count": 1267.0
+        }
+      ],
+      "thread": 15476,
+      "cpu_ms": 31.25,
+      "sample_count": 1267.0
+    },
+    {
+      "top_symbols": [
+        {
+          "symbol": "ntdll, NtWaitForSingleObject",
+          "count": 1267.0
+        }
+      ],
+      "thread": 19740,
+      "cpu_ms": 31.25,
+      "sample_count": 1267.0
+    },
+    {
+      "top_symbols": [
+        {
+          "symbol": "ntdll, ZwWaitForAlertByThreadId",
+          "count": 1267.0
+        }
+      ],
+      "thread": 26320,
+      "cpu_ms": 31.25,
+      "sample_count": 1267.0
+    },
+    {
+      "top_symbols": [
+        {
+          "symbol": "win32u, NtUserGetMessage",
+          "count": 1267.0
+        }
+      ],
+      "thread": 34420,
+      "cpu_ms": 15.625,
+      "sample_count": 1267.0
+    },
+    {
+      "top_symbols": [
+        {
+          "symbol": "ntdll, ZwWaitForMultipleObjects",
+          "count": 1267.0
+        }
+      ],
+      "thread": 21480,
+      "cpu_ms": 15.625,
+      "sample_count": 1267.0
+    },
+    {
+      "top_symbols": [
+        {
+          "symbol": "ntdll, NtWaitForSingleObject",
+          "count": 1267.0
+        }
+      ],
+      "thread": 30480,
+      "cpu_ms": 15.625,
+      "sample_count": 1267.0
+    },
+    {
+      "top_symbols": [
+        {
+          "symbol": "ntdll, NtWaitForSingleObject",
+          "count": 1267.0
+        }
+      ],
+      "thread": 30496,
+      "cpu_ms": 15.625,
+      "sample_count": 1267.0
+    },
+    {
+      "top_symbols": [
+        {
+          "symbol": "ntdll, NtWaitForSingleObject",
+          "count": 1267.0
+        }
+      ],
+      "thread": 17876,
+      "cpu_ms": 15.625,
+      "sample_count": 1267.0
+    },
+    {
+      "top_symbols": [
+        {
+          "symbol": "ntdll, NtWaitForSingleObject",
+          "count": 1267.0
+        }
+      ],
+      "thread": 4936,
+      "cpu_ms": 15.625,
+      "sample_count": 1267.0
+    },
+    {
+      "top_symbols": [
+        {
+          "symbol": "ntdll, NtWaitForSingleObject",
+          "count": 1267.0
+        }
+      ],
+      "thread": 1404,
+      "cpu_ms": 15.625,
+      "sample_count": 1267.0
+    },
+    {
+      "top_symbols": [
+        {
+          "symbol": "ntdll, NtWaitForSingleObject",
+          "count": 1267.0
+        }
+      ],
+      "thread": 33952,
+      "cpu_ms": 15.625,
+      "sample_count": 1267.0
+    },
+    {
+      "top_symbols": [
+        {
+          "symbol": "ntdll, NtWaitForSingleObject",
+          "count": 1267.0
+        }
+      ],
+      "thread": 35120,
+      "cpu_ms": 15.625,
+      "sample_count": 1267.0
+    },
+    {
+      "top_symbols": [
+        {
+          "symbol": "ntdll, NtWaitForSingleObject",
+          "count": 1267.0
+        }
+      ],
+      "thread": 19496,
+      "cpu_ms": 15.625,
+      "sample_count": 1267.0
+    },
+    {
+      "top_symbols": [
+        {
+          "symbol": "ntdll, NtWaitForSingleObject",
+          "count": 1267.0
+        }
+      ],
+      "thread": 26272,
+      "cpu_ms": 15.625,
+      "sample_count": 1267.0
+    },
+    {
+      "top_symbols": [
+        {
+          "symbol": "ntdll, ZwWaitForAlertByThreadId",
+          "count": 1267.0
+        }
+      ],
+      "thread": 1996,
+      "cpu_ms": 15.625,
+      "sample_count": 1267.0
+    },
+    {
+      "top_symbols": [
+        {
+          "symbol": "ntdll, ZwWaitForMultipleObjects",
+          "count": 1267.0
+        }
+      ],
+      "thread": 3688,
+      "cpu_ms": 15.625,
+      "sample_count": 1267.0
+    },
+    {
+      "top_symbols": [
+        {
+          "symbol": "ntdll, ZwWaitForMultipleObjects",
+          "count": 1267.0
+        }
+      ],
+      "thread": 34520,
+      "cpu_ms": 15.625,
+      "sample_count": 1267.0
+    },
+    {
+      "top_symbols": [
+        {
+          "symbol": "ntdll, ZwWaitForAlertByThreadId",
+          "count": 1267.0
+        }
+      ],
+      "thread": 12784,
+      "cpu_ms": 15.625,
+      "sample_count": 1267.0
+    },
+    {
+      "top_symbols": [
+        {
+          "symbol": "ntdll, ZwWaitForAlertByThreadId",
+          "count": 1267.0
+        }
+      ],
+      "thread": 32268,
+      "cpu_ms": 15.625,
+      "sample_count": 1267.0
+    },
+    {
+      "top_symbols": [
+        {
+          "symbol": "ntdll, NtWaitForSingleObject",
+          "count": 1263.0
+        },
+        {
+          "symbol": "forza_horizon, __imp__sub_82D65608",
+          "count": 3.0
+        },
+        {
+          "symbol": "rexruntimerd, _imp__NtReleaseSemaphore",
+          "count": 1.0
+        }
+      ],
+      "thread": 28912,
+      "cpu_ms": 15.625,
+      "sample_count": 1267.0
+    },
+    {
+      "top_symbols": [
+        {
+          "symbol": "ntdll, ZwWaitForAlertByThreadId",
+          "count": 1267.0
+        }
+      ],
+      "thread": 24484,
+      "cpu_ms": 15.625,
+      "sample_count": 1267.0
+    },
+    {
+      "top_symbols": [
+        {
+          "symbol": "ntdll, NtWaitForSingleObject",
+          "count": 1267.0
+        }
+      ],
+      "thread": 12824,
+      "cpu_ms": 0.0,
+      "sample_count": 1267.0
+    },
+    {
+      "top_symbols": [
+        {
+          "symbol": "ntdll, NtWaitForSingleObject",
+          "count": 1267.0
+        }
+      ],
+      "thread": 33104,
+      "cpu_ms": 0.0,
+      "sample_count": 1267.0
+    },
+    {
+      "top_symbols": [
+        {
+          "symbol": "ntdll, NtWaitForSingleObject",
+          "count": 1267.0
+        }
+      ],
+      "thread": 11208,
+      "cpu_ms": 0.0,
+      "sample_count": 1267.0
+    },
+    {
+      "top_symbols": [
+        {
+          "symbol": "ntdll, NtWaitForSingleObject",
+          "count": 1266.0
+        },
+        {
+          "symbol": "forza_horizon, __imp____restgprlr_28",
+          "count": 1.0
+        }
+      ],
+      "thread": 9640,
+      "cpu_ms": 0.0,
+      "sample_count": 1267.0
+    },
+    {
+      "top_symbols": [
+        {
+          "symbol": "ntdll, NtWaitForSingleObject",
+          "count": 1267.0
+        }
+      ],
+      "thread": 30860,
+      "cpu_ms": 0.0,
+      "sample_count": 1267.0
+    },
+    {
+      "top_symbols": [
+        {
+          "symbol": "ntdll, ZwWaitForAlertByThreadId",
+          "count": 1267.0
+        }
+      ],
+      "thread": 1900,
+      "cpu_ms": 0.0,
+      "sample_count": 1267.0
+    },
+    {
+      "top_symbols": [
+        {
+          "symbol": "ntdll, ZwWaitForAlertByThreadId",
+          "count": 1267.0
+        }
+      ],
+      "thread": 30116,
+      "cpu_ms": 0.0,
+      "sample_count": 1267.0
+    },
+    {
+      "top_symbols": [
+        {
+          "symbol": "ntdll, NtWaitForSingleObject",
+          "count": 1267.0
+        }
+      ],
+      "thread": 9452,
+      "cpu_ms": 0.0,
+      "sample_count": 1267.0
+    },
+    {
+      "top_symbols": [
+        {
+          "symbol": "ntdll, ZwWaitForMultipleObjects",
+          "count": 1267.0
+        }
+      ],
+      "thread": 9400,
+      "cpu_ms": 0.0,
+      "sample_count": 1267.0
+    },
+    {
+      "top_symbols": [
+        {
+          "symbol": "ntdll, ZwWaitForAlertByThreadId",
+          "count": 1267.0
+        }
+      ],
+      "thread": 35068,
+      "cpu_ms": 0.0,
+      "sample_count": 1267.0
+    },
+    {
+      "top_symbols": [
+        {
+          "symbol": "ntdll, ZwWaitForAlertByThreadId",
+          "count": 1267.0
+        }
+      ],
+      "thread": 9436,
+      "cpu_ms": 0.0,
+      "sample_count": 1267.0
+    },
+    {
+      "top_symbols": [
+        {
+          "symbol": "ntdll, ZwWaitForAlertByThreadId",
+          "count": 1267.0
+        }
+      ],
+      "thread": 13144,
+      "cpu_ms": 0.0,
+      "sample_count": 1267.0
+    },
+    {
+      "top_symbols": [
+        {
+          "symbol": "ntdll, ZwWaitForAlertByThreadId",
+          "count": 1267.0
+        }
+      ],
+      "thread": 20176,
+      "cpu_ms": 0.0,
+      "sample_count": 1267.0
+    },
+    {
+      "top_symbols": [
+        {
+          "symbol": "ntdll, ZwWaitForAlertByThreadId",
+          "count": 1267.0
+        }
+      ],
+      "thread": 33476,
+      "cpu_ms": 0.0,
+      "sample_count": 1267.0
+    },
+    {
+      "top_symbols": [
+        {
+          "symbol": "ntdll, ZwWaitForAlertByThreadId",
+          "count": 1267.0
+        }
+      ],
+      "thread": 30004,
+      "cpu_ms": 0.0,
+      "sample_count": 1267.0
+    },
+    {
+      "top_symbols": [
+        {
+          "symbol": "ntdll, NtWaitForSingleObject",
+          "count": 1267.0
+        }
+      ],
+      "thread": 17312,
+      "cpu_ms": 0.0,
+      "sample_count": 1267.0
+    },
+    {
+      "top_symbols": [
+        {
+          "symbol": "ntdll, NtWaitForSingleObject",
+          "count": 1267.0
+        }
+      ],
+      "thread": 22692,
+      "cpu_ms": 0.0,
+      "sample_count": 1267.0
+    },
+    {
+      "top_symbols": [
+        {
+          "symbol": "ntdll, ZwWaitForAlertByThreadId",
+          "count": 1267.0
+        }
+      ],
+      "thread": 27248,
+      "cpu_ms": 0.0,
+      "sample_count": 1267.0
+    },
+    {
+      "top_symbols": [
+        {
+          "symbol": "ntdll, NtWaitForSingleObject",
+          "count": 1267.0
+        }
+      ],
+      "thread": 19480,
+      "cpu_ms": 0.0,
+      "sample_count": 1267.0
+    },
+    {
+      "top_symbols": [
+        {
+          "symbol": "ntdll, ZwWaitForMultipleObjects",
+          "count": 1267.0
+        }
+      ],
+      "thread": 26376,
+      "cpu_ms": 0.0,
+      "sample_count": 1267.0
+    },
+    {
+      "top_symbols": [
+        {
+          "symbol": "ntdll, NtWaitForSingleObject",
+          "count": 1267.0
+        }
+      ],
+      "thread": 32564,
+      "cpu_ms": 0.0,
+      "sample_count": 1267.0
+    },
+    {
+      "top_symbols": [
+        {
+          "symbol": "ntdll, NtSignalAndWaitForSingleObject",
+          "count": 1267.0
+        }
+      ],
+      "thread": 31116,
+      "cpu_ms": 0.0,
+      "sample_count": 1267.0
+    },
+    {
+      "top_symbols": [
+        {
+          "symbol": "ntdll, ZwWaitForMultipleObjects",
+          "count": 1247.0
+        },
+        {
+          "symbol": "ntdll, ZwSetEvent",
+          "count": 4.0
+        },
+        {
+          "symbol": "forza_horizon, __imp__sub_823F1BF0",
+          "count": 2.0
+        },
+        {
+          "symbol": "forza_horizon, __imp____restgprlr_29",
+          "count": 1.0
+        },
+        {
+          "symbol": "rexruntimerd, _imp__KeWaitForMultipleObjects",
+          "count": 1.0
+        },
+        {
+          "symbol": "ntdll, RtlQueryPerformanceCounter",
+          "count": 1.0
+        },
+        {
+          "symbol": "MSVCP140, Mtx_unlock",
+          "count": 1.0
+        },
+        {
+          "symbol": "MSVCP140, Mtx_lock",
+          "count": 1.0
+        },
+        {
+          "symbol": "forza_horizon, __imp__sub_82470560",
+          "count": 1.0
+        },
+        {
+          "symbol": "forza_horizon, __imp__sub_8246E740",
+          "count": 1.0
+        },
+        {
+          "symbol": "forza_horizon, __imp__sub_823F2660",
+          "count": 1.0
+        },
+        {
+          "symbol": "forza_horizon, __imp__sub_823F25A0",
+          "count": 1.0
+        }
+      ],
+      "thread": 2936,
+      "cpu_ms": 0.0,
+      "sample_count": 1267.0
+    },
+    {
+      "top_symbols": [
+        {
+          "symbol": "ntdll, ZwWaitForAlertByThreadId",
+          "count": 1267.0
+        }
+      ],
+      "thread": 27856,
+      "cpu_ms": 0.0,
+      "sample_count": 1267.0
+    },
+    {
+      "top_symbols": [
+        {
+          "symbol": "ntdll, ZwWaitForAlertByThreadId",
+          "count": 1267.0
+        }
+      ],
+      "thread": 824,
+      "cpu_ms": 0.0,
+      "sample_count": 1267.0
+    },
+    {
+      "top_symbols": [
+        {
+          "symbol": "ntdll, ZwDelayExecution",
+          "count": 1266.0
+        },
+        {
+          "symbol": "ntdll, NtReadFile",
+          "count": 1.0
+        }
+      ],
+      "thread": 10224,
+      "cpu_ms": 0.0,
+      "sample_count": 1267.0
+    },
+    {
+      "top_symbols": [
+        {
+          "symbol": "ntdll, NtWaitForSingleObject",
+          "count": 1267.0
+        }
+      ],
+      "thread": 14196,
+      "cpu_ms": 0.0,
+      "sample_count": 1267.0
+    },
+    {
+      "top_symbols": [
+        {
+          "symbol": "ntdll, NtWaitForSingleObject",
+          "count": 1267.0
+        }
+      ],
+      "thread": 7288,
+      "cpu_ms": 0.0,
+      "sample_count": 1267.0
+    }
+  ],
+  "schema": 1,
+  "thread_count": 82
+}
