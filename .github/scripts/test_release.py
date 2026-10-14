@@ -190,6 +190,36 @@ class ReleaseTests(unittest.TestCase):
                 release.publish()
             self.assertFalse(any(call.args[:3] == ("gh", "release", "edit") for call in command.call_args_list))
 
+    def test_verified_preview_draft_publishes_after_download(self):
+        self.write_archive()
+        assets = [self.archive, Path(str(self.archive) + ".sha256")]
+        notes = self.directory / "notes.md"
+        notes.write_text("# Test release\n\nSynthetic notes.\n")
+        self.metadata["provenance"].update(repository="owner/repo", event="push", release_notes_sha256=release.file_digest(notes))
+        env = dict(GITHUB_EVENT_NAME="push", GITHUB_REF=self.ref, GITHUB_SHA=self.commit, GITHUB_RUN_ID="42", GITHUB_REPOSITORY="owner/repo")
+
+        def command(*args):
+            if args[0] == "git":
+                return self.commit
+            if args[:2] == ("gh", "api"):
+                return json.dumps({"draft": True, "assets": [{"name": p.name} for p in assets]})
+            if args[:3] == ("gh", "release", "download"):
+                destination = Path(args[args.index("--dir") + 1])
+                for asset in assets:
+                    (destination / asset.name).write_bytes(asset.read_bytes())
+            return "mocked"
+
+        with patch.dict("os.environ", env), patch.object(release, "command", side_effect=command) as mocked, \
+                patch.object(release, "verify", return_value=self.metadata), patch.object(release, "notes_for", return_value=(notes, "Test release")), \
+                patch.object(release, "remote_tag_commit", return_value=self.commit), patch.object(Path, "iterdir", side_effect=lambda: iter(assets)):
+            release.publish()
+            mutations = [call.args for call in mocked.call_args_list if call.args[:2] == ("gh", "release")]
+            self.assertEqual([args[2] for args in mutations], ["create", "download", "edit"])
+            self.assertIn("--draft", mutations[0])
+            self.assertIn("--verify-tag", mutations[0])
+            self.assertIn("--prerelease=true", mutations[-1])
+            self.assertIn("--latest=false", mutations[-1])
+
 
 if __name__ == "__main__":
     unittest.main()

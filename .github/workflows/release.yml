@@ -69,6 +69,8 @@ jobs:
             .local/packages/*.zip
             .local/packages/*.zip.sha256
           if-no-files-found: error
+          # Explicit ZIP-only paths are inside .local (a hidden directory).
+          include-hidden-files: true
           compression-level: 0
           retention-days: 14
 
