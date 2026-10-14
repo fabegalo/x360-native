@@ -1,5 +1,22 @@
 # STATUS
 
+Biblioteca universal + AOT automático (2026-10-14), **candidata local preview.20**:
+catálogo persistente por inventário SHA-256, importação ISO/GDFX/STFS/pasta,
+metadados verificados, versões/duplicatas e retomada sem destruir dados.
+Projetos manuais são perfis opcionais; o desktop gera projeto AOT genérico,
+executa codegen/build com o SDK pinado e registra somente builds verificados
+na My Games original. Falhas de preparação/runtime permanecem diagnosticáveis.
+Charlie Murder LIVE, sem projeto manual, foi importado, gerado, compilado e
+iniciado pela dashboard original; bloqueio real em `0x82163C60` ausente da
+tabela AOT, **não jogável**. Reuso de build e persistência após erro comprovados.
+Castle Crashers LIVE e Forza Horizon ISO importados; três entradas persistem
+após reinício. Castle recompilado e iniciado pela My Games até o menu, sessão
+limitada sem erros/stubs/unimplemented; não amplia o aceite de saves comerciais.
+Testes focados, screenshots reais e logs em `docs/universal-library.md`.
+C7/C8, isolamento de versões e todos os 67 patches preservados. Sem Computer
+Use, push ou publicação; ZIP Windows x64 preparado pelo gate de distribuição.
+Importação universal e tentativa automática **não significam execução universal**.
+
 C8 (2026-10-13), **saves XContent por perfil/título implementados e validados
 pelo caminho XAM → NT/VFS → disco em Windows x64**: patch 0067 usa o XUID
 conectado do C7 e Title ID do XEX, isola enumeração/mounts, invalida handles

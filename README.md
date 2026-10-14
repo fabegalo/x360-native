@@ -12,6 +12,17 @@ Performance improvements must be backed by measurements, not assumptions.
 > currently tested platform**, using D3D12. Linux and macOS are roadmap goals.
 > The first technical preview is `v0.1.0-preview.19`; it is experimental.
 
+The next **local candidate, v0.1.0-preview.20**, adds a persistent game Library
+with automatic generic AOT preparation. Import valid ISO/GDFX images, CON/LIVE/PIRS packages
+or extracted game folders. Different versions remain separate; exact duplicates
+reuse verified content. **Importing a game does not mean it can run.** Unsupported
+games stay visible in the desktop Library. Preparing generates a local project,
+runs the pinned ReXGlue codegen and compiles it without manual TOML/CMake/C++ edits.
+Existing title profiles are optional compatibility overrides. Failed stages and
+logs remain available for retry; compilation is not a compatibility claim. Only verified, prepared games enter
+the original dashboard's My Games. This candidate is not published yet.
+See the [candidate notes](docs/releases/0.1.0-preview.20.md).
+
 [Current capabilities](#current-capabilities) · [Getting started](#download-and-installation) ·
 [Roadmap](#roadmap) · [Documentation](#documentation-and-contributing)
 
@@ -67,7 +78,9 @@ take precedence. Xbox Live, online multiplayer and special peripherals are not v
   and resources. Original launch requests select a verified, prepared target.
 - **Guided import and preparation.** Import extracted files/folders, ISO game
   images (GDFX), or Xbox 360 CON/LIVE/PIRS packages, including extensionless XBLA
-  packages. Originals are preserved; incomplete or unknown sets cannot become ready.
+  packages. Originals are preserved; incomplete content cannot become ready.
+  Unknown games can attempt automatic AOT preparation and report real codegen,
+  compilation or runtime limitations.
 - **Verified reuse and reproducible preparation.** Pinned tools, SDK revisions and
   patches, isolated builds and preparation receipts connect inputs to native
   executables and their dependencies. Valid artifacts can be reused. Independent
@@ -96,7 +109,7 @@ For this technical preview:
 1. **Extract the whole Windows x64 application ZIP** and launch `x360-native.exe`.
    It opens without Xbox content. GitHub's source-code archives are not the app.
 2. **Import your own authorized content.** Supply the matching original dashboard
-   files and any supported games. The app identifies versions, checks components
+   files and games, including games without AOT support. The app identifies versions, checks components
    and shows what is missing. Unpack ZIP/RAR/7z archives first.
 3. **Prepare supported content.** The app checks/downloads pinned tools with your
    consent and builds native code locally. Additional Microsoft C++ components may

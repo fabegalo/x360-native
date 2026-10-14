@@ -1,5 +1,24 @@
 # Matriz de resultados
 
+## Universal Library — preview.20 candidate
+
+Import capability is separate from execution compatibility. Valid ISO/GDFX,
+CON/LIVE/PIRS and extracted game folders can be catalogued without an AOT recipe.
+Unknown names/versions are left unknown. Preparing an imported game automatically
+generates its project and attempts ReXGlue codegen and compilation; manual title
+profiles are optional compatibility overrides. Only exact, verified preparations are
+eligible for original My Games; there is no alternative game launcher.
+
+| Content tested | Title ID / version | Desktop import | AOT execution status |
+|---|---|---|---|
+| Castle Crashers LIVE and extracted folder | 584108B7 / 0.0.1.3 | Persisted; duplicate content reused | Existing experimental support retained |
+| Charlie Murder LIVE | 58410B83 / 0.0.0.2 | Persisted with original package name | Automatic codegen/build and original My Games launch verified; runtime stops at missing AOT function `0x82163C60`; not playable |
+| Forza Horizon ISO | 4D5309C9 / 0.0.0.10 | Persisted; no invented display name | Automatic preparation offered; build/runtime not tested |
+
+Evidence and scope: [Universal Library](universal-library.md). The historical
+execution results below are retained; cataloguing a title does not advance its
+gameplay or save/load stage.
+
 Etapas: **análise → geração → compilação → inicialização → menu → gameplay →
 save/load → conclusão**. Valores: `ok` (demonstrado pelo teste citado),
 `falha`, `—` (não se aplica ao tipo de alvo), `não testado`.
