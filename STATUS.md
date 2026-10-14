@@ -1,5 +1,21 @@
 # STATUS
 
+Auditoria AOT e Forza Horizon (2026-10-14, trabalho local): os 12 UnresolvedCall
+originais foram resolvidos com entradas verificadas no XEX e patch genérico 0068
+para respeitar fins de .pdata no GapFill. Isolamento de build/recibos corrigido;
+SDK pinado preservado. Forza tem perfil exato 4D5309C9/2DC7007B/0.0.0.10,
+codegen e build nativo completos, incluindo XMediaFacade/SpeechFacade originais
+com hashes verificados. A execução diagnóstica apresentou intro e PRESS START
+reais e respondeu à entrada. O perfil local Forza foi escolhido pelo usuário.
+O teste conectado expôs troca de fiber guest sem continuação da pilha C++;
+as cinco funções XAPI foram associadas ao suporte nativo existente. A execução
+seguinte chegou à primeira cena jogável, com carro/HUD/tráfego, acelerador e
+direção roteados. A distância caiu de 2,9 para 2,1 milhas. Ainda não iniciou
+pela My Games: o catálogo registra Forza, mas a UI original o filtra. Há avisos
+gráficos de resolve/fetch; menu separado, save/load e campanha não validados.
+Evidências e limites: `docs/validation-forza-horizon.md`. Resultados anteriores
+abaixo são históricos; codegen/build não significam jogo funcional.
+
 Correção da configuração AOT genérica em caminhos longos (2026-10-14):
 o Forza importado falhou no try_compile do SDL porque o build usava o ID completo
 como diretório. O catálogo e os dados mantêm a identidade completa; o build usa

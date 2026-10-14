@@ -13,7 +13,7 @@ eligible for original My Games; there is no alternative game launcher.
 |---|---|---|---|
 | Castle Crashers LIVE and extracted folder | 584108B7 / 0.0.1.3 | Persisted; duplicate content reused | Existing experimental support retained |
 | Charlie Murder LIVE | 58410B83 / 0.0.0.2 | Persisted with original package name | Automatic codegen/build and original My Games launch verified; runtime stops at missing AOT function `0x82163C60`; not playable |
-| Forza Horizon ISO | 4D5309C9 / 0.0.0.10 | Persisted; no invented display name | Automatic preparation offered; build/runtime not tested |
+| Forza Horizon ISO | 4D5309C9 / 0.0.0.10 | Persisted; verified extraction reused | Exact AOT profile builds; native fiber bindings fix connected-profile crash. Initial driving scene, HUD, traffic and routed accelerator/steering observed. My Games launch remains blocked; save/load and sustained gameplay unverified. See [Forza validation](validation-forza-horizon.md). |
 
 Evidence and scope: [Universal Library](universal-library.md). The historical
 execution results below are retained; cataloguing a title does not advance its

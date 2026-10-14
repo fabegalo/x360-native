@@ -538,6 +538,14 @@ TEST_CASE("local isolated prepared environment installs original library depende
   const auto targets = ReadCatalog(paths);
   const auto dash = std::find_if(targets.begin(), targets.end(), [](const auto& t) { return t.id == "dash_17559"; });
   REQUIRE(dash != targets.end()); REQUIRE(Inspect(paths, *dash).prepared);
+  if (const char* required_game = std::getenv("X360N_TEST_PREPARED_GAME")) {
+    auto game = std::find_if(targets.begin(), targets.end(), [&](const auto& t) { return t.id == required_game; });
+    REQUIRE(game != targets.end());
+    const auto inspection = Inspect(paths, *game);
+    CAPTURE(inspection.issues);
+    REQUIRE(inspection.prepared);
+    REQUIRE_FALSE(game->library.title_id.empty());
+  }
   for (const auto& id : dash->dependencies) {
     auto game = std::find_if(targets.begin(), targets.end(), [&](const auto& t) { return t.id == id; });
     REQUIRE(game != targets.end()); REQUIRE(Inspect(paths, *game).prepared);

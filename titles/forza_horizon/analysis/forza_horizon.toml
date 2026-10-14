@@ -38,3 +38,17 @@ address = 0x826B5D6C
 register = 30
 labels = [0x826B5D70, 0x826B5DFC, 0x826B5D70, 0x826B5DFC, 0x826B5D70,
           0x826B5DFC, 0x826B5D70, 0x826B5DFC, 0x826B5D70, 0x826B5DFC]
+
+# Original XAPI fiber ABI verified in this exact XEX. Native AOT call stacks
+# must switch with the guest context: KeSetCurrentStackPointers alone updates
+# r1/PCR but cannot transfer the C++ continuation. Keep the complete lifecycle
+# on the existing SDK host-fiber implementation (no success stub).
+# Convert: KTHREAD+0x164, 0xA50 context, parameter at +0 and stack fields +4/+8/+C.
+# Create: r3 stack size, r4 entry, r5 parameter; original bootstrap 830ED900.
+# Switch: single-instruction thunk to full context switch at 830ED910.
+[rexcrt]
+ConvertThreadToFiber = 0x830EBC70
+ConvertFiberToThread = 0x830EBD00
+CreateFiber = 0x830EBD50
+DeleteFiber = 0x830EBE30
+SwitchToFiber = 0x830EBE90

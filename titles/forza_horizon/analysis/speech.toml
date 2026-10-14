@@ -1,0 +1,6 @@
+# SpeechFacade_default.xex from Forza 4D5309C9 / 2DC7007B / 0.0.0.10.
+# SHA-256 d54f6aae6ae2fd6da9b8c37d48f0a6bb295caa18ad82d0d9df66026141a41594.
+[functions]
+# Six-instruction argument adapter ending in b 890A6308, between independent
+# adjustors at 890E2F98 and 890E2FB8. The latter branches back to this entry.
+0x890E2FA0 = {}

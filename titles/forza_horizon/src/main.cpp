@@ -1,10 +1,31 @@
 #include "forza_horizon_init.h"
 #include <rex/rex_app.h>
+#include <rex/logging.h>
+#include "../../../src/supervisor/sha256.h"
 #include "launch_handoff.h"
 
 class ImportedGameApp : public rex::ReXApp {
  public:
   using rex::ReXApp::ReXApp;
+  bool ConstructRuntime(const rex::PathConfig& paths) override {
+    const std::pair<const char*, const char*> originals[] = {
+      {"default.xex", "db40df605ade49a612b35a7a24c38f6004bcb17a88ed6b48288de16df9e3987c"},
+      {"XMediaFacade_default.xex", "ed285beefeafcdc90cf64d6085d19c874e3f1e15072c12cdf9ba2237c88e2ce5"},
+      {"SpeechFacade_default.xex", "d54f6aae6ae2fd6da9b8c37d48f0a6bb295caa18ad82d0d9df66026141a41594"},
+    };
+    if (!paths.update_data_root.empty()) {
+      REXLOG_ERROR("Forza 0.0.0.10: update overlays require their own verified AOT profile");
+      return false;
+    }
+    for (const auto& [name, hash] : originals) {
+      const auto digest = x360n::DigestFile(paths.game_data_root / name);
+      if (!digest || digest->sha256 != hash) {
+        REXLOG_ERROR("Forza 4D5309C9/2DC7007B/0.0.0.10: missing or mismatched {} (expected {})", name, hash);
+        return false;
+      }
+    }
+    return rex::ReXApp::ConstructRuntime(paths);
+  }
   void OnPreLaunchModule() override { x360n::ImportLaunchData(*runtime()); }
   void OnGuestThreadExit(rex::system::XThread*) override { x360n::ExportLaunchRequest(*runtime()); }
   bool OnWindowCloseRequested() override { x360n::ExportWindowClose(); return true; }

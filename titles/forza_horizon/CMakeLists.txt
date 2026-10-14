@@ -22,11 +22,13 @@ endif()
 set(FORZAHORIZON_SOURCES
     src/main.cpp
     ../common/launch_handoff.cpp
+    ../../src/supervisor/sha256.cpp
 )
 include_directories(../common)
 
 if(WIN32)
     add_executable(forza_horizon WIN32 ${FORZAHORIZON_SOURCES})
+    target_link_libraries(forza_horizon PRIVATE bcrypt)
 else()
     add_executable(forza_horizon ${FORZAHORIZON_SOURCES})
 endif()
