@@ -38,6 +38,12 @@ modificações locais; seus hashes e a base estão no lock e em `package.json`.
 O código adaptado em `src/content/xex_patch.cpp` deriva do ReXGlue/Xenia e conserva
 esses avisos; não é compilado nos três executáveis deste ZIP.
 
+O scanout experimental em `src/native/scanout.hlsl` adapta a permutação de
+endereços tiled de `src/graphics/pipeline/texture/util.cpp` do SDK pinado:
+Copyright 2022 Ben Vanik, adaptação ReXGlue por Tom Clay (2026), BSD-3-Clause.
+Os avisos Xenia/ReXGlue e seus termos permanecem aplicáveis. O plugin Native
+é um alvo de desenvolvimento separado; esta alteração não publica novo ZIP.
+
 O pacote contém `x360-native.exe`, `app/x360n.exe` e `app/x360n-extract.exe`.
 Não contém jogos, dashboards, fontes Xbox, firmware, chaves, saída AOT, runtime
 ReXGlue completo, FFmpeg, disasm GNU, SDL binário nem ferramentas de compilação.

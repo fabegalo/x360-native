@@ -539,3 +539,19 @@ No upstream equivalent identified; SDK pin unchanged. The explicit
 values against the definitions and reports a bounded synthetic lookup benchmark.
 Real-game evidence is required separately; a faster synthetic lookup alone does
 not establish better game performance.
+
+## 0074 — Optional backend packet validation
+
+Adds a compile-time backend hook immediately after reading a PM4 header. Only
+Native defines `REX_GPU_VALIDATE_PACKET`; Xenos retains its existing path with
+no added branch, call or instrumentation. Native checks packet extent and its
+implemented opcode subset, failing explicitly before shared parsing can ignore
+unsupported guest work. No ABI, SDK pin, Xenos translator or backend changes.
+
+No upstream equivalent identified. `sdkcheck.Native-packet-guard` injects an
+unsupported opcode through the actual MMIO/ring path: without the hook it times
+out without explicit failure; with it the child exits 78 and logs the exact
+unsupported opcode. Before/after logs and graphical evidence are described in
+`docs/native-renderer.md`. The patch is applied only through the pinned patch
+script, with before/after file hashes in `deps.lock.json` (73 active patches;
+withdrawn 0073 is not reintroduced).

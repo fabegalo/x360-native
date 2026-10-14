@@ -1,0 +1,2 @@
+#pragma once
+inline constexpr char kScanoutSource[] = R"hlsl(@NATIVE_SCANOUT_HLSL@)hlsl";
