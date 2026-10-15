@@ -1,8 +1,9 @@
 # Scripted route for a window we launched: posts key messages to that window
 # only (no global input) and saves captures at given times. Used for menu tests
 # of titles run with --mnk_mode=true (SDK keyboard -> pad emulation).
-# Steps: "<seconds>:key:<Name>" or "<seconds>:shot:<file.png>", comma-separated,
-# times measured from when the window first appears.
+# Steps: "<seconds>:key:<Name>", "<seconds>:hold:<Name>:<ms>" or "<seconds>:shot:<file.png>",
+# comma-separated, times measured from when the window first appears.
+# In --mnk_mode, E/Q are the default RT/LT (accelerate/brake), A/D steer.
 # Usage: scripts/window-route.ps1 -ProcessName castle_crashers -Steps "10:key:Return,15:shot:a.png"
 param(
     [Parameter(Mandatory)] [string]$ProcessName,
@@ -34,6 +35,7 @@ public static class X360nKeys {
 $keys = @{
     'Return' = @(0x0D, 0x1C); 'Space' = @(0x20, 0x39); 'X' = @(0x58, 0x2D)
     'W' = @(0x57, 0x11); 'A' = @(0x41, 0x1E); 'S' = @(0x53, 0x1F); 'D' = @(0x44, 0x20)
+    'E' = @(0x45, 0x12); 'Q' = @(0x51, 0x10)
     'Backspace' = @(0x08, 0x0E); 'Semicolon' = @(0xBA, 0x27)
     'D1' = @(0x31, 0x02); 'D3' = @(0x33, 0x04)   # default LB / RB in --mnk_mode
     'ShiftRight' = @(0x27, 0x4D); 'ShiftLeft' = @(0x25, 0x4B)
@@ -53,11 +55,13 @@ Start-Sleep -Milliseconds 200
 $t0 = Get-Date
 foreach ($step in $Steps.Split(',')) {
     $parts = $step.Trim().Split(':', 3)
+    $hold = 120
+    if ($parts[1] -eq 'hold') { $name, $ms = $parts[2].Split(':', 2); $parts[2] = $name; $hold = [int]$ms }
     $at = [double]$parts[0]
     $wait = $at - ((Get-Date) - $t0).TotalSeconds
     if ($wait -gt 0) { Start-Sleep -Milliseconds ([int]($wait * 1000)) }
     if (-not (Get-Process -Id $proc.Id -ErrorAction SilentlyContinue)) { Write-Host "process exited before step '$step'"; exit 2 }
-    if ($parts[1] -eq 'key') {
+    if ($parts[1] -eq 'key' -or $parts[1] -eq 'hold') {
         [void][X360nKeys]::SetForegroundWindow([X360nKeys]::GetAncestor($hwnd,2))
         [void][X360nKeys]::PostMessage($hwnd,0x0007,[IntPtr]::Zero,[IntPtr]::Zero)
         Start-Sleep -Milliseconds 50
@@ -72,7 +76,7 @@ foreach ($step in $Steps.Split(',')) {
         $up = [IntPtr]([int64](1 -bor ($k[1] -shl 16) -bor (1 -shl 30)) -bor 0x80000000)
         if ($shifted) { $down=[IntPtr]($down.ToInt64() -bor 0x01000000); $up=[IntPtr]($up.ToInt64() -bor 0x01000000) }
         [void][X360nKeys]::PostMessage($hwnd, 0x0100, [IntPtr]$k[0], $down)   # WM_KEYDOWN
-        Start-Sleep -Milliseconds 120
+        Start-Sleep -Milliseconds $hold
         [void][X360nKeys]::PostMessage($hwnd, 0x0101, [IntPtr]$k[0], $up)     # WM_KEYUP
         if ($shifted) { [void][X360nKeys]::PostMessage($hwnd,0x0101,[IntPtr]0x10,[IntPtr]([int64]0xC02A0001)) }
         Write-Host ("{0,6:N1}s key {1}" -f ((Get-Date) - $t0).TotalSeconds, $parts[2])
