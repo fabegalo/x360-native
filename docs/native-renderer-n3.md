@@ -209,3 +209,41 @@ e curvas PWL com slopes diferentes por canal; erro máximo de um nível de 8 bit
 para a referência CPU. Cinco pares PNG (frames 0/7/23/31/47) têm hashes idênticos
 entre Native e Xenos. É teste sintético de correção, não imagem original de jogo
 nem benchmark. Os diretórios são `scanout-native` e `scanout-xenos` sob a evidência N3.
+
+## N3.1 — Forza até a cena jogável (2026-10-14, parcial)
+
+Continuação local a partir do trabalho não commitado deixado pela sessão
+anterior (PointList via gerador de GS do SDK fixado, restart de primitivas,
+texturas 3D/profundidade/BC4, resolves sem cobertura). Código: `fafbe33`;
+script de rota com `hold`/RT/LT: `066d36c`. Sem push ou Release.
+
+**Fato:** pelo executável diagnóstico (`native-n3-diagnostic`, sem recibo,
+não é entrada pela My Games), o Forza passou intro, menu, vídeo, carregamento
+e cutscenes e chegou à cena dirigível com HUD (minimapa, 2.9 MI, velocímetro)
+renderizada pelo Native; freio/ré respondeu (marcha R). Evidências em
+`.local/validation/native-n4/` (`n31-*.png`, hashes em `n31-evidence.txt`;
+runs `20261015T0051*Z-n4-forza-c9-deferred`, `c7`, `c8`, `c10`).
+
+Contratos novos, espelhando o executor fixado quando o guest fornece estado
+inválido: textura de tipo inválido/sem dados e views incompatíveis ou de sinal
+não usado → view nula (draw executa); fetch de vértice inválido é executado
+como programado (o `vfetch` está sob predicado no shader, ex. `4E1DA281…`);
+`EVENT_WRITE_EXT` grava extents máximos (superconjunto; só afeta predicação);
+polygon offset aplicado no teste ROV; DXN → BC5; cube/arrays; sampler conforme
+`GetSamplerParameters`.
+
+Desempenho (somente diagnóstico `native_stats`, trechos não idênticos): na cena
+3D passou de ~1,2 para ~2,6 presents/s; por quadro, uploads de textura 281→86 e
+submissões 380→95. Ganhos vieram de conversão direta nas páginas de upload,
+leitura de resolves adiada até pontos observáveis pelo guest, eventos sem
+espera quando não há resolve pendente, cache LRU por conteúdo com validação por
+época e cópia única de vértices por época. **Injogável; não aprovado.**
+Próximo gargalo medido: texturas geradas por resolve fazem GPU→CPU→GPU
+(carregamento de texturas na GPU com os shaders `texture_load_*` do SDK é o
+passo indicado) e compilação de PSO síncrona.
+
+Pendências: congelamento intermitente na cutscene interna (c8/c10; o c9
+passou), artefatos visíveis vs Xenos (lanternas magenta, brilho no vidro
+traseiro; causa não identificada), ciclo Dashboard → My Games → Forza →
+Dashboard com o plugin novo **não revalidado** (requer nova preparação
+oficial). Testes focados: `x360n_native_tests` 18 casos/362.367 asserções.
