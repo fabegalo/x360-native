@@ -56,10 +56,18 @@ D3D12Render::TextureTables D3D12Render::BindTextures(const RegisterFile& r, rex:
   Timer timer(stats_enabled_, texture_ns_);
   TextureTables tables;
   const auto& textures = shader.GetTextureBindingsAfterTranslation();
+  const auto& samplers = shader.GetSamplerBindingsAfterTranslation();
+  size_t index_count = 4;
+  // Translator indices are not zero-based dense binding ordinals. Include the
+  // greatest assigned index, including sampler and signed-view aliases.
+  for (const auto& b : textures) index_count = std::max(index_count, size_t(b.bindless_descriptor_index) + 1);
+  for (const auto& b : samplers) index_count = std::max(index_count, size_t(b.bindless_descriptor_index) + 1);
+  std::vector<uint32_t> indices(index_count);
   if (!textures.empty()) {
     auto first = Views(uint32_t(textures.size()));
     for (unsigned i = 0; i < textures.size(); ++i) {
       const auto& binding = textures[i]; auto f = r.GetTextureFetch(binding.fetch_constant);
+      indices.at(binding.bindless_descriptor_index) = first + i;
       // As the pinned texture cache, a fetch constant that is not a texture,
       // or has no data, gives an invalid binding: its view is null (zeros)
       // and the draw still runs. Rate-limited, never silent.
@@ -202,7 +210,7 @@ D3D12Render::TextureTables D3D12Render::BindTextures(const RegisterFile& r, rex:
       // Pages the CPU wrote are uploaded; resolve results are already resident.
       mirror_->RequestRange(base << 12, base_bytes);
       if (mip_bytes) mirror_->RequestRange(mip << 12, mip_bytes);
-      const auto shader_index = GpuLoadShader(input);
+      const auto shader_index = texture_cpu_ ? LoadShader::kUnknown : GpuLoadShader(input);
       if (shader_index != LoadShader::kUnknown) {
         LoadTextureGpu(PlanGpuTextureLoad(input, shader_index), texture.Get());
         if (stats_enabled_) { ++gpu_texture_loads_; ++texture_uploads_; }
@@ -232,13 +240,12 @@ D3D12Render::TextureTables D3D12Render::BindTextures(const RegisterFile& r, rex:
       Transition(texture.Get(), state, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
       device_->CreateShaderResourceView(texture.Get(), &view, Cpu(first + i)); transient_.push_back(texture);
     }
-    tables.views = int(first);
   }
-  const auto& samplers = shader.GetSamplerBindingsAfterTranslation();
   if (!samplers.empty()) {
     auto first = Samplers(uint32_t(samplers.size()));
     for (unsigned i = 0; i < samplers.size(); ++i) {
       const auto& b = samplers[i]; auto f = r.GetTextureFetch(b.fetch_constant);
+      indices.at(b.bindless_descriptor_index) = first + i;
       auto mag = b.mag_filter == TextureFilter::kUseFetchConst ? f.mag_filter : b.mag_filter;
       auto min = b.min_filter == TextureFilter::kUseFetchConst ? f.min_filter : b.min_filter;
       auto mip = b.mip_filter == TextureFilter::kUseFetchConst ? f.mip_filter : b.mip_filter;
@@ -268,13 +275,12 @@ D3D12Render::TextureTables D3D12Render::BindTextures(const RegisterFile& r, rex:
       }
       device_->CreateSampler(&s, Cpu(first + i, true));
     }
-    tables.samplers = int(first);
   }
+  tables.indices = Constants(indices.data(), indices.size() * sizeof(uint32_t));
   return tables;
 }
-void D3D12Render::SetTextureTables(const TextureTables& tables, unsigned root, unsigned sampler_root) {
-  if (tables.views >= 0) list_->SetGraphicsRootDescriptorTable(root, Gpu(uint32_t(tables.views)));
-  if (tables.samplers >= 0) list_->SetGraphicsRootDescriptorTable(sampler_root, Gpu(uint32_t(tables.samplers), true));
+void D3D12Render::SetTextureTables(const TextureTables& tables, unsigned root) {
+  if (tables.indices) list_->SetGraphicsRootConstantBufferView(root, tables.indices);
 }
 void D3D12Render::TextureWatch(void*, void* data, uint64_t argument, bool) {
   // Under GuestMemoryMirror::Lock(); the fired watch is already retired.

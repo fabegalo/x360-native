@@ -1,5 +1,18 @@
 # STATUS
 
+Native N4.1 corrigiu as cores da cena 3D do Forza (2026-10-15): contrato
+bindless do tradutor, heaps tipados e índices por estágio. O defeito foi
+reproduzido também no Xenos bindful; Native/Xenos bindless produziram zero
+canais diferentes no draw isolado. Captura real do Viper confirma cores
+coerentes com Xenos. Memória guest residente e conversão GPU N4 preservadas;
+63.698 cargas GPU e zero CPU no último contador da execução. Passaram 4.005
+asserções de conversão, ABI e 48 frames de scanout (4.718.592 canais, erro ≤1).
+**Desempenho não aprovado:** janelas 3D de 0,10–0,19 FPS, depois pausa longa;
+execução encerrada pelo supervisor aos 240 s. Causa desse bloqueio não isolada,
+sem ganho de FPS alegado. Mantenedor pediu concluir com as evidências atuais.
+Checkpoint `aa3277b`, SDK/pin, 74 patches e Xenos preservados; sem Computer Use,
+push, Release ou implementação de oclusão. [Evidências e comparação arquitetural](docs/native-renderer-n4-1.md).
+
 Native N3 confirmou o primeiro ciclo de título comercial (2026-10-14): Retail
 17559 em boot direto → My Games → Castle Crashers 0.0.1.3 (trial original) →
 dashboard, com imagens reais e entrada manual confirmada pelo mantenedor.

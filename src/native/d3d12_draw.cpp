@@ -12,6 +12,8 @@
 #include <rex/graphics/flags.h>
 #include <fstream>
 #include <stdexcept>
+REXCVAR_DEFINE_STRING(native_draw_dump, "", "GPU/Native", "Diagnostic draw snapshot directory");
+REXCVAR_DEFINE_STRING(native_draw_dump_ps, "", "GPU/Native", "Diagnostic pixel shader hash to snapshot");
 namespace x360n::native {
 using namespace rex::graphics;
 using namespace rex::graphics::xenos;
@@ -32,6 +34,43 @@ void D3D12Render::Draw(const RegisterFile& r, rex::memory::Memory& memory, Shade
   Require(vertex, "missing vertex shader");
   auto& vs = *static_cast<DxbcShader*>(vertex);
   auto* ps = static_cast<DxbcShader*>(pixel);
+  static bool draw_dumped = false;
+  static const auto dump_dir = REXCVAR_GET(native_draw_dump);
+  static const uint64_t dump_hash = REXCVAR_GET(native_draw_dump_ps).empty() ? 0 :
+      std::stoull(REXCVAR_GET(native_draw_dump_ps), nullptr, 16);
+  if (!dump_dir.empty() && !draw_dumped && ps && ps->ucode_data_hash() == dump_hash) {
+    Flush(kFlushDrain);
+    const auto dir = std::filesystem::path(dump_dir);
+    std::filesystem::create_directories(dir);
+    auto save = [&](const std::string& name, const void* p, size_t n) {
+      std::ofstream(dir / name, std::ios::binary).write(static_cast<const char*>(p), n);
+    };
+    save("registers.bin", r.values, sizeof(r.values));
+    save("vs.bin", vs.ucode_dwords(), vs.ucode_dword_count() * 4);
+    save("ps.bin", ps->ucode_dwords(), ps->ucode_dword_count() * 4);
+    std::ofstream(dir / "draw.txt") << uint32_t(primitive) << ' ' << count << ' ' << bool(indices);
+    if (indices) save("indices.bin", indices, sizeof(*indices));
+    auto range = [&](uint32_t address, uint32_t bytes) {
+      if (address && bytes && uint64_t(address) + bytes <= 0x20000000)
+        save("memory-" + std::to_string(address) + ".bin", memory.TranslatePhysical(address), bytes);
+    };
+    if (indices) range(indices->guest_base, indices->length);
+    for (const auto& b : vs.vertex_bindings()) {
+      auto f = r.GetVertexFetch(b.fetch_constant);
+      if (f.type == FetchConstantType::kVertex) range(f.address << 2, f.size << 2);
+    }
+    for (unsigned i = 0; i < 32; ++i) {
+      auto f = r.GetTextureFetch(i);
+      if (f.type != FetchConstantType::kTexture) continue;
+      uint32_t w, h, d, base, mip, lo, hi;
+      texture_util::GetSubresourcesFromFetchConstant(f, &w, &h, &d, &base, &mip, &lo, &hi);
+      auto layout = texture_util::GetGuestTextureLayout(f.dimension, f.pitch, w + 1, h + 1, d + 1, f.tiled, f.format, f.packed_mips, true, hi);
+      range(base << 12, layout.base.level_data_extent_bytes);
+      if (hi) range(mip << 12, layout.mips_total_extent_bytes);
+    }
+    draw_dumped = true;
+    REXLOG_INFO("Native isolated draw captured to {}", dir.string());
+  }
   if (r.Get<reg::RB_MODECONTROL>().edram_mode == EdramMode::kDepthOnly) ps = nullptr;
   Require(!vs.memexport_eM_written() && (!ps || !ps->memexport_eM_written()), "memexport not implemented");
   const bool polygon = draw_util::IsPrimitivePolygonal(r);
@@ -134,7 +173,7 @@ void D3D12Render::Draw(const RegisterFile& r, rex::memory::Memory& memory, Shade
     for (auto* shader : {&vs, ps}) if (shader)
       for (const auto& t : shader->GetTextureBindingsAfterTranslation()) {
         auto f = r.GetTextureFetch(t.fetch_constant);
-        if (f.type != FetchConstantType::kTexture || !NeedsCpuConversion(f.format, t.is_signed, f.num_format)) continue;
+        if (f.type != FetchConstantType::kTexture || (!texture_cpu_ && !NeedsCpuConversion(f.format, t.is_signed, f.num_format))) continue;
         uint32_t wm, hm, dm, base, mip, lo, hi;
         texture_util::GetSubresourcesFromFetchConstant(f, &wm, &hm, &dm, &base, &mip, &lo, &hi);
         // Same extents BindTextures reads (all levels, conservatively).
@@ -310,7 +349,9 @@ void D3D12Render::Draw(const RegisterFile& r, rex::memory::Memory& memory, Shade
   floats(vs, XE_GPU_REG_SHADER_CONSTANT_000_X, 1); if (ps) floats(*ps, XE_GPU_REG_SHADER_CONSTANT_256_X, 2);
   list_->SetGraphicsRootConstantBufferView(3, Constants(&r[XE_GPU_REG_SHADER_CONSTANT_BOOL_000_031], 40 * 4));
   list_->SetGraphicsRootConstantBufferView(4, Constants(&r[XE_GPU_REG_SHADER_CONSTANT_FETCH_00_0], 192 * 4));
-  SetTextureTables(pixel_tables, 6, 7); SetTextureTables(vertex_tables, 8, 9);
+  SetTextureTables(pixel_tables, 6); SetTextureTables(vertex_tables, 8);
+  list_->SetGraphicsRootDescriptorTable(7, Gpu(0, true));
+  list_->SetGraphicsRootDescriptorTable(9, Gpu(0));
   list_->OMSetRenderTargets(0, nullptr, FALSE, nullptr);
   list_->IASetPrimitiveTopology(point ? D3D_PRIMITIVE_TOPOLOGY_POINTLIST : primitive == PrimitiveType::kTriangleStrip ? D3D_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP : D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
   if (indices || fan || quad) { list_->IASetIndexBuffer(&ib); for (const auto& range : index_ranges) list_->DrawIndexedInstanced(range.count, 1, range.offset, 0, 0); }

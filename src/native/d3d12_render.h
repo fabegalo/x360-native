@@ -75,9 +75,9 @@ class D3D12Render {
   uint32_t Samplers(uint32_t);
   // Loads or reuses the textures of a shader and writes its view and sampler
   // tables before the draw state is recorded; Tables binds them afterwards.
-  struct TextureTables { int views = -1, samplers = -1; };
+  struct TextureTables { D3D12_GPU_VIRTUAL_ADDRESS indices = 0; };
   TextureTables BindTextures(const rex::graphics::RegisterFile&, rex::memory::Memory&, rex::graphics::DxbcShader&);
-  void SetTextureTables(const TextureTables&, unsigned root, unsigned sampler_root);
+  void SetTextureTables(const TextureTables&, unsigned root);
   // Records a GPU load of guest bytes from memory_ into texture (COPY_DEST).
   void LoadTextureGpu(const TextureLoadPlan&, ID3D12Resource* texture);
   struct Scratch { Ptr<ID3D12Resource> buffer; uint64_t size, used; D3D12_RESOURCE_STATES state; };
@@ -122,6 +122,7 @@ class D3D12Render {
   std::unordered_map<std::string, CachedTexture> textures_;
   uint64_t texture_cache_bytes_ = 0, texture_cache_hits_ = 0, gpu_texture_loads_ = 0, cpu_texture_loads_ = 0;
   bool texture_cache_enabled_ = true;
+  bool texture_cpu_ = false;
   std::vector<uint8_t> depth_shader_;
   const std::vector<uint8_t>& RectangleShader(unsigned interpolators, unsigned clip_planes);
   std::array<Ptr<ID3D12PipelineState>, 9> copy_pipelines_;

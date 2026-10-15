@@ -44,6 +44,15 @@ Copyright 2022 Ben Vanik, adaptação ReXGlue por Tom Clay (2026), BSD-3-Clause.
 Os avisos Xenia/ReXGlue e seus termos permanecem aplicáveis. O plugin Native
 é um alvo de desenvolvimento separado; esta alteração não publica novo ZIP.
 
+O espelho residente `src/native/guest_memory_mirror.{h,cpp}` adapta o
+`SharedMemory` do ReXGlue/Xenia pinado (Copyright 2020 Ben Vanik, adaptação
+ReXGlue por Tom Clay, 2026) e alterações do ShiftGlue `1e8968f7` (Copyright
+2026 Tom Clay; partes Copyright 2022 Ben Vanik e colaboradores Xenia).
+Termos BSD-3-Clause preservados em [ShiftGlue](licenses/shiftglue.txt) e nos
+avisos ReXGlue/Xenia existentes. `texture_load.{h,cpp}` adapta o planejamento
+de carga do cache D3D12 do SDK pinado e usa seus shaders, sob os mesmos avisos
+ReXGlue/Xenia. Nenhum módulo original de dashboard é compartilhado por isso.
+
 O pacote contém `x360-native.exe`, `app/x360n.exe` e `app/x360n-extract.exe`.
 Não contém jogos, dashboards, fontes Xbox, firmware, chaves, saída AOT, runtime
 ReXGlue completo, FFmpeg, disasm GNU, SDL binário nem ferramentas de compilação.

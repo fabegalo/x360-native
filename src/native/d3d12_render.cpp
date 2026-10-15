@@ -9,6 +9,7 @@
 #include <algorithm>
 REXCVAR_DEFINE_BOOL(native_stats, false, "GPU/Native", "Log cumulative Native CPU submission costs for bounded diagnostics");
 REXCVAR_DEFINE_BOOL(native_texture_cache, true, "GPU/Native", "Reuse textures only while every guest source byte matches; disable for diagnostics");
+REXCVAR_DEFINE_BOOL(native_texture_cpu, false, "GPU/Native", "Diagnose texture loads with CPU conversion and synchronized guest bytes");
 namespace x360n::native {
 using namespace rex::graphics;
 using namespace rex::graphics::xenos;
@@ -77,10 +78,12 @@ uint32_t D3D12Render::Samplers(uint32_t n) { Require(sampler_count_ + n <= 2048,
 D3D12Render::D3D12Render(rex::ui::d3d12::D3D12Provider& provider) : provider_(provider), device_(provider.GetDevice()) {
   stats_enabled_ = REXCVAR_GET(native_stats);
   texture_cache_enabled_ = REXCVAR_GET(native_texture_cache);
+  texture_cpu_ = REXCVAR_GET(native_texture_cpu);
   device_->QueryInterface(IID_PPV_ARGS(&debug_));
   D3D12_FEATURE_DATA_D3D12_OPTIONS options{};
   Check(device_->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS, &options, sizeof(options)), "feature query");
   Require(options.ROVsSupported, "D3D12 rasterizer ordered views required");
+  Require(options.ResourceBindingTier >= D3D12_RESOURCE_BINDING_TIER_2, "D3D12 resource binding tier 2 required");
   Check(device_->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&allocator_)), "allocator");
   Check(device_->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, allocator_.Get(), nullptr, IID_PPV_ARGS(&list_)), "command list");
   Check(device_->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&fence_)), "fence");
@@ -96,18 +99,24 @@ D3D12Render::D3D12Render(rex::ui::d3d12::D3D12Provider& provider) : provider_(pr
   const unsigned cb[] = {0, 1, 1, 2, 3};
   for (unsigned i = 0; i < 5; ++i) { p[i].ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV; p[i].Descriptor = {cb[i], 0}; }
   p[1].ShaderVisibility = D3D12_SHADER_VISIBILITY_VERTEX; p[2].ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
-  D3D12_DESCRIPTOR_RANGE ranges[7] = {
+  // Match the translator's bindless ABI: b4 contains per-stage descriptor
+  // indices, and spaces 1/2/3 alias the same heap for 2D/3D/cube views.
+  // Descriptors retain their existing lifetime (until the submission fence).
+  D3D12_DESCRIPTOR_RANGE ranges[] = {
     {D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 0, 0, 0},
     {D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 2, 0, 0, 1},
-    {D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 255, 1, 0, 0},
-    {D3D12_DESCRIPTOR_RANGE_TYPE_SAMPLER, 127, 0, 0, 0},
-    {D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 255, 1, 0, 0},
-    {D3D12_DESCRIPTOR_RANGE_TYPE_SAMPLER, 127, 0, 0, 0}};
+    {D3D12_DESCRIPTOR_RANGE_TYPE_SAMPLER, UINT_MAX, 0, 0, 0},
+    {D3D12_DESCRIPTOR_RANGE_TYPE_SRV, UINT_MAX, 0, 1, 0},
+    {D3D12_DESCRIPTOR_RANGE_TYPE_SRV, UINT_MAX, 0, 2, 0},
+    {D3D12_DESCRIPTOR_RANGE_TYPE_SRV, UINT_MAX, 0, 3, 0}};
   p[5].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE; p[5].DescriptorTable = {2, ranges};
-  for (unsigned i = 6; i < 10; ++i) {
-    p[i].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE; p[i].DescriptorTable = {1, &ranges[i - 4]};
-    p[i].ShaderVisibility = i < 8 ? D3D12_SHADER_VISIBILITY_PIXEL : D3D12_SHADER_VISIBILITY_VERTEX;
-  }
+  p[6].ParameterType = p[8].ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV;
+  p[6].Descriptor = p[8].Descriptor = {4, 0};
+  p[6].ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
+  p[8].ShaderVisibility = D3D12_SHADER_VISIBILITY_VERTEX;
+  p[7].ParameterType = p[9].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
+  p[7].DescriptorTable = {1, ranges + 2};
+  p[9].DescriptorTable = {3, ranges + 3};
   D3D12_ROOT_SIGNATURE_DESC rd{10, p, 0, nullptr, D3D12_ROOT_SIGNATURE_FLAG_NONE};
   Ptr<ID3DBlob> blob, errors;
   Check(D3D12SerializeRootSignature(&rd, D3D_ROOT_SIGNATURE_VERSION_1, &blob, &errors), "draw root serialization");

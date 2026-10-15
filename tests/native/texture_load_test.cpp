@@ -99,7 +99,8 @@ void Compare(Gpu& gpu, TextureFormat format, DataDimension dimension, bool tiled
   b.Transition = {mirror.Get(), D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES, D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE};
   gpu.list->ResourceBarrier(1, &b);
   const auto plan = PlanGpuTextureLoad(t, shader);
-  auto scratch = gpu.Buffer(plan.scratch_bytes + 4096, D3D12_HEAP_TYPE_DEFAULT, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS);
+  constexpr uint64_t scratch_offset = 65536;
+  auto scratch = gpu.Buffer(scratch_offset + plan.scratch_bytes + 4096, D3D12_HEAP_TYPE_DEFAULT, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS);
   D3D12_HEAP_PROPERTIES heap_props{}; heap_props.Type = D3D12_HEAP_TYPE_DEFAULT;
   ComPtr<ID3D12Resource> texture;
   REQUIRE(SUCCEEDED(gpu.device->CreateCommittedResource(&heap_props, D3D12_HEAP_FLAG_NONE, &d, D3D12_RESOURCE_STATE_COPY_DEST, nullptr, IID_PPV_ARGS(&texture))));
@@ -109,14 +110,14 @@ void Compare(Gpu& gpu, TextureFormat format, DataDimension dimension, bool tiled
   srv.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING; srv.Buffer.NumElements = UINT(memory_size >> plan.source_bpe_log2);
   gpu.device->CreateShaderResourceView(mirror.Get(), &srv, cpu);
   D3D12_UNORDERED_ACCESS_VIEW_DESC uav{}; uav.Format = UintPow2Format(plan.dest_bpe_log2); uav.ViewDimension = D3D12_UAV_DIMENSION_BUFFER;
-  uav.Buffer.NumElements = UINT((plan.scratch_bytes + 4096) >> plan.dest_bpe_log2);
+  uav.Buffer.NumElements = UINT((scratch_offset + plan.scratch_bytes + 4096) >> plan.dest_bpe_log2);
   cpu.ptr += increment; gpu.device->CreateUnorderedAccessView(scratch.Get(), nullptr, &uav, cpu);
   auto pipeline = CreateTextureLoadPipeline(gpu.device.Get(), gpu.root.Get(), shader);
   ID3D12DescriptorHeap* heaps[]{gpu.heap.Get()}; gpu.list->SetDescriptorHeaps(1, heaps);
   gpu.list->SetComputeRootSignature(gpu.root.Get()); gpu.list->SetPipelineState(pipeline.Get());
   gpu.list->SetComputeRootDescriptorTable(1, gpu_handle);
   gpu_handle.ptr += increment; gpu.list->SetComputeRootDescriptorTable(2, gpu_handle);
-  RecordTextureLoad(gpu.list.Get(), plan, 0, scratch.Get(), texture.Get());
+  RecordTextureLoad(gpu.list.Get(), plan, scratch_offset, scratch.Get(), texture.Get());
   b.Transition = {texture.Get(), D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES, D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_COPY_SOURCE};
   gpu.list->ResourceBarrier(1, &b);
   auto readback = gpu.Buffer(total, D3D12_HEAP_TYPE_READBACK, D3D12_RESOURCE_STATE_COPY_DEST);
@@ -176,4 +177,10 @@ TEST_CASE("Native GPU texture loads equal the CPU conversion") {
     Compare(gpu, format, DataDimension::k3D, true, Endian::k8in32, 32, 32, 8, 0, false, true, random);
     Compare(gpu, format, DataDimension::k3D, true, Endian::k8in32, 32, 32, 8, 0, false, false, random);
   }
+  for (auto format : {TextureFormat::k_8_8_8_8, TextureFormat::k_16_16_FLOAT, TextureFormat::k_16_16_16_16})
+    for (bool tiled : {false, true})
+      for (bool packed : {false, true}) {
+        Compare(gpu, format, DataDimension::k3D, tiled, Endian::k8in32, 16, 16, 16, 0, packed, true, random);
+        Compare(gpu, format, DataDimension::k3D, tiled, Endian::k8in32, 16, 16, 16, 4, packed, true, random);
+      }
 }

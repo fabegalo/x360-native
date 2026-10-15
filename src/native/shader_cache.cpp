@@ -34,6 +34,7 @@ Shader::Translation* ShaderCache::Translate(DxbcShader& shader, uint64_t modific
   if (created && !translator.TranslateAnalyzedShader(*result))
     throw std::runtime_error("Native: guest shader translation failed");
   if (!result->is_valid()) throw std::runtime_error("Native: invalid translated shader");
+  if (created && !REXCVAR_GET(dump_shaders).empty()) result->Dump(REXCVAR_GET(dump_shaders), "native");
   return result;
 }
 }
