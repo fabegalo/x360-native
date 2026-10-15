@@ -88,7 +88,7 @@ void D3D12Scanout::Resolve(const rex::graphics::RegisterFile& regs, rex::memory:
 }
 void D3D12Scanout::Present(rex::ui::Presenter& presenter, const ScanoutTexture& t,
                          const void* pixels, const uint32_t* lut) {
-  if (render_) render_->Flush();
+  if (render_) { render_->CountPresent(); render_->CompleteGuestWrites(); render_->Flush(); }
   const unsigned index = unsigned(serial_ % slots_.size());
   auto& slot = slots_[index];
   Wait(slot.serial);

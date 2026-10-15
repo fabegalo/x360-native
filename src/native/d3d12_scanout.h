@@ -13,6 +13,7 @@ class D3D12Scanout final : public ScanoutBackend {
   void Present(rex::ui::Presenter& presenter, const ScanoutTexture& texture,
                const void* pixels, const uint32_t* lut) override;
   void Drain() override;
+  void CompleteGuestWrites() override { if (render_) render_->CompleteGuestWrites(); }
   rex::graphics::Shader* LoadShader(rex::graphics::xenos::ShaderType type, const uint32_t* data, uint32_t count) override;
   void Draw(const rex::graphics::RegisterFile& regs, rex::memory::Memory& memory, rex::graphics::Shader* vs, rex::graphics::Shader* ps,
       rex::graphics::xenos::PrimitiveType primitive, uint32_t count, const DrawIndices* indices) override;

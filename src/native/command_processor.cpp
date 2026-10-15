@@ -17,8 +17,15 @@ namespace x360n::native {
   rex::FlushLogging();
   std::_Exit(78);
 }
+namespace { CommandProcessor* active_processor = nullptr; }
+void CompleteGuestWritesBeforePacket() { if (active_processor) active_processor->CompleteGuestWrites(); }
+void CommandProcessor::CompleteGuestWrites() {
+  try { if (scanout_) scanout_->CompleteGuestWrites(); }
+  catch (const std::exception& e) { Unsupported(e.what()); }
+}
 bool CommandProcessor::SetupContext() {
   try {
+    active_processor = this;
     scanout_ = factory_(*graphics_system_->provider());
     REXLOG_INFO("Native: independent D3D12 scanout and guest renderer ready");
     return true;
@@ -27,17 +34,19 @@ bool CommandProcessor::SetupContext() {
 void CommandProcessor::ShutdownContext() {
   try { if (scanout_) scanout_->Drain(); }
   catch (const std::exception& e) { Unsupported(e.what()); }
+  active_processor = nullptr;
   scanout_.reset();
 }
 void CommandProcessor::WriteRegister(uint32_t index, uint32_t value) {
   if (index >= rex::graphics::RegisterFile::kRegisterCount)
     Unsupported("GPU register outside Native state");
   // The shared PM4 decoder publishes event completions to guest memory after
-  // this register write. Retire Native work before that publication.
-  if (index == rex::graphics::XE_GPU_REG_VGT_EVENT_INITIATOR && scanout_) {
-    try { scanout_->Drain(); }
-    catch (const std::exception& e) { Unsupported(e.what()); }
-  }
+  // this register write. Every guest input of earlier commands (vertices,
+  // indices, textures, constants, shaders) was copied when recorded, and the
+  // only guest-memory outputs are resolve results: publish those first.
+  // In-flight EDRAM work is not guest-observable (memexport and occlusion
+  // queries are refused), so no GPU wait is needed otherwise.
+  if (index == rex::graphics::XE_GPU_REG_VGT_EVENT_INITIATOR) CompleteGuestWrites();
   rex::graphics::CommandProcessor::WriteRegister(index, value);
 }
 void CommandProcessor::IssueSwap(uint32_t, uint32_t width, uint32_t height) {

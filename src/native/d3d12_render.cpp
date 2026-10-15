@@ -27,6 +27,12 @@ D3D12Render::Ptr<ID3D12Resource> D3D12Render::Buffer(uint64_t bytes, D3D12_HEAP_
   return r;
 }
 D3D12Render::UploadSlice D3D12Render::Upload(const void* data, size_t bytes) {
+  uint8_t* mapped;
+  auto slice = Reserve(bytes, mapped);
+  std::memcpy(mapped, data, bytes);
+  return slice;
+}
+D3D12Render::UploadSlice D3D12Render::Reserve(size_t bytes, uint8_t*& mapped) {
   // Suballocate immutable ranges for this submission. Reuse only after Flush
   // has waited for the fence, including texture copies and root CBVs.
   const uint64_t aligned = (uint64_t(bytes) + 511) & ~uint64_t(511);
@@ -42,7 +48,7 @@ D3D12Render::UploadSlice D3D12Render::Upload(const void* data, size_t bytes) {
   }
   auto& page = upload_pages_[upload_page_index_];
   const uint64_t offset = page.used; page.used += aligned;
-  std::memcpy(page.mapped + offset, data, bytes);
+  mapped = page.mapped + offset;
   return {page.resource, offset};
 }
 D3D12_GPU_VIRTUAL_ADDRESS D3D12Render::Constants(const void* p, size_t n) { return Upload(p, n).Address(); }
@@ -126,6 +132,17 @@ void D3D12Render::Flush() {
     }
     debug_->ClearStoredMessages();
   }
+  if (!writeback_.empty()) {
+    // The fence above retired every resolve copy of this submission.
+    void* mapped; D3D12_RANGE range{0, size_t(readback_used_)};
+    Check(readback_->Map(0, &range, &mapped), "map resolve readback");
+    writeback_.Complete([&](const GuestWriteback::Write& w) {
+      std::memcpy(guest_memory_->TranslatePhysical(w.address), static_cast<const uint8_t*>(mapped) + w.offset, w.length);
+    });
+    D3D12_RANGE none{}; readback_->Unmap(0, &none);
+    ++guest_epoch_; // Guest memory changed.
+  }
+  readback_used_ = 0;
   transient_.clear(); view_count_ = sampler_count_ = 0;
   uint64_t retained = 0;
   for (auto& page : upload_pages_) { page.used = 0; retained += page.size; }
@@ -133,17 +150,25 @@ void D3D12Render::Flush() {
   upload_page_index_ = 0;
   Check(allocator_->Reset(), "reset allocator"); Check(list_->Reset(allocator_.Get(), nullptr), "reset list");
   if (stats_enabled_ && serial_ % 30 == 0)
-    REXLOG_INFO("Native costs draws={} resolves={} submits={} texture_uploads={} texture_bytes={} texture_ms={} resolve_ms={} flush_ms={} cache_hits={} (flush overlaps resolve)",
-        draw_count_, resolve_count_, serial_, texture_uploads_, texture_upload_bytes_, texture_ns_ / 1000000,
+    REXLOG_INFO("Native costs presents={} draws={} resolves={} empty_resolves={} overlap_flushes={} submits={} texture_uploads={} texture_bytes={} texture_ms={} resolve_ms={} flush_ms={} cache_hits={} (flush overlaps resolve)",
+        present_count_, draw_count_, resolve_count_, empty_resolve_count_, overlap_flushes_, serial_, texture_uploads_, texture_upload_bytes_, texture_ns_ / 1000000,
         resolve_ns_ / 1000000, flush_ns_ / 1000000, texture_cache_hits_);
   if (stats_enabled_ && serial_ % 30 == 0)
     REXLOG_INFO("Native draw costs draw_ms={} guest_upload_ms={} guest_upload_bytes={} (draw includes textures; uploads include resolve preservation)",
         draw_ns_ / 1000000, guest_upload_ns_ / 1000000, guest_upload_bytes_);
 }
+void D3D12Render::SyncGuestRead(uint32_t address, uint64_t length) {
+  if (length && writeback_.Overlaps(address, uint32_t(std::min<uint64_t>(length, 0x20000000)))) {
+    if (stats_enabled_) ++overlap_flushes_;
+    Flush();
+  }
+}
 void D3D12Render::UploadGuest(rex::memory::Memory& m, uint32_t address, uint32_t bytes) {
   Timer timer(stats_enabled_, guest_upload_ns_);
   Require(uint64_t(address) + bytes <= 0x20000000, "guest upload bounds");
   if (!bytes) return;
+  // Callers synchronize before recording; flushing here would orphan state.
+  Require(!writeback_.Overlaps(address, bytes), "guest upload overlaps an incomplete resolve");
   if (stats_enabled_) guest_upload_bytes_ += bytes;
   auto data = Upload(m.TranslatePhysical(address), bytes);
   Transition(memory_.Get(), memory_state_, D3D12_RESOURCE_STATE_COPY_DEST);

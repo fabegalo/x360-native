@@ -3,7 +3,7 @@ set(_gpu ${X360_REXGLUE_DIR}/src/graphics)
 add_library(rexgpu-native SHARED plugin.cpp command_processor.cpp packet_guard.cpp d3d12_scanout.cpp texture.cpp
     ${_gpu}/graphics_system.cpp ${_gpu}/command_processor.cpp
     ${_gpu}/register_file.cpp ${_gpu}/registers.cpp ${_gpu}/flags.cpp
-    shader_cache.cpp d3d12_render.cpp d3d12_draw.cpp rectangle_shader.cpp d3d12_resolve.cpp d3d12_textures.cpp edram_format.cpp ${_gpu}/util/draw.cpp
+    shader_cache.cpp d3d12_render.cpp d3d12_draw.cpp rectangle_shader.cpp point_shader.cpp d3d12_resolve.cpp d3d12_textures.cpp edram_format.cpp ${_gpu}/util/draw.cpp
     ${_gpu}/pipeline/shader/shader.cpp ${_gpu}/format/ucode.cpp
     ${_gpu}/pipeline/shader/translator.cpp ${_gpu}/pipeline/shader/translator_disasm.cpp
     ${_gpu}/pipeline/shader/dxbc.cpp ${_gpu}/pipeline/shader/dxbc_translator.cpp
@@ -27,8 +27,8 @@ add_executable(x360n_native_probe ../../tests/native/probe.cpp)
 target_link_libraries(x360n_native_probe PRIVATE rexruntime windowscodecs ole32)
 x360n_stage_runtime_dlls(x360n_native_probe PLUGIN_TARGETS rexgpu-native rexgpu-xenos)
 if(TARGET Catch2::Catch2WithMain)
-  add_executable(x360n_native_tests ../../tests/native/texture_test.cpp ../../tests/native/packet_test.cpp ../../tests/native/rectangle_test.cpp texture.cpp packet_guard.cpp rectangle_shader.cpp)
-  target_include_directories(x360n_native_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+  add_executable(x360n_native_tests ../../tests/native/texture_test.cpp ../../tests/native/packet_test.cpp ../../tests/native/rectangle_test.cpp ../../tests/native/point_test.cpp texture.cpp packet_guard.cpp rectangle_shader.cpp point_shader.cpp ${_gpu}/util/draw.cpp ${_gpu}/register_file.cpp ${_gpu}/registers.cpp ${_gpu}/flags.cpp ${X360_REXGLUE_DIR}/thirdparty/dxbc/DXBCChecksum.cpp)
+  target_include_directories(x360n_native_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${X360_REXGLUE_DIR} ${X360_REXGLUE_DIR}/thirdparty/renderdoc)
   target_link_libraries(x360n_native_tests PRIVATE rexruntime Catch2::Catch2WithMain d3d12 d3dcompiler)
   x360n_stage_runtime_dlls(x360n_native_tests)
   add_test(NAME native.texture COMMAND x360n_native_tests ~[native-packet])

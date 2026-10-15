@@ -6,6 +6,10 @@ namespace rex::graphics {
 // Called only by SDK sources compiled for Native with REX_GPU_VALIDATE_PACKET.
 // The Xenos plugin has no extra branch, virtual call, or instrumentation.
 void ValidatePacketForBackend(uint32_t header, const rex::memory::RingBuffer& payload) {
+  // A wait, interrupt or memory packet may let the guest CPU write memory
+  // while it executes: the next packet starts a new guest epoch as well.
+  static thread_local bool after_guest_sync = false;
+  if (after_guest_sync) { after_guest_sync = false; x360n::native::CompleteGuestWritesBeforePacket(); }
   const auto remaining_dwords = payload.read_count() / 4;
   if (!header) return;
   const uint32_t type = header >> 30;
@@ -33,6 +37,9 @@ void ValidatePacketForBackend(uint32_t header, const rex::memory::RingBuffer& pa
     case PM4_SET_BIN_SELECT_LO: case PM4_SET_BIN_SELECT_HI:
     case PM4_EVENT_WRITE: required = 1; break;
     case PM4_REG_RMW: case PM4_EVENT_WRITE_SHD: required = 3; break;
+    // Shared handler reports maximal screen extents: a superset of any draw's
+    // coverage, so tile predication may run more draws but never drops pixels.
+    case PM4_EVENT_WRITE_EXT: required = 2; break;
     case PM4_WAIT_REG_MEM: required = 5; break;
     case PM4_COND_WRITE: required = 6; break;
     case PM4_MEM_WRITE: required = 2; variable = true; break;
@@ -53,6 +60,15 @@ void ValidatePacketForBackend(uint32_t header, const rex::memory::RingBuffer& pa
   // Inspect a cursor copy: validation must not consume the guest command.
   auto cursor = payload;
   auto word = [&]() { return cursor.ReadAndSwap<uint32_t>(); };
+  if (opcode == PM4_EVENT_WRITE_EXT) {
+    word();
+    const auto address = word();
+    // The shared writer always stores six 16-bit values swapped 8-in-16.
+    if (Endian(address & 3) != Endian::k8in16)
+      x360n::native::Unsupported("screen extent endianness not implemented");
+    if (uint64_t(address & ~3u) + 12 > 0x20000000)
+      x360n::native::Unsupported("screen extent outside guest physical memory");
+  }
   if (opcode == PM4_IM_LOAD || opcode == PM4_IM_LOAD_IMMEDIATE) {
     auto source = word(), size = word();
     auto type = opcode == PM4_IM_LOAD ? source & 3 : source;
@@ -92,6 +108,16 @@ void ValidatePacketForBackend(uint32_t header, const rex::memory::RingBuffer& pa
     }
     if (base >= RegisterFile::kRegisterCount || length > RegisterFile::kRegisterCount - base || uint64_t(address) + length * 4 > 0x20000000)
       x360n::native::Unsupported("constant register or memory extent invalid");
+  }
+  // These packets read or write guest memory, or let the guest run code:
+  // incomplete resolve results must be visible to them first.
+  switch (opcode) {
+    case PM4_INTERRUPT: case PM4_REG_TO_MEM: case PM4_IM_LOAD: case PM4_WAIT_REG_MEM:
+    case PM4_COND_WRITE: case PM4_MEM_WRITE: case PM4_LOAD_ALU_CONSTANT:
+      x360n::native::CompleteGuestWritesBeforePacket();
+      after_guest_sync = true;
+      break;
+    default: break;
   }
 }
 }

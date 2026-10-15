@@ -1,4 +1,5 @@
 #include "d3d12_render.h"
+#include "resolve_coverage.h"
 #include <d3dcompiler.h>
 #include <rex/logging.h>
 #include <stdexcept>
@@ -42,14 +43,50 @@ D3D12Render::Ptr<ID3D12PipelineState> D3D12Render::ComputePSO(ID3D12RootSignatur
 }
 void D3D12Render::Resolve(const RegisterFile& r, rex::memory::Memory& memory) {
   Timer timer(stats_enabled_, resolve_ns_);
+  guest_memory_ = &memory;
+  const auto fetch = r.GetVertexFetch(0);
+  if (fetch.type == xenos::FetchConstantType::kVertex && fetch.size == 6 &&
+      uint64_t(fetch.address) * 4 + 24 <= 0x20000000) {
+    SyncGuestRead(fetch.address << 2, 24); // Rectangle read by the CPU below.
+    float vertices[6];
+    const auto* guest = memory.TranslatePhysical<const float*>(fetch.address << 2);
+    for (unsigned i = 0; i < 6; ++i) vertices[i] = xenos::GpuSwap(guest[i], fetch.endian);
+    if (ResolveCoverageEmpty(r, vertices)) {
+      // No samples exist to copy or clear: nothing becomes CPU-visible, so as
+      // in the pinned executor there is no submission or wait. Pending draws
+      // stay ordered in the list; no destination writes are fabricated.
+      ++resolve_count_;
+      ++empty_resolve_count_;
+      return;
+    }
+  }
   draw_util::ResolveInfo info;
-  if (!draw_util::GetResolveInfo(r, memory, 1, 1, false, false, info)) throw std::runtime_error("Native: invalid resolve registers/vertices");
+  if (!draw_util::GetResolveInfo(r, memory, 1, 1, false, false, info)) {
+    const auto f = r.GetVertexFetch(0);
+    REXLOG_ERROR("Native resolve fetch address={:08X} size={} endian={} surface={:08X} scissor TL={:08X} BR={:08X}",
+        f.address << 2, f.size, uint32_t(f.endian), r[XE_GPU_REG_RB_SURFACE_INFO],
+        r[XE_GPU_REG_PA_SC_WINDOW_SCISSOR_TL], r[XE_GPU_REG_PA_SC_WINDOW_SCISSOR_BR]);
+    if (f.type == xenos::FetchConstantType::kVertex && f.size == 6) {
+      const auto* v = memory.TranslatePhysical<const float*>(f.address << 2);
+      REXLOG_ERROR("Native resolve vertices ({},{}) ({},{}) ({},{})", xenos::GpuSwap(v[0], f.endian), xenos::GpuSwap(v[1], f.endian),
+          xenos::GpuSwap(v[2], f.endian), xenos::GpuSwap(v[3], f.endian), xenos::GpuSwap(v[4], f.endian), xenos::GpuSwap(v[5], f.endian));
+    }
+    throw std::runtime_error("Native: invalid resolve registers/vertices");
+  }
   if (!copy_root_) copy_root_ = ComputeRoot(sizeof(draw_util::ResolveCopyShaderConstants) / 4, true);
   if (!clear_root_) clear_root_ = ComputeRoot(sizeof(draw_util::ResolveClearShaderConstants) / 4, false);
-  if (view_count_ > 65000) Flush();
-  ID3D12DescriptorHeap* heaps[]{views_.Get(), samplers_.Get()}; list_->SetDescriptorHeaps(2, heaps);
   auto length = info.copy_dest_extent_length;
-  Ptr<ID3D12Resource> readback;
+  const uint64_t slot = (uint64_t(length) + 255) & ~uint64_t(255);
+  // Every flush happens before recording: bytes preserved around the copy
+  // are read from guest memory, which must hold earlier resolve results.
+  SyncGuestRead(info.copy_dest_extent_start, length);
+  if (view_count_ > 65000 || (length && readback_used_ + slot > readback_size_)) Flush();
+  if (slot > readback_size_) {
+    // After the flush no submission references the old buffer.
+    readback_size_ = std::max<uint64_t>(slot, 16ull * 1024 * 1024);
+    readback_ = Buffer(readback_size_, D3D12_HEAP_TYPE_READBACK, D3D12_RESOURCE_STATE_COPY_DEST);
+  }
+  ID3D12DescriptorHeap* heaps[]{views_.Get(), samplers_.Get()}; list_->SetDescriptorHeaps(2, heaps);
   if (length) {
     draw_util::ResolveCopyShaderConstants constants; uint32_t gx, gy;
     auto index = info.GetCopyShader(1, 1, constants, gx, gy);
@@ -84,8 +121,10 @@ void D3D12Render::Resolve(const RegisterFile& r, rex::memory::Memory& memory) {
     list_->SetComputeRootDescriptorTable(1, Gpu(v)); list_->SetComputeRootDescriptorTable(2, Gpu(v + 1));
     list_->Dispatch(gx, gy, 1);
     Transition(memory_.Get(), memory_state_, D3D12_RESOURCE_STATE_COPY_SOURCE);
-    readback = Buffer(length, D3D12_HEAP_TYPE_READBACK, D3D12_RESOURCE_STATE_COPY_DEST);
-    list_->CopyBufferRegion(readback.Get(), 0, memory_.Get(), info.copy_dest_extent_start, length);
+    list_->CopyBufferRegion(readback_.Get(), readback_used_, memory_.Get(), info.copy_dest_extent_start, length);
+    // Guest-visible when this submission's fence completes (see GuestWriteback).
+    writeback_.Add(info.copy_dest_extent_start, length, readback_used_);
+    readback_used_ += slot;
   }
   if (info.IsClearingColor() || info.IsClearingDepth()) {
     Transition(edram_.Get(), edram_state_, D3D12_RESOURCE_STATE_UNORDERED_ACCESS); Barrier();
@@ -104,12 +143,6 @@ void D3D12Render::Resolve(const RegisterFile& r, rex::memory::Memory& memory) {
       list_->Dispatch(groups.first, groups.second, 1); Barrier();
     };
     if (info.IsClearingDepth()) clear(true); if (info.IsClearingColor()) clear(false);
-  }
-  Flush();
-  if (readback) {
-    void* data; D3D12_RANGE range{0, length}; Check(readback->Map(0, &range, &data), "readback");
-    std::memcpy(memory.TranslatePhysical(info.copy_dest_extent_start), data, length);
-    D3D12_RANGE empty{}; readback->Unmap(0, &empty);
   }
   ++resolve_count_;
 }

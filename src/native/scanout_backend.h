@@ -14,6 +14,9 @@ class ScanoutBackend {
   virtual void Present(rex::ui::Presenter&, const ScanoutTexture&, const void* pixels,
                        const uint32_t* lut) = 0;
   virtual void Drain() = 0;
+  // Guest-observable point (memory packet, wait, buffer end): publish every
+  // recorded resolve result to guest memory before the guest can see it.
+  virtual void CompleteGuestWrites() = 0;
   virtual rex::graphics::Shader* LoadShader(rex::graphics::xenos::ShaderType, const uint32_t*, uint32_t) = 0;
   virtual void Draw(const rex::graphics::RegisterFile&, rex::memory::Memory&, rex::graphics::Shader*, rex::graphics::Shader*,
       rex::graphics::xenos::PrimitiveType, uint32_t, const DrawIndices*) = 0;

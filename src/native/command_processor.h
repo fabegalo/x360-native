@@ -12,6 +12,14 @@ class CommandProcessor final : public rex::graphics::CommandProcessor {
   bool SetupContext() override;
   void ShutdownContext() override;
   void WriteRegister(uint32_t index, uint32_t value) override;
+  // Guest-observable points: the read pointer is written back after a
+  // primary buffer, and waits poll memory the guest or a resolve may write.
+  void OnPrimaryBufferEnd() override { CompleteGuestWrites(); }
+  void PrepareForWait() override { CompleteGuestWrites(); }
+ public:
+  // Called before PM4 packets that read or write guest memory.
+  void CompleteGuestWrites();
+ protected:
   rex::graphics::Shader* LoadShader(rex::graphics::xenos::ShaderType type, uint32_t address,
                                     const uint32_t* data, uint32_t count) override;
   bool IssueDraw(rex::graphics::xenos::PrimitiveType, uint32_t, IndexBufferInfo*, bool) override;
@@ -22,4 +30,6 @@ class CommandProcessor final : public rex::graphics::CommandProcessor {
   std::unique_ptr<ScanoutBackend> scanout_;
 };
 [[noreturn]] void Unsupported(const char* message);
+// Single command processor thread per process; no-op before setup.
+void CompleteGuestWritesBeforePacket();
 }
