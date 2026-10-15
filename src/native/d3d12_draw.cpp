@@ -1,6 +1,7 @@
 #include "d3d12_render.h"
 #include "rectangle_shader.h"
 #include "point_shader.h"
+#include "texture_load.h"
 #include "primitive_indices.h"
 #include <rex/graphics/pipeline/render_target/cache.h>
 #include <rex/logging.h>
@@ -45,7 +46,7 @@ void D3D12Render::Draw(const RegisterFile& r, rex::memory::Memory& memory, Shade
       primitive != PrimitiveType::kRectangleList && !fan && !quad && !point)
     throw std::runtime_error("Native draw: primitive conversion not implemented (primitive=" +
         std::to_string(uint32_t(primitive)) + ", count=" + std::to_string(count) + ")");
-  if (view_count_ > 60000 || sampler_count_ > 1700 || transient_.size() > 5000) Flush();
+  if (view_count_ > 60000 || sampler_count_ > 1700 || transient_.size() > 5000) Flush(kFlushCapacity);
   auto program = r.Get<reg::SQ_PROGRAM_CNTL>();
   uint32_t param = kMaxInterpolators;
   auto mask = ps ? vs.writes_interpolators() & ps->GetInterpolatorInputMask(program, r.Get<reg::SQ_CONTEXT_MISC>(), param) : 0;
@@ -124,26 +125,25 @@ void D3D12Render::Draw(const RegisterFile& r, rex::memory::Memory& memory, Shade
       throw std::runtime_error("Native draw: graphics pipeline creation failed HRESULT=" + std::to_string(uint32_t(hr)));
     }
   }
-  // Every guest range this draw reads on the CPU must hold earlier resolve
-  // results before anything is recorded (a later flush would orphan state).
+  // Ranges this draw reads on the CPU (indices, textures converted on the
+  // CPU) must hold earlier resolve results before anything is recorded (a
+  // later flush would orphan state). Vertices and GPU-loaded textures read
+  // the resident mirror, where resolve results already are.
   if (!writeback_.empty()) {
-    for (const auto& b : vs.vertex_bindings()) {
-      auto f = r.GetVertexFetch(b.fetch_constant);
-      if (f.type == FetchConstantType::kVertex) SyncGuestRead(f.address << 2, uint64_t(f.size) << 2);
-    }
-    if (indices) SyncGuestRead(indices->guest_base, indices->length);
+    if (indices) SyncGuestRead(indices->guest_base, indices->length, kReadIndices);
     for (auto* shader : {&vs, ps}) if (shader)
       for (const auto& t : shader->GetTextureBindingsAfterTranslation()) {
         auto f = r.GetTextureFetch(t.fetch_constant);
-        if (f.type != FetchConstantType::kTexture) continue;
+        if (f.type != FetchConstantType::kTexture || !NeedsCpuConversion(f.format, t.is_signed, f.num_format)) continue;
         uint32_t wm, hm, dm, base, mip, lo, hi;
         texture_util::GetSubresourcesFromFetchConstant(f, &wm, &hm, &dm, &base, &mip, &lo, &hi);
         // Same extents BindTextures reads (all levels, conservatively).
         auto layout = texture_util::GetGuestTextureLayout(f.dimension, f.pitch, wm + 1, hm + 1, dm + 1, f.tiled, f.format, f.packed_mips, true, hi);
-        if (base) SyncGuestRead(base << 12, (layout.base.level_data_extent_bytes + 3u) & ~3u);
-        if (mip && hi) SyncGuestRead(mip << 12, (layout.mips_total_extent_bytes + 3u) & ~3u);
+        if (base) SyncGuestRead(base << 12, (layout.base.level_data_extent_bytes + 3u) & ~3u, kReadCpuTexture);
+        if (mip && hi) SyncGuestRead(mip << 12, (layout.mips_total_extent_bytes + 3u) & ~3u, kReadCpuTexture);
       }
   }
+  auto& mirror = Mirror(memory);
   for (const auto& b : vs.vertex_bindings()) {
     auto f = r.GetVertexFetch(b.fetch_constant);
     if (f.type == FetchConstantType::kInvalidVertex) {
@@ -162,9 +162,8 @@ void D3D12Render::Draw(const RegisterFile& r, rex::memory::Memory& memory, Shade
           uint32_t(f.type), b.fetch_constant, f.dword_0, f.dword_1, (unsigned long long)vs.ucode_data_hash());
       throw std::runtime_error(text);
     }
-    // memory_ keeps earlier copies; guest bytes are unchanged within an epoch.
-    if (vertex_epoch_ != guest_epoch_) { vertex_uploads_.clear(); vertex_epoch_ = guest_epoch_; }
-    if (vertex_uploads_.insert(uint64_t(f.address) << 32 | f.size).second) UploadGuest(memory, f.address << 2, f.size << 2);
+    // Uploads only pages the CPU wrote since they were last valid.
+    mirror.RequestRange(f.address << 2, f.size << 2);
   }
   D3D12_INDEX_BUFFER_VIEW ib{};
   std::vector<IndexRange> index_ranges;
@@ -203,6 +202,10 @@ void D3D12Render::Draw(const RegisterFile& r, rex::memory::Memory& memory, Shade
     ib = {data.Address(), UINT(expanded.size() * 4), DXGI_FORMAT_R32_UINT};
     count = uint32_t(expanded.size());
   }
+  // Texture loads record uploads and compute work: before the draw state.
+  TextureTables pixel_tables, vertex_tables;
+  if (ps) pixel_tables = BindTextures(r, memory, *ps);
+  vertex_tables = BindTextures(r, memory, vs);
   Transition(memory_.Get(), memory_state_, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_INDEX_BUFFER);
   Transition(edram_.Get(), edram_state_, D3D12_RESOURCE_STATE_UNORDERED_ACCESS); Barrier();
   ID3D12DescriptorHeap* heaps[]{views_.Get(), samplers_.Get()}; list_->SetDescriptorHeaps(2, heaps);
@@ -307,7 +310,7 @@ void D3D12Render::Draw(const RegisterFile& r, rex::memory::Memory& memory, Shade
   floats(vs, XE_GPU_REG_SHADER_CONSTANT_000_X, 1); if (ps) floats(*ps, XE_GPU_REG_SHADER_CONSTANT_256_X, 2);
   list_->SetGraphicsRootConstantBufferView(3, Constants(&r[XE_GPU_REG_SHADER_CONSTANT_BOOL_000_031], 40 * 4));
   list_->SetGraphicsRootConstantBufferView(4, Constants(&r[XE_GPU_REG_SHADER_CONSTANT_FETCH_00_0], 192 * 4));
-  if (ps) BindTextures(r, memory, *ps, 6, 7); BindTextures(r, memory, vs, 8, 9);
+  SetTextureTables(pixel_tables, 6, 7); SetTextureTables(vertex_tables, 8, 9);
   list_->OMSetRenderTargets(0, nullptr, FALSE, nullptr);
   list_->IASetPrimitiveTopology(point ? D3D_PRIMITIVE_TOPOLOGY_POINTLIST : primitive == PrimitiveType::kTriangleStrip ? D3D_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP : D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
   if (indices || fan || quad) { list_->IASetIndexBuffer(&ib); for (const auto& range : index_ranges) list_->DrawIndexedInstanced(range.count, 1, range.offset, 0, 0); }

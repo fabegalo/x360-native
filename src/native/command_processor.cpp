@@ -18,9 +18,16 @@ namespace x360n::native {
   std::_Exit(78);
 }
 namespace { CommandProcessor* active_processor = nullptr; }
-void CompleteGuestWritesBeforePacket() { if (active_processor) active_processor->CompleteGuestWrites(); }
-void CommandProcessor::CompleteGuestWrites() {
-  try { if (scanout_) scanout_->CompleteGuestWrites(); }
+void CompleteGuestWritesBeforePacket(GuestSync source, uint32_t opcode) { if (active_processor) active_processor->CompleteGuestWrites(source, opcode); }
+void SyncGuestReadBeforePacket(uint32_t address, uint32_t length, uint32_t opcode) {
+  if (active_processor) active_processor->SyncGuestRead(address, length, opcode);
+}
+void CommandProcessor::SyncGuestRead(uint32_t address, uint32_t length, uint32_t opcode) {
+  try { if (scanout_) scanout_->SyncGuestRead(address, length, opcode); }
+  catch (const std::exception& e) { Unsupported(e.what()); }
+}
+void CommandProcessor::CompleteGuestWrites(GuestSync source, uint32_t opcode) {
+  try { if (scanout_) scanout_->CompleteGuestWrites(source, opcode); }
   catch (const std::exception& e) { Unsupported(e.what()); }
 }
 bool CommandProcessor::SetupContext() {
@@ -40,13 +47,6 @@ void CommandProcessor::ShutdownContext() {
 void CommandProcessor::WriteRegister(uint32_t index, uint32_t value) {
   if (index >= rex::graphics::RegisterFile::kRegisterCount)
     Unsupported("GPU register outside Native state");
-  // The shared PM4 decoder publishes event completions to guest memory after
-  // this register write. Every guest input of earlier commands (vertices,
-  // indices, textures, constants, shaders) was copied when recorded, and the
-  // only guest-memory outputs are resolve results: publish those first.
-  // In-flight EDRAM work is not guest-observable (memexport and occlusion
-  // queries are refused), so no GPU wait is needed otherwise.
-  if (index == rex::graphics::XE_GPU_REG_VGT_EVENT_INITIATOR) CompleteGuestWrites();
   rex::graphics::CommandProcessor::WriteRegister(index, value);
 }
 void CommandProcessor::IssueSwap(uint32_t, uint32_t width, uint32_t height) {

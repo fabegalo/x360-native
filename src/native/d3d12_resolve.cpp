@@ -47,7 +47,7 @@ void D3D12Render::Resolve(const RegisterFile& r, rex::memory::Memory& memory) {
   const auto fetch = r.GetVertexFetch(0);
   if (fetch.type == xenos::FetchConstantType::kVertex && fetch.size == 6 &&
       uint64_t(fetch.address) * 4 + 24 <= 0x20000000) {
-    SyncGuestRead(fetch.address << 2, 24); // Rectangle read by the CPU below.
+    SyncGuestRead(fetch.address << 2, 24, kReadResolveRect); // Rectangle read by the CPU below.
     float vertices[6];
     const auto* guest = memory.TranslatePhysical<const float*>(fetch.address << 2);
     for (unsigned i = 0; i < 6; ++i) vertices[i] = xenos::GpuSwap(guest[i], fetch.endian);
@@ -77,10 +77,7 @@ void D3D12Render::Resolve(const RegisterFile& r, rex::memory::Memory& memory) {
   if (!clear_root_) clear_root_ = ComputeRoot(sizeof(draw_util::ResolveClearShaderConstants) / 4, false);
   auto length = info.copy_dest_extent_length;
   const uint64_t slot = (uint64_t(length) + 255) & ~uint64_t(255);
-  // Every flush happens before recording: bytes preserved around the copy
-  // are read from guest memory, which must hold earlier resolve results.
-  SyncGuestRead(info.copy_dest_extent_start, length);
-  if (view_count_ > 65000 || (length && readback_used_ + slot > readback_size_)) Flush();
+  if (view_count_ > 65000 || (length && readback_used_ + slot > readback_size_)) Flush(kFlushCapacity);
   if (slot > readback_size_) {
     // After the flush no submission references the old buffer.
     readback_size_ = std::max<uint64_t>(slot, 16ull * 1024 * 1024);
@@ -104,7 +101,10 @@ void D3D12Render::Resolve(const RegisterFile& r, rex::memory::Memory& memory) {
         {resolve_full_128bpp_cs, sizeof(resolve_full_128bpp_cs)}};
       copy_pipelines_[size_t(index)] = ComputePSO(copy_root_.Get(), code[size_t(index)].pShaderBytecode, code[size_t(index)].BytecodeLength);
     }
-    UploadGuest(memory, info.copy_dest_extent_start, length);
+    // Bytes of the extent outside the written rectangle stay as they are:
+    // the mirror is made current (CPU-written pages only) before the copy.
+    auto& mirror = Mirror(memory);
+    mirror.RequestRange(info.copy_dest_extent_start, length);
     Transition(memory_.Get(), memory_state_, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
     Barrier(); Transition(edram_.Get(), edram_state_, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
     unsigned v = Views(2);
@@ -120,6 +120,9 @@ void D3D12Render::Resolve(const RegisterFile& r, rex::memory::Memory& memory) {
     list_->SetComputeRoot32BitConstants(0, sizeof(constants) / 4, &constants, 0);
     list_->SetComputeRootDescriptorTable(1, Gpu(v)); list_->SetComputeRootDescriptorTable(2, Gpu(v + 1));
     list_->Dispatch(gx, gy, 1);
+    // The mirror now holds these bytes: later fetches read them on the GPU;
+    // cached textures over the range reload from the mirror.
+    mirror.RangeWrittenByGpu(info.copy_dest_extent_start, length);
     Transition(memory_.Get(), memory_state_, D3D12_RESOURCE_STATE_COPY_SOURCE);
     list_->CopyBufferRegion(readback_.Get(), readback_used_, memory_.Get(), info.copy_dest_extent_start, length);
     // Guest-visible when this submission's fence completes (see GuestWriteback).

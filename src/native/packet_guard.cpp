@@ -9,7 +9,7 @@ void ValidatePacketForBackend(uint32_t header, const rex::memory::RingBuffer& pa
   // A wait, interrupt or memory packet may let the guest CPU write memory
   // while it executes: the next packet starts a new guest epoch as well.
   static thread_local bool after_guest_sync = false;
-  if (after_guest_sync) { after_guest_sync = false; x360n::native::CompleteGuestWritesBeforePacket(); }
+  if (after_guest_sync) { after_guest_sync = false; x360n::native::CompleteGuestWritesBeforePacket(x360n::native::kGuestSyncPacket, 0x80); }
   const auto remaining_dwords = payload.read_count() / 4;
   if (!header) return;
   const uint32_t type = header >> 30;
@@ -112,9 +112,30 @@ void ValidatePacketForBackend(uint32_t header, const rex::memory::RingBuffer& pa
   // These packets read or write guest memory, or let the guest run code:
   // incomplete resolve results must be visible to them first.
   switch (opcode) {
-    case PM4_INTERRUPT: case PM4_REG_TO_MEM: case PM4_IM_LOAD: case PM4_WAIT_REG_MEM:
-    case PM4_COND_WRITE: case PM4_MEM_WRITE: case PM4_LOAD_ALU_CONSTANT:
-      x360n::native::CompleteGuestWritesBeforePacket();
+    // EVENT_WRITE_SHD/EXT store a fence or extents to guest memory after the
+    // event register write; a plain EVENT_WRITE (cache flush) publishes
+    // nothing the guest can observe, so it does not wait for the GPU.
+    // Every guest input of earlier commands was captured when recorded and
+    // the only guest-memory outputs are resolve results.
+    case PM4_EVENT_WRITE_SHD:
+      x360n::native::CompleteGuestWritesBeforePacket(x360n::native::kGuestSyncEvent, opcode);
+      after_guest_sync = true;
+      break;
+    // IM_LOAD and LOAD_ALU_CONSTANT only read guest memory into the command
+    // processor: a pending resolve matters only if it overlaps the read.
+    case PM4_IM_LOAD: case PM4_LOAD_ALU_CONSTANT: {
+      auto read = payload;
+      auto next = [&]() { return read.ReadAndSwap<uint32_t>(); };
+      uint32_t address, bytes;
+      if (opcode == PM4_IM_LOAD) { address = next() & ~3u; bytes = (next() & 65535) * 4; }
+      else { address = next() & 0x3fffffff; next(); bytes = (next() & 0xfff) * 4; }
+      x360n::native::SyncGuestReadBeforePacket(address, bytes, opcode);
+      break;
+    }
+    case PM4_EVENT_WRITE_EXT:
+    case PM4_INTERRUPT: case PM4_REG_TO_MEM: case PM4_WAIT_REG_MEM:
+    case PM4_COND_WRITE: case PM4_MEM_WRITE:
+      x360n::native::CompleteGuestWritesBeforePacket(x360n::native::kGuestSyncPacket, opcode);
       after_guest_sync = true;
       break;
     default: break;

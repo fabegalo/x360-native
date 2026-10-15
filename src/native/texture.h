@@ -22,7 +22,9 @@ constexpr float PackedSnorm(unsigned value, unsigned bits) {
 // bias 15, with denormals (no infinity encoding); preserve exact f32 bits.
 inline float DecodeDepthTexture(uint32_t packed, bool floating) {
   uint32_t depth = packed >> 8;
-  if (!floating) return float(depth) / 16777215.f;
+  // As the pinned texture_load_depth_unorm shader: (d + d/2^23) / 2^24, exact
+  // at 0 and at 0xFFFFFF (1.0).
+  if (!floating) return float(depth + (depth >> 23)) * 0x1p-24f;
   if (!depth) return 0.f;
   uint32_t mantissa = depth & 0xFFFFF, exponent = depth >> 20;
   if (!exponent) {
@@ -38,6 +40,12 @@ constexpr bool IsFloatTexture(rex::graphics::xenos::TextureFormat f) {
   using F = rex::graphics::xenos::TextureFormat;
   return f == F::k_16_FLOAT || f == F::k_16_16_FLOAT || f == F::k_16_16_16_16_FLOAT ||
       f == F::k_32_FLOAT || f == F::k_32_32_FLOAT || f == F::k_32_32_32_32_FLOAT;
+}
+// Endian swap the pinned texture_load_* shaders apply per block size: none
+// for 8-bit blocks, only 8in16 for 16-bit blocks, every mode from 32 bits.
+constexpr rex::graphics::xenos::Endian TextureBlockEndian(unsigned block_bytes, rex::graphics::xenos::Endian endian) {
+  using E = rex::graphics::xenos::Endian;
+  return block_bytes == 1 ? E::kNone : block_bytes == 2 && endian != E::k8in16 ? E::kNone : endian;
 }
 // API-independent description; this is also the boundary for a future Vulkan backend.
 struct ScanoutTexture {

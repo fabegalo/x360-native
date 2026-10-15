@@ -14,11 +14,12 @@ class CommandProcessor final : public rex::graphics::CommandProcessor {
   void WriteRegister(uint32_t index, uint32_t value) override;
   // Guest-observable points: the read pointer is written back after a
   // primary buffer, and waits poll memory the guest or a resolve may write.
-  void OnPrimaryBufferEnd() override { CompleteGuestWrites(); }
-  void PrepareForWait() override { CompleteGuestWrites(); }
+  void OnPrimaryBufferEnd() override { CompleteGuestWrites(kGuestSyncBufferEnd); }
+  void PrepareForWait() override { CompleteGuestWrites(kGuestSyncWait); }
  public:
   // Called before PM4 packets that read or write guest memory.
-  void CompleteGuestWrites();
+  void CompleteGuestWrites(GuestSync, uint32_t opcode = 0xFF);
+  void SyncGuestRead(uint32_t address, uint32_t length, uint32_t opcode);
  protected:
   rex::graphics::Shader* LoadShader(rex::graphics::xenos::ShaderType type, uint32_t address,
                                     const uint32_t* data, uint32_t count) override;
@@ -31,5 +32,7 @@ class CommandProcessor final : public rex::graphics::CommandProcessor {
 };
 [[noreturn]] void Unsupported(const char* message);
 // Single command processor thread per process; no-op before setup.
-void CompleteGuestWritesBeforePacket();
+// opcode: PM4 type-3 opcode for diagnostics, 0x80 for the packet after a sync.
+void CompleteGuestWritesBeforePacket(GuestSync, uint32_t opcode);
+void SyncGuestReadBeforePacket(uint32_t address, uint32_t length, uint32_t opcode);
 }

@@ -1,10 +1,12 @@
 #include "d3d12_render.h"
 #include <rex/graphics/pipeline/render_target/cache.h>
 #include <rex/logging.h>
+#include <rex/graphics/flags.h>
 #include <d3dcompiler.h>
 #include <stdexcept>
 #include <bit>
 #include <cmath>
+#include <algorithm>
 REXCVAR_DEFINE_BOOL(native_stats, false, "GPU/Native", "Log cumulative Native CPU submission costs for bounded diagnostics");
 REXCVAR_DEFINE_BOOL(native_texture_cache, true, "GPU/Native", "Reuse textures only while every guest source byte matches; disable for diagnostics");
 namespace x360n::native {
@@ -111,14 +113,50 @@ D3D12Render::D3D12Render(rex::ui::d3d12::D3D12Provider& provider) : provider_(pr
   Check(D3D12SerializeRootSignature(&rd, D3D_ROOT_SIGNATURE_VERSION_1, &blob, &errors), "draw root serialization");
   Check(device_->CreateRootSignature(0, blob->GetBufferPointer(), blob->GetBufferSize(), IID_PPV_ARGS(&root_)), "draw root");
 }
-D3D12Render::~D3D12Render() { if (event_) CloseHandle(event_); }
-void D3D12Render::Flush() {
+// Watches reference cache entries: retire them before the cache is destroyed.
+D3D12Render::~D3D12Render() { mirror_.reset(); if (event_) CloseHandle(event_); }
+void D3D12Render::EndFrame() {
+  // Pinned clear_memory_page_state contract: CPU-uploaded pages are reloaded
+  // on their next request after a frame, GPU-written pages stay resident.
+  if (mirror_ && REXCVAR_GET(clear_memory_page_state)) mirror_->InvalidateCpuPages();
+}
+void D3D12Render::CountPresent() {
+  ++present_count_;
+  if (!stats_enabled_) return;
+  const auto now = std::chrono::steady_clock::now();
+  if (last_present_.time_since_epoch().count()) frame_ms_.push_back(std::chrono::duration<float, std::milli>(now - last_present_).count());
+  else window_start_ = now;
+  last_present_ = now;
+  const double window = std::chrono::duration<double>(now - window_start_).count();
+  if (window < 5.0 || frame_ms_.empty()) return;
+  // Interval statistics of guest presents in this window: average rate,
+  // percentile frame times and 1% low (average rate of the slowest 1%).
+  std::vector<float> sorted = frame_ms_;
+  std::sort(sorted.begin(), sorted.end());
+  auto pct = [&](double p) { return sorted[std::min(sorted.size() - 1, size_t(p * double(sorted.size())))]; };
+  const size_t slow = std::max<size_t>(1, sorted.size() / 100);
+  double slow_ms = 0; for (size_t i = sorted.size() - slow; i < sorted.size(); ++i) slow_ms += sorted[i];
+  REXLOG_INFO("Native frame stats frames={} seconds={:.2f} fps={:.2f} p50_ms={:.2f} p95_ms={:.2f} p99_ms={:.2f} max_ms={:.2f} low1_fps={:.2f}",
+      sorted.size(), window, double(sorted.size()) / window, pct(0.50), pct(0.95), pct(0.99), sorted.back(), 1000.0 * double(slow) / slow_ms);
+  REXLOG_INFO("Native flush causes guest_sync={} (event={} packet={} wait={} buffer_end={} present={}) present={} overlap={} capacity={} drain={} wait_ms={}",
+      flush_causes_[kFlushGuestSync], sync_sources_[kGuestSyncEvent], sync_sources_[kGuestSyncPacket], sync_sources_[kGuestSyncWait], sync_sources_[kGuestSyncBufferEnd], sync_sources_[kGuestSyncPresent], flush_causes_[kFlushPresent], flush_causes_[kFlushOverlap], flush_causes_[kFlushCapacity], flush_causes_[kFlushDrain], flush_wait_ns_ / 1000000);
+  std::string opcodes;
+  for (unsigned i = 0; i < 256; ++i) if (sync_opcodes_[i]) opcodes += fmt::format(" {:02X}:{}", i, sync_opcodes_[i]);
+  REXLOG_INFO("Native guest sync opcodes{}", opcodes);
+  REXLOG_INFO("Native overlap sites indices={} cpu_texture={} resolve_rect={} mirror_upload_bytes={}", overlap_sites_[kReadIndices], overlap_sites_[kReadCpuTexture], overlap_sites_[kReadResolveRect], mirror_ ? mirror_->uploaded_bytes() : 0);
+  frame_ms_.clear(); window_start_ = now;
+}
+void D3D12Render::Flush(FlushCause cause) {
   Timer timer(stats_enabled_, flush_ns_);
+  if (stats_enabled_) ++flush_causes_[cause];
   Check(list_->Close(), "close"); ID3D12CommandList* lists[]{list_.Get()};
   provider_.GetDirectQueue()->ExecuteCommandLists(1, lists);
   Check(provider_.GetDirectQueue()->Signal(fence_.Get(), ++serial_), "signal");
-  Check(fence_->SetEventOnCompletion(serial_, event_), "fence completion");
+  {
+    Timer wait(stats_enabled_, flush_wait_ns_);
+    Check(fence_->SetEventOnCompletion(serial_, event_), "fence completion");
   Require(WaitForSingleObject(event_, 5000) == WAIT_OBJECT_0, "render GPU timeout");
+  }
   Check(device_->GetDeviceRemovedReason(), "device status");
   if (debug_) {
     const auto messages = debug_->GetNumStoredMessagesAllowedByRetrievalFilter();
@@ -137,13 +175,13 @@ void D3D12Render::Flush() {
     void* mapped; D3D12_RANGE range{0, size_t(readback_used_)};
     Check(readback_->Map(0, &range, &mapped), "map resolve readback");
     writeback_.Complete([&](const GuestWriteback::Write& w) {
-      std::memcpy(guest_memory_->TranslatePhysical(w.address), static_cast<const uint8_t*>(mapped) + w.offset, w.length);
+      mirror_->CopyReadbackToGuest(w.address, static_cast<const uint8_t*>(mapped) + w.offset, w.length);
     });
     D3D12_RANGE none{}; readback_->Unmap(0, &none);
-    ++guest_epoch_; // Guest memory changed.
   }
   readback_used_ = 0;
   transient_.clear(); view_count_ = sampler_count_ = 0;
+  for (auto& s : scratch_) s.used = 0;
   uint64_t retained = 0;
   for (auto& page : upload_pages_) { page.used = 0; retained += page.size; }
   if (retained > 64 * 1024 * 1024) upload_pages_.clear();
@@ -154,23 +192,28 @@ void D3D12Render::Flush() {
         present_count_, draw_count_, resolve_count_, empty_resolve_count_, overlap_flushes_, serial_, texture_uploads_, texture_upload_bytes_, texture_ns_ / 1000000,
         resolve_ns_ / 1000000, flush_ns_ / 1000000, texture_cache_hits_);
   if (stats_enabled_ && serial_ % 30 == 0)
-    REXLOG_INFO("Native draw costs draw_ms={} guest_upload_ms={} guest_upload_bytes={} (draw includes textures; uploads include resolve preservation)",
-        draw_ns_ / 1000000, guest_upload_ns_ / 1000000, guest_upload_bytes_);
+    REXLOG_INFO("Native draw costs draw_ms={} guest_upload_ms={} guest_upload_bytes={} gpu_texture_loads={} cpu_texture_loads={} flush_wait_ms={} (draw includes textures; uploads are mirror pages the CPU wrote)",
+        draw_ns_ / 1000000, guest_upload_ns_ / 1000000, guest_upload_bytes_, gpu_texture_loads_, cpu_texture_loads_, flush_wait_ns_ / 1000000);
 }
-void D3D12Render::SyncGuestRead(uint32_t address, uint64_t length) {
+void D3D12Render::SyncGuestRead(uint32_t address, uint64_t length, ReadSite site) {
   if (length && writeback_.Overlaps(address, uint32_t(std::min<uint64_t>(length, 0x20000000)))) {
-    if (stats_enabled_) ++overlap_flushes_;
-    Flush();
+    if (stats_enabled_) { ++overlap_flushes_; ++overlap_sites_[site]; }
+    Flush(kFlushOverlap);
   }
 }
-void D3D12Render::UploadGuest(rex::memory::Memory& m, uint32_t address, uint32_t bytes) {
+GuestMemoryMirror& D3D12Render::Mirror(rex::memory::Memory& memory) {
+  guest_memory_ = &memory;
+  if (!mirror_) mirror_ = std::make_unique<GuestMemoryMirror>(memory, [this](uint32_t a, uint32_t n) { UploadGuest(a, n); });
+  return *mirror_;
+}
+void D3D12Render::UploadGuest(uint32_t address, uint32_t bytes) {
   Timer timer(stats_enabled_, guest_upload_ns_);
   Require(uint64_t(address) + bytes <= 0x20000000, "guest upload bounds");
   if (!bytes) return;
-  // Callers synchronize before recording; flushing here would orphan state.
-  Require(!writeback_.Overlaps(address, bytes), "guest upload overlaps an incomplete resolve");
+  // Only pages the CPU wrote since they were valid: never the GPU-written
+  // pages of a pending resolve, which stay valid in the mirror.
   if (stats_enabled_) guest_upload_bytes_ += bytes;
-  auto data = Upload(m.TranslatePhysical(address), bytes);
+  auto data = Upload(guest_memory_->TranslatePhysical(address), bytes);
   Transition(memory_.Get(), memory_state_, D3D12_RESOURCE_STATE_COPY_DEST);
   list_->CopyBufferRegion(memory_.Get(), address, data.resource.Get(), data.offset, bytes);
 }

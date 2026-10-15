@@ -1,6 +1,7 @@
 #include "d3d12_render.h"
 #include "texture.h"
 #include "texture_block.h"
+#include "texture_load.h"
 #include <rex/graphics/pipeline/texture/util.h>
 #include <rex/logging.h>
 #include <stdexcept>
@@ -51,8 +52,9 @@ D3D12_TEXTURE_ADDRESS_MODE Clamp(ClampMode c) {
     default: throw std::runtime_error("Native texture clamp mode not implemented"); }
 }
 }
-void D3D12Render::BindTextures(const RegisterFile& r, rex::memory::Memory& memory, DxbcShader& shader, unsigned root, unsigned sampler_root) {
+D3D12Render::TextureTables D3D12Render::BindTextures(const RegisterFile& r, rex::memory::Memory& memory, DxbcShader& shader) {
   Timer timer(stats_enabled_, texture_ns_);
+  TextureTables tables;
   const auto& textures = shader.GetTextureBindingsAfterTranslation();
   if (!textures.empty()) {
     auto first = Views(uint32_t(textures.size()));
@@ -103,30 +105,22 @@ void D3D12Render::BindTextures(const RegisterFile& r, rex::memory::Memory& memor
       // The translator also declares a 2D alternative for stacked fetches.
       // A 2D fetch of volume storage views its first base-level slice.
       if (volume && !host_volume) max_level = 0;
-      auto format = Format(f.format, binding.is_signed); auto fi = FormatInfo::Get(f.format);
-      unsigned block = fi->bytes_per_block();
+      auto format = Format(f.format, binding.is_signed);
       const bool depth_texture = f.format == TextureFormat::k_24_8 || f.format == TextureFormat::k_24_8_FLOAT;
       const bool integer16 = f.num_format && f.format == TextureFormat::k_16;
-      const bool rgba4 = f.format == TextureFormat::k_4_4_4_4;
-      const bool rgb10_signed = GetBaseFormat(f.format) == TextureFormat::k_2_10_10_10 && binding.is_signed;
       if (f.num_format && !integer16 && !depth_texture && !IsFloatTexture(f.format)) throw std::runtime_error("Native integer texture format=" + std::to_string(uint32_t(f.format)) + " signed=" + std::to_string(binding.is_signed) + " binding=" + std::to_string(binding.fetch_constant));
       if (integer16) format = DXGI_FORMAT_R32_FLOAT;
-      unsigned host_block = (rgba4 && binding.is_signed) || rgb10_signed ? 16 : integer16 || rgba4 ? 4 : block;
-      auto layout = texture_util::GetGuestTextureLayout(f.dimension, f.pitch, wm + 1, hm + 1, dm + 1, f.tiled, f.format, f.packed_mips, true, max_level);
-      const uint32_t base_bytes = (layout.base.level_data_extent_bytes + 3u) & ~3u;
-      const uint32_t mip_bytes = max_level ? (layout.mips_total_extent_bytes + 3u) & ~3u : 0;
-      Require(uint64_t(base << 12) + base_bytes <= 0x20000000 &&
-          uint64_t(mip << 12) + mip_bytes <= 0x20000000, "texture source extent overflow");
-      // Draw synchronized every texture range with incomplete resolves first.
-      Require(!writeback_.Overlaps(base << 12, base_bytes) && (!mip_bytes || !writeback_.Overlaps(mip << 12, mip_bytes)),
-          "texture read overlaps an incomplete resolve");
-      std::span<const uint8_t> base_source(memory.TranslatePhysical<const uint8_t*>(base << 12), base_bytes);
-      std::span<const uint8_t> mip_source;
-      if (mip_bytes) mip_source = {memory.TranslatePhysical<const uint8_t*>(mip << 12), mip_bytes};
       // Cube faces and stacked 2D slices are array slices of every level.
       const bool cube = f.dimension == DataDimension::kCube;
       const unsigned array_size = cube || (f.dimension == DataDimension::k2DOrStacked && f.stacked) ? dm + 1 : 1;
       const unsigned levels = max_level + 1;
+      const TextureLoadInput input{f.format, f.dimension, f.endianness, bool(f.tiled), bool(f.packed_mips), wm + 1, hm + 1, dm + 1,
+          f.pitch, base << 12, mip << 12, max_level, host_volume, array_size, format, bool(binding.is_signed), bool(f.num_format)};
+      const auto layout = input.Layout();
+      const uint32_t base_bytes = (layout.base.level_data_extent_bytes + 3u) & ~3u;
+      const uint32_t mip_bytes = max_level ? (layout.mips_total_extent_bytes + 3u) & ~3u : 0;
+      Require(uint64_t(base << 12) + base_bytes <= 0x20000000 &&
+          uint64_t(mip << 12) + mip_bytes <= 0x20000000, "texture source extent overflow");
       // The guest swizzle is applied by this per-bind view, not stored bytes.
       D3D12_SHADER_RESOURCE_VIEW_DESC view{}; view.Format = format;
       if (host_volume) {
@@ -156,10 +150,10 @@ void D3D12Render::BindTextures(const RegisterFile& r, rex::memory::Memory& memor
         if (found != textures_.end()) {
           entry = &found->second;
           entry->last_use = ++texture_use_;
-          // Guest bytes are compared once per guest epoch: guest-visible
-          // writes (CPU after a sync point, resolve results) start a new one.
-          if (entry->epoch == guest_epoch_ || entry->source.Matches(base_source, mip_source)) {
-            entry->epoch = guest_epoch_;
+          bool current;
+          { auto lock = GuestMemoryMirror::Lock(); current = !entry->outdated; }
+          // Unchanged since loaded: no CPU or GPU write touched its pages.
+          if (current) {
             device_->CreateShaderResourceView(entry->resource.Get(), &view, Cpu(first + i));
             transient_.push_back(entry->resource); // Keep alive through in-flight eviction.
             if (stats_enabled_) ++texture_cache_hits_;
@@ -167,8 +161,6 @@ void D3D12Render::BindTextures(const RegisterFile& r, rex::memory::Memory& memor
           }
         }
       }
-      TextureSnapshot snapshot;
-      snapshot.Assign(base_source, mip_source);
       D3D12_RESOURCE_DESC d{}; d.Dimension = host_volume ? D3D12_RESOURCE_DIMENSION_TEXTURE3D : D3D12_RESOURCE_DIMENSION_TEXTURE2D; d.Width = wm + 1; d.Height = hm + 1;
       d.DepthOrArraySize = UINT16(host_volume ? dm + 1 : array_size); d.MipLevels = UINT16(levels); d.Format = format; d.SampleDesc.Count = 1;
       Ptr<ID3D12Resource> texture;
@@ -182,114 +174,65 @@ void D3D12Render::BindTextures(const RegisterFile& r, rex::memory::Memory& memor
       } else {
         D3D12_HEAP_PROPERTIES heap{}; heap.Type = D3D12_HEAP_TYPE_DEFAULT;
         Require(SUCCEEDED(device_->CreateCommittedResource(&heap, D3D12_HEAP_FLAG_NONE, &d, D3D12_RESOURCE_STATE_COPY_DEST, nullptr, IID_PPV_ARGS(&texture))), "create resource");
-      }
-      std::vector<D3D12_PLACED_SUBRESOURCE_FOOTPRINT> footprints(levels * array_size);
-      uint64_t bytes;
-      device_->GetCopyableFootprints(&d, 0, levels * array_size, 0, footprints.data(), nullptr, nullptr, &bytes);
-      // Convert straight into the fenced upload page; every texel of every
-      // footprint row is written below, padding is never sampled.
-      uint8_t* linear;
-      auto upload = Reserve(size_t(bytes), linear);
-      const bool raw = !depth_texture && !rgb10_signed && !rgba4 && !integer16;
-      const unsigned block_log2 = std::countr_zero(block);
-      for (unsigned level = 0; level <= max_level; ++level) {
-        unsigned stored_level = std::min(level, layout.packed_level);
-        const auto& gl = level ? layout.mips[stored_level] : layout.base;
-        uint32_t address = level ? (mip << 12) + layout.mip_offsets_bytes[stored_level] : base << 12;
-        unsigned ox = 0, oy = 0, oz = 0;
-        if (f.packed_mips) texture_util::GetPackedMipOffset(wm + 1, hm + 1, volume ? dm + 1 : 1, f.format, level, ox, oy, oz);
-        unsigned bx = (std::max(1u, (wm + 1) >> level) + fi->block_width - 1) / fi->block_width;
-        unsigned by = (std::max(1u, (hm + 1) >> level) + fi->block_height - 1) / fi->block_height;
-        const std::span<const uint8_t> source = level ? std::span<const uint8_t>(snapshot.mips) : std::span<const uint8_t>(snapshot.base);
-        const uint32_t pitch_blocks = gl.row_pitch_bytes / block;
-        for (unsigned slice = 0; slice < array_size; ++slice) {
-        const size_t level_offset = size_t(address - (level ? mip : base) * 4096u) + size_t(slice) * gl.array_slice_stride_bytes;
-        const auto& footprint = footprints[level + slice * levels];
-        for (unsigned z = 0; z < (host_volume ? std::max(1u, (dm + 1) >> level) : 1u); ++z)
-        for (unsigned y = 0; y < by; ++y) {
-          uint8_t* row = linear + footprint.Offset + (uint64_t(z) * by + y) * footprint.Footprint.RowPitch;
-          const uint32_t linear_row = ((z + oz) * gl.z_slice_stride_block_rows + y + oy) * gl.row_pitch_bytes + ox * block;
-          // Whole linear rows of 32/64/128-bit blocks are word aligned; the
-          // per-word endian swap equals the per-byte address XOR below.
-          if (raw && !f.tiled && block >= 4 && !((level_offset + linear_row) & 3)) {
-            ReadTextureBlock(source, level_offset + linear_row, bx * block, f.endianness, row);
-            continue;
-          }
-          if (raw && f.tiled && !volume) {
-            const unsigned run = TiledContiguousBlocks(block_log2);
-            for (unsigned x = 0; x < bx;) {
-              const unsigned n = std::min(run - ((x + ox) & (run - 1)), bx - x);
-              const uint32_t offset = texture_util::GetTiledOffset2D(x + ox, y + oy, pitch_blocks, block_log2);
-              ReadTextureBlock(source, level_offset + offset, n * block, f.endianness, row + size_t(x) * block);
-              x += n;
+        if (texture_cache_enabled_) {
+          uint64_t cost;
+          device_->GetCopyableFootprints(&d, 0, levels * array_size, 0, nullptr, nullptr, nullptr, &cost);
+          if (cost <= kTextureCacheBudget) {
+            // Least recently bound first; in-flight users hold their reference.
+            while (!textures_.empty() && (textures_.size() >= kTextureCacheEntries || texture_cache_bytes_ + cost > kTextureCacheBudget)) {
+              auto oldest = std::min_element(textures_.begin(), textures_.end(),
+                  [](const auto& a, const auto& b) { return a.second.last_use < b.second.last_use; });
+              texture_cache_bytes_ -= oldest->second.bytes;
+              Unwatch(oldest->second);
+              textures_.erase(oldest);
             }
-            continue;
-          }
-          for (unsigned x = 0; x < bx; ++x) {
-          uint32_t offset = f.tiled ? (volume ? uint32_t(texture_util::GetTiledOffset3D(x + ox, y + oy, z + oz,
-              pitch_blocks, gl.z_slice_stride_block_rows, block_log2)) :
-              texture_util::GetTiledOffset2D(x + ox, y + oy, pitch_blocks, block_log2)) :
-              linear_row + x * block;
-          uint8_t* dest = row + size_t(x) * host_block;
-          if (raw) { ReadTextureBlock(source, level_offset + offset, block, f.endianness, dest); continue; }
-          uint8_t texel[16];
-          ReadTextureBlock(source, level_offset + offset, block, f.endianness, texel);
-          if (depth_texture) {
-            uint32_t bits; std::memcpy(&bits, texel, 4);
-            const float value = DecodeDepthTexture(bits, f.format == TextureFormat::k_24_8_FLOAT);
-            std::memcpy(dest, &value, 4);
-          } else if (rgb10_signed) {
-            uint32_t bits; std::memcpy(&bits, texel, 4);
-            float values[]{PackedSnorm(bits & 1023, 10), PackedSnorm((bits >> 10) & 1023, 10),
-                PackedSnorm((bits >> 20) & 1023, 10), PackedSnorm(bits >> 30, 2)};
-            std::memcpy(dest, values, sizeof(values));
-          } else if (rgba4) {
-            uint16_t bits; std::memcpy(&bits, texel, 2);
-            if (binding.is_signed) {
-              float values[4];
-              for (unsigned c = 0; c < 4; ++c) values[c] = Rgba4Snorm((bits >> (c * 4)) & 15);
-              std::memcpy(dest, values, sizeof(values));
-            } else {
-              uint32_t expanded = ExpandRgba4(bits);
-              std::memcpy(dest, &expanded, 4);
-            }
-          } else {
-            uint16_t bits; std::memcpy(&bits, texel, 2);
-            float value = binding.is_signed ? float(int16_t(bits)) : float(bits);
-            std::memcpy(dest, &value, 4);
-          }
+            entry = &textures_.emplace(std::move(cache_key), CachedTexture{texture, cost, ++texture_use_}).first->second;
+            texture_cache_bytes_ += cost;
           }
         }
-        }
       }
-      if (stats_enabled_) { ++texture_uploads_; texture_upload_bytes_ += bytes; }
-      for (unsigned subresource = 0; subresource < levels * array_size; ++subresource) {
-        D3D12_TEXTURE_COPY_LOCATION src{}; src.pResource = upload.resource.Get(); src.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT; src.PlacedFootprint = footprints[subresource];
-        src.PlacedFootprint.Offset += upload.offset;
-        D3D12_TEXTURE_COPY_LOCATION dst{}; dst.pResource = texture.Get(); dst.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX; dst.SubresourceIndex = subresource;
-        list_->CopyTextureRegion(&dst, 0, 0, 0, &src, nullptr);
+      if (entry) {
+        // Watch before the mirror upload: a CPU write after this point marks
+        // the texture outdated again, so no write between upload and use is lost.
+        auto lock = GuestMemoryMirror::Lock();
+        entry->outdated = false;
+        if (!entry->watches[0]) entry->watches[0] = mirror_->Watch(base << 12, base_bytes, TextureWatch, this, entry, 0);
+        if (mip_bytes && !entry->watches[1]) entry->watches[1] = mirror_->Watch(mip << 12, mip_bytes, TextureWatch, this, entry, 1);
+      }
+      // Pages the CPU wrote are uploaded; resolve results are already resident.
+      mirror_->RequestRange(base << 12, base_bytes);
+      if (mip_bytes) mirror_->RequestRange(mip << 12, mip_bytes);
+      const auto shader_index = GpuLoadShader(input);
+      if (shader_index != LoadShader::kUnknown) {
+        LoadTextureGpu(PlanGpuTextureLoad(input, shader_index), texture.Get());
+        if (stats_enabled_) { ++gpu_texture_loads_; ++texture_uploads_; }
+      } else {
+        // Draw synchronized every CPU-converted range with incomplete resolves first.
+        Require(!writeback_.Overlaps(base << 12, base_bytes) && (!mip_bytes || !writeback_.Overlaps(mip << 12, mip_bytes)),
+            "texture read overlaps an incomplete resolve");
+        std::span<const uint8_t> base_source(memory.TranslatePhysical<const uint8_t*>(base << 12), base_bytes);
+        std::span<const uint8_t> mip_source;
+        if (mip_bytes) mip_source = {memory.TranslatePhysical<const uint8_t*>(mip << 12), mip_bytes};
+        std::vector<D3D12_PLACED_SUBRESOURCE_FOOTPRINT> footprints(levels * array_size);
+        uint64_t bytes;
+        device_->GetCopyableFootprints(&d, 0, levels * array_size, 0, footprints.data(), nullptr, nullptr, &bytes);
+        // Convert straight into the fenced upload page; every texel of every
+        // footprint row is written, padding is never sampled.
+        uint8_t* linear;
+        auto upload = Reserve(size_t(bytes), linear);
+        ConvertTextureCpu(input, base_source, mip_source, footprints, linear);
+        for (unsigned subresource = 0; subresource < levels * array_size; ++subresource) {
+          D3D12_TEXTURE_COPY_LOCATION src{}; src.pResource = upload.resource.Get(); src.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT; src.PlacedFootprint = footprints[subresource];
+          src.PlacedFootprint.Offset += upload.offset;
+          D3D12_TEXTURE_COPY_LOCATION dst{}; dst.pResource = texture.Get(); dst.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX; dst.SubresourceIndex = subresource;
+          list_->CopyTextureRegion(&dst, 0, 0, 0, &src, nullptr);
+        }
+        if (stats_enabled_) { ++cpu_texture_loads_; ++texture_uploads_; texture_upload_bytes_ += bytes; }
       }
       Transition(texture.Get(), state, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
       device_->CreateShaderResourceView(texture.Get(), &view, Cpu(first + i)); transient_.push_back(texture);
-      if (entry) {
-        entry->source = std::move(snapshot);
-        entry->epoch = guest_epoch_;
-      } else if (texture_cache_enabled_) {
-        const uint64_t cost = snapshot.base.size() + snapshot.mips.size() + bytes;
-        if (cost <= kTextureCacheBudget) {
-          // Least recently bound first; in-flight users hold their reference.
-          while (!textures_.empty() && (textures_.size() >= kTextureCacheEntries || texture_cache_bytes_ + cost > kTextureCacheBudget)) {
-            auto oldest = std::min_element(textures_.begin(), textures_.end(),
-                [](const auto& a, const auto& b) { return a.second.last_use < b.second.last_use; });
-            texture_cache_bytes_ -= oldest->second.bytes;
-            textures_.erase(oldest);
-          }
-          textures_.emplace(std::move(cache_key), CachedTexture{std::move(snapshot), texture, cost, ++texture_use_, guest_epoch_});
-          texture_cache_bytes_ += cost;
-        }
-      }
     }
-    list_->SetGraphicsRootDescriptorTable(root, Gpu(first));
+    tables.views = int(first);
   }
   const auto& samplers = shader.GetSamplerBindingsAfterTranslation();
   if (!samplers.empty()) {
@@ -325,7 +268,53 @@ void D3D12Render::BindTextures(const RegisterFile& r, rex::memory::Memory& memor
       }
       device_->CreateSampler(&s, Cpu(first + i, true));
     }
-    list_->SetGraphicsRootDescriptorTable(sampler_root, Gpu(first, true));
+    tables.samplers = int(first);
   }
+  return tables;
+}
+void D3D12Render::SetTextureTables(const TextureTables& tables, unsigned root, unsigned sampler_root) {
+  if (tables.views >= 0) list_->SetGraphicsRootDescriptorTable(root, Gpu(uint32_t(tables.views)));
+  if (tables.samplers >= 0) list_->SetGraphicsRootDescriptorTable(sampler_root, Gpu(uint32_t(tables.samplers), true));
+}
+void D3D12Render::TextureWatch(void*, void* data, uint64_t argument, bool) {
+  // Under GuestMemoryMirror::Lock(); the fired watch is already retired.
+  auto* entry = static_cast<CachedTexture*>(data);
+  entry->outdated = true;
+  entry->watches[argument] = nullptr;
+}
+void D3D12Render::Unwatch(CachedTexture& entry) {
+  auto lock = GuestMemoryMirror::Lock();
+  for (auto& watch : entry.watches) { mirror_->Unwatch(watch); watch = nullptr; }
+}
+void D3D12Render::LoadTextureGpu(const TextureLoadPlan& plan, ID3D12Resource* texture) {
+  if (!load_root_) load_root_ = CreateTextureLoadRoot(device_);
+  auto& pipeline = load_pipelines_[size_t(plan.shader)];
+  if (!pipeline) pipeline = CreateTextureLoadPipeline(device_, load_root_.Get(), plan.shader);
+  // Scratch regions live until the submission's fence (reset in Flush).
+  const uint64_t need = (plan.scratch_bytes + 65535) & ~uint64_t(65535);
+  Scratch* scratch = nullptr;
+  for (auto& s : scratch_) if (s.size - s.used >= need) { scratch = &s; break; }
+  if (!scratch) {
+    const uint64_t size = std::max<uint64_t>(need, 64ull << 20);
+    scratch_.push_back({Buffer(size, D3D12_HEAP_TYPE_DEFAULT, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS),
+        size, 0, D3D12_RESOURCE_STATE_UNORDERED_ACCESS});
+    scratch = &scratch_.back();
+  }
+  const uint64_t offset = scratch->used; scratch->used += need;
+  Transition(scratch->buffer.Get(), scratch->state, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+  Transition(memory_.Get(), memory_state_, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+  const unsigned v = Views(2);
+  D3D12_SHADER_RESOURCE_VIEW_DESC srv{}; srv.Format = UintPow2Format(plan.source_bpe_log2);
+  srv.ViewDimension = D3D12_SRV_DIMENSION_BUFFER; srv.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+  srv.Buffer.NumElements = UINT(0x20000000u >> plan.source_bpe_log2);
+  device_->CreateShaderResourceView(memory_.Get(), &srv, Cpu(v));
+  D3D12_UNORDERED_ACCESS_VIEW_DESC uav{}; uav.Format = UintPow2Format(plan.dest_bpe_log2); uav.ViewDimension = D3D12_UAV_DIMENSION_BUFFER;
+  uav.Buffer.NumElements = UINT(scratch->size >> plan.dest_bpe_log2);
+  device_->CreateUnorderedAccessView(scratch->buffer.Get(), nullptr, &uav, Cpu(v + 1));
+  ID3D12DescriptorHeap* heaps[]{views_.Get(), samplers_.Get()}; list_->SetDescriptorHeaps(2, heaps);
+  list_->SetComputeRootSignature(load_root_.Get()); list_->SetPipelineState(pipeline.Get());
+  list_->SetComputeRootDescriptorTable(1, Gpu(v)); list_->SetComputeRootDescriptorTable(2, Gpu(v + 1));
+  RecordTextureLoad(list_.Get(), plan, offset, scratch->buffer.Get(), texture);
+  scratch->state = D3D12_RESOURCE_STATE_COPY_SOURCE;
 }
 }

@@ -5,11 +5,16 @@
 #include <rex/graphics/register_file.h>
 #include <stdexcept>
 #include <vector>
+#include "scanout_backend.h"
 
 namespace x360n::native {
 [[noreturn]] void Unsupported(const char* message) { throw std::runtime_error(message); }
-unsigned guest_write_drains = 0;
-void CompleteGuestWritesBeforePacket() { ++guest_write_drains; }
+unsigned guest_write_drains = 0, guest_range_reads = 0;
+uint32_t last_read_address = 0, last_read_length = 0;
+void CompleteGuestWritesBeforePacket(GuestSync, uint32_t) { ++guest_write_drains; }
+void SyncGuestReadBeforePacket(uint32_t address, uint32_t length, uint32_t) {
+  ++guest_range_reads; last_read_address = address; last_read_length = length;
+}
 }
 namespace rex::graphics {
 void ValidatePacketForBackend(uint32_t, const rex::memory::RingBuffer&);
@@ -76,17 +81,34 @@ TEST_CASE("Native publishes incomplete resolves before guest memory packets", "[
   Validate(PM4_WAIT_REG_MEM, {0x13, 0x1000, 0, 0xffffffff, 0x100});
   CHECK(drains == 3);
   Validate(PM4_INTERRUPT, {1});
-  Validate(PM4_LOAD_ALU_CONSTANT, {0x1000, 0, 1});
-  Validate(PM4_IM_LOAD, {0x1001, 3});
-  CHECK(drains == 9);
+  CHECK(drains == 5);
+  // Memory reads into the command processor only synchronize their own range
+  // and let the guest observe nothing (no following epoch drain).
+  auto& reads = x360n::native::guest_range_reads;
+  reads = 0;
+  Validate(PM4_LOAD_ALU_CONSTANT, {0x2000, 0, 3});
+  CHECK(drains == 6);
+  CHECK(reads == 1);
+  CHECK(x360n::native::last_read_address == 0x2000);
+  CHECK(x360n::native::last_read_length == 12);
+  Validate(PM4_IM_LOAD, {0x3001, 5});
+  CHECK(drains == 6);
+  CHECK(reads == 2);
+  CHECK(x360n::native::last_read_address == 0x3000);
+  CHECK(x360n::native::last_read_length == 20);
   reg::VGT_DRAW_INITIATOR draw{};
   draw.source_select = SourceSelect::kAutoIndex; draw.prim_type = PrimitiveType::kTriangleList; draw.num_indices = 3;
   Validate(PM4_DRAW_INDX_2, {draw.value});
-  CHECK(drains == 10);
-  Validate(PM4_DRAW_INDX_2, {draw.value});
+  CHECK(drains == 6);
+  // A plain event (cache flush) publishes nothing; fence and extent writes do.
+  Validate(PM4_EVENT_WRITE, {0x16});
+  CHECK(drains == 6);
+  Validate(PM4_EVENT_WRITE_SHD, {0x14, 0x1000 | 2, 7});
+  CHECK(drains == 7);
   Validate(PM4_SET_CONSTANT, {1u << 16, 0});
-  Validate(PM4_EVENT_WRITE_EXT, {0x0A, 0x1000 | 1}); // Drained by the event initiator write.
-  CHECK(drains == 10);
+  CHECK(drains == 8);
+  Validate(PM4_EVENT_WRITE_EXT, {0x0A, 0x1000 | 1});
+  CHECK(drains == 9);
 }
 #include "guest_writeback.h"
 TEST_CASE("Native resolve writeback tracks overlap and submission order") {
