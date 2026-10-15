@@ -7,9 +7,11 @@
 #include <bit>
 #include <cmath>
 #include <algorithm>
+#include <fstream>
 REXCVAR_DEFINE_BOOL(native_stats, false, "GPU/Native", "Log cumulative Native CPU submission costs for bounded diagnostics");
 REXCVAR_DEFINE_BOOL(native_texture_cache, true, "GPU/Native", "Reuse textures only while every guest source byte matches; disable for diagnostics");
 REXCVAR_DEFINE_BOOL(native_texture_cpu, false, "GPU/Native", "Diagnose texture loads with CPU conversion and synchronized guest bytes");
+REXCVAR_DECLARE(std::string, native_pso_dump);
 namespace x360n::native {
 using namespace rex::graphics;
 using namespace rex::graphics::xenos;
@@ -120,6 +122,14 @@ D3D12Render::D3D12Render(rex::ui::d3d12::D3D12Provider& provider) : provider_(pr
   D3D12_ROOT_SIGNATURE_DESC rd{10, p, 0, nullptr, D3D12_ROOT_SIGNATURE_FLAG_NONE};
   Ptr<ID3DBlob> blob, errors;
   Check(D3D12SerializeRootSignature(&rd, D3D_ROOT_SIGNATURE_VERSION_1, &blob, &errors), "draw root serialization");
+  pipeline_store_.SetRoot(blob->GetBufferPointer(), blob->GetBufferSize());
+  const auto pso_dump = REXCVAR_GET(native_pso_dump);
+  if (!pso_dump.empty()) {
+    std::filesystem::create_directories(pso_dump);
+    std::ofstream out(std::filesystem::path(pso_dump) / "root.bin", std::ios::binary);
+    out.write(static_cast<const char*>(blob->GetBufferPointer()), blob->GetBufferSize());
+    Require(bool(out), "PSO root diagnostic write failed");
+  }
   Check(device_->CreateRootSignature(0, blob->GetBufferPointer(), blob->GetBufferSize(), IID_PPV_ARGS(&root_)), "draw root");
 }
 // Watches reference cache entries: retire them before the cache is destroyed.
@@ -147,6 +157,11 @@ void D3D12Render::CountPresent() {
   double slow_ms = 0; for (size_t i = sorted.size() - slow; i < sorted.size(); ++i) slow_ms += sorted[i];
   REXLOG_INFO("Native frame stats frames={} seconds={:.2f} fps={:.2f} p50_ms={:.2f} p95_ms={:.2f} p99_ms={:.2f} max_ms={:.2f} low1_fps={:.2f}",
       sorted.size(), window, double(sorted.size()) / window, pct(0.50), pct(0.95), pct(0.99), sorted.back(), 1000.0 * double(slow) / slow_ms);
+  REXLOG_INFO("Native pipeline totals creations={} shader_ms={} pso_ms={} pso_thread_cpu_ms={} pso_process_cpu_ms={} draw_ms={} texture_ms={} upload_ms={} resolve_ms={} fence_ms={}",
+      pipeline_creations_, shader_ns_ / 1000000, pipeline_ns_ / 1000000, pipeline_thread_ns_ / 1000000,
+      pipeline_process_ns_ / 1000000, draw_ns_ / 1000000, texture_ns_ / 1000000,
+      guest_upload_ns_ / 1000000, resolve_ns_ / 1000000, flush_wait_ns_ / 1000000);
+  REXLOG_INFO("Native pipeline disk hits={} rejects={}", pipeline_disk_hits_, pipeline_disk_rejects_);
   REXLOG_INFO("Native flush causes guest_sync={} (event={} packet={} wait={} buffer_end={} present={}) present={} overlap={} capacity={} drain={} wait_ms={}",
       flush_causes_[kFlushGuestSync], sync_sources_[kGuestSyncEvent], sync_sources_[kGuestSyncPacket], sync_sources_[kGuestSyncWait], sync_sources_[kGuestSyncBufferEnd], sync_sources_[kGuestSyncPresent], flush_causes_[kFlushPresent], flush_causes_[kFlushOverlap], flush_causes_[kFlushCapacity], flush_causes_[kFlushDrain], flush_wait_ns_ / 1000000);
   std::string opcodes;

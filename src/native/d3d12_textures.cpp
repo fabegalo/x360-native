@@ -91,10 +91,7 @@ D3D12Render::TextureTables D3D12Render::BindTextures(const RegisterFile& r, rex:
       // its first slice), 3D-or-stacked views only 3D, cube views only cubes.
       // The translated shader selects the view by the fetch dimension at run
       // time, and per component between signed and unsigned results.
-      const bool compatible = binding.dimension == FetchOpDimension::kCube ? f.dimension == DataDimension::kCube :
-          binding.dimension == FetchOpDimension::k3DOrStacked ? f.dimension == DataDimension::k3D : f.dimension != DataDimension::kCube;
-      const uint8_t signs = texture_util::SwizzleSigns(f);
-      if (!valid || !compatible || (binding.is_signed ? !texture_util::IsAnySignSigned(signs) : !texture_util::IsAnySignNotSigned(signs))) {
+      if (!valid || !TextureViewActive(f, binding.dimension, binding.is_signed)) {
         D3D12_SHADER_RESOURCE_VIEW_DESC unused{}; unused.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
         unused.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
         if (binding.dimension == FetchOpDimension::k3DOrStacked) {

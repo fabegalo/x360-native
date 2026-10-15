@@ -49,6 +49,13 @@ bool NeedsCpuConversion(TextureFormat format, bool is_signed, bool num_format) {
       (GetBaseFormat(format) == TextureFormat::k_2_10_10_10 && is_signed) ||
       (num_format && format == TextureFormat::k_16);
 }
+bool TextureViewActive(const xe_gpu_texture_fetch_t& f, FetchOpDimension dimension, bool is_signed) {
+  if (f.type != FetchConstantType::kTexture) return false;
+  const bool compatible = dimension == FetchOpDimension::kCube ? f.dimension == DataDimension::kCube :
+      dimension == FetchOpDimension::k3DOrStacked ? f.dimension == DataDimension::k3D : f.dimension != DataDimension::kCube;
+  const uint8_t signs = texture_util::SwizzleSigns(f);
+  return compatible && (is_signed ? texture_util::IsAnySignSigned(signs) : texture_util::IsAnySignNotSigned(signs));
+}
 LoadShader GpuLoadShader(const TextureLoadInput& t) {
   if (NeedsCpuConversion(t.format, t.is_signed, t.num_format)) return LoadShader::kUnknown;
   if (DepthFormat(t.format))

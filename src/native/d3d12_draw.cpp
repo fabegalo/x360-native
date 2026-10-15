@@ -14,12 +14,20 @@
 #include <stdexcept>
 REXCVAR_DEFINE_STRING(native_draw_dump, "", "GPU/Native", "Diagnostic draw snapshot directory");
 REXCVAR_DEFINE_STRING(native_draw_dump_ps, "", "GPU/Native", "Diagnostic pixel shader hash to snapshot");
+REXCVAR_DEFINE_STRING(native_pso_dump, "", "GPU/Native", "Diagnostic directory for the latest graphics PSO inputs");
 namespace x360n::native {
 using namespace rex::graphics;
 using namespace rex::graphics::xenos;
 using T = DxbcShaderTranslator;
 namespace {
 void Require(bool v, const char* what) { if (!v) throw std::runtime_error(std::string("Native draw: ") + what); }
+uint64_t CpuNs(bool process) {
+  FILETIME created{}, exited{}, kernel{}, user{};
+  if (process) GetProcessTimes(GetCurrentProcess(), &created, &exited, &kernel, &user);
+  else GetThreadTimes(GetCurrentThread(), &created, &exited, &kernel, &user);
+  auto ticks = [](FILETIME t) { return (uint64_t(t.dwHighDateTime) << 32) | t.dwLowDateTime; };
+  return (ticks(kernel) + ticks(user)) * 100;
+}
 }
 const std::vector<uint8_t>& D3D12Render::RectangleShader(unsigned interpolators, unsigned clip_planes) {
   auto& binary = rectangles_[interpolators | (clip_planes << 8)];
@@ -106,8 +114,10 @@ void D3D12Render::Draw(const RegisterFile& r, rex::memory::Memory& memory, Shade
     pm.pixel.param_gen_point = param < kMaxInterpolators;
   }
   if (param < kMaxInterpolators) { pm.pixel.param_gen_enable = 1; pm.pixel.param_gen_interpolator = param; }
-  auto* vt = shaders.Translate(vs, vm.value);
   D3D12_GRAPHICS_PIPELINE_STATE_DESC pd{}; pd.pRootSignature = root_.Get();
+  {
+  Timer shader_timer(stats_enabled_, shader_ns_);
+  auto* vt = shaders.Translate(vs, vm.value);
   pd.VS = {vt->translated_binary().data(), vt->translated_binary().size()};
   if (ps) { auto* pt = shaders.Translate(*ps, pm.value); pd.PS = {pt->translated_binary().data(), pt->translated_binary().size()}; }
   else { if (depth_shader_.empty()) depth_shader_ = shaders.translator.CreateDepthOnlyPixelShader(); pd.PS = {depth_shader_.data(), depth_shader_.size()}; }
@@ -126,6 +136,7 @@ void D3D12Render::Draw(const RegisterFile& r, rex::memory::Memory& memory, Shade
     if (gs.empty()) CreateDxbcGeometryShader(key, gs);
     pd.GS = {gs.data(), gs.size() * sizeof(uint32_t)};
   }
+  }
   pd.SampleMask = UINT_MAX; pd.SampleDesc.Count = 1;
   pd.PrimitiveTopologyType = point ? D3D12_PRIMITIVE_TOPOLOGY_TYPE_POINT : D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
   auto mode = r.Get<reg::PA_SU_SC_MODE_CNTL>();
@@ -142,7 +153,46 @@ void D3D12Render::Draw(const RegisterFile& r, rex::memory::Memory& memory, Shade
   std::string key(reinterpret_cast<const char*>(&pd), sizeof(pd));
   auto& pipeline = pipelines_[key];
   if (!pipeline) {
+    auto disk = pipeline_store_.Load(pd);
+    static const auto pso_dump = REXCVAR_GET(native_pso_dump);
+    if (!pso_dump.empty()) {
+      const auto dir = std::filesystem::path(pso_dump);
+      std::filesystem::create_directories(dir);
+      auto save = [&](const char* name, const void* bytes, size_t size) {
+        std::ofstream out(dir / name, std::ios::binary);
+        out.write(static_cast<const char*>(bytes), size);
+        Require(bool(out), "PSO diagnostic write failed");
+      };
+      auto saved = pd; saved.pRootSignature = nullptr;
+      saved.VS.pShaderBytecode = saved.PS.pShaderBytecode = saved.GS.pShaderBytecode = nullptr;
+      save("pso.bin", &saved, sizeof(saved));
+      save("vs.dxbc", pd.VS.pShaderBytecode, pd.VS.BytecodeLength);
+      save("ps.dxbc", pd.PS.pShaderBytecode, pd.PS.BytecodeLength);
+      save("gs.dxbc", pd.GS.pShaderBytecode, pd.GS.BytecodeLength);
+    }
+    const auto start = stats_enabled_ ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
+    const auto thread_start = stats_enabled_ ? CpuNs(false) : 0;
+    const auto process_start = stats_enabled_ ? CpuNs(true) : 0;
+    if (stats_enabled_) REXLOG_INFO("Native PSO begin id={} VS={:016X} PS={:016X} vm={:016X} pm={:016X} primitive={} msaa={}",
+        pipelines_.size(), vs.ucode_data_hash(), ps ? ps->ucode_data_hash() : 0, vm.value, pm.value, uint32_t(primitive), uint32_t(msaa));
+    pd.CachedPSO = {disk.blob.data(), disk.blob.size()};
     auto hr = device_->CreateGraphicsPipelineState(&pd, IID_PPV_ARGS(&pipeline));
+    if (!disk.blob.empty()) {
+      if (SUCCEEDED(hr)) ++pipeline_disk_hits_;
+      else {
+        ++pipeline_disk_rejects_; pipeline.Reset(); pd.CachedPSO = {};
+        // Opaque blobs may become invalid after a driver or adapter change.
+        hr = device_->CreateGraphicsPipelineState(&pd, IID_PPV_ARGS(&pipeline));
+      }
+    }
+    if (SUCCEEDED(hr) && (disk.blob.empty() || !pd.CachedPSO.CachedBlobSizeInBytes)) pipeline_store_.Save(disk, pipeline.Get());
+    if (stats_enabled_) {
+      auto wall = std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - start).count();
+      auto thread = CpuNs(false) - thread_start, process = CpuNs(true) - process_start;
+      pipeline_ns_ += wall; pipeline_thread_ns_ += thread; pipeline_process_ns_ += process; ++pipeline_creations_;
+      REXLOG_INFO("Native PSO end id={} wall_ms={} thread_cpu_ms={} process_cpu_ms={} HRESULT={:08X}",
+          pipelines_.size(), wall / 1000000, thread / 1000000, process / 1000000, uint32_t(hr));
+    }
     if (FAILED(hr)) {
       REXLOG_ERROR("Native PSO HRESULT={:08X} VS={:016X} PS={:016X} primitive={} MSAA={} clip={} interpolators={:X}",
           uint32_t(hr), vs.ucode_data_hash(), ps ? ps->ucode_data_hash() : 0,
@@ -173,7 +223,7 @@ void D3D12Render::Draw(const RegisterFile& r, rex::memory::Memory& memory, Shade
     for (auto* shader : {&vs, ps}) if (shader)
       for (const auto& t : shader->GetTextureBindingsAfterTranslation()) {
         auto f = r.GetTextureFetch(t.fetch_constant);
-        if (f.type != FetchConstantType::kTexture || (!texture_cpu_ && !NeedsCpuConversion(f.format, t.is_signed, f.num_format))) continue;
+        if (!TextureViewActive(f, t.dimension, t.is_signed) || (!texture_cpu_ && !NeedsCpuConversion(f.format, t.is_signed, f.num_format))) continue;
         uint32_t wm, hm, dm, base, mip, lo, hi;
         texture_util::GetSubresourcesFromFetchConstant(f, &wm, &hm, &dm, &base, &mip, &lo, &hi);
         // Same extents BindTextures reads (all levels, conservatively).

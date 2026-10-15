@@ -11,6 +11,28 @@ using Microsoft::WRL::ComPtr;
 using namespace x360n::native;
 using namespace rex::graphics;
 using namespace rex::graphics::xenos;
+TEST_CASE("Native inactive texture alternatives do not require guest memory") {
+  xe_gpu_texture_fetch_t f{}; f.type = FetchConstantType::kTexture;
+  f.dimension = DataDimension::k2DOrStacked; f.format = TextureFormat::k_2_10_10_10; f.swizzle = 0x688;
+  REQUIRE(NeedsCpuConversion(f.format, true, false));
+  REQUIRE_FALSE(TextureViewActive(f, FetchOpDimension::k2D, true));
+  REQUIRE(TextureViewActive(f, FetchOpDimension::k2D, false));
+  REQUIRE_FALSE(TextureViewActive(f, FetchOpDimension::k3DOrStacked, false));
+  REQUIRE_FALSE(TextureViewActive(f, FetchOpDimension::kCube, false));
+  f.sign_x = TextureSign::kSigned;
+  REQUIRE(TextureViewActive(f, FetchOpDimension::k2D, true));
+  REQUIRE(TextureViewActive(f, FetchOpDimension::k2D, false));
+  f.sign_y = f.sign_z = f.sign_w = TextureSign::kSigned;
+  REQUIRE_FALSE(TextureViewActive(f, FetchOpDimension::k2D, false));
+  f.dimension = DataDimension::k3D;
+  REQUIRE(TextureViewActive(f, FetchOpDimension::k3DOrStacked, true));
+  REQUIRE(TextureViewActive(f, FetchOpDimension::k2D, true));
+  f.dimension = DataDimension::kCube;
+  REQUIRE(TextureViewActive(f, FetchOpDimension::kCube, true));
+  REQUIRE_FALSE(TextureViewActive(f, FetchOpDimension::k2D, true));
+  f.type = FetchConstantType::kInvalidTexture;
+  REQUIRE_FALSE(TextureViewActive(f, FetchOpDimension::kCube, true));
+}
 namespace {
 struct Gpu {
   ComPtr<ID3D12Device> device;

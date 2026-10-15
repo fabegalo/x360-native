@@ -193,6 +193,7 @@ int wmain(int argc, wchar_t** argv) {
     } shutdown{gpu.get()};
     auto* memory = rt.memory();
     if (draw_replay) {
+      if (plugin == "native") gpu->InitializeShaderStorage(output / "pipeline-cache", 0, true);
       ReplayDraw(*gpu, *memory, argv[4], output);
       gpu->Shutdown(); shutdown.gpu = nullptr; gpu.reset(); rt.Shutdown(); rex::FlushLogging();
       std::cout << "PASS isolated draw capture\n"; return 0;

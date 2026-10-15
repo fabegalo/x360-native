@@ -73,8 +73,15 @@ void D3D12Scanout::Wait(uint64_t serial) {
   Check(provider_.GetDevice()->GetDeviceRemovedReason(), "device status");
 }
 void D3D12Scanout::Drain() { if (render_) render_->Flush(D3D12Render::kFlushDrain); Wait(serial_); }
+void D3D12Scanout::InitializeShaderStorage(const std::filesystem::path& root, uint32_t title_id) {
+  pipeline_directory_ = root / "native-d3d12-pso-v1" / std::to_string(title_id);
+  if (render_) render_->SetPipelineDirectory(pipeline_directory_);
+}
 rex::graphics::Shader* D3D12Scanout::LoadShader(rex::graphics::xenos::ShaderType type, const uint32_t* data, uint32_t count) {
-  if (!render_) render_ = std::make_unique<D3D12Render>(provider_);
+  if (!render_) {
+    render_ = std::make_unique<D3D12Render>(provider_);
+    render_->SetPipelineDirectory(pipeline_directory_);
+  }
   return render_->shaders.Load(type, data, count);
 }
 void D3D12Scanout::Draw(const rex::graphics::RegisterFile& regs, rex::memory::Memory& memory, rex::graphics::Shader* vs, rex::graphics::Shader* ps,

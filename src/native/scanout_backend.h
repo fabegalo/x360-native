@@ -16,6 +16,7 @@ class ScanoutBackend {
   virtual void Present(rex::ui::Presenter&, const ScanoutTexture&, const void* pixels,
                        const uint32_t* lut) = 0;
   virtual void Drain() = 0;
+  virtual void InitializeShaderStorage(const std::filesystem::path&, uint32_t title_id) = 0;
   // Guest-observable point (memory packet, wait, buffer end): publish every
   // recorded resolve result to guest memory before the guest can see it.
   virtual void CompleteGuestWrites(GuestSync, uint32_t opcode) = 0;

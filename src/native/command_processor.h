@@ -8,6 +8,7 @@ class CommandProcessor final : public rex::graphics::CommandProcessor {
                    ScanoutFactory factory)
       : rex::graphics::CommandProcessor(graphics, kernel), factory_(factory) {}
   void IssueSwap(uint32_t address, uint32_t width, uint32_t height) override;
+  void InitializeShaderStorage(const std::filesystem::path&, uint32_t title_id, bool blocking) override;
  protected:
   bool SetupContext() override;
   void ShutdownContext() override;

@@ -35,6 +35,10 @@ static_assert(sizeof(LoadConstants) == 40);
 constexpr uint32_t kLoadGuestXThreadsPerGroupLog2 = 2, kLoadGuestYBlocksPerGroupLog2 = 5;
 // RGBA4, signed RGB10A2 and integer 16-bit textures keep Native's CPU conversion.
 bool NeedsCpuConversion(rex::graphics::xenos::TextureFormat, bool is_signed, bool num_format);
+// The translator declares alternative signed and dimensional views. Null
+// alternatives do not read guest bytes and must not trigger CPU synchronization.
+bool TextureViewActive(const rex::graphics::xenos::xe_gpu_texture_fetch_t&,
+    rex::graphics::xenos::FetchOpDimension, bool is_signed);
 // Pinned SDK load shader whose output equals Native's CPU conversion for this
 // binding; LoadShader::kUnknown keeps the CPU conversion.
 LoadShader GpuLoadShader(const TextureLoadInput&);

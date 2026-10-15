@@ -1,5 +1,6 @@
 #pragma once
 #include "shader_cache.h"
+#include "pipeline_store.h"
 #include "draw_types.h"
 #include "guest_memory_mirror.h"
 #include "texture_load.h"
@@ -20,6 +21,7 @@ class D3D12Render {
   explicit D3D12Render(rex::ui::d3d12::D3D12Provider&);
   ~D3D12Render();
   ShaderCache shaders;
+  void SetPipelineDirectory(const std::filesystem::path& path) { pipeline_store_.SetDirectory(path); }
   void Draw(const rex::graphics::RegisterFile&, rex::memory::Memory&,
       rex::graphics::Shader*, rex::graphics::Shader*, rex::graphics::xenos::PrimitiveType,
       uint32_t count, const DrawIndices*);
@@ -133,6 +135,10 @@ class D3D12Render {
   uint64_t texture_ns_ = 0, resolve_ns_ = 0, flush_ns_ = 0;
   uint64_t texture_uploads_ = 0, texture_upload_bytes_ = 0;
   uint64_t draw_ns_ = 0, guest_upload_ns_ = 0, guest_upload_bytes_ = 0;
+  uint64_t shader_ns_ = 0, pipeline_ns_ = 0, pipeline_thread_ns_ = 0, pipeline_process_ns_ = 0;
+  uint64_t pipeline_creations_ = 0;
+  uint64_t pipeline_disk_hits_ = 0, pipeline_disk_rejects_ = 0;
+  PipelineStore pipeline_store_;
   uint64_t flush_causes_[kFlushCauses]{}, flush_wait_ns_ = 0;
   uint64_t sync_sources_[kGuestSyncSources]{};
   uint64_t sync_opcodes_[256]{};

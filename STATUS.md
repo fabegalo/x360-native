@@ -1,5 +1,18 @@
 # STATUS
 
+Native N4.2 recuperou progressão até condução do Forza (2026-10-15), sobre
+`41768ce`: cache persistente de PSOs com identidade integral e fallback do driver,
+mais remoção de esperas para views de textura inativas. PSOs eram o maior custo
+a frio (71,3 s em 213 criações); primeiro conjunto de 27 assinaturas passou de
+10.728 para 506 ms. Na última execução, cores/HUD preservados e controles
+confirmados manualmente; cinemática observada a 10,46–11,72 FPS e condução a
+5,34–5,44 FPS em janelas selecionadas. **Sem ganho global A/B certificado:**
+persistem hitches a frio de até 3,05 s. Avançou por 158 s até exit 78 em
+`EVENT_WRITE_ZPD` (0x5B), não implementado. Cache/views: 30 asserções; draw
+isolado com cache idêntico ao Xenos. Mantenedor pediu concluir sem a dupla
+adicional de medições equivalentes. Aceite integral de desempenho pendente;
+SDK/pin, patches e Xenos preservados. [Evidências e limites](docs/native-renderer-n4-2.md).
+
 Native N4.1 corrigiu as cores da cena 3D do Forza (2026-10-15): contrato
 bindless do tradutor, heaps tipados e índices por estágio. O defeito foi
 reproduzido também no Xenos bindful; Native/Xenos bindless produziram zero

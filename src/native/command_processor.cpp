@@ -44,6 +44,9 @@ void CommandProcessor::ShutdownContext() {
   active_processor = nullptr;
   scanout_.reset();
 }
+void CommandProcessor::InitializeShaderStorage(const std::filesystem::path& path, uint32_t title_id, bool) {
+  if (scanout_) scanout_->InitializeShaderStorage(path, title_id);
+}
 void CommandProcessor::WriteRegister(uint32_t index, uint32_t value) {
   if (index >= rex::graphics::RegisterFile::kRegisterCount)
     Unsupported("GPU register outside Native state");

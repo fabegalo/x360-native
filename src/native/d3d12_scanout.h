@@ -13,6 +13,7 @@ class D3D12Scanout final : public ScanoutBackend {
   void Present(rex::ui::Presenter& presenter, const ScanoutTexture& texture,
                const void* pixels, const uint32_t* lut) override;
   void Drain() override;
+  void InitializeShaderStorage(const std::filesystem::path&, uint32_t title_id) override;
   void CompleteGuestWrites(GuestSync source, uint32_t opcode) override { if (render_) render_->CompleteGuestWrites(source, opcode); }
   void SyncGuestRead(uint32_t address, uint32_t length, uint32_t opcode) override { if (render_) render_->SyncPacketRead(address, length, opcode); }
   rex::graphics::Shader* LoadShader(rex::graphics::xenos::ShaderType type, const uint32_t* data, uint32_t count) override;
@@ -37,5 +38,6 @@ class D3D12Scanout final : public ScanoutBackend {
   uint64_t serial_ = 0;
   std::array<Slot, 3> slots_;
   std::unique_ptr<D3D12Render> render_;
+  std::filesystem::path pipeline_directory_;
 };
 }
