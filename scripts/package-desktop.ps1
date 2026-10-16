@@ -97,7 +97,7 @@ foreach ($binary in @((Join-Path $destination 'x360-native.exe'), (Join-Path $in
     $imports = & (Join-Path $llvm 'bin/llvm-readobj.exe') --coff-imports $binary
     if ($LASTEXITCODE -ne 0) { throw 'Cannot inspect binary imports' }
     foreach ($line in $imports) {
-        if ($line -match '^  Name: (.+)$' -and $Matches[1] -notmatch '^(KERNEL32|USER32|GDI32|ADVAPI32|SHELL32|ole32|OLEAUT32|COMDLG32|COMCTL32|bcrypt|dbghelp|d3d12|dxgi|XINPUT1_4|dwmapi|WS2_32|ntdll|VERSION|IMM32|SHLWAPI)\.dll$' -and $Matches[1] -notmatch '^api-ms-win-.*\.dll$') { throw "Unexpected runtime dependency: $($Matches[1])" }
+        if ($line -match '^  Name: (.+)$' -and $Matches[1] -notmatch '^(KERNEL32|USER32|GDI32|ADVAPI32|SHELL32|ole32|OLEAUT32|COMDLG32|COMCTL32|bcrypt|dbghelp|d3d12|dxgi|XINPUT1_4|dwmapi|WS2_32|ntdll|VERSION|IMM32|SHLWAPI|gdiplus|uxtheme)\.dll$' -and $Matches[1] -notmatch '^api-ms-win-.*\.dll$') { throw "Unexpected runtime dependency: $($Matches[1])" }
     }
 }
 # Legal material is visible at the ZIP root, and comes from the same commit.
