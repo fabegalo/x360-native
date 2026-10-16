@@ -6,7 +6,9 @@
 # Needs the prepared title and dashboard builds and the user's originals;
 # exits 77 (skipped) otherwise. Opens a window, so it runs alone.
 param(
-  [Parameter(Mandatory)][string]$Supervisor,
+  [string]$Supervisor,
+  # Re-checks the rex.log of an earlier run instead of starting the title.
+  [string]$ExistingLog = '',
   [ValidateRange(20, 120)][int]$Seconds = 55,
   [ValidateRange(5, 100)][int]$GuideAfter = 30
 )
@@ -18,6 +20,10 @@ $dash = "$root\.local\inputs\dashboard\17559"
 $xam = "$dash\system\xam_ui.xex"
 $catalog = "$dash\avatar\AvatarAssetPack.toc"
 $game = "$root\.local\inputs\titles\motocross_madness\extracted"
+if ($ExistingLog) {
+  $log = (Resolve-Path -LiteralPath $ExistingLog).Path
+} else {
+if (-not $Supervisor) { throw 'Supervisor is required to start the title' }
 foreach ($file in @($exe, $host_dll, $xam, $catalog, "$game\default.xex")) {
   if (-not (Test-Path -LiteralPath $file)) { Write-Host "SKIP: not present: $file"; exit 77 }
 }
@@ -38,6 +44,7 @@ $summary = $output | Where-Object { $_ -match '^run: .* report (.+report\.json)$
 if (-not $summary) { Write-Host 'FAIL: no supervisor report'; exit 1 }
 $report = ($summary -replace '^run: .* report ', '').Trim()
 $log = Join-Path (Split-Path $report) 'rex.log'
+}
 $lines = Get-Content -LiteralPath $log
 function First($pattern) {
   for ($i = 0; $i -lt $lines.Count; ++$i) { if ($lines[$i] -match $pattern) { return $i } }
@@ -54,7 +61,7 @@ if ($request -lt 0) { $failures += 'Guide was never requested' }
 if ($hud -lt 0) { $failures += 'Guide UI initialization did not complete' }
 if ($ready -ge 0 -and $hud -ge 0 -and $hud -lt $ready) { $failures += 'Guide initialized before the avatar service; the shared order was not exercised' }
 foreach ($bad in @('Unable to allocate XEX memory', 'XEX load failed', 'already loaded; refusing duplicate load')) {
-  if (First ([regex]::Escape($bad)) -ge 0) { $failures += "log contains '$bad'" }
+  if ((First ([regex]::Escape($bad))) -ge 0) { $failures += "log contains '$bad'" }
 }
 $avatar_errors = @($lines | Where-Object { $_ -match 'avatar-service: (\w+) -> ([0-9A-F]{8})' -and $Matches[2] -ne '00000000' -and
   $Matches[1] -notin @('GetManifestLocalUser', 'SetCustomAsset', 'ManifestGetBodyType') })

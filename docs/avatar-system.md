@@ -918,8 +918,15 @@ manuais. Fatos desta mudança; o que não foi executado está marcado no fim.
 - `local.motocross.shared-xam` (`tests/local/motocross-shared-xam.ps1`): execução
   limitada pelo `x360n run`, com o probe opcional do Guide, exigindo READY do serviço,
   inicialização da UI do Guide depois dele e nenhuma segunda carga do XAM.
-- **Não verificado:** `local.motocross.shared-xam` não foi executado antes do commit
-  (a pedido do mantenedor). O usuário abriu o Motocross pela My Games da 17559 e o
-  serviço recebeu os arquivos (run acima); com a imagem compartilhada, Guide,
-  mipmaps e piloto por esse caminho ainda não foram observados. Títulos AOT
-  genéricos importados ainda não recebem o serviço.
+- Execução `20261016T233404Z-mm-shared-xam` (builds `dash_17559` e
+  `motocross_madness` novos, 55 s até o limite, sem entrada): o serviço usou
+  `sys17559:\system\xam_ui.xex`, `Initialize -> 00000000` e READY aos 0,7 s; o Guide
+  foi pedido aos 30 s, completou toda a inicialização original (dispositivo,
+  compositor, bootstrap XUI, skin, localização, HUD, cena) e compôs 600+ quadros.
+  Nenhuma segunda carga de XEX nem erro do serviço; o único erro é o
+  `devkit:\senoverride\…\transport.ini` já conhecido. O verificador (com
+  `-ExistingLog`) aprova essa execução e reprova a anterior,
+  `20261016T230448Z-session-1-motocross_madness`, que tinha o conflito.
+- **Não verificado:** `GetAssets`, mipmaps e o piloto não foram exercitados nessa
+  execução curta (tela de título, sem gameplay); dependem de jogar até a pista.
+  Títulos AOT genéricos importados ainda não recebem o serviço.
