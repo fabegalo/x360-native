@@ -183,3 +183,97 @@ TEST_CASE("session dashboard version comes from its preparation receipt", "[sess
   CHECK_THROWS(LoadSessionProfile(ProjectPaths{dir}, manifest, false));
   fs::remove_all(dir);
 }
+
+TEST_CASE("avatar service files belong to the session dashboard version and bytes", "[session][avatar]") {
+  auto dir = UniqueTempPath("session-avatar");
+  fs::create_directories(dir / "dash/originals/system");
+  fs::create_directories(dir / "dash/originals/avatar");
+  fs::create_directories(dir / "game/codegen/content");
+  const auto xam = dir / "dash/originals/system/xam_ui.xex";
+  const auto catalog = dir / "dash/originals/avatar/AvatarAssetPack.toc";
+  std::ofstream(xam, std::ios::binary) << "xam fixture";
+  std::ofstream(catalog, std::ios::binary) << "catalog fixture";
+  const auto xam_sha = DigestFile(xam)->sha256, catalog_sha = DigestFile(catalog)->sha256;
+  const auto dash_manifest = dir / "dash/dash.toml";
+  std::ofstream(dash_manifest) << "[project]\nname='dash'\ngame_root='originals'\n"
+      "[entrypoint]\nfile_path='originals/dash.xex'\n[x360n]\nnative_exe='build/dash.exe'\n"
+      "user_data_root='user'\nsystem_ui_host='session_ui.dll'\nxex_sha256='" << std::string(64, '0') << "'\n";
+  auto prepare = [&](const std::string& version, const std::string& avatar) {
+    std::ofstream(dir / "dash/preparation.toml")
+        << "kind='dashboard'\ndashboard_version='2.0.17559.0'\nruntime_files=['session_ui.dll']\n"
+        << "[[files]]\npath='system/xam_ui.xex'\nsource_name='xam.xex'\nsha256='" << xam_sha << "'\n"
+        << "[[files]]\npath='avatar/AvatarAssetPack.toc'\nsource_name='AvatarAssetPack.toc'\nsha256='"
+        << catalog_sha << "'\noptional=true\n"
+        << "[avatar]\nversion='" << version << "'\nxam.path='system/xam_ui.xex'\nxam.provenance='update zip'\n"
+        << avatar;
+  };
+  const std::string catalog_entry = "catalog.path='avatar/AvatarAssetPack.toc'\ncatalog.provenance='storage pack'\n";
+  const auto game_manifest = dir / "game/game.toml";
+  auto title = [&](const std::string& extra) {
+    std::ofstream(game_manifest) << "[project]\nname='game'\ngame_root='codegen'\n"
+        "[entrypoint]\nfile_path='codegen/content/default.xex'\n[x360n]\n"
+        "game_data_root='codegen/content'\nnative_exe='build/game.exe'\n"
+        "user_data_root='user'\nxex_sha256='" << std::string(64, '0') << "'\n" << extra;
+    return LoadSessionProfile(ProjectPaths{dir}, game_manifest, false);
+  };
+  const auto requirement = "avatar_service='2.0.17559.0'\navatar_xam_sha256='" + xam_sha + "'\n";
+
+  prepare("2.0.17559.0", catalog_entry);
+  const auto dashboard = LoadSessionProfile(ProjectPaths{dir}, dash_manifest, false);
+  REQUIRE(dashboard.avatar_files);
+  CHECK(dashboard.avatar_files->catalog.sha256 == catalog_sha);
+  auto game = title(requirement);
+  // The codegen VFS root may be wider than the title's own content root.
+  CHECK(game.game_root == fs::weakly_canonical(dir / "game/codegen/content"));
+  CHECK(AvatarServiceArguments(dashboard, game) ==
+        std::vector<std::string>{"--x360n_avatar_xam_17559=" + PathUtf8(fs::canonical(xam)),
+                                 "--x360n_avatar_catalog_17559=" + PathUtf8(fs::canonical(catalog))});
+  // Titles without the service receive nothing, even from a 17559 dashboard.
+  CHECK(AvatarServiceArguments(dashboard, title("")).empty());
+  // Profiles cannot pass or disable the service themselves.
+  for (const auto* arg : {"--x360n_avatar_service=false", "--x360n_avatar_catalog_17559=other.toc"})
+    CHECK_THROWS(title(requirement + "args=['" + arg + "']\n"));
+  CHECK_THROWS(title("avatar_service='2.0.17559.0'\n"));
+  CHECK_THROWS(title("avatar_service='17559'\navatar_xam_sha256='" + xam_sha + "'\n"));
+
+  auto refused = [&](const SessionProfile& from, const SessionProfile& to, const std::string& expected) {
+    try {
+      AvatarServiceArguments(from, to);
+      FAIL("accepted: " << expected);
+    } catch (const std::runtime_error& e) {
+      CAPTURE(e.what());
+      CHECK(std::string(e.what()).find(expected) != std::string::npos);
+    }
+  };
+  // A title built against another XAM, another dashboard version, or no [avatar].
+  refused(dashboard, title("avatar_service='2.0.17559.0'\navatar_xam_sha256='" + std::string(64, 'a') + "'\n"),
+          "compiled against xam.xex SHA-256 " + std::string(64, 'a'));
+  auto other = dashboard;
+  other.dashboard_version = "2.0.13604.0";
+  refused(other, game, "requires the session dashboard 2.0.17559.0; dash is 2.0.13604.0");
+  other = dashboard;
+  other.avatar_files.reset();
+  refused(other, game, "registers no avatar files");
+  other = dashboard;
+  other.system_ui_host.clear();
+  refused(other, game, "has no system UI host, which provides the shared XAM image");
+  // Missing or different bytes, named with version, file and registered hash.
+  fs::rename(catalog, dir / "moved.toc");
+  refused(dashboard, game, "missing AvatarAssetPack.toc 2.0.17559.0 (SHA-256 " + catalog_sha + "; storage pack)");
+  fs::rename(dir / "moved.toc", catalog);
+  std::ofstream(xam, std::ios::binary) << "xam of another version";
+  refused(dashboard, game, "different file instead of xam_ui.xex 2.0.17559.0");
+  std::ofstream(xam, std::ios::binary) << "xam fixture";
+  CHECK(AvatarServiceArguments(dashboard, game).size() == 2);
+
+  // The registration itself must be version-consistent, hashed and inside the root.
+  prepare("2.0.13604.0", catalog_entry);
+  CHECK_THROWS(LoadSessionProfile(ProjectPaths{dir}, dash_manifest, false));
+  prepare("2.0.17559.0", "catalog.path='avatar/Unregistered.toc'\ncatalog.provenance='x'\n");
+  CHECK_THROWS(LoadSessionProfile(ProjectPaths{dir}, dash_manifest, false));
+  prepare("2.0.17559.0", "catalog.path='../../AvatarAssetPack.toc'\ncatalog.provenance='x'\n");
+  CHECK_THROWS(LoadSessionProfile(ProjectPaths{dir}, dash_manifest, false));
+  prepare("2.0.17559.0", "catalog.path='avatar/AvatarAssetPack.toc'\n");
+  CHECK_THROWS(LoadSessionProfile(ProjectPaths{dir}, dash_manifest, false));
+  fs::remove_all(dir);
+}

@@ -41,6 +41,10 @@ int main(int argc, char** argv) {
         << arg("--user_language=") << ' ' << arg("--user_country=") << '\n';
     if (!step) SaveConsoleSettings(ProjectPaths{root.parent_path().parent_path()}, {1, 103});
   }
+  if (mode == "avatar")
+    std::ofstream(root / "avatar-observed.txt", std::ios::app | std::ios::binary)
+        << dashboard << ' ' << arg("--x360n_avatar_xam_17559=") << '|'
+        << arg("--x360n_avatar_catalog_17559=") << '\n';
   if (mode == "version")
     std::ofstream(root / "version-observed.txt", std::ios::app | std::ios::binary)
         << arg("--x360n_dashboard_version=") << '\n';
@@ -57,7 +61,7 @@ int main(int argc, char** argv) {
   request.kind = dashboard ? LaunchRequest::Image : LaunchRequest::Dashboard;
   request.flags = dashboard ? 0 : 0x100;
   if (dashboard) request.path = PathUtf8(root / "game.xex");
-  if (step == 80 || ((mode == "locale" || mode == "version") && step == 2)) { request.kind = LaunchRequest::WindowClose; request.path.clear(); }
+  if (step == 80 || ((mode == "locale" || mode == "version" || mode == "avatar") && step == 2)) { request.kind = LaunchRequest::WindowClose; request.path.clear(); }
   if (!dashboard && mode == "invalid-flags") request.flags = 0x200;
   if (!dashboard && mode == "invalid-target") {
     request.kind = LaunchRequest::Image; request.flags = 0;

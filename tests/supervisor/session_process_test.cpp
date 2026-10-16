@@ -77,6 +77,61 @@ TEST_CASE("session dashboard version reaches the game and dashboard return", "[g
     CHECK(Read(f.paths.inputs() / "version-observed.txt") == line + line + line);
   }
 }
+TEST_CASE("session hands only its dashboard's verified avatar files to an avatar title", "[avatar][cli]") {
+  for (const std::string variant : {"valid", "missing", "different", "version"}) {
+    CAPTURE(variant);
+    Fixture f("avatar");
+    const auto dashboard = f.root / "titles/dashboard/dashboard_manifest.toml";
+    const auto game = f.root / "titles/game/game_manifest.toml";
+    const auto xam = f.paths.inputs() / "system/xam_ui.xex";
+    const auto catalog = f.paths.inputs() / "avatar/AvatarAssetPack.toc";
+    fs::create_directories(xam.parent_path());
+    fs::create_directories(catalog.parent_path());
+    std::ofstream(xam, std::ios::binary) << "xam 17559 fixture";
+    std::ofstream(catalog, std::ios::binary) << "catalog 17559 fixture";
+    const auto xam_sha = DigestFile(xam)->sha256;
+    const std::string version = variant == "version" ? "2.0.6717.0" : "2.0.17559.0";
+    // The dashboard's system UI host binds the XAM image the service shares.
+    std::ofstream(f.paths.build() / "session_ui.dll", std::ios::binary) << "host fixture";
+    std::ofstream(dashboard, std::ios::app) << "system_ui_host = 'session_ui.dll'\n";
+    std::ofstream(dashboard.parent_path() / "preparation.toml")
+        << "kind='dashboard'\ndashboard_version='" << version << "'\nruntime_files=['session_ui.dll']\n"
+        << "[[files]]\npath='system/xam_ui.xex'\nsource_name='xam.xex'\nsha256='" << xam_sha << "'\n"
+        << "[[files]]\npath='avatar/AvatarAssetPack.toc'\nsource_name='AvatarAssetPack.toc'\nsha256='"
+        << DigestFile(catalog)->sha256 << "'\noptional=true\n"
+        << "[avatar]\nversion='" << version << "'\nxam.path='system/xam_ui.xex'\nxam.provenance='fixture'\n"
+        << "catalog.path='avatar/AvatarAssetPack.toc'\ncatalog.provenance='fixture'\n";
+    WriteTestReceipt(f.paths, "dashboard", dashboard, f.paths.build() / "dashboard.exe",
+                     {f.paths.inputs() / "dashboard.xex"});
+    std::ofstream(game, std::ios::app) << "avatar_service = '2.0.17559.0'\navatar_xam_sha256 = '" << xam_sha << "'\n";
+    WriteTestReceipt(f.paths, "game", game, f.paths.build() / "game.exe", {f.paths.inputs() / "game.xex"});
+    if (variant == "missing") fs::remove(catalog);
+    if (variant == "different") std::ofstream(catalog, std::ios::binary) << "another catalog";
+    auto result = f.Run();
+    const auto err = Read(f.root / "err.log");
+    INFO(err);
+    REQUIRE(result.launched);
+    const auto observed = Read(f.paths.inputs() / "avatar-observed.txt");
+    if (variant == "valid") {
+      REQUIRE(result.exit_code == 0);
+      // The dashboard itself receives nothing; the title receives both paths.
+      CHECK(observed == "1 |\n0 " + PathUtf8(fs::canonical(xam)) + "|" + PathUtf8(fs::canonical(catalog)) +
+                        "\n1 |\n");
+      continue;
+    }
+    // Refused before the title starts: only the dashboard ran.
+    CHECK(result.exit_code == 3);
+    CHECK(observed == "1 |\n");
+    CHECK(err.find("avatar service 2.0.17559.0 of game") != std::string::npos);
+    if (variant == "version") {
+      CHECK(err.find("is 2.0.6717.0") != std::string::npos);
+    } else {
+      CHECK(err.find(variant == "missing" ? "missing AvatarAssetPack.toc 2.0.17559.0"
+                                          : "different file instead of AvatarAssetPack.toc 2.0.17559.0") !=
+            std::string::npos);
+    }
+  }
+}
 TEST_CASE("session survives 80 transitions with intact handoffs and states", "[session][cli]") {
   Fixture f("healthy");
   auto result = f.Run();

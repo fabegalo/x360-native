@@ -687,6 +687,9 @@ int Session(const ProjectPaths& paths, const fs::path& manifest, int timeout, bo
         args.push_back("--x360n_system_ui_host=" + PathUtf8(dashboard.system_ui_host));
         args.push_back("--x360n_system_ui_root=" + PathUtf8(dashboard.game_root));
       }
+      // A title's original avatar service uses only the session dashboard's own
+      // verified files; a missing or different one refuses the title here.
+      for (auto& arg : AvatarServiceArguments(dashboard, active)) args.push_back(std::move(arg));
       if (!incoming.empty()) args.push_back("--x360n_handoff_in=" + PathUtf8(incoming));
       fs::path handoff;
       std::chrono::milliseconds child_lifetime{};

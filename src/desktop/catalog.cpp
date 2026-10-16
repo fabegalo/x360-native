@@ -95,6 +95,8 @@ std::vector<Target> ReadCatalog(const ProjectPaths& paths) {
     t.manifest = dir.path() / (t.id + "_manifest.toml");
     auto profile = Read(t.manifest);
     t.game_root = Resolve(dir.path(), Text(profile["project"]["game_root"]));
+    // A codegen VFS root wider than the content (embedded system modules).
+    if (profile["x360n"]["game_data_root"]) t.game_root = Resolve(dir.path(), Text(profile["x360n"]["game_data_root"]));
     Inside(t.game_root, paths.inputs());
     t.exe = paths.build() / "titles" / t.id / (t.id + ".exe");
     if (auto value = profile["x360n"]["native_exe"].value<std::string>())
@@ -121,6 +123,7 @@ std::vector<Target> ReadCatalog(const ProjectPaths& paths) {
       Inside(i.destination, t.game_root);
       i.source_name = Text((*fields)["source_name"]);
       i.sha256 = Text((*fields)["sha256"]);
+      i.optional = (*fields)["optional"].value_or(false);
       if (!IsSafePackageEntryName(i.source_name) || i.sha256.size() != 64 ||
           i.sha256.find_first_not_of("0123456789abcdef") != std::string::npos)
         throw std::runtime_error("Identidade de componente inválida.");
@@ -181,6 +184,8 @@ Inspection Inspect(const ProjectPaths& paths, const Target& t) {
   for (const auto& i : t.inputs) {
     auto file = t.preparation_source.empty() ? i.destination : t.preparation_source / i.destination.lexically_relative(t.game_root);
     if (!fs::is_regular_file(file)) {
+      // Absent optional components are checked by whoever needs them.
+      if (i.optional) continue;
       r.inputs_ok = false;
       r.issues.push_back("Falta componente: " + Utf8(i.destination));
     } else if (!Matches(file, i.sha256)) {
@@ -264,7 +269,7 @@ size_t Import(const ProjectPaths& paths, const Target& t, const fs::path& source
         throw std::runtime_error("Destino já contém outro arquivo; nada será sobrescrito: " + Utf8(i.destination));
       copies.erase(i.destination);
     } else if (!copies.contains(i.destination)) {
-      if (allow_partial) continue;
+      if (allow_partial || i.optional) continue;
       throw std::runtime_error("Conjunto incompleto. Falta o arquivo verificado: " + i.source_name);
     } else needed += fs::file_size(copies.at(i.destination));
   }

@@ -22,6 +22,9 @@ SessionProfile LoadSessionProfile(const ProjectPaths& paths, const std::filesyst
   p.manifest = manifest;
   p.name = text(table["project"]["name"]);
   p.game_root = resolve(text(table["project"]["game_root"]));
+  // Codegen may need a wider VFS root (an embedded system module); the title's
+  // own content root for import and execution is then declared separately.
+  if (table["x360n"]["game_data_root"]) p.game_root = resolve(text(table["x360n"]["game_data_root"]));
   p.xex = resolve(text(table["entrypoint"]["file_path"]));
   p.exe = resolve(text(table["x360n"]["native_exe"]));
   p.user_root = UserDataRoot(paths, resolve(text(table["x360n"]["user_data_root"])));
@@ -64,6 +67,40 @@ SessionProfile LoadSessionProfile(const ProjectPaths& paths, const std::filesyst
     if (!ParseDashboardVersion(*version)) throw std::runtime_error("invalid dashboard_version: " + *version);
     p.dashboard_version = *version;
   }
+  if (auto avatar = preparation["avatar"].as_table()) {
+    // Only this dashboard's own registered components, never another version's.
+    AvatarServiceFiles files;
+    files.version = text((*avatar)["version"]);
+    if (files.version != p.dashboard_version)
+      throw std::runtime_error("avatar service version " + files.version +
+                               " differs from dashboard_version '" + p.dashboard_version + "': " + PathUtf8(setup));
+    auto component = [&](const char* key, AvatarServiceFiles::File& file) {
+      const auto relative = text((*avatar)[key]["path"]);
+      file.provenance = text((*avatar)[key]["provenance"]);
+      // Lexical here: an absent file is reported at launch, not when loading.
+      const auto normal = PathFromUtf8(relative).lexically_normal();
+      if (normal.empty() || normal.has_root_path() || *normal.begin() == "..")
+        throw std::runtime_error("avatar service file outside the dashboard game root: " + relative);
+      file.path = std::filesystem::weakly_canonical(p.game_root / normal);
+      if (auto registered = preparation["files"].as_array())
+        for (const auto& entry : *registered)
+          if (entry.as_table() && (*entry.as_table())["path"].value<std::string>() == relative)
+            file.sha256 = text((*entry.as_table())["sha256"]);
+      if (file.sha256.size() != 64 || file.sha256.find_first_not_of("0123456789abcdef") != std::string::npos)
+        throw std::runtime_error("avatar service file has no registered SHA-256 in [[files]]: " + relative);
+    };
+    component("xam", files.xam);
+    component("catalog", files.catalog);
+    p.avatar_files = std::move(files);
+  }
+  if (auto version = table["x360n"]["avatar_service"].value<std::string>()) {
+    if (!ParseDashboardVersion(*version)) throw std::runtime_error("invalid avatar_service: " + *version);
+    p.avatar_service = *version;
+    p.avatar_xam_sha256 = text(table["x360n"]["avatar_xam_sha256"]);
+    if (p.avatar_xam_sha256.size() != 64 ||
+        p.avatar_xam_sha256.find_first_not_of("0123456789abcdef") != std::string::npos)
+      throw std::runtime_error("invalid avatar_xam_sha256: " + PathUtf8(manifest));
+  }
   if (auto library = preparation["library"].as_table()) {
     const auto title = text((*library)["title_id"]);
     const auto type = text((*library)["content_type"]);
@@ -83,6 +120,7 @@ SessionProfile LoadSessionProfile(const ProjectPaths& paths, const std::filesyst
           arg.starts_with("--x360n_profile_root") ||
           arg.starts_with("--x360n_dashboard_version") ||
           arg.starts_with("--x360n_system_ui_") ||
+          arg.starts_with("--x360n_avatar_") ||
           arg.starts_with("--parent_window"))
         throw std::runtime_error("reserved session argument: " + arg);
       p.args.push_back(arg);
@@ -161,5 +199,45 @@ bool MatchesLaunch(const SessionProfile& p, const LaunchRequest& request,
   if (!matches) return false;
   auto digest = DigestFile(path);
   return digest && digest->sha256 == p.sha256;
+}
+std::vector<std::string> AvatarServiceArguments(const SessionProfile& dashboard, const SessionProfile& title) {
+  if (title.avatar_service.empty()) return {};
+  const auto& version = title.avatar_service;
+  const auto service = "avatar service " + version + " of " + title.name + ": ";
+  if (dashboard.dashboard_version != version)
+    throw std::runtime_error(service + "requires the session dashboard " + version + "; " + dashboard.name +
+        (dashboard.dashboard_version.empty() ? " has no dashboard version" : " is " + dashboard.dashboard_version) +
+        ". Start the title from the dashboard " + version + " session.");
+  if (!dashboard.avatar_files)
+    throw std::runtime_error(service + "dashboard " + dashboard.name + " (" + version +
+        ") registers no avatar files (preparation.toml [avatar]).");
+  // Its system UI host binds the one XAM image the service and the Guide share.
+  if (dashboard.system_ui_host.empty())
+    throw std::runtime_error(service + "dashboard " + dashboard.name + " (" + version +
+        ") has no system UI host, which provides the shared XAM image.");
+  const auto& files = *dashboard.avatar_files;
+  if (files.xam.sha256 != title.avatar_xam_sha256)
+    throw std::runtime_error(service + "compiled against xam.xex SHA-256 " + title.avatar_xam_sha256 +
+        ", but dashboard " + dashboard.name + " registers " + PathUtf8(files.xam.path.filename()) +
+        " SHA-256 " + files.xam.sha256 + ".");
+  for (const auto* file : {&files.xam, &files.catalog}) {
+    const auto identity = PathUtf8(file->path.filename()) + " " + version + " (SHA-256 " + file->sha256 +
+                          "; " + file->provenance + ")";
+    if (!std::filesystem::is_regular_file(file->path))
+      throw std::runtime_error(service + "missing " + identity + ". Import it into the dashboard " + version +
+                               ": " + PathUtf8(file->path));
+    if (!IsWithin(file->path, dashboard.game_root))
+      throw std::runtime_error(service + identity + " resolves outside the dashboard game root: " +
+                               PathUtf8(file->path));
+    const auto digest = DigestFile(file->path);
+    if (!digest || digest->sha256 != file->sha256)
+      throw std::runtime_error(service + "different file instead of " + identity +
+          (digest ? ", found SHA-256 " + digest->sha256 : std::string(", unreadable")) +
+          ". It is preserved; import the " + version + " original: " + PathUtf8(file->path));
+  }
+  // The title's cvars carry the build number of the version it was built against.
+  const auto build = std::to_string((*ParseDashboardVersion(version))[2]);
+  return {"--x360n_avatar_xam_" + build + "=" + PathUtf8(files.xam.path),
+          "--x360n_avatar_catalog_" + build + "=" + PathUtf8(files.catalog.path)};
 }
 }

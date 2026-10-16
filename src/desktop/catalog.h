@@ -11,6 +11,7 @@ struct Input {
   std::filesystem::path destination;
   std::string source_name, sha256;
   std::filesystem::path source_relative;
+  bool optional = false;  // may be absent; when present it must match
 };
 struct Target {
   std::string id, label, limitations, label_en, limitations_en;

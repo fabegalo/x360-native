@@ -54,6 +54,24 @@ TEST_CASE("asset inventory rejects missing data and same-name files in the wrong
   Write(f.target.inputs.back().destination, "broken");
   CHECK_FALSE(Inspect(f.paths, f.target).inputs_ok);
 }
+TEST_CASE("optional dashboard components may be absent but never differ") {
+  Fixture f;
+  Input catalog{f.target.game_root / "avatar/AvatarAssetPack.toc", "AvatarAssetPack.toc", Hash("catalog"), {}};
+  catalog.optional = true;
+  f.target.inputs.push_back(catalog);
+  // Absent: the required set imports and stays usable.
+  CHECK(Import(f.paths, f.target, f.source) == 2);
+  CHECK(Inspect(f.paths, f.target).inputs_ok);
+  CHECK_FALSE(fs::exists(catalog.destination));
+  // Present elsewhere in the selected folder: imported with its verified bytes.
+  Write(f.source / "storage/FFFE07DF00000002.extracted/AvatarAssetPack.toc", "catalog");
+  CHECK(Import(f.paths, f.target, f.source) == 1);
+  CHECK(DigestFile(catalog.destination)->sha256 == Hash("catalog"));
+  CHECK(Inspect(f.paths, f.target).inputs_ok);
+  // A different file in its place is reported, as for required components.
+  Write(catalog.destination, "another version");
+  CHECK_FALSE(Inspect(f.paths, f.target).inputs_ok);
+}
 TEST_CASE("individual renamed components are identified by bytes and imported incrementally") {
   Fixture f;
   auto file = f.source / "renamed.bin"; Write(file, "dashboard");

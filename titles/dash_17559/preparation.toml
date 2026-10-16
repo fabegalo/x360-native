@@ -67,3 +67,23 @@ sha256 = "876ddbb333d83f408ab7c69267703e623daef6da5b1eb3302bd94d246155724e"
 path = "system/hud.xex"
 source_name = "hud.xex"
 sha256 = "37e10612afde211e1d349838704f7cc2648ad5a4d1f8ca459f18ecd2c1f31ac7"
+# Avatar catalog of this dashboard, optional for the dashboard itself. From the
+# official SystemUpdate_17559_USB.zip: $SystemUpdate/FFFE07DF00000002 (PIRS storage
+# pack "AvatarAsset", title FFFE07DF, version 0x20449700), extracted unchanged.
+[[files]]
+path = "avatar/AvatarAssetPack.toc"
+source_name = "AvatarAssetPack.toc"
+sha256 = "a8c90b3db5c6349a55fcb72eda47e08e4940f88fabda4ff73025d9728832daa8"
+optional = true
+
+# Original avatar service of titles started from this dashboard (manifest
+# avatar_service = "2.0.17559.0", titles/common/avatar, docs/avatar-system.md §17).
+# Hashes are the [[files]] entries above. The supervisor verifies both files at every
+# launch and refuses the title, naming version and file, when one is missing or
+# different; titles never receive another dashboard version's XAM or catalog.
+[avatar]
+version = "2.0.17559.0"
+xam.path = "system/xam_ui.xex"
+xam.provenance = "SystemUpdate_17559_USB.zip, $SystemUpdate/su20076000_00000000, $flash_xam.xex"
+catalog.path = "avatar/AvatarAssetPack.toc"
+catalog.provenance = "SystemUpdate_17559_USB.zip, $SystemUpdate/FFFE07DF00000002 (AvatarAsset 0x20449700)"
