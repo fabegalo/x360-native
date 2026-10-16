@@ -6,6 +6,7 @@
 #include <rex/logging.h>
 #include <rex/logging/assert.h>
 #include <rex/kernel/xam/module.h>
+#include <rex/system/user_module.h>
 #include <rex/filesystem/vfs.h>
 #include <rex/filesystem/devices/host_path_entry.h>
 #include <rex/platform/dynlib.h>
@@ -62,6 +63,10 @@ void ImportLaunchData(rex::Runtime& runtime) {
     const auto identity = user->identity();
     REXLOG_INFO("[supervisor] session profile xuid={:016X} state={} root={}",
         identity.xuid, identity.signin_state, profile_root);
+    // A game launched with a signed-in account joins that account's played
+    // titles; the dashboard and other system titles are not recorded.
+    if (runtime.kernel_state()->GetExecutableModule())
+      user->RecordTitlePlayed(runtime.kernel_state()->title_id());
   }
   auto input = REXCVAR_GET(x360n_handoff_in);
   if (input.empty()) return;
