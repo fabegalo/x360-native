@@ -1,0 +1,17 @@
+{
+  "seconds": 52,
+  "arguments": [],
+  "events": [
+    {"at": 12, "action": "key", "vk": 13, "scan": 28, "hold_ms": 120},
+    {"at": 17, "action": "key", "vk": 71, "scan": 34, "hold_ms": 120},
+    {"at": 21, "action": "key", "vk": 72, "scan": 35, "hold_ms": 120},
+    {"at": 23, "action": "key", "vk": 72, "scan": 35, "hold_ms": 120},
+    {"at": 25, "action": "shot", "name": "settings"},
+    {"at": 26, "action": "key", "vk": 32, "scan": 57, "hold_ms": 120},
+    {"at": 31, "action": "shot", "name": "profile"},
+    {"at": 33, "action": "key", "vk": 8, "scan": 14, "hold_ms": 120},
+    {"at": 37, "action": "shot", "name": "back"},
+    {"at": 39, "action": "key", "vk": 71, "scan": 34, "hold_ms": 120},
+    {"at": 43, "action": "shot", "name": "closed"}
+  ]
+}

@@ -1,0 +1,16 @@
+{
+  "seconds": 70,
+  "arguments": ["--dash17559_boot_intro=false"],
+  "events": [
+    {"at": 38, "action": "key", "vk": 71, "scan": 34, "hold_ms": 120},
+    {"at": 42, "action": "key", "vk": 72, "scan": 35, "hold_ms": 120},
+    {"at": 44, "action": "key", "vk": 72, "scan": 35, "hold_ms": 120},
+    {"at": 46, "action": "shot", "name": "settings"},
+    {"at": 47, "action": "key", "vk": 32, "scan": 57, "hold_ms": 120},
+    {"at": 52, "action": "shot", "name": "profile"},
+    {"at": 54, "action": "key", "vk": 8, "scan": 14, "hold_ms": 120},
+    {"at": 58, "action": "shot", "name": "back"},
+    {"at": 60, "action": "key", "vk": 71, "scan": 34, "hold_ms": 120},
+    {"at": 64, "action": "shot", "name": "closed"}
+  ]
+}

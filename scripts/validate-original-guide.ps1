@@ -73,7 +73,9 @@ $si.RedirectStandardOutput=$true;$si.RedirectStandardError=$true
 $arguments=@('--gpu_plugin=xenos','--mnk_mode=true','--log_level=info',
  '--keybind_guide=G','--keybind_dpad_up=U','--keybind_dpad_down=J','--keybind_dpad_left=N','--keybind_dpad_right=H',
  "--game_data_root=$game","--user_data_root=$out/user","--cache_root=$out/user/cache",
- "--log_file=$out/rex.log","--x360n_handoff_out=$out/handoff.bin")+@($plan.arguments | Where-Object {$_})
+ "--log_file=$out/rex.log","--x360n_handoff_out=$out/handoff.bin",
+ # The same account store a supervisor session passes to every process.
+ "--x360n_profile_root=$out/user")+@($plan.arguments | Where-Object {$_})
 if($SystemUiHost){
  $hostPath=(Resolve-Path -LiteralPath $SystemUiHost).Path
  $systemRoot=(Resolve-Path -LiteralPath $SystemUiRoot).Path
