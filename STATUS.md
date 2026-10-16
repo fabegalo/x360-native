@@ -9,8 +9,8 @@ etapa histórica não certificam automaticamente o build atual nem outros títul
 
 Windows x64/D3D12 é o ambiente demonstrado. Linux, macOS, ARM64 e Windows limpo
 continuam sem aceite funcional completo. ReXGlue v0.10.0 permanece fixado em
-`f5337cdc947ff6d4c4196737e2c807a48f2a1fc2`, LLVM 22.1.8, **77 patches ativos**
-no [lock](deps.lock.json); numeração até 0078, com 0073 retirado.
+`f5337cdc947ff6d4c4196737e2c807a48f2a1fc2`, LLVM 22.1.8, **78 patches ativos**
+no [lock](deps.lock.json); numeração até 0079, com 0073 retirado.
 O submódulo modificado pelos patches/materialização do libmspack é esperado.
 Nunca substituir módulos ou fontes originais entre versões de dashboard.
 
@@ -37,7 +37,8 @@ XAM (patch 0078), executado no `VdSwap` de qualquer título, sem hooks por jogo 
 sem compartilhar o dispositivo D3D do título. Em 16/10 abriu, navegou e fechou
 na dashboard, no Forza (com Xbox Home → handoff Dashboard) e no Castle Crashers,
 com o título escurecido atrás e seguindo após o fechamento; Guide → Perfil → B
-volta ao Guide. Dados de perfil, entrada do jogo durante o Guide, Vulkan e outros
+volta ao Guide. A entrada fica com o Guide, inclusive botões ainda pressionados ao
+fechar (patch 0079). Dados de perfil, Vulkan e outros
 títulos não verificados: [relatório de 16/10](docs/guide-composition-2026-10-16.md)
 (histórico em [15/10](docs/guide-composition-2026-10-15.md)).
 Patches 0076/0077 corrigem resolves vazios e fetches comprovadamente inativos,

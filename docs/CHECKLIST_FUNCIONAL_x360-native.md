@@ -75,7 +75,7 @@ Os itens gerais abaixo continuam pendentes quando a evidência cobre só este pa
 - [ ] Exibir textos, ícones, fontes, transições e animações corretamente, não apenas uma imagem estática.
 - [x] Abrir e fechar o Guide original na dashboard. Retail 17559, Windows x64/Xenos, 16/10: abas, B, reabertura, botão Guide; [relatório](guide-composition-2026-10-16.md).
 - [x] Abrir e fechar o Guide original durante o jogo, permitindo acionar o pedido de retorno. Forza (Xbox Home → handoff Dashboard) e Castle Crashers, Windows x64/Xenos, 16/10; outros jogos não verificados; [relatório](guide-composition-2026-10-16.md).
-- [ ] Direcionar a entrada para a interface ativa, sem acionar simultaneamente o jogo por trás do Guide.
+- [x] Direcionar a entrada para a interface ativa, sem acionar simultaneamente o jogo por trás do Guide. Windows x64/Xenos, 16/10: Castle Crashers ao vivo e `system_ui_input_test` (estado, keystrokes, botão Guide e botões segurados ao fechar); outros jogos não verificados; [relatório](guide-composition-2026-10-16.md).
 - [ ] Exibir e utilizar o teclado virtual original quando solicitado.
 - [ ] Mostrar diálogos reais de confirmação, erros e notificações.
 - [ ] Tratar telas dependentes de serviços indisponíveis sem travar nem informar conexão fictícia.

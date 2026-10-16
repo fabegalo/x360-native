@@ -93,6 +93,39 @@ Testes focados (Release, TEMP/TMP no workspace):
   corrigido para não exigir host.
 - `apply-sdk-patches.ps1 -Check`: 77 patches aplicados (0001–0078, 0073 retirado).
 
+## Entrada do jogo com o Guide aberto (patch 0079)
+
+Antes desta etapa, a SDK já entregava estado vazio ao título enquanto a UI de
+sistema estava visível. O teste novo `system_ui_input_test` reproduziu três
+falhas restantes: o título via o bit do botão Guide (habilitado pelo host para
+uso próprio); o B que fecha o Guide, ainda pressionado, aparecia ao jogo como
+pressão nova; e o soltar dessa tecla chegava como keystroke ao título. O patch
+0079 corrige as três, sem caso por título. O teste passou a aprovar: 24 casos e
+540 asserções com os contratos do Guide, mais `[mnk-keystroke]` e
+`[persist-display]` (`input-test-after.log`, `input-mnk-tests*.log`).
+
+Ao vivo, no Castle Crashers, o título só lê `XamInputGetState`:
+
+- `castle-input-1`: Start/A com o Guide aberto não tiraram o jogo de
+  "Press Start"; depois de fechar, Start abriu o menu. Execução feita antes da
+  SDK nova; o comportamento é o mesmo depois dela.
+- `castle-diag2`, com instrumentação temporária já removida: o B que fechou o
+  Guide ficou pressionado por cerca de 0,85 s depois do fechamento e não chegou
+  ao jogo; o Start seguinte chegou (`buttons=0010`, `visible=false`).
+- `castle-trace-diag`: nenhuma entrada não nula chegou ao jogo durante todo o
+  Guide, inclusive com o diálogo Xbox Home. O jogo foi sozinho ao menu
+  principal enquanto o Guide estava aberto; a causa provável é o próprio
+  título (notificação de UI de sistema ou tempo de attract), não verificada.
+- No Guide, Start age como seleção e abre o diálogo Xbox Home; o primeiro B
+  fecha o diálogo e o segundo fecha o Guide.
+- `castle-input-4`, `dash-full-input` e `forza-input`, com SDK 0079: saída 0;
+  Forza com handoff Dashboard.
+- `castle-trace`: encerramento forçado pelo runner depois do fechamento da
+  janela. Não se repetiu em `castle-trace-diag`, `castle-diag2`, no mesmo
+  cenário com o build final (`castle-trace-final`, saída 0) nem nas demais
+  execuções. A causa não foi investigada e o caso continua registrado como
+  falha.
+
 ## Ainda falha ou não foi verificado
 
 - Perfil: gamerpic e números de jogos/gamerscore/conquistas não aparecem; o log
@@ -100,7 +133,6 @@ Testes focados (Release, TEMP/TMP no workspace):
   do perfil, não na composição.
 - Entre um app e o seguinte (Guide → Perfil), o quadro do título aparece sem
   escurecimento durante um swap, porque o descritor vazio é publicado ao fechar.
-- Não foi verificado se o jogo recebe entrada enquanto o Guide está aberto.
 - Tampouco foram verificados animações de fade quadro a quadro, outros idiomas,
   Vulkan, outros jogos e títulos que dependam do conteúdo da EDRAM entre swaps
   (a EDRAM é compartilhada, como no console).
