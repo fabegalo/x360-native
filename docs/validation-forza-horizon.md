@@ -1,5 +1,9 @@
 # Forza Horizon — Windows x64 investigation, 2026-10-14
 
+Atualização Xenos de 2026-10-15: [correção de resolves vazios, testes e comparação
+real](xenos-empty-resolves.md). A validação nova é focada no renderer; o ciclo
+integral abaixo permanece evidência histórica, não uma repetição com a DLL nova.
+
 ## Completed original-library cycle — Retail 17559, Windows x64
 
 The complete requested Forza cycle passed in a normal `x360n session`, started

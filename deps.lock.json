@@ -1016,6 +1016,17 @@
     "src/graphics/command_processor.cpp": "18889d89b79e42fdc2d494bd36874d83bd54719b978f5133d2b5c60d6fe5f461"
   },
   "test": "sdkcheck.Native-packet-guard; native.packet-payload"
+},
+{
+  "file": "patches/rexglue-sdk/0076-empty-resolve-noop.patch",
+  "sha256": "079ee2f0cbbcb8d3dd0b65244507b371d589b744d0a20bd48b8f5ef51b869a7a",
+  "base_files": {
+    "src/graphics/util/draw.cpp": "a3215a0de2f42d9e2235dd062b4cd2c3c0a27effd033c27ab6b6ca1f7673a25b"
+  },
+  "files": {
+    "src/graphics/util/draw.cpp": "33957ed61d2819427b6695c40b6669cd3dd9f9b85b042ad4ac8a6df5c61e75bf"
+  },
+  "test": "sdkcheck.empty-resolve"
 }
                                     ]
                     },

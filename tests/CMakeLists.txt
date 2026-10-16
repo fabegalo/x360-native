@@ -12,6 +12,16 @@
 list(APPEND CMAKE_MODULE_PATH "${X360_REXGLUE_DIR}/thirdparty/catch2/extras")
 include(Catch)
 
+add_executable(x360n_resolve_checks sdkcheck/resolve_empty_probe.cpp
+    ${X360_REXGLUE_DIR}/src/graphics/util/draw.cpp
+    ${X360_REXGLUE_DIR}/src/graphics/register_file.cpp
+    ${X360_REXGLUE_DIR}/src/graphics/registers.cpp
+    ${X360_REXGLUE_DIR}/src/graphics/flags.cpp)
+target_link_libraries(x360n_resolve_checks PRIVATE rexruntime)
+x360n_stage_runtime_dlls(x360n_resolve_checks)
+add_test(NAME sdkcheck.empty-resolve COMMAND x360n_resolve_checks)
+set_tests_properties(sdkcheck.empty-resolve PROPERTIES LABELS project TIMEOUT 30)
+
 # Helper child process for supervisor tests (test fixture, not a title).
 add_executable(x360n_test_child supervisor/test_child.cpp)
 add_executable(x360n_session_child supervisor/session_child.cpp)

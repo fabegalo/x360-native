@@ -1,5 +1,18 @@
 # STATUS
 
+Xenos: corrigido o contrato de resolves vazios em 2026-10-15, sobre `dd3113e`.
+O patch SDK 0076 impede que alinhamento crie uma cópia/clear a partir de região
+vazia e reutiliza o no-op do cache existente. Teste real do helper: 204 checks,
+84 falhas antes e zero depois. Forza chegou à condução com entrada e áudio
+WASAPI confirmado; 5.054 erros de resolve/falhas associadas em janela de 30 s
+antes, zero depois. Fetch 90 continua pendente. Castle: menu renderizado após
+Start, zero erros/criticals, 59,968 FPS. Sem ganho global de performance:
+par de gameplay recusado por câmeras diferentes; introdução controlada estável
+em ~30 FPS. Ciclo completo pela dashboard usa a evidência histórica, sem nova
+certificação com essa DLL. SDK/pin e produção preservados; validação em cópias
+isoladas. **Native suspenso; prioridade atual Xenos.**
+[Evidências, comparação e limites](docs/xenos-empty-resolves.md).
+
 Native N4.2 recuperou progressão até condução do Forza (2026-10-15), sobre
 `41768ce`: cache persistente de PSOs com identidade integral e fallback do driver,
 mais remoção de esperas para views de textura inativas. PSOs eram o maior custo
