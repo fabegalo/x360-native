@@ -8,7 +8,12 @@ necessárias ou usar stubs para obter números melhores. Preservar C7/C8, perfis
 saves e biblioteca. Compilador, AOT, CPU, memória, GPU e carregamento são frentes
 contínuas, priorizadas por evidência.
 
-Native é a prioridade gráfica iniciada em 2026-10-14: primeiro scanout D3D12
+O desenvolvimento Native está suspenso por decisão do mantenedor em 2026-10-15.
+A prioridade atual é fortalecer o Xenos existente, sem iniciar trabalho Native
+ou Vulkan. A investigação de resolves está em
+[Xenos: resolves vazios](xenos-empty-resolves.md).
+
+Histórico: Native foi a prioridade gráfica iniciada em 2026-10-14: primeiro scanout D3D12
 executado, com fronteira própria para Vulkan futuro e Xenos mantido como padrão.
 [Resultados e limites](native-renderer.md). A comparação de pixels passou;
 o fixture com readback não é benchmark de FPS. A meta competitiva frente ao

@@ -1,0 +1,149 @@
+diff --git a/src/graphics/d3d12/command_processor.cpp b/src/graphics/d3d12/command_processor.cpp
+index 7285aea..b3e26fe 100644
+--- a/src/graphics/d3d12/command_processor.cpp
++++ b/src/graphics/d3d12/command_processor.cpp
+@@ -23,6 +23,7 @@
+ #include <rex/graphics/d3d12/graphics_system.h>
+ #include <rex/graphics/d3d12/shader.h>
+ #include <rex/graphics/flags.h>
++#include <rex/graphics/d3d12/inactive_vertex_fetch.h>
+ #include <rex/graphics/registers.h>
+ #include <rex/graphics/util/draw.h>
+ #include <rex/graphics/xenos.h>
+@@ -2489,6 +2490,12 @@ bool D3D12CommandProcessor::IssueDraw(xenos::PrimitiveType primitive_type, uint3
+         continue;
+       }
+       xenos::xe_gpu_vertex_fetch_t vfetch_constant = regs.GetVertexFetch(vfetch_index);
++      if (vfetch_constant.type != xenos::FetchConstantType::kVertex &&
++          IsVertexFetchInactive(vertex_shader->ucode_data(), regs, vfetch_index)) {
++        // Do not mark in-sync: new float/bool constants can activate this fetch
++        // without a descriptor write. The GPU keeps the original predication.
++        continue;
++      }
+       switch (vfetch_constant.type) {
+         case xenos::FetchConstantType::kVertex:
+           break;
+diff --git a/include/rex/graphics/d3d12/inactive_vertex_fetch.h b/include/rex/graphics/d3d12/inactive_vertex_fetch.h
+new file mode 100644
+--- /dev/null
++++ b/include/rex/graphics/d3d12/inactive_vertex_fetch.h
+@@ -0,0 +1,119 @@
++#pragma once
++
++#include <cstring>
++#include <span>
++#include <rex/graphics/pipeline/shader/shader.h>
++#include <rex/graphics/register_file.h>
++
++namespace rex::graphics::d3d12 {
++
++// A proof of non-use, not a shader executor. Unknown control flow, predicates,
++// or addressing retain the normal invalid-fetch rejection. Called only for an
++// invalid descriptor; never cache the result across draws / constant updates.
++inline bool IsVertexFetchInactive(std::span<const uint32_t> code,
++                                  const RegisterFile& regs, uint32_t target) {
++  using namespace ucode;
++  if (target >= 96 || code.empty() || code.size() % 3 ||
++      (regs[XE_GPU_REG_SQ_VS_CONST] != 0 && regs[XE_GPU_REG_SQ_VS_CONST] != 0xFF000)) {
++    return false;
++  }
++  // Bit 0 = may be false, bit 1 = may be true. Entry p0 is unspecified here.
++  uint32_t predicate = 3;
++  uint32_t bound = uint32_t(code.size() / 3);
++  uint32_t previous_full = UINT32_MAX;
++  bool found = false;
++  for (uint32_t pair = 0; pair < bound; ++pair) {
++    ControlFlowInstruction cf[2];
++    UnpackControlFlowInstructions(code.data() + pair * 3, cf);
++    for (uint32_t half = 0; half < 2; ++half) {
++      ParsedExecInstruction exec;
++      switch (cf[half].opcode()) {
++        case ControlFlowOpcode::kNop:
++        case ControlFlowOpcode::kAlloc:
++          continue;
++        case ControlFlowOpcode::kExec:
++        case ControlFlowOpcode::kExecEnd:
++          ParseControlFlowExec(cf[half].exec, pair * 2 + half, exec);
++          break;
++        case ControlFlowOpcode::kCondExec:
++        case ControlFlowOpcode::kCondExecPredClean:
++          ParseControlFlowCondExec(cf[half].cond_exec, pair * 2 + half, exec);
++          break;
++        case ControlFlowOpcode::kCondExecPred:
++          ParseControlFlowCondExecPred(cf[half].cond_exec_pred, pair * 2 + half, exec);
++          break;
++        default:
++          // Includes jumps, calls, loops and conditional termination.
++          return false;
++      }
++      bound = std::min(bound, exec.instruction_address);
++      if (pair >= bound || size_t(exec.instruction_address) + exec.instruction_count > code.size() / 3) {
++        return false;
++      }
++      // EXEC condition is sampled at entry; instruction predicates may change.
++      bool may_execute = true, must_execute = true;
++      if (exec.type == ParsedExecInstruction::Type::kConditional) {
++        uint32_t index = exec.bool_constant_index;
++        bool value = (regs[XE_GPU_REG_SHADER_CONSTANT_BOOL_000_031 + index / 32] >> (index % 32)) & 1;
++        may_execute = must_execute = value == exec.condition;
++      } else if (exec.type == ParsedExecInstruction::Type::kPredicated) {
++        uint32_t required = 1u << uint32_t(exec.condition);
++        may_execute = (predicate & required) != 0;
++        must_execute = predicate == required;
++      }
++      uint32_t sequence = exec.sequence;
++      for (uint32_t n = 0; n < exec.instruction_count; ++n, sequence >>= 2) {
++        const uint32_t* words = code.data() + 3 * (exec.instruction_address + n);
++        if (sequence & 1) {
++          FetchInstruction fetch;
++          std::memcpy(&fetch, words, sizeof(fetch));
++          if (fetch.opcode() != FetchOpcode::kVertexFetch) continue;
++          const auto& vertex = fetch.vertex_fetch();
++          // Mini fetch operands follow the preceding full instruction in the
++          // translator, including when that instruction is predicated out.
++          if (!vertex.is_mini_fetch()) previous_full = vertex.fetch_constant_index();
++          if (previous_full == UINT32_MAX) return false;
++          if (previous_full != target) continue;
++          found = true;
++          if (may_execute && (!fetch.is_predicated() ||
++              (predicate & (1u << uint32_t(fetch.predicate_condition()))))) return false;
++          continue;
++        }
++        AluInstruction raw;
++        std::memcpy(&raw, words, sizeof(raw));
++        auto scalar = raw.scalar_opcode();
++        auto vector = raw.vector_opcode();
++        bool scalar_writes = scalar >= AluScalarOpcode::kSetpEq && scalar <= AluScalarOpcode::kSetpRstr;
++        bool vector_writes = vector >= AluVectorOpcode::kSetpEqPush && vector <= AluVectorOpcode::kSetpGePush;
++        if (!scalar_writes && !vector_writes) continue;
++        bool may_write = may_execute, must_write = must_execute;
++        if (raw.is_predicated()) {
++          uint32_t required = 1u << uint32_t(raw.predicate_condition());
++          may_write &= (predicate & required) != 0;
++          must_write &= predicate == required;
++        }
++        if (!may_write) continue;
++        uint32_t result = 3;
++        if (!vector_writes && (scalar == AluScalarOpcode::kSetpEq || scalar == AluScalarOpcode::kSetpNe)) {
++          ParsedAluInstruction alu;
++          ParseAluInstruction(raw, xenos::ShaderType::kVertex, alu);
++          const auto& operand = alu.scalar_operands[0];
++          uint32_t component = uint32_t(operand.GetComponent(0));
++          if (alu.scalar_operand_count == 1 && operand.storage_source == InstructionStorageSource::kConstantFloat &&
++              operand.storage_addressing_mode == InstructionStorageAddressingMode::kAbsolute &&
++              operand.storage_index < 256 && component < 4) {
++            uint32_t bits = regs[XE_GPU_REG_SHADER_CONSTANT_000_X + 4 * operand.storage_index + component];
++            // DXBC float comparisons flush denormals. Sign / abs / negate do
++            // not affect equality with zero; NaNs compare unequal.
++            bool zero = (bits & 0x7F800000u) == 0;
++            result = 1u << uint32_t(scalar == AluScalarOpcode::kSetpEq ? zero : !zero);
++          }
++        }
++        predicate = must_write ? result : predicate | result;
++      }
++      if (exec.is_end) return found;
++    }
++  }
++  return false;
++}
++}  // namespace rex::graphics::d3d12

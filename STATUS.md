@@ -1,4 +1,27 @@
 # STATUS
+Xenos X2 (2026-10-15), sobre `ee7e8af`: corrigida rejeição de draws cujo vertex
+fetch inválido está comprovadamente inativo por predicação. Patch 0077 genérico,
+sem exceção de título, valores fictícios ou bypass permissivo; 2.328 checks
+sintéticos passam, 204 checks de resolve preservados. Forza chegou à condução:
+zero Fetch 90, resolve vazio ou falha de backend. Castle mostrou o menu, zero
+errors/criticals. Ciclo original My Games → Forza → Guide/Xbox Home → 17559
+passou em harness isolado, mesmo HWND/XUID, exits 0. Gate de preparação de
+produção não recertificado; navegação por controle após retorno inconclusiva.
+Sem ganho de FPS alegado. Native suspenso; desktop paralelo preservado.
+[Evidências e limites X2](docs/xenos-fetch-predication.md).
+
+Xenos: corrigido o contrato de resolves vazios em 2026-10-15, sobre `dd3113e`.
+O patch SDK 0076 impede que alinhamento crie uma cópia/clear a partir de região
+vazia e reutiliza o no-op do cache existente. Teste real do helper: 204 checks,
+84 falhas antes e zero depois. Forza chegou à condução com entrada e áudio
+WASAPI confirmado; 5.054 erros de resolve/falhas associadas em janela de 30 s
+antes, zero depois. Fetch 90 continua pendente. Castle: menu renderizado após
+Start, zero erros/criticals, 59,968 FPS. Sem ganho global de performance:
+par de gameplay recusado por câmeras diferentes; introdução controlada estável
+em ~30 FPS. Ciclo completo pela dashboard usa a evidência histórica, sem nova
+certificação com essa DLL. SDK/pin e produção preservados; validação em cópias
+isoladas. **Native suspenso; prioridade atual Xenos.**
+[Evidências, comparação e limites](docs/xenos-empty-resolves.md).
 
 Native N4.2 recuperou progressão até condução do Forza (2026-10-15), sobre
 `41768ce`: cache persistente de PSOs com identidade integral e fallback do driver,

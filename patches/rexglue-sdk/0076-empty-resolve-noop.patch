@@ -1,0 +1,61 @@
+diff --git a/src/graphics/util/draw.cpp b/src/graphics/util/draw.cpp
+index 305380e..92fd666 100644
+--- a/src/graphics/util/draw.cpp
++++ b/src/graphics/util/draw.cpp
+@@ -841,17 +841,6 @@ bool GetResolveInfo(const RegisterFile& regs, const memory::Memory& memory,
+ 
+   assert_true(x0 <= x1 && y0 <= y1);
+ 
+-  // Direct3D 9's D3DDevice_Resolve internally rounds the right/bottom of the
+-  // rectangle internally to 8. While all the alignment should have already been
+-  // done by Direct3D 9, just for safety of host implementation of resolve,
+-  // force-align the rectangle by expanding (D3D9 expands to the right/bottom
+-  // for some reason, haven't found how left/top is rounded, but logically it
+-  // would make sense to expand to the left/top too).
+-  x0 &= ~int32_t(xenos::kResolveAlignmentPixels - 1);
+-  y0 &= ~int32_t(xenos::kResolveAlignmentPixels - 1);
+-  x1 = rex::align(x1, int32_t(xenos::kResolveAlignmentPixels));
+-  y1 = rex::align(y1, int32_t(xenos::kResolveAlignmentPixels));
+-
+   auto rb_surface_info = regs.Get<reg::RB_SURFACE_INFO>();
+   if (rb_surface_info.msaa_samples > xenos::MsaaSamples::k4X) {
+     // Safety check because a lot of code assumes up to 4x.
+@@ -863,6 +852,25 @@ bool GetResolveInfo(const RegisterFile& regs, const memory::Memory& memory,
+     return false;
+   }
+ 
++  // Clipping or top-left rasterization may leave no covered pixels. Test
++  // before alignment: rounding an empty interval outwards can create a tile
++  // that the guest never requested to copy or clear. The backend already
++  // handles zero extents as a successful no-op.
++  if (x0 >= x1 || y0 >= y1) {
++    return true;
++  }
++
++  // Direct3D 9's D3DDevice_Resolve internally rounds the right/bottom of the
++  // rectangle internally to 8. While all the alignment should have already been
++  // done by Direct3D 9, just for safety of host implementation of resolve,
++  // force-align the rectangle by expanding (D3D9 expands to the right/bottom
++  // for some reason, haven't found how left/top is rounded, but logically it
++  // would make sense to expand to the left/top too).
++  x0 &= ~int32_t(xenos::kResolveAlignmentPixels - 1);
++  y0 &= ~int32_t(xenos::kResolveAlignmentPixels - 1);
++  x1 = rex::align(x1, int32_t(xenos::kResolveAlignmentPixels));
++  y1 = rex::align(y1, int32_t(xenos::kResolveAlignmentPixels));
++
+   // Clamp to the EDRAM surface pitch (maximum possible surface pitch is also
+   // assumed to be the largest resolvable size).
+   int32_t surface_pitch_aligned =
+@@ -882,10 +890,9 @@ bool GetResolveInfo(const RegisterFile& regs, const memory::Memory& memory,
+     y1 = y0 + int32_t(xenos::kMaxResolveSize);
+   }
+ 
+-  assert_true(x0 < x1 && y0 < y1);
++  // Surface-pitch clipping can also leave nothing to copy or clear.
+   if (x0 >= x1 || y0 >= y1) {
+-    REXGPU_ERROR("Resolve region is empty");
+-    return false;
++    return true;
+   }
+ 
+   info_out.coordinate_info.width_div_8 = uint32_t(x1 - x0) >> xenos::kResolveAlignmentPixelsLog2;

@@ -555,3 +555,27 @@ unsupported opcode. Before/after logs and graphical evidence are described in
 `docs/native-renderer.md`. The patch is applied only through the pinned patch
 script, with before/after file hashes in `deps.lock.json` (73 active patches;
 withdrawn 0073 is not reintroduced).
+
+## 0076 — Empty resolves are successful no-ops
+
+Checks empty rasterized/scissored resolve coverage before 8-pixel alignment,
+preventing an empty unaligned rectangle from becoming a nonempty copy/clear.
+Returns the existing zero-extent no-op contract after pitch clipping as well.
+Invalid command, vertex-buffer format and MSAA checks remain. Uses the existing
+Xenos render-target cache; no additional cache, synchronization removal or title
+special case. No upstream equivalent identified; SDK pin unchanged.
+
+`sdkcheck.empty-resolve` exercises the actual helper with synthetic guest memory
+and registers. It fails without the patch (84/204 checks) and passes with it.
+Real Forza evidence and remaining fetch warnings: `docs/xenos-empty-resolves.md`.
+
+### 0077 — inactive vertex fetch proof (2026-10-15)
+
+Xenos D3D12: não rejeitar o draw por descritor inválido se a análise conservadora
+provar que todas as referências ao slot estão predicadas fora no draw atual.
+Sem índice/hash/título especial, sem permitir acesso inválido e sem marcar o
+slot como residente. Constantes atuais são reconsideradas a cada draw; casos
+não comprovados conservam a rejeição. Native/Vulkan não alterados.
+
+`sdkcheck.inactive-vertex-fetch`: 2.328 checks sintéticos; Forza e Castle reais,
+com os limites em [X2](../../docs/xenos-fetch-predication.md). Patch 0076 intacto.

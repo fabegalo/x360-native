@@ -1,5 +1,9 @@
 # Forza Horizon — Windows x64 investigation, 2026-10-14
 
+Atualização Xenos de 2026-10-15: [correção de resolves vazios, testes e comparação
+real](xenos-empty-resolves.md). A validação nova é focada no renderer; o ciclo
+integral abaixo permanece evidência histórica, não uma repetição com a DLL nova.
+
 ## Completed original-library cycle — Retail 17559, Windows x64
 
 The complete requested Forza cycle passed in a normal `x360n session`, started
@@ -549,3 +553,11 @@ prove a completed library scene. The earlier two-item My Games captures remain
 the listing evidence. At requested window shutdown this final dashboard log
 recorded a guest read at `0x14` during `KernelState::TerminateTitle`, then exited.
 This is a separate dashboard shutdown defect, not a Forza gameplay crash.
+
+## Xenos X2 — 2026-10-15
+
+O patch 0077 corrige a rejeição indevida de draws com fetch comprovadamente
+inativo por predicação, preservando o 0076. Forza voltou à condução e o ciclo
+My Games → Forza → Guide/Xbox Home → 17559 foi validado em harness isolado,
+mesmo HWND e perfil. Não é recertificação dos recibos de produção nem aprovação
+de fidelidade integral. [Evidências e limites](xenos-fetch-predication.md).
