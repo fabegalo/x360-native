@@ -675,6 +675,9 @@ int Session(const ProjectPaths& paths, const fs::path& manifest, int timeout, bo
       // Identity follows the platform session; game content and saves keep
       // their existing title roots. Never copy or replace a game's profiles.
       args.push_back("--x360n_profile_root=" + PathUtf8(dashboard.user_root));
+      // Account rules that changed between dashboard versions follow this one.
+      if (!dashboard.dashboard_version.empty())
+        args.push_back("--x360n_dashboard_version=" + dashboard.dashboard_version);
       // Every title presents through VdSwap, where the session dashboard's own
       // host composes its original Guide. A dashboard version without a host
       // offers no Guide; its titles never receive another version's modules.

@@ -159,3 +159,27 @@ TEST_CASE("handoff distinguishes title return from closing the platform", "[sess
   LaunchRequest output; CHECK_FALSE(ReadLaunchRequest(file, output));
   fs::remove_all(dir);
 }
+
+TEST_CASE("session dashboard version comes from its preparation receipt", "[session]") {
+  auto dir = UniqueTempPath("session-version");
+  fs::create_directories(dir);
+  const auto manifest = dir / "profile.toml";
+  const auto setup = dir / "preparation.toml";
+  auto write = [&](const std::string& args = "") {
+    std::ofstream(manifest) << "[project]\nname='test'\ngame_root='originals'\n"
+      "[entrypoint]\nfile_path='originals/dash.xex'\n[x360n]\n"
+      "native_exe='build/dash.exe'\nuser_data_root='user'\nxex_sha256='"
+      << std::string(64, '0') << "'\n" << args;
+  };
+  write();
+  CHECK(LoadSessionProfile(ProjectPaths{dir}, manifest, false).dashboard_version.empty());
+  std::ofstream(setup) << "kind='dashboard'\ndashboard_version='2.0.6717.0'\n";
+  CHECK(LoadSessionProfile(ProjectPaths{dir}, manifest, false).dashboard_version == "2.0.6717.0");
+  std::ofstream(setup) << "kind='dashboard'\ndashboard_version='2.0.6717'\n";
+  CHECK_THROWS(LoadSessionProfile(ProjectPaths{dir}, manifest, false));
+  // The supervisor passes the session dashboard's version; profiles cannot.
+  std::ofstream(setup) << "kind='dashboard'\ndashboard_version='2.0.17559.0'\n";
+  write("args=['--x360n_dashboard_version=2.0.4552.0']\n");
+  CHECK_THROWS(LoadSessionProfile(ProjectPaths{dir}, manifest, false));
+  fs::remove_all(dir);
+}

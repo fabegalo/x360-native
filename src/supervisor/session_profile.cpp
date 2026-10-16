@@ -1,6 +1,7 @@
 #include "session_profile.h"
 #include "sha256.h"
 #include "preparation.h"
+#include "../../titles/common/games_played.h"
 #include <stdexcept>
 #include <fstream>
 #include <toml++/toml.hpp>
@@ -59,6 +60,10 @@ SessionProfile LoadSessionProfile(const ProjectPaths& paths, const std::filesyst
         if (value.value<std::string>() == PathUtf8(p.system_ui_host.filename())) recorded = true;
     if (!recorded) throw std::runtime_error("system UI host is not owned by the dashboard preparation receipt");
   }
+  if (auto version = preparation["dashboard_version"].value<std::string>()) {
+    if (!ParseDashboardVersion(*version)) throw std::runtime_error("invalid dashboard_version: " + *version);
+    p.dashboard_version = *version;
+  }
   if (auto library = preparation["library"].as_table()) {
     const auto title = text((*library)["title_id"]);
     const auto type = text((*library)["content_type"]);
@@ -76,6 +81,7 @@ SessionProfile LoadSessionProfile(const ProjectPaths& paths, const std::filesyst
       if (arg.starts_with("--game_data_root") || arg.starts_with("--user_data_root") ||
           arg.starts_with("--x360n_handoff") || arg.starts_with("--log_file") ||
           arg.starts_with("--x360n_profile_root") ||
+          arg.starts_with("--x360n_dashboard_version") ||
           arg.starts_with("--x360n_system_ui_") ||
           arg.starts_with("--parent_window"))
         throw std::runtime_error("reserved session argument: " + arg);

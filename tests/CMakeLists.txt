@@ -53,6 +53,7 @@ add_executable(x360n_tests
     supervisor/console_settings_test.cpp
     supervisor/session_process_test.cpp
     supervisor/preparation_test.cpp
+    supervisor/games_played_test.cpp
 )
 target_link_libraries(x360n_tests PRIVATE x360n_core Catch2::Catch2WithMain)
 target_sources(x360n_tests PRIVATE supervisor/dashboard_assets_test.cpp
@@ -178,6 +179,9 @@ target_sources(x360n_sdk_runtime_checks PRIVATE sdkcheck/persist_display_test.cp
 target_sources(x360n_sdk_runtime_checks PRIVATE sdkcheck/system_command_buffer_test.cpp)
 target_sources(x360n_sdk_runtime_checks PRIVATE sdkcheck/system_ui_input_test.cpp)
 target_sources(x360n_sdk_runtime_checks PRIVATE sdkcheck/local_profile_gamercard_test.cpp)
+target_sources(x360n_sdk_runtime_checks PRIVATE sdkcheck/games_played_launch_test.cpp)
+target_compile_definitions(x360n_sdk_runtime_checks PRIVATE X360N_SOURCE_ROOT="${PROJECT_SOURCE_DIR}")
+target_link_libraries(x360n_sdk_runtime_checks PRIVATE tomlplusplus)
 target_sources(x360n_sdk_runtime_checks PRIVATE sdkcheck/audio_drain_test.cpp)
 target_sources(x360n_sdk_runtime_checks PRIVATE sdkcheck/profile_ui_request_test.cpp)
 target_sources(x360n_sdk_runtime_checks PRIVATE sdkcheck/system_ui_context_test.cpp)

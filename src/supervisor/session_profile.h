@@ -7,6 +7,7 @@ struct SessionProfile {
   std::filesystem::path manifest, exe, xex, game_root, user_root;
   std::filesystem::path library_relative_xex;
   std::filesystem::path system_ui_host;
+  std::string dashboard_version;  // preparation.toml of a dashboard, e.g. 2.0.17559.0
   std::string name, sha256;
   std::vector<std::string> args;
   std::vector<std::filesystem::path> launch_targets;

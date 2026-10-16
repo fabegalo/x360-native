@@ -62,6 +62,21 @@ TEST_CASE("console preferences survive title handoffs and reload on session rest
   REQUIRE(result.exit_code == 0);
   CHECK(Read(f.paths.inputs() / "console-observed.txt") == "9 13\n9 13\n9 13\n1 103\n1 103\n1 103\n");
 }
+TEST_CASE("session dashboard version reaches the game and dashboard return", "[games-played][cli]") {
+  for (const auto* version : {"2.0.6717.0", "2.0.17559.0"}) {
+    Fixture f("version");
+    const auto manifest = f.root / "titles/dashboard/dashboard_manifest.toml";
+    std::ofstream(manifest.parent_path() / "preparation.toml")
+        << "kind='dashboard'\ndashboard_version='" << version << "'\n";
+    WriteTestReceipt(f.paths, "dashboard", manifest, f.paths.build() / "dashboard.exe",
+                     {f.paths.inputs() / "dashboard.xex"});
+    auto result = f.Run();
+    INFO(Read(f.root / "err.log"));
+    REQUIRE(result.exit_code == 0);
+    const auto line = std::string(version) + "\n";
+    CHECK(Read(f.paths.inputs() / "version-observed.txt") == line + line + line);
+  }
+}
 TEST_CASE("session survives 80 transitions with intact handoffs and states", "[session][cli]") {
   Fixture f("healthy");
   auto result = f.Run();

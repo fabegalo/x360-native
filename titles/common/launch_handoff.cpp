@@ -1,5 +1,6 @@
 #include "launch_handoff.h"
 #include "launch_request.h"
+#include "games_played.h"
 #include <mutex>
 #include <rex/cvar.h>
 #include <rex/runtime.h>
@@ -15,8 +16,10 @@
 REXCVAR_DEFINE_STRING(x360n_handoff_out, "", "Supervisor", "Per-run host handoff output");
 REXCVAR_DEFINE_STRING(x360n_handoff_in, "", "Supervisor", "Previous title's launch data");
 REXCVAR_DEFINE_STRING(x360n_profile_root, "", "Supervisor", "Profile store owned by this dashboard session");
+REXCVAR_DEFINE_STRING(x360n_dashboard_version, "", "Supervisor", "Version of the session dashboard");
 REXCVAR_DEFINE_STRING(x360n_system_ui_host, "", "Supervisor", "Verified dashboard session UI host");
 REXCVAR_DEFINE_STRING(x360n_system_ui_root, "", "Supervisor", "Original assets of the session dashboard");
+REXCVAR_DECLARE(uint32_t, license_mask);
 
 namespace x360n {
 namespace {
@@ -55,6 +58,11 @@ void ImportLaunchData(rex::Runtime& runtime) {
         !install(&runtime, root.c_str(), reinterpret_cast<const char*>(directory.c_str())))
       REX_FATAL("Invalid dashboard system UI host or original assets: {}", ui_host);
   }
+  auto input = REXCVAR_GET(x360n_handoff_in);
+  LaunchRequest request;
+  if (!input.empty() &&
+      (!ReadLaunchRequest(Utf8Path(input), request) || request.kind == LaunchRequest::WindowClose))
+    REX_FATAL("Invalid supervisor launch-data record: {}", input);
   const auto profile_root = REXCVAR_GET(x360n_profile_root);
   if (!profile_root.empty()) {
     auto* user = runtime.kernel_state()->user_profile();
@@ -65,14 +73,34 @@ void ImportLaunchData(rex::Runtime& runtime) {
         identity.xuid, identity.signin_state, profile_root);
     // A game launched with a signed-in account joins that account's played
     // titles; the dashboard and other system titles are not recorded.
-    if (runtime.kernel_state()->GetExecutableModule())
-      user->RecordTitlePlayed(runtime.kernel_state()->title_id());
+    if (runtime.kernel_state()->GetExecutableModule()) {
+      const auto title_id = runtime.kernel_state()->title_id();
+      const auto version_text = REXCVAR_GET(x360n_dashboard_version);
+      const auto version = ParseDashboardVersion(version_text);
+      if (!version_text.empty() && !version)
+        REX_FATAL("Invalid session dashboard version: {}", version_text);
+      // The package the dashboard launched, when this title came from one.
+      std::optional<LaunchedContent> content;
+      if (!input.empty() && request.kind == LaunchRequest::Image && !request.path.empty())
+        content = ReadLaunchedContent(Utf8Path(request.path), title_id);
+      // Use the same active unlock mask exposed to the game by XAM. Reading it
+      // does not grant a license or change the installed package.
+      switch (DecideGamesPlayed(version, content, REXCVAR_GET(license_mask))) {
+        case GamesPlayedDecision::Record:
+          user->RecordTitlePlayed(title_id);
+          break;
+        case GamesPlayedDecision::SkipArcadeTrial:
+          REXLOG_INFO("[supervisor] title {:08X} is an Arcade trial; dashboard {} does not "
+                      "add it to Games Played", title_id, version_text);
+          break;
+        case GamesPlayedDecision::UnknownDashboard:
+          REXLOG_WARN("[supervisor] title {:08X} is an Arcade trial and the session dashboard "
+                      "version is unknown; Games Played not updated", title_id);
+          break;
+      }
+    }
   }
-  auto input = REXCVAR_GET(x360n_handoff_in);
   if (input.empty()) return;
-  LaunchRequest request;
-  if (!ReadLaunchRequest(Utf8Path(input), request) || request.kind == LaunchRequest::WindowClose)
-    REX_FATAL("Invalid supervisor launch-data record: {}", input);
   dashboard_return = request.kind != LaunchRequest::Image;
   auto xam = runtime.kernel_state()->GetKernelModule<rex::kernel::xam::XamModule>("xam.xex");
   auto& data = xam->loader_data();
