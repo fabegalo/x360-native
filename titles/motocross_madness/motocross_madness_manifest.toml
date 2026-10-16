@@ -27,4 +27,7 @@ includes = ["../dash_17559/analysis/xam_ui_17559.toml", "analysis/xam17559_avata
 xex_sha256 = "2a8406bcf9c223f9d7da732be617cc7cd46fbb587ef552f7fcacac2049b95dcd"
 native_exe = "../../.local/build/titles/motocross_madness/motocross_madness.exe"
 user_data_root = "../../.local/user/motocross_madness"
-args = ["--gpu_plugin=xenos", "--mnk_mode=true"]
+# The title builds texture fetch constants with type 0 on purpose: its GPU DXT1
+# compression of terrain color tiles samples them in every draw (2026-10-16,
+# docs/validation-motocross-madness.md). Without this the terrain is black.
+args = ["--gpu_plugin=xenos", "--mnk_mode=true", "--gpu_allow_invalid_fetch_constants=true"]
