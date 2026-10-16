@@ -1,5 +1,9 @@
 # Validação experimental: Castle Crashers (XBLA)
 
+Este registro preserva a validação inicial. Ciclos originais posteriores estão
+em [Dashboard](dashboard.md), [Forza (regressão Castle)](validation-forza-horizon.md)
+e [Native N3](native-renderer-n3.md). Save/load comercial continua não validado.
+
 Segundo alvo experimental, a partir de arquivos fornecidos pelo usuário em
 `.local/inputs/titles/castle_crashers/source/` (não versionados; pacote realocado
 da antiga pasta `Castle Crashers (World) (XBLA)`, com SHA-256 preservado).

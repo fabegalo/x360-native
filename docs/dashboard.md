@@ -1,11 +1,13 @@
 # Dashboard original: diagnóstico
 
-Estado em 2026-10-12. **Intro original e menu Metro; interface ainda parcial.**
-A 17559 usa agora SegoeXbox-Light.xtt original. My Games recebe a URI expandida,
-mas a biblioteca ainda aparece sem conteúdo; algumas configurações causam crash.
-§0.13 registra o incremento atual; as seções
-anteriores preservam a evolução do diagnóstico. A região zerada de §0.10
-continua sendo uma hipótese experimental, com conteúdo real desconhecido.
+Estado consolidado em 2026-10-15: Retail 17559 renderiza intro/menu e My Games,
+com ciclos Castle/Forza demonstrados. C7.7 (§0.31) demonstrou criação, troca e
+persistência de perfis locais; C7.8 (§0.32) mantém isolamento dos originais.
+Saves por perfil têm [testes C8](save-storage.md), sem aceite comercial.
+Guide/Xbox Home foi demonstrado no [ciclo Forza](validation-forza-horizon.md);
+isso não certifica todos os serviços da interface. A região zerada de §0.10
+permanece hipótese experimental. As seções numeradas são registros históricos:
+falhas e pendências valem para o incremento datado, salvo atualização posterior.
 
 Referências: ReXGlue v0.10.0 `f5337cdc` (caminhos relativos a
 `external/rexglue-sdk`) e Xenia Canary `04f85416e0f8` (consultado só como

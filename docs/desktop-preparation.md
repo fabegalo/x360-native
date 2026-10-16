@@ -1,5 +1,10 @@
 # Aplicativo gráfico — candidato Windows x64
 
+Histórico de preparação/primeira utilização. A biblioteca ISO/STFS e a geração
+AOT genérica posteriores estão em [Universal Library](universal-library.md);
+a interface atual está em [Desktop UI](desktop-ui.md). Windows limpo continua
+sem aceite completo. As limitações de cada preview abaixo são datadas.
+
 **Distribuição de referência:** `v0.1.0-preview.19`, primeira prévia experimental
 com publicação pública autorizada. C4/C11 e C10 tecnicamente concluídos; Windows
 limpo continua não validado. As seções datadas abaixo preservam os testes dos

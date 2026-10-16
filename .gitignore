@@ -20,3 +20,34 @@ CMakeUserPresets.json
 titles/*/generated/*
 !titles/*/generated/rexglue.cmake
 titles/*/out/
+
+# Accidental out-of-tree build output; canonical builds remain in .local/build.
+/build/
+/out/
+/cmake-build-*/
+CMakeFiles/
+CMakeCache.txt
+compile_commands.json
+*.obj
+*.o
+*.pch
+*.pdb
+*.ilk
+*.exp
+*.idb
+*.exe
+*.dll
+*.lib
+
+# Python tooling and abandoned synthetic pipeline-cache test directories.
+__pycache__/
+*.py[cod]
+.pytest_cache/
+/pipeline-store-test-*/
+
+# Original content belongs under .local/inputs, never in tracked source.
+*.iso
+*.xex
+*.xexp
+*.xtt
+*.stfs

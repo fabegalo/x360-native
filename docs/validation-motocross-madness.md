@@ -1,5 +1,10 @@
 # Validação experimental: Motocross Madness (XBLA)
 
+Atualização: serviço opt-in, tutorial e integração na main foram demonstrados
+em [Avatares §§14–15](avatar-system.md#15-integração-na-main-2026-10-13).
+Chão preto, piloto deformado e save/load continuam pendentes. O diagnóstico
+abaixo preserva os bloqueios anteriores a essa integração.
+
 Terceiro alvo de jogo, a partir de arquivos fornecidos pelo usuário em
 `.local/inputs/titles/motocross_madness/` (não versionados; organização em
 `metadata/LEIA-ME.txt` daquela pasta). Data: 2026-10-12. SDK: ReXGlue v0.10.0

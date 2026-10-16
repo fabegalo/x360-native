@@ -1,43 +1,22 @@
 # GitHub collaboration settings
 
-Read-only inspection on **2026-10-13** using the GitHub REST API:
+Read-only GitHub REST inspection on **2026-10-15**. No settings were changed.
 
 | Setting | Observed |
-| --- | --- |
-| Default branch | `main` |
-| Issues | Enabled |
+|---|---|
+| Default branch / Issues | `main` / enabled |
 | Automatic merge | Disabled |
-| Classic protection on `main` | Not protected (`protected: false`; protection endpoint returns 404) |
-| Repository rulesets / effective rules on `main` | Empty lists |
-| Private vulnerability reporting | Disabled |
+| Effective main rules | Pull request required; review conversations must be resolved; zero required approving reviews; extra approval for unattributed changes enabled |
+| Required check | **Contribution checks**, GitHub Actions; branch must be up to date |
+| History and deletion | Non-fast-forward updates and branch deletion blocked |
+| Private vulnerability reporting | Disabled; follow [SECURITY.md](../SECURITY.md) |
 
-No administrative settings were changed. These files and local commits do not
-activate branch protection or private reporting.
-
-## Recommended configuration (requires maintainer approval)
-
-Use one active branch ruleset targeting `main` (or equivalent classic protection):
-
-- Require a pull request with **one approving review**; dismiss stale approvals
-  when new commits change the diff and require resolution of review conversations.
-- Require a code owner review for community changes; `.github/CODEOWNERS` assigns
-  the repository to `@fabegalo`.
-- Block force pushes and branch deletion. Avoid routine administrator bypass.
-- After successful real PR runs, require the **Contribution checks** job from the
-  **PR checks** workflow, selecting the GitHub Actions check in the settings UI.
-  Do not make a never-run check mandatory; first verify a fork PR and a title edit.
-- Keep **Allow auto-merge** disabled. Merge manually after review.
-
-A PR author cannot approve their own PR. With only one maintainer, the owner's PRs
-need another trusted reviewer; requiring the sole code owner on their own PR also
-needs an explicit policy decision. Resolve this before enforcement (add a trusted
-reviewer/code owner or define a narrowly scoped, audited exceptional bypass).
-Do not silently bypass community PR review or require a full native build as a gate.
-
-Enable **Private vulnerability reporting** under the repository security settings,
-then verify the private report entry point and update the dated note in
-`SECURITY.md`. Until enabled, that policy explains how to request the channel
-without publishing vulnerability details. No personal email address is needed.
+The branch reports `protected: true`. Classic protection returns 404 because
+protection is supplied by repository rulesets (25031546 and 25031552).
+Inspect `rules/branches/main` as well as the classic protection endpoint.
+Use a PR and wait for the required check; do not bypass rules or force-push.
+Enabling private reporting or changing review requirements needs a separate
+maintainer decision. The current rules do not require a second approving reviewer.
 
 ## Lightweight CI scope
 
@@ -49,7 +28,7 @@ the runner; the only package installed is pinned PyYAML for safe YAML parsing.
 The `pull_request` trigger includes title edits; title text is passed through an
 environment variable. The diff uses the test merge commit's first parent, so it
 covers the whole PR without fetching full history. No path filter suppresses the
-check, which allows it to become required later. Fork runs may first need approval
+check, which is currently required by the main ruleset. Fork runs may first need approval
 under GitHub's Actions policy. Merge conflicts must be resolved before GitHub can
 run this merge-based workflow.
 

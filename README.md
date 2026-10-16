@@ -40,7 +40,7 @@ validated combination of versions, not a claim that every dashboard or game work
 
 ## Current capabilities
 
-Evidence reviewed on **13 October 2026**. Results below combine recorded manual
+Evidence reviewed on **15 October 2026**. Results below combine recorded manual
 sessions and automated checks on `main`; they are not a new gameplay certification.
 
 **Compiled** means a native build succeeded. **Boots** means the original program
@@ -59,10 +59,16 @@ Functional; a timed smoke test cannot establish either status.
 | **Castle Crashers 0.0.1.3** | **Renders** — menu, keyboard/controller input, original launch and return verified. Gameplay was user-reported. | Sustained gameplay, save/load and full-game entitlement unvalidated; smoke results do not prove playability. |
 | **Motocross Madness** | **In-game** — tutorial movement and objectives observed, including after integration into `main`. | Black terrain and deformed rider; full races and save/load unvalidated. No graphical preparation profile yet. |
 | **Avatars** | Experimental opt-in service completes real `Initialize`, asset assembly and mipmap generation in Motocross. | Visual fidelity, catalog animations and persistent user avatars unvalidated; not a universal avatar service. |
-| **Original launch and return** | 17559 ↔ Castle cycle verified; launch flags/data preserved, failures distinguished from normal return. | Other title/dashboard combinations require their own validation. |
-| **Profiles and Guide** | Partial system UI bindings and original profile scene creation. | No complete original UI flow or real local sign-in/out; per-user saves and achievements unvalidated. |
+| **Original launch and return** | 17559 ↔ Castle and 17559 ↔ Forza cycles verified; launch flags/data preserved, failures distinguished from normal return. | Other title/dashboard combinations require their own validation. |
+| **Profiles, Guide and storage** | Original local profile creation, sign-in/out, switching and persistence; Guide/Xbox Home return demonstrated in Forza. C8 storage isolation/flush verified across processes. | One active user in slot 0; full Guide, achievements and commercial game save/load unvalidated. |
+| **Forza Horizon 0.0.0.10** | **In-game** — original My Games launch, driving/input/audio and Guide return demonstrated. | Campaign and save/load unvalidated; X2 renderer validation used an isolated harness. |
+| **Native D3D12 renderer** | Experimental dashboard/Castle cycle and Forza driving; N4.1 color correction and N4.2 pipeline cache. | Development suspended, performance not approved, occlusion query unimplemented; Vulkan unavailable. Xenos remains the default. |
 | **Desktop app** | Windows GUI opens from an extracted preview, imports content and manages the installed library. | Clean Windows installation and the complete first-use experience remain unvalidated. |
 | **Content preparation** | Identity/integrity checks, guided AOT preparation and reuse of verified artifacts implemented. | Exact supported versions only; recognition or extraction does not make a title runnable. |
+
+Current source-tree status is in [STATUS.md](STATUS.md); `main` includes changes
+newer than the published preview. See [Forza evidence](docs/validation-forza-horizon.md),
+[local profiles](docs/dashboard.md) and [save-storage contracts](docs/save-storage.md).
 
 See the [technical audit and subsequent validations](docs/PROJECT_AUDIT.md),
 [dashboard evidence](docs/dashboard.md) and [avatar integration results](docs/avatar-system.md).
@@ -98,7 +104,7 @@ the complete original Microsoft kernel, XAM or firmware. See the
 
 ## Download and installation
 
-**[Download v0.1.0-preview.19 — First Technical Preview](https://github.com/fabegalo/x360-native/releases/tag/v0.1.0-preview.19).**
+**[Download v0.1.0-preview.20 — Universal Library (corrected)](https://github.com/fabegalo/x360-native/releases/tag/v0.1.0-preview.20).**
 Choose the Windows x64 ZIP and its SHA-256 file. This is an experimental pre-release.
 Installation on clean Windows, including obtaining missing Microsoft build
 components, is **not validated**. See the [release record](docs/FIRST_RELEASE.md)
