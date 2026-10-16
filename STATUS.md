@@ -1,4 +1,14 @@
 # STATUS
+Xenos X2 (2026-10-15), sobre `ee7e8af`: corrigida rejeição de draws cujo vertex
+fetch inválido está comprovadamente inativo por predicação. Patch 0077 genérico,
+sem exceção de título, valores fictícios ou bypass permissivo; 2.328 checks
+sintéticos passam, 204 checks de resolve preservados. Forza chegou à condução:
+zero Fetch 90, resolve vazio ou falha de backend. Castle mostrou o menu, zero
+errors/criticals. Ciclo original My Games → Forza → Guide/Xbox Home → 17559
+passou em harness isolado, mesmo HWND/XUID, exits 0. Gate de preparação de
+produção não recertificado; navegação por controle após retorno inconclusiva.
+Sem ganho de FPS alegado. Native suspenso; desktop paralelo preservado.
+[Evidências e limites X2](docs/xenos-fetch-predication.md).
 
 Xenos: corrigido o contrato de resolves vazios em 2026-10-15, sobre `dd3113e`.
 O patch SDK 0076 impede que alinhamento crie uma cópia/clear a partir de região

@@ -150,3 +150,11 @@ Nenhum conteúdo proprietário foi incluído no commit. Sem Computer Use,
 push, Release, implementação Native ou trabalho Vulkan.
 Hashes dos binários e principais evidências: `validation/xenos-forza/evidence.json`
 sob a mesma raiz `.local`.
+
+## X2 — continuação de 2026-10-15
+
+O fetch 90 pendente nesta nota foi reproduzido como rejeição antecipada de um
+fetch predicado inativo, e corrigido genericamente no patch 0077. Houve ciclo
+original completo em harness diagnóstico isolado, com a DLL nova e o 0076
+preservado. Isso não recertifica o recibo do launcher de produção. Evidências,
+regressões e limites de entrada/renderização: [Xenos X2](xenos-fetch-predication.md).

@@ -553,3 +553,11 @@ prove a completed library scene. The earlier two-item My Games captures remain
 the listing evidence. At requested window shutdown this final dashboard log
 recorded a guest read at `0x14` during `KernelState::TerminateTitle`, then exited.
 This is a separate dashboard shutdown defect, not a Forza gameplay crash.
+
+## Xenos X2 — 2026-10-15
+
+O patch 0077 corrige a rejeição indevida de draws com fetch comprovadamente
+inativo por predicação, preservando o 0076. Forza voltou à condução e o ciclo
+My Games → Forza → Guide/Xbox Home → 17559 foi validado em harness isolado,
+mesmo HWND e perfil. Não é recertificação dos recibos de produção nem aprovação
+de fidelidade integral. [Evidências e limites](xenos-fetch-predication.md).
