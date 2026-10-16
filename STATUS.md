@@ -52,6 +52,13 @@ conta local, persistida e trocada com o perfil (patch 0080); gamerpic,
 gamerscore e conquistas seguem sem dados locais. Vulkan e outros títulos não
 verificados: [relatório de 16/10](docs/guide-composition-2026-10-16.md)
 (histórico em [15/10](docs/guide-composition-2026-10-15.md)).
+Games Played (16/10): sessões a partir de `2.0.6683.0` não acrescentam XBLA Trial;
+anteriores preservam a inclusão. Licença do pacote e Full ativo são consultados,
+sem remover registros existentes. Onze testes focados aprovados, incluindo runtime
+com XEX/licença real de Castle Crashers para as versões 6717 e 17559. Builds 17559
+e Castle aprovados; build 6717 bloqueado pela fonte correspondente ausente, sem
+fallback nem validação visual. [Evidências](docs/games-played-trials.md).
+
 Patches 0076/0077 corrigem resolves vazios e fetches comprovadamente inativos,
 com 204 e 2.328 checks sintéticos respectivamente. Forza chegou à condução sem
 os erros diagnosticados; isso não estabelece ganho global de FPS.
