@@ -61,8 +61,9 @@ for ($pass=1; $pass -le 2; $pass++) {
       if ($process.HasExited) { throw 'Desktop exited before validation' }
       $window=$process.MainWindowHandle
       $library = if ($window -ne [IntPtr]::Zero) { [LibraryWindow]::GetDlgItem($window,121) } else { [IntPtr]::Zero }
-      $combo = [LibraryWindow]::GetDlgItem($window,102)
-      $loaded = $combo -ne [IntPtr]::Zero -and [LibraryWindow]::SendMessage($combo,0x146,[IntPtr]::Zero,[IntPtr]::Zero).ToInt32() -gt 0
+      $rowsList = if ($window -ne [IntPtr]::Zero) { [LibraryWindow]::GetDlgItem($window,122) } else { [IntPtr]::Zero }
+      # The list control always holds the dashboard rows once the first verification finished.
+      $loaded = $rowsList -ne [IntPtr]::Zero -and [LibraryWindow]::SendMessage($rowsList,0x18B,[IntPtr]::Zero,[IntPtr]::Zero).ToInt32() -gt 0
     } until (($loaded -and $library -ne [IntPtr]::Zero -and [LibraryWindow]::IsWindowEnabled($library)) -or (Get-Date) -gt $deadline)
     if ((Get-Date) -gt $deadline) { throw 'Desktop verification exceeded 180 seconds' }
     if ($pass -eq 1 -and $ImportFile) {
