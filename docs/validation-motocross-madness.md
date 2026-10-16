@@ -429,3 +429,13 @@ Nenhuma suíte anterior repetida. Build final passou. Export GetAssets/overlappe
 protocolo 2, componentes especiais/modificadores e renderização continuam
 pendentes; Initialize mantém `0xFFFFFFFF`. Perfil diagnóstico 4, forma neutra,
 apenas na x360-avatars. Evidência, comando e limites em `docs/avatar-system.md` §13.
+
+### Serviço de avatar padrão pela sessão 17559 (2026-10-16)
+
+O serviço de avatar está ligado por padrão e é compartilhado (`titles/common/avatar`).
+O jogo recebe o `xam.xex` e o `AvatarAssetPack.toc` somente do perfil da dashboard
+Retail 17559 (`preparation.toml [avatar]`), conferidos pelo supervisor antes de cada
+início; sem eles, ou a partir de outra versão, a sessão recusa o jogo com mensagem que
+identifica versão e arquivo. Registro de biblioteca (`preparation.toml`,
+`assets.sha256`) e `game_data_root` adicionados para a My Games. Abertura visual por
+esse caminho ainda não verificada. Detalhes em `docs/avatar-system.md` §17.

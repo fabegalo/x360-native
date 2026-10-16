@@ -840,3 +840,86 @@ após carregar o módulo, exatamente o bloco de 9 construtores de constantes do
 avatar (`0x81A801BC`, `81A70E60`…`81A71008`), conferindo cada entrada da tabela.
 Construtores de objetos/`atexit` seguem sem execução. Detalhes e evidência em
 [Motocross Madness](validation-motocross-madness.md#piloto-deformado-causa-e-correção).
+
+## 17. Serviço padrão, ligado ao perfil da dashboard 17559 (2026-10-16)
+
+O serviço deixou de ser exclusivo do Motocross Madness e não depende mais de flags
+manuais. Fatos desta mudança; o que não foi executado está marcado no fim.
+
+### Código compartilhado
+
+- `titles/common/avatar/avatar_service_17559.cpp` (antes
+  `titles/motocross_madness/src/avatar_service.cpp`). O bloco verificado de
+  construtores estáticos (`xam17559_static_init.h`, §16) continua idêntico e é
+  executado antes do uso.
+- `titles/common/avatar/avatar_service_17559.cmake`:
+  `x360n_add_avatar_service_17559(<título>)` adiciona só o serviço; o título
+  declara `avatar_service` no manifesto e não precisa embutir um XAM próprio.
+- Cvars: `x360n_avatar_service` (**padrão `true`**), `x360n_avatar_xam_17559` e
+  `x360n_avatar_catalog_17559` (caminhos fornecidos pelo supervisor). A antiga
+  `motocross_avatar_service` foi removida. `x360n_xam17559_root` permanece só para
+  os probes diagnósticos do Motocross; com `--motocross_xam_aot_probe=true` o probe
+  desliga o serviço, como antes (o `Initialize` posterior do jogo falha nesse modo).
+- **Uma imagem XAM por processo, compartilhada com o Guide.** A primeira versão
+  carregava uma segunda cópia (`x360nsys:\xam.xex`, DLL do título) em `0x815F0000`;
+  depois o Guide não conseguia carregar a sua (`Unable to allocate XEX memory at
+  815F0000-00610000`, run `20261016T230448Z-session-1-motocross_madness`, pedidos
+  `00021015` com `80070490`). Agora o serviço usa a imagem que o host de UI da
+  dashboard associa (`sys17559:\system\xam_ui.xex`, `dash_17559_xam_ui.dll`,
+  exportada por `X360nSystemUiXamModule` e lida por `x360n::SystemXamModulePath`),
+  e só a aceita se for o mesmo arquivo que o supervisor verificou. O Guide aceita
+  a imagem já carregada e faz sua inicialização de UI uma única vez (falha não é
+  repetida, como antes). Nessa DLL valem os encaminhamentos de alocação do Guide
+  (`system_ui_memory.cpp`), não os do antigo DLL do título.
+- O XAM embutido no Motocross (`[[modules]] x360nsys:\xam.xex`, com
+  `src/xam_avatar_memory.cpp`) ficou só para os probes diagnósticos.
+- Sem os dois caminhos, com `x360n_dashboard_version` diferente de `2.0.17559.0`
+  ou sem a imagem do host, `Initialize` registra o erro e retorna `80070002`; não
+  procura arquivos nem usa outra versão. O supervisor também recusa avatar quando
+  a dashboard não tem `system_ui_host`.
+
+### Registro e recusa antes do runtime
+
+- `titles/dash_17559/preparation.toml`: `[avatar]` com `version = "2.0.17559.0"`,
+  `xam` = `system/xam_ui.xex` (SHA-256 `78b3dbd8…f828467`, procedência
+  `SystemUpdate_17559_USB.zip`, `$SystemUpdate/su20076000_00000000`,
+  `$flash_xam.xex`) e `catalog` = `avatar/AvatarAssetPack.toc` (SHA-256
+  `a8c90b3d…832daa8`, `$SystemUpdate/FFFE07DF00000002`, pacote "AvatarAsset"
+  `0x20449700`). Os hashes vêm das entradas `[[files]]`; o catálogo é `optional`:
+  falta dele não impede a dashboard, mas um arquivo diferente é apontado.
+- O importador do desktop aceita `[[files]] optional = true`: copia o arquivo quando
+  presente na pasta selecionada e não exige quando ausente.
+- Manifesto do título: `avatar_service = "2.0.17559.0"` e `avatar_xam_sha256`
+  (o XAM compilado no título). `x360n session` chama `AvatarServiceArguments`
+  (`src/supervisor/session_profile.cpp`) a cada transição e recusa o título, antes
+  de iniciá-lo, com mensagem que nomeia versão, arquivo, SHA-256 e procedência:
+  dashboard de outra versão (ou sessão iniciada no próprio título), dashboard sem
+  `[avatar]`, XAM do perfil diferente do compilado no título, arquivo ausente,
+  divergente ou fora da raiz da dashboard. Perfis não podem passar `--x360n_avatar_*`.
+- Motocross Madness ganhou registro de biblioteca (`preparation.toml`, `[library]`
+  `58410B0F`/`000D0000`, inventário `assets.sha256` com 54 assets conferidos) e
+  `[x360n] game_data_root`, porque `[project] game_root` precisa ser a raiz VFS do
+  codegen (`.local/inputs`) para incluir o `xam.xex`. Assim o jogo aparece na My Games
+  da 17559 depois de preparado pelo aplicativo.
+
+### Testes e o que não foi verificado
+
+- `x360n.avatar service files belong to the session dashboard version and bytes`:
+  sucesso e recusas (versão, `[avatar]` ausente, XAM divergente, catálogo ausente e
+  alterado, registro sem hash, fora da raiz, argumentos reservados).
+- `x360n.session hands only its dashboard's verified avatar files to an avatar title`:
+  supervisor real com participante sintético; a dashboard não recebe argumentos, o
+  título recebe os dois caminhos; nas recusas o título não é iniciado (exit 3).
+- `local.Motocross Madness receives the 17559 dashboard avatar files` e `…is refused
+  by other dashboard versions`: perfis reais do repositório e arquivos do usuário.
+- `desktop.catalog` (`optional dashboard components may be absent but never differ`).
+- O `AvatarAssetPack.toc` do usuário foi copiado, com hash conferido, para
+  `.local/inputs/dashboard/17559/avatar/`, como faria a importação guiada.
+- `local.motocross.shared-xam` (`tests/local/motocross-shared-xam.ps1`): execução
+  limitada pelo `x360n run`, com o probe opcional do Guide, exigindo READY do serviço,
+  inicialização da UI do Guide depois dele e nenhuma segunda carga do XAM.
+- **Não verificado:** `local.motocross.shared-xam` não foi executado antes do commit
+  (a pedido do mantenedor). O usuário abriu o Motocross pela My Games da 17559 e o
+  serviço recebeu os arquivos (run acima); com a imagem compartilhada, Guide,
+  mipmaps e piloto por esse caminho ainda não foram observados. Títulos AOT
+  genéricos importados ainda não recebem o serviço.
