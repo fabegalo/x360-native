@@ -59,8 +59,9 @@ REXCVAR_DEFINE_BOOL(motocross_xam_aot_probe, false, "Motocross Madness",
 REXCVAR_DEFINE_STRING(x360n_xam17559_root, "", "x360n",
                       "Host folder with the original xam.xex 2.0.17559.0, mounted read-only as "
                       "x360nsys:");
-REXCVAR_DEFINE_STRING(x360n_avatar_catalog_17559, "", "x360n",
-                      "Host path of AvatarAssetPack.toc from the 17559 storage pack FFFE07DF00000002");
+// Defined by the shared avatar service (titles/common/avatar/avatar_service_17559.cpp).
+REXCVAR_DECLARE(std::string, x360n_avatar_catalog_17559);
+REXCVAR_DECLARE(bool, x360n_avatar_service);
 REXCVAR_DEFINE_BOOL(motocross_xam_aot_probe_strb, false, "Motocross Madness",
                     "Diagnostic, with the probe: decode every STRB blob of the 17559 catalog with "
                     "XAM's original Structured Binary reader and compare with the bytes");
@@ -1511,6 +1512,10 @@ void MaybeRunXamAotProbe(PPCRegister& r3, PPCRegister& r4, PPCRegister& r5, PPCR
   static bool done = false;
   if (done || !REXCVAR_GET(motocross_xam_aot_probe)) return;
   done = true;
+  // The probe mounts x360nsys: itself and owns the module; the game's later
+  // XamAvatarInitialize then fails in this diagnostic mode, as before.
+  REXCVAR_SET(x360n_avatar_service, false);
+  REXLOG_INFO("xam-aot-probe: avatar service disabled for this diagnostic run");
   auto* thread = rex::runtime::ThreadState::Get();
   if (!thread) {
     Check(false, "no guest thread");

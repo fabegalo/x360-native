@@ -1,0 +1,22 @@
+label = "Motocross Madness 0.0.0.3 (preparação)"
+label_en = "Motocross Madness 0.0.0.3 (preparation)"
+limitations_en = "Start the game from original My Games of the Retail 17559 dashboard: its avatar service uses that dashboard's xam.xex and AvatarAssetPack.toc, and the session refuses the game if they are missing or different. Import the extracted 0.0.0.3 folder: the executable and 54 assets are verified before copying. Tutorial and early gameplay observed locally; save/load, full races, Trick Jam DLC and multiplayer remain pending."
+session = false
+importable = true
+inventory = "assets.sha256"
+runtime_files = ["rexruntimerd.dll", "rexgpu-xenosrd.dll", "TracyClientrd.dll", "motocross_madness_xam.dll"]
+limitations = "Inicie o jogo pela My Games original da dashboard Retail 17559: o serviço de avatar usa o xam.xex e o AvatarAssetPack.toc dessa dashboard, e a sessão recusa o jogo se faltarem ou forem diferentes. Selecione a pasta extraída da versão 0.0.0.3: o executável e os 54 assets são verificados antes da cópia. Tutorial e gameplay inicial observados localmente; save/load, corridas completas, DLC Trick Jam e multiplayer seguem pendentes."
+[[files]]
+path = "default.xex"
+source_name = "default.xex"
+sha256 = "2a8406bcf9c223f9d7da732be617cc7cd46fbb587ef552f7fcacac2049b95dcd"
+
+# Metadata of the original LIVE package (Arcade 0x000D0000, title 58410B0F, media
+# 62541B78, version 0x3), recorded locally in .local/inputs/titles/motocross_madness/
+# metadata. SDK catalog metadata, not a replacement package or a license grant.
+[library]
+title_id = "58410B0F"
+content_type = "000D0000"
+file_name = "7E38A2BCC89C941C7C6BA32DD79E873F42333EF658"
+display_name = "Motocross Madness"
+source_sha256 = "09a3173cfeb4cbd44bf58fc0800cae98aa9aa17584cd036d90d203f3b1d76408"

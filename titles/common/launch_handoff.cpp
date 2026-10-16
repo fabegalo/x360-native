@@ -27,6 +27,7 @@ std::mutex handoff_mutex;
 bool dashboard_return = false;
 rex::platform::DynamicLibrary system_ui_host;
 void (*system_ui_release)() = nullptr;
+std::string system_xam_path;
 std::filesystem::path Utf8Path(const std::string& value) {
   return std::filesystem::path(std::u8string(value.begin(), value.end()));
 }
@@ -41,6 +42,7 @@ void Publish(const std::string& output, const LaunchRequest& request) {
 }
 }
 bool IsDashboardReturn() { return dashboard_return; }
+const std::string& SystemXamModulePath() { return system_xam_path; }
 void ImportLaunchData(rex::Runtime& runtime) {
   dashboard_return = false;
   const auto ui_host = REXCVAR_GET(x360n_system_ui_host);
@@ -57,6 +59,8 @@ void ImportLaunchData(rex::Runtime& runtime) {
     if (!install || !system_ui_release ||
         !install(&runtime, root.c_str(), reinterpret_cast<const char*>(directory.c_str())))
       REX_FATAL("Invalid dashboard system UI host or original assets: {}", ui_host);
+    // Optional export: hosts that bind an original XAM image share it.
+    if (auto xam = system_ui_host.GetSymbol<const char* (*)()>("X360nSystemUiXamModule")) system_xam_path = xam();
   }
   auto input = REXCVAR_GET(x360n_handoff_in);
   LaunchRequest request;

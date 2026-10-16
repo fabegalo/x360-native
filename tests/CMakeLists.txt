@@ -135,6 +135,8 @@ target_sources(x360n_local_tests PRIVATE local/dashboard_assets_test.cpp
 target_compile_definitions(x360n_local_tests PRIVATE X360N_SOURCE_ROOT="${PROJECT_SOURCE_DIR}")
 # Avatar service static initializers checked against the user's xam.xex image.
 target_sources(x360n_local_tests PRIVATE local/avatar_static_init_test.cpp)
+# Avatar service files of the 17559 dashboard profile handed to Motocross Madness.
+target_sources(x360n_local_tests PRIVATE local/avatar_service_profile_test.cpp)
 target_compile_definitions(x360n_local_tests PRIVATE X360N_CONTENT_EXE="$<TARGET_FILE:x360n-content>")
 add_dependencies(x360n_local_tests x360n-content)
 catch_discover_tests(x360n_local_tests TEST_PREFIX "local." PROPERTIES LABELS "project" TIMEOUT 600)
@@ -246,6 +248,16 @@ add_test(NAME local.iruka.regression
     COMMAND powershell -NoProfile -ExecutionPolicy Bypass -File ${PROJECT_SOURCE_DIR}/scripts/regress-iruka.ps1
     WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
 set_tests_properties(local.iruka.regression PROPERTIES
+    LABELS "project" TIMEOUT 180 SKIP_RETURN_CODE 77 RUN_SERIAL TRUE)
+
+# Avatar service and 17559 Guide sharing one original XAM image in Motocross
+# Madness (docs/avatar-system.md §17). Needs both prepared builds and the user's
+# originals; skipped (77) otherwise. Opens a window, so it runs alone.
+add_test(NAME local.motocross.shared-xam
+    COMMAND powershell -NoProfile -ExecutionPolicy Bypass -File ${PROJECT_SOURCE_DIR}/tests/local/motocross-shared-xam.ps1
+        -Supervisor $<TARGET_FILE:x360n>
+    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+set_tests_properties(local.motocross.shared-xam PROPERTIES
     LABELS "project" TIMEOUT 180 SKIP_RETURN_CODE 77 RUN_SERIAL TRUE)
 
 add_subdirectory(ppc_smoke)

@@ -43,3 +43,6 @@ SESSION_UI_EXPORT bool X360nSystemUiInstall(rex::Runtime* runtime, const char* r
   return true;
 }
 SESSION_UI_EXPORT void X360nSystemUiRelease() { dash17559::ReleaseSystemUiHost(); }
+// The one original XAM 17559 image of the title process, owned by this
+// dashboard profile and shared with the title's avatar service.
+SESSION_UI_EXPORT const char* X360nSystemUiXamModule() { return dash17559::SystemXamPath().c_str(); }

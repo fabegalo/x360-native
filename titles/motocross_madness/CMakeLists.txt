@@ -22,13 +22,7 @@ set(MOTOCROSSMADNESS_SOURCES
     src/main.cpp
     src/unresolved_imports.cpp
     src/avatar_trace.cpp
-    src/avatar_service.cpp
     src/xam_aot_probe.cpp
-    ../common/avatar/avatar_toc.cpp
-    ../common/avatar/avatar_metadata.cpp
-    ../common/avatar/avatar_assets_request.cpp
-    ../common/avatar/avatar_aot_assets.cpp
-    ../common/avatar/avatar_aot_catalog.cpp
     ../common/camera_state.cpp
     ../common/launch_handoff.cpp
 )
@@ -43,9 +37,15 @@ endif()
 # stage it next to the executable so --gpu_plugin=xenos can load it.
 rexglue_setup_target(motocross_madness GPU_PLUGINS xenos)
 
-# Original XAM 2.0.17559.0 ([[modules]] x360nsys:\xam.xex). Its guest dispatch table
-# would start at 0x81C00000 and cover 0x8242D510, over the game image at 0x82000000;
-# patch 0031 keeps it on the host.
+# Shared avatar service, on by default in the dashboard 17559 session, running in
+# that dashboard's XAM image (shared with its Guide).
+include(../common/avatar/avatar_service_17559.cmake)
+x360n_add_avatar_service_17559(motocross_madness)
+
+# Diagnostic-only copy of the original XAM 2.0.17559.0 ([[modules]] x360nsys:\xam.xex),
+# loaded by src/xam_aot_probe.cpp only. Its guest dispatch table would start at
+# 0x81C00000 and cover 0x8242D510, over the game image at 0x82000000; patch 0031
+# keeps it on the host.
 if(TARGET motocross_madness_xam)
     target_compile_definitions(motocross_madness_xam PRIVATE REX_HOST_FUNCTION_TABLE=1)
     # Read-only diagnostic hooks of analysis/xam17559_avatar_trace.toml.

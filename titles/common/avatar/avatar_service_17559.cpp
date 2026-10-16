@@ -1,8 +1,17 @@
-// Title-local bridge to the original 17559 avatar algorithms. Console services
-// (files, memory, threads and completion events/APCs) remain owned by the SDK.
-// No XAM entry point, app manager, worker thread or global heap is initialized.
+// Bridge to the original Retail 2.0.17559.0 avatar algorithms, for any title
+// started from the dashboard 17559 session (avatar_service_17559.cmake).
+// Console services (files, memory, threads and completion events/APCs) remain
+// owned by the SDK. No XAM entry point, app manager, worker thread or global heap
+// is initialized.
+//
+// On by default. The original files come only from the session dashboard 17559
+// profile: the supervisor verifies them (preparation.toml [avatar], SHA-256) and
+// passes their paths; a title never searches for or shares another version's XAM.
+// The code runs in that dashboard's single XAM image, shared with its Guide.
 #include <rex/cvar.h>
 #include <rex/filesystem/devices/host_path_device.h>
+#include <rex/filesystem/devices/host_path_entry.h>
+#include <rex/filesystem/vfs.h>
 #include <rex/logging.h>
 #include <rex/memory.h>
 #include <rex/ppc/context.h>
@@ -21,14 +30,19 @@
 #include <iterator>
 #include <mutex>
 
-#include "../../common/avatar/avatar_aot_catalog.h"
-#include "../../common/avatar/xam17559_static_init.h"
+#include "../launch_handoff.h"
+#include "avatar_aot_catalog.h"
+#include "xam17559_static_init.h"
 
-REXCVAR_DEFINE_BOOL(motocross_avatar_service, false, "Motocross Madness",
+REXCVAR_DEFINE_BOOL(x360n_avatar_service, true, "x360n",
                     "Use the original 17559 avatar catalog and AOT algorithms");
-REXCVAR_DECLARE(std::string, x360n_xam17559_root);
-REXCVAR_DECLARE(std::string, x360n_avatar_catalog_17559);
-REXCVAR_DECLARE(bool, motocross_xam_aot_probe);
+REXCVAR_DEFINE_STRING(x360n_avatar_xam_17559, "", "Supervisor",
+                      "Original xam.xex 2.0.17559.0 of the session dashboard, verified "
+                      "by the supervisor");
+REXCVAR_DEFINE_STRING(x360n_avatar_catalog_17559, "", "Supervisor",
+                      "Original AvatarAssetPack.toc of the session dashboard 17559, "
+                      "verified by the supervisor");
+REXCVAR_DECLARE(std::string, x360n_dashboard_version);
 
 namespace {
 using namespace x360n::avatar;
@@ -98,8 +112,9 @@ void Invoke(PPCContext& ctx, const char* name, F fn) {
 }
 // Without the avatar library's static initializers (xam17559_static_init.h)
 // the skeleton dequantization axis scales stayed (2, 0, 0): every bone lost its
-// Y/Z translation and rotation, and the animated rider broke apart. Run exactly
-// that block of the original table, in order, after verifying each entry.
+// Y/Z translation and rotation, and Motocross Madness's animated rider broke
+// apart. Run exactly that block of the original table, in order, after
+// verifying each entry.
 bool RunAvatarStaticInitializers() {
   for (size_t i = 0; i < kXam17559AvatarInitializers.size(); ++i) {
     const auto fn = Read(kXam17559AvatarInitializerTable + uint32_t(4 * i));
@@ -116,33 +131,56 @@ bool RunAvatarStaticInitializers() {
 
 uint32_t Initialize(uint32_t version, uint32_t coord, uint32_t processor,
                     uint32_t callbacks, uint32_t buffer, uint32_t size) {
-  if (!REXCVAR_GET(motocross_avatar_service)) return kAssetsFailure;
-  if (service || REXCVAR_GET(motocross_xam_aot_probe) || version != 4 ||
-      coord != 1 || processor > 5 || !callbacks || !buffer || (buffer & 15) ||
-      size < 0x300000)
+  if (!REXCVAR_GET(x360n_avatar_service)) return kAssetsFailure;
+  if (service || version != 4 || coord != 1 || processor > 5 || !callbacks ||
+      !buffer || (buffer & 15) || size < 0x300000)
     return kAssetsInvalid;
-  const auto root = REXCVAR_GET(x360n_xam17559_root);
-  const auto path = REXCVAR_GET(x360n_avatar_catalog_17559);
-  if (root.empty() || path.empty()) return 0x80070002;
+  // Supervisor arguments are UTF-8; never reinterpret them in the ANSI code page.
+  auto utf8_path = [](const std::string& s) {
+    return std::filesystem::path(std::u8string(s.begin(), s.end()));
+  };
+  const auto xam = utf8_path(REXCVAR_GET(x360n_avatar_xam_17559));
+  const auto path = utf8_path(REXCVAR_GET(x360n_avatar_catalog_17559));
+  if (xam.empty() || path.empty() ||
+      REXCVAR_GET(x360n_dashboard_version) != "2.0.17559.0") {
+    // No search for files and no other version's XAM: only the session
+    // dashboard 17559 provides them (supervisor, preparation.toml [avatar]).
+    REXLOG_ERROR(
+        "avatar-service: the session did not provide the Retail 2.0.17559.0 "
+        "xam.xex and AvatarAssetPack.toc (session dashboard '{}'); start the "
+        "title from the dashboard 17559 session",
+        REXCVAR_GET(x360n_dashboard_version));
+    return 0x80070002;
+  }
   auto* fs = Runtime()->kernel_state()->file_system();
+  // One original XAM image per process, as on the console. The session
+  // dashboard's system UI host binds it (its own verified AOT, also used by
+  // the Guide); a second copy cannot occupy 0x815F0000 next to it. Accept it
+  // only if it is the very file the supervisor verified for this service.
+  const auto& shared = x360n::SystemXamModulePath();
+  auto* entry = shared.empty() ? nullptr
+      : dynamic_cast<rex::filesystem::HostPathEntry*>(fs->ResolvePath(shared));
+  std::error_code same_error;
+  if (!entry || !std::filesystem::equivalent(entry->host_path(), xam, same_error)) {
+    REXLOG_ERROR(
+        "avatar-service: the session dashboard 17559 system UI host provides no "
+        "XAM image matching {} ('{}')",
+        REXCVAR_GET(x360n_avatar_xam_17559), shared);
+    return 0x80070002;
+  }
   if (!mounted) {
-    auto image = std::make_unique<rex::filesystem::HostPathDevice>(
-        "\\Device\\X360nAvatarSystem", root, true);
     auto assets = std::make_unique<rex::filesystem::HostPathDevice>(
         "\\Device\\X360nAvatarCatalog",
-        std::filesystem::path(path).parent_path(), true);
-    if (!image->Initialize() || !assets->Initialize() ||
-        !fs->RegisterDevice(std::move(image)) ||
-        !fs->RegisterDevice(std::move(assets)) ||
-        !fs->RegisterSymbolicLink("x360nsys:", "\\Device\\X360nAvatarSystem"))
+        path.parent_path(), true);
+    if (!assets->Initialize() || !fs->RegisterDevice(std::move(assets)))
       return kAssetsFailure;
     mounted = true;
   }
-  auto module =
-      Runtime()->kernel_state()->LoadUserModule("x360nsys:\\xam.xex", false);
+  auto module = Runtime()->kernel_state()->LoadUserModule(shared, false);
   if (!module || module->xex_module()->base_address() != 0x815F0000 ||
       module->xex_module()->image_size() != 0x610000)
     return kAssetsFailure;
+  REXLOG_INFO("avatar-service: using the session XAM image {}", shared);
   if (!RunAvatarStaticInitializers()) return kAssetsFailure;
   for (uint32_t i = 0; i < 5; ++i)
     if (!Runtime()->function_dispatcher()->GetFunction(Read(callbacks + 4 * i)))
@@ -161,7 +199,7 @@ uint32_t Initialize(uint32_t version, uint32_t coord, uint32_t processor,
   Profile profile(candidate->callbacks.p);
   auto hr =
       candidate->catalog.Open("\\Device\\X360nAvatarCatalog\\" +
-                              std::filesystem::path(path).filename().string());
+                              path.filename().string());
   if (hr) return hr;
   // Readiness is demonstrated by producing a complete original avatar, not by
   // changing the return value of the SDK's failed Initialize.
@@ -282,8 +320,9 @@ extern "C" REX_FUNC(__imp__XamAvatarGetMetadataRandom) {
 }
 extern "C" REX_FUNC(__imp__XamAvatarGetManifestLocalUser) {
   const auto overlap = ctx.r5.u32;
-  // SDK profiles do not yet provide original avatar metadata. The game's own
-  // fallback requests random metadata; never manufacture a profile avatar.
+  // SDK profiles do not yet provide original avatar metadata. A title's own
+  // fallback (Motocross Madness: random metadata) decides; never manufacture a
+  // profile avatar.
   Invoke(ctx, "GetManifestLocalUser",
          [&] { return Complete(overlap, 0x80070490); });
 }

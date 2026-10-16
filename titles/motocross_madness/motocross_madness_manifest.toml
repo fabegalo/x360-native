@@ -4,8 +4,8 @@
 name = "motocross_madness"
 sdk_version = "0.10.0"
 # Codegen-only VFS root: it must contain both default.xex and the original xam.xex
-# below (project_recompiler.cpp refuses modules outside it). The game still runs with
-# --game_data_root=<...>\titles\motocross_madness\extracted.
+# below (project_recompiler.cpp refuses modules outside it). The game runs from
+# [x360n] game_data_root (titles/motocross_madness/extracted).
 game_root = "../../.local/inputs"
 
 [entrypoint]
@@ -15,7 +15,8 @@ includes = ["analysis/motocross_madness.toml", "analysis/motocross_madness_point
 
 # Original XAM 2.0.17559.0 from Microsoft's SystemUpdate_17559_USB.zip (same file as
 # the dashboard's isolated XUI image: SHA-256 78b3dbd8ae866f4258f5444205486ea9f8451afaa30f469c875dcf345f828467).
-# Loaded on demand by src/xam_aot_probe.cpp only; its entry point is never called and
+# Loaded on demand only by the diagnostic src/xam_aot_probe.cpp (the avatar service
+# uses the session dashboard's XAM image instead); its entry point is never called and
 # the SDK's XAM services stay authoritative. Analysis hints for this binary live with
 # the dashboard profile that first needed them.
 [[modules]]
@@ -24,10 +25,20 @@ file_path = "../../.local/inputs/dashboard/versions/17559/retail_system_assets/e
 out_directory_path = "generated/xam"
 includes = ["../dash_17559/analysis/xam_ui_17559.toml", "analysis/xam17559_avatar_trace.toml"]
 [x360n]
-xex_sha256 = "2a8406bcf9c223f9d7da732be617cc7cd46fbb587ef552f7fcacac2049b95dcd"
+# Content root for import and execution (game_root above is the codegen VFS root).
+game_data_root = "../../.local/inputs/titles/motocross_madness/extracted"
+xex_sha256 ="2a8406bcf9c223f9d7da732be617cc7cd46fbb587ef552f7fcacac2049b95dcd"
 native_exe = "../../.local/build/titles/motocross_madness/motocross_madness.exe"
 user_data_root = "../../.local/user/motocross_madness"
 # The title builds texture fetch constants with type 0 on purpose: its GPU DXT1
 # compression of terrain color tiles samples them in every draw (2026-10-16,
 # docs/validation-motocross-madness.md). Without this the terrain is black.
 args = ["--gpu_plugin=xenos", "--mnk_mode=true", "--gpu_allow_invalid_fetch_constants=true"]
+# Shared avatar service (titles/common/avatar, docs/avatar-system.md §17). It calls
+# addresses of this exact XAM, running in the session dashboard's single XAM image
+# (shared with its Guide). That dashboard must be this version, register this xam.xex
+# and its AvatarAssetPack.toc (preparation.toml [avatar]) and provide its system UI
+# host; otherwise the supervisor refuses the title before it starts. The game stops
+# at its menu without the service.
+avatar_service = "2.0.17559.0"
+avatar_xam_sha256 = "78b3dbd8ae866f4258f5444205486ea9f8451afaa30f469c875dcf345f828467"

@@ -50,6 +50,7 @@ std::vector<SuspendedApp> suspended_apps;
 std::vector<uint8_t> restore_state;  // consumed by the next initialization
 x360n::SystemUiExecution ui_execution;
 std::string system_drive = "game:";
+std::string bound_xam_path;
 std::string UiPath(const char* path) {
   return system_drive + std::string(path).substr(5);
 }
@@ -141,6 +142,7 @@ bool NotifyDisplay(rex::Runtime& runtime, rex::runtime::ThreadState* thread) {
   return true;
 }
 }
+const std::string& SystemXamPath() { return bound_xam_path; }
 void ReleaseSystemUiHost() {
   rex::kernel::xboxkrnl::SetSystemSwapCallback(nullptr);
   // The main thread may have exited while a different presenting thread is
@@ -217,6 +219,7 @@ void InstallSystemUi(rex::Runtime& runtime, std::string drive, std::string nativ
   bind("createprofile.xex", "game:\\system\\createprofile.xex", "dash_17559_createprofile");
   if (!native_directory.empty()) {
     bind("xam.xex", "game:\\system\\xam_ui.xex", "dash_17559_xam_ui");
+    bound_xam_path = UiPath("game:\\system\\xam_ui.xex");
     bind("gamerprofile.xex", "game:\\system\\gamerprofile.xex", "dash_17559_gamerprofile");
   }
   if (REXCVAR_GET(dash17559_signin_ui)) {
@@ -229,7 +232,7 @@ void InstallSystemUi(rex::Runtime& runtime, std::string drive, std::string nativ
     };
   }
   auto xam = runtime.kernel_state()->GetKernelModule<rex::kernel::xam::XamModule>("xam.xex");
-  xam->system_ui_request = [&runtime, ui_ready = false](uint32_t message, uint32_t request, uint32_t size) mutable -> rex::X_HRESULT {
+  xam->system_ui_request = [&runtime, ui_ready = false, ui_attempted = false](uint32_t message, uint32_t request, uint32_t size) mutable -> rex::X_HRESULT {
     const auto* application = SystemUiApplicationFor(message);
     if (!application) return X_E_NOTFOUND;
     if (!request || size != application->request_size || !rex::system::XThread::IsInThread()) return X_E_INVALIDARG;
@@ -259,10 +262,14 @@ void InstallSystemUi(rex::Runtime& runtime, std::string drive, std::string nativ
     // Execute on the requesting guest thread, preserving its register context.
     auto* thread = rex::system::XThread::GetCurrentThread()->thread_state();
     auto* dispatcher = runtime.function_dispatcher();
+    // One original XAM image per process, as on the console: a title's avatar
+    // service may already have loaded it (SystemXamModulePath). Its UI-only
+    // initialization still runs here exactly once; a failed one is not retried.
     auto ui = state->GetModule(UiPath("game:\\system\\xam_ui.xex"));
-    if (ui && !ui_ready) return X_E_FAIL;
-    if (!ui) {
-      ui = state->LoadUserModule(UiPath("game:\\system\\xam_ui.xex"), false);
+    if (!ui_ready && ui_attempted) return X_E_FAIL;
+    if (!ui_ready) {
+      ui_attempted = true;
+      if (!ui) ui = state->LoadUserModule(UiPath("game:\\system\\xam_ui.xex"), false);
       if (!ui) return X_E_NOTFOUND;
       rex::cvar::SetFlagByName("dash17559_ui_self", std::to_string(ui->hmodule_ptr()));
       // XUI-specific static constructor from 81A70370. It initializes the
