@@ -608,3 +608,22 @@ the same base-class packet; only Xenos D3D12 was exercised.
 layout, the inherited fetch, the presented fetch, the rotating-buffer limit and
 the return to the title frame. It fails without the patch (stub exports and no
 callback API). Live evidence: `docs/guide-composition-2026-10-16.md`.
+
+### 0079 — system UI input ownership (2026-10-16)
+
+`src/kernel/xam/xam_input.cpp`. While a system UI owned a controller, the title
+already received an empty state. Three gaps remained, all reproduced by
+`tests/sdkcheck/system_ui_input_test.cpp` before this patch (3 failed checks):
+
+- the Guide button bit reached `XamInputGetState` for titles, because the 17559
+  host enables `guide_button` for its own polling (the runtime default is off);
+  non-privileged queries now never see it;
+- a button still held when the UI closed (the B that closes the Guide) became a
+  new title press; buttons and triggers held through the UI are now hidden from
+  the title until released;
+- the key-up of a pad key the HUD consumed reached `XamInputGetKeystroke(Ex)`;
+  keys delivered to the HUD keep their remaining transitions with the UI.
+
+No title special case. Live check (Castle Crashers, temporary instrumentation,
+removed): B held ~0.85 s after closing the Guide never reached the title; the
+next Start did.

@@ -518,7 +518,7 @@
                                                            },
                                             "files":  {
                                                           "include/rex/kernel/xam/module.h":  "2547409edaa44b2f7ab2972a0504de4fb6bbd0b87a62cad0a5d0a663a25c1d2d",
-                                                          "src/kernel/xam/xam_input.cpp":  "168638f2d39571fd98fff13e57cfd88e2a942312100a9b7c228c44a80a21dfa7",
+                                                          "src/kernel/xam/xam_input.cpp":  "16b99785eb442c048ff5d6e988200580971b418c28aa0ad02a94de495ea452d6",
                                                           "src/kernel/xam/xam_misc.cpp":  "d6406921077ec432aeb4654b995fe87cb81acbf993bf2ea32168189e7a40e396",
                                                           "src/kernel/xam/xam_ui.cpp":  "c5a93b435cb1b135e553c523b437985d2cacfa28a0118ae2c220ba3d9a83fa1a"
                                                       },
@@ -533,7 +533,7 @@
                                                            },
                                             "files":  {
                                                           "include/rex/kernel/xam/module.h":  "2547409edaa44b2f7ab2972a0504de4fb6bbd0b87a62cad0a5d0a663a25c1d2d",
-                                                          "src/kernel/xam/xam_input.cpp":  "168638f2d39571fd98fff13e57cfd88e2a942312100a9b7c228c44a80a21dfa7"
+                                                          "src/kernel/xam/xam_input.cpp":  "16b99785eb442c048ff5d6e988200580971b418c28aa0ad02a94de495ea452d6"
                                                       },
                                             "test":  "sdkcheck.Sign-in ANY_USER session and HUD Ex ABI; title application routing and request outcomes"
                                         },
@@ -850,7 +850,7 @@
                                                                "src/kernel/xam/xam_input.cpp":  "c194bd782927f6057e8a5d97611d6fa64d8d67a2de5753fb76ae4b481bea44c7"
                                                            },
                                             "files":  {
-                                                          "src/kernel/xam/xam_input.cpp":  "168638f2d39571fd98fff13e57cfd88e2a942312100a9b7c228c44a80a21dfa7"
+                                                          "src/kernel/xam/xam_input.cpp":  "16b99785eb442c048ff5d6e988200580971b418c28aa0ad02a94de495ea452d6"
                                                       },
                                             "test":  "sdkcheck.Sign-in ANY_USER session preserves exclusivity and validates HUD Ex ABI"
                                         },
@@ -1058,6 +1058,17 @@
     "src/kernel/xboxkrnl/xboxkrnl_video.cpp": "ea0e09814eedb327c49395eccadc6d6cc55d51844734cd6f53dbeafb56c5efc4"
   },
   "test": "tests/sdkcheck/system_command_buffer_test.cpp"
+},
+{
+  "file": "patches/rexglue-sdk/0079-system-ui-input-ownership.patch",
+  "sha256": "1bf246d6bad0cf5006ea4c3f40ae52184d8153c837ba99ce5fb2364dc1e9fd91",
+  "base_files": {
+    "src/kernel/xam/xam_input.cpp": "168638f2d39571fd98fff13e57cfd88e2a942312100a9b7c228c44a80a21dfa7"
+  },
+  "files": {
+    "src/kernel/xam/xam_input.cpp": "16b99785eb442c048ff5d6e988200580971b418c28aa0ad02a94de495ea452d6"
+  },
+  "test": "tests/sdkcheck/system_ui_input_test.cpp"
 }
                                     ]
                     },
