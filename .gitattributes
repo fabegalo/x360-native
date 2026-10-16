@@ -3,3 +3,5 @@
 patches/**/*.patch -text
 # Preserve the exact upstream legal texts and their recorded SHA-256 values.
 /licenses/*.txt -text -whitespace
+# Release provenance hashes must match between Windows build and Linux publish.
+/docs/releases/*.md text eol=lf
