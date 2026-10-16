@@ -41,7 +41,7 @@ bool DepthFormat(TextureFormat f) { return f == TextureFormat::k_24_8 || f == Te
 }
 texture_util::TextureGuestLayout TextureLoadInput::Layout() const {
   return texture_util::GetGuestTextureLayout(dimension, pitch, width, height, depth_or_slices, tiled, format,
-      packed_mips, true, max_level);
+      packed_mips, base != 0, max_level);
 }
 bool NeedsCpuConversion(TextureFormat format, bool is_signed, bool num_format) {
   // RGBA4: the pinned D3D12 shaders target B4G4R4A4, not Native's exact RGBA8.
@@ -88,6 +88,9 @@ TextureLoadPlan PlanGpuTextureLoad(const TextureLoadInput& t, LoadShader shader)
   uint32_t loop_level_first, loop_level_last;
   if (level_packed == 0) { loop_level_first = 0; loop_level_last = uint32_t(level_last != 0); }
   else { loop_level_first = 0; loop_level_last = level_stored_last; }
+  // A missing base is valid when only mip levels are resident. Keep guest
+  // level numbers (and packed-tail offsets), but never read address zero.
+  if (!t.base) loop_level_first = 1;
   // Native never decompresses: block-compressed guest formats stay compressed.
   const uint32_t host_block_width = block_width, host_block_height = block_height;
   const uint32_t host_x_blocks_per_thread = 1u << info.x_blocks_log2;
@@ -155,7 +158,7 @@ TextureLoadPlan PlanGpuTextureLoad(const TextureLoadInput& t, LoadShader shader)
     }
   }
   const uint32_t levels = t.max_level + 1;
-  for (uint32_t level = 0; level <= level_last; ++level) {
+  for (uint32_t level = t.base ? 0 : 1; level <= level_last; ++level) {
     const uint32_t guest_level = std::min(level, level_packed);
     D3D12_PLACED_SUBRESOURCE_FOOTPRINT fp = level ? slice_mips[guest_level] : slice_base;
     const uint64_t slice_size = level ? size_mips[guest_level] : size_base;
@@ -194,7 +197,7 @@ void ConvertTextureCpu(const TextureLoadInput& t, std::span<const uint8_t> base_
   const unsigned levels = t.max_level + 1;
   const Endian endian = TextureBlockEndian(block, t.endian);
   const uint32_t base_page = t.base, mip_page = t.mip;
-  for (unsigned level = 0; level <= t.max_level; ++level) {
+  for (unsigned level = t.base ? 0 : 1; level <= t.max_level; ++level) {
     unsigned stored_level = std::min(level, layout.packed_level);
     const auto& gl = level ? layout.mips[stored_level] : layout.base;
     uint32_t address = level ? mip_page + layout.mip_offsets_bytes[stored_level] : base_page;

@@ -104,12 +104,11 @@ D3D12Render::TextureTables D3D12Render::BindTextures(const RegisterFile& r, rex:
         device_->CreateShaderResourceView(nullptr, &unused, Cpu(first + i));
         continue;
       }
-      Require(base != 0, "mip-only texture not implemented");
       const bool volume = f.dimension == DataDimension::k3D;
       const bool host_volume = volume && binding.dimension == FetchOpDimension::k3DOrStacked;
       // The translator also declares a 2D alternative for stacked fetches.
       // A 2D fetch of volume storage views its first base-level slice.
-      if (volume && !host_volume) max_level = 0;
+      if (volume && !host_volume) max_level = base ? 0 : min_level;
       auto format = Format(f.format, binding.is_signed);
       const bool depth_texture = f.format == TextureFormat::k_24_8 || f.format == TextureFormat::k_24_8_FLOAT;
       const bool integer16 = f.num_format && f.format == TextureFormat::k_16;
@@ -201,7 +200,7 @@ D3D12Render::TextureTables D3D12Render::BindTextures(const RegisterFile& r, rex:
         // the texture outdated again, so no write between upload and use is lost.
         auto lock = GuestMemoryMirror::Lock();
         entry->outdated = false;
-        if (!entry->watches[0]) entry->watches[0] = mirror_->Watch(base << 12, base_bytes, TextureWatch, this, entry, 0);
+        if (base_bytes && !entry->watches[0]) entry->watches[0] = mirror_->Watch(base << 12, base_bytes, TextureWatch, this, entry, 0);
         if (mip_bytes && !entry->watches[1]) entry->watches[1] = mirror_->Watch(mip << 12, mip_bytes, TextureWatch, this, entry, 1);
       }
       // Pages the CPU wrote are uploaded; resolve results are already resident.
@@ -227,6 +226,7 @@ D3D12Render::TextureTables D3D12Render::BindTextures(const RegisterFile& r, rex:
         auto upload = Reserve(size_t(bytes), linear);
         ConvertTextureCpu(input, base_source, mip_source, footprints, linear);
         for (unsigned subresource = 0; subresource < levels * array_size; ++subresource) {
+          if (!base && subresource % levels == 0) continue;
           D3D12_TEXTURE_COPY_LOCATION src{}; src.pResource = upload.resource.Get(); src.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT; src.PlacedFootprint = footprints[subresource];
           src.PlacedFootprint.Offset += upload.offset;
           D3D12_TEXTURE_COPY_LOCATION dst{}; dst.pResource = texture.Get(); dst.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX; dst.SubresourceIndex = subresource;
