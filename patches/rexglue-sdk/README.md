@@ -579,3 +579,32 @@ não comprovados conservam a rejeição. Native/Vulkan não alterados.
 
 `sdkcheck.inactive-vertex-fetch`: 2.328 checks sintéticos; Forza e Castle reais,
 com os limites em [X2](../../docs/xenos-fetch-predication.md). Patch 0076 intacto.
+
+### 0078 — system command buffer composition (2026-10-16)
+
+Implements the kernel contract used by the original XAM 17559 compositor
+(`816CCF00` → `81842B08` → `VdSetSystemCommandBuffer`) instead of stubs:
+`VdSetSystemCommandBuffer` keeps a copy of the 0x94-byte descriptor,
+`VdQuerySystemCommandBuffer` allows recording while at most one published buffer
+waits for the GPU (XAM rotates three; bounded 100 ms wait, no dependency on the
+caller's own swap), and `VdGet3dVideoFormat` returns 0 (no stereoscopic output)
+instead of leaving r3 undefined. `SetSystemSwapCallback` lets a system UI host
+run on the guest thread inside `VdSwap`, for every title, without title hooks.
+
+When a descriptor is published, `VdSwap` emits the ReXGlue-only
+`PM4_XE_SYSTEM_COMMANDS` packet. The command processor snapshots the title's
+register file, active shaders and bin masks, places the title front buffer in
+fetch constant 15 (XAM's inherit tags `0x10000` in tag word 3, decoded from
+`81842C08`/`81845860`; inference confirmed by the composed image), runs the
+recorded buffer, restores the title state (constants through `WriteRegister`,
+other registers directly to avoid replaying scratch/gamma side effects) and
+writes the completion sequence to a kernel fence. The swap then presents the
+descriptor's system front buffer (base/format/dimensions from the descriptor,
+other fetch fields from the title fetch). Without a descriptor `VdSwap` is
+unchanged. EDRAM is shared, as on the console. Native/Vulkan backends receive
+the same base-class packet; only Xenos D3D12 was exercised.
+
+`tests/sdkcheck/system_command_buffer_test.cpp` checks the callback, the packet
+layout, the inherited fetch, the presented fetch, the rotating-buffer limit and
+the return to the title frame. It fails without the patch (stub exports and no
+callback API). Live evidence: `docs/guide-composition-2026-10-16.md`.

@@ -174,6 +174,7 @@ target_sources(x360n_sdk_runtime_checks PRIVATE sdkcheck/aggregate_content_test.
 target_sources(x360n_sdk_runtime_checks PRIVATE sdkcheck/title_return_test.cpp
     ../titles/common/launch_handoff.cpp)
 target_sources(x360n_sdk_runtime_checks PRIVATE sdkcheck/persist_display_test.cpp)
+target_sources(x360n_sdk_runtime_checks PRIVATE sdkcheck/system_command_buffer_test.cpp)
 target_sources(x360n_sdk_runtime_checks PRIVATE sdkcheck/audio_drain_test.cpp)
 target_sources(x360n_sdk_runtime_checks PRIVATE sdkcheck/profile_ui_request_test.cpp)
 target_sources(x360n_sdk_runtime_checks PRIVATE sdkcheck/system_ui_context_test.cpp)

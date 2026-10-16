@@ -1,0 +1,343 @@
+diff --git a/include/rex/graphics/command_processor.h b/include/rex/graphics/command_processor.h
+index 85bbd9c..f4e9069 100644
+--- a/include/rex/graphics/command_processor.h
++++ b/include/rex/graphics/command_processor.h
+@@ -186,6 +186,8 @@ class CommandProcessor {
+   bool ExecutePacketType3_XE_SWAP(memory::RingBuffer* reader, uint32_t packet, uint32_t count);
+   bool ExecutePacketType3_INDIRECT_BUFFER(memory::RingBuffer* reader, uint32_t packet,
+                                           uint32_t count);
++  bool ExecutePacketType3_XE_SYSTEM_COMMANDS(memory::RingBuffer* reader, uint32_t packet,
++                                             uint32_t count);
+   bool ExecutePacketType3_WAIT_REG_MEM(memory::RingBuffer* reader, uint32_t packet, uint32_t count);
+   bool ExecutePacketType3_REG_RMW(memory::RingBuffer* reader, uint32_t packet, uint32_t count);
+   bool ExecutePacketType3_REG_TO_MEM(memory::RingBuffer* reader, uint32_t packet, uint32_t count);
+@@ -271,6 +273,9 @@ class CommandProcessor {
+   Shader* active_vertex_shader_ = nullptr;
+   Shader* active_pixel_shader_ = nullptr;
+ 
++  // Title register state while a system command buffer runs.
++  std::vector<uint32_t> system_register_snapshot_;
++
+   bool paused_ = false;
+ 
+   // By default (such as for tools), post-processing is disabled.
+diff --git a/include/rex/graphics/xenos.h b/include/rex/graphics/xenos.h
+index f7fd14e..63356d9 100644
+--- a/include/rex/graphics/xenos.h
++++ b/include/rex/graphics/xenos.h
+@@ -1606,6 +1606,7 @@ enum Type3Opcode {
+   PM4_INTERRUPT             = 0x54,   // generate interrupt from the command stream
+ 
+   PM4_XE_SWAP               = 0x64,   // Xenia only: VdSwap uses this to trigger a swap.
++  PM4_XE_SYSTEM_COMMANDS    = 0x65,   // ReXGlue only: VdSwap runs the published system command buffer.
+ 
+   PM4_IM_STORE              = 0x2c,   // copy sequencer instruction memory to system memory
+ 
+diff --git a/include/rex/kernel/xboxkrnl/video.h b/include/rex/kernel/xboxkrnl/video.h
+index 0b9bd41..c92b712 100644
+--- a/include/rex/kernel/xboxkrnl/video.h
++++ b/include/rex/kernel/xboxkrnl/video.h
+@@ -26,6 +26,20 @@ namespace rex::kernel::xboxkrnl {
+ 
+ void VdQueryVideoMode(system::X_VIDEO_MODE* video_mode);
+ 
++// Front buffer passed by a title to VdSwap.
++struct SystemSwapFrame {
++  uint32_t frontbuffer_virtual;
++  uint32_t frontbuffer_physical;
++  uint32_t width;
++  uint32_t height;
++  uint32_t texture_format;
++};
++// Called on the guest thread executing VdSwap, before its packets are written.
++// A system UI host records and publishes its command buffer here through the
++// original VdSetSystemCommandBuffer contract. Null removes the callback.
++using SystemSwapCallback = void (*)(const SystemSwapFrame& frame);
++void SetSystemSwapCallback(SystemSwapCallback callback);
++
+ // Register video variable exports (VdGlobalDevice, VdHSIOCalibrationLock, etc.)
+ // Must be called during kernel initialization before XEX modules are loaded.
+ void RegisterVideoExports(rex::runtime::ExportResolver* export_resolver,
+diff --git a/src/graphics/command_processor.cpp b/src/graphics/command_processor.cpp
+index 8883a89..c7d6e8f 100644
+--- a/src/graphics/command_processor.cpp
++++ b/src/graphics/command_processor.cpp
+@@ -804,6 +804,9 @@ bool CommandProcessor::ExecutePacketType3(memory::RingBuffer* reader, uint32_t p
+     case PM4_XE_SWAP:
+       result = ExecutePacketType3_XE_SWAP(reader, packet, count);
+       break;
++    case PM4_XE_SYSTEM_COMMANDS:
++      result = ExecutePacketType3_XE_SYSTEM_COMMANDS(reader, packet, count);
++      break;
+     case PM4_INDIRECT_BUFFER:
+     case PM4_INDIRECT_BUFFER_PFD:
+       result = ExecutePacketType3_INDIRECT_BUFFER(reader, packet, count);
+@@ -1027,6 +1030,52 @@ bool CommandProcessor::ExecutePacketType3_XE_SWAP(memory::RingBuffer* reader, ui
+   return true;
+ }
+ 
++bool CommandProcessor::ExecutePacketType3_XE_SYSTEM_COMMANDS(memory::RingBuffer* reader,
++                                                             uint32_t packet, uint32_t count) {
++  // VdSwap inserts the command buffer published through VdSetSystemCommandBuffer.
++  // It runs between two title frames: restore the title's register state and
++  // shaders afterwards, so the title never observes the system recording.
++  // Payload: command address, dword count, completion fence, sequence, and
++  // the title front buffer fetch constant the command buffer inherits.
++  constexpr uint32_t kInheritedFetch = 15;
++  if (count < 10) {
++    reader->AdvanceRead(count * sizeof(uint32_t));
++    return false;
++  }
++  uint32_t list_ptr = CpuToGpu(reader->ReadAndSwap<uint32_t>());
++  uint32_t list_length = reader->ReadAndSwap<uint32_t>() & 0xFFFFFF;
++  uint32_t fence = reader->ReadAndSwap<uint32_t>();
++  uint32_t sequence = reader->ReadAndSwap<uint32_t>();
++  uint32_t front_buffer[6];
++  for (uint32_t& value : front_buffer) value = reader->ReadAndSwap<uint32_t>();
++  reader->AdvanceRead((count - 10) * sizeof(uint32_t));
++  RegisterFile& regs = *register_file_;
++  system_register_snapshot_.assign(regs.values, regs.values + RegisterFile::kRegisterCount);
++  Shader* vertex_shader = active_vertex_shader_;
++  Shader* pixel_shader = active_pixel_shader_;
++  const uint64_t bin_select = bin_select_;
++  const uint64_t bin_mask = bin_mask_;
++  for (uint32_t i = 0; i < 6; ++i)
++    WriteRegister(XE_GPU_REG_SHADER_CONSTANT_FETCH_00_0 + kInheritedFetch * 6 + i, front_buffer[i]);
++  if (list_length) ExecuteIndirectBuffer(GpuToCpu(list_ptr), list_length);
++  for (uint32_t i = 0; i < RegisterFile::kRegisterCount; ++i) {
++    const uint32_t value = system_register_snapshot_[i];
++    if (regs.values[i] == value) continue;
++    // Constants carry backend binding state; other registers are read per draw.
++    // Assign those directly to avoid replaying side effects (scratch, gamma).
++    if (i >= XE_GPU_REG_SHADER_CONSTANT_000_X && i <= XE_GPU_REG_SHADER_CONSTANT_LOOP_31)
++      WriteRegister(i, value);
++    else
++      const_cast<volatile uint32_t&>(regs.values[i]) = value;
++  }
++  active_vertex_shader_ = vertex_shader;
++  active_pixel_shader_ = pixel_shader;
++  bin_select_ = bin_select;
++  bin_mask_ = bin_mask;
++  memory::store_and_swap<uint32_t>(memory_->TranslatePhysical(fence), sequence);
++  return true;
++}
++
+ bool CommandProcessor::ExecutePacketType3_INDIRECT_BUFFER(memory::RingBuffer* reader,
+                                                           uint32_t packet, uint32_t count) {
+   // indirect buffer dispatch
+diff --git a/src/kernel/xboxkrnl/xboxkrnl_video.cpp b/src/kernel/xboxkrnl/xboxkrnl_video.cpp
+index 173372f..00346b5 100644
+--- a/src/kernel/xboxkrnl/xboxkrnl_video.cpp
++++ b/src/kernel/xboxkrnl/xboxkrnl_video.cpp
+@@ -13,8 +13,13 @@
+ #pragma GCC diagnostic ignored "-Wunused-parameter"
+ 
+ #include <algorithm>
++#include <array>
+ #include <atomic>
++#include <chrono>
++#include <cstring>
++#include <mutex>
+ #include <string>
++#include <thread>
+ 
+ #include <rex/cvar.h>
+ #include <rex/graphics/pipeline/texture/info.h>
+@@ -96,7 +101,6 @@ REX_EXPORT_STUB(__imp__VdGenerateGPUCSCCoefficients);
+ REX_EXPORT_STUB(__imp__VdGetClosedCaptionReadyStatus);
+ REX_EXPORT_STUB(__imp__VdGetDisplayModeOverride);
+ REX_EXPORT_STUB(__imp__VdInitializeScaler);
+-REX_EXPORT_STUB(__imp__VdQuerySystemCommandBuffer);
+ REX_EXPORT_STUB(__imp__VdReadDVERegisterUlong);
+ REX_EXPORT_STUB(__imp__VdReadWriteHSIOCalibrationFlag);
+ REX_EXPORT_STUB(__imp__VdRegisterGraphicsNotification);
+@@ -107,7 +111,6 @@ REX_EXPORT_STUB(__imp__VdSetColorProfileAdjustment);
+ REX_EXPORT_STUB(__imp__VdSetCscMatricesOverride);
+ REX_EXPORT_STUB(__imp__VdSetHDCPOption);
+ REX_EXPORT_STUB(__imp__VdSetMacrovisionOption);
+-REX_EXPORT_STUB(__imp__VdSetSystemCommandBuffer);
+ REX_EXPORT_STUB(__imp__VdSetWSSData);
+ REX_EXPORT_STUB(__imp__VdSetWSSOption);
+ REX_EXPORT_STUB(__imp__VdTurnDisplayOff);
+@@ -128,7 +131,6 @@ REX_EXPORT_STUB(__imp__VdSetSCMSState);
+ REX_EXPORT_STUB(__imp__VdGetOption);
+ REX_EXPORT_STUB(__imp__VdSetOption);
+ REX_EXPORT_STUB(__imp__VdQueryVideoCapabilities);
+-REX_EXPORT_STUB(__imp__VdGet3dVideoFormat);
+ REX_EXPORT_STUB(__imp__VdGetWSS2Data);
+ REX_EXPORT_STUB(__imp__VdSet3dVideoFormat);
+ REX_EXPORT_STUB(__imp__VdSetWSS2Data);
+@@ -359,6 +361,74 @@ void VdSetSystemCommandBufferGpuIdentifierAddress_entry(mapped_void unk) {
+   // r3 = 0x2B10(d3d?) + 8
+ }
+ 
++namespace {
++// Descriptor built by XAM 17559 816C9A20/816CCF00 -> 81842B08 (0x94 bytes):
++// +00 command buffer address, +04 size in dwords (24 bits), +08 front buffer
++// virtual page, +0C texture format, +10 color format, +14/+18 dimensions,
++// +1C/+20 optional scaler, +58/+90 optional title scaler.
++constexpr uint32_t kSystemCommandBufferSize = 0x94;
++struct SystemCommandBufferState {
++  std::mutex mutex;
++  std::array<uint8_t, kSystemCommandBufferSize> descriptor{};
++  bool present = false;
++  uint32_t published = 0;
++  uint32_t fence = 0;  // Guest physical-heap word written by the command processor.
++};
++SystemCommandBufferState system_command_buffer;
++std::atomic<SystemSwapCallback> system_swap_callback{nullptr};
++
++uint32_t DescriptorWord(const std::array<uint8_t, kSystemCommandBufferSize>& d, uint32_t offset) {
++  return memory::load_and_swap<uint32_t>(d.data() + offset);
++}
++uint32_t ExecutedSystemCommandBuffers() {
++  if (!system_command_buffer.fence) return 0;
++  return memory::load_and_swap<uint32_t>(
++      REX_KERNEL_MEMORY()->TranslateVirtual(system_command_buffer.fence));
++}
++}  // namespace
++
++void SetSystemSwapCallback(SystemSwapCallback callback) { system_swap_callback.store(callback); }
++
++u32 VdGet3dVideoFormat_entry() {
++  // The emulated output has no stereoscopic mode. XAM 17559 816C8010 compares
++  // the result with 3 before choosing its side-by-side system buffers.
++  return 0;
++}
++
++void VdSetSystemCommandBuffer_entry(mapped_void descriptor) {
++  std::lock_guard lock(system_command_buffer.mutex);
++  auto& state = system_command_buffer;
++  if (!descriptor) {
++    state.descriptor.fill(0);
++    state.present = false;
++    return;
++  }
++  std::memcpy(state.descriptor.data(), descriptor.as<uint8_t*>(), kSystemCommandBufferSize);
++  state.present = DescriptorWord(state.descriptor, 0) && (DescriptorWord(state.descriptor, 4) & 0xFFFFFF);
++  REXKRNL_DEBUG("VdSetSystemCommandBuffer: commands {:08X}+{} front {:08X} {}x{}",
++                DescriptorWord(state.descriptor, 0), DescriptorWord(state.descriptor, 4) & 0xFFFFFF,
++                DescriptorWord(state.descriptor, 8), DescriptorWord(state.descriptor, 0x14),
++                DescriptorWord(state.descriptor, 0x18));
++}
++
++u32 VdQuerySystemCommandBuffer_entry(u32 unk0) {
++  // XAM records into one of three rotating buffers after this returns nonzero.
++  // At most one published buffer may still wait for the command processor.
++  // Earlier swaps were already submitted by the title, so a bounded wait
++  // cannot depend on the caller's own pending swap.
++  const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(100);
++  for (;;) {
++    uint32_t published;
++    {
++      std::lock_guard lock(system_command_buffer.mutex);
++      published = system_command_buffer.published;
++    }
++    if (published - ExecutedSystemCommandBuffers() <= 1) return 1;
++    if (std::chrono::steady_clock::now() >= deadline) return 0;
++    std::this_thread::sleep_for(std::chrono::milliseconds(1));
++  }
++}
++
+ // VdVerifyMEInitCommand
+ // r3
+ // r4 = 19
+@@ -517,12 +587,73 @@ void VdSwap_entry(mapped_void buffer_ptr,      // ptr into primary ringbuffer
+   dwords[offset++] = gpu_fetch.dword_4;
+   dwords[offset++] = gpu_fetch.dword_5;
+ 
++  // A system UI host may record its frame from this title's front buffer. Its
++  // published command buffer inherits fetch constant 0 written above.
++  if (auto callback = system_swap_callback.load()) {
++    callback(SystemSwapFrame{frontbuffer_virtual_address, frontbuffer_physical_address,
++                             uint32_t(*width), uint32_t(*height), uint32_t(texture_format)});
++  }
++  std::array<uint8_t, kSystemCommandBufferSize> system{};
++  uint32_t sequence = 0;
++  {
++    std::lock_guard lock(system_command_buffer.mutex);
++    if (system_command_buffer.present && system_command_buffer.fence) {
++      system = system_command_buffer.descriptor;
++      sequence = ++system_command_buffer.published;
++    }
++  }
++  uint32_t swap_address = frontbuffer_physical_address;
++  uint32_t swap_width = *width;
++  uint32_t swap_height = *height;
++  if (sequence) {
++    // XAM 17559 begins recording with inherit tags 0x10000 in tag word 3
++    // (816C9FB4), handled by 81842C08 -> 81845860 as fetch constant 15: the
++    // command buffer samples the title's front buffer from that slot.
++    dwords[offset++] = xenos::MakePacketType3(xenos::PM4_XE_SYSTEM_COMMANDS, 10);
++    dwords[offset++] = DescriptorWord(system, 0);
++    dwords[offset++] = DescriptorWord(system, 4) & 0xFFFFFF;
++    dwords[offset++] = REX_KERNEL_MEMORY()->GetPhysicalAddress(system_command_buffer.fence);
++    dwords[offset++] = sequence;
++    dwords[offset++] = gpu_fetch.dword_0;
++    dwords[offset++] = gpu_fetch.dword_1;
++    dwords[offset++] = gpu_fetch.dword_2;
++    dwords[offset++] = gpu_fetch.dword_3;
++    dwords[offset++] = gpu_fetch.dword_4;
++    dwords[offset++] = gpu_fetch.dword_5;
++    // The system frame replaces the title image only when XAM supplied one.
++    const uint32_t system_virtual = DescriptorWord(system, 8) & 0xFFFFF000;
++    const uint32_t system_physical =
++        system_virtual ? REX_KERNEL_MEMORY()->GetPhysicalAddress(system_virtual) : UINT32_MAX;
++    const uint32_t system_width = DescriptorWord(system, 0x14);
++    const uint32_t system_height = DescriptorWord(system, 0x18);
++    if (system_physical != UINT32_MAX && system_width && system_height && system_width <= 8192 &&
++        system_height <= 8192) {
++      auto system_fetch = gpu_fetch;
++      system_fetch.base_address = system_physical >> 12;
++      system_fetch.format = xenos::TextureFormat(DescriptorWord(system, 0xC) & 0x3F);
++      system_fetch.size_2d.width = system_width - 1;
++      system_fetch.size_2d.height = system_height - 1;
++      system_fetch.pitch = (system_width + 31) >> 5;
++      dwords[offset++] =
++          xenos::MakePacketType0(rex::graphics::XE_GPU_REG_SHADER_CONSTANT_FETCH_00_0, 6);
++      dwords[offset++] = system_fetch.dword_0;
++      dwords[offset++] = system_fetch.dword_1;
++      dwords[offset++] = system_fetch.dword_2;
++      dwords[offset++] = system_fetch.dword_3;
++      dwords[offset++] = system_fetch.dword_4;
++      dwords[offset++] = system_fetch.dword_5;
++      swap_address = system_physical;
++      swap_width = system_width;
++      swap_height = system_height;
++    }
++  }
++
+   dwords[offset++] = xenos::MakePacketType3(xenos::PM4_XE_SWAP, 4);
+   dwords[offset++] = rex::graphics::xenos::kSwapSignature;
+-  dwords[offset++] = frontbuffer_physical_address;
++  dwords[offset++] = swap_address;
+ 
+-  dwords[offset++] = *width;
+-  dwords[offset++] = *height;
++  dwords[offset++] = swap_width;
++  dwords[offset++] = swap_height;
+ 
+   // Fill the rest of the buffer with NOP packets.
+   for (uint32_t i = offset; i < 64; i++) {
+@@ -547,6 +678,13 @@ void RegisterVideoExports(rex::runtime::ExportResolver* export_resolver,
+   export_resolver->SetVariableMapping("xboxkrnl.exe", 0x01BF, pVdGlobalXamDevice);
+   memory::store_and_swap<uint32_t>(memory->TranslateVirtual(pVdGlobalXamDevice), 0);
+ 
++  // Completion sequence of system command buffers, written by the GPU.
++  system_command_buffer.fence = memory->SystemHeapAlloc(4, 32, memory::kSystemHeapPhysical);
++  if (system_command_buffer.fence)
++    memory::store_and_swap<uint32_t>(memory->TranslateVirtual(system_command_buffer.fence), 0);
++  system_command_buffer.published = 0;
++  system_command_buffer.present = false;
++
+   // VdGpuClockInMHz (4b)
+   // GPU clock. Xenos is 500MHz. Hope nothing is relying on this timing...
+   uint32_t pVdGpuClockInMHz = memory->SystemHeapAlloc(4, 32, memory::kSystemHeapPhysical);
+@@ -592,3 +730,7 @@ REX_EXPORT(__imp__VdPersistDisplay, rex::kernel::xboxkrnl::VdPersistDisplay_entr
+ REX_EXPORT(__imp__VdRetrainEDRAMWorker, rex::kernel::xboxkrnl::VdRetrainEDRAMWorker_entry)
+ REX_EXPORT(__imp__VdRetrainEDRAM, rex::kernel::xboxkrnl::VdRetrainEDRAM_entry)
+ REX_EXPORT(__imp__VdSwap, rex::kernel::xboxkrnl::VdSwap_entry)
++REX_EXPORT(__imp__VdSetSystemCommandBuffer, rex::kernel::xboxkrnl::VdSetSystemCommandBuffer_entry)
++REX_EXPORT(__imp__VdQuerySystemCommandBuffer,
++           rex::kernel::xboxkrnl::VdQuerySystemCommandBuffer_entry)
++REX_EXPORT(__imp__VdGet3dVideoFormat, rex::kernel::xboxkrnl::VdGet3dVideoFormat_entry)
