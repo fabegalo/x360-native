@@ -1,5 +1,9 @@
 # Auditoria técnica do x360-native
 
+Registro histórico de 13/10 e suas correções E1–E11. Para C7/C8, Forza, Native,
+Xenos e integração posteriores, consulte [STATUS](../STATUS.md). As prioridades
+e bloqueios da auditoria original não substituem esse estado consolidado.
+
 Data: 13/10/2026. Base auditada: `main`, commit `55e326c77fd4a26f44d69468ea67ab1670e3c4cd`.
 
 **Estado ativo em 13/10/2026:** implementações técnicas de C1/C3, C2, C5, C6, C9, C12, C4/C11 e C10 concluídas. O mantenedor autorizou a primeira pre-release pública `v0.1.0-preview.19`. Windows limpo e demais limitações funcionais continuam explicitamente não validados. O diagnóstico e os bloqueios registrados abaixo são históricos; o estado da distribuição está em [FIRST_RELEASE.md](FIRST_RELEASE.md).

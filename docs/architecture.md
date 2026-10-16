@@ -11,7 +11,9 @@ sincronização. Instrumentação opcional e desligada normalmente. Preservar C7
 isolamento de versões, SDK pinado e patches reproduzíveis. Metodologia, limites
 das métricas e roadmap: [Performance](performance.md).
 
-Estado em 2026-10-11. Marcadores usados neste documento:
+Base arquitetural de 2026-10-11, revisada em 2026-10-15. Problemas do SDK
+e contagens antigas são históricos; o lock/patches e [STATUS](../STATUS.md)
+registram as correções e o estado consolidado. Marcadores usados:
 
 - **[fato]** confirmado no código/execução, com referência;
 - **[hipótese]** decisão de projeto ainda não demonstrada;
@@ -49,7 +51,8 @@ compilado por Clang e ligado a um runtime nativo.
 
 Consequência: "compilou" não significa "funciona". Cada título exige análise,
 correções de fronteira de função, implementação de imports ausentes e validação
-de comportamento. Não fazemos afirmações de desempenho: nada foi medido.
+de comportamento. Medições posteriores e seus limites estão em
+[Performance](performance.md); não há ganho global universal demonstrado.
 
 ## 2. Componentes atuais
 
@@ -58,11 +61,11 @@ x360/
 ├── deps.lock.json          revisões fixadas (SDK, LLVM) — fonte única
 ├── CMakeLists.txt          projeto raiz; inclui o SDK via add_subdirectory
 ├── CMakePresets.json       preset win-amd64 (espelha o windows-base do SDK)
-├── external/rexglue-sdk/   submódulo ReXGlue fixado (não editado)
+├── external/rexglue-sdk/   submódulo ReXGlue fixado + patches reproduzíveis
 ├── scripts/                bootstrap (LLVM, submódulos, symlinks), devshell
-├── src/supervisor/         x360n: doctor, identify, run
+├── src/supervisor/         x360n: doctor, identify, run, session
 ├── tests/                  testes do projeto (ver README)
-├── titles/                 configurações por título/versão (vazio por ora)
+├── titles/                 configurações por título/versão e overrides AOT
 ├── docs/                   este documento, dashboard, compatibilidade
 └── .local/                 ignorado pelo git: toolchains, build, inputs, runs
 ```
@@ -115,9 +118,9 @@ sobre dados confiáveis; o nosso verifica limites porque a entrada não é confi
 ```
 arquivos locais (.local/inputs)
  → identificação      x360n identify                      [implementado]
- → análise + geração  rexglue codegen <manifest>          [SDK; sem entrada autorizada ainda]
- → compilação         projeto CMake gerado por rexglue init [SDK; idem]
- → execução           x360n run <exe recompilado>         [implementado; só testado com fixtures]
+ → análise + geração  rexglue codegen <manifest>          [implementado; conteúdo fornecido localmente]
+ → compilação         projeto CMake gerado por rexglue init [implementado]
+ → execução           x360n run <exe recompilado>         [implementado; títulos e fixtures documentados]
  → relatório          .local/runs/<utc>-<label>/report.json [implementado]
 ```
 
@@ -131,11 +134,10 @@ acesso big-endian à memória, `stwbrx` e chamada `bl` entre funções. Isso val
 tradução de instruções e arestas de chamada, **não** carga de XEX, imports,
 threads, VFS ou GPU.
 
-**[hipótese]** M1 exige um XEX autorizado. Alternativas, em ordem:
-1. homebrew com licença que permita uso, fornecido pelo usuário;
-2. gerar um XEX2 mínimo a partir de código nosso (formato sem criptografia e sem
-   compressão). Precisa demonstrar que `XexModule::Load` aceita a imagem; não
-   foi tentado.
+**[fato]** M1 foi demonstrado com o XEX Iruka fornecido localmente.
+A biblioteca atual importa conteúdos e gera projetos AOT genéricos; perfis
+manuais são overrides opcionais. [Iruka](validation-iruka.md),
+[biblioteca e recibos](universal-library.md).
 
 ## 4. Modelo de processos (dashboard ↔ jogos)
 
@@ -171,7 +173,8 @@ A intro só ocorre na entrada inicial. A sessão mantém um frame Win32 e superf
 reais por título; --separate-windows preserva o diagnóstico. Fechar o frame encerra
 a plataforma. GuestExit ainda não prova retorno pedido pelo Guide.
 
-Pendências: Guide original e perfis locais persistentes.
+Atualização: perfis locais persistentes demonstrados no C7.7; Guide/Xbox Home
+no ciclo Forza. Guide completo e saves comerciais continuam pendentes.
 Os user_data_root anteriores foram preservados separadamente (sem migrar saves).
 
 Alternativa registrada, não escolhida: um único processo que carregaria títulos
@@ -189,7 +192,7 @@ A alternativa no mesmo processo não foi implementada; ver `docs/dashboard.md`.
 executável, commit do SDK lido do submódulo e o fixado no lock, commit do
 projeto (nulo enquanto não houver commit), versão do supervisor e configuração.
 
-**[hipótese, a implementar no M1]** A identidade de um título preparado será a
+**[fato, recibos C2]** A identidade de um título preparado inclui a
 tupla (SHA-256 de cada XEX de entrada, versão/base_version/media_id do cabeçalho,
 commit do SDK, versão do LLVM, hash do manifesto e das inclusões `[functions]`).
 Configurações por título ficam em `titles/` e são indexadas pelo SHA-256 do XEX,

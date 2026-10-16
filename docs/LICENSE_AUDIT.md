@@ -12,7 +12,8 @@ autorizada de `v0.1.0-preview.19`. Obrigações Microsoft, GPL/LGPL e direitos s
 originais continuam aplicáveis; a autorização não equivale a parecer jurídico,
 prova de titularidade de terceiros ou licença para redistribuir o SDK completo.
 O mantenedor aprovou BSD-3-Clause e o titular `x360-native`; `LICENSE` contém os
-termos definitivos somente do código próprio. Comparação em `LICENSE_PROPOSAL.md`.
+termos definitivos somente do código próprio. A proposta anterior foi encerrada; use [LICENSE](../LICENSE) como fonte única
+dos termos próprios, preservando os avisos e obrigações de terceiros.
 
 ## Escopo verificável
 

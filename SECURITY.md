@@ -10,7 +10,7 @@ When enabled, use GitHub **Security → Report a vulnerability** on
 [this repository](https://github.com/fabegalo/x360-native/security/advisories/new).
 This opens a private report for the maintainer, not a public issue.
 
-Private vulnerability reporting was **disabled when inspected on 2026-10-13**.
+Private vulnerability reporting was **disabled when inspected on 2026-10-15**.
 If the button is unavailable, open an issue with only the title
 "Request to enable private vulnerability reporting" and no technical details,
 affected component, exploit, logs or attachments. Wait for the maintainer to

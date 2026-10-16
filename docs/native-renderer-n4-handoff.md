@@ -5,8 +5,10 @@ Nota histórica: o bloqueio de cor deste checkpoint foi tratado em
 A integração posterior na `main` foi autorizada pelo mantenedor em 2026-10-15;
 isso não amplia os limites de desempenho ou compatibilidade registrados nessas notas.
 
-Branch local `wip/native-n4-gpu-resident`, sobre `c43d679`. **Não aprovado**:
-regressão de cor na cena 3D. Não mesclar na `main`. Sem push ou Release.
+No checkpoint original, branch `wip/native-n4-gpu-resident` sobre `c43d679`,
+a regressão de cor impedia integração. Essa restrição foi superada por N4.1/N4.2
+e pela [integração de 15/10](integration-2026-10-15.md). Os itens abaixo
+registram o diagnóstico daquele checkpoint; não são a lista atual de pendências.
 
 ## O que mudou
 
@@ -16,7 +18,7 @@ regressão de cor na cena 3D. Não mesclar na `main`. Sem push ou Release.
   rápido sem lock, `RangeWrittenByGpu`, `CopyReadbackToGuest` só em páginas
   ainda válidas e `InvalidateCpuPages` por quadro (`clear_memory_page_state`).
   Adaptado do `SharedMemory` pinado (Xenia, BSD) e de ShiftGlue `1e8968f7`
-  (BSD, Tom Clay). **Pendente:** registrar em `THIRD_PARTY_NOTICES.md`.
+  (BSD, Tom Clay). Atribuição posteriormente registrada em `THIRD_PARTY_NOTICES.md`.
 - `src/native/texture_load.{h,cpp}` (novo): plano de carga na GPU com os shaders
   `texture_load_{8,16,32,64,128}bpb` e `depth_{unorm,float}` do SDK (espelha
   `LoadTextureDataFromResidentMemoryImpl`), conversão CPU movida para

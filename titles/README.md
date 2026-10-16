@@ -10,7 +10,12 @@ projeto gerado por `rexglue init` (v0.10.0) com as adaptações do x360-native
 | `iruka/` | `default.xex` `66ec34f2…cb61e31` (amostra XDK, `rexglue/demo-iruka`) | `docs/validation-iruka.md` |
 | `castle_crashers/` | `default.xex` `825e9c8c…f5d9ad` (XBLA `584108B7`, v0.0.1.3) | `docs/validation-castle-crashers.md` |
 | `motocross_madness/` | `default.xex` `2a8406bc…5dcd` (XBLA `58410B0F`, v0.0.0.3) | `docs/validation-motocross-madness.md` |
+| `forza_horizon/` | `default.xex` `db40df60…9e3987c` (4D5309C9, v0.0.0.10) | `docs/validation-forza-horizon.md` |
+| `dash_6717/` | `dash.xex` `f8a51ea3…cb87d8` (2.0.6717.0; diagnóstico) | `docs/dashboard.md` |
 | `dash_17559/` | `dash.xex` `3ad8f38d…14f927` (dashboard 2.0.17559.0) | `docs/dashboard.md` |
+
+O desktop também gera projetos genéricos em `.local/aot/`; os diretórios aqui
+são perfis manuais opcionais, não requisito para importar novos jogos.
 
 Em cada pasta:
 

@@ -59,7 +59,8 @@ A interface gráfica também importa ISO e pacotes CON/LIVE/PIRS, conforme a aud
 Esse comando extrai a partição de jogo; não converte o título em um alvo executável.
 
 **Copiar ou extrair arquivos não cria suporte ao jogo.** Ainda são necessários
-identificação, perfil em `titles/`, análise, geração AOT, compilação e validação.
+identificação, análise, geração AOT, compilação e validação. A biblioteca gera
+projetos genéricos automaticamente; perfis em `titles/` são overrides opcionais.
 Consulte [Configurações por título](../titles/README.md).
 
 ### Dashboards e módulos do sistema
@@ -76,8 +77,9 @@ O uso experimental de rotinas originais para avatares está documentado em
 [Sistema de avatares](avatar-system.md).
 
 `dashboard/resources/fonts/` é um acervo local, não um pacote global de fontes
-para todas as versões. Compartilhe recursos somente quando sua identidade ou
-compatibilidade estiver demonstrada. Saves e dados de usuário ficam sob
+para todas as versões. Cada versão usa exclusivamente seus recursos originais
+identificados, sem fallback por nome, ordinal ou export para outra versão.
+Saves e dados de usuário ficam sob
 `.local/user/<perfil-de-execução>/`, conforme o manifesto.
 
 ### DLC e atualizações
@@ -129,16 +131,19 @@ com `--dash17559_boot_intro=false`; veja os detalhes em [Dashboard](dashboard.md
 
 ## Testes e diagnóstico
 
-Após um build bem-sucedido, execute o subconjunto pertinente:
+Após um build bem-sucedido, inspecione e execute somente os testes pertinentes.
+`project` e `local.*` incluem testes gráficos; não são seleções padrão para
+edições pequenas. Exemplo focado sem sessão de jogo:
 
 ```powershell
-scripts\devshell.cmd ctest --preset win-amd64-debug -L project
-scripts\devshell.cmd ctest --preset win-amd64-debug -R "local[.]"
+scripts\devshell.cmd ctest --preset win-amd64-debug -N -R "x360n[.]sha256"
+scripts\devshell.cmd ctest --preset win-amd64-debug -R "x360n[.]sha256" --output-on-failure --timeout 30
 ```
 
-Os testes `local.*` dependem dos arquivos de entrada correspondentes. A suíte
-completa pode ser executada com `ctest --preset win-amd64-debug -j 16` pelo mesmo
-`devshell.cmd`; não use binários antigos para validar um build que falhou.
+Os testes `local.*` dependem dos arquivos de entrada correspondentes. Suítes
+completas, testes visuais e sessões longas exigem necessidade e autorização
+prévia; siga [CONTRIBUTING.md](../CONTRIBUTING.md#choose-tests-that-match-the-change).
+Não use binários antigos para validar um build que falhou.
 
 A última suíte completa registrada em 13/10/2026, após C9/C12, executou 1.807 testes:
 **1.802 aprovados, quatro ignorados e uma falha preexistente** em

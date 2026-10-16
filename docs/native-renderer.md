@@ -1,5 +1,10 @@
 # Native renderer — primeiro incremento executável
 
+Histórico N1. Avanços posteriores: [N2](native-renderer-n2.md),
+[N3](native-renderer-n3.md), [N4.1](native-renderer-n4-1.md),
+[N4.2](native-renderer-n4-2.md). Desenvolvimento Native suspenso em 15/10;
+Xenos padrão. Os bloqueios abaixo descrevem o primeiro incremento.
+
 Este documento registra N1. O incremento posterior já demonstrou Home e
 navegação originais: [Native N2, evidências e limites](native-renderer-n2.md).
 

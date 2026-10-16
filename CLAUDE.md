@@ -127,32 +127,19 @@ presente não for exatamente o arquivo listado. Qualquer outra falha é regress�
 
 ## Estrutura
 
-Dashboard atual: `docs/dashboard.md` §0.22. A região experimental `0x8E030000`
-(64 KiB RW) é exclusiva do título 17559, zerada uma vez, desligável por
-`--dash17559_experimental_region=false`; log/relatório dizem que o conteúdo real
-é desconhecido. Patch 0006 implementa idioma configurado e ponteiro de fallback
-UTF-16. Patch 0007 despacha a DPC que deixava comandos gráficos sem envio;
-o contador correto era 0x0B, não zero (a amostra antiga omitia 4 KiB na tradução).
-Os hints setjmp/longjmp do título corrigem o retorno protegido da interface.
-Menu Metro renderiza continuamente; controle e Shift+setas confirmados pelo usuário.
-Fonte original SegoeXbox-Light.xtt agora associada ao perfil 17559. XAM 17559
-foi usado como referência para a rota gameslibrary (launch data + notificação),
-sem carregar código do módulo. My Games exibe Castle Crashers 0.0.1.3 (usuário
-confirmou); patch 0016 e x360n session executam o ciclo real com Castle Crashers. Intro
-original AOT opcional (`--dash17559_boot_intro=true`) tem imagem/som observados
-e retorna à dashboard por export 2(false), preservando o tempo/efeito do original.
-Boot direto continua disponível; a sessão usa intro somente na entrada inicial.
-Ciclo original confirmado: My Games → Castle Crashers → XamLoaderLaunchTitle(NULL,
-0x100) → dashboard, na mesma janela, sem repetir intro (0017–0020). Flags e 1020
-bytes de launch data preservados; contexto Arcade traduzido somente no perfil 17559.
-31/31 sdkcheck e 40/40 x360n passam. Guide e perfis locais seguem pendentes;
-Settings chegou a XamShowGamerCardUI (stub), não à seleção de perfil.
-Algumas páginas de configurações ainda leem 0x1C após XConfig categoria 7.
+Estado funcional consolidado em [STATUS.md](STATUS.md). Evidências por versão
+em [docs/dashboard.md](docs/dashboard.md), especialmente C7.7/C7.8 (§§0.31–0.32),
+e saves em [docs/save-storage.md](docs/save-storage.md). A região experimental
+17559 `0x8E030000` (64 KiB RW) permanece hipótese explícita, exclusiva do título.
+Xenos é padrão; Native está suspenso, experimental e sem aceite de performance.
+O lock contém 76 patches ativos, até 0077 (0073 retirado); não confundir a
+numeração com a quantidade. Resultados históricos de testes ficam nos relatórios,
+sem repetir suítes ou sessões visuais por uma mudança documental.
 
 - `external/rexglue-sdk` — submódulo fixado em `deps.lock.json`. **Não editar à mão.**
   Exceções documentadas: cópias dos symlinks do libmspack (`scripts/materialize-symlinks.ps1`)
   e os patches locais de `patches/rexglue-sdk/` (0001–0002 autorizados em 2026-10-11,
-  0003–0026 sob a autorização de 2026-10-12), aplicados por
+  demais patches documentados individualmente no lock e nos relatórios), aplicados por
   `scripts/apply-sdk-patches.ps1` e verificados pelo CMake no configure e em todo build.
   `src/ui/rex_app.cpp` (patch 0004) é compilado em cada executável: recompile o título.
 - Correções do SDK vão no `CMakeLists.txt` raiz como backport condicionado ao
@@ -164,7 +151,7 @@ Algumas páginas de configurações ainda leem 0x1C após XConfig categoria 7.
   A cópia roda antes do link, também num build com `--target`.
 - O carimbo do codegen não inclui o `rexglue`: depois de mudar o codegen, regenere com
   `rexglue codegen --ignore-stamp` (não `--force`).
-- `src/supervisor` — `x360n` (doctor/identify/run). Não liga o runtime.
+- `src/supervisor` — `x360n` (doctor/identify/run/session). Não liga o runtime.
 - `tests/` — prefixos: `x360n.*`, `x360n.ppc.*`, `sdkcheck.*`, `env.*`, `local.*`.
   Um único label CTest (`project`): listas de labels quebram `catch_discover_tests`.
 - `titles/` — configuração por título/versão, indexada por SHA-256 do XEX.

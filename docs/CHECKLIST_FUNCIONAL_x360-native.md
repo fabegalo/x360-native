@@ -18,16 +18,21 @@ Windows x86-64 é o primeiro alvo funcional relatado, não uma restrição perma
 
 ## Estado atual consolidado
 
+Revisão documental em 15/10/2026. O resumo por título/backend está em
+[STATUS](../STATUS.md) e na [matriz de compatibilidade](compatibility.md).
+Os itens gerais abaixo mantêm seus limites: validação de um par específico
+não aprova todos os jogos, versões ou serviços.
+
 | Área | Último resultado relatado | Limite da evidência |
 |---|---|---|
-| Intro + dashboard 17559 | Animação e áudio originais, conclusão pela exportação 2 e transição para a dashboard; fonte original integrada. | O tempo observado de cerca de 11 segundos não é um temporizador nem um requisito fixo. |
-| My Games | A dashboard chamou `XamContentLaunchImageInternalEx` para `XSYSLAUNCH:\default.xex`. | Comprova a origem do pedido; não aprova enumeração geral, resolução de qualquer título ou o ciclo completo. |
-| Supervisor | Conferiu caminho e hash da recompilação do Castle Crashers, segundo o agente. | Ainda falta explicitar qual hash e a ligação entre conteúdo selecionado, XEX e artefato nativo. |
-| Retorno original | Castle Crashers chamou `XamLoaderLaunchTitle(NULL, 0x100)` e voltou à 17559 sem intro; confirmado pelo usuário e logs (§0.19). | Guide, perfil selecionado e saves não validados. |
-| Motivo de encerramento | Protocolo distingue Dashboard, TitleTerminate, GuestExit e WindowClose; testes de exports e handoff passaram. | Ainda falta testar cada cenário e repetição na interface real; fechar janela não conta como retorno Xbox. |
-| Castle Crashers | Chega ao menu em execução separada; há regressões relatadas sem crash. | Não aprova, por si só, seleção genérica, perfil, saves ou retorno original pela dashboard. |
-| Dashboard 6717 | Perfil separado criado e executado. | Último bloqueio relatado: import XAM `0xAE6`, chamado em `0x9210F1F4`; sem novo resultado visual apresentado. |
-| Perfis locais 17559 | C7.7: criação de dois perfis pela UI original, lista, troca, GamerCard, Sign-out e recuperação após reiniciar. | Um ativo no slot 0; ciclo com jogos, saves/conquistas e usuários simultâneos não aprovados por este resultado. |
+| Intro + dashboard 17559 | Animação/áudio originais, fonte correspondente, Home/My Games e retorno sem repetir intro | Sistema ainda parcial; não é boot do firmware inteiro. |
+| My Games e supervisor | Ciclos Castle e Forza pela interface original, identidade/recibos e launch data verificados | Preparação genérica não garante jogabilidade; X2 isolado não recertifica o gate de produção. |
+| Retorno e Guide | Castle via Return to Arcade; Forza via Guide/Xbox Home; mesma janela/perfil | Não aprova Guide completo nem todas as combinações. |
+| Motivo de encerramento | Dashboard, TitleTerminate, GuestExit e WindowClose distintos | Fechar janela não conta como retorno Xbox. |
+| Castle Crashers | Menu, entrada e ciclo original; cenas observadas em Native N3 trial | Save/load comercial e campanha pendentes. |
+| Dashboard 6717 | Build e navegação histórica; diagnóstico somente | Fonte correspondente ausente e smoke posterior com crash. |
+| Perfis C7 | Criação, troca, GamerCard, Sign-out e recuperação de dois perfis pela UI original | Um ativo no slot 0; usuários simultâneos/conquistas não aprovados. |
+| Saves C8 | Persistência/flush e isolamento por XUID/Title ID em dois processos via XAM/VFS | Contratos testados; não save/load de progresso comercial. |
 
 **Critério de fidelidade:** o código original da dashboard/jogo deve originar os pedidos, e o ambiente deve respeitar sua identidade, seus argumentos e seus efeitos. O supervisor pode ser uma implementação interna no PC; clique interceptado, jogo fixo e fechamento de janela não substituem os pedidos originais. Usar um ou mais processos, isoladamente, não comprova nem invalida essa fidelidade.
 

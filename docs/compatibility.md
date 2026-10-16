@@ -1,101 +1,48 @@
 # Matriz de resultados
 
-## Native D3D12 — N3, 2026-10-14
+Consolidada em **2026-10-15**. Resultados por conteúdo e backend; não há título
+certificado como plenamente funcional. Importar, gerar e compilar não comprovam
+jogabilidade. Os links preservam hashes completos, runs, testes e falhas anteriores.
 
-Resultado separado do Xenos: Retail 17559 (boot direto) → My Games → Castle
-Crashers 584108B7/0.0.1.3 → retorno original à dashboard demonstrado. Imagens
-originais, seleção de personagem/cena/pausa e entrada manual confirmada pelo
-mantenedor, no modo trial do conteúdo local. Mesma janela, perfil e Native
-global; Castle exit 0, sem timeout. Desempenho ainda lento, campanha e save/load
-não certificados. Forza foi lançado pela My Games; scanout/amostragem RGB10
-corrigidos, mas o próximo draw PointList ainda é recusado com exit 78, sem
-gameplay. Não herda a compatibilidade Xenos. Vulkan indisponível.
-[Evidências e limites](native-renderer-n3.md).
+| Alvo / versão | Estado demonstrado em Windows x64 | Limites / evidência |
+|---|---|---|
+| Dashboard Retail 17559 / Xenos | Intro com áudio, Home/textos, navegação, My Games, perfis locais e retorno original de Castle/Forza | Serviços de sistema ainda parciais; um usuário ativo no slot 0. [Dashboard](dashboard.md), [Forza](validation-forza-horizon.md) |
+| Dashboard Retail 6717 | Compilada; blades/navegação observadas historicamente | Fonte `XenonJKLatin.xtt` correspondente ausente; smoke posterior com acesso nulo. Somente diagnóstico, sem sessão guiada. [Auditoria](PROJECT_AUDIT.md) |
+| Iruka / Dolphin, XEX `66ec34f2…cb61e31` | Renderização/animação; regressão L1–L5 | Entrada, áudio, execução longa e encerramento normal não validados. [Iruka](validation-iruka.md) |
+| Castle Crashers 584108B7 / 0.0.1.3 | Menu, entrada e ciclo original 17559 ↔ jogo; cenas observadas no trial Native N3 | Sem campanha/save/load comercial ou licença completa certificados. [Castle](validation-castle-crashers.md), [N3](native-renderer-n3.md) |
+| Motocross Madness 58410B0F / 0.0.0.3 | Tutorial com movimento e objetivos, serviço opt-in de avatares; integrado na main | Chão preto e piloto deformado; corrida completa/save/load não validados. [Avatares §15](avatar-system.md#15-integração-na-main-2026-10-13) |
+| Forza Horizon 4D5309C9 / 0.0.0.10 / Xenos | My Games → condução com entrada/áudio → Guide/Xbox Home → 17559, mesma janela/perfil | Ciclo com recibos aprovado em 14/10; X2 em harness isolado, gate de produção não recertificado e navegação pós-retorno inconclusiva. Campanha/saves pendentes. [Forza](validation-forza-horizon.md), [X2](xenos-fetch-predication.md) |
+| Charlie Murder 58410B83 / 0.0.0.2 | Importação LIVE, AOT compilado e lançamento pela My Games | Para na função AOT ausente `0x82163C60`; não jogável. [Biblioteca](universal-library.md) |
 
-## Universal Library — preview.20 candidate
+## Native D3D12
 
-Import capability is separate from execution compatibility. Valid ISO/GDFX,
-CON/LIVE/PIRS and extracted game folders can be catalogued without an AOT recipe.
-Unknown names/versions are left unknown. Preparing an imported game automatically
-generates its project and attempts ReXGlue codegen and compilation; manual title
-profiles are optional compatibility overrides. Only exact, verified preparations are
-eligible for original My Games; there is no alternative game launcher.
+Backend experimental separado, **desenvolvimento suspenso**. Retail 17559 em
+boot direto → Castle trial → retorno demonstrado em [N3](native-renderer-n3.md).
+Forza passou do bloqueio PointList; [N4.1](native-renderer-n4-1.md) corrigiu cores
+e [N4.2](native-renderer-n4-2.md) chegou à condução, com entrada confirmada.
+Desempenho não aprovado, hitches e `EVENT_WRITE_ZPD` (0x5B) não implementado.
+Vulkan indisponível. Compatibilidade e desempenho Xenos não são herdados.
 
-| Content tested | Title ID / version | Desktop import | AOT execution status |
-|---|---|---|---|
-| Castle Crashers LIVE and extracted folder | 584108B7 / 0.0.1.3 | Persisted; duplicate content reused | Existing experimental support retained |
-| Charlie Murder LIVE | 58410B83 / 0.0.0.2 | Persisted with original package name | Automatic codegen/build and original My Games launch verified; runtime stops at missing AOT function `0x82163C60`; not playable |
-| Forza Horizon ISO | 4D5309C9 / 0.0.0.10 | Persisted; verified extraction reused | Exact AOT profile builds; native fiber bindings fix connected-profile crash. Initial driving scene, HUD, traffic and routed accelerator/steering observed. My Games launch remains blocked; save/load and sustained gameplay unverified. See [Forza validation](validation-forza-horizon.md). |
+## Importação, perfis e armazenamento
 
-Evidence and scope: [Universal Library](universal-library.md). The historical
-execution results below are retained; cataloguing a title does not advance its
-gameplay or save/load stage.
+ISO/GDFX, CON/LIVE/PIRS e pastas extraídas podem entrar no catálogo sem perfil
+manual. A preparação genérica tenta codegen/build com o SDK pinado; apenas
+artefatos verificados entram na My Games. Versões e inventários permanecem
+isolados. [Biblioteca universal](universal-library.md).
 
-Etapas: **análise → geração → compilação → inicialização → menu → gameplay →
-save/load → conclusão**. Valores: `ok` (demonstrado pelo teste citado),
-`falha`, `—` (não se aplica ao tipo de alvo), `não testado`.
-Um título só avança de etapa com evidência registrada; "compilou" não implica
-"inicia", e "inicia" não implica "jogável".
+C7 demonstrou criação, seleção, troca, Sign-out e persistência de dois perfis
+locais, um ativo no slot 0. C8 demonstrou saves por XUID/Title ID, flush e
+recuperação entre processos via XAM/VFS. São contratos testados, **não aceite
+de save/load comercial**. [C7](dashboard.md), [C8](save-storage.md).
 
-Ambiente de todas as linhas abaixo: Windows 11 Pro 10.0.26300, AMD Ryzen 7
-5700X3D, 40 GB RAM, RTX 4070; LLVM/Clang 22.1.8 + MSVC 14.44 (VS Build Tools
-17.14.41), Windows SDK 10.0.26100; configuração Debug.
-Revisão do projeto: commits locais de 2026-10-12; SDK `f5337cdc` (v0.10.0) com os
-patches locais 0001–0010 (`patches/rexglue-sdk/`).
-Títulos compilados em `RelWithDebInfo` (ver `docs/validation-iruka.md`).
+## Referências de validação
 
-## Títulos e amostras
+As observações históricas usam o SDK `f5337cdc` e o conjunto de patches indicado
+em cada relatório; não representar resultados antigos como execução do lock atual.
+Integração da main: [22 testes focados e build Debug](integration-2026-10-15.md).
+Suíte completa de 13/10: 1.802/1.807 aprovados, quatro skips e uma falha conhecida,
+sem reexecução nesta consolidação. [Auditoria E11](PROJECT_AUDIT.md#e11-c9c12--ambiente-dos-testes-e-sessões-contínuas--13102026).
 
-| Alvo | Identidade | Análise | Geração | Compilação | Inicialização | Menu | Gameplay | Save/load | Conclusão | Teste | Limitações |
-|---|---|---|---|---|---|---|---|---|---|---|---|
-| Amostra XDK "Dolphin" (`rexglue/demo-iruka@4d81580`) | `default.xex` SHA-256 `66ec34f2…cb61e31`, 2 658 304 bytes; sem title id | ok com os ajustes da demo (`titles/iruka/analysis/iruka.toml`); sem eles, falha em execução | ok (77 arquivos, 5222 funções, determinística) | ok com backport `b5e0cf8` | ok: renderiza e anima por 30–40 s sem crash | — (sem menu) | — (não interativa) | — | — | `docs/validation-iruka.md`; runs `20261011T070446Z`, `20261011T070909Z` | entrada, áudio, encerramento normal, execução longa e Release não validados |
-| Castle Crashers (XBLA, `584108B7`, v0.0.1.3) — experimental | `default.xex` SHA-256 `825e9c8c…f5d9ad` (pacote LIVE `ed7b65a8…c31d41e74`) | ok com 3 ajustes (`titles/castle_crashers/analysis/castle_crashers.toml`) | ok (41 arquivos, 3714 funções) | ok | ok: 60 s sem falha, 0 stubs | ok: menu principal renderizado (captura); navegação por teclado e controle **relatada pelo usuário** | **relatado pelo usuário** (teclado e controle); não observado por nós | não testado | não testado | `docs/validation-castle-crashers.md`; run `20261011T171213Z-cc-run-2` | provável modo trial (`license_mask` 0); 2 shaders `.xpu` ausentes no pacote; sem save/load, Live fora do escopo |
-| Motocross Madness (XBLA, `58410B0F`) — worktree isolada `x360-avatars` | `default.xex` SHA-256 `2a8406bc…5dcd`; XAM original 17559 | ok | ok | ok, RelWithDebInfo + patch 0036 | ok com serviço opt-in validando catálogo/assembly | não validado separadamente | tutorial observado: 88 MPH, 748 pontos, objetivos avançando | não testado | não testado | `docs/avatar-system.md` §14; run `20261013T030314Z-mm-avatar-menu` | chão preto, piloto deformado; sem aprovação visual; main não integrada |
-
-## Dashboard
-
-Estado atual (§0.13–0.14): 17559 usa a fonte original e a intro AOT original,
-com som/imagem confirmados e retorno natural à dashboard em cerca de 11 s.
-My Games recebe a URI expandida e abre uma tela sem conteúdo; a enumeração
-de jogos ainda não foi observada e o ciclo com Castle Crashers não ocorreu.
-23/23 sdkcheck, iruka L1–L5 e execução separada do Castle Crashers por 45 s
-validaram esse incremento (duas chamadas ao stub AchievementsUI no jogo).
-Retail 6717 tem perfil separado: apresenta quadros, troca de blade e move o
-destaque por entrada roteada (run `20261012T054645Z-dash6717-input`); sem texto
-(`XenonJKLatin.xtt` da 6717 ausente); lançamento não testado. `docs/dashboard.md` §0.15.
-
-Os parágrafos seguintes preservam os resultados históricos anteriores.
-
-Atualização 2026-10-12: **primeiro quadro real renderizado**, com blocos e ícones,
-e mudança de painel durante entrada (`20261012T030938Z-dash-jmp-fixed`). O patch
-0007 executa o DPC que libera novas submissões; a câmera retorna erro explícito
-de indisponibilidade e os endereços de setjmp/longjmp foram configurados. A
-espera anterior lia conclusão `0x0B` para alvo `0x0D`; zero era erro da sonda
-externa, corrigido. Nenhum contador foi forçado. Ver `docs/dashboard.md` §0.11.
-
-Incremento de navegação (§0.12): textos confirmados pelo usuário usando a fonte
-alternativa original; controle e Shift+setas respondem, menu do sistema abre.
-Fila MNK e ABI de data/hora corrigidos; strings comuns ausentes agora retornam
-nulo. My Games emite `gameslibrary:_RootTitle=My Games;`, mas XamLaunchURI não
-tem roteador e retorna E_NOTIMPL. Biblioteca e ciclo com Castle Crashers não
-funcionam. Algumas páginas do sistema ainda leem 0x1C após XConfig categoria 7.
-`media:\SegoeXbox-Light.xtt` continua ausente; hipótese de região de 64 KiB
-zerada inalterada. Validação: 22/22 sdkcheck, iruka L1–L5, Castle Crashers com
-menu principal observado em 45 s; este último foi executado separadamente.
-
-A linha abaixo preserva o resultado histórico anterior a essas correções:
-
-| Versão | Identidade | Análise | Geração | Compilação | Inicialização | Teste | Limitações |
-|---|---|---|---|---|---|---|---|
-| 2.0.17559.0 (Metro), `FFFE07D1` | `dash.xex` SHA-256 `3ad8f38d…14f927`, 5 971 968 bytes (`dashbigger.xex` `fc4ad906…ebc8c2` tem a mesma imagem carregada) | ok com 30 entradas conferidas uma a uma e 1 tabela de saltos (`titles/dash_17559/analysis/dash_17559.toml`) + 515 inícios só por ponteiro classificados por script (`dash_17559_pointer_targets.toml`) | ok (39 141 funções; 0 sobreposições `.pdata`; sem `--force`) | ok; 12 armadilhas e `XUsbcamGetState` implementado no título; exe `cec26d64…40bc12` | **parcial**: com os patches 0001–0005, 39 141 funções registradas e **o código executa** a partir de `xstart` (áudio, idioma, fontes, perfil, abre `shrdres.xzp`); para ~2 s depois lendo a página de sistema fixa `0x8E038630`, não mapeada (conteúdo desconhecido). Nenhum quadro apresentado | `docs/dashboard.md` §0.8; runs `…dash17559-codegen-10`, `20261012T012216Z-dash17559-run-10`, `…run-9-crashstack` | 28 stubs chamados (não definem r3); `DASHUSER:` ausente; menu, navegação, lançar jogo: não testados |
-
-## Programas de teste sem conteúdo proprietário
-
-Não são jogos. Validam o caminho instrução→C++→nativo, não o sistema.
-
-| Alvo | Identidade | Análise | Geração | Compilação | Execução | Teste | Limitações |
-|---|---|---|---|---|---|---|---|
-| ReXGlue `tests/ppc` (166 arquivos .s) | fontes do SDK em `f5337cdc` | ok | ok | ok | ok: 1458/1458 casos | `ctest -L ppc` | binário bruto em 0x82010000, sem XEX, imports, threads, VFS, GPU |
-| x360n `tests/ppc_smoke/asm/x360n_smoke.s` | `.bin` SHA-256 `8eb71d00…5219a` (120 bytes) | ok | ok (5 funções, 2 `bl` resolvidos) | ok | ok: 4/4 casos, 12 asserções; via `x360n run`, saída 0, 0 linhas STUB | `ctest -R "x360n[.]ppc"` | idem; o relatório da execução guarda o SHA-256 do executável testado |
-
-O SHA-256 do `.bin` foi conferido com `sha256sum` e `Get-FileHash`.
+Testes PPC sintéticos do SDK e do projeto verificam tradução/execução de
+instruções, não compatibilidade de jogos, XEX ou serviços de sistema. Os hashes,
+comandos e resultados de cada campanha ficam nos relatórios correspondentes.

@@ -11,7 +11,8 @@ contínuas, priorizadas por evidência.
 O desenvolvimento Native está suspenso por decisão do mantenedor em 2026-10-15.
 A prioridade atual é fortalecer o Xenos existente, sem iniciar trabalho Native
 ou Vulkan. A investigação de resolves está em
-[Xenos: resolves vazios](xenos-empty-resolves.md).
+[Xenos: resolves vazios](xenos-empty-resolves.md) e
+[X2: vertex fetch predicado](xenos-fetch-predication.md).
 
 Histórico: Native foi a prioridade gráfica iniciada em 2026-10-14: primeiro scanout D3D12
 executado, com fronteira própria para Vulkan futuro e Xenos mantido como padrão.
