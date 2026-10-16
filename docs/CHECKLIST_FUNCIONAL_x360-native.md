@@ -73,8 +73,8 @@ Os itens gerais abaixo continuam pendentes quando a evidência cobre só este pa
 
 - [ ] Navegar pelos menus e painéis locais da dashboard com controle, incluindo confirmar e voltar.
 - [ ] Exibir textos, ícones, fontes, transições e animações corretamente, não apenas uma imagem estática.
-- [ ] Abrir e fechar o Guide original na dashboard.
-- [ ] Abrir e fechar o Guide original durante o jogo, permitindo acionar o pedido de retorno.
+- [x] Abrir e fechar o Guide original na dashboard. Retail 17559, Windows x64/Xenos, 16/10: abas, B, reabertura, botão Guide; [relatório](guide-composition-2026-10-16.md).
+- [x] Abrir e fechar o Guide original durante o jogo, permitindo acionar o pedido de retorno. Forza (Xbox Home → handoff Dashboard) e Castle Crashers, Windows x64/Xenos, 16/10; outros jogos não verificados; [relatório](guide-composition-2026-10-16.md).
 - [ ] Direcionar a entrada para a interface ativa, sem acionar simultaneamente o jogo por trás do Guide.
 - [ ] Exibir e utilizar o teclado virtual original quando solicitado.
 - [ ] Mostrar diálogos reais de confirmação, erros e notificações.

@@ -2,6 +2,11 @@
 
 Investigação e execuções locais de 15–16/10/2026, Windows x64/Xenos.
 
+> Atualização de 16/10: a composição universal foi implementada pelo buffer de
+> sistema original; ver [relatório de 16/10](guide-composition-2026-10-16.md).
+> As constatações abaixo descrevem o estado anterior.
+
+
 O objetivo de universalizar o Guide **não foi concluído**. O host continua
 dependente do ponto de desenho da dashboard e dos hooks de resolve do Forza.
 Não foi implementado um compositor genérico no runtime/Xenos. Não há aceite

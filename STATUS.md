@@ -9,8 +9,8 @@ etapa histórica não certificam automaticamente o build atual nem outros títul
 
 Windows x64/D3D12 é o ambiente demonstrado. Linux, macOS, ARM64 e Windows limpo
 continuam sem aceite funcional completo. ReXGlue v0.10.0 permanece fixado em
-`f5337cdc947ff6d4c4196737e2c807a48f2a1fc2`, LLVM 22.1.8, **76 patches ativos**
-no [lock](deps.lock.json); numeração até 0077, com 0073 retirado.
+`f5337cdc947ff6d4c4196737e2c807a48f2a1fc2`, LLVM 22.1.8, **77 patches ativos**
+no [lock](deps.lock.json); numeração até 0078, com 0073 retirado.
 O submódulo modificado pelos patches/materialização do libmspack é esperado.
 Nunca substituir módulos ou fontes originais entre versões de dashboard.
 
@@ -32,10 +32,14 @@ Nunca substituir módulos ou fontes originais entre versões de dashboard.
 ## Renderização e performance
 
 **Xenos é o padrão; Native está suspenso por decisão do mantenedor.**
-O Guide universal continua pendente: a investigação de 15/10 confirmou a falta
-de composição de sistema e preservou os hooks existentes. Correções de contexto,
-fechamento e inicialização original, com capturas e falhas, estão no
-[relatório do Guide](docs/guide-composition-2026-10-15.md).
+O Guide original 17559 é composto pelo buffer de comandos de sistema da própria
+XAM (patch 0078), executado no `VdSwap` de qualquer título, sem hooks por jogo e
+sem compartilhar o dispositivo D3D do título. Em 16/10 abriu, navegou e fechou
+na dashboard, no Forza (com Xbox Home → handoff Dashboard) e no Castle Crashers,
+com o título escurecido atrás e seguindo após o fechamento; Guide → Perfil → B
+volta ao Guide. Dados de perfil, entrada do jogo durante o Guide, Vulkan e outros
+títulos não verificados: [relatório de 16/10](docs/guide-composition-2026-10-16.md)
+(histórico em [15/10](docs/guide-composition-2026-10-15.md)).
 Patches 0076/0077 corrigem resolves vazios e fetches comprovadamente inativos,
 com 204 e 2.328 checks sintéticos respectivamente. Forza chegou à condução sem
 os erros diagnosticados; isso não estabelece ganho global de FPS.
