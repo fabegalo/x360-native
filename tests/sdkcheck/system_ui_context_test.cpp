@@ -2,7 +2,9 @@
 #include <rex/kernel/init.h>
 #include <rex/runtime.h>
 #include "../../titles/common/system_ui_context.h"
+#include "../../titles/common/system_ui_execution.h"
 #include <atomic>
+#include <future>
 #include <stdexcept>
 
 TEST_CASE("System UI borrows each presenting thread and restores its context on unwind",
@@ -60,4 +62,52 @@ TEST_CASE("System UI borrows each presenting thread and restores its context on 
     REQUIRE(thread->Wait(0, 0, 0, &timeout) == 0);
     CHECK(passed.load() == i + 1);
   }
+}
+
+TEST_CASE("System UI teardown joins the Xbox Home caller after foreground exit",
+          "[sdk][guide-context][guide-exit]") {
+  rex::Runtime runtime(std::filesystem::temp_directory_path());
+  rex::RuntimeConfig config{};
+  config.tool_mode = true;
+  config.kernel_init = rex::kernel::InitializeKernel;
+  REQUIRE(runtime.Setup(std::move(config)) == 0);
+  x360n::SystemUiExecution execution;
+  std::promise<bool> entered;
+  std::promise<void> allow_exit;
+  auto release = allow_exit.get_future();
+  auto caller = rex::system::object_ref<rex::system::XHostThread>(
+      new rex::system::XHostThread(runtime.kernel_state(), 128 * 1024, 0, [&] {
+        x360n::SystemUiExecution::Scope frame(execution);
+        entered.set_value(bool(frame));
+        release.wait();
+        // Xbox Home retires this native thread without returning through the
+        // host frame. The foreground thread's earlier exit is not sufficient.
+        rex::system::XThread::GetCurrentThread()->Terminate(0);
+        return 0;
+      }));
+  REQUIRE(caller->Create() == 0);
+  CHECK(entered.get_future().get());
+  std::atomic<bool> overlapping_frame{true};
+  auto other = rex::system::object_ref<rex::system::XHostThread>(
+      new rex::system::XHostThread(runtime.kernel_state(), 128 * 1024, 0, [&] {
+        x360n::SystemUiExecution::Scope frame(execution);
+        overlapping_frame = bool(frame);
+        return 0;
+      }));
+  const auto created = other->Create();
+  CHECK(created == 0);
+  uint64_t timeout = uint64_t(-50'000'000ll);
+  if (created == 0) CHECK(other->Wait(0, 0, 0, &timeout) == 0);
+  CHECK_FALSE(overlapping_frame.load());
+  std::promise<void> waiting;
+  auto teardown = std::async(std::launch::async, [&] {
+    waiting.set_value();
+    execution.WaitForCallerExit();
+  });
+  waiting.get_future().wait();
+  CHECK(teardown.wait_for(std::chrono::milliseconds(50)) == std::future_status::timeout);
+  allow_exit.set_value();
+  CHECK(teardown.wait_for(std::chrono::seconds(5)) == std::future_status::ready);
+  teardown.get();
+  REQUIRE(caller->Wait(0, 0, 0, &timeout) == 0);
 }

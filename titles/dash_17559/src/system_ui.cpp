@@ -1,6 +1,7 @@
 #include "system_ui.h"
 #include "system_ui_request.h"
 #include "../../common/system_ui_context.h"
+#include "../../common/system_ui_execution.h"
 #include <rex/runtime.h>
 #include <rex/logging.h>
 #include <rex/cvar.h>
@@ -34,6 +35,7 @@ std::function<void()> request_signin;
 std::function<void()> pending_ui;
 std::function<void()> poll_guide;
 const SystemUiApplication* active_application = nullptr;
+x360n::SystemUiExecution ui_execution;
 thread_local bool in_dashboard_frame = false;
 std::string system_drive = "game:";
 std::string UiPath(const char* path) {
@@ -41,7 +43,14 @@ std::string UiPath(const char* path) {
 }
 }
 void ReleaseSystemUiHost() {
-  // Called after the dashboard guest thread has exited, before runtime teardown.
+  // The main thread may have exited while a different presenting thread is
+  // still terminating the title. Do not destroy its callback or the runtime.
+  auto xam = rex::Runtime::instance()->kernel_state()
+      ->GetKernelModule<rex::kernel::xam::XamModule>("xam.xex");
+  using Exit = rex::kernel::xam::XamModule::LoaderData::ExitRequest;
+  const auto exit = xam->loader_data().exit_request;
+  if (exit == Exit::Dashboard || exit == Exit::Terminate)
+    ui_execution.WaitForCallerExit();
   draw_ui = {};
   request_signin = {};
   pending_ui = {};
@@ -478,6 +487,8 @@ void InstallSystemUi(rex::Runtime& runtime, std::string drive, std::string nativ
 }
 
 void dash17559::DrawSystemUiFrame(PPCContext& ctx) {
+  x360n::SystemUiExecution::Scope execution(dash17559::ui_execution);
+  if (!execution) return;
   // The original renderer also reaches this context through ThreadState. Keep
   // the frame bridge free of REX_FUNC's restrict qualifier and restore even
   // when guest execution unwinds (for example an Xbox Home request).
