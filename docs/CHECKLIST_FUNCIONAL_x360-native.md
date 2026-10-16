@@ -161,6 +161,15 @@ caracteres escolhidos, criando asPlayer1/qwPlayer1; GamerCards, Sign-out e
 troca no mesmo processo demonstrados. Regra permanente em AGENTS.md/CLAUDE.md;
 mapeamento e evidências em dashboard §0.32. Não amplia o aceite de jogos.
 
+Incremento Perfil do Guide (2026-10-16, patch 0080): GamerCard original do Guide
+17559 com dados das contas locais, Windows x64/Xenos.
+
+- [x] Mostrar a contagem real de jogos da conta conectada no Perfil do Guide, na dashboard, no Forza e no Castle Crashers.
+- [x] Recuperar essa contagem após reiniciar e trocá-la com o perfil no mesmo processo (Player1 1, Player2 0).
+- [ ] Gamerpic, gamerscore, conquistas e símbolo de gamerscore: sem dados ou recurso local; ver [relatório](guide-composition-2026-10-16.md).
+
+Não amplia o aceite de conquistas por usuário nem de outros jogos.
+
 ## 4. Biblioteca e My Games — P0
 
 - [x] Fazer o pedido de lançamento partir de My Games original na 17559: chamada relatada a `XamContentLaunchImageInternalEx` para `XSYSLAUNCH:\default.xex`.

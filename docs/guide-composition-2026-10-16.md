@@ -126,11 +126,66 @@ Ao vivo, no Castle Crashers, o título só lê `XamInputGetState`:
   execuções. A causa não foi investigada e o caso continua registrado como
   falha.
 
+## Perfil do Guide com dados locais (patch 0080)
+
+A GamerCard original (`XuiGamerCard`, `xam_ui.xex` 17559) mostrava o perfil
+sem números. Quatro defeitos, nesta ordem, impediam os dados:
+
+1. **Leitura de imagem síncrona.** O pedido de tile chama a XAM interna
+   (`81670C00`/`81670B68`), que falhava antes de qualquer outro pedido. Agora
+   esses pontos usam `XamReadTileEx`/`XamReadTile` do SDK, que conclui o
+   overlapped com `ERROR_NOT_FOUND` (contas locais não têm gamerpic) e deixa a
+   GamerCard seguir.
+2. **ABI de `XamUserReadProfileSettingsEx`.** A XAM 17559 passa flags em r9 e o
+   ponteiro do tamanho em r10; o SDK lia o tamanho em r9 e devolvia
+   `E_INVALIDARG`. Corrigido no patch 0080, com teste das duas ABIs.
+3. **realloc privado da XAM (`816E6BB8`).** Com ponteiro nulo ele chegava ao
+   heap da XAM, que este host não inicia, e a lista de pedidos da GamerCard não
+   crescia (fila vazia, nenhum pedido consultado). Blocos virtuais agora usam o
+   heap do SDK, como o free `816E6B10` já fazia.
+4. **malloc privado da XAM (`816E6B68`, 14 chamadores).** Mesmo heap ausente.
+   A fonte de dados recebia os valores (rastreio temporário: propriedade 22 =
+   1), mas não copiava a lista de ouvintes e a mudança não chegava à cena: a
+   tela continuava em "Games 0". Ligado ao heap do SDK, par do free acima.
+
+Os três números vêm de `XamUserReadProfileSettings` (CRED, TITLES_PLAYED,
+ACHIEVEMENTS_EARNED), sem valor inventado:
+
+- **Jogos:** contagem de títulos da conta conectada, gravada em
+  `<perfis>/<XUID>/titles-played.dat` quando um jogo inicia com ela conectada.
+  A dashboard e outros títulos de sistema (`FFFExxxx`) não contam.
+- **Gamerscore e conquistas:** 0. Não há registro de desbloqueios por conta.
+  O enumerador interno de conquistas (`81670190`) continua falhando: o do SDK
+  ignora o Title ID pedido e devolveria as conquistas do executável atual, o
+  que mostraria dados de outro título como se fossem do perfil.
+- **Gamerpic:** nenhuma. O título padrão da chave (`FFFE07D1`) só contém a
+  imagem `0x8000`; não há imagem original de gamerpic disponível para uma conta
+  local. A área fica vazia, como numa conta sem imagem.
+
+Execuções em `.local/validation/profile/`, Windows x64/Xenos, mesmo build,
+diagnóstico sem instrumentação temporária. Capturas conferidas:
+
+| Diretório | Resultado |
+|---|---|
+| `final-1-forza` | Forza, perfil "Forza": Guide → Perfil mostra Games 1; B volta ao Guide; Guide fecha e o jogo segue. Log: `title 4D5309C9 played`. |
+| `final-2b-castle` | Castle Crashers com o perfil anterior: Games 2; B e fechamento devolvem o menu do jogo. Log: `title 584108B7 played`. |
+| `final-3-dash` | Dashboard reiniciada com esse perfil: Games 2 (persistência; a dashboard não conta). Arquivo com exatamente `4D5309C9` e `584108B7`. Guide → Perfil → B → Guide → fechar. |
+| `switch-1-castle` | Castle com dois perfis (Player1 conectado): registra o jogo só para Player1. Cache frio, o Guide abriu tarde; usado apenas para gerar o dado. |
+| `switch-6-dash` | Mesmo processo: Player1 com Games 1 → Sign Out/Yes → Sign In → Player2 → diálogo original de privacidade (No) → Perfil do Player2 com Games 0 → B → Guide. |
+
+`final-2-castle` falhou no runner: a captura passou de 5 s e o encerramento do
+auxiliar disputou com o `taskkill` (o título saiu com código 0). Repetido em
+`final-2b-castle`. Testes: `x360n_sdk_runtime_checks` com os filtros de perfil,
+Guide e entrada, 39 casos/914 asserções (`final-tests.log`).
+
 ## Ainda falha ou não foi verificado
 
-- Perfil: gamerpic e números de jogos/gamerscore/conquistas não aparecem; o log
-  registra configurações de perfil não implementadas. O problema está nos dados
-  do perfil, não na composição.
+- Perfil: gamerpic ausente (sem imagem original para conta local); gamerscore
+  e conquistas ficam 0 até existir registro de desbloqueios por conta; os
+  troféus bloqueados são o estado padrão da cena. O símbolo de gamerscore
+  (`U+E00A`) aparece como retângulo: não existe nas fontes XenonJKLatin,
+  XenonCLatin e XenonSCLatin disponíveis. Contagem de jogos não verificada em
+  jogos iniciados fora deste fluxo (sem `--x360n_profile_root`).
 - Entre um app e o seguinte (Guide → Perfil), o quadro do título aparece sem
   escurecimento durante um swap, porque o descritor vazio é publicado ao fechar.
 - Tampouco foram verificados animações de fade quadro a quadro, outros idiomas,
