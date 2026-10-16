@@ -18,6 +18,10 @@ BRIDGE_XAM_SERVICE(816DD118, XamUserGetSigninState)
 BRIDGE_XAM_SERVICE(816DDB20, XamUserGetSigninInfo)
 BRIDGE_XAM_SERVICE(816B1F28, XamUserReadProfileSettings)
 BRIDGE_XAM_SERVICE(816B16A8, XamUserReadProfileSettingsEx)
+// Tile reads complete asynchronously in XAM; the gamercard keeps loading its
+// statistics when a picture is unavailable.
+BRIDGE_XAM_SERVICE(81670C00, XamReadTileEx)
+BRIDGE_XAM_SERVICE(81670B68, XamReadTile)
 #undef BRIDGE_XAM_SERVICE
 
 // The original HUD polls the system input queue, rather than the suspended
@@ -108,6 +112,24 @@ extern "C" REX_FUNC(sub_816E6AB0) {
   if (ctx.r3.u32 >= 0xA0000000u) __imp__sub_816E6AB0(ctx, base);
   else __imp__XMemFree(ctx, base);
 }
+// XAM realloc 816E6BB8(pointer, size). A null pointer reached XAM's own heap,
+// which this host never starts, so XuiGamerCard could not grow its request
+// list. Virtual blocks use the bridged heap above; physical blocks keep the
+// original path.
+extern "C" REX_FUNC(__imp__sub_816E6BB8);
+extern "C" REX_FUNC(sub_816E6BB8) {
+  const auto old = ctx.r3.u32, requested = ctx.r4.u32;
+  if (old >= 0xA0000000u) { __imp__sub_816E6BB8(ctx, base); return; }
+  auto* memory = REX_KERNEL_MEMORY();
+  const auto next = requested ? memory->SystemHeapAlloc(requested, 0x20) : 0;
+  if ((next || !requested) && old) {
+    uint32_t size = 0;
+    memory->LookupHeap(old)->QuerySize(old, &size);
+    if (next) std::memcpy(base + next, base + old, std::min(size, requested));
+    memory->SystemHeapFree(old);
+  }
+  ctx.r3.u64 = next;
+}
 
 extern "C" REX_FUNC(__imp__sub_817B8A58);
 extern "C" REX_FUNC(sub_817B8A58) {
@@ -154,6 +176,12 @@ extern "C" REX_FUNC(sub_817DA648) {
 // HUD control constructors use XAM's private C++ allocator (tag 0x500).
 // Pair it with its original delete boundary, backed by the SDK guest heap.
 extern "C" REX_FUNC(sub_816E6B18) {
+  ctx.r3.u64 = REX_KERNEL_MEMORY()->SystemHeapAlloc(std::max(1u, ctx.r3.u32));
+}
+// Its malloc 816E6B68 (flags 0x500) reached the same unstarted XAM heap and
+// returned null, so XUI data sources could not copy their listener lists and
+// property changes were never delivered. It pairs with the delete below.
+extern "C" REX_FUNC(sub_816E6B68) {
   ctx.r3.u64 = REX_KERNEL_MEMORY()->SystemHeapAlloc(std::max(1u, ctx.r3.u32));
 }
 extern "C" REX_FUNC(sub_816E6B10) {
