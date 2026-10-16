@@ -828,3 +828,15 @@ em `scripts/window-route.ps1` permanece sem commit e com SHA-256
 O bundle `.local/integration-avatars/avatars-history.bundle` conserva também
 as referências anteriores à integração. Nenhuma pendência funcional exclusiva
 ficou apenas na branch eliminada.
+
+## 16. Construtores estáticos do XAM 17559 (2026-10-16)
+
+O serviço AOT não executa o entry point do `xam.xex`, então os construtores
+estáticos C++ (tabela CRT em `0x81A80010`) não rodavam. Os vetores de escala por
+eixo usados na dequantização do esqueleto (`0x81A975B4`, `0x81A975C0`) ficavam
+com o valor da imagem, (2, 0, 0): todos os ossos perdiam Y/Z e rotação, e o piloto
+animado do Motocross Madness se desfazia em estilhaços. O serviço agora executa,
+após carregar o módulo, exatamente o bloco de 9 construtores de constantes do
+avatar (`0x81A801BC`, `81A70E60`…`81A71008`), conferindo cada entrada da tabela.
+Construtores de objetos/`atexit` seguem sem execução. Detalhes e evidência em
+[Motocross Madness](validation-motocross-madness.md#piloto-deformado-causa-e-correção).

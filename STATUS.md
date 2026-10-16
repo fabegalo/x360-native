@@ -31,6 +31,34 @@ Nunca substituir módulos ou fontes originais entre versões de dashboard.
 
 ## Renderização e performance
 
+Motocross (16/10): patch 0082 permite consultar o tamanho das configurações de
+perfil antes do sign-in, preservando a autorização da leitura; patch 0083
+serializa as transações entre o heap físico e seus aliases, inclusive a
+invalidação. Testes focados reproduziram as falhas e passaram após as correções.
+Patch 0084 implementa a consulta XCTD para os streams expostos pelo VFS,
+identificando a assinatura sem consumir dados nem gerar conclusão de leitura;
+81 verificações focadas passaram, incluindo erros de acesso e buffers curtos.
+Patch 0085 substitui o stub da máscara de usuários ociosos do microfone por
+estado por runtime e atualização pendente coalescida (15 verificações); captura
+de microfone continua ausente. Patch 0086 impede que carregar um XEX apague
+reservas de outros módulos no mesmo heap; a tentativa com outra chave libera
+somente a própria imagem e colisões são recusadas. Falhas nas duas chaves também
+liberam a reserva imediatamente. Red: 12 falhas iniciais e uma de rollback;
+green: 48 verificações novas e 103 do carregador/imports/codegen, sem sessão visual.
+Codegen de produção aprovado sem erros de liberação; sessão Xenos posterior
+com zero falhas de heap/stub de voz no snapshot de 67,548 s. Avisos de textura,
+volumes ausentes e imports variáveis ainda aparecem; não é um log limpo.
+O teste Native solicitado pelo usuário revelou saída 78 para textura somente
+com mipmaps; esse carregamento foi corrigido e verificado por comparação CPU/GPU.
+O usuário pediu retorno ao Xenos e restringiu o trabalho aos erros dos logs.
+Fetch constants inválidas e fidelidade visual continuam pendentes; não há aceite gráfico nem ganho de performance
+demonstrado. [Evidência](docs/validation-motocross-madness.md#correções-e-diagnóstico-de-16102026)
+Chão preto corrigido (16/10, tarde): compressão DXT1 do terreno na GPU dependia de
+fetch tipo 0 (liberado no manifesto do título) e de RT s5.10/resolve inteiro exatos
+(patch 0087, D3D12 RTV). Piloto corrigido: o serviço de avatar não rodava os
+construtores estáticos do XAM 17559 que calculam as escalas Y/Z do esqueleto; agora
+executa o bloco verificado da tabela original. [Evidência](docs/validation-motocross-madness.md#chão-preto-causa-e-correção-16102026-tarde)
+
 Idioma/localidade (16/10): seleção independente no desktop, persistida por
 ambiente e repassada aos processos da sessão. Patch 0081 corrige os getters
 XAM/XConfig e preserva as ABIs de idioma antigas. Dashboard/Guide Retail 17559
