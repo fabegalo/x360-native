@@ -42,6 +42,17 @@
   "attributions_sha256": "a7ff3b7ce13deb4f6492e01e62eb9d0e98e0b0855bd92f609e192976a75207d9",
   "components": [
     {
+      "id": "shiftglue",
+      "origin": "https://github.com/arcanite24/shiftglue-sdk",
+      "revision": "1e8968f712824b97d4f4330c5a22389c4c8be1b5",
+      "spdx": "BSD-3-Clause",
+      "license_file": "licenses/shiftglue.txt",
+      "scope": "source",
+      "integration": "Native guest memory mirror adaptations in the source payload; not linked into desktop executables",
+      "obligations": "Preserve original notices and applicable source/binary license conditions.",
+      "license_sha256": "8e065be1da2ff9a16b1f063d4636d8b67e6a654bb90583ea4332e66ac421bb18"
+    },
+    {
       "id": "fmt",
       "origin": "https://github.com/fmtlib/fmt.git",
       "revision": "407c905e45ad75fc29bf0f9bb7c5c2fd3475976f",
