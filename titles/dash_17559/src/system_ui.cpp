@@ -1,5 +1,6 @@
 #include "system_ui.h"
 #include "system_ui_request.h"
+#include "../../common/system_ui_context.h"
 #include <rex/runtime.h>
 #include <rex/logging.h>
 #include <rex/cvar.h>
@@ -32,34 +33,12 @@ std::function<bool()> draw_ui;
 std::function<void()> request_signin;
 std::function<void()> pending_ui;
 std::function<void()> poll_guide;
+const SystemUiApplication* active_application = nullptr;
 thread_local bool in_dashboard_frame = false;
 std::string system_drive = "game:";
 std::string UiPath(const char* path) {
   return system_drive + std::string(path).substr(5);
 }
-// XAM's HUD runs in the system process (2). The local host borrows the
-// dashboard thread for a frame, restoring its process context on return.
-class SystemProcessScope {
- public:
-  explicit SystemProcessScope(rex::Runtime& runtime)
-      : thread_(rex::system::XThread::GetCurrentThread()->guest_object<rex::system::X_KTHREAD>()),
-        pcr_(runtime.memory()->TranslateVirtual<rex::system::X_KPCR*>(
-            rex::system::XThread::GetCurrentThread()->thread_state()->context()->r13.u32)),
-        previous_(thread_->process_type), previous_dup_(thread_->process_type_dup),
-        previous_dpc_(pcr_->processtype_value_in_dpc) {
-    thread_->process_type = thread_->process_type_dup = 2;
-    pcr_->processtype_value_in_dpc = 2;
-  }
-  ~SystemProcessScope() {
-    thread_->process_type = previous_;
-    thread_->process_type_dup = previous_dup_;
-    pcr_->processtype_value_in_dpc = previous_dpc_;
-  }
- private:
-  rex::system::X_KTHREAD* thread_;
-  rex::system::X_KPCR* pcr_;
-  uint8_t previous_, previous_dup_, previous_dpc_;
-};
 }
 void ReleaseSystemUiHost() {
   // Called after the dashboard guest thread has exited, before runtime teardown.
@@ -67,6 +46,7 @@ void ReleaseSystemUiHost() {
   request_signin = {};
   pending_ui = {};
   poll_guide = {};
+  active_application = nullptr;
 }
 void InstallSystemUi(rex::Runtime& runtime, std::string drive, std::string native_directory) {
   system_drive = std::move(drive);
@@ -81,7 +61,14 @@ void InstallSystemUi(rex::Runtime& runtime, std::string drive, std::string nativ
         (uint16_t(input.gamepad.buttons) & rex::input::X_INPUT_GAMEPAD_GUIDE);
     const bool edge = pressed && !held;
     held = pressed;
-    if (!edge || draw_ui || pending_ui) return;
+    if (!edge || pending_ui) return;
+    if (draw_ui) {
+      if (active_application == &kGuide) {
+        auto xam = runtime.kernel_state()->GetKernelModule<rex::kernel::xam::XamModule>("xam.xex");
+        xam->RequestSystemUiClose();
+      }
+      return;
+    }
     auto* ctx = rex::system::XThread::GetCurrentThread()->thread_state()->context();
     ctx->r3.u64 = 0;
     __imp__XamShowGuideUI(*ctx, runtime.memory()->virtual_membase());
@@ -117,7 +104,7 @@ void InstallSystemUi(rex::Runtime& runtime, std::string drive, std::string nativ
     if (!application) return X_E_NOTFOUND;
     if (!request || size != application->request_size || !rex::system::XThread::IsInThread()) return X_E_INVALIDARG;
     REXLOG_INFO("17559 system UI: original application request {:08X} size={}", message, size);
-    SystemProcessScope system_process(runtime);
+    x360n::SystemUiContext system_process(*runtime.memory());
     auto* state = runtime.kernel_state();
     auto xam = state->GetKernelModule<rex::kernel::xam::XamModule>("xam.xex");
     if (draw_ui) {
@@ -193,25 +180,7 @@ void InstallSystemUi(rex::Runtime& runtime, std::string drive, std::string nativ
       const auto boot_result = static_cast<rex::X_HRESULT>(dispatcher->ExecuteTrap(thread, 0x816C8328, bootstrap, 0));
       REXLOG_INFO("17559 system UI: original XUI host bootstrap -> {:08X}", uint32_t(boot_result));
       if (static_cast<int32_t>(boot_result) < 0) return boot_result;
-      // Typeface descriptor from original host 816C8450. Register the original
-      // language font in this XUI instance; dashboard registration is separate.
-      const auto font = memory->SystemHeapAlloc(540);
-      if (!font) return static_cast<X_HRESULT>(0x8007000Eu);
-      std::memset(memory->TranslateVirtual(font), 0, 540);
-      uint64_t font_path[] = {0, 260, font + 20};
-      auto font_result = static_cast<X_HRESULT>(dispatcher->ExecuteTrap(thread, 0x81699810, font_path, 3));
-      if (static_cast<int32_t>(font_result) >= 0) {
-        rex::memory::store_and_swap<uint32_t>(memory->TranslateVirtual(font),
-            rex::memory::load_and_swap<uint32_t>(memory->TranslateVirtual(0x81A827D0)));
-        rex::memory::store_and_swap<uint32_t>(memory->TranslateVirtual(font + 4), font + 20);
-        uint64_t register_font[] = {font, 1};
-        font_result = static_cast<X_HRESULT>(dispatcher->ExecuteTrap(thread, 0x817DEA18, register_font, 2));
-      }
-      memory->SystemHeapFree(font);
-      REXLOG_INFO("17559 system UI: original default typeface -> {:08X}", uint32_t(font_result));
-      if (static_cast<int32_t>(font_result) < 0) return font_result;
-      // Original 816C8474 loads xamstrings.xus from XAM's language resource.
-      // The Sign-in dialogs require this table, including first-use questions.
+      // The original host initializes localization and fonts after loading its skin.
       uint64_t common_strings_lock[] = {0x81A83050};
       dispatcher->ExecuteTrap(thread, 0x81A723A4, common_strings_lock, 1);
       // CRT 81A6F888 constructs the configuration facade used by the HUD
@@ -242,11 +211,6 @@ void InstallSystemUi(rex::Runtime& runtime, std::string drive, std::string nativ
         REXLOG_ERROR("17559 system UI: could not load original game:\\system\\huduiskin.xex as resource module");
         return X_E_NOTFOUND;
       }
-      uint64_t common_strings[] = {skin->hmodule_ptr()};
-      dispatcher->ExecuteTrap(thread, 0x816E0B68, common_strings, 1);
-      const auto strings = rex::memory::load_and_swap<uint32_t>(memory->TranslateVirtual(0x81AA3EC4));
-      REXLOG_INFO("17559 system UI: original common strings table={:08X}", strings);
-      if (!strings) return X_E_NOTFOUND;
       const auto locator = memory->SystemHeapAlloc(256);
       if (!locator) return static_cast<X_HRESULT>(0x8007000Eu);
       uint64_t locate_skin[] = {skin->hmodule_ptr(), 0x815FA684, 0x815FA6C0, locator, 128};
@@ -259,6 +223,16 @@ void InstallSystemUi(rex::Runtime& runtime, std::string drive, std::string nativ
       uint64_t skin_path[] = {0x815FA690, 0};
       skin_result = static_cast<X_HRESULT>(dispatcher->ExecuteTrap(thread, 0x817C5EE0, skin_path, 2));
       if (static_cast<int32_t>(skin_result) < 0) return skin_result;
+      // Original host 816CE8B0 calls 816C8450 before constructing hudbkgnd.
+      // Let that original routine select the language, strings, font path and
+      // fallback descriptor instead of synthesizing only part of its typeface.
+      uint64_t localization[] = {skin->hmodule_ptr()};
+      const auto localization_result = static_cast<X_HRESULT>(
+          dispatcher->ExecuteTrap(thread, 0x816C8450, localization, 1));
+      REXLOG_INFO("17559 system UI: original localization/typeface -> {:08X}", uint32_t(localization_result));
+      if (static_cast<int32_t>(localization_result) < 0) return localization_result;
+      const auto strings = rex::memory::load_and_swap<uint32_t>(memory->TranslateVirtual(0x81AA3EC4));
+      if (!strings) return X_E_NOTFOUND;
       // hudbkgnd.xur is built by the original host before app scene properties
       // can reference its background controller at 81A9DE68.
       uint64_t background[] = {hud, skin->hmodule_ptr()};
@@ -271,7 +245,8 @@ void InstallSystemUi(rex::Runtime& runtime, std::string drive, std::string nativ
     if (!module) return X_E_NOTFOUND;
     uint64_t attach[] = {module->hmodule_ptr(), 1, 0};
     const auto attached = dispatcher->ExecuteTrap(thread, module->entry_point(), attach, 3);
-    auto unload = [state, dispatcher, thread, module] {
+    auto unload = [state, dispatcher, module] {
+      auto* thread = rex::system::XThread::GetCurrentThread()->thread_state();
       uint64_t detach[] = {module->hmodule_ptr(), 0, 0};
       dispatcher->ExecuteTrap(thread, module->entry_point(), detach, 3);
       state->UnloadUserModule(module, false);
@@ -293,12 +268,14 @@ void InstallSystemUi(rex::Runtime& runtime, std::string drive, std::string nativ
     dispatcher->ExecuteTrap(thread, 0x817DCBB8, resource_registration, 2);
     std::memcpy(runtime.memory()->TranslateVirtual(owned_request), runtime.memory()->TranslateVirtual(request), size);
     const auto user = rex::memory::load_and_swap<uint32_t>(runtime.memory()->TranslateVirtual(owned_request + application->user_offset));
-    auto release_module = [&runtime, dispatcher, thread, registration, owned_request, xam, unload] {
+    auto release_module = [&runtime, dispatcher, registration, owned_request, xam, unload] {
+      auto* thread = rex::system::XThread::GetCurrentThread()->thread_state();
       uint64_t unregister_resource[] = {registration->resource_id};
       dispatcher->ExecuteTrap(thread, 0x817DCBD8, unregister_resource, 1);
       unload();
       runtime.memory()->SystemHeapFree(owned_request);
       xam->EndSystemUi(registration->module);
+      active_application = nullptr;
     };
     if (!xam->BeginSystemUi(module->hmodule_ptr(), registration->slot, user)) {
       release_module();
@@ -355,7 +332,8 @@ void InstallSystemUi(rex::Runtime& runtime, std::string drive, std::string nativ
       REXLOG_INFO("17559 system UI: original attach scene -> {:08X}", uint32_t(linked));
       if (static_cast<int32_t>(linked) >= 0) {
         auto active_scene = std::make_shared<uint32_t>(scene);
-        auto destroy_scene = [&runtime, dispatcher, thread, hud, active_scene, registration, release_module] {
+        auto destroy_scene = [&runtime, dispatcher, hud, active_scene, registration, release_module] {
+          auto* thread = rex::system::XThread::GetCurrentThread()->thread_state();
           // App owns the scene. Unlink and clear the host's reference before
           // its destroy callback and original DLL detach release the app.
           if (*active_scene) {
@@ -383,9 +361,9 @@ void InstallSystemUi(rex::Runtime& runtime, std::string drive, std::string nativ
         // The original dashboard resolves/presents this target after its XUI
         // present call. Composite the original HUD here, with no extra swap,
         // image copy, window, blocking loop, or per-frame resource creation.
-        draw_ui = [&runtime, dispatcher, thread, hud, registration, xam, destroy_scene, active_scene, saved_size, user,
+        draw_ui = [&runtime, dispatcher, hud, registration, xam, destroy_scene, active_scene, saved_size, user,
                    previous_frame = rex::chrono::Clock::QueryGuestUptimeMillis(), frame = 0u]() mutable -> bool {
-          SystemProcessScope system_process(runtime);
+          auto* thread = rex::system::XThread::GetCurrentThread()->thread_state();
           if (xam->ConsumeSystemUiResume(registration->module)) {
             // Match the original XAM stack lifecycle: serialize (80000009),
             // destroy the application, then restore a new instance with flags=2.
@@ -483,6 +461,7 @@ void InstallSystemUi(rex::Runtime& runtime, std::string drive, std::string nativ
           ++frame;
           return true;
         };
+        active_application = application;
         xam->SetSystemUiVisible(module->hmodule_ptr());
         state->BroadcastNotification(0x9, true);
         runtime.memory()->SystemHeapFree(output);
@@ -499,39 +478,25 @@ void InstallSystemUi(rex::Runtime& runtime, std::string drive, std::string nativ
 }
 
 void dash17559::DrawSystemUiFrame(PPCContext& ctx) {
-  if (dash17559::poll_guide) {
-    const PPCContext saved = ctx;
-    dash17559::poll_guide();
-    ctx = saved;
-    ctx.fpscr.restoreGuestBits(saved.fpscr.csr);
+  // The original renderer also reaches this context through ThreadState. Keep
+  // the frame bridge free of REX_FUNC's restrict qualifier and restore even
+  // when guest execution unwinds (for example an Xbox Home request).
+  x360n::SystemUiContext frame(*rex::Runtime::instance()->memory());
+  if (frame.thread_state()->context() != &ctx) {
+    REXLOG_ERROR("17559 system UI: frame context does not belong to the current guest thread");
+    return;
   }
+  if (dash17559::poll_guide) dash17559::poll_guide();
   if (!dash17559::draw_ui && dash17559::pending_ui) {
-    const PPCContext saved = ctx;
     auto request = std::move(dash17559::pending_ui);
     request();
-    ctx = saved;
-    ctx.fpscr.restoreGuestBits(saved.fpscr.csr);
   }
   if (dash17559::request_signin) {
-    const PPCContext saved = ctx;
     auto request = std::move(dash17559::request_signin);
     request();
-    ctx = saved;
-    ctx.fpscr.restoreGuestBits(saved.fpscr.csr);
   }
-  if (dash17559::draw_ui) {
-    // The host accesses this context through ThreadState too, so this bridge
-    // must not use REX_FUNC's restrict qualifier. Preserve the caller's context.
-    const PPCContext saved = ctx;
-    const bool active = dash17559::draw_ui();
-    if (!active) dash17559::draw_ui = {};
-    ctx = saved;
-    ctx.fpscr.restoreGuestBits(saved.fpscr.csr);
-    if (!active) REXLOG_INFO("17559 system UI: restored present context r3={:08X}", ctx.r3.u32);
-  }
-
+  if (dash17559::draw_ui && !dash17559::draw_ui()) dash17559::draw_ui = {};
 }
-
 #ifndef X360N_SYSTEM_UI_PLUGIN
 extern "C" REX_FUNC(__imp__sub_92186D90);
 extern "C" REX_FUNC(__imp__sub_9221CD90);

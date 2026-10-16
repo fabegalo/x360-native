@@ -162,6 +162,7 @@ extern "C" REX_FUNC(sub_816E6B10) {
 
 // Internal XamAllocEx/XamFree calls share the SDK allocation contract.
 extern "C" REX_FUNC(__imp__XamAllocEx);
+extern "C" REX_FUNC(__imp__sub_816E67E8);
 extern "C" REX_FUNC(__imp__XamFree);
 extern "C" REX_FUNC(__imp__sub_816E6858);
 extern "C" REX_FUNC(sub_816E6858) {
@@ -170,7 +171,11 @@ extern "C" REX_FUNC(sub_816E6858) {
 }
 extern "C" REX_FUNC(sub_816E67E8) {
   const auto tag=ctx.r3.u32, flags=ctx.r4.u32, size=ctx.r5.u32, output=ctx.r6.u32, caller=uint32_t(ctx.lr);
-  __imp__XamAllocEx(ctx, base);
+  // The original system compositor requests tagged physical command memory.
+  // Preserve its physical allocator, as for XMemAlloc above; the SDK's XAM
+  // virtual-pool adapter explicitly rejects this allocation class.
+  if (flags & 0x40000000u) __imp__sub_816E67E8(ctx, base);
+  else __imp__XamAllocEx(ctx, base);
   REXLOG_INFO("17559 XUI XamAllocEx tag={:08X} flags={:08X} size={} caller={:08X} -> {:08X} ptr={:08X}", tag, flags, size, caller, ctx.r3.u32, output ? rex::memory::load_and_swap<uint32_t>(base+output) : 0);
 }
 
