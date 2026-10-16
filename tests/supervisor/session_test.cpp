@@ -101,7 +101,8 @@ TEST_CASE("session UI host belongs to its dashboard build and receipt", "[sessio
   CHECK_THROWS(LoadSessionProfile(ProjectPaths{dir}, manifest, false));
   std::ofstream(setup) << "runtime_files=['system_ui.dll']\n";
   const auto profile = LoadSessionProfile(ProjectPaths{dir}, manifest, false);
-  CHECK(profile.system_ui_host == dir / "build/system_ui.dll");
+  // TEMP may use an 8.3 alias; the loader canonicalizes the existing root.
+  CHECK(profile.system_ui_host == fs::canonical(dir) / "build/system_ui.dll");
   for (const auto* host : {"../other-version/system_ui.dll", "C:/other/system_ui.dll", ""}) {
     write(host);
     CHECK_THROWS(LoadSessionProfile(ProjectPaths{dir}, manifest, false));
