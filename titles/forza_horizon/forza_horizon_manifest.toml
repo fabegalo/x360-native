@@ -28,4 +28,3 @@ xex_sha256 = "db40df605ade49a612b35a7a24c38f6004bcb17a88ed6b48288de16df9e3987c"
 native_exe = "../../.local/build/titles/forza_horizon/forza_horizon.exe"
 user_data_root = "../../.local/user/forza_horizon"
 args = ["--gpu_plugin=xenos", "--mnk_mode=true"]
-system_ui_frames = true

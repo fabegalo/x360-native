@@ -671,9 +671,10 @@ int Session(const ProjectPaths& paths, const fs::path& manifest, int timeout, bo
       // Identity follows the platform session; game content and saves keep
       // their existing title roots. Never copy or replace a game's profiles.
       args.push_back("--x360n_profile_root=" + PathUtf8(dashboard.user_root));
-      if (active.system_ui_frames && active.manifest != dashboard.manifest) {
-        if (dashboard.system_ui_host.empty())
-          throw std::runtime_error("session dashboard has no original system UI host");
+      // Every title presents through VdSwap, where the session dashboard's own
+      // host composes its original Guide. A dashboard version without a host
+      // offers no Guide; its titles never receive another version's modules.
+      if (active.manifest != dashboard.manifest && !dashboard.system_ui_host.empty()) {
         // Recheck the dashboard receipt that owns this native host and modules.
         LoadSessionProfile(paths, dashboard.manifest);
         args.push_back("--x360n_system_ui_host=" + PathUtf8(dashboard.system_ui_host));

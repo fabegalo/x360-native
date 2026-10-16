@@ -22,7 +22,6 @@ namespace {
 std::mutex handoff_mutex;
 bool dashboard_return = false;
 rex::platform::DynamicLibrary system_ui_host;
-void (*system_ui_frame)(PPCContext*) = nullptr;
 void (*system_ui_release)() = nullptr;
 std::filesystem::path Utf8Path(const std::string& value) {
   return std::filesystem::path(std::u8string(value.begin(), value.end()));
@@ -38,9 +37,6 @@ void Publish(const std::string& output, const LaunchRequest& request) {
 }
 }
 bool IsDashboardReturn() { return dashboard_return; }
-void DrawSessionSystemUi(PPCContext& ctx) {
-  if (system_ui_frame) system_ui_frame(&ctx);
-}
 void ImportLaunchData(rex::Runtime& runtime) {
   dashboard_return = false;
   const auto ui_host = REXCVAR_GET(x360n_system_ui_host);
@@ -51,10 +47,10 @@ void ImportLaunchData(rex::Runtime& runtime) {
       REX_FATAL("Missing verified dashboard system UI host: {}", ui_host);
     using Install = bool (*)(rex::Runtime*, const char*, const char*);
     auto install = system_ui_host.GetSymbol<Install>("X360nSystemUiInstall");
-    system_ui_frame = system_ui_host.GetSymbol<decltype(system_ui_frame)>("X360nSystemUiFrame");
+    // The host composes at VdSwap; titles need no render hook.
     system_ui_release = system_ui_host.GetSymbol<decltype(system_ui_release)>("X360nSystemUiRelease");
     const auto directory = path.parent_path().u8string();
-    if (!install || !system_ui_frame || !system_ui_release ||
+    if (!install || !system_ui_release ||
         !install(&runtime, root.c_str(), reinterpret_cast<const char*>(directory.c_str())))
       REX_FATAL("Invalid dashboard system UI host or original assets: {}", ui_host);
   }
@@ -82,7 +78,7 @@ void ImportLaunchData(rex::Runtime& runtime) {
       data.launch_data.size(), uint32_t(request.kind), request.flags, dashboard_return);
 }
 void ExportLaunchRequest(rex::Runtime& runtime) {
-  if (system_ui_release) { system_ui_release(); system_ui_frame = nullptr; }
+  if (system_ui_release) { system_ui_release(); system_ui_release = nullptr; }
   const auto output = REXCVAR_GET(x360n_handoff_out);
   if (output.empty()) return;
   auto xam = runtime.kernel_state()->GetKernelModule<rex::kernel::xam::XamModule>("xam.xex");

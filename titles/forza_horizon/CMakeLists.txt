@@ -21,7 +21,6 @@ endif()
 # Sources
 set(FORZAHORIZON_SOURCES
     src/main.cpp
-    src/system_ui_frame.cpp
     ../common/launch_handoff.cpp
     ../../src/supervisor/sha256.cpp
 )

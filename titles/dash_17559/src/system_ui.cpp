@@ -35,14 +35,111 @@ std::function<void()> request_signin;
 std::function<void()> pending_ui;
 std::function<void()> poll_guide;
 const SystemUiApplication* active_application = nullptr;
+// XAM stacks a system app that launches another one (Guide -> Profile): the
+// caller is serialized with 80000009 and restored with flags=2 when its
+// successor closes, as in the existing resume path.
+struct SuspendedApp {
+  uint32_t message;
+  std::vector<uint8_t> request;
+  std::vector<uint8_t> state;
+};
+std::vector<SuspendedApp> suspended_apps;
+std::vector<uint8_t> restore_state;  // consumed by the next initialization
 x360n::SystemUiExecution ui_execution;
-thread_local bool in_dashboard_frame = false;
 std::string system_drive = "game:";
 std::string UiPath(const char* path) {
   return system_drive + std::string(path).substr(5);
 }
+// Original XAM 17559 HUD host state (816CE8B0/816CE108), base 81AA20E0.
+constexpr uint32_t kHudVisible = 0x81AA2188;       // +168
+constexpr uint32_t kFadeTarget = 0x81AA21B4;       // +212
+constexpr uint32_t kFadeCurrent = 0x81AA21B8;      // +216
+constexpr uint32_t kDisplayChanged = 0x81A82744;   // set with a visible app (816CE4C8)
+constexpr uint32_t kFadeShown = 0x815FA6BC;        // f30 in 816CE108
+constexpr uint32_t kFadeHidden = 0x815F86F8;       // f31 in 816CE108
+constexpr uint32_t kSystemDevice = 0x81AA1B14;
+constexpr uint32_t kSystemTarget = 0x81AA1B18;
+// The title's latest VdSwap front buffer; the system frame inherits it.
+rex::kernel::xboxkrnl::SystemSwapFrame title_frame{};
+void SystemSwap(const rex::kernel::xboxkrnl::SystemSwapFrame& frame) {
+  title_frame = frame;
+  auto* thread = rex::system::XThread::GetCurrentThread();
+  if (!thread || !thread->thread_state()) return;
+  DrawSystemUiFrame(*thread->thread_state()->context());
+}
+uint32_t Read32(rex::memory::Memory& memory, uint32_t address) {
+  return rex::memory::load_and_swap<uint32_t>(memory.TranslateVirtual(address));
+}
+void Write32(rex::memory::Memory& memory, uint32_t address, uint32_t value) {
+  rex::memory::store_and_swap<uint32_t>(memory.TranslateVirtual(address), value);
+}
+// Static host state written by the original host 816CE8B0 before and after
+// its compositor setup: dispatcher headers of its events (type byte, signal
+// state, empty wait list) and the compositor's pending-work list heads.
+void InitializeHostState(rex::memory::Memory& memory) {
+  auto event = [&](uint32_t header, uint8_t type) {
+    *memory.TranslateVirtual<uint8_t*>(header) = type;
+    Write32(memory, header + 4, 0);
+    Write32(memory, header + 8, header + 8);
+    Write32(memory, header + 12, header + 8);
+  };
+  event(0x81AA2134, 0);  // 816CE8B0: r31+84
+  event(0x81AA2144, 1);  // r31+100
+  event(0x81AA1858, 0);  // 6232
+  event(0x81AA1838, 1);  // 6200
+  event(0x81AA1828, 0);  // 6184
+  // 816CE994-816CE9B8: two empty list heads at 6152 and 6160.
+  Write32(memory, 0x81AA1808, 0x81AA1808);
+  Write32(memory, 0x81AA180C, 0x81AA1808);
+  Write32(memory, 0x81AA1810, 0x81AA1810);
+  Write32(memory, 0x81AA1814, 0x81AA1810);
+}
+// 816CE3F8 hides the HUD and, with no pending app, 816C9A20 publishes an
+// empty descriptor: the title's own front buffer is presented again.
+void HideSystemFrame(rex::Runtime& runtime, rex::runtime::ThreadState* thread) {
+  auto* memory = runtime.memory();
+  Write32(*memory, kHudVisible, 0);
+  Write32(*memory, kFadeTarget, Read32(*memory, kFadeHidden));
+  Write32(*memory, kFadeCurrent, Read32(*memory, kFadeHidden));
+  runtime.function_dispatcher()->ExecuteTrap(thread, 0x816C9A20, nullptr, 0);
+}
+// The kernel delivers display (type 3, 88 bytes) and title scaler (type 1,
+// 64 bytes) information to XAM's routine 816CBFD8, registered by 816CE8B0.
+// VdRegisterXamGraphicsNotification is not run here; deliver the same data.
+bool NotifyDisplay(rex::Runtime& runtime, rex::runtime::ThreadState* thread) {
+  auto* memory = runtime.memory();
+  auto* dispatcher = runtime.function_dispatcher();
+  const auto info = memory->SystemHeapAlloc(88 + 64);
+  if (!info) return false;
+  uint64_t query[] = {info};
+  dispatcher->ExecuteTrap(thread, 0x81A72E44, query, 1);  // VdGetCurrentDisplayInformation
+  auto* bytes = memory->TranslateVirtual<uint8_t*>(info);
+  const uint16_t display_width = rex::memory::load_and_swap<uint16_t>(bytes + 0x48);
+  const uint16_t display_height = rex::memory::load_and_swap<uint16_t>(bytes + 0x4A);
+  if (title_frame.width && title_frame.height) {
+    // Front buffer and scaler source follow the title's swap chain.
+    rex::memory::store_and_swap<uint16_t>(bytes + 0, uint16_t(title_frame.width));
+    rex::memory::store_and_swap<uint16_t>(bytes + 2, uint16_t(title_frame.height));
+    rex::memory::store_and_swap<uint32_t>(bytes + 0x10, title_frame.width);
+    rex::memory::store_and_swap<uint32_t>(bytes + 0x14, title_frame.height);
+  }
+  auto* scaler = bytes + 88;
+  std::memcpy(scaler, bytes, 4);
+  rex::memory::store_and_swap<uint16_t>(scaler + 4, display_width);
+  rex::memory::store_and_swap<uint16_t>(scaler + 6, display_height);
+  std::memcpy(scaler + 8, bytes + 8, 56);
+  uint64_t display[] = {0, 3, info};
+  dispatcher->ExecuteTrap(thread, 0x816CBFD8, display, 3);
+  uint64_t title[] = {0, 1, info + 88};
+  dispatcher->ExecuteTrap(thread, 0x816CBFD8, title, 3);
+  memory->SystemHeapFree(info);
+  REXLOG_INFO("17559 system UI: display {}x{}, title front buffer {}x{}", display_width, display_height,
+              title_frame.width, title_frame.height);
+  return true;
+}
 }
 void ReleaseSystemUiHost() {
+  rex::kernel::xboxkrnl::SetSystemSwapCallback(nullptr);
   // The main thread may have exited while a different presenting thread is
   // still terminating the title. Do not destroy its callback or the runtime.
   auto xam = rex::Runtime::instance()->kernel_state()
@@ -56,6 +153,8 @@ void ReleaseSystemUiHost() {
   pending_ui = {};
   poll_guide = {};
   active_application = nullptr;
+  suspended_apps.clear();
+  restore_state.clear();
 }
 void InstallSystemUi(rex::Runtime& runtime, std::string drive, std::string native_directory) {
   system_drive = std::move(drive);
@@ -82,6 +181,9 @@ void InstallSystemUi(rex::Runtime& runtime, std::string drive, std::string nativ
     ctx->r3.u64 = 0;
     __imp__XamShowGuideUI(*ctx, runtime.memory()->virtual_membase());
   };
+  // Every title presents through VdSwap: run system frames there, not from
+  // title-specific render hooks.
+  rex::kernel::xboxkrnl::SetSystemSwapCallback(&SystemSwap);
   auto bind = [&](const char* pe, const char* path, const char* name) {
     const auto library = native_directory.empty() ? std::string(name)
         : native_directory + "/" + name;
@@ -173,18 +275,37 @@ void InstallSystemUi(rex::Runtime& runtime, std::string drive, std::string nativ
       uint64_t object_buckets[] = {0x81AC8328, 0, 0x400};
       dispatcher->ExecuteTrap(thread, 0x8172D4F0, object_buckets, 3);
       REXLOG_INFO("17559 system UI: original XUI critical-section constructor completed");
-      // Original system-XUI bootstrap 816C8328 shares the active D3D device.
-      // Supply the live device and video mode through its own host-state fields.
-      const auto* device_export = runtime.export_resolver()->GetExportByOrdinal("xboxkrnl.exe", 0x1BE);
-      if (!device_export || !device_export->variable_ptr) return X_E_FAIL;
+      // XAM owns a separate recording D3D device (816968A8 -> 816C9EA0) whose
+      // command buffers the kernel runs at the title's swap. The title device
+      // and its D3D state are never shared with the system UI.
       auto* memory = runtime.memory();
-      const auto device = rex::memory::load_and_swap<uint32_t>(memory->TranslateVirtual(device_export->variable_ptr));
-      if (!device) return X_E_FAIL;
-      rex::system::X_VIDEO_MODE mode{};
-      rex::kernel::xboxkrnl::VdQueryVideoMode(&mode);
-      rex::memory::store_and_swap<uint32_t>(memory->TranslateVirtual(0x81AA1B14), device);
-      rex::memory::store_and_swap<uint32_t>(memory->TranslateVirtual(0x81A826F0), mode.display_width);
-      rex::memory::store_and_swap<uint32_t>(memory->TranslateVirtual(0x81A826F4), mode.display_height);
+      const auto hardware = Read32(*memory, 0x815F0480);
+      // 816C9EA0 creates the device only when XboxHardwareInfo (xboxkrnl
+      // 0x156, import slot 815F0480) has flag 0x200; no other XAM 17559 code
+      // tests that bit, and this runtime does not set it. This host provides
+      // the system graphics device, so expose the flag to that call only:
+      // titles keep the runtime's existing XboxHardwareInfo value.
+      const auto* hardware_export = runtime.export_resolver()->GetExportByOrdinal("xboxkrnl.exe", 0x156);
+      if (!hardware_export || hardware_export->variable_ptr != hardware) return X_E_FAIL;
+      InitializeHostState(*memory);
+      const auto hardware_flags = Read32(*memory, hardware);
+      Write32(*memory, hardware, hardware_flags | 0x200);
+      const auto device_result = static_cast<X_HRESULT>(dispatcher->ExecuteTrap(thread, 0x816C9EA0, nullptr, 0));
+      Write32(*memory, hardware, hardware_flags);
+      const auto system_device = Read32(*memory, kSystemDevice);
+      REXLOG_INFO("17559 system UI: original system device -> {:08X}, device={:08X}, commands={:08X}",
+                  uint32_t(device_result), system_device, Read32(*memory, 0x81AA1B00));
+      if (static_cast<int32_t>(device_result) < 0 || !system_device) return X_E_FAIL;
+      if (!NotifyDisplay(runtime, thread)) return static_cast<X_HRESULT>(0x8007000Eu);
+      // 816CE8B0 creates compositor resources (system front buffer, target,
+      // shaders and the 852x480 canvas) before the XUI bootstrap.
+      const auto resources = static_cast<X_HRESULT>(dispatcher->ExecuteTrap(thread, 0x816CA748, nullptr, 0));
+      REXLOG_INFO("17559 system UI: original compositor resources -> {:08X}, target={:08X}, canvas={}x{}",
+                  uint32_t(resources), Read32(*memory, kSystemTarget), Read32(*memory, 0x81A826F0),
+                  Read32(*memory, 0x81A826F4));
+      if (static_cast<int32_t>(resources) < 0) return resources;
+      Write32(*memory, kFadeTarget, Read32(*memory, kFadeHidden));
+      Write32(*memory, kFadeCurrent, Read32(*memory, kFadeHidden));
       uint64_t bootstrap[] = {0};
       const auto boot_result = static_cast<rex::X_HRESULT>(dispatcher->ExecuteTrap(thread, 0x816C8328, bootstrap, 0));
       REXLOG_INFO("17559 system UI: original XUI host bootstrap -> {:08X}", uint32_t(boot_result));
@@ -297,12 +418,23 @@ void InstallSystemUi(rex::Runtime& runtime, std::string drive, std::string nativ
     };
     // Original XAM 17559 816BCE74-816BCED8: first-load flags=1, copied
     // request, hmodule, user; arg2 points to the module's output-size word.
-    put(0, 1); put(4, owned_request); put(8, module->hmodule_ptr());
+    // A suspended app is restored with flags=2 and its serialized state.
+    const auto restored = restore_state.empty() ? 0
+        : runtime.memory()->SystemHeapAlloc(uint32_t(restore_state.size()));
+    if (restored)
+      std::memcpy(runtime.memory()->TranslateVirtual(restored), restore_state.data(), restore_state.size());
+    // Keep the state alive until scene creation and layout have completed.
+    struct GuestAllocation {
+      rex::memory::Memory* memory; uint32_t address;
+      ~GuestAllocation() { if (address) memory->SystemHeapFree(address); }
+    } state_lifetime{runtime.memory(), restored};
+    put(0, restored ? 2 : 1); put(4, restored ? restored : owned_request); put(8, module->hmodule_ptr());
     put(12, user);
     put(16, 0);
     uint64_t initialize[] = {0x80000004, context, context + 16};
     const auto result = static_cast<rex::X_HRESULT>(dispatcher->ExecuteTrap(thread, registration->callback, initialize, 3));
-    REXLOG_INFO("17559 system UI: {} original initialize -> {:08X}", application->name, uint32_t(result));
+    REXLOG_INFO("17559 system UI: {} original {} -> {:08X}", application->name,
+                restored ? "restore" : "initialize", uint32_t(result));
     const auto saved_size = rex::memory::load_and_swap<uint32_t>(runtime.memory()->TranslateVirtual(context + 16));
     runtime.memory()->SystemHeapFree(context);
     if (static_cast<int32_t>(result) < 0) {
@@ -370,8 +502,10 @@ void InstallSystemUi(rex::Runtime& runtime, std::string drive, std::string nativ
         // The original dashboard resolves/presents this target after its XUI
         // present call. Composite the original HUD here, with no extra swap,
         // image copy, window, blocking loop, or per-frame resource creation.
+        std::vector<uint8_t> request_bytes(size);
+        std::memcpy(request_bytes.data(), runtime.memory()->TranslateVirtual(owned_request), size);
         draw_ui = [&runtime, dispatcher, hud, registration, xam, destroy_scene, active_scene, saved_size, user,
-                   previous_frame = rex::chrono::Clock::QueryGuestUptimeMillis(), frame = 0u]() mutable -> bool {
+                   message, request_bytes = std::move(request_bytes), frame = 0u]() mutable -> bool {
           auto* thread = rex::system::XThread::GetCurrentThread()->thread_state();
           if (xam->ConsumeSystemUiResume(registration->module)) {
             // Match the original XAM stack lifecycle: serialize (80000009),
@@ -444,33 +578,45 @@ void InstallSystemUi(rex::Runtime& runtime, std::string drive, std::string nativ
           dispatcher->ExecuteTrap(thread, registration->callback, update, 3);
           dispatcher->ExecuteTrap(thread, 0x816927C0, input, 1);
           if (xam->GetSystemUiSession().close_requested) {
+            // Closing because this app requested another one: keep it below
+            // the successor, serialized by its own 80000009 handler.
+            if (pending_ui && saved_size && saved_size <= 1024 * 1024) {
+              const auto buffer = runtime.memory()->SystemHeapAlloc(saved_size);
+              if (buffer) {
+                uint64_t save[] = {0x80000009, buffer, 0};
+                const auto saved = dispatcher->ExecuteTrap(thread, registration->callback, save, 3);
+                if (static_cast<int32_t>(saved) >= 0) {
+                  const auto* bytes = runtime.memory()->TranslateVirtual<uint8_t*>(buffer);
+                  suspended_apps.push_back({message, request_bytes, {bytes, bytes + saved_size}});
+                  REXLOG_INFO("17559 system UI: suspended {:08X} below its successor ({} bytes)", message, saved_size);
+                } else {
+                  REXLOG_ERROR("17559 system UI: original save failed {:08X}", uint32_t(saved));
+                }
+                runtime.memory()->SystemHeapFree(buffer);
+              }
+            }
             destroy_scene();
             runtime.kernel_state()->BroadcastNotification(0x9, false);
             REXLOG_INFO("17559 system UI: closed original app after {} frames; dashboard focus released", frame);
             return false;
           }
-          dispatcher->ExecuteTrap(thread, 0x817DA398, nullptr, 0);
-          const auto saved_f1 = thread->context()->f1;
-          const auto now = rex::chrono::Clock::QueryGuestUptimeMillis();
-          // Original 816C8108 converts timebase ticks to milliseconds (x1000).
-          thread->context()->f1.f64 = static_cast<uint32_t>(now - previous_frame);
-          previous_frame = now;
-          dispatcher->ExecuteTrap(thread, 0x817AB6D0, nullptr, 0);
-          thread->context()->f1 = saved_f1;
-          uint64_t render[] = {hud, 0};
-          const auto rendered = dispatcher->ExecuteTrap(thread, 0x81695098, render, 2);
-          if (static_cast<int32_t>(rendered) < 0) {
-            REXLOG_ERROR("17559 system UI: original render failed {:08X}; releasing app", uint32_t(rendered));
-            destroy_scene();
-            runtime.kernel_state()->BroadcastNotification(0x9, false);
-            return false;
+          // Original HUD frame 816CD6E8: when the kernel accepts another system
+          // command buffer, 816CCF00 times, lays out and renders XUI, draws the
+          // title's front buffer behind it, and publishes the recorded frame.
+          if (dispatcher->ExecuteTrap(thread, 0x81842110, nullptr, 0)) {
+            uint64_t compose[] = {Read32(*runtime.memory(), kSystemTarget)};
+            dispatcher->ExecuteTrap(thread, 0x816CCF00, compose, 1);
+            if (frame == 0 || frame % 600 == 0)
+              REXLOG_INFO("17559 system UI: composed original system frame {}", frame);
+            ++frame;
           }
-          if (frame == 0 || frame % 600 == 0)
-            REXLOG_INFO("17559 system UI: composed original frame {} -> {:08X}", frame, uint32_t(rendered));
-          ++frame;
           return true;
         };
         active_application = application;
+        // 816CE4B8-816CE4D0: a shown app fades the title frame in the system pass.
+        Write32(*runtime.memory(), kFadeTarget, Read32(*runtime.memory(), kFadeShown));
+        Write32(*runtime.memory(), kDisplayChanged, 1);
+        Write32(*runtime.memory(), kHudVisible, 1);
         xam->SetSystemUiVisible(module->hmodule_ptr());
         state->BroadcastNotification(0x9, true);
         runtime.memory()->SystemHeapFree(output);
@@ -506,19 +652,24 @@ void dash17559::DrawSystemUiFrame(PPCContext& ctx) {
     auto request = std::move(dash17559::request_signin);
     request();
   }
-  if (dash17559::draw_ui && !dash17559::draw_ui()) dash17559::draw_ui = {};
+  if (dash17559::draw_ui && !dash17559::draw_ui()) {
+    dash17559::draw_ui = {};
+    dash17559::HideSystemFrame(*rex::Runtime::instance(), frame.thread_state());
+    if (!dash17559::pending_ui && !dash17559::suspended_apps.empty()) {
+      // The successor closed: return to the app that launched it.
+      dash17559::pending_ui = [app = std::move(dash17559::suspended_apps.back())] {
+        auto& runtime = *rex::Runtime::instance();
+        auto xam = runtime.kernel_state()->GetKernelModule<rex::kernel::xam::XamModule>("xam.xex");
+        const auto buffer = runtime.memory()->SystemHeapAlloc(uint32_t(app.request.size()));
+        if (!buffer) { REXLOG_ERROR("17559 system UI: restore request allocation failed"); return; }
+        std::memcpy(runtime.memory()->TranslateVirtual(buffer), app.request.data(), app.request.size());
+        dash17559::restore_state = app.state;
+        const auto result = xam->system_ui_request(app.message, buffer, uint32_t(app.request.size()));
+        dash17559::restore_state.clear();
+        runtime.memory()->SystemHeapFree(buffer);
+        REXLOG_INFO("17559 system UI: restored suspended {:08X} -> {:08X}", app.message, uint32_t(result));
+      };
+      dash17559::suspended_apps.pop_back();
+    }
+  }
 }
-#ifndef X360N_SYSTEM_UI_PLUGIN
-extern "C" REX_FUNC(__imp__sub_92186D90);
-extern "C" REX_FUNC(__imp__sub_9221CD90);
-extern "C" REX_FUNC(sub_92186D90) {
-  const auto previous = dash17559::in_dashboard_frame;
-  dash17559::in_dashboard_frame = true;
-  __imp__sub_92186D90(ctx, base);
-  dash17559::in_dashboard_frame = previous;
-}
-extern "C" void sub_9221CD90(PPCContext& ctx, uint8_t* base) {
-  if (dash17559::in_dashboard_frame) dash17559::DrawSystemUiFrame(ctx);
-  __imp__sub_9221CD90(ctx, base);
-}
-#endif

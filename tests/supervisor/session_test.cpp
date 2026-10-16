@@ -94,7 +94,7 @@ TEST_CASE("session UI host belongs to its dashboard build and receipt", "[sessio
     std::ofstream(manifest) << "[project]\nname='test'\ngame_root='originals'\n"
       "[entrypoint]\nfile_path='originals/dash.xex'\n[x360n]\n"
       "native_exe='build/dash.exe'\nuser_data_root='user'\nxex_sha256='"
-      << std::string(64, '0') << "'\nsystem_ui_frames=true\nsystem_ui_host='"
+      << std::string(64, '0') << "'\nsystem_ui_host='"
       << host << "'\n" << args;
   };
   write("system_ui.dll");
@@ -102,7 +102,6 @@ TEST_CASE("session UI host belongs to its dashboard build and receipt", "[sessio
   std::ofstream(setup) << "runtime_files=['system_ui.dll']\n";
   const auto profile = LoadSessionProfile(ProjectPaths{dir}, manifest, false);
   CHECK(profile.system_ui_host == dir / "build/system_ui.dll");
-  CHECK(profile.system_ui_frames);
   for (const auto* host : {"../other-version/system_ui.dll", "C:/other/system_ui.dll", ""}) {
     write(host);
     CHECK_THROWS(LoadSessionProfile(ProjectPaths{dir}, manifest, false));

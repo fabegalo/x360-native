@@ -7,7 +7,6 @@ struct SessionProfile {
   std::filesystem::path manifest, exe, xex, game_root, user_root;
   std::filesystem::path library_relative_xex;
   std::filesystem::path system_ui_host;
-  bool system_ui_frames = false;
   std::string name, sha256;
   std::vector<std::string> args;
   std::vector<std::filesystem::path> launch_targets;

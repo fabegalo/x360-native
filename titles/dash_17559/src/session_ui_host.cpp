@@ -42,5 +42,4 @@ SESSION_UI_EXPORT bool X360nSystemUiInstall(rex::Runtime* runtime, const char* r
   REXLOG_INFO("17559 system UI: session host installed with verified original assets at {}", root_utf8);
   return true;
 }
-SESSION_UI_EXPORT void X360nSystemUiFrame(PPCContext* ctx) { dash17559::DrawSystemUiFrame(*ctx); }
 SESSION_UI_EXPORT void X360nSystemUiRelease() { dash17559::ReleaseSystemUiHost(); }

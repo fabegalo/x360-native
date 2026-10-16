@@ -25,7 +25,6 @@ SessionProfile LoadSessionProfile(const ProjectPaths& paths, const std::filesyst
   p.exe = resolve(text(table["x360n"]["native_exe"]));
   p.user_root = UserDataRoot(paths, resolve(text(table["x360n"]["user_data_root"])));
   p.sha256 = text(table["x360n"]["xex_sha256"]);
-  p.system_ui_frames = table["x360n"]["system_ui_frames"].value_or(false);
   if (auto host = table["x360n"]["system_ui_host"].value<std::string>()) {
     const auto relative_host = PathFromUtf8(*host);
     if (relative_host.empty() || relative_host.has_parent_path() || relative_host.is_absolute())
