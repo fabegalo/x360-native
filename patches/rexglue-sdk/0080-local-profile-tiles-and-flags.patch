@@ -1,0 +1,216 @@
+diff --git a/include/rex/system/xam/user_profile.h b/include/rex/system/xam/user_profile.h
+index f37b721..6c1a7dc 100644
+--- a/include/rex/system/xam/user_profile.h
++++ b/include/rex/system/xam/user_profile.h
+@@ -233,6 +233,10 @@ class UserProfile {
+ 
+   // Local account collection; one active account in slot zero. Commit before publication.
+   bool InitializeLocal(const std::filesystem::path& root);
++  // Games launched while a local account was signed in, kept per XUID next
++  // to the account store. System titles (FFFExxxx) are not games.
++  bool RecordTitlePlayed(uint32_t title_id);
++  std::vector<uint32_t> TitlesPlayed(uint64_t xuid) const;
+   uint32_t CreateLocal(const std::string& name, uint64_t* created_xuid = nullptr);
+   std::vector<Identity> local_profiles() const;
+   Identity FindLocal(uint64_t xuid) const;
+diff --git a/src/kernel/xam/xam_misc.cpp b/src/kernel/xam/xam_misc.cpp
+index 6aaec97..763c467 100644
+--- a/src/kernel/xam/xam_misc.cpp
++++ b/src/kernel/xam/xam_misc.cpp
+@@ -740,8 +740,6 @@ REX_EXPORT_STUB(__imp__XamReadGameTileImage);
+ REX_EXPORT_STUB(__imp__XamReadImage);
+ REX_EXPORT_STUB(__imp__XamReadString);
+ REX_EXPORT_STUB(__imp__XamReadStrings);
+-REX_EXPORT_STUB(__imp__XamReadTile);
+-REX_EXPORT_STUB(__imp__XamReadTileEx);
+ REX_EXPORT_STUB(__imp__XamReadTileToTextureEx);
+ REX_EXPORT_STUB(__imp__XamRegisterSMCNotification);
+ REX_EXPORT_STUB(__imp__XamRegisterScreenSaverCallback);
+diff --git a/src/kernel/xam/xam_user.cpp b/src/kernel/xam/xam_user.cpp
+index fedc2fd..9b00b9b 100644
+--- a/src/kernel/xam/xam_user.cpp
++++ b/src/kernel/xam/xam_user.cpp
+@@ -360,9 +360,12 @@ u32 XamUserReadProfileSettings_entry(u32 title_id, u32 user_index, u32 xuid_coun
+                                       setting_ids, 0, buffer_size_ptr, buffer_ptr, overlapped);
+ }
+ 
++// XAM 17559 816B16A8: flags in r9 and the size pointer in r10. Its own
++// XamUserReadProfileSettings wrapper (816B1F28) moves the size pointer from
++// r9 to r10 and passes zero flags.
+ u32 XamUserReadProfileSettingsEx_entry(u32 title_id, u32 user_index, u32 xuid_count,
+                                        mapped_u64 xuids, u32 setting_count, mapped_u32 setting_ids,
+-                                       mapped_u32 buffer_size_ptr, u32 unk_2,
++                                       u32 unk_2, mapped_u32 buffer_size_ptr,
+                                        mapped_void buffer_ptr,
+                                        ppc_ptr_t<XAM_OVERLAPPED> overlapped) {
+   return XamUserReadProfileSettingsEx(title_id, user_index, xuid_count, xuids, setting_count,
+@@ -833,6 +836,40 @@ u32 XamReadTileToTexture_entry(u32 unknown, u32 title_id, u64 tile_id, u32 user_
+   return X_ERROR_SUCCESS;
+ }
+ 
++// XAM 17559 81670C00 (export 0x2FC) sends these arguments to the XGI tile
++// service as message 000B003A and completes asynchronously when an overlapped
++// is supplied. Local accounts keep no tile images (XamWriteGamerTile retains
++// none and the 17559 inputs carry no gamer picture packs), so every tile is
++// reported absent: callers proceed with their own missing-picture path.
++u32 XamReadTileEx_entry(u32 tile_type, u32 title_id, u64 tile_id, u32 user_index, u32 unk_r7,
++                        u32 unk_r8, mapped_void buffer_ptr, mapped_u32 buffer_size_ptr,
++                        u32 overlapped_ptr) {
++  REXKRNL_DEBUG("XamReadTileEx type={} title={:08X} tile={:016X} user={}", uint32_t(tile_type),
++                uint32_t(title_id), uint64_t(tile_id), uint32_t(user_index));
++  if (!buffer_size_ptr) return X_ERROR_INVALID_PARAMETER;
++  if (overlapped_ptr) {
++    REX_KERNEL_STATE()->CompleteOverlappedImmediate(overlapped_ptr, X_ERROR_NOT_FOUND);
++    return X_ERROR_IO_PENDING;
++  }
++  return X_ERROR_NOT_FOUND;
++}
++
++// XAM 17559 81670B68 (export 0x2EF): message 000B0030 with the same tile key.
++u32 XamReadTile_entry(u32 tile_type, u32 title_id, u64 tile_id, u32 user_index, u32 unk_r7,
++                      u32 unk_r8, u32 overlapped_ptr) {
++  REXKRNL_DEBUG("XamReadTile type={} title={:08X} tile={:016X} user={}", uint32_t(tile_type),
++                uint32_t(title_id), uint64_t(tile_id), uint32_t(user_index));
++  if (overlapped_ptr) {
++    REX_KERNEL_STATE()->CompleteOverlappedImmediate(overlapped_ptr, X_ERROR_NOT_FOUND);
++    return X_ERROR_IO_PENDING;
++  }
++  return X_ERROR_NOT_FOUND;
++}
++
++// Local accounts are full offline accounts: never guests, no cached Live flags.
++u32 XamUserIsGuest_entry(u32 user_index) { return 0; }
++u32 XamUserGetCachedUserFlags_entry(u32 user_index) { return 0; }
++
+ u32 XamWriteGamerTile_entry(u32 arg1, u32 arg2, u32 arg3, u32 arg4, u32 arg5, u32 overlapped_ptr) {
+   if (overlapped_ptr) {
+     REX_KERNEL_STATE()->CompleteOverlappedImmediate(overlapped_ptr, X_ERROR_SUCCESS);
+@@ -920,6 +957,10 @@ REX_EXPORT(__imp__XamUserCreateAchievementEnumerator,
+ REX_EXPORT(__imp__XamParseGamerTileKey, rex::kernel::xam::XamParseGamerTileKey_entry)
+ REX_EXPORT(__imp__XamReadTileToTexture, rex::kernel::xam::XamReadTileToTexture_entry)
+ REX_EXPORT(__imp__XamWriteGamerTile, rex::kernel::xam::XamWriteGamerTile_entry)
++REX_EXPORT(__imp__XamReadTileEx, rex::kernel::xam::XamReadTileEx_entry)
++REX_EXPORT(__imp__XamReadTile, rex::kernel::xam::XamReadTile_entry)
++REX_EXPORT(__imp__XamUserIsGuest, rex::kernel::xam::XamUserIsGuest_entry)
++REX_EXPORT(__imp__XamUserGetCachedUserFlags, rex::kernel::xam::XamUserGetCachedUserFlags_entry)
+ REX_EXPORT(__imp__XamSessionCreateHandle, rex::kernel::xam::XamSessionCreateHandle_entry)
+ REX_EXPORT(__imp__XamSessionRefObjByHandle, rex::kernel::xam::XamSessionRefObjByHandle_entry)
+ REX_EXPORT(__imp__XamUserReadUserPreference, rex::kernel::xam::XamUserReadUserPreference_entry)
+@@ -933,7 +974,6 @@ REX_EXPORT_STUB(__imp__XamUserCreateTitlesPlayedEnumerator);
+ REX_EXPORT(__imp__XamUserFlushLogonQueue, rex::kernel::xam::XamUserFlushLogonQueue_entry)
+ REX_EXPORT_STUB(__imp__XamUserGetAge);
+ REX_EXPORT_STUB(__imp__XamUserGetAgeGroup);
+-REX_EXPORT_STUB(__imp__XamUserGetCachedUserFlags);
+ REX_EXPORT(__imp__XamUserGetDeviceId, rex::kernel::xam::XamUserGetDeviceId_entry)
+ extern "C" REX_FUNC(__imp__XamUserGetIndexFromXUID) {
+   auto index = mapped_u32(ctx.r5.u32 ?
+@@ -960,7 +1000,6 @@ REX_EXPORT_STUB(__imp__XamUserGetUserTenure);
+ REX_EXPORT_STUB(__imp__XamUserGetUsersMissingAvatars);
+ REX_EXPORT_STUB(__imp__XamUserGetXUIDForTFA);
+ REX_EXPORT_STUB(__imp__XamUserInvalidateProfileSetting);
+-REX_EXPORT_STUB(__imp__XamUserIsGuest);
+ REX_EXPORT_STUB(__imp__XamUserIsLogonPreviewModeEnabled);
+ REX_EXPORT_STUB(__imp__XamUserIsParentalControlled);
+ REX_EXPORT_STUB(__imp__XamUserIsPartial);
+diff --git a/src/system/xam/user_profile.cpp b/src/system/xam/user_profile.cpp
+index 90e7541..dd2d1df 100644
+--- a/src/system/xam/user_profile.cpp
++++ b/src/system/xam/user_profile.cpp
+@@ -240,6 +240,86 @@ bool UserProfile::PersistProfiles(const std::vector<Identity>& next, const Ident
+   return ok;
+ }
+ 
++namespace {
++constexpr size_t kMaxTitlesPlayed = 4096;
++std::filesystem::path TitlesPlayedPath(const std::filesystem::path& store, uint64_t xuid) {
++  return store.parent_path() / fmt::format("{:016X}", xuid) / "titles-played.dat";
++}
++}
++
++std::vector<uint32_t> UserProfile::TitlesPlayed(uint64_t xuid) const {
++  std::filesystem::path store;
++  {
++    std::lock_guard lock(identity_mutex_);
++    if (!storage_ready_ || !ValidLocalXuid(xuid)) return {};
++    store = profile_path_;
++  }
++  // "X360TP01", big-endian count, then sorted unique big-endian title IDs.
++  std::vector<uint32_t> titles;
++  auto* file = rex::filesystem::OpenFile(TitlesPlayedPath(store, xuid), "rb");
++  if (!file) return titles;
++  std::array<uint8_t, 12> header{};
++  bool ok = fread(header.data(), 1, header.size(), file) == header.size() &&
++            !std::memcmp(header.data(), "X360TP01", 8);
++  const uint32_t count = ok ? (uint32_t(header[8]) << 24) | (uint32_t(header[9]) << 16) |
++                                  (uint32_t(header[10]) << 8) | header[11] : 0;
++  ok = ok && count <= kMaxTitlesPlayed;
++  for (uint32_t i = 0; ok && i < count; ++i) {
++    std::array<uint8_t, 4> id{};
++    ok = fread(id.data(), 1, id.size(), file) == id.size();
++    const uint32_t title = (uint32_t(id[0]) << 24) | (uint32_t(id[1]) << 16) |
++                           (uint32_t(id[2]) << 8) | id[3];
++    ok = ok && title && (titles.empty() || title > titles.back());
++    if (ok) titles.push_back(title);
++  }
++  ok = ok && fgetc(file) == EOF;
++  fclose(file);
++  if (!ok) {
++    REXSYS_ERROR("Local profile {:016X}: invalid titles played record", xuid);
++    return {};
++  }
++  return titles;
++}
++
++bool UserProfile::RecordTitlePlayed(uint32_t title_id) {
++  const auto account = identity();
++  if (!account.signin_state || !title_id || (title_id >> 16) == 0xFFFE) return false;
++  auto titles = TitlesPlayed(account.xuid);
++  const auto position = std::lower_bound(titles.begin(), titles.end(), title_id);
++  if (position != titles.end() && *position == title_id) return true;
++  if (titles.size() >= kMaxTitlesPlayed) return false;
++  titles.insert(position, title_id);
++  std::filesystem::path destination;
++  {
++    std::lock_guard lock(identity_mutex_);
++    if (!storage_ready_) return false;
++    destination = TitlesPlayedPath(profile_path_, account.xuid);
++  }
++  std::error_code error;
++  std::filesystem::create_directories(destination.parent_path(), error);
++  if (error) return false;
++  std::vector<uint8_t> record(12 + titles.size() * 4);
++  std::memcpy(record.data(), "X360TP01", 8);
++  auto put32 = [&](size_t offset, uint32_t value) {
++    for (unsigned i = 0; i < 4; ++i) record[offset + i] = uint8_t(value >> (24 - i * 8));
++  };
++  put32(8, uint32_t(titles.size()));
++  for (size_t i = 0; i < titles.size(); ++i) put32(12 + i * 4, titles[i]);
++  auto temporary = destination;
++  temporary += ".tmp";
++  auto* file = rex::filesystem::OpenFile(temporary, "wb");
++  if (!file) return false;
++  bool ok = fwrite(record.data(), 1, record.size(), file) == record.size() && fflush(file) == 0;
++  if (fclose(file)) ok = false;
++  if (ok) {
++    std::filesystem::rename(temporary, destination, error);
++    ok = !error;
++  }
++  if (!ok) std::filesystem::remove(temporary, error);
++  if (ok) REXSYS_INFO("Local profile {:016X}: title {:08X} played", account.xuid, title_id);
++  return ok;
++}
++
+ uint32_t UserProfile::CreateLocal(const std::string& name, uint64_t* created_xuid) {
+   std::lock_guard lock(identity_mutex_);
+   if (created_xuid) *created_xuid = 0;
+@@ -333,6 +413,10 @@ UserProfile::Setting* UserProfile::GetSetting(uint32_t setting_id) {
+     return nullptr;
+   }
+   UserProfile::Setting* setting = it->second;
++  if (setting_id == 0x10040012 && setting->type == Setting::Type::INT32) {
++    // XPROFILE_GAMERCARD_TITLES_PLAYED follows the signed-in account's record.
++    static_cast<Int32Setting*>(setting)->value = int32_t(TitlesPlayed(xuid()).size());
++  }
+   if (setting->is_title_specific()) {
+     // If what we have loaded in memory isn't for the title that is running
+     // right now, then load it from disk.

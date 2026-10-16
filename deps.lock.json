@@ -123,7 +123,7 @@
                                             "file":  "patches/rexglue-sdk/0010-common-string-unavailable.patch",
                                             "sha256":  "3862fa9674a74241d9b6dfccde6a1f706e5a2c7e614082350f2593af58616dea",
                                             "files":  {
-                                                          "src/kernel/xam/xam_misc.cpp":  "d6406921077ec432aeb4654b995fe87cb81acbf993bf2ea32168189e7a40e396"
+                                                          "src/kernel/xam/xam_misc.cpp":  "e86b6a749cebcb5e4da9b6621072f4c55d46daecfa16108eaf7effcb3652ac64"
                                                       },
                                             "base_files":  {
                                                                "src/kernel/xam/xam_misc.cpp":  "6f0a07784bf46a5e9dd9f3c387ef52a936c527c949057aae1fb97388e21ce68d"
@@ -134,7 +134,7 @@
                                             "file":  "patches/rexglue-sdk/0011-xam-user-preference.patch",
                                             "sha256":  "9cfbe27ea058fbcb5f80a63714dfd38a0127317398e461443ca6687ae7780120",
                                             "files":  {
-                                                          "src/kernel/xam/xam_user.cpp":  "f8f184af1239887cd920a3205c7d6bac4f6c1afcb9f498b2050d1487aaaa850e"
+                                                          "src/kernel/xam/xam_user.cpp":  "679084f458f9adc32c00963b8cfc117549c0d2b6e620dd931e7f4e583879fb6e"
                                                       },
                                             "base_files":  {
                                                                "src/kernel/xam/xam_user.cpp":  "7b84ddf00e12b1c9de33e00df75d8d692a686fcbbd939a0d706fecd36bc609e9"
@@ -271,7 +271,7 @@
                                             "files":  {
                                                           "include/rex/kernel/xam/module.h":  "2547409edaa44b2f7ab2972a0504de4fb6bbd0b87a62cad0a5d0a663a25c1d2d",
                                                           "src/kernel/xam/xam_content.cpp":  "7d8b3c7516223c258024303e3f2d8ce93e34a0c5b85da3495f13dcce977f0033",
-                                                          "src/kernel/xam/xam_misc.cpp":  "d6406921077ec432aeb4654b995fe87cb81acbf993bf2ea32168189e7a40e396"
+                                                          "src/kernel/xam/xam_misc.cpp":  "e86b6a749cebcb5e4da9b6621072f4c55d46daecfa16108eaf7effcb3652ac64"
                                                       },
                                             "base_files":  {
                                                                "include/rex/kernel/xam/module.h":  "a9cc652f87264f2b5137d81a1c600127e97224183e2200b15460946201f29f9b",
@@ -344,7 +344,7 @@
                                                                "src/kernel/xam/xam_ui.cpp":  "03e89d1119cb059d706b790304f2f26be668d1fce8660a2ff7a22e70c2c7b5d4"
                                                            },
                                             "files":  {
-                                                          "src/kernel/xam/xam_user.cpp":  "f8f184af1239887cd920a3205c7d6bac4f6c1afcb9f498b2050d1487aaaa850e",
+                                                          "src/kernel/xam/xam_user.cpp":  "679084f458f9adc32c00963b8cfc117549c0d2b6e620dd931e7f4e583879fb6e",
                                                           "src/kernel/xam/xam_ui.cpp":  "c5a93b435cb1b135e553c523b437985d2cacfa28a0118ae2c220ba3d9a83fa1a"
                                                       },
                                             "test":  "tests/sdkcheck/profile_ui_request_test.cpp"
@@ -360,7 +360,7 @@
                                             "files":  {
                                                           "include/rex/kernel/xam/module.h":  "2547409edaa44b2f7ab2972a0504de4fb6bbd0b87a62cad0a5d0a663a25c1d2d",
                                                           "src/kernel/xam/apps/xam_app.cpp":  "b7cde8af85114c7d6ae6bd321a46a11fe291030f2ad999554968079f9e0a0c68",
-                                                          "src/kernel/xam/xam_misc.cpp":  "d6406921077ec432aeb4654b995fe87cb81acbf993bf2ea32168189e7a40e396"
+                                                          "src/kernel/xam/xam_misc.cpp":  "e86b6a749cebcb5e4da9b6621072f4c55d46daecfa16108eaf7effcb3652ac64"
                                                       },
                                             "test":  "tests/sdkcheck/profile_ui_request_test.cpp"
                                         },
@@ -373,7 +373,7 @@
                                                            },
                                             "files":  {
                                                           "src/kernel/xam/xam_info.cpp":  "ec03633f74c82929d69cec46ed7451673abbf286f03aec4f3a72e3f61d82c2be",
-                                                          "src/kernel/xam/xam_misc.cpp":  "d6406921077ec432aeb4654b995fe87cb81acbf993bf2ea32168189e7a40e396"
+                                                          "src/kernel/xam/xam_misc.cpp":  "e86b6a749cebcb5e4da9b6621072f4c55d46daecfa16108eaf7effcb3652ac64"
                                                       },
                                             "test":  "tests/sdkcheck/profile_ui_request_test.cpp"
                                         },
@@ -428,7 +428,7 @@
                                                                "src/kernel/xam/xam_info.cpp":  "35ad6f47fe3ab4be8719b610de857b2b243a70de4d74c860f38823b050a3d4cb"
                                                            },
                                             "files":  {
-                                                          "src/kernel/xam/xam_misc.cpp":  "d6406921077ec432aeb4654b995fe87cb81acbf993bf2ea32168189e7a40e396",
+                                                          "src/kernel/xam/xam_misc.cpp":  "e86b6a749cebcb5e4da9b6621072f4c55d46daecfa16108eaf7effcb3652ac64",
                                                           "src/kernel/xam/xam_info.cpp":  "ec03633f74c82929d69cec46ed7451673abbf286f03aec4f3a72e3f61d82c2be"
                                                       },
                                             "test":  "sdkcheck XMem virtual allocations return aligned writable memory, honor zero initialization, and release storage; physical classes fail explicitly"
@@ -519,7 +519,7 @@
                                             "files":  {
                                                           "include/rex/kernel/xam/module.h":  "2547409edaa44b2f7ab2972a0504de4fb6bbd0b87a62cad0a5d0a663a25c1d2d",
                                                           "src/kernel/xam/xam_input.cpp":  "16b99785eb442c048ff5d6e988200580971b418c28aa0ad02a94de495ea452d6",
-                                                          "src/kernel/xam/xam_misc.cpp":  "d6406921077ec432aeb4654b995fe87cb81acbf993bf2ea32168189e7a40e396",
+                                                          "src/kernel/xam/xam_misc.cpp":  "e86b6a749cebcb5e4da9b6621072f4c55d46daecfa16108eaf7effcb3652ac64",
                                                           "src/kernel/xam/xam_ui.cpp":  "c5a93b435cb1b135e553c523b437985d2cacfa28a0118ae2c220ba3d9a83fa1a"
                                                       },
                                             "test":  "sdkcheck.System UI host exports and session input/lifecycle isolation"
@@ -547,10 +547,10 @@
                                                                "src/kernel/xam/xam_user.cpp":  "aee8024f578e96457f58051cddae10f7d23ef6db1852a81a12eebb93af5a6918"
                                                            },
                                             "files":  {
-                                                          "include/rex/system/xam/user_profile.h":  "1aaae9190f78c62f1dd8a88015c54ddcbca8157847032da3c90c5065e4eee03b",
-                                                          "src/system/xam/user_profile.cpp":  "84f4ce2dfc72816a695ed18447fa47032489acd50efec30dd1475ac428f365da",
+                                                          "include/rex/system/xam/user_profile.h":  "ff1302506590e8b5cc483d7fc710cf55b7a69af6052f209a818ff04e1bff18ee",
+                                                          "src/system/xam/user_profile.cpp":  "d6932c86448e21fc0386895cff9400e56756ea85d3231b5a175845cea3ea72b5",
                                                           "src/system/kernel_state.cpp":  "707d13e46006debe1adb792a26e18f3860f1515a4765af5a748c51447f36b3ef",
-                                                          "src/kernel/xam/xam_user.cpp":  "f8f184af1239887cd920a3205c7d6bac4f6c1afcb9f498b2050d1487aaaa850e"
+                                                          "src/kernel/xam/xam_user.cpp":  "679084f458f9adc32c00963b8cfc117549c0d2b6e620dd931e7f4e583879fb6e"
                                                       },
                                             "test":  "sdkcheck.Local profile: persistent identity, XAM logon/logoff, restart, corruption and write failure"
                                         },
@@ -564,8 +564,8 @@
                                                            },
                                             "files":  {
                                                           "src/kernel/xam/xam_enum.cpp":  "027e8f7ee0d1b38e54a1ae1652aad2766eac1fae4ce91a049ce2fcc3c5235d84",
-                                                          "src/kernel/xam/xam_user.cpp":  "f8f184af1239887cd920a3205c7d6bac4f6c1afcb9f498b2050d1487aaaa850e",
-                                                          "src/kernel/xam/xam_misc.cpp":  "d6406921077ec432aeb4654b995fe87cb81acbf993bf2ea32168189e7a40e396"
+                                                          "src/kernel/xam/xam_user.cpp":  "679084f458f9adc32c00963b8cfc117549c0d2b6e620dd931e7f4e583879fb6e",
+                                                          "src/kernel/xam/xam_misc.cpp":  "e86b6a749cebcb5e4da9b6621072f4c55d46daecfa16108eaf7effcb3652ac64"
                                                       },
                                             "test":  "sdkcheck.Local profile: original Sign-in enumeration ABI, confirmation, cancellation boundary and restart"
                                         },
@@ -587,7 +587,7 @@
                                                                "src/kernel/xam/xam_misc.cpp":  "33bfbe1ae23956af73db5c1c394d87f0118378eb8d8932d15eddcedfb405dfce"
                                                            },
                                             "files":  {
-                                                          "src/kernel/xam/xam_misc.cpp":  "d6406921077ec432aeb4654b995fe87cb81acbf993bf2ea32168189e7a40e396"
+                                                          "src/kernel/xam/xam_misc.cpp":  "e86b6a749cebcb5e4da9b6621072f4c55d46daecfa16108eaf7effcb3652ac64"
                                                       },
                                             "test":  "sdkcheck.Sign-in retail mode and local account queries do not leak input registers"
                                         },
@@ -598,7 +598,7 @@
                                                                "src/kernel/xam/xam_user.cpp":  "ee961c8e3af100e5fbc79abf60d7d9c0761d91c9548c1a033ce99846b9605d8d"
                                                            },
                                             "files":  {
-                                                          "src/kernel/xam/xam_user.cpp":  "f8f184af1239887cd920a3205c7d6bac4f6c1afcb9f498b2050d1487aaaa850e"
+                                                          "src/kernel/xam/xam_user.cpp":  "679084f458f9adc32c00963b8cfc117549c0d2b6e620dd931e7f4e583879fb6e"
                                                       },
                                             "test":  "sdkcheck.Local profile enumerates the original Sign-in record and commits only on confirmation"
                                         },
@@ -614,8 +614,8 @@
                                             "files":  {
                                                           "src/kernel/xam/xam_task.cpp":  "bf53e54767cdac3e0acf94334a98690777dabe426cad696e538cc5b45829710c",
                                                           "include/rex/system/xobject.h":  "37930c4cdbf022d716b4033a2f278153f3535ef7a13b7b3ebb798d42dca8b319",
-                                                          "src/kernel/xam/xam_misc.cpp":  "d6406921077ec432aeb4654b995fe87cb81acbf993bf2ea32168189e7a40e396",
-                                                          "src/kernel/xam/xam_user.cpp":  "f8f184af1239887cd920a3205c7d6bac4f6c1afcb9f498b2050d1487aaaa850e"
+                                                          "src/kernel/xam/xam_misc.cpp":  "e86b6a749cebcb5e4da9b6621072f4c55d46daecfa16108eaf7effcb3652ac64",
+                                                          "src/kernel/xam/xam_user.cpp":  "679084f458f9adc32c00963b8cfc117549c0d2b6e620dd931e7f4e583879fb6e"
                                                       },
                                             "test":  "sdkcheck.Sign-in task lifetime and local session contracts"
                                         },
@@ -650,7 +650,7 @@
                                                                "src/kernel/xam/xam_user.cpp":  "770dff46e6ad83abcfeaa76fb213b493b0a939feaac0544340ec196de295becb"
                                                            },
                                             "files":  {
-                                                          "src/kernel/xam/xam_user.cpp":  "f8f184af1239887cd920a3205c7d6bac4f6c1afcb9f498b2050d1487aaaa850e"
+                                                          "src/kernel/xam/xam_user.cpp":  "679084f458f9adc32c00963b8cfc117549c0d2b6e620dd931e7f4e583879fb6e"
                                                       },
                                             "test":  "sdkcheck.Local profile logon completes overlapped with the real result"
                                         },
@@ -661,7 +661,7 @@
                                                                "src/kernel/xam/xam_misc.cpp":  "abe8472af0d84456047a52ed7cc91c4d131965c76ca06582107f2d15f3517386"
                                                            },
                                             "files":  {
-                                                          "src/kernel/xam/xam_misc.cpp":  "d6406921077ec432aeb4654b995fe87cb81acbf993bf2ea32168189e7a40e396"
+                                                          "src/kernel/xam/xam_misc.cpp":  "e86b6a749cebcb5e4da9b6621072f4c55d46daecfa16108eaf7effcb3652ac64"
                                                       },
                                             "test":  "sdkcheck.Sign-in retail mode and local account queries do not leak input registers"
                                         },
@@ -683,7 +683,7 @@
                                                                "src/kernel/xam/xam_misc.cpp":  "8c6934c669484b99a937df04e6777475fd9403f04cc458414ab5a411e6a9ca44"
                                                            },
                                             "files":  {
-                                                          "src/kernel/xam/xam_misc.cpp":  "d6406921077ec432aeb4654b995fe87cb81acbf993bf2ea32168189e7a40e396"
+                                                          "src/kernel/xam/xam_misc.cpp":  "e86b6a749cebcb5e4da9b6621072f4c55d46daecfa16108eaf7effcb3652ac64"
                                                       },
                                             "test":  "sdkcheck.Sign-in retail mode and local account queries do not leak input registers"
                                         },
@@ -707,9 +707,9 @@
                                                                "src/system/xam/user_profile.cpp":  "2d0dc2a1af7e636acfec38cd6d439f90aaae221afde7406362eb0ac97f02eb10"
                                                            },
                                             "files":  {
-                                                          "include/rex/system/xam/user_profile.h":  "1aaae9190f78c62f1dd8a88015c54ddcbca8157847032da3c90c5065e4eee03b",
+                                                          "include/rex/system/xam/user_profile.h":  "ff1302506590e8b5cc483d7fc710cf55b7a69af6052f209a818ff04e1bff18ee",
                                                           "src/kernel/xam/xam_enum.cpp":  "027e8f7ee0d1b38e54a1ae1652aad2766eac1fae4ce91a049ce2fcc3c5235d84",
-                                                          "src/system/xam/user_profile.cpp":  "84f4ce2dfc72816a695ed18447fa47032489acd50efec30dd1475ac428f365da"
+                                                          "src/system/xam/user_profile.cpp":  "d6932c86448e21fc0386895cff9400e56756ea85d3231b5a175845cea3ea72b5"
                                                       },
                                             "test":  "sdkcheck.Local profiles enumerate independently switch atomically and survive restart"
                                         },
@@ -723,7 +723,7 @@
                                                            },
                                             "files":  {
                                                           "src/kernel/xam/xam_ui.cpp":  "c5a93b435cb1b135e553c523b437985d2cacfa28a0118ae2c220ba3d9a83fa1a",
-                                                          "src/kernel/xam/xam_user.cpp":  "f8f184af1239887cd920a3205c7d6bac4f6c1afcb9f498b2050d1487aaaa850e",
+                                                          "src/kernel/xam/xam_user.cpp":  "679084f458f9adc32c00963b8cfc117549c0d2b6e620dd931e7f4e583879fb6e",
                                                           "src/kernel/xam/apps/xam_app.cpp":  "b7cde8af85114c7d6ae6bd321a46a11fe291030f2ad999554968079f9e0a0c68"
                                                       },
                                             "test":  "sdkcheck.Profile UI requests reach the system application without invented signin notifications"
@@ -752,7 +752,7 @@
                                             "files":  {
                                                           "include/rex/system/xobject.h":  "37930c4cdbf022d716b4033a2f278153f3535ef7a13b7b3ebb798d42dca8b319",
                                                           "src/kernel/xam/xam_enum.cpp":  "027e8f7ee0d1b38e54a1ae1652aad2766eac1fae4ce91a049ce2fcc3c5235d84",
-                                                          "src/kernel/xam/xam_misc.cpp":  "d6406921077ec432aeb4654b995fe87cb81acbf993bf2ea32168189e7a40e396"
+                                                          "src/kernel/xam/xam_misc.cpp":  "e86b6a749cebcb5e4da9b6621072f4c55d46daecfa16108eaf7effcb3652ac64"
                                                       },
                                             "test":  "sdkcheck.Local profile creation uses guest account and consumable operation handles"
                                         },
@@ -775,7 +775,7 @@
                                                                "src/kernel/xam/xam_msg.cpp":  "d7831f4a7ce73415336fbe5713f3de9a4071f0b905ab1f1ddc96e4441c461325"
                                                            },
                                             "files":  {
-                                                          "src/kernel/xam/xam_misc.cpp":  "d6406921077ec432aeb4654b995fe87cb81acbf993bf2ea32168189e7a40e396",
+                                                          "src/kernel/xam/xam_misc.cpp":  "e86b6a749cebcb5e4da9b6621072f4c55d46daecfa16108eaf7effcb3652ac64",
                                                           "src/kernel/xam/xam_msg.cpp":  "f8652a036a2679632523e6c0843d3049c0a378f0f3c871e37c1e9409157999ab"
                                                       },
                                             "test":  "sdkcheck.Profile device completion queries return results and honor nonblocking waits"
@@ -798,7 +798,7 @@
                                                                "src/kernel/xam/xam_user.cpp":  "b3101a12066fcfedb07019b26423d654da090c2ccfb08252a9d66b8f71eb2b93"
                                                            },
                                             "files":  {
-                                                          "src/kernel/xam/xam_user.cpp":  "f8f184af1239887cd920a3205c7d6bac4f6c1afcb9f498b2050d1487aaaa850e"
+                                                          "src/kernel/xam/xam_user.cpp":  "679084f458f9adc32c00963b8cfc117549c0d2b6e620dd931e7f4e583879fb6e"
                                                       },
                                             "test":  "sdkcheck.Local profile creation uses guest account and consumable operation handles"
                                         },
@@ -812,7 +812,7 @@
                                                            },
                                             "files":  {
                                                           "src/kernel/xam/xam_ui.cpp":  "c5a93b435cb1b135e553c523b437985d2cacfa28a0118ae2c220ba3d9a83fa1a",
-                                                          "src/kernel/xam/xam_user.cpp":  "f8f184af1239887cd920a3205c7d6bac4f6c1afcb9f498b2050d1487aaaa850e",
+                                                          "src/kernel/xam/xam_user.cpp":  "679084f458f9adc32c00963b8cfc117549c0d2b6e620dd931e7f4e583879fb6e",
                                                           "src/kernel/xam/apps/xam_app.cpp":  "b7cde8af85114c7d6ae6bd321a46a11fe291030f2ad999554968079f9e0a0c68"
                                                       },
                                             "test":  "sdkcheck.Profile UI requests reach the system application without invented signin notifications"
@@ -826,9 +826,9 @@
                                                                "src/kernel/xam/xam_user.cpp":  "89bad7914e75acd64e54af5f6167312ae51a5e4e8fb3354281e02297e403d400"
                                                            },
                                             "files":  {
-                                                          "src/kernel/xam/xam_misc.cpp":  "d6406921077ec432aeb4654b995fe87cb81acbf993bf2ea32168189e7a40e396",
+                                                          "src/kernel/xam/xam_misc.cpp":  "e86b6a749cebcb5e4da9b6621072f4c55d46daecfa16108eaf7effcb3652ac64",
                                                           "src/kernel/xam/xam_ui.cpp":  "c5a93b435cb1b135e553c523b437985d2cacfa28a0118ae2c220ba3d9a83fa1a",
-                                                          "src/kernel/xam/xam_user.cpp":  "f8f184af1239887cd920a3205c7d6bac4f6c1afcb9f498b2050d1487aaaa850e"
+                                                          "src/kernel/xam/xam_user.cpp":  "679084f458f9adc32c00963b8cfc117549c0d2b6e620dd931e7f4e583879fb6e"
                                                       },
                                             "test":  "sdkcheck.Guide sign-out removes only the active local identity"
                                         },
@@ -904,8 +904,8 @@
                                                           "src/kernel/xboxkrnl/xboxkrnl_io_info.cpp":  "fccc74f557571afb7ec2d128b723bf7d2790e8edae9bd5757e764c3ad670b746",
                                                           "src/filesystem/devices/host_path_entry.cpp":  "2e596a2af494b8ca3de656f7c25a5f2c83edff3dc4d82b239e92c7cf0fcb0bc6",
                                                           "src/filesystem/devices/host_path_device.cpp":  "b1bfaed54b2140d4259e715d0333dc0d925ff89124c8aa6b530149d9415d937d",
-                                                          "include/rex/system/xam/user_profile.h":  "1aaae9190f78c62f1dd8a88015c54ddcbca8157847032da3c90c5065e4eee03b",
-                                                          "src/system/xam/user_profile.cpp":  "84f4ce2dfc72816a695ed18447fa47032489acd50efec30dd1475ac428f365da",
+                                                          "include/rex/system/xam/user_profile.h":  "ff1302506590e8b5cc483d7fc710cf55b7a69af6052f209a818ff04e1bff18ee",
+                                                          "src/system/xam/user_profile.cpp":  "d6932c86448e21fc0386895cff9400e56756ea85d3231b5a175845cea3ea72b5",
                                                           "include/rex/system/xam/content_manager.h":  "bdf1e86f8d7ca5cfce30613ff3595a76f1fb15819fe44c41788e625d3566e938",
                                                           "src/system/xam/content_manager.cpp":  "497db31a7aa6caee8e5aaf4fb632ddfc3bc7f72b839d818c95dc6531bbef559b",
                                                           "src/kernel/xam/xam_content.cpp":  "7d8b3c7516223c258024303e3f2d8ce93e34a0c5b85da3495f13dcce977f0033"
@@ -973,7 +973,7 @@
                                                            },
                                             "files":  {
                                                           "src/kernel/xam/xam_info.cpp":  "ec03633f74c82929d69cec46ed7451673abbf286f03aec4f3a72e3f61d82c2be",
-                                                          "src/kernel/xam/xam_misc.cpp":  "d6406921077ec432aeb4654b995fe87cb81acbf993bf2ea32168189e7a40e396",
+                                                          "src/kernel/xam/xam_misc.cpp":  "e86b6a749cebcb5e4da9b6621072f4c55d46daecfa16108eaf7effcb3652ac64",
                                                           "include/rex/audio/audio_system.h":  "71cc56c9cac14a44784e7f8b3beb11191d262d1dd451fa2f3d6ce5684d95960c",
                                                           "include/rex/system/interfaces/audio.h":  "ac584d917f4ab0d74d17138a95baf28ef2412656e8da4da36928f7eee54095a8",
                                                           "src/audio/audio_system.cpp":  "c59d2f8658c878ea52cc5f4751001fa8c52873ae8e995f1e307fba788d35cce9",
@@ -1069,6 +1069,23 @@
     "src/kernel/xam/xam_input.cpp": "16b99785eb442c048ff5d6e988200580971b418c28aa0ad02a94de495ea452d6"
   },
   "test": "tests/sdkcheck/system_ui_input_test.cpp"
+},
+{
+  "file": "patches/rexglue-sdk/0080-local-profile-tiles-and-flags.patch",
+  "sha256": "770b450e8acaabe86f317dd54a404faea766e746e0fe63e59f9c7d58cf52aef6",
+  "base_files": {
+    "include/rex/system/xam/user_profile.h": "1aaae9190f78c62f1dd8a88015c54ddcbca8157847032da3c90c5065e4eee03b",
+    "src/kernel/xam/xam_misc.cpp": "d6406921077ec432aeb4654b995fe87cb81acbf993bf2ea32168189e7a40e396",
+    "src/kernel/xam/xam_user.cpp": "f8f184af1239887cd920a3205c7d6bac4f6c1afcb9f498b2050d1487aaaa850e",
+    "src/system/xam/user_profile.cpp": "84f4ce2dfc72816a695ed18447fa47032489acd50efec30dd1475ac428f365da"
+  },
+  "files": {
+    "include/rex/system/xam/user_profile.h": "ff1302506590e8b5cc483d7fc710cf55b7a69af6052f209a818ff04e1bff18ee",
+    "src/kernel/xam/xam_misc.cpp": "e86b6a749cebcb5e4da9b6621072f4c55d46daecfa16108eaf7effcb3652ac64",
+    "src/kernel/xam/xam_user.cpp": "679084f458f9adc32c00963b8cfc117549c0d2b6e620dd931e7f4e583879fb6e",
+    "src/system/xam/user_profile.cpp": "d6932c86448e21fc0386895cff9400e56756ea85d3231b5a175845cea3ea72b5"
+  },
+  "test": "tests/sdkcheck/local_profile_gamercard_test.cpp"
 }
                                     ]
                     },

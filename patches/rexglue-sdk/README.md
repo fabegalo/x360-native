@@ -627,3 +627,31 @@ already received an empty state. Three gaps remained, all reproduced by
 No title special case. Live check (Castle Crashers, temporary instrumentation,
 removed): B held ~0.85 s after closing the Guide never reached the title; the
 next Start did.
+
+### 0080 — local profile gamercard statistics (2026-10-16)
+
+`include/rex/system/xam/user_profile.h`, `src/system/xam/user_profile.cpp`,
+`src/kernel/xam/xam_user.cpp`, `src/kernel/xam/xam_misc.cpp`. The original
+17559 XuiGamerCard (Guide → Profile) left its statistics blank:
+
+- `XamUserReadProfileSettingsEx` read the size pointer from r9. XAM 17559
+  (`816B16A8`) takes flags in r9 and the size pointer in r10; its own
+  `XamUserReadProfileSettings` wrapper (`816B1F28`) moves the pointer from r9
+  to r10 and passes zero flags. The request failed with `E_INVALIDARG`.
+- `XamReadTile`/`XamReadTileEx` were stubs. Local accounts have no gamer
+  picture, so they now report `ERROR_NOT_FOUND`, completing the overlapped
+  when one is given, instead of a synchronous success with no data. The
+  gamercard then continues with its other requests.
+- `XamUserIsGuest` and `XamUserGetCachedUserFlags` were stubs; local accounts
+  are not guests and have no cached Live flags (0).
+- `XPROFILE_GAMERCARD_TITLES_PLAYED` (`0x10040012`) now comes from the
+  signed-in account's own record, `<profile store>/<XUID>/titles-played.dat`
+  (`X360TP01`, big-endian count and sorted unique title IDs). A title is added
+  when a game starts with that account signed in; system titles (`FFFExxxx`)
+  and signed-out sessions are not recorded. Gamerscore and achievement counts
+  stay 0: there are no per-account unlock records yet.
+
+`tests/sdkcheck/local_profile_gamercard_test.cpp` covers both read ABIs, the
+per-XUID count across a session switch and a runtime restart, the system-title
+rejection and the tile completion. Live evidence:
+`docs/guide-composition-2026-10-16.md`.
