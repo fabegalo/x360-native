@@ -568,3 +568,14 @@ special case. No upstream equivalent identified; SDK pin unchanged.
 `sdkcheck.empty-resolve` exercises the actual helper with synthetic guest memory
 and registers. It fails without the patch (84/204 checks) and passes with it.
 Real Forza evidence and remaining fetch warnings: `docs/xenos-empty-resolves.md`.
+
+### 0077 — inactive vertex fetch proof (2026-10-15)
+
+Xenos D3D12: não rejeitar o draw por descritor inválido se a análise conservadora
+provar que todas as referências ao slot estão predicadas fora no draw atual.
+Sem índice/hash/título especial, sem permitir acesso inválido e sem marcar o
+slot como residente. Constantes atuais são reconsideradas a cada draw; casos
+não comprovados conservam a rejeição. Native/Vulkan não alterados.
+
+`sdkcheck.inactive-vertex-fetch`: 2.328 checks sintéticos; Forza e Castle reais,
+com os limites em [X2](../../docs/xenos-fetch-predication.md). Patch 0076 intacto.
