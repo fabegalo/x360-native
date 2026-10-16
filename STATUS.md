@@ -32,6 +32,10 @@ Nunca substituir módulos ou fontes originais entre versões de dashboard.
 ## Renderização e performance
 
 **Xenos é o padrão; Native está suspenso por decisão do mantenedor.**
+O Guide universal continua pendente: a investigação de 15/10 confirmou a falta
+de composição de sistema e preservou os hooks existentes. Correções de contexto,
+fechamento e inicialização original, com capturas e falhas, estão no
+[relatório do Guide](docs/guide-composition-2026-10-15.md).
 Patches 0076/0077 corrigem resolves vazios e fetches comprovadamente inativos,
 com 204 e 2.328 checks sintéticos respectivamente. Forza chegou à condução sem
 os erros diagnosticados; isso não estabelece ganho global de FPS.

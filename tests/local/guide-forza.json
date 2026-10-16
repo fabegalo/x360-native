@@ -1,0 +1,92 @@
+{
+  "seconds": 90,
+  "arguments": [],
+  "events": [
+    {
+      "vk": 13,
+      "scan": 28,
+      "action": "key",
+      "hold_ms": 120,
+      "at": 20
+    },
+    {
+      "name": "before-guide",
+      "action": "shot",
+      "at": 35
+    },
+    {
+      "vk": 71,
+      "scan": 34,
+      "action": "key",
+      "hold_ms": 120,
+      "at": 38
+    },
+    {
+      "name": "guide",
+      "action": "shot",
+      "at": 43
+    },
+    {
+      "vk": 72,
+      "scan": 35,
+      "action": "key",
+      "hold_ms": 120,
+      "at": 46
+    },
+    {
+      "name": "media",
+      "action": "shot",
+      "at": 50
+    },
+    {
+      "vk": 71,
+      "scan": 34,
+      "action": "key",
+      "hold_ms": 120,
+      "at": 53
+    },
+    {
+      "name": "closed",
+      "action": "shot",
+      "at": 58
+    },
+    {
+      "at": 60,
+      "action": "key",
+      "hold_ms": 120,
+      "vk": 71,
+      "scan": 34
+    },
+    {
+      "at": 64,
+      "action": "key",
+      "hold_ms": 120,
+      "vk": 80,
+      "scan": 25
+    },
+    {
+      "at": 67,
+      "action": "shot",
+      "name": "home-dialog"
+    },
+    {
+      "at": 70,
+      "action": "key",
+      "hold_ms": 120,
+      "vk": 85,
+      "scan": 22
+    },
+    {
+      "at": 73,
+      "action": "shot",
+      "name": "home-selection"
+    },
+    {
+      "at": 76,
+      "action": "key",
+      "hold_ms": 120,
+      "vk": 32,
+      "scan": 57
+    }
+  ]
+}

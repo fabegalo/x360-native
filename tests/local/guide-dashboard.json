@@ -1,0 +1,26 @@
+{
+  "seconds": 52,
+  "arguments": ["--dash17559_boot_intro=false"],
+  "events": [
+    {"at": 12, "action": "shot", "name": "dashboard"},
+    {"at": 13, "action": "key", "vk": 71, "scan": 34, "hold_ms": 120},
+    {"at": 13.2, "action": "shot", "name": "opening"},
+    {"at": 16, "action": "shot", "name": "guide"},
+    {"at": 17, "action": "key", "vk": 72, "scan": 35, "hold_ms": 120},
+    {"at": 20, "action": "shot", "name": "media"},
+    {"at": 21, "action": "key", "vk": 72, "scan": 35, "hold_ms": 120},
+    {"at": 24, "action": "shot", "name": "settings"},
+    {"at": 25, "action": "key", "vk": 78, "scan": 49, "hold_ms": 120},
+    {"at": 26, "action": "key", "vk": 78, "scan": 49, "hold_ms": 120},
+    {"at": 27, "action": "key", "vk": 78, "scan": 49, "hold_ms": 120},
+    {"at": 30, "action": "shot", "name": "games"},
+    {"at": 32, "action": "key", "vk": 8, "scan": 14, "hold_ms": 120},
+    {"at": 35, "action": "shot", "name": "closed-b"},
+    {"at": 36, "action": "key", "vk": 71, "scan": 34, "hold_ms": 120},
+    {"at": 39, "action": "shot", "name": "reopened"},
+    {"at": 40, "action": "key", "vk": 71, "scan": 34, "hold_ms": 120},
+    {"at": 43, "action": "shot", "name": "guide-button-again"},
+    {"at": 44, "action": "key", "vk": 8, "scan": 14, "hold_ms": 120},
+    {"at": 47, "action": "shot", "name": "closed-final"}
+  ]
+}

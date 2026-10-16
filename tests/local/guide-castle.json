@@ -1,0 +1,35 @@
+{
+  "seconds": 30,
+  "arguments": [],
+  "events": [
+    {
+      "action": "shot",
+      "at": 12,
+      "name": "before-guide"
+    },
+    {
+      "vk": 71,
+      "hold_ms": 120,
+      "action": "key",
+      "at": 14,
+      "scan": 34
+    },
+    {
+      "action": "shot",
+      "at": 18,
+      "name": "after-guide"
+    },
+    {
+      "vk": 8,
+      "hold_ms": 120,
+      "action": "key",
+      "at": 20,
+      "scan": 14
+    },
+    {
+      "action": "shot",
+      "at": 25,
+      "name": "after-back"
+    }
+  ]
+}
