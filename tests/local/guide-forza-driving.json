@@ -1,0 +1,19 @@
+{
+  "seconds": 290,
+  "arguments": [],
+  "events": [
+    {"at": 30, "action": "key", "vk": 13, "scan": 28, "hold_ms": 250},
+    {"at": 45, "action": "key", "vk": 13, "scan": 28, "hold_ms": 250},
+    {"at": 55, "action": "key", "vk": 32, "scan": 57, "hold_ms": 250},
+    {"at": 110, "action": "key", "vk": 32, "scan": 57, "hold_ms": 250},
+    {"at": 190, "action": "key", "vk": 32, "scan": 57, "hold_ms": 250},
+    {"at": 235, "action": "shot", "name": "driving"},
+    {"at": 240, "action": "key", "vk": 71, "scan": 34, "hold_ms": 120},
+    {"at": 245, "action": "shot", "name": "guide"},
+    {"at": 248, "action": "key", "vk": 72, "scan": 35, "hold_ms": 120},
+    {"at": 252, "action": "shot", "name": "media"},
+    {"at": 255, "action": "key", "vk": 71, "scan": 34, "hold_ms": 120},
+    {"at": 260, "action": "shot", "name": "closed"},
+    {"at": 270, "action": "shot", "name": "resumed"}
+  ]
+}

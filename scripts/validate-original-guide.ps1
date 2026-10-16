@@ -1,4 +1,4 @@
-#requires -Version 7.0
+#requires -Version 5.1
 # Explicit diagnostic only. Uses original guest UI and PID-scoped local input;
 # captures are evidence to review, never an automatic visual acceptance verdict.
 param(
@@ -13,6 +13,16 @@ param(
 $ErrorActionPreference='Stop'
 $root=(Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 . "$PSScriptRoot/benchmark-window.ps1"
+# Windows PowerShell 5.1 has no ProcessStartInfo.ArgumentList: quote each
+# argument with the CommandLineToArgvW rules instead.
+function Join-ProcessArguments([string[]]$Values){
+ ($Values | ForEach-Object {
+  if($_ -notmatch '[\s"]' -and $_){$_}else{'"'+(($_ -replace '(\\*)"','$1$1\"') -replace '(\\+)$','$1$1')+'"'}
+ }) -join ' '
+}
+function Stop-ProcessTree([Diagnostics.Process]$Process){
+ & taskkill.exe /PID $Process.Id /T /F 2>&1 | Out-Null
+}
 $exe=(Resolve-Path -LiteralPath $Executable).Path
 $game=(Resolve-Path -LiteralPath $GameRoot).Path
 $seed=(Resolve-Path -LiteralPath $SeedUserData).Path
@@ -24,14 +34,14 @@ if($out.StartsWith($seed.TrimEnd('\')+'\',[StringComparison]::OrdinalIgnoreCase)
 if([bool]$SystemUiHost -ne [bool]$SystemUiRoot){throw 'System UI host and original root must be supplied together'}
 $plan=Get-Content -LiteralPath $ScenarioFile -Raw | ConvertFrom-Json
 $seconds=[double]$plan.seconds
-if(![double]::IsFinite($seconds) -or $seconds -lt 5 -or $seconds -gt 300){throw 'Scenario duration must be 5..300 seconds'}
+if([double]::IsNaN($seconds) -or [double]::IsInfinity($seconds) -or $seconds -lt 5 -or $seconds -gt 300){throw 'Scenario duration must be 5..300 seconds'}
 foreach($arg in $plan.arguments){
  if($arg -ne '--dash17559_boot_intro=false'){throw 'Scenario arguments may only disable the dashboard intro'}
 }
 $previous=-1.0
 foreach($event in $plan.events){
  $at=[double]$event.at
- if(![double]::IsFinite($at) -or $at -lt 0 -or $at -lt $previous -or $at -ge $seconds){throw 'Events must be ordered within the scenario duration'}
+ if([double]::IsNaN($at) -or [double]::IsInfinity($at) -or $at -lt 0 -or $at -lt $previous -or $at -ge $seconds){throw 'Events must be ordered within the scenario duration'}
  $previous=$at
  if($event.action -eq 'shot'){
   if($event.name -notmatch '^[a-z0-9-]+$'){throw 'Invalid screenshot name'}
@@ -72,7 +82,7 @@ if($SystemUiHost){
 }
 $metadata['arguments']=$arguments
 $metadata | ConvertTo-Json -Depth 8 | Set-Content "$out/environment.json"
-foreach($arg in $arguments){$si.ArgumentList.Add($arg)}
+$si.Arguments=Join-ProcessArguments $arguments
 $p=$null;$clock=[Diagnostics.Stopwatch]::new();$failure=$null;$completed=0;$forced=$false
 try {
  $p=[Diagnostics.Process]::Start($si)
@@ -89,12 +99,12 @@ try {
    # PrintWindow can block. An owned helper has a separate five-second timeout.
    $capture=[Diagnostics.ProcessStartInfo]::new()
    $capture.FileName=(Get-Process -Id $PID).Path;$capture.UseShellExecute=$false;$capture.CreateNoWindow=$true
-   foreach($arg in @('-NoProfile','-File',"$PSScriptRoot/benchmark-window.ps1",'-CaptureProcessId',"$($p.Id)",'-CapturePath',"$out/$($event.name).png")){$capture.ArgumentList.Add($arg)}
+   $capture.Arguments=Join-ProcessArguments @('-NoProfile','-ExecutionPolicy','Bypass','-File',"$PSScriptRoot/benchmark-window.ps1",'-CaptureProcessId',"$($p.Id)",'-CapturePath',"$out/$($event.name).png")
    $helper=[Diagnostics.Process]::Start($capture)
    try {
     if(!$helper.WaitForExit(5000)){throw 'Capture timeout'}
     if($helper.ExitCode -ne 0){throw 'Capture failed'}
-   }finally{if(!$helper.HasExited){$helper.Kill($true);[void]$helper.WaitForExit(1000)};$helper.Dispose()}
+   }finally{if(!$helper.HasExited){Stop-ProcessTree $helper;[void]$helper.WaitForExit(1000)};$helper.Dispose()}
   }
   $completed++
   @{event=$event;actual_seconds=$clock.Elapsed.TotalSeconds;pid=$p.Id} | ConvertTo-Json -Depth 4 -Compress | Add-Content "$out/events.jsonl"
@@ -105,7 +115,7 @@ try {
   $exitedBeforeCleanup=$p.HasExited
   if(!$p.HasExited){
    [void]$p.CloseMainWindow()
-   if(!$p.WaitForExit(5000)){$forced=$true;$p.Kill($true);[void]$p.WaitForExit(1000)}
+   if(!$p.WaitForExit(5000)){$forced=$true;Stop-ProcessTree $p;[void]$p.WaitForExit(1000)}
   }
   if(!$failure -and $forced){$failure='Title required forced termination at cleanup'}
   if(!$failure -and $p.ExitCode -ne 0){$failure="Title exited with code $($p.ExitCode)"}
