@@ -50,6 +50,7 @@ add_executable(x360n_tests
     supervisor/process_test.cpp
     supervisor/session_test.cpp
     supervisor/renderer_settings_test.cpp
+    supervisor/console_settings_test.cpp
     supervisor/session_process_test.cpp
     supervisor/preparation_test.cpp
 )

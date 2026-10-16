@@ -31,7 +31,7 @@ dependência externa (`gdiplus` e `uxtheme` são do Windows). Código em
 | Biblioteca | Lista de cartões (nome, Title ID, versão, selo Pronto/Preparando/Importado/Não suportado/Erro), busca (Ctrl+F), filtros Todos/Prontos/Preparar/Atenção, painel da seleção com a ação disponível |
 | Importar | Área de soltar arquivo/pasta, ISO/GDFX, XBLA/STFS e pasta extraída; progresso por etapas (Extração → Verificação → Importação) |
 | Dashboard | Versões da dashboard original, estado de cada preparação e requisitos (arquivos originais, preparação AOT, ambiente do PC) |
-| Configurações | Renderer global (Xenos padrão; Native experimental somente com o acesso de desenvolvimento existente), armazenamento e ambiente (pasta do ambiente, saves, dados locais, verificação), idioma PT-BR/EN, dados do PC |
+| Configurações | Renderer global (Xenos padrão; Native experimental somente com o acesso de desenvolvimento existente), armazenamento e ambiente, idioma PT-BR/EN do desktop, dados do PC e idioma/localidade independentes do console ([contratos e validação](console-language-locale.md)) |
 | Diagnóstico | Detalhes, requisitos e logs da operação |
 
 O banner no topo mostra a operação em andamento (título, mensagem, tempo,

@@ -21,6 +21,7 @@
 #include "workspace_lease.h"
 #include "sha256.h"
 #include "renderer_settings.h"
+#include "console_settings.h"
 
 namespace fs = std::filesystem;
 using namespace x360n;
@@ -36,7 +37,8 @@ void VerifyDistribution(const fs::path& directory) {
 }
 constexpr UINT kFinished = WM_APP + 1, kProgress = WM_APP + 2, kDetected = WM_APP + 3, kInitialized = WM_APP + 4, kInspected = WM_APP + 5, kOpenEnvironment = WM_APP + 6, kPreview = WM_APP + 20;
 enum { kFolder = 101, kTargets, kCheck, kImport, kPrepare, kLaunch, kDetails, kData, kCancel, kLanguage, kInstall, kStorage, kPrimary, kSettings, kImportFolder, kDashboards, kGames, kHome, kImportPage, kAddContent, kLibrary, kGameList, kRenderer, kNativeDevelopment,
-       kSearch, kFilter0, kFilter1, kFilter2, kFilter3, kLangPt, kLangEn, kRendererNative, kRetry, kDismiss, kBannerLibrary, kBannerDetails };
+       kSearch, kFilter0, kFilter1, kFilter2, kFilter3, kLangPt, kLangEn, kRendererNative, kRetry, kDismiss, kBannerLibrary, kBannerDetails,
+       kConsoleLanguage, kConsoleCountry };
 bool english = false;
 std::string Tr(const char* pt, const char* en) { return english ? en : pt; }
 std::wstring Wide(const std::string& text) {
@@ -62,6 +64,7 @@ struct Fonts { HFONT body{}, bold{}, caption{}, headline{}, big{}, icon{}, icon_
 struct App {
   HWND library_list{}, window{}, subtitle{}, root_text{}, status{}, details{}, headline{}, footer{}, search{};
   HWND activity_text{}, drop_text{}, renderer_hint{}, env_text{}, hot{};
+  HWND console_language_label{}, console_country_label{}, console_hint{};
   Fonts fonts;
   HICON icon{};
   std::vector<HWND> all;
@@ -70,6 +73,7 @@ struct App {
   std::string startup_error;
   Environment environment;
   RendererSettings renderer_settings;
+  ConsoleSettings console_settings;
   std::vector<Target> targets;
   struct CheckedTarget { Inspection state; std::vector<std::string> library; bool added = false; };
   std::vector<CheckedTarget> checked;
@@ -108,6 +112,8 @@ struct App {
 #ifndef X360N_DISTRIBUTION
   bool preview_empty = false;
   fs::path auto_import;  // review aid: import this path once the first verification finishes
+  fs::path capture_settings;  // self-capture after loading real preferences; no input automation
+  unsigned capture_ticks = 0;
 #endif
   ~App() {
     if (worker.joinable()) worker.join();
@@ -384,15 +390,15 @@ void Layout(App& a) {
       const bool two = cw >= s(700);
       const int gap = s(16);
       const int colw = two ? (cw - gap) / 2 : cw;
-      const int hg = s(314), hs = s(188), hl = s(100), hy = s(142);
+      const int hg = s(314), hs = s(188), hl = s(300), hy = s(190);
       int lx = cx, rx = two ? cx + colw + gap : cx;
       int ly = yc, ry = two ? yc : yc + hg + gap;
       g.cards[0] = rect(lx, ly, colw, hg);                     // graphics
       if (two) { g.cards[1] = rect(rx, ry, colw, hs); } else { g.cards[1] = rect(lx, ly + hg + gap, colw, hs); }
       const int ly2 = two ? ly + hg + gap : g.cards[1].bottom + gap;
-      g.cards[2] = rect(lx, ly2, colw, hl);                    // language
-      const int sy2 = two ? ry + hs + gap : g.cards[2].bottom + gap;
-      g.cards[3] = rect(two ? rx : lx, sy2, colw, hy);         // system
+      g.cards[2] = rect(two ? rx : lx, two ? ry + hs + gap : ly2, colw, hl); // console
+      const int sy2 = two ? ly2 : g.cards[2].bottom + gap;
+      g.cards[3] = rect(lx, sy2, colw, hy);                   // desktop
       const RECT& gf = g.cards[0];
       put(a.renderer_hint, gf.left + s(24), gf.top + s(52), colw - s(48), s(60));
       const int ow = colw - s(48);
@@ -407,10 +413,15 @@ void Layout(App& a) {
       put(Item(a, kData), st.left + s(24), st.top + s(138), bw2, s(38));
       put(Item(a, kCheck), st.left + s(24) + bw2 + s(12), st.top + s(138), bw2, s(38));
       const RECT& lg = g.cards[2];
-      put(Item(a, kLangPt), lg.left + s(24), lg.top + s(48), s(140), s(36));
-      put(Item(a, kLangEn), lg.left + s(24) + s(148), lg.top + s(48), s(140), s(36));
+      put(a.console_language_label, lg.left + s(24), lg.top + s(50), ow, s(22));
+      put(Item(a, kConsoleLanguage), lg.left + s(24), lg.top + s(76), ow, s(300));
+      put(a.console_country_label, lg.left + s(24), lg.top + s(112), ow, s(22));
+      put(Item(a, kConsoleCountry), lg.left + s(24), lg.top + s(138), ow, s(300));
+      put(a.console_hint, lg.left + s(24), lg.top + s(178), ow, s(108));
       const RECT& sy = g.cards[3];
-      put(a.env_text, sy.left + s(24), sy.top + s(52), colw - s(48), sy.bottom - sy.top - s(64));
+      put(Item(a, kLangPt), sy.left + s(24), sy.top + s(48), s(140), s(36));
+      put(Item(a, kLangEn), sy.left + s(172), sy.top + s(48), s(140), s(36));
+      put(a.env_text, sy.left + s(24), sy.top + s(96), ow, s(82));
       break;
     }
     case Page::Diagnostics: {
@@ -420,7 +431,8 @@ void Layout(App& a) {
     }
   }
   a.geo = g;
-  for (auto h : a.all) if (std::find(placed.begin(), placed.end(), h) == placed.end() && IsWindowVisible(h)) ShowWindow(h, SW_HIDE);
+  for (auto h : a.all) if (std::find(placed.begin(), placed.end(), h) == placed.end() &&
+      (GetWindowLongPtrW(h, GWL_STYLE) & WS_VISIBLE)) ShowWindow(h, SW_HIDE);
   RedrawWindow(a.window, nullptr, nullptr, RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN);
 }
 void Enable(App& a) {
@@ -446,6 +458,8 @@ void Enable(App& a) {
   EnableWindow(Item(a, kRenderer), !a.busy && !a.root.empty());
   EnableWindow(Item(a, kRendererNative), !a.busy && !a.root.empty() && native);
   EnableWindow(Item(a, kNativeDevelopment), !a.busy && !a.root.empty());
+  EnableWindow(Item(a, kConsoleLanguage), !a.busy && !a.root.empty());
+  EnableWindow(Item(a, kConsoleCountry), !a.busy && !a.root.empty());
   EnableWindow(a.library_list, !a.busy);
   Layout(a);
 }
@@ -618,6 +632,13 @@ void Load(App& a, const fs::path& root) {
   if (a.environment.description.empty() || a.root != root) a.environment = CheckEnvironment(root);
   a.root = root;
   a.renderer_settings = root.empty() ? RendererSettings{} : LoadRendererSettings(ProjectPaths{root});
+  a.console_settings = root.empty() ? ConsoleSettings{} : LoadConsoleSettings(ProjectPaths{root});
+  for (int id : {kConsoleLanguage, kConsoleCountry}) {
+    const auto combo = Item(a, id);
+    const auto selected = id == kConsoleLanguage ? a.console_settings.language : a.console_settings.country;
+    for (int i = 0; i < SendMessageW(combo, CB_GETCOUNT, 0, 0); ++i)
+      if (SendMessageW(combo, CB_GETITEMDATA, i, 0) == selected) SendMessageW(combo, CB_SETCURSEL, i, 0);
+  }
   UpdateRendererControls(a);
   SetWindowTextW(a.root_text, root.empty() ? WTr("Nenhum ambiente selecionado", "No environment selected").c_str() : root.c_str());
   if (!root.empty() && a.targets.empty()) { a.targets = ReadCatalog(ProjectPaths{root}); a.checked.clear(); }
@@ -654,6 +675,9 @@ void SavePreferences(const App& a) {
   out << (english ? "en" : "pt") << '\n' << (portable ? "." : Utf8(a.root)) << '\n';
 }
 void Labels(App& a) {
+  Set(a.console_language_label, Tr("Idioma da dashboard, Guide e jogos", "Dashboard, Guide and game language"));
+  Set(a.console_country_label, Tr("Região / localidade", "Region / locale"));
+  Set(a.console_hint, Tr("Aplicado ao iniciar uma nova sessão.\r\nIdiomas disponíveis dependem dos recursos originais de cada versão e jogo.", "Applies when starting a new session.\r\nAvailable languages depend on each version's and game's original resources."));
   for (auto [id, pt, en] : {std::tuple{kFolder, "Selecionar ambiente", "Choose environment"},
        {kCheck, "Verificar ambiente", "Check environment"},
        {kDetails, "Diagnóstico", "Diagnostics"}, {kData, "Abrir dados locais", "Open local data"},
@@ -918,10 +942,11 @@ void PaintBanner(HDC dc, App& a) {
     }
   }
 }
-void Paint(App& a) {
-  PAINTSTRUCT ps{}; auto target = BeginPaint(a.window, &ps);
+void Paint(App& a, HDC capture = nullptr) {
+  PAINTSTRUCT ps{}; auto target = capture ? capture : BeginPaint(a.window, &ps);
   auto s = [&](int v) { return ui::S(v, a.dpi); };
   RECT paint = ps.rcPaint;
+  if (capture) GetClientRect(a.window, &paint);
   ui::Buffer buffer(target, paint.right - paint.left, paint.bottom - paint.top);
   HDC dc = buffer.dc();
   ui::Origin() = {-paint.left, -paint.top};
@@ -1029,15 +1054,15 @@ void Paint(App& a) {
       for (const auto& c : g.cards) card(c);
       DrawHeading(dc, a, g.cards[0], ui::icon::chip, WTr("Gráficos", "Graphics"));
       DrawHeading(dc, a, g.cards[1], ui::icon::save, WTr("Armazenamento e ambiente", "Storage and environment"));
-      DrawHeading(dc, a, g.cards[2], ui::icon::language, WTr("Idioma", "Language"));
-      DrawHeading(dc, a, g.cards[3], ui::icon::tools, WTr("Este computador", "This computer"));
+      DrawHeading(dc, a, g.cards[2], ui::icon::language, WTr("Console Xbox 360", "Xbox 360 console"));
+      DrawHeading(dc, a, g.cards[3], ui::icon::tools, WTr("Aplicativo desktop", "Desktop application"));
       break;
     }
     case Page::Diagnostics: card(g.details_card); break;
   }
   ui::Origin() = {0, 0};
   buffer.Flush(paint.left, paint.top);
-  EndPaint(a.window, &ps);
+  if (!capture) EndPaint(a.window, &ps);
 }
 void DrawButton(App& a, const DRAWITEMSTRUCT& item) {
   const auto style = a.styles[int(item.CtlID)];
@@ -1250,10 +1275,22 @@ LRESULT CALLBACK WndProc(HWND window, UINT message, WPARAM wp, LPARAM lp) {
       case WM_MEASUREITEM: {
         auto* measure = reinterpret_cast<MEASUREITEMSTRUCT*>(lp);
         if (measure->CtlType == ODT_LISTBOX) { measure->itemHeight = UINT(ui::S(76, a->dpi)); return TRUE; }
+        if (measure->CtlType == ODT_COMBOBOX) { measure->itemHeight = UINT(ui::S(24, a->dpi)); return TRUE; }
         break;
       }
       case WM_DRAWITEM: {
         auto* item = reinterpret_cast<DRAWITEMSTRUCT*>(lp);
+        if (item->CtlType == ODT_COMBOBOX) {
+          ui::Fill(item->hDC, item->rcItem, item->itemState & ODS_SELECTED ? ui::Mix(P.surface, P.accent, 18) : P.surface);
+          if (item->itemID != UINT(-1)) {
+            wchar_t text[256]{}; SendMessageW(item->hwndItem, CB_GETLBTEXT, item->itemID, reinterpret_cast<LPARAM>(text));
+            auto rect = item->rcItem; rect.left += ui::S(8, a->dpi);
+            ui::Text(item->hDC, a->fonts.body, text, rect, item->itemState & ODS_DISABLED ? P.muted : P.text,
+                     DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS);
+          }
+          if (item->itemState & ODS_FOCUS) DrawFocusRect(item->hDC, &item->rcItem);
+          return TRUE;
+        }
         if (item->CtlType == ODT_LISTBOX) DrawRow(*a, *item); else DrawButton(*a, *item);
         return TRUE;
       }
@@ -1307,6 +1344,19 @@ LRESULT CALLBACK WndProc(HWND window, UINT message, WPARAM wp, LPARAM lp) {
         Button(*a, kCheck, Kind::Secondary, nullptr, 2);
         Button(*a, kLangPt, Kind::Chip, nullptr, 2);
         Button(*a, kLangEn, Kind::Chip, nullptr, 2);
+        a->console_language_label = Control(*a, L"STATIC", L"", 0);
+        a->console_country_label = Control(*a, L"STATIC", L"", 0);
+        a->console_hint = Control(*a, L"STATIC", L"", 0);
+        for (int id : {kConsoleLanguage, kConsoleCountry}) {
+          const auto combo = Control(*a, L"COMBOBOX", L"", CBS_DROPDOWNLIST | CBS_OWNERDRAWFIXED | CBS_HASSTRINGS | WS_VSCROLL | WS_TABSTOP, id);
+          auto add = [&](uint32_t value, const char* name) {
+            const auto text = Wide(name);
+            const auto index = SendMessageW(combo, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(text.c_str()));
+            SendMessageW(combo, CB_SETITEMDATA, index, value);
+          };
+          if (id == kConsoleLanguage) for (const auto& v : ConsoleLanguages()) add(v.id, v.name);
+          else for (const auto& v : ConsoleLocales()) add(v.country, v.name);
+        }
         a->env_text = Control(*a, L"STATIC", L"", 0);
         a->details = Control(*a, L"EDIT", L"", ES_MULTILINE | ES_READONLY | ES_AUTOVSCROLL | WS_VSCROLL | WS_TABSTOP);
         SetWindowTheme(a->library_list, L"DarkMode_Explorer", nullptr);
@@ -1385,6 +1435,19 @@ LRESULT CALLBACK WndProc(HWND window, UINT message, WPARAM wp, LPARAM lp) {
         if (id == kData && !a->root.empty()) { auto p = a->root / ".local"; fs::create_directories(p); ShellExecuteW(window, L"open", p.c_str(), nullptr, nullptr, SW_SHOWNORMAL); return 0; }
         if (id == kCancel) { a->cancel = true; Set(a->activity_text, Tr("Cancelando... Aguarde a etapa atual terminar com segurança.", "Cancelling... Wait for the current step to finish safely.")); return 0; }
         if (a->busy) return 0;
+        if (id == kConsoleLanguage || id == kConsoleCountry) {
+          if (a->root.empty() || HIWORD(wp) != CBN_SELCHANGE) return 0;
+          const auto combo = Item(*a, id);
+          const auto selected = SendMessageW(combo, CB_GETCURSEL, 0, 0);
+          if (selected == CB_ERR) return 0;
+          auto settings = a->console_settings;
+          const auto value = uint32_t(SendMessageW(combo, CB_GETITEMDATA, selected, 0));
+          if (id == kConsoleLanguage) settings.language = value; else settings.country = value;
+          WorkspaceLease lease(ProjectPaths{a->root});
+          SaveConsoleSettings(ProjectPaths{a->root}, settings);
+          a->console_settings = settings;
+          return 0;
+        }
         if (id == kRenderer || id == kRendererNative || id == kNativeDevelopment) {
           if (a->root.empty()) return 0;
           auto settings = a->renderer_settings;
@@ -1495,6 +1558,53 @@ LRESULT CALLBACK WndProc(HWND window, UINT message, WPARAM wp, LPARAM lp) {
         return 0;
       }
       case WM_TIMER: {
+#ifndef X360N_DISTRIBUTION
+        if (!a->capture_settings.empty() && !a->busy && !a->initializing && ++a->capture_ticks > 10) {
+          const auto output = std::move(a->capture_settings); a->capture_settings.clear();
+          auto state_path = output; state_path += ".state.txt";
+          std::ofstream state(state_path);
+          for (int id : {kConsoleLanguage, kConsoleCountry}) {
+            const auto combo = Item(*a, id);
+            state << id << " count=" << SendMessageW(combo, CB_GETCOUNT, 0, 0)
+                  << " selected=" << SendMessageW(combo, CB_GETCURSEL, 0, 0) << '\n';
+          }
+          state.close();
+          a->settings = true; a->show_details = false;
+          SetPageTexts(*a); Layout(*a);
+          ShowWindow(window, SW_SHOWNOACTIVATE);
+          RedrawWindow(window, nullptr, nullptr, RDW_INVALIDATE | RDW_UPDATENOW | RDW_ALLCHILDREN);
+          RECT client{}; GetClientRect(window, &client);
+          HDC source = GetDC(window), dc = CreateCompatibleDC(source);
+          HBITMAP bitmap = CreateCompatibleBitmap(source, client.right, client.bottom);
+          const auto old = SelectObject(dc, bitmap);
+          Paint(*a, dc);
+          // Render our own controls into the same surface, even with a hidden
+          // parent. This does not capture or operate any other application.
+          for (auto child : a->all) {
+            if (!(GetWindowLongPtrW(child, GWL_STYLE) & WS_VISIBLE)) continue;
+            RECT rect{}; GetWindowRect(child, &rect);
+            MapWindowPoints(nullptr, window, reinterpret_cast<POINT*>(&rect), 2);
+            const auto saved_dc = SaveDC(dc);
+            SetViewportOrgEx(dc, rect.left, rect.top, nullptr);
+            IntersectClipRect(dc, 0, 0, rect.right - rect.left, rect.bottom - rect.top);
+            SendMessageW(child, WM_PRINT, reinterpret_cast<WPARAM>(dc), PRF_CLIENT | PRF_ERASEBKGND | PRF_CHILDREN);
+            RestoreDC(dc, saved_dc);
+          }
+          SelectObject(dc, old); DeleteDC(dc); ReleaseDC(window, source);
+          bool saved = false;
+          {
+            UINT count = 0, size = 0; Gdiplus::GetImageEncodersSize(&count, &size);
+            std::vector<uint8_t> storage(size);
+            auto* codecs = reinterpret_cast<Gdiplus::ImageCodecInfo*>(storage.data());
+            Gdiplus::GetImageEncoders(count, size, codecs);
+            Gdiplus::Bitmap image(bitmap, nullptr);
+            for (UINT i = 0; i < count; ++i) if (std::wstring_view(codecs[i].MimeType) == L"image/png")
+              saved = image.Save(output.c_str(), &codecs[i].Clsid) == Gdiplus::Ok;
+          }
+          DeleteObject(bitmap);
+          DestroyWindow(window); PostQuitMessage(saved ? 0 : 1); return 0;
+        }
+#endif
         if (wp == 2) {
           if (!a->busy) { KillTimer(window, 2); return 0; }
           if (a->geo.banner_on && a->busy) {
@@ -1684,6 +1794,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show) {
     else if (option == L"--lang" && i + 1 < count) english = std::wstring(args[++i]) == L"en";
     else if (option == L"--dpi" && i + 1 < count) g_dpi_override = UINT(_wtoi(args[++i]));
     else if (option == L"--import" && i + 1 < count) app.auto_import = args[++i];
+    else if (option == L"--capture-settings" && i + 1 < count) app.capture_settings = args[++i];
 #endif
   }
   LocalFree(args);

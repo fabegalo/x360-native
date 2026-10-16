@@ -655,3 +655,17 @@ next Start did.
 per-XUID count across a session switch and a runtime restart, the system-title
 rejection and the tile completion. Live evidence:
 `docs/guide-composition-2026-10-16.md`.
+
+### 0081 — console language ABIs and country (2026-10-16)
+
+`xam_info.cpp`, `xam_locale.cpp`, `xam_misc.cpp`, `xboxkrnl_xconfig.cpp`.
+Read the chosen console language in XGetLanguage (base), XTLGetLanguageV2
+(through Polish/Russian) and XamGetLanguage (extended). Preserve ABI fallback
+limits; reject reserved language 10. XamGetCountry now returns the configured
+country instead of residual r3. XConfig reads agree with these getters;
+out-of-range countries no longer wrap in locale lookup. Unsupported guest
+writes return explicit errors rather than pretending to persist settings.
+
+Regression: `tests/sdkcheck/xam_language_test.cpp`; desktop/session evidence
+and contract references: `docs/console-language-locale.md`. The patch changes
+no original resource, license region, AV region or dashboard module mapping.

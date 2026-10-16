@@ -17,6 +17,7 @@
 #include <functional>
 #include <memory>
 #include <vector>
+#include <chrono>
 #include <rex/ppc/func.h>
 #include <rex/input/input_system.h>
 #include <rex/input/flags.h>
@@ -25,6 +26,8 @@ extern "C" REX_FUNC(__imp__XamShowGuideUI);
 
 REXCVAR_DEFINE_BOOL(dash17559_signin_ui, false, "Dashboard 17559",
                    "Submit the original Sign-in request once at the first dashboard frame (manual validation)");
+REXCVAR_DEFINE_UINT32(dash17559_guide_probe_seconds, 0, "Diagnostics",
+                     "Request original Guide once after 1..120 seconds; zero disables the diagnostic");
 
 namespace dash17559 {
 using rex::X_HRESULT;
@@ -181,6 +184,22 @@ void InstallSystemUi(rex::Runtime& runtime, std::string drive, std::string nativ
     ctx->r3.u64 = 0;
     __imp__XamShowGuideUI(*ctx, runtime.memory()->virtual_membase());
   };
+  // Opt-in service-level validation without desktop input or UI automation.
+  // No clock reads or wrapper in ordinary sessions.
+  const auto probe = REXCVAR_GET(dash17559_guide_probe_seconds);
+  if (probe > 0 && probe <= 120) {
+    poll_guide = [&runtime, poll = std::move(poll_guide), probe,
+                  start = std::chrono::steady_clock::now(), submitted = false]() mutable {
+      poll();
+      if (submitted || std::chrono::steady_clock::now() - start < std::chrono::seconds(probe)) return;
+      submitted = true;
+      if (draw_ui || pending_ui) return;
+      auto* ctx = rex::system::XThread::GetCurrentThread()->thread_state()->context();
+      ctx->r3.u64 = 0;
+      __imp__XamShowGuideUI(*ctx, runtime.memory()->virtual_membase());
+      REXLOG_INFO("17559 diagnostic: original Guide service requested, result={:08X}", ctx->r3.u32);
+    };
+  }
   // Every title presents through VdSwap: run system frames there, not from
   // title-specific render hooks.
   rex::kernel::xboxkrnl::SetSystemSwapCallback(&SystemSwap);

@@ -2,6 +2,7 @@
 #include <catch2/catch_message.hpp>
 #include "child_process.h"
 #include "session_profile.h"
+#include "console_settings.h"
 #include "preparation_fixture.h"
 #include "scratch.h"
 #include <algorithm>
@@ -47,6 +48,19 @@ struct Fixture {
         root, root / "out.log", root / "err.log", 90s});
   }
 };
+}
+TEST_CASE("console preferences survive title handoffs and reload on session restart", "[console-settings][cli]") {
+  Fixture f("locale");
+  SaveConsoleSettings(f.paths, {9, 13});
+  auto result = f.Run();
+  INFO(Read(f.root / "err.log"));
+  REQUIRE(result.exit_code == 0);
+  CHECK(Read(f.paths.inputs() / "console-observed.txt") == "9 13\n9 13\n9 13\n");
+  // First child changes the saved preferences. The running session retains its
+  // snapshot, while a new supervisor process reads the new values.
+  result = f.Run();
+  REQUIRE(result.exit_code == 0);
+  CHECK(Read(f.paths.inputs() / "console-observed.txt") == "9 13\n9 13\n9 13\n1 103\n1 103\n1 103\n");
 }
 TEST_CASE("session survives 80 transitions with intact handoffs and states", "[session][cli]") {
   Fixture f("healthy");

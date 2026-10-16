@@ -1,5 +1,6 @@
 // Synthetic session participant. Uses the original binary handoff protocol.
 #include "session_profile.h"
+#include "console_settings.h"
 #include <CLI/CLI.hpp>
 #include <chrono>
 #include <thread>
@@ -35,6 +36,11 @@ int main(int argc, char** argv) {
   } else if (!dashboard) return 72;
   if ((step % 2 == 0) != dashboard) return 73;
   std::ofstream(root / "observed.txt", std::ios::app) << step << ' ' << dashboard << '\n';
+  if (mode == "locale") {
+    std::ofstream(root / "console-observed.txt", std::ios::app | std::ios::binary)
+        << arg("--user_language=") << ' ' << arg("--user_country=") << '\n';
+    if (!step) SaveConsoleSettings(ProjectPaths{root.parent_path().parent_path()}, {1, 103});
+  }
   // Real interaction is represented by a dwell every 16 launches. The other
   // transitions deliberately form fast bursts to test watchdog recovery.
   if (mode == "healthy" && step % 16 == 15)
@@ -48,7 +54,7 @@ int main(int argc, char** argv) {
   request.kind = dashboard ? LaunchRequest::Image : LaunchRequest::Dashboard;
   request.flags = dashboard ? 0 : 0x100;
   if (dashboard) request.path = PathUtf8(root / "game.xex");
-  if (step == 80) { request.kind = LaunchRequest::WindowClose; request.path.clear(); }
+  if (step == 80 || (mode == "locale" && step == 2)) { request.kind = LaunchRequest::WindowClose; request.path.clear(); }
   if (!dashboard && mode == "invalid-flags") request.flags = 0x200;
   if (!dashboard && mode == "invalid-target") {
     request.kind = LaunchRequest::Image; request.flags = 0;

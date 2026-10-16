@@ -9,8 +9,8 @@ etapa histórica não certificam automaticamente o build atual nem outros títul
 
 Windows x64/D3D12 é o ambiente demonstrado. Linux, macOS, ARM64 e Windows limpo
 continuam sem aceite funcional completo. ReXGlue v0.10.0 permanece fixado em
-`f5337cdc947ff6d4c4196737e2c807a48f2a1fc2`, LLVM 22.1.8, **79 patches ativos**
-no [lock](deps.lock.json); numeração até 0080, com 0073 retirado.
+`f5337cdc947ff6d4c4196737e2c807a48f2a1fc2`, LLVM 22.1.8, **80 patches ativos**
+no [lock](deps.lock.json); numeração até 0081, com 0073 retirado.
 O submódulo modificado pelos patches/materialização do libmspack é esperado.
 Nunca substituir módulos ou fontes originais entre versões de dashboard.
 
@@ -30,6 +30,15 @@ Nunca substituir módulos ou fontes originais entre versões de dashboard.
 | Desktop | Interface Windows redesenhada, biblioteca, diagnóstico, seleção global de renderer e preferências | Windows limpo, acessibilidade e aceite completo de primeira utilização pendentes. [Interface](docs/desktop-ui.md), [Preparação](docs/desktop-preparation.md) |
 
 ## Renderização e performance
+
+Idioma/localidade (16/10): seleção independente no desktop, persistida por
+ambiente e repassada aos processos da sessão. Patch 0081 corrige os getters
+XAM/XConfig e preserva as ABIs de idioma antigas. Dashboard/Guide Retail 17559
+em PT-BR após reinicialização; Forza em português confirmado pelo mantenedor.
+3 casos/800 asserções de preferências/processos e 3 casos/1.121 asserções XAM.
+Escritas pelas configurações originais e outras versões ainda pendentes;
+builds visuais diagnósticos, sem renovar recibos de preparação de produção.
+[Evidências e limites](docs/console-language-locale.md).
 
 **Xenos é o padrão; Native está suspenso por decisão do mantenedor.**
 O Guide original 17559 é composto pelo buffer de comandos de sistema da própria

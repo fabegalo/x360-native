@@ -9,6 +9,7 @@ add_library(x360n_core STATIC
     report.cpp
     session_profile.cpp
     renderer_settings.cpp
+    console_settings.cpp
     session_window.cpp
     workspace_lease.cpp
 )

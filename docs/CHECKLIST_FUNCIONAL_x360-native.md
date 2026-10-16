@@ -279,6 +279,11 @@ os testes do serviço não promovem esse aceite. Evidências e limites:
 ## 8. Configurações e funções locais do sistema — P1
 
 - [ ] Alterar idioma e região utilizando os recursos disponíveis para a versão, com persistência.
+  Implementado no desktop em 16/10: 16 idiomas e 42 localidades independentes,
+  persistência e contratos XAM/XConfig testados. Retail 17559/Guide em PT-BR
+  após reinicialização; Forza confirmado em português pelo mantenedor.
+  Escrita pelas configurações originais e aceite das outras versões pendentes
+  ([evidências e limites](console-language-locale.md)).
 - [ ] Fornecer data, hora e fuso coerentes às interfaces e jogos.
 - [ ] Aplicar opções de vídeo, proporção, áudio e controles efetivamente suportadas, sem configurações de fachada.
 - [ ] Alterar temas, imagens de jogador e preferências visuais quando presentes na dashboard.
