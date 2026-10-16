@@ -1,0 +1,141 @@
+diff --git a/include/rex/graphics/util/draw.h b/include/rex/graphics/util/draw.h
+--- a/include/rex/graphics/util/draw.h
++++ b/include/rex/graphics/util/draw.h
+@@ -496,6 +496,11 @@
+   reg::RB_COPY_DEST_INFO copy_dest_info;
+   ResolveCopyDestCoordinateInfo copy_dest_coordinate_info;
+ 
++  // patch 0087: the host keeps k_16_16[_16_16] render targets as the guest's
++  // s5.10 fixed-point integers (value * 1024), so copying them to the same
++  // format as signed integers with exponent bias 10 is a bitwise copy.
++  bool fixed16_s5_10_storage;
++
+   // The address of the texture or the location within the texture that
+   // copy_dest_coordinate_info.offset_x/y_div_8 - the origin of the copy
+   // destination - is relative to.
+@@ -581,9 +586,19 @@
+ // color render target formats are properly emulated as -32...32, true if
+ // emulated as snorm, with range limited to -1...1, but with correct blending
+ // within that range.
++// fixed16_s5_10_storage (patch 0087): the backend stores fixed-point
++// k_16_16[_16_16] render targets exactly as the guest's s5.10 integers.
+ bool GetResolveInfo(const RegisterFile& regs, const memory::Memory& memory,
+                     uint32_t draw_resolution_scale_x, uint32_t draw_resolution_scale_y,
+                     bool fixed_rg16_truncated_to_minus_1_to_1,
+-                    bool fixed_rgba16_truncated_to_minus_1_to_1, ResolveInfo& info_out);
++                    bool fixed_rgba16_truncated_to_minus_1_to_1, ResolveInfo& info_out,
++                    bool fixed16_s5_10_storage = false);
++
++// patch 0087: multiplier applied to pixel shader color output for a render
++// target. Fixed-point k_16_16[_16_16] are s5.10 on the guest (-32...31.999,
++// stored as value * 1024). When the host keeps them as SNORM16 after dividing
++// by 32, 32768/32767 makes the SNORM16 integer equal to value * 1024.
++float GetColorExpBiasScale(xenos::ColorRenderTargetFormat format, int32_t exp_bias,
++                           bool fixed16_as_full_range_snorm);
+ 
+ }  // namespace rex::graphics::draw_util
+diff --git a/src/graphics/util/draw.cpp b/src/graphics/util/draw.cpp
+--- a/src/graphics/util/draw.cpp
++++ b/src/graphics/util/draw.cpp
+@@ -765,11 +765,13 @@
+ bool GetResolveInfo(const RegisterFile& regs, const memory::Memory& memory,
+                     uint32_t draw_resolution_scale_x, uint32_t draw_resolution_scale_y,
+                     bool fixed_rg16_truncated_to_minus_1_to_1,
+-                    bool fixed_rgba16_truncated_to_minus_1_to_1, ResolveInfo& info_out) {
++                    bool fixed_rgba16_truncated_to_minus_1_to_1, ResolveInfo& info_out,
++                    bool fixed16_s5_10_storage) {
+   // Don't pass uninitialized values to shaders, not to leak data to frame
+   // captures. Also initialize an invalid resolve to empty.
+   info_out.coordinate_info.packed = 0;
+   info_out.height_div_8 = 0;
++  info_out.fixed16_s5_10_storage = fixed16_s5_10_storage;
+ 
+   auto rb_copy_control = regs.Get<reg::RB_COPY_CONTROL>();
+   info_out.rb_copy_control = rb_copy_control;
+@@ -1126,7 +1128,18 @@
+   bool is_depth = IsCopyingDepth();
+   ResolveEdramInfo edram_info = is_depth ? depth_edram_info : color_edram_info;
+   bool source_is_64bpp = !is_depth && color_edram_info.format_is_64bpp != 0;
+-  if (is_depth ||
++  // patch 0087: s5.10 value * 2^10 as a signed integer is the stored integer.
++  // The full copy shaders do not implement integer destinations.
++  const auto source_format = xenos::ColorRenderTargetFormat(color_edram_info.format);
++  const bool fixed16_raw_integer_copy =
++      !is_depth && fixed16_s5_10_storage && copy_dest_info.copy_dest_exp_bias == 10 &&
++      copy_dest_info.copy_dest_number == xenos::SurfaceNumberFormat::kSignedInteger &&
++      xenos::IsSingleCopySampleSelected(copy_dest_coordinate_info.copy_sample_select) &&
++      ((source_format == xenos::ColorRenderTargetFormat::k_16_16 &&
++        copy_dest_info.copy_dest_format == xenos::ColorFormat::k_16_16) ||
++       (source_format == xenos::ColorRenderTargetFormat::k_16_16_16_16 &&
++        copy_dest_info.copy_dest_format == xenos::ColorFormat::k_16_16_16_16));
++  if (is_depth || fixed16_raw_integer_copy ||
+       (!copy_dest_info.copy_dest_exp_bias &&
+        xenos::IsSingleCopySampleSelected(copy_dest_coordinate_info.copy_sample_select) &&
+        xenos::IsColorResolveFormatBitwiseEquivalent(
+@@ -1189,4 +1202,22 @@
+   return shader;
+ }
+ 
++float GetColorExpBiasScale(xenos::ColorRenderTargetFormat format, int32_t exp_bias,
++                           bool fixed16_as_full_range_snorm) {
++  const bool remap = fixed16_as_full_range_snorm &&
++                     (format == xenos::ColorRenderTargetFormat::k_16_16 ||
++                      format == xenos::ColorRenderTargetFormat::k_16_16_16_16);
++  // Remap from -32...32 to -1...1 by dividing the output values by 32, losing
++  // blending correctness, but getting the full range.
++  if (remap) {
++    exp_bias -= 5;
++  }
++  float scale = rex::memory::Reinterpret<float>(int32_t(0x3F800000 + (exp_bias << 23)));
++  if (remap) {
++    // SNORM16 stores round(f * 32767); s5.10 stores value * 32768 / 32.
++    scale *= 32768.0f / 32767.0f;
++  }
++  return scale;
++}
++
+ }  // namespace rex::graphics::draw_util
+diff --git a/src/graphics/d3d12/command_processor.cpp b/src/graphics/d3d12/command_processor.cpp
+--- a/src/graphics/d3d12/command_processor.cpp
++++ b/src/graphics/d3d12/command_processor.cpp
+@@ -3882,18 +3882,11 @@
+   for (uint32_t i = 0; i < 4; ++i) {
+     reg::RB_COLOR_INFO color_info = color_infos[i];
+     // Exponent bias is in bits 20:25 of RB_COLOR_INFO.
+-    int32_t color_exp_bias = color_info.color_exp_bias;
+-    if (color_info.color_format == xenos::ColorRenderTargetFormat::k_16_16 ||
+-        color_info.color_format == xenos::ColorRenderTargetFormat::k_16_16_16_16) {
+-      if (render_target_cache_->GetPath() == RenderTargetCache::Path::kHostRenderTargets &&
+-          !render_target_cache_->IsFixed16TruncatedToMinus1To1()) {
+-        // Remap from -32...32 to -1...1 by dividing the output values by 32,
+-        // losing blending correctness, but getting the full range.
+-        color_exp_bias -= 5;
+-      }
+-    }
+-    auto color_exp_bias_scale =
+-        rex::memory::Reinterpret<float>(int32_t(0x3F800000 + (color_exp_bias << 23)));
++    // patch 0087: full-range SNORM16 keeps the guest's s5.10 integers exactly.
++    auto color_exp_bias_scale = draw_util::GetColorExpBiasScale(
++        color_info.color_format, color_info.color_exp_bias,
++        render_target_cache_->GetPath() == RenderTargetCache::Path::kHostRenderTargets &&
++            !render_target_cache_->IsFixed16TruncatedToMinus1To1());
+     dirty |= system_constants_.color_exp_bias[i] != color_exp_bias_scale;
+     system_constants_.color_exp_bias[i] = color_exp_bias_scale;
+     if (edram_rov_used) {
+diff --git a/src/graphics/d3d12/render_target_cache.cpp b/src/graphics/d3d12/render_target_cache.cpp
+--- a/src/graphics/d3d12/render_target_cache.cpp
++++ b/src/graphics/d3d12/render_target_cache.cpp
+@@ -1169,9 +1169,12 @@
+ 
+   draw_util::ResolveInfo resolve_info;
+   bool fixed_16_truncated_to_minus_1_to_1 = IsFixed16TruncatedToMinus1To1();
++  // patch 0087: only full-range host render targets store exact s5.10 integers.
+   if (!draw_util::GetResolveInfo(register_file(), memory, draw_resolution_scale_x(),
+                                  draw_resolution_scale_y(), fixed_16_truncated_to_minus_1_to_1,
+-                                 fixed_16_truncated_to_minus_1_to_1, resolve_info)) {
++                                 fixed_16_truncated_to_minus_1_to_1, resolve_info,
++                                 GetPath() == Path::kHostRenderTargets &&
++                                     !fixed_16_truncated_to_minus_1_to_1)) {
+     return false;
+   }
+ 

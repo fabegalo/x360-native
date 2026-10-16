@@ -732,3 +732,31 @@ refused (the combined legacy call accepts reserved pages). Regression:
 Checked with the Motocross Madness codegen and title only; the dashboard and
 other titles have not been rerun with this patch.
 
+### 0087 — s5.10 fixed-point render targets and raw integer resolves (2026-10-16)
+
+`include/rex/graphics/util/draw.h`, `src/graphics/util/draw.cpp`,
+`src/graphics/d3d12/command_processor.cpp`, `src/graphics/d3d12/render_target_cache.cpp`.
+Motocross Madness compresses its terrain color tiles to DXT1 on the GPU: a pixel
+shader writes each block's four 16-bit words as integers to a `k_16_16_16_16`
+render target with exponent bias -10, and the result is resolved to the same
+format as signed integers with exponent bias +10, then sampled as DXT1. On the
+console that round trip must be bit-exact, which is what an s5.10 fixed-point
+target (stored integer = value * 1024) gives. Two host differences broke it:
+
+- the full-range D3D12 host render target path stores these formats as SNORM16
+  after dividing by 32, i.e. `round(n * 32767 / 32768)`; 32,702 of the 65,535
+  integers changed by one. `draw_util::GetColorExpBiasScale` now also multiplies
+  by 32768/32767, so the SNORM16 integer equals `value * 1024`;
+- the non-zero destination exponent bias routed the copy to the full resolve
+  shaders, which do not implement integer destinations (the blocks came out as
+  `0000`/`FFFF`). When the backend stores exact s5.10 integers, a copy of
+  `k_16_16[_16_16]` to the same format as signed integers with bias 10 is the
+  stored integer, so the existing bitwise copy shaders are used.
+
+Only the D3D12 full-range host render target path opts in; the ROV path, the
+-1...1 truncated mode and Vulkan keep their previous behavior. Resolves that
+convert these targets to other formats read the stored values with the old
+32/32767 factor, a relative difference of 3e-5. The s5.10 scale is inferred
+from the title's design (no public hardware document was found).
+Regression: `sdkcheck.fixed16-resolve` (every s5.10 integer through SNORM16 for
+both formats and biases, the copy-shader choice and its exclusions).

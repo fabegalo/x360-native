@@ -305,7 +305,7 @@
                                                           "src/graphics/graphics_system.cpp":  "fb3256cec0bbf518125245b180508aa40587ab239f2db47aeea6981d1a3174de",
                                                           "include/rex/graphics/command_processor.h":  "7bf96a1beb75e4495d97c2631573ee666e1fde5ea8b813ca7a034679abb65a63",
                                                           "src/graphics/command_processor.cpp":  "b018ebfc094dae7a7160288a1ebaafbc330c5e10c5b8c8704c90b387d36ee747",
-                                                          "src/graphics/d3d12/command_processor.cpp":  "a555b7da7fe7a9d1a36979c235a647e8812deb7bd95de8dfff8cedd547ec49a9",
+                                                          "src/graphics/d3d12/command_processor.cpp":  "bc0a78d9f51fa445da1cef906fbef4715669bbca1892d0c07d7f8da2853e40f1",
                                                           "src/graphics/vulkan/command_processor.cpp":  "56d2acf73af58e68fcc9fe0f17bec6816460e2b6c8872851d58da1813d61cb7d",
                                                           "src/audio/sdl/sdl_audio_driver.cpp":  "b563c3686247199c274e55531429f3657a4426a76536c1ebe048910c13eef690"
                                                       },
@@ -1024,7 +1024,7 @@
     "src/graphics/util/draw.cpp": "a3215a0de2f42d9e2235dd062b4cd2c3c0a27effd033c27ab6b6ca1f7673a25b"
   },
   "files": {
-    "src/graphics/util/draw.cpp": "33957ed61d2819427b6695c40b6669cd3dd9f9b85b042ad4ac8a6df5c61e75bf"
+    "src/graphics/util/draw.cpp": "6716afd6e8eea3c94628bf2c195894ec7288a4e2645e2a190113030b63d1d7f1"
   },
   "test": "sdkcheck.empty-resolve"
 },
@@ -1036,7 +1036,7 @@
   },
   "files": {
     "include/rex/graphics/d3d12/inactive_vertex_fetch.h": "5372e4310830ca88bd84f166d59f909bc37d7625c8393c09fa14f8d819f86bf8",
-    "src/graphics/d3d12/command_processor.cpp": "a555b7da7fe7a9d1a36979c235a647e8812deb7bd95de8dfff8cedd547ec49a9"
+    "src/graphics/d3d12/command_processor.cpp": "bc0a78d9f51fa445da1cef906fbef4715669bbca1892d0c07d7f8da2853e40f1"
   },
   "test": "sdkcheck.inactive-vertex-fetch"
 },
@@ -1165,6 +1165,23 @@
     "src/system/xex_module.cpp": "58b6448413fffe26c7ed9eb7262f911a6f4ef742709ce9408a2f4ec9a0bc0928"
   },
   "test": "tests/sdkcheck/xex_heap_ownership_test.cpp"
+},
+{
+  "file": "patches/rexglue-sdk/0087-fixed16-s5-10-resolve.patch",
+  "sha256": "b6eb234a8a24d2e4a628e6649ac825ba0a1a2953255cc1a063afca7a08353485",
+  "base_files": {
+    "include/rex/graphics/util/draw.h": "c5066ec6c92958ad5fd9e4bbfb034d596e0980ed3acf01a4ecbfec7060a0da4d",
+    "src/graphics/util/draw.cpp": "33957ed61d2819427b6695c40b6669cd3dd9f9b85b042ad4ac8a6df5c61e75bf",
+    "src/graphics/d3d12/command_processor.cpp": "a555b7da7fe7a9d1a36979c235a647e8812deb7bd95de8dfff8cedd547ec49a9",
+    "src/graphics/d3d12/render_target_cache.cpp": "7bc68f0891b9ec0a108a3e1b34e980619245d28ab86f201846b40230760b1dd0"
+  },
+  "files": {
+    "include/rex/graphics/util/draw.h": "d299b845b4fcc38a3b727991dd71f84cd1c7c4060dc7bbe074a820f465a8cc01",
+    "src/graphics/util/draw.cpp": "6716afd6e8eea3c94628bf2c195894ec7288a4e2645e2a190113030b63d1d7f1",
+    "src/graphics/d3d12/command_processor.cpp": "bc0a78d9f51fa445da1cef906fbef4715669bbca1892d0c07d7f8da2853e40f1",
+    "src/graphics/d3d12/render_target_cache.cpp": "9e562ab6e87297661341ae76618b28cae2ee668e0848a8347f45115f5b97140f"
+  },
+  "test": "tests/sdkcheck/fixed16_resolve_probe.cpp"
 }
                                     ]
                     },
