@@ -1,0 +1,126 @@
+diff --git a/include/rex/system/xex_module.h b/include/rex/system/xex_module.h
+--- a/include/rex/system/xex_module.h
++++ b/include/rex/system/xex_module.h
+@@ -192,6 +192,7 @@
+   void ReadSecurityInfo();
+ 
+   int ReadImage(const void* xex_addr, size_t xex_length, bool use_dev_key);
++  bool AllocateImageMemory(uint32_t size);
+   int ReadImageUncompressed(const void* xex_addr, size_t xex_length);
+   int ReadImageBasicCompressed(const void* xex_addr, size_t xex_length);
+   int ReadImageCompressed(const void* xex_addr, size_t xex_length);
+@@ -217,6 +218,7 @@
+   uint8_t session_key_[0x10];
+   bool is_dev_kit_ = false;
+ 
++  bool image_memory_allocated_ = false;  // Only this module owns this reservation.
+   bool loaded_ = false;         // Loaded into memory?
+   bool finished_load_ = false;  // PE/imports/symbols/etc all loaded?
+ 
+diff --git a/src/system/xex_module.cpp b/src/system/xex_module.cpp
+--- a/src/system/xex_module.cpp
++++ b/src/system/xex_module.cpp
+@@ -502,7 +502,12 @@
+     return 0;
+   }
+ 
+-  memory()->LookupHeap(base_address_)->Reset();
++  // Retrying another key may replace this image, never the entire image heap.
++  // Other loaded modules and kernel allocations must retain their reservations.
++  if (image_memory_allocated_) {
++    if (!memory()->LookupHeap(base_address_)->Release(base_address_)) return 2;
++    image_memory_allocated_ = false;
++  }
+ 
+   aes_decrypt_buffer(use_dev_key ? xe_xex2_devkit_key : xe_xex2_retail_key,
+                      reinterpret_cast<const uint8_t*>(xex_security_info()->aes_key), 16,
+@@ -536,17 +541,28 @@
+   return 3;
+ }
+ 
++bool XexModule::AllocateImageMemory(uint32_t size) {
++  auto* heap = memory()->LookupHeap(base_address_);
++  constexpr auto rw = memory::kMemoryProtectRead | memory::kMemoryProtectWrite;
++  // Reserve separately: the legacy combined reserve+commit operation permits
++  // existing reservations. An image must never overwrite another allocation.
++  if (!heap->AllocFixed(base_address_, size, 4096, memory::kMemoryAllocationReserve, rw)) {
++    return false;
++  }
++  image_memory_allocated_ = true;
++  if (!heap->AllocFixed(base_address_, size, 4096, memory::kMemoryAllocationCommit, rw)) {
++    if (heap->Release(base_address_)) image_memory_allocated_ = false;
++    return false;
++  }
++  return true;
++}
++
+ int XexModule::ReadImageUncompressed(const void* xex_addr, size_t xex_length) {
+   // Allocate in-place the XEX memory.
+   const uint32_t exe_length = static_cast<uint32_t>(xex_length - xex_header()->header_size);
+ 
+   uint32_t uncompressed_size = exe_length;
+-  bool alloc_result =
+-      memory()
+-          ->LookupHeap(base_address_)
+-          ->AllocFixed(base_address_, uncompressed_size, 4096,
+-                       rex::memory::kMemoryAllocationReserve | rex::memory::kMemoryAllocationCommit,
+-                       rex::memory::kMemoryProtectRead | rex::memory::kMemoryProtectWrite);
++  bool alloc_result = AllocateImageMemory(uncompressed_size);
+   if (!alloc_result) {
+     REXLOG_ERROR("Unable to allocate XEX memory at {:08X}-{:08X}.", base_address_,
+                  uncompressed_size);
+@@ -606,10 +622,7 @@
+   }
+ 
+   // Allocate in-place the XEX memory.
+-  bool alloc_result =
+-      heap->AllocFixed(base_address_, total_size, 4096,
+-                       rex::memory::kMemoryAllocationReserve | rex::memory::kMemoryAllocationCommit,
+-                       rex::memory::kMemoryProtectRead | rex::memory::kMemoryProtectWrite);
++  bool alloc_result = AllocateImageMemory(total_size);
+   if (!alloc_result) {
+     REXLOG_ERROR("Unable to allocate XEX memory at {:08X}-{:08X}.", base_address_,
+                  uncompressed_size);
+@@ -748,13 +761,7 @@
+     uint32_t uncompressed_size = image_size();
+ 
+     // Allocate in-place the XEX memory.
+-    bool alloc_result =
+-        memory()
+-            ->LookupHeap(base_address_)
+-            ->AllocFixed(
+-                base_address_, uncompressed_size, 4096,
+-                rex::memory::kMemoryAllocationReserve | rex::memory::kMemoryAllocationCommit,
+-                rex::memory::kMemoryProtectRead | rex::memory::kMemoryProtectWrite);
++    bool alloc_result = AllocateImageMemory(uncompressed_size);
+ 
+     if (alloc_result) {
+       uint8_t* buffer = memory()->TranslateVirtual(base_address_);
+@@ -951,6 +958,7 @@
+     result_code = ReadImage(xex_addr, xex_length, true);
+     if (result_code) {
+       REXLOG_ERROR("XEX load failed with code {}, tried both encryption keys", result_code);
++      Unload();  // Failed UserModule loads delete this object without calling Unload.
+       return false;
+     }
+   }
+@@ -1085,14 +1093,12 @@
+   if (!loaded_) {
+     return true;
+   }
++  // Failed loads (including an occupied base address) may own no image.
++  if (image_memory_allocated_) {
++    if (!memory()->LookupHeap(base_address_)->Release(base_address_)) return false;
++    image_memory_allocated_ = false;
++  }
+   loaded_ = false;
+-
+-  // If this isn't a patch, just deallocate the memory occupied by the exe
+-  if (!is_patch()) {
+-    assert_not_zero(base_address_);
+-
+-    memory()->LookupHeap(base_address_)->Release(base_address_);
+-  }
+ 
+   xex_header_mem_.resize(0);
+ 

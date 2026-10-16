@@ -1,0 +1,36 @@
+diff --git a/src/kernel/xboxkrnl/xboxkrnl_io_info.cpp b/src/kernel/xboxkrnl/xboxkrnl_io_info.cpp
+--- a/src/kernel/xboxkrnl/xboxkrnl_io_info.cpp
++++ b/src/kernel/xboxkrnl/xboxkrnl_io_info.cpp
+@@ -149,14 +149,25 @@
+       break;
+     }
+     case XFileXctdCompressionInformation: {
+-      REXKRNL_ERROR(
+-          "NtQueryInformationFile(XFileXctdCompressionInformation) "
+-          "unimplemented");
+-      // Files that are XCTD compressed begin with the magic 0x0FF512ED but we
+-      // shouldn't detect this that way. There's probably a flag somewhere
+-      // (attributes?) that defines if it's compressed or not.
+-      status = X_STATUS_INVALID_PARAMETER;
++      // The exposed files are raw streams (host paths, STFS and disc files),
++      // without the console filesystem's XCTD metadata. Derive bit 0 from the
++      // on-disk signature, just as the guest XCTD library does when the device
++      // cannot answer this query. Do not infer it from host compression flags.
++      // Read at an explicit backend offset: XFile::Read would advance the guest
++      // cursor and could signal completion ports for a metadata-only query.
++      uint8_t signature[4] = {};
++      size_t bytes_read = 0;
++      status = file->file()->ReadSync(signature, 0, &bytes_read);
+       out_length = 0;
++      if (XSUCCEEDED(status) || status == X_STATUS_END_OF_FILE) {
++        auto info = info_ptr.as<X_FILE_XCTD_COMPRESSION_INFORMATION*>();
++        info->unknown = bytes_read == 4 && signature[0] == 0x0F &&
++                                signature[1] == 0xF5 && signature[2] == 0x12 &&
++                                signature[3] == 0xED
++                            ? 1 : 0;
++        status = X_STATUS_SUCCESS;
++        out_length = sizeof(*info);
++      }
+       break;
+     };
+     case XFileNetworkOpenInformation: {

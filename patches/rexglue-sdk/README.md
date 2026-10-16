@@ -669,3 +669,66 @@ writes return explicit errors rather than pretending to persist settings.
 Regression: `tests/sdkcheck/xam_language_test.cpp`; desktop/session evidence
 and contract references: `docs/console-language-locale.md`. The patch changes
 no original resource, license region, AV region or dashboard module mapping.
+
+### 0082 — profile settings sizing before sign-in (2026-10-16)
+
+`src/kernel/xam/xam_user.cpp`. Motocross Madness voice initialization asks
+`XamUserReadProfileSettingsEx` for the buffer size with user index 255 and a
+null buffer before any account is signed in. The sign-in check ran first and
+returned `ERROR_NOT_LOGGED_ON` (1245) without the size; the caller propagated
+`E_FAIL` and reached a null access. The size computation depends only on the
+setting IDs, so the query now reports it with `ERROR_INSUFFICIENT_BUFFER` (122).
+Reading account data still requires a signed-in user and leaves the buffer
+untouched otherwise. Regression:
+`sdkcheck.Profile settings sizing works before sign-in without reading account data`
+(both read ABIs, user 0/255, null output pointer, signed-in read).
+
+### 0083 — physical heap transactions keep the global lock (2026-10-16)
+
+`src/system/xmemory.cpp`, `include/rex/system/xmemory.h`. With 4 KiB host pages,
+`PhysicalHeap` allocation skipped the global critical region, and
+Release/Decommit/Protect moved the lock into `TriggerCallbacks`, which dropped
+it before the parent/alias metadata was updated. An allocation could then reuse
+parent pages while the previous alias was still being invalidated. The lock is
+now held through the whole parent/alias transaction (`TriggerCallbacksLocked`),
+and `AcquireHostPageReconcileLock` always takes it, before `heap_mutex_`.
+Regression: `sdkcheck.Physical allocations serialize parent and alias metadata`
+(3 failures before the patch). The extra lock on 4 KiB-page allocations has not
+been measured; it does not by itself certify every invalid-release cause.
+
+### 0084 — XCTD compression query (2026-10-16)
+
+`src/kernel/xboxkrnl/xboxkrnl_io_info.cpp`. `NtQueryInformationFile` class 27
+(`XFileXctdCompressionInformation`) logged an error and failed. The VFS exposes
+raw streams without console XCTD metadata, so bit 0 now reports whether the file
+starts with the big-endian signature `0x0FF512ED`, the same test the title's
+XCTD library performs when the query fails (`82AB1FC8`, `82AB2030`). The read
+uses an explicit backend offset: no guest cursor change, event or completion.
+No host compression flag is consulted and nothing is decompressed. Read-denied
+handles keep their error; a short file reports no signature. Regression:
+`sdkcheck.XCTD query identifies the encoded stream without consuming file data`.
+
+### 0085 — microphone array idle-user mask (2026-10-16)
+
+`include/rex/system/kernel_state.h`, `src/kernel/xam/xam_voice.cpp`.
+`XamVoiceSetMicArrayIdleUsers` was a stub that left the incoming mask in r3.
+Retail 17559 XAM (`816FB9C0`, export `0x48C`) stores all 32 bits, queues a DPC
+when r4 is non-zero and returns 0. KernelState now keeps the mask and one
+coalesced pending update, independent of capture hardware. Nothing consumes
+the update yet and microphone capture remains unimplemented. Regression:
+`sdkcheck.Mic array idle-user control does not return the incoming user mask`.
+
+### 0086 — XEX image reservation ownership (2026-10-16)
+
+`include/rex/system/xex_module.h`, `src/system/xex_module.cpp`. `ReadImage`
+called `Reset()` on the whole image heap before every load or key retry,
+erasing the metadata of other modules in that heap; their later releases
+failed (`BaseHeap::Release failed because address is not a region start`).
+Each XEX now records its own reservation, releases only that one before a
+retry, releases it on Unload only if it was allocated, and calls Unload when
+both keys fail. Reserve and commit are separate so an occupied base address is
+refused (the combined legacy call accepts reserved pages). Regression:
+`sdkcheck.XEX load and key retry preserve other allocations in the image heap`.
+Checked with the Motocross Madness codegen and title only; the dashboard and
+other titles have not been rerun with this patch.
+

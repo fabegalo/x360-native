@@ -1,0 +1,65 @@
+diff --git a/include/rex/system/kernel_state.h b/include/rex/system/kernel_state.h
+--- a/include/rex/system/kernel_state.h
++++ b/include/rex/system/kernel_state.h
+@@ -215,6 +215,25 @@
+   util::XdbfGameData title_xdbf() const;
+   util::XdbfGameData module_xdbf(object_ref<UserModule> exec_module) const;
+ 
++  // XAM microphone-array control state, independent of capture-device presence.
++  // The original setter stores the full mask and optionally queues one DPC.
++  // A pending update is coalesced; its consumer observes the newest mask.
++  void SetMicArrayIdleUsers(uint32_t mask, bool request_update) {
++    std::lock_guard lock(mic_array_idle_mutex_);
++    mic_array_idle_users_ = mask;
++    mic_array_idle_update_pending_ |= request_update;
++  }
++  uint32_t GetMicArrayIdleUsers() {
++    std::lock_guard lock(mic_array_idle_mutex_);
++    return mic_array_idle_users_;
++  }
++  std::optional<uint32_t> TakeMicArrayIdleUsersUpdate() {
++    std::lock_guard lock(mic_array_idle_mutex_);
++    if (!mic_array_idle_update_pending_) return std::nullopt;
++    mic_array_idle_update_pending_ = false;
++    return mic_array_idle_users_;
++  }
++
+   xam::AppManager* app_manager() const { return app_manager_.get(); }
+   xam::ContentManager* content_manager() const { return content_manager_.get(); }
+   xam::UserProfile* user_profile() const { return user_profile_.get(); }
+@@ -370,6 +389,10 @@
+   memory::Memory* memory_;
+   runtime::FunctionDispatcher* function_dispatcher_;
+   rex::filesystem::VirtualFileSystem* file_system_;
++
++  std::mutex mic_array_idle_mutex_;
++  uint32_t mic_array_idle_users_ = 0;
++  bool mic_array_idle_update_pending_ = false;
+ 
+   std::unique_ptr<xam::AppManager> app_manager_;
+   std::unique_ptr<xam::ContentManager> content_manager_;
+diff --git a/src/kernel/xam/xam_voice.cpp b/src/kernel/xam/xam_voice.cpp
+--- a/src/kernel/xam/xam_voice.cpp
++++ b/src/kernel/xam/xam_voice.cpp
+@@ -22,6 +22,14 @@
+ namespace rex {
+ namespace kernel {
+ namespace xam {
++
++u32 XamVoiceSetMicArrayIdleUsers_entry(u32 idle_users, u32 request_update) {
++  // Retail 17559 export 0x48C stores all 32 mask bits, optionally requests a
++  // coalesced control update, and returns success independently of hardware.
++  // This control queue does not claim microphone capture is implemented.
++  REX_KERNEL_STATE()->SetMicArrayIdleUsers(idle_users, request_update != 0);
++  return X_ERROR_SUCCESS;
++}
+ 
+ u32 XamVoiceIsActiveProcess_entry() {
+   // Returning 0 here will short-circuit a bunch of voice stuff.
+@@ -66,5 +74,5 @@
+ REX_EXPORT_STUB(__imp__XamVoiceRecordUserPrivileges);
+ REX_EXPORT_STUB(__imp__XamVoiceSetAudioCaptureRoutine);
+ REX_EXPORT_STUB(__imp__XamVoiceSetMicArrayBeamAngle);
+-REX_EXPORT_STUB(__imp__XamVoiceSetMicArrayIdleUsers);
++REX_EXPORT(__imp__XamVoiceSetMicArrayIdleUsers, rex::kernel::xam::XamVoiceSetMicArrayIdleUsers_entry)
+ REX_EXPORT_STUB(__imp__XamVoiceSubmitPacket);

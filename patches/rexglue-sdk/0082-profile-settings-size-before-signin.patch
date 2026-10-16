@@ -1,0 +1,35 @@
+diff --git "a/src/kernel/xam/xam_user.cpp" "b/src/kernel/xam/xam_user.cpp"
+index 9b00b9b..00e87b9 100644
+--- "a/src/kernel/xam/xam_user.cpp"
++++ "b/src/kernel/xam/xam_user.cpp"
+@@ -216,15 +216,12 @@ uint32_t XamUserReadProfileSettingsEx(uint32_t title_id, uint32_t user_index, ui
+                                       be<uint32_t>* setting_ids, uint32_t unk,
+                                       be<uint32_t>* buffer_size_ptr, uint8_t* buffer,
+                                       XAM_OVERLAPPED* overlapped) {
+-  if (!REX_KERNEL_STATE()->user_profile()->signin_state()) return X_ERROR_NOT_LOGGED_ON;
+   if (!xuid_count) {
+     assert_null(xuids);
+   } else {
+     assert_true(xuid_count == 1);
+     assert_not_null(xuids);
+     // TODO(gibbed): allow proper lookup of arbitrary XUIDs
+-    const auto& user_profile = REX_KERNEL_STATE()->user_profile();
+-    assert_true(static_cast<uint64_t>(xuids[0]) == user_profile->xuid());
+     // TODO(gibbed): we assert here, but in case a title passes xuid_count > 1
+     // until it's implemented for release builds...
+     xuid_count = 1;
+@@ -276,6 +273,14 @@ uint32_t XamUserReadProfileSettingsEx(uint32_t title_id, uint32_t user_index, ui
+     return X_ERROR_INSUFFICIENT_BUFFER;
+   }
+ 
++  // A sizing query only depends on setting IDs, including the caller's
++  // any-user index (255). Require an account only when reading its data.
++  const auto& sizing_profile = REX_KERNEL_STATE()->user_profile();
++  if (!sizing_profile->signin_state()) return X_ERROR_NOT_LOGGED_ON;
++  if (xuids) {
++    assert_true(static_cast<uint64_t>(xuids[0]) == sizing_profile->xuid());
++  }
++
+   // Title ID = 0 means us.
+   // 0xfffe07d1 = profile?
+ 

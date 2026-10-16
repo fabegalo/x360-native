@@ -38,6 +38,59 @@ constexpr uint32_t kCred = 0x10040006;
 constexpr uint32_t kAchievements = 0x10040013;
 }  // namespace
 
+TEST_CASE("Profile settings sizing works before sign-in without reading account data",
+          "[sdk][local-profile][profile-sizing]") {
+  GamercardStore store;
+  rex::Runtime rt(store.path, store.path);
+  SetupGamercard(rt);
+  auto* profile = rt.kernel_state()->user_profile();
+  REQUIRE(profile->signin_state() == 0);
+  auto* memory = rt.memory();
+  auto* base = memory->virtual_membase();
+  const auto block = memory->SystemHeapAlloc(4096);
+  REQUIRE(block);
+  const uint32_t ids = block, size = block + 16, buffer = block + 64;
+  rex::memory::store_and_swap<uint32_t>(base + ids, kCred);
+  auto read = [&](bool ex, uint32_t user, uint32_t capacity, uint32_t output) {
+    rex::memory::store_and_swap<uint32_t>(base + size, capacity);
+    PPCContext ctx{};
+    ctx.r1.u64 = block + 2048;
+    ctx.r3.u64 = 0xFFFE07D1; ctx.r4.u64 = user;
+    ctx.r7.u64 = 1; ctx.r8.u64 = ids;
+    if (ex) {
+      ctx.r10.u64 = size;
+      rex::memory::store_and_swap<uint32_t>(base + ctx.r1.u32 + 0x54, output);
+      rex::memory::store_and_swap<uint32_t>(base + ctx.r1.u32 + 0x5C, 0);
+      __imp__XamUserReadProfileSettingsEx(ctx, base);
+    } else {
+      ctx.r9.u64 = size; ctx.r10.u64 = output;
+      rex::memory::store_and_swap<uint32_t>(base + ctx.r1.u32 + 0x54, 0);
+      __imp__XamUserReadProfileSettings(ctx, base);
+    }
+    return ctx.r3.u32;
+  };
+  for (bool ex : {false, true}) {
+    for (uint32_t user : {0u, 255u}) {
+      CHECK(read(ex, user, 0, 0) == X_ERROR_INSUFFICIENT_BUFFER);
+      CHECK(rex::memory::load_and_swap<uint32_t>(base + size) == 48);
+      std::memset(base + buffer, 0xA5, 48);
+      CHECK(read(ex, user, 48, buffer) == X_ERROR_NOT_LOGGED_ON);
+      CHECK(base[buffer] == 0xA5);
+      CHECK(base[buffer + 47] == 0xA5);
+    }
+    CHECK(read(ex, 0, 48, 0) == X_ERROR_INVALID_PARAMETER);
+  }
+  uint64_t xuid = 0;
+  REQUIRE(profile->CreateLocal("Sizing", &xuid) == 0);
+  REQUIRE(profile->SetLocalSession(xuid) == 0);
+  for (bool ex : {false, true}) {
+    CHECK(read(ex, 255, 0, 0) == X_ERROR_INSUFFICIENT_BUFFER);
+    CHECK(read(ex, 0, 48, buffer) == 0);
+    CHECK(rex::memory::load_and_swap<uint32_t>(base + buffer) == 1);
+  }
+  memory->SystemHeapFree(block);
+}
+
 TEST_CASE("Gamercard statistics follow the signed-in local account and its played titles",
           "[sdk][local-profile][gamercard]") {
   GamercardStore store;
