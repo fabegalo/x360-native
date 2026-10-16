@@ -182,7 +182,7 @@ class ReleaseTests(unittest.TestCase):
         notes = self.directory / "notes.md"
         notes.write_text("# Test release\n\nSynthetic notes.\n")
         self.metadata["provenance"].update(repository="owner/repo", event="push", release_notes_sha256=release.file_digest(notes))
-        with patch.dict("os.environ", env), patch.object(release, "command", side_effect=[self.commit, self.commit, "draft-url", json.dumps({"draft": True, "assets": []})]) as command, \
+        with patch.dict("os.environ", env), patch.object(release, "command", side_effect=[self.commit, self.commit, "draft-url", json.dumps({"isDraft": True, "assets": []})]) as command, \
                 patch.object(release, "verify", return_value=self.metadata), patch.object(release, "notes_for", return_value=(notes, "Test release")), \
                 patch.object(release, "remote_tag_commit", return_value=self.commit), patch.object(Path, "iterdir", return_value=iter([self.archive])), \
                 patch.object(Path, "is_file", return_value=True):
@@ -201,8 +201,8 @@ class ReleaseTests(unittest.TestCase):
         def command(*args):
             if args[0] == "git":
                 return self.commit
-            if args[:2] == ("gh", "api"):
-                return json.dumps({"draft": True, "assets": [{"name": p.name} for p in assets]})
+            if args[:3] == ("gh", "release", "view"):
+                return json.dumps({"isDraft": True, "assets": [{"name": p.name} for p in assets]})
             if args[:3] == ("gh", "release", "download"):
                 destination = Path(args[args.index("--dir") + 1])
                 for asset in assets:
@@ -214,7 +214,7 @@ class ReleaseTests(unittest.TestCase):
                 patch.object(release, "remote_tag_commit", return_value=self.commit), patch.object(Path, "iterdir", side_effect=lambda: iter(assets)):
             release.publish()
             mutations = [call.args for call in mocked.call_args_list if call.args[:2] == ("gh", "release")]
-            self.assertEqual([args[2] for args in mutations], ["create", "download", "edit"])
+            self.assertEqual([args[2] for args in mutations], ["create", "view", "download", "edit"])
             self.assertIn("--draft", mutations[0])
             self.assertIn("--verify-tag", mutations[0])
             self.assertIn("--prerelease=true", mutations[-1])

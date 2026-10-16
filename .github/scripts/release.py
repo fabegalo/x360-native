@@ -210,8 +210,8 @@ def publish():
     command("gh", "release", "create", tag, *(str(p) for p in assets), "--repo", repository,
             "--verify-tag", "--target", commit, "--draft", "--title", title, "--notes-file", str(notes),
             *( ["--prerelease"] if "-" in version else []))
-    release = json.loads(command("gh", "api", f"repos/{repository}/releases/tags/{tag}"))
-    require(release["draft"] and {a["name"] for a in release["assets"]} == {p.name for p in assets}, "Draft assets incomplete")
+    release = json.loads(command("gh", "release", "view", tag, "--repo", repository, "--json", "isDraft,assets"))
+    require(release["isDraft"] and {a["name"] for a in release["assets"]} == {p.name for p in assets}, "Draft assets incomplete")
     # Verify the actual bytes stored on GitHub before making anything public.
     with tempfile.TemporaryDirectory() as downloaded:
         command("gh", "release", "download", tag, "--repo", repository, "--dir", downloaded)
