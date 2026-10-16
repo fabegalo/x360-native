@@ -3,6 +3,8 @@
 #include <d3dcompiler.h>
 #include <wrl/client.h>
 #include <fstream>
+#include <chrono>
+#include <thread>
 using Microsoft::WRL::ComPtr;
 using x360n::native::PipelineStore;
 TEST_CASE("Native pipeline store validates full inputs and incomplete files") {
@@ -48,5 +50,14 @@ TEST_CASE("Native pipeline store validates full inputs and incomplete files") {
   store.Save(miss, pso.Get());
   std::filesystem::resize_file(hit.path, 32);
   REQUIRE(store.Load(pd).blob.empty());
-  std::filesystem::remove(hit.path); std::filesystem::remove(directory);
+  std::filesystem::remove(hit.path);
+  // Windows scanners may briefly retain a delete-pending file handle. Keep
+  // cleanup bounded and require an empty directory rather than deleting peers.
+  std::error_code cleanup_error;
+  for (unsigned attempt = 0; attempt < 100; ++attempt) {
+    std::filesystem::remove(directory, cleanup_error);
+    if (!cleanup_error) break;
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  }
+  REQUIRE_FALSE(cleanup_error);
 }

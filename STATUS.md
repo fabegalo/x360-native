@@ -1,4 +1,11 @@
 # STATUS
+
+Integração na `main` (2026-10-15): históricos Native N4.1/N4.2, interface desktop
+e correções Xenos reunidos sem conflitos textuais nem reescrita. Build Debug
+completo aprovado, 76 patches SDK verificados e 22 testes focados aprovados após
+correções de dependências dos probes e limites/limpeza de testes no Windows.
+Sem novos jogos, testes visuais ou ampliação de aceite de performance.
+[Procedimento, falhas iniciais e evidências](docs/integration-2026-10-15.md).
 Xenos X2 (2026-10-15), sobre `ee7e8af`: corrigida rejeição de draws cujo vertex
 fetch inválido está comprovadamente inativo por predicação. Patch 0077 genérico,
 sem exceção de título, valores fictícios ou bypass permissivo; 2.328 checks

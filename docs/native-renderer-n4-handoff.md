@@ -1,5 +1,10 @@
 # Native N4 — handoff (checkpoint experimental, 2026-10-15)
 
+Nota histórica: o bloqueio de cor deste checkpoint foi tratado em
+[N4.1](native-renderer-n4-1.md), seguido por [N4.2](native-renderer-n4-2.md).
+A integração posterior na `main` foi autorizada pelo mantenedor em 2026-10-15;
+isso não amplia os limites de desempenho ou compatibilidade registrados nessas notas.
+
 Branch local `wip/native-n4-gpu-resident`, sobre `c43d679`. **Não aprovado**:
 regressão de cor na cena 3D. Não mesclar na `main`. Sem push ou Release.
 
