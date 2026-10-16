@@ -133,6 +133,10 @@ target_link_libraries(x360n_local_tests PRIVATE x360n_core Catch2::Catch2WithMai
 target_sources(x360n_local_tests PRIVATE local/dashboard_assets_test.cpp
     ../titles/common/dashboard_assets.cpp)
 target_compile_definitions(x360n_local_tests PRIVATE X360N_SOURCE_ROOT="${PROJECT_SOURCE_DIR}")
+# Avatar service static initializers checked against the user's xam.xex image.
+target_sources(x360n_local_tests PRIVATE local/avatar_static_init_test.cpp)
+target_compile_definitions(x360n_local_tests PRIVATE X360N_CONTENT_EXE="$<TARGET_FILE:x360n-content>")
+add_dependencies(x360n_local_tests x360n-content)
 catch_discover_tests(x360n_local_tests TEST_PREFIX "local." PROPERTIES LABELS "project" TIMEOUT 600)
 
 # SDK behavior checks (link the SDK codegen library).

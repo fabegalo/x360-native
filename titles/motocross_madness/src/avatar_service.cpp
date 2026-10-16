@@ -22,6 +22,7 @@
 #include <mutex>
 
 #include "../../common/avatar/avatar_aot_catalog.h"
+#include "../../common/avatar/xam17559_static_init.h"
 
 REXCVAR_DEFINE_BOOL(motocross_avatar_service, false, "Motocross Madness",
                     "Use the original 17559 avatar catalog and AOT algorithms");
@@ -95,6 +96,24 @@ void Invoke(PPCContext& ctx, const char* name, F fn) {
   ctx.r3.u64 = hr;
   REXLOG_INFO("avatar-service: {} -> {:08X}", name, hr);
 }
+// Without the avatar library's static initializers (xam17559_static_init.h)
+// the skeleton dequantization axis scales stayed (2, 0, 0): every bone lost its
+// Y/Z translation and rotation, and the animated rider broke apart. Run exactly
+// that block of the original table, in order, after verifying each entry.
+bool RunAvatarStaticInitializers() {
+  for (size_t i = 0; i < kXam17559AvatarInitializers.size(); ++i) {
+    const auto fn = Read(kXam17559AvatarInitializerTable + uint32_t(4 * i));
+    if (fn != kXam17559AvatarInitializers[i] ||
+        !Runtime()->function_dispatcher()->GetFunction(fn)) {
+      REXLOG_ERROR("avatar-service: initializer {} is {:08X}, expected {:08X}", i,
+                   fn, kXam17559AvatarInitializers[i]);
+      return false;
+    }
+  }
+  for (auto fn : kXam17559AvatarInitializers) Call(fn, {});
+  return true;
+}
+
 uint32_t Initialize(uint32_t version, uint32_t coord, uint32_t processor,
                     uint32_t callbacks, uint32_t buffer, uint32_t size) {
   if (!REXCVAR_GET(motocross_avatar_service)) return kAssetsFailure;
@@ -124,6 +143,7 @@ uint32_t Initialize(uint32_t version, uint32_t coord, uint32_t processor,
   if (!module || module->xex_module()->base_address() != 0x815F0000 ||
       module->xex_module()->image_size() != 0x610000)
     return kAssetsFailure;
+  if (!RunAvatarStaticInitializers()) return kAssetsFailure;
   for (uint32_t i = 0; i < 5; ++i)
     if (!Runtime()->function_dispatcher()->GetFunction(Read(callbacks + 4 * i)))
       return kAssetsInvalid;
