@@ -64,11 +64,20 @@ x360/
 ├── external/rexglue-sdk/   submódulo ReXGlue fixado + patches reproduzíveis
 ├── scripts/                bootstrap (LLVM, submódulos, symlinks), devshell
 ├── src/supervisor/         x360n: doctor, identify, run, session
+├── src/content/            inspeção e extração de conteúdo
+├── src/desktop/            model/, win32/, resources/
+├── src/native/             commands/, d3d12/, memory/, pipeline/, textures/, shaders/
+├── cmake/                  sdk/, build/, runtime/, distribution/
 ├── tests/                  testes do projeto (ver README)
 ├── titles/                 configurações por título/versão e overrides AOT
 ├── docs/                   este documento, dashboard, compatibilidade
-└── .local/                 ignorado pelo git: toolchains, build, inputs, runs
+└── .local/                 inputs, estado local, build, evidence e archive (ignorados)
 ```
+
+Árvore completa em [filetree.txt](filetree.txt); organização e limites em
+[reorganização](reorganization.md). [Conteúdo local](guides/content-layout.md)
+descreve dashboards por versão, discos e DLCs. Esses agrupamentos físicos não
+alteram as fronteiras funcionais D1–D7.
 
 ### 2.1 ReXGlue (dependência)
 
@@ -121,7 +130,7 @@ arquivos locais (.local/inputs)
  → análise + geração  rexglue codegen <manifest>          [implementado; conteúdo fornecido localmente]
  → compilação         projeto CMake gerado por rexglue init [implementado]
  → execução           x360n run <exe recompilado>         [implementado; títulos e fixtures documentados]
- → relatório          .local/runs/<utc>-<label>/report.json [implementado]
+ → relatório          .local/evidence/runs/<utc>-<label>/report.json [implementado]
 ```
 
 Cada etapa grava a saída da ferramenta original e seu código de saída; nenhuma
@@ -136,8 +145,8 @@ threads, VFS ou GPU.
 
 **[fato]** M1 foi demonstrado com o XEX Iruka fornecido localmente.
 A biblioteca atual importa conteúdos e gera projetos AOT genéricos; perfis
-manuais são overrides opcionais. [Iruka](validation-iruka.md),
-[biblioteca e recibos](universal-library.md).
+manuais são overrides opcionais. [Iruka](reports/titles/validation-iruka.md),
+[biblioteca e recibos](guides/universal-library.md).
 
 ## 4. Modelo de processos (dashboard ↔ jogos)
 

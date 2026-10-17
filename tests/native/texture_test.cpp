@@ -1,5 +1,5 @@
-#include "texture.h"
-#include "texture_snapshot.h"
+#include "../../src/native/textures/texture.h"
+#include "../../src/native/textures/texture_snapshot.h"
 #include <catch2/catch_test_macros.hpp>
 using namespace rex::graphics::xenos;
 TEST_CASE("Native packed signed RGB10A2 preserves endpoints and negative steps") {

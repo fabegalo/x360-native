@@ -14,7 +14,7 @@ struct ProjectPaths {
   std::filesystem::path root;  // directory containing deps.lock.json
   std::filesystem::path local() const { return root / ".local"; }
   std::filesystem::path inputs() const { return local() / "inputs"; }
-  std::filesystem::path runs() const { return local() / "runs"; }
+  std::filesystem::path runs() const { return local() / "evidence" / "runs"; }
   std::filesystem::path build() const { return local() / "build"; }
   std::filesystem::path sdk() const { return root / "external" / "rexglue-sdk"; }
   std::filesystem::path sdk_out() const { return sdk() / "out"; }

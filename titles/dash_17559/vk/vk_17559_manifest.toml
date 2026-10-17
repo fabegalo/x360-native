@@ -2,9 +2,9 @@
 [project]
 name = "dash_17559"
 sdk_version = "0.10.0"
-game_root = "../../../.local/inputs/dashboard/17559"
+game_root = "../../../.local/inputs/dashboards/17559/runtime"
 [entrypoint]
-file_path = "../../../.local/inputs/dashboard/17559/vk.xex"
+file_path = "../../../.local/inputs/dashboards/17559/runtime/vk.xex"
 out_directory_path = "../generated/vk"
 is_dll = true
 includes = ["../analysis/vk_17559.toml"]

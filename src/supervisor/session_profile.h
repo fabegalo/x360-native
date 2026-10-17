@@ -21,6 +21,7 @@ struct SessionProfile {
   std::string dashboard_version;  // preparation.toml of a dashboard, e.g. 2.0.17559.0
   std::string name, sha256;
   std::vector<std::string> args;
+  std::vector<std::string> skip_boot_intro_args;  // optional overrides owned by this profile
   std::vector<std::filesystem::path> launch_targets;
   std::vector<uint32_t> dashboard_return_flags{0};
   std::optional<AvatarServiceFiles> avatar_files;  // dashboard: what it provides
@@ -31,6 +32,7 @@ struct SessionProfile {
 // Catalog reads retain routing metadata; execution always validates the files.
 SessionProfile LoadSessionProfile(const ProjectPaths& paths, const std::filesystem::path& manifest,
                                   bool validate_execution = true);
+std::vector<std::string> SessionProfileArguments(const SessionProfile& profile, bool skip_boot_intro);
 bool MatchesLaunch(const SessionProfile& profile, const LaunchRequest& request,
                    const std::filesystem::path& dashboard_user_root = {});
 // Arguments that hand the session dashboard's verified avatar files to a title

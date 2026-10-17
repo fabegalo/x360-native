@@ -29,7 +29,7 @@ TEST_CASE("Motocross Madness receives the 17559 dashboard avatar files", "[local
   CHECK(game.avatar_service == "2.0.17559.0");
   // The dashboard's isolated XUI copy is the same original the title was built with.
   CHECK(dashboard.avatar_files->xam.sha256 == game.avatar_xam_sha256);
-  CHECK(game.game_root == fs::weakly_canonical(Root() / ".local/inputs/titles/motocross_madness/extracted"));
+  CHECK(game.game_root == fs::weakly_canonical(Root() / ".local/inputs/games/motocross_madness/content"));
   for (const auto* file : {&dashboard.avatar_files->xam, &dashboard.avatar_files->catalog})
     if (!fs::exists(file->path)) SKIP("not present: " + file->path.string());
   // A prepared build is launchable by the session with its receipt and content.

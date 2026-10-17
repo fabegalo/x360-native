@@ -3,9 +3,9 @@
 [project]
 name = "iruka"
 sdk_version = "0.10.0"
-game_root = "../../.local/inputs/titles/iruka/extracted"
+game_root = "../../.local/inputs/games/iruka/content"
 
 [entrypoint]
-file_path = "../../.local/inputs/titles/iruka/extracted/default.xex"
+file_path = "../../.local/inputs/games/iruka/content/default.xex"
 out_directory_path = "generated/default"
 includes = ["analysis/iruka.toml"]  # hints carried over from demo-iruka iruka_config.toml

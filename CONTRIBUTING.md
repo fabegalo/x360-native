@@ -25,13 +25,18 @@ Documentation and collaboration changes do not need Xbox content, submodules or 
 native build. For C++ work, the tested environment is Windows x64 with VS 2022
 Build Tools (C++, MSVC x64 and Windows SDK), Git, CMake and Ninja. The bootstrap
 obtains the pinned LLVM toolchain and SDK dependencies. Follow
-[Building and development](docs/BUILDING.md) for prerequisites, bootstrap,
+[Building and development](docs/guides/BUILDING.md) for prerequisites, bootstrap,
 configuration and build commands; use `scripts\devshell.cmd` for native builds.
 Linux/macOS presets or a successful compilation do not establish runtime support.
 
 Keep dependencies pinned by [deps.lock.json](deps.lock.json). Keep local builds,
 inputs and logs under `.local/`. Contributors using coding agents must also read
 [AGENTS.md](AGENTS.md) and [CLAUDE.md](CLAUDE.md).
+
+Use the [documentation index](docs/README.md), [repository filetree](docs/filetree.txt)
+and [content layout](docs/guides/content-layout.md) when adding files. Keep tests
+under `tests/`, tools in the corresponding `scripts/` group, and generated/local
+outputs out of tracked source.
 
 ## Choose tests that match the change
 

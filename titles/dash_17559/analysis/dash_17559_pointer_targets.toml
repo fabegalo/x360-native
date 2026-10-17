@@ -13,16 +13,16 @@
 # bctr that ends sub_923941E0, held by .rdata words 0x9203A468 and 0x9204326C).
 #
 # How (codegen-8 output, generated before these entries existed):
-#   x360n-content xref .local\inputs\dashboard\17559 dash.xex 9217E000 9293EC8C
-#     -> .local\runs\dash-artifacts\dash-code-ptrs-codegen8.txt (54 410 data words)
-#   scripts\analysis\check-pointer-targets.ps1 -Image .local\runs\dash-artifacts\dash-image.bin
+#   x360n-content xref .local\inputs\dashboards\17559\runtime dash.xex 9217E000 9293EC8C
+#     -> .local\evidence\runs\dash-artifacts\dash-code-ptrs-codegen8.txt (54 410 data words)
+#   scripts\analysis\check-pointer-targets.ps1 -Image .local\evidence\runs\dash-artifacts\dash-image.bin
 #     -Generated titles\dash_17559\generated\dash -Xref <that file> -Base 92000000 -Toml
 # Of 901 code addresses held by data that no generated function starts at, 506 pass
 # every criterion: aligned; not inside a .pdata function; not inside a generated
 # function; the word before is 0 or ends a function (blr, bctr, b); and a blr, bctr
 # or b follows within 64 words without reaching another function start. The 395
 # others (100 unaligned, 295 inside functions, mostly labels inside .pdata ranges)
-# are not here. Report: .local\runs\dash-artifacts\dash-pointer-targets-codegen8.txt.
+# are not here. Report: .local\evidence\runs\dash-artifacts\dash-pointer-targets-codegen8.txt.
 #
 # Spot check by disassembly (x360n-content disasm), 9 of 506: 0x92394200 (leaf),
 # 0x9225E258 (lwz r11,28(r3); mr r3,r4; mtctr r11; bctr), 0x9236C488, 0x9239FDA8,
@@ -547,7 +547,7 @@
 # (mr r3,r5; b 0x921dc698, after the b that ends the code before it). No data word
 # holds it; code forms it: addi r10,r7,-14088 at 0x921DC99C after a lis. Same
 # classifier and criteria, with the "addr" lines of x360n-content xref as references,
-# against the codegen-9 output (.local\runs\dash-artifacts\dash-code-refs-all.txt ->
+# against the codegen-9 output (.local\evidence\runs\dash-artifacts\dash-code-refs-all.txt ->
 # dash-pointer-targets-codegen9.txt): 9 FUNC, all below, each checked by disassembly
 # (thunks mr r3,r5 / mr r10,r4 ... ; b, leaf functions and a dispatch thunk).
 0x921CB9D8 = {}  # refs=1; after 0x48030764; first end after 2 word(s)

@@ -1,9 +1,9 @@
 # Share shader semantics and packet/register services, never the Xenos executor.
 set(_gpu ${X360_REXGLUE_DIR}/src/graphics)
-add_library(rexgpu-native SHARED plugin.cpp command_processor.cpp packet_guard.cpp d3d12_scanout.cpp texture.cpp texture_load.cpp guest_memory_mirror.cpp
+add_library(rexgpu-native SHARED commands/plugin.cpp commands/command_processor.cpp commands/packet_guard.cpp d3d12/d3d12_scanout.cpp textures/texture.cpp textures/texture_load.cpp memory/guest_memory_mirror.cpp
     ${_gpu}/graphics_system.cpp ${_gpu}/command_processor.cpp
     ${_gpu}/register_file.cpp ${_gpu}/registers.cpp ${_gpu}/flags.cpp
-    shader_cache.cpp pipeline_store.cpp d3d12_render.cpp d3d12_draw.cpp rectangle_shader.cpp point_shader.cpp d3d12_resolve.cpp d3d12_textures.cpp edram_format.cpp ${_gpu}/util/draw.cpp
+    pipeline/shader_cache.cpp pipeline/pipeline_store.cpp d3d12/d3d12_render.cpp d3d12/d3d12_draw.cpp shaders/rectangle_shader.cpp shaders/point_shader.cpp d3d12/d3d12_resolve.cpp d3d12/d3d12_textures.cpp d3d12/edram_format.cpp ${_gpu}/util/draw.cpp
     ${_gpu}/pipeline/shader/shader.cpp ${_gpu}/format/ucode.cpp
     ${_gpu}/pipeline/shader/translator.cpp ${_gpu}/pipeline/shader/translator_disasm.cpp
     ${_gpu}/pipeline/shader/dxbc.cpp ${_gpu}/pipeline/shader/dxbc_translator.cpp
@@ -15,9 +15,9 @@ target_include_directories(rexgpu-native PRIVATE ${X360_REXGLUE_DIR})
 set_target_properties(rexgpu-native PROPERTIES DEBUG_POSTFIX d RELWITHDEBINFO_POSTFIX rd)
 target_compile_options(rexgpu-native PRIVATE -Wall -Wextra -Wno-unused-parameter)
 target_compile_definitions(rexgpu-native PRIVATE REX_GPU_VALIDATE_PACKET=1)
-file(READ ${CMAKE_CURRENT_SOURCE_DIR}/scanout.hlsl NATIVE_SCANOUT_HLSL)
-configure_file(scanout_source.h.in scanout_source.h @ONLY)
-set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS scanout.hlsl)
+file(READ ${CMAKE_CURRENT_SOURCE_DIR}/shaders/scanout.hlsl NATIVE_SCANOUT_HLSL)
+configure_file(shaders/scanout_source.h.in scanout_source.h @ONLY)
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS shaders/scanout.hlsl)
 target_include_directories(rexgpu-native PRIVATE ${CMAKE_CURRENT_BINARY_DIR})
 target_include_directories(rexgpu-native PRIVATE ${X360_REXGLUE_DIR}/thirdparty/renderdoc)
 if(X360N_NATIVE_PLUGIN_ONLY)
@@ -27,10 +27,10 @@ add_executable(x360n_native_probe ../../tests/native/probe.cpp)
 target_link_libraries(x360n_native_probe PRIVATE rexruntime windowscodecs ole32)
 x360n_stage_runtime_dlls(x360n_native_probe PLUGIN_TARGETS rexgpu-native rexgpu-xenos)
 if(TARGET Catch2::Catch2WithMain)
-  add_executable(x360n_native_tests ../../tests/native/texture_test.cpp ../../tests/native/packet_test.cpp ../../tests/native/rectangle_test.cpp ../../tests/native/point_test.cpp ../../tests/native/texture_load_test.cpp texture.cpp texture_load.cpp packet_guard.cpp rectangle_shader.cpp point_shader.cpp ${_gpu}/util/draw.cpp ${_gpu}/register_file.cpp ${_gpu}/registers.cpp ${_gpu}/flags.cpp ${X360_REXGLUE_DIR}/thirdparty/dxbc/DXBCChecksum.cpp)
+  add_executable(x360n_native_tests ../../tests/native/texture_test.cpp ../../tests/native/packet_test.cpp ../../tests/native/rectangle_test.cpp ../../tests/native/point_test.cpp ../../tests/native/texture_load_test.cpp textures/texture.cpp textures/texture_load.cpp commands/packet_guard.cpp shaders/rectangle_shader.cpp shaders/point_shader.cpp ${_gpu}/util/draw.cpp ${_gpu}/register_file.cpp ${_gpu}/registers.cpp ${_gpu}/flags.cpp ${X360_REXGLUE_DIR}/thirdparty/dxbc/DXBCChecksum.cpp)
   target_include_directories(x360n_native_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${X360_REXGLUE_DIR} ${X360_REXGLUE_DIR}/thirdparty/renderdoc)
   target_link_libraries(x360n_native_tests PRIVATE rexruntime Catch2::Catch2WithMain d3d12 d3dcompiler)
-  target_sources(x360n_native_tests PRIVATE ../../tests/native/pipeline_store_test.cpp pipeline_store.cpp)
+  target_sources(x360n_native_tests PRIVATE ../../tests/native/pipeline_store_test.cpp pipeline/pipeline_store.cpp)
   target_link_libraries(x360n_native_tests PRIVATE xxHash::xxhash)
   x360n_stage_runtime_dlls(x360n_native_tests)
   add_test(NAME native.texture COMMAND x360n_native_tests ~[native-packet])

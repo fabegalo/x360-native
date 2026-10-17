@@ -5,7 +5,7 @@
 #include <rex/graphics/register_file.h>
 #include <stdexcept>
 #include <vector>
-#include "scanout_backend.h"
+#include "../../src/native/commands/scanout_backend.h"
 
 namespace x360n::native {
 [[noreturn]] void Unsupported(const char* message) { throw std::runtime_error(message); }
@@ -110,7 +110,7 @@ TEST_CASE("Native publishes incomplete resolves before guest memory packets", "[
   Validate(PM4_EVENT_WRITE_EXT, {0x0A, 0x1000 | 1});
   CHECK(drains == 9);
 }
-#include "guest_writeback.h"
+#include "../../src/native/memory/guest_writeback.h"
 TEST_CASE("Native resolve writeback tracks overlap and submission order") {
   x360n::native::GuestWriteback w;
   CHECK(w.empty());

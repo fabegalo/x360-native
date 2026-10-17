@@ -12,7 +12,7 @@ source_name = "default.xex"
 sha256 = "2a8406bcf9c223f9d7da732be617cc7cd46fbb587ef552f7fcacac2049b95dcd"
 
 # Metadata of the original LIVE package (Arcade 0x000D0000, title 58410B0F, media
-# 62541B78, version 0x3), recorded locally in .local/inputs/titles/motocross_madness/
+# 62541B78, version 0x3), recorded locally in .local/inputs/games/motocross_madness/
 # metadata. SDK catalog metadata, not a replacement package or a license grant.
 [library]
 title_id = "58410B0F"

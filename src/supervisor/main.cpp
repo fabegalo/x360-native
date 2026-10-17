@@ -663,13 +663,9 @@ int Session(const ProjectPaths& paths, const fs::path& manifest, int timeout, bo
       // Revalidate the profile and input bytes at every transition.
       active = LoadSessionProfile(paths, active.manifest);
       CheckSessionRenderer(active.exe, renderer_settings);
-      auto args = SessionConsoleArguments(SessionRendererArguments(active.args, renderer_settings), console_settings);
-      // Explicit diagnostic session choice. Preserve the normal manifest and
-      // receipt, and do not change any graphics commands within the guest.
-      if (skip_boot_intro && active.manifest == dashboard.manifest) {
-        for (auto& arg : args)
-          if (arg == "--dash17559_boot_intro=true") arg = "--dash17559_boot_intro=false";
-      }
+      auto args = SessionConsoleArguments(SessionRendererArguments(
+          SessionProfileArguments(active, skip_boot_intro && active.manifest == dashboard.manifest),
+          renderer_settings), console_settings);
       args.push_back("--game_data_root=" + PathUtf8(active.game_root));
       args.push_back("--user_data_root=" + PathUtf8(active.user_root));
       // Identity follows the platform session; game content and saves keep

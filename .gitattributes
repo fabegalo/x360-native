@@ -5,3 +5,7 @@ patches/**/*.patch -text
 /licenses/*.txt -text -whitespace
 # Release provenance hashes must match between Windows build and Linux publish.
 /docs/releases/*.md text eol=lf
+# The pinned codegen rewrites manifests and its integration template with LF.
+# Keep preparation fingerprints stable across codegen on Windows as well.
+/titles/**/*.toml text eol=lf
+/titles/*/generated/rexglue.cmake text eol=lf

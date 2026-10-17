@@ -8,10 +8,10 @@
 # where older formats are listed as unsupported, with the reason.
 #
 # path (relative to .local/inputs)	sha256	size	title_id (- if none)	version
-titles/iruka/extracted/default.xex	66ec34f2f558fe4e419d926108bf458a5c634ea8b5f76771b48ba633ecb61e31	2658304	-	-
-titles/castle_crashers/extracted/default.xex	825e9c8cb951d62ce954901488c5b783349c98cc5c03bd08ea0739df3af5d9ad	765952	584108B7	0.0.1.3
-titles/forza_horizon/extracted/default.xex	db40df605ade49a612b35a7a24c38f6004bcb17a88ed6b48288de16df9e3987c	20856832	4D5309C9	0.0.0.10
-dashboard/17559/dash.xex	3ad8f38d070eaf63cadac0697e3e8802c565cbfd0825a485347c5d718014f927	5971968	FFFE07D1	2.0.17559.0
-dashboard/17559/dashbigger.xex	fc4ad90638a8fff7759734dee364a48964e164d567699ca7e7aca2dc06ebc8c2	15880192	FFFE07D1	2.0.17559.0
-dashboard/17559/bootanim.xex	45eb980c0f841b4807d43c07c766fae5e70b8e2fa4d13fb247a491897cfc6de7	397312	00000000	2.0.17559.0
-dashboard/versions/6717/blades_retail/dash.xex	f8a51ea30406e3b8737e0cdbdad44867743869d59f58d4bc0f4b83e154cb87d8	4374528	FFFE07D1	2.0.6717.0
+games/iruka/content/default.xex	66ec34f2f558fe4e419d926108bf458a5c634ea8b5f76771b48ba633ecb61e31	2658304	-	-
+games/castle_crashers/content/default.xex	825e9c8cb951d62ce954901488c5b783349c98cc5c03bd08ea0739df3af5d9ad	765952	584108B7	0.0.1.3
+games/forza_horizon/disc-1/default.xex	db40df605ade49a612b35a7a24c38f6004bcb17a88ed6b48288de16df9e3987c	20856832	4D5309C9	0.0.0.10
+dashboards/17559/runtime/dash.xex	3ad8f38d070eaf63cadac0697e3e8802c565cbfd0825a485347c5d718014f927	5971968	FFFE07D1	2.0.17559.0
+dashboards/17559/runtime/dashbigger.xex	fc4ad90638a8fff7759734dee364a48964e164d567699ca7e7aca2dc06ebc8c2	15880192	FFFE07D1	2.0.17559.0
+dashboards/17559/runtime/bootanim.xex	45eb980c0f841b4807d43c07c766fae5e70b8e2fa4d13fb247a491897cfc6de7	397312	00000000	2.0.17559.0
+dashboards/6717/blades_retail/dash.xex	f8a51ea30406e3b8737e0cdbdad44867743869d59f58d4bc0f4b83e154cb87d8	4374528	FFFE07D1	2.0.6717.0

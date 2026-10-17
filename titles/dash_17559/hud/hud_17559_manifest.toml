@@ -3,9 +3,9 @@
 [project]
 name = "dash_17559"
 sdk_version = "0.10.0"
-game_root = "../../../.local/inputs/dashboard/17559"
+game_root = "../../../.local/inputs/dashboards/17559/runtime"
 [entrypoint]
-file_path = "../../../.local/inputs/dashboard/17559/system/hud.xex"
+file_path = "../../../.local/inputs/dashboards/17559/runtime/system/hud.xex"
 out_directory_path = "../generated/hud"
 is_dll = true
 includes = ["../analysis/hud_17559.toml"]

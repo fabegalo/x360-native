@@ -76,5 +76,5 @@ CTest com `-R "real installed Arcade" --timeout 60`. O teste é pulado se a vari
 não existir, e recusa máscara ativa diferente de zero. Nenhum original é copiado
 para o repositório ou modificado pelo teste.
 
-Logs locais em `.local/logs/games-played-*.log`: builds, primeira rodada de sete
+Logs locais em `.local/evidence/logs/games-played-*.log`: builds, primeira rodada de sete
 casos, repetição da licença real, regressões de sessão/idioma e isolamento.

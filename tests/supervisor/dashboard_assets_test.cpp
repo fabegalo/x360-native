@@ -57,13 +57,24 @@ TEST_CASE("Dashboard assets match preparation and every AOT module stays inside 
         ? std::span<const DashboardAsset>(dash17559::kOriginalAssets)
         : std::span<const DashboardAsset>(dash6717::kOriginalAssets);
     std::map<std::string, std::string> expected;
+    std::map<std::string, std::string> optional;
     for (const auto& entry : *info["files"].as_array()) {
       REQUIRE(entry.is_table());
-      expected.emplace((*entry.as_table())["path"].value_or(""), (*entry.as_table())["sha256"].value_or(""));
+      auto& inventory = (*entry.as_table())["optional"].value_or(false) ? optional : expected;
+      inventory.emplace((*entry.as_table())["path"].value_or(""), (*entry.as_table())["sha256"].value_or(""));
     }
     if (auto pending = info["unverified_dependencies"].as_array())
       for (const auto& entry : *pending) expected.emplace(entry.value_or(""), "");
     REQUIRE(assets.size() == expected.size());
+    for (const auto& [path, hash] : optional) {
+      CHECK_FALSE(expected.contains(path));
+      CHECK(hash.size() == 64);
+      CHECK(hash.find_first_not_of("0123456789abcdef") == std::string::npos);
+    }
+    if (const auto catalog = info["avatar"]["catalog"]["path"].value<std::string>()) {
+      REQUIRE(optional.contains(*catalog));
+      CHECK(info["avatar"]["version"].value_or(std::string{}) == info["dashboard_version"].value_or(std::string{}));
+    }
     for (const auto& asset : assets) {
       REQUIRE(expected.contains(std::string(asset.path)));
       CHECK(asset.sha256 == expected.at(std::string(asset.path)));

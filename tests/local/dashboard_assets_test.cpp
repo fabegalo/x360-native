@@ -6,7 +6,7 @@
 #include <iterator>
 
 TEST_CASE("Dashboard 17559 original dependency hashes match the active package", "[dashboard-assets]") {
-  auto root = std::filesystem::path(X360N_SOURCE_ROOT) / ".local/inputs/dashboard/17559";
+  auto root = std::filesystem::path(X360N_SOURCE_ROOT) / ".local/inputs/dashboards/17559/runtime";
   if (!std::filesystem::exists(root)) SKIP("17559 original package not supplied");
   const auto error = x360n::VerifyDashboardAssets(root, "17559", dash17559::kOriginalAssets);
   INFO(error);

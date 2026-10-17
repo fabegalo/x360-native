@@ -16,10 +16,10 @@ $ErrorActionPreference = 'Stop'
 $root = (Resolve-Path "$PSScriptRoot/../..").Path
 $exe = "$root\.local\build\titles\motocross_madness\motocross_madness.exe"
 $host_dll = "$root\.local\build\titles\dash_17559\dash_17559_session_ui.dll"
-$dash = "$root\.local\inputs\dashboard\17559"
+$dash = "$root\.local\inputs\dashboards\17559\runtime"
 $xam = "$dash\system\xam_ui.xex"
 $catalog = "$dash\avatar\AvatarAssetPack.toc"
-$game = "$root\.local\inputs\titles\motocross_madness\extracted"
+$game = "$root\.local\inputs\games\motocross_madness\content"
 if ($ExistingLog) {
   $log = (Resolve-Path -LiteralPath $ExistingLog).Path
 } else {

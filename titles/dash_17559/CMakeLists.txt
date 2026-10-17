@@ -106,4 +106,4 @@ if(TARGET dash_17559_xam_ui)
 endif()
 
 include(../../cmake/runtime/x360n_dashboard_assets.cmake)
-x360n_guard_dashboard(dash_17559 17559 "${CMAKE_CURRENT_SOURCE_DIR}/../../.local/inputs/dashboard/17559")
+x360n_guard_dashboard_profile(dash_17559 "${CMAKE_CURRENT_SOURCE_DIR}/dash_17559_manifest.toml")

@@ -80,7 +80,7 @@ de saves alternativo.
   uma grava, encerra; a outra recupera ambos os payloads e exclui apenas o de
   Player2. Grava PIDs, hashes dos binários e snapshots SHA-256 dos arquivos.
   CTest `sdkcheck.save-storage-processes`: passou, 1,83 s;
-  evidência final: `.local/runs/c8-storage-c6cd3b7d92684173818c894e2996f84b/report.json`.
+  evidência final: `.local/evidence/runs/c8-storage-c6cd3b7d92684173818c894e2996f84b/report.json`.
 - Replay dos 67 patches desde os fontes pinados, verificando hashes de entrada
   e finais: `.local/c8/replay-acceptance.log`. Builds e logs focados em `.local/c8/`.
 
@@ -95,7 +95,7 @@ scripts/devshell.cmd ctest --preset win-amd64-debug -R sdkcheck.save-storage-pro
 
 Castle Crashers foi recompilado e executado por scripts locais em três sessões
 limitadas (aproximadamente 39, 54 e 54 segundos), com armazenamento isolado,
-logs e screenshots em `.local/runs/c8-castle-{1,2,3}`. Chegou ao menu original
+logs e screenshots em `.local/evidence/runs/c8-castle-{1,2,3}`. Chegou ao menu original
 em modo trial. Não houve pacote de save produzido; o script não confirmou foco
 na janela. **Save/load de progresso comercial e o ciclo completo dashboard →
 jogo → save → dashboard não foram comprovados.** Não se atribui essa ausência

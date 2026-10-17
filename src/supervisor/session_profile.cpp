@@ -7,6 +7,16 @@
 #include <toml++/toml.hpp>
 
 namespace x360n {
+std::vector<std::string> SessionProfileArguments(const SessionProfile& profile, bool skip_boot_intro) {
+  auto args = profile.args;
+  if (skip_boot_intro) for (const auto& override : profile.skip_boot_intro_args) {
+    const auto key = override.substr(0, override.find('=') + 1);
+    bool replaced = false;
+    for (auto& arg : args) if (arg.starts_with(key)) { arg = override; replaced = true; }
+    if (!replaced) args.push_back(override);
+  }
+  return args;
+}
 SessionProfile LoadSessionProfile(const ProjectPaths& paths, const std::filesystem::path& file, bool validate_execution) {
   const auto manifest = std::filesystem::canonical(file);
   std::ifstream input(manifest, std::ios::binary);
@@ -112,7 +122,8 @@ SessionProfile LoadSessionProfile(const ProjectPaths& paths, const std::filesyst
       throw std::runtime_error("invalid library content name");
     p.library_relative_xex = std::filesystem::path("0000000000000000") / title / type / name / relative;
   }
-  if (auto array = table["x360n"]["args"].as_array())
+  auto read_args = [&](const char* key, std::vector<std::string>& destination) {
+    if (auto array = table["x360n"][key].as_array())
     for (const auto& value : *array) {
       auto arg = text(value);
       if (arg.starts_with("--game_data_root") || arg.starts_with("--user_data_root") ||
@@ -123,8 +134,14 @@ SessionProfile LoadSessionProfile(const ProjectPaths& paths, const std::filesyst
           arg.starts_with("--x360n_avatar_") ||
           arg.starts_with("--parent_window"))
         throw std::runtime_error("reserved session argument: " + arg);
-      p.args.push_back(arg);
+      destination.push_back(arg);
     }
+  };
+  read_args("args", p.args);
+  read_args("skip_boot_intro_args", p.skip_boot_intro_args);
+  for (const auto& arg : p.skip_boot_intro_args)
+    if (!arg.starts_with("--") || arg.find('=') == std::string::npos)
+      throw std::runtime_error("skip_boot_intro_args requires --option=value: " + arg);
   if (auto array = table["x360n"]["launch_targets"].as_array())
     for (const auto& value : *array) p.launch_targets.push_back(resolve(text(value)));
   if (table["x360n"]["launch_library"].value_or(false)) {

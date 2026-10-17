@@ -12,7 +12,7 @@ namespace fs = std::filesystem;
 namespace {
 std::string Hex(uint32_t v) { char s[9]; std::snprintf(s, sizeof s, "%08X", unsigned(v)); return s; }
 // The installed layout and 0x148-byte aggregate header the importer writes
-// (src/desktop/library.cpp); a license mask trailer is optional.
+// (src/desktop/model/library.cpp); a license mask trailer is optional.
 fs::path Install(const fs::path& root, uint32_t title, uint32_t type,
                  std::optional<uint32_t> license) {
   const auto title_dir = root / "0000000000000000" / Hex(title);

@@ -3,7 +3,7 @@ param([Parameter(Mandatory)][string]$PackageDirectory,
 $ErrorActionPreference='Stop'
 $root=(Resolve-Path (Join-Path $PSScriptRoot '../..')).Path
 $gate=Join-Path $root 'scripts/packaging/check-package-licenses.ps1'
-$temp=Join-Path $root ('.local/audit/license-tests-'+[guid]::NewGuid().ToString('N'))
+$temp=Join-Path $root ('.local/evidence/audit/license-tests-'+[guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory $temp | Out-Null
 function Index($base,$name) {
     $lines=@(Get-ChildItem $base -File -Recurse | Where-Object FullName -ne (Join-Path $base $name) | Sort-Object FullName | ForEach-Object {
@@ -20,9 +20,9 @@ function Refresh($p) {
 }
 & $gate -PackageDirectory $PackageDirectory -SdkDirectory $SdkDirectory
 $cases=@(
- @{name='changed-icon'; expected='Desktop icon provenance mismatch'; mutate={param($p) [IO.File]::WriteAllBytes((Join-Path $p 'app/workspace/src/desktop/desktop.ico'),[byte[]]@(0,0,1,0))}},
- @{name='unproven-icon'; expected='Desktop icon differs from original'; mutate={param($p) $path=Join-Path $p 'app/workspace/src/desktop/desktop.ico'; $b=[IO.File]::ReadAllBytes($path); $b[$b.Length-1]=1; [IO.File]::WriteAllBytes($path,$b); foreach($base in @($p,(Join-Path $p 'app/workspace'))) { $i=Get-Content (Join-Path $base 'licenses/inventory.json') -Raw | ConvertFrom-Json; ($i.components | Where-Object id -eq 'desktop-icon').content_sha256=(Get-FileHash $path).Hash.ToLowerInvariant(); $i | ConvertTo-Json -Depth 12 | Set-Content (Join-Path $base 'licenses/inventory.json') }}},
- @{name='missing-icon-provenance'; expected='Missing desktop icon provenance'; mutate={param($p) Remove-Item -LiteralPath (Join-Path $p 'app/workspace/docs/ICON_PROVENANCE.md')}},
+ @{name='changed-icon'; expected='Desktop icon provenance mismatch'; mutate={param($p) [IO.File]::WriteAllBytes((Join-Path $p 'app/workspace/src/desktop/resources/desktop.ico'),[byte[]]@(0,0,1,0))}},
+ @{name='unproven-icon'; expected='Desktop icon differs from original'; mutate={param($p) $path=Join-Path $p 'app/workspace/src/desktop/resources/desktop.ico'; $b=[IO.File]::ReadAllBytes($path); $b[$b.Length-1]=1; [IO.File]::WriteAllBytes($path,$b); foreach($base in @($p,(Join-Path $p 'app/workspace'))) { $i=Get-Content (Join-Path $base 'licenses/inventory.json') -Raw | ConvertFrom-Json; ($i.components | Where-Object id -eq 'desktop-icon').content_sha256=(Get-FileHash $path).Hash.ToLowerInvariant(); $i | ConvertTo-Json -Depth 12 | Set-Content (Join-Path $base 'licenses/inventory.json') }}},
+ @{name='missing-icon-provenance'; expected='Missing desktop icon provenance'; mutate={param($p) Remove-Item -LiteralPath (Join-Path $p 'app/workspace/docs/reports/maintenance/ICON_PROVENANCE.md')}},
  @{name='missing-sdk-license'; expected='Missing required file'; mutate={param($p) Remove-Item -LiteralPath (Join-Path $p 'licenses/dxc-headers.txt')}},
  @{name='removed-sdk-license-record'; expected='Missing supplemental SDK license'; mutate={param($p) foreach($base in @($p,(Join-Path $p 'app/workspace'))) { $i=Get-Content (Join-Path $base 'licenses/inventory.json') -Raw | ConvertFrom-Json; ($i.components | Where-Object id -eq 'dxc-headers').license_file=$null; $i | ConvertTo-Json -Depth 12 | Set-Content (Join-Path $base 'licenses/inventory.json') }}},
  @{name='missing-license'; expected='Missing required file'; mutate={param($p) Remove-Item -LiteralPath (Join-Path $p 'licenses/nlohmann-json.txt')}},

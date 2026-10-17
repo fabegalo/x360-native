@@ -43,7 +43,7 @@ TEST_CASE("log scanner counts REX_STUB lines by export name", "[report]") {
 }
 
 TEST_CASE("log scanner counts unimplemented XAM app messages and critical lines", "[report]") {
-  // Formats from src/kernel/xam/apps/*.cpp and the FATAL seen in docs/validation-iruka.md.
+  // Formats from src/kernel/xam/apps/*.cpp and the FATAL seen in docs/reports/titles/validation-iruka.md.
   auto s = ScanLogText(
       "[2026-10-11 04:02:55.100] [warning] [krnl] [t1] Unimplemented XMP message app=000000FA, "
       "msg=00070044, arg1=4000A000, arg2=00000010\r\n"

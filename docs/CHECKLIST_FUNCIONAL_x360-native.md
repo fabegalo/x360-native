@@ -4,7 +4,7 @@
 C4/C11 e C10 tecnicamente concluídos. O mantenedor autorizou a publicação
 pública de `v0.1.0-preview.19`, após validar pacote e histórico. Os requisitos
 de aceite amplo para leigos continuam como trabalho futuro, não como novos
-portões desta prévia. Windows limpo **não validado**. [Registro da Release](FIRST_RELEASE.md).
+portões desta prévia. Windows limpo **não validado**. [Registro da Release](reports/maintenance/FIRST_RELEASE.md).
 
 **Objetivo:** escolher uma dashboard original → executar a intro correspondente → entrar em um perfil → listar e selecionar um jogo pela interface original → atender ao pedido original de lançamento → jogar → salvar → atender ao pedido original de retorno → voltar à mesma dashboard, sem repetir a intro.
 
@@ -73,9 +73,9 @@ Os itens gerais abaixo continuam pendentes quando a evidência cobre só este pa
 
 - [ ] Navegar pelos menus e painéis locais da dashboard com controle, incluindo confirmar e voltar.
 - [ ] Exibir textos, ícones, fontes, transições e animações corretamente, não apenas uma imagem estática.
-- [x] Abrir e fechar o Guide original na dashboard. Retail 17559, Windows x64/Xenos, 16/10: abas, B, reabertura, botão Guide; [relatório](guide-composition-2026-10-16.md).
-- [x] Abrir e fechar o Guide original durante o jogo, permitindo acionar o pedido de retorno. Forza (Xbox Home → handoff Dashboard) e Castle Crashers, Windows x64/Xenos, 16/10; outros jogos não verificados; [relatório](guide-composition-2026-10-16.md).
-- [x] Direcionar a entrada para a interface ativa, sem acionar simultaneamente o jogo por trás do Guide. Windows x64/Xenos, 16/10: Castle Crashers ao vivo e `system_ui_input_test` (estado, keystrokes, botão Guide e botões segurados ao fechar); outros jogos não verificados; [relatório](guide-composition-2026-10-16.md).
+- [x] Abrir e fechar o Guide original na dashboard. Retail 17559, Windows x64/Xenos, 16/10: abas, B, reabertura, botão Guide; [relatório](reports/graphics/guide-composition-2026-10-16.md).
+- [x] Abrir e fechar o Guide original durante o jogo, permitindo acionar o pedido de retorno. Forza (Xbox Home → handoff Dashboard) e Castle Crashers, Windows x64/Xenos, 16/10; outros jogos não verificados; [relatório](reports/graphics/guide-composition-2026-10-16.md).
+- [x] Direcionar a entrada para a interface ativa, sem acionar simultaneamente o jogo por trás do Guide. Windows x64/Xenos, 16/10: Castle Crashers ao vivo e `system_ui_input_test` (estado, keystrokes, botão Guide e botões segurados ao fechar); outros jogos não verificados; [relatório](reports/graphics/guide-composition-2026-10-16.md).
 - [ ] Exibir e utilizar o teclado virtual original quando solicitado.
 - [ ] Mostrar diálogos reais de confirmação, erros e notificações.
 - [ ] Tratar telas dependentes de serviços indisponíveis sem travar nem informar conexão fictícia.
@@ -166,7 +166,7 @@ Incremento Perfil do Guide (2026-10-16, patch 0080): GamerCard original do Guide
 
 - [x] Mostrar a contagem real de jogos da conta conectada no Perfil do Guide, na dashboard, no Forza e no Castle Crashers.
 - [x] Recuperar essa contagem após reiniciar e trocá-la com o perfil no mesmo processo (Player1 1, Player2 0).
-- [ ] Gamerpic, gamerscore, conquistas e símbolo de gamerscore: sem dados ou recurso local; ver [relatório](guide-composition-2026-10-16.md).
+- [ ] Gamerpic, gamerscore, conquistas e símbolo de gamerscore: sem dados ou recurso local; ver [relatório](reports/graphics/guide-composition-2026-10-16.md).
 
 Não amplia o aceite de conquistas por usuário nem de outros jogos.
 
@@ -222,7 +222,7 @@ confirmação Xbox Home, cinco callbacks, drenagem de áudio e exit 0 sem timeou
 ou cancelamento do jogo; coletor anexado sem exceção capturada. Retorno sem
 intro, mesmo HWND 7341630/XUID E00AD9FD043F47E5 e My Games novamente responsiva.
 Screenshots/relatórios e uma AV anterior não reproduzida estão separados em
-`docs/validation-forza-horizon.md`. Não aprova fidelidade gráfica completa,
+`docs/reports/titles/validation-forza-horizon.md`. Não aprova fidelidade gráfica completa,
 fechar/reabrir Guide com B, outros títulos/versões ou o ciclo com save/load de §5.3.
 
 ### 5.3. Fechamento da janela, falhas e repetição
@@ -283,7 +283,7 @@ os testes do serviço não promovem esse aceite. Evidências e limites:
   persistência e contratos XAM/XConfig testados. Retail 17559/Guide em PT-BR
   após reinicialização; Forza confirmado em português pelo mantenedor.
   Escrita pelas configurações originais e aceite das outras versões pendentes
-  ([evidências e limites](console-language-locale.md)).
+  ([evidências e limites](guides/console-language-locale.md)).
 - [ ] Fornecer data, hora e fuso coerentes às interfaces e jogos.
 - [ ] Aplicar opções de vídeo, proporção, áudio e controles efetivamente suportadas, sem configurações de fachada.
 - [ ] Alterar temas, imagens de jogador e preferências visuais quando presentes na dashboard.
@@ -353,14 +353,14 @@ O runtime documentado separa memória, funções do sistema, threads, arquivos, 
 Home → Games da Retail 17559 renderizados pelo executor D3D12 independente,
 com capturas reais comparadas ao Xenos e testes focados. Os itens gerais acima
 continuam abertos: diferenças de pixels, Guide/avatares, transições para jogos,
-Vulkan e desempenho não estão certificados. [Resultados e limites](native-renderer-n2.md).
+Vulkan e desempenho não estão certificados. [Resultados e limites](reports/graphics/native-renderer-n2.md).
 
 **Evidência parcial Native N3 (2026-10-14):** ciclo original 17559 (boot direto)
 → My Games → Castle Crashers em modo trial → dashboard confirmado com participação
 manual do mantenedor, gráficos reais e entrada; janela, perfil e renderer global
 preservados. Castle encerrou pelo loader original com exit 0, sem timeout.
 Lentidão permanece; não fecha os itens gerais de fidelidade, campanha, áudio,
-simulação ou Vulkan. [Evidências e limites](native-renderer-n3.md).
+simulação ou Vulkan. [Evidências e limites](reports/graphics/native-renderer-n3.md).
 
 ## 12. Rede e periféricos especiais — P2
 
@@ -496,7 +496,7 @@ O assistente externo cuida de instalação, preparação, escolha do ambiente e 
 - [x] Não enviar automaticamente conteúdo, saves, credenciais ou informações pessoais — preparação e supervisor não têm upload/telemetria.
 - [ ] Guiar atualizações preservando perfis, saves, conteúdo e preparações ainda compatíveis.
 - [ ] Recuperar atualizações interrompidas e permitir retornar a uma versão anterior quando viável.
-- [x] Informar claramente onde os dados ficam armazenados — interface mostra a pasta do perfil e oferece abrir dados locais; detalhes e registros ficam em `.local/logs/desktop/` e `.local/runs/`.
+- [x] Informar claramente onde os dados ficam armazenados — interface mostra a pasta do perfil e oferece abrir dados locais; detalhes e registros ficam em `.local/evidence/logs/desktop/` e `.local/evidence/runs/`.
 - [x] Remover o aplicativo sem apagar dados pessoais sem escolha explícita — pacote portátil separado do ambiente; remoção do pacote mantém conteúdo e dados, instrução incluída.
 - [ ] Tratar verificações de segurança de cada sistema sem instruir a desativar antivírus ou proteções como procedimento normal.
 
@@ -517,7 +517,7 @@ Usar o **pacote real da release** em cada sistema/arquitetura anunciado como sup
 
 O aceite comprova facilidade de uso para o conjunto e o ambiente testados, não compatibilidade universal nem todos os jogos na primeira release.
 
-**Incremento gráfico de 2026-10-12:** candidato local e ferramentas gerenciadas implementados; importação de conteúdo completo e registro do catálogo SDK por dashboard. Testes e limites em `docs/desktop-preparation.md`. Caminhos Unicode foram testados na importação e no runtime iruka; isso não equivale ao fluxo completo em máquina limpa. Perfis originais continuam bloqueados no host XUI de atualização/composição/entrada. Save/load e atualização/rollback não aprovados. Todos os itens do §18 permanecem abertos até teste do pacote nas condições exigidas.
+**Incremento gráfico de 2026-10-12:** candidato local e ferramentas gerenciadas implementados; importação de conteúdo completo e registro do catálogo SDK por dashboard. Testes e limites em `docs/guides/desktop-preparation.md`. Caminhos Unicode foram testados na importação e no runtime iruka; isso não equivale ao fluxo completo em máquina limpa. Perfis originais continuam bloqueados no host XUI de atualização/composição/entrada. Save/load e atualização/rollback não aprovados. Todos os itens do §18 permanecem abertos até teste do pacote nas condições exigidas.
 
 ## 19. Commits e publicação — regras permanentes e histórico da preparação
 
@@ -555,12 +555,12 @@ Se houver commits já compartilhados, informar a situação antes de alterar ess
 - Destino autorizado: `fabegalo/x360-native`, privado até nova instrução do proprietário.
 - Base publicada: último incremento consolidado da cena XUI; alterações concorrentes não commitadas foram preservadas localmente. Não reescrever a árvore ativa enquanto outra sessão trabalha.
 - Intervalo revisado: 32 commits próprios, desde a raiz. Antes da primeira publicação não havia remoto, branches remotas ou tags no repositório de origem; nenhum histórico upstream foi reescrito.
-- Backup recuperado em cópia isolada e verificado por `git bundle verify` e `git fsck`. Bundle original, patches das alterações locais, cópias dos arquivos em andamento, auditoria e mapa antigo→novo permanecem fora do conjunto publicado, em `.local/publication/20261012-private/`.
+- Backup recuperado em cópia isolada e verificado por `git bundle verify` e `git fsck`. Bundle original, patches das alterações locais, cópias dos arquivos em andamento, auditoria e mapa antigo→novo permanecem fora do conjunto publicado, em `.local/archive/releases/publication/20261012-private/`.
 - Reescrita exclusiva de mensagens: 32/32 árvores, autores e datas idênticos. Títulos Conventional Commits; removidos os rodapés de autoria de assistente. Créditos humanos e referências técnicas preservados.
 - Auditoria de todos os snapshots: 422 blobs, 182 caminhos históricos; sem binários, recursos proprietários, conteúdo de `.local`, fontes AOT geradas ou padrões de credenciais detectados. Metadados do autor humano foram preservados conforme §19.2. Isto não constitui garantia universal de ausência de segredos.
 - SDK permanece gitlink público fixado em `f5337cdc947ff6d4c4196737e2c807a48f2a1fc2`; o histórico da dependência não integra a reescrita. Atualizadas apenas duas referências internas ao commit próprio do primeiro quadro.
 - Publicada somente a branch `main` revisada: 32 commits reescritos e o registro da auditoria, até `b31aae906cd636fb793cc965d7dfbc9e1d5d1813`. Sem push de backup, espelhamento, force-push, tags ou release. Visibilidade `PRIVATE` reconfirmada pela API do GitHub.
-- Árvore de desenvolvimento reconciliada após o usuário confirmar que a outra sessão parou: `main` passou a acompanhar `origin/main`. Conferidos HEAD, diferenças locais, arquivos em andamento e SDK preservados. Evidência local em `.local/publication/20261012-private/reconciliation-1791814020853/after.json`; publicação em `published-verification.json`. Commits posteriores não significam envio automático nem mudança de visibilidade.
+- Árvore de desenvolvimento reconciliada após o usuário confirmar que a outra sessão parou: `main` passou a acompanhar `origin/main`. Conferidos HEAD, diferenças locais, arquivos em andamento e SDK preservados. Evidência local em `.local/archive/releases/publication/20261012-private/reconciliation-1791814020853/after.json`; publicação em `published-verification.json`. Commits posteriores não significam envio automático nem mudança de visibilidade.
 
 ## 20. Títulos XNA / Xbox Live Indie Games — P1/P2
 

@@ -3,10 +3,10 @@
 [project]
 name = "castle_crashers"
 sdk_version = "0.10.0"
-game_root = "../../.local/inputs/titles/castle_crashers/extracted"
+game_root = "../../.local/inputs/games/castle_crashers/content"
 
 [entrypoint]
-file_path = "../../.local/inputs/titles/castle_crashers/extracted/default.xex"
+file_path = "../../.local/inputs/games/castle_crashers/content/default.xex"
 out_directory_path = "generated/default"
 includes = ["analysis/castle_crashers.toml"]
 

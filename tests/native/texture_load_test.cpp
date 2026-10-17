@@ -1,4 +1,4 @@
-#include "texture_load.h"
+#include "../../src/native/textures/texture_load.h"
 #include <rex/graphics/pipeline/texture/info.h>
 #include <catch2/catch_test_macros.hpp>
 #include <d3d12.h>

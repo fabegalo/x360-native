@@ -16,17 +16,17 @@
 # method after a run of adjustor thunks, held only by .rdata 0x820E0D24.
 #
 # How (codegen output generated with motocross_madness.toml only):
-#   x360n-content xref .local\inputs\titles\motocross_madness\extracted default.xex
-#     82210000 8316B73C -> .local\runs\mm-artifacts\mm-code-ptrs-codegen1.txt
+#   x360n-content xref .local\inputs\games\motocross_madness\content default.xex
+#     82210000 8316B73C -> .local\evidence\runs\mm-artifacts\mm-code-ptrs-codegen1.txt
 #     (74 465 data words, 4 716 formed addresses)
-#   scripts\analysis\check-pointer-targets.ps1 -Image .local\runs\mm-artifacts\mm-image.bin
+#   scripts\analysis\check-pointer-targets.ps1 -Image .local\evidence\runs\mm-artifacts\mm-image.bin
 #     -Generated titles\motocross_madness\generated\default -Xref <that file>
 #     -Base 82000000 -Toml
 # Of 2141 referenced code addresses that no generated function covers, 189 pass every
 # criterion (aligned; not inside a .pdata function; not inside a generated function;
 # the word before is 0 or ends a function; a blr, bctr or b follows within 64 words
 # without reaching another function start). The other 1952 are not here.
-# Report: .local\runs\mm-artifacts\mm-pointer-targets-codegen1.txt.
+# Report: .local\evidence\runs\mm-artifacts\mm-pointer-targets-codegen1.txt.
 
 [functions]
 0x82269A08 = {}  # refs=1; after 0x4E800420; first end after 11 word(s)

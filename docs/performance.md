@@ -11,17 +11,17 @@ contínuas, priorizadas por evidência.
 O desenvolvimento Native está suspenso por decisão do mantenedor em 2026-10-15.
 A prioridade atual é fortalecer o Xenos existente, sem iniciar trabalho Native
 ou Vulkan. A investigação de resolves está em
-[Xenos: resolves vazios](xenos-empty-resolves.md) e
-[X2: vertex fetch predicado](xenos-fetch-predication.md).
+[Xenos: resolves vazios](reports/graphics/xenos-empty-resolves.md) e
+[X2: vertex fetch predicado](reports/graphics/xenos-fetch-predication.md).
 
 Histórico: Native foi a prioridade gráfica iniciada em 2026-10-14: primeiro scanout D3D12
 executado, com fronteira própria para Vulkan futuro e Xenos mantido como padrão.
-[Resultados e limites](native-renderer.md). A comparação de pixels passou;
+[Resultados e limites](reports/graphics/native-renderer.md). A comparação de pixels passou;
 o fixture com readback não é benchmark de FPS. A meta competitiva frente ao
 Pinyon exige cenas equivalentes, mesma fidelidade, 1% low/P95/P99, CPU/GPU,
 RAM/VRAM e pacing, sem mudar física/áudio/simulação. Ainda não há resultado
 competitivo. Native N3 demonstrou dashboard e ciclo Castle em modo trial, mas
-continua lento; Forza Native não está certificado. [Resultados N3](native-renderer-n3.md).
+continua lento; Forza Native não está certificado. [Resultados N3](reports/graphics/native-renderer-n3.md).
 P1/P2/P3 preservados.
 
 ## Instrumentação
@@ -142,7 +142,7 @@ durante o build e seu diretório padrão está sem executável. Os artefatos
 congelados, auditados e suficientes para o benchmark estão disponíveis:
 
 ```powershell
-pwsh -File scripts/performance/benchmark-runtime.ps1 -Title forza_horizon -Label nova-coleta -BinaryDirectory .local/benchmarks/binaries/sdk72/forza_horizon
+pwsh -File scripts/performance/benchmark-runtime.ps1 -Title forza_horizon -Label nova-coleta -BinaryDirectory .local/evidence/benchmarks/binaries/sdk72/forza_horizon
 ```
 
 Usar `sdk71/forza_horizon` para o outro lado desse A/B. Não copiar executáveis
@@ -153,12 +153,12 @@ ProcessStartInfo sem console, entrada/captura por scripts locais e PID exato,
 deadline e cleanup em finally. Sem Computer Use. Capturas fora da janela medida.
 PrintWindow roda em helper próprio com timeout de 5 s e cleanup, para que um
 jogo sem resposta não bloqueie indefinidamente a coleta.
-Uma seed imutável em `.local/benchmarks/seeds/<title>` alimenta cópias de perfis,
+Uma seed imutável em `.local/evidence/benchmarks/seeds/<title>` alimenta cópias de perfis,
 saves e caches por execução, preservando dados reais. A condição inicial de cache
 é idêntica; cache do SO/driver não é controlado. Outra condição exige outro conjunto
 explícito de seeds preservando o anterior. Não misturar originais entre títulos.
 
-Saídas em `.local/benchmarks/<label>/<title>`: ambiente, CSV, resultado JSON,
+Saídas em `.local/evidence/benchmarks/<label>/<title>`: ambiente, CSV, resultado JSON,
 amostras do processo, eventos, logs e PNGs. Registram hardware/driver/resolução,
 power plan quando disponíveis, hashes de binários/DLLs/configuração, lock, cenário
 e seed. É diagnóstico direto com guardas de originais do título; não publica
@@ -180,9 +180,9 @@ nativos; os campos `external_*` usam as amostras do processo. Encerramento limit
 forçado é explicitado e não equivale a um retorno normal à dashboard.
 
 ```powershell
-pwsh -File scripts/performance/compare-benchmarks.ps1 -Before .local/benchmarks/before/dash_17559 -After .local/benchmarks/after/dash_17559 -Output .local/benchmarks/delta.json
-pwsh -File scripts/performance/export-benchmark.ps1 -Run .local/benchmarks/before/dash_17559 -Output .local/benchmarks/public.json
-pwsh -File scripts/performance/reduce-benchmark.ps1 -Run .local/benchmarks/before/dash_17559
+pwsh -File scripts/performance/compare-benchmarks.ps1 -Before .local/evidence/benchmarks/before/dash_17559 -After .local/evidence/benchmarks/after/dash_17559 -Output .local/evidence/benchmarks/delta.json
+pwsh -File scripts/performance/export-benchmark.ps1 -Run .local/evidence/benchmarks/before/dash_17559 -Output .local/evidence/benchmarks/public.json
+pwsh -File scripts/performance/reduce-benchmark.ps1 -Run .local/evidence/benchmarks/before/dash_17559
 ```
 
 A comparação exige a mesma cena revisada, janela completa, seed, configuração,
@@ -218,7 +218,7 @@ limita a execução a 30 s. É uma carga sintética do runtime, não FPS de um j
 
 ```powershell
 scripts/devshell.cmd cmake --build .local/build/win-amd64 --config Release --target x360n_perf_counter_probe
-pwsh -File scripts/performance/benchmark-counters.ps1 -Executable .local/build/win-amd64/tests/Release/x360n_perf_counter_probe.exe -Output .local/benchmarks/counters.json
+pwsh -File scripts/performance/benchmark-counters.ps1 -Executable .local/build/win-amd64/tests/Release/x360n_perf_counter_probe.exe -Output .local/evidence/benchmarks/counters.json
 scripts/devshell.cmd ctest --test-dir .local/build/win-amd64 -C Release -R "x360n[.]benchmark"
 ```
 
@@ -250,7 +250,7 @@ de benchmark durante builds ou outros jogos. Testar apenas regressões pertinent
 6. Marcadores semânticos de carregamento/transição; caches persistentes somente
    com identidade/versionamento/invalidação comprovados.
 
-Resultados: [2026-10-14](performance-results-2026-10-14.md).
-P3: [encerramento por reversão da otimização 0073](performance-p3-2026-10-14.md).
+Resultados: [2026-10-14](reports/performance/performance-results-2026-10-14.md).
+P3: [encerramento por reversão da otimização 0073](reports/performance/performance-p3-2026-10-14.md).
 Instrumentação e benchmarks preservados; a redução isolada de CPU não foi aceita
 como ganho global diante da piora observada de 1% low.

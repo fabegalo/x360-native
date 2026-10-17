@@ -36,12 +36,12 @@ int wmain(int argc,wchar_t** argv) {
   auto exe=bin/(std::wstring(name)+L".exe");
   auto run=out/("step-"+std::to_string(step));fs::create_directories(run);
   auto handoff=run/"handoff.bin";
-  auto game_root=root/(game?".local/inputs/titles/forza_horizon/extracted":".local/inputs/dashboard/17559");
+  auto game_root=root/(game?".local/inputs/games/forza_horizon/disc-1":".local/inputs/dashboards/17559/runtime");
   std::wstring cmd=Quote(exe)+L" --gpu_plugin=xenos --mnk_mode=true --parent_window="+std::to_wstring(window.handle())+
    L" --game_data_root="+Quote(game_root)+L" --user_data_root="+Quote(out/(game?"game-user":"dash-user"))+
    L" --x360n_profile_root="+Quote(out/"dash-user")+L" --x360n_handoff_out="+Quote(handoff);
   if(game) cmd+=L" --x360n_system_ui_host="+Quote(out/"dash-bin/dash_17559_session_ui.dll")+
-    L" --x360n_system_ui_root="+Quote(root/".local/inputs/dashboard/17559");
+    L" --x360n_system_ui_root="+Quote(root/".local/inputs/dashboards/17559/runtime");
   else cmd+=L" --dash17559_boot_intro=false";
   if(step) cmd+=L" --x360n_handoff_in="+Quote(out/("step-"+std::to_string(step-1))/"handoff.bin");
   SECURITY_ATTRIBUTES sa{sizeof(sa),nullptr,TRUE};

@@ -9,7 +9,7 @@ sdk_version = "0.10.0"
 game_root = "../../.local/inputs"
 
 [entrypoint]
-file_path = "../../.local/inputs/titles/motocross_madness/extracted/default.xex"
+file_path = "../../.local/inputs/games/motocross_madness/content/default.xex"
 out_directory_path = "generated/default"
 includes = ["analysis/motocross_madness.toml", "analysis/motocross_madness_pointer_targets.toml", "analysis/motocross_madness_avatar_trace.toml"]
 
@@ -21,18 +21,18 @@ includes = ["analysis/motocross_madness.toml", "analysis/motocross_madness_point
 # the dashboard profile that first needed them.
 [[modules]]
 guest_path = 'x360nsys:\xam.xex'
-file_path = "../../.local/inputs/dashboard/versions/17559/retail_system_assets/extracted/xam.xex"
+file_path = "../../.local/inputs/dashboards/17559/retail_system_assets/extracted/xam.xex"
 out_directory_path = "generated/xam"
 includes = ["../dash_17559/analysis/xam_ui_17559.toml", "analysis/xam17559_avatar_trace.toml"]
 [x360n]
 # Content root for import and execution (game_root above is the codegen VFS root).
-game_data_root = "../../.local/inputs/titles/motocross_madness/extracted"
+game_data_root = "../../.local/inputs/games/motocross_madness/content"
 xex_sha256 ="2a8406bcf9c223f9d7da732be617cc7cd46fbb587ef552f7fcacac2049b95dcd"
 native_exe = "../../.local/build/titles/motocross_madness/motocross_madness.exe"
 user_data_root = "../../.local/user/motocross_madness"
 # The title builds texture fetch constants with type 0 on purpose: its GPU DXT1
 # compression of terrain color tiles samples them in every draw (2026-10-16,
-# docs/validation-motocross-madness.md). Without this the terrain is black.
+# docs/reports/titles/validation-motocross-madness.md). Without this the terrain is black.
 args = ["--gpu_plugin=xenos", "--mnk_mode=true", "--gpu_allow_invalid_fetch_constants=true"]
 # Shared avatar service (titles/common/avatar, docs/avatar-system.md §17). It calls
 # addresses of this exact XAM, running in the session dashboard's single XAM image

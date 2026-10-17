@@ -7,10 +7,10 @@ projeto gerado por `rexglue init` (v0.10.0) com as adaptações do x360-native
 
 | Pasta | Executável de entrada (SHA-256) | Documento |
 |---|---|---|
-| `iruka/` | `default.xex` `66ec34f2…cb61e31` (amostra XDK, `rexglue/demo-iruka`) | `docs/validation-iruka.md` |
-| `castle_crashers/` | `default.xex` `825e9c8c…f5d9ad` (XBLA `584108B7`, v0.0.1.3) | `docs/validation-castle-crashers.md` |
-| `motocross_madness/` | `default.xex` `2a8406bc…5dcd` (XBLA `58410B0F`, v0.0.0.3) | `docs/validation-motocross-madness.md` |
-| `forza_horizon/` | `default.xex` `db40df60…9e3987c` (4D5309C9, v0.0.0.10) | `docs/validation-forza-horizon.md` |
+| `iruka/` | `default.xex` `66ec34f2…cb61e31` (amostra XDK, `rexglue/demo-iruka`) | `docs/reports/titles/validation-iruka.md` |
+| `castle_crashers/` | `default.xex` `825e9c8c…f5d9ad` (XBLA `584108B7`, v0.0.1.3) | `docs/reports/titles/validation-castle-crashers.md` |
+| `motocross_madness/` | `default.xex` `2a8406bc…5dcd` (XBLA `58410B0F`, v0.0.0.3) | `docs/reports/titles/validation-motocross-madness.md` |
+| `forza_horizon/` | `default.xex` `db40df60…9e3987c` (4D5309C9, v0.0.0.10) | `docs/reports/titles/validation-forza-horizon.md` |
 | `dash_6717/` | `dash.xex` `f8a51ea3…cb87d8` (2.0.6717.0; diagnóstico) | `docs/dashboard.md` |
 | `dash_17559/` | `dash.xex` `3ad8f38d…14f927` (dashboard 2.0.17559.0) | `docs/dashboard.md` |
 
@@ -38,8 +38,10 @@ jogo ou de sistema entra aqui: os XEX ficam em `.local/inputs`, o build em
 `.local/build/titles/<nome>`.
 
 Para adicionar arquivos de um novo jogo, use
-`.local/inputs/titles/<nome>/source/` para o pacote original e
-`.local/inputs/titles/<nome>/extracted/` para o XEX e todos os recursos extraídos.
-Hashes e identificação ficam em `metadata/`, ao lado de `extracted/`. Veja
-[Onde colocar os arquivos](../docs/BUILDING.md#onde-colocar-os-arquivos). Colocar arquivos ali não cria
+`.local/inputs/games/<nome>/source/` para o pacote original e
+`.local/inputs/games/<nome>/content/` para pacotes/demos extraídos ou `disc-1/`,
+`disc-2/` conforme os discos presentes. DLCs ficam em `dlc/<pacote>/`, separados
+do executável base. Hashes e identificação ficam em `metadata/`. Veja
+[layout de conteúdo](../docs/guides/content-layout.md) e
+[Onde colocar os arquivos](../docs/guides/BUILDING.md#onde-colocar-os-arquivos). Colocar arquivos ali não cria
 automaticamente um projeto AOT nesta pasta.

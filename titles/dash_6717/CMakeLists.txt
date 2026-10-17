@@ -33,7 +33,7 @@ endif()
 
 rexglue_setup_target(dash_6717 GPU_PLUGINS xenos)
 include(../../cmake/runtime/x360n_dashboard_assets.cmake)
-x360n_guard_dashboard(dash_6717 6717 "${CMAKE_CURRENT_SOURCE_DIR}/../../.local/inputs/dashboard/versions/6717/blades_retail")
+x360n_guard_dashboard_profile(dash_6717 "${CMAKE_CURRENT_SOURCE_DIR}/dash_6717_manifest.toml")
 if(REXSDK_DIR)
     x360n_stage_runtime_dlls(dash_6717 PLUGIN_TARGETS rexgpu-xenos)
 endif()

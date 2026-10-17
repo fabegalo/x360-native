@@ -1,4 +1,4 @@
-#include "rectangle_shader.h"
+#include "../../src/native/shaders/rectangle_shader.h"
 #include <catch2/catch_test_macros.hpp>
 #include <d3d12.h>
 #include <d3dcompiler.h>

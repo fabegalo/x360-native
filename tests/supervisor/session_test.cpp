@@ -9,6 +9,17 @@
 
 namespace fs = std::filesystem;
 using namespace x360n;
+TEST_CASE("session diagnostic arguments belong to the selected profile", "[session]") {
+  SessionProfile first;
+  first.args = {"--other_dashboard_intro=true", "--gpu_plugin=xenos"};
+  first.skip_boot_intro_args = {"--other_dashboard_intro=false"};
+  CHECK(SessionProfileArguments(first, false) == first.args);
+  CHECK(SessionProfileArguments(first, true) == std::vector<std::string>{"--other_dashboard_intro=false", "--gpu_plugin=xenos"});
+  SessionProfile second;
+  second.args = {"--another_intro=normal"};
+  CHECK(SessionProfileArguments(second, true) == second.args);
+  CHECK(first.args.front() == "--other_dashboard_intro=true");
+}
 TEST_CASE("session watchdog resets after sustained execution without a lifetime limit", "[session]") {
   SessionProgress progress;
   for (unsigned cycle = 0; cycle < 1000; ++cycle) {
@@ -62,6 +73,8 @@ TEST_CASE("session profile and launch request preserve Unicode paths", "[session
   CHECK(MatchesLaunch(profile, request));
   CHECK(PathFromUtf8(PathUtf8(dir)) == dir);
   // A title manifest cannot replace the profile authority selected by Session.
+  std::ofstream(manifest, std::ios::app) << "skip_boot_intro_args = ['--intro=false']\n";
+  CHECK(LoadSessionProfile(ProjectPaths{dir}, manifest, false).skip_boot_intro_args == std::vector<std::string>{"--intro=false"});
   std::ofstream(manifest, std::ios::app) << "args = ['--x360n_profile_root=other-user']\n";
   CHECK_THROWS(LoadSessionProfile(ProjectPaths{dir}, manifest, false));
   fs::remove_all(dir.parent_path());

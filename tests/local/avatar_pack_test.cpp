@@ -18,7 +18,7 @@ using namespace x360n::avatar;
 namespace {
 
 fs::path PackDir() {
-  return fs::path(X360N_SOURCE_ROOT) / ".local/inputs/dashboard/versions/17559/retail_system_assets" /
+  return fs::path(X360N_SOURCE_ROOT) / ".local/inputs/dashboards/17559/retail_system_assets" /
          "storage_packs/FFFE07DF00000002.extracted";
 }
 
@@ -76,7 +76,7 @@ TEST_CASE("17559 AvatarAssetPackLegacyV1.toc parses with 13 columns", "[avatar]"
 // Same-version pair: the 13604 descriptors (FFFE07DF00000006) against the 13604
 // catalog (FFFE07DF00000002), both from the collection's 13604 set.
 TEST_CASE("13604 avatar descriptors resolve against the 13604 catalog", "[avatar]") {
-  const fs::path set = fs::path(X360N_SOURCE_ROOT) / ".local/inputs/dashboard/versions/13604/kinect_retail_full_readme";
+  const fs::path set = fs::path(X360N_SOURCE_ROOT) / ".local/inputs/dashboards/13604/kinect_retail_full_readme";
   const auto toc_path = set / "FFFE07DF00000002 Extracted/AvatarAssetPack.toc";
   const auto desc_dir = set / "FFFE07DF00000006 Extracted";
   if (!fs::exists(toc_path) || !fs::exists(desc_dir)) SKIP("13604 set not present under " + set.string());

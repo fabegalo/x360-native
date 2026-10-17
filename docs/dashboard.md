@@ -4,7 +4,7 @@ Estado consolidado em 2026-10-15: Retail 17559 renderiza intro/menu e My Games,
 com ciclos Castle/Forza demonstrados. C7.7 (§0.31) demonstrou criação, troca e
 persistência de perfis locais; C7.8 (§0.32) mantém isolamento dos originais.
 Saves por perfil têm [testes C8](save-storage.md), sem aceite comercial.
-Guide/Xbox Home foi demonstrado no [ciclo Forza](validation-forza-horizon.md);
+Guide/Xbox Home foi demonstrado no [ciclo Forza](reports/titles/validation-forza-horizon.md);
 isso não certifica todos os serviços da interface. A região zerada de §0.10
 permanece hipótese experimental. As seções numeradas são registros históricos:
 falhas e pendências valem para o incremento datado, salvo atualização posterior.
@@ -15,11 +15,11 @@ referência de comportamento; não é usado como executor).
 
 ## 0. Pacote 17559
 
-Arquivos em `.local/inputs/dashboard/17559/` (ignorado pelo git). Nenhum foi
-alterado (hashes reconferidos); hashes em `.local/inputs/dashboard/metadata/17559/17559.sha256`,
-identidade em `.local/inputs/dashboard/metadata/17559/17559-*.identify.json`. Nenhum arquivo de
+Arquivos em `.local/inputs/dashboards/17559/runtime/` (ignorado pelo git). Nenhum foi
+alterado (hashes reconferidos); hashes em `.local/inputs/dashboards/metadata/17559/17559.sha256`,
+identidade em `.local/inputs/dashboards/metadata/17559/17559-*.identify.json`. Nenhum arquivo de
 outra versão foi usado no alvo ativo. A coleção fornecida posteriormente está em
-`.local/inputs/dashboard/versions/<versão>/<variante>/`, e as fontes em
+`.local/inputs/dashboards/<versão>/<variante>/`, e as fontes em
 `dashboard/resources/fonts/`.
 
 Na organização de 2026-10-12, os 311 conjuntos da coleção e o alvo ativo foram
@@ -35,7 +35,7 @@ Ferramentas (todas sobre o carregador e o decodificador do próprio SDK):
 `x360n-content dump-image | imports | resources | disasm | xref | callers`,
 `scripts/analysis/xex-imports.ps1`, `scripts/analysis/xex-module-strings.ps1`,
 `scripts/analysis/xex-locator-strings.ps1`, `scripts/analysis/check-function-bounds.ps1`,
-`scripts/analysis/check-pdata-overlap.ps1`. Saídas em `.local/runs/dash-artifacts/`.
+`scripts/analysis/check-pdata-overlap.ps1`. Saídas em `.local/evidence/runs/dash-artifacts/`.
 
 ### 0.1 Conteúdo real
 
@@ -54,7 +54,7 @@ resolvem, `src/system/user_module.cpp:258-277`): **36 seções**, idênticas no
 `neon`, `signupbo`, `dashuisk`, `network`, `videos`, `pictures`, `music`,
 `memory`, `gamercar`, `dvd`, `dashcomm`, `dashmain`, `consoles`, `SharedUI`,
 `contui`, `contapp`, `hubui`, `dashlua`, `hubapp`, `arcade` (endereços, tamanhos e
-SHA-256 em `.local/runs/dash-artifacts/dash-resources.csv`).
+SHA-256 em `.local/evidence/runs/dash-artifacts/dash-resources.csv`).
 
 ### 0.2 Imports e as conferências antes da execução
 
@@ -189,7 +189,7 @@ destino é lido de duas tabelas em `.data`, zeradas na imagem e escritas só por
 `XdfLoadXexFromCache("dashnui.xex", 8, 0, &handle)` e resolvem cada slot com
 `XexGetProcedureAddress` por **nome** (`NuiIdentityEnroll`,
 `SpeechOnlineRecognize`, …; mapa slot→nome em
-`.local/runs/dash-artifacts/`). Nenhum destino foi fixado. Com o SDK atual o
+`.local/evidence/runs/dash-artifacts/`). Nenhum destino foi fixado. Com o SDK atual o
 carregamento não acontece (stub, §0.2), as tabelas ficam em 0, e uma chamada a
 um desses thunks chegaria ao despachante com destino 0 —
 `Call to invalid or unregistered function at guest address 0x00000000`. Isso é o
@@ -244,7 +244,7 @@ O app do título também carrega `game:\dash.xex` em vez do padrão
 
 ```powershell
 x360n run .local\build\titles\dash_17559\dash_17559.exe --label dash17559-run-1 --timeout 60 --rex-log -- `
-  --gpu_plugin=xenos --game_data_root=<raiz>\.local\inputs\dashboard\17559 `
+  --gpu_plugin=xenos --game_data_root=<raiz>\.local\inputs\dashboards\17559\runtime `
   --user_data_root=<raiz>\.local\user\dash_17559 --log_max_file_size_mb=512
 ```
 
@@ -536,7 +536,7 @@ de 4 KiB do heap físico E/F no Windows. A amostra corrigida em §0.11 lê `0x0B
 A thread `CommandProcessor::WorkerThreadMain` está esperando trabalho (linha 225),
 sem comandos pendentes. O run termina pelo timeout de 120 s, sem exceção não
 tratada, mas com 99 linhas STUB, 86 erros e 7 mensagens não implementadas.
-Evidência local: `.local/logs/dash17559-fence-state.txt` e os relatórios desses runs.
+Evidência local: `.local/evidence/logs/dash17559-fence-state.txt` e os relatórios desses runs.
 
 Naquele momento ainda não havia sido determinado qual pacote atualizava o contador.
 `VdGetSystemCommandBuffer` usa placeholders e
@@ -555,7 +555,7 @@ codegen não foi forçado e os arquivos gerados permaneceram iguais.
 o guest lê o ponteiro em dispositivo `0x40002400 + 11024`, o valor emitido em
 `+11036` e a conclusão nesse ponteiro. Espera enquanto
 `uint32_t(emitido - alvo) < uint32_t(emitido - concluído)`. A amostra correta
-(`.local/logs/dash-fence-alias-state.txt`) tem emitido `0x15`, alvo `0x0D`,
+(`.local/evidence/logs/dash-fence-alias-state.txt`) tem emitido `0x15`, alvo `0x0D`,
 ponteiro `0xFFCA3000`, concluído `0x0B`: `8 < 10` mantém a espera.
 
 `sub_921B0960` emite `EVENT_WRITE_SHD`, initiator 3, endereço físico
@@ -593,7 +593,7 @@ Dois bloqueios seguintes foram corrigidos separadamente:
 **Resultado visual:** run `20261012T030938Z-dash-jmp-fixed` apresenta conteúdo
 real: fundo, blocos e ícones. Durante entradas direcionais e botão A foram
 observados painéis diferentes, inclusive o de configurações. Captura local:
-`.local/logs/dash17559-real-frame-input.png`. Isso demonstra renderização real
+`.local/evidence/logs/dash17559-real-frame-input.png`. Isso demonstra renderização real
 e resposta parcial à entrada, não compatibilidade completa ou lançamento de jogos.
 
 **Limites concretos:** `media:\SegoeXbox-Light.xtt` falha com `0xC000000F`;
@@ -627,7 +627,7 @@ o build final sem instrumentação não tem captura própria.
 O primeiro quadro permanece preservado no commit local `0195954`. Os patches
 0008–0010 corrigem a fila de teclas do driver MNK, o ABI de data/hora e o retorno
 de ponteiro nulo para strings comuns ausentes (sem aceitar confirmações).
-`sdkcheck`: **22/22** em `.local/logs/navigation-final-ctest.log`.
+`sdkcheck`: **22/22** em `.local/evidence/logs/navigation-final-ctest.log`.
 Regressões com os patches: iruka L1–L5 aprovado (313 cores, diferença 7,144,
 run `20261012T040641Z-regress-iruka`); Castle Crashers apresentou o menu principal
 e permaneceu 45 s sem crash, stubs, erros ou críticas
@@ -757,7 +757,7 @@ recompilada e repetiu a transição em `20261012T052114Z-dash17559-intro-shared-
 intro às 02:21:23.684, retorno original às 02:21:34.870 e callback da dashboard
 às 02:21:34.872. Os módulos carregados foram conferidos no processo: runtime,
 Xenos e bootanim vieram de `.local/build/titles/dash_17559/` (registro local em
-`.local/logs/dash17559-final-loaded-modules.txt`).
+`.local/evidence/logs/dash17559-final-loaded-modules.txt`).
 Esse diagnóstico foi encerrado pelo supervisor aos 50 s, sem crítica/crash,
 mas com os stubs e erros de serviços já conhecidos. O timeout não é validação
 de encerramento normal; a transição da intro ocorreu antes dele.
@@ -874,7 +874,7 @@ Somente arquivos que o usuário tem autorização para usar (por exemplo, extra�
 do próprio console). O projeto não baixa nem distribui esses arquivos.
 
 ```
-.local/inputs/dashboard/<versão>/   (ignorado pelo git)
+.local/inputs/dashboards/<versão>/   (ignorado pelo git)
   dash.xex
   xam.xex            (ou a forma em que estiver no sistema de arquivos de flash)
   demais módulos e recursos que dash.xex referenciar
@@ -894,7 +894,7 @@ a confirmar com dados.
 
 ## 6. Primeiro experimento (D1) — análise sem executar
 
-Entrada: uma versão autorizada da dashboard em `.local/inputs/dashboard/<versão>/`.
+Entrada: uma versão autorizada da dashboard em `.local/inputs/dashboards/<versão>/`.
 
 1. `x360n identify --json` em cada XEX: SHA-256, flags, title id (esperado
    `FFFE07D1` para `dash.xex`), versão, formato, bibliotecas importadas.
@@ -1046,7 +1046,7 @@ selecionado. O bloqueio Settings/XamShowGamerCardUI FE/21008 permanece.
 Na regressão apareceu double-free do ICC filename ao destruir a janela filha:
 CleanupWindowData já o liberara, mas uma reentrada de foco chamava
 WIN_UpdateWindowICCProfile. Patch 0020 recusa foco em janela is_destroying.
-A pilha está em .local/logs/child-focus-debug.log. Depois: 37 asserções de foco e
+A pilha está em .local/evidence/logs/child-focus-debug.log. Depois: 37 asserções de foco e
 encerramento passaram; consolidação 31/31 sdkcheck e 40/40 x360n, sem skips.
 Testes focados de retorno/URI: 115 asserções em 4 casos.
 
@@ -1181,7 +1181,7 @@ de fechar o stream. Aguarda também um período do buffer do dispositivo; isso n
 é confirmação física de reprodução. Limite de 2 s registra falha, não sucesso.
 Sem fade de áudio. Teste silencioso: antes 0/64 frames consumidos; depois 64/64.
 Testes focados: 164 asserções/6 casos. Regressões: 35/35 sdkcheck, 40/40 supervisor.
-Logs em .local/logs/audio-drain-{before,focused}.log e transition-sdk-regressions.log.
+Logs em .local/evidence/logs/audio-drain-{before,focused}.log e transition-sdk-regressions.log.
 
 Regressão iruka 20261012T103413Z-iruka-transition-0025: 30207 ms até timeout
 diagnóstico, zero stubs/mensagens não implementadas/erros/críticas. Sem nova
@@ -1318,12 +1318,12 @@ ExecuteTrap e o bridge não declara `restrict` sobre um contexto que também é
 acessado por ThreadState. Isso corrige o crash reproduzido ao devolver r3=1 ao
 XuiPresent da dashboard. Falhas de layout/render também liberam a sessão.
 
-Evidência real: `.local/runs/20261013T144103Z-c7-context-safe/`, três cenas
+Evidência real: `.local/evidence/runs/20261013T144103Z-c7-context-safe/`, três cenas
 criadas, compostas continuamente e fechadas após 1817, 3645 e 1309 quadros.
 Na segunda abertura, o teclado moveu View Games → Edit Profile; após a terceira
 saída, Settings recebeu o comando e moveu Profile → Preferences. Sem crash.
-Capturas: `.local/logs/c7-reopened-navigation.png` e
-`.local/logs/c7-close-dashboard.png`. Esses contadores comprovam atualização,
+Capturas: `.local/evidence/logs/c7-reopened-navigation.png` e
+`.local/evidence/logs/c7-close-dashboard.png`. Esses contadores comprovam atualização,
 não constituem benchmark de desempenho nem medição de vazamentos.
 
 Limites: nome, estatísticas e imagem do usuário ainda não estão completos;
@@ -1401,7 +1401,7 @@ Não foram implementados criação/persistência, Live ou Guide.
 Verificação manual, em PowerShell na raiz, após o build do componente:
 
 ```powershell
-& .\.local\build\titles\dash_17559\dash_17559.exe --gpu_plugin=xenos --mnk_mode=true --game_data_root="$PWD\.local\inputs\dashboard\17559" --dash17559_boot_intro=false --dash17559_signin_ui=true
+& .\.local\build\titles\dash_17559\dash_17559.exe --gpu_plugin=xenos --mnk_mode=true --game_data_root="$PWD\.local\inputs\dashboards\17559\runtime" --dash17559_boot_intro=false --dash17559_signin_ui=true
 ```
 
 A opção é desligada por padrão e envia **uma única** solicitação através do thunk
@@ -1515,7 +1515,7 @@ Contratos acrescentados e evidência estática dos binários locais 17559:
   cópia limitada/terminação UTF-16 conforme `81722F00`. Essas correções
   posteriores à captura receberam teste unitário, sem segunda execução gráfica.
 
-**Execução única:** `.local/runs/c73-signin-profile/rex.log` registra a chamada
+**Execução única:** `.local/evidence/runs/c73-signin-profile/rex.log` registra a chamada
 real de enumeração pelo original e `1 record(s)` às 17:09:48.178. A captura
 `signin.png`, feita pelo script local `capture-window.ps1`, mostra `C73Local`
 na interface original. Foi usada uma fixture desconectada de 33 bytes em
@@ -1563,7 +1563,7 @@ durou 58,153 s (PID 30384, encerrado pelo script; nenhum processo remanescente).
 Computer Use e envio de entrada por scripts não foram utilizados. Dados isolados
 em `.local/tmp/c74-dashboard-data/profiles/local-v1.dat`: perfil existente
 `C73Local`, XUID `E00000000000C730`, sessão inicialmente zero. Os arquivos
-`before.dat` e `after.dat` em `.local/runs/c74-original-confirm/` têm o mesmo
+`before.dat` e `after.dat` em `.local/evidence/runs/c74-original-confirm/` têm o mesmo
 SHA-256 `B3199E283D5AAB0A6F6DC8DFC4543752812B5AF485D711527C12478ADE1675FA`;
 o byte de sessão permaneceu zero. O usuário informou: “O Sign-in apareceu,
 mas A não entrou” e “Pressionei B, mas não fechou”. Cancelamento sem mudança
@@ -1611,7 +1611,7 @@ outro serviço, UI substituta, conclusão automática, notificação de login ou
 infraestrutura de perfis. Dashboard/GamerCard com o XUID conectado **não
 demonstrados**. A e B **reprovados na sessão manual**.
 
-Evidências privadas em `.local/runs/c74-original-confirm/`: capturas por script
+Evidências privadas em `.local/evidence/runs/c74-original-confirm/`: capturas por script
 local, cópias do perfil, `binaries.txt` com hashes dos três binários utilizados e
 `rex.log` SHA-256
 `6FD8E1DD4D4FCFB694D5D2884CBB7D8A944C6263AB18EA8720A5B61647E5D40E`.
@@ -1668,7 +1668,7 @@ Reverse/apply em cópia isolada conferiu hashes base/final (`c75-replay.log`).
 Os 43 patches passaram `apply-sdk-patches.ps1 -Check`. Não foram repetidas
 regressões anteriores, testes dos jogos ou suítes completas.
 
-**Única execução gráfica:** `.local/runs/c75-original-confirm/`, PID 29820,
+**Única execução gráfica:** `.local/evidence/runs/c75-original-confirm/`, PID 29820,
 56,114 s, encerramento pelo script `.local/tmp/c75-run.ps1`, sem processos
 remanescentes. Entrada manual do usuário, capturas reais por
 `scripts/diagnostics/capture-window.ps1`; nenhum Computer Use ou entrada por script.
@@ -1753,7 +1753,7 @@ passou. Evidências de build/teste/replay em `.local/tmp/c76-*`.
 
 Execuções com entrada por mensagens locais e PNGs reais por PrintWindow:
 
-| Diretório em `.local/runs/` | Evidência |
+| Diretório em `.local/evidence/runs/` | Evidência |
 |---|---|
 | `c76-notify-native` | Seleção normal da dashboard: perfil desconectado → A → sessão 1 → Home. |
 | `c76-accept-hosted` | `signin.xex` original lista C73Local; A, diálogo original/Yes, login, Home, GamerCard com C73Local e B voltando a Settings (40,849 s). |
@@ -1830,7 +1830,7 @@ há vínculo configurado. X abre Sign-in/Sign-out, A confirma e B volta.
   ausência de informação; o antigo stub deixava r3 como falso sucesso e
   tentava decodificar uma imagem em endereço zero. Isso não implementa game-info.
 
-**Evidência real do aceite**, sob `.local/runs/`, com armazenamento inicialmente
+**Evidência real do aceite**, sob `.local/evidence/runs/`, com armazenamento inicialmente
 vazio `.local/tmp/multi-final66-data`. Todas estas execuções usaram o botão Guide
 normal, sem a flag de diagnóstico `dash17559_signin_ui`:
 
@@ -1901,12 +1901,12 @@ Com uma pasta de dados vazia já criada, o roteiro do aceite é:
 ```powershell
 $data = '.local/tmp/perfis-novos' # criar vazia; não reutilizar dados pessoais
 New-Item -ItemType Directory $data
-scripts/validation/test-local-profiles-17559.ps1 -UserDataRoot $data -Out .local/runs/perfis-create1 -Sequence '71,76,32,13,74,74,32' -ExpectedProfiles Player1 -ExpectedActive Player1
-scripts/validation/test-local-profiles-17559.ps1 -UserDataRoot $data -Out .local/runs/perfis-create2 -Sequence '71,76,85,32,wait:2500,71,76,74,32,13,74,74,32' -ExpectedProfiles Player1,Player2 -ExpectedActive Player2
-scripts/validation/test-local-profiles-17559.ps1 -UserDataRoot $data -Out .local/runs/perfis-card2 -Sequence '51,51,51,72,32,8' -ExpectedProfiles Player1,Player2 -ExpectedActive Player2
-scripts/validation/test-local-profiles-17559.ps1 -UserDataRoot $data -Out .local/runs/perfis-switch1 -Sequence '71,76,85,32,wait:2500,71,76,32,85,32' -ExpectedProfiles Player1,Player2 -ExpectedActive Player1
-scripts/validation/test-local-profiles-17559.ps1 -UserDataRoot $data -Out .local/runs/perfis-card1-signout -Sequence '51,51,51,72,32,8,71,76,85,32,wait:2500,71,76' -ExpectedProfiles Player1,Player2 -ExpectedActive ''
-scripts/validation/test-local-profiles-17559.ps1 -UserDataRoot $data -Out .local/runs/perfis-restart -Sequence '71,76' -ExpectedProfiles Player1,Player2 -ExpectedActive ''
+scripts/validation/test-local-profiles-17559.ps1 -UserDataRoot $data -Out .local/evidence/runs/perfis-create1 -Sequence '71,76,32,13,74,74,32' -ExpectedProfiles Player1 -ExpectedActive Player1
+scripts/validation/test-local-profiles-17559.ps1 -UserDataRoot $data -Out .local/evidence/runs/perfis-create2 -Sequence '71,76,85,32,wait:2500,71,76,74,32,13,74,74,32' -ExpectedProfiles Player1,Player2 -ExpectedActive Player2
+scripts/validation/test-local-profiles-17559.ps1 -UserDataRoot $data -Out .local/evidence/runs/perfis-card2 -Sequence '51,51,51,72,32,8' -ExpectedProfiles Player1,Player2 -ExpectedActive Player2
+scripts/validation/test-local-profiles-17559.ps1 -UserDataRoot $data -Out .local/evidence/runs/perfis-switch1 -Sequence '71,76,85,32,wait:2500,71,76,32,85,32' -ExpectedProfiles Player1,Player2 -ExpectedActive Player1
+scripts/validation/test-local-profiles-17559.ps1 -UserDataRoot $data -Out .local/evidence/runs/perfis-card1-signout -Sequence '51,51,51,72,32,8,71,76,85,32,wait:2500,71,76' -ExpectedProfiles Player1,Player2 -ExpectedActive ''
+scripts/validation/test-local-profiles-17559.ps1 -UserDataRoot $data -Out .local/evidence/runs/perfis-restart -Sequence '71,76' -ExpectedProfiles Player1,Player2 -ExpectedActive ''
 ```
 
 O script limita cada processo a 60 s, acompanha sua execução, captura por
@@ -1928,7 +1928,7 @@ Base `daa5bf0`. A regra permanente está em `AGENTS.md` e `CLAUDE.md`:
 **uma dashboard, seus módulos originais correspondentes; sem mistura de versões**.
 Compartilhar infraestrutura genérica ReXGlue continua permitido.
 
-A conferência do arquivo efetivamente usado, `.local/inputs/dashboard/17559/vk.xex`,
+A conferência do arquivo efetivamente usado, `.local/inputs/dashboards/17559/runtime/vk.xex`,
 mostrou XEX2 de 45.056 bytes, versão e base **2.0.17559.0**, PE `vk.dll`,
 base `917D0000`, entry `917DFBA8`. Os imports XAM e kernel também declaram
 2.0.17559.0. SHA-256:
@@ -2027,7 +2027,7 @@ somente UI original e scripts locais autorizados, processos limitados a 60 s:
   (`0x28`), lista ambos, seleciona qwPlayer1 e conecta (`0x120424`) no mesmo
   processo. Snapshot final: asPlayer1 desconectado, qwPlayer1 conectado.
 
-Os diretórios sob `.local/runs/` contêm PNGs, log guest, teclas, snapshots e
+Os diretórios sob `.local/evidence/runs/` contêm PNGs, log guest, teclas, snapshots e
 hashes dos binários. Não houve escrita direta no backend para produzir esses
 perfis. Os limites de C7.7 permanecem: offline, um usuário ativo no slot 0,
 sem aprovação de saves, Xbox Live, Guide completo ou usuários simultâneos.

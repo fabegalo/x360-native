@@ -1,0 +1,805 @@
+x360-native/  (tracked source + additions from this reorganization)
+|-- .github/
+|   |-- ISSUE_TEMPLATE/
+|   |   |-- bug_report.yml
+|   |   |-- config.yml
+|   |   |-- dashboard_compatibility.yml
+|   |   |-- feature_request.yml
+|   |   `-- game_compatibility.yml
+|   |-- scripts/
+|   |   |-- check_contributions.py
+|   |   |-- prepare-release.ps1
+|   |   |-- release.py
+|   |   `-- test_release.py
+|   |-- workflows/
+|   |   |-- pr-checks.yml
+|   |   `-- release.yml
+|   |-- CODEOWNERS
+|   |-- MAINTAINERS.md
+|   `-- PULL_REQUEST_TEMPLATE.md
+|-- benchmarks/
+|   |-- results/
+|   |   `-- 2026-10-14/
+|   |       |-- p2/
+|   |       |   |-- castle_crashers-01-off.json
+|   |       |   |-- castle_crashers-02-on.json
+|   |       |   |-- castle_crashers-03-on.json
+|   |       |   |-- castle_crashers-04-off.json
+|   |       |   |-- castle_crashers-05-on.json
+|   |       |   |-- castle_crashers-06-off.json
+|   |       |   |-- castle_crashers-07-off.json
+|   |       |   |-- castle_crashers-08-on.json
+|   |       |   |-- castle_crashers-comparison.json
+|   |       |   |-- castle_crashers-first-four.json
+|   |       |   |-- dataset.json
+|   |       |   |-- forza_horizon-01-off.json
+|   |       |   |-- forza_horizon-02-on.json
+|   |       |   |-- forza_horizon-03-on.json
+|   |       |   |-- forza_horizon-04-off.json
+|   |       |   |-- forza_horizon-05-on.json
+|   |       |   |-- forza_horizon-06-off.json
+|   |       |   |-- forza_horizon-07-off.json
+|   |       |   |-- forza_horizon-08-on.json
+|   |       |   |-- forza_horizon-comparison.json
+|   |       |   |-- forza_horizon-first-four.json
+|   |       |   `-- rejected-empty-csv-cli.json
+|   |       |-- p3/
+|   |       |   |-- etw-limitation.json
+|   |       |   |-- hardware.json
+|   |       |   |-- p3-after-01-gpu.json
+|   |       |   |-- p3-after-01.json
+|   |       |   |-- p3-after-02.json
+|   |       |   |-- p3-after-03-gpu.json
+|   |       |   |-- p3-after-03.json
+|   |       |   |-- p3-before-01-gpu.json
+|   |       |   |-- p3-before-01.json
+|   |       |   |-- p3-before-02-gpu.json
+|   |       |   |-- p3-before-02.json
+|   |       |   |-- p3-castle-after-01.json
+|   |       |   |-- p3-restored-final.json
+|   |       |   |-- pacing-review.json
+|   |       |   |-- pair-01.json
+|   |       |   |-- pair-02.json
+|   |       |   |-- profile-before.json
+|   |       |   |-- register-after.json
+|   |       |   |-- register-before.json
+|   |       |   |-- register-restored.json
+|   |       |   `-- rollback.json
+|   |       |-- castle-baseline.json
+|   |       |-- castle-calibration.json
+|   |       |-- castle-comparison.json
+|   |       |-- castle-final-after.json
+|   |       |-- castle-final-before.json
+|   |       |-- counter-candidate.json
+|   |       |-- counter-dll-comparison.json
+|   |       |-- counter-recovery-comparison.json
+|   |       |-- dashboard-baseline.json
+|   |       |-- dashboard-comparison.json
+|   |       |-- dashboard-final-after.json
+|   |       |-- dashboard-final-before.json
+|   |       |-- evidence-recovery-audit.json
+|   |       |-- forza-calibration.json
+|   |       |-- forza-comparison.json
+|   |       |-- forza-comparison2.json
+|   |       |-- forza-final-after.json
+|   |       |-- forza-final-after2.json
+|   |       |-- forza-final-before.json
+|   |       |-- forza-final-before2.json
+|   |       |-- forza-gameplay-calibration.json
+|   |       `-- forza-input-calibration.json
+|   `-- scenarios.json
+|-- cmake/
+|   |-- build/
+|   |   |-- x360n_build_isolation.cmake
+|   |   `-- x360n_stage_files.cmake
+|   |-- distribution/
+|   |   `-- x360n_distribution_compile.cmake
+|   |-- runtime/
+|   |   |-- x360n_dashboard_assets.cmake
+|   |   |-- x360n_ppc.cmake
+|   |   `-- x360n_runtime.manifest
+|   |-- sdk/
+|   |   |-- x360n_sdk_backports.cmake
+|   |   `-- x360n_verify_sdk_patches.cmake
+|   |-- README.md
+|   `-- x360n_sdk_backports.cmake
+|-- docs/
+|   |-- evidence/
+|   |   |-- native-2026-10-14/
+|   |   |   |-- native-frame-0.png
+|   |   |   |-- native-frame-23.png
+|   |   |   |-- native-frame-7.png
+|   |   |   |-- xenos-frame-0.png
+|   |   |   |-- xenos-frame-23.png
+|   |   |   `-- xenos-frame-7.png
+|   |   `-- native-n2-2026-10-14/
+|   |       |-- captures.json
+|   |       |-- native-games.png
+|   |       |-- native-home.png
+|   |       |-- xenos-games.png
+|   |       `-- xenos-home.png
+|   |-- guides/
+|   |   |-- BUILDING.md
+|   |   |-- console-language-locale.md
+|   |   |-- content-layout.md
+|   |   |-- desktop-preparation.md
+|   |   |-- desktop-ui.md
+|   |   |-- release-automation.md
+|   |   `-- universal-library.md
+|   |-- releases/
+|   |   |-- 0.1.0-preview.19.md
+|   |   |-- 0.1.0-preview.20.md
+|   |   `-- 0.1.0-preview.21.md
+|   |-- reports/
+|   |   |-- graphics/
+|   |   |   |-- guide-composition-2026-10-15.md
+|   |   |   |-- guide-composition-2026-10-16.md
+|   |   |   |-- native-renderer-n2.md
+|   |   |   |-- native-renderer-n3.md
+|   |   |   |-- native-renderer-n4-1.md
+|   |   |   |-- native-renderer-n4-2.md
+|   |   |   |-- native-renderer-n4-handoff.md
+|   |   |   |-- native-renderer.md
+|   |   |   |-- xenos-empty-resolves.md
+|   |   |   `-- xenos-fetch-predication.md
+|   |   |-- maintenance/
+|   |   |   |-- FIRST_RELEASE.md
+|   |   |   |-- ICON_PROVENANCE.md
+|   |   |   |-- integration-2026-10-15.md
+|   |   |   |-- LICENSE_AUDIT.md
+|   |   |   |-- maintenance-2026-10-15.md
+|   |   |   `-- PROJECT_AUDIT.md
+|   |   |-- performance/
+|   |   |   |-- performance-p2-2026-10-14.md
+|   |   |   |-- performance-p3-2026-10-14.md
+|   |   |   `-- performance-results-2026-10-14.md
+|   |   `-- titles/
+|   |       |-- launcher-import-validation-2026-10-17.md
+|   |       |-- validation-castle-crashers.md
+|   |       |-- validation-forza-horizon.md
+|   |       |-- validation-iruka.md
+|   |       `-- validation-motocross-madness.md
+|   |-- architecture.md
+|   |-- avatar-system.md
+|   |-- CHECKLIST_FUNCIONAL_x360-native.md
+|   |-- compatibility.md
+|   |-- dashboard.md
+|   |-- filetree.txt
+|   |-- games-played-trials.md
+|   |-- performance.md
+|   |-- README.md
+|   |-- reorganization.md
+|   `-- save-storage.md
+|-- external/
+|   `-- rexglue-sdk
+|-- licenses/
+|   |-- abseil.txt
+|   |-- aes_128.txt
+|   |-- binutils-powerpc.txt
+|   |-- catch2.txt
+|   |-- cli11.txt
+|   |-- cmake.txt
+|   |-- des.txt
+|   |-- disasm.txt
+|   |-- disruptorplus.txt
+|   |-- dxbc-md5.txt
+|   |-- dxc-headers.txt
+|   |-- FFmpeg.txt
+|   |-- fmt.txt
+|   |-- git-credential-manager-notice.txt
+|   |-- git-credential-manager.txt
+|   |-- glslang.txt
+|   |-- header-attributions.txt
+|   |-- imgui.txt
+|   |-- inja.txt
+|   |-- inventory.json
+|   |-- libmspack.txt
+|   |-- llvm.txt
+|   |-- microsoft-stl.txt
+|   |-- mingit.txt
+|   |-- moltenvk.txt
+|   |-- ninja.txt
+|   |-- nlohmann-json.txt
+|   |-- o1heap.txt
+|   |-- rc4.txt
+|   |-- renderdoc.txt
+|   |-- rexglue-attributions.txt
+|   |-- rexglue-sdk.txt
+|   |-- rijndael.txt
+|   |-- sdl3.txt
+|   |-- sha256.txt
+|   |-- shiftglue.txt
+|   |-- simde.txt
+|   |-- spdlog.txt
+|   |-- spirv-headers.txt
+|   |-- spirv-tools.txt
+|   |-- tiny-aes-c.txt
+|   |-- TinySHA1.txt
+|   |-- tomlplusplus.txt
+|   |-- tracy.txt
+|   |-- utfcpp.txt
+|   |-- vulkan-loader.txt
+|   |-- vulkan-memory-allocator.txt
+|   `-- xxHash.txt
+|-- patches/
+|   `-- rexglue-sdk/
+|       |-- 0001-function-table-xex-heap.patch
+|       |-- 0002-setup-failure-teardown.patch
+|       |-- 0003-import-records-across-libraries.patch
+|       |-- 0004-app-teardown-order.patch
+|       |-- 0005-image-page-entry-bit0.patch
+|       |-- 0006-xam-language.patch
+|       |-- 0007-dpc-dispatch.patch
+|       |-- 0008-mnk-button-keystrokes.patch
+|       |-- 0009-dashboard-datetime-abi.patch
+|       |-- 0010-common-string-unavailable.patch
+|       |-- 0011-xam-user-preference.patch
+|       |-- 0012-initial-storage-notification.patch
+|       |-- 0013-aggregate-all-content-types.patch
+|       |-- 0014-content-attributes.patch
+|       |-- 0015-internal-shared-content-owner.patch
+|       |-- 0016-content-launch-image.patch
+|       |-- 0017-parent-window-surface.patch
+|       |-- 0018-sdl-child-window-focus.patch
+|       |-- 0019-explicit-title-return.patch
+|       |-- 0020-sdl-destroying-window-focus.patch
+|       |-- 0021-title-terminate-callbacks.patch
+|       |-- 0022-launch-request-callback.patch
+|       |-- 0023-synchronize-ring-reinitialization.patch
+|       |-- 0024-persisted-display-presentation.patch
+|       |-- 0025-drain-submitted-audio.patch
+|       |-- 0026-profile-ui-request-dispatch.patch
+|       |-- 0027-system-ui-module-registration.patch
+|       |-- 0028-system-ui-extended-allocation.patch
+|       |-- 0029-retain-loaded-module-identity.patch
+|       |-- 0030-indirect-call-diagnostics.patch
+|       |-- 0031-host-only-module-dispatch.patch
+|       |-- 0032-xmem-d3d-declaration-allocation.patch
+|       |-- 0033-resource-only-xex-modules.patch
+|       |-- 0034-xam-system-pool-allocation.patch
+|       |-- 0035-ldi-caller-workspace.patch
+|       |-- 0036-vavguw-codegen.patch
+|       |-- 0037-gdfx-bounded-directory-parser.patch
+|       |-- 0038-build-local-sdk-outputs.patch
+|       |-- 0039-system-ui-session.patch
+|       |-- 0040-signin-any-user-input.patch
+|       |-- 0041-local-profile-session.patch
+|       |-- 0042-local-profile-enumeration.patch
+|       |-- 0043-rtl-passcode-byte-count.patch
+|       |-- 0044-retail-console-mode.patch
+|       |-- 0045-local-signin-merge.patch
+|       |-- 0046-signin-task-completion.patch
+|       |-- 0047-task-status-contract.patch
+|       |-- 0048-console-retail-settings.patch
+|       |-- 0049-local-logon-barrier.patch
+|       |-- 0050-retail-ui-animation.patch
+|       |-- 0051-task-handle-lifetime.patch
+|       |-- 0052-local-demand-query.patch
+|       |-- 0053-system-notification-delivery.patch
+|       |-- 0054-multiple-local-profile-store.patch
+|       |-- 0055-original-create-profile-ui-request.patch
+|       |-- 0056-resume-system-profile-after-device-selection.patch
+|       |-- 0057-local-profile-creation-service.patch
+|       |-- 0058-release-profile-creation-operation-handle.patch
+|       |-- 0059-public-overlapped-completion-queries.patch
+|       |-- 0060-enumerate-profiles-on-local-storage-device.patch
+|       |-- 0061-sign-in-newly-created-local-profile.patch
+|       |-- 0062-original-guide-ui-request.patch
+|       |-- 0063-guide-local-session-and-signout-contracts.patch
+|       |-- 0064-bound-nui-device-status-to-original-layout.patch
+|       |-- 0065-scope-any-user-hud-input-to-session-owner.patch
+|       |-- 0066-enable-original-system-input-for-any-controller.patch
+|       |-- 0067-profile-save-storage.patch
+|       |-- 0068-gapfill-pdata-end-boundaries.patch
+|       |-- 0069-extracted-content-metadata.patch
+|       |-- 0070-optional-runtime-benchmarks.patch
+|       |-- 0071-original-hud-dashboard-return.patch
+|       |-- 0072-isolate-performance-counter-cache-lines.patch
+|       |-- 0073-index-gpu-register-metadata.patch
+|       |-- 0074-optional-backend-packet-validation.patch
+|       |-- 0075-native-packet-payload-validation.patch
+|       |-- 0076-empty-resolve-noop.patch
+|       |-- 0077-inactive-vertex-fetch.patch
+|       |-- 0078-system-command-buffer-composition.patch
+|       |-- 0079-system-ui-input-ownership.patch
+|       |-- 0080-local-profile-tiles-and-flags.patch
+|       |-- 0081-console-language-abis.patch
+|       |-- 0082-profile-settings-size-before-signin.patch
+|       |-- 0083-physical-heap-atomic-transactions.patch
+|       |-- 0084-xctd-compression-query.patch
+|       |-- 0085-mic-array-idle-users.patch
+|       |-- 0086-xex-image-allocation-ownership.patch
+|       |-- 0087-fixed16-s5-10-resolve.patch
+|       `-- README.md
+|-- scripts/
+|   |-- analysis/
+|   |   |-- check-code-gaps.ps1
+|   |   |-- check-function-bounds.ps1
+|   |   |-- check-pdata-overlap.ps1
+|   |   |-- check-pointer-targets.ps1
+|   |   |-- xex-imports.ps1
+|   |   |-- xex-locator-strings.ps1
+|   |   `-- xex-module-strings.ps1
+|   |-- build/
+|   |   |-- build-lease.ps1
+|   |   |-- ninja-guard.ps1
+|   |   `-- preparation-receipt.ps1
+|   |-- diagnostics/
+|   |   |-- capture-desktop-ui.ps1
+|   |   |-- capture-window.ps1
+|   |   |-- image-stats.ps1
+|   |   |-- native-stats-window.ps1
+|   |   |-- sample-runtime-threads.cpp
+|   |   `-- window-route.ps1
+|   |-- maintenance/
+|   |   |-- local-layout.json
+|   |   `-- local-workspace.ps1
+|   |-- packaging/
+|   |   |-- check-package-licenses.ps1
+|   |   |-- generate-desktop-icon.ps1
+|   |   `-- package-desktop.ps1
+|   |-- performance/
+|   |   |-- benchmark-counters.ps1
+|   |   |-- benchmark-gpu.ps1
+|   |   |-- benchmark-instrumentation.ps1
+|   |   |-- benchmark-process-summary.ps1
+|   |   |-- benchmark-runtime.ps1
+|   |   |-- benchmark-summary.ps1
+|   |   |-- benchmark-window.ps1
+|   |   |-- compare-benchmarks.ps1
+|   |   |-- compare-instrumentation.ps1
+|   |   |-- export-benchmark.ps1
+|   |   |-- reduce-benchmark.ps1
+|   |   `-- summarize-benchmark-gpu.ps1
+|   |-- setup/
+|   |   |-- apply-sdk-patches.ps1
+|   |   |-- bootstrap-llvm.ps1
+|   |   |-- desktop-tools.lock.json
+|   |   |-- install-build-tools.ps1
+|   |   `-- materialize-symlinks.ps1
+|   |-- validation/
+|   |   |-- regress-iruka.ps1
+|   |   |-- test-desktop-ui.ps1
+|   |   |-- test-library-desktop.ps1
+|   |   |-- test-local-profiles-17559.ps1
+|   |   |-- test-signin-17559.ps1
+|   |   |-- validate-console-locale.ps1
+|   |   |-- validate-library-session.ps1
+|   |   `-- validate-original-guide.ps1
+|   |-- bootstrap.ps1
+|   |-- build-title.ps1
+|   |-- devshell.cmd
+|   |-- ninja-guard.ps1
+|   |-- prepare-tools.ps1
+|   `-- README.md
+|-- src/
+|   |-- content/
+|   |   |-- CMakeLists.txt
+|   |   |-- extract_main.cpp
+|   |   |-- extraction.cpp
+|   |   |-- extraction.h
+|   |   |-- extraction_manifest.cpp
+|   |   |-- extraction_manifest.h
+|   |   |-- main.cpp
+|   |   |-- xex_patch.cpp
+|   |   `-- xex_patch.h
+|   |-- desktop/
+|   |   |-- model/
+|   |   |   |-- catalog.cpp
+|   |   |   |-- catalog.h
+|   |   |   |-- generic_aot.cpp
+|   |   |   |-- identify.cpp
+|   |   |   |-- import_source.cpp
+|   |   |   |-- import_source.h
+|   |   |   |-- imported_games.cpp
+|   |   |   |-- library.cpp
+|   |   |   `-- workspace.cpp
+|   |   |-- resources/
+|   |   |   |-- desktop.ico
+|   |   |   |-- desktop.manifest
+|   |   |   `-- desktop.rc
+|   |   |-- win32/
+|   |   |   |-- environment_win32.cpp
+|   |   |   |-- environment_win32.h
+|   |   |   |-- main_win32.cpp
+|   |   |   `-- ui_theme.h
+|   |   `-- CMakeLists.txt
+|   |-- native/
+|   |   |-- commands/
+|   |   |   |-- command_processor.cpp
+|   |   |   |-- command_processor.h
+|   |   |   |-- draw_types.h
+|   |   |   |-- packet_guard.cpp
+|   |   |   |-- plugin.cpp
+|   |   |   |-- primitive_indices.h
+|   |   |   |-- resolve_coverage.h
+|   |   |   `-- scanout_backend.h
+|   |   |-- d3d12/
+|   |   |   |-- d3d12_draw.cpp
+|   |   |   |-- d3d12_render.cpp
+|   |   |   |-- d3d12_render.h
+|   |   |   |-- d3d12_resolve.cpp
+|   |   |   |-- d3d12_scanout.cpp
+|   |   |   |-- d3d12_scanout.h
+|   |   |   |-- d3d12_textures.cpp
+|   |   |   `-- edram_format.cpp
+|   |   |-- memory/
+|   |   |   |-- guest_memory_mirror.cpp
+|   |   |   |-- guest_memory_mirror.h
+|   |   |   `-- guest_writeback.h
+|   |   |-- pipeline/
+|   |   |   |-- pipeline_store.cpp
+|   |   |   |-- pipeline_store.h
+|   |   |   |-- shader_cache.cpp
+|   |   |   `-- shader_cache.h
+|   |   |-- shaders/
+|   |   |   |-- point_shader.cpp
+|   |   |   |-- point_shader.h
+|   |   |   |-- rectangle_shader.cpp
+|   |   |   |-- rectangle_shader.h
+|   |   |   |-- scanout.hlsl
+|   |   |   `-- scanout_source.h.in
+|   |   |-- textures/
+|   |   |   |-- texture.cpp
+|   |   |   |-- texture.h
+|   |   |   |-- texture_block.h
+|   |   |   |-- texture_load.cpp
+|   |   |   |-- texture_load.h
+|   |   |   `-- texture_snapshot.h
+|   |   `-- CMakeLists.txt
+|   `-- supervisor/
+|       |-- child_process.cpp
+|       |-- child_process.h
+|       |-- CMakeLists.txt
+|       |-- console_settings.cpp
+|       |-- console_settings.h
+|       |-- main.cpp
+|       |-- paths.cpp
+|       |-- paths.h
+|       |-- preparation.cpp
+|       |-- preparation.h
+|       |-- renderer_settings.cpp
+|       |-- renderer_settings.h
+|       |-- report.cpp
+|       |-- report.h
+|       |-- session_profile.cpp
+|       |-- session_profile.h
+|       |-- session_progress.h
+|       |-- session_window.cpp
+|       |-- session_window.h
+|       |-- sha256.cpp
+|       |-- sha256.h
+|       |-- workspace_lease.cpp
+|       |-- workspace_lease.h
+|       |-- xex_identity.cpp
+|       `-- xex_identity.h
+|-- tests/
+|   |-- avatar/
+|   |   |-- assets_request_test.cpp
+|   |   |-- avatar_metadata_test.cpp
+|   |   `-- avatar_toc_test.cpp
+|   |-- build_isolation/
+|   |   |-- CMakeLists.txt
+|   |   |-- dashboard_assets.ps1
+|   |   |-- gate.ps1
+|   |   |-- generic_aot.ps1
+|   |   |-- leases_test.ps1
+|   |   |-- main.cpp
+|   |   |-- parallel_test.ps1
+|   |   `-- runtime.cpp
+|   |-- cmake/
+|   |   |-- contracts.cmake
+|   |   |-- graphics.cmake
+|   |   |-- local.cmake
+|   |   |-- project.cmake
+|   |   |-- sdk.cmake
+|   |   `-- sessions.cmake
+|   |-- content/
+|   |   |-- apply_patch_keys_test.cpp
+|   |   |-- extract_disc_test.cpp
+|   |   `-- extraction_manifest_test.cpp
+|   |-- desktop/
+|   |   |-- catalog_test.cpp
+|   |   |-- import_source_test.cpp
+|   |   |-- imported_games_test.cpp
+|   |   `-- targets.cmake
+|   |-- local/
+|   |   |-- avatar_pack_test.cpp
+|   |   |-- avatar_service_profile_test.cpp
+|   |   |-- avatar_static_init_test.cpp
+|   |   |-- dashboard_assets_test.cpp
+|   |   |-- guide-castle-input.json
+|   |   |-- guide-castle.json
+|   |   |-- guide-dashboard.json
+|   |   |-- guide-forza-driving.json
+|   |   |-- guide-forza.json
+|   |   |-- guide-profile-castle.json
+|   |   |-- guide-profile-dashboard.json
+|   |   |-- guide-profile-forza.json
+|   |   |-- guide-profile-switch.json
+|   |   |-- inputs_test.cpp
+|   |   |-- integration_targets.tsv
+|   |   |-- motocross-shared-xam.ps1
+|   |   |-- save-storage-process.ps1
+|   |   `-- xenos_cycle_probe.cpp
+|   |-- native/
+|   |   |-- packet_test.cpp
+|   |   |-- pipeline_store_test.cpp
+|   |   |-- point_test.cpp
+|   |   |-- probe.cpp
+|   |   |-- rectangle_test.cpp
+|   |   |-- reject_packet.cmake
+|   |   |-- texture_load_test.cpp
+|   |   `-- texture_test.cpp
+|   |-- packaging/
+|   |   `-- licenses.ps1
+|   |-- performance/
+|   |   |-- compare_test.ps1
+|   |   |-- counter_probe.cpp
+|   |   |-- export_test.ps1
+|   |   |-- instrumentation_test.ps1
+|   |   |-- process_summary_test.ps1
+|   |   |-- reduce_test.ps1
+|   |   |-- register_info_probe.cpp
+|   |   `-- summary_test.ps1
+|   |-- ppc_contract/
+|   |   |-- CMakeLists.txt
+|   |   |-- contract_test.ps1
+|   |   |-- guest.cpp
+|   |   |-- host.cpp
+|   |   |-- local-options.cmake
+|   |   |-- module.cpp
+|   |   `-- pch.h
+|   |-- ppc_smoke/
+|   |   |-- asm/
+|   |   |   `-- x360n_smoke.s
+|   |   |-- CMakeLists.txt
+|   |   `-- compile_semantics.cpp
+|   |-- sdkcheck/
+|   |   |-- vavguw/
+|   |   |   |-- asm/
+|   |   |   |   `-- vavguw.s
+|   |   |   |-- CMakeLists.txt
+|   |   |   `-- main.cpp
+|   |   |-- aggregate_content_test.cpp
+|   |   |-- app_shutdown_test.cpp
+|   |   |-- audio_drain_test.cpp
+|   |   |-- dashboard_6717_curl_bind_test.cpp
+|   |   |-- dashboard_camera_test.cpp
+|   |   |-- dashboard_region_test.cpp
+|   |   |-- dashboard_typeface_test.cpp
+|   |   |-- dashboard_uri_test.cpp
+|   |   |-- depfile_escape_test.cpp
+|   |   |-- dpc_dispatch_test.cpp
+|   |   |-- fixed16_resolve_probe.cpp
+|   |   |-- function_table_test.cpp
+|   |   |-- games_played_launch_test.cpp
+|   |   |-- gapfill_boundary_test.cpp
+|   |   |-- image_page_entry_test.cpp
+|   |   |-- import_records_test.cpp
+|   |   |-- inactive_vertex_fetch_probe.cpp
+|   |   |-- ldi_test.cpp
+|   |   |-- local_profile_gamercard_test.cpp
+|   |   |-- local_profile_test.cpp
+|   |   |-- mic_array_idle_test.cpp
+|   |   |-- mnk_keystroke_test.cpp
+|   |   |-- perf_counter_test.cpp
+|   |   |-- persist_display_test.cpp
+|   |   |-- physical_heap_transaction_test.cpp
+|   |   |-- profile_ui_request_test.cpp
+|   |   |-- resolve_empty_probe.cpp
+|   |   |-- save_storage_test.cpp
+|   |   |-- setup_failure_test.cpp
+|   |   |-- signin_task_test.cpp
+|   |   |-- storage_notification_test.cpp
+|   |   |-- synthetic_xex.cpp
+|   |   |-- synthetic_xex.h
+|   |   |-- system_command_buffer_test.cpp
+|   |   |-- system_ui_context_test.cpp
+|   |   |-- system_ui_input_test.cpp
+|   |   |-- title_return_test.cpp
+|   |   |-- xam_common_string_test.cpp
+|   |   |-- xam_datetime_test.cpp
+|   |   |-- xam_language_test.cpp
+|   |   |-- xam_user_preference_test.cpp
+|   |   |-- xctd_query_test.cpp
+|   |   `-- xex_heap_ownership_test.cpp
+|   |-- shutdown_probe/
+|   |   `-- probe_app.cpp
+|   |-- supervisor/
+|   |   |-- console_settings_test.cpp
+|   |   |-- dashboard_assets_test.cpp
+|   |   |-- games_played_test.cpp
+|   |   |-- paths_test.cpp
+|   |   |-- preparation_fixture.h
+|   |   |-- preparation_receipt_test.ps1
+|   |   |-- preparation_test.cpp
+|   |   |-- process_test.cpp
+|   |   |-- renderer_settings_test.cpp
+|   |   |-- report_test.cpp
+|   |   |-- scratch.h
+|   |   |-- session_child.cpp
+|   |   |-- session_process_test.cpp
+|   |   |-- session_test.cpp
+|   |   |-- sha256_test.cpp
+|   |   |-- test_child.cpp
+|   |   `-- xex_identity_test.cpp
+|   |-- CMakeLists.txt
+|   `-- README.md
+|-- titles/
+|   |-- castle_crashers/
+|   |   |-- analysis/
+|   |   |   `-- castle_crashers.toml
+|   |   |-- generated/
+|   |   |   `-- rexglue.cmake
+|   |   |-- src/
+|   |   |   |-- castle_crashers_app.h
+|   |   |   `-- main.cpp
+|   |   |-- assets.sha256
+|   |   |-- castle_crashers_manifest.toml
+|   |   |-- CMakeLists.txt
+|   |   |-- CMakePresets.json
+|   |   `-- preparation.toml
+|   |-- common/
+|   |   |-- avatar/
+|   |   |   |-- avatar_aot_assets.cpp
+|   |   |   |-- avatar_aot_assets.h
+|   |   |   |-- avatar_aot_catalog.cpp
+|   |   |   |-- avatar_aot_catalog.h
+|   |   |   |-- avatar_assets_request.cpp
+|   |   |   |-- avatar_assets_request.h
+|   |   |   |-- avatar_metadata.cpp
+|   |   |   |-- avatar_metadata.h
+|   |   |   |-- avatar_service_17559.cmake
+|   |   |   |-- avatar_service_17559.cpp
+|   |   |   |-- avatar_toc.cpp
+|   |   |   |-- avatar_toc.h
+|   |   |   `-- xam17559_static_init.h
+|   |   |-- generic/
+|   |   |   |-- CMakeLists.txt
+|   |   |   `-- main.cpp
+|   |   |-- camera_state.cpp
+|   |   |-- dashboard_assets.cpp
+|   |   |-- dashboard_assets.h
+|   |   |-- dashboard_paths.h
+|   |   |-- games_played.h
+|   |   |-- guest_capture.h
+|   |   |-- launch_handoff.cpp
+|   |   |-- launch_handoff.h
+|   |   |-- launch_request.h
+|   |   |-- system_ui_context.h
+|   |   `-- system_ui_execution.h
+|   |-- dash_17559/
+|   |   |-- analysis/
+|   |   |   |-- bootanim_17559.toml
+|   |   |   |-- createprofile_17559.toml
+|   |   |   |-- dash_17559.toml
+|   |   |   |-- dash_17559_pointer_targets.toml
+|   |   |   |-- gamerprofile_17559.toml
+|   |   |   |-- hud_17559.toml
+|   |   |   |-- signin_17559.toml
+|   |   |   |-- vk_17559.toml
+|   |   |   `-- xam_ui_17559.toml
+|   |   |-- createprofile/
+|   |   |   |-- .gitignore
+|   |   |   `-- createprofile_17559_manifest.toml
+|   |   |-- generated/
+|   |   |   `-- rexglue.cmake
+|   |   |-- hud/
+|   |   |   |-- .gitignore
+|   |   |   `-- hud_17559_manifest.toml
+|   |   |-- signin/
+|   |   |   |-- .gitignore
+|   |   |   `-- signin_17559_manifest.toml
+|   |   |-- src/
+|   |   |   |-- boot_intro.cpp
+|   |   |   |-- boot_intro.h
+|   |   |   |-- dash_17559_app.h
+|   |   |   |-- display_transition.cpp
+|   |   |   |-- display_transition.h
+|   |   |   |-- experimental_region.h
+|   |   |   |-- launch_context.h
+|   |   |   |-- launch_uri.cpp
+|   |   |   |-- main.cpp
+|   |   |   |-- original_assets.h
+|   |   |   |-- session_ui_host.cpp
+|   |   |   |-- signin_imports.cpp
+|   |   |   |-- system_ui.cpp
+|   |   |   |-- system_ui.h
+|   |   |   |-- system_ui_imports.cpp
+|   |   |   |-- system_ui_memory.cpp
+|   |   |   |-- system_ui_request.h
+|   |   |   |-- typeface.cpp
+|   |   |   |-- unresolved_imports.cpp
+|   |   |   `-- vk_imports.cpp
+|   |   |-- vk/
+|   |   |   |-- .gitignore
+|   |   |   `-- vk_17559_manifest.toml
+|   |   |-- CMakeLists.txt
+|   |   |-- CMakePresets.json
+|   |   |-- dash_17559_manifest.toml
+|   |   `-- preparation.toml
+|   |-- dash_6717/
+|   |   |-- analysis/
+|   |   |   |-- dash_6717.toml
+|   |   |   `-- dash_6717_pointer_targets.toml
+|   |   |-- generated/
+|   |   |   `-- rexglue.cmake
+|   |   |-- src/
+|   |   |   |-- curl_bind.cpp
+|   |   |   |-- curl_bind.h
+|   |   |   |-- dash_6717_app.h
+|   |   |   |-- main.cpp
+|   |   |   |-- original_assets.h
+|   |   |   `-- unresolved_imports.cpp
+|   |   |-- CMakeLists.txt
+|   |   |-- CMakePresets.json
+|   |   |-- dash_6717_manifest.toml
+|   |   `-- preparation.toml
+|   |-- forza_horizon/
+|   |   |-- analysis/
+|   |   |   |-- forza_horizon.toml
+|   |   |   |-- pointer_targets.toml
+|   |   |   |-- speech.toml
+|   |   |   `-- xmedia.toml
+|   |   |-- generated/
+|   |   |   `-- rexglue.cmake
+|   |   |-- src/
+|   |   |   `-- main.cpp
+|   |   |-- assets.sha256
+|   |   |-- CMakeLists.txt
+|   |   |-- CMakePresets.json
+|   |   |-- forza_horizon_manifest.toml
+|   |   |-- preparation.toml
+|   |   `-- verify-input.cmake
+|   |-- iruka/
+|   |   |-- analysis/
+|   |   |   `-- iruka.toml
+|   |   |-- generated/
+|   |   |   `-- rexglue.cmake
+|   |   |-- src/
+|   |   |   |-- iruka_app.h
+|   |   |   `-- main.cpp
+|   |   |-- CMakeLists.txt
+|   |   |-- CMakePresets.json
+|   |   `-- iruka_manifest.toml
+|   |-- motocross_madness/
+|   |   |-- analysis/
+|   |   |   |-- motocross_madness.toml
+|   |   |   |-- motocross_madness_avatar_trace.toml
+|   |   |   |-- motocross_madness_pointer_targets.toml
+|   |   |   `-- xam17559_avatar_trace.toml
+|   |   |-- generated/
+|   |   |   `-- rexglue.cmake
+|   |   |-- src/
+|   |   |   |-- avatar_trace.cpp
+|   |   |   |-- main.cpp
+|   |   |   |-- motocross_madness_app.h
+|   |   |   |-- unresolved_imports.cpp
+|   |   |   |-- xam_aot_probe.cpp
+|   |   |   |-- xam_avatar_memory.cpp
+|   |   |   `-- xam_avatar_trace.cpp
+|   |   |-- assets.sha256
+|   |   |-- CMakeLists.txt
+|   |   |-- CMakePresets.json
+|   |   |-- motocross_madness_manifest.toml
+|   |   `-- preparation.toml
+|   `-- README.md
+|-- .gitattributes
+|-- .gitignore
+|-- .gitmodules
+|-- AGENTS.md
+|-- CLAUDE.md
+|-- CMakeLists.txt
+|-- CMakePresets.json
+|-- CONTRIBUTING.md
+|-- deps.lock.json
+|-- LICENSE
+|-- README.md
+|-- SECURITY.md
+|-- STATUS.md
+`-- THIRD_PARTY_NOTICES.md
+
+external/rexglue-sdk is the pinned Git submodule; its internals are omitted.
+docs/research/ is pre-existing untracked local work, excluded from these commits.
+Local data and generated outputs: see docs/guides/content-layout.md and docs/reorganization.md.

@@ -3,23 +3,23 @@
 [project]
 name = "forza_horizon"
 sdk_version = "0.10.0"
-game_root = "../../.local/inputs/titles/forza_horizon/extracted"
+game_root = "../../.local/inputs/games/forza_horizon/disc-1"
 
 [entrypoint]
-file_path = "../../.local/inputs/titles/forza_horizon/extracted/default.xex"
+file_path = "../../.local/inputs/games/forza_horizon/disc-1/default.xex"
 out_directory_path = "generated/default"
 includes = ["analysis/forza_horizon.toml", "analysis/pointer_targets.toml"]
 
 # Original executable modules shipped with this exact disc inventory.
 [[modules]]
 guest_path = 'game:\XMediaFacade_default.xex'
-file_path = "../../.local/inputs/titles/forza_horizon/extracted/XMediaFacade_default.xex"
+file_path = "../../.local/inputs/games/forza_horizon/disc-1/XMediaFacade_default.xex"
 out_directory_path = "generated/xmedia"
 includes = ["analysis/xmedia.toml"]
 
 [[modules]]
 guest_path = 'game:\SpeechFacade_default.xex'
-file_path = "../../.local/inputs/titles/forza_horizon/extracted/SpeechFacade_default.xex"
+file_path = "../../.local/inputs/games/forza_horizon/disc-1/SpeechFacade_default.xex"
 out_directory_path = "generated/speech"
 includes = ["analysis/speech.toml"]
 

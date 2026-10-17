@@ -578,7 +578,7 @@ slot como residente. Constantes atuais são reconsideradas a cada draw; casos
 não comprovados conservam a rejeição. Native/Vulkan não alterados.
 
 `sdkcheck.inactive-vertex-fetch`: 2.328 checks sintéticos; Forza e Castle reais,
-com os limites em [X2](../../docs/xenos-fetch-predication.md). Patch 0076 intacto.
+com os limites em [X2](../../docs/reports/graphics/xenos-fetch-predication.md). Patch 0076 intacto.
 
 ### 0078 — system command buffer composition (2026-10-16)
 

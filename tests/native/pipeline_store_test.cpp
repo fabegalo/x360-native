@@ -1,4 +1,4 @@
-#include "pipeline_store.h"
+#include "../../src/native/pipeline/pipeline_store.h"
 #include <catch2/catch_test_macros.hpp>
 #include <d3dcompiler.h>
 #include <wrl/client.h>

@@ -1,5 +1,5 @@
-#include "point_shader.h"
-#include "resolve_coverage.h"
+#include "../../src/native/shaders/point_shader.h"
+#include "../../src/native/commands/resolve_coverage.h"
 #include <catch2/catch_test_macros.hpp>
 #include <d3d12.h>
 #include <d3dcompiler.h>
@@ -86,7 +86,7 @@ TEST_CASE("Native point geometry links constant and exported size with sprite co
 }
 
 
-#include "primitive_indices.h"
+#include "../../src/native/commands/primitive_indices.h"
 TEST_CASE("Native primitive restart splits strips and fans without bridging segments") {
   using P = xenos::PrimitiveType;
   const uint32_t indices[]{0,1,2,0xFFFFFFFFu,3,4,5};
@@ -103,7 +103,7 @@ TEST_CASE("Native primitive restart splits strips and fans without bridging segm
   CHECK(fan.values == std::vector<uint32_t>{3,4,5,3,5,6});
 }
 
-#include "texture.h"
+#include "../../src/native/textures/texture.h"
 TEST_CASE("Native depth textures preserve float24 denormals and ignore stencil") {
   CHECK(DecodeDepthTexture(0x000000FF, true) == 0.f);
   CHECK(DecodeDepthTexture(0x00000100, true) == std::bit_cast<float>(uint32_t(93u << 23)));
@@ -115,7 +115,7 @@ TEST_CASE("Native depth textures preserve float24 denormals and ignore stencil")
   CHECK_FALSE(IsFloatTexture(xenos::TextureFormat::k_16));
 }
 
-#include "texture_block.h"
+#include "../../src/native/textures/texture_block.h"
 #include <chrono>
 #include <iostream>
 TEST_CASE("Native texture block endian normalization matches byte addressing") {

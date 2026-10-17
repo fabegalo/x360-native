@@ -427,7 +427,7 @@
       "spdx": "MIT",
       "scope": "download",
       "integration": "Downloaded SDK runtime headers only. 10/11 byte-identical; multi_threaded_claim_strategy.hpp changes static_cast<sequence_t>(diff + 1) to static_cast<size_t>(diff + 1).",
-      "obligations": "Preserve Lewis Baker 2013 MIT copyright and permission; modification identified in docs/LICENSE_AUDIT.md.",
+      "obligations": "Preserve Lewis Baker 2013 MIT copyright and permission; modification identified in docs/reports/maintenance/LICENSE_AUDIT.md.",
       "license_file": "licenses/disruptorplus.txt",
       "license_sha256": "a56f05c0dbd9489e928fd3ca22712f90b310fe749ceef47059e895f6a235100c",
       "original": "https://raw.githubusercontent.com/xenia-project/disruptorplus/5787e9cb7551c8c79cf9ce14f7be860dc907e9a4/LICENSE.txt",
@@ -717,7 +717,7 @@
       "license_file": null,
       "scope": "binary",
       "integration": "Release static CRT /MT; Windows OS DLLs supplied by OS, not shipped",
-      "obligations": "Distributor entitlement and applicable protective end-user terms for static CRT/UCRT remain required; Build Tools OSS dependency exception does not automatically cover proprietary local AOT. Maintainer authorized the public technical preview; this does not grant rights over Microsoft or Xbox content. See docs/LICENSE_AUDIT.md."
+      "obligations": "Distributor entitlement and applicable protective end-user terms for static CRT/UCRT remain required; Build Tools OSS dependency exception does not automatically cover proprietary local AOT. Maintainer authorized the public technical preview; this does not grant rights over Microsoft or Xbox content. See docs/reports/maintenance/LICENSE_AUDIT.md."
     },
     {
       "id": "git/usr/share/licenses/gcc-libs",
@@ -1455,12 +1455,12 @@
     },
     {
       "id": "desktop-icon",
-      "origin": "Original geometry in scripts/packaging/generate-desktop-icon.ps1; docs/ICON_PROVENANCE.md",
+      "origin": "Original geometry in scripts/packaging/generate-desktop-icon.ps1; docs/reports/maintenance/ICON_PROVENANCE.md",
       "revision": "original-2026-10-13",
       "spdx": "BSD-3-Clause",
       "scope": "source-and-embedded-resource",
       "integration": "Compiled Windows icon resource and source payload",
-      "original": "src/desktop/desktop.ico",
+      "original": "src/desktop/resources/desktop.ico",
       "license_file": "LICENSE",
       "content_sha256": "20c4f1e07fe0102cff771f1687c4acd128371fe1703f54b2b3b42e816c476e6a",
       "obligations": "Copyright (c) 2026, x360-native; public holder confirmed by maintainer. Preserve BSD-3-Clause notice. Old icon history is a separate unresolved provenance question.",

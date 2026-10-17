@@ -5,8 +5,8 @@ A licença BSD-3-Clause do código próprio está em **LICENSE**. Ela não subst
 os termos dos componentes abaixo nem concede direitos sobre jogos ou software Xbox.
 
 O ícone XN é geometria original do projeto sob BSD-3-Clause, com fonte e
-reprodução em [ICON_PROVENANCE.md](app/workspace/docs/ICON_PROVENANCE.md)
-(no repositório: `docs/ICON_PROVENANCE.md`). Titular público confirmado:
+reprodução em `docs/reports/maintenance/ICON_PROVENANCE.md` no repositório
+(no pacote: `app/workspace/docs/reports/maintenance/ICON_PROVENANCE.md`). Titular público confirmado:
 x360-native. Os avisos legítimos dos demais autores permanecem preservados.
 
 Os textos originais estão na pasta **licenses**, ao lado deste documento no ZIP.
@@ -38,7 +38,7 @@ modificações locais; seus hashes e a base estão no lock e em `package.json`.
 O código adaptado em `src/content/xex_patch.cpp` deriva do ReXGlue/Xenia e conserva
 esses avisos; não é compilado nos três executáveis deste ZIP.
 
-O scanout experimental em `src/native/scanout.hlsl` adapta a permutação de
+O scanout experimental em `src/native/shaders/scanout.hlsl` adapta a permutação de
 endereços tiled de `src/graphics/pipeline/texture/util.cpp` do SDK pinado:
 Copyright 2022 Ben Vanik, adaptação ReXGlue por Tom Clay (2026), BSD-3-Clause.
 Os avisos Xenia/ReXGlue e seus termos permanecem aplicáveis. O plugin Native
@@ -102,7 +102,7 @@ não atende essas obrigações. O ZIP desktop não inclui esses binários.
 
 O inventário registra também bibliotecas opcionais/testes que não entram no ZIP.
 Não se autoriza aqui redistribuição dos arquivos fornecidos pelo usuário.
-Veja `app/workspace/docs/LICENSE_AUDIT.md` (ou `docs/LICENSE_AUDIT.md` no repositório)
+Veja `app/workspace/docs/reports/maintenance/LICENSE_AUDIT.md` (ou `docs/reports/maintenance/LICENSE_AUDIT.md` no repositório)
 para evidências, obrigações e limites da auditoria. O mantenedor autorizou a
 primeira pre-release pública; essa decisão não modifica as licenças aplicáveis
 nem concede direitos sobre arquivos originais Xbox ou componentes Microsoft.

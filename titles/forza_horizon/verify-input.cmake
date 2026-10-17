@@ -1,6 +1,6 @@
 # The analysis seeds apply only to this exact original executable.
 if(NOT DEFINED XEX)
-    set(XEX "${CMAKE_CURRENT_LIST_DIR}/../../.local/inputs/titles/forza_horizon/extracted/default.xex")
+    set(XEX "${CMAKE_CURRENT_LIST_DIR}/../../.local/inputs/games/forza_horizon/disc-1/default.xex")
 endif()
 set(expected db40df605ade49a612b35a7a24c38f6004bcb17a88ed6b48288de16df9e3987c)
 if(NOT EXISTS "${XEX}")

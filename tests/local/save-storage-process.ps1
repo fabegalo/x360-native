@@ -5,7 +5,7 @@ param(
 $ErrorActionPreference = 'Stop'
 $env:PSModulePath = Join-Path $PSHOME 'Modules'
 $root = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../..'))
-if (-not $Output) { $Output = Join-Path $root ('.local/runs/c8-storage-' + [Guid]::NewGuid().ToString('N')) }
+if (-not $Output) { $Output = Join-Path $root ('.local/evidence/runs/c8-storage-' + [Guid]::NewGuid().ToString('N')) }
 $Output = [IO.Path]::GetFullPath($Output)
 if (Test-Path -LiteralPath $Output) { throw 'Use a fresh output directory; existing saves are never replaced.' }
 [void][IO.Directory]::CreateDirectory($Output)

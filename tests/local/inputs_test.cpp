@@ -4,7 +4,7 @@
 // Two separate questions:
 //  - inventory: every .xex under .local/inputs is hashed and classified
 //    (XEX2 / XEX1 / other XEX variant / invalid); older formats and invalid files
-//    are listed with the reason in .local/runs/inventory/inventory.tsv. It fails
+//    are listed with the reason in .local/evidence/runs/inventory/inventory.tsv. It fails
 //    only if a file cannot be read or a file with the XEX2 signature is malformed;
 //  - integration targets: the executables this project builds and runs, listed
 //    explicitly in tests/local/integration_targets.tsv; each one present must be
@@ -85,7 +85,7 @@ TEST_CASE("inventory of .local/inputs classifies every XEX", "[local]") {
   if (xexes.empty()) SKIP("no .xex files under " << PathUtf8(Inputs()));
   std::sort(xexes.begin(), xexes.end());
 
-  fs::path report_dir = PathFromUtf8(X360N_SOURCE_ROOT) / ".local" / "runs" / "inventory";
+  fs::path report_dir = PathFromUtf8(X360N_SOURCE_ROOT) / ".local" / "evidence" / "runs" / "inventory";
   fs::create_directories(report_dir, ec);
   std::ofstream report(report_dir / "inventory.tsv", std::ios::binary);
   REQUIRE(report);

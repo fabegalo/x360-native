@@ -378,7 +378,7 @@ genérico de entradas hostis.
 
 Fonte: `AvatarAssetPack.toc` do storage pack 17559 já autorizado, SHA-256
 `a8c90b3db5c6349a55fcb72eda47e08e4940f88fabda4ff73025d9728832daa8`.
-Relatórios em `.local/runs/` **da worktree de avatares**. O build privado voltou
+Relatórios em `.local/evidence/runs/` **da worktree de avatares**. O build privado voltou
 para `.local/build/titles/motocross_madness-avatars` nessa worktree; o SDK, as DLLs,
 o código gerado e o perfil de teste são separados da distribuição. A cópia antiga
 do build em `x360` foi preservada. Integração na `main` adiada por escolha do usuário.
@@ -807,7 +807,7 @@ As diferenças pendentes eram finais de linha e o SDK já coberto pelos patches;
 não havia código funcional exclusivo sem commit.
 
 Todo o diretório foi movido, sem exclusão recursiva, para o arquivo local ignorado
-`.local/preserved/x360-avatars-20261013/`. Os inventários de 25 095 entradas
+`.local/archive/preserved/x360-avatars-20261013/`. Os inventários de 25 095 entradas
 (arquivos, diretórios e links), incluindo tamanhos e destinos das junções,
 coincidem antes/depois. Os 23 057 arquivos regulares (3 564 848 724 bytes),
 logs, dados de usuário, experimentos, AOT e SDK privado permanecem recuperáveis.
@@ -839,7 +839,7 @@ animado do Motocross Madness se desfazia em estilhaços. O serviço agora execut
 após carregar o módulo, exatamente o bloco de 9 construtores de constantes do
 avatar (`0x81A801BC`, `81A70E60`…`81A71008`), conferindo cada entrada da tabela.
 Construtores de objetos/`atexit` seguem sem execução. Detalhes e evidência em
-[Motocross Madness](validation-motocross-madness.md#piloto-deformado-causa-e-correção).
+[Motocross Madness](reports/titles/validation-motocross-madness.md#piloto-deformado-causa-e-correção).
 
 ## 17. Serviço padrão, ligado ao perfil da dashboard 17559 (2026-10-16)
 
@@ -914,7 +914,7 @@ manuais. Fatos desta mudança; o que não foi executado está marcado no fim.
   by other dashboard versions`: perfis reais do repositório e arquivos do usuário.
 - `desktop.catalog` (`optional dashboard components may be absent but never differ`).
 - O `AvatarAssetPack.toc` do usuário foi copiado, com hash conferido, para
-  `.local/inputs/dashboard/17559/avatar/`, como faria a importação guiada.
+  `.local/inputs/dashboards/17559/runtime/avatar/`, como faria a importação guiada.
 - `local.motocross.shared-xam` (`tests/local/motocross-shared-xam.ps1`): execução
   limitada pelo `x360n run`, com o probe opcional do Guide, exigindo READY do serviço,
   inicialização da UI do Guide depois dele e nenhuma segunda carga do XAM.

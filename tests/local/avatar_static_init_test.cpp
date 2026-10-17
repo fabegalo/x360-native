@@ -32,7 +32,7 @@ uint32_t Word(const std::vector<uint8_t>& image, uint32_t address) {
 
 TEST_CASE("17559 xam.xex avatar static initializer block", "[local][avatar]") {
   const fs::path root = fs::path(X360N_SOURCE_ROOT) /
-                        ".local/inputs/dashboard/versions/17559/retail_system_assets/extracted";
+                        ".local/inputs/dashboards/17559/retail_system_assets/extracted";
   if (!fs::exists(root / "xam.xex")) SKIP("not present: " + (root / "xam.xex").string());
   const fs::path dir = UniqueTempPath("avatar_static_init_test");
   fs::remove_all(dir);
