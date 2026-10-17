@@ -59,7 +59,7 @@ argumentos de sessão; não conhece o nome do cvar de uma dashboard específica.
 
 O inventário, o mapa de caminhos, os backups dos registros de catálogo e os
 hashes antes/depois desta migração ficam em
-`.local/reorganization/inputs-migration/`. Os dados originais foram renomeados
+`.local/evidence/reorganization/2026-10-17/inputs-migration/`. Os dados originais foram renomeados
 no mesmo volume. Metadados históricos continuam registrando o caminho da coleta;
 o mapa liga esses caminhos aos destinos atuais. Os manifestos AOT locais e o
 `content_root` do catálogo ativo foram atualizados.
@@ -68,3 +68,8 @@ Uma mudança de fonte/manifesto invalida o recibo de preparação anterior.
 Preparar pelo fluxo normal gera/builda e valida a nova identidade. Não editar
 hashes ou recibos para esconder essa invalidação. Nenhum save/perfil é movido
 como parte da migração de inputs.
+
+O campo histórico `reference_examples.demo-iruka.extracted_to` do lock conserva
+o endereço da aquisição original. Ele não é consumido pelo build; o manifesto
+do título e o mapa da migração registram o destino atual. O lock e os hashes
+fixados foram preservados integralmente.

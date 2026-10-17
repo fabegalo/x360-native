@@ -143,7 +143,7 @@ scripts\devshell.cmd cmake --build --preset win-amd64-debug
 ```
 
 Results on this machine (2026-10-11 and 2026-10-12; logs under
-`.local/runs/sdk-patch-evidence/`, not versioned):
+`.local/evidence/runs/sdk-patch-evidence/`, not versioned; migrated in October 2026):
 
 | Reverted | Result without | With the patch |
 |---|---|---|
@@ -181,7 +181,7 @@ before a patch.
   actual result. Other devices return ERROR_NOT_SUPPORTED. Before: 6/36
   assertions fail; after: 36/36. Test: aggregate_content_test.cpp.
 
-Evidence logs: .local/runs/sdk-patch-evidence/0011-*, 0013-*, 0014-* and 0015-*.
+Evidence logs: .local/evidence/runs/sdk-patch-evidence/0011-*, 0013-*, 0014-* and 0015-*.
 No upstream equivalent claimed. XAM is a local reference, not executed by HLE.
 The aggregate ABI still returns the SDK's 328-byte structure where 17559 reads
 512 bytes; full extended metadata remains pending and must not be fabricated.

@@ -5,7 +5,7 @@
 | `sdk/` | Backports condicionados à revisão fixada e verificação dos patches |
 | `build/` | Isolamento do Ninja e cópia de DLLs por produtor/destino |
 | `runtime/` | Contratos PPC, identidade dos originais e manifestos Windows |
-| `distribution/` | Guard de fontes do pacote desktop |
+| `distribution/` | Launcher de compilação com caminhos estáveis para o pacote desktop |
 
 `x360n_sdk_backports.cmake` na raiz encaminha para `sdk/`: projetos AOT locais
 gerados anteriormente continuam encontrando o ponto de entrada. Não remover

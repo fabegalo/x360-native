@@ -898,7 +898,7 @@ Entrada: uma versão autorizada da dashboard em `.local/inputs/dashboards/<vers�
 
 1. `x360n identify --json` em cada XEX: SHA-256, flags, title id (esperado
    `FFFE07D1` para `dash.xex`), versão, formato, bibliotecas importadas.
-2. `rexglue init --project-name dash_<versão> --xex-path <dash.xex> --project-root .local/projects/dash_<versão>`
+2. `rexglue init --project-name dash_<versão> --xex-path <dash.xex> --project-root .local/build/scaffolds/dash_<versão>`
    e `rexglue codegen` **sem `--force`**; guardar log e código de saída.
 3. Produzir a matriz de imports: cada ordinal usado → implementado / stub /
    ausente no SDK v0.10.0.
@@ -906,7 +906,7 @@ Entrada: uma versão autorizada da dashboard em `.local/inputs/dashboards/<vers�
 
 Critério de saída: relatório com números reais. Iniciar a dashboard fica para D2.
 Resultado para a 17559: passos 1–4 feitos (§0.2–0.4; o projeto ficou em
-`titles/dash_17559`, não em `.local/projects`). D2 (iniciar) parou no setup do
+`titles/dash_17559`, fora do scaffold temporário). D2 (iniciar) parou no setup do
 runtime, antes de executar código da dashboard (§0.6).
 Um processo de teste que abre e fecha valida apenas o supervisor e nunca será
 apresentado como execução da dashboard.

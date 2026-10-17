@@ -795,7 +795,7 @@ Validação própria da integração, autorizada separadamente dos incrementos a
   conhecidos da dashboard permanecem. Não houve medição audiovisual contra
   console nem ampliação da validação de save/load ou gameplay de Castle Crashers.
 
-Logs e fixtures privados: `.local/integration-avatars/`; dados de usuário e
+Logs e fixtures privados: `.local/evidence/integration-avatars/`; dados de usuário e
 caches desta validação: `.local/user/integration-avatars/`. Originais, AOT
 gerado, builds e logs não fazem parte dos commits.
 
@@ -825,7 +825,7 @@ A main volta a ser a referência de desenvolvimento. O SDK continua aparecendo
 modificado pelos patches/materialização esperados. A alteração de outra sessão
 em `scripts/diagnostics/window-route.ps1` permanece sem commit e com SHA-256
 `c307f4bac6ec049967c445d7672c4357d009419303a372a77ae10cba67863201` inalterado.
-O bundle `.local/integration-avatars/avatars-history.bundle` conserva também
+O bundle `.local/evidence/integration-avatars/avatars-history.bundle` conserva também
 as referências anteriores à integração. Nenhuma pendência funcional exclusiva
 ficou apenas na branch eliminada.
 

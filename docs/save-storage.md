@@ -82,7 +82,7 @@ de saves alternativo.
   CTest `sdkcheck.save-storage-processes`: passou, 1,83 s;
   evidência final: `.local/evidence/runs/c8-storage-c6cd3b7d92684173818c894e2996f84b/report.json`.
 - Replay dos 67 patches desde os fontes pinados, verificando hashes de entrada
-  e finais: `.local/c8/replay-acceptance.log`. Builds e logs focados em `.local/c8/`.
+  e finais: `.local/evidence/c8/replay-acceptance.log`. Builds e logs focados em `.local/evidence/c8/`.
 
 Reprodução focada após compilar `x360n_sdk_runtime_checks` pelo devshell:
 

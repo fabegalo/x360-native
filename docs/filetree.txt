@@ -366,6 +366,7 @@ x360-native/  (tracked source + additions from this reorganization)
 |   |   |-- validate-console-locale.ps1
 |   |   |-- validate-library-session.ps1
 |   |   `-- validate-original-guide.ps1
+|   |-- apply-sdk-patches.ps1
 |   |-- bootstrap.ps1
 |   |-- build-title.ps1
 |   |-- devshell.cmd
