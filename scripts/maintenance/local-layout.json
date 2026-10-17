@@ -1,0 +1,8 @@
+{
+  "evidence": ["audit", "benchmarks", "cleanup-audit", "diagnostics", "logs", "runs", "ui", "validation", "pr-check-validation", "c8", "integration-avatars"],
+  "archive/experiments": ["locale-amend", "locale-patch", "locale-replay81", "patchwork", "native-patch-0074", "perf-patch70-base", "perf70-replay", "perf72-base", "perf72-next", "perf72-replay"],
+  "archive/releases": ["release-backups", "release-preview19", "release-public-preview19", "publication"],
+  "archive": ["preserved", "build-archives", "projects"],
+  "archive/work": ["tmp", "test-temp", "tests", "distribution", "collaboration-python"],
+  "preserve_in_place": ["inputs", "user", "userdata", "keys", "catalog", "toolchains", "build", "aot", "preparation", "worktrees", "reference", "packages", "reorganization"]
+}

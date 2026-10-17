@@ -44,7 +44,7 @@ foreach($event in $scenario.events){
  if([double]$event.seconds -lt 0 -or [double]$event.seconds+[double]$event.hold_seconds -ge $start+$duration){throw 'Input event falls outside the bounded scenario'}
  if([int]$event.vk -le 0 -or [int]$event.vk -gt 255 -or [int]$event.scan -le 0 -or [int]$event.scan -gt 127){throw 'Invalid input key/scan code'}
 }
-$out=Join-Path $root ".local/benchmarks/$Label/$Title"
+$out=Join-Path $root ".local/evidence/benchmarks/$Label/$Title"
 if(Test-Path $out){throw "Refusing to overwrite $out"}
 New-Item -ItemType Directory -Force $out | Out-Null
 if(!$BinaryDirectory){$BinaryDirectory=Join-Path $root ".local/build/titles/$Title"}
@@ -57,7 +57,7 @@ function Inventory([string]$Directory) {
  })
 }
 # Immutable seed reused for both sides; never change real profiles, saves or caches.
-$seed=Join-Path $root ".local/benchmarks/seeds/$Title"
+$seed=Join-Path $root ".local/evidence/benchmarks/seeds/$Title"
 if(!(Test-Path $seed)) {
  New-Item -ItemType Directory -Force $seed | Out-Null
  Get-ChildItem -LiteralPath (Join-Path $root $scenario.user_root) | Copy-Item -Destination $seed -Recurse

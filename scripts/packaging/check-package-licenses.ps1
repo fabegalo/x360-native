@@ -70,9 +70,9 @@ if(-not $ids.ContainsKey('nlohmann-json') -or -not $ids.ContainsKey('microsoft-s
 if((Digest (Join-Path $package 'licenses/header-attributions.txt')) -ne $inventory.header_attributions_sha256) { throw 'Header attribution text changed' }
 $icon=@($inventory.components | Where-Object id -eq 'desktop-icon')
 if($icon.Count -ne 1 -or $icon[0].spdx -ne 'BSD-3-Clause' -or
-   (Digest (Join-Path $payload 'src/desktop/desktop.ico')) -ne $icon[0].content_sha256) { throw 'Desktop icon provenance mismatch' }
-if(-not (Test-Path -LiteralPath (Join-Path $payload 'docs/ICON_PROVENANCE.md'))) { throw 'Missing desktop icon provenance' }
-& (Join-Path $PSScriptRoot 'generate-desktop-icon.ps1') -OutputPath (Join-Path $payload 'src/desktop/desktop.ico') -Check
+   (Digest (Join-Path $payload 'src/desktop/resources/desktop.ico')) -ne $icon[0].content_sha256) { throw 'Desktop icon provenance mismatch' }
+if(-not (Test-Path -LiteralPath (Join-Path $payload 'docs/reports/maintenance/ICON_PROVENANCE.md'))) { throw 'Missing desktop icon provenance' }
+& (Join-Path $PSScriptRoot 'generate-desktop-icon.ps1') -OutputPath (Join-Path $payload 'src/desktop/resources/desktop.ico') -Check
 # Supplemental upstream texts travel with the exported source/environment too.
 foreach($id in @('tiny-aes-c','disruptorplus','dxc-headers','dxbc-md5','sha256','disasm')) {
     $record=@($inventory.components | Where-Object id -eq $id)

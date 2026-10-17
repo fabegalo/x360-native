@@ -1,6 +1,6 @@
 # Copyright (c) 2026, x360-native. SPDX-License-Identifier: BSD-3-Clause
 # Original pixel geometry; no fonts, external artwork, graphics libraries or timestamps.
-param([string]$OutputPath = (Join-Path $PSScriptRoot '../../src/desktop/desktop.ico'),
+param([string]$OutputPath = (Join-Path $PSScriptRoot '../../src/desktop/resources/desktop.ico'),
       [switch]$Check)
 $ErrorActionPreference = 'Stop'
 # Hand-drawn 5x7 X and N, separated by one column, preserving the XN monogram.

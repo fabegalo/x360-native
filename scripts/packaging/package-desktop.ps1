@@ -20,7 +20,7 @@ if ($ProvenanceFile) {
 }
 git -C $root diff --quiet HEAD -- scripts/packaging/package-desktop.ps1
 if ($LASTEXITCODE -ne 0) { throw 'Commit the packaging script before using it.' }
-$job = Join-Path $root ('.local/distribution/' + [guid]::NewGuid().ToString('N'))
+$job = Join-Path $root ('.local/build/distribution/' + [guid]::NewGuid().ToString('N'))
 $source = Join-Path $job 'source'
 $build = Join-Path $job 'build'
 New-Item -ItemType Directory -Force $source, $destination | Out-Null

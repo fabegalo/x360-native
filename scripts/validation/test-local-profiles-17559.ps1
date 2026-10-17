@@ -15,7 +15,7 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 $root = (Resolve-Path (Join-Path $PSScriptRoot '../..')).Path
-if (!$GameRoot) { $GameRoot = Join-Path $root '.local/inputs/dashboard/17559' }
+if (!$GameRoot) { $GameRoot = Join-Path $root '.local/inputs/dashboards/17559/runtime' }
 if (!$Executable) { $Executable = Join-Path $root '.local/build/titles/dash_17559/dash_17559.exe' }
 $Executable = (Resolve-Path -LiteralPath $Executable).Path
 $GameRoot = (Resolve-Path -LiteralPath $GameRoot).Path

@@ -11,7 +11,7 @@ param(
 $ErrorActionPreference='Stop'
 $root= (Resolve-Path (Join-Path $PSScriptRoot '../..')).Path
 $out=[IO.Path]::GetFullPath($OutputDirectory)
-if(-not $out.StartsWith((Join-Path $root '.local\validation\'),[StringComparison]::OrdinalIgnoreCase)) { throw 'Evidence must be under .local/validation' }
+if(-not $out.StartsWith((Join-Path $root '.local\evidence\validation\'),[StringComparison]::OrdinalIgnoreCase)) { throw 'Evidence must be under .local/evidence/validation' }
 if($Game -notmatch '^[a-z][a-z0-9_]*$') { throw 'Invalid game process name' }
 New-Item -ItemType Directory -Force $out | Out-Null
 Add-Type -AssemblyName System.Drawing

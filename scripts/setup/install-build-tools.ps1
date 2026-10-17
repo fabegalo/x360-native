@@ -6,7 +6,7 @@ $ErrorActionPreference = 'Stop'
 $env:PSModulePath = Join-Path $PSHOME 'Modules'
 if (-not ($AllowInstallation -or $DownloadOnly)) { throw 'Explicit installation/download consent is required.' }
 $root = (Resolve-Path (Join-Path $PSScriptRoot '../..')).Path
-$cache = Join-Path $root '.local/downloads'
+$cache = Join-Path $root '.local/cache/downloads'
 New-Item -ItemType Directory -Force $cache | Out-Null
 $installer = Join-Path $cache 'vs_buildtools_2022.exe'
 if (-not (Test-Path -LiteralPath $installer)) {

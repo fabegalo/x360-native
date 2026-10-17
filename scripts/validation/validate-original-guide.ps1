@@ -28,7 +28,7 @@ $game=(Resolve-Path -LiteralPath $GameRoot).Path
 $seed=(Resolve-Path -LiteralPath $SeedUserData).Path
 $out=[IO.Path]::GetFullPath($OutputDirectory)
 if(!$exe.StartsWith((Join-Path $root '.local\build\'),[StringComparison]::OrdinalIgnoreCase)) {throw 'Use an existing local build executable'}
-if(!$out.StartsWith((Join-Path $root '.local\validation\'),[StringComparison]::OrdinalIgnoreCase)) {throw 'Evidence must be under .local/validation'}
+if(!$out.StartsWith((Join-Path $root '.local\evidence\validation\'),[StringComparison]::OrdinalIgnoreCase)) {throw 'Evidence must be under .local/evidence/validation'}
 if(Test-Path -LiteralPath $out){throw 'Use a new evidence directory'}
 if($out.StartsWith($seed.TrimEnd('\')+'\',[StringComparison]::OrdinalIgnoreCase)){throw 'Evidence must be outside the seed directory'}
 if([bool]$SystemUiHost -ne [bool]$SystemUiRoot){throw 'System UI host and original root must be supplied together'}

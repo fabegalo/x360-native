@@ -21,4 +21,3 @@ add_test(NAME local.motocross.shared-xam
     WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
 set_tests_properties(local.motocross.shared-xam PROPERTIES
     LABELS "project" TIMEOUT 180 SKIP_RETURN_CODE 77 RUN_SERIAL TRUE)
-

@@ -1,5 +1,5 @@
 # Regression check for the functional reference (rexglue/demo-iruka, XDK sample
-# "Dolphin"; see docs/validation-iruka.md). Launches the recompiled title under
+# "Dolphin"; see docs/reports/titles/validation-iruka.md). Launches the recompiled title under
 # `x360n run`, captures its window twice and checks, as separate levels:
 #   L1 process started            report: launched
 #   L2 XEX loaded, guest started  rex.log: "Function table initialized for module"
@@ -20,7 +20,7 @@ $root = (Resolve-Path (Join-Path $PSScriptRoot '../..')).Path
 Set-Location $root
 
 $xexSha = '66ec34f2f558fe4e419d926108bf458a5c634ea8b5f76771b48ba633ecb61e31'
-$gameRoot = Join-Path $root '.local\inputs\titles\iruka\extracted'
+$gameRoot = Join-Path $root '.local\inputs\games\iruka\content'
 $x360n = Join-Path $root $Supervisor
 $exe = Join-Path (Join-Path $root $BuildDir) 'iruka.exe'
 
@@ -48,7 +48,7 @@ $capture = Start-Process powershell -WindowStyle Hidden -PassThru -ArgumentList 
 $runExit = $LASTEXITCODE
 [void]$capture.WaitForExit(30000)
 
-$runDir = Get-ChildItem (Join-Path $root '.local\runs') -Directory -Filter "*-$runLabel" |
+$runDir = Get-ChildItem (Join-Path $root '.local\evidence\runs') -Directory -Filter "*-$runLabel" |
     Sort-Object Name | Select-Object -Last 1
 if (-not $runDir) {
     Write-Host "FAIL: supervisor exited $runExit without a report for $runLabel"

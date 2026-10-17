@@ -5,18 +5,18 @@ param(
  [ValidateSet('castle_crashers','forza_horizon')][string[]]$Titles=@('castle_crashers','forza_horizon'),
  [ValidateSet(4,8)][int]$Samples=4,
  [ValidateRange(1,8)][int]$FirstSample=1,
- [string]$BinaryRoot='.local/benchmarks/binaries/sdk72'
+ [string]$BinaryRoot='.local/evidence/benchmarks/binaries/sdk72'
 )
 $ErrorActionPreference='Stop'
 $root= (Resolve-Path (Join-Path $PSScriptRoot '../..')).Path
 Set-Location $root
 if($FirstSample -gt $Samples){throw 'FirstSample must not exceed Samples'}
-New-Item -ItemType Directory -Force (Join-Path $root '.local/logs') | Out-Null
+New-Item -ItemType Directory -Force (Join-Path $root '.local/evidence/logs') | Out-Null
 $order=@('Off','On','On','Off','On','Off','Off','On')
 foreach($title in $Titles) {
  for($i=$FirstSample;$i -le $Samples;$i++) {
   $mode=$order[$i-1];$runLabel='{0}-{1:00}-{2}' -f $Label,$i,$mode.ToLowerInvariant()
-  $log=Join-Path $root ".local/logs/$runLabel-$title.log"
+  $log=Join-Path $root ".local/evidence/logs/$runLabel-$title.log"
   Write-Output "START $title $i/$Samples $mode $([DateTime]::UtcNow.ToString('o'))"
   $si=[Diagnostics.ProcessStartInfo]::new()
   $si.FileName=(Get-Process -Id $PID).Path;$si.UseShellExecute=$false;$si.CreateNoWindow=$true

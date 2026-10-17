@@ -112,16 +112,16 @@ remaining limitations documented in `docs/dashboard.md` §0.11.
 ## Apply, check, revert
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File scripts\apply-sdk-patches.ps1          # apply (idempotent)
-powershell -ExecutionPolicy Bypass -File scripts\apply-sdk-patches.ps1 -Check   # report; exit 1 if not applied
-powershell -ExecutionPolicy Bypass -File scripts\apply-sdk-patches.ps1 -Revert  # back to the pinned sources
+powershell -ExecutionPolicy Bypass -File scripts\setup\apply-sdk-patches.ps1          # apply (idempotent)
+powershell -ExecutionPolicy Bypass -File scripts\setup\apply-sdk-patches.ps1 -Check   # report; exit 1 if not applied
+powershell -ExecutionPolicy Bypass -File scripts\setup\apply-sdk-patches.ps1 -Revert  # back to the pinned sources
 ```
 
 `scripts\bootstrap.ps1` applies them on a clean clone (after the submodules and
 the libmspack symlink copies). The script refuses an SDK checkout at any other
 commit and a patch that does not apply cleanly.
 
-CMake checks the result twice (`cmake/x360n_verify_sdk_patches.cmake`): at
+CMake checks the result twice (`cmake/sdk/x360n_verify_sdk_patches.cmake`): at
 configure time, and at build time before `rexruntime` compiles. Both stop with
 the file, its SHA-256 and the expected one when a patch is missing. The check
 runs in the main tree and in every title tree under `titles/`.
@@ -325,7 +325,7 @@ empty entries, a displaced game partition, traversal order and 300 siblings.
 The original audit fixture now returns error 1 without a crash; the valid
 fixture still extracts identical bytes and hashes. Patch apply/reverse hashes
 were checked in an isolated Git fixture; all 37 patches pass `-Check`.
-See `docs/PROJECT_AUDIT.md` E6 for C1/C3 before/after evidence and limits.
+See `docs/reports/maintenance/PROJECT_AUDIT.md` E6 for C1/C3 before/after evidence and limits.
 
 ## Sign-in foreground input (0040)
 
@@ -475,7 +475,7 @@ XEX execution identity into its packed metadata result, retaining the real
 content type. Reject malformed or mismatched identities. This does not invent
 STFS licenses, artwork or publisher information. The same contract covers
 executable disc and XBLA content; routing still matches the installed XEX hash.
-See `docs/validation-forza-horizon.md` for focused tests and actual UI evidence.
+See `docs/reports/titles/validation-forza-horizon.md` for focused tests and actual UI evidence.
 
 ## 0071 — original HUD reboot and audio callback lifetime
 
@@ -501,7 +501,7 @@ quiescence, processor identity, FP policy and SDL drainage. The seven patched
 files replay from their recorded base hashes to the recorded final hashes.
 The 17559 host separately initializes the original audio CRT lock. Evidence and
 the distinction between direct diagnostics and full UI acceptance are recorded
-in `docs/validation-forza-horizon.md`.
+in `docs/reports/titles/validation-forza-horizon.md`.
 
 ## 0072 — Isolate performance counter cache lines
 
@@ -515,7 +515,7 @@ No upstream equivalent identified; the SDK pin is unchanged. Focused
 `sdkcheck.Performance` tests cover disabled counters, concurrent sums, gauges,
 CSV and snapshots while writers are active. The before/after experiment uses
 identical probe executables and frozen title binaries, changing only the runtime
-DLL. Results and limits are in `docs/performance-results-2026-10-14.md`.
+DLL. Results and limits are in `docs/reports/performance/performance-results-2026-10-14.md`.
 This reduces instrumentation overhead; it does not establish an FPS improvement
 with instrumentation disabled.
 
@@ -552,7 +552,7 @@ No upstream equivalent identified. `sdkcheck.Native-packet-guard` injects an
 unsupported opcode through the actual MMIO/ring path: without the hook it times
 out without explicit failure; with it the child exits 78 and logs the exact
 unsupported opcode. Before/after logs and graphical evidence are described in
-`docs/native-renderer.md`. The patch is applied only through the pinned patch
+`docs/reports/graphics/native-renderer.md`. The patch is applied only through the pinned patch
 script, with before/after file hashes in `deps.lock.json` (73 active patches;
 withdrawn 0073 is not reintroduced).
 
@@ -567,7 +567,7 @@ special case. No upstream equivalent identified; SDK pin unchanged.
 
 `sdkcheck.empty-resolve` exercises the actual helper with synthetic guest memory
 and registers. It fails without the patch (84/204 checks) and passes with it.
-Real Forza evidence and remaining fetch warnings: `docs/xenos-empty-resolves.md`.
+Real Forza evidence and remaining fetch warnings: `docs/reports/graphics/xenos-empty-resolves.md`.
 
 ### 0077 — inactive vertex fetch proof (2026-10-15)
 
@@ -607,7 +607,7 @@ the same base-class packet; only Xenos D3D12 was exercised.
 `tests/sdkcheck/system_command_buffer_test.cpp` checks the callback, the packet
 layout, the inherited fetch, the presented fetch, the rotating-buffer limit and
 the return to the title frame. It fails without the patch (stub exports and no
-callback API). Live evidence: `docs/guide-composition-2026-10-16.md`.
+callback API). Live evidence: `docs/reports/graphics/guide-composition-2026-10-16.md`.
 
 ### 0079 — system UI input ownership (2026-10-16)
 
@@ -654,7 +654,7 @@ next Start did.
 `tests/sdkcheck/local_profile_gamercard_test.cpp` covers both read ABIs, the
 per-XUID count across a session switch and a runtime restart, the system-title
 rejection and the tile completion. Live evidence:
-`docs/guide-composition-2026-10-16.md`.
+`docs/reports/graphics/guide-composition-2026-10-16.md`.
 
 ### 0081 — console language ABIs and country (2026-10-16)
 
@@ -667,7 +667,7 @@ out-of-range countries no longer wrap in locale lookup. Unsupported guest
 writes return explicit errors rather than pretending to persist settings.
 
 Regression: `tests/sdkcheck/xam_language_test.cpp`; desktop/session evidence
-and contract references: `docs/console-language-locale.md`. The patch changes
+and contract references: `docs/guides/console-language-locale.md`. The patch changes
 no original resource, license region, AV region or dashboard module mapping.
 
 ### 0082 — profile settings sizing before sign-in (2026-10-16)

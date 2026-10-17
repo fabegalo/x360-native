@@ -7,7 +7,7 @@ $ErrorActionPreference = 'Stop'
 $env:PSModulePath = Join-Path $PSHOME 'Modules'
 $root = (Resolve-Path (Split-Path -Parent $PSScriptRoot)).Path
 $tools = Join-Path $root '.local/toolchains'
-$cache = Join-Path $root '.local/downloads'
+$cache = Join-Path $root '.local/cache/downloads'
 $lock = Get-Content -Raw (Join-Path $PSScriptRoot 'setup/desktop-tools.lock.json') | ConvertFrom-Json
 New-Item -ItemType Directory -Force $tools, $cache | Out-Null
 try { $lease = [IO.File]::Open((Join-Path $root '.local/environment.lock'), [IO.FileMode]::OpenOrCreate, [IO.FileAccess]::ReadWrite, [IO.FileShare]::None) }

@@ -94,4 +94,3 @@ if(WIN32)
     -Executable $<TARGET_FILE:x360n_sdk_runtime_checks>)
   set_tests_properties(sdkcheck.save-storage-processes PROPERTIES LABELS project TIMEOUT 75)
 endif()
-

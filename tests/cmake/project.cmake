@@ -74,4 +74,3 @@ if(WIN32)
     -File ${CMAKE_CURRENT_SOURCE_DIR}/ppc_contract/contract_test.ps1)
   set_tests_properties(x360n.ppc.compile-contract PROPERTIES LABELS project TIMEOUT 180)
 endif()
-

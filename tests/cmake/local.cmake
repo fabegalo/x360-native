@@ -14,4 +14,3 @@ target_sources(x360n_local_tests PRIVATE local/avatar_service_profile_test.cpp)
 target_compile_definitions(x360n_local_tests PRIVATE X360N_CONTENT_EXE="$<TARGET_FILE:x360n-content>")
 add_dependencies(x360n_local_tests x360n-content)
 catch_discover_tests(x360n_local_tests TEST_PREFIX "local." PROPERTIES LABELS "project" TIMEOUT 600)
-

@@ -20,7 +20,7 @@ $game=(Resolve-Path -LiteralPath $GameRoot).Path
 $user=(Resolve-Path -LiteralPath $UserData).Path
 $out=[IO.Path]::GetFullPath($OutputDirectory)
 if(!$exe.StartsWith("$root\.local\build\",[StringComparison]::OrdinalIgnoreCase)){throw 'Use a local build'}
-if(!$out.StartsWith("$root\.local\validation\",[StringComparison]::OrdinalIgnoreCase)){throw 'Use .local/validation for evidence'}
+if(!$out.StartsWith("$root\.local\evidence\validation\",[StringComparison]::OrdinalIgnoreCase)){throw 'Use .local/evidence/validation for evidence'}
 if(Test-Path -LiteralPath $out){throw 'Evidence directory must be new'}
 if($Language -eq 10){throw 'Reserved console language ID'}
 if([bool]$SystemUiHost -ne [bool]$SystemUiRoot){throw 'Supply both original system UI host and root'}

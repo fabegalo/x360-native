@@ -14,7 +14,7 @@ if (Test-Path $clang) {
     exit 0
 }
 
-$dlDir = Join-Path $root '.local\downloads'
+$dlDir = Join-Path $root '.local\cache\downloads'
 New-Item -ItemType Directory -Force $dlDir | Out-Null
 $archive = Join-Path $dlDir $lock.asset
 
