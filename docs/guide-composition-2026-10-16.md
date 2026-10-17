@@ -62,7 +62,7 @@ Não houve Computer Use, push ou Release.
 ## Evidências
 
 Diretório local: `.local/validation/system-composition/`. Capturas, binários e
-logs ficam fora do Git. Runner: `scripts/validate-original-guide.ps1`, agora
+logs ficam fora do Git. Runner: `scripts/validation/validate-original-guide.ps1`, agora
 compatível com Windows PowerShell 5.1; esta máquina não tem PowerShell 7.
 
 | Execução | Resultado |

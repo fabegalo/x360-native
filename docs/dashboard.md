@@ -33,9 +33,9 @@ foram tratados como duplicados. O complemento `17559 Full` está separado em
 
 Ferramentas (todas sobre o carregador e o decodificador do próprio SDK):
 `x360n-content dump-image | imports | resources | disasm | xref | callers`,
-`scripts/xex-imports.ps1`, `scripts/xex-module-strings.ps1`,
-`scripts/xex-locator-strings.ps1`, `scripts/check-function-bounds.ps1`,
-`scripts/check-pdata-overlap.ps1`. Saídas em `.local/runs/dash-artifacts/`.
+`scripts/analysis/xex-imports.ps1`, `scripts/analysis/xex-module-strings.ps1`,
+`scripts/analysis/xex-locator-strings.ps1`, `scripts/analysis/check-function-bounds.ps1`,
+`scripts/analysis/check-pdata-overlap.ps1`. Saídas em `.local/runs/dash-artifacts/`.
 
 ### 0.1 Conteúdo real
 
@@ -108,7 +108,7 @@ Outros achados que afetam a execução:
 ### 0.3 Dependências: classificação
 
 Fontes: recursos embutidos (§0.1), localizadores na imagem
-(`scripts/xex-locator-strings.ps1`: 747 textos `<esquema>://`), código que usa
+(`scripts/analysis/xex-locator-strings.ps1`: 747 textos `<esquema>://`), código que usa
 cada nome (`x360n-content xref/callers/disasm`). "Necessário" só com evidência de
 uso no caminho de inicialização — nenhuma ainda (a execução não chegou lá).
 
@@ -178,7 +178,7 @@ Classificação das 30 entradas:
 | função | 10 | `0x922E3BC0`, `0x922E3C38`, `0x922E3CB8`, `0x922E3D18`, `0x922E3D88`, `0x9234F658`, `0x92351430`, `0x923766B0`, `0x927AFE08`, `0x92837DE8` |
 | trecho de outra função | 0 | — |
 
-**Limites conferidos no código gerado** (`scripts/check-function-bounds.ps1`):
+**Limites conferidos no código gerado** (`scripts/analysis/check-function-bounds.ps1`):
 30/30 iguais aos documentados. A única diferença inicial era minha: em
 `0x923766B0` incluí um `blr` inalcançável depois de um `bctr`.
 
@@ -419,7 +419,7 @@ SDK que não é compilado e o Xenia também dão "0 = not connected". As outras 
 do `bctr` que termina `sub_923941E0`, guardada em `.rdata` (`0x9203A468`,
 `0x9204326C`), sem `.pdata`. O codegen só acha vtables pelo RTTI e tem o scan geral de
 ponteiros desligado (`docs/architecture.md` §7 item 22). Em vez de um endereço por
-execução, `scripts/check-pointer-targets.ps1` classifica todos os endereços de código
+execução, `scripts/analysis/check-pointer-targets.ps1` classifica todos os endereços de código
 guardados em dados (`x360n-content xref`, 54 410 palavras) e, numa segunda passada,
 os montados no código por `lis` + `addi`/`ori`: 506 + 9 passam em todos os critérios
 (alinhado; fora de `.pdata` e de função gerada; palavra anterior 0 ou fim de função;
@@ -1671,7 +1671,7 @@ regressões anteriores, testes dos jogos ou suítes completas.
 **Única execução gráfica:** `.local/runs/c75-original-confirm/`, PID 29820,
 56,114 s, encerramento pelo script `.local/tmp/c75-run.ps1`, sem processos
 remanescentes. Entrada manual do usuário, capturas reais por
-`scripts/capture-window.ps1`; nenhum Computer Use ou entrada por script.
+`scripts/diagnostics/capture-window.ps1`; nenhum Computer Use ou entrada por script.
 Dados isolados copiados da fixture existente, nome `C73Local`, XUID
 `E00000000000C730`. `state-8.png` mostra o perfil sem cadeado. `state-35.png`
 e `state-50.png` mostram o corpo vazio do Sign-in. Não há chamada a
@@ -1767,7 +1767,7 @@ diretamente seu byte de sessão. O backend só grava em resposta ao fluxo guest.
 capturas. Os testes usaram cópias isoladas do perfil existente. O teste hosted
 também persistiu a resposta de privacidade pelo diálogo original.
 
-Reprodução autorizada com `scripts/test-signin-17559.ps1 -UserDataRoot <cópia>
+Reprodução autorizada com `scripts/validation/test-signin-17559.ps1 -UserDataRoot <cópia>
 -Out <evidência> -Mode Confirm -GamerCard`; `-Hosted -ConfirmPrivacy` exercita
 o módulo Sign-in sobre a dashboard e seu diálogo de primeiro uso. `-Mode Cancel`
 requer perfil desconectado; `-Mode Restart -GamerCard` reutiliza o registro
@@ -1901,12 +1901,12 @@ Com uma pasta de dados vazia já criada, o roteiro do aceite é:
 ```powershell
 $data = '.local/tmp/perfis-novos' # criar vazia; não reutilizar dados pessoais
 New-Item -ItemType Directory $data
-scripts/test-local-profiles-17559.ps1 -UserDataRoot $data -Out .local/runs/perfis-create1 -Sequence '71,76,32,13,74,74,32' -ExpectedProfiles Player1 -ExpectedActive Player1
-scripts/test-local-profiles-17559.ps1 -UserDataRoot $data -Out .local/runs/perfis-create2 -Sequence '71,76,85,32,wait:2500,71,76,74,32,13,74,74,32' -ExpectedProfiles Player1,Player2 -ExpectedActive Player2
-scripts/test-local-profiles-17559.ps1 -UserDataRoot $data -Out .local/runs/perfis-card2 -Sequence '51,51,51,72,32,8' -ExpectedProfiles Player1,Player2 -ExpectedActive Player2
-scripts/test-local-profiles-17559.ps1 -UserDataRoot $data -Out .local/runs/perfis-switch1 -Sequence '71,76,85,32,wait:2500,71,76,32,85,32' -ExpectedProfiles Player1,Player2 -ExpectedActive Player1
-scripts/test-local-profiles-17559.ps1 -UserDataRoot $data -Out .local/runs/perfis-card1-signout -Sequence '51,51,51,72,32,8,71,76,85,32,wait:2500,71,76' -ExpectedProfiles Player1,Player2 -ExpectedActive ''
-scripts/test-local-profiles-17559.ps1 -UserDataRoot $data -Out .local/runs/perfis-restart -Sequence '71,76' -ExpectedProfiles Player1,Player2 -ExpectedActive ''
+scripts/validation/test-local-profiles-17559.ps1 -UserDataRoot $data -Out .local/runs/perfis-create1 -Sequence '71,76,32,13,74,74,32' -ExpectedProfiles Player1 -ExpectedActive Player1
+scripts/validation/test-local-profiles-17559.ps1 -UserDataRoot $data -Out .local/runs/perfis-create2 -Sequence '71,76,85,32,wait:2500,71,76,74,32,13,74,74,32' -ExpectedProfiles Player1,Player2 -ExpectedActive Player2
+scripts/validation/test-local-profiles-17559.ps1 -UserDataRoot $data -Out .local/runs/perfis-card2 -Sequence '51,51,51,72,32,8' -ExpectedProfiles Player1,Player2 -ExpectedActive Player2
+scripts/validation/test-local-profiles-17559.ps1 -UserDataRoot $data -Out .local/runs/perfis-switch1 -Sequence '71,76,85,32,wait:2500,71,76,32,85,32' -ExpectedProfiles Player1,Player2 -ExpectedActive Player1
+scripts/validation/test-local-profiles-17559.ps1 -UserDataRoot $data -Out .local/runs/perfis-card1-signout -Sequence '51,51,51,72,32,8,71,76,85,32,wait:2500,71,76' -ExpectedProfiles Player1,Player2 -ExpectedActive ''
+scripts/validation/test-local-profiles-17559.ps1 -UserDataRoot $data -Out .local/runs/perfis-restart -Sequence '71,76' -ExpectedProfiles Player1,Player2 -ExpectedActive ''
 ```
 
 O script limita cada processo a 60 s, acompanha sua execução, captura por
@@ -1976,7 +1976,7 @@ Isso preserva a evidência histórica de Blades, mas não permite ocultar a
 dependência usando uma fonte de outra versão. Não houve sessão 6717 neste
 incremento. 13604 não tem alvo integrado nem fallback para 17559.
 
-**Proteções e custo:** `cmake/x360n_dashboard_assets.cmake` confere os originais
+**Proteções e custo:** `cmake/runtime/x360n_dashboard_assets.cmake` confere os originais
 na configuração e antes dos alvos AOT/build. `VerifyDashboardAssets` verifica
 a tabela compilada antes de construir Runtime, inclusive na execução direta
 com `--game_data_root`. Arquivo ausente, hash incompatível ou caminho que

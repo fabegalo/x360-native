@@ -40,7 +40,7 @@ class ReleaseTests(unittest.TestCase):
             self.files["app/workspace/" + notice] = self.files[notice]
         self.files["app/workspace/" + patches[0]["file"]] = patch_bytes
         self.files["app/workspace/deps.lock.json"] = json.dumps({"rexglue_sdk": {"commit": inventory["sdk_commit"], "patches": patches}, "llvm": {"sha256": "e" * 64}}).encode()
-        self.files["app/workspace/scripts/desktop-tools.lock.json"] = json.dumps({"tools": [tool]}).encode()
+        self.files["app/workspace/scripts/setup/desktop-tools.lock.json"] = json.dumps({"tools": [tool]}).encode()
 
     def write_archive(self):
         def index(prefix, name):

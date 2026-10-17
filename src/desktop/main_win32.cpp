@@ -835,7 +835,7 @@ void Start(App& a, int action, fs::path source = {}) {
         wchar_t sys[MAX_PATH]{}; GetSystemDirectoryW(sys, MAX_PATH);
         fs::path powershell = fs::path(sys) / "WindowsPowerShell/v1.0/powershell.exe";
         if (action == kInstall) {
-          run(powershell, {"-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", Utf8(a.root / "scripts/install-build-tools.ps1"), "-AllowInstallation"}, "msvc");
+          run(powershell, {"-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", Utf8(a.root / "scripts/setup/install-build-tools.ps1"), "-AllowInstallation"}, "msvc");
           finish(Tr("Instalador encerrado. Verifique as dependências novamente antes de preparar.", "Installer closed. Recheck dependencies before preparing.")); return;
         }
         auto tool_args = std::vector<std::string>{"-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", Utf8(a.root / "scripts/prepare-tools.ps1")};

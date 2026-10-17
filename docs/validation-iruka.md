@@ -64,7 +64,7 @@ O C++ é gerado pelo `rexglue` compilado nessa mesma árvore, como etapa do buil
 | 2 | Leitura pelo carregador do SDK | ok | codegen: `Title ID 00000000`, `Version 0.0.0.0`, `Filetime 2025-07-12`; runtime: `Function table initialized for module: code=82060000-8226A7CC, image=82000000-82290000`. Não houve rejeição. |
 | 3 | Análise | ok, **com lacuna** | fases Register→Validate sem erro e sem `--force`. Sem os ajustes da demo, `0x82198CD8` (comparador do qsort, só alcançado por ponteiro) não é descoberto e surge uma entrada falsa `sub_82198D4C` no meio da função |
 | 4 | Geração | ok | 77 arquivos, 5222 funções, 36 MB. Determinística: 0 diferenças entre a saída do `rexglued.exe` (Debug, árvore principal) e a do `rexgluerd.exe` (árvore do título) |
-| 5 | Compilação/ligação | falha → ok | 1ª tentativa: `rex/ui/style.h:18:10: fatal error: 'imgui.h' file not found` ao compilar `rex_app.cpp` — bug do SDK v0.10.0 corrigido upstream em `b5e0cf8`; Pinyon Shift contorna igual (`PinyonShiftRexGlue.cmake:298-300`). Backport em `cmake/x360n_sdk_backports.cmake`, condicionado ao commit fixado. Depois: `iruka.exe` ligado |
+| 5 | Compilação/ligação | falha → ok | 1ª tentativa: `rex/ui/style.h:18:10: fatal error: 'imgui.h' file not found` ao compilar `rex_app.cpp` — bug do SDK v0.10.0 corrigido upstream em `b5e0cf8`; Pinyon Shift contorna igual (`PinyonShiftRexGlue.cmake:298-300`). Backport em `cmake/sdk/x360n_sdk_backports.cmake`, condicionado ao commit fixado. Depois: `iruka.exe` ligado |
 | 6a | Execução (invocação errada) | falha | `[error] --game_data_root was not provided.` — a v0.10.0 só lê a pasta do jogo do cvar `--game_data_root` (`src/ui/rex_app.cpp:108-112`); o argumento posicional da wiki/README não existe mais. Abre também um MessageBox (`rex_app.cpp:204-208`). Classificação: nossa linha de comando |
 | 6b | Execução **sem** ajustes da demo | falha | `0xC0000409` após 1,5 s; log: `[critical] [FATAL] Call to invalid or unregistered function at guest address 0x82198CD8`. Classificação: execução, por configuração de análise incompleta |
 | 6c | Execução **com** os ajustes da demo | ok (limitado) | 2 execuções (40 s e 30 s; runs `20261011T070446Z` e `20261011T070909Z`) até o timeout do supervisor, sem crash; capturas de janela com golfinho, fundo do mar, texto "Dolphin" e o contador do próprio sample avançando (00m14s → 00m26s); log real (`--rex-log`): 0 linhas STUB, 0 erros, 2 avisos |
@@ -95,7 +95,7 @@ emulação de GPU (`rex_app.cpp:49-52`). O CMake do título passou a chamar
 
 ## 3. Referência funcional e reprodução limpa
 
-Níveis verificados automaticamente por `scripts/regress-iruka.ps1`
+Níveis verificados automaticamente por `scripts/validation/regress-iruka.ps1`
 (CTest `local.iruka.regression`), separando "processo iniciou" de "funcionou":
 
 | Nível | Critério | Resultado |

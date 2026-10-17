@@ -13,7 +13,7 @@ try {
   $envData | ConvertTo-Json -Depth 10 | Set-Content "$temp/$side/environment.json"
   $result | ConvertTo-Json -Depth 5 | Set-Content "$temp/$side/result.json"
  }
- $script=Join-Path $PSScriptRoot '../../scripts/compare-benchmarks.ps1'
+ $script=Join-Path $PSScriptRoot '../../scripts/performance/compare-benchmarks.ps1'
  & $script -Before "$temp/a" -After "$temp/b" -Output "$temp/comparison.json" | Out-Null
  if(!(Get-Content "$temp/comparison.json" -Raw | ConvertFrom-Json).comparable){throw 'Identical runs rejected'}
  $envData.artifacts[1].sha256='new'

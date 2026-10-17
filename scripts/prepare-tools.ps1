@@ -8,7 +8,7 @@ $env:PSModulePath = Join-Path $PSHOME 'Modules'
 $root = (Resolve-Path (Split-Path -Parent $PSScriptRoot)).Path
 $tools = Join-Path $root '.local/toolchains'
 $cache = Join-Path $root '.local/downloads'
-$lock = Get-Content -Raw (Join-Path $PSScriptRoot 'desktop-tools.lock.json') | ConvertFrom-Json
+$lock = Get-Content -Raw (Join-Path $PSScriptRoot 'setup/desktop-tools.lock.json') | ConvertFrom-Json
 New-Item -ItemType Directory -Force $tools, $cache | Out-Null
 try { $lease = [IO.File]::Open((Join-Path $root '.local/environment.lock'), [IO.FileMode]::OpenOrCreate, [IO.FileAccess]::ReadWrite, [IO.FileShare]::None) }
 catch { throw 'Environment in use. Close the platform or other preparation and retry.' }
@@ -115,11 +115,11 @@ if ($submodules | Where-Object { $_ -match '^-' }) {
     if ($LASTEXITCODE -ne 0) { throw 'SDK dependency download failed; retry preparation.' }
 }
 Stage 'verify SDK patches'
-& (Join-Path $PSScriptRoot 'materialize-symlinks.ps1')
-& (Join-Path $PSScriptRoot 'apply-sdk-patches.ps1')
+& (Join-Path $PSScriptRoot 'setup/materialize-symlinks.ps1')
+& (Join-Path $PSScriptRoot 'setup/apply-sdk-patches.ps1')
 if ($LASTEXITCODE -ne 0) { throw 'SDK patch verification failed.' }
 Stage 'prepare LLVM'
-& (Join-Path $PSScriptRoot 'bootstrap-llvm.ps1') -AllowDownloads:$AllowDownloads
+& (Join-Path $PSScriptRoot 'setup/bootstrap-llvm.ps1') -AllowDownloads:$AllowDownloads
 if ($LASTEXITCODE -ne 0) { throw 'LLVM preparation failed.' }
 $pending = Join-Path $root '.local/dependency-update.pending'
 if (Test-Path -LiteralPath $pending) { Remove-Item -LiteralPath $pending }

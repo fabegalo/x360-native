@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.25)
 project(ppc_contract LANGUAGES CXX)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
-include("${X360N_ROOT}/cmake/x360n_ppc.cmake")
+include("${X360N_ROOT}/cmake/runtime/x360n_ppc.cmake")
 set(REXGLUE_ENTRYPOINT_GENERATED_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/guest.cpp")
 set(DLL_SOURCES_example "${CMAKE_CURRENT_SOURCE_DIR}/module.cpp")
 add_library(guest OBJECT ${REXGLUE_ENTRYPOINT_GENERATED_SOURCES})

@@ -185,7 +185,7 @@ int Doctor(const ProjectPaths& p, const std::string& config) {
         clean = false;
         if (line.find("thirdparty/libmspack") != std::string::npos) {
           warn("SDK working tree: " + line +
-               " (expected: symlinks materialized by scripts/materialize-symlinks.ps1)");
+               " (expected: symlinks materialized by scripts/setup/materialize-symlinks.ps1)");
         } else {
           warn("SDK working tree modified: " + line);
         }
@@ -197,7 +197,7 @@ int Doctor(const ProjectPaths& p, const std::string& config) {
   // Toolchain.
   fs::path clang = p.local() / "toolchains" / ("llvm-" X360N_LLVM_VERSION_LOCKED) / "bin" / "clang++.exe";
   if (!fs::exists(clang)) {
-    fail("pinned clang++ missing at " + PathUtf8(clang) + " (run scripts/bootstrap-llvm.ps1)");
+    fail("pinned clang++ missing at " + PathUtf8(clang) + " (run scripts/setup/bootstrap-llvm.ps1)");
   } else {
     auto c = Capture(p, clang, {"--version"});
     std::string want = "clang version " X360N_LLVM_VERSION_LOCKED;

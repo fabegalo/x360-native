@@ -8,7 +8,7 @@ for %%I in ("%X360_ROOT%") do set "X360_ROOT=%%~fI"
 set "X360_LLVM=%X360_ROOT%\.local\toolchains\llvm-22.1.8"
 
 if not exist "%X360_LLVM%\bin\clang++.exe" (
-  echo [devshell] LLVM not found at %X360_LLVM%. Run scripts\bootstrap-llvm.ps1 first. 1>&2
+  echo [devshell] LLVM not found at %X360_LLVM%. Run scripts\setup\bootstrap-llvm.ps1 first. 1>&2
   exit /b 3
 )
 

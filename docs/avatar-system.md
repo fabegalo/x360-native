@@ -502,7 +502,7 @@ por `GetAssets`. `XamAvatarInitialize` continua retornando `0xFFFFFFFF`; protoco
 ## 12. Imports LDI e worker original de GetAssets (2026-10-12)
 
 Implementado na worktree `x360-avatars`, sem integração na `main`: patch local
-**0035-ldi-caller-workspace**, aplicado por `scripts/apply-sdk-patches.ps1`, com
+**0035-ldi-caller-workspace**, aplicado por `scripts/setup/apply-sdk-patches.ps1`, com
 hashes anteriores/finais em `deps.lock.json`. Substitui os quatro stubs LDI no
 runtime privado; nenhum outro gerenciador do XAM é inicializado.
 
@@ -753,7 +753,7 @@ O merge `5ee0f3d` preserva os sete commits `536f5f8`, `582cb16`, `dffa97f`,
 `65c7bf1`, `7fbcf94`, `7db63ae` e `1a4608a`, incluindo os experimentos opt-in.
 Não houve squash nem reescrita. A base principal `2b4b9b8`, com as mudanças de
 distribuição, SDK, supervisor e runtime, foi preservada. A alteração local de
-`scripts/window-route.ps1`, pertencente a outra sessão, ficou fora dos commits.
+`scripts/diagnostics/window-route.ps1`, pertencente a outra sessão, ficou fora dos commits.
 
 Validação própria da integração, autorizada separadamente dos incrementos acima:
 
@@ -823,7 +823,7 @@ mesmo caminho e commit `2b4b9b8`. Nenhum push ou release foi realizado.
 
 A main volta a ser a referência de desenvolvimento. O SDK continua aparecendo
 modificado pelos patches/materialização esperados. A alteração de outra sessão
-em `scripts/window-route.ps1` permanece sem commit e com SHA-256
+em `scripts/diagnostics/window-route.ps1` permanece sem commit e com SHA-256
 `c307f4bac6ec049967c445d7672c4357d009419303a372a77ae10cba67863201` inalterado.
 O bundle `.local/integration-avatars/avatars-history.bundle` conserva também
 as referências anteriores à integração. Nenhuma pendência funcional exclusiva

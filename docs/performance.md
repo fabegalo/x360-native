@@ -102,9 +102,9 @@ CPU total e RAM da instrumentação, **não** seu efeito em FPS. GPU/VRAM també
 continuam indisponíveis; identidade da placa/driver não é medição de uso.
 
 ```powershell
-pwsh -NoProfile -File scripts/benchmark-instrumentation.ps1 -Label p2-measured -Samples 4
+pwsh -NoProfile -File scripts/performance/benchmark-instrumentation.ps1 -Label p2-measured -Samples 4
 # Ampliar a mesma série após examinar dispersão, sem sobrescrever as primeiras:
-pwsh -NoProfile -File scripts/benchmark-instrumentation.ps1 -Label p2-measured -Samples 8 -FirstSample 5
+pwsh -NoProfile -File scripts/performance/benchmark-instrumentation.ps1 -Label p2-measured -Samples 8 -FirstSample 5
 ```
 
 Quatro amostras usam OFF/ON/ON/OFF; oito acrescentam ON/OFF/OFF/ON. O driver
@@ -132,9 +132,9 @@ Usar PowerShell 7 e binários compilados por `scripts/devshell.cmd`, com SDK fix
 em `deps.lock.json`. Cenários: `benchmarks/scenarios.json`.
 
 ```powershell
-pwsh -File scripts/benchmark-runtime.ps1 -Title dash_17559 -Label baseline-1
-pwsh -File scripts/benchmark-runtime.ps1 -Title castle_crashers -Label baseline-1
-pwsh -File scripts/benchmark-runtime.ps1 -Title forza_horizon -Label baseline-1
+pwsh -File scripts/performance/benchmark-runtime.ps1 -Title dash_17559 -Label baseline-1
+pwsh -File scripts/performance/benchmark-runtime.ps1 -Title castle_crashers -Label baseline-1
+pwsh -File scripts/performance/benchmark-runtime.ps1 -Title forza_horizon -Label baseline-1
 ```
 
 Na retomada local de 2026-10-14, o prepare anterior do Forza foi interrompido
@@ -142,7 +142,7 @@ durante o build e seu diretório padrão está sem executável. Os artefatos
 congelados, auditados e suficientes para o benchmark estão disponíveis:
 
 ```powershell
-pwsh -File scripts/benchmark-runtime.ps1 -Title forza_horizon -Label nova-coleta -BinaryDirectory .local/benchmarks/binaries/sdk72/forza_horizon
+pwsh -File scripts/performance/benchmark-runtime.ps1 -Title forza_horizon -Label nova-coleta -BinaryDirectory .local/benchmarks/binaries/sdk72/forza_horizon
 ```
 
 Usar `sdk71/forza_horizon` para o outro lado desse A/B. Não copiar executáveis
@@ -180,9 +180,9 @@ nativos; os campos `external_*` usam as amostras do processo. Encerramento limit
 forçado é explicitado e não equivale a um retorno normal à dashboard.
 
 ```powershell
-pwsh -File scripts/compare-benchmarks.ps1 -Before .local/benchmarks/before/dash_17559 -After .local/benchmarks/after/dash_17559 -Output .local/benchmarks/delta.json
-pwsh -File scripts/export-benchmark.ps1 -Run .local/benchmarks/before/dash_17559 -Output .local/benchmarks/public.json
-pwsh -File scripts/reduce-benchmark.ps1 -Run .local/benchmarks/before/dash_17559
+pwsh -File scripts/performance/compare-benchmarks.ps1 -Before .local/benchmarks/before/dash_17559 -After .local/benchmarks/after/dash_17559 -Output .local/benchmarks/delta.json
+pwsh -File scripts/performance/export-benchmark.ps1 -Run .local/benchmarks/before/dash_17559 -Output .local/benchmarks/public.json
+pwsh -File scripts/performance/reduce-benchmark.ps1 -Run .local/benchmarks/before/dash_17559
 ```
 
 A comparação exige a mesma cena revisada, janela completa, seed, configuração,
@@ -213,12 +213,12 @@ capturas antes de aceitar um par, sem atribuir variações de uma execução a g
 `x360n_perf_counter_probe` é um alvo explícito, fora dos benchmarks automáticos:
 executa chamadas reais de `rex::perf`, valida totais e registra sete amostras de
 um/quatro writers com contadores independentes, habilitados/desabilitados.
-`scripts/benchmark-counters.ps1 -Executable <probe.exe> -Output <resultado.json>`
+`scripts/performance/benchmark-counters.ps1 -Executable <probe.exe> -Output <resultado.json>`
 limita a execução a 30 s. É uma carga sintética do runtime, não FPS de um jogo.
 
 ```powershell
 scripts/devshell.cmd cmake --build .local/build/win-amd64 --config Release --target x360n_perf_counter_probe
-pwsh -File scripts/benchmark-counters.ps1 -Executable .local/build/win-amd64/tests/Release/x360n_perf_counter_probe.exe -Output .local/benchmarks/counters.json
+pwsh -File scripts/performance/benchmark-counters.ps1 -Executable .local/build/win-amd64/tests/Release/x360n_perf_counter_probe.exe -Output .local/benchmarks/counters.json
 scripts/devshell.cmd ctest --test-dir .local/build/win-amd64 -C Release -R "x360n[.]benchmark"
 ```
 

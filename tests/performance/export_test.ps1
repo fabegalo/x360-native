@@ -10,7 +10,7 @@ try {
   hardware=@{cpu='fixture'};artifacts=@(@{file='game.exe';sha256='a'})}
  $envData | ConvertTo-Json -Depth 10 | Set-Content "$temp/environment.json"
  @{scene_verified=$false;gpu_ms_per_frame=$null;fps_mean=60} | ConvertTo-Json | Set-Content "$temp/result.json"
- & "$PSScriptRoot/../../scripts/export-benchmark.ps1" -Run $temp -Output "$temp/public.json"
+ & "$PSScriptRoot/../../scripts/performance/export-benchmark.ps1" -Run $temp -Output "$temp/public.json"
  $raw=Get-Content "$temp/public.json" -Raw;$r=$raw | ConvertFrom-Json
  if($raw -match 'private-profile|private-game-root|private-user-root|private-build-root|private-nested-path'){throw 'Private input escaped export'}
  if($r.binary_provenance.head -ne 'fixture-commit'){throw 'Binary identity lost'}

@@ -245,7 +245,7 @@ set_tests_properties(env.doctor PROPERTIES LABELS "project" TIMEOUT 300)
 # (cmake --preset x360n-win-amd64 in titles/iruka) and the demo assets in
 # .local/inputs; skipped (77) otherwise. Opens a window, so it runs alone.
 add_test(NAME local.iruka.regression
-    COMMAND powershell -NoProfile -ExecutionPolicy Bypass -File ${PROJECT_SOURCE_DIR}/scripts/regress-iruka.ps1
+    COMMAND powershell -NoProfile -ExecutionPolicy Bypass -File ${PROJECT_SOURCE_DIR}/scripts/validation/regress-iruka.ps1
     WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
 set_tests_properties(local.iruka.regression PROPERTIES
     LABELS "project" TIMEOUT 180 SKIP_RETURN_CODE 77 RUN_SERIAL TRUE)

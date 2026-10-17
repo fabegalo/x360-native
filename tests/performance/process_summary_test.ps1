@@ -1,6 +1,6 @@
 #requires -Version 7.0
 $ErrorActionPreference='Stop'
-. "$PSScriptRoot/../../scripts/benchmark-process-summary.ps1"
+. "$PSScriptRoot/../../scripts/performance/benchmark-process-summary.ps1"
 $rows=@(0..40 | ForEach-Object {@{seconds=[double]$_;cpu_ms=[double]$_*2000;working_set_bytes=1000+$_;private_bytes=2000+$_}})
 $r=Get-BenchmarkProcessSummary $rows 5.25 30 16
 if($r.external_process_cpu_ms -ne 60000 -or $r.external_process_cpu_percent_machine -ne 12.5 -or $r.external_sample_count -ne 30 -or $r.ram_working_set_peak_bytes -ne 1035){throw 'Process boundary interpolation/normalization failed'}

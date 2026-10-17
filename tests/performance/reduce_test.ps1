@@ -14,7 +14,7 @@ try {
  @(@{runtime_seconds=.5;working_set_bytes=123;private_bytes=456}) | ConvertTo-Json -AsArray | Set-Content "$temp/process-samples.json"
  $csvHash=(Get-FileHash "$temp/frames.csv").Hash
  $initialHash=(Get-FileHash "$temp/result.json").Hash
- $script=Join-Path $PSScriptRoot '../../scripts/reduce-benchmark.ps1'
+ $script=Join-Path $PSScriptRoot '../../scripts/performance/reduce-benchmark.ps1'
  1..2 | ForEach-Object {
   & $script -Run $temp | Out-Null
   $r=Get-Content "$temp/result.json" -Raw | ConvertFrom-Json

@@ -1,7 +1,7 @@
 # Pointer-reached function starts of dash.xex 2.0.17559.0 (SHA-256 3ad8f38d...14f927).
 #
 # Separate from dash_17559.toml, whose entries were each checked by hand. These were
-# classified by scripts/check-pointer-targets.ps1 and spot-checked, not reviewed one
+# classified by scripts/analysis/check-pointer-targets.ps1 and spot-checked, not reviewed one
 # by one; remove the include in dash_17559_manifest.toml to drop them all.
 #
 # Why: the dashboard calls through vtables that have no RTTI. The codegen finds
@@ -15,7 +15,7 @@
 # How (codegen-8 output, generated before these entries existed):
 #   x360n-content xref .local\inputs\dashboard\17559 dash.xex 9217E000 9293EC8C
 #     -> .local\runs\dash-artifacts\dash-code-ptrs-codegen8.txt (54 410 data words)
-#   scripts\check-pointer-targets.ps1 -Image .local\runs\dash-artifacts\dash-image.bin
+#   scripts\analysis\check-pointer-targets.ps1 -Image .local\runs\dash-artifacts\dash-image.bin
 #     -Generated titles\dash_17559\generated\dash -Xref <that file> -Base 92000000 -Toml
 # Of 901 code addresses held by data that no generated function starts at, 506 pass
 # every criterion: aligned; not inside a .pdata function; not inside a generated

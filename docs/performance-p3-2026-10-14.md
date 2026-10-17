@@ -166,11 +166,11 @@ Os diretórios locais de binários são `p3-before/forza_horizon` e
 `p3-after/forza_horizon`, dentro de `.local/benchmarks/binaries`.
 
 ```powershell
-pwsh -NoProfile -File scripts/benchmark-runtime.ps1 -Title forza_horizon -Label nova-p3-before -BinaryDirectory .local/benchmarks/binaries/p3-before/forza_horizon -Instrumentation On
+pwsh -NoProfile -File scripts/performance/benchmark-runtime.ps1 -Title forza_horizon -Label nova-p3-before -BinaryDirectory .local/benchmarks/binaries/p3-before/forza_horizon -Instrumentation On
 # Em outro processo local, enquanto o runner controla o jogo; usar seu PID exato:
-pwsh -NoProfile -File scripts/benchmark-gpu.ps1 -ProcessId <PID> -Output <gpu.json>
+pwsh -NoProfile -File scripts/performance/benchmark-gpu.ps1 -ProcessId <PID> -Output <gpu.json>
 # Depois do encerramento, repetir com p3-after e um label novo; revisar as cenas.
-pwsh -NoProfile -File scripts/compare-benchmarks.ps1 -Before <run-before> -After <run-after> -ChangedArtifacts rexgpu-xenosrd.dll -Output <comparacao.json>
+pwsh -NoProfile -File scripts/performance/compare-benchmarks.ps1 -Before <run-before> -After <run-after> -ChangedArtifacts rexgpu-xenosrd.dll -Output <comparacao.json>
 ```
 
 Compilação do probe sem recompilar jogos, via toolchain fixada:

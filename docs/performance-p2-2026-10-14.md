@@ -191,9 +191,9 @@ não houve regressão completa nem nova suíte PPC/C7/C8 sem alteração relevan
 ## Reprodução
 
 ```powershell
-pwsh -NoProfile -File scripts/benchmark-instrumentation.ps1 -Label nova-serie -Samples 4
+pwsh -NoProfile -File scripts/performance/benchmark-instrumentation.ps1 -Label nova-serie -Samples 4
 # Após completar/revisar a primeira série, extensão explícita:
-pwsh -NoProfile -File scripts/benchmark-instrumentation.ps1 -Label nova-serie -Samples 8 -FirstSample 5
+pwsh -NoProfile -File scripts/performance/benchmark-instrumentation.ps1 -Label nova-serie -Samples 8 -FirstSample 5
 ```
 
 Os comandos iniciam jogos reais e exigem sessão exclusiva. O watchdog é de 330 s
@@ -209,8 +209,8 @@ Exemplo de reprocessamento/comparação da série já coletada, sem iniciar jogo
 $order = '01-off','02-on','03-on','04-off','05-on','06-off','07-off','08-on'
 foreach ($title in 'castle_crashers','forza_horizon') {
   $runs = @($order | ForEach-Object { ".local/benchmarks/p2-measured-$_/$title" })
-  foreach ($run in $runs) { & scripts/reduce-benchmark.ps1 -Run $run }
-  & scripts/compare-instrumentation.ps1 -Runs $runs -Output ".local/benchmarks/$title-p2-comparison.json"
+  foreach ($run in $runs) { & scripts/performance/reduce-benchmark.ps1 -Run $run }
+  & scripts/performance/compare-instrumentation.ps1 -Runs $runs -Output ".local/benchmarks/$title-p2-comparison.json"
 }
 ```
 

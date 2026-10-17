@@ -1,5 +1,5 @@
 $ErrorActionPreference='Stop'
-. "$PSScriptRoot/../../scripts/benchmark-summary.ps1"
+. "$PSScriptRoot/../../scripts/performance/benchmark-summary.ps1"
 $temp=Join-Path ([IO.Path]::GetTempPath()) ('x360n-bench-'+[guid]::NewGuid()+'.csv')
 try {
  $fields=@('draw_calls','command_buffer_stalls','vertices_processed','functions_dispatched','interrupt_dispatches','texture_cache_hits','texture_cache_misses','pipeline_cache_hits','pipeline_cache_misses','shader_translation_us','shader_translations','pipeline_creation_us','pipeline_creations','swap_failures')

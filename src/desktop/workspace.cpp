@@ -67,7 +67,7 @@ void Publish(const fs::path& source, const fs::path& dest) {
 }
 std::string Component(const fs::path& rel) {
   if (rel == "deps.lock.json" || *rel.begin() == "patches") return "SDK e correções";
-  if (rel == "scripts/desktop-tools.lock.json") return "ferramentas de preparação";
+  if (rel == "scripts/setup/desktop-tools.lock.json") return "ferramentas de preparação";
   if (*rel.begin() == "titles") return "preparações de jogos e dashboards";
   return "componentes do aplicativo";
 }

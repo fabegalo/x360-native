@@ -2,7 +2,7 @@
 # (SHA-256 f8a51ea30406e3b8737e0cdbdad44867743869d59f58d4bc0f4b83e154cb87d8).
 #
 # Separate from dash_6717.toml, whose entries were each checked by hand. These were
-# classified by scripts/check-pointer-targets.ps1 and spot-checked, not reviewed one
+# classified by scripts/analysis/check-pointer-targets.ps1 and spot-checked, not reviewed one
 # by one; remove the include in dash_6717_manifest.toml to drop them all.
 #
 # Why: as in 17559 (docs/architecture.md §7 item 22), functions without .pdata that
@@ -15,7 +15,7 @@
 #   x360n-content xref .local\inputs\dashboard\versions\6717\blades_retail dash.xex
 #     9210C000 927962AC -> .local\runs\dash-artifacts\dash6717-code-refs.txt
 #     (32 992 data words and 3 177 lis + addi/ori addresses into code)
-#   scripts\check-pointer-targets.ps1 -Image .local\runs\dash-artifacts\dash6717-image.bin
+#   scripts\analysis\check-pointer-targets.ps1 -Image .local\runs\dash-artifacts\dash6717-image.bin
 #     -Generated titles\dash_6717\generated\dash -Xref <that file> -Base 92000000 -Toml
 # Of 931 code addresses referenced by data or code that no generated function starts
 # at, 334 pass every criterion of the script (aligned; not inside a .pdata function;

@@ -16,7 +16,7 @@
 # Not added here: other code without .pdata that nothing failed on (e.g. the
 # adjustor thunk at 0x9237E660). Entries here are added only for observed failures.
 # Function starts reached only through data pointers (vtables without RTTI) are in
-# dash_17559_pointer_targets.toml, classified by scripts/check-pointer-targets.ps1.
+# dash_17559_pointer_targets.toml, classified by scripts/analysis/check-pointer-targets.ps1.
 
 # The Lua protected call at 0x928E4028 saves a jump buffer via 0x9291C760;
 # 0x928E4A00 throws via 0x9291C330. These are the matching CRT routines
@@ -153,7 +153,7 @@ setjmp_address = 0x9291C760
 0x922E3BC0 = {}
 
 # --- Jump table read past its end ---------------------------------------------------
-# After the run that passed validation (codegen-5), scripts/check-pdata-overlap.ps1
+# After the run that passed validation (codegen-5), scripts/analysis/check-pdata-overlap.ps1
 # found one overrun out of 28 350 .pdata functions: sub_922B4890 (.pdata
 # 0x922B4890-0x922B4B50) had label loc_922B4B64 inside the next .pdata function
 # 0x922B4B50. The generated switch on r25 had 512 cases.

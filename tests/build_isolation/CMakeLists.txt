@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.25)
 project(build_isolation LANGUAGES CXX)
-include("${X360N_ROOT}/cmake/x360n_sdk_backports.cmake")
-include("${X360N_ROOT}/cmake/x360n_build_isolation.cmake")
+include("${X360N_ROOT}/cmake/sdk/x360n_sdk_backports.cmake")
+include("${X360N_ROOT}/cmake/build/x360n_build_isolation.cmake")
 x360n_guard_ninja()
 if(TEST_GATE)
     add_custom_target(gate

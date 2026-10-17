@@ -84,7 +84,7 @@ Os cenários explícitos estão em `tests/local/guide-dashboard.json`,
 `guide-castle.json` e `guide-forza.json`. Exemplo de reprodução diagnóstica:
 
 ```powershell
-pwsh -NoProfile -File scripts/validate-original-guide.ps1 `
+pwsh -NoProfile -File scripts/validation/validate-original-guide.ps1 `
   -Executable .local/build/titles/dash_17559/dash_17559.exe `
   -GameRoot .local/inputs/dashboard/17559 `
   -SeedUserData .local/validation/universal-guide/baseline-user `

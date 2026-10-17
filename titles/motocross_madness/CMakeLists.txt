@@ -11,9 +11,9 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 include(generated/rexglue.cmake)
 
 # x360-native: fixes for the pinned SDK commit, applied from outside the SDK
-# tree (see cmake/x360n_sdk_backports.cmake). Only meaningful with REXSDK_DIR.
+# tree (see cmake/sdk/x360n_sdk_backports.cmake). Only meaningful with REXSDK_DIR.
 if(REXSDK_DIR)
-    include(${CMAKE_CURRENT_SOURCE_DIR}/../../cmake/x360n_sdk_backports.cmake)
+    include(${CMAKE_CURRENT_SOURCE_DIR}/../../cmake/sdk/x360n_sdk_backports.cmake)
     x360n_apply_sdk_backports("${REXSDK_DIR}")
 endif()
 
@@ -53,7 +53,7 @@ if(TARGET motocross_madness_xam)
 endif()
 
 # x360-native: copy rexruntime and the GPU plugin next to the executable on every
-# build, not only when it relinks (see cmake/x360n_sdk_backports.cmake).
+# build, not only when it relinks (see cmake/sdk/x360n_sdk_backports.cmake).
 if(REXSDK_DIR)
     x360n_stage_runtime_dlls(motocross_madness PLUGIN_TARGETS rexgpu-xenos)
 endif()

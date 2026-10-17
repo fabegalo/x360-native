@@ -66,11 +66,11 @@ biblioteca vazia). Nada disso grava dados do usuário.
 
 ```powershell
 # Capturas PNG de todas as telas (PrintWindow, sem injetar entrada)
-powershell -ExecutionPolicy Bypass -File scripts/capture-desktop-ui.ps1 -Exe <x360-native.exe> -OutDir .local/ui/after [-Dpi 144 -Width 1500 -Height 960] [-Lang en] [-Tag min]
+powershell -ExecutionPolicy Bypass -File scripts/diagnostics/capture-desktop-ui.ps1 -Exe <x360-native.exe> -OutDir .local/ui/after [-Dpi 144 -Width 1500 -Height 960] [-Lang en] [-Tag min]
 # Verificações funcionais num ambiente descartável (copia só titles/ e deps.lock.json)
-powershell -ExecutionPolicy Bypass -File scripts/test-desktop-ui.ps1 -Exe <x360-native.exe>
+powershell -ExecutionPolicy Bypass -File scripts/validation/test-desktop-ui.ps1 -Exe <x360-native.exe>
 # Biblioteca persistente entre dois processos (existente; adaptado ao controle de lista)
-powershell -ExecutionPolicy Bypass -File scripts/test-library-desktop.ps1 -Executable <x360-native.exe> -Root . -OutputDirectory .local/ui/library-test
+powershell -ExecutionPolicy Bypass -File scripts/validation/test-library-desktop.ps1 -Executable <x360-native.exe> -Root . -OutputDirectory .local/ui/library-test
 ```
 
 As capturas ficam em `.local/ui/{before,after}` (ignorado pelo Git): mostram

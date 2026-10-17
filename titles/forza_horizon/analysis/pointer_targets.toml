@@ -1,6 +1,6 @@
 # Forza Horizon 4D5309C9 / 2DC7007B / 0.0.0.10.
 # XEX SHA-256 db40df605ade49a612b35a7a24c38f6004bcb17a88ed6b48288de16df9e3987c.
-# Pointer-only entries: scripts/check-pointer-targets.ps1 P/A/N/G/B/E criteria.
+# Pointer-only entries: scripts/analysis/check-pointer-targets.ps1 P/A/N/G/B/E criteria.
 # All 191 starts disassembled; CFG discovers sizes, including conditional tails.
 # Runtime 830B52F0 at vtable word 822B486C exposed this missing-entry class.
 [functions]

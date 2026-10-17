@@ -2,7 +2,7 @@
 # SHA-256 2a8406bcf9c223f9d7da732be617cc7cd46fbb587ef552f7fcacac2049b95dcd).
 #
 # Separate from motocross_madness.toml, whose entries were each checked by hand. These
-# were classified by scripts/check-pointer-targets.ps1 and spot-checked (0x822ED5D8,
+# were classified by scripts/analysis/check-pointer-targets.ps1 and spot-checked (0x822ED5D8,
 # 0x8255CE70, 0x82ACC348, 0x82F3CD30: argument-shuffling thunk, vtable thunk, adjustor
 # thunk, frameless getter), not reviewed one by one; remove the include in
 # motocross_madness_manifest.toml to drop them all.
@@ -19,7 +19,7 @@
 #   x360n-content xref .local\inputs\titles\motocross_madness\extracted default.xex
 #     82210000 8316B73C -> .local\runs\mm-artifacts\mm-code-ptrs-codegen1.txt
 #     (74 465 data words, 4 716 formed addresses)
-#   scripts\check-pointer-targets.ps1 -Image .local\runs\mm-artifacts\mm-image.bin
+#   scripts\analysis\check-pointer-targets.ps1 -Image .local\runs\mm-artifacts\mm-image.bin
 #     -Generated titles\motocross_madness\generated\default -Xref <that file>
 #     -Base 82000000 -Toml
 # Of 2141 referenced code addresses that no generated function covers, 189 pass every

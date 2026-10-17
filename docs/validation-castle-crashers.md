@@ -49,7 +49,7 @@ x360n run .local\build\titles\castle_crashers\castle_crashers.exe --label cc-run
 
 O teclado só emula o controle com `--mnk_mode=true` (padrão `false`,
 `src/input/mnk/mnk_input_driver.cpp:26`; A = `Space`/`;`, Start = `Return`/`X`).
-Uma execução 3 com teclas enviadas à janela (`scripts/window-route.ps1`) foi
+Uma execução 3 com teclas enviadas à janela (`scripts/diagnostics/window-route.ps1`) foi
 interrompida pelo usuário antes de o supervisor gravar o relatório; não conta
 como evidência.
 
@@ -116,6 +116,6 @@ desempenho.
 | Ferramenta | Uso |
 |---|---|
 | `x360n-content info/extract/dump-image` | cabeçalho STFS, extração validada com manifesto, imagem carregada (como o codegen) |
-| `scripts/check-pdata-overlap.ps1` | funções geradas que passam do fim declarado no `.pdata` (iruka: 0/3725; Castle Crashers: 1/2484 antes da correção, 0 depois) |
-| `scripts/check-code-gaps.ps1` | trechos de código sem função gerada (heurística; controle positivo: acha `0x82198CD8` no iruka sem ajustes) |
-| `scripts/window-route.ps1` | teclas e capturas na janela de um processo lançado por nós |
+| `scripts/analysis/check-pdata-overlap.ps1` | funções geradas que passam do fim declarado no `.pdata` (iruka: 0/3725; Castle Crashers: 1/2484 antes da correção, 0 depois) |
+| `scripts/analysis/check-code-gaps.ps1` | trechos de código sem função gerada (heurística; controle positivo: acha `0x82198CD8` no iruka sem ajustes) |
+| `scripts/diagnostics/window-route.ps1` | teclas e capturas na janela de um processo lançado por nós |

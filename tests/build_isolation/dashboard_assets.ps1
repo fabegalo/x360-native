@@ -11,7 +11,7 @@ $hash = (Get-FileHash -LiteralPath $module).Hash.ToLowerInvariant()
 [IO.File]::WriteAllText($header, '  {"vk.xex", "' + $hash + '"},' + "`n")
 function Check([bool]$Success, [string]$Message) {
     $ErrorActionPreference = 'Continue' # expected native stderr on rejection (Windows PowerShell 5)
-    $output = & cmake "-DROOT=$scratch" "-DHEADER=$header" '-DVERSION=17559' -P "$root/cmake/x360n_dashboard_assets.cmake" 2>&1 | Out-String
+    $output = & cmake "-DROOT=$scratch" "-DHEADER=$header" '-DVERSION=17559' -P "$root/cmake/runtime/x360n_dashboard_assets.cmake" 2>&1 | Out-String
     $ErrorActionPreference = 'Stop'
     if (($LASTEXITCODE -eq 0) -ne $Success -or (!$Success -and !($output -replace '\s+', ' ').Contains($Message))) {
         throw "Unexpected build guard result: $output"

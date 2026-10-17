@@ -104,7 +104,7 @@ dos perfis, sem alterar perfis/saves de uso normal:
 | `ptbr-final` | Repetição focada após corrigir `XamGetCountry`; não é nova regressão geral. |
 | `desktop-verified.png` | Desktop real: “Português (Brasil)” e “Brasil (BR)” carregados de `.local/console.toml`; 16 opções de idioma e 42 de país. |
 
-O runner `scripts/validate-console-locale.ps1` limita o tempo e registra
+O runner `scripts/validation/validate-console-locale.ps1` limita o tempo e registra
 argumentos, hashes, saída e capturas do presenter. O diagnóstico opt-in
 `dash17559_guide_probe_seconds` solicita o serviço original do Guide uma vez,
 sem mouse/teclado. Desligado, não adiciona consultas ao relógio no frame.

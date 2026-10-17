@@ -1,7 +1,7 @@
 # Procedência do ícone
 
 O ícone atual é geometria original criada para x360-native em 2026-10-13.
-O gerador `scripts/generate-desktop-icon.ps1` contém toda a fonte: dois glifos
+O gerador `scripts/packaging/generate-desktop-icon.ps1` contém toda a fonte: dois glifos
 pixelados XN desenhados em uma grade, fundo petróleo e primeiro plano claro.
 Não usa fonte tipográfica, imagem, logotipo, modelo generativo ou recurso externo.
 Conserva o monograma e a família de cores da interface; não representa o símbolo
@@ -9,7 +9,7 @@ Xbox nem afiliação com a Microsoft. O identificador do recurso Windows permane
 inalterado. Titular público confirmado pelo responsável: **x360-native**.
 Licença: BSD-3-Clause, texto integral no `LICENSE` da raiz.
 
-Gerar: `powershell -NoProfile -File scripts/generate-desktop-icon.ps1`.
+Gerar: `powershell -NoProfile -File scripts/packaging/generate-desktop-icon.ps1`.
 Verificar sem modificar: acrescentar `-Check`. O ICO contém imagens DIB 32 bits
 de 16, 32, 48 e 64 pixels. Não depende de fontes instaladas ou relógio da máquina.
 O inventário existente registra o hash do ICO; o gate confere os bytes e o gerador.

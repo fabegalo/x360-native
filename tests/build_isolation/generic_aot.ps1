@@ -6,7 +6,7 @@ $build = Join-Path $Root ".local/build/$title"
 $marker = Join-Path $Root ".local/preparation/$title.incomplete"
 [void][IO.Directory]::CreateDirectory($source)
 try {
-    $module = (Join-Path $Root 'cmake/x360n_build_isolation.cmake').Replace('\','/')
+    $module = (Join-Path $Root 'cmake/build/x360n_build_isolation.cmake').Replace('\','/')
     [IO.File]::WriteAllText((Join-Path $source 'CMakeLists.txt'), @"
 cmake_minimum_required(VERSION 3.25)
 project($title NONE)
@@ -18,7 +18,7 @@ add_custom_target(probe ALL COMMAND "`${CMAKE_COMMAND}" -E touch "`${CMAKE_BINAR
     if ($LASTEXITCODE) { throw 'Generic fixture configure failed' }
     & cmake --build $build
     if ($LASTEXITCODE -or -not [IO.File]::Exists($marker)) { throw 'Direct generic build did not invalidate its title receipt' }
-    . "$Root/scripts/build-lease.ps1"
+    . "$Root/scripts/build/build-lease.ps1"
     $lease = Enter-BuildLease $Root (Join-Path $Root '.local/build') $title
     try {
         & cmake --build $build

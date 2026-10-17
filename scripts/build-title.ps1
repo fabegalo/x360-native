@@ -20,9 +20,9 @@ $env:PSModulePath = Join-Path $PSHOME 'Modules'
 # Ninja emits UTF-8 dependency paths, including on Windows PowerShell 5.1.
 [Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)
 $root = (Resolve-Path (Split-Path -Parent $PSScriptRoot)).Path
-. (Join-Path $PSScriptRoot 'preparation-receipt.ps1')
-. (Join-Path $PSScriptRoot 'build-lease.ps1')
-$driverSnapshot = @(Get-ReceiptEntries @($PSCommandPath, (Join-Path $PSScriptRoot 'preparation-receipt.ps1'), (Join-Path $PSScriptRoot 'build-lease.ps1')))
+. (Join-Path $PSScriptRoot 'build/preparation-receipt.ps1')
+. (Join-Path $PSScriptRoot 'build/build-lease.ps1')
+$driverSnapshot = @(Get-ReceiptEntries @($PSCommandPath, (Join-Path $PSScriptRoot 'build/preparation-receipt.ps1'), (Join-Path $PSScriptRoot 'build/build-lease.ps1')))
 if ($Title -notmatch '^[a-z][a-z0-9_]*$') { throw "invalid title name '$Title'" }
 $titleDir = Join-Path $root "titles\$Title"
 if (-not (Test-Path (Join-Path $titleDir 'CMakePresets.json'))) {

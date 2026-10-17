@@ -1,7 +1,7 @@
 # Automated Windows x64 releases
 
 `.github/workflows/release.yml` builds the desktop distribution entirely on a
-GitHub-hosted `windows-2022` runner. It reuses `scripts/package-desktop.ps1`;
+GitHub-hosted `windows-2022` runner. It reuses `scripts/packaging/package-desktop.ps1`;
 there is no separate packager or dependency on a maintainer's computer.
 
 ## Manual validation

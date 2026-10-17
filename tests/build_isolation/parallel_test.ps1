@@ -3,7 +3,7 @@
 param([string]$Root = (Resolve-Path "$PSScriptRoot/../..").Path)
 $ErrorActionPreference = 'Stop'
 $env:PSModulePath = Join-Path $PSHOME 'Modules'
-. "$Root/scripts/preparation-receipt.ps1"
+. "$Root/scripts/build/preparation-receipt.ps1"
 $scratch = Join-Path $Root ('.local/build/isolation-' + [Guid]::NewGuid().ToString('N'))
 $cmake = (Get-Command cmake).Source
 $compiler = "$Root/.local/toolchains/llvm-22.1.8/bin/clang++.exe"
@@ -61,7 +61,7 @@ try {
     Assert (Test-ReceiptEntries $aFiles) 'rejected producer changed artifacts'
     # A loaded/locked destination rejects publication and keeps its old bytes.
     $old = Get-ReceiptHash "$a/rexruntime.dll"
-    $stage = "set(sources `"$($b.Replace('\','/'))/rexruntime.dll`")`nset(destination `"$($a.Replace('\','/'))`")`ninclude(`"$($Root.Replace('\','/'))/cmake/x360n_stage_files.cmake`")"
+    $stage = "set(sources `"$($b.Replace('\','/'))/rexruntime.dll`")`nset(destination `"$($a.Replace('\','/'))`")`ninclude(`"$($Root.Replace('\','/'))/cmake/build/x360n_stage_files.cmake`")"
     [IO.File]::WriteAllText("$scratch/stage.cmake", $stage)
     $lock=[IO.File]::Open("$a/rexruntime.dll", 'Open', 'Read', 'Read')
     try {

@@ -22,7 +22,7 @@ try {
  }
  function Invoke-FixtureComparison {
   # Use a child so the script's nonzero exit cannot terminate the fixture.
-  $command='& "'+(Resolve-Path "$PSScriptRoot/../../scripts/compare-instrumentation.ps1").Path+'" -Runs @('+(@($dirs | ForEach-Object {'"'+$_+'"'}) -join ',')+') -Output "'+"$temp/report.json"+'"'
+  $command='& "'+(Resolve-Path "$PSScriptRoot/../../scripts/performance/compare-instrumentation.ps1").Path+'" -Runs @('+(@($dirs | ForEach-Object {'"'+$_+'"'}) -join ',')+') -Output "'+"$temp/report.json"+'"'
   & pwsh -NoProfile -Command $command | Out-Null
   return $LASTEXITCODE
  }

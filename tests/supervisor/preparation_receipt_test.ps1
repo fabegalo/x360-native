@@ -1,7 +1,7 @@
 param([string]$Root = (Resolve-Path "$PSScriptRoot/../..").Path)
 $ErrorActionPreference = 'Stop'
 $env:PSModulePath = Join-Path $PSHOME 'Modules'
-. "$Root/scripts/preparation-receipt.ps1"
+. "$Root/scripts/build/preparation-receipt.ps1"
 $scratch = Join-Path ([IO.Path]::GetTempPath()) ("x360n-receipt-" + [Guid]::NewGuid().ToString('N'))
 [void][IO.Directory]::CreateDirectory($scratch)
 function Assert($Condition, [string]$Message) { if (-not $Condition) { throw $Message } }

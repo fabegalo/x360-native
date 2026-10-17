@@ -25,7 +25,7 @@ O serviço de avatares representa progresso real: nesta auditoria, o gerador ori
 - `main` e a referência local `origin/main` apontavam para a revisão acima. Não houve consulta remota nem push.
 - Os commits de distribuição `2b4b9b8`, de avatares `1a4608a` e a integração `5ee0f3d` são ancestrais de `main`. Nenhum commit alcançável pelas referências locais ficou fora de `main` em `git log --all --not main`.
 - A worktree de distribuição remanescente estava limpa, em HEAD destacado `2b4b9b8`. Sua existência não significa código pendente de integração. A preservação da antiga worktree de avatares está documentada em `docs/avatar-system.md`, seção 15.
-- Alterações preexistentes: submódulo `external/rexglue-sdk` modificado e `scripts/window-route.ps1` modificado. Foram preservadas. O SHA-256 deste script é `c307f4bac6ec049967c445d7672c4357d009419303a372a77ae10cba67863201`.
+- Alterações preexistentes: submódulo `external/rexglue-sdk` modificado e `scripts/diagnostics/window-route.ps1` modificado. Foram preservadas. O SHA-256 deste script é `c307f4bac6ec049967c445d7672c4357d009419303a372a77ae10cba67863201`.
 - O único entregável versionável produzido é este relatório. Logs, fixtures sintéticas, builds e extração do ZIP ficaram em áreas locais ignoradas ou temporárias. Não houve reset, clean, rebase, commit ou publicação.
 
 ### Separação de responsabilidades observada
@@ -125,7 +125,7 @@ Não foi demonstrado problema de severidade crítica. “Alto” abaixo signific
 
 ### C5. Médio — staging concorrente de DLLs e saídas globais do SDK — corrigido
 
-- **Local:** `cmake/x360n_sdk_backports.cmake:83–112`, `x360n_stage_runtime_dlls`; SDK `CMakeLists.txt:226–228`.
+- **Local:** `cmake/sdk/x360n_sdk_backports.cmake:83–112`, `x360n_stage_runtime_dlls`; SDK `CMakeLists.txt:226–228`.
 - **Evidência:** vários targets fazem `copy_if_different` das mesmas DLLs para `tests/Debug`. O build paralelo padrão falhou copiando `rexruntimerd.dll`; o build serial no host concluiu. A topologia é compatível com corrida de cópias, embora o log isolado não exclua interferência externa. Builds distintos de títulos escrevem também em `${REXGLUE_ROOT}/out/${REX_PLATFORM}`.
 - **Impacto:** falhas intermitentes e possibilidade de uma configuração sobrescrever artefatos utilizados por outra. O lease da GUI/scripts não serializa invocações CMake diretas.
 - **Correção implementada:** patch reproduzível 0038 mantém o pin e coloca todas as saídas do SDK no diretório do build/configuração. Um produtor de staging por diretório substitui os produtores concorrentes e publica DLLs por cópia temporária, SHA-256 e rename. `build-title` e o Ninja configurado pelo CMake compartilham leases por build/título; preparações independentes coexistem, enquanto o mesmo conjunto é rejeitado antes de escrever. O lease de ambiente é compartilhado entre builds e continua excluindo sessões/instalação de ferramentas. O recibo C2 permanece no schema 1; ver E8.
@@ -133,7 +133,7 @@ Não foi demonstrado problema de severidade crítica. “Alto” abaixo signific
 
 ### C6. Médio — flags semânticas do código PPC não são uniformes
 
-**Estado: corrigido e validado em 13/10/2026.** `cmake/x360n_ppc.cmake` centraliza `-fno-strict-aliasing -ffp-model=strict` em uma interface privada. O helper comum identifica os consumidores dos inventários de fontes geradas exportados pelo SDK, após declarar os targets: entrada, módulos e PCHs recebem o contrato, sem listas de títulos nem alteração dos arquivos gerados. Os testes PPC locais usam a mesma interface. Pin do SDK, LLVM 22.1.8, patch 0038 e `-O2` dos títulos permanecem intactos.
+**Estado: corrigido e validado em 13/10/2026.** `cmake/runtime/x360n_ppc.cmake` centraliza `-fno-strict-aliasing -ffp-model=strict` em uma interface privada. O helper comum identifica os consumidores dos inventários de fontes geradas exportados pelo SDK, após declarar os targets: entrada, módulos e PCHs recebem o contrato, sem listas de títulos nem alteração dos arquivos gerados. Os testes PPC locais usam a mesma interface. Pin do SDK, LLVM 22.1.8, patch 0038 e `-O2` dos títulos permanecem intactos.
 
 - **Local:** SDK `CMakeLists.txt:133–134`; configuração de títulos em `titles/*/generated/rexglue.cmake` e CMake dos títulos.
 - **Evidência:** o SDK aplica `-fno-strict-aliasing` e `-ffp-model=strict`; os comandos Ninja inspecionados para código gerado de Iruka não contêm ambas. As opções de um subdiretório SDK não passam automaticamente ao target criado pelo pai.
@@ -178,7 +178,7 @@ parcial, com as limitações abaixo. SDK entregue como patch 0039 no commit
 
 **Estado: corrigido em 13/10/2026.** Conversões de caminhos do inventário/diagnósticos e leitura do TSV usam UTF-8 explícito. O harness Iruka inicializa os módulos do próprio host PowerShell e vincula cada execução a um relatório novo e exclusivo. Fixtures Unicode mantidas; nova fixture sintética inclui espaços, acento, japonês e emoji. Reprodução e revalidação em E11.
 
-- **Local:** `tests/local/inputs_test.cpp:50,78,92`; `scripts/regress-iruka.ps1:26`; contraste com normalização já existente em `prepare-tools.ps1`.
+- **Local:** `tests/local/inputs_test.cpp:50,78,92`; `scripts/validation/regress-iruka.ps1:26`; contraste com normalização já existente em `prepare-tools.ps1`.
 - **Evidência:** inventário falhou com exceção de conversão Unicode, após 973 asserções, ao encontrar fixture local com caracteres não representáveis na página de códigos. O teste Iruka falhou antes de iniciar o jogo porque `Get-FileHash` não era encontrado pelo Windows PowerShell com `PSModulePath` herdado. Repetição focada com caminho de módulos correto passou.
 - **Impacto:** sinal de regressão confuso e falhas dependentes do nome de usuário/pasta/shell. Apagar a fixture Unicode esconderia um caso válido.
 - **Correção:** usar representação UTF-8 explícita nos diagnósticos/caminhos de teste e inicializar o ambiente PowerShell na fronteira do harness. Preservar teste com Unicode e espaços.
@@ -191,7 +191,7 @@ parcial, com as limitações abaixo. SDK entregue como patch 0039 no commit
 - **Validação:** candidato `0.1.0-preview.6` da revisão `3b9cb59`, dois builds simultâneos isolados com ZIPs idênticos; 55 casos/20.628 assertions por build, 1 positivo/16 negativos do gate e 8 assertions dos recibos reais C2 aprovados. Textos acessíveis na raiz do ZIP; 88 registros de inventário. Extraído e verificado fora do repositório. C1/C3, C2, C5, C6 e C4/C11 preservados; Windows limpo continua pendente.
 - **Revalidação das pendências:** candidato `0.1.0-preview.7`, revisão `d87b5c9`: dois ZIPs idênticos, 55 casos/20.628 assertions por build, 1 positivo/21 negativos do gate, 8 verificações de recibos reais e 43 de instalação/atualização aprovadas. GUI aberta fora do repositório, ambiente padrão criado e 341 arquivos conferidos; sem downloads, recompilação de jogos ou regeneração AOT. Evidências e bloqueadores humanos em `LICENSE_AUDIT.md`.
 
-- **Local:** raiz do repositório; `scripts/package-desktop.ps1:49–53`; `deps.lock.json`.
+- **Local:** raiz do repositório; `scripts/packaging/package-desktop.ps1:49–53`; `deps.lock.json`.
 - **Evidência:** não há `LICENSE`/`NOTICE` próprio versionado. O pacote copia licenças de fmt, CLI11 e toml++, mas seu payload exporta também patches/código e aponta o SDK por URL; não há inventário completo de avisos ReXGlue/Xenia e demais componentes aplicáveis ao material distribuído.
 - **Impacto:** usuários e redistribuidores não têm termos claros para o código do projeto; não é possível aprovar a completude dos avisos apenas pela lista atual. Esta é uma constatação do conteúdo, não parecer jurídico de compatibilidade de licenças.
 - **Correção:** escolher licença do código próprio, inventariar o que efetivamente entra em cada pacote e preservar os avisos exigidos de terceiros, inclusive código derivado. Manter conteúdo proprietário e código AOT derivado fora da distribuição.
@@ -199,7 +199,7 @@ parcial, com as limitações abaixo. SDK entregue como patch 0039 no commit
 
 ### C11. Médio — correspondência fonte/binário e pacote reproduzível — corrigido
 
-- **Local:** `scripts/package-desktop.ps1:16–20,43–48`; ausência de `.github/workflows`.
+- **Local:** `scripts/packaging/package-desktop.ps1:16–20,43–48`; ausência de `.github/workflows`.
 - **Evidência:** o script usa cache/preset geral, compila e só depois exige `X360_DESKTOP_ONLY=ON`. Na main usada nesta auditoria o cache é de build completo. O bloqueio de árvore suja cobre apenas parte das entradas; `git archive HEAD` exporta todo o fonte enquanto CMake/headers fora dessa lista podem influenciar o binário local. Não há pipeline versionado de release/CI.
 - **Impacto:** processo depende de preparação manual ou da worktree histórica e não garante, sozinho, que o pacote corresponda integralmente ao commit declarado. O ZIP anterior não valida a main consolidada.
 - **Correção:** diretório próprio de build de distribuição, configuração explícita desde o início, fonte imutável/entradas verificadas e gate de pacote. Executar em Windows limpo sem ferramentas prévias e registrar o caminho de instalação/recuperação das ferramentas.
@@ -323,7 +323,7 @@ Comandos abaixo são relativos à raiz do repositório. O PowerShell foi usado p
 | Verificação / comando | Resultado nesta auditoria |
 |---|---|
 | `git status --short`, `git rev-parse HEAD`, `git log --all --not main`, `git merge-base --is-ancestor <commit> main`, inspeção das worktrees | Integração confirmada no alcance descrito em A; alterações preexistentes preservadas. |
-| `powershell -NoProfile -File scripts/apply-sdk-patches.ps1 -Check` | 36 patches/hashes consistentes; log `patch-check.log`. |
+| `powershell -NoProfile -File scripts/setup/apply-sdk-patches.ps1 -Check` | 36 patches/hashes consistentes; log `patch-check.log`. |
 | Reversão/aplicação em fixture isolada dos arquivos afetados | 45 arquivos iguais à base após reversão, reaplicação aprovada; `patch-replay/result.txt`. Não representa clone/build completo novo. |
 | `scripts/devshell.cmd cmake --build --preset win-amd64-debug` | Falhou no staging concorrente de DLL: `build-main.log`. |
 | Mesmo build com `--parallel 1`, primeiro restrito e depois no host | Tentativa restrita falhou ao executar assembler PPC; host concluiu. `build-main-serial.log`, `build-main-host.log`. |
@@ -401,7 +401,7 @@ Escopo: parser GDFX no SDK, extração/manifesto em `src/content`, testes focado
 | Fixtures originais `.local/validation/project-audit-20261013/extract-probe/{bad-root,disc}.iso` | Crash da raiz inválida documentado na auditoria | Reutilizadas sem alteração: malformada retorna 1; válida retorna 0 e extrai `hello.txt` com bytes `hello` e SHA-256 `2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824` |
 | `scripts/devshell.cmd cmake --build --preset win-amd64-debug --target x360n_tests --parallel 1` | Build dos testes de reprodução aprovado | Build final aprovado, incluindo SDK/parser e ferramenta, sem recompilar títulos |
 | `scripts/devshell.cmd ctest --preset win-amd64-debug -R x360n[.] --output-on-failure -j 4` | — | **66/66 aprovados, zero falhas/skips**, 16,63 s; conteúdo, supervisor e smoke PPC existentes |
-| `scripts/apply-sdk-patches.ps1 -Check` e verificação CMake | 36 patches existentes | 37 patches e hashes consistentes; pin `f5337cdc947ff6d4c4196737e2c807a48f2a1fc2` preservado |
+| `scripts/setup/apply-sdk-patches.ps1 -Check` e verificação CMake | 36 patches existentes | 37 patches e hashes consistentes; pin `f5337cdc947ff6d4c4196737e2c807a48f2a1fc2` preservado |
 | Aplicação/reversão de 0037 em fixture Git isolada com `.gitattributes` | — | Hashes dos dois arquivos iguais ao resultado declarado após aplicar e à revisão original após reverter |
 
 A revisão independente encontrou um caso de compatibilidade com separador final no destino; foi reproduzido, corrigido e incluído nos testes antes da conclusão. A primeira fixture de replay sem repositório Git não respeitou os atributos LF e divergiu por finais de linha; a comparação final usou fixture Git com os atributos do SDK. Não foi revertido o SDK em uso.
@@ -537,7 +537,7 @@ A falha remanescente `unit.Depfile escapes characters make treats as syntax` é 
 
 ### Ocorrências e preservação das evidências
 
-A preparação antiga de Iruka foi corretamente recusada por C2 após divergência em `cmake/x360n_sdk_backports.cmake`. Foi revalidada pelo fluxo normal `build-title.ps1 -Title iruka`, sem alterar fontes do título: codegen escreveu zero arquivos e manteve 77. Uma tentativa durante a preparação foi recusada pelo lease; a execução final acima ocorreu após sua conclusão.
+A preparação antiga de Iruka foi corretamente recusada por C2 após divergência em `cmake/sdk/x360n_sdk_backports.cmake`. Foi revalidada pelo fluxo normal `build-title.ps1 -Title iruka`, sem alterar fontes do título: codegen escreveu zero arquivos e manteve 77. Uma tentativa durante a preparação foi recusada pelo lease; a execução final acima ocorreu após sua conclusão.
 
 Essa recusa expôs um defeito adicional do harness antigo: buscava o último run histórico quando não havia relatório novo e regravava seu `regress.json`. O resumo de `20261013T101128Z-regress-iruka` foi reconstruído com os resultados originais comprovados por seu relatório, log e capturas preservados (L1–L5, 307 cores, diferença 6,871). A ocorrência incorreta foi guardada em `stale-report-incident.json`. O harness agora usa um UUID por invocação e falha explicitamente se não houver relatório correspondente; o negativo da tabela prova a preservação posterior.
 

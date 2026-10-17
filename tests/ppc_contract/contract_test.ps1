@@ -6,7 +6,7 @@ if (-not $DeveloperEnvironment) {
     & "$Root/scripts/devshell.cmd" powershell -NoProfile -ExecutionPolicy Bypass -File $PSCommandPath -Root $Root -DeveloperEnvironment
     exit $LASTEXITCODE
 }
-. "$Root/scripts/preparation-receipt.ps1"
+. "$Root/scripts/build/preparation-receipt.ps1"
 function Assert($ok, $message) { if (-not $ok) { throw $message } }
 $scratch = Join-Path $Root ('.local/build/ppc-contract-' + [Guid]::NewGuid().ToString('N'))
 $compiler = "$Root/.local/toolchains/llvm-22.1.8/bin/clang++.exe"

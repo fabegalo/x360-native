@@ -1,6 +1,6 @@
 param([string]$Root = (Resolve-Path "$PSScriptRoot/../..").Path)
 $ErrorActionPreference = 'Stop'
-. "$Root/scripts/build-lease.ps1"
+. "$Root/scripts/build/build-lease.ps1"
 $scratch = Join-Path ([IO.Path]::GetTempPath()) ('x360n-leases-' + [Guid]::NewGuid().ToString('N'))
 function Assert($value, $message) { if (-not $value) { throw $message } }
 function Release($lease) { foreach ($handle in $lease) { $handle.Dispose() } }

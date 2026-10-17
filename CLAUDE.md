@@ -137,10 +137,10 @@ numeração com a quantidade. Resultados históricos de testes ficam nos relató
 sem repetir suítes ou sessões visuais por uma mudança documental.
 
 - `external/rexglue-sdk` — submódulo fixado em `deps.lock.json`. **Não editar à mão.**
-  Exceções documentadas: cópias dos symlinks do libmspack (`scripts/materialize-symlinks.ps1`)
+  Exceções documentadas: cópias dos symlinks do libmspack (`scripts/setup/materialize-symlinks.ps1`)
   e os patches locais de `patches/rexglue-sdk/` (0001–0002 autorizados em 2026-10-11,
   demais patches documentados individualmente no lock e nos relatórios), aplicados por
-  `scripts/apply-sdk-patches.ps1` e verificados pelo CMake no configure e em todo build.
+  `scripts/setup/apply-sdk-patches.ps1` e verificados pelo CMake no configure e em todo build.
   `src/ui/rex_app.cpp` (patch 0004) é compilado em cada executável: recompile o título.
 - Correções do SDK vão no `CMakeLists.txt` raiz como backport condicionado ao
   commit fixado, citando o commit upstream equivalente. Sem equivalente upstream,

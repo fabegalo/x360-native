@@ -50,7 +50,7 @@
 
 # Build with the entries above: codegen succeeds, but motocross_madness_recomp.9.cpp
 # fails to compile with "use of undeclared label 'loc_82C687F8'" (and 82C68728,
-# 82C68730, 82C68738, 82C68600, 82C6862C). scripts/check-pdata-overlap.ps1 finds
+# 82C68730, 82C68738, 82C68600, 82C6862C). scripts/analysis/check-pdata-overlap.ps1 finds
 # the only overrun among 37353 .pdata functions: sub_82C680E0 (.pdata 0x82C680E0
 # length 0x150) has label loc_82C68234, inside the next .pdata function 0x82C68230.
 #

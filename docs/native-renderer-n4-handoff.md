@@ -35,7 +35,7 @@ registram o diagnóstico daquele checkpoint; não são a lista atual de pendênc
 - `texture.h`: endian por tamanho de bloco como os shaders pinados (8 bpb sem
   swap; 16 bpb só `8in16`) e depth unorm `(d + (d >> 23)) * 2^-24`.
 - `native_stats` (desligado por padrão): frame time P50/P95/P99/1% low, causas
-  de flush, opcodes e locais de overlap. `scripts/native-stats-window.ps1`.
+  de flush, opcodes e locais de overlap. `scripts/diagnostics/native-stats-window.ps1`.
 - Testes: `tests/native/texture_load_test.cpp` (GPU×CPU byte a byte, 13
   formatos, 4 endians, linear/tiled, mips empacotados, cubo, array, volume);
   `packet_test.cpp` atualizado. Último resultado: 19 casos, 366.000 asserções.
@@ -45,7 +45,7 @@ registram o diagnóstico daquele checkpoint; não são a lista atual de pendênc
 - Build: `scripts\devshell.cmd cmake --build .local\build\titles\forza_horizon --target rexgpu-native`.
 - Rodada: `.local/validation/native-n4/bench-forza.ps1 -Label <x> -Seconds 150`
   (executável diagnóstico `native-n3-diagnostic`, sem recibo, rota por tempo
-  `30:Return,45:Return,55:Space`). Resumo: `scripts/native-stats-window.ps1`.
+  `30:Return,45:Return,55:Space`). Resumo: `scripts/diagnostics/native-stats-window.ps1`.
 - Runs: `20261015T011953Z-n4-bench-b0`, `...012410Z-...-b1-events`,
   `...012731Z-...-b1-opcodes`, `...013058Z-...-b2-range`, `...014455Z-...-b3-mirror`,
   `...014902Z-...-b4-sites`, `...020000Z-...-b5-current` (`.local/runs/`);

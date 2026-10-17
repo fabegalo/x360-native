@@ -102,7 +102,7 @@ def environment(versions):
     require(msvc and sdk, "Microsoft C++/Windows SDK environment missing")
     path = Path(".local/release/provenance.json")
     provenance = json.loads(path.read_text(encoding="utf-8"))
-    tools = json.loads(Path("scripts/desktop-tools.lock.json").read_text(encoding="utf-8"))["tools"]
+    tools = json.loads(Path("scripts/setup/desktop-tools.lock.json").read_text(encoding="utf-8"))["tools"]
     provenance["tools"] = []
     for tool in tools:
         receipt = Path(".local/toolchains") / tool["directory"] / ".x360n-archive-sha256"
@@ -183,7 +183,7 @@ def verify(directory, version, commit, ref, run_id):
         require(provenance["commit"] == commit and provenance["version"] == version and provenance["ref"] == ref and
                 provenance["run_id"] == str(run_id) and provenance["tag"] == expected_tag, "Actions provenance differs")
         require(provenance["llvm_archive_sha256"] == lock["llvm"]["sha256"], "LLVM archive provenance differs")
-        tools = json.loads(files["app/workspace/scripts/desktop-tools.lock.json"])["tools"]
+        tools = json.loads(files["app/workspace/scripts/setup/desktop-tools.lock.json"])["tools"]
         require(provenance["tools"] == [{k: t[k] for k in ("id", "version", "sha256")} for t in tools], "Tool provenance differs")
     print(f"Verified {archive_path.name}: {actual}; {len(files)} files; exact commit {commit}")
     return metadata

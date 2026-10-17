@@ -208,7 +208,7 @@ diferentes têm executáveis diferentes. Pinyon Shift faz o mesmo
 | D2 | LLVM **22.1.8** portátil em `.local/toolchains` | o SDK exige Clang ≥ 18 (`CMakeLists.txt:83-93`) e o CI usa LLVM upstream (`choco install llvm`); 22.1.8 era a última estável na data da tag; sem admin nem PATH global | apagar o diretório; ajustar o lock |
 | D3 | SDK via `add_subdirectory` (modo "Git Submodule" da wiki), sem `install` | `install` executa `reg add HKCU\Software\Kitware\CMake\Packages\rexglue` (`cmake/rexglue_install.cmake:194-217`) | rodar o install quando o usuário autorizar |
 | D4 | Backport do commit upstream `b5e0cf8` no nosso CMake, só para o pin v0.10.0 | `include/rex/hash.h` (público) inclui `<xxhash.h>`, mas xxHash é ligado como PRIVATE; `unit_tests` não compila | removido automaticamente ao trocar o pin |
-| D5 | Materializar 15 symlinks do libmspack como cópias verificadas (`scripts/materialize-symlinks.ps1`) | sem Developer Mode a conta não cria symlinks; o git os grava como texto e `lzxd.c` não compila | `git -C external/rexglue-sdk/thirdparty/libmspack checkout -- .` |
+| D5 | Materializar 15 symlinks do libmspack como cópias verificadas (`scripts/setup/materialize-symlinks.ps1`) | sem Developer Mode a conta não cria symlinks; o git os grava como texto e `lzxd.c` não compila | `git -C external/rexglue-sdk/thirdparty/libmspack checkout -- .` |
 | D6 | O supervisor não liga o runtime | identificar e supervisionar não precisa de memória de guest; a DLL do runtime acoplaria o supervisor a cada título | ligar quando houver necessidade demonstrada |
 | D7 | Teste PowerPC próprio pelo pipeline oficial `recompile-tests` | único caminho do SDK que recompila e executa código PPC sem XEX | — |
 
@@ -263,7 +263,7 @@ diferentes têm executáveis diferentes. Pinyon Shift faz o mesmo
 14. **Fontes de kernel fora do build**: `src/kernel/CMakeLists.txt` deixa
     comentados `xboxkrnl_usbcam.cpp`, `cert_monitor.cpp` e `debug_monitor.cpp`
     (iguais no `development`); os 11 `XUsbcam*` ficam sem símbolo. Um título que
-    os importe não linka. `scripts/xex-imports.ps1` só conta fontes compiladas.
+    os importe não linka. `scripts/analysis/xex-imports.ps1` só conta fontes compiladas.
 15. **Tabela de funções sempre no heap `v80000000`** — *corrigido localmente pelo
     patch 0001*: `Memory::InitializeFunctionTable` (`src/system/xmemory.cpp:787-806`
     no original) a alocava em `image_base + image_size` no heap
@@ -315,7 +315,7 @@ diferentes têm executáveis diferentes. Pinyon Shift faz o mesmo
     (`src/codegen/analyze.cpp`, "too many false positives"). Thunks de ajuste e
     folhas de vtables sem RTTI ficam fora, e a chamada falha com `Call to invalid or
     unregistered function`. Castle Crashers teve 1; a dashboard 17559, 515.
-    `scripts/check-pointer-targets.ps1` lista os candidatos com critérios
+    `scripts/analysis/check-pointer-targets.ps1` lista os candidatos com critérios
     verificáveis; as entradas vão para a análise do título, não para o SDK.
 23. **Página de sistema em endereço fixo `0x8E038600`** — *não resolvido*: a
     dashboard lê sinalizadores em `0x8E038614`, `0x8E038630` e `0x8E038678` por
@@ -323,7 +323,7 @@ diferentes têm executáveis diferentes. Pinyon Shift faz o mesmo
     aloca a página zerada com "Data is currently unknown". Conteúdo real desconhecido.
 
 Patches locais (base `f5337cdc`): `patches/rexglue-sdk/README.md`; aplicação
-reproduzível por `scripts/apply-sdk-patches.ps1` e verificação no CMake.
+reproduzível por `scripts/setup/apply-sdk-patches.ps1` e verificação no CMake.
 
 ## 8. Pinyon Shift: o que é reutilizável
 

@@ -55,7 +55,7 @@ jobs:
         env:
           PACKAGE_VERSION: ${{ steps.identity.outputs.version }}
         run: |
-          & scripts/package-desktop.ps1 -Version $env:PACKAGE_VERSION -OutputDirectory .local/packages -ProvenanceFile .local/release/provenance.json
+          & scripts/packaging/package-desktop.ps1 -Version $env:PACKAGE_VERSION -OutputDirectory .local/packages -ProvenanceFile .local/release/provenance.json
       - name: Verify final ZIP, checksums, payload and provenance
         env:
           PACKAGE_VERSION: ${{ steps.identity.outputs.version }}

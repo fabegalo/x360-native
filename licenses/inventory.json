@@ -1455,7 +1455,7 @@
     },
     {
       "id": "desktop-icon",
-      "origin": "Original geometry in scripts/generate-desktop-icon.ps1; docs/ICON_PROVENANCE.md",
+      "origin": "Original geometry in scripts/packaging/generate-desktop-icon.ps1; docs/ICON_PROVENANCE.md",
       "revision": "original-2026-10-13",
       "spdx": "BSD-3-Clause",
       "scope": "source-and-embedded-resource",

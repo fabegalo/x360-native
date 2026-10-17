@@ -2,7 +2,7 @@ param([Parameter(Mandatory)][string]$PackageDirectory,
       [Parameter(Mandatory)][string]$SdkDirectory)
 $ErrorActionPreference='Stop'
 $root=(Resolve-Path (Join-Path $PSScriptRoot '../..')).Path
-$gate=Join-Path $root 'scripts/check-package-licenses.ps1'
+$gate=Join-Path $root 'scripts/packaging/check-package-licenses.ps1'
 $temp=Join-Path $root ('.local/audit/license-tests-'+[guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory $temp | Out-Null
 function Index($base,$name) {
