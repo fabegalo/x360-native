@@ -24,3 +24,8 @@ por padrão e usa `-Apply -Clean` para aplicar as regras explícitas do JSON.
 Adquire o lock exclusivo do ambiente, recusa caminhos externos e redirecionamentos
 não classificados, registra cada ação antes de executá-la e preserva dados de
 finalidade incerta. Consultar [reorganização](../docs/reorganization.md).
+
+Jornais novos ficam em `.local/evidence/maintenance/<timestamp>/`. A limpeza
+protege as entradas de todos os recibos de preparação e conserva executáveis,
+DLLs e metadados ativos. Objetos/PCH descartados serão recompilados quando
+necessários. Downloads futuros usam `.local/cache/downloads/`.
