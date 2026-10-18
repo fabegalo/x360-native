@@ -371,3 +371,22 @@ TEST_CASE("local AOT regenerates an existing imported title without copying cont
   CHECK(DigestFile(catalog)->sha256==before->sha256);
   CHECK(fs::is_regular_file(game->exe.parent_path()/".x360n-aot-owner"));
 }
+
+TEST_CASE("local catalog snapshot records actual preparation state", "[.local-catalog-snapshot]") {
+  const auto* root = std::getenv("X360N_LIBRARY_ROOT");
+  const auto* output = std::getenv("X360N_LIBRARY_SNAPSHOT");
+  REQUIRE(root); REQUIRE(output);
+  ProjectPaths paths{PathFromUtf8(root)};
+  nlohmann::json snapshot = nlohmann::json::array();
+  for (const auto& target : ReadCatalog(paths)) {
+    const auto state = Inspect(paths, target);
+    snapshot.push_back({{"id", target.id}, {"label", target.label}, {"kind", target.kind},
+        {"root", Utf8(target.game_root)}, {"manifest", Utf8(target.manifest)},
+        {"exe", Utf8(target.exe)}, {"catalogued", target.catalogued},
+        {"generic_aot", target.generic_aot}, {"title_id", target.title_id},
+        {"inputs_ok", state.inputs_ok}, {"prepared", state.prepared},
+        {"interrupted", state.interrupted}, {"issues", state.issues}});
+  }
+  Write(PathFromUtf8(output), snapshot.dump(2) + "\n");
+  CHECK(fs::is_regular_file(PathFromUtf8(output)));
+}

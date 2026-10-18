@@ -149,6 +149,23 @@ lives in that build's `generated/default/`, avoiding the long source path too.
 Previous build files remain preserved at their old locations; re-preparation
 produces the newly declared native path.
 
+### Existing local content (2026-10-18)
+
+Importing an extracted game already inside this environment's
+`.local/inputs/games/` verifies and registers its existing directory instead of
+copying the disc again. Links and paths outside that root cannot use this path.
+A root bound to another catalog inventory keeps the isolated import behavior;
+the existing record is never silently rebound. External imports still copy and
+verify content normally. The focused import tests passed 12 cases / 182 assertions.
+
+For a source checkout, `scripts/start-desktop.cmd` opens the current Debug
+desktop with this repository as its environment. Build it through
+`scripts/devshell.cmd cmake --build .local/build/win-amd64 --config Debug --target x360-native`.
+The desktop does not require launching every game after each change. Use focused
+checks for affected contracts and manual game sessions when requested. Readiness
+continues to require real preparation receipts; Xbox-original XBE content cannot
+use the Xbox 360 XEX/PowerPC pipeline.
+
 The build driver reads the generated preset's `binaryDir`, verifies ownership,
 retains codegen source/stamp files during native invalidation, and certifies
 dependencies from both legacy and compact codegen locations. Automatic launch
