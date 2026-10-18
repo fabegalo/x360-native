@@ -9,8 +9,20 @@ function Assert-AotBuildDirectory([string]$Root, [string]$Declared, [string]$Req
         throw 'Generated AOT output is bound to its declared build directory; regenerate the project to relocate it.'
     }
 }
+function Get-BuildIoPath([string]$File) {
+    $full = [IO.Path]::GetFullPath($File)
+    if ([IO.Path]::DirectorySeparatorChar -eq '\' -and -not $full.StartsWith('\\?\')) {
+        if ($full.StartsWith('\\')) { return '\\?\UNC\' + $full.Substring(2) }
+        return '\\?\' + $full
+    }
+    return $full
+}
+function Test-BuildFile([string]$File) { [IO.File]::Exists((Get-BuildIoPath $File)) }
 function Get-ReceiptHash([string]$File) {
-    (Get-FileHash -LiteralPath $File -Algorithm SHA256).Hash.ToLowerInvariant()
+    $stream = [IO.File]::OpenRead((Get-BuildIoPath $File))
+    $sha = [Security.Cryptography.SHA256]::Create()
+    try { ([BitConverter]::ToString($sha.ComputeHash($stream))).Replace('-', '').ToLowerInvariant() }
+    finally { $sha.Dispose(); $stream.Dispose() }
 }
 function Clear-NinjaNativeProducts([string]$Ninja, [string]$Build) {
     $rules = @(& $Ninja -C $Build -t rules | Where-Object { $_ -match '(_COMPILER__|_LINKER__)' })
@@ -40,9 +52,10 @@ function Reset-GeneratedBuildOutputs([string]$Build, [string[]]$Outputs) {
         $file = Resolve-BuildPath $Build $output
         # Retain title AOT sources/stamps and their per-module fingerprints,
         # including compact generic outputs now located inside the build tree.
-        if ($aot -and $file.StartsWith($aotBoundary, [StringComparison]::OrdinalIgnoreCase)) { continue }
-        if ($file.StartsWith($boundary, [StringComparison]::OrdinalIgnoreCase) -and [IO.File]::Exists($file)) {
-            [IO.File]::Delete($file)
+        if ($aot -and $file.StartsWith($aotBoundary, [StringComparison]::OrdinalIgnoreCase) -and
+            (Test-BuildFile (Join-Path (Split-Path $file) 'codegen.stamp'))) { continue }
+        if ($file.StartsWith($boundary, [StringComparison]::OrdinalIgnoreCase) -and (Test-BuildFile $file)) {
+            [IO.File]::Delete((Get-BuildIoPath $file))
         }
     }
 }
@@ -55,8 +68,12 @@ function Get-BuildCache([string]$Build) {
 }
 function Get-NinjaNodes([string]$Build, [string[]]$Targets) {
     $cache = Get-BuildCache $Build
-    $graph = & $cache.CMAKE_MAKE_PROGRAM -C $Build -t graph @Targets
-    if ($LASTEXITCODE) { throw 'Cannot read build dependency graph' }
+    if (Test-Path Function:\Invoke-IncrementalNinjaQuery) {
+        $graph = (Invoke-IncrementalNinjaQuery $Build (@('graph') + $Targets)) -split '\r?\n'
+    } else {
+        $graph = & $cache.CMAKE_MAKE_PROGRAM -C $Build -t graph @Targets
+        if ($LASTEXITCODE) { throw 'Cannot read build dependency graph' }
+    }
     foreach ($line in $graph) {
         if ($line -match '^"[^" ]+" \[label="((?:\\.|[^"\\])*)"\]$') {
             $name = $matches[1].Replace('\\', '\').Replace('\"', '"')
@@ -78,7 +95,7 @@ function Get-AdditionalCodegenManifests([string]$Project, [string]$Build) {
         if ($seen.Add($file)) { $file }
     }
 }
-function Get-BuildInputs([string]$Root, [string]$Title, [string]$Build, [string[]]$Targets) {
+function Get-BuildInputs([string]$Root, [string]$Title, [string]$Build, [string[]]$Targets, [switch]$AllowInvalidCodegen) {
     $projectDirectory = (Get-BuildCache $Build).CMAKE_HOME_DIRECTORY
     $cache = Get-BuildCache $Build
     $files = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
@@ -92,8 +109,12 @@ function Get-BuildInputs([string]$Root, [string]$Title, [string]$Build, [string[
         elseif ($node -match '\.lib$' -and -not $node.StartsWith($Build, [StringComparison]::OrdinalIgnoreCase) -and
                 -not $node.StartsWith((Join-Path $Root 'external/rexglue-sdk/out'), [StringComparison]::OrdinalIgnoreCase) -and [IO.File]::Exists($node)) { [void]$files.Add($node) }
     }
-    $deps = & $cache.CMAKE_MAKE_PROGRAM -C $Build -t deps
-    if ($LASTEXITCODE) { throw 'Cannot read compiler dependencies' }
+    if (Test-Path Function:\Invoke-IncrementalNinjaQuery) {
+        $deps = (Invoke-IncrementalNinjaQuery $Build @('deps')) -split '\r?\n'
+    } else {
+        $deps = & $cache.CMAKE_MAKE_PROGRAM -C $Build -t deps
+        if ($LASTEXITCODE) { throw 'Cannot read compiler dependencies' }
+    }
     $selected = $false
     foreach ($line in $deps) {
         if ($line -match '^(.+): #deps ') {
@@ -111,11 +132,12 @@ function Get-BuildInputs([string]$Root, [string]$Title, [string]$Build, [string[
         $full = (Resolve-BuildPath $Build $file)
         if ([IO.File]::Exists($full)) { [void]$files.Add($full) }
     }
-    foreach ($name in @('CMAKE_CXX_COMPILER','CMAKE_C_COMPILER','CMAKE_LINKER','CMAKE_AR','CMAKE_MAKE_PROGRAM','X360N_REAL_NINJA','CMAKE_COMMAND','CMAKE_RC_COMPILER')) {
+    foreach ($name in @('CMAKE_CXX_COMPILER','CMAKE_C_COMPILER','CMAKE_LINKER','CMAKE_AR','CMAKE_MAKE_PROGRAM','X360N_REAL_NINJA','CMAKE_COMMAND','CMAKE_RC_COMPILER','CMAKE_MT','CMAKE_RANLIB')) {
         if ($cache[$name] -and [IO.File]::Exists($cache[$name])) { [void]$files.Add([IO.Path]::GetFullPath($cache[$name])) }
     }
     foreach ($file in @('deps.lock.json','scripts/build-title.ps1','scripts/build/preparation-receipt.ps1','scripts/devshell.cmd',
-                       'scripts/build/build-lease.ps1','scripts/build/ninja-guard.ps1','cmake/build/x360n_stage_files.cmake')) {
+                       'scripts/build/build-lease.ps1','scripts/build/ninja-guard.ps1','scripts/build/incremental-state.ps1','scripts/build/toolchain-snapshot.ps1',
+                       'cmake/build/x360n_stage_files.cmake','cmake/runtime/x360n_runtime.manifest')) {
         [void]$files.Add([IO.Path]::GetFullPath((Join-Path $Root $file)))
     }
     if ($projectDirectory.StartsWith((Join-Path $Root '.local/aot').Replace('\','/'), [StringComparison]::OrdinalIgnoreCase)) {
@@ -133,6 +155,12 @@ function Get-BuildInputs([string]$Root, [string]$Title, [string]$Build, [string[
     if ([IO.File]::Exists($manifestList)) { [void]$files.Add($manifestList) }
     foreach ($file in Get-AdditionalCodegenManifests $projectDirectory $Build) { [void]$files.Add($file) }
     foreach ($file in @('CMakeCache.txt','build.ninja','CMakeFiles/rules.ninja')) { [void]$files.Add((Join-Path $Build $file)) }
+    $implicit = Join-Path $Build '.preparation/toolchain.json'
+    if ([IO.File]::Exists($implicit)) {
+        [void]$files.Add($implicit)
+        $snapshot = [IO.File]::ReadAllText($implicit) | ConvertFrom-Json
+        foreach ($file in @($snapshot.libraries + $snapshot.resources)) { if ($file) { [void]$files.Add($file) } }
+    }
     $lock = Get-Content -Raw (Join-Path $Root 'deps.lock.json') | ConvertFrom-Json
     foreach ($patch in $lock.rexglue_sdk.patches) {
         [void]$files.Add((Join-Path $Root $patch.file))
@@ -149,6 +177,22 @@ function Get-BuildInputs([string]$Root, [string]$Title, [string]$Build, [string[
         # Old generated modules may remain on disk after removal from a manifest.
         # Only a stamp reachable from this target contributes dependencies.
         if ((Join-Path $depfile.DirectoryName 'codegen.build.stamp') -notin $nodes) { continue }
+        # Upstream verifies existence, not the content of emitted outputs.
+        # Authenticate its inventory and every output, including ones that do
+        # not currently appear in a compiler dependency record.
+        [void]$files.Add($depfile.FullName)
+        $stampFile = Join-Path $depfile.DirectoryName 'codegen.stamp'
+        [void]$files.Add($stampFile)
+        try {
+            $stamp = [IO.File]::ReadAllText($stampFile) | ConvertFrom-Json
+            if ($stamp.version -ne 1 -or -not $stamp.outputs) { throw "Invalid codegen inventory: $stampFile" }
+            $boundary = $depfile.DirectoryName.TrimEnd('\','/') + [IO.Path]::DirectorySeparatorChar
+            foreach ($output in $stamp.outputs) {
+                $full = Resolve-BuildPath $depfile.DirectoryName $output
+                if (-not $full.StartsWith($boundary, [StringComparison]::OrdinalIgnoreCase)) { throw 'Codegen inventory escaped its module' }
+                [void]$files.Add($full)
+            }
+        } catch { if (-not $AllowInvalidCodegen) { throw } }
         # SDK writes one dependency per line with make escaping (including spaces).
         foreach ($line in ([IO.File]::ReadAllLines($depfile.FullName) | Select-Object -Skip 1)) {
             $file = $line.Trim() -replace ' \\$', ''
@@ -216,7 +260,7 @@ function Test-ReceiptGlobs($Globs) {
 }
 function Test-ReceiptEntries($Entries) {
     foreach ($entry in $Entries) {
-        if (-not [IO.File]::Exists($entry.path) -or (Get-ReceiptHash $entry.path) -ne $entry.sha256) { return $false }
+        if (-not (Test-BuildFile $entry.path) -or (Get-ReceiptHash $entry.path) -ne $entry.sha256) { return $false }
     }
     return $true
 }

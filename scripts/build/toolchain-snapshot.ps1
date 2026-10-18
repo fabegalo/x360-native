@@ -1,0 +1,96 @@
+param([Parameter(Mandatory)][string]$Build)
+$ErrorActionPreference = 'Stop'
+$env:PSModulePath = Join-Path $PSHOME 'Modules'
+. "$PSScriptRoot/preparation-receipt.ps1"
+. "$PSScriptRoot/incremental-state.ps1"
+# Run inside devshell: implicit INCLUDE/LIB search paths are not written into
+# Ninja's commands. A VS/Windows Kit update must not silently reuse old objects.
+$environmentNames = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+foreach ($name in @('PATH','INCLUDE','LIB','LIBPATH','VCToolsInstallDir','VCToolsVersion',
+    'WindowsSdkDir','WindowsSDKVersion','UCRTVersion','CL','_CL_','LINK','_LINK_',
+    'CPATH','C_INCLUDE_PATH','CPLUS_INCLUDE_PATH','LIBRARY_PATH','COMPILER_PATH',
+    'CCC_OVERRIDE_OPTIONS','SOURCE_DATE_EPOCH','CMAKE_PREFIX_PATH','CMAKE_TOOLCHAIN_FILE')) {
+    [void]$environmentNames.Add($name)
+}
+$includes = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+$resources = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+$hasResources = $false
+foreach ($directory in @(($env:INCLUDE + ';' + $env:CPATH + ';' + $env:C_INCLUDE_PATH + ';' + $env:CPLUS_INCLUDE_PATH) -split ';')) {
+    if ($directory -and [IO.Directory]::Exists($directory)) { [void]$includes.Add([IO.Path]::GetFullPath($directory)) }
+}
+$cacheFile = Join-Path $Build 'CMakeCache.txt'
+$graphTrusted = $false
+if ([IO.File]::Exists($cacheFile)) {
+    $cache = Get-BuildCache $Build
+    if ($cache.CMAKE_CXX_COMPILER) {
+        $clangRoot = Join-Path (Split-Path (Split-Path $cache.CMAKE_CXX_COMPILER)) 'lib/clang'
+        if ([IO.Directory]::Exists($clangRoot)) {
+            foreach ($version in [IO.Directory]::EnumerateDirectories($clangRoot)) {
+                $builtin = Join-Path $version 'include'
+                if ([IO.Directory]::Exists($builtin)) { [void]$includes.Add([IO.Path]::GetFullPath($builtin)) }
+            }
+        }
+    }
+    $commands = @()
+    try {
+        $commands = (Invoke-IncrementalNinjaQuery $Build @('compdb')) | ConvertFrom-Json
+        $graphTrusted = $true
+    } catch { Write-Host 'Toolchain inventory will be completed after configure.' }
+    if ($cache.CMAKE_HOME_DIRECTORY) {
+        $configs = @(Get-NinjaNodes $Build @('build.ninja')) + @((Join-Path $cache.CMAKE_HOME_DIRECTORY 'CMakePresets.json'))
+        foreach ($config in $configs) {
+            if ([IO.Path]::GetExtension($config) -notmatch '^\.(cmake|txt|json)$' -or -not (Test-BuildFile $config)) { continue }
+            $text = [IO.File]::ReadAllText((Get-BuildIoPath $config))
+            foreach ($match in [regex]::Matches($text, '(?i)\$(?:ENV|PENV)\{([a-z_][a-z0-9_]*)\}')) {
+                [void]$environmentNames.Add($match.Groups[1].Value)
+            }
+        }
+    }
+    foreach ($command in $commands) {
+        if ($command.output -match '\.res$') {
+            $hasResources = $true
+            $resourceRoot = Split-Path (Resolve-BuildPath $Build $command.file)
+            foreach ($file in [IO.Directory]::EnumerateFiles($resourceRoot, '*', [IO.SearchOption]::AllDirectories)) {
+                if ([IO.Path]::GetExtension($file) -match '^\.(h|rc|ico|cur|bmp|manifest)$') { [void]$resources.Add($file) }
+            }
+        }
+        foreach ($match in [regex]::Matches($command.command, '(?:^|\s)(?:-I|-isystem\s+|/I)\s*(?:"([^"]+)"|([^\s"]+))')) {
+            $directory = if ($match.Groups[1].Success) { $match.Groups[1].Value } else { $match.Groups[2].Value }
+            $directory = Resolve-BuildPath $Build $directory
+            if ([IO.Directory]::Exists($directory)) { [void]$includes.Add($directory) }
+        }
+    }
+}
+$inventory = [ordered]@{}
+foreach ($directory in @($includes | Sort-Object)) {
+    # Contents of consumed headers are hashed through compiler deps. Inventory
+    # changes also detect a newly added header shadowing a previous resolution.
+    $headers = [Collections.Generic.List[string]]::new()
+    foreach ($file in [IO.Directory]::EnumerateFiles($directory, '*', [IO.SearchOption]::AllDirectories)) {
+        if ([IO.Path]::GetExtension($file) -match '^\.(h|hh|hpp|hxx|inc|inl)$') { $headers.Add($file) }
+    }
+    $sorted = $headers.ToArray()
+    [Array]::Sort($sorted, [StringComparer]::CurrentCultureIgnoreCase)
+    $inventory[$directory] = $sorted
+    if ($hasResources) { foreach ($file in $inventory[$directory]) { [void]$resources.Add($file) } }
+}
+$libraries = @()
+foreach ($directory in @($env:LIB -split ';')) {
+    if ($directory -and [IO.Directory]::Exists($directory)) {
+        $libraries += @([IO.Directory]::EnumerateFiles($directory, '*.lib', [IO.SearchOption]::TopDirectoryOnly))
+    }
+}
+$variables = [ordered]@{}
+foreach ($name in @($environmentNames | Sort-Object)) {
+    $value = [Environment]::GetEnvironmentVariable($name)
+    # Configs may reference credentials as well as flags; persist identity only.
+    $variables[$name] = if ($null -eq $value) { $null } else { Get-TextDigest $value }
+}
+$snapshot = [ordered]@{schema=1; graph_trusted=$graphTrusted; environment=$variables; includes=$inventory;
+    libraries=@($libraries | Sort-Object -Unique); resources=@($resources | Sort-Object)}
+$file = Join-Path $Build '.preparation/toolchain.json'
+[void][IO.Directory]::CreateDirectory((Split-Path $file))
+$text = $snapshot | ConvertTo-Json -Depth 5
+if (-not [IO.File]::Exists($file) -or [IO.File]::ReadAllText($file) -ne $text) {
+    Publish-PreparationReceipt $file $snapshot
+}

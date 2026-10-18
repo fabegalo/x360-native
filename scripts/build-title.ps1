@@ -1,4 +1,4 @@
-# Builds a title project under titles/<name> from scratch, including codegen.
+# Builds a title project with content-verified incremental native products/codegen.
 #
 # With the v0.10.0 init template in REXSDK_DIR mode the rexglue tool is built in
 # the same tree, and generated/<module>/sources.cmake is only included if it
@@ -22,7 +22,8 @@ $env:PSModulePath = Join-Path $PSHOME 'Modules'
 $root = (Resolve-Path (Split-Path -Parent $PSScriptRoot)).Path
 . (Join-Path $PSScriptRoot 'build/preparation-receipt.ps1')
 . (Join-Path $PSScriptRoot 'build/build-lease.ps1')
-$driverSnapshot = @(Get-ReceiptEntries @($PSCommandPath, (Join-Path $PSScriptRoot 'build/preparation-receipt.ps1'), (Join-Path $PSScriptRoot 'build/build-lease.ps1')))
+. (Join-Path $PSScriptRoot 'build/incremental-state.ps1')
+$driverSnapshot = @(Get-ReceiptEntries @($PSCommandPath, (Join-Path $PSScriptRoot 'build/preparation-receipt.ps1'), (Join-Path $PSScriptRoot 'build/build-lease.ps1'), (Join-Path $PSScriptRoot 'build/incremental-state.ps1'), (Join-Path $PSScriptRoot 'build/toolchain-snapshot.ps1')))
 if ($Title -notmatch '^[a-z][a-z0-9_]*$') { throw "invalid title name '$Title'" }
 $titleDir = Join-Path $root "titles\$Title"
 if (-not (Test-Path (Join-Path $titleDir 'CMakePresets.json'))) {
@@ -54,6 +55,7 @@ $lease = Enter-BuildLease $root $build $Title
 $previousOwnedBuild = $env:X360N_OWNED_BUILD
 $env:X360N_OWNED_BUILD = $build
 $marker = Join-Path $root ".local/preparation/$Title.incomplete"
+$interrupted = [IO.File]::Exists($marker)
 New-Item -ItemType Directory -Force (Split-Path $marker) | Out-Null
 [IO.File]::WriteAllText($marker, 'incomplete')
 $devshell = Join-Path $root 'scripts\devshell.cmd'
@@ -61,12 +63,18 @@ $exe = Join-Path $build "$Title.exe"
 $manifest = Join-Path $titleDir "${Title}_manifest.toml"
 $receiptFile = "$exe.preparation.json"
 $previous = Get-PreviousReceipt $receiptFile $Title $manifest $exe
-$reuse = $previous -and (Test-ReceiptEntries @($previous.inputs + $previous.artifacts)) -and (Test-ReceiptGlobs $previous.globs)
-if ($reuse) {
-    $head = & git -C (Join-Path $root 'external/rexglue-sdk') rev-parse HEAD
-    $reuse = $LASTEXITCODE -eq 0 -and $head.Trim() -eq $previous.sdk_commit
-}
 $sourceSnapshot = @()
+$finalSourceSnapshot = @()
+$stateFile = Join-Path $build '.preparation/incremental.json'
+$incrementalState = $null
+$processed = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+$runId = [Guid]::NewGuid().ToString('N')
+function Update-ToolchainSnapshot([string]$Phase) {
+    $log = Join-Path $build "x360n-build-$Phase.$runId.log"
+    $script = Join-Path $PSScriptRoot 'build/toolchain-snapshot.ps1'
+    cmd /c "`"$devshell`" powershell.exe -NoProfile -ExecutionPolicy Bypass -File `"$script`" -Build `"$build`" > `"$log`" 2>&1"
+    if ($LASTEXITCODE) { throw "Cannot identify build toolchain; see $log" }
+}
 
 $steps = @(
     @{ name = '1-configure';  args = "cmake --preset x360n-win-amd64 -B `"$build`" -DX360N_CODEGEN_BOOTSTRAP=ON" },
@@ -77,6 +85,13 @@ $steps = @(
 )
 Push-Location $titleDir
 try {
+    Update-ToolchainSnapshot '0-toolchain'
+    $reuse = -not $interrupted -and $previous -and (Test-ReceiptEntries @($previous.inputs + $previous.artifacts)) -and (Test-ReceiptGlobs $previous.globs)
+    $incrementalState = Read-IncrementalState $stateFile $previous $build $Title $interrupted
+    if ($reuse -or $incrementalState) {
+        $head = & git -C (Join-Path $root 'external/rexglue-sdk') rev-parse HEAD
+        if ($LASTEXITCODE -or $head.Trim() -ne $previous.sdk_commit) { $reuse = $false; $incrementalState = $null }
+    }
     if ($reuse) {
         # A verified final build needs no relink from unverified intermediates or
         # mutable shared SDK outputs. Keep the exact certified producer/products.
@@ -88,10 +103,15 @@ try {
     foreach ($s in $steps) {
         if ($s.name -eq '2-tool') {
             $cache = Get-BuildCache $build
-            if (-not $reuse) {
-                # Native objects cannot be trusted after an uncertified build or
-                # a content change with preserved mtime. Keep SDK codegen stamps:
-                # its per-module input hashes still select the necessary modules.
+            if ($incrementalState) {
+                try { Update-IncrementalProducts $build $incrementalState $processed -CheckProducts }
+                catch {
+                    Write-Host "incremental cache rejected: $($_.Exception.Message)"
+                    $incrementalState = $null
+                }
+            }
+            if (-not $incrementalState) {
+                Write-Host 'safe rebuild: no authenticated incremental state'
                 Clear-NinjaNativeProducts $cache.CMAKE_MAKE_PROGRAM $build
                 # Embedded templates and other custom outputs also require a
                 # content-safe rebuild when input mtimes were preserved.
@@ -99,7 +119,7 @@ try {
                 if ($LASTEXITCODE) { throw 'Cannot identify generated build products' }
                 Reset-GeneratedBuildOutputs $build $generated
             }
-            $sourceSnapshot = @(Get-ReceiptEntries @(Get-BuildInputs $root $Title $build @($Title) | Where-Object {
+            $sourceSnapshot = @(Get-ReceiptEntries @(Get-BuildInputs $root $Title $build @($Title) -AllowInvalidCodegen | Where-Object {
                 [IO.File]::Exists($_) -and
                 -not $_.StartsWith($build, [StringComparison]::OrdinalIgnoreCase) -and
                 (-not $_.StartsWith((Join-Path $titleDir 'generated'), [StringComparison]::OrdinalIgnoreCase) -or
@@ -123,7 +143,7 @@ try {
             }
             $tool = Join-Path $producerDir ([IO.Path]::GetFileName($tool))
             $producer = @(Get-ReceiptEntries $copies)
-            $sameProducer = $previous -and $previous.producer -and (Test-ReceiptEntries $previous.producer)
+            $sameProducer = $incrementalState -and $previous -and $previous.producer -and (Test-ReceiptEntries $previous.producer)
             # Codegen's sdkVersion alone is not a producer identity. Force only
             # this title when the actual producer changes or has no provenance.
             $ignore = if ($sameProducer) { '' } else { '--ignore-stamp' }
@@ -141,6 +161,14 @@ try {
             # the XEX and analysis and skips unchanged modules by content.
             $s.args = "`"$tool`" codegen `"$manifest`" $ignore"
         }
+        if ($s.name -eq '4-build') {
+            # Codegen preserves unchanged C++; compare again after it writes new
+            # content, even if timestamps happen to compare equal or go backwards.
+            if ($incrementalState) { Update-IncrementalProducts $build $incrementalState $processed }
+            $finalSourceSnapshot = @(Get-ReceiptEntries @(Get-BuildInputs $root $Title $build @($Title) | Where-Object {
+                (Test-BuildFile $_) -and $_ -ne (Join-Path $build '.preparation/toolchain.json')
+            }))
+        }
         $invocations = @($s)
         if ($s.name -eq '2-codegen') {
             $invocations += @(Get-AdditionalCodegenManifests $titleDir $build | ForEach-Object {
@@ -150,7 +178,9 @@ try {
         }
         foreach ($invocation in $invocations) {
             Write-Output "X360N_STAGE $Title $($invocation.name)"
-            $log = Join-Path $build "x360n-build-$($invocation.name).log"
+            # An interrupted process may retain its log handle. Never truncate
+            # an older run's evidence or make recovery depend on that handle.
+            $log = Join-Path $build "x360n-build-$($invocation.name).$runId.log"
             [IO.File]::WriteAllText($marker, "Preparing: $($invocation.name)`nLog: $log")
             $sw = [Diagnostics.Stopwatch]::StartNew()
             # Redirect inside cmd: in PowerShell 5.1 with ErrorActionPreference=Stop,
@@ -192,7 +222,8 @@ try {
         }
     }
     if (-not (Test-ReceiptEntries $driverSnapshot) -or -not (Test-ReceiptEntries $ownerSnapshot) -or
-        -not (Test-ReceiptEntries $sourceSnapshot)) { throw 'An input changed during preparation; prepare again. No receipt published.' }
+        -not (Test-ReceiptEntries $sourceSnapshot) -or -not (Test-ReceiptEntries $finalSourceSnapshot)) { throw 'An input changed during preparation; prepare again. No receipt published.' }
+    Update-ToolchainSnapshot '5-toolchain'
     $inputs = @(Get-ReceiptEntries @(Get-BuildInputs $root $Title $build @($Title)))
     $dllOutputs = @(Select-NativeDllOutputs $root @(Get-NinjaNodes $build @($Title)) | Sort-Object -Unique)
     $artifacts = @(Get-PreparedArtifacts $build $exe $dllOutputs | Sort-Object path -Unique)
@@ -203,8 +234,16 @@ try {
     if (-not (Test-ReceiptEntries $sourceSnapshot) -or -not (Test-ReceiptEntries $producer)) {
         throw 'Inputs or codegen changed while collecting the receipt; prepare again. No receipt published.'
     }
+    $state = @{ schema=1; title=$Title; build=$build;
+        products=@(Get-IncrementalProducts $build | Where-Object sha256 -ne '<missing>');
+        database=@(Get-IncrementalDatabase $build); policy=@(Get-IncrementalPolicy $root $build) }
+    Publish-PreparationReceipt $stateFile $state
+    $stateEntry = @(Get-ReceiptEntries @($stateFile))[0]
+    if (-not (Test-ReceiptEntries $driverSnapshot) -or -not (Test-ReceiptEntries $finalSourceSnapshot) -or
+        -not (Test-ReceiptEntries $producer)) { throw 'Inputs changed while collecting incremental state; no receipt published.' }
     $receipt = @{ schema = 1; title = $Title; manifest = $manifest; exe = $exe; sdk_commit = $sdkCommit; globs = $globs;
-        inputs = @($inputs + $producer + $ownerSnapshot | Sort-Object path -Unique); artifacts = $artifacts; producer = $producer;
+        inputs = @($inputs + $producer + $ownerSnapshot + $stateEntry | Sort-Object path -Unique); artifacts = $artifacts; producer = $producer;
+        incremental = $stateEntry;
         roles = @{ compiler = (Get-BuildCache $build).CMAKE_CXX_COMPILER; codegen = $tool;
             build_config = (Join-Path $build 'CMakeCache.txt') } }
     Publish-PreparationReceipt $receiptFile $receipt

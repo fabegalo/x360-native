@@ -1,7 +1,8 @@
-param([string]$Root = (Resolve-Path "$PSScriptRoot/../..").Path)
+param([string]$Root = (Resolve-Path "$PSScriptRoot/../..").Path, [string]$ReceiptScript)
 $ErrorActionPreference = 'Stop'
 $env:PSModulePath = Join-Path $PSHOME 'Modules'
-. "$Root/scripts/build/preparation-receipt.ps1"
+if (-not $ReceiptScript) { $ReceiptScript = "$Root/scripts/build/preparation-receipt.ps1" }
+. $ReceiptScript
 $scratch = Join-Path ([IO.Path]::GetTempPath()) ("x360n-receipt-" + [Guid]::NewGuid().ToString('N'))
 [void][IO.Directory]::CreateDirectory($scratch)
 function Assert($Condition, [string]$Message) { if (-not $Condition) { throw $Message } }
@@ -68,9 +69,12 @@ try {
     $aotStamp = Join-Path $aotRoot 'codegen.stamp'; [IO.File]::WriteAllText($aotStamp, 'per-module fingerprint')
     [IO.File]::WriteAllText((Join-Path $build '.x360n-aot-owner'), 'full catalog identity')
     [IO.File]::WriteAllText($generated, 'stale embedded template')
-    Reset-GeneratedBuildOutputs $build @($aotSource,$aotStamp,$generated)
+    $rootHeader = Join-Path $build 'generated/shared.inja.h'
+    [IO.File]::WriteAllText($rootHeader, 'stale non-codegen header')
+    Reset-GeneratedBuildOutputs $build @($aotSource,$aotStamp,$generated,$rootHeader)
     Assert ([IO.File]::Exists($aotSource) -and [IO.File]::Exists($aotStamp)) 'compact AOT source/stamp lost during SDK invalidation'
     Assert (-not [IO.File]::Exists($generated)) 'compact AOT incorrectly preserved an unrelated generated template'
+    Assert (-not [IO.File]::Exists($rootHeader)) 'AOT ownership incorrectly preserved a non-codegen header at generated root'
     $exe = Join-Path $build 'sample.exe'; [IO.File]::WriteAllText($exe, 'native output')
     $dll = Join-Path $scratch 'runtime.dll'; [IO.File]::WriteAllText($dll, 'built runtime')
     $guest = Join-Path $scratch '.local/inputs/game/HostLoader.dll'

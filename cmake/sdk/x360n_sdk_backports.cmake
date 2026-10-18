@@ -42,6 +42,8 @@ function(x360n_apply_sdk_backports sdk_dir)
         # title processes. Do not change the machine's ANSI code page.
         target_link_options(rexglue PRIVATE
             "LINKER:/MANIFESTINPUT:${CMAKE_CURRENT_FUNCTION_LIST_DIR}/../runtime/x360n_runtime.manifest")
+        set_property(TARGET rexglue APPEND PROPERTY LINK_DEPENDS
+            "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/../runtime/x360n_runtime.manifest")
     endif()
     x360n_sdk_commit(_commit "${sdk_dir}")
     if(_commit STREQUAL "f5337cdc947ff6d4c4196737e2c807a48f2a1fc2")  # v0.10.0
@@ -102,6 +104,8 @@ function(x360n_stage_runtime_dlls target)
     if(_kind STREQUAL "EXECUTABLE")
         target_link_options(${target} PRIVATE
             "LINKER:/MANIFESTINPUT:${CMAKE_CURRENT_FUNCTION_LIST_DIR}/../runtime/x360n_runtime.manifest")
+        set_property(TARGET ${target} APPEND PROPERTY LINK_DEPENDS
+            "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/../runtime/x360n_runtime.manifest")
     endif()
     cmake_parse_arguments(ARG "" "" "PLUGIN_TARGETS" ${ARGN})
     option(X360N_NATIVE_RENDERER "Build and stage the experimental Native graphics plugin for development" OFF)
