@@ -1213,7 +1213,7 @@
 },
 {
   "file": "patches/rexglue-sdk/0090-byte-computed-ctr-dispatch.patch",
-  "sha256": "7c49d7121472afdc98c6d0b785a36f786792ce587aaf32f69c4607106fff8a95",
+  "sha256": "21407e7563f993eff516a8e0f8d09ff598e55741c2d64c4b3a70594a933b0aab",
   "base_files": {
     "include/rex/codegen/function_types.h": "2741b526692ebcb5f2600a99bdd1f21d0238cfa5bf86ae2160d42849fae6f725",
     "src/codegen/function_scanner.cpp": "c20a0f7769e30154a670c6c67826a5a75009b61a1fd14881f3fe1ebc80027115",
@@ -1222,7 +1222,7 @@
   },
   "files": {
     "include/rex/codegen/function_types.h": "98691be9bb440a786a7788158f3b08a781f2723faffd236029c4e70c5c6015d8",
-    "src/codegen/function_scanner.cpp": "4b754866a640782afc61e8fc2d6843e5e50527453e184577c63b9e771c3ff233",
+    "src/codegen/function_scanner.cpp": "4b08edbb9dd32d0093ea6cc80f74b6a116597a8ea07d7af7cec22ccd141b7907",
     "src/codegen/function_graph.cpp": "8b6df66b04ebdf665cb311a51c0abd19290eaa545e44f74863f29a2090ba8546",
     "src/codegen/builders/control_flow.cpp": "b71bf91c2c7feafc5dc5efb5f1e8d1307d788d850ac08a67e657b5d52c0ee829"
   },

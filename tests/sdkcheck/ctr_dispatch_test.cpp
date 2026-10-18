@@ -9,6 +9,8 @@ using namespace x360n::test;
 
 TEST_CASE("Byte computed dispatch preserves CTR without guessing table length",
           "[sdk][codegen][ctr-dispatch]") {
+  for (const unsigned pdataWords : {11u, 15u}) {
+  CAPTURE(pdataWords);
   std::vector<Placed> placed;
   auto bytes = BuildXex({}, &placed, 0, Entry::kReturnZero);
   auto put = [&](uint32_t address, uint32_t word) {
@@ -23,7 +25,8 @@ TEST_CASE("Byte computed dispatch preserves CTR without guessing table length",
       0x3860000B, 0x4E800020, 0x38600016, 0x4E800020,
       0x38600021, 0x3860002C, 0x4E800020};
   for (unsigned i = 0; i < std::size(code); ++i) put(kXexText + i * 4, code[i]);
-  put(kXexPdata + 4, (1u << 30) | (15u << 8));
+  // MSVC may put case bodies beyond the metadata extent, before the next entry.
+  put(kXexPdata + 4, (1u << 30) | (pdataWords << 8));
   for (size_t i = 0; i < 512; ++i) bytes.at(0x2200 + i) = 5;
   bytes.at(0x2200) = 0;
   bytes.at(0x2201) = 2;
@@ -56,6 +59,7 @@ TEST_CASE("Byte computed dispatch preserves CTR without guessing table length",
   for (auto it = std::sregex_iterator(source.begin(), source.end(), jump);
        it != std::sregex_iterator(); ++it) CHECK(defined.contains((*it)[1]));
   REQUIRE(pipeline->RunWrite().has_value());
+  }
 }
 
 TEST_CASE("Byte dispatch follows register definitions and exact PPC masks",

@@ -786,12 +786,13 @@ The PPC analysis recognizes a contiguous def-use chain from `lbzx`, optional
 `rlwinm`, constant-base addition and `mtctr` to `bctr` (nops are allowed).
 Its finite destination domain comes from all 256 byte values and the exact
 rotate/mask, with 32-bit wrapping and the architectural low-bit clearing of
-`bctr`. It does not read or guess a table's length. Only destinations within
-the current function's extent, before another known entry, seed local CFG
+`bctr`. It does not read or guess a table's length. Only destinations in the
+current code region, before another known entry, seed local CFG
 discovery. Emission switches on the original computed CTR; other destinations
 tail-dispatch through the existing checked resolver. The guest load/arithmetic
 remain intact. Analyzed tables take precedence over late emission heuristics;
-manual switch configuration retains priority. Other patterns retain the previous
+manual switch configuration retains priority. Out-of-line cases may extend past
+PDATA into an unowned gap, preserving the existing discovery contract. Other patterns retain the previous
 analysis. No runtime scanner, original-byte patch or title-specific rule.
 
 Regression: `tests/sdkcheck/ctr_dispatch_test.cpp`, including adjacent-function

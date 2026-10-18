@@ -13,7 +13,7 @@ index 8c6772d..1169dcb 100644
  
  //=============================================================================
 diff --git a/src/codegen/function_scanner.cpp b/src/codegen/function_scanner.cpp
-index d7ba519..c46d75b 100644
+index d7ba519..e0e9cdf 100644
 --- a/src/codegen/function_scanner.cpp
 +++ b/src/codegen/function_scanner.cpp
 @@ -1362,6 +1362,83 @@ BoundsInfo scanForBounds(DecodedBinary& decoded, uint32_t bctrAddr, const CodeRe
@@ -100,14 +100,16 @@ index d7ba519..c46d75b 100644
  std::optional<JumpTable> detectJumpTable(DecodedBinary& decoded, uint32_t bctrAddr,
                                           const CodeRegion& containingRegion, uint32_t funcStart,
                                           uint32_t funcEnd) {
-@@ -1935,7 +2012,16 @@ BlockDiscoveryResult discoverBlocks(
+@@ -1935,7 +2012,18 @@ BlockDiscoveryResult discoverBlocks(
              }
            }
            if (!jt) {
 -            jt = detectJumpTable(decoded, addr, containingRegion, entryPoint, funcEnd);
-+            jt = detectByteDispatch(decoded, addr, entryPoint, funcEnd);
++            // PDATA can omit out-of-line cases. The next known entry is the
++            // ownership barrier; a finite domain may extend into the gap before it.
++            jt = detectByteDispatch(decoded, addr, entryPoint, containingRegion.end);
 +            if (jt) {
-+              uint32_t localEnd = funcEnd;
++              uint32_t localEnd = containingRegion.end;
 +              for (uint32_t other : knownFunctions) {
 +                if (other > entryPoint && other < localEnd) localEnd = other;
 +              }
