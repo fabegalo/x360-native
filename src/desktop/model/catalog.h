@@ -63,6 +63,10 @@ std::vector<std::string> DetectImportTargets(const std::vector<Target>& targets,
                                             const std::filesystem::path& source,
                                             const std::function<bool()>& cancelled = {});
 Inspection Inspect(const ProjectPaths& paths, const Target& target, InspectionMode mode = InspectionMode::Full);
+// Complete launch preflight. Caller keeps its DigestBatch alive through the
+// supervisor's remaining checks; metadata alone never authorizes execution.
+Target VerifyCatalogLaunch(const ProjectPaths& paths, const std::vector<Target>& catalog,
+    const std::string& id, const std::filesystem::path& manifest);
 // Installs verified dependencies into the selected dashboard's SDK content store.
 // The original dashboard still enumerates and launches them through XAM.
 std::vector<std::string> InspectLibrary(const ProjectPaths& paths, const Target& session, const std::vector<Target>& catalog);

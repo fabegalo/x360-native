@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <functional>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -33,6 +34,7 @@ struct ProcessSpec {
   std::function<void()> on_tick;  // worker-only, bounded progress/log sampling
   uintptr_t notification_event = 0;  // borrowed auto-reset lifecycle event
   std::function<void()> on_notification;
+  bool collect_metrics = false;  // Opt-in Job Object accounting, including descendants.
 };
 
 struct CrashInfo {
@@ -52,6 +54,10 @@ struct ProcessResult {
   uint32_t exit_code = 0;  // raw; NTSTATUS values on crashes
   std::chrono::milliseconds duration{0};
   CrashInfo crash;  // only with ProcessSpec::capture_crash
+  struct Metrics {
+    uint64_t cpu_us = 0, read_bytes = 0, read_operations = 0, write_bytes = 0, peak_job_commit_bytes = 0;
+  };
+  std::optional<Metrics> metrics;
 };
 
 ProcessResult RunProcess(const ProcessSpec& spec);

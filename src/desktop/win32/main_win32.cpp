@@ -891,16 +891,15 @@ void Start(App& a, int action, fs::path source = {}) {
       if (action == kPrepare && !target.aot) throw std::runtime_error("Import a valid XEX game before preparation.");
       if (action == kPrepare && !target.preparation_source.empty())
         Import(ProjectPaths{a.root}, target, target.preparation_source, [&] { return a.cancel.load(); });
-      if (action == kLaunch || action == kPrepare || action == kVerifyTarget) {
+      if (action == kPrepare || action == kVerifyTarget) {
         DigestBatch batch([&a] { return a.cancel.load(); });
         ActionTrace trace("launch.preflight");
         const auto state = verify_target();
         if (action == kVerifyTarget) {
           finish(Tr("Verificação concluída. Consulte o estado e o Diagnóstico do título.", "Verification finished. See the title's status and Diagnostics.")); return;
         }
-        if (!state.inputs_ok || (action == kLaunch && !state.prepared))
+        if (!state.inputs_ok)
           throw std::runtime_error(Tr("O conteúdo mudou desde a verificação. Confira os detalhes e prepare novamente.", "Content changed since verification. Check details and prepare again."));
-        if (action == kLaunch) a.launch_verified = true;
         // A valid installed library was just checked. Registration/copying is a
         // preparation task; repeating it on every launch rehashes the same set.
       }
@@ -965,13 +964,31 @@ void Start(App& a, int action, fs::path source = {}) {
           Post(a.window, kProgress, Tr("Preparação: ", "Preparation: ") + last);
         };
         auto result = RunProcess(spec);
+        std::string launch_detail;
+        if (action == kLaunch) {
+          // The supervisor performs the complete preflight. Consume its bounded
+          // status record only after exit; never rehash the launch closure here.
+          std::ifstream verified(spec.stdout_file, std::ios::binary);
+          std::string prefix(65536, '\0');
+          verified.read(prefix.data(), std::streamsize(prefix.size()));
+          prefix.resize(size_t(verified.gcount()));
+          a.launch_verified = prefix.find("X360N_LAUNCH_VERIFIED\n") != std::string::npos ||
+                              prefix.find("X360N_LAUNCH_VERIFIED\r\n") != std::string::npos;
+          if (result.exit_code != 0 || !result.launched) {
+            std::ifstream error(spec.stderr_file, std::ios::binary);
+            launch_detail.resize(4096); error.read(launch_detail.data(), std::streamsize(launch_detail.size()));
+            launch_detail.resize(size_t(error.gcount()));
+          }
+        }
         if (result.cancelled) throw std::runtime_error("Preparação cancelada. Os originais e dados de usuário foram preservados; tente preparar novamente para retomar as etapas válidas.");
         if (!result.launched || result.exit_code != 0)
-          throw std::runtime_error("A etapa " + label + " não concluiu. " + result.launch_error + " " + DescribeExitCode(result.exit_code) + "\r\nDiagnóstico local: " + Utf8(a.logs));
+          throw std::runtime_error("A etapa " + label + " não concluiu. " + result.launch_error + " " + DescribeExitCode(result.exit_code) +
+              (launch_detail.empty() ? "" : "\r\n" + launch_detail) + "\r\nDiagnóstico local: " + Utf8(a.logs));
       };
       if (action == kLaunch) {
         SessionNotification notification({}, true);
-        run(Supervisor(a), {"--root", Utf8(a.root), "session", Utf8(target.manifest), "--timeout", "0", "--closed-event", notification.name()}, "session", notification.handle());
+        Post(a.window, kProgress, Tr("Conferindo ", "Verifying ") + (english ? target.label_en : target.label));
+        run(Supervisor(a), {"--root", Utf8(a.root), "session", Utf8(target.manifest), "--catalog-target", target.id, "--timeout", "0", "--closed-event", notification.name()}, "session", notification.handle());
         finish("Sessão encerrada. Consulte os logs para os resultados da execução.");
       } else {
         wchar_t sys[MAX_PATH]{}; GetSystemDirectoryW(sys, MAX_PATH);
@@ -1847,6 +1864,8 @@ LRESULT CALLBACK WndProc(HWND window, UINT message, WPARAM wp, LPARAM lp) {
           const auto it = std::find_if(a->targets.begin(), a->targets.end(), [&](const auto& t) { return t.id == a->operation_target; });
           if (it != a->targets.end()) {
             auto& state = a->checked.at(size_t(it - a->targets.begin())).state;
+            state.verification_pending = false;
+            state.inputs_ok = false;
             state.prepared = false; state.issues.push_back(*text);
           }
         }

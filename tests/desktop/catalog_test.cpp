@@ -1,6 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include "../../src/desktop/model/catalog.h"
 #include "sha256.h"
+#include "digest_batch.h"
 #include "session_profile.h"
 #include "workspace_lease.h"
 #include "../supervisor/preparation_fixture.h"
@@ -54,6 +55,33 @@ TEST_CASE("asset inventory rejects missing data and same-name files in the wrong
   CHECK(Import(f.paths, f.target, f.source) == 3);
   Write(f.target.inputs.back().destination, "broken");
   CHECK_FALSE(Inspect(f.paths, f.target).inputs_ok);
+}
+TEST_CASE("supervisor launch preflight binds the complete catalog validation to its protected batch", "[launch-preflight]") {
+  Fixture f;
+  Write(f.target.inputs[0].destination, "dashboard");
+  Write(f.target.inputs[1].destination, "module");
+  Write(f.target.exe, "synthetic executable, never executed"); f.Receipt();
+  {
+    DigestBatch batch;
+    CHECK(VerifyCatalogLaunch(f.paths, {f.target}, f.target.id, f.target.manifest).id == f.target.id);
+    const auto streamed = batch.files;
+    CHECK_FALSE(CheckPreparation(f.paths, f.target.id, f.target.manifest, f.target.exe));
+    CHECK(batch.files == streamed);
+    CHECK(batch.hits > 0);
+    CHECK_THROWS(VerifyCatalogLaunch(f.paths, {f.target}, "unknown", f.target.manifest));
+    CHECK_THROWS(VerifyCatalogLaunch(f.paths, {f.target}, f.target.id, f.root / "other.toml"));
+  }
+  SECTION("same timestamp changed input") {
+    const auto input = f.target.inputs.front().destination;
+    const auto time = fs::last_write_time(input); Write(input, "corrupted"); fs::last_write_time(input, time);
+  }
+  SECTION("missing dependency") { f.target.dependencies = {"missing"}; }
+  SECTION("incomplete build") { Write(PreparationMarker(f.paths, f.target), "interrupted"); }
+  SECTION("changed executable") { Write(f.target.exe, "corrupted"); }
+  SECTION("unverified DLL") { Write(f.target.exe.parent_path() / "extra.dll", "corrupted"); }
+  SECTION("runtime failure") { Write(f.paths.local() / "preparation" / (f.target.id + ".runtime-error"), "failed"); }
+  DigestBatch next_launch;
+  CHECK_THROWS(VerifyCatalogLaunch(f.paths, {f.target}, f.target.id, f.target.manifest));
 }
 TEST_CASE("optional dashboard components may be absent but never differ") {
   Fixture f;
@@ -704,7 +732,13 @@ void CheckLocalLibrary(bool require_prepared_dashboard) {
     LaunchRequest request; request.kind = LaunchRequest::Image;
     request.path = PathUtf8(installed);
     CHECK(MatchesLaunch(game, request, dashboard.user_root));
-    CHECK_FALSE(MatchesLaunch(game, request, dashboard.user_root / "other-dashboard"));
+    // Historical verified junction installs are also the original XEX itself;
+    // that direct source route remains valid independently of a library root.
+    if (!fs::equivalent(game.xex, installed))
+      CHECK_FALSE(MatchesLaunch(game, request, dashboard.user_root / "other-dashboard"));
+    auto wrong_dashboard = request;
+    wrong_dashboard.path = PathUtf8(dashboard.user_root / "other-dashboard" / game.library_relative_xex);
+    CHECK_FALSE(MatchesLaunch(game, wrong_dashboard, dashboard.user_root));
     request.flags = 1;
     CHECK_FALSE(MatchesLaunch(game, request, dashboard.user_root));
     request.flags = 0; request.kind = LaunchRequest::WindowClose;

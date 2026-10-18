@@ -13,7 +13,7 @@
 namespace x360n {
 namespace fs = std::filesystem;
 namespace {
-fs::path Normal(const fs::path& p) { return fs::weakly_canonical(p); }
+fs::path Normal(const fs::path& p) { return VerificationPath(p); }
 std::string Key(const fs::path& p) {
   auto s = PathUtf8(Normal(p));
 #ifdef _WIN32

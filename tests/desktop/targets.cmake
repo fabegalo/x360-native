@@ -1,10 +1,24 @@
 # Included in the src/desktop directory scope to preserve binary locations.
 if(TARGET Catch2::Catch2WithMain)
+  add_executable(x360n_preparation_benchmark EXCLUDE_FROM_ALL ../../tests/desktop/preparation_benchmark.cpp)
+  target_link_libraries(x360n_preparation_benchmark PRIVATE x360n_core)
+  add_executable(x360n_launch_benchmark EXCLUDE_FROM_ALL ../../tests/desktop/launch_benchmark.cpp)
+  target_link_libraries(x360n_launch_benchmark PRIVATE x360n_desktop_model)
+  if(X360N_BASELINE_CORE_DIR)
+    # Reproduce the old verifier with the same benchmark/flags. Explicit source
+    # objects satisfy these symbols before the current static archive is read.
+    add_executable(x360n_launch_baseline EXCLUDE_FROM_ALL ../../tests/desktop/launch_benchmark.cpp
+      "${X360N_BASELINE_CORE_DIR}/digest_batch-before.cpp"
+      "${X360N_BASELINE_CORE_DIR}/preparation-before.cpp")
+    target_link_libraries(x360n_launch_baseline PRIVATE x360n_desktop_model tomlplusplus)
+    target_include_directories(x360n_launch_baseline PRIVATE ${X360_REXGLUE_DIR}/thirdparty/inja/third_party/include)
+  endif()
   add_executable(x360n_launcher_benchmark EXCLUDE_FROM_ALL ../../tests/desktop/launcher_benchmark.cpp)
   target_link_libraries(x360n_launcher_benchmark PRIVATE x360n_desktop_model)
   target_compile_definitions(x360n_launcher_benchmark PRIVATE X360N_BENCHMARK_BATCH=1)
   if(WIN32)
     add_executable(x360n_launcher_child ../../tests/desktop/launcher_child.cpp)
+    target_link_libraries(x360n_launcher_child PRIVATE x360n_desktop_model)
     add_executable(x360n_launcher_test_child ../../tests/supervisor/test_child.cpp)
     add_executable(x360n_launcher_session_child ../../tests/supervisor/session_child.cpp)
     target_link_libraries(x360n_launcher_session_child PRIVATE x360n_core)

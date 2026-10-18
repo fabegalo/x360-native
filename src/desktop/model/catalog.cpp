@@ -254,6 +254,32 @@ Inspection Inspect(const ProjectPaths& paths, const Target& t, InspectionMode mo
   }
   return r;
 }
+Target VerifyCatalogLaunch(const ProjectPaths& paths, const std::vector<Target>& catalog,
+    const std::string& id, const fs::path& manifest) {
+  ActionTrace trace("launch.catalog-preflight");
+  const auto find = [&](const std::string& name) -> const Target& {
+    const auto it = std::find_if(catalog.begin(), catalog.end(), [&](const auto& t) { return t.id == name; });
+    if (it == catalog.end()) throw std::runtime_error("Dependência de lançamento ausente: " + name);
+    return *it;
+  };
+  const auto& selected = find(id);
+  if (!selected.aot || fs::weakly_canonical(selected.manifest) != fs::weakly_canonical(manifest))
+    throw std::runtime_error("O manifesto de lançamento não corresponde ao título selecionado.");
+  const auto check = [&](const Target& t) {
+    CheckVerificationCancellation();
+    const auto state = Inspect(paths, t);
+    if (!state.inputs_ok || !state.prepared) {
+      std::string reason = "Conteúdo ou preparação inválida: " + t.id;
+      for (const auto& issue : state.issues) reason += "\n" + issue;
+      throw std::runtime_error(reason);
+    }
+    const auto issues = InspectLibrary(paths, t, catalog);
+    if (!issues.empty()) throw std::runtime_error(issues.front());
+  };
+  check(selected);
+  for (const auto& dep : selected.dependencies) check(find(dep));
+  return selected;
+}
 size_t Import(const ProjectPaths& paths, const Target& t, const fs::path& source,
               const std::function<bool()>& cancelled, bool allow_partial) {
   Inside(t.game_root, paths.inputs());

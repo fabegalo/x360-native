@@ -47,9 +47,19 @@ TEST_CASE("captures stdout, stderr and the exit code", "[process]") {
   CHECK(r.exit_code == 7);
   CHECK(Slurp(s.dir / "out.log").find("child stdout") != std::string::npos);
   CHECK(Slurp(s.dir / "err.log").find("child stderr") != std::string::npos);
+  CHECK_FALSE(r.metrics);
 }
 
 #ifdef _WIN32
+TEST_CASE("process tree resource accounting is opt in", "[process]") {
+  Scratch s;
+  auto spec = s.Spec({"exit", "0"}); spec.collect_metrics = true;
+  const auto result = RunProcess(spec);
+  REQUIRE(result.launched); REQUIRE(result.metrics);
+  CHECK(result.exit_code == 0);
+  CHECK(result.metrics->write_bytes > 0);
+  CHECK(result.metrics->peak_job_commit_bytes > 0);
+}
 TEST_CASE("desktop child has no console and retains captured output", "[process]") {
   Scratch s;
   auto spec = s.Spec({"console"});

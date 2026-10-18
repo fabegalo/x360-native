@@ -10,6 +10,9 @@ class VerificationCancelled : public std::runtime_error {
   VerificationCancelled() : std::runtime_error("Verification cancelled; original files preserved.") {}
 };
 void CheckVerificationCancellation();
+// Ordinary paths may reuse pinned ancestor identities within the batch. Links
+// and hosts without equivalent exclusion retain full filesystem resolution.
+std::filesystem::path VerificationPath(const std::filesystem::path& path);
 // Reuse only within one synchronous verification transaction. On Windows each
 // cached digest owns a read handle denying writes/deletion until destruction.
 // No timestamp cache, persisted approvals, or reuse across process boundaries.

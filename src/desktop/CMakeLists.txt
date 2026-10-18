@@ -3,6 +3,9 @@ add_library(x360n_desktop_model STATIC model/catalog.cpp model/workspace.cpp mod
 target_include_directories(x360n_desktop_model PRIVATE ${X360_REXGLUE_DIR}/thirdparty/inja/third_party/include)
 target_link_libraries(x360n_desktop_model PUBLIC x360n_core PRIVATE tomlplusplus)
 target_include_directories(x360n_desktop_model PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/model)
+# The supervisor owns launch preflight so one protected digest transaction can
+# cover catalog, original library, receipts and process identity reporting.
+target_link_libraries(x360n PRIVATE x360n_desktop_model)
 if(WIN32)
   enable_language(RC)
   add_executable(x360-native WIN32 win32/main_win32.cpp win32/environment_win32.cpp resources/desktop.rc)

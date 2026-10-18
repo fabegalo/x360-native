@@ -205,6 +205,8 @@ TEST_CASE("preview launch must reject changed content with preserved timestamps"
   CHECK_FALSE(f.app.checked[0].state.verification_pending);
   CHECK_FALSE(f.app.checked[0].state.inputs_ok);
   CHECK_FALSE(f.app.checked[0].state.prepared);
+  REQUIRE_FALSE(f.app.checked[0].state.issues.empty());
+  CHECK(f.app.checked[0].state.issues.back().find("dash.xex") != std::string::npos);
   CHECK_FALSE(fs::exists(f.root / "child-started.txt"));
 }
 TEST_CASE("selected verification authenticates only its preparation without launching tools", "[launcher-ui]") {

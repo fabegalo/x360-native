@@ -13,6 +13,25 @@
 using namespace x360n;
 namespace fs = std::filesystem;
 using namespace std::chrono_literals;
+TEST_CASE("verification paths retain ancestors only for their protected transaction", "[digest-batch]") {
+  const auto root = UniqueTempPath("verification-path");
+  const auto directory = root / fs::path(u8"João 日本");
+  fs::create_directories(directory);
+  const auto file = directory / "source.bin"; std::ofstream(file) << "original";
+  {
+    DigestBatch batch;
+    CHECK(VerificationPath(file) == fs::weakly_canonical(file));
+    REQUIRE(DigestFile(file));
+    CHECK(VerificationPath(file) == fs::weakly_canonical(file));
+    CHECK(DigestFile(file)->sha256 == DigestFile(file)->sha256);
+    CHECK(batch.files == 1);
+    CHECK_FALSE(MoveFileExW(directory.c_str(), (root / "moved").c_str(), 0));
+    CHECK_FALSE(MoveFileExW(root.c_str(), fs::path(root.native() + L"-moved").c_str(), 0));
+  }
+  REQUIRE(MoveFileExW(directory.c_str(), (root / "moved").c_str(), 0));
+  CHECK(VerificationPath(root / "moved/source.bin") == fs::weakly_canonical(root / "moved/source.bin"));
+  std::error_code ec; fs::remove_all(root, ec);
+}
 TEST_CASE("digest batches retain byte identity only while writes and replacement are excluded", "[digest-batch]") {
   const auto dir = UniqueTempPath("digest-batch"); fs::create_directories(dir);
   const auto file = dir / "input.bin";

@@ -342,6 +342,17 @@ ProcessResult RunProcess(const ProcessSpec& spec) {
   DWORD code = 0;
   GetExitCodeProcess(process.h, &code);
   r.exit_code = code;
+  if (spec.collect_metrics) {
+    JOBOBJECT_BASIC_AND_IO_ACCOUNTING_INFORMATION accounting{};
+    JOBOBJECT_EXTENDED_LIMIT_INFORMATION memory{};
+    if (QueryInformationJobObject(job.h, JobObjectBasicAndIoAccountingInformation, &accounting, sizeof(accounting), nullptr) &&
+        QueryInformationJobObject(job.h, JobObjectExtendedLimitInformation, &memory, sizeof(memory), nullptr)) {
+      r.metrics = ProcessResult::Metrics{
+          uint64_t(accounting.BasicInfo.TotalUserTime.QuadPart + accounting.BasicInfo.TotalKernelTime.QuadPart) / 10,
+          accounting.IoInfo.ReadTransferCount, accounting.IoInfo.ReadOperationCount,
+          accounting.IoInfo.WriteTransferCount, uint64_t(memory.PeakJobMemoryUsed)};
+    }
+  }
   return r;
 }
 

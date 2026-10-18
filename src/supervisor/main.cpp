@@ -8,11 +8,13 @@
 #include <cctype>
 #include <chrono>
 #include <cstdio>
+#include <cstdlib>
 #include <fstream>
 #include <iostream>
 #include <memory>
 #include <sstream>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include <CLI/CLI.hpp>
@@ -32,6 +34,7 @@
 #include "session_window.h"
 #include "action_trace.h"
 #include "digest_batch.h"
+#include "catalog.h"
 #include "session_notification.h"
 #include "workspace_lease.h"
 
@@ -461,6 +464,14 @@ int Run(const ProjectPaths& p, const fs::path& exe_in, std::vector<std::string> 
   // and scanned like the captured streams.
   fs::path rex_log_file = dir / "rex.log";
   if (rex_log) args.insert(args.begin(), "--log_file=" + PathUtf8(rex_log_file));
+  // Manual startup diagnostics only; no title is launched by enabling this.
+  // Reuse the pinned runtime's first-swap CSV, in this transition's own run dir.
+  const char* startup_metrics = std::getenv("X360N_STARTUP_METRICS");
+  if (startup_metrics && std::string_view(startup_metrics) == "1") {
+    std::erase_if(args, [](const auto& arg) { return arg.starts_with("--perf_counters=") || arg.starts_with("--perf_log_csv="); });
+    args.push_back("--perf_counters=true");
+    args.push_back("--perf_log_csv=" + PathUtf8(dir / "startup.csv"));
+  }
   if (handoff) {
     *handoff = dir / "handoff.bin";
     // Refuse stale records, including a same-second reused run label.
@@ -647,7 +658,7 @@ int Run(const ProjectPaths& p, const fs::path& exe_in, std::vector<std::string> 
   return r.exit_code == 0 ? kExitOk : kExitFailed;
 }
 
-int Session(const ProjectPaths& paths, const fs::path& manifest, int timeout, bool separate_windows, bool skip_boot_intro, bool crash_stack, const fs::path& user_data_root, const std::string& closed_event) {
+int Session(const ProjectPaths& paths, const fs::path& manifest, int timeout, bool separate_windows, bool skip_boot_intro, bool crash_stack, const fs::path& user_data_root, const std::string& closed_event, const std::string& catalog_target) {
   ActionTrace trace("session.total");
   try {
     WorkspaceLease lease(paths);
@@ -668,14 +679,20 @@ int Session(const ProjectPaths& paths, const fs::path& manifest, int timeout, bo
     const auto console_settings = LoadConsoleSettings(paths);
     SessionNotification notification(closed_event);
     std::unique_ptr<SessionWindow> window;
-    if (!separate_windows) {
-      window = std::make_unique<SessionWindow>(true, notification.handle());
-      fmt::print("session: persistent window {}\n", window->handle());
-    }
     // Discovery of generated AOT routes also inspects receipts. Keep it in the
     // same protected transaction as the first selected launch, rather than
     // streaming every shared dependency again before the frame even exists.
     auto verification = std::make_unique<DigestBatch>([&] { return window && window->closed(); });
+    if (!catalog_target.empty()) {
+      const auto catalog = desktop::ReadCatalog(paths);
+      desktop::VerifyCatalogLaunch(paths, catalog, catalog_target, manifest);
+      fmt::print("X360N_LAUNCH_VERIFIED\n");
+      std::fflush(stdout);
+    }
+    if (!separate_windows) {
+      window = std::make_unique<SessionWindow>(true, notification.handle());
+      fmt::print("session: persistent window {}\n", window->handle());
+    }
     fmt::print("session: console language={} country={} (snapshot until restart)\n",
                console_settings.language, console_settings.country);
     const auto dashboard = load_profile(manifest);
@@ -822,6 +839,8 @@ int main(int argc, char** argv) {
   bool session_crash_stack = false;
   std::string session_user_data_root;
   std::string session_closed_event;
+  std::string catalog_target;
+  session->add_option("--catalog-target", catalog_target, "Verify selected catalog title and library in this launch transaction");
   session->add_option("--closed-event", session_closed_event, "Internal desktop frame-close notification");
   session->add_option("manifest", session_manifest)->required();
   session->add_flag("--separate-windows", separate_windows, "Diagnostic mode: one window per title");
@@ -864,7 +883,7 @@ int main(int argc, char** argv) {
     return kExitUsage;
   }
   if (doctor->parsed()) return Doctor(*paths, config);
-  if (session->parsed()) return Session(*paths, PathFromUtf8(session_manifest), session_timeout, separate_windows, skip_boot_intro, session_crash_stack, PathFromUtf8(session_user_data_root), session_closed_event);
+  if (session->parsed()) return Session(*paths, PathFromUtf8(session_manifest), session_timeout, separate_windows, skip_boot_intro, session_crash_stack, PathFromUtf8(session_user_data_root), session_closed_event, catalog_target);
   if (run->parsed()) {
     try {
       // Session already owns this lease. Standalone prepared-title launches
