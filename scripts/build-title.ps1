@@ -88,7 +88,9 @@ $steps = @(
 Push-Location $titleDir
 try {
     Update-ToolchainSnapshot '0-toolchain'
-    $reuse = -not $interrupted -and $previous -and (Test-ReceiptEntries @($previous.inputs + $previous.artifacts)) -and (Test-ReceiptGlobs $previous.globs)
+    $reuse = -not $interrupted -and $previous -and $previous.configure -and
+        (Test-ReceiptEntries @($previous.inputs + $previous.artifacts)) -and (Test-ReceiptGlobs $previous.globs) -and
+        (Test-IncrementalConfigureInputs @(Get-IncrementalConfigureInputs $build $titleDir) $previous.configure)
     if ($reuse) {
         $head = & git -C (Join-Path $root 'external/rexglue-sdk') rev-parse HEAD
         if ($LASTEXITCODE -or $head.Trim() -ne $previous.sdk_commit) { $reuse = $false; $incrementalState = $null }
@@ -113,7 +115,7 @@ try {
     if ($incrementalState) {
         $configureSnapshot = @(Get-IncrementalConfigureInputs $build $titleDir)
         $skipConfigure = (Test-ReceiptGlobs $previous.globs) -and
-            (Test-IncrementalConfigureInputs $configureSnapshot $previous.inputs)
+            (Test-IncrementalConfigureInputs $configureSnapshot $previous.configure)
     }
     foreach ($s in $steps) {
         if ($s.name -eq '1-configure' -and $skipConfigure) {
@@ -257,6 +259,7 @@ try {
     $sdkCommit = (& git -C (Join-Path $root 'external/rexglue-sdk') rev-parse HEAD).Trim()
     if ($LASTEXITCODE) { throw 'Cannot identify SDK revision' }
     $globs = @(Get-BuildGlobs $build)
+    $configuration = @(Get-IncrementalConfigureInputs $build $titleDir)
     if (-not (Test-ReceiptGlobs $globs)) { throw 'Build source inventory changed; prepare again. No receipt published.' }
     if (-not (Test-ReceiptEntries $sourceSnapshot) -or -not (Test-ReceiptEntries $producer)) {
         throw 'Inputs or codegen changed while collecting the receipt; prepare again. No receipt published.'
@@ -267,10 +270,14 @@ try {
     Publish-PreparationReceipt $stateFile $state
     $stateEntry = @(Get-ReceiptEntries @($stateFile))[0]
     if (-not (Test-ReceiptEntries $driverSnapshot) -or -not (Test-ReceiptEntries $finalSourceSnapshot) -or
-        -not (Test-ReceiptEntries $producer)) { throw 'Inputs changed while collecting incremental state; no receipt published.' }
+        -not (Test-ReceiptEntries $producer) -or
+        -not (Test-IncrementalConfigureInputs @(Get-IncrementalConfigureInputs $build $titleDir) $configuration)) {
+        throw 'Inputs changed while collecting incremental state; no receipt published.'
+    }
     $receipt = @{ schema = 1; title = $Title; manifest = $manifest; exe = $exe; sdk_commit = $sdkCommit; globs = $globs;
         inputs = @($inputs + $producer + $ownerSnapshot + $stateEntry | Sort-Object path -Unique); artifacts = $artifacts; producer = $producer;
         incremental = $stateEntry;
+        configure = $configuration;
         roles = @{ compiler = (Get-BuildCache $build).CMAKE_CXX_COMPILER; codegen = $tool;
             build_config = (Join-Path $build 'CMakeCache.txt') } }
     Publish-PreparationReceipt $receiptFile $receipt

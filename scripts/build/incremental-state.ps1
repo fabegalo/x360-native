@@ -51,6 +51,10 @@ function Get-IncrementalConfigureInputs([string]$Build, [string]$Project) {
     Get-ReceiptEntries @($files | Where-Object { (Test-BuildFile $_) -and $_ -ne (Join-Path $Build 'build.ninja') } | Sort-Object -Unique)
 }
 function Test-IncrementalConfigureInputs($Current, $Previous) {
+    # Compare an explicit configuration inventory, not the receipt's superset
+    # of native inputs. Disappearing auxiliary lists/presets matter as much as
+    # additions; filtering existing files during discovery must not hide them.
+    if (-not $Previous -or @($Current).Count -ne @($Previous).Count) { return $false }
     $hashes = @{}
     foreach ($entry in $Previous) { $hashes[$entry.path] = $entry.sha256 }
     foreach ($entry in $Current) { if ($hashes[$entry.path] -ne $entry.sha256) { return $false } }

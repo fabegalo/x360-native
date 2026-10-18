@@ -87,6 +87,9 @@ set_property(TARGET fixture APPEND PROPERTY LINK_DEPENDS "${CMAKE_SOURCE_DIR}/ap
     Assert (([IO.Path]::GetFullPath("$build/generated/dll_targets.cmake")) -in $receiptInputs) 'auxiliary generated CMake list missing from receipt'
     $configureInputs = @(Get-IncrementalConfigureInputs $build $scratch)
     Assert (Test-IncrementalConfigureInputs $configureInputs $configureInputs) 'identical configuration was rejected'
+    [IO.File]::Delete("$build/generated/dll_targets.cmake")
+    Assert (-not (Test-IncrementalConfigureInputs @(Get-IncrementalConfigureInputs $build $scratch) $configureInputs)) 'removed auxiliary CMake list ignored'
+    [IO.File]::WriteAllText("$build/generated/dll_targets.cmake", '# auxiliary list not included by the project')
     Change-Content "$scratch/flags.json" '{"version":6,"configurePresets":[]}'
     Assert (-not (Test-IncrementalConfigureInputs @(Get-IncrementalConfigureInputs $build $scratch) $configureInputs)) 'inherited preset change ignored'
     Change-Content "$scratch/flags.json" '{"version":6}'
