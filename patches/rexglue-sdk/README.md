@@ -760,3 +760,22 @@ convert these targets to other formats read the stored values with the old
 from the title's design (no public hardware document was found).
 Regression: `sdkcheck.fixed16-resolve` (every s5.10 integer through SNORM16 for
 both formats and biases, the copy-shader choice and its exclusions).
+
+### 0089 — opt-in host dispatch for the entrypoint (2026-10-17)
+
+Adjacent original XEX images cannot host auxiliary function tables at each
+`IMAGE_BASE + IMAGE_SIZE`. The existing DLL capability already supports host-only
+dispatch; the entrypoint gains an explicit `Runtime::Setup(image, config, true)`
+overload and a default-false `ReXApp::UseHostFunctionTable()` hook. The original
+Setup overload, RuntimeConfig and PPCImageInfo layouts are retained. Apps opting
+in must compile their indirect calls with `REX_HOST_FUNCTION_TABLE=1`; generated
+DLLs expose their matching capability through the existing export. The generic
+multi-module project applies the mode consistently; existing title profiles keep
+their default dispatch. No original image is moved or patched.
+
+Regression: `tests/sdkcheck/entrypoint_dispatch_test.cpp` reproduces refusal of
+the adjacent image with the old entrypoint table, verifies the explicit mode,
+preserves both mappings and image bytes, and checks the legacy default. Patch
+replay and exact before/final hashes are recorded in the lock. No equivalent
+upstream commit is known; the SDK pin is unchanged. Evidence and limitations:
+`docs/reports/aot-dependencies-2026-10-17.md`.

@@ -23,7 +23,7 @@
                                             "file":  "patches/rexglue-sdk/0002-setup-failure-teardown.patch",
                                             "sha256":  "73480fa9b0645d7532f6bfbb471dc964a87590c1fcd5c20946ad38340f769a93",
                                             "files":  {
-                                                          "src/system/runtime.cpp":  "e182e32e3e80c7bb308401bdb95348253e31b0c64c3afbaaaa9e5c3beeb37641"
+                                                          "src/system/runtime.cpp":  "5ba8271148a18c512a4c2d17479934c3c4af718254ea0ac925f00822efbbd8c2"
                                                       },
                                             "base_files":  {
                                                                "src/system/runtime.cpp":  "f55bd64cf055f7ad288c282883e94feec8fb53631a6807654f7a516ec7ab4af7"
@@ -51,7 +51,7 @@
                                             "file":  "patches/rexglue-sdk/0004-app-teardown-order.patch",
                                             "sha256":  "f68d6d6e4e2cc4c7c218eac15cc7c29723c1fb357a735657bed68d312ade4ff1",
                                             "files":  {
-                                                          "src/ui/rex_app.cpp":  "a7b8bcbc3e1ec2456cfaf923857aef9e2a7cb5e8fe75e26b2e28f8184ee57570"
+                                                          "src/ui/rex_app.cpp":  "9c29942ad96d54b34ac2f4064442afb0ea4b1cf944bcf5e7a516680a896bd28d"
                                                       },
                                             "base_files":  {
                                                                "src/ui/rex_app.cpp":  "0ebbd4c0e484eb865f94de37cc71a70e3f25068b78d072cd7f577cdb811020b7"
@@ -946,7 +946,7 @@
                                                           "src/core/perf/counter.cpp":  "df95e01382113fcd10e5698b8f6985f7d14486a834e542be95dfc1e59b611268",
                                                           "src/graphics/command_processor.cpp":  "b018ebfc094dae7a7160288a1ebaafbc330c5e10c5b8c8704c90b387d36ee747",
                                                           "src/graphics/d3d12/pipeline_cache.cpp":  "37d0ee1c01c689f941676b19e3f5049c436f1f50c411a2a32720e2bdc7bac80d",
-                                                          "src/system/runtime.cpp":  "e182e32e3e80c7bb308401bdb95348253e31b0c64c3afbaaaa9e5c3beeb37641"
+                                                          "src/system/runtime.cpp":  "5ba8271148a18c512a4c2d17479934c3c4af718254ea0ac925f00822efbbd8c2"
                                                       },
                                             "base_files":  {
                                                                "CMakeLists.txt":  "32728b0c02bfd06d6bcddec55fd08f05c013cea1ea7e5dc1e777b195e85b589e",
@@ -1193,6 +1193,23 @@
     "src/codegen/phase_gapfill.cpp": "b64c94daa2639315f6ec4b15243c5d608d04a25a4156f5625e5ea229d7adb813"
   },
   "test": "tests/sdkcheck/virtual_thunk_discovery_test.cpp"
+},
+{
+  "file": "patches/rexglue-sdk/0089-entrypoint-host-function-table.patch",
+  "sha256": "46d1ab5ff0f22bdfbb1fa3c4256ef336b75602acfa91be6f6b6edf3c6e9f57f8",
+  "base_files": {
+    "include/rex/runtime.h": "8fcd287e79a6211d1052b12a6007bdd6be3fec200f968b3da190517aebf773b6",
+    "src/system/runtime.cpp": "e182e32e3e80c7bb308401bdb95348253e31b0c64c3afbaaaa9e5c3beeb37641",
+    "include/rex/rex_app.h": "bd847c79e07f935c5788529d300c18ba2c4d2ca946c80a3c8e0f405f31062f89",
+    "src/ui/rex_app.cpp": "a7b8bcbc3e1ec2456cfaf923857aef9e2a7cb5e8fe75e26b2e28f8184ee57570"
+  },
+  "files": {
+    "include/rex/runtime.h": "8cc304b2dd3fe9045cfffd9f71c985963ab049b381b509b4e52d44bfc53353ac",
+    "src/system/runtime.cpp": "5ba8271148a18c512a4c2d17479934c3c4af718254ea0ac925f00822efbbd8c2",
+    "include/rex/rex_app.h": "769ea2f312400d6be8359071bbc03fc854ccf626bbc115ff9ba3dbfdb102c55d",
+    "src/ui/rex_app.cpp": "9c29942ad96d54b34ac2f4064442afb0ea4b1cf944bcf5e7a516680a896bd28d"
+  },
+  "test": "tests/sdkcheck/entrypoint_dispatch_test.cpp"
 }
                                     ]
                     },

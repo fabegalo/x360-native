@@ -37,6 +37,7 @@ x360n_stage_runtime_dlls(x360n_perf_counter_probe)
 # A benchmark is an explicit command, never an automatic CTest workload.
 
 add_executable(x360n_sdk_runtime_checks
+    sdkcheck/entrypoint_dispatch_test.cpp
     sdkcheck/perf_counter_test.cpp
     sdkcheck/synthetic_xex.cpp
     sdkcheck/function_table_test.cpp
