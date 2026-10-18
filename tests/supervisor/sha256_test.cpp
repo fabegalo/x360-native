@@ -38,6 +38,16 @@ TEST_CASE("sha256 one million 'a' fed in uneven chunks", "[sha256]") {
   CHECK(ToHex(d) == "cdc76e5c9914fb9281a1c7e284d73e67f1809a48a497200e046d39ccc7112cd0");
 }
 
+TEST_CASE("platform SHA-256 agrees on padding and streaming boundaries", "[sha256]") {
+  for (const size_t size : {0u, 3u, 55u, 56u, 63u, 64u, 65u, 1048575u, 1048576u, 1048577u, 3145745u}) {
+    INFO(size);
+    std::string bytes(size, '\0');
+    for (size_t i = 0; i < size; ++i) bytes[i] = char(i * 31 + 7);
+    CHECK(PlatformSha256Hex(Bytes(bytes)) == Sha256Hex(Bytes(bytes)));
+  }
+  CHECK(PlatformSha256Hex(Bytes("abc")) == "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
+}
+
 TEST_CASE("sha256 of a file matches the in-memory digest", "[sha256]") {
   auto path = UniqueTempPath("sha256_test.bin");
   std::string data(3 * 1024 * 1024 + 17, '\0');

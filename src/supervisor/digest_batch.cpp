@@ -1,6 +1,6 @@
 #include "digest_batch.h"
 #include "action_trace.h"
-#include <map>
+#include <unordered_map>
 #include <stdexcept>
 #include <vector>
 #ifdef _WIN32
@@ -46,11 +46,11 @@ struct DigestBatch::State {
   std::function<bool()> cancelled;
 #ifdef _WIN32
   struct Entry { std::shared_ptr<File> file; FileDigest digest; };
-  std::map<std::string, Entry> entries;
-  std::map<std::filesystem::path, std::string> paths;
-  std::map<std::filesystem::path, std::unique_ptr<File>> directories;
-  std::map<std::filesystem::path, std::filesystem::path> normal;
-  std::map<std::filesystem::path, std::shared_ptr<File>> metadata;
+  std::unordered_map<std::string, Entry> entries;
+  std::unordered_map<std::filesystem::path, std::string> paths;
+  std::unordered_map<std::filesystem::path, std::unique_ptr<File>> directories;
+  std::unordered_map<std::filesystem::path, std::filesystem::path> normal;
+  std::unordered_map<std::filesystem::path, std::shared_ptr<File>> metadata;
   bool Pin(const std::filesystem::path& directory) {
     if (directories.contains(directory)) return true;
     const auto parent = directory.parent_path();

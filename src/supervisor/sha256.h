@@ -28,6 +28,9 @@ class Sha256 {
 
 std::string ToHex(std::span<const uint8_t> bytes);
 std::string Sha256Hex(std::span<const uint8_t> data);
+// Same SHA-256 identity using the OS provider where available. Provider errors
+// fail closed; other hosts retain the portable implementation.
+std::string PlatformSha256Hex(std::span<const uint8_t> data);
 
 struct FileDigest {
   uint64_t size = 0;

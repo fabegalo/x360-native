@@ -2,6 +2,7 @@
 
 #include <fstream>
 #include <vector>
+#include <stdexcept>
 #include "action_trace.h"
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
@@ -106,6 +107,32 @@ std::string Sha256Hex(std::span<const uint8_t> data) {
   h.Update(data);
   auto d = h.Finish();
   return ToHex(d);
+}
+
+std::string PlatformSha256Hex(std::span<const uint8_t> data) {
+#ifdef _WIN32
+  struct Algorithm {
+    BCRYPT_ALG_HANDLE handle = nullptr;
+    Algorithm() { if (BCryptOpenAlgorithmProvider(&handle, BCRYPT_SHA256_ALGORITHM, nullptr, 0) < 0) handle = nullptr; }
+    ~Algorithm() { if (handle) BCryptCloseAlgorithmProvider(handle, 0); }
+  };
+  static const Algorithm algorithm;
+  struct Hash { BCRYPT_HASH_HANDLE handle = nullptr; ~Hash() { if (handle) BCryptDestroyHash(handle); } } hash;
+  if (!algorithm.handle || BCryptCreateHash(algorithm.handle, &hash.handle, nullptr, 0, nullptr, 0, 0) < 0)
+    throw std::runtime_error("SHA-256 provider unavailable");
+  while (!data.empty()) {
+    const auto count = static_cast<ULONG>(data.size() > (1u << 20) ? (1u << 20) : data.size());
+    if (BCryptHashData(hash.handle, const_cast<PUCHAR>(data.data()), count, 0) < 0)
+      throw std::runtime_error("SHA-256 provider failed");
+    data = data.subspan(count);
+  }
+  std::array<uint8_t, 32> digest{};
+  if (BCryptFinishHash(hash.handle, digest.data(), static_cast<ULONG>(digest.size()), 0) < 0)
+    throw std::runtime_error("SHA-256 provider failed");
+  return ToHex(digest);
+#else
+  return Sha256Hex(data);
+#endif
 }
 
 std::optional<FileDigest> DigestFile(const std::filesystem::path& path) {

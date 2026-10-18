@@ -42,6 +42,12 @@ void Safe(const fs::path& file, const fs::path& root) {
     if (fs::is_symlink(p)) throw std::runtime_error("Catalog path contains a link");
 }
 std::string Fingerprint(const Json& files) {
+  if (CatalogLaunchVerificationActive()) {
+    std::string bytes;
+    for (const auto& f : files)
+      bytes += f.at("path").get<std::string>() + "\t" + f.at("sha256").get<std::string>() + "\n";
+    return PlatformSha256Hex({reinterpret_cast<const uint8_t*>(bytes.data()), bytes.size()});
+  }
   Sha256 hash;
   for (const auto& f : files) {
     const auto line = f.at("path").get<std::string>() + "\t" + f.at("sha256").get<std::string>() + "\n";

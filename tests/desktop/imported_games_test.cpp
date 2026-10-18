@@ -1,5 +1,6 @@
 #include "../../src/desktop/model/catalog.h"
 #include "sha256.h"
+#include "digest_batch.h"
 #include "../../src/desktop/model/import_source.h"
 #include "session_profile.h"
 #include "preparation.h"
@@ -54,6 +55,36 @@ TEST_CASE("universal library persists unsupported titles and exact duplicates", 
   SECTION("same executable different content") { Write(f.source/"assets/data","different assets"); }
   CHECK(ImportGame(f.paths,games,f.source,f.source)!=id);
   CHECK(ReadCatalog(f.paths).size()==2);
+}
+TEST_CASE("launch inventory hashing preserves portable identities and rejects tampering", "[launch-preflight]") {
+  Fixture f;
+  const auto id = ImportGame(f.paths, {}, f.source, f.source);
+  const auto ordinary = ReadCatalog(f.paths);
+  REQUIRE(ordinary.size() == 1);
+  {
+    DigestBatch batch;
+    CatalogLaunchVerification scope;
+    const auto launched = ReadCatalog(f.paths);
+    REQUIRE(launched.size() == 1);
+    CHECK(launched[0].id == id);
+    CHECK(launched[0].game_root == ordinary[0].game_root);
+    CHECK(launched[0].import_error == ordinary[0].import_error);
+    REQUIRE(launched[0].inputs.size() == ordinary[0].inputs.size());
+    for (size_t i = 0; i < launched[0].inputs.size(); ++i) {
+      CHECK(launched[0].inputs[i].destination == ordinary[0].inputs[i].destination);
+      CHECK(launched[0].inputs[i].sha256 == ordinary[0].inputs[i].sha256);
+    }
+  }
+  const auto file = fs::directory_iterator(f.paths.local() / "catalog")->path();
+  auto record = nlohmann::json::parse(std::ifstream(file));
+  record["files"][0]["sha256"] = std::string(64, '0');
+  Write(file, record.dump());
+  DigestBatch batch;
+  CatalogLaunchVerification scope;
+  const auto corrupted = ReadCatalog(f.paths);
+  REQUIRE(corrupted.size() == 1);
+  CHECK_FALSE(corrupted[0].import_error.empty());
+  CHECK(corrupted[0].inputs.empty());
 }
 TEST_CASE("folder catalog retains source-bound generated library routing metadata", "[library-content-type]") {
   Fixture f; f.Infrastructure();
