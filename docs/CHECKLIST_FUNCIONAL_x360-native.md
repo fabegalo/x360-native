@@ -10,6 +10,11 @@ portões desta prévia. Windows limpo **não validado**. [Registro da Release](r
 Charlie, registros nativos e contratos 17559/perfil existente verificados sem
 executar jogos. Isso não marca os aceites visuais ou comerciais abaixo como
 concluídos. [Relatório e testes](reports/audit-closure-2026-10-18.md).
+
+**Teste manual Charlie, 18/10:** pedido My Games e bootstrap nativo demonstrados,
+com retorno automático antes do aceite XNA. Corrigidos metadados divergentes da
+biblioteca; renderização, entrada, Guide/Xbox Home, gameplay e saves continuam
+pendentes. Os itens XNA da seção 20 permanecem abertos. [Evidências](reports/charlie-functional-2026-10-18.md).
 A prévia pública atual é [v0.1.0-preview.21](https://github.com/fabegalo/x360-native/releases/tag/v0.1.0-preview.21),
 publicada em 16/10; a referência à `.19` acima é histórica, da primeira publicação.
 

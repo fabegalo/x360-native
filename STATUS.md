@@ -5,6 +5,16 @@ Este arquivo resume o estado atual; os relatórios vinculados preservam datas,
 falhas iniciais, hashes, comandos e limites de cada validação. Resultados de uma
 etapa histórica não certificam automaticamente o build atual nem outros títulos.
 
+Charlie Murder, teste manual de 18/10: recibos atuais de Charlie/17559
+revalidados sem rebuild de títulos. Corrigida genericamente a divergência entre
+o tipo do catálogo por pasta e o perfil AOT, com arquivamento dos registros
+obsoletos e do cache derivado da lista. O pedido My Games correto executou
+HostLoader/RuntimeHost/NetCF, mas o bootstrap voltou sozinho antes de comprovar
+inicialização XNA, imagem ou entrada do jogo. Guide/Xbox Home e gameplay não
+aprovados. Uma navegação posterior em Storage → perfis caiu na dashboard 17559;
+pilha preservada e causa ainda pendente. Perfis/saves originais usados somente
+para gerar cópia isolada. [Evidências, correção e limites](docs/reports/charlie-functional-2026-10-18.md).
+
 Fechamento técnico sobre a `main` inicial `6be0c60`: `ead9ea3` corrige a
 invalidação de CMake removido; `d8088e6` recusa flags externas não rastreadas;
 `3c42190` verifica os registros reais das DLLs; `fa5730e` separa o callback
