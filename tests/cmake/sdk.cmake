@@ -60,6 +60,14 @@ x360n_stage_runtime_dlls(x360n_shutdown_probe PLUGIN_TARGETS rexgpu-xenos)
 
 # SDK runtime checks (link rexruntime): behavior our local SDK patches fix
 # (patches/rexglue-sdk/). Synthetic inputs only.
+if(WIN32)
+  # Explicit opt-in: changes foreground only between its own synthetic windows.
+  # No guest, renderer, physical controller or injected keyboard input.
+  add_executable(x360n_session_focus_checks EXCLUDE_FROM_ALL sdkcheck/session_focus_test.cpp)
+  target_link_libraries(x360n_session_focus_checks PRIVATE rexruntime x360n_core Catch2::Catch2WithMain)
+  x360n_stage_runtime_dlls(x360n_session_focus_checks)
+endif()
+
 add_executable(x360n_perf_counter_probe EXCLUDE_FROM_ALL performance/counter_probe.cpp)
 add_executable(x360n_register_info_probe EXCLUDE_FROM_ALL
     performance/register_info_probe.cpp

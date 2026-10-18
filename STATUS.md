@@ -58,6 +58,13 @@ compilado; build/recibos de Charlie, Moto, Castle e 17559 aprovados. O registro
 final do Charlie na My Games continua pendente por trava ocupada. A fila de novas
 preparações foi adiada para os testes manuais; não há aceite dos dez diretórios.
 
+Foco da sessão (18/10): reproduzida a divergência entre foco nativo da filha e
+foco SDL após iniciar em segundo plano. O supervisor agora encaminha a ativação
+da raiz e reconcilia o foco após as mensagens nativas, respeitando foreground.
+Seis ciclos com duas filhas sucessivas e joystick virtual passaram (89 asserções);
+frontend Debug separado recompilado. Sem alteração no SDK/renderer ou repetição
+do acervo. [Reprodução, correção e limites](docs/reports/session-focus-2026-10-18.md).
+
 ## Plataforma e dependências
 
 Windows x64/D3D12 é o ambiente demonstrado. Linux, macOS, ARM64 e Windows limpo
