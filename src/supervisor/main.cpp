@@ -34,6 +34,7 @@
 #include "session_window.h"
 #include "action_trace.h"
 #include "digest_batch.h"
+#include "launch_preflight.h"
 #include "catalog.h"
 #include "session_notification.h"
 #include "workspace_lease.h"
@@ -686,6 +687,7 @@ int Session(const ProjectPaths& paths, const fs::path& manifest, int timeout, bo
     if (!catalog_target.empty()) {
       desktop::CatalogLaunchVerification launch_paths;
       const auto catalog = desktop::ReadCatalog(paths);
+      PrimeLaunchVerification(paths, catalog, catalog_target);
       desktop::VerifyCatalogLaunch(paths, catalog, catalog_target, manifest);
       fmt::print("X360N_LAUNCH_VERIFIED\n");
       std::fflush(stdout);

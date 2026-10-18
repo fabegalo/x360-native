@@ -4,11 +4,32 @@ if(TARGET Catch2::Catch2WithMain)
   target_link_libraries(x360n_preparation_benchmark PRIVATE x360n_core)
   add_executable(x360n_launch_benchmark EXCLUDE_FROM_ALL ../../tests/desktop/launch_benchmark.cpp)
   target_link_libraries(x360n_launch_benchmark PRIVATE x360n_desktop_model)
+  add_executable(x360n_launch_smoke EXCLUDE_FROM_ALL ../../tests/desktop/launch_smoke.cpp)
+  target_link_libraries(x360n_launch_smoke PRIVATE x360n_desktop_model)
+  if(X360N_PREFLIGHT_BASELINE_DIR)
+    add_executable(x360n_preflight_baseline EXCLUDE_FROM_ALL ../../tests/desktop/launch_benchmark.cpp
+      ../../tests/desktop/preflight_baseline.cpp
+      "${X360N_PREFLIGHT_BASELINE_DIR}/digest_batch.cpp"
+      "${X360N_PREFLIGHT_BASELINE_DIR}/preparation.cpp")
+    target_link_libraries(x360n_preflight_baseline PRIVATE x360n_desktop_model tomlplusplus)
+    target_include_directories(x360n_preflight_baseline PRIVATE ${X360_REXGLUE_DIR}/thirdparty/inja/third_party/include)
+    add_executable(x360n_preflight_baseline_optimized EXCLUDE_FROM_ALL ../../tests/desktop/launch_benchmark.cpp
+      ../../tests/desktop/preflight_baseline.cpp
+      "${X360N_PREFLIGHT_BASELINE_DIR}/digest_batch-optimized.cpp"
+      "${X360N_PREFLIGHT_BASELINE_DIR}/preparation-optimized.cpp")
+    set_source_files_properties(
+      "${X360N_PREFLIGHT_BASELINE_DIR}/digest_batch-optimized.cpp"
+      "${X360N_PREFLIGHT_BASELINE_DIR}/preparation-optimized.cpp" PROPERTIES
+      COMPILE_OPTIONS "$<$<CONFIG:Debug>:-O2>")
+    target_link_libraries(x360n_preflight_baseline_optimized PRIVATE x360n_desktop_model tomlplusplus)
+    target_include_directories(x360n_preflight_baseline_optimized PRIVATE ${X360_REXGLUE_DIR}/thirdparty/inja/third_party/include)
+  endif()
   if(X360N_BASELINE_CORE_DIR)
     # Reproduce the old verifier with the same benchmark/flags. Explicit source
     # objects satisfy these symbols before the current static archive is read.
     add_executable(x360n_launch_baseline EXCLUDE_FROM_ALL ../../tests/desktop/launch_benchmark.cpp
       ../../tests/desktop/launch_baseline_paths.cpp
+      ../../tests/desktop/preflight_baseline.cpp
       "${X360N_BASELINE_CORE_DIR}/digest_batch-before.cpp"
       "${X360N_BASELINE_CORE_DIR}/preparation-before.cpp")
     target_link_libraries(x360n_launch_baseline PRIVATE x360n_desktop_model tomlplusplus)

@@ -5,10 +5,12 @@
 #include <nlohmann/json.hpp>
 #include <toml++/toml.hpp>
 #include <fstream>
-#include <set>
 #include <cctype>
 #include <regex>
 #include <algorithm>
+#include <unordered_set>
+#include <map>
+#include <locale>
 
 namespace x360n {
 namespace fs = std::filesystem;
@@ -74,19 +76,29 @@ std::optional<std::string> CheckPreparation(const ProjectPaths& paths,
     const auto sdk_commit = receipt.at("sdk_commit").get<std::string>();
     if (sdk_commit.size() != 40 || sdk_commit != ReadHead(paths.sdk()))
       return fail("A revisão do ReXGlue mudou.");
-    std::set<std::string> inputs, artifacts;
+    std::unordered_set<std::string> inputs, artifacts;
     for (auto group : {"inputs", "artifacts"}) {
       const auto& entries = receipt.at(group);
       if (!entries.is_array() || entries.empty()) return fail("Recibo incompleto.");
       auto& seen = std::string(group) == "inputs" ? inputs : artifacts;
+      seen.reserve(entries.size());
+      ActionTrace entries_trace(std::string("receipt.") + group);
+      std::vector<fs::path> files;
+      std::vector<std::string> hashes;
+      files.reserve(entries.size());
+      hashes.reserve(entries.size());
       for (const auto& entry : entries) {
         CheckVerificationCancellation();
         const auto file = PathFromUtf8(entry.at("path").get<std::string>());
         const auto hash = entry.at("sha256").get<std::string>();
         if (!file.is_absolute() || hash.size() != 64 || hash.find_first_not_of("0123456789abcdef") != std::string::npos ||
             !seen.insert(Key(file)).second) return fail("Registro de arquivo inválido.");
-        const auto digest = DigestFile(file);
-        if (!digest || digest->sha256 != hash) return fail("Arquivo alterado ou ausente: " + PathUtf8(file));
+        files.push_back(file); hashes.push_back(hash);
+      }
+      PrimeVerificationDigests(files);
+      for (size_t i = 0; i < files.size(); ++i) {
+        const auto digest = DigestFile(files[i]);
+        if (!digest || digest->sha256 != hashes[i]) return fail("Arquivo alterado ou ausente: " + PathUtf8(files[i]));
       }
     }
     for (auto role : {"compiler", "codegen", "build_config"})
@@ -94,6 +106,9 @@ std::optional<std::string> CheckPreparation(const ProjectPaths& paths,
         return fail("Identidade das ferramentas e configuração incompleta.");
     // CMake's CONFIGURE_DEPENDS inventory also detects newly added sources or
     // templates; hashes of previously existing files alone cannot do that.
+    {
+    ActionTrace globs_trace("receipt.globs");
+    std::map<std::pair<fs::path, bool>, std::vector<fs::directory_entry>> inventories;
     for (const auto& glob : receipt.at("globs")) {
       CheckVerificationCancellation();
       const auto glob_pattern = glob.at("pattern").get<std::string>();
@@ -103,21 +118,54 @@ std::optional<std::string> CheckPreparation(const ProjectPaths& paths,
         else if (c == '?') expression += "[^/]";
         else { if (std::string(".\\+(){}[]^$|").find(c) != std::string::npos) expression += '\\'; expression += c; }
       }
-      const std::regex pattern(expression, std::regex::icase);
-      std::set<std::string> expected, actual;
-      for (const auto& file : glob.at("files")) expected.insert(Key(PathFromUtf8(file.get<std::string>())));
+      // CMake predominantly emits *.c/*.h/*.cpp. Their exact equivalent is a
+      // case-insensitive suffix on the final component, including recursive
+      // globs. Keep the original regex for every other pattern.
+      const bool suffix_pattern = glob_pattern.starts_with("*.") &&
+          glob_pattern.find_first_of("*?/\\", 1) == std::string::npos &&
+          std::all_of(glob_pattern.begin(), glob_pattern.end(), [](unsigned char c) { return c < 128; });
+      std::optional<std::regex> pattern;
+      if (!suffix_pattern) pattern.emplace(expression, std::regex::icase);
       const auto directory = PathFromUtf8(glob.at("directory").get<std::string>());
+      const auto include_directories = glob.at("directories").get<bool>();
+      const std::locale glob_locale;
+      const auto& character = std::use_facet<std::ctype<char>>(glob_locale);
+      auto matches = [&](const fs::path& file) {
+        if (suffix_pattern) {
+          const auto name = PathUtf8(file.filename());
+          const auto suffix = std::string_view(glob_pattern).substr(1);
+          if (name.size() < suffix.size()) return false;
+          const auto tail = std::string_view(name).substr(name.size() - suffix.size());
+          for (size_t i = 0; i < suffix.size(); ++i)
+            if (character.tolower(tail[i]) != character.tolower(suffix[i])) return false;
+          return true;
+        }
+        auto relative = PathUtf8(file.lexically_relative(directory));
+        std::replace(relative.begin(), relative.end(), '\\', '/');
+        return std::regex_match(relative, *pattern);
+      };
+      std::unordered_set<std::string> expected, actual;
+      expected.reserve(glob.at("files").size());
+      for (const auto& file : glob.at("files")) expected.insert(Key(PathFromUtf8(file.get<std::string>())));
+      const bool recursive = glob.at("recursive").get<bool>() || glob_pattern.find('/') != std::string::npos;
+      const auto inventory_key = std::make_pair(directory, recursive);
+      auto [inventory, inserted] = inventories.try_emplace(inventory_key);
+      if (inserted) {
+        if (recursive) for (const auto& file : fs::recursive_directory_iterator(directory)) {
+          CheckVerificationCancellation(); inventory->second.push_back(file);
+        }
+        else for (const auto& file : fs::directory_iterator(directory)) {
+          CheckVerificationCancellation(); inventory->second.push_back(file);
+        }
+      }
       auto collect = [&](const auto& file) {
         CheckVerificationCancellation();
-        auto relative = PathUtf8(file.path().lexically_relative(directory));
-        std::replace(relative.begin(), relative.end(), '\\', '/');
-        if ((glob.at("directories").get<bool>() || file.is_regular_file()) &&
-            std::regex_match(relative, pattern)) actual.insert(Key(file.path()));
+        if (matches(file.path()) && (include_directories || file.is_regular_file()))
+          actual.insert(Key(file.path()));
       };
-      if (glob.at("recursive").get<bool>() || glob_pattern.find('/') != std::string::npos)
-        for (const auto& file : fs::recursive_directory_iterator(directory)) collect(file);
-      else for (const auto& file : fs::directory_iterator(directory)) collect(file);
+      for (const auto& file : inventory->second) collect(file);
       if (actual != expected) return fail("A lista de fontes ou templates mudou: " + PathUtf8(directory));
+    }
     }
     // Required anchors prevent an empty/partial receipt from blessing an exe.
     std::ifstream profile_file(manifest, std::ios::binary);

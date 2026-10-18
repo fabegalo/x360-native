@@ -3,6 +3,8 @@
 #include "child_process.h"
 #include "workspace_lease.h"
 #include "scratch.h"
+#include "digest_batch.h"
+#include <nlohmann/json.hpp>
 #include <chrono>
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
@@ -92,6 +94,46 @@ TEST_CASE("new templates invalidate the configured source inventory", "[preparat
   std::ofstream(directory / "notes.txt") << "not a template"; CHECK_FALSE(f.Check());
   fs::create_directories(directory / "nested");
   std::ofstream(directory / "nested/new.inja") << "new template"; CHECK(f.Check());
+}
+TEST_CASE("receipt inventory snapshots preserve suffix and hierarchical glob gates", "[preparation]") {
+  Fixture f;
+  const auto directory = f.root / "templates";
+  fs::create_directories(directory / "nested/deep");
+  std::ofstream(directory / "root.H") << "header";
+  std::ofstream(directory / "nested/one.c") << "one";
+  std::ofstream(directory / "nested/deep/two.C") << "two";
+  std::ofstream(directory / "nested/deep/other.txt") << "ignored";
+  fs::create_directory(directory / "folder.h");
+  const auto file = PreparationReceipt(f.exe);
+  nlohmann::json receipt;
+  { std::ifstream input(file); input >> receipt; }
+  receipt["globs"] = nlohmann::json::array({
+      {{"directory", PathUtf8(directory)}, {"pattern", "*.h"}, {"recursive", false}, {"directories", false},
+       {"files", {PathUtf8(directory / "root.H")}}},
+      {{"directory", PathUtf8(directory)}, {"pattern", "*.h"}, {"recursive", false}, {"directories", true},
+       {"files", {PathUtf8(directory / "root.H"), PathUtf8(directory / "folder.h")}}},
+      {{"directory", PathUtf8(directory)}, {"pattern", "*/*.c"}, {"recursive", false}, {"directories", false},
+       {"files", {PathUtf8(directory / "nested/one.c")}}},
+      {{"directory", PathUtf8(directory)}, {"pattern", "*.c"}, {"recursive", true}, {"directories", false},
+       {"files", {PathUtf8(directory / "nested/one.c"), PathUtf8(directory / "nested/deep/two.C")}}}
+  });
+  std::ofstream(file) << receipt;
+  {
+    DigestBatch batch;
+    REQUIRE_FALSE(f.Check());
+    REQUIRE_FALSE(f.Check());
+    SECTION("new matching source is never approved by the earlier snapshot") {
+      std::ofstream(directory / "nested/deep/new.c") << "new";
+    }
+    SECTION("new unrecorded DLL is never approved by prior hashes") {
+      std::ofstream(f.exe.parent_path() / "extra.DLL") << "new";
+    }
+    SECTION("a later incomplete marker revokes readiness") {
+      fs::create_directories(f.paths.local() / "preparation");
+      std::ofstream(f.paths.local() / "preparation/sample.incomplete") << "interrupted";
+    }
+    CHECK(f.Check());
+  }
 }
 TEST_CASE("explicit alternate build remains bound to the registered title", "[preparation]") {
   Fixture f;

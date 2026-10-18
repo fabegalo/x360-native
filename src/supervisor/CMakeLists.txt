@@ -25,6 +25,14 @@ if(WIN32)
     target_link_libraries(x360n_core PUBLIC dbghelp user32 gdi32 bcrypt)
 endif()
 target_compile_options(x360n_core PUBLIC -Wall -Wextra)
+
+# Verification streams thousands of files even in the local Debug frontend.
+# Keep assertions, debug CRT and symbols, but optimize these CPU hot loops.
+# Title/SDK presets and every other supervisor source retain their flags.
+if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
+    set_source_files_properties(digest_batch.cpp preparation.cpp PROPERTIES
+        COMPILE_OPTIONS "$<$<CONFIG:Debug>:-O2>")
+endif()
 target_compile_definitions(x360n_core PUBLIC
     X360N_VERSION="${PROJECT_VERSION}"
     X360N_BUILD_CONFIG="$<CONFIG>"

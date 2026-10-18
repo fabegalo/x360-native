@@ -200,3 +200,49 @@ TEST_CASE("protected digests support long Unicode Windows paths", "[digest-batch
   }
   std::error_code ec; fs::remove_all(fs::path(L"\\\\?\\" + dir.native()), ec);
 }
+TEST_CASE("parallel digest read ahead preserves transaction identity and timestamp adversaries", "[digest-batch]") {
+  const auto dir = UniqueTempPath("digest-parallel"); fs::create_directories(dir);
+  std::vector<fs::path> paths;
+  std::vector<std::string> hashes;
+  std::vector<fs::file_time_type> times;
+  for (unsigned i = 0; i < 9; ++i) {
+    paths.push_back(dir / (std::to_string(i) + ".bin"));
+    const std::string bytes((1 << 20) + i * 13, char('a' + i));
+    std::ofstream(paths.back(), std::ios::binary) << bytes;
+    hashes.push_back(Sha256Hex({reinterpret_cast<const uint8_t*>(bytes.data()), bytes.size()}));
+    times.push_back(fs::last_write_time(paths.back()));
+  }
+  for (const unsigned workers : {1u, 4u, 20u}) {
+    DigestBatch batch;
+    auto candidates = paths;
+    candidates.push_back(paths.front()); candidates.push_back(dir / "missing");
+    PrimeVerificationDigests(candidates, workers);
+    REQUIRE(batch.files == paths.size());
+    for (size_t i = 0; i < paths.size(); ++i) {
+      REQUIRE(DigestFile(paths[i])); CHECK(DigestFile(paths[i])->sha256 == hashes[i]);
+      CHECK(HasProtectedVerificationPath(paths[i]));
+      CHECK_FALSE(DeleteFileW(paths[i].c_str()));
+    }
+    CHECK(batch.files == paths.size());
+    CHECK_FALSE(DigestFile(dir / "missing"));
+  }
+  // A new operation must read again even with exactly preserved size/mtime.
+  {
+    std::fstream file(paths[3], std::ios::in | std::ios::out | std::ios::binary); file.put('z');
+  }
+  fs::last_write_time(paths[3], times[3]);
+  {
+    DigestBatch batch;
+    PrimeVerificationDigests(paths);
+    CHECK(DigestFile(paths[3])->sha256 != hashes[3]);
+    CHECK(batch.files == paths.size());
+  }
+  {
+    unsigned checks = 0;
+    DigestBatch batch([&] { return ++checks > paths.size() + 1; });
+    CHECK_THROWS_AS(PrimeVerificationDigests(paths), VerificationCancelled);
+  }
+  // Cancellation joins every worker and destruction releases all exclusions.
+  CHECK(DeleteFileW(paths[3].c_str()));
+  std::error_code ec; fs::remove_all(dir, ec);
+}

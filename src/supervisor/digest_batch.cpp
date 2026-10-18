@@ -3,6 +3,11 @@
 #include <unordered_map>
 #include <stdexcept>
 #include <vector>
+#include <atomic>
+#include <thread>
+#include <condition_variable>
+#include <unordered_set>
+#include <algorithm>
 #ifdef _WIN32
 #include <bcrypt.h>
 #endif
@@ -36,6 +41,32 @@ std::filesystem::path CanonicalName(HANDLE file, const std::filesystem::path& pa
   }
   return std::filesystem::weakly_canonical(path);
 }
+std::optional<FileDigest> HashHeldFile(HANDLE file, std::vector<uint8_t>& buffer,
+                                     const std::function<bool()>& keep_reading) {
+  ActionTrace trace("hash.stream");
+  LARGE_INTEGER beginning{};
+  if (!SetFilePointerEx(file, beginning, nullptr, FILE_BEGIN)) return std::nullopt;
+  struct Algorithm {
+    BCRYPT_ALG_HANDLE handle = nullptr;
+    Algorithm() { if (BCryptOpenAlgorithmProvider(&handle, BCRYPT_SHA256_ALGORITHM, nullptr, 0) < 0) handle = nullptr; }
+    ~Algorithm() { if (handle) BCryptCloseAlgorithmProvider(handle, 0); }
+  };
+  static const Algorithm algorithm;
+  struct Hash { BCRYPT_HASH_HANDLE handle = nullptr; ~Hash() { if (handle) BCryptDestroyHash(handle); } } hash;
+  if (!algorithm.handle || BCryptCreateHash(algorithm.handle, &hash.handle, nullptr, 0, nullptr, 0, 0) < 0) return std::nullopt;
+  uint64_t size = 0;
+  for (;;) {
+    if (!keep_reading()) return std::nullopt;
+    DWORD count = 0;
+    if (!ReadFile(file, buffer.data(), static_cast<DWORD>(buffer.size()), &count, nullptr)) return std::nullopt;
+    if (!count) break;
+    if (BCryptHashData(hash.handle, buffer.data(), count, 0) < 0) return std::nullopt;
+    size += count;
+  }
+  std::array<uint8_t, 32> digest{};
+  if (BCryptFinishHash(hash.handle, digest.data(), static_cast<ULONG>(digest.size()), 0) < 0) return std::nullopt;
+  return FileDigest{size, ToHex(digest)};
+}
 #endif
 }
 struct DigestBatch::State {
@@ -53,6 +84,15 @@ struct DigestBatch::State {
   std::unordered_map<std::filesystem::path, std::unique_ptr<File>> directories;
   std::unordered_map<std::filesystem::path, std::filesystem::path> normal;
   std::unordered_map<std::filesystem::path, std::shared_ptr<File>> metadata;
+  struct Pending {
+    std::filesystem::path path;
+    std::string key;
+    std::shared_ptr<File> file;
+    std::optional<FileDigest> digest;
+  };
+  bool collecting = false;
+  std::vector<Pending> pending;
+  std::unordered_set<std::string> pending_keys;
   bool Pin(const std::filesystem::path& directory) {
     if (directories.contains(directory)) return true;
     const auto parent = directory.parent_path();
@@ -169,35 +209,74 @@ std::optional<FileDigest> TryBatchDigest(const std::filesystem::path& path, bool
     ++current->owner->hits;
     return it->second.digest;
   }
-  ActionTrace trace("hash.stream");
-  LARGE_INTEGER beginning{};
-  if (!SetFilePointerEx(file->handle, beginning, nullptr, FILE_BEGIN)) return std::nullopt;
-  struct Algorithm {
-    BCRYPT_ALG_HANDLE handle = nullptr;
-    Algorithm() { if (BCryptOpenAlgorithmProvider(&handle, BCRYPT_SHA256_ALGORITHM, nullptr, 0) < 0) handle = nullptr; }
-    ~Algorithm() { if (handle) BCryptCloseAlgorithmProvider(handle, 0); }
-  };
-  static const Algorithm algorithm;
-  struct Hash { BCRYPT_HASH_HANDLE handle = nullptr; ~Hash() { if (handle) BCryptDestroyHash(handle); } } hash;
-  if (!algorithm.handle || BCryptCreateHash(algorithm.handle, &hash.handle, nullptr, 0, nullptr, 0, 0) < 0) return std::nullopt;
-  uint64_t size = 0;
-  for (;;) {
-    CheckVerificationCancellation();
-    DWORD count = 0;
-    if (!ReadFile(file->handle, current->buffer.data(), static_cast<DWORD>(current->buffer.size()), &count, nullptr)) return std::nullopt;
-    if (!count) break;
-    if (BCryptHashData(hash.handle, current->buffer.data(), count, 0) < 0) return std::nullopt;
-    size += count;
+  if (current->collecting && pinned && reusable &&
+      ((uint64_t(info.nFileSizeHigh) << 32) | info.nFileSizeLow) >= (1u << 20)) {
+    if (current->pending_keys.insert(key).second)
+      current->pending.push_back({absolute, key, std::move(file), {}});
+    return std::nullopt;
   }
-  std::array<uint8_t, 32> digest{};
-  if (BCryptFinishHash(hash.handle, digest.data(), static_cast<ULONG>(digest.size()), 0) < 0) return std::nullopt;
-  FileDigest result{size, ToHex(digest)};
-  ++current->owner->files; current->owner->bytes += size;
-  if (reusable) current->entries.emplace(key, DigestBatch::State::Entry{std::move(file), result});
+  const auto result = HashHeldFile(file->handle, current->buffer, [] {
+    CheckVerificationCancellation(); return true;
+  });
+  if (!result) return std::nullopt;
+  ++current->owner->files; current->owner->bytes += result->size;
+  if (reusable) current->entries.emplace(key, DigestBatch::State::Entry{std::move(file), *result});
   if (pinned && reusable) current->paths.emplace(absolute, key);
   return result;
 #else
   (void)path; handled = false; return std::nullopt;
+#endif
+}
+void PrimeVerificationDigests(std::span<const std::filesystem::path> paths, unsigned workers) {
+  CheckVerificationCancellation();
+#ifdef _WIN32
+  if (!current || paths.empty()) return;
+  auto* state = current;
+  struct Reset {
+    DigestBatch::State* state;
+    ~Reset() { state->collecting = false; state->pending.clear(); state->pending_keys.clear(); }
+  } reset{state};
+  state->collecting = true;
+  for (const auto& path : paths) { bool handled = false; TryBatchDigest(path, handled); }
+  state->collecting = false;
+  if (state->pending.empty()) return;
+  const unsigned count = static_cast<unsigned>(std::min<size_t>(state->pending.size(), std::clamp(workers, 1u, 4u)));
+  std::atomic<size_t> next{0};
+  std::atomic<unsigned> done{0};
+  std::atomic<bool> stopped{false};
+  std::mutex mutex;
+  std::condition_variable progress;
+  // Workers never touch thread-local verification state or invoke the owner's
+  // cancellation/UI callback. The owner polls it while workers stream 1 MiB blocks.
+  std::vector<std::jthread> threads;
+  try {
+    for (unsigned i = 0; i < count; ++i) threads.emplace_back([&] {
+      try {
+        std::vector<uint8_t> buffer(1 << 20);
+        while (!stopped.load(std::memory_order_relaxed)) {
+          const auto index = next.fetch_add(1, std::memory_order_relaxed);
+          if (index >= state->pending.size()) break;
+          auto& job = state->pending[index];
+          job.digest = HashHeldFile(job.file->handle, buffer, [&] { return !stopped.load(std::memory_order_relaxed); });
+        }
+      } catch (...) { stopped.store(true, std::memory_order_relaxed); }
+      ++done; progress.notify_one();
+    });
+    while (done.load() != count) {
+      CheckVerificationCancellation();
+      std::unique_lock lock(mutex);
+      progress.wait_for(lock, std::chrono::milliseconds(10), [&] { return done.load() == count; });
+    }
+  } catch (...) { stopped.store(true); throw; }
+  threads.clear(); // Join before publishing results or releasing held files.
+  CheckVerificationCancellation();
+  for (auto& job : state->pending) if (job.digest) {
+    ++state->owner->files; state->owner->bytes += job.digest->size;
+    state->entries.emplace(job.key, DigestBatch::State::Entry{std::move(job.file), *job.digest});
+    state->paths.emplace(job.path, job.key);
+  }
+#else
+  (void)paths; (void)workers;
 #endif
 }
 }

@@ -2,6 +2,7 @@
 #include "../../src/desktop/model/catalog.h"
 #include "sha256.h"
 #include "digest_batch.h"
+#include "launch_preflight.h"
 #include "session_profile.h"
 #include "workspace_lease.h"
 #include "../supervisor/preparation_fixture.h"
@@ -64,6 +65,7 @@ TEST_CASE("supervisor launch preflight binds the complete catalog validation to 
   {
     DigestBatch batch;
     CHECK_FALSE(CatalogLaunchVerificationActive());
+    PrimeLaunchVerification(f.paths, {f.target}, f.target.id);
     CHECK(VerifyCatalogLaunch(f.paths, {f.target}, f.target.id, f.target.manifest).id == f.target.id);
     CHECK_FALSE(CatalogLaunchVerificationActive());
     const auto streamed = batch.files;
@@ -83,6 +85,7 @@ TEST_CASE("supervisor launch preflight binds the complete catalog validation to 
   SECTION("unverified DLL") { Write(f.target.exe.parent_path() / "extra.dll", "corrupted"); }
   SECTION("runtime failure") { Write(f.paths.local() / "preparation" / (f.target.id + ".runtime-error"), "failed"); }
   DigestBatch next_launch;
+  PrimeLaunchVerification(f.paths, {f.target}, f.target.id);
   CHECK_THROWS(VerifyCatalogLaunch(f.paths, {f.target}, f.target.id, f.target.manifest));
 }
 TEST_CASE("launch path scope preserves catalog metadata and unwinds without changing opening", "[launch-preflight]") {
