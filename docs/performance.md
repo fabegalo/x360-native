@@ -31,6 +31,10 @@ digests apenas durante lotes com exclusão de escrita/remoção. A comparação
 sintética alternada reduziu a conferência de 21,60 para 11,56 s; não mede startup
 real ou desempenho dos jogos. Instrumentação, regressões, limites e roteiro
 manual: [launcher em 18/10/2026](reports/launcher-performance-2026-10-18.md).
+No complemento com o acervo local, a espera inicial de 84–85 s caiu para 5,98 s:
+abertura lista metadados, sem autenticar antecipadamente todos os títulos.
+SHA-256/recibos continuam obrigatórios antes de preparar/iniciar; a verificação
+completa também pode ser solicitada explicitamente. Não é medição de startup guest.
 
 ## Builds incrementais
 

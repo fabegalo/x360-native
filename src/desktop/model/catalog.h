@@ -30,8 +30,11 @@ struct Target {
 };
 struct Inspection {
   bool inputs_ok = true, prepared = false, interrupted = false;
+  // Presentation metadata never authenticates content or grants launchability.
+  bool verification_pending = false, launch_candidate = false;
   std::vector<std::string> issues;
 };
+enum class InspectionMode { Full, Preview };
 struct ContentIdentity {
   std::filesystem::path file;
   std::string target_id, label, version, kind, problem;
@@ -59,7 +62,7 @@ std::string ImportGame(const ProjectPaths& paths, const std::vector<Target>& tar
 std::vector<std::string> DetectImportTargets(const std::vector<Target>& targets,
                                             const std::filesystem::path& source,
                                             const std::function<bool()>& cancelled = {});
-Inspection Inspect(const ProjectPaths& paths, const Target& target);
+Inspection Inspect(const ProjectPaths& paths, const Target& target, InspectionMode mode = InspectionMode::Full);
 // Installs verified dependencies into the selected dashboard's SDK content store.
 // The original dashboard still enumerates and launches them through XAM.
 std::vector<std::string> InspectLibrary(const ProjectPaths& paths, const Target& session, const std::vector<Target>& catalog);

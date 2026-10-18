@@ -1,4 +1,5 @@
 #include "catalog.h"
+#include "catalog_paths.h"
 #include "action_trace.h"
 #include "digest_batch.h"
 #include "preparation.h"
@@ -77,6 +78,7 @@ std::vector<Target> ReadCatalog(const ProjectPaths& paths) {
     auto info = Read(setup);
     Target t;
     t.id = Utf8(dir.path().filename());
+    ActionTrace target_trace("catalog.recipe." + t.id);
     if (!IsSafeLabel(t.id)) throw std::runtime_error("Identificador inválido.");
     t.label = Text(info["label"]);
     t.limitations = Text(info["limitations"]);
@@ -102,6 +104,7 @@ std::vector<Target> ReadCatalog(const ProjectPaths& paths) {
     // A codegen VFS root wider than the content (embedded system modules).
     if (profile["x360n"]["game_data_root"]) t.game_root = Resolve(dir.path(), Text(profile["x360n"]["game_data_root"]));
     Inside(t.game_root, paths.inputs());
+    CatalogPaths content_paths(t.game_root);
     t.exe = paths.build() / "titles" / t.id / (t.id + ".exe");
     if (auto value = profile["x360n"]["native_exe"].value<std::string>())
       t.exe = Resolve(dir.path(), *value);
@@ -147,7 +150,9 @@ std::vector<Target> ReadCatalog(const ProjectPaths& paths) {
         auto relative = fs::path(std::u8string(line.begin() + 65, line.end()));
         for (const auto& component : relative)
           if (!IsSafePackageEntryName(Utf8(component))) throw std::runtime_error("Caminho inválido no inventário.");
-        auto destination = Resolve(t.game_root, Utf8(relative)); Inside(destination, t.game_root);
+        auto fast = content_paths.Resolve(t.game_root / relative);
+        auto destination = fast ? *fast : Resolve(t.game_root, Utf8(relative));
+        if (!fast) Inside(destination, t.game_root);
         t.inputs.push_back({destination, Utf8(relative.filename()), line.substr(0, 64), relative});
       }
     }
@@ -183,10 +188,27 @@ fs::path PreparationMarker(const ProjectPaths& paths, const Target& t) {
   if (!IsSafeLabel(t.id)) throw std::runtime_error("Identificador inválido.");
   return paths.local() / "preparation" / (t.id + ".incomplete");
 }
-Inspection Inspect(const ProjectPaths& paths, const Target& t) {
+Inspection Inspect(const ProjectPaths& paths, const Target& t, InspectionMode mode) {
   ActionTrace trace("content.inspect." + t.id);
   Inspection r;
   if (!t.import_error.empty()) { r.inputs_ok = false; r.issues.push_back(t.import_error); }
+  if (mode == InspectionMode::Preview) {
+    // Opening the launcher lists metadata. Only an explicit check/preparation/
+    // launch authenticates the complete inventory with Full (the default).
+    r.inputs_ok = false;
+    if (!t.import_error.empty() || t.inputs.empty()) return r;
+    const auto& anchor = t.inputs.front();
+    const auto file = t.preparation_source.empty() ? anchor.destination :
+        t.preparation_source / anchor.destination.lexically_relative(t.game_root);
+    r.verification_pending = fs::is_regular_file(file);
+    r.interrupted = fs::exists(PreparationMarker(paths, t)) ||
+        fs::exists(paths.local() / "preparation" / (t.id + ".runtime-error"));
+    r.launch_candidate = r.verification_pending && t.aot && !r.interrupted &&
+        fs::is_regular_file(t.exe) && fs::is_regular_file(PreparationReceipt(t.exe));
+    for (const auto& runtime : t.runtime_files) r.launch_candidate &= fs::is_regular_file(runtime);
+    if (!r.verification_pending) r.issues.push_back("Falta componente: " + Utf8(anchor.destination));
+    return r;
+  }
   for (const auto& i : t.inputs) {
     CheckVerificationCancellation();
     auto file = t.preparation_source.empty() ? i.destination : t.preparation_source / i.destination.lexically_relative(t.game_root);

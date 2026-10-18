@@ -1,4 +1,6 @@
 #include "catalog.h"
+#include "catalog_paths.h"
+#include "action_trace.h"
 #include "digest_batch.h"
 #include "sha256.h"
 #include "workspace_lease.h"
@@ -224,10 +226,12 @@ std::string ImportGame(const ProjectPaths& paths, const std::vector<Target>& tar
 void ReadImportedGames(const ProjectPaths& paths, std::vector<Target>& targets) {
   const auto root = paths.local() / "catalog";
   if (!fs::is_directory(root)) return;
+  CatalogPaths content_paths(paths.inputs());
   for (const auto& file : fs::directory_iterator(root)) {
     CheckVerificationCancellation();
     if (file.path().extension() != ".json") continue;
     Target t; t.id = Utf8(file.path().stem()); t.aot = false; t.catalogued = true; t.importable = false;
+    ActionTrace target_trace("catalog.imported." + t.id);
     t.label = t.label_en = t.id;
     try {
       Safe(file.path(), paths.local());
@@ -241,7 +245,7 @@ void ReadImportedGames(const ProjectPaths& paths, std::vector<Target>& targets) 
         CheckVerificationCancellation();
         auto rel = Relative(f.at("path")); const auto hash = f.at("sha256").get<std::string>();
         if (!HashValid(hash) || !seen.insert(rel).second) throw std::runtime_error("Invalid catalog inventory");
-        Safe(t.game_root / rel, paths.inputs());
+        if (!content_paths.Resolve(t.game_root / rel)) Safe(t.game_root / rel, paths.inputs());
         t.inputs.push_back({t.game_root / rel, Utf8(rel.filename()), hash, rel});
       }
       t.title_id = r.at("title_id"); t.version = r.at("version"); t.media_id = r.at("media_id");
@@ -291,7 +295,8 @@ void ReadImportedGames(const ProjectPaths& paths, std::vector<Target>& targets) 
       for (const auto& dep : r.value("imports", std::vector<std::string>{})) {
         t.limitations += "\nImport: " + dep; t.limitations_en += "\nImport: " + dep;
       }
-    } catch (const std::exception& e) { t.import_error = std::string("Catalog error; record preserved: ") + e.what(); t.inputs.clear(); }
+    } catch (const VerificationCancelled&) { throw; }
+      catch (const std::exception& e) { t.import_error = std::string("Catalog error; record preserved: ") + e.what(); t.inputs.clear(); }
     targets.push_back(std::move(t));
   }
 }

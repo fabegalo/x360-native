@@ -15,6 +15,16 @@ Corpus sintético: conferência média de 21,60 → 11,56 s; retorno da carga na
 aprovados. Sem jogos executados ou medição real de startup/gameplay. Relatório,
 limites e roteiro manual: [launcher](docs/reports/launcher-performance-2026-10-18.md).
 
+Complemento após relato de um minuto nessa conferência: reproduzidos 84,14 / 84,88 s
+no acervo local (9 alvos, 11.258 inputs, 29,50 GB lidos por passagem). A abertura
+agora lista metadados em 5,98 s nas duas passagens, sem hashes do conteúdo e sem
+marcá-lo como autenticado. Conferência completa permanece obrigatória ao preparar,
+iniciar ou pedir verificação explícita. Resolução de diretórios é reaproveitada
+somente enquanto handles impedem alteração/renomeação; links usam as verificações
+anteriores. Regressões ampliadas para 14 casos / 150 asserções; catálogo 82 / 53.799.
+O tempo não inclui startup real de dashboard/jogo. Evidência e limites no complemento
+do mesmo relatório; nenhum jogo executado.
+
 Charlie/NetCF, análise técnica sobre `6de07e6`: demonstrada incompatibilidade
 entre o PTE aproximado do SDK e o mapper de modo de usuário do RuntimeHost.
 A página `0x82BC0000` recebe `0x2BC` e falha no teste de atributos; sonda com

@@ -10,6 +10,7 @@
 #endif
 #include "../supervisor/preparation_fixture.h"
 #include "../supervisor/scratch.h"
+#include "catalog_paths.h"
 namespace {
 using Clock = std::chrono::steady_clock;
 int64_t Now() { return std::chrono::duration_cast<std::chrono::milliseconds>(Clock::now().time_since_epoch()).count(); }
@@ -76,6 +77,9 @@ struct Frontend {
   }
   void Seed(const Target& target, bool unrelated = false) {
     app.targets = {target}; app.checked.resize(1); app.checked[0].state = Inspect(paths, target);
+#ifndef X360N_FRONTEND_BASELINE
+    app.catalog_loaded = true;
+#endif
     if (unrelated) {
       Target slow; slow.id = "unrelated"; slow.aot = false;
       for (unsigned i = 0; i != 6000; ++i) slow.inputs.push_back({paths.inputs() / ("missing-" + std::to_string(i)), "missing", std::string(64, 'a')});
@@ -109,6 +113,10 @@ TEST_CASE("launcher catalog loading leaves the message thread responsive", "[lau
 }
 TEST_CASE("launcher completes consecutive sessions without scanning unrelated content", "[launcher-ui]") {
   Frontend f; const auto target = f.TargetFixture(); f.Seed(target, true);
+#ifndef X360N_FRONTEND_BASELINE
+  f.app.checked[0].state = Inspect(f.paths, target, InspectionMode::Preview);
+  InspectSelected(f.app);
+#endif
   const std::string modes[]{"ok", "fail", "ok"};
   for (unsigned step = 0; step != 3; ++step) {
     const auto& mode = modes[step];
@@ -116,7 +124,13 @@ TEST_CASE("launcher completes consecutive sessions without scanning unrelated co
     fs::remove(f.root / "child-ended.txt");
     const auto launch_start = Now();
     if (step == 2) { SendMessageW(f.app.window, WM_COMMAND, kRetry, 0); f.Pump(); }
-    else Start(f.app, kLaunch);
+    else {
+#ifndef X360N_FRONTEND_BASELINE
+      if (step == 0) SendMessageW(f.app.window, WM_COMMAND, kPrimary, 0);
+      else
+#endif
+        Start(f.app, kLaunch);
+    }
     REQUIRE(f.app.busy);
     SendMessageW(f.app.window, WM_COMMAND, kDetails, 0);
     SendMessageW(f.app.window, WM_COMMAND, mode == "fail" ? kGames : kHome, 0);
@@ -146,6 +160,94 @@ TEST_CASE("launcher cancels verification before creating a session process", "[l
   CHECK_FALSE(f.app.session);
 }
 #ifndef X360N_FRONTEND_BASELINE
+TEST_CASE("launcher lists a complete inventory without authenticating or executing it", "[launcher-ui]") {
+  Frontend f; const auto target = f.TargetFixture();
+  const auto setup = f.root / "titles/dashboard/preparation.toml";
+  std::ifstream in(setup); std::string text{std::istreambuf_iterator<char>(in), {}}; in.close();
+  std::ofstream(setup) << "inventory='inventory.tsv'\n" << text;
+  std::ofstream list(f.root / "titles/dashboard/inventory.tsv");
+  for (int i = 0; i != 5000; ++i) list << std::string(64, 'a') << '\t' << i << ".bin\n";
+  list.close();
+  {
+    DigestBatch batch;
+    const auto catalog = ReadCatalog(f.paths);
+    REQUIRE(catalog.front().inputs.size() == 5001);
+    const auto checked = CheckContents(f.root, catalog, InspectionMode::Preview);
+    REQUIRE(checked.size() == 1);
+    CHECK(checked[0].state.verification_pending);
+    CHECK(checked[0].state.launch_candidate);
+    CHECK_FALSE(checked[0].state.inputs_ok);
+    CHECK_FALSE(checked[0].state.prepared);
+    CHECK(batch.files == 0); CHECK(batch.bytes == 0);
+  }
+  const auto started = Now(); Load(f.app, f.root);
+  REQUIRE(f.Until([&] { return !f.app.busy; }));
+  std::cout << "complete initial listing ms=" << Now() - started << '\n';
+  CHECK(Now() - started < 3000);
+  REQUIRE(f.app.catalog_loaded);
+  CHECK(f.app.next_action == kLaunch);
+  CHECK_FALSE(f.app.current.prepared);
+  SendMessageW(f.app.window, WM_COMMAND, kGames, 0);
+  SendMessageW(f.app.window, WM_COMMAND, kHome, 0);
+  CHECK_FALSE(f.app.busy);
+  CHECK_FALSE(fs::exists(f.root / "child-started.txt"));
+}
+TEST_CASE("preview launch must reject changed content with preserved timestamps", "[launcher-ui]") {
+  Frontend f; const auto target = f.TargetFixture(); f.Seed(target);
+  f.app.checked[0].state = Inspect(f.paths, target, InspectionMode::Preview);
+  const auto file = target.inputs.front().destination;
+  const auto timestamp = fs::last_write_time(file);
+  std::ofstream(file) << "corrupted input"; fs::last_write_time(file, timestamp);
+  SendMessageW(f.app.window, WM_COMMAND, kLaunch, 0);
+  REQUIRE(f.app.busy);
+  REQUIRE(f.Until([&] { return !f.app.busy; }));
+  CHECK(f.app.failed);
+  CHECK_FALSE(f.app.checked[0].state.verification_pending);
+  CHECK_FALSE(f.app.checked[0].state.inputs_ok);
+  CHECK_FALSE(f.app.checked[0].state.prepared);
+  CHECK_FALSE(fs::exists(f.root / "child-started.txt"));
+}
+TEST_CASE("selected verification authenticates only its preparation without launching tools", "[launcher-ui]") {
+  Frontend f; auto target = f.TargetFixture(); target.session = false;
+  f.Seed(target, true);
+  f.app.checked[0].state = Inspect(f.paths, target, InspectionMode::Preview);
+  Start(f.app, kVerifyTarget);
+  REQUIRE(f.Until([&] { return !f.app.busy; }));
+  CHECK_FALSE(f.app.failed);
+  CHECK(f.app.checked[0].state.prepared);
+  CHECK_FALSE(f.app.checked[0].state.verification_pending);
+  CHECK(f.app.checked[1].state.issues.empty());
+  CHECK_FALSE(fs::exists(f.root / "child-started.txt"));
+  CHECK_FALSE(fs::exists(f.app.logs / "tools.log"));
+}
+TEST_CASE("empty catalogs finish loading once and navigation does not restart workers", "[launcher-ui]") {
+  Frontend f; Load(f.app, f.root);
+  REQUIRE(f.Until([&] { return !f.app.busy; }));
+  CHECK(f.app.catalog_loaded); CHECK(f.app.targets.empty());
+  SendMessageW(f.app.window, WM_COMMAND, kGames, 0);
+  CHECK_FALSE(f.app.busy);
+}
+TEST_CASE("catalog path reuse pins directory identities for only one catalog read", "[launcher-ui]") {
+  Frontend f;
+  const auto parent = f.root / "content";
+  const auto dir = parent / "nested";
+  fs::create_directories(dir);
+  std::ofstream(dir / "asset") << "asset";
+  {
+    CatalogPaths paths(parent);
+    REQUIRE(paths.Resolve(dir / "asset"));
+    CHECK(paths.Resolve(dir / "missing"));
+    CHECK_FALSE(paths.Resolve(dir / "missing-parent/asset"));
+    CHECK_FALSE(paths.Resolve(f.root / "outside"));
+    CHECK_FALSE(MoveFileExW(dir.c_str(), (parent / "moved").c_str(), 0));
+    CHECK_FALSE(MoveFileExW(parent.c_str(), (f.root / "moved").c_str(), 0));
+    CHECK(paths.Resolve(dir / "asset"));
+  }
+  REQUIRE(MoveFileExW(dir.c_str(), (parent / "moved").c_str(), 0));
+  CatalogPaths fresh(parent);
+  CHECK_FALSE(fresh.Resolve(dir / "asset"));
+  CHECK(fresh.Resolve(parent / "moved/asset"));
+}
 TEST_CASE("launcher reports native closure before supervisor diagnostic cleanup completes", "[launcher-ui]") {
   Frontend f; f.Seed(f.TargetFixture());
   std::ofstream(f.root / "child-mode.txt") << "cleanup";

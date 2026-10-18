@@ -165,10 +165,13 @@ de dashboard, C7/C8 comercial ou jogo foi ampliada.
    & .local/build/desktop-only/src/desktop/x360-native.exe
    ```
 
-3. Cronometrar a abertura, verificação inicial, navegação/busca/diagnóstico e
+3. Cronometrar a abertura/listagem, navegação/busca/diagnóstico e
    clicar manualmente para abrir a dashboard. Anotar quando a janela aparece,
    quando o conteúdo original aparece e quando aceita entrada. Não confundir
    frame criado, filha anexada e primeiro swap/conteúdo pronto.
+   Registrar separadamente a autenticação em **Conferir e iniciar**. **Verificar
+   ambiente** pede a varredura completa de forma explícita; não é mais requisito
+   para abrir a biblioteca. O estado inicial **Conferir** não certifica os arquivos.
 4. Minimizar/restaurar e trocar foco: a sessão deve continuar. Fechar a janela
    native: observar a transição de sessão, finalização dos registros e liberação
    para outro lançamento. Repetir na mesma instalação com cache quente.
@@ -184,10 +187,79 @@ de dashboard, C7/C8 comercial ou jogo foi ampliada.
 
 Cada TSV tem `timestamp_monotonic_ms`, `thread_id`, `phase`, `duration_ms`, sem
 cabeçalho. Um arquivo por processo. `ui.command.*`, `ui.load`, `ui.start`,
-`ui.timer`, `catalog.read`, `content.snapshot`, `receipt.verify.*`, `hash.stream`,
+`ui.timer`, `catalog.read`, `catalog.recipe.*`, `catalog.imported.*`, `content.list`,
+`content.snapshot`, `receipt.verify.*`, `hash.stream`,
 `launch.preflight`, `process.created/exited`, `session.window.create/closed`,
 `session.title_window.attached`, `ui.session.closed`, `operation.finish` e
 `ui.finished` separam os estágios. Durações de scopes são inclusivas e podem
 se sobrepor: não somar seus totais para obter a latência do caminho crítico.
 Tracing é opt-in, desligado normalmente; escritas de diagnóstico não alteram
 o resultado da operação. ON/OFF não foi certificado como benchmark de gameplay.
+
+## Complemento: um minuto em “Conferindo seu conteúdo”
+
+Após o relato do mantenedor, a base `17b5a0d` foi medida com o acervo local real,
+somente para leitura. A primeira correção tirara a carga da thread Win32, mas
+ainda exigia autenticar **todos** os títulos antes de publicar a biblioteca.
+Havia nove alvos, 11.258 inputs e leitura de 29.499.627.672 bytes por passagem,
+incluindo dependências e cópias conferidas pelos recibos. A leitura do catálogo
+repetia canonicalização e checagem de ancestrais para milhares de irmãos.
+
+| Etapa no acervo local, Debug e tracing OFF | Antes, passes 0 / 1 | Depois, passes 0 / 1 |
+|---|---:|---:|
+| Leitura do catálogo | 23.874,9 / 23.484,4 ms | 5.965,16 / 5.967,55 ms |
+| Espera inicial de catálogo + estado para a biblioteca | 84.140,3 / 84.881,2 ms | 5.976,74 / 5.979,68 ms |
+| Arquivos lidos para SHA / bytes por passagem | 17.396 / 29.499.627.672 | 0 / 0 |
+
+São duas passagens por processo, na mesma máquina/acervo/build Debug, sem build
+ou teste concorrente, sem flush do cache do sistema. O segundo passe representa
+repetição quente. O “depois” muda deliberadamente o trabalho da abertura:
+**lista metadados, sem autenticar o acervo**. Não representa uma aceleração de
+93% da autenticação completa. Os 5,98 s não incluem probe de hardware, criação
+da janela desktop, preflight de pacote nem startup de dashboard/jogo. Os números
+anteriores do corpus sintético permanecem históricos.
+
+`InspectionMode::Preview` nunca define `inputs_ok` ou `prepared` como verdadeiros.
+A UI mostra **Verificação pendente / Conferir**, com **Conferir e iniciar** para
+sessão candidata ou **Conferir preparação** para conferir o build de um jogo sem
+executá-lo. Existência de executável/recibo é apenas metadado. Antes de criar
+processo ou executar preparação, o worker usa `Full` (padrão da API) para conferir
+SHA-256, recibos, dependências e biblioteca pertinentes. Não há aprovação por
+mtime ou cache persistente. Falha publica o estado autenticado negativo. Importar
+ou preparar também deixou de disparar uma nova varredura pesada de outros títulos.
+**Verificar ambiente** continua pedindo a conferência completa explicitamente.
+
+O catálogo reaproveita resolução de diretórios apenas durante aquela leitura,
+com handles `GENERIC_READ` sem compartilhamento de escrita/remoção. Cada folha
+tem atributos conferidos; ancestrais também são retidos. Links, ausência de
+parent, exclusão indisponível ou host sem suporte seguem as verificações antigas.
+Não existe cache global de módulos ou cruzamento de versões. A tentativa inicial
+com `FILE_READ_ATTRIBUTES` falhou no teste de exclusão de rename; foi corrigida
+para `GENERIC_READ` e o teste passou. Traces opcionais agora distinguem receita,
+registro importado e listagem, sem hashes de conteúdo nesta última.
+
+Regressões finais: `desktop.launcher` **14 casos / 150 asserções**, incluindo
+conclusão de listagem com 5.000 entradas (1.866 ms; dispatch 24 ms), zero hashes,
+conteúdo adulterado com mtime preservado recusado antes do processo, início pela
+ação de preview, conferência selecionada sem ferramentas/processo, catálogo vazio
+sem loop e exclusão/liberação de diretórios. Sucesso/falha/sucesso sintéticos:
+saída → UI ociosa 24 / 26 / 24 ms; fechar janela → filho encerrado 2 / 1 ms
+(normal/debug). `desktop.catalog`: **82 / 53.799**, aprovado. Não se repetiram os
+contratos de supervisor sem alteração de código daquele componente.
+
+Evidência local: `.local/evidence/launcher-content-followup-2026-10-18/`, com
+binário anterior, hashes, stdout/stderr, falha inicial de exclusão, builds,
+testes e traces. Reprodução da listagem:
+
+```powershell
+& .local/build/desktop-only/src/desktop/x360n_launcher_benchmark.exe . --preview
+```
+
+O baseline já recusou recibos de 17559 (fonte `sha256.cpp` alterada) e Forza
+(`x360n_sdk_backports.cmake` alterado), encontrou 6717 incompleta e três builds
+AOT ausentes. Não se reemitiram recibos nem se recompilaram títulos para esconder
+essas pendências. O preview mostra nove pendentes e zero autenticados; isso não
+significa que os três preparados anteriores foram removidos. A conferência
+completa pode continuar demorada e exigir preparação legítima. Nenhum jogo foi
+executado; startup real e desempenho guest permanecem sem medição, com o roteiro
+manual acima preparado para essa validação.
