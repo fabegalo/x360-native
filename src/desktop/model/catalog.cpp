@@ -1,4 +1,6 @@
 #include "catalog.h"
+#include "action_trace.h"
+#include "digest_batch.h"
 #include "preparation.h"
 #include "sha256.h"
 #include "workspace_lease.h"
@@ -66,8 +68,10 @@ fs::path ImportIoPath(const fs::path& path) {
 }
 }
 std::vector<Target> ReadCatalog(const ProjectPaths& paths) {
+  ActionTrace trace("catalog.read");
   std::vector<Target> result;
   if (fs::is_directory(paths.root / "titles")) for (const auto& dir : fs::directory_iterator(paths.root / "titles")) {
+    CheckVerificationCancellation();
     auto setup = dir.path() / "preparation.toml";
     if (!fs::is_regular_file(setup)) continue;
     auto info = Read(setup);
@@ -135,6 +139,7 @@ std::vector<Target> ReadCatalog(const ProjectPaths& paths) {
       std::ifstream stream(list, std::ios::binary);
       if (!stream) throw std::runtime_error("Inventário de componentes ausente: " + Utf8(list));
       for (std::string line; std::getline(stream, line);) {
+        CheckVerificationCancellation();
         if (!line.empty() && line.back() == '\r') line.pop_back();
         if (line.empty() || line[0] == '#') continue;
         if (line.size() < 67 || line[64] != '\t' || line.substr(0, 64).find_first_not_of("0123456789abcdef") != std::string::npos)
@@ -179,9 +184,11 @@ fs::path PreparationMarker(const ProjectPaths& paths, const Target& t) {
   return paths.local() / "preparation" / (t.id + ".incomplete");
 }
 Inspection Inspect(const ProjectPaths& paths, const Target& t) {
+  ActionTrace trace("content.inspect." + t.id);
   Inspection r;
   if (!t.import_error.empty()) { r.inputs_ok = false; r.issues.push_back(t.import_error); }
   for (const auto& i : t.inputs) {
+    CheckVerificationCancellation();
     auto file = t.preparation_source.empty() ? i.destination : t.preparation_source / i.destination.lexically_relative(t.game_root);
     if (!fs::is_regular_file(file)) {
       // Absent optional components are checked by whoever needs them.

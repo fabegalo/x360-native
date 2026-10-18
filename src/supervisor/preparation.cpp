@@ -1,4 +1,6 @@
 #include "preparation.h"
+#include "action_trace.h"
+#include "digest_batch.h"
 #include "sha256.h"
 #include <nlohmann/json.hpp>
 #include <toml++/toml.hpp>
@@ -43,6 +45,7 @@ std::string ReadHead(const fs::path& sdk) {
 fs::path PreparationReceipt(const fs::path& exe) { auto p = exe; p += ".preparation.json"; return p; }
 std::optional<std::string> CheckPreparation(const ProjectPaths& paths,
     const std::string& title, const fs::path& manifest, const fs::path& exe) {
+  ActionTrace trace("receipt.verify." + title);
   const auto fail = [](const std::string& reason) -> std::optional<std::string> {
     return "Preparação inválida; prepare novamente. " + reason;
   };
@@ -77,6 +80,7 @@ std::optional<std::string> CheckPreparation(const ProjectPaths& paths,
       if (!entries.is_array() || entries.empty()) return fail("Recibo incompleto.");
       auto& seen = std::string(group) == "inputs" ? inputs : artifacts;
       for (const auto& entry : entries) {
+        CheckVerificationCancellation();
         const auto file = PathFromUtf8(entry.at("path").get<std::string>());
         const auto hash = entry.at("sha256").get<std::string>();
         if (!file.is_absolute() || hash.size() != 64 || hash.find_first_not_of("0123456789abcdef") != std::string::npos ||
@@ -91,6 +95,7 @@ std::optional<std::string> CheckPreparation(const ProjectPaths& paths,
     // CMake's CONFIGURE_DEPENDS inventory also detects newly added sources or
     // templates; hashes of previously existing files alone cannot do that.
     for (const auto& glob : receipt.at("globs")) {
+      CheckVerificationCancellation();
       const auto glob_pattern = glob.at("pattern").get<std::string>();
       std::string expression = glob.at("recursive").get<bool>() ? "([^/]*/)*" : "";
       for (const auto c : glob_pattern) {
@@ -103,6 +108,7 @@ std::optional<std::string> CheckPreparation(const ProjectPaths& paths,
       for (const auto& file : glob.at("files")) expected.insert(Key(PathFromUtf8(file.get<std::string>())));
       const auto directory = PathFromUtf8(glob.at("directory").get<std::string>());
       auto collect = [&](const auto& file) {
+        CheckVerificationCancellation();
         auto relative = PathUtf8(file.path().lexically_relative(directory));
         std::replace(relative.begin(), relative.end(), '\\', '/');
         if ((glob.at("directories").get<bool>() || file.is_regular_file()) &&
@@ -147,7 +153,8 @@ std::optional<std::string> CheckPreparation(const ProjectPaths& paths,
     if (fs::exists(paths.local() / "preparation" / (title + ".incomplete")))
       return fail("A preparação ainda não terminou.");
     return std::nullopt;
-  } catch (const std::exception&) { return fail("Não foi possível verificar o recibo e suas dependências."); }
+  } catch (const VerificationCancelled&) { throw; }
+    catch (const std::exception&) { return fail("Não foi possível verificar o recibo e suas dependências."); }
 }
 std::optional<std::string> CheckPreparedLaunch(const ProjectPaths& paths, const fs::path& exe) {
   try {

@@ -27,6 +27,12 @@ struct ProcessSpec {
   bool capture_crash = false;
   std::function<bool()> should_cancel;
   bool no_console = false;  // Desktop preparation; does not hide a title's GUI.
+  // Borrowed manual-reset Windows event; signaled only by this session's close.
+  uintptr_t cancel_event = 0;
+  std::function<void()> on_started;
+  std::function<void()> on_tick;  // worker-only, bounded progress/log sampling
+  uintptr_t notification_event = 0;  // borrowed auto-reset lifecycle event
+  std::function<void()> on_notification;
 };
 
 struct CrashInfo {

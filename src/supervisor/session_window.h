@@ -8,15 +8,17 @@ namespace x360n {
 // in a child window; this class draws no dashboard or game interface.
 class SessionWindow {
  public:
-  explicit SessionWindow(bool visible = true);
+  explicit SessionWindow(bool visible = true, uintptr_t closed_notification = 0);
   ~SessionWindow();
   SessionWindow(const SessionWindow&) = delete;
   SessionWindow& operator=(const SessionWindow&) = delete;
   uintptr_t handle() const { return handle_; }
   bool closed() const { return closed_.load(); }
+  uintptr_t close_event() const { return close_event_; }
   unsigned attached_count() const { return attached_count_.load(); }
  private:
   uintptr_t handle_ = 0;
+  uintptr_t close_event_ = 0;
   std::atomic<bool> closed_{false};
   std::atomic<unsigned> attached_count_{0};
   std::thread thread_;

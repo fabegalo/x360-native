@@ -1,6 +1,8 @@
 #include "child_process.h"
 
 #include <fmt/format.h>
+#include <algorithm>
+#include "action_trace.h"
 
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
@@ -194,7 +196,13 @@ void CaptureCrash(HANDLE process, const DEBUG_EVENT& ev, const std::filesystem::
 }  // namespace
 
 ProcessResult RunProcess(const ProcessSpec& spec) {
+  ActionTrace trace("process.wait");
   ProcessResult r;
+  auto cancelled = [&] {
+    return (spec.cancel_event && WaitForSingleObject(reinterpret_cast<HANDLE>(spec.cancel_event), 0) == WAIT_OBJECT_0) ||
+           (spec.should_cancel && spec.should_cancel());
+  };
+  if (cancelled()) { r.cancelled = true; return r; }
   Handle out(OpenForChild(spec.stdout_file, true));
   Handle err(OpenForChild(spec.stderr_file, true));
   Handle in(OpenForChild({}, false));
@@ -247,6 +255,8 @@ ProcessResult RunProcess(const ProcessSpec& spec) {
   }
   ResumeThread(thread.h);
   r.launched = true;
+  ActionTrace::Event("process.created", start);
+  if (spec.on_started) spec.on_started();
 
   if (spec.capture_crash) {
     // Debug loop: the debug events must be pumped by this thread until the
@@ -255,6 +265,13 @@ ProcessResult RunProcess(const ProcessSpec& spec) {
                                              : std::chrono::steady_clock::time_point::max();
     bool initial_breakpoint = true;
     for (bool exited = false; !exited;) {
+      if (!r.cancelled && !r.timed_out) {
+        r.cancelled = cancelled();
+        r.timed_out = !r.cancelled && std::chrono::steady_clock::now() >= deadline;
+        if (r.cancelled || r.timed_out) TerminateJobObject(job.h, 1);
+      }
+      if (spec.on_tick) spec.on_tick();
+      if (spec.notification_event && WaitForSingleObject(reinterpret_cast<HANDLE>(spec.notification_event), 0) == WAIT_OBJECT_0 && spec.on_notification) spec.on_notification();
       DEBUG_EVENT ev{};
       if (!WaitForDebugEvent(&ev, 100)) {
         if (!r.timed_out && std::chrono::steady_clock::now() >= deadline) {
@@ -293,16 +310,33 @@ ProcessResult RunProcess(const ProcessSpec& spec) {
   } else {
     const auto deadline = spec.timeout.count() > 0 ? start + spec.timeout
         : std::chrono::steady_clock::time_point::max();
-    while (WaitForSingleObject(process.h, 100) == WAIT_TIMEOUT) {
-      r.cancelled = spec.should_cancel && spec.should_cancel();
+    HANDLE waits[]{process.h, nullptr, nullptr};
+    DWORD count = 1, cancel_index = MAXDWORD, notification_index = MAXDWORD;
+    if (spec.cancel_event) { cancel_index = count; waits[count++] = reinterpret_cast<HANDLE>(spec.cancel_event); }
+    if (spec.notification_event) { notification_index = count; waits[count++] = reinterpret_cast<HANDLE>(spec.notification_event); }
+    for (;;) {
+      const auto remaining = spec.timeout.count() > 0 ?
+          std::max<int64_t>(0, std::chrono::duration_cast<std::chrono::milliseconds>(deadline - std::chrono::steady_clock::now()).count()) : int64_t(INFINITE);
+      const auto interval = (spec.should_cancel || spec.on_tick || spec.capture_crash) ? std::min<int64_t>(100, remaining) : remaining;
+      const auto wait = WaitForMultipleObjects(count, waits, FALSE,
+          static_cast<DWORD>(std::min<int64_t>(interval, INFINITE)));
+      if (wait == WAIT_OBJECT_0) break;
+      if (notification_index != MAXDWORD && wait == WAIT_OBJECT_0 + notification_index) {
+        if (spec.on_notification) spec.on_notification();
+        if (!cancelled() && std::chrono::steady_clock::now() < deadline) continue;
+      }
+      if (wait == WAIT_FAILED) { r.launch_error = LastError("waiting for child"); TerminateJobObject(job.h, 1); WaitForSingleObject(process.h, 10000); break; }
+      r.cancelled = (cancel_index != MAXDWORD && wait == WAIT_OBJECT_0 + cancel_index) || cancelled();
       r.timed_out = !r.cancelled && std::chrono::steady_clock::now() >= deadline;
       if (r.cancelled || r.timed_out) {
         TerminateJobObject(job.h, 1);
         WaitForSingleObject(process.h, 10000);
         break;
       }
+      if (spec.on_tick) spec.on_tick();
     }
   }
+  ActionTrace::Event("process.exited");
   r.duration = std::chrono::duration_cast<std::chrono::milliseconds>(
       std::chrono::steady_clock::now() - start);
   DWORD code = 0;

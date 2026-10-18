@@ -1,6 +1,7 @@
 #include "session_profile.h"
 #include "sha256.h"
 #include "preparation.h"
+#include "digest_batch.h"
 #include "../../titles/common/games_played.h"
 #include <stdexcept>
 #include <fstream>
@@ -18,6 +19,7 @@ std::vector<std::string> SessionProfileArguments(const SessionProfile& profile, 
   return args;
 }
 SessionProfile LoadSessionProfile(const ProjectPaths& paths, const std::filesystem::path& file, bool validate_execution) {
+  CheckVerificationCancellation();
   const auto manifest = std::filesystem::canonical(file);
   std::ifstream input(manifest, std::ios::binary);
   if (!input) throw std::runtime_error("cannot open session profile: " + PathUtf8(manifest));
@@ -150,6 +152,7 @@ SessionProfile LoadSessionProfile(const ProjectPaths& paths, const std::filesyst
     for (const auto& root : {paths.root / "titles", paths.local() / "aot"}) {
     if (!std::filesystem::is_directory(root)) continue;
     for (const auto& dir : std::filesystem::directory_iterator(root)) {
+      CheckVerificationCancellation();
       try {
       const auto setup_file = dir.path() / "preparation.toml";
       if (!std::filesystem::is_regular_file(setup_file)) continue;
@@ -172,7 +175,8 @@ SessionProfile LoadSessionProfile(const ProjectPaths& paths, const std::filesyst
            CheckPreparation(paths, id, candidate, native))) continue;
       if (std::filesystem::weakly_canonical(candidate) != manifest)
         p.launch_targets.push_back(candidate);
-      } catch (const std::exception&) {
+      } catch (const VerificationCancelled&) { throw; }
+        catch (const std::exception&) {
         // An interrupted or malformed optional game project must not prevent
         // starting the original dashboard or another already verified title.
         continue;

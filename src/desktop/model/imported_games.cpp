@@ -1,4 +1,5 @@
 #include "catalog.h"
+#include "digest_batch.h"
 #include "sha256.h"
 #include "workspace_lease.h"
 #include <nlohmann/json.hpp>
@@ -224,6 +225,7 @@ void ReadImportedGames(const ProjectPaths& paths, std::vector<Target>& targets) 
   const auto root = paths.local() / "catalog";
   if (!fs::is_directory(root)) return;
   for (const auto& file : fs::directory_iterator(root)) {
+    CheckVerificationCancellation();
     if (file.path().extension() != ".json") continue;
     Target t; t.id = Utf8(file.path().stem()); t.aot = false; t.catalogued = true; t.importable = false;
     t.label = t.label_en = t.id;
@@ -236,6 +238,7 @@ void ReadImportedGames(const ProjectPaths& paths, std::vector<Target>& targets) 
       t.game_root = paths.inputs() / Relative(r.at("content_root")); Safe(t.game_root, paths.inputs());
       std::set<fs::path> seen;
       for (const auto& f : r.at("files")) {
+        CheckVerificationCancellation();
         auto rel = Relative(f.at("path")); const auto hash = f.at("sha256").get<std::string>();
         if (!HashValid(hash) || !seen.insert(rel).second) throw std::runtime_error("Invalid catalog inventory");
         Safe(t.game_root / rel, paths.inputs());

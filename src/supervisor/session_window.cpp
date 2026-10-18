@@ -1,6 +1,7 @@
 #include "session_window.h"
 #include <future>
 #include <stdexcept>
+#include "action_trace.h"
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
@@ -13,6 +14,8 @@ constexpr UINT kSyncTitleFocus = WM_APP + 0x361;
 struct FrameState {
   std::atomic<bool>* closed;
   std::atomic<unsigned>* attached_count;
+  HANDLE close_event;
+  HANDLE closed_notification;
   HWND child = nullptr;
 };
 void SizeChild(HWND window, HWND child) {
@@ -44,6 +47,7 @@ LRESULT CALLBACK FrameProc(HWND window, UINT message, WPARAM wp, LPARAM lp) {
         state->child = child; SizeChild(window, child);
         PostMessageW(window, kSyncTitleFocus, 0, 0);
         state->attached_count->fetch_add(1);
+        ActionTrace::Event("session.title_window.attached");
       }
       return 0;
     }
@@ -58,24 +62,30 @@ LRESULT CALLBACK FrameProc(HWND window, UINT message, WPARAM wp, LPARAM lp) {
     }
     if (message == WM_CLOSE) {
       state->closed->store(true);
+      SetEvent(state->close_event);
+      if (state->closed_notification) SetEvent(state->closed_notification);
+      ActionTrace::Event("session.window.closed");
       if (IsWindow(state->child)) PostMessageW(state->child, WM_CLOSE, 0, 0);
       DestroyWindow(window); return 0;
     }
-    if (message == WM_DESTROY) { PostQuitMessage(0); return 0; }
+    if (message == WM_DESTROY) { state->closed->store(true); SetEvent(state->close_event); if (state->closed_notification) SetEvent(state->closed_notification); PostQuitMessage(0); return 0; }
   }
   return DefWindowProcW(window, message, wp, lp);
 }
 }
-SessionWindow::SessionWindow(bool visible) {
+SessionWindow::SessionWindow(bool visible, uintptr_t closed_notification) {
+  ActionTrace trace("session.window.create");
+  close_event_ = reinterpret_cast<uintptr_t>(CreateEventW(nullptr, TRUE, FALSE, nullptr));
+  if (!close_event_) throw std::runtime_error("could not create session close event");
   std::promise<uintptr_t> ready; auto result = ready.get_future();
-  thread_ = std::thread([this, visible, ready = std::move(ready)]() mutable {
+  thread_ = std::thread([this, visible, closed_notification, ready = std::move(ready)]() mutable {
     SetThreadDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
     const auto instance = GetModuleHandleW(nullptr);
     WNDCLASSW wc{}; wc.lpfnWndProc = FrameProc; wc.hInstance = instance;
     wc.lpszClassName = L"X360NativeSession"; wc.hCursor = LoadCursorW(nullptr, MAKEINTRESOURCEW(32512));
     wc.hbrBackground = static_cast<HBRUSH>(GetStockObject(BLACK_BRUSH));
     RegisterClassW(&wc);
-    FrameState state{&closed_, &attached_count_};
+    FrameState state{&closed_, &attached_count_, reinterpret_cast<HANDLE>(close_event_), reinterpret_cast<HANDLE>(closed_notification)};
     RECT rect{0, 0, 1280, 720}; AdjustWindowRect(&rect, WS_OVERLAPPEDWINDOW, FALSE);
     auto window = CreateWindowExW(0, wc.lpszClassName, L"x360-native",
         WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN, CW_USEDEFAULT, CW_USEDEFAULT,
@@ -89,16 +99,17 @@ SessionWindow::SessionWindow(bool visible) {
     }
   });
   handle_ = result.get();
-  if (!handle_) { thread_.join(); throw std::runtime_error("could not create session window"); }
+  if (!handle_) { thread_.join(); CloseHandle(reinterpret_cast<HANDLE>(close_event_)); throw std::runtime_error("could not create session window"); }
 }
 SessionWindow::~SessionWindow() {
   if (!closed()) PostMessageW(reinterpret_cast<HWND>(handle_), WM_CLOSE, 0, 0);
   if (thread_.joinable()) thread_.join();
+  CloseHandle(reinterpret_cast<HANDLE>(close_event_));
 }
 }
 #else
 namespace x360n {
-SessionWindow::SessionWindow(bool) { throw std::runtime_error("session window requires Windows"); }
+SessionWindow::SessionWindow(bool, uintptr_t) { throw std::runtime_error("session window requires Windows"); }
 SessionWindow::~SessionWindow() = default;
 }
 #endif

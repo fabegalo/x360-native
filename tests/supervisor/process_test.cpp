@@ -72,7 +72,9 @@ TEST_CASE("kills the child on timeout", "[process]") {
 TEST_CASE("session cancellation stops the child without reporting a timeout", "[process]") {
   Scratch s;
   auto spec = s.Spec({"sleep", "20000"});
-  spec.should_cancel = [] { return true; };
+  bool started = false;
+  spec.on_started = [&] { started = true; };
+  spec.should_cancel = [&] { return started; };
   const auto r = RunProcess(spec);
   REQUIRE(r.launched);
   CHECK(r.cancelled);

@@ -2,6 +2,7 @@
 
 #include <fstream>
 #include <vector>
+#include "action_trace.h"
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
@@ -108,6 +109,11 @@ std::string Sha256Hex(std::span<const uint8_t> data) {
 }
 
 std::optional<FileDigest> DigestFile(const std::filesystem::path& path) {
+  extern std::optional<FileDigest> TryBatchDigest(const std::filesystem::path&, bool&);
+  bool handled = false;
+  auto batched = TryBatchDigest(path, handled);
+  if (handled) return batched;
+  ActionTrace trace("hash.stream");
   std::ifstream in(path, std::ios::binary);
   if (!in) return std::nullopt;
 #ifdef _WIN32

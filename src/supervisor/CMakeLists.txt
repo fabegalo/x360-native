@@ -2,6 +2,7 @@
 # CLI11) and fmt; does not link the ReXGlue runtime.
 add_library(x360n_core STATIC
     sha256.cpp
+    digest_batch.cpp
     preparation.cpp
     xex_identity.cpp
     paths.cpp

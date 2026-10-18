@@ -30,6 +30,9 @@
 #include "console_settings.h"
 #include "session_progress.h"
 #include "session_window.h"
+#include "action_trace.h"
+#include "digest_batch.h"
+#include "session_notification.h"
 #include "workspace_lease.h"
 
 #ifdef _WIN32
@@ -421,7 +424,10 @@ std::string UtcStamp() {
 int Run(const ProjectPaths& p, const fs::path& exe_in, std::vector<std::string> args,
         std::string label, int timeout_s, bool rex_log, bool crash_stack,
         fs::path* handoff = nullptr, SessionWindow* window = nullptr,
-        std::chrono::milliseconds* child_lifetime = nullptr) {
+        std::chrono::milliseconds* child_lifetime = nullptr,
+        std::unique_ptr<DigestBatch> verification = {}) {
+  ActionTrace trace("supervisor.run");
+  if (!verification) verification = std::make_unique<DigestBatch>();
   fs::path exe = fs::absolute(exe_in);
   if (auto why = CheckPreparedLaunch(p, exe)) {
     fmt::print(stderr, "run: {}\n", *why);
@@ -464,16 +470,30 @@ int Run(const ProjectPaths& p, const fs::path& exe_in, std::vector<std::string> 
   if (window) args.push_back("--parent_window=" + std::to_string(window->handle()));
 
   auto exe_digest = DigestFile(exe);
+  std::vector<std::pair<fs::path, std::optional<FileDigest>>> dll_digests;
+  {
+    std::error_code ec;
+    for (const auto& file : fs::directory_iterator(exe.parent_path(), ec)) {
+      auto ext = file.path().extension().string();
+      for (auto& c : ext) c = char(std::tolower(static_cast<unsigned char>(c)));
+      if (file.is_regular_file() && ext == ".dll") dll_digests.emplace_back(file.path(), DigestFile(file.path()));
+    }
+    std::sort(dll_digests.begin(), dll_digests.end(), [](const auto& a, const auto& b) { return a.first < b.first; });
+  }
+  // Retain identities for reporting, but release verification handles before
+  // runtime. Every subsequent title transition authenticates a fresh batch.
+  verification.reset();
   // The child runs in its executable's directory: relative paths in its
   // arguments resolve there, not in the caller's directory.
   ProcessSpec spec{exe, args, exe.parent_path(), dir / "stdout.log", dir / "stderr.log",
                    std::chrono::seconds(timeout_s)};
   spec.capture_crash = crash_stack;
   spec.no_console = true;  // Keep the title GUI, with logs in the run directory.
-  if (window) spec.should_cancel = [window] { return window->closed(); };
+  if (window) spec.cancel_event = window->close_event();
   fmt::print("run: {} (working dir {}) -> {}\n", PathUtf8(exe), PathUtf8(spec.working_dir),
              PathUtf8(dir));
   auto r = RunProcess(spec);
+  ActionTrace::Event("session.child.exited");
   if (child_lifetime) *child_lifetime = r.duration;
 
   LogScan scan;
@@ -510,18 +530,10 @@ int Run(const ProjectPaths& p, const fs::path& exe_in, std::vector<std::string> 
   // loads first): which build of them this run actually used.
   w.BeginArray("dlls");
   {
-    std::vector<fs::path> dlls;
-    std::error_code dir_ec;
-    for (const auto& e : fs::directory_iterator(exe.parent_path(), dir_ec)) {
-      std::string ext = e.path().extension().string();
-      for (char& c : ext) c = char(std::tolower(static_cast<unsigned char>(c)));
-      if (e.is_regular_file() && ext == ".dll") dlls.push_back(e.path());
-    }
-    std::sort(dlls.begin(), dlls.end());
-    for (const auto& d : dlls) {
+    for (const auto& [d, dg] : dll_digests) {
       w.BeginObject();
       w.String("name", PathUtf8(d.filename()));
-      if (auto dg = DigestFile(d)) {
+      if (dg) {
         w.Number("size", int64_t(dg->size));
         w.String("sha256", dg->sha256);
       }
@@ -635,7 +647,8 @@ int Run(const ProjectPaths& p, const fs::path& exe_in, std::vector<std::string> 
   return r.exit_code == 0 ? kExitOk : kExitFailed;
 }
 
-int Session(const ProjectPaths& paths, const fs::path& manifest, int timeout, bool separate_windows, bool skip_boot_intro, bool crash_stack, const fs::path& user_data_root) {
+int Session(const ProjectPaths& paths, const fs::path& manifest, int timeout, bool separate_windows, bool skip_boot_intro, bool crash_stack, const fs::path& user_data_root, const std::string& closed_event) {
+  ActionTrace trace("session.total");
   try {
     WorkspaceLease lease(paths);
     if (!user_data_root.empty()) {
@@ -653,6 +666,16 @@ int Session(const ProjectPaths& paths, const fs::path& manifest, int timeout, bo
     // Immutable for this session, including Guide and all title transitions.
     const auto renderer_settings = LoadRendererSettings(paths);
     const auto console_settings = LoadConsoleSettings(paths);
+    SessionNotification notification(closed_event);
+    std::unique_ptr<SessionWindow> window;
+    if (!separate_windows) {
+      window = std::make_unique<SessionWindow>(true, notification.handle());
+      fmt::print("session: persistent window {}\n", window->handle());
+    }
+    // Discovery of generated AOT routes also inspects receipts. Keep it in the
+    // same protected transaction as the first selected launch, rather than
+    // streaming every shared dependency again before the frame even exists.
+    auto verification = std::make_unique<DigestBatch>([&] { return window && window->closed(); });
     fmt::print("session: console language={} country={} (snapshot until restart)\n",
                console_settings.language, console_settings.country);
     const auto dashboard = load_profile(manifest);
@@ -664,16 +687,14 @@ int Session(const ProjectPaths& paths, const fs::path& manifest, int timeout, bo
     for (const auto& target : dashboard.launch_targets)
       targets.push_back(load_profile(target, false));
     auto active = dashboard;
-    std::unique_ptr<SessionWindow> window;
-    if (!separate_windows) {
-      window = std::make_unique<SessionWindow>();
-      fmt::print("session: persistent window {}\n", window->handle());
-    }
     fs::path incoming;
     SessionProgress progress;
     for (uint64_t step = 0; ; ++step) {
-      // Revalidate the profile and input bytes at every transition.
-      active = load_profile(active.manifest);
+      if (window && window->closed()) return kExitOk;
+      if (!verification) verification = std::make_unique<DigestBatch>([&] { return window && window->closed(); });
+      // Step zero already authenticated the dashboard in this same protected
+      // transaction. Every later title transition gets a fresh verification.
+      if (step != 0) active = load_profile(active.manifest);
       CheckSessionRenderer(active.exe, renderer_settings);
       auto args = SessionConsoleArguments(SessionRendererArguments(
           SessionProfileArguments(active, skip_boot_intro && active.manifest == dashboard.manifest),
@@ -706,7 +727,7 @@ int Session(const ProjectPaths& paths, const fs::path& manifest, int timeout, bo
       // budget. Shorten only the diagnostic label, never the routed identity.
       const auto run_label = run_prefix + active.name.substr(0, 64 - run_prefix.size());
       const auto result = Run(paths, active.exe, args,
-          run_label, timeout, true, crash_stack, &handoff, window.get(), &child_lifetime);
+          run_label, timeout, true, crash_stack, &handoff, window.get(), &child_lifetime, std::move(verification));
       if (window && window->closed()) return kExitOk;
       if (result != kExitOk) {
         // A successful compilation is not a compatibility verdict. Preserve a
@@ -760,6 +781,8 @@ int Session(const ProjectPaths& paths, const fs::path& manifest, int timeout, bo
       if (!can_continue()) return kExitFailed;
       incoming = handoff; active = *target;
     }
+  } catch (const VerificationCancelled&) {
+    return kExitOk;
   } catch (const std::exception& e) {
     fmt::print(stderr, "session: {}\n", e.what());
     return kExitUsage;
@@ -798,6 +821,8 @@ int main(int argc, char** argv) {
   bool separate_windows = false;
   bool session_crash_stack = false;
   std::string session_user_data_root;
+  std::string session_closed_event;
+  session->add_option("--closed-event", session_closed_event, "Internal desktop frame-close notification");
   session->add_option("manifest", session_manifest)->required();
   session->add_flag("--separate-windows", separate_windows, "Diagnostic mode: one window per title");
   session->add_flag("--skip-boot-intro", skip_boot_intro, "Diagnostic mode: skip the optional dashboard boot animation");
@@ -839,7 +864,7 @@ int main(int argc, char** argv) {
     return kExitUsage;
   }
   if (doctor->parsed()) return Doctor(*paths, config);
-  if (session->parsed()) return Session(*paths, PathFromUtf8(session_manifest), session_timeout, separate_windows, skip_boot_intro, session_crash_stack, PathFromUtf8(session_user_data_root));
+  if (session->parsed()) return Session(*paths, PathFromUtf8(session_manifest), session_timeout, separate_windows, skip_boot_intro, session_crash_stack, PathFromUtf8(session_user_data_root), session_closed_event);
   if (run->parsed()) {
     try {
       // Session already owns this lease. Standalone prepared-title launches

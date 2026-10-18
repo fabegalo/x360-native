@@ -22,6 +22,9 @@
 #include "sha256.h"
 #include "renderer_settings.h"
 #include "console_settings.h"
+#include "action_trace.h"
+#include "digest_batch.h"
+#include "session_notification.h"
 
 namespace fs = std::filesystem;
 using namespace x360n;
@@ -35,7 +38,7 @@ void VerifyDistribution(const fs::path& directory) {
   VerifyPackage(directory);
 #endif
 }
-constexpr UINT kFinished = WM_APP + 1, kProgress = WM_APP + 2, kDetected = WM_APP + 3, kInitialized = WM_APP + 4, kInspected = WM_APP + 5, kOpenEnvironment = WM_APP + 6, kPreview = WM_APP + 20;
+constexpr UINT kFinished = WM_APP + 1, kProgress = WM_APP + 2, kDetected = WM_APP + 3, kInitialized = WM_APP + 4, kInspected = WM_APP + 5, kOpenEnvironment = WM_APP + 6, kEnvironmentChecked = WM_APP + 7, kSessionStarted = WM_APP + 8, kSessionClosed = WM_APP + 9, kPreview = WM_APP + 20;
 enum { kFolder = 101, kTargets, kCheck, kImport, kPrepare, kLaunch, kDetails, kData, kCancel, kLanguage, kInstall, kStorage, kPrimary, kSettings, kImportFolder, kDashboards, kGames, kHome, kImportPage, kAddContent, kLibrary, kGameList, kRenderer, kNativeDevelopment,
        kSearch, kFilter0, kFilter1, kFilter2, kFilter3, kLangPt, kLangEn, kRendererNative, kRetry, kDismiss, kBannerLibrary, kBannerDetails,
        kConsoleLanguage, kConsoleCountry };
@@ -77,6 +80,18 @@ struct App {
   std::vector<Target> targets;
   struct CheckedTarget { Inspection state; std::vector<std::string> library; bool added = false; };
   std::vector<CheckedTarget> checked;
+  // Worker writes only pending results; UI adopts them after completion/join.
+  std::vector<Target> pending_targets;
+  std::vector<CheckedTarget> pending_checked;
+  Environment pending_environment;
+  RendererSettings pending_renderer;
+  ConsoleSettings pending_console;
+  bool pending_snapshot = false;
+  PayloadStatus pending_payload;
+  fs::path pending_root;
+  bool pending_payload_current = false;
+  bool supervisor_available = false, pending_supervisor_available = false;
+  bool launch_verified = false;  // worker result, consumed only after completion
   std::vector<size_t> dashboard_indices, rows;
   Inspection current;
   size_t selected = 0;
@@ -84,7 +99,7 @@ struct App {
   std::atomic<bool> cancel{false};
   std::atomic<bool> failed{false};
   std::atomic<int> stage{0};
-  bool busy = false, session = false, show_details = false;
+  bool busy = false, session = false, finishing_session = false, show_details = false;
   UINT dpi = 96;
   WORD buttons_down = 0;
   unsigned anim_ticks = 0;
@@ -108,7 +123,7 @@ struct App {
   int result = 0;  // 0 none, 1 success, 2 warning, 3 error
   std::wstring result_title;
   int last_action = 0; fs::path last_source;
-  std::string preparing_id;
+  std::string preparing_id, operation_target;
 #ifndef X360N_DISTRIBUTION
   bool preview_empty = false;
   fs::path auto_import;  // review aid: import this path once the first verification finishes
@@ -303,7 +318,7 @@ void Layout(App& a) {
     g.banner = rect(cx, yc, cw, bh);
     put(a.activity_text, cx + s(76), yc + (busy ? s(50) : s(48)), cw - s(76) - s(24) - (busy ? 0 : s(400)), busy ? s(44) : s(54));
     if (busy) {
-      put(Item(a, kCancel), cx + cw - s(24) - s(130), yc + s(16), s(130), s(36), !a.session && !a.initializing);
+      put(Item(a, kCancel), cx + cw - s(24) - s(130), yc + s(16), s(130), s(36), !a.session);
       g.bar = rect(cx + s(24), yc + s(104), cw - s(48), s(6));
       g.steps = rect(cx + s(24), yc + s(120), cw - s(48), s(26));
     } else {
@@ -442,7 +457,7 @@ void Enable(App& a) {
   EnableWindow(Item(a, kStorage), !a.busy && !a.root.empty());
   EnableWindow(Item(a, kDetails), TRUE);
   EnableWindow(Item(a, kDismiss), TRUE);
-  EnableWindow(Item(a, kCancel), a.busy && !a.session && !a.installing);
+  EnableWindow(Item(a, kCancel), a.busy && !a.session && !a.finishing_session && !a.installing);
   EnableWindow(Item(a, kLanguage), !a.busy);
   EnableWindow(a.details, TRUE);
   EnableWindow(a.status, TRUE); EnableWindow(a.activity_text, TRUE); EnableWindow(a.subtitle, TRUE);
@@ -461,6 +476,11 @@ void Enable(App& a) {
   EnableWindow(Item(a, kConsoleLanguage), !a.busy && !a.root.empty());
   EnableWindow(Item(a, kConsoleCountry), !a.busy && !a.root.empty());
   EnableWindow(a.library_list, !a.busy);
+  // Navigation reads only the published presentation snapshot, including while
+  // verification or a session runs. Mutating actions remain serialized.
+  for (int id : {kHome, kDashboards, kGames, kImportPage, kLibrary, kSearch, kFilter0, kFilter1, kFilter2, kFilter3})
+    EnableWindow(Item(a, id), !a.initializing);
+  EnableWindow(a.library_list, !a.initializing && a.checked.size() == a.targets.size());
   Layout(a);
 }
 
@@ -503,12 +523,13 @@ void UpdateRendererControls(App& a) {
 }
 // A snapshot is for presentation only. Navigation never hashes the content.
 // Populate it on the worker; operations revalidate before using the files.
-void CheckContents(App& a) {
+std::vector<App::CheckedTarget> CheckContents(const fs::path& root, const std::vector<Target>& targets) {
+  ActionTrace trace("content.snapshot");
   std::vector<App::CheckedTarget> checked;
-  for (const auto& target : a.targets) {
+  for (const auto& target : targets) {
     App::CheckedTarget item;
-    item.state = Inspect(ProjectPaths{a.root}, target);
-    if (item.state.inputs_ok) item.library = InspectLibrary(ProjectPaths{a.root}, target, a.targets);
+    item.state = Inspect(ProjectPaths{root}, target);
+    if (item.state.inputs_ok) item.library = InspectLibrary(ProjectPaths{root}, target, targets);
     if (!target.catalogued && !target.inputs.empty()) {
       auto anchor = DigestFile(target.inputs.front().destination);
       item.added = anchor && anchor->sha256 == target.inputs.front().sha256;
@@ -516,7 +537,13 @@ void CheckContents(App& a) {
     item.added = item.added || target.catalogued;
     checked.push_back(std::move(item));
   }
-  a.checked = std::move(checked);
+  return checked;
+}
+void AdoptSnapshot(App& a) {
+  if (!a.pending_snapshot) return;
+  a.targets = std::move(a.pending_targets);
+  a.checked = std::move(a.pending_checked);
+  a.pending_snapshot = false;
 }
 void InspectSelected(App& a) {
   a.current = {};
@@ -577,10 +604,9 @@ void InspectSelected(App& a) {
       a.current.prepared = false; detail += issue + "\r\n";
     }
   }
-  auto supervisor = Supervisor(a);
-  if (!fs::is_regular_file(supervisor)) {
+  if (!a.supervisor_available) {
     a.current.prepared = false;
-    detail += "Falta o supervisor ao lado do aplicativo: " + Utf8(supervisor) + "\r\n";
+    detail += "Falta o supervisor ao lado do aplicativo.\r\n";
   }
   a.next_action = !a.current.inputs_ok ? kImport : !a.current.prepared ? kPrepare : t.session ? kLaunch : kPrepare;
   primary(a.next_action == kImport ? Tr("Selecionar arquivos", "Choose files") :
@@ -589,7 +615,7 @@ void InspectSelected(App& a) {
     a.current.prepared ? Tr("Conteúdo verificado. Inicie seus jogos pela My Games da dashboard.\r\nO menu do próprio jogo permite retornar à dashboard.", "Content verified. Launch games through the dashboard's My Games.\r\nReturn to the dashboard from the game's own menu.") :
     Tr("Conteúdo verificado. A preparação será feita nesta pasta.\r\nDownloads e instalações serão informados antes de começar.", "Content verified. Preparation will use this folder.\r\nDownloads and installations will be explained before they start.");
   if (!a.current.inputs_ok) {
-    const bool added = !t.inputs.empty() && fs::is_regular_file(t.inputs.front().destination);
+    const bool added = a.checked.at(a.selected).added;
     state = (added ? Tr("Conteúdo incompleto", "Content incomplete") : Tr("Aguardando seus arquivos", "Waiting for your files")) + "\r\n" +
       Tr("Adicione seus arquivos originais para continuar. Os componentes necessários estão listados no Diagnóstico.", "Add your original files to continue. Required components are listed in Diagnostics.");
     if (!missing.empty()) state += "\r\n" + Tr("Próximo conjunto: ", "Next set: ") + missing;
@@ -625,14 +651,34 @@ void InspectSelected(App& a) {
   Enable(a);
 }
 void Load(App& a, const fs::path& root) {
+  ActionTrace trace("ui.load");
+  if (a.busy && a.initializing) { SetPageTexts(a); Enable(a); return; }
   if (a.root != root) { a.targets.clear(); a.checked.clear(); }
   a.dashboard_indices.clear(); a.rows.clear(); a.selected = 0;
   SendMessageW(a.library_list, LB_RESETCONTENT, 0, 0);
   // Hardware probing is independent of navigation between pages.
-  if (a.environment.description.empty() || a.root != root) a.environment = CheckEnvironment(root);
+  const bool probe = a.environment.description.empty() || a.root != root;
   a.root = root;
-  a.renderer_settings = root.empty() ? RendererSettings{} : LoadRendererSettings(ProjectPaths{root});
-  a.console_settings = root.empty() ? ConsoleSettings{} : LoadConsoleSettings(ProjectPaths{root});
+  if (!a.busy && (probe || (!root.empty() && a.targets.empty()) || a.checked.size() != a.targets.size())) {
+    if (a.worker.joinable()) a.worker.join();
+    a.busy = true; a.initializing = true; a.cancel = false;
+    SetActivity(a, 4, WTr("Conferindo seu conteúdo", "Checking your content"), Tr("Lendo o catálogo e conferindo seus arquivos em segundo plano.", "Reading the catalog and verifying your files in the background."));
+    SetPageTexts(a); Enable(a);
+    a.worker = std::thread([&a, root] {
+      try {
+        DigestBatch batch([&a] { return a.cancel.load(); });
+        a.pending_environment = CheckEnvironment(root);
+        a.pending_renderer = root.empty() ? RendererSettings{} : LoadRendererSettings(ProjectPaths{root});
+        a.pending_console = root.empty() ? ConsoleSettings{} : LoadConsoleSettings(ProjectPaths{root});
+        a.pending_supervisor_available = fs::is_regular_file(Supervisor(a));
+        a.pending_targets = root.empty() ? std::vector<Target>{} : ReadCatalog(ProjectPaths{root});
+        a.pending_checked = CheckContents(root, a.pending_targets);
+        a.pending_snapshot = true;
+        Post(a.window, kInspected, "");
+      } catch (const std::exception& error) { Post(a.window, kInspected, error.what()); }
+    });
+    return;
+  }
   for (int id : {kConsoleLanguage, kConsoleCountry}) {
     const auto combo = Item(a, id);
     const auto selected = id == kConsoleLanguage ? a.console_settings.language : a.console_settings.country;
@@ -641,19 +687,6 @@ void Load(App& a, const fs::path& root) {
   }
   UpdateRendererControls(a);
   SetWindowTextW(a.root_text, root.empty() ? WTr("Nenhum ambiente selecionado", "No environment selected").c_str() : root.c_str());
-  if (!root.empty() && a.targets.empty()) { a.targets = ReadCatalog(ProjectPaths{root}); a.checked.clear(); }
-  if (a.checked.size() != a.targets.size()) {
-    if (a.worker.joinable()) a.worker.join();
-    a.busy = true; a.initializing = true;
-    SetActivity(a, 4, WTr("Conferindo seu conteúdo", "Checking your content"), Tr("Verificamos seus arquivos ao abrir ou atualizar o ambiente.\r\nTrocar de tela não repete essa verificação.", "Files are checked when opening or refreshing the environment.\r\nSwitching pages does not repeat this check."));
-    SetPageTexts(a);
-    Enable(a);
-    a.worker = std::thread([&a] {
-      try { CheckContents(a); Post(a.window, kInspected, ""); }
-      catch (const std::exception& error) { Post(a.window, kInspected, error.what()); }
-    });
-    return;
-  }
   a.selected = a.targets.size();
   for (size_t i = 0; i < a.targets.size(); ++i) {
     if ((a.targets[i].kind != "dashboard") != a.games) continue;
@@ -673,6 +706,24 @@ void SavePreferences(const App& a) {
   std::ofstream out(a.preferences, std::ios::binary);
   const bool portable = a.root == a.preferences.parent_path() / "environment";
   out << (english ? "en" : "pt") << '\n' << (portable ? "." : Utf8(a.root)) << '\n';
+}
+void CheckEnvironmentAsync(App& a, const fs::path& root) {
+  if (a.busy) return;
+  if (a.worker.joinable()) a.worker.join();
+  a.pending_root = root; a.busy = true; a.initializing = true; a.cancel = false;
+  SetActivity(a, 4, WTr("Verificando ambiente", "Checking environment"), Tr("Conferindo a instalação em segundo plano.", "Verifying the installation in the background."));
+  Enable(a);
+  a.worker = std::thread([&a, root] {
+    try {
+      DigestBatch batch([&a] { return a.cancel.load(); });
+      VerifyDistribution(a.self.parent_path());
+      a.pending_payload = InspectEnvironment(Payload(a), root);
+      const auto installed = DigestFile(root / ".local/payload.sha256");
+      const auto packaged = DigestFile(Payload(a) / "payload.sha256");
+      a.pending_payload_current = a.pending_payload.current && installed && packaged && installed->sha256 == packaged->sha256;
+      Post(a.window, kEnvironmentChecked, "");
+    } catch (const std::exception& error) { Post(a.window, kEnvironmentChecked, error.what()); }
+  });
 }
 void Labels(App& a) {
   Set(a.console_language_label, Tr("Idioma da dashboard, Guide e jogos", "Dashboard, Guide and game language"));
@@ -721,38 +772,25 @@ std::wstring FormatBytes(uintmax_t bytes) {
   else swprintf_s(text, L"%.0f KB", double(bytes) / 1024.0);
   return text;
 }
-uintmax_t DirectorySize(const fs::path& directory) {
-  uintmax_t total = 0; size_t seen = 0; std::error_code ec;
-  if (!fs::is_directory(directory, ec)) return 0;
-  for (fs::recursive_directory_iterator it(directory, fs::directory_options::skip_permission_denied, ec), end; !ec && it != end; it.increment(ec)) {
-    if (++seen > 50000) break;
-    std::error_code size_error;
-    if (it->is_regular_file(size_error)) { auto size = it->file_size(size_error); if (!size_error) total += size; }
-  }
-  return total;
-}
 void Start(App& a, int action, fs::path source = {}) {
+  ActionTrace trace("ui.start");
   if (a.busy || (action != kImport && a.selected >= a.targets.size())) return;
   if (a.root.empty()) throw std::runtime_error("Choose an environment before importing content.");
-  if (!a.preferences.empty()) {
-    VerifyDistribution(a.self.parent_path());
-    if (!InspectEnvironment(Payload(a), a.root).current)
-      throw std::runtime_error("Esta instalação precisa ser atualizada. Selecione novamente o ambiente em Configurações. Seus jogos e dados serão preservados.");
-  }
   if (action == kLaunch && !a.targets[a.selected].session) return;
   if (a.worker.joinable()) a.worker.join();
   a.logs = a.root / ".local/evidence/logs/desktop" / std::to_string(GetTickCount64());
-  fs::create_directories(a.logs);
-  a.cancel = false; a.failed = false; a.busy = true; a.session = action == kLaunch; a.installing = action == kInstall; a.importing = action == kImport; a.import_recognized = false; a.imported_id.clear();
+  a.cancel = false; a.failed = false; a.busy = true; a.session = false; a.installing = action == kInstall; a.importing = action == kImport; a.import_recognized = false; a.imported_id.clear();
   a.result = 0; a.last_action = action; a.last_source = source;
   const auto target = a.selected < a.targets.size() ? a.targets[a.selected] : Target{};
+  a.operation_target = target.id;
+  a.launch_verified = false;
   a.preparing_id = action == kPrepare ? target.id : std::string();
-  a.stage = (action == kImport && fs::is_directory(source)) ? 1 : 0;
+  a.stage = 0;
   if (action == kImport)
     SetActivity(a, 1, WTr("Importando conteúdo", "Importing content"), Tr("Verificando o conjunto selecionado antes de copiar...", "Verifying the selected set before copying..."),
       {WTr("Extração", "Extraction"), WTr("Verificação", "Verification"), WTr("Importação", "Import")});
   else if (action == kLaunch)
-    SetActivity(a, 3, WTr("Sessão em andamento", "Session running"), Tr("Use a My Games para iniciar um jogo e o menu do jogo para voltar.\r\nFeche a janela da plataforma para encerrar a sessão.", "Use My Games to launch and the game's menu to return.\r\nClose the platform window to end the session."));
+    SetActivity(a, 3, WTr("Preparando sessão", "Preparing session"), Tr("Conferindo a integridade antes de abrir a dashboard.", "Verifying integrity before opening the dashboard."));
   else if (action == kInstall)
     SetActivity(a, 4, WTr("Instalando componentes", "Installing components"), Tr("Conclua ou cancele pelo instalador da Microsoft e aguarde o retorno.", "Finish or cancel in the Microsoft installer and wait for it to return."));
   else
@@ -764,16 +802,32 @@ void Start(App& a, int action, fs::path source = {}) {
   SetTimer(a.window, 2, 33, nullptr);
   a.worker = std::thread([&a, target, action, source] {
     auto finish = [&](const std::string& message) {
-      try { if (action == kImport) a.targets = ReadCatalog(ProjectPaths{a.root}); CheckContents(a); }
+      ActionTrace trace("operation.finish");
+      // Session completion must never wait for an unrelated catalog/hash scan.
+      try { if (action != kLaunch && !a.cancel.load()) {
+        DigestBatch batch;
+        a.pending_targets = action == kImport ? ReadCatalog(ProjectPaths{a.root}) : a.targets;
+        a.pending_checked = CheckContents(a.root, a.pending_targets);
+        a.pending_snapshot = true;
+      } }
       catch (const std::exception& error) { a.failed = true; Post(a.window, kFinished, error.what()); return; }
       std::ofstream(a.logs / "result.txt", std::ios::binary) << message << '\n';
       Post(a.window, kFinished, message);
     };
     try {
+      fs::create_directories(a.logs);
+      if (!a.preferences.empty()) {
+        ActionTrace trace("environment.preflight");
+        VerifyDistribution(a.self.parent_path());
+        if (!InspectEnvironment(Payload(a), a.root).current)
+          throw std::runtime_error("Esta instalação precisa ser atualizada. Selecione novamente o ambiente em Configurações. Seus jogos e dados serão preservados.");
+      }
       if (action == kPrepare && !target.aot) throw std::runtime_error("Import a valid XEX game before preparation.");
       if (action == kPrepare && !target.preparation_source.empty())
         Import(ProjectPaths{a.root}, target, target.preparation_source, [&] { return a.cancel.load(); });
       if (action == kLaunch || action == kPrepare) {
+        DigestBatch batch([&a] { return a.cancel.load(); });
+        ActionTrace trace("launch.preflight");
         auto state = Inspect(ProjectPaths{a.root}, target);
         for (const auto& dep : target.dependencies) {
           auto it = std::find_if(a.targets.begin(), a.targets.end(), [&](const auto& t) { return t.id == dep; });
@@ -784,6 +838,9 @@ void Start(App& a, int action, fs::path source = {}) {
         }
         if (!state.inputs_ok || (action == kLaunch && (!state.prepared || !InspectLibrary(ProjectPaths{a.root}, target, a.targets).empty())))
           throw std::runtime_error(Tr("O conteúdo mudou desde a verificação. Confira os detalhes e prepare novamente.", "Content changed since verification. Check details and prepare again."));
+        if (action == kLaunch) a.launch_verified = true;
+        // A valid installed library was just checked. Registration/copying is a
+        // preparation task; repeating it on every launch rehashes the same set.
       }
       if (action == kImport) {
         ImportSource content(source, Supervisor(a).parent_path() / "x360n-extract.exe", a.logs,
@@ -816,20 +873,43 @@ void Start(App& a, int action, fs::path source = {}) {
         a.import_recognized = true;
         finish((english ? selected.label_en : selected.label) + "\r\n" + Tr("Conteúdo verificado e adicionado. Seus originais foram preservados.", "Content verified and added. Your originals are preserved.")); return;
       }
-      auto run = [&](fs::path exe, std::vector<std::string> args, const std::string& label) {
+      auto run = [&](fs::path exe, std::vector<std::string> args, const std::string& label, uintptr_t closed_event = 0) {
         ProcessSpec spec;
         spec.exe = exe; spec.args = args; spec.working_dir = a.root;
         spec.stdout_file = a.logs / (label + ".log"); spec.stderr_file = a.logs / (label + ".error.log");
         spec.no_console = true;
-        if (action != kLaunch && action != kInstall) spec.should_cancel = [&] { return a.cancel.load(); };
+        if (action != kInstall) spec.should_cancel = [&] { return a.cancel.load(); };
+        if (action == kLaunch) spec.on_started = [&] { Post(a.window, kSessionStarted, ""); };
+        spec.notification_event = closed_event;
+        spec.on_notification = [&] { Post(a.window, kSessionClosed, ""); };
+        auto next_sample = std::chrono::steady_clock::now();
+        std::string previous_stage;
+        if (action == kPrepare) spec.on_tick = [&] {
+          const auto now = std::chrono::steady_clock::now();
+          if (now < next_sample) return;
+          next_sample = now + std::chrono::milliseconds(500);
+          // Read only the current step's bounded log tail, on the process
+          // worker. Never rescan whole logs or extraction trees on WM_TIMER.
+          std::ifstream in(spec.stdout_file, std::ios::binary | std::ios::ate);
+          if (!in) return;
+          const auto size = in.tellg();
+          in.seekg(std::max<std::streamoff>(0, static_cast<std::streamoff>(size) - 65536));
+          std::string last;
+          for (std::string line; std::getline(in, line);) if (line.starts_with("X360N_STAGE ")) last = line.substr(12);
+          if (last.empty() || last == previous_stage) return;
+          previous_stage = last;
+          const int mapped = last.find("4-build") != std::string::npos ? 3 : last.find("codegen") != std::string::npos ? 2 : last.find("configure") != std::string::npos ? 1 : 0;
+          if (mapped > a.stage.load() && a.stage.load() < 4) a.stage = mapped;
+          Post(a.window, kProgress, Tr("Preparação: ", "Preparation: ") + last);
+        };
         auto result = RunProcess(spec);
         if (result.cancelled) throw std::runtime_error("Preparação cancelada. Os originais e dados de usuário foram preservados; tente preparar novamente para retomar as etapas válidas.");
         if (!result.launched || result.exit_code != 0)
           throw std::runtime_error("A etapa " + label + " não concluiu. " + result.launch_error + " " + DescribeExitCode(result.exit_code) + "\r\nDiagnóstico local: " + Utf8(a.logs));
       };
       if (action == kLaunch) {
-        PrepareLibrary(ProjectPaths{a.root}, target, a.targets);
-        run(Supervisor(a), {"--root", Utf8(a.root), "session", Utf8(target.manifest), "--timeout", "0"}, "session");
+        SessionNotification notification({}, true);
+        run(Supervisor(a), {"--root", Utf8(a.root), "session", Utf8(target.manifest), "--timeout", "0", "--closed-event", notification.name()}, "session", notification.handle());
         finish("Sessão encerrada. Consulte os logs para os resultados da execução.");
       } else {
         wchar_t sys[MAX_PATH]{}; GetSystemDirectoryW(sys, MAX_PATH);
@@ -1365,34 +1445,34 @@ LRESULT CALLBACK WndProc(HWND window, UINT message, WPARAM wp, LPARAM lp) {
         return 0;
       }
       case kOpenEnvironment: {
-        if (a->initializing) {
-          const auto state = InspectEnvironment(Payload(*a), a->root);
-          const auto installed = DigestFile(a->root / ".local/payload.sha256");
-          const auto packaged = DigestFile(Payload(*a) / "payload.sha256");
-          if (state.current && installed && packaged && installed->sha256 == packaged->sha256) {
-            a->initializing = false; Load(*a, a->root); return 0;
-          }
-          if (!state.current && fs::exists(a->root / "deps.lock.json")) {
-            std::string message = Tr("Esta instalação precisa ser atualizada para continuar. Seus jogos e dados serão preservados.\n\nComponentes: ", "This installation needs an update to continue. Your games and data will be preserved.\n\nComponents: ");
-            for (const auto& component : state.components) message += "\n• " + component;
-            if (state.interrupted) message += Tr("\nRetomar atualização interrompida.", "\nResume interrupted update.");
-            message += Tr("\n\nAtualizar agora? Preparações ainda válidas serão reutilizadas.", "\n\nUpdate now? Valid preparations will be reused.");
-            if (MessageBoxW(window, Wide(message).c_str(), L"x360-native", MB_YESNO | MB_ICONINFORMATION) != IDYES) {
-              a->root.clear(); a->initializing = false; Load(*a, a->root); return 0;
-            }
-          }
-          a->busy = true;
-          SetActivity(*a, 4, WTr("Bem-vindo ao x360-native", "Welcome to x360-native"), Tr("Estamos organizando o aplicativo para a primeira utilização.\r\nNenhum download é necessário nesta etapa.", "We are getting the app ready for its first use.\r\nNo download is needed for this step."));
-          Enable(*a);
-          a->worker = std::thread([a] {
-            try { InitializeEnvironment(Payload(*a), a->root, true); Post(a->window, kInitialized, ""); }
-            catch (const std::exception& error) { Post(a->window, kInitialized, error.what()); }
-          });
-        } else Load(*a, a->root);
-        if (!a->startup_error.empty()) {
-          Set(a->status, Tr("Não foi possível usar a pasta padrão. Escolha outra pasta para continuar.", "The default folder could not be used. Choose another folder to continue."));
-          Set(a->details, a->startup_error);
+        a->initializing = false;
+        if (!a->preferences.empty()) CheckEnvironmentAsync(*a, a->root);
+        else Load(*a, a->root);
+        return 0;
+      }
+      case kEnvironmentChecked: {
+        std::unique_ptr<std::string> error(reinterpret_cast<std::string*>(lp));
+        if (a->worker.joinable()) a->worker.join();
+        a->busy = false; a->initializing = false;
+        if (!error->empty()) throw std::runtime_error(*error);
+        const auto root = a->pending_root;
+        if (a->pending_payload_current) {
+          a->targets.clear(); a->checked.clear(); Load(*a, root); SavePreferences(*a); return 0;
         }
+        if (fs::exists(root / "deps.lock.json")) {
+          std::string message = Tr("Esta instalação precisa ser atualizada. Jogos, perfis e saves serão preservados.\n\nComponentes:", "This installation needs an update. Games, profiles and saves will be preserved.\n\nComponents:");
+          for (const auto& item : a->pending_payload.components) message += "\n" + item;
+          message += Tr("\n\nAtualizar agora?", "\n\nUpdate now?");
+          if (MessageBoxW(window, Wide(message).c_str(), L"x360-native", MB_YESNO | MB_ICONINFORMATION) != IDYES) { Enable(*a); return 0; }
+        }
+        a->root = root; a->targets.clear(); a->checked.clear();
+        a->busy = true; a->initializing = true;
+        SetActivity(*a, 4, WTr("Organizando ambiente", "Preparing environment"), Tr("Aguarde a atualização dos componentes do aplicativo.", "Updating application components."));
+        Enable(*a);
+        a->worker = std::thread([a, root] {
+          try { InitializeEnvironment(Payload(*a), root, true, [a] { if (a->cancel.load()) throw std::runtime_error("Environment update cancelled; reopen to resume."); }); Post(a->window, kInitialized, ""); }
+          catch (const std::exception& error) { Post(a->window, kInitialized, error.what()); }
+        });
         return 0;
       }
       case WM_SIZE: if (a->details) Layout(*a); return 0;
@@ -1408,6 +1488,7 @@ LRESULT CALLBACK WndProc(HWND window, UINT message, WPARAM wp, LPARAM lp) {
       }
       case kPreview: ApplyPreview(*a, int(wp)); return 0;
       case WM_COMMAND: {
+        ActionTrace trace("ui.command." + std::to_string(LOWORD(wp)));
         auto id = LOWORD(wp);
         if (id == kPrimary) id = a->next_action;
         if (id == IDOK) {
@@ -1420,6 +1501,9 @@ LRESULT CALLBACK WndProc(HWND window, UINT message, WPARAM wp, LPARAM lp) {
         if (id == kDismiss) { a->result = 0; Layout(*a); return 0; }
         if (id == kBannerDetails) id = kDetails;
         if (id == kBannerLibrary) id = kLibrary;
+        if (a->busy && id != kDetails && id != kData && id != kCancel && id != kDismiss &&
+            id != kHome && id != kDashboards && id != kGames && id != kImportPage && id != kLibrary &&
+            id != kSearch && id != kGameList && !(id >= kFilter0 && id <= kFilter3)) return 0;
         if (id == kDetails || id == kSettings) {
           if (id == kDetails) { a->show_details = !a->show_details; a->settings = false; }
           else { if (a->busy) return 0; a->settings = !a->settings; a->show_details = false; }
@@ -1429,7 +1513,6 @@ LRESULT CALLBACK WndProc(HWND window, UINT message, WPARAM wp, LPARAM lp) {
         }
         if (id == kData && !a->root.empty()) { auto p = a->root / ".local"; fs::create_directories(p); ShellExecuteW(window, L"open", p.c_str(), nullptr, nullptr, SW_SHOWNORMAL); return 0; }
         if (id == kCancel) { a->cancel = true; Set(a->activity_text, Tr("Cancelando... Aguarde a etapa atual terminar com segurança.", "Cancelling... Wait for the current step to finish safely.")); return 0; }
-        if (a->busy) return 0;
         if (id == kConsoleLanguage || id == kConsoleCountry) {
           if (a->root.empty() || HIWORD(wp) != CBN_SELCHANGE) return 0;
           const auto combo = Item(*a, id);
@@ -1496,7 +1579,14 @@ LRESULT CALLBACK WndProc(HWND window, UINT message, WPARAM wp, LPARAM lp) {
         if (id == kRetry) {
           a->result = 0;
           if (a->last_action == kImport && !a->last_source.empty()) Start(*a, kImport, a->last_source);
-          else if (a->last_action == kPrepare || a->last_action == kLaunch) PostMessageW(window, WM_COMMAND, WPARAM(a->last_action), 0);
+          else if (a->last_action == kPrepare || a->last_action == kLaunch) {
+            const auto target = std::find_if(a->targets.begin(), a->targets.end(), [&](const auto& t) { return t.id == a->operation_target; });
+            if (target == a->targets.end()) throw std::runtime_error("O alvo da operação não está mais neste catálogo. Verifique o ambiente.");
+            const auto index = size_t(target - a->targets.begin());
+            Navigate(*a, target->kind == "dashboard" ? kDashboards : kGames);
+            Load(*a, a->root); a->selected = index; SyncSelection(*a); InspectSelected(*a);
+            PostMessageW(window, WM_COMMAND, WPARAM(a->last_action), 0);
+          }
           else Layout(*a);
           return 0;
         }
@@ -1504,15 +1594,7 @@ LRESULT CALLBACK WndProc(HWND window, UINT message, WPARAM wp, LPARAM lp) {
           auto root = PickFolder(window, WTr("Escolha uma pasta vazia para o ambiente ou uma existente do x360-native", "Choose an empty environment folder or an existing x360-native environment").c_str());
           if (!root.empty()) {
             if (!a->preferences.empty()) {
-              VerifyDistribution(a->self.parent_path());
-              const auto state = InspectEnvironment(Payload(*a), root);
-              if (!state.current && fs::exists(root / "deps.lock.json")) {
-                std::string message = Tr("Esta instalação precisa ser atualizada para continuar. Seus jogos e dados serão preservados.\n\nComponentes:", "This installation needs an update to continue. Your games and data will be preserved.\n\nComponents:");
-                for (const auto& component : state.components) message += "\n• " + component;
-                message += Tr("\n\nAtualizar agora?", "\n\nUpdate now?");
-                if (MessageBoxW(window, Wide(message).c_str(), L"x360-native", MB_YESNO | MB_ICONINFORMATION) != IDYES) return 0;
-              }
-              InitializeEnvironment(Payload(*a), root, true);
+              CheckEnvironmentAsync(*a, root); return 0;
             }
             a->targets.clear(); a->checked.clear();
             Load(*a, root);
@@ -1521,13 +1603,9 @@ LRESULT CALLBACK WndProc(HWND window, UINT message, WPARAM wp, LPARAM lp) {
         }
         if (id == kCheck) {
           if (!a->preferences.empty()) {
-            VerifyDistribution(a->self.parent_path());
-            if (!InspectEnvironment(Payload(*a), a->root).current) {
-              a->targets.clear(); a->checked.clear(); a->root.clear(); Load(*a, a->root);
-              throw std::runtime_error("O ambiente precisa de atualização. Selecione-o novamente em Configurações; seus dados serão preservados.");
-            }
+            CheckEnvironmentAsync(*a, a->root); return 0;
           }
-          a->environment = CheckEnvironment(a->root); a->targets.clear(); Load(*a, a->root);
+          a->targets.clear(); a->checked.clear(); Load(*a, a->root);
         }
         if (id == kImport || id == kImportFolder) { auto source = PickFolder(window, WTr(id == kImport ? "Selecione um arquivo original" : "Selecione a pasta com seus arquivos originais", id == kImport ? "Select an original file" : "Select the folder with your original files").c_str(), id == kImportFolder); if (!source.empty()) Start(*a, kImport, source); }
         if (id == kPrepare) {
@@ -1553,6 +1631,7 @@ LRESULT CALLBACK WndProc(HWND window, UINT message, WPARAM wp, LPARAM lp) {
         return 0;
       }
       case WM_TIMER: {
+        ActionTrace trace("ui.timer");
 #ifndef X360N_DISTRIBUTION
         if (!a->capture_settings.empty() && !a->busy && !a->initializing && ++a->capture_ticks > 10) {
           const auto output = std::move(a->capture_settings); a->capture_settings.clear();
@@ -1615,26 +1694,6 @@ LRESULT CALLBACK WndProc(HWND window, UINT message, WPARAM wp, LPARAM lp) {
           }
           return 0;
         }
-        if (a->busy && !a->initializing && !a->session && (++a->timer_ticks % 10 == 0)) {
-          std::string last; std::error_code ec; fs::file_time_type latest{};
-          if (a->activity_kind == 1 && a->stage == 0) { if (auto size = DirectorySize(a->logs / "extraction")) a->extracted_bytes = size; }
-          if (a->activity_kind == 2) for (fs::directory_iterator it(a->logs, ec), end; !ec && it != end; it.increment(ec)) {
-            const auto& file = *it;
-            if (file.path().extension() != ".log" || file.last_write_time() < latest) continue;
-            std::ifstream in(file.path()); std::string stage;
-            for (std::string line; std::getline(in, line);) if (line.starts_with("X360N_STAGE ")) stage = line.substr(12);
-            if (!stage.empty()) { last = stage; latest = file.last_write_time(); }
-          }
-          if (!last.empty()) {
-            const int mapped = last.find("4-build") != std::string::npos ? 3 : last.find("codegen") != std::string::npos ? 2 : last.find("configure") != std::string::npos ? 1 : 0;
-            if (mapped > a->stage.load() && a->stage.load() < 4) a->stage = mapped;
-            auto stage = mapped == 2 ? Tr("Traduzindo o código original do título…", "Translating the title's original code…") :
-                mapped == 3 ? Tr("Compilando a execução para este computador…", "Compiling native execution for this computer…") :
-                mapped == 1 ? Tr("Verificando e configurando a preparação…", "Checking and configuring preparation…") :
-                Tr("Preparando e verificando as ferramentas necessárias…", "Preparing and verifying the required tools…");
-            if (!a->cancel) Set(a->activity_text, stage + "\r\n" + Tr("Você pode cancelar e continuar depois. Os registros estão no Diagnóstico.", "You can cancel and continue later. Logs are available in Diagnostics."));
-          }
-        }
         if (GetForegroundWindow() != window || a->busy) { a->buttons_down = 0; return 0; }
         XINPUT_STATE input{};
         if (XInputGetState(0, &input) != ERROR_SUCCESS) { a->buttons_down = 0; return 0; }
@@ -1661,6 +1720,11 @@ LRESULT CALLBACK WndProc(HWND window, UINT message, WPARAM wp, LPARAM lp) {
         if (a->worker.joinable()) a->worker.join();
         a->busy = false; a->initializing = false;
         if (error->empty()) {
+          AdoptSnapshot(*a);
+          a->environment = std::move(a->pending_environment);
+          a->renderer_settings = a->pending_renderer;
+          a->console_settings = a->pending_console;
+          a->supervisor_available = a->pending_supervisor_available;
           Load(*a, a->root);
 #ifndef X360N_DISTRIBUTION
           if (!a->auto_import.empty() && !a->busy) {
@@ -1706,10 +1770,18 @@ LRESULT CALLBACK WndProc(HWND window, UINT message, WPARAM wp, LPARAM lp) {
         return 0;
       }
       case kFinished: {
+        ActionTrace trace("ui.finished");
         std::unique_ptr<std::string> text(reinterpret_cast<std::string*>(lp));
-        if (a->worker.joinable()) a->worker.join(); a->busy = false; a->session = false; a->installing = false; a->preparing_id.clear();
+        if (a->worker.joinable()) a->worker.join(); a->busy = false; a->session = false; a->finishing_session = false; a->installing = false; a->preparing_id.clear();
         KillTimer(window, 2);
-        if (!a->importing) a->environment = CheckEnvironment(a->root);
+        AdoptSnapshot(*a);
+        if ((a->last_action == kLaunch && a->failed && !a->launch_verified) || a->cancel.load()) {
+          const auto it = std::find_if(a->targets.begin(), a->targets.end(), [&](const auto& t) { return t.id == a->operation_target; });
+          if (it != a->targets.end()) {
+            auto& state = a->checked.at(size_t(it - a->targets.begin())).state;
+            state.prepared = false; state.issues.push_back(*text);
+          }
+        }
         if (a->importing) {
           Load(*a, a->root);
           for (size_t i = 0; i < a->targets.size(); ++i) if (a->targets[i].id == a->imported_id) { a->selected = i; SyncSelection(*a); break; }
@@ -1733,9 +1805,29 @@ LRESULT CALLBACK WndProc(HWND window, UINT message, WPARAM wp, LPARAM lp) {
         Set(a->activity_text, *text);
         Layout(*a); Enable(*a); return 0;
       }
+      case kSessionStarted: {
+        std::unique_ptr<std::string> text(reinterpret_cast<std::string*>(lp));
+        if (a->busy && a->last_action == kLaunch) {
+          a->session = true;
+          a->activity_title = WTr("Sessão em andamento", "Session running");
+          Set(a->activity_text, Tr("A dashboard está sob supervisão. Feche a janela da plataforma para encerrar.", "The dashboard is supervised. Close the platform window to end the session."));
+          Enable(*a);
+        }
+        return 0;
+      }
+      case kSessionClosed: {
+        std::unique_ptr<std::string> text(reinterpret_cast<std::string*>(lp));
+        if (a->busy && a->last_action == kLaunch) {
+          a->session = false; a->finishing_session = true;
+          a->activity_title = WTr("Sessão encerrada", "Session ended");
+          Set(a->activity_text, Tr("A janela foi fechada. Finalizando os registros locais.", "The window closed. Finalizing local diagnostics."));
+          ActionTrace::Event("ui.session.closed"); Enable(*a);
+        }
+        return 0;
+      }
       case WM_CLOSE:
         if (a->busy) {
-          MessageBoxW(window, a->installing ? L"Conclua ou cancele pelo instalador Microsoft e aguarde o retorno." : a->session ? L"Encerre pela janela da plataforma. Voltar pelo menu do jogo retorna à dashboard." : L"Cancele a operação e aguarde sua conclusão antes de fechar.", L"Operação em andamento", MB_OK | MB_ICONINFORMATION); return 0;
+          MessageBoxW(window, a->installing ? L"Conclua ou cancele pelo instalador Microsoft e aguarde o retorno." : a->session ? L"Encerre pela janela da plataforma. Voltar pelo menu do jogo retorna à dashboard." : a->finishing_session ? L"A sessão já encerrou. Aguarde a conclusão dos registros locais." : L"Cancele a operação e aguarde sua conclusão antes de fechar.", L"Operação em andamento", MB_OK | MB_ICONINFORMATION); return 0;
         }
         DestroyWindow(window); return 0;
       case WM_DESTROY: PostQuitMessage(0); return 0;
@@ -1759,16 +1851,6 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show) {
   {
   App app;
   wchar_t self[32768]{}; GetModuleFileNameW(nullptr, self, 32768); app.self = self;
-  try {
-#ifdef X360N_DISTRIBUTION
-    VerifyDistribution(app.self.parent_path());
-#else
-    if (fs::is_directory(Payload(app))) VerifyDistribution(app.self.parent_path());
-#endif
-  } catch (const std::exception& error) {
-    MessageBoxW(nullptr, Wide(error.what()).c_str(), L"x360-native — pacote não validado", MB_OK | MB_ICONERROR);
-    CoUninitialize(); return 2;
-  }
   if (!fs::is_directory(Payload(app))) {
     if (auto root = FindProjectRoot(app.self)) app.root = root->root;
   } else {
