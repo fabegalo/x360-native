@@ -71,13 +71,13 @@ The 17559 `vk.xex` is the identified Retail 17559 component. The 13604 `vk.xex` 
 
 ## See the original dashboard
 
-These are real 1280×720 GPU readback screenshots from the **Xenos backend**, captured on 14 October 2026 during a dashboard navigation comparison. They show dashboard states, not gameplay and not a performance benchmark.
+These are real 1280×720 GPU readback screenshots captured on 14 October 2026 during a dashboard navigation comparison. Home uses the default **Xenos / D3D12** backend. Games uses the **experimental Native D3D12** backend, whose development is suspended and whose performance is not approved. They show dashboard states, not gameplay or a performance benchmark, and the two images are not a backend comparison.
 
-| Dashboard 17559 · Home | Dashboard 17559 · Games |
+| Dashboard 17559 · Home · Xenos | Dashboard 17559 · Games · Native experimental |
 |---|---|
 | ![Real Dashboard 17559 Home screenshot](docs/assets/screenshots/dashboard-17559-home.png) | ![Real Dashboard 17559 Games screenshot](docs/assets/screenshots/dashboard-17559-games.png) |
 
-Capture metadata and hashes are retained in [`captures.json`](docs/evidence/native-n2-2026-10-14/captures.json); the full evidence set is under [`docs/evidence/`](docs/evidence/). The banner above is original conceptual artwork, not a screenshot or compatibility claim.
+Capture metadata and hashes are retained in [`captures.json`](docs/evidence/native-n2-2026-10-14/captures.json); the full evidence set is under [`docs/evidence/`](docs/evidence/). The Games screenshot is from `native-games.png`, where the Games tab and My Games tile are visible. The banner above is original conceptual artwork, not a screenshot or compatibility claim.
 
 ## How it works
 

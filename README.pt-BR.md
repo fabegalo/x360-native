@@ -71,13 +71,13 @@ O `vk.xex` 17559 identificado corresponde à versão Retail 17559. O `vk.xex` 13
 
 ## Veja a dashboard original
 
-Estas são capturas reais de leitura da GPU em 1280×720 do **backend Xenos**, feitas em 14 de outubro de 2026 durante uma comparação de navegação da dashboard. Elas mostram estados da interface, não gameplay nem um benchmark de desempenho.
+Estas são capturas reais de leitura da GPU em 1280×720, feitas em 14 de outubro de 2026 durante uma comparação de navegação da dashboard. A Home usa o backend padrão **Xenos / D3D12**. Games usa o backend **Native D3D12 experimental**, cujo desenvolvimento está suspenso e cujo desempenho não foi aprovado. As imagens mostram estados da dashboard, não gameplay nem um benchmark de desempenho, e não são uma comparação entre os dois backends.
 
-| Dashboard 17559 · Home | Dashboard 17559 · Games |
+| Dashboard 17559 · Home · Xenos | Dashboard 17559 · Games · Native experimental |
 |---|---|
 | ![Captura real da Home da Dashboard 17559](docs/assets/screenshots/dashboard-17559-home.png) | ![Captura real de Games da Dashboard 17559](docs/assets/screenshots/dashboard-17559-games.png) |
 
-Os metadados e hashes estão em [`captures.json`](docs/evidence/native-n2-2026-10-14/captures.json); o conjunto completo de evidências fica em [`docs/evidence/`](docs/evidence/). O banner acima é arte conceitual original, não uma captura de tela nem uma afirmação de compatibilidade.
+Os metadados e hashes estão em [`captures.json`](docs/evidence/native-n2-2026-10-14/captures.json); o conjunto completo de evidências fica em [`docs/evidence/`](docs/evidence/). A captura Games vem de `native-games.png`, onde as abas Games e o bloco My Games estão visíveis. O banner acima é arte conceitual original, não uma captura de tela nem uma afirmação de compatibilidade.
 
 ## Como funciona
 
