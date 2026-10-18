@@ -1,0 +1,76 @@
+diff --git a/src/kernel/CMakeLists.txt b/src/kernel/CMakeLists.txt
+index 984b97d..977cf34 100644
+--- a/src/kernel/CMakeLists.txt
++++ b/src/kernel/CMakeLists.txt
+@@ -50,7 +50,7 @@ set(REXKERNEL_SOURCES
+     xboxkrnl/xboxkrnl_rtl.cpp
+     xboxkrnl/xboxkrnl_strings.cpp
+     xboxkrnl/xboxkrnl_threading.cpp
+-    # xboxkrnl/xboxkrnl_usbcam.cpp  # TODO: lol eventually.
++    xboxkrnl/xboxkrnl_usbcam.cpp
+     xboxkrnl/xboxkrnl_video.cpp
+     xboxkrnl/xboxkrnl_xconfig.cpp
+     xboxkrnl/xboxkrnl_audio.cpp
+diff --git a/src/kernel/xboxkrnl/xboxkrnl_usbcam.cpp b/src/kernel/xboxkrnl/xboxkrnl_usbcam.cpp
+index e9d0b04..a73a3bf 100644
+--- a/src/kernel/xboxkrnl/xboxkrnl_usbcam.cpp
++++ b/src/kernel/xboxkrnl/xboxkrnl_usbcam.cpp
+@@ -21,14 +21,11 @@ namespace rex::kernel::xboxkrnl {
+ u32 XUsbcamCreate_entry(u32 buffer,
+                         u32 buffer_size,  // 0x4B000 640x480?
+                         mapped_void unk3_ptr) {
+-  // This function should return success.
+-  // It looks like it only allocates space for usbcam support.
+-  // returning error code might cause games to initialize incorrectly.
+-  // "Carcassonne" initalization function checks for result from this
+-  // function. If value is different than 0 instead of loading
+-  // rest of the game it returns from initalization function and tries
+-  // to run game normally which causes crash, due to uninitialized data.
+-  return X_STATUS_SUCCESS;
++  // No camera backend exists. Match the platform's established unavailable
++  // contract: don't allocate a fictitious device, touch output buffers or
++  // claim initialization succeeded. All argument pointers remain untouched.
++  REXKRNL_WARN("XUsbcamCreate: camera backend not implemented");
++  return X_STATUS_NOT_IMPLEMENTED;
+ }
+
+ u32 XUsbcamGetState_entry() {
+@@ -36,17 +33,29 @@ u32 XUsbcamGetState_entry() {
+   return 0;
+ }
+
++[[noreturn]] void UnsupportedCamera(PPCContext& ctx, const char* operation) {
++  // Other operation signatures/status domains aren't established. Fail at the
++  // call site rather than returning an arbitrary register value or success.
++  REX_FATAL("Unsupported Vision camera operation {}; no camera backend; LR={:08X}",
++            operation, static_cast<uint32_t>(ctx.lr));
++}
++
+ }  // namespace rex::kernel::xboxkrnl
+
+ REX_EXPORT(__imp__XUsbcamCreate, rex::kernel::xboxkrnl::XUsbcamCreate_entry)
+ REX_EXPORT(__imp__XUsbcamGetState, rex::kernel::xboxkrnl::XUsbcamGetState_entry)
+
+-REX_EXPORT_STUB(__imp__XUsbcamSetCaptureMode);
+-REX_EXPORT_STUB(__imp__XUsbcamGetConfig);
+-REX_EXPORT_STUB(__imp__XUsbcamSetConfig);
+-REX_EXPORT_STUB(__imp__XUsbcamReadFrame);
+-REX_EXPORT_STUB(__imp__XUsbcamSnapshot);
+-REX_EXPORT_STUB(__imp__XUsbcamSetView);
+-REX_EXPORT_STUB(__imp__XUsbcamGetView);
+-REX_EXPORT_STUB(__imp__XUsbcamDestroy);
+-REX_EXPORT_STUB(__imp__XUsbcamReset);
++#define REX_UNSUPPORTED_CAMERA(name) \
++  REX_HOOK_RAW(name) { rex::kernel::xboxkrnl::UnsupportedCamera(ctx, #name); } \
++  static rex::ppc::detail::PPCFuncRegistrar _ppc_reg_##name(#name, &name)
++
++REX_UNSUPPORTED_CAMERA(__imp__XUsbcamSetCaptureMode);
++REX_UNSUPPORTED_CAMERA(__imp__XUsbcamGetConfig);
++REX_UNSUPPORTED_CAMERA(__imp__XUsbcamSetConfig);
++REX_UNSUPPORTED_CAMERA(__imp__XUsbcamReadFrame);
++REX_UNSUPPORTED_CAMERA(__imp__XUsbcamSnapshot);
++REX_UNSUPPORTED_CAMERA(__imp__XUsbcamSetView);
++REX_UNSUPPORTED_CAMERA(__imp__XUsbcamGetView);
++REX_UNSUPPORTED_CAMERA(__imp__XUsbcamDestroy);
++REX_UNSUPPORTED_CAMERA(__imp__XUsbcamReset);
++#undef REX_UNSUPPORTED_CAMERA

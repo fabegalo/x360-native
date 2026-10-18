@@ -1231,6 +1231,19 @@
     "src/codegen/decoded_binary.cpp": "adb2e7e42a37f8bdcae7d9bdb2e0e468091b4ebf49cadbdeed847f4826c93ea3"
   },
   "test": "tests/sdkcheck/ctr_dispatch_test.cpp"
+},
+{
+  "file": "patches/rexglue-sdk/0091-camera-unavailable-exports.patch",
+  "sha256": "dfef13948a5d55d39f25393fe73aee20d282f116db1fdbebf88a034e6bf46bfb",
+  "base_files": {
+    "src/kernel/CMakeLists.txt": "f75ffba39ad96e512d7b7445db1c0699e92a49eb6194ad709a277f54701e584c",
+    "src/kernel/xboxkrnl/xboxkrnl_usbcam.cpp": "31c5ba040a757a0e3df16b8fb26ba09318e660c142de77a920c944b2a5cc10a6"
+  },
+  "files": {
+    "src/kernel/CMakeLists.txt": "024f6e3d34c96e0a81e5f0aacbeb26fe62ef0439dbd8fdd6c24eb49e265af78b",
+    "src/kernel/xboxkrnl/xboxkrnl_usbcam.cpp": "fea30b5ea33f9c83ea1a27e4addd9855410da940e5b487ee5f474e2492f8275d"
+  },
+  "test": "tests/sdkcheck/usbcam_unavailable_test.ps1"
 }
                                     ]
                     },

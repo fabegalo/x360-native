@@ -806,3 +806,21 @@ and tests mutable table bytes, indices beyond 512, local cases and a real
 cross-function tail dispatch, with the SDK's host resolver. Replay hashes are
 recorded in `deps.lock.json`. No equivalent upstream commit is known; the pin
 is unchanged. Results: `docs/reports/aot-ctr-dispatch-2026-10-17.md`.
+
+### 0091 — shared camera-unavailable exports (2026-10-18)
+
+The pinned kernel omits `xboxkrnl_usbcam.cpp`, leaving valid imports undefined
+at native link time. Compile its 11 existing exports, retaining disconnected
+state 0 and moving the established platform creation-failure contract into the
+SDK: `X_STATUS_NOT_IMPLEMENTED`, no device allocation or output writes. The
+upstream unconditional creation-success body and nine return-without-result
+stubs are not enabled. Operations without an established implementation abort
+with their name and guest LR. This is a capability/failure contract, not camera
+capture support; it is shared across titles and dashboard versions without using
+original version-specific assets. Existing local dashboard overrides are retained.
+
+Regression `sdkcheck.usbcam-unavailable` links all exports without title shims,
+checks buffers/registers and the state/create contract, and verifies all nine
+unsupported operations abort in bounded subprocesses. Existing dashboard camera
+and entrypoint tests also pass. No upstream equivalent is known; pin unchanged.
+Before/after hashes and replay are recorded in the lock and the AOT report above.

@@ -35,6 +35,16 @@ target_compile_options(x360n_ctr_dispatch_native PRIVATE -msse4.1
     -UTRACY_ENABLE -UREXGLUE_ENABLE_PROFILING -UREXGLUE_ENABLE_PERF_COUNTERS)
 x360n_stage_runtime_dlls(x360n_ctr_dispatch_native)
 
+add_executable(x360n_usbcam_unavailable_checks sdkcheck/usbcam_unavailable_probe.cpp)
+target_link_libraries(x360n_usbcam_unavailable_checks PRIVATE rexruntime)
+x360n_stage_runtime_dlls(x360n_usbcam_unavailable_checks)
+if(WIN32)
+  add_test(NAME sdkcheck.usbcam-unavailable COMMAND powershell -NoProfile -ExecutionPolicy Bypass
+    -File ${CMAKE_CURRENT_SOURCE_DIR}/sdkcheck/usbcam_unavailable_test.ps1
+    -Executable $<TARGET_FILE:x360n_usbcam_unavailable_checks>)
+  set_tests_properties(sdkcheck.usbcam-unavailable PROPERTIES LABELS project TIMEOUT 60)
+endif()
+
 # Explicit analysis-only corpus diagnostic; never starts guest code or runs in CTest.
 add_executable(x360n_aot_discovery_probe EXCLUDE_FROM_ALL tools/aot_discovery_probe.cpp)
 target_link_libraries(x360n_aot_discovery_probe PRIVATE rexcodegen)
