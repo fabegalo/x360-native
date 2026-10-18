@@ -33,11 +33,11 @@ if ([IO.File]::Exists($cacheFile)) {
     }
     $commands = @()
     try {
-        $commands = (Invoke-IncrementalNinjaQuery $Build @('compdb')) | ConvertFrom-Json
+        $commands = (Invoke-IncrementalNinjaQuery $Build @('compdb','-x')) | ConvertFrom-Json
         $graphTrusted = $true
     } catch { Write-Host 'Toolchain inventory will be completed after configure.' }
     if ($cache.CMAKE_HOME_DIRECTORY) {
-        $configs = @(Get-NinjaNodes $Build @('build.ninja')) + @((Join-Path $cache.CMAKE_HOME_DIRECTORY 'CMakePresets.json'))
+        $configs = @(Get-NinjaNodes $Build @('build.ninja')) + @(Get-BuildPresetFiles $cache.CMAKE_HOME_DIRECTORY)
         foreach ($config in $configs) {
             if ([IO.Path]::GetExtension($config) -notmatch '^\.(cmake|txt|json)$' -or -not (Test-BuildFile $config)) { continue }
             $text = [IO.File]::ReadAllText((Get-BuildIoPath $config))
@@ -68,7 +68,7 @@ if ([IO.File]::Exists($cacheFile)) {
                 if ([IO.Path]::GetExtension($file) -match '^\.(h|rc|ico|cur|bmp|manifest)$') { [void]$resources.Add($file) }
             }
         }
-        foreach ($match in [regex]::Matches($command.command, '(?:^|\s)(?:-I|-isystem\s+|/I)\s*(?:"([^"]+)"|([^\s"]+))')) {
+        foreach ($match in [regex]::Matches($command.command, '(?:^|\s)(?:-isystem|-iquote|-idirafter|-imsvc|-I|/external:I|/I)\s*(?:"([^"]+)"|([^\s"]+))')) {
             $directory = if ($match.Groups[1].Success) { $match.Groups[1].Value } else { $match.Groups[2].Value }
             $directory = Resolve-BuildPath $Build $directory
             if ([IO.Directory]::Exists($directory)) { [void]$includes.Add($directory) }

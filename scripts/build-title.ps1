@@ -100,7 +100,26 @@ try {
         Write-Host "reused verified preparation: $exe"
         return
     }
+    $configureSnapshot = @()
+    $skipConfigure = $false
+    if ($incrementalState) {
+        $configureSnapshot = @(Get-IncrementalConfigureInputs $build $titleDir)
+        $skipConfigure = (Test-ReceiptGlobs $previous.globs) -and
+            (Test-IncrementalConfigureInputs $configureSnapshot $previous.inputs)
+    }
     foreach ($s in $steps) {
+        if ($s.name -eq '1-configure' -and $skipConfigure) {
+            Write-Host 'reused verified CMake configuration'
+            continue
+        }
+        if ($s.name -eq '3-reconfigure' -and $skipConfigure) {
+            $currentConfigure = @(Get-IncrementalConfigureInputs $build $titleDir)
+            if ($currentConfigure.Count -eq $configureSnapshot.Count -and
+                (Test-IncrementalConfigureInputs $currentConfigure $configureSnapshot)) {
+                Write-Host 'reused verified CMake configuration after codegen'
+                continue
+            }
+        }
         if ($s.name -eq '2-tool') {
             $cache = Get-BuildCache $build
             if ($incrementalState) {

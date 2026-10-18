@@ -95,10 +95,31 @@ function Get-AdditionalCodegenManifests([string]$Project, [string]$Build) {
         if ($seen.Add($file)) { $file }
     }
 }
+function Get-BuildPresetFiles([string]$Project) {
+    $pending = [Collections.Generic.Queue[string]]::new()
+    $seen = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    foreach ($name in @('CMakePresets.json','CMakeUserPresets.json')) {
+        $file = Join-Path $Project $name
+        if (Test-BuildFile $file) { $pending.Enqueue($file) }
+    }
+    while ($pending.Count) {
+        $file = [IO.Path]::GetFullPath($pending.Dequeue())
+        if (-not $seen.Add($file)) { continue }
+        $file
+        $preset = [IO.File]::ReadAllText((Get-BuildIoPath $file)) | ConvertFrom-Json
+        foreach ($include in $preset.include) {
+            $path = $include.Replace('${sourceDir}', $Project).Replace('${fileDir}', (Split-Path $file))
+            $path = [regex]::Replace($path, '\$(?:p?env)\{([^}]+)\}', { param($match) [Environment]::GetEnvironmentVariable($match.Groups[1].Value) })
+            if ($path.Contains('$')) { throw "Cannot certify preset include: $include" }
+            $pending.Enqueue((Resolve-BuildPath (Split-Path $file) $path))
+        }
+    }
+}
 function Get-BuildInputs([string]$Root, [string]$Title, [string]$Build, [string[]]$Targets, [switch]$AllowInvalidCodegen) {
     $projectDirectory = (Get-BuildCache $Build).CMAKE_HOME_DIRECTORY
     $cache = Get-BuildCache $Build
     $files = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    foreach ($file in Get-BuildPresetFiles $projectDirectory) { [void]$files.Add($file) }
     $nodes = @(Get-NinjaNodes $Build $Targets)
     $objects = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
     foreach ($node in $nodes) {

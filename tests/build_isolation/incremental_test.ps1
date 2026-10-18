@@ -56,6 +56,11 @@ try {
     [IO.File]::WriteAllText((Get-BuildIoPath $longProduct), 'corrupted long native product')
     Update-IncrementalProducts $longGraph @{products=$longProducts} ([Collections.Generic.HashSet[string]]::new()) -CheckProducts
     Assert (-not (Test-BuildFile $longProduct)) 'long native product corruption was reused'
+    $responseGraph = [IO.File]::ReadAllText("$longGraph/build.ninja").Replace('command = unused-generator', 'command = unused-generator @$rspfile' + "`n  rspfile = flags.rsp`n  rspfile_content = -DFLAG=1")
+    [IO.File]::WriteAllText("$longGraph/build.ninja", $responseGraph)
+    $responseProducts = @(Get-IncrementalProducts $longGraph)
+    [IO.File]::WriteAllText("$longGraph/build.ninja", $responseGraph.Replace('-DFLAG=1','-DFLAG=2'))
+    Assert (@(Get-IncrementalProducts $longGraph)[0].signature -ne $responseProducts[0].signature) 'response file flag change ignored'
     [IO.File]::WriteAllText("$scratch/CMakeLists.txt", @'
 cmake_minimum_required(VERSION 3.25)
 project(incremental_fixture LANGUAGES CXX)
@@ -75,6 +80,23 @@ set_property(TARGET fixture APPEND PROPERTY LINK_DEPENDS "${CMAKE_SOURCE_DIR}/ap
     [IO.File]::WriteAllText("$scratch/main.cpp", 'int first(); int second(); int main() { return first() + second(); }')
     [IO.File]::WriteAllText("$scratch/policy", 'SDK/compiler/patch identity')
     Configure-Fixture; Build-Fixture
+    [IO.File]::WriteAllText("$scratch/CMakePresets.json", '{"version":6,"include":["flags.json"]}')
+    [IO.File]::WriteAllText("$scratch/flags.json", '{"version":6}')
+    $configureInputs = @(Get-IncrementalConfigureInputs $build $scratch)
+    Assert (Test-IncrementalConfigureInputs $configureInputs $configureInputs) 'identical configuration was rejected'
+    Change-Content "$scratch/flags.json" '{"version":6,"configurePresets":[]}'
+    Assert (-not (Test-IncrementalConfigureInputs @(Get-IncrementalConfigureInputs $build $scratch) $configureInputs)) 'inherited preset change ignored'
+    Change-Content "$scratch/flags.json" '{"version":6}'
+    Change-Content "$scratch/second.cpp" "#include `"shared.h`"`nint second() { return SHARED; } // configure independent"
+    Assert (Test-IncrementalConfigureInputs @(Get-IncrementalConfigureInputs $build $scratch) $configureInputs) 'source-only change requires configure'
+    $cmakeText = [IO.File]::ReadAllText("$scratch/CMakeLists.txt")
+    Change-Content "$scratch/CMakeLists.txt" ($cmakeText + "`n# same timestamp configuration change`n")
+    Assert (-not (Test-IncrementalConfigureInputs @(Get-IncrementalConfigureInputs $build $scratch) $configureInputs)) 'same-mtime CMake change ignored'
+    Change-Content "$scratch/CMakeLists.txt" $cmakeText
+    [IO.File]::WriteAllText("$build/generated/new-sources.cmake", '# newly generated module list')
+    Assert (-not (Test-IncrementalConfigureInputs @(Get-IncrementalConfigureInputs $build $scratch) $configureInputs)) 'new generated module list ignored'
+    [IO.File]::Delete("$build/generated/new-sources.cmake")
+    Build-Fixture
     $state = Snapshot
     $objects = @($state.products | Where-Object path -match '[.]obj$')
     Assert ($objects.Count -eq 3) 'fixture did not record every native object'

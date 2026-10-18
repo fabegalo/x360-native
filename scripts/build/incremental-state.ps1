@@ -39,6 +39,23 @@ function Get-TextDigest([string]$Text) {
     try { ([BitConverter]::ToString($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes($Text)))).Replace('-', '').ToLowerInvariant() }
     finally { $sha.Dispose() }
 }
+function Get-IncrementalConfigureInputs([string]$Build, [string]$Project) {
+    $files = @(Get-NinjaNodes $Build @('build.ninja')) + @(Get-BuildPresetFiles $Project)
+    $manifest = Join-Path $Build 'x360n-codegen-manifests.txt'
+    if (Test-BuildFile $manifest) { $files += $manifest; $files += [IO.File]::ReadAllLines($manifest) }
+    $files += @([IO.Directory]::EnumerateFiles($Project, '*_manifest.toml', [IO.SearchOption]::TopDirectoryOnly))
+    # Bootstrap may not yet include a newly emitted sources.cmake in the graph.
+    foreach ($directory in @((Join-Path $Project 'generated'), (Join-Path $Build 'generated'))) {
+        if ([IO.Directory]::Exists($directory)) { $files += @([IO.Directory]::EnumerateFiles($directory, '*.cmake', [IO.SearchOption]::AllDirectories)) }
+    }
+    Get-ReceiptEntries @($files | Where-Object { (Test-BuildFile $_) -and $_ -ne (Join-Path $Build 'build.ninja') } | Sort-Object -Unique)
+}
+function Test-IncrementalConfigureInputs($Current, $Previous) {
+    $hashes = @{}
+    foreach ($entry in $Previous) { $hashes[$entry.path] = $entry.sha256 }
+    foreach ($entry in $Current) { if ($hashes[$entry.path] -ne $entry.sha256) { return $false } }
+    return $true
+}
 function Get-IncrementalProducts([string]$Build) {
     $cache = Get-BuildCache $Build
     $ninja = $cache.CMAKE_MAKE_PROGRAM
@@ -70,7 +87,7 @@ function Get-IncrementalProducts([string]$Build) {
         }
     }
     $commandMap = @{}
-    foreach ($command in ((Invoke-IncrementalNinjaQuery $Build @('compdb')) | ConvertFrom-Json)) {
+    foreach ($command in ((Invoke-IncrementalNinjaQuery $Build @('compdb','-x')) | ConvertFrom-Json)) {
         if ($command.command) { $commandMap[(Resolve-BuildPath $Build $command.output)] = $command.command }
     }
     # compdb names just the first output of a multi-output edge. Authenticate
