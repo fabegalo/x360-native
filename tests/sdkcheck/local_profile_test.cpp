@@ -3,6 +3,8 @@
 #include <filesystem>
 #include <fstream>
 #include <chrono>
+#include <cstdlib>
+#include "paths.h"
 #include <rex/kernel/init.h>
 #include <rex/logging.h>
 #include <rex/runtime.h>
@@ -781,4 +783,75 @@ TEST_CASE("Multi-profile migration and failed writes preserve the last committed
   CHECK(recovered.CreateLocal("Replacement") == X_ERROR_FUNCTION_FAILED);
   CHECK(std::filesystem::file_size(store.path / "profiles/local-v2.dat") == 6);
   CHECK(std::filesystem::file_size(store.path / "profiles/local-v1.dat") == 33);
+}
+
+TEST_CASE("Existing profile copy joins slot zero and survives runtime restart",
+          "[.existing-profile-copy]") {
+  namespace fs = std::filesystem;
+  const char* configured = std::getenv("X360N_TEST_PROFILE_COPY_ROOT");
+  REQUIRE(configured);
+  const auto copy = fs::canonical(x360n::PathFromUtf8(configured));
+  const auto evidence = fs::canonical(fs::path(X360N_SOURCE_ROOT) / ".local/evidence");
+  const auto relative = fs::relative(copy, evidence);
+  // This opt-in test may persist a selection only in an isolated evidence copy.
+  REQUIRE_FALSE(relative.empty());
+  REQUIRE_FALSE(relative.is_absolute());
+  REQUIRE(*relative.begin() != "..");
+  REQUIRE(fs::is_directory(copy / "profiles"));
+  Store store;
+  uint64_t selected = 0;
+  size_t count = 0;
+  {
+    rex::Runtime rt(store.path, store.path);
+    Setup(rt);
+    auto* profile = rt.kernel_state()->user_profile();
+    REQUIRE(profile->InitializeLocal(copy));
+    const auto accounts = profile->local_profiles();
+    REQUIRE_FALSE(accounts.empty());
+    count = accounts.size();
+    selected = profile->signin_state() ? profile->xuid() : accounts.front().xuid;
+    REQUIRE(selected != 0);
+    auto* memory = rt.memory();
+    const auto users = memory->SystemHeapAlloc(392 * 4);
+    const auto info = memory->SystemHeapAlloc(40);
+    REQUIRE(users != 0);
+    REQUIRE(info != 0);
+    std::memset(memory->TranslateVirtual(users), 0, 392 * 4);
+    rex::memory::store_and_swap<uint64_t>(memory->TranslateVirtual(users), selected);
+    PPCContext ctx{};
+    ctx.r3.u64 = users; ctx.r4.u64 = 0; ctx.r5.u64 = 0;
+    __imp__XamUserLogon(ctx, memory->virtual_membase());
+    REQUIRE(ctx.r3.u32 == 0);
+    CHECK(profile->xuid() == selected);
+    CHECK(profile->signin_state() == 1);
+    CHECK(profile->local_profiles().size() == count);
+    ctx.r3.u64 = 0; ctx.r4.u64 = 0; ctx.r5.u64 = info;
+    __imp__XamUserGetSigninInfo(ctx, memory->virtual_membase());
+    REQUIRE(ctx.r3.u32 == 0);
+    CHECK(rex::memory::load_and_swap<uint64_t>(memory->TranslateVirtual(info)) == selected);
+    CHECK(rex::memory::load_and_swap<uint32_t>(memory->TranslateVirtual(info + 12)) == 1);
+    ctx.r3.u64 = 0; ctx.r4.u64 = 0; ctx.r5.u64 = info;
+    __imp__XamUserGetXUID(ctx, memory->virtual_membase());
+    CHECK(ctx.r3.u32 == 0x80070057u); // zero is not a valid XUID type mask
+    ctx.r3.u64 = 0; ctx.r4.u64 = 1; ctx.r5.u64 = info; // local identities
+    __imp__XamUserGetXUID(ctx, memory->virtual_membase());
+    REQUIRE(ctx.r3.u32 == 0);
+    CHECK(rex::memory::load_and_swap<uint64_t>(memory->TranslateVirtual(info)) == selected);
+    // The extended account record ABI must join the same existing identity.
+    ctx.r3.u64 = users; ctx.r4.u64 = 0; ctx.r5.u64 = 0;
+    __imp__XamUserLogonEx(ctx, memory->virtual_membase());
+    REQUIRE(ctx.r3.u32 == 0);
+    CHECK(profile->xuid() == selected);
+    CHECK(profile->local_profiles().size() == count);
+    memory->SystemHeapFree(info); memory->SystemHeapFree(users);
+  }
+  {
+    rex::Runtime rt(store.path, store.path);
+    Setup(rt);
+    auto* profile = rt.kernel_state()->user_profile();
+    REQUIRE(profile->InitializeLocal(copy));
+    CHECK(profile->xuid() == selected);
+    CHECK(profile->signin_state() == 1);
+    CHECK(profile->local_profiles().size() == count);
+  }
 }

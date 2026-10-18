@@ -4,6 +4,10 @@
 0x90105C6C = {} # memcpy byte remainder, branch at 90105CBC; outside .pdata
 # Original vtable thunks referenced by the module's read-only data, outside .pdata.
 0x90107AF8 = {}
+# Frameless virtual callback referenced by the original Retail 17559 data.
+# Three instructions ending in blr; outside the dispatcher's 13-slot domain.
+# Original SHA and boundary/registration regression: tests/local/signin_discovery.ps1.
+0x90116C88 = { size = 12 }
 0x90116F38 = {}
 0x90116F40 = {}
 0x90116F50 = {}
