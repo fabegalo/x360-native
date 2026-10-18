@@ -13,12 +13,23 @@ passaram; não houve sessão de jogo ou nova certificação funcional/visual.
 [Filetree](docs/filetree.txt), [layout dos inputs](docs/guides/content-layout.md)
 e [auditoria, limpeza e resultados](docs/reorganization.md).
 
+AOT-Discovery (17/10/2026): patch 0088 separa thunks virtuais adjacentes sem
+`.pdata`/RTTI e reutiliza a decodificação existente. Comparação genérica:
+Iruka +2 entradas/32 bytes; Motocross +9 entradas/128 bytes, com cinco chamadas
+estáticas não resolvidas reduzidas a zero. Os corpos C++ previamente emitidos
+permaneceram idênticos; repetições de Iruka/Motocross foram determinísticas.
+120 asserções focadas aprovadas. O entry point `0x82163C60` pertence ao
+`HostLoader.dll` do Charlie e já é descoberto quando esse módulo é analisado;
+prepará-lo/registrá-lo no projeto genérico continua pendente. Não houve execução
+de jogo nem novo aceite funcional ou de performance.
+[Auditoria, corpus e limites](docs/reports/aot-discovery-2026-10-17.md).
+
 ## Plataforma e dependências
 
 Windows x64/D3D12 é o ambiente demonstrado. Linux, macOS, ARM64 e Windows limpo
 continuam sem aceite funcional completo. ReXGlue v0.10.0 permanece fixado em
-`f5337cdc947ff6d4c4196737e2c807a48f2a1fc2`, LLVM 22.1.8, **86 patches ativos**
-no [lock](deps.lock.json); numeração até 0087, com 0073 retirado.
+`f5337cdc947ff6d4c4196737e2c807a48f2a1fc2`, LLVM 22.1.8, **87 patches ativos**
+no [lock](deps.lock.json); numeração até 0088, com 0073 retirado.
 O submódulo modificado pelos patches/materialização do libmspack é esperado.
 Nunca substituir módulos ou fontes originais entre versões de dashboard.
 
