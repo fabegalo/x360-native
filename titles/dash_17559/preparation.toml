@@ -5,7 +5,7 @@ label_en = "Retail dashboard 17559"
 limitations_en = "Menu, Castle Crashers cycle and local profile creation/switching through the original UI validated locally. One active local profile in slot 0; Xbox Live, full Guide coverage and game saves remain pending. Original content is never downloaded."
 session = true
 limitations = "Menu, ciclo com Castle Crashers e criação/troca de perfis locais pela interface original validados. Um perfil local ativo no slot 0; Xbox Live, cobertura completa do Guide e saves de jogos seguem pendentes. Nenhum download de conteúdo original."
-runtime_files = ["rexruntimerd.dll", "rexgpu-xenosrd.dll", "TracyClientrd.dll", "dash_17559_bootanim.dll", "dash_17559_gamerprofile.dll", "dash_17559_xam_ui.dll", "dash_17559_signin.dll", "dash_17559_createprofile.dll", "dash_17559_vk.dll", "dash_17559_hud.dll", "dash_17559_session_ui.dll"]
+runtime_files = ["rexruntime.dll", "rexgpu-xenos.dll", "dash_17559_bootanim.dll", "dash_17559_gamerprofile.dll", "dash_17559_xam_ui.dll", "dash_17559_signin.dll", "dash_17559_createprofile.dll", "dash_17559_vk.dll", "dash_17559_hud.dll", "dash_17559_session_ui.dll"]
 
 [[files]]
 path = "dash.xex"

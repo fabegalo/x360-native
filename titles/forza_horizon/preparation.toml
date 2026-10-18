@@ -6,7 +6,7 @@ kind = "game"
 session = false
 importable = true
 inventory = "assets.sha256"
-runtime_files = ["rexruntimerd.dll", "rexgpu-xenosrd.dll", "TracyClientrd.dll", "forza_horizon_XMediaFacade_default.dll", "forza_horizon_SpeechFacade_default.dll"]
+runtime_files = ["rexruntime.dll", "rexgpu-xenos.dll", "forza_horizon_XMediaFacade_default.dll", "forza_horizon_SpeechFacade_default.dll"]
 [[files]]
 path = "default.xex"
 source_name = "default.xex"

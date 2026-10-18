@@ -4,7 +4,7 @@ limitations_en = "Start the game from original My Games of the Retail 17559 dash
 session = false
 importable = true
 inventory = "assets.sha256"
-runtime_files = ["rexruntimerd.dll", "rexgpu-xenosrd.dll", "TracyClientrd.dll", "motocross_madness_xam.dll"]
+runtime_files = ["rexruntime.dll", "rexgpu-xenos.dll", "motocross_madness_xam.dll"]
 limitations = "Inicie o jogo pela My Games original da dashboard Retail 17559: o serviço de avatar usa o xam.xex e o AvatarAssetPack.toc dessa dashboard, e a sessão recusa o jogo se faltarem ou forem diferentes. Selecione a pasta extraída da versão 0.0.0.3: o executável e os 54 assets são verificados antes da cópia. Tutorial e gameplay inicial observados localmente; save/load, corridas completas, DLC Trick Jam e multiplayer seguem pendentes."
 [[files]]
 path = "default.xex"

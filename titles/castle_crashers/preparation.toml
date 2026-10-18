@@ -4,7 +4,7 @@ limitations_en = "Start the game from original My Games. Import the extracted 0.
 session = false
 importable = true
 inventory = "assets.sha256"
-runtime_files = ["rexruntimerd.dll", "rexgpu-xenosrd.dll", "TracyClientrd.dll"]
+runtime_files = ["rexruntime.dll", "rexgpu-xenos.dll"]
 limitations = "Inicie o jogo pela My Games original. Selecione a pasta extraída da versão 0.0.1.3: o executável e os 707 assets são verificados antes da cópia. Importação de STFS diretamente no assistente ainda pendente."
 [[files]]
 path = "default.xex"
