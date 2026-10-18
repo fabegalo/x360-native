@@ -15,11 +15,13 @@ function Snapshot {
 try {
     [void][IO.Directory]::CreateDirectory($include)
     [void][IO.Directory]::CreateDirectory($libraries)
+    [void][IO.Directory]::CreateDirectory("$scratch/source")
+    [IO.File]::WriteAllText("$scratch/source/input.cpp", '// source')
     [IO.File]::WriteAllText("$include/header.h", 'header')
     [IO.File]::WriteAllText("$libraries/implicit.lib", 'library v1')
     [IO.File]::WriteAllText("$scratch/CMakeCache.txt", "CMAKE_MAKE_PROGRAM:FILEPATH=$Ninja`nCMAKE_HOME_DIRECTORY:INTERNAL=$scratch`n")
     [IO.File]::WriteAllText("$scratch/CMakeLists.txt", 'set(TEST "$ENV{X360N_BUILD_FLAG_TEST}")')
-    [IO.File]::WriteAllText("$scratch/build.ninja", "rule compiler`n  command = unused-compiler -I`"$include`"`nbuild dummy.obj: compiler input.cpp`nbuild build.ninja: phony CMakeLists.txt`n")
+    [IO.File]::WriteAllText("$scratch/build.ninja", "rule compiler`n  command = unused-compiler -I`"$include`"`nbuild dummy.obj: compiler source/input.cpp`nbuild build.ninja: phony CMakeLists.txt`n")
     [IO.File]::WriteAllText("$scratch/capture.ps1", @"
 `$ErrorActionPreference = 'Stop'
 `$env:LIB = '$libraries;' + `$env:LIB
@@ -30,8 +32,14 @@ try {
     Assert ((Snapshot) -eq $first) 'identical devshell/search inventory was not stable'
     $snapshot = [IO.File]::ReadAllText("$scratch/.preparation/toolchain.json") | ConvertFrom-Json
     Assert ($snapshot.graph_trusted -and ([IO.Path]::GetFullPath("$libraries/implicit.lib")) -in @($snapshot.libraries)) 'implicit library not captured'
-    [IO.File]::WriteAllText("$include/shadow.h", 'new header')
+    [IO.File]::WriteAllText("$include/shadow", 'new extensionless header')
     Assert ((Snapshot) -ne $first) 'new header in an explicit include directory was not detected'
+    $extensionlessInventory = Get-ReceiptHash "$scratch/.preparation/toolchain.json"
+    [IO.File]::WriteAllText("$include/shadow.custom", 'new include with arbitrary extension')
+    Assert ((Snapshot) -ne $extensionlessInventory) 'include with arbitrary extension was ignored'
+    $customInventory = Get-ReceiptHash "$scratch/.preparation/toolchain.json"
+    [IO.File]::WriteAllText("$scratch/source/quoted", 'new local quote include')
+    Assert ((Snapshot) -ne $customInventory) 'new local quoted header was ignored'
     $headerInventory = Get-ReceiptHash "$scratch/.preparation/toolchain.json"
     $capture = [IO.File]::ReadAllText("$scratch/capture.ps1").Replace('compiler-semantics-one','compiler-semantics-two')
     [IO.File]::WriteAllText("$scratch/capture.ps1", $capture)

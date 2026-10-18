@@ -46,6 +46,20 @@ if ([IO.File]::Exists($cacheFile)) {
             }
         }
     }
+    # Quoted includes also search beside their source/header, even without -I.
+    $localInputs = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    foreach ($command in $commands) {
+        if ($command.command -and $command.output -match '\.(obj|pch|res)$' -and $command.file) { [void]$localInputs.Add((Resolve-BuildPath $Build $command.file)) }
+    }
+    if ($graphTrusted) {
+        foreach ($line in ((Invoke-IncrementalNinjaQuery $Build @('deps')) -split '\r?\n')) {
+            if ($line.StartsWith('    ')) { [void]$localInputs.Add((Resolve-BuildPath $Build $line.Substring(4))) }
+        }
+    }
+    foreach ($file in $localInputs) {
+        $directory = Split-Path $file
+        if ((Test-BuildFile $file) -and [IO.Directory]::Exists($directory)) { [void]$includes.Add($directory) }
+    }
     foreach ($command in $commands) {
         if ($command.output -match '\.res$') {
             $hasResources = $true
@@ -62,17 +76,24 @@ if ([IO.File]::Exists($cacheFile)) {
     }
 }
 $inventory = [ordered]@{}
+$inventoryRoots = [Collections.Generic.List[string]]::new()
 foreach ($directory in @($includes | Sort-Object)) {
+    $covered = $false
+    foreach ($parent in $inventoryRoots) {
+        if ($directory.StartsWith($parent.TrimEnd('\','/') + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) { $covered = $true; break }
+    }
+    if ($covered) { continue }
+    $inventoryRoots.Add($directory)
     # Contents of consumed headers are hashed through compiler deps. Inventory
     # changes also detect a newly added header shadowing a previous resolution.
     $headers = [Collections.Generic.List[string]]::new()
     foreach ($file in [IO.Directory]::EnumerateFiles($directory, '*', [IO.SearchOption]::AllDirectories)) {
-        if ([IO.Path]::GetExtension($file) -match '^\.(h|hh|hpp|hxx|inc|inl)$') { $headers.Add($file) }
+        $headers.Add($file)
     }
     $sorted = $headers.ToArray()
     [Array]::Sort($sorted, [StringComparer]::CurrentCultureIgnoreCase)
     $inventory[$directory] = $sorted
-    if ($hasResources) { foreach ($file in $inventory[$directory]) { [void]$resources.Add($file) } }
+    if ($hasResources) { foreach ($file in $inventory[$directory]) { if ([IO.Path]::GetExtension($file) -match '^\.(h|hh|hpp|hxx|inc|inl|rc|ico|cur|bmp|manifest)$') { [void]$resources.Add($file) } } }
 }
 $libraries = @()
 foreach ($directory in @($env:LIB -split ';')) {
