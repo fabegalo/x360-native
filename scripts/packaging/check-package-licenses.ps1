@@ -92,7 +92,7 @@ foreach($command in (Get-Content (Join-Path $package 'app/compile-commands.json'
     if($f -match '^<source>/external/rexglue-sdk/(src/.+)$') { $units += $Matches[1] }
     elseif($f -match '^<source>/external/rexglue-sdk/thirdparty/([^/]+)/') {
         if($Matches[1] -notin @('fmt','spdlog','catch2')) { throw 'Unreviewed third-party translation unit' }
-    } elseif($f -notmatch '^<source>/(src/(desktop|supervisor|content)/|tests/(supervisor|content)/)') { throw 'Unreviewed distribution translation unit' }
+    } elseif($f -notmatch '^<source>/(src/(desktop|supervisor|content)/|tests/(supervisor|content|desktop)/)') { throw 'Unreviewed distribution translation unit' }
 }
 if(Compare-Object @($inventory.sdk_translation_units | Sort-Object) @($units | Sort-Object -Unique)) { throw 'SDK extraction source scope changed' }
 $dependencyInputs=Get-Content (Join-Path $package 'app/dependency-inputs.json') -Raw | ConvertFrom-Json
