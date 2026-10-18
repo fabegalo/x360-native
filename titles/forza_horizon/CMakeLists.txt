@@ -23,6 +23,7 @@ set(FORZAHORIZON_SOURCES
     src/main.cpp
     ../common/launch_handoff.cpp
     ../../src/supervisor/sha256.cpp
+    ../../src/supervisor/digest_batch.cpp
 )
 include_directories(../common)
 

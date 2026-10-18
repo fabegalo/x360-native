@@ -5,6 +5,13 @@ Este arquivo resume o estado atual; os relatórios vinculados preservam datas,
 falhas iniciais, hashes, comandos e limites de cada validação. Resultados de uma
 etapa histórica não certificam automaticamente o build atual nem outros títulos.
 
+Preparação da dashboard (18/10): corrigida a ausência de `digest_batch.cpp`
+nos targets que compilam `sha256.cpp` diretamente, causa do erro de linkagem
+`TryBatchDigest` no launcher. 17559 recompilada pelo driver oficial, recibo novo
+publicado e 13 artefatos conferidos. CMake de 6717/Forza corrigido pela mesma
+dependência, sem recompilação desses títulos. Sem execução guest ou teste visual.
+[Diagnóstico e validação](docs/reports/dashboard-build-2026-10-18.md).
+
 Launcher (18/10): catálogo, preflight de instalação e probes saíram da thread
 Win32; conclusão de sessão deixou de reinspecionar o acervo. Eventos distinguem
 fechamento da janela, cleanup e saída do supervisor. SHA é reutilizado somente

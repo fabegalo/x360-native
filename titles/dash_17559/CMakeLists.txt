@@ -22,6 +22,7 @@ set(DASH17559_SOURCES
     src/main.cpp
     ../common/dashboard_assets.cpp
     ../../src/supervisor/sha256.cpp
+    ../../src/supervisor/digest_batch.cpp
     # Traps for imports the pinned SDK does not provide at link time (see the file).
     src/unresolved_imports.cpp
     ../common/camera_state.cpp
@@ -45,7 +46,8 @@ endif()
 rexglue_setup_target(dash_17559 GPU_PLUGINS xenos)
 
 add_library(dash_17559_session_ui SHARED src/session_ui_host.cpp src/system_ui.cpp
-    ../common/dashboard_assets.cpp ../../src/supervisor/sha256.cpp)
+    ../common/dashboard_assets.cpp ../../src/supervisor/sha256.cpp
+    ../../src/supervisor/digest_batch.cpp)
 target_compile_definitions(dash_17559_session_ui PRIVATE X360N_SYSTEM_UI_PLUGIN=1)
 target_link_libraries(dash_17559_session_ui PRIVATE rex::runtime)
 if(WIN32)

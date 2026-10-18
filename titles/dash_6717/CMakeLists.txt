@@ -19,6 +19,7 @@ set(DASH6717_SOURCES
     src/main.cpp
     ../common/dashboard_assets.cpp
     ../../src/supervisor/sha256.cpp
+    ../../src/supervisor/digest_batch.cpp
     src/unresolved_imports.cpp
     src/curl_bind.cpp
     ../common/camera_state.cpp
