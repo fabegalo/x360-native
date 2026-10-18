@@ -487,6 +487,80 @@ TEST_CASE("original library supports long content paths without Windows policy c
   CHECK_NOTHROW(PrepareLibrary(f.paths, session, {game}));
 }
 
+TEST_CASE("original library archives only verified obsolete content type registrations", "[library-content-type]") {
+  Fixture f; Import(f.paths, f.target, f.source);
+  Write(f.target.exe, "prepared fixture"); f.Receipt();
+  auto game = f.target;
+  game.library = {"12345678", "00004000", "same-package", "Synthetic title", Hash("package")};
+  Target dashboard; dashboard.session = true; dashboard.user_root = f.paths.local() / "user/dashboard";
+  PrepareLibrary(f.paths, dashboard, {game});
+  const auto base = dashboard.user_root / "0000000000000000/12345678";
+  const auto old_header = base / "Headers/00004000/same-package.header";
+  const auto old_hash = DigestFile(old_header)->sha256;
+  const auto old_file = base / "00004000/same-package/dash.xex";
+  Write(dashboard.user_root / "profiles/account", "existing account");
+  Write(dashboard.user_root / "saves/progress", "existing progress");
+  const auto shared_cache = dashboard.user_root / "0000000000000000/FFFE07DF/00040000/ContentCache.pkg/CDIs.bin";
+  const auto account_cache = dashboard.user_root / "E000000000000001/FFFE07DF/00040000/ContentCache.pkg/CDIs.bin";
+  Write(shared_cache, "shared derived list"); Write(account_cache, "account derived list");
+  game.library.content_type = "000D0000";
+  SECTION("identical installed inventory and aggregate migrate without losing user data") {
+    CHECK_FALSE(InspectLibrary(f.paths, dashboard, {game}).empty());
+    PrepareLibrary(f.paths, dashboard, {game});
+    CHECK_FALSE(fs::exists(old_header));
+    CHECK(fs::exists(base / "Headers/000D0000/same-package.header"));
+    REQUIRE(fs::is_directory(dashboard.user_root / ".x360n-inactive-headers"));
+    unsigned saved = 0;
+    for (const auto& entry : fs::directory_iterator(dashboard.user_root / ".x360n-inactive-headers")) {
+      CHECK(DigestFile(entry.path())->sha256 == old_hash); ++saved;
+    }
+    CHECK(saved == 1);
+    CHECK_FALSE(fs::exists(shared_cache)); CHECK_FALSE(fs::exists(account_cache));
+    unsigned caches = 0;
+    for (const auto& entry : fs::recursive_directory_iterator(dashboard.user_root / ".x360n-library-cache-archive")) {
+      if (!entry.is_regular_file()) continue;
+      const auto hash = DigestFile(entry.path())->sha256;
+      CHECK((hash == Hash("shared derived list") || hash == Hash("account derived list"))); ++caches;
+    }
+    CHECK(caches == 2);
+    CHECK(InspectLibrary(f.paths, dashboard, {game}).empty());
+    CHECK_NOTHROW(PrepareLibrary(f.paths, dashboard, {game}));
+  }
+  SECTION("different metadata is preserved and refused") {
+    Write(old_header, "unowned header with license data");
+    CHECK_THROWS(PrepareLibrary(f.paths, dashboard, {game}));
+    CHECK(DigestFile(old_header)->sha256 == Hash("unowned header with license data"));
+    CHECK_FALSE(fs::exists(base / "Headers/000D0000/same-package.header"));
+    CHECK(fs::exists(shared_cache)); CHECK(fs::exists(account_cache));
+  }
+  SECTION("different installed bytes are preserved and refused") {
+    Write(old_file, "different content");
+    CHECK_THROWS(PrepareLibrary(f.paths, dashboard, {game}));
+    CHECK(fs::exists(old_header));
+    CHECK(DigestFile(old_file)->sha256 == Hash("different content"));
+  }
+  SECTION("another catalogued recipe retains its own content type") {
+    auto other = game; other.library.content_type = "00004000";
+    other.id = "other";
+    other.manifest = f.root / "titles/other/other_manifest.toml";
+    other.exe = f.paths.build() / "titles/other/other.exe";
+    Write(other.manifest, "[project]\nname='other'\n[entrypoint]\nfile_path='../../.local/inputs/dashboards/test/dash.xex'\n");
+    Write(other.exe, "other build");
+    WriteTestReceipt(f.paths, other.id, other.manifest, other.exe,
+                     {other.inputs[0].destination, other.inputs[1].destination});
+    PrepareLibrary(f.paths, dashboard, {game, other});
+    CHECK(DigestFile(old_header)->sha256 == old_hash);
+    CHECK(InspectLibrary(f.paths, dashboard, {game, other}).empty());
+  }
+  SECTION("cancellation preserves the old registration") {
+    CHECK_THROWS(PrepareLibrary(f.paths, dashboard, {game}, [] { return true; }));
+    CHECK(DigestFile(old_header)->sha256 == old_hash);
+  }
+  CHECK(fs::exists(old_file));
+  CHECK(DigestFile(dashboard.user_root / "profiles/account")->sha256 == Hash("existing account"));
+  CHECK(DigestFile(dashboard.user_root / "saves/progress")->sha256 == Hash("existing progress"));
+}
+
 TEST_CASE("original library withdraws stale builds and discovers additional recipes") {
   Fixture f; Import(f.paths, f.target, f.source);
   Write(f.target.exe, "prepared fixture"); f.Receipt();
@@ -583,10 +657,17 @@ void CheckLocalLibrary(bool require_prepared_dashboard) {
   if (selected_game) REQUIRE(game_receipt);
   // An explicit game scopes writes to that entry, preserving unrelated headers.
   const auto installed_targets = selected_game ? std::vector<Target>{*selected_game} : targets;
-  PrepareLibrary(paths, *dash, installed_targets);
+  auto session = *dash;
+  if (const char* copy = std::getenv("X360N_TEST_LIBRARY_USER_ROOT")) {
+    const auto directory = fs::canonical(PathFromUtf8(copy));
+    REQUIRE(IsWithin(directory, paths.local() / "evidence"));
+    REQUIRE(directory != fs::weakly_canonical(dash->user_root));
+    session.user_root = directory;
+  }
+  PrepareLibrary(paths, session, installed_targets);
   // Registration and routing only: never spawn the dashboard or the game.
   WorkspaceLease lease(paths);
-  CHECK(InspectLibrary(paths, *dash, installed_targets).empty());
+  CHECK(InspectLibrary(paths, session, installed_targets).empty());
   const auto dashboard_receipt_after = DigestFile(PreparationReceipt(dash->exe));
   REQUIRE(dashboard_receipt_after);
   CHECK(dashboard_receipt_after->sha256 == dashboard_receipt->sha256);
@@ -596,7 +677,8 @@ void CheckLocalLibrary(bool require_prepared_dashboard) {
     CHECK(game_receipt_after->sha256 == game_receipt->sha256);
     // Catalog metadata is sufficient for registration, as in the desktop's
     // game preparation path. Only the full check certifies dashboard execution.
-    const auto dashboard = LoadSessionProfile(paths, dash->manifest, require_prepared_dashboard);
+    auto dashboard = LoadSessionProfile(paths, dash->manifest, require_prepared_dashboard);
+    dashboard.user_root = session.user_root;
     REQUIRE(std::find(dashboard.launch_targets.begin(), dashboard.launch_targets.end(),
                       fs::canonical(selected_game->manifest)) != dashboard.launch_targets.end());
     const auto game = LoadSessionProfile(paths, selected_game->manifest);

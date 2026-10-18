@@ -2,6 +2,7 @@
 #include "sha256.h"
 #include "workspace_lease.h"
 #include <nlohmann/json.hpp>
+#include <toml++/toml.hpp>
 #include <rex/filesystem/devices/stfs_xbox.h>
 #include <algorithm>
 #include <fstream>
@@ -264,6 +265,24 @@ void ReadImportedGames(const ProjectPaths& paths, std::vector<Target>& targets) 
       t.user_root = UserDataRoot(paths, paths.local() / "user" / t.id);
       if (!t.title_id.empty())
         t.library = {t.title_id, r.value("content_type", std::string("00004000")), content_id.substr(0, 40), name, content_id};
+      if (fs::is_regular_file(t.manifest) && !t.library.title_id.empty()) {
+        // Folder imports have no container content type. Reuse the generated
+        // profile's source-bound routing metadata instead of inventing a second
+        // registration under the folder default. Execution still checks its receipt.
+        const auto setup_file = t.manifest.parent_path() / "preparation.toml";
+        std::ifstream recipe(setup_file, std::ios::binary);
+        if (!recipe) throw std::runtime_error("Generated AOT library metadata is missing; regenerate the project.");
+        const auto setup = toml::parse(recipe, Utf8(setup_file));
+        const auto library = setup["library"];
+        const auto type = library["content_type"].value_or(std::string{});
+        if (library["source_sha256"].value_or(std::string{}) != content_id ||
+            library["title_id"].value_or(std::string{}) != t.library.title_id ||
+            library["file_name"].value_or(std::string{}) != t.library.file_name ||
+            type.size() != 8 || type.find_first_not_of("0123456789ABCDEF") != std::string::npos ||
+            (r.contains("content_type") && type != t.library.content_type))
+          throw std::runtime_error("Generated AOT library identity differs from the imported source; regenerate the project.");
+        t.library.content_type = type;
+      }
       t.limitations = "Preparação AOT automática disponível. Compilar não comprova compatibilidade. Inicie pela My Games original.";
       t.limitations_en = "Automatic AOT preparation available. Compilation does not prove compatibility. Launch through original My Games.";
       for (const auto& dep : r.value("imports", std::vector<std::string>{})) {

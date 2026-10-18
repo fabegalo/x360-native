@@ -66,6 +66,70 @@ bool Same(const fs::path& file, const std::string& hash) {
 std::string Hash(const std::string& bytes) {
   return Sha256Hex({reinterpret_cast<const uint8_t*>(bytes.data()), bytes.size()});
 }
+// A legacy registration may advertise the same package under a content type
+// no longer declared by its verified recipe. Never route that path as an alias:
+// reconcile enumeration in this dashboard's own store, retaining all payloads.
+std::vector<Entry> OtherRegistrations(const Target& session, const Target& game,
+                                      const std::vector<Target>& catalog) {
+  std::vector<Entry> entries;
+  const auto headers = Describe(session, game).header.parent_path().parent_path();
+  if (!fs::is_directory(headers)) return entries;
+  for (const auto& dir : fs::directory_iterator(headers)) {
+    const auto type = Utf8(dir.path().filename());
+    if (!dir.is_directory() || type == game.library.content_type || type.size() != 8 ||
+        type.find_first_not_of("0123456789ABCDEF") != std::string::npos) continue;
+    const auto& c = game.library;
+    if (std::any_of(catalog.begin(), catalog.end(), [&](const auto& other) {
+          return other.library.title_id == c.title_id && other.library.file_name == c.file_name &&
+                 other.library.content_type == type;
+        })) continue;
+    auto legacy = game;
+    legacy.library.content_type = type;
+    auto entry = Describe(session, legacy);
+    if (fs::exists(entry.header)) entries.push_back(std::move(entry));
+  }
+  return entries;
+}
+void CheckObsoleteRegistration(const Target& session, const Target& game, const Entry& entry) {
+  if (!WithinNew(entry.header, session.user_root) || !Same(entry.header, Hash(entry.bytes)))
+    throw std::runtime_error("Conflicting library metadata differs; preserved: " + Utf8(entry.header));
+  for (const auto& input : game.inputs) {
+    const auto file = entry.folder / input.destination.lexically_relative(game.game_root);
+    if (!WithinNew(file, session.user_root) || !Same(file, input.sha256))
+      throw std::runtime_error("Conflicting library content differs or is incomplete; preserved: " + Utf8(file));
+  }
+}
+void ArchiveLibraryCaches(const Target& session) {
+  // The original dashboard persists its derived enumeration in this system
+  // content package, for the shared store and local accounts. Removing a
+  // header alone leaves the retired item visible until CDIs is regenerated.
+  // Preserve each cache byte-for-byte, only in this dashboard's own storage.
+  std::vector<fs::path> caches;
+  for (const auto& account : fs::directory_iterator(LibraryPath(session.user_root))) {
+    const auto name = Utf8(account.path().filename());
+    if (name.size() != 16 || name.find_first_not_of("0123456789ABCDEF") != std::string::npos) continue;
+    // Extended-length Windows paths do not normalize forward slashes.
+    const auto cache = (account.path() / "FFFE07DF/00040000/ContentCache.pkg/CDIs.bin").make_preferred();
+    if (!fs::exists(cache)) continue;
+    if (!WithinNew(cache, session.user_root) || fs::is_symlink(cache) || !fs::is_regular_file(cache))
+      throw std::runtime_error("Redirected or invalid dashboard library cache; preserved: " + Utf8(cache));
+    caches.push_back(cache);
+  }
+  const auto archive = LibraryPath(session.user_root) / ".x360n-library-cache-archive" /
+      std::to_string(std::chrono::steady_clock::now().time_since_epoch().count());
+  for (const auto& cache : caches) {
+    const auto saved = archive / cache.lexically_relative(LibraryPath(session.user_root));
+    if (!WithinNew(saved, session.user_root)) throw std::runtime_error("Redirected library cache archive");
+    fs::create_directories(saved.parent_path()); fs::rename(cache, saved);
+  }
+}
+void ArchiveHeader(const Target& session, const Target& game, const Entry& entry) {
+  const auto saved = LibraryPath(session.user_root) / ".x360n-inactive-headers" /
+      (game.id + "-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()) + ".header");
+  if (!WithinNew(saved, session.user_root)) throw std::runtime_error("Redirected library archive");
+  ArchiveLibraryCaches(session);
+  fs::create_directories(saved.parent_path()); fs::rename(entry.header, saved);
+}
 void CheckSource(const Target& game) {
   if (game.inputs.empty()) throw std::runtime_error("Conteúdo sem inventário verificado.");
   for (const auto& input : game.inputs)
@@ -108,6 +172,8 @@ std::vector<std::string> InspectLibrary(const ProjectPaths& paths, const Target&
       valid = valid && Same(destination, input.sha256);
     }
     if (!valid) issues.push_back("Prepare para registrar o conteúdo verificado na My Games: " + id);
+    for (const auto& legacy : OtherRegistrations(session, game, catalog))
+      issues.push_back("Conflicting My Games content type; prepare to reconcile verified metadata: " + Utf8(legacy.header));
   }
   return issues;
 }
@@ -127,10 +193,7 @@ void PrepareLibrary(const ProjectPaths& paths, const Target& session, const std:
     if (!fs::exists(entry.header)) continue;
     if (!Same(entry.header, Hash(entry.bytes)) || !WithinNew(entry.header, session.user_root))
       throw std::runtime_error("Existing library header differs; preserved. Repair the registration before launching.");
-    const auto saved = LibraryPath(session.user_root) / ".x360n-inactive-headers" /
-        (game.id + "-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()) + ".header");
-    if (!WithinNew(saved, session.user_root)) throw std::runtime_error("Redirected library archive");
-    fs::create_directories(saved.parent_path()); fs::rename(entry.header, saved);
+    ArchiveHeader(session, game, entry);
   }
   for (const auto& id : installed) {
     stop();
@@ -138,6 +201,8 @@ void PrepareLibrary(const ProjectPaths& paths, const Target& session, const std:
     if (game.library.title_id.empty()) continue;
     CheckSource(game);
     const auto entry = Describe(session, game);
+    const auto obsolete = OtherRegistrations(session, game, catalog);
+    for (const auto& legacy : obsolete) CheckObsoleteRegistration(session, game, legacy);
     // Preflight the complete installed set before writing. An existing junction
     // from the historical manual install is accepted only for identical bytes;
     // never write through it. New installs use ordinary files, without elevation.
@@ -182,6 +247,13 @@ void PrepareLibrary(const ProjectPaths& paths, const Target& session, const std:
         out.close(); if (!out) throw std::runtime_error("Não foi possível gravar o catálogo.");
       }
       fs::rename(tmp, entry.header);
+    }
+    for (const auto& legacy : obsolete) {
+      stop();
+      // Recheck immediately before withdrawing enumeration, retaining the exact
+      // header in the existing archive. Unknown metadata/licenses fail closed.
+      CheckObsoleteRegistration(session, game, legacy);
+      ArchiveHeader(session, game, legacy);
     }
   }
 }

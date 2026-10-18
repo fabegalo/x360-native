@@ -55,6 +55,43 @@ TEST_CASE("universal library persists unsupported titles and exact duplicates", 
   CHECK(ImportGame(f.paths,games,f.source,f.source)!=id);
   CHECK(ReadCatalog(f.paths).size()==2);
 }
+TEST_CASE("folder catalog retains source-bound generated library routing metadata", "[library-content-type]") {
+  Fixture f; f.Infrastructure();
+  ImportGame(f.paths, {}, f.source, f.source);
+  auto game = ReadCatalog(f.paths).front();
+  GenerateAotProject(f.paths, game);
+  const auto file = game.manifest.parent_path() / "preparation.toml";
+  auto setup = toml::parse_file(file.string());
+  setup["library"].as_table()->insert_or_assign("content_type", "000D0000");
+  bool valid = true;
+  SECTION("folder default cannot advertise a second content type") {}
+  SECTION("metadata from another source is refused") {
+    valid = false;
+    setup["library"].as_table()->insert_or_assign("source_sha256", std::string(64, 'a'));
+  }
+  SECTION("explicit container type conflicts require regeneration") {
+    valid = false;
+    for (const auto& entry : fs::directory_iterator(f.paths.local() / "catalog")) {
+      auto record = nlohmann::json::parse(std::ifstream(entry.path()));
+      record["content_type"] = "00004000";
+      Write(entry.path(), record.dump());
+    }
+  }
+  { std::ofstream out(file); out << setup; }
+  const auto catalog = ReadCatalog(f.paths);
+  REQUIRE(catalog.size() == 1);
+  if (valid) {
+    CHECK(catalog[0].import_error.empty());
+    CHECK(catalog[0].library.content_type == "000D0000");
+    CHECK_FALSE(catalog[0].inputs.empty());
+    const auto profile = LoadSessionProfile(f.paths, game.manifest, false);
+    CHECK(PathUtf8(profile.library_relative_xex).find("000D0000") != std::string::npos);
+  } else {
+    CHECK_FALSE(catalog[0].import_error.empty());
+    CHECK(catalog[0].inputs.empty());
+  }
+  CHECK(fs::file_size(f.root / ".local/user/save") == 4);
+}
 TEST_CASE("universal library isolates discs and leaves sibling DLC intact", "[universal]") {
   Fixture f;
   auto first = Xex(); first[50] = 1; first[51] = 2;
