@@ -10,6 +10,8 @@
 #include <fstream>
 #include <algorithm>
 #include <cstdlib>
+#include <chrono>
+#include <iostream>
 #include <nlohmann/json.hpp>
 #include <toml++/toml.hpp>
 
@@ -431,6 +433,27 @@ TEST_CASE("automatic AOT discovers verified XEX dependencies by content and pres
   CHECK(DigestFile(t.manifest)->sha256==config_hash);
   }
 }
+TEST_CASE("unchanged AOT generation does not invalidate preparation and preserves earlier failures", "[generic-aot]") {
+  Fixture f; f.Infrastructure();
+  ImportGame(f.paths, {}, f.source, f.source);
+  const auto game = ReadCatalog(f.paths).front();
+  GenerateAotProject(f.paths, game);
+  const auto marker = PreparationMarker(f.paths, game);
+  REQUIRE(fs::exists(marker));
+  fs::remove(marker); // fixture's simulated completed preparation
+  const auto manifest_time = fs::last_write_time(game.manifest);
+  GenerateAotProject(f.paths, game);
+  CHECK_FALSE(fs::exists(marker));
+  CHECK(fs::last_write_time(game.manifest) == manifest_time);
+  CHECK_FALSE(Inspect(f.paths, game).prepared); // no receipt/exe is implicitly approved
+  std::ofstream(f.root / "titles/common/generic/modules.cmake", std::ios::app) << "\n# changed build integration\n";
+  GenerateAotProject(f.paths, game);
+  CHECK(fs::exists(marker));
+  Write(marker, "previous interrupted preparation");
+  GenerateAotProject(f.paths, game);
+  std::ifstream in(marker); std::string contents{std::istreambuf_iterator<char>(in), {}};
+  CHECK(contents == "previous interrupted preparation");
+}
 TEST_CASE("local AOT regenerates an existing imported title without copying content", "[.local-existing-aot]") {
   const char* root = std::getenv("X360N_AOT_ROOT"), *id = std::getenv("X360N_AOT_TITLE");
   REQUIRE(root); REQUIRE(id);
@@ -446,7 +469,15 @@ TEST_CASE("local AOT regenerates an existing imported title without copying cont
   }
   REQUIRE_FALSE(catalog.empty());
   const auto before = DigestFile(catalog); REQUIRE(before);
+  const bool prepared_before = Inspect(paths, *game).prepared;
+  const auto started = std::chrono::steady_clock::now();
   GenerateAotProject(paths,*game);
+  std::cout << "project generation ms=" << std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-started).count()
+            << " prepared-before=" << prepared_before << '\n';
+  if (prepared_before) {
+    CHECK_FALSE(fs::exists(PreparationMarker(paths, *game)));
+    CHECK(Inspect(paths, *game).prepared);
+  }
   const auto profile = LoadSessionProfile(paths,game->manifest,false);
   CHECK(profile.name==game->id);
   CHECK(fs::weakly_canonical(profile.exe)==fs::weakly_canonical(game->exe));

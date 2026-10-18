@@ -172,6 +172,19 @@ TEST_CASE("lifecycle notifications cannot postpone a child timeout", "[session-e
   CHECK(result.launched); CHECK(result.timed_out); CHECK_FALSE(result.cancelled); CHECK(result.duration < 1s);
   std::error_code ec; fs::remove_all(dir, ec);
 }
+TEST_CASE("nested verification preserves operation cancellation", "[digest-batch]") {
+  bool cancelled = false;
+  DigestBatch outer([&] { return cancelled; });
+  {
+    DigestBatch nested;
+    CHECK_NOTHROW(CheckVerificationCancellation());
+    cancelled = true;
+    CHECK_THROWS_AS(CheckVerificationCancellation(), VerificationCancelled);
+  }
+  CHECK_THROWS_AS(CheckVerificationCancellation(), VerificationCancelled);
+  cancelled = false;
+  CHECK_NOTHROW(CheckVerificationCancellation());
+}
 TEST_CASE("protected digests support long Unicode Windows paths", "[digest-batch]") {
   const auto dir = UniqueTempPath("batch-long-path");
   auto deep = dir;

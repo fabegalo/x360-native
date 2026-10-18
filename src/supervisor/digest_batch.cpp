@@ -39,8 +39,10 @@ std::filesystem::path CanonicalName(HANDLE file, const std::filesystem::path& pa
 #endif
 }
 struct DigestBatch::State {
+  // A nested validation must not mask cancellation of its enclosing operation.
   State(DigestBatch* owner_in, State* previous_in, std::function<bool()> cancelled_in)
-      : owner(owner_in), previous(previous_in), cancelled(std::move(cancelled_in)) {}
+      : owner(owner_in), previous(previous_in),
+        cancelled(cancelled_in ? std::move(cancelled_in) : (previous_in ? previous_in->cancelled : std::function<bool()>{})) {}
   DigestBatch* owner;
   State* previous;
   std::function<bool()> cancelled;

@@ -1,5 +1,6 @@
 #include "catalog.h"
 #include "sha256.h"
+#include "digest_batch.h"
 #include "workspace_lease.h"
 #include <nlohmann/json.hpp>
 #include <toml++/toml.hpp>
@@ -30,12 +31,14 @@ std::string CMakeLiteral(const fs::path& p) {
   while (value.find("]" + delimiter + "]") != std::string::npos) delimiter += '=';
   return "[" + delimiter + "[" + value + "]" + delimiter + "]";
 }
-void Write(const fs::path& file, const std::string& text, const fs::path& root) {
+void Write(const fs::path& file, const std::string& text, const fs::path& root,
+           const std::function<void()>& before_write = {}) {
   auto rel = fs::weakly_canonical(file).lexically_relative(fs::weakly_canonical(root));
   if (rel.empty() || rel.is_absolute() || *rel.begin() == "..") throw std::runtime_error("AOT project path escaped workspace");
   for (auto p = file; p != root && !p.empty(); p = p.parent_path())
     if (fs::is_symlink(p)) throw std::runtime_error("AOT project contains a redirected path");
   if (fs::exists(file) && ReadText(file) == text) return; // preserve stamps for unchanged configuration
+  if (before_write) before_write();
   fs::create_directories(file.parent_path());
   auto temp = file; temp += ".tmp";
   if (fs::is_symlink(temp)) throw std::runtime_error("AOT staging file redirected");
@@ -50,6 +53,7 @@ std::string Toml(const toml::table& t) { std::ostringstream out; out << t; retur
 
 void GenerateAotProject(const ProjectPaths& paths, const Target& t) {
   if (!t.generic_aot || !IsSafeLabel(t.id) || t.inputs.empty()) throw std::runtime_error("Not an imported generic AOT title");
+  auto validation = std::make_unique<DigestBatch>();
   if (!Inspect(paths, t).inputs_ok) throw std::runtime_error("Imported content changed; cannot prepare this identity");
   const auto identities = IdentifyContent({}, t.game_root / "default.xex");
   if (identities.size() != 1 || !identities[0].valid || identities[0].title_id != t.title_id || identities[0].version != t.version)
@@ -93,6 +97,9 @@ void GenerateAotProject(const ProjectPaths& paths, const Target& t) {
     if (!target_names.insert(folded).second) throw std::runtime_error("Ambiguous AOT module target: " + guest);
     modules.push_back(std::move(module));
   }
+  // The original inventory and XEX identities were authenticated in one protected
+  // transaction. Release it before changing any generated project files.
+  validation.reset();
   WorkspaceLease lease(paths);
   const auto dir = paths.local() / "aot" / t.id;
   const auto generated = t.exe.parent_path() / "generated/default";
@@ -103,9 +110,17 @@ void GenerateAotProject(const ProjectPaths& paths, const Target& t) {
   if (!fs::exists(owner_file) && fs::is_directory(t.exe.parent_path()) &&
       fs::directory_iterator(t.exe.parent_path()) != fs::directory_iterator())
     throw std::runtime_error("AOT build directory has no verified owner; existing files were preserved.");
-  Write(owner_file, owner, paths.local());
-  fs::create_directories(PreparationMarker(paths, t).parent_path());
-  Write(PreparationMarker(paths, t), "project-generation\n", paths.local());
+  bool invalidated = false;
+  auto publish = [&](const fs::path& file, const std::string& text) {
+    Write(file, text, paths.local(), [&] {
+      if (invalidated) return;
+      const auto marker = PreparationMarker(paths, t);
+      fs::create_directories(marker.parent_path());
+      Write(marker, "project-generation\n", paths.local());
+      invalidated = true;
+    });
+  };
+  publish(owner_file, owner);
   const auto xex_hash = identities[0].sha256;
   toml::table manifest{
     {"project", toml::table{{"name", t.id}, {"sdk_version", "0.10.0"}, {"game_root", Path(t.game_root)}}},
@@ -152,13 +167,13 @@ void GenerateAotProject(const ProjectPaths& paths, const Target& t) {
   std::string inventory;
   for (const auto& input : t.inputs)
     inventory += input.sha256 + "\t" + Path(input.destination.lexically_relative(t.game_root)) + "\n";
-  Write(dir / "assets.sha256", inventory, paths.local());
+  publish(dir / "assets.sha256", inventory);
   auto manifest_text = Toml(manifest);
   // The pinned codegen's version updater canonicalizes this one assignment.
   // Emit its spelling up front so the producer cannot mutate a certified input.
   Replace(manifest_text, "sdk_version = '0.10.0'", "sdk_version = \"0.10.0\"");
-  Write(t.manifest, manifest_text, paths.local());
-  Write(dir / "preparation.toml", Toml(setup), paths.local());
+  publish(t.manifest, manifest_text);
+  publish(dir / "preparation.toml", Toml(setup));
   // This pinned SDK template has only scalar substitutions and cmake_var calls.
   // Reject unfamiliar directives instead of silently emitting a broken project.
   auto integration = ReadText(paths.root / "external/rexglue-sdk/resources/templates/init/rexglue_cmake.inja");
@@ -182,10 +197,10 @@ void GenerateAotProject(const ProjectPaths& paths, const Target& t) {
   // The pinned CLI refreshes generated/rexglue.cmake unconditionally from its
   // source-relative template. Keep our absolute-output integration separate so
   // that codegen cannot undo the compact paths before the second configure.
-  Write(dir / "generated/x360n_rexglue.cmake", integration, paths.local());
+  publish(dir / "generated/x360n_rexglue.cmake", integration);
   auto module_integration = ReadText(paths.root / "titles/common/generic/modules.cmake");
   Replace(module_integration, "@TITLE@", t.id);
-  Write(dir / "generated/x360n_modules.cmake", module_integration + module_cmake, paths.local());
+  publish(dir / "generated/x360n_modules.cmake", module_integration + module_cmake);
   for (const auto& name : {"CMakeLists.txt", "main.cpp"}) {
     auto text = ReadText(paths.root / "titles/common/generic" / name);
     Replace(text, "@TITLE@", t.id);
@@ -193,7 +208,7 @@ void GenerateAotProject(const ProjectPaths& paths, const Target& t) {
     Replace(text, "@ROOT@", "${CMAKE_CURRENT_SOURCE_DIR}/../../..");
     Replace(text, "@GENERATED@", Path(generated));
     Replace(text, "@HOST_DISPATCH@", modules.empty() ? "0" : "1");
-    Write(dir / name, text, paths.local());
+    publish(dir / name, text);
   }
   using J = nlohmann::json;
   J preset{{"version", 6}, {"configurePresets", J::array({{
@@ -204,6 +219,6 @@ void GenerateAotProject(const ProjectPaths& paths, const Target& t) {
       {"CMAKE_C_FLAGS", "-march=x86-64-v2"}, {"CMAKE_CXX_FLAGS", "-march=x86-64-v2"},
       {"REXSDK_DIR", Path(paths.root / "external/rexglue-sdk")}}}
   }})}};
-  Write(dir / "CMakePresets.json", preset.dump(2) + "\n", paths.local());
+  publish(dir / "CMakePresets.json", preset.dump(2) + "\n");
 }
 }
