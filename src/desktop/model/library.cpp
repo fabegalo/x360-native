@@ -5,6 +5,7 @@
 #include <array>
 #include <chrono>
 #include <fstream>
+#include <set>
 #include <stdexcept>
 
 namespace fs = std::filesystem;
@@ -93,10 +94,19 @@ std::vector<Entry> OtherRegistrations(const Target& session, const Target& game,
 void CheckObsoleteRegistration(const Target& session, const Target& game, const Entry& entry) {
   if (!WithinNew(entry.header, session.user_root) || !Same(entry.header, Hash(entry.bytes)))
     throw std::runtime_error("Conflicting library metadata differs; preserved: " + Utf8(entry.header));
+  std::set<fs::path> expected;
+  if (!WithinNew(entry.folder, session.user_root) || fs::is_symlink(entry.folder))
+    throw std::runtime_error("Redirected obsolete library content; preserved: " + Utf8(entry.folder));
   for (const auto& input : game.inputs) {
     const auto file = entry.folder / input.destination.lexically_relative(game.game_root);
     if (!WithinNew(file, session.user_root) || !Same(file, input.sha256))
       throw std::runtime_error("Conflicting library content differs or is incomplete; preserved: " + Utf8(file));
+    expected.insert(file.lexically_normal());
+  }
+  for (const auto& file : fs::recursive_directory_iterator(entry.folder)) {
+    if (file.is_symlink() || !WithinNew(file.path(), session.user_root) ||
+        (file.is_regular_file() && !expected.contains(file.path().lexically_normal())))
+      throw std::runtime_error("Unidentified obsolete library data; preserved: " + Utf8(file.path()));
   }
 }
 void ArchiveLibraryCaches(const Target& session) {
@@ -253,7 +263,16 @@ void PrepareLibrary(const ProjectPaths& paths, const Target& session, const std:
       // Recheck immediately before withdrawing enumeration, retaining the exact
       // header in the existing archive. Unknown metadata/licenses fail closed.
       CheckObsoleteRegistration(session, game, legacy);
-      ArchiveHeader(session, game, legacy);
+      // The SDK also enumerates extracted folders without a header, displaying
+      // their package ID. Retain the complete obsolete copy outside that tree.
+      const auto saved = LibraryPath(session.user_root) / ".x360n-inactive-content" /
+          (game.id + "-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+      if (!WithinNew(saved, session.user_root)) throw std::runtime_error("Redirected content archive");
+      ArchiveLibraryCaches(session);
+      fs::create_directories(saved.parent_path());
+      fs::rename(legacy.folder, saved);
+      try { ArchiveHeader(session, game, legacy); }
+      catch (...) { fs::rename(saved, legacy.folder); throw; }
     }
   }
 }

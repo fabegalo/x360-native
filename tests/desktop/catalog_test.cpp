@@ -504,9 +504,11 @@ TEST_CASE("original library archives only verified obsolete content type registr
   const auto account_cache = dashboard.user_root / "E000000000000001/FFFE07DF/00040000/ContentCache.pkg/CDIs.bin";
   Write(shared_cache, "shared derived list"); Write(account_cache, "account derived list");
   game.library.content_type = "000D0000";
+  bool archived_content = false;
   SECTION("identical installed inventory and aggregate migrate without losing user data") {
     CHECK_FALSE(InspectLibrary(f.paths, dashboard, {game}).empty());
     PrepareLibrary(f.paths, dashboard, {game});
+    archived_content = true;
     CHECK_FALSE(fs::exists(old_header));
     CHECK(fs::exists(base / "Headers/000D0000/same-package.header"));
     REQUIRE(fs::is_directory(dashboard.user_root / ".x360n-inactive-headers"));
@@ -523,6 +525,13 @@ TEST_CASE("original library archives only verified obsolete content type registr
       CHECK((hash == Hash("shared derived list") || hash == Hash("account derived list"))); ++caches;
     }
     CHECK(caches == 2);
+    unsigned payload_files = 0;
+    for (const auto& entry : fs::recursive_directory_iterator(dashboard.user_root / ".x360n-inactive-content")) {
+      if (!entry.is_regular_file()) continue;
+      const auto hash = DigestFile(entry.path())->sha256;
+      CHECK((hash == Hash("dashboard") || hash == Hash("module"))); ++payload_files;
+    }
+    CHECK(payload_files == 2);
     CHECK(InspectLibrary(f.paths, dashboard, {game}).empty());
     CHECK_NOTHROW(PrepareLibrary(f.paths, dashboard, {game}));
   }
@@ -538,6 +547,13 @@ TEST_CASE("original library archives only verified obsolete content type registr
     CHECK_THROWS(PrepareLibrary(f.paths, dashboard, {game}));
     CHECK(fs::exists(old_header));
     CHECK(DigestFile(old_file)->sha256 == Hash("different content"));
+  }
+  SECTION("additional unrecognized files are preserved and refused") {
+    const auto extra = old_file.parent_path() / "unrecognized.license";
+    Write(extra, "preserve extra data");
+    CHECK_THROWS(PrepareLibrary(f.paths, dashboard, {game}));
+    CHECK(fs::exists(old_header));
+    CHECK(DigestFile(extra)->sha256 == Hash("preserve extra data"));
   }
   SECTION("another catalogued recipe retains its own content type") {
     auto other = game; other.library.content_type = "00004000";
@@ -556,7 +572,7 @@ TEST_CASE("original library archives only verified obsolete content type registr
     CHECK_THROWS(PrepareLibrary(f.paths, dashboard, {game}, [] { return true; }));
     CHECK(DigestFile(old_header)->sha256 == old_hash);
   }
-  CHECK(fs::exists(old_file));
+  CHECK(fs::exists(old_file) == !archived_content);
   CHECK(DigestFile(dashboard.user_root / "profiles/account")->sha256 == Hash("existing account"));
   CHECK(DigestFile(dashboard.user_root / "saves/progress")->sha256 == Hash("existing progress"));
 }
