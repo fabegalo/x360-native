@@ -5,6 +5,22 @@ Este arquivo resume o estado atual; os relatórios vinculados preservam datas,
 falhas iniciais, hashes, comandos e limites de cada validação. Resultados de uma
 etapa histórica não certificam automaticamente o build atual nem outros títulos.
 
+Preparação e lançamento (18/10, sobre `c84a4b4`): reconstrução nativa completa
+17559 703,12 → 552,65 s (21,40%); no-ops dos quatro alvos 31,69–32,96% mais
+rápidos, com zero CMake/codegen/objetos. A validação anterior ao processo caiu
+28,79 → 21,87 s na 17559; Charlie 10,63 → 9,30 s; Moto 12,25 → 10,75 s;
+Castle 8,68 → 8,15 s. SHA integral e isolamento preservados; transações novas
+a cada sessão, sem aprovação persistente. Abertura/interface do launcher mantidas.
+Não foram executados jogos; startup real e primeiro frame dependem de teste manual.
+Memória adicional da transação e resultados sem ganho estão documentados no
+[relatório de preparação/startup](docs/reports/preparation-startup-2026-10-18.md).
+Complemento: corrigidos objetos AOT genéricos acima de MAX_PATH e a invalidação
+incondicional de projetos idênticos. Charlie/Moto recompilaram somente um objeto
+host por alteração, sem PCH ou link de DLL; 34/5 DLLs preservaram SHA-256. A
+geração idempotente real de Charlie levou 4,37 s e manteve seu recibo válido.
+O incremental estável de Charlie permaneceu em aproximadamente 123 s: não houve
+ganho de parede nesse ensaio; a redução de trabalho não é vendida como latência.
+
 Preparação da dashboard (18/10): corrigida a ausência de `digest_batch.cpp`
 nos targets que compilam `sha256.cpp` diretamente, causa do erro de linkagem
 `TryBatchDigest` no launcher. 17559 recompilada pelo driver oficial, recibo novo

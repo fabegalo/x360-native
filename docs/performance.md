@@ -38,6 +38,22 @@ completa também pode ser solicitada explicitamente. Não é medição de startu
 
 ## Builds incrementais
 
+A otimização seguinte reduziu a reconstrução nativa completa da 17559 em 21,40%
+e os no-ops de 17559/Charlie/Moto/Castle em 31,69–32,96%. O núcleo de fingerprints
+de Motocross caiu de 68,26 para 10,75 s com 1.166 produtos idênticos. O lançamento
+usa outra melhoria: uma transação protegida no supervisor, sem rehashes de bytes
+já retidos e sem nova normalização dos mesmos nomes. A validação anterior ao
+processo caiu 24,03% / 12,51% / 12,25% / 6,09%, respectivamente. O custo novo de
+reler o catálogo está incluído; o caminho padrão de abertura foi mantido.
+Resultados negativos, memória adicional, metodologia, commits e procedimento
+manual de janela/primeiro frame:
+[preparação e startup](reports/preparation-startup-2026-10-18.md).
+O complemento corrigiu dependências Ninja obsoletas em objetos AOT genéricos
+longos e a criação indevida de marcador ao regenerar projeto idêntico. O teste
+real preservou 34/5 DLLs de Charlie/Moto e compilou só um objeto host; o custo
+restante dos inventários/hashes ainda manteve Charlie em cerca de 123 s, sem
+ganho de parede no incremental estável medido.
+
 O driver de títulos reutiliza produtos certificados por conteúdo e dependências
 reais do Ninja. Configuração, codegen e compilação têm decisões separadas; estado
 inválido exige rebuild seguro. Metodologia, contagens, tempos e limites:
