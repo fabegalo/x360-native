@@ -2,6 +2,7 @@
 # SDK behavior checks (link the SDK codegen library).
 add_executable(x360n_sdk_checks sdkcheck/depfile_escape_test.cpp)
 target_sources(x360n_sdk_checks PRIVATE sdkcheck/gapfill_boundary_test.cpp sdkcheck/synthetic_xex.cpp)
+target_sources(x360n_sdk_checks PRIVATE sdkcheck/virtual_thunk_discovery_test.cpp)
 target_link_libraries(x360n_sdk_checks PRIVATE rexcodegen Catch2::Catch2WithMain)
 target_compile_options(x360n_sdk_checks PRIVATE
     -UTRACY_ENABLE -UREXGLUE_ENABLE_PROFILING -UREXGLUE_ENABLE_PERF_COUNTERS)
@@ -9,6 +10,11 @@ target_compile_options(x360n_sdk_checks PRIVATE
 x360n_stage_runtime_dlls(x360n_sdk_checks)
 catch_discover_tests(x360n_sdk_checks TEST_PREFIX "sdkcheck." PROPERTIES LABELS "project" TIMEOUT 60
     DISCOVERY_MODE PRE_TEST)
+
+# Explicit analysis-only corpus diagnostic; never starts guest code or runs in CTest.
+add_executable(x360n_aot_discovery_probe EXCLUDE_FROM_ALL tools/aot_discovery_probe.cpp)
+target_link_libraries(x360n_aot_discovery_probe PRIVATE rexcodegen)
+x360n_stage_runtime_dlls(x360n_aot_discovery_probe)
 
 # Minimal ReXApp built like a title, for the teardown checks in
 # sdkcheck/app_shutdown_test.cpp (patches 0002 and 0004). It runs the synthetic

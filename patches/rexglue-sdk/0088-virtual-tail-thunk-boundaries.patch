@@ -1,0 +1,129 @@
+diff --git a/src/codegen/phase_gapfill.cpp b/src/codegen/phase_gapfill.cpp
+index fb5972a..da973c6 100644
+--- a/src/codegen/phase_gapfill.cpp
++++ b/src/codegen/phase_gapfill.cpp
+@@ -10,8 +10,10 @@
+  */
+ 
+ #include "ppc/instruction.h"
++#include "decoded_binary.h"
+ 
+ #include <unordered_set>
++#include <map>
+ 
+ #include <rex/codegen/phases.h>
+ #include "phase_helpers.h"
+@@ -23,7 +25,6 @@
+ 
+ #include <ppc.h>
+ 
+-using rex::codegen::ppc::decode_instruction;
+ using rex::codegen::ppc::Opcode;
+ using rex::memory::load_and_swap;
+ 
+@@ -35,11 +36,32 @@ namespace {
+ // GapFill to register uncovered code regions
+ //=============================================================================
+ 
++// A frameless virtual tail thunk has no fall-through and no table of local
++// labels. Keep this deliberately exact: an arbitrary bctr may be a switch.
++bool isVirtualTailThunk(DecodedBinary& decoded, uint32_t start, uint32_t end) {
++  if (end - start != 12)
++    return false;
++  const auto* object = decoded.get(start);
++  const auto* slot = decoded.get(start + 4);
++  const auto* ctr = decoded.get(start + 8);
++  const auto* branch = decoded.get(end);
++  if (!object || !slot || !ctr || !branch)
++    return false;
++  const auto scratch = object->D.RT;
++  return object->opcode == Opcode::lwz && object->D.RA == 3 && object->D.d == 0 &&
++         (scratch == 11 || scratch == 12) &&
++         slot->opcode == Opcode::lwz && slot->D.RA == scratch && slot->D.RT == scratch &&
++         static_cast<int16_t>(slot->D.d) >= 0 && (slot->D.d & 3) == 0 &&
++         ctr->opcode == Opcode::mtctr && ctr->XFX.RT == scratch &&
++         static_cast<uint32_t>(branch->code) == 0x4E800420;
++}
++
+ // Split a code region into function segments based on terminators (blr, tail calls).
+ std::vector<CodeRegion> splitRegionOnTerminators(
+-    const CodeRegion& region, const BinaryView& binary,
++    const CodeRegion& region, DecodedBinary& decoded,
+     const std::unordered_set<uint32_t>& knownCallables,
+-    const std::unordered_set<uint32_t>& pdataEnds) {
++    const std::unordered_set<uint32_t>& pdataEnds,
++    const std::map<uint32_t, uint32_t>& protectedEnds) {
+   std::vector<CodeRegion> segments;
+   uint32_t segmentStart = region.start;
+ 
+@@ -51,21 +73,28 @@ std::vector<CodeRegion> splitRegionOnTerminators(
+       segments.push_back({segmentStart, addr});
+       segmentStart = addr;
+     }
+-    const uint8_t* data = binary.translate(addr);
+-    if (!data)
++    const auto* insn = decoded.get(addr);
++    if (!insn)
+       break;
+ 
+-    uint32_t raw = load_and_swap<uint32_t>(data);
+-    auto decoded = decode_instruction(addr, raw);
+     bool shouldSplit = false;
+     const char* reason = nullptr;
+ 
+     // Check for terminators
+-    if (decoded.is_return()) {
++    if (insn->is_return()) {
+       shouldSplit = true;
+       reason = "blr";
+-    } else if (decoded.opcode == Opcode::b && decoded.branch_target.has_value()) {
+-      uint32_t target = decoded.branch_target.value();
++    } else if (insn->opcode == Opcode::bcctr && isVirtualTailThunk(decoded, segmentStart, addr)) {
++      const auto boundary = addr + 4;
++      auto owner = protectedEnds.upper_bound(boundary);
++      // A recognized sequence does not override original metadata or an
++      // explicit config extent, including unreachable holes in that extent.
++      if (owner == protectedEnds.begin() || std::prev(owner)->second <= boundary) {
++        shouldSplit = true;
++        reason = "virtual tail thunk";
++      }
++    } else if (insn->opcode == Opcode::b && insn->branch_target.has_value()) {
++      uint32_t target = insn->branch_target.value();
+       // Don't split on tail recursion (branch to own segment start)
+       if (target != segmentStart && knownCallables.contains(target)) {
+         shouldSplit = true;
+@@ -141,9 +170,23 @@ void gapFillCodeRegions(CodegenContext& ctx) {
+   }
+ 
+   std::unordered_set<uint32_t> pdataEnds;
++  std::map<uint32_t, uint32_t> protectedEnds;
+   for (const auto& [start, size] : scan.pdataSizes) {
+-    if (size != 0 && start + size > start)
++    if (size != 0 && start + size > start) {
+       pdataEnds.insert(start + size);
++      protectedEnds[start] = start + size;
++    }
++  }
++  for (const auto& [start, config] : ctx.Config().functions) {
++    const auto size = config.getSize(start);
++    if (size != 0 && start + size > start)
++      protectedEnds[start] = std::max(protectedEnds[start], start + size);
++  }
++  // Prefix maxima also protect overlapping declared ranges.
++  uint32_t end = 0;
++  for (auto& [start, limit] : protectedEnds) {
++    end = std::max(end, limit);
++    limit = end;
+   }
+ 
+   size_t gapsFound = 0;
+@@ -151,7 +194,8 @@ void gapFillCodeRegions(CodegenContext& ctx) {
+ 
+   for (const auto& region : scan.codeRegions) {
+     // Split region on terminators (blr, tail calls), then check each segment
+-    auto segments = splitRegionOnTerminators(region, binary, knownCallables, pdataEnds);
++    auto segments = splitRegionOnTerminators(region, ctx.decoded(), knownCallables, pdataEnds,
++                                             protectedEnds);
+ 
+     for (const auto& segment : segments) {
+       // Skip if this segment's start is already a registered function entry

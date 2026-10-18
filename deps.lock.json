@@ -916,7 +916,7 @@
                                             "file":  "patches/rexglue-sdk/0068-gapfill-pdata-end-boundaries.patch",
                                             "sha256":  "9632659ad82cf7da44c026ce7e61d7f3b6071e16976dea3a7c29041d0483dc30",
                                             "files":  {
-                                                          "src/codegen/phase_gapfill.cpp":  "3b89f9a207f52ae832403a84aa52b9683fbdb32800c9ab3423096dbb16c4c457"
+                                                          "src/codegen/phase_gapfill.cpp":  "b64c94daa2639315f6ec4b15243c5d608d04a25a4156f5625e5ea229d7adb813"
                                                       },
                                             "base_files":  {
                                                                "src/codegen/phase_gapfill.cpp":  "878a120c08c772e005f92ec44ed5121c65b5b5764c4725896dfe2d7d5e7d20e3"
@@ -1182,6 +1182,17 @@
     "src/graphics/d3d12/render_target_cache.cpp": "9e562ab6e87297661341ae76618b28cae2ee668e0848a8347f45115f5b97140f"
   },
   "test": "tests/sdkcheck/fixed16_resolve_probe.cpp"
+},
+{
+  "file": "patches/rexglue-sdk/0088-virtual-tail-thunk-boundaries.patch",
+  "sha256": "f00a72cf918a4d62b23776a3200bfafb16e396ca54e529a992e5d71f03f7d3f1",
+  "base_files": {
+    "src/codegen/phase_gapfill.cpp": "3b89f9a207f52ae832403a84aa52b9683fbdb32800c9ab3423096dbb16c4c457"
+  },
+  "files": {
+    "src/codegen/phase_gapfill.cpp": "b64c94daa2639315f6ec4b15243c5d608d04a25a4156f5625e5ea229d7adb813"
+  },
+  "test": "tests/sdkcheck/virtual_thunk_discovery_test.cpp"
 }
                                     ]
                     },
