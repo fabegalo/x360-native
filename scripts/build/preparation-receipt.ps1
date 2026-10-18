@@ -12,6 +12,26 @@ function Assert-AotBuildDirectory([string]$Root, [string]$Declared, [string]$Req
 function Get-ReceiptHash([string]$File) {
     (Get-FileHash -LiteralPath $File -Algorithm SHA256).Hash.ToLowerInvariant()
 }
+function Clear-NinjaNativeProducts([string]$Ninja, [string]$Build) {
+    $rules = @(& $Ninja -C $Build -t rules | Where-Object { $_ -match '(_COMPILER__|_LINKER__)' })
+    if ($LASTEXITCODE -or -not $rules.Count) { throw 'Cannot identify native build rules' }
+    # cmd.exe has an 8191-character limit, including the guard/wrapper paths.
+    # Bound arguments conservatively; clean every rule, preserving AOT stamps.
+    $batch = [Collections.Generic.List[string]]::new()
+    $length = 0
+    foreach ($rule in $rules) {
+        if ($batch.Count -and $length + $rule.Length + 3 -gt 4000) {
+            & $Ninja -C $Build -t clean -r @batch
+            if ($LASTEXITCODE) { throw 'Cannot invalidate stale native products' }
+            $batch.Clear(); $length = 0
+        }
+        $batch.Add($rule); $length += $rule.Length + 3
+    }
+    if ($batch.Count) {
+        & $Ninja -C $Build -t clean -r @batch
+        if ($LASTEXITCODE) { throw 'Cannot invalidate stale native products' }
+    }
+}
 function Reset-GeneratedBuildOutputs([string]$Build, [string[]]$Outputs) {
     $boundary = [IO.Path]::GetFullPath($Build).TrimEnd('\') + '\'
     $aot = [IO.File]::Exists((Join-Path $Build '.x360n-aot-owner'))

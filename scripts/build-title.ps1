@@ -92,9 +92,7 @@ try {
                 # Native objects cannot be trusted after an uncertified build or
                 # a content change with preserved mtime. Keep SDK codegen stamps:
                 # its per-module input hashes still select the necessary modules.
-                $rules = @(& $cache.CMAKE_MAKE_PROGRAM -C $build -t rules | Where-Object { $_ -match '(_COMPILER__|_LINKER__)' })
-                & $cache.CMAKE_MAKE_PROGRAM -C $build -t clean -r @rules
-                if ($LASTEXITCODE) { throw 'Cannot invalidate stale native products' }
+                Clear-NinjaNativeProducts $cache.CMAKE_MAKE_PROGRAM $build
                 # Embedded templates and other custom outputs also require a
                 # content-safe rebuild when input mtimes were preserved.
                 $generated = @(& $cache.CMAKE_MAKE_PROGRAM -C $build -t targets rule CUSTOM_COMMAND)

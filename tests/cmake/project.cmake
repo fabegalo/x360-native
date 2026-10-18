@@ -74,6 +74,9 @@ if(WIN32)
   add_test(NAME x360n.preparation-receipt-publication COMMAND powershell -NoProfile -ExecutionPolicy Bypass
     -File ${CMAKE_CURRENT_SOURCE_DIR}/supervisor/preparation_receipt_test.ps1)
   set_tests_properties(x360n.preparation-receipt-publication PROPERTIES LABELS project TIMEOUT 60)
+  add_test(NAME x360n.native-product-cleaning COMMAND powershell -NoProfile -ExecutionPolicy Bypass
+    -File ${CMAKE_CURRENT_SOURCE_DIR}/build_isolation/native-clean.ps1 -Ninja "${X360N_REAL_NINJA}")
+  set_tests_properties(x360n.native-product-cleaning PROPERTIES LABELS project TIMEOUT 30)
   add_test(NAME x360n.ppc.compile-contract COMMAND powershell -NoProfile -ExecutionPolicy Bypass
     -File ${CMAKE_CURRENT_SOURCE_DIR}/ppc_contract/contract_test.ps1)
   set_tests_properties(x360n.ppc.compile-contract PROPERTIES LABELS project TIMEOUT 180)
