@@ -60,6 +60,20 @@ param([string]`$PreviousSha)
     [IO.File]::WriteAllText("$libraries/implicit.lib", 'library v2')
     [IO.File]::SetLastWriteTimeUtc("$libraries/implicit.lib", $time)
     Assert (-not (Test-ReceiptEntries $librariesBefore)) 'implicit library substitution accepted'
+    $lastSnapshot = Get-ReceiptHash "$scratch/.preparation/toolchain.json"
+    $capture = [IO.File]::ReadAllText("$scratch/capture.ps1").Replace("& '$SnapshotScript'", "`$env:CXXFLAGS = '@external.rsp'`n& '$SnapshotScript'")
+    Assert ($capture.Contains("`$env:CXXFLAGS = '@external.rsp'")) 'negative flag fixture was not installed'
+    [IO.File]::WriteAllText("$scratch/capture.ps1", $capture)
+    $rejected = $false
+    try { $null = Snapshot } catch {
+        # Windows PowerShell may wrap native stderr as NativeCommandError before
+        # the complete message is redirected. Accept only this specific failure.
+        $diagnostic = $_.Exception.Message + "`n" + [IO.File]::ReadAllText("$scratch/capture.log")
+        $rejected = $diagnostic.Contains('Unexpanded response file')
+        if (-not $rejected) { Write-Output $diagnostic }
+    }
+    Assert $rejected 'environment response flags bypassed the preflight'
+    Assert ((Get-ReceiptHash "$scratch/.preparation/toolchain.json") -eq $lastSnapshot) 'failed flag preflight replaced the authenticated snapshot'
     Write-Output 'PASS: deterministic devshell, include paths with spaces, new shadow headers, implicit libraries, CMake environment identity without raw values'
 } finally {
     $resolved = [IO.Path]::GetFullPath($scratch)

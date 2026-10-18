@@ -39,6 +39,22 @@ function Get-TextDigest([string]$Text) {
     try { ([BitConverter]::ToString($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes($Text)))).Replace('-', '').ToLowerInvariant() }
     finally { $sha.Dispose() }
 }
+function Assert-IncrementalResponseFlags([string]$Command) {
+    # compdb -x expands Ninja's rspfile_content, not arbitrary external/nested
+    # @files. Their flags/include search paths are absent from our authenticated
+    # dependency closure. Fail before certification rather than reuse them.
+    if ($Command -match '(?is)^\s*(?:"[^"]*[\\/]cmd\.exe"|[^\s"]*[\\/]cmd\.exe|cmd(?:\.exe)?)\s+(?:/[ds]\s+)*/c\s+"(.*)"\s*$') {
+        $Command = $matches[1]
+    }
+    foreach ($token in [regex]::Matches($Command, '(?:[^\s"'']+|"(?:\\.|[^"\\])*"|''(?:\\.|[^''\\])*'')+')) {
+        $value = $token.Value.Trim([char[]]@([char]34, [char]39))
+        if ($value.StartsWith('@') -or
+            ($value.StartsWith('-Wl,') -and $value -match ',["'']?@') -or
+            $value -match '^-(?:Xclang|Xlinker)=["'']?@') {
+            throw 'Unexpanded response file: cannot certify external/nested flags. Declare the response content in the Ninja rule so compdb -x can expand it.'
+        }
+    }
+}
 function Get-IncrementalConfigureInputs([string]$Build, [string]$Project) {
     $files = @(Get-NinjaNodes $Build @('build.ninja')) + @(Get-BuildPresetFiles $Project)
     $manifest = Join-Path $Build 'x360n-codegen-manifests.txt'
@@ -92,6 +108,7 @@ function Get-IncrementalProducts([string]$Build) {
     }
     $commandMap = @{}
     foreach ($command in ((Invoke-IncrementalNinjaQuery $Build @('compdb','-x')) | ConvertFrom-Json)) {
+        Assert-IncrementalResponseFlags $command.command
         if ($command.command) { $commandMap[(Resolve-BuildPath $Build $command.output)] = $command.command }
     }
     # compdb names just the first output of a multi-output edge. Authenticate

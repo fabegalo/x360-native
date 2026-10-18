@@ -61,6 +61,17 @@ try {
     $responseProducts = @(Get-IncrementalProducts $longGraph)
     [IO.File]::WriteAllText("$longGraph/build.ninja", $responseGraph.Replace('-DFLAG=1','-DFLAG=2'))
     Assert (@(Get-IncrementalProducts $longGraph)[0].signature -ne $responseProducts[0].signature) 'response file flag change ignored'
+    foreach ($argument in @('@external.rsp', '@"external flags.rsp"', '"@external flags.rsp"', '-Wl,@external.rsp', '-Xclang=@external.rsp', 'cmd.exe /C "cd . && compiler @external.rsp && cd ."')) {
+        $rejected = $false
+        try { Assert-IncrementalResponseFlags ("compiler $argument").Replace('compiler cmd.exe', 'cmd.exe') }
+        catch { $rejected = $_.Exception.Message -like 'Unexpanded response file:*' }
+        Assert $rejected "untracked response flags accepted: $argument"
+    }
+    Assert-IncrementalResponseFlags 'compiler -DMAIL="user@example.com" "C:/folder @part/source.cpp" -I"@include"'
+    [IO.File]::WriteAllText("$longGraph/build.ninja", $responseGraph.Replace('unused-generator @$rspfile', 'unused-generator @external.rsp'))
+    $rejected = $false
+    try { $null = @(Get-IncrementalProducts $longGraph) } catch { $rejected = $_.Exception.Message -like 'Unexpanded response file:*' }
+    Assert $rejected 'native checkpoint certified an unexpanded response argument'
     [IO.File]::WriteAllText("$scratch/CMakeLists.txt", @'
 cmake_minimum_required(VERSION 3.25)
 project(incremental_fixture LANGUAGES CXX)

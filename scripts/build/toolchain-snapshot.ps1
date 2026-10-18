@@ -3,6 +3,9 @@ $ErrorActionPreference = 'Stop'
 $env:PSModulePath = Join-Path $PSHOME 'Modules'
 . "$PSScriptRoot/preparation-receipt.ps1"
 . "$PSScriptRoot/incremental-state.ps1"
+foreach ($name in @('CL','_CL_','LINK','_LINK_','CFLAGS','CXXFLAGS','LDFLAGS','RCFLAGS')) {
+    Assert-IncrementalResponseFlags ([Environment]::GetEnvironmentVariable($name))
+}
 # Run inside devshell: implicit INCLUDE/LIB search paths are not written into
 # Ninja's commands. A VS/Windows Kit update must not silently reuse old objects.
 $environmentNames = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
@@ -50,6 +53,7 @@ if ([IO.File]::Exists($cacheFile)) {
         $commands = (Invoke-IncrementalNinjaQuery $Build @('compdb','-x')) | ConvertFrom-Json
         $graphTrusted = $true
     } catch { Write-Host 'Toolchain inventory will be completed after configure.' }
+    foreach ($command in $commands) { Assert-IncrementalResponseFlags $command.command }
     if ($cache.CMAKE_HOME_DIRECTORY) {
         $configs = @(Get-NinjaNodes $Build @('build.ninja')) + @(Get-BuildPresetFiles $cache.CMAKE_HOME_DIRECTORY)
         foreach ($config in $configs) {
