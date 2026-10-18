@@ -290,6 +290,24 @@ function Test-VerifiedCodegen($Previous, [string]$Project, [string]$Build) {
     }
     return $true
 }
+function Get-CodegenInputMetadata([string[]]$Manifests) {
+    foreach ($entry in @(Get-ReceiptEntries $Manifests)) {
+        [pscustomobject]@{path=$entry.path;sha256=$entry.sha256;last_write_time_utc=[IO.File]::GetLastWriteTimeUtc($entry.path)}
+    }
+}
+function Restore-UnchangedCodegenInputMetadata($Entries) {
+    # The pinned producer rewrites sdk_version even when no bytes change.
+    # Preserve write-if-changed semantics across both explicit and Ninja codegen.
+    # Timestamps never authenticate content: changed/missing inputs are untouched
+    # and the driver's source snapshots must still pass full SHA-256 validation.
+    foreach ($entry in $Entries) {
+        if ((Test-BuildFile $entry.path) -and (Get-ReceiptHash $entry.path) -eq $entry.sha256 -and
+            [IO.File]::GetLastWriteTimeUtc($entry.path) -ne $entry.last_write_time_utc) {
+            [IO.File]::SetLastWriteTimeUtc($entry.path, $entry.last_write_time_utc)
+            Write-Verbose "Preserved metadata for byte-identical codegen input: $($entry.path)"
+        }
+    }
+}
 function Select-NativeDllOutputs([string]$Root, [string[]]$Nodes) {
     $originals = [IO.Path]::GetFullPath((Join-Path $Root '.local/inputs')).TrimEnd('\','/') + [IO.Path]::DirectorySeparatorChar
     foreach ($file in $Nodes) {

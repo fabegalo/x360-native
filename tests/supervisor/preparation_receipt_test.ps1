@@ -34,6 +34,21 @@ try {
         Assert $rejected 'stale compiled helper accepted in the same host'
         Assert (Test-ReceiptEntries $entry) 'restored helper identity rejected'
     }
+    $rewritten = Join-Path $scratch 'producer-input.toml'
+    [IO.File]::WriteAllText($rewritten, "[project]`nsdk_version = '0.10.0'`n")
+    $metadata = @(Get-CodegenInputMetadata @($rewritten))
+    $changedTime = $metadata[0].last_write_time_utc.AddSeconds(2)
+    [IO.File]::WriteAllText($rewritten, [IO.File]::ReadAllText($rewritten))
+    [IO.File]::SetLastWriteTimeUtc($rewritten, $changedTime)
+    Restore-UnchangedCodegenInputMetadata $metadata
+    Assert ([IO.File]::GetLastWriteTimeUtc($rewritten) -eq $metadata[0].last_write_time_utc) 'identical SDK rewrite invalidated CMake metadata'
+    [IO.File]::WriteAllText($rewritten, "[project]`nsdk_version = 'changed'`n")
+    [IO.File]::SetLastWriteTimeUtc($rewritten, $changedTime)
+    Restore-UnchangedCodegenInputMetadata $metadata
+    Assert ([IO.File]::GetLastWriteTimeUtc($rewritten) -eq $changedTime) 'changed SDK input had its timestamp restored'
+    Assert (-not (Test-ReceiptEntries $metadata)) 'changed SDK input approved after metadata check'
+    [IO.File]::Delete($rewritten)
+    Restore-UnchangedCodegenInputMetadata $metadata
     $project = Join-Path $scratch 'project with spaces'
     $generated = Join-Path $project 'generated/default'
     $native = Join-Path $scratch 'native'

@@ -131,12 +131,18 @@ function Test-FingerprintPolicyTransition($Old, $Current, [string]$Root, $Receip
         'scripts/build/preparation-receipt.ps1'='57a3ec59065d92fce079b9b726b24cb82bc7c4f5533a136013d0ad42d39e76bb'
         'scripts/build/product-fingerprint.cs'='91606b61c4e41f59749d01ae8d962224c80f93e71de90f2967a48513377f3107'
     }
+    $framework = @{
+        'scripts/build-title.ps1'='a9b8309d4886ff4b3a0ebf17757107c639312ead85f65efb1da5c75d78a490ab'
+        'scripts/build/incremental-state.ps1'='0605c5a2e192b7404e4cf22d2388917a2c6a51b3e5894acf9a336736b5179612'
+        'scripts/build/preparation-receipt.ps1'='dbad7717a14410298ebf217e05767b531bd731974d65396638ea021b502dcb0d'
+        'scripts/build/product-fingerprint.cs'='f3f86e3d3363e87dbb576e1aaa359b695d546d474ca9080a672057a4b9eef361'
+    }
     $oldMap = @{}; $currentMap = @{}; $receiptMap = @{}; $allowed = @{}
     foreach ($entry in $Old) { if ($oldMap.ContainsKey($entry.path)) { return $false }; $oldMap[$entry.path] = $entry.sha256 }
     foreach ($entry in $Current) { if ($currentMap.ContainsKey($entry.path)) { return $false }; $currentMap[$entry.path] = $entry.sha256 }
     foreach ($entry in $ReceiptInputs) { $receiptMap[$entry.path] = $entry.sha256 }
     $helper = [IO.Path]::GetFullPath((Join-Path $Root 'scripts/build/product-fingerprint.cs'))
-    foreach ($known in @($legacy, $compiled)) {
+    foreach ($known in @($legacy, $compiled, $framework)) {
         $allowed = @{}; $match = $true
         foreach ($relative in $known.Keys) {
             $path = [IO.Path]::GetFullPath((Join-Path $Root $relative))

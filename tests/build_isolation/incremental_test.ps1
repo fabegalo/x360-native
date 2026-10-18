@@ -60,6 +60,17 @@ try {
     Assert (Test-FingerprintPolicyTransition $oldCompiled $currentCompiled $transitionRoot $oldCompiled) 'known compiled receipt transition rejected'
     $oldCompiled[0].sha256 = 'f'*64
     Assert (-not (Test-FingerprintPolicyTransition $oldCompiled $currentCompiled $transitionRoot $oldCompiled)) 'compiled transition accepted an unknown source'
+    $frameworkScripts = @{
+        'scripts/build-title.ps1'='a9b8309d4886ff4b3a0ebf17757107c639312ead85f65efb1da5c75d78a490ab'
+        'scripts/build/incremental-state.ps1'='0605c5a2e192b7404e4cf22d2388917a2c6a51b3e5894acf9a336736b5179612'
+        'scripts/build/preparation-receipt.ps1'='dbad7717a14410298ebf217e05767b531bd731974d65396638ea021b502dcb0d'
+        'scripts/build/product-fingerprint.cs'='f3f86e3d3363e87dbb576e1aaa359b695d546d474ca9080a672057a4b9eef361'
+    }
+    $oldFramework = @($frameworkScripts.Keys | ForEach-Object { [pscustomobject]@{path=(Join-Path $transitionRoot $_);sha256=$frameworkScripts[$_]} })
+    $currentFramework = @($oldFramework | ForEach-Object { [pscustomobject]@{path=$_.path;sha256=('b'*64)} })
+    Assert (Test-FingerprintPolicyTransition $oldFramework $currentFramework $transitionRoot $oldFramework) 'known Framework policy transition rejected'
+    $oldFramework[0].sha256 = 'f'*64
+    Assert (-not (Test-FingerprintPolicyTransition $oldFramework $currentFramework $transitionRoot $oldFramework)) 'Framework transition accepted an unknown source'
     $longDirectory = Join-Path $scratch (('long-dependency-' * 7) + '/' + ('nested-header-' * 7))
     $longInput = Join-Path $longDirectory 'input.h'
     $extended = '\\?\' + [IO.Path]::GetFullPath($longDirectory)

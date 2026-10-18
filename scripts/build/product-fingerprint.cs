@@ -29,7 +29,7 @@ public sealed class X360NProducts : IDisposable {
     readonly bool windows = Environment.OSVersion.Platform == PlatformID.Win32NT;
     // Framework exposes CNG through System.Core; newer .NET uses its native
     // SHA256 implementation. Avoid a compile-time dependency on the former.
-    static readonly Type cng = Type.GetType("System.Security.Cryptography.SHA256Cng, System.Core", false);
+    static readonly Type cng = Type.GetType("System.Security.Cryptography.SHA256Cng, System.Core, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089", false);
     static string HashStream(Stream stream, byte[] buffer) {
         using (SHA256 sha = Environment.OSVersion.Platform == PlatformID.Win32NT && cng != null
             ? (SHA256)Activator.CreateInstance(cng) : SHA256.Create()) {

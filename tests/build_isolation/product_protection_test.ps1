@@ -1,6 +1,10 @@
 param([string]$Root = (Resolve-Path "$PSScriptRoot/../..").Path)
 $ErrorActionPreference = 'Stop'
 Add-Type -Path "$Root/scripts/build/product-fingerprint.cs"
+if ($PSVersionTable.PSEdition -eq 'Desktop') {
+    $provider = ([X360NProducts].GetField('cng', [Reflection.BindingFlags]'Static,NonPublic')).GetValue($null)
+    if (-not $provider -or $provider.FullName -ne 'System.Security.Cryptography.SHA256Cng') { throw 'Framework silently fell back to managed SHA-256' }
+}
 $scratch = Join-Path $Root ('.local/build/product-protection-' + [Guid]::NewGuid().ToString('N'))
 $directory = Join-Path $scratch 'source with spaces'
 [void][IO.Directory]::CreateDirectory($directory)

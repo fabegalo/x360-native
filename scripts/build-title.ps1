@@ -66,6 +66,7 @@ $receiptFile = "$exe.preparation.json"
 $previous = Get-PreviousReceipt $receiptFile $Title $manifest $exe
 $sourceSnapshot = @()
 $finalSourceSnapshot = @()
+$codegenInputMetadata = @()
 $stateFile = Join-Path $build '.preparation/incremental.json'
 $incrementalState = $null
 $processed = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
@@ -155,6 +156,7 @@ try {
                 (-not $_.StartsWith((Join-Path $titleDir 'generated'), [StringComparison]::OrdinalIgnoreCase) -or
                  $_ -eq (Join-Path $titleDir 'generated/x360n_rexglue.cmake'))
             }))
+            $codegenInputMetadata = @(Get-CodegenInputMetadata (@($manifest) + @(Get-AdditionalCodegenManifests $titleDir $build)))
         }
         if ($s.name -eq '2-codegen') {
             $tool = @(Get-NinjaNodes $build @('rexglue') | Where-Object { $_ -match '[\\/]rexglue[^\\/]*\.exe$' })[0]
@@ -229,6 +231,7 @@ try {
                 throw "Preparation failed at $($invocation.name), exit $rc"
             }
             }
+        if ($s.name -eq '4-build') { Restore-UnchangedCodegenInputMetadata $codegenInputMetadata }
         if ($s.name -in @('1-configure', '3-reconfigure')) {
             # CMake 3.31's __create_def calls CreateFileW without converting long
             # object paths (Source/bindexplib.cxx). Keep its generated object list
