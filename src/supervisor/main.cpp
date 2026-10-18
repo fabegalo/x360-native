@@ -635,22 +635,34 @@ int Run(const ProjectPaths& p, const fs::path& exe_in, std::vector<std::string> 
   return r.exit_code == 0 ? kExitOk : kExitFailed;
 }
 
-int Session(const ProjectPaths& paths, const fs::path& manifest, int timeout, bool separate_windows, bool skip_boot_intro) {
+int Session(const ProjectPaths& paths, const fs::path& manifest, int timeout, bool separate_windows, bool skip_boot_intro, bool crash_stack, const fs::path& user_data_root) {
   try {
     WorkspaceLease lease(paths);
+    if (!user_data_root.empty()) {
+      if (!user_data_root.is_absolute() || !fs::is_directory(user_data_root))
+        throw std::runtime_error("Session user data root must be an existing absolute directory.");
+      for (const auto& protected_root : {paths.inputs(), paths.build(), paths.root / "titles", paths.sdk()})
+        if (fs::exists(protected_root) && IsWithin(user_data_root, protected_root))
+          throw std::runtime_error("Session user data cannot share content, source or build directories.");
+    }
+    auto load_profile = [&](const fs::path& file, bool validate_execution = true) {
+      auto profile = LoadSessionProfile(paths, file, validate_execution);
+      if (!user_data_root.empty()) profile.user_root = user_data_root / profile.user_root.filename();
+      return profile;
+    };
     // Immutable for this session, including Guide and all title transitions.
     const auto renderer_settings = LoadRendererSettings(paths);
     const auto console_settings = LoadConsoleSettings(paths);
     fmt::print("session: console language={} country={} (snapshot until restart)\n",
                console_settings.language, console_settings.country);
-    const auto dashboard = LoadSessionProfile(paths, manifest);
+    const auto dashboard = load_profile(manifest);
     CheckSessionRenderer(dashboard.exe, renderer_settings);
     fmt::print("session: global renderer {}{}\n",
         renderer_settings.renderer == Renderer::Native ? "Native" : "Xenos",
         renderer_settings.experimental ? " (explicit experimental development access)" : "");
     std::vector<SessionProfile> targets;
     for (const auto& target : dashboard.launch_targets)
-      targets.push_back(LoadSessionProfile(paths, target, false));
+      targets.push_back(load_profile(target, false));
     auto active = dashboard;
     std::unique_ptr<SessionWindow> window;
     if (!separate_windows) {
@@ -661,7 +673,7 @@ int Session(const ProjectPaths& paths, const fs::path& manifest, int timeout, bo
     SessionProgress progress;
     for (uint64_t step = 0; ; ++step) {
       // Revalidate the profile and input bytes at every transition.
-      active = LoadSessionProfile(paths, active.manifest);
+      active = load_profile(active.manifest);
       CheckSessionRenderer(active.exe, renderer_settings);
       auto args = SessionConsoleArguments(SessionRendererArguments(
           SessionProfileArguments(active, skip_boot_intro && active.manifest == dashboard.manifest),
@@ -679,7 +691,7 @@ int Session(const ProjectPaths& paths, const fs::path& manifest, int timeout, bo
       // offers no Guide; its titles never receive another version's modules.
       if (active.manifest != dashboard.manifest && !dashboard.system_ui_host.empty()) {
         // Recheck the dashboard receipt that owns this native host and modules.
-        LoadSessionProfile(paths, dashboard.manifest);
+        load_profile(dashboard.manifest);
         args.push_back("--x360n_system_ui_host=" + PathUtf8(dashboard.system_ui_host));
         args.push_back("--x360n_system_ui_root=" + PathUtf8(dashboard.game_root));
       }
@@ -694,7 +706,7 @@ int Session(const ProjectPaths& paths, const fs::path& manifest, int timeout, bo
       // budget. Shorten only the diagnostic label, never the routed identity.
       const auto run_label = run_prefix + active.name.substr(0, 64 - run_prefix.size());
       const auto result = Run(paths, active.exe, args,
-          run_label, timeout, true, false, &handoff, window.get(), &child_lifetime);
+          run_label, timeout, true, crash_stack, &handoff, window.get(), &child_lifetime);
       if (window && window->closed()) return kExitOk;
       if (result != kExitOk) {
         // A successful compilation is not a compatibility verdict. Preserve a
@@ -784,9 +796,15 @@ int main(int argc, char** argv) {
   int session_timeout = 600;
   bool skip_boot_intro = false;
   bool separate_windows = false;
+  bool session_crash_stack = false;
+  std::string session_user_data_root;
   session->add_option("manifest", session_manifest)->required();
   session->add_flag("--separate-windows", separate_windows, "Diagnostic mode: one window per title");
   session->add_flag("--skip-boot-intro", skip_boot_intro, "Diagnostic mode: skip the optional dashboard boot animation");
+  session->add_flag("--crash-stack", session_crash_stack,
+                   "Diagnostic mode: record unhandled exception stacks for each session child; slower");
+  session->add_option("--user-data-root", session_user_data_root,
+                      "Session-only storage parent (absolute existing directory); preserves each title folder name");
   session->add_option("--timeout", session_timeout, "Timeout per title; 0 disables it")
       ->check(CLI::NonNegativeNumber);
   std::string exe, label;
@@ -821,7 +839,7 @@ int main(int argc, char** argv) {
     return kExitUsage;
   }
   if (doctor->parsed()) return Doctor(*paths, config);
-  if (session->parsed()) return Session(*paths, PathFromUtf8(session_manifest), session_timeout, separate_windows, skip_boot_intro);
+  if (session->parsed()) return Session(*paths, PathFromUtf8(session_manifest), session_timeout, separate_windows, skip_boot_intro, session_crash_stack, PathFromUtf8(session_user_data_root));
   if (run->parsed()) {
     try {
       // Session already owns this lease. Standalone prepared-title launches

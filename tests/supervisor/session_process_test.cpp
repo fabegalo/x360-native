@@ -42,12 +42,57 @@ struct Fixture {
     }
   }
   ~Fixture() { std::error_code ec; fs::remove_all(root.parent_path(), ec); }
-  ProcessResult Run(int timeout = 0) {
-    return RunProcess({PathFromUtf8(X360N_EXE), {"--root", PathUtf8(root), "session",
-        PathUtf8(root / "titles/dashboard/dashboard_manifest.toml"), "--separate-windows", "--timeout", std::to_string(timeout)},
+  ProcessResult Run(int timeout = 0, bool crash_stack = false, const fs::path& user_root = {}) {
+    std::vector<std::string> args{"--root", PathUtf8(root), "session",
+        PathUtf8(root / "titles/dashboard/dashboard_manifest.toml"), "--separate-windows", "--timeout", std::to_string(timeout)};
+    if (crash_stack) args.push_back("--crash-stack");
+    if (!user_root.empty()) { args.push_back("--user-data-root"); args.push_back(PathUtf8(user_root)); }
+    return RunProcess({PathFromUtf8(X360N_EXE), std::move(args),
         root, root / "out.log", root / "err.log", 90s});
   }
 };
+}
+TEST_CASE("session storage override follows handoffs without changing global storage", "[session-storage][cli]") {
+  Fixture f("storage");
+  const auto copy = f.paths.local() / "isolated";
+  fs::create_directories(copy);
+  const auto result = f.Run(10, false, copy);
+  INFO(Read(f.root / "err.log"));
+  INFO(Read(f.root / "out.log"));
+  REQUIRE(result.exit_code == 0);
+  CHECK(Read(f.paths.inputs() / "storage-observed.txt") ==
+        PathUtf8(copy / "dashboard") + "\n" + PathUtf8(copy / "game") + "\n" + PathUtf8(copy / "dashboard") + "\n");
+  CHECK_FALSE(fs::exists(f.paths.local() / "user-data-root.txt"));
+  for (const auto& invalid : {f.paths.inputs(), f.paths.build(), f.root / "titles", copy / "absent", fs::path("relative")}) {
+    CAPTURE(invalid);
+    CHECK(f.Run(10, false, invalid).exit_code != 0);
+  }
+  CHECK(Read(f.paths.inputs() / "storage-observed.txt").find("relative") == std::string::npos);
+}
+TEST_CASE("session captures an unhandled exception only with explicit crash diagnostics", "[session-crash][cli]") {
+  for (const bool capture : {false, true}) {
+    for (const std::string mode : {"crash-dashboard", "crash-game"}) {
+      CAPTURE(capture, mode);
+      Fixture f(mode);
+      auto result = f.Run(10, capture);
+      INFO(Read(f.root / "err.log"));
+      REQUIRE(result.launched);
+      REQUIRE_FALSE(result.timed_out);
+      REQUIRE(result.exit_code != 0);
+      unsigned runs = 0, crashes = 0;
+      for (const auto& run : fs::directory_iterator(f.paths.runs())) {
+        ++runs;
+        const auto report = Read(run.path() / "report.json");
+        if (report.find("\"exit_code_hex\": \"0xC0000005\"") == std::string::npos) continue;
+        ++crashes;
+        CHECK(fs::exists(run.path() / "crash.txt") == capture);
+        CHECK((report.find("\"exception_code\": \"0xC0000005\"") != std::string::npos) == capture);
+      }
+      CHECK(crashes == 1);
+      // No relaunch after a crash, including a crash before the first handoff.
+      CHECK(runs == (mode == "crash-dashboard" ? 1 : 2));
+    }
+  }
 }
 TEST_CASE("console preferences survive title handoffs and reload on session restart", "[console-settings][cli]") {
   Fixture f("locale");

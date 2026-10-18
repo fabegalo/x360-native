@@ -144,6 +144,15 @@ Após a intro, use **My Games → Castle Crashers**. Para voltar, use **Return t
 Arcade** no menu do jogo. Fechar a janela encerra a plataforma. O timeout do
 exemplo é de 900 segundos por título; `--timeout 0` desativa esse limite.
 
+Para um teste manual que precise capturar crash, `session --crash-stack` usa a
+API de debug para cada processo e grava `crash.txt`/`report.json` na exceção não
+tratada. É diagnóstico opcional, com overhead, desligado por padrão. Use
+`--user-data-root C:/caminho/absoluto/da/copia` para redirecionar somente essa
+sessão: cada título conserva o nome de sua pasta e todos compartilham o perfil
+da dashboard copiada. Prepare a cópia antes, incluindo os registros/conteúdos
+My Games necessários. O parâmetro não copia arquivos nem altera a seleção
+global de armazenamento. As verificações de recibos e originais continuam ativas.
+
 A navegação foi confirmada com controle e teclado (`Shift` + setas na dashboard).
 A inicialização direta continua disponível para diagnóstico, executando o alvo
 com `--dash17559_boot_intro=false`; veja os detalhes em [Dashboard](../dashboard.md).
