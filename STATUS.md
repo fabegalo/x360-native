@@ -51,6 +51,13 @@ pelo mantenedor e não foi restaurado. A validação visual seguinte fica para o
 teste manual solicitado pelo mantenedor, sem regressão automática de todo o acervo.
 [Diagnóstico, falhas preservadas e resultados](docs/reports/aot-ctr-dispatch-2026-10-17.md).
 
+Desktop (18/10): corrigida a escrita prematura do marcador de título incompleto
+quando o preflight de ferramentas falha por ambiente ocupado. O driver que
+possui as travas passa a ser responsável pelo marcador. Frontend Debug separado
+compilado; build/recibos de Charlie, Moto, Castle e 17559 aprovados. O registro
+final do Charlie na My Games continua pendente por trava ocupada. A fila de novas
+preparações foi adiada para os testes manuais; não há aceite dos dez diretórios.
+
 ## Plataforma e dependências
 
 Windows x64/D3D12 é o ambiente demonstrado. Linux, macOS, ARM64 e Windows limpo
@@ -70,7 +77,7 @@ Nunca substituir módulos ou fontes originais entre versões de dashboard.
 | Castle Crashers 0.0.1.3 | Ciclo original 17559 → My Games → jogo → 17559, mesma janela; entrada e cenas observadas no escopo registrado | Trial local; campanha, licença completa e save/load não certificados. [Histórico](docs/reports/titles/validation-castle-crashers.md), [Native N3](docs/reports/graphics/native-renderer-n3.md) |
 | Forza Horizon 0.0.0.10 | Ciclo My Games → condução → Guide/Xbox Home → 17559 com recibos em 14/10; perfil/entrada/áudio e retorno registrados | Campanha e saves não certificados. X2 repetiu o ciclo em harness isolado, sem recertificar o gate de preparação de produção. [Forza](docs/reports/titles/validation-forza-horizon.md), [X2](docs/reports/graphics/xenos-fetch-predication.md) |
 | Motocross Madness | Tutorial com movimento/objetivos e serviço opt-in de avatares, integrado na main | Chão preto, piloto deformado; corridas, animações e save/load pendentes. [Avatares §15](docs/avatar-system.md#15-integração-na-main-2026-10-13) |
-| Iruka | Referência técnica com renderização/animação e regressão L1–L5 | Entrada, áudio, encerramento normal e sessões longas não validados. [Iruka](docs/reports/titles/validation-iruka.md) |
+| Iruka (histórico) | Referência técnica com renderização/animação e regressão L1–L5 | Removido do acervo pelo mantenedor em 18/10; não restaurado. [Iruka](docs/reports/titles/validation-iruka.md) |
 | Retail 6717 | Build e observações históricas de blades/navegação | Fonte correspondente ausente e smoke posterior com crash; somente diagnóstico, sem sessão guiada. [Auditoria](docs/reports/maintenance/PROJECT_AUDIT.md) |
 | Biblioteca e preparação | Importação ISO/GDFX, STFS e pasta; catálogo persistente; AOT genérico com DLLs dependentes e recibos | Importado/compilado não significa jogável. Charlie completo compila; HostLoader/RuntimeHost registram, sem novo aceite de execução. [Biblioteca](docs/guides/universal-library.md), [correção PPC](docs/reports/aot-ctr-dispatch-2026-10-17.md) |
 | Desktop | Interface Windows redesenhada, biblioteca, diagnóstico, seleção global de renderer e preferências | Windows limpo, acessibilidade e aceite completo de primeira utilização pendentes. [Interface](docs/guides/desktop-ui.md), [Preparação](docs/guides/desktop-preparation.md) |

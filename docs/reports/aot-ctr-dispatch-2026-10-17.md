@@ -231,3 +231,75 @@ nenhum label ausente. Os 162 objetos PPC do Charlie e os 330 do Motocross
 mantêm `-fno-strict-aliasing` e `-ffp-model=strict` no grafo de compilação.
 O `doctor` do supervisor Debug terminou com zero falhas e 106 avisos,
 incluindo os patches locais/materialização já esperados; não é um log sem avisos.
+
+Castle concluiu em 361,4 s com oito jobs (66 s de build nativo). Recibo:
+2.973 inputs, cinco artefatos e três arquivos do produtor. SHA-256 do EXE:
+`480b53e22fd1e125ce5922343b9478ae6e7df319b5a8f0310419716eee1952d6`;
+recibo `edfbcb3df78d619f625c0a56a8c627bba18987e10a86e01648a39d62a4e1f014`.
+Foram auditadas 3.715 funções em 17 arquivos,
+14 despachos por CTR, nenhum label ausente; 21 objetos PPC com ambos os flags.
+
+O primeiro prepare da 17559 passou em 590,6 s (227 s nativos), mas a auditoria
+adicional encontrou seis unidades de compilação, nos módulos signin,
+createprofile, vk e hud, sem o contrato PPC. Os targets são criados a partir de
+invocações separadas de codegen e não entram nos inventários de fontes do SDK
+usados pelo seletor automático. Não se alterou o seletor compartilhado nem se
+invalidaram os demais títulos: os quatro targets agora ligam privadamente
+`x360n_ppc_options`, o contrato reutilizável já existente. A nova configuração
+confere os 210 objetos sem flags ausentes. Build, recibo, CMake anterior e a
+auditoria reprovada ficaram em `dash-before-ppc-contract/`; uma preparação nova
+refaz o vínculo entre fontes, opções e artefatos.
+
+A auditoria de labels da 17559 incluiu os módulos auxiliares: 206 arquivos,
+62.385 funções, 167 despachos por CTR e nenhum label ausente. O atalho
+`x360-native (main).lnk`, na Área de Trabalho, aponta ao desktop Debug local e
+passa `--root` para este checkout. A abertura real da janela foi observada;
+nenhum jogo foi aberto. Não houve inspeção de gameplay nem sessão My Games.
+
+## Fechamento do código e pendências — 18/10
+
+A preparação final da 17559 com o contrato PPC concluiu em 601,7 s, oito jobs,
+233 s de build nativo: 3.453 inputs, 13 artefatos e três arquivos do produtor.
+EXE `8cd261cce61cb72b8b247984ed4eb4d396d16a4feac8a870ad3729eef3bc5008`;
+recibo `f0c9dd272c44e57cd07ef9011c09ad92f2bb80d28f94d79faab06d7fbaae1c43`.
+O snapshot final de preparação aprovou Charlie, Moto, Castle e 17559. Isso
+certifica os produtos AOT, separadamente da instalação na biblioteca original.
+
+O mantenedor reproduziu uma falha em `tools` pelo desktop. O diagnóstico
+`logs/desktop/23651359/tools.error.log` contém `Environment in use`: a tentativa
+coincidiu com a preparação externa ainda ativa. O frontend escrevia o marcador
+de título incompleto antes de adquirir as travas e também no catch de qualquer
+erro. Essa escrita podia invalidar um produto válido ou alterar o marcador de
+outro build. O frontend agora deixa a criação/diagnóstico desse marcador ao
+driver `build-title.ps1`, que possui as travas; erros de ferramentas, importação
+e registro ficam nos logs da operação e nas verificações da biblioteca.
+
+O frontend corrigido foi configurado e compilado em Debug na árvore
+`desktop-only` (9,5 / 51,7 s), sem fechar a janela aberta pelo mantenedor.
+SHA-256: `128e08236673f2c9b1c96178eea3f818463459a58a29ea776f32b0a0cb58defd`.
+O atalho da Área de Trabalho e `scripts/start-desktop.cmd` apontam primeiro a
+essa árvore. A janela anterior não foi substituída nem reaberta automaticamente.
+Após o Escape físico que interrompeu Computer Use, não houve nova automação de UI.
+
+A fila de novas preparações foi encerrada para permitir os testes manuais.
+Castle, Charlie, Forza Horizon e Forza Horizon 2 tiveram cadastro verificado;
+Forza Horizon 2 ficou sem geração/build novo. As operações seguintes receberam
+estado **adiado**, código 125 do harness, sem iniciar processos. Não são falhas
+de compilação demonstradas. Moto já possuía perfil/build válido. Os demais
+XEX presentes e a execução dos dez diretórios não foram certificados.
+
+A tentativa final de `PrepareLibrary` real, pelo teste opt-in
+`[.local-prepared]`, confirmou os seis pré-requisitos de preparação e falhou
+na aquisição da trava exclusiva do ambiente: seis asserções aprovadas, uma
+falha por `Environment busy or not writable`, exit 42 em 21,4 s. A abertura
+exclusiva do arquivo de trava também confirmou compartilhamento ocupado.
+Nenhuma trava foi removida à força, nenhum recibo foi editado e o registro do
+Charlie na My Games **permanece pendente**. Não se declara a tarefa inteira
+concluída nem os dez jogos prontos para executar.
+
+Preservação final: dos 22 arquivos acompanhados, somente o JSON de catálogo
+do Charlie mudou durante o recadastro verificado. Perfis, saves, headers e cache
+acompanhados ficaram idênticos; nenhuma ausência foi encontrada. O backup
+anterior permanece disponível. A configuração gráfica manteve o mesmo hash.
+Sem push, Release ou alteração no renderer. Commits registram o código validado
+e os limites efetivamente observados.
