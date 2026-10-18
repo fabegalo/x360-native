@@ -43,6 +43,7 @@ jobs:
           python -m unittest discover -s .github/scripts -p test_release.py
           if ($LASTEXITCODE -ne 0) { throw 'Release ZIP gate tests failed' }
           & tests/packaging/release-configuration.ps1
+          & tests/packaging/local-startup.ps1
       - name: Validate commit, tag and release notes
         id: identity
         env:

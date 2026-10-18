@@ -26,7 +26,7 @@ int main(int argc, char** argv) {
   spec.args = {"-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", PathUtf8(root / "scripts/build-title.ps1"), "-Title", argv[2]};
   spec.working_dir = root;
   spec.stdout_file = output / "stdout.log"; spec.stderr_file = output / "stderr.log";
-  spec.timeout = std::chrono::minutes(20); spec.no_console = true; spec.collect_metrics = true;
+  spec.timeout = std::chrono::minutes(40); spec.no_console = true; spec.collect_metrics = true;
   const auto result = RunProcess(spec);
   JsonWriter out;
   out.BeginObject().String("title", argv[2]).Number("duration_ms", result.duration.count())
