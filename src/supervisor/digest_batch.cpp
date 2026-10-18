@@ -21,6 +21,20 @@ std::wstring Extended(std::filesystem::path path) {
   if (name.starts_with(L"\\\\?\\")) return name;
   return name.starts_with(L"\\\\") ? L"\\\\?\\UNC\\" + name.substr(2) : L"\\\\?\\" + name;
 }
+std::filesystem::path CanonicalName(HANDLE file, const std::filesystem::path& path) {
+  const auto needed = GetFinalPathNameByHandleW(file, nullptr, 0, FILE_NAME_NORMALIZED | VOLUME_NAME_DOS);
+  if (needed) {
+    std::wstring name(needed, L'\0');
+    const auto count = GetFinalPathNameByHandleW(file, name.data(), needed, FILE_NAME_NORMALIZED | VOLUME_NAME_DOS);
+    if (count && count < needed) {
+      name.resize(count);
+      if (name.starts_with(L"\\\\?\\UNC\\")) return std::filesystem::path(L"\\\\" + name.substr(8)).lexically_normal();
+      if (name.starts_with(L"\\\\?\\") && name.size() > 6 && name[5] == L':')
+        return std::filesystem::path(name.substr(4)).lexically_normal();
+    }
+  }
+  return std::filesystem::weakly_canonical(path);
+}
 #endif
 }
 struct DigestBatch::State {
@@ -30,10 +44,12 @@ struct DigestBatch::State {
   State* previous;
   std::function<bool()> cancelled;
 #ifdef _WIN32
-  struct Entry { std::unique_ptr<File> file; FileDigest digest; };
+  struct Entry { std::shared_ptr<File> file; FileDigest digest; };
   std::map<std::string, Entry> entries;
   std::map<std::filesystem::path, std::string> paths;
   std::map<std::filesystem::path, std::unique_ptr<File>> directories;
+  std::map<std::filesystem::path, std::filesystem::path> normal;
+  std::map<std::filesystem::path, std::shared_ptr<File>> metadata;
   bool Pin(const std::filesystem::path& directory) {
     if (directories.contains(directory)) return true;
     const auto parent = directory.parent_path();
@@ -44,7 +60,10 @@ struct DigestBatch::State {
     BY_HANDLE_FILE_INFORMATION info{};
     if (file->handle == INVALID_HANDLE_VALUE || !GetFileInformationByHandle(file->handle, &info) ||
         !(info.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) || (info.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT)) return false;
-    directories.emplace(directory, std::move(file)); return true;
+    const auto handle = file->handle;
+    directories.emplace(directory, std::move(file));
+    normal.emplace(directory, CanonicalName(handle, directory));
+    return true;
   }
   std::vector<uint8_t> buffer = std::vector<uint8_t>(1 << 20);
 #endif
@@ -64,11 +83,23 @@ std::filesystem::path VerificationPath(const std::filesystem::path& path) {
     for (const auto& part : path) if (part == "." || part == "..") ordinary = false;
     if (ordinary) {
       const auto absolute = std::filesystem::absolute(path).lexically_normal();
-      if (current->paths.contains(absolute)) return absolute;
+      if (const auto found = current->normal.find(absolute); found != current->normal.end()) return found->second;
       if (current->Pin(absolute.parent_path())) {
         const auto attributes = GetFileAttributesW(Extended(absolute).c_str());
-        if (attributes != INVALID_FILE_ATTRIBUTES && !(attributes & FILE_ATTRIBUTE_REPARSE_POINT) &&
-            (!(attributes & FILE_ATTRIBUTE_DIRECTORY) || current->Pin(absolute))) return absolute;
+        if (attributes != INVALID_FILE_ATTRIBUTES && !(attributes & FILE_ATTRIBUTE_REPARSE_POINT)) {
+          if (attributes & FILE_ATTRIBUTE_DIRECTORY) {
+            if (current->Pin(absolute)) return current->normal.at(absolute);
+          } else {
+            auto file = std::make_shared<File>(CreateFileW(Extended(absolute).c_str(), GENERIC_READ, FILE_SHARE_READ,
+                nullptr, OPEN_EXISTING, FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_SEQUENTIAL_SCAN, nullptr));
+            BY_HANDLE_FILE_INFORMATION info{};
+            if (file->handle != INVALID_HANDLE_VALUE && GetFileInformationByHandle(file->handle, &info) &&
+                !(info.dwFileAttributes & (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT))) {
+              current->metadata.emplace(absolute, file);
+              return current->normal.emplace(absolute, CanonicalName(file->handle, absolute)).first->second;
+            }
+          }
+        }
       }
     }
   }
@@ -90,14 +121,16 @@ std::optional<FileDigest> TryBatchDigest(const std::filesystem::path& path, bool
   }
   bool pinned = !absolute.native().starts_with(L"\\\\?\\") && current->Pin(absolute.parent_path());
   auto name = Extended(absolute);
-  auto file = std::make_unique<File>(CreateFileW(name.c_str(), GENERIC_READ, FILE_SHARE_READ,
+  std::shared_ptr<File> file;
+  if (const auto found = current->metadata.find(absolute); found != current->metadata.end()) file = found->second;
+  else file = std::make_shared<File>(CreateFileW(name.c_str(), GENERIC_READ, FILE_SHARE_READ,
       nullptr, OPEN_EXISTING, FILE_FLAG_SEQUENTIAL_SCAN | (pinned ? FILE_FLAG_OPEN_REPARSE_POINT : 0), nullptr));
   if (file->handle == INVALID_HANDLE_VALUE) return std::nullopt;
   BY_HANDLE_FILE_INFORMATION info{};
   if (!GetFileInformationByHandle(file->handle, &info) || (info.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)) return std::nullopt;
   if (pinned && (info.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT)) {
     pinned = false;
-    file = std::make_unique<File>(CreateFileW(name.c_str(), GENERIC_READ, FILE_SHARE_READ,
+    file = std::make_shared<File>(CreateFileW(name.c_str(), GENERIC_READ, FILE_SHARE_READ,
         nullptr, OPEN_EXISTING, FILE_FLAG_SEQUENTIAL_SCAN, nullptr));
     if (file->handle == INVALID_HANDLE_VALUE || !GetFileInformationByHandle(file->handle, &info) ||
         (info.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)) return std::nullopt;
@@ -105,12 +138,18 @@ std::optional<FileDigest> TryBatchDigest(const std::filesystem::path& path, bool
   const auto key = std::to_string(info.dwVolumeSerialNumber) + ":" +
       std::to_string(info.nFileIndexHigh) + ":" + std::to_string(info.nFileIndexLow);
   const bool reusable = info.nFileIndexHigh || info.nFileIndexLow;
+  if (pinned) {
+    current->metadata.emplace(absolute, file);
+    current->normal.emplace(absolute, CanonicalName(file->handle, absolute));
+  }
   if (const auto it = current->entries.find(key); reusable && it != current->entries.end()) {
     if (pinned) current->paths.emplace(absolute, key);
     ++current->owner->hits;
     return it->second.digest;
   }
   ActionTrace trace("hash.stream");
+  LARGE_INTEGER beginning{};
+  if (!SetFilePointerEx(file->handle, beginning, nullptr, FILE_BEGIN)) return std::nullopt;
   struct Algorithm {
     BCRYPT_ALG_HANDLE handle = nullptr;
     Algorithm() { if (BCryptOpenAlgorithmProvider(&handle, BCRYPT_SHA256_ALGORITHM, nullptr, 0) < 0) handle = nullptr; }

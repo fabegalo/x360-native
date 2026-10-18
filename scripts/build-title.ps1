@@ -231,7 +231,7 @@ try {
                 throw "Preparation failed at $($invocation.name), exit $rc"
             }
             }
-        if ($s.name -eq '4-build') { Restore-UnchangedCodegenInputMetadata $codegenInputMetadata }
+        if ($s.name -in @('2-codegen', '4-build')) { Restore-UnchangedCodegenInputMetadata $codegenInputMetadata }
         if ($s.name -in @('1-configure', '3-reconfigure')) {
             # CMake 3.31's __create_def calls CreateFileW without converting long
             # object paths (Source/bindexplib.cxx). Keep its generated object list

@@ -13,6 +13,18 @@
 using namespace x360n;
 namespace fs = std::filesystem;
 using namespace std::chrono_literals;
+TEST_CASE("verification paths preserve canonical spelling for case aliases", "[digest-batch]") {
+  const auto root = UniqueTempPath("verification-case"); fs::create_directories(root);
+  const auto file = root / "source.bin"; std::ofstream(file) << "original";
+  const auto alias = root / "SOURCE.BIN";
+  if (fs::exists(alias)) {
+    DigestBatch batch;
+    CHECK(VerificationPath(alias) == fs::weakly_canonical(alias));
+    REQUIRE(DigestFile(alias));
+    CHECK(VerificationPath(alias) == fs::weakly_canonical(alias));
+  }
+  std::error_code ec; fs::remove_all(root, ec);
+}
 TEST_CASE("verification paths retain ancestors only for their protected transaction", "[digest-batch]") {
   const auto root = UniqueTempPath("verification-path");
   const auto directory = root / fs::path(u8"João 日本");
