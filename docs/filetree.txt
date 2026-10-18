@@ -104,6 +104,13 @@ x360-native/  (tracked source + additions from this reorganization)
 |   |-- README.md
 |   `-- x360n_sdk_backports.cmake
 |-- docs/
+|   |-- assets/
+|   |   |-- screenshots/
+|   |   |   |-- dashboard-17559-games.png
+|   |   |   `-- dashboard-17559-home.png
+|   |   |-- architecture.svg
+|   |   |-- dashboard-isolation.svg
+|   |   `-- x360-native-banner.png
 |   |-- evidence/
 |   |   |-- native-2026-10-14/
 |   |   |   |-- native-frame-0.png
@@ -797,6 +804,7 @@ x360-native/  (tracked source + additions from this reorganization)
 |-- deps.lock.json
 |-- LICENSE
 |-- README.md
+|-- README.pt-BR.md
 |-- SECURITY.md
 |-- STATUS.md
 `-- THIRD_PARTY_NOTICES.md

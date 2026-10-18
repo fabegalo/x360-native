@@ -94,7 +94,7 @@ the last demonstrated stage. See [title profiles](titles/README.md),
 [compatibility evidence](docs/compatibility.md) and [dashboard records](docs/dashboard.md).
 
 Distinguish **Compiled**, **Boots**, **Renders**, **In-game**, **Playable** and
-**Fully Functional**, as defined in the [README](README.md#current-capabilities).
+**Fully Functional**, as defined in the [README](README.md#current-status).
 Report failures before compilation too. Timed startup is not proof of playability;
 save/load, progression, input, audio and return-to-dashboard need their own evidence.
 Sanitize usernames, paths, account IDs and secrets in logs. Share screenshots only
