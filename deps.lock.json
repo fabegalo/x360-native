@@ -1213,18 +1213,22 @@
 },
 {
   "file": "patches/rexglue-sdk/0090-byte-computed-ctr-dispatch.patch",
-  "sha256": "21407e7563f993eff516a8e0f8d09ff598e55741c2d64c4b3a70594a933b0aab",
+  "sha256": "d2edd7c37d79b26001d60b0ae1c616527319a1caa5bdfa181f0307f81aabebec",
   "base_files": {
     "include/rex/codegen/function_types.h": "2741b526692ebcb5f2600a99bdd1f21d0238cfa5bf86ae2160d42849fae6f725",
     "src/codegen/function_scanner.cpp": "c20a0f7769e30154a670c6c67826a5a75009b61a1fd14881f3fe1ebc80027115",
     "src/codegen/function_graph.cpp": "fecfff835149863b2b75f1a7bbeea48d221b85924f401fb0ee7e55f0b242ebee",
-    "src/codegen/builders/control_flow.cpp": "06cb0d3d4d1b36be55bce48b28970b5b0359f295e71ff84f476d9ea3bd2ba7b2"
+    "src/codegen/builders/control_flow.cpp": "06cb0d3d4d1b36be55bce48b28970b5b0359f295e71ff84f476d9ea3bd2ba7b2",
+    "src/codegen/decoded_binary.h": "5b4d543c9ad5998bedceec1647d78562df450a269a55a5a75efa2931dd915e02",
+    "src/codegen/decoded_binary.cpp": "382a9fc4f240d61d039dd1372c1d3750dd705676f0a0beb38c3757cf34b664c3"
   },
   "files": {
     "include/rex/codegen/function_types.h": "98691be9bb440a786a7788158f3b08a781f2723faffd236029c4e70c5c6015d8",
-    "src/codegen/function_scanner.cpp": "4b08edbb9dd32d0093ea6cc80f74b6a116597a8ea07d7af7cec22ccd141b7907",
+    "src/codegen/function_scanner.cpp": "a6a23f7cc730f6ceed23875d5e14c4d8d254afc70a03e3ccdadb6dd77c5c96a0",
     "src/codegen/function_graph.cpp": "8b6df66b04ebdf665cb311a51c0abd19290eaa545e44f74863f29a2090ba8546",
-    "src/codegen/builders/control_flow.cpp": "b71bf91c2c7feafc5dc5efb5f1e8d1307d788d850ac08a67e657b5d52c0ee829"
+    "src/codegen/builders/control_flow.cpp": "b71bf91c2c7feafc5dc5efb5f1e8d1307d788d850ac08a67e657b5d52c0ee829",
+    "src/codegen/decoded_binary.h": "d790f56981a58b3e6b44d41a44cc59d7e64df37452342110342227ba4bb934b2",
+    "src/codegen/decoded_binary.cpp": "adb2e7e42a37f8bdcae7d9bdb2e0e468091b4ebf49cadbdeed847f4826c93ea3"
   },
   "test": "tests/sdkcheck/ctr_dispatch_test.cpp"
 }

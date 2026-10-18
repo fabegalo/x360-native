@@ -794,6 +794,10 @@ remain intact. Analyzed tables take precedence over late emission heuristics;
 manual switch configuration retains priority. Out-of-line cases may extend past
 PDATA into an unowned gap, preserving the existing discovery contract. Other patterns retain the previous
 analysis. No runtime scanner, original-byte patch or title-specific rule.
+Direct call destinations are indexed in the existing decode pass so a caller
+discovered later cannot make the computed domain absorb its callee. PC-capture
+calls to the following word are excluded. Successor paths may continue beyond
+the largest domain address, up to their terminators and the same entry barrier.
 
 Regression: `tests/sdkcheck/ctr_dispatch_test.cpp`, including adjacent-function
 data, register/mask variants and broken def-use chains. The explicit
