@@ -24,7 +24,8 @@ $root = (Resolve-Path (Split-Path -Parent $PSScriptRoot)).Path
 . (Join-Path $PSScriptRoot 'build/preparation-receipt.ps1')
 . (Join-Path $PSScriptRoot 'build/build-lease.ps1')
 . (Join-Path $PSScriptRoot 'build/incremental-state.ps1')
-$driverSnapshot = @(Get-ReceiptEntries @($PSCommandPath, (Join-Path $PSScriptRoot 'build/preparation-receipt.ps1'), (Join-Path $PSScriptRoot 'build/build-lease.ps1'), (Join-Path $PSScriptRoot 'build/incremental-state.ps1'), (Join-Path $PSScriptRoot 'build/toolchain-snapshot.ps1'), (Join-Path $PSScriptRoot 'build/product-fingerprint.cs')))
+. (Join-Path $PSScriptRoot 'build/release-configuration.ps1')
+$driverSnapshot = @(Get-ReceiptEntries @($PSCommandPath, (Join-Path $PSScriptRoot 'build/preparation-receipt.ps1'), (Join-Path $PSScriptRoot 'build/build-lease.ps1'), (Join-Path $PSScriptRoot 'build/incremental-state.ps1'), (Join-Path $PSScriptRoot 'build/release-configuration.ps1'), (Join-Path $PSScriptRoot 'build/toolchain-snapshot.ps1'), (Join-Path $PSScriptRoot 'build/product-fingerprint.cs')))
 if ($Title -notmatch '^[a-z][a-z0-9_]*$') { throw "invalid title name '$Title'" }
 $titleDir = Join-Path $root "titles\$Title"
 if (-not (Test-Path (Join-Path $titleDir 'CMakePresets.json'))) {
@@ -81,16 +82,17 @@ function Update-ToolchainSnapshot([string]$Phase) {
 }
 
 $steps = @(
-    @{ name = '1-configure';  args = "cmake --preset x360n-win-amd64 -B `"$build`" -DX360N_CODEGEN_BOOTSTRAP=ON" },
+    @{ name = '1-configure';  args = "cmake --preset x360n-win-amd64 -B `"$build`" -DCMAKE_BUILD_TYPE=Release -DX360N_CODEGEN_BOOTSTRAP=ON" },
     @{ name = '2-tool';       args = "cmake --build `"$build`" --target rexglue" },
     @{ name = '2-codegen';    args = '' },
-    @{ name = '3-reconfigure'; args = "cmake --preset x360n-win-amd64 -B `"$build`" -DX360N_CODEGEN_BOOTSTRAP=OFF" },
+    @{ name = '3-reconfigure'; args = "cmake --preset x360n-win-amd64 -B `"$build`" -DCMAKE_BUILD_TYPE=Release -DX360N_CODEGEN_BOOTSTRAP=OFF" },
     @{ name = '4-build';      args = "cmake --build `"$build`"" }
 )
 Push-Location $titleDir
 try {
     Update-ToolchainSnapshot '0-toolchain'
-    $reuse = -not $interrupted -and $previous -and $previous.configure -and
+    $releaseConfigured = Test-ReleaseBuildConfiguration $build
+    $reuse = $releaseConfigured -and -not $interrupted -and $previous -and $previous.configure -and
         (Test-ReceiptEntries @($previous.inputs + $previous.artifacts)) -and (Test-ReceiptGlobs $previous.globs) -and
         (Test-IncrementalConfigureInputs @(Get-IncrementalConfigureInputs $build $titleDir) $previous.configure)
     if ($reuse) {
@@ -116,7 +118,7 @@ try {
     $skipConfigure = $false
     if ($incrementalState) {
         $configureSnapshot = @(Get-IncrementalConfigureInputs $build $titleDir)
-        $skipConfigure = (Test-ReceiptGlobs $previous.globs) -and
+        $skipConfigure = $releaseConfigured -and (Test-ReceiptGlobs $previous.globs) -and
             (Test-IncrementalConfigureInputs $configureSnapshot $previous.configure)
     }
     foreach ($s in $steps) {
@@ -233,6 +235,7 @@ try {
             }
         if ($s.name -in @('2-codegen', '4-build')) { Restore-UnchangedCodegenInputMetadata $codegenInputMetadata }
         if ($s.name -in @('1-configure', '3-reconfigure')) {
+            if (-not (Test-ReleaseBuildConfiguration $build)) { throw 'Title preparation requires Release, including SDK/runtime and DLLs' }
             # CMake 3.31's __create_def calls CreateFileW without converting long
             # object paths (Source/bindexplib.cxx). Keep its generated object list
             # and symbol extraction; only spell paths >= MAX_PATH in extended form.
@@ -272,6 +275,8 @@ try {
         throw 'An input changed during preparation; prepare again. No receipt published.'
     }
     Update-ToolchainSnapshot '5-toolchain'
+    if (-not (Test-ReleaseBuildConfiguration $build)) { throw 'Cannot certify a non-Release title' }
+    Assert-ReleaseCompileCommands @((Invoke-IncrementalNinjaQuery $build @('compdb', '-x')) | ConvertFrom-Json) -NinjaGraph
     $inputs = @(Get-ReceiptEntries @(Get-BuildInputs $root $Title $build @($Title)))
     $dllOutputs = @(Select-NativeDllOutputs $root @(Get-NinjaNodes $build @($Title)) | Sort-Object -Unique)
     $artifacts = @(Get-PreparedArtifacts $build $exe $dllOutputs | Sort-Object path -Unique)

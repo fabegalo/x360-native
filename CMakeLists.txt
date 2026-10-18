@@ -11,6 +11,15 @@ enable_testing()
 
 # The distributable UI does not link or rebuild the title runtime.
 option(X360_DESKTOP_ONLY "Build the desktop distribution without the title SDK runtime" OFF)
+option(X360_DISTRIBUTION "Build the end-user distribution (Release only)" OFF)
+if(X360_DISTRIBUTION)
+    get_property(_distribution_multi GLOBAL PROPERTY GENERATOR_IS_MULTI_CONFIG)
+    if(NOT X360_DESKTOP_ONLY OR
+       (_distribution_multi AND NOT CMAKE_CONFIGURATION_TYPES STREQUAL "Release") OR
+       (NOT _distribution_multi AND NOT CMAKE_BUILD_TYPE STREQUAL "Release"))
+        message(FATAL_ERROR "End-user distribution requires desktop-only Release configuration")
+    endif()
+endif()
 if(X360_DESKTOP_ONLY)
     if(X360_DISTRIBUTION)
         set(CMAKE_C_COMPILER_LAUNCHER "${CMAKE_COMMAND};-P;${CMAKE_CURRENT_SOURCE_DIR}/cmake/distribution/x360n_distribution_compile.cmake;--")

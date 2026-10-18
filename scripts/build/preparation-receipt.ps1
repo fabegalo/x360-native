@@ -175,7 +175,7 @@ function Get-BuildInputs([string]$Root, [string]$Title, [string]$Build, [string[
         if ($cache[$name] -and [IO.File]::Exists($cache[$name])) { [void]$files.Add([IO.Path]::GetFullPath($cache[$name])) }
     }
     foreach ($file in @('deps.lock.json','scripts/build-title.ps1','scripts/build/preparation-receipt.ps1','scripts/devshell.cmd',
-                       'scripts/build/build-lease.ps1','scripts/build/ninja-guard.ps1','scripts/build/incremental-state.ps1','scripts/build/toolchain-snapshot.ps1','scripts/build/product-fingerprint.cs',
+                       'scripts/build/build-lease.ps1','scripts/build/ninja-guard.ps1','scripts/build/incremental-state.ps1','scripts/build/release-configuration.ps1','scripts/build/toolchain-snapshot.ps1','scripts/build/product-fingerprint.cs',
                        'cmake/build/x360n_stage_files.cmake','cmake/runtime/x360n_runtime.manifest')) {
         [void]$files.Add([IO.Path]::GetFullPath((Join-Path $Root $file)))
     }

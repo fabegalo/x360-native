@@ -35,6 +35,19 @@ def file_digest(path):
         return hashlib.file_digest(source, "sha256").hexdigest()
 
 
+def verify_release_commands(commands):
+    native = [c for c in commands if re.search(r"\.(?:c|cc|cpp|cxx|c\+\+|m|mm)$", c["file"], re.I)]
+    require(native, "Release compiler evidence is empty")
+    for entry in native:
+        flags = entry.get("command", "")
+        require(re.search(r"(?:^|\s)-O3(?:\s|$)", flags) and
+                re.search(r"(?:^|\s)-DNDEBUG(?:=1)?(?:\s|$)", flags) and
+                not re.search(r"(?:^|\s)(?:-O(?:0|1|2|4|s|z|g|fast)|[-/]UNDEBUG|[-/]D_DEBUG(?:=\S+)?|"
+                              r"[-/]D_ITERATOR_DEBUG_LEVEL=[12]|/M[DT]d)(?:\s|$)", flags) and
+                not re.search(r"(?:libcpmtd|libcmtd|msvcrtd|ucrtd|vcruntimed)(?:\.lib)?(?:\s|$)", flags, re.I),
+                f"Non-Release compiler configuration: {entry['file']}")
+
+
 def remote_tag_commit(repository, tag):
     obj = json.loads(command("gh", "api", f"repos/{repository}/git/ref/tags/{tag}"))["object"]
     for _ in range(8):
@@ -164,6 +177,7 @@ def verify(directory, version, commit, ref, run_id):
         index("", "package.sha256")
         index("app/workspace/", "payload.sha256")
         metadata = json.loads(files["package.json"])
+        verify_release_commands(json.loads(files["app/compile-commands.json"]))
         lock = json.loads(files["app/workspace/deps.lock.json"])
         inventory = json.loads(files["licenses/inventory.json"])
         require(metadata["version"] == version and metadata["commit"] == commit, "Package source/version differs")

@@ -207,7 +207,7 @@ function Get-IncrementalPolicy([string]$Root, [string]$Build) {
     $cache = Get-BuildCache $Build
     $files = @('deps.lock.json','scripts/build-title.ps1','scripts/devshell.cmd',
         'scripts/build/preparation-receipt.ps1','scripts/build/incremental-state.ps1','scripts/build/product-fingerprint.cs',
-        'scripts/build/build-lease.ps1','scripts/build/ninja-guard.ps1','scripts/build/toolchain-snapshot.ps1') | ForEach-Object { Join-Path $Root $_ }
+        'scripts/build/build-lease.ps1','scripts/build/ninja-guard.ps1','scripts/build/release-configuration.ps1','scripts/build/toolchain-snapshot.ps1') | ForEach-Object { Join-Path $Root $_ }
     $implicit = Join-Path $Build '.preparation/toolchain.json'
     if ([IO.File]::Exists($implicit)) { $files += $implicit }
     foreach ($name in @('CMAKE_CXX_COMPILER','CMAKE_C_COMPILER','CMAKE_LINKER','CMAKE_AR','X360N_REAL_NINJA','CMAKE_COMMAND','CMAKE_RC_COMPILER','CMAKE_MT','CMAKE_RANLIB')) {

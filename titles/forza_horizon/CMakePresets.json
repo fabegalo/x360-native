@@ -6,7 +6,7 @@
       "generator": "Ninja",
       "binaryDir": "${sourceDir}/../../.local/build/titles/forza_horizon",
       "cacheVariables": {
-        "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+        "CMAKE_BUILD_TYPE": "Release",
         "CMAKE_C_COMPILER": "${sourceDir}/../../.local/toolchains/llvm-22.1.8/bin/clang.exe",
         "CMAKE_CXX_COMPILER": "${sourceDir}/../../.local/toolchains/llvm-22.1.8/bin/clang++.exe",
         "CMAKE_C_FLAGS": "-march=x86-64-v2",

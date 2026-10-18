@@ -5,6 +5,15 @@ Este arquivo resume o estado atual; os relatórios vinculados preservam datas,
 falhas iniciais, hashes, comandos e limites de cada validação. Resultados de uma
 etapa histórica não certificam automaticamente o build atual nem outros títulos.
 
+Configuração de produção (18/10): o pacote desktop já usava Release, mas os
+presets padrão e a geração AOT usavam RelWithDebInfo. Corrigidos para Release;
+o driver impede reuso/reconfiguração omitida de outro modo e confere flags antes
+de certificar títulos/SDK/DLLs. Distribuição fora de Release é recusada pelo CMake;
+gates local/ZIP também recusam evidência Debug, mesmo com metadados Release.
+Frontend Release compilado em árvore separada e flags conferidas. Jogos antigos
+não foram reconstruídos nem executados nesta revisão. Métricas anteriores do
+frontend Debug não representam o pacote final. [Validação e limites](docs/reports/release-configuration-2026-10-18.md).
+
 Preflight de lançamento (18/10, sobre `99a7764`): comparação alternada no mesmo
 acervo reduziu a média da 17559 de 31,27 para 19,35 s (38,13%); Charlie 9,27 →
 7,74 s (16,47%); Moto 10,91 → 7,98 s (26,83%); Castle 8,12 → 6,88 s (15,32%).

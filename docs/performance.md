@@ -38,6 +38,11 @@ completa também pode ser solicitada explicitamente. Não é medição de startu
 
 ## Preflight de lançamento
 
+**Configuração de produção:** frontend, supervisor, extrator e preparação normal
+de títulos/SDK/DLLs exigem Release. Debug/RelWithDebInfo são diagnósticos explícitos.
+Os benchmarks abaixo preservam as configurações históricas; não extrapolar suas
+latências para o pacote final. [Política, correções e validação de Release](reports/release-configuration-2026-10-18.md).
+
 A continuação sobre `99a7764` reduziu a validação anterior ao processo em 38,13%
 na 17559, 16,47% em Charlie, 26,83% em Moto e 15,32% em Castle, em comparação
 alternada no mesmo acervo. Read-ahead de até quatro hashes grandes preserva

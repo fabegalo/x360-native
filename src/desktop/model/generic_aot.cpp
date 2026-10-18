@@ -213,7 +213,7 @@ void GenerateAotProject(const ProjectPaths& paths, const Target& t) {
   using J = nlohmann::json;
   J preset{{"version", 6}, {"configurePresets", J::array({{
     {"name", "x360n-win-amd64"}, {"generator", "Ninja"}, {"binaryDir", Path(t.exe.parent_path())},
-    {"cacheVariables", {{"CMAKE_BUILD_TYPE", "RelWithDebInfo"},
+    {"cacheVariables", {{"CMAKE_BUILD_TYPE", "Release"},
       {"CMAKE_C_COMPILER", Path(paths.local() / "toolchains/llvm-22.1.8/bin/clang.exe")},
       {"CMAKE_CXX_COMPILER", Path(paths.local() / "toolchains/llvm-22.1.8/bin/clang++.exe")},
       {"CMAKE_C_FLAGS", "-march=x86-64-v2"}, {"CMAKE_CXX_FLAGS", "-march=x86-64-v2"},

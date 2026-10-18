@@ -4,12 +4,12 @@
     "configurePresets": [
         {
             "name": "x360n-win-amd64",
-            "displayName": "x360-native: Windows AMD64 RelWithDebInfo (pinned LLVM, SDK from source)",
+            "displayName": "x360-native: Windows AMD64 Release (pinned LLVM, SDK from source)",
             "description": "Builds the SDK from ../../external/rexglue-sdk (REXSDK_DIR) and runs codegen as part of the build. Use scripts\\build-title.ps1.",
             "generator": "Ninja",
             "binaryDir": "${sourceDir}/../../.local/build/titles/motocross_madness",
             "cacheVariables": {
-                "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+                "CMAKE_BUILD_TYPE": "Release",
                 "CMAKE_C_COMPILER": "${sourceDir}/../../.local/toolchains/llvm-22.1.8/bin/clang.exe",
                 "CMAKE_CXX_COMPILER": "${sourceDir}/../../.local/toolchains/llvm-22.1.8/bin/clang++.exe",
                 "CMAKE_C_FLAGS": "-march=x86-64-v2",

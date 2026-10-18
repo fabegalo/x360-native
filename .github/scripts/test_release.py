@@ -25,6 +25,9 @@ class ReleaseTests(unittest.TestCase):
         pe[60:64] = (64).to_bytes(4, "little")
         pe[64:70] = b"PE\0\0\x64\x86"
         self.files = {exe: bytes(pe) for exe in release.EXECUTABLES}
+        self.files["app/compile-commands.json"] = json.dumps([
+            dict(file="<source>/src/supervisor/main.cpp", command="clang++ -O3 -DNDEBUG --dependent-lib=libcmt -c main.cpp")
+        ]).encode()
         self.files.update({"LICENSE": b"synthetic license", "THIRD_PARTY_NOTICES.md": b"synthetic notice"})
         patch_bytes = b"synthetic patch fixture"
         patches = [{"file": "patches/rexglue-sdk/fixture.patch", "sha256": release.digest(patch_bytes)}]
@@ -64,6 +67,18 @@ class ReleaseTests(unittest.TestCase):
     def test_complete_archive(self):
         self.write_archive()
         self.assertEqual(self.verify()["commit"], self.commit)
+
+    def test_debug_flags_rejected_even_with_release_metadata_and_valid_hashes(self):
+        for flags in ("-O0 -DNDEBUG", "-O3 -DNDEBUG -D_DEBUG", "-O3 -DNDEBUG --dependent-lib=libcmtd",
+                      "-O3 -DNDEBUG -O2", "-O3", "-O3 -DNDEBUG /MDd", "-O3 -DNDEBUG -D_ITERATOR_DEBUG_LEVEL=2",
+                      "-O3 -DNDEBUG -UNDEBUG", "-O3 -DNDEBUG --dependent-lib=libcpmtd", "-O3 -DNDEBUG -Og"):
+            with self.subTest(flags=flags):
+                self.files["app/compile-commands.json"] = json.dumps([
+                    dict(file="<source>/src/supervisor/main.cpp", command=f"clang++ {flags} -c main.cpp")
+                ]).encode()
+                self.write_archive()
+                with self.assertRaisesRegex(ValueError, "Non-Release compiler"):
+                    self.verify()
 
     def test_corrupt_download(self):
         self.write_archive()

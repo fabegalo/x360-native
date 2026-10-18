@@ -2,6 +2,7 @@
 param([Parameter(Mandatory)][string]$PackageDirectory,
       [Parameter(Mandatory)][string]$SdkDirectory)
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot '../build/release-configuration.ps1')
 $package = (Resolve-Path -LiteralPath $PackageDirectory).Path
 $sdk = (Resolve-Path -LiteralPath $SdkDirectory).Path
 function Digest($path) {
@@ -87,7 +88,9 @@ foreach($dep in $metadata.dependencies.PSObject.Properties) {
 }
 if(@($metadata.dependencies.PSObject.Properties).Count -ne @($inventory.desktop_dependencies).Count) { throw 'Missing build dependency identity' }
 $units=@()
-foreach($command in (Get-Content (Join-Path $package 'app/compile-commands.json') -Raw | ConvertFrom-Json)) {
+$compileCommands = @(Get-Content (Join-Path $package 'app/compile-commands.json') -Raw | ConvertFrom-Json)
+Assert-ReleaseCompileCommands $compileCommands
+foreach($command in $compileCommands) {
     $f=$command.file.Replace('\','/')
     if($f -match '^<source>/external/rexglue-sdk/(src/.+)$') { $units += $Matches[1] }
     elseif($f -match '^<source>/external/rexglue-sdk/thirdparty/([^/]+)/') {
