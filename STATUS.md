@@ -5,13 +5,26 @@ Este arquivo resume o estado atual; os relatórios vinculados preservam datas,
 falhas iniciais, hashes, comandos e limites de cada validação. Resultados de uma
 etapa histórica não certificam automaticamente o build atual nem outros títulos.
 
+Ambiente local Release (18/10): launcher, supervisor e extrator reconstruídos
+em Release na árvore usada pelo atalho; startup agora exige Release. Seis
+produtos nativos foram compilados nesse modo. O mantenedor reduziu o aceite
+final a 17559 e Castle: ambos foram recertificados e executaram por 30 s,
+com 1.620 swaps e zero falhas de swap cada; 1.161 arquivos originais de usuário
+auditados permaneceram intactos. Preflight do smoke: Castle 5,498 s; 17559
+13,354 s, sem novo comparativo equivalente de latência. Charlie/Minecraft
+mantêm recibos Release; Motocross foi interrompido na recertificação e Forza
+ainda precisa recertificar os metadados de DLL Release. A 6717 foi bloqueada
+pelo gate de `XenonJKLatin.xtt` sem identidade verificada; exe/recibo antigos
+arquivados, sem fallback. [Resultados e limites da migração local](docs/reports/local-release-migration-2026-10-18.md).
+
 Configuração de produção (18/10): o pacote desktop já usava Release, mas os
 presets padrão e a geração AOT usavam RelWithDebInfo. Corrigidos para Release;
 o driver impede reuso/reconfiguração omitida de outro modo e confere flags antes
 de certificar títulos/SDK/DLLs. Distribuição fora de Release é recusada pelo CMake;
 gates local/ZIP também recusam evidência Debug, mesmo com metadados Release.
-Frontend Release compilado em árvore separada e flags conferidas. Jogos antigos
-não foram reconstruídos nem executados nesta revisão. Métricas anteriores do
+Na auditoria inicial, frontend Release foi compilado em árvore separada e suas
+flags conferidas; jogos antigos ainda não haviam sido reconstruídos/executados.
+Métricas anteriores do
 frontend Debug não representam o pacote final. [Validação e limites](docs/reports/release-configuration-2026-10-18.md).
 
 Preflight de lançamento (18/10, sobre `99a7764`): comparação alternada no mesmo
