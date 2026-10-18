@@ -16,3 +16,9 @@ Não executar automaticamente a suíte completa do SDK nem os testes visuais
 `local.iruka.regression` e `local.motocross.shared-xam`. Não remover verificações
 ou tratar um skip como sucesso funcional. Fixtures sintéticos ficam em diretórios
 temporários isolados; preservar perfis, saves e catálogos reais.
+
+`x360n_user_mode_page_probe` é um diagnóstico explícito, fora de ALL e CTest.
+Consulta o export real de PTE em memória sintética; não carrega nem executa
+originais. Saída 78 registra incompatibilidade com o teste de atributos do
+consumidor de modo de usuário, não aprovação. Comando e limites no
+[relatório NetCF](../docs/reports/charlie-netcf-2026-10-18.md).

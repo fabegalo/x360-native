@@ -5,6 +5,16 @@ Este arquivo resume o estado atual; os relatórios vinculados preservam datas,
 falhas iniciais, hashes, comandos e limites de cada validação. Resultados de uma
 etapa histórica não certificam automaticamente o build atual nem outros títulos.
 
+Charlie/NetCF, análise técnica sobre `6de07e6`: demonstrada incompatibilidade
+entre o PTE aproximado do SDK e o mapper de modo de usuário do RuntimeHost.
+A página `0x82BC0000` recebe `0x2BC` e falha no teste de atributos; sonda com
+memória sintética reproduziu seis recusas em 15 páginas, sem execução guest.
+O HRESULT da sessão histórica não foi capturado; uma falha anterior no mapper
+não pode ser excluída. Sem patch especulativo ou correção funcional declarada:
+contratos de PTE, entrada/saída de modo de usuário e `sc` permanecem o bloqueio.
+Recibos de Charlie/17559/Moto/Castle e 2.019 arquivos originais revalidados.
+Sem jogos iniciados. [Diagnóstico, testes e próximo limite](docs/reports/charlie-netcf-2026-10-18.md).
+
 Charlie Murder, teste manual de 18/10: recibos atuais de Charlie/17559
 revalidados sem rebuild de títulos. Corrigida genericamente a divergência entre
 o tipo do catálogo por pasta e o perfil AOT, com arquivamento dos registros

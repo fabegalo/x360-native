@@ -71,6 +71,12 @@ add_executable(x360n_aot_discovery_probe EXCLUDE_FROM_ALL tools/aot_discovery_pr
 target_link_libraries(x360n_aot_discovery_probe PRIVATE rexcodegen)
 x360n_stage_runtime_dlls(x360n_aot_discovery_probe)
 
+# Explicit synthetic diagnostic, deliberately outside ALL and CTest. Exit 78
+# records an unsupported image-page attribute contract; never runs a game.
+add_executable(x360n_user_mode_page_probe EXCLUDE_FROM_ALL tools/user_mode_page_probe.cpp)
+target_link_libraries(x360n_user_mode_page_probe PRIVATE rexruntime)
+x360n_stage_runtime_dlls(x360n_user_mode_page_probe)
+
 # Minimal ReXApp built like a title, for the teardown checks in
 # sdkcheck/app_shutdown_test.cpp (patches 0002 and 0004). It runs the synthetic
 # XEX that the test writes; see shutdown_probe/probe_app.cpp.
