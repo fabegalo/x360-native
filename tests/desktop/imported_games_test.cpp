@@ -90,6 +90,27 @@ TEST_CASE("universal library resumes catalogs in arbitrary existing input locati
   CHECK(ReadCatalog(f.paths)[0].game_root == legacy);
   CHECK(Inspect(f.paths, ReadCatalog(f.paths)[0]).inputs_ok);
 }
+TEST_CASE("universal library adopts verified local games without duplicating discs", "[universal][local-inputs]") {
+  Fixture f;
+  const auto source = f.paths.inputs()/"games/existing/disc-1";
+  fs::create_directories(source.parent_path()); fs::rename(f.source, source);
+  const auto before = fs::last_write_time(source/"default.xex");
+  const auto id = ImportGame(f.paths, {}, source, source);
+  auto games = ReadCatalog(f.paths); REQUIRE(games.size() == 1);
+  CHECK(games[0].game_root == source);
+  CHECK(Inspect(f.paths, games[0]).inputs_ok);
+  CHECK(fs::last_write_time(source/"default.xex") == before);
+  CHECK_FALSE(fs::exists(f.paths.inputs()/"games/12345678"));
+  CHECK(ImportGame(f.paths, games, source, source) == id);
+  Write(source/"assets/data", "changed revision");
+  CHECK(ImportGame(f.paths, games, source, source) != id);
+  games = ReadCatalog(f.paths); REQUIRE(games.size() == 2);
+  const auto other = std::find_if(games.begin(), games.end(), [&](const auto& game) { return game.id != id; });
+  REQUIRE(other != games.end());
+  CHECK(other->game_root != source);
+  CHECK(Inspect(f.paths, *other).inputs_ok);
+  CHECK_FALSE(Inspect(f.paths, *std::find_if(games.begin(), games.end(), [&](const auto& game) { return game.id == id; })).inputs_ok);
+}
 TEST_CASE("universal library rejects malformed games before publication", "[universal]") {
   Fixture f;
   SECTION("truncated XEX") { Write(f.source/"default.xex","XEX2bad"); }

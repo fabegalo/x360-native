@@ -165,6 +165,18 @@ std::string ImportGame(const ProjectPaths& paths, const std::vector<Target>& tar
     target = *recipe;
     if (record["name"] == "") record["name"] = recipe->library.display_name;
   }
+  // Content already owned by this environment needs verification, not another
+  // full disc copy. Never adopt external paths, links, or a root already bound
+  // to a different inventory. Changed revisions keep the isolated import path.
+  if (IsWithin(source, paths.inputs() / "games")) {
+    Safe(source, paths.inputs());
+    const auto canonical_source = fs::weakly_canonical(source);
+    const auto occupied = std::any_of(targets.begin(), targets.end(), [&](const auto& existing) {
+      return existing.catalogued && fs::weakly_canonical(existing.game_root) == canonical_source &&
+          existing.id != "g" + id.substr(0, 63) && existing.id != target.id;
+    });
+    if (!occupied) target.game_root = source;
+  }
   // Store every asset, including files beyond an AOT recipe's minimum inventory.
   target.inputs.clear();
   for (const auto& f : files) {
