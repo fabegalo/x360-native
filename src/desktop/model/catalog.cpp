@@ -26,6 +26,7 @@ std::string Utf8(const fs::path& path) {
   return {reinterpret_cast<const char*>(s.data()), s.size()};
 }
 namespace {
+thread_local bool launch_verification = false;
 toml::table Read(const fs::path& path) {
   std::ifstream stream(path, std::ios::binary);
   if (!stream) throw std::runtime_error("Não foi possível ler: " + Utf8(path));
@@ -37,11 +38,11 @@ std::string Text(const auto& node) {
   return *s;
 }
 fs::path Resolve(const fs::path& parent, const std::string& value) {
-  return fs::weakly_canonical(parent / fs::path(std::u8string(value.begin(), value.end())));
+  return CatalogVerificationPath(parent / fs::path(std::u8string(value.begin(), value.end())));
 }
 void Inside(const fs::path& path, const fs::path& base) {
   // Includes non-existing descendants; existing links are resolved before comparison.
-  auto p = fs::weakly_canonical(path), b = fs::weakly_canonical(base);
+  auto p = CatalogVerificationPath(path), b = CatalogVerificationPath(base);
   auto rel = p.lexically_relative(b);
   if (rel.empty() || rel.is_absolute() || *rel.begin() == "..")
     throw std::runtime_error("Caminho fora da pasta autorizada: " + Utf8(path));
@@ -67,6 +68,12 @@ fs::path ImportIoPath(const fs::path& path) {
   return path;
 #endif
 }
+}
+CatalogLaunchVerification::CatalogLaunchVerification() : previous_(launch_verification) { launch_verification = true; }
+CatalogLaunchVerification::~CatalogLaunchVerification() { launch_verification = previous_; }
+bool CatalogLaunchVerificationActive() { return launch_verification; }
+fs::path CatalogVerificationPath(const fs::path& path) {
+  return launch_verification ? VerificationPath(path) : fs::weakly_canonical(path);
 }
 std::vector<Target> ReadCatalog(const ProjectPaths& paths) {
   ActionTrace trace("catalog.read");
@@ -256,6 +263,7 @@ Inspection Inspect(const ProjectPaths& paths, const Target& t, InspectionMode mo
 }
 Target VerifyCatalogLaunch(const ProjectPaths& paths, const std::vector<Target>& catalog,
     const std::string& id, const fs::path& manifest) {
+  CatalogLaunchVerification launch_paths;
   ActionTrace trace("launch.catalog-preflight");
   const auto find = [&](const std::string& name) -> const Target& {
     const auto it = std::find_if(catalog.begin(), catalog.end(), [&](const auto& t) { return t.id == name; });

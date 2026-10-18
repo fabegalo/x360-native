@@ -51,6 +51,19 @@ struct ContentIdentity {
 std::vector<ContentIdentity> IdentifyContent(const std::vector<Target>& targets,
     const std::filesystem::path& source, const std::function<bool()>& cancelled = {});
 std::string Utf8(const std::filesystem::path& path);
+// Enables protected path reuse only for the launch operation. Ordinary catalog
+// opening, imports and preparation retain their existing resolution path.
+class CatalogLaunchVerification {
+ public:
+  CatalogLaunchVerification();
+  ~CatalogLaunchVerification();
+  CatalogLaunchVerification(const CatalogLaunchVerification&) = delete;
+  CatalogLaunchVerification& operator=(const CatalogLaunchVerification&) = delete;
+ private:
+  bool previous_;
+};
+bool CatalogLaunchVerificationActive();
+std::filesystem::path CatalogVerificationPath(const std::filesystem::path& path);
 std::vector<Target> ReadCatalog(const ProjectPaths& paths);
 // Durable local game inventory, independent of the AOT recipe catalog.
 void ReadImportedGames(const ProjectPaths& paths, std::vector<Target>& targets);

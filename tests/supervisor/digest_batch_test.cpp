@@ -2,6 +2,7 @@
 #include <catch2/catch_message.hpp>
 #include "digest_batch.h"
 #include "child_process.h"
+#include "paths.h"
 #include "session_window.h"
 #include "session_notification.h"
 #include "scratch.h"
@@ -32,7 +33,10 @@ TEST_CASE("verification paths retain ancestors only for their protected transact
   const auto file = directory / "source.bin"; std::ofstream(file) << "original";
   {
     DigestBatch batch;
+    CHECK_FALSE(HasProtectedVerificationPath(file));
     CHECK(VerificationPath(file) == fs::weakly_canonical(file));
+    CHECK(HasProtectedVerificationPath(file));
+    CHECK_FALSE(HasProtectedVerificationPath(directory / "." / "source.bin"));
     REQUIRE(DigestFile(file));
     CHECK(VerificationPath(file) == fs::weakly_canonical(file));
     CHECK(DigestFile(file)->sha256 == DigestFile(file)->sha256);
@@ -41,8 +45,26 @@ TEST_CASE("verification paths retain ancestors only for their protected transact
     CHECK_FALSE(MoveFileExW(root.c_str(), fs::path(root.native() + L"-moved").c_str(), 0));
   }
   REQUIRE(MoveFileExW(directory.c_str(), (root / "moved").c_str(), 0));
+  CHECK_FALSE(HasProtectedVerificationPath(root / "moved/source.bin"));
   CHECK(VerificationPath(root / "moved/source.bin") == fs::weakly_canonical(root / "moved/source.bin"));
   std::error_code ec; fs::remove_all(root, ec);
+}
+TEST_CASE("reparse ancestors never receive ordinary-path approval", "[digest-batch]") {
+  const auto root = UniqueTempPath("verification-junction");
+  fs::create_directories(root / "target"); std::ofstream(root / "target/input") << "synthetic";
+  wchar_t system[MAX_PATH]{}; GetSystemDirectoryW(system, MAX_PATH);
+  ProcessSpec spec{fs::path(system) / "cmd.exe", {"/c", "mklink", "/J", PathUtf8(root / "alias"), PathUtf8(root / "target")},
+      root, root / "out", root / "err", 3s};
+  spec.no_console = true; REQUIRE(RunProcess(spec).exit_code == 0);
+  {
+    DigestBatch batch;
+    const auto alias = root / "alias/input";
+    CHECK(VerificationPath(alias) == fs::weakly_canonical(alias));
+    CHECK_FALSE(HasProtectedVerificationPath(alias));
+    REQUIRE(DigestFile(alias));
+    CHECK_FALSE(HasProtectedVerificationPath(alias));
+  }
+  std::error_code ec; fs::remove(root / "alias", ec); fs::remove_all(root, ec);
 }
 TEST_CASE("digest batches retain byte identity only while writes and replacement are excluded", "[digest-batch]") {
   const auto dir = UniqueTempPath("digest-batch"); fs::create_directories(dir);

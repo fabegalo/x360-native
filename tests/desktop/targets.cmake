@@ -8,6 +8,7 @@ if(TARGET Catch2::Catch2WithMain)
     # Reproduce the old verifier with the same benchmark/flags. Explicit source
     # objects satisfy these symbols before the current static archive is read.
     add_executable(x360n_launch_baseline EXCLUDE_FROM_ALL ../../tests/desktop/launch_benchmark.cpp
+      ../../tests/desktop/launch_baseline_paths.cpp
       "${X360N_BASELINE_CORE_DIR}/digest_batch-before.cpp"
       "${X360N_BASELINE_CORE_DIR}/preparation-before.cpp")
     target_link_libraries(x360n_launch_baseline PRIVATE x360n_desktop_model tomlplusplus)

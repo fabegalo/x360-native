@@ -684,6 +684,7 @@ int Session(const ProjectPaths& paths, const fs::path& manifest, int timeout, bo
     // streaming every shared dependency again before the frame even exists.
     auto verification = std::make_unique<DigestBatch>([&] { return window && window->closed(); });
     if (!catalog_target.empty()) {
+      desktop::CatalogLaunchVerification launch_paths;
       const auto catalog = desktop::ReadCatalog(paths);
       desktop::VerifyCatalogLaunch(paths, catalog, catalog_target, manifest);
       fmt::print("X360N_LAUNCH_VERIFIED\n");

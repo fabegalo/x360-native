@@ -36,6 +36,8 @@ int main(int argc, char** argv) {
     auto elapsed = [&] { return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count(); };
     uint64_t files = 0, bytes = 0, hits = 0;
     auto batch = std::make_unique<DigestBatch>();
+    std::unique_ptr<CatalogLaunchVerification> launch_paths;
+    if (mode == "shared") launch_paths = std::make_unique<CatalogLaunchVerification>();
     auto record = [&] { files += batch->files; bytes += batch->bytes; hits += batch->hits; };
     const auto catalog = ReadCatalog(paths);
     const auto catalog_ms = elapsed();

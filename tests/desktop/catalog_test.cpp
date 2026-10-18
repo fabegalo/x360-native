@@ -63,7 +63,9 @@ TEST_CASE("supervisor launch preflight binds the complete catalog validation to 
   Write(f.target.exe, "synthetic executable, never executed"); f.Receipt();
   {
     DigestBatch batch;
+    CHECK_FALSE(CatalogLaunchVerificationActive());
     CHECK(VerifyCatalogLaunch(f.paths, {f.target}, f.target.id, f.target.manifest).id == f.target.id);
+    CHECK_FALSE(CatalogLaunchVerificationActive());
     const auto streamed = batch.files;
     CHECK_FALSE(CheckPreparation(f.paths, f.target.id, f.target.manifest, f.target.exe));
     CHECK(batch.files == streamed);
@@ -82,6 +84,33 @@ TEST_CASE("supervisor launch preflight binds the complete catalog validation to 
   SECTION("runtime failure") { Write(f.paths.local() / "preparation" / (f.target.id + ".runtime-error"), "failed"); }
   DigestBatch next_launch;
   CHECK_THROWS(VerifyCatalogLaunch(f.paths, {f.target}, f.target.id, f.target.manifest));
+}
+TEST_CASE("launch path scope preserves catalog metadata and unwinds without changing opening", "[launch-preflight]") {
+  Fixture f;
+  Write(f.target.inputs[0].destination, "dashboard");
+  Write(f.target.inputs[1].destination, "module");
+  Write(f.target.exe, "synthetic executable, never executed");
+  const auto directory = f.root / "titles/dash_test";
+  Write(directory / "dash_test_manifest.toml", "[project]\nname='dash_test'\ngame_root='../../.local/inputs/dashboards/test'\n");
+  Write(directory / "preparation.toml", "label='test'\nlimitations='synthetic'\n[[files]]\npath='dash.xex'\nsource_name='dash.xex'\nsha256='" + Hash("dashboard") + "'\n");
+  const auto ordinary = ReadCatalog(f.paths);
+  REQUIRE(ordinary.size() == 1);
+  {
+    DigestBatch batch;
+    CHECK_FALSE(HasProtectedVerificationPath(ordinary[0].inputs[0].destination));
+    CatalogLaunchVerification scope;
+    CHECK(CatalogLaunchVerificationActive());
+    const auto launched = ReadCatalog(f.paths);
+    REQUIRE(launched.size() == ordinary.size());
+    CHECK(launched[0].id == ordinary[0].id);
+    CHECK(launched[0].manifest == ordinary[0].manifest);
+    CHECK(launched[0].game_root == ordinary[0].game_root);
+    CHECK(launched[0].inputs[0].destination == ordinary[0].inputs[0].destination);
+    CHECK(launched[0].inputs[0].sha256 == ordinary[0].inputs[0].sha256);
+    CHECK(HasProtectedVerificationPath(launched[0].inputs[0].destination));
+  }
+  CHECK_FALSE(CatalogLaunchVerificationActive());
+  CHECK_FALSE(HasProtectedVerificationPath(ordinary[0].inputs[0].destination));
 }
 TEST_CASE("optional dashboard components may be absent but never differ") {
   Fixture f;

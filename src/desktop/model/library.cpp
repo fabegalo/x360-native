@@ -24,7 +24,9 @@ fs::path LibraryPath(const fs::path& path) {
 #endif
 }
 bool WithinNew(const fs::path& file, const fs::path& root) {
-  auto relative = fs::weakly_canonical(LibraryPath(file)).lexically_relative(fs::weakly_canonical(LibraryPath(root)));
+  auto relative = CatalogLaunchVerificationActive()
+      ? CatalogVerificationPath(file).lexically_relative(CatalogVerificationPath(root))
+      : fs::weakly_canonical(LibraryPath(file)).lexically_relative(fs::weakly_canonical(LibraryPath(root)));
   return !relative.empty() && !relative.is_absolute() && *relative.begin() != "..";
 }
 const Target& Dependency(const std::vector<Target>& catalog, const std::string& id) {

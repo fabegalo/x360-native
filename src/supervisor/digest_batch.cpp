@@ -22,16 +22,17 @@ std::wstring Extended(std::filesystem::path path) {
   return name.starts_with(L"\\\\") ? L"\\\\?\\UNC\\" + name.substr(2) : L"\\\\?\\" + name;
 }
 std::filesystem::path CanonicalName(HANDLE file, const std::filesystem::path& path) {
-  const auto needed = GetFinalPathNameByHandleW(file, nullptr, 0, FILE_NAME_NORMALIZED | VOLUME_NAME_DOS);
-  if (needed) {
-    std::wstring name(needed, L'\0');
-    const auto count = GetFinalPathNameByHandleW(file, name.data(), needed, FILE_NAME_NORMALIZED | VOLUME_NAME_DOS);
-    if (count && count < needed) {
+  std::wstring name(512, L'\0');
+  auto count = GetFinalPathNameByHandleW(file, name.data(), static_cast<DWORD>(name.size()), FILE_NAME_NORMALIZED | VOLUME_NAME_DOS);
+  if (count >= name.size()) {
+    name.resize(size_t(count) + 1);
+    count = GetFinalPathNameByHandleW(file, name.data(), static_cast<DWORD>(name.size()), FILE_NAME_NORMALIZED | VOLUME_NAME_DOS);
+  }
+  if (count && count < name.size()) {
       name.resize(count);
       if (name.starts_with(L"\\\\?\\UNC\\")) return std::filesystem::path(L"\\\\" + name.substr(8)).lexically_normal();
       if (name.starts_with(L"\\\\?\\") && name.size() > 6 && name[5] == L':')
         return std::filesystem::path(name.substr(4)).lexically_normal();
-    }
   }
   return std::filesystem::weakly_canonical(path);
 }
@@ -84,6 +85,8 @@ std::filesystem::path VerificationPath(const std::filesystem::path& path) {
     if (ordinary) {
       const auto absolute = std::filesystem::absolute(path).lexically_normal();
       if (const auto found = current->normal.find(absolute); found != current->normal.end()) return found->second;
+      if (const auto found = current->metadata.find(absolute); found != current->metadata.end())
+        return current->normal.emplace(absolute, CanonicalName(found->second->handle, absolute)).first->second;
       if (current->Pin(absolute.parent_path())) {
         const auto attributes = GetFileAttributesW(Extended(absolute).c_str());
         if (attributes != INVALID_FILE_ATTRIBUTES && !(attributes & FILE_ATTRIBUTE_REPARSE_POINT)) {
@@ -105,6 +108,16 @@ std::filesystem::path VerificationPath(const std::filesystem::path& path) {
   }
 #endif
   return std::filesystem::weakly_canonical(path);
+}
+bool HasProtectedVerificationPath(const std::filesystem::path& path) {
+#ifdef _WIN32
+  if (!current || path.native().starts_with(L"\\\\?\\")) return false;
+  for (const auto& part : path) if (part == "." || part == "..") return false;
+  const auto absolute = (path.is_absolute() ? path : std::filesystem::absolute(path)).lexically_normal();
+  return current->metadata.contains(absolute) || current->directories.contains(absolute);
+#else
+  (void)path; return false;
+#endif
 }
 
 std::optional<FileDigest> TryBatchDigest(const std::filesystem::path& path, bool& handled) {
@@ -140,7 +153,6 @@ std::optional<FileDigest> TryBatchDigest(const std::filesystem::path& path, bool
   const bool reusable = info.nFileIndexHigh || info.nFileIndexLow;
   if (pinned) {
     current->metadata.emplace(absolute, file);
-    current->normal.emplace(absolute, CanonicalName(file->handle, absolute));
   }
   if (const auto it = current->entries.find(key); reusable && it != current->entries.end()) {
     if (pinned) current->paths.emplace(absolute, key);

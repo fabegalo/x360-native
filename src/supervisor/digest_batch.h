@@ -13,6 +13,9 @@ void CheckVerificationCancellation();
 // Ordinary paths may reuse pinned ancestor identities within the batch. Links
 // and hosts without equivalent exclusion retain full filesystem resolution.
 std::filesystem::path VerificationPath(const std::filesystem::path& path);
+// True only while this exact ordinary name and all ancestors are held against
+// writes/replacement. Does not authenticate bytes or cache absent paths.
+bool HasProtectedVerificationPath(const std::filesystem::path& path);
 // Reuse only within one synchronous verification transaction. On Windows each
 // cached digest owns a read handle denying writes/deletion until destruction.
 // No timestamp cache, persisted approvals, or reuse across process boundaries.

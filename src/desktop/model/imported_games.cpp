@@ -35,8 +35,9 @@ fs::path Relative(const std::string& s) {
   return p;
 }
 void Safe(const fs::path& file, const fs::path& root) {
-  auto rel = fs::weakly_canonical(file).lexically_relative(fs::weakly_canonical(root));
+  auto rel = CatalogVerificationPath(file).lexically_relative(CatalogVerificationPath(root));
   if (rel.empty() || rel.is_absolute() || *rel.begin() == "..") throw std::runtime_error("Catalog destination redirected outside its root");
+  if (CatalogLaunchVerificationActive() && HasProtectedVerificationPath(file)) return;
   for (auto p = file; p != root && !p.empty(); p = p.parent_path())
     if (fs::is_symlink(p)) throw std::runtime_error("Catalog path contains a link");
 }
