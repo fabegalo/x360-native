@@ -841,9 +841,9 @@ void Start(App& a, int action, fs::path source = {}) {
         auto tool_args = std::vector<std::string>{"-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", Utf8(a.root / "scripts/prepare-tools.ps1")};
         tool_args.push_back("-UpdateDependencies");
         if (a.allow_downloads) tool_args.push_back("-AllowDownloads");
-        const auto marker = PreparationMarker(ProjectPaths{a.root}, target);
-        fs::create_directories(marker.parent_path());
-        { std::ofstream out(marker); out << "Preparing: tools\nLog: " << Utf8(a.logs / "tools.log") << '\n'; }
+        // Tool preflight can fail because another build owns the environment.
+        // Only build-title.ps1 may publish a title's incomplete marker, after
+        // acquiring its leases. Never invalidate another build or a valid receipt.
         Post(a.window, kProgress, Tr("Verificando ferramentas e dependências...", "Checking tools and dependencies..."));
         run(powershell, tool_args, "tools");
         if (target.generic_aot) GenerateAotProject(ProjectPaths{a.root}, target);
@@ -851,8 +851,6 @@ void Start(App& a, int action, fs::path source = {}) {
           if (a.cancel) throw std::runtime_error("Preparação cancelada.");
           Target pending; pending.id = id;
           const auto marker = PreparationMarker(ProjectPaths{a.root}, pending);
-          fs::create_directories(marker.parent_path());
-          { std::ofstream out(marker); if (!out) throw std::runtime_error("Não foi possível registrar o início da preparação."); out << "incomplete\n"; }
           auto item = std::find_if(a.targets.begin(), a.targets.end(), [&](const auto& t) { return t.id == id; });
           auto label = item == a.targets.end() ? id : (english ? item->label_en : item->label);
           Post(a.window, kProgress, Tr("Preparando ", "Preparing ") + label + Tr(".\r\nA primeira preparação pode levar vários minutos.", ".\r\nFirst-time preparation can take several minutes."));
@@ -872,11 +870,8 @@ void Start(App& a, int action, fs::path source = {}) {
         finish(Tr("Preparação concluída. Os componentes serão conferidos antes de habilitar a sessão.", "Preparation finished. Components will be checked before enabling the session."));
       }
     } catch (const std::exception& error) {
-      if (action == kPrepare) {
-        const auto marker = PreparationMarker(ProjectPaths{a.root}, target);
-        std::error_code ec; fs::create_directories(marker.parent_path(), ec);
-        std::ofstream(marker, std::ios::app) << error.what() << '\n';
-      }
+      // The driver records failures of builds it actually owns. Tools/import/
+      // registration errors stay in this operation's logs and library inspection.
       a.failed = true; finish(error.what());
     }
   });

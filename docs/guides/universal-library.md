@@ -158,9 +158,11 @@ A root bound to another catalog inventory keeps the isolated import behavior;
 the existing record is never silently rebound. External imports still copy and
 verify content normally. The focused import tests passed 12 cases / 182 assertions.
 
-For a source checkout, `scripts/start-desktop.cmd` opens the current Debug
-desktop with this repository as its environment. Build it through
-`scripts/devshell.cmd cmake --build .local/build/win-amd64 --config Debug --target x360-native`.
+For a source checkout, `scripts/start-desktop.cmd` opens the separate desktop
+build with this repository as its environment, falling back to the full Debug
+tree when the separate executable is absent. Prepare the separate Debug build with
+`scripts/devshell.cmd cmake -S . -B .local/build/desktop-only -DX360_DESKTOP_ONLY=ON -DCMAKE_BUILD_TYPE=Debug`,
+then `scripts/devshell.cmd cmake --build .local/build/desktop-only --target x360-native`.
 The desktop does not require launching every game after each change. Use focused
 checks for affected contracts and manual game sessions when requested. Readiness
 continues to require real preparation receipts; Xbox-original XBE content cannot
