@@ -1,0 +1,178 @@
+diff --git a/include/rex/codegen/function_types.h b/include/rex/codegen/function_types.h
+index 8c6772d..1169dcb 100644
+--- a/include/rex/codegen/function_types.h
++++ b/include/rex/codegen/function_types.h
+@@ -248,6 +248,9 @@ struct JumpTable {
+   uint32_t tableAddress;          // Address of jump table data
+   uint8_t indexRegister;          // Register holding switch index
+   std::vector<uint32_t> targets;  // Resolved case targets (internal labels)
++  // Finite computed branch domain, not table slots. Preserve the original
++  // loads/arithmetic and dispatch on CTR; other destinations use the resolver.
++  bool dispatchByTarget = false;
+ };
+ 
+ //=============================================================================
+diff --git a/src/codegen/function_scanner.cpp b/src/codegen/function_scanner.cpp
+index d7ba519..c46d75b 100644
+--- a/src/codegen/function_scanner.cpp
++++ b/src/codegen/function_scanner.cpp
+@@ -1362,6 +1362,83 @@ BoundsInfo scanForBounds(DecodedBinary& decoded, uint32_t bctrAddr, const CodeRe
+ //=============================================================================
+ // Jump Table Detection
+ //=============================================================================
++namespace {
++
++// A byte load followed by a constant-base add has a finite destination domain
++// even when the number of table slots is unknowable. Recognize the actual
++// def-use chain (including the exact rotate/mask), without reading table data.
++// Keep this matcher local and conservative: only nops may separate definitions.
++std::optional<JumpTable> detectByteDispatch(DecodedBinary& decoded, uint32_t bctr,
++                                          uint32_t start, uint32_t end) {
++  using namespace rex::codegen::ppc;
++  uint32_t cursor = bctr;
++  auto previous = [&]() -> const Instruction* {
++    while (cursor >= start + 4) {
++      cursor -= 4;
++      const auto* insn = decoded.get(cursor);
++      if (!insn || static_cast<uint32_t>(insn->code) != 0x60000000)
++        return insn;
++    }
++    return nullptr;
++  };
++  const auto* ctr = previous();
++  if (!ctr || ctr->opcode != Opcode::mtctr) return std::nullopt;
++  const auto* sum = previous();
++  if (!sum || sum->opcode != Opcode::add || sum->XO.RT != ctr->XFX.RT)
++    return std::nullopt;
++  const auto* low = previous();
++  if (!low || low->opcode != Opcode::addi || low->D.RT == 0 || low->D.RA != low->D.RT)
++    return std::nullopt;
++  const uint8_t baseReg = low->D.RT;
++  uint8_t offsetReg;
++  if (sum->XO.RA == baseReg) offsetReg = sum->XO.RB;
++  else if (sum->XO.RB == baseReg) offsetReg = sum->XO.RA;
++  else return std::nullopt;
++  if (offsetReg == baseReg) return std::nullopt;
++  const auto* high = previous();
++  if (!high || high->opcode != Opcode::lis || high->D.RT != baseReg)
++    return std::nullopt;
++  const uint32_t base = (uint32_t(high->D.UIMM()) << 16) + int16_t(low->D.d);
++  const auto* value = previous();
++  uint32_t shift = 0, mask = 0xFFFFFFFF;
++  if (value && value->opcode == Opcode::rlwinm && value->M.RA == offsetReg) {
++    // A record-form rotate changes CR; it is still executed by the emitter.
++    shift = value->M.SH;
++    mask = 0;
++    for (unsigned bit = 0; bit < 32; ++bit) {
++      const bool included = value->M.MB <= value->M.ME
++          ? bit >= value->M.MB && bit <= value->M.ME
++          : bit >= value->M.MB || bit <= value->M.ME;
++      if (included) mask |= 0x80000000u >> bit;
++    }
++    offsetReg = value->M.RS;
++    value = previous();
++  }
++  if (!value || value->opcode != Opcode::lbzx || value->X.RT != offsetReg)
++    return std::nullopt;
++
++  JumpTable jt{};
++  jt.bctrAddress = bctr;
++  jt.dispatchByTarget = true;
++  // These are possible branch destinations derived from PPC semantics, not
++  // invented table entries. Never extend ownership into the next function.
++  for (uint32_t byte = 0; byte < 256; ++byte) {
++    const uint32_t rotated = shift ? (byte << shift) | (byte >> (32 - shift)) : byte;
++    const uint32_t target = (base + (rotated & mask)) & ~3u;
++    if (target >= start && target < end) {
++      const auto* insn = decoded.get(target);
++      if (insn && static_cast<uint32_t>(insn->code) != 0 &&
++          static_cast<uint32_t>(insn->code) != 0xFFFFFFFF)
++        jt.targets.push_back(target);
++    }
++  }
++  std::sort(jt.targets.begin(), jt.targets.end());
++  jt.targets.erase(std::unique(jt.targets.begin(), jt.targets.end()), jt.targets.end());
++  return jt;
++}
++
++}  // namespace
++
+ std::optional<JumpTable> detectJumpTable(DecodedBinary& decoded, uint32_t bctrAddr,
+                                          const CodeRegion& containingRegion, uint32_t funcStart,
+                                          uint32_t funcEnd) {
+@@ -1935,7 +2012,16 @@ BlockDiscoveryResult discoverBlocks(
+             }
+           }
+           if (!jt) {
+-            jt = detectJumpTable(decoded, addr, containingRegion, entryPoint, funcEnd);
++            jt = detectByteDispatch(decoded, addr, entryPoint, funcEnd);
++            if (jt) {
++              uint32_t localEnd = funcEnd;
++              for (uint32_t other : knownFunctions) {
++                if (other > entryPoint && other < localEnd) localEnd = other;
++              }
++              std::erase_if(jt->targets, [localEnd](uint32_t t) { return t >= localEnd; });
++            }
++            if (!jt)
++              jt = detectJumpTable(decoded, addr, containingRegion, entryPoint, funcEnd);
+           }
+           if (jt) {
+             REXCODEGEN_TRACE("discoverBlocks: detected jump table at bctr 0x{:08X} with {} targets",
+diff --git a/src/codegen/function_graph.cpp b/src/codegen/function_graph.cpp
+index fc918bb..1af5781 100644
+--- a/src/codegen/function_graph.cpp
++++ b/src/codegen/function_graph.cpp
+@@ -520,8 +520,14 @@ std::string FunctionNode::emitCpp(const EmitContext& ctx) const {
+       if (stIt != ctx.config.switchTables.end()) {
+         activeJt = &stIt->second;
+       } else {
++        for (const auto& jt : jumpTables()) {
++          if (jt.bctrAddress == blockBase) {
++            activeJt = &jt;
++            break;
++          }
++        }
+         auto lateIt = lateJumpTables.find(blockBase);
+-        if (lateIt != lateJumpTables.end()) {
++        if (!activeJt && lateIt != lateJumpTables.end()) {
+           activeJt = &lateIt->second;
+         }
+       }
+diff --git a/src/codegen/builders/control_flow.cpp b/src/codegen/builders/control_flow.cpp
+index 26957fc..c91f026 100644
+--- a/src/codegen/builders/control_flow.cpp
++++ b/src/codegen/builders/control_flow.cpp
+@@ -125,11 +125,17 @@ bool build_bctr(BuilderContext& ctx) {
+   }
+ 
+   if (jt) {
+-    ctx.println("\tswitch ({}.u32) {{", ctx.r(jt->indexRegister));
++    if (jt->dispatchByTarget)
++      ctx.println("\tswitch ({}.u32 & ~3u) {{", ctx.ctr());
++    else
++      ctx.println("\tswitch ({}.u32) {{", ctx.r(jt->indexRegister));
+ 
+     for (size_t i = 0; i < jt->targets.size(); i++) {
+-      ctx.println("\tcase {}:", i);
+       auto label = jt->targets[i];
++      if (jt->dispatchByTarget)
++        ctx.println("\tcase 0x{:X}:", label);
++      else
++        ctx.println("\tcase {}:", i);
+ 
+       // TODO(tomc): Figure out if this actually is triggered on real hardware and what would
+       // happen?
+@@ -168,7 +174,12 @@ bool build_bctr(BuilderContext& ctx) {
+     }
+ 
+     ctx.println("\tdefault:");
+-    ctx.println("\t\t__builtin_trap(); // Switch case out of range");
++    if (jt->dispatchByTarget) {
++      ctx.println("\t\tREX_CALL_INDIRECT_FUNC({}.u32 & ~3u);", ctx.ctr());
++      ctx.println("\t\treturn;");
++    } else {
++      ctx.println("\t\t__builtin_trap(); // Switch case out of range");
++    }
+     ctx.println("\t}}");
+ 
+     ctx.reset_switch_table();

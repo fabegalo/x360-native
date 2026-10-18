@@ -3,6 +3,7 @@
 add_executable(x360n_sdk_checks sdkcheck/depfile_escape_test.cpp)
 target_sources(x360n_sdk_checks PRIVATE sdkcheck/gapfill_boundary_test.cpp sdkcheck/synthetic_xex.cpp)
 target_sources(x360n_sdk_checks PRIVATE sdkcheck/virtual_thunk_discovery_test.cpp)
+target_sources(x360n_sdk_checks PRIVATE sdkcheck/ctr_dispatch_test.cpp)
 target_link_libraries(x360n_sdk_checks PRIVATE rexcodegen Catch2::Catch2WithMain)
 target_compile_options(x360n_sdk_checks PRIVATE
     -UTRACY_ENABLE -UREXGLUE_ENABLE_PROFILING -UREXGLUE_ENABLE_PERF_COUNTERS)
@@ -10,6 +11,29 @@ target_compile_options(x360n_sdk_checks PRIVATE
 x360n_stage_runtime_dlls(x360n_sdk_checks)
 catch_discover_tests(x360n_sdk_checks TEST_PREFIX "sdkcheck." PROPERTIES LABELS "project" TIMEOUT 60
     DISCOVERY_MODE PRE_TEST)
+
+# Explicit native integration check: generate a synthetic XEX with the production
+# pipeline, compile its real output, and execute it against the real dispatcher.
+# Kept out of ALL; no proprietary content and no game/visual session.
+set(ctr_fixture "${CMAKE_CURRENT_BINARY_DIR}/ctr_fixture")
+set(ctr_generated "${ctr_fixture}/x360n_codegen/byte_ctr/out")
+add_custom_command(
+    OUTPUT "${ctr_generated}/byte_ctr_recomp.0.cpp"
+    COMMAND ${CMAKE_COMMAND} -E make_directory "${ctr_fixture}"
+    COMMAND ${CMAKE_COMMAND} -E env "TEMP=${ctr_fixture}" "TMP=${ctr_fixture}"
+        X360N_KEEP_TEST_DIRS=1 $<TARGET_FILE:x360n_sdk_checks>
+        "Byte computed dispatch preserves CTR without guessing table length"
+    DEPENDS x360n_sdk_checks
+    VERBATIM)
+add_executable(x360n_ctr_dispatch_native EXCLUDE_FROM_ALL
+    sdkcheck/ctr_dispatch_native.cpp "${ctr_generated}/byte_ctr_recomp.0.cpp")
+target_include_directories(x360n_ctr_dispatch_native PRIVATE "${ctr_generated}")
+target_compile_definitions(x360n_ctr_dispatch_native PRIVATE
+    REX_HOST_FUNCTION_TABLE=1 X360N_CTR_FIXTURE="${ctr_fixture}/x360n_codegen/byte_ctr")
+target_link_libraries(x360n_ctr_dispatch_native PRIVATE rexruntime simde x360n_ppc_options)
+target_compile_options(x360n_ctr_dispatch_native PRIVATE -msse4.1
+    -UTRACY_ENABLE -UREXGLUE_ENABLE_PROFILING -UREXGLUE_ENABLE_PERF_COUNTERS)
+x360n_stage_runtime_dlls(x360n_ctr_dispatch_native)
 
 # Explicit analysis-only corpus diagnostic; never starts guest code or runs in CTest.
 add_executable(x360n_aot_discovery_probe EXCLUDE_FROM_ALL tools/aot_discovery_probe.cpp)

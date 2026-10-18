@@ -779,3 +779,25 @@ preserves both mappings and image bytes, and checks the legacy default. Patch
 replay and exact before/final hashes are recorded in the lock. No equivalent
 upstream commit is known; the SDK pin is unchanged. Evidence and limitations:
 `docs/reports/aot-dependencies-2026-10-17.md`.
+
+### 0090 — finite byte computed branches without guessed table slots (2026-10-17)
+
+The PPC analysis recognizes a contiguous def-use chain from `lbzx`, optional
+`rlwinm`, constant-base addition and `mtctr` to `bctr` (nops are allowed).
+Its finite destination domain comes from all 256 byte values and the exact
+rotate/mask, with 32-bit wrapping and the architectural low-bit clearing of
+`bctr`. It does not read or guess a table's length. Only destinations within
+the current function's extent, before another known entry, seed local CFG
+discovery. Emission switches on the original computed CTR; other destinations
+tail-dispatch through the existing checked resolver. The guest load/arithmetic
+remain intact. Analyzed tables take precedence over late emission heuristics;
+manual switch configuration retains priority. Other patterns retain the previous
+analysis. No runtime scanner, original-byte patch or title-specific rule.
+
+Regression: `tests/sdkcheck/ctr_dispatch_test.cpp`, including adjacent-function
+data, register/mask variants and broken def-use chains. The explicit
+`x360n_ctr_dispatch_native` target compiles production-generated synthetic PPC
+and tests mutable table bytes, indices beyond 512, local cases and a real
+cross-function tail dispatch, with the SDK's host resolver. Replay hashes are
+recorded in `deps.lock.json`. No equivalent upstream commit is known; the pin
+is unchanged. Results: `docs/reports/aot-ctr-dispatch-2026-10-17.md`.
