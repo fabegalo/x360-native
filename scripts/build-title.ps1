@@ -87,8 +87,7 @@ Push-Location $titleDir
 try {
     Update-ToolchainSnapshot '0-toolchain'
     $reuse = -not $interrupted -and $previous -and (Test-ReceiptEntries @($previous.inputs + $previous.artifacts)) -and (Test-ReceiptGlobs $previous.globs)
-    $incrementalState = Read-IncrementalState $stateFile $previous $build $Title $interrupted
-    if ($reuse -or $incrementalState) {
+    if ($reuse) {
         $head = & git -C (Join-Path $root 'external/rexglue-sdk') rev-parse HEAD
         if ($LASTEXITCODE -or $head.Trim() -ne $previous.sdk_commit) { $reuse = $false; $incrementalState = $null }
     }
@@ -99,6 +98,13 @@ try {
         [IO.File]::Delete((Join-Path $root ".local/preparation/$Title.runtime-error"))
         Write-Host "reused verified preparation: $exe"
         return
+    }
+    # A certified final executable needs no native cache. Validate its private
+    # checkpoint only when a build will actually consume intermediate products.
+    $incrementalState = Read-IncrementalState $stateFile $previous $build $Title $interrupted
+    if ($incrementalState) {
+        $head = & git -C (Join-Path $root 'external/rexglue-sdk') rev-parse HEAD
+        if ($LASTEXITCODE -or $head.Trim() -ne $previous.sdk_commit) { $incrementalState = $null }
     }
     $configureSnapshot = @()
     $skipConfigure = $false
