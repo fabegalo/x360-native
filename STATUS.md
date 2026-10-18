@@ -5,6 +5,20 @@ Este arquivo resume o estado atual; os relatórios vinculados preservam datas,
 falhas iniciais, hashes, comandos e limites de cada validação. Resultados de uma
 etapa histórica não certificam automaticamente o build atual nem outros títulos.
 
+Preflight de lançamento (18/10, sobre `99a7764`): comparação alternada no mesmo
+acervo reduziu a média da 17559 de 31,27 para 19,35 s (38,13%); Charlie 9,27 →
+7,74 s (16,47%); Moto 10,91 → 7,98 s (26,83%); Castle 8,12 → 6,88 s (15,32%).
+Read-ahead limitado a quatro workers, inventários sem enumerações repetidas dentro
+da chamada e dois fontes do verificador otimizados em Debug, mantendo asserts.
+Sem cache por timestamp/aprovação persistente ou mudanças no launcher, catálogo,
+renderer e SDK. 37 regressões focadas/32.505 asserções passaram. Os quatro smokes
+autorizados foram executados: 17559/Moto/Castle registraram swaps e encerraram
+pelo prazo de 30 s; Charlie voltou à dashboard após bootstrap NetCF, sem swaps.
+Os 1.132 arquivos de usuário originais auditados foram preservados. O acervo da
+17559 cresceu; não comparar diretamente com os 21,87 s históricos. Tempos por
+etapa, I/O, aumento de memória/leituras especulativas, tentativa descartada e
+limites de primeiro frame: [relatório de preflight](docs/reports/startup-preflight-2026-10-18.md).
+
 Preparação e lançamento (18/10, sobre `c84a4b4`): reconstrução nativa completa
 17559 703,12 → 552,65 s (21,40%); no-ops dos quatro alvos 31,69–32,96% mais
 rápidos, com zero CMake/codegen/objetos. A validação anterior ao processo caiu

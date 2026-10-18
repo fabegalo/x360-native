@@ -36,6 +36,22 @@ abertura lista metadados, sem autenticar antecipadamente todos os títulos.
 SHA-256/recibos continuam obrigatórios antes de preparar/iniciar; a verificação
 completa também pode ser solicitada explicitamente. Não é medição de startup guest.
 
+## Preflight de lançamento
+
+A continuação sobre `99a7764` reduziu a validação anterior ao processo em 38,13%
+na 17559, 16,47% em Charlie, 26,83% em Moto e 15,32% em Castle, em comparação
+alternada no mesmo acervo. Read-ahead de até quatro hashes grandes preserva
+exclusão de escrita/remoção; inventários compartilham enumeração somente dentro
+da mesma chamada. Dois fontes do verificador usam `-O2` em Debug com asserts,
+símbolos e CRT Debug preservados. Não há aprovação persistente por metadados.
+
+Os smokes curtos autorizados executaram os quatro títulos: três registraram
+swaps; Charlie retornou à dashboard após bootstrap NetCF. Não certificam gameplay
+nem tempo de clique até imagem. Os ganhos não eliminam os hashes integrais ou
+o custo de handles/inventários e acrescentam memória/leitura especulativa em
+alguns caminhos. Controle antigo com `-O2`, experiência sem ganho, I/O e resultados:
+[preflight de 18/10/2026](reports/startup-preflight-2026-10-18.md).
+
 ## Builds incrementais
 
 A otimização seguinte reduziu a reconstrução nativa completa da 17559 em 21,40%
