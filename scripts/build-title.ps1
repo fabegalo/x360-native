@@ -256,7 +256,18 @@ try {
         }
     }
     if (-not (Test-ReceiptEntries $driverSnapshot) -or -not (Test-ReceiptEntries $ownerSnapshot) -or
-        -not (Test-ReceiptEntries $sourceSnapshot) -or -not (Test-ReceiptEntries $finalSourceSnapshot)) { throw 'An input changed during preparation; prepare again. No receipt published.' }
+        -not (Test-ReceiptEntries $sourceSnapshot) -or -not (Test-ReceiptEntries $finalSourceSnapshot)) {
+        if ($env:X360N_PREPARATION_DIAGNOSTICS -eq '1') {
+            foreach ($group in @(@{name='driver';entries=$driverSnapshot}, @{name='owner';entries=$ownerSnapshot},
+                @{name='source';entries=$sourceSnapshot}, @{name='final-source';entries=$finalSourceSnapshot})) {
+                foreach ($entry in $group.entries) {
+                    $actual = if (Test-BuildFile $entry.path) { Get-ReceiptHash $entry.path } else { '<missing>' }
+                    if ($actual -ne $entry.sha256) { Write-Host "Preparation input changed ($($group.name)): $($entry.path) ($($entry.sha256) -> $actual)" }
+                }
+            }
+        }
+        throw 'An input changed during preparation; prepare again. No receipt published.'
+    }
     Update-ToolchainSnapshot '5-toolchain'
     $inputs = @(Get-ReceiptEntries @(Get-BuildInputs $root $Title $build @($Title)))
     $dllOutputs = @(Select-NativeDllOutputs $root @(Get-NinjaNodes $build @($Title)) | Sort-Object -Unique)
