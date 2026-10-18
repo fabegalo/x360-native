@@ -79,9 +79,12 @@ std::filesystem::path VerificationPath(const std::filesystem::path& path) {
   CheckVerificationCancellation();
 #ifdef _WIN32
   if (current) {
+    // Exact names already recorded here have ordinary, protected ancestors.
+    // Avoid reconstructing and normalizing their components on every hit.
+    if (const auto found = current->normal.find(path); found != current->normal.end()) return found->second;
     // Resolve dot components through the filesystem, including link/.. semantics.
     bool ordinary = !path.native().starts_with(L"\\\\?\\");
-    for (const auto& part : path) if (part == "." || part == "..") ordinary = false;
+    for (const auto& part : path) if (part.native() == L"." || part.native() == L"..") ordinary = false;
     if (ordinary) {
       const auto absolute = std::filesystem::absolute(path).lexically_normal();
       if (const auto found = current->normal.find(absolute); found != current->normal.end()) return found->second;
@@ -112,7 +115,8 @@ std::filesystem::path VerificationPath(const std::filesystem::path& path) {
 bool HasProtectedVerificationPath(const std::filesystem::path& path) {
 #ifdef _WIN32
   if (!current || path.native().starts_with(L"\\\\?\\")) return false;
-  for (const auto& part : path) if (part == "." || part == "..") return false;
+  if (current->metadata.contains(path) || current->directories.contains(path)) return true;
+  for (const auto& part : path) if (part.native() == L"." || part.native() == L"..") return false;
   const auto absolute = (path.is_absolute() ? path : std::filesystem::absolute(path)).lexically_normal();
   return current->metadata.contains(absolute) || current->directories.contains(absolute);
 #else
@@ -125,6 +129,10 @@ std::optional<FileDigest> TryBatchDigest(const std::filesystem::path& path, bool
 #ifdef _WIN32
   handled = current != nullptr;
   if (!handled) return std::nullopt;
+  if (const auto found = current->paths.find(path); found != current->paths.end()) {
+    ++current->owner->hits;
+    return current->entries.at(found->second).digest;
+  }
   std::error_code path_error;
   const auto absolute = std::filesystem::absolute(path, path_error).lexically_normal();
   if (path_error) return std::nullopt;

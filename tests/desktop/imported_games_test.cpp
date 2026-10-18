@@ -75,15 +75,31 @@ TEST_CASE("launch inventory hashing preserves portable identities and rejects ta
       CHECK(launched[0].inputs[i].sha256 == ordinary[0].inputs[i].sha256);
     }
   }
-  const auto file = fs::directory_iterator(f.paths.local() / "catalog")->path();
+  auto file = fs::directory_iterator(f.paths.local() / "catalog")->path();
   auto record = nlohmann::json::parse(std::ifstream(file));
-  record["files"][0]["sha256"] = std::string(64, '0');
+  std::string expected;
+  SECTION("changed hash") {
+    record["files"][0]["sha256"] = std::string(64, '0');
+    expected = "Invalid catalog identity";
+  }
+  SECTION("duplicate paths with a valid inventory fingerprint") {
+    record["files"].push_back(record["files"][0]);
+    std::string bytes;
+    for (const auto& input : record["files"])
+      bytes += input.at("path").get<std::string>() + "\t" + input.at("sha256").get<std::string>() + "\n";
+    const auto identity = Sha256Hex({reinterpret_cast<const uint8_t*>(bytes.data()), bytes.size()});
+    record["id"] = identity;
+    const auto renamed = file.parent_path() / (identity + ".json");
+    fs::rename(file, renamed); file = renamed;
+    expected = "Invalid catalog inventory";
+  }
   Write(file, record.dump());
   DigestBatch batch;
   CatalogLaunchVerification scope;
   const auto corrupted = ReadCatalog(f.paths);
   REQUIRE(corrupted.size() == 1);
   CHECK_FALSE(corrupted[0].import_error.empty());
+  CHECK(corrupted[0].import_error.find(expected) != std::string::npos);
   CHECK(corrupted[0].inputs.empty());
 }
 TEST_CASE("folder catalog retains source-bound generated library routing metadata", "[library-content-type]") {

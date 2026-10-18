@@ -11,6 +11,7 @@
 #include <fstream>
 #include <map>
 #include <set>
+#include <unordered_set>
 #include <fmt/format.h>
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
@@ -248,10 +249,13 @@ void ReadImportedGames(const ProjectPaths& paths, std::vector<Target>& targets) 
           t.id != Fingerprint(r.at("files"))) throw std::runtime_error("Invalid catalog identity");
       t.game_root = paths.inputs() / Relative(r.at("content_root")); Safe(t.game_root, paths.inputs());
       std::set<fs::path> seen;
+      std::unordered_set<fs::path> launch_seen;
+      const bool launching = CatalogLaunchVerificationActive();
       for (const auto& f : r.at("files")) {
         CheckVerificationCancellation();
         auto rel = Relative(f.at("path")); const auto hash = f.at("sha256").get<std::string>();
-        if (!HashValid(hash) || !seen.insert(rel).second) throw std::runtime_error("Invalid catalog inventory");
+        if (!HashValid(hash) || !(launching ? launch_seen.insert(rel).second : seen.insert(rel).second))
+          throw std::runtime_error("Invalid catalog inventory");
         if (!content_paths.Resolve(t.game_root / rel)) Safe(t.game_root / rel, paths.inputs());
         t.inputs.push_back({t.game_root / rel, Utf8(rel.filename()), hash, rel});
       }
