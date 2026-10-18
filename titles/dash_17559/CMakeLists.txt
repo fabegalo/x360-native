@@ -91,7 +91,9 @@ foreach(module signin createprofile vk hud)
         target_sources(${module_target} PRIVATE "src/${module}_imports.cpp")
     endif()
     target_include_directories(${module_target} PRIVATE "${generated_dir}")
-    target_link_libraries(${module_target} PRIVATE rex::runtime)
+    # Separate codegen invocations do not populate the SDK's entry/DLL source
+    # inventories. These targets still compile PPC and need its shared contract.
+    target_link_libraries(${module_target} PRIVATE rex::runtime x360n_ppc_options)
     rexglue_apply_recomp_settings(${module_target} "${generated_dir}/dash_17559_pch.h")
     rexglue_configure_module_target(${module_target} HOST dash_17559)
     add_dependencies(dash_17559 ${module_target})
