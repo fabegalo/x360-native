@@ -24,6 +24,14 @@ competitivo. Native N3 demonstrou dashboard e ciclo Castle em modo trial, mas
 continua lento; Forza Native não está certificado. [Resultados N3](reports/graphics/native-renderer-n3.md).
 P1/P2/P3 preservados.
 
+## Launcher desktop
+
+O launcher desktop mantém I/O e autenticação fora da thread Win32 e reutiliza
+digests apenas durante lotes com exclusão de escrita/remoção. A comparação
+sintética alternada reduziu a conferência de 21,60 para 11,56 s; não mede startup
+real ou desempenho dos jogos. Instrumentação, regressões, limites e roteiro
+manual: [launcher em 18/10/2026](reports/launcher-performance-2026-10-18.md).
+
 ## Builds incrementais
 
 O driver de títulos reutiliza produtos certificados por conteúdo e dependências

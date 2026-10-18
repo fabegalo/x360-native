@@ -5,6 +5,16 @@ Este arquivo resume o estado atual; os relatórios vinculados preservam datas,
 falhas iniciais, hashes, comandos e limites de cada validação. Resultados de uma
 etapa histórica não certificam automaticamente o build atual nem outros títulos.
 
+Launcher (18/10): catálogo, preflight de instalação e probes saíram da thread
+Win32; conclusão de sessão deixou de reinspecionar o acervo. Eventos distinguem
+fechamento da janela, cleanup e saída do supervisor. SHA é reutilizado somente
+em lotes com arquivos protegidos contra alteração, sem cache persistente.
+Corpus sintético: conferência média de 21,60 → 11,56 s; retorno da carga na UI
+32,24 s → 16 ms; saída → ocioso 1,14–1,17 s → 16–20 ms. Novas regressões: 9 casos /
+107 asserções; contratos de supervisor: 25 / 1.090; catálogo: 82 / 53.799,
+aprovados. Sem jogos executados ou medição real de startup/gameplay. Relatório,
+limites e roteiro manual: [launcher](docs/reports/launcher-performance-2026-10-18.md).
+
 Charlie/NetCF, análise técnica sobre `6de07e6`: demonstrada incompatibilidade
 entre o PTE aproximado do SDK e o mapper de modo de usuário do RuntimeHost.
 A página `0x82BC0000` recebe `0x2BC` e falha no teste de atributos; sonda com
