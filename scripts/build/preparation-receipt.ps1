@@ -99,7 +99,9 @@ function Get-BuildInputs([string]$Root, [string]$Title, [string]$Build, [string[
         [void]$files.Add([IO.Path]::GetFullPath((Join-Path $Root $file)))
     }
     if ($projectDirectory.StartsWith((Join-Path $Root '.local/aot').Replace('\','/'), [StringComparison]::OrdinalIgnoreCase)) {
-        foreach ($name in @('CMakeLists.txt','main.cpp')) { [void]$files.Add((Join-Path $Root "titles/common/generic/$name")) }
+        foreach ($name in @('CMakeLists.txt','main.cpp','modules.cmake')) { [void]$files.Add((Join-Path $Root "titles/common/generic/$name")) }
+        $moduleAnalysis = Join-Path $Root 'titles/common/module_analysis.toml'
+        if ([IO.File]::Exists($moduleAnalysis)) { [void]$files.Add($moduleAnalysis) }
     }
     foreach ($name in @('CMakePresets.json', "${Title}_manifest.toml", 'assets.sha256')) {
         $file = Join-Path $projectDirectory $name
@@ -138,6 +140,16 @@ function Get-BuildInputs([string]$Root, [string]$Title, [string]$Build, [string[
 }
 function Get-ReceiptEntries([string[]]$Files) {
     foreach ($file in $Files) { [pscustomobject]@{ path = [IO.Path]::GetFullPath($file); sha256 = Get-ReceiptHash $file } }
+}
+function Select-NativeDllOutputs([string]$Root, [string[]]$Nodes) {
+    $originals = [IO.Path]::GetFullPath((Join-Path $Root '.local/inputs')).TrimEnd('\','/') + [IO.Path]::DirectorySeparatorChar
+    foreach ($file in $Nodes) {
+        # Guest XEX images may be named HostLoader.dll and appear as codegen
+        # input nodes. They are immutable inputs, never native staging outputs.
+        $full = [IO.Path]::GetFullPath($file)
+        if ([IO.Path]::GetExtension($full) -ieq '.dll' -and
+            -not $full.StartsWith($originals, [StringComparison]::OrdinalIgnoreCase)) { $full }
+    }
 }
 function Get-PreparedArtifacts([string]$Build, [string]$Exe, [string[]]$DllOutputs) {
     $expected = @($DllOutputs | ForEach-Object { [IO.Path]::GetFileName($_) } | Sort-Object -Unique)

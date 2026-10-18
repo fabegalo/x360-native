@@ -6,6 +6,8 @@
 #include <fstream>
 #include <sstream>
 #include <regex>
+#include <algorithm>
+#include <set>
 
 namespace fs = std::filesystem;
 namespace x360n::desktop {
@@ -21,6 +23,12 @@ void Replace(std::string& s, const std::string& from, const std::string& to) {
 }
 std::string Path(const fs::path& p) {
   const auto u = p.generic_u8string(); return {u.begin(), u.end()};
+}
+std::string CMakeLiteral(const fs::path& p) {
+  const auto value = Path(p);
+  std::string delimiter = "=";
+  while (value.find("]" + delimiter + "]") != std::string::npos) delimiter += '=';
+  return "[" + delimiter + "[" + value + "]" + delimiter + "]";
 }
 void Write(const fs::path& file, const std::string& text, const fs::path& root) {
   auto rel = fs::weakly_canonical(file).lexically_relative(fs::weakly_canonical(root));
@@ -46,6 +54,45 @@ void GenerateAotProject(const ProjectPaths& paths, const Target& t) {
   const auto identities = IdentifyContent({}, t.game_root / "default.xex");
   if (identities.size() != 1 || !identities[0].valid || identities[0].title_id != t.title_id || identities[0].version != t.version)
     throw std::runtime_error("XEX identity changed before project generation");
+  // Inspect the verified inventory, including XEX images disguised as .dll.
+  // Never search sibling content roots or trust the catalog's older module list.
+  std::vector<ContentIdentity> modules;
+  std::set<std::string> target_names{"default"}, guest_paths;
+  auto inputs = t.inputs;
+  std::sort(inputs.begin(), inputs.end(), [](const auto& a, const auto& b) { return a.destination < b.destination; });
+  for (const auto& input : inputs) {
+    const auto relative = input.destination.lexically_relative(t.game_root);
+    const auto resolved = fs::weakly_canonical(input.destination).lexically_relative(fs::weakly_canonical(t.game_root));
+    if (relative.empty() || relative.is_absolute() || *relative.begin() == ".." ||
+        resolved.empty() || resolved.is_absolute() || *resolved.begin() == "..")
+      throw std::runtime_error("Invalid AOT module path");
+    auto guest = Path(relative);
+    std::transform(guest.begin(), guest.end(), guest.begin(), [](unsigned char c) { return c >= 'A' && c <= 'Z' ? c + 'a' - 'A' : c; });
+    if (!guest_paths.insert(guest).second) throw std::runtime_error("Duplicate case-insensitive AOT path: " + guest);
+    if (guest == "default.xex") continue;
+    std::ifstream in(input.destination, std::ios::binary);
+    char magic[4]{}; in.read(magic, 4);
+    if (std::string_view(magic, 3) != "XEX") continue;
+    auto found = IdentifyContent({}, input.destination);
+    if (found.size() != 1 || !found[0].valid || found[0].sha256 != input.sha256)
+      throw std::runtime_error("Unidentified AOT dependency: " + guest);
+    auto& module = found[0];
+    // Only the loader's bounded data-only metadata gate proves this is a resource.
+    if (module.resource_only) continue;
+    if (!(module.module_flags & 8) || !module.image_base || !module.image_size)
+      throw std::runtime_error("Unsupported AOT dependency identity: " + guest);
+    // Match the pinned SDK's target derivation exactly. Ambiguous basenames must
+    // fail rather than overwrite another module's native library or output.
+    auto name = Utf8(module.file.stem());
+    std::replace(name.begin(), name.end(), '.', '_');
+    std::replace(name.begin(), name.end(), ' ', '_');
+    if (!std::regex_match(name, std::regex("[A-Za-z_][A-Za-z0-9_]*")))
+      throw std::runtime_error("Unsupported AOT module target: " + guest);
+    auto folded = name;
+    std::transform(folded.begin(), folded.end(), folded.begin(), [](unsigned char c) { return c >= 'A' && c <= 'Z' ? c + 'a' - 'A' : c; });
+    if (!target_names.insert(folded).second) throw std::runtime_error("Ambiguous AOT module target: " + guest);
+    modules.push_back(std::move(module));
+  }
   WorkspaceLease lease(paths);
   const auto dir = paths.local() / "aot" / t.id;
   const auto generated = t.exe.parent_path() / "generated/default";
@@ -70,6 +117,35 @@ void GenerateAotProject(const ProjectPaths& paths, const Target& t) {
     {"limitations_en", t.limitations_en}, {"kind", "game"}, {"session", false}, {"importable", false},
     {"inventory", "assets.sha256"},
     {"files", toml::array{toml::table{{"path", "default.xex"}, {"source_name", "default.xex"}, {"sha256", xex_hash}}}}};
+  toml::array module_tables;
+  // Make original code inputs visible to the pre-codegen snapshot, including
+  // the very first preparation before a codegen depfile exists.
+  std::string module_cmake = "set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS " +
+      CMakeLiteral(t.game_root / "default.xex") + ")\n";
+  const auto analysis_file = paths.root / "titles/common/module_analysis.toml";
+  const auto analysis = fs::is_regular_file(analysis_file) ? toml::parse_file(analysis_file.string()) : toml::table{};
+  for (size_t i = 0; i < modules.size(); ++i) {
+    const auto& module = modules[i];
+    auto name = Utf8(module.file.stem());
+    std::replace(name.begin(), name.end(), '.', '_');
+    std::replace(name.begin(), name.end(), ' ', '_');
+    const auto output = generated.parent_path() / ("module_" + std::to_string(i));
+    const auto relative = Path(module.file.lexically_relative(t.game_root));
+    toml::table module_table{{"file_path", Path(module.file)}, {"guest_path", relative}, {"out_directory_path", Path(output)}};
+    // Optional analysis is bound to the complete original module hash, never
+    // the title ID, a basename or a presumed compatible runtime version.
+    if (const auto profile = analysis["modules"][module.sha256]; profile) {
+      if (!profile.is_table() || !profile["functions"].is_table())
+        throw std::runtime_error("Invalid hash-bound AOT module analysis: " + module.sha256);
+      module_table.insert("functions", *profile["functions"].as_table());
+    }
+    module_tables.push_back(std::move(module_table));
+    setup["files"].as_array()->push_back(toml::table{{"path", relative}, {"source_name", Utf8(module.file.filename())},
+      {"sha256", module.sha256}});
+    module_cmake += "set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS " + CMakeLiteral(module.file) + ")\n";
+    module_cmake += "x360n_add_aot_module(" + t.id + "_" + name + " " + CMakeLiteral(output) + ")\n";
+  }
+  if (!modules.empty()) manifest.insert("modules", std::move(module_tables));
   if (!t.library.title_id.empty()) setup.insert("library", toml::table{{"title_id", t.library.title_id},
     {"content_type", t.library.content_type}, {"file_name", t.library.file_name},
     {"display_name", t.library.display_name}, {"source_sha256", t.library.source_sha256}});
@@ -86,6 +162,12 @@ void GenerateAotProject(const ProjectPaths& paths, const Target& t) {
   // This pinned SDK template has only scalar substitutions and cmake_var calls.
   // Reject unfamiliar directives instead of silently emitting a broken project.
   auto integration = ReadText(paths.root / "external/rexglue-sdk/resources/templates/init/rexglue_cmake.inja");
+  // The pinned SDK's DLL template assumes source-relative output directories.
+  // Keep its registry and codegen intact; wire compact absolute outputs below.
+  const auto dll_section = integration.find("# Include DLL module shared library targets");
+  if (dll_section == std::string::npos) throw std::runtime_error("Unsupported pinned SDK DLL integration");
+  integration.erase(dll_section);
+  integration += "include(\"${CMAKE_CURRENT_SOURCE_DIR}/generated/x360n_modules.cmake\")\n";
   Replace(integration, "{{ cmake_var(\"CMAKE_CURRENT_SOURCE_DIR\") }}/{{ entrypoint_out_dir }}",
       "{{ cmake_var(\"X360N_GENERATED_ROOT\") }}");
   for (const auto& file : {"sources.cmake", "dll_targets.cmake"})
@@ -101,12 +183,16 @@ void GenerateAotProject(const ProjectPaths& paths, const Target& t) {
   // source-relative template. Keep our absolute-output integration separate so
   // that codegen cannot undo the compact paths before the second configure.
   Write(dir / "generated/x360n_rexglue.cmake", integration, paths.local());
+  auto module_integration = ReadText(paths.root / "titles/common/generic/modules.cmake");
+  Replace(module_integration, "@TITLE@", t.id);
+  Write(dir / "generated/x360n_modules.cmake", module_integration + module_cmake, paths.local());
   for (const auto& name : {"CMakeLists.txt", "main.cpp"}) {
     auto text = ReadText(paths.root / "titles/common/generic" / name);
     Replace(text, "@TITLE@", t.id);
     // CMake bracket arguments avoid interpolation of imported display names.
     Replace(text, "@ROOT@", "${CMAKE_CURRENT_SOURCE_DIR}/../../..");
     Replace(text, "@GENERATED@", Path(generated));
+    Replace(text, "@HOST_DISPATCH@", modules.empty() ? "0" : "1");
     Write(dir / name, text, paths.local());
   }
   using J = nlohmann::json;

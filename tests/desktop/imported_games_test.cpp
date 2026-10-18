@@ -5,10 +5,12 @@
 #include "preparation.h"
 #include "../supervisor/scratch.h"
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/matchers/catch_matchers_string.hpp>
 #include <fstream>
 #include <algorithm>
 #include <cstdlib>
 #include <nlohmann/json.hpp>
+#include <toml++/toml.hpp>
 
 using namespace x360n;
 using namespace x360n::desktop;
@@ -28,6 +30,12 @@ struct Fixture {
   ProjectPaths paths{root};
   fs::path source = root / "source";
   Fixture() { Write(source/"default.xex", Xex()); Write(source/"assets/data", "asset"); Write(root/".local/user/save", "keep"); }
+  void Infrastructure() {
+    for (const auto& file : {"titles/common/generic/CMakeLists.txt", "titles/common/generic/main.cpp",
+         "titles/common/generic/modules.cmake", "external/rexglue-sdk/resources/templates/init/rexglue_cmake.inja"}) {
+      auto dest=root/file; fs::create_directories(dest.parent_path()); fs::copy_file(fs::path(X360N_SOURCE_ROOT)/file,dest);
+    }
+  }
   ~Fixture() { std::error_code ec; fs::remove_all(root, ec); }
 };
 }
@@ -169,10 +177,7 @@ TEST_CASE("universal library imports available real content into a persistent en
 
 TEST_CASE("automatic AOT generates a stable project without a manual recipe", "[universal][generic-aot]") {
   Fixture f;
-  for (const auto& file : {"titles/common/generic/CMakeLists.txt", "titles/common/generic/main.cpp",
-       "external/rexglue-sdk/resources/templates/init/rexglue_cmake.inja"}) {
-    auto dest=f.root/file; fs::create_directories(dest.parent_path()); fs::copy_file(fs::path(X360N_SOURCE_ROOT)/file,dest);
-  }
+  f.Infrastructure();
   ImportGame(f.paths,{},f.source,f.source); const auto t=ReadCatalog(f.paths).front();
   REQUIRE(t.generic_aot); REQUIRE(t.aot);
   CHECK(t.id.size() == 64);
@@ -234,6 +239,93 @@ TEST_CASE("automatic AOT generates a stable project without a manual recipe", "[
   CHECK_THROWS(GenerateAotProject(f.paths,t));
   CHECK(fs::last_write_time(t.manifest)==repaired_stamp);
 }
+TEST_CASE("automatic AOT discovers verified XEX dependencies by content and preserves their identity", "[universal][generic-aot]") {
+  Fixture f; f.Infrastructure();
+  auto module = [](unsigned entry) {
+    std::string s(512, '\0');
+    auto be = [&](size_t p, unsigned n) { for (int i=0; i<4; ++i) s[p+i]=char(n>>(24-8*i)); };
+    s.replace(0,4,"XEX2"); be(4,9); be(8,512); be(16,64); be(20,2);
+    be(24,0x10100); be(28,entry); be(32,0x10201); be(36,0x83000000);
+    be(68,0x10000); return s;
+  };
+  Write(f.source/"nested/HostLoader.dll", module(0x83001000));
+  Write(f.source/"game.exe.xex", module(0x83002000));
+  std::string resource(600,'\0');
+  const auto resource32=[&](size_t p,unsigned n) { for(int i=0;i<4;++i) resource[p+i]=char(n>>(24-8*i)); };
+  resource.replace(0,4,"XEX2"); resource32(4,8); resource32(8,600); resource32(16,64); resource32(20,3);
+  resource32(24,0x10201); resource32(28,0x83000000);
+  resource32(32,0x3FF); resource32(36,528); resource32(528,8); resource[535]=1;
+  resource32(40,0x2FF); resource32(44,560); resource32(560,20); resource[564]='s';
+  resource32(572,0x83000000); resource32(576,4);
+  resource32(68,0x10000); resource32(64+0x110,0x83000000);
+  resource32(64+0x180,1); resource32(64+0x184,0x13);
+  Write(f.source/"resource.dll",resource);
+  REQUIRE(IdentifyContent({},f.source/"resource.dll").front().resource_only);
+  for (const auto offset : {533,455,572}) {
+    auto invalid=resource;
+    invalid[offset]=offset==533 ? 1 : offset==455 ? 0x11 : char(0x84);
+    Write(f.source/"unproven-resource.dll",invalid);
+    CHECK_FALSE(IdentifyContent({},f.source/"unproven-resource.dll").front().resource_only);
+  }
+  fs::remove(f.source/"unproven-resource.dll");
+  auto no_entry=module(0);
+  Write(f.source/"zero_entry.dll",no_entry);
+  CHECK_FALSE(IdentifyContent({},f.source/"zero_entry.dll").front().resource_only);
+  fs::remove(f.source/"zero_entry.dll");
+  Write(f.source/"ordinary.dll", "ordinary native/data asset");
+  SECTION("zero entry point does not suppress an executable DLL") {
+    Write(f.source/"zero_entry.dll",no_entry);
+    ImportGame(f.paths,{},f.source,f.source); const auto t=ReadCatalog(f.paths).front();
+    GenerateAotProject(f.paths,t);
+    auto manifest=toml::parse_file(t.manifest.string());
+    REQUIRE(manifest["modules"].as_array());
+    CHECK(manifest["modules"].as_array()->size()==3);
+  }
+  SECTION("ambiguous native targets fail before project publication") {
+    Write(f.source/"other/HostLoader.dll", module(0x83003000));
+    ImportGame(f.paths,{},f.source,f.source); const auto t=ReadCatalog(f.paths).front();
+    CHECK_THROWS_WITH(GenerateAotProject(f.paths,t), "Ambiguous AOT module target: other/hostloader.dll");
+    CHECK_FALSE(fs::exists(t.manifest));
+  }
+  SECTION("malformed XEX dependency fails before project publication") {
+    Write(f.source/"broken.dll", "XEX2broken");
+    ImportGame(f.paths,{},f.source,f.source); const auto t=ReadCatalog(f.paths).front();
+    CHECK_THROWS_WITH(GenerateAotProject(f.paths,t), "Unidentified AOT dependency: broken.dll");
+    CHECK_FALSE(fs::exists(t.manifest));
+  }
+  SECTION("original identity and exact-hash analysis survive deterministic regeneration") {
+  ImportGame(f.paths,{},f.source,f.source); const auto t=ReadCatalog(f.paths).front();
+  const auto original=DigestFile(t.game_root/"nested/HostLoader.dll")->sha256;
+  Write(f.root/"titles/common/module_analysis.toml", "[modules.'"+original+"']\nfunctions=1\n");
+  CHECK_THROWS(GenerateAotProject(f.paths,t)); CHECK_FALSE(fs::exists(t.manifest));
+  Write(f.root/"titles/common/module_analysis.toml", "[modules.'"+std::string(64,'0')+"'.functions]\n0x83009900={}\n[modules.'"+original+"'.functions]\n0x83001000={}\n");
+  std::ifstream record_file(fs::directory_iterator(f.paths.local()/"catalog")->path());
+  const auto record=nlohmann::json::parse(record_file);
+  auto dependency=std::find_if(record["modules"].begin(),record["modules"].end(),[](const auto& m) { return m["path"]=="nested/HostLoader.dll"; });
+  REQUIRE(dependency!=record["modules"].end());
+  CHECK((*dependency)["sha256"]==original);
+  CHECK((*dependency)["entry_point"]==0x83001000);
+  CHECK((*dependency)["image_base"]==0x83000000);
+  GenerateAotProject(f.paths,t);
+  auto manifest=toml::parse_file(t.manifest.string());
+  auto modules=manifest["modules"].as_array(); REQUIRE(modules); REQUIRE(modules->size()==2);
+  CHECK((*modules)[0].as_table()->at("guest_path").value_or(std::string{})=="game.exe.xex");
+  CHECK((*modules)[1].as_table()->at("guest_path").value_or(std::string{})=="nested/HostLoader.dll");
+  CHECK(fs::equivalent(PathFromUtf8((*modules)[1].as_table()->at("file_path").value_or("")),t.game_root/"nested/HostLoader.dll"));
+  CHECK((*modules)[1].as_table()->at("functions").as_table()->contains("0x83001000"));
+  CHECK_FALSE((*modules)[0].as_table()->contains("functions"));
+  CHECK_FALSE((*modules)[1].as_table()->at("functions").as_table()->contains("0x83009900"));
+  auto setup=toml::parse_file((t.manifest.parent_path()/"preparation.toml").string());
+  REQUIRE(setup["files"].as_array()->size()==3);
+  CHECK((*setup["files"].as_array())[2].as_table()->at("sha256").value_or("")==original);
+  CHECK(DigestFile(t.game_root/"nested/HostLoader.dll")->sha256==original);
+  const auto config_hash=DigestFile(t.manifest)->sha256;
+  GenerateAotProject(f.paths,t); CHECK(DigestFile(t.manifest)->sha256==config_hash);
+  Write(t.game_root/"nested/HostLoader.dll",module(0x83004000));
+  CHECK_THROWS(GenerateAotProject(f.paths,t));
+  CHECK(DigestFile(t.manifest)->sha256==config_hash);
+  }
+}
 TEST_CASE("local AOT regenerates an existing imported title without copying content", "[.local-existing-aot]") {
   const char* root = std::getenv("X360N_AOT_ROOT"), *id = std::getenv("X360N_AOT_TITLE");
   REQUIRE(root); REQUIRE(id);
@@ -241,7 +333,13 @@ TEST_CASE("local AOT regenerates an existing imported title without copying cont
   const auto games = ReadCatalog(paths);
   const auto game = std::find_if(games.begin(),games.end(),[&](const auto& t){return t.id==id;});
   REQUIRE(game!=games.end()); REQUIRE(game->generic_aot);
-  const auto catalog = paths.local()/"catalog"/(Utf8(game->game_root.filename())+".json");
+  fs::path catalog;
+  for (const auto& entry : fs::directory_iterator(paths.local()/"catalog")) {
+    if (entry.path().extension() != ".json") continue;
+    std::ifstream in(entry.path()); auto record = nlohmann::json::parse(in);
+    if (fs::equivalent(paths.inputs()/PathFromUtf8(record.at("content_root").get<std::string>()), game->game_root)) catalog=entry.path();
+  }
+  REQUIRE_FALSE(catalog.empty());
   const auto before = DigestFile(catalog); REQUIRE(before);
   GenerateAotProject(paths,*game);
   const auto profile = LoadSessionProfile(paths,game->manifest,false);

@@ -15,7 +15,10 @@ std::vector<ContentIdentity> IdentifyContent(const std::vector<Target>& targets,
   auto inspect = [&](const fs::path& file) {
     if (cancelled && cancelled()) throw std::runtime_error("Identificação cancelada.");
     // Ignore unrelated assets in a folder, while still accepting any single file.
-    bool candidate = single || file.extension() == ".xex";
+    std::ifstream signature(file, std::ios::binary);
+    char magic[4]{}; signature.read(magic, 4);
+    bool candidate = single || file.extension() == ".xex" ||
+        std::string_view(magic, 3) == "XEX";
     for (const auto& t : targets) for (const auto& i : t.inputs)
       if (i.source_relative.empty() && (file.filename() == PathFromUtf8(i.source_name) || file.filename() == i.destination.filename())) candidate = true;
     if (!candidate) return;
@@ -46,6 +49,11 @@ std::vector<ContentIdentity> IdentifyContent(const std::vector<Target>& targets,
     if (parsed.identity) {
       const auto& identity = *parsed.identity;
       item.valid = true;
+      item.module_flags = identity.module_flags;
+      item.entry_point = identity.entry_point.value_or(0);
+      item.image_base = identity.image_base.value_or(0);
+      item.image_size = identity.image_size.value_or(0);
+      item.resource_only = identity.resource_only;
       item.original_name = identity.original_pe_name.value_or("");
       for (const auto& dependency : identity.imports)
         item.imports.push_back(dependency.name + " " + dependency.version.ToString() + " (minimum " + dependency.version_min.ToString() + ")");

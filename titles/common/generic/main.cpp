@@ -5,6 +5,7 @@
 class ImportedGameApp : public rex::ReXApp {
  public:
   using rex::ReXApp::ReXApp;
+  bool UseHostFunctionTable() const override { return @HOST_DISPATCH@ != 0; }
   void OnPreLaunchModule() override { x360n::ImportLaunchData(*runtime()); }
   void OnGuestThreadExit(rex::system::XThread*) override { x360n::ExportLaunchRequest(*runtime()); }
   bool OnWindowCloseRequested() override { x360n::ExportWindowClose(); return true; }

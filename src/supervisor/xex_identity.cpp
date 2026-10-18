@@ -143,11 +143,17 @@ XexParseResult ParseXexIdentity(std::span<const uint8_t> b) {
     return b.subspan(offset, size);
   };
 
+  std::optional<std::span<const uint8_t>> resources;
+  bool has_imports_or_tls = false;
   for (uint32_t i = 0; i < id.header_count; ++i) {
     size_t entry = kFixedHeaderSize + size_t(i) * sizeof(xex2_opt_header);
     uint32_t key = Be32(b, entry);
     uint32_t value = Be32(b, entry + 4);  // inline value or offset, see GetOptHeader in the SDK
+    if (key == XEX_HEADER_IMPORT_LIBRARIES || key == XEX_HEADER_TLS_INFO) has_imports_or_tls = true;
     switch (key) {
+      case XEX_HEADER_RESOURCE_INFO:
+        resources = variable(key, value, 20);
+        break;
       case XEX_HEADER_ENTRY_POINT:
         id.entry_point = value;
         break;
@@ -244,6 +250,30 @@ XexParseResult ParseXexIdentity(std::span<const uint8_t> b) {
     id.image_size = Be32(b, security_offset + offsetof(xex2_security_info, image_size));
     id.load_address = Be32(b, security_offset + offsetof(xex2_security_info, load_address));
     id.region = Be32(b, security_offset + offsetof(xex2_security_info, region));
+    // Match the loader's resource-only gate rather than treating entry_point=0
+    // as proof of data. A DLL with executable pages/exports may have no DllMain.
+    if (id.module_flags == XEX_MODULE_DLL_MODULE && id.encryption_type == XEX_ENCRYPTION_NONE &&
+        !id.entry_point && !has_imports_or_tls && resources && (resources->size() - 4) % 16 == 0) {
+      const uint64_t start = id.load_address.value_or(0), end = start + id.image_size.value_or(0);
+      bool valid = start != 0 && end <= 0x100000000ull;
+      for (size_t off = 4; valid && off < resources->size(); off += 16) {
+        const uint64_t address = Be32(*resources, off + 8), size = Be32(*resources, off + 12);
+        valid = (*resources)[off] != 0 && size != 0 && address >= start && address + size <= end;
+      }
+      const auto count = Be32(b, security_offset + offsetof(xex2_security_info, page_descriptor_count));
+      const auto pages = security_offset + offsetof(xex2_security_info, page_descriptors);
+      valid = valid && InRange(limit, pages, uint64_t(count) * sizeof(xex2_page_descriptor));
+      const auto flags = Be32(b, security_offset + offsetof(xex2_security_info, image_flags));
+      const uint64_t page_size = flags & XEX_IMAGE_PAGE_SIZE_4KB ? 4096 : 65536;
+      uint64_t covered = 0;
+      for (uint32_t i = 0; valid && i < count; ++i) {
+        const auto value = Be32(b, pages + size_t(i) * sizeof(xex2_page_descriptor));
+        const auto type = value & 15, page_count = value >> 4;
+        covered += uint64_t(page_count) * page_size;
+        valid = page_count && (type == XEX_SECTION_DATA || type == XEX_SECTION_READONLY_DATA) && covered <= end - start;
+      }
+      id.resource_only = valid && covered == end - start;
+    }
   } else {
     id.warnings.push_back(fmt::format("security info at 0x{:X} out of range", security_offset));
   }

@@ -73,6 +73,11 @@ try {
     Assert (-not [IO.File]::Exists($generated)) 'compact AOT incorrectly preserved an unrelated generated template'
     $exe = Join-Path $build 'sample.exe'; [IO.File]::WriteAllText($exe, 'native output')
     $dll = Join-Path $scratch 'runtime.dll'; [IO.File]::WriteAllText($dll, 'built runtime')
+    $guest = Join-Path $scratch '.local/inputs/game/HostLoader.dll'
+    $native = Join-Path $build 'game_HostLoader.dll'
+    $adjacent = Join-Path $scratch '.local/inputs-other/native.DLL'
+    $outputs = @(Select-NativeDllOutputs $scratch @($guest,$native,$adjacent,$inputFile))
+    Assert ($outputs.Count -eq 2 -and $native -in $outputs -and $adjacent -in $outputs -and $guest -notin $outputs) 'original guest DLL was confused with a native output or boundary sibling was lost'
     $staged = Join-Path $build 'runtime.dll'; [IO.File]::Copy($dll, $staged)
     Assert (@(Get-PreparedArtifacts $build $exe @($dll)).Count -eq 2) 'matching build outputs rejected'
     [IO.File]::WriteAllText($staged, 'wrong version')

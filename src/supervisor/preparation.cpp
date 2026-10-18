@@ -120,6 +120,14 @@ std::optional<std::string> CheckPreparation(const ProjectPaths& paths,
     if (!xex || !inputs.contains(Key(manifest)) || !inputs.contains(Key(paths.root / "deps.lock.json")) ||
         !inputs.contains(Key(manifest.parent_path() / PathFromUtf8(*xex))) || !artifacts.contains(Key(exe)))
       return fail("Entradas obrigatórias ausentes do recibo.");
+    if (auto modules = profile["modules"].as_array()) {
+      for (const auto& module : *modules) {
+        const auto* table = module.as_table();
+        auto file = table ? (*table)["file_path"].value<std::string>() : std::nullopt;
+        if (!file || !inputs.contains(Key(manifest.parent_path() / PathFromUtf8(*file))))
+          return fail("Dependência AOT ausente do recibo.");
+      }
+    }
     const auto registration = manifest.parent_path() / "preparation.toml";
     if (fs::is_regular_file(registration) && !inputs.contains(Key(registration)))
       return fail("O registro do título mudou.");

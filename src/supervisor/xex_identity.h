@@ -51,6 +51,7 @@ struct XexIdentity {
   std::optional<uint32_t> image_size;    // security info
   std::optional<uint32_t> load_address;  // security info
   std::optional<uint32_t> region;        // security info
+  bool resource_only = false;           // bounded data-only metadata, same gate as SDK
   std::vector<XexImportLibrary> imports;
   std::vector<std::string> warnings;     // malformed optional data that was skipped
 };

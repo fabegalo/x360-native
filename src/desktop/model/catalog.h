@@ -1,5 +1,6 @@
 #pragma once
 #include "paths.h"
+#include <cstdint>
 #include <functional>
 #include <vector>
 
@@ -39,6 +40,8 @@ struct ContentIdentity {
   std::string sha256, title_id, media_id, original_name;
   std::string base_version, region;
   unsigned disc_number = 0, disc_count = 0;
+  uint32_t module_flags = 0, entry_point = 0, image_base = 0, image_size = 0;
+  bool resource_only = false;
   std::vector<std::string> imports;
 };
 // Read-only inspection; recognizing a format is never a compatibility claim.

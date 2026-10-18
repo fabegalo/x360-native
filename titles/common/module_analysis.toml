@@ -1,0 +1,120 @@
+# Optional original-module entry metadata. Exact SHA-256 only; no code replacement.
+# Provenance and reviewed boundaries: docs/reports/aot-dependencies-2026-10-17.md
+# StubBin copy suffix: andi.; mtctr; beqlr; byte-copy loop; blr. No .pdata.
+
+# Runtime/v4.0/MXF.Avatar.dll.xex, local package 58410B83 / 0.0.0.2
+[modules.'7705af35e6e446787336a33a465a44f3840ce646b741e88693932a1de86290d6'.functions]
+0x835C440C = {}
+
+# Runtime/v4.0/MXF.Game.dll.xex, local package 58410B83 / 0.0.0.2
+[modules.'5e06bb37ca035a713bbd9a79377ad2ae8f2d8867326fa2b0933a0f5ff92f4aac'.functions]
+0x8370440C = {}
+
+# Runtime/v4.0/MXF.GamerServices.dll.xex, local package 58410B83 / 0.0.0.2
+[modules.'a9125e7666938edd51627a9c6c743baf381c4448809fea4d15d9e9ce7a259216'.functions]
+0x8310440C = {}
+
+# Runtime/v4.0/MXF.Graphics.dll.xex, local package 58410B83 / 0.0.0.2
+[modules.'17b175a3d0469349f0972cf8d9e6673cc0da78ceef96f0d6b98b90f20d649ff6'.functions]
+0x831B440C = {}
+
+# Runtime/v4.0/MXF.Input.Touch.dll.xex, local package 58410B83 / 0.0.0.2
+[modules.'132e6ad7a80398d763e53c8bc67ef8c88d1ff236e0419b4a42e75aba3c89ca5c'.functions]
+0x8348440C = {}
+
+# Runtime/v4.0/MXF.Net.dll.xex, local package 58410B83 / 0.0.0.2
+[modules.'c6b008500bb7df98ad8a5460b85bbbec4f6839644bff163dafdcd9fea0e1e449'.functions]
+0x8333440C = {}
+
+# Runtime/v4.0/MXF.Storage.dll.xex, local package 58410B83 / 0.0.0.2
+[modules.'09a4030dc2995cad2f8f7dbd8ae053eaca85cf9517e125871ec84c56fd7ea0fc'.functions]
+0x833E440C = {}
+
+# Runtime/v4.0/MXF.Video.dll.xex, local package 58410B83 / 0.0.0.2
+[modules.'3d16895531622b65ee4df2eecc3c892f4e6ce56b0a06249986f7adc4bc009394'.functions]
+0x8352440C = {}
+
+# Runtime/v4.0/MXF.Xact.dll.xex, local package 58410B83 / 0.0.0.2
+[modules.'79177b278f6e8ceacc29e815fade89af9bd71077dffe6affa17b08d5301b6720'.functions]
+0x8329440C = {}
+
+# Runtime/v4.0/MXF.Xdk.dll.xex, local package 58410B83 / 0.0.0.2
+[modules.'7ed3e4f3accd49f0c3c6ef854b5b1501459d5cb31c5f314d5f87e89a8b8e5a2c'.functions]
+0x8366440C = {}
+
+# Runtime/v4.0/MXF.dll.xex, local package 58410B83 / 0.0.0.2
+[modules.'28ebee201b089cb1e4f0bb5e19d52cabf42b0496a7be4908034e16f265ab5a0b'.functions]
+0x8300440C = {}
+
+# Runtime/v4.0/NetCFUserMode.dll, local package 58410B83 / 0.0.0.2
+[modules.'e7aaf6eecb3afb467e1c5b9974a011fdb0021c9dc8e41f40d05cada4ea83fb18'.functions]
+0x82BD4A00 = {}
+0x82BE6DC8 = {}
+
+# Runtime/v4.0/System.Core.dll.xex, local package 58410B83 / 0.0.0.2
+[modules.'260beb0f4fb22b48345fdaa3644bfbd88319c539fcd9af3b7fffd24f800b510f'.functions]
+0x83D3440C = {}
+
+# Runtime/v4.0/System.SR.dll.xex, local package 58410B83 / 0.0.0.2
+[modules.'ffedac78252aba26eeac44257ca3ca3486d9c9f848cade5169ae9301705a089f'.functions]
+0x83E9440C = {}
+
+# Runtime/v4.0/System.Xml.Linq.dll.xex, local package 58410B83 / 0.0.0.2
+[modules.'a124588787d763f072a15816535902af0088e837ce573ec3e29f660a153720d9'.functions]
+0x83DE440C = {}
+
+# Runtime/v4.0/System.Xml.dll.xex, local package 58410B83 / 0.0.0.2
+[modules.'8ca22319573a93aa5166d3bb01cbbe9a7b5723023a08c1b0c4577b6fcd22c3c6'.functions]
+0x83FA440C = {}
+
+# Runtime/v4.0/System.dll.xex, local package 58410B83 / 0.0.0.2
+[modules.'21993eecbb32c65e88b1078bdaa209cf2dc268aabee1362f64b02657c7d00745'.functions]
+0x83C2440C = {}
+
+# Runtime/v4.0/big5.nlp.xex, local package 58410B83 / 0.0.0.2
+[modules.'e6626940b1a417b9271fea14aea19935c9000a00705bf4cc5a614a8e7f337c3f'.functions]
+0x82CA440C = {}
+
+# Runtime/v4.0/bopomofo.nlp.xex, local package 58410B83 / 0.0.0.2
+[modules.'69085f8fee9ca35ef9fb70589dc6a6d318a3fe6c255146d9656fdf77a0aee9e5'.functions]
+0x82D5440C = {}
+
+# Runtime/v4.0/ksc.nlp.xex, local package 58410B83 / 0.0.0.2
+[modules.'e0a1d18e2952e699c9e85574b37d27c46a13e0b51d1a0721eb7b0b6097a818fb'.functions]
+0x82E0440C = {}
+
+# Runtime/v4.0/l_except_3_7.nlp.xex, local package 58410B83 / 0.0.0.2
+[modules.'73b53c56738965ff148e34e04e2d116c7339d8b7e1070073dfc0cb78d314909b'.functions]
+0x82EC440C = {}
+
+# Runtime/v4.0/l_intl_3_7.nlp.xex, local package 58410B83 / 0.0.0.2
+[modules.'f518ce5680274d8c2918bf6eba4f9dc88a40d33f939f3ecbde6d190800f13793'.functions]
+0x82F6440C = {}
+
+# Runtime/v4.0/mscorlib.dll.xex, local package 58410B83 / 0.0.0.2
+[modules.'996ca4a233641f20e55966596805df9692e0e871ff9b58e0baf7586087813740'.functions]
+0x837B440C = {}
+
+# Runtime/v4.0/prc.nlp.xex, local package 58410B83 / 0.0.0.2
+[modules.'c1db3636a380c9464e553999518617533c2f22f3db3c4240d77793cd067bcc3c'.functions]
+0x8394440C = {}
+
+# Runtime/v4.0/prcp.nlp.xex, local package 58410B83 / 0.0.0.2
+[modules.'0b360840c0e27bd74544c817b9708af177837246b5d94fc97b166f5bf2a05b9c'.functions]
+0x839F440C = {}
+
+# Runtime/v4.0/sortkey_3_7.nlp.xex, local package 58410B83 / 0.0.0.2
+[modules.'1a760972285675e41a3fe3b26bc683cf0557ba63362e3ac6cf7051c328b43410'.functions]
+0x83AA440C = {}
+
+# Runtime/v4.0/sorttbls_3_7.nlp.xex, local package 58410B83 / 0.0.0.2
+[modules.'610cada5ac86023d53e2241ec58a8935c30629829a1f8630e6ec862e3e51c3c9'.functions]
+0x83B8440C = {}
+
+# Runtime/v4.0/xjis.nlp.xex, local package 58410B83 / 0.0.0.2
+[modules.'d1a38e911594facf986ad09fc4de93e66b06f258c38f0f26856f559f2c8ddf5c'.functions]
+0x8415440C = {}
+
+# game.exe.xex, local package 58410B83 / 0.0.0.2
+[modules.'7870f7d923c6ff8ee05b695ea5a61b87354d0e75aae5e33b22a2bac79a69c107'.functions]
+0x841F440C = {}

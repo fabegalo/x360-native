@@ -134,10 +134,14 @@ std::string ImportGame(const ProjectPaths& paths, const std::vector<Target>& tar
     if (!names.insert(folded).second) throw std::runtime_error("Duplicate case-insensitive game path");
     auto digest = DigestFile(f.path()); if (!digest) throw std::runtime_error("Could not read game content");
     inventory.emplace(name, digest->sha256);
-    if (Key(Utf8(f.path().extension())) == ".xex") {
+    std::ifstream signature(f.path(), std::ios::binary);
+    char magic[4]{}; signature.read(magic, 4);
+    if (std::string_view(magic, 3) == "XEX") {
       auto found = IdentifyContent({}, f.path(), cancelled);
       if (!found.empty() && found[0].valid) modules.push_back({{"path", name}, {"sha256", digest->sha256},
-        {"title_id", found[0].title_id}, {"version", found[0].version}, {"imports", found[0].imports}});
+        {"title_id", found[0].title_id}, {"version", found[0].version}, {"imports", found[0].imports},
+        {"module_flags", found[0].module_flags}, {"entry_point", found[0].entry_point},
+        {"image_base", found[0].image_base}, {"image_size", found[0].image_size}});
     }
   }
   Json files = Json::array();

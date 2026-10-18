@@ -117,6 +117,17 @@ TEST_CASE("compact AOT receipts require the matching directory owner", "[prepara
   WriteTestReceipt(f.paths, "sample", f.manifest, exe, f.inputs);
   CHECK(CheckPreparation(f.paths, "sample", f.manifest, exe));
 }
+TEST_CASE("preparation requires every declared AOT dependency in its receipt", "[preparation]") {
+  Fixture f;
+  const auto module = f.root / "HostLoader.dll";
+  std::ofstream(module) << "original guest module";
+  std::ofstream(f.manifest, std::ios::app) << "[[modules]]\nfile_path='../../HostLoader.dll'\nguest_path='HostLoader.dll'\n";
+  f.Sign(); CHECK(f.Check());
+  f.inputs.push_back(module); f.Sign(); CHECK_FALSE(f.Check());
+  const auto time = fs::last_write_time(module);
+  std::ofstream(module) << "changed guest module"; fs::last_write_time(module, time);
+  CHECK(f.Check());
+}
 #ifdef _WIN32
 TEST_CASE("inspection rejects the title producer lease and recovers after release", "[preparation]") {
   Fixture f;

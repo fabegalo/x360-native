@@ -196,7 +196,7 @@ try {
     if (-not (Test-ReceiptEntries $driverSnapshot) -or -not (Test-ReceiptEntries $ownerSnapshot) -or
         -not (Test-ReceiptEntries $sourceSnapshot)) { throw 'An input changed during preparation; prepare again. No receipt published.' }
     $inputs = @(Get-ReceiptEntries @(Get-BuildInputs $root $Title $build @($Title)))
-    $dllOutputs = @(Get-NinjaNodes $build @($Title) | Where-Object { $_ -match '\.dll$' } | Sort-Object -Unique)
+    $dllOutputs = @(Select-NativeDllOutputs $root @(Get-NinjaNodes $build @($Title)) | Sort-Object -Unique)
     $artifacts = @(Get-PreparedArtifacts $build $exe $dllOutputs | Sort-Object path -Unique)
     $sdkCommit = (& git -C (Join-Path $root 'external/rexglue-sdk') rev-parse HEAD).Trim()
     if ($LASTEXITCODE) { throw 'Cannot identify SDK revision' }
