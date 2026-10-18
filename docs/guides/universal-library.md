@@ -309,3 +309,15 @@ refused with `no verified AOT profile`. No Charlie process started, and its
 inactive header was preserved. These short checks do not certify gameplay,
 commercial saves, complete XAM support or performance; detailed diagnostics and
 preservation hashes are in the report.
+
+### Charlie registration gate — 2026-10-18
+
+The later PPC correction compiled Charlie's complete AOT, but its receipt became
+stale after SDK patch 0092. The authorized preparation attempt was interrupted
+when another activity changed the build drivers; no new receipt was published.
+The 17559 preparation also remained incomplete after its external watchdog.
+The maintainer chose to document these blockers without another attempt.
+Existing My Games headers retain their hashes; the final registration test
+correctly refuses Charlie before writing. Registration and an executed dashboard
+transition remain unvalidated. The new opt-in checks compile, but their positive
+paths still await valid preparations. See the [diagnosis, results and limits](../reports/charlie-library-2026-10-18.md).
