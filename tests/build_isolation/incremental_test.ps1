@@ -82,6 +82,9 @@ set_property(TARGET fixture APPEND PROPERTY LINK_DEPENDS "${CMAKE_SOURCE_DIR}/ap
     Configure-Fixture; Build-Fixture
     [IO.File]::WriteAllText("$scratch/CMakePresets.json", '{"version":6,"include":["flags.json"]}')
     [IO.File]::WriteAllText("$scratch/flags.json", '{"version":6}')
+    [IO.File]::WriteAllText("$build/generated/dll_targets.cmake", '# auxiliary list not included by the project')
+    $receiptInputs = @(Get-BuildInputs $Root 'fixture' $build @('fixture'))
+    Assert (([IO.Path]::GetFullPath("$build/generated/dll_targets.cmake")) -in $receiptInputs) 'auxiliary generated CMake list missing from receipt'
     $configureInputs = @(Get-IncrementalConfigureInputs $build $scratch)
     Assert (Test-IncrementalConfigureInputs $configureInputs $configureInputs) 'identical configuration was rejected'
     Change-Content "$scratch/flags.json" '{"version":6,"configurePresets":[]}'

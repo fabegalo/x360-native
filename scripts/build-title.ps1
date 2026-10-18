@@ -72,7 +72,9 @@ $runId = [Guid]::NewGuid().ToString('N')
 function Update-ToolchainSnapshot([string]$Phase) {
     $log = Join-Path $build "x360n-build-$Phase.$runId.log"
     $script = Join-Path $PSScriptRoot 'build/toolchain-snapshot.ps1'
-    cmd /c "`"$devshell`" powershell.exe -NoProfile -ExecutionPolicy Bypass -File `"$script`" -Build `"$build`" > `"$log`" 2>&1"
+    $priorToolchain = @($previous.inputs | Where-Object path -eq (Join-Path $build '.preparation/toolchain.json'))
+    $authenticated = if ($priorToolchain.Count -eq 1) { '-PreviousSha ' + $priorToolchain[0].sha256 } else { '' }
+    cmd /c "`"$devshell`" powershell.exe -NoProfile -ExecutionPolicy Bypass -File `"$script`" -Build `"$build`" $authenticated > `"$log`" 2>&1"
     if ($LASTEXITCODE) { throw "Cannot identify build toolchain; see $log" }
 }
 
@@ -145,7 +147,7 @@ try {
                 Reset-GeneratedBuildOutputs $build $generated
             }
             $sourceSnapshot = @(Get-ReceiptEntries @(Get-BuildInputs $root $Title $build @($Title) -AllowInvalidCodegen | Where-Object {
-                [IO.File]::Exists($_) -and
+                (Test-BuildFile $_) -and
                 -not $_.StartsWith($build, [StringComparison]::OrdinalIgnoreCase) -and
                 (-not $_.StartsWith((Join-Path $titleDir 'generated'), [StringComparison]::OrdinalIgnoreCase) -or
                  $_ -eq (Join-Path $titleDir 'generated/x360n_rexglue.cmake'))

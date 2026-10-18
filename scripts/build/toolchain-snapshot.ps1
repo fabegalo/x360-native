@@ -1,4 +1,4 @@
-param([Parameter(Mandatory)][string]$Build)
+param([Parameter(Mandatory)][string]$Build, [string]$PreviousSha)
 $ErrorActionPreference = 'Stop'
 $env:PSModulePath = Join-Path $PSHOME 'Modules'
 . "$PSScriptRoot/preparation-receipt.ps1"
@@ -20,6 +20,20 @@ foreach ($directory in @(($env:INCLUDE + ';' + $env:CPATH + ';' + $env:C_INCLUDE
 }
 $cacheFile = Join-Path $Build 'CMakeCache.txt'
 $graphTrusted = $false
+$snapshotFile = Join-Path $Build '.preparation/toolchain.json'
+$dependencyFile = Join-Path $Build '.ninja_deps'
+$dependencyHash = if (Test-BuildFile $dependencyFile) { Get-ReceiptHash $dependencyFile } else { $null }
+$cachedDirectories = $null
+if ($PreviousSha -match '^[a-f0-9]{64}$' -and (Test-BuildFile $snapshotFile) -and
+    (Get-ReceiptHash $snapshotFile) -eq $PreviousSha -and $dependencyHash) {
+    try {
+        $cached = [IO.File]::ReadAllText($snapshotFile) | ConvertFrom-Json
+        if ($cached.schema -eq 1 -and $cached.dependency_database -eq $dependencyHash -and $cached.dependency_directories) {
+            $cachedDirectories = @($cached.dependency_directories)
+        }
+    } catch { $cachedDirectories = $null }
+}
+$dependencyDirectories = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
 if ([IO.File]::Exists($cacheFile)) {
     $cache = Get-BuildCache $Build
     if ($cache.CMAKE_CXX_COMPILER) {
@@ -51,15 +65,19 @@ if ([IO.File]::Exists($cacheFile)) {
     foreach ($command in $commands) {
         if ($command.command -and $command.output -match '\.(obj|pch|res)$' -and $command.file) { [void]$localInputs.Add((Resolve-BuildPath $Build $command.file)) }
     }
-    if ($graphTrusted) {
+    if ($graphTrusted -and $cachedDirectories) {
+        foreach ($directory in $cachedDirectories) { [void]$dependencyDirectories.Add($directory) }
+        Write-Host 'reused authenticated compiler include directories'
+    } elseif ($graphTrusted) {
         foreach ($line in ((Invoke-IncrementalNinjaQuery $Build @('deps')) -split '\r?\n')) {
             if ($line.StartsWith('    ')) { [void]$localInputs.Add((Resolve-BuildPath $Build $line.Substring(4))) }
         }
     }
     foreach ($file in $localInputs) {
         $directory = Split-Path $file
-        if ((Test-BuildFile $file) -and [IO.Directory]::Exists($directory)) { [void]$includes.Add($directory) }
+        if ((Test-BuildFile $file) -and [IO.Directory]::Exists($directory)) { [void]$dependencyDirectories.Add($directory) }
     }
+    foreach ($directory in $dependencyDirectories) { if ([IO.Directory]::Exists($directory)) { [void]$includes.Add($directory) } }
     foreach ($command in $commands) {
         if ($command.output -match '\.res$') {
             $hasResources = $true
@@ -108,6 +126,7 @@ foreach ($name in @($environmentNames | Sort-Object)) {
     $variables[$name] = if ($null -eq $value) { $null } else { Get-TextDigest $value }
 }
 $snapshot = [ordered]@{schema=1; graph_trusted=$graphTrusted; environment=$variables; includes=$inventory;
+    dependency_database=$dependencyHash; dependency_directories=@($dependencyDirectories | Sort-Object);
     libraries=@($libraries | Sort-Object -Unique); resources=@($resources | Sort-Object)}
 $file = Join-Path $Build '.preparation/toolchain.json'
 [void][IO.Directory]::CreateDirectory((Split-Path $file))

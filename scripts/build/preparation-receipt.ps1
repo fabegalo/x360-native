@@ -191,6 +191,12 @@ function Get-BuildInputs([string]$Root, [string]$Title, [string]$Build, [string[
     $depfiles = @()
     foreach ($generatedRoot in @((Join-Path $projectDirectory 'generated'), (Join-Path $Build 'generated'))) {
         if (Test-Path -LiteralPath $generatedRoot) {
+            # ReXGlue writes auxiliary lists (notably dll_targets.cmake) after
+            # serializing its output stamp. Authenticate the inventory used by
+            # configure reuse even when a list is not included by this project.
+            foreach ($file in [IO.Directory]::EnumerateFiles($generatedRoot, '*.cmake', [IO.SearchOption]::AllDirectories)) {
+                [void]$files.Add($file)
+            }
             $depfiles += @(Get-ChildItem -LiteralPath $generatedRoot -Filter codegen.d -Recurse -File)
         }
     }
