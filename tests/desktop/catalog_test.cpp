@@ -2,6 +2,7 @@
 #include "../../src/desktop/model/catalog.h"
 #include "sha256.h"
 #include "session_profile.h"
+#include "workspace_lease.h"
 #include "../supervisor/preparation_fixture.h"
 #include <chrono>
 #include <fstream>
@@ -550,12 +551,19 @@ TEST_CASE("local packaged payload imports the complete validated sets into a fre
   CHECK_NOTHROW(PrepareLibrary(ProjectPaths{root}, *dash, targets));
 }
 
-TEST_CASE("local isolated prepared environment installs original library dependencies", "[.local-prepared]") {
+namespace {
+void CheckLocalLibrary(bool require_prepared_dashboard) {
   const char* root = std::getenv("X360N_TEST_PREPARED_ROOT"); REQUIRE(root);
+  if (!require_prepared_dashboard) REQUIRE(std::getenv("X360N_TEST_PREPARED_GAME"));
   ProjectPaths paths{PathFromUtf8(root)};
   const auto targets = ReadCatalog(paths);
   const auto dash = std::find_if(targets.begin(), targets.end(), [](const auto& t) { return t.id == "dash_17559"; });
-  REQUIRE(dash != targets.end()); REQUIRE(Inspect(paths, *dash).prepared);
+  REQUIRE(dash != targets.end());
+  const auto dashboard_state = Inspect(paths, *dash);
+  CAPTURE(dashboard_state.issues);
+  if (require_prepared_dashboard) REQUIRE(dashboard_state.prepared);
+  else REQUIRE(dashboard_state.inputs_ok);
+  const Target* selected_game = nullptr;
   if (const char* required_game = std::getenv("X360N_TEST_PREPARED_GAME")) {
     auto game = std::find_if(targets.begin(), targets.end(), [&](const auto& t) { return t.id == required_game; });
     REQUIRE(game != targets.end());
@@ -563,11 +571,60 @@ TEST_CASE("local isolated prepared environment installs original library depende
     CAPTURE(inspection.issues);
     REQUIRE(inspection.prepared);
     REQUIRE_FALSE(game->library.title_id.empty());
+    selected_game = &*game;
   }
   for (const auto& id : dash->dependencies) {
     auto game = std::find_if(targets.begin(), targets.end(), [&](const auto& t) { return t.id == id; });
     REQUIRE(game != targets.end()); REQUIRE(Inspect(paths, *game).prepared);
   }
-  PrepareLibrary(paths, *dash, targets);
-  CHECK(InspectLibrary(paths, *dash, targets).empty());
+  const auto dashboard_receipt = DigestFile(PreparationReceipt(dash->exe));
+  REQUIRE(dashboard_receipt);
+  const auto game_receipt = selected_game ? DigestFile(PreparationReceipt(selected_game->exe)) : std::nullopt;
+  if (selected_game) REQUIRE(game_receipt);
+  // An explicit game scopes writes to that entry, preserving unrelated headers.
+  const auto installed_targets = selected_game ? std::vector<Target>{*selected_game} : targets;
+  PrepareLibrary(paths, *dash, installed_targets);
+  // Registration and routing only: never spawn the dashboard or the game.
+  WorkspaceLease lease(paths);
+  CHECK(InspectLibrary(paths, *dash, installed_targets).empty());
+  const auto dashboard_receipt_after = DigestFile(PreparationReceipt(dash->exe));
+  REQUIRE(dashboard_receipt_after);
+  CHECK(dashboard_receipt_after->sha256 == dashboard_receipt->sha256);
+  if (selected_game) {
+    const auto game_receipt_after = DigestFile(PreparationReceipt(selected_game->exe));
+    REQUIRE(game_receipt_after);
+    CHECK(game_receipt_after->sha256 == game_receipt->sha256);
+    // Catalog metadata is sufficient for registration, as in the desktop's
+    // game preparation path. Only the full check certifies dashboard execution.
+    const auto dashboard = LoadSessionProfile(paths, dash->manifest, require_prepared_dashboard);
+    REQUIRE(std::find(dashboard.launch_targets.begin(), dashboard.launch_targets.end(),
+                      fs::canonical(selected_game->manifest)) != dashboard.launch_targets.end());
+    const auto game = LoadSessionProfile(paths, selected_game->manifest);
+    REQUIRE_FALSE(game.library_relative_xex.empty());
+    const auto installed = dashboard.user_root / game.library_relative_xex;
+    REQUIRE(fs::is_regular_file(installed));
+    LaunchRequest request; request.kind = LaunchRequest::Image;
+    request.path = PathUtf8(installed);
+    CHECK(MatchesLaunch(game, request, dashboard.user_root));
+    CHECK_FALSE(MatchesLaunch(game, request, dashboard.user_root / "other-dashboard"));
+    request.flags = 1;
+    CHECK_FALSE(MatchesLaunch(game, request, dashboard.user_root));
+    request.flags = 0; request.kind = LaunchRequest::WindowClose;
+    CHECK_FALSE(MatchesLaunch(game, request, dashboard.user_root));
+    const auto header = dashboard.user_root / "0000000000000000" /
+        selected_game->library.title_id / "Headers" / selected_game->library.content_type /
+        (selected_game->library.file_name + ".header");
+    CHECK(fs::file_size(header) == 0x148);
+    if (require_prepared_dashboard)
+      SUCCEED("Verified receipts, installed content/header and dashboard routing; no title executed.");
+    else
+      SUCCEED("Verified game receipt, registration and catalog routing only; dashboard execution not certified.");
+  }
+}
+}
+TEST_CASE("local isolated prepared environment installs original library dependencies", "[.local-prepared]") {
+  CheckLocalLibrary(true);
+}
+TEST_CASE("local prepared game registers into an imported dashboard without execution", "[.local-game-registration]") {
+  CheckLocalLibrary(false);
 }
