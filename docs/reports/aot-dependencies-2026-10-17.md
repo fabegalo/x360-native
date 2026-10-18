@@ -1,5 +1,11 @@
 # Preparação genérica de dependências AOT — 17/10/2026
 
+Atualização de 18/10: o bloqueio de labels do RuntimeHost e o link dos exports
+de câmera foram corrigidos genericamente. O Charlie completo agora possui
+build e recibo novos; execução XNA ainda não certificada.
+[Continuação, reprodução e validações](aot-ctr-dispatch-2026-10-17.md).
+Os resultados abaixo preservam o estado histórico desta investigação.
+
 Continuação do [relatório de descoberta](aot-discovery-2026-10-17.md).
 ReXGlue permanece em `f5337cdc947ff6d4c4196737e2c807a48f2a1fc2`, LLVM 22.1.8,
 agora com 88 patches ativos, até 0089 (0073 continua retirado). Sem mudança de renderer, stubs novos, push ou

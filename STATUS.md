@@ -1,6 +1,6 @@
 # STATUS
 
-Estado consolidado em **2026-10-17**; a referência funcional integrada é `1844245`.
+Estado consolidado em **2026-10-18**; a referência funcional integrada é `1844245`.
 Este arquivo resume o estado atual; os relatórios vinculados preservam datas,
 falhas iniciais, hashes, comandos e limites de cada validação. Resultados de uma
 etapa histórica não certificam automaticamente o build atual nem outros títulos.
@@ -39,12 +39,24 @@ registradas no relatório; não recertificam campanha, saves ou performance.
 Castle `0x820E15E8` foi reproduzido e investigado separadamente; seu hint original
 de produção permanece. [Análise](docs/reports/castle-tail-boundary-2026-10-17.md).
 
+Correção PPC posterior (17–18/10): patch 0090 deriva o domínio de destinos de
+despachos por byte sem adivinhar o tamanho da tabela, preserva casos fora do
+`.pdata` e protege entradas chamadas descobertas depois. O RuntimeHost e os
+32 módulos do Charlie agora compilam; recibo novo e registros nativos de
+HostLoader/RuntimeHost aprovados. Patch 0091 disponibiliza o contrato genérico
+de câmera ausente, com falha explícita, sem sucesso fictício. O codegen passou
+oito casos/271 asserções e 3.072 chamadas nativas sintéticas. Isso ainda não
+certifica execução XNA nem gameplay do Charlie. Iruka foi removido dos inputs
+pelo mantenedor e não foi restaurado. A validação visual seguinte fica para o
+teste manual solicitado pelo mantenedor, sem regressão automática de todo o acervo.
+[Diagnóstico, falhas preservadas e resultados](docs/reports/aot-ctr-dispatch-2026-10-17.md).
+
 ## Plataforma e dependências
 
 Windows x64/D3D12 é o ambiente demonstrado. Linux, macOS, ARM64 e Windows limpo
 continuam sem aceite funcional completo. ReXGlue v0.10.0 permanece fixado em
-`f5337cdc947ff6d4c4196737e2c807a48f2a1fc2`, LLVM 22.1.8, **88 patches ativos**
-no [lock](deps.lock.json); numeração até 0089, com 0073 retirado.
+`f5337cdc947ff6d4c4196737e2c807a48f2a1fc2`, LLVM 22.1.8, **90 patches ativos**
+no [lock](deps.lock.json); numeração até 0091, com 0073 retirado.
 O submódulo modificado pelos patches/materialização do libmspack é esperado.
 Nunca substituir módulos ou fontes originais entre versões de dashboard.
 
@@ -60,7 +72,7 @@ Nunca substituir módulos ou fontes originais entre versões de dashboard.
 | Motocross Madness | Tutorial com movimento/objetivos e serviço opt-in de avatares, integrado na main | Chão preto, piloto deformado; corridas, animações e save/load pendentes. [Avatares §15](docs/avatar-system.md#15-integração-na-main-2026-10-13) |
 | Iruka | Referência técnica com renderização/animação e regressão L1–L5 | Entrada, áudio, encerramento normal e sessões longas não validados. [Iruka](docs/reports/titles/validation-iruka.md) |
 | Retail 6717 | Build e observações históricas de blades/navegação | Fonte correspondente ausente e smoke posterior com crash; somente diagnóstico, sem sessão guiada. [Auditoria](docs/reports/maintenance/PROJECT_AUDIT.md) |
-| Biblioteca e preparação | Importação ISO/GDFX, STFS e pasta; catálogo persistente; AOT genérico com DLLs dependentes e recibos | Importado/compilado não significa jogável. HostLoader do Charlie compila/registra; RuntimeHost bloqueia o build completo. [Biblioteca](docs/guides/universal-library.md) |
+| Biblioteca e preparação | Importação ISO/GDFX, STFS e pasta; catálogo persistente; AOT genérico com DLLs dependentes e recibos | Importado/compilado não significa jogável. Charlie completo compila; HostLoader/RuntimeHost registram, sem novo aceite de execução. [Biblioteca](docs/guides/universal-library.md), [correção PPC](docs/reports/aot-ctr-dispatch-2026-10-17.md) |
 | Desktop | Interface Windows redesenhada, biblioteca, diagnóstico, seleção global de renderer e preferências | Windows limpo, acessibilidade e aceite completo de primeira utilização pendentes. [Interface](docs/guides/desktop-ui.md), [Preparação](docs/guides/desktop-preparation.md) |
 
 ## Renderização e performance
