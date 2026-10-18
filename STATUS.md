@@ -1,6 +1,6 @@
 # STATUS
 
-Estado consolidado em **2026-10-15**, após a integração `1844245`.
+Estado consolidado em **2026-10-17**; a referência funcional integrada é `1844245`.
 Este arquivo resume o estado atual; os relatórios vinculados preservam datas,
 falhas iniciais, hashes, comandos e limites de cada validação. Resultados de uma
 etapa histórica não certificam automaticamente o build atual nem outros títulos.
@@ -19,17 +19,32 @@ Iruka +2 entradas/32 bytes; Motocross +9 entradas/128 bytes, com cinco chamadas
 estáticas não resolvidas reduzidas a zero. Os corpos C++ previamente emitidos
 permaneceram idênticos; repetições de Iruka/Motocross foram determinísticas.
 120 asserções focadas aprovadas. O entry point `0x82163C60` pertence ao
-`HostLoader.dll` do Charlie e já é descoberto quando esse módulo é analisado;
-prepará-lo/registrá-lo no projeto genérico continua pendente. Não houve execução
-de jogo nem novo aceite funcional ou de performance.
+`HostLoader.dll` do Charlie e já é descoberto quando esse módulo é analisado.
+Não houve execução de jogo nessa etapa nem novo aceite funcional ou de performance.
 [Auditoria, corpus e limites](docs/reports/aot-discovery-2026-10-17.md).
+
+Dependências AOT (17/10/2026): preparação genérica agora descobre XEX DLL pelo
+conteúdo do inventário verificado, gera targets/registro e certifica seus inputs
+por hash. Patch 0089 permite despacho opt-in no host para imagens adjacentes,
+preservando bases originais e o caminho padrão dos perfis existentes.
+HostLoader compilado: 1.461 funções registradas, incluindo `0x82163C60`, com
+identidade/layout conferidos. O Charlie completo permanece sem recibo novo:
+o build do RuntimeHost falha em labels de um switch especulativo; execução do
+Charlie pelo My Games e gameplay XNA não estão validados.
+[Implementação, reprodução e limites](docs/reports/aot-dependencies-2026-10-17.md).
+Builds/recibos novos de Iruka, Motocross, Castle e 17559 aprovados. Smokes finais:
+Iruka 15 s; My Games → Castle/Moto → Guide → Home original na mesma janela.
+São regressões curtas de inicialização/retorno, com limitações de serviços SDK
+registradas no relatório; não recertificam campanha, saves ou performance.
+Castle `0x820E15E8` foi reproduzido e investigado separadamente; seu hint original
+de produção permanece. [Análise](docs/reports/castle-tail-boundary-2026-10-17.md).
 
 ## Plataforma e dependências
 
 Windows x64/D3D12 é o ambiente demonstrado. Linux, macOS, ARM64 e Windows limpo
 continuam sem aceite funcional completo. ReXGlue v0.10.0 permanece fixado em
-`f5337cdc947ff6d4c4196737e2c807a48f2a1fc2`, LLVM 22.1.8, **87 patches ativos**
-no [lock](deps.lock.json); numeração até 0088, com 0073 retirado.
+`f5337cdc947ff6d4c4196737e2c807a48f2a1fc2`, LLVM 22.1.8, **88 patches ativos**
+no [lock](deps.lock.json); numeração até 0089, com 0073 retirado.
 O submódulo modificado pelos patches/materialização do libmspack é esperado.
 Nunca substituir módulos ou fontes originais entre versões de dashboard.
 
@@ -45,7 +60,7 @@ Nunca substituir módulos ou fontes originais entre versões de dashboard.
 | Motocross Madness | Tutorial com movimento/objetivos e serviço opt-in de avatares, integrado na main | Chão preto, piloto deformado; corridas, animações e save/load pendentes. [Avatares §15](docs/avatar-system.md#15-integração-na-main-2026-10-13) |
 | Iruka | Referência técnica com renderização/animação e regressão L1–L5 | Entrada, áudio, encerramento normal e sessões longas não validados. [Iruka](docs/reports/titles/validation-iruka.md) |
 | Retail 6717 | Build e observações históricas de blades/navegação | Fonte correspondente ausente e smoke posterior com crash; somente diagnóstico, sem sessão guiada. [Auditoria](docs/reports/maintenance/PROJECT_AUDIT.md) |
-| Biblioteca e preparação | Importação ISO/GDFX, STFS e pasta; catálogo persistente; geração/build AOT genéricos e recibos | Importado/compilado não significa jogável. Charlie Murder para em função AOT ausente. [Biblioteca](docs/guides/universal-library.md) |
+| Biblioteca e preparação | Importação ISO/GDFX, STFS e pasta; catálogo persistente; AOT genérico com DLLs dependentes e recibos | Importado/compilado não significa jogável. HostLoader do Charlie compila/registra; RuntimeHost bloqueia o build completo. [Biblioteca](docs/guides/universal-library.md) |
 | Desktop | Interface Windows redesenhada, biblioteca, diagnóstico, seleção global de renderer e preferências | Windows limpo, acessibilidade e aceite completo de primeira utilização pendentes. [Interface](docs/guides/desktop-ui.md), [Preparação](docs/guides/desktop-preparation.md) |
 
 ## Renderização e performance

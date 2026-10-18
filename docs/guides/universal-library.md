@@ -255,3 +255,38 @@ projects, profiles, saves and preferences remain local. Updated sources may
 invalidate preparation receipts; preparing again is expected. C7/C8 and the
 67 pinned reproducible SDK patches are retained. A local candidate does not
 authorize a push or public Release.
+
+## Dependent AOT modules — 17 October 2026
+
+Generic preparation now inspects the verified imported inventory for XEX images,
+including files named `.dll`. Executable DLLs receive their own generated native
+targets and the SDK's module registry. Original relative guest paths, hashes,
+image bases and entry points are retained. Ambiguous or unsupported images fail
+preparation; there is no search in sibling installations or dashboard versions.
+Resource-only images require bounded metadata validation; a zero entry point
+alone does not exclude executable code. Optional analysis entries are selected
+by the original module's complete SHA-256 in `titles/common/module_analysis.toml`.
+
+Multi-module generic projects opt into the SDK's host function table for the
+entrypoint and DLLs, so auxiliary tables do not occupy the next original image.
+Existing single-module projects retain their previous dispatch mode. Receipts
+cover every declared original module, the generated project, native dependency
+closure and shared recipe. A guest XEX named `.dll` remains an input and is never
+staged as a native DLL. A partial build does not receive a success receipt.
+
+Charlie Murder's historical `0x82163C60` failure was reproduced in a frozen
+diagnostic copy. Its real HostLoader DLL now compiles and registers 1,461
+functions, including that entry point. The complete 32-image codegen succeeds,
+but the RuntimeHost C++ build fails on a speculative switch boundary. Charlie
+therefore remains incompletely prepared; My Games execution and XNA gameplay
+have not been validated. See the [implementation and evidence report](../reports/aot-dependencies-2026-10-17.md)
+and the separate [Castle boundary investigation](../reports/castle-tail-boundary-2026-10-17.md).
+
+Focused builds produced new receipts for Iruka, Motocross, Castle and 17559.
+The original My Games launched Castle and Motocross and both returned through
+the original Guide/Xbox Home confirmation. Old content folders without active
+headers still appear under hash names; attempting Charlie's old folder was
+refused with `no verified AOT profile`. No Charlie process started, and its
+inactive header was preserved. These short checks do not certify gameplay,
+commercial saves, complete XAM support or performance; detailed diagnostics and
+preservation hashes are in the report.
