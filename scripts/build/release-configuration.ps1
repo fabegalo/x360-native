@@ -7,7 +7,9 @@ function Test-ReleaseBuildConfiguration([string]$Build) {
 }
 function Assert-ReleaseCompileCommands($Commands, [switch]$NinjaGraph) {
     $count = 0
-    foreach ($entry in $Commands) {
+    # Windows PowerShell 5.1 emits a decoded JSON array as one pipeline item;
+    # @(... | ConvertFrom-Json) can therefore contain a nested array.
+    foreach ($entry in @($Commands | ForEach-Object { $_ })) {
         # Ninja's full compdb includes phony/custom edges whose first input can
         # be a .cpp. Only object/PCH producers are compiler evidence there.
         if ($NinjaGraph -and $entry.output -notmatch '\.(?:obj|o|pch|gch)$') { continue }

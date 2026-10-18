@@ -88,7 +88,7 @@ foreach($dep in $metadata.dependencies.PSObject.Properties) {
 }
 if(@($metadata.dependencies.PSObject.Properties).Count -ne @($inventory.desktop_dependencies).Count) { throw 'Missing build dependency identity' }
 $units=@()
-$compileCommands = @(Get-Content (Join-Path $package 'app/compile-commands.json') -Raw | ConvertFrom-Json)
+$compileCommands = @(Get-Content (Join-Path $package 'app/compile-commands.json') -Raw | ConvertFrom-Json | ForEach-Object { $_ })
 Assert-ReleaseCompileCommands $compileCommands
 foreach($command in $compileCommands) {
     $f=$command.file.Replace('\','/')

@@ -21,6 +21,12 @@ $rejected=$false
 try { Assert-ReleaseCompileCommands @(@{file='generated/title.cpp';output='title.cpp.obj';command='clang++ -O0 -c title.cpp'}) -NinjaGraph }
 catch { $rejected=$true }
 Assert $rejected 'Debug object accepted in full Ninja graph'
+$json='[{"file":"host.cpp","output":"host.cpp.obj","command":"clang++ -O3 -DNDEBUG -c host.cpp"}]'
+Assert-ReleaseCompileCommands @($json | ConvertFrom-Json) -NinjaGraph
+$rejected=$false
+try { Assert-ReleaseCompileCommands @($json.Replace('-O3','-O0') | ConvertFrom-Json) -NinjaGraph }
+catch { $rejected=$true }
+Assert $rejected 'Decoded nested JSON accepted a Debug object'
 $negative = @('', '-O0 -DNDEBUG', '-O3', '-O3 -DNDEBUG -D_DEBUG', '-O3 -DNDEBUG --dependent-lib=libcmtd',
     '-O3 -DNDEBUG /MDd', '-O3 -DNDEBUG -O2', '-O3 -DNDEBUG -D_ITERATOR_DEBUG_LEVEL=2',
     '-O3 -DNDEBUG -UNDEBUG', '-O3 -DNDEBUG --dependent-lib=libcpmtd', '-O3 -DNDEBUG -Og')
