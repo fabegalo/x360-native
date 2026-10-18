@@ -1224,7 +1224,7 @@
   },
   "files": {
     "include/rex/codegen/function_types.h": "98691be9bb440a786a7788158f3b08a781f2723faffd236029c4e70c5c6015d8",
-    "src/codegen/function_scanner.cpp": "a6a23f7cc730f6ceed23875d5e14c4d8d254afc70a03e3ccdadb6dd77c5c96a0",
+    "src/codegen/function_scanner.cpp": "583f1a89d0a62f23fbc5549db2808541ad05f894965292c38c10ed75b81a3c0d",
     "src/codegen/function_graph.cpp": "8b6df66b04ebdf665cb311a51c0abd19290eaa545e44f74863f29a2090ba8546",
     "src/codegen/builders/control_flow.cpp": "b71bf91c2c7feafc5dc5efb5f1e8d1307d788d850ac08a67e657b5d52c0ee829",
     "src/codegen/decoded_binary.h": "d790f56981a58b3e6b44d41a44cc59d7e64df37452342110342227ba4bb934b2",
@@ -1244,6 +1244,17 @@
     "src/kernel/xboxkrnl/xboxkrnl_usbcam.cpp": "fea30b5ea33f9c83ea1a27e4addd9855410da940e5b487ee5f474e2492f8275d"
   },
   "test": "tests/sdkcheck/usbcam_unavailable_test.ps1"
+},
+{
+  "file": "patches/rexglue-sdk/0092-guarded-byte-dispatch-domain.patch",
+  "sha256": "2281d5d693a1ba410af263c373ee5e754f65b90b5383059067c540ac3e27b7da",
+  "base_files": {
+    "src/codegen/function_scanner.cpp": "a6a23f7cc730f6ceed23875d5e14c4d8d254afc70a03e3ccdadb6dd77c5c96a0"
+  },
+  "files": {
+    "src/codegen/function_scanner.cpp": "583f1a89d0a62f23fbc5549db2808541ad05f894965292c38c10ed75b81a3c0d"
+  },
+  "test": "tests/sdkcheck/ctr_dispatch_test.cpp"
 }
                                     ]
                     },

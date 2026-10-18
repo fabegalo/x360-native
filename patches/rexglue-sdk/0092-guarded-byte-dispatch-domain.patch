@@ -1,0 +1,59 @@
+diff --git a/src/codegen/function_scanner.cpp b/src/codegen/function_scanner.cpp
+--- a/src/codegen/function_scanner.cpp
++++ b/src/codegen/function_scanner.cpp
+@@ -1421,12 +1421,55 @@ std::optional<JumpTable> detectByteDispatch(DecodedBinary& decoded, uint32_t bctr,
+   if (!value || value->opcode != Opcode::lbzx || value->X.RT != offsetReg)
+     return std::nullopt;
+ 
++  // A full byte domain is only a fallback. When a straight-line unsigned
++  // guard proves the table's extent, use its actual bytes. Otherwise unrelated
++  // neighboring leaf functions can be claimed as hypothetical local cases,
++  // preventing GapFill from registering their callable entries.
++  bool byteValues[256];
++  std::fill_n(byteValues, 256, true);
++  const auto* tableLow = previous();
++  const auto* tableHigh = previous();
++  const auto* guard = previous();
++  const auto* compare = previous();
++  if (tableLow && tableHigh && guard && compare &&
++      tableLow->opcode == Opcode::addi && tableLow->D.RT != 0 &&
++      tableLow->D.RA == tableLow->D.RT &&
++      tableHigh->opcode == Opcode::lis && tableHigh->D.RT == tableLow->D.RT &&
++      value->X.RA == tableLow->D.RT && value->X.RB != tableLow->D.RT &&
++      compare->opcode == Opcode::cmpli && compare->D.RA == value->X.RB &&
++      !(static_cast<uint32_t>(compare->code) & 0x00200000u) &&
++      (guard->opcode == Opcode::bc || guard->opcode == Opcode::bclr) &&
++      (guard->XL.BO & ~1u) == 12 && !guard->XL.LK &&
++      guard->XL.BI == ((static_cast<uint32_t>(compare->code) >> 23) & 7u) * 4 + 1) {
++    // Only the fall-through of bgt/bgtlr may reach the load. No preceding
++    // branch may bypass the compare or enter the matched suffix.
++    bool dominated = true;
++    for (uint32_t addr = start; addr < compare->address; addr += 4) {
++      const auto* prefix = decoded.get(addr);
++      if (!prefix || isBranch(*prefix)) { dominated = false; break; }
++    }
++    if (guard->opcode == Opcode::bc &&
++        (!guard->branch_target || (*guard->branch_target > compare->address &&
++                                  *guard->branch_target <= bctr)))
++      dominated = false;
++    const uint32_t table = (uint32_t(tableHigh->D.UIMM()) << 16) + tableLow->D.SIMM();
++    const uint32_t count = compare->D.UIMM() + 1;
++    if (dominated) {
++      if (const auto* bytes = decoded.rawData(table, count)) {
++        std::fill_n(byteValues, 256, false);
++        for (uint32_t index = 0; index < count; ++index)
++          byteValues[bytes[index]] = true;
++      }
++    }
++  }
++
+   JumpTable jt{};
+   jt.bctrAddress = bctr;
+   jt.dispatchByTarget = true;
+   // These are possible branch destinations derived from PPC semantics, not
+   // invented table entries. Never extend ownership into the next function.
+   for (uint32_t byte = 0; byte < 256; ++byte) {
++    if (!byteValues[byte]) continue;
+     const uint32_t rotated = shift ? (byte << shift) | (byte >> (32 - shift)) : byte;
+     const uint32_t target = (base + (rotated & mask)) & ~3u;
+     if (target >= start && target < end) {

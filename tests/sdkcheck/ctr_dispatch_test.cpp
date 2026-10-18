@@ -1,11 +1,73 @@
 #include <catch2/catch_test_macros.hpp>
 #include <rex/codegen/codegen.h>
 #include "synthetic_xex.h"
+#include <algorithm>
 #include <fstream>
 #include <regex>
 #include <set>
 
 using namespace x360n::test;
+
+TEST_CASE("Guarded byte dispatch leaves the following callback callable",
+          "[sdk][codegen][ctr-dispatch][bounded-byte-dispatch]") {
+  for (unsigned variant = 0; variant < 7; ++variant) {
+    CAPTURE(variant);
+    auto bytes = BuildXex({}, nullptr, 0, Entry::kReturnZero);
+    auto put = [&](uint32_t address, uint32_t word) {
+      for (unsigned i = 0; i < 4; ++i)
+        bytes.at(0x1000 + address - kXexBase + i) = uint8_t(word >> (24 - 8 * i));
+    };
+    uint32_t code[] = {
+        0x81630000, // lwz r11,0(r3)
+        0x2B0B0001, // cmplwi cr6,r11,1
+        0x4D990020, // bgtlr cr6
+        0x3D808200, 0x398C1080, // table inside the fixture's real .rdata section
+        0x7C0C58AE, 0x5400103A, // lbzx r0,r12,r11; slwi r0,r0,2
+        0x3D808201, 0x398C0030, // case base = 0x82010030
+        0x7D8C0214, 0x7D8903A6, 0x4E800420,
+        0x3860000B, 0x4E800020, // case 0: 11
+        0x38600016, 0x4E800020, // case 1: 22
+        0x38600021, 0x4E800020  // independent callback: 33
+    };
+    if (variant == 1) code[2] = 0x41990028; // bgt cr6,case 0
+    if (variant == 2) code[2] = 0x4D950020; // different CR field: no proven bound
+    if (variant == 3) code[1] = 0x2B0A0001; // different compared register
+    if (variant == 4) code[2] = 0x4C990020; // blelr permits indices above the limit
+    if (variant == 5) code[0] = 0x4800000C; // entry bypasses compare/guard
+    if (variant == 6) code[3] = 0x3D808100; // table bytes unavailable
+    for (unsigned i = 0; i < std::size(code); ++i) put(kXexText + i * 4, code[i]);
+    put(kXexPdata + 4, (1u << 30) | (12u << 8));
+    bytes.at(0x2080) = 0;
+    bytes.at(0x2081) = 2;
+    // Valid-looking bytes following the *proven* two slots must not expand
+    // ownership over a separate frameless callback, which has no PDATA or BL.
+    for (unsigned i = 2; i < 64; ++i) bytes.at(0x2080 + i) = 4;
+    Workdir work("x360n_codegen", variant == 0 ? "bounded_byte" : "bounded_variants");
+    work.write("test.xex", bytes);
+    std::ofstream(work.dir / "test.toml") <<
+        "project_name='bounded_byte'\nfile_path='test.xex'\nout_directory_path='out'\n";
+    auto pipeline = rex::codegen::CodegenPipeline::Create(work.dir / "test.toml");
+    REQUIRE(pipeline);
+    REQUIRE(pipeline->RunAnalyze());
+    auto& ctx = pipeline->context();
+    const auto* node = ctx.graph.getFunction(kXexText);
+    REQUIRE(node);
+    REQUIRE(node->jumpTables().size() == 1);
+    const auto& table = node->jumpTables().front();
+    CHECK(table.dispatchByTarget);
+    if (variant < 2) {
+      CHECK(table.targets == std::vector<uint32_t>{kXexText + 48, kXexText + 56});
+      CHECK(node->end() == kXexText + 64);
+      REQUIRE(ctx.graph.isEntryPoint(kXexText + 64));
+      CHECK(ctx.graph.getFunction(kXexText + 64)->end() == kXexText + 72);
+    } else {
+      // A nearby compare alone proves nothing. Preserve the existing finite
+      // domain and runtime CTR dispatch when data flow/control flow is unknown.
+      CHECK(std::find(table.targets.begin(), table.targets.end(), kXexText + 64) != table.targets.end());
+    }
+    REQUIRE(pipeline->RunWrite());
+  }
+}
 
 TEST_CASE("Byte computed dispatch preserves CTR without guessing table length",
           "[sdk][codegen][ctr-dispatch]") {

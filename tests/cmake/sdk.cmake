@@ -35,6 +35,27 @@ target_compile_options(x360n_ctr_dispatch_native PRIVATE -msse4.1
     -UTRACY_ENABLE -UREXGLUE_ENABLE_PROFILING -UREXGLUE_ENABLE_PERF_COUNTERS)
 x360n_stage_runtime_dlls(x360n_ctr_dispatch_native)
 
+set(bounded_fixture "${CMAKE_CURRENT_BINARY_DIR}/bounded_fixture")
+set(bounded_generated "${bounded_fixture}/x360n_codegen/bounded_byte/out")
+add_custom_command(
+    OUTPUT "${bounded_generated}/bounded_byte_recomp.0.cpp" "${bounded_generated}/bounded_byte_init.cpp"
+    COMMAND ${CMAKE_COMMAND} -E make_directory "${bounded_fixture}"
+    COMMAND ${CMAKE_COMMAND} -E env "TEMP=${bounded_fixture}" "TMP=${bounded_fixture}"
+        X360N_KEEP_TEST_DIRS=1 $<TARGET_FILE:x360n_sdk_checks>
+        "Guarded byte dispatch leaves the following callback callable"
+    DEPENDS x360n_sdk_checks
+    VERBATIM)
+add_executable(x360n_bounded_byte_native EXCLUDE_FROM_ALL
+    sdkcheck/bounded_byte_native.cpp "${bounded_generated}/bounded_byte_recomp.0.cpp"
+    "${bounded_generated}/bounded_byte_init.cpp")
+target_include_directories(x360n_bounded_byte_native PRIVATE "${bounded_generated}")
+target_compile_definitions(x360n_bounded_byte_native PRIVATE REX_HOST_FUNCTION_TABLE=1
+    X360N_BOUNDED_FIXTURE="${bounded_fixture}/x360n_codegen/bounded_byte")
+target_link_libraries(x360n_bounded_byte_native PRIVATE rexruntime simde x360n_ppc_options)
+target_compile_options(x360n_bounded_byte_native PRIVATE -msse4.1
+    -UTRACY_ENABLE -UREXGLUE_ENABLE_PROFILING -UREXGLUE_ENABLE_PERF_COUNTERS)
+x360n_stage_runtime_dlls(x360n_bounded_byte_native)
+
 add_executable(x360n_usbcam_unavailable_checks sdkcheck/usbcam_unavailable_probe.cpp)
 target_link_libraries(x360n_usbcam_unavailable_checks PRIVATE rexruntime)
 x360n_stage_runtime_dlls(x360n_usbcam_unavailable_checks)

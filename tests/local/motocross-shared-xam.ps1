@@ -43,6 +43,16 @@ $output | ForEach-Object { Write-Host $_ }
 $summary = $output | Where-Object { $_ -match '^run: .* report (.+report\.json)$' } | Select-Object -Last 1
 if (-not $summary) { Write-Host 'FAIL: no supervisor report'; exit 1 }
 $report = ($summary -replace '^run: .* report ', '').Trim()
+$record = Get-Content -LiteralPath $report -Raw | ConvertFrom-Json
+# A late crash after READY/Guide is still a failure. This no-input run must
+# remain alive until the supervisor's explicit bound, not merely log milestones.
+if (-not $record.result.launched -or -not $record.result.timed_out -or
+    $record.result.cancelled -or $record.result.duration_ms -lt ($Seconds * 1000) -or
+    $record.diagnostics.critical_lines -ne 0 -or
+    @($record.diagnostics.unregistered_calls.PSObject.Properties).Count -ne 0) {
+  Write-Host "FAIL: title did not survive the bounded run without a fatal/unregistered call: $report"
+  exit 1
+}
 $log = Join-Path (Split-Path $report) 'rex.log'
 }
 $lines = Get-Content -LiteralPath $log
