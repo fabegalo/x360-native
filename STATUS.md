@@ -65,6 +65,17 @@ Seis ciclos com duas filhas sucessivas e joystick virtual passaram (89 asserçõ
 frontend Debug separado recompilado. Sem alteração no SDK/renderer ou repetição
 do acervo. [Reprodução, correção e limites](docs/reports/session-focus-2026-10-18.md).
 
+Motocross (18/10): patch 0092 usa o limite demonstrado pelo PPC para restringir
+o domínio de switches por byte e preservar callbacks adjacentes. A entrada
+`0x82B36410` voltou ao registro, sem remover entradas anteriores. Nove casos/354
+asserções, 3.072 chamadas nativas anteriores e 18 chamadas pelo registro gerado
+passaram; builds/recibos de Motocross e da dependência 17559 foram publicados.
+O smoke sem perfil superou a falha original e chegou a avatar READY, mas caiu
+em signin 17559 após 8,6 s (`0x90116C88`). A confirmação com cópia do perfil foi
+recusada antes de abrir por alteração paralela de um input do recibo. O usuário
+confirmou a questão do perfil e pediu finalizar; sem nova sessão, rebuild ou
+aceite de gameplay/My Games. [Evidência e limites](docs/reports/motocross-callable-regression-2026-10-18.md).
+
 ## Plataforma e dependências
 
 Windows x64/D3D12 é o ambiente demonstrado. Linux, macOS, ARM64 e Windows limpo
