@@ -279,13 +279,15 @@ sessão de jogo nem ampliação de aceite de performance nessa integração.
 são históricos, não a contagem de uma execução nova.
 [Auditoria E11](docs/reports/maintenance/PROJECT_AUDIT.md#e11-c9c12--ambiente-dos-testes-e-sessões-contínuas--13102026).
 
-Prévia pública mais recente conferida em 18/10 pela API GitHub:
-**v0.1.0-preview.21**, publicada em 16/10 às 05:50:07 UTC, com ZIP e SHA-256.
-A main inclui trabalho posterior que não foi publicado nesse pacote. A conferência
-foi de metadados, sem recertificar/download do ZIP. Nenhuma nova Release resulta
-desta auditoria. [Release existente](https://github.com/fabegalo/x360-native/releases/tag/v0.1.0-preview.21),
-[notas](docs/releases/0.1.0-preview.21.md),
-[primeira Release](docs/reports/maintenance/FIRST_RELEASE.md), [automação](docs/guides/release-automation.md).
+Distribuição de 18/10: a prévia **v0.1.0-preview.22** consolida as melhorias
+de catálogo, builds, preparação, preflight e diagnósticos de runtime posteriores
+à [preview.21](https://github.com/fabegalo/x360-native/releases/tag/v0.1.0-preview.21).
+A publicação automatizada depende de build hospedado Windows x64, testes focados,
+verificações de licenças, hashes e integridade do ZIP. A Release do desktop
+não estabelece aceite de gameplay, XNA, save/load ou primeira utilização em
+Windows limpo. [Release preview.22](https://github.com/fabegalo/x360-native/releases/tag/v0.1.0-preview.22),
+[notas](docs/releases/0.1.0-preview.22.md),
+[automação](docs/guides/release-automation.md).
 
 ## Prioridades e preservação
 

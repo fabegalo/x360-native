@@ -34,22 +34,32 @@ The project also works to run the **original Xbox 360 dashboard** as its own tar
 
 ## Current status · 18 October 2026
 
-The primary demonstrated configuration is **Windows x64 with the Xenos D3D12 graphics backend**. Other operating systems and CPU architectures are goals, not supported releases. The source tree has newer work than the published preview; a recorded result does not automatically certify a new build or a different content dump.
+The primary demonstrated configuration is **Windows x64 with the Xenos D3D12 graphics backend**. Other operating systems and CPU architectures are goals, not supported releases. Recorded compatibility observations refer to specific source revisions and local tests; the published package does not automatically certify the same behavior on every Windows system or content dump.
 
 | Target | What has been demonstrated | What is still missing |
 |---|---|---|
-| **Retail Dashboard 17559 (Metro)** | Original boot intro with audio, dashboard text and navigation, My Games, local profile flows, and return from tested games. | Many system services and settings remain partial. Only one active local user in slot 0. |
+| **Retail Dashboard 17559 (Metro)** | Original intro/audio, navigation, My Games, local profile flows and return from tested games; a bounded runtime smoke recorded GPU swaps on 18 October. | Several system services/settings are partial. A swap alone does not certify a visible frame; only one active local user in slot 0. |
 | **Retail Dashboard 6717 (Blades)** | Builds; historical navigation observations. | Matching font/resource is missing and a later smoke crashed. Diagnostic target only; no guided compatibility session. |
 | **Castle Crashers 0.0.1.3** | Original launch from 17559, menu/input/rendering observations, and return to the dashboard. | Campaign, commercial entitlement, and game save/load are not certified. |
 | **Forza Horizon 0.0.0.10** | Driving with input and audio, then Guide/Xbox Home return to 17559. | Campaign and save/load are not certified; later renderer experiments do not inherit production compatibility. |
-| **Motocross Madness 0.0.0.3** | Historical tutorial movement and objectives; terrain/vertex corrections recorded on 16 October. AOT callback and 17559 dependency contracts verified on 18 October. | New sign-in callback fix needs a manual My Games run with an existing profile. Full races, graphics fidelity and save/load remain unvalidated. |
+| **Motocross Madness 0.0.0.3** | Historical tutorial movement/objectives; terrain/rider fixes, restored AOT callback and original 17559 sign-in callback; bounded runtime smoke recorded swaps. | Complete My Games/profile/Guide flow, graphics fidelity, full races and commercial save/load are not certified. |
 | **Iruka / Dolphin sample (historical)** | Rendering and animation regression checks. | Removed from local inputs by the maintainer on 18 October. Input, audio, normal shutdown, and long sessions remain unvalidated. |
-| **Charlie Murder 0.0.0.2** | Official AOT preparation; all 31 native DLL registrations, receipts and My Games registration/routing verified without running the game. | XNA execution and gameplay require manual acceptance. Not certified playable. |
+| **Charlie Murder 0.0.0.2** | AOT preparation, 31 native DLL registrations and My Games routing verified. An isolated session reached HostLoader, RuntimeHost and NetCF bootstrap, then returned to the dashboard. | XNA initialization, rendering, input, Guide, gameplay and saves remain unvalidated; NetCF PTE mapping blocker documented. |
 | **Native D3D12 renderer** | Experimental dashboard/game flows were observed. | Development is suspended; performance is not approved, an occlusion query is missing, and Vulkan is unavailable. Xenos results do not transfer to Native. |
 
 **No listed game is certified as Playable or Fully Functional.** A short launch, a successful build, or reaching a menu does not establish complete gameplay, progression, saves, or overall compatibility. The detailed [compatibility matrix](docs/compatibility.md) and dated [project status](STATUS.md) contain evidence and qualifications.
 
 The [18 October audit closure](docs/reports/audit-closure-2026-10-18.md) records incremental rebuild measurements, product integrity and the remaining manual acceptance checks. No game sessions or new release were produced by that audit.
+
+### Engineering progress since preview.21
+
+- **Launcher responsiveness:** listing the same local collection no longer hashes all its content, improving from about 84–85 seconds to 5.98 seconds. Native session closure is reflected without a full catalog rescan.
+- **Authenticated preparation:** safe incremental AOT/native reuse and reduced CMake/codegen work. One measured full 17559 build improved from 703.12 to 552.65 seconds (21.4%); four no-op preparations improved by 31.7–33.0%. Some incremental builds remain expensive.
+- **Protected launch preflight:** on the tested warm-cache collection, verification before process creation improved from 31.27 to 19.35 seconds (17559), 9.27 to 7.74 (Charlie), 10.91 to 7.98 (Motocross) and 8.12 to 6.88 (Castle). Full SHA-256 is still mandatory; 17559 reads about 22 GB.
+- **Runtime and AOT validation:** bounded smokes recorded GPU swaps for 17559, Motocross and Castle. Charlie returned after NetCF bootstrap without XNA certification. No first-visible-frame or gameplay benchmark is claimed.
+
+See [launcher performance](docs/reports/launcher-performance-2026-10-18.md), [preparation benchmarks](docs/reports/preparation-startup-2026-10-18.md), [preflight evidence](docs/reports/startup-preflight-2026-10-18.md), [Charlie functional limits](docs/reports/charlie-functional-2026-10-18.md) and [NetCF diagnosis](docs/reports/charlie-netcf-2026-10-18.md).
+
 
 ### What the compatibility labels mean
 
@@ -95,9 +105,9 @@ More detail: [architecture and decisions](docs/architecture.md), [universal libr
 
 ## Download and try the preview
 
-**[Download the experimental Windows x64 preview](https://github.com/fabegalo/x360-native/releases/tag/v0.1.0-preview.21).** `v0.1.0-preview.21`, published on 16 October, is a technical preview, not a general compatibility release. It predates the current source audit. A clean Windows first-use experience is not fully validated.
+**[Download the experimental Windows x64 preview](https://github.com/fabegalo/x360-native/releases/tag/v0.1.0-preview.22).** v0.1.0-preview.22 is a technical preview, not a general compatibility release. It contains the desktop app, not proprietary Xbox content, game binaries or the complete build toolchain. Clean Windows first-use is unverified.
 
-1. Download the Windows x64 application ZIP and its published SHA-256 file from the [preview page](https://github.com/fabegalo/x360-native/releases/tag/v0.1.0-preview.21). Do not use GitHub’s “Source code” archives as the app.
+1. Download the Windows x64 application ZIP and matching SHA-256 checksum from the [preview.22 Release page](https://github.com/fabegalo/x360-native/releases/tag/v0.1.0-preview.22). GitHub's automatic “Source code” archives are not the application.
 2. Extract the complete ZIP and run `x360-native.exe`. Keep its `data/` folder: it stores the local environment, imported content, preparations, and settings.
 3. In the app, import dashboard files and games that you are authorized to use. The app identifies them and reports missing or unsupported components.
 4. Prepare a supported dashboard and any game you want to try. The app obtains pinned tools with consent and compiles locally; additional Microsoft C++ build components may require their official installer.
