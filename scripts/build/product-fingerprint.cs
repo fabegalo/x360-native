@@ -13,6 +13,10 @@ public sealed class X360NProduct {
     public string signature { get; set; }
     public string sha256 { get; set; }
 }
+public sealed class X360NReceiptEntry {
+    public string path { get; set; }
+    public string sha256 { get; set; }
+}
 public sealed class X360NProducts : IDisposable {
     static readonly StringComparer Comparer = StringComparer.OrdinalIgnoreCase;
     readonly Dictionary<string, string> hashes = new Dictionary<string, string>(Comparer);
@@ -23,6 +27,38 @@ public sealed class X360NProducts : IDisposable {
     readonly List<FileStream> readers = new List<FileStream>();
     readonly byte[] buffer = new byte[1048576];
     readonly bool windows = Environment.OSVersion.Platform == PlatformID.Win32NT;
+    // Framework exposes CNG through System.Core; newer .NET uses its native
+    // SHA256 implementation. Avoid a compile-time dependency on the former.
+    static readonly Type cng = Type.GetType("System.Security.Cryptography.SHA256Cng, System.Core", false);
+    static string HashStream(Stream stream, byte[] buffer) {
+        using (SHA256 sha = Environment.OSVersion.Platform == PlatformID.Win32NT && cng != null
+            ? (SHA256)Activator.CreateInstance(cng) : SHA256.Create()) {
+            int count;
+            while ((count = stream.Read(buffer, 0, buffer.Length)) != 0) sha.TransformBlock(buffer, 0, count, null, 0);
+            sha.TransformFinalBlock(buffer, 0, 0);
+            return Hex(sha.Hash);
+        }
+    }
+    public static X360NReceiptEntry[] ReceiptEntries(string[] files) {
+        var result = new List<X360NReceiptEntry>(); var buffer = new byte[1048576];
+        foreach (string file in files) {
+            string path = Path.GetFullPath(file);
+            using (var stream = File.OpenRead(Io(path))) result.Add(new X360NReceiptEntry { path = path, sha256 = HashStream(stream, buffer) });
+        }
+        return result.ToArray();
+    }
+    public static bool VerifyReceipt(string[] files, string[] expected) {
+        if (files.Length != expected.Length) return false;
+        var buffer = new byte[1048576];
+        for (int i = 0; i < files.Length; ++i) {
+            string path = Io(files[i]);
+            if (!File.Exists(path)) return false;
+            // No approval/hash cache here: read every file on every call,
+            // holding its read handle against writes for that entire read.
+            using (var stream = File.OpenRead(path)) if (!Comparer.Equals(HashStream(stream, buffer), expected[i])) return false;
+        }
+        return true;
+    }
     [StructLayout(LayoutKind.Sequential)]
     struct FileInfo {
         public uint Attributes, CreationLow, CreationHigh, AccessLow, AccessHigh, WriteLow, WriteHigh;
@@ -114,15 +150,10 @@ public sealed class X360NProducts : IDisposable {
                 if (info.IndexHigh != 0 || info.IndexLow != 0) key = info.Volume + ":" + info.IndexHigh + ":" + info.IndexLow;
                 if (key != null && hashes.TryGetValue(key, out cached)) { if (pinned) paths[path] = cached; return cached; }
             }
-            using (SHA256 sha = windows ? (SHA256)new SHA256Cng() : SHA256.Create()) {
-                int count;
-                while ((count = stream.Read(buffer, 0, buffer.Length)) != 0) sha.TransformBlock(buffer, 0, count, null, 0);
-                sha.TransformFinalBlock(buffer, 0, 0);
-                string result = Hex(sha.Hash);
-                if (key != null) { hashes.Add(key, result); readers.Add(stream); stream = null; }
-                if (pinned && key != null) paths[path] = result;
-                return result;
-            }
+            string result = HashStream(stream, buffer);
+            if (key != null) { hashes.Add(key, result); readers.Add(stream); stream = null; }
+            if (pinned && key != null) paths[path] = result;
+            return result;
         } finally { if (stream != null) stream.Dispose(); }
     }
     public void Dispose() {

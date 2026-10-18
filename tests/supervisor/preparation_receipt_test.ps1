@@ -3,6 +3,9 @@ $ErrorActionPreference = 'Stop'
 $env:PSModulePath = Join-Path $PSHOME 'Modules'
 if (-not $ReceiptScript) { $ReceiptScript = "$Root/scripts/build/preparation-receipt.ps1" }
 . $ReceiptScript
+if ([IO.Path]::GetFullPath($ReceiptScript) -eq [IO.Path]::GetFullPath("$Root/scripts/build/preparation-receipt.ps1")) {
+    . "$Root/scripts/build/incremental-state.ps1"
+}
 $scratch = Join-Path ([IO.Path]::GetTempPath()) ("x360n-receipt-" + [Guid]::NewGuid().ToString('N'))
 [void][IO.Directory]::CreateDirectory($scratch)
 function Assert($Condition, [string]$Message) { if (-not $Condition) { throw $Message } }
@@ -16,6 +19,20 @@ try {
         try { $expected = ([BitConverter]::ToString($reference.ComputeHash($data))).Replace('-', '').ToLowerInvariant() }
         finally { $reference.Dispose() }
         Assert ((Get-ReceiptHash $vector) -eq $expected) "SHA-256 streaming boundary differs at $size bytes"
+        $entry = @(Get-ReceiptEntries @($vector))
+        Assert ($entry.Count -eq 1 -and $entry[0].sha256 -eq $expected) "Compiled SHA-256 differs at $size bytes"
+        Assert (Test-ReceiptEntries $entry) "Compiled receipt verification differs at $size bytes"
+    }
+    if (Test-Path Function:\Initialize-ProductFingerprints) {
+        $originalHelper = $script:X360NProductFingerprintSource
+        $changedHelper = Join-Path $scratch 'changed-helper.cs'
+        [IO.File]::WriteAllText($changedHelper, [IO.File]::ReadAllText($originalHelper) + "`n// changed source identity")
+        $rejected = $false
+        try { $script:X360NProductFingerprintSource = $changedHelper; Initialize-ProductFingerprints }
+        catch { $rejected = $_.Exception.Message -like '*start a new host*' }
+        finally { $script:X360NProductFingerprintSource = $originalHelper }
+        Assert $rejected 'stale compiled helper accepted in the same host'
+        Assert (Test-ReceiptEntries $entry) 'restored helper identity rejected'
     }
     $project = Join-Path $scratch 'project with spaces'
     $generated = Join-Path $project 'generated/default'

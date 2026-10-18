@@ -15,6 +15,7 @@ param(
     [switch]$KeepIncompleteMarker
 )
 $ErrorActionPreference = 'Stop'
+if ($env:X360N_PREPARATION_DIAGNOSTICS -eq '1') { $VerbosePreference = 'Continue' }
 # Preparation uses only modules shipped with the selected PowerShell host.
 $env:PSModulePath = Join-Path $PSHOME 'Modules'
 # Ninja emits UTF-8 dependency paths, including on Windows PowerShell 5.1.

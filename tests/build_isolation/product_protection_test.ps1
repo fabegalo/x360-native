@@ -9,6 +9,9 @@ $file = Join-Path $directory 'input.bin'
 $digest = [X360NProducts].GetMethod('Digest', [Reflection.BindingFlags]'Instance,NonPublic')
 function Assert($Condition, [string]$Message) { if (-not $Condition) { throw $Message } }
 try {
+    $entries = [X360NProducts]::ReceiptEntries([string[]]@($file))
+    Assert ([X360NProducts]::VerifyReceipt([string[]]@($file), [string[]]@($entries[0].sha256))) 'compiled receipt rejected unchanged file'
+    Assert (-not [X360NProducts]::VerifyReceipt([string[]]@("$file-missing"), [string[]]@($entries[0].sha256))) 'compiled receipt accepted missing file'
     $batch = [X360NProducts]::new()
     try {
         $before = $digest.Invoke($batch, [string[]]@($file))
@@ -24,6 +27,7 @@ try {
     $file = Join-Path "$directory-moved" 'input.bin'
     $time = [IO.File]::GetLastWriteTimeUtc($file)
     [IO.File]::WriteAllText($file, 'other'); [IO.File]::SetLastWriteTimeUtc($file, $time)
+    Assert (-not [X360NProducts]::VerifyReceipt([string[]]@($file), [string[]]@($entries[0].sha256))) 'compiled receipt cached approval after same-mtime edit'
     $batch = [X360NProducts]::new()
     try { Assert ($digest.Invoke($batch, [string[]]@($file)) -ne $before) 'same-mtime edit reused across transactions' }
     finally { $batch.Dispose() }

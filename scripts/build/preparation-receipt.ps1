@@ -23,8 +23,9 @@ function Get-ReceiptHash([string]$File) {
     # HashAlgorithm.ComputeHash(Stream) feeds CNG only 4 KiB at a time on .NET
     # Framework. Larger blocks reduce read/interop calls without caching hashes.
     if (-not $script:ReceiptHashBuffer) { $script:ReceiptHashBuffer = [byte[]]::new(1048576) }
-    $sha = if ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT) {
-        [Security.Cryptography.SHA256Cng]::new()
+    $cng = 'System.Security.Cryptography.SHA256Cng' -as [type]
+    $sha = if ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT -and $cng) {
+        [Activator]::CreateInstance($cng)
     } else { [Security.Cryptography.SHA256]::Create() }
     try {
         while (($count = $stream.Read($script:ReceiptHashBuffer, 0, $script:ReceiptHashBuffer.Length)) -gt 0) {
@@ -247,6 +248,11 @@ function Get-BuildInputs([string]$Root, [string]$Title, [string]$Build, [string[
     @($files | Sort-Object)
 }
 function Get-ReceiptEntries([string[]]$Files) {
+    if (Test-Path Function:\Initialize-ProductFingerprints) {
+        Initialize-ProductFingerprints
+        [X360NProducts]::ReceiptEntries($Files)
+        return
+    }
     foreach ($file in $Files) { [pscustomobject]@{ path = [IO.Path]::GetFullPath($file); sha256 = Get-ReceiptHash $file } }
 }
 function Test-VerifiedCodegen($Previous, [string]$Project, [string]$Build) {
@@ -338,26 +344,31 @@ function Test-ReceiptGlobs($Globs) {
     return $true
 }
 function Test-ReceiptEntries($Entries) {
+    if ($null -eq $Entries -or @($Entries).Count -eq 0) { return $true }
+    if (Test-Path Function:\Initialize-ProductFingerprints) {
+        Initialize-ProductFingerprints
+        return [X360NProducts]::VerifyReceipt([string[]]@($Entries.path), [string[]]@($Entries.sha256))
+    }
     foreach ($entry in $Entries) {
         if (-not (Test-BuildFile $entry.path) -or (Get-ReceiptHash $entry.path) -ne $entry.sha256) { return $false }
     }
     return $true
 }
 function Get-PreviousReceipt([string]$File, [string]$Title, [string]$Manifest, [string]$Exe) {
-    if (-not [IO.File]::Exists($File)) { return $null }
+    if (-not [IO.File]::Exists($File)) { Write-Verbose 'Previous preparation receipt absent'; return $null }
     try {
         $r = [IO.File]::ReadAllText($File) | ConvertFrom-Json
-        if ($r.schema -ne 1 -or $r.title -ne $Title -or $r.manifest -ne $Manifest -or $r.exe -ne $Exe -or -not $r.inputs -or -not $r.artifacts) { return $null }
+        if ($r.schema -ne 1 -or $r.title -ne $Title -or $r.manifest -ne $Manifest -or $r.exe -ne $Exe -or -not $r.inputs -or -not $r.artifacts) { Write-Verbose 'Previous receipt identity differs'; return $null }
         foreach ($required in @($Manifest, $r.roles.compiler, $r.roles.codegen, $r.roles.build_config)) {
-            if (-not $required -or [IO.Path]::GetFullPath($required) -notin @($r.inputs.path)) { return $null }
+            if (-not $required -or [IO.Path]::GetFullPath($required) -notin @($r.inputs.path)) { Write-Verbose "Previous receipt role absent: $required"; return $null }
         }
-        if ($Exe -notin @($r.artifacts.path)) { return $null }
+        if ($Exe -notin @($r.artifacts.path)) { Write-Verbose 'Previous executable artifact absent'; return $null }
         $registration = Join-Path (Split-Path $Manifest) 'preparation.toml'
-        if ([IO.File]::Exists($registration) -and $registration -notin @($r.inputs.path)) { return $null }
+        if ([IO.File]::Exists($registration) -and $registration -notin @($r.inputs.path)) { Write-Verbose 'Previous registration input absent'; return $null }
         $artifacts = @($Exe) + @(Get-ChildItem -LiteralPath (Split-Path $Exe) -Filter '*.dll' -File | ForEach-Object FullName)
-        if ((@($artifacts | Sort-Object) -join "`n") -ne (@($r.artifacts.path | Sort-Object) -join "`n")) { return $null }
+        if ((@($artifacts | Sort-Object) -join "`n") -ne (@($r.artifacts.path | Sort-Object) -join "`n")) { Write-Verbose 'Previous native DLL inventory differs'; return $null }
         return $r
-    } catch { return $null }
+    } catch { Write-Verbose "Previous receipt rejected: $($_.Exception.Message)"; return $null }
 }
 function Publish-PreparationReceipt([string]$File, $Receipt) {
     $temp = "$File.$([Guid]::NewGuid().ToString('N')).tmp"

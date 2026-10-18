@@ -98,7 +98,16 @@ function Get-IncrementalProducts([string]$Build) {
         [string[]]@($commands.command), [string[]]$libraries, [string[]]$resources)
 }
 function Initialize-ProductFingerprints {
-    if (-not ('X360NProducts' -as [type])) { Add-Type -Path $script:X360NProductFingerprintSource }
+    $identity = Get-ReceiptHash $script:X360NProductFingerprintSource
+    $domain = [AppDomain]::CurrentDomain
+    if ('X360NProducts' -as [type]) {
+        if ($domain.GetData('X360NProducts.source') -ne $identity) {
+            throw 'Fingerprint helper source changed in this PowerShell host; start a new host before preparing.'
+        }
+    } else {
+        Add-Type -Path $script:X360NProductFingerprintSource
+        $domain.SetData('X360NProducts.source', $identity)
+    }
 }
 function Get-IncrementalDatabase([string]$Build) {
     Get-ReceiptEntries @('build.ninja','CMakeFiles/rules.ninja','.ninja_deps','.ninja_log' | ForEach-Object { Join-Path $Build $_ })
@@ -109,29 +118,42 @@ function Test-FingerprintPolicyTransition($Old, $Current, [string]$Root, $Receip
     # include inventory and every other policy input must remain identical.
     # The caller still authenticates the checkpoint/database, then rehashes all
     # native products and recomputes all signatures before consuming them.
-    $known = @{
+    $legacy = @{
         'scripts/build-title.ps1'='24dc32959f876804387f934b3b49718db87facd995ec08efe755de6a4e0988dd'
         'scripts/build/incremental-state.ps1'='438e6eecac8bd3199155fd534a57935912bec24c817d83ef37574fe855ee43b9'
         'scripts/build/preparation-receipt.ps1'='03383e4edf99f84a77645ede3a0b3244d770a752a6fa5b7eed861b769d1bf408'
+    }
+    # f11faaa uses identical product signatures; this later transition only
+    # moves receipt loops into the same compiled, content-verified helper.
+    $compiled = @{
+        'scripts/build-title.ps1'='af68e9112a9df731877ae358cc65e60d3a8b91727df137fd89143e02f300b419'
+        'scripts/build/incremental-state.ps1'='a6ed6385306883251cbabfcd8cbfe494ea5e88c960714183652fdbd5e215a09d'
+        'scripts/build/preparation-receipt.ps1'='57a3ec59065d92fce079b9b726b24cb82bc7c4f5533a136013d0ad42d39e76bb'
+        'scripts/build/product-fingerprint.cs'='91606b61c4e41f59749d01ae8d962224c80f93e71de90f2967a48513377f3107'
     }
     $oldMap = @{}; $currentMap = @{}; $receiptMap = @{}; $allowed = @{}
     foreach ($entry in $Old) { if ($oldMap.ContainsKey($entry.path)) { return $false }; $oldMap[$entry.path] = $entry.sha256 }
     foreach ($entry in $Current) { if ($currentMap.ContainsKey($entry.path)) { return $false }; $currentMap[$entry.path] = $entry.sha256 }
     foreach ($entry in $ReceiptInputs) { $receiptMap[$entry.path] = $entry.sha256 }
-    foreach ($relative in $known.Keys) {
-        $path = [IO.Path]::GetFullPath((Join-Path $Root $relative))
-        if ($oldMap[$path] -ne $known[$relative] -or $receiptMap[$path] -ne $known[$relative] -or
-            -not $currentMap.ContainsKey($path)) { return $false }
-        $allowed[$path] = $true
-    }
     $helper = [IO.Path]::GetFullPath((Join-Path $Root 'scripts/build/product-fingerprint.cs'))
-    if ($oldMap.ContainsKey($helper) -or -not $currentMap.ContainsKey($helper) -or
-        $currentMap.Count -ne $oldMap.Count + 1) { return $false }
-    foreach ($path in $oldMap.Keys) {
-        if (-not $currentMap.ContainsKey($path) -or
-            (-not $allowed.ContainsKey($path) -and $oldMap[$path] -ne $currentMap[$path])) { return $false }
+    foreach ($known in @($legacy, $compiled)) {
+        $allowed = @{}; $match = $true
+        foreach ($relative in $known.Keys) {
+            $path = [IO.Path]::GetFullPath((Join-Path $Root $relative))
+            if ($oldMap[$path] -ne $known[$relative] -or $receiptMap[$path] -ne $known[$relative] -or
+                -not $currentMap.ContainsKey($path)) { $match = $false; break }
+            $allowed[$path] = $true
+        }
+        $added = if ($known.ContainsKey('scripts/build/product-fingerprint.cs')) { 0 } else { 1 }
+        if (-not $match -or -not $currentMap.ContainsKey($helper) -or
+            $oldMap.ContainsKey($helper) -ne ($added -eq 0) -or $currentMap.Count -ne $oldMap.Count + $added) { continue }
+        foreach ($path in $oldMap.Keys) {
+            if (-not $currentMap.ContainsKey($path) -or
+                (-not $allowed.ContainsKey($path) -and $oldMap[$path] -ne $currentMap[$path])) { $match = $false; break }
+        }
+        if ($match) { return $true }
     }
-    return $true
+    return $false
 }
 function Read-IncrementalState([string]$File, $Previous, [string]$Build, [string]$Title, [bool]$Interrupted, [string]$Root) {
     try {

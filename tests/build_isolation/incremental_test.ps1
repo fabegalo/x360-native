@@ -49,6 +49,17 @@ try {
     $compilerPolicy.sha256 = 'a'*64
     $oldPolicy[0].sha256 = 'e'*64
     Assert (-not (Test-FingerprintPolicyTransition $oldPolicy $currentPolicy $transitionRoot $oldPolicy)) 'transition accepted an unknown predecessor'
+    $compiledScripts = @{
+        'scripts/build-title.ps1'='af68e9112a9df731877ae358cc65e60d3a8b91727df137fd89143e02f300b419'
+        'scripts/build/incremental-state.ps1'='a6ed6385306883251cbabfcd8cbfe494ea5e88c960714183652fdbd5e215a09d'
+        'scripts/build/preparation-receipt.ps1'='57a3ec59065d92fce079b9b726b24cb82bc7c4f5533a136013d0ad42d39e76bb'
+        'scripts/build/product-fingerprint.cs'='91606b61c4e41f59749d01ae8d962224c80f93e71de90f2967a48513377f3107'
+    }
+    $oldCompiled = @($compiledScripts.Keys | ForEach-Object { [pscustomobject]@{path=(Join-Path $transitionRoot $_);sha256=$compiledScripts[$_]} })
+    $currentCompiled = @($oldCompiled | ForEach-Object { [pscustomobject]@{path=$_.path;sha256=('a'*64)} })
+    Assert (Test-FingerprintPolicyTransition $oldCompiled $currentCompiled $transitionRoot $oldCompiled) 'known compiled receipt transition rejected'
+    $oldCompiled[0].sha256 = 'f'*64
+    Assert (-not (Test-FingerprintPolicyTransition $oldCompiled $currentCompiled $transitionRoot $oldCompiled)) 'compiled transition accepted an unknown source'
     $longDirectory = Join-Path $scratch (('long-dependency-' * 7) + '/' + ('nested-header-' * 7))
     $longInput = Join-Path $longDirectory 'input.h'
     $extended = '\\?\' + [IO.Path]::GetFullPath($longDirectory)
