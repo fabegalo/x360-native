@@ -24,6 +24,13 @@ competitivo. Native N3 demonstrou dashboard e ciclo Castle em modo trial, mas
 continua lento; Forza Native não está certificado. [Resultados N3](reports/graphics/native-renderer-n3.md).
 P1/P2/P3 preservados.
 
+## Builds incrementais
+
+O driver de títulos reutiliza produtos certificados por conteúdo e dependências
+reais do Ninja. Configuração, codegen e compilação têm decisões separadas; estado
+inválido exige rebuild seguro. Metodologia, contagens, tempos e limites:
+[builds incrementais de 18/10/2026](reports/incremental-builds-2026-10-18.md).
+
 ## Instrumentação
 
 O patch 0070 reutiliza `rex::perf` e seu CSV. `perf_log_csv` passa a ser conectado

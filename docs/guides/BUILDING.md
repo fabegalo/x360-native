@@ -118,6 +118,20 @@ powershell -ExecutionPolicy Bypass -File scripts\build-title.ps1 -Title dash_175
 O script executa configure, build do gerador, codegen, reconfigure e build, interrompendo na primeira
 falha. Os executáveis ficam em `.local/build/titles/<nome>/`.
 
+Preparações já certificadas são reutilizadas por SHA-256. Nas demais, um checkpoint
+privado identifica objetos e produtos afetados pelos comandos, fontes e headers
+reais do Ninja; C++ e módulos AOT inalterados permanecem. Toolchain, SDK/patches,
+flags, inventários e originais fazem parte da invalidação. Estado inválido ou build
+interrompido exige reconstrução conservadora. Logs por tentativa usam
+`x360n-build-<etapa>.<id>.log`; o caminho exato aparece na saída do script e no
+marcador de erro. [Contratos, testes e medições](../reports/incremental-builds-2026-10-18.md).
+
+A configuração exige o mesmo inventário de arquivos CMake, incluindo remoções.
+Response files declarados nas regras Ninja são expandidos e rastreados; flags
+externas/aninhadas `@arquivo` que não forem expandidas são recusadas no preflight,
+inclusive quando vêm do ambiente. Declare seu conteúdo na regra Ninja; não
+desative a certificação para contornar o erro.
+
 Inicie a sessão pelo supervisor:
 
 ```powershell

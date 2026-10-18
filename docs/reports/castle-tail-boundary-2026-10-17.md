@@ -75,3 +75,15 @@ Evidência local nova: `.local/evidence/aot-dependencies-2026-10-17/`:
 switch: `.local/evidence/aot-discovery/`, preservados conforme
 [relatório anterior](aot-discovery-2026-10-17.md). O probe é diagnóstico de
 análise; seu exit 1 é falha esperada reproduzida, não aprovação de runtime.
+
+## Revisão sobre a main de 18/10/2026
+
+Com o pin e os 91 patches atuais, o driver oficial preparou o perfil de produção
+em 553,71 s (792 compilações de objetos, 11 PCH), com recibo novo. Análise usando
+o arquivo de hints real: 3.910 funções, 252.627 palavras, zero erros; adjustor,
+leaf e destinos adjacentes independentes, switch de 16 slots e entradas geradas
+conferidos. A retirada isolada do hint `0x820E15E8`, mantendo os outros metadados,
+reproduziu o mesmo UnresolvedCall: 3.908 funções, 252.610 palavras, um erro/exit 1.
+Essa limitação sem metadata não foi promovida a sucesso nem corrigida mediante
+uma heurística indiscriminada. Originais, hints e SDK preservados; nenhum jogo
+executado. [Produtos, hashes, comandos e limites do fechamento](audit-closure-2026-10-18.md).

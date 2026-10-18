@@ -1,9 +1,20 @@
 # STATUS
 
-Estado consolidado em **2026-10-18**; a referência funcional integrada é `1844245`.
+Estado consolidado em **2026-10-18**; a referência funcional integrada histórica é `1844245`.
 Este arquivo resume o estado atual; os relatórios vinculados preservam datas,
 falhas iniciais, hashes, comandos e limites de cada validação. Resultados de uma
 etapa histórica não certificam automaticamente o build atual nem outros títulos.
+
+Fechamento técnico sobre a `main` inicial `6be0c60`: `ead9ea3` corrige a
+invalidação de CMake removido; `d8088e6` recusa flags externas não rastreadas;
+`3c42190` verifica os registros reais das DLLs; `fa5730e` separa o callback
+original `0x90116C88` do sign-in 17559. Charlie foi restaurado pelo driver oficial:
+31 DLLs conferidas, 27.612 registros e registro/roteamento My Games aprovados.
+Motocross preservou 51.148 entradas, incluindo `0x82B36410`; o contrato de
+dependência 17559 passou, e uma cópia de perfil existente passou por duas ABIs
+de logon e restart sem alterar os perfis/saves originais. Sem executar jogos,
+Computer Use, push ou Release. Aceite pela interface, gameplay/save/load e
+Windows limpo continuam pendentes. [Relatório, commits e medições](docs/reports/audit-closure-2026-10-18.md).
 
 Reorganização estrutural de **17/10/2026**: código/testes, ferramentas, CMake,
 documentação e dados locais foram organizados por responsabilidade. Inputs agora
@@ -28,9 +39,10 @@ conteúdo do inventário verificado, gera targets/registro e certifica seus inpu
 por hash. Patch 0089 permite despacho opt-in no host para imagens adjacentes,
 preservando bases originais e o caminho padrão dos perfis existentes.
 HostLoader compilado: 1.461 funções registradas, incluindo `0x82163C60`, com
-identidade/layout conferidos. O Charlie completo permanece sem recibo novo:
-o build do RuntimeHost falha em labels de um switch especulativo; execução do
-Charlie pelo My Games e gameplay XNA não estão validados.
+identidade/layout conferidos. Naquela tentativa, o Charlie completo ficou sem
+recibo novo: o RuntimeHost falhou em labels de um switch especulativo. A falha
+de compilação foi superada pelas correções PPC abaixo e pelo fechamento atual;
+execução real pelo My Games e gameplay XNA continuam sem aceite.
 [Implementação, reprodução e limites](docs/reports/aot-dependencies-2026-10-17.md).
 Builds/recibos novos de Iruka, Motocross, Castle e 17559 aprovados. Smokes finais:
 Iruka 15 s; My Games → Castle/Moto → Guide → Home original na mesma janela.
@@ -55,8 +67,9 @@ Desktop (18/10): corrigida a escrita prematura do marcador de título incompleto
 quando o preflight de ferramentas falha por ambiente ocupado. O driver que
 possui as travas passa a ser responsável pelo marcador. Frontend Debug separado
 compilado; build/recibos de Charlie, Moto, Castle e 17559 aprovados. O registro
-final do Charlie na My Games continua pendente por trava ocupada. A fila de novas
-preparações foi adiada para os testes manuais; não há aceite dos dez diretórios.
+final do Charlie na My Games ficou pendente por trava ocupada naquela etapa;
+foi concluído pelo código oficial no fechamento técnico acima, sem executar o jogo.
+Não há aceite funcional dos dez diretórios.
 
 Foco da sessão (18/10): reproduzida a divergência entre foco nativo da filha e
 foco SDL após iniciar em segundo plano. O supervisor agora encaminha a ativação
@@ -73,8 +86,9 @@ passaram; builds/recibos de Motocross e da dependência 17559 foram publicados.
 O smoke sem perfil superou a falha original e chegou a avatar READY, mas caiu
 em signin 17559 após 8,6 s (`0x90116C88`). A confirmação com cópia do perfil foi
 recusada antes de abrir por alteração paralela de um input do recibo. O usuário
-confirmou a questão do perfil e pediu finalizar; sem nova sessão, rebuild ou
-aceite de gameplay/My Games. [Evidência e limites](docs/reports/motocross-callable-regression-2026-10-18.md).
+confirmou a questão do perfil e pediu finalizar aquela etapa. O fechamento atual
+recompilou os produtos e verificou os contratos em cópia do perfil; nova sessão
+pela My Games e gameplay continuam pendentes. [Evidência histórica](docs/reports/motocross-callable-regression-2026-10-18.md).
 
 ## Plataforma e dependências
 
@@ -94,10 +108,10 @@ Nunca substituir módulos ou fontes originais entre versões de dashboard.
 | Saves C8 | Isolamento por XUID/Title ID, flush e recuperação em processos independentes pelo caminho XAM → VFS → host | Testes de contratos; **save/load de progresso comercial ainda não comprovado**. [Armazenamento](docs/save-storage.md) |
 | Castle Crashers 0.0.1.3 | Ciclo original 17559 → My Games → jogo → 17559, mesma janela; entrada e cenas observadas no escopo registrado | Trial local; campanha, licença completa e save/load não certificados. [Histórico](docs/reports/titles/validation-castle-crashers.md), [Native N3](docs/reports/graphics/native-renderer-n3.md) |
 | Forza Horizon 0.0.0.10 | Ciclo My Games → condução → Guide/Xbox Home → 17559 com recibos em 14/10; perfil/entrada/áudio e retorno registrados | Campanha e saves não certificados. X2 repetiu o ciclo em harness isolado, sem recertificar o gate de preparação de produção. [Forza](docs/reports/titles/validation-forza-horizon.md), [X2](docs/reports/graphics/xenos-fetch-predication.md) |
-| Motocross Madness | Tutorial com movimento/objetivos e serviço opt-in de avatares, integrado na main | Chão preto, piloto deformado; corridas, animações e save/load pendentes. [Avatares §15](docs/avatar-system.md#15-integração-na-main-2026-10-13) |
+| Motocross Madness | Tutorial histórico; correções de terreno/piloto em 16/10. Callback AOT, dependência 17559 e perfil existente em cópia conferidos em 18/10 | Novo sign-in pela interface, corridas, fidelidade e save/load pendentes. [Avatares](docs/avatar-system.md), [fechamento](docs/reports/audit-closure-2026-10-18.md) |
 | Iruka (histórico) | Referência técnica com renderização/animação e regressão L1–L5 | Removido do acervo pelo mantenedor em 18/10; não restaurado. [Iruka](docs/reports/titles/validation-iruka.md) |
 | Retail 6717 | Build e observações históricas de blades/navegação | Fonte correspondente ausente e smoke posterior com crash; somente diagnóstico, sem sessão guiada. [Auditoria](docs/reports/maintenance/PROJECT_AUDIT.md) |
-| Biblioteca e preparação | Importação ISO/GDFX, STFS e pasta; catálogo persistente; AOT genérico com DLLs dependentes e recibos | Importado/compilado não significa jogável. Charlie completo compila; HostLoader/RuntimeHost registram, sem novo aceite de execução. [Biblioteca](docs/guides/universal-library.md), [correção PPC](docs/reports/aot-ctr-dispatch-2026-10-17.md) |
+| Biblioteca e preparação | Importação ISO/GDFX, STFS e pasta; catálogo persistente; Charlie com preparação oficial, 31 DLLs e registro/roteamento My Games conferidos | Importado/compilado não significa jogável. Execução XNA e gameplay do Charlie sem novo aceite. [Biblioteca](docs/guides/universal-library.md), [fechamento](docs/reports/audit-closure-2026-10-18.md) |
 | Desktop | Interface Windows redesenhada, biblioteca, diagnóstico, seleção global de renderer e preferências | Windows limpo, acessibilidade e aceite completo de primeira utilização pendentes. [Interface](docs/guides/desktop-ui.md), [Preparação](docs/guides/desktop-preparation.md) |
 
 ## Renderização e performance
@@ -188,9 +202,12 @@ sessão de jogo nem ampliação de aceite de performance nessa integração.
 são históricos, não a contagem de uma execução nova.
 [Auditoria E11](docs/reports/maintenance/PROJECT_AUDIT.md#e11-c9c12--ambiente-dos-testes-e-sessões-contínuas--13102026).
 
-Prévia pública mais recente conferida em 15/10: **v0.1.0-preview.20**, corrigida.
-A main inclui trabalho posterior que não foi publicado nesse pacote. Nenhuma
-nova Release resulta desta limpeza. [Notas](docs/releases/0.1.0-preview.20.md),
+Prévia pública mais recente conferida em 18/10 pela API GitHub:
+**v0.1.0-preview.21**, publicada em 16/10 às 05:50:07 UTC, com ZIP e SHA-256.
+A main inclui trabalho posterior que não foi publicado nesse pacote. A conferência
+foi de metadados, sem recertificar/download do ZIP. Nenhuma nova Release resulta
+desta auditoria. [Release existente](https://github.com/fabegalo/x360-native/releases/tag/v0.1.0-preview.21),
+[notas](docs/releases/0.1.0-preview.21.md),
 [primeira Release](docs/reports/maintenance/FIRST_RELEASE.md), [automação](docs/guides/release-automation.md).
 
 ## Prioridades e preservação

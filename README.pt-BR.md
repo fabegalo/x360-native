@@ -32,7 +32,7 @@ O projeto também busca executar a **dashboard original do Xbox 360** como um al
 
 <a id="estado-atual"></a>
 
-## Estado atual · 17 de outubro de 2026
+## Estado atual · 18 de outubro de 2026
 
 A configuração principal demonstrada é **Windows x64 com o backend gráfico Xenos D3D12**. Outros sistemas operacionais e arquiteturas são objetivos, não plataformas com suporte de distribuição. A árvore atual tem trabalho mais recente que a prévia publicada; um resultado registrado não certifica automaticamente um build novo ou outro dump de conteúdo.
 
@@ -42,12 +42,14 @@ A configuração principal demonstrada é **Windows x64 com o backend gráfico X
 | **Dashboard Retail 6717 (Blades)** | Compila; houve observações históricas de navegação. | Falta fonte/recurso correspondente e um smoke posterior sofreu crash. Alvo diagnóstico; sem sessão guiada de compatibilidade. |
 | **Castle Crashers 0.0.1.3** | Início original pela dashboard 17559, observação de menu/entrada/renderização e retorno à dashboard. | Campanha, licença comercial e save/load do jogo não estão certificados. |
 | **Forza Horizon 0.0.0.10** | Direção com entrada e áudio, seguida de retorno pelo Guide/Xbox Home à 17559. | Campanha e save/load não certificados; experimentos posteriores de renderer não herdam compatibilidade de produção. |
-| **Motocross Madness 0.0.0.3** | Movimento e objetivos no tutorial; serviço opt-in de avatares exercitado. | Terreno preto e piloto deformado; corridas completas e save/load não validados. |
-| **Amostra Iruka / Dolphin** | Verificações de regressão de renderização e animação. | Entrada, áudio, encerramento normal e sessões longas não validados. |
-| **Charlie Murder 0.0.0.2** | Importação, build AOT e início pela área My Games. | Para em uma função AOT ausente; não jogável. |
+| **Motocross Madness 0.0.0.3** | Movimento e objetivos no tutorial histórico; correções de terreno/vértices registradas em 16/10. Callback AOT e contratos da dependência 17559 verificados em 18/10. | A correção do callback de sign-in exige teste manual pela My Games com perfil existente. Corridas completas, fidelidade gráfica e save/load pendentes. |
+| **Amostra Iruka / Dolphin (histórico)** | Verificações de regressão de renderização e animação. | Removida dos inputs locais pelo mantenedor em 18/10. Entrada, áudio, encerramento normal e sessões longas continuam sem validação. |
+| **Charlie Murder 0.0.0.2** | Preparação AOT oficial; registros das 31 DLLs nativas, recibos e registro/roteamento My Games verificados sem executar o jogo. | Execução XNA e gameplay dependem de aceite manual. Sem certificação de jogabilidade. |
 | **Renderer Native D3D12** | Fluxos experimentais de dashboard/jogo foram observados. | Desenvolvimento suspenso; desempenho não aprovado, falta uma consulta de oclusão e Vulkan está indisponível. Resultados do Xenos não se aplicam ao Native. |
 
 **Nenhum jogo listado está certificado como Jogável ou Plenamente Funcional.** Um início breve, build bem-sucedido ou chegada a um menu não comprova gameplay completo, progressão, saves ou compatibilidade geral. A [matriz de compatibilidade](docs/compatibility.md) e o [estado do projeto](STATUS.md), com datas, registram as evidências e ressalvas detalhadas.
+
+O [fechamento da auditoria de 18/10](docs/reports/audit-closure-2026-10-18.md) registra medições incrementais, integridade dos produtos e aceites manuais restantes. Essa auditoria não executou jogos nem produziu nova Release.
 
 ### O que significam os estados de compatibilidade
 
@@ -93,9 +95,9 @@ Mais detalhes: [arquitetura e decisões](docs/architecture.md), [biblioteca e pr
 
 ## Baixe e experimente a prévia
 
-**[Baixe a prévia experimental para Windows x64](https://github.com/fabegalo/x360-native/releases/tag/v0.1.0-preview.20).** O pacote corrigido `v0.1.0-preview.20` é uma prévia técnica, não uma versão de compatibilidade geral. A primeira utilização em uma instalação limpa do Windows não foi validada por completo.
+**[Baixe a prévia experimental para Windows x64](https://github.com/fabegalo/x360-native/releases/tag/v0.1.0-preview.21).** `v0.1.0-preview.21`, publicada em 16/10, é uma prévia técnica, não uma versão de compatibilidade geral. O pacote antecede a auditoria atual dos fontes. A primeira utilização em uma instalação limpa do Windows não foi validada por completo.
 
-1. Baixe o ZIP do aplicativo Windows x64 e seu arquivo SHA-256 publicado na [página da prévia](https://github.com/fabegalo/x360-native/releases/tag/v0.1.0-preview.20). Não use os arquivos “Source code” do GitHub como aplicativo.
+1. Baixe o ZIP do aplicativo Windows x64 e seu arquivo SHA-256 publicado na [página da prévia](https://github.com/fabegalo/x360-native/releases/tag/v0.1.0-preview.21). Não use os arquivos “Source code” do GitHub como aplicativo.
 2. Extraia o ZIP inteiro e execute `x360-native.exe`. Preserve a pasta `data/`: ela armazena o ambiente local, conteúdo importado, preparações e configurações.
 3. No aplicativo, importe arquivos de dashboard e jogos que você esteja autorizado a usar. O programa os identifica e informa componentes ausentes ou sem suporte.
 4. Prepare uma dashboard compatível e os jogos que deseja experimentar. Com consentimento, o app obtém ferramentas fixadas e compila localmente; componentes adicionais de C++ da Microsoft podem exigir o instalador oficial.

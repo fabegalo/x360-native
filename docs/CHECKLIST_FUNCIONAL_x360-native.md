@@ -6,6 +6,13 @@ pública de `v0.1.0-preview.19`, após validar pacote e histórico. Os requisito
 de aceite amplo para leigos continuam como trabalho futuro, não como novos
 portões desta prévia. Windows limpo **não validado**. [Registro da Release](reports/maintenance/FIRST_RELEASE.md).
 
+**Revisão técnica em 18/10/2026:** invalidação incremental, preparação oficial do
+Charlie, registros nativos e contratos 17559/perfil existente verificados sem
+executar jogos. Isso não marca os aceites visuais ou comerciais abaixo como
+concluídos. [Relatório e testes](reports/audit-closure-2026-10-18.md).
+A prévia pública atual é [v0.1.0-preview.21](https://github.com/fabegalo/x360-native/releases/tag/v0.1.0-preview.21),
+publicada em 16/10; a referência à `.19` acima é histórica, da primeira publicação.
+
 **Objetivo:** escolher uma dashboard original → executar a intro correspondente → entrar em um perfil → listar e selecionar um jogo pela interface original → atender ao pedido original de lançamento → jogar → salvar → atender ao pedido original de retorno → voltar à mesma dashboard, sem repetir a intro.
 
 Windows x86-64 é o primeiro alvo funcional relatado, não uma restrição permanente. Windows, Linux e macOS são objetivos, com estado separado por sistema e arquitetura. Recompilação estática com ReXGlue; suporte progressivo a todas as versões originais de dashboard, incluindo antigas e betas, e ao catálogo de jogos Xbox 360.
@@ -290,9 +297,11 @@ os testes do serviço não promovem esse aceite. Evidências e limites:
 - [ ] Exibir cartão de jogador, histórico de jogos e conquistas locais reais.
 - [ ] Registrar conquistas emitidas pelo jogo, persistir o progresso e mostrar as notificações correspondentes.
 - [ ] Suportar avatares e sua edição nas versões em que existirem. Em 2026-10-13,
-  serviço original 17559 isolado levou Motocross ao tutorial; chão preto e piloto
-  deformado ainda impedem aprovação visual. Edição/persistência não validadas
-  ([evidência](avatar-system.md#14-servico-real-e-entrada-no-tutorial-2026-10-13)).
+  serviço original 17559 isolado levou Motocross ao tutorial. Terreno preto e
+  piloto deformado tiveram causas/correções registradas em 16/10; fidelidade,
+  edição/persistência e nova execução com perfil existente continuam pendentes
+  ([avatares](avatar-system.md#16-construtores-estáticos-do-xam-17559-2026-10-16),
+  [auditoria sem jogos de 18/10](reports/audit-closure-2026-10-18.md)).
 - [ ] Navegar no gerenciamento original de armazenamento e conteúdo.
 - [ ] Reproduzir música, fotos e vídeos locais nas interfaces e formatos que forem suportados por cada versão.
 - [ ] Implementar as opções de família/privacidade locais presentes, ou informar claramente as que ainda não têm efeito.

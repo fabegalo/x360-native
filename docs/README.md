@@ -18,6 +18,7 @@ Estado atual: [STATUS](../STATUS.md). Cobertura demonstrada e pendências:
 | Compatibilidade e validações de títulos | [Matriz](compatibility.md), [relatórios](reports/titles/) |
 | Gráficos e Guide | [Relatórios](reports/graphics/) |
 | Auditorias e integrações | [Relatórios](reports/maintenance/) |
+| Fechamento da auditoria de 18/10 | [Contratos, produtos e aceites pendentes](reports/audit-closure-2026-10-18.md), [builds incrementais](reports/incremental-builds-2026-10-18.md) |
 | Distribuição | [Automação](guides/release-automation.md), [notas](releases/) |
 
 `evidence/` conserva capturas e artefatos de evidência. `research/` contém
