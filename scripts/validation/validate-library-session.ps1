@@ -4,7 +4,8 @@
 # 'close' is test cleanup, NEVER evidence of an original title return.
 param(
     [Parameter(Mandatory)][string]$OutputDirectory,
-    [string]$Game = 'forza_horizon',
+    [string[]]$Game = @('forza_horizon'),
+    [string]$Supervisor = '.local/build/win-amd64/src/supervisor/Debug/x360n.exe',
     [ValidateRange(30,600)][int]$Seconds = 300,
     [switch]$SkipBootIntro
 )
@@ -12,7 +13,8 @@ $ErrorActionPreference='Stop'
 $root= (Resolve-Path (Join-Path $PSScriptRoot '../..')).Path
 $out=[IO.Path]::GetFullPath($OutputDirectory)
 if(-not $out.StartsWith((Join-Path $root '.local\evidence\validation\'),[StringComparison]::OrdinalIgnoreCase)) { throw 'Evidence must be under .local/evidence/validation' }
-if($Game -notmatch '^[a-z][a-z0-9_]*$') { throw 'Invalid game process name' }
+if(-not $Game.Count -or @($Game | Where-Object { $_ -notmatch '^[a-z][a-z0-9_]*$' }).Count) { throw 'Invalid game process name' }
+$allowedProcesses = @('dash_17559') + $Game
 New-Item -ItemType Directory -Force $out | Out-Null
 Add-Type -AssemblyName System.Drawing
 Add-Type @'
@@ -30,6 +32,26 @@ public static class CycleWindow {
  [DllImport("user32.dll")] public static extern bool PostMessage(IntPtr h,uint m,IntPtr w,IntPtr l);
  [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h,out Rect r);
  [DllImport("user32.dll")] public static extern bool PrintWindow(IntPtr h,IntPtr dc,uint flags);
+ [StructLayout(LayoutKind.Sequential,CharSet=CharSet.Unicode)] public struct ProcessEntry {
+  public uint size,usage,pid; public UIntPtr heap; public uint module,threads,parent;
+  public int priority; public uint flags;
+  [MarshalAs(UnmanagedType.ByValTStr,SizeConst=260)] public string name;
+ }
+ [DllImport("kernel32.dll")] static extern IntPtr CreateToolhelp32Snapshot(uint flags,uint pid);
+ [DllImport("kernel32.dll",CharSet=CharSet.Unicode)] static extern bool Process32FirstW(IntPtr h,ref ProcessEntry entry);
+ [DllImport("kernel32.dll",CharSet=CharSet.Unicode)] static extern bool Process32NextW(IntPtr h,ref ProcessEntry entry);
+ [DllImport("kernel32.dll")] static extern bool CloseHandle(IntPtr h);
+ public static bool Owned(int supervisor,int child) {
+  IntPtr snap=CreateToolhelp32Snapshot(2,0);
+  if(snap==new IntPtr(-1))return false;
+  try {
+   ProcessEntry e=new ProcessEntry();e.size=(uint)Marshal.SizeOf(typeof(ProcessEntry));
+   if(Process32FirstW(snap,ref e)) do {
+    if(e.pid==(uint)child)return e.parent==(uint)supervisor;
+   } while(Process32NextW(snap,ref e));
+   return false;
+  } finally {CloseHandle(snap);}
+ }
  public static IntPtr Find(int pid) {
   IntPtr found=IntPtr.Zero;
   Callback cb=(h,p)=>{uint owner;GetWindowThreadProcessId(h,out owner);if(owner==pid&&IsWindowVisible(h))found=h;return true;};
@@ -43,7 +65,7 @@ $keys=@{ A=@(0x20,0x39);B=@(0x08,0x0E);X=@(0x4C,0x26);Y=@(0x50,0x19);
  LB=@(0x31,0x02);RB=@(0x33,0x04);RT=@(0x45,0x12);LT=@(0x51,0x10);
  SteerLeft=@(0x41,0x1E);SteerRight=@(0x44,0x20) }
 $si=[Diagnostics.ProcessStartInfo]::new()
-$si.FileName=Join-Path $root '.local/build/win-amd64/src/supervisor/Release/x360n.exe'
+$si.FileName=if([IO.Path]::IsPathRooted($Supervisor)){$Supervisor}else{Join-Path $root $Supervisor}
 $si.WorkingDirectory=$root;$si.UseShellExecute=$false;$si.CreateNoWindow=$true
 $si.RedirectStandardOutput=$true;$si.RedirectStandardError=$true
 $si.Arguments='session titles/dash_17559/dash_17559_manifest.toml --timeout '+$Seconds
@@ -69,8 +91,9 @@ try {
      'Window close requested as cleanup, not title return' | Add-Content "$out/cleanup.txt"
      [void]$p.CloseMainWindow();break
     }
-    if($command.process -notin @('dash_17559',$Game)){throw 'Unowned title process'}
-    $title=Get-Process -Name $command.process -ErrorAction Stop | Select-Object -First 1
+    if($command.process -notin $allowedProcesses){throw 'Unowned title process'}
+    $title=Get-Process -Name $command.process -ErrorAction Stop | Where-Object {[CycleWindow]::Owned($p.Id,$_.Id)} | Select-Object -First 1
+    if(!$title){throw 'Title is not a child of this supervised session'}
     $child=[CycleWindow]::Find($title.Id)
     if($child -eq [IntPtr]::Zero){throw 'Title has no visible session surface'}
     $frame=[CycleWindow]::GetAncestor($child,2)
