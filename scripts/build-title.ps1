@@ -23,7 +23,7 @@ $root = (Resolve-Path (Split-Path -Parent $PSScriptRoot)).Path
 . (Join-Path $PSScriptRoot 'build/preparation-receipt.ps1')
 . (Join-Path $PSScriptRoot 'build/build-lease.ps1')
 . (Join-Path $PSScriptRoot 'build/incremental-state.ps1')
-$driverSnapshot = @(Get-ReceiptEntries @($PSCommandPath, (Join-Path $PSScriptRoot 'build/preparation-receipt.ps1'), (Join-Path $PSScriptRoot 'build/build-lease.ps1'), (Join-Path $PSScriptRoot 'build/incremental-state.ps1'), (Join-Path $PSScriptRoot 'build/toolchain-snapshot.ps1')))
+$driverSnapshot = @(Get-ReceiptEntries @($PSCommandPath, (Join-Path $PSScriptRoot 'build/preparation-receipt.ps1'), (Join-Path $PSScriptRoot 'build/build-lease.ps1'), (Join-Path $PSScriptRoot 'build/incremental-state.ps1'), (Join-Path $PSScriptRoot 'build/toolchain-snapshot.ps1'), (Join-Path $PSScriptRoot 'build/product-fingerprint.cs')))
 if ($Title -notmatch '^[a-z][a-z0-9_]*$') { throw "invalid title name '$Title'" }
 $titleDir = Join-Path $root "titles\$Title"
 if (-not (Test-Path (Join-Path $titleDir 'CMakePresets.json'))) {
@@ -105,7 +105,7 @@ try {
     }
     # A certified final executable needs no native cache. Validate its private
     # checkpoint only when a build will actually consume intermediate products.
-    $incrementalState = Read-IncrementalState $stateFile $previous $build $Title $interrupted
+    $incrementalState = Read-IncrementalState $stateFile $previous $build $Title $interrupted $root
     if ($incrementalState) {
         $head = & git -C (Join-Path $root 'external/rexglue-sdk') rev-parse HEAD
         if ($LASTEXITCODE -or $head.Trim() -ne $previous.sdk_commit) { $incrementalState = $null }
@@ -173,6 +173,10 @@ try {
             $tool = Join-Path $producerDir ([IO.Path]::GetFileName($tool))
             $producer = @(Get-ReceiptEntries $copies)
             $sameProducer = $incrementalState -and $previous -and $previous.producer -and (Test-ReceiptEntries $previous.producer)
+            if ($sameProducer -and (Test-VerifiedCodegen $previous $titleDir $build)) {
+                Write-Host 'reused verified AOT analysis and generated outputs'
+                continue
+            }
             # Codegen's sdkVersion alone is not a producer identity. Force only
             # this title when the actual producer changes or has no provenance.
             $ignore = if ($sameProducer) { '' } else { '--ignore-stamp' }

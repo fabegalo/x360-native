@@ -1,3 +1,4 @@
+$script:X360NProductFingerprintSource = Join-Path $PSScriptRoot 'product-fingerprint.cs'
 # Private, disposable acceleration data. The preparation receipt authenticates it.
 # Ninja supplies commands/edges; its compiler dep database supplies actual headers.
 # No timestamps or cross-title object cache are used as evidence of correctness.
@@ -40,6 +41,9 @@ function Get-TextDigest([string]$Text) {
     finally { $sha.Dispose() }
 }
 function Assert-IncrementalResponseFlags([string]$Command) {
+    # A response reference necessarily contains @. Most expanded compdb
+    # commands have none; avoid allocating a regex match for every token.
+    if ($Command.IndexOf('@') -lt 0) { return }
     # compdb -x expands Ninja's rspfile_content, not arbitrary external/nested
     # @files. Their flags/include search paths are absent from our authenticated
     # dependency closure. Fail before certification rather than reuse them.
@@ -77,113 +81,59 @@ function Test-IncrementalConfigureInputs($Current, $Previous) {
     return $true
 }
 function Get-IncrementalProducts([string]$Build) {
-    $cache = Get-BuildCache $Build
-    $ninja = $cache.CMAKE_MAKE_PROGRAM
-    $graph = (Invoke-IncrementalNinjaQuery $Build @('graph','all','rexglue')) -split '\r?\n'
-    $nodes = @{}; $incoming = @{}; $rules = @{}
-    foreach ($line in $graph) {
-        if ($line -match '^"([^"]+)" \[label="((?:\\.|[^"\\])*)"(, shape=ellipse)?\]$') {
-            $id = $matches[1]; $label = $matches[2].Replace('\\', '\').Replace('\"', '"')
-            if ($matches[3]) { $rules[$id] = $label }
-            else { $nodes[$id] = Resolve-BuildPath $Build $label }
-        } elseif ($line -match '^"([^"]+)" -> "([^"]+)"(.*)$') {
-            $from = $matches[1]; $to = $matches[2]; $attributes = $matches[3]
-            # Order-only dependencies schedule producers; they do not consume
-            # their contents (notably codegen and the always-run patch guard).
-            if ($attributes -match 'style=dotted') { continue }
-            if (-not $incoming.ContainsKey($to)) { $incoming[$to] = [Collections.Generic.List[string]]::new() }
-            $incoming[$to].Add($from)
-        }
-    }
-    $dependencies = @{}
-    $deps = (Invoke-IncrementalNinjaQuery $Build @('deps')) -split '\r?\n'
-    $selected = $null
-    foreach ($line in $deps) {
-        if ($line -match '^(.+): #deps [0-9]+,.*\((VALID|STALE)\)$') {
-            $selected = Resolve-BuildPath $Build $matches[1]
-            $dependencies[$selected] = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
-        } elseif ($selected -and $line.StartsWith('    ')) {
-            [void]$dependencies[$selected].Add((Resolve-BuildPath $Build $line.Substring(4)))
-        }
-    }
-    $commandMap = @{}
-    foreach ($command in ((Invoke-IncrementalNinjaQuery $Build @('compdb','-x')) | ConvertFrom-Json)) {
-        Assert-IncrementalResponseFlags $command.command
-        if ($command.command) { $commandMap[(Resolve-BuildPath $Build $command.output)] = $command.command }
-    }
-    # compdb names just the first output of a multi-output edge. Authenticate
-    # and invalidate its siblings as well (embedded headers, import libraries).
-    $ruleCommands = @{}
-    foreach ($id in $nodes.Keys) {
-        if ($commandMap.ContainsKey($nodes[$id])) {
-            foreach ($parent in $incoming[$id]) {
-                if ($rules.ContainsKey($parent)) { $ruleCommands[$parent] = $commandMap[$nodes[$id]] }
-            }
-        }
-    }
-    foreach ($id in $nodes.Keys) {
-        foreach ($parent in $incoming[$id]) {
-            if ($ruleCommands.ContainsKey($parent)) { $commandMap[$nodes[$id]] = $ruleCommands[$parent] }
-        }
-    }
-    $hashes = @{}
+    # Compile once in this PowerShell host. The driver snapshots this source and
+    # its SHA-256 participates in both policy and final preparation receipts.
+    Initialize-ProductFingerprints
+    $graph = Invoke-IncrementalNinjaQuery $Build @('graph','all','rexglue')
+    $deps = Invoke-IncrementalNinjaQuery $Build @('deps')
+    $commands = @((Invoke-IncrementalNinjaQuery $Build @('compdb','-x')) | ConvertFrom-Json)
+    foreach ($command in $commands) { Assert-IncrementalResponseFlags $command.command }
+    $libraries = @(); $resources = @()
     $implicit = Join-Path $Build '.preparation/toolchain.json'
-    $libraryParts = @()
-    $resourceParts = @()
-    if ([IO.File]::Exists($implicit)) {
+    if (Test-BuildFile $implicit) {
         $snapshot = [IO.File]::ReadAllText($implicit) | ConvertFrom-Json
-        foreach ($file in @($snapshot.libraries + $snapshot.resources)) {
-            if (-not $file) { continue }
-            $hashes[$file] = Get-ReceiptHash $file
-        }
-        $libraryParts = @($snapshot.libraries | ForEach-Object { $_ + '=' + $hashes[$_] })
-        $resourceParts = @($snapshot.resources | ForEach-Object { $_ + '=' + $hashes[$_] })
+        $libraries = @($snapshot.libraries); $resources = @($snapshot.resources)
     }
-    $emitted = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
-    $boundary = [IO.Path]::GetFullPath($Build).TrimEnd('\','/') + [IO.Path]::DirectorySeparatorChar
-    foreach ($id in $nodes.Keys) {
-        $path = $nodes[$id]
-        if (-not $commandMap.ContainsKey($path)) { continue }
-        if (-not $emitted.Add($path)) { continue }
-        # Only owned products may be removed. Guest originals and source-tree
-        # AOT are never disposable native products. SDK handles codegen separately.
-        if ($commandMap[$path] -match '(?:^|\s)codegen\s' -or $path -match 'codegen[.]build[.]stamp$') { continue }
-        if (-not $path.StartsWith($boundary, [StringComparison]::OrdinalIgnoreCase)) { throw "Build output outside its owner: $path" }
-        $inputs = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
-        foreach ($match in [regex]::Matches($commandMap[$path], '/MANIFESTINPUT:(?:"([^"]+)"|([^\s"]+))')) {
-            $manifest = if ($match.Groups[1].Success) { $match.Groups[1].Value } else { $match.Groups[2].Value }
-            [void]$inputs.Add((Resolve-BuildPath $Build $manifest))
-        }
-        foreach ($parent in $incoming[$id]) {
-            if ($rules.ContainsKey($parent)) {
-                foreach ($inputId in $incoming[$parent]) { if ($nodes.ContainsKey($inputId)) { [void]$inputs.Add($nodes[$inputId]) } }
-            } elseif ($nodes.ContainsKey($parent)) { [void]$inputs.Add($nodes[$parent]) }
-        }
-        if ($dependencies.ContainsKey($path)) { $inputs.UnionWith($dependencies[$path]) }
-        # A native object without compiler deps cannot certify its include closure.
-        if ($path -match '[.](obj|pch)$' -and (Test-BuildFile $path) -and -not $dependencies.ContainsKey($path)) {
-            throw "Compiler dependency record missing: $path"
-        }
-        $parts = [Collections.Generic.List[string]]::new()
-        $parts.Add($commandMap[$path])
-        if ($path -match '\.(exe|dll|lib)$') { foreach ($part in $libraryParts) { $parts.Add($part) } }
-        if ($path -match '\.res$') { foreach ($part in $resourceParts) { $parts.Add($part) } }
-        foreach ($inputPath in @($inputs | Sort-Object)) {
-            if (-not $hashes.ContainsKey($inputPath)) {
-                $hashes[$inputPath] = if (Test-BuildFile $inputPath) { Get-ReceiptHash $inputPath } else { '<missing>' }
-            }
-            $parts.Add($inputPath + '=' + $hashes[$inputPath])
-        }
-        if (-not $hashes.ContainsKey($path)) {
-            $hashes[$path] = if (Test-BuildFile $path) { Get-ReceiptHash $path } else { '<missing>' }
-        }
-        [pscustomobject]@{ path=$path; signature=(Get-TextDigest ($parts -join "`n")); sha256=$hashes[$path] }
-    }
+    [X360NProducts]::Compute($Build, $graph, $deps, [string[]]@($commands.output),
+        [string[]]@($commands.command), [string[]]$libraries, [string[]]$resources)
+}
+function Initialize-ProductFingerprints {
+    if (-not ('X360NProducts' -as [type])) { Add-Type -Path $script:X360NProductFingerprintSource }
 }
 function Get-IncrementalDatabase([string]$Build) {
     Get-ReceiptEntries @('build.ninja','CMakeFiles/rules.ninja','.ninja_deps','.ninja_log' | ForEach-Object { Join-Path $Build $_ })
 }
-function Read-IncrementalState([string]$File, $Previous, [string]$Build, [string]$Title, [bool]$Interrupted) {
+function Test-FingerprintPolicyTransition($Old, $Current, [string]$Root, $ReceiptInputs) {
+    # One explicit, reproducible transition from c84a4b4's signature algorithm.
+    # Only its three verifier scripts may differ; SDK, tools, environment,
+    # include inventory and every other policy input must remain identical.
+    # The caller still authenticates the checkpoint/database, then rehashes all
+    # native products and recomputes all signatures before consuming them.
+    $known = @{
+        'scripts/build-title.ps1'='24dc32959f876804387f934b3b49718db87facd995ec08efe755de6a4e0988dd'
+        'scripts/build/incremental-state.ps1'='438e6eecac8bd3199155fd534a57935912bec24c817d83ef37574fe855ee43b9'
+        'scripts/build/preparation-receipt.ps1'='03383e4edf99f84a77645ede3a0b3244d770a752a6fa5b7eed861b769d1bf408'
+    }
+    $oldMap = @{}; $currentMap = @{}; $receiptMap = @{}; $allowed = @{}
+    foreach ($entry in $Old) { if ($oldMap.ContainsKey($entry.path)) { return $false }; $oldMap[$entry.path] = $entry.sha256 }
+    foreach ($entry in $Current) { if ($currentMap.ContainsKey($entry.path)) { return $false }; $currentMap[$entry.path] = $entry.sha256 }
+    foreach ($entry in $ReceiptInputs) { $receiptMap[$entry.path] = $entry.sha256 }
+    foreach ($relative in $known.Keys) {
+        $path = [IO.Path]::GetFullPath((Join-Path $Root $relative))
+        if ($oldMap[$path] -ne $known[$relative] -or $receiptMap[$path] -ne $known[$relative] -or
+            -not $currentMap.ContainsKey($path)) { return $false }
+        $allowed[$path] = $true
+    }
+    $helper = [IO.Path]::GetFullPath((Join-Path $Root 'scripts/build/product-fingerprint.cs'))
+    if ($oldMap.ContainsKey($helper) -or -not $currentMap.ContainsKey($helper) -or
+        $currentMap.Count -ne $oldMap.Count + 1) { return $false }
+    foreach ($path in $oldMap.Keys) {
+        if (-not $currentMap.ContainsKey($path) -or
+            (-not $allowed.ContainsKey($path) -and $oldMap[$path] -ne $currentMap[$path])) { return $false }
+    }
+    return $true
+}
+function Read-IncrementalState([string]$File, $Previous, [string]$Build, [string]$Title, [bool]$Interrupted, [string]$Root) {
     try {
         $File = [IO.Path]::GetFullPath($File)
         if ($Interrupted -or -not $Previous -or -not $Previous.incremental -or
@@ -191,7 +141,13 @@ function Read-IncrementalState([string]$File, $Previous, [string]$Build, [string
         $state = [IO.File]::ReadAllText($File) | ConvertFrom-Json
         if ($state.schema -ne 1 -or $state.build -ne $Build -or $state.title -ne $Title -or
             -not $state.products -or -not $state.database -or -not $state.policy -or
-            -not (Test-ReceiptEntries $state.database) -or -not (Test-ReceiptEntries $state.policy)) { Write-Verbose 'Checkpoint identity, database or policy differs'; return $null }
+            -not (Test-ReceiptEntries $state.database)) { Write-Verbose 'Checkpoint identity or database differs'; return $null }
+        if (-not (Test-ReceiptEntries $state.policy)) {
+            if (-not $Root -or -not (Test-FingerprintPolicyTransition $state.policy @(Get-IncrementalPolicy $Root $Build) $Root $Previous.inputs)) {
+                Write-Verbose 'Checkpoint policy differs'; return $null
+            }
+            Write-Host 'authenticated fingerprint policy transition; every product will be verified before reuse'
+        }
         $seen = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
         $boundary = $Build.TrimEnd('\','/') + [IO.Path]::DirectorySeparatorChar
         foreach ($product in $state.products) {
@@ -222,7 +178,7 @@ function Update-IncrementalProducts([string]$Build, $State, $Processed, [switch]
 function Get-IncrementalPolicy([string]$Root, [string]$Build) {
     $cache = Get-BuildCache $Build
     $files = @('deps.lock.json','scripts/build-title.ps1','scripts/devshell.cmd',
-        'scripts/build/preparation-receipt.ps1','scripts/build/incremental-state.ps1',
+        'scripts/build/preparation-receipt.ps1','scripts/build/incremental-state.ps1','scripts/build/product-fingerprint.cs',
         'scripts/build/build-lease.ps1','scripts/build/ninja-guard.ps1','scripts/build/toolchain-snapshot.ps1') | ForEach-Object { Join-Path $Root $_ }
     $implicit = Join-Path $Build '.preparation/toolchain.json'
     if ([IO.File]::Exists($implicit)) { $files += $implicit }

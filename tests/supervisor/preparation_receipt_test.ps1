@@ -7,6 +7,41 @@ $scratch = Join-Path ([IO.Path]::GetTempPath()) ("x360n-receipt-" + [Guid]::NewG
 [void][IO.Directory]::CreateDirectory($scratch)
 function Assert($Condition, [string]$Message) { if (-not $Condition) { throw $Message } }
 try {
+    foreach ($size in @(0, 3, 1048575, 1048576, 1048577, 2097169)) {
+        $vector = Join-Path $scratch 'hash-vector'
+        $data = [byte[]]::new($size)
+        for ($i = 0; $i -lt $size; $i += 4093) { $data[$i] = $i % 251 }
+        [IO.File]::WriteAllBytes($vector, $data)
+        $reference = [Security.Cryptography.SHA256]::Create()
+        try { $expected = ([BitConverter]::ToString($reference.ComputeHash($data))).Replace('-', '').ToLowerInvariant() }
+        finally { $reference.Dispose() }
+        Assert ((Get-ReceiptHash $vector) -eq $expected) "SHA-256 streaming boundary differs at $size bytes"
+    }
+    $project = Join-Path $scratch 'project with spaces'
+    $generated = Join-Path $project 'generated/default'
+    $native = Join-Path $scratch 'native'
+    [void][IO.Directory]::CreateDirectory($generated)
+    [void][IO.Directory]::CreateDirectory($native)
+    $dependency = Join-Path $scratch 'original.xex'
+    $analysis = Join-Path $scratch 'analysis.toml'
+    $manifest = Join-Path $project 'sample_manifest.toml'
+    $output = Join-Path $generated 'emitted.cpp'
+    $stamp = Join-Path $generated 'codegen.stamp'
+    $depfile = Join-Path $generated 'codegen.d'
+    foreach ($path in @($dependency, $analysis, $manifest, $output, $stamp)) { [IO.File]::WriteAllText($path, 'original') }
+    $lines = @('output: \') + @($dependency, $analysis, $manifest | ForEach-Object { '  ' + $_.Replace('\', '/').Replace(' ', '\ ') + ' \' })
+    [IO.File]::WriteAllLines($depfile, $lines)
+    $previous = @{inputs=@(Get-ReceiptEntries @($dependency, $analysis, $manifest, $output, $stamp, $depfile))}
+    Assert (Test-VerifiedCodegen $previous $project $native) 'unchanged AOT closure rejected'
+    foreach ($path in @($dependency, $analysis, $manifest, $output, $stamp, $depfile)) {
+        $originalBytes = [IO.File]::ReadAllBytes($path); $originalTime = [IO.File]::GetLastWriteTimeUtc($path)
+        [IO.File]::WriteAllText($path, 'modified'); [IO.File]::SetLastWriteTimeUtc($path, $originalTime)
+        Assert (-not (Test-VerifiedCodegen $previous $project $native)) "modified AOT closure accepted: $path"
+        [IO.File]::WriteAllBytes($path, $originalBytes); [IO.File]::SetLastWriteTimeUtc($path, $originalTime)
+    }
+    [IO.File]::WriteAllText((Join-Path $project 'added_manifest.toml'), 'new module')
+    Assert (-not (Test-VerifiedCodegen $previous $project $native)) 'new module manifest ignored'
+    Assert (-not (Test-VerifiedCodegen @{inputs=@()} $project $native)) 'missing authenticated AOT inventory accepted'
     $inputFile = Join-Path $scratch 'input with spaces.xex'
     [IO.File]::WriteAllText($inputFile, 'version1')
     $entries = @(Get-ReceiptEntries @($inputFile))

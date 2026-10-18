@@ -30,6 +30,25 @@ function Invalidate($State) {
     Update-IncrementalProducts $build $State ([Collections.Generic.HashSet[string]]::new()) -CheckProducts
 }
 try {
+    $transitionRoot = Join-Path $scratch 'transition'
+    $legacyScripts = @{
+        'scripts/build-title.ps1'='24dc32959f876804387f934b3b49718db87facd995ec08efe755de6a4e0988dd'
+        'scripts/build/incremental-state.ps1'='438e6eecac8bd3199155fd534a57935912bec24c817d83ef37574fe855ee43b9'
+        'scripts/build/preparation-receipt.ps1'='03383e4edf99f84a77645ede3a0b3244d770a752a6fa5b7eed861b769d1bf408'
+    }
+    $oldPolicy = @($legacyScripts.Keys | ForEach-Object { [pscustomobject]@{path=(Join-Path $transitionRoot $_);sha256=$legacyScripts[$_]} })
+    $oldPolicy += [pscustomobject]@{path=(Join-Path $transitionRoot 'compiler');sha256=('a'*64)}
+    $currentPolicy = @($oldPolicy | ForEach-Object { [pscustomobject]@{path=$_.path;sha256=$(if($_.path -like '*compiler'){$_.sha256}else{'b'*64})} })
+    $currentPolicy += [pscustomobject]@{path=(Join-Path $transitionRoot 'scripts/build/product-fingerprint.cs');sha256=('c'*64)}
+    Assert (Test-FingerprintPolicyTransition $oldPolicy $currentPolicy $transitionRoot $oldPolicy) 'known authenticated signature-policy transition rejected'
+    Assert (-not (Test-FingerprintPolicyTransition $oldPolicy $currentPolicy $transitionRoot @())) 'transition accepted without receipt anchors'
+    Assert (-not (Test-FingerprintPolicyTransition $oldPolicy $currentPolicy "$transitionRoot-other" $oldPolicy)) 'transition accepted another source root'
+    $compilerPolicy = $currentPolicy | Where-Object path -like '*compiler'
+    $compilerPolicy.sha256 = 'd'*64
+    Assert (-not (Test-FingerprintPolicyTransition $oldPolicy $currentPolicy $transitionRoot $oldPolicy)) 'transition accepted changed compiler/toolchain policy'
+    $compilerPolicy.sha256 = 'a'*64
+    $oldPolicy[0].sha256 = 'e'*64
+    Assert (-not (Test-FingerprintPolicyTransition $oldPolicy $currentPolicy $transitionRoot $oldPolicy)) 'transition accepted an unknown predecessor'
     $longDirectory = Join-Path $scratch (('long-dependency-' * 7) + '/' + ('nested-header-' * 7))
     $longInput = Join-Path $longDirectory 'input.h'
     $extended = '\\?\' + [IO.Path]::GetFullPath($longDirectory)

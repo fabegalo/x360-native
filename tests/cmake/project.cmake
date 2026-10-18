@@ -80,6 +80,9 @@ if(WIN32)
   add_test(NAME x360n.incremental-build COMMAND powershell -NoProfile -ExecutionPolicy Bypass
     -File ${CMAKE_CURRENT_SOURCE_DIR}/build_isolation/incremental_test.ps1 -Ninja "${X360N_REAL_NINJA}")
   set_tests_properties(x360n.incremental-build PROPERTIES LABELS project TIMEOUT 300)
+  add_test(NAME x360n.product-protection COMMAND powershell -NoProfile -ExecutionPolicy Bypass
+    -File ${CMAKE_CURRENT_SOURCE_DIR}/build_isolation/product_protection_test.ps1)
+  set_tests_properties(x360n.product-protection PROPERTIES LABELS project TIMEOUT 30)
   add_test(NAME x360n.toolchain-snapshot COMMAND powershell -NoProfile -ExecutionPolicy Bypass
     -File ${CMAKE_CURRENT_SOURCE_DIR}/build_isolation/toolchain_snapshot_test.ps1 -Ninja "${X360N_REAL_NINJA}")
   set_tests_properties(x360n.toolchain-snapshot PROPERTIES LABELS project TIMEOUT 300)

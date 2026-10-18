@@ -20,8 +20,19 @@ function Get-BuildIoPath([string]$File) {
 function Test-BuildFile([string]$File) { [IO.File]::Exists((Get-BuildIoPath $File)) }
 function Get-ReceiptHash([string]$File) {
     $stream = [IO.File]::OpenRead((Get-BuildIoPath $File))
-    $sha = [Security.Cryptography.SHA256]::Create()
-    try { ([BitConverter]::ToString($sha.ComputeHash($stream))).Replace('-', '').ToLowerInvariant() }
+    # HashAlgorithm.ComputeHash(Stream) feeds CNG only 4 KiB at a time on .NET
+    # Framework. Larger blocks reduce read/interop calls without caching hashes.
+    if (-not $script:ReceiptHashBuffer) { $script:ReceiptHashBuffer = [byte[]]::new(1048576) }
+    $sha = if ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT) {
+        [Security.Cryptography.SHA256Cng]::new()
+    } else { [Security.Cryptography.SHA256]::Create() }
+    try {
+        while (($count = $stream.Read($script:ReceiptHashBuffer, 0, $script:ReceiptHashBuffer.Length)) -gt 0) {
+            [void]$sha.TransformBlock($script:ReceiptHashBuffer, 0, $count, $null, 0)
+        }
+        [void]$sha.TransformFinalBlock($script:ReceiptHashBuffer, 0, 0)
+        ([BitConverter]::ToString($sha.Hash)).Replace('-', '').ToLowerInvariant()
+    }
     finally { $sha.Dispose(); $stream.Dispose() }
 }
 function Clear-NinjaNativeProducts([string]$Ninja, [string]$Build) {
@@ -69,12 +80,13 @@ function Get-BuildCache([string]$Build) {
 function Get-NinjaNodes([string]$Build, [string[]]$Targets) {
     $cache = Get-BuildCache $Build
     if (Test-Path Function:\Invoke-IncrementalNinjaQuery) {
-        $graph = (Invoke-IncrementalNinjaQuery $Build (@('graph') + $Targets)) -split '\r?\n'
+        $graph = Invoke-IncrementalNinjaQuery $Build (@('graph') + $Targets)
     } else {
-        $graph = & $cache.CMAKE_MAKE_PROGRAM -C $Build -t graph @Targets
+        $graph = (& $cache.CMAKE_MAKE_PROGRAM -C $Build -t graph @Targets) -join "`n"
         if ($LASTEXITCODE) { throw 'Cannot read build dependency graph' }
     }
-    foreach ($line in $graph) {
+    if ('X360NProducts' -as [type]) { [X360NProducts]::GraphNodes($Build, $graph); return }
+    foreach ($line in ($graph -split '\r?\n')) {
         if ($line -match '^"[^" ]+" \[label="((?:\\.|[^"\\])*)"\]$') {
             $name = $matches[1].Replace('\\', '\').Replace('\"', '"')
             (Resolve-BuildPath $Build $name)
@@ -116,6 +128,7 @@ function Get-BuildPresetFiles([string]$Project) {
     }
 }
 function Get-BuildInputs([string]$Root, [string]$Title, [string]$Build, [string[]]$Targets, [switch]$AllowInvalidCodegen) {
+    if (Test-Path Function:\Initialize-ProductFingerprints) { Initialize-ProductFingerprints }
     $projectDirectory = (Get-BuildCache $Build).CMAKE_HOME_DIRECTORY
     $cache = Get-BuildCache $Build
     $files = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
@@ -131,17 +144,21 @@ function Get-BuildInputs([string]$Root, [string]$Title, [string]$Build, [string[
                 -not $node.StartsWith((Join-Path $Root 'external/rexglue-sdk/out'), [StringComparison]::OrdinalIgnoreCase) -and [IO.File]::Exists($node)) { [void]$files.Add($node) }
     }
     if (Test-Path Function:\Invoke-IncrementalNinjaQuery) {
-        $deps = (Invoke-IncrementalNinjaQuery $Build @('deps')) -split '\r?\n'
+        $deps = Invoke-IncrementalNinjaQuery $Build @('deps')
     } else {
-        $deps = & $cache.CMAKE_MAKE_PROGRAM -C $Build -t deps
+        $deps = (& $cache.CMAKE_MAKE_PROGRAM -C $Build -t deps) -join "`n"
         if ($LASTEXITCODE) { throw 'Cannot read compiler dependencies' }
     }
-    $selected = $false
-    foreach ($line in $deps) {
-        if ($line -match '^(.+): #deps ') {
-            $selected = $objects.Contains((Resolve-BuildPath $Build $matches[1]))
-        } elseif ($selected -and $line.StartsWith('    ')) {
-            [void]$files.Add((Resolve-BuildPath $Build $line.Substring(4)))
+    if ('X360NProducts' -as [type]) {
+        foreach ($file in [X360NProducts]::CompilerDependencies($Build, $deps, [string[]]@($objects))) { [void]$files.Add($file) }
+    } else {
+        $selected = $false
+        foreach ($line in ($deps -split '\r?\n')) {
+            if ($line -match '^(.+): #deps ') {
+                $selected = $objects.Contains((Resolve-BuildPath $Build $matches[1]))
+            } elseif ($selected -and $line.StartsWith('    ')) {
+                [void]$files.Add((Resolve-BuildPath $Build $line.Substring(4)))
+            }
         }
     }
     # CMake declares its input files as phony outputs too. Ninja -t inputs
@@ -157,7 +174,7 @@ function Get-BuildInputs([string]$Root, [string]$Title, [string]$Build, [string[
         if ($cache[$name] -and [IO.File]::Exists($cache[$name])) { [void]$files.Add([IO.Path]::GetFullPath($cache[$name])) }
     }
     foreach ($file in @('deps.lock.json','scripts/build-title.ps1','scripts/build/preparation-receipt.ps1','scripts/devshell.cmd',
-                       'scripts/build/build-lease.ps1','scripts/build/ninja-guard.ps1','scripts/build/incremental-state.ps1','scripts/build/toolchain-snapshot.ps1',
+                       'scripts/build/build-lease.ps1','scripts/build/ninja-guard.ps1','scripts/build/incremental-state.ps1','scripts/build/toolchain-snapshot.ps1','scripts/build/product-fingerprint.cs',
                        'cmake/build/x360n_stage_files.cmake','cmake/runtime/x360n_runtime.manifest')) {
         [void]$files.Add([IO.Path]::GetFullPath((Join-Path $Root $file)))
     }
@@ -231,6 +248,41 @@ function Get-BuildInputs([string]$Root, [string]$Title, [string]$Build, [string[
 }
 function Get-ReceiptEntries([string[]]$Files) {
     foreach ($file in $Files) { [pscustomobject]@{ path = [IO.Path]::GetFullPath($file); sha256 = Get-ReceiptHash $file } }
+}
+function Test-VerifiedCodegen($Previous, [string]$Project, [string]$Build) {
+    # Only a receipt-authenticated producer/checkpoint may call this fast path.
+    # codegen.d records the manifest, original XEXs and recursive analysis inputs;
+    # the receipt records every emitted output, stamp and auxiliary CMake list.
+    $entries = @{}
+    foreach ($entry in $Previous.inputs) { $entries[$entry.path] = $entry }
+    $selected = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    $depfiles = [Collections.Generic.List[string]]::new()
+    foreach ($directory in @((Join-Path $Project 'generated'), (Join-Path $Build 'generated'))) {
+        $boundary = [IO.Path]::GetFullPath($directory).TrimEnd('\','/') + [IO.Path]::DirectorySeparatorChar
+        foreach ($entry in $Previous.inputs) {
+            if ($entry.path.StartsWith($boundary, [StringComparison]::OrdinalIgnoreCase)) {
+                [void]$selected.Add($entry.path)
+                if ([IO.Path]::GetFileName($entry.path) -eq 'codegen.d') { $depfiles.Add($entry.path) }
+            }
+        }
+    }
+    if (-not $depfiles.Count) { return $false }
+    foreach ($depfile in $depfiles) {
+        # Authenticate before parsing a dependency list supplied by the build.
+        if (-not (Test-ReceiptEntries @($entries[$depfile]))) { return $false }
+        foreach ($line in ([IO.File]::ReadAllLines($depfile) | Select-Object -Skip 1)) {
+            $file = $line.Trim() -replace ' \\$', ''
+            $file = $file.Replace('\ ', ' ').Replace('\:', ':').Replace('\\', '\').Replace('$$', '$')
+            if ($file) { [void]$selected.Add([IO.Path]::GetFullPath($file)) }
+        }
+    }
+    foreach ($manifest in @([IO.Directory]::EnumerateFiles($Project, '*_manifest.toml')) + @(Get-AdditionalCodegenManifests $Project $Build)) {
+        [void]$selected.Add([IO.Path]::GetFullPath($manifest))
+    }
+    foreach ($file in $selected) {
+        if (-not $entries.ContainsKey($file) -or -not (Test-ReceiptEntries @($entries[$file]))) { return $false }
+    }
+    return $true
 }
 function Select-NativeDllOutputs([string]$Root, [string[]]$Nodes) {
     $originals = [IO.Path]::GetFullPath((Join-Path $Root '.local/inputs')).TrimEnd('\','/') + [IO.Path]::DirectorySeparatorChar
