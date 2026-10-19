@@ -4,6 +4,7 @@
 #include "../../titles/common/dashboard_assets.h"
 #include "../../titles/dash_17559/src/original_assets.h"
 #include "../../titles/dash_6717/src/original_assets.h"
+#include "../../titles/dash_1888/src/original_assets.h"
 #include <toml++/toml.hpp>
 #include <fstream>
 #include <map>
@@ -49,13 +50,14 @@ TEST_CASE("Dashboard assets reject mixed versions missing modules and stale hash
 
 TEST_CASE("Dashboard assets match preparation and every AOT module stays inside its version", "[dashboard-assets]") {
   const auto root = fs::path(X360N_SOURCE_ROOT);
-  for (const std::string version : {"17559", "6717"}) {
+  for (const std::string version : {"17559", "6717", "1888"}) {
     const auto folder = root / "titles" / ("dash_" + version);
     auto info = toml::parse_file((folder / "preparation.toml").string());
     REQUIRE(info["dashboard_version"].value_or("") == "2.0." + version + ".0");
     const std::span<const DashboardAsset> assets = version == "17559"
         ? std::span<const DashboardAsset>(dash17559::kOriginalAssets)
-        : std::span<const DashboardAsset>(dash6717::kOriginalAssets);
+        : version == "6717" ? std::span<const DashboardAsset>(dash6717::kOriginalAssets)
+        : std::span<const DashboardAsset>(dash1888::kOriginalAssets);
     std::map<std::string, std::string> expected;
     std::map<std::string, std::string> optional;
     for (const auto& entry : *info["files"].as_array()) {

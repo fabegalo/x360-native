@@ -5,6 +5,15 @@ Este arquivo resume o estado atual; os relatórios vinculados preservam datas,
 falhas iniciais, hashes, comandos e limites de cada validação. Resultados de uma
 etapa histórica não certificam automaticamente o build atual nem outros títulos.
 
+Retail 1888 (18/10): perfil próprio Release com 22 originais locais identificados
+e SHA-256, snapshot reproduzível e isolamento por versão. A interface Blades
+original renderizou Games/Media/System e Console Settings; navegação por teclado
+observada e controle físico confirmado pelo mantenedor. Selecionável no launcher,
+sem biblioteca de jogos nesta etapa. Quatro smokes limitados terminaram por timeout,
+sem crash capturado; Guide/perfis/serviços/jogos sem aceite. Recurso localizado
+`pt-br/shrdres.xzp` ausente; XAM original inventariado, sem execução AOT certificada.
+Sem avanço para outra versão. [Hashes, testes e limites da 1888](docs/reports/dashboard-1888-2026-10-18.md).
+
 Ambiente local Release (18/10): launcher, supervisor e extrator reconstruídos
 em Release na árvore usada pelo atalho; startup agora exige Release. Seis
 produtos nativos foram compilados nesse modo. O mantenedor reduziu o aceite

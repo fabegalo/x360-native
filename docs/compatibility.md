@@ -6,6 +6,7 @@ jogabilidade. Os links preservam hashes completos, runs, testes e falhas anterio
 
 | Alvo / versão | Estado demonstrado em Windows x64 | Limites / evidência |
 |---|---|---|
+| Dashboard Retail 1888 / Xenos | Blades/textos originais; Games → Media → System e Console Settings com teclado; controle físico confirmado pelo mantenedor | Release próprio, launcher e snapshot isolado. Guide/perfis/serviços/jogos sem aceite; recurso pt-BR ausente. [1888](reports/dashboard-1888-2026-10-18.md) |
 | Dashboard Retail 17559 / Xenos | Intro com áudio, Home/textos, navegação, My Games, perfis locais e retorno original de Castle/Forza | Serviços de sistema ainda parciais; um usuário ativo no slot 0. [Dashboard](dashboard.md), [Forza](reports/titles/validation-forza-horizon.md) |
 | Dashboard Retail 6717 | Compilada; blades/navegação observadas historicamente | Fonte `XenonJKLatin.xtt` correspondente ausente; smoke posterior com acesso nulo. Somente diagnóstico, sem sessão guiada. [Auditoria](reports/maintenance/PROJECT_AUDIT.md) |
 | Iruka / Dolphin, XEX `66ec34f2…cb61e31` (histórico) | Renderização/animação; regressão L1–L5 | Removido dos inputs pelo mantenedor em 18/10, sem restauração. Entrada, áudio, execução longa e encerramento normal não validados. [Iruka](reports/titles/validation-iruka.md) |

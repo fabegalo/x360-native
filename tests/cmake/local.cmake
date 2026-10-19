@@ -14,3 +14,8 @@ target_sources(x360n_local_tests PRIVATE local/avatar_service_profile_test.cpp)
 target_compile_definitions(x360n_local_tests PRIVATE X360N_CONTENT_EXE="$<TARGET_FILE:x360n-content>")
 add_dependencies(x360n_local_tests x360n-content)
 catch_discover_tests(x360n_local_tests TEST_PREFIX "local." PROPERTIES LABELS "project" TIMEOUT 600)
+if(WIN32)
+  add_test(NAME local.dash-1888-snapshot COMMAND powershell -NoProfile -ExecutionPolicy Bypass
+    -File ${CMAKE_CURRENT_SOURCE_DIR}/local/dash_1888_snapshot.ps1)
+  set_tests_properties(local.dash-1888-snapshot PROPERTIES LABELS project TIMEOUT 60 SKIP_RETURN_CODE 77)
+endif()

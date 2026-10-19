@@ -1,0 +1,17 @@
+# Retail 2.0.1888.0 only. Originals stay in the ignored, verified local snapshot.
+[project]
+name = "dash_1888"
+sdk_version = "0.10.0"
+game_root = "../../.local/inputs/dashboards/1888/runtime"
+
+[entrypoint]
+file_path = "../../.local/inputs/dashboards/1888/runtime/dash.xex"
+out_directory_path = "generated/dash"
+includes = ["analysis/dash_1888.toml", "analysis/dash_1888_pointer_targets.toml"]
+
+[x360n]
+xex_sha256 = "261b32510079b2d0770631529f752a7580902283426b87dbc4b09a2764bb780b"
+native_exe = "../../.local/build/titles/dash_1888/dash_1888.exe"
+user_data_root = "../../.local/user/dash1888"
+launch_library = false
+args = ["--gpu_plugin=xenos", "--mnk_mode=true"]

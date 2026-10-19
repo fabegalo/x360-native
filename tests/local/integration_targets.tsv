@@ -8,6 +8,7 @@
 # where older formats are listed as unsupported, with the reason.
 #
 # path (relative to .local/inputs)	sha256	size	title_id (- if none)	version
+dashboards/1888/runtime/dash.xex	261b32510079b2d0770631529f752a7580902283426b87dbc4b09a2764bb780b	2596864	FFFE07D1	2.0.1888.0
 games/iruka/content/default.xex	66ec34f2f558fe4e419d926108bf458a5c634ea8b5f76771b48ba633ecb61e31	2658304	-	-
 games/castle_crashers/content/default.xex	825e9c8cb951d62ce954901488c5b783349c98cc5c03bd08ea0739df3af5d9ad	765952	584108B7	0.0.1.3
 games/forza_horizon/disc-1/default.xex	db40df605ade49a612b35a7a24c38f6004bcb17a88ed6b48288de16df9e3987c	20856832	4D5309C9	0.0.0.10
