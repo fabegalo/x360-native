@@ -425,4 +425,20 @@ TEST_CASE("launcher layout keeps controls inside the window, their cards and the
   english = false;
   ApplyPreview(f.app, 5);
 }
+TEST_CASE("owner-drawn buttons never erase to the default background before drawing", "[launcher-layout]") {
+  Frontend f;
+  HDC screen = GetDC(nullptr), dc = CreateCompatibleDC(screen);
+  HBITMAP bitmap = CreateCompatibleBitmap(screen, 8, 8);
+  const auto old = SelectObject(dc, bitmap);
+  ReleaseDC(nullptr, screen);
+  for (auto h : f.app.all) {
+    wchar_t cls[16]{}; GetClassNameW(h, cls, 16);
+    if (std::wstring_view(cls) != L"Button") continue;
+    INFO(GetDlgCtrlID(h));
+    RECT all{0, 0, 8, 8}; ui::Fill(dc, all, RGB(1, 2, 3));
+    CHECK(SendMessageW(h, WM_ERASEBKGND, reinterpret_cast<WPARAM>(dc), 0) != 0);
+    CHECK(GetPixel(dc, 4, 4) == RGB(1, 2, 3));
+  }
+  SelectObject(dc, old); DeleteObject(bitmap); DeleteDC(dc);
+}
 #endif

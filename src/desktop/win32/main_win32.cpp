@@ -189,7 +189,8 @@ LRESULT CALLBACK HotProc(HWND h, UINT m, WPARAM wp, LPARAM lp, UINT_PTR, DWORD_P
     InvalidateRect(h, nullptr, FALSE);
   } else if (m == WM_MOUSELEAVE && a->hot == h) {
     a->hot = nullptr; InvalidateRect(h, nullptr, FALSE);
-  } else if (m == WM_SETFOCUS) PostMessageW(a->window, kReveal, reinterpret_cast<WPARAM>(h), 0);
+  } else if (m == WM_ERASEBKGND) return 1;  // DrawButton fills the whole button; a default erase flashes white
+  else if (m == WM_SETFOCUS) PostMessageW(a->window, kReveal, reinterpret_cast<WPARAM>(h), 0);
   else if (m == WM_NCDESTROY) RemoveWindowSubclass(h, HotProc, 0);
   return DefSubclassProc(h, m, wp, lp);
 }
@@ -330,7 +331,8 @@ void Layout(App& a) {
   RECT clip{};  // non-empty while placing scrolled content
   auto put = [&](HWND h, int x, int y, int w, int hgt, bool visible = true) {
     placed.push_back(h);
-    SetWindowPos(h, nullptr, x, y, std::max(0, w), std::max(0, hgt), SWP_NOZORDER | SWP_NOACTIVATE | (visible ? SWP_SHOWWINDOW : SWP_HIDEWINDOW));
+    // No intermediate repaint: the whole window is invalidated once at the end.
+    SetWindowPos(h, nullptr, x, y, std::max(0, w), std::max(0, hgt), SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOREDRAW | (visible ? SWP_SHOWWINDOW : SWP_HIDEWINDOW));
     bool clipped = false;
     if (!IsRectEmpty(&clip)) {
       g.scrolled.push_back(h);
@@ -340,11 +342,11 @@ void Layout(App& a) {
       RECT shown{};
       if (!IntersectRect(&shown, &r, &clip)) shown = {};
       else if (!EqualRect(&shown, &r)) OffsetRect(&shown, -r.left, -r.top);
-      if (!EqualRect(&shown, &r)) { SetWindowRgn(h, CreateRectRgnIndirect(&shown), TRUE); clipped = true; }
+      if (!EqualRect(&shown, &r)) { SetWindowRgn(h, CreateRectRgnIndirect(&shown), FALSE); clipped = true; }
     }
     const auto known = std::find(a.clipped.begin(), a.clipped.end(), h);
     if (clipped && known == a.clipped.end()) a.clipped.push_back(h);
-    if (!clipped && known != a.clipped.end()) { a.clipped.erase(known); SetWindowRgn(h, nullptr, TRUE); }
+    if (!clipped && known != a.clipped.end()) { a.clipped.erase(known); SetWindowRgn(h, nullptr, FALSE); }
   };
   auto rect = [](int x, int y, int w, int h) { return RECT{x, y, x + w, y + h}; };
   const Page page = PageOf(a);
@@ -557,7 +559,9 @@ void Layout(App& a) {
   }
   a.geo = g;
   for (auto h : a.all) if (std::find(placed.begin(), placed.end(), h) == placed.end() &&
-      (GetWindowLongPtrW(h, GWL_STYLE) & WS_VISIBLE)) ShowWindow(h, SW_HIDE);
+      (GetWindowLongPtrW(h, GWL_STYLE) & WS_VISIBLE))
+    SetWindowPos(h, nullptr, 0, 0, 0, 0, SWP_HIDEWINDOW | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOREDRAW);
+  // A single invalidation; repeated layouts in one message coalesce into one paint.
   RedrawWindow(a.window, nullptr, nullptr, RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN);
 }
 void Enable(App& a) {
@@ -830,7 +834,10 @@ void Load(App& a, const fs::path& root, InspectionMode mode = InspectionMode::Pr
       if (SendMessageW(combo, CB_GETITEMDATA, i, 0) == selected) SendMessageW(combo, CB_SETCURSEL, i, 0);
   }
   UpdateRendererControls(a);
-  SetWindowTextW(a.root_text, root.empty() ? WTr("Nenhum ambiente selecionado", "No environment selected").c_str() : root.c_str());
+  // Display only: a shortcut's "scripts\.." root reads as the folder it names.
+  auto shown = root.lexically_normal();
+  if (shown.has_relative_path() && !shown.has_filename()) shown = shown.parent_path();
+  SetWindowTextW(a.root_text, root.empty() ? WTr("Nenhum ambiente selecionado", "No environment selected").c_str() : shown.c_str());
   a.selected = a.targets.size();
   for (size_t i = 0; i < a.targets.size(); ++i) {
     if ((a.targets[i].kind != "dashboard") != a.games) continue;
