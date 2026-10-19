@@ -265,4 +265,164 @@ TEST_CASE("launcher reports native closure before supervisor diagnostic cleanup 
   CHECK_FALSE(f.app.finishing_session);
   CHECK_FALSE(f.app.failed);
 }
+namespace {
+struct Placed { HWND h; int id; RECT r; };
+// Child rectangles in client coordinates; WS_VISIBLE because the fixture parent stays hidden.
+std::vector<Placed> VisibleControls(const App& a) {
+  std::vector<Placed> out;
+  for (auto h : a.all) {
+    if (!(GetWindowLongPtrW(h, GWL_STYLE) & WS_VISIBLE)) continue;
+    RECT r{}; GetWindowRect(h, &r);
+    MapWindowPoints(nullptr, a.window, reinterpret_cast<POINT*>(&r), 2);
+    // A clipped (scrolled) control only shows its window region.
+    RECT box{};
+    const int kind = GetWindowRgnBox(h, &box);
+    if (kind == NULLREGION) continue;
+    if (kind != ERROR) { OffsetRect(&box, r.left, r.top); IntersectRect(&r, &r, &box); }
+    out.push_back({h, GetDlgCtrlID(h), r});
+  }
+  return out;
+}
+std::wstring Describe(const Placed& p) {
+  wchar_t cls[32]{}, text[96]{}; GetClassNameW(p.h, cls, 32); GetWindowTextW(p.h, text, 96);
+  return std::wstring(cls) + L"#" + std::to_wstring(p.id) + L" '" + text + L"' [" + std::to_wstring(p.r.left) + L"," +
+         std::to_wstring(p.r.top) + L"," + std::to_wstring(p.r.right) + L"," + std::to_wstring(p.r.bottom) + L"]";
+}
+std::string Narrow(const std::wstring& s) { std::string out; for (auto c : s) out += c < 128 ? char(c) : '?'; return out; }
+// Space the owner-drawn label needs, mirroring DrawButton.
+int NeededWidth(App& a, HDC dc, const Placed& p) {
+  auto s = [&](int v) { return ui::S(v, a.dpi); };
+  const auto style = a.styles[p.id];
+  wchar_t text[256]{}; GetWindowTextW(p.h, text, 256);
+  const std::wstring label = text;
+  switch (style.kind) {
+    case Kind::Nav: return s(50) + ui::TextWidth(dc, a.fonts.bold, label) + s(8);
+    case Kind::Option: return s(48) + ui::TextWidth(dc, a.fonts.bold, label) + s(16);
+    case Kind::Toggle: return s(52) + ui::TextWidth(dc, a.fonts.body, label);
+    case Kind::Chip: return ui::TextWidth(dc, a.fonts.bold, label) + s(16);
+    default: break;
+  }
+  const bool glyph = style.glyph || p.id == kPrimary;
+  return glyph ? s(22) + s(8) + ui::TextWidth(dc, a.fonts.bold, label) + s(16) : ui::TextWidth(dc, a.fonts.body, label) + s(16);
+}
+void SaveCapture(App& a, const fs::path& output) {
+  RECT client{}; GetClientRect(a.window, &client);
+  HDC screen = GetDC(nullptr), dc = CreateCompatibleDC(screen);
+  HBITMAP bitmap = CreateCompatibleBitmap(screen, client.right, client.bottom);
+  const auto old = SelectObject(dc, bitmap);
+  Paint(a, dc);
+  for (auto child : a.all) {
+    if (!(GetWindowLongPtrW(child, GWL_STYLE) & WS_VISIBLE)) continue;
+    RECT rect{}; GetWindowRect(child, &rect);
+    MapWindowPoints(nullptr, a.window, reinterpret_cast<POINT*>(&rect), 2);
+    const auto saved = SaveDC(dc);
+    SetViewportOrgEx(dc, rect.left, rect.top, nullptr);
+    HRGN region = CreateRectRgn(0, 0, 0, 0);
+    if (GetWindowRgn(child, region) != ERROR) { OffsetRgn(region, rect.left, rect.top); ExtSelectClipRgn(dc, region, RGN_AND); }
+    else IntersectClipRect(dc, 0, 0, rect.right - rect.left, rect.bottom - rect.top);
+    DeleteObject(region);
+    SendMessageW(child, WM_PRINT, reinterpret_cast<WPARAM>(dc), PRF_CLIENT | PRF_ERASEBKGND | PRF_CHILDREN);
+    RestoreDC(dc, saved);
+  }
+  SelectObject(dc, old); DeleteDC(dc); ReleaseDC(nullptr, screen);
+  UINT count = 0, size = 0; Gdiplus::GetImageEncodersSize(&count, &size);
+  std::vector<uint8_t> storage(size);
+  auto* codecs = reinterpret_cast<Gdiplus::ImageCodecInfo*>(storage.data());
+  Gdiplus::GetImageEncoders(count, size, codecs);
+  {
+    Gdiplus::Bitmap image(bitmap, nullptr);
+    for (UINT i = 0; i < count; ++i) if (std::wstring_view(codecs[i].MimeType) == L"image/png") image.Save(output.c_str(), &codecs[i].Clsid);
+  }
+  DeleteObject(bitmap);
+}
+}
+// Geometry review of every page, banner state, size and scale without showing
+// the window. Set X360N_LAYOUT_CAPTURE to a folder to also save PNG renders.
+TEST_CASE("launcher layout keeps controls inside the window, their cards and their labels", "[launcher-layout]") {
+  Frontend f; f.Seed(f.TargetFixture());
+  wchar_t capture[MAX_PATH]{};
+  const fs::path captures = GetEnvironmentVariableW(L"X360N_LAYOUT_CAPTURE", capture, MAX_PATH) ? fs::path(capture) : fs::path();
+  if (!captures.empty()) fs::create_directories(captures);
+  struct PageCase { const char* name; int command; int preview; };  // preview 6: game list, 7: empty library
+  const PageCase pages[] = {{"home", kHome, 0}, {"library", kGames, 7}, {"library-list", kGames, 6}, {"import", kImportPage, 0},
+                            {"dashboard", kDashboards, 0}, {"settings", kSettings, 0}, {"diagnostics", kDetails, 0}};
+  struct BannerCase { const char* name; int preview; };
+  const BannerCase banners[] = {{"idle", 5}, {"busy", 2}, {"error", 3}, {"imported", 4}};
+  struct SizeCase { const char* name; int w, h; };
+  const SizeCase sizes[] = {{"min", 1000, 700}, {"default", 1220, 800}};
+  for (const bool en : {false, true}) for (const UINT dpi : {96u, 144u}) for (const auto& size : sizes) for (const auto& page : pages) for (const auto& banner : banners) {
+    english = en;
+    if (f.app.dpi != dpi) { f.app.dpi = dpi; ApplyFonts(f.app); }
+    Labels(f.app);
+    // Client size equals the outer size the window would have at this scale.
+    RECT outer{0, 0, MulDiv(size.w, int(dpi), 96), MulDiv(size.h, int(dpi), 96)};
+    SetWindowPos(f.app.window, nullptr, 0, 0, outer.right, outer.bottom, SWP_NOZORDER | SWP_NOACTIVATE);
+    ApplyPreview(f.app, 5);
+    f.app.settings = f.app.show_details = false;
+    SendMessageW(f.app.window, WM_COMMAND, page.command == kSettings || page.command == kDetails ? kHome : page.command, 0);
+    if (page.preview) ApplyPreview(f.app, page.preview);
+    if (page.command == kSettings || page.command == kDetails) SendMessageW(f.app.window, WM_COMMAND, page.command, 0);
+    if (banner.preview != 5) ApplyPreview(f.app, banner.preview);
+    Layout(f.app);
+    const std::string state = std::string(page.name) + "-" + banner.name + "-" + size.name + "-" + std::to_string(dpi) + (en ? "-en" : "-pt");
+    INFO(state);
+    RECT client{}; GetClientRect(f.app.window, &client);
+    const auto controls = VisibleControls(f.app);
+    std::vector<RECT> cards;
+    const auto& g = f.app.geo;
+    for (const auto& r : {g.banner, g.hero, g.drop, g.list_card, g.detail, g.search, g.details_card, g.empty}) cards.push_back(r);
+    for (const auto& r : g.stats) cards.push_back(r);
+    for (const auto& r : g.tiles) cards.push_back(r);
+    for (const auto& r : g.cards) cards.push_back(r);
+    HDC dc = GetDC(f.app.window);
+    for (size_t i = 0; i < controls.size(); ++i) {
+      const auto& c = controls[i];
+      INFO(Narrow(Describe(c)));
+      CHECK(c.r.left >= 0); CHECK(c.r.top >= 0);
+      CHECK(c.r.right <= client.right); CHECK(c.r.bottom <= client.bottom);
+      for (const auto& card : cards) {
+        RECT hit{};
+        if (IsRectEmpty(&card) || !IntersectRect(&hit, &card, &c.r)) continue;
+        RECT inside{}; UnionRect(&inside, &card, &c.r);
+        CHECK(EqualRect(&inside, &card));
+      }
+      for (size_t j = i + 1; j < controls.size(); ++j) {
+        RECT hit{};
+        INFO("overlaps " << Narrow(Describe(controls[j])));
+        CHECK_FALSE(IntersectRect(&hit, &c.r, &controls[j].r));
+      }
+      wchar_t cls[16]{}; GetClassNameW(c.h, cls, 16);
+      const int w = c.r.right - c.r.left, h = c.r.bottom - c.r.top;
+      RECT region{};
+      const bool whole = GetWindowRgnBox(c.h, &region) == ERROR;
+      if (std::wstring_view(cls) == L"Button" && w > h && whole) CHECK(NeededWidth(f.app, dc, c) <= w);
+      if (std::wstring_view(cls) == L"Static" && !(GetWindowLongPtrW(c.h, GWL_STYLE) & (SS_ENDELLIPSIS | SS_PATHELLIPSIS)) && whole) {
+        wchar_t text[2048]{}; GetWindowTextW(c.h, text, 2048);
+        RECT need{0, 0, w, 0};
+        auto font = reinterpret_cast<HFONT>(SendMessageW(c.h, WM_GETFONT, 0, 0));
+        auto previous = SelectObject(dc, font);
+        DrawTextW(dc, text, -1, &need, DT_CALCRECT | DT_WORDBREAK | DT_NOPREFIX | DT_EDITCONTROL);
+        SelectObject(dc, previous);
+        CHECK(need.bottom <= h);
+      }
+    }
+    ReleaseDC(f.app.window, dc);
+    if (!captures.empty()) SaveCapture(f.app, captures / (state + ".png"));
+    if (page.command == kSettings) {
+      // Clipped content stays reachable: focus reveals the last control, and the
+      // fully scrolled page shows every card above the window's bottom edge.
+      const auto last = Item(f.app, kLangEn);
+      Reveal(f.app, last);
+      RECT box{};
+      CHECK(GetWindowRgnBox(last, &box) == ERROR);
+      f.app.scroll = 1 << 20; Layout(f.app);
+      CHECK(f.app.scroll == f.app.geo.scroll_max);
+      for (const auto& card : f.app.geo.cards) CHECK(card.bottom <= client.bottom);
+      if (!captures.empty() && f.app.geo.scroll_max > 0) SaveCapture(f.app, captures / (state + "-scrolled.png"));
+      f.app.scroll = 0; Layout(f.app);
+    }
+  }
+  english = false;
+  ApplyPreview(f.app, 5);
+}
 #endif

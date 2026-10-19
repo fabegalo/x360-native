@@ -38,7 +38,7 @@ void VerifyDistribution(const fs::path& directory) {
   VerifyPackage(directory);
 #endif
 }
-constexpr UINT kFinished = WM_APP + 1, kProgress = WM_APP + 2, kDetected = WM_APP + 3, kInitialized = WM_APP + 4, kInspected = WM_APP + 5, kOpenEnvironment = WM_APP + 6, kEnvironmentChecked = WM_APP + 7, kSessionStarted = WM_APP + 8, kSessionClosed = WM_APP + 9, kPreview = WM_APP + 20;
+constexpr UINT kFinished = WM_APP + 1, kProgress = WM_APP + 2, kDetected = WM_APP + 3, kInitialized = WM_APP + 4, kInspected = WM_APP + 5, kOpenEnvironment = WM_APP + 6, kEnvironmentChecked = WM_APP + 7, kSessionStarted = WM_APP + 8, kSessionClosed = WM_APP + 9, kReveal = WM_APP + 10, kPreview = WM_APP + 20;
 enum { kFolder = 101, kTargets, kCheck, kImport, kPrepare, kLaunch, kDetails, kData, kCancel, kLanguage, kInstall, kStorage, kPrimary, kSettings, kImportFolder, kDashboards, kGames, kHome, kImportPage, kAddContent, kLibrary, kGameList, kRenderer, kNativeDevelopment,
        kSearch, kFilter0, kFilter1, kFilter2, kFilter3, kLangPt, kLangEn, kRendererNative, kRetry, kDismiss, kBannerLibrary, kBannerDetails,
        kConsoleLanguage, kConsoleCountry, kVerifyTarget };
@@ -59,8 +59,13 @@ enum class Kind { Secondary, Primary, Nav, Chip, Ghost, Option, Toggle };
 enum class Tone { Neutral, Ok, Warn, Err, Info };
 struct Style { Kind kind = Kind::Secondary; const wchar_t* glyph = nullptr; int back = 0; };  // back: 0 bg, 1 sidebar, 2 surface
 struct Geo {
-  RECT banner{}, bar{}, steps{}, hero{}, stats[4]{}, drop{}, tiles[3]{}, list_card{}, detail{}, search{}, cards[4]{}, details_card{}, empty{}, sidebar{};
+  RECT banner{}, bar{}, steps{}, elapsed{}, hero{}, stats[4]{}, drop{}, tiles[3]{}, list_card{}, detail{}, search{}, cards[4]{}, details_card{}, empty{}, sidebar{};
   bool banner_on = false;
+  int banner_text = 0, title_right = 0, action_w = 0;
+  // Settings content scrolls inside the viewport; its controls are clipped to it.
+  RECT viewport{};
+  int scroll_max = 0;
+  std::vector<HWND> scrolled;
 };
 struct Fonts { HFONT body{}, bold{}, caption{}, headline{}, big{}, icon{}, icon_big{}, mono{}; };
 
@@ -114,6 +119,8 @@ struct App {
   int next_action = kFolder;
   // Presentation state
   Geo geo;
+  std::vector<HWND> clipped;  // controls with a window region set by Layout
+  int scroll = 0;
   int filter = 0;
   std::wstring query, chip_text, activity_title, selection_title;
   Tone chip_tone = Tone::Neutral;
@@ -182,8 +189,33 @@ LRESULT CALLBACK HotProc(HWND h, UINT m, WPARAM wp, LPARAM lp, UINT_PTR, DWORD_P
     InvalidateRect(h, nullptr, FALSE);
   } else if (m == WM_MOUSELEAVE && a->hot == h) {
     a->hot = nullptr; InvalidateRect(h, nullptr, FALSE);
-  } else if (m == WM_NCDESTROY) RemoveWindowSubclass(h, HotProc, 0);
+  } else if (m == WM_SETFOCUS) PostMessageW(a->window, kReveal, reinterpret_cast<WPARAM>(h), 0);
+  else if (m == WM_NCDESTROY) RemoveWindowSubclass(h, HotProc, 0);
   return DefSubclassProc(h, m, wp, lp);
+}
+// A closed list scrolls the page instead of silently changing a saved console setting.
+LRESULT CALLBACK ComboProc(HWND h, UINT m, WPARAM wp, LPARAM lp, UINT_PTR, DWORD_PTR) {
+  if (m == WM_MOUSEWHEEL && !SendMessageW(h, CB_GETDROPPEDSTATE, 0, 0)) return SendMessageW(GetParent(h), m, wp, lp);
+  if (m == WM_NCDESTROY) RemoveWindowSubclass(h, ComboProc, 0);
+  return DefSubclassProc(h, m, wp, lp);
+}
+// Height the wrapped text of a static control needs at `width`, as the control draws it.
+int TextHeight(HWND h, int width) {
+  wchar_t text[2048]{}; GetWindowTextW(h, text, 2048);
+  HDC dc = GetDC(h);
+  const auto old = SelectObject(dc, reinterpret_cast<HFONT>(SendMessageW(h, WM_GETFONT, 0, 0)));
+  RECT r{0, 0, std::max(1, width), 0};
+  DrawTextW(dc, text, -1, &r, DT_CALCRECT | DT_WORDBREAK | DT_NOPREFIX | DT_EDITCONTROL);
+  TEXTMETRICW metrics{}; GetTextMetricsW(dc, &metrics);
+  SelectObject(dc, old); ReleaseDC(h, dc);
+  return std::max<int>(r.bottom, metrics.tmHeight);
+}
+int LineHeight(HWND h) {
+  HDC dc = GetDC(h);
+  const auto old = SelectObject(dc, reinterpret_cast<HFONT>(SendMessageW(h, WM_GETFONT, 0, 0)));
+  TEXTMETRICW metrics{}; GetTextMetricsW(dc, &metrics);
+  SelectObject(dc, old); ReleaseDC(h, dc);
+  return metrics.tmHeight;
 }
 HWND Control(App& a, const wchar_t* cls, const wchar_t* text, DWORD style, int id = 0) {
   if (std::wstring_view(cls) == L"BUTTON") style |= BS_OWNERDRAW;
@@ -199,6 +231,14 @@ HWND Button(App& a, int id, Kind kind, const wchar_t* glyph = nullptr, int back 
   return Control(a, L"BUTTON", L"", WS_TABSTOP, id);
 }
 HWND Item(const App& a, int id) { return GetDlgItem(a.window, id); }
+// Width an owner-drawn button needs for its label (and glyph), mirroring DrawButton.
+int ButtonWidth(const App& a, int id, bool glyph) {
+  wchar_t text[256]{}; GetWindowTextW(Item(a, id), text, 256);
+  HDC dc = GetDC(a.window);
+  const int w = ui::TextWidth(dc, glyph ? a.fonts.bold : a.fonts.body, text);
+  ReleaseDC(a.window, dc);
+  return w + ui::S(glyph ? 22 + 8 + 24 : 24, a.dpi);
+}
 
 // ---------- State of listed items ----------
 Row StatusOf(const App& a, size_t i) {
@@ -286,12 +326,27 @@ void Layout(App& a) {
   const int W = client.right, H = client.bottom;
   auto s = [&](int v) { return ui::S(v, a.dpi); };
   std::vector<HWND> placed;
+  Geo g;
+  RECT clip{};  // non-empty while placing scrolled content
   auto put = [&](HWND h, int x, int y, int w, int hgt, bool visible = true) {
     placed.push_back(h);
     SetWindowPos(h, nullptr, x, y, std::max(0, w), std::max(0, hgt), SWP_NOZORDER | SWP_NOACTIVATE | (visible ? SWP_SHOWWINDOW : SWP_HIDEWINDOW));
+    bool clipped = false;
+    if (!IsRectEmpty(&clip)) {
+      g.scrolled.push_back(h);
+      // Measure the real window: a drop-down list keeps only its closed height.
+      RECT r{}; GetWindowRect(h, &r);
+      MapWindowPoints(nullptr, a.window, reinterpret_cast<POINT*>(&r), 2);
+      RECT shown{};
+      if (!IntersectRect(&shown, &r, &clip)) shown = {};
+      else if (!EqualRect(&shown, &r)) OffsetRect(&shown, -r.left, -r.top);
+      if (!EqualRect(&shown, &r)) { SetWindowRgn(h, CreateRectRgnIndirect(&shown), TRUE); clipped = true; }
+    }
+    const auto known = std::find(a.clipped.begin(), a.clipped.end(), h);
+    if (clipped && known == a.clipped.end()) a.clipped.push_back(h);
+    if (!clipped && known != a.clipped.end()) { a.clipped.erase(known); SetWindowRgn(h, nullptr, TRUE); }
   };
   auto rect = [](int x, int y, int w, int h) { return RECT{x, y, x + w, y + h}; };
-  Geo g;
   const Page page = PageOf(a);
   const int sb = s(216), pad = s(32);
   g.sidebar = rect(0, 0, sb, H);
@@ -318,21 +373,47 @@ void Layout(App& a) {
   g.banner_on = banner;
   if (banner) {
     const bool busy = a.busy;
-    const int bh = busy ? s(156) : s(116);
+    // Actions share the title row; the message starts below them and grows with
+    // its wrapped length, so no control covers a button's border.
+    const int tw = cw - s(76) - s(24), line = LineHeight(a.activity_text);
+    g.banner_text = std::clamp(TextHeight(a.activity_text, tw), line, 4 * line);
+    const int text_top = s(58), bar_top = text_top + g.banner_text + s(12);
+    const bool stages = busy && !a.stage_names.empty();
+    const int right = cx + cw - s(24);
+    // Result actions sit beside the title, or in their own row when the title needs the space.
+    std::vector<int> actions;
+    if (!busy && a.result == 3) actions = {kBannerDetails, kRetry};
+    else if (!busy && a.result == 1 && a.importing) actions = {kBannerLibrary};
+    int actions_w = 0;
+    for (int id : actions) actions_w += ButtonWidth(a, id, true) + s(8);
+    HDC title_dc = GetDC(a.window);
+    const int title_w = ui::TextWidth(title_dc, a.fonts.big, a.result_title);
+    ReleaseDC(a.window, title_dc);
+    const bool action_row = !actions.empty() && cx + s(76) + title_w + s(16) > right - s(36) - actions_w;
+    const int bh = busy ? bar_top + s(6) + (stages ? s(10) + s(26) : 0) + s(14) :
+                   text_top + g.banner_text + (action_row ? s(12) + s(36) : 0) + s(18);
     g.banner = rect(cx, yc, cw, bh);
-    put(a.activity_text, cx + s(76), yc + (busy ? s(50) : s(48)), cw - s(76) - s(24) - (busy ? 0 : s(400)), busy ? s(44) : s(54));
+    put(a.activity_text, cx + s(76), yc + text_top, tw, g.banner_text);
     if (busy) {
-      put(Item(a, kCancel), cx + cw - s(24) - s(130), yc + s(16), s(130), s(36), !a.session);
-      g.bar = rect(cx + s(24), yc + s(104), cw - s(48), s(6));
-      g.steps = rect(cx + s(24), yc + s(120), cw - s(48), s(26));
+      const int cancel_w = std::max(s(130), ButtonWidth(a, kCancel, true));
+      put(Item(a, kCancel), right - cancel_w, yc + s(16), cancel_w, s(36), !a.session);
+      g.elapsed = rect(right - cancel_w - s(12) - s(150), yc + s(18), s(150), s(28));
+      g.title_right = g.elapsed.left - s(8);
+      g.bar = rect(cx + s(24), yc + bar_top, cw - s(48), s(6));
+      g.steps = stages ? rect(cx + s(24), g.bar.bottom + s(10), cw - s(48), s(26)) : RECT{};
     } else {
-      int bx = cx + cw - s(24) - s(36);
-      put(Item(a, kDismiss), bx, yc + s(16), s(36), s(36));
-      if (a.result == 3) {
-        bx -= s(8) + s(150); put(Item(a, kBannerDetails), bx, yc + s(16), s(150), s(36));
-        bx -= s(8) + s(200); put(Item(a, kRetry), bx, yc + s(16), s(200), s(36));
-      } else if (a.result == 1 && a.importing) {
-        bx -= s(8) + s(170); put(Item(a, kBannerLibrary), bx, yc + s(16), s(170), s(36));
+      put(Item(a, kDismiss), right - s(36), yc + s(16), s(36), s(36));
+      g.title_right = right - s(36) - s(16);
+      if (action_row) {
+        int bx = cx + s(76);
+        for (auto it = actions.rbegin(); it != actions.rend(); ++it) {
+          const int w = ButtonWidth(a, *it, true);
+          put(Item(a, *it), bx, yc + text_top + g.banner_text + s(12), w, s(36)); bx += w + s(8);
+        }
+      } else {
+        int bx = right - s(36);
+        for (int id : actions) { const int w = ButtonWidth(a, id, true); bx -= s(8) + w; put(Item(a, id), bx, yc + s(16), w, s(36)); }
+        g.title_right = bx - s(16);
       }
     }
     yc += bh + s(16);
@@ -385,9 +466,12 @@ void Layout(App& a) {
         g.list_card = rect(cx, top, cw, std::max<int>(s(96), int(g.detail.top) - s(12) - top));
         put(a.library_list, cx, top, cw, g.list_card.bottom - top);
         SendMessageW(a.library_list, LB_SETITEMHEIGHT, 0, s(76));
-        put(a.status, cx + s(24), g.detail.top + s(58), cw - s(48) - s(244), s(80));
-        put(Item(a, kPrimary), cx + cw - s(24) - s(220), g.detail.top + s(22), s(220), s(46));
-        put(Item(a, kAddContent), cx + cw - s(24) - s(220), g.detail.top + s(22) + s(46) + s(12), s(220), s(40));
+        // Both actions share one column wide enough for the longer label.
+        const int aw = std::min(cw / 2, std::max({s(220), ButtonWidth(a, kPrimary, true), ButtonWidth(a, kAddContent, true)}));
+        g.action_w = aw;
+        put(a.status, cx + s(24), g.detail.top + s(58), cw - s(48) - aw - s(24), s(80));
+        put(Item(a, kPrimary), cx + cw - s(24) - aw, g.detail.top + s(22), aw, s(46));
+        put(Item(a, kAddContent), cx + cw - s(24) - aw, g.detail.top + s(22) + s(46) + s(12), aw, s(40));
       }
       break;
     }
@@ -409,38 +493,60 @@ void Layout(App& a) {
       const bool two = cw >= s(700);
       const int gap = s(16);
       const int colw = two ? (cw - gap) / 2 : cw;
-      const int hg = s(314), hs = s(188), hl = s(300), hy = s(190);
-      int lx = cx, rx = two ? cx + colw + gap : cx;
-      int ly = yc, ry = two ? yc : yc + hg + gap;
-      g.cards[0] = rect(lx, ly, colw, hg);                     // graphics
-      if (two) { g.cards[1] = rect(rx, ry, colw, hs); } else { g.cards[1] = rect(lx, ly + hg + gap, colw, hs); }
-      const int ly2 = two ? ly + hg + gap : g.cards[1].bottom + gap;
-      g.cards[2] = rect(two ? rx : lx, two ? ry + hs + gap : ly2, colw, hl); // console
-      const int sy2 = two ? ly2 : g.cards[2].bottom + gap;
-      g.cards[3] = rect(lx, sy2, colw, hy);                   // desktop
-      const RECT& gf = g.cards[0];
-      put(a.renderer_hint, gf.left + s(24), gf.top + s(52), colw - s(48), s(60));
       const int ow = colw - s(48);
-      put(Item(a, kRenderer), gf.left + s(24), gf.top + s(116), ow, s(58));
-      put(Item(a, kRendererNative), gf.left + s(24), gf.top + s(182), ow, s(58));
-      put(Item(a, kNativeDevelopment), gf.left + s(24), gf.top + s(256), colw - s(48), s(36));
+      // Card heights follow their wrapped texts; storage actions pair up only when every label fits.
+      const int hint_h = TextHeight(a.renderer_hint, ow);
+      const int console_h = TextHeight(a.console_hint, ow);
+      const int env_h = TextHeight(a.env_text, ow);
+      int need = 0;
+      for (int id : {kFolder, kStorage, kData, kCheck}) need = std::max(need, ButtonWidth(a, id, false));
+      const bool pairs = 2 * need + s(12) <= ow;
+      const int storage_rows = pairs ? 2 : 4;
+      const int hg = s(52) + hint_h + s(12) + s(58) + s(8) + s(58) + s(16) + s(36) + s(20);
+      const int hs = s(92) + storage_rows * s(46) - s(8) + s(20);
+      const int hl = s(178) + console_h + s(20);
+      const int hy = s(96) + env_h + s(20);
+      // Lay the cards out from the viewport top, then shift them by the clamped scroll.
+      const int top = yc;
+      int lx = cx, rx = two ? cx + colw + gap : cx;
+      g.cards[0] = rect(lx, top, colw, hg);                     // graphics
+      g.cards[1] = two ? rect(rx, top, colw, hs) : rect(lx, top + hg + gap, colw, hs);  // storage
+      g.cards[2] = rect(two ? rx : lx, g.cards[1].bottom + gap, colw, hl);              // console
+      g.cards[3] = rect(lx, two ? g.cards[0].bottom + gap : g.cards[2].bottom + gap, colw, hy);  // desktop
+      LONG content = 0;
+      for (const auto& c : g.cards) content = std::max(content, c.bottom);
+      g.viewport = RECT{sb + 1, top, W, H};
+      g.scroll_max = std::max(0, int(content) + s(28) - H);
+      a.scroll = std::clamp(a.scroll, 0, g.scroll_max);
+      for (auto& c : g.cards) OffsetRect(&c, 0, -a.scroll);
+      clip = g.viewport;
+      const RECT& gf = g.cards[0];
+      put(a.renderer_hint, gf.left + s(24), gf.top + s(52), ow, hint_h);
+      const int oy = gf.top + s(52) + hint_h + s(12);
+      put(Item(a, kRenderer), gf.left + s(24), oy, ow, s(58));
+      put(Item(a, kRendererNative), gf.left + s(24), oy + s(66), ow, s(58));
+      put(Item(a, kNativeDevelopment), gf.left + s(24), oy + s(66) + s(58) + s(16), ow, s(36));
       const RECT& st = g.cards[1];
-      put(a.root_text, st.left + s(24), st.top + s(56), colw - s(48), s(24));
-      const int bw2 = (colw - s(48) - s(12)) / 2;
-      put(Item(a, kFolder), st.left + s(24), st.top + s(92), bw2, s(38));
-      put(Item(a, kStorage), st.left + s(24) + bw2 + s(12), st.top + s(92), bw2, s(38));
-      put(Item(a, kData), st.left + s(24), st.top + s(138), bw2, s(38));
-      put(Item(a, kCheck), st.left + s(24) + bw2 + s(12), st.top + s(138), bw2, s(38));
+      put(a.root_text, st.left + s(24), st.top + s(56), ow, s(24));
+      const int bw2 = pairs ? (ow - s(12)) / 2 : ow;
+      int slot = 0;
+      for (int id : {kFolder, kStorage, kData, kCheck}) {
+        const int col = pairs ? slot % 2 : 0, row = pairs ? slot / 2 : slot;
+        put(Item(a, id), st.left + s(24) + col * (bw2 + s(12)), st.top + s(92) + row * s(46), bw2, s(38));
+        ++slot;
+      }
       const RECT& lg = g.cards[2];
       put(a.console_language_label, lg.left + s(24), lg.top + s(50), ow, s(22));
       put(Item(a, kConsoleLanguage), lg.left + s(24), lg.top + s(76), ow, s(300));
       put(a.console_country_label, lg.left + s(24), lg.top + s(112), ow, s(22));
       put(Item(a, kConsoleCountry), lg.left + s(24), lg.top + s(138), ow, s(300));
-      put(a.console_hint, lg.left + s(24), lg.top + s(178), ow, s(108));
+      put(a.console_hint, lg.left + s(24), lg.top + s(178), ow, console_h);
       const RECT& sy = g.cards[3];
-      put(Item(a, kLangPt), sy.left + s(24), sy.top + s(48), s(140), s(36));
-      put(Item(a, kLangEn), sy.left + s(172), sy.top + s(48), s(140), s(36));
-      put(a.env_text, sy.left + s(24), sy.top + s(96), ow, s(82));
+      const int chip_w = std::max({s(140), ButtonWidth(a, kLangPt, false), ButtonWidth(a, kLangEn, false)});
+      put(Item(a, kLangPt), sy.left + s(24), sy.top + s(48), chip_w, s(36));
+      put(Item(a, kLangEn), sy.left + s(24) + chip_w + s(8), sy.top + s(48), chip_w, s(36));
+      put(a.env_text, sy.left + s(24), sy.top + s(96), ow, env_h);
+      clip = {};
       break;
     }
     case Page::Diagnostics: {
@@ -1070,11 +1176,10 @@ void PaintBanner(HDC dc, App& a) {
   RECT disc{b.left + s(24), b.top + s(16), b.left + s(64), b.top + s(56)};
   ui::Circle(dc, disc, ui::Mix(P.surface, color, 20));
   ui::Text(dc, a.fonts.icon, glyph, disc, color, DT_SINGLELINE | DT_VCENTER | DT_CENTER);
-  const int right = b.right - s(24) - (busy ? s(146) : 0);
-  ui::Text(dc, a.fonts.big, busy ? a.activity_title : a.result_title, {b.left + s(76), b.top + s(14), right - (busy ? s(150) : s(220)), b.top + s(48)}, P.text);
+  ui::Text(dc, a.fonts.big, busy ? a.activity_title : a.result_title, {b.left + s(76), b.top + s(14), a.geo.title_right, b.top + s(48)}, P.text);
   if (!busy) return;
   ui::Text(dc, a.fonts.caption, Elapsed(a) + (a.activity_kind == 1 && a.stage == 0 && a.extracted_bytes ? L"   ·   " + FormatBytes(a.extracted_bytes) : L""),
-           {right - s(150), b.top + s(18), right, b.top + s(46)}, P.muted, DT_SINGLELINE | DT_VCENTER | DT_RIGHT);
+           a.geo.elapsed, P.muted, DT_SINGLELINE | DT_VCENTER | DT_RIGHT);
   // Progress: completed stages are solid; the current stage animates because no percentage is known.
   const RECT& bar = a.geo.bar;
   ui::Round(dc, bar, (bar.bottom - bar.top) / 2, P.surface2);
@@ -1089,7 +1194,7 @@ void PaintBanner(HDC dc, App& a) {
     const int l = std::max(seg_left, seg_left + pos), r = std::min(seg_right, seg_left + pos + sweep);
     if (r > l) ui::Round(dc, {l, bar.top, r, bar.bottom}, (bar.bottom - bar.top) / 2, P.accent_text);
   }
-  if (count) {
+  if (count && !IsRectEmpty(&a.geo.steps)) {
     const RECT& st = a.geo.steps; const int sw = (st.right - st.left) / count;
     for (int i = 0; i < count; ++i) {
       const bool d = i < done, cur = i == done;
@@ -1168,7 +1273,7 @@ void Paint(App& a, HDC capture = nullptr) {
       card(g.detail);
       DrawChip(dc, a, g.detail.left + s(24), g.detail.top + s(20), a.chip_text, a.chip_tone);
       const int tx = g.detail.left + s(24) + ChipWidth(dc, a, a.chip_text) + s(12);
-      ui::Text(dc, a.fonts.bold, a.selection_title, {tx, g.detail.top + s(18), g.detail.right - s(24) - s(244), g.detail.top + s(46)}, P.text);
+      ui::Text(dc, a.fonts.bold, a.selection_title, {tx, g.detail.top + s(18), g.detail.right - s(24) - g.action_w - s(24), g.detail.top + s(46)}, P.text);
       if (page == Page::Dashboard) {
         // Requirements of the selected version: what is still missing before it can start.
         struct Need { std::wstring text; bool ok; };
@@ -1208,11 +1313,24 @@ void Paint(App& a, HDC capture = nullptr) {
       break;
     }
     case Page::Settings: {
+      const auto saved = SaveDC(dc);
+      const RECT view = ui::Off(g.viewport);
+      IntersectClipRect(dc, view.left, view.top, view.right, view.bottom);
       for (const auto& c : g.cards) card(c);
       DrawHeading(dc, a, g.cards[0], ui::icon::chip, WTr("Gráficos", "Graphics"));
       DrawHeading(dc, a, g.cards[1], ui::icon::save, WTr("Armazenamento e ambiente", "Storage and environment"));
       DrawHeading(dc, a, g.cards[2], ui::icon::language, WTr("Console Xbox 360", "Xbox 360 console"));
       DrawHeading(dc, a, g.cards[3], ui::icon::tools, WTr("Aplicativo desktop", "Desktop application"));
+      RestoreDC(dc, saved);
+      if (g.scroll_max > 0) {
+        // Position indicator for the scrolled cards (wheel, Tab and the gamepad reveal them).
+        const RECT& v = g.viewport;
+        const int track = v.bottom - v.top - s(16), view_h = v.bottom - v.top;
+        const int thumb = std::max(s(32), track * view_h / (view_h + g.scroll_max));
+        const int y = v.top + s(8) + (track - thumb) * a.scroll / g.scroll_max;
+        ui::Round(dc, {v.right - s(14), v.top + s(8), v.right - s(10), v.top + s(8) + track}, s(2), P.surface);
+        ui::Round(dc, {v.right - s(14), y, v.right - s(10), y + thumb}, s(2), P.faint);
+      }
       break;
     }
     case Page::Diagnostics: card(g.details_card); break;
@@ -1315,8 +1433,11 @@ void DrawButton(App& a, const DRAWITEMSTRUCT& item) {
   } else if (style.kind == Kind::Nav) {
     ui::Text(dc, a.fonts.icon, style.glyph ? style.glyph : L"", {s(14), 0, s(42), h}, glyph_ink, DT_SINGLELINE | DT_VCENTER | DT_CENTER);
     ui::Text(dc, selected ? a.fonts.bold : a.fonts.body, label, {s(50), 0, w - s(8), h}, ink);
+  } else if (glyph && style.kind != Kind::Chip && w <= h) {
+    // Square buttons are icon-only; their label stays the accessible name.
+    ui::Text(dc, a.fonts.icon, glyph, box, glyph_ink, DT_SINGLELINE | DT_VCENTER | DT_CENTER);
   } else if (glyph && style.kind != Kind::Chip) {
-    const int iw = s(22), gap = s(8), tw = ui::TextWidth(dc, a.fonts.body, label);
+    const int iw = s(22), gap = s(8), tw = ui::TextWidth(dc, a.fonts.bold, label);
     const int total = iw + gap + std::min(tw, w - iw - gap - s(16));
     const int x0 = std::max(s(8), (w - total) / 2);
     ui::Text(dc, a.fonts.icon, glyph, {x0, 0, x0 + iw, h}, glyph_ink, DT_SINGLELINE | DT_VCENTER | DT_CENTER);
@@ -1375,6 +1496,24 @@ void Navigate(App& a, int id) {
   a.settings = a.show_details = false;
 }
 void GoBack(App& a) { if (a.settings || a.show_details) { a.settings = a.show_details = false; InspectSelected(a); } }
+// Keyboard and gamepad focus scrolls a clipped Settings control fully into view.
+void Reveal(App& a, HWND h) {
+  const auto& g = a.geo;
+  if (g.scroll_max <= 0 || std::find(g.scrolled.begin(), g.scrolled.end(), h) == g.scrolled.end()) return;
+  RECT r{}; GetWindowRect(h, &r);
+  MapWindowPoints(nullptr, a.window, reinterpret_cast<POINT*>(&r), 2);
+  const int margin = ui::S(16, a.dpi);
+  const int delta = r.top < g.viewport.top + margin ? r.top - g.viewport.top - margin :
+                    r.bottom > g.viewport.bottom - margin ? r.bottom - g.viewport.bottom + margin : 0;
+  if (delta) { a.scroll += delta; Layout(a); }
+}
+// Progress text can wrap to another line; resize the banner only when it does.
+void RefreshBanner(App& a) {
+  if (!a.geo.banner_on) return;
+  const int width = a.geo.banner.right - a.geo.banner.left - ui::S(76 + 24, a.dpi), line = LineHeight(a.activity_text);
+  if (std::clamp(TextHeight(a.activity_text, width), line, 4 * line) != a.geo.banner_text) Layout(a);
+  else InvalidateRect(a.window, &a.geo.banner, FALSE);
+}
 void ApplyPreview(App& a, int state) {
 #ifndef X360N_DISTRIBUTION
   switch (state) {
@@ -1506,6 +1645,8 @@ LRESULT CALLBACK WndProc(HWND window, UINT message, WPARAM wp, LPARAM lp) {
         a->console_hint = Control(*a, L"STATIC", L"", 0);
         for (int id : {kConsoleLanguage, kConsoleCountry}) {
           const auto combo = Control(*a, L"COMBOBOX", L"", CBS_DROPDOWNLIST | CBS_OWNERDRAWFIXED | CBS_HASSTRINGS | WS_VSCROLL | WS_TABSTOP, id);
+          SetWindowTheme(combo, L"DarkMode_CFD", nullptr);
+          SetWindowSubclass(combo, ComboProc, 0, 0);
           auto add = [&](uint32_t value, const char* name) {
             const auto text = Wide(name);
             const auto index = SendMessageW(combo, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(text.c_str()));
@@ -1569,6 +1710,13 @@ LRESULT CALLBACK WndProc(HWND window, UINT message, WPARAM wp, LPARAM lp) {
       case WM_GETMINMAXINFO: {
         auto* size = reinterpret_cast<MINMAXINFO*>(lp); size->ptMinTrackSize = {MulDiv(1000, a->dpi, 96), MulDiv(700, a->dpi, 96)}; return 0;
       }
+      case WM_MOUSEWHEEL:
+        if (PageOf(*a) == Page::Settings && a->geo.scroll_max > 0) {
+          a->scroll -= GET_WHEEL_DELTA_WPARAM(wp) * ui::S(72, a->dpi) / WHEEL_DELTA;
+          Layout(*a); return 0;
+        }
+        break;
+      case kReveal: Reveal(*a, reinterpret_cast<HWND>(wp)); return 0;
       case kPreview: ApplyPreview(*a, int(wp)); return 0;
       case WM_COMMAND: {
         ActionTrace trace("ui.command." + std::to_string(LOWORD(wp)));
@@ -1589,14 +1737,15 @@ LRESULT CALLBACK WndProc(HWND window, UINT message, WPARAM wp, LPARAM lp) {
             id != kSearch && id != kGameList && !(id >= kFilter0 && id <= kFilter3)) return 0;
         if (id == kDetails || id == kSettings) {
           if (id == kDetails) { a->show_details = !a->show_details; a->settings = false; }
-          else { if (a->busy) return 0; a->settings = !a->settings; a->show_details = false; }
+          else { if (a->busy) return 0; a->settings = !a->settings; a->show_details = false; a->scroll = 0; }
           SetPageTexts(*a);
           if (!a->show_details && !a->settings && !a->busy) InspectSelected(*a);
           Layout(*a); return 0;
         }
         if (id == kData && !a->root.empty()) { auto p = a->root / ".local"; fs::create_directories(p); ShellExecuteW(window, L"open", p.c_str(), nullptr, nullptr, SW_SHOWNORMAL); return 0; }
-        if (id == kCancel) { a->cancel = true; Set(a->activity_text, Tr("Cancelando... Aguarde a etapa atual terminar com segurança.", "Cancelling... Wait for the current step to finish safely.")); return 0; }
+        if (id == kCancel) { a->cancel = true; Set(a->activity_text, Tr("Cancelando... Aguarde a etapa atual terminar com segurança.", "Cancelling... Wait for the current step to finish safely.")); RefreshBanner(*a); return 0; }
         if (id == kConsoleLanguage || id == kConsoleCountry) {
+          if (HIWORD(wp) == CBN_SETFOCUS) { Reveal(*a, reinterpret_cast<HWND>(lp)); return 0; }
           if (a->root.empty() || HIWORD(wp) != CBN_SELCHANGE) return 0;
           const auto combo = Item(*a, id);
           const auto selected = SendMessageW(combo, CB_GETCURSEL, 0, 0);
@@ -1774,11 +1923,7 @@ LRESULT CALLBACK WndProc(HWND window, UINT message, WPARAM wp, LPARAM lp) {
             const int pad = ui::S(4, a->dpi);
             RECT bar = a->geo.bar; InflateRect(&bar, 0, pad);
             InvalidateRect(window, &bar, FALSE);
-            if (++a->anim_ticks % 30 == 0) {
-              RECT label = a->geo.banner; label.top += ui::S(10, a->dpi); label.bottom = label.top + ui::S(40, a->dpi);
-              label.left = label.right - ui::S(24 + 146 + 150, a->dpi); label.right -= ui::S(24 + 146, a->dpi);
-              InvalidateRect(window, &label, FALSE);
-            }
+            if (++a->anim_ticks % 30 == 0) InvalidateRect(window, &a->geo.elapsed, FALSE);
           }
           return 0;
         }
@@ -1801,7 +1946,7 @@ LRESULT CALLBACK WndProc(HWND window, UINT message, WPARAM wp, LPARAM lp) {
       case kProgress: {
         std::unique_ptr<std::string> text(reinterpret_cast<std::string*>(lp)); Set(a->details, *text);
         if (!a->cancel) Set(a->activity_text, *text);
-        InvalidateRect(window, &a->geo.banner, FALSE); return 0;
+        RefreshBanner(*a); return 0;
       }
       case kInspected: {
         std::unique_ptr<std::string> error(reinterpret_cast<std::string*>(lp));
