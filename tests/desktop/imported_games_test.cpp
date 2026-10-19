@@ -245,7 +245,11 @@ TEST_CASE("universal library isolates discs and leaves sibling DLC intact", "[un
   const auto second = std::find_if(games.begin(), games.end(), [&](const auto& game) { return game.game_root != first_root; });
   REQUIRE(second != games.end());
   CHECK(Utf8(second->game_root.filename()).starts_with("disc-2-"));
+  // 64 bits of the identity keep deep content-install discs under MAX_PATH.
+  CHECK(Utf8(second->game_root.filename()).size() == std::string("disc-2-").size() + 16);
   CHECK(second->game_root.parent_path() == first_root.parent_path());
+  CHECK(second->label.ends_with("(Disco 2 de 2)"));
+  CHECK(second->label_en.ends_with("(Disc 2 of 2)"));
   CHECK(DigestFile(first_root/"default.xex")->sha256 != DigestFile(second->game_root/"default.xex")->sha256);
   CHECK(fs::file_size(first_root.parent_path()/"dlc/package") == 12);
   CHECK(Inspect(f.paths, *second).inputs_ok);

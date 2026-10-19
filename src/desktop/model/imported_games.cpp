@@ -227,9 +227,12 @@ std::string ImportGame(const ProjectPaths& paths, const std::vector<Target>& tar
   Target target; target.id = id; target.aot = false;
   // Discs and content revisions share a title directory, never a writable root.
   // DLC packages may live alongside them under dlc/, outside every game root.
+  // The directory carries 64 bits of the identity: content-install discs nest
+  // packages deep enough that the full 256-bit name exceeds MAX_PATH (error 206)
+  // under an extracted package's data folder. The catalog keeps the full id.
   const auto disc = identity.disc_number ? "disc-" + std::to_string(identity.disc_number) + "-" : "";
   target.game_root = paths.inputs() / "games" /
-      (identity.title_id.empty() ? "unknown" : identity.title_id) / (disc + id);
+      (identity.title_id.empty() ? "unknown" : identity.title_id) / (disc + id.substr(0, 16));
   if (const auto* recipe = Recipe(targets, record)) {
     target = *recipe;
     if (record["name"] == "") record["name"] = recipe->library.display_name;
@@ -278,6 +281,8 @@ std::string ImportGame(const ProjectPaths& paths, const std::vector<Target>& tar
     // desktop use UTF-8; retain the actual code and Unicode paths without letting
     // serialization replace the original failure with invalid-UTF-8 errors.
     auto message = "Erro de arquivo durante a importação (código " + std::to_string(e.code().value()) + ").";
+    if (e.code().value() == 206)  // ERROR_FILENAME_EXCED_RANGE: Windows long paths are disabled
+      message += " O caminho ficou longo demais para o Windows; use um ambiente em uma pasta mais curta (por exemplo C:\\x360).";
     if (!e.path1().empty()) message += " Caminho: " + Utf8(e.path1());
     if (!e.path2().empty()) message += " Destino: " + Utf8(e.path2());
     if (!previously_complete) { record["error"] = message; Save(paths, id, record); }
@@ -327,6 +332,11 @@ void ReadImportedGames(const ProjectPaths& paths, std::vector<Target>& targets) 
       auto name = r.at("name").get<std::string>();
       if (name.empty()) name = "Xbox 360" + (t.title_id.empty() ? " (unknown title)" : " " + t.title_id);
       t.label = t.label_en = name + (t.version.empty() ? "" : " — " + t.version);
+      // Discs of one title share its name; tell them apart in the library.
+      if (const auto number = r.value("disc_number", 0u), count = r.value("disc_count", 0u); number && count > 1) {
+        t.label += " (Disco " + std::to_string(number) + " de " + std::to_string(count) + ")";
+        t.label_en += " (Disc " + std::to_string(number) + " of " + std::to_string(count) + ")";
+      }
       if (!r.value("complete", false)) t.import_error = r.value("error", "Import interrupted; select the same source to resume.");
       if (const auto* recipe = Recipe(targets, r)) {
         auto& existing = targets[size_t(recipe - targets.data())];
