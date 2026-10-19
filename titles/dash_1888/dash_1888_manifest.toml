@@ -9,9 +9,17 @@ file_path = "../../.local/inputs/dashboards/1888/runtime/dash.xex"
 out_directory_path = "generated/dash"
 includes = ["analysis/dash_1888.toml", "analysis/dash_1888_pointer_targets.toml"]
 
+# Only the original Retail 1888 module pinned in snapshot.json.
+[[modules]]
+guest_path = 'game:\bootanim.xex'
+file_path = "../../.local/inputs/dashboards/1888/runtime/bootanim.xex"
+out_directory_path = "generated/bootanim"
+includes = ["analysis/bootanim_1888.toml"]
+
 [x360n]
 xex_sha256 = "261b32510079b2d0770631529f752a7580902283426b87dbc4b09a2764bb780b"
 native_exe = "../../.local/build/titles/dash_1888/dash_1888.exe"
 user_data_root = "../../.local/user/dash1888"
 launch_library = false
-args = ["--gpu_plugin=xenos", "--mnk_mode=true"]
+args = ["--gpu_plugin=xenos", "--mnk_mode=true", "--dash1888_boot_intro=true"]
+skip_boot_intro_args = ["--dash1888_boot_intro=false"]

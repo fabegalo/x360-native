@@ -3,7 +3,10 @@
 Retail **1888** (18/10/2026): Blades original, textos, troca Games/Media/System e
 Console Settings demonstrados com teclado; controle físico confirmado pelo
 mantenedor. Perfil Release próprio selecionável no launcher, com snapshot de 22
-originais e dados isolados. Guide/perfis/serviços/jogos não certificados; recurso
+originais e dados isolados. A intro original também renderizou animação/logo,
+com som confirmado e transição à Blades em 11,867 s; habilitada pelo launcher.
+[Contrato e validação da intro](reports/dashboard-1888-intro-2026-10-18.md).
+Guide/perfis/serviços/jogos não certificados; recurso
 localizado pt-BR ausente. [Procedência, SHA-256, testes e limites](reports/dashboard-1888-2026-10-18.md).
 As seções históricas abaixo tratam da 17559, salvo versão explicitamente indicada.
 

@@ -1,0 +1,28 @@
+# Retail 1888 bootanim.xex SHA-256
+# 456e7a4ec249dec02cb39ae02729a6542307ff9bd9361e55afa3264bbb5ebcb3.
+# Exports 1/2/3: 9801A010/9801A068/9801A088, from this module's export table.
+[functions]
+0x98034A58 = {} # unresolved tail call from 98038084; follows b at 98034A54
+
+# Pointer checker over actual .text 98008000-98041194; confirmed adjustment
+# thunks / leaf after a terminal predecessor, outside .pdata. Starts only.
+0x98034028 = {}
+0x98034038 = {}
+0x98034828 = {}
+0x98034830 = {}
+0x98034838 = {}
+0x980386B0 = {}
+0x980386B8 = {}
+0x980386C0 = {}
+0x980386E8 = {}
+0x980386F0 = {}
+0x98038700 = {}
+0x98038710 = {}
+
+# The original initializer 98011D50 clears object+28/+29 at 98011D70/74.
+# Ask export 2(false) AFTER its call returns, before original 98013528.
+# No skipped instructions, forced branches, counters, or rendering replacement.
+[[midasm_hook]]
+name = "x360n_boot1888_initialized"
+address = 0x98013524
+after_instruction = true
