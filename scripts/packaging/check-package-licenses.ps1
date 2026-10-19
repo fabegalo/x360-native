@@ -36,12 +36,14 @@ $lock=Get-Content -LiteralPath (Join-Path $payload 'deps.lock.json') -Raw | Conv
 if($inventory.schema -ne 1 -or $metadata.sdk_commit -ne $inventory.sdk_commit -or $lock.rexglue_sdk.commit -ne $inventory.sdk_commit) { throw 'License inventory SDK revision mismatch' }
 if(-not $metadata.desktop_only) { throw 'License scope only covers the desktop distribution' }
 if((Digest (Join-Path $package 'licenses/inventory.json')) -ne (Digest (Join-Path $payload 'licenses/inventory.json'))) { throw 'Payload/license inventory mismatch' }
+if((Digest (Join-Path $package 'licenses/excluded-loader-constants.json')) -ne (Digest (Join-Path $payload 'licenses/excluded-loader-constants.json'))) { throw 'Payload/exclusion policy mismatch' }
 if((Digest (Join-Path $payload 'payload.sha256')) -ne $metadata.payload_sha256) { throw 'Payload identity mismatch' }
 foreach($required in @('LICENSE','THIRD_PARTY_NOTICES.md')) {
     if((Digest (Join-Path $package $required)) -ne (Digest (Join-Path $payload $required))) { throw "Notice differs from committed payload: $required" }
 }
 $expected=@('LICENSE','THIRD_PARTY_NOTICES.md','READ-ME.txt','package.json','package.sha256','app/compile-commands.json','app/dependency-inputs.json','app/link-inputs.json','licenses/inventory.json','licenses/rexglue-attributions.txt','licenses/header-attributions.txt') + @($inventory.executables)
 $ids=@{}
+$expected += 'licenses/excluded-loader-constants.json'
 foreach($component in $inventory.components) {
     if($ids.ContainsKey($component.id)) { throw 'Duplicate component identity' }; $ids[$component.id]=$true
     if($component.scope -like 'binary*' -and $component.spdx -eq 'NOASSERTION') { throw "Unidentified desktop component: $($component.id)" }
