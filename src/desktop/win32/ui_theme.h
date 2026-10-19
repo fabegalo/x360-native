@@ -140,6 +140,7 @@ inline constexpr const wchar_t* chip = L"";
 inline constexpr const wchar_t* save = L"";
 inline constexpr const wchar_t* tools = L"";
 inline constexpr const wchar_t* disc = L"";
+inline constexpr const wchar_t* remove = L"";
 inline constexpr const wchar_t* package = L"";
 }
 }

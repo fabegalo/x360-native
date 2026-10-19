@@ -190,6 +190,42 @@ std::vector<std::string> InspectLibrary(const ProjectPaths& paths, const Target&
   }
   return issues;
 }
+void WithdrawLibrary(const Target& session, const Target& game, const std::vector<Target>& catalog) {
+  if (!session.session || session.user_root.empty() || game.library.title_id.empty() || game.inputs.empty() ||
+      !fs::is_directory(LibraryPath(session.user_root))) return;
+  auto entries = OtherRegistrations(session, game, catalog);
+  entries.insert(entries.begin(), Describe(session, game));
+  std::set<fs::path> expected;
+  for (const auto& input : game.inputs) expected.insert(input.destination.lexically_relative(game.game_root).lexically_normal());
+  // Identify everything before the first write; unknown data is preserved.
+  const auto staged = [](fs::path header) { header += ".x360n-library-tmp"; return header; };
+  for (const auto& entry : entries) {
+    for (const auto& header : {entry.header, staged(entry.header)}) {
+      if (!fs::exists(header)) continue;
+      if (!WithinNew(header, session.user_root) || fs::is_symlink(header) || !Same(header, Hash(entry.bytes)))
+        throw std::runtime_error("Registro da biblioteca diferente; preservado: " + Utf8(header));
+    }
+    if (!fs::exists(entry.folder)) continue;
+    if (!WithinNew(entry.folder, session.user_root) || fs::is_symlink(entry.folder) || !fs::is_directory(entry.folder))
+      throw std::runtime_error("Conteúdo da biblioteca redirecionado; preservado: " + Utf8(entry.folder));
+    for (const auto& file : fs::recursive_directory_iterator(entry.folder)) {
+      const auto type = file.symlink_status().type();
+      if (type == fs::file_type::directory) continue;
+      // PrepareLibrary leaves interrupted copies beside their destination.
+      auto name = Utf8(file.path().lexically_relative(entry.folder).lexically_normal());
+      if (const auto at = name.find(".x360n-library-tmp"); at != std::string::npos) name.resize(at);
+      if (type != fs::file_type::regular || !expected.contains(PathFromUtf8(name)))
+        throw std::runtime_error("Dados não identificados na biblioteca; preservados: " + Utf8(file.path()));
+    }
+  }
+  for (const auto& entry : entries) {
+    // Enumeration goes first: the dashboard never lists a partially removed copy.
+    if (fs::exists(entry.header)) ArchiveHeader(session, game, entry);
+    else if (fs::exists(entry.folder)) ArchiveLibraryCaches(session);
+    fs::remove(staged(entry.header));
+    fs::remove_all(entry.folder);
+  }
+}
 void PrepareLibrary(const ProjectPaths& paths, const Target& session, const std::vector<Target>& catalog,
                     const std::function<bool()>& cancelled) {
   if (!session.session || !session.launch_library) return;

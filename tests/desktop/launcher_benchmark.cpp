@@ -1,6 +1,7 @@
 // Read-only launcher-path benchmark. Never creates a title process or window.
 #include "catalog.h"
 #include "action_trace.h"
+#include "preparation.h"
 #include "sha256.h"
 #ifdef X360N_BENCHMARK_BATCH
 #include "digest_batch.h"
@@ -55,7 +56,9 @@ int main(int argc, char** argv) {
   if (argc < 2 || argc > 3) return 2;
   const ProjectPaths paths{std::filesystem::absolute(argv[1])};
   if (argc == 3 && std::string(argv[2]) == "--fixture") Fixture(paths);
-  const auto mode = argc == 3 && std::string(argv[2]) == "--preview" ? InspectionMode::Preview : InspectionMode::Full;
+  // --preview-hints adds the launcher's listing hints (one shared ReceiptHints).
+  const bool hinted = argc == 3 && std::string(argv[2]) == "--preview-hints";
+  const auto mode = argc == 3 && (std::string(argv[2]) == "--preview" || hinted) ? InspectionMode::Preview : InspectionMode::Full;
   for (int pass = 0; pass != 2; ++pass) {
     const auto start = std::chrono::steady_clock::now();
 #ifdef X360N_BENCHMARK_BATCH
@@ -64,16 +67,18 @@ int main(int argc, char** argv) {
     const auto catalog = ReadCatalog(paths);
     std::cout << "catalog pass=" << pass << " ms="
               << std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count() << std::endl;
-    size_t ready = 0, inputs = 0, pending = 0;
+    size_t ready = 0, inputs = 0, pending = 0, current = 0, stale = 0;
+    ReceiptHints hints{paths};
     for (const auto& target : catalog) {
-      const auto state = Inspect(paths, target, mode);
+      const auto state = Inspect(paths, target, mode, hinted ? &hints : nullptr);
+      current += state.receipt_current; stale += state.receipt_stale;
       for (const auto& issue : state.issues) std::cerr << target.id << ": " << issue << std::endl;
       if (mode == InspectionMode::Full && state.inputs_ok) InspectLibrary(paths, target, catalog);
       if (mode == InspectionMode::Full && !target.catalogued && !target.inputs.empty()) DigestFile(target.inputs.front().destination);
       ready += state.prepared; pending += state.verification_pending; inputs += target.inputs.size();
     }
     std::cout << "snapshot pass=" << pass << " targets=" << catalog.size() << " inputs=" << inputs
-              << " ready=" << ready << " pending=" << pending << " ms="
+              << " ready=" << ready << " pending=" << pending << " current=" << current << " stale=" << stale << " ms="
               << std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count() << std::endl;
 #ifdef X360N_BENCHMARK_BATCH
     std::cout << "streams=" << batch.files << " bytes=" << batch.bytes << " reused=" << batch.hits << std::endl;

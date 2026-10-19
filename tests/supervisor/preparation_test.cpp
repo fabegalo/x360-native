@@ -214,3 +214,26 @@ TEST_CASE("supervisor blocks an exchanged executable or DLL before creating a ch
     auto r = RunProcess(spec); CHECK(r.launched); CHECK(r.exit_code == 3); CHECK_FALSE(fs::exists(f.paths.runs()));
   }
 }
+TEST_CASE("listing hints follow receipt file times and never replace the byte check", "[preparation]") {
+  Fixture f;
+  { ReceiptHints hints{f.paths}; CHECK(hints.Check("sample",f.manifest,f.exe)==ReceiptHint::Current);
+    CHECK(hints.Check("other",f.manifest,f.exe)==ReceiptHint::Stale); }
+  SECTION("input changed after the receipt") {
+    fs::last_write_time(f.inputs[0],fs::last_write_time(PreparationReceipt(f.exe))+std::chrono::hours(1));
+  }
+  SECTION("input missing") { fs::remove(f.inputs[1]); }
+  SECTION("artifact missing") { fs::remove(f.exe.parent_path()/"runtime.dll"); }
+  SECTION("other SDK revision") { std::ofstream(f.paths.sdk()/".git/HEAD") << std::string(40,'b') << '\n'; }
+  SECTION("no receipt") { fs::remove(PreparationReceipt(f.exe)); }
+  ReceiptHints hints{f.paths};
+  CHECK(hints.Check("sample",f.manifest,f.exe)!=ReceiptHint::Current);
+}
+TEST_CASE("a same-time replacement keeps the hint but fails the receipt check", "[preparation]") {
+  Fixture f;
+  const auto time = fs::last_write_time(f.inputs[0]);
+  std::ofstream(f.inputs[0]) << "exchanged with preserved time";
+  fs::last_write_time(f.inputs[0],time);
+  ReceiptHints hints{f.paths};
+  CHECK(hints.Check("sample",f.manifest,f.exe)==ReceiptHint::Current);
+  CHECK(f.Check());
+}

@@ -4,6 +4,7 @@
 #include <functional>
 #include <vector>
 
+namespace x360n { class ReceiptHints; enum class ReceiptHint; }
 namespace x360n::desktop {
 struct LibraryContent {
   std::string title_id, content_type, file_name, display_name, source_sha256;
@@ -28,6 +29,7 @@ struct Target {
   bool importable = true;
   bool aot = true, catalogued = false, generic_aot = false;
   std::string title_id, version, media_id, original_name, import_error;
+  std::string catalog_id;  // full content identity of the imported record, if any
   // Package icon recorded at import (content-addressed in .local/catalog/thumbnails).
   std::filesystem::path thumbnail;
   std::string thumbnail_sha256;
@@ -36,6 +38,8 @@ struct Inspection {
   bool inputs_ok = true, prepared = false, interrupted = false;
   // Presentation metadata never authenticates content or grants launchability.
   bool verification_pending = false, launch_candidate = false;
+  // Preview hint from file times; never a substitute for the full check.
+  bool receipt_current = false, receipt_stale = false;
   std::vector<std::string> issues;
 };
 enum class InspectionMode { Full, Preview };
@@ -81,7 +85,12 @@ std::vector<uint8_t> ReadThumbnail(const Target& target);
 std::vector<std::string> DetectImportTargets(const std::vector<Target>& targets,
                                             const std::filesystem::path& source,
                                             const std::function<bool()>& cancelled = {});
-Inspection Inspect(const ProjectPaths& paths, const Target& target, InspectionMode mode = InspectionMode::Full);
+// Records a listing hint on a Preview inspection (stale withdraws the candidate).
+void ApplyReceiptHint(Inspection& state, ReceiptHint hint);
+// Preview never hashes. With `hints`, a built title's receipt is compared by
+// file times (presentation only); sharing one instance examines each file once.
+Inspection Inspect(const ProjectPaths& paths, const Target& target, InspectionMode mode = InspectionMode::Full,
+                   ReceiptHints* hints = nullptr);
 // Complete launch preflight. Caller keeps its DigestBatch alive through the
 // supervisor's remaining checks; metadata alone never authorizes execution.
 Target VerifyCatalogLaunch(const ProjectPaths& paths, const std::vector<Target>& catalog,
@@ -91,6 +100,15 @@ Target VerifyCatalogLaunch(const ProjectPaths& paths, const std::vector<Target>&
 std::vector<std::string> InspectLibrary(const ProjectPaths& paths, const Target& session, const std::vector<Target>& catalog);
 void PrepareLibrary(const ProjectPaths& paths, const Target& session, const std::vector<Target>& catalog,
                     const std::function<bool()>& cancelled = {});
+// Withdraws a game's registration and verified copy from one dashboard's store.
+// Unidentified data fails closed before any change. The caller holds the lease.
+void WithdrawLibrary(const Target& session, const Target& game, const std::vector<Target>& catalog);
+// Removes an imported game from the library: its My Games registrations, the
+// environment's imported copy and its generated AOT project/build, then the
+// catalog record (last, so an interrupted removal can be retried). Saves,
+// profiles and the original source are kept; a folder adopted in place is not
+// deleted. Never applies to dashboards or catalogue-only recipes.
+void RemoveGame(const ProjectPaths& paths, const std::vector<Target>& catalog, const std::string& id);
 std::filesystem::path PreparationMarker(const ProjectPaths& paths, const Target& target);
 // Validates the entire selected set before any write. Copies only verified missing
 // files; existing different bytes are an error. Cancellation leaves valid copies

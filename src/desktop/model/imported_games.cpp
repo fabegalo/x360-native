@@ -11,6 +11,7 @@
 #include <fstream>
 #include <map>
 #include <memory>
+#include <optional>
 #include <set>
 #include <unordered_set>
 #include <fmt/format.h>
@@ -96,6 +97,17 @@ const Target* Recipe(const std::vector<Target>& targets, const Json& record) {
     if (match) return &t;
   }
   return nullptr;
+}
+// Content-install discs nest deeper than MAX_PATH; walk and delete without it.
+fs::path Extended(const fs::path& path) {
+#ifdef _WIN32
+  auto name = fs::absolute(path).lexically_normal().make_preferred().native();
+  if (name.starts_with(L"\\\\?\\")) return name;
+  if (name.starts_with(L"\\\\")) return L"\\\\?\\UNC\\" + name.substr(2);
+  return L"\\\\?\\" + name;
+#else
+  return path;
+#endif
 }
 template<class Units> std::string Name(const Units& units) {
   std::u16string s;
@@ -302,6 +314,7 @@ void ReadImportedGames(const ProjectPaths& paths, std::vector<Target>& targets) 
     CheckVerificationCancellation();
     if (file.path().extension() != ".json") continue;
     Target t; t.id = Utf8(file.path().stem()); t.aot = false; t.catalogued = true; t.importable = false;
+    t.catalog_id = t.id;
     ActionTrace target_trace("catalog.imported." + t.id);
     t.label = t.label_en = t.id;
     try {
@@ -344,6 +357,7 @@ void ReadImportedGames(const ProjectPaths& paths, std::vector<Target>& targets) 
         existing.catalogued = true; existing.title_id = t.title_id; existing.version = t.version;
         existing.media_id = t.media_id; existing.original_name = t.original_name; existing.import_error = t.import_error;
         existing.thumbnail = t.thumbnail; existing.thumbnail_sha256 = t.thumbnail_sha256;
+        existing.catalog_id = t.catalog_id;
         existing.label = existing.label_en = t.label;
         continue;
       }
@@ -384,6 +398,77 @@ void ReadImportedGames(const ProjectPaths& paths, std::vector<Target>& targets) 
       catch (const std::exception& e) { t.import_error = std::string("Catalog error; record preserved: ") + e.what(); t.inputs.clear(); }
     targets.push_back(std::move(t));
   }
+}
+
+void RemoveGame(const ProjectPaths& paths, const std::vector<Target>& catalog, const std::string& id) {
+  const auto found = std::find_if(catalog.begin(), catalog.end(), [&](const auto& t) { return t.id == id; });
+  if (found == catalog.end() || !found->catalogued || found->catalog_id.empty() || found->kind != "game")
+    throw std::runtime_error("Somente jogos importados podem ser removidos da biblioteca.");
+  const auto& game = *found;
+  WorkspaceLease lease(paths);
+  const auto record = paths.local() / "catalog" / (game.catalog_id + ".json");
+  Safe(record, paths.local());
+  // An unreadable record identifies no content; only the record itself goes.
+  std::optional<fs::path> content;
+  std::string source;
+  if (fs::is_regular_file(record)) {
+    Json r;
+    try { std::ifstream in(record); r = Json::parse(in); } catch (const std::exception&) {}
+    if (r.is_object() && r.value("id", std::string{}) == game.catalog_id && r.contains("content_root")) {
+      content = paths.inputs() / Relative(r.at("content_root"));
+      Safe(*content, paths.inputs());
+      source = r.value("source", std::string{});
+    }
+  }
+  // Only whole trees this environment created: no links/junctions inside.
+  const auto own_tree = [](const fs::path& root) {
+    for (const auto& entry : fs::recursive_directory_iterator(Extended(root))) {
+      const auto type = entry.symlink_status().type();
+      if (type != fs::file_type::regular && type != fs::file_type::directory)
+        throw std::runtime_error("Link ou arquivo especial encontrado; nada foi apagado: " + Utf8(entry.path()));
+    }
+  };
+  // Identify every deletion before the first write.
+  const auto games = paths.inputs() / "games";
+  bool delete_content = content && fs::is_directory(*content);
+  if (delete_content) {
+    const auto relative = content->lexically_normal().lexically_relative(games.lexically_normal());
+    // games/<title>/<root>; never the shared inputs or a title directory itself.
+    if (relative.empty() || *relative.begin() == ".." || std::distance(relative.begin(), relative.end()) < 2 || fs::is_symlink(*content))
+      throw std::runtime_error("Conteúdo importado fora da pasta de jogos; preservado: " + Utf8(*content));
+    // A folder imported in place holds the user's own files; another record may share a root.
+    if (!source.empty() && IsWithin(PathFromUtf8(source), *content)) delete_content = false;
+    for (const auto& other : catalog)
+      if (&other != &game && other.catalogued && (IsWithin(other.game_root, *content) || IsWithin(*content, other.game_root) ||
+          (!other.preparation_source.empty() && IsWithin(other.preparation_source, *content)))) delete_content = false;
+    if (delete_content) own_tree(*content);
+  }
+  fs::path project, build;
+  if (game.generic_aot) {
+    project = paths.local() / "aot" / game.id;
+    build = game.exe.parent_path();
+    Safe(project, paths.local()); Safe(build, paths.local());
+    if (fs::exists(build)) {
+      std::ifstream owner_input(build / ".x360n-aot-owner"); std::string owner;
+      std::getline(owner_input, owner);
+      if (!owner.empty() && owner.back() == '\r') owner.pop_back();
+      if (owner != game.id) throw std::runtime_error("O build AOT pertence a outro título; preservado: " + Utf8(build));
+      own_tree(build);
+    }
+    if (fs::exists(project)) own_tree(project);
+  }
+  // Enumeration first: no dashboard keeps listing content that is about to go.
+  for (const auto& dashboard : catalog) WithdrawLibrary(dashboard, game, catalog);
+  if (!build.empty()) fs::remove_all(Extended(build));
+  if (!project.empty()) fs::remove_all(Extended(project));
+  if (game.generic_aot)
+    for (const auto* suffix : {".incomplete", ".runtime-error", ".lock"})
+      fs::remove(paths.local() / "preparation" / (game.id + suffix));
+  if (delete_content) {
+    fs::remove_all(Extended(*content));
+    if (const auto title = content->parent_path(); fs::is_directory(title) && fs::is_empty(title)) fs::remove(title);
+  }
+  fs::remove(record);
 }
 
 std::vector<uint8_t> ReadThumbnail(const Target& target) {

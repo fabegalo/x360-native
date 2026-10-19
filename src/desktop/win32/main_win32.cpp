@@ -24,6 +24,7 @@
 #include "console_settings.h"
 #include "action_trace.h"
 #include "digest_batch.h"
+#include "preparation.h"
 #include "session_notification.h"
 #include "update.h"
 
@@ -39,10 +40,10 @@ void VerifyDistribution(const fs::path& directory) {
   VerifyPackage(directory);
 #endif
 }
-constexpr UINT kFinished = WM_APP + 1, kProgress = WM_APP + 2, kDetected = WM_APP + 3, kInitialized = WM_APP + 4, kInspected = WM_APP + 5, kOpenEnvironment = WM_APP + 6, kEnvironmentChecked = WM_APP + 7, kSessionStarted = WM_APP + 8, kSessionClosed = WM_APP + 9, kReveal = WM_APP + 10, kUpdateChecked = WM_APP + 11, kUpdateFinished = WM_APP + 12, kPreview = WM_APP + 20;
+constexpr UINT kFinished = WM_APP + 1, kProgress = WM_APP + 2, kDetected = WM_APP + 3, kInitialized = WM_APP + 4, kInspected = WM_APP + 5, kOpenEnvironment = WM_APP + 6, kEnvironmentChecked = WM_APP + 7, kSessionStarted = WM_APP + 8, kSessionClosed = WM_APP + 9, kReveal = WM_APP + 10, kUpdateChecked = WM_APP + 11, kUpdateFinished = WM_APP + 12, kHinted = WM_APP + 13, kPreview = WM_APP + 20;
 enum { kFolder = 101, kTargets, kCheck, kImport, kPrepare, kLaunch, kDetails, kData, kCancel, kLanguage, kInstall, kStorage, kPrimary, kSettings, kImportFolder, kDashboards, kGames, kHome, kImportPage, kAddContent, kLibrary, kGameList, kRenderer, kNativeDevelopment,
        kSearch, kFilter0, kFilter1, kFilter2, kFilter3, kLangPt, kLangEn, kRendererNative, kRetry, kDismiss, kBannerLibrary, kBannerDetails,
-       kConsoleLanguage, kConsoleCountry, kVerifyTarget, kUpdate };
+       kConsoleLanguage, kConsoleCountry, kVerifyTarget, kUpdate, kRemove };
 bool english = false;
 std::string Tr(const char* pt, const char* en) { return english ? en : pt; }
 std::wstring Wide(const std::string& text) {
@@ -146,8 +147,14 @@ struct App {
   std::thread update_check;
   std::atomic<bool> closing{false};
   std::optional<AvailableUpdate> update;
+  // Listing hints run after the list is shown; results apply only to the
+  // snapshot they were computed for, and never while an operation runs.
+  std::thread hint_check;
+  unsigned hint_generation = 0;
+  struct Hints { unsigned generation = 0; std::vector<std::pair<size_t, ReceiptHint>> items; };
   ~App() {
     closing = true;
+    if (hint_check.joinable()) hint_check.join();
     if (update_check.joinable()) update_check.join();
     if (worker.joinable()) worker.join();
     for (auto font : {fonts.body, fonts.bold, fonts.caption, fonts.headline, fonts.big, fonts.icon, fonts.icon_big, fonts.mono}) if (font) DeleteObject(font);
@@ -256,7 +263,20 @@ Row StatusOf(const App& a, size_t i) {
   const auto& t = a.targets[i];
   const auto& c = a.checked.at(i);
   if (a.busy && !a.session && !a.preparing_id.empty() && a.preparing_id == t.id) return Row::Preparing;
-  if (c.state.verification_pending) return t.aot ? Row::Unchecked : Row::Unsupported;
+  if (c.state.verification_pending) {
+    // Listing hints only; the full check still runs before preparing or starting.
+    if (!t.aot) return Row::Unsupported;
+    if (c.state.interrupted) return Row::Error;
+    if (!c.state.launch_candidate) return Row::Imported;
+    if (!c.state.receipt_current) return Row::Unchecked;
+    for (const auto& dep : t.dependencies) {
+      const auto it = std::find_if(a.targets.begin(), a.targets.end(), [&](const auto& d) { return d.id == dep; });
+      if (it == a.targets.end()) return Row::Error;
+      const auto& state = a.checked.at(size_t(it - a.targets.begin())).state;
+      if (!state.receipt_current && !state.prepared) return state.receipt_stale ? Row::Imported : Row::Unchecked;
+    }
+    return Row::Ready;
+  }
   if (!c.state.inputs_ok || c.state.interrupted) return t.kind == "dashboard" && !c.state.interrupted ? Row::Pending : Row::Error;
   if (!t.aot) return Row::Unsupported;
   if (c.state.prepared && c.library.empty()) return Row::Ready;
@@ -266,7 +286,7 @@ std::wstring RowLabel([[maybe_unused]] const App& a, Row row, bool dashboard) {
   switch (row) {
     case Row::Ready: return WTr(dashboard ? "Pronta" : "Pronto", "Ready");
     case Row::Preparing: return WTr("Preparando", "Preparing");
-    case Row::Imported: return dashboard ? WTr("Preparar", "Prepare") : WTr("Importado", "Imported");
+    case Row::Imported: return WTr("Preparar", "Prepare");
     case Row::Unsupported: return WTr("Não suportado", "Not supported");
     case Row::Pending: return WTr("Pendente", "Pending");
     case Row::Unchecked: return WTr("Conferir", "Check");
@@ -330,6 +350,12 @@ void RebuildRows(App& a) {
   InvalidateRect(a.library_list, nullptr, FALSE);
 }
 
+// Only imported games leave the library; dashboards and recipes stay.
+bool Removable(const App& a) {
+  if (a.selected >= a.targets.size() || a.checked.size() != a.targets.size()) return false;
+  const auto& t = a.targets[a.selected];
+  return t.catalogued && !t.catalog_id.empty() && t.kind == "game";
+}
 // ---------- Layout ----------
 void Layout(App& a) {
   if (!a.details) return;
@@ -474,7 +500,8 @@ void Layout(App& a) {
         put(Item(a, kPrimary), cx + (cw - s(240)) / 2, g.empty.top + s(196), s(240), s(46), !filtered);
         put(a.library_list, cx, top, 0, 0, false);
       } else {
-        const int dh = page == Page::Dashboard ? s(196) : s(150);
+        const bool removable = page == Page::Library && Removable(a);
+        const int dh = page == Page::Dashboard || removable ? s(196) : s(150);
         g.detail = rect(cx, bottom - dh, cw, dh);
         g.list_card = rect(cx, top, cw, std::max<int>(s(96), int(g.detail.top) - s(12) - top));
         put(a.library_list, cx, top, cw, g.list_card.bottom - top);
@@ -485,6 +512,7 @@ void Layout(App& a) {
         put(a.status, cx + s(24), g.detail.top + s(58), cw - s(48) - aw - s(24), s(80));
         put(Item(a, kPrimary), cx + cw - s(24) - aw, g.detail.top + s(22), aw, s(46));
         put(Item(a, kAddContent), cx + cw - s(24) - aw, g.detail.top + s(22) + s(46) + s(12), aw, s(40));
+        if (removable) put(Item(a, kRemove), cx + cw - s(24) - aw, g.detail.top + s(22) + s(46) + s(12) + s(40) + s(8), aw, s(36));
       }
       break;
     }
@@ -594,6 +622,7 @@ void Enable(App& a) {
     (a.next_action == kVerifyTarget && a.current.verification_pending && a.current.launch_candidate) ||
     (a.next_action == kLaunch && (a.current.prepared || a.current.launch_candidate) && a.environment.graphics);
   EnableWindow(Item(a, kPrimary), !a.busy && action_ok);
+  EnableWindow(Item(a, kRemove), !a.busy && !a.initializing && Removable(a));
   EnableWindow(Item(a, kSettings), !a.busy);
   EnableWindow(Item(a, kUpdate), !a.busy);
   const bool native = a.renderer_settings.experimental;
@@ -676,6 +705,32 @@ void AdoptSnapshot(App& a) {
   a.checked = std::move(a.pending_checked);
   a.catalog_loaded = true;
   a.pending_snapshot = false;
+  ++a.hint_generation;
+}
+// Second phase of a listing: built titles' receipts by file times, so a row can
+// say ready or stale without delaying the list. Presentation only.
+void StartHints(App& a) {
+  if (a.hint_check.joinable()) a.hint_check.join();
+  if (a.root.empty() || a.checked.size() != a.targets.size()) return;
+  std::vector<std::pair<size_t, Target>> todo;
+  for (size_t i = 0; i < a.targets.size(); ++i) {
+    const auto& state = a.checked[i].state;
+    if (state.verification_pending && state.launch_candidate && !state.receipt_current && !state.receipt_stale)
+      todo.emplace_back(i, a.targets[i]);
+  }
+  if (todo.empty()) return;
+  a.hint_check = std::thread([&a, root = a.root, todo = std::move(todo), generation = a.hint_generation] {
+    auto* found = new App::Hints{generation, {}};
+    try {
+      ActionTrace trace("ui.hints");
+      ReceiptHints hints{ProjectPaths{root}};
+      for (const auto& [index, target] : todo) {
+        if (a.closing) break;
+        found->items.emplace_back(index, hints.Check(target.id, target.manifest, target.exe));
+      }
+    } catch (const std::exception&) {}  // a hint never fails the listing
+    if (a.closing || !PostMessageW(a.window, kHinted, 0, reinterpret_cast<LPARAM>(found))) delete found;
+  });
 }
 void InspectSelected(App& a) {
   a.current = {};
@@ -727,11 +782,31 @@ void InspectSelected(App& a) {
       }
     }
     a.next_action = a.current.launch_candidate ? (t.session ? kLaunch : kVerifyTarget) : kPrepare;
-    chip(Tr("Verificação pendente", "Verification pending"), Tone::Info);
     primary(a.next_action == kLaunch ? Tr("Conferir e iniciar", "Verify and start") :
             a.next_action == kVerifyTarget ? Tr("Conferir preparação", "Verify preparation") : Tr("Conferir e preparar", "Verify and prepare"));
-    Set(a.status, Tr("Conteúdo listado. Arquivos e recibos serão conferidos antes de preparar ou iniciar.\r\nEsta listagem ainda não comprova integridade ou compatibilidade.",
-                    "Content listed. Files and receipts will be verified before preparation or launch.\r\nThis listing does not yet establish integrity or compatibility."));
+    // The row's listing hint, explained; the full check runs before any action.
+    const auto row = StatusOf(a, a.selected);
+    if (row == Row::Error) {
+      chip(Tr("Falha na última tentativa", "Last attempt failed"), Tone::Err);
+      Set(a.status, Tr("A última preparação ou execução falhou. O motivo está no Diagnóstico.\r\nPreparar de novo retoma as etapas válidas.",
+                      "The last preparation or run failed. The reason is in Diagnostics.\r\nPreparing again resumes the valid steps."));
+    } else if (row == Row::Imported) {
+      chip(a.current.receipt_stale ? Tr("Precisa preparar de novo", "Needs preparing again") : Tr("Não preparado", "Not prepared"), Tone::Warn);
+      Set(a.status, a.current.receipt_stale ?
+          Tr("Arquivos mudaram desde a última preparação, por exemplo numa atualização do aplicativo.\r\nPrepare novamente para usar esta versão.",
+             "Files changed since the last preparation, for example in an application update.\r\nPrepare again to use this version.") :
+          Tr("Ainda não preparado neste computador.\r\nA preparação compila o título; seus arquivos são conferidos antes.",
+             "Not prepared on this computer yet.\r\nPreparation compiles the title; your files are verified first."));
+    } else if (row == Row::Ready) {
+      chip(t.session ? Tr("Pronta", "Ready") : Tr("Pronto para a My Games", "Ready for My Games"), Tone::Ok);
+      Set(a.status, Tr("Preparação em dia. A integridade completa é conferida ao iniciar.",
+                      "Preparation up to date. Full integrity is checked when starting."));
+    } else {
+      chip(Tr("Verificação pendente", "Verification pending"), Tone::Info);
+      Set(a.status, Tr("Conteúdo listado. Arquivos e recibos serão conferidos antes de preparar ou iniciar.\r\nEsta listagem ainda não comprova integridade ou compatibilidade.",
+                      "Content listed. Files and receipts will be verified before preparation or launch.\r\nThis listing does not yet establish integrity or compatibility."));
+    }
+    for (const auto& issue : a.current.issues) detail += "\r\n" + issue;
     if (page == Page::Home && !a.current.launch_candidate) { a.next_action = kDashboards; primary(Tr("Configurar Xbox 360", "Set up Xbox 360")); }
     if (page == Page::Import) { a.next_action = kImport; primary(Tr("Escolher arquivo", "Choose file")); }
     if (!t.importable && !t.generic_aot && !a.current.launch_candidate) { a.next_action = kDashboards; primary(Tr("Escolher dashboard", "Choose dashboard")); }
@@ -977,7 +1052,7 @@ void Labels(App& a) {
        {kRenderer, "Xenos (ReXGlue)", "Xenos (ReXGlue)"}, {kRendererNative, "Native (Experimental)", "Native (Experimental)"},
        {kNativeDevelopment, "Acesso de desenvolvimento ao Native", "Native development access"},
        {kRetry, "Tentar novamente", "Try again"}, {kBannerDetails, "Diagnóstico", "Diagnostics"}, {kBannerLibrary, "Ver biblioteca", "View library"},
-       {kDismiss, "Fechar", "Dismiss"}}) Set(Item(a, id), Tr(pt, en));
+       {kDismiss, "Fechar", "Dismiss"}, {kRemove, "Remover da biblioteca", "Remove from library"}}) Set(Item(a, id), Tr(pt, en));
   Set(Item(a, kLanguage), english ? "Language: English" : "Idioma: Português");
   if (a.update) Set(Item(a, kUpdate), Tr("Instalar ", "Install ") + a.update->version);
   SendMessageW(a.search, EM_SETCUEBANNER, TRUE, reinterpret_cast<LPARAM>(WTr("Buscar jogo, Title ID ou versão", "Search game, Title ID or version").c_str()));
@@ -1033,6 +1108,8 @@ void Start(App& a, int action, fs::path source = {}) {
     SetActivity(a, 4, WTr("Conferindo preparação", "Checking preparation"), Tr("Conferindo os arquivos e recibos do título selecionado. Você pode cancelar.", "Verifying the selected title's files and receipts. You can cancel."));
   else if (action == kInstall)
     SetActivity(a, 4, WTr("Instalando componentes", "Installing components"), Tr("Conclua ou cancele pelo instalador da Microsoft e aguarde o retorno.", "Finish or cancel in the Microsoft installer and wait for it to return."));
+  else if (action == kRemove)
+    SetActivity(a, 4, WTr("Removendo da biblioteca", "Removing from library"), Tr("Retirando o jogo da My Games e apagando a cópia importada. Saves e perfis são mantidos.", "Withdrawing the game from My Games and deleting the imported copy. Saves and profiles are kept."));
   else
     SetActivity(a, 2, WTr("Preparando para você", "Preparing for you"), Tr("Preparação em andamento. As etapas reais serão registradas no Diagnóstico.", "Preparation running. Actual stages are recorded in Diagnostics."),
       {WTr("Ferramentas", "Tools"), WTr("Configuração", "Configuration"), WTr("Tradução", "Translation"), WTr("Compilação", "Compilation"), WTr("Registro", "Registration")});
@@ -1073,7 +1150,7 @@ void Start(App& a, int action, fs::path source = {}) {
       // Session completion must never wait for an unrelated catalog/hash scan.
       try { if (action != kLaunch && action != kVerifyTarget && !a.cancel.load()) {
         DigestBatch batch([&a] { return a.cancel.load(); });
-        a.pending_targets = action == kImport ? ReadCatalog(ProjectPaths{a.root}) : a.targets;
+        a.pending_targets = action == kImport || action == kRemove ? ReadCatalog(ProjectPaths{a.root}) : a.targets;
         a.pending_checked = CheckContents(a.root, a.pending_targets, InspectionMode::Preview);
         a.pending_snapshot = true;
         if (action == kPrepare && !a.failed) verify_target();
@@ -1089,6 +1166,10 @@ void Start(App& a, int action, fs::path source = {}) {
         VerifyDistribution(a.self.parent_path());
         if (!InspectEnvironment(Payload(a), a.root).current)
           throw std::runtime_error("Esta instalação precisa ser atualizada. Selecione novamente o ambiente em Configurações. Seus jogos e dados serão preservados.");
+      }
+      if (action == kRemove) {
+        RemoveGame(ProjectPaths{a.root}, a.targets, target.id);
+        finish((english ? target.label_en : target.label) + "\r\n" + Tr("Removido da biblioteca e da My Games. Saves, perfis e o arquivo original foram mantidos.", "Removed from the library and My Games. Saves, profiles and the original file were kept.")); return;
       }
       if (action == kPrepare && !target.aot) throw std::runtime_error("Import a valid XEX game before preparation.");
       if (action == kPrepare && !target.preparation_source.empty())
@@ -1746,6 +1827,7 @@ LRESULT CALLBACK WndProc(HWND window, UINT message, WPARAM wp, LPARAM lp) {
         a->status = Control(*a, L"STATIC", L"", 0);
         Button(*a, kPrimary, Kind::Primary, ui::icon::play, 2);
         Button(*a, kAddContent, Kind::Secondary, ui::icon::add);
+        Button(*a, kRemove, Kind::Secondary, ui::icon::remove, 2);
         Button(*a, kLibrary, Kind::Secondary, ui::icon::library);
         // Library / dashboard
         a->search = Control(*a, L"EDIT", L"", ES_AUTOHSCROLL | WS_TABSTOP, kSearch);
@@ -1967,6 +2049,19 @@ LRESULT CALLBACK WndProc(HWND window, UINT message, WPARAM wp, LPARAM lp) {
           if (MessageBoxW(window, Wide(question).c_str(), L"x360-native", MB_YESNO | MB_ICONINFORMATION) == IDYES) StartUpdate(*a);
           return 0;
         }
+        if (id == kRemove) {
+          if (!Removable(*a)) return 0;
+          const auto& t = a->targets[a->selected];
+          const auto question = Tr("Remover \"", "Remove \"") + (english ? t.label_en : t.label) + Tr("\" da biblioteca?\n\n", "\" from the library?\n\n") +
+            Tr("Serão apagados deste ambiente: a cópia importada do jogo, sua cópia na My Games das dashboards e a preparação AOT gerada para ele. "
+               "Saves, perfis e o arquivo original que você importou são mantidos. Uma pasta importada no próprio local não é apagada.\n\n"
+               "Para jogar de novo, importe e prepare o jogo outra vez.",
+               "This deletes from the environment: the game's imported copy, its copy in the dashboards' My Games and the AOT preparation generated for it. "
+               "Saves, profiles and the original file you imported are kept. A folder imported in place is not deleted.\n\n"
+               "To play again, import and prepare the game again.");
+          if (MessageBoxW(window, Wide(question).c_str(), L"x360-native", MB_YESNO | MB_ICONWARNING | MB_DEFBUTTON2) == IDYES) Start(*a, kRemove);
+          return 0;
+        }
         if (id == kRetry) {
           a->result = 0;
           if (a->last_action == kUpdate) StartUpdate(*a);
@@ -2120,6 +2215,7 @@ LRESULT CALLBACK WndProc(HWND window, UINT message, WPARAM wp, LPARAM lp) {
           a->console_settings = a->pending_console;
           a->supervisor_available = a->pending_supervisor_available;
           Load(*a, a->root);
+          StartHints(*a);
 #ifndef X360N_DISTRIBUTION
           if (!a->auto_import.empty() && !a->busy) {
             const auto source = std::move(a->auto_import); a->auto_import.clear();
@@ -2178,6 +2274,7 @@ LRESULT CALLBACK WndProc(HWND window, UINT message, WPARAM wp, LPARAM lp) {
             state.prepared = false; state.issues.push_back(*text);
           }
         }
+        if (a->last_action == kRemove) Load(*a, a->root);
         if (a->importing) {
           Load(*a, a->root);
           for (size_t i = 0; i < a->targets.size(); ++i) if (a->targets[i].id == a->imported_id) { a->selected = i; SyncSelection(*a); break; }
@@ -2197,10 +2294,28 @@ LRESULT CALLBACK WndProc(HWND window, UINT message, WPARAM wp, LPARAM lp) {
           a->result_title = a->importing ? WTr("Importação concluída", "Import finished") :
             a->last_action == kLaunch ? WTr("Sessão encerrada", "Session ended") :
             a->last_action == kVerifyTarget ? WTr("Verificação concluída", "Verification finished") :
+            a->last_action == kRemove ? WTr("Jogo removido", "Game removed") :
             a->last_action == kInstall ? WTr("Instalador encerrado", "Installer closed") : WTr("Preparação concluída", "Preparation finished");
         }
         Set(a->activity_text, *text);
-        Layout(*a); Enable(*a); return 0;
+        Layout(*a); Enable(*a);
+        StartHints(*a);
+        return 0;
+      }
+      case kHinted: {
+        std::unique_ptr<App::Hints> found(reinterpret_cast<App::Hints*>(lp));
+        if (a->busy || found->generation != a->hint_generation || a->checked.size() != a->targets.size()) return 0;
+        for (const auto& [index, hint] : found->items)
+          if (index < a->checked.size()) ApplyReceiptHint(a->checked[index].state, hint);
+        // Rows draw their state; only a status filter changes which rows exist.
+        if (a->filter != 0) {
+          RebuildRows(*a);
+          if (std::find(a->rows.begin(), a->rows.end(), a->selected) == a->rows.end()) a->selected = a->rows.empty() ? a->targets.size() : a->rows.front();
+          SyncSelection(*a);
+        }
+        InvalidateRect(a->library_list, nullptr, FALSE);
+        if (!a->show_details && !a->settings) InspectSelected(*a);
+        return 0;
       }
       case kSessionStarted: {
         std::unique_ptr<std::string> text(reinterpret_cast<std::string*>(lp));

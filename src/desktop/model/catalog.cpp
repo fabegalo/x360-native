@@ -196,7 +196,14 @@ fs::path PreparationMarker(const ProjectPaths& paths, const Target& t) {
   if (!IsSafeLabel(t.id)) throw std::runtime_error("Identificador inválido.");
   return paths.local() / "preparation" / (t.id + ".incomplete");
 }
-Inspection Inspect(const ProjectPaths& paths, const Target& t, InspectionMode mode) {
+void ApplyReceiptHint(Inspection& state, ReceiptHint hint) {
+  state.receipt_current = hint == ReceiptHint::Current;
+  state.receipt_stale = hint == ReceiptHint::Stale;
+  if (!state.receipt_stale) return;
+  state.launch_candidate = false;
+  state.issues.push_back("Arquivos mudaram desde a última preparação (por exemplo, uma atualização do aplicativo); prepare novamente.");
+}
+Inspection Inspect(const ProjectPaths& paths, const Target& t, InspectionMode mode, ReceiptHints* hints) {
   ActionTrace trace("content.inspect." + t.id);
   Inspection r;
   if (!t.import_error.empty()) { r.inputs_ok = false; r.issues.push_back(t.import_error); }
@@ -209,11 +216,18 @@ Inspection Inspect(const ProjectPaths& paths, const Target& t, InspectionMode mo
     const auto file = t.preparation_source.empty() ? anchor.destination :
         t.preparation_source / anchor.destination.lexically_relative(t.game_root);
     r.verification_pending = fs::is_regular_file(file);
-    r.interrupted = fs::exists(PreparationMarker(paths, t)) ||
-        fs::exists(paths.local() / "preparation" / (t.id + ".runtime-error"));
+    r.interrupted = false;
+    // Both markers are small; their first lines name the failed step and log.
+    for (const auto& marker : {PreparationMarker(paths, t), paths.local() / "preparation" / (t.id + ".runtime-error")}) {
+      if (!fs::exists(marker)) continue;
+      r.interrupted = true;
+      std::ifstream log(marker); std::string line;
+      for (unsigned n = 0; n < 30 && std::getline(log, line); ++n) r.issues.push_back(line);
+    }
     r.launch_candidate = r.verification_pending && t.aot && !r.interrupted &&
         fs::is_regular_file(t.exe) && fs::is_regular_file(PreparationReceipt(t.exe));
     for (const auto& runtime : t.runtime_files) r.launch_candidate &= fs::is_regular_file(runtime);
+    if (r.launch_candidate && hints) ApplyReceiptHint(r, hints->Check(t.id, t.manifest, t.exe));
     if (!r.verification_pending) r.issues.push_back("Falta componente: " + Utf8(anchor.destination));
     return r;
   }

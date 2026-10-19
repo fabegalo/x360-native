@@ -204,6 +204,55 @@ std::optional<std::string> CheckPreparation(const ProjectPaths& paths,
   } catch (const VerificationCancelled&) { throw; }
     catch (const std::exception&) { return fail("Não foi possível verificar o recibo e suas dependências."); }
 }
+ReceiptHint ReceiptHints::Check(const std::string& title, const fs::path& manifest, const fs::path& exe) {
+  ActionTrace trace("receipt.hint." + title);
+  // Lexical keys: canonicalizing or opening each recorded file is the cost a
+  // listing must avoid. Every directory is enumerated once; its entries carry
+  // their modification times, and a recorded file absent from it is missing.
+  const auto key = [](const fs::path& path) {
+    auto s = PathUtf8(fs::absolute(path).lexically_normal().make_preferred());
+#ifdef _WIN32
+    for (auto& c : s) if (c >= 'A' && c <= 'Z') c += 'a' - 'A';
+#endif
+    return s;
+  };
+  try {
+    std::error_code ec;
+    const auto receipt_file = PreparationReceipt(exe);
+    const auto written = fs::last_write_time(receipt_file, ec);
+    if (ec) return ReceiptHint::Stale;
+    std::ifstream input(receipt_file, std::ios::binary);
+    const auto receipt = nlohmann::json::parse(input);
+    if (receipt.at("schema") != 1 || receipt.at("title") != title ||
+        key(PathFromUtf8(receipt.at("manifest").get<std::string>())) != key(manifest) ||
+        key(PathFromUtf8(receipt.at("exe").get<std::string>())) != key(exe)) return ReceiptHint::Stale;
+    if (!head_) head_ = ReadHead(paths_.sdk());
+    if (receipt.at("sdk_commit").get<std::string>() != *head_) return ReceiptHint::Stale;
+    for (auto group : {"inputs", "artifacts"}) {
+      const auto& entries = receipt.at(group);
+      if (!entries.is_array() || entries.empty()) return ReceiptHint::Stale;
+      for (const auto& entry : entries) {
+        const auto file = PathFromUtf8(entry.at("path").get<std::string>());
+        const auto name = key(file);
+        auto time = times_.find(name);
+        if (time == times_.end()) {
+          const auto directory = file.parent_path();
+          if (listed_.insert(key(directory)).second) {
+            std::error_code list;
+            for (fs::directory_iterator it(directory, list), end; !list && it != end; it.increment(list)) {
+              std::error_code stat;
+              const auto modified = it->last_write_time(stat);
+              if (!stat) times_.emplace(key(it->path()), modified);
+            }
+          }
+          time = times_.try_emplace(name).first;  // still absent: missing
+        }
+        if (!time->second || *time->second > written) return ReceiptHint::Stale;
+      }
+    }
+    return ReceiptHint::Current;
+  } catch (const std::exception&) { return ReceiptHint::Unknown; }
+}
 std::optional<std::string> CheckPreparedLaunch(const ProjectPaths& paths, const fs::path& exe) {
   try {
     const auto titles = paths.root / "titles";

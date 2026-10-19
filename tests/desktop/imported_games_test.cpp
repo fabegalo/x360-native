@@ -600,3 +600,65 @@ TEST_CASE("local catalog snapshot records actual preparation state", "[.local-ca
   Write(PathFromUtf8(output), snapshot.dump(2) + "\n");
   CHECK(fs::is_regular_file(PathFromUtf8(output)));
 }
+TEST_CASE("removing an imported game deletes only the environment's own copies", "[universal][remove]") {
+  Fixture f;
+  f.Infrastructure();
+  ImportGame(f.paths,{},f.source,f.source);
+  auto catalog = ReadCatalog(f.paths); REQUIRE(catalog.size()==1);
+  const auto t = catalog.front();
+  REQUIRE(t.generic_aot); REQUIRE_FALSE(t.catalog_id.empty()); REQUIRE_FALSE(t.library.title_id.empty());
+  GenerateAotProject(f.paths,t);
+  Write(t.exe,"native fixture"); Write(t.exe.parent_path()/".x360n-aot-owner",t.id+"\n");
+  Write(f.paths.local()/"preparation"/(t.id+".runtime-error"),"Runtime failed");
+  Write(t.user_root/"save.bin","keep");
+  // An interrupted registration: the copy exists, its header does not yet.
+  Target dash; dash.id="dash"; dash.kind="dashboard"; dash.session=true; dash.launch_library=true;
+  dash.user_root=f.root/".local/user/dash";
+  const auto copy=dash.user_root/"0000000000000000"/t.library.title_id/t.library.content_type/t.library.file_name;
+  Write(copy/"default.xex",Xex()); Write(copy/"assets/data.x360n-library-tmp","partial");
+  Write(dash.user_root/"E000000000000000/profile.bin","keep");
+  catalog.push_back(dash);
+  RemoveGame(f.paths,catalog,t.id);
+  CHECK(ReadCatalog(f.paths).empty());
+  CHECK_FALSE(fs::exists(t.game_root));
+  CHECK_FALSE(fs::exists(t.manifest.parent_path()));
+  CHECK_FALSE(fs::exists(t.exe.parent_path()));
+  CHECK_FALSE(fs::exists(f.paths.local()/"preparation"/(t.id+".runtime-error")));
+  CHECK_FALSE(fs::exists(copy));
+  CHECK(fs::file_size(t.user_root/"save.bin")==4);
+  CHECK(fs::file_size(dash.user_root/"E000000000000000/profile.bin")==4);
+  CHECK(fs::file_size(f.root/".local/user/save")==4);
+  CHECK(fs::exists(f.source/"default.xex"));
+  CHECK(fs::exists(f.source/"assets/data"));
+}
+TEST_CASE("removal keeps unidentified library data, folders imported in place and dashboards", "[universal][remove]") {
+  Fixture f;
+  SECTION("unidentified file in a dashboard copy") {
+    ImportGame(f.paths,{},f.source,f.source);
+    auto catalog = ReadCatalog(f.paths); REQUIRE(catalog.size()==1);
+    const auto t = catalog.front();
+    Target dash; dash.id="dash"; dash.kind="dashboard"; dash.session=true; dash.user_root=f.root/".local/user/dash";
+    const auto copy=dash.user_root/"0000000000000000"/t.library.title_id/t.library.content_type/t.library.file_name;
+    Write(copy/"default.xex",Xex()); Write(copy/"unknown.bin","not ours");
+    catalog.push_back(dash);
+    CHECK_THROWS(RemoveGame(f.paths,catalog,t.id));
+    CHECK(fs::exists(copy/"unknown.bin")); CHECK(fs::exists(copy/"default.xex"));
+    CHECK(ReadCatalog(f.paths).size()==1);
+    CHECK(fs::exists(t.game_root/"default.xex"));
+  }
+  SECTION("folder imported in place") {
+    const auto in_place = f.paths.inputs()/"games/mine/disc";
+    Write(in_place/"default.xex",Xex()); Write(in_place/"assets/data","asset");
+    ImportGame(f.paths,{},in_place,in_place);
+    auto catalog = ReadCatalog(f.paths); REQUIRE(catalog.size()==1);
+    REQUIRE(fs::equivalent(catalog.front().game_root,in_place));
+    RemoveGame(f.paths,catalog,catalog.front().id);
+    CHECK(ReadCatalog(f.paths).empty());
+    CHECK(fs::exists(in_place/"default.xex")); CHECK(fs::exists(in_place/"assets/data"));
+  }
+  SECTION("dashboards and unknown ids") {
+    Target dash; dash.id="dash"; dash.kind="dashboard"; dash.session=true; dash.catalogued=true; dash.catalog_id="x";
+    CHECK_THROWS(RemoveGame(f.paths,{dash},"dash"));
+    CHECK_THROWS(RemoveGame(f.paths,{},"missing"));
+  }
+}
