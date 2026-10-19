@@ -824,3 +824,129 @@ checks buffers/registers and the state/create contract, and verifies all nine
 unsupported operations abort in bounded subprocesses. Existing dashboard camera
 and entrypoint tests also pass. No upstream equivalent is known; pin unchanged.
 Before/after hashes and replay are recorded in the lock and the AOT report above.
+
+### 0093 — full SHA-1 message length (2026-10-18)
+
+TinySHA1 wrote four zero bytes before the low word of the padded bit count.
+Messages of 512 MiB or more therefore received the wrong SHA-1 padding. Emit
+the complete 64-bit bit count in big-endian order. Smaller messages and XEX
+block verification keep their existing contract; no hashes are bypassed.
+
+`tests/sdkcheck/sha1_test.cpp` checks standard vectors, streaming boundaries,
+binary blocks against Windows BCrypt, the 512 MiB boundary, and the guest
+XeCryptSha ABI. No equivalent upstream commit is known; the SDK pin remains
+unchanged. Before/after source hashes and the patch hash are in `deps.lock.json`.
+
+### 0094 — older local logon and firmware exit (2026-10-18)
+
+The original Retail 1888 Sign-in submits four XUIDs through XamUserLogon,
+using offline modes 0x420/0x424 and closing snapshot 0x23. Accept these modes
+through the existing persistent local store; reject online variants, unknown
+identities and multiple users before mutating the active identity.
+
+The original HUD's nice poweroff uses HalReturnToFirmware(5). Replace the
+unconditional process exit for the existing routine 1 and this routine 5 with
+a recorded firmware request and normal title termination notifications. The
+host exports a distinct handoff and closes its platform session. Routine 1
+still ends the host session; this does not implement an automatic console reboot.
+Other firmware modes fail explicitly. No original module or version is shared.
+
+Focused regressions: `tests/sdkcheck/local_profile_test.cpp`, the bounded
+subprocess `tests/sdkcheck/firmware_exit_test.ps1`, and supervisor handoff/session
+tests. Source and patch hashes are recorded in `deps.lock.json`; SDK pin unchanged.
+The mode-5 interpretation is also described by the upstream Xenia Canary
+[HAL implementation](https://github.com/xenia-canary/xenia-canary/blob/canary_experimental/src/xenia/kernel/xboxkrnl/xboxkrnl_hal.cc).
+
+### 0095 — legacy XEX wrapping keys (2026-10-18)
+
+Early XEX2 images can use the older wrapping-key family: Retail 1888 xam.xex
+is one such image. Follow the four-key order in Xenia Canary's BSD-licensed
+[XEX loader](https://github.com/xenia-canary/xenia-canary/blob/canary_experimental/src/xenia/cpu/xex_module.cc):
+current retail/devkit first, then legacy retail/devkit. Each attempt retains
+the existing block SHA-1 and PE checks, plus patch 0086's per-image reservation
+ownership. Remember the selected family for re-deriving an image session key
+after a delta updates its header; a legacy devkit key remains a devkit key.
+
+`tests/sdkcheck/xex_key_test.cpp` builds independent AES-CBC encrypted synthetic
+images through Windows BCrypt and verifies all four paths without executing
+guest code or losing a neighboring allocation. It reads constants from the SDK
+source instead of duplicating key material in project test data. The original
+1888 XAM remains unchanged; no other dashboard's module is substituted.
+
+### 0096 — PowerPC condition-register aliases (2026-10-18)
+
+The disassembler emits `crmove` and `crnot` for the two-source `cror`/`crnor`
+forms with identical sources. Generate those two-operand forms explicitly,
+preserving all other CR bits. This is shared PPC behavior, not an XAM-specific
+replacement. `tests/sdkcheck/cr_alias/` assembles and recompiles independent
+fixtures and compares cross-field and same-bit operations with a bit-mask
+reference. The SDK pin is unchanged; hashes are recorded in the lock.
+
+### 0097 — real XAM allocation size (2026-10-18)
+
+Replace the XamAllocSize stub with a query of committed guest allocation
+metadata. The original 1888 export 818E8770 returns the usable byte count in
+r3; its XUI realloc body 81907EF0 uses that count to bound its copy. Leaving
+the input pointer in r3 can make growth read beyond the previous allocation.
+The shared HLE heap commits whole pages, so the result includes usable page
+padding. Null, freed, uncommitted and interior pointers return zero. No extra
+tracking map is added. Original physical allocations retain their original
+1888 size-query path at the title boundary.
+
+`tests/sdkcheck/xam_allocation_test.cpp` covers all shared virtual allocation
+entry points, page boundaries and invalid/freed pointers. The explicitly
+invoked `x360n_1888_allocation_probe` exercises the original recompiled XUI
+realloc body without entering XAM or creating a GUI. These checks do not
+certify the interactive Sign-in or Guide flows. No equivalent upstream commit
+is known; SDK pin unchanged, patch/source hashes in `deps.lock.json`.
+
+### 0098 — authenticated encrypted resource XEX2 (2026-10-19)
+
+The resource-only loader previously required an unencrypted DLL with flags
+exactly 8. Original encrypted skins can also carry the exports-to-title bit.
+Accept those data-only XEX2 images after checking every plaintext page-digest
+link, rooted in the security header. This also selects the correct key for
+encrypted raw/basic compression, where compressed-block hashes are absent.
+Retain the resource bounds, complete data-page coverage, and rejection of
+entrypoints, imports, TLS, code sections and unsupported module classes.
+Existing compressed-block verification remains active. Encrypted XEX1 resource
+images remain unsupported; no failed executable is reclassified as a skin.
+
+The `[xex-resource]` synthetic fixture uses independent Windows BCrypt AES/SHA
+and stored LZX, covers three compression modes and four wrapping-key families,
+and rejects damaged digest chains or executable/out-of-range metadata. It
+contains no original resource bytes. SDK pin unchanged; hashes in the lock.
+
+### 0099 — unavailable custom banner (2026-10-19)
+
+`XCustomGetBannerImage` returns `E_NOTIMPL` and clears its output pointer while
+the SDK has no banner provider; a null output returns `E_INVALIDARG`. This lets
+the original caller use its own fallback artwork instead of treating a stub's
+unchanged pointer register as successful image data. Focused coverage:
+`tests/sdkcheck/local_profile_test.cpp` (`[custom-banner]`).
+
+### 0100 — unavailable private input statistics (2026-10-19)
+
+The input backend has no provider for the private device-statistics record.
+Return `ERROR_NOT_SUPPORTED` for valid requests, leaving caller storage untouched;
+invalid user/output arguments return `ERROR_INVALID_PARAMETER`. This prevents
+the former stub's unchanged user index zero from becoming a successful query.
+Controller polling and keystrokes are unchanged. The focused test above also
+checks all four user slots and untouched output guards. SDK pin unchanged.
+
+## 0101 — posse dos controles que iniciam uma UI de sistema
+
+`0101-system-ui-opening-input.patch` captura, ao iniciar a sessão, os controles
+que já estão pressionados. As duas ABIs HUD consomem somente DOWN/repetições/UP
+desses controles até sua soltura. Um botão novo continua disponível e START/BACK
+voltam a funcionar normalmente após o UP; não há esvaziamento geral da fila.
+O host 1888 usa a mesma captura para reter o gesto de fechamento antes de devolver
+a fila à dashboard. A captura consulta o estado uma vez por transição; a filtragem
+usa a trava e o bookkeeping de keystrokes já existentes, sem instrumentação nos
+polls normais dos jogos.
+
+A regressão `[guide-opening]` em `tests/sdkcheck/system_ui_input_test.cpp` falhou
+no SDK anterior (24 asserções) e cobre as duas ABIs, três reaberturas, eventos
+atrasados/repetidos, preservação de A e START novo, requisição sem botões e o
+retorno da fila ao título. `[guide-input]` e `[profile-ui]` preservam os contratos
+de saída e sessão. Não há alteração de originais nem dependências entre versões.

@@ -17,6 +17,7 @@ set_tests_properties(avatar.ModifierCounts PROPERTIES LABELS "project" TIMEOUT 1
 set_tests_properties(avatar.AssetsRequest PROPERTIES LABELS "project" TIMEOUT 15)
 
 add_subdirectory(sdkcheck/vavguw)
+add_subdirectory(sdkcheck/cr_alias)
 
 # Explicit manual diagnostic only; never part of automatic CTest runs.
 if(WIN32)

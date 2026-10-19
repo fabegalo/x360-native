@@ -1,0 +1,31 @@
+diff --git a/thirdparty/crypto/TinySHA1.hpp b/thirdparty/crypto/TinySHA1.hpp
+--- a/thirdparty/crypto/TinySHA1.hpp
++++ b/thirdparty/crypto/TinySHA1.hpp
+@@ -112,7 +112,7 @@ class SHA1 {
+   }
+ 
+   const uint32_t* finalize(digest32_t digest) {
+-    size_t bitCount = this->m_byteCount * 8;
++    const uint64_t bitCount = uint64_t(this->m_byteCount) * 8;
+     processByte(0x80);
+     if (this->m_blockByteIndex > 56) {
+       while (m_blockByteIndex != 0) {
+@@ -127,14 +127,10 @@ class SHA1 {
+         processByte(0);
+       }
+     }
+-    processByte(0);
+-    processByte(0);
+-    processByte(0);
+-    processByte(0);
+-    processByte(static_cast<unsigned char>((bitCount >> 24) & 0xFF));
+-    processByte(static_cast<unsigned char>((bitCount >> 16) & 0xFF));
+-    processByte(static_cast<unsigned char>((bitCount >> 8) & 0xFF));
+-    processByte(static_cast<unsigned char>((bitCount)&0xFF));
++    // SHA-1 appends the full 64-bit length in big-endian order. The high
++    // word is nonzero already at 512 MiB; writing zero there hashes other data.
++    for (int shift = 56; shift >= 0; shift -= 8)
++      processByte(static_cast<uint8_t>(bitCount >> shift));
+ 
+     memcpy(digest, m_digest, 5 * sizeof(uint32_t));
+     return digest;

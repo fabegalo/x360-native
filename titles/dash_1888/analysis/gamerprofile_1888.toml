@@ -1,0 +1,4 @@
+# Original Retail 1888 gamerprofile.xex SHA-256 b7ba58ab7a5de40ec20fc89267dee9ca7195d043fbeb95d7d536e307c59cfd8b.
+# Byte-copy tail outside .pdata, reached by the module's static backward branch.
+[functions]
+0x90111144 = {}

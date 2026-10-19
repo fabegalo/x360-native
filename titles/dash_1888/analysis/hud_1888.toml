@@ -1,0 +1,4 @@
+# Original Retail 1888 hud.xex SHA-256 e6b6dd32d000b5524823de6ab0256b42d8d7b3fa923a9625bd24c3b543df165a.
+# Byte-copy tail outside .pdata, reached by the module's static backward branch.
+[functions]
+0x913EEFC4 = {}

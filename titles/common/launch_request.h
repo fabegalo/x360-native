@@ -11,7 +11,7 @@ namespace x360n {
 struct LaunchRequest {
   enum Kind : uint32_t {
     Image = 1, WindowClose = 2, GuestExit = 3,
-    Dashboard = 4, TitleTerminate = 5
+    Dashboard = 4, TitleTerminate = 5, FirmwareExit = 6
   };
   Kind kind = Image;
   uint32_t flags = 0;
@@ -36,7 +36,7 @@ inline bool ReadLaunchRequest(const std::filesystem::path& file, LaunchRequest& 
   const auto kind = ReadU32(in);
   r.flags = ReadU32(in);
   const auto present = ReadU32(in), path_size = ReadU32(in), data_size = ReadU32(in);
-  if (!in || kind < 1 || kind > 5 || present > 1 || path_size > 32768 || data_size > 65536)
+  if (!in || kind < 1 || kind > 6 || present > 1 || path_size > 32768 || data_size > 65536)
     return false;
   r.kind = LaunchRequest::Kind(kind);
   r.data_present = present != 0;
@@ -45,7 +45,9 @@ inline bool ReadLaunchRequest(const std::filesystem::path& file, LaunchRequest& 
   in.read(reinterpret_cast<char*>(r.data.data()), data_size);
   if (!in || in.peek() != EOF || r.path.find('\0') != std::string::npos ||
       (!r.data_present && data_size) || (r.kind == LaunchRequest::Image && r.path.empty()) ||
-      (r.kind != LaunchRequest::Image && !r.path.empty()))
+      (r.kind != LaunchRequest::Image && !r.path.empty()) ||
+      (r.kind == LaunchRequest::FirmwareExit &&
+       ((r.flags != 1 && r.flags != 5) || r.data_present || !r.data.empty())))
     return false;
   out = std::move(r);
   return true;

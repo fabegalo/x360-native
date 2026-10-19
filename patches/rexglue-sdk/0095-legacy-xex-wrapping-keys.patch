@@ -1,0 +1,114 @@
+diff --git a/include/rex/system/xex_module.h b/include/rex/system/xex_module.h
+index c4d469b..7b6c2f5 100644
+--- a/include/rex/system/xex_module.h
++++ b/include/rex/system/xex_module.h
+@@ -191,7 +191,7 @@ class XexModule : public Module {
+  private:
+   void ReadSecurityInfo();
+ 
+-  int ReadImage(const void* xex_addr, size_t xex_length, bool use_dev_key);
++  int ReadImage(const void* xex_addr, size_t xex_length, bool use_dev_key, bool use_legacy_key = false);
+   bool AllocateImageMemory(uint32_t size);
+   int ReadImageUncompressed(const void* xex_addr, size_t xex_length);
+   int ReadImageBasicCompressed(const void* xex_addr, size_t xex_length);
+@@ -217,6 +217,7 @@ class XexModule : public Module {
+ 
+   uint8_t session_key_[0x10];
+   bool is_dev_kit_ = false;
++  bool uses_legacy_key_ = false;
+ 
+   bool image_memory_allocated_ = false;  // Only this module owns this reservation.
+   bool loaded_ = false;         // Loaded into memory?
+diff --git a/src/system/xex_module.cpp b/src/system/xex_module.cpp
+index 3f3ed4e..2d43092 100644
+--- a/src/system/xex_module.cpp
++++ b/src/system/xex_module.cpp
+@@ -37,6 +37,19 @@ static const uint8_t xe_xex2_retail_key[16] = {0x20, 0xB1, 0x85, 0xA5, 0x9D, 0x2
+ static const uint8_t xe_xex2_devkit_key[16] = {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                                                0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
+ 
++// Legacy wrapping keys are also used by early XEX2 system images. Values and
++// fallback order follow Xenia Canary's BSD-licensed XEX loader.
++static const uint8_t xe_xex1_retail_key[16] = {
++    0xA2, 0x6C, 0x10, 0xF7, 0x1F, 0xD9, 0x35, 0xE9,
++    0x8B, 0x99, 0x92, 0x2C, 0xE9, 0x32, 0x15, 0x72};
++static const uint8_t xe_xex1_devkit_key[16] = {
++    0xA8, 0xB0, 0x05, 0x12, 0xED, 0xE3, 0x63, 0x8D,
++    0xC6, 0x58, 0xB3, 0x10, 0x1F, 0x9F, 0x50, 0xD1};
++static const uint8_t* XexMasterKey(bool devkit, bool legacy) {
++  return legacy ? (devkit ? xe_xex1_devkit_key : xe_xex1_retail_key)
++                : (devkit ? xe_xex2_devkit_key : xe_xex2_retail_key);
++}
++
+ void aes_decrypt_buffer(const uint8_t* session_key, const uint8_t* input_buffer,
+                         const size_t input_size, uint8_t* output_buffer, const size_t output_size) {
+   uint32_t rk[4 * (MAXNR + 1)];
+@@ -354,7 +367,7 @@ int XexModule::ApplyPatch(XexModule* module) {
+   memcpy(orig_session_key, module->session_key_, 0x10);
+ 
+   // Header patch updated the base XEX key, need to redecrypt it
+-  aes_decrypt_buffer(module->is_dev_kit_ ? xe_xex2_devkit_key : xe_xex2_retail_key,
++  aes_decrypt_buffer(XexMasterKey(module->is_dev_kit_, module->uses_legacy_key_),
+                      reinterpret_cast<const uint8_t*>(module->xex_security_info()->aes_key), 16,
+                      module->session_key_, 16);
+ 
+@@ -487,12 +500,13 @@ int XexModule::ApplyPatch(XexModule* module) {
+   return result_code;
+ }
+ 
+-int XexModule::ReadImage(const void* xex_addr, size_t xex_length, bool use_dev_key) {
++int XexModule::ReadImage(const void* xex_addr, size_t xex_length, bool use_dev_key, bool use_legacy_key) {
+   if (!opt_file_format_info()) {
+     return 1;
+   }
+ 
+   is_dev_kit_ = use_dev_key;
++  uses_legacy_key_ = use_legacy_key;
+ 
+   if (is_patch()) {
+     // Make a copy of patch data for other XEX's to use with ApplyPatch()
+@@ -509,7 +523,7 @@ int XexModule::ReadImage(const void* xex_addr, size_t xex_length, bool use_dev_k
+     image_memory_allocated_ = false;
+   }
+ 
+-  aes_decrypt_buffer(use_dev_key ? xe_xex2_devkit_key : xe_xex2_retail_key,
++  aes_decrypt_buffer(XexMasterKey(use_dev_key, use_legacy_key),
+                      reinterpret_cast<const uint8_t*>(xex_security_info()->aes_key), 16,
+                      session_key_, 16);
+ 
+@@ -949,18 +963,24 @@ bool XexModule::Load(const std::string_view name, const std::string_view path, c
+ 
+   uint8_t* data = memory()->TranslateVirtual(base_address_);
+ 
+-  // Load in the XEX basefile
+-  // We'll try using both XEX2 keys to see if any give a valid PE
+-  int result_code = ReadImage(xex_addr, xex_length, false);
+-  if (result_code) {
+-    REXLOG_WARN("XEX load failed with code {}, trying with devkit encryption key...", result_code);
+-
+-    result_code = ReadImage(xex_addr, xex_length, true);
+-    if (result_code) {
+-      REXLOG_ERROR("XEX load failed with code {}, tried both encryption keys", result_code);
+-      Unload();  // Failed UserModule loads delete this object without calling Unload.
+-      return false;
++  // Try current keys first, then legacy keys, preserving the original image,
++  // block digest checks and per-image reservation ownership on every retry.
++  int result_code = 0;
++  for (unsigned attempt = 0; attempt < 4; ++attempt) {
++    const bool legacy = attempt >= 2;
++    const bool devkit = (attempt & 1) != 0;
++    result_code = ReadImage(xex_addr, xex_length, devkit, legacy);
++    if (!result_code) {
++      if (legacy) REXLOG_INFO("XEX loaded with legacy {} wrapping key", devkit ? "devkit" : "retail");
++      break;
+     }
++    REXLOG_WARN("XEX load failed with code {} using {} {} wrapping key", result_code,
++                legacy ? "legacy" : "current", devkit ? "devkit" : "retail");
++  }
++  if (result_code) {
++    REXLOG_ERROR("XEX load failed with all supported wrapping keys");
++    Unload();
++    return false;
+   }
+ 
+   // Note: caller will have to call LoadContinue once it's determined whether a

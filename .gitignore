@@ -23,6 +23,9 @@ CMakeUserPresets.json
 # AOT outputs live in .local/build/aot/<identity>/generated. Neither is published.
 titles/*/generated/*
 !titles/*/generated/rexglue.cmake
+# Standalone 1888 app manifests emit unused integration templates. The host
+# consumes generated/<app>/sources.cmake through its own CMakeLists.txt.
+/titles/dash_1888/*/generated/
 titles/*/out/
 
 # Accidental out-of-tree build output; canonical builds remain in .local/build.

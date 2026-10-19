@@ -1,0 +1,4 @@
+# Original Retail 1888 createprofile.xex SHA-256 13b2a99bb6c12d16cf48cfdd9cec234404a7e60c50c21fa46db01c5c72bd52ec.
+# Byte-copy tail outside .pdata, reached by the module's static backward branch.
+[functions]
+0x901071E4 = {}

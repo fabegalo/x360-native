@@ -6,7 +6,9 @@ session = true
 importable = true
 limitations = "Blades 2005 original: textos, troca Games/Media/System e Console Settings verificados com teclado; controle físico confirmado pelo mantenedor. Guide, perfis, serviços e jogos ainda sem aceite. Recurso localizado pt-BR ausente no acervo. Usa somente originais identificados da 1888."
 limitations_en = "Original 2005 Blades: text, Games/Media/System switching and Console Settings verified with keyboard; physical controller confirmed by the maintainer. Guide, profiles, services and games remain unvalidated. Localized pt-BR resource absent from the supplied archive. Uses identified 1888 originals only."
-runtime_files = ["rexruntime.dll", "rexgpu-xenos.dll", "dash_1888_bootanim.dll"]
+runtime_files = ["rexruntime.dll", "rexgpu-xenos.dll", "dash_1888_bootanim.dll",
+                 "dash_1888_xam.dll", "dash_1888_signin.dll", "dash_1888_createprofile.dll",
+                 "dash_1888_hud.dll", "dash_1888_vk.dll", "dash_1888_gamerprofile.dll"]
 
 [[files]]
 path = "bootanim.xex"

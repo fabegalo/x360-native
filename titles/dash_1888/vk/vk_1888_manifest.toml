@@ -1,0 +1,11 @@
+# Original Retail 1888 module; SHA-256 c357fef1074fca213217a93493b1c4dd7fcffe0cc1a29bf52de828df92d43d30.
+# Generated separately because system applications share a guest image range.
+[project]
+name = "dash_1888"
+sdk_version = "0.10.0"
+game_root = "../../../.local/inputs/dashboards/1888/runtime"
+[entrypoint]
+file_path = "../../../.local/inputs/dashboards/1888/runtime/vk.xex"
+out_directory_path = "../generated/vk"
+is_dll = true
+includes = ["../analysis/vk_1888.toml"]

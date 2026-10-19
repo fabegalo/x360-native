@@ -151,7 +151,7 @@ void ReleaseSystemUiHost() {
       ->GetKernelModule<rex::kernel::xam::XamModule>("xam.xex");
   using Exit = rex::kernel::xam::XamModule::LoaderData::ExitRequest;
   const auto exit = xam->loader_data().exit_request;
-  if (exit == Exit::Dashboard || exit == Exit::Terminate)
+  if (exit == Exit::Dashboard || exit == Exit::Terminate || exit == Exit::Firmware)
     ui_execution.WaitForCallerExit();
   draw_ui = {};
   request_signin = {};

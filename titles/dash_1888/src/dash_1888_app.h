@@ -11,6 +11,7 @@
 #include "../../common/launch_handoff.h"
 #include "../../common/guest_capture.h"
 #include "original_assets.h"
+#include "system_ui.h"
 
 REXCVAR_DECLARE(bool, dash1888_boot_intro);
 REXCVAR_DEFINE_STRING(x360n_guest_capture, "", "Diagnostics", "Capture actual GPU output every two seconds (opt-in)");
@@ -33,8 +34,10 @@ class Dash1888App : public rex::ReXApp {
     x360n::ImportLaunchData(*runtime());
     if (REXCVAR_GET(dash1888_boot_intro) && !x360n::IsDashboardReturn())
       dash1888::InstallBootIntro(*runtime());
+    dash1888::InstallSystemUi(*runtime());
   }
   void OnGuestThreadExit(rex::system::XThread*) override {
+    dash1888::ReleaseSystemUi();
     x360n::ExportLaunchRequest(*runtime());
   }
   bool OnWindowCloseRequested() override { x360n::ExportWindowClose(); return true; }

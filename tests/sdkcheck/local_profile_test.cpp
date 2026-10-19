@@ -48,6 +48,37 @@ extern "C" void __imp__GetSystemTimeAsFileTime(PPCContext&, uint8_t*);
 extern "C" void __imp__ExGetXConfigSetting(PPCContext&, uint8_t*);
 extern "C" void __imp__ExReadModifyWriteXConfigSettingUlong(PPCContext&, uint8_t*);
 extern "C" void __imp__XamNuiGetDeviceStatus(PPCContext&, uint8_t*);
+extern "C" void __imp__XCustomGetBannerImage(PPCContext&, uint8_t*);
+extern "C" void __imp__XamInputGetDeviceStats(PPCContext&, uint8_t*);
+
+TEST_CASE("Missing custom banner returns failure and clears only its output pointer", "[sdk][custom-banner]") {
+  const auto dir = std::filesystem::temp_directory_path() / ("x360n_banner_" + std::to_string(
+      std::chrono::steady_clock::now().time_since_epoch().count()));
+  std::filesystem::create_directories(dir);
+  struct Cleanup { std::filesystem::path p; ~Cleanup() { std::error_code e; std::filesystem::remove_all(p, e); } } cleanup{dir};
+  rex::Runtime rt(dir);
+  rex::RuntimeConfig config{}; config.tool_mode = true; config.kernel_init = rex::kernel::InitializeKernel;
+  REQUIRE(rt.Setup(std::move(config)) == X_STATUS_SUCCESS);
+  auto* memory = rt.memory(); auto* base = memory->virtual_membase();
+  const auto buffer = memory->SystemHeapAlloc(16); REQUIRE(buffer);
+  std::memset(base + buffer, 0xA5, 16);
+  PPCContext ctx{}; ctx.r3.u64 = buffer + 4;
+  __imp__XCustomGetBannerImage(ctx, base);
+  CHECK(ctx.r3.u32 == 0x80004001u);
+  CHECK(rex::memory::load_and_swap<uint32_t>(base + buffer + 4) == 0);
+  for (unsigned i = 0; i < 16; ++i) if (i < 4 || i >= 8) CHECK(base[buffer + i] == 0xA5);
+  ctx.r3.u64 = 0; __imp__XCustomGetBannerImage(ctx, base);
+  CHECK(ctx.r3.u32 == 0x80070057u);
+  // No backend supplies the private device-statistics record. Leave it
+  // untouched on failure; user zero must not become an accidental success.
+  std::memset(base + buffer, 0xA5, 16);
+  for (uint32_t user = 0; user < 4; ++user) {
+    ctx.r3.u64 = user; ctx.r4.u64 = buffer;
+    __imp__XamInputGetDeviceStats(ctx, base); CHECK(ctx.r3.u32 == 50);
+    for (unsigned i = 0; i < 16; ++i) CHECK(base[buffer + i] == 0xA5);
+  }
+  memory->SystemHeapFree(buffer);
+}
 
 TEST_CASE("Guide device status preserves the caller stack after its 16-byte output",
           "[sdk][guide-contract]") {
@@ -783,6 +814,45 @@ TEST_CASE("Multi-profile migration and failed writes preserve the last committed
   CHECK(recovered.CreateLocal("Replacement") == X_ERROR_FUNCTION_FAILED);
   CHECK(std::filesystem::file_size(store.path / "profiles/local-v2.dat") == 6);
   CHECK(std::filesystem::file_size(store.path / "profiles/local-v1.dat") == 33);
+}
+
+TEST_CASE("Older XUID-array logon confirms persisted local identities and rejects online modes",
+          "[sdk][local-logon-array]") {
+  Store store;
+  rex::Runtime rt(store.path, store.path);
+  Setup(rt);
+  auto* profile = rt.kernel_state()->user_profile();
+  uint64_t xuid = 0;
+  REQUIRE(profile->CreateLocal("Blades", &xuid) == 0);
+  auto* memory = rt.memory();
+  const auto users = memory->SystemHeapAlloc(32);
+  REQUIRE(users);
+  auto* bytes = memory->TranslateVirtual<uint8_t*>(users);
+  std::memset(bytes, 0, 32);
+  rex::memory::store_and_swap<uint64_t>(bytes, xuid);
+  PPCContext ctx{};
+  auto logon = [&](uint32_t flags) {
+    ctx.r3.u64 = users; ctx.r4.u64 = flags; ctx.r5.u64 = 0;
+    __imp__XamUserLogon(ctx, memory->virtual_membase());
+    return ctx.r3.u32;
+  };
+  CHECK(logon(0x421) == 0x80004001u);
+  CHECK(profile->signin_state() == 0);
+  for (uint32_t flags : {0x420u, 0x424u, 0x23u}) {
+    REQUIRE(logon(flags) == 0);
+    CHECK(profile->identity().xuid == xuid);
+    CHECK(profile->signin_state() == 1);
+  }
+  CHECK(logon(0x425) == 0x80004001u);
+  CHECK(profile->signin_state() == 1);
+  rex::memory::store_and_swap<uint64_t>(bytes + 8, xuid);
+  CHECK(logon(0x420) == 0x80004001u); // multi-user rejection is atomic
+  CHECK(profile->signin_state() == 1);
+  rex::memory::store_and_swap<uint64_t>(bytes + 8, 0);
+  rex::memory::store_and_swap<uint64_t>(bytes, xuid + 1);
+  CHECK(logon(0x420) != 0); // cannot fabricate an account
+  CHECK(profile->identity().xuid == xuid);
+  memory->SystemHeapFree(users);
 }
 
 TEST_CASE("Existing profile copy joins slot zero and survives runtime restart",

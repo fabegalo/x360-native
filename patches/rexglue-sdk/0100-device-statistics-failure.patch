@@ -1,0 +1,18 @@
+diff --git a/src/kernel/xam/xam_input.cpp b/src/kernel/xam/xam_input.cpp
+index c3e3509..7bb662e 100644
+--- a/src/kernel/xam/xam_input.cpp
++++ b/src/kernel/xam/xam_input.cpp
+@@ -319,7 +319,12 @@ REX_EXPORT(__imp__XamUserGetDeviceContext, rex::kernel::xam::XamUserGetDeviceCon
+ 
+ REX_EXPORT_STUB(__imp__XamInputControl);
+ REX_EXPORT_STUB(__imp__XamInputEnableAutobind);
+-REX_EXPORT_STUB(__imp__XamInputGetDeviceStats);
++// The input backend does not expose the private device-statistics record.
++// Do not leave user index zero in r3 as an accidental successful query. Keep
++// caller storage untouched on failure; no fabricated battery/accessory data.
++extern "C" REX_FUNC(__imp__XamInputGetDeviceStats) {
++  ctx.r3.u64 = ctx.r3.u32 < 4 && ctx.r4.u32 ? 50u : 87u;
++}
+ REX_EXPORT_STUB(__imp__XamInputGetFailedConnectionOrBind);
+ REX_EXPORT_STUB(__imp__XamInputGetKeyLocks);
+ extern "C" REX_FUNC(__imp__XamInputGetKeystrokeHud) {

@@ -5,10 +5,12 @@
 #include <rex/system/function_dispatcher.h>
 #include <rex/system/kernel_state.h>
 #include <rex/system/user_module.h>
+#include <atomic>
 
 namespace dash1888 {
 namespace {
 PPCFunc* dashboard_entry = nullptr;
+std::atomic<bool> intro_running = false;
 void BootThenDashboard(PPCContext& ctx, uint8_t* base) {
   auto* runtime = rex::Runtime::instance();
   auto module = runtime->kernel_state()->LoadUserModule("game:\\bootanim.xex", false);
@@ -28,12 +30,14 @@ void BootThenDashboard(PPCContext& ctx, uint8_t* base) {
               address, module->hmodule_ptr());
   start(ctx, base);
   REXLOG_INFO("1888 intro: original export 1 returned; starting original dashboard");
+  intro_running.store(false, std::memory_order_release);
   ctx = saved;
   ctx.fpscr.restoreGuestBits(saved.fpscr.csr);
   dashboard_entry(ctx, base);
 }
 }
 void InstallBootIntro(rex::Runtime& runtime) {
+  intro_running.store(true, std::memory_order_release);
   const auto entry = runtime.kernel_state()->GetExecutableModule()->entry_point();
   auto* dispatcher = runtime.function_dispatcher();
   dashboard_entry = dispatcher->GetFunction(entry);
@@ -41,4 +45,5 @@ void InstallBootIntro(rex::Runtime& runtime) {
       !dispatcher->SetFunction(entry, BootThenDashboard))
     REX_FATAL("1888 intro: could not install bootstrap");
 }
+bool BootIntroRunning() { return intro_running.load(std::memory_order_acquire); }
 }

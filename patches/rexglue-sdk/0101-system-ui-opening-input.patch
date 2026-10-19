@@ -1,0 +1,124 @@
+diff --git a/include/rex/kernel/xam/module.h b/include/rex/kernel/xam/module.h
+index 1a25002..621d06a 100644
+--- a/include/rex/kernel/xam/module.h
++++ b/include/rex/kernel/xam/module.h
+@@ -26,6 +26,8 @@ namespace kernel {
+ namespace xam {
+ 
+ bool xeXamIsUIActive();
++// Capture controls already held by the request that begins this UI session.
++void CaptureSystemUiOpeningInput(uint32_t owner);
+ 
+ class XamModule : public system::KernelModule {
+  public:
+@@ -51,6 +53,7 @@ class XamModule : public system::KernelModule {
+     auto it = system_apps_.find(slot);
+     if (system_ui_.module || (user >= 4 && user != 0xFF) || it == system_apps_.end() ||
+         it->second.module != module) return false;
++    CaptureSystemUiOpeningInput(user);
+     system_ui_ = {module, user};
+     return true;
+   }
+diff --git a/src/kernel/xam/xam_input.cpp b/src/kernel/xam/xam_input.cpp
+index 7bb662e..293f5c0 100644
+--- a/src/kernel/xam/xam_input.cpp
++++ b/src/kernel/xam/xam_input.cpp
+@@ -48,6 +48,7 @@ struct SystemUiLatch {
+   uint16_t buttons = 0;   // held through the UI: hidden until released
+   bool left_trigger = false, right_trigger = false;
+   uint32_t keys = 0;      // pad keystrokes whose key-up still belongs to the UI
++  uint32_t opening_keys = 0; // initiating controls, suppressed through their key-up
+ };
+ std::mutex system_ui_latch_mutex;
+ SystemUiLatch system_ui_latches[4];
+@@ -71,6 +72,32 @@ uint32_t PadKeyBit(uint16_t virtual_key) {
+   return virtual_key >= 0x5800 && virtual_key <= 0x5817 ? 1u << (virtual_key - 0x5800) : 0;
+ }
+ 
++// Ownership changes once per application, not once per input poll. Capture
++// only the controls actually held at that boundary; never drain the queue.
++// New controls remain available even while an initiating button is held.
++void CaptureSystemUiOpeningInput(uint32_t owner) {
++  constexpr uint16_t buttons[24] = {
++      0x1000, 0x2000, 0x4000, 0x8000, 0x0100, 0x0200, 0, 0,
++      0, 0, 0, 0, 0, 0, 0, 0,
++      0x0001, 0x0002, 0x0004, 0x0008, 0x0010, 0x0020, 0x0040, 0x0080};
++  auto* backend = input_system();
++  for (uint32_t user = 0; user < 4; ++user) {
++    if (owner != 0xFF && owner != user) continue;
++    X_INPUT_STATE state{};
++    uint32_t keys = 0;
++    if (backend && backend->GetState(user, &state) == X_ERROR_SUCCESS) {
++      for (uint32_t bit = 0; bit < 24; ++bit)
++        if (uint16_t(state.gamepad.buttons) & buttons[bit]) keys |= 1u << bit;
++      if (state.gamepad.left_trigger) keys |= PadKeyBit(0x5806);
++      if (state.gamepad.right_trigger) keys |= PadKeyBit(0x5807);
++    }
++    std::lock_guard lock(system_ui_latch_mutex);
++    auto& latch = system_ui_latches[user];
++    latch.opening_keys = keys;
++    latch.keys |= keys;
++    latch.armed = true;
++  }
++}
+ // First title query after a system UI: latch everything still held.
+ void TakeSystemUiLatch(SystemUiLatch& latch, const X_INPUT_STATE& held) {
+   if (!latch.armed) return;
+@@ -103,17 +130,31 @@ void FilterTitleState(uint32_t user, X_INPUT_STATE* state) {
+ }
+ 
+ // The HUD received this key-down: its repeats and key-up belong to the UI.
+-void NoteSystemUiKeystroke(const X_INPUT_KEYSTROKE& stroke) {
++bool NoteSystemUiKeystroke(const X_INPUT_KEYSTROKE& stroke) {
+   const uint32_t user = stroke.user_index;
+   const uint32_t bit = PadKeyBit(uint16_t(stroke.virtual_key));
+-  if (user >= 4 || !bit) return;
++  if (user >= 4 || !bit) return false;
+   std::lock_guard lock(system_ui_latch_mutex);
+   auto& latch = system_ui_latches[user];
+   latch.armed = true;
+-  if (uint16_t(stroke.flags) & rex::input::X_INPUT_KEYSTROKE_KEYUP) latch.keys &= ~bit;
+-  else latch.keys |= bit;
++  const bool opening = (latch.opening_keys & bit) != 0;
++  if (uint16_t(stroke.flags) & rex::input::X_INPUT_KEYSTROKE_KEYUP) {
++    latch.keys &= ~bit;
++    latch.opening_keys &= ~bit;
++  } else latch.keys |= bit;
++  return opening;
+ }
+ 
++// Both HUD ABIs use the same ownership rule, including delayed transitions
++// and repeats. Stop at the first unrelated event and preserve its payload.
++uint32_t GetSystemUiKeystroke(rex::input::InputSystem* backend, uint32_t user,
++                              X_INPUT_KEYSTROKE* stroke) {
++  if (!backend) return X_ERROR_DEVICE_NOT_CONNECTED;
++  for (;;) {
++    const auto result = backend->GetKeystroke(user, 1, stroke);
++    if (result != X_ERROR_SUCCESS || !NoteSystemUiKeystroke(*stroke)) return result;
++  }
++}
+ // Drops the remaining transitions of a key the system UI consumed.
+ bool SystemUiOwnsKeystroke(uint32_t user, const X_INPUT_KEYSTROKE& stroke) {
+   if (user >= 4) return false;
+@@ -340,8 +381,7 @@ extern "C" REX_FUNC(__imp__XamInputGetKeystrokeHud) {
+   }
+   auto* stroke = reinterpret_cast<input::X_INPUT_KEYSTROKE*>(base + ctx.r4.u32);
+   kernel::xam::ArmSystemUiLatch(ui.user);
+-  ctx.r3.u64 = kernel::xam::input_system()->GetKeystroke(user, 1, stroke);
+-  if (ctx.r3.u32 == X_ERROR_SUCCESS) kernel::xam::NoteSystemUiKeystroke(*stroke);
++  ctx.r3.u64 = kernel::xam::GetSystemUiKeystroke(kernel::xam::input_system(), user, stroke);
+ }
+ extern "C" REX_FUNC(__imp__XamInputGetKeystrokeHudEx) {
+   using namespace rex;
+@@ -369,9 +409,9 @@ extern "C" REX_FUNC(__imp__XamInputGetKeystrokeHudEx) {
+   const uint32_t first = selected == 0xFF ? 0 : selected;
+   const uint32_t end = selected == 0xFF ? 4 : selected + 1;
+   for (uint32_t index = first; index < end; ++index) {
+-    const auto result = input_backend->GetKeystroke(index, 1, stroke);
++    const auto result = kernel::xam::GetSystemUiKeystroke(input_backend, index, stroke);
+     if (result == X_ERROR_SUCCESS) {
+-      kernel::xam::NoteSystemUiKeystroke(*stroke);
++
+       ctx.r3.u64 = result;
+       return;
+     }

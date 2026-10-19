@@ -173,6 +173,23 @@ TEST_CASE("handoff distinguishes title return from closing the platform", "[sess
   fs::remove_all(dir);
 }
 
+TEST_CASE("firmware exit handoff rejects launch data and unsupported routines", "[firmware-exit]") {
+  auto dir = UniqueTempPath("firmware-handoff"); fs::create_directories(dir);
+  auto file = dir / "handoff.bin";
+  for (uint32_t routine : {1u, 5u, 99u}) {
+    LaunchRequest input; input.kind = LaunchRequest::FirmwareExit; input.flags = routine;
+    REQUIRE(WriteLaunchRequest(file, input));
+    LaunchRequest output;
+    CHECK(ReadLaunchRequest(file, output) == (routine != 99));
+    fs::remove(file);
+  }
+  LaunchRequest input; input.kind = LaunchRequest::FirmwareExit; input.flags = 5;
+  input.data_present = true;
+  REQUIRE(WriteLaunchRequest(file, input));
+  LaunchRequest output; CHECK_FALSE(ReadLaunchRequest(file, output));
+  fs::remove_all(dir);
+}
+
 TEST_CASE("session dashboard version comes from its preparation receipt", "[session]") {
   auto dir = UniqueTempPath("session-version");
   fs::create_directories(dir);

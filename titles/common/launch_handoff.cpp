@@ -125,7 +125,12 @@ void ExportLaunchRequest(rex::Runtime& runtime) {
   request.flags = data.launch_flags;
   request.data_present = data.launch_data_present;
   request.data = data.launch_data;
-  if (data.exit_request == Exit::Dashboard) {
+  if (data.exit_request == Exit::Firmware) {
+    request.kind = LaunchRequest::FirmwareExit;
+    request.flags = data.firmware_routine;
+    request.data_present = false;
+    request.data.clear();
+  } else if (data.exit_request == Exit::Dashboard) {
     request.kind = LaunchRequest::Dashboard;
   } else if (data.exit_request == Exit::Terminate) {
     request.kind = LaunchRequest::TitleTerminate;

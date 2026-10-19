@@ -18,7 +18,11 @@ add_executable(x360n_tests
     supervisor/games_played_test.cpp
 )
 target_link_libraries(x360n_tests PRIVATE x360n_core Catch2::Catch2WithMain)
+# preparation_test.cpp reads receipts directly, so it owns this header dependency.
+target_include_directories(x360n_tests SYSTEM PRIVATE
+    ${X360_REXGLUE_DIR}/thirdparty/inja/third_party/include)
 target_sources(x360n_tests PRIVATE supervisor/dashboard_assets_test.cpp
+    supervisor/dashboard_1888_requests_test.cpp
     ../titles/common/dashboard_assets.cpp)
 target_link_libraries(x360n_tests PRIVATE tomlplusplus)
 target_compile_definitions(x360n_tests PRIVATE
@@ -34,6 +38,10 @@ target_sources(x360n_tests PRIVATE avatar/avatar_toc_test.cpp avatar/avatar_meta
 # x360n-content extract-disc over synthetic GDFX images and apply-patch key file
 # handling (runs the tool as a process; no key material).
 target_sources(x360n_tests PRIVATE content/extract_disc_test.cpp content/apply_patch_keys_test.cpp)
+if(WIN32)
+  target_sources(x360n_tests PRIVATE content/apply_patch_test.cpp)
+  target_link_libraries(x360n_tests PRIVATE bcrypt)
+endif()
 target_sources(x360n_tests PRIVATE content/extraction_manifest_test.cpp
     ${PROJECT_SOURCE_DIR}/src/content/extraction_manifest.cpp)
 target_compile_definitions(x360n_tests PRIVATE X360N_CONTENT_EXE="$<TARGET_FILE:x360n-content>")

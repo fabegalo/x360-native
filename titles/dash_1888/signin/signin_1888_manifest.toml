@@ -1,0 +1,11 @@
+# Original Retail 1888 module; SHA-256 45ecb2e6afa0023dc1e09a8a9113731ed420bbee943853aeeb07c2f71ba4e7d4.
+# Generated separately because system applications share a guest image range.
+[project]
+name = "dash_1888"
+sdk_version = "0.10.0"
+game_root = "../../../.local/inputs/dashboards/1888/runtime"
+[entrypoint]
+file_path = "../../../.local/inputs/dashboards/1888/runtime/signin.xex"
+out_directory_path = "../generated/signin"
+is_dll = true
+includes = ["../analysis/signin_1888.toml"]

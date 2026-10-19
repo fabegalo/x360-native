@@ -1,0 +1,30 @@
+# Original XAM Retail 1888, SHA-256 b735585475af402b96f3617322d64444ddecd841352cbaafa32da647c40871f4.
+# Original tail-call wrappers outside .pdata, verified with SDK disassembly.
+[functions]
+0x819AB1E8 = {}
+0x819AB2B0 = {}
+0x81A27800 = {}
+0x81A27860 = {}
+0x81A278C0 = {}
+0x819E7848 = {}
+0x819E8690 = {}
+0x818ED178 = {}
+
+# XUI drawing callbacks held by the original .rdata vtables at 81887880,
+# 818888B0 and 81888998. Each is an adjustor thunk outside .pdata, after a
+# terminal branch and before the next original function; no binary changes.
+# 819E8460 was reached at the first manual draw (LR 819EDBB8).
+# Bounds: 2 instructions each
+0x819E7860 = {}
+0x819E8460 = {}
+0x819E8468 = {}
+0x819E8470 = {}
+0x819EF378 = {}
+0x819EF380 = {}
+0x819EF388 = {}
+0x819EF3B0 = {}
+0x819EF3B8 = {}
+0x819EF3C8 = {}
+0x819EF3D8 = {}
+0x819F1210 = {}
+0x819F1218 = {}

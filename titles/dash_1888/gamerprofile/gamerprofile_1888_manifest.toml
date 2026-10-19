@@ -1,0 +1,11 @@
+# Original Retail 1888 module; SHA-256 b7ba58ab7a5de40ec20fc89267dee9ca7195d043fbeb95d7d536e307c59cfd8b.
+# Generated separately because system applications share a guest image range.
+[project]
+name = "dash_1888"
+sdk_version = "0.10.0"
+game_root = "../../../.local/inputs/dashboards/1888/runtime"
+[entrypoint]
+file_path = "../../../.local/inputs/dashboards/1888/runtime/gamerprofile.xex"
+out_directory_path = "../generated/gamerprofile"
+is_dll = true
+includes = ["../analysis/gamerprofile_1888.toml"]

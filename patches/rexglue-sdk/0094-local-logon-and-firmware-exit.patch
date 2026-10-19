@@ -1,0 +1,71 @@
+diff --git a/include/rex/kernel/xam/module.h b/include/rex/kernel/xam/module.h
+--- a/include/rex/kernel/xam/module.h
++++ b/include/rex/kernel/xam/module.h
+@@ -124,5 +124,6 @@
+   struct LoaderData {
+-    enum class ExitRequest { None, Dashboard, Terminate };
++    enum class ExitRequest { None, Dashboard, Terminate, Firmware };
+     ExitRequest exit_request = ExitRequest::None;
++    uint32_t firmware_routine = 0;
+     bool launch_data_present = false;
+     std::vector<uint8_t> launch_data;
+diff --git a/src/kernel/xboxkrnl/xboxkrnl_hal.cpp b/src/kernel/xboxkrnl/xboxkrnl_hal.cpp
+--- a/src/kernel/xboxkrnl/xboxkrnl_hal.cpp
++++ b/src/kernel/xboxkrnl/xboxkrnl_hal.cpp
+@@ -19,6 +19,7 @@
+ #include <rex/types.h>
+ #include <rex/system/kernel_state.h>
+ #include <rex/system/xtypes.h>
++#include <rex/kernel/xam/module.h>
+ 
+ namespace rex::kernel::xboxkrnl {
+ 
+@@ -26,12 +27,24 @@ void HalReturnToFirmware_entry(u32 routine) {
+   // IN FIRMWARE_REENTRY  Routine
+ 
+-  // Routine must be 1 'HalRebootRoutine'
+-  assert_true(routine == 1);
+-
+-  // TODO(benvank): diediedie much more gracefully
+-  // Not sure how to blast back up the stack in LLVM without exceptions, though.
+-  REXKRNL_ERROR("Game requested shutdown via HalReturnToFirmware");
+-  exit(0);
++  // Preserve the existing routine 1 host-exit contract and the original
++  // Retail HUD's routine 5 (nice poweroff). Other firmware modes need their
++  // own implementation; never return a fictitious success to guest code.
++  if (routine != 1 && routine != 5)
++    REX_FATAL("Unsupported HalReturnToFirmware routine {}", routine);
++  {
++    auto xam = REX_KERNEL_STATE()->GetKernelModule<rex::kernel::xam::XamModule>("xam.xex");
++    auto& loader = xam->loader_data();
++    loader.exit_request = rex::kernel::xam::XamModule::LoaderData::ExitRequest::Firmware;
++    loader.firmware_routine = routine;
++    loader.launch_path.clear();
++    loader.launch_flags = 0;
++    loader.launch_data_present = false;
++    loader.launch_data.clear();
++  }
++  REXKRNL_INFO("Guest requested firmware exit, routine={}", routine);
++  // Run guest notifications and let ReXApp publish the handoff and tear down
++  // its runtime. exit(0) bypasses both, leaving the supervisor without intent.
++  REX_KERNEL_STATE()->TerminateTitle();
+ }
+ 
+ }  // namespace rex::kernel::xboxkrnl
+diff --git a/src/kernel/xam/xam_user.cpp b/src/kernel/xam/xam_user.cpp
+--- a/src/kernel/xam/xam_user.cpp
++++ b/src/kernel/xam/xam_user.cpp
+@@ -70,8 +70,12 @@ static uint32_t LocalLogon(mapped_void users, uint32_t flags, uint32_t overlapped,
+   if (!users) return uint32_t(X_E_INVALIDARG);
+   const bool remove = stride == 8 && flags == 0x28;
+   const bool append = stride == 392 && flags == 0x120424;
++  // The older XUID-array ABI is used by original Retail 1888 Sign-in:
++  // 90103550 submits its closing snapshot (0x23), 90105FE8/90106064 its
++  // offline confirmation (0x420/0x424). Online variants remain unsupported.
++  const bool local_array = stride == 8 && (flags == 0x23 || flags == 0x420 || flags == 0x424);
+   if (flags && !(stride == 392 && (flags == 0x120420 || append)) &&
+-      !(stride == 8 && (flags == 0x63 || flags == 0x24 || remove))) return 0x80004001u;
++      !local_array && !(stride == 8 && (flags == 0x63 || flags == 0x24 || remove))) return 0x80004001u;
+   auto* bytes = users.as<uint8_t*>();
+   for (unsigned i = 1; i < 4; ++i) {
+     if (rex::memory::load_and_swap<uint64_t>(bytes + i * stride))

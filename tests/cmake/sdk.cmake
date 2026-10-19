@@ -1,6 +1,10 @@
 # Included from tests/CMakeLists.txt; paths and target outputs stay rooted there.
 # SDK behavior checks (link the SDK codegen library).
 add_executable(x360n_sdk_checks sdkcheck/depfile_escape_test.cpp)
+target_sources(x360n_sdk_checks PRIVATE sdkcheck/sha1_test.cpp)
+if(WIN32)
+  target_link_libraries(x360n_sdk_checks PRIVATE bcrypt)
+endif()
 target_sources(x360n_sdk_checks PRIVATE sdkcheck/gapfill_boundary_test.cpp sdkcheck/synthetic_xex.cpp)
 target_sources(x360n_sdk_checks PRIVATE sdkcheck/virtual_thunk_discovery_test.cpp)
 target_sources(x360n_sdk_checks PRIVATE sdkcheck/ctr_dispatch_test.cpp)
@@ -135,6 +139,11 @@ target_sources(x360n_sdk_runtime_checks PRIVATE sdkcheck/physical_heap_transacti
 target_sources(x360n_sdk_runtime_checks PRIVATE sdkcheck/xctd_query_test.cpp)
 target_sources(x360n_sdk_runtime_checks PRIVATE sdkcheck/mic_array_idle_test.cpp)
 target_sources(x360n_sdk_runtime_checks PRIVATE sdkcheck/xex_heap_ownership_test.cpp)
+target_sources(x360n_sdk_runtime_checks PRIVATE sdkcheck/xam_allocation_test.cpp)
+if(WIN32)
+  target_sources(x360n_sdk_runtime_checks PRIVATE sdkcheck/xex_key_test.cpp)
+  target_link_libraries(x360n_sdk_runtime_checks PRIVATE bcrypt)
+endif()
 target_sources(x360n_sdk_runtime_checks PRIVATE sdkcheck/games_played_launch_test.cpp)
 target_compile_definitions(x360n_sdk_runtime_checks PRIVATE X360N_SOURCE_ROOT="${PROJECT_SOURCE_DIR}")
 target_link_libraries(x360n_sdk_runtime_checks PRIVATE tomlplusplus)
@@ -160,8 +169,38 @@ target_compile_options(x360n_sdk_runtime_checks PRIVATE
 target_compile_definitions(x360n_sdk_runtime_checks PRIVATE
     X360N_SHUTDOWN_PROBE="$<TARGET_FILE:x360n_shutdown_probe>")
 add_dependencies(x360n_sdk_runtime_checks x360n_shutdown_probe)
+
+add_executable(x360n_firmware_exit_probe sdkcheck/firmware_exit_probe.cpp ../titles/common/launch_handoff.cpp)
+target_link_libraries(x360n_firmware_exit_probe PRIVATE rexruntime)
+x360n_stage_runtime_dlls(x360n_firmware_exit_probe)
+if(WIN32)
+  add_test(NAME sdkcheck.firmware-exit COMMAND powershell -NoProfile -ExecutionPolicy Bypass
+    -File ${CMAKE_CURRENT_SOURCE_DIR}/sdkcheck/firmware_exit_test.ps1
+    -Executable $<TARGET_FILE:x360n_firmware_exit_probe>)
+  set_tests_properties(sdkcheck.firmware-exit PROPERTIES LABELS project TIMEOUT 30)
+endif()
 # Runtime DLLs staged on every build, not only when this executable relinks.
 x360n_stage_runtime_dlls(x360n_sdk_runtime_checks)
+add_executable(x360n_1888_bridge_checks
+    sdkcheck/dashboard_1888_bridge_test.cpp
+    ../titles/dash_1888/src/system_ui_app_load.cpp
+    ../titles/dash_1888/src/legacy_ui_requests.cpp)
+target_link_libraries(x360n_1888_bridge_checks PRIVATE rexruntime Catch2::Catch2WithMain)
+target_compile_options(x360n_1888_bridge_checks PRIVATE
+    -UTRACY_ENABLE -UREXGLUE_ENABLE_PROFILING -UREXGLUE_ENABLE_PERF_COUNTERS)
+x360n_stage_runtime_dlls(x360n_1888_bridge_checks)
+add_test(NAME sdkcheck.1888-native-bridges COMMAND x360n_1888_bridge_checks)
+set_tests_properties(sdkcheck.1888-native-bridges PROPERTIES LABELS project TIMEOUT 30)
+if(WIN32)
+  add_executable(x360n_1888_allocation_probe EXCLUDE_FROM_ALL tools/aot_xam_allocation_probe.cpp)
+  target_sources(x360n_1888_allocation_probe PRIVATE
+      ../titles/dash_1888/src/system_ui.cpp ../titles/common/dashboard_assets.cpp)
+  target_compile_definitions(x360n_1888_allocation_probe PRIVATE X360N_1888_UI_DIAGNOSTIC=1)
+  target_link_libraries(x360n_1888_allocation_probe PRIVATE rexruntime x360n_core)
+  target_compile_options(x360n_1888_allocation_probe PRIVATE
+      -UTRACY_ENABLE -UREXGLUE_ENABLE_PROFILING -UREXGLUE_ENABLE_PERF_COUNTERS)
+  x360n_stage_runtime_dlls(x360n_1888_allocation_probe)
+endif()
 catch_discover_tests(x360n_sdk_runtime_checks TEST_PREFIX "sdkcheck." PROPERTIES LABELS "project" TIMEOUT 120
     DISCOVERY_MODE PRE_TEST)
 if(WIN32)

@@ -1,0 +1,60 @@
+diff --git a/src/system/xex_module.cpp b/src/system/xex_module.cpp
+index 2d43092..157b22e 100644
+--- a/src/system/xex_module.cpp
++++ b/src/system/xex_module.cpp
+@@ -75,12 +75,18 @@ using rex::system::KernelState;
+ 
+ namespace {
+ // Resource DLLs (for example a system UI skin) may contain raw XUIZ data
+-// instead of PE code. Accept only bounded, unencrypted, data-only images;
++// instead of PE code. Accept only bounded, data-only images; encrypted XEX2
++// resources must also validate the complete plaintext page digest chain.
+ // never interpret a failed executable load as a resource module.
+ bool IsResourceOnly(const XexModule& module) {
+   const auto* header = module.xex_header();
+-  if (header->module_flags != XEX_MODULE_DLL_MODULE ||
+-      module.opt_file_format_info()->encryption_type != XEX_ENCRYPTION_NONE) return false;
++  constexpr uint32_t allowed_flags = XEX_MODULE_DLL_MODULE | XEX_MODULE_EXPORTS_TO_TITLE;
++  if (!(header->module_flags & XEX_MODULE_DLL_MODULE) ||
++      (header->module_flags & ~allowed_flags)) return false;
++  const auto encryption = module.opt_file_format_info()->encryption_type;
++  const bool verify_pages = encryption != XEX_ENCRYPTION_NONE;
++  if (verify_pages && (encryption != XEX_ENCRYPTION_NORMAL || header->magic != kXEX2Signature))
++    return false;
+   void* unused = nullptr;
+   for (auto key : {XEX_HEADER_ENTRY_POINT, XEX_HEADER_IMPORT_LIBRARIES, XEX_HEADER_TLS_INFO})
+     if (module.GetOptHeader(key, &unused)) return false;
+@@ -102,13 +108,31 @@ bool IsResourceOnly(const XexModule& module) {
+   }
+   const auto* security = module.xex_security_info();
+   const uint32_t page_size = security->image_flags & XEX_IMAGE_PAGE_SIZE_4KB ? 4096 : 65536;
++  const auto descriptors_offset = uintptr_t(security->page_descriptors) - uintptr_t(header);
++  if (descriptors_offset > header_size || uint64_t(security->page_descriptor_count) *
++      sizeof(xex2_page_descriptor) > header_size - descriptors_offset) return false;
++  const char* expected_digest = verify_pages ?
++      static_cast<const xex2_security_info*>(XexModule::GetSecurityInfo(header))->section_digest : nullptr;
+   uint64_t covered = 0;
+   for (uint32_t i = 0; i < security->page_descriptor_count; ++i) {
+     xex2_page_descriptor page;
+     page.value = rex::byte_swap(security->page_descriptors[i].value);
+     if (!page.page_count || (page.info != XEX_SECTION_DATA && page.info != XEX_SECTION_READONLY_DATA)) return false;
+-    covered += uint64_t(page.page_count) * page_size;
+-    if (covered > module.image_size()) return false;
++    const uint64_t bytes = uint64_t(page.page_count) * page_size;
++    if (bytes > module.image_size() - covered) return false;
++    if (verify_pages) {
++      // XEX2 link i = SHA-1(decoded page run i || raw descriptor i).
++      // The root is in the security header; subsequent links are in the
++      // previous descriptor. This also authenticates encrypted basic/raw
++      // payloads, which have no compressed-block digest to select the key.
++      sha1::SHA1 hash;
++      hash.processBytes(module.memory()->TranslateVirtual(start + covered), size_t(bytes));
++      hash.processBytes(&security->page_descriptors[i], sizeof(xex2_page_descriptor));
++      uint8_t digest[20]; hash.finalize(digest);
++      if (std::memcmp(digest, expected_digest, sizeof(digest))) return false;
++      expected_digest = security->page_descriptors[i].data_digest;
++    }
++    covered += bytes;
+   }
+   return covered == module.image_size();
+ }

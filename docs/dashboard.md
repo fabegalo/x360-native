@@ -1,5 +1,14 @@
 # Dashboard original: diagnóstico
 
+Retail **1888 — Guide** (19/10/2026): retirada a chamada de fechamento indevida
+do loop original e removido o descarte geral de `guide_input.h`. Após reprovação
+manual da reabertura, o patch 0101 captura somente o gesto inicial até seu UP;
+regressões de entrada e sonda CPU com timers reais passaram. A revisão local
+posterior corrigiu a limpeza de recursos em duas falhas de abertura, sem build
+ou UI; binários não recertificados após esses ajustes. Reabertura com controle
+físico, serviços completos, relógio/AM–PM e mensagens XMP continuam pendentes.
+[Causa, revisão das adaptações e evidências](reports/dashboard-1888-guide-2026-10-19.md).
+
 Retail **1888** (18/10/2026): Blades original, textos, troca Games/Media/System e
 Console Settings demonstrados com teclado; controle físico confirmado pelo
 mantenedor. Perfil Release próprio selecionável no launcher, com snapshot de 22

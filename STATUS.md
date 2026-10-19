@@ -1,9 +1,22 @@
 # STATUS
 
-Estado consolidado em **2026-10-18**; a referência funcional integrada histórica é `1844245`.
+Estado consolidado em **2026-10-19**; a referência funcional integrada histórica é `1844245`.
 Este arquivo resume o estado atual; os relatórios vinculados preservam datas,
 falhas iniciais, hashes, comandos e limites de cada validação. Resultados de uma
 etapa histórica não certificam automaticamente o build atual nem outros títulos.
+
+Retail 1888 — Guide (19/10): corrigida a chamada de fechamento indevida no loop
+de frames do host original. Após reprovação manual da reabertura, o patch 0101
+passou a reter somente os controles do gesto de abertura/fechamento até seu UP;
+`guide_input.h` e seu descarte geral continuam removidos. Evidências anteriores:
+269 asserções/10 casos de entrada, 51 asserções dos adaptadores e ensaio CPU com
+timers reais aprovados. A revisão local posterior corrigiu duas saídas de erro
+que deixavam o recurso registrado após descarregar a aplicação e restringiu o
+novo teste CNG ao Windows. Revisão sem build, UI ou nova execução de testes
+nativos, conforme pedido do mantenedor, que autorizou o commit. Não há
+recertificação dos binários após esses ajustes. Pendem aceite manual da
+reabertura/controle, relógio/AM–PM, erros XMP e serviços completos.
+[Correção, revisão e limites](docs/reports/dashboard-1888-guide-2026-10-19.md).
 
 Retail 1888 (18/10): perfil próprio Release com 22 originais locais identificados
 e SHA-256, snapshot reproduzível e isolamento por versão. A interface Blades
@@ -206,8 +219,8 @@ pela My Games e gameplay continuam pendentes. [Evidência histórica](docs/repor
 
 Windows x64/D3D12 é o ambiente demonstrado. Linux, macOS, ARM64 e Windows limpo
 continuam sem aceite funcional completo. ReXGlue v0.10.0 permanece fixado em
-`f5337cdc947ff6d4c4196737e2c807a48f2a1fc2`, LLVM 22.1.8, **91 patches ativos**
-no [lock](deps.lock.json); numeração até 0092, com 0073 retirado.
+`f5337cdc947ff6d4c4196737e2c807a48f2a1fc2`, LLVM 22.1.8, **100 patches ativos**
+no [lock](deps.lock.json); numeração até 0101, com 0073 retirado.
 O submódulo modificado pelos patches/materialização do libmspack é esperado.
 Nunca substituir módulos ou fontes originais entre versões de dashboard.
 

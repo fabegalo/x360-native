@@ -1,0 +1,4 @@
+# Original Retail 1888 signin.xex SHA-256 45ecb2e6afa0023dc1e09a8a9113731ed420bbee943853aeeb07c2f71ba4e7d4.
+# Byte-copy tail outside .pdata, reached by the module's static backward branch.
+[functions]
+0x90108E04 = {}

@@ -52,6 +52,24 @@ struct Fixture {
   }
 };
 }
+TEST_CASE("firmware powerdown closes the platform from either session participant", "[firmware-exit][cli]") {
+  for (const std::string mode : {"firmware-dashboard", "firmware-child"}) {
+    Fixture f(mode);
+    const auto result = f.Run(10);
+    INFO(Read(f.root / "err.log"));
+    REQUIRE(result.exit_code == 0);
+    std::istringstream observed(Read(f.paths.inputs() / "observed.txt"));
+    unsigned step = 99; bool dashboard = false;
+    REQUIRE(bool(observed >> step >> dashboard));
+    CHECK(step == 0); CHECK(dashboard);
+    if (mode == "firmware-child") {
+      REQUIRE(bool(observed >> step >> dashboard));
+      CHECK(step == 1); CHECK_FALSE(dashboard);
+    }
+    CHECK_FALSE(bool(observed >> step));
+    CHECK(Read(f.root / "out.log").find("requested firmware exit (routine 5)") != std::string::npos);
+  }
+}
 TEST_CASE("session storage override follows handoffs without changing global storage", "[session-storage][cli]") {
   Fixture f("storage");
   const auto copy = f.paths.local() / "isolated";

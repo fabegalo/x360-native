@@ -71,6 +71,10 @@ int main(int argc, char** argv) {
   if (dashboard) request.path = PathUtf8(root / "game.xex");
   if (step == 80 || ((mode == "locale" || mode == "version" || mode == "avatar" || mode == "storage") && step == 2)) { request.kind = LaunchRequest::WindowClose; request.path.clear(); }
   if (!dashboard && mode == "invalid-flags") request.flags = 0x200;
+  if ((mode == "firmware-dashboard" && dashboard) || (mode == "firmware-child" && !dashboard)) {
+    request.kind = LaunchRequest::FirmwareExit; request.flags = 5;
+    request.path.clear(); request.data_present = false; request.data.clear();
+  }
   if (!dashboard && mode == "invalid-target") {
     request.kind = LaunchRequest::Image; request.flags = 0;
     request.path = PathUtf8(root / "unregistered.xex");

@@ -5,6 +5,7 @@
 #include <rex/input/flags.h>
 #include <rex/input/input.h>
 #include <rex/input/input_system.h>
+#include <rex/input/input_driver.h>
 #include <rex/input/mnk/mnk_input_driver.h>
 #include <rex/kernel/init.h>
 #include <rex/kernel/xam/module.h>
@@ -14,7 +15,100 @@
 extern "C" REX_FUNC(__imp__XamInputGetState);
 extern "C" REX_FUNC(__imp__XamInputGetKeystroke);
 extern "C" REX_FUNC(__imp__XamInputGetKeystrokeHudEx);
+extern "C" REX_FUNC(__imp__XamInputGetKeystrokeHud);
 REXCVAR_DECLARE(bool, mnk_mode);
+
+namespace {
+class OpeningPad final : public rex::input::InputDriver {
+ public:
+  OpeningPad() : InputDriver(nullptr, 0) {}
+  rex::X_STATUS Setup() override { return 0; }
+  void EnumerateDevices(std::vector<rex::input::DeviceInfo>& out) override {
+    out.push_back({rex::input::DeviceId(1), 0, "opening fixture", "", false});
+  }
+  rex::X_RESULT GetDeviceState(rex::input::DeviceId, rex::input::X_INPUT_STATE* out) override {
+    *out = {}; out->gamepad.buttons = held; return 0;
+  }
+  rex::X_RESULT GetDeviceCapabilities(rex::input::DeviceId, uint32_t, rex::input::X_INPUT_CAPABILITIES*) override { return 0; }
+  rex::X_RESULT SetDeviceVibration(rex::input::DeviceId, rex::input::X_INPUT_VIBRATION*) override { return 0; }
+  rex::X_RESULT GetDeviceKeystroke(rex::input::DeviceId, uint32_t, rex::input::X_INPUT_KEYSTROKE* out) override {
+    if (next == keys.size()) return 4306;
+    *out = {}; out->virtual_key = keys[next].first; out->flags = keys[next].second;
+    ++next; return 0;
+  }
+  uint16_t held = 0;
+  size_t next = 0;
+  std::vector<std::pair<uint16_t, uint16_t>> keys;
+};
+}
+
+TEST_CASE("System UI opening controls stay with their initiating gesture across reopenings", "[sdk][guide-opening]") {
+  using namespace rex::input;
+  OpeningPad* pad = nullptr;
+  rex::Runtime rt(std::filesystem::temp_directory_path());
+  rex::RuntimeConfig config{}; config.tool_mode = true; config.kernel_init = rex::kernel::InitializeKernel;
+  config.input_factory = [&](bool) {
+    auto input = std::make_unique<InputSystem>(nullptr);
+    auto driver = std::make_unique<OpeningPad>(); pad = driver.get();
+    input->AddDriver(std::move(driver));
+    input->SetDeviceAssignment(std::make_unique<SlotAssignment>());
+    return input;
+  };
+  REQUIRE(rt.Setup(std::move(config)) == 0);
+  auto xam = rt.kernel_state()->GetKernelModule<rex::kernel::xam::XamModule>("xam.xex");
+  const auto address = rt.memory()->SystemHeapAlloc(sizeof(X_INPUT_KEYSTROKE));
+  REQUIRE(address);
+  auto* base = rt.memory()->virtual_membase();
+  auto* stroke = reinterpret_cast<X_INPUT_KEYSTROKE*>(base + address);
+  bool extended = false;
+  SECTION("HUD ABI") { extended = false; }
+  SECTION("HUD Ex ANY_USER ABI") { extended = true; }
+  PPCContext ctx{};
+  auto query = [&] {
+    ctx.r3.u64 = extended ? 0xFF : 0; ctx.r4.u64 = extended ? 1 : address; ctx.r5.u64 = address;
+    if (extended) __imp__XamInputGetKeystrokeHudEx(ctx, base);
+    else __imp__XamInputGetKeystrokeHud(ctx, base);
+    return ctx.r3.u32;
+  };
+  REQUIRE(xam->RegisterSystemApp({0x1000, 0xFF, 0x90105000, 0}) == 0);
+  for (unsigned cycle = 0; cycle < 3; ++cycle) {
+    CAPTURE(cycle, extended);
+    pad->held = X_INPUT_GAMEPAD_GUIDE | X_INPUT_GAMEPAD_BACK | X_INPUT_GAMEPAD_START;
+    pad->keys.clear(); pad->next = 0;
+    REQUIRE(xam->BeginSystemUi(0x1000, 0xFF, 0));
+    REQUIRE(xam->EnableSystemUiInput(0, true));
+    REQUIRE(xam->SetSystemUiVisible(0x1000));
+    pad->keys = {{0x5815, 1}, {0x5814, 1}, {0x5800, 1}};
+    REQUIRE(query() == 0);
+    CHECK(stroke->virtual_key == 0x5800); // New A survives the opening gesture.
+    CHECK(pad->next == 3);
+    pad->keys.push_back({0x5814, 5}); // A later repeat belongs to the same held START.
+    CHECK(query() == 4306);
+    pad->held = 0;
+    pad->keys.push_back({0x5815, 2}); pad->keys.push_back({0x5814, 2});
+    CHECK(query() == 4306);
+    pad->keys.push_back({0x5814, 1}); // Fresh START after release is a real UI action.
+    REQUIRE(query() == 0); CHECK(stroke->virtual_key == 0x5814);
+    // The host also captures a raw Guide closing shortcut before the title
+    // regains the queue. Its transitions cannot select a dashboard item.
+    pad->held = X_INPUT_GAMEPAD_GUIDE | X_INPUT_GAMEPAD_BACK | X_INPUT_GAMEPAD_START;
+    rex::kernel::xam::CaptureSystemUiOpeningInput(0);
+    REQUIRE(xam->EndSystemUi(0x1000));
+    pad->keys = {{0x5814, 1}, {0x5815, 1}, {0x5814, 2}, {0x5815, 2}, {0x5801, 1}};
+    pad->next = 0; pad->held = 0;
+    ctx.r3.u64 = 0; ctx.r4.u64 = 1; ctx.r5.u64 = address;
+    __imp__XamInputGetKeystroke(ctx, base);
+    REQUIRE(ctx.r3.u32 == 0); CHECK(stroke->virtual_key == 0x5801); CHECK(pad->next == 5);
+  }
+  // Ordinary API requests with no initiating buttons preserve START/BACK.
+  pad->held = 0; pad->keys = {{0x5814, 1}, {0x5815, 1}}; pad->next = 0;
+  REQUIRE(xam->BeginSystemUi(0x1000, 0xFF, 0));
+  REQUIRE(xam->EnableSystemUiInput(0, true)); REQUIRE(xam->SetSystemUiVisible(0x1000));
+  REQUIRE(query() == 0); CHECK(stroke->virtual_key == 0x5814);
+  REQUIRE(query() == 0); CHECK(stroke->virtual_key == 0x5815);
+  REQUIRE(xam->EndSystemUi(0x1000));
+  rt.memory()->SystemHeapFree(address);
+}
 
 TEST_CASE("Buttons owned by the system UI do not reach the title after it closes",
           "[sdk][guide-input]") {

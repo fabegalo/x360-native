@@ -773,6 +773,10 @@ int Session(const ProjectPaths& paths, const fs::path& manifest, int timeout, bo
       if (request.kind != LaunchRequest::Image) {
         // Closing a host window exits the platform, never impersonates Xbox Home.
         if (request.kind == LaunchRequest::WindowClose) return kExitOk;
+        if (request.kind == LaunchRequest::FirmwareExit) {
+          fmt::print("session: {} requested firmware exit (routine {}); closing platform\n", active.name, request.flags);
+          return kExitOk;
+        }
         if (active.manifest == dashboard.manifest) return kExitOk;
         if (request.kind == LaunchRequest::Dashboard &&
             std::find(dashboard.dashboard_return_flags.begin(), dashboard.dashboard_return_flags.end(),
