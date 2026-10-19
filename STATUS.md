@@ -10,7 +10,10 @@ de compatibilidade/builds locais e jogos adicionados. Todos os jogos passam pelo
 mesmo registro de importação e remoção; Castle/Motocross/Forza não são itens fixos.
 Após a limpeza manual do catálogo, a 17559 passou pela conferência somente de
 leitura com biblioteca vazia e zero rotas de jogos. Frontend Release do atalho
-atualizado; testes focados aprovados, sem execução de dashboard/jogo.
+atualizado para 0.56.8-dev; candidato 0.56.8 em build limpo e ZIP extraído
+aprovados. Nenhuma execução de dashboard/jogo pelo agente. Nos testes manuais
+do mantenedor, a 17559 iniciou e saiu com código 0; a 1888 iniciou, mas registrou
+uma chamada não resolvida após Guide/criação de perfil, pendente de diagnóstico.
 [Correção e evidências](docs/reports/library-membership-2026-10-19.md).
 
 Correções da revisão externa (19/10): estado de entrada vinculado ao backend e
