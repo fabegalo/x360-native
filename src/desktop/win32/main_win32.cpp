@@ -1212,8 +1212,7 @@ void Start(App& a, int action, fs::path source = {}) {
         }
         auto selected = *std::find_if(a.targets.begin(), a.targets.end(), [&](const auto& t) { return t.id == ids.front(); });
         if (selected.kind == "game") {
-          const auto folder = fs::is_directory(content.path()) ? content.path() : content.path().parent_path();
-          a.imported_id = ImportGame(ProjectPaths{a.root}, a.targets, folder, source, [&] { return a.cancel.load(); });
+          a.imported_id = ImportGame(ProjectPaths{a.root}, a.targets, content.path(), source, [&] { return a.cancel.load(); });
           a.import_recognized = true;
           finish(Tr("Jogo adicionado à Biblioteca. Importar não significa poder executar.", "Game added to Library. Importing does not mean it can run.")); return;
         }

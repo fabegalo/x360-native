@@ -369,6 +369,8 @@ TEST_CASE("compatibility recipes use the same import remove and reimport lifecyc
   auto catalog = ReadCatalog(f.paths); REQUIRE(catalog.size() == 1);
   Write(catalog[0].exe, "leftover build, never executed");
   CHECK_FALSE(InGameLibrary(catalog[0]));
+  CHECK_THROWS(ImportGame(f.paths, catalog, content/"default.xex", content/"default.xex"));
+  CHECK_FALSE(fs::exists(f.paths.local()/"catalog"));
   const auto id = ImportGame(f.paths, catalog, content, content);
   CHECK(id == "supported");
   catalog = ReadCatalog(f.paths); REQUIRE(catalog.size() == 1);
