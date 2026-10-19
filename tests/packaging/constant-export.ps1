@@ -11,11 +11,15 @@ Copy-Item -LiteralPath (Join-Path $root 'scripts/build/release-configuration.ps1
 $policy = Get-Content (Join-Path $root 'licenses/excluded-loader-constants.json') -Raw | ConvertFrom-Json
 # Only this isolated test policy adds a synthetic exclusion; production rules
 # and its full gate remain intact. No real key is written into a fixture.
-$value = [byte[]](101..116)
+# Do not use a printable alphabetic run: ordinary binaries contain those bytes.
+$value = [byte[]]@(143,17,211,66,184,9,239,53,157,98,201,44,170,7,228,121)
 $sha = [Security.Cryptography.SHA256]::Create()
 try { $hash = [BitConverter]::ToString($sha.ComputeHash($value)).Replace('-', '').ToLowerInvariant() } finally { $sha.Dispose() }
 $policy.rules += @{id='synthetic-test'; first_byte=$value[0]; sha256=$hash}
 $policy | ConvertTo-Json -Depth 10 | Set-Content "$scratch/policy/licenses/excluded-loader-constants.json"
+# Prove that the chosen synthetic marker is absent before testing each injection.
+& "$scratch/policy/scripts/packaging/check-package-licenses.ps1" -PackageDirectory $PackageDirectory -SdkDirectory $SdkDirectory | Out-Null
+Write-Output 'PASS isolated synthetic exclusion is absent from the real baseline package'
 function Index($directory, $index) {
     $lines = @(Get-ChildItem -LiteralPath $directory -Recurse -File | Where-Object FullName -ne (Join-Path $directory $index) | Sort-Object FullName | ForEach-Object {
         (Get-FileHash -LiteralPath $_.FullName).Hash.ToLowerInvariant() + "`t" + $_.FullName.Substring($directory.Length + 1).Replace('\', '/')

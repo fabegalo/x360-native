@@ -67,7 +67,15 @@ cópia descartável do SDK e SDL fixados, sem edições ocultas no SDK real.
 Log: `sdk-replay.txt` na pasta de evidências desta tarefa.
 Contratos Release combinados de entrada, chaves/recursos e banner:
 **1.324 asserções / 22 casos** (`contracts-final.txt`).
-Pacote exportado e ZIP ainda aguardam o fechamento abaixo.
+O primeiro candidato passou no gate real e após extração do ZIP. A regressão
+negativa inicial escolheu bytes sintéticos 101–116 (texto alfabético presente no
+executável comum), produzindo uma colisão do fixture. Substituído o marcador e
+acrescentada aprovação do pacote base sob a regra sintética antes das injeções.
+Os três cenários de pacote completo — C++, diff adicionado e diff removido —
+agora recusam especificamente `app/workspace/synthetic.patch`, com índices
+refeitos. `constant-export-gate.txt` registra a falha inicial;
+`constant-export-verified.txt`, o resultado corrigido. A política real não foi
+relaxada. O candidato final é regenerado para incluir o fixture corrigido.
 
 ## Atualizador — evidência nova
 
