@@ -151,7 +151,7 @@ void CheckSource(const Target& game) {
 std::vector<std::string> InstalledGames(const ProjectPaths& paths, const std::vector<Target>& catalog) {
   std::vector<std::string> ids;
   for (const auto& game : catalog) {
-    if (!game.aot || game.kind != "game" || game.library.title_id.empty() || game.inputs.empty()) continue;
+    if (!InGameLibrary(game) || !game.aot || game.library.title_id.empty() || game.inputs.empty()) continue;
     // Most imported games have never been built. Do not rehash their multi-GB
     // inventories for each dashboard while discovering executable entries.
     if (!fs::is_regular_file(game.exe) || fs::exists(PreparationMarker(paths, game))) continue;
@@ -164,6 +164,7 @@ std::vector<std::string> InspectLibrary(const ProjectPaths& paths, const Target&
   std::vector<std::string> issues;
   if (session.session && !session.launch_library) return issues;
   if (!session.session) {
+    if (!InGameLibrary(session)) return issues;
     if (!fs::is_regular_file(session.exe) || fs::exists(PreparationMarker(paths, session))) return issues;
     // A compiled game can still have an interrupted registration. Check only
     // this game in dashboards already imported, without making unrelated games
@@ -236,7 +237,7 @@ void PrepareLibrary(const ProjectPaths& paths, const Target& session, const std:
   // profiles and saves intact when a preparation becomes stale or interrupted.
   for (const auto& game : catalog) {
     stop();
-    if (!game.aot || game.library.title_id.empty() ||
+    if (!InGameLibrary(game) || !game.aot || game.library.title_id.empty() ||
         std::find(installed.begin(), installed.end(), game.id) != installed.end()) continue;
     const auto entry = Describe(session, game);
     if (!fs::exists(entry.header)) continue;

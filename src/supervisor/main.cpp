@@ -692,9 +692,12 @@ int Session(const ProjectPaths& paths, const fs::path& manifest, int timeout, bo
     // same protected transaction as the first selected launch, rather than
     // streaming every shared dependency again before the frame even exists.
     auto verification = std::make_unique<DigestBatch>([&] { return window && window->closed(); });
+    const auto catalog = [&] {
+      desktop::CatalogLaunchVerification launch_paths;
+      return desktop::ReadCatalog(paths);
+    }();
     if (!catalog_target.empty()) {
       desktop::CatalogLaunchVerification launch_paths;
-      const auto catalog = desktop::ReadCatalog(paths);
       PrimeLaunchVerification(paths, catalog, catalog_target);
       desktop::VerifyCatalogLaunch(paths, catalog, catalog_target, manifest);
       fmt::print("X360N_LAUNCH_VERIFIED\n");
@@ -706,7 +709,8 @@ int Session(const ProjectPaths& paths, const fs::path& manifest, int timeout, bo
     }
     fmt::print("session: console language={} country={} (snapshot until restart)\n",
                console_settings.language, console_settings.country);
-    const auto dashboard = load_profile(manifest);
+    auto dashboard = load_profile(manifest);
+    BindLibraryLaunchTargets(dashboard, catalog);
     CheckSessionRenderer(dashboard.exe, renderer_settings);
     fmt::print("session: global renderer {}{}\n",
         renderer_settings.renderer == Renderer::Native ? "Native" : "Xenos",

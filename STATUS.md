@@ -5,6 +5,14 @@ Este arquivo resume o estado atual; os relatórios vinculados preservam datas,
 falhas iniciais, hashes, comandos e limites de cada validação. Resultados de uma
 etapa histórica não certificam automaticamente o build atual nem outros títulos.
 
+Biblioteca do launcher (19/10): removida a associação automática entre receitas
+de compatibilidade/builds locais e jogos adicionados. Todos os jogos passam pelo
+mesmo registro de importação e remoção; Castle/Motocross/Forza não são itens fixos.
+Após a limpeza manual do catálogo, a 17559 passou pela conferência somente de
+leitura com biblioteca vazia e zero rotas de jogos. Frontend Release do atalho
+atualizado; testes focados aprovados, sem execução de dashboard/jogo.
+[Correção e evidências](docs/reports/library-membership-2026-10-19.md).
+
 Correções da revisão externa (19/10): estado de entrada vinculado ao backend e
 à conexão (0102); janela BACK/START opt-in por usuário, desligada por padrão;
 0095 usa chaves legadas locais, sem valores no payload; atualizador com diário

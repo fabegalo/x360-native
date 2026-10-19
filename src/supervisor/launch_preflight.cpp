@@ -4,6 +4,21 @@
 #include <algorithm>
 
 namespace x360n {
+void BindLibraryLaunchTargets(SessionProfile& profile,
+    const std::vector<desktop::Target>& catalog) {
+  namespace fs = std::filesystem;
+  const auto dashboard = std::find_if(catalog.begin(), catalog.end(), [&](const auto& target) {
+    return target.session && target.launch_library &&
+        fs::weakly_canonical(target.manifest) == fs::weakly_canonical(profile.manifest);
+  });
+  if (dashboard == catalog.end()) return; // Explicit non-library session profiles.
+  std::erase_if(profile.launch_targets, [&](const auto& manifest) {
+    return std::none_of(catalog.begin(), catalog.end(), [&](const auto& game) {
+      return desktop::InGameLibrary(game) && game.aot && game.import_error.empty() &&
+          fs::weakly_canonical(game.manifest) == fs::weakly_canonical(manifest);
+    });
+  });
+}
 void PrimeLaunchVerification(const ProjectPaths& paths,
     const std::vector<desktop::Target>& catalog, const std::string& selected) {
   ActionTrace trace("launch.read-ahead");
@@ -17,7 +32,7 @@ void PrimeLaunchVerification(const ProjectPaths& paths,
           target.preparation_source / input.destination.lexically_relative(target.game_root));
   };
   auto installed = [&](const desktop::Target& game) {
-    return game.aot && game.kind == "game" && !game.library.title_id.empty() && !game.inputs.empty() &&
+    return desktop::InGameLibrary(game) && game.aot && !game.library.title_id.empty() && !game.inputs.empty() &&
         fs::is_regular_file(game.exe) && !fs::exists(desktop::PreparationMarker(paths, game));
   };
   auto copies = [&](const desktop::Target& dashboard, const desktop::Target& game) {

@@ -88,7 +88,8 @@ int main(int argc, char** argv) {
     const auto preflight_ms = elapsed();
     stage("catalog_validation");
     if (mode == "split") { record(); batch.reset(); batch = std::make_unique<DigestBatch>(); }
-    const auto profile = LoadSessionProfile(paths, selected.manifest);
+    auto profile = LoadSessionProfile(paths, selected.manifest);
+    BindLibraryLaunchTargets(profile, catalog);
     stage("session_profile");
     CheckSessionRenderer(profile.exe, LoadRendererSettings(paths));
     for (const auto& target : profile.launch_targets) LoadSessionProfile(paths, target, false);
@@ -104,6 +105,7 @@ int main(int argc, char** argv) {
     stages.EndArray().EndObject();
     JsonWriter out;
     out.BeginObject().String("title", id).String("mode", mode)
+       .Number("library_launch_targets", int64_t(profile.launch_targets.size()))
        .Number("catalog_ms", int64_t(catalog_ms))
        .Number("preflight_ms", int64_t(preflight_ms)).Number("total_ms", int64_t(elapsed()))
        .Number("files", int64_t(files)).Number("bytes", int64_t(bytes)).Number("hits", int64_t(hits));

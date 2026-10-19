@@ -356,6 +356,43 @@ TEST_CASE("universal library discovers a newly installed AOT recipe without movi
   CHECK(fs::exists(games[0].game_root/"default.xex"));
   CHECK(fs::exists(games[0].preparation_source/"default.xex"));
 }
+TEST_CASE("compatibility recipes use the same import remove and reimport lifecycle", "[universal][remove][library-membership]") {
+  Fixture f;
+  const auto content = f.paths.inputs()/"games/supported/content";
+  Write(content/"default.xex", Xex()); Write(content/"assets/data", "asset");
+  const auto recipe = f.root/"titles/supported";
+  Write(recipe/"supported_manifest.toml", "[project]\nname='supported'\ngame_root='../../.local/inputs/games/supported/content'\n");
+  Write(recipe/"preparation.toml", "label='Supported game'\nlimitations='Synthetic'\n"
+      "[[files]]\npath='default.xex'\nsource_name='default.xex'\nsha256='" + Sha(Xex()) + "'\n"
+      "[[files]]\npath='assets/data'\nsource_name='data'\nsha256='" + Sha("asset") + "'\n"
+      "[library]\ntitle_id='12345678'\ncontent_type='000D0000'\nfile_name='fixture'\ndisplay_name='Fixture'\nsource_sha256='" + Sha("package") + "'\n");
+  auto catalog = ReadCatalog(f.paths); REQUIRE(catalog.size() == 1);
+  Write(catalog[0].exe, "leftover build, never executed");
+  CHECK_FALSE(InGameLibrary(catalog[0]));
+  const auto id = ImportGame(f.paths, catalog, content, content);
+  CHECK(id == "supported");
+  catalog = ReadCatalog(f.paths); REQUIRE(catalog.size() == 1);
+  REQUIRE(InGameLibrary(catalog[0])); CHECK_FALSE(catalog[0].generic_aot);
+  const auto record = catalog[0].catalog_id;
+  Target dashboard; dashboard.id = "dashboard"; dashboard.session = true; dashboard.kind = "dashboard";
+  dashboard.user_root = f.paths.local()/"user/dashboard";
+  const auto installed = dashboard.user_root/"0000000000000000/12345678/000D0000/fixture";
+  Write(installed/"default.xex", Xex()); Write(installed/"assets/data", "asset");
+  Write(dashboard.user_root/"profile.bin", "profile");
+  catalog.push_back(dashboard);
+  RemoveGame(f.paths, catalog, id);
+  CHECK_FALSE(fs::exists(installed));
+  CHECK(DigestFile(dashboard.user_root/"profile.bin")->sha256 == Sha("profile"));
+  catalog = ReadCatalog(f.paths); REQUIRE(catalog.size() == 1);
+  CHECK_FALSE(InGameLibrary(catalog[0]));
+  CHECK(fs::exists(catalog[0].exe)); // A leftover build cannot resurrect membership.
+  CHECK(DigestFile(content/"default.xex")->sha256 == Sha(Xex()));
+  CHECK(DigestFile(content/"assets/data")->sha256 == Sha("asset"));
+  CHECK(DigestFile(f.paths.local()/"user/save")->sha256 == Sha("keep"));
+  CHECK(ImportGame(f.paths, catalog, content, content) == id);
+  catalog = ReadCatalog(f.paths); REQUIRE(catalog.size() == 1);
+  CHECK(InGameLibrary(catalog[0])); CHECK(catalog[0].catalog_id == record);
+}
 TEST_CASE("universal library imports available real content into a persistent environment", "[.universal-real]") {
   const char* root=std::getenv("X360N_LIBRARY_ROOT"); const char* original=std::getenv("X360N_LIBRARY_SOURCE");
   const char* extractor=std::getenv("X360N_TEST_EXTRACTOR");

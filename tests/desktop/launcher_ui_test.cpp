@@ -111,6 +111,28 @@ TEST_CASE("launcher catalog loading leaves the message thread responsive", "[lau
   REQUIRE(f.Until([&] { return !f.app.busy; }));
   CHECK_FALSE(f.app.session);
 }
+TEST_CASE("launcher lists and removes every game through its import record", "[library-membership]") {
+  const auto root = UniqueTempPath("launcher-membership");
+  fs::create_directories(root);
+  Target game; game.id = "recipe"; game.game_root = root;
+  game.exe = root / "compiled.exe";
+  std::ofstream(root / "default.xex") << "original";
+  std::ofstream(game.exe) << "compiled fixture, never executed";
+  game.inputs = {{root / "default.xex", "default.xex", DigestFile(root / "default.xex")->sha256, {}}};
+  App app; app.targets = {game}; app.selected = 0;
+  app.checked = CheckContents(root, app.targets, InspectionMode::Preview);
+  CHECK_FALSE(app.checked[0].added); CHECK_FALSE(Removable(app));
+  app.targets[0].catalogued = true; app.targets[0].catalog_id = "import-record";
+  for (const bool generic : {false, true}) {
+    app.targets[0].generic_aot = generic;
+    app.checked = CheckContents(root, app.targets, InspectionMode::Preview);
+    CHECK(app.checked[0].added); CHECK(Removable(app));
+  }
+  app.targets[0].catalogued = false;
+  app.checked = CheckContents(root, app.targets, InspectionMode::Preview);
+  CHECK_FALSE(app.checked[0].added); CHECK_FALSE(Removable(app));
+  fs::remove_all(root);
+}
 TEST_CASE("launcher completes consecutive sessions without scanning unrelated content", "[launcher-ui]") {
   Frontend f; const auto target = f.TargetFixture(); f.Seed(target, true);
 #ifndef X360N_FRONTEND_BASELINE

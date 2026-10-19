@@ -402,7 +402,7 @@ void ReadImportedGames(const ProjectPaths& paths, std::vector<Target>& targets) 
 
 void RemoveGame(const ProjectPaths& paths, const std::vector<Target>& catalog, const std::string& id) {
   const auto found = std::find_if(catalog.begin(), catalog.end(), [&](const auto& t) { return t.id == id; });
-  if (found == catalog.end() || !found->catalogued || found->catalog_id.empty() || found->kind != "game")
+  if (found == catalog.end() || !InGameLibrary(*found))
     throw std::runtime_error("Somente jogos importados podem ser removidos da biblioteca.");
   const auto& game = *found;
   WorkspaceLease lease(paths);

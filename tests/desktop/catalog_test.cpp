@@ -31,6 +31,7 @@ struct Fixture {
   Fixture() {
     fs::create_directories(source);
     target.id = "dash_test"; target.game_root = paths.inputs() / "dashboards/test";
+    target.catalogued = true; target.catalog_id = "synthetic-import-record";
     target.exe = paths.build() / "titles/dash_test/dash_test.exe";
     target.inputs = {{target.game_root / "dash.xex", "dash.xex", Hash("dashboard"), {}},
                      {target.game_root / "system/xam_ui.xex", "xam.xex", Hash("module"), {}}};
@@ -161,6 +162,36 @@ TEST_CASE("optional games do not prevent an empty dashboard library") {
   CHECK(InspectLibrary(f.paths, session, {f.target}).empty());
   CHECK_NOTHROW(PrepareLibrary(f.paths, session, {f.target}));
   CHECK_FALSE(fs::exists(session.user_root));
+}
+TEST_CASE("prepared recipes outside the imported library never block or populate a dashboard", "[library-membership]") {
+  Fixture f; Import(f.paths, f.target, f.source);
+  Write(f.target.exe, "prepared fixture"); f.Receipt();
+  auto game = f.target;
+  game.catalogued = false; game.catalog_id.clear();
+  game.library = {"12345678", "000D0000", "fixture", "Fixture", Hash("package")};
+  Target dashboard; dashboard.id = "dashboard"; dashboard.session = true;
+  dashboard.kind = "dashboard"; dashboard.launch_library = true;
+  dashboard.manifest = f.root / "dashboard.toml";
+  dashboard.user_root = f.paths.local() / "user/dashboard";
+  REQUIRE(Inspect(f.paths, game).prepared);
+  CHECK(InspectLibrary(f.paths, dashboard, {game}).empty());
+  CHECK_NOTHROW(PrepareLibrary(f.paths, dashboard, {game}));
+  CHECK_FALSE(fs::exists(dashboard.user_root));
+  CHECK_THROWS(VerifyCatalogLaunch(f.paths, {game}, game.id, game.manifest));
+  SessionProfile profile; profile.manifest = dashboard.manifest;
+  profile.launch_targets = {game.manifest};
+  BindLibraryLaunchTargets(profile, {dashboard, game});
+  CHECK(profile.launch_targets.empty());
+  game.catalogued = true; game.catalog_id = "synthetic-import";
+  CHECK_FALSE(InspectLibrary(f.paths, dashboard, {game}).empty());
+  PrepareLibrary(f.paths, dashboard, {game});
+  CHECK(InspectLibrary(f.paths, dashboard, {game}).empty());
+  profile.launch_targets = {game.manifest};
+  BindLibraryLaunchTargets(profile, {dashboard, game});
+  REQUIRE(profile.launch_targets.size() == 1);
+  game.import_error = "incomplete import";
+  BindLibraryLaunchTargets(profile, {dashboard, game});
+  CHECK(profile.launch_targets.empty());
 }
 TEST_CASE("dashboard sessions without library opt-in do not require or install games", "[dashboard-library-optin]") {
   Fixture f;

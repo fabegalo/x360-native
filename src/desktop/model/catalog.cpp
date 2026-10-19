@@ -286,6 +286,8 @@ Target VerifyCatalogLaunch(const ProjectPaths& paths, const std::vector<Target>&
     return *it;
   };
   const auto& selected = find(id);
+  if (selected.kind == "game" && !InGameLibrary(selected))
+    throw std::runtime_error("Adicione o jogo à biblioteca antes de iniciar: " + id);
   if (!selected.aot || fs::weakly_canonical(selected.manifest) != fs::weakly_canonical(manifest))
     throw std::runtime_error("O manifesto de lançamento não corresponde ao título selecionado.");
   const auto check = [&](const Target& t) {

@@ -351,11 +351,11 @@ void RebuildRows(App& a) {
   InvalidateRect(a.library_list, nullptr, FALSE);
 }
 
-// Only imported games leave the library; dashboards and recipes stay.
+// All games use the same persistent import/removal lifecycle.
 bool Removable(const App& a) {
   if (a.selected >= a.targets.size() || a.checked.size() != a.targets.size()) return false;
   const auto& t = a.targets[a.selected];
-  return t.catalogued && !t.catalog_id.empty() && t.kind == "game";
+  return InGameLibrary(t);
 }
 // ---------- Layout ----------
 void Layout(App& a) {
@@ -688,14 +688,14 @@ std::vector<App::CheckedTarget> CheckContents(const fs::path& root, const std::v
     App::CheckedTarget item;
     item.state = Inspect(ProjectPaths{root}, target, mode);
     if (mode == InspectionMode::Full && item.state.inputs_ok) item.library = InspectLibrary(ProjectPaths{root}, target, targets);
-    if (!target.catalogued && !target.inputs.empty()) {
+    if (target.kind == "dashboard" && !target.inputs.empty()) {
       const auto& first = target.inputs.front();
       const auto file = target.preparation_source.empty() ? first.destination :
           target.preparation_source / first.destination.lexically_relative(target.game_root);
       if (mode == InspectionMode::Preview) item.added = fs::is_regular_file(file);
       else { const auto anchor = DigestFile(file); item.added = anchor && anchor->sha256 == first.sha256; }
     }
-    item.added = item.added || target.catalogued;
+    item.added = item.added || InGameLibrary(target);
     checked.push_back(std::move(item));
   }
   return checked;
@@ -1211,6 +1211,12 @@ void Start(App& a, int action, fs::path source = {}) {
           finish(message); return;
         }
         auto selected = *std::find_if(a.targets.begin(), a.targets.end(), [&](const auto& t) { return t.id == ids.front(); });
+        if (selected.kind == "game") {
+          const auto folder = fs::is_directory(content.path()) ? content.path() : content.path().parent_path();
+          a.imported_id = ImportGame(ProjectPaths{a.root}, a.targets, folder, source, [&] { return a.cancel.load(); });
+          a.import_recognized = true;
+          finish(Tr("Jogo adicionado à Biblioteca. Importar não significa poder executar.", "Game added to Library. Importing does not mean it can run.")); return;
+        }
         a.imported_id = selected.id;
         if (!selected.importable) { finish((english ? selected.label_en : selected.label) + "\r\n" + Tr("Esta versão foi reconhecida. Preparação ainda indisponível; consulte o Diagnóstico.", "This version was recognized. Preparation is not yet available; see Diagnostics.")); return; }
         a.stage = 2;

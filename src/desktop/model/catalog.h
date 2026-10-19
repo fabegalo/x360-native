@@ -42,6 +42,11 @@ struct Inspection {
   bool receipt_current = false, receipt_stale = false;
   std::vector<std::string> issues;
 };
+// The persistent import record is the only game-library membership authority.
+// Compatibility recipes and leftover build outputs never add a game.
+inline bool InGameLibrary(const Target& target) {
+  return target.kind == "game" && target.catalogued && !target.catalog_id.empty();
+}
 enum class InspectionMode { Full, Preview };
 struct ContentIdentity {
   std::filesystem::path file;
