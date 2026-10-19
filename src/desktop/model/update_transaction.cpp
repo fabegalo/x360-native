@@ -237,6 +237,9 @@ void ApplyUpdate(const fs::path& package, const fs::path& staged, const std::str
         !fs::exists(entry.path() / "rolled-back") && !fs::exists(entry.path() / "confirmed"))
       throw std::runtime_error("Atualização anterior pendente; inicie-a ou execute recover-update.cmd");
   const auto old = Inventory(package, false), incoming = Inventory(staged, true);
+  constexpr const char* recovery_header = "@echo off\r\n:: x360-native update recovery v1\r\n";
+  if (fs::exists(package / "recover-update.cmd") && !Text(package / "recover-update.cmd").starts_with(recovery_header))
+    throw std::runtime_error("recover-update.cmd já existe e não pertence ao atualizador; arquivo preservado");
   if (Json::parse(Text(staged / "package.json")).value("version", std::string()) != version)
     throw std::runtime_error("Pacote não corresponde à versão anunciada");
   for (const auto& [name, hash] : incoming) {
@@ -260,7 +263,7 @@ void ApplyUpdate(const fs::path& package, const fs::path& staged, const std::str
   // This is the old supervisor, copied outside all application moves.
   FlushCopy(package / "app/x360n.exe", transaction / "recovery.exe");
   const auto relative = "data\\updates\\" + Utf8(transaction.filename());
-  DurableWrite(package / "recover-update.cmd", "@echo off\r\n\"%~dp0" + relative + "\\recovery.exe\" recover-update --package \"%~dp0.\" --transaction \"%~dp0" + relative + "\"\r\nif errorlevel 1 pause\r\n");
+  DurableWrite(package / "recover-update.cmd", std::string(recovery_header) + "\"%~dp0" + relative + "\\recovery.exe\" recover-update --package \"%~dp0.\" --transaction \"%~dp0" + relative + "\"\r\nif errorlevel 1 pause\r\n");
   DurableWrite(transaction / "plan.json", plan.dump(2) + "\n");
   try {
     Checkpoint(checkpoint, "journal");

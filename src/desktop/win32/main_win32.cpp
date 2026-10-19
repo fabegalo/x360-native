@@ -2420,7 +2420,9 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show) {
                                CW_USEDEFAULT, CW_USEDEFAULT, 1220, 800, nullptr, nullptr, instance, &app);
   if (!window) { Gdiplus::GdiplusShutdown(gdiplus_token); CoUninitialize(); return 1; }
   ShowWindow(window, show); UpdateWindow(window);
-  if (!app.preferences.empty()) {
+  {
+    // An interrupted rename may have removed app/workspace, so this cannot
+    // depend on successful payload discovery or initialized preferences.
     try { ConfirmUpdates(app.self.parent_path(), X360N_VERSION); }
     catch (const std::exception& error) {
       MessageBoxW(window, Wide(error.what()).c_str(), L"x360-native", MB_OK | MB_ICONERROR);

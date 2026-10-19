@@ -222,9 +222,26 @@ TEST_CASE("update rejects invalid paths inventories and collisions before moving
   SECTION("inventory traversal") { std::ofstream(staged / "package.sha256", std::ios::app) << std::string(64, 'a') << "\t../escape\n"; }
   SECTION("corrupt installed inventory") { Write(package / "package.sha256", "invalid"); }
   SECTION("local collision") { Write(package / "new.txt", "local user file"); }
+  SECTION("local recovery script collision") { Write(package / "recover-update.cmd", "user script"); }
   SECTION("previous transaction preserved") { Write(txn / "backup/old.txt", "previous backup"); }
   CHECK_THROWS(ApplyUpdate(package, staged, "2.0.0", txn));
   CHECK(Read(package / "x360-native.exe") == "launcher 1.0.0");
+  Preserved(root);
+  fs::remove_all(root);
+}
+
+TEST_CASE("consecutive update transactions preserve previous backups", "[update]") {
+  const auto root = UniqueTempPath("update-consecutive"); Packages(root);
+  const auto package = root / "installed", first = package / "data/updates/txn-first", second = package / "data/updates/txn-second";
+  ApplyUpdate(package, root / "staged", "2.0.0", first);
+  MakePackage(root / "third", "3.0.0");
+  CHECK_THROWS(ApplyUpdate(package, root / "third", "3.0.0", second));
+  CHECK_NOTHROW(ConfirmUpdates(package, "2.0.0"));
+  ApplyUpdate(package, root / "third", "3.0.0", second);
+  CHECK(Read(first / "backup/x360-native.exe") == "launcher 1.0.0");
+  CHECK(Read(second / "backup/x360-native.exe") == "launcher 2.0.0");
+  CHECK_NOTHROW(RecoverUpdate(package, second));
+  CHECK(Read(package / "x360-native.exe") == "launcher 2.0.0");
   Preserved(root);
   fs::remove_all(root);
 }
