@@ -1,0 +1,388 @@
+--- a/include/rex/input/input_system.h
++++ b/include/rex/input/input_system.h
+@@ -11,6 +11,9 @@
+  */
+ 
+ #include <memory>
++#include <array>
++#include <chrono>
++#include <mutex>
+ #include <vector>
+ 
+ #include <rex/input/device_assignment.h>
+@@ -25,10 +28,35 @@
+ 
+ namespace rex::input {
+ 
++// Per-backend state: never shared across runtime instances or controller connections.
++struct SystemUiLatch {
++  bool armed = false;
++  uint16_t buttons = 0;
++  bool left_trigger = false, right_trigger = false;
++  uint32_t keys = 0, opening_keys = 0;
++};
++struct GuideChord {
++  bool pending = false;
++  X_INPUT_KEYSTROKE stroke{};
++  std::chrono::steady_clock::time_point since{};
++  uint16_t observed = 0, waiting = 0, consumed = 0;
++};
++struct SystemUiInputState {
++  std::recursive_mutex mutex;
++  std::array<SystemUiLatch, 4> latches{};
++  std::array<GuideChord, 4> chords{};
++  void Reset(uint32_t user) {
++    std::lock_guard lock(mutex);
++    if (user < 4) { latches[user] = {}; chords[user] = {}; }
++  }
++};
++
+ class InputSystem : public system::IInputSystem {
+  public:
+   explicit InputSystem(rex::ui::Window* window);
+   ~InputSystem() override;
++
++  SystemUiInputState system_ui_input;
+ 
+   rex::ui::Window* window() const { return window_; }
+ 
+--- a/src/input/input_system.cpp
++++ b/src/input/input_system.cpp
+@@ -48,6 +48,8 @@
+ }
+ 
+ void InputSystem::Shutdown() {
++  for (uint32_t user = 0; user < 4; ++user) system_ui_input.Reset(user);
++  active_devices_ = {};
+   // device_owners_ holds raw driver pointers.
+   devices_.clear();
+   device_owners_.clear();
+@@ -72,6 +74,7 @@
+ }
+ 
+ void InputSystem::SetDeviceAssignment(std::unique_ptr<DeviceAssignment> assignment) {
++  for (uint32_t user = 0; user < 4; ++user) system_ui_input.Reset(user);
+   assignment_ = std::move(assignment);
+   if (assignment_) {
+     assignment_->OnDevicesChanged(devices_);
+@@ -162,7 +165,14 @@
+   }
+ 
+   if (changed && assignment_) {
++    std::array<std::vector<DeviceId>, 4> previous;
++    for (uint32_t user = 0; user < 4; ++user) assignment_->DevicesForUser(user, previous[user]);
+     assignment_->OnDevicesChanged(devices_);
++    for (uint32_t user = 0; user < 4; ++user) {
++      std::vector<DeviceId> current;
++      assignment_->DevicesForUser(user, current);
++      if (current != previous[user]) system_ui_input.Reset(user);
++    }
+   }
+ }
+ 
+@@ -243,6 +253,7 @@
+   }
+ 
+   if (!any) {
++    system_ui_input.Reset(user_index);
+     return X_ERROR_DEVICE_NOT_CONNECTED;
+   }
+   if (out_state) {
+@@ -318,6 +329,7 @@
+       any_connected = true;
+     }
+   }
++  if (!any_connected) system_ui_input.Reset(user_index);
+   return any_connected ? X_ERROR_EMPTY : X_ERROR_DEVICE_NOT_CONNECTED;
+ }
+ 
+--- a/src/kernel/xam/xam_input.cpp
++++ b/src/kernel/xam/xam_input.cpp
+@@ -10,6 +10,7 @@
+  */
+ 
+ #include <chrono>
++#include <algorithm>
+ #include <mutex>
+ 
+ #include <rex/cvar.h>
+@@ -28,7 +29,9 @@
+ 
+ REXCVAR_DEFINE_INT32(guide_chord_ms, 0, "Input",
+                      "Hold a BACK/START key-down up to N ms for a controller that reports "
+-                     "BACK+START as Guide; 0 disables");
++                     "BACK+START as Guide; 0 disables (opt-in, no dashboard default)");
++REXCVAR_DEFINE_INT32(guide_chord_users, 1, "Input",
++                     "Guest controller bitmask for the opt-in Guide chord window (1=user 0, 15=all)");
+ 
+ namespace rex {
+ namespace kernel {
+@@ -49,20 +52,15 @@
+ 
+ // Controls in use while a system UI owns a controller stay with that UI until
+ // released, so the press that closes the Guide never becomes a title press.
+-struct SystemUiLatch {
+-  bool armed = false;     // a system UI owned this controller since the last title query
+-  uint16_t buttons = 0;   // held through the UI: hidden until released
+-  bool left_trigger = false, right_trigger = false;
+-  uint32_t keys = 0;      // pad keystrokes whose key-up still belongs to the UI
+-  uint32_t opening_keys = 0; // initiating controls, suppressed through their key-up
+-};
+-std::mutex system_ui_latch_mutex;
+-SystemUiLatch system_ui_latches[4];
++using rex::input::SystemUiLatch;
++using rex::input::GuideChord;
++rex::input::SystemUiInputState& UiInput() { return input_system()->system_ui_input; }
+ 
+ void ArmSystemUiLatch(uint32_t owner) {
+-  std::lock_guard lock(system_ui_latch_mutex);
++  if (!input_system()) return;
++  std::lock_guard lock(UiInput().mutex);
+   for (uint32_t user = 0; user < 4; ++user)
+-    if (owner == 0xFF || owner == user) system_ui_latches[user].armed = true;
++    if (owner == 0xFF || owner == user) UiInput().latches[user].armed = true;
+ }
+ 
+ bool SystemUiOwnsInput(uint32_t user) {
+@@ -102,13 +100,14 @@
+ // New controls remain available even while an initiating button is held.
+ void CaptureSystemUiOpeningInput(uint32_t owner) {
+   auto* backend = input_system();
++  if (!backend) return;
+   for (uint32_t user = 0; user < 4; ++user) {
+     if (owner != 0xFF && owner != user) continue;
+     X_INPUT_STATE state{};
+     uint32_t keys = 0;
+     if (backend && backend->GetState(user, &state) == X_ERROR_SUCCESS) keys = PadKeysFromState(state);
+-    std::lock_guard lock(system_ui_latch_mutex);
+-    auto& latch = system_ui_latches[user];
++    std::lock_guard lock(UiInput().mutex);
++    auto& latch = UiInput().latches[user];
+     latch.opening_keys = keys;
+     latch.keys |= keys;
+     latch.armed = true;
+@@ -125,16 +124,18 @@
+ 
+ // Title view of a raw controller state. The Guide button is never a title
+ // button: the system UI host enables it only for its own polling.
++uint16_t ObserveChord(uint32_t user, const X_INPUT_STATE& state);
+ void FilterTitleState(uint32_t user, X_INPUT_STATE* state) {
+   if (!state) return;
++  if (user >= 4) return;
++  std::lock_guard lock(UiInput().mutex);
++  const uint16_t chord_buttons = ObserveChord(user, *state);
+   state->gamepad.buttons = uint16_t(state->gamepad.buttons) & ~rex::input::X_INPUT_GAMEPAD_GUIDE;
+-  if (user >= 4) return;
+-  std::lock_guard lock(system_ui_latch_mutex);
+-  auto& latch = system_ui_latches[user];
++  auto& latch = UiInput().latches[user];
+   TakeSystemUiLatch(latch, *state);
+   const uint16_t buttons = uint16_t(state->gamepad.buttons);
+   latch.buttons &= buttons;
+-  state->gamepad.buttons = buttons & ~latch.buttons;
++  state->gamepad.buttons = buttons & ~latch.buttons & ~chord_buttons;
+   if (latch.left_trigger) {
+     if (state->gamepad.left_trigger) state->gamepad.left_trigger = 0;
+     else latch.left_trigger = false;
+@@ -151,53 +152,77 @@
+ // first BACK/START key-down waits until GUIDE appears (the chord then belongs
+ // to the system UI until released), the key is released, or the window ends.
+ // Later keystrokes stay queued behind it, so order is preserved.
+-struct GuideChord {
+-  bool pending = false;
+-  X_INPUT_KEYSTROKE stroke{};
+-  std::chrono::steady_clock::time_point since{};
+-};
+-std::mutex guide_chord_mutex;  // serializes fetches through the chord stage
+-GuideChord guide_chords[4];
+-
++constexpr uint16_t kChordButtons = rex::input::X_INPUT_GAMEPAD_START | rex::input::X_INPUT_GAMEPAD_BACK;
++int32_t ChordWindow(uint32_t user) {
++  return user < 4 && (REXCVAR_GET(guide_chord_users) & (1 << user))
++      ? std::clamp(REXCVAR_GET(guide_chord_ms), 0, 1000) : 0;
++}
+ uint16_t ChordButton(uint16_t virtual_key) {
+   return virtual_key == 0x5814 ? uint16_t(rex::input::X_INPUT_GAMEPAD_START)
+        : virtual_key == 0x5815 ? uint16_t(rex::input::X_INPUT_GAMEPAD_BACK) : 0;
+ }
+ 
++// Shared decision for state and event consumers; neither route can bypass the
++// window. Only BACK/START belong to this chord, never unrelated held controls.
++uint16_t ObserveChord(uint32_t user, const X_INPUT_STATE& state) {
++  if (user >= 4) return 0;
++  auto& chord = UiInput().chords[user];
++  const uint16_t buttons = uint16_t(state.gamepad.buttons);
++  const uint16_t held = buttons & kChordButtons;
++  const auto now = std::chrono::steady_clock::now();
++  const int32_t window = ChordWindow(user);
++  chord.consumed &= held;
++  chord.waiting &= held;
++  if (window && (held & ~chord.observed)) {
++    if (!chord.waiting) chord.since = now;
++    chord.waiting |= held & ~chord.observed;
++  }
++  chord.observed = held;
++  if (window && (buttons & rex::input::X_INPUT_GAMEPAD_GUIDE) &&
++      (chord.waiting || chord.pending)) {
++    const uint16_t captured = held | (chord.pending ? ChordButton(uint16_t(chord.stroke.virtual_key)) : 0);
++    chord.consumed |= captured;
++    chord.waiting = 0;
++    X_INPUT_STATE controls{}; controls.gamepad.buttons = captured;
++    const auto keys = PadKeysFromState(controls);
++    auto& latch = UiInput().latches[user];
++    latch.keys |= keys; latch.opening_keys |= keys;
++  }
++  if (!window || now - chord.since >= std::chrono::milliseconds(window)) chord.waiting = 0;
++  return chord.waiting | chord.consumed;
++}
++
+ uint32_t FetchKeystroke(rex::input::InputSystem* backend, uint32_t user, uint32_t flags,
+                         X_INPUT_KEYSTROKE* stroke) {
+-  const int32_t window_ms = REXCVAR_GET(guide_chord_ms);
+-  if (window_ms <= 0 || user >= 4) return backend->GetKeystroke(user, flags, stroke);
+-  std::lock_guard chord_lock(guide_chord_mutex);
+-  auto& chord = guide_chords[user];
++  if (!backend) return X_ERROR_DEVICE_NOT_CONNECTED;
++  if (user >= 4) return X_ERROR_BAD_ARGUMENTS;
++  std::lock_guard lock(backend->system_ui_input.mutex);
++  if (!ChordWindow(user) && !backend->system_ui_input.chords[user].pending)
++    return backend->GetKeystroke(user, flags, stroke);
++  // Poll connection even while an event waits. RefreshDevices clears both
++  // ownership and the pending event on identity changes, including reconnection.
++  X_INPUT_STATE held{};
++  const auto connected = backend->GetState(user, &held);
++  if (connected != X_ERROR_SUCCESS) {
++    backend->system_ui_input.Reset(user);
++    return connected;
++  }
++  auto& chord = backend->system_ui_input.chords[user];
++  ObserveChord(user, held);
+   if (!chord.pending) {
+     const auto result = backend->GetKeystroke(user, flags, stroke);
++    if (result != X_ERROR_SUCCESS) return result;
++    const uint16_t button = ChordButton(uint16_t(stroke->virtual_key));
+     const uint16_t key_flags = uint16_t(stroke->flags);
+-    if (result != X_ERROR_SUCCESS || !ChordButton(uint16_t(stroke->virtual_key)) ||
++    if (!button || !(chord.waiting & button) ||
+         !(key_flags & rex::input::X_INPUT_KEYSTROKE_KEYDOWN) ||
+         (key_flags & (rex::input::X_INPUT_KEYSTROKE_KEYUP | rex::input::X_INPUT_KEYSTROKE_REPEAT)))
+       return result;
+-    chord = {true, *stroke, std::chrono::steady_clock::now()};
+-  }
+-  X_INPUT_STATE held{};
+-  const bool connected = backend->GetState(user, &held) == X_ERROR_SUCCESS;
+-  const uint16_t buttons = connected ? uint16_t(held.gamepad.buttons) : 0;
+-  if (buttons & rex::input::X_INPUT_GAMEPAD_GUIDE) {
+-    // The chord is a Guide press: neither the title nor the HUD receives
+-    // its controls. Their repeats and key-ups are dropped until release.
+-    const uint32_t keys = PadKeysFromState(held) | PadKeyBit(uint16_t(chord.stroke.virtual_key));
+-    chord.pending = false;
+-    std::lock_guard lock(system_ui_latch_mutex);
+-    auto& latch = system_ui_latches[user];
+-    latch.keys |= keys;
+-    latch.opening_keys |= keys;
+-    latch.armed = true;
+-    return X_ERROR_EMPTY;
+-  }
+-  const auto elapsed = std::chrono::steady_clock::now() - chord.since;
+-  if ((buttons & ChordButton(uint16_t(chord.stroke.virtual_key))) &&
+-      elapsed < std::chrono::milliseconds(window_ms))
+-    return X_ERROR_EMPTY;
++    chord.pending = true; chord.stroke = *stroke;
++  }
++  const auto button = ChordButton(uint16_t(chord.stroke.virtual_key));
++  if (chord.consumed & button) { chord.pending = false; return X_ERROR_EMPTY; }
++  if (chord.waiting & button) return X_ERROR_EMPTY;
+   chord.pending = false;
+   *stroke = chord.stroke;
+   return X_ERROR_SUCCESS;
+@@ -208,8 +233,8 @@
+   const uint32_t user = stroke.user_index;
+   const uint32_t bit = PadKeyBit(uint16_t(stroke.virtual_key));
+   if (user >= 4 || !bit) return false;
+-  std::lock_guard lock(system_ui_latch_mutex);
+-  auto& latch = system_ui_latches[user];
++  std::lock_guard lock(UiInput().mutex);
++  auto& latch = UiInput().latches[user];
+   latch.armed = true;
+   const bool opening = (latch.opening_keys & bit) != 0;
+   if (uint16_t(stroke.flags) & rex::input::X_INPUT_KEYSTROKE_KEYUP) {
+@@ -232,8 +257,8 @@
+ // Drops the remaining transitions of a key the system UI consumed.
+ bool SystemUiOwnsKeystroke(uint32_t user, const X_INPUT_KEYSTROKE& stroke) {
+   if (user >= 4) return false;
+-  std::lock_guard lock(system_ui_latch_mutex);
+-  auto& latch = system_ui_latches[user];
++  std::lock_guard lock(UiInput().mutex);
++  auto& latch = UiInput().latches[user];
+   const uint32_t bit = PadKeyBit(uint16_t(stroke.virtual_key));
+   if (!bit || !(latch.keys & bit)) return false;
+   if (uint16_t(stroke.flags) & rex::input::X_INPUT_KEYSTROKE_KEYUP) {
+@@ -250,6 +275,21 @@
+     if (result != X_ERROR_SUCCESS || !SystemUiOwnsKeystroke(keystroke->user_index, *keystroke))
+       return result;
+   }
++}
++
++uint32_t QueryTitleKeystroke(rex::input::InputSystem* backend, uint32_t user, uint32_t flags,
++                            X_INPUT_KEYSTROKE* stroke) {
++  if (user >= 4 && user != 0xFF) return X_ERROR_BAD_ARGUMENTS;
++  const auto first = user == 0xFF ? 0 : user, end = user == 0xFF ? 4 : user + 1;
++  uint32_t status = X_ERROR_DEVICE_NOT_CONNECTED;
++  for (uint32_t index = first; index < end; ++index) {
++    if (SystemUiOwnsInput(index)) { status = X_ERROR_EMPTY; continue; }
++    const auto result = GetTitleKeystroke(backend, index, flags, stroke);
++    if (result == X_ERROR_SUCCESS) return result;
++    if (result == X_ERROR_EMPTY) status = result;
++    else if (result != X_ERROR_DEVICE_NOT_CONNECTED) return result;
++  }
++  return status;
+ }
+ 
+ void XamResetInactivity_entry() {
+@@ -328,11 +368,12 @@
+   auto* is = input_system();
+   // Original system apps use the privileged high bit for device-state queries.
+   // Foreground title queries remain suppressed while the HUD owns input.
++  const auto result = is ? is->GetState(actual_user_index, input_state) : X_ERROR_DEVICE_NOT_CONNECTED;
++  if (is && result != X_ERROR_SUCCESS) return result;
+   if (!(flags & 0x80000000u) && SystemUiOwnsInput(actual_user_index)) {
+     if (input_state) *input_state = {};
+     return X_ERROR_SUCCESS;
+   }
+-  const auto result = is->GetState(actual_user_index, input_state);
+   if (result == X_ERROR_SUCCESS && !(flags & 0x80000000u))
+     FilterTitleState(actual_user_index, input_state.host_address());
+   return result;
+@@ -372,13 +413,11 @@
+ 
+   uint32_t actual_user_index = user_index;
+   if ((actual_user_index & 0xFF) == 0xFF || (flags & XINPUT_FLAG_ANY_USER)) {
+-    // Always pin user to 0.
+-    actual_user_index = 0;
++    actual_user_index = 0xFF;
+   }
+ 
+   auto* is = input_system();
+-  if (SystemUiOwnsInput(actual_user_index)) return X_ERROR_EMPTY;
+-  return GetTitleKeystroke(is, actual_user_index, flags, keystroke.host_address());
++  return QueryTitleKeystroke(is, actual_user_index, flags, keystroke.host_address());
+ }
+ 
+ // Same as non-ex, just takes a pointer to user index.
+@@ -395,13 +434,11 @@
+ 
+   uint32_t user_index = *user_index_ptr;
+   if ((user_index & 0xFF) == 0xFF || (flags & XINPUT_FLAG_ANY_USER)) {
+-    // Always pin user to 0.
+-    user_index = 0;
++    user_index = 0xFF;
+   }
+ 
+   auto* is = input_system();
+-  if (SystemUiOwnsInput(user_index)) return X_ERROR_EMPTY;
+-  auto result = GetTitleKeystroke(is, user_index, flags, keystroke.host_address());
++  auto result = QueryTitleKeystroke(is, user_index, flags, keystroke.host_address());
+   if (XSUCCEEDED(result)) {
+     *user_index_ptr = keystroke->user_index;
+   }

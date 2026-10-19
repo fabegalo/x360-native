@@ -382,10 +382,7 @@ void InstallSystemUi(rex::Runtime& rt) {
   }
   rex::cvar::SetFlagByName("guide_button", "true");
   if (rex::cvar::GetFlagByName("keybind_guide").empty()) rex::cvar::SetFlagByName("keybind_guide", "G");
-  // Controllers without a Guide button may report it only as BACK+START. Unless
-  // configured, let the SDK keep that chord from becoming a dashboard action.
-  if (rex::cvar::GetFlagSource("guide_chord_ms") == rex::cvar::Source::kDefault)
-    rex::cvar::SetFlagByName("guide_chord_ms", "150");
+  // BACK+START suppression is an explicit SDK option for the selected users.
   Xam(rt)->system_ui_request = [&rt](uint32_t message, uint32_t address, uint32_t size) -> rex::X_HRESULT {
     if (message == kReleaseApp) {
       std::lock_guard lock(request_mutex); reserved = false; return 0;

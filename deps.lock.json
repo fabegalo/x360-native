@@ -518,7 +518,7 @@
                                                            },
                                             "files":  {
                                                           "include/rex/kernel/xam/module.h":  "9094a03962109c555f8fa2ee60de3370a492765e19d8025db24e3c94e69745c1",
-                                                          "src/kernel/xam/xam_input.cpp":  "d00abcca28c73cd7b4941363d0b5b76e69a836b97dd832fbfa925a4f9fa43acf",
+                                                          "src/kernel/xam/xam_input.cpp":  "1d6d94480cbc54cebbb1a687c3605bfa0e7d2e63ebbaad51416347c9b5af6ede",
                                                           "src/kernel/xam/xam_misc.cpp":  "40f6b9d06f64ccf14119b783814e2485e9cb0918e67c288c8eab0fad5a3879a5",
                                                           "src/kernel/xam/xam_ui.cpp":  "c5a93b435cb1b135e553c523b437985d2cacfa28a0118ae2c220ba3d9a83fa1a"
                                                       },
@@ -533,7 +533,7 @@
                                                            },
                                             "files":  {
                                                           "include/rex/kernel/xam/module.h":  "9094a03962109c555f8fa2ee60de3370a492765e19d8025db24e3c94e69745c1",
-                                                          "src/kernel/xam/xam_input.cpp":  "d00abcca28c73cd7b4941363d0b5b76e69a836b97dd832fbfa925a4f9fa43acf"
+                                                          "src/kernel/xam/xam_input.cpp":  "1d6d94480cbc54cebbb1a687c3605bfa0e7d2e63ebbaad51416347c9b5af6ede"
                                                       },
                                             "test":  "sdkcheck.Sign-in ANY_USER session and HUD Ex ABI; title application routing and request outcomes"
                                         },
@@ -850,7 +850,7 @@
                                                                "src/kernel/xam/xam_input.cpp":  "c194bd782927f6057e8a5d97611d6fa64d8d67a2de5753fb76ae4b481bea44c7"
                                                            },
                                             "files":  {
-                                                          "src/kernel/xam/xam_input.cpp":  "d00abcca28c73cd7b4941363d0b5b76e69a836b97dd832fbfa925a4f9fa43acf"
+                                                          "src/kernel/xam/xam_input.cpp":  "1d6d94480cbc54cebbb1a687c3605bfa0e7d2e63ebbaad51416347c9b5af6ede"
                                                       },
                                             "test":  "sdkcheck.Sign-in ANY_USER session preserves exclusivity and validates HUD Ex ABI"
                                         },
@@ -1066,7 +1066,7 @@
     "src/kernel/xam/xam_input.cpp": "168638f2d39571fd98fff13e57cfd88e2a942312100a9b7c228c44a80a21dfa7"
   },
   "files": {
-    "src/kernel/xam/xam_input.cpp": "d00abcca28c73cd7b4941363d0b5b76e69a836b97dd832fbfa925a4f9fa43acf"
+    "src/kernel/xam/xam_input.cpp": "1d6d94480cbc54cebbb1a687c3605bfa0e7d2e63ebbaad51416347c9b5af6ede"
   },
   "test": "tests/sdkcheck/system_ui_input_test.cpp"
 },
@@ -1352,7 +1352,7 @@
     "src/kernel/xam/xam_input.cpp": "16b99785eb442c048ff5d6e988200580971b418c28aa0ad02a94de495ea452d6"
   },
   "files": {
-    "src/kernel/xam/xam_input.cpp": "d00abcca28c73cd7b4941363d0b5b76e69a836b97dd832fbfa925a4f9fa43acf"
+    "src/kernel/xam/xam_input.cpp": "1d6d94480cbc54cebbb1a687c3605bfa0e7d2e63ebbaad51416347c9b5af6ede"
   },
   "test": "tests/sdkcheck/local_profile_test.cpp"
 },
@@ -1365,9 +1365,24 @@
                    },
     "files":  {
                   "include/rex/kernel/xam/module.h":  "9094a03962109c555f8fa2ee60de3370a492765e19d8025db24e3c94e69745c1",
-                  "src/kernel/xam/xam_input.cpp":  "d00abcca28c73cd7b4941363d0b5b76e69a836b97dd832fbfa925a4f9fa43acf"
+                  "src/kernel/xam/xam_input.cpp":  "1d6d94480cbc54cebbb1a687c3605bfa0e7d2e63ebbaad51416347c9b5af6ede"
               },
     "test":  "tests/sdkcheck/system_ui_input_test.cpp"
+},
+{
+  "file": "patches/rexglue-sdk/0102-input-lifecycle.patch",
+  "sha256": "8d6417bee963ccbee6fc7e6c3bee0f9e9540fb70566057d441745225ef388099",
+  "base_files": {
+    "include/rex/input/input_system.h": "696037c34e8b9138d84beaf4a515a83da2bee9db50e889940781ec1992098b53",
+    "src/input/input_system.cpp": "a2101f593abff808585a78de1aa1c25e41521fd4ed9be45f2102a6c968d033dc",
+    "src/kernel/xam/xam_input.cpp": "d00abcca28c73cd7b4941363d0b5b76e69a836b97dd832fbfa925a4f9fa43acf"
+  },
+  "files": {
+    "include/rex/input/input_system.h": "438683b19d401dc8f79ccb5e418bc9c72839637385299604864acc92019a1080",
+    "src/input/input_system.cpp": "51b74e5784bf1d29d0c5dc47a914f5b0af8518e314ce6d551cf7d57cb2eb2d3f",
+    "src/kernel/xam/xam_input.cpp": "1d6d94480cbc54cebbb1a687c3605bfa0e7d2e63ebbaad51416347c9b5af6ede"
+  },
+  "test": "tests/sdkcheck/system_ui_input_test.cpp"
 }
                                     ]
                     },

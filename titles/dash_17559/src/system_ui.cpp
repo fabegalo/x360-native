@@ -168,10 +168,7 @@ void InstallSystemUi(rex::Runtime& runtime, std::string drive, std::string nativ
   // title. Poll its edge here because the original XAM scheduler is not run.
   rex::cvar::SetFlagByName("guide_button", "true");
   if (rex::cvar::GetFlagByName("keybind_guide").empty()) rex::cvar::SetFlagByName("keybind_guide", "G");
-  // Controllers without a Guide button may report it only as BACK+START. Unless
-  // configured, let the SDK keep that chord from becoming a dashboard action.
-  if (rex::cvar::GetFlagSource("guide_chord_ms") == rex::cvar::Source::kDefault)
-    rex::cvar::SetFlagByName("guide_chord_ms", "150");
+  // BACK+START suppression is an explicit SDK option for the selected users.
   poll_guide = [&runtime, held = std::array<bool, 4>{}]() mutable {
     auto* system = static_cast<rex::input::InputSystem*>(runtime.input_system());
     for (uint32_t user = 0; user < 4; ++user) {
