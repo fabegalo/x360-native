@@ -1,8 +1,9 @@
 # Reconexão e BACK+START — 19/10/2026
 
 Escopo P0: entrada do controle e gesto do Guide nas Retail 1888/17559. Aceite
-físico obrigatório ainda pendente. Nenhum jogo ou sessão visual foi iniciado
-pelo agente; sem push, tag ou Release.
+físico obrigatório ainda pendente. Até o commit `8d41064`, não houve sessão
+visual nem push. A rodada posterior, autorizada pelo mantenedor, está registrada
+abaixo. Nenhum jogo foi executado; sem tag ou Release.
 
 ## Base e diagnóstico
 
@@ -173,7 +174,7 @@ processo e usou o arquivo local de chaves existente. Não mudou busca de módulo
 em produção nem misturou originais. Os quatro arquivos dos diretórios de usuário
 das duas dashboards mantiveram os hashes antes/depois das sondas.
 
-Na **17559**, esta rodada cobre os contratos SDK/HUD Ex, a análise dos callbacks
+Na **17559**, a rodada anterior ao commit cobre os contratos SDK/HUD Ex, a análise dos callbacks
 originais e o build Release. Não houve execução visual do HUD original 17559
 pelo agente; reconexão e ausência de Confirmar indevido precisam do aceite manual.
 
@@ -220,4 +221,64 @@ Executar nas duas dashboards recompiladas, usando o controle do mantenedor:
 5. Conferir Guide dedicado e outros índices disponíveis, quando houver hardware.
 
 Falha manual exige continuar a correção. Resultados sintéticos, build e recibos
-não constituem aceite físico nem autorização para publicar.
+não constituem aceite físico. A autorização posterior de envio ao remoto é
+distinta desse aceite e não transforma testes automatizados em validação do hardware.
+
+## Validação adicional e envio solicitado — 19/10, 15h46–15h53
+
+Após `8d41064`, o mantenedor pediu que o agente executasse os testes e enviasse
+os commits ao remoto. Foram usados os mesmos produtos Release, sem alteração de
+código, SDK ou originais. As sessões visuais usaram Computer Use, a sonda de
+entrada já existente na 1888 e a sonda de abertura do serviço na 17559. Todas
+tiveram limite de 180 ou 300 segundos; encerraram antes dele, com saída 0 e sem
+exceção não tratada. Não houve execução de jogos ou criação de perfil pelo agente.
+
+Evidências locais adicionais: `.local/evidence/validation/input-p0-ui-20261019/`.
+Foram copiadas as pastas de usuário para esse diretório; os dois arquivos de
+cada pasta original conservaram seus hashes antes/depois. As capturas das telas
+foram inspecionadas durante a sessão. Os logs e `summary.json` registram:
+
+- **1888:** run `20261019T185047Z-input-p0-ui-1888-chord`, 86.978 ms. A sonda
+  `dash1888_input_probe=1` produziu 24 keystrokes BACK/START e cinco bordas Guide
+  observadas. A primeira borda fechou a aplicação de criação de perfil que o
+  boot já havia aberto; as quatro seguintes abriram/fecharam o HUD duas vezes.
+  Dois `hud.xex init=00000000`, dois unloads, zero keystrokes entregues à XUI
+  com `dash1888_ui_input_trace=true`. A tela voltou à dashboard, sem confirmação
+  ou reinício indevido. Não contabilizar três ciclos completos: parte da sonda
+  coincidiu com a inicialização da dashboard.
+- **17559:** runs `20261019T184601Z-input-p0-ui-17559` (106.582 ms),
+  `20261019T184805Z-input-p0-ui-17559-guide` (25.117 ms) e
+  `20261019T184926Z-input-p0-ui-17559-restart` (76.443 ms). Guide original
+  visível após a sonda de serviço; START do teclado confirmou Xbox Home,
+  produzindo `XamLoaderRebootToDash` e saída 0. Após iniciar novamente a
+  dashboard, o Guide abriu e B independente o fechou, com liberação de foco
+  registrada após 888 frames. A sessão permaneceu viva até o fechamento da janela.
+- A combinação de teclado Z+X produz BACK/START, mas não produz o bit GUIDE
+  adicional enviado pelo firmware do controle. Portanto o Xbox Home confirmado
+  por essa sequência **não é um teste do gesto completo do 8BitDo**. Pulsos
+  curtos de G também não produziram borda observável nessa automação. Nenhuma
+  dessas tentativas conta como aceite do atalho físico. A enviado à dashboard
+  não produziu uma transição visual conclusiva; a preservação de A/BACK/START
+  continua demonstrada pelos contratos focados, pendente de aceite físico.
+
+Os logs de runtime continuam contendo serviços parciais já conhecidos:
+XLIVEBASE/MediaInfo na 17559 e XMP na 1888. As contagens zero do supervisor
+referem-se somente a stdout/stderr; nesta rodada, `--log_file` direcionou o log
+do runtime aos arquivos `rex.log`, `guide.log`, `restart.log` e `chord.log`.
+Não interpretar a saída 0 como ausência de stubs ou compatibilidade completa.
+O crash histórico de createprofile da 1888 não foi reproduzido nem certificado
+como corrigido por esse percurso.
+
+A repetição focada solicitada passou: **935 asserções / 23 casos** em
+`contracts.txt`; **80.000 consultas concorrentes** em 733 ms no run
+`20261019T185306Z-input-p0-prepush-concurrency`; sonda SDL com 20 lotes de eventos
+expirados, conexão virtual e callback após destruição em 134 ms no run
+`20261019T185306Z-input-p0-prepush-sdl`. Ambas as sondas saíram com código 0.
+Os recibos foram novamente conferidos: 3.737 entradas/10 artefatos na 1888 e
+3.975/12 na 17559, com os mesmos hashes Release da tabela anterior. Nenhum
+processo de teste ficou aberto.
+
+Esta rodada sustenta o envio solicitado do código e das evidências documentais.
+Não comprova desligar/religar o controle físico, o timing de seu firmware, nem
+o aceite manual exigido no início da tarefa. A pendência permanece explícita;
+não há declaração de eliminação definitiva das duas regressões no hardware.

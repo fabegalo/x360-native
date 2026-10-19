@@ -14,6 +14,11 @@ voltam a usar a janela de 150 ms nos quatro usuários, preservando configuraçã
 explícita; SDK permanece opt-in. Testes técnicos não substituem o aceite físico,
 que continua pendente. Passaram 935 asserções de entrada/UI, sondas de hotplug e
 Guide original 1888, isolamento e recibos Release novos das duas dashboards.
+Na rodada visual posterior autorizada, a 1888 completou dois ciclos integrados
+do Guide sem entregar os 24 keystrokes do gesto à XUI; na 17559 foram observados
+abertura, fechamento por B e nova abertura após reiniciar. As sessões saíram
+com código 0 e sem exceção capturada. Testes focados e hashes Release foram
+reconferidos antes do envio remoto solicitado; isso não substitui o aceite físico.
 O encerramento observado na 17559 e o crash de
 createprofile na 1888 têm evidências distintas.
 [Diagnóstico, validação e roteiro manual](docs/reports/controller-reconnect-guide-2026-10-19.md).
