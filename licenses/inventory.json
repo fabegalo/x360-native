@@ -1456,13 +1456,13 @@
     {
       "id": "desktop-icon",
       "origin": "Original geometry in scripts/packaging/generate-desktop-icon.ps1; docs/reports/maintenance/ICON_PROVENANCE.md",
-      "revision": "original-2026-10-13",
+      "revision": "original-2026-10-18",
       "spdx": "BSD-3-Clause",
       "scope": "source-and-embedded-resource",
       "integration": "Compiled Windows icon resource and source payload",
       "original": "src/desktop/resources/desktop.ico",
       "license_file": "LICENSE",
-      "content_sha256": "20c4f1e07fe0102cff771f1687c4acd128371fe1703f54b2b3b42e816c476e6a",
+      "content_sha256": "9539edca04a3e2f2b5460fdcee8925cc0974af265fb715cf5a524fc32be31ed1",
       "obligations": "Copyright (c) 2026, x360-native; public holder confirmed by maintainer. Preserve BSD-3-Clause notice. Old icon history is a separate unresolved provenance question.",
       "license_sha256": "bc3a3590ae6dfa3fa6ff8bb0025f09466657cac73438d625e223269557ca4f37"
     }
