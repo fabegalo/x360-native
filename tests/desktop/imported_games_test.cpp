@@ -28,6 +28,13 @@ std::string Xex(unsigned version = 1, unsigned title = 0x12345678) {
   s.replace(0, 4, "XEX2"); be(4,1); be(8,56); be(20,1); be(24,0x40006); be(28,32);
   be(32,0xAABBCCDD); be(36,version); be(44,title); return s;
 }
+// Minimal PIRS header: Title ID in the execution info, UTF-16BE title name.
+std::string ArtPackage(unsigned title, const std::u16string& name) {
+  std::string s(0x971A, '\0'); s.replace(0, 4, "PIRS");
+  for (int i=0; i<4; ++i) s[0x360+i]=char(title>>(24-8*i));
+  for (size_t i=0; i<name.size(); ++i) { s[0x1691+2*i]=char(name[i]>>8); s[0x1692+2*i]=char(name[i]&0xFF); }
+  return s;
+}
 struct Fixture {
   fs::path root = UniqueTempPath("universal_library");
   ProjectPaths paths{root};
@@ -57,6 +64,27 @@ TEST_CASE("universal library persists unsupported titles and exact duplicates", 
   SECTION("same executable different content") { Write(f.source/"assets/data","different assets"); }
   CHECK(ImportGame(f.paths,games,f.source,f.source)!=id);
   CHECK(ReadCatalog(f.paths).size()==2);
+}
+TEST_CASE("folder imports name discs from their own title art package", "[universal][disc-name]") {
+  Fixture f; std::string expected;
+  SECTION("matching title, any case") { Write(f.source/"NXEART", ArtPackage(0x12345678, u"Disc Game")); expected = "Disc Game"; }
+  SECTION("art package of another title is ignored") { Write(f.source/"nxeart", ArtPackage(0x87654321, u"Other Game")); }
+  SECTION("art that is not a package is ignored") { Write(f.source/"nxeart", "art"); }
+  SECTION("nested art package is not the disc root") { Write(f.source/"media/nxeart", ArtPackage(0x12345678, u"Nested")); }
+  const auto id = ImportGame(f.paths, {}, f.source, f.source);
+  auto games = ReadCatalog(f.paths); REQUIRE(games.size() == 1);
+  CHECK(games[0].label.starts_with(expected.empty() ? "Xbox 360 12345678" : expected));
+  if (expected.empty()) return;
+  // Records written before the name was read regain it on reimport of the same content.
+  const auto record_file = fs::directory_iterator(f.paths.local()/"catalog")->path();
+  auto record = nlohmann::json::parse(std::ifstream(record_file));
+  CHECK(record["name"] == expected);
+  record["name"] = ""; Write(record_file, record.dump());
+  CHECK(ReadCatalog(f.paths)[0].label.starts_with("Xbox 360 12345678"));
+  CHECK(ImportGame(f.paths, ReadCatalog(f.paths), f.source, f.source) == id);
+  games = ReadCatalog(f.paths); REQUIRE(games.size() == 1);
+  CHECK(games[0].label.starts_with(expected));
+  CHECK(Inspect(f.paths, games[0]).inputs_ok);
 }
 TEST_CASE("launch inventory hashing preserves portable identities and rejects tampering", "[launch-preflight]") {
   Fixture f;

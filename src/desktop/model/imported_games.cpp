@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <fstream>
 #include <map>
+#include <memory>
 #include <set>
 #include <unordered_set>
 #include <fmt/format.h>
@@ -101,16 +102,19 @@ template<class Units> std::string Name(const Units& units) {
   for (auto v : units) { if (!uint16_t(v)) break; s.push_back(char16_t(uint16_t(v))); }
   return s.empty() ? "" : Utf8(fs::path(s));
 }
-void PackageMetadata(const fs::path& original, Json& r) {
-  if (!fs::is_regular_file(original)) return;
-  rex::filesystem::StfsHeader header{};
-  std::ifstream in(original, std::ios::binary);
+bool ReadPackageHeader(const fs::path& file, rex::filesystem::StfsHeader& header) {
+  if (!fs::is_regular_file(file)) return false;
+  std::ifstream in(file, std::ios::binary);
   in.read(reinterpret_cast<char*>(&header), sizeof(header));
-  if (in.gcount() != sizeof(header)) return;
+  if (in.gcount() != sizeof(header)) return false;
   const auto magic = header.header.magic.get();
   using Type = rex::filesystem::XContentPackageType;
-  if (magic != Type::kCon && magic != Type::kLive && magic != Type::kPirs) return;
-  const auto& md = header.metadata;
+  return magic == Type::kCon || magic == Type::kLive || magic == Type::kPirs;
+}
+void PackageMetadata(const fs::path& original, Json& r) {
+  auto header = std::make_unique<rex::filesystem::StfsHeader>();
+  if (!ReadPackageHeader(original, *header)) return;
+  const auto& md = header->metadata;
   r["package_title_id"] = fmt::format("{:08X}", uint32_t(md.execution_info.title_id));
   r["content_type"] = fmt::format("{:08X}", uint32_t(md.content_type.get()));
   r["publisher"] = Name(md.publisher_raw.uint);
@@ -119,6 +123,21 @@ void PackageMetadata(const fs::path& original, Json& r) {
   for (const auto& language : md.display_name_raw.uint) names.push_back(Name(language));
   r["display_names"] = names;
   if (r["name"] == "") for (const auto& name : names) if (name != "") { r["name"] = name; break; }
+}
+// Disc roots carry the dashboard art package (nxeart). Only its title name is
+// used: its content type and display names describe the art package, not the
+// game, and a package from another title is ignored.
+void DiscArtName(const fs::path& root, Json& r) {
+  if (r["name"] != "" || r["title_id"] == "") return;
+  for (const auto& entry : fs::directory_iterator(root)) {
+    if (entry.is_symlink() || !entry.is_regular_file() || Key(Utf8(entry.path().filename())) != "nxeart") continue;
+    auto header = std::make_unique<rex::filesystem::StfsHeader>();
+    if (!ReadPackageHeader(entry.path(), *header)) return;
+    const auto& md = header->metadata;
+    if (fmt::format("{:08X}", uint32_t(md.execution_info.title_id)) != r["title_id"].get<std::string>()) return;
+    r["name"] = Name(md.title_name_raw.uint);
+    return;
+  }
 }
 }
 
@@ -167,6 +186,7 @@ std::string ImportGame(const ProjectPaths& paths, const std::vector<Target>& tar
     {"disc_number", identity.disc_number}, {"disc_count", identity.disc_count},
     {"imports", identity.imports}, {"modules", modules}, {"name", ""}, {"source", Utf8(original)}, {"complete", false}};
   PackageMetadata(original, record);
+  DiscArtName(source, record);
   Target target; target.id = id; target.aot = false;
   // Discs and content revisions share a title directory, never a writable root.
   // DLC packages may live alongside them under dlc/, outside every game root.
