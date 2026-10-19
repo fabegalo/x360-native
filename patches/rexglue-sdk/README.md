@@ -1013,3 +1013,35 @@ do extrator (`xex1-retail`/`xex1-devkit`, 32 dígitos hexadecimais), selecionado
 Testes fornecem chaves legadas sintéticas; ausência/má formação falha explicitamente.
 O gate de distribuição reconhece constantes em bytes, C++ e unified diff.
 Fingerprints de exclusão não servem ao carregador. Histórico publicado preservado.
+
+## 0103–0105 — reconexão e posse do gesto Guide (19/10/2026)
+
+0103 serializa consultas, enumeração, atribuição e invalidação no InputSystem.
+A sonda concorrente reproduziu `0xC0000005` em `SlotAssignment::OnDevicesChanged`
+antes da correção. Shutdown retira os drivers sob a trava, mas os destrói fora
+dela para não esperar a UI segurando a trava de entrada.
+
+0104 captura a borda Guide antes do carregamento da aplicação e preserva essa
+captura ao iniciar a sessão após a soltura. A borda pertence à conexão: Guide
+segurado ao reconectar não abre/fecha outra sessão. O fechamento captura naquele
+instante os controles ainda pressionados. Filtragem e consulta são atômicas;
+fila vazia libera máscaras de abertura de controles já soltos, inclusive quando
+o backend nunca gerou seu UP. Ambas as ABIs HUD e os quatro usuários têm regressões.
+Um contador de geração também detecta troca de dispositivo entre GetState e
+GetKeystroke; somente nesse caso relê o estado antes de classificar a nova tecla.
+A limpeza de fila vazia também exige uma máscara de abertura pendente antes de
+consultar o estado, sem acrescentar esse poll quando não houve gesto do Guide.
+As dashboards 1888/17559 habilitam a janela existente de 150 ms e máscara 15
+somente quando a origem do cvar é o padrão; valores explícitos, inclusive 0,
+são preservados. O padrão do SDK continua 0. A janela não desfaz comandos já
+entregues antes de seu prazo; calibração e aceite físicos seguem pendentes.
+
+0105 remove o observador SDL também no destrutor, invalida callbacks pendentes
+sem capturar o driver e serializa extração/aplicação dos lotes de eventos.
+Chegada expirada e duplicada são toleradas; remoção usa o instance ID armazenado.
+Soltura cancela repeat antes de sua emissão. A sonda SDL é sem janela visível,
+usa joystick virtual e executa o callback enfileirado após destruir o driver.
+
+Testes: `input_hotplug_probe.cpp`, `sdl_hotplug_probe.cpp` e `[input-p0]` em
+`system_ui_input_test.cpp`. SDK pinado e originais preservados.
+[Evidências, limites e aceite obrigatório](../../docs/reports/controller-reconnect-guide-2026-10-19.md).

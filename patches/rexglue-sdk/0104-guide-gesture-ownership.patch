@@ -1,0 +1,214 @@
+diff --git a/include/rex/input/input_system.h b/include/rex/input/input_system.h
+--- a/include/rex/input/input_system.h
++++ b/include/rex/input/input_system.h
+@@ -36,6 +36,8 @@
+   uint32_t keys = 0, opening_keys = 0;
+ };
+ struct GuideChord {
++  // A new connection must release GUIDE before it can open/close a UI.
++  bool guide_held = true, guide_initialized = false;
+   bool pending = false;
+   X_INPUT_KEYSTROKE stroke{};
+   std::chrono::steady_clock::time_point since{};
+@@ -47,9 +49,10 @@
+   std::recursive_mutex mutex;
+   std::array<SystemUiLatch, 4> latches{};
+   std::array<GuideChord, 4> chords{};
++  std::array<uint64_t, 4> generations{};
+   void Reset(uint32_t user) {
+     std::lock_guard lock(mutex);
+-    if (user < 4) { latches[user] = {}; chords[user] = {}; }
++    if (user < 4) { ++generations[user]; latches[user] = {}; chords[user] = {}; }
+   }
+ };
+ 
+diff --git a/include/rex/kernel/xam/module.h b/include/rex/kernel/xam/module.h
+--- a/include/rex/kernel/xam/module.h
++++ b/include/rex/kernel/xam/module.h
+@@ -28,6 +28,9 @@
+ bool xeXamIsUIActive();
+ // Capture controls already held by the request that begins this UI session.
+ void CaptureSystemUiOpeningInput(uint32_t owner);
++// Atomic raw-state edge and gesture capture, reset with the input connection.
++bool PollGuideButton(uint32_t user);
++void CaptureSystemUiClosingInput(uint32_t owner);
+ 
+ class XamModule : public system::KernelModule {
+  public:
+@@ -97,6 +100,7 @@
+   bool EndSystemUi(uint32_t module) {
+     std::lock_guard lock(system_apps_mutex_);
+     if (!module || module != system_ui_.module) return false;
++    CaptureSystemUiClosingInput(system_ui_.user);
+     system_ui_ = {};
+     return true;
+   }
+diff --git a/src/kernel/xam/xam_input.cpp b/src/kernel/xam/xam_input.cpp
+--- a/src/kernel/xam/xam_input.cpp
++++ b/src/kernel/xam/xam_input.cpp
+@@ -98,20 +98,46 @@
+ // Ownership changes once per application, not once per input poll. Capture
+ // only the controls actually held at that boundary; never drain the queue.
+ // New controls remain available even while an initiating button is held.
++void CaptureOpeningInput(uint32_t user, const X_INPUT_STATE& state) {
++  auto& chord = UiInput().chords[user];
++  uint32_t keys = PadKeysFromState(state);
++  if (chord.pending) {
++    keys |= PadKeyBit(uint16_t(chord.stroke.virtual_key));
++    chord.pending = false;
++  }
++  auto& latch = UiInput().latches[user];
++  // The host may have captured the physical edge before loading the app.
++  // Beginning that app after release must not erase its queued transitions.
++  latch.opening_keys |= keys;
++  latch.keys |= keys;
++  latch.armed = true;
++}
+ void CaptureSystemUiOpeningInput(uint32_t owner) {
+   auto* backend = input_system();
+   if (!backend) return;
++  std::lock_guard lock(UiInput().mutex);
+   for (uint32_t user = 0; user < 4; ++user) {
+     if (owner != 0xFF && owner != user) continue;
+     X_INPUT_STATE state{};
+-    uint32_t keys = 0;
+-    if (backend && backend->GetState(user, &state) == X_ERROR_SUCCESS) keys = PadKeysFromState(state);
+-    std::lock_guard lock(UiInput().mutex);
+-    auto& latch = UiInput().latches[user];
+-    latch.opening_keys = keys;
+-    latch.keys |= keys;
+-    latch.armed = true;
+-  }
++    if (backend->GetState(user, &state) == X_ERROR_SUCCESS) CaptureOpeningInput(user, state);
++  }
++}
++bool PollGuideButton(uint32_t user) {
++  auto* backend = input_system();
++  if (!backend || user >= 4) return false;
++  std::lock_guard lock(UiInput().mutex);
++  X_INPUT_STATE state{};
++  if (backend->GetState(user, &state) != X_ERROR_SUCCESS) return false;
++  auto& chord = UiInput().chords[user];
++  const bool pressed = (uint16_t(state.gamepad.buttons) & rex::input::X_INPUT_GAMEPAD_GUIDE) != 0;
++  const bool first = !chord.guide_initialized;
++  const bool edge = !first && pressed && !chord.guide_held;
++  chord.guide_initialized = true;
++  chord.guide_held = pressed;
++  // Even GUIDE held on reconnection owns its accompanying controls. It must
++  // not activate a dashboard item or synthesize another Guide edge.
++  if (pressed && (first || edge)) CaptureOpeningInput(user, state);
++  return edge;
+ }
+ // First title query after a system UI: latch everything still held.
+ void TakeSystemUiLatch(SystemUiLatch& latch, const X_INPUT_STATE& held) {
+@@ -120,6 +146,21 @@
+   latch.buttons = uint16_t(held.gamepad.buttons);
+   latch.left_trigger = held.gamepad.left_trigger != 0;
+   latch.right_trigger = held.gamepad.right_trigger != 0;
++}
++
++// Snapshot at the actual close boundary, so a later fresh title press is not
++// mistaken for a key held by a UI that has already gone away.
++void CaptureSystemUiClosingInput(uint32_t owner) {
++  auto* backend = input_system();
++  if (!backend) return;
++  std::lock_guard lock(UiInput().mutex);
++  for (uint32_t user = 0; user < 4; ++user) {
++    if (owner != 0xFF && owner != user) continue;
++    X_INPUT_STATE held{};
++    if (backend->GetState(user, &held) != X_ERROR_SUCCESS) continue;
++    CaptureOpeningInput(user, held);
++    TakeSystemUiLatch(UiInput().latches[user], held);
++  }
+ }
+ 
+ // Title view of a raw controller state. The Guide button is never a title
+@@ -210,8 +251,16 @@
+   auto& chord = backend->system_ui_input.chords[user];
+   ObserveChord(user, held);
+   if (!chord.pending) {
++    const auto generation = UiInput().generations[user];
+     const auto result = backend->GetKeystroke(user, flags, stroke);
+     if (result != X_ERROR_SUCCESS) return result;
++    if (generation != UiInput().generations[user]) {
++      // SDL may deliver a hotplug event between the state and key queries.
++      // Re-evaluate the new connection before classifying its first key.
++      const auto refreshed = backend->GetState(user, &held);
++      if (refreshed != X_ERROR_SUCCESS) return refreshed;
++      ObserveChord(user, held);
++    }
+     const uint16_t button = ChordButton(uint16_t(stroke->virtual_key));
+     const uint16_t key_flags = uint16_t(stroke->flags);
+     if (!button || !(chord.waiting & button) ||
+@@ -221,11 +270,27 @@
+     chord.pending = true; chord.stroke = *stroke;
+   }
+   const auto button = ChordButton(uint16_t(chord.stroke.virtual_key));
+-  if (chord.consumed & button) { chord.pending = false; return X_ERROR_EMPTY; }
++  if (chord.consumed & button) {
++    chord.pending = false;
++    return FetchKeystroke(backend, user, flags, stroke);
++  }
+   if (chord.waiting & button) return X_ERROR_EMPTY;
+   chord.pending = false;
+   *stroke = chord.stroke;
+   return X_ERROR_SUCCESS;
++}
++
++// State-based drivers need not generate an UP if the opening DOWN was never
++// requested. Once their event queue is empty, released opening controls can
++// relinquish ownership; later presses must work normally.
++void ReleaseIdleOpeningInput(rex::input::InputSystem* backend, uint32_t user) {
++  if (user >= 4 || UiInput().chords[user].pending || !UiInput().latches[user].opening_keys) return;
++  X_INPUT_STATE state{};
++  if (backend->GetState(user, &state) != X_ERROR_SUCCESS) return;
++  auto& latch = UiInput().latches[user];
++  const auto released = latch.opening_keys & ~PadKeysFromState(state);
++  latch.opening_keys &= ~released;
++  latch.keys &= ~released;
+ }
+ 
+ // The HUD received this key-down: its repeats and key-up belong to the UI.
+@@ -249,8 +314,10 @@
+ uint32_t GetSystemUiKeystroke(rex::input::InputSystem* backend, uint32_t user,
+                               X_INPUT_KEYSTROKE* stroke) {
+   if (!backend) return X_ERROR_DEVICE_NOT_CONNECTED;
++  std::lock_guard lock(backend->system_ui_input.mutex);
+   for (;;) {
+     const auto result = FetchKeystroke(backend, user, 1, stroke);
++    if (result == X_ERROR_EMPTY) ReleaseIdleOpeningInput(backend, user);
+     if (result != X_ERROR_SUCCESS || !NoteSystemUiKeystroke(*stroke)) return result;
+   }
+ }
+@@ -270,8 +337,11 @@
+ 
+ uint32_t GetTitleKeystroke(rex::input::InputSystem* is, uint32_t user, uint32_t flags,
+                            X_INPUT_KEYSTROKE* keystroke) {
++  if (!is) return X_ERROR_DEVICE_NOT_CONNECTED;
++  std::lock_guard lock(is->system_ui_input.mutex);
+   for (;;) {
+     const auto result = FetchKeystroke(is, user, flags, keystroke);
++    if (result == X_ERROR_EMPTY) ReleaseIdleOpeningInput(is, user);
+     if (result != X_ERROR_SUCCESS || !SystemUiOwnsKeystroke(keystroke->user_index, *keystroke))
+       return result;
+   }
+@@ -368,9 +438,16 @@
+   auto* is = input_system();
+   // Original system apps use the privileged high bit for device-state queries.
+   // Foreground title queries remain suppressed while the HUD owns input.
+-  const auto result = is ? is->GetState(actual_user_index, input_state) : X_ERROR_DEVICE_NOT_CONNECTED;
+-  if (is && result != X_ERROR_SUCCESS) return result;
+-  if (!(flags & 0x80000000u) && SystemUiOwnsInput(actual_user_index)) {
++  const bool owned = !(flags & 0x80000000u) && SystemUiOwnsInput(actual_user_index);
++  if (!is) {
++    if (!owned) return X_ERROR_DEVICE_NOT_CONNECTED;
++    if (input_state) *input_state = {};
++    return X_ERROR_SUCCESS;
++  }
++  std::lock_guard lock(is->system_ui_input.mutex);
++  const auto result = is->GetState(actual_user_index, input_state);
++  if (result != X_ERROR_SUCCESS) return result;
++  if (owned) {
+     if (input_state) *input_state = {};
+     return X_ERROR_SUCCESS;
+   }

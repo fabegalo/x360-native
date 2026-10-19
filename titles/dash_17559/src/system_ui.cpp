@@ -5,6 +5,7 @@
 #include <rex/runtime.h>
 #include <rex/logging.h>
 #include <rex/cvar.h>
+#include "../../common/guide_button.h"
 #include <rex/kernel/xam/module.h>
 #include <rex/kernel/xboxkrnl/video.h>
 #include <rex/system/function_dispatcher.h>
@@ -166,17 +167,11 @@ void InstallSystemUi(rex::Runtime& runtime, std::string drive, std::string nativ
   system_drive = std::move(drive);
   // XAM normally handles the physical Guide button outside the foreground
   // title. Poll its edge here because the original XAM scheduler is not run.
-  rex::cvar::SetFlagByName("guide_button", "true");
+  x360n::ConfigureGuideButton();
   if (rex::cvar::GetFlagByName("keybind_guide").empty()) rex::cvar::SetFlagByName("keybind_guide", "G");
-  // BACK+START suppression is an explicit SDK option for the selected users.
-  poll_guide = [&runtime, held = std::array<bool, 4>{}]() mutable {
-    auto* system = static_cast<rex::input::InputSystem*>(runtime.input_system());
+  poll_guide = [&runtime]() {
     for (uint32_t user = 0; user < 4; ++user) {
-      rex::input::X_INPUT_STATE input{};
-      const bool pressed = system && system->GetState(user, &input) == 0 &&
-          (uint16_t(input.gamepad.buttons) & rex::input::X_INPUT_GAMEPAD_GUIDE);
-      const bool edge = pressed && !held[user];
-      held[user] = pressed;
+      const bool edge = rex::kernel::xam::PollGuideButton(user);
       if (!edge || pending_ui) continue;
       if (draw_ui) {
         if (active_application == &kGuide) {

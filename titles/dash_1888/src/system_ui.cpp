@@ -5,6 +5,7 @@
 #include "guide_diagnostic.h"
 #include "../../common/system_ui_context.h"
 #include "../../common/system_ui_execution.h"
+#include "../../common/guide_button.h"
 #include <rex/runtime.h>
 #include <rex/cvar.h>
 #include <rex/logging.h>
@@ -55,7 +56,6 @@ std::optional<Active> active;
 std::vector<Request> suspended;
 x360n::SystemUiExecution execution;
 bool initialized = false, attempted = false, reserved = false;
-bool guide_held[4] = {};
 bool HasPending() { std::lock_guard lock(request_mutex); return pending.has_value(); }
 std::optional<Request> TakePending() {
   std::lock_guard lock(request_mutex);
@@ -297,12 +297,8 @@ void Swap(const rex::kernel::xboxkrnl::SystemSwapFrame& frame) {
   title_frame = frame;
   auto& rt = *rex::Runtime::instance();
   auto xam = Xam(rt);
-  auto* backend = static_cast<rex::input::InputSystem*>(rt.input_system());
   for (uint32_t user = 0; user < 4; ++user) {
-    rex::input::X_INPUT_STATE input{};
-    const bool pressed = backend && backend->GetState(user, &input) == 0 &&
-        (uint16_t(input.gamepad.buttons) & rex::input::X_INPUT_GAMEPAD_GUIDE);
-    if (pressed && !guide_held[user]) {
+    if (rex::kernel::xam::PollGuideButton(user)) {
       // One line per physical press: distinguishes missing input from a Guide
       // that opened but did not present.
       REXLOG_INFO("1888 system UI: Guide button user={} (active={:X}, pending={})", user,
@@ -312,13 +308,11 @@ void Swap(const rex::kernel::xboxkrnl::SystemSwapFrame& frame) {
       } else if (active) {
         // The closing shortcut also belongs to this UI until release. Capture
         // its held controls before returning input ownership to the dashboard.
-        rex::kernel::xam::CaptureSystemUiOpeningInput(user);
         xam->RequestSystemUiClose();
       } else {
         Enqueue(Request{0x21015, user, {}, {}});
       }
     }
-    guide_held[user] = pressed;
   }
   // Opt-in service-level validation without desktop input or UI automation.
   // No clock reads in ordinary sessions.
@@ -380,9 +374,9 @@ void InstallSystemUi(rex::Runtime& rt) {
     // Original private module loads use the 1888-only mounted SystemRoot.
     rt.kernel_state()->RegisterRecompiledModule(image.c_str(), ("\\SystemRoot\\" + image).c_str(), library.c_str());
   }
-  rex::cvar::SetFlagByName("guide_button", "true");
+  x360n::ConfigureGuideButton();
   if (rex::cvar::GetFlagByName("keybind_guide").empty()) rex::cvar::SetFlagByName("keybind_guide", "G");
-  // BACK+START suppression is an explicit SDK option for the selected users.
+  // Shared dashboard defaults preserve explicit SDK input configuration.
   Xam(rt)->system_ui_request = [&rt](uint32_t message, uint32_t address, uint32_t size) -> rex::X_HRESULT {
     if (message == kReleaseApp) {
       std::lock_guard lock(request_mutex); reserved = false; return 0;

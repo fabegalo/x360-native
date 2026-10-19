@@ -171,6 +171,20 @@ target_compile_definitions(x360n_sdk_runtime_checks PRIVATE
 add_dependencies(x360n_sdk_runtime_checks x360n_shutdown_probe)
 
 add_executable(x360n_firmware_exit_probe sdkcheck/firmware_exit_probe.cpp ../titles/common/launch_handoff.cpp)
+add_executable(x360n_input_hotplug_probe sdkcheck/input_hotplug_probe.cpp)
+target_link_libraries(x360n_input_hotplug_probe PRIVATE rexruntime)
+x360n_stage_runtime_dlls(x360n_input_hotplug_probe)
+add_test(NAME sdkcheck.input-hotplug-concurrency COMMAND x360n_input_hotplug_probe)
+set_tests_properties(sdkcheck.input-hotplug-concurrency PROPERTIES LABELS project TIMEOUT 30)
+add_executable(x360n_sdl_hotplug_probe sdkcheck/sdl_hotplug_probe.cpp
+    ${PROJECT_SOURCE_DIR}/external/rexglue-sdk/src/input/sdl/sdl_input_driver.cpp)
+# Driver and SDL must share one instance in this process.
+target_link_libraries(x360n_sdl_hotplug_probe PRIVATE rexruntime)
+target_compile_options(x360n_sdl_hotplug_probe PRIVATE
+    -UTRACY_ENABLE -UREXGLUE_ENABLE_PROFILING -UREXGLUE_ENABLE_PERF_COUNTERS)
+x360n_stage_runtime_dlls(x360n_sdl_hotplug_probe)
+add_test(NAME sdkcheck.sdl-hotplug-events COMMAND x360n_sdl_hotplug_probe)
+set_tests_properties(sdkcheck.sdl-hotplug-events PROPERTIES LABELS project TIMEOUT 30)
 target_link_libraries(x360n_firmware_exit_probe PRIVATE rexruntime)
 x360n_stage_runtime_dlls(x360n_firmware_exit_probe)
 if(WIN32)

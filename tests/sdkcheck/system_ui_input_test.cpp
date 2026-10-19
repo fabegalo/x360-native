@@ -14,12 +14,31 @@
 #include <rex/kernel/xam/module.h>
 #include <rex/ppc/func.h>
 #include <rex/system/kernel_state.h>
+#include "../../titles/common/guide_button.h"
 
 extern "C" REX_FUNC(__imp__XamInputGetState);
 extern "C" REX_FUNC(__imp__XamInputGetKeystroke);
 extern "C" REX_FUNC(__imp__XamInputGetKeystrokeHudEx);
 extern "C" REX_FUNC(__imp__XamInputGetKeystrokeHud);
 REXCVAR_DECLARE(bool, mnk_mode);
+
+TEST_CASE("Dashboard Guide defaults preserve explicit zero and user mask", "[input-p0]") {
+  struct ResetFlags {
+    ~ResetFlags() {
+      for (auto name : {"guide_button", "guide_chord_ms", "guide_chord_users"})
+        rex::cvar::ResetToDefault(name);
+    }
+  } reset;
+  for (auto name : {"guide_chord_ms", "guide_chord_users"}) rex::cvar::ResetToDefault(name);
+  x360n::ConfigureGuideButton();
+  CHECK(rex::cvar::GetFlagByName("guide_chord_ms") == "150");
+  CHECK(rex::cvar::GetFlagByName("guide_chord_users") == "15");
+  REQUIRE(rex::cvar::SetFlagByName("guide_chord_ms", "0"));
+  REQUIRE(rex::cvar::SetFlagByName("guide_chord_users", "1"));
+  x360n::ConfigureGuideButton();
+  CHECK(rex::cvar::GetFlagByName("guide_chord_ms") == "0");
+  CHECK(rex::cvar::GetFlagByName("guide_chord_users") == "1");
+}
 
 namespace {
 class OpeningPad final : public rex::input::InputDriver {
@@ -32,7 +51,9 @@ class OpeningPad final : public rex::input::InputDriver {
   }
   rex::X_RESULT GetDeviceState(rex::input::DeviceId, rex::input::X_INPUT_STATE* out) override {
     if (!connected) return 1167;
-    *out = {}; out->gamepad.buttons = held; return 0;
+    *out = {}; out->gamepad.buttons = held;
+    if (replace_after_state) { identity += 4; held = replacement_buttons; replace_after_state = false; }
+    return 0;
   }
   rex::X_RESULT GetDeviceCapabilities(rex::input::DeviceId, uint32_t, rex::input::X_INPUT_CAPABILITIES*) override { return 0; }
   rex::X_RESULT SetDeviceVibration(rex::input::DeviceId, rex::input::X_INPUT_VIBRATION*) override { return 0; }
@@ -48,6 +69,8 @@ class OpeningPad final : public rex::input::InputDriver {
   uint64_t identity = 1;
   unsigned device_count = 1;
   unsigned event_device = 0;
+  bool replace_after_state = false;
+  uint16_t replacement_buttons = 0;
   size_t next = 0;
   std::vector<std::pair<uint16_t, uint16_t>> keys;
 };
@@ -252,10 +275,10 @@ struct ChordFixture {
     __imp__XamInputGetKeystrokeHud(ctx, base);
     return ctx.r3.u32;
   }
-  void Open() {
+  void Open(uint32_t owner = 0) {
     REQUIRE(xam->RegisterSystemApp({0x1000, 0xFF, 0x90105000, 0}) == 0);
-    REQUIRE(xam->BeginSystemUi(0x1000, 0xFF, 0));
-    REQUIRE(xam->EnableSystemUiInput(0, true));
+    REQUIRE(xam->BeginSystemUi(0x1000, 0xFF, owner));
+    REQUIRE(xam->EnableSystemUiInput(owner, true));
     REQUIRE(xam->SetSystemUiVisible(0x1000));
   }
   uint16_t State() {
@@ -483,4 +506,141 @@ TEST_CASE("A BACK+START Guide chord never reaches the title or the HUD", "[sdk][
     REQUIRE(f.Hud() == 0);
     f.Close();
   }
+}
+
+TEST_CASE("Opening a queued Guide preserves the initiating chord after its buttons are released", "[sdk][guide-chord][input-p0]") {
+  using namespace rex::input;
+  for (uint32_t user = 0; user < 4; ++user) {
+    ChordFixture f; f.user = user; f.pad->device_count = 4; f.pad->event_device = user;
+    REQUIRE(rex::cvar::SetFlagByName("guide_chord_ms", "150"));
+    REQUIRE(rex::cvar::SetFlagByName("guide_chord_users", "15"));
+    f.pad->held = X_INPUT_GAMEPAD_START;
+    f.pad->keys = {{0x5814, 1}};
+    CHECK(f.Title() == 4306);
+    f.pad->held |= X_INPUT_GAMEPAD_BACK | X_INPUT_GAMEPAD_GUIDE;
+    rex::kernel::xam::CaptureSystemUiOpeningInput(user);
+    // Native app loading takes longer than the physical gesture.
+    f.pad->held = 0;
+    f.pad->keys.insert(f.pad->keys.end(), {{0x5815, 1}, {0x5814, 2}, {0x5815, 2}, {0x5800, 1}});
+    REQUIRE(f.xam->RegisterSystemApp({0x1000, 0xFF, 0x90105000, 0}) == 0);
+    REQUIRE(f.xam->BeginSystemUi(0x1000, 0xFF, user));
+    REQUIRE(f.xam->EnableSystemUiInput(user, true));
+    REQUIRE(f.xam->SetSystemUiVisible(0x1000));
+    REQUIRE(f.Hud() == 0);
+    CHECK(f.stroke()->virtual_key == 0x5800);
+    CHECK(f.pad->next == f.pad->keys.size());
+    f.Close();
+  }
+}
+
+TEST_CASE("A device replaced between state and keystroke cannot bypass Guide ownership", "[sdk][guide-lifecycle][input-p0]") {
+  using namespace rex::input;
+  for (uint32_t user = 0; user < 4; ++user) {
+    for (bool hud : {false, true}) {
+      CAPTURE(user, hud);
+      ChordFixture f; f.user = user; f.pad->device_count = 4; f.pad->event_device = user;
+      REQUIRE(rex::cvar::SetFlagByName("guide_chord_ms", "150"));
+      REQUIRE(rex::cvar::SetFlagByName("guide_chord_users", "15"));
+      if (hud) f.Open(user);
+      const auto query = [&] { return hud ? f.Hud() : f.Title(); };
+      f.pad->held = 0;
+      f.pad->replacement_buttons = X_INPUT_GAMEPAD_GUIDE | X_INPUT_GAMEPAD_BACK | X_INPUT_GAMEPAD_START;
+      f.pad->replace_after_state = true;
+      f.pad->keys = {{0x5814, 1}, {0x5815, 1}};
+      CHECK(query() == 4306);
+      CHECK(query() == 4306);
+      f.pad->held = 0;
+      f.pad->keys.insert(f.pad->keys.end(), {{0x5814, 2}, {0x5815, 2}, {0x5800, 1}});
+      REQUIRE(query() == 0);
+      CHECK(f.stroke()->virtual_key == 0x5800);
+      if (hud) f.Close();
+    }
+  }
+}
+
+TEST_CASE("Guide edges belong to a connection and do not swallow new controls while held", "[sdk][guide-lifecycle][input-p0]") {
+  using namespace rex::input;
+  for (uint32_t user = 0; user < 4; ++user) {
+    CAPTURE(user);
+    ChordFixture f; f.user = user; f.pad->device_count = 4; f.pad->event_device = user;
+    REQUIRE(rex::cvar::SetFlagByName("guide_chord_ms", "150"));
+    REQUIRE(rex::cvar::SetFlagByName("guide_chord_users", "15"));
+    const auto poll = [&] { return rex::kernel::xam::PollGuideButton(user); };
+    CHECK_FALSE(poll()); // connected and neutral
+    f.pad->held = X_INPUT_GAMEPAD_START; f.pad->keys = {{0x5814, 1}};
+    CHECK(f.Title() == 4306);
+    f.pad->connected = false;
+    CHECK(f.Title() == 1167);
+    f.pad->connected = true; f.pad->identity += 4;
+    f.pad->held = 0; f.pad->keys.clear(); f.pad->next = 0;
+    CHECK(f.Title() == 4306); CHECK_FALSE(poll());
+    for (bool dedicated : {false, true}) {
+      CAPTURE(dedicated);
+      const uint16_t controls = dedicated ? 0 : X_INPUT_GAMEPAD_START | X_INPUT_GAMEPAD_BACK;
+      f.pad->held = X_INPUT_GAMEPAD_GUIDE | controls;
+      f.pad->keys.clear(); f.pad->next = 0;
+      if (!dedicated) f.pad->keys = {{0x5814, 1}, {0x5815, 1}};
+      REQUIRE(poll());
+      REQUIRE(f.xam->RegisterSystemApp({0x1000, 0xFF, 0x90105000, 0}) == 0);
+      REQUIRE(f.xam->BeginSystemUi(0x1000, 0xFF, user));
+      REQUIRE(f.xam->EnableSystemUiInput(user, true));
+      REQUIRE(f.xam->SetSystemUiVisible(0x1000));
+      // Holding GUIDE must not steal a subsequent, deliberate A.
+      f.pad->held |= X_INPUT_GAMEPAD_A;
+      f.pad->keys.push_back({0x5800, 1});
+      CHECK_FALSE(poll());
+      REQUIRE(f.Hud() == 0); CHECK(f.stroke()->virtual_key == 0x5800);
+      f.pad->held = 0; CHECK_FALSE(poll());
+      if (!dedicated) { f.pad->keys.push_back({0x5814, 2}); f.pad->keys.push_back({0x5815, 2}); }
+      f.pad->keys.push_back({0x5800, 2});
+      REQUIRE(f.Hud() == 0); CHECK(f.stroke()->virtual_key == 0x5800);
+      // Disconnect with a command waiting in the chord window.
+      f.pad->held = X_INPUT_GAMEPAD_BACK; f.pad->keys.push_back({0x5815, 1});
+      CHECK(f.Hud() == 4306);
+      f.pad->connected = false;
+      CHECK_FALSE(poll()); CHECK(f.Hud() == 1167);
+      f.pad->connected = true; f.pad->identity += 4;
+      f.pad->held = X_INPUT_GAMEPAD_GUIDE | controls;
+      f.pad->keys = dedicated ? std::vector<std::pair<uint16_t,uint16_t>>{} :
+          std::vector<std::pair<uint16_t,uint16_t>>{{0x5814, 1}, {0x5815, 1}};
+      f.pad->next = 0;
+      CHECK_FALSE(poll()); // held while connecting is not a new Guide press
+      CHECK(f.Hud() == 4306);
+      f.pad->held = 0; CHECK_FALSE(poll());
+      if (!dedicated) { f.pad->keys.push_back({0x5814, 2}); f.pad->keys.push_back({0x5815, 2}); }
+      CHECK(f.Hud() == 4306);
+      f.pad->held = X_INPUT_GAMEPAD_GUIDE;
+      REQUIRE(poll()); // released then pressed: close exactly once
+      f.Close();
+      CHECK_FALSE(poll());
+      f.pad->held = 0; CHECK_FALSE(poll()); CHECK(f.State() == 0);
+      f.pad->keys.push_back({0x5800, 1});
+      REQUIRE(f.Title() == 0); CHECK(f.stroke()->virtual_key == 0x5800);
+      f.pad->keys.push_back({0x5800, 2}); REQUIRE(f.Title() == 0);
+    }
+  }
+}
+
+TEST_CASE("Released opening controls without queued UP do not poison the next press", "[sdk][guide-opening][input-p0]") {
+  using namespace rex::input;
+  ChordFixture f;
+  f.pad->held = X_INPUT_GAMEPAD_GUIDE | X_INPUT_GAMEPAD_START | X_INPUT_GAMEPAD_BACK;
+  f.Open();
+  // SDL generates transitions on demand; a gesture released before the first
+  // query has neither a DOWN nor an UP in its queue.
+  f.pad->held = 0;
+  REQUIRE(f.Hud() == 4306);
+  for (auto [button, key] : {std::pair{X_INPUT_GAMEPAD_START, 0x5814},
+                           std::pair{X_INPUT_GAMEPAD_BACK, 0x5815},
+                           std::pair{X_INPUT_GAMEPAD_A, 0x5800}}) {
+    f.pad->held = button; f.pad->keys.push_back({uint16_t(key), 1});
+    REQUIRE(f.Hud() == 0); CHECK(f.stroke()->virtual_key == key);
+    f.pad->held = 0; f.pad->keys.push_back({uint16_t(key), 2});
+    REQUIRE(f.Hud() == 0); CHECK(f.stroke()->virtual_key == key);
+  }
+  f.Close();
+  // No title poll between closing and this new physical press.
+  f.pad->held = X_INPUT_GAMEPAD_A; f.pad->keys.push_back({0x5800, 1});
+  CHECK(f.State() == X_INPUT_GAMEPAD_A);
+  REQUIRE(f.Title() == 0); CHECK(f.stroke()->virtual_key == 0x5800);
 }

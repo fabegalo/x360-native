@@ -5,6 +5,19 @@ Este arquivo resume o estado atual; os relatórios vinculados preservam datas,
 falhas iniciais, hashes, comandos e limites de cada validação. Resultados de uma
 etapa histórica não certificam automaticamente o build atual nem outros títulos.
 
+Entrada P0 (19/10): reproduzido acesso inválido `0xC0000005` na enumeração
+concorrente do InputSystem. Patches 0103–0105 serializam hotplug, retiram callbacks
+SDL com segurança e vinculam o gesto Guide à conexão e às transições da UI.
+START recebido pelos originais também significa Confirmar: captura antes de
+carregar o Guide e no fechamento impede a entrega tardia do gesto. As dashboards
+voltam a usar a janela de 150 ms nos quatro usuários, preservando configuração
+explícita; SDK permanece opt-in. Testes técnicos não substituem o aceite físico,
+que continua pendente. Passaram 935 asserções de entrada/UI, sondas de hotplug e
+Guide original 1888, isolamento e recibos Release novos das duas dashboards.
+O encerramento observado na 17559 e o crash de
+createprofile na 1888 têm evidências distintas.
+[Diagnóstico, validação e roteiro manual](docs/reports/controller-reconnect-guide-2026-10-19.md).
+
 Biblioteca do launcher (19/10): removida a associação automática entre receitas
 de compatibilidade/builds locais e jogos adicionados. Todos os jogos passam pelo
 mesmo registro de importação e remoção; Castle/Motocross/Forza não são itens fixos.
@@ -251,8 +264,8 @@ pela My Games e gameplay continuam pendentes. [Evidência histórica](docs/repor
 
 Windows x64/D3D12 é o ambiente demonstrado. Linux, macOS, ARM64 e Windows limpo
 continuam sem aceite funcional completo. ReXGlue v0.10.0 permanece fixado em
-`f5337cdc947ff6d4c4196737e2c807a48f2a1fc2`, LLVM 22.1.8, **101 patches ativos**
-no [lock](deps.lock.json); numeração até 0102, com 0073 retirado.
+`f5337cdc947ff6d4c4196737e2c807a48f2a1fc2`, LLVM 22.1.8, **104 patches ativos**
+no [lock](deps.lock.json); numeração até 0105, com 0073 retirado.
 O submódulo modificado pelos patches/materialização do libmspack é esperado.
 Nunca substituir módulos ou fontes originais entre versões de dashboard.
 

@@ -1,0 +1,275 @@
+diff --git a/include/rex/input/sdl/sdl_input_driver.h b/include/rex/input/sdl/sdl_input_driver.h
+--- a/include/rex/input/sdl/sdl_input_driver.h
++++ b/include/rex/input/sdl/sdl_input_driver.h
+@@ -60,6 +60,7 @@
+ 
+   struct ControllerState {
+     SDL_Gamepad* sdl;
++    SDL_JoystickID instance_id;
+     X_INPUT_CAPABILITIES caps;
+     X_INPUT_STATE state;
+     bool state_changed;
+@@ -74,6 +75,8 @@
+   void OnLostFocus(rex::ui::UISetupEvent& e) override;
+   void OnGotFocus(rex::ui::UISetupEvent& e) override;
+ 
++  static bool SDLCALL EventWatch(void* userdata, SDL_Event* event);
++  void DetachFromWindow();
+   void HandleEvent(const SDL_Event& event);
+   std::unique_lock<std::mutex> DrainAndLock();
+   void ProcessEventLocked(const SDL_Event& event);
+@@ -91,10 +94,12 @@
+   void QueueControllerUpdate();
+ 
+   rex::ui::Window* attached_window_ = nullptr;
+-  bool sdl_events_initialized_;
+-  bool SDL_Gamepad_initialized_;
++  std::atomic<bool> sdl_events_initialized_;
++  std::atomic<bool> SDL_Gamepad_initialized_;
+   std::atomic<int> sdl_events_unflushed_;
+-  std::atomic<bool> sdl_pumpevents_queued_;
++  struct PumpState { std::atomic<bool> queued{false}, active{true}; };
++  std::shared_ptr<PumpState> pump_state_ = std::make_shared<PumpState>();
++  std::mutex lifecycle_mutex_;
+   // Appended in connection order, never re-sorted, and unbounded: the
+   // assignment decides how many the guest sees.
+   std::vector<ControllerState> controllers_;
+diff --git a/src/input/sdl/sdl_input_driver.cpp b/src/input/sdl/sdl_input_driver.cpp
+--- a/src/input/sdl/sdl_input_driver.cpp
++++ b/src/input/sdl/sdl_input_driver.cpp
+@@ -37,11 +37,10 @@
+       sdl_events_initialized_(false),
+       SDL_Gamepad_initialized_(false),
+       sdl_events_unflushed_(0),
+-      sdl_pumpevents_queued_(false),
+       controllers_(),
+       controllers_mutex_() {}
+ 
+-SDLInputDriver::~SDLInputDriver() {}
++SDLInputDriver::~SDLInputDriver() { DetachFromWindow(); }
+ 
+ X_STATUS SDLInputDriver::Setup() {
+   if (!TestSDLVersion()) {
+@@ -53,7 +52,11 @@
+ 
+ void SDLInputDriver::OnWindowAvailable(rex::ui::Window* window) {
+   if (window && !attached_window_) {
+-    attached_window_ = window;
++    {
++      std::lock_guard lock(lifecycle_mutex_);
++      attached_window_ = window;
++      pump_state_ = std::make_shared<PumpState>();
++    }
+     window->AddListener(this);
+     window->app_context().CallInUIThreadSynchronous([this]() {
+       // Initialize SDL events subsystem
+@@ -66,27 +69,7 @@
+ 
+       // With an event watch we will always get notified, even if the event queue
+       // is full, which can happen if another subsystem does not clear its events.
+-      SDL_AddEventWatch(
+-          [](void* userdata, SDL_Event* event) -> bool {
+-            if (!userdata || !event) {
+-              assert_always();
+-              return false;
+-            }
+-
+-            const auto type = event->type;
+-            if (type < SDL_EVENT_JOYSTICK_AXIS_MOTION || type >= SDL_EVENT_FINGER_DOWN) {
+-              return false;
+-            }
+-
+-            // If another part of rex uses another SDL subsystem that generates
+-            // events, this may seem like a bad idea. They will however not
+-            // subscribe to controller events so we get away with that.
+-            const auto driver = static_cast<SDLInputDriver*>(userdata);
+-            driver->HandleEvent(*event);
+-
+-            return false;
+-          },
+-          this);
++      SDL_AddEventWatch(EventWatch, this);
+ 
+       // Initialize game controller subsystem
+       if (!SDL_InitSubSystem(SDL_INIT_GAMEPAD)) {
+@@ -117,28 +100,38 @@
+   }
+ }
+ 
+-void SDLInputDriver::OnClosing(rex::ui::UIEvent&) {
+-  if (attached_window_) {
+-    attached_window_->RemoveListener(this);
+-    if (sdl_pumpevents_queued_) {
+-      attached_window_->app_context().CallInUIThreadSynchronous(
+-          [this]() { attached_window_->app_context().ExecutePendingFunctionsFromUIThread(); });
+-    }
+-    for (auto& controller : controllers_) {
+-      SDL_CloseGamepad(controller.sdl);
+-    }
++bool SDLCALL SDLInputDriver::EventWatch(void* userdata, SDL_Event* event) {
++  if (userdata && event && event->type >= SDL_EVENT_JOYSTICK_AXIS_MOTION &&
++      event->type < SDL_EVENT_FINGER_DOWN)
++    static_cast<SDLInputDriver*>(userdata)->HandleEvent(*event);
++  return false;
++}
++
++void SDLInputDriver::DetachFromWindow() {
++  rex::ui::Window* window = nullptr;
++  {
++    std::lock_guard lock(lifecycle_mutex_);
++    window = attached_window_;
++    attached_window_ = nullptr;
++    pump_state_->active = false;
++  }
++  if (!window) return;
++  window->app_context().CallInUIThreadSynchronous([this, window] {
++    window->RemoveListener(this);
++    // RemoveEventWatch waits for concurrent dispatches. Do this before taking
++    // the controller lock: an SDL caller can hold its joystick/watch locks.
++    if (sdl_events_initialized_) SDL_RemoveEventWatch(EventWatch, this);
++    std::lock_guard guard(controllers_mutex_);
++    for (auto& controller : controllers_) SDL_CloseGamepad(controller.sdl);
+     controllers_.clear();
+-    if (SDL_Gamepad_initialized_) {
+-      SDL_QuitSubSystem(SDL_INIT_GAMEPAD);
+-      SDL_Gamepad_initialized_ = false;
+-    }
+-    if (sdl_events_initialized_) {
+-      SDL_QuitSubSystem(SDL_INIT_EVENTS);
+-      sdl_events_initialized_ = false;
+-    }
+-    attached_window_ = nullptr;
+-  }
+-}
++    if (SDL_Gamepad_initialized_.exchange(false)) SDL_QuitSubSystem(SDL_INIT_GAMEPAD);
++    if (sdl_events_initialized_.exchange(false)) SDL_QuitSubSystem(SDL_INIT_EVENTS);
++    std::lock_guard events_guard(event_queue_mutex_);
++    pending_events_.clear();
++  });
++}
++
++void SDLInputDriver::OnClosing(rex::ui::UIEvent&) { DetachFromWindow(); }
+ 
+ void SDLInputDriver::OnLostFocus(rex::ui::UISetupEvent&) {}
+ 
+@@ -168,7 +161,7 @@
+ 
+ X_RESULT SDLInputDriver::GetDeviceCapabilities(DeviceId id, uint32_t flags,
+                                                X_INPUT_CAPABILITIES* out_caps) {
+-  assert(sdl_events_initialized_ && SDL_Gamepad_initialized_);
++  if (!sdl_events_initialized_ || !SDL_Gamepad_initialized_) return X_ERROR_DEVICE_NOT_CONNECTED;
+   if (!out_caps) {
+     return X_ERROR_BAD_ARGUMENTS;
+   }
+@@ -192,7 +185,7 @@
+ }
+ 
+ X_RESULT SDLInputDriver::GetDeviceState(DeviceId id, X_INPUT_STATE* out_state) {
+-  assert(sdl_events_initialized_ && SDL_Gamepad_initialized_);
++  if (!sdl_events_initialized_ || !SDL_Gamepad_initialized_) return X_ERROR_DEVICE_NOT_CONNECTED;
+ 
+   auto is_active = this->is_active();
+ 
+@@ -225,7 +218,7 @@
+ }
+ 
+ X_RESULT SDLInputDriver::SetDeviceVibration(DeviceId id, X_INPUT_VIBRATION* vibration) {
+-  assert(sdl_events_initialized_ && SDL_Gamepad_initialized_);
++  if (!sdl_events_initialized_ || !SDL_Gamepad_initialized_) return X_ERROR_DEVICE_NOT_CONNECTED;
+ 
+   QueueControllerUpdate();
+ 
+@@ -249,7 +242,7 @@
+                                             X_INPUT_KEYSTROKE* out_keystroke) {
+   // TODO(JoelLinn): Figure out the flags
+   // https://github.com/evilC/UCR/blob/0489929e2a8e39caa3484c67f3993d3fba39e46f/Libraries/XInput.ahk#L85-L98
+-  assert(sdl_events_initialized_ && SDL_Gamepad_initialized_);
++  if (!sdl_events_initialized_ || !SDL_Gamepad_initialized_) return X_ERROR_DEVICE_NOT_CONNECTED;
+   if (!out_keystroke) {
+     return X_ERROR_BAD_ARGUMENTS;
+   }
+@@ -320,6 +313,8 @@
+                 : uint64_t(0);
+   KeystrokeState& last = controller->keystroke;
+ 
++  if (!(curr_butts & (uint64_t(1) << last.repeat_butt_idx)))
++    last.repeat_state = RepeatState::Idle;
+   // Handle repeating
+   auto guest_now = rex::chrono::Clock::QueryGuestUptimeMillis();
+   static_assert(HID_SDL_REPEAT_DELAY >= HID_SDL_REPEAT_RATE);
+@@ -408,12 +403,14 @@
+ }
+ 
+ std::unique_lock<std::mutex> SDLInputDriver::DrainAndLock() {
++  // Serialize both detaching a batch and applying it. Swapping before this
++  // lock allowed later REMOVED events to overtake an older ADDED batch.
++  std::unique_lock<std::mutex> guard(controllers_mutex_);
+   std::vector<SDL_Event> events;
+   {
+     std::lock_guard<std::mutex> guard(event_queue_mutex_);
+     events.swap(pending_events_);
+   }
+-  std::unique_lock<std::mutex> guard(controllers_mutex_);
+   for (const auto& event : events) {
+     ProcessEventLocked(event);
+   }
+@@ -441,9 +438,11 @@
+ }
+ 
+ void SDLInputDriver::OnControllerDeviceAddedLocked(const SDL_Event& event) {
++  if (GetControllerIndexFromInstanceID(event.gdevice.which)) return;
+   const auto controller = SDL_OpenGamepad(event.gdevice.which);
+   if (!controller) {
+-    assert_always();
++    // Hotplug notifications are asynchronous: removed before the guest poll.
++    REXLOG_DEBUG("SDL: ignored expired gamepad arrival {}", event.gdevice.which);
+     return;
+   }
+   REXLOG_INFO(
+@@ -462,6 +461,7 @@
+   // order and leaves non-XInput pads unnumbered.
+   ControllerState state = {};
+   state.sdl = controller;
++  state.instance_id = event.gdevice.which;
+   state.id = AllocateDeviceId();
+   state.state_changed = true;  // XInput starts with packet_number = 1
+   UpdateXCapabilities(state);
+@@ -591,12 +591,7 @@
+ std::optional<size_t> SDLInputDriver::GetControllerIndexFromInstanceID(SDL_JoystickID instance_id) {
+   // Loop through our controllers and try to match the given ID.
+   for (size_t i = 0; i < controllers_.size(); i++) {
+-    auto controller = controllers_.at(i).sdl;
+-    auto joystick = SDL_GetGamepadJoystick(controller);
+-    assert(joystick);
+-    auto joy_instance_id = SDL_GetJoystickID(joystick);
+-    assert(joy_instance_id >= 0);
+-    if (joy_instance_id == instance_id) {
++    if (controllers_[i].instance_id == instance_id) {
+       return i;
+     }
+   }
+@@ -669,15 +664,15 @@
+ }
+ 
+ void SDLInputDriver::QueueControllerUpdate() {
+-  // Pump SDL events to ensure controller state is up to date.
+-  bool is_queued = false;
+-  sdl_pumpevents_queued_.compare_exchange_strong(is_queued, true);
+-  if (!is_queued) {
+-    attached_window_->app_context().CallInUIThread([this]() {
+-      SDL_PumpEvents();
+-      sdl_pumpevents_queued_ = false;
+-    });
+-  }
++  std::lock_guard lock(lifecycle_mutex_);
++  if (!attached_window_ || !pump_state_->active || pump_state_->queued.exchange(true)) return;
++  auto pump = pump_state_;
++  // Queued work owns no driver/window pointer. A shutdown can retire the
++  // driver before the UI thread reaches this callback without a use-after-free.
++  if (!attached_window_->app_context().CallInUIThread([pump]() {
++        if (pump->active) SDL_PumpEvents();
++        pump->queued = false;
++      })) pump->queued = false;
+ }
+ 
+ // Check if the analog inputs exceed their thresholds to become a button press
