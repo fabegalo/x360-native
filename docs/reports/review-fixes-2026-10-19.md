@@ -9,6 +9,11 @@ Revisão de implementação corrigida: `555b5bfd88f425f9fd5155425d14cdca211dc668
 Commits locais separados: `6248a83` (entrada), `48f53df`/`be475a1`
 (distribuição), `dbc78b7`/`d4077b3` (atualizador), `555b5bf` (precedência da
 seleção explícita de chaves). Sem push, tag, Release ou reescrita do histórico.
+O fixture final de exportação está em `008c08d`. Logs e scripts locais desta
+rodada ficam em `.local/evidence/review-fixes-20261019/`. O
+[registro final](../../.local/evidence/review-fixes-20261019/final-state.json),
+gravado após o commit deste relatório, contém o HEAD final, hashes dos frontends,
+recibos e identidade do candidato; seu aceite manual continua pendente.
 
 ## Entrada — correção e evidência nova
 
@@ -149,6 +154,33 @@ completos de executáveis/recibos no [registro local](../../.local/evidence/revi
 | Charlie (`g0a4c6253b34297dc`) | 4005 | 34 | `8a52d8cca0d40f335e5fd8a825aa40d4c7463c6aaefdf00529d6e65196b98245` |
 | `4D530A81` (`g6ad318fe6b4d245a`) | 3449 | 3 | `45cbd25b447c56bf5bbe21443d91e445b94348ce14ffd6d67eeb9786d93fa750` |
 
+### Candidato local final
+
+`0.56.6`, Windows x64 Release, origem Git
+`008c08d2e86dccd82e5701215b616ae85a1eaed8`. O commit posterior fecha somente
+este resultado documental; não modifica o código do aplicativo ou dos testes.
+
+Arquivo: `.local/packages/review-fixes-20261019-final/x360-native-0.56.6-windows-x64.zip`
+(8.786.396 bytes). SHA-256:
+`9d43a6b07ca0f4b91d15f2cb991109a3368a2b52e79c7bb2c8fd89cb5d0afbb8`.
+
+Build limpo aprovado; `desktop.catalog` e `desktop.update-recovery` aprovados
+no próprio build de distribuição. Gate de conteúdo/licenças aprovado para
+89 componentes e três executáveis. ZIP extraído em pasta nova, SHA do sidecar e
+todos os índices, conteúdo, licenças e comandos Release conferidos. As três
+injeções sintéticas foram repetidas sobre cópias desse candidato final, com
+aprovação da base e rejeição do arquivo injetado em cada formato.
+Logs: `package-candidate-final.txt`, `candidate-final-zip-gate.txt` e
+`constant-export-final.txt`; metadados em `candidate-result.json`.
+
+O primeiro candidato ficou preservado como evidência, substituído por este.
+Nenhum pacote foi publicado nem instalado como atualização real. Windows limpo,
+reinicialização elétrica física e execução visual do novo pacote não foram
+testados. A recuperação persistente cobre transações com o diário desta
+implementação, não transações antigas que nunca gravaram esse diário.
+
+### Roteiro manual
+
 Roteiro reservado ao mantenedor, nos novos produtos 1888 e 17559:
 
 1. Abrir cada dashboard e conferir intro, áudio e chegada à interface original.
@@ -167,6 +199,9 @@ sintéticos não certificam a experiência gráfica, sonora ou o controle físic
 
 ### Pendências desta tarefa
 
-Pacote candidato e aceite manual ainda em andamento. Evidências históricas do
-relatório de Guide não são recertificação desta tarefa. Encerramento organizado
-continua distinto de reboot fiel do console.
+Correções, regressões focadas, sete recibos Release e candidato local concluídos.
+Falta o teste manual da 1888 e da 17559 e o aceite explícito do mantenedor;
+portanto o critério completo da tarefa ainda não foi atingido. Push continua
+pendente desse aceite. Evidências históricas do relatório de Guide não são
+recertificação desta tarefa. Encerramento organizado continua distinto de
+reboot fiel do console.

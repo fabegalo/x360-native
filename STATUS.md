@@ -12,8 +12,9 @@ persistente, recuperação independente e canais estável/preview separados.
 Regressões Release novas aprovadas, incluindo 24.576 verificações dos aliases CR
 regenerados e 1.263 asserções do atualizador. 1888/17559/Motocross, Castle, Forza,
 Charlie e o AOT 4D530A81 receberam recibos Release novos com todos os hashes
-conferidos; frontend do atalho recompilado. Pacote e aceite manual ainda em
-fechamento. Nenhuma dashboard/jogo foi executada nesta tarefa.
+conferidos; frontend do atalho recompilado. Candidato local 0.56.6, build limpo,
+gates de conteúdo/licenças e ZIP extraído aprovados. Aceite manual da 1888/17559
+pendente; sem push/publicação. Nenhuma dashboard/jogo foi executada nesta tarefa.
 [Evidências e pendências](docs/reports/review-fixes-2026-10-19.md).
 
 Dashboards 1888/17559 — revisão pós-commit anterior (19/10): corrigidos LB/RB trocados no
