@@ -1,20 +1,18 @@
 diff --git a/src/kernel/xam/xam_misc.cpp b/src/kernel/xam/xam_misc.cpp
-index 2e47909..3238346 100644
 --- a/src/kernel/xam/xam_misc.cpp
 +++ b/src/kernel/xam/xam_misc.cpp
-@@ -212,7 +212,15 @@ REX_EXPORT_STUB(__imp__XAutomationpInputXenonButton);
+@@ -212,7 +212,14 @@ REX_EXPORT_STUB(__imp__XAutomationpInputXenonButton);
  REX_EXPORT_STUB(__imp__XAutomationpUnbindController);
  REX_EXPORT_STUB(__imp__XCustomBroadcastActionEvent);
  REX_EXPORT_STUB(__imp__XCustomBroadcastGamercardEvent);
 -REX_EXPORT_STUB(__imp__XCustomGetBannerImage);
 +// No custom banner provider is implemented. Return an explicit failed HRESULT,
 +// never an unchanged output-pointer register interpreted as successful image data.
-+// The original caller owns the fallback artwork and does not consume the output
-+// after failure. Clear only the single output pointer when one was supplied.
++// The only known caller (Retail 1888 HUD 913E31E8) passes one stack word in r3
++// and reads it only when r3 >= 0, keeping its own fallback artwork otherwise.
++// Guest memory is not written: other callers' argument layouts are unverified.
 +extern "C" REX_FUNC(__imp__XCustomGetBannerImage) {
-+  if (!ctx.r3.u32) { ctx.r3.u64 = 0x80070057u; return; }
-+  rex::memory::store_and_swap<uint32_t>(base + ctx.r3.u32, 0);
-+  ctx.r3.u64 = 0x80004001u;
++  ctx.r3.u64 = ctx.r3.u32 ? 0x80004001u : 0x80070057u;
 +}
  REX_EXPORT_STUB(__imp__XCustomGetCurrentGamercard);
  REX_EXPORT_STUB(__imp__XCustomGetLastActionPress);

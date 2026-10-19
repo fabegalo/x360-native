@@ -1,16 +1,18 @@
 diff --git a/src/kernel/xam/xam_info.cpp b/src/kernel/xam/xam_info.cpp
-index d1d8228..a9e81e8 100644
 --- a/src/kernel/xam/xam_info.cpp
 +++ b/src/kernel/xam/xam_info.cpp
-@@ -362,6 +362,22 @@ u32 XamAllocEx_entry(u32 tag, u32 flags, u32 size, mapped_u32 out_ptr) {
+@@ -362,6 +362,25 @@ u32 XamAllocEx_entry(u32 tag, u32 flags, u32 size, mapped_u32 out_ptr) {
    return ptr ? 0u : 0x8007000Eu;
  }
  
 +// Original XAM 1888 818E8770 returns usable byte size in r3 (RtlSizeHeap
 +// for virtual storage, MmQueryAllocationSize for physical storage). Query the
 +// real guest allocation metadata used by the HLE allocators. SystemHeap uses
-+// whole committed pages, so all of allocation_size is usable storage. No
-+// additional tracking map or per-allocation instrumentation is necessary.
++// whole committed, zero-filled pages, so all of allocation_size is usable
++// storage; it can exceed the requested size. The known callers (1888/17559
++// HUD, Sign-in, Create Profile, Gamer Profile and XUI 818E88F8) are realloc
++// helpers that copy min(this size, new size) into a fresh allocation, which
++// stays inside committed storage. No per-allocation tracking map is kept.
 +u32 XamAllocSize_entry(u32 pointer) {
 +  if (!pointer) return 0;
 +  auto* heap = REX_KERNEL_MEMORY()->LookupHeap(pointer);
@@ -25,7 +27,7 @@ index d1d8228..a9e81e8 100644
  u32 XamFree_entry(mapped_u32 ptr) {
    REX_KERNEL_MEMORY()->SystemHeapFree(ptr.guest_address());
  
-@@ -433,3 +449,5 @@ REX_EXPORT(__imp__XamAllocEx, rex::kernel::xam::XamAllocEx_entry)
+@@ -433,3 +452,5 @@ REX_EXPORT(__imp__XamAllocEx, rex::kernel::xam::XamAllocEx_entry)
  
  REX_EXPORT(__imp__XMemAlloc, rex::kernel::xam::XMemAlloc_entry)
  REX_EXPORT(__imp__XMemFree, rex::kernel::xam::XMemFree_entry)

@@ -20,10 +20,31 @@ index 1a25002..621d06a 100644
      return true;
    }
 diff --git a/src/kernel/xam/xam_input.cpp b/src/kernel/xam/xam_input.cpp
-index 7bb662e..293f5c0 100644
 --- a/src/kernel/xam/xam_input.cpp
 +++ b/src/kernel/xam/xam_input.cpp
-@@ -48,6 +48,7 @@ struct SystemUiLatch {
+@@ -9,8 +9,10 @@
+  * @modified    Tom Clay, 2026 - Adapted for ReXGlue runtime
+  */
+ 
++#include <chrono>
+ #include <mutex>
+ 
++#include <rex/cvar.h>
+ #include <rex/input/input.h>
+ #include <rex/input/input_system.h>
+ #include <rex/kernel/xam/private.h>
+@@ -24,6 +26,10 @@
+ 
+ #pragma GCC diagnostic ignored "-Wunused-parameter"
+ 
++REXCVAR_DEFINE_INT32(guide_chord_ms, 0, "Input",
++                     "Hold a BACK/START key-down up to N ms for a controller that reports "
++                     "BACK+START as Guide; 0 disables");
++
+ namespace rex {
+ namespace kernel {
+ namespace xam {
+@@ -48,6 +54,7 @@ struct SystemUiLatch {
    uint16_t buttons = 0;   // held through the UI: hidden until released
    bool left_trigger = false, right_trigger = false;
    uint32_t keys = 0;      // pad keystrokes whose key-up still belongs to the UI
@@ -31,29 +52,39 @@ index 7bb662e..293f5c0 100644
  };
  std::mutex system_ui_latch_mutex;
  SystemUiLatch system_ui_latches[4];
-@@ -71,6 +72,32 @@ uint32_t PadKeyBit(uint16_t virtual_key) {
+@@ -71,6 +78,42 @@ uint32_t PadKeyBit(uint16_t virtual_key) {
    return virtual_key >= 0x5800 && virtual_key <= 0x5817 ? 1u << (virtual_key - 0x5800) : 0;
  }
  
++// Pad keystroke bits of the controls held in a controller state. Index i is
++// virtual key 0x5800 + i; note RSHOULDER (0x5804) precedes LSHOULDER (0x5805).
++uint32_t PadKeysFromState(const X_INPUT_STATE& state) {
++  using namespace rex::input;
++  constexpr uint16_t buttons[24] = {
++      X_INPUT_GAMEPAD_A, X_INPUT_GAMEPAD_B, X_INPUT_GAMEPAD_X, X_INPUT_GAMEPAD_Y,
++      X_INPUT_GAMEPAD_RIGHT_SHOULDER, X_INPUT_GAMEPAD_LEFT_SHOULDER, 0, 0,
++      0, 0, 0, 0, 0, 0, 0, 0,
++      X_INPUT_GAMEPAD_DPAD_UP, X_INPUT_GAMEPAD_DPAD_DOWN, X_INPUT_GAMEPAD_DPAD_LEFT,
++      X_INPUT_GAMEPAD_DPAD_RIGHT, X_INPUT_GAMEPAD_START, X_INPUT_GAMEPAD_BACK,
++      X_INPUT_GAMEPAD_LEFT_THUMB, X_INPUT_GAMEPAD_RIGHT_THUMB};
++  uint32_t keys = 0;
++  for (uint32_t bit = 0; bit < 24; ++bit)
++    if (uint16_t(state.gamepad.buttons) & buttons[bit]) keys |= 1u << bit;
++  if (state.gamepad.left_trigger) keys |= PadKeyBit(0x5806);
++  if (state.gamepad.right_trigger) keys |= PadKeyBit(0x5807);
++  return keys;
++}
++
 +// Ownership changes once per application, not once per input poll. Capture
 +// only the controls actually held at that boundary; never drain the queue.
 +// New controls remain available even while an initiating button is held.
 +void CaptureSystemUiOpeningInput(uint32_t owner) {
-+  constexpr uint16_t buttons[24] = {
-+      0x1000, 0x2000, 0x4000, 0x8000, 0x0100, 0x0200, 0, 0,
-+      0, 0, 0, 0, 0, 0, 0, 0,
-+      0x0001, 0x0002, 0x0004, 0x0008, 0x0010, 0x0020, 0x0040, 0x0080};
 +  auto* backend = input_system();
 +  for (uint32_t user = 0; user < 4; ++user) {
 +    if (owner != 0xFF && owner != user) continue;
 +    X_INPUT_STATE state{};
 +    uint32_t keys = 0;
-+    if (backend && backend->GetState(user, &state) == X_ERROR_SUCCESS) {
-+      for (uint32_t bit = 0; bit < 24; ++bit)
-+        if (uint16_t(state.gamepad.buttons) & buttons[bit]) keys |= 1u << bit;
-+      if (state.gamepad.left_trigger) keys |= PadKeyBit(0x5806);
-+      if (state.gamepad.right_trigger) keys |= PadKeyBit(0x5807);
-+    }
++    if (backend && backend->GetState(user, &state) == X_ERROR_SUCCESS) keys = PadKeysFromState(state);
 +    std::lock_guard lock(system_ui_latch_mutex);
 +    auto& latch = system_ui_latches[user];
 +    latch.opening_keys = keys;
@@ -64,9 +95,68 @@ index 7bb662e..293f5c0 100644
  // First title query after a system UI: latch everything still held.
  void TakeSystemUiLatch(SystemUiLatch& latch, const X_INPUT_STATE& held) {
    if (!latch.armed) return;
-@@ -103,17 +130,31 @@ void FilterTitleState(uint32_t user, X_INPUT_STATE* state) {
+@@ -102,18 +145,90 @@ void FilterTitleState(uint32_t user, X_INPUT_STATE* state) {
+   }
  }
  
++// Some controllers report the Guide only as BACK+START: GUIDE appears with the
++// second button, after the first already produced a key-down that the
++// foreground title or open HUD would act on. With guide_chord_ms > 0, that
++// first BACK/START key-down waits until GUIDE appears (the chord then belongs
++// to the system UI until released), the key is released, or the window ends.
++// Later keystrokes stay queued behind it, so order is preserved.
++struct GuideChord {
++  bool pending = false;
++  X_INPUT_KEYSTROKE stroke{};
++  std::chrono::steady_clock::time_point since{};
++};
++std::mutex guide_chord_mutex;  // serializes fetches through the chord stage
++GuideChord guide_chords[4];
++
++uint16_t ChordButton(uint16_t virtual_key) {
++  return virtual_key == 0x5814 ? uint16_t(rex::input::X_INPUT_GAMEPAD_START)
++       : virtual_key == 0x5815 ? uint16_t(rex::input::X_INPUT_GAMEPAD_BACK) : 0;
++}
++
++uint32_t FetchKeystroke(rex::input::InputSystem* backend, uint32_t user, uint32_t flags,
++                        X_INPUT_KEYSTROKE* stroke) {
++  const int32_t window_ms = REXCVAR_GET(guide_chord_ms);
++  if (window_ms <= 0 || user >= 4) return backend->GetKeystroke(user, flags, stroke);
++  std::lock_guard chord_lock(guide_chord_mutex);
++  auto& chord = guide_chords[user];
++  if (!chord.pending) {
++    const auto result = backend->GetKeystroke(user, flags, stroke);
++    const uint16_t key_flags = uint16_t(stroke->flags);
++    if (result != X_ERROR_SUCCESS || !ChordButton(uint16_t(stroke->virtual_key)) ||
++        !(key_flags & rex::input::X_INPUT_KEYSTROKE_KEYDOWN) ||
++        (key_flags & (rex::input::X_INPUT_KEYSTROKE_KEYUP | rex::input::X_INPUT_KEYSTROKE_REPEAT)))
++      return result;
++    chord = {true, *stroke, std::chrono::steady_clock::now()};
++  }
++  X_INPUT_STATE held{};
++  const bool connected = backend->GetState(user, &held) == X_ERROR_SUCCESS;
++  const uint16_t buttons = connected ? uint16_t(held.gamepad.buttons) : 0;
++  if (buttons & rex::input::X_INPUT_GAMEPAD_GUIDE) {
++    // The chord is a Guide press: neither the title nor the HUD receives
++    // its controls. Their repeats and key-ups are dropped until release.
++    const uint32_t keys = PadKeysFromState(held) | PadKeyBit(uint16_t(chord.stroke.virtual_key));
++    chord.pending = false;
++    std::lock_guard lock(system_ui_latch_mutex);
++    auto& latch = system_ui_latches[user];
++    latch.keys |= keys;
++    latch.opening_keys |= keys;
++    latch.armed = true;
++    return X_ERROR_EMPTY;
++  }
++  const auto elapsed = std::chrono::steady_clock::now() - chord.since;
++  if ((buttons & ChordButton(uint16_t(chord.stroke.virtual_key))) &&
++      elapsed < std::chrono::milliseconds(window_ms))
++    return X_ERROR_EMPTY;
++  chord.pending = false;
++  *stroke = chord.stroke;
++  return X_ERROR_SUCCESS;
++}
++
  // The HUD received this key-down: its repeats and key-up belong to the UI.
 -void NoteSystemUiKeystroke(const X_INPUT_KEYSTROKE& stroke) {
 +bool NoteSystemUiKeystroke(const X_INPUT_KEYSTROKE& stroke) {
@@ -93,14 +183,34 @@ index 7bb662e..293f5c0 100644
 +                              X_INPUT_KEYSTROKE* stroke) {
 +  if (!backend) return X_ERROR_DEVICE_NOT_CONNECTED;
 +  for (;;) {
-+    const auto result = backend->GetKeystroke(user, 1, stroke);
++    const auto result = FetchKeystroke(backend, user, 1, stroke);
 +    if (result != X_ERROR_SUCCESS || !NoteSystemUiKeystroke(*stroke)) return result;
 +  }
 +}
  // Drops the remaining transitions of a key the system UI consumed.
  bool SystemUiOwnsKeystroke(uint32_t user, const X_INPUT_KEYSTROKE& stroke) {
    if (user >= 4) return false;
-@@ -340,8 +381,7 @@ extern "C" REX_FUNC(__imp__XamInputGetKeystrokeHud) {
+@@ -121,14 +236,17 @@ bool SystemUiOwnsKeystroke(uint32_t user, const X_INPUT_KEYSTROKE& stroke) {
+   auto& latch = system_ui_latches[user];
+   const uint32_t bit = PadKeyBit(uint16_t(stroke.virtual_key));
+   if (!bit || !(latch.keys & bit)) return false;
+-  if (uint16_t(stroke.flags) & rex::input::X_INPUT_KEYSTROKE_KEYUP) latch.keys &= ~bit;
++  if (uint16_t(stroke.flags) & rex::input::X_INPUT_KEYSTROKE_KEYUP) {
++    latch.keys &= ~bit;
++    latch.opening_keys &= ~bit;  // released: no longer part of a system UI gesture
++  }
+   return true;
+ }
+ 
+ uint32_t GetTitleKeystroke(rex::input::InputSystem* is, uint32_t user, uint32_t flags,
+                            X_INPUT_KEYSTROKE* keystroke) {
+   for (;;) {
+-    const auto result = is->GetKeystroke(user, flags, keystroke);
++    const auto result = FetchKeystroke(is, user, flags, keystroke);
+     if (result != X_ERROR_SUCCESS || !SystemUiOwnsKeystroke(keystroke->user_index, *keystroke))
+       return result;
+   }
+@@ -340,8 +458,7 @@ extern "C" REX_FUNC(__imp__XamInputGetKeystrokeHud) {
    }
    auto* stroke = reinterpret_cast<input::X_INPUT_KEYSTROKE*>(base + ctx.r4.u32);
    kernel::xam::ArmSystemUiLatch(ui.user);
@@ -110,7 +220,7 @@ index 7bb662e..293f5c0 100644
  }
  extern "C" REX_FUNC(__imp__XamInputGetKeystrokeHudEx) {
    using namespace rex;
-@@ -369,9 +409,9 @@ extern "C" REX_FUNC(__imp__XamInputGetKeystrokeHudEx) {
+@@ -369,9 +486,9 @@ extern "C" REX_FUNC(__imp__XamInputGetKeystrokeHudEx) {
    const uint32_t first = selected == 0xFF ? 0 : selected;
    const uint32_t end = selected == 0xFF ? 4 : selected + 1;
    for (uint32_t index = first; index < end; ++index) {

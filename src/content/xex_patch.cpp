@@ -137,12 +137,14 @@ Bytes ReadFile(const fs::path& p) {
   return Bytes((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
 }
 
-// AES-128-CBC with a zero IV and no padding. An incomplete block is invalid.
+// AES-128-CBC with a zero IV and no padding over whole 16-byte blocks; a tail is
+// left unchanged, as the SDK loader's aes_decrypt_buffer does. Authentication
+// comes from the block and page digests checked by the callers.
 Bytes AesCbcDecrypt(const Key& key, const uint8_t* data, size_t len) {
-  if (len % 16 || len > std::numeric_limits<ULONG>::max())
-    throw Error{"AES ciphertext size is not supported or is not block aligned"};
+  if (len > std::numeric_limits<ULONG>::max())
+    throw Error{"AES ciphertext size is not supported"};
   Bytes out(data, data + len);
-  const ULONG whole = ULONG(len);
+  const ULONG whole = ULONG(len & ~size_t(15));
   if (!whole) return out;
   BCRYPT_ALG_HANDLE alg = nullptr;
   BCRYPT_KEY_HANDLE k = nullptr;
@@ -491,10 +493,12 @@ int ApplyXexPatch(const fs::path& base_path, const fs::path& patch_path, const f
     Bytes image = b.image;
     const size_t work = std::max(image.size(), target_image_size);
     image.resize(work, 0);
-    if (uint64_t(img_src_off) + img_src_size > b.image.size() ||
-        uint64_t(img_dst_off) + img_src_size > work)
-      throw Error{"patch: image move outside the image"};
+    // As in the SDK loader, the source size only describes a move when the
+    // source offset is set; otherwise it just bounds the zeroed tail below.
     if (img_src_off) {
+      if (uint64_t(img_src_off) + img_src_size > b.image.size() ||
+          uint64_t(img_dst_off) + img_src_size > work)
+        throw Error{"patch: image move outside the image"};
       std::memmove(image.data() + img_dst_off, image.data() + img_src_off, img_src_size);
     }
     const uint64_t image_target_size = uint64_t(img_dst_off) + img_src_size;

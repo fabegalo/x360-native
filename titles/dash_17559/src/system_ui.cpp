@@ -13,6 +13,7 @@
 #include <rex/system/xthread.h>
 #include <rex/system/thread_state.h>
 #include <rex/chrono/clock.h>
+#include <array>
 #include <cstring>
 #include <functional>
 #include <memory>
@@ -167,24 +168,30 @@ void InstallSystemUi(rex::Runtime& runtime, std::string drive, std::string nativ
   // title. Poll its edge here because the original XAM scheduler is not run.
   rex::cvar::SetFlagByName("guide_button", "true");
   if (rex::cvar::GetFlagByName("keybind_guide").empty()) rex::cvar::SetFlagByName("keybind_guide", "G");
-  poll_guide = [&runtime, held = false]() mutable {
-    rex::input::X_INPUT_STATE input{};
+  // Controllers without a Guide button may report it only as BACK+START. Unless
+  // configured, let the SDK keep that chord from becoming a dashboard action.
+  if (rex::cvar::GetFlagSource("guide_chord_ms") == rex::cvar::Source::kDefault)
+    rex::cvar::SetFlagByName("guide_chord_ms", "150");
+  poll_guide = [&runtime, held = std::array<bool, 4>{}]() mutable {
     auto* system = static_cast<rex::input::InputSystem*>(runtime.input_system());
-    const bool pressed = system && system->GetState(0, &input) == 0 &&
-        (uint16_t(input.gamepad.buttons) & rex::input::X_INPUT_GAMEPAD_GUIDE);
-    const bool edge = pressed && !held;
-    held = pressed;
-    if (!edge || pending_ui) return;
-    if (draw_ui) {
-      if (active_application == &kGuide) {
-        auto xam = runtime.kernel_state()->GetKernelModule<rex::kernel::xam::XamModule>("xam.xex");
-        xam->RequestSystemUiClose();
+    for (uint32_t user = 0; user < 4; ++user) {
+      rex::input::X_INPUT_STATE input{};
+      const bool pressed = system && system->GetState(user, &input) == 0 &&
+          (uint16_t(input.gamepad.buttons) & rex::input::X_INPUT_GAMEPAD_GUIDE);
+      const bool edge = pressed && !held[user];
+      held[user] = pressed;
+      if (!edge || pending_ui) continue;
+      if (draw_ui) {
+        if (active_application == &kGuide) {
+          auto xam = runtime.kernel_state()->GetKernelModule<rex::kernel::xam::XamModule>("xam.xex");
+          xam->RequestSystemUiClose();
+        }
+        continue;
       }
-      return;
+      auto* ctx = rex::system::XThread::GetCurrentThread()->thread_state()->context();
+      ctx->r3.u64 = user;
+      __imp__XamShowGuideUI(*ctx, runtime.memory()->virtual_membase());
     }
-    auto* ctx = rex::system::XThread::GetCurrentThread()->thread_state()->context();
-    ctx->r3.u64 = 0;
-    __imp__XamShowGuideUI(*ctx, runtime.memory()->virtual_membase());
   };
   // Opt-in service-level validation without desktop input or UI automation.
   // No clock reads or wrapper in ordinary sessions.

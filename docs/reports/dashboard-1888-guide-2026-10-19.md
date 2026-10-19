@@ -109,6 +109,50 @@ As correções desta revisão **não foram compiladas nem executadas**; os recib
 anteriores não certificam os fontes modificados. Reabertura com controle físico,
 sign-in, criação de perfis, teclado e demais serviços continuam sem aceite completo.
 
+## Revisão pós-commit `bf1c1a9` — correções e atalho BACK+START
+
+A revisão do commit encontrou problemas, corrigidos nesta etapa:
+
+| Achado | Correção | Evidência |
+|---|---|---|
+| 0101 trocava LB/RB na captura (`0x5804` é RSHOULDER) | Tabela única `PadKeysFromState` | Caso `Shoulder buttons…` em `[guide-opening]` |
+| START do atalho BACK+START executava na dashboard e o Guide era trocado pela ação dela | Filtro `guide_chord_ms` no SDK; 150 ms nas duas dashboards por padrão | `[guide-chord]`: título, HUD, toque curto, janela expirada, desligado |
+| 0094 fazia `REX_FATAL` em routines ≠ 1/5 (antes: saída limpa) | Todo routine fecha a plataforma pelo handoff, com aviso | Sonda de firmware com routines 1, 5 e 2; `[firmware-exit]` |
+| 0099 escrevia em `*r3` sem ABI confirmada | Falha sem escrever; ABI do único chamador (HUD 1888 `913E31E8`) documentada | `[custom-banner]` com memória intocada |
+| `crset`/`crclr` sem builder (mesma família do 0096) | Builders e fixtures novos | `sdkcheck.CrAliases`: 24.576 verificações |
+| `apply-patch` mais restrito que o loader | Cauda AES não alinhada e `img_src_off == 0` aceitos como no SDK | `apply-patch accepts layouts the SDK loader accepts` |
+| Guide só no controle 0 | As duas dashboards consultam os quatro controles | Sem teste automatizado; aceite manual pendente |
+
+Causa do atalho: o controle do mantenedor (8BitDo, VID `0x2DC8`, conforme o log
+`20261019T082354Z-session-0-dash_1888`) só sinaliza GUIDE junto com o segundo
+botão. Nos traços `20261019T052843Z` e `20261019T053310Z`, a HUD recebeu apenas
+transições posteriores de BACK/START; o primeiro DOWN já tinha ido para a
+dashboard. Na sessão `082354Z`, a Create Profile substituiu o Guide 77 ms depois
+de ele abrir. Isso é compatível com o START da dashboard sem perfis, mas o
+solicitante não foi registrado: hipótese, não fato. Com o filtro, o primeiro
+DOWN de BACK/START espera até o GUIDE, a soltura ou o fim da janela. A janela de
+150 ms é uma hipótese a calibrar e acrescenta até esse atraso a BACK/START nas
+dashboards (toques curtos são entregues na soltura).
+
+Não mudaram: `XamAllocSize` (todos os consumidores conhecidos são realloc dentro
+da memória comprometida; documentação corrigida), a falha de abertura após a
+cena (o callback original já destrói a cena, como registrado acima) e o duplo
+SHA-1 de recursos cifrados (otimização exige medição antes/depois; pendente).
+Motocross ainda tem traps `crmove`/`crnot` gerados antes do 0096 e precisa de
+codegen `--ignore-stamp` mais regressão própria.
+
+Testes focados, Debug, 19/10: SDK `[guide-opening],[guide-chord],[guide-input],
+[profile-ui],[custom-banner],[local-logon-array],[xam-allocation]` 549 asserções
+em 15 casos; projeto `[firmware-exit],[xex-patch]` 3.008 em 13; `CrAliases`
+24.576; sonda de firmware 1/5/2; `1888-native-bridges` 51. Reaplicação dos 100
+patches numa cópia do SDK fixado: 105 arquivos idênticos ao lock (os dois patches
+SDL não se aplicam à cópia sem submódulo); `apply-sdk-patches.ps1 -Check` exit 0.
+Logs em `.local/logs/review-fix-*.txt`. `scripts/build-title.ps1` recompilou
+`dash_1888` (exit 0, 06:11) e `dash_17559` (exit 0, 06:19, estágio 4 em 168 s);
+os dois executáveis e seus `rexruntime.dll` contêm o novo cvar. Log:
+`.local/logs/review-fix-dashes.log`. Não houve suíte completa nem execução de
+dashboard; o aceite do atalho com o controle físico é do mantenedor.
+
 ## Causa e correção
 
 O processamento de cada frame chamava `818D21E8`, interpretando `hud+0x38` como

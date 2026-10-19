@@ -5,6 +5,14 @@ Este arquivo resume o estado atual; os relatórios vinculados preservam datas,
 falhas iniciais, hashes, comandos e limites de cada validação. Resultados de uma
 etapa histórica não certificam automaticamente o build atual nem outros títulos.
 
+Dashboards 1888/17559 — revisão pós-commit (19/10): corrigidos LB/RB trocados no
+0101 e o START do atalho BACK+START, que chegava à dashboard antes do GUIDE em
+controles sem botão Guide (`guide_chord_ms`, 150 ms por padrão nas dashboards).
+Também corrigidos firmware ≠ 1/5 (fecha a plataforma, sem fatal), banner sem
+escrita, `crset`/`crclr` e `apply-patch` alinhado ao loader. Testes focados
+passaram; aceite com o controle físico pendente.
+[Revisão](docs/reports/dashboard-1888-guide-2026-10-19.md#revisão-pós-commit-bf1c1a9--correções-e-atalho-backstart).
+
 Retail 1888 — Guide (19/10): corrigida a chamada de fechamento indevida no loop
 de frames do host original. Após reprovação manual da reabertura, o patch 0101
 passou a reter somente os controles do gesto de abertura/fechamento até seu UP;

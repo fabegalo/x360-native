@@ -51,7 +51,7 @@ extern "C" void __imp__XamNuiGetDeviceStatus(PPCContext&, uint8_t*);
 extern "C" void __imp__XCustomGetBannerImage(PPCContext&, uint8_t*);
 extern "C" void __imp__XamInputGetDeviceStats(PPCContext&, uint8_t*);
 
-TEST_CASE("Missing custom banner returns failure and clears only its output pointer", "[sdk][custom-banner]") {
+TEST_CASE("Missing custom banner returns failure without writing guest memory", "[sdk][custom-banner]") {
   const auto dir = std::filesystem::temp_directory_path() / ("x360n_banner_" + std::to_string(
       std::chrono::steady_clock::now().time_since_epoch().count()));
   std::filesystem::create_directories(dir);
@@ -65,8 +65,8 @@ TEST_CASE("Missing custom banner returns failure and clears only its output poin
   PPCContext ctx{}; ctx.r3.u64 = buffer + 4;
   __imp__XCustomGetBannerImage(ctx, base);
   CHECK(ctx.r3.u32 == 0x80004001u);
-  CHECK(rex::memory::load_and_swap<uint32_t>(base + buffer + 4) == 0);
-  for (unsigned i = 0; i < 16; ++i) if (i < 4 || i >= 8) CHECK(base[buffer + i] == 0xA5);
+  // The HUD 1888 caller reads its stack word only on success (913E31E8).
+  for (unsigned i = 0; i < 16; ++i) CHECK(base[buffer + i] == 0xA5);
   ctx.r3.u64 = 0; __imp__XCustomGetBannerImage(ctx, base);
   CHECK(ctx.r3.u32 == 0x80070057u);
   // No backend supplies the private device-statistics record. Leave it

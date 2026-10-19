@@ -54,7 +54,8 @@ std::atomic<bool> ui_active = false;
 std::optional<Active> active;
 std::vector<Request> suspended;
 x360n::SystemUiExecution execution;
-bool initialized = false, attempted = false, reserved = false, guide_held = false;
+bool initialized = false, attempted = false, reserved = false;
+bool guide_held[4] = {};
 bool HasPending() { std::lock_guard lock(request_mutex); return pending.has_value(); }
 std::optional<Request> TakePending() {
   std::lock_guard lock(request_mutex);
@@ -296,27 +297,29 @@ void Swap(const rex::kernel::xboxkrnl::SystemSwapFrame& frame) {
   title_frame = frame;
   auto& rt = *rex::Runtime::instance();
   auto xam = Xam(rt);
-  rex::input::X_INPUT_STATE input{};
   auto* backend = static_cast<rex::input::InputSystem*>(rt.input_system());
-  const bool pressed = backend && backend->GetState(0, &input) == 0 &&
-      (uint16_t(input.gamepad.buttons) & rex::input::X_INPUT_GAMEPAD_GUIDE);
-  if (pressed && !guide_held) {
-    // One line per physical press: distinguishes missing input from a Guide
-    // that opened but did not present.
-    REXLOG_INFO("1888 system UI: Guide button (active={:X}, pending={})",
-                active ? active->request.message : 0, HasPending());
-    if (HasPending()) {
-      // A queued application is presented first; this press is not retained.
-    } else if (active) {
-      // The closing shortcut also belongs to this UI until release. Capture
-      // its held controls before returning input ownership to the dashboard.
-      rex::kernel::xam::CaptureSystemUiOpeningInput(active->request.user);
-      xam->RequestSystemUiClose();
-    } else if (!active) {
-      Enqueue(Request{0x21015, 0, {}, {}});
+  for (uint32_t user = 0; user < 4; ++user) {
+    rex::input::X_INPUT_STATE input{};
+    const bool pressed = backend && backend->GetState(user, &input) == 0 &&
+        (uint16_t(input.gamepad.buttons) & rex::input::X_INPUT_GAMEPAD_GUIDE);
+    if (pressed && !guide_held[user]) {
+      // One line per physical press: distinguishes missing input from a Guide
+      // that opened but did not present.
+      REXLOG_INFO("1888 system UI: Guide button user={} (active={:X}, pending={})", user,
+                  active ? active->request.message : 0, HasPending());
+      if (HasPending()) {
+        // A queued application is presented first; this press is not retained.
+      } else if (active) {
+        // The closing shortcut also belongs to this UI until release. Capture
+        // its held controls before returning input ownership to the dashboard.
+        rex::kernel::xam::CaptureSystemUiOpeningInput(user);
+        xam->RequestSystemUiClose();
+      } else {
+        Enqueue(Request{0x21015, user, {}, {}});
+      }
     }
+    guide_held[user] = pressed;
   }
-  guide_held = pressed;
   // Opt-in service-level validation without desktop input or UI automation.
   // No clock reads in ordinary sessions.
   if (const auto probe = REXCVAR_GET(dash1888_guide_probe_seconds); probe > 0 && probe <= 120) {
@@ -379,6 +382,10 @@ void InstallSystemUi(rex::Runtime& rt) {
   }
   rex::cvar::SetFlagByName("guide_button", "true");
   if (rex::cvar::GetFlagByName("keybind_guide").empty()) rex::cvar::SetFlagByName("keybind_guide", "G");
+  // Controllers without a Guide button may report it only as BACK+START. Unless
+  // configured, let the SDK keep that chord from becoming a dashboard action.
+  if (rex::cvar::GetFlagSource("guide_chord_ms") == rex::cvar::Source::kDefault)
+    rex::cvar::SetFlagByName("guide_chord_ms", "150");
   Xam(rt)->system_ui_request = [&rt](uint32_t message, uint32_t address, uint32_t size) -> rex::X_HRESULT {
     if (message == kReleaseApp) {
       std::lock_guard lock(request_mutex); reserved = false; return 0;

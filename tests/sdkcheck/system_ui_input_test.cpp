@@ -1,5 +1,8 @@
 #include <catch2/catch_test_macros.hpp>
+#include <chrono>
 #include <filesystem>
+#include <thread>
+#include <tuple>
 #include <rex/cvar.h>
 #include <rex/runtime.h>
 #include <rex/input/flags.h>
@@ -198,4 +201,167 @@ TEST_CASE("Buttons owned by the system UI do not reach the title after it closes
   press(rex::ui::VirtualKey::kBack, false);
   memory->SystemHeapFree(stroke);
   memory->SystemHeapFree(pad);
+}
+
+namespace {
+// Shared fixture for the HUD ownership and BACK+START chord cases below. Latch
+// state is process-wide, so each case first drains stale ownership by
+// delivering every pad key-up through the title queue.
+struct ChordFixture {
+  OpeningPad* pad = nullptr;
+  rex::Runtime rt{std::filesystem::temp_directory_path()};
+  rex::system::object_ref<rex::kernel::xam::XamModule> xam;
+  uint32_t address = 0;
+  uint8_t* base = nullptr;
+  ChordFixture() {
+    using namespace rex::input;
+    rex::RuntimeConfig config{}; config.tool_mode = true; config.kernel_init = rex::kernel::InitializeKernel;
+    config.input_factory = [this](bool) {
+      auto input = std::make_unique<InputSystem>(nullptr);
+      auto driver = std::make_unique<OpeningPad>(); pad = driver.get();
+      input->AddDriver(std::move(driver));
+      input->SetDeviceAssignment(std::make_unique<SlotAssignment>());
+      return input;
+    };
+    REQUIRE(rt.Setup(std::move(config)) == 0);
+    xam = rt.kernel_state()->GetKernelModule<rex::kernel::xam::XamModule>("xam.xex");
+    address = rt.memory()->SystemHeapAlloc(sizeof(X_INPUT_KEYSTROKE));
+    REQUIRE(address);
+    base = rt.memory()->virtual_membase();
+    pad->held = 0; pad->next = 0; pad->keys.clear();
+    for (uint16_t vk = 0x5800; vk <= 0x5817; ++vk) pad->keys.push_back({vk, 2});
+    while (Title() == 0) {}
+    pad->keys.clear(); pad->next = 0;
+  }
+  ~ChordFixture() {
+    rex::cvar::SetFlagByName("guide_chord_ms", "0");
+    rt.memory()->SystemHeapFree(address);
+  }
+  rex::input::X_INPUT_KEYSTROKE* stroke() { return reinterpret_cast<rex::input::X_INPUT_KEYSTROKE*>(base + address); }
+  uint32_t Title() {
+    PPCContext ctx{}; ctx.r3.u64 = 0; ctx.r4.u64 = 1; ctx.r5.u64 = address;
+    __imp__XamInputGetKeystroke(ctx, base);
+    return ctx.r3.u32;
+  }
+  uint32_t Hud() {
+    PPCContext ctx{}; ctx.r3.u64 = 0; ctx.r4.u64 = address;
+    __imp__XamInputGetKeystrokeHud(ctx, base);
+    return ctx.r3.u32;
+  }
+  void Open() {
+    REQUIRE(xam->RegisterSystemApp({0x1000, 0xFF, 0x90105000, 0}) == 0);
+    REQUIRE(xam->BeginSystemUi(0x1000, 0xFF, 0));
+    REQUIRE(xam->EnableSystemUiInput(0, true));
+    REQUIRE(xam->SetSystemUiVisible(0x1000));
+  }
+  void Close() {
+    REQUIRE(xam->EndSystemUi(0x1000));
+    REQUIRE(xam->UnregisterSystemApp(0x1000, 0xFF) == 0);
+  }
+};
+}
+
+TEST_CASE("Shoulder buttons held at opening map to their own pad keys", "[sdk][guide-opening]") {
+  using namespace rex::input;
+  ChordFixture f;
+  // VK_PAD_RSHOULDER is 0x5804 and VK_PAD_LSHOULDER 0x5805. A held LB must
+  // keep only its own transitions; RB stays a new UI action, and vice versa.
+  for (const auto& [held, held_vk, other_vk] : {std::tuple{uint16_t(X_INPUT_GAMEPAD_LEFT_SHOULDER), uint16_t(0x5805), uint16_t(0x5804)},
+                                                std::tuple{uint16_t(X_INPUT_GAMEPAD_RIGHT_SHOULDER), uint16_t(0x5804), uint16_t(0x5805)}}) {
+    CAPTURE(held_vk);
+    f.pad->held = held;
+    f.Open();
+    f.pad->keys = {{held_vk, 1}, {held_vk, 5}, {other_vk, 1}};
+    f.pad->next = 0;
+    REQUIRE(f.Hud() == 0);
+    CHECK(f.stroke()->virtual_key == other_vk);
+    CHECK(f.pad->next == 3);
+    f.pad->held = 0;
+    f.pad->keys.push_back({held_vk, 2}); f.pad->keys.push_back({other_vk, 2});
+    REQUIRE(f.Hud() == 0);
+    CHECK(f.stroke()->virtual_key == other_vk);
+    CHECK((uint16_t(f.stroke()->flags) & X_INPUT_KEYSTROKE_KEYUP) != 0);
+    f.Close();
+  }
+}
+
+TEST_CASE("A BACK+START Guide chord never reaches the title or the HUD", "[sdk][guide-chord]") {
+  using namespace rex::input;
+  ChordFixture f;
+  constexpr uint16_t kStart = 0x5814, kBack = 0x5815, kA = 0x5800;
+  constexpr uint16_t kChord = X_INPUT_GAMEPAD_START | X_INPUT_GAMEPAD_BACK | X_INPUT_GAMEPAD_GUIDE;
+
+  SECTION("disabled: START is delivered immediately") {
+    f.pad->held = X_INPUT_GAMEPAD_START;
+    f.pad->keys = {{kStart, 1}};
+    REQUIRE(f.Title() == 0);
+    CHECK(f.stroke()->virtual_key == kStart);
+    f.pad->held = 0; f.pad->keys.push_back({kStart, 2});
+    REQUIRE(f.Title() == 0);
+  }
+  SECTION("title: first button waits, the chord is consumed") {
+    REQUIRE(rex::cvar::SetFlagByName("guide_chord_ms", "150"));
+    f.pad->held = X_INPUT_GAMEPAD_START;
+    f.pad->keys = {{kStart, 1}};
+    CHECK(f.Title() == 4306);  // pending: the partner may still arrive
+    CHECK(f.pad->next == 1);
+    f.pad->held = kChord;
+    f.pad->keys.push_back({kBack, 1});
+    CHECK(f.Title() == 4306);  // GUIDE seen: START belongs to the system UI
+    CHECK(f.Title() == 4306);  // the second button's key-down too
+    f.pad->keys.push_back({kStart, 5});
+    CHECK(f.Title() == 4306);  // and its repeats
+    f.pad->held = 0;
+    f.pad->keys.push_back({kStart, 2}); f.pad->keys.push_back({kBack, 2});
+    f.pad->keys.push_back({kA, 1});
+    REQUIRE(f.Title() == 0);
+    CHECK(f.stroke()->virtual_key == kA);
+    CHECK(f.pad->next == f.pad->keys.size());
+    // Released: a fresh START is an ordinary title action again.
+    f.pad->keys.push_back({kA, 2});
+    REQUIRE(f.Title() == 0);
+    f.pad->held = X_INPUT_GAMEPAD_START;
+    f.pad->keys.push_back({kStart, 1});
+    CHECK(f.Title() == 4306);
+    f.pad->held = 0;
+    f.pad->keys.push_back({kStart, 2});
+    REQUIRE(f.Title() == 0);  // released inside the window: delivered at once
+    CHECK(f.stroke()->virtual_key == kStart);
+    CHECK((uint16_t(f.stroke()->flags) & X_INPUT_KEYSTROKE_KEYDOWN) != 0);
+    REQUIRE(f.Title() == 0);
+    CHECK((uint16_t(f.stroke()->flags) & X_INPUT_KEYSTROKE_KEYUP) != 0);
+  }
+  SECTION("title: a held START without GUIDE is delivered after the window") {
+    REQUIRE(rex::cvar::SetFlagByName("guide_chord_ms", "40"));
+    f.pad->held = X_INPUT_GAMEPAD_START;
+    f.pad->keys = {{kStart, 1}, {kA, 1}};
+    CHECK(f.Title() == 4306);
+    std::this_thread::sleep_for(std::chrono::milliseconds(60));
+    REQUIRE(f.Title() == 0);
+    CHECK(f.stroke()->virtual_key == kStart);
+    REQUIRE(f.Title() == 0);  // later keys kept their order behind it
+    CHECK(f.stroke()->virtual_key == kA);
+    f.pad->held = 0;
+    f.pad->keys.push_back({kStart, 2}); f.pad->keys.push_back({kA, 2});
+    REQUIRE(f.Title() == 0); REQUIRE(f.Title() == 0);
+  }
+  SECTION("HUD: the closing chord is not a UI action") {
+    REQUIRE(rex::cvar::SetFlagByName("guide_chord_ms", "150"));
+    f.Open();
+    f.pad->held = X_INPUT_GAMEPAD_BACK;
+    f.pad->keys = {{kBack, 1}};
+    CHECK(f.Hud() == 4306);
+    f.pad->held = kChord;
+    f.pad->keys.push_back({kStart, 1});
+    CHECK(f.Hud() == 4306);
+    CHECK(f.Hud() == 4306);
+    f.pad->held = 0;
+    f.pad->keys.push_back({kBack, 2}); f.pad->keys.push_back({kStart, 2});
+    f.pad->keys.push_back({kA, 1});
+    REQUIRE(f.Hud() == 0);
+    CHECK(f.stroke()->virtual_key == kA);
+    f.pad->keys.push_back({kA, 2});
+    REQUIRE(f.Hud() == 0);
+    f.Close();
+  }
 }

@@ -3,7 +3,8 @@ $ErrorActionPreference = 'Stop'
 $root = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../../.local/evidence/firmware'))
 $run = Join-Path $root ('firmware-' + [Guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $run | Out-Null
-foreach ($routine in @(1, 5)) {
+# 1 and 5 are the observed routines; 2 stands for one that is not modeled separately.
+foreach ($routine in @(1, 5, 2)) {
     $case = Join-Path $run $routine
     New-Item -ItemType Directory -Path $case | Out-Null
     $stdout = Join-Path $case 'stdout.txt'

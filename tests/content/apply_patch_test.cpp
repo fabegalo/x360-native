@@ -92,6 +92,7 @@ struct Fixture {
   Bytes base_header = Bytes(kHeader), target_header, patch_header;
   Bytes base_image = Bytes(0x2000), target_image, base_body, records;
   bool chained = false, corrupt_patch_block = false;
+  size_t base_tail = 0;  // trailing bytes after the last whole AES block
   explicit Fixture(bool chain = false) : chained(chain) {
     fs::create_directories(dir);
     for (unsigned i = 0; i < 16; ++i) {
@@ -175,6 +176,7 @@ struct Fixture {
     Bytes base = base_header, body = base_body;
     body.resize((body.size() + 15) & ~size_t(15));
     body = Encrypt(base_key, body); base.insert(base.end(), body.begin(), body.end());
+    base.insert(base.end(), base_tail, uint8_t(0x5A));
     Bytes patch_body(24);
     if (chained) {
       REQUIRE(records.size() >= 12);
@@ -375,4 +377,20 @@ TEST_CASE("apply-patch rejects malformed header ranges before allocation", "[con
   INFO(f.Err()); REQUIRE(result.launched); CHECK(result.exit_code == 1);
   CHECK(f.Err().find("header") != std::string::npos);
   CHECK_FALSE(fs::exists(f.dir / "out"));
+}
+
+TEST_CASE("apply-patch accepts layouts the SDK loader accepts", "[content][xex-patch]") {
+  Fixture f;
+  // aes_decrypt_buffer decrypts whole blocks and leaves a tail unchanged; the
+  // block and page digests still authenticate the decoded image.
+  SECTION("unaligned bytes after the encrypted body") { f.base_tail = 5; }
+  // With a zero source offset the source size moves nothing; a size beyond
+  // the base image only means there is no tail to clear.
+  SECTION("zero image source offset with a larger size") {
+    Put32(f.patch_header, kDelta + 0x44, uint32_t(f.base_image.size() + 0x1000));
+  }
+  const auto result = f.Run();
+  INFO(f.Err()); REQUIRE(result.launched); REQUIRE(result.exit_code == 0);
+  CHECK(Read(f.dir / "out/base.2.0.2.0.header.bin") == f.target_header);
+  CHECK(Read(f.dir / "out/base.2.0.2.0.image.bin") == f.target_image);
 }

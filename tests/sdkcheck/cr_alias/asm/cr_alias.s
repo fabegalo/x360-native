@@ -19,3 +19,13 @@ test_crnot_cross:
   crnot 31, 7
   blr
   #_ REGISTER_OUT r3 0
+test_crset_bit:
+  #_ REGISTER_IN r3 0
+  crset 5
+  blr
+  #_ REGISTER_OUT r3 0
+test_crclr_bit:
+  #_ REGISTER_IN r3 0
+  crclr 30
+  blr
+  #_ REGISTER_OUT r3 0

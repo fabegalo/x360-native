@@ -1,5 +1,11 @@
 # Dashboard original: diagnóstico
 
+Retail **1888/17559 — atalho do Guide** (19/10/2026): o primeiro botão de
+BACK+START deixou de chegar à dashboard em controles que só sinalizam GUIDE com
+o segundo botão; LB/RB da captura de abertura corrigidos. Testes focados
+aprovados; aceite físico pendente.
+[Revisão pós-commit](reports/dashboard-1888-guide-2026-10-19.md#revisão-pós-commit-bf1c1a9--correções-e-atalho-backstart).
+
 Retail **1888 — Guide** (19/10/2026): retirada a chamada de fechamento indevida
 do loop original e removido o descarte geral de `guide_input.h`. Após reprovação
 manual da reabertura, o patch 0101 captura somente o gesto inicial até seu UP;

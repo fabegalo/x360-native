@@ -12,7 +12,7 @@ diff --git a/include/rex/kernel/xam/module.h b/include/rex/kernel/xam/module.h
 diff --git a/src/kernel/xboxkrnl/xboxkrnl_hal.cpp b/src/kernel/xboxkrnl/xboxkrnl_hal.cpp
 --- a/src/kernel/xboxkrnl/xboxkrnl_hal.cpp
 +++ b/src/kernel/xboxkrnl/xboxkrnl_hal.cpp
-@@ -19,6 +19,7 @@
+@@ -18,6 +18,7 @@
  #include <rex/types.h>
  #include <rex/system/kernel_state.h>
  #include <rex/system/xtypes.h>
@@ -20,7 +20,8 @@ diff --git a/src/kernel/xboxkrnl/xboxkrnl_hal.cpp b/src/kernel/xboxkrnl/xboxkrnl
  
  namespace rex::kernel::xboxkrnl {
  
-@@ -26,12 +27,24 @@ void HalReturnToFirmware_entry(u32 routine) {
+@@ -25,13 +26,27 @@ void HalReturnToFirmware_entry(u32 routine) {
+   // void
    // IN FIRMWARE_REENTRY  Routine
  
 -  // Routine must be 1 'HalRebootRoutine'
@@ -30,11 +31,13 @@ diff --git a/src/kernel/xboxkrnl/xboxkrnl_hal.cpp b/src/kernel/xboxkrnl/xboxkrnl
 -  // Not sure how to blast back up the stack in LLVM without exceptions, though.
 -  REXKRNL_ERROR("Game requested shutdown via HalReturnToFirmware");
 -  exit(0);
-+  // Preserve the existing routine 1 host-exit contract and the original
-+  // Retail HUD's routine 5 (nice poweroff). Other firmware modes need their
-+  // own implementation; never return a fictitious success to guest code.
++  // The host cannot reboot or power cycle a console: every routine closes the
++  // platform, as the previous exit(0) did for all of them, but through an
++  // orderly title termination. Routine 1 (reboot) and the Retail HUD's
++  // routine 5 (power off) are the observed ones; the call never returns.
 +  if (routine != 1 && routine != 5)
-+    REX_FATAL("Unsupported HalReturnToFirmware routine {}", routine);
++    REXKRNL_WARN("HalReturnToFirmware routine {} is not modeled separately; closing platform",
++                 routine);
 +  {
 +    auto xam = REX_KERNEL_STATE()->GetKernelModule<rex::kernel::xam::XamModule>("xam.xex");
 +    auto& loader = xam->loader_data();

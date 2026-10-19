@@ -1,21 +1,21 @@
 diff --git a/src/codegen/builders.h b/src/codegen/builders.h
-index 87993f4..805a867 100644
 --- a/src/codegen/builders.h
 +++ b/src/codegen/builders.h
-@@ -110,6 +110,8 @@ bool build_crnor(BuilderContext& ctx);
+@@ -110,6 +110,10 @@ bool build_crnor(BuilderContext& ctx);
  bool build_cror(BuilderContext& ctx);
  bool build_crorc(BuilderContext& ctx);
  bool build_crxor(BuilderContext& ctx);
 +bool build_crmove(BuilderContext& ctx);
 +bool build_crnot(BuilderContext& ctx);
++bool build_crset(BuilderContext& ctx);
++bool build_crclr(BuilderContext& ctx);
  
  // Equivalence (XNOR)
  bool build_eqv(BuilderContext& ctx);
 diff --git a/src/codegen/builders/logical.cpp b/src/codegen/builders/logical.cpp
-index a58f51d..0590c02 100644
 --- a/src/codegen/builders/logical.cpp
 +++ b/src/codegen/builders/logical.cpp
-@@ -467,4 +467,19 @@ bool build_crxor(BuilderContext& ctx) {
+@@ -467,4 +467,32 @@ bool build_crxor(BuilderContext& ctx) {
    return true;
  }
  
@@ -34,17 +34,31 @@ index a58f51d..0590c02 100644
 +              ctx.cr(src / 4), crBitName(src % 4));
 +  return true;
 +}
++
++// creqv/crxor with three identical operands: one destination, constant result.
++bool build_crset(BuilderContext& ctx) {
++  const uint32_t dst = ctx.insn.operands[0];
++  ctx.println("\t{}.{} = 1;", ctx.cr(dst / 4), crBitName(dst % 4));
++  return true;
++}
++
++bool build_crclr(BuilderContext& ctx) {
++  const uint32_t dst = ctx.insn.operands[0];
++  ctx.println("\t{}.{} = 0;", ctx.cr(dst / 4), crBitName(dst % 4));
++  return true;
++}
  }  // namespace rex::codegen
 diff --git a/src/codegen/instruction_dispatch.cpp b/src/codegen/instruction_dispatch.cpp
-index 0eab428..3c13613 100644
 --- a/src/codegen/instruction_dispatch.cpp
 +++ b/src/codegen/instruction_dispatch.cpp
-@@ -114,6 +114,8 @@ static const std::unordered_map<int, Builder>& GetDispatchTable() {
+@@ -114,6 +114,10 @@ static const std::unordered_map<int, Builder>& GetDispatchTable() {
        {PPC_INST_CROR, build_cror},
        {PPC_INST_CRORC, build_crorc},
        {PPC_INST_CRXOR, build_crxor},
 +      {PPC_INST_CRMOVE, build_crmove},
 +      {PPC_INST_CRNOT, build_crnot},
++      {PPC_INST_CRSET, build_crset},
++      {PPC_INST_CRCLR, build_crclr},
  
        //=====================================================================
        // Comparison

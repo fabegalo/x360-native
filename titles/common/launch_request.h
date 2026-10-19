@@ -46,8 +46,8 @@ inline bool ReadLaunchRequest(const std::filesystem::path& file, LaunchRequest& 
   if (!in || in.peek() != EOF || r.path.find('\0') != std::string::npos ||
       (!r.data_present && data_size) || (r.kind == LaunchRequest::Image && r.path.empty()) ||
       (r.kind != LaunchRequest::Image && !r.path.empty()) ||
-      (r.kind == LaunchRequest::FirmwareExit &&
-       ((r.flags != 1 && r.flags != 5) || r.data_present || !r.data.empty())))
+      // Any HAL routine closes the platform; flags carries it for the log.
+      (r.kind == LaunchRequest::FirmwareExit && (r.data_present || !r.data.empty())))
     return false;
   out = std::move(r);
   return true;

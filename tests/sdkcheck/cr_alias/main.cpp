@@ -13,10 +13,12 @@ int main() {
   uint32_t checks = 0;
   for (unsigned n = 0; n < 4096; ++n) {
     const uint32_t input = n < 32 ? 1u << n : random();
-    for (unsigned variant = 0; variant < 4; ++variant) {
+    for (unsigned variant = 0; variant < 6; ++variant) {
       for (unsigned i = 0; i < 8; ++i) cr[i]->set_raw(input >> (28 - 4 * i));
-      const unsigned dest[] = {7, 2, 28, 31}, source[] = {31, 2, 0, 7};
-      const uint32_t bit = ((input >> (31 - source[variant])) & 1) ^ (variant & 1);
+      // Variants 4/5 are crset 5 and crclr 30: constant results, no source.
+      const unsigned dest[] = {7, 2, 28, 31, 5, 30}, source[] = {31, 2, 0, 7, 0, 0};
+      const uint32_t bit = variant == 4 ? 1u : variant == 5 ? 0u
+                         : ((input >> (31 - source[variant])) & 1) ^ (variant & 1);
       const uint32_t expected = (input & ~(1u << (31 - dest[variant]))) |
                                  (bit << (31 - dest[variant]));
       switch (variant) {
@@ -24,6 +26,8 @@ int main() {
         case 1: cr_alias_82010008(ctx, memory); break;
         case 2: cr_alias_82010010(ctx, memory); break;
         case 3: cr_alias_82010018(ctx, memory); break;
+        case 4: cr_alias_82010020(ctx, memory); break;
+        case 5: cr_alias_82010028(ctx, memory); break;
       }
       uint32_t got = 0;
       for (unsigned i = 0; i < 8; ++i) got |= cr[i]->raw() << (28 - 4 * i);

@@ -173,14 +173,17 @@ TEST_CASE("handoff distinguishes title return from closing the platform", "[sess
   fs::remove_all(dir);
 }
 
-TEST_CASE("firmware exit handoff rejects launch data and unsupported routines", "[firmware-exit]") {
+TEST_CASE("firmware exit handoff keeps its routine and rejects launch data", "[firmware-exit]") {
   auto dir = UniqueTempPath("firmware-handoff"); fs::create_directories(dir);
   auto file = dir / "handoff.bin";
+  // Every HAL routine closes the platform; unmodeled ones must not be lost.
   for (uint32_t routine : {1u, 5u, 99u}) {
     LaunchRequest input; input.kind = LaunchRequest::FirmwareExit; input.flags = routine;
     REQUIRE(WriteLaunchRequest(file, input));
     LaunchRequest output;
-    CHECK(ReadLaunchRequest(file, output) == (routine != 99));
+    REQUIRE(ReadLaunchRequest(file, output));
+    CHECK(output.kind == LaunchRequest::FirmwareExit);
+    CHECK(output.flags == routine);
     fs::remove(file);
   }
   LaunchRequest input; input.kind = LaunchRequest::FirmwareExit; input.flags = 5;

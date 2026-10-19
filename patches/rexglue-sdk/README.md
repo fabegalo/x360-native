@@ -849,7 +849,11 @@ unconditional process exit for the existing routine 1 and this routine 5 with
 a recorded firmware request and normal title termination notifications. The
 host exports a distinct handoff and closes its platform session. Routine 1
 still ends the host session; this does not implement an automatic console reboot.
-Other firmware modes fail explicitly. No original module or version is shared.
+Revised 2026-10-19: any other routine also closes the platform through the same
+orderly handoff (the pinned SDK exited for all of them), with a warning that it
+is not modeled separately; the handoff keeps the routine value. A fatal error
+there would have turned a former clean exit into a crash for other titles.
+No original module or version is shared.
 
 Focused regressions: `tests/sdkcheck/local_profile_test.cpp`, the bounded
 subprocess `tests/sdkcheck/firmware_exit_test.ps1`, and supervisor handoff/session
@@ -880,7 +884,13 @@ forms with identical sources. Generate those two-operand forms explicitly,
 preserving all other CR bits. This is shared PPC behavior, not an XAM-specific
 replacement. `tests/sdkcheck/cr_alias/` assembles and recompiles independent
 fixtures and compares cross-field and same-bit operations with a bit-mask
-reference. The SDK pin is unchanged; hashes are recorded in the lock.
+reference. Revised 2026-10-19: the same family's one-operand `crset`/`crclr`
+(`creqv`/`crxor` with three identical operands) also had no builder and is now
+generated; the fixture adds both (24,576 checks). No current generated title
+uses them. After this codegen change, titles generated earlier must be
+regenerated with `--ignore-stamp`; Motocross's `xam` module still has the old
+`REX_UNIMPLEMENTED` traps for `crmove`/`crnot`. The SDK pin is unchanged;
+hashes are recorded in the lock.
 
 ### 0097 — real XAM allocation size (2026-10-18)
 
@@ -891,7 +901,10 @@ the input pointer in r3 can make growth read beyond the previous allocation.
 The shared HLE heap commits whole pages, so the result includes usable page
 padding. Null, freed, uncommitted and interior pointers return zero. No extra
 tracking map is added. Original physical allocations retain their original
-1888 size-query path at the title boundary.
+1888 size-query path at the title boundary. The reported size can exceed the
+requested one; every known caller (1888/17559 HUD, Sign-in, Create Profile,
+Gamer Profile, XUI 818E88F8) is a realloc helper copying min(old, new) into a
+fresh block, so the copy stays inside committed, zero-filled storage.
 
 `tests/sdkcheck/xam_allocation_test.cpp` covers all shared virtual allocation
 entry points, page boundaries and invalid/freed pointers. The explicitly
@@ -919,10 +932,13 @@ contains no original resource bytes. SDK pin unchanged; hashes in the lock.
 
 ### 0099 — unavailable custom banner (2026-10-19)
 
-`XCustomGetBannerImage` returns `E_NOTIMPL` and clears its output pointer while
-the SDK has no banner provider; a null output returns `E_INVALIDARG`. This lets
-the original caller use its own fallback artwork instead of treating a stub's
-unchanged pointer register as successful image data. Focused coverage:
+`XCustomGetBannerImage` returns `E_NOTIMPL` while the SDK has no banner
+provider; a null argument returns `E_INVALIDARG`. This lets the original caller
+use its own fallback artwork instead of treating a stub's unchanged pointer
+register as successful image data. The only known caller, Retail 1888 HUD
+`913E31E8`, passes one stack word and reads it only on success; since other
+argument layouts are unverified, guest memory is not written (revised
+2026-10-19; the first version cleared that word). Focused coverage:
 `tests/sdkcheck/local_profile_test.cpp` (`[custom-banner]`).
 
 ### 0100 — unavailable private input statistics (2026-10-19)
@@ -950,3 +966,23 @@ no SDK anterior (24 asserções) e cobre as duas ABIs, três reaberturas, evento
 atrasados/repetidos, preservação de A e START novo, requisição sem botões e o
 retorno da fila ao título. `[guide-input]` e `[profile-ui]` preservam os contratos
 de saída e sessão. Não há alteração de originais nem dependências entre versões.
+
+### Revisão de 19/10/2026 — ombros e atalho BACK+START
+
+A tabela de captura trocava LB/RB: `VK_PAD_RSHOULDER` é `0x5804` e
+`VK_PAD_LSHOULDER` é `0x5805`. A conversão de estado para teclas agora é única
+(`PadKeysFromState`) e o caso `Shoulder buttons held at opening…` cobre os dois.
+Uma inversão temporária para provar o caso vermelho foi recusada pelo gate de
+hashes do SDK no build; o resultado desse ensaio foi descartado.
+
+Controles sem botão Guide (8BitDo VID `0x2DC8`, relatado pelo mantenedor)
+sinalizam GUIDE só junto com o segundo botão de BACK+START. Os traços físicos
+de 19/10 (`20261019T052843Z`/`053310Z`) mostram o primeiro botão chegando ao
+título antes do GUIDE. Com `guide_chord_ms > 0`, o primeiro DOWN de BACK/START
+fica retido até aparecer GUIDE (o atalho passa à UI de sistema até a soltura,
+nas filas do título e da HUD), até a soltura (entregue imediatamente) ou até o
+fim da janela. Eventos seguintes esperam atrás dele, preservando a ordem. O
+padrão do SDK é 0 (desligado, sem custo além da leitura do cvar); as dashboards
+1888 e 17559 usam 150 ms quando o usuário não configurou o valor. A janela é uma
+hipótese a calibrar no teste manual; `[guide-chord]` cobre título, HUD, toque
+curto, janela expirada e o modo desligado. Jogos e consultas de estado não mudam.
