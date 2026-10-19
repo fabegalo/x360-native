@@ -1,6 +1,7 @@
 # x360-native: supervisor and integration layer on top of ReXGlue.
 cmake_minimum_required(VERSION 3.25)
 project(x360_native VERSION 0.1.0 LANGUAGES C CXX)
+include(cmake/distribution/x360n_version.cmake)
 
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)

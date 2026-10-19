@@ -1,10 +1,12 @@
 # Build from committed source in a fresh distribution-only tree. Never publishes.
-param([string]$Version = '0.1.0-preview', [string]$OutputDirectory = '.local/packages',
+param([string]$Version = '', [string]$OutputDirectory = '.local/packages',
       [ValidateSet('local-candidate','public-prerelease')][string]$Publication = 'local-candidate',
       [string]$ProvenanceFile = '')
 $ErrorActionPreference = 'Stop'
 $env:PSModulePath = Join-Path $PSHOME 'Modules'
 $root = (Resolve-Path (Join-Path $PSScriptRoot '../..')).Path
+# Default: the version computed from the Conventional Commits of the committed history.
+if (-not $Version) { $Version = & (Join-Path $PSScriptRoot 'compute-version.ps1') -Repository $root }
 if ($Version -notmatch '^[a-zA-Z0-9._-]+$') { throw 'Invalid package version' }
 $base = [IO.Path]::GetFullPath((Join-Path $root $OutputDirectory))
 if (-not $base.StartsWith((Join-Path $root '.local') + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) { throw 'Packages must remain below .local' }
@@ -81,7 +83,7 @@ $sourceMap = $source.Replace('\','/')
 $payloadHash = Hash (Join-Path $payload 'payload.sha256')
 $flags = "-march=x86-64-v2 -mno-incremental-linker-compatible -ffile-prefix-map=$sourceMap=/x360-source"
 $devshell = Join-Path $root 'scripts/devshell.cmd'
-& $devshell cmake -S $source -B $build -G Ninja -DX360_DESKTOP_ONLY=ON -DX360_DISTRIBUTION=ON "-DX360_PACKAGE_PAYLOAD_SHA256=$payloadHash" -DCMAKE_BUILD_TYPE=Release "-DCMAKE_C_COMPILER=$llvm/bin/clang.exe" "-DCMAKE_CXX_COMPILER=$clang" "-DCMAKE_C_FLAGS=$flags" "-DCMAKE_CXX_FLAGS=$flags" '-DCMAKE_EXE_LINKER_FLAGS=-Wl,/Brepro' -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+& $devshell cmake -S $source -B $build -G Ninja -DX360_DESKTOP_ONLY=ON -DX360_DISTRIBUTION=ON "-DX360_PACKAGE_PAYLOAD_SHA256=$payloadHash" "-DX360_VERSION=$Version" -DCMAKE_BUILD_TYPE=Release "-DCMAKE_C_COMPILER=$llvm/bin/clang.exe" "-DCMAKE_CXX_COMPILER=$clang" "-DCMAKE_C_FLAGS=$flags" "-DCMAKE_CXX_FLAGS=$flags" '-DCMAKE_EXE_LINKER_FLAGS=-Wl,/Brepro' -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
 if ($LASTEXITCODE -ne 0) { throw 'Distribution configure failed' }
 & $devshell cmake --build $build --target x360-native x360n_desktop_tests
 if ($LASTEXITCODE -ne 0) { throw 'Distribution build failed' }
@@ -144,7 +146,12 @@ Extraia o ZIP inteiro em uma pasta vazia e abra x360-native.exe.
 Em Importar > Adicionar arquivo, selecione uma ISO ou um pacote Xbox 360
 (CON/LIVE/PIRS, incluindo XBLA). A extração é local e não requer instalar
 ferramentas de compilação. ZIP, RAR e 7z devem ser descompactados antes.
-Para atualizar, extraia em outra pasta e selecione seu ambiente anterior em
+Ao abrir, o aplicativo consulta somente a lista pública de versões no GitHub
+Releases do x360-native. Havendo versão mais nova, "Instalar <versão>" na barra
+lateral baixa o ZIP, confere o SHA-256 publicado e o índice do pacote, troca os
+arquivos sem tocar em data e guarda a versão anterior em data\updates\previous.
+A versão vem dos Conventional Commits do projeto (feat: minor; fix/perf: patch).
+Para atualizar manualmente, extraia em outra pasta e selecione seu ambiente anterior em
 Configurações > Selecionar ambiente. Confirme a atualização apresentada.
 Seus jogos, dashboards, perfis e saves serão preservados; preparações válidas
 serão reutilizadas. Uma atualização interrompida pode ser retomada abrindo

@@ -44,6 +44,16 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Release ZIP gate tests failed' }
           & tests/packaging/release-configuration.ps1
           & tests/packaging/local-startup.ps1
+      - name: Require the version computed from Conventional Commits
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+        env:
+          TAG_NAME: ${{ github.ref_name }}
+        run: |
+          & tests/packaging/compute_version_test.ps1
+          $computed = & scripts/packaging/compute-version.ps1
+          $tagged = $env:TAG_NAME.Substring(1)
+          if ($tagged -ne $computed -and -not $tagged.StartsWith("$computed-")) { throw "Tag $env:TAG_NAME differs from the computed version $computed" }
+          "Computed version: $computed; tag: $env:TAG_NAME"
       - name: Validate commit, tag and release notes
         id: identity
         env:

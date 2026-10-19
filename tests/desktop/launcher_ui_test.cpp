@@ -340,6 +340,8 @@ void SaveCapture(App& a, const fs::path& output) {
 // the window. Set X360N_LAYOUT_CAPTURE to a folder to also save PNG renders.
 TEST_CASE("launcher layout keeps controls inside the window, their cards and their labels", "[launcher-layout]") {
   Frontend f; f.Seed(f.TargetFixture());
+  // The sidebar update action takes room only while a newer release is known.
+  f.app.update = AvailableUpdate{"10.100.100", "x360-native-10.100.100-windows-x64", "", "", ""};
   wchar_t capture[MAX_PATH]{};
   const fs::path captures = GetEnvironmentVariableW(L"X360N_LAYOUT_CAPTURE", capture, MAX_PATH) ? fs::path(capture) : fs::path();
   if (!captures.empty()) fs::create_directories(captures);

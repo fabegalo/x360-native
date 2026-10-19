@@ -25,6 +25,7 @@
 #include "action_trace.h"
 #include "digest_batch.h"
 #include "session_notification.h"
+#include "update.h"
 
 namespace fs = std::filesystem;
 using namespace x360n;
@@ -38,10 +39,10 @@ void VerifyDistribution(const fs::path& directory) {
   VerifyPackage(directory);
 #endif
 }
-constexpr UINT kFinished = WM_APP + 1, kProgress = WM_APP + 2, kDetected = WM_APP + 3, kInitialized = WM_APP + 4, kInspected = WM_APP + 5, kOpenEnvironment = WM_APP + 6, kEnvironmentChecked = WM_APP + 7, kSessionStarted = WM_APP + 8, kSessionClosed = WM_APP + 9, kReveal = WM_APP + 10, kPreview = WM_APP + 20;
+constexpr UINT kFinished = WM_APP + 1, kProgress = WM_APP + 2, kDetected = WM_APP + 3, kInitialized = WM_APP + 4, kInspected = WM_APP + 5, kOpenEnvironment = WM_APP + 6, kEnvironmentChecked = WM_APP + 7, kSessionStarted = WM_APP + 8, kSessionClosed = WM_APP + 9, kReveal = WM_APP + 10, kUpdateChecked = WM_APP + 11, kUpdateFinished = WM_APP + 12, kPreview = WM_APP + 20;
 enum { kFolder = 101, kTargets, kCheck, kImport, kPrepare, kLaunch, kDetails, kData, kCancel, kLanguage, kInstall, kStorage, kPrimary, kSettings, kImportFolder, kDashboards, kGames, kHome, kImportPage, kAddContent, kLibrary, kGameList, kRenderer, kNativeDevelopment,
        kSearch, kFilter0, kFilter1, kFilter2, kFilter3, kLangPt, kLangEn, kRendererNative, kRetry, kDismiss, kBannerLibrary, kBannerDetails,
-       kConsoleLanguage, kConsoleCountry, kVerifyTarget };
+       kConsoleLanguage, kConsoleCountry, kVerifyTarget, kUpdate };
 bool english = false;
 std::string Tr(const char* pt, const char* en) { return english ? en : pt; }
 std::wstring Wide(const std::string& text) {
@@ -141,7 +142,13 @@ struct App {
   int capture_page = kSettings;  // page shown in the self-capture (Settings or Library)
   unsigned capture_ticks = 0;
 #endif
+  // Self-update: the release check runs beside the main worker; installing uses the worker.
+  std::thread update_check;
+  std::atomic<bool> closing{false};
+  std::optional<AvailableUpdate> update;
   ~App() {
+    closing = true;
+    if (update_check.joinable()) update_check.join();
     if (worker.joinable()) worker.join();
     for (auto font : {fonts.body, fonts.bold, fonts.caption, fonts.headline, fonts.big, fonts.icon, fonts.icon_big, fonts.mono}) if (font) DeleteObject(font);
     DestroyIcon(icon);
@@ -364,6 +371,7 @@ void Layout(App& a) {
   by -= nh; put(Item(a, kLanguage), nx, by, nw, nh);
   by -= nh + s(4); put(Item(a, kDetails), nx, by, nw, nh);
   by -= nh + s(4); put(Item(a, kSettings), nx, by, nw, nh);
+  if (a.update) { by -= nh + s(12); put(Item(a, kUpdate), nx, by, nw, nh); }
   // Header
   const int cx = sb + pad, cw = std::max(s(300), W - sb - 2 * pad);
   int y = s(28);
@@ -587,6 +595,7 @@ void Enable(App& a) {
     (a.next_action == kLaunch && (a.current.prepared || a.current.launch_candidate) && a.environment.graphics);
   EnableWindow(Item(a, kPrimary), !a.busy && action_ok);
   EnableWindow(Item(a, kSettings), !a.busy);
+  EnableWindow(Item(a, kUpdate), !a.busy);
   const bool native = a.renderer_settings.experimental;
   EnableWindow(Item(a, kRenderer), !a.busy && !a.root.empty());
   EnableWindow(Item(a, kRendererNative), !a.busy && !a.root.empty() && native);
@@ -879,6 +888,79 @@ void CheckEnvironmentAsync(App& a, const fs::path& root, bool verify_contents = 
     } catch (const std::exception& error) { Post(a.window, kEnvironmentChecked, error.what()); }
   });
 }
+// ---------- Self-update (installed packages only) ----------
+fs::path SystemTool(const wchar_t* name) {
+  wchar_t sys[MAX_PATH]{}; GetSystemDirectoryW(sys, MAX_PATH);
+  return fs::path(sys) / name;
+}
+fs::path Updates(const App& a) { return a.preferences.parent_path() / "updates"; }
+// HTTPS only, redirects included; the Windows curl.exe avoids linking a network stack.
+void Download(const App& a, const std::string& url, const fs::path& file, int seconds, const std::atomic<bool>& stop) {
+  ProcessSpec spec;
+  spec.exe = SystemTool(L"curl.exe");
+  spec.args = {"-fsSL", "--proto", "=https", "--proto-redir", "=https", "--connect-timeout", "15", "--max-time", std::to_string(seconds),
+               "-A", std::string("x360-native/") + X360N_VERSION, "-H", "Accept: application/vnd.github+json", "-o", Utf8(file), url};
+  spec.working_dir = file.parent_path();
+  spec.stdout_file = Updates(a) / "curl.log"; spec.stderr_file = Updates(a) / "curl.error.log";
+  spec.no_console = true;
+  spec.should_cancel = [&stop] { return stop.load(); };
+  const auto result = RunProcess(spec);
+  if (result.cancelled) throw std::runtime_error(Tr("Atualização cancelada. Nada foi alterado.", "Update cancelled. Nothing was changed."));
+  if (!result.launched || result.exit_code != 0)
+    throw std::runtime_error(Tr("Não foi possível baixar ", "Could not download ") + url + " (" + result.launch_error + " " + DescribeExitCode(result.exit_code) + ")");
+}
+// Packages ask GitHub Releases once per start; nothing else is sent.
+void CheckForUpdate(App& a) {
+  if (a.preferences.empty() || a.update_check.joinable()) return;
+  a.update_check = std::thread([&a] {
+    auto* found = new std::optional<AvailableUpdate>;
+    try {
+      fs::create_directories(Updates(a));
+      const auto list = Updates(a) / "releases.json";
+      Download(a, kReleasesApi, list, 30, a.closing);
+      std::ifstream in(list, std::ios::binary);
+      *found = SelectUpdate({std::istreambuf_iterator<char>(in), {}}, X360N_VERSION);
+    } catch (const std::exception&) { found->reset(); }  // offline or rate limited: try again next start
+    if (a.closing || !PostMessageW(a.window, kUpdateChecked, 0, reinterpret_cast<LPARAM>(found))) delete found;
+  });
+}
+void StartUpdate(App& a) {
+  if (a.busy || !a.update) return;
+  if (a.worker.joinable()) a.worker.join();
+  const auto update = *a.update;
+  a.cancel = false; a.failed = false; a.busy = true; a.result = 0; a.stage = 0; a.last_action = kUpdate;
+  a.show_details = false; a.settings = false;
+  SetActivity(a, 1, WTr("Atualizando o aplicativo", "Updating the application"),
+    Tr("Baixando a versão ", "Downloading version ") + update.version + Tr(" do GitHub. Seus dados em data\\ são preservados.", " from GitHub. Your data in data\\ is preserved."),
+    {WTr("Download", "Download"), WTr("Verificação", "Verification"), WTr("Instalação", "Installation")});
+  SetPageTexts(a); Enable(a);
+  a.worker = std::thread([&a, update] {
+    try {
+      const auto dir = Updates(a) / update.version;
+      fs::remove_all(dir);
+      fs::create_directories(dir / "extract");
+      const auto archive = dir / (update.package + ".zip"), checksum = dir / (update.package + ".zip.sha256");
+      Download(a, update.checksum_url, checksum, 60, a.cancel);
+      Download(a, update.archive_url, archive, 3600, a.cancel);
+      a.stage = 1;
+      Post(a.window, kProgress, Tr("Conferindo o SHA-256 e o conteúdo do pacote...", "Checking the SHA-256 and the package contents..."));
+      VerifyArchive(archive, checksum);
+      ProcessSpec tar;
+      tar.exe = SystemTool(L"tar.exe"); tar.args = {"-xf", Utf8(archive), "-C", Utf8(dir / "extract")};
+      tar.working_dir = dir; tar.stdout_file = dir / "tar.log"; tar.stderr_file = dir / "tar.error.log"; tar.no_console = true;
+      tar.should_cancel = [&a] { return a.cancel.load(); };
+      const auto extracted = RunProcess(tar);
+      if (extracted.cancelled) throw std::runtime_error(Tr("Atualização cancelada. Nada foi alterado.", "Update cancelled. Nothing was changed."));
+      if (!extracted.launched || extracted.exit_code != 0) throw std::runtime_error(Tr("Não foi possível extrair a atualização. Nada foi alterado.", "Could not extract the update. Nothing was changed."));
+      if (a.cancel) throw std::runtime_error(Tr("Atualização cancelada. Nada foi alterado.", "Update cancelled. Nothing was changed."));
+      a.stage = 2;
+      Post(a.window, kProgress, Tr("Instalando. A versão anterior fica em data\\updates\\previous.", "Installing. The previous version stays in data\\updates\\previous."));
+      ApplyUpdate(a.self.parent_path(), dir / "extract" / update.package, update.version, Updates(a) / "previous");
+      std::error_code ec; fs::remove_all(dir, ec);  // only this download
+      Post(a.window, kUpdateFinished, "");
+    } catch (const std::exception& error) { Post(a.window, kUpdateFinished, error.what()); }
+  });
+}
 void Labels(App& a) {
   Set(a.console_language_label, Tr("Idioma da dashboard, Guide e jogos", "Dashboard, Guide and game language"));
   Set(a.console_country_label, Tr("Região / localidade", "Region / locale"));
@@ -897,8 +979,9 @@ void Labels(App& a) {
        {kRetry, "Tentar novamente", "Try again"}, {kBannerDetails, "Diagnóstico", "Diagnostics"}, {kBannerLibrary, "Ver biblioteca", "View library"},
        {kDismiss, "Fechar", "Dismiss"}}) Set(Item(a, id), Tr(pt, en));
   Set(Item(a, kLanguage), english ? "Language: English" : "Idioma: Português");
+  if (a.update) Set(Item(a, kUpdate), Tr("Instalar ", "Install ") + a.update->version);
   SendMessageW(a.search, EM_SETCUEBANNER, TRUE, reinterpret_cast<LPARAM>(WTr("Buscar jogo, Title ID ou versão", "Search game, Title ID or version").c_str()));
-  Set(a.footer, Tr("Prévia para Windows\r\nSeus arquivos permanecem neste computador.", "Windows preview\r\nYour files stay on this computer."));
+  Set(a.footer, Tr("Prévia v", "Preview v") + X360N_VERSION + Tr(" · Windows\r\nSeus arquivos permanecem neste computador.", " · Windows\r\nYour files stay on this computer."));
   UpdateRendererControls(a);
 }
 fs::path PickFolder(HWND owner, const wchar_t* title, bool folder = true) {
@@ -1651,6 +1734,7 @@ LRESULT CALLBACK WndProc(HWND window, UINT message, WPARAM wp, LPARAM lp) {
         a->footer = Control(*a, L"STATIC", L"", 0);
         a->headline = Control(*a, L"STATIC", L"", SS_ENDELLIPSIS);
         a->subtitle = Control(*a, L"STATIC", L"", 0);
+        Button(*a, kUpdate, Kind::Primary, ui::icon::download, 1);
         Button(*a, kData, Kind::Secondary, nullptr);
         Button(*a, kCancel, Kind::Secondary, ui::icon::cancel, 2);
         Button(*a, kDismiss, Kind::Ghost, ui::icon::cancel, 2);
@@ -1712,7 +1796,30 @@ LRESULT CALLBACK WndProc(HWND window, UINT message, WPARAM wp, LPARAM lp) {
         a->initializing = false;
         if (!a->preferences.empty()) CheckEnvironmentAsync(*a, a->root);
         else Load(*a, a->root);
+        CheckForUpdate(*a);
         return 0;
+      }
+      case kUpdateChecked: {
+        std::unique_ptr<std::optional<AvailableUpdate>> found(reinterpret_cast<std::optional<AvailableUpdate>*>(lp));
+        if (a->update_check.joinable()) a->update_check.join();
+        a->update = std::move(*found);
+        Labels(*a); Enable(*a);
+        return 0;
+      }
+      case kUpdateFinished: {
+        std::unique_ptr<std::string> error(reinterpret_cast<std::string*>(lp));
+        if (a->worker.joinable()) a->worker.join();
+        a->busy = false; KillTimer(window, 2);
+        if (error->empty()) {
+          // The new files are in place; the old launcher image was only renamed.
+          ShellExecuteW(nullptr, L"open", a->self.c_str(), nullptr, a->self.parent_path().c_str(), SW_SHOWNORMAL);
+          DestroyWindow(window); return 0;
+        }
+        a->result = a->cancel ? 2 : 3;
+        a->result_title = WTr("Atualização não instalada", "Update not installed");
+        Set(a->activity_text, *error + Tr("\r\nA versão atual continua instalada.", "\r\nThe current version is still installed."));
+        Set(a->details, *error + "\r\n" + Utf8(Updates(*a)));
+        Enable(*a); return 0;
       }
       case kEnvironmentChecked: {
         std::unique_ptr<std::string> error(reinterpret_cast<std::string*>(lp));
@@ -1849,9 +1956,21 @@ LRESULT CALLBACK WndProc(HWND window, UINT message, WPARAM wp, LPARAM lp) {
           } else if (HIWORD(wp) == LBN_DBLCLK && IsWindowEnabled(Item(*a, kPrimary))) SendMessageW(Item(*a, kPrimary), BM_CLICK, 0, 0);
           return 0;
         }
+        if (id == kUpdate && a->update) {
+          const auto question = Tr("Instalar a versão ", "Install version ") + a->update->version + Tr(" (atual: ", " (current: ") + X360N_VERSION + ")?\n\n" +
+            Tr("O pacote é baixado do GitHub Releases do x360-native e conferido pelo SHA-256 publicado e pelo índice do próprio pacote. "
+               "A pasta data (ambiente, jogos, perfis e saves) não é alterada; a versão atual fica em data\\updates\\previous. "
+               "O aplicativo reinicia ao final; o ambiente pode pedir para ser atualizado em seguida.",
+               "The package is downloaded from x360-native's GitHub Releases and checked against the published SHA-256 and its own index. "
+               "The data folder (environment, games, profiles and saves) is not changed; the current version stays in data\\updates\\previous. "
+               "The application restarts at the end; the environment may then ask to be updated.");
+          if (MessageBoxW(window, Wide(question).c_str(), L"x360-native", MB_YESNO | MB_ICONINFORMATION) == IDYES) StartUpdate(*a);
+          return 0;
+        }
         if (id == kRetry) {
           a->result = 0;
-          if (a->last_action == kImport && !a->last_source.empty()) Start(*a, kImport, a->last_source);
+          if (a->last_action == kUpdate) StartUpdate(*a);
+          else if (a->last_action == kImport && !a->last_source.empty()) Start(*a, kImport, a->last_source);
           else if (a->last_action == kPrepare || a->last_action == kLaunch || a->last_action == kVerifyTarget) {
             const auto target = std::find_if(a->targets.begin(), a->targets.end(), [&](const auto& t) { return t.id == a->operation_target; });
             if (target == a->targets.end()) throw std::runtime_error("O alvo da operação não está mais neste catálogo. Verifique o ambiente.");
@@ -2108,7 +2227,7 @@ LRESULT CALLBACK WndProc(HWND window, UINT message, WPARAM wp, LPARAM lp) {
           MessageBoxW(window, a->installing ? L"Conclua ou cancele pelo instalador Microsoft e aguarde o retorno." : a->session ? L"Encerre pela janela da plataforma. Voltar pelo menu do jogo retorna à dashboard." : a->finishing_session ? L"A sessão já encerrou. Aguarde a conclusão dos registros locais." : L"Cancele a operação e aguarde sua conclusão antes de fechar.", L"Operação em andamento", MB_OK | MB_ICONINFORMATION); return 0;
         }
         DestroyWindow(window); return 0;
-      case WM_DESTROY: PostQuitMessage(0); return 0;
+      case WM_DESTROY: a->closing = true; PostQuitMessage(0); return 0;
     }
   } catch (const std::exception& error) {
     if (!a->worker.joinable()) { a->busy = false; a->session = false; }
