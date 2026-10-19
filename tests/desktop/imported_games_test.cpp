@@ -12,6 +12,7 @@
 #include <cstdlib>
 #include <chrono>
 #include <iostream>
+#include <optional>
 #include <nlohmann/json.hpp>
 #include <toml++/toml.hpp>
 
@@ -28,13 +29,23 @@ std::string Xex(unsigned version = 1, unsigned title = 0x12345678) {
   s.replace(0, 4, "XEX2"); be(4,1); be(8,56); be(20,1); be(24,0x40006); be(28,32);
   be(32,0xAABBCCDD); be(36,version); be(44,title); return s;
 }
-// Minimal PIRS header: Title ID in the execution info, UTF-16BE title name.
-std::string ArtPackage(unsigned title, const std::u16string& name) {
+// Minimal PIRS header: Title ID in the execution info, UTF-16BE title name,
+// package and title thumbnails (sizes are written as given, data is truncated).
+std::string ArtPackage(unsigned title, const std::u16string& name,
+                       const std::string& thumbnail = {}, const std::string& title_thumbnail = {},
+                       std::optional<unsigned> thumbnail_size = {}) {
   std::string s(0x971A, '\0'); s.replace(0, 4, "PIRS");
-  for (int i=0; i<4; ++i) s[0x360+i]=char(title>>(24-8*i));
+  const auto be = [&](size_t p, unsigned n) { for (int i=0; i<4; ++i) s[p+i]=char(n>>(24-8*i)); };
+  be(0x360, title);
   for (size_t i=0; i<name.size(); ++i) { s[0x1691+2*i]=char(name[i]>>8); s[0x1692+2*i]=char(name[i]&0xFF); }
+  be(0x1712, thumbnail_size.value_or(unsigned(thumbnail.size()))); be(0x1716, unsigned(title_thumbnail.size()));
+  s.replace(0x171A, std::min<size_t>(thumbnail.size(), 0x3D00), thumbnail.substr(0, 0x3D00));
+  s.replace(0x571A, title_thumbnail.size(), title_thumbnail);
   return s;
 }
+std::string Png(const std::string& payload) { return std::string("\x89PNG\r\n\x1A\n", 8) + payload; }
+std::string Sha(const std::string& s) { return Sha256Hex({reinterpret_cast<const uint8_t*>(s.data()), s.size()}); }
+std::string Bytes(const std::vector<uint8_t>& v) { return {v.begin(), v.end()}; }
 struct Fixture {
   fs::path root = UniqueTempPath("universal_library");
   ProjectPaths paths{root};
@@ -85,6 +96,55 @@ TEST_CASE("folder imports name discs from their own title art package", "[univer
   games = ReadCatalog(f.paths); REQUIRE(games.size() == 1);
   CHECK(games[0].label.starts_with(expected));
   CHECK(Inspect(f.paths, games[0]).inputs_ok);
+}
+TEST_CASE("imports record the package icon by hash and readers verify it", "[universal][thumbnail]") {
+  Fixture f; std::string expected;
+  const auto icon = Png("package icon"), title_icon = Png("title icon");
+  SECTION("disc art package icon") { Write(f.source/"nxeart", ArtPackage(0x12345678, u"Disc", icon, title_icon)); expected = icon; }
+  SECTION("title icon when the package icon is empty") { Write(f.source/"nxeart", ArtPackage(0x12345678, u"Disc", {}, title_icon)); expected = title_icon; }
+  SECTION("data that is not PNG is ignored") { Write(f.source/"nxeart", ArtPackage(0x12345678, u"Disc", "GIF89a icon")); }
+  SECTION("size beyond the shared thumbnail field is ignored") { Write(f.source/"nxeart", ArtPackage(0x12345678, u"Disc", icon, {}, 0x3D01)); }
+  SECTION("art package of another title is ignored") { Write(f.source/"nxeart", ArtPackage(0x87654321, u"Other", icon)); }
+  ImportGame(f.paths, {}, f.source, f.source);
+  auto games = ReadCatalog(f.paths); REQUIRE(games.size() == 1);
+  CHECK(games[0].import_error.empty());
+  if (expected.empty()) {
+    CHECK(games[0].thumbnail_sha256.empty()); CHECK(ReadThumbnail(games[0]).empty());
+    CHECK_FALSE(fs::exists(f.paths.local()/"catalog/thumbnails"));
+    return;
+  }
+  CHECK(games[0].thumbnail_sha256 == Sha(expected));
+  CHECK(games[0].thumbnail == f.paths.local()/"catalog/thumbnails"/(Sha(expected) + ".png"));
+  CHECK(Bytes(ReadThumbnail(games[0])) == expected);
+  Write(games[0].thumbnail, Png("changed"));
+  CHECK(ReadThumbnail(games[0]).empty());  // presentation only: the game stays listed
+  CHECK(ReadCatalog(f.paths)[0].import_error.empty());
+}
+TEST_CASE("package imports take the container icon and reimport restores it", "[universal][thumbnail]") {
+  Fixture f; const auto icon = Png("arcade icon");
+  const auto package = f.root/"package";
+  Write(package, ArtPackage(0x12345678, u"Arcade Game", icon));
+  const auto id = ImportGame(f.paths, {}, f.source, package);
+  auto games = ReadCatalog(f.paths); REQUIRE(games.size() == 1);
+  CHECK(games[0].label.starts_with("Arcade Game"));
+  CHECK(Bytes(ReadThumbnail(games[0])) == icon);
+  fs::path record_path;
+  for (const auto& entry : fs::directory_iterator(f.paths.local()/"catalog")) if (entry.path().extension() == ".json") record_path = entry.path();
+  REQUIRE(Utf8(record_path.stem()).starts_with(id.substr(1)));
+  auto record = nlohmann::json::parse(std::ifstream(record_path));
+  SECTION("older record without an icon gains it") {
+    record.erase("thumbnail_sha256"); Write(record_path, record.dump());
+    fs::remove_all(f.paths.local()/"catalog/thumbnails");
+    CHECK(ReadCatalog(f.paths)[0].thumbnail_sha256.empty());
+    ImportGame(f.paths, ReadCatalog(f.paths), f.source, package);
+    games = ReadCatalog(f.paths); REQUIRE(games.size() == 1);
+    CHECK(Bytes(ReadThumbnail(games[0])) == icon);
+  }
+  SECTION("malformed recorded hash is a catalog error") {
+    record["thumbnail_sha256"] = "../../outside"; Write(record_path, record.dump());
+    games = ReadCatalog(f.paths); REQUIRE(games.size() == 1);
+    CHECK(games[0].import_error.find("Invalid catalog thumbnail") != std::string::npos);
+  }
 }
 TEST_CASE("launch inventory hashing preserves portable identities and rejects tampering", "[launch-preflight]") {
   Fixture f;

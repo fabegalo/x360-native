@@ -43,6 +43,14 @@ inline void Fill(HDC dc, const RECT& rect, COLORREF c) {
   SetDCBrushColor(dc, c);
   FillRect(dc, &r, static_cast<HBRUSH>(GetStockObject(DC_BRUSH)));
 }
+inline void RoundPath(Gdiplus::GraphicsPath& path, const Gdiplus::RectF& rf, int radius) {
+  const float d = float(radius) * 2;
+  path.AddArc(rf.X, rf.Y, d, d, 180, 90);
+  path.AddArc(rf.GetRight() - d, rf.Y, d, d, 270, 90);
+  path.AddArc(rf.GetRight() - d, rf.GetBottom() - d, d, d, 0, 90);
+  path.AddArc(rf.X, rf.GetBottom() - d, d, d, 90, 90);
+  path.CloseFigure();
+}
 // Anti-aliased rounded rectangle. `border` < 0 means no outline.
 inline void Round(HDC dc, RECT r, int radius, COLORREF fill, COLORREF border = CLR_INVALID, int border_width = 1, bool dashed = false) {
   r = Off(r);
@@ -50,19 +58,30 @@ inline void Round(HDC dc, RECT r, int radius, COLORREF fill, COLORREF border = C
   g.SetSmoothingMode(Gdiplus::SmoothingModeAntiAlias);
   const float bw = float(border_width);
   Gdiplus::RectF rf(float(r.left) + bw / 2, float(r.top) + bw / 2, float(r.right - r.left) - bw, float(r.bottom - r.top) - bw);
-  const float d = float(radius) * 2;
   Gdiplus::GraphicsPath path;
-  path.AddArc(rf.X, rf.Y, d, d, 180, 90);
-  path.AddArc(rf.GetRight() - d, rf.Y, d, d, 270, 90);
-  path.AddArc(rf.GetRight() - d, rf.GetBottom() - d, d, d, 0, 90);
-  path.AddArc(rf.X, rf.GetBottom() - d, d, d, 90, 90);
-  path.CloseFigure();
+  RoundPath(path, rf, radius);
   if (fill != CLR_INVALID) { Gdiplus::SolidBrush brush(Gc(fill)); g.FillPath(&brush, &path); }
   if (border != CLR_INVALID) {
     Gdiplus::Pen pen(Gc(border), bw);
     if (dashed) pen.SetDashStyle(Gdiplus::DashStyleDash);
     g.DrawPath(&pen, &path);
   }
+}
+// Image stretched into an anti-aliased rounded rectangle.
+inline void Image(HDC dc, RECT r, int radius, Gdiplus::Image& image) {
+  r = Off(r);
+  const UINT iw = image.GetWidth(), ih = image.GetHeight();
+  if (!iw || !ih || r.right <= r.left || r.bottom <= r.top) return;
+  Gdiplus::Graphics g(dc);
+  g.SetSmoothingMode(Gdiplus::SmoothingModeAntiAlias);
+  g.SetInterpolationMode(Gdiplus::InterpolationModeHighQualityBicubic);
+  g.SetPixelOffsetMode(Gdiplus::PixelOffsetModeHighQuality);
+  Gdiplus::TextureBrush brush(&image, Gdiplus::WrapModeClamp);
+  brush.TranslateTransform(float(r.left), float(r.top));
+  brush.ScaleTransform(float(r.right - r.left) / float(iw), float(r.bottom - r.top) / float(ih));
+  Gdiplus::GraphicsPath path;
+  RoundPath(path, Gdiplus::RectF(float(r.left), float(r.top), float(r.right - r.left), float(r.bottom - r.top)), radius);
+  g.FillPath(&brush, &path);
 }
 inline void Circle(HDC dc, RECT r, COLORREF fill) {
   r = Off(r);

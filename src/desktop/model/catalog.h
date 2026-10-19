@@ -28,6 +28,9 @@ struct Target {
   bool importable = true;
   bool aot = true, catalogued = false, generic_aot = false;
   std::string title_id, version, media_id, original_name, import_error;
+  // Package icon recorded at import (content-addressed in .local/catalog/thumbnails).
+  std::filesystem::path thumbnail;
+  std::string thumbnail_sha256;
 };
 struct Inspection {
   bool inputs_ok = true, prepared = false, interrupted = false;
@@ -73,6 +76,8 @@ void GenerateAotProject(const ProjectPaths& paths, const Target& target);
 std::string ImportGame(const ProjectPaths& paths, const std::vector<Target>& targets,
     const std::filesystem::path& source, const std::filesystem::path& original,
     const std::function<bool()>& cancelled = {});
+// Presentation only: the recorded icon bytes, or empty when absent or changed.
+std::vector<uint8_t> ReadThumbnail(const Target& target);
 std::vector<std::string> DetectImportTargets(const std::vector<Target>& targets,
                                             const std::filesystem::path& source,
                                             const std::function<bool()>& cancelled = {});

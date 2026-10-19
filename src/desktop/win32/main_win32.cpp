@@ -83,6 +83,8 @@ struct App {
   RendererSettings renderer_settings;
   ConsoleSettings console_settings;
   std::vector<Target> targets;
+  // Decoded once per icon hash; a failed decode stays cached as empty.
+  std::map<std::string, std::unique_ptr<Gdiplus::Bitmap>> thumbnails;
   struct CheckedTarget { Inspection state; std::vector<std::string> library; bool added = false; };
   std::vector<CheckedTarget> checked;
   // Worker writes only pending results; UI adopts them after completion/join.
@@ -136,6 +138,7 @@ struct App {
   bool preview_empty = false;
   fs::path auto_import;  // review aid: import this path once the first verification finishes
   fs::path capture_settings;  // self-capture after loading real preferences; no input automation
+  int capture_page = kSettings;  // page shown in the self-capture (Settings or Library)
   unsigned capture_ticks = 0;
 #endif
   ~App() {
@@ -1455,6 +1458,34 @@ void DrawButton(App& a, const DRAWITEMSTRUCT& item) {
   if (focus) ui::Round(dc, {0, 0, w, h}, style.kind == Kind::Chip ? h / 2 : s(10), CLR_INVALID, P.accent_text, 2);
   buffer.Flush(item.rcItem.left, item.rcItem.top);
 }
+// The recorded package icon, decoded into a premultiplied copy that does not
+// keep the source stream alive. A missing or changed file keeps the glyph.
+Gdiplus::Bitmap* Thumbnail(App& a, const Target& t) {
+  if (t.thumbnail_sha256.empty()) return nullptr;
+  auto [it, inserted] = a.thumbnails.try_emplace(t.thumbnail_sha256);
+  if (!inserted) return it->second.get();
+  const auto png = ReadThumbnail(t);
+  if (png.empty()) return nullptr;
+  HGLOBAL memory = GlobalAlloc(GMEM_MOVEABLE, png.size());
+  if (!memory) return nullptr;
+  void* bytes = GlobalLock(memory);
+  if (!bytes) { GlobalFree(memory); return nullptr; }
+  memcpy(bytes, png.data(), png.size()); GlobalUnlock(memory);
+  IStream* stream = nullptr;
+  if (FAILED(CreateStreamOnHGlobal(memory, TRUE, &stream))) { GlobalFree(memory); return nullptr; }
+  {
+    Gdiplus::Bitmap decoded(stream);
+    const UINT w = decoded.GetWidth(), h = decoded.GetHeight();
+    if (decoded.GetLastStatus() == Gdiplus::Ok && w && h && w <= 1024 && h <= 1024) {
+      auto copy = std::make_unique<Gdiplus::Bitmap>(INT(w), INT(h), PixelFormat32bppPARGB);
+      Gdiplus::Graphics g(copy.get());
+      if (copy->GetLastStatus() == Gdiplus::Ok && g.DrawImage(&decoded, 0, 0, INT(w), INT(h)) == Gdiplus::Ok)
+        it->second = std::move(copy);
+    }
+  }
+  stream->Release();
+  return it->second.get();
+}
 void DrawRow(App& a, const DRAWITEMSTRUCT& item) {
   if (item.itemID == UINT(-1)) return;
   const int w = item.rcItem.right - item.rcItem.left, h = item.rcItem.bottom - item.rcItem.top;
@@ -1471,8 +1502,11 @@ void DrawRow(App& a, const DRAWITEMSTRUCT& item) {
     RECT card{s(8), s(4), w - s(8), h - s(4)};
     ui::Round(dc, card, s(12), sel ? ui::Mix(P.surface, P.accent, 18) : P.surface2, sel ? P.accent_text : P.border, sel && focus ? 2 : 1);
     RECT badge_icon{card.left + s(14), card.top + s(10), card.left + s(14) + s(44), card.top + s(10) + s(44)};
-    ui::Round(dc, badge_icon, s(10), ui::Mix(P.surface2, ToneColor(tone == Tone::Neutral ? Tone::Info : tone), 18));
-    ui::Text(dc, a.fonts.icon, dashboard ? ui::icon::dashboard : ui::icon::gamepad, badge_icon, ToneColor(tone == Tone::Neutral ? Tone::Info : tone), DT_SINGLELINE | DT_VCENTER | DT_CENTER);
+    if (auto* image = dashboard ? nullptr : Thumbnail(a, t)) ui::Image(dc, badge_icon, s(10), *image);
+    else {
+      ui::Round(dc, badge_icon, s(10), ui::Mix(P.surface2, ToneColor(tone == Tone::Neutral ? Tone::Info : tone), 18));
+      ui::Text(dc, a.fonts.icon, dashboard ? ui::icon::dashboard : ui::icon::gamepad, badge_icon, ToneColor(tone == Tone::Neutral ? Tone::Info : tone), DT_SINGLELINE | DT_VCENTER | DT_CENTER);
+    }
     const auto status = RowLabel(a, row, dashboard);
     const int bw = ChipWidth(dc, a, status);
     const int chip_x = card.right - s(16) - bw, chip_y = (card.top + card.bottom) / 2 - s(13);
@@ -1887,7 +1921,8 @@ LRESULT CALLBACK WndProc(HWND window, UINT message, WPARAM wp, LPARAM lp) {
                   << " selected=" << SendMessageW(combo, CB_GETCURSEL, 0, 0) << '\n';
           }
           state.close();
-          a->settings = true; a->show_details = false;
+          if (a->capture_page == kGames) { Navigate(*a, kGames); Load(*a, a->root); }
+          else { a->settings = true; a->show_details = false; }
           SetPageTexts(*a); Layout(*a);
           ShowWindow(window, SW_SHOWNOACTIVATE);
           RedrawWindow(window, nullptr, nullptr, RDW_INVALIDATE | RDW_UPDATENOW | RDW_ALLCHILDREN);
@@ -2115,6 +2150,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show) {
     else if (option == L"--dpi" && i + 1 < count) g_dpi_override = UINT(_wtoi(args[++i]));
     else if (option == L"--import" && i + 1 < count) app.auto_import = args[++i];
     else if (option == L"--capture-settings" && i + 1 < count) app.capture_settings = args[++i];
+    else if (option == L"--capture-games" && i + 1 < count) { app.capture_settings = args[++i]; app.capture_page = kGames; }
 #endif
   }
   LocalFree(args);

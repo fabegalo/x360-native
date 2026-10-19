@@ -111,10 +111,44 @@ bool ReadPackageHeader(const fs::path& file, rex::filesystem::StfsHeader& header
   using Type = rex::filesystem::XContentPackageType;
   return magic == Type::kCon || magic == Type::kLive || magic == Type::kPirs;
 }
-void PackageMetadata(const fs::path& original, Json& r) {
+// Bounded by the field shared by both metadata versions; larger v1 icons are skipped.
+constexpr size_t kThumbnailLimit = rex::filesystem::XContentMetadata::kThumbLengthV2;
+// The package's own icon, else its title icon; only PNG data is kept.
+std::vector<uint8_t> Thumbnail(const rex::filesystem::XContentMetadata& md) {
+  static constexpr uint8_t kPng[] = {0x89, 'P', 'N', 'G', '\r', '\n', 0x1A, '\n'};
+  for (const auto& [data, size] : {std::pair{md.thumbnail, uint32_t(md.thumbnail_size)},
+                                   std::pair{md.title_thumbnail, uint32_t(md.title_thumbnail_size)}}) {
+    if (size < sizeof(kPng) || size > kThumbnailLimit || !std::equal(std::begin(kPng), std::end(kPng), data)) continue;
+    return {data, data + size};
+  }
+  return {};
+}
+// Content-addressed, so identical icons share one file; readers verify the hash.
+std::string SaveThumbnail(const ProjectPaths& paths, const std::vector<uint8_t>& png) {
+  const auto sha = Sha256Hex(png);
+  WorkspaceLease lease(paths);
+  const auto root = paths.local() / "catalog" / "thumbnails";
+  const auto file = root / (sha + ".png");
+  Safe(file, paths.local());
+  if (const auto existing = DigestFile(file); existing && existing->sha256 == sha) return sha;
+  fs::create_directories(root);
+  const auto tmp = root / (sha + ".tmp"); Safe(tmp, paths.local());
+  std::ofstream out(tmp, std::ios::binary);
+  out.write(reinterpret_cast<const char*>(png.data()), std::streamsize(png.size())); out.close();
+  if (!out) throw std::runtime_error("Could not persist the game thumbnail");
+#ifdef _WIN32
+  if (!MoveFileExW(tmp.c_str(), file.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH))
+    throw std::runtime_error("Could not publish the game thumbnail");
+#else
+  fs::rename(tmp, file);
+#endif
+  return sha;
+}
+void PackageMetadata(const fs::path& original, Json& r, std::vector<uint8_t>& thumbnail) {
   auto header = std::make_unique<rex::filesystem::StfsHeader>();
   if (!ReadPackageHeader(original, *header)) return;
   const auto& md = header->metadata;
+  thumbnail = Thumbnail(md);
   r["package_title_id"] = fmt::format("{:08X}", uint32_t(md.execution_info.title_id));
   r["content_type"] = fmt::format("{:08X}", uint32_t(md.content_type.get()));
   r["publisher"] = Name(md.publisher_raw.uint);
@@ -124,18 +158,19 @@ void PackageMetadata(const fs::path& original, Json& r) {
   r["display_names"] = names;
   if (r["name"] == "") for (const auto& name : names) if (name != "") { r["name"] = name; break; }
 }
-// Disc roots carry the dashboard art package (nxeart). Only its title name is
-// used: its content type and display names describe the art package, not the
-// game, and a package from another title is ignored.
-void DiscArtName(const fs::path& root, Json& r) {
-  if (r["name"] != "" || r["title_id"] == "") return;
+// Disc roots carry the dashboard art package (nxeart). Only its title name and
+// icon are used: its content type and display names describe the art package,
+// not the game, and a package from another title is ignored.
+void DiscArt(const fs::path& root, Json& r, std::vector<uint8_t>& thumbnail) {
+  if ((r["name"] != "" && !thumbnail.empty()) || r["title_id"] == "") return;
   for (const auto& entry : fs::directory_iterator(root)) {
     if (entry.is_symlink() || !entry.is_regular_file() || Key(Utf8(entry.path().filename())) != "nxeart") continue;
     auto header = std::make_unique<rex::filesystem::StfsHeader>();
     if (!ReadPackageHeader(entry.path(), *header)) return;
     const auto& md = header->metadata;
     if (fmt::format("{:08X}", uint32_t(md.execution_info.title_id)) != r["title_id"].get<std::string>()) return;
-    r["name"] = Name(md.title_name_raw.uint);
+    if (r["name"] == "") r["name"] = Name(md.title_name_raw.uint);
+    if (thumbnail.empty()) thumbnail = Thumbnail(md);
     return;
   }
 }
@@ -185,8 +220,10 @@ std::string ImportGame(const ProjectPaths& paths, const std::vector<Target>& tar
     {"original_name", identity.original_name}, {"base_version", identity.base_version}, {"region", identity.region},
     {"disc_number", identity.disc_number}, {"disc_count", identity.disc_count},
     {"imports", identity.imports}, {"modules", modules}, {"name", ""}, {"source", Utf8(original)}, {"complete", false}};
-  PackageMetadata(original, record);
-  DiscArtName(source, record);
+  std::vector<uint8_t> thumbnail;
+  PackageMetadata(original, record, thumbnail);
+  DiscArt(source, record, thumbnail);
+  if (!thumbnail.empty()) record["thumbnail_sha256"] = SaveThumbnail(paths, thumbnail);
   Target target; target.id = id; target.aot = false;
   // Discs and content revisions share a title directory, never a writable root.
   // DLC packages may live alongside them under dlc/, outside every game root.
@@ -229,6 +266,7 @@ std::string ImportGame(const ProjectPaths& paths, const std::vector<Target>& tar
     for (auto& input : target.inputs) input.destination = target.game_root / input.source_relative;
     previously_complete = old.value("complete", false);
     if (record["name"] == "") record["name"] = old.value("name", "");
+    if (!record.contains("thumbnail_sha256") && old.contains("thumbnail_sha256")) record["thumbnail_sha256"] = old["thumbnail_sha256"];
   }
   record["content_root"] = Utf8(target.game_root.lexically_relative(paths.inputs()));
   if (!previously_complete) Save(paths, id, record); // durable interruption marker before copying
@@ -281,6 +319,11 @@ void ReadImportedGames(const ProjectPaths& paths, std::vector<Target>& targets) 
       }
       t.title_id = r.at("title_id"); t.version = r.at("version"); t.media_id = r.at("media_id");
       t.original_name = r.at("original_name");
+      if (r.contains("thumbnail_sha256")) {
+        t.thumbnail_sha256 = r.at("thumbnail_sha256").get<std::string>();
+        if (!HashValid(t.thumbnail_sha256)) throw std::runtime_error("Invalid catalog thumbnail");
+        t.thumbnail = root / "thumbnails" / (t.thumbnail_sha256 + ".png");
+      }
       auto name = r.at("name").get<std::string>();
       if (name.empty()) name = "Xbox 360" + (t.title_id.empty() ? " (unknown title)" : " " + t.title_id);
       t.label = t.label_en = name + (t.version.empty() ? "" : " — " + t.version);
@@ -290,6 +333,7 @@ void ReadImportedGames(const ProjectPaths& paths, std::vector<Target>& targets) 
         if (recipe->game_root != t.game_root) existing.preparation_source = t.game_root;
         existing.catalogued = true; existing.title_id = t.title_id; existing.version = t.version;
         existing.media_id = t.media_id; existing.original_name = t.original_name; existing.import_error = t.import_error;
+        existing.thumbnail = t.thumbnail; existing.thumbnail_sha256 = t.thumbnail_sha256;
         existing.label = existing.label_en = t.label;
         continue;
       }
@@ -330,5 +374,18 @@ void ReadImportedGames(const ProjectPaths& paths, std::vector<Target>& targets) 
       catch (const std::exception& e) { t.import_error = std::string("Catalog error; record preserved: ") + e.what(); t.inputs.clear(); }
     targets.push_back(std::move(t));
   }
+}
+
+std::vector<uint8_t> ReadThumbnail(const Target& target) {
+  if (target.thumbnail_sha256.empty()) return {};
+  std::error_code ec;
+  if (fs::is_symlink(target.thumbnail, ec) || !fs::is_regular_file(target.thumbnail, ec)) return {};
+  const auto size = fs::file_size(target.thumbnail, ec);
+  if (ec || size > kThumbnailLimit) return {};
+  std::vector<uint8_t> png(size);
+  std::ifstream in(target.thumbnail, std::ios::binary);
+  in.read(reinterpret_cast<char*>(png.data()), std::streamsize(size));
+  if (size_t(in.gcount()) != size || Sha256Hex(png) != target.thumbnail_sha256) return {};
+  return png;
 }
 }
