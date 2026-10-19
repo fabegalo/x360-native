@@ -24,6 +24,7 @@ struct Target {
   std::vector<std::filesystem::path> runtime_files;
   LibraryContent library;
   bool session = false;
+  bool launch_library = false;  // explicit manifest opt-in, independent of opening a dashboard
   bool importable = true;
   bool aot = true, catalogued = false, generic_aot = false;
   std::string title_id, version, media_id, original_name, import_error;

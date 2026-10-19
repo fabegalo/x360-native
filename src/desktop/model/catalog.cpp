@@ -107,6 +107,7 @@ std::vector<Target> ReadCatalog(const ProjectPaths& paths) {
     }
     t.manifest = dir.path() / (t.id + "_manifest.toml");
     auto profile = Read(t.manifest);
+    t.launch_library = profile["x360n"]["launch_library"].value_or(false);
     t.game_root = Resolve(dir.path(), Text(profile["project"]["game_root"]));
     // A codegen VFS root wider than the content (embedded system modules).
     if (profile["x360n"]["game_data_root"]) t.game_root = Resolve(dir.path(), Text(profile["x360n"]["game_data_root"]));

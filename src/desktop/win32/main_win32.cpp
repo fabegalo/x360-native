@@ -659,6 +659,9 @@ void InspectSelected(App& a) {
     state = Tr("Preparação ainda indisponível para esta versão.\r\nConsulte a pendência no Diagnóstico; seus arquivos serão preservados.", "Preparation is not yet available for this version.\r\nSee Diagnostics for its requirements; your files are preserved.");
     chip(Tr("Indisponível", "Unavailable"), Tone::Warn);
   }
+  if (t.session && !t.launch_library && a.current.inputs_ok && a.current.prepared)
+    state = Tr("Dashboard original preparada para iniciar.\r\nConsulte as limitações desta versão no Diagnóstico.",
+               "Original dashboard prepared to start.\r\nSee this version's limitations in Diagnostics.");
   if (t.generic_aot) state = a.current.prepared ? Tr("Build AOT verificado. Compatibilidade de execução ainda não comprovada.\r\nTente iniciar pela My Games original.", "AOT build verified. Runtime compatibility is not yet proven.\r\nTry launching through original My Games.") :
       Tr("Preparação AOT automática disponível. Compilar não garante execução.\r\nFalhas e estágios ficam registrados no Diagnóstico para nova tentativa.", "Automatic AOT preparation available. Compilation does not guarantee execution.\r\nErrors and stages are saved in Diagnostics for retry.");
   if (a.games && a.current.prepared) primary(Tr("Preparado para My Games", "Prepared for My Games"));

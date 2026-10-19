@@ -162,13 +162,14 @@ std::vector<std::string> InstalledGames(const ProjectPaths& paths, const std::ve
 }
 std::vector<std::string> InspectLibrary(const ProjectPaths& paths, const Target& session, const std::vector<Target>& catalog) {
   std::vector<std::string> issues;
+  if (session.session && !session.launch_library) return issues;
   if (!session.session) {
     if (!fs::is_regular_file(session.exe) || fs::exists(PreparationMarker(paths, session))) return issues;
     // A compiled game can still have an interrupted registration. Check only
     // this game in dashboards already imported, without making unrelated games
     // dependencies of its ready state.
     for (const auto& dashboard : catalog) {
-      if (!dashboard.session || dashboard.inputs.empty() || !fs::is_regular_file(dashboard.inputs.front().destination)) continue;
+      if (!dashboard.session || !dashboard.launch_library || dashboard.inputs.empty() || !fs::is_regular_file(dashboard.inputs.front().destination)) continue;
       auto missing = InspectLibrary(paths, dashboard, {session});
       issues.insert(issues.end(), missing.begin(), missing.end());
     }
@@ -191,7 +192,7 @@ std::vector<std::string> InspectLibrary(const ProjectPaths& paths, const Target&
 }
 void PrepareLibrary(const ProjectPaths& paths, const Target& session, const std::vector<Target>& catalog,
                     const std::function<bool()>& cancelled) {
-  if (!session.session) return;
+  if (!session.session || !session.launch_library) return;
   WorkspaceLease lease(paths);
   auto stop = [&] { if (cancelled && cancelled()) throw std::runtime_error("Registro cancelado. Conteúdo e saves existentes foram preservados."); };
   const auto installed = InstalledGames(paths, catalog);

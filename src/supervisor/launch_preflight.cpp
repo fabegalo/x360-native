@@ -29,10 +29,11 @@ void PrimeLaunchVerification(const ProjectPaths& paths,
   auto prime = [&](const desktop::Target& target) {
     inputs(target);
     if (target.session) {
-      for (const auto& game : catalog) if (installed(game)) { inputs(game); copies(target, game); }
+      if (target.launch_library)
+        for (const auto& game : catalog) if (installed(game)) { inputs(game); copies(target, game); }
     } else if (installed(target)) {
       for (const auto& dashboard : catalog)
-        if (dashboard.session && !dashboard.inputs.empty() && fs::is_regular_file(dashboard.inputs.front().destination))
+        if (dashboard.session && dashboard.launch_library && !dashboard.inputs.empty() && fs::is_regular_file(dashboard.inputs.front().destination))
           copies(dashboard, target);
     }
   };

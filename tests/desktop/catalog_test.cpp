@@ -156,11 +156,53 @@ TEST_CASE("unsupported and corrupt files are not copied or accepted as compatibl
   CHECK_FALSE(fs::exists(f.target.game_root));
 }
 TEST_CASE("optional games do not prevent an empty dashboard library") {
-  Fixture f; Target session; session.session = true;
+  Fixture f; Target session; session.session = true; session.launch_library = true;
   session.user_root = f.paths.local() / "user/dashboard";
   CHECK(InspectLibrary(f.paths, session, {f.target}).empty());
   CHECK_NOTHROW(PrepareLibrary(f.paths, session, {f.target}));
   CHECK_FALSE(fs::exists(session.user_root));
+}
+TEST_CASE("dashboard sessions without library opt-in do not require or install games", "[dashboard-library-optin]") {
+  Fixture f;
+  Import(f.paths, f.target, f.source);
+  Write(f.target.exe, "prepared game fixture"); f.Receipt();
+  auto game = f.target;
+  game.library = {"12345678", "000D0000", "fixture", "Fixture game", Hash("package")};
+  const auto extra = game.game_root / "game-data.bin";
+  Write(extra, "game-only input");
+  game.inputs.push_back({extra, "game-data.bin", Hash("game-only input"), {}});
+  WriteTestReceipt(f.paths, game.id, game.manifest, game.exe,
+      {game.inputs[0].destination, game.inputs[1].destination, extra});
+  Target dashboard;
+  dashboard.session = true;
+  dashboard.user_root = f.paths.local() / "user/isolated-dashboard";
+  dashboard.inputs = f.target.inputs;
+  REQUIRE_FALSE(dashboard.launch_library);
+  CHECK(InspectLibrary(f.paths, dashboard, {game}).empty());
+  CHECK_NOTHROW(PrepareLibrary(f.paths, dashboard, {game}));
+  CHECK_FALSE(fs::exists(dashboard.user_root));
+  // A prepared game's readiness must not require registration in this dashboard.
+  CHECK(InspectLibrary(f.paths, game, {game, dashboard}).empty());
+  {
+    DigestBatch batch;
+    dashboard.id = "isolated";
+    dashboard.kind = "dashboard";
+    PrimeLaunchVerification(f.paths, {game, dashboard}, dashboard.id);
+    // Verification handles deny writes. The unrelated game's unique input
+    // must not have been included in this dashboard's read-ahead transaction.
+    std::fstream writable(extra, std::ios::in | std::ios::out | std::ios::binary);
+    CHECK(writable.is_open());
+  }
+  dashboard.launch_library = true;
+  CHECK_FALSE(InspectLibrary(f.paths, dashboard, {game}).empty());
+  PrepareLibrary(f.paths, dashboard, {game});
+  CHECK(InspectLibrary(f.paths, dashboard, {game}).empty());
+  CHECK(fs::exists(dashboard.user_root));
+  // Disabling library participation preserves installed content and user data.
+  Write(dashboard.user_root / "profiles/existing", "existing profile");
+  dashboard.launch_library = false;
+  CHECK_NOTHROW(PrepareLibrary(f.paths, dashboard, {game}));
+  CHECK(DigestFile(dashboard.user_root / "profiles/existing")->sha256 == Hash("existing profile"));
 }
 TEST_CASE("catalog routing can describe an absent game but execution still rejects it") {
   Fixture f; auto manifest = f.root / "profile.toml";
@@ -472,8 +514,18 @@ game_root = "../../.local/inputs/dashboards/test"
   auto catalog = ReadCatalog(f.paths);
   REQUIRE(catalog.size() == 1);
   CHECK(catalog[0].session);
+  CHECK_FALSE(catalog[0].launch_library);
   CHECK(catalog[0].game_root == fs::weakly_canonical(f.target.game_root));
   CHECK(Utf8(f.root).find("á") != std::string::npos);
+  for (const bool enabled : {true, false}) {
+    Write(f.root / "titles/dash_test/dash_test_manifest.toml",
+          std::string("[project]\ngame_root='../../.local/inputs/dashboards/test'\n[x360n]\nlaunch_library=") +
+          (enabled ? "true\n" : "false\n"));
+    const auto updated = ReadCatalog(f.paths);
+    REQUIRE(updated.size() == 1);
+    CHECK(updated[0].session);
+    CHECK(updated[0].launch_library == enabled);
+  }
 }
 
 TEST_CASE("missing runtime and interrupted build never qualify an old exe as prepared") {
@@ -507,7 +559,7 @@ TEST_CASE("original library registration validates all bytes and publishes the h
   Write(f.target.exe, "prepared fixture"); f.Receipt();
   auto game = f.target;
   game.library = {"584108B7", "000D0000", "F9432A7FE407A3C196C95D0FFD4A540937FD4EEC58", "Castle Crashers", Hash("package provenance")};
-  Target session; session.session = true; session.user_root = f.paths.local() / "user/dashboard";
+  Target session; session.session = true; session.launch_library = true; session.user_root = f.paths.local() / "user/dashboard";
   session.dependencies = {game.id};
   session.inputs = game.inputs;
   CHECK_FALSE(InspectLibrary(f.paths, game, {game, session}).empty());
@@ -538,7 +590,7 @@ TEST_CASE("original library supports long content paths without Windows policy c
   Write(f.target.exe, "prepared fixture"); f.Receipt();
   auto game = f.target;
   game.library = {"584108B7", "000D0000", "F9432A7FE407A3C196C95D0FFD4A540937FD4EEC58", "Castle Crashers", Hash("package provenance")};
-  Target session; session.session = true;
+  Target session; session.session = true; session.launch_library = true;
   session.user_root = f.root / std::string(110, 'x');
   session.dependencies = {game.id};
   REQUIRE((session.user_root / "0000000000000000/584108B7/000D0000" / game.library.file_name / "system/xam_ui.xex.x360n-library-tmp").native().size() > 260);
@@ -552,7 +604,7 @@ TEST_CASE("original library archives only verified obsolete content type registr
   Write(f.target.exe, "prepared fixture"); f.Receipt();
   auto game = f.target;
   game.library = {"12345678", "00004000", "same-package", "Synthetic title", Hash("package")};
-  Target dashboard; dashboard.session = true; dashboard.user_root = f.paths.local() / "user/dashboard";
+  Target dashboard; dashboard.session = true; dashboard.launch_library = true; dashboard.user_root = f.paths.local() / "user/dashboard";
   PrepareLibrary(f.paths, dashboard, {game});
   const auto base = dashboard.user_root / "0000000000000000/12345678";
   const auto old_header = base / "Headers/00004000/same-package.header";
@@ -649,7 +701,7 @@ TEST_CASE("original library withdraws stale builds and discovers additional reci
   Write(second.manifest, "[project]\nname='second'\n[entrypoint]\nfile_path='../../.local/inputs/dashboards/test/dash.xex'\n");
   Write(second.exe,"second build");
   WriteTestReceipt(f.paths,second.id,second.manifest,second.exe,{second.inputs[0].destination,second.inputs[1].destination});
-  Target dashboard; dashboard.session=true; dashboard.user_root=f.paths.local()/"user/dashboard";
+  Target dashboard; dashboard.session=true; dashboard.launch_library=true; dashboard.user_root=f.paths.local()/"user/dashboard";
   const auto first_header=dashboard.user_root/"0000000000000000/12345678/Headers/000D0000/first.header";
   const auto second_header=dashboard.user_root/"0000000000000000/87654321/Headers/000D0000/second.header";
   PrepareLibrary(f.paths,dashboard,{game,second});
