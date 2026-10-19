@@ -36,6 +36,7 @@
 #include "digest_batch.h"
 #include "launch_preflight.h"
 #include "catalog.h"
+#include "update.h"
 #include "session_notification.h"
 #include "workspace_lease.h"
 
@@ -827,6 +828,10 @@ int main(int argc, char** argv) {
   app.require_subcommand(1);
   std::string root_opt;
   app.add_option("--root", root_opt, "Project root (default: search upward from the executable)");
+  auto* recover = app.add_subcommand("recover-update", "Restore an interrupted application update from its persistent journal");
+  std::string recovery_package, recovery_transaction;
+  recover->add_option("--package", recovery_package)->required();
+  recover->add_option("--transaction", recovery_transaction)->required();
 
   auto* doctor = app.add_subcommand("doctor", "Verify toolchain, pinned SDK and SDK tools");
   std::string config = X360N_BUILD_CONFIG;
@@ -888,6 +893,16 @@ int main(int argc, char** argv) {
   }
 
   if (identify->parsed()) return Identify(PathFromUtf8(file), json);
+  if (recover->parsed()) {
+    try {
+      x360n::desktop::RecoverUpdate(PathFromUtf8(recovery_package), PathFromUtf8(recovery_transaction));
+      fmt::print("Previous application restored and verified. User data preserved.\n");
+      return kExitOk;
+    } catch (const std::exception& e) {
+      fmt::print(stderr, "Recovery incomplete: {}\n", e.what());
+      return kExitFailed;
+    }
+  }
 
   auto paths = FindProjectRoot(root_opt.empty() ? SelfPath() : PathFromUtf8(root_opt));
   if (!paths) {

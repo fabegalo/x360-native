@@ -46,7 +46,7 @@ std::optional<int> CompareVersions(const std::string& left, const std::string& r
   }
   return x.size() == y.size() ? 0 : x.size() < y.size() ? -1 : 1;
 }
-std::optional<AvailableUpdate> SelectUpdate(const std::string& releases_json, const std::string& current) {
+std::optional<AvailableUpdate> SelectUpdate(const std::string& releases_json, const std::string& current, UpdateChannel channel) {
   const auto releases = nlohmann::json::parse(releases_json);
   if (!releases.is_array()) throw std::runtime_error("Resposta inesperada da lista de versões.");
   std::optional<AvailableUpdate> best;
@@ -55,6 +55,8 @@ std::optional<AvailableUpdate> SelectUpdate(const std::string& releases_json, co
     const std::string tag = release["tag_name"];
     if (tag.size() < 2 || tag[0] != 'v') continue;
     const auto version = tag.substr(1);
+    if (channel == UpdateChannel::Stable &&
+        (release.value("prerelease", false) || version.find('-') != std::string::npos)) continue;
     // Build metadata would put '+' in file names and URLs; published versions never use it.
     if (version.find('+') != std::string::npos) continue;
     const auto newer = CompareVersions(version, current);
@@ -75,39 +77,5 @@ void VerifyArchive(const fs::path& archive, const fs::path& checksum) {
   const auto digest = DigestFile(archive);
   if (!digest || text != digest->sha256 + "  " + Utf8(archive.filename()))
     throw std::runtime_error("O download da atualização não confere com o SHA-256 publicado. Nada foi alterado.");
-}
-void ApplyUpdate(const fs::path& package, const fs::path& staged, const std::string& version, const fs::path& rollback) {
-  VerifyPackage(staged);
-  const auto metadata = nlohmann::json::parse(ReadText(staged / "package.json"));
-  if (!metadata.is_object() || metadata.value("version", std::string()) != version)
-    throw std::runtime_error("O pacote baixado não corresponde à versão anunciada. Nada foi alterado.");
-  // Current application entries: the top-level components of its own index.
-  std::set<fs::path> current{"package.sha256"};
-  {
-    std::ifstream in(package / "package.sha256", std::ios::binary);
-    if (!in) throw std::runtime_error("Esta cópia não é um pacote instalado; atualize extraindo o ZIP.");
-    for (std::string line; std::getline(in, line);) {
-      if (!line.empty() && line.back() == '\r') line.pop_back();
-      if (line.size() > 65) current.insert(*fs::path(std::u8string(line.begin() + 65, line.end())).begin());
-    }
-  }
-  std::vector<fs::path> incoming;
-  for (const auto& entry : fs::directory_iterator(staged)) incoming.push_back(entry.path().filename());
-  for (const auto& name : incoming) if (name == "data") throw std::runtime_error("O pacote baixado contém dados de usuário. Nada foi alterado.");
-  fs::remove_all(rollback);
-  fs::create_directories(rollback);
-  std::vector<std::pair<fs::path, fs::path>> moved;
-  auto move = [&](const fs::path& from, const fs::path& to) { fs::rename(from, to); moved.emplace_back(from, to); };
-  try {
-    // Renaming keeps the running launcher valid; nothing is deleted.
-    for (const auto& name : current) if (fs::exists(package / name)) move(package / name, rollback / name);
-    for (const auto& name : incoming) {
-      if (fs::exists(package / name)) move(package / name, rollback / name);
-      move(staged / name, package / name);
-    }
-  } catch (...) {
-    for (auto it = moved.rbegin(); it != moved.rend(); ++it) { std::error_code ec; fs::rename(it->second, it->first, ec); }
-    throw;
-  }
 }
 }

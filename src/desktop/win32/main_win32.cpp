@@ -147,6 +147,7 @@ struct App {
   std::thread update_check;
   std::atomic<bool> closing{false};
   std::optional<AvailableUpdate> update;
+  UpdateChannel update_channel = UpdateChannel::Stable;
   // Listing hints run after the list is shown; results apply only to the
   // snapshot they were computed for, and never while an operation runs.
   std::thread hint_check;
@@ -994,7 +995,7 @@ void CheckForUpdate(App& a) {
       const auto list = Updates(a) / "releases.json";
       Download(a, kReleasesApi, list, 30, a.closing);
       std::ifstream in(list, std::ios::binary);
-      *found = SelectUpdate({std::istreambuf_iterator<char>(in), {}}, X360N_VERSION);
+      *found = SelectUpdate({std::istreambuf_iterator<char>(in), {}}, X360N_VERSION, a.update_channel);
     } catch (const std::exception&) { found->reset(); }  // offline or rate limited: try again next start
     if (a.closing || !PostMessageW(a.window, kUpdateChecked, 0, reinterpret_cast<LPARAM>(found))) delete found;
   });
@@ -1029,8 +1030,9 @@ void StartUpdate(App& a) {
       if (!extracted.launched || extracted.exit_code != 0) throw std::runtime_error(Tr("Não foi possível extrair a atualização. Nada foi alterado.", "Could not extract the update. Nothing was changed."));
       if (a.cancel) throw std::runtime_error(Tr("Atualização cancelada. Nada foi alterado.", "Update cancelled. Nothing was changed."));
       a.stage = 2;
-      Post(a.window, kProgress, Tr("Instalando. A versão anterior fica em data\\updates\\previous.", "Installing. The previous version stays in data\\updates\\previous."));
-      ApplyUpdate(a.self.parent_path(), dir / "extract" / update.package, update.version, Updates(a) / "previous");
+      Post(a.window, kProgress, Tr("Instalando. A versão anterior fica em data\\updates.", "Installing. The previous version stays in data\\updates."));
+      const auto transaction = Updates(a) / ("txn-" + std::to_string(GetCurrentProcessId()) + "-" + std::to_string(GetTickCount64()));
+      ApplyUpdate(a.self.parent_path(), dir / "extract" / update.package, update.version, transaction);
       std::error_code ec; fs::remove_all(dir, ec);  // only this download
       Post(a.window, kUpdateFinished, "");
     } catch (const std::exception& error) { Post(a.window, kUpdateFinished, error.what()); }
@@ -1894,12 +1896,16 @@ LRESULT CALLBACK WndProc(HWND window, UINT message, WPARAM wp, LPARAM lp) {
         a->busy = false; KillTimer(window, 2);
         if (error->empty()) {
           // The new files are in place; the old launcher image was only renamed.
-          ShellExecuteW(nullptr, L"open", a->self.c_str(), nullptr, a->self.parent_path().c_str(), SW_SHOWNORMAL);
+          if (reinterpret_cast<INT_PTR>(ShellExecuteW(nullptr, L"open", a->self.c_str(), nullptr, a->self.parent_path().c_str(), SW_SHOWNORMAL)) <= 32) {
+            *error = Tr("A nova versão não iniciou. Feche o aplicativo e execute recover-update.cmd para restaurar a anterior.",
+                        "The new version could not start. Close the application and run recover-update.cmd to restore the previous version.");
+          } else {
           DestroyWindow(window); return 0;
+          }
         }
         a->result = a->cancel ? 2 : 3;
         a->result_title = WTr("Atualização não instalada", "Update not installed");
-        Set(a->activity_text, *error + Tr("\r\nA versão atual continua instalada.", "\r\nThe current version is still installed."));
+        Set(a->activity_text, *error);
         Set(a->details, *error + "\r\n" + Utf8(Updates(*a)));
         Enable(*a); return 0;
       }
@@ -2041,10 +2047,10 @@ LRESULT CALLBACK WndProc(HWND window, UINT message, WPARAM wp, LPARAM lp) {
         if (id == kUpdate && a->update) {
           const auto question = Tr("Instalar a versão ", "Install version ") + a->update->version + Tr(" (atual: ", " (current: ") + X360N_VERSION + ")?\n\n" +
             Tr("O pacote é baixado do GitHub Releases do x360-native e conferido pelo SHA-256 publicado e pelo índice do próprio pacote. "
-               "A pasta data (ambiente, jogos, perfis e saves) não é alterada; a versão atual fica em data\\updates\\previous. "
+               "Ambiente, jogos, perfis e saves são preservados; a versão atual fica em data\\updates; recover-update.cmd permite restaurá-la. "
                "O aplicativo reinicia ao final; o ambiente pode pedir para ser atualizado em seguida.",
                "The package is downloaded from x360-native's GitHub Releases and checked against the published SHA-256 and its own index. "
-               "The data folder (environment, games, profiles and saves) is not changed; the current version stays in data\\updates\\previous. "
+               "Environment, games, profiles and saves are preserved; the current version stays in data\\updates; recover-update.cmd can restore it. "
                "The application restarts at the end; the environment may then ask to be updated.");
           if (MessageBoxW(window, Wide(question).c_str(), L"x360-native", MB_YESNO | MB_ICONINFORMATION) == IDYES) StartUpdate(*a);
           return 0;
@@ -2388,6 +2394,11 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show) {
 #endif
   }
   LocalFree(args);
+  if (!app.preferences.empty()) {
+    std::ifstream channel(app.preferences.parent_path() / "update-channel.txt");
+    std::string selected; std::getline(channel, selected);
+    if (selected == "preview") app.update_channel = UpdateChannel::Preview;
+  }
   // A first-time user shouldn't need to choose a source repository. The package
   // prepares its own verified source payload in the user's normal data folder.
   // An existing installation is preserved; its location can be changed in Settings.
@@ -2409,6 +2420,14 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show) {
                                CW_USEDEFAULT, CW_USEDEFAULT, 1220, 800, nullptr, nullptr, instance, &app);
   if (!window) { Gdiplus::GdiplusShutdown(gdiplus_token); CoUninitialize(); return 1; }
   ShowWindow(window, show); UpdateWindow(window);
+  if (!app.preferences.empty()) {
+    try { ConfirmUpdates(app.self.parent_path(), X360N_VERSION); }
+    catch (const std::exception& error) {
+      MessageBoxW(window, Wide(error.what()).c_str(), L"x360-native", MB_OK | MB_ICONERROR);
+      DestroyWindow(window);
+      Gdiplus::GdiplusShutdown(gdiplus_token); CoUninitialize(); return 1;
+    }
+  }
   SetFocus(GetDlgItem(window, kPrimary));
   MSG msg{};
   while (GetMessageW(&msg, nullptr, 0, 0) > 0) {

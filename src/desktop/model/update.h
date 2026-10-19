@@ -4,6 +4,7 @@
 #include <filesystem>
 #include <optional>
 #include <string>
+#include <functional>
 
 namespace x360n::desktop {
 inline constexpr const char* kReleasesApi = "https://api.github.com/repos/fabegalo/x360-native/releases?per_page=30";
@@ -15,12 +16,19 @@ struct AvailableUpdate {
 // Highest published (non-draft) release above `current` whose tag is v<version> and
 // that carries both x360-native-<version>-windows-x64.zip and its .sha256. URLs are
 // rebuilt from the pinned repository, never taken from the response.
-std::optional<AvailableUpdate> SelectUpdate(const std::string& releases_json, const std::string& current);
+enum class UpdateChannel { Stable, Preview };
+std::optional<AvailableUpdate> SelectUpdate(const std::string& releases_json, const std::string& current,
+                                           UpdateChannel channel = UpdateChannel::Stable);
 // The checksum file must read "<sha256>  <archive name>" and match the archive.
 void VerifyArchive(const std::filesystem::path& archive, const std::filesystem::path& checksum);
-// Replaces the application files of `package` with the verified package extracted at
-// `staged` (same version), keeping data/. Current files move to `rollback` (replaced),
-// and every move is undone if any step fails.
+// Persistent transaction in a new direct child of package/data/updates. The old
+// package and recovery supervisor survive until explicit recovery/confirmation.
+// checkpoint is optional fault instrumentation; production leaves it empty.
+using UpdateCheckpoint = std::function<void(const char*)>;
 void ApplyUpdate(const std::filesystem::path& package, const std::filesystem::path& staged,
-                 const std::string& version, const std::filesystem::path& rollback);
+                 const std::string& version, const std::filesystem::path& transaction,
+                 const UpdateCheckpoint& checkpoint = {});
+void RecoverUpdate(const std::filesystem::path& package, const std::filesystem::path& transaction,
+                   const UpdateCheckpoint& checkpoint = {});
+void ConfirmUpdates(const std::filesystem::path& package, const std::string& version);
 }

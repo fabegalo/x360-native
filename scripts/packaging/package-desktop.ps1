@@ -90,6 +90,8 @@ if ($LASTEXITCODE -ne 0) { throw 'Distribution build failed' }
 # This isolated tree registers only distribution tests, never SDK/game suites.
 & $devshell ctest --test-dir $build -R desktop.catalog --no-tests=error --output-on-failure
 if ($LASTEXITCODE -ne 0) { throw 'Distribution tests failed; ZIP withheld' }
+& $devshell ctest --test-dir $build -R desktop.update-recovery --no-tests=error --output-on-failure
+if ($LASTEXITCODE -ne 0) { throw 'Update recovery tests failed; ZIP withheld' }
 $binaries = Join-Path $build 'src/desktop'
 Copy-Item -LiteralPath (Join-Path $binaries 'x360-native.exe') -Destination $destination
 Copy-Item -LiteralPath (Join-Path $binaries 'x360n.exe') -Destination $internal
@@ -149,7 +151,16 @@ ferramentas de compilação. ZIP, RAR e 7z devem ser descompactados antes.
 Ao abrir, o aplicativo consulta somente a lista pública de versões no GitHub
 Releases do x360-native. Havendo versão mais nova, "Instalar <versão>" na barra
 lateral baixa o ZIP, confere o SHA-256 publicado e o índice do pacote, troca os
-arquivos sem tocar em data e guarda a versão anterior em data\updates\previous.
+arquivos de aplicativo e guarda a versão anterior em uma transação em data\updates.
+Perfis, saves e conteúdo importado são preservados. Se houver interrupção ou a
+versão nova não iniciar, feche o aplicativo e execute recover-update.cmd na pasta
+principal: a cópia independente do supervisor restaura a versão anterior.
+Falhas de recuperação são mostradas e não apagam o backup. Não remova a transação.
+Atualizações usam o canal estável por padrão. Para aderir explicitamente a previews,
+crie data\update-channel.txt contendo somente preview; remova o arquivo para sair.
+Chaves legadas de XEX não são distribuídas. Forneça seu arquivo local em
+data\environment\.local\keys\xex-keys.txt (ou no ambiente selecionado), no formato
+<nome> <32 dígitos hexadecimais>, com nomes xex1-retail e xex1-devkit necessários.
 A versão vem dos Conventional Commits do projeto (feat: minor; fix/perf: patch).
 Para atualizar manualmente, extraia em outra pasta e selecione seu ambiente anterior em
 Configurações > Selecionar ambiente. Confirme a atualização apresentada.

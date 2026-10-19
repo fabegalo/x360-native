@@ -1,5 +1,5 @@
 # The preparation model is independent of the Windows frontend and title runtime.
-add_library(x360n_desktop_model STATIC model/catalog.cpp model/workspace.cpp model/library.cpp model/identify.cpp model/import_source.cpp model/imported_games.cpp model/generic_aot.cpp model/update.cpp)
+add_library(x360n_desktop_model STATIC model/catalog.cpp model/workspace.cpp model/library.cpp model/identify.cpp model/import_source.cpp model/imported_games.cpp model/generic_aot.cpp model/update.cpp model/update_transaction.cpp)
 target_sources(x360n_desktop_model PRIVATE ../supervisor/launch_preflight.cpp)
 target_include_directories(x360n_desktop_model PRIVATE ${X360_REXGLUE_DIR}/thirdparty/inja/third_party/include)
 target_link_libraries(x360n_desktop_model PUBLIC x360n_core PRIVATE tomlplusplus)
