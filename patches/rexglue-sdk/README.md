@@ -986,3 +986,30 @@ padrão do SDK é 0 (desligado, sem custo além da leitura do cvar); as dashboar
 1888 e 17559 usam 150 ms quando o usuário não configurou o valor. A janela é uma
 hipótese a calibrar no teste manual; `[guide-chord]` cobre título, HUD, toque
 curto, janela expirada e o modo desligado. Jogos e consultas de estado não mudam.
+
+## 0102 — ciclo de vida da entrada e janela opt-in (19/10/2026)
+
+Substitui o estado global de posse/atalho por estado da instância de entrada.
+Desconexão, mudança de identidade/atribuição e Shutdown invalidam pendências e
+posse. Um erro de conexão nunca libera DOWN guardado. Runtimes consecutivos
+não herdam o gesto; nenhuma fila é drenada na inicialização.
+
+GetState e GetKeystroke compartilham a decisão de janela; ANY_USER percorre os
+quatro índices, respeitando o proprietário da UI. A janela agora permanece
+desligada também nas dashboards. Habilitação explícita: `guide_chord_ms` (0–1000)
+e máscara `guide_chord_users` (padrão 1, usuário 0). A política se aplica ao
+usuário guest selecionado, inclusive dispositivos mesclados nele. Eventos
+posteriores mantêm sua ordem; UP/repetições são preservados para comandos normais.
+
+Red integrado em Release: três falhas de ciclo de vida. Green: 500 asserções/18
+casos de entrada/UI. Testes físicos e calibração continuam pendentes.
+[Relatório](../../docs/reports/review-fixes-2026-10-19.md).
+
+### Revisão distributiva do 0095
+
+O patch ativo não inclui valores de chaves legadas. Usa arquivo local no formato
+do extrator (`xex1-retail`/`xex1-devkit`, 32 dígitos hexadecimais), selecionado por
+`xex_keys_file` ou `X360N_XEX_KEYS`. O driver registra a identidade SHA do arquivo.
+Testes fornecem chaves legadas sintéticas; ausência/má formação falha explicitamente.
+O gate de distribuição reconhece constantes em bytes, C++ e unified diff.
+Fingerprints de exclusão não servem ao carregador. Histórico publicado preservado.

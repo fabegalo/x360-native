@@ -5,9 +5,21 @@ Este arquivo resume o estado atual; os relatórios vinculados preservam datas,
 falhas iniciais, hashes, comandos e limites de cada validação. Resultados de uma
 etapa histórica não certificam automaticamente o build atual nem outros títulos.
 
-Dashboards 1888/17559 — revisão pós-commit (19/10): corrigidos LB/RB trocados no
+Correções da revisão externa (19/10): estado de entrada vinculado ao backend e
+à conexão (0102); janela BACK/START opt-in por usuário, desligada por padrão;
+0095 usa chaves legadas locais, sem valores no payload; atualizador com diário
+persistente, recuperação independente e canais estável/preview separados.
+Regressões Release novas aprovadas, incluindo 24.576 verificações dos aliases CR
+regenerados e 1.263 asserções do atualizador. 1888/17559/Motocross, Castle, Forza,
+Charlie e o AOT 4D530A81 receberam recibos Release novos com todos os hashes
+conferidos; frontend do atalho recompilado. Pacote e aceite manual ainda em
+fechamento. Nenhuma dashboard/jogo foi executada nesta tarefa.
+[Evidências e pendências](docs/reports/review-fixes-2026-10-19.md).
+
+Dashboards 1888/17559 — revisão pós-commit anterior (19/10): corrigidos LB/RB trocados no
 0101 e o START do atalho BACK+START, que chegava à dashboard antes do GUIDE em
-controles sem botão Guide (`guide_chord_ms`, 150 ms por padrão nas dashboards).
+controles sem botão Guide (`guide_chord_ms`; o default de 150 ms daquela etapa
+foi retirado pelo 0102).
 Também corrigidos firmware ≠ 1/5 (fecha a plataforma, sem fatal), banner sem
 escrita, `crset`/`crclr` e `apply-patch` alinhado ao loader. Testes focados
 passaram; aceite com o controle físico pendente.
@@ -227,8 +239,8 @@ pela My Games e gameplay continuam pendentes. [Evidência histórica](docs/repor
 
 Windows x64/D3D12 é o ambiente demonstrado. Linux, macOS, ARM64 e Windows limpo
 continuam sem aceite funcional completo. ReXGlue v0.10.0 permanece fixado em
-`f5337cdc947ff6d4c4196737e2c807a48f2a1fc2`, LLVM 22.1.8, **100 patches ativos**
-no [lock](deps.lock.json); numeração até 0101, com 0073 retirado.
+`f5337cdc947ff6d4c4196737e2c807a48f2a1fc2`, LLVM 22.1.8, **101 patches ativos**
+no [lock](deps.lock.json); numeração até 0102, com 0073 retirado.
 O submódulo modificado pelos patches/materialização do libmspack é esperado.
 Nunca substituir módulos ou fontes originais entre versões de dashboard.
 
