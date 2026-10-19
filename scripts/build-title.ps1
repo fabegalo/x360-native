@@ -26,6 +26,10 @@ $root = (Resolve-Path (Split-Path -Parent $PSScriptRoot)).Path
 . (Join-Path $PSScriptRoot 'build/incremental-state.ps1')
 . (Join-Path $PSScriptRoot 'build/release-configuration.ps1')
 $driverSnapshot = @(Get-ReceiptEntries @($PSCommandPath, (Join-Path $PSScriptRoot 'build/preparation-receipt.ps1'), (Join-Path $PSScriptRoot 'build/build-lease.ps1'), (Join-Path $PSScriptRoot 'build/incremental-state.ps1'), (Join-Path $PSScriptRoot 'build/release-configuration.ps1'), (Join-Path $PSScriptRoot 'build/toolchain-snapshot.ps1'), (Join-Path $PSScriptRoot 'build/product-fingerprint.cs')))
+$previousXexKeys = $env:X360N_XEX_KEYS
+$localKeys = if ($previousXexKeys) { [IO.Path]::GetFullPath($previousXexKeys) } else { Join-Path $root '.local/keys/xex-keys.txt' }
+$keySnapshot = if (Test-Path -LiteralPath $localKeys -PathType Leaf) { @(Get-ReceiptEntries @($localKeys)) } else { @() }
+$driverSnapshot += $keySnapshot
 if ($Title -notmatch '^[a-z][a-z0-9_]*$') { throw "invalid title name '$Title'" }
 $titleDir = Join-Path $root "titles\$Title"
 if (-not (Test-Path (Join-Path $titleDir 'CMakePresets.json'))) {
@@ -90,6 +94,7 @@ $steps = @(
 )
 Push-Location $titleDir
 try {
+    if ($keySnapshot.Count) { $env:X360N_XEX_KEYS = $localKeys }
     Update-ToolchainSnapshot '0-toolchain'
     $releaseConfigured = Test-ReleaseBuildConfiguration $build
     $reuse = $releaseConfigured -and -not $interrupted -and $previous -and $previous.configure -and
@@ -299,7 +304,7 @@ try {
         throw 'Inputs changed while collecting incremental state; no receipt published.'
     }
     $receipt = @{ schema = 1; title = $Title; manifest = $manifest; exe = $exe; sdk_commit = $sdkCommit; globs = $globs;
-        inputs = @($inputs + $producer + $ownerSnapshot + $stateEntry | Sort-Object path -Unique); artifacts = $artifacts; producer = $producer;
+        inputs = @($inputs + $producer + $ownerSnapshot + $stateEntry + $keySnapshot | Sort-Object path -Unique); artifacts = $artifacts; producer = $producer;
         incremental = $stateEntry;
         configure = $configuration;
         roles = @{ compiler = (Get-BuildCache $build).CMAKE_CXX_COMPILER; codegen = $tool;
@@ -313,6 +318,7 @@ try {
 } finally {
     Pop-Location
     $env:X360N_OWNED_BUILD = $previousOwnedBuild
+    $env:X360N_XEX_KEYS = $previousXexKeys
     foreach ($handle in $lease) { $handle.Dispose() }
 }
 Write-Host "built: $(Join-Path $build "$Title.exe")"

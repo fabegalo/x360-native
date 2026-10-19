@@ -480,6 +480,11 @@ int Run(const ProjectPaths& p, const fs::path& exe_in, std::vector<std::string> 
     args.push_back("--x360n_handoff_out=" + PathUtf8(*handoff));
   }
   if (window) args.push_back("--parent_window=" + std::to_string(window->handle()));
+  // Legacy wrapping keys are local user material, excluded from source payloads.
+  // Use the same explicit local file as apply-patch; never embed its contents.
+  if (fs::is_regular_file(p.root / ".local/keys/xex-keys.txt") &&
+      std::none_of(args.begin(), args.end(), [](const auto& arg) { return arg.starts_with("--xex_keys_file"); }))
+    args.push_back("--xex_keys_file=" + PathUtf8(p.root / ".local/keys/xex-keys.txt"));
 
   auto exe_digest = DigestFile(exe);
   std::vector<std::pair<fs::path, std::optional<FileDigest>>> dll_digests;

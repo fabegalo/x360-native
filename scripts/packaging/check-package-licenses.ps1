@@ -106,17 +106,9 @@ foreach($dependencyInput in $dependencyInputs) {
         if($dependencyInput -like 'thirdparty/inja/*' -and $dependencyInput -notlike 'thirdparty/inja/third_party/include/nlohmann/*') { throw 'Unreviewed inja nested dependency' }
     } elseif($dependencyInput -notlike 'include/rex/*' -and $dependencyInput -ne 'src/core/platform_win.h' -and $dependencyInput -notin $inventory.sdk_translation_units) { throw 'Unreviewed SDK input' }
 }
-# Read the known loader constants only into memory, never print or distribute them.
-# All-zero devkit values cannot be distinguished from ordinary zero-filled data.
-$loader=Get-Content -LiteralPath (Join-Path $sdk 'src/system/xex_module.cpp') -Raw
-$needles=@([regex]::Matches($loader,'(?s)static const uint8_t xe_xex\w+_key\[16\]\s*=\s*\{([^}]+)\}') | ForEach-Object {
-    $bytes=[byte[]]@([regex]::Matches($_.Groups[1].Value,'0x([0-9a-fA-F]{2})') | ForEach-Object { [Convert]::ToByte($_.Groups[1].Value,16) })
-    if($bytes.Length -eq 16 -and @($bytes | Where-Object { $_ -ne 0 }).Count) { ,$bytes }
-})
-if(-not $needles.Count) { throw 'SDK constant exclusion evidence missing' }
-if(-not ('X360LicenseBytes' -as [type])) {
-    Add-Type 'public static class X360LicenseBytes { public static bool Contains(byte[] b, byte[] n) { for(int i=0;i<=b.Length-n.Length;i++){if(b[i]!=n[0])continue; int j=1;while(j<n.Length&&b[i+j]==n[j])j++;if(j==n.Length)return true;}return false;} }'
-}
+. (Join-Path $PSScriptRoot 'excluded-constants.ps1')
+$policy = Get-Content (Join-Path $PSScriptRoot '../../licenses/excluded-loader-constants.json') -Raw | ConvertFrom-Json
+if ($policy.schema -ne 1 -or $policy.rules.Count -lt 3) { throw 'SDK constant exclusion evidence missing' }
 foreach($file in Get-ChildItem -LiteralPath $package -Recurse -File) {
     $rel=$file.FullName.Substring($package.Length+1).Replace('\','/')
     if($file.Attributes -band [IO.FileAttributes]::ReparsePoint) { throw 'Reparse point in package' }
@@ -126,16 +118,11 @@ foreach($file in Get-ChildItem -LiteralPath $package -Recurse -File) {
     $bytes=[IO.File]::ReadAllBytes($file.FullName)
     $magic=[Text.Encoding]::ASCII.GetString($bytes,0,[Math]::Min(4,$bytes.Length))
     if($magic -in @('XEX1','XEX2','CON ','LIVE','PIRS') -or ($magic.StartsWith('MZ') -and $rel -notin $inventory.executables)) { throw "Embedded executable/container: $rel" }
-    foreach($needle in $needles) {
-        if([X360LicenseBytes]::Contains($bytes,$needle)) { throw "Sensitive loader constant in: $rel" }
-    }
+    $textFile = $rel -match '\.(cpp|h|hpp|c|patch|json|toml|ps1|md|txt)$'
+    if (Test-ExcludedConstant $bytes $policy.rules -Text:$textFile) { throw "Sensitive loader constant in: $rel" }
     if($rel -match '\.(cpp|h|hpp|c|patch|json|toml|ps1|md|txt)$') {
         $text=[Text.Encoding]::UTF8.GetString($bytes)
         if($text -match '-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----') { throw "Private key material in: $rel" }
-        foreach($needle in $needles) {
-            $pattern=(@($needle | ForEach-Object { '0x'+$_.ToString('x2')+'\s*' }) -join ',\s*')
-            if($text -match $pattern -or $text -match (($needle | ForEach-Object { $_.ToString('x2') }) -join '')) { throw "Sensitive loader constant text in: $rel" }
-        }
     }
 }
 foreach($exe in $inventory.executables) { if(-not (Test-Path -LiteralPath (Under $package $exe))) { throw 'Missing inventoried executable' } }

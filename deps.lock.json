@@ -34,7 +34,7 @@
                                             "file":  "patches/rexglue-sdk/0003-import-records-across-libraries.patch",
                                             "sha256":  "39ca70edb6444fa3a42495c8a9d7bd241b9972849e4ac2b35974ed4a6002d5bd",
                                             "files":  {
-                                                          "src/system/xex_module.cpp":  "81382810b17ec5eaeccbe855d8d42d0468dfb745a88bbc8a2ad4896cf7e55d70",
+                                                          "src/system/xex_module.cpp":  "3ca9480d0c644f3c9258a551a89225aebb146c63a6a257c7ae54a3a206563206",
                                                           "src/codegen/phase_register.cpp":  "5cfccd37d29d8cc4eacad6f0b76b69f56526b90f19dfb216b2fe9dd383193935",
                                                           "include/rex/codegen/analysis_errors.h":  "088eb6768d0839b1fc3cc13c4d766f4f1130a4bf82556b7984d3b095b33e11eb",
                                                           "src/codegen/analyze.cpp":  "aea3234592d2b8076af8591d5244f4b934504049f27e53f1d68d2cae614f042a"
@@ -440,7 +440,7 @@
                                                                "src/system/xex_module.cpp":  "de376f50d35cb3e9559de41c95008b9bec53c1e9dedf8f983f6928f23effb561"
                                                            },
                                             "files":  {
-                                                          "src/system/xex_module.cpp":  "81382810b17ec5eaeccbe855d8d42d0468dfb745a88bbc8a2ad4896cf7e55d70"
+                                                          "src/system/xex_module.cpp":  "3ca9480d0c644f3c9258a551a89225aebb146c63a6a257c7ae54a3a206563206"
                                                       },
                                             "test":  "sdkcheck Resource-only XEX modules load bounded data without pretending to be PE code: valid resource failed before patch; malformed ranges, code pages and titles stay rejected."
                                         },
@@ -1161,8 +1161,8 @@
     "src/system/xex_module.cpp": "5b2f2461371da8a46d4ae619212d58fb1cb40ac378a34234b90c6e22cadee6c0"
   },
   "files": {
-    "include/rex/system/xex_module.h": "8bec98581f18e086e72ee807464f78ea72f59905a9ab91194ecfc532434c4cb4",
-    "src/system/xex_module.cpp": "81382810b17ec5eaeccbe855d8d42d0468dfb745a88bbc8a2ad4896cf7e55d70"
+    "include/rex/system/xex_module.h": "d18dde7d6b0dfd8228d5ee75d0c28cb256b7eacd7c32e12b4120da0bb700c262",
+    "src/system/xex_module.cpp": "3ca9480d0c644f3c9258a551a89225aebb146c63a6a257c7ae54a3a206563206"
   },
   "test": "tests/sdkcheck/xex_heap_ownership_test.cpp"
 },
@@ -1284,14 +1284,14 @@
 },
 {
   "file": "patches/rexglue-sdk/0095-legacy-xex-wrapping-keys.patch",
-  "sha256": "9c4b6c2105976331bf8aa321353e8464ca2a600e1ea37517a0aba899792c0dd6",
+  "sha256": "d81133b66b3df6ce5c2205844768d64a870be0b592023f9ff3e95390aa9bf79e",
   "base_files": {
     "src/system/xex_module.cpp": "58b6448413fffe26c7ed9eb7262f911a6f4ef742709ce9408a2f4ec9a0bc0928",
     "include/rex/system/xex_module.h": "28457554801a88cc319f9c8367918064e59f9a796b5eef3c78a31a7fc8f6154c"
   },
   "files": {
-    "src/system/xex_module.cpp": "81382810b17ec5eaeccbe855d8d42d0468dfb745a88bbc8a2ad4896cf7e55d70",
-    "include/rex/system/xex_module.h": "8bec98581f18e086e72ee807464f78ea72f59905a9ab91194ecfc532434c4cb4"
+    "src/system/xex_module.cpp": "3ca9480d0c644f3c9258a551a89225aebb146c63a6a257c7ae54a3a206563206",
+    "include/rex/system/xex_module.h": "d18dde7d6b0dfd8228d5ee75d0c28cb256b7eacd7c32e12b4120da0bb700c262"
   },
   "test": "tests/sdkcheck/xex_key_test.cpp"
 },
@@ -1327,10 +1327,10 @@
   "file": "patches/rexglue-sdk/0098-encrypted-resource-xex.patch",
   "sha256": "de53934a6f4c997767b6b50de199bd6253d5fd3856787ae53da39d1a138ccac8",
   "base_files": {
-    "src/system/xex_module.cpp": "f97445de795003ade967efd24f78738c3fc93b3f89d9f0c92149a6da2807705b"
+    "src/system/xex_module.cpp": "170569af5a4e485b3f06638374555b00b5b47f691a746deca0eddab39ab97446"
   },
   "files": {
-    "src/system/xex_module.cpp": "81382810b17ec5eaeccbe855d8d42d0468dfb745a88bbc8a2ad4896cf7e55d70"
+    "src/system/xex_module.cpp": "3ca9480d0c644f3c9258a551a89225aebb146c63a6a257c7ae54a3a206563206"
   },
   "test": "tests/sdkcheck/xex_key_test.cpp"
 },

@@ -7,10 +7,12 @@
 #include <fstream>
 #include <iterator>
 #include <regex>
+#include <rex/cvar.h>
 #include <rex/kernel/init.h>
 #include <rex/runtime.h>
 #include <rex/system/xex_module.h>
 #include "synthetic_xex.h"
+#include "../supervisor/scratch.h"
 using rex::X_STATUS;
 namespace {
 using Key = std::array<uint8_t, 16>;
@@ -20,7 +22,7 @@ std::array<Key, 4> ReadSdkKeys() {
  std::ifstream file(std::filesystem::path(X360N_SOURCE_ROOT)/"external/rexglue-sdk/src/system/xex_module.cpp");
  REQUIRE(file.good());
  const std::string source((std::istreambuf_iterator<char>(file)),{});
- const std::array<const char*,4> names{"xe_xex2_retail_key","xe_xex2_devkit_key","xe_xex1_retail_key","xe_xex1_devkit_key"};
+ const std::array<const char*,2> names{"xe_xex2_retail_key","xe_xex2_devkit_key"};
  std::array<Key,4> keys{};
  for(size_t i=0;i<names.size();++i) {
   const auto start=source.find(std::string(names[i])+"[16]");
@@ -34,8 +36,26 @@ std::array<Key, 4> ReadSdkKeys() {
   }
   REQUIRE(index==16);
  }
+ for (unsigned i=0;i<16;++i) { keys[2][i]=uint8_t(0x41+i); keys[3][i]=uint8_t(0x71+i); }
  return keys;
 }
+
+struct LocalKeys {
+ std::filesystem::path file = UniqueTempPath("synthetic-legacy-keys.txt");
+ std::string saved = rex::cvar::GetFlagByName("xex_keys_file");
+ LocalKeys(const std::array<Key,4>& keys) {
+  std::ofstream out(file);
+  const char* digits="0123456789abcdef";
+  for(unsigned i=2;i<4;++i) {
+   out << (i==2?"xex1-retail ":"xex1-devkit ");
+   for(auto b:keys[i]) out << digits[b>>4] << digits[b&15];
+   out << '\n';
+  }
+  out.close();
+  REQUIRE(rex::cvar::SetFlagByName("xex_keys_file",file.string()));
+ }
+ ~LocalKeys() { rex::cvar::SetFlagByName("xex_keys_file",saved); std::filesystem::remove(file); }
+};
 
 std::vector<uint8_t> Encrypt(const Key& key, std::span<const uint8_t> bytes);
 namespace {
@@ -94,7 +114,7 @@ Bytes ResourceImage(const Key& master, unsigned compression, bool encrypted=true
 }
 TEST_CASE("XEX resource-only modules accept authenticated encrypted payloads and reject executable metadata", "[sdk][xex-resource]") {
  using namespace x360n::test;
- const auto keys=ReadSdkKeys();Workdir work("x360n_xex_resource","authenticated");
+ const auto keys=ReadSdkKeys(); LocalKeys local(keys); Workdir work("x360n_xex_resource","authenticated");
  rex::Runtime rt(work.dir);rex::RuntimeConfig config{};config.tool_mode=true;config.kernel_init=rex::kernel::InitializeKernel;
  REQUIRE(rt.Setup(std::move(config))==X_STATUS_SUCCESS);
  for(unsigned compression=0;compression<3;++compression) {
@@ -137,7 +157,7 @@ std::vector<uint8_t> Encrypt(const Key& key, std::span<const uint8_t> bytes) {
 }
 TEST_CASE("XEX loader accepts legacy and current wrapping keys without losing other allocations", "[sdk][xex-key]") {
  using namespace x360n::test;
- const auto keys=ReadSdkKeys();
+ const auto keys=ReadSdkKeys(); LocalKeys local(keys);
  Workdir work("x360n_xex_key","wrapping");
  rex::Runtime rt(work.dir);
  rex::RuntimeConfig config{}; config.tool_mode=true;config.kernel_init=rex::kernel::InitializeKernel;
@@ -167,4 +187,22 @@ TEST_CASE("XEX loader accepts legacy and current wrapping keys without losing ot
   REQUIRE(module.Unload());
  }
  REQUIRE(heap->Release(neighbor));
+}
+
+TEST_CASE("Legacy encrypted resources reject missing or malformed local key material", "[sdk][xex-key]") {
+ using namespace x360n::test;
+ const auto keys=ReadSdkKeys(); LocalKeys local(keys);
+ SECTION("missing file") { std::filesystem::remove(local.file); }
+ SECTION("missing legacy retail") { std::ofstream(local.file) << "xex2-devkit 00000000000000000000000000000000\n"; }
+ SECTION("malformed hex") { std::ofstream(local.file) << "xex1-retail invalid\n"; }
+ SECTION("duplicate name") {
+  std::ofstream(local.file) << "xex1-retail 00000000000000000000000000000000\nxex1-retail 00000000000000000000000000000000\n";
+ }
+ Workdir work("x360n_xex_key","invalid-local");
+ rex::Runtime rt(work.dir); rex::RuntimeConfig config{}; config.tool_mode=true; config.kernel_init=rex::kernel::InitializeKernel;
+ REQUIRE(rt.Setup(std::move(config))==X_STATUS_SUCCESS);
+ auto bytes=ResourceImage(keys[2],2);
+ rex::runtime::XexModule module(rt.function_dispatcher(),rt.kernel_state());
+ CHECK_FALSE(module.Load("skin.xex","game:\\skin.xex",bytes.data(),bytes.size()));
+ REQUIRE(module.Unload());
 }
