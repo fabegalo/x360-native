@@ -24,6 +24,8 @@ void ObserveSwap(const rex::kernel::xboxkrnl::SystemSwapFrame& frame) {
 
 TEST_CASE("VdSwap runs the published system command buffer and presents its frame",
           "[sdk][system-command-buffer]") {
+  swap_callbacks = 0;
+  observed = {};
   namespace xenos = rex::graphics::xenos;
   using rex::X_STATUS;
   rex::Runtime rt(std::filesystem::temp_directory_path());
@@ -139,14 +141,24 @@ TEST_CASE("VdSwap runs the published system command buffer and presents its fram
   rex::memory::store_and_swap<uint32_t>(memory->TranslatePhysical(fence), 2);
   CHECK(query() == 1);
 
-  ctx.r3.u64 = 0;
+  SECTION("Null descriptor ends system scanout") {
+    ctx.r3.u64 = 0;
+  }
+  SECTION("Original empty descriptor ends system scanout") {
+    put(0x600, 0);
+    put(0x604, 0);
+    ctx.r3.u64 = scratch + 0x600;
+  }
   __imp__VdSetSystemCommandBuffer(ctx, base);
   swap();
-  CHECK(get(7 * 4) == xenos::MakePacketType3(xenos::PM4_XE_SWAP, 4));
-  CHECK(get(9 * 4) == title_physical);
+  CHECK(get(7 * 4) == xenos::MakePacketType0(rex::graphics::XE_GPU_REG_D1OVL_ENABLE, 1));
+  CHECK(get(8 * 4) == 0);
+  CHECK(get(9 * 4) == xenos::MakePacketType3(xenos::PM4_XE_SWAP, 4));
+  CHECK(get(11 * 4) == title_physical);
   rex::kernel::xboxkrnl::SetSystemSwapCallback(nullptr);
   swap();
   CHECK(swap_callbacks == 4);
+  CHECK(get(7 * 4) == xenos::MakePacketType3(xenos::PM4_XE_SWAP, 4));
   memory->SystemHeapFree(system);
   memory->SystemHeapFree(title);
   memory->SystemHeapFree(stack);

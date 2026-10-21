@@ -1096,3 +1096,33 @@ mantêm o caminho anterior. Corrige `8007000E` reproduzido na fila original
 quando o aviso de conquista era enviado fora de uma tarefa. Testes técnicos
 não certificam a apresentação visual durante gameplay. Sem equivalente upstream.
 [Causa, testes e aceite](../../docs/reports/achievement-notification-2026-10-21.md).
+
+## 0114 — camada de vídeo original D1OVL no D3D12
+
+Preserva os registradores de scanout emitidos pelo compositor original após
+os comandos de sistema, mantendo a restauração dos registradores de desenho do
+título. Decodifica superfície RGB, pitch, posição e recorte D1OVL, carrega a
+textura pelo cache existente e compõe os pixels originais antes de gamma/FXAA.
+Pipeline e superfície intermediária são criados somente quando usados e
+reutilizados. O descritor vazio encerra a camada na próxima apresentação,
+inclusive quando substitui os últimos comandos originais no mesmo callback.
+Sem textos, conquistas, layout ou IDs de jogos no backend. Escopo de backend:
+D3D12; Vulkan e Native não recebem certificação por este patch.
+
+Shader próprio `display_overlay.hlsl`, bytecode reproduzível pelo alvo
+`x360n_display_overlay_shader_check` (entrada HLSL, saída opcional header).
+Testes de decodificação e fechamento em `display_overlay_test.cpp` e
+`system_command_buffer_test.cpp`; diagnóstico GPU sem janela pelo alvo
+`x360n_display_overlay_gpu_check`. Sem equivalente upstream identificado.
+[Evidências e limite do aceite](../../docs/reports/achievement-overlay-2026-10-21.md).
+
+## 0115 — cor e alpha da superfície D1OVL
+
+Corrige o fetch de scanout para BGRA sem inversão dos bytes. A ordem PPC dos
+comandos não se aplica aos pixels da superfície de display. A inversão anterior
+levava alpha ao vermelho e um canal de cor ao alpha, tornando branco transparente
+em ciano opaco. Sem troca de shader, substituição de recursos ou chave de cor.
+Teste GPU usa o decodificador compartilhado, superfície de 8 bits e 64 pixels
+com cores distintas e alpha zero/parcial/opaco; a configuração anterior é
+controle negativo e falha. Sem equivalente upstream identificado.
+[Evidências e limite do aceite](../../docs/reports/achievement-overlay-2026-10-21.md).

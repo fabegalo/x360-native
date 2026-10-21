@@ -1,5 +1,17 @@
 # Included from tests/CMakeLists.txt; paths and target outputs stay rooted there.
 if(WIN32)
+  add_executable(x360n_display_overlay_shader_check tools/display_overlay_shader_check.cpp)
+  target_link_libraries(x360n_display_overlay_shader_check PRIVATE d3dcompiler)
+  add_test(NAME sdkcheck.display-overlay-shader COMMAND x360n_display_overlay_shader_check
+    ${PROJECT_SOURCE_DIR}/external/rexglue-sdk/src/graphics/shaders/display_overlay.hlsl)
+  set_tests_properties(sdkcheck.display-overlay-shader PROPERTIES LABELS project TIMEOUT 20)
+  add_executable(x360n_display_overlay_gpu_check EXCLUDE_FROM_ALL tools/display_overlay_gpu_check.cpp)
+  target_sources(x360n_display_overlay_gpu_check PRIVATE ../external/rexglue-sdk/src/graphics/register_file.cpp)
+  target_link_libraries(x360n_display_overlay_gpu_check PRIVATE rexruntime d3d12 d3dcompiler dxgi)
+  x360n_stage_runtime_dlls(x360n_display_overlay_gpu_check)
+  # Explicit offscreen GPU diagnostic, not automatically added to CTest.
+endif()
+if(WIN32)
   add_executable(x360n_notification_17559_probe EXCLUDE_FROM_ALL tools/notification_17559_probe.cpp
       ../titles/common/dashboard_assets.cpp)
   target_link_libraries(x360n_notification_17559_probe PRIVATE rexruntime x360n_core)
@@ -141,6 +153,8 @@ target_sources(x360n_sdk_runtime_checks PRIVATE sdkcheck/title_return_test.cpp
     ../titles/common/launch_handoff.cpp)
 target_sources(x360n_sdk_runtime_checks PRIVATE sdkcheck/persist_display_test.cpp)
 target_sources(x360n_sdk_runtime_checks PRIVATE sdkcheck/system_command_buffer_test.cpp)
+target_sources(x360n_sdk_runtime_checks PRIVATE sdkcheck/display_overlay_test.cpp)
+target_sources(x360n_sdk_runtime_checks PRIVATE ../external/rexglue-sdk/src/graphics/register_file.cpp)
 target_sources(x360n_sdk_runtime_checks PRIVATE sdkcheck/system_ui_input_test.cpp)
 target_sources(x360n_sdk_runtime_checks PRIVATE sdkcheck/local_profile_gamercard_test.cpp)
 

@@ -1,0 +1,18 @@
+diff --git a/include/rex/graphics/display_overlay.h b/include/rex/graphics/display_overlay.h
+--- a/include/rex/graphics/display_overlay.h
++++ b/include/rex/graphics/display_overlay.h
+@@ -41,10 +41,12 @@
+   out.fetch.pitch = pitch >> 5;
+   out.fetch.base_address = address >> 12;
+   out.fetch.format = format ? xenos::TextureFormat::k_2_10_10_10 : xenos::TextureFormat::k_8_8_8_8;
+-  out.fetch.endianness = xenos::Endian::k8in32;
++  // Display scanout consumes little-endian BGR(A) surface words. This is
++  // independent of the PPC byte order used to write command/register values.
++  out.fetch.endianness = xenos::Endian::kNone;
+   out.fetch.size_2d.width = width - 1;
+   out.fetch.size_2d.height = height - 1;
+-  out.fetch.swizzle = 0x688;  // RGBA.
++  out.fetch.swizzle = XE_GPU_MAKE_TEXTURE_SWIZZLE(B, G, R, A);
+   out.valid = true;
+   return out;
+ }

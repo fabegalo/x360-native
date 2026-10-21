@@ -41,7 +41,30 @@ A 1888 não foi alterada. A compilação Release do alinhamento foi concluída n
 validação para commit, após o bloqueio inicial por ambiente em uso. Evidência:
 `.local/evidence/validation/precommit-20261021/build-dash.log`.
 
-Conquistas — notificação 17559 (21/10): a sessão real do mantenedor gravou a
+Conquistas — cor/transparência (21/10): o mantenedor confirmou o aviso original
+“10G — Bem-Vindo Ao Horizon”, mas com fundo ciano e tonalidade vermelha.
+Patch 0115 corrige a leitura BGRA sem byte swap da superfície D1OVL. Release:
+422 asserções/oito casos e 64 pixels na GPU passaram; o controle negativo com
+o decodificador anterior falhou como esperado. Confirmação visual das cores
+e transparência no gameplay ainda pendente. Builds Release da 17559 e do Forza
+concluídos, com recibos e 18 hashes de artefatos finais conferidos. A pilha de
+114 patches foi reproduzida, com 124 hashes finais idênticos. Commit solicitado pelo mantenedor;
+sem autorização nova de push.
+[Diagnóstico e validação](docs/reports/achievement-overlay-2026-10-21.md).
+
+Conquistas — reteste anterior sem visual (21/10): a sessão Forza
+`20261021T125515Z-session-3-forza_horizon` confirmou novamente fila e recursos
+originais carregados, mas o mantenedor não viu o aviso. Identificado o caminho
+de scanout D1OVL emitido pelo compositor original e ausente no backend. Patch
+0114 implementa sua composição no D3D12, preserva estado do jogo e desliga a
+camada no descritor vazio. Release: 416 asserções/oito casos; 48 pixels de
+GPU sem janela; shader reproduzido; 113 patches reaplicados/124 hashes conferidos.
+Builds Release da 17559 e do Forza concluídos; recibos e hashes dos 18 artefatos
+finais conferidos, sem preparação incompleta.
+Aceite da notificação original em gameplay continua pendente.
+[Causa, correção e validação](docs/reports/achievement-overlay-2026-10-21.md).
+
+Conquistas — notificação 17559, rodada anterior (21/10): a sessão real do mantenedor gravou a
 conquista 155 do Forza, mas o aviso original falhou com `8007000E`. Reproduzido
 em sonda sem janela: apresentador válido, fila sem tarefa XAM corrente. Patch
 0113 fornece contexto síncrono do host; a mesma fila original retorna sucesso
