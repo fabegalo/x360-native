@@ -4,6 +4,8 @@
 #include <filesystem>
 #include <thread>
 #include <rex/kernel/init.h>
+#include <rex/kernel/xam/task_context.h>
+#include <stdexcept>
 #include <rex/runtime.h>
 #include <rex/system/function_dispatcher.h>
 #include <rex/system/kernel_state.h>
@@ -19,15 +21,19 @@ extern "C" REX_FUNC(__imp__XamTaskCloseHandle);
 extern "C" REX_FUNC(__imp__XamTaskGetCurrentTask);
 extern "C" REX_FUNC(__imp__XamTaskGetStatus);
 extern "C" REX_FUNC(__imp__XamTaskGetCompletionStatus);
+extern "C" REX_FUNC(__imp__XamTaskGetAttributes);
 
 namespace {
 std::atomic<uint32_t> received_context, received_handle, worker_handle;
+std::atomic<uint32_t> worker_system_task;
 std::atomic<bool> entered, cancelled, finished;
 void TaskCallback(PPCContext& ctx, uint8_t* base) {
+  worker_system_task = rex::kernel::xam::CurrentSystemTask();
   received_context = ctx.r3.u32;
   worker_handle = rex::system::XThread::GetCurrentThread()->handle();
   __imp__XamTaskGetCurrentTask(ctx, base);
   received_handle = ctx.r3.u32;
+  __imp__XamTaskCloseHandle(ctx, base); // GetCurrentTask owns a reference.
   entered = true;
   const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(3);
   do {
@@ -39,6 +45,67 @@ void TaskCallback(PPCContext& ctx, uint8_t* base) {
   std::this_thread::sleep_for(std::chrono::milliseconds(30));
   finished = true;
   ctx.r3.u64 = 0x81234567;
+}
+
+TEST_CASE("Host system tasks retain identity attributes and restore nested callers",
+          "[sdk][signin-task][notification-task]") {
+  rex::Runtime rt(std::filesystem::temp_directory_path());
+  rex::RuntimeConfig config{};
+  config.tool_mode = true;
+  config.kernel_init = rex::kernel::InitializeKernel;
+  REQUIRE(rt.Setup(std::move(config)) == X_STATUS_SUCCESS);
+  const auto output = rt.memory()->SystemHeapAlloc(8);
+  auto* base = rt.memory()->virtual_membase();
+  uint32_t outside = ~0u, outer = 0, inner = 0, restored = 0, after = ~0u;
+  uint32_t attributes = 0, attr_result = ~0u, invalid = 0, result = 0, null_output = 0;
+  bool host_identity = false;
+  bool outer_alive = false, inner_gone = false, exception_restored = false;
+  auto caller = rex::system::object_ref<rex::system::XHostThread>(
+      new rex::system::XHostThread(rt.kernel_state(), 128 * 1024, 0, [&] {
+    auto& ctx = *rex::system::XThread::GetCurrentThread()->thread_state()->context();
+    auto current = [&] {
+      __imp__XamTaskGetCurrentTask(ctx, base);
+      const auto handle = ctx.r3.u32;
+      if (handle) __imp__XamTaskCloseHandle(ctx, base);
+      return handle;
+    };
+    outside = current();
+    result = rex::kernel::xam::RunSystemTask([&] {
+      outer = current();
+      ctx.r3.u64 = rex::kernel::xam::CurrentSystemTask();
+      host_identity = ctx.r3.u32 == outer;
+      __imp__XamTaskCloseHandle(ctx, base);
+      outer_alive = rex::kernel::xam::IsRuntimeTask(outer);
+      ctx.r3.u64 = outer; ctx.r4.u64 = output;
+      __imp__XamTaskGetAttributes(ctx, base); attr_result = ctx.r3.u32;
+      attributes = rex::memory::load_and_swap<uint32_t>(base + output);
+      ctx.r3.u64 = outer; ctx.r4.u64 = 0;
+      __imp__XamTaskGetAttributes(ctx, base); null_output = ctx.r3.u32;
+      rex::kernel::xam::RunSystemTask([&] { inner = current(); return 0u; });
+      inner_gone = !rex::kernel::xam::IsRuntimeTask(inner);
+      restored = current();
+      try {
+        rex::kernel::xam::RunSystemTask([]() -> uint32_t { throw std::runtime_error("test"); });
+      } catch (const std::runtime_error&) { exception_restored = current() == outer; }
+      return 0x81234567u;
+    });
+    after = current();
+    ctx.r3.u64 = outer; ctx.r4.u64 = output;
+    __imp__XamTaskGetAttributes(ctx, base); invalid = ctx.r3.u32;
+    return 0;
+  }));
+  REQUIRE(caller->Create() == X_STATUS_SUCCESS);
+  uint64_t timeout = uint64_t(-50'000'000ll);
+  REQUIRE(caller->Wait(0, 0, 0, &timeout) == X_STATUS_SUCCESS);
+  CHECK(outside == 0); CHECK(after == 0);
+  CHECK(outer != 0); CHECK(inner != 0); CHECK(inner != outer);
+  CHECK(outer_alive); CHECK(inner_gone); CHECK(restored == outer);
+  CHECK(exception_restored); CHECK(attr_result == 0);
+  CHECK(attributes == 0x04000000);
+  CHECK(host_identity); CHECK(null_output == 0x80070057);
+  CHECK(invalid == 0x80070057); CHECK(result == 0x81234567);
+  CHECK_FALSE(rex::kernel::xam::IsRuntimeTask(outer));
+  rt.memory()->SystemHeapFree(output);
 }
 }
 
@@ -84,6 +151,7 @@ TEST_CASE("Sign-in task cancellation joins callback before releasing its module"
   REQUIRE(caller->Wait(0, 0, 0, &timeout) == X_STATUS_SUCCESS);
   CHECK(scheduled == 0);
   CHECK(received_context == 0x10203040);
+  CHECK(worker_system_task == 0);
   CHECK(received_handle == rex::memory::load_and_swap<uint32_t>(base + address));
   CHECK(pending == 0);
   CHECK(cancelled);

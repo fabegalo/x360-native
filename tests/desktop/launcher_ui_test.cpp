@@ -89,6 +89,45 @@ struct Frontend {
   }
 };
 }
+TEST_CASE("launcher fullscreen and crash capture controls do not start a session", "[launcher-options]") {
+  Frontend f;
+  CHECK_FALSE(f.app.renderer_settings.fullscreen);
+  CHECK_FALSE(f.app.capture_crash);
+  SendMessageW(f.app.window, WM_COMMAND, kFullscreen, 0);
+  CHECK(f.app.renderer_settings.fullscreen);
+  CHECK(LoadRendererSettings(f.paths).fullscreen);
+  SendMessageW(f.app.window, WM_COMMAND, kCaptureCrash, 0);
+  CHECK(f.app.capture_crash);
+  CHECK_FALSE(f.app.busy);
+  CHECK_FALSE(fs::exists(f.root / "child-started.txt"));
+  SendMessageW(f.app.window, WM_COMMAND, kFullscreen, 0);
+  CHECK_FALSE(LoadRendererSettings(f.paths).fullscreen);
+}
+TEST_CASE("reopening a prepared launcher restores ready without hashing content", "[launcher-ready]") {
+  Frontend f; const auto target = f.TargetFixture();
+  for (int reopen = 0; reopen != 2; ++reopen) {
+    f.app.targets = {target};
+    f.app.checked = CheckContents(f.root, f.app.targets, InspectionMode::Preview);
+    f.app.selected = 0;
+    DigestBatch batch;
+    StartHints(f.app);
+    REQUIRE(f.Until([&] { return f.app.checked[0].state.receipt_current; }));
+    CHECK(StatusOf(f.app, 0) == Row::Ready);
+    InspectSelected(f.app);
+    CHECK(f.app.next_action == kLaunch);
+    CHECK(f.app.chip_tone == Tone::Ok);
+    CHECK(batch.files == 0);
+    CHECK_FALSE(fs::exists(f.root / "child-started.txt"));
+  }
+  f.app.checked[0].library = {"registration incomplete"};
+  CHECK(StatusOf(f.app, 0) == Row::Imported);
+  f.app.checked[0].library.clear();
+  ApplyReceiptHint(f.app.checked[0].state, ReceiptHint::Stale);
+  CHECK(StatusOf(f.app, 0) == Row::Imported);
+  fs::remove(target.exe);
+  f.app.checked = CheckContents(f.root, f.app.targets, InspectionMode::Preview);
+  CHECK(StatusOf(f.app, 0) != Row::Ready);
+}
 TEST_CASE("launcher catalog loading leaves the message thread responsive", "[launcher-ui]") {
   Frontend f; f.TargetFixture();
   // Resolving a large inventory used to run synchronously inside Load().

@@ -3,6 +3,23 @@
 #include <catch2/catch_test_macros.hpp>
 #include <fstream>
 using namespace x360n;
+TEST_CASE("fullscreen preference persists independently and old settings remain windowed", "[renderer][fullscreen]") {
+  const auto root = PathFromUtf8(X360N_SOURCE_ROOT) / ".local/tmp" / UniqueTempPath("fullscreen").filename();
+  ProjectPaths paths{root};
+  CHECK_FALSE(LoadRendererSettings(paths).fullscreen);
+  SaveRendererSettings(paths, {Renderer::Xenos, false, true});
+  const auto snapshot = LoadRendererSettings(paths);
+  CHECK(snapshot.fullscreen);
+  CHECK(snapshot.renderer == Renderer::Xenos);
+  SaveRendererSettings(paths, {});
+  CHECK_FALSE(LoadRendererSettings(paths).fullscreen);
+  CHECK(snapshot.fullscreen);
+  std::ofstream(paths.local() / "graphics.toml") << "renderer = 'xenos'\nexperimental = false\n";
+  CHECK_FALSE(LoadRendererSettings(paths).fullscreen);
+  std::ofstream(paths.local() / "graphics.toml") << "renderer = 'xenos'\nexperimental = false\nfullscreen = 'true'\n";
+  CHECK_THROWS(LoadRendererSettings(paths));
+  std::filesystem::remove_all(root);
+}
 TEST_CASE("global renderer overrides manifests and requires development access", "[renderer]") {
   const std::vector<std::string> args{"--gpu_plugin=xenos", "--mnk_mode=true", "--gpu_plugin", "other", "--gpu-plugin=native"};
   CHECK(SessionRendererArguments(args, {}) == std::vector<std::string>{"--mnk_mode=true", "--gpu_plugin=xenos"});

@@ -1,0 +1,124 @@
+diff --git a/include/rex/kernel/xam/task_context.h b/include/rex/kernel/xam/task_context.h
+new file mode 100644
+index 0000000..3f89bda
+--- /dev/null
++++ b/include/rex/kernel/xam/task_context.h
+@@ -0,0 +1,12 @@
++#pragma once
++#include <cstdint>
++#include <functional>
++
++namespace rex::kernel::xam {
++// Run a synchronous host system callback with its own scoped XAM task identity.
++// Must be called on a bound guest thread; restores any enclosing task on return.
++uint32_t RunSystemTask(const std::function<uint32_t()>& callback);
++bool IsRuntimeTask(uint32_t handle);
++// Retained handle only for RunSystemTask; zero for ordinary guest task workers.
++uint32_t CurrentSystemTask();
++}
+diff --git a/src/kernel/xam/xam_task.cpp b/src/kernel/xam/xam_task.cpp
+index 369c2a8..be30d4c 100644
+--- a/src/kernel/xam/xam_task.cpp
++++ b/src/kernel/xam/xam_task.cpp
+@@ -28,6 +28,8 @@
+ #endif
+ 
+ #include <fmt/format.h>
++#include <functional>
++#include <mutex>
+ 
+ namespace rex {
+ namespace kernel {
+@@ -40,7 +42,9 @@ struct TaskState {
+   std::atomic<bool> completed{false};
+   std::atomic<uint32_t> result{0x8000000A};
+   uint32_t handle = 0;
++  bool host_system = false;
+   uint32_t attributes[2] = {};
++  std::mutex attributes_mutex;
+ };
+ static thread_local TaskState* current_task = nullptr;
+ 
+@@ -115,7 +119,49 @@ u32 XamTaskSchedule_entry(mapped_void callback, u32 context,
+ }
+ 
+ u32 XamTaskShouldExit_entry() { return current_task && current_task->cancelled; }
+-u32 XamTaskGetCurrentTask_entry() { return current_task ? current_task->handle : 0; }
++u32 XamTaskGetCurrentTask_entry() {
++  if (!current_task) return 0;
++  auto task = LookupTask(current_task->handle);
++  if (!task) return 0;
++  // Original 17559 816B7F30 takes a reference, released by CloseHandle.
++  task->RetainHandle();
++  return task->handle();
++}
++
++// A host-dispatched synchronous system callback is a real task too. Keep its
++// lifetime bounded to the callback, without starting a worker or borrowing the
++// title's TLS. Nested dispatch restores the caller's task and cancellation state.
++uint32_t RunSystemTask(const std::function<uint32_t()>& callback) {
++  auto task = object_ref<Task>(new Task(REX_KERNEL_STATE()));
++  task->state->handle = task->handle();
++  task->state->host_system = true;
++  task->state->attributes[0] = 0x04000000;
++  struct Scope {
++    TaskState* previous;
++    Task* task;
++    ~Scope() { current_task = previous; task->ReleaseHandle(); }
++  } scope{current_task, task.get()};
++  current_task = task->state.get();
++  const auto result = callback();
++  task->state->result = result;
++  task->state->completed = true;
++  return result;
++}
++
++bool IsRuntimeTask(uint32_t handle) { return bool(LookupTask(handle)); }
++
++uint32_t CurrentSystemTask() {
++  return current_task && current_task->host_system ? uint32_t(XamTaskGetCurrentTask_entry()) : 0;
++}
++
++u32 XamTaskGetAttributes_entry(u32 handle, mapped_u32 output) {
++  auto task = LookupTask(handle);
++  if (!task || !output) return X_E_INVALIDARG;
++  std::lock_guard lock(task->state->attributes_mutex);
++  output[0] = task->state->attributes[0];
++  output[1] = task->state->attributes[1];
++  return 0;
++}
+ u32 XamTaskCancel_entry(u32 handle) {
+   auto task = LookupTask(handle);
+   if (!task) return X_E_INVALIDARG;
+@@ -126,6 +172,7 @@ u32 XamTaskWaitOnCompletion_entry(u32 handle) {
+   auto task = LookupTask(handle);
+   if (!task || task->state.get() == current_task) return X_E_INVALIDARG;
+   // Join the guest callback before its owner frees context or unloads the XEX.
++  if (!task->thread) return task->state->completed ? 0 : uint32_t(X_E_INVALIDARG);
+   return task->thread->Wait(0, 0, 0, nullptr);
+ }
+ u32 XamTaskCloseHandle_entry(u32 handle) {
+@@ -146,7 +193,9 @@ u32 XamTaskGetCompletionStatus_entry(u32 handle) {
+ }
+ u32 XamTaskQueryProperty_entry(u32 handle, u32 mask) {
+   auto task = LookupTask(handle);
+-  return task ? task->state->attributes[0] & mask : 0;
++  if (!task) return 0;
++  std::lock_guard lock(task->state->attributes_mutex);
++  return task->state->attributes[0] & mask;
+ }
+ 
+ }  // namespace xam
+@@ -162,11 +211,11 @@ REX_EXPORT(__imp__XamTaskGetCurrentTask, rex::kernel::xam::XamTaskGetCurrentTask
+ REX_EXPORT(__imp__XamTaskGetStatus, rex::kernel::xam::XamTaskGetStatus_entry)
+ REX_EXPORT(__imp__XamTaskGetCompletionStatus, rex::kernel::xam::XamTaskGetCompletionStatus_entry)
+ REX_EXPORT(__imp__XamTaskQueryProperty, rex::kernel::xam::XamTaskQueryProperty_entry)
++REX_EXPORT(__imp__XamTaskGetAttributes, rex::kernel::xam::XamTaskGetAttributes_entry)
+ 
+ REX_EXPORT_STUB(__imp__XamTaskCancelWaitAndCloseWaitTask);
+ REX_EXPORT_STUB(__imp__XamTaskCreateQueue);
+ REX_EXPORT_STUB(__imp__XamTaskCreateQueueEx);
+-REX_EXPORT_STUB(__imp__XamTaskGetAttributes);
+ REX_EXPORT_STUB(__imp__XamTaskModify);
+ REX_EXPORT_STUB(__imp__XamTaskReschedule);
+ REX_EXPORT_STUB(__imp__XamTaskSetCancelSubTasks);

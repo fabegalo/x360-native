@@ -294,6 +294,29 @@ struct ChordFixture {
 };
 }
 
+TEST_CASE("A short START tap reaches state polling once without a second press", "[sdk][guide-state-tap]") {
+  using namespace rex::input;
+  ChordFixture f;
+  REQUIRE(rex::cvar::SetFlagByName("guide_chord_ms", "150"));
+  f.pad->held = X_INPUT_GAMEPAD_START;
+  CHECK(f.State() == 0);
+  f.pad->held = 0;
+  CHECK(f.State() == X_INPUT_GAMEPAD_START);
+  CHECK(f.State() == 0);
+  CHECK(f.State() == 0);
+}
+TEST_CASE("Delayed START changes the visible packet when the physical packet is unchanged", "[sdk][guide-state-tap]") {
+  using namespace rex::input;
+  ChordFixture f;
+  REQUIRE(rex::cvar::SetFlagByName("guide_chord_ms", "150"));
+  f.pad->held = X_INPUT_GAMEPAD_START;
+  CHECK(f.State() == 0);
+  const uint32_t before = reinterpret_cast<X_INPUT_STATE*>(f.base + f.address)->packet_number;
+  auto* input = static_cast<InputSystem*>(f.rt.input_system());
+  input->system_ui_input.chords[0].since -= std::chrono::milliseconds(151);
+  CHECK(f.State() == X_INPUT_GAMEPAD_START);
+  CHECK(uint32_t(reinterpret_cast<X_INPUT_STATE*>(f.base + f.address)->packet_number) != before);
+}
 TEST_CASE("Pending Guide input is discarded on disconnect and backend shutdown", "[sdk][guide-lifecycle]") {
   using namespace rex::input;
   ChordFixture f;

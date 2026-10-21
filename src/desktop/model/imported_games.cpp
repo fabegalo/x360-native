@@ -41,8 +41,16 @@ void Safe(const fs::path& file, const fs::path& root) {
   auto rel = CatalogVerificationPath(file).lexically_relative(CatalogVerificationPath(root));
   if (rel.empty() || rel.is_absolute() || *rel.begin() == "..") throw std::runtime_error("Catalog destination redirected outside its root");
   if (CatalogLaunchVerificationActive() && HasProtectedVerificationPath(file)) return;
-  for (auto p = file; p != root && !p.empty(); p = p.parent_path())
+  for (auto p = file; p != root && !p.empty();) {
     if (fs::is_symlink(p)) throw std::runtime_error("Catalog path contains a link");
+    const auto parent = p.parent_path();
+    // Equivalent roots can have different spellings (case, separators, '.').
+    // A filesystem root is its own parent; never spin there if the lexical
+    // comparison did not match. Canonical containment was checked above, and
+    // every visited ancestor still receives the original link check.
+    if (parent == p) break;
+    p = parent;
+  }
 }
 std::string Fingerprint(const Json& files) {
   if (CatalogLaunchVerificationActive()) {
@@ -283,7 +291,7 @@ std::string ImportGame(const ProjectPaths& paths, const std::vector<Target>& tar
     if (record["name"] == "") record["name"] = old.value("name", "");
     if (!record.contains("thumbnail_sha256") && old.contains("thumbnail_sha256")) record["thumbnail_sha256"] = old["thumbnail_sha256"];
   }
-  record["content_root"] = Utf8(target.game_root.lexically_relative(paths.inputs()));
+  record["content_root"] = Utf8(target.game_root.lexically_normal().lexically_relative(paths.inputs().lexically_normal()));
   if (!previously_complete) Save(paths, id, record); // durable interruption marker before copying
   try {
     Import(paths, target, source, cancelled);

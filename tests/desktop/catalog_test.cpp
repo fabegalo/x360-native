@@ -585,6 +585,89 @@ TEST_CASE("runtime failure remains visible without discarding a verified build",
   CHECK(fs::exists(f.target.exe));
   fs::remove(error); CHECK(Inspect(f.paths,f.target).prepared);
 }
+TEST_CASE("launcher completes missing registration from a valid build without manual repair", "[launcher-flow]") {
+  Fixture f; Import(f.paths, f.target, f.source);
+  Write(f.target.exe, "prepared fixture"); f.Receipt();
+  auto game = f.target;
+  game.library = {"12345678", "000D0000", "package", "Synthetic fixture", Hash("package")};
+  auto dashboard = game;
+  dashboard.id = "dashboard"; dashboard.kind = "dashboard";
+  dashboard.session = true; dashboard.launch_library = true;
+  dashboard.user_root = f.paths.local() / "user/dashboard";
+  dashboard.manifest = f.root / "titles/dashboard/dashboard_manifest.toml";
+  dashboard.exe = f.paths.build() / "titles/dashboard/dashboard.exe";
+  Write(dashboard.manifest, "[project]\nname='dashboard'\n[entrypoint]\nfile_path='../../.local/inputs/dashboards/test/dash.xex'\n");
+  Write(dashboard.exe, "dashboard fixture");
+  WriteTestReceipt(f.paths, dashboard.id, dashboard.manifest, dashboard.exe,
+      {game.inputs[0].destination, game.inputs[1].destination});
+  const auto header = dashboard.user_root / "0000000000000000/12345678/Headers/000D0000/package.header";
+  Write(dashboard.user_root / "profiles/account", "existing profile");
+  Write(dashboard.user_root / "saves/game", "existing save");
+  const auto receipt = DigestFile(fs::path(game.exe.string() + ".preparation.json"))->sha256;
+  SECTION("prepare game and repeat the operation") {
+    CHECK_FALSE(InspectLibrary(f.paths, game, {game, dashboard}).empty());
+    REQUIRE(CompleteLibraryPreparation(f.paths, game, {game, dashboard}));
+    CHECK(fs::exists(header));
+    CHECK(InspectLibrary(f.paths, game, {game, dashboard}).empty());
+    CHECK(CompleteLibraryPreparation(f.paths, game, {game, dashboard}));
+  }
+  SECTION("starting dashboard completes the imported game's registration") {
+    CHECK_THROWS(VerifyCatalogLaunch(f.paths, {game, dashboard}, dashboard.id, dashboard.manifest));
+    REQUIRE(CompleteLibraryPreparation(f.paths, dashboard, {game, dashboard}));
+    CHECK(fs::exists(header));
+    CHECK_NOTHROW(VerifyCatalogLaunch(f.paths, {game, dashboard}, dashboard.id, dashboard.manifest));
+    CHECK(CompleteLibraryPreparation(f.paths, dashboard, {game, dashboard}));
+  }
+  SECTION("invalid dashboard does not register games") {
+    Write(dashboard.exe, "changed executable");
+    CHECK_FALSE(CompleteLibraryPreparation(f.paths, dashboard, {game, dashboard}));
+    CHECK_FALSE(fs::exists(header));
+  }
+  SECTION("an unimported recipe is not a prepared library game") {
+    game.catalog_id.clear();
+    CHECK_FALSE(CompleteLibraryPreparation(f.paths, game, {game, dashboard}));
+    CHECK_FALSE(fs::exists(header));
+  }
+  SECTION("an unsupported recipe never publishes a registration") {
+    game.aot = false;
+    CHECK_FALSE(CompleteLibraryPreparation(f.paths, game, {game, dashboard}));
+    CHECK_FALSE(fs::exists(header));
+  }
+  SECTION("dashboard without library opt in remains untouched") {
+    auto isolated = dashboard; isolated.id = "isolated";
+    isolated.launch_library = false;
+    isolated.user_root = f.paths.local() / "user/isolated";
+    REQUIRE(CompleteLibraryPreparation(f.paths, game, {game, dashboard, isolated}));
+    CHECK(fs::exists(header));
+    CHECK_FALSE(fs::exists(isolated.user_root));
+  }
+  SECTION("missing executable never publishes registration") {
+    fs::remove(game.exe);
+    CHECK_FALSE(CompleteLibraryPreparation(f.paths, game, {game, dashboard}));
+    CHECK_FALSE(fs::exists(header));
+  }
+  SECTION("missing dependency never publishes registration") {
+    game.dependencies = {"absent"};
+    CHECK_THROWS(CompleteLibraryPreparation(f.paths, game, {game, dashboard}));
+    CHECK_FALSE(fs::exists(header));
+  }
+  SECTION("cancelled registration can be retried") {
+    CHECK_THROWS(CompleteLibraryPreparation(f.paths, game, {game, dashboard}, [] { return true; }));
+    CHECK_FALSE(fs::exists(header));
+    CHECK(CompleteLibraryPreparation(f.paths, game, {game, dashboard}));
+  }
+  SECTION("different installed bytes are preserved") {
+    const auto installed = dashboard.user_root / "0000000000000000/12345678/000D0000/package/dash.xex";
+    Write(installed, "different");
+    CHECK_THROWS(CompleteLibraryPreparation(f.paths, game, {game, dashboard}));
+    CHECK(DigestFile(installed)->sha256 == Hash("different"));
+    CHECK_FALSE(fs::exists(header));
+  }
+  CHECK(DigestFile(fs::path(game.exe.string() + ".preparation.json"))->sha256 == receipt);
+  CHECK(DigestFile(dashboard.user_root / "profiles/account")->sha256 == Hash("existing profile"));
+  CHECK(DigestFile(dashboard.user_root / "saves/game")->sha256 == Hash("existing save"));
+}
+
 TEST_CASE("original library registration validates all bytes and publishes the header last") {
   Fixture f; Import(f.paths, f.target, f.source);
   Write(f.target.exe, "prepared fixture"); f.Receipt();

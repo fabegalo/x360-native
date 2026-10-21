@@ -73,12 +73,12 @@ LRESULT CALLBACK FrameProc(HWND window, UINT message, WPARAM wp, LPARAM lp) {
   return DefWindowProcW(window, message, wp, lp);
 }
 }
-SessionWindow::SessionWindow(bool visible, uintptr_t closed_notification) {
+SessionWindow::SessionWindow(bool visible, uintptr_t closed_notification, bool fullscreen) {
   ActionTrace trace("session.window.create");
   close_event_ = reinterpret_cast<uintptr_t>(CreateEventW(nullptr, TRUE, FALSE, nullptr));
   if (!close_event_) throw std::runtime_error("could not create session close event");
   std::promise<uintptr_t> ready; auto result = ready.get_future();
-  thread_ = std::thread([this, visible, closed_notification, ready = std::move(ready)]() mutable {
+  thread_ = std::thread([this, visible, closed_notification, fullscreen, ready = std::move(ready)]() mutable {
     SetThreadDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
     const auto instance = GetModuleHandleW(nullptr);
     WNDCLASSW wc{}; wc.lpfnWndProc = FrameProc; wc.hInstance = instance;
@@ -90,6 +90,18 @@ SessionWindow::SessionWindow(bool visible, uintptr_t closed_notification) {
     auto window = CreateWindowExW(0, wc.lpszClassName, L"x360-native",
         WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN, CW_USEDEFAULT, CW_USEDEFAULT,
         rect.right - rect.left, rect.bottom - rect.top, nullptr, nullptr, instance, &state);
+    if (window && fullscreen) {
+      // SDL renders inside this frame. Fullscreen belongs to the frame so it
+      // survives every dashboard/title transition without resizing the desktop.
+      MONITORINFO monitor{sizeof(monitor)};
+      if (GetMonitorInfoW(MonitorFromWindow(window, MONITOR_DEFAULTTONEAREST), &monitor)) {
+        SetWindowLongPtrW(window, GWL_STYLE, WS_POPUP | WS_CLIPCHILDREN);
+        const auto& bounds = monitor.rcMonitor;
+        SetWindowPos(window, nullptr, bounds.left, bounds.top,
+                     bounds.right - bounds.left, bounds.bottom - bounds.top,
+                     SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
+      } else { DestroyWindow(window); window = nullptr; }
+    }
     ready.set_value(reinterpret_cast<uintptr_t>(window));
     if (!window) return;
     if (visible) ShowWindow(window, SW_SHOW);
@@ -109,7 +121,7 @@ SessionWindow::~SessionWindow() {
 }
 #else
 namespace x360n {
-SessionWindow::SessionWindow(bool, uintptr_t) { throw std::runtime_error("session window requires Windows"); }
+SessionWindow::SessionWindow(bool, uintptr_t, bool) { throw std::runtime_error("session window requires Windows"); }
 SessionWindow::~SessionWindow() = default;
 }
 #endif

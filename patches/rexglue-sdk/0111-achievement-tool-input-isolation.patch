@@ -1,0 +1,18 @@
+diff --git a/src/system/kernel_state.cpp b/src/system/kernel_state.cpp
+index 51371b4..a5f7724 100644
+--- a/src/system/kernel_state.cpp
++++ b/src/system/kernel_state.cpp
+@@ -307,6 +307,13 @@ void KernelState::LoadAchievementsData() {
+   SetLoadedAchievements(std::move(achievements));
+   // The guest uses only original title resources. Editable host metadata and
+   // legacy title-global unlock files cannot establish per-account progress.
++  // Codegen/init tools default user_data_root to the input directory. Never
++  // publish persistent metadata into original content in that configuration.
++  // Explicit isolated user roots remain usable by metadata validation tools.
++  if (emulator_->is_tool_mode() &&
++      emulator_->user_data_root() == emulator_->game_data_root()) {
++    return;
++  }
+   uint32_t data = 0, size = 0;
+   if (XSUCCEEDED(executable_module_->GetSection(
+           fmt::format("{:08X}", title_id()).c_str(), &data, &size))) {

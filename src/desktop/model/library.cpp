@@ -1,6 +1,7 @@
 #include "catalog.h"
 #include "sha256.h"
 #include "workspace_lease.h"
+#include "digest_batch.h"
 #include <algorithm>
 #include <array>
 #include <chrono>
@@ -159,6 +160,41 @@ std::vector<std::string> InstalledGames(const ProjectPaths& paths, const std::ve
   }
   return ids;
 }
+}
+bool CompleteLibraryPreparation(const ProjectPaths& paths, const Target& target,
+    const std::vector<Target>& catalog, const std::function<bool()>& cancelled) {
+  if (!target.aot || (!target.session && !InGameLibrary(target))) return false;
+  std::vector<Target> pending;
+  {
+    DigestBatch batch(cancelled);
+    const auto ready = [&](const Target& item) {
+      if (cancelled && cancelled()) throw std::runtime_error("Preparação cancelada.");
+      const auto state = Inspect(paths, item);
+      return item.aot && state.inputs_ok && state.prepared;
+    };
+    if (!ready(target)) return false;
+    for (const auto& id : target.dependencies)
+      if (!ready(Dependency(catalog, id))) return false;
+    if (target.session) {
+      if (!InspectLibrary(paths, target, catalog).empty())
+        pending.push_back(target);
+    } else {
+      for (const auto& dashboard : catalog) {
+        if (!dashboard.session || !dashboard.launch_library || dashboard.inputs.empty() ||
+            !fs::is_regular_file(dashboard.inputs.front().destination)) continue;
+        if (!InspectLibrary(paths, dashboard, {target}).empty())
+          pending.push_back(dashboard);
+      }
+    }
+    if (pending.empty()) return true;
+  }
+  // Release verification handles before publishing/renaming copied files.
+  for (const auto& dashboard : pending)
+    PrepareLibrary(paths, dashboard, catalog, cancelled);
+  DigestBatch verification(cancelled);
+  const auto issues = InspectLibrary(paths, target, catalog);
+  if (!issues.empty()) throw std::runtime_error(issues.front());
+  return true;
 }
 std::vector<std::string> InspectLibrary(const ProjectPaths& paths, const Target& session, const std::vector<Target>& catalog) {
   std::vector<std::string> issues;

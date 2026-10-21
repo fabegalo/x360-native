@@ -1,4 +1,12 @@
 # Included from tests/CMakeLists.txt; paths and target outputs stay rooted there.
+if(WIN32)
+  add_executable(x360n_notification_17559_probe EXCLUDE_FROM_ALL tools/notification_17559_probe.cpp
+      ../titles/common/dashboard_assets.cpp)
+  target_link_libraries(x360n_notification_17559_probe PRIVATE rexruntime x360n_core)
+  target_compile_options(x360n_notification_17559_probe PRIVATE
+      -UTRACY_ENABLE -UREXGLUE_ENABLE_PROFILING -UREXGLUE_ENABLE_PERF_COUNTERS)
+  x360n_stage_runtime_dlls(x360n_notification_17559_probe)
+endif()
 # SDK behavior checks (link the SDK codegen library).
 add_executable(x360n_sdk_checks sdkcheck/depfile_escape_test.cpp)
 target_sources(x360n_sdk_checks PRIVATE sdkcheck/sha1_test.cpp)
@@ -135,6 +143,14 @@ target_sources(x360n_sdk_runtime_checks PRIVATE sdkcheck/persist_display_test.cp
 target_sources(x360n_sdk_runtime_checks PRIVATE sdkcheck/system_command_buffer_test.cpp)
 target_sources(x360n_sdk_runtime_checks PRIVATE sdkcheck/system_ui_input_test.cpp)
 target_sources(x360n_sdk_runtime_checks PRIVATE sdkcheck/local_profile_gamercard_test.cpp)
+
+target_sources(x360n_sdk_runtime_checks PRIVATE
+    sdkcheck/offline_achievement_store_test.cpp
+    sdkcheck/offline_achievement_api_test.cpp
+    sdkcheck/achievement_ui_test.cpp
+    sdkcheck/achievement_cached_title_test.cpp
+    sdkcheck/achievement_xdbf_test.cpp
+    sdkcheck/offline_achievement_metadata_test.cpp)
 target_sources(x360n_sdk_runtime_checks PRIVATE sdkcheck/physical_heap_transaction_test.cpp)
 target_sources(x360n_sdk_runtime_checks PRIVATE sdkcheck/xctd_query_test.cpp)
 target_sources(x360n_sdk_runtime_checks PRIVATE sdkcheck/mic_array_idle_test.cpp)
@@ -218,6 +234,10 @@ endif()
 catch_discover_tests(x360n_sdk_runtime_checks TEST_PREFIX "sdkcheck." PROPERTIES LABELS "project" TIMEOUT 120
     DISCOVERY_MODE PRE_TEST)
 if(WIN32)
+  add_test(NAME sdkcheck.offline-achievements-processes COMMAND powershell -NoProfile -ExecutionPolicy Bypass
+    -File ${CMAKE_CURRENT_SOURCE_DIR}/local/offline-achievements-process.ps1
+    -Executable $<TARGET_FILE:x360n_sdk_runtime_checks>)
+  set_tests_properties(sdkcheck.offline-achievements-processes PROPERTIES LABELS project TIMEOUT 50)
   add_test(NAME sdkcheck.save-storage-processes COMMAND powershell -NoProfile -ExecutionPolicy Bypass
     -File ${CMAKE_CURRENT_SOURCE_DIR}/local/save-storage-process.ps1
     -Executable $<TARGET_FILE:x360n_sdk_runtime_checks>)

@@ -8,7 +8,8 @@ namespace x360n {
 // in a child window; this class draws no dashboard or game interface.
 class SessionWindow {
  public:
-  explicit SessionWindow(bool visible = true, uintptr_t closed_notification = 0);
+  explicit SessionWindow(bool visible = true, uintptr_t closed_notification = 0,
+                         bool fullscreen = false);
   ~SessionWindow();
   SessionWindow(const SessionWindow&) = delete;
   SessionWindow& operator=(const SessionWindow&) = delete;

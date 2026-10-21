@@ -1,0 +1,132 @@
+diff --git a/src/kernel/xam/xam_enum.cpp b/src/kernel/xam/xam_enum.cpp
+index acb33f5..fb5e3e9 100644
+--- a/src/kernel/xam/xam_enum.cpp
++++ b/src/kernel/xam/xam_enum.cpp
+@@ -233,19 +233,18 @@ uint32_t xeXamEnumerate(uint32_t handle, uint32_t flags, mapped_void buffer_ptr,
+ 
+ u32 XamEnumerate_entry(u32 handle, u32 flags, mapped_void buffer, u32 buffer_length,
+                        mapped_u32 items_returned, ppc_ptr_t<XAM_OVERLAPPED> overlapped) {
++  auto e = REX_KERNEL_OBJECTS()->LookupObject<XEnumerator>(handle);
++  if (!e) return X_ERROR_INVALID_HANDLE;
+   // Validate the count output before WriteItems advances the cursor. Legacy
+   // enumerators retain their existing ABI; these two contracts require four
+   // writable bytes whenever a synchronous count pointer is supplied.
+   if (!overlapped && items_returned) {
+-    auto e = REX_KERNEL_OBJECTS()->LookupObject<XEnumerator>(handle);
+-    if (e) {
+-      const auto* header = REX_KERNEL_MEMORY()->TranslateVirtual<X_KENUMERATOR*>(e->guest_object());
+-      if (header->app_id == 0xFB &&
+-          (header->open_message == 0xB000A || header->open_message == 0xB0050) &&
+-          !AchievementGuestSpan(REX_KERNEL_MEMORY(), items_returned.guest_address(), 4,
+-                                memory::kMemoryProtectWrite))
+-        return X_ERROR_INVALID_PARAMETER;
+-    }
++    const auto* header = REX_KERNEL_MEMORY()->TranslateVirtual<X_KENUMERATOR*>(e->guest_object());
++    if (header->app_id == 0xFB &&
++        (header->open_message == 0xB000A || header->open_message == 0xB0050) &&
++        !AchievementGuestSpan(REX_KERNEL_MEMORY(), items_returned.guest_address(), 4,
++                              memory::kMemoryProtectWrite))
++      return X_ERROR_INVALID_PARAMETER;
+   }
+   uint32_t dummy = 0;
+   auto result =
+diff --git a/src/kernel/xam/xam_misc.cpp b/src/kernel/xam/xam_misc.cpp
+index 857f517..fbc2bf6 100644
+--- a/src/kernel/xam/xam_misc.cpp
++++ b/src/kernel/xam/xam_misc.cpp
+@@ -10,9 +10,12 @@
+ 
+ #include <rex/kernel/xam/private.h>
+ #include <rex/kernel/xam/module.h>
++#include <rex/kernel/xam/offline_achievement_helpers.h>
+ #include <rex/logging.h>
+ #include <rex/hook.h>
+ #include <rex/chrono/clock.h>
++#include <rex/string.h>
++#include <algorithm>
+ 
+ // kinda gross but oh well
+ REX_EXPORT_STUB(__imp__CancelWaitableTimer);
+@@ -470,8 +473,48 @@ REX_EXPORT_STUB(__imp__XamGetAdaptersCollection);
+ REX_EXPORT_STUB(__imp__XamGetAppliesTo);
+ REX_EXPORT_STUB(__imp__XamGetCachedGamerTag);
+ REX_EXPORT_STUB(__imp__XamGetCachedGamerTagW);
+-REX_EXPORT_STUB(__imp__XamGetCachedTitleName);
+-REX_EXPORT_STUB(__imp__XamGetCachedTitleNameEx);
++namespace {
++uint32_t CachedOriginalTitleName(uint32_t title, uint32_t buffer, uint32_t capacity_address) {
++  using rex::kernel::xam::AchievementGuestSpan;
++  auto* memory = REX_KERNEL_MEMORY();
++  if ((buffer & 1) || (capacity_address & 3) ||
++      !AchievementGuestSpan(memory, capacity_address, 4,
++          rex::memory::kMemoryProtectRead | rex::memory::kMemoryProtectWrite)) return 87;
++  const uint32_t capacity = std::min<uint32_t>(
++      rex::memory::load_and_swap<uint32_t>(memory->TranslateVirtual(capacity_address)), 23);
++  if (!capacity || !AchievementGuestSpan(memory, buffer, capacity * 2,
++                                        rex::memory::kMemoryProtectWrite)) return 87;
++  auto* output = memory->TranslateVirtual<rex::be<uint16_t>*>(buffer);
++  auto* count = memory->TranslateVirtual<rex::be<uint32_t>*>(capacity_address);
++  output[0] = 0;
++  *count = title ? 0 : 1;
++  if (!title) return 87;
++  std::string name;
++  const auto result = REX_KERNEL_STATE()->offline_achievements().TitleName(title, name);
++  const uint32_t error = rex::kernel::xam::OfflineAchievementError(result);
++  if (error) return error;
++  const auto text = rex::string::to_utf16(name);
++  const size_t length = std::min<size_t>(text.size(), capacity - 1);
++  for (size_t i = 0; i < length; ++i) output[i] = text[i];
++  output[length] = 0;
++  *count = static_cast<uint32_t>(length + 1);
++  return 0;
++}
++}
++// Original 17559 exports 816A3D58/816A3A80: r5 is an in/out character
++// capacity, not OVERLAPPED. Cached replies are synchronous; Ex r6 contains
++// lookup flags. Offline misses cannot start a remote fetch or invent a name.
++// Helper 816A35D0 caps the buffer at 23 WCHARs including the terminator.
++extern "C" REX_FUNC(__imp__XamGetCachedTitleName) {
++  ctx.r3.u64 = CachedOriginalTitleName(ctx.r3.u32, ctx.r4.u32, ctx.r5.u32);
++}
++extern "C" REX_FUNC(__imp__XamGetCachedTitleNameEx) {
++  ctx.r3.u64 = CachedOriginalTitleName(ctx.r3.u32, ctx.r4.u32, ctx.r5.u32);
++}
++static rex::ppc::detail::PPCFuncRegistrar cached_title_name_reg(
++    "__imp__XamGetCachedTitleName", &__imp__XamGetCachedTitleName);
++static rex::ppc::detail::PPCFuncRegistrar cached_title_name_ex_reg(
++    "__imp__XamGetCachedTitleNameEx", &__imp__XamGetCachedTitleNameEx);
+ REX_EXPORT_STUB(__imp__XamGetClosedCaptioningSettings);
+ REX_EXPORT_STUB(__imp__XamGetClosedCaptioningState);
+ REX_EXPORT_STUB(__imp__XamGetConsoleFriendlyName);
+diff --git a/src/kernel/xam/xam_notify.cpp b/src/kernel/xam/xam_notify.cpp
+index 651dbbf..84f5951 100644
+--- a/src/kernel/xam/xam_notify.cpp
++++ b/src/kernel/xam/xam_notify.cpp
+@@ -169,6 +169,10 @@ uint32_t QueueOriginalNotification(PPCContext& ctx, bool extended) {
+ }
+ extern "C" REX_FUNC(__imp__XNotifyQueueUI) { ctx.r3.u64 = QueueOriginalNotification(ctx, false); }
+ extern "C" REX_FUNC(__imp__XNotifyQueueUIEx) { ctx.r3.u64 = QueueOriginalNotification(ctx, true); }
++static rex::ppc::detail::PPCFuncRegistrar notify_queue_ui_reg(
++    "__imp__XNotifyQueueUI", &__imp__XNotifyQueueUI);
++static rex::ppc::detail::PPCFuncRegistrar notify_queue_ui_ex_reg(
++    "__imp__XNotifyQueueUIEx", &__imp__XNotifyQueueUIEx);
+ REX_EXPORT_STUB(__imp__XNotifyRegisterArea);
+ REX_EXPORT_STUB(__imp__XNotifyUIGetOptions);
+ REX_EXPORT_STUB(__imp__XNotifyUISetOptions);
+diff --git a/src/kernel/xam/xam_ui.cpp b/src/kernel/xam/xam_ui.cpp
+index 835de7f..c4083cf 100644
+--- a/src/kernel/xam/xam_ui.cpp
++++ b/src/kernel/xam/xam_ui.cpp
+@@ -627,6 +627,12 @@ extern "C" REX_FUNC(__imp__XamShowAchievementsUIEx) {
+ extern "C" REX_FUNC(__imp__XamShowAchievementDetailsUI) {
+   ctx.r3.u64 = ShowOriginalAchievements(ctx.r3.u32, ctx.r4.u32, 0, 4, ctx.r5.u32);
+ }
++static rex::ppc::detail::PPCFuncRegistrar show_achievements_ui_reg(
++    "__imp__XamShowAchievementsUI", &__imp__XamShowAchievementsUI);
++static rex::ppc::detail::PPCFuncRegistrar show_achievements_ui_ex_reg(
++    "__imp__XamShowAchievementsUIEx", &__imp__XamShowAchievementsUIEx);
++static rex::ppc::detail::PPCFuncRegistrar show_achievement_details_ui_reg(
++    "__imp__XamShowAchievementDetailsUI", &__imp__XamShowAchievementDetailsUI);
+ REX_EXPORT_STUB(__imp__XamShowAndWaitForMessageBoxEx);
+ REX_EXPORT_STUB(__imp__XamShowAvatarAwardGamesUI);
+ REX_EXPORT_STUB(__imp__XamShowAvatarAwardsUI);

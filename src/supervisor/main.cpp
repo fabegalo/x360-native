@@ -704,7 +704,7 @@ int Session(const ProjectPaths& paths, const fs::path& manifest, int timeout, bo
       std::fflush(stdout);
     }
     if (!separate_windows) {
-      window = std::make_unique<SessionWindow>(true, notification.handle());
+      window = std::make_unique<SessionWindow>(true, notification.handle(), renderer_settings.fullscreen);
       fmt::print("session: persistent window {}\n", window->handle());
     }
     fmt::print("session: console language={} country={} (snapshot until restart)\n",

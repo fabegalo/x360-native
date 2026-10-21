@@ -1,4 +1,5 @@
 #include "system_ui.h"
+#include "boot_intro.h"
 #include "system_ui_request.h"
 #include "../../common/system_ui_context.h"
 #include "../../common/system_ui_execution.h"
@@ -7,6 +8,7 @@
 #include <rex/cvar.h>
 #include "../../common/guide_button.h"
 #include <rex/kernel/xam/module.h>
+#include <rex/kernel/xam/task_context.h>
 #include <rex/kernel/xboxkrnl/video.h>
 #include <rex/system/function_dispatcher.h>
 #include <rex/system/kernel_state.h>
@@ -23,6 +25,10 @@
 #include <rex/ppc/func.h>
 #include <rex/input/input_system.h>
 #include <rex/input/flags.h>
+#include <rex/system/offline_achievement_store.h>
+#include <rex/string.h>
+#include <atomic>
+#include <mutex>
 
 extern "C" REX_FUNC(__imp__XamShowGuideUI);
 
@@ -39,6 +45,15 @@ std::function<bool()> draw_ui;
 std::function<void()> request_signin;
 std::function<void()> pending_ui;
 std::function<void()> poll_guide;
+struct AchievementNotice {
+  uint32_t user, title, achievement;
+  uint64_t xuid;
+};
+std::mutex achievement_notices_mutex;
+std::vector<AchievementNotice> achievement_notices;
+std::atomic<bool> achievement_notices_pending{false};
+uint64_t achievement_notice_generation = 0;  // guarded by achievement_notices_mutex
+bool notification_host_ready = false;
 const SystemUiApplication* active_application = nullptr;
 // XAM stacks a system app that launches another one (Guide -> Profile): the
 // caller is serialized with 80000009 and restored with flags=2 when its
@@ -65,9 +80,16 @@ constexpr uint32_t kFadeShown = 0x815FA6BC;        // f30 in 816CE108
 constexpr uint32_t kFadeHidden = 0x815F86F8;       // f31 in 816CE108
 constexpr uint32_t kSystemDevice = 0x81AA1B14;
 constexpr uint32_t kSystemTarget = 0x81AA1B18;
+constexpr uint32_t kNotificationHost = 0x81AA1B54;  // 816CEA9C
+constexpr uint32_t kNotificationVisible = 0x81AA2154; // host +116
 // The title's latest VdSwap front buffer; the system frame inherits it.
 rex::kernel::xboxkrnl::SystemSwapFrame title_frame{};
 void SystemSwap(const rex::kernel::xboxkrnl::SystemSwapFrame& frame) {
+#ifndef X360N_SYSTEM_UI_PLUGIN
+  // Same lifecycle gate as the 1888 host. Game session plugins have no
+  // console boot animation; the dashboard bootstrap owns this state.
+  if (BootIntroRunning()) return;
+#endif
   title_frame = frame;
   auto* thread = rex::system::XThread::GetCurrentThread();
   if (!thread || !thread->thread_state()) return;
@@ -162,6 +184,14 @@ void ReleaseSystemUiHost() {
   active_application = nullptr;
   suspended_apps.clear();
   restore_state.clear();
+  xam->SetAchievementUnlockedCallback({});
+  {
+    std::lock_guard lock(achievement_notices_mutex);
+    ++achievement_notice_generation;
+    achievement_notices.clear();
+    achievement_notices_pending.store(false, std::memory_order_release);
+  }
+  notification_host_ready = false;
 }
 void InstallSystemUi(rex::Runtime& runtime, std::string drive, std::string native_directory) {
   system_drive = std::move(drive);
@@ -231,15 +261,30 @@ void InstallSystemUi(rex::Runtime& runtime, std::string drive, std::string nativ
     };
   }
   auto xam = runtime.kernel_state()->GetKernelModule<rex::kernel::xam::XamModule>("xam.xex");
+  uint64_t notice_generation;
+  {
+    std::lock_guard lock(achievement_notices_mutex);
+    notice_generation = ++achievement_notice_generation;
+  }
+  xam->SetAchievementUnlockedCallback([notice_generation](uint64_t xuid, uint32_t user, uint32_t title, uint32_t achievement) {
+    // A worker may already have captured the callback when the host closes.
+    // It never touches Runtime/guest state, and the generation rejects any
+    // old session's presentation after teardown/reinstall.
+    std::lock_guard lock(achievement_notices_mutex);
+    if (notice_generation != achievement_notice_generation) return;
+    achievement_notices.push_back({user, title, achievement, xuid});
+    achievement_notices_pending.store(true, std::memory_order_release);
+  });
   xam->system_ui_request = [&runtime, ui_ready = false, ui_attempted = false](uint32_t message, uint32_t request, uint32_t size) mutable -> rex::X_HRESULT {
+    const bool notification = message == 0x21013;
     const auto* application = SystemUiApplicationFor(message);
-    if (!application) return X_E_NOTFOUND;
-    if (!request || size != application->request_size || !rex::system::XThread::IsInThread()) return X_E_INVALIDARG;
+    if (!notification && !application) return X_E_NOTFOUND;
+    if (!request || size != (notification ? 40u : application->request_size) || !rex::system::XThread::IsInThread()) return X_E_INVALIDARG;
     REXLOG_INFO("17559 system UI: original application request {:08X} size={}", message, size);
     x360n::SystemUiContext system_process(*runtime.memory());
     auto* state = runtime.kernel_state();
     auto xam = state->GetKernelModule<rex::kernel::xam::XamModule>("xam.xex");
-    if (draw_ui) {
+    if (!notification && draw_ui) {
       if (pending_ui) return X_E_FAIL;
       // System apps occupy the same guest image. Copy the request now, then
       // unload the current app at the frame boundary before loading its successor.
@@ -257,7 +302,7 @@ void InstallSystemUi(rex::Runtime& runtime, std::string drive, std::string nativ
       xam->RequestSystemUiClose();
       return 0;
     }
-    if (xam->FindSystemApp(0xFF)) return X_E_FAIL;
+    if (!notification && xam->FindSystemApp(0xFF)) return X_E_FAIL;
     // Execute on the requesting guest thread, preserving its register context.
     auto* thread = rex::system::XThread::GetCurrentThread()->thread_state();
     auto* dispatcher = runtime.function_dispatcher();
@@ -394,7 +439,38 @@ void InstallSystemUi(rex::Runtime& runtime, std::string drive, std::string nativ
       const auto background_result = static_cast<X_HRESULT>(dispatcher->ExecuteTrap(thread, 0x816929B8, background, 2));
       REXLOG_INFO("17559 system UI: original HUD background -> {:08X}", uint32_t(background_result));
       if (static_cast<int32_t>(background_result) < 0) return background_result;
+      // Complete the original host startup (816CEBA8-816CEBB8). The popup
+      // compositor 816CE060 requires both fields before either its standalone
+      // render path or its HUD render path. Without them notify.xur still
+      // advances and plays its sound, but returns before drawing anything.
+      Write32(*memory, 0x81AA2190, 1);  // host +176: graphics host ready
+      Write32(*memory, 0x81AA2194, 1);  // host +180: popup composition enabled
       ui_ready = true;
+    }
+    if (notification) {
+      if (!notification_host_ready) {
+        // 816CEA98-816CEAB4 constructs the original notification presenter and
+        // binds the system DC. The original compositor already updates it.
+        const auto presenter = static_cast<uint32_t>(dispatcher->ExecuteTrap(thread, 0x816AB9C0, nullptr, 0));
+        if (!presenter) return static_cast<X_HRESULT>(0x8007000Eu);
+        uint64_t initialize[] = {presenter, Read32(*runtime.memory(), 0x81AA2110)};
+        if (!dispatcher->ExecuteTrap(thread, 0x81692978, initialize, 2)) return X_E_FAIL;
+        Write32(*runtime.memory(), kNotificationHost, presenter);
+        notification_host_ready = true;
+      }
+      uint64_t args[] = {request};
+      const auto queued = static_cast<X_HRESULT>(rex::kernel::xam::RunSystemTask([&] {
+        return uint32_t(dispatcher->ExecuteTrap(thread, 0x816AC0A8, args, 1));
+      }));
+      if (static_cast<int32_t>(queued) >= 0 && queued != 1) {
+        // 816C88E8 acquires one outstanding notification reference on the
+        // inactive -> active edge. Its worker wake is replaced by VdSwap here.
+        if (!Read32(*runtime.memory(), kNotificationVisible))
+          Write32(*runtime.memory(), 0x81AA2104, Read32(*runtime.memory(), 0x81AA2104) + 1);
+        Write32(*runtime.memory(), kNotificationVisible, 1);
+        REXLOG_INFO("17559 system UI: original notification queued");
+      }
+      return queued;
     }
     auto module = state->LoadUserModule(UiPath(application->path), false);
     if (!module) return X_E_NOTFOUND;
@@ -668,6 +744,57 @@ void dash17559::DrawSystemUiFrame(PPCContext& ctx) {
     REXLOG_ERROR("17559 system UI: frame context does not belong to the current guest thread");
     return;
   }
+  if (dash17559::achievement_notices_pending.load(std::memory_order_acquire)) {
+    std::vector<dash17559::AchievementNotice> notices;
+    {
+      std::lock_guard lock(dash17559::achievement_notices_mutex);
+      notices.swap(dash17559::achievement_notices);
+      dash17559::achievement_notices_pending.store(false, std::memory_order_release);
+    }
+    auto& runtime = *rex::Runtime::instance();
+    auto* memory = runtime.memory();
+    auto xam = runtime.kernel_state()->GetKernelModule<rex::kernel::xam::XamModule>("xam.xex");
+    for (const auto& notice : notices) {
+      const auto identity = runtime.kernel_state()->user_profile()->identity();
+      if (notice.user || !identity.signin_state || identity.xuid != notice.xuid) continue;
+      std::vector<rex::system::OfflineAchievementRecord> records;
+      const auto metadata = runtime.kernel_state()->offline_achievements().List(notice.xuid, notice.title, records);
+      if (metadata != rex::system::OfflineAchievementResult::kSuccess) {
+        REXLOG_ERROR("17559 achievement notification: committed metadata unavailable for {:08X}/{}", notice.title, notice.achievement);
+        continue;
+      }
+      std::u16string notification_text;
+      for (const auto& record : records) {
+        if (record.info.id != notice.achievement || !record.unlock_filetime) continue;
+        // 8190FBE8 uses the original UTF16 format at 8162F678: "%d|%s".
+        // The scene supplies its localized heading, icon, sound and animation.
+        notification_text = rex::string::to_utf16(std::to_string(record.info.gamerscore) + "|" + record.info.label);
+        if (notification_text.size() > 254) {
+          notification_text.resize(254);
+          if (notification_text.back() >= 0xD800 && notification_text.back() <= 0xDBFF)
+            notification_text.pop_back();
+        }
+        break;
+      }
+      if (notification_text.empty()) continue;
+      const uint32_t bytes = 40 + uint32_t((notification_text.size() + 1) * 2);
+      const auto request = memory->SystemHeapAlloc(bytes);
+      if (!request) {
+        REXLOG_ERROR("17559 achievement notification: out of guest memory");
+        continue;
+      }
+      auto* words = memory->TranslateVirtual<rex::be<uint32_t>*>(request);
+      std::memset(words, 0, bytes);
+      words[0] = 27; words[1] = notice.user; words[2] = 2; words[3] = request + 40;
+      words[9] = notice.title;
+      auto* text = memory->TranslateVirtual<rex::be<uint16_t>*>(request + 40);
+      for (size_t i = 0; i < notification_text.size(); ++i) text[i] = notification_text[i];
+      const auto result = xam->system_ui_request(0x21013, request, 40);
+      memory->SystemHeapFree(request);
+      if (static_cast<int32_t>(result) < 0)
+        REXLOG_ERROR("17559 original achievement notification failed {:08X}: {:08X}/{}", uint32_t(result), notice.title, notice.achievement);
+    }
+  }
   if (dash17559::poll_guide) dash17559::poll_guide();
   if (!dash17559::draw_ui && dash17559::pending_ui) {
     auto request = std::move(dash17559::pending_ui);
@@ -695,6 +822,20 @@ void dash17559::DrawSystemUiFrame(PPCContext& ctx) {
         REXLOG_INFO("17559 system UI: restored suspended {:08X} -> {:08X}", app.message, uint32_t(result));
       };
       dash17559::suspended_apps.pop_back();
+    }
+  }
+  // A notification is a non-modal system frame: the original presenter owns
+  // animation and expiry; it never captures game controls or opens the Guide.
+  // With no pending notification this path has no guest call or allocation.
+  if (!dash17559::draw_ui && dash17559::notification_host_ready) {
+    auto& runtime = *rex::Runtime::instance();
+    auto* memory = runtime.memory();
+    if (dash17559::Read32(*memory, dash17559::kNotificationVisible) &&
+        runtime.function_dispatcher()->ExecuteTrap(frame.thread_state(), 0x81842110, nullptr, 0)) {
+      uint64_t compose[] = {dash17559::Read32(*memory, dash17559::kSystemTarget)};
+      runtime.function_dispatcher()->ExecuteTrap(frame.thread_state(), 0x816CCF00, compose, 1);
+      // 816CD678-816CD6BC publishes the empty descriptor when the last
+      // notification expires with no HUD. Do not drain the buffers twice.
     }
   }
 }

@@ -23,6 +23,9 @@ RendererSettings LoadRendererSettings(const ProjectPaths& paths) {
   if (!renderer || !experimental || (*renderer != "xenos" && *renderer != "native"))
     throw std::runtime_error("Invalid global graphics settings: " + PathUtf8(file));
   RendererSettings result{*renderer == "native" ? Renderer::Native : Renderer::Xenos, *experimental};
+  if (table.contains("fullscreen") && !table["fullscreen"].is_boolean())
+    throw std::runtime_error("Invalid fullscreen preference: " + PathUtf8(file));
+  result.fullscreen = table["fullscreen"].value_or(false);
   Validate(result); return result;
 }
 void SaveRendererSettings(const ProjectPaths& paths, RendererSettings settings) {
@@ -33,7 +36,8 @@ void SaveRendererSettings(const ProjectPaths& paths, RendererSettings settings) 
   {
     std::ofstream out(temp, std::ios::binary | std::ios::trunc);
     out << "renderer = '" << (settings.renderer == Renderer::Native ? "native" : "xenos")
-        << "'\nexperimental = " << (settings.experimental ? "true" : "false") << '\n';
+        << "'\nexperimental = " << (settings.experimental ? "true" : "false")
+        << "\nfullscreen = " << (settings.fullscreen ? "true" : "false") << '\n';
     out.close();
     if (!out) throw std::runtime_error("Cannot persist global graphics settings");
   }

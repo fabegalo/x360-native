@@ -7,6 +7,7 @@ enum class Renderer { Xenos, Native };
 struct RendererSettings {
   Renderer renderer = Renderer::Xenos;
   bool experimental = false;
+  bool fullscreen = false;
 };
 RendererSettings LoadRendererSettings(const ProjectPaths& paths);
 void SaveRendererSettings(const ProjectPaths& paths, RendererSettings settings);

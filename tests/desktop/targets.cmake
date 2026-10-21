@@ -62,6 +62,8 @@ if(TARGET Catch2::Catch2WithMain)
     set_tests_properties(desktop.launcher PROPERTIES LABELS project TIMEOUT 90)
     add_test(NAME desktop.launcher-layout COMMAND x360n_launcher_tests "[launcher-layout]")
     set_tests_properties(desktop.launcher-layout PROPERTIES LABELS project TIMEOUT 60)
+    add_test(NAME desktop.session-fullscreen COMMAND x360n_launcher_tests "[session-fullscreen]")
+    set_tests_properties(desktop.session-fullscreen PROPERTIES LABELS project TIMEOUT 30)
     add_test(NAME desktop.version-from-commits COMMAND powershell -NoProfile -ExecutionPolicy Bypass
       -File ${PROJECT_SOURCE_DIR}/tests/packaging/compute_version_test.ps1)
     set_tests_properties(desktop.version-from-commits PROPERTIES LABELS project TIMEOUT 60)

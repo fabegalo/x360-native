@@ -178,7 +178,7 @@ Incremento Perfil do Guide (2026-10-16, patch 0080): GamerCard original do Guide
 
 - [x] Mostrar a contagem real de jogos da conta conectada no Perfil do Guide, na dashboard, no Forza e no Castle Crashers.
 - [x] Recuperar essa contagem após reiniciar e trocá-la com o perfil no mesmo processo (Player1 1, Player2 0).
-- [ ] Gamerpic, gamerscore, conquistas e símbolo de gamerscore: sem dados ou recurso local; ver [relatório](reports/graphics/guide-composition-2026-10-16.md).
+- [ ] Gamerpic e símbolo de gamerscore: apresentação ainda sem aceite; ver [relatório](reports/graphics/guide-composition-2026-10-16.md). Gamerscore e conquistas offline possuem serviços e metadados originais implementados, com aceite de gameplay/UI pendente; ver [implementação e roteiro](reports/offline-achievements-2026-10-21.md).
 
 Não amplia o aceite de conquistas por usuário nem de outros jogos.
 
@@ -301,6 +301,11 @@ os testes do serviço não promovem esse aceite. Evidências e limites:
 - [ ] Alterar temas, imagens de jogador e preferências visuais quando presentes na dashboard.
 - [ ] Exibir cartão de jogador, histórico de jogos e conquistas locais reais.
 - [ ] Registrar conquistas emitidas pelo jogo, persistir o progresso e mostrar as notificações correspondentes.
+
+Implementação offline de 21/10: armazenamento por XUID/título, APIs XAM, contadores
+e ponte para notificações originais 17559. Os testes técnicos e recursos originais
+não aprovam estes itens: falta desbloqueio real observado no gameplay e conferência
+da UI após reiniciar. [Evidências e aceite manual](reports/offline-achievements-2026-10-21.md).
 - [ ] Suportar avatares e sua edição nas versões em que existirem. Em 2026-10-13,
   serviço original 17559 isolado levou Motocross ao tutorial. Terreno preto e
   piloto deformado tiveram causas/correções registradas em 16/10; fidelidade,

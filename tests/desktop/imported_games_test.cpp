@@ -76,6 +76,31 @@ TEST_CASE("universal library persists unsupported titles and exact duplicates", 
   CHECK(ImportGame(f.paths,games,f.source,f.source)!=id);
   CHECK(ReadCatalog(f.paths).size()==2);
 }
+TEST_CASE("folder import terminates for equivalent ancestor spellings", "[universal][import-path-termination]") {
+  Fixture f;
+  auto source = f.source;
+  SECTION("trailing separator") { source /= ""; }
+  SECTION("dot component") { source /= "."; }
+  SECTION("local content with alternate environment spelling") {
+    source = f.paths.inputs() / "games" / "sample";
+    fs::create_directories(source.parent_path());
+    fs::rename(f.source, source);
+    f.paths.root /= ".";
+  }
+  SECTION("local content with launcher parent spelling") {
+    source = f.paths.inputs() / "games" / "sample";
+    fs::create_directories(source.parent_path());
+    fs::rename(f.source, source);
+    fs::create_directory(f.root / "scripts");
+    f.paths.root /= "scripts/..";
+  }
+  const auto id = ImportGame(f.paths, {}, source, source);
+  const auto games = ReadCatalog(f.paths);
+  REQUIRE(games.size() == 1);
+  CHECK(games.front().id == id);
+  CHECK(Inspect(f.paths, games.front()).inputs_ok);
+  CHECK(fs::file_size(f.root / ".local/user/save") == 4);
+}
 TEST_CASE("folder imports name discs from their own title art package", "[universal][disc-name]") {
   Fixture f; std::string expected;
   SECTION("matching title, any case") { Write(f.source/"NXEART", ArtPackage(0x12345678, u"Disc Game")); expected = "Disc Game"; }

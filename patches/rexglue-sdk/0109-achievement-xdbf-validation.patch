@@ -1,0 +1,105 @@
+diff --git a/src/system/util/xdbf_utils.cpp b/src/system/util/xdbf_utils.cpp
+index 8250565..43d3e25 100644
+--- a/src/system/util/xdbf_utils.cpp
++++ b/src/system/util/xdbf_utils.cpp
+@@ -11,6 +11,8 @@
+ 
+ #include <rex/system/util/xdbf_utils.h>
+ 
++#include <set>
++
+ namespace rex {
+ namespace system {
+ namespace util {
+@@ -25,31 +27,70 @@ constexpr uint64_t kXdbfIdXstc = 0x58535443;
+ constexpr uint64_t kXdbfIdXach = 0x58414348;
+ 
+ XdbfWrapper::XdbfWrapper(const uint8_t* data, size_t data_size)
+-    : data_(data), data_size_(data_size) {
+-  if (!data || data_size <= sizeof(XbdfHeader)) {
+-    data_ = nullptr;
+-    return;
+-  }
+-
+-  const uint8_t* ptr = data_;
+-
+-  header_ = reinterpret_cast<const XbdfHeader*>(ptr);
+-  ptr += sizeof(XbdfHeader);
+-  if (header_->magic != kXdbfSignatureXdbf) {
+-    data_ = nullptr;
+-    return;
++    : data_size_(data_size) {
++  // Validate before publishing data_. Cached game resources are disk input too;
++  // an invalid resource must never expose an unchecked pointer to callers.
++  if (!data || data_size < sizeof(XbdfHeader)) return;
++  const auto* header = reinterpret_cast<const XbdfHeader*>(data);
++  if (header->magic != kXdbfSignatureXdbf || header->version != 0x00010000 ||
++      header->entry_used > header->entry_count || header->free_used > header->free_count) return;
++  size_t offset = sizeof(XbdfHeader);
++  if (header->entry_count > (data_size - offset) / sizeof(XbdfEntry)) return;
++  const auto* entries = reinterpret_cast<const XbdfEntry*>(data + offset);
++  offset += size_t(header->entry_count) * sizeof(XbdfEntry);
++  if (header->free_count > (data_size - offset) / sizeof(XbdfFileLoc)) return;
++  const auto* files = reinterpret_cast<const XbdfFileLoc*>(data + offset);
++  offset += size_t(header->free_count) * sizeof(XbdfFileLoc);
++  const size_t remaining = data_size - offset;
++  std::set<std::pair<uint16_t, uint64_t>> keys;
++  for (uint32_t i = 0; i < header->entry_used; ++i) {
++    const auto& entry = entries[i];
++    if (entry.offset > remaining || entry.size > remaining - entry.offset ||
++        !keys.emplace(entry.section, entry.id).second) return;
++    const auto* block = data + offset + entry.offset;
++    if (entry.section == uint16_t(XdbfSection::kStringTable) ||
++        (entry.section == uint16_t(XdbfSection::kMetadata) && entry.id == kXdbfIdXach)) {
++      if (entry.size < sizeof(XdbfSectionHeader)) return;
++      const auto* section = reinterpret_cast<const XdbfSectionHeader*>(block);
++      const bool strings = entry.section == uint16_t(XdbfSection::kStringTable);
++      if (section->version != 1 ||
++          section->magic != (strings ? kXdbfSignatureXstr : kXdbfSignatureXach) ||
++          section->size < sizeof(XdbfSectionHeader) - 4 || section->size > entry.size - 4) return;
++      // SPA section sizes exclude the four-byte magic, unlike entry sizes.
++      const size_t section_end = size_t(section->size) + 4;
++      size_t position = sizeof(XdbfSectionHeader);
++      std::set<uint16_t> ids;
++      for (uint16_t j = 0; j < section->count; ++j) {
++        if (strings) {
++          if (sizeof(XdbfStringTableEntry) > section_end - position) return;
++          const auto* string = reinterpret_cast<const XdbfStringTableEntry*>(block + position);
++          position += sizeof(XdbfStringTableEntry);
++          if (string->string_length > section_end - position ||
++              !ids.insert(string->id).second) return;
++          position += string->string_length;
++        } else {
++          if (sizeof(XdbfAchievementTableEntry) > section_end - position) return;
++          const auto* achievement = reinterpret_cast<const XdbfAchievementTableEntry*>(block + position);
++          if (!ids.insert(achievement->id).second) return;
++          position += sizeof(XdbfAchievementTableEntry);
++        }
++      }
++    } else if (entry.section == uint16_t(XdbfSection::kMetadata) && entry.id == kXdbfIdXstc) {
++      if (entry.size < sizeof(XdbfXstc)) return;
++      const auto* xstc = reinterpret_cast<const XdbfXstc*>(block);
++      if (xstc->magic != kXdbfSignatureXstc || xstc->version != 1 ||
++          xstc->size < sizeof(XdbfXstc) - 4 || xstc->size > entry.size - 4) return;
++    }
+   }
+-
+-  entries_ = reinterpret_cast<const XbdfEntry*>(ptr);
+-  ptr += sizeof(XbdfEntry) * header_->entry_count;
+-
+-  files_ = reinterpret_cast<const XbdfFileLoc*>(ptr);
+-  ptr += sizeof(XbdfFileLoc) * header_->free_count;
+-
+-  content_offset_ = ptr;
++  header_ = header;
++  entries_ = entries;
++  files_ = files;
++  content_offset_ = data + offset;
++  data_ = data;
+ }
+ 
+ XdbfBlock XdbfWrapper::GetEntry(XdbfSection section, uint64_t id) const {
++  if (!is_valid()) return {};
+   for (uint32_t i = 0; i < header_->entry_used; ++i) {
+     auto& entry = entries_[i];
+     if (entry.section == static_cast<uint16_t>(section) && entry.id == id) {

@@ -102,6 +102,19 @@ TEST_CASE("digest batches retain byte identity only while writes and replacement
   }
   std::error_code ec; fs::remove_all(dir, ec);
 }
+TEST_CASE("fullscreen belongs to the persistent session frame", "[session-fullscreen]") {
+  SessionWindow window(false, 0, true);
+  const auto hwnd = reinterpret_cast<HWND>(window.handle());
+  REQUIRE(IsWindow(hwnd));
+  CHECK_FALSE(IsWindowVisible(hwnd));
+  CHECK((GetWindowLongPtrW(hwnd, GWL_STYLE) & WS_OVERLAPPEDWINDOW) == 0);
+  MONITORINFO monitor{sizeof(monitor)};
+  REQUIRE(GetMonitorInfoW(MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST), &monitor));
+  RECT bounds{}; REQUIRE(GetWindowRect(hwnd, &bounds));
+  CHECK(EqualRect(&bounds, &monitor.rcMonitor));
+  CHECK_FALSE(window.closed());
+  // No dashboard or game is executed by this window-contract test.
+}
 TEST_CASE("session close event interrupts only its owned process in plain and crash capture modes", "[session-event]") {
   const auto dir = UniqueTempPath("session-event"); fs::create_directories(dir);
   for (const bool debug : {false, true}) {

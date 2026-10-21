@@ -1,0 +1,581 @@
+diff --git a/include/rex/system/kernel_state.h b/include/rex/system/kernel_state.h
+--- a/include/rex/system/kernel_state.h
++++ b/include/rex/system/kernel_state.h
+@@ -27,6 +27,7 @@
+ #include <rex/filesystem/vfs.h>
+ #include <rex/logging.h>
+ #include <rex/system/achievement_manager.h>
++#include <rex/system/offline_achievement_store.h>
+ #include <rex/system/thread_state.h>
+ #include <rex/thread/fiber.h>
+ #include <rex/system/util/native_list.h>
+@@ -369,6 +370,8 @@ class KernelState {
+   std::vector<AchievementInfo> loaded_achievements() const;
+   AchievementManager& achievements() { return achievement_manager_; }
+   const AchievementManager& achievements() const { return achievement_manager_; }
++  OfflineAchievementStore& offline_achievements() { return offline_achievement_store_; }
++  void ConfigureOfflineAchievements(const std::filesystem::path& user_root);
+ 
+   using AchievementUnlockCallback = std::function<void(const AchievementInfo&)>;
+   AchievementListenerHandle RegisterAchievementUnlockCallback(AchievementUnlockCallback cb);
+@@ -430,6 +433,7 @@ class KernelState {
+   uint32_t kernel_guest_globals_ = 0;
+ 
+   AchievementManager achievement_manager_;
++  OfflineAchievementStore offline_achievement_store_;
+ 
+   std::atomic<bool> dispatch_thread_running_;
+   std::atomic<bool> terminating_title_{false};
+diff --git a/include/rex/system/offline_achievement_store.h b/include/rex/system/offline_achievement_store.h
+new file mode 100644
+--- /dev/null
++++ b/include/rex/system/offline_achievement_store.h
+@@ -0,0 +1,69 @@
++// Offline XAM achievements. Original XDBF metadata and per-XUID unlocks are
++// separate from the optional host achievement facade. BSD-3-Clause.
++#pragma once
++
++#include <cstdint>
++#include <filesystem>
++#include <mutex>
++#include <span>
++#include <string>
++#include <unordered_map>
++#include <vector>
++
++#include <rex/system/achievement_store.h>
++
++namespace rex::system {
++
++enum class OfflineAchievementResult {
++  kSuccess,
++  kNotFound,
++  kInvalidArgument,
++  kStorageError,
++  kCorruptData,
++  kMetadataMismatch,
++};
++
++struct OfflineAchievementRecord {
++  AchievementInfo info;
++  uint64_t unlock_filetime = 0;
++};
++
++struct OfflineAchievementTotals {
++  uint32_t gamerscore = 0;
++  uint32_t unlocked_count = 0;
++};
++
++class OfflineAchievementStore {
++ public:
++  // Call whenever the local account root changes (including session handoff).
++  // Empty roots disable persistence; no unlock may silently become volatile.
++  void Configure(const std::filesystem::path& user_root, uint32_t language = 0);
++
++  // Only the unmodified resource from the identified executable is imported.
++  // Conflicting metadata for a cached Title ID is an explicit error.
++  OfflineAchievementResult ImportTitle(uint32_t title_id, std::span<const uint8_t> xdbf);
++  OfflineAchievementResult List(uint64_t xuid, uint32_t title_id,
++                                std::vector<OfflineAchievementRecord>& records);
++  // Validate the complete batch, durably replace the profile snapshot, then
++  // return only new unlocks. Duplicate writes are successful and produce no event.
++  OfflineAchievementResult UnlockBatch(uint64_t xuid, uint32_t title_id,
++                                       std::span<const uint32_t> ids,
++                                       std::vector<OfflineAchievementRecord>& newly_unlocked);
++  // Global and optional per-title counters come from the same committed
++  // snapshot, even while another process writes an unlock.
++  OfflineAchievementResult Totals(uint64_t xuid, OfflineAchievementTotals& totals,
++                                  uint32_t title_id = 0,
++                                  OfflineAchievementTotals* title_totals = nullptr);
++  OfflineAchievementResult GetImage(uint32_t title_id, uint32_t image_id,
++                                    std::vector<uint8_t>& image);
++  OfflineAchievementResult TitleName(uint32_t title_id, std::string& name);
++
++ private:
++  std::mutex mutex_;
++  std::filesystem::path root_;
++  uint32_t language_ = 0;
++  // A rejected current resource must not silently use a previous cached copy.
++  std::unordered_map<uint32_t, OfflineAchievementResult> rejected_titles_;
++};
++
++}  // namespace rex::system
+diff --git a/src/system/CMakeLists.txt b/src/system/CMakeLists.txt
+--- a/src/system/CMakeLists.txt
++++ b/src/system/CMakeLists.txt
+@@ -2,6 +2,7 @@ set(REXSYSTEM_SOURCES
+     runtime.cpp
+     embedded_metadata.cpp
+     achievement_manager.cpp
++    offline_achievement_store.cpp
+     achievements.cpp
+     kernel_state.cpp
+     xmemory.cpp
+diff --git a/src/system/kernel_state.cpp b/src/system/kernel_state.cpp
+--- a/src/system/kernel_state.cpp
++++ b/src/system/kernel_state.cpp
+@@ -305,17 +305,24 @@ void KernelState::LoadAchievementsData() {
+   }
+ 
+   SetLoadedAchievements(std::move(achievements));
+-  if (auto metadata_path = emulator_->FindMetadataPath("achievements.toml")) {
+-    achievement_manager_.LoadMetadataFile(*metadata_path);
++  // The guest uses only original title resources. Editable host metadata and
++  // legacy title-global unlock files cannot establish per-account progress.
++  uint32_t data = 0, size = 0;
++  if (XSUCCEEDED(executable_module_->GetSection(
++          fmt::format("{:08X}", title_id()).c_str(), &data, &size))) {
++    const auto result = offline_achievement_store_.ImportTitle(
++        title_id(), std::span<const uint8_t>(memory()->TranslateVirtual(data), size));
++    if (result != OfflineAchievementResult::kSuccess)
++      REXSYS_ERROR("Original achievement metadata {:08X} unavailable: {}",
++                   title_id(), static_cast<int>(result));
+   }
++}
+ 
+-  // Set up the unlock save path and restore persisted state.
+-  const auto user_root = emulator_->user_data_root();
+-  if (!user_root.empty()) {
+-    achievement_manager_.SetUnlockSavePath(user_root / "achievements" /
+-                                           fmt::format("{:08X}.toml", title_id()));
+-    achievement_manager_.LoadUnlockState();
+-  }
++void KernelState::ConfigureOfflineAchievements(const std::filesystem::path& user_root) {
++  offline_achievement_store_.Configure(user_root, uint32_t(REXCVAR_GET(user_language)));
++  // Session handoff may select the shared dashboard account root after loading
++  // the game. Republish the same original resource into that root immediately.
++  if (executable_module_) LoadAchievementsData();
+ }
+ 
+ uint32_t KernelState::process_type() const {
+diff --git a/src/system/offline_achievement_store.cpp b/src/system/offline_achievement_store.cpp
+new file mode 100644
+--- /dev/null
++++ b/src/system/offline_achievement_store.cpp
+@@ -0,0 +1,415 @@
++// Durable offline XAM achievement storage. BSD-3-Clause.
++#include <rex/system/offline_achievement_store.h>
++
++#include <algorithm>
++#include <array>
++#include <cerrno>
++#include <chrono>
++#include <cstdio>
++#include <cstring>
++#include <limits>
++#include <map>
++#include <set>
++#include <thread>
++#include <utility>
++
++#include <fmt/format.h>
++#include <rex/filesystem.h>
++#include <rex/hash.h>
++#include <rex/platform.h>
++#include <rex/system/util/xdbf_utils.h>
++
++#if REX_PLATFORM_WIN32
++#include <windows.h>
++#include <io.h>
++#else
++#include <fcntl.h>
++#include <sys/file.h>
++#include <unistd.h>
++#endif
++
++namespace rex::system {
++namespace {
++using Result = OfflineAchievementResult;
++constexpr size_t kMaxXdbfSize = 64 * 1024 * 1024;
++constexpr size_t kMaxUnlocks = 262144;
++using Key = std::pair<uint32_t, uint32_t>;
++using Unlocks = std::map<Key, uint64_t>;
++
++uint32_t Read32(const uint8_t* p) {
++  return (uint32_t(p[0]) << 24) | (uint32_t(p[1]) << 16) | (uint32_t(p[2]) << 8) | p[3];
++}
++uint64_t Read64(const uint8_t* p) { return (uint64_t(Read32(p)) << 32) | Read32(p + 4); }
++void Append32(std::vector<uint8_t>& data, uint32_t value) {
++  for (unsigned shift : {24u, 16u, 8u, 0u}) data.push_back(uint8_t(value >> shift));
++}
++void Append64(std::vector<uint8_t>& data, uint64_t value) {
++  Append32(data, uint32_t(value >> 32)); Append32(data, uint32_t(value));
++}
++bool ValidXuid(uint64_t xuid) { return xuid && xuid != UINT64_MAX; }
++uint64_t CurrentFileTime() {
++  using namespace std::chrono;
++  return uint64_t(duration_cast<duration<int64_t, std::ratio<1, 10000000>>>(
++      system_clock::now().time_since_epoch()).count()) + 116444736000000000ULL;
++}
++
++// An OS-owned file lock serializes read/modify/replace across game/dashboard
++// processes and independent store instances. A crashed owner releases it.
++class StoreLock {
++ public:
++  explicit StoreLock(const std::filesystem::path& root) {
++    if (root.empty()) return;
++    std::error_code ec;
++    std::filesystem::create_directories(root, ec);
++    if (ec) return;
++    const auto path = root / "store.lock";
++#if REX_PLATFORM_WIN32
++    handle_ = CreateFileW(path.c_str(), GENERIC_READ | GENERIC_WRITE,
++                         FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr, OPEN_ALWAYS,
++                         FILE_ATTRIBUTE_NORMAL, nullptr);
++    OVERLAPPED overlapped{};
++    if (handle_ == INVALID_HANDLE_VALUE) return;
++    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(1);
++    do {
++      ok_ = LockFileEx(handle_, LOCKFILE_EXCLUSIVE_LOCK | LOCKFILE_FAIL_IMMEDIATELY,
++                       0, 1, 0, &overlapped) != 0;
++      if (ok_ || GetLastError() != ERROR_LOCK_VIOLATION) break;
++      std::this_thread::sleep_for(std::chrono::milliseconds(2));
++    } while (std::chrono::steady_clock::now() < deadline);
++#else
++    handle_ = open(path.c_str(), O_RDWR | O_CREAT, 0600);
++    if (handle_ < 0) return;
++    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(1);
++    do {
++      ok_ = flock(handle_, LOCK_EX | LOCK_NB) == 0;
++      if (ok_ || (errno != EWOULDBLOCK && errno != EAGAIN && errno != EINTR)) break;
++      std::this_thread::sleep_for(std::chrono::milliseconds(2));
++    } while (std::chrono::steady_clock::now() < deadline);
++#endif
++  }
++  ~StoreLock() {
++#if REX_PLATFORM_WIN32
++    if (handle_ != INVALID_HANDLE_VALUE) {
++      if (ok_) { OVERLAPPED overlapped{}; UnlockFileEx(handle_, 0, 1, 0, &overlapped); }
++      CloseHandle(handle_);
++    }
++#else
++    if (handle_ >= 0) { if (ok_) flock(handle_, LOCK_UN); close(handle_); }
++#endif
++  }
++  explicit operator bool() const { return ok_; }
++ private:
++  bool ok_ = false;
++#if REX_PLATFORM_WIN32
++  HANDLE handle_ = INVALID_HANDLE_VALUE;
++#else
++  int handle_ = -1;
++#endif
++};
++
++Result ReadFile(const std::filesystem::path& path, size_t maximum, std::vector<uint8_t>& bytes) {
++  bytes.clear();
++  std::error_code ec;
++  const auto length = std::filesystem::file_size(path, ec);
++  if (ec) return ec == std::errc::no_such_file_or_directory ? Result::kNotFound : Result::kStorageError;
++  if (length > maximum) return Result::kCorruptData;
++  auto* file = rex::filesystem::OpenFile(path, "rb");
++  if (!file) return Result::kStorageError;
++  bytes.resize(size_t(length));
++  const bool ok = fread(bytes.data(), 1, bytes.size(), file) == bytes.size() &&
++                  fgetc(file) == EOF && !ferror(file);
++  const bool closed = fclose(file) == 0;
++  return ok && closed ? Result::kSuccess : Result::kStorageError;
++}
++
++Result WriteFile(const std::filesystem::path& path, std::span<const uint8_t> bytes) {
++  std::error_code ec;
++  std::filesystem::create_directories(path.parent_path(), ec);
++  if (ec) return Result::kStorageError;
++  auto temporary = path;
++  temporary += ".tmp";
++  auto* file = rex::filesystem::OpenFile(temporary, "wb");
++  if (!file) return Result::kStorageError;
++  bool ok = fwrite(bytes.data(), 1, bytes.size(), file) == bytes.size() && fflush(file) == 0;
++#if REX_PLATFORM_WIN32
++  if (ok) ok = _commit(_fileno(file)) == 0;
++#else
++  if (ok) ok = fsync(fileno(file)) == 0;
++#endif
++  if (fclose(file)) ok = false;
++  if (ok) {
++#if REX_PLATFORM_WIN32
++    ok = MoveFileExW(temporary.c_str(), path.c_str(),
++                    MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH) != 0;
++#else
++    std::filesystem::rename(temporary, path, ec);
++    ok = !ec;
++    if (ok) {
++      const int directory = open(path.parent_path().c_str(), O_RDONLY | O_DIRECTORY);
++      ok = directory >= 0 && fsync(directory) == 0;
++      if (directory >= 0) close(directory);
++    }
++#endif
++  }
++  // The previous destination is never deleted before a successful replacement.
++  if (!ok) std::filesystem::remove(temporary, ec);
++  return ok ? Result::kSuccess : Result::kStorageError;
++}
++
++std::filesystem::path MetadataPath(const std::filesystem::path& root, uint32_t title) {
++  return root / "metadata" / fmt::format("{:08X}.xdbf", title);
++}
++std::filesystem::path UnlockPath(const std::filesystem::path& root, uint64_t xuid) {
++  return root / "profiles" / fmt::format("{:016X}.dat", xuid);
++}
++Result ReadMetadata(const std::filesystem::path& root, uint32_t title, std::vector<uint8_t>& raw) {
++  std::vector<uint8_t> data;
++  auto result = ReadFile(MetadataPath(root, title), kMaxXdbfSize + 24, data);
++  if (result != Result::kSuccess) return result;
++  if (data.size() < 24 || std::memcmp(data.data(), "X360AM01", 8) ||
++      Read32(data.data() + 8) != title || Read32(data.data() + 12) != data.size() - 24 ||
++      Read64(data.data() + 16) != XXH3_64bits(data.data() + 24, data.size() - 24))
++    return Result::kCorruptData;
++  raw.assign(data.begin() + 24, data.end());
++  return util::XdbfGameData(raw.data(), raw.size()).is_valid() ? Result::kSuccess : Result::kCorruptData;
++}
++
++Result ReadUnlocks(const std::filesystem::path& root, uint64_t xuid, Unlocks& unlocks) {
++  unlocks.clear();
++  std::vector<uint8_t> data;
++  auto result = ReadFile(UnlockPath(root, xuid), 28 + kMaxUnlocks * 16, data);
++  if (result == Result::kNotFound) return Result::kSuccess;
++  if (result != Result::kSuccess) return result;
++  if (data.size() < 28 || std::memcmp(data.data(), "X360AU01", 8) ||
++      Read64(data.data() + 8) != xuid || Read32(data.data() + 16) > kMaxUnlocks ||
++      data.size() != 28 + size_t(Read32(data.data() + 16)) * 16 ||
++      Read64(data.data() + data.size() - 8) != XXH3_64bits(data.data(), data.size() - 8))
++    return Result::kCorruptData;
++  Key previous{};
++  for (size_t offset = 20; offset + 8 < data.size(); offset += 16) {
++    const Key key{Read32(data.data() + offset), Read32(data.data() + offset + 4)};
++    const auto time = Read64(data.data() + offset + 8);
++    if (!key.first || !time || key <= previous) return Result::kCorruptData;
++    unlocks.emplace(key, time);
++    previous = key;
++  }
++  return Result::kSuccess;
++}
++Result WriteUnlocks(const std::filesystem::path& root, uint64_t xuid, const Unlocks& unlocks) {
++  std::vector<uint8_t> data{'X','3','6','0','A','U','0','1'};
++  Append64(data, xuid); Append32(data, uint32_t(unlocks.size()));
++  for (const auto& [key, time] : unlocks) {
++    Append32(data, key.first); Append32(data, key.second); Append64(data, time);
++  }
++  Append64(data, XXH3_64bits(data.data(), data.size()));
++  return WriteFile(UnlockPath(root, xuid), data);
++}
++std::vector<AchievementInfo> Catalog(const util::XdbfGameData& db, uint32_t language) {
++  std::vector<AchievementInfo> catalog;
++  const auto selected = language ? db.GetExistingLanguage(static_cast<XLanguage>(language)) : db.default_language();
++  for (const auto& entry : db.GetAchievements()) {
++    AchievementInfo info;
++    info.id = entry.id; info.image_id = entry.image_id; info.gamerscore = entry.gamerscore;
++    // State bits are never accepted as evidence of unlocks from metadata.
++    info.flags = uint32_t(entry.flags) & ~0x30000u;
++    info.label = db.GetStringTableEntry(selected, entry.label_id);
++    info.description = db.GetStringTableEntry(selected, entry.description_id);
++    info.unachieved_description = db.GetStringTableEntry(selected, entry.unachieved_id);
++    catalog.push_back(std::move(info));
++  }
++  return catalog;
++}
++bool ValidCatalog(const util::XdbfGameData& db) {
++  std::set<uint32_t> ids;
++  for (const auto& entry : db.GetAchievements()) {
++    if (!ids.insert(entry.id).second) return false;
++  }
++  return true;
++}
++}  // namespace
++
++void OfflineAchievementStore::Configure(const std::filesystem::path& user_root, uint32_t language) {
++  std::lock_guard lock(mutex_);
++  root_ = user_root.empty() ? std::filesystem::path{} : user_root / "offline-achievements-v1";
++  language_ = language;
++  rejected_titles_.clear();
++}
++
++OfflineAchievementResult OfflineAchievementStore::ImportTitle(uint32_t title_id, std::span<const uint8_t> raw) {
++  if (!title_id) return Result::kInvalidArgument;
++  std::lock_guard lock(mutex_);
++  const auto finish = [&](Result result) {
++    if (result == Result::kSuccess) rejected_titles_.erase(title_id);
++    else rejected_titles_[title_id] = result;
++    return result;
++  };
++  if (raw.empty() || raw.size() > kMaxXdbfSize) return finish(Result::kInvalidArgument);
++  const util::XdbfGameData db(raw.data(), raw.size());
++  if (!db.is_valid() || !ValidCatalog(db)) return finish(Result::kCorruptData);
++  StoreLock store_lock(root_);
++  if (!store_lock) return finish(Result::kStorageError);
++  std::vector<uint8_t> previous;
++  auto result = ReadMetadata(root_, title_id, previous);
++  if (result == Result::kSuccess) {
++    if (previous.size() == raw.size() && std::equal(previous.begin(), previous.end(), raw.begin()))
++      return finish(Result::kSuccess);
++    // A legitimate update may add achievements or localization/images, but
++    // must preserve the IDs and scores already used to account for unlocks.
++    const util::XdbfGameData old_db(previous.data(), previous.size());
++    const auto current = db.GetAchievements();
++    for (const auto& old : old_db.GetAchievements()) {
++      const auto found = std::find_if(current.begin(), current.end(),
++          [&](const auto& entry) { return uint16_t(entry.id) == uint16_t(old.id); });
++      if (found == current.end() || uint16_t(found->gamerscore) != uint16_t(old.gamerscore))
++        return finish(Result::kMetadataMismatch);
++    }
++  } else if (result != Result::kNotFound) return finish(result);
++  std::vector<uint8_t> data{'X','3','6','0','A','M','0','1'};
++  Append32(data, title_id); Append32(data, uint32_t(raw.size()));
++  Append64(data, XXH3_64bits(raw.data(), raw.size()));
++  data.insert(data.end(), raw.begin(), raw.end());
++  return finish(WriteFile(MetadataPath(root_, title_id), data));
++}
++
++OfflineAchievementResult OfflineAchievementStore::List(uint64_t xuid, uint32_t title_id,
++    std::vector<OfflineAchievementRecord>& records) {
++  records.clear();
++  if (!ValidXuid(xuid) || !title_id) return Result::kInvalidArgument;
++  std::lock_guard lock(mutex_);
++  if (auto rejected = rejected_titles_.find(title_id); rejected != rejected_titles_.end())
++    return rejected->second;
++  StoreLock store_lock(root_);
++  if (!store_lock) return Result::kStorageError;
++  std::vector<uint8_t> raw;
++  auto result = ReadMetadata(root_, title_id, raw);
++  if (result != Result::kSuccess) return result;
++  Unlocks unlocks;
++  result = ReadUnlocks(root_, xuid, unlocks);
++  if (result != Result::kSuccess) return result;
++  const util::XdbfGameData db(raw.data(), raw.size());
++  auto catalog = Catalog(db, language_);
++  for (auto& info : catalog) {
++    auto found = unlocks.find({title_id, info.id});
++    records.push_back({std::move(info), found != unlocks.end() ? found->second : 0});
++  }
++  return Result::kSuccess;
++}
++
++OfflineAchievementResult OfflineAchievementStore::UnlockBatch(uint64_t xuid, uint32_t title_id,
++    std::span<const uint32_t> ids, std::vector<OfflineAchievementRecord>& newly_unlocked) {
++  newly_unlocked.clear();
++  if (!ValidXuid(xuid) || !title_id || ids.empty() || ids.size() > kMaxUnlocks)
++    return Result::kInvalidArgument;
++  std::lock_guard lock(mutex_);
++  if (auto rejected = rejected_titles_.find(title_id); rejected != rejected_titles_.end())
++    return rejected->second;
++  StoreLock store_lock(root_);
++  if (!store_lock) return Result::kStorageError;
++  std::vector<uint8_t> raw;
++  auto result = ReadMetadata(root_, title_id, raw);
++  if (result != Result::kSuccess) return result;
++  const util::XdbfGameData db(raw.data(), raw.size());
++  const auto catalog = Catalog(db, language_);
++  Unlocks unlocks;
++  result = ReadUnlocks(root_, xuid, unlocks);
++  if (result != Result::kSuccess) return result;
++  std::vector<OfflineAchievementRecord> pending;
++  const auto time = CurrentFileTime();
++  for (const auto id : ids) {
++    const auto info = std::find_if(catalog.begin(), catalog.end(),
++        [&](const auto& value) { return value.id == id; });
++    if (info == catalog.end()) return Result::kNotFound;
++    if (unlocks.emplace(Key{title_id, id}, time).second) pending.push_back({*info, time});
++  }
++  if (unlocks.size() > kMaxUnlocks) return Result::kStorageError;
++  if (pending.empty()) return Result::kSuccess;
++  result = WriteUnlocks(root_, xuid, unlocks);
++  if (result == Result::kSuccess) newly_unlocked = std::move(pending);
++  return result;
++}
++
++OfflineAchievementResult OfflineAchievementStore::Totals(uint64_t xuid, OfflineAchievementTotals& totals,
++    uint32_t title_id, OfflineAchievementTotals* title_totals) {
++  totals = {};
++  if (title_totals) *title_totals = {};
++  if (!ValidXuid(xuid) || (title_totals && !title_id)) return Result::kInvalidArgument;
++  std::lock_guard lock(mutex_);
++  if (title_totals) {
++    if (auto rejected = rejected_titles_.find(title_id); rejected != rejected_titles_.end())
++      return rejected->second;
++  }
++  StoreLock store_lock(root_);
++  if (!store_lock) return Result::kStorageError;
++  Unlocks unlocks;
++  auto result = ReadUnlocks(root_, xuid, unlocks);
++  if (result != Result::kSuccess) return result;
++  uint64_t score = 0;
++  uint64_t title_score = 0;
++  uint32_t title_count = 0;
++  uint32_t current_title = 0;
++  std::vector<AchievementInfo> catalog;
++  for (const auto& [key, time] : unlocks) {
++    if (key.first != current_title) {
++      std::vector<uint8_t> raw;
++      result = ReadMetadata(root_, key.first, raw);
++      if (result != Result::kSuccess) return result;
++      catalog = Catalog(util::XdbfGameData(raw.data(), raw.size()), language_);
++      current_title = key.first;
++    }
++    auto info = std::find_if(catalog.begin(), catalog.end(), [&](const auto& value) { return value.id == key.second; });
++    if (info == catalog.end()) return Result::kCorruptData;
++    score += info->gamerscore;
++    if (score > UINT32_MAX) return Result::kCorruptData;
++    if (key.first == title_id) {
++      title_score += info->gamerscore;
++      ++title_count;
++    }
++  }
++  // A system title or a title without an achievement resource can still have
++  // zero earned counters. Existing corrupt/conflicting metadata remains an
++  // explicit failure; missing metadata cannot supply names or unlocks.
++  if (title_totals && !title_count) {
++    std::vector<uint8_t> raw;
++    result = ReadMetadata(root_, title_id, raw);
++    if (result != Result::kSuccess && result != Result::kNotFound) return result;
++  }
++  totals = {uint32_t(score), uint32_t(unlocks.size())};
++  if (title_totals) *title_totals = {uint32_t(title_score), title_count};
++  return Result::kSuccess;
++}
++
++OfflineAchievementResult OfflineAchievementStore::GetImage(uint32_t title_id, uint32_t image_id,
++    std::vector<uint8_t>& image) {
++  image.clear();
++  if (!title_id) return Result::kInvalidArgument;
++  std::lock_guard lock(mutex_);
++  if (auto rejected = rejected_titles_.find(title_id); rejected != rejected_titles_.end())
++    return rejected->second;
++  StoreLock store_lock(root_);
++  if (!store_lock) return Result::kStorageError;
++  std::vector<uint8_t> raw;
++  const auto result = ReadMetadata(root_, title_id, raw);
++  if (result != Result::kSuccess) return result;
++  const util::XdbfGameData db(raw.data(), raw.size());
++  const auto block = db.GetEntry(util::XdbfSection::kImage, image_id);
++  if (!block || !block.size) return Result::kNotFound;
++  image.assign(block.buffer, block.buffer + block.size);
++  return Result::kSuccess;
++}
++
++OfflineAchievementResult OfflineAchievementStore::TitleName(uint32_t title_id, std::string& name) {
++  name.clear();
++  if (!title_id) return Result::kInvalidArgument;
++  std::lock_guard lock(mutex_);
++  if (auto rejected = rejected_titles_.find(title_id); rejected != rejected_titles_.end())
++    return rejected->second;
++  StoreLock store_lock(root_);
++  if (!store_lock) return Result::kStorageError;
++  std::vector<uint8_t> raw;
++  const auto result = ReadMetadata(root_, title_id, raw);
++  if (result != Result::kSuccess) return result;
++  const util::XdbfGameData db(raw.data(), raw.size());
++  name = language_ ? db.title(db.GetExistingLanguage(static_cast<XLanguage>(language_))) : db.title();
++  return name.empty() ? Result::kNotFound : Result::kSuccess;
++}
++}  // namespace rex::system
+diff --git a/src/system/xam/user_profile.cpp b/src/system/xam/user_profile.cpp
+--- a/src/system/xam/user_profile.cpp
++++ b/src/system/xam/user_profile.cpp
+@@ -127,6 +127,7 @@ UserProfile::Identity UserProfile::FindLocal(uint64_t xuid) const {
+ }
+ 
+ bool UserProfile::InitializeLocal(const std::filesystem::path& root) {
++  if (kernel_state_) kernel_state_->ConfigureOfflineAchievements(root);
+   std::lock_guard lock(identity_mutex_);
+   identity_ = {};
+   profiles_.clear();

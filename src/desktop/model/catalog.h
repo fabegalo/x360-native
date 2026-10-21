@@ -105,6 +105,11 @@ Target VerifyCatalogLaunch(const ProjectPaths& paths, const std::vector<Target>&
 std::vector<std::string> InspectLibrary(const ProjectPaths& paths, const Target& session, const std::vector<Target>& catalog);
 void PrepareLibrary(const ProjectPaths& paths, const Target& session, const std::vector<Target>& catalog,
                     const std::function<bool()>& cancelled = {});
+// Complete registration without rebuilding when the selected build and its
+// dependencies are valid. False means compilation/import is still required.
+// Never executes a title; the supervisor must still perform launch validation.
+bool CompleteLibraryPreparation(const ProjectPaths& paths, const Target& target,
+    const std::vector<Target>& catalog, const std::function<bool()>& cancelled = {});
 // Withdraws a game's registration and verified copy from one dashboard's store.
 // Unidentified data fails closed before any change. The caller holds the lease.
 void WithdrawLibrary(const Target& session, const Target& game, const std::vector<Target>& catalog);

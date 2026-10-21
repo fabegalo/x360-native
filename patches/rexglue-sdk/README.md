@@ -1045,3 +1045,54 @@ usa joystick virtual e executa o callback enfileirado após destruir o driver.
 Testes: `input_hotplug_probe.cpp`, `sdl_hotplug_probe.cpp` e `[input-p0]` em
 `system_ui_input_test.cpp`. SDK pinado e originais preservados.
 [Evidências, limites e aceite obrigatório](../../docs/reports/controller-reconnect-guide-2026-10-19.md).
+
+## 0106–0111 — conquistas offline e interface original 17559
+
+0106 adiciona armazenamento durável por XUID/Title ID/Achievement ID com
+metadados XDBF originais, checksum, trava entre processos e substituição atômica.
+O handoff usa a raiz de perfis da sessão. Recusa corrupção e catálogos
+incompatíveis; não migra desbloqueios globais antigos nem modifica saves/perfis.
+
+0107 implementa a escrita XGI, leitura de contadores, enumeração por título e
+XUID completo, histórico de jogos e imagens originais. Corrige capacidade de
+enumeração, marshaling PPC de 64 bits e propagação de falhas assíncronas de uma
+aplicação existente. Duplicatas não somam pontos nem notificam novamente.
+
+0108 encaminha as telas de conquistas ao GamerProfile original e notificações
+ao serviço FE/0x21013. A ponte em `titles/dash_17559/src/system_ui.cpp` inicializa
+sob demanda o apresentador original, usando `notify.xur` e o compositor da XAM;
+sem overlay substituto nem mudança da captura de controles.
+
+0109 valida os limites do XDBF e suas tabelas antes de expor seus recursos.
+0110 fornece nomes originais dos títulos ao GamerProfile, registra os exports
+da interface no resolver e rejeita handles encerrados antes de escrever outputs.
+0111 impede persistência de metadados no diretório de entrada quando o runtime
+de uma ferramenta usa a raiz de usuário implícita; raízes explícitas isoladas
+continuam funcionando. Evita que o codegen altere o inventário importável do jogo.
+Testes focados exercitam contratos PPC, erros, corrupção, concorrência, dois
+perfis/dois títulos e reinício em processos independentes. Gameplay e exibição
+real dependem do aceite manual, não substituído por testes sintéticos.
+
+[Contratos, evidências e roteiro](../../docs/reports/offline-achievements-2026-10-21.md).
+
+## 0112 — toques curtos e pacotes de estado do controle
+
+Preserva um toque real de START/BACK liberado antes do fim da janela do Guide
+para a próxima consulta de estado do título. Antes, DOWN era ocultado durante
+a janela e UP apagava a espera, perdendo o toque inteiro. O gesto do Guide
+continua consumido pela interface original. Mudanças nos botões filtrados
+também avançam o pacote visível quando o pacote físico permanece igual.
+Estado por usuário/conexão, reset existente, sem alocações no polling nem
+lógica por título. Testes em `system_ui_input_test.cpp`, incluindo falha
+reproduzida antes da correção. Não há equivalente upstream associado.
+
+## 0113 — contexto de tarefa para notificações originais
+
+Fornece um contexto de tarefa XAM para callbacks síncronos do host, sem criar
+threads. Restaura o contexto anterior em aninhamento/exceção, retém a referência
+de `XamTaskGetCurrentTask` e implementa leitura sincronizada dos atributos.
+O adaptador 17559 usa a identidade do host apenas nesse escopo; workers comuns
+mantêm o caminho anterior. Corrige `8007000E` reproduzido na fila original
+quando o aviso de conquista era enviado fora de uma tarefa. Testes técnicos
+não certificam a apresentação visual durante gameplay. Sem equivalente upstream.
+[Causa, testes e aceite](../../docs/reports/achievement-notification-2026-10-21.md).

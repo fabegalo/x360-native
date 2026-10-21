@@ -1,9 +1,75 @@
 # STATUS
 
-Estado consolidado em **2026-10-19**; a referência funcional integrada histórica é `1844245`.
+Estado consolidado em **2026-10-21**; a referência funcional integrada histórica é `1844245`.
 Este arquivo resume o estado atual; os relatórios vinculados preservam datas,
 falhas iniciais, hashes, comandos e limites de cada validação. Resultados de uma
 etapa histórica não certificam automaticamente o build atual nem outros títulos.
+
+Launcher (21/10): corrigido o fluxo que anunciava jogo pronto pelo recibo mas
+iniciava a dashboard sem concluir o registro na My Games. Preparar/iniciar agora
+concluem o registro pelo aplicativo, com validação independente no supervisor.
+Build Release inicial e 223 asserções focadas passaram; a 17559 abriu pelo botão
+normal. O mantenedor confirmou dashboard, My Games e Forza funcionando.
+Launcher/supervisor finais recompilados em Release após encerramento dos processos.
+Tela cheia configurável no aplicativo agora dimensiona a janela da sessão;
+79 asserções do modelo e 63.918 asserções de 15 casos da interface passaram.
+Reabertura agora reaproveita recibos atuais para mostrar pronto/iniciar, sem
+acrescentar hashes de inventários à listagem; 113 asserções/10 casos passaram.
+Validação visual da tela cheia pendente. Captura de pilha opcional disponível
+em Diagnóstico, desligada normalmente. A criação de perfil
+17559 caiu após criação/login bem-sucedidos, com leitura guest de `0x00000005`;
+pilha não capturada e causa ainda em diagnóstico. Forza também caiu após 302.052 ms,
+por leitura guest `0x02A2C6F8`, sem pilha. Ambas as falhas continuam sem correção
+certificada. Aceite de conquistas separado;
+commit local autorizado pelo mantenedor em 21/10; push não solicitado nesta rodada.
+[Correção, evidências e pendências](docs/reports/launcher-registration-flow-2026-10-21.md).
+
+START no jogo (21/10): reproduzida em teste a perda de toques liberados antes
+do fim da janela do Guide. Patch 0112 preserva o toque para a consulta de estado
+e avança o pacote visível quando a filtragem muda os botões. 844 asserções
+focadas de entrada/Guide passaram em Release; confirmação com controle físico
+pendente. SDK continua pinado, sem hacks por título.
+[Evidências e aceite](docs/reports/start-short-tap-2026-10-21.md).
+
+Guide durante boot (21/10): o mantenedor confirmou que as duas dashboards
+bloqueiam o Guide na intro. A pedido dele, o código da 17559 foi alinhado ao
+mecanismo existente da 1888: `BootIntroRunning()` controla a entrada do callback
+de swap, com estado pertencente ao bootstrap original. Removidos o descarte
+explícito de apertos, a guarda adicional de solicitações e o teste que exercitava
+essa política anterior. O plugin de UI dos jogos não executa a intro de console.
+A 1888 não foi alterada. A compilação Release do alinhamento foi concluída na
+validação para commit, após o bloqueio inicial por ambiente em uso. Evidência:
+`.local/evidence/validation/precommit-20261021/build-dash.log`.
+
+Conquistas — notificação 17559 (21/10): a sessão real do mantenedor gravou a
+conquista 155 do Forza, mas o aviso original falhou com `8007000E`. Reproduzido
+em sonda sem janela: apresentador válido, fila sem tarefa XAM corrente. Patch
+0113 fornece contexto síncrono do host; a mesma fila original retorna sucesso
+com ele. 37 asserções focadas de tarefas passaram em Release. Builds finais da
+17559 e do Forza concluídos, com recibos novos; a fila foi validada com ambos os
+runtimes finais. No reteste do mantenedor houve som, mas nenhum visual; o log
+confirma a cena original carregada. Encontrada inicialização ausente de dois
+campos exigidos pelo compositor original de popups; corrigida no host 17559.
+Sonda otimizada dos desvios originais: seis casos passaram, sem GPU. Build
+Release concluído, recibo novo e hashes dos artefatos conferidos; exibição visual
+e aceite continuam pendentes. Desbloqueio existente
+preservado; nenhum jogo executado pelo agente.
+[Evidências e aceite](docs/reports/achievement-notification-2026-10-21.md).
+
+Conquistas offline — implementação 17559 (21/10): serviços XGI/XUser/XAM,
+metadados originais XDBF, persistência por XUID/título/conquista, Gamerscore e
+contadores integrados, enumeração pelo Title ID solicitado e ponte para o
+apresentador original de notificações. SDK permanece pinado com patches
+0106–0111 reproduzíveis. O 0111 impede que ferramentas AOT publiquem cache de
+conquistas na pasta original de entrada. Testes técnicos cobrem erros, duplicação, operações
+assíncronas, isolamento e reinício; os recursos locais de Forza, Castle e
+Motocross foram lidos sem executar gameplay. **Aceite funcional pendente**:
+o mantenedor precisa obter uma conquista real, observar a notificação/Guide e
+conferir a persistência após reiniciar. Nenhum jogo/dashboard foi executado pelo
+agente, nenhum save ou perfil existente foi editado e a Retail 1888 ficou fora
+do escopo. O mantenedor autorizou validar e fazer commit local em 21/10;
+isso não representa aceite funcional da notificação nem autorização de push.
+[Implementação, validação e aceite manual](docs/reports/offline-achievements-2026-10-21.md).
 
 Entrada P0 (19/10): reproduzido acesso inválido `0xC0000005` na enumeração
 concorrente do InputSystem. Patches 0103–0105 serializam hotplug, retiram callbacks
@@ -336,8 +402,10 @@ na dashboard, no Forza (com Xbox Home → handoff Dashboard) e no Castle Crasher
 com o título escurecido atrás e seguindo após o fechamento; Guide → Perfil → B
 volta ao Guide. A entrada fica com o Guide, inclusive botões ainda pressionados ao
 fechar (patch 0079). O Perfil do Guide mostra a contagem real de jogos por
-conta local, persistida e trocada com o perfil (patch 0080); gamerpic,
-gamerscore e conquistas seguem sem dados locais. Vulkan e outros títulos não
+conta local, persistida e trocada com o perfil (patch 0080). Na validação de
+16/10, gamerpic, Gamerscore e conquistas ainda não tinham dados locais; a
+implementação de conquistas de 21/10, descrita no início deste arquivo, aguarda
+aceite em gameplay. Vulkan e outros títulos não
 verificados: [relatório de 16/10](docs/reports/graphics/guide-composition-2026-10-16.md)
 (histórico em [15/10](docs/reports/graphics/guide-composition-2026-10-15.md)).
 Games Played (16/10): sessões a partir de `2.0.6683.0` não acrescentam XBLA Trial;

@@ -4,6 +4,25 @@
 #include <rex/ppc/func.h>
 #include <rex/system/kernel_state.h>
 #include <rex/system/user_module.h>
+#include <rex/kernel/xam/task_context.h>
+
+// Notifications run as host system tasks. Route their task identity/attributes
+// through the runtime; retain original behavior for original XAM-owned handles.
+extern "C" REX_FUNC(__imp__sub_816B8098);
+extern "C" REX_FUNC(sub_816B8098) {
+  ctx.r3.u64 = rex::kernel::xam::CurrentSystemTask();
+  if (!ctx.r3.u32) __imp__sub_816B8098(ctx, base);
+}
+#define BRIDGE_RUNTIME_TASK(address, name) \
+  extern "C" REX_FUNC(__imp__##name); \
+  extern "C" REX_FUNC(__imp__sub_##address); \
+  extern "C" REX_FUNC(sub_##address) { \
+    if (rex::kernel::xam::IsRuntimeTask(ctx.r3.u32)) __imp__##name(ctx, base); \
+    else __imp__sub_##address(ctx, base); \
+  }
+BRIDGE_RUNTIME_TASK(816B7BF0, XamTaskGetAttributes)
+BRIDGE_RUNTIME_TASK(816B7B80, XamTaskCloseHandle)
+#undef BRIDGE_RUNTIME_TASK
 
 // XuiGamerCard calls XAM services internally, without an import thunk. Use the
 // same identity and settings service as the dashboard and system applications.

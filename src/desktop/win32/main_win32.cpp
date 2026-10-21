@@ -43,7 +43,7 @@ void VerifyDistribution(const fs::path& directory) {
 constexpr UINT kFinished = WM_APP + 1, kProgress = WM_APP + 2, kDetected = WM_APP + 3, kInitialized = WM_APP + 4, kInspected = WM_APP + 5, kOpenEnvironment = WM_APP + 6, kEnvironmentChecked = WM_APP + 7, kSessionStarted = WM_APP + 8, kSessionClosed = WM_APP + 9, kReveal = WM_APP + 10, kUpdateChecked = WM_APP + 11, kUpdateFinished = WM_APP + 12, kHinted = WM_APP + 13, kPreview = WM_APP + 20;
 enum { kFolder = 101, kTargets, kCheck, kImport, kPrepare, kLaunch, kDetails, kData, kCancel, kLanguage, kInstall, kStorage, kPrimary, kSettings, kImportFolder, kDashboards, kGames, kHome, kImportPage, kAddContent, kLibrary, kGameList, kRenderer, kNativeDevelopment,
        kSearch, kFilter0, kFilter1, kFilter2, kFilter3, kLangPt, kLangEn, kRendererNative, kRetry, kDismiss, kBannerLibrary, kBannerDetails,
-       kConsoleLanguage, kConsoleCountry, kVerifyTarget, kUpdate, kRemove };
+       kConsoleLanguage, kConsoleCountry, kVerifyTarget, kUpdate, kRemove, kFullscreen, kCaptureCrash };
 bool english = false;
 std::string Tr(const char* pt, const char* en) { return english ? en : pt; }
 std::wstring Wide(const std::string& text) {
@@ -83,6 +83,7 @@ struct App {
   std::string startup_error;
   Environment environment;
   RendererSettings renderer_settings;
+  bool capture_crash = false;
   ConsoleSettings console_settings;
   std::vector<Target> targets;
   // Decoded once per icon hash; a failed decode stays cached as empty.
@@ -269,14 +270,17 @@ Row StatusOf(const App& a, size_t i) {
     if (!t.aot) return Row::Unsupported;
     if (c.state.interrupted) return Row::Error;
     if (!c.state.launch_candidate) return Row::Imported;
-    if (!c.state.receipt_current) return Row::Unchecked;
+    if (!c.state.receipt_current) return c.state.receipt_stale ? Row::Imported : Row::Unchecked;
     for (const auto& dep : t.dependencies) {
       const auto it = std::find_if(a.targets.begin(), a.targets.end(), [&](const auto& d) { return d.id == dep; });
       if (it == a.targets.end()) return Row::Error;
       const auto& state = a.checked.at(size_t(it - a.targets.begin())).state;
       if (!state.receipt_current && !state.prepared) return state.receipt_stale ? Row::Imported : Row::Unchecked;
     }
-    return Row::Ready;
+    // Reuse the preparation receipt for presentation. Starting still completes
+    // any pending registration and performs the supervisor's independent check.
+    // Do not hash game inventories just to display an already prepared title.
+    return c.library.empty() ? Row::Ready : Row::Imported;
   }
   if (!c.state.inputs_ok || c.state.interrupted) return t.kind == "dashboard" && !c.state.interrupted ? Row::Pending : Row::Error;
   if (!t.aot) return Row::Unsupported;
@@ -544,7 +548,7 @@ void Layout(App& a) {
       for (int id : {kFolder, kStorage, kData, kCheck}) need = std::max(need, ButtonWidth(a, id, false));
       const bool pairs = 2 * need + s(12) <= ow;
       const int storage_rows = pairs ? 2 : 4;
-      const int hg = s(52) + hint_h + s(12) + s(58) + s(8) + s(58) + s(16) + s(36) + s(20);
+      const int hg = s(52) + hint_h + s(12) + s(58) + s(8) + s(58) + s(16) + s(36) + s(44) + s(20);
       const int hs = s(92) + storage_rows * s(46) - s(8) + s(20);
       const int hl = s(178) + console_h + s(20);
       const int hy = s(96) + env_h + s(20);
@@ -568,6 +572,7 @@ void Layout(App& a) {
       put(Item(a, kRenderer), gf.left + s(24), oy, ow, s(58));
       put(Item(a, kRendererNative), gf.left + s(24), oy + s(66), ow, s(58));
       put(Item(a, kNativeDevelopment), gf.left + s(24), oy + s(66) + s(58) + s(16), ow, s(36));
+      put(Item(a, kFullscreen), gf.left + s(24), oy + s(66) + s(58) + s(60), ow, s(36));
       const RECT& st = g.cards[1];
       put(a.root_text, st.left + s(24), st.top + s(56), ow, s(24));
       const int bw2 = pairs ? (ow - s(12)) / 2 : ow;
@@ -593,7 +598,8 @@ void Layout(App& a) {
     }
     case Page::Diagnostics: {
       g.details_card = rect(cx, yc, cw, std::max(s(160), bottom - yc));
-      put(a.details, cx + s(16), yc + s(14), cw - s(32), g.details_card.bottom - g.details_card.top - s(28));
+      put(Item(a, kCaptureCrash), cx + s(16), yc + s(14), cw - s(32), s(36));
+      put(a.details, cx + s(16), yc + s(58), cw - s(32), g.details_card.bottom - g.details_card.top - s(72));
       break;
     }
   }
@@ -630,6 +636,7 @@ void Enable(App& a) {
   EnableWindow(Item(a, kRenderer), !a.busy && !a.root.empty());
   EnableWindow(Item(a, kRendererNative), !a.busy && !a.root.empty() && native);
   EnableWindow(Item(a, kNativeDevelopment), !a.busy && !a.root.empty());
+  EnableWindow(Item(a, kFullscreen), !a.busy && !a.root.empty());
   EnableWindow(Item(a, kConsoleLanguage), !a.busy && !a.root.empty());
   EnableWindow(Item(a, kConsoleCountry), !a.busy && !a.root.empty());
   EnableWindow(a.library_list, !a.busy);
@@ -782,7 +789,7 @@ void InspectSelected(App& a) {
         a.current.launch_candidate &= state.prepared || state.launch_candidate;
       }
     }
-    a.next_action = a.current.launch_candidate ? (t.session ? kLaunch : kVerifyTarget) : kPrepare;
+    a.next_action = a.current.launch_candidate && t.session ? kLaunch : kPrepare;
     primary(a.next_action == kLaunch ? Tr("Conferir e iniciar", "Verify and start") :
             a.next_action == kVerifyTarget ? Tr("Conferir preparação", "Verify preparation") : Tr("Conferir e preparar", "Verify and prepare"));
     // The row's listing hint, explained; the full check runs before any action.
@@ -799,9 +806,10 @@ void InspectSelected(App& a) {
           Tr("Ainda não preparado neste computador.\r\nA preparação compila o título; seus arquivos são conferidos antes.",
              "Not prepared on this computer yet.\r\nPreparation compiles the title; your files are verified first."));
     } else if (row == Row::Ready) {
-      chip(t.session ? Tr("Pronta", "Ready") : Tr("Pronto para a My Games", "Ready for My Games"), Tone::Ok);
-      Set(a.status, Tr("Preparação em dia. A integridade completa é conferida ao iniciar.",
-                      "Preparation up to date. Full integrity is checked when starting."));
+      chip(t.session ? Tr("Pronta para iniciar", "Ready to start") : Tr("Preparado", "Prepared"), Tone::Ok);
+      primary(t.session ? Tr("Iniciar Xbox 360", "Start Xbox 360") : Tr("Preparado para My Games", "Prepared for My Games"));
+      Set(a.status, Tr("Preparação em dia. Inicie seus jogos pela My Games da dashboard.",
+                      "Preparation up to date. Start your games through the dashboard's My Games."));
     } else {
       chip(Tr("Verificação pendente", "Verification pending"), Tone::Info);
       Set(a.status, Tr("Conteúdo listado. Arquivos e recibos serão conferidos antes de preparar ou iniciar.\r\nEsta listagem ainda não comprova integridade ou compatibilidade.",
@@ -1053,6 +1061,8 @@ void Labels(App& a) {
        {kLangPt, "Português (BR)", "Portuguese (BR)"}, {kLangEn, "English", "English"},
        {kRenderer, "Xenos (ReXGlue)", "Xenos (ReXGlue)"}, {kRendererNative, "Native (Experimental)", "Native (Experimental)"},
        {kNativeDevelopment, "Acesso de desenvolvimento ao Native", "Native development access"},
+       {kFullscreen, "Iniciar sessão em tela cheia", "Start session in fullscreen"},
+       {kCaptureCrash, "Capturar pilha de falhas nas próximas sessões", "Capture crash stacks in upcoming sessions"},
        {kRetry, "Tentar novamente", "Try again"}, {kBannerDetails, "Diagnóstico", "Diagnostics"}, {kBannerLibrary, "Ver biblioteca", "View library"},
        {kDismiss, "Fechar", "Dismiss"}, {kRemove, "Remover da biblioteca", "Remove from library"}}) Set(Item(a, id), Tr(pt, en));
   Set(Item(a, kLanguage), english ? "Language: English" : "Idioma: Português");
@@ -1119,7 +1129,8 @@ void Start(App& a, int action, fs::path source = {}) {
   SetPageTexts(a);
   Enable(a);
   SetTimer(a.window, 2, 33, nullptr);
-  a.worker = std::thread([&a, target, action, source] {
+  const bool capture_crash = a.capture_crash;
+  a.worker = std::thread([&a, target, action, source, capture_crash] {
     auto verify_target = [&] {
       if (!a.pending_snapshot) {
         a.pending_targets = a.targets; a.pending_checked = a.checked;
@@ -1176,17 +1187,30 @@ void Start(App& a, int action, fs::path source = {}) {
       if (action == kPrepare && !target.aot) throw std::runtime_error("Import a valid XEX game before preparation.");
       if (action == kPrepare && !target.preparation_source.empty())
         Import(ProjectPaths{a.root}, target, target.preparation_source, [&] { return a.cancel.load(); });
-      if (action == kPrepare || action == kVerifyTarget) {
-        DigestBatch batch([&a] { return a.cancel.load(); });
+      if (action == kPrepare || action == kVerifyTarget || action == kLaunch) {
         ActionTrace trace("launch.preflight");
-        const auto state = verify_target();
-        if (action == kVerifyTarget) {
-          finish(Tr("Verificação concluída. Consulte o estado e o Diagnóstico do título.", "Verification finished. See the title's status and Diagnostics.")); return;
+        if (action != kVerifyTarget) {
+          Post(a.window, kProgress, Tr("Conferindo a preparação e concluindo o registro na My Games...", "Checking preparation and completing My Games registration..."));
+          if (CompleteLibraryPreparation(ProjectPaths{a.root}, target, a.targets, [&] { return a.cancel.load(); })) {
+            if (action == kPrepare) {
+              finish(Tr("Preparação concluída. Conteúdo verificado e registrado na My Games.", "Preparation complete. Content verified and registered in My Games.")); return;
+            }
+          } else if (action == kLaunch) {
+            const auto state = verify_target();
+            std::string reason = Tr("A preparação mudou. Selecione Preparar para atualizar os componentes antes de iniciar.", "Preparation changed. Select Prepare to update components before starting.");
+            for (const auto& issue : state.issues) reason += "\r\n" + issue;
+            throw std::runtime_error(reason);
+          }
         }
-        if (!state.inputs_ok)
-          throw std::runtime_error(Tr("O conteúdo mudou desde a verificação. Confira os detalhes e prepare novamente.", "Content changed since verification. Check details and prepare again."));
-        // A valid installed library was just checked. Registration/copying is a
-        // preparation task; repeating it on every launch rehashes the same set.
+        if (action != kLaunch) {
+          DigestBatch batch([&a] { return a.cancel.load(); });
+          const auto state = verify_target();
+          if (action == kVerifyTarget) {
+            finish(Tr("Verificação concluída. Consulte o estado e o Diagnóstico do título.", "Verification finished. See the title's status and Diagnostics.")); return;
+          }
+          if (!state.inputs_ok)
+            throw std::runtime_error(Tr("O conteúdo mudou desde a verificação. Confira os detalhes e prepare novamente.", "Content changed since verification. Check details and prepare again."));
+        }
       }
       if (action == kImport) {
         ImportSource content(source, Supervisor(a).parent_path() / "x360n-extract.exe", a.logs,
@@ -1278,7 +1302,9 @@ void Start(App& a, int action, fs::path source = {}) {
       if (action == kLaunch) {
         SessionNotification notification({}, true);
         Post(a.window, kProgress, Tr("Conferindo ", "Verifying ") + (english ? target.label_en : target.label));
-        run(Supervisor(a), {"--root", Utf8(a.root), "session", Utf8(target.manifest), "--catalog-target", target.id, "--timeout", "0", "--closed-event", notification.name()}, "session", notification.handle());
+        std::vector<std::string> args{"--root", Utf8(a.root), "session", Utf8(target.manifest), "--catalog-target", target.id, "--timeout", "0", "--closed-event", notification.name()};
+        if (capture_crash) args.push_back("--crash-stack");
+        run(Supervisor(a), args, "session", notification.handle());
         finish("Sessão encerrada. Consulte os logs para os resultados da execução.");
       } else {
         wchar_t sys[MAX_PATH]{}; GetSystemDirectoryW(sys, MAX_PATH);
@@ -1311,10 +1337,8 @@ void Start(App& a, int action, fs::path source = {}) {
         a.stage = 4;
         Post(a.window, kProgress, Tr("Registrando conteúdo verificado na biblioteca original...", "Registering verified content in the original library..."));
         fs::remove(PreparationMarker(ProjectPaths{a.root}, target));
-        PrepareLibrary(ProjectPaths{a.root}, target, a.targets, [&] { return a.cancel.load(); });
-        if (!target.session) for (const auto& dashboard : a.targets)
-          if (dashboard.session && Inspect(ProjectPaths{a.root}, dashboard).inputs_ok)
-            PrepareLibrary(ProjectPaths{a.root}, dashboard, a.targets, [&] { return a.cancel.load(); });
+        if (!CompleteLibraryPreparation(ProjectPaths{a.root}, target, a.targets, [&] { return a.cancel.load(); }))
+          throw std::runtime_error(Tr("A preparação não produziu componentes válidos. Consulte o Diagnóstico.", "Preparation did not produce valid components. See Diagnostics."));
         fs::remove(PreparationMarker(ProjectPaths{a.root}, target));
         finish(Tr("Preparação concluída. Os componentes serão conferidos antes de habilitar a sessão.", "Preparation finished. Components will be checked before enabling the session."));
       }
@@ -1547,6 +1571,8 @@ void DrawButton(App& a, const DRAWITEMSTRUCT& item) {
     case kRenderer: selected = a.renderer_settings.renderer == Renderer::Xenos; break;
     case kRendererNative: selected = a.renderer_settings.renderer == Renderer::Native; break;
     case kNativeDevelopment: selected = a.renderer_settings.experimental; break;
+    case kFullscreen: selected = a.renderer_settings.fullscreen; break;
+    case kCaptureCrash: selected = a.capture_crash; break;
   }
   const wchar_t* glyph = style.glyph;
   if (item.CtlID == kPrimary) {
@@ -1848,6 +1874,8 @@ LRESULT CALLBACK WndProc(HWND window, UINT message, WPARAM wp, LPARAM lp) {
         Button(*a, kRenderer, Kind::Option, nullptr, 2);
         Button(*a, kRendererNative, Kind::Option, nullptr, 2);
         Button(*a, kNativeDevelopment, Kind::Toggle, nullptr, 2);
+        Button(*a, kFullscreen, Kind::Toggle, nullptr, 2);
+        Button(*a, kCaptureCrash, Kind::Toggle, nullptr, 2);
         a->root_text = Control(*a, L"STATIC", L"", SS_PATHELLIPSIS);
         Button(*a, kFolder, Kind::Secondary, nullptr, 2);
         Button(*a, kStorage, Kind::Secondary, nullptr, 2);
@@ -1999,10 +2027,15 @@ LRESULT CALLBACK WndProc(HWND window, UINT message, WPARAM wp, LPARAM lp) {
           a->console_settings = settings;
           return 0;
         }
-        if (id == kRenderer || id == kRendererNative || id == kNativeDevelopment) {
+        if (id == kCaptureCrash) {
+          a->capture_crash = !a->capture_crash;
+          InvalidateRect(window, nullptr, FALSE); return 0;
+        }
+        if (id == kRenderer || id == kRendererNative || id == kNativeDevelopment || id == kFullscreen) {
           if (a->root.empty()) return 0;
           auto settings = a->renderer_settings;
-          if (id == kNativeDevelopment) {
+          if (id == kFullscreen) settings.fullscreen = !settings.fullscreen;
+          else if (id == kNativeDevelopment) {
             settings.experimental = !settings.experimental;
             if (!settings.experimental) settings.renderer = Renderer::Xenos;
           } else if (id == kRendererNative) {
