@@ -1478,3 +1478,22 @@ mapeamento de teclado (mnk) exige modificadores exatos, então Alt+Enter não
 aciona Start. A escolha não é gravada nas configurações (a opção "Iniciar
 sessão em tela cheia" continua valendo para o início). Teste
 `[fullscreen-toggle]`.
+
+## 0142 — consulta de cvar fora das draws Vulkan
+
+`VulkanCommandProcessor::IssueDraw` testava `IsReadbackMemexportEnabled` antes
+de verificar se a draw tinha faixas de MEMEXPORT. Essa consulta procura o cvar
+legado pelo nome no registro (mutex global, `std::string` e hash; ~107 ns
+medidos) e acontecia em toda draw. O teste agora começa por
+`!memexport_ranges_.empty()`. A função é `const` e sem efeitos colaterais: draws
+com MEMEXPORT avaliam as duas condições como antes; as demais não fazem o
+readback em nenhum dos casos. O D3D12 já fazia a checagem dentro de
+`if (memexport_used)` e não muda. Mesmo mecanismo da referência 0049 do
+ForzaHorizon1-ReImagined. Sem equivalente upstream identificado.
+
+`sdkcheck.Vulkan-draw-registry-lock` (com `sdkcheck.D3D12-draw-registry-lock`
+como controle) segura o lock do registro em outra thread e exige que 4.096 draws
+sem MEMEXPORT terminem. Antes do patch, o Vulkan não terminou em 3 s; depois,
+terminou em 9,9 ms. Os testes só existem onde há o draw retido local
+(`X360N_DRAW_SNAPSHOT`). Capturas byte a byte idênticas antes/depois.
+[Medições e limites](../../docs/reports/performance/g2-xenos-2026-10-22.md).

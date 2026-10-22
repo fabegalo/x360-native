@@ -44,4 +44,22 @@ if(TARGET Catch2::Catch2WithMain)
       -DPROBE=$<TARGET_FILE:x360n_native_probe> -DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/guard-probe
       -P ${CMAKE_CURRENT_SOURCE_DIR}/../../tests/native/reject_packet.cmake)
   set_tests_properties(sdkcheck.Native-packet-guard PROPERTIES LABELS project TIMEOUT 25)
+  # Patch 0142: non-memexport Xenos draws must not wait for the cvar registry lock.
+  # Replays a retained draw from local evidence (user content, not distributed), so
+  # the checks exist only where that snapshot does.
+  set(X360N_DRAW_SNAPSHOT "${CMAKE_SOURCE_DIR}/.local/evidence/validation/native-n4/isolated-draw"
+      CACHE PATH "Retained draw snapshot for the Xenos draw probes")
+  if(EXISTS "${X360N_DRAW_SNAPSHOT}/draw.txt")
+    set(_xenos_apis d3d12)
+    if(REXGLUE_USE_VULKAN)
+      list(APPEND _xenos_apis vulkan)
+    endif()
+    foreach(_api IN LISTS _xenos_apis)
+      string(REPLACE "d3d12" "D3D12" _name "${_api}")
+      string(REPLACE "vulkan" "Vulkan" _name "${_name}")
+      add_test(NAME sdkcheck.${_name}-draw-registry-lock COMMAND x360n_native_probe xenos:${_api}
+          ${CMAKE_CURRENT_BINARY_DIR}/registry-lock-${_api} --draw-registry-locked ${X360N_DRAW_SNAPSHOT})
+      set_tests_properties(sdkcheck.${_name}-draw-registry-lock PROPERTIES LABELS project TIMEOUT 60)
+    endforeach()
+  endif()
 endif()

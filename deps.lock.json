@@ -306,7 +306,7 @@
                                                           "include/rex/graphics/command_processor.h":  "7bf96a1beb75e4495d97c2631573ee666e1fde5ea8b813ca7a034679abb65a63",
                                                           "src/graphics/command_processor.cpp":  "db782a5c854eb4d0fa6f29d37a9a51894a1a444038516433beaccd2d3f0a6fd0",
                                                           "src/graphics/d3d12/command_processor.cpp":  "55f87348cee13631a4697360f8bdf63fb6fb6f14c96bdc39f120ae322eba6c34",
-                                                          "src/graphics/vulkan/command_processor.cpp":  "1ffefcfb33ec126ed323bdba817ff265e851cf4553df718206e01dd290bd0e6a",
+                                                          "src/graphics/vulkan/command_processor.cpp":  "9dc51bab07f15cccc5039f0b8e7dc6ffcd83204ba6930166cb835a1ede7f9db3",
                                                           "src/audio/sdl/sdl_audio_driver.cpp":  "b563c3686247199c274e55531429f3657a4426a76536c1ebe048910c13eef690"
                                                       },
                                             "base_files":  {
@@ -1781,7 +1781,7 @@
                                                 "include/rex/graphics/vulkan/texture_cache.h": "56a61a90b0afd99d10d3f3405ec141292a2e4f568d7907abdabbbb0382274d04",
                                                 "src/graphics/vulkan/texture_cache.cpp": "7243c98ba139184bb276fca4a591527307f1f3988b9d591fc493860eab6e6d9d",
                                                 "include/rex/graphics/vulkan/command_processor.h": "dc2f9179af542f30183da0a0fa57eadac62341943fa21faa9c5b1e1c93e3bba1",
-                                                "src/graphics/vulkan/command_processor.cpp": "1ffefcfb33ec126ed323bdba817ff265e851cf4553df718206e01dd290bd0e6a"
+                                                "src/graphics/vulkan/command_processor.cpp": "9dc51bab07f15cccc5039f0b8e7dc6ffcd83204ba6930166cb835a1ede7f9db3"
                                             },
                                             "base_files": {
                                                 "include/rex/graphics/vulkan/texture_cache.h": "384ec034cf009960892703a473df4fe6bdd3ba6ce9027e0d89dd957c01a318e4",
@@ -1949,6 +1949,17 @@
     "src/ui/rex_app.cpp": "4669c12c285315c7824949fe84ffb03308f987c7d87a0a510597b7745b42c3f0"
   },
   "test": "sdkcheck: [fullscreen-toggle] Alt+Enter/F11 toggle fullscreen"
+},
+{
+  "file": "patches/rexglue-sdk/0142-vulkan-memexport-readback-check-order.patch",
+  "sha256": "755a34896310f8cf6aa1a2a5c93df80190cfaaafa8d29abddbe5189c99e89726",
+  "base_files": {
+    "src/graphics/vulkan/command_processor.cpp": "1ffefcfb33ec126ed323bdba817ff265e851cf4553df718206e01dd290bd0e6a"
+  },
+  "files": {
+    "src/graphics/vulkan/command_processor.cpp": "9dc51bab07f15cccc5039f0b8e7dc6ffcd83204ba6930166cb835a1ede7f9db3"
+  },
+  "test": "sdkcheck.Vulkan-draw-registry-lock: 4096 non-memexport Xenos/Vulkan draws retire while the cvar registry is locked; fails before the patch"
 }
 ]
                     },

@@ -315,5 +315,10 @@ de benchmark durante builds ou outros jogos. Testar apenas regressões pertinent
 
 Resultados: [2026-10-14](reports/performance/performance-results-2026-10-14.md).
 P3: [encerramento por reversão da otimização 0073](reports/performance/performance-p3-2026-10-14.md).
+G2 (2026-10-22): o patch 0142 tira do caminho de draw Xenos/Vulkan a consulta de
+cvar por nome, que passava pelo lock do registro. Prova: com o lock ocupado, as
+draws deixaram de bloquear. Capturas idênticas. No probe sintético, o tempo do CP
+caiu −3,8% em média (t −1,90, 15 pares), sem significância comprovada e sem
+medição em jogo. [Relatório G2](reports/performance/g2-xenos-2026-10-22.md).
 Instrumentação e benchmarks preservados; a redução isolada de CPU não foi aceita
 como ganho global diante da piora observada de 1% low.

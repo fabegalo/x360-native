@@ -12,6 +12,9 @@
 #include <rex/graphics/pipeline/texture/util.h>
 #include <rex/ui/presenter.h>
 #include <chrono>
+#include <condition_variable>
+#include <mutex>
+#include <optional>
 #include <thread>
 #include <iostream>
 #include <fstream>
@@ -44,9 +47,53 @@ void WritePNG(const std::filesystem::path& path, const rex::ui::RawImage& image)
   check(frame->WritePixels(image.height, image.width * 3, UINT(bgr.size()), bgr.data()));
   check(frame->Commit()); check(encoder->Commit());
 }
+double ProcessCpuMs() {
+  FILETIME created, exited, kernel, user;
+  Require(GetProcessTimes(GetCurrentProcess(), &created, &exited, &kernel, &user), "process CPU time");
+  auto ticks = [](const FILETIME& t) { return (uint64_t(t.dwHighDateTime) << 32) | t.dwLowDateTime; };
+  return double(ticks(kernel) + ticks(user)) / 10000.0;
+}
+// Holds the cvar registry lock from another thread (ListModifiedFlags calls this
+// flag's getter while locked) so a draw path that looks a cvar up by name blocks.
+struct RegistryGate {
+  std::mutex mutex;
+  std::condition_variable changed;
+  bool armed = false, held = false, released = false;
+  std::thread holder;
+  std::optional<rex::cvar::FlagRegistrar> flag;
+  void Register() {
+    rex::cvar::FlagEntry entry;
+    entry.name = "x360n_probe_registry_gate"; entry.type = rex::cvar::FlagType::String;
+    entry.category = "Probe"; entry.description = "Diagnostic registry lock holder";
+    entry.setter = [](std::string_view) { return false; };
+    entry.getter = [this] {
+      std::unique_lock lock(mutex);
+      if (armed) {
+        held = true; changed.notify_all();
+        changed.wait_for(lock, std::chrono::seconds(6), [&] { return released; });
+      }
+      return std::string();
+    };
+    entry.command_callback = [](std::string_view) {};
+    flag.emplace(std::move(entry));
+  }
+  void Hold() {
+    { std::lock_guard lock(mutex); armed = true; }
+    holder = std::thread([] { rex::cvar::ListModifiedFlags(); });
+    std::unique_lock lock(mutex);
+    Require(changed.wait_for(lock, std::chrono::seconds(5), [&] { return held; }), "registry gate held");
+  }
+  void Release() {
+    { std::lock_guard lock(mutex); released = true; armed = false; }
+    changed.notify_all();
+    if (holder.joinable()) holder.join();
+  }
+};
+enum class ReplayMode { kSingle, kStress, kTiming, kRegistryLocked };
 void ReplayDraw(rex::system::IGraphicsSystem& gpu, rex::memory::Memory& memory,
                 const std::filesystem::path& input, const std::filesystem::path& output,
-                unsigned repetitions = 1) {
+                ReplayMode replay, RegistryGate* gate = nullptr) {
+  const unsigned repetitions = replay == ReplayMode::kStress ? 4096 : 1;
   auto read = [&](const std::filesystem::path& file) {
     std::ifstream in(file, std::ios::binary);
     Require(bool(in), "snapshot file");
@@ -100,8 +147,27 @@ void ReplayDraw(rex::system::IGraphicsSystem& gpu, rex::memory::Memory& memory,
   }
   reg::VGT_DRAW_INITIATOR draw{};
   draw.prim_type = PrimitiveType(primitive); draw.source_select = SourceSelect::kAutoIndex; draw.num_indices = count;
-  for (unsigned n = 0; n < repetitions; ++n)
-    words.insert(words.end(), {Packet(PM4_DRAW_INDX_2, 1), draw.value});
+  // Ring segments kicked one at a time, each retired by its own MEM_WRITE marker.
+  struct Kick { size_t end; uint32_t marker; unsigned draws; };
+  std::vector<Kick> kicks;
+  auto end_kick = [&](unsigned draws) {
+    const uint32_t value = uint32_t(kicks.size() + 1);
+    words.insert(words.end(), {Packet(PM4_MEM_WRITE, 2), memory.GetPhysicalAddress(done), value});
+    kicks.push_back({words.size(), value, draws});
+  };
+  auto add_draws = [&](unsigned count) {
+    for (unsigned n = 0; n < count; ++n) words.insert(words.end(), {Packet(PM4_DRAW_INDX_2, 1), draw.value});
+  };
+  constexpr unsigned kTimingSegments = 4, kTimingDraws = 2048, kLockedDraws = 4096;
+  if (replay == ReplayMode::kTiming) {
+    add_draws(1); end_kick(1);  // Shader translation and pipeline creation stay outside the timed segments.
+    for (unsigned s = 0; s < kTimingSegments; ++s) { add_draws(kTimingDraws); end_kick(kTimingDraws); }
+  } else if (replay == ReplayMode::kRegistryLocked) {
+    add_draws(1); end_kick(1);
+    add_draws(kLockedDraws); end_kick(kLockedDraws);
+  } else {
+    add_draws(repetitions);
+  }
   // Resolve the draw's color target to an independently allocated framebuffer.
   const float xy[]{0, 0, float(width), 0, 0, float(height)};
   std::memcpy(memory.TranslateVirtual(vertices), xy, sizeof(xy));
@@ -126,24 +192,58 @@ void ReplayDraw(rex::system::IGraphicsSystem& gpu, rex::memory::Memory& memory,
   for (unsigned i = 0; i < 6; ++i) set(XE_GPU_REG_SHADER_CONSTANT_FETCH_00_0+i, raw_fetch[i]);
   set(XE_GPU_REG_DC_LUT_RW_MODE, 1); set(XE_GPU_REG_DC_LUT_WRITE_EN_MASK, 7); set(XE_GPU_REG_DC_LUT_RW_INDEX, 0);
   for (unsigned i = 0; i < 128; ++i) for (unsigned c = 0; c < 3; ++c) set(XE_GPU_REG_DC_LUT_PWL_DATA, (i*512) | (512u<<16));
-  words.insert(words.end(), {Packet(PM4_XE_SWAP, 4), kSwapSignature, memory.GetPhysicalAddress(image), width, height,
-      Packet(PM4_MEM_WRITE, 2), memory.GetPhysicalAddress(done), 1});
+  words.insert(words.end(), {Packet(PM4_XE_SWAP, 4), kSwapSignature, memory.GetPhysicalAddress(image), width, height});
+  end_kick(0);
   Require(words.size()*4 <= 262144, "replay ring capacity");
   for (size_t i = 0; i < words.size(); ++i)
     rex::memory::store_and_swap<uint32_t>(memory.TranslateVirtual(ring+uint32_t(i*4)), words[i]);
   gpu.InitializeRingBuffer(memory.GetPhysicalAddress(ring), 15);
   auto* mmio = memory.LookupVirtualMappedRange(0x7fc80714);
-  mmio->write(nullptr, mmio->callback_context, 0x7fc80714, uint32_t(words.size()));
   auto* marker = memory.TranslateVirtual<volatile uint32_t*>(done);
-  const auto deadline = std::chrono::steady_clock::now()+std::chrono::seconds(15);
-  while (*marker != 1 && std::chrono::steady_clock::now()<deadline) std::this_thread::sleep_for(std::chrono::milliseconds(1));
-  Require(*marker == 1, "isolated draw completion");
+  using clock = std::chrono::steady_clock;
+  auto wait = [&](uint32_t value, clock::duration limit, bool spin) {
+    const auto deadline = clock::now() + limit;
+    while (*marker != value && clock::now() < deadline)
+      spin ? std::this_thread::yield() : std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    return *marker == value;
+  };
+  for (size_t k = 0; k < kicks.size(); ++k) {
+    const Kick& kick = kicks[k];
+    const bool locked = replay == ReplayMode::kRegistryLocked && k == 1;
+    if (locked) gate->Hold();
+    const double cpu_before = ProcessCpuMs();
+    const auto start = clock::now();
+    mmio->write(nullptr, mmio->callback_context, 0x7fc80714, uint32_t(kick.end));
+    bool retired = wait(kick.marker, locked ? std::chrono::seconds(3) : std::chrono::seconds(15),
+                        replay == ReplayMode::kTiming);
+    const double wall_ms = std::chrono::duration<double, std::milli>(clock::now() - start).count();
+    const double cpu_ms = ProcessCpuMs() - cpu_before;
+    if (locked) {
+      gate->Release();
+      std::cout << "registry_locked draws=" << kick.draws << " retired_while_locked=" << retired
+                << " wall_ms=" << wall_ms << '\n';
+      Require(retired, "non-memexport draws waited for the cvar registry lock");
+    }
+    if (replay == ReplayMode::kTiming && k > 0 && kick.draws)
+      std::cout << "segment=" << k << " draws=" << kick.draws << " wall_ms=" << wall_ms
+                << " ns_per_draw=" << wall_ms * 1e6 / kick.draws << " process_cpu_ms=" << cpu_ms << '\n';
+    Require(retired, "isolated draw completion");
+  }
+  if (replay == ReplayMode::kTiming) {
+    // Cost of one registry query by name, the lookup a readback setting check makes.
+    constexpr unsigned kQueries = 1000000;
+    unsigned modified = 0;
+    const auto start = clock::now();
+    for (unsigned i = 0; i < kQueries; ++i) modified += rex::cvar::HasNonDefaultValue("vulkan_readback_memexport");
+    std::cout << "registry_query_ns=" << std::chrono::duration<double, std::nano>(clock::now() - start).count() / kQueries
+              << " modified=" << modified << '\n';
+  }
   rex::ui::RawImage capture; Require(gpu.presenter()->CaptureGuestOutput(capture), "isolated draw capture");
   WritePNG(output / "draw.png", capture);
 }
 }
 int wmain(int argc, wchar_t** argv) {
-  if (argc != 3 && argc != 4 && argc != 5) { std::cerr << "usage: x360n_native_probe native|xenos OUTPUT_DIRECTORY [--reject|--abi|--replay INPUT_DIRECTORY|--draw-replay INPUT_DIRECTORY]\n"; return 2; }
+  if (argc != 3 && argc != 4 && argc != 5) { std::cerr << "usage: x360n_native_probe native|xenos OUTPUT_DIRECTORY [--reject|--abi|--replay INPUT_DIRECTORY|--draw-replay|--draw-stress|--draw-timing|--draw-registry-locked INPUT_DIRECTORY]\n"; return 2; }
   try {
     Require(SUCCEEDED(CoInitializeEx(nullptr, COINIT_MULTITHREADED)), "COM setup");
     const std::filesystem::path output(argv[2]);
@@ -163,8 +263,14 @@ int wmain(int argc, wchar_t** argv) {
     if (backend == "vulkan") Require(implementation == "Vulkan", "requested actual Vulkan graphics system");
     if (backend == "d3d12" && plugin == "xenos") Require(implementation == "Direct3D 12", "requested actual D3D12 graphics system");
     std::cout << "API selected: " << backend << "; implementation: " << implementation << '\n';
-    const bool stress = argc == 5 && std::wstring_view(argv[3]) == L"--draw-stress";
-    const bool draw_replay = argc == 5 && (std::wstring_view(argv[3]) == L"--draw-replay" || stress);
+    const std::wstring_view replay_flag = argc == 5 ? std::wstring_view(argv[3]) : std::wstring_view();
+    const bool stress = replay_flag == L"--draw-stress";
+    const ReplayMode replay_mode = stress ? ReplayMode::kStress
+        : replay_flag == L"--draw-timing" ? ReplayMode::kTiming
+        : replay_flag == L"--draw-registry-locked" ? ReplayMode::kRegistryLocked : ReplayMode::kSingle;
+    const bool draw_replay = replay_flag == L"--draw-replay" || replay_mode != ReplayMode::kSingle;
+    RegistryGate registry_gate;
+    if (replay_mode == ReplayMode::kRegistryLocked) registry_gate.Register();
     if (plugin == "native" && draw_replay) rex::cvar::SetFlagByName("native_stats", "true");
     if (stress) rex::cvar::SetFlagByName("d3d12_debug", "true");
     if (draw_replay) {
@@ -209,7 +315,7 @@ int wmain(int argc, wchar_t** argv) {
     auto* memory = rt.memory();
     if (draw_replay) {
       if (plugin == "native") gpu->InitializeShaderStorage(output / "pipeline-cache", 0, true);
-      ReplayDraw(*gpu, *memory, argv[4], output, stress ? 4096 : 1);
+      ReplayDraw(*gpu, *memory, argv[4], output, replay_mode, &registry_gate);
       gpu->Shutdown(); shutdown.gpu = nullptr; gpu.reset(); rt.Shutdown(); rex::FlushLogging();
       std::cout << "PASS isolated draw capture\n"; return 0;
     }
