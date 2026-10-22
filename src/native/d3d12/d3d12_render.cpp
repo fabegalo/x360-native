@@ -131,9 +131,67 @@ D3D12Render::D3D12Render(rex::ui::d3d12::D3D12Provider& provider) : provider_(pr
     Require(bool(out), "PSO root diagnostic write failed");
   }
   Check(device_->CreateRootSignature(0, blob->GetBufferPointer(), blob->GetBufferSize(), IID_PPV_ARGS(&root_)), "draw root");
+  BeginGpuTimestamp();
 }
 // Watches reference cache entries: retire them before the cache is destroyed.
-D3D12Render::~D3D12Render() { mirror_.reset(); if (event_) CloseHandle(event_); }
+D3D12Render::~D3D12Render() {
+  // Submissions still in flight are not awaited here; they stay uncounted.
+  if (stats_enabled_) try { CollectGpuTimestamps(); LogSubmissionStats(); } catch (const std::exception& e) {
+    REXLOG_WARN("Native final submission stats unavailable: {}", e.what());
+  }
+  mirror_.reset(); if (event_) CloseHandle(event_);
+}
+void D3D12Render::BeginGpuTimestamp() {
+  if (!stats_enabled_) return;
+  if (!timestamps_) {
+    D3D12_QUERY_HEAP_DESC qd{D3D12_QUERY_HEAP_TYPE_TIMESTAMP, uint32_t(batches_.size() * 2), 0};
+    Check(device_->CreateQueryHeap(&qd, IID_PPV_ARGS(&timestamps_)), "timestamp heap");
+    timestamp_readback_ = Buffer(batches_.size() * 16, D3D12_HEAP_TYPE_READBACK, D3D12_RESOURCE_STATE_COPY_DEST);
+    Check(provider_.GetDirectQueue()->GetTimestampFrequency(&timestamp_frequency_), "timestamp frequency");
+  }
+  list_->EndQuery(timestamps_.Get(), D3D12_QUERY_TYPE_TIMESTAMP, batch_index_ * 2);
+}
+void D3D12Render::EndGpuTimestamp() {
+  if (!stats_enabled_) return;
+  list_->EndQuery(timestamps_.Get(), D3D12_QUERY_TYPE_TIMESTAMP, batch_index_ * 2 + 1);
+  list_->ResolveQueryData(timestamps_.Get(), D3D12_QUERY_TYPE_TIMESTAMP, batch_index_ * 2, 2,
+      timestamp_readback_.Get(), batch_index_ * 16);
+  timestamp_serials_[batch_index_] = serial_ + 1;
+}
+void D3D12Render::CollectGpuTimestamps() {
+  // Completed submissions in serial order: busy time inside each, idle gaps
+  // between consecutive ones on the same direct queue.
+  const uint64_t completed = fence_->GetCompletedValue();
+  if (!timestamps_ || completed == UINT64_MAX) return;
+  for (;;) {
+    unsigned slot = unsigned(batches_.size());
+    for (unsigned i = 0; i < batches_.size(); ++i)
+      if (timestamp_serials_[i] && timestamp_serials_[i] <= completed &&
+          (slot == batches_.size() || timestamp_serials_[i] < timestamp_serials_[slot])) slot = i;
+    if (slot == batches_.size()) return;
+    timestamp_serials_[slot] = 0;
+    void* mapped; D3D12_RANGE range{size_t(slot) * 16, size_t(slot) * 16 + 16};
+    Check(timestamp_readback_->Map(0, &range, &mapped), "map timestamps");
+    uint64_t ticks[2]; std::memcpy(ticks, static_cast<const uint8_t*>(mapped) + range.Begin, sizeof(ticks));
+    D3D12_RANGE none{}; timestamp_readback_->Unmap(0, &none);
+    if (ticks[1] >= ticks[0]) gpu_busy_ticks_ += ticks[1] - ticks[0];
+    if (gpu_last_end_ && ticks[0] >= gpu_last_end_) gpu_idle_ticks_ += ticks[0] - gpu_last_end_;
+    gpu_last_end_ = ticks[1]; ++gpu_timed_;
+  }
+}
+void D3D12Render::LogSubmissionStats() {
+  auto ms = [&](uint64_t ticks) { return timestamp_frequency_ ? double(ticks) * 1000.0 / double(timestamp_frequency_) : 0.0; };
+  REXLOG_INFO("Native queue submissions={} asynchronous={} fence_waits={} fence_ms={} gpu_timed={} gpu_busy_ms={:.3f} gpu_idle_between_ms={:.3f}",
+      serial_, async_submissions_, fence_waits_, flush_wait_ns_ / 1000000, gpu_timed_, ms(gpu_busy_ticks_), ms(gpu_idle_ticks_));
+  REXLOG_INFO("Native costs presents={} draws={} resolves={} empty_resolves={} overlap_flushes={} submits={} texture_uploads={} texture_bytes={} texture_ms={} resolve_ms={} flush_ms={} cache_hits={} (flush overlaps resolve)",
+      present_count_, draw_count_, resolve_count_, empty_resolve_count_, overlap_flushes_, serial_, texture_uploads_, texture_upload_bytes_, texture_ns_ / 1000000,
+      resolve_ns_ / 1000000, flush_ns_ / 1000000, texture_cache_hits_);
+  REXLOG_INFO("Native draw costs draw_ms={} guest_upload_ms={} guest_upload_bytes={} gpu_texture_loads={} cpu_texture_loads={} flush_wait_ms={} (draw includes textures; uploads are mirror pages the CPU wrote)",
+      draw_ns_ / 1000000, guest_upload_ns_ / 1000000, guest_upload_bytes_, gpu_texture_loads_, cpu_texture_loads_, flush_wait_ns_ / 1000000);
+  std::string causes;
+  for (unsigned i = 0; i < kFlushCauses; ++i) causes += fmt::format(" {}", flush_causes_[i]);
+  REXLOG_INFO("Native flush causes (guest_sync present overlap capacity drain){}", causes);
+}
 void D3D12Render::EndFrame() {
   // Pinned clear_memory_page_state contract: CPU-uploaded pages are reloaded
   // on their next request after a frame, GPU-written pages stay resident.
@@ -173,6 +231,7 @@ void D3D12Render::CountPresent() {
 void D3D12Render::Flush(FlushCause cause) {
   Timer timer(stats_enabled_, flush_ns_);
   if (stats_enabled_) ++flush_causes_[cause];
+  EndGpuTimestamp();
   Check(list_->Close(), "close"); ID3D12CommandList* lists[]{list_.Get()};
   provider_.GetDirectQueue()->ExecuteCommandLists(1, lists);
   Check(provider_.GetDirectQueue()->Signal(fence_.Get(), ++serial_), "signal");
@@ -206,16 +265,7 @@ void D3D12Render::Flush(FlushCause cause) {
   }
   readback_used_ = 0;
   RecycleBatch();
-  if (stats_enabled_ && serial_ % 30 == 0)
-    REXLOG_INFO("Native queue submissions={} asynchronous={} fence_waits={} fence_ms={}",
-        serial_, async_submissions_, fence_waits_, flush_wait_ns_ / 1000000);
-  if (stats_enabled_ && serial_ % 30 == 0)
-    REXLOG_INFO("Native costs presents={} draws={} resolves={} empty_resolves={} overlap_flushes={} submits={} texture_uploads={} texture_bytes={} texture_ms={} resolve_ms={} flush_ms={} cache_hits={} (flush overlaps resolve)",
-        present_count_, draw_count_, resolve_count_, empty_resolve_count_, overlap_flushes_, serial_, texture_uploads_, texture_upload_bytes_, texture_ns_ / 1000000,
-        resolve_ns_ / 1000000, flush_ns_ / 1000000, texture_cache_hits_);
-  if (stats_enabled_ && serial_ % 30 == 0)
-    REXLOG_INFO("Native draw costs draw_ms={} guest_upload_ms={} guest_upload_bytes={} gpu_texture_loads={} cpu_texture_loads={} flush_wait_ms={} (draw includes textures; uploads are mirror pages the CPU wrote)",
-        draw_ns_ / 1000000, guest_upload_ns_ / 1000000, guest_upload_bytes_, gpu_texture_loads_, cpu_texture_loads_, flush_wait_ns_ / 1000000);
+  if (stats_enabled_ && serial_ % 30 == 0) LogSubmissionStats();
 }
 void D3D12Render::Wait(uint64_t serial) {
   const auto completed = fence_->GetCompletedValue();
@@ -236,6 +286,7 @@ void D3D12Render::RecycleBatch() {
   batch_index_ = (batch_index_ + 1) % batches_.size();
   auto& next = batches_[batch_index_];
   Wait(next.serial);
+  if (stats_enabled_) CollectGpuTimestamps();
   allocator_ = std::move(next.allocator);
   views_ = std::move(next.views); samplers_ = std::move(next.samplers);
   transient_ = std::move(next.transient);
@@ -256,6 +307,7 @@ void D3D12Render::RecycleBatch() {
     Check(device_->CreateDescriptorHeap(&hd, IID_PPV_ARGS(&samplers_)), "batch samplers");
   }
   Check(list_->Reset(allocator_.Get(), nullptr), "reset list");
+  BeginGpuTimestamp();
 }
 void D3D12Render::SyncGuestRead(uint32_t address, uint64_t length, ReadSite site) {
   if (length && writeback_.Overlaps(address, uint32_t(std::min<uint64_t>(length, 0x20000000)))) {

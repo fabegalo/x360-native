@@ -121,6 +121,16 @@ class D3D12Render {
   std::array<RetiredBatch, 3> batches_;
   unsigned batch_index_ = 0;
   uint64_t fence_waits_ = 0, async_submissions_ = 0;
+  // native_stats only: two timestamps bracket each submission of an arena and
+  // are read once its fence has completed, never with an added wait.
+  Ptr<ID3D12QueryHeap> timestamps_;
+  Ptr<ID3D12Resource> timestamp_readback_;
+  std::array<uint64_t, 3> timestamp_serials_{};
+  uint64_t timestamp_frequency_ = 0, gpu_busy_ticks_ = 0, gpu_idle_ticks_ = 0, gpu_last_end_ = 0, gpu_timed_ = 0;
+  void BeginGpuTimestamp();
+  void EndGpuTimestamp();
+  void CollectGpuTimestamps();
+  void LogSubmissionStats();
   std::map<std::string, Ptr<ID3D12PipelineState>> pipelines_;
   std::map<unsigned, std::vector<uint8_t>> rectangles_;
   std::map<unsigned, std::vector<uint32_t>> points_;
