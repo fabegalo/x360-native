@@ -5,7 +5,7 @@ label_en = "Retail dashboard 17559"
 limitations_en = "Menu, Castle Crashers cycle and local profile creation/switching through the original UI validated locally. One active local profile in slot 0; Xbox Live, full Guide coverage and game saves remain pending. Original content is never downloaded."
 session = true
 limitations = "Menu, ciclo com Castle Crashers e criação/troca de perfis locais pela interface original validados. Um perfil local ativo no slot 0; Xbox Live, cobertura completa do Guide e saves de jogos seguem pendentes. Nenhum download de conteúdo original."
-runtime_files = ["rexruntime.dll", "rexgpu-xenos.dll", "dash_17559_bootanim.dll", "dash_17559_gamerprofile.dll", "dash_17559_xam_ui.dll", "dash_17559_signin.dll", "dash_17559_createprofile.dll", "dash_17559_vk.dll", "dash_17559_hud.dll", "dash_17559_session_ui.dll"]
+runtime_files = ["rexruntime.dll", "rexgpu-xenos.dll", "dash_17559_bootanim.dll", "dash_17559_gamerprofile.dll", "dash_17559_xam_ui.dll", "dash_17559_signin.dll", "dash_17559_createprofile.dll", "dash_17559_vk.dll", "dash_17559_hud.dll", "dash_17559_session_ui.dll", "dash_17559_deviceselector.dll"]
 
 [[files]]
 path = "dash.xex"
@@ -87,3 +87,9 @@ xam.path = "system/xam_ui.xex"
 xam.provenance = "SystemUpdate_17559_USB.zip, $SystemUpdate/su20076000_00000000, $flash_xam.xex"
 catalog.path = "avatar/AvatarAssetPack.toc"
 catalog.provenance = "SystemUpdate_17559_USB.zip, $SystemUpdate/FFFE07DF00000002 (AvatarAsset 0x20449700)"
+
+# Original 17559 storage selector, from the same official update as XAM.
+[[files]]
+path = "system/deviceselector.xex"
+source_name = "deviceselector.xex"
+sha256 = "2334c6772fd54201e60792c70a54e4714aaf74d45f657013ebe5da3737e06c0c"

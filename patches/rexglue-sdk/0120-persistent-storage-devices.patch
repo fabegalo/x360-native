@@ -1,0 +1,932 @@
+diff --git a/include/rex/system/xam/content_device.h b/include/rex/system/xam/content_device.h
+index c7118cb..0ee3cae 100644
+--- a/include/rex/system/xam/content_device.h
++++ b/include/rex/system/xam/content_device.h
+@@ -11,6 +11,9 @@
+  */
+ 
+ #include <rex/system/xtypes.h>
++#include <filesystem>
++#include <optional>
++#include <string>
+ 
+ namespace rex {
+ namespace system {
+@@ -18,23 +21,31 @@ namespace xam {
+ 
+ enum class DeviceType : uint32_t {
+   HDD = 1,
++  MU = 2,
+   ODD = 4,
++  USB = 16,
+ };
+ 
+-enum class DummyDeviceId : uint32_t {
++enum class ContentDeviceId : uint32_t {
+   HDD = 1,
+   ODD = 2,
+ };
+ 
+-struct DummyDeviceInfo {
+-  DummyDeviceId device_id;
++struct ContentDeviceInfo {
++  uint32_t device_id;
+   DeviceType device_type;
+   uint64_t total_bytes;
+   uint64_t free_bytes;
+-  const std::u16string_view name;
++  std::u16string name;
++  std::filesystem::path root;
++  uint64_t capacity_limit = 0;
++  uint64_t reserve_bytes = 0;
+ };
+ 
+-const DummyDeviceInfo* GetDummyDeviceInfo(uint32_t device_id);
++// A snapshot belongs to the caller; no process-global device/cache state.
++std::optional<ContentDeviceInfo> GetContentDeviceInfo(uint32_t device_id);
++X_RESULT QueryContentDeviceSpace(ContentDeviceInfo& device);
++bool IsUnlinkedStoragePath(const std::filesystem::path& path);
+ 
+ }  // namespace xam
+ }  // namespace system
+diff --git a/include/rex/system/xam/content_manager.h b/include/rex/system/xam/content_manager.h
+index cc9ba01..302c07b 100644
+--- a/include/rex/system/xam/content_manager.h
++++ b/include/rex/system/xam/content_manager.h
+@@ -12,6 +12,7 @@
+ #pragma once
+ 
+ #include <memory>
++#include <rex/system/xam/content_device.h>
+ #include <string>
+ #include <unordered_map>
+ #include <vector>
+@@ -150,6 +151,10 @@ class ContentManager {
+   ContentManager(KernelState* kernel_state, const std::filesystem::path& root_path);
+   ~ContentManager();
+ 
++  std::optional<ContentDeviceInfo> GetDevice(uint32_t id) const;
++  std::vector<ContentDeviceInfo> GetDevices() const;
++  std::filesystem::path DeviceRoot(uint32_t id) const;
++
+   std::vector<XCONTENT_AGGREGATE_DATA> ListContent(uint32_t device_id, uint64_t xuid,
+                                                    XContentType content_type,
+                                                    uint32_t title_id = -1);
+@@ -186,7 +191,8 @@ class ContentManager {
+   X_RESULT WriteContentHeaderFile(uint64_t xuid, XCONTENT_AGGREGATE_DATA data,
+                                   uint32_t license_mask = 0);
+   X_RESULT ReadContentHeaderFile(const std::string_view file_name, uint64_t xuid, uint32_t title_id,
+-                                 XContentType content_type, XCONTENT_AGGREGATE_DATA& data) const;
++                                 XContentType content_type, XCONTENT_AGGREGATE_DATA& data,
++                                 uint32_t device_id = 1) const;
+ 
+   std::filesystem::path ResolveGameUserContentPath();
+   bool IsContentOpen(const XCONTENT_AGGREGATE_DATA& data) const;
+@@ -202,11 +208,11 @@ class ContentManager {
+ 
+  private:
+   std::filesystem::path ResolvePackageRoot(uint64_t xuid, XContentType content_type,
+-                                           uint32_t title_id = -1);
++                                           uint32_t title_id = -1, uint32_t device_id = 1);
+   std::filesystem::path ResolvePackagePath(uint64_t xuid, const XCONTENT_AGGREGATE_DATA& data);
+   std::filesystem::path ResolvePackageHeaderPath(const std::string_view file_name, uint64_t xuid,
+                                                  uint32_t title_id,
+-                                                 XContentType content_type) const;
++                                                 XContentType content_type, uint32_t device_id = 1) const;
+ 
+   std::unordered_map<string::string_key_case, ContentPackage*,
+                      string::string_key_case::Hash>::iterator
+@@ -216,6 +222,8 @@ class ContentManager {
+ 
+   KernelState* kernel_state_;
+   std::filesystem::path root_path_;
++  std::vector<ContentDeviceInfo> devices_;
++  bool devices_valid_ = true;
+ 
+   // TODO(benvanik): remove use of global lock, it's bad here!
+   rex::thread::global_critical_region global_critical_region_;
+diff --git a/src/system/xam/content_manager.cpp b/src/system/xam/content_manager.cpp
+index 081a57a..dcdd606 100644
+--- a/src/system/xam/content_manager.cpp
++++ b/src/system/xam/content_manager.cpp
+@@ -10,6 +10,11 @@
+  */
+ 
+ #include <array>
++#include <toml++/toml.hpp>
++#include <rex/logging.h>
++#ifdef _WIN32
++#include <windows.h>
++#endif
+ #include <rex/filesystem/devices/stfs_xbox.h>
+ #include <cstring>
+ #include <queue>
+@@ -39,13 +44,97 @@ static const char* kGameContentHeaderDirName = "Headers";
+ 
+ static std::atomic<uint64_t> content_device_id_{0};
+ 
++// Every ancestor is checked, including the configured environment root. In
++// particular, Windows junctions are reparse points even when is_symlink is false.
++bool IsUnlinkedStoragePath(const std::filesystem::path& path) {
++  if (path.empty()) return false;
++  for (auto p = std::filesystem::absolute(path).lexically_normal(); !p.empty();) {
++    std::error_code ec;
++    const auto status = std::filesystem::symlink_status(p, ec);
++    if (ec && ec != std::errc::no_such_file_or_directory) return false;
++    if (std::filesystem::is_symlink(status)) return false;
++#ifdef _WIN32
++    const auto attrs = GetFileAttributesW(p.c_str());
++    if (attrs != INVALID_FILE_ATTRIBUTES && (attrs & FILE_ATTRIBUTE_REPARSE_POINT)) return false;
++#endif
++    auto parent = p.parent_path();
++    if (parent == p) break;
++    p = parent;
++  }
++  return true;
++}
++
++X_RESULT QueryContentDeviceSpace(ContentDeviceInfo& device) {
++  std::error_code ec;
++  if (!IsUnlinkedStoragePath(device.root) || !std::filesystem::is_directory(device.root, ec))
++    return X_ERROR_DEVICE_NOT_CONNECTED;
++  const auto space = std::filesystem::space(device.root, ec);
++  if (ec) return X_ERROR_ACCESS_DENIED;
++  uint64_t used = 0;
++  if (device.capacity_limit) {
++    std::filesystem::recursive_directory_iterator it(device.root, ec), end;
++    if (ec) return X_ERROR_ACCESS_DENIED;
++    for (; it != end; it.increment(ec)) {
++      if (ec || !IsUnlinkedStoragePath(it->path())) return X_ERROR_ACCESS_DENIED;
++      // Secondary volumes have independent accounting; never count them in HDD.
++      if (device.device_id == 1 && it->path() == device.root / "storage") {
++        it.disable_recursion_pending(); continue;
++      }
++      if (it->is_regular_file(ec)) {
++        const auto size = it->file_size(ec);
++        if (ec || size > UINT64_MAX - used) return X_ERROR_ACCESS_DENIED;
++        used += size;
++      }
++      if (ec) return X_ERROR_ACCESS_DENIED;
++    }
++    if (ec) return X_ERROR_ACCESS_DENIED;
++  }
++  const auto available = space.available > device.reserve_bytes ? space.available - device.reserve_bytes : 0;
++  device.total_bytes = device.capacity_limit ? std::min(device.capacity_limit, space.capacity) : space.capacity;
++  const auto remaining = device.total_bytes > used ? device.total_bytes - used : 0;
++  device.free_bytes = device.capacity_limit
++      ? std::min(available, remaining > device.reserve_bytes ? remaining - device.reserve_bytes : 0) : available;
++  if (device.device_type == DeviceType::ODD) device.free_bytes = 0;
++  return X_ERROR_SUCCESS;
++}
++
++// Content mounts use the same volume accounting as XAM, including quota checks
++// for growth. Ordinary unlimited volumes add no scan to the I/O hot path.
++class ContentVolumeDevice : public filesystem::HostPathDevice {
++ public:
++  ContentVolumeDevice(std::string_view mount, const std::filesystem::path& path,
++                      ContentDeviceInfo volume)
++      : HostPathDevice(mount, path, false, true), volume_(std::move(volume)) {}
++  bool is_accessible() const override {
++    std::error_code ec;
++    return IsUnlinkedStoragePath(volume_.root) && std::filesystem::is_directory(volume_.root, ec);
++  }
++  X_STATUS QueryVolumeSize(uint64_t& total, uint64_t& free) const override {
++    auto snapshot = volume_;
++    const auto result = QueryContentDeviceSpace(snapshot);
++    if (result) return X_STATUS_UNSUCCESSFUL;
++    total = snapshot.total_bytes; free = snapshot.free_bytes;
++    return X_STATUS_SUCCESS;
++  }
++  bool has_capacity_limit() const override { return volume_.capacity_limit || volume_.reserve_bytes; }
++  X_STATUS CheckGrowth(uint64_t bytes) const override {
++    if (!bytes || !has_capacity_limit()) return X_STATUS_SUCCESS;
++    auto snapshot = volume_;
++    if (QueryContentDeviceSpace(snapshot)) return X_STATUS_ACCESS_DENIED;
++    // STATUS_DISK_FULL maps to Win32 ERROR_DISK_FULL in the pinned kernel table.
++    return bytes <= snapshot.free_bytes ? X_STATUS_SUCCESS : X_STATUS(0xC000007Fu);
++  }
++ private:
++  ContentDeviceInfo volume_;
++};
++
+ // Guest files retain the device, so unmounting cannot invalidate their Entry
+ // pointers. Revocation denies I/O even if a duplicated handle survives close.
+-class SaveDevice final : public filesystem::HostPathDevice {
++class SaveDevice final : public ContentVolumeDevice {
+  public:
+-  SaveDevice(std::string_view mount, const std::filesystem::path& path, UserProfile* user)
+-      : HostPathDevice(mount, path, false, true), user_(user), epoch_(user->storage_epoch()) {}
+-  bool is_accessible() const override { return !revoked_ && epoch_ == user_->storage_epoch(); }
++  SaveDevice(std::string_view mount, const std::filesystem::path& path, UserProfile* user, ContentDeviceInfo volume)
++      : ContentVolumeDevice(mount, path, std::move(volume)), user_(user), epoch_(user->storage_epoch()) {}
++  bool is_accessible() const override { return !revoked_ && epoch_ == user_->storage_epoch() && ContentVolumeDevice::is_accessible(); }
+   void Revoke() { revoked_ = true; }
+  private:
+   UserProfile* user_;
+@@ -69,10 +158,13 @@ ContentPackage::ContentPackage(KernelState* kernel_state, const std::string_view
+   content_data_ = data;
+ 
+   auto fs = kernel_state_->file_system();
++  const auto volume = kernel_state_->content_manager()->GetDevice(data.device_id);
++  if (!volume) throw std::filesystem::filesystem_error("disconnected volume",
++      package_path, std::make_error_code(std::errc::no_such_device));
+   std::unique_ptr<filesystem::HostPathDevice> device;
+   if (data.content_type == XContentType::kSavedGame)
+-    device = std::make_unique<SaveDevice>(device_path_, package_path, kernel_state_->user_profile());
+-  else device = std::make_unique<filesystem::HostPathDevice>(device_path_, package_path, false, true);
++    device = std::make_unique<SaveDevice>(device_path_, package_path, kernel_state_->user_profile(), *volume);
++  else device = std::make_unique<ContentVolumeDevice>(device_path_, package_path, *volume);
+   if (!device->Initialize()) throw std::filesystem::filesystem_error(
+       "content mount", package_path, std::make_error_code(std::errc::io_error));
+   device_ = device.get();
+@@ -116,7 +208,64 @@ void ContentPackage::LoadPackageLicenseMask(const std::filesystem::path header_p
+ }
+ 
+ ContentManager::ContentManager(KernelState* kernel_state, const std::filesystem::path& root_path)
+-    : kernel_state_(kernel_state), root_path_(root_path) {}
++    : kernel_state_(kernel_state), root_path_(root_path) {
++  devices_.push_back({1, DeviceType::HDD, 0, 0, u"Hard Drive", root_path_});
++  const auto config_path = root_path_ / "storage.toml";
++  if (!std::filesystem::exists(config_path)) return;
++  try {
++    if (!IsUnlinkedStoragePath(config_path)) throw std::runtime_error("linked storage config");
++    const auto config = toml::parse_file(rex::path_to_utf8(config_path));
++    if (config["version"].value<int64_t>() != 1) throw std::runtime_error("storage version must be 1");
++    auto limit = [](const toml::node_view<const toml::node>& node) -> uint64_t {
++      if (!node) return 0;
++      const auto value = node.value<int64_t>();
++      if (!value || *value < 0) throw std::runtime_error("invalid capacity/reserve");
++      return uint64_t(*value);
++    };
++    devices_[0].capacity_limit = limit(config["hdd"]["capacity_bytes"]);
++    devices_[0].reserve_bytes = limit(config["hdd"]["reserve_bytes"]);
++    if (const auto* entries = config["device"].as_array()) {
++      for (const auto& entry : *entries) {
++        const auto* table = entry.as_table();
++        if (!table) throw std::runtime_error("invalid device table");
++        const auto id = (*table)["id"].value<int64_t>().value_or(0);
++        const auto type = (*table)["type"].value<std::string>().value_or("");
++        if (id < 3 || id > UINT32_MAX || (type != "mu" && type != "usb") ||
++            std::any_of(devices_.begin(), devices_.end(), [&](const auto& d) { return d.device_id == id; }))
++          throw std::runtime_error("invalid or duplicate storage device");
++        auto name = (*table)["name"].value<std::string>().value_or(type == "mu" ? "Memory Unit" : "USB Storage");
++        if (name.empty() || name.size() > 80) throw std::runtime_error("invalid storage name");
++        devices_.push_back({uint32_t(id), type == "mu" ? DeviceType::MU : DeviceType::USB,
++            0, 0, rex::string::to_utf16(name), root_path_ / "storage" / fmt::format("{:08X}", id),
++            limit((*table)["capacity_bytes"]), limit((*table)["reserve_bytes"])});
++      }
++    }
++  } catch (const std::exception& error) {
++    devices_valid_ = false;
++    REXSYS_ERROR("Invalid storage.toml: {}; storage devices unavailable", error.what());
++  }
++}
++
++std::optional<ContentDeviceInfo> ContentManager::GetDevice(uint32_t id) const {
++  if (!devices_valid_) return std::nullopt;
++  const auto it = std::find_if(devices_.begin(), devices_.end(), [&](const auto& d) { return d.device_id == id; });
++  if (it == devices_.end()) return std::nullopt;
++  auto snapshot = *it;
++  if (QueryContentDeviceSpace(snapshot)) return std::nullopt;
++  return snapshot;
++}
++
++std::vector<ContentDeviceInfo> ContentManager::GetDevices() const {
++  std::vector<ContentDeviceInfo> result;
++  for (const auto& spec : devices_) if (auto info = GetDevice(spec.device_id)) result.push_back(*info);
++  return result;
++}
++
++std::filesystem::path ContentManager::DeviceRoot(uint32_t id) const {
++  const auto device = GetDevice(id);
++  if (!device) throw std::filesystem::filesystem_error("disconnected storage", std::make_error_code(std::errc::no_such_device));
++  return device->root;
++}
+ 
+ ContentManager::~ContentManager() {
+   for (auto& [name, package] : open_packages_) delete package;
+@@ -149,7 +298,7 @@ X_RESULT ContentManager::FlushContent(std::string_view root_name) {
+ }
+ 
+ std::filesystem::path ContentManager::ResolvePackageRoot(uint64_t xuid, XContentType content_type,
+-                                                         uint32_t title_id) {
++                                                         uint32_t title_id, uint32_t device_id) {
+   if (title_id == kCurrentlyRunningTitleId) {
+     title_id = kernel_state_->title_id();
+   }
+@@ -159,7 +308,7 @@ std::filesystem::path ContentManager::ResolvePackageRoot(uint64_t xuid, XContent
+ 
+   // Package root path:
+   // content_root/xuid/title_id/content_type/
+-  return root_path_ / xuid_str / title_id_str / content_type_str;
++  return DeviceRoot(device_id) / xuid_str / title_id_str / content_type_str;
+ }
+ 
+ std::filesystem::path ContentManager::ResolvePackagePath(uint64_t xuid,
+@@ -175,10 +324,12 @@ std::filesystem::path ContentManager::ResolvePackagePath(uint64_t xuid,
+   // content_root/xuid/title_id/content_type/data_file_name/
+   if (!ValidName(data.file_name())) throw std::filesystem::filesystem_error(
+       "invalid content name", std::make_error_code(std::errc::invalid_argument));
+-  auto package_root = ResolvePackageRoot(used_xuid, data.content_type, data.title_id);
++  auto package_root = ResolvePackageRoot(used_xuid, data.content_type, data.title_id, data.device_id);
+   auto path = package_root / rex::to_path(data.file_name());
+   // Never follow an existing junction/symlink into another owner's storage.
+-  for (auto p = path; p != root_path_ && !p.empty(); p = p.parent_path()) {
++  if (!IsUnlinkedStoragePath(path)) throw std::filesystem::filesystem_error(
++      "linked content path", path, std::make_error_code(std::errc::permission_denied));
++  for (auto p = path; p != DeviceRoot(data.device_id) && !p.empty(); p = p.parent_path()) {
+     std::error_code ec;
+     auto status = std::filesystem::symlink_status(p, ec);
+     if (std::filesystem::is_symlink(status)) throw std::filesystem::filesystem_error(
+@@ -189,7 +340,7 @@ std::filesystem::path ContentManager::ResolvePackagePath(uint64_t xuid,
+ 
+ std::filesystem::path ContentManager::ResolvePackageHeaderPath(const std::string_view file_name,
+                                                                uint64_t xuid, uint32_t title_id,
+-                                                               XContentType content_type) const {
++                                                               XContentType content_type, uint32_t device_id) const {
+   if (title_id == kCurrentlyRunningTitleId) {
+     title_id = kernel_state_->title_id();
+   }
+@@ -205,8 +356,10 @@ std::filesystem::path ContentManager::ResolvePackageHeaderPath(const std::string
+ 
+   // Header root path:
+   // content_root/xuid/title_id/Headers/content_type/filename.header
+-  return root_path_ / xuid_str / title_id_str / kGameContentHeaderDirName / content_type_str /
+-         final_name;
++  const auto path = DeviceRoot(device_id) / xuid_str / title_id_str / kGameContentHeaderDirName / content_type_str / final_name;
++  if (!ValidName(file_name) || !IsUnlinkedStoragePath(path))
++    throw std::filesystem::filesystem_error("invalid content header path", path, std::make_error_code(std::errc::permission_denied));
++  return path;
+ }
+ 
+ std::vector<XCONTENT_AGGREGATE_DATA> ContentManager::ListContent(uint32_t device_id, uint64_t xuid,
+@@ -220,7 +373,9 @@ std::vector<XCONTENT_AGGREGATE_DATA> ContentManager::ListContent(uint32_t device
+ 
+   // Search path:
+   // content_root/xuid/title_id/type_name/*
+-  auto package_root = ResolvePackageRoot(xuid, content_type, title_id);
++  auto package_root = ResolvePackageRoot(xuid, content_type, title_id, device_id);
++  if (!IsUnlinkedStoragePath(package_root)) throw std::filesystem::filesystem_error(
++      "linked content catalog", package_root, std::make_error_code(std::errc::permission_denied));
+   if (!std::filesystem::exists(package_root)) return result;
+   // A denied directory is a storage failure, never an empty save catalog.
+   for (const auto& entry : std::filesystem::directory_iterator(package_root)) {
+@@ -229,7 +384,7 @@ std::vector<XCONTENT_AGGREGATE_DATA> ContentManager::ListContent(uint32_t device
+     if (!ValidName(rex::path_to_utf8(name))) continue;
+     XCONTENT_AGGREGATE_DATA content_data{};
+     if (ReadContentHeaderFile(rex::path_to_utf8(name), xuid, title_id,
+-                              content_type, content_data) != X_ERROR_SUCCESS)
++                              content_type, content_data, device_id) != X_ERROR_SUCCESS)
+       content_data.set_display_name(rex::path_to_utf16(name));
+     // Routing comes from the directory being enumerated, never an old header.
+     content_data.device_id = device_id;
+@@ -261,7 +416,7 @@ std::vector<XCONTENT_AGGREGATE_DATA> ContentManager::ListContentAllTypes(
+     }
+     return true;
+   };
+-  const auto user_root = root_path_ / fmt::format("{:016X}", xuid);
++  const auto user_root = DeviceRoot(device_id) / fmt::format("{:016X}", xuid);
+   for (const auto& title : rex::filesystem::ListFiles(user_root)) {
+     uint32_t title_id;
+     if (title.type != rex::filesystem::FileInfo::Type::kDirectory ||
+@@ -401,7 +556,7 @@ X_RESULT ContentManager::WriteContentHeaderFile(uint64_t xuid, XCONTENT_AGGREGAT
+   uint64_t used_xuid = (data.xuid != uint64_t(-1) && data.xuid != 0) ? uint64_t(data.xuid) : xuid;
+ 
+   auto header_path =
+-      ResolvePackageHeaderPath(data.file_name(), used_xuid, data.title_id, data.content_type);
++      ResolvePackageHeaderPath(data.file_name(), used_xuid, data.title_id, data.content_type, data.device_id);
+   auto parent_path = header_path.parent_path();
+ 
+   if (!std::filesystem::exists(parent_path)) {
+@@ -422,8 +577,8 @@ X_RESULT ContentManager::WriteContentHeaderFile(uint64_t xuid, XCONTENT_AGGREGAT
+ 
+ X_RESULT ContentManager::ReadContentHeaderFile(const std::string_view file_name, uint64_t xuid,
+                                                uint32_t title_id, XContentType content_type,
+-                                               XCONTENT_AGGREGATE_DATA& data) const {
+-  auto header_file_path = ResolvePackageHeaderPath(file_name, xuid, title_id, content_type);
++                                               XCONTENT_AGGREGATE_DATA& data, uint32_t device_id) const {
++  auto header_file_path = ResolvePackageHeaderPath(file_name, xuid, title_id, content_type, device_id);
+   constexpr uint32_t header_size = sizeof(XCONTENT_AGGREGATE_DATA);
+ 
+   if (!std::filesystem::exists(header_file_path)) {
+@@ -521,7 +676,7 @@ X_RESULT ContentManager::OpenContent(const std::string_view root_name, uint64_t
+   auto package = ResolvePackage(root_name, xuid, data);
+   assert_not_null(package);
+   package->LoadPackageLicenseMask(ResolvePackageHeaderPath(
+-      data.file_name(), xuid, kernel_state_->title_id(), data.content_type));
++      data.file_name(), xuid, data.title_id, data.content_type, data.device_id));
+   content_license = package->GetPackageLicense();
+ 
+   {
+@@ -607,7 +762,7 @@ X_RESULT ContentManager::DeleteContent(uint64_t xuid, const XCONTENT_AGGREGATE_D
+ 
+   uint64_t used_xuid = (data.xuid != uint64_t(-1) && data.xuid != 0) ? uint64_t(data.xuid) : xuid;
+   auto header_path =
+-      ResolvePackageHeaderPath(data.file_name(), used_xuid, data.title_id, data.content_type);
++      ResolvePackageHeaderPath(data.file_name(), used_xuid, data.title_id, data.content_type, data.device_id);
+   std::error_code ec2;
+   bool header_removed = std::filesystem::remove(header_path, ec2);
+   if (ec2) return X_ERROR_ACCESS_DENIED;
+@@ -655,7 +810,7 @@ X_RESULT ContentManager::UnmountAndDeleteContent(uint64_t xuid,
+ 
+   uint64_t used_xuid = (data.xuid != uint64_t(-1) && data.xuid != 0) ? uint64_t(data.xuid) : xuid;
+   auto header_path =
+-      ResolvePackageHeaderPath(data.file_name(), used_xuid, data.title_id, data.content_type);
++      ResolvePackageHeaderPath(data.file_name(), used_xuid, data.title_id, data.content_type, data.device_id);
+ 
+   std::error_code ec;
+   auto dir_removed = std::filesystem::remove_all(package_path, ec);
+@@ -702,7 +857,7 @@ ContentManager::FindOpenPackageByData(const XCONTENT_AGGREGATE_DATA& data) {
+     // Match on content_type + file_name + resolved title_id.
+     // device_id is a virtual storage selector, not a content identifier.
+     if (data.content_type == pkg.content_type && data.file_name() == pkg.file_name() &&
+-        query_title == pkg_title && data.xuid == pkg.xuid) {
++        query_title == pkg_title && data.xuid == pkg.xuid && data.device_id == pkg.device_id) {
+       return it;
+     }
+   }
+@@ -822,7 +977,7 @@ X_RESULT ContentManager::InstallContent(const std::filesystem::path& package_pat
+   auto file_name = rex::path_to_utf8(package_path.filename());
+ 
+   XCONTENT_AGGREGATE_DATA content_data;
+-  content_data.device_id = static_cast<uint32_t>(DummyDeviceId::HDD);
++  content_data.device_id = static_cast<uint32_t>(ContentDeviceId::HDD);
+   content_data.content_type = XContentType::kMarketplaceContent;
+   content_data.title_id = kernel_state_->title_id();
+   content_data.xuid = 0;
+diff --git a/src/kernel/xam/xam_content_device.cpp b/src/kernel/xam/xam_content_device.cpp
+index f153b69..ca60a68 100644
+--- a/src/kernel/xam/xam_content_device.cpp
++++ b/src/kernel/xam/xam_content_device.cpp
+@@ -12,6 +12,8 @@
+ #include <rex/kernel/xam/private.h>
+ #include <rex/logging.h>
+ #include <rex/math.h>
++#include <rex/filesystem/devices/host_path_device.h>
++#include <rex/system/xam/content_manager.h>
+ #include <rex/hook.h>
+ #include <rex/types.h>
+ #include <rex/system/kernel_state.h>
+@@ -25,49 +27,40 @@ namespace xam {
+ using namespace rex::system;
+ using namespace rex::system::xam;
+ 
+-// TODO(gibbed): real information.
+-//
+-// Until we expose real information about a HDD device, we
+-// claim there is 3GB free on a 4GB dummy HDD.
+-//
+-// There is a possibility that certain games are bugged in that
+-// they incorrectly only look at the lower 32-bits of free_bytes,
+-// when it is a 64-bit value. Which means any size above ~4GB
+-// will not be recognized properly.
+-#define ONE_GB (1024ull * 1024ull * 1024ull)
+-
+-static const DummyDeviceInfo dummy_hdd_device_info_ = {
+-    DummyDeviceId::HDD, DeviceType::HDD,
+-    20ull * ONE_GB,  // 20GB
+-    3ull * ONE_GB,   // 3GB, so it looks a little used.
+-    u"Dummy HDD",
+-};
+-static const DummyDeviceInfo dummy_odd_device_info_ = {
+-    DummyDeviceId::ODD, DeviceType::ODD,
+-    7ull * ONE_GB,  // 7GB (rough maximum)
+-    0ull * ONE_GB,  // read-only FS, so no free space
+-    u"Dummy ODD",
+-};
+-static const DummyDeviceInfo* dummy_device_infos_[] = {
+-    &dummy_hdd_device_info_,
+-    &dummy_odd_device_info_,
+-};
+-#undef ONE_GB
+-
+-const DummyDeviceInfo* GetDummyDeviceInfo(uint32_t device_id) {
+-  const auto& begin = std::begin(dummy_device_infos_);
+-  const auto& end = std::end(dummy_device_infos_);
+-  auto it = std::find_if(begin, end, [device_id](const auto& item) {
+-    return static_cast<uint32_t>(item->device_id) == device_id;
+-  });
+-  return it == end ? nullptr : *it;
++// Device IDs are scoped to the configured runtime environment. Optical media
++// is advertised only when a real read-only CdRom0 device has been mounted.
++std::optional<ContentDeviceInfo> FindDevice(uint32_t id) {
++  if (id != 2) return REX_KERNEL_STATE()->content_manager()->GetDevice(id);
++  const auto entry = REX_KERNEL_FS()->ResolvePath("\\Device\\CdRom0\\");
++  if (!entry || !entry->device()->is_accessible() || !entry->device()->is_read_only()) return std::nullopt;
++  auto* device = entry->device();
++  uint64_t total = uint64_t(device->total_allocation_units()) * device->sectors_per_allocation_unit() * device->bytes_per_sector();
++  if (const auto* host = dynamic_cast<rex::filesystem::HostPathDevice*>(device)) {
++    // An extracted optical tree has its real byte size, not the host disk size.
++    total = 0;
++    std::error_code ec;
++    std::filesystem::recursive_directory_iterator it(host->host_path(), ec), end;
++    if (ec) return std::nullopt;
++    for (; it != end; it.increment(ec)) {
++      if (ec || !IsUnlinkedStoragePath(it->path())) return std::nullopt;
++      if (it->is_regular_file(ec)) {
++        const auto size = it->file_size(ec);
++        if (ec || size > UINT64_MAX - total) return std::nullopt;
++        total += size;
++      }
++      if (ec) return std::nullopt;
++    }
++    if (ec) return std::nullopt;
++  }
++  return ContentDeviceInfo{2, DeviceType::ODD, total, 0, u"DVD"};
+ }
+ 
+ u32 XamContentGetDeviceName_entry(u32 device_id, mapped_wstring name_buffer, u32 name_capacity) {
+-  auto device_info = GetDummyDeviceInfo(device_id);
+-  if (device_info == nullptr) {
++  auto device_info = FindDevice(device_id);
++  if (!device_info) {
+     return X_ERROR_DEVICE_NOT_CONNECTED;
+   }
++  if (!name_buffer) return X_ERROR_INVALID_PARAMETER;
+   auto name = std::u16string(device_info->name);
+   if (name_capacity < name.size() + 1) {
+     return X_ERROR_INSUFFICIENT_BUFFER;
+@@ -77,8 +70,8 @@ u32 XamContentGetDeviceName_entry(u32 device_id, mapped_wstring name_buffer, u32
+ }
+ 
+ u32 XamContentGetDeviceState_entry(u32 device_id, mapped_void overlapped_ptr) {
+-  auto device_info = GetDummyDeviceInfo(device_id);
+-  if (device_info == nullptr) {
++  auto device_info = FindDevice(device_id);
++  if (!device_info) {
+     if (overlapped_ptr) {
+       REX_KERNEL_STATE()->CompleteOverlappedImmediateEx(
+           overlapped_ptr.guest_address(), X_ERROR_FUNCTION_FAILED, X_ERROR_DEVICE_NOT_CONNECTED, 0);
+@@ -109,8 +102,9 @@ typedef struct {
+ static_assert_size(X_CONTENT_DEVICE_DATA, 0x50);
+ 
+ u32 XamContentGetDeviceData_entry(u32 device_id, ppc_ptr_t<X_CONTENT_DEVICE_DATA> device_data) {
+-  auto device_info = GetDummyDeviceInfo(device_id);
+-  if (device_info == nullptr) {
++  if (!device_data) return X_ERROR_INVALID_PARAMETER;
++  auto device_info = FindDevice(device_id);
++  if (!device_info) {
+     return X_ERROR_DEVICE_NOT_CONNECTED;
+   }
+   device_data.Zero();
+@@ -125,7 +119,9 @@ u32 XamContentGetDeviceData_entry(u32 device_id, ppc_ptr_t<X_CONTENT_DEVICE_DATA
+ 
+ u32 XamContentCreateDeviceEnumerator_entry(u32 content_type, u32 content_flags, u32 max_count,
+                                            mapped_u32 buffer_size_ptr, mapped_u32 handle_out) {
+-  assert_not_null(handle_out);
++  if (!handle_out || !max_count || max_count > UINT32_MAX / sizeof(X_CONTENT_DEVICE_DATA))
++    return X_ERROR_INVALID_PARAMETER;
++  *handle_out = 0;
+ 
+   if (buffer_size_ptr) {
+     *buffer_size_ptr = sizeof(X_CONTENT_DEVICE_DATA) * max_count;
+@@ -137,8 +133,10 @@ u32 XamContentCreateDeviceEnumerator_entry(u32 content_type, u32 content_flags,
+     return result;
+   }
+ 
+-  for (const auto& device_info : dummy_device_infos_) {
+-    // Copy our dummy device into the enumerator
++  auto devices = REX_KERNEL_STATE()->content_manager()->GetDevices();
++  if (auto optical = FindDevice(2)) devices.push_back(*optical);
++  for (const auto& device_value : devices) {
++    const auto* device_info = &device_value;
+     auto device_data = e->AppendItem();
+     assert_not_null(device_data);
+     if (device_data) {
+@@ -159,18 +157,11 @@ u32 XamContentCreateDeviceEnumerator_entry(u32 content_type, u32 content_flags,
+ }  // namespace kernel
+ }  // namespace rex
+ 
+-// fix me later
+-namespace rex {
+-namespace system {
+-namespace xam {
+-
+-const DummyDeviceInfo* GetDummyDeviceInfo(uint32_t device_id) {
+-  return rex::kernel::xam::GetDummyDeviceInfo(device_id);
++namespace rex::system::xam {
++std::optional<ContentDeviceInfo> GetContentDeviceInfo(uint32_t device_id) {
++  return rex::kernel::xam::FindDevice(device_id);
++}
+ }
+-
+-}  // namespace xam
+-}  // namespace system
+-}  // namespace rex
+ 
+ REX_EXPORT(__imp__XamContentGetDeviceName, rex::kernel::xam::XamContentGetDeviceName_entry)
+ REX_EXPORT(__imp__XamContentGetDeviceState, rex::kernel::xam::XamContentGetDeviceState_entry)
+@@ -180,8 +171,20 @@ REX_EXPORT(__imp__XamContentCreateDeviceEnumerator,
+ 
+ REX_EXPORT_STUB(__imp__XamContentAddCacheDevice);
+ REX_EXPORT_STUB(__imp__XamContentDeviceCheckUpdates);
+-REX_EXPORT_STUB(__imp__XamContentGetDefaultDevice);
++// Original 17559 export 0x284: one output pointer, message FE/2002B.
++namespace rex::kernel::xam {
++u32 XamContentGetDefaultDevice_entry(mapped_u32 output) {
++  if (!output) return X_ERROR_INVALID_PARAMETER;
++  *output = 0;
++  const auto devices = REX_KERNEL_STATE()->content_manager()->GetDevices();
++  if (devices.empty()) return X_ERROR_DEVICE_NOT_CONNECTED;
++  *output = devices.front().device_id;
++  return X_ERROR_SUCCESS;
++}
++}
++REX_EXPORT(__imp__XamContentGetDefaultDevice, rex::kernel::xam::XamContentGetDefaultDevice_entry)
+ REX_EXPORT_STUB(__imp__XamContentGetDeviceSerialNumber);
+ REX_EXPORT_STUB(__imp__XamContentGetDeviceVolumePath);
+-REX_EXPORT_STUB(__imp__XamContentGetLocalizedDeviceData);
++// 17559 0x639 has the same two-argument 0x50-byte record as 0x25E.
++REX_EXPORT(__imp__XamContentGetLocalizedDeviceData, rex::kernel::xam::XamContentGetDeviceData_entry)
+ REX_EXPORT_STUB(__imp__XamContentRemoveCacheDevice);
+diff --git a/src/kernel/xam/xam_content.cpp b/src/kernel/xam/xam_content.cpp
+index 3c3718f..950b32a 100644
+--- a/src/kernel/xam/xam_content.cpp
++++ b/src/kernel/xam/xam_content.cpp
+@@ -39,7 +39,7 @@ using namespace rex::system::xam;
+ // A save operation captures a real connected identity, never a display name.
+ static X_RESULT ContentUser(uint32_t index, XCONTENT_AGGREGATE_DATA& data, uint64_t& xuid) {
+   if (!ContentManager::ValidName(data.file_name())) return X_ERROR_INVALID_PARAMETER;
+-  if (!GetDummyDeviceInfo(data.device_id) || data.device_id != 1)
++  if (!GetContentDeviceInfo(data.device_id))
+     return X_ERROR_DEVICE_NOT_CONNECTED;
+   if (data.content_type == XContentType::kSavedGame) {
+     auto identity = REX_KERNEL_STATE()->user_profile()->identity();
+@@ -71,9 +71,9 @@ u32 XamContentGetAttributesInternal_entry(mapped_void content, mapped_void attri
+   X_RESULT result = X_ERROR_INVALID_PARAMETER;
+   if (content && attributes) {
+     const auto* data = content.as<XCONTENT_AGGREGATE_DATA*>();
+-    const auto* device = GetDummyDeviceInfo(data->device_id);
++    const auto device = GetContentDeviceInfo(data->device_id);
+     if (!device) result = X_ERROR_DEVICE_NOT_CONNECTED;
+-    else if (device->device_type != DeviceType::HDD) result = X_RESULT_FROM_WIN32(50) /* ERROR_NOT_SUPPORTED */;
++    else if (device->device_type == DeviceType::ODD) result = X_RESULT_FROM_WIN32(50) /* ERROR_NOT_SUPPORTED */;
+     else result = REX_KERNEL_STATE()->content_manager()->GetContentAttributes(
+         *data, attributes.as<uint8_t*>());
+   }
+@@ -90,9 +90,9 @@ u32 XamContentGetMetaDataInternal_entry(mapped_void content, mapped_void metadat
+   X_RESULT result = X_ERROR_INVALID_PARAMETER;
+   if (content && metadata) {
+     const auto& data = *content.as<XCONTENT_AGGREGATE_DATA*>();
+-    const auto* device = GetDummyDeviceInfo(data.device_id);
++    const auto device = GetContentDeviceInfo(data.device_id);
+     if (!device) result = X_ERROR_DEVICE_NOT_CONNECTED;
+-    else if (device->device_type != DeviceType::HDD) result = X_RESULT_FROM_WIN32(50);
++    else if (device->device_type == DeviceType::ODD) result = X_RESULT_FROM_WIN32(50);
+     else result = REX_KERNEL_STATE()->content_manager()->GetContentMetadata(
+         data, metadata.as<uint8_t*>());
+     REXKRNL_INFO("Content metadata: title={:08X} type={:08X} name={} result={:08X}",
+@@ -146,8 +146,8 @@ u32 XamContentCreateEnumerator_entry(u32 user_index, u32 device_id, u32 content_
+   const auto identity = REX_KERNEL_STATE()->user_profile()->identity();
+   if (saved && (user_index != 0 || !identity.signin_state)) return X_ERROR_NO_SUCH_USER;
+ 
+-  auto device_info = device_id == 0 ? nullptr : GetDummyDeviceInfo(device_id);
+-  if ((device_id && device_info == nullptr) || !handle_out) {
++  auto device_info = device_id == 0 ? std::nullopt : GetContentDeviceInfo(device_id);
++  if ((device_id && !device_info) || !handle_out) {
+     if (buffer_size_ptr) {
+       *buffer_size_ptr = 0;
+     }
+@@ -167,30 +167,19 @@ u32 XamContentCreateEnumerator_entry(u32 user_index, u32 device_id, u32 content_
+   }
+ 
+   try {
+-  if (!device_info || device_info->device_id == DummyDeviceId::HDD) {
+-    // Enumerate user-specific content
+-    auto content_datas = REX_KERNEL_STATE()->content_manager()->ListContent(
+-        static_cast<uint32_t>(DummyDeviceId::HDD), xuid, XContentType(uint32_t(content_type)));
+-    for (const auto& content_data : content_datas) {
+-      auto item = e->AppendItem();
+-      *item = content_data;
+-    }
+-
+-    // Also enumerate common content (xuid=0)
+-    if (!saved && xuid != 0) {
+-      auto common_datas = REX_KERNEL_STATE()->content_manager()->ListContent(
+-          static_cast<uint32_t>(DummyDeviceId::HDD), 0, XContentType(uint32_t(content_type)));
+-      for (const auto& content_data : common_datas) {
+-        auto item = e->AppendItem();
+-        *item = content_data;
++  for (const auto& device : REX_KERNEL_STATE()->content_manager()->GetDevices()) {
++    if (device_id && device.device_id != device_id) continue;
++    for (const auto owner : {xuid, uint64_t(0)}) {
++      if (owner == 0 && (saved || xuid == 0)) {
++        if (xuid != 0) continue;
+       }
++      auto items = REX_KERNEL_STATE()->content_manager()->ListContent(
++          device.device_id, owner, XContentType(uint32_t(content_type)));
++      for (const auto& item : items) *e->AppendItem() = item;
++      if (saved || xuid == 0) break;
+     }
+   }
+ 
+-  if (!device_info || device_info->device_id == DummyDeviceId::ODD) {
+-    // TODO(gibbed): disc drive content
+-  }
+-
+   } catch (const std::filesystem::filesystem_error&) {
+     e->ReleaseHandle();
+     if (buffer_size_ptr) *buffer_size_ptr = 0;
+@@ -620,9 +609,9 @@ static X_RESULT PrepareContentLaunch(filesystem::Entry* entry, XamModule* xam) {
+ u32 XamContentLaunchImageInternalEx_entry(mapped_void content, mapped_string image, u32 flags) {
+   if (!content) return X_ERROR_INVALID_PARAMETER;
+   const auto& data = *content.as<XCONTENT_AGGREGATE_DATA*>();
+-  const auto* device = GetDummyDeviceInfo(data.device_id);
++  const auto device = GetContentDeviceInfo(data.device_id);
+   if (!device) return X_ERROR_DEVICE_NOT_CONNECTED;
+-  if (device->device_type != DeviceType::HDD) return X_RESULT_FROM_WIN32(50);
++  if (device->device_type == DeviceType::ODD) return X_RESULT_FROM_WIN32(50);
+   // Other loader modes need their own semantics; don't silently drop flags.
+   if (flags != 0) {
+     REXKRNL_ERROR("Content launch flags {:08X} not implemented", uint32_t(flags));
+diff --git a/src/kernel/xam/xam_content_aggregate.cpp b/src/kernel/xam/xam_content_aggregate.cpp
+index bb3b1c8..f41f2ef 100644
+--- a/src/kernel/xam/xam_content_aggregate.cpp
++++ b/src/kernel/xam/xam_content_aggregate.cpp
+@@ -68,7 +68,7 @@ void AddODDContentTest(object_ref<XStaticEnumerator<XCONTENT_AGGREGATE_DATA>> e,
+         auto item = e->AppendItem();
+         assert_not_null(item);
+         if (item) {
+-          item->device_id = static_cast<uint32_t>(DummyDeviceId::ODD);
++          item->device_id = static_cast<uint32_t>(ContentDeviceId::ODD);
+           item->content_type = content_type;
+           item->set_display_name(string::to_utf16(content_entry->name()));
+           item->set_file_name(content_entry->name());
+@@ -83,8 +83,8 @@ u32 XamContentAggregateCreateEnumerator_entry(u64 xuid, u32 device_id, u32 conte
+                                               mapped_u32 handle_out) {
+   assert_not_null(handle_out);
+ 
+-  auto device_info = device_id == 0 ? nullptr : GetDummyDeviceInfo(device_id);
+-  if ((device_id && device_info == nullptr) || !handle_out) {
++  auto device_info = device_id == 0 ? std::nullopt : GetContentDeviceInfo(device_id);
++  if ((device_id && !device_info) || !handle_out) {
+     return X_E_INVALIDARG;
+   }
+ 
+@@ -106,9 +106,11 @@ u32 XamContentAggregateCreateEnumerator_entry(u64 xuid, u32 device_id, u32 conte
+     if (device_info && device_info->device_type == DeviceType::ODD) {
+       // No installed HDD packages belong to the optical device.
+     } else {
+-      auto items = REX_KERNEL_STATE()->content_manager()->ListContentAllTypes(
+-          static_cast<uint32_t>(DummyDeviceId::HDD), xuid, unk3);
+-      for (const auto& item : items) *e->AppendItem() = item;
++      for (const auto& device : REX_KERNEL_STATE()->content_manager()->GetDevices()) {
++        if (device_id && device.device_id != device_id) continue;
++        auto items = REX_KERNEL_STATE()->content_manager()->ListContentAllTypes(device.device_id, xuid, unk3);
++        for (const auto& item : items) *e->AppendItem() = item;
++      }
+     }
+     REXKRNL_DEBUG("XamContentAggregateCreateEnumerator: all types xuid={:016X} device={} title={:08X}, {} items",
+                   uint64_t(xuid), uint32_t(device_id), uint32_t(unk3), e->item_count());
+@@ -120,7 +122,8 @@ u32 XamContentAggregateCreateEnumerator_entry(u64 xuid, u32 device_id, u32 conte
+ 
+   uint64_t userxuid = REX_KERNEL_STATE()->user_profile()->xuid();
+ 
+-  if (!device_info || device_info->device_type == DeviceType::HDD) {
++  for (const auto& device : REX_KERNEL_STATE()->content_manager()->GetDevices()) {
++    if (device_id && device.device_id != device_id) continue;
+     // Fetch any alternate title IDs defined in the XEX header
+     // (used by games to load saves from other titles, etc)
+     std::vector<uint32_t> title_ids{kCurrentlyRunningTitleId};
+@@ -133,7 +136,7 @@ u32 XamContentAggregateCreateEnumerator_entry(u64 xuid, u32 device_id, u32 conte
+     for (auto& title_id : title_ids) {
+       // Get user-specific content
+       auto content_datas = REX_KERNEL_STATE()->content_manager()->ListContent(
+-          static_cast<uint32_t>(DummyDeviceId::HDD), xuid, content_type_enum, title_id);
++          device.device_id, xuid, content_type_enum, title_id);
+       for (const auto& content_data : content_datas) {
+         auto item = e->AppendItem();
+         assert_not_null(item);
+@@ -145,7 +148,7 @@ u32 XamContentAggregateCreateEnumerator_entry(u64 xuid, u32 device_id, u32 conte
+       // Also get common content (xuid=0)
+       if (userxuid != 0) {
+         auto common_datas = REX_KERNEL_STATE()->content_manager()->ListContent(
+-            static_cast<uint32_t>(DummyDeviceId::HDD), 0, content_type_enum, title_id);
++            device.device_id, 0, content_type_enum, title_id);
+         for (const auto& content_data : common_datas) {
+           auto item = e->AppendItem();
+           assert_not_null(item);
+diff --git a/include/rex/filesystem/devices/host_path_device.h b/include/rex/filesystem/devices/host_path_device.h
+index 48100be..9bc9018 100644
+--- a/include/rex/filesystem/devices/host_path_device.h
++++ b/include/rex/filesystem/devices/host_path_device.h
+@@ -41,11 +41,15 @@ class HostPathDevice : public Device {
+   uint32_t attributes() const override { return 0; }
+   uint32_t component_name_max_length() const override { return 255; }
+ 
+-  uint32_t total_allocation_units() const override { return 128 * 1024; }
+-  uint32_t available_allocation_units() const override { return 128 * 1024; }
++  uint32_t total_allocation_units() const override;
++  uint32_t available_allocation_units() const override;
+   uint32_t sectors_per_allocation_unit() const override { return 1; }
+   uint32_t bytes_per_sector() const override { return 0x200; }
+ 
++  virtual X_STATUS QueryVolumeSize(uint64_t& total, uint64_t& available) const;
++  virtual bool has_capacity_limit() const { return false; }
++  virtual X_STATUS CheckGrowth(uint64_t bytes) const { return X_STATUS_SUCCESS; }
++
+  private:
+   void PopulateEntry(HostPathEntry* parent_entry);
+ 
+diff --git a/src/filesystem/devices/host_path_device.cpp b/src/filesystem/devices/host_path_device.cpp
+index 811713f..d192274 100644
+--- a/src/filesystem/devices/host_path_device.cpp
++++ b/src/filesystem/devices/host_path_device.cpp
+@@ -21,6 +21,23 @@
+ 
+ namespace rex::filesystem {
+ 
++X_STATUS HostPathDevice::QueryVolumeSize(uint64_t& total, uint64_t& available) const {
++  std::error_code ec;
++  const auto space = std::filesystem::space(host_path_, ec);
++  if (ec) return X_STATUS_UNSUCCESSFUL;
++  total = space.capacity;
++  available = read_only_ ? 0 : space.available;
++  return X_STATUS_SUCCESS;
++}
++uint32_t HostPathDevice::total_allocation_units() const {
++  uint64_t total = 0, available = 0;
++  return QueryVolumeSize(total, available) ? 0 : uint32_t(std::min<uint64_t>(total / 512, UINT32_MAX));
++}
++uint32_t HostPathDevice::available_allocation_units() const {
++  uint64_t total = 0, available = 0;
++  return QueryVolumeSize(total, available) ? 0 : uint32_t(std::min<uint64_t>(available / 512, UINT32_MAX));
++}
++
+ HostPathDevice::HostPathDevice(const std::string_view mount_path,
+                                const std::filesystem::path& host_path, bool read_only,
+                                bool allow_share_delete)
+diff --git a/src/filesystem/devices/host_path_file.cpp b/src/filesystem/devices/host_path_file.cpp
+index 9d257c6..e66dde9 100644
+--- a/src/filesystem/devices/host_path_file.cpp
++++ b/src/filesystem/devices/host_path_file.cpp
+@@ -12,6 +12,7 @@
+ #include <rex/filesystem/devices/host_path_entry.h>
+ #include <rex/filesystem/devices/host_path_file.h>
+ #include <rex/filesystem/device.h>
++#include <rex/filesystem/devices/host_path_device.h>
+ 
+ namespace rex::filesystem {
+ 
+@@ -47,6 +48,18 @@ X_STATUS HostPathFile::WriteSync(std::span<const uint8_t> buffer, size_t byte_of
+     return X_STATUS_ACCESS_DENIED;
+   }
+ 
++  auto* device = static_cast<HostPathDevice*>(entry_->device());
++  std::unique_lock<std::recursive_mutex> quota_lock(rex::thread::global_critical_region::mutex(), std::defer_lock);
++  if (device->has_capacity_limit()) {
++    quota_lock.lock();
++    std::error_code ec;
++    const auto old = std::filesystem::file_size(file_handle_->path(), ec);
++    if (out_bytes_written) *out_bytes_written = 0;
++    if (ec || buffer.size() > SIZE_MAX - byte_offset) return X_STATUS_INVALID_PARAMETER;
++    const uint64_t end = byte_offset + buffer.size();
++    const auto status = device->CheckGrowth(end > old ? end - old : 0);
++    if (status) return status;
++  }
+   if (file_handle_->Write(byte_offset, buffer.data(), buffer.size(), out_bytes_written)) {
+     return X_STATUS_SUCCESS;
+   } else {
+@@ -60,6 +73,16 @@ X_STATUS HostPathFile::SetLength(size_t length) {
+     return X_STATUS_ACCESS_DENIED;
+   }
+ 
++  auto* device = static_cast<HostPathDevice*>(entry_->device());
++  std::unique_lock<std::recursive_mutex> quota_lock(rex::thread::global_critical_region::mutex(), std::defer_lock);
++  if (device->has_capacity_limit()) {
++    quota_lock.lock();
++    std::error_code ec;
++    const auto old = std::filesystem::file_size(file_handle_->path(), ec);
++    if (ec) return X_STATUS_ACCESS_DENIED;
++    const auto status = device->CheckGrowth(length > old ? length - old : 0);
++    if (status) return status;
++  }
+   if (file_handle_->SetLength(length)) {
+     return X_STATUS_SUCCESS;
+   } else {
+diff --git a/src/kernel/xboxkrnl/xboxkrnl_io_info.cpp b/src/kernel/xboxkrnl/xboxkrnl_io_info.cpp
+index d6a3018..b8aa1ed 100644
+--- a/src/kernel/xboxkrnl/xboxkrnl_io_info.cpp
++++ b/src/kernel/xboxkrnl/xboxkrnl_io_info.cpp
+@@ -1,3 +1,4 @@
++#include <rex/filesystem/devices/host_path_device.h>
+ /**
+  ******************************************************************************
+  * Xenia : Xbox 360 Emulator Research Project                                 *
+@@ -415,8 +416,16 @@ u32 NtQueryVolumeInformationFile_entry(u32 file_handle,
+     case XFileFsSizeInformation: {
+       auto device = file->device();
+       auto info = info_ptr.as<X_FILE_FS_SIZE_INFORMATION*>();
++      if (const auto* host = dynamic_cast<rex::filesystem::HostPathDevice*>(device)) {
++        uint64_t total = 0, free = 0;
++        status = host->QueryVolumeSize(total, free);
++        if (status != X_STATUS_SUCCESS) { out_length = 0; break; }
++        info->total_allocation_units = total / 512;
++        info->available_allocation_units = free / 512;
++      } else {
+       info->total_allocation_units = device->total_allocation_units();
+       info->available_allocation_units = device->available_allocation_units();
++      }
+       info->sectors_per_allocation_unit = device->sectors_per_allocation_unit();
+       info->bytes_per_sector = device->bytes_per_sector();
+       // TODO(gibbed): sanity check, XCTD userland code seems to require this.

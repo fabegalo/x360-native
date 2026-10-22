@@ -24,9 +24,12 @@ if(WIN32)
     endif()
     target_compile_definitions(x360-native PRIVATE X360N_DISTRIBUTION=1 X360N_PACKAGE_PAYLOAD="${X360_PACKAGE_PAYLOAD_SHA256}")
   endif()
-  add_dependencies(x360-native x360n x360n-extract)
-  add_custom_command(TARGET x360-native POST_BUILD
+  # Dependencies can change without relinking the launcher. Stage the tools on
+  # every launcher build so an old adjacent supervisor is never left behind.
+  add_custom_target(x360n_stage_desktop_tools
     COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:x360n> $<TARGET_FILE_DIR:x360-native>
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:x360n-extract> $<TARGET_FILE_DIR:x360-native>)
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:x360n-extract> $<TARGET_FILE_DIR:x360-native>
+    DEPENDS x360n x360n-extract)
+  add_dependencies(x360-native x360n_stage_desktop_tools)
 endif()
 include(${PROJECT_SOURCE_DIR}/tests/desktop/targets.cmake)

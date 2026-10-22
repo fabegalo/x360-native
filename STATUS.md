@@ -5,6 +5,128 @@ Este arquivo resume o estado atual; os relatórios vinculados preservam datas,
 falhas iniciais, hashes, comandos e limites de cada validação. Resultados de uma
 etapa histórica não certificam automaticamente o build atual nem outros títulos.
 
+Criação de perfil — retomada 22/10: no run `20261022T021930Z` (aplicativo
+principal, sem sessões concorrentes) Entrar → Criar perfil criou dois perfis com
+logon e a dashboard continuou aberta até o mantenedor fechá-la. O atalho direto
+do Guide chamava `XamAppRequestLoad`/`XamAppLoad("createprofile.xex")`, ainda
+stubs (registrados nos logs manuais). Patch 0131 os implementa por um hook do
+perfil; o host 17559 abre o CreateProfile original sem pedido (hipótese
+documentada), sem fallback. `[app-load]` 40 asserções/2 casos; relacionados
+1.977/38. Preparo oficial às 23:48 (21/10, horário local): 13 artefatos/4.032 entradas
+conferidos. Atalho direto aceito pelo mantenedor (run `20261022T025119Z`). Patch 0132:
+`XamUserIsPartialProfile` (stub) fazia o Guide abrir as conquistas do título
+atual em vez da lista de Jogos para os controles 1–3; red 5/10 → green, produto
+`4bb5a0fe…` conferido. Tela de conquistas de um jogo carregava sem parar: a
+`LoadAchievementsScene` pede flags `0x27` e o SDK recusava bits fora de `0x7`
+(original `81670190` não valida). Patch 0134 corrige (red 87 → green; sonda com
+cópia dos dados reais devolve as 50 conquistas do FM4); 0133 só registra log.
+Aceite visual pendente.
+
+Criação de perfil — teste manual às 22:22 (21/10): Entrar → Criar perfil
+gravou a identidade e concluiu logon, mas caiu no retorno; atalho direto do
+Guide também sem aceite. Run `C0000005`, sem pilha/PPC capturados. Patch 0129
+distingue fechar toda a pilha de fechar só a tela; host 17559 deixa de restaurar
+pais concluídos e libera cópias de strings do estado descartado. Release focado
+0129/0130 e ajuste do host: **1.161 asserções / 23 casos**, mais sondas CPU dos
+métodos originais de fechamento e serialização. O host aceita pedidos durante
+a inicialização e não restaura um buffer recusado com `S_FALSE`. SDK com 130
+patches; preparo `69e532…`, integrado ao seletor `5898c6…`: 13 artefatos/4.031 entradas/15 originais
+conferidos. Quatro sondas CPU com a DLL exata do produto passaram, sem erros ou
+stubs; 15 arquivos reais preservados. Causa exata do acesso inválido e aceite
+físico das duas rotas continuam pendentes.
+[Diagnóstico e limites](docs/reports/profile-guide-p0-2026-10-21.md).
+
+P0 Storage 17559 — 22/10: HDD único da sessão (0136; sem migração, por decisão do
+mantenedor) para o Storage ver saves de todos os jogos; registros agregados de 584 bytes
+com tamanho (0137); perfis como pacotes de conteúdo por dispositivo, listáveis, apagáveis
+e copiáveis/movíveis no Storage (0138, sem migração; aceite visual pendente). Copiar/mover (S4) implementados no patch 0135, transacionais,
+com progresso/cancelamento do callback original da dashboard, cota e recusa de conflito;
+`[storage-transfer]` red→green (58 asserções), relacionados 2.387/39. Roteiro manual
+descartável `scripts/validation/start-storage-transfer-17559.ps1`; aceite visual pendente.
+
+P0 Storage 17559 — incremento S1 e parte de S2: HDD real persistente, MU/USB
+configuradas com IDs estáveis, quota/reserva, capacidade NT/XAM coerente e
+seletor original FE/2100B com AOT próprio, sem escolher HDD automaticamente.
+Patches 0120/0121/0122/0127 de conteúdo preservam C8/XUID e os originais 17559.
+Release integrado: 2.690 asserções/43 casos; roteamento original: 25/um caso.
+Produto final `5898c6…`: 13 artefatos, 4.031 entradas e 15 originais conferidos.
+Teste curto autorizado abriu Sistema → Armazenamento e o seletor original com
+HDD/MU, capacidades coerentes e categorias originais. A UI revelou cache
+fictício de 512 MiB por BOOL stale: patch 0130 corrigiu, e o reteste mostrou
+Itens do Sistema em 0 KB. A abertura do seletor revelou helper AOT ausente;
+limites originais de ceil/floor adicionados, com sonda CPU numérica aprovada.
+Seleção concluiu HDD1, resultado 0; cancelamento concluiu 1627/extended1223,
+saída de dispositivo intacta. Houve entrada manual concorrente; escolha da MU,
+automação exclusiva e retorno completo ao Home pelo Storage continuam sem aceite.
+A sessão de cancelamento foi encerrada intencionalmente pelo agente para liberar
+teste manual de perfis; esse fechamento não é nova queda do produto. Dados
+descartáveis preservados. Copiar/mover, formatação,
+transações/recuperação, integração completa com My Games e save/load comercial
+continuam pendentes; o sistema solicitado não está completo.
+[Matriz, ABIs, evidências e aceite](docs/reports/storage-p0-2026-10-21.md).
+
+P0 perfis — correções adicionais dos logs manuais: patches 0123/0124/0125
+tratam campos opcionais ausentes sem erro global 87, enviam OptionsUI ao HUD
+original e implementam flags locais XGI B0082 por XUID. Patch 0128 remove os
+resultados fictícios do parser de gamerpic, seguindo o export original 17559.
+Outros 23 callbacks originais da família das páginas de perfil foram auditados
+e incluídos na análise AOT. Release focado integrado com Storage/gráficos:
+**2.690 asserções / 43 casos**, sem suíte completa ou execução de interface.
+SDK Check integral passou com 128 patches; replay limpo reproduziu 130 arquivos
+finais. Preparo oficial da 17559 concluído às 22:19:03, coordenado com Storage
+e gráficos: 13 artefatos, 4.027 entradas e 15 originais conferidos, sem marcador
+incompleto. Dez arquivos reais de identidade/conquistas e os 114 patches
+históricos preservados. Sonda GamerProfile original passou duas enumerações
+overlapped de jogos/conquistas por perfil na sequência Alpha → Bravo → Alpha,
+com isolamento de pontos/flags; parser HLE coincidiu com o export original em
+seis entradas. Ambas usaram a DLL exata do produto e saíram 0, sem erros/stubs,
+em armazenamento temporário e sem entrypoints, cenas, GPU ou jogos.
+Queda guest 5 após criação, seleção completa de avatar/gamerpic e aceite das
+cenas originais continuam pendentes. [Detalhes](docs/reports/profile-guide-p0-2026-10-21.md).
+
+P0 perfis/Guide (21/10): implementadas entradas originais de jogos/modo 1,
+jogos com prêmios/modo 6 e edição/modo 3; renomeação mantendo o XUID; remoção
+da identidade com snapshot recuperável; preferências persistentes de sete tipos
+com cache por XUID/Title ID, falhas e proteção da leitura concorrente.
+Patches novos 0116–0119 preservam os 114 anteriores e o SDK pinado.
+Testes Release relacionados: **2.060 asserções em 31 casos**, sem suíte completa.
+Sonda headless executou duas criações e logons pelos métodos originais 17559,
+em armazenamento novo; isso não executa o retorno das cenas à dashboard.
+O acesso guest `0x00000005` relatado após criação continua sem causa confirmada
+e sem aceite da correção. Diagnóstico PPC opcional permanece desligado nas
+sessões normais. Build Release integrado concluído pelo driver oficial;
+12 artefatos e 14 originais conferidos. Sondas com a DLL exata do produto
+passaram nos dois pares de criação/logon originais e no diagnóstico sintético.
+O supervisor foi corrigido para retorno da dashboard à própria dashboard sem
+encerrar a plataforma; supervisor Release usado pelo aplicativo atualizado e 57 asserções/quatro
+casos relacionados passaram. Total final: **2.117 asserções / 35 casos**.
+Dez arquivos reais de identidade/conquistas mantiveram seus hashes.
+Sem execução de dashboard/jogo ou controle de UI pelo agente. Um usuário ativo
+no slot 0; quatro usuários simultâneos e o fluxo visual completo de conquistas
+continuam pendentes. [Evidências e limites](docs/reports/profile-guide-p0-2026-10-21.md).
+
+Sessões manuais 21:02–21:08 (21/10): queda fatal ao abrir preferências de
+entrada (`803_SignInPreferences.xur`), chamada AOT ausente `817ACC88`,
+LR `817B3928`, saída `C0000409`. Confirmado callback de duas instruções no
+original 17559 e incluído na análise. Sonda headless falhou com a DLL anterior.
+Também identificada cópia antiga do supervisor ao lado do launcher; staging
+passa a ocorrer em todo build, mesmo sem relink. Os erros de settings,
+`XamShowOptionsUI` e XGI receberam as correções adicionais descritas acima;
+`DASHUSER:`, `shrdres.xzp` e os pedidos online continuam sem correção certificada.
+Build Release oficial concluído, recibo com 12 artefatos conferidos e sem
+marcador incompleto; sonda do callback passou com a DLL final. As cópias do
+supervisor agora têm hashes iguais; link do frontend encontrou arquivo
+indisponível, sem encerrar o aplicativo aberto. Dez arquivos de usuário e os
+14 originais permaneceram idênticos durante esta correção. Sem aceite visual novo.
+
+Inspeção da sessão manual das 20:02–20:03 (21/10): saída `0` após
+`XamLoaderRebootToDash reason=23`/handoff `Dashboard`; sem reprodução de
+CreateProfile. As chamadas `XamShowGamesUI` e `XamShowAvatarAwardGamesUI`
+atingiram os stubs que motivaram as novas rotas. O encerramento após retorno à
+própria dashboard motivou a correção do supervisor. Sem captura PPC/pilha nessa
+sessão; o fluxo visual do novo build ainda precisa de aceite. Detalhes no
+relatório P0 acima.
+
 Launcher (21/10): corrigido o fluxo que anunciava jogo pronto pelo recibo mas
 iniciava a dashboard sem concluir o registro na My Games. Preparar/iniciar agora
 concluem o registro pelo aplicativo, com validação independente no supervisor.
@@ -443,10 +565,23 @@ com 204 e 2.328 checks sintéticos respectivamente. Forza chegou à condução s
 os erros diagnosticados; isso não estabelece ganho global de FPS.
 [Evidências Xenos](docs/reports/graphics/xenos-fetch-predication.md).
 
+G1 (21/10), **incremento parcial**: build Release raiz com Xenos/Vulkan e
+encaminhamento explícito da API; scanout e D1OVL offscreen passaram, incluindo
+BGRA/alpha, gamma e resize. Cinco capturas equivalentes entre APIs foram
+idênticas. Native/D3D12 usa arenas aposentadas por fence; o microcenário
+controlado de 4.096 draws preservou a imagem e teve medianas de processo de
+1,421 → 1,332 s, sem comprovar FPS/frametime de gameplay. Configuração, ABI e
+transições sintéticas: 940 asserções/sete casos relacionados aprovados.
+Native/Vulkan e ZPD continuam pendentes; títulos/AOT, recibos e ZIP Vulkan
+ainda não estão integrados/validados. O preparo 17559 de perfis/Storage permanece
+Xenos/D3D12; não foi alterado para Vulkan nem houve sessão original nova nesta
+etapa. [Implementação, baseline, falhas e matriz](docs/reports/graphics/g1-vulkan-native-2026-10-21.md).
+
 Native D3D12 permanece experimental. N3 demonstrou o ciclo Castle; N4.1 corrigiu
 cores/bindless e N4.2 reduziu custo de PSOs e esperas de views inativas. Forza
 chegou à condução, mas desempenho não aprovado e `EVENT_WRITE_ZPD` (0x5B)
-continua não implementado. Vulkan indisponível, com recusa explícita.
+continua não implementado. Naquele checkpoint, Vulkan estava indisponível,
+com recusa explícita; o incremento G1 acima ainda se limita aos probes.
 [N4.1](docs/reports/graphics/native-renderer-n4-1.md), [N4.2](docs/reports/graphics/native-renderer-n4-2.md).
 
 Instrumentação opcional/desligada normalmente. P2 não demonstrou ganho ou

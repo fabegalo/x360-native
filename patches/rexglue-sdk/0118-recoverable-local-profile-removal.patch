@@ -1,0 +1,147 @@
+diff --git a/src/kernel/xam/xam_misc.cpp b/src/kernel/xam/xam_misc.cpp
+index 27c58c7..fac2449 100644
+--- a/src/kernel/xam/xam_misc.cpp
++++ b/src/kernel/xam/xam_misc.cpp
+@@ -762,7 +762,6 @@ REX_EXPORT_STUB(__imp__XamProfileClose);
+ REX_EXPORT_STUB(__imp__XamProfileControlPec);
+ 
+ 
+-REX_EXPORT_STUB(__imp__XamProfileDelete);
+ 
+ 
+ REX_EXPORT_STUB(__imp__XamProfileGetCachedWindowsLiveEmail);
+diff --git a/src/kernel/xam/xam_enum.cpp b/src/kernel/xam/xam_enum.cpp
+index c247d74..26af8bb 100644
+--- a/src/kernel/xam/xam_enum.cpp
++++ b/src/kernel/xam/xam_enum.cpp
+@@ -345,3 +345,14 @@ extern "C" REX_FUNC(__imp__XamProfileRenameAccount) {
+ }
+ static rex::ppc::detail::PPCFuncRegistrar profile_rename_reg(
+     "__imp__XamProfileRenameAccount", &__imp__XamProfileRenameAccount);
++
++// Original 17559 816DB078: local device in r3, full XUID in r4;
++// original dashboard confirmation owns the decision to submit this operation.
++extern "C" REX_FUNC(__imp__XamProfileDelete) {
++  using namespace rex;
++  const auto result = ctx.r3.u32 > 1 ? X_ERROR_DEVICE_NOT_CONNECTED
++      : REX_KERNEL_STATE()->user_profile()->RemoveLocal(ctx.r4.u64);
++  ctx.r3.u64 = X_HRESULT_FROM_WIN32(result);
++}
++static rex::ppc::detail::PPCFuncRegistrar profile_delete_reg(
++    "__imp__XamProfileDelete", &__imp__XamProfileDelete);
+diff --git a/src/system/xam/user_profile.cpp b/src/system/xam/user_profile.cpp
+index ee39a32..5ee06ac 100644
+--- a/src/system/xam/user_profile.cpp
++++ b/src/system/xam/user_profile.cpp
+@@ -14,6 +14,7 @@
+ #include <array>
+ #include <cstring>
+ #include <cctype>
++#include <chrono>
+ #include <random>
+ #include <rex/platform.h>
+ #if REX_PLATFORM_WIN32
+@@ -161,9 +162,16 @@ bool UserProfile::InitializeLocal(const std::filesystem::path& root) {
+     if (size < 20 || std::memcmp(record.data(), "X360LP02", 8)) return false;
+     count = (uint32_t(record[8]) << 24) | (uint32_t(record[9]) << 16) |
+             (uint32_t(record[10]) << 8) | record[11];
+-    if (!count || count > 64 || size != 20 + count * 25) return false;
++    if (count > 64 || size != 20 + count * 25) return false;
+     selected = u64(12);
+     offset = 20;
++    // A committed empty v2 is the tombstone after removing the final account.
++    // It must take precedence over the preserved v1 migration source.
++    if (!count) {
++      if (selected) return false;
++      storage_ready_ = true;
++      return true;
++    }
+   } else if (size != 33 || std::memcmp(record.data(), "X360LP01", 8)) return false;
+   std::vector<Identity> loaded;
+   unsigned signed_in = 0;
+@@ -195,7 +203,7 @@ bool UserProfile::PersistProfiles(const std::vector<Identity>& next, const Ident
+   std::error_code error;
+   std::filesystem::create_directories(profile_path_.parent_path(), error);
+   if (error) { REXSYS_ERROR("Local profile directory: {}", error.message()); return false; }
+-  const bool version2 = next.size() > 1 || profile_path_.filename() == "local-v2.dat";
++  const bool version2 = next.size() != 1 || profile_path_.filename() == "local-v2.dat";
+   const auto destination = profile_path_.parent_path() / (version2 ? "local-v2.dat" : "local-v1.dat");
+   std::vector<uint8_t> record(version2 ? 20 + next.size() * 25 : 33, 0);
+   std::memcpy(record.data(), version2 ? "X360LP02" : "X360LP01", 8);
+@@ -385,6 +393,62 @@ uint32_t UserProfile::RenameLocal(uint64_t xuid, const std::string& name) {
+   return X_ERROR_SUCCESS;
+ }
+ 
++uint32_t UserProfile::RemoveLocal(uint64_t xuid) {
++  auto storage_lock = rex::thread::global_critical_region::AcquireDirect();
++  bool signed_out = false;
++  {
++    std::lock_guard lock(identity_mutex_);
++    auto next = profiles_;
++    const auto target = std::find_if(next.begin(), next.end(),
++        [xuid](const auto& profile) { return profile.xuid == xuid; });
++    if (target == next.end()) return X_ERROR_NO_SUCH_USER;
++    // Do not overwrite a recovery record or erase any account content. The
++    // complete pre-commit snapshot also retains selection and migration format.
++    std::error_code error;
++    const auto recovery_dir = profile_path_.parent_path() / "deleted";
++    std::filesystem::create_directories(recovery_dir, error);
++    if (error) return X_ERROR_FUNCTION_FAILED;
++    const auto recovery = recovery_dir / fmt::format("{:016X}-{}-{}", xuid,
++        std::chrono::steady_clock::now().time_since_epoch().count(), profile_path_.filename().string());
++    if (!std::filesystem::copy_file(profile_path_, recovery, std::filesystem::copy_options::none, error) || error)
++      return X_ERROR_FUNCTION_FAILED;
++    auto* archive = rex::filesystem::OpenFile(recovery, "ab");
++    if (!archive) return X_ERROR_FUNCTION_FAILED;
++    bool durable = fflush(archive) == 0;
++#if REX_PLATFORM_WIN32
++    if (durable) durable = _commit(_fileno(archive)) == 0;
++#else
++    if (durable) durable = fsync(fileno(archive)) == 0;
++#endif
++    if (fclose(archive)) durable = false;
++    if (!durable) return X_ERROR_FUNCTION_FAILED;
++    next.erase(target);
++    auto selected = identity_;
++    const bool removed_selection = selected.xuid == xuid;
++    if (removed_selection) {
++      signed_out = selected.signin_state != 0;
++      selected = next.empty() ? Identity{} : next.front();
++      selected.signin_state = 0;
++      for (auto& profile : next) profile.signin_state = 0;
++    }
++    if (!PersistProfiles(next, selected)) return X_ERROR_FUNCTION_FAILED;
++    profiles_ = std::move(next);
++    identity_ = std::move(selected);
++    if (removed_selection) {
++      ++storage_epoch_;
++      for (auto& setting : setting_list_) if (setting->is_title_specific()) {
++        setting->loaded_title_id = 0;
++        if (setting->type == Setting::Type::BINARY) {
++          static_cast<BinarySetting*>(setting.get())->value.clear();
++          setting->is_set = false;
++        }
++      }
++    }
++  }
++  if (signed_out && kernel_state_) kernel_state_->BroadcastNotification(0xA, 1);
++  return X_ERROR_SUCCESS;
++}
++
+ uint32_t UserProfile::SetLocalSession(uint64_t xuid) {
+   auto storage_lock = rex::thread::global_critical_region::AcquireDirect();
+   std::lock_guard lock(identity_mutex_);
+diff --git a/include/rex/system/xam/user_profile.h b/include/rex/system/xam/user_profile.h
+index 36988e9..5e459d0 100644
+--- a/include/rex/system/xam/user_profile.h
++++ b/include/rex/system/xam/user_profile.h
+@@ -239,6 +239,9 @@ class UserProfile {
+   std::vector<uint32_t> TitlesPlayed(uint64_t xuid) const;
+   uint32_t CreateLocal(const std::string& name, uint64_t* created_xuid = nullptr);
+   uint32_t RenameLocal(uint64_t xuid, const std::string& name);
++  // Archive the committed account snapshot, then remove only its identity.
++  // Associated saves, settings and achievements remain recoverable in place.
++  uint32_t RemoveLocal(uint64_t xuid);
+   std::vector<Identity> local_profiles() const;
+   Identity FindLocal(uint64_t xuid) const;
+   uint32_t SetLocalSession(uint64_t xuid);

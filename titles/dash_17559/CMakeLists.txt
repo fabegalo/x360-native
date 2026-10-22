@@ -21,6 +21,7 @@ endif()
 set(DASH17559_SOURCES
     src/main.cpp
     ../common/dashboard_assets.cpp
+    ../common/guest_fault_context.cpp
     ../../src/supervisor/sha256.cpp
     ../../src/supervisor/digest_batch.cpp
     # Traps for imports the pinned SDK does not provide at link time (see the file).
@@ -70,7 +71,7 @@ endif()
 # configures the producer first, then generates every module before reconfigure.
 option(X360N_CODEGEN_BOOTSTRAP "Configure the producer before guest generation" OFF)
 set(X360N_CODEGEN_MANIFESTS "")
-foreach(module signin createprofile vk hud)
+foreach(module signin createprofile vk hud deviceselector)
     set(manifest "${CMAKE_CURRENT_SOURCE_DIR}/${module}/${module}_17559_manifest.toml")
     string(APPEND X360N_CODEGEN_MANIFESTS "${manifest}\n")
     set(generated_dir "${CMAKE_CURRENT_SOURCE_DIR}/generated/${module}")

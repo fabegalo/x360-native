@@ -274,7 +274,18 @@ TEST_CASE("Offline achievement enumeration honors PPC XUID Title ID offsets stri
   CHECK(guest.Create(kTitleA, first ^ 0x100000000ull) == X_ERROR_NO_SUCH_USER);
   CHECK(guest.Create(0x12349999, first) == X_ERROR_NOT_FOUND);
   CHECK(guest.Create(kTitleA, first, 0, UINT32_MAX) == X_ERROR_INVALID_PARAMETER);
-  CHECK(guest.Create(kTitleA, first, 0, 1, 8) == X_ERROR_INVALID_PARAMETER);
+  // Original 17559 81670190 validates user, count and output pointers, never
+  // the flags: only flags & 7 select the 500-byte string records. GamerProfile's
+  // LoadAchievementsScene (90117710) requests flags 0x27.
+  REQUIRE(guest.Create(kTitleA, first, 0, 2, 0x27) == X_ERROR_SUCCESS);
+  CHECK(guest.Word(300) == 1000);
+  REQUIRE(guest.Enumerate(guest.Word(304), 1000) == X_ERROR_SUCCESS);
+  CHECK(guest.Word(308) == 2); CHECK(guest.Word(1024) == 1);
+  CHECK(memory::load_and_swap<uint16_t>(guest.base + guest.Word(1028)) == u'F');
+  REQUIRE(guest.Create(kTitleA, first, 0, 1, 0x20) == X_ERROR_SUCCESS);
+  CHECK(guest.Word(300) == 36);
+  REQUIRE(guest.Enumerate(guest.Word(304), 36) == X_ERROR_SUCCESS);
+  CHECK(guest.Word(1024) == 1); CHECK(guest.Word(1028) == 0);
   CHECK(guest.Create(kTitleA, first, 0, 1, 7, 4) == X_ERROR_INVALID_PARAMETER);
   REQUIRE(state->user_profile()->RecordTitlePlayed(kTitleA));
   REQUIRE(state->user_profile()->RecordTitlePlayed(kTitleB));

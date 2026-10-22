@@ -23,6 +23,14 @@ Interação não autorizada exige interrupção e comunicação imediata do bloq
 não esperar horas por aprovação. Concluir o escopo atual antes de ampliá-lo ou
 começar outra funcionalidade.
 
+## Fidelidade ao console — regra permanente
+
+Ser o mais fiel possível ao console original, idealmente idêntico (telas, fluxos,
+HDD único com saves/perfis como conteúdo, códigos de erro e contratos XAM da
+versão correspondente). Divergências de projeto são corrigidas em direção ao
+original, sem sistemas de migração (dados locais de teste são descartáveis);
+o não comprovado fica como hipótese.
+
 ## Regra arquitetural permanente — isolamento de versões
 
 Uma dashboard usa exclusivamente seus módulos e recursos originais correspondentes.

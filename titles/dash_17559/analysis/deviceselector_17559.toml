@@ -1,0 +1,12 @@
+# System callback recorded by original DLL registration at 916D6C84.
+[functions]
+0x916D6B20 = {}
+# Original ceil/floor helpers used indirectly for capacity labels. Each ends
+# at its blr, before padding: 7560..7598 and 75A0..75D8 (60 bytes each).
+# Scene callers 916D3190/34E0 and 916D34C0; LR at failure was 916D2784.
+0x916D7560 = { size = 0x3C }
+0x916D75A0 = { size = 0x3C }
+# Original byte remainder of memcpy: andi./mtctr/beqlr, byte loop, blr.
+# Direct branch at 916D7BFC; outside .pdata. Ends before the separate
+# unaligned word loop at 916D7BD0 (36 bytes, disassembled from the pinned XEX).
+0x916D7BAC = { size = 0x24 }

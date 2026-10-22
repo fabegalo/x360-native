@@ -3,6 +3,8 @@
 #include <filesystem>
 #include <fstream>
 #include <chrono>
+#include <cstdio>
+#include <optional>
 #include <cstdlib>
 #include "paths.h"
 #include <rex/kernel/init.h>
@@ -13,6 +15,7 @@
 #include <rex/system/xnotifylistener.h>
 #include <rex/system/xthread.h>
 #include <rex/system/xio.h>
+#include <rex/system/xam/content_manager.h>
 #include <rex/system/thread_state.h>
 
 using rex::X_STATUS;
@@ -27,6 +30,8 @@ extern "C" void __imp__XamUserGetSigninState(PPCContext&, uint8_t*);
 extern "C" void __imp__XamProfileCreateEnumerator(PPCContext&, uint8_t*);
 extern "C" void __imp__XamProfileCreate(PPCContext&, uint8_t*);
 extern "C" void __imp__XamProfileGetCreationStatus(PPCContext&, uint8_t*);
+extern "C" void __imp__XamProfileRenameAccount(PPCContext&, uint8_t*);
+extern "C" void __imp__XamProfileDelete(PPCContext&, uint8_t*);
 extern "C" void __imp__XamProfileEnumerate(PPCContext&, uint8_t*);
 extern "C" void __imp__XamProfileFindAccount(PPCContext&, uint8_t*);
 extern "C" void __imp__XamProfileLoadAccountInfo(PPCContext&, uint8_t*);
@@ -125,6 +130,12 @@ struct Store {
   Store() { std::filesystem::create_directories(path); }
   ~Store() { std::error_code ec; std::filesystem::remove_all(path, ec); }
 };
+// As on the console: <device>/<XUID>/FFFE07D1/00010000/<XUID>/.
+std::filesystem::path ProfilePackage(const std::filesystem::path& device, uint64_t xuid) {
+  char name[17];
+  std::snprintf(name, sizeof(name), "%016llX", static_cast<unsigned long long>(xuid));
+  return device / name / "FFFE07D1" / "00010000" / name;
+}
 void Setup(rex::Runtime& rt) {
   rex::InitLogging("c72-profile.log", spdlog::level::err);
   rex::RuntimeConfig config{};
@@ -237,7 +248,8 @@ TEST_CASE("Local profile enumerates the original Sign-in record and commits only
       CHECK(rex::memory::load_and_swap<uint16_t>(bytes + 32 + i * 2) == uint16_t("Selected"[i]));
     CHECK(rex::memory::load_and_swap<uint16_t>(bytes + 48) == 0);
     CHECK(rex::memory::load_and_swap<uint64_t>(bytes + 64) == 0); // no Live identity
-    CHECK(rex::memory::load_and_swap<uint32_t>(bytes + 404) == 0);
+    // The profile package is on the hard drive (device 1), as on the console.
+    CHECK(rex::memory::load_and_swap<uint32_t>(bytes + 404) == 1);
     CHECK(bytes[408] == 0xCD); // exactly 392 bytes
     CHECK(enumerate(first) == X_ERROR_NO_MORE_FILES);
     CHECK(enumerate(second) == 0); // cursors are independent
@@ -552,6 +564,77 @@ TEST_CASE("Local profile creation uses guest account and consumable operation ha
   mem->SystemHeapFree(data);
 }
 
+TEST_CASE("Original profile rename commits a stable XUID and preserves other user data",
+          "[sdk][local-profile][profile-rename]") {
+  Store store;
+  rex::Runtime rt(store.path, store.path);
+  Setup(rt);
+  auto* profile = rt.kernel_state()->user_profile();
+  uint64_t alpha = 0, bravo = 0;
+  REQUIRE(profile->CreateLocal("Alpha", &alpha) == 0);
+  REQUIRE(profile->CreateLocal("Bravo", &bravo) == 0);
+  REQUIRE(profile->SetLocalSession(alpha) == 0);
+  const auto epoch = profile->storage_epoch();
+  auto listener = rex::system::object_ref<rex::system::XNotifyListener>(
+      new rex::system::XNotifyListener(rt.kernel_state()));
+  listener->Initialize(1, 10);
+  uint32_t notification_id = 0, notification_data = 0;
+  while (listener->DequeueNotification(&notification_id, &notification_data)) {}
+  const auto marker = store.path / "offline-achievements-v1" / "keep.dat";
+  std::filesystem::create_directories(marker.parent_path());
+  { std::ofstream out(marker, std::ios::binary); out << "committed-other-data"; }
+  const auto buffer = rt.memory()->SystemHeapAlloc(64);
+  REQUIRE(buffer);
+  auto rename = [&](uint64_t xuid, const std::u16string& name) {
+    std::memset(rt.memory()->TranslateVirtual(buffer), 0, 64);
+    for (size_t i = 0; i < name.size() && i < 24; ++i)
+      rex::memory::store_and_swap<uint16_t>(rt.memory()->TranslateVirtual(buffer + uint32_t(i * 2)), name[i]);
+    PPCContext ctx{};
+    ctx.r3.u64 = xuid; ctx.r4.u64 = buffer;
+    __imp__XamProfileRenameAccount(ctx, rt.memory()->virtual_membase());
+    return ctx.r3.u32;
+  };
+  SECTION("rename and case-only rename survive recovery") {
+    REQUIRE(rename(alpha, u"Renamed") == 0);
+    REQUIRE(listener->DequeueNotification(0xE, &notification_data));
+    CHECK(notification_data == 1);
+    CHECK(profile->xuid() == alpha); CHECK(profile->name() == "Renamed");
+    CHECK(profile->signin_state() == 1); CHECK(profile->FindLocal(bravo).name == "Bravo");
+    REQUIRE(rename(alpha, u"RENAMED") == 0);
+    rex::system::xam::UserProfile recovered;
+    REQUIRE(recovered.InitializeLocal(store.path));
+    CHECK(recovered.xuid() == alpha); CHECK(recovered.name() == "RENAMED");
+    CHECK(recovered.FindLocal(bravo).name == "Bravo");
+    CHECK(profile->storage_epoch() == epoch); // Existing save handles keep their identity.
+  }
+  SECTION("duplicate invalid and unknown identities leave state unchanged") {
+    CHECK(rename(alpha, u"BRAVO") == X_ERROR_ALREADY_EXISTS);
+    for (const auto& name : {u"", u" leading", u"trailing ", u"abcdefghijklmnop", u"\u00E9"})
+      CHECK(rename(alpha, name) == X_ERROR_INVALID_PARAMETER);
+    CHECK(rename(alpha + 2, u"Missing") == X_ERROR_NO_SUCH_USER);
+    CHECK(profile->name() == "Alpha"); CHECK(profile->FindLocal(bravo).name == "Bravo");
+    CHECK_FALSE(listener->DequeueNotification(0xE, &notification_data));
+    PPCContext ctx{};
+    ctx.r3.u64 = alpha; ctx.r4.u64 = 5;
+    __imp__XamProfileRenameAccount(ctx, rt.memory()->virtual_membase());
+    CHECK(ctx.r3.u32 == X_ERROR_INVALID_PARAMETER);
+  }
+  SECTION("failed atomic replace preserves committed name") {
+    const auto staging = ProfilePackage(store.path, alpha) / "account.dat.tmp";
+    std::filesystem::create_directory(staging);
+    CHECK(rename(alpha, u"MustNotCommit") == X_ERROR_FUNCTION_FAILED);
+    CHECK(profile->name() == "Alpha");
+    rex::system::xam::UserProfile recovered;
+    REQUIRE(recovered.InitializeLocal(store.path));
+    CHECK(recovered.name() == "Alpha"); CHECK(recovered.xuid() == alpha);
+  }
+  CHECK(profile->local_profiles().size() == 2);
+  std::string preserved;
+  { std::ifstream in(marker, std::ios::binary); std::getline(in, preserved); }
+  CHECK(preserved == "committed-other-data");
+  rt.memory()->SystemHeapFree(buffer);
+}
+
 TEST_CASE("Guide sign-out removes only the active local identity", "[sdk][local-profile]") {
   Store store;
   rex::Runtime rt(store.path, store.path);
@@ -583,6 +666,122 @@ TEST_CASE("Guide sign-out removes only the active local identity", "[sdk][local-
   CHECK(recovered.FindLocal(alpha).name == "Alpha");
   CHECK(recovered.FindLocal(bravo).name == "Bravo");
   rt.memory()->SystemHeapFree(users);
+}
+
+TEST_CASE("Confirmed profile deletion removes only the profile package and keeps account content",
+          "[sdk][local-profile][profile-delete]") {
+  Store store;
+  rex::Runtime rt(store.path, store.path);
+  Setup(rt);
+  auto* profile = rt.kernel_state()->user_profile();
+  uint64_t alpha = 0, bravo = 0;
+  REQUIRE(profile->CreateLocal("Alpha", &alpha) == 0);
+  REQUIRE(profile->CreateLocal("Bravo", &bravo) == 0);
+  REQUIRE(profile->SetLocalSession(alpha) == 0);
+  auto remove = [&](uint64_t xuid, uint32_t device = 1) {
+    PPCContext ctx{};
+    ctx.r3.u64 = device; ctx.r4.u64 = xuid;
+    __imp__XamProfileDelete(ctx, rt.memory()->virtual_membase());
+    return ctx.r3.u32;
+  };
+  auto read = [](const std::filesystem::path& path) {
+    std::ifstream in(path, std::ios::binary);
+    return std::string(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
+  };
+  auto header = [&](uint64_t xuid) {
+    const auto package = ProfilePackage(store.path, xuid);
+    return package.parent_path().parent_path() / "Headers" / "00010000" /
+           (package.filename().string() + ".header");
+  };
+  for (auto xuid : {alpha, bravo}) {
+    REQUIRE(std::filesystem::is_regular_file(ProfilePackage(store.path, xuid) / "account.dat"));
+    REQUIRE(std::filesystem::is_regular_file(header(xuid)));
+  }
+  const auto marker = store.path / "offline-achievements-v1" / "keep.dat";
+  // A saved game of the deleted account stays on the device, as on the console.
+  const auto save = ProfilePackage(store.path, alpha).parent_path().parent_path().parent_path() /
+                    "4D5307E6" / "00000001" / "Slot" / "keep.dat";
+  for (const auto& path : {marker, save}) {
+    std::filesystem::create_directories(path.parent_path());
+    std::ofstream out(path, std::ios::binary); out << "unchanged-account-content";
+  }
+  const auto epoch = profile->storage_epoch();
+  SECTION("inactive removal preserves the active identity") {
+    REQUIRE(remove(bravo) == 0);
+    CHECK(profile->xuid() == alpha); CHECK(profile->signin_state() == 1);
+    CHECK(profile->local_profiles().size() == 1); CHECK(profile->FindLocal(bravo).xuid == 0);
+    CHECK(profile->storage_epoch() == epoch);
+    CHECK_FALSE(std::filesystem::exists(ProfilePackage(store.path, bravo)));
+    CHECK_FALSE(std::filesystem::exists(header(bravo)));
+    rex::system::xam::UserProfile recovered;
+    REQUIRE(recovered.InitializeLocal(store.path));
+    CHECK(recovered.xuid() == alpha); CHECK(recovered.local_profiles().size() == 1);
+  }
+  SECTION("active removal signs out and revokes the previous storage identity") {
+    REQUIRE(remove(alpha) == 0);
+    CHECK(profile->xuid() == bravo); CHECK(profile->signin_state() == 0);
+    CHECK(profile->storage_epoch() > epoch);
+    rex::system::xam::UserProfile recovered;
+    REQUIRE(recovered.InitializeLocal(store.path));
+    CHECK(recovered.xuid() == bravo); CHECK(recovered.signin_state() == 0);
+  }
+  SECTION("final removal leaves no profile") {
+    REQUIRE(remove(bravo) == 0); REQUIRE(remove(alpha) == 0);
+    CHECK(profile->local_profiles().empty()); CHECK(profile->xuid() == 0);
+    rex::system::xam::UserProfile recovered;
+    REQUIRE(recovered.InitializeLocal(store.path));
+    CHECK(recovered.local_profiles().empty()); CHECK(recovered.signin_state() == 0);
+    REQUIRE(recovered.CreateLocal("NewIdentity") == 0);
+    CHECK(recovered.local_profiles().size() == 1); CHECK(recovered.xuid() != alpha);
+  }
+  SECTION("failed session commit keeps the old state and the package") {
+    std::filesystem::create_directories(store.path / "profiles/session-v1.dat.tmp");
+    CHECK(remove(alpha) == uint32_t(X_HRESULT_FROM_WIN32(X_ERROR_FUNCTION_FAILED)));
+    CHECK(profile->xuid() == alpha); CHECK(profile->local_profiles().size() == 2);
+    CHECK(profile->signin_state() == 1); CHECK(profile->storage_epoch() == epoch);
+    CHECK(std::filesystem::is_regular_file(ProfilePackage(store.path, alpha) / "account.dat"));
+  }
+  CHECK(remove(alpha + 2) == uint32_t(X_HRESULT_FROM_WIN32(X_ERROR_NO_SUCH_USER)));
+  CHECK(remove(alpha, 2) == uint32_t(X_HRESULT_FROM_WIN32(X_ERROR_DEVICE_NOT_CONNECTED)));
+  CHECK(read(marker) == "unchanged-account-content");
+  CHECK(read(save) == "unchanged-account-content");
+}
+
+TEST_CASE("Profiles are storage content listed refreshed and locked while signed in",
+          "[sdk][local-profile][profile-content]") {
+  using namespace rex::system;
+  Store store;
+  rex::Runtime rt(store.path, store.path);
+  Setup(rt);
+  auto* profile = rt.kernel_state()->user_profile();
+  auto* content = rt.kernel_state()->content_manager();
+  uint64_t alpha = 0, bravo = 0;
+  REQUIRE(profile->CreateLocal("Alpha", &alpha) == 0);
+  REQUIRE(profile->CreateLocal("Bravo", &bravo) == 0);
+  REQUIRE(profile->SetLocalSession(alpha) == 0);
+  auto find = [&](uint64_t xuid) {
+    std::optional<xam::XCONTENT_AGGREGATE_DATA> found;
+    for (const auto& item : content->ListContent(1, xuid, XContentType::kProfile, 0xFFFE07D1))
+      if (uint64_t(item.xuid) == xuid) found = item;
+    return found;
+  };
+  const auto active = find(alpha), inactive = find(bravo);
+  REQUIRE(active); REQUIRE(inactive);
+  CHECK(active->display_name() == u"Alpha");
+  CHECK(inactive->display_name() == u"Bravo");
+  CHECK(uint32_t(active->title_id) == 0xFFFE07D1u);
+  // The signed-in profile cannot be deleted or moved from Storage.
+  CHECK(content->DeleteContent(alpha, *active) == X_ERROR_ACCESS_DENIED);
+  CHECK(content->TransferContent(alpha, *active, 1, alpha, true, {}) == X_ERROR_ACCESS_DENIED);
+  CHECK(profile->FindLocal(alpha).xuid == alpha);
+  // Deleting a signed-out profile package removes the account at once.
+  REQUIRE(content->DeleteContent(bravo, *inactive) == X_ERROR_SUCCESS);
+  CHECK(profile->FindLocal(bravo).xuid == 0);
+  CHECK(profile->local_profiles().size() == 1);
+  CHECK(profile->xuid() == alpha); CHECK(profile->signin_state() == 1);
+  // Profile-wide data lives inside the package.
+  CHECK(profile->PackagePath(alpha) == ProfilePackage(store.path, alpha));
+  CHECK(profile->PackagePath(bravo).empty());
 }
 
 TEST_CASE("Local profile commits real XAM identity and recovers session on restart", "[sdk][local-profile]") {
@@ -689,18 +888,19 @@ TEST_CASE("Local profile rejects corruption and failed disk writes without publi
   const auto xuid = profile->xuid();
   CHECK(profile->SetLocalSession(xuid + 2) == X_ERROR_NO_SUCH_USER);
   // A directory occupying the staging filename deterministically denies writes.
-  std::filesystem::create_directory(store.path / "profiles/local-v1.dat.tmp");
+  std::filesystem::create_directories(store.path / "profiles/session-v1.dat.tmp");
   CHECK(profile->SetLocalSession(xuid) == X_ERROR_FUNCTION_FAILED);
   CHECK(profile->signin_state() == 0);
   rex::system::xam::UserProfile recovered;
   REQUIRE(recovered.InitializeLocal(store.path));
   CHECK(recovered.xuid() == xuid);
   CHECK(recovered.signin_state() == 0);
-  { std::ofstream corrupt(store.path / "profiles/local-v1.dat", std::ios::binary); corrupt << "broken"; }
+  std::filesystem::remove(store.path / "profiles/session-v1.dat.tmp");
+  { std::ofstream corrupt(store.path / "profiles/session-v1.dat", std::ios::binary); corrupt << "broken"; }
   CHECK_FALSE(recovered.InitializeLocal(store.path));
   CHECK(recovered.xuid() == 0);
   CHECK(recovered.CreateLocal("Replacement") == X_ERROR_FUNCTION_FAILED);
-  CHECK(std::filesystem::file_size(store.path / "profiles/local-v1.dat") == 6);
+  CHECK(std::filesystem::file_size(store.path / "profiles/session-v1.dat") == 6);
 }
 
 TEST_CASE("Local profile logon completes overlapped with the real result", "[sdk][local-profile]") {
@@ -783,22 +983,21 @@ TEST_CASE("Profile device completion queries return results and honor nonblockin
   mem->SystemHeapFree(data);
 }
 
-TEST_CASE("Multi-profile migration and failed writes preserve the last committed identities", "[sdk][local-profile]") {
+TEST_CASE("Profile packages and failed session writes preserve the last committed identities",
+          "[sdk][local-profile]") {
   Store store;
   rex::system::xam::UserProfile profile;
   REQUIRE(profile.InitializeLocal(store.path));
-  REQUIRE(profile.CreateLocal("First") == 0);
-  const auto first = profile.xuid();
+  uint64_t first = 0, second = 0;
+  REQUIRE(profile.CreateLocal("First", &first) == 0);
   REQUIRE(profile.SetLocalSession(first) == 0);
-  const auto staging = store.path / "profiles/local-v2.dat.tmp";
-  std::filesystem::create_directory(staging);
-  CHECK(profile.CreateLocal("Second") == X_ERROR_FUNCTION_FAILED);
-  CHECK(profile.local_profiles().size() == 1);
-  CHECK(profile.signin_state() == 1);
-  CHECK_FALSE(std::filesystem::exists(store.path / "profiles/local-v2.dat"));
-  std::filesystem::remove(staging);
-  uint64_t second = 0;
+  // Each profile is its own package on the device; there is no profile index.
+  CHECK(std::filesystem::is_regular_file(ProfilePackage(store.path, first) / "account.dat"));
+  CHECK(profile.CreateLocal("Second", nullptr, 2) == X_ERROR_DEVICE_NOT_CONNECTED);
   REQUIRE(profile.CreateLocal("Second", &second) == 0);
+  CHECK(std::filesystem::is_regular_file(ProfilePackage(store.path, second) / "account.dat"));
+  CHECK_FALSE(std::filesystem::exists(store.path / "profiles/local-v2.dat"));
+  const auto staging = store.path / "profiles/session-v1.dat.tmp";
   std::filesystem::create_directory(staging);
   CHECK(profile.SetLocalSession(second) == X_ERROR_FUNCTION_FAILED);
   CHECK(profile.xuid() == first);
@@ -808,12 +1007,17 @@ TEST_CASE("Multi-profile migration and failed writes preserve the last committed
   CHECK(recovered.xuid() == first);
   CHECK(recovered.signin_state() == 1);
   std::filesystem::remove(staging);
-  { std::ofstream corrupt(store.path / "profiles/local-v2.dat", std::ios::binary); corrupt << "broken"; }
+  // A damaged package is not a profile; the others remain.
+  { std::ofstream corrupt(ProfilePackage(store.path, second) / "account.dat", std::ios::binary); corrupt << "broken"; }
+  REQUIRE(recovered.InitializeLocal(store.path));
+  CHECK(recovered.local_profiles().size() == 1);
+  CHECK(recovered.FindLocal(second).xuid == 0);
+  // A damaged session record keeps everyone signed out and refuses writes.
+  { std::ofstream corrupt(store.path / "profiles/session-v1.dat", std::ios::binary); corrupt << "broken"; }
   CHECK_FALSE(recovered.InitializeLocal(store.path));
   CHECK(recovered.local_profiles().empty());
   CHECK(recovered.CreateLocal("Replacement") == X_ERROR_FUNCTION_FAILED);
-  CHECK(std::filesystem::file_size(store.path / "profiles/local-v2.dat") == 6);
-  CHECK(std::filesystem::file_size(store.path / "profiles/local-v1.dat") == 33);
+  CHECK(std::filesystem::file_size(store.path / "profiles/session-v1.dat") == 6);
 }
 
 TEST_CASE("Older XUID-array logon confirms persisted local identities and rejects online modes",
@@ -867,15 +1071,13 @@ TEST_CASE("Existing profile copy joins slot zero and survives runtime restart",
   REQUIRE_FALSE(relative.empty());
   REQUIRE_FALSE(relative.is_absolute());
   REQUIRE(*relative.begin() != "..");
-  REQUIRE(fs::is_directory(copy / "profiles"));
-  Store store;
   uint64_t selected = 0;
   size_t count = 0;
   {
-    rex::Runtime rt(store.path, store.path);
+    // The copy is the whole hard drive: profile packages and session.
+    rex::Runtime rt(copy, copy);
     Setup(rt);
     auto* profile = rt.kernel_state()->user_profile();
-    REQUIRE(profile->InitializeLocal(copy));
     const auto accounts = profile->local_profiles();
     REQUIRE_FALSE(accounts.empty());
     count = accounts.size();
@@ -916,10 +1118,9 @@ TEST_CASE("Existing profile copy joins slot zero and survives runtime restart",
     memory->SystemHeapFree(info); memory->SystemHeapFree(users);
   }
   {
-    rex::Runtime rt(store.path, store.path);
+    rex::Runtime rt(copy, copy);
     Setup(rt);
     auto* profile = rt.kernel_state()->user_profile();
-    REQUIRE(profile->InitializeLocal(copy));
     CHECK(profile->xuid() == selected);
     CHECK(profile->signin_state() == 1);
     CHECK(profile->local_profiles().size() == count);

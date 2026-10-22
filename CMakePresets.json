@@ -16,7 +16,9 @@
                 "CMAKE_CXX_STANDARD": "23",
                 "CMAKE_CONFIGURATION_TYPES": "Debug;Release;RelWithDebInfo",
                 "CMAKE_DEFAULT_BUILD_TYPE": "Release",
-                "REXGLUE_BUILD_TESTS": "ON"
+                "REXGLUE_BUILD_TESTS": "ON",
+                "REXGLUE_USE_D3D12": "ON",
+                "REXGLUE_USE_VULKAN": "ON"
             },
             "condition": { "type": "equals", "lhs": "${hostSystemName}", "rhs": "Windows" }
         }

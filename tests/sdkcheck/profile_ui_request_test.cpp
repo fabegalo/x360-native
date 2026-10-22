@@ -14,7 +14,9 @@
 #include <rex/system/kernel_state.h>
 #include <rex/system/xam/app_manager.h>
 #include <rex/system/xnotifylistener.h>
+#include <rex/system/xio.h>
 #include "../../titles/dash_17559/src/system_ui_request.h"
+#include "../../titles/dash_17559/src/system_ui.h"
 
 extern "C" REX_FUNC(__imp__XamShowSigninUI);
 extern "C" REX_FUNC(__imp__XamShowGuideUI);
@@ -32,6 +34,8 @@ extern "C" REX_FUNC(__imp__XamAppUnloadStack);
 extern "C" REX_FUNC(__imp__XamInputGetState);
 extern "C" REX_FUNC(__imp__GetTickCount);
 extern "C" REX_FUNC(__imp__XamInputGetKeystrokeHudEx);
+extern "C" REX_FUNC(__imp__XamAppLoad);
+extern "C" REX_FUNC(__imp__XamAppRequestLoad);
 REXCVAR_DECLARE(bool, mnk_mode);
 
 TEST_CASE("Sign-in routes to its original application with the original user field", "[sdk][signin]") {
@@ -60,6 +64,12 @@ TEST_CASE("Sign-in routes to its original application with the original user fie
   CHECK(guide->request_size == 12);
   CHECK(guide->user_offset == 4);
   CHECK(guide->resource_id == 0);
+  const auto* selector = SystemUiApplicationFor(0x2100B);
+  REQUIRE(selector);
+  CHECK(std::string(selector->path) == "game:\\system\\deviceselector.xex");
+  CHECK(selector->request_size == 40);
+  CHECK(selector->user_offset == 4);
+  CHECK(selector->resource_id == 2);
 }
 
 TEST_CASE("Sign-in ANY_USER session preserves exclusivity and validates HUD Ex ABI", "[sdk][signin]") {
@@ -159,11 +169,230 @@ TEST_CASE("Sign-in ANY_USER session preserves exclusivity and validates HUD Ex A
   CHECK(ctx.r3.u32 == 4306);
   ctx.r3.u64 = 0xFF; ctx.r4.u64 = 0x20000000; ctx.r5.u64 = stroke;
   __imp__XamInputGetKeystrokeHudEx(ctx, memory->virtual_membase());
+  CHECK(ctx.r3.u32 == 4306); // No stale release from the already closed session.
+  keyboard->OnKeyDown(key); // A fresh press belongs to the new controller-0 session.
+  ctx.r3.u64 = 0xFF; ctx.r4.u64 = 0x20000000; ctx.r5.u64 = stroke;
+  __imp__XamInputGetKeystrokeHudEx(ctx, memory->virtual_membase());
   REQUIRE(ctx.r3.u32 == 0);
   CHECK(actual->user_index == 0);
   CHECK(actual->virtual_key == uint16_t(rex::ui::VirtualKey::kXInputPadB));
   REQUIRE(xam->EndSystemUi(0x1000));
   memory->SystemHeapFree(stroke);
+}
+
+TEST_CASE("System apps can queue a successor before their first scene is visible", "[sdk][profile-ui][profile-ui-initial-request]") {
+  struct RestoreFlags {
+    std::vector<std::pair<std::string, std::string>> values;
+    ~RestoreFlags() { for (const auto& [name, value] : values) rex::cvar::SetFlagByName(name, value); }
+  } flags;
+  for (const auto name : {"guide_button", "guide_chord_ms", "guide_chord_users", "keybind_guide"})
+    flags.values.emplace_back(name, rex::cvar::GetFlagByName(name));
+  rex::Runtime rt(std::filesystem::temp_directory_path());
+  rex::RuntimeConfig config{}; config.tool_mode = true;
+  config.kernel_init = rex::kernel::InitializeKernel;
+  REQUIRE(rt.Setup(std::move(config)) == 0);
+  auto xam = rt.kernel_state()->GetKernelModule<rex::kernel::xam::XamModule>("xam.xex");
+  REQUIRE(xam->RegisterSystemApp({0x1000, 0xFF, 0x90105000, 3}) == 0);
+  bool accepted = false, deferred_close = false, still_owned = false;
+  auto caller = rex::system::object_ref<rex::system::XHostThread>(new rex::system::XHostThread(
+      rt.kernel_state(), 512 * 1024, 0, [&] {
+    // Install the real host, but represent only its pre-scene lifecycle phase.
+    // No drawing/frame callback is run, and no original app is initialized.
+    dash17559::InstallSystemUi(rt);
+    if (!xam->BeginSystemUi(0x1000, 0xFF, 0)) return 1;
+    PPCContext ctx{}; ctx.r3.u64 = 0; ctx.r4.u64 = 1;
+    __imp__XamShowCreateProfileUI(ctx, rt.memory()->virtual_membase());
+    const auto session = xam->GetSystemUiSession();
+    accepted = ctx.r3.u32 == 0;
+    deferred_close = session.close_requested && !session.visible;
+    still_owned = session.module == 0x1000 && xam->FindSystemApp(0xFF).has_value();
+    xam->EndSystemUi(0x1000);
+    dash17559::ReleaseSystemUiHost(); // Discard queued work; never construct a scene.
+    return 0;
+  }));
+  REQUIRE(caller->Create() == 0);
+  uint64_t timeout = uint64_t(-100'000'000ll);
+  REQUIRE(caller->Wait(0, 0, 0, &timeout) == 0);
+  CHECK(accepted);
+  CHECK(deferred_close);
+  CHECK(still_owned);
+}
+
+TEST_CASE("XamAppLoad reaches only a title-selected original app loader", "[sdk][profile-ui][app-load]") {
+  rex::Runtime rt(std::filesystem::temp_directory_path());
+  rex::RuntimeConfig config{}; config.tool_mode = true;
+  config.kernel_init = rex::kernel::InitializeKernel;
+  REQUIRE(rt.Setup(std::move(config)) == 0);
+  auto* memory = rt.memory();
+  auto* base = memory->virtual_membase();
+  auto xam = rt.kernel_state()->GetKernelModule<rex::kernel::xam::XamModule>("xam.xex");
+  // Exports by ordinal, as the original Guide's import thunks reach them.
+  REQUIRE(rt.function_dispatcher()->InitializeFunctionTable(0x82000000, 0x1000, 0x82000000, 0x10000, true, true));
+  const auto request_load = rt.function_dispatcher()->GetFunction(xam->GetProcAddressByOrdinal(0x248));
+  const auto load = rt.function_dispatcher()->GetFunction(xam->GetProcAddressByOrdinal(0x244));
+  REQUIRE(request_load); REQUIRE(load);
+  const auto name = memory->SystemHeapAlloc(32);
+  std::strcpy(memory->TranslateVirtual<char*>(name), "createprofile.xex");
+  const auto payload = memory->SystemHeapAlloc(512);
+  PPCContext ctx{};
+  auto call_load = [&](uint32_t buffer, uint32_t size, uint32_t overlapped = 0, uint32_t handle = 0) {
+    ctx.r3.u64 = name; ctx.r4.u64 = 2; ctx.r5.u64 = buffer; ctx.r6.u64 = size;
+    ctx.r7.u64 = overlapped; ctx.r8.u64 = handle;
+    load(ctx, base);
+    return ctx.r3.u32;
+  };
+  // No loader: the gate is refused and a load fails as 816CDF7C does.
+  ctx.r3.u64 = 0xDEADBEEF;
+  request_load(ctx, base);
+  CHECK(ctx.r3.u32 == 0);
+  CHECK(call_load(0, 0) == 0x80004005);
+  std::string module;
+  uint32_t calls = 0, user = 0, buffer = 0, size = 0, status = 0;
+  xam->system_app_load = [&](const std::string& m, uint32_t u, uint32_t b, uint32_t s) {
+    module = m; user = u; buffer = b; size = s; ++calls; return status;
+  };
+  ctx.r3.u64 = 0xDEADBEEF;
+  __imp__XamAppRequestLoad(ctx, base);
+  CHECK(ctx.r3.u32 == 1);
+  CHECK(call_load(0, 0) == 0);
+  REQUIRE(calls == 1);
+  CHECK(module == "createprofile.xex"); CHECK(user == 2); CHECK(buffer == 0); CHECK(size == 0);
+  CHECK(call_load(payload, 400) == 0);
+  CHECK(buffer == payload); CHECK(size == 256);   // 816CDEB0 keeps at most 256 bytes
+  CHECK(call_load(0, 64) == 0); CHECK(size == 0); // no buffer, nothing to copy
+  status = 0x80070490;
+  CHECK(call_load(0, 0) == 0x80070490);
+  // OVERLAPPED completion and the app handle are not implemented: refused and
+  // completed with the original failure code, never reported as loaded.
+  const auto io = memory->SystemHeapAlloc(sizeof(rex::system::XAM_OVERLAPPED));
+  std::memset(memory->TranslateVirtual(io), 0, sizeof(rex::system::XAM_OVERLAPPED));
+  const auto before = calls;
+  uint32_t overlapped_result = 0;
+  auto caller = rex::system::object_ref<rex::system::XHostThread>(new rex::system::XHostThread(
+      rt.kernel_state(), 512 * 1024, 0, [&] {
+    overlapped_result = call_load(0, 0, io); // completion runs on a guest thread
+    return 0;
+  }));
+  REQUIRE(caller->Create() == 0);
+  uint64_t timeout = uint64_t(-100'000'000ll);
+  REQUIRE(caller->Wait(0, 0, 0, &timeout) == 0);
+  CHECK(overlapped_result == 0x80004001);
+  CHECK(memory->TranslateVirtual<rex::system::XAM_OVERLAPPED*>(io)->result == 1627);
+  CHECK(call_load(0, 0, 0, payload) == 0x80004001);
+  CHECK(calls == before);
+  memory->SystemHeapFree(io);
+  memory->SystemHeapFree(payload);
+  memory->SystemHeapFree(name);
+  xam->system_app_load = {};
+}
+
+TEST_CASE("Guide's direct Create Profile loads the original app without a request", "[sdk][profile-ui][app-load]") {
+  using namespace dash17559;
+  CHECK(SystemUiMessageForLoad("createprofile.xex") == 0x2100E);
+  CHECK(SystemUiMessageForLoad("CreateProfile.XEX") == 0x2100E);
+  CHECK(SystemUiMessageForLoad("signin.xex") == 0);
+  CHECK(SystemUiMessageForLoad("createprofile.xex2") == 0);
+  struct RestoreFlags {
+    std::vector<std::pair<std::string, std::string>> values;
+    ~RestoreFlags() { for (const auto& [name, value] : values) rex::cvar::SetFlagByName(name, value); }
+  } flags;
+  for (const auto name : {"guide_button", "guide_chord_ms", "guide_chord_users", "keybind_guide"})
+    flags.values.emplace_back(name, rex::cvar::GetFlagByName(name));
+  rex::Runtime rt(std::filesystem::temp_directory_path());
+  rex::RuntimeConfig config{}; config.tool_mode = true;
+  config.kernel_init = rex::kernel::InitializeKernel;
+  REQUIRE(rt.Setup(std::move(config)) == 0);
+  auto xam = rt.kernel_state()->GetKernelModule<rex::kernel::xam::XamModule>("xam.xex");
+  // The original Guide (hud 913E5930, resource 0) owns the session for controller 1.
+  REQUIRE(xam->RegisterSystemApp({0x1000, 0xFF, 0x913E5930, 0}) == 0);
+  uint32_t granted = 0, unknown = 0, with_buffer = 0, loaded = 1;
+  bool kept_open = false, deferred_close = false, still_owned = false;
+  auto caller = rex::system::object_ref<rex::system::XHostThread>(new rex::system::XHostThread(
+      rt.kernel_state(), 512 * 1024, 0, [&] {
+    // Real host; only the pre-scene phase is represented, no app is initialized.
+    dash17559::InstallSystemUi(rt);
+    if (!xam->BeginSystemUi(0x1000, 0xFF, 1)) return 1;
+    auto* memory = rt.memory();
+    const auto name = memory->SystemHeapAlloc(32);
+    auto* base = memory->virtual_membase();
+    PPCContext ctx{};
+    __imp__XamAppRequestLoad(ctx, base);
+    granted = ctx.r3.u32;
+    auto load = [&](const char* module, uint32_t buffer, uint32_t size) {
+      std::strcpy(memory->TranslateVirtual<char*>(name), module);
+      ctx.r3.u64 = name; ctx.r4.u64 = 1; ctx.r5.u64 = buffer; ctx.r6.u64 = size;
+      ctx.r7.u64 = 0; ctx.r8.u64 = 0;
+      __imp__XamAppLoad(ctx, base);
+      return ctx.r3.u32;
+    };
+    unknown = load("signin.xex", 0, 0);
+    with_buffer = load("createprofile.xex", name, 16);
+    kept_open = !xam->GetSystemUiSession().close_requested;
+    // hud 913EA808: XamAppLoad("createprofile.xex", controller, 0, 0, 0, 0).
+    loaded = load("createprofile.xex", 0, 0);
+    const auto session = xam->GetSystemUiSession();
+    deferred_close = session.close_requested;
+    still_owned = session.module == 0x1000 && session.user == 1;
+    memory->SystemHeapFree(name);
+    xam->EndSystemUi(0x1000);
+    dash17559::ReleaseSystemUiHost(); // Discard queued work; never construct a scene.
+    return 0;
+  }));
+  REQUIRE(caller->Create() == 0);
+  uint64_t timeout = uint64_t(-100'000'000ll);
+  REQUIRE(caller->Wait(0, 0, 0, &timeout) == 0);
+  CHECK(granted == 1);
+  CHECK(unknown == 0x80070490);       // no silent fallback to another app
+  CHECK(with_buffer == 0x80004001);   // buffer layout not verified: refused
+  CHECK(kept_open);
+  CHECK(loaded == 0);                 // queued behind the Guide at the frame boundary
+  CHECK(deferred_close);
+  CHECK(still_owned);
+}
+
+TEST_CASE("Closing the original application stack differs from closing its top app", "[sdk][profile-ui][profile-ui-stack]") {
+  rex::Runtime rt(std::filesystem::temp_directory_path());
+  rex::RuntimeConfig config{}; config.tool_mode = true;
+  config.kernel_init = rex::kernel::InitializeKernel;
+  REQUIRE(rt.Setup(std::move(config)) == 0);
+  auto xam = rt.kernel_state()->GetKernelModule<rex::kernel::xam::XamModule>("xam.xex");
+  REQUIRE(xam->RegisterSystemApp({0x1000, 0xFF, 0x90105C98, 14}) == 0);
+  // Keep the pre-patch negative control runnable, rather than failing to compile
+  // against its older session structure.
+  auto stack_requested = []<typename Session>(const Session& session) {
+    if constexpr (requires { session.close_stack_requested; }) return session.close_stack_requested;
+    else return false;
+  };
+  PPCContext ctx{};
+  auto* base = rt.memory()->virtual_membase();
+  REQUIRE(xam->BeginSystemUi(0x1000, 0xFF, 0));
+  __imp__XamAppUnloadSelf(ctx, base);
+  CHECK(ctx.r3.u32 == 0);
+  CHECK(xam->GetSystemUiSession().close_requested);
+  CHECK_FALSE(stack_requested(xam->GetSystemUiSession()));
+  REQUIRE(xam->EndSystemUi(0x1000));
+  REQUIRE(xam->BeginSystemUi(0x1000, 0xFF, 0));
+  REQUIRE(xam->SetSystemUiVisible(0x1000));
+  ctx.r3.u64 = 1;
+  __imp__XamAppUnloadStack(ctx, base);
+  CHECK(ctx.r3.u32 == 87);
+  CHECK_FALSE(xam->GetSystemUiSession().close_requested);
+  ctx.r3.u64 = 0;
+  __imp__XamAppUnloadStack(ctx, base);
+  CHECK(ctx.r3.u32 == 0);
+  CHECK(xam->GetSystemUiSession().close_requested);
+  CHECK(stack_requested(xam->GetSystemUiSession()));
+  CHECK(xam->GetSystemUiSession().visible); // Destruction waits for the frame boundary.
+  CHECK(xam->FindSystemApp(0xFF).has_value());
+  // A queued successor also requests close-self. It must not downgrade the
+  // earlier close-stack, or CreateProfile's completed parents will be restored.
+  REQUIRE(xam->RequestSystemUiClose());
+  CHECK(stack_requested(xam->GetSystemUiSession()));
+  REQUIRE(xam->EndSystemUi(0x1000));
+  REQUIRE(xam->BeginSystemUi(0x1000, 0xFF, 0));
+  CHECK_FALSE(stack_requested(xam->GetSystemUiSession()));
+  CHECK_FALSE(xam->GetSystemUiSession().close_requested);
+  REQUIRE(xam->EndSystemUi(0x1000));
 }
 
 TEST_CASE("System UI host exports reject calls without an active session", "[sdk][profile-ui]") {

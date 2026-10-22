@@ -95,6 +95,18 @@ extern "C" REX_FUNC(__imp__XuiElementInputEnabled) { CallUi(ctx, base, 0x817BCB4
 extern "C" REX_FUNC(__imp__XuiBroadcastMessage) { CallUi(ctx, base, 0x817B3FB0); }
 extern "C" REX_FUNC(__imp__XuiElementSetOpacity) { CallUi(ctx, base, 0x817BD450); }
 extern "C" REX_FUNC(__imp__XuiControlAttachVisual) { CallUi(ctx, base, 0x817C0008); }
+extern "C" REX_FUNC(__imp__XuiProgressBarSetValue) { CallUi(ctx, base, 0x817C1538); }
+extern "C" REX_FUNC(__imp__XamGetDashContext) { CallUi(ctx, base, 0x816E16E0); }
+// 17559 export 645 is a three-argument package-statistics request, despite
+// the SDK's name. The original wrapper clears both u32 outputs and the
+// selector checks a negative HRESULT before using its optional adjustment.
+// This backend has no system package partition/statistics service.
+extern "C" REX_FUNC(__imp__XamPackageManagerHasExtendedPartition) {
+  if (!ctx.r4.u32 || !ctx.r5.u32) { ctx.r3.u64 = 0x80070057u; return; }
+  rex::memory::store_and_swap<uint32_t>(base + ctx.r4.u32, 0);
+  rex::memory::store_and_swap<uint32_t>(base + ctx.r5.u32, 0);
+  ctx.r3.u64 = 0x80070032u; // ERROR_NOT_SUPPORTED, no fabricated statistics.
+}
 extern "C" REX_FUNC(__imp__XuiElementTreeHasFocus) { CallUi(ctx, base, 0x817BFC10); }
 extern "C" REX_FUNC(__imp__XuiSceneIsInTransition) { CallUi(ctx, base, 0x817C0AA0); }
 extern "C" REX_FUNC(__imp__XuiEditSetTextLimit) { CallUi(ctx, base, 0x817D6FD8); }

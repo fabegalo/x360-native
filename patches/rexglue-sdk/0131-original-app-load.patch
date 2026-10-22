@@ -1,0 +1,64 @@
+diff --git a/include/rex/kernel/xam/module.h b/include/rex/kernel/xam/module.h
+index bf32cdc..81f8aeb 100644
+--- a/include/rex/kernel/xam/module.h
++++ b/include/rex/kernel/xam/module.h
+@@ -45,6 +45,9 @@ class XamModule : public system::KernelModule {
+   // The profile selects the original system UI module; the shared runtime only
+   // transports requests and tracks registrations. No UI/state change is implied.
+   std::function<X_HRESULT(uint32_t, uint32_t, uint32_t)> system_ui_request;
++  // XamAppLoad: module name, controller, optional buffer and its size (<= 256).
++  // Only the profile knows which original modules it can load this way.
++  std::function<X_HRESULT(const std::string&, uint32_t, uint32_t, uint32_t)> system_app_load;
+   // Optional original-system presentation, called only after a durable new
+   // offline unlock. It must queue work; XGI may call from a worker thread.
+   using AchievementUnlockedCallback = std::function<void(uint64_t, uint32_t, uint32_t, uint32_t)>;
+diff --git a/src/kernel/xam/xam_misc.cpp b/src/kernel/xam/xam_misc.cpp
+index 8e92c36..407ace6 100644
+--- a/src/kernel/xam/xam_misc.cpp
++++ b/src/kernel/xam/xam_misc.cpp
+@@ -310,11 +310,43 @@ REX_EXPORT_STUB(__imp__XamAppAllocateInterappWorkspaceEx);
+ REX_EXPORT_STUB(__imp__XamAppFreeInterappWorkspace);
+ REX_EXPORT_STUB(__imp__XamAppGetInterappWorkspace);
+ REX_EXPORT_STUB(__imp__XamAppGetSessionId);
+-REX_EXPORT_STUB(__imp__XamAppLoad);
++// Retail 17559 0x244 (816CDD58): r3 module name (260 chars kept), r4 controller,
++// r5/r6 optional buffer (at most 256 bytes kept), r7 OVERLAPPED, r8 app handle.
++// 816CDF7C returns E_FAIL without an app host. Asynchronous completion and the
++// app handle are not implemented: such calls fail, completing the OVERLAPPED
++// with 1627 as 816CDFC0 does, instead of pretending the app was loaded.
++extern "C" REX_FUNC(__imp__XamAppLoad) {
++  auto* kernel = REX_KERNEL_STATE();
++  auto xam = kernel->GetKernelModule<rex::kernel::xam::XamModule>("xam.xex");
++  const uint32_t name = ctx.r3.u32, user = ctx.r4.u32, buffer = ctx.r5.u32;
++  const uint32_t size = buffer ? std::min(ctx.r6.u32, 256u) : 0;
++  const uint32_t overlapped = ctx.r7.u32;
++  uint32_t result = 0x80004005;
++  if (overlapped || ctx.r8.u32) {
++    result = 0x80004001;
++  } else if (xam && xam->system_app_load && name) {
++    const auto* chars = REX_KERNEL_MEMORY()->TranslateVirtual<const char*>(name);
++    std::string module;
++    for (size_t i = 0; i < 260 && chars[i]; ++i) module.push_back(chars[i]);
++    result = uint32_t(xam->system_app_load(module, user, buffer, size));
++  }
++  if (overlapped && static_cast<int32_t>(result) < 0)
++    kernel->CompleteOverlappedImmediateEx(overlapped, 1627, result, 0);
++  ctx.r3.u64 = result;
++}
++static rex::ppc::detail::PPCFuncRegistrar app_load_reg("__imp__XamAppLoad", &__imp__XamAppLoad);
+ REX_EXPORT_STUB(__imp__XamAppLoadPass2SysApps);
+ REX_EXPORT_STUB(__imp__XamAppReinitialize);
+ REX_EXPORT_STUB(__imp__XamAppReportError);
+-REX_EXPORT_STUB(__imp__XamAppRequestLoad);
++// Retail 17559 0x248 (816CAD70 -> 816CAC60, type 0) acquires XAM's app-load
++// gate; the Guide calls XamAppLoad only when it returns nonzero. The gate is
++// not modeled: nonzero means a title-selected original app loader exists.
++extern "C" REX_FUNC(__imp__XamAppRequestLoad) {
++  auto xam = REX_KERNEL_STATE()->GetKernelModule<rex::kernel::xam::XamModule>("xam.xex");
++  ctx.r3.u64 = xam && xam->system_app_load ? 1 : 0;
++}
++static rex::ppc::detail::PPCFuncRegistrar app_request_load_reg("__imp__XamAppRequestLoad",
++                                                               &__imp__XamAppRequestLoad);
+ REX_EXPORT_STUB(__imp__XamAppRequestLoadEx);
+ REX_EXPORT_STUB(__imp__XamAppSetTestOption);
+ extern "C" REX_FUNC(__imp__XamAppUnloadSelf) {

@@ -38,6 +38,16 @@ imediata de backend/SDK ou ports paralelos. Requisitos e aceite do pacote real:
 `docs/CHECKLIST_FUNCIONAL_x360-native.md` §§15–18, ainda pendentes. Não distribuir
 conteúdo proprietário ou código derivado dos binários sem autorização aplicável.
 
+## Fidelidade ao console — regra permanente
+
+O comportamento deve ser o mais fiel possível ao console original, idealmente
+idêntico: telas, fluxos, armazenamento (um único HDD por console, saves e perfis
+como conteúdo), códigos de erro e contratos XAM seguem o original 17559 (ou a
+versão correspondente). Quando uma decisão de projeto divergir do console,
+corrigir em direção ao original; divergência só com justificativa registrada.
+Sem sistemas de migração: dados locais de teste não são importantes e podem
+ser descartados. O que não for comprovado no original fica marcado como hipótese.
+
 ## Isolamento de versões — regra arquitetural permanente
 
 **Uma dashboard, seus módulos originais correspondentes. Sem mistura de versões.**
@@ -132,8 +142,9 @@ em [docs/dashboard.md](docs/dashboard.md), especialmente C7.7/C7.8 (§§0.31–0
 e saves em [docs/save-storage.md](docs/save-storage.md). A região experimental
 17559 `0x8E030000` (64 KiB RW) permanece hipótese explícita, exclusiva do título.
 Xenos é padrão; Native está suspenso, experimental e sem aceite de performance.
-O lock contém 114 patches ativos, até 0115 (0073 retirado); não confundir a
-numeração com a quantidade. Resultados históricos de testes ficam nos relatórios,
+O lock contém 138 patches ativos, incluindo 0138 (0073 retirado e dois caminhos
+distintos com prefixo 0127); a lista do lock define a ordem, não o prefixo.
+Resultados históricos de testes ficam nos relatórios,
 sem repetir suítes ou sessões visuais por uma mudança documental.
 
 - `external/rexglue-sdk` — submódulo fixado em `deps.lock.json`. **Não editar à mão.**

@@ -1,0 +1,247 @@
+diff --git a/include/rex/graphics/vulkan/texture_cache.h b/include/rex/graphics/vulkan/texture_cache.h
+--- a/include/rex/graphics/vulkan/texture_cache.h
++++ b/include/rex/graphics/vulkan/texture_cache.h
+@@ -114,6 +114,10 @@
+   // guest-to-host swizzle requires swapping red and blue (R <- B, B <- R) with
+   // green preserved, which is needed by the presentation fallback path on
+   // devices without imageViewFormatSwizzle.
++  VkImageView RequestDisplayTexture(const xenos::xe_gpu_texture_fetch_t& fetch,
++      uint32_t& width_scaled_out, uint32_t& height_scaled_out,
++      xenos::TextureFormat& format_out, uint32_t* width_unscaled_out = nullptr,
++      uint32_t* height_unscaled_out = nullptr, bool* needs_rb_swap_out = nullptr);
+   VkImageView RequestSwapTexture(uint32_t& width_scaled_out, uint32_t& height_scaled_out,
+                                  xenos::TextureFormat& format_out,
+                                  uint32_t* width_unscaled_out = nullptr,
+diff --git a/src/graphics/vulkan/texture_cache.cpp b/src/graphics/vulkan/texture_cache.cpp
+--- a/src/graphics/vulkan/texture_cache.cpp
++++ b/src/graphics/vulkan/texture_cache.cpp
+@@ -986,8 +986,16 @@
+                                                    uint32_t* width_unscaled_out,
+                                                    uint32_t* height_unscaled_out,
+                                                    bool* swap_source_needs_rb_swap_out) {
+-  const auto& regs = register_file();
+-  xenos::xe_gpu_texture_fetch_t fetch = regs.GetTextureFetch(0);
++  return RequestDisplayTexture(register_file().GetTextureFetch(0), width_scaled_out,
++      height_scaled_out, format_out, width_unscaled_out, height_unscaled_out,
++      swap_source_needs_rb_swap_out);
++}
++
++VkImageView VulkanTextureCache::RequestDisplayTexture(
++    const xenos::xe_gpu_texture_fetch_t& fetch, uint32_t& width_scaled_out,
++    uint32_t& height_scaled_out, xenos::TextureFormat& format_out,
++    uint32_t* width_unscaled_out, uint32_t* height_unscaled_out,
++    bool* swap_source_needs_rb_swap_out) {
+   TextureKey key;
+   BindingInfoFromFetchConstant(fetch, key, nullptr);
+   if (!key.is_valid || key.base_page == 0 || key.dimension != xenos::DataDimension::k2DOrStacked) {
+diff --git a/include/rex/graphics/vulkan/command_processor.h b/include/rex/graphics/vulkan/command_processor.h
+--- a/include/rex/graphics/vulkan/command_processor.h
++++ b/include/rex/graphics/vulkan/command_processor.h
+@@ -692,6 +692,19 @@
+   VkDeviceMemory resolve_downscale_buffer_memory_ = VK_NULL_HANDLE;
+   uint32_t resolve_downscale_buffer_size_ = 0;
+ 
++  VkImageView ComposeDisplayOverlay(VkImageView source, uint32_t width, uint32_t height,
++      uint32_t display_width, uint32_t display_height, bool& source_rb_swap);
++  void DestroyDisplayOverlay();
++  VkDescriptorSetLayout display_overlay_set_layout_ = VK_NULL_HANDLE;
++  VkDescriptorPool display_overlay_pool_ = VK_NULL_HANDLE;
++  std::array<VkDescriptorSet, kMaxFramesInFlight> display_overlay_sets_{};
++  VkPipelineLayout display_overlay_pipeline_layout_ = VK_NULL_HANDLE;
++  VkPipeline display_overlay_pipeline_ = VK_NULL_HANDLE;
++  VkImage display_overlay_image_ = VK_NULL_HANDLE;
++  VkDeviceMemory display_overlay_memory_ = VK_NULL_HANDLE;
++  VkImageView display_overlay_view_ = VK_NULL_HANDLE;
++  uint32_t display_overlay_width_ = 0, display_overlay_height_ = 0;
++  VkImageLayout display_overlay_layout_ = VK_IMAGE_LAYOUT_UNDEFINED;
+   VkImage swap_fxaa_source_image_ = VK_NULL_HANDLE;
+   VkDeviceMemory swap_fxaa_source_image_memory_ = VK_NULL_HANDLE;
+   VkImageView swap_fxaa_source_image_view_ = VK_NULL_HANDLE;
+diff --git a/src/graphics/vulkan/command_processor.cpp b/src/graphics/vulkan/command_processor.cpp
+--- a/src/graphics/vulkan/command_processor.cpp
++++ b/src/graphics/vulkan/command_processor.cpp
+@@ -30,6 +30,7 @@
+ #include <rex/math.h>
+ #include <rex/graphics/util/draw.h>
+ #include <rex/graphics/flags.h>
++#include <rex/graphics/display_overlay.h>
+ #include <rex/graphics/pipeline/shader/shader.h>
+ #include <rex/graphics/pipeline/shader/spirv_translator.h>
+ #include <rex/graphics/registers.h>
+@@ -1898,6 +1899,7 @@
+ 
+ void VulkanCommandProcessor::ShutdownContext() {
+   AwaitAllQueueOperationsCompletion();
++  DestroyDisplayOverlay();
+   InvalidateAllVertexBufferResidency();
+   ShutdownOcclusionQueryResources();
+ 
+@@ -2269,6 +2271,154 @@
+   gamma_ramp_pwl_current_frame_ = UINT32_MAX;
+ }
+ 
++
++void VulkanCommandProcessor::DestroyDisplayOverlay() {
++  const auto* vd = GetVulkanDevice();
++  const auto& fn = vd->functions(); const auto device = vd->device();
++  ui::vulkan::util::DestroyAndNullHandle(fn.vkDestroyImageView, device, display_overlay_view_);
++  ui::vulkan::util::DestroyAndNullHandle(fn.vkDestroyImage, device, display_overlay_image_);
++  ui::vulkan::util::DestroyAndNullHandle(fn.vkFreeMemory, device, display_overlay_memory_);
++  ui::vulkan::util::DestroyAndNullHandle(fn.vkDestroyPipeline, device, display_overlay_pipeline_);
++  ui::vulkan::util::DestroyAndNullHandle(fn.vkDestroyPipelineLayout, device, display_overlay_pipeline_layout_);
++  ui::vulkan::util::DestroyAndNullHandle(fn.vkDestroyDescriptorPool, device, display_overlay_pool_);
++  ui::vulkan::util::DestroyAndNullHandle(fn.vkDestroyDescriptorSetLayout, device, display_overlay_set_layout_);
++  display_overlay_width_ = display_overlay_height_ = 0;
++  display_overlay_layout_ = VK_IMAGE_LAYOUT_UNDEFINED;
++}
++
++VkImageView VulkanCommandProcessor::ComposeDisplayOverlay(VkImageView source,
++    uint32_t width, uint32_t height, uint32_t display_width, uint32_t display_height,
++    bool& source_rb_swap) {
++  const auto plane = DecodeDisplayOverlay(*register_file_);
++  if (!plane.valid) return source;
++  const auto* vd = GetVulkanDevice(); const auto& fn = vd->functions();
++  const auto device = vd->device();
++  if (!display_overlay_pipeline_) {
++    // Compose in linear guest scanout space, before the existing gamma pass.
++    // No CPU readback, title-register mutation or shared descriptor rewrites.
++    constexpr const char* shader = R"glsl(#version 450
++layout(local_size_x=16, local_size_y=8) in;
++layout(set=0,binding=0,rgba16f) uniform writeonly image2D dest;
++layout(set=0,binding=1) uniform sampler2D title_image;
++layout(set=0,binding=2) uniform sampler2D overlay_image;
++layout(push_constant) uniform Constants {
++  uvec2 size; vec2 screen_scale; uvec4 rect; vec2 offset; vec2 surface_scale;
++  uvec2 rb_swap;
++} c;
++void main() {
++  uvec2 xy=gl_GlobalInvocationID.xy; if(any(greaterThanEqual(xy,c.size))) return;
++  vec4 color=texelFetch(title_image,ivec2(xy),0);
++  if(c.rb_swap.x!=0u) color.rgb=color.bgr;
++  vec2 screen=(vec2(xy)+0.5)*c.screen_scale;
++  if(all(greaterThanEqual(screen,vec2(c.rect.xy))) && all(lessThan(screen,vec2(c.rect.zw)))) {
++    ivec2 p=ivec2((screen-c.offset)*c.surface_scale);
++    if(all(greaterThanEqual(p,ivec2(0))) && all(lessThan(p,textureSize(overlay_image,0)))) {
++      vec4 overlay=texelFetch(overlay_image,p,0);
++      if(c.rb_swap.y!=0u) overlay.rgb=overlay.bgr;
++      color.rgb=mix(color.rgb,overlay.rgb,overlay.a);
++    }
++  }
++  imageStore(dest,ivec2(xy),color);
++})glsl";
++    std::vector<uint32_t> spirv; std::string error;
++    if (!CompileGlslToSpirv(VK_SHADER_STAGE_COMPUTE_BIT, shader, spirv, error)) {
++      REXGPU_ERROR("D1OVL SPIR-V: {}", error); return VK_NULL_HANDLE;
++    }
++    VkDescriptorSetLayoutBinding bindings[3]{};
++    for (uint32_t i=0;i<3;++i) {
++      bindings[i].binding=i; bindings[i].descriptorCount=1;
++      bindings[i].descriptorType=i ? VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER : VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
++      bindings[i].stageFlags=VK_SHADER_STAGE_COMPUTE_BIT;
++    }
++    VkDescriptorSetLayoutCreateInfo set_info{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO};
++    set_info.bindingCount=3; set_info.pBindings=bindings;
++    if(fn.vkCreateDescriptorSetLayout(device,&set_info,nullptr,&display_overlay_set_layout_)!=VK_SUCCESS) return VK_NULL_HANDLE;
++    VkPushConstantRange range{VK_SHADER_STAGE_COMPUTE_BIT,0,56};
++    VkPipelineLayoutCreateInfo layout_info{VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};
++    layout_info.setLayoutCount=1; layout_info.pSetLayouts=&display_overlay_set_layout_;
++    layout_info.pushConstantRangeCount=1; layout_info.pPushConstantRanges=&range;
++    if(fn.vkCreatePipelineLayout(device,&layout_info,nullptr,&display_overlay_pipeline_layout_)!=VK_SUCCESS) return VK_NULL_HANDLE;
++    display_overlay_pipeline_=ui::vulkan::util::CreateComputePipeline(vd,display_overlay_pipeline_layout_,spirv.data(),spirv.size()*4);
++    if(!display_overlay_pipeline_) return VK_NULL_HANDLE;
++    VkDescriptorPoolSize sizes[]{{VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,kMaxFramesInFlight},
++        {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,2*kMaxFramesInFlight}};
++    VkDescriptorPoolCreateInfo pool{VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO};
++    pool.maxSets=kMaxFramesInFlight; pool.poolSizeCount=2; pool.pPoolSizes=sizes;
++    if(fn.vkCreateDescriptorPool(device,&pool,nullptr,&display_overlay_pool_)!=VK_SUCCESS) return VK_NULL_HANDLE;
++    std::array<VkDescriptorSetLayout,kMaxFramesInFlight> layouts;
++    layouts.fill(display_overlay_set_layout_);
++    VkDescriptorSetAllocateInfo alloc{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};
++    alloc.descriptorPool=display_overlay_pool_; alloc.descriptorSetCount=kMaxFramesInFlight;
++    alloc.pSetLayouts=layouts.data();
++    if(fn.vkAllocateDescriptorSets(device,&alloc,display_overlay_sets_.data())!=VK_SUCCESS) return VK_NULL_HANDLE;
++  }
++  uint32_t ow,oh,uw,uh; xenos::TextureFormat format; bool overlay_rb_swap=false;
++  const auto overlay=texture_cache_->RequestDisplayTexture(plane.fetch,ow,oh,format,&uw,&uh,&overlay_rb_swap);
++  if(!overlay) return VK_NULL_HANDLE;
++  if(display_overlay_image_ && (width!=display_overlay_width_ || height!=display_overlay_height_)) {
++    // All uses are in earlier submissions of this queue. Retire the image and
++    // its memory together; never free a resized plane while a frame samples it.
++    const auto submission=GetCurrentSubmission();
++    destroy_image_views_.emplace_back(submission,display_overlay_view_);
++    destroy_images_.emplace_back(submission,display_overlay_image_);
++    destroy_memory_.emplace_back(submission,display_overlay_memory_);
++    display_overlay_view_=VK_NULL_HANDLE; display_overlay_image_=VK_NULL_HANDLE;
++    display_overlay_memory_=VK_NULL_HANDLE; display_overlay_layout_=VK_IMAGE_LAYOUT_UNDEFINED;
++  }
++  if(!display_overlay_image_) {
++    VkImageCreateInfo info{VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
++    info.imageType=VK_IMAGE_TYPE_2D; info.format=VK_FORMAT_R16G16B16A16_SFLOAT;
++    info.extent={width,height,1}; info.mipLevels=info.arrayLayers=1;
++    info.samples=VK_SAMPLE_COUNT_1_BIT; info.tiling=VK_IMAGE_TILING_OPTIMAL;
++    info.usage=VK_IMAGE_USAGE_SAMPLED_BIT|VK_IMAGE_USAGE_STORAGE_BIT;
++    if(!ui::vulkan::util::CreateDedicatedAllocationImage(vd,info,
++        ui::vulkan::util::MemoryPurpose::kDeviceLocal,display_overlay_image_,display_overlay_memory_)) return VK_NULL_HANDLE;
++    VkImageViewCreateInfo view{VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
++    view.image=display_overlay_image_; view.viewType=VK_IMAGE_VIEW_TYPE_2D;
++    view.format=info.format; view.subresourceRange=ui::vulkan::util::InitializeSubresourceRange();
++    if(fn.vkCreateImageView(device,&view,nullptr,&display_overlay_view_)!=VK_SUCCESS) return VK_NULL_HANDLE;
++    display_overlay_width_=width; display_overlay_height_=height;
++  }
++  const VkDescriptorSet set=display_overlay_sets_[frame_current_%kMaxFramesInFlight];
++  const VkSampler sampler=swap_sampler_linear_clamp_;
++  VkDescriptorImageInfo images[]{{VK_NULL_HANDLE,display_overlay_view_,VK_IMAGE_LAYOUT_GENERAL},
++      {sampler,source,VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
++      {sampler,overlay,VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL}};
++  VkWriteDescriptorSet writes[3]{};
++  for(uint32_t i=0;i<3;++i) {
++    writes[i].sType=VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET; writes[i].dstSet=set;
++    writes[i].dstBinding=i; writes[i].descriptorCount=1; writes[i].pImageInfo=&images[i];
++    writes[i].descriptorType=i ? VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER : VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
++  }
++  fn.vkUpdateDescriptorSets(device,3,writes,0,nullptr);
++  const auto subresource=ui::vulkan::util::InitializeSubresourceRange();
++  PushImageMemoryBarrier(display_overlay_image_,subresource,
++      VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT|VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
++      VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,VK_ACCESS_SHADER_READ_BIT,VK_ACCESS_SHADER_WRITE_BIT,
++      display_overlay_layout_,VK_IMAGE_LAYOUT_GENERAL);
++  SubmitBarriers(true);
++  struct Constants { uint32_t size[2]; float screen_scale[2]; uint32_t rect[4];
++    float offset[2],scale[2]; uint32_t rb_swap[2]; } constants{
++      {width,height},{float(display_width)/width,float(display_height)/height},
++      {plane.x,plane.y,plane.right,plane.bottom},{float(plane.offset_x),float(plane.offset_y)},
++      {float(ow)/uw,float(oh)/uh},{uint32_t(!vd->properties().imageViewFormatSwizzle && source_rb_swap),
++          uint32_t(!vd->properties().imageViewFormatSwizzle && overlay_rb_swap)}};
++  static_assert(sizeof(Constants)==56);
++  deferred_command_buffer_.CmdVkBindDescriptorSets(VK_PIPELINE_BIND_POINT_COMPUTE,
++      display_overlay_pipeline_layout_,0,1,&set,0,nullptr);
++  deferred_command_buffer_.CmdVkPushConstants(display_overlay_pipeline_layout_,
++      VK_SHADER_STAGE_COMPUTE_BIT,0,sizeof(constants),&constants);
++  BindExternalComputePipeline(display_overlay_pipeline_);
++  deferred_command_buffer_.CmdVkDispatch((width+15)/16,(height+7)/8,1);
++  PushImageMemoryBarrier(display_overlay_image_,subresource,VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
++      VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT|VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
++      VK_ACCESS_SHADER_WRITE_BIT,VK_ACCESS_SHADER_READ_BIT,VK_IMAGE_LAYOUT_GENERAL,
++      VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
++  display_overlay_layout_=VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
++  source_rb_swap=false;
++  return display_overlay_view_;
++}
++
+ void VulkanCommandProcessor::IssueSwap(uint32_t frontbuffer_ptr, uint32_t frontbuffer_width,
+                                        uint32_t frontbuffer_height) {
+   last_swap_succeeded_ = false;
+@@ -2409,6 +2559,13 @@
+   uint32_t display_width = std::max(uint32_t(1), uint32_t(video_mode.display_width));
+   uint32_t display_height = std::max(uint32_t(1), uint32_t(video_mode.display_height));
+ 
++  swap_texture_view = ComposeDisplayOverlay(swap_texture_view, guest_output_width,
++      guest_output_height, display_width, display_height, swap_source_needs_rb_swap);
++  if (!swap_texture_view) {
++    REXGPU_ERROR("Vulkan D1OVL composition failed; refusing partial frame");
++    EndSubmission(true);
++    return;
++  }
+   last_swap_succeeded_ = presenter->RefreshGuestOutput(
+       guest_output_width, guest_output_height, display_width, display_height,
+       [this, guest_output_width, guest_output_height, frontbuffer_format, swap_texture_view,

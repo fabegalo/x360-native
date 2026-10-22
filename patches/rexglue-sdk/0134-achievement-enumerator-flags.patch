@@ -1,0 +1,16 @@
+diff --git a/src/kernel/xam/xam_user.cpp b/src/kernel/xam/xam_user.cpp
+index 05f377c..e929b46 100644
+--- a/src/kernel/xam/xam_user.cpp
++++ b/src/kernel/xam/xam_user.cpp
+@@ -850,7 +850,10 @@ class XStaticAchievementEnumerator : public XEnumerator {
+ u32 XamUserCreateAchievementEnumerator_entry(u32 title_id, u32 user_index, u64 xuid, u32 flags,
+                                              u32 offset, u32 count, mapped_u32 buffer_size_ptr,
+                                              mapped_u32 handle_ptr) {
+-  if (!count || !buffer_size_ptr || !handle_ptr || (uint32_t(flags) & ~7u) ||
++  // Original 17559 81670190 never validates flags; flags & 7 selects strings.
++  // Other bits (GamerProfile requests 0x27) reach the service, which has no
++  // other source than the local ledger here.
++  if (!count || !buffer_size_ptr || !handle_ptr ||
+       !AchievementGuestSpan(REX_KERNEL_MEMORY(), buffer_size_ptr.guest_address(), 4,
+                             memory::kMemoryProtectWrite) ||
+       !AchievementGuestSpan(REX_KERNEL_MEMORY(), handle_ptr.guest_address(), 4,

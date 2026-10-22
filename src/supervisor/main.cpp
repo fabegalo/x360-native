@@ -733,9 +733,10 @@ int Session(const ProjectPaths& paths, const fs::path& manifest, int timeout, bo
           renderer_settings), console_settings);
       args.push_back("--game_data_root=" + PathUtf8(active.game_root));
       args.push_back("--user_data_root=" + PathUtf8(active.user_root));
-      // Identity follows the platform session; game content and saves keep
-      // their existing title roots. Never copy or replace a game's profiles.
+      // Identity and the console hard drive (XContent: saves, DLC, installs)
+      // follow the platform session; caches stay in each title's own root.
       args.push_back("--x360n_profile_root=" + PathUtf8(dashboard.user_root));
+      args.push_back("--content_data_root=" + PathUtf8(dashboard.user_root));
       // Account rules that changed between dashboard versions follow this one.
       if (!dashboard.dashboard_version.empty())
         args.push_back("--x360n_dashboard_version=" + dashboard.dashboard_version);
@@ -789,7 +790,10 @@ int Session(const ProjectPaths& paths, const fs::path& manifest, int timeout, bo
           fmt::print("session: {} requested firmware exit (routine {}); closing platform\n", active.name, request.flags);
           return kExitOk;
         }
-        if (active.manifest == dashboard.manifest) return kExitOk;
+        // A dashboard can request a dashboard route too (for example Retail
+        // 17559 reason 23). Preserve its packed context and relaunch the same
+        // verified profile; only an ordinary exit from it ends the session.
+        if (active.manifest == dashboard.manifest && request.kind != LaunchRequest::Dashboard) return kExitOk;
         if (request.kind == LaunchRequest::Dashboard &&
             std::find(dashboard.dashboard_return_flags.begin(), dashboard.dashboard_return_flags.end(),
                       request.flags) == dashboard.dashboard_return_flags.end()) {

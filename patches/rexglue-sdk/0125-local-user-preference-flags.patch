@@ -1,0 +1,69 @@
+diff --git a/src/kernel/xam/apps/xgi_app.cpp b/src/kernel/xam/apps/xgi_app.cpp
+index 32f8c6a..2d147c1 100644
+--- a/src/kernel/xam/apps/xgi_app.cpp
++++ b/src/kernel/xam/apps/xgi_app.cpp
+@@ -33,6 +33,39 @@ X_HRESULT XgiApp::DispatchMessageSync(uint32_t message, uint32_t buffer_ptr,
+   // NOTE: buffer_length may be zero or valid.
+   auto buffer = memory_->TranslateVirtual(buffer_ptr);
+   switch (message) {
++    case 0x000B0082: {
++      // Retail 17559 8190B3B0 -> 8190A7D0: read the selected preference
++      // from profile flags 10040053. The result is a bit mask, not a bool.
++      if ((buffer_length && buffer_length != 12) ||
++          !AchievementGuestSpan(memory_, buffer_ptr, 12, memory::kMemoryProtectRead))
++        return X_E_INVALIDARG;
++      const auto user = memory::load_and_swap<uint32_t>(buffer);
++      const auto preference = memory::load_and_swap<uint32_t>(buffer + 4);
++      const auto output = memory::load_and_swap<uint32_t>(buffer + 8);
++      uint32_t enabled_bit = 0;
++      switch (preference) {
++        case 1: case 32: case 64: case 128: case 256: case 512: break;
++        case 6: enabled_bit = 4; break;
++        case 24: enabled_bit = 16; break;
++        default: return X_E_INVALIDARG;
++      }
++      if (user >= 4 || !AchievementGuestSpan(memory_, output, 4, memory::kMemoryProtectWrite))
++        return X_E_INVALIDARG;
++      auto lock = rex::thread::global_critical_region::AcquireDirect();
++      auto* profile = kernel_state_->user_profile();
++      if (user || !profile->signin_state()) return X_HRESULT_FROM_WIN32(X_ERROR_NO_SUCH_USER);
++      const auto* setting = profile->GetSetting(0x10040053);
++      if (!setting || setting->load_failed || setting->type != UserProfile::Setting::Type::INT32)
++        return X_E_FAIL;
++      // The original read response is zero-initialized for an unset field.
++      const uint32_t flags = setting->is_set
++          ? uint32_t(static_cast<const UserProfile::Int32Setting*>(setting)->value) : 0;
++      uint32_t value = flags & preference;
++      const bool disabled = enabled_bit && (value & enabled_bit) != enabled_bit;
++      if (enabled_bit && !disabled) value &= ~enabled_bit;
++      memory::store_and_swap<uint32_t>(memory_->TranslateVirtual(output), value);
++      return disabled ? X_HRESULT(1) : X_E_SUCCESS;
++    }
+     case 0x000B0006: {
+       assert_true(!buffer_length || buffer_length == 24);
+       // dword r3 user index
+diff --git a/src/kernel/xam/xam_user.cpp b/src/kernel/xam/xam_user.cpp
+index 6fc59a5..15742cc 100644
+--- a/src/kernel/xam/xam_user.cpp
++++ b/src/kernel/xam/xam_user.cpp
+@@ -1092,14 +1092,18 @@ X_HRESULT xeXMsgStartIORequestEx(uint32_t app, uint32_t message, uint32_t overla
+ 
+ // Wrapper as in xam.xex 2.0.17559.0 (export 0x4F7 at 0x816B1F68): the read itself
+ // is XGI app (0xFB) message 0x000B0082 with {user_index, preference, buffer}.
+-// The XGI handler for that message is not implemented here; its failure reaches
+-// the caller (and the OVERLAPPED) instead of a residual r3 and no completion.
++// The XGI handler reads the committed local flags; propagate its HRESULT and
++// complete the OVERLAPPED instead of leaving residual registers or a pending request.
+ u32 XamUserReadUserPreference_entry(u32 user_index, u32 preference, u32 buffer_ptr,
+                                     u32 overlapped_ptr) {
+   if (user_index >= 4 || !buffer_ptr) {
+     return X_ERROR_INVALID_PARAMETER;
+   }
+   auto* memory = REX_KERNEL_MEMORY();
++  if (!AchievementGuestSpan(memory, buffer_ptr, 4, memory::kMemoryProtectWrite) ||
++      (overlapped_ptr && !AchievementGuestSpan(memory, overlapped_ptr, sizeof(XAM_OVERLAPPED),
++          memory::kMemoryProtectRead | memory::kMemoryProtectWrite)))
++    return X_ERROR_INVALID_PARAMETER;
+   const uint32_t block_ptr = memory->SystemHeapAlloc(12);
+   if (!block_ptr) {
+     REXKRNL_ERROR("XamUserReadUserPreference: no guest memory for the XGI message");

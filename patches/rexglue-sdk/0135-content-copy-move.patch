@@ -1,0 +1,301 @@
+diff --git a/include/rex/system/xam/content_manager.h b/include/rex/system/xam/content_manager.h
+index 302c07b..aef9fb8 100644
+--- a/include/rex/system/xam/content_manager.h
++++ b/include/rex/system/xam/content_manager.h
+@@ -11,6 +11,7 @@
+ 
+ #pragma once
+ 
++#include <functional>
+ #include <memory>
+ #include <rex/system/xam/content_device.h>
+ #include <string>
+@@ -185,6 +186,15 @@ class ContentManager {
+   X_RESULT SetContentThumbnail(uint64_t xuid, const XCONTENT_AGGREGATE_DATA& data,
+                                std::vector<uint8_t> buffer);
+   X_RESULT DeleteContent(uint64_t xuid, const XCONTENT_AGGREGATE_DATA& data);
++  // Copies one package and its header to another device and/or owner; a move
++  // then deletes the source. The copy is staged on the destination volume and
++  // renamed into place, so a failure or cancellation leaves the source intact
++  // and no partial destination. progress(done, total, first) returns false to
++  // cancel. Results are Win32 codes.
++  using TransferProgress = std::function<bool(uint64_t, uint64_t, bool)>;
++  X_RESULT TransferContent(uint64_t xuid, const XCONTENT_AGGREGATE_DATA& source,
++                           uint32_t destination_device, uint64_t destination_xuid, bool move,
++                           const TransferProgress& progress);
+   X_RESULT UnmountContent(uint64_t xuid, const XCONTENT_AGGREGATE_DATA& data);
+   X_RESULT UnmountAndDeleteContent(uint64_t xuid, const XCONTENT_AGGREGATE_DATA& data);
+ 
+diff --git a/src/kernel/xam/xam_content.cpp b/src/kernel/xam/xam_content.cpp
+index 950b32a..f6ac17b 100644
+--- a/src/kernel/xam/xam_content.cpp
++++ b/src/kernel/xam/xam_content.cpp
+@@ -26,6 +26,7 @@
+ #include <rex/system/kernel_state.h>
+ #include <rex/system/xam/content_device.h>
+ #include <rex/system/xenumerator.h>
++#include <rex/system/xio.h>
+ #include <rex/system/xtypes.h>
+ 
+ REXCVAR_DEFINE_UINT32(license_mask, 0, "Kernel", "Set license mask for activated content");
+@@ -677,8 +678,77 @@ REX_EXPORT(__imp__XamContentSetThumbnail, rex::kernel::xam::XamContentSetThumbna
+ REX_EXPORT(__imp__XamContentDelete, rex::kernel::xam::XamContentDelete_entry)
+ REX_EXPORT(__imp__XamContentDeleteInternal, rex::kernel::xam::XamContentDeleteInternal_entry)
+ 
++namespace {
++// Retail 17559 0x26C/0x26D (816EEB68/816EEB70 -> 816EEA78) build FE/2000C:
++// optional owner XUID (r3) and destination device (r4) pointers, a 512-byte
++// item whose first 0x148 bytes are XCONTENT_AGGREGATE_DATA, a progress
++// callback (r6) and its context (r7), an extra argument (r8) and OVERLAPPED
++// (r9); copy=0, move=1. Both pointers absent is ERROR_INVALID_PARAMETER.
++// The dashboard (922FF840-922FF8B4) passes a CopyProgressRoutine-style
++// callback (922FDB00): r3/r4 total/transferred, r8 reason (1 = start), the
++// context as ninth argument; nonzero cancels. XAM's FE/2000C handler itself
++// was not traced: a conflict never overwrites (183), space is checked first
++// (112) and a cancellation completes with ERROR_CANCELLED (1223).
++uint32_t ContentTransfer(PPCContext& ctx, uint8_t* base, bool move) {
++  using namespace rex;
++  using namespace rex::system;
++  using namespace rex::system::xam;
++  const uint32_t xuid_ptr = ctx.r3.u32, device_ptr = ctx.r4.u32, item = ctx.r5.u32;
++  const uint32_t callback = ctx.r6.u32, context = ctx.r7.u32, overlapped = ctx.r9.u32;
++  if ((!xuid_ptr && !device_ptr) || !item) return 87;
++  auto* kernel = REX_KERNEL_STATE();
++  XCONTENT_AGGREGATE_DATA source;
++  std::memcpy(&source, base + item, sizeof(source));
++  const uint64_t user = kernel->user_profile()->xuid();
++  const uint64_t owner = xuid_ptr ? memory::load_and_swap<uint64_t>(base + xuid_ptr) : 0;
++  const uint32_t device = device_ptr ? memory::load_and_swap<uint32_t>(base + device_ptr)
++                                     : uint32_t(source.device_id);
++  auto run = [kernel, source, user, owner, device, move, callback, context]() -> uint32_t {
++    ContentManager::TransferProgress progress;
++    if (callback) {
++      progress = [kernel, callback, context, quiet = false](uint64_t done, uint64_t total,
++                                                            bool first) mutable {
++        if (quiet) return true;
++        uint64_t args[] = {total, done, total, done, 1, first ? 1u : 0u, 0, 0, context};
++        const auto reply = uint32_t(kernel->function_dispatcher()->Execute(
++            XThread::GetCurrentThread()->thread_state(), callback, args, 9));
++        quiet = reply == 3;               // PROGRESS_QUIET: no more calls
++        return reply == 0 || reply == 3;  // PROGRESS_CANCEL/STOP end the transfer
++      };
++    }
++    const auto result = kernel->content_manager()->TransferContent(user, source, device, owner,
++                                                                   move, progress);
++    REXKRNL_INFO("Content {} {:08X}/{:08X} device {} -> {}: {}", move ? "move" : "copy",
++                 uint32_t(source.title_id), static_cast<uint32_t>(XContentType(source.content_type)),
++                 uint32_t(source.device_id), device, result);
++    return result;
++  };
++  if (!overlapped) return run();
++  auto* io = kernel->memory()->TranslateVirtual(overlapped);
++  XOverlappedSetResult(io, X_ERROR_IO_PENDING);
++  XOverlappedSetContext(io, XThread::GetCurrentThreadHandle());
++  // A transfer can take minutes: never on the shared deferred-completion queue.
++  auto worker = object_ref<XHostThread>(new XHostThread(kernel, 256 * 1024, 0,
++      [kernel, run, overlapped]() {
++        const auto result = run();
++        kernel->CompleteOverlappedEx(overlapped, result, X_HRESULT_FROM_WIN32(result), 0);
++        return 0;
++      }));
++  if (worker->Create() != X_STATUS_SUCCESS) {
++    kernel->CompleteOverlappedEx(overlapped, X_ERROR_FUNCTION_FAILED,
++                                 X_HRESULT_FROM_WIN32(X_ERROR_FUNCTION_FAILED), 0);
++    return X_ERROR_FUNCTION_FAILED;
++  }
++  return X_ERROR_IO_PENDING;
++}
++}  // namespace
++extern "C" REX_FUNC(__imp__XamContentCopyInternal) { ctx.r3.u64 = ContentTransfer(ctx, base, false); }
++extern "C" REX_FUNC(__imp__XamContentMoveInternal) { ctx.r3.u64 = ContentTransfer(ctx, base, true); }
++static rex::ppc::detail::PPCFuncRegistrar content_copy_internal_reg(
++    "__imp__XamContentCopyInternal", &__imp__XamContentCopyInternal);
++static rex::ppc::detail::PPCFuncRegistrar content_move_internal_reg(
++    "__imp__XamContentMoveInternal", &__imp__XamContentMoveInternal);
+ REX_EXPORT_STUB(__imp__XamContentClosePackageFile);
+-REX_EXPORT_STUB(__imp__XamContentCopyInternal);
+ REX_EXPORT_STUB(__imp__XamContentCreateAndMountPackage);
+ REX_EXPORT_STUB(__imp__XamContentCreateEnumeratorInternal);
+ REX_EXPORT_STUB(__imp__XamContentDismountAndClosePackage);
+@@ -702,7 +772,6 @@ REX_EXPORT(__imp__XamContentLaunchImageInternalEx, rex::kernel::xam::XamContentL
+ REX_EXPORT_STUB(__imp__XamContentLockUnlockPackageHeaders);
+ REX_EXPORT_STUB(__imp__XamContentMountInstalledGame);
+ REX_EXPORT_STUB(__imp__XamContentMountPackage);
+-REX_EXPORT_STUB(__imp__XamContentMoveInternal);
+ REX_EXPORT_STUB(__imp__XamContentOpenFileInternal);
+ REX_EXPORT_STUB(__imp__XamContentOpenPackageFile);
+ REX_EXPORT_STUB(__imp__XamContentQueryLicenseInternal);
+diff --git a/src/system/xam/content_manager.cpp b/src/system/xam/content_manager.cpp
+index dcdd606..31b871d 100644
+--- a/src/system/xam/content_manager.cpp
++++ b/src/system/xam/content_manager.cpp
+@@ -9,7 +9,10 @@
+  * @modified    Tom Clay, 2026 - Adapted for ReXGlue runtime
+  */
+ 
++#include <algorithm>
+ #include <array>
++#include <atomic>
++#include <chrono>
+ #include <toml++/toml.hpp>
+ #include <rex/logging.h>
+ #ifdef _WIN32
+@@ -773,6 +776,158 @@ X_RESULT ContentManager::DeleteContent(uint64_t xuid, const XCONTENT_AGGREGATE_D
+   return X_ERROR_FILE_NOT_FOUND;
+ } catch (const std::filesystem::filesystem_error&) { return X_ERROR_ACCESS_DENIED; }
+ 
++// Staging directories of transfers in progress. With none active, a leftover
++// one comes from an interrupted process and is removed before the next copy.
++static std::atomic<int> active_transfers_{0};
++static std::atomic<uint64_t> transfer_sequence_{0};
++static constexpr const char* kTransferStagingDirName = ".x360n-transfer";
++
++X_RESULT ContentManager::TransferContent(uint64_t xuid, const XCONTENT_AGGREGATE_DATA& source,
++                                         uint32_t destination_device, uint64_t destination_xuid,
++                                         bool move, const TransferProgress& progress) try {
++  namespace fs = std::filesystem;
++  constexpr X_RESULT kDiskFull = X_RESULT_FROM_WIN32(112);
++  std::error_code ec;
++  const uint64_t owner =
++      (source.xuid != uint64_t(-1) && source.xuid != 0) ? uint64_t(source.xuid) : xuid;
++  XCONTENT_AGGREGATE_DATA destination = source;
++  destination.device_id = destination_device;
++  destination.xuid = destination_xuid ? destination_xuid : owner;
++  auto device = GetDevice(destination_device);
++  if (!device) return X_ERROR_DEVICE_NOT_CONNECTED;
++  if (device->device_type == DeviceType::ODD) return X_ERROR_ACCESS_DENIED;
++  if (source.title_id == kCurrentlyRunningTitleId) return X_ERROR_INVALID_PARAMETER;
++  fs::path source_path, source_header, destination_path, destination_header;
++  {
++    auto global_lock = global_critical_region_.Acquire();
++    if (move && IsContentOpen(source)) return X_ERROR_ACCESS_DENIED;  // as DeleteContent
++    source_path = ResolvePackagePath(xuid, source);
++    source_header = ResolvePackageHeaderPath(source.file_name(), owner, source.title_id,
++                                             source.content_type, source.device_id);
++    destination_path = ResolvePackagePath(destination.xuid, destination);
++    destination_header = ResolvePackageHeaderPath(destination.file_name(), destination.xuid,
++                                                  destination.title_id, destination.content_type,
++                                                  destination_device);
++  }
++  if (!fs::is_directory(source_path, ec)) return X_ERROR_FILE_NOT_FOUND;
++  // Never overwrite: the same item already at the destination is a conflict.
++  if (fs::exists(destination_path, ec) || fs::exists(destination_header, ec))
++    return X_ERROR_ALREADY_EXISTS;
++
++  std::vector<std::pair<fs::path, uint64_t>> files;
++  std::vector<fs::path> directories;
++  uint64_t total = 0;
++  for (fs::recursive_directory_iterator it(source_path, ec), end; !ec && it != end; it.increment(ec)) {
++    if (!IsUnlinkedStoragePath(it->path())) return X_ERROR_ACCESS_DENIED;
++    const auto relative = it->path().lexically_relative(source_path);
++    if (it->is_directory(ec)) { directories.push_back(relative); continue; }
++    if (!it->is_regular_file(ec)) return X_ERROR_ACCESS_DENIED;
++    const auto size = it->file_size(ec);
++    if (ec || size > UINT64_MAX - total) return X_ERROR_ACCESS_DENIED;
++    files.emplace_back(relative, size);
++    total += size;
++  }
++  if (ec) return X_ERROR_ACCESS_DENIED;
++  std::vector<uint8_t> header;
++  if (fs::exists(source_header, ec)) {
++    auto file = rex::filesystem::OpenFile(source_header, "rb");
++    if (!file) return X_ERROR_ACCESS_DENIED;
++    header.resize(size_t(fs::file_size(source_header, ec)));
++    const bool read = !ec && fread(header.data(), 1, header.size(), file) == header.size();
++    fclose(file);
++    if (!read) return X_ERROR_ACCESS_DENIED;
++  }
++  if (header.size() < sizeof(destination)) header.resize(sizeof(destination));
++  std::memcpy(header.data(), &destination, sizeof(destination));
++  total += header.size();
++  {
++    auto snapshot = *device;
++    if (const auto queried = QueryContentDeviceSpace(snapshot)) return queried;
++    if (total > snapshot.free_bytes) return kDiskFull;
++  }
++
++  const auto staging_root = DeviceRoot(destination_device) / kTransferStagingDirName;
++  if (active_transfers_.fetch_add(1) == 0) fs::remove_all(staging_root, ec);
++  struct Active { ~Active() { active_transfers_.fetch_sub(1); } } active;
++  const auto staging = staging_root / fmt::format(
++      "{:016X}-{:08X}", uint64_t(std::chrono::steady_clock::now().time_since_epoch().count()),
++      uint32_t(transfer_sequence_.fetch_add(1)));
++  struct Cleanup {
++    fs::path root, path;
++    ~Cleanup() {
++      std::error_code e;
++      fs::remove_all(path, e);
++      fs::remove(root, e);  // only when no other transfer still stages there
++    }
++  } cleanup{staging_root, staging};
++  const auto staged_package = staging / "package";
++  const auto staged_header = staging / "header";
++  if (!fs::create_directories(staged_package, ec) || !IsUnlinkedStoragePath(staged_package))
++    return X_ERROR_ACCESS_DENIED;
++  for (const auto& dir : directories) {
++    fs::create_directories(staged_package / dir, ec);
++    if (ec) return X_ERROR_ACCESS_DENIED;
++  }
++  uint64_t done = 0;
++  if (progress && !progress(0, total, true)) return X_ERROR_CANCELLED;
++  std::vector<uint8_t> buffer(1024 * 1024);
++  for (const auto& [relative, size] : files) {
++    auto in = rex::filesystem::OpenFile(source_path / relative, "rb");
++    if (!in) return X_ERROR_ACCESS_DENIED;
++    auto out = rex::filesystem::OpenFile(staged_package / relative, "wb");
++    if (!out) { fclose(in); return X_ERROR_ACCESS_DENIED; }
++    bool ok = true, cancelled = false;
++    for (uint64_t left = size; ok && left;) {
++      const size_t chunk = size_t(std::min<uint64_t>(left, buffer.size()));
++      ok = fread(buffer.data(), 1, chunk, in) == chunk && fwrite(buffer.data(), 1, chunk, out) == chunk;
++      left -= chunk;
++      done += chunk;
++      if (ok && progress && !progress(done, total, false)) { cancelled = true; break; }
++    }
++    fclose(in);
++    if (fclose(out)) ok = false;
++    if (cancelled) return X_ERROR_CANCELLED;
++    if (!ok) return X_ERROR_ACCESS_DENIED;
++  }
++  {
++    auto out = rex::filesystem::OpenFile(staged_header, "wb");
++    if (!out) return X_ERROR_ACCESS_DENIED;
++    const bool written = fwrite(header.data(), 1, header.size(), out) == header.size();
++    if (fclose(out) || !written) return X_ERROR_ACCESS_DENIED;
++    done += header.size();
++    if (progress && !progress(done, total, false)) return X_ERROR_CANCELLED;
++  }
++
++  auto global_lock = global_critical_region_.Acquire();
++  if (fs::exists(destination_path, ec) || fs::exists(destination_header, ec))
++    return X_ERROR_ALREADY_EXISTS;
++  if (move && IsContentOpen(source)) return X_ERROR_ACCESS_DENIED;
++  fs::create_directories(destination_path.parent_path(), ec);
++  fs::create_directories(destination_header.parent_path(), ec);
++  if (!IsUnlinkedStoragePath(destination_path.parent_path()) ||
++      !IsUnlinkedStoragePath(destination_header.parent_path()))
++    return X_ERROR_ACCESS_DENIED;
++  fs::rename(staged_package, destination_path, ec);
++  if (ec) return X_ERROR_ACCESS_DENIED;
++  fs::rename(staged_header, destination_header, ec);
++  if (ec) {
++    std::error_code e;
++    fs::remove_all(destination_path, e);
++    return X_ERROR_ACCESS_DENIED;
++  }
++  if (move) {
++    const auto deleted = DeleteContent(xuid, source);
++    if (deleted != X_ERROR_SUCCESS) {
++      // Keep exactly one copy: the source stays, the new destination goes.
++      std::error_code e;
++      fs::remove_all(destination_path, e);
++      fs::remove(destination_header, e);
++      return deleted;
++    }
++  }
++  return X_ERROR_SUCCESS;
++} catch (const std::filesystem::filesystem_error&) { return X_ERROR_ACCESS_DENIED; }
++
+ X_RESULT ContentManager::UnmountContent(uint64_t xuid, const XCONTENT_AGGREGATE_DATA& data) {
+   ContentPackage* package = nullptr;
+   {

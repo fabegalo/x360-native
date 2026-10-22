@@ -59,6 +59,8 @@ class D3D12Render {
   D3D12_GPU_VIRTUAL_ADDRESS Constants(const void*, size_t);
   void Transition(ID3D12Resource*, D3D12_RESOURCE_STATES&, D3D12_RESOURCE_STATES);
   void Barrier();
+  void Wait(uint64_t serial);
+  void RecycleBatch();
   // Resident guest memory mirror (memory_), created with the guest memory.
   GuestMemoryMirror& Mirror(rex::memory::Memory&);
   std::unique_ptr<GuestMemoryMirror> mirror_;
@@ -105,6 +107,20 @@ class D3D12Render {
   uint32_t view_count_ = 0, sampler_count_ = 0;
   Ptr<ID3D12RootSignature> root_, copy_root_, clear_root_;
   std::vector<Ptr<ID3D12Resource>> transient_;
+  // Three independent recording arenas. Queue ordering protects persistent
+  // memory/EDRAM/textures; a fence protects each arena's mutable descriptors,
+  // uploads, scratch regions and command allocator from premature reuse.
+  struct RetiredBatch {
+    uint64_t serial = 0;
+    Ptr<ID3D12CommandAllocator> allocator;
+    Ptr<ID3D12DescriptorHeap> views, samplers;
+    std::vector<Ptr<ID3D12Resource>> transient;
+    std::vector<UploadPage> uploads;
+    std::vector<Scratch> scratch;
+  };
+  std::array<RetiredBatch, 3> batches_;
+  unsigned batch_index_ = 0;
+  uint64_t fence_waits_ = 0, async_submissions_ = 0;
   std::map<std::string, Ptr<ID3D12PipelineState>> pipelines_;
   std::map<unsigned, std::vector<uint8_t>> rectangles_;
   std::map<unsigned, std::vector<uint32_t>> points_;

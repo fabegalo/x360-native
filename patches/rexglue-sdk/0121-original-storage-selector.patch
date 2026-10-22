@@ -1,0 +1,85 @@
+diff --git a/src/kernel/xam/xam_ui.cpp b/src/kernel/xam/xam_ui.cpp
+index 0aa1d86..3395f24 100644
+--- a/src/kernel/xam/xam_ui.cpp
++++ b/src/kernel/xam/xam_ui.cpp
+@@ -510,25 +510,31 @@ u32 XamShowDeviceSelectorUI_entry(u32 user_index, u32 content_type, u32 content_
+                 uint32_t(user_index), uint32_t(content_type), uint32_t(content_flags),
+                 uint64_t(total_requested), device_id_ptr.guest_address(),
+                 overlapped.guest_address());
+-  if (!device_id_ptr) return X_ERROR_INVALID_PARAMETER;
+-  auto xam = REX_KERNEL_STATE()->GetKernelModule<XamModule>("xam.xex");
+-  const auto session = xam->GetSystemUiSession();
+-  if (session.module && content_type == 0x10000 && content_flags == 0x40200) {
+-    // The existing local content service has one device. The original system
+-    // app resumes initialization after this nested selector has completed.
+-    *device_id_ptr = 1;
+-    if (overlapped)
+-      REX_KERNEL_STATE()->CompleteOverlappedImmediate(overlapped.guest_address(), 0);
+-    xam->RequestSystemUiResume(session.module);
+-    return overlapped ? X_ERROR_IO_PENDING : X_ERROR_SUCCESS;
++  // Retail 17559 816C51E8/816C5300: the original API requires an
++  // OVERLAPPED and dispatches FE/2100B with a 40-byte request. The original
++  // device-selector application writes the selection and completes the I/O.
++  if (!device_id_ptr || !overlapped || (user_index >= 4 && user_index != 0xFF) ||
++      (content_flags & 0x83F00008)) return X_ERROR_INVALID_PARAMETER;
++  auto* state = REX_KERNEL_STATE();
++  const auto request = state->memory()->SystemHeapAlloc(40);
++  if (!request) return X_RESULT(14);  // ERROR_NOT_ENOUGH_MEMORY
++  auto* words = state->memory()->TranslateVirtual<be<uint32_t>*>(request);
++  std::memset(words, 0, 40);
++  words[1] = user_index; words[2] = content_type;
++  words[3] = content_flags | ((content_flags & 0x10000) ? 0x200 : 0);
++  memory::store_and_swap<uint64_t>(words + 4, total_requested);
++  words[6] = device_id_ptr.guest_address(); words[7] = overlapped.guest_address();
++  auto* io = overlapped.as<XAM_OVERLAPPED*>();
++  io->result = X_ERROR_IO_PENDING;
++  const auto status = state->app_manager()->DispatchMessageSync(0xFE, 0x2100B, request, 40);
++  state->memory()->SystemHeapFree(request);
++  if (XFAILED(status)) {
++    const uint32_t error = (status & 0x7FFF0000) == 0x00070000
++        ? uint32_t(status & 0xFFFF) : X_ERROR_FUNCTION_FAILED;
++    state->CompleteOverlappedImmediateEx(overlapped.guest_address(), error, status, 0);
++    return error;
+   }
+-  return xeXamDispatchHeadless(
+-      [device_id_ptr]() -> X_RESULT {
+-        // NOTE: 0x00000001 is our dummy device ID from xam_content.cc
+-        *device_id_ptr = 0x00000001;
+-        return X_ERROR_SUCCESS;
+-      },
+-      overlapped.guest_address());
++  return X_ERROR_IO_PENDING;
+ }
+ 
+ void XamShowDirtyDiscErrorUI_entry(u32 user_index) {
+@@ -582,7 +588,17 @@ uint32_t XamShowMessageBoxUIEx_entry() {
+ REX_EXPORT(__imp__XamIsUIActive, rex::kernel::xam::XamIsUIActive_entry)
+ REX_EXPORT(__imp__XamShowMessageBoxUI, rex::kernel::xam::XamShowMessageBoxUI_entry)
+ REX_EXPORT(__imp__XamShowKeyboardUI, rex::kernel::xam::XamShowKeyboardUI_entry)
+-REX_EXPORT(__imp__XamShowDeviceSelectorUI, rex::kernel::xam::XamShowDeviceSelectorUI_entry)
++// total_requested occupies one complete PPC GPR. The generic pinned
++// marshaller reads its low 32 bits; keep this ABI adapter local to the export.
++extern "C" REX_FUNC(__imp__XamShowDeviceSelectorUI) {
++  auto output = mapped_u32(ctx.r7.u32 ? reinterpret_cast<rex::be<uint32_t>*>(base + ctx.r7.u32) : nullptr,
++                           ctx.r7.u32);
++  auto overlapped = mapped_void(ctx.r8.u32 ? base + ctx.r8.u32 : nullptr, ctx.r8.u32);
++  ctx.r3.u64 = rex::kernel::xam::XamShowDeviceSelectorUI_entry(
++      ctx.r3.u32, ctx.r4.u32, ctx.r5.u32, ctx.r6.u64, output, overlapped);
++}
++static rex::ppc::detail::PPCFuncRegistrar device_selector_reg(
++    "__imp__XamShowDeviceSelectorUI", &__imp__XamShowDeviceSelectorUI);
+ REX_EXPORT(__imp__XamShowDirtyDiscErrorUI, rex::kernel::xam::XamShowDirtyDiscErrorUI_entry)
+ REX_EXPORT(__imp__XamShowPartyUI, rex::kernel::xam::XamShowPartyUI_entry)
+ REX_EXPORT(__imp__XamShowCommunitySessionsUI, rex::kernel::xam::XamShowCommunitySessionsUI_entry)
+diff --git a/src/kernel/xam/apps/xam_app.cpp b/src/kernel/xam/apps/xam_app.cpp
+index 1e8289d..57be4e8 100644
+--- a/src/kernel/xam/apps/xam_app.cpp
++++ b/src/kernel/xam/apps/xam_app.cpp
+@@ -31,6 +31,7 @@ X_HRESULT XamApp::DispatchMessageSync(uint32_t message, uint32_t buffer_ptr,
+   // NOTE: buffer_length may be zero or valid.
+   auto buffer = memory_->TranslateVirtual(buffer_ptr);
+   switch (message) {
++    case 0x0002100B:
+     case 0x00021001:
+     case 0x00021015:
+     case 0x0002100E:

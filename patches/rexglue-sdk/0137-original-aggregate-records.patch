@@ -1,0 +1,171 @@
+diff --git a/include/rex/system/xam/content_manager.h b/include/rex/system/xam/content_manager.h
+index aef9fb8..77a2700 100644
+--- a/include/rex/system/xam/content_manager.h
++++ b/include/rex/system/xam/content_manager.h
+@@ -163,6 +163,8 @@ class ContentManager {
+   // Explicit all-types aggregate requests, optionally restricted to a title.
+   std::vector<XCONTENT_AGGREGATE_DATA> ListContentAllTypes(
+       uint32_t device_id, uint64_t xuid, uint32_t title_filter = 0);
++  // Owners (16-hex XUID directories, including 0 for shared content) on a device.
++  std::vector<uint64_t> ListContentOwners(uint32_t device_id);
+ 
+   std::unique_ptr<ContentPackage> ResolvePackage(const std::string_view root_name, uint64_t xuid,
+                                                  const XCONTENT_AGGREGATE_DATA& data);
+diff --git a/src/kernel/xam/xam_content_aggregate.cpp b/src/kernel/xam/xam_content_aggregate.cpp
+index bb61dce..2266ef5 100644
+--- a/src/kernel/xam/xam_content_aggregate.cpp
++++ b/src/kernel/xam/xam_content_aggregate.cpp
+@@ -9,6 +9,8 @@
+  * @modified    Tom Clay, 2026 - Adapted for ReXGlue runtime
+  */
+ 
++#include <array>
++#include <cstring>
+ #include <rex/filesystem/file.h>
+ #include <rex/kernel/xam/private.h>
+ #include <rex/logging.h>
+@@ -29,8 +31,32 @@ namespace xam {
+ using namespace rex::system;
+ using namespace rex::system::xam;
+ 
+-void AddODDContentTest(object_ref<XStaticEnumerator<XCONTENT_AGGREGATE_DATA>> e,
+-                       XContentType content_type) {
++// Original 17559 aggregate records are 584 bytes (816EEDF0): the aggregate
++// data, then the package size (+0x148) and creation FILETIME (+0x150), filled
++// from the same file attributes XamContentGetAttributes reports (81684B58).
++struct X_CONTENT_AGGREGATE_RECORD {
++  XCONTENT_AGGREGATE_DATA data;
++  be<uint64_t> size;
++  be<uint64_t> creation_time;
++  uint8_t reserved[584 - 0x158];
++};
++static_assert_size(X_CONTENT_AGGREGATE_RECORD, 584);
++using AggregateEnumerator = XStaticEnumerator<X_CONTENT_AGGREGATE_RECORD>;
++
++void AppendAggregate(AggregateEnumerator* e, const XCONTENT_AGGREGATE_DATA& data) {
++  auto* item = e->AppendItem();
++  if (!item) return;
++  std::memset(item, 0, sizeof(*item));
++  item->data = data;
++  std::array<uint8_t, 36> attributes{};
++  if (REX_KERNEL_STATE()->content_manager()->GetContentAttributes(data, attributes.data()) ==
++      X_ERROR_SUCCESS) {
++    item->creation_time = memory::load_and_swap<uint64_t>(attributes.data() + 4);
++    item->size = memory::load_and_swap<uint64_t>(attributes.data() + 28);
++  }
++}
++
++void AddODDContentTest(object_ref<AggregateEnumerator> e, XContentType content_type) {
+   auto root_entry = REX_KERNEL_FS()->ResolvePath("game:\\Content\\0000000000000000");
+   if (!root_entry) {
+     return;
+@@ -65,15 +91,13 @@ void AddODDContentTest(object_ref<XStaticEnumerator<XCONTENT_AGGREGATE_DATA>> e,
+           break;
+         }
+ 
+-        auto item = e->AppendItem();
+-        assert_not_null(item);
+-        if (item) {
+-          item->device_id = static_cast<uint32_t>(ContentDeviceId::ODD);
+-          item->content_type = content_type;
+-          item->set_display_name(string::to_utf16(content_entry->name()));
+-          item->set_file_name(content_entry->name());
+-          item->title_id = title_id;
+-        }
++        XCONTENT_AGGREGATE_DATA item{};
++        item.device_id = static_cast<uint32_t>(ContentDeviceId::ODD);
++        item.content_type = content_type;
++        item.set_display_name(string::to_utf16(content_entry->name()));
++        item.set_file_name(content_entry->name());
++        item.title_id = title_id;
++        AppendAggregate(e.get(), item);
+       }
+     }
+   }
+@@ -88,7 +112,7 @@ u32 XamContentAggregateCreateEnumerator_entry(u64 xuid, u32 device_id, u32 conte
+     return X_E_INVALIDARG;
+   }
+ 
+-  auto e = make_object<XStaticEnumerator<XCONTENT_AGGREGATE_DATA>>(REX_KERNEL_STATE(), 1);
++  auto e = make_object<AggregateEnumerator>(REX_KERNEL_STATE(), 1);
+   X_KENUMERATOR_CONTENT_AGGREGATE* extra;
+   auto result = e->Initialize(0xFF, 0xFE, 0x2000E, 0x20010, 0, &extra);
+   if (XFAILED(result)) {
+@@ -106,10 +130,16 @@ u32 XamContentAggregateCreateEnumerator_entry(u64 xuid, u32 device_id, u32 conte
+     if (device_info && device_info->device_type == DeviceType::ODD) {
+       // No installed HDD packages belong to the optical device.
+     } else {
+-      for (const auto& device : REX_KERNEL_STATE()->content_manager()->GetDevices()) {
++      // Original filter (816876B4): XUID 0 accepts every owner, -1 only shared
++      // content (owner 0), any other only that owner. Storage passes 0.
++      auto* content = REX_KERNEL_STATE()->content_manager();
++      for (const auto& device : content->GetDevices()) {
+         if (device_id && device.device_id != device_id) continue;
+-        auto items = REX_KERNEL_STATE()->content_manager()->ListContentAllTypes(device.device_id, xuid, unk3);
+-        for (const auto& item : items) *e->AppendItem() = item;
++        std::vector<uint64_t> owners{uint64_t(xuid) == ~0ull ? 0ull : uint64_t(xuid)};
++        if (!xuid) owners = content->ListContentOwners(device.device_id);
++        for (const auto owner : owners)
++          for (const auto& item : content->ListContentAllTypes(device.device_id, owner, unk3))
++            AppendAggregate(e.get(), item);
+       }
+     }
+     REXKRNL_DEBUG("XamContentAggregateCreateEnumerator: all types xuid={:016X} device={} title={:08X}, {} items",
+@@ -137,25 +167,13 @@ u32 XamContentAggregateCreateEnumerator_entry(u64 xuid, u32 device_id, u32 conte
+       // Get user-specific content
+       auto content_datas = REX_KERNEL_STATE()->content_manager()->ListContent(
+           device.device_id, xuid, content_type_enum, title_id);
+-      for (const auto& content_data : content_datas) {
+-        auto item = e->AppendItem();
+-        assert_not_null(item);
+-        if (item) {
+-          *item = content_data;
+-        }
+-      }
++      for (const auto& content_data : content_datas) AppendAggregate(e.get(), content_data);
+ 
+       // Also get common content (xuid=0)
+       if (userxuid != 0) {
+         auto common_datas = REX_KERNEL_STATE()->content_manager()->ListContent(
+             device.device_id, 0, content_type_enum, title_id);
+-        for (const auto& content_data : common_datas) {
+-          auto item = e->AppendItem();
+-          assert_not_null(item);
+-          if (item) {
+-            *item = content_data;
+-          }
+-        }
++        for (const auto& content_data : common_datas) AppendAggregate(e.get(), content_data);
+       }
+     }
+   }
+diff --git a/src/system/xam/content_manager.cpp b/src/system/xam/content_manager.cpp
+index 31b871d..1993e32 100644
+--- a/src/system/xam/content_manager.cpp
++++ b/src/system/xam/content_manager.cpp
+@@ -435,6 +435,25 @@ std::vector<XCONTENT_AGGREGATE_DATA> ContentManager::ListContentAllTypes(
+   return result;
+ }
+ 
++std::vector<uint64_t> ContentManager::ListContentOwners(uint32_t device_id) {
++  std::vector<uint64_t> owners;
++  for (const auto& entry : rex::filesystem::ListFiles(DeviceRoot(device_id))) {
++    const auto name = rex::path_to_utf8(entry.name);
++    if (entry.type != rex::filesystem::FileInfo::Type::kDirectory || name.size() != 16) continue;
++    uint64_t xuid = 0;
++    bool hex = true;
++    for (const char c : name) {
++      const int n = c >= '0' && c <= '9' ? c - '0' : c >= 'a' && c <= 'f' ? c - 'a' + 10 :
++                    c >= 'A' && c <= 'F' ? c - 'A' + 10 : -1;
++      if (n < 0) { hex = false; break; }
++      xuid = (xuid << 4) | uint64_t(n);
++    }
++    if (hex) owners.push_back(xuid);
++  }
++  std::sort(owners.begin(), owners.end());
++  return owners;
++}
++
+ std::unique_ptr<ContentPackage> ContentManager::ResolvePackage(
+     const std::string_view root_name, uint64_t xuid, const XCONTENT_AGGREGATE_DATA& data) {
+   auto package_path = ResolvePackagePath(xuid, data);

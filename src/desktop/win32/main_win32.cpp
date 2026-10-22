@@ -43,7 +43,7 @@ void VerifyDistribution(const fs::path& directory) {
 constexpr UINT kFinished = WM_APP + 1, kProgress = WM_APP + 2, kDetected = WM_APP + 3, kInitialized = WM_APP + 4, kInspected = WM_APP + 5, kOpenEnvironment = WM_APP + 6, kEnvironmentChecked = WM_APP + 7, kSessionStarted = WM_APP + 8, kSessionClosed = WM_APP + 9, kReveal = WM_APP + 10, kUpdateChecked = WM_APP + 11, kUpdateFinished = WM_APP + 12, kHinted = WM_APP + 13, kPreview = WM_APP + 20;
 enum { kFolder = 101, kTargets, kCheck, kImport, kPrepare, kLaunch, kDetails, kData, kCancel, kLanguage, kInstall, kStorage, kPrimary, kSettings, kImportFolder, kDashboards, kGames, kHome, kImportPage, kAddContent, kLibrary, kGameList, kRenderer, kNativeDevelopment,
        kSearch, kFilter0, kFilter1, kFilter2, kFilter3, kLangPt, kLangEn, kRendererNative, kRetry, kDismiss, kBannerLibrary, kBannerDetails,
-       kConsoleLanguage, kConsoleCountry, kVerifyTarget, kUpdate, kRemove, kFullscreen, kCaptureCrash };
+       kConsoleLanguage, kConsoleCountry, kVerifyTarget, kUpdate, kRemove, kFullscreen, kCaptureCrash, kApiD3D12, kApiVulkan };
 bool english = false;
 std::string Tr(const char* pt, const char* en) { return english ? en : pt; }
 std::wstring Wide(const std::string& text) {
@@ -548,7 +548,7 @@ void Layout(App& a) {
       for (int id : {kFolder, kStorage, kData, kCheck}) need = std::max(need, ButtonWidth(a, id, false));
       const bool pairs = 2 * need + s(12) <= ow;
       const int storage_rows = pairs ? 2 : 4;
-      const int hg = s(52) + hint_h + s(12) + s(58) + s(8) + s(58) + s(16) + s(36) + s(44) + s(20);
+      const int hg = s(52) + hint_h + s(12) + s(58) + s(8) + s(58) + s(132) + s(16) + s(36) + s(44) + s(20);
       const int hs = s(92) + storage_rows * s(46) - s(8) + s(20);
       const int hl = s(178) + console_h + s(20);
       const int hy = s(96) + env_h + s(20);
@@ -571,8 +571,10 @@ void Layout(App& a) {
       const int oy = gf.top + s(52) + hint_h + s(12);
       put(Item(a, kRenderer), gf.left + s(24), oy, ow, s(58));
       put(Item(a, kRendererNative), gf.left + s(24), oy + s(66), ow, s(58));
-      put(Item(a, kNativeDevelopment), gf.left + s(24), oy + s(66) + s(58) + s(16), ow, s(36));
-      put(Item(a, kFullscreen), gf.left + s(24), oy + s(66) + s(58) + s(60), ow, s(36));
+      put(Item(a, kApiD3D12), gf.left + s(24), oy + s(132), ow, s(58));
+      put(Item(a, kApiVulkan), gf.left + s(24), oy + s(198), ow, s(58));
+      put(Item(a, kNativeDevelopment), gf.left + s(24), oy + s(264) + s(8), ow, s(36));
+      put(Item(a, kFullscreen), gf.left + s(24), oy + s(264) + s(52), ow, s(36));
       const RECT& st = g.cards[1];
       put(a.root_text, st.left + s(24), st.top + s(56), ow, s(24));
       const int bw2 = pairs ? (ow - s(12)) / 2 : ow;
@@ -635,6 +637,8 @@ void Enable(App& a) {
   const bool native = a.renderer_settings.experimental;
   EnableWindow(Item(a, kRenderer), !a.busy && !a.root.empty());
   EnableWindow(Item(a, kRendererNative), !a.busy && !a.root.empty() && native);
+  EnableWindow(Item(a, kApiD3D12), !a.busy && !a.root.empty());
+  EnableWindow(Item(a, kApiVulkan), !a.busy && !a.root.empty() && native && a.renderer_settings.renderer == Renderer::Xenos);
   EnableWindow(Item(a, kNativeDevelopment), !a.busy && !a.root.empty());
   EnableWindow(Item(a, kFullscreen), !a.busy && !a.root.empty());
   EnableWindow(Item(a, kConsoleLanguage), !a.busy && !a.root.empty());
@@ -1059,7 +1063,8 @@ void Labels(App& a) {
        {kImportPage, "Importar", "Import"}, {kAddContent, "Adicionar conteúdo", "Add content"}, {kLibrary, "Ver biblioteca", "View library"},
        {kFilter0, "Todos", "All"}, {kFilter1, "Prontos", "Ready"}, {kFilter2, "Preparar", "To prepare"}, {kFilter3, "Atenção", "Attention"},
        {kLangPt, "Português (BR)", "Portuguese (BR)"}, {kLangEn, "English", "English"},
-       {kRenderer, "Xenos (ReXGlue)", "Xenos (ReXGlue)"}, {kRendererNative, "Native (Experimental)", "Native (Experimental)"},
+       {kRenderer, "Renderer · Xenos (ReXGlue)", "Renderer · Xenos (ReXGlue)"}, {kRendererNative, "Renderer · Native (Experimental)", "Renderer · Native (Experimental)"},
+       {kApiD3D12, "API gráfica · Direct3D 12", "Graphics API · Direct3D 12"}, {kApiVulkan, "API gráfica · Vulkan", "Graphics API · Vulkan"},
        {kNativeDevelopment, "Acesso de desenvolvimento ao Native", "Native development access"},
        {kFullscreen, "Iniciar sessão em tela cheia", "Start session in fullscreen"},
        {kCaptureCrash, "Capturar pilha de falhas nas próximas sessões", "Capture crash stacks in upcoming sessions"},
@@ -1570,6 +1575,8 @@ void DrawButton(App& a, const DRAWITEMSTRUCT& item) {
     case kLangEn: selected = english; break;
     case kRenderer: selected = a.renderer_settings.renderer == Renderer::Xenos; break;
     case kRendererNative: selected = a.renderer_settings.renderer == Renderer::Native; break;
+    case kApiD3D12: selected = a.renderer_settings.api == GraphicsApi::D3D12; break;
+    case kApiVulkan: selected = a.renderer_settings.api == GraphicsApi::Vulkan; break;
     case kNativeDevelopment: selected = a.renderer_settings.experimental; break;
     case kFullscreen: selected = a.renderer_settings.fullscreen; break;
     case kCaptureCrash: selected = a.capture_crash; break;
@@ -1633,8 +1640,14 @@ void DrawButton(App& a, const DRAWITEMSTRUCT& item) {
     ui::Circle(dc, {s(18), cy - s(7), s(32), cy + s(7)}, selected ? ui::Mix(P.surface, P.accent, 22) : P.surface2);
     if (selected) ui::Circle(dc, {s(21), cy - s(4), s(29), cy + s(4)}, P.accent_text);
     ui::Text(dc, a.fonts.bold, label, {s(48), s(8), w - s(16), s(30)}, ink);
-    ui::Text(dc, a.fonts.caption, native ? (disabled ? WTr("Requer o acesso de desenvolvimento abaixo", "Requires the development access below") : WTr("Experimental · executor D3D12 próprio", "Experimental · own D3D12 executor"))
-                                         : WTr("Padrão · compatível com o ReXGlue", "Default · ReXGlue compatible"), {s(48), s(30), w - s(16), s(52)}, disabled ? P.faint : P.muted);
+    const auto caption = item.CtlID == kApiVulkan
+        ? (a.renderer_settings.renderer == Renderer::Native
+           ? WTr("Indisponível no Native · executor incompleto", "Unavailable in Native · incomplete executor")
+           : WTr("Experimental · driver verificado antes de iniciar", "Experimental · driver checked before launch"))
+        : item.CtlID == kApiD3D12 ? WTr("Padrão · disponível para Xenos e Native", "Default · available for Xenos and Native")
+        : native ? (disabled ? WTr("Requer o acesso de desenvolvimento abaixo", "Requires the development access below") : WTr("Experimental · executor próprio", "Experimental · independent executor"))
+        : WTr("Padrão · compatível com o ReXGlue", "Default · ReXGlue compatible");
+    ui::Text(dc, a.fonts.caption, caption, {s(48), s(30), w - s(16), s(52)}, disabled ? P.faint : P.muted);
   } else if (style.kind == Kind::Toggle) {
     ui::Text(dc, a.fonts.body, label, {box.left, 0, w, h}, ink);
   } else if (style.kind == Kind::Nav) {
@@ -1873,6 +1886,8 @@ LRESULT CALLBACK WndProc(HWND window, UINT message, WPARAM wp, LPARAM lp) {
         a->renderer_hint = Control(*a, L"STATIC", L"", 0);
         Button(*a, kRenderer, Kind::Option, nullptr, 2);
         Button(*a, kRendererNative, Kind::Option, nullptr, 2);
+        Button(*a, kApiD3D12, Kind::Option, nullptr, 2);
+        Button(*a, kApiVulkan, Kind::Option, nullptr, 2);
         Button(*a, kNativeDevelopment, Kind::Toggle, nullptr, 2);
         Button(*a, kFullscreen, Kind::Toggle, nullptr, 2);
         Button(*a, kCaptureCrash, Kind::Toggle, nullptr, 2);
@@ -2031,16 +2046,20 @@ LRESULT CALLBACK WndProc(HWND window, UINT message, WPARAM wp, LPARAM lp) {
           a->capture_crash = !a->capture_crash;
           InvalidateRect(window, nullptr, FALSE); return 0;
         }
-        if (id == kRenderer || id == kRendererNative || id == kNativeDevelopment || id == kFullscreen) {
+        if (id == kRenderer || id == kRendererNative || id == kNativeDevelopment || id == kFullscreen || id == kApiD3D12 || id == kApiVulkan) {
           if (a->root.empty()) return 0;
           auto settings = a->renderer_settings;
           if (id == kFullscreen) settings.fullscreen = !settings.fullscreen;
           else if (id == kNativeDevelopment) {
             settings.experimental = !settings.experimental;
-            if (!settings.experimental) settings.renderer = Renderer::Xenos;
+            if (!settings.experimental) { settings.renderer = Renderer::Xenos; settings.api = GraphicsApi::D3D12; }
           } else if (id == kRendererNative) {
             if (!settings.experimental) return 0;
             settings.renderer = Renderer::Native;
+          } else if (id == kApiD3D12) settings.api = GraphicsApi::D3D12;
+          else if (id == kApiVulkan) {
+            if (!settings.experimental || settings.renderer == Renderer::Native) return 0;
+            settings.api = GraphicsApi::Vulkan;
           } else settings.renderer = Renderer::Xenos;
           SaveRendererSettings(ProjectPaths{a->root}, settings);
           a->renderer_settings = settings;

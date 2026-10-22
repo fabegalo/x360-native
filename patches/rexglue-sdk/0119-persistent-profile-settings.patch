@@ -1,0 +1,503 @@
+diff --git a/src/kernel/xam/xam_user.cpp b/src/kernel/xam/xam_user.cpp
+index 4314f1c..254b99b 100644
+--- a/src/kernel/xam/xam_user.cpp
++++ b/src/kernel/xam/xam_user.cpp
+@@ -33,6 +33,7 @@
+ #include <rex/system/xthread.h>
+ #include <rex/system/xtypes.h>
+ #include <rex/ui/image_decode.h>
++#include <rex/thread/mutex.h>
+ 
+ REXCVAR_DEFINE_UINT32(user_language, 1, "Kernel", "User's language ID");
+ 
+@@ -225,6 +226,9 @@ uint32_t XamUserReadProfileSettingsEx(uint32_t title_id, uint32_t user_index, ui
+                                       be<uint32_t>* setting_ids, uint32_t unk,
+                                       be<uint32_t>* buffer_size_ptr, uint8_t* buffer,
+                                       XAM_OVERLAPPED* overlapped) {
++  // Hold the same gate as sign-in and writes until the response has copied
++  // its settings. A writer must not replace a borrowed Setting mid-read.
++  auto profile_lock = rex::thread::global_critical_region::AcquireDirect();
+   if (xuid_count > 1 || (xuid_count != 0) != (xuids != nullptr) || unk || !setting_ids)
+     return X_ERROR_INVALID_PARAMETER;
+ 
+@@ -352,9 +356,11 @@ uint32_t XamUserReadProfileSettingsEx(uint32_t title_id, uint32_t user_index, ui
+   // TODO(gibbed): setting validity checking without needing a user profile
+   // object.
+   bool any_missing = false;
++  bool load_failed = false;
+   for (uint32_t i = 0; i < setting_count; ++i) {
+     auto setting_id = static_cast<uint32_t>(setting_ids[i]);
+     auto setting = user_profile->GetSetting(setting_id);
++    load_failed |= setting && setting->load_failed;
+     if (!setting) {
+       any_missing = true;
+       REXKRNL_ERROR(
+@@ -363,14 +369,15 @@ uint32_t XamUserReadProfileSettingsEx(uint32_t title_id, uint32_t user_index, ui
+           setting_id);
+     }
+   }
+-  if (any_missing) {
++  if (any_missing || load_failed) {
++    const uint32_t error = load_failed ? X_ERROR_FUNCTION_FAILED : X_ERROR_INVALID_PARAMETER;
+     // TODO(benvanik): don't fail? most games don't even check!
+     if (overlapped) {
+       REX_KERNEL_STATE()->CompleteOverlappedImmediate(
+-          REX_KERNEL_MEMORY()->HostToGuestVirtual(overlapped), X_ERROR_INVALID_PARAMETER);
++          REX_KERNEL_MEMORY()->HostToGuestVirtual(overlapped), error);
+       return X_ERROR_IO_PENDING;
+     }
+-    return X_ERROR_INVALID_PARAMETER;
++    return error;
+   }
+ 
+   auto out_header = reinterpret_cast<X_USER_READ_PROFILE_SETTINGS*>(buffer);
+@@ -440,6 +447,7 @@ u32 XamUserReadProfileSettingsEx_entry(u32 title_id, u32 user_index, u32 xuid_co
+ u32 XamUserWriteProfileSettings_entry(u32 title_id, u32 user_index, u32 setting_count,
+                                       ppc_ptr_t<X_USER_PROFILE_SETTING> settings,
+                                       ppc_ptr_t<XAM_OVERLAPPED> overlapped) {
++  auto profile_lock = rex::thread::global_critical_region::AcquireDirect();
+   if (!setting_count || setting_count > 32 || !settings ||
+       !AchievementGuestSpan(REX_KERNEL_MEMORY(), settings.guest_address(),
+                             uint64_t(setting_count) * sizeof(X_USER_PROFILE_SETTING),
+@@ -459,17 +467,20 @@ u32 XamUserWriteProfileSettings_entry(u32 title_id, u32 user_index, u32 setting_
+     return X_ERROR_NO_SUCH_USER;
+   }
+ 
+-  // Update and save settings.
++  // Validate and decode the complete request before committing any value.
+   const auto& user_profile = REX_KERNEL_STATE()->user_profile();
++  auto finish = [&](uint32_t error) {
++    if (!overlapped) return error;
++    REX_KERNEL_STATE()->CompleteOverlappedImmediateEx(overlapped.guest_address(),
++        error, X_HRESULT_FROM_WIN32(error), 0);
++    return uint32_t(X_ERROR_IO_PENDING);
++  };
++  std::vector<std::unique_ptr<UserProfile::Setting>> decoded;
+ 
+   for (uint32_t n = 0; n < setting_count; ++n) {
+     const uint32_t id = settings[n].setting_id;
+-    if (id == 0x10040006u || id == 0x10040013u || id == 0x10040038u || id == 0x10040039u) {
+-      if (!overlapped) return X_ERROR_ACCESS_DENIED;
+-      REX_KERNEL_STATE()->CompleteOverlappedImmediateEx(overlapped.guest_address(),
+-          X_ERROR_ACCESS_DENIED, X_HRESULT_FROM_WIN32(X_ERROR_ACCESS_DENIED), 0);
+-      return X_ERROR_IO_PENDING;
+-    }
++    if (id == 0x10040006u || id == 0x10040012u || id == 0x10040013u ||
++        id == 0x10040038u || id == 0x10040039u) return finish(X_ERROR_ACCESS_DENIED);
+   }
+ 
+   for (uint32_t n = 0; n < setting_count; ++n) {
+@@ -480,45 +491,59 @@ u32 XamUserWriteProfileSettings_entry(u32 title_id, u32 user_index, u32 setting_
+       continue;
+     }
+ 
+-    REXKRNL_DEBUG(
+-        "XamUserWriteProfileSettings: setting index [{}]:"
+-        " from={} setting_id={:08X} data.type={}",
+-        n, (uint32_t)setting.from, (uint32_t)setting.setting_id, setting.data.type);
+-
++    UserProfile::Setting::Key key{}; key.value = setting.setting_id;
++    const auto effective_type = setting_type == UserProfile::Setting::Type::CONTENT
++        ? UserProfile::Setting::Type::BINARY : setting_type;
++    if (key.type != uint32_t(effective_type)) return finish(X_ERROR_INVALID_PARAMETER);
+     switch (setting_type) {
+       case UserProfile::Setting::Type::CONTENT:
+       case UserProfile::Setting::Type::BINARY: {
+-        uint8_t* binary_ptr = REX_KERNEL_MEMORY()->TranslateVirtual(setting.data.binary.ptr);
+-        size_t binary_size = setting.data.binary.size;
+-        std::vector<uint8_t> bytes;
+-        if (setting.data.binary.ptr) {
+-          // Copy provided data
+-          bytes.resize(binary_size);
+-          std::memcpy(bytes.data(), binary_ptr, binary_size);
+-        } else {
+-          // Data pointer was NULL, so just fill with zeroes
+-          bytes.resize(binary_size, 0);
+-        }
+-        user_profile->AddSetting(
+-            std::make_unique<xam::UserProfile::BinarySetting>(setting.setting_id, bytes));
++        const uint32_t size = setting.data.binary.size;
++        if (size > key.size || (size && !AchievementGuestSpan(REX_KERNEL_MEMORY(),
++            setting.data.binary.ptr, size, memory::kMemoryProtectRead)))
++          return finish(X_ERROR_INVALID_PARAMETER);
++        std::vector<uint8_t> bytes(size);
++        if (size) std::memcpy(bytes.data(), REX_KERNEL_MEMORY()->TranslateVirtual(setting.data.binary.ptr), size);
++        decoded.push_back(std::make_unique<UserProfile::BinarySetting>(setting.setting_id, bytes));
+       } break;
+-      case UserProfile::Setting::Type::WSTRING:
++      case UserProfile::Setting::Type::WSTRING: {
++        const uint32_t size = setting.data.unicode.size;
++        if (size > key.size || size % 2 || (size && !AchievementGuestSpan(REX_KERNEL_MEMORY(),
++            setting.data.unicode.ptr, size, memory::kMemoryProtectRead)))
++          return finish(X_ERROR_INVALID_PARAMETER);
++        std::u16string value;
++        for (uint32_t i = 0; i < size; i += 2) {
++          const auto c = memory::load_and_swap<uint16_t>(REX_KERNEL_MEMORY()->TranslateVirtual(uint32_t(setting.data.unicode.ptr) + i));
++          if (!c) { if (i + 2 != size) return finish(X_ERROR_INVALID_PARAMETER); }
++          else { if (i + 2 == size) return finish(X_ERROR_INVALID_PARAMETER); value.push_back(c); }
++        }
++        decoded.push_back(std::make_unique<UserProfile::UnicodeSetting>(setting.setting_id, value));
++        break;
++      }
+       case UserProfile::Setting::Type::DOUBLE:
++        if (key.size != 8) return finish(X_ERROR_INVALID_PARAMETER);
++        decoded.push_back(std::make_unique<UserProfile::DoubleSetting>(setting.setting_id, double(setting.data.f64))); break;
+       case UserProfile::Setting::Type::FLOAT:
++        if (key.size != 4) return finish(X_ERROR_INVALID_PARAMETER);
++        decoded.push_back(std::make_unique<UserProfile::FloatSetting>(setting.setting_id, float(setting.data.f32))); break;
+       case UserProfile::Setting::Type::INT32:
++        if (key.size != 4) return finish(X_ERROR_INVALID_PARAMETER);
++        decoded.push_back(std::make_unique<UserProfile::Int32Setting>(setting.setting_id, int32_t(setting.data.s32))); break;
+       case UserProfile::Setting::Type::INT64:
++        if (key.size != 8) return finish(X_ERROR_INVALID_PARAMETER);
++        decoded.push_back(std::make_unique<UserProfile::Int64Setting>(setting.setting_id, int64_t(setting.data.s64))); break;
+       case UserProfile::Setting::Type::DATETIME:
+-      default: {
+-        REXKRNL_ERROR("XamUserWriteProfileSettings: Unimplemented data type {}", setting_type);
+-      } break;
++        if (key.size != 8) return finish(X_ERROR_INVALID_PARAMETER);
++        decoded.push_back(std::make_unique<UserProfile::DateTimeSetting>(setting.setting_id, int64_t(uint64_t(setting.data.filetime)))); break;
++      default: return finish(X_ERROR_INVALID_PARAMETER);
+     };
+   }
+ 
+-  if (overlapped) {
+-    REX_KERNEL_STATE()->CompleteOverlappedImmediate(overlapped.guest_address(), X_ERROR_SUCCESS);
+-    return X_ERROR_IO_PENDING;
+-  }
+-  return X_ERROR_SUCCESS;
++  const bool changed = !decoded.empty();
++  for (auto& setting : decoded)
++    if (!user_profile->AddSetting(std::move(setting))) return finish(X_ERROR_FUNCTION_FAILED);
++  if (changed) REX_KERNEL_STATE()->BroadcastNotification(0xE, 1);
++  return finish(X_ERROR_SUCCESS);
+ }
+ 
+ u32 XamUserCheckPrivilege_entry(u32 user_index, u32 mask, mapped_u32 out_value) {
+diff --git a/src/system/xam/user_profile.cpp b/src/system/xam/user_profile.cpp
+index 5ee06ac..0816d97 100644
+--- a/src/system/xam/user_profile.cpp
++++ b/src/system/xam/user_profile.cpp
+@@ -15,6 +15,7 @@
+ #include <cstring>
+ #include <cctype>
+ #include <chrono>
++#include <optional>
+ #include <random>
+ #include <rex/platform.h>
+ #if REX_PLATFORM_WIN32
+@@ -28,12 +29,99 @@
+ 
+ #include <rex/logging.h>
+ #include <rex/system/kernel_state.h>
++#include <rex/system/user_module.h>
+ #include <rex/system/xam/user_profile.h>
+ 
+ namespace rex {
+ namespace system {
+ namespace xam {
+ 
++namespace {
++using ProfileSetting = UserProfile::Setting;
++template <typename T> std::vector<uint8_t> SettingScalar(T value) {
++  std::vector<uint8_t> bytes(sizeof(T));
++  memory::store_and_swap<T>(bytes.data(), value);
++  return bytes;
++}
++std::unique_ptr<ProfileSetting> EmptySetting(uint32_t id) {
++  ProfileSetting::Key key{}; key.value = id;
++  switch (ProfileSetting::Type(key.type)) {
++    case ProfileSetting::Type::INT32: return std::make_unique<UserProfile::Int32Setting>(id, 0);
++    case ProfileSetting::Type::INT64: return std::make_unique<UserProfile::Int64Setting>(id, 0);
++    case ProfileSetting::Type::DOUBLE: return std::make_unique<UserProfile::DoubleSetting>(id, 0);
++    case ProfileSetting::Type::FLOAT: return std::make_unique<UserProfile::FloatSetting>(id, 0);
++    case ProfileSetting::Type::DATETIME: return std::make_unique<UserProfile::DateTimeSetting>(id, 0);
++    case ProfileSetting::Type::WSTRING: return std::make_unique<UserProfile::UnicodeSetting>(id, u"");
++    case ProfileSetting::Type::BINARY: return std::make_unique<UserProfile::BinarySetting>(id);
++    default: return {};
++  }
++}
++std::optional<std::vector<uint8_t>> EncodeSetting(const ProfileSetting& setting) {
++  ProfileSetting::Key key{}; key.value = setting.setting_id;
++  if (key.type != uint32_t(setting.type)) return {};
++  std::vector<uint8_t> bytes;
++  switch (setting.type) {
++    case ProfileSetting::Type::INT32: bytes = SettingScalar(static_cast<const UserProfile::Int32Setting&>(setting).value); break;
++    case ProfileSetting::Type::INT64: bytes = SettingScalar(static_cast<const UserProfile::Int64Setting&>(setting).value); break;
++    case ProfileSetting::Type::DOUBLE: bytes = SettingScalar(static_cast<const UserProfile::DoubleSetting&>(setting).value); break;
++    case ProfileSetting::Type::FLOAT: bytes = SettingScalar(static_cast<const UserProfile::FloatSetting&>(setting).value); break;
++    case ProfileSetting::Type::DATETIME: bytes = SettingScalar(static_cast<const UserProfile::DateTimeSetting&>(setting).value); break;
++    case ProfileSetting::Type::WSTRING: {
++      const auto& value = static_cast<const UserProfile::UnicodeSetting&>(setting).value;
++      if (value.size() >= key.size / 2) return {};
++      bytes.resize((value.size() + 1) * 2);
++      for (size_t i = 0; i < value.size(); ++i)
++        memory::store_and_swap<uint16_t>(bytes.data() + i * 2, value[i]);
++      break;
++    }
++    case ProfileSetting::Type::BINARY: bytes = static_cast<const UserProfile::BinarySetting&>(setting).value; break;
++    default: return {};
++  }
++  if (bytes.size() > key.size) return {};
++  return bytes;
++}
++bool DecodeSetting(ProfileSetting& setting, const std::vector<uint8_t>& bytes) {
++  ProfileSetting::Key key{}; key.value = setting.setting_id;
++  if (key.type != uint32_t(setting.type) || bytes.size() > key.size) return false;
++  switch (setting.type) {
++    case ProfileSetting::Type::INT32:
++      if (bytes.size() != 4) return false;
++      static_cast<UserProfile::Int32Setting&>(setting).value = memory::load_and_swap<int32_t>(bytes.data()); break;
++    case ProfileSetting::Type::INT64:
++      if (bytes.size() != 8) return false;
++      static_cast<UserProfile::Int64Setting&>(setting).value = memory::load_and_swap<int64_t>(bytes.data()); break;
++    case ProfileSetting::Type::DOUBLE:
++      if (bytes.size() != 8) return false;
++      static_cast<UserProfile::DoubleSetting&>(setting).value = memory::load_and_swap<double>(bytes.data()); break;
++    case ProfileSetting::Type::FLOAT:
++      if (bytes.size() != 4) return false;
++      static_cast<UserProfile::FloatSetting&>(setting).value = memory::load_and_swap<float>(bytes.data()); break;
++    case ProfileSetting::Type::DATETIME:
++      if (bytes.size() != 8) return false;
++      static_cast<UserProfile::DateTimeSetting&>(setting).value = memory::load_and_swap<int64_t>(bytes.data()); break;
++    case ProfileSetting::Type::WSTRING: {
++      if (bytes.size() < 2 || bytes.size() % 2) return false;
++      std::u16string value;
++      for (size_t i = 0; i < bytes.size(); i += 2) {
++        const auto c = memory::load_and_swap<uint16_t>(bytes.data() + i);
++        if (!c) {
++          if (i + 2 != bytes.size()) return false;
++          static_cast<UserProfile::UnicodeSetting&>(setting).value = std::move(value);
++          setting.is_set = true;
++          return true;
++        }
++        value.push_back(c);
++      }
++      return false;
++    }
++    case ProfileSetting::Type::BINARY: static_cast<UserProfile::BinarySetting&>(setting).value = bytes; break;
++    default: return false;
++  }
++  setting.is_set = true;
++  return true;
++}
++}  // namespace
++
+ UserProfile::UserProfile() {
+   // https://cs.rin.ru/forum/viewtopic.php?f=38&t=60668&hilit=gfwl+live&start=195
+   // https://github.com/arkem/py360/blob/master/py360/constants.py
+@@ -98,6 +186,7 @@ UserProfile::UserProfile() {
+   AddSetting(std::make_unique<BinarySetting>(0x63E83FFE));
+   // XPROFILE_TITLE_SPECIFIC3
+   AddSetting(std::make_unique<BinarySetting>(0x63E83FFD));
++  initializing_settings_ = false;
+ }
+ 
+ namespace {
+@@ -482,14 +571,21 @@ uint32_t UserProfile::SetLocalSession(uint64_t xuid) {
+ }
+ 
+ 
+-void UserProfile::AddSetting(std::unique_ptr<Setting> setting) {
++bool UserProfile::AddSetting(std::unique_ptr<Setting> setting) {
++  if (!setting) return false;
++  if (initializing_settings_) {
++    const auto encoded = EncodeSetting(*setting);
++    if (!encoded) return false;
++    setting_defaults_[setting->setting_id] = {*encoded, setting->is_set};
++  } else if (setting->is_set && !SaveSetting(setting.get())) {
++    return false; // Never publish a value whose durable write failed.
++  }
++  setting->loaded_xuid = xuid();
++  setting->loaded_title_id = setting->is_title_specific() && kernel_state_ && kernel_state_->GetExecutableModule()
++      ? kernel_state_->title_id() : 0;
+   Setting* previous_setting = setting.get();
+   std::swap(settings_[setting->setting_id], previous_setting);
+ 
+-  if (setting->is_set && setting->is_title_specific()) {
+-    SaveSetting(setting.get());
+-  }
+-
+   if (previous_setting) {
+     // replace: swap out the old setting from the owning list
+     for (auto vec_it = setting_list_.begin(); vec_it != setting_list_.end(); ++vec_it) {
+@@ -502,67 +598,98 @@ void UserProfile::AddSetting(std::unique_ptr<Setting> setting) {
+     // new setting: add to the owning list
+     setting_list_.push_back(std::move(setting));
+   }
++  return true;
+ }
+ 
+ UserProfile::Setting* UserProfile::GetSetting(uint32_t setting_id) {
+-  const auto& it = settings_.find(setting_id);
++  auto it = settings_.find(setting_id);
+   if (it == settings_.end()) {
+-    return nullptr;
++    auto setting = EmptySetting(setting_id);
++    if (!setting || !xuid()) return nullptr;
++    std::error_code error;
++    if (!std::filesystem::exists(SettingPath(setting.get()), error) && !error) return nullptr;
++    LoadSetting(setting.get());
++    auto* pointer = setting.get();
++    settings_[setting_id] = pointer;
++    setting_list_.push_back(std::move(setting));
++    it = settings_.find(setting_id);
+   }
+   UserProfile::Setting* setting = it->second;
++  const auto title = setting->is_title_specific() && kernel_state_ && kernel_state_->GetExecutableModule()
++      ? kernel_state_->title_id() : 0;
++  if (setting->loaded_xuid != xuid() || (setting->is_title_specific() && setting->loaded_title_id != title))
++    LoadSetting(setting);
+   if (setting_id == 0x10040012 && setting->type == Setting::Type::INT32) {
+     // XPROFILE_GAMERCARD_TITLES_PLAYED follows the signed-in account's record.
+     static_cast<Int32Setting*>(setting)->value = int32_t(TitlesPlayed(xuid()).size());
+   }
+-  if (setting->is_title_specific()) {
+-    // If what we have loaded in memory isn't for the title that is running
+-    // right now, then load it from disk.
+-    if (kernel_state_->title_id() != setting->loaded_title_id) {
+-      LoadSetting(setting);
+-    }
+-  }
+   return setting;
+ }
+ 
+-void UserProfile::LoadSetting(UserProfile::Setting* setting) {
++std::filesystem::path UserProfile::SettingPath(const Setting* setting) const {
+   if (setting->is_title_specific()) {
+-    auto content_dir = kernel_state_->content_manager()->ResolveGameUserContentPath();
+-    auto setting_id = fmt::format("{:08X}", setting->setting_id);
+-    auto file_path = content_dir / setting_id;
+-    auto file = rex::filesystem::OpenFile(file_path, "rb");
+-    if (file) {
+-      fseek(file, 0, SEEK_END);
+-      uint32_t input_file_size = static_cast<uint32_t>(ftell(file));
+-      fseek(file, 0, SEEK_SET);
+-
+-      std::vector<uint8_t> serialized_data(input_file_size);
+-      fread(serialized_data.data(), 1, serialized_data.size(), file);
+-      fclose(file);
+-      setting->Deserialize(serialized_data);
+-      setting->loaded_title_id = kernel_state_->title_id();
+-    }
+-  } else {
+-    // Unsupported for now.  Other settings aren't per-game and need to be
+-    // stored some other way.
+-    REXSYS_WARN("Attempting to load unsupported profile setting from disk");
++    if (!kernel_state_ || !kernel_state_->GetExecutableModule()) return {};
++    return kernel_state_->content_manager()->ResolveGameUserContentPath() / fmt::format("{:08X}", setting->setting_id);
+   }
++  if (!xuid() || profile_path_.empty()) return {};
++  return profile_path_.parent_path() / fmt::format("{:016X}", xuid()) /
++      "settings-v1" / fmt::format("{:08X}.dat", setting->setting_id);
+ }
+ 
+-void UserProfile::SaveSetting(UserProfile::Setting* setting) {
+-  if (setting->is_title_specific()) {
+-    auto serialized_setting = setting->Serialize();
+-    auto content_dir = kernel_state_->content_manager()->ResolveGameUserContentPath();
+-    std::filesystem::create_directories(content_dir);
+-    auto setting_id = fmt::format("{:08X}", setting->setting_id);
+-    auto file_path = content_dir / setting_id;
+-    auto file = rex::filesystem::OpenFile(file_path, "wb");
+-    fwrite(serialized_setting.data(), 1, serialized_setting.size(), file);
+-    fclose(file);
+-  } else {
+-    // Unsupported for now.  Other settings aren't per-game and need to be
+-    // stored some other way.
+-    REXSYS_WARN("Attempting to save unsupported profile setting to disk");
++void UserProfile::LoadSetting(Setting* setting) {
++  const auto fallback = setting_defaults_.find(setting->setting_id);
++  const auto empty = EmptySetting(setting->setting_id);
++  const auto initial = empty ? EncodeSetting(*empty) : std::nullopt;
++  if (fallback == setting_defaults_.end() && !initial) { setting->load_failed = true; return; }
++  const auto& bytes = fallback != setting_defaults_.end() ? fallback->second.bytes : *initial;
++  DecodeSetting(*setting, bytes);
++  setting->is_set = fallback != setting_defaults_.end() && fallback->second.is_set;
++  setting->loaded_xuid = xuid();
++  setting->loaded_title_id = setting->is_title_specific() && kernel_state_ && kernel_state_->GetExecutableModule()
++      ? kernel_state_->title_id() : 0;
++  setting->load_failed = false;
++  const auto path = SettingPath(setting);
++  if (path.empty()) return;
++  std::error_code error;
++  if (!std::filesystem::exists(path, error) && !error) return;
++  auto* file = rex::filesystem::OpenFile(path, "rb");
++  if (!file) { setting->load_failed = true; return; }
++  Setting::Key key{}; key.value = setting->setting_id;
++  std::vector<uint8_t> stored(key.size + 1);
++  const auto count = fread(stored.data(), 1, stored.size(), file);
++  const bool failed = ferror(file) != 0;
++  fclose(file);
++  stored.resize(count);
++  setting->load_failed = failed || !DecodeSetting(*setting, stored);
++}
++
++bool UserProfile::SaveSetting(Setting* setting) {
++  const auto bytes = EncodeSetting(*setting);
++  const auto path = SettingPath(setting);
++  if (!bytes || path.empty()) return false;
++  std::error_code error;
++  std::filesystem::create_directories(path.parent_path(), error);
++  if (error) return false;
++  auto temporary = path; temporary += ".tmp";
++  auto* file = rex::filesystem::OpenFile(temporary, "wb");
++  if (!file) return false;
++  bool ok = (bytes->empty() || fwrite(bytes->data(), 1, bytes->size(), file) == bytes->size()) && fflush(file) == 0;
++#if REX_PLATFORM_WIN32
++  if (ok) ok = _commit(_fileno(file)) == 0;
++#else
++  if (ok) ok = fsync(fileno(file)) == 0;
++#endif
++  if (fclose(file)) ok = false;
++  if (ok) {
++#if REX_PLATFORM_WIN32
++    ok = MoveFileExW(temporary.c_str(), path.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH) != 0;
++#else
++    std::filesystem::rename(temporary, path, error);
++    ok = !error;
++#endif
+   }
++  if (!ok) std::filesystem::remove(temporary, error);
++  return ok;
+ }
+ 
+ }  // namespace xam
+diff --git a/include/rex/system/xam/user_profile.h b/include/rex/system/xam/user_profile.h
+index 5e459d0..3f3009e 100644
+--- a/include/rex/system/xam/user_profile.h
++++ b/include/rex/system/xam/user_profile.h
+@@ -114,6 +114,8 @@ class UserProfile {
+     size_t size;
+     bool is_set;
+     uint32_t loaded_title_id;
++    uint64_t loaded_xuid = 0;
++    bool load_failed = false;
+     Setting(uint32_t setting_id, Type type, size_t size, bool is_set)
+         : setting_id(setting_id), type(type), size(size), is_set(is_set), loaded_title_id(0) {}
+     virtual void Append(X_USER_PROFILE_SETTING_DATA* data, SettingByteStream* stream) {
+@@ -248,7 +250,7 @@ class UserProfile {
+ 
+   void set_kernel_state(KernelState* ks) { kernel_state_ = ks; }
+ 
+-  void AddSetting(std::unique_ptr<Setting> setting);
++  bool AddSetting(std::unique_ptr<Setting> setting);
+   Setting* GetSetting(uint32_t setting_id);
+ 
+  private:
+@@ -261,10 +263,14 @@ class UserProfile {
+   bool PersistProfiles(const std::vector<Identity>& next, const Identity& selected);
+   std::vector<std::unique_ptr<Setting>> setting_list_;
+   std::unordered_map<uint32_t, Setting*> settings_;
++  struct SettingDefault { std::vector<uint8_t> bytes; bool is_set; };
++  std::unordered_map<uint32_t, SettingDefault> setting_defaults_;
++  bool initializing_settings_ = true;
+   KernelState* kernel_state_ = nullptr;
+ 
+   void LoadSetting(UserProfile::Setting*);
+-  void SaveSetting(UserProfile::Setting*);
++  bool SaveSetting(UserProfile::Setting*);
++  std::filesystem::path SettingPath(const UserProfile::Setting*) const;
+ };
+ 
+ }  // namespace xam

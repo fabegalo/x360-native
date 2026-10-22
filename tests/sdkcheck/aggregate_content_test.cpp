@@ -3,6 +3,7 @@
 #include <filesystem>
 #include <fstream>
 #include <set>
+#include <vector>
 #include <array>
 #include <rex/system/function_dispatcher.h>
 #include <rex/kernel/init.h>
@@ -137,12 +138,16 @@ TEST_CASE("Aggregate all-types query enumerates installed titles with their real
   rt.kernel_state()->SetExecutableModule(module);
   const auto output = rt.memory()->SystemHeapAlloc(4096);
   REQUIRE(output);
-  auto query = [&](uint32_t title) {
+  std::set<uint64_t> owners;
+  std::vector<uint64_t> sizes;
+  size_t record_size = 0;
+  auto query = [&](uint32_t title, uint64_t xuid = 0) {
+    owners.clear(); sizes.clear();
     uint32_t result = ~0u;
     auto thread = rex::system::object_ref<rex::system::XHostThread>(
         new rex::system::XHostThread(rt.kernel_state(), 128 * 1024, 0, [&]() {
       auto* ctx = rex::system::XThread::GetCurrentThread()->thread_state()->context();
-      ctx->r3.u64 = 0; ctx->r4.u64 = 1; ctx->r5.u64 = 0xFFFFFFFF;
+      ctx->r3.u64 = xuid; ctx->r4.u64 = 1; ctx->r5.u64 = 0xFFFFFFFF;
       ctx->r6.u64 = title; ctx->r7.u64 = output;
       __imp__XamContentAggregateCreateEnumerator(*ctx, rt.memory()->virtual_membase());
       result = ctx->r3.u32;
@@ -155,6 +160,7 @@ TEST_CASE("Aggregate all-types query enumerates installed titles with their real
     auto handle = *rt.memory()->TranslateVirtual<rex::be<uint32_t>*>(output);
     auto e = rt.kernel_state()->object_table()->LookupObject<rex::system::XEnumerator>(handle);
     REQUIRE(e);
+    record_size = e->item_size();
     std::set<std::pair<uint32_t, uint32_t>> found;
     for (unsigned i = 0; i < 8; ++i) {
       uint32_t count = 0;
@@ -162,12 +168,20 @@ TEST_CASE("Aggregate all-types query enumerates installed titles with their real
       if (!count) break;
       REQUIRE(status == 0);
       auto* data = rt.memory()->TranslateVirtual<rex::system::xam::XCONTENT_AGGREGATE_DATA*>(output + 16);
-      CHECK(uint64_t(data->xuid) == 0);
+      owners.insert(uint64_t(data->xuid));
+      sizes.push_back(rex::memory::load_and_swap<uint64_t>(reinterpret_cast<uint8_t*>(data) + 0x148));
       found.emplace(data->title_id, uint32_t(data->content_type.get()));
     }
     return found;
   };
+  // Original filter 816876B4: XUID 0 accepts every owner (the Storage query),
+  // -1 only shared content, any other only that owner.
   CHECK(query(0) == std::set<std::pair<uint32_t, uint32_t>>{{0x584108B7, 0xD0000}, {0x12345678, 0x80000}});
+  CHECK(owners == std::set<uint64_t>{0, 1});
+  CHECK(query(0, ~0ull) == std::set<std::pair<uint32_t, uint32_t>>{{0x584108B7, 0xD0000}, {0x12345678, 0x80000}});
+  CHECK(owners == std::set<uint64_t>{0});
+  CHECK(query(0, 1) == std::set<std::pair<uint32_t, uint32_t>>{{0x584108B7, 0xD0000}});
+  CHECK(owners == std::set<uint64_t>{1});
   CHECK(query(0x584108B7) == std::set<std::pair<uint32_t, uint32_t>>{{0x584108B7, 0xD0000}});
   // Exercise the export, including packed 36-byte output and failure completion.
   const auto package = root / "0000000000000000/584108B7/000D0000/package-a";
@@ -198,6 +212,10 @@ TEST_CASE("Aggregate all-types query enumerates installed titles with their real
   CHECK(attributes(false) == 0);
   CHECK(rex::memory::load_and_swap<uint32_t>(bytes) == 0x10);
   CHECK(rex::memory::load_and_swap<uint64_t>(bytes + 28) == 15);
+  // 584-byte original records (816EEDF0) carry the size at +0x148 (81684BC0).
+  CHECK(query(0x584108B7, ~0ull).size() == 1);
+  CHECK(record_size == 584);
+  CHECK(sizes == std::vector<uint64_t>{15});
   CHECK(bytes[36] == 0xA5);
   // Internal aggregate records carry the owner, including XUID=0 (shared).
   std::strcpy(reinterpret_cast<char*>(rt.memory()->TranslateVirtual(output + 2560)), "shared-test");

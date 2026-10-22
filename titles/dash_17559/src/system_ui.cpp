@@ -1,6 +1,8 @@
 #include "system_ui.h"
 #include "boot_intro.h"
 #include "system_ui_request.h"
+#include "storage_selector_diagnostic.h"
+#include "system_ui_saved_state.h"
 #include "../../common/system_ui_context.h"
 #include "../../common/system_ui_execution.h"
 #include <rex/runtime.h>
@@ -20,6 +22,7 @@
 #include <cstring>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <vector>
 #include <chrono>
 #include <rex/ppc/func.h>
@@ -62,9 +65,12 @@ struct SuspendedApp {
   uint32_t message;
   std::vector<uint8_t> request;
   std::vector<uint8_t> state;
+  uint32_t user;
 };
 std::vector<SuspendedApp> suspended_apps;
 std::vector<uint8_t> restore_state;  // consumed by the next initialization
+// Controller of an app started by XamAppLoad without a request buffer.
+std::optional<uint32_t> load_user;  // consumed by the next initialization
 x360n::SystemUiExecution ui_execution;
 std::string system_drive = "game:";
 std::string bound_xam_path;
@@ -100,6 +106,19 @@ uint32_t Read32(rex::memory::Memory& memory, uint32_t address) {
 }
 void Write32(rex::memory::Memory& memory, uint32_t address, uint32_t value) {
   rex::memory::store_and_swap<uint32_t>(memory.TranslateVirtual(address), value);
+}
+// A nested selector request is accepted before the previous app is suspended.
+// If loading its successor fails at the frame boundary, complete that accepted
+// I/O instead of leaving the game or CreateProfile waiting indefinitely.
+void FailQueuedSelector(rex::Runtime& runtime, uint32_t message,
+                        const std::vector<uint8_t>& request, X_HRESULT status) {
+  if (message != 0x2100B || request.size() != 40 || static_cast<int32_t>(status) >= 0) return;
+  const auto address = rex::memory::load_and_swap<uint32_t>(request.data() + 0x1C);
+  if (!address) return;
+  const auto* io = runtime.memory()->TranslateVirtual<rex::system::XAM_OVERLAPPED*>(address);
+  if (io->result != 997) return; // The original app may already have completed.
+  const uint32_t error = (status & 0x7FFF0000) == 0x00070000 ? status & 0xFFFF : 1627;
+  runtime.kernel_state()->CompleteOverlappedImmediateEx(address, error, status, 0);
 }
 // Static host state written by the original host 816CE8B0 before and after
 // its compositor setup: dispatcher headers of its events (type byte, signal
@@ -182,8 +201,11 @@ void ReleaseSystemUiHost() {
   pending_ui = {};
   poll_guide = {};
   active_application = nullptr;
+  for (const auto& app : suspended_apps)
+    ReleaseDiscardedSystemUiState(*rex::Runtime::instance()->memory(), app.message, app.state);
   suspended_apps.clear();
   restore_state.clear();
+  load_user.reset();
   xam->SetAchievementUnlockedCallback({});
   {
     std::lock_guard lock(achievement_notices_mutex);
@@ -231,6 +253,7 @@ void InstallSystemUi(rex::Runtime& runtime, std::string drive, std::string nativ
       REXLOG_INFO("17559 diagnostic: original Guide service requested, result={:08X}", ctx->r3.u32);
     };
   }
+  poll_guide = WithStorageSelectorDiagnostic(runtime, std::move(poll_guide));
   // Every title presents through VdSwap: run system frames there, not from
   // title-specific render hooks.
   rex::kernel::xboxkrnl::SetSystemSwapCallback(&SystemSwap);
@@ -246,6 +269,7 @@ void InstallSystemUi(rex::Runtime& runtime, std::string drive, std::string nativ
   runtime.kernel_state()->RegisterRecompiledModule("vk.xex", "\\Device\\Harddisk0\\Partition1\\vk.xex", keyboard_library.c_str());
   bind("signin.xex", "game:\\system\\signin.xex", "dash_17559_signin");
   bind("createprofile.xex", "game:\\system\\createprofile.xex", "dash_17559_createprofile");
+  bind("deviceselector.xex", "game:\\system\\deviceselector.xex", "dash_17559_deviceselector");
   if (!native_directory.empty()) {
     bind("xam.xex", "game:\\system\\xam_ui.xex", "dash_17559_xam_ui");
     bound_xam_path = UiPath("game:\\system\\xam_ui.xex");
@@ -275,28 +299,52 @@ void InstallSystemUi(rex::Runtime& runtime, std::string drive, std::string nativ
     achievement_notices.push_back({user, title, achievement, xuid});
     achievement_notices_pending.store(true, std::memory_order_release);
   });
+  // Hypothesis (816BCE74 not fully traced): without a buffer, XAM initializes
+  // the app with a null request; 90107850 handles that case. A buffer would
+  // need its unverified layout and is refused rather than reinterpreted.
+  xam->system_app_load = [&runtime](const std::string& module, uint32_t user, uint32_t buffer,
+                                    uint32_t size) -> rex::X_HRESULT {
+    const auto message = SystemUiMessageForLoad(module);
+    if (!message) return X_E_NOTFOUND;
+    if (buffer || size) return static_cast<X_HRESULT>(0x80004001u);
+    auto xam = runtime.kernel_state()->GetKernelModule<rex::kernel::xam::XamModule>("xam.xex");
+    load_user = user;
+    const auto result = xam->system_ui_request(message, 0, 0);
+    load_user.reset();
+    return result;
+  };
   xam->system_ui_request = [&runtime, ui_ready = false, ui_attempted = false](uint32_t message, uint32_t request, uint32_t size) mutable -> rex::X_HRESULT {
     const bool notification = message == 0x21013;
     const auto* application = SystemUiApplicationFor(message);
     if (!notification && !application) return X_E_NOTFOUND;
-    if (!request || size != (notification ? 40u : application->request_size) || !rex::system::XThread::IsInThread()) return X_E_INVALIDARG;
-    REXLOG_INFO("17559 system UI: original application request {:08X} size={}", message, size);
+    // XamAppLoad without a buffer: no request, controller from load_user.
+    const bool unrequested = !notification && !request && !size && load_user;
+    if (!unrequested && (!request || size != (notification ? 40u : application->request_size))) return X_E_INVALIDARG;
+    if (!rex::system::XThread::IsInThread()) return X_E_INVALIDARG;
+    REXLOG_INFO("17559 system UI: original application request {:08X} size={}{}", message, size,
+                unrequested ? " (XamAppLoad)" : "");
     x360n::SystemUiContext system_process(*runtime.memory());
     auto* state = runtime.kernel_state();
     auto xam = state->GetKernelModule<rex::kernel::xam::XamModule>("xam.xex");
-    if (!notification && draw_ui) {
+    if (!notification && (draw_ui || xam->GetSystemUiSession().module)) {
       if (pending_ui) return X_E_FAIL;
       // System apps occupy the same guest image. Copy the request now, then
       // unload the current app at the frame boundary before loading its successor.
       std::vector<uint8_t> bytes(size);
-      std::memcpy(bytes.data(), runtime.memory()->TranslateVirtual(request), size);
-      pending_ui = [&runtime, message, bytes = std::move(bytes)] {
+      if (size) std::memcpy(bytes.data(), runtime.memory()->TranslateVirtual(request), size);
+      pending_ui = [&runtime, message, bytes = std::move(bytes), queued_user = load_user] {
         auto xam = runtime.kernel_state()->GetKernelModule<rex::kernel::xam::XamModule>("xam.xex");
-        const auto buffer = runtime.memory()->SystemHeapAlloc(uint32_t(bytes.size()));
-        if (!buffer) { REXLOG_ERROR("17559 system UI: queued request allocation failed"); return; }
-        std::memcpy(runtime.memory()->TranslateVirtual(buffer), bytes.data(), bytes.size());
+        const auto buffer = bytes.empty() ? 0 : runtime.memory()->SystemHeapAlloc(uint32_t(bytes.size()));
+        if (!bytes.empty() && !buffer) {
+          FailQueuedSelector(runtime, message, bytes, static_cast<X_HRESULT>(0x8007000Eu));
+          REXLOG_ERROR("17559 system UI: queued request allocation failed"); return;
+        }
+        if (buffer) std::memcpy(runtime.memory()->TranslateVirtual(buffer), bytes.data(), bytes.size());
+        load_user = queued_user;
         const auto result = xam->system_ui_request(message, buffer, uint32_t(bytes.size()));
-        runtime.memory()->SystemHeapFree(buffer);
+        load_user.reset();
+        if (buffer) runtime.memory()->SystemHeapFree(buffer);
+        FailQueuedSelector(runtime, message, bytes, result);
         REXLOG_INFO("17559 system UI: queued request {:08X} -> {:08X}", message, uint32_t(result));
       };
       xam->RequestSystemUiClose();
@@ -490,21 +538,23 @@ void InstallSystemUi(rex::Runtime& runtime, std::string drive, std::string nativ
       else state->UnloadUserModule(module, false);
       return X_E_FAIL;
     }
-    const auto owned_request = runtime.memory()->SystemHeapAlloc(size);
-    if (!owned_request) {
+    const auto owned_request = size ? runtime.memory()->SystemHeapAlloc(size) : 0;
+    if (size && !owned_request) {
       unload();
       return static_cast<X_HRESULT>(0x8007000Eu);
     }
     uint64_t resource_registration[] = {registration->resource_id, module->hmodule_ptr()};
     dispatcher->ExecuteTrap(thread, 0x817DCBB8, resource_registration, 2);
-    std::memcpy(runtime.memory()->TranslateVirtual(owned_request), runtime.memory()->TranslateVirtual(request), size);
-    const auto user = rex::memory::load_and_swap<uint32_t>(runtime.memory()->TranslateVirtual(owned_request + application->user_offset));
+    if (size)
+      std::memcpy(runtime.memory()->TranslateVirtual(owned_request), runtime.memory()->TranslateVirtual(request), size);
+    const auto user = unrequested ? *load_user
+        : rex::memory::load_and_swap<uint32_t>(runtime.memory()->TranslateVirtual(owned_request + application->user_offset));
     auto release_module = [&runtime, dispatcher, registration, owned_request, xam, unload] {
       auto* thread = rex::system::XThread::GetCurrentThread()->thread_state();
       uint64_t unregister_resource[] = {registration->resource_id};
       dispatcher->ExecuteTrap(thread, 0x817DCBD8, unregister_resource, 1);
       unload();
-      runtime.memory()->SystemHeapFree(owned_request);
+      if (owned_request) runtime.memory()->SystemHeapFree(owned_request);
       xam->EndSystemUi(registration->module);
       active_application = nullptr;
     };
@@ -604,7 +654,7 @@ void InstallSystemUi(rex::Runtime& runtime, std::string drive, std::string nativ
         // present call. Composite the original HUD here, with no extra swap,
         // image copy, window, blocking loop, or per-frame resource creation.
         std::vector<uint8_t> request_bytes(size);
-        std::memcpy(request_bytes.data(), runtime.memory()->TranslateVirtual(owned_request), size);
+        if (size) std::memcpy(request_bytes.data(), runtime.memory()->TranslateVirtual(owned_request), size);
         draw_ui = [&runtime, dispatcher, hud, registration, xam, destroy_scene, active_scene, saved_size, user,
                    message, request_bytes = std::move(request_bytes), frame = 0u]() mutable -> bool {
           auto* thread = rex::system::XThread::GetCurrentThread()->thread_state();
@@ -621,7 +671,8 @@ void InstallSystemUi(rex::Runtime& runtime, std::string drive, std::string nativ
             }
             uint64_t save[] = {0x80000009, resume + 24, 0};
             const auto saved = dispatcher->ExecuteTrap(thread, registration->callback, save, 3);
-            if (static_cast<int32_t>(saved) < 0) {
+            // S_FALSE leaves the original sign-in state buffer untouched.
+            if (saved != 0) {
               runtime.memory()->SystemHeapFree(resume);
               destroy_scene();
               runtime.kernel_state()->BroadcastNotification(0x9, false);
@@ -678,20 +729,31 @@ void InstallSystemUi(rex::Runtime& runtime, std::string drive, std::string nativ
           uint64_t update[] = {0x8000000A, 0, 0};
           dispatcher->ExecuteTrap(thread, registration->callback, update, 3);
           dispatcher->ExecuteTrap(thread, 0x816927C0, input, 1);
-          if (xam->GetSystemUiSession().close_requested) {
+          const auto closing = xam->GetSystemUiSession();
+          if (closing.close_requested) {
+            // CreateProfile's completion calls UnloadStack, not UnloadSelf.
+            // Its completed parents must not be restored. A successor queued
+            // by the same callback still runs after this frame's destruction.
+            if (closing.close_stack_requested) {
+              for (const auto& app : suspended_apps)
+                ReleaseDiscardedSystemUiState(*runtime.memory(), app.message, app.state);
+              suspended_apps.clear();
+            }
             // Closing because this app requested another one: keep it below
             // the successor, serialized by its own 80000009 handler.
-            if (pending_ui && saved_size && saved_size <= 1024 * 1024) {
+            if (!closing.close_stack_requested && pending_ui && saved_size && saved_size <= 1024 * 1024) {
               const auto buffer = runtime.memory()->SystemHeapAlloc(saved_size);
               if (buffer) {
                 uint64_t save[] = {0x80000009, buffer, 0};
                 const auto saved = dispatcher->ExecuteTrap(thread, registration->callback, save, 3);
-                if (static_cast<int32_t>(saved) >= 0) {
+                if (saved == 0) {
                   const auto* bytes = runtime.memory()->TranslateVirtual<uint8_t*>(buffer);
-                  suspended_apps.push_back({message, request_bytes, {bytes, bytes + saved_size}});
+                  suspended_apps.push_back({message, request_bytes, {bytes, bytes + saved_size}, user});
                   REXLOG_INFO("17559 system UI: suspended {:08X} below its successor ({} bytes)", message, saved_size);
-                } else {
+                } else if (static_cast<int32_t>(saved) < 0) {
                   REXLOG_ERROR("17559 system UI: original save failed {:08X}", uint32_t(saved));
+                } else {
+                  REXLOG_INFO("17559 system UI: original app declined suspension {:08X}", uint32_t(saved));
                 }
                 runtime.memory()->SystemHeapFree(buffer);
               }
@@ -807,22 +869,24 @@ void dash17559::DrawSystemUiFrame(PPCContext& ctx) {
   if (dash17559::draw_ui && !dash17559::draw_ui()) {
     dash17559::draw_ui = {};
     dash17559::HideSystemFrame(*rex::Runtime::instance(), frame.thread_state());
-    if (!dash17559::pending_ui && !dash17559::suspended_apps.empty()) {
-      // The successor closed: return to the app that launched it.
-      dash17559::pending_ui = [app = std::move(dash17559::suspended_apps.back())] {
-        auto& runtime = *rex::Runtime::instance();
-        auto xam = runtime.kernel_state()->GetKernelModule<rex::kernel::xam::XamModule>("xam.xex");
-        const auto buffer = runtime.memory()->SystemHeapAlloc(uint32_t(app.request.size()));
-        if (!buffer) { REXLOG_ERROR("17559 system UI: restore request allocation failed"); return; }
-        std::memcpy(runtime.memory()->TranslateVirtual(buffer), app.request.data(), app.request.size());
-        dash17559::restore_state = app.state;
-        const auto result = xam->system_ui_request(app.message, buffer, uint32_t(app.request.size()));
-        dash17559::restore_state.clear();
-        runtime.memory()->SystemHeapFree(buffer);
-        REXLOG_INFO("17559 system UI: restored suspended {:08X} -> {:08X}", app.message, uint32_t(result));
-      };
-      dash17559::suspended_apps.pop_back();
-    }
+  }
+  if (!dash17559::draw_ui && !dash17559::pending_ui && !dash17559::suspended_apps.empty()) {
+    // Also resume the parent when its queued successor failed to load.
+    dash17559::pending_ui = [app = std::move(dash17559::suspended_apps.back())] {
+      auto& runtime = *rex::Runtime::instance();
+      auto xam = runtime.kernel_state()->GetKernelModule<rex::kernel::xam::XamModule>("xam.xex");
+      const auto buffer = app.request.empty() ? 0 : runtime.memory()->SystemHeapAlloc(uint32_t(app.request.size()));
+      if (!app.request.empty() && !buffer) { REXLOG_ERROR("17559 system UI: restore request allocation failed"); return; }
+      if (buffer) std::memcpy(runtime.memory()->TranslateVirtual(buffer), app.request.data(), app.request.size());
+      dash17559::restore_state = app.state;
+      if (app.request.empty()) dash17559::load_user = app.user;
+      const auto result = xam->system_ui_request(app.message, buffer, uint32_t(app.request.size()));
+      dash17559::restore_state.clear();
+      dash17559::load_user.reset();
+      if (buffer) runtime.memory()->SystemHeapFree(buffer);
+      REXLOG_INFO("17559 system UI: restored suspended {:08X} -> {:08X}", app.message, uint32_t(result));
+    };
+    dash17559::suspended_apps.pop_back();
   }
   // A notification is a non-modal system frame: the original presenter owns
   // animation and expiry; it never captures game controls or opens the Guide.
@@ -839,3 +903,41 @@ void dash17559::DrawSystemUiFrame(PPCContext& ctx) {
     }
   }
 }
+
+#ifndef X360N_SYSTEM_UI_PLUGIN
+namespace dash17559 {
+namespace {
+// Pure original XAM 17559 routines imported by dash.xex itself (the Storage
+// list): run them from the original image, mapped on first use without its
+// entry point, exactly as the Guide host maps it. No reimplementation of
+// their collation/localization tables.
+void CallOriginalXam(PPCContext& ctx, uint8_t* base, uint32_t address, const char* name) {
+  static std::mutex mapping;
+  auto& runtime = *rex::Runtime::instance();
+  auto* state = runtime.kernel_state();
+  {
+    std::lock_guard lock(mapping);
+    const auto path = UiPath("game:\system\xam_ui.xex");
+    if (!state->GetModule(path) && !state->LoadUserModule(path, false))
+      REXLOG_ERROR("17559: original XAM image unavailable for {}", name);
+  }
+  auto* fn = runtime.function_dispatcher()->GetFunction(address);
+  if (!fn) {
+    REXLOG_ERROR("17559: missing original {} {:08X}", name, address);
+    ctx.r3.u64 = 0x80004001;  // E_NOTIMPL, never a fabricated result
+    return;
+  }
+  fn(ctx, base);
+}
+}  // namespace
+}  // namespace dash17559
+// Original export 0x1E6 (816E35A8): (str1, str2, count, flags) UTF-16 collation.
+extern "C" REX_FUNC(__imp__XamUniSortCmpString) {
+  dash17559::CallOriginalXam(ctx, base, 0x816E35A8, "XamUniSortCmpString");
+}
+// Original export 0x283 (816EE090): localized title/display strings of a
+// content metadata block in the console language; 87 without metadata.
+extern "C" REX_FUNC(__imp__XamContentGetLocalizedString) {
+  dash17559::CallOriginalXam(ctx, base, 0x816EE090, "XamContentGetLocalizedString");
+}
+#endif

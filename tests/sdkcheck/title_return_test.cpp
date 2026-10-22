@@ -122,7 +122,7 @@ TEST_CASE("original HUD reboot preserves its packed dashboard context", "[sdk][t
 }
 }
 
-TEST_CASE("session identity follows the dashboard store without replacing title profiles", "[sdk][title-return]") {
+TEST_CASE("session identity follows the dashboard hard drive and its session", "[sdk][title-return]") {
   x360n::test::Workdir work("x360n_title_return", "profile-source");
   const auto platform = work.dir / "platform";
   const auto game = work.dir / "game";
@@ -133,15 +133,18 @@ TEST_CASE("session identity follows the dashboard store without replacing title 
   uint64_t owner_id = 0;
   REQUIRE(owner.CreateLocal("Session", &owner_id) == 0);
   REQUIRE(owner.SetLocalSession(owner_id) == 0);
-  rex::system::xam::UserProfile local;
-  REQUIRE(local.InitializeLocal(game));
-  uint64_t local_id = 0;
-  REQUIRE(local.CreateLocal("Preserved", &local_id) == 0);
-  REQUIRE(local.SetLocalSession(local_id) == 0);
+  // As the supervisor does: one console hard drive for every title.
+  struct RestoreFlag {
+    std::string value = rex::cvar::GetFlagByName("content_data_root");
+    ~RestoreFlag() { rex::cvar::SetFlagByName("content_data_root", value); }
+  } restore_root;
+  REQUIRE(rex::cvar::SetFlagByName("content_data_root", platform.string()));
   rex::Runtime rt(game, game);
   rex::RuntimeConfig config{}; config.tool_mode = true; config.kernel_init = rex::kernel::InitializeKernel;
   REQUIRE(rt.Setup(std::move(config)) == X_STATUS_SUCCESS);
-  REQUIRE(rt.kernel_state()->user_profile()->identity().xuid == local_id);
+  // The profile is found on the hard drive; the title root has no session.
+  REQUIRE(rt.kernel_state()->user_profile()->identity().xuid == owner_id);
+  CHECK(rt.kernel_state()->user_profile()->identity().signin_state == 0);
   const auto previous = REXCVAR_GET(x360n_profile_root);
   struct Reset { std::string value; ~Reset() { REXCVAR_SET(x360n_profile_root, value); } } reset{previous};
   REXCVAR_SET(x360n_profile_root, platform.string());
@@ -152,9 +155,9 @@ TEST_CASE("session identity follows the dashboard store without replacing title 
   REQUIRE(rt.kernel_state()->user_profile()->SetLocalSession(0) == 0);
   REQUIRE(owner.InitializeLocal(platform));
   CHECK(owner.identity().signin_state == 0);
-  REQUIRE(local.InitializeLocal(game));
-  CHECK(local.identity().xuid == local_id);
-  CHECK(local.identity().signin_state == 1);
+  // No profile copy is made in the title's own root.
+  for (const auto& entry : std::filesystem::directory_iterator(game))
+    CHECK(entry.path().filename().string().size() != 16);
 }
 
 TEST_CASE("title termination dispatches registered guest callbacks before stopping threads",

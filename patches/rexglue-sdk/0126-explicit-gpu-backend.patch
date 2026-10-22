@@ -1,0 +1,43 @@
+diff --git a/include/rex/runtime.h b/include/rex/runtime.h
+--- a/include/rex/runtime.h
++++ b/include/rex/runtime.h
+@@ -68,6 +68,8 @@
+   // GPU emulation plugin loaded by ReXApp when `graphics` is empty
+   // (e.g. "xenos"); empty means no GPU emulation.
+   std::string gpu_plugin;
++  // Explicit host API; never silently substitute another backend.
++  std::string gpu_backend = "any";
+   std::function<std::unique_ptr<system::IAudioSystem>(runtime::FunctionDispatcher*)> audio_factory;
+   std::function<std::unique_ptr<system::IInputSystem>(bool tool_mode)> input_factory;
+   std::function<void(Runtime*, system::KernelState*)> kernel_init;
+diff --git a/src/ui/rex_app.cpp b/src/ui/rex_app.cpp
+--- a/src/ui/rex_app.cpp
++++ b/src/ui/rex_app.cpp
+@@ -46,6 +46,10 @@
+ #include <filesystem>
+ #include <string_view>
+ 
++REXCVAR_DEFINE_STRING(gpu_backend, "any", "GPU",
++                      "Graphics API: any, d3d12 or vulkan (explicit selections never fall back)")
++    .lifecycle(rex::cvar::Lifecycle::kInitOnly);
++
+ REXCVAR_DEFINE_STRING(gpu_plugin, "", "GPU",
+                       "GPU emulation plugin to load at startup (e.g. 'xenos'); empty disables "
+                       "GPU emulation")
+@@ -309,6 +313,7 @@
+ 
+ bool ReXApp::SetupPresentation() {
+   config_.gpu_plugin = REXCVAR_GET(gpu_plugin);
++  config_.gpu_backend = REXCVAR_GET(gpu_backend);
+   config_.audio_factory = REX_AUDIO_BACKEND(rex::audio::sdl::SDLAudioSystem);
+   config_.input_factory = REX_INPUT_BACKEND(rex::input::CreateDefaultInputSystem);
+   config_.kernel_init = rex::kernel::InitializeKernel;
+@@ -316,7 +321,7 @@
+   OnPreSetup(config_);
+ 
+   if (!config_.graphics && !config_.gpu_plugin.empty()) {
+-    config_.graphics = rex::system::LoadGpuPlugin(config_.gpu_plugin);
++    config_.graphics = rex::system::LoadGpuPlugin(config_.gpu_plugin, config_.gpu_backend);
+     if (!config_.graphics) {
+       // Fatal by design: no silent headless fallback.
+       auto msg =

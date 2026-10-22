@@ -38,8 +38,8 @@ D3D12Render::UploadSlice D3D12Render::Upload(const void* data, size_t bytes) {
   return slice;
 }
 D3D12Render::UploadSlice D3D12Render::Reserve(size_t bytes, uint8_t*& mapped) {
-  // Suballocate immutable ranges for this submission. Reuse only after Flush
-  // has waited for the fence, including texture copies and root CBVs.
+  // Suballocate immutable ranges for this batch. RecycleBatch waits for its
+  // own fence before reusing uploads, including texture copies and root CBVs.
   const uint64_t aligned = (uint64_t(bytes) + 511) & ~uint64_t(511);
   while (upload_page_index_ < upload_pages_.size() &&
       upload_pages_[upload_page_index_].size - upload_pages_[upload_page_index_].used < aligned)
@@ -176,11 +176,12 @@ void D3D12Render::Flush(FlushCause cause) {
   Check(list_->Close(), "close"); ID3D12CommandList* lists[]{list_.Get()};
   provider_.GetDirectQueue()->ExecuteCommandLists(1, lists);
   Check(provider_.GetDirectQueue()->Signal(fence_.Get(), ++serial_), "signal");
-  {
-    Timer wait(stats_enabled_, flush_wait_ns_);
-    Check(fence_->SetEventOnCompletion(serial_, event_), "fence completion");
-  Require(WaitForSingleObject(event_, 5000) == WAIT_OBJECT_0, "render GPU timeout");
-  }
+  // CPU-visible writes and drain still require completion. Pure GPU work can
+  // remain queued until its recording arena is needed again. The same direct
+  // queue orders persistent EDRAM/mirror/texture accesses and scanout work.
+  if (!writeback_.empty() || cause == kFlushDrain || cause == kFlushGuestSync || cause == kFlushOverlap)
+    Wait(serial_);
+  else if (stats_enabled_) ++async_submissions_;
   Check(device_->GetDeviceRemovedReason(), "device status");
   if (debug_) {
     const auto messages = debug_->GetNumStoredMessagesAllowedByRetrievalFilter();
@@ -204,13 +205,10 @@ void D3D12Render::Flush(FlushCause cause) {
     D3D12_RANGE none{}; readback_->Unmap(0, &none);
   }
   readback_used_ = 0;
-  transient_.clear(); view_count_ = sampler_count_ = 0;
-  for (auto& s : scratch_) s.used = 0;
-  uint64_t retained = 0;
-  for (auto& page : upload_pages_) { page.used = 0; retained += page.size; }
-  if (retained > 64 * 1024 * 1024) upload_pages_.clear();
-  upload_page_index_ = 0;
-  Check(allocator_->Reset(), "reset allocator"); Check(list_->Reset(allocator_.Get(), nullptr), "reset list");
+  RecycleBatch();
+  if (stats_enabled_ && serial_ % 30 == 0)
+    REXLOG_INFO("Native queue submissions={} asynchronous={} fence_waits={} fence_ms={}",
+        serial_, async_submissions_, fence_waits_, flush_wait_ns_ / 1000000);
   if (stats_enabled_ && serial_ % 30 == 0)
     REXLOG_INFO("Native costs presents={} draws={} resolves={} empty_resolves={} overlap_flushes={} submits={} texture_uploads={} texture_bytes={} texture_ms={} resolve_ms={} flush_ms={} cache_hits={} (flush overlaps resolve)",
         present_count_, draw_count_, resolve_count_, empty_resolve_count_, overlap_flushes_, serial_, texture_uploads_, texture_upload_bytes_, texture_ns_ / 1000000,
@@ -218,6 +216,46 @@ void D3D12Render::Flush(FlushCause cause) {
   if (stats_enabled_ && serial_ % 30 == 0)
     REXLOG_INFO("Native draw costs draw_ms={} guest_upload_ms={} guest_upload_bytes={} gpu_texture_loads={} cpu_texture_loads={} flush_wait_ms={} (draw includes textures; uploads are mirror pages the CPU wrote)",
         draw_ns_ / 1000000, guest_upload_ns_ / 1000000, guest_upload_bytes_, gpu_texture_loads_, cpu_texture_loads_, flush_wait_ns_ / 1000000);
+}
+void D3D12Render::Wait(uint64_t serial) {
+  const auto completed = fence_->GetCompletedValue();
+  Require(completed != UINT64_MAX, "render device removed");
+  if (completed >= serial) return;
+  Timer wait(stats_enabled_, flush_wait_ns_);
+  if (stats_enabled_) ++fence_waits_;
+  Check(fence_->SetEventOnCompletion(serial, event_), "fence completion");
+  Require(WaitForSingleObject(event_, 5000) == WAIT_OBJECT_0, "render GPU timeout");
+}
+void D3D12Render::RecycleBatch() {
+  auto& retired = batches_[batch_index_];
+  retired.serial = serial_;
+  retired.allocator = std::move(allocator_);
+  retired.views = std::move(views_); retired.samplers = std::move(samplers_);
+  retired.transient = std::move(transient_);
+  retired.uploads = std::move(upload_pages_); retired.scratch = std::move(scratch_);
+  batch_index_ = (batch_index_ + 1) % batches_.size();
+  auto& next = batches_[batch_index_];
+  Wait(next.serial);
+  allocator_ = std::move(next.allocator);
+  views_ = std::move(next.views); samplers_ = std::move(next.samplers);
+  transient_ = std::move(next.transient);
+  upload_pages_ = std::move(next.uploads); scratch_ = std::move(next.scratch);
+  next.serial = 0;
+  transient_.clear(); view_count_ = sampler_count_ = 0;
+  for (auto& s : scratch_) s.used = 0;
+  uint64_t retained = 0;
+  for (auto& page : upload_pages_) { page.used = 0; retained += page.size; }
+  if (retained > 64 * 1024 * 1024) upload_pages_.clear();
+  upload_page_index_ = 0;
+  if (allocator_) Check(allocator_->Reset(), "reset allocator");
+  else Check(device_->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&allocator_)), "batch allocator");
+  if (!views_) {
+    D3D12_DESCRIPTOR_HEAP_DESC hd{D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, 65536, D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE, 0};
+    Check(device_->CreateDescriptorHeap(&hd, IID_PPV_ARGS(&views_)), "batch views");
+    hd.Type = D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER; hd.NumDescriptors = 2048;
+    Check(device_->CreateDescriptorHeap(&hd, IID_PPV_ARGS(&samplers_)), "batch samplers");
+  }
+  Check(list_->Reset(allocator_.Get(), nullptr), "reset list");
 }
 void D3D12Render::SyncGuestRead(uint32_t address, uint64_t length, ReadSite site) {
   if (length && writeback_.Overlaps(address, uint32_t(std::min<uint64_t>(length, 0x20000000)))) {

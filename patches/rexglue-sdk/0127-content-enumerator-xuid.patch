@@ -1,0 +1,20 @@
+diff --git a/src/kernel/xam/xam_content_aggregate.cpp b/src/kernel/xam/xam_content_aggregate.cpp
+index f41f2ef..bb61dce 100644
+--- a/src/kernel/xam/xam_content_aggregate.cpp
++++ b/src/kernel/xam/xam_content_aggregate.cpp
+@@ -175,5 +175,13 @@ u32 XamContentAggregateCreateEnumerator_entry(u64 xuid, u32 device_id, u32 conte
+ }  // namespace kernel
+ }  // namespace rex
+ 
+-REX_EXPORT(__imp__XamContentAggregateCreateEnumerator,
+-           rex::kernel::xam::XamContentAggregateCreateEnumerator_entry)
++// XUID is one 64-bit PPC GPR. Keep it intact rather than passing through
++// the pinned generic marshaller, which reads only the low 32 bits.
++extern "C" REX_FUNC(__imp__XamContentAggregateCreateEnumerator) {
++  auto handle = mapped_u32(ctx.r7.u32 ? reinterpret_cast<rex::be<uint32_t>*>(base + ctx.r7.u32) : nullptr,
++                          ctx.r7.u32);
++  ctx.r3.u64 = rex::kernel::xam::XamContentAggregateCreateEnumerator_entry(
++      ctx.r3.u64, ctx.r4.u32, ctx.r5.u32, ctx.r6.u32, handle);
++}
++static rex::ppc::detail::PPCFuncRegistrar aggregate_content_reg(
++    "__imp__XamContentAggregateCreateEnumerator", &__imp__XamContentAggregateCreateEnumerator);

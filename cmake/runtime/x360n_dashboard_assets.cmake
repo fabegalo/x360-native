@@ -80,7 +80,7 @@ function(x360n_guard_dashboard target version root)
             -P "${CMAKE_CURRENT_FUNCTION_LIST_FILE}"
         VERBATIM)
     # Includes separate overlapping AOT images, before their source generation.
-    foreach(suffix "" _codegen _bootanim _gamerprofile _xam_ui _signin _createprofile _vk _hud)
+    foreach(suffix "" _codegen _bootanim _gamerprofile _xam_ui _signin _createprofile _vk _hud _deviceselector)
         if(TARGET ${target}${suffix})
             add_dependencies(${target}${suffix} ${target}_original_assets_check)
         endif()

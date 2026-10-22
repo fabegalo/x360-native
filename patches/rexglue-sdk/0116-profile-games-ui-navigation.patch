@@ -1,0 +1,63 @@
+diff --git a/src/kernel/xam/xam_ui.cpp b/src/kernel/xam/xam_ui.cpp
+index c4083cf..39318ac 100644
+--- a/src/kernel/xam/xam_ui.cpp
++++ b/src/kernel/xam/xam_ui.cpp
+@@ -598,9 +598,9 @@ REX_EXPORT_STUB(__imp__XamNavigate);
+ REX_EXPORT_STUB(__imp__XamNavigateBack);
+ REX_EXPORT_STUB(__imp__XamOverrideHudOpenType);
+ namespace {
+-// Retail 17559 wrappers 816C4678/816C4808 request the original GamerProfile
+-// application in modes 2/4. XUID is passed in one PPC argument register (r5).
+-uint32_t ShowOriginalAchievements(uint32_t user, uint32_t title, uint64_t xuid,
++// Retail 17559 wrappers request the original GamerProfile application. The
++// achievements Ex ABI passes XUID in r5; games/award-games pass it in r4.
++uint32_t ShowOriginalProfile(uint32_t user, uint32_t title, uint64_t xuid,
+                                   uint32_t mode, uint32_t achievement) {
+   if (user >= 4) return 87;  // ERROR_INVALID_PARAMETER
+   auto* kernel = REX_KERNEL_STATE();
+@@ -619,14 +619,26 @@ uint32_t ShowOriginalAchievements(uint32_t user, uint32_t title, uint64_t xuid,
+ }
+ }
+ extern "C" REX_FUNC(__imp__XamShowAchievementsUI) {
+-  ctx.r3.u64 = ShowOriginalAchievements(ctx.r3.u32, ctx.r4.u32, 0, 2, 0);
++  ctx.r3.u64 = ShowOriginalProfile(ctx.r3.u32, ctx.r4.u32, 0, 2, 0);
+ }
+ extern "C" REX_FUNC(__imp__XamShowAchievementsUIEx) {
+-  ctx.r3.u64 = ShowOriginalAchievements(ctx.r3.u32, ctx.r4.u32, ctx.r5.u64, 2, 0);
++  ctx.r3.u64 = ShowOriginalProfile(ctx.r3.u32, ctx.r4.u32, ctx.r5.u64, 2, 0);
+ }
+ extern "C" REX_FUNC(__imp__XamShowAchievementDetailsUI) {
+-  ctx.r3.u64 = ShowOriginalAchievements(ctx.r3.u32, ctx.r4.u32, 0, 4, ctx.r5.u32);
++  ctx.r3.u64 = ShowOriginalProfile(ctx.r3.u32, ctx.r4.u32, 0, 4, ctx.r5.u32);
+ }
++// Original 17559 exports 2D0 (816C48A0) and 3C7 (816C49F0): the second
++// argument is a complete XUID, stored at request +8, with title/detail zero.
++extern "C" REX_FUNC(__imp__XamShowGamesUI) {
++  ctx.r3.u64 = ShowOriginalProfile(ctx.r3.u32, 0, ctx.r4.u64, 1, 0);
++}
++extern "C" REX_FUNC(__imp__XamShowAvatarAwardGamesUI) {
++  ctx.r3.u64 = ShowOriginalProfile(ctx.r3.u32, 0, ctx.r4.u64, 6, 0);
++}
++static rex::ppc::detail::PPCFuncRegistrar show_games_ui_reg(
++    "__imp__XamShowGamesUI", &__imp__XamShowGamesUI);
++static rex::ppc::detail::PPCFuncRegistrar show_avatar_award_games_ui_reg(
++    "__imp__XamShowAvatarAwardGamesUI", &__imp__XamShowAvatarAwardGamesUI);
+ static rex::ppc::detail::PPCFuncRegistrar show_achievements_ui_reg(
+     "__imp__XamShowAchievementsUI", &__imp__XamShowAchievementsUI);
+ static rex::ppc::detail::PPCFuncRegistrar show_achievements_ui_ex_reg(
+@@ -634,7 +646,6 @@ static rex::ppc::detail::PPCFuncRegistrar show_achievements_ui_ex_reg(
+ static rex::ppc::detail::PPCFuncRegistrar show_achievement_details_ui_reg(
+     "__imp__XamShowAchievementDetailsUI", &__imp__XamShowAchievementDetailsUI);
+ REX_EXPORT_STUB(__imp__XamShowAndWaitForMessageBoxEx);
+-REX_EXPORT_STUB(__imp__XamShowAvatarAwardGamesUI);
+ REX_EXPORT_STUB(__imp__XamShowAvatarAwardsUI);
+ REX_EXPORT_STUB(__imp__XamShowAvatarMiniCreatorUI);
+ REX_EXPORT_STUB(__imp__XamShowBadDiscErrorUI);
+@@ -663,7 +674,6 @@ REX_EXPORT_STUB(__imp__XamShowGameInviteUI);
+ REX_EXPORT_STUB(__imp__XamShowGameVoiceChannelUI);
+ REX_EXPORT_STUB(__imp__XamShowGamerCardUIForXUID);
+ REX_EXPORT_STUB(__imp__XamShowGamerCardUIForXUIDp);
+-REX_EXPORT_STUB(__imp__XamShowGamesUI);
+ REX_EXPORT_STUB(__imp__XamShowGenericOnlineAppUI);
+ REX_EXPORT_STUB(__imp__XamShowGoldUpgradeUI);
+ REX_EXPORT_STUB(__imp__XamShowGraduateUserUI);

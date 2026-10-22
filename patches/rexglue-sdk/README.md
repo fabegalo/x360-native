@@ -1126,3 +1126,337 @@ Teste GPU usa o decodificador compartilhado, superfície de 8 bits e 64 pixels
 com cores distintas e alpha zero/parcial/opaco; a configuração anterior é
 controle negativo e falha. Sem equivalente upstream identificado.
 [Evidências e limite do aceite](../../docs/reports/achievement-overlay-2026-10-21.md).
+
+## 0116 — entradas de jogos do GamerProfile original
+
+Implementa `XamShowGamesUI` e `XamShowAvatarAwardGamesUI`, antes stubs atingidos
+na sessão manual de 21/10. Os exports originais Retail 17559 2D0/3C7
+(`816C48A0`/`816C49F0`) usam os modos 1/6 do GamerProfile: FE/21008, 544 bytes,
+usuário em +0 e XUID de 64 bits em +8. O XUID vem de **r4**, diferentemente de
+`XamShowAchievementsUIEx`, que o recebe em r5. Título/detalhe ficam zerados.
+Reutiliza a rota existente para o módulo original; sem interface substituta,
+dados inventados ou modificação do ledger. Preserva falhas de despacho.
+Regressão focada em `achievement_ui_test.cpp`, tag `[profile-navigation]`,
+falhou sem o patch. Sem equivalente upstream identificado. Abertura/desenho
+e retorno das cenas ainda dependem do aceite manual; o patch não certifica
+a correção da queda posterior a CreateProfile.
+
+## 0117 — renomeação local e entrada da edição original
+
+`XamShowEditProfileUI` solicita o modo 3 do GamerProfile, conforme o export
+Retail 17559 3BC (`816C4B40`). `XamProfileRenameAccount` preserva o XUID inteiro
+em r3 e lê o nome WCHAR em r4, conforme `816DE888`/caller `9010BC20`.
+Retorna erro Win32 síncrono; não usa o marshaler que trunca inteiros em 32 bits.
+Valida a memória guest e o nome limitado a 15 caracteres ASCII, mantendo o
+contrato local já existente. Duplicidade ignora caixa e exclui a própria conta.
+
+A gravação atômica antecede a publicação do nome; falha não altera identidade,
+seleção ou estado conectado. XUID, caminhos de saves e ledger permanecem
+estáveis; renomear não revoga handles de save. A conta ativa publica a
+notificação original 14/slot mask 1 após o commit. Testes `[profile-rename]` e
+`[profile-navigation]` falham sem o patch. Não implementa serviços Live nem
+certifica o desenho/aceite das cenas. Sem equivalente upstream identificado.
+
+## 0118 — remoção recuperável da identidade local
+
+Implementa `XamProfileDelete` conforme `816DB078`: dispositivo em r3 e XUID
+inteiro em r4, resultado HRESULT. O pedido é emitido pela confirmação original
+da dashboard. Antes de remover a identidade, copia e sincroniza o snapshot
+comprometido em `profiles/deleted/`, sem substituir uma recuperação existente.
+Falha no arquivo de recuperação ou no commit recusa a alteração em memória.
+Saves, configurações e conquistas continuam em seus caminhos por XUID.
+
+Remover a conta selecionada desconecta e invalida seus handles de armazenamento;
+remover outra conta preserva a sessão atual. A remoção do último perfil grava
+v2 vazio de 20 bytes, com XUID selecionado zero. O parser reconhece esse estado
+sem ressuscitar o v1 preservado como origem de migração. Criar uma nova conta
+depois disso mantém o v2. Não apaga conteúdo associado nem implementa restauração
+pela UI; o arquivo de recuperação preserva o formato original do snapshot.
+Testes `[profile-delete]`, junto dos casos de migração/identidade, usam somente
+armazenamento descartável. Sem equivalente upstream identificado.
+
+## 0119 — preferências persistentes e cache de configurações por XUID
+
+Implementa os tipos INT32, INT64, DOUBLE, FLOAT, DATETIME, WCHAR e BINARY no
+`XamUserWriteProfileSettings`, antes ignorados com retorno de sucesso para
+vários tipos. Valida tipo, tamanho e memória de todos os itens antes de gravar.
+Os contadores do ledger e de títulos jogados permanecem somente leitura.
+
+Preferências gerais ficam em `profiles/<XUID>/settings-v1/<ID>.dat`, com os
+escalares e WCHAR em big endian; strings terminam em WCHAR zero. Configurações
+específicas do título mantêm o caminho e os bytes do armazenamento anterior.
+Cada valor é gravado e sincronizado em temporário antes da substituição atômica;
+falha não publica esse valor no cache. Isso não promete uma transação conjunta
+para falhas de I/O no meio de um lote. Arquivo corrompido retorna erro de leitura.
+
+O cache acompanha XUID e Title ID, restaurando o padrão ou ausência quando
+o próximo usuário/título não possui esse valor. Nome e exclusão da identidade
+não mudam os caminhos por XUID. Leitura e gravação usam a mesma seção crítica
+do logon até copiar a resposta, evitando substituição/liberação de um objeto
+`Setting` ainda usado por outra chamada. Sem alteração por frame ou no renderer.
+Falha de abertura de arquivo não chega mais a `fwrite`/`fclose` com FILE nulo.
+Essa falha de contrato não é atribuída à queda guest `0x00000005` sem evidência.
+
+Testes em `profile_settings_test.cpp`: sete tipos, reinício, renomeação,
+troca de usuário, corrupção, falha de escrita, overlapped, buffers e leitura
+concorrente. Os casos de persistência falharam antes do patch. Sem equivalente
+upstream identificado.
+
+## 0120 — dispositivos de armazenamento persistentes
+
+Troca os dispositivos fictícios por backings do ambiente, IDs estáveis,
+capacidade real do host e quotas/reservas opcionais em `storage.toml`.
+MU/USB só aparecem com pasta configurada existente; o óptico depende de
+um mount CdRom0 realmente somente leitura. Pacotes/headers/enumeração C8
+usam a raiz do dispositivo; o layout anterior do HDD é preservado.
+Consultas NT do volume do pacote usam os mesmos números de XAM; crescimento
+de arquivos com quota passa pela verificação de espaço do backend.
+Os testes PPC em `storage_device_test.cpp` e `save_storage_test.cpp` cobrem
+volumes separados, reinício, ausência, erro, quota e persistência real.
+Limites e aceite original em `docs/reports/storage-p0-2026-10-21.md`.
+Sem equivalente upstream identificado.
+
+## 0121 — seletor original de armazenamento
+
+Transporta o pedido Retail 17559 FE/2100B de 40 bytes, mantém o OVERLAPPED
+pendente para a conclusão pela aplicação e remove a seleção automática do
+HDD. Adapter local preserva os 64 bits de bytes pedidos em `r6`. O perfil
+17559 registra o `deviceselector.xex` correspondente por SHA-256 e compila
+seu próprio módulo AOT; o host utiliza cenas e recursos originais.
+Frontend ausente retorna erro. Testes `[storage-selector]`; controle e
+aceite visual permanecem pendentes. Sem equivalente upstream identificado.
+
+## 0122 — capacidades offline de armazenamento de rede
+
+Implementa como desativados os booleans de Cloud Storage consultados pelo
+seletor original, em vez de deixar argumentos antigos em `r3`. O runtime
+não oferece serviço online e sempre oculta seu dispositivo de rede.
+Não fabrica permissões, conectividade ou dados de nuvem. Testes PPC variam
+usuário/tipo/Title ID para impedir suporte dependente do argumento residual.
+Sem equivalente upstream identificado.
+
+## 0123 — campos opcionais de perfil ausentes
+
+Campos com chave/tipo/tamanho válidos, mas ainda não gravados, são retornados
+com origem `NO_VALUE` (0) e tipo `UNSET` (FF), sem criar arquivos nem inventar
+valores. Um campo ausente não invalida o lote inteiro de configurações da
+dashboard. Chaves malformadas continuam recusadas, inclusive na consulta de
+tamanho; arquivos corrompidos continuam sendo erros. A regressão usa os sete
+IDs ausentes registrados nas sessões da Retail 17559 e confirma persistência
+após gravar um deles. Tags `[profile-settings-optional]`, `[profile-settings]`.
+Sem equivalente upstream identificado.
+
+## 0124 — opções no Guide original
+
+Substitui o stub `XamShowOptionsUI` pelo pedido FE/21015 de 12 bytes
+`{0, controller, 6}`, conforme o export 4ED (`816C2BD8 -> 816C2AF0`) da
+Retail 17559. Usa o HUD original e o tratamento existente de pedidos
+encadeados; não altera a identidade nem cria uma tela alternativa.
+Preserva validação de usuário e falhas de memória/despacho.
+Tag `[profile-options]`, com regressão anterior ao patch.
+Sem equivalente upstream identificado.
+
+## 0125 — preferências locais no XGI
+
+Implementa a mensagem XGI B0082 seguindo `8190B3B0 -> 8190A7D0` da
+17559: lê os flags persistentes `10040053` do XUID ativo, aplica as máscaras
+1/6/24/32/64/128/256/512 e remove o bit de habilitação de 6/24 quando
+presente. Preserva S_FALSE quando a preferência composta está desabilitada.
+Ausência do campo conserva o resultado zerado da resposta original;
+corrupção, usuário desconectado e parâmetros inválidos não viram sucesso.
+O wrapper valida saída e OVERLAPPED antes do despacho. Não implementa Live
+nem anuncia suporte a quatro usuários simultâneos. Testes `[user-preference]`
+e `[profile-preference-flags]`, incluindo isolamento e buffers inválidos.
+Sem equivalente upstream identificado.
+
+## 0127 — XUID completo na enumeração agregada
+
+O primeiro argumento de `XamContentAggregateCreateEnumerator` é um XUID
+de 64 bits em um GPR PPC. Um adapter local evita a truncagem do marshaller
+genérico, que ocultava saves de proprietários reais. O teste C8 consulta
+um save da MU pelo XUID completo, via export e `XamEnumerate`, antes e
+depois de reiniciar. Não altera o marshaller global. Sem equivalente
+upstream identificado. O patch gráfico com prefixo 0127 tem caminho próprio;
+a ordem de aplicação é exclusivamente a lista em `deps.lock.json`.
+
+## 0128 — chave original de gamerpic
+
+Remove os valores fictícios C0DE0001/2/3 de `XamParseGamerTileKey`.
+Implementa o descritor de string XAM e os três componentes hexadecimais
+conforme o export 30A (`81670A50..81670B68`) da Retail 17559, incluindo
+o fallback reservado do original e a atualização do comprimento. Valida
+os spans de memória antes de ler ou escrever. Teste `[profile-tile-key]`
+falha com o stub anterior e passa com chaves reais, reservadas e inválidas.
+Isso não implementa seleção, gravação ou cache de imagens do perfil.
+Sem equivalente upstream identificado.
+
+## 0126 — API gráfica explícita no aplicativo
+
+`gpu_backend` atravessa RuntimeConfig/ReXApp até LoadGpuPlugin e a fábrica
+existente, sem alterar GpuCreateInfo nem a ABI 1 do plugin. API solicitada
+explicitamente não retorna ao padrão. RuntimeConfig C++ ganhou um campo:
+recompilar consumidores junto com o runtime. Teste gpu_backend_test.cpp e
+probes da fábrica; sem equivalente upstream identificado.
+
+## 0127 — composição D1OVL no Vulkan
+
+`0127-vulkan-display-overlay.patch` tem caminho distinto do patch de conteúdo
+0127. A lista do lock determina a aplicação. RequestDisplayTexture aceita
+o fetch próprio da camada sem alterar registradores do título. Compute GLSL
+traduzido para SPIR-V compõe BGRA/alpha antes de gamma, com descriptors por
+frame, barriers e descarte de image/view/memory por submission no resize.
+Os probes compararam 48 frames por API e cinco capturas idênticas. Isso ainda
+não certifica notificações/Guide originais ou gameplay Vulkan. Sem equivalente
+upstream identificado. [Evidências e limites](../../docs/reports/graphics/g1-vulkan-native-2026-10-21.md).
+
+## 0129 — fechar a pilha original de aplicativos
+
+`XamAppUnloadStack(0)` deixa de equivaler a `XamAppUnloadSelf`. A sessão
+preserva o escopo da pilha até o fechamento no limite do frame; um close-self
+posterior não o reduz. O host 17559 descarta os pais suspensos nessa situação,
+mantém o sucessor enfileirado e não restaura o CreateProfile já concluído.
+Nenhum módulo é descarregado dentro do callback solicitante.
+
+O teste `[profile-ui-stack]` falhou antes do patch em duas asserções e passou
+nas 23 após aplicá-lo. A sonda CPU executa o update original `90106398` com
+estados 1/2 e confirma Self/Stack. O host também libera as quatro cópias de
+strings do estado de Sign-in descartado, seguindo salvar/restaurar originais.
+Sem equivalente upstream identificado; aceite das duas rotas visuais separado.
+
+## 0130 — cache de Cloud Storage ausente no modo offline
+
+`XamNetworkStorageDeviceHasCacheFile` é um BOOL no export original 17559
+`615` (`816A6790`, pedido FE/2D002). O stub deixava o ID de dispositivo em
+`r3`; a dashboard interpretava HDD/MU como cache existente e acrescentava seu
+item de 512 MiB. Retorna falso porque não existe backend de Cloud Storage,
+sem inventar arquivos nem alterar a UI original. Teste PPC
+`[storage-offline-cache]`: red com IDs 1/2/7/FFFFFFFF na DLL anterior.
+Sem equivalente upstream identificado.
+
+## 0131 — carregamento de app original pelo Guide
+
+O atalho **Criar perfil** do Guide 17559 não usa `XamShowCreateProfileUI`:
+o handler do HUD (`913E85E0`, modo 2) chama `913EA808`, que executa
+`XamAppRequestLoad()` e, se não zero, `XamAppLoad("createprofile.xex",
+controle, 0, 0, 0, 0)`. Os dois exports eram `REX_EXPORT_STUB`; os logs
+manuais registraram os dois stubs e nenhuma tela foi aberta.
+
+`XamAppRequestLoad` (0x248, `816CAD70 → 816CAC60` tipo 0) devolve se há um
+carregador de apps originais selecionado pelo perfil; o gate interno do XAM
+não é modelado. `XamAppLoad` (0x244, `816CDD58`) entrega nome, controle e
+buffer opcional (no máximo 256 bytes) ao hook `system_app_load`; sem hook,
+devolve `E_FAIL` como `816CDF7C`. OVERLAPPED e handle de saída não estão
+implementados: a chamada falha com `E_NOTIMPL` e completa o OVERLAPPED com
+1627, sem simular carga. O host 17559 aceita somente `createprofile.xex` sem
+buffer e o inicia pelo mesmo caminho do CreateProfile original, com pedido
+nulo (`90107850` só copia os 136 bytes quando existem) e o controle do
+`XamAppLoad`. Que o XAM passe pedido nulo nesse caminho é hipótese:
+`816BCE74` não foi rastreado por completo. Teste `[app-load]`. Sem
+equivalente upstream identificado.
+
+## 0132 — perfil local nunca é parcial
+
+`XamUserIsPartialProfile` (0xAEA) era `REX_EXPORT_STUB`. O Guide 17559
+(`913E6B88`) chama esse export com o índice do controle e, se não zero, abre
+as conquistas do título atual (`XamShowAchievementsUI`) em vez da lista de
+Jogos (`XamShowGamesUI`). O stub devolvia o próprio índice: para os
+controles 1–3 o Guide abria a tela errada. Original `816DAAC8`: usuário
+conectado (`816D8470`) e bit `0x80000000` da primeira palavra da conta de
+380 bytes em registro+20 (copiada por `816DB950`; `816DAA60` testa Live
+`0x20000000` na mesma palavra). Contas locais não têm flags reservados
+(`AccountFor`), então o resultado é 0. Teste `[partial-profile]`: red com 5
+de 10 asserções falhando (1, 2, 3, 4 e 255 vazavam em `r3`); green 10/10.
+Sem equivalente upstream identificado.
+
+## 0133 — diagnóstico da enumeração de conquistas
+
+Somente log, sem mudança de comportamento. Uma linha `info` por criação de
+enumerador de conquistas/títulos jogados (título, controle, XUID, flags,
+quantidade, resultado) e por página entregue por `XamEnumerate` desses dois
+enumeradores (incluindo recusa de flags e buffer insuficiente). Motivo: a
+tela original de conquistas do GamerProfile 17559 fica carregando; as
+operações originais (`901200D8`) concluem na sonda CPU com cópia dos dados
+reais, mas a sessão real não registrava nenhum passo dessas exportações.
+Frequência: algumas linhas por abertura das telas de perfil, nenhuma por
+quadro. Testes relacionados inalterados: 1.502 asserções / 37 casos.
+
+## 0134 — flags do enumerador de conquistas como no original
+
+A tela de conquistas de um jogo ficava carregando sem parar. A
+`LoadAchievementsScene` do GamerProfile 17559 (`XM_INIT` em `90117710`)
+configura a operação `901200D8` com **flags `0x27`** e quantidade 150; o SDK
+recusava qualquer flag fora de `0x7` (erro 87). A cena recebia a falha, mas a
+lista nunca recebia dados. Original `81670190`: valida controle < 4,
+quantidade e ponteiros de saída, **não valida flags**; `flags & 7` escolhe
+registros de 36 ou 500 bytes. Os demais bits seguem para o serviço; aqui a
+única fonte é o livro local. Teste `[offline-achievement-api]`: red
+`87 == 0` com `0x27`; green 315 asserções / 3 casos. A asserção anterior que
+exigia erro para a flag `8` foi substituída por asserções do comportamento
+original (`0x27` com textos; `0x20` com itens de 36 bytes sem textos).
+Sonda com cópia somente leitura dos dados reais (perfil Forza, FM4
+`4D5309C9`): 50 conquistas com `0x27`/150, a 155 desbloqueada.
+
+## 0135 — copiar e mover conteúdo entre dispositivos
+
+`XamContentCopyInternal` (0x26C) e `XamContentMoveInternal` (0x26D) eram
+stubs. Wrapper original `816EEA78` (FE/2000C, 552 bytes): ponteiro opcional
+de XUID dono (`r3`), ponteiro opcional de dispositivo de destino (`r4`), item
+de 512 bytes (`r5`, cujos 0x148 bytes iniciais são `XCONTENT_AGGREGATE_DATA`;
+a dashboard acrescenta o tamanho em +328), callback (`r6`), contexto (`r7`),
+argumento extra (`r8`) e OVERLAPPED (`r9`); sem XUID e sem dispositivo é 87.
+A dashboard (`922FF840`–`922FF8B4`; Move é o thunk `9293B72C`, Copy o
+`9293B70C`) usa um callback no formato `CopyProgressRoutine` (`922FDB00`):
+total/transferido em `r3`/`r4`, motivo em `r8` (1 = início), contexto como
+nono argumento (`84(r1)`), retorno não zero cancela.
+
+`ContentManager::TransferContent` copia pacote e header para uma área de
+preparação no volume de destino e renomeia no lugar; mover só apaga a origem
+depois do destino concluído e, se a exclusão falhar, remove o destino. Nunca
+sobrescreve (183); verifica espaço com a mesma cota/reserva das consultas
+(112); recusa mover conteúdo aberto (5, como a exclusão); cancelamento
+completa com 1223 sem deixar destino nem preparação; preparação de processo
+interrompido é removida na transferência seguinte. Com OVERLAPPED, a cópia
+roda em `XHostThread` própria (não na fila deferida compartilhada) e devolve
+997. Hipóteses: o handler FE/2000C do XAM não foi rastreado; os códigos de
+conflito/espaço/cancelamento e a ausência de notificação de mudança seguem o
+backend local. Teste `[storage-transfer]`: red 2 falhas com o stub; green
+58 asserções. Formatação continua não implementada.
+
+## 0136 — HDD único do console
+
+Cvar `content_data_root`: raiz do `ContentManager` (o HDD do console, com
+`storage.toml`, MU/USB e todo XContent). Padrão: `user_data_root`, como antes.
+A sessão do supervisor passa a raiz da dashboard a todos os títulos; caches e
+demais dados continuam na raiz de cada título. Motivo: no console há um único
+HDD; com raízes por título, o Storage da dashboard não via saves dos jogos.
+Teste `[storage-hdd-root]`: red (cvar inexistente) → green.
+
+## 0137 — registros agregados originais
+
+`XamContentAggregateCreateEnumerator` devolve registros de 584 bytes, como o
+XAM 17559: `XCONTENT_AGGREGATE_DATA` (0x148), tamanho u64 em +0x148 e criação
+FILETIME em +0x150, preenchidos por `GetContentAttributes`. Filtro de dono
+original: XUID 0 lista todos os donos do dispositivo, ~0 só o compartilhado e
+os demais só aquele dono (`ContentManager::ListContentOwners`). Motivo: o
+Storage listava itens sem tamanho e omitia saves de outros perfis. Teste
+`[aggregate-content]`: registro de 584 bytes, tamanhos e filtro de dono.
+
+## 0138 — perfis como pacotes de conteúdo
+
+Como no console, cada perfil é um pacote de conteúdo no dispositivo:
+`<dispositivo>/<XUID>/FFFE07D1/00010000/<XUID>/` com `account.dat`
+("X360PA01", XUID, gamertag), jogos jogados, `settings-v1/` e conquistas
+offline (`achievements.dat`, via resolvedor do `OfflineAchievementStore`),
+mais o header 0x10000 com a gamertag como nome. `UserProfile` descobre os
+perfis varrendo HDD/MU/USB conectados; `<raiz>/profiles/session-v1.dat`
+("X360SS01", XUID, estado) guarda só a seleção. O antigo `local-v2.dat` e o
+arquivo de recuperação de exclusões deixaram de existir, sem migração (dados
+locais de teste são descartáveis). `XamProfileCreate` cria no dispositivo
+escolhido; enumeração, `FindAccount`, `LoadAccountInfo` e `XamProfileDelete`
+informam/aceitam o dispositivo real (0 = qualquer). No Storage, apagar ou
+mover o pacote do perfil conectado é recusado (5, como conteúdo aberto); após
+apagar/copiar/mover pacotes de perfil a lista é relida. Uma cópia do mesmo
+XUID em outro dispositivo é a mesma conta: vale a primeira encontrada
+(hipótese; o console não foi comparado). Testes `[profile-content]`,
+`[profile-delete]`, `[local-profile]` e `[profile-settings]` atualizados para
+o novo contrato.

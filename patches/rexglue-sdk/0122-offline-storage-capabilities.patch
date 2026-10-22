@@ -1,0 +1,45 @@
+diff --git a/src/kernel/xam/xam_misc.cpp b/src/kernel/xam/xam_misc.cpp
+index fac2449..46813aa 100644
+--- a/src/kernel/xam/xam_misc.cpp
++++ b/src/kernel/xam/xam_misc.cpp
+@@ -696,21 +696,34 @@ REX_EXPORT_STUB(__imp__XamNetworkStorageGetTitleProperties);
+ REX_EXPORT_STUB(__imp__XamNetworkStorageGetUserLastError);
+ REX_EXPORT_STUB(__imp__XamNetworkStorageGetUserNetworkSyncTime);
+ REX_EXPORT_STUB(__imp__XamNetworkStorageGetUserProperties);
+-REX_EXPORT_STUB(__imp__XamNetworkStorageHasUserEnabledStorage);
++// Offline runtime: this boolean capability is disabled, for every user/title.
++extern "C" REX_FUNC(__imp__XamNetworkStorageHasUserEnabledStorage) { ctx.r3.u64 = 0; }
++static rex::ppc::detail::PPCFuncRegistrar reg_XamNetworkStorageHasUserEnabledStorage("__imp__XamNetworkStorageHasUserEnabledStorage", &__imp__XamNetworkStorageHasUserEnabledStorage);
+ REX_EXPORT_STUB(__imp__XamNetworkStorageIsCheckingSyncStates);
+-REX_EXPORT_STUB(__imp__XamNetworkStorageIsEnabledInLiveHive);
+-REX_EXPORT_STUB(__imp__XamNetworkStorageIsSupportedContentType);
++// Offline runtime: this boolean capability is disabled, for every user/title.
++extern "C" REX_FUNC(__imp__XamNetworkStorageIsEnabledInLiveHive) { ctx.r3.u64 = 0; }
++static rex::ppc::detail::PPCFuncRegistrar reg_XamNetworkStorageIsEnabledInLiveHive("__imp__XamNetworkStorageIsEnabledInLiveHive", &__imp__XamNetworkStorageIsEnabledInLiveHive);
++// Offline runtime: this boolean capability is disabled, for every user/title.
++extern "C" REX_FUNC(__imp__XamNetworkStorageIsSupportedContentType) { ctx.r3.u64 = 0; }
++static rex::ppc::detail::PPCFuncRegistrar reg_XamNetworkStorageIsSupportedContentType("__imp__XamNetworkStorageIsSupportedContentType", &__imp__XamNetworkStorageIsSupportedContentType);
+ REX_EXPORT_STUB(__imp__XamNetworkStorageIsTitleExempt);
+-REX_EXPORT_STUB(__imp__XamNetworkStorageIsUserInSync);
++// Offline runtime: this boolean capability is disabled, for every user/title.
++extern "C" REX_FUNC(__imp__XamNetworkStorageIsUserInSync) { ctx.r3.u64 = 0; }
++static rex::ppc::detail::PPCFuncRegistrar reg_XamNetworkStorageIsUserInSync("__imp__XamNetworkStorageIsUserInSync", &__imp__XamNetworkStorageIsUserInSync);
+ REX_EXPORT_STUB(__imp__XamNetworkStorageLockFile);
+ REX_EXPORT_STUB(__imp__XamNetworkStorageOnSigninChanged);
+ REX_EXPORT_STUB(__imp__XamNetworkStorageOnUserSyncChange);
+ REX_EXPORT_STUB(__imp__XamNetworkStorageSetTestMock);
+ REX_EXPORT_STUB(__imp__XamNetworkStorageSetTitleProperties);
+ REX_EXPORT_STUB(__imp__XamNetworkStorageSetUserInSync);
+-REX_EXPORT_STUB(__imp__XamNetworkStorageShouldHideFromTitle);
++// Original selector 916D29C8 excludes cloud storage on this boolean result.
++// No online backend is configured; never expose a fictitious cloud device.
++extern "C" REX_FUNC(__imp__XamNetworkStorageShouldHideFromTitle) { ctx.r3.u64 = 1; }
++static rex::ppc::detail::PPCFuncRegistrar reg_XamNetworkStorageShouldHideFromTitle("__imp__XamNetworkStorageShouldHideFromTitle", &__imp__XamNetworkStorageShouldHideFromTitle);
+ REX_EXPORT_STUB(__imp__XamNetworkStorageSignInTestMock);
+-REX_EXPORT_STUB(__imp__XamNetworkStorageUserHasPrivilege);
++// Offline runtime: this boolean capability is disabled, for every user/title.
++extern "C" REX_FUNC(__imp__XamNetworkStorageUserHasPrivilege) { ctx.r3.u64 = 0; }
++static rex::ppc::detail::PPCFuncRegistrar reg_XamNetworkStorageUserHasPrivilege("__imp__XamNetworkStorageUserHasPrivilege", &__imp__XamNetworkStorageUserHasPrivilege);
+ REX_EXPORT_STUB(__imp__XamNetworkStorageUserNeedsToSync);
+ REX_EXPORT_STUB(__imp__XamOfflineTimerForceQuery);
+ REX_EXPORT_STUB(__imp__XamOfflineTimerGetContractData);

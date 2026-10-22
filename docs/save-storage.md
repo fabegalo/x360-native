@@ -40,8 +40,10 @@ inclusive `game:`, é rejeitado antes de qualquer substituição destrutiva.
 
 ```text
 <user_data_root>/
-  profiles/local-v1.dat ou local-v2.dat        # identidade C7 existente
+  profiles/session-v1.dat                   # perfil selecionado e estado (0138)
   <XUID de 16 dígitos hex>/
+    FFFE07D1/00010000/<XUID>/                # pacote do perfil (0138)
+    FFFE07D1/Headers/00010000/<XUID>.header
     <Title ID de 8 dígitos hex>/
       00000001/<nome do pacote>/<arquivos do jogo>
       Headers/00000001/<nome do pacote>.header
@@ -105,7 +107,25 @@ Comprovado: Windows x64, um usuário conectado no slot 0, dois perfis alternados
 pacotes extraídos e operações pelo caminho XAM → VFS → host. Não comprovados:
 POSIX, múltiplos usuários simultâneos, tolerância a queda de energia, STFS novo
 assinado/criptografado, Xbox Live ou compatibilidade universal. A descoberta do
-HDD e seus números de capacidade ainda são os valores virtuais do SDK. APIs
-de instalação/abertura direta de containers fora desse fluxo não foram ampliadas.
+HDD e seus números de capacidade eram os valores virtuais do SDK nessa etapa.
+O incremento de dispositivos de 21/10 substitui esses números por backing real,
+mantém o layout C8 e acrescenta MU/USB configuradas, quotas e consulta NT do
+volume do pacote. O seletor original 17559 foi exibido em teste curto autorizado,
+com conclusão de seleção e cancelamento; houve interação concorrente, e escolha
+da MU e uso por jogo ainda precisam de aceite. Implementação e limites estão no
+[relatório S1](reports/storage-p0-2026-10-21.md). APIs de instalação/abertura
+direta de containers fora desse fluxo não foram ampliadas.
 
-Sem Computer Use, suíte completa, push, Release ou alterações no GitHub.
+A etapa C8 histórica acima não usou Computer Use. O incremento S1 teve teste
+visual explicitamente autorizado; não houve suíte completa, push ou Release.
+
+## HDD único da sessão (22/10)
+
+Regra de fidelidade ao console: todos os títulos de uma sessão gravam XContent
+(saves, DLC, instalações e configurações de perfil por título) no **HDD da
+dashboard da sessão** (`--content_data_root`, patch 0136). Cada título mantém
+sua própria raiz para cache e dados internos. Não há migração: por decisão do
+mantenedor, saves antigos nas raízes dos títulos deixam de ser usados (não são
+apagados). Sessões de outra dashboard usam o próprio HDD, como consoles
+distintos. Jogos precisam ser recompilados com o SDK do 0136 para adotar o HDD
+único; um runtime anterior ignora a flag e continua usando a própria raiz.

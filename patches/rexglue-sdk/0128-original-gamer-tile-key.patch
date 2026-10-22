@@ -1,0 +1,76 @@
+diff --git a/src/kernel/xam/xam_user.cpp b/src/kernel/xam/xam_user.cpp
+index 15742cc..e855005 100644
+--- a/src/kernel/xam/xam_user.cpp
++++ b/src/kernel/xam/xam_user.cpp
+@@ -13,6 +13,7 @@
+ #pragma GCC diagnostic ignored "-Wunused-parameter"
+ 
+ #include <cstring>
++#include <array>
+ #include <limits>
+ #include <mutex>
+ 
+@@ -982,9 +983,60 @@ u32 XamUserCreateTitlesPlayedEnumerator_entry(u32 title_id, u32 user_index, u64
+ 
+ u32 XamParseGamerTileKey_entry(mapped_u32 key_ptr, mapped_u32 out1_ptr, mapped_u32 out2_ptr,
+                                mapped_u32 out3_ptr) {
+-  *out1_ptr = 0xC0DE0001;
+-  *out2_ptr = 0xC0DE0002;
+-  *out3_ptr = 0xC0DE0003;
++  // Retail 17559 export 30A (81670A50): XAM string descriptor, three
++  // eight-WCHAR hexadecimal components, and the original reserved fallback.
++  auto* memory = REX_KERNEL_MEMORY();
++  const auto key = key_ptr.guest_address();
++  if (!AchievementGuestSpan(memory, key, 16, memory::kMemoryProtectRead | memory::kMemoryProtectWrite) ||
++      !AchievementGuestSpan(memory, out1_ptr.guest_address(), 4, memory::kMemoryProtectWrite) ||
++      !AchievementGuestSpan(memory, out2_ptr.guest_address(), 4, memory::kMemoryProtectWrite) ||
++      !AchievementGuestSpan(memory, out3_ptr.guest_address(), 4, memory::kMemoryProtectWrite))
++    return X_ERROR_INVALID_PARAMETER;
++  const uint32_t buffer = memory::load_and_swap<uint32_t>(memory->TranslateVirtual(key + 12));
++  std::array<uint32_t, 3> components{0xFFFE07D1u, 0x20000u, 0x10000u};
++  uint32_t length = 0;
++  auto read = [&](uint32_t index, uint16_t& value) {
++    const uint64_t address = uint64_t(buffer) + uint64_t(index) * 2;
++    if (address > UINT32_MAX || !AchievementGuestSpan(memory, uint32_t(address), 2, memory::kMemoryProtectRead))
++      return false;
++    value = memory::load_and_swap<uint16_t>(memory->TranslateVirtual(uint32_t(address)));
++    return true;
++  };
++  if (buffer) {
++    uint32_t chars = 0;
++    for (; chars < 48; ++chars) {
++      uint16_t c;
++      if (!read(chars, c)) return X_ERROR_INVALID_PARAMETER;
++      if (!c) break;
++    }
++    length = (chars + 1) * 2;
++    for (uint32_t part = 0; part < 3; ++part) {
++      std::array<uint16_t, 8> text{};
++      for (uint32_t i = 0; i < text.size(); ++i) {
++        if (!read(part * 8 + i, text[i])) return X_ERROR_INVALID_PARAMETER;
++        if (!text[i]) break;
++      }
++      size_t i = 0;
++      while (i < text.size() && (text[i] == ' ' || (text[i] >= '\t' && text[i] <= '\r'))) ++i;
++      const bool negative = i < text.size() && text[i] == '-';
++      if (i < text.size() && (text[i] == '-' || text[i] == '+')) ++i;
++      if (i + 1 < text.size() && text[i] == '0' && (text[i + 1] == 'x' || text[i + 1] == 'X')) i += 2;
++      uint32_t value = 0;
++      for (; i < text.size(); ++i) {
++        const auto c = text[i];
++        const uint32_t digit = c >= '0' && c <= '9' ? c - '0' :
++            c >= 'a' && c <= 'f' ? c - 'a' + 10 : c >= 'A' && c <= 'F' ? c - 'A' + 10 : 16;
++        if (digit >= 16) break;
++        value = value * 16 + digit;
++      }
++      components[part] = negative ? 0u - value : value;
++    }
++    const auto prefix = components[0] & 0xFFFF0000u;
++    if (components[0] == 0xFFFE0854u || prefix == 0x10000 || prefix == 0x20000)
++      components = {0xFFFE07D1u, 0x20000u, 0x10000u};
++  }
++  memory::store_and_swap<uint32_t>(memory->TranslateVirtual(key + 8), length);
++  *out1_ptr = components[0]; *out2_ptr = components[1]; *out3_ptr = components[2];
+   return X_ERROR_SUCCESS;
+ }
+ 

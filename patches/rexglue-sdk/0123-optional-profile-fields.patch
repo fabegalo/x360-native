@@ -1,0 +1,71 @@
+diff --git a/src/system/xam/user_profile.cpp b/src/system/xam/user_profile.cpp
+index 0816d97..0eca58e 100644
+--- a/src/system/xam/user_profile.cpp
++++ b/src/system/xam/user_profile.cpp
+@@ -45,6 +45,16 @@ template <typename T> std::vector<uint8_t> SettingScalar(T value) {
+ }
+ std::unique_ptr<ProfileSetting> EmptySetting(uint32_t id) {
+   ProfileSetting::Key key{}; key.value = id;
++  switch (ProfileSetting::Type(key.type)) {
++    case ProfileSetting::Type::INT32:
++    case ProfileSetting::Type::FLOAT: if (key.size != 4) return {}; break;
++    case ProfileSetting::Type::INT64:
++    case ProfileSetting::Type::DOUBLE:
++    case ProfileSetting::Type::DATETIME: if (key.size != 8) return {}; break;
++    case ProfileSetting::Type::WSTRING: if (key.size < 2 || key.size % 2) return {}; break;
++    case ProfileSetting::Type::BINARY: break;
++    default: return {};
++  }
+   switch (ProfileSetting::Type(key.type)) {
+     case ProfileSetting::Type::INT32: return std::make_unique<UserProfile::Int32Setting>(id, 0);
+     case ProfileSetting::Type::INT64: return std::make_unique<UserProfile::Int64Setting>(id, 0);
+@@ -606,8 +616,8 @@ UserProfile::Setting* UserProfile::GetSetting(uint32_t setting_id) {
+   if (it == settings_.end()) {
+     auto setting = EmptySetting(setting_id);
+     if (!setting || !xuid()) return nullptr;
+-    std::error_code error;
+-    if (!std::filesystem::exists(SettingPath(setting.get()), error) && !error) return nullptr;
++    // Valid but absent fields are XPROFILE_SETTING_SOURCE_NO_VALUE. Loading
++    // leaves is_set false; do not invent defaults or fail the entire request.
+     LoadSetting(setting.get());
+     auto* pointer = setting.get();
+     settings_[setting_id] = pointer;
+diff --git a/src/kernel/xam/xam_user.cpp b/src/kernel/xam/xam_user.cpp
+index 254b99b..6fc59a5 100644
+--- a/src/kernel/xam/xam_user.cpp
++++ b/src/kernel/xam/xam_user.cpp
+@@ -264,12 +264,24 @@ uint32_t XamUserReadProfileSettingsEx(uint32_t title_id, uint32_t user_index, ui
+     UserProfile::Setting::Key setting_key;
+     setting_key.value = static_cast<uint32_t>(setting_ids[i]);
+     switch (static_cast<UserProfile::Setting::Type>(setting_key.type)) {
++      case UserProfile::Setting::Type::INT32:
++      case UserProfile::Setting::Type::FLOAT:
++        if (setting_key.size != 4) return X_ERROR_INVALID_PARAMETER;
++        break;
++      case UserProfile::Setting::Type::INT64:
++      case UserProfile::Setting::Type::DOUBLE:
++      case UserProfile::Setting::Type::DATETIME:
++        if (setting_key.size != 8) return X_ERROR_INVALID_PARAMETER;
++        break;
+       case UserProfile::Setting::Type::WSTRING:
++        if (setting_key.size < 2 || setting_key.size % 2) return X_ERROR_INVALID_PARAMETER;
++        needed_data_size += setting_key.size;
++        break;
+       case UserProfile::Setting::Type::BINARY:
+         needed_data_size += setting_key.size;
+         break;
+       default:
+-        break;
++        return X_ERROR_INVALID_PARAMETER;
+     }
+   }
+   if (xuids) {
+@@ -412,6 +424,8 @@ uint32_t XamUserReadProfileSettingsEx(uint32_t title_id, uint32_t user_index, ui
+       out_setting->from = 1;
+     } else if (setting && setting->is_set) {
+       setting->Append(&out_setting->data, &out_stream);
++    } else {
++      out_setting->data.type = uint8_t(UserProfile::Setting::Type::UNSET);
+     }
+     ++out_setting;
+   }

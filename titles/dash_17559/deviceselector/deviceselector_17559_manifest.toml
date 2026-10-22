@@ -1,0 +1,14 @@
+# Original Retail 17559 module, extracted unchanged from
+# SystemUpdate_17559_USB.zip / $SystemUpdate/su20076000_00000000 /
+# $flash_deviceselector.xex. SHA-256:
+# 2334c6772fd54201e60792c70a54e4714aaf74d45f657013ebe5da3737e06c0c.
+[project]
+name = "dash_17559"
+sdk_version = "0.10.0"
+game_root = "../../../.local/inputs/dashboards/17559/runtime"
+
+[entrypoint]
+file_path = "../../../.local/inputs/dashboards/17559/runtime/system/deviceselector.xex"
+out_directory_path = "../generated/deviceselector"
+is_dll = true
+includes = ["../analysis/deviceselector_17559.toml"]

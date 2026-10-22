@@ -1,0 +1,21 @@
+diff --git a/src/kernel/xam/xam_user.cpp b/src/kernel/xam/xam_user.cpp
+index e855005..0e6a23a 100644
+--- a/src/kernel/xam/xam_user.cpp
++++ b/src/kernel/xam/xam_user.cpp
+@@ -1302,7 +1302,15 @@ REX_EXPORT_STUB(__imp__XamUserInvalidateProfileSetting);
+ REX_EXPORT_STUB(__imp__XamUserIsLogonPreviewModeEnabled);
+ REX_EXPORT_STUB(__imp__XamUserIsParentalControlled);
+ REX_EXPORT_STUB(__imp__XamUserIsPartial);
+-REX_EXPORT_STUB(__imp__XamUserIsPartialProfile);
++// Retail 17559 0xAEA (816DAAC8): a signed-in user (816D8470) whose account
++// flags have 0x80000000. They are the first word of the 380-byte account kept
++// at user record +20 (copied out by 816DB950; 816DAA60 tests Live 0x20000000
++// in the same word). Local accounts have no reserved flags (AccountFor in
++// xam_enum.cpp), so no local profile is partial, signed in or not. The Guide
++// (hud 913E6B88) opens the Games list instead of the title's achievements.
++extern "C" REX_FUNC(__imp__XamUserIsPartialProfile) { ctx.r3.u64 = 0; }
++static rex::ppc::detail::PPCFuncRegistrar user_is_partial_profile_reg(
++    "__imp__XamUserIsPartialProfile", &__imp__XamUserIsPartialProfile);
+ REX_EXPORT_STUB(__imp__XamUserIsUnsafeProgrammingAllowed);
+ REX_EXPORT_STUB(__imp__XamUserLockLogonPreviewMode);
+ REX_EXPORT(__imp__XamUserLogon, rex::kernel::xam::XamUserLogon_entry)

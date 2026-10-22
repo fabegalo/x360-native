@@ -26,10 +26,10 @@ Get-FileHash -Algorithm SHA256 -Path $Executable,
     "$binaryRoot/dash_17559_gamerprofile.dll", "$binaryRoot/dash_17559_xam_ui.dll" |
     Format-Table -AutoSize | Out-String -Width 240 | Set-Content "$Out/binaries.txt"
 if (Get-Process -Name dash_17559 -ErrorAction SilentlyContinue) { throw 'Close the existing dashboard first.' }
-$record = Join-Path $UserDataRoot 'profiles/local-v1.dat'
+$record = Join-Path $UserDataRoot 'profiles/session-v1.dat'
 $before = [IO.File]::ReadAllBytes($record)
-if ($before.Length -ne 33 -or [Text.Encoding]::ASCII.GetString($before, 0, 8) -ne 'X360LP01') {
-    throw 'Expected an existing local-v1 profile record.'
+if ($before.Length -ne 17 -or [Text.Encoding]::ASCII.GetString($before, 0, 8) -ne 'X360SS01') {
+    throw 'Expected an existing local profile session record.'
 }
 if (($Mode -eq 'Restart') -ne ($before[16] -eq 1)) { throw 'Unexpected initial session state for this test mode.' }
 if ($Mode -ne 'Confirm' -and $ConfirmPrivacy) { throw 'Privacy confirmation requires Confirm mode.' }
@@ -114,7 +114,7 @@ try {
         if ([Convert]::ToBase64String($after) -ne [Convert]::ToBase64String($before)) { throw 'Cancel modified the profile.' }
     } else {
         if ($after[16] -ne 1) { throw 'The original UI did not sign in the profile.' }
-        foreach ($i in (0..15 + 17..32)) { if ($before[$i] -ne $after[$i]) { throw 'Profile identity changed.' } }
+        foreach ($i in 0..15) { if ($before[$i] -ne $after[$i]) { throw 'Profile identity changed.' } }
     }
     if ($GamerCard -and $Mode -ne 'Cancel') {
         1..3 | ForEach-Object { Press 0x33; Pause-Test 600 } # right shoulder to Settings

@@ -1,0 +1,71 @@
+diff --git a/src/kernel/xam/xam_enum.cpp b/src/kernel/xam/xam_enum.cpp
+index 26af8bb..36a47b6 100644
+--- a/src/kernel/xam/xam_enum.cpp
++++ b/src/kernel/xam/xam_enum.cpp
+@@ -189,7 +189,11 @@ uint32_t xeXamEnumerate(uint32_t handle, uint32_t flags, mapped_void buffer_ptr,
+   const auto* header = REX_KERNEL_MEMORY()->TranslateVirtual<X_KENUMERATOR*>(e->guest_object());
+   if (header->app_id == 0xFB &&
+       (header->open_message == 0xB000A || header->open_message == 0xB0050)) {
+-    if (flags) return X_ERROR_INVALID_PARAMETER;
++    if (flags) {
++      REXKRNL_INFO("Achievement/title enumerate message={:05X} rejected flags={:X}",
++                   uint32_t(header->open_message), flags);
++      return X_ERROR_INVALID_PARAMETER;
++    }
+   } else {
+     assert_true(flags == 0);
+   }
+@@ -213,6 +217,8 @@ uint32_t xeXamEnumerate(uint32_t handle, uint32_t flags, mapped_void buffer_ptr,
+           (header->open_message == 0xB000A || header->open_message == 0xB0050)) {
+         const uint64_t required = uint64_t(e->items_per_enumerate()) * e->item_size();
+         if (buffer_size < required) {
++          REXKRNL_INFO("Achievement/title enumerate message={:05X} size={} < required {}",
++                       uint32_t(header->open_message), buffer_size, required);
+           extended_error = X_HRESULT_FROM_WIN32(X_ERROR_INSUFFICIENT_BUFFER);
+           length = 0;
+           return X_ERROR_INSUFFICIENT_BUFFER;
+@@ -225,6 +231,11 @@ uint32_t xeXamEnumerate(uint32_t handle, uint32_t flags, mapped_void buffer_ptr,
+         }
+       }
+       result = e->WriteItems(buffer_ptr.guest_address(), buffer_ptr.as<uint8_t*>(), &item_count);
++      // One line per achievement/title page, the profile UI's loading step.
++      if (header->app_id == 0xFB &&
++          (header->open_message == 0xB000A || header->open_message == 0xB0050))
++        REXKRNL_INFO("Achievement/title enumerate message={:05X} size={} -> {} items={}",
++                     uint32_t(header->open_message), buffer_size, result, item_count);
+     }
+     extended_error = X_HRESULT_FROM_WIN32(result);
+     length = item_count;
+diff --git a/src/kernel/xam/xam_user.cpp b/src/kernel/xam/xam_user.cpp
+index 0e6a23a..05f377c 100644
+--- a/src/kernel/xam/xam_user.cpp
++++ b/src/kernel/xam/xam_user.cpp
+@@ -1224,9 +1224,14 @@ static mapped_void AchievementBuffer(uint8_t* base, uint32_t address) {
+   return mapped_void(address ? rex::memory::GuestPtr<uint8_t*>(base, address) : nullptr, address);
+ }
+ extern "C" REX_FUNC(__imp__XamUserCreateAchievementEnumerator) {
++  // One line per enumerator: the profile UI creates a few per screen.
++  const uint32_t title = ctx.r3.u32, user = ctx.r4.u32, flags = ctx.r6.u32, count = ctx.r8.u32;
++  const uint64_t xuid = ctx.r5.u64;
+   ctx.r3.u64 = rex::kernel::xam::XamUserCreateAchievementEnumerator_entry(
+       ctx.r3.u32, ctx.r4.u32, ctx.r5.u64, ctx.r6.u32, ctx.r7.u32, ctx.r8.u32,
+       AchievementWord(base, ctx.r9.u32), AchievementWord(base, ctx.r10.u32));
++  REXKRNL_INFO("Achievement enumerator title={:08X} user={} xuid={:016X} flags={:X} count={} -> {}",
++               title, user, xuid, flags, count, ctx.r3.u32);
+ }
+ static rex::ppc::detail::PPCFuncRegistrar achievement_enum_reg(
+     "__imp__XamUserCreateAchievementEnumerator", &__imp__XamUserCreateAchievementEnumerator);
+@@ -1264,9 +1269,13 @@ REX_EXPORT_STUB(__imp__XamUserCreateAvatarAssetEnumerator);
+ REX_EXPORT_STUB(__imp__XamUserCreatePlayerEnumerator);
+ REX_EXPORT_STUB(__imp__XamUserCreateStatsEnumerator);
+ extern "C" REX_FUNC(__imp__XamUserCreateTitlesPlayedEnumerator) {
++  const uint32_t title = ctx.r3.u32, user = ctx.r4.u32, offset = ctx.r6.u32, count = ctx.r7.u32;
++  const uint64_t xuid = ctx.r5.u64;
+   ctx.r3.u64 = rex::kernel::xam::XamUserCreateTitlesPlayedEnumerator_entry(
+       ctx.r3.u32, ctx.r4.u32, ctx.r5.u64, ctx.r6.u32, ctx.r7.u32,
+       AchievementWord(base, ctx.r8.u32), AchievementWord(base, ctx.r9.u32));
++  REXKRNL_INFO("Titles played enumerator title={:08X} user={} xuid={:016X} offset={} count={} -> {}",
++               title, user, xuid, offset, count, ctx.r3.u32);
+ }
+ static rex::ppc::detail::PPCFuncRegistrar achievement_titles_reg(
+     "__imp__XamUserCreateTitlesPlayedEnumerator", &__imp__XamUserCreateTitlesPlayedEnumerator);

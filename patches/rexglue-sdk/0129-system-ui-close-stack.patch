@@ -1,0 +1,43 @@
+diff --git a/include/rex/kernel/xam/module.h b/include/rex/kernel/xam/module.h
+index c7e884c..bf32cdc 100644
+--- a/include/rex/kernel/xam/module.h
++++ b/include/rex/kernel/xam/module.h
+@@ -65,6 +65,7 @@ class XamModule : public system::KernelModule {
+   struct SystemUiSession {
+     uint32_t module = 0, user = 0;
+     bool visible = false, input_enabled = false, close_requested = false, resume_requested = false;
++    bool close_stack_requested = false;
+   };
+   // One foreground system application. Rendering and guest destruction belong
+   // to the selected original UI host, outside these locks and export calls.
+@@ -96,10 +97,11 @@ class XamModule : public system::KernelModule {
+     system_ui_.input_enabled = enable;
+     return true;
+   }
+-  bool RequestSystemUiClose() {
++  bool RequestSystemUiClose(bool entire_stack = false) {
+     std::lock_guard lock(system_apps_mutex_);
+     if (!system_ui_.module) return false;
+     system_ui_.close_requested = true;
++    system_ui_.close_stack_requested |= entire_stack;
+     return true;
+   }
+   bool RequestSystemUiResume(uint32_t module) {
+diff --git a/src/kernel/xam/xam_misc.cpp b/src/kernel/xam/xam_misc.cpp
+index 46813aa..a84cbe2 100644
+--- a/src/kernel/xam/xam_misc.cpp
++++ b/src/kernel/xam/xam_misc.cpp
+@@ -322,10 +322,11 @@ extern "C" REX_FUNC(__imp__XamAppUnloadSelf) {
+   ctx.r3.u64 = xam && xam->RequestSystemUiClose() ? 0 : 1627;
+ }
+ extern "C" REX_FUNC(__imp__XamAppUnloadStack) {
+-  // The installed host currently owns one foreground app. Nonzero flags are
++  // Original 17559 816CAF08 -> 816CAD78 closes the whole app chain. Nonzero flags are
+   // not implemented; never unload guest code while its callback is executing.
+   if (ctx.r3.u32) { ctx.r3.u64 = 87; return; }
+-  __imp__XamAppUnloadSelf(ctx, base);
++  auto xam = REX_KERNEL_STATE()->GetKernelModule<rex::kernel::xam::XamModule>("xam.xex");
++  ctx.r3.u64 = xam && xam->RequestSystemUiClose(true) ? 0 : 1627;
+ }
+ REX_EXPORT_STUB(__imp__XamAppUnrequestLoad);
+ extern "C" REX_FUNC(__imp__XamAreMixedAccountsSignedIn) {

@@ -22,6 +22,8 @@ IMPORT(XamContentCreateEnumerator); IMPORT(XamEnumerate); IMPORT(XamUserLogonEx)
 IMPORT(XamUserLogon); IMPORT(XGetOverlappedResult);
 IMPORT(NtCreateFile); IMPORT(NtReadFile); IMPORT(NtWriteFile); IMPORT(NtClose);
 IMPORT(NtFlushBuffersFile);
+IMPORT(NtQueryVolumeInformationFile);
+IMPORT(XamContentAggregateCreateEnumerator);
 using namespace rex;
 using namespace rex::system;
 using namespace rex::system::xam;
@@ -129,6 +131,59 @@ struct SaveGuest {
     REQUIRE(call(__imp__XamContentClose,{mem,0}) == 0);
   }
 };
+}
+
+TEST_CASE("Save storage routes separate volumes and enforces capacity through NT", "[sdk][save-storage][storage-device]") {
+  const auto root = std::filesystem::current_path() /
+      ("c8-volumes-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+  std::filesystem::create_directories(root / "storage/00000007");
+  struct Cleanup { std::filesystem::path path;
+    ~Cleanup() { std::error_code ec; std::filesystem::remove_all(path, ec); }
+  } cleanup{root};
+  std::ofstream(root / "storage.toml") << "version=1\n[[device]]\nid=7\ntype='mu'\ncapacity_bytes=4096\n";
+  uint64_t owner = 0;
+  for (int restart = 0; restart != 2; ++restart) {
+    SaveGuest g(root);
+    auto* profile = g.rt.kernel_state()->user_profile();
+    if (!restart) REQUIRE(profile->CreateLocal("VolumeOwner") == 0);
+    owner = profile->xuid();
+    g.select(owner);
+    auto* data = reinterpret_cast<XCONTENT_DATA*>(g.base + g.mem + 256);
+    data->device_id = 7;
+    REQUIRE(g.content(restart ? 3 : 1) == 0);
+    auto file = g.open(restart ? 1 : 3);
+    if (!restart) {
+      g.write(file, "volume-seven");
+      // A rejected growth leaves both the file and package untouched.
+      REQUIRE(g.io(file, std::string(5000, 'x'), true) == 0xC000007F);
+    }
+    g.read(file, "volume-seven");
+    REQUIRE(g.call(__imp__NtQueryVolumeInformationFile, {file, g.mem + 640, g.mem + 1536, 24, 3}) == 0);
+    CHECK(memory::load_and_swap<uint64_t>(g.base + g.mem + 1536) == 4096 / 512);
+    CHECK(memory::load_and_swap<uint64_t>(g.base + g.mem + 1544) < 4096 / 512);
+    g.close(file);
+    // Internal Storage enumeration carries the complete XUID in r3.
+    // A low-32-bit owner must never hide this profile's packages.
+    REQUIRE(g.call(__imp__XamContentAggregateCreateEnumerator,
+        {owner, 7, 0xFFFFFFFF, 0, g.mem + 616}) == 0);
+    REQUIRE(g.call(__imp__XamEnumerate,
+        {g.word(616), 0, g.mem + 1536, sizeof(XCONTENT_AGGREGATE_DATA), g.mem + 620, 0}) == 0);
+    CHECK(g.word(620) == 1);
+    const auto* aggregate = reinterpret_cast<const XCONTENT_AGGREGATE_DATA*>(g.base + g.mem + 1536);
+    CHECK(aggregate->xuid == owner);
+    CHECK(aggregate->device_id == 7);
+    REQUIRE(g.call(__imp__NtClose, {g.word(616)}) == 0);
+    REQUIRE(g.call(__imp__XamContentCreateEnumerator, {0, 1, 1, 0, 8, g.mem + 612, g.mem + 616}) == 0);
+    CHECK(g.enumerate(g.word(616)) != 0); // Nothing from device 7 leaks into HDD.
+    const auto package = root / "storage/00000007" / fmt::format("{:016X}", owner) /
+        "1234C800/00000001/progress/progress.bin";
+    CHECK(std::filesystem::file_size(package) == std::string("volume-seven").size());
+    if (!restart) {
+      std::filesystem::rename(root / "storage/00000007", root / "detached-volume");
+      CHECK(g.content(3) == X_ERROR_DEVICE_NOT_CONNECTED);
+      std::filesystem::rename(root / "detached-volume", root / "storage/00000007");
+    }
+  }
 }
 
 TEST_CASE("Save storage reports real failures and completes overlapped operations", "[sdk][save-storage]") {
@@ -241,7 +296,11 @@ TEST_CASE("Save storage uses XAM and NT file contracts across profiles and resta
     {
       SaveGuest g(root);
       const auto profiles = g.rt.kernel_state()->user_profile()->local_profiles();
-      REQUIRE(profiles.size() == 2); p1 = profiles[0].xuid; p2 = profiles[1].xuid;
+      // Profiles are found by scanning the device, so match them by gamertag.
+      REQUIRE(profiles.size() == 2);
+      for (const auto& account : profiles) (account.name == "Player1" ? p1 : p2) = account.xuid;
+      REQUIRE(g.rt.kernel_state()->user_profile()->FindLocal(p1).name == "Player1");
+      REQUIRE(g.rt.kernel_state()->user_profile()->FindLocal(p2).name == "Player2");
       for (auto [id, bytes] : {std::pair{p1,first},std::pair{p2,second}}) {
         g.select(id); REQUIRE(g.content(3) == 0);
         auto f = g.open(1); g.read(f,bytes); g.close(f);

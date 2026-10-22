@@ -67,30 +67,28 @@ function Capture([string]$Name) {
     & "$root/scripts/diagnostics/capture-window.ps1" -ProcessName dash_17559 -Out "$Out/$Name.png" -WaitSeconds 1
     $profiles = @(Read-Profiles)
     ConvertTo-Json -InputObject $profiles | Set-Content "$Out/$Name.json"
-    foreach ($version in 1,2) {
-        $record = Join-Path $UserDataRoot "profiles/local-v$version.dat"
-        if (Test-Path -LiteralPath $record) { Copy-Item -LiteralPath $record "$Out/$Name-v$version.dat" }
-    }
+    $session = Join-Path $UserDataRoot 'profiles/session-v1.dat'
+    if (Test-Path -LiteralPath $session) { Copy-Item -LiteralPath $session "$Out/$Name-session.dat" }
 }
 function Read-Profiles {
-    $record = Join-Path $UserDataRoot 'profiles/local-v2.dat'
-    $v2 = Test-Path -LiteralPath $record
-    if (!$v2) { $record = Join-Path $UserDataRoot 'profiles/local-v1.dat' }
-    if (!(Test-Path -LiteralPath $record)) { return }
-    $bytes = [IO.File]::ReadAllBytes($record)
-    $count = 1; $offset = 8
-    if ($v2) {
-        if ($bytes.Length -lt 20) { throw 'Truncated profile store.' }
-        $count = [int]$bytes[8]*16777216 + [int]$bytes[9]*65536 + [int]$bytes[10]*256 + [int]$bytes[11]
-        $offset = 20
+    # Profiles are content packages on the hard drive:
+    # <XUID>/FFFE07D1/00010000/<XUID>/account.dat ("X360PA01", XUID, name[16]).
+    $selected = $null; $state = 0
+    $session = Join-Path $UserDataRoot 'profiles/session-v1.dat'
+    if (Test-Path -LiteralPath $session) {
+        $bytes = [IO.File]::ReadAllBytes($session)
+        if ($bytes.Length -ne 17) { throw 'Invalid profile session record.' }
+        $selected = [BitConverter]::ToString($bytes, 8, 8).Replace('-', ''); $state = $bytes[16]
     }
-    if ($count -lt 1 -or $count -gt 64 -or $bytes.Length -ne $offset + $count*25) { throw 'Invalid profile store length.' }
-    for ($n=0; $n -lt $count; $n++) {
-        $p = $offset + $n*25
+    foreach ($owner in Get-ChildItem -LiteralPath $UserDataRoot -Directory | Where-Object Name -Match '^[0-9A-F]{16}$') {
+        $account = Join-Path $owner.FullName "FFFE07D1/00010000/$($owner.Name)/account.dat"
+        if (!(Test-Path -LiteralPath $account)) { continue }
+        $bytes = [IO.File]::ReadAllBytes($account)
+        if ($bytes.Length -ne 32) { throw "Invalid profile package: $account" }
         [pscustomobject]@{
-            xuid = [BitConverter]::ToString($bytes, $p, 8).Replace('-', '')
-            name = [Text.Encoding]::ASCII.GetString($bytes, $p+9, 16).TrimEnd([char]0)
-            signedIn = $bytes[$p+8] -eq 1
+            xuid = $owner.Name
+            name = [Text.Encoding]::ASCII.GetString($bytes, 16, 16).TrimEnd([char]0)
+            signedIn = $owner.Name -eq $selected -and $state -eq 1
         }
     }
 }

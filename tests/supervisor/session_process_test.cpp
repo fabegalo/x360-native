@@ -3,6 +3,7 @@
 #include "child_process.h"
 #include "session_profile.h"
 #include "console_settings.h"
+#include "renderer_settings.h"
 #include "preparation_fixture.h"
 #include "scratch.h"
 #include <algorithm>
@@ -68,6 +69,31 @@ TEST_CASE("firmware powerdown closes the platform from either session participan
     }
     CHECK_FALSE(bool(observed >> step));
     CHECK(Read(f.root / "out.log").find("requested firmware exit (routine 5)") != std::string::npos);
+  }
+}
+TEST_CASE("dashboard return from the dashboard preserves context instead of closing the platform",
+          "[dashboard-self-return][cli]") {
+  for (const std::string mode : {"dashboard-self-return", "dashboard-self-invalid"}) {
+    Fixture f(mode);
+    const auto result = f.Run(10);
+    INFO(Read(f.root / "err.log")); INFO(Read(f.root / "out.log"));
+    REQUIRE(result.launched); REQUIRE_FALSE(result.timed_out);
+    std::istringstream observed(Read(f.paths.inputs() / "observed.txt"));
+    unsigned step = 99; bool dashboard = false;
+    REQUIRE(bool(observed >> step >> dashboard));
+    CHECK(step == 0); CHECK(dashboard);
+    if (mode == "dashboard-self-return") {
+      REQUIRE(result.exit_code == 0);
+      // The second dashboard validates the exact previous launch data and
+      // profile root before recording its entry, then requests WindowClose.
+      REQUIRE(bool(observed >> step >> dashboard));
+      CHECK(step == 1); CHECK(dashboard);
+      CHECK(Read(f.root / "out.log").find("requested dashboard; returning to dashboard") != std::string::npos);
+    } else {
+      CHECK(result.exit_code != 0);
+      CHECK(Read(f.root / "err.log").find("dashboard return flags 00000200 are not implemented") != std::string::npos);
+    }
+    CHECK_FALSE(bool(observed >> step));
   }
 }
 TEST_CASE("session storage override follows handoffs without changing global storage", "[session-storage][cli]") {
@@ -194,6 +220,17 @@ TEST_CASE("session hands only its dashboard's verified avatar files to an avatar
             std::string::npos);
     }
   }
+}
+TEST_CASE("graphics API is immutable through dashboard game dashboard transitions", "[session-graphics][cli]") {
+  Fixture f("graphics");
+  const auto result = f.Run();
+  INFO(Read(f.root / "err.log"));
+  REQUIRE(result.launched);
+  REQUIRE_FALSE(result.timed_out);
+  REQUIRE(result.exit_code == 0);
+  CHECK(Read(f.paths.inputs() / "graphics-observed.txt") == "d3d12\nd3d12\nd3d12\n");
+  // The child's new preference applies only on the next platform session.
+  CHECK(LoadRendererSettings(f.paths).api == GraphicsApi::Vulkan);
 }
 TEST_CASE("session survives 80 transitions with intact handoffs and states", "[session][cli]") {
   Fixture f("healthy");

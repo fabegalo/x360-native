@@ -21,6 +21,8 @@
 #include "../../common/launch_handoff.h"
 #include "../../common/dashboard_paths.h"
 #include "../../common/guest_capture.h"
+#include "../../common/guest_fault_context.h"
+#include <rex/dbg.h>
 #include "original_assets.h"
 
 REXCVAR_DECLARE(bool, dash17559_experimental_region);
@@ -73,6 +75,18 @@ class Dash17559App : public rex::ReXApp {
   // the system partition with dash.xex and shrdres.xzp; here it is the package folder
   // (--game_data_root), the same files, mounted read-only.
   void OnPostSetup() override {
+    // The launcher's opt-in --crash-stack attaches the supervisor debugger.
+    // Capture PPC state alongside its native stack, with no handler installed
+    // during normal sessions. Install before any original guest thread starts.
+    if (rex::debug::IsDebuggerAttached()) {
+      const auto log = REXCVAR_GET(log_file);
+      if (!log.empty()) {
+        auto fault_path = std::filesystem::path(std::u8string(log.begin(), log.end()));
+        fault_path += ".ppc.txt";
+        if (!guest_fault_context_.Start(*runtime()->memory(), fault_path))
+          REXLOG_ERROR("17559: cannot create PPC fault diagnostic next to {}", log);
+      }
+    }
     const auto result = experimental_region_.Map(*runtime()->memory(),
         REXCVAR_GET(dash17559_experimental_region));
     using Result = dash17559::ExperimentalRegion::Result;
@@ -92,6 +106,7 @@ class Dash17559App : public rex::ReXApp {
 
  private:
   x360n::GuestCapture guest_capture_;
+  x360n::GuestFaultContext guest_fault_context_;
   dash17559::ExperimentalRegion experimental_region_;
 
   // Override virtual hooks for customization:

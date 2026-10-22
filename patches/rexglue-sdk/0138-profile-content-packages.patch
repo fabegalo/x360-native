@@ -1,0 +1,893 @@
+diff --git a/include/rex/system/offline_achievement_store.h b/include/rex/system/offline_achievement_store.h
+index d4e921b..a60006b 100644
+--- a/include/rex/system/offline_achievement_store.h
++++ b/include/rex/system/offline_achievement_store.h
+@@ -4,6 +4,7 @@
+ 
+ #include <cstdint>
+ #include <filesystem>
++#include <functional>
+ #include <mutex>
+ #include <span>
+ #include <string>
+@@ -57,8 +58,14 @@ class OfflineAchievementStore {
+   OfflineAchievementResult GetImage(uint32_t title_id, uint32_t image_id,
+                                     std::vector<uint8_t>& image);
+   OfflineAchievementResult TitleName(uint32_t title_id, std::string& name);
++  // Unlocks live in each profile's own package, like its GPDs on the console.
++  // The resolver maps a XUID to that file, or empty for an unknown profile.
++  // Without a resolver they stay under the configured root.
++  void SetProfileFileResolver(std::function<std::filesystem::path(uint64_t)> resolver);
+ 
+  private:
++  std::filesystem::path UnlocksPath(uint64_t xuid) const;
++  std::function<std::filesystem::path(uint64_t)> profile_file_;
+   std::mutex mutex_;
+   std::filesystem::path root_;
+   uint32_t language_ = 0;
+diff --git a/include/rex/system/xam/user_profile.h b/include/rex/system/xam/user_profile.h
+index 3f3009e..3941e58 100644
+--- a/include/rex/system/xam/user_profile.h
++++ b/include/rex/system/xam/user_profile.h
+@@ -225,6 +225,7 @@ class UserProfile {
+     uint64_t xuid = 0;
+     std::string name;
+     uint32_t signin_state = 0;
++    uint32_t device_id = 1;  // storage device holding the profile package
+   };
+   uint64_t storage_epoch() const { return storage_epoch_.load(); }
+   Identity identity() const;
+@@ -233,16 +234,23 @@ class UserProfile {
+   uint32_t signin_state() const { std::lock_guard lock(identity_mutex_); return identity_.signin_state; }
+   uint32_t type() const { return signin_state() ? 1 : 0; }
+ 
+-  // Local account collection; one active account in slot zero. Commit before publication.
++  // As on the console, each profile is a content package on a storage device:
++  // <device>/<XUID>/FFFE07D1/00010000/<XUID>/ (identity, titles played,
++  // settings, offline achievements) plus its content header. Profiles are
++  // discovered on the connected devices; <root>/profiles/session-v1.dat keeps
++  // only the selected account and its sign-in state.
+   bool InitializeLocal(const std::filesystem::path& root);
+-  // Games launched while a local account was signed in, kept per XUID next
+-  // to the account store. System titles (FFFExxxx) are not games.
++  // Re-reads the devices after profile content was copied, moved or deleted.
++  bool RescanLocal();
++  // Package directory of a known local profile; empty when unknown.
++  std::filesystem::path PackagePath(uint64_t xuid) const;
++  // Games launched while a local account was signed in, kept in its package.
++  // System titles (FFFExxxx) are not games.
+   bool RecordTitlePlayed(uint32_t title_id);
+   std::vector<uint32_t> TitlesPlayed(uint64_t xuid) const;
+-  uint32_t CreateLocal(const std::string& name, uint64_t* created_xuid = nullptr);
++  uint32_t CreateLocal(const std::string& name, uint64_t* created_xuid = nullptr, uint32_t device_id = 1);
+   uint32_t RenameLocal(uint64_t xuid, const std::string& name);
+-  // Archive the committed account snapshot, then remove only its identity.
+-  // Associated saves, settings and achievements remain recoverable in place.
++  // Deletes the profile package; saves and other content of the XUID remain.
+   uint32_t RemoveLocal(uint64_t xuid);
+   std::vector<Identity> local_profiles() const;
+   Identity FindLocal(uint64_t xuid) const;
+@@ -258,9 +266,13 @@ class UserProfile {
+   Identity identity_;
+   std::atomic<uint64_t> storage_epoch_{0};
+   std::vector<Identity> profiles_;
+-  std::filesystem::path profile_path_;
++  std::filesystem::path root_;
+   bool storage_ready_ = false;
+-  bool PersistProfiles(const std::vector<Identity>& next, const Identity& selected);
++  std::vector<Identity> ScanDevices() const;
++  std::filesystem::path DeviceRoot(uint32_t device_id) const;
++  std::filesystem::path PackagePathLocked(const Identity& profile) const;
++  bool WritePackage(const Identity& profile) const;
++  bool PersistSession(const Identity& selected);
+   std::vector<std::unique_ptr<Setting>> setting_list_;
+   std::unordered_map<uint32_t, Setting*> settings_;
+   struct SettingDefault { std::vector<uint8_t> bytes; bool is_set; };
+diff --git a/src/kernel/xam/xam_enum.cpp b/src/kernel/xam/xam_enum.cpp
+index 36a47b6..4d744bf 100644
+--- a/src/kernel/xam/xam_enum.cpp
++++ b/src/kernel/xam/xam_enum.cpp
+@@ -51,6 +51,14 @@ struct LocalProfileRecord {
+ static_assert_size(LocalProfileRecord, 392);
+ #pragma pack(pop)
+ 
++// Profiles are content packages on HDD, memory units or USB storage; 0 means
++// any device. The optical drive never holds profiles.
++static bool ProfileDevice(uint32_t device) {
++  if (!device) return true;
++  const auto info = REX_KERNEL_STATE()->content_manager()->GetDevice(device);
++  return info && info->device_type != DeviceType::ODD;
++}
++
+ static LocalAccount AccountFor(const UserProfile::Identity& identity) {
+   LocalAccount account{};
+   for (size_t i = 0; i < identity.name.size() && i < 15; ++i)
+@@ -62,16 +70,18 @@ u32 XamProfileCreateEnumerator_entry(u32 filter, mapped_u32 handle) {
+   if (!handle) return X_ERROR_INVALID_PARAMETER;
+   *handle = 0;
+   // Sign-in uses 0 (all devices); CreateProfile uses the selected local
+-  // storage device (1) to enforce its per-device profile limit.
+-  if (filter > 1) return X_ERROR_DEVICE_NOT_CONNECTED;
++  // storage device to enforce its per-device profile limit.
++  if (!ProfileDevice(filter)) return X_ERROR_DEVICE_NOT_CONNECTED;
+   auto e = make_object<XStaticEnumerator<LocalProfileRecord>>(REX_KERNEL_STATE(), 1);
+   auto status = e->Initialize(0xFF, 0xFE, 0x23001, 0x23003, 0);
+   if (XFAILED(status)) return X_ERROR_FUNCTION_FAILED;
+   for (const auto& identity : REX_KERNEL_STATE()->user_profile()->local_profiles()) {
++    if (filter && identity.device_id != filter) continue;
+     auto* record = e->AppendItem();
+     *record = {};
+     record->xuid = identity.xuid;
+     record->account = AccountFor(identity);
++    record->device = identity.device_id;
+   }
+   *handle = e->handle();
+   REXKRNL_INFO("Local profile enumeration: {} record(s)", e->item_count());
+@@ -103,15 +113,16 @@ u32 XamProfileFindAccount_entry(u64 xuid, ppc_ptr_t<LocalAccount> account, mappe
+   const auto identity = REX_KERNEL_STATE()->user_profile()->FindLocal(xuid);
+   if (!identity.xuid || xuid != identity.xuid) return X_ERROR_NO_SUCH_USER;
+   *account = AccountFor(identity);
+-  if (device) *device = 0;
++  if (device) *device = identity.device_id;
+   return X_ERROR_SUCCESS;
+ }
+ 
+ u32 XamProfileLoadAccountInfo_entry(u32 device, u64 xuid, ppc_ptr_t<LocalAccount> account) {
+-  if (device) return X_ERROR_DEVICE_NOT_CONNECTED;
++  if (!ProfileDevice(device)) return X_ERROR_DEVICE_NOT_CONNECTED;
+   if (!account) return X_ERROR_INVALID_PARAMETER;
+   const auto identity = REX_KERNEL_STATE()->user_profile()->FindLocal(xuid);
+   if (!identity.xuid || xuid != identity.xuid) return X_ERROR_NO_SUCH_USER;
++  if (device && identity.device_id != device) return X_ERROR_NO_SUCH_USER;
+   *account = AccountFor(identity);
+   return X_ERROR_SUCCESS;
+ }
+@@ -135,7 +146,8 @@ u32 CreateLocalProfile(uint32_t flags, mapped_u32 device, uint64_t input_xuid,
+   if (!device || !account || !handle) return X_E_INVALIDARG;
+   *handle = 0;
+   if (flags != 1 || input_xuid || account->online_xuid) return 0x80004001u;
+-  if (*device > 1) return X_HRESULT_FROM_WIN32(X_ERROR_DEVICE_NOT_CONNECTED);
++  const uint32_t target = *device ? uint32_t(*device) : 1;
++  if (!ProfileDevice(target)) return X_HRESULT_FROM_WIN32(X_ERROR_DEVICE_NOT_CONNECTED);
+   std::string name;
+   for (unsigned i = 0; i < 16; ++i) {
+     const uint16_t c = account->name[i];
+@@ -144,7 +156,7 @@ u32 CreateLocalProfile(uint32_t flags, mapped_u32 device, uint64_t input_xuid,
+     name.push_back(char(c));
+   }
+   auto operation = make_object<ProfileCreation>(REX_KERNEL_STATE());
+-  operation->result = REX_KERNEL_STATE()->user_profile()->CreateLocal(name, &operation->xuid);
++  operation->result = REX_KERNEL_STATE()->user_profile()->CreateLocal(name, &operation->xuid, target);
+   *handle = operation->handle();
+   REXKRNL_INFO("Local profile created name={} xuid={:016X} result={}", name,
+       operation->xuid, operation->result);
+@@ -361,7 +373,10 @@ static rex::ppc::detail::PPCFuncRegistrar profile_rename_reg(
+ // original dashboard confirmation owns the decision to submit this operation.
+ extern "C" REX_FUNC(__imp__XamProfileDelete) {
+   using namespace rex;
+-  const auto result = ctx.r3.u32 > 1 ? X_ERROR_DEVICE_NOT_CONNECTED
++  const auto device = ctx.r3.u32;
++  const auto profile = REX_KERNEL_STATE()->user_profile()->FindLocal(ctx.r4.u64);
++  const auto result = !rex::kernel::xam::ProfileDevice(device) ? X_ERROR_DEVICE_NOT_CONNECTED
++      : !profile.xuid || (device && profile.device_id != device) ? X_ERROR_NO_SUCH_USER
+       : REX_KERNEL_STATE()->user_profile()->RemoveLocal(ctx.r4.u64);
+   ctx.r3.u64 = X_HRESULT_FROM_WIN32(result);
+ }
+diff --git a/src/system/offline_achievement_store.cpp b/src/system/offline_achievement_store.cpp
+index 3566b5d..3656c6a 100644
+--- a/src/system/offline_achievement_store.cpp
++++ b/src/system/offline_achievement_store.cpp
+@@ -159,9 +159,6 @@ Result WriteFile(const std::filesystem::path& path, std::span<const uint8_t> byt
+ std::filesystem::path MetadataPath(const std::filesystem::path& root, uint32_t title) {
+   return root / "metadata" / fmt::format("{:08X}.xdbf", title);
+ }
+-std::filesystem::path UnlockPath(const std::filesystem::path& root, uint64_t xuid) {
+-  return root / "profiles" / fmt::format("{:016X}.dat", xuid);
+-}
+ Result ReadMetadata(const std::filesystem::path& root, uint32_t title, std::vector<uint8_t>& raw) {
+   std::vector<uint8_t> data;
+   auto result = ReadFile(MetadataPath(root, title), kMaxXdbfSize + 24, data);
+@@ -174,10 +171,12 @@ Result ReadMetadata(const std::filesystem::path& root, uint32_t title, std::vect
+   return util::XdbfGameData(raw.data(), raw.size()).is_valid() ? Result::kSuccess : Result::kCorruptData;
+ }
+ 
+-Result ReadUnlocks(const std::filesystem::path& root, uint64_t xuid, Unlocks& unlocks) {
++Result ReadUnlocks(const std::filesystem::path& file, uint64_t xuid, Unlocks& unlocks) {
+   unlocks.clear();
++  // A XUID without a profile package has no unlocks.
++  if (file.empty()) return Result::kSuccess;
+   std::vector<uint8_t> data;
+-  auto result = ReadFile(UnlockPath(root, xuid), 28 + kMaxUnlocks * 16, data);
++  auto result = ReadFile(file, 28 + kMaxUnlocks * 16, data);
+   if (result == Result::kNotFound) return Result::kSuccess;
+   if (result != Result::kSuccess) return result;
+   if (data.size() < 28 || std::memcmp(data.data(), "X360AU01", 8) ||
+@@ -195,14 +194,15 @@ Result ReadUnlocks(const std::filesystem::path& root, uint64_t xuid, Unlocks& un
+   }
+   return Result::kSuccess;
+ }
+-Result WriteUnlocks(const std::filesystem::path& root, uint64_t xuid, const Unlocks& unlocks) {
++Result WriteUnlocks(const std::filesystem::path& file, uint64_t xuid, const Unlocks& unlocks) {
++  if (file.empty()) return Result::kStorageError;
+   std::vector<uint8_t> data{'X','3','6','0','A','U','0','1'};
+   Append64(data, xuid); Append32(data, uint32_t(unlocks.size()));
+   for (const auto& [key, time] : unlocks) {
+     Append32(data, key.first); Append32(data, key.second); Append64(data, time);
+   }
+   Append64(data, XXH3_64bits(data.data(), data.size()));
+-  return WriteFile(UnlockPath(root, xuid), data);
++  return WriteFile(file, data);
+ }
+ std::vector<AchievementInfo> Catalog(const util::XdbfGameData& db, uint32_t language) {
+   std::vector<AchievementInfo> catalog;
+@@ -235,6 +235,17 @@ void OfflineAchievementStore::Configure(const std::filesystem::path& user_root,
+   rejected_titles_.clear();
+ }
+ 
++void OfflineAchievementStore::SetProfileFileResolver(
++    std::function<std::filesystem::path(uint64_t)> resolver) {
++  std::lock_guard lock(mutex_);
++  profile_file_ = std::move(resolver);
++}
++
++std::filesystem::path OfflineAchievementStore::UnlocksPath(uint64_t xuid) const {
++  if (profile_file_) return profile_file_(xuid);
++  return root_ / "profiles" / fmt::format("{:016X}.dat", xuid);
++}
++
+ OfflineAchievementResult OfflineAchievementStore::ImportTitle(uint32_t title_id, std::span<const uint8_t> raw) {
+   if (!title_id) return Result::kInvalidArgument;
+   std::lock_guard lock(mutex_);
+@@ -284,7 +295,7 @@ OfflineAchievementResult OfflineAchievementStore::List(uint64_t xuid, uint32_t t
+   auto result = ReadMetadata(root_, title_id, raw);
+   if (result != Result::kSuccess) return result;
+   Unlocks unlocks;
+-  result = ReadUnlocks(root_, xuid, unlocks);
++  result = ReadUnlocks(UnlocksPath(xuid), xuid, unlocks);
+   if (result != Result::kSuccess) return result;
+   const util::XdbfGameData db(raw.data(), raw.size());
+   auto catalog = Catalog(db, language_);
+@@ -311,7 +322,7 @@ OfflineAchievementResult OfflineAchievementStore::UnlockBatch(uint64_t xuid, uin
+   const util::XdbfGameData db(raw.data(), raw.size());
+   const auto catalog = Catalog(db, language_);
+   Unlocks unlocks;
+-  result = ReadUnlocks(root_, xuid, unlocks);
++  result = ReadUnlocks(UnlocksPath(xuid), xuid, unlocks);
+   if (result != Result::kSuccess) return result;
+   std::vector<OfflineAchievementRecord> pending;
+   const auto time = CurrentFileTime();
+@@ -323,7 +334,7 @@ OfflineAchievementResult OfflineAchievementStore::UnlockBatch(uint64_t xuid, uin
+   }
+   if (unlocks.size() > kMaxUnlocks) return Result::kStorageError;
+   if (pending.empty()) return Result::kSuccess;
+-  result = WriteUnlocks(root_, xuid, unlocks);
++  result = WriteUnlocks(UnlocksPath(xuid), xuid, unlocks);
+   if (result == Result::kSuccess) newly_unlocked = std::move(pending);
+   return result;
+ }
+@@ -341,7 +352,7 @@ OfflineAchievementResult OfflineAchievementStore::Totals(uint64_t xuid, OfflineA
+   StoreLock store_lock(root_);
+   if (!store_lock) return Result::kStorageError;
+   Unlocks unlocks;
+-  auto result = ReadUnlocks(root_, xuid, unlocks);
++  auto result = ReadUnlocks(UnlocksPath(xuid), xuid, unlocks);
+   if (result != Result::kSuccess) return result;
+   uint64_t score = 0;
+   uint64_t title_score = 0;
+diff --git a/src/system/xam/content_manager.cpp b/src/system/xam/content_manager.cpp
+index 1993e32..70cf5ad 100644
+--- a/src/system/xam/content_manager.cpp
++++ b/src/system/xam/content_manager.cpp
+@@ -32,6 +32,7 @@
+ #include <rex/system/kernel_state.h>
+ #include <rex/system/xam/content_device.h>
+ #include <rex/system/xam/content_manager.h>
++#include <rex/system/xam/user_profile.h>
+ #include <rex/system/xfile.h>
+ #include <rex/system/xobject.h>
+ 
+@@ -767,10 +768,24 @@ X_RESULT ContentManager::SetContentThumbnail(uint64_t xuid, const XCONTENT_AGGRE
+   }
+ } catch (const std::filesystem::filesystem_error&) { return X_ERROR_ACCESS_DENIED; }
+ 
++// A profile package in use by the signed-in account is locked like open content.
++static bool SignedInProfile(KernelState* kernel_state, const XCONTENT_AGGREGATE_DATA& data) {
++  if (data.content_type != XContentType::kProfile || !kernel_state) return false;
++  const auto account = kernel_state->user_profile()->identity();
++  return account.signin_state && account.device_id == data.device_id &&
++         data.file_name() == fmt::format("{:016X}", account.xuid);
++}
++
++// Profiles are found by scanning the devices; refresh after their packages change.
++static void RefreshProfiles(KernelState* kernel_state, const XCONTENT_AGGREGATE_DATA& data) {
++  if (data.content_type == XContentType::kProfile && kernel_state)
++    kernel_state->user_profile()->RescanLocal();
++}
++
+ X_RESULT ContentManager::DeleteContent(uint64_t xuid, const XCONTENT_AGGREGATE_DATA& data) try {
+   auto global_lock = global_critical_region_.Acquire();
+ 
+-  if (IsContentOpen(data)) {
++  if (IsContentOpen(data) || SignedInProfile(kernel_state_, data)) {
+     // TODO(Gliniak): Get real error code for this case.
+     return X_ERROR_ACCESS_DENIED;
+   }
+@@ -790,6 +805,7 @@ X_RESULT ContentManager::DeleteContent(uint64_t xuid, const XCONTENT_AGGREGATE_D
+   if (ec2) return X_ERROR_ACCESS_DENIED;
+ 
+   if (dir_removed > 0 || header_removed) {
++    RefreshProfiles(kernel_state_, data);
+     return X_ERROR_SUCCESS;
+   }
+   return X_ERROR_FILE_NOT_FOUND;
+@@ -819,7 +835,8 @@ X_RESULT ContentManager::TransferContent(uint64_t xuid, const XCONTENT_AGGREGATE
+   fs::path source_path, source_header, destination_path, destination_header;
+   {
+     auto global_lock = global_critical_region_.Acquire();
+-    if (move && IsContentOpen(source)) return X_ERROR_ACCESS_DENIED;  // as DeleteContent
++    if (move && (IsContentOpen(source) || SignedInProfile(kernel_state_, source)))
++      return X_ERROR_ACCESS_DENIED;  // as DeleteContent
+     source_path = ResolvePackagePath(xuid, source);
+     source_header = ResolvePackageHeaderPath(source.file_name(), owner, source.title_id,
+                                              source.content_type, source.device_id);
+@@ -920,7 +937,8 @@ X_RESULT ContentManager::TransferContent(uint64_t xuid, const XCONTENT_AGGREGATE
+   auto global_lock = global_critical_region_.Acquire();
+   if (fs::exists(destination_path, ec) || fs::exists(destination_header, ec))
+     return X_ERROR_ALREADY_EXISTS;
+-  if (move && IsContentOpen(source)) return X_ERROR_ACCESS_DENIED;
++  if (move && (IsContentOpen(source) || SignedInProfile(kernel_state_, source)))
++    return X_ERROR_ACCESS_DENIED;
+   fs::create_directories(destination_path.parent_path(), ec);
+   fs::create_directories(destination_header.parent_path(), ec);
+   if (!IsUnlinkedStoragePath(destination_path.parent_path()) ||
+@@ -944,6 +962,7 @@ X_RESULT ContentManager::TransferContent(uint64_t xuid, const XCONTENT_AGGREGATE
+       return deleted;
+     }
+   }
++  RefreshProfiles(kernel_state_, destination);
+   return X_ERROR_SUCCESS;
+ } catch (const std::filesystem::filesystem_error&) { return X_ERROR_ACCESS_DENIED; }
+ 
+@@ -997,6 +1016,7 @@ X_RESULT ContentManager::UnmountAndDeleteContent(uint64_t xuid,
+   if (ec2) return X_ERROR_ACCESS_DENIED;
+ 
+   if (dir_removed > 0 || header_removed) {
++    RefreshProfiles(kernel_state_, data);
+     return X_ERROR_SUCCESS;
+   }
+   return X_ERROR_FILE_NOT_FOUND;
+diff --git a/src/system/xam/user_profile.cpp b/src/system/xam/user_profile.cpp
+index 0eca58e..04217ef 100644
+--- a/src/system/xam/user_profile.cpp
++++ b/src/system/xam/user_profile.cpp
+@@ -27,9 +27,11 @@
+ 
+ #include <fmt/format.h>
+ 
++#include <rex/filesystem.h>
+ #include <rex/logging.h>
+ #include <rex/system/kernel_state.h>
+ #include <rex/system/user_module.h>
++#include <rex/system/xam/content_manager.h>
+ #include <rex/system/xam/user_profile.h>
+ 
+ namespace rex {
+@@ -226,145 +228,226 @@ UserProfile::Identity UserProfile::FindLocal(uint64_t xuid) const {
+   return {};
+ }
+ 
+-bool UserProfile::InitializeLocal(const std::filesystem::path& root) {
+-  if (kernel_state_) kernel_state_->ConfigureOfflineAchievements(root);
+-  std::lock_guard lock(identity_mutex_);
+-  identity_ = {};
+-  profiles_.clear();
+-  storage_ready_ = false;
+-  if (root.empty()) return false;
+-  profile_path_ = root / "profiles" / "local-v1.dat";
+-  const auto v2 = root / "profiles" / "local-v2.dat";
++namespace {
++constexpr uint32_t kProfileTitle = 0xFFFE07D1;
++constexpr size_t kMaxTitlesPlayed = 4096;
++// Every write is staged next to its destination and renamed into place.
++bool WriteAtomic(const std::filesystem::path& destination, const std::vector<uint8_t>& bytes) {
+   std::error_code error;
+-  const bool version2 = std::filesystem::exists(v2, error);
+-  if (error) return false;
+-  if (version2) profile_path_ = v2;
+-  const bool exists = std::filesystem::exists(profile_path_, error);
++  std::filesystem::create_directories(destination.parent_path(), error);
+   if (error) return false;
+-  if (!exists) { storage_ready_ = true; return true; }
+-  // Bounded parser. A bad v2 never silently falls back to the migration source.
+-  std::array<uint8_t, 20 + 64 * 25> record{};
+-  auto* file = rex::filesystem::OpenFile(profile_path_, "rb");
+-  if (!file) return false;
+-  const auto size = fread(record.data(), 1, record.size(), file);
+-  const bool bad = ferror(file) != 0 || fgetc(file) != EOF;
+-  fclose(file);
+-  if (bad) return false;
+-  auto u64 = [&](size_t offset) {
+-    uint64_t value = 0;
+-    for (size_t i = 0; i < 8; ++i) value = (value << 8) | record[offset+i];
+-    return value;
+-  };
+-  size_t count = 1, offset = 8;
+-  uint64_t selected = 0;
+-  if (version2) {
+-    if (size < 20 || std::memcmp(record.data(), "X360LP02", 8)) return false;
+-    count = (uint32_t(record[8]) << 24) | (uint32_t(record[9]) << 16) |
+-            (uint32_t(record[10]) << 8) | record[11];
+-    if (count > 64 || size != 20 + count * 25) return false;
+-    selected = u64(12);
+-    offset = 20;
+-    // A committed empty v2 is the tombstone after removing the final account.
+-    // It must take precedence over the preserved v1 migration source.
+-    if (!count) {
+-      if (selected) return false;
+-      storage_ready_ = true;
+-      return true;
+-    }
+-  } else if (size != 33 || std::memcmp(record.data(), "X360LP01", 8)) return false;
+-  std::vector<Identity> loaded;
+-  unsigned signed_in = 0;
+-  for (size_t i = 0; i < count; ++i, offset += 25) {
+-    const auto xuid = u64(offset);
+-    const auto state = record[offset + 8];
+-    if (state > 1 || record[offset + 24]) return false;
+-    const std::string name(reinterpret_cast<const char*>(record.data() + offset + 9));
+-    if (!ValidLocalXuid(xuid) || !ValidLocalName(name)) return false;
+-    for (size_t j = offset + 9 + name.size(); j <= offset + 24; ++j)
+-      if (record[j]) return false;
+-    for (const auto& p : loaded) if (p.xuid == xuid) return false;
+-    signed_in += state;
+-    loaded.push_back({xuid, name, state});
+-  }
+-  if (signed_in > 1) return false;
+-  if (!version2) selected = loaded.front().xuid;
+-  const auto it = std::find_if(loaded.begin(), loaded.end(),
+-      [&](const auto& p) { return p.xuid == selected; });
+-  if (it == loaded.end() || (signed_in && !it->signin_state)) return false;
+-  identity_ = *it;
+-  profiles_ = std::move(loaded);
+-  storage_ready_ = true;
+-  return true;
+-}
+-
+-bool UserProfile::PersistProfiles(const std::vector<Identity>& next, const Identity& selected) {
+-  if (!storage_ready_) { REXSYS_ERROR("Local profile store is not initialized"); return false; }
+-  std::error_code error;
+-  std::filesystem::create_directories(profile_path_.parent_path(), error);
+-  if (error) { REXSYS_ERROR("Local profile directory: {}", error.message()); return false; }
+-  const bool version2 = next.size() != 1 || profile_path_.filename() == "local-v2.dat";
+-  const auto destination = profile_path_.parent_path() / (version2 ? "local-v2.dat" : "local-v1.dat");
+-  std::vector<uint8_t> record(version2 ? 20 + next.size() * 25 : 33, 0);
+-  std::memcpy(record.data(), version2 ? "X360LP02" : "X360LP01", 8);
+-  auto put64 = [&](size_t offset, uint64_t value) {
+-    for (unsigned i = 0; i < 8; ++i) record[offset+i] = uint8_t(value >> (56-i*8));
+-  };
+-  size_t offset = 8;
+-  if (version2) {
+-    record[11] = uint8_t(next.size());
+-    put64(12, selected.xuid);
+-    offset = 20;
+-  }
+-  for (const auto& p : next) {
+-    put64(offset, p.xuid);
+-    record[offset+8] = uint8_t(p.signin_state);
+-    std::memcpy(record.data()+offset+9, p.name.data(), p.name.size());
+-    offset += 25;
+-  }
+   auto temporary = destination;
+   temporary += ".tmp";
+   auto* file = rex::filesystem::OpenFile(temporary, "wb");
+-  if (!file) { REXSYS_ERROR("Local profile staging open failed: {}", errno); return false; }
+-  bool ok = fwrite(record.data(), 1, record.size(), file) == record.size() && fflush(file) == 0;
++  if (!file) return false;
++  bool ok = fwrite(bytes.data(), 1, bytes.size(), file) == bytes.size() && fflush(file) == 0;
+ #if REX_PLATFORM_WIN32
+   if (ok) ok = _commit(_fileno(file)) == 0;
+ #else
+   if (ok) ok = fsync(fileno(file)) == 0;
+ #endif
+-  if (!ok) REXSYS_ERROR("Local profile flush failed: {}", errno);
+-  if (fclose(file)) { REXSYS_ERROR("Local profile close failed: {}", errno); ok = false; }
++  if (fclose(file)) ok = false;
+   if (ok) {
+ #if REX_PLATFORM_WIN32
+     ok = MoveFileExW(temporary.c_str(), destination.c_str(),
+-                    MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH) != 0;
+-    if (!ok) REXSYS_ERROR("Local profile replace failed: {}", GetLastError());
++                     MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH) != 0;
+ #else
+     std::filesystem::rename(temporary, destination, error);
+     ok = !error;
+ #endif
+   }
+   if (!ok) std::filesystem::remove(temporary, error);
+-  if (ok) profile_path_ = destination;
+   return ok;
+ }
++std::optional<std::vector<uint8_t>> ReadSmall(const std::filesystem::path& path, size_t limit) {
++  auto* file = rex::filesystem::OpenFile(path, "rb");
++  if (!file) return std::nullopt;
++  std::vector<uint8_t> bytes(limit + 1);
++  const auto size = fread(bytes.data(), 1, bytes.size(), file);
++  const bool bad = ferror(file) != 0;
++  fclose(file);
++  if (bad || size > limit) return std::nullopt;
++  bytes.resize(size);
++  return bytes;
++}
++uint64_t Get64(const uint8_t* p) {
++  uint64_t value = 0;
++  for (int i = 0; i < 8; ++i) value = (value << 8) | p[i];
++  return value;
++}
++void Put64(uint8_t* p, uint64_t value) {
++  for (int i = 0; i < 8; ++i) p[i] = uint8_t(value >> (56 - i * 8));
++}
++std::string XuidName(uint64_t xuid) { return fmt::format("{:016X}", xuid); }
++bool SameName(const std::string& a, const std::string& b) {
++  return a.size() == b.size() && std::equal(a.begin(), a.end(), b.begin(),
++      [](unsigned char x, unsigned char y) { return std::tolower(x) == std::tolower(y); });
++}
++}  // namespace
+ 
+-namespace {
+-constexpr size_t kMaxTitlesPlayed = 4096;
+-std::filesystem::path TitlesPlayedPath(const std::filesystem::path& store, uint64_t xuid) {
+-  return store.parent_path() / fmt::format("{:016X}", xuid) / "titles-played.dat";
++std::filesystem::path UserProfile::DeviceRoot(uint32_t device_id) const {
++  if (!kernel_state_ || !kernel_state_->content_manager())
++    return device_id == 1 ? root_ : std::filesystem::path{};
++  try {
++    return kernel_state_->content_manager()->DeviceRoot(device_id);
++  } catch (const std::filesystem::filesystem_error&) {
++    return {};  // disconnected device
++  }
++}
++
++std::filesystem::path UserProfile::PackagePathLocked(const Identity& profile) const {
++  const auto device = DeviceRoot(profile.device_id);
++  if (device.empty()) return {};
++  return device / XuidName(profile.xuid) / fmt::format("{:08X}", kProfileTitle) / "00010000" /
++         XuidName(profile.xuid);
++}
++
++std::filesystem::path UserProfile::PackagePath(uint64_t xuid) const {
++  std::lock_guard lock(identity_mutex_);
++  for (const auto& p : profiles_) if (p.xuid == xuid) return PackagePathLocked(p);
++  return {};
++}
++
++// account.dat: "X360PA01", big-endian XUID, NUL-padded gamertag (16 bytes).
++bool UserProfile::WritePackage(const Identity& profile) const {
++  const auto package = PackagePathLocked(profile);
++  if (package.empty()) return false;
++  std::vector<uint8_t> record(32, 0);
++  std::memcpy(record.data(), "X360PA01", 8);
++  Put64(record.data() + 8, profile.xuid);
++  std::memcpy(record.data() + 16, profile.name.data(), profile.name.size());
++  if (!WriteAtomic(package / "account.dat", record)) return false;
++  if (!kernel_state_ || !kernel_state_->content_manager()) return true;
++  XCONTENT_AGGREGATE_DATA data{};
++  data.device_id = profile.device_id;
++  data.content_type = XContentType::kProfile;
++  data.set_display_name(std::u16string(profile.name.begin(), profile.name.end()));
++  data.set_file_name(XuidName(profile.xuid));
++  data.xuid = profile.xuid;
++  data.title_id = kProfileTitle;
++  return kernel_state_->content_manager()->WriteContentHeaderFile(profile.xuid, data) == X_ERROR_SUCCESS;
++}
++
++std::vector<UserProfile::Identity> UserProfile::ScanDevices() const {
++  std::vector<Identity> found;
++  std::vector<uint32_t> devices{1};
++  if (kernel_state_ && kernel_state_->content_manager()) {
++    devices.clear();
++    for (const auto& device : kernel_state_->content_manager()->GetDevices())
++      if (device.device_type != DeviceType::ODD) devices.push_back(device.device_id);
++  }
++  for (const auto device : devices) {
++    std::vector<uint64_t> owners;
++    if (kernel_state_ && kernel_state_->content_manager()) {
++      try {
++        owners = kernel_state_->content_manager()->ListContentOwners(device);
++      } catch (const std::filesystem::filesystem_error&) {
++        continue;
++      }
++    } else {
++      std::error_code error;
++      for (const auto& entry : std::filesystem::directory_iterator(root_, error)) {
++        const auto name = entry.path().filename().string();
++        if (name.size() == 16) try { owners.push_back(std::stoull(name, nullptr, 16)); } catch (...) {}
++      }
++    }
++    for (const auto xuid : owners) {
++      if (!ValidLocalXuid(xuid)) continue;
++      Identity profile{xuid, {}, 0, device};
++      const auto record = ReadSmall(PackagePathLocked(profile) / "account.dat", 32);
++      if (!record || record->size() != 32 || std::memcmp(record->data(), "X360PA01", 8) ||
++          Get64(record->data() + 8) != xuid || (*record)[31])
++        continue;
++      profile.name = reinterpret_cast<const char*>(record->data() + 16);
++      if (!ValidLocalName(profile.name)) continue;
++      // A copy on another device is the same account; the first device wins.
++      if (std::any_of(found.begin(), found.end(), [&](const auto& p) { return p.xuid == xuid; }))
++        continue;
++      found.push_back(std::move(profile));
++    }
++  }
++  return found;
++}
++
++bool UserProfile::InitializeLocal(const std::filesystem::path& root) {
++  {
++    std::lock_guard lock(identity_mutex_);
++    identity_ = {};
++    profiles_.clear();
++    storage_ready_ = false;
++    root_ = root;
++  }
++  if (kernel_state_) kernel_state_->ConfigureOfflineAchievements(root);
++  if (root.empty()) return false;
++  if (kernel_state_) {
++    // Offline achievements live in each profile package, like its GPDs.
++    kernel_state_->offline_achievements().SetProfileFileResolver(
++        [this](uint64_t xuid) { const auto p = PackagePath(xuid); return p.empty() ? p : p / "achievements.dat"; });
++  }
++  return RescanLocal();
+ }
++
++bool UserProfile::RescanLocal() {
++  // Storage before identity, as in every other profile mutation.
++  auto storage_lock = rex::thread::global_critical_region::AcquireDirect();
++  std::lock_guard lock(identity_mutex_);
++  if (root_.empty()) return false;
++  auto loaded = ScanDevices();
++  uint64_t selected = identity_.xuid;
++  uint32_t state = identity_.signin_state;
++  if (!storage_ready_) {
++    // session-v1.dat: "X360SS01", big-endian selected XUID, sign-in state.
++    state = 0;
++    selected = 0;
++    const auto session = root_ / "profiles" / "session-v1.dat";
++    std::error_code error;
++    const bool exists = std::filesystem::exists(session, error);
++    if (error) return false;
++    if (exists) {
++      const auto record = ReadSmall(session, 17);
++      if (!record || record->size() != 17 || std::memcmp(record->data(), "X360SS01", 8) ||
++          (*record)[16] > 1)
++        return false;
++      selected = Get64(record->data() + 8);
++      state = (*record)[16];
++    }
++  }
++  auto it = std::find_if(loaded.begin(), loaded.end(), [&](const auto& p) { return p.xuid == selected; });
++  if (it == loaded.end()) {
++    identity_ = loaded.empty() ? Identity{} : loaded.front();
++    identity_.signin_state = 0;
++  } else {
++    identity_ = *it;
++    identity_.signin_state = state;
++  }
++  for (auto& p : loaded) p.signin_state = p.xuid == identity_.xuid ? identity_.signin_state : 0;
++  profiles_ = std::move(loaded);
++  storage_ready_ = true;
++  return true;
++}
++
++bool UserProfile::PersistSession(const Identity& selected) {
++  if (!storage_ready_) { REXSYS_ERROR("Local profile store is not initialized"); return false; }
++  std::vector<uint8_t> record(17, 0);
++  std::memcpy(record.data(), "X360SS01", 8);
++  Put64(record.data() + 8, selected.xuid);
++  record[16] = uint8_t(selected.signin_state ? 1 : 0);
++  if (WriteAtomic(root_ / "profiles" / "session-v1.dat", record)) return true;
++  REXSYS_ERROR("Local profile session write failed");
++  return false;
+ }
+ 
+ std::vector<uint32_t> UserProfile::TitlesPlayed(uint64_t xuid) const {
+-  std::filesystem::path store;
++  std::filesystem::path package;
+   {
+     std::lock_guard lock(identity_mutex_);
+     if (!storage_ready_ || !ValidLocalXuid(xuid)) return {};
+-    store = profile_path_;
++    for (const auto& p : profiles_) if (p.xuid == xuid) package = PackagePathLocked(p);
+   }
++  if (package.empty()) return {};
+   // "X360TP01", big-endian count, then sorted unique big-endian title IDs.
+   std::vector<uint32_t> titles;
+-  auto* file = rex::filesystem::OpenFile(TitlesPlayedPath(store, xuid), "rb");
++  auto* file = rex::filesystem::OpenFile(package / "titles-played.dat", "rb");
+   if (!file) return titles;
+   std::array<uint8_t, 12> header{};
+   bool ok = fread(header.data(), 1, header.size(), file) == header.size() &&
+@@ -397,15 +480,8 @@ bool UserProfile::RecordTitlePlayed(uint32_t title_id) {
+   if (position != titles.end() && *position == title_id) return true;
+   if (titles.size() >= kMaxTitlesPlayed) return false;
+   titles.insert(position, title_id);
+-  std::filesystem::path destination;
+-  {
+-    std::lock_guard lock(identity_mutex_);
+-    if (!storage_ready_) return false;
+-    destination = TitlesPlayedPath(profile_path_, account.xuid);
+-  }
+-  std::error_code error;
+-  std::filesystem::create_directories(destination.parent_path(), error);
+-  if (error) return false;
++  const auto package = PackagePath(account.xuid);
++  if (package.empty()) return false;
+   std::vector<uint8_t> record(12 + titles.size() * 4);
+   std::memcpy(record.data(), "X360TP01", 8);
+   auto put32 = [&](size_t offset, uint32_t value) {
+@@ -413,31 +489,23 @@ bool UserProfile::RecordTitlePlayed(uint32_t title_id) {
+   };
+   put32(8, uint32_t(titles.size()));
+   for (size_t i = 0; i < titles.size(); ++i) put32(12 + i * 4, titles[i]);
+-  auto temporary = destination;
+-  temporary += ".tmp";
+-  auto* file = rex::filesystem::OpenFile(temporary, "wb");
+-  if (!file) return false;
+-  bool ok = fwrite(record.data(), 1, record.size(), file) == record.size() && fflush(file) == 0;
+-  if (fclose(file)) ok = false;
+-  if (ok) {
+-    std::filesystem::rename(temporary, destination, error);
+-    ok = !error;
+-  }
+-  if (!ok) std::filesystem::remove(temporary, error);
++  const bool ok = WriteAtomic(package / "titles-played.dat", record);
+   if (ok) REXSYS_INFO("Local profile {:016X}: title {:08X} played", account.xuid, title_id);
+   return ok;
+ }
+ 
+-uint32_t UserProfile::CreateLocal(const std::string& name, uint64_t* created_xuid) {
++uint32_t UserProfile::CreateLocal(const std::string& name, uint64_t* created_xuid, uint32_t device_id) {
++  auto storage_lock = rex::thread::global_critical_region::AcquireDirect();
+   std::lock_guard lock(identity_mutex_);
+   if (created_xuid) *created_xuid = 0;
++  if (!storage_ready_) return X_ERROR_FUNCTION_FAILED;
+   if (!ValidLocalName(name)) return X_ERROR_INVALID_PARAMETER;
+-  for (const auto& p : profiles_) {
+-    if (p.name.size() == name.size() && std::equal(name.begin(), name.end(), p.name.begin(),
+-        [](unsigned char a, unsigned char b) { return std::tolower(a) == std::tolower(b); }))
+-      return X_ERROR_ALREADY_EXISTS;
+-  }
++  for (const auto& p : profiles_) if (SameName(p.name, name)) return X_ERROR_ALREADY_EXISTS;
+   if (profiles_.size() >= 64) return X_ERROR_FUNCTION_FAILED;
++  if (DeviceRoot(device_id).empty() ||
++      (kernel_state_ && kernel_state_->content_manager() &&
++       !kernel_state_->content_manager()->GetDevice(device_id)))
++    return X_ERROR_DEVICE_NOT_CONNECTED;
+   uint64_t xuid = 0;
+   try {
+     std::random_device source;
+@@ -450,11 +518,15 @@ uint32_t UserProfile::CreateLocal(const std::string& name, uint64_t* created_xui
+     REXSYS_ERROR("Local profile identity generation: {}", error.what());
+     return X_ERROR_FUNCTION_FAILED;
+   }
+-  auto next = profiles_;
+-  next.push_back({xuid, name, 0});
+-  auto selected = identity_.xuid ? identity_ : next.back();
+-  if (!PersistProfiles(next, selected)) return X_ERROR_FUNCTION_FAILED;
+-  profiles_ = std::move(next);
++  const Identity created{xuid, name, 0, device_id};
++  if (!WritePackage(created)) {
++    std::error_code error;
++    std::filesystem::remove_all(PackagePathLocked(created), error);
++    return X_ERROR_FUNCTION_FAILED;
++  }
++  auto selected = identity_.xuid ? identity_ : created;
++  if (!identity_.xuid && !PersistSession(selected)) return X_ERROR_FUNCTION_FAILED;
++  profiles_.push_back(created);
+   identity_ = std::move(selected);
+   if (created_xuid) *created_xuid = xuid;
+   return X_ERROR_SUCCESS;
+@@ -466,24 +538,18 @@ uint32_t UserProfile::RenameLocal(uint64_t xuid, const std::string& name) {
+   {
+     std::lock_guard lock(identity_mutex_);
+     if (!ValidLocalName(name)) return X_ERROR_INVALID_PARAMETER;
+-    auto next = profiles_;
+-    const auto target = std::find_if(next.begin(), next.end(),
++    const auto target = std::find_if(profiles_.begin(), profiles_.end(),
+         [xuid](const auto& profile) { return profile.xuid == xuid; });
+-    if (target == next.end()) return X_ERROR_NO_SUCH_USER;
+-    for (const auto& profile : next) {
+-      if (profile.xuid != xuid && profile.name.size() == name.size() &&
+-          std::equal(name.begin(), name.end(), profile.name.begin(),
+-              [](unsigned char a, unsigned char b) { return std::tolower(a) == std::tolower(b); }))
+-        return X_ERROR_ALREADY_EXISTS;
+-    }
++    if (target == profiles_.end()) return X_ERROR_NO_SUCH_USER;
++    for (const auto& profile : profiles_)
++      if (profile.xuid != xuid && SameName(profile.name, name)) return X_ERROR_ALREADY_EXISTS;
+     if (target->name == name) return X_ERROR_SUCCESS;
++    auto renamed = *target;
++    renamed.name = name;
++    if (!WritePackage(renamed)) return X_ERROR_FUNCTION_FAILED;
+     target->name = name;
+-    auto selected = identity_;
+-    if (selected.xuid == xuid) selected.name = name;
+-    if (!PersistProfiles(next, selected)) return X_ERROR_FUNCTION_FAILED;
+-    notify = selected.xuid == xuid && selected.signin_state != 0;
+-    profiles_ = std::move(next);
+-    identity_ = std::move(selected);
++    if (identity_.xuid == xuid) identity_.name = name;
++    notify = identity_.xuid == xuid && identity_.signin_state != 0;
+     // Renaming does not change identity or revoke save/achievement handles.
+   }
+   // Original 17559 816DE9B8 publishes profile-change notification 14 with
+@@ -501,26 +567,9 @@ uint32_t UserProfile::RemoveLocal(uint64_t xuid) {
+     const auto target = std::find_if(next.begin(), next.end(),
+         [xuid](const auto& profile) { return profile.xuid == xuid; });
+     if (target == next.end()) return X_ERROR_NO_SUCH_USER;
+-    // Do not overwrite a recovery record or erase any account content. The
+-    // complete pre-commit snapshot also retains selection and migration format.
+-    std::error_code error;
+-    const auto recovery_dir = profile_path_.parent_path() / "deleted";
+-    std::filesystem::create_directories(recovery_dir, error);
+-    if (error) return X_ERROR_FUNCTION_FAILED;
+-    const auto recovery = recovery_dir / fmt::format("{:016X}-{}-{}", xuid,
+-        std::chrono::steady_clock::now().time_since_epoch().count(), profile_path_.filename().string());
+-    if (!std::filesystem::copy_file(profile_path_, recovery, std::filesystem::copy_options::none, error) || error)
+-      return X_ERROR_FUNCTION_FAILED;
+-    auto* archive = rex::filesystem::OpenFile(recovery, "ab");
+-    if (!archive) return X_ERROR_FUNCTION_FAILED;
+-    bool durable = fflush(archive) == 0;
+-#if REX_PLATFORM_WIN32
+-    if (durable) durable = _commit(_fileno(archive)) == 0;
+-#else
+-    if (durable) durable = fsync(fileno(archive)) == 0;
+-#endif
+-    if (fclose(archive)) durable = false;
+-    if (!durable) return X_ERROR_FUNCTION_FAILED;
++    const auto package = PackagePathLocked(*target);
++    const auto header = DeviceRoot(target->device_id) / XuidName(xuid) /
++        fmt::format("{:08X}", kProfileTitle) / "Headers" / "00010000" / (XuidName(xuid) + ".header");
+     next.erase(target);
+     auto selected = identity_;
+     const bool removed_selection = selected.xuid == xuid;
+@@ -529,8 +578,16 @@ uint32_t UserProfile::RemoveLocal(uint64_t xuid) {
+       selected = next.empty() ? Identity{} : next.front();
+       selected.signin_state = 0;
+       for (auto& profile : next) profile.signin_state = 0;
++      if (!PersistSession(selected)) return X_ERROR_FUNCTION_FAILED;
++    }
++    // The profile package goes; saves and other content of this XUID remain.
++    std::error_code error;
++    std::filesystem::remove_all(package, error);
++    if (!error) std::filesystem::remove(header, error);
++    if (error) {
++      if (removed_selection) PersistSession(identity_);
++      return X_ERROR_FUNCTION_FAILED;
+     }
+-    if (!PersistProfiles(next, selected)) return X_ERROR_FUNCTION_FAILED;
+     profiles_ = std::move(next);
+     identity_ = std::move(selected);
+     if (removed_selection) {
+@@ -561,7 +618,7 @@ uint32_t UserProfile::SetLocalSession(uint64_t xuid) {
+   for (auto& p : next) p.signin_state = 0;
+   it->signin_state = state;
+   const auto selected = *it;
+-  if (!PersistProfiles(next, selected)) return X_ERROR_FUNCTION_FAILED;
++  if (!PersistSession(selected)) return X_ERROR_FUNCTION_FAILED;
+   ++storage_epoch_; // Existing save mounts and enumerators never revive after sign-in.
+   const bool changed_identity = identity_.xuid != selected.xuid;
+   profiles_ = std::move(next);
+@@ -641,9 +698,10 @@ std::filesystem::path UserProfile::SettingPath(const Setting* setting) const {
+     if (!kernel_state_ || !kernel_state_->GetExecutableModule()) return {};
+     return kernel_state_->content_manager()->ResolveGameUserContentPath() / fmt::format("{:08X}", setting->setting_id);
+   }
+-  if (!xuid() || profile_path_.empty()) return {};
+-  return profile_path_.parent_path() / fmt::format("{:016X}", xuid()) /
+-      "settings-v1" / fmt::format("{:08X}.dat", setting->setting_id);
++  // Profile-wide settings live in the signed-in profile's own package.
++  const auto package = xuid() ? PackagePath(xuid()) : std::filesystem::path{};
++  if (package.empty()) return {};
++  return package / "settings-v1" / fmt::format("{:08X}.dat", setting->setting_id);
+ }
+ 
+ void UserProfile::LoadSetting(Setting* setting) {

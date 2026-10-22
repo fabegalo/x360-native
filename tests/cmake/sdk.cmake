@@ -12,6 +12,18 @@ if(WIN32)
   # Explicit offscreen GPU diagnostic, not automatically added to CTest.
 endif()
 if(WIN32)
+  add_executable(x360n_profile_17559_probe EXCLUDE_FROM_ALL tools/profile_17559_probe.cpp
+      ../titles/common/dashboard_assets.cpp)
+  target_link_libraries(x360n_profile_17559_probe PRIVATE rexruntime x360n_core)
+  target_compile_options(x360n_profile_17559_probe PRIVATE
+      -UTRACY_ENABLE -UREXGLUE_ENABLE_PROFILING -UREXGLUE_ENABLE_PERF_COUNTERS)
+  x360n_stage_runtime_dlls(x360n_profile_17559_probe)
+  add_executable(x360n_storage_17559_probe EXCLUDE_FROM_ALL tools/storage_17559_probe.cpp
+      ../titles/common/dashboard_assets.cpp)
+  target_link_libraries(x360n_storage_17559_probe PRIVATE rexruntime x360n_core)
+  target_compile_options(x360n_storage_17559_probe PRIVATE
+      -UTRACY_ENABLE -UREXGLUE_ENABLE_PROFILING -UREXGLUE_ENABLE_PERF_COUNTERS)
+  x360n_stage_runtime_dlls(x360n_storage_17559_probe)
   add_executable(x360n_notification_17559_probe EXCLUDE_FROM_ALL tools/notification_17559_probe.cpp
       ../titles/common/dashboard_assets.cpp)
   target_link_libraries(x360n_notification_17559_probe PRIVATE rexruntime x360n_core)
@@ -21,6 +33,8 @@ if(WIN32)
 endif()
 # SDK behavior checks (link the SDK codegen library).
 add_executable(x360n_sdk_checks sdkcheck/depfile_escape_test.cpp)
+target_sources(x360n_sdk_checks PRIVATE sdkcheck/gpu_backend_test.cpp)
+target_compile_definitions(x360n_sdk_checks PRIVATE X360N_SOURCE_ROOT="${PROJECT_SOURCE_DIR}")
 target_sources(x360n_sdk_checks PRIVATE sdkcheck/sha1_test.cpp)
 if(WIN32)
   target_link_libraries(x360n_sdk_checks PRIVATE bcrypt)
@@ -179,9 +193,28 @@ target_compile_definitions(x360n_sdk_runtime_checks PRIVATE X360N_SOURCE_ROOT="$
 target_link_libraries(x360n_sdk_runtime_checks PRIVATE tomlplusplus)
 target_sources(x360n_sdk_runtime_checks PRIVATE sdkcheck/audio_drain_test.cpp)
 target_sources(x360n_sdk_runtime_checks PRIVATE sdkcheck/profile_ui_request_test.cpp)
+target_sources(x360n_sdk_runtime_checks PRIVATE ../titles/dash_17559/src/system_ui.cpp)
+set_source_files_properties("${PROJECT_SOURCE_DIR}/titles/dash_17559/src/system_ui.cpp"
+    PROPERTIES COMPILE_DEFINITIONS X360N_SYSTEM_UI_PLUGIN=1)
 target_sources(x360n_sdk_runtime_checks PRIVATE sdkcheck/system_ui_context_test.cpp)
+if(WIN32)
+  add_executable(x360n_guest_fault_context_probe tools/guest_fault_context_probe.cpp
+      ../titles/common/guest_fault_context.cpp)
+  target_link_libraries(x360n_guest_fault_context_probe PRIVATE rexruntime)
+  target_compile_options(x360n_guest_fault_context_probe PRIVATE
+      -UTRACY_ENABLE -UREXGLUE_ENABLE_PROFILING -UREXGLUE_ENABLE_PERF_COUNTERS)
+  x360n_stage_runtime_dlls(x360n_guest_fault_context_probe)
+  target_sources(x360n_sdk_runtime_checks PRIVATE sdkcheck/guest_fault_context_test.cpp
+      ../titles/common/guest_fault_context.cpp)
+  target_compile_definitions(x360n_sdk_runtime_checks PRIVATE
+      X360N_GUEST_FAULT_PROBE="$<TARGET_FILE:x360n_guest_fault_context_probe>")
+  add_dependencies(x360n_sdk_runtime_checks x360n_guest_fault_context_probe)
+endif()
 target_sources(x360n_sdk_runtime_checks PRIVATE sdkcheck/local_profile_test.cpp)
+target_sources(x360n_sdk_runtime_checks PRIVATE sdkcheck/profile_settings_test.cpp)
+target_sources(x360n_sdk_runtime_checks PRIVATE sdkcheck/profile_tile_key_test.cpp)
 target_sources(x360n_sdk_runtime_checks PRIVATE sdkcheck/save_storage_test.cpp)
+target_sources(x360n_sdk_runtime_checks PRIVATE sdkcheck/storage_device_test.cpp)
 target_sources(x360n_sdk_runtime_checks PRIVATE sdkcheck/signin_task_test.cpp)
 target_sources(x360n_sdk_runtime_checks PRIVATE sdkcheck/dashboard_uri_test.cpp
     ../titles/dash_17559/src/launch_uri.cpp)

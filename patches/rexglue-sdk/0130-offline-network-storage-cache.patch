@@ -1,0 +1,17 @@
+diff --git a/src/kernel/xam/xam_misc.cpp b/src/kernel/xam/xam_misc.cpp
+index a84cbe2..8e92c36 100644
+--- a/src/kernel/xam/xam_misc.cpp
++++ b/src/kernel/xam/xam_misc.cpp
+@@ -688,7 +688,11 @@ REX_EXPORT_STUB(__imp__XamNetworkStorageAppLauncherLaunchIfRunning);
+ REX_EXPORT_STUB(__imp__XamNetworkStorageCheckOutTitle);
+ REX_EXPORT_STUB(__imp__XamNetworkStorageCreateCacheOnDevice);
+ REX_EXPORT_STUB(__imp__XamNetworkStorageDeleteCacheOnDevice);
+-REX_EXPORT_STUB(__imp__XamNetworkStorageDeviceHasCacheFile);
++// Original 17559 export 615 returns a BOOL via FE/2D002. No network-storage
++// cache exists offline. A stale device ID here makes the dashboard synthesize
++// its 512 MiB cache entry (922FA610 -> 922F9A60) on a local device.
++extern "C" REX_FUNC(__imp__XamNetworkStorageDeviceHasCacheFile) { ctx.r3.u64 = 0; }
++static rex::ppc::detail::PPCFuncRegistrar reg_XamNetworkStorageDeviceHasCacheFile("__imp__XamNetworkStorageDeviceHasCacheFile", &__imp__XamNetworkStorageDeviceHasCacheFile);
+ REX_EXPORT_STUB(__imp__XamNetworkStorageGetBackingDevice);
+ REX_EXPORT_STUB(__imp__XamNetworkStorageGetLastSyncTime);
+ REX_EXPORT_STUB(__imp__XamNetworkStorageGetNetworkDevice);

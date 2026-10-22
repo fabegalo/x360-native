@@ -36,3 +36,38 @@
 0x8172B4C0 = {}
 0x8172B4E8 = {}
 0x8172B520 = {}
+
+# Original SignInPreferences message thunk, reached indirectly at 817B3924.
+# Manual run 20261022T000450Z: CTR=817ACC88, LR=817B3928.
+# Outside .pdata; exactly mr r3,r5; b 817CB4B0 (817ACC88..817ACC8F).
+# Its address is formed at 817B92F0; the handler is already generated.
+0x817ACC88 = {}
+
+# The same original message-dispatch family uses 23 more two-instruction
+# callbacks for profile/property pages. Each start is formed by original code,
+# outside .pdata, and contains exactly mr r3,r5; b <generated handler>.
+# Verified against image SHA256 235c5f6aa71a98ec7ec94d7e825198bf97c38099af9bb174ad2ab0642b182d07.
+# See profile-p0-followup-20261021/profile-callback-{xrefs.log,audit.json}.
+0x817ACC38 = {}
+0x817ACC40 = {}
+0x817ACC48 = {}
+0x817ACC50 = {}
+0x817ACC58 = {}
+0x817ACC60 = {}
+0x817ACC68 = {}
+0x817ACC70 = {}
+0x817ACC78 = {}
+0x817ACC80 = {}
+0x817ACC90 = {}
+0x817ACC98 = {}
+0x817ACCA0 = {}
+0x817ACCA8 = {}
+0x817ACCB0 = {}
+0x817ACCB8 = {}
+0x817ACCC0 = {}
+0x817ACCC8 = {}
+0x817ACCD0 = {}
+0x817ACCD8 = {}
+0x817ACCE0 = {}
+0x817ACCE8 = {}
+0x817ACCF0 = {}

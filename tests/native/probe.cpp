@@ -7,6 +7,7 @@
 #include <rex/graphics/registers.h>
 #include <rex/graphics/register_file.h>
 #include <rex/graphics/flags.h>
+#include <rex/graphics/graphics_system.h>
 #include <rex/cvar.h>
 #include <rex/graphics/pipeline/texture/util.h>
 #include <rex/ui/presenter.h>
@@ -14,6 +15,7 @@
 #include <thread>
 #include <iostream>
 #include <fstream>
+#include <cmath>
 #include <wincodec.h>
 #include <wrl/client.h>
 using namespace rex::graphics;
@@ -43,7 +45,8 @@ void WritePNG(const std::filesystem::path& path, const rex::ui::RawImage& image)
   check(frame->Commit()); check(encoder->Commit());
 }
 void ReplayDraw(rex::system::IGraphicsSystem& gpu, rex::memory::Memory& memory,
-                const std::filesystem::path& input, const std::filesystem::path& output) {
+                const std::filesystem::path& input, const std::filesystem::path& output,
+                unsigned repetitions = 1) {
   auto read = [&](const std::filesystem::path& file) {
     std::ifstream in(file, std::ios::binary);
     Require(bool(in), "snapshot file");
@@ -97,7 +100,8 @@ void ReplayDraw(rex::system::IGraphicsSystem& gpu, rex::memory::Memory& memory,
   }
   reg::VGT_DRAW_INITIATOR draw{};
   draw.prim_type = PrimitiveType(primitive); draw.source_select = SourceSelect::kAutoIndex; draw.num_indices = count;
-  words.insert(words.end(), {Packet(PM4_DRAW_INDX_2, 1), draw.value});
+  for (unsigned n = 0; n < repetitions; ++n)
+    words.insert(words.end(), {Packet(PM4_DRAW_INDX_2, 1), draw.value});
   // Resolve the draw's color target to an independently allocated framebuffer.
   const float xy[]{0, 0, float(width), 0, 0, float(height)};
   std::memcpy(memory.TranslateVirtual(vertices), xy, sizeof(xy));
@@ -143,15 +147,26 @@ int wmain(int argc, wchar_t** argv) {
   try {
     Require(SUCCEEDED(CoInitializeEx(nullptr, COINIT_MULTITHREADED)), "COM setup");
     const std::filesystem::path output(argv[2]);
-    const auto plugin = std::filesystem::path(argv[1]).string();
+    auto plugin = std::filesystem::path(argv[1]).string();
+    std::string backend = "d3d12";
+    if (const auto colon = plugin.find(':'); colon != std::string::npos) {
+      backend = plugin.substr(colon + 1); plugin.resize(colon);
+    }
     std::filesystem::create_directories(output);
     rex::InitLogging((output / "runtime.log").string().c_str());
     rex::Runtime rt(output, output / "user");
     rex::RuntimeConfig config; config.tool_mode = true; config.kernel_init = rex::kernel::InitializeKernel;
     Require(rt.Setup(std::move(config)) == X_STATUS_SUCCESS, "runtime setup");
-    auto gpu = rex::system::LoadGpuPlugin(plugin, "d3d12");
+    auto gpu = rex::system::LoadGpuPlugin(plugin, backend);
     Require(bool(gpu), "load plugin ABI");
-    const bool draw_replay = argc == 5 && std::wstring_view(argv[3]) == L"--draw-replay";
+    const auto implementation = static_cast<rex::graphics::GraphicsSystem*>(gpu.get())->name();
+    if (backend == "vulkan") Require(implementation == "Vulkan", "requested actual Vulkan graphics system");
+    if (backend == "d3d12" && plugin == "xenos") Require(implementation == "Direct3D 12", "requested actual D3D12 graphics system");
+    std::cout << "API selected: " << backend << "; implementation: " << implementation << '\n';
+    const bool stress = argc == 5 && std::wstring_view(argv[3]) == L"--draw-stress";
+    const bool draw_replay = argc == 5 && (std::wstring_view(argv[3]) == L"--draw-replay" || stress);
+    if (plugin == "native" && draw_replay) rex::cvar::SetFlagByName("native_stats", "true");
+    if (stress) rex::cvar::SetFlagByName("d3d12_debug", "true");
     if (draw_replay) {
       std::filesystem::create_directories(output / "shaders");
       rex::cvar::SetFlagByName("dump_shaders", (output / "shaders").string());
@@ -194,7 +209,7 @@ int wmain(int argc, wchar_t** argv) {
     auto* memory = rt.memory();
     if (draw_replay) {
       if (plugin == "native") gpu->InitializeShaderStorage(output / "pipeline-cache", 0, true);
-      ReplayDraw(*gpu, *memory, argv[4], output);
+      ReplayDraw(*gpu, *memory, argv[4], output, stress ? 4096 : 1);
       gpu->Shutdown(); shutdown.gpu = nullptr; gpu.reset(); rt.Shutdown(); rex::FlushLogging();
       std::cout << "PASS isolated draw capture\n"; return 0;
     }
@@ -224,7 +239,10 @@ int wmain(int argc, wchar_t** argv) {
     Require(physical_image != UINT32_MAX && physical_ring != UINT32_MAX && physical_done != UINT32_MAX, "physical allocation translation");
     auto* mmio = memory->LookupVirtualMappedRange(0x7fc80714);
     Require(mmio != nullptr, "GPU MMIO registration");
-    if (argc == 4) {
+    const bool overlay_test = argc == 4 && std::wstring_view(argv[3]) == L"--overlay";
+    const auto overlay_image = overlay_test ? memory->SystemHeapAlloc(64 * 64 * 4, 4096, rex::memory::kSystemHeapPhysical) : 0;
+    if (overlay_test) Require(overlay_image != 0, "overlay allocation");
+    if (argc == 4 && !overlay_test) {
       std::vector<uint32_t> words;
       const std::wstring_view mode(argv[3]);
       if (mode == L"--reject") words = {Packet(0x7e, 1), 0};
@@ -251,6 +269,7 @@ int wmain(int argc, wchar_t** argv) {
     uint64_t tested = 0;
     const auto start = std::chrono::steady_clock::now();
     for (unsigned frame = replay ? 24 : 0; frame < (replay ? 25u : 48u); ++frame) {
+      if (overlay_test) width = (frame & 1) ? 192 : 256; // Resize every frame.
       const bool pwl = frame >= 24;
       xe_gpu_texture_fetch_t fetch{};
       fetch.type = FetchConstantType::kTexture; fetch.dimension = DataDimension::k2DOrStacked;
@@ -284,6 +303,23 @@ int wmain(int argc, wchar_t** argv) {
       std::vector<uint32_t> words{(5u << 16) | XE_GPU_REG_SHADER_CONSTANT_FETCH_00_0};
       const auto* raw = reinterpret_cast<const uint32_t*>(&fetch);
       words.insert(words.end(), raw, raw + 6);
+      if (overlay_test) {
+        const uint32_t colors[]{0x00FFFFFF, 0xFFFF0000, 0xFF0000FF, 0x8000FF00};
+        for (unsigned y = 0; y < 64; ++y) for (unsigned x = 0; x < 64; ++x) {
+          const auto offset = texture_util::GetTiledOffset2D(x, y, 64, 2);
+          std::memcpy(memory->TranslateVirtual<uint8_t*>(overlay_image) + offset, &colors[x / 16], 4);
+        }
+        auto set = [&](unsigned index, uint32_t value) { words.insert(words.end(), {index, value}); };
+        set(XE_GPU_REG_D1OVL_ENABLE, frame % 4 != 3);
+        set(XE_GPU_REG_D1OVL_CONTROL1, 0);
+        set(XE_GPU_REG_D1OVL_SURFACE_ADDRESS, memory->GetPhysicalAddress(overlay_image));
+        set(XE_GPU_REG_D1OVL_PITCH, 64);
+        // Probe uses display coordinates from VdQueryVideoMode (1280x720).
+        set(XE_GPU_REG_D1OVL_START, (32 << 16) | 16);
+        set(XE_GPU_REG_D1OVL_END, (96 << 16) | 80);
+        set(XE_GPU_REG_D1OVL_SURFACE_OFFSET_X, 32);
+        set(XE_GPU_REG_D1OVL_SURFACE_OFFSET_Y, 16);
+      }
       if (pwl) {
         // Exercise actual guest PWL programming, with independent RGB slopes.
         words.insert(words.end(), {XE_GPU_REG_DC_LUT_RW_MODE, 1,
@@ -328,6 +364,16 @@ int wmain(int argc, wchar_t** argv) {
           for (unsigned c = 0; c < 3; ++c) expected[c] = channels[(fetch.swizzle >> (c * 3)) & 7];
         }
         for (unsigned c = 0; c < 3; ++c) {
+          if (overlay_test && frame % 4 != 3) {
+            const double sx = (x + 0.5) * 1280.0 / width, sy = (y + 0.5) * 720.0 / height;
+            if (sx >= 32 && sx < 96 && sy >= 16 && sy < 80) {
+              const unsigned stripe = unsigned(sx - 32) / 16;
+              const unsigned colors[4][3]{{255,255,255},{255,0,0},{0,0,255},{0,255,0}};
+              const double alpha = stripe == 0 ? 0 : stripe == 3 ? 128.0/255.0 : 1;
+              const unsigned limit = pwl ? 1023 : 255;
+              expected[c] = unsigned(std::lround(expected[c] * (1-alpha) + colors[stripe][c] * (double(limit)/255.0) * alpha));
+            }
+          }
           // Hardware LUT is 10-bit, exposed to the guest as 16-bit entries.
           const unsigned value = pwl ? 0 : gamma[c * 256 + expected[c]] >> 6;
           int reference = int((value * 255 + 511) / 1023);
@@ -356,6 +402,7 @@ int wmain(int argc, wchar_t** argv) {
     }
     gpu->Shutdown(); shutdown.gpu = nullptr; gpu.reset();
     memory->SystemHeapFree(image); memory->SystemHeapFree(ring); memory->SystemHeapFree(done);
+    if (overlay_image) memory->SystemHeapFree(overlay_image);
     rt.Shutdown();
     rex::FlushLogging();
     std::cout << "PASS plugin=" << plugin << " frames=" << (replay ? 1 : 48) << " checked_channels=" << tested

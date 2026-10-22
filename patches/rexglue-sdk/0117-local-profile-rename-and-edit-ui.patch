@@ -1,0 +1,130 @@
+diff --git a/src/kernel/xam/xam_ui.cpp b/src/kernel/xam/xam_ui.cpp
+index 39318ac..0aa1d86 100644
+--- a/src/kernel/xam/xam_ui.cpp
++++ b/src/kernel/xam/xam_ui.cpp
+@@ -635,6 +635,12 @@ extern "C" REX_FUNC(__imp__XamShowGamesUI) {
+ extern "C" REX_FUNC(__imp__XamShowAvatarAwardGamesUI) {
+   ctx.r3.u64 = ShowOriginalProfile(ctx.r3.u32, 0, ctx.r4.u64, 6, 0);
+ }
++// Original 17559 export 3BC (816C4B40): edit-profile mode, no target XUID.
++extern "C" REX_FUNC(__imp__XamShowEditProfileUI) {
++  ctx.r3.u64 = ShowOriginalProfile(ctx.r3.u32, 0, 0, 3, 0);
++}
++static rex::ppc::detail::PPCFuncRegistrar show_edit_profile_ui_reg(
++    "__imp__XamShowEditProfileUI", &__imp__XamShowEditProfileUI);
+ static rex::ppc::detail::PPCFuncRegistrar show_games_ui_reg(
+     "__imp__XamShowGamesUI", &__imp__XamShowGamesUI);
+ static rex::ppc::detail::PPCFuncRegistrar show_avatar_award_games_ui_reg(
+@@ -659,7 +665,6 @@ REX_EXPORT_STUB(__imp__XamShowCsvTransitionUI);
+ REX_EXPORT_STUB(__imp__XamShowCustomMessageComposeUI);
+ REX_EXPORT_STUB(__imp__XamShowCustomPlayerListUI);
+ REX_EXPORT_STUB(__imp__XamShowDirectAcquireUI);
+-REX_EXPORT_STUB(__imp__XamShowEditProfileUI);
+ REX_EXPORT_STUB(__imp__XamShowFirstRunWelcomeUI);
+ REX_EXPORT_STUB(__imp__XamShowFitnessBodyProfileUI);
+ REX_EXPORT_STUB(__imp__XamShowFitnessClearUI);
+diff --git a/src/kernel/xam/xam_misc.cpp b/src/kernel/xam/xam_misc.cpp
+index fbc2bf6..27c58c7 100644
+--- a/src/kernel/xam/xam_misc.cpp
++++ b/src/kernel/xam/xam_misc.cpp
+@@ -775,7 +775,6 @@ REX_EXPORT_STUB(__imp__XamProfileIsSaveWindowsLiveCredsEnabled);
+ REX_EXPORT_STUB(__imp__XamProfileLoadWindowsLiveCredentials);
+ REX_EXPORT_STUB(__imp__XamProfileOpen);
+ REX_EXPORT_STUB(__imp__XamProfileRecoverTitle);
+-REX_EXPORT_STUB(__imp__XamProfileRenameAccount);
+ REX_EXPORT_STUB(__imp__XamProfileSaveAccountInfo);
+ REX_EXPORT_STUB(__imp__XamProfileSaveWindowsLiveCredentials);
+ REX_EXPORT_STUB(__imp__XamProfileSetCachedWindowsLiveEmail);
+diff --git a/src/kernel/xam/xam_enum.cpp b/src/kernel/xam/xam_enum.cpp
+index fb5e3e9..c247d74 100644
+--- a/src/kernel/xam/xam_enum.cpp
++++ b/src/kernel/xam/xam_enum.cpp
+@@ -151,6 +151,23 @@ u32 CreateLocalProfile(uint32_t flags, mapped_u32 device, uint64_t input_xuid,
+   return 0;
+ }
+ 
++// Original 17559 816DE888 and GamerProfile 9010BC20: XUID in r3,
++// bounded WCHAR name in r4; synchronous Win32 result (not an HRESULT).
++uint32_t RenameLocalProfile(uint64_t xuid, uint32_t name_address) {
++  if (!name_address) return X_ERROR_INVALID_PARAMETER;
++  std::string name;
++  for (uint32_t i = 0; i < 16; ++i) {
++    const uint64_t address = uint64_t(name_address) + i * 2;
++    if (address > 0xFFFFFFFFu || !AchievementGuestSpan(REX_KERNEL_MEMORY(),
++        uint32_t(address), 2, memory::kMemoryProtectRead)) return X_ERROR_INVALID_PARAMETER;
++    const auto c = memory::load_and_swap<uint16_t>(REX_KERNEL_MEMORY()->TranslateVirtual(uint32_t(address)));
++    if (!c) return REX_KERNEL_STATE()->user_profile()->RenameLocal(xuid, name);
++    if (i == 15 || c < 32 || c > 126) return X_ERROR_INVALID_PARAMETER;
++    name.push_back(char(c));
++  }
++  return X_ERROR_INVALID_PARAMETER;
++}
++
+ u32 XamProfileGetCreationStatus_entry(u32 handle, mapped_u64 xuid) {
+   if (!xuid) return X_E_INVALIDARG;
+   auto operation = REX_KERNEL_OBJECTS()->LookupObject<ProfileCreation>(handle);
+@@ -322,3 +339,9 @@ extern "C" REX_FUNC(__imp__XamProfileCreate) {
+ REX_EXPORT(__imp__XamProfileGetCreationStatus, rex::kernel::xam::XamProfileGetCreationStatus_entry)
+ 
+ static rex::ppc::detail::PPCFuncRegistrar profile_create_reg("__imp__XamProfileCreate", &__imp__XamProfileCreate);
++
++extern "C" REX_FUNC(__imp__XamProfileRenameAccount) {
++  ctx.r3.u64 = rex::kernel::xam::RenameLocalProfile(ctx.r3.u64, ctx.r4.u32);
++}
++static rex::ppc::detail::PPCFuncRegistrar profile_rename_reg(
++    "__imp__XamProfileRenameAccount", &__imp__XamProfileRenameAccount);
+diff --git a/src/system/xam/user_profile.cpp b/src/system/xam/user_profile.cpp
+index eb86ab9..ee39a32 100644
+--- a/src/system/xam/user_profile.cpp
++++ b/src/system/xam/user_profile.cpp
+@@ -353,6 +353,38 @@ uint32_t UserProfile::CreateLocal(const std::string& name, uint64_t* created_xui
+   return X_ERROR_SUCCESS;
+ }
+ 
++uint32_t UserProfile::RenameLocal(uint64_t xuid, const std::string& name) {
++  auto storage_lock = rex::thread::global_critical_region::AcquireDirect();
++  bool notify = false;
++  {
++    std::lock_guard lock(identity_mutex_);
++    if (!ValidLocalName(name)) return X_ERROR_INVALID_PARAMETER;
++    auto next = profiles_;
++    const auto target = std::find_if(next.begin(), next.end(),
++        [xuid](const auto& profile) { return profile.xuid == xuid; });
++    if (target == next.end()) return X_ERROR_NO_SUCH_USER;
++    for (const auto& profile : next) {
++      if (profile.xuid != xuid && profile.name.size() == name.size() &&
++          std::equal(name.begin(), name.end(), profile.name.begin(),
++              [](unsigned char a, unsigned char b) { return std::tolower(a) == std::tolower(b); }))
++        return X_ERROR_ALREADY_EXISTS;
++    }
++    if (target->name == name) return X_ERROR_SUCCESS;
++    target->name = name;
++    auto selected = identity_;
++    if (selected.xuid == xuid) selected.name = name;
++    if (!PersistProfiles(next, selected)) return X_ERROR_FUNCTION_FAILED;
++    notify = selected.xuid == xuid && selected.signin_state != 0;
++    profiles_ = std::move(next);
++    identity_ = std::move(selected);
++    // Renaming does not change identity or revoke save/achievement handles.
++  }
++  // Original 17559 816DE9B8 publishes profile-change notification 14 with
++  // the affected slot mask after persisting and updating the cached name.
++  if (notify && kernel_state_) kernel_state_->BroadcastNotification(0xE, 1);
++  return X_ERROR_SUCCESS;
++}
++
+ uint32_t UserProfile::SetLocalSession(uint64_t xuid) {
+   auto storage_lock = rex::thread::global_critical_region::AcquireDirect();
+   std::lock_guard lock(identity_mutex_);
+diff --git a/include/rex/system/xam/user_profile.h b/include/rex/system/xam/user_profile.h
+index 6c1a7dc..36988e9 100644
+--- a/include/rex/system/xam/user_profile.h
++++ b/include/rex/system/xam/user_profile.h
+@@ -238,6 +238,7 @@ class UserProfile {
+   bool RecordTitlePlayed(uint32_t title_id);
+   std::vector<uint32_t> TitlesPlayed(uint64_t xuid) const;
+   uint32_t CreateLocal(const std::string& name, uint64_t* created_xuid = nullptr);
++  uint32_t RenameLocal(uint64_t xuid, const std::string& name);
+   std::vector<Identity> local_profiles() const;
+   Identity FindLocal(uint64_t xuid) const;
+   uint32_t SetLocalSession(uint64_t xuid);

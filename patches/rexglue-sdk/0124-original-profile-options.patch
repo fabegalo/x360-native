@@ -1,0 +1,27 @@
+diff --git a/src/kernel/xam/xam_ui.cpp b/src/kernel/xam/xam_ui.cpp
+index 3395f24..c75221e 100644
+--- a/src/kernel/xam/xam_ui.cpp
++++ b/src/kernel/xam/xam_ui.cpp
+@@ -741,7 +741,21 @@ REX_EXPORT_STUB(__imp__XamShowNuiSigninUI);
+ REX_EXPORT_STUB(__imp__XamShowNuiVideoRichPresenceUI);
+ REX_EXPORT_STUB(__imp__XamShowOptionalMediaUpdateRequiredUI);
+ REX_EXPORT_STUB(__imp__XamShowOptionalMediaUpdateRequiredUIEx);
+-REX_EXPORT_STUB(__imp__XamShowOptionsUI);
++// Retail 17559 export 4ED (816C2BD8 -> 816C2AF0) opens the original
++// Guide options page. Request is {reserved=0, controller, open_mode=6}.
++extern "C" REX_FUNC(__imp__XamShowOptionsUI) {
++  if (ctx.r3.u32 >= 4) { ctx.r3.u64 = 87; return; }
++  auto* memory = REX_KERNEL_MEMORY();
++  const auto request = memory->SystemHeapAlloc(12);
++  if (!request) { ctx.r3.u64 = 14; return; }
++  auto* words = memory->TranslateVirtual<rex::be<uint32_t>*>(request);
++  words[0] = 0; words[1] = ctx.r3.u32; words[2] = 6;
++  const auto status = REX_KERNEL_STATE()->app_manager()->DispatchMessageSync(0xFE, 0x21015, request, 12);
++  memory->SystemHeapFree(request);
++  ctx.r3.u64 = static_cast<int32_t>(status) < 0 ? (status == 0x8007000Eu ? 14u : 1627u) : 0u;
++}
++static rex::ppc::detail::PPCFuncRegistrar show_options_ui_reg(
++    "__imp__XamShowOptionsUI", &__imp__XamShowOptionsUI);
+ REX_EXPORT_STUB(__imp__XamShowPamUI);
+ REX_EXPORT_STUB(__imp__XamShowPartyInviteUI);
+ REX_EXPORT_STUB(__imp__XamShowPartyJoinInProgressUI);

@@ -18,5 +18,6 @@ inline constexpr x360n::DashboardAsset kOriginalAssets[] = {
   {"system/createprofile.xex", "c5dae66e2e7b408ef6d84d659a2232ad89f01d78fa38c365d8732f2e0a221bbd"},
   {"vk.xex", "876ddbb333d83f408ab7c69267703e623daef6da5b1eb3302bd94d246155724e"},
   {"system/hud.xex", "37e10612afde211e1d349838704f7cc2648ad5a4d1f8ca459f18ecd2c1f31ac7"},
+  {"system/deviceselector.xex", "2334c6772fd54201e60792c70a54e4714aaf74d45f657013ebe5da3737e06c0c"},
 };
 }
