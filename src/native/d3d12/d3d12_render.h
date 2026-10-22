@@ -105,6 +105,13 @@ class D3D12Render {
   D3D12_RESOURCE_STATES edram_state_ = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
   Ptr<ID3D12DescriptorHeap> views_, samplers_;
   uint32_t view_count_ = 0, sampler_count_ = 0;
+  // Samplers already written into the current arena's heap, by exact
+  // D3D12_SAMPLER_DESC bytes. Cleared with the arena (RecycleBatch).
+  using SamplerKey = std::array<uint32_t, sizeof(D3D12_SAMPLER_DESC) / 4>;
+  struct SamplerKeyHash { size_t operator()(const SamplerKey&) const; };
+  std::unordered_map<SamplerKey, uint32_t, SamplerKeyHash> arena_samplers_;
+  uint64_t sampler_reuses_ = 0;
+  uint32_t Sampler(const D3D12_SAMPLER_DESC&);
   Ptr<ID3D12RootSignature> root_, copy_root_, clear_root_;
   std::vector<Ptr<ID3D12Resource>> transient_;
   // Three independent recording arenas. Queue ordering protects persistent

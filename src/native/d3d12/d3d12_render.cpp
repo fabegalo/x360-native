@@ -181,8 +181,8 @@ void D3D12Render::CollectGpuTimestamps() {
 }
 void D3D12Render::LogSubmissionStats() {
   auto ms = [&](uint64_t ticks) { return timestamp_frequency_ ? double(ticks) * 1000.0 / double(timestamp_frequency_) : 0.0; };
-  REXLOG_INFO("Native queue submissions={} asynchronous={} fence_waits={} fence_ms={} gpu_timed={} gpu_busy_ms={:.3f} gpu_idle_between_ms={:.3f}",
-      serial_, async_submissions_, fence_waits_, flush_wait_ns_ / 1000000, gpu_timed_, ms(gpu_busy_ticks_), ms(gpu_idle_ticks_));
+  REXLOG_INFO("Native queue submissions={} asynchronous={} fence_waits={} fence_ms={} gpu_timed={} gpu_busy_ms={:.3f} gpu_idle_between_ms={:.3f} sampler_reuses={}",
+      serial_, async_submissions_, fence_waits_, flush_wait_ns_ / 1000000, gpu_timed_, ms(gpu_busy_ticks_), ms(gpu_idle_ticks_), sampler_reuses_);
   REXLOG_INFO("Native costs presents={} draws={} resolves={} empty_resolves={} overlap_flushes={} submits={} texture_uploads={} texture_bytes={} texture_ms={} resolve_ms={} flush_ms={} cache_hits={} (flush overlaps resolve)",
       present_count_, draw_count_, resolve_count_, empty_resolve_count_, overlap_flushes_, serial_, texture_uploads_, texture_upload_bytes_, texture_ns_ / 1000000,
       resolve_ns_ / 1000000, flush_ns_ / 1000000, texture_cache_hits_);
@@ -293,6 +293,7 @@ void D3D12Render::RecycleBatch() {
   upload_pages_ = std::move(next.uploads); scratch_ = std::move(next.scratch);
   next.serial = 0;
   transient_.clear(); view_count_ = sampler_count_ = 0;
+  arena_samplers_.clear();
   for (auto& s : scratch_) s.used = 0;
   uint64_t retained = 0;
   for (auto& page : upload_pages_) { page.used = 0; retained += page.size; }

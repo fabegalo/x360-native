@@ -4,6 +4,8 @@
 #include "../textures/texture_load.h"
 #include <rex/graphics/pipeline/texture/util.h>
 #include <rex/logging.h>
+#include <xxhash.h>
+#include <cstring>
 #include <stdexcept>
 #include <cfloat>
 #include <bit>
@@ -239,10 +241,8 @@ D3D12Render::TextureTables D3D12Render::BindTextures(const RegisterFile& r, rex:
     }
   }
   if (!samplers.empty()) {
-    auto first = Samplers(uint32_t(samplers.size()));
     for (unsigned i = 0; i < samplers.size(); ++i) {
       const auto& b = samplers[i]; auto f = r.GetTextureFetch(b.fetch_constant);
-      indices.at(b.bindless_descriptor_index) = first + i;
       auto mag = b.mag_filter == TextureFilter::kUseFetchConst ? f.mag_filter : b.mag_filter;
       auto min = b.min_filter == TextureFilter::kUseFetchConst ? f.min_filter : b.min_filter;
       auto mip = b.mip_filter == TextureFilter::kUseFetchConst ? f.mip_filter : b.mip_filter;
@@ -270,11 +270,25 @@ D3D12Render::TextureTables D3D12Render::BindTextures(const RegisterFile& r, rex:
         case BorderColor::k_ACBCRY_Black: s.BorderColor[1] = s.BorderColor[2] = 0.5f; break;
         default: break;
       }
-      device_->CreateSampler(&s, Cpu(first + i, true));
+      indices.at(b.bindless_descriptor_index) = Sampler(s);
     }
   }
   tables.indices = Constants(indices.data(), indices.size() * sizeof(uint32_t));
   return tables;
+}
+static_assert(sizeof(D3D12_SAMPLER_DESC) == 13 * 4, "sampler key covers every byte of the description");
+size_t D3D12Render::SamplerKeyHash::operator()(const SamplerKey& key) const {
+  return size_t(XXH3_64bits(key.data(), sizeof(key)));
+}
+uint32_t D3D12Render::Sampler(const D3D12_SAMPLER_DESC& s) {
+  // A descriptor written earlier in this arena with identical bytes samples
+  // identically and lives until the same fence; reuse its index.
+  SamplerKey key; std::memcpy(key.data(), &s, sizeof(s));
+  auto [it, inserted] = arena_samplers_.try_emplace(key, 0);
+  if (!inserted) { if (stats_enabled_) ++sampler_reuses_; return it->second; }
+  it->second = Samplers(1);
+  device_->CreateSampler(&s, Cpu(it->second, true));
+  return it->second;
 }
 void D3D12Render::SetTextureTables(const TextureTables& tables, unsigned root) {
   if (tables.indices) list_->SetGraphicsRootConstantBufferView(root, tables.indices);
