@@ -66,14 +66,14 @@ RuntimeConfig até `LoadGpuPlugin`. `GpuCreateInfo` e a ABI 1 do plugin permanec
 iguais. A estrutura C++ RuntimeConfig mudou: consumidores devem ser recompilados
 com o runtime correspondente, sem copiar uma DLL nova para um AOT antigo.
 
-Patch `0127-vulkan-display-overlay.patch`: RequestDisplayTexture recebe o fetch
+Patch `0140-vulkan-display-overlay.patch` (antes `0127-vulkan-display-overlay.patch`): RequestDisplayTexture recebe o fetch
 da superfície sem sobrescrever os registradores do título. O compositor compute
 gera SPIR-V de GLSL, compõe antes de gamma e conserva alpha do título. Usa BGRA
 sem byte swap, retângulo/offset, escala de display, descriptors por frame,
 barriers explícitas e aposentadoria de image/view/memory por submission no resize.
 Falha de composição retorna falha de apresentação, sem aceitar frame parcial.
-O nome do arquivo distingue esse patch do `0127-content-enumerator-xuid.patch`
-da tarefa paralela; ambos permanecem registrados separadamente no lock.
+Renumerado de 0127 para 0140 em 22/10 por repetir o prefixo de
+`0127-content-enumerator-xuid.patch`; conteúdo e hash inalterados.
 
 ### Seleção e preflight
 

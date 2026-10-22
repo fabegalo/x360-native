@@ -117,7 +117,7 @@ crítico de cada frame nem prova que o limite próximo de 30 FPS é um gargalo.
 
 ## Mudança
 
-Patch `0073-index-gpu-register-metadata.patch`: tabela constante indexada, gerada
+Patch `withdrawn/0073-index-gpu-register-metadata.patch`: tabela constante indexada, gerada
 pela mesma `register_table.inc`, com nome nulo nas lacunas e verificação de limite.
 Sem alocação, lock ou construção dinâmica por frame. Tipos, nomes, ponteiros
 estáveis por índice e null para desconhecidos são preservados. Nenhum draw,

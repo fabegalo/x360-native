@@ -302,7 +302,6 @@ x360-native/  (tracked source + additions from this reorganization)
 |       |-- 0070-optional-runtime-benchmarks.patch
 |       |-- 0071-original-hud-dashboard-return.patch
 |       |-- 0072-isolate-performance-counter-cache-lines.patch
-|       |-- 0073-index-gpu-register-metadata.patch
 |       |-- 0074-optional-backend-packet-validation.patch
 |       |-- 0075-native-packet-payload-validation.patch
 |       |-- 0076-empty-resolve-noop.patch
@@ -317,6 +316,8 @@ x360-native/  (tracked source + additions from this reorganization)
 |       |-- 0085-mic-array-idle-users.patch
 |       |-- 0086-xex-image-allocation-ownership.patch
 |       |-- 0087-fixed16-s5-10-resolve.patch
+|       |-- withdrawn/
+|       |   `-- 0073-index-gpu-register-metadata.patch
 |       `-- README.md
 |-- scripts/
 |   |-- analysis/

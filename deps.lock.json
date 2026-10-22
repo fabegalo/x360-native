@@ -1775,7 +1775,7 @@
 }
 ,
                                         {
-                                            "file": "patches/rexglue-sdk/0127-vulkan-display-overlay.patch",
+                                            "file": "patches/rexglue-sdk/0140-vulkan-display-overlay.patch",
                                             "sha256": "3e371c4e562e2678d4ab750c5e26b729219d3fb50f9023905cd5c05698e9fc3e",
                                             "files": {
                                                 "include/rex/graphics/vulkan/texture_cache.h": "56a61a90b0afd99d10d3f3405ec141292a2e4f568d7907abdabbbb0382274d04",

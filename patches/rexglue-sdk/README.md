@@ -522,7 +522,8 @@ with instrumentation disabled.
 ## 0073 — Index immutable GPU register metadata
 
 **Withdrawn at P3 close (2026-10-14).** This file is retained as experimental
-evidence but is not listed in `deps.lock.json` and must not be applied. The
+evidence in `withdrawn/0073-index-gpu-register-metadata.patch`; it is not listed
+in `deps.lock.json` and must not be applied. The
 original switch is restored byte-for-byte. The accepted pair reduced CPU by
 3.97% but worsened 1% low by 27.78%; existing repeats cannot establish that
 this is only noise. No simple correction with consistent benefit was identified.
@@ -1276,8 +1277,9 @@ de 64 bits em um GPR PPC. Um adapter local evita a truncagem do marshaller
 genérico, que ocultava saves de proprietários reais. O teste C8 consulta
 um save da MU pelo XUID completo, via export e `XamEnumerate`, antes e
 depois de reiniciar. Não altera o marshaller global. Sem equivalente
-upstream identificado. O patch gráfico com prefixo 0127 tem caminho próprio;
-a ordem de aplicação é exclusivamente a lista em `deps.lock.json`.
+upstream identificado. O patch gráfico que também usava o prefixo 0127 foi
+renumerado para 0140; a ordem de aplicação é exclusivamente a lista em
+`deps.lock.json`.
 
 ## 0128 — chave original de gamerpic
 
@@ -1298,10 +1300,11 @@ explicitamente não retorna ao padrão. RuntimeConfig C++ ganhou um campo:
 recompilar consumidores junto com o runtime. Teste gpu_backend_test.cpp e
 probes da fábrica; sem equivalente upstream identificado.
 
-## 0127 — composição D1OVL no Vulkan
+## 0140 — composição D1OVL no Vulkan (antes 0127)
 
-`0127-vulkan-display-overlay.patch` tem caminho distinto do patch de conteúdo
-0127. A lista do lock determina a aplicação. RequestDisplayTexture aceita
+`0140-vulkan-display-overlay.patch` se chamava `0127-vulkan-display-overlay.patch`
+e repetia o prefixo do patch de conteúdo 0127; foi renomeado sem mudar o conteúdo
+nem o hash. Continua aplicado logo após 0128, pela lista do lock. RequestDisplayTexture aceita
 o fetch próprio da camada sem alterar registradores do título. Compute GLSL
 traduzido para SPIR-V compõe BGRA/alpha antes de gamma, com descriptors por
 frame, barriers e descarte de image/view/memory por submission no resize.
