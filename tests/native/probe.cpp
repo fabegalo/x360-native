@@ -11,6 +11,7 @@
 #include <rex/cvar.h>
 #include <rex/graphics/pipeline/texture/util.h>
 #include <rex/ui/presenter.h>
+#include <rex/ui/d3d12/d3d12_provider.h>
 #include <chrono>
 #include <condition_variable>
 #include <mutex>
@@ -97,10 +98,60 @@ struct RegistryGate {
     if (holder.joinable()) holder.join();
   }
 };
+// Timestamps on the direct queue both D3D12 backends submit to. A mark runs
+// once every earlier submission on the queue has, so the span between two
+// marks covers the backend's GPU work in between, plus any time the queue
+// sat empty waiting for it.
+struct QueueTimestamps {
+  template<class T> using Ptr = Microsoft::WRL::ComPtr<T>;
+  ID3D12CommandQueue* queue = nullptr;
+  Ptr<ID3D12QueryHeap> heap; Ptr<ID3D12Resource> readback; Ptr<ID3D12Fence> fence;
+  Ptr<ID3D12CommandAllocator> allocators[2]; Ptr<ID3D12GraphicsCommandList> lists[2];
+  uint64_t frequency = 0;
+  explicit QueueTimestamps(rex::ui::d3d12::D3D12Provider& provider) : queue(provider.GetDirectQueue()) {
+    auto check = [](HRESULT hr) { Require(SUCCEEDED(hr), "queue timestamp setup"); };
+    auto* device = provider.GetDevice();
+    D3D12_QUERY_HEAP_DESC qd{D3D12_QUERY_HEAP_TYPE_TIMESTAMP, 2, 0};
+    check(device->CreateQueryHeap(&qd, IID_PPV_ARGS(&heap)));
+    D3D12_HEAP_PROPERTIES hp{}; hp.Type = D3D12_HEAP_TYPE_READBACK;
+    D3D12_RESOURCE_DESC rd{}; rd.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER; rd.Width = 16; rd.Height = 1;
+    rd.DepthOrArraySize = 1; rd.MipLevels = 1; rd.SampleDesc.Count = 1; rd.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+    check(device->CreateCommittedResource(&hp, D3D12_HEAP_FLAG_NONE, &rd, D3D12_RESOURCE_STATE_COPY_DEST, nullptr, IID_PPV_ARGS(&readback)));
+    check(device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&fence)));
+    for (unsigned i = 0; i < 2; ++i) {
+      check(device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&allocators[i])));
+      check(device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, allocators[i].Get(), nullptr, IID_PPV_ARGS(&lists[i])));
+    }
+    check(queue->GetTimestampFrequency(&frequency));
+  }
+  void Mark(unsigned i) {
+    auto& list = lists[i];
+    list->EndQuery(heap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, i);
+    if (i == 1) list->ResolveQueryData(heap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, 0, 2, readback.Get(), 0);
+    Require(SUCCEEDED(list->Close()), "queue timestamp list");
+    ID3D12CommandList* lists_to_run[]{list.Get()};
+    queue->ExecuteCommandLists(1, lists_to_run);
+    Require(SUCCEEDED(queue->Signal(fence.Get(), i + 1)), "queue timestamp signal");
+  }
+  double SpanMs() {
+    if (fence->GetCompletedValue() < 2) {
+      HANDLE event = CreateEventW(nullptr, FALSE, FALSE, nullptr);
+      Require(event && SUCCEEDED(fence->SetEventOnCompletion(2, event)), "queue timestamp wait");
+      const bool done = WaitForSingleObject(event, 10000) == WAIT_OBJECT_0;
+      CloseHandle(event);
+      Require(done, "queue timestamp timeout");
+    }
+    void* mapped; D3D12_RANGE range{0, 16};
+    Require(SUCCEEDED(readback->Map(0, &range, &mapped)), "queue timestamp map");
+    uint64_t ticks[2]; std::memcpy(ticks, mapped, sizeof(ticks));
+    D3D12_RANGE none{}; readback->Unmap(0, &none);
+    return double(ticks[1] - ticks[0]) * 1000.0 / double(frequency);
+  }
+};
 enum class ReplayMode { kSingle, kStress, kTiming, kRegistryLocked };
 void ReplayDraw(rex::system::IGraphicsSystem& gpu, rex::memory::Memory& memory,
                 const std::filesystem::path& input, const std::filesystem::path& output,
-                ReplayMode replay, RegistryGate* gate = nullptr) {
+                ReplayMode replay, RegistryGate* gate = nullptr, QueueTimestamps* queue_timestamps = nullptr) {
   const unsigned repetitions = replay == ReplayMode::kStress ? 4096 : 1;
   auto read = [&](const std::filesystem::path& file) {
     std::ifstream in(file, std::ios::binary);
@@ -223,7 +274,10 @@ void ReplayDraw(rex::system::IGraphicsSystem& gpu, rex::memory::Memory& memory,
     if (locked) gate->Hold();
     const double cpu_before = WorkerCpuMs();
     const auto start = clock::now();
-    if (k == 1) { timed_start = start; timed_worker_cpu = cpu_before; }
+    if (k == 1) {
+      timed_start = start; timed_worker_cpu = cpu_before;
+      if (queue_timestamps) queue_timestamps->Mark(0);
+    }
     mmio->write(nullptr, mmio->callback_context, 0x7fc80714, uint32_t(kick.end));
     bool retired = wait(kick.marker, locked ? std::chrono::seconds(3) : std::chrono::seconds(15),
                         replay == ReplayMode::kTiming);
@@ -240,12 +294,16 @@ void ReplayDraw(rex::system::IGraphicsSystem& gpu, rex::memory::Memory& memory,
                 << " ns_per_draw=" << wall_ms * 1e6 / kick.draws << " worker_cpu_ms=" << cpu_ms << '\n';
     Require(retired, "isolated draw completion");
   }
+  // The last kick ends after XE_SWAP, by which both backends submitted the
+  // timed draws, the resolve and the swap; the capture's own work comes later.
+  if (queue_timestamps) queue_timestamps->Mark(1);
   rex::ui::RawImage capture; Require(gpu.presenter()->CaptureGuestOutput(capture), "isolated draw capture");
   if (replay == ReplayMode::kTiming) {
     // The capture needs the resolve, hence every timed draw, done on the GPU:
     // unlike the segment marker, this interval includes work still in flight.
     std::cout << "timed_to_capture_ms=" << std::chrono::duration<double, std::milli>(clock::now() - timed_start).count()
               << " timed_to_capture_worker_cpu_ms=" << WorkerCpuMs() - timed_worker_cpu << '\n';
+    if (queue_timestamps) std::cout << "queue_gpu_span_ms=" << queue_timestamps->SpanMs() << '\n';
     // Cost of one registry query by name, the lookup a readback setting check makes.
     constexpr unsigned kQueries = 1000000;
     unsigned modified = 0;
@@ -294,7 +352,10 @@ int wmain(int argc, wchar_t** argv) {
       rex::cvar::SetFlagByName("d3d12_dxbc_disasm", "true");
     }
     if (draw_replay && plugin == "xenos") {
-      rex::cvar::SetFlagByName("render_target_path_d3d12", "rov");
+      // ROV matches Native; X360N_PROBE_XENOS_RT_PATH=rtv measures host render targets.
+      char rt_path[8]{};
+      const DWORD rt_length = GetEnvironmentVariableA("X360N_PROBE_XENOS_RT_PATH", rt_path, sizeof(rt_path));
+      rex::cvar::SetFlagByName("render_target_path_d3d12", rt_length && rt_length < sizeof(rt_path) ? rt_path : "rov");
       rex::cvar::SetFlagByName("d3d12_bindless", "true");
       rex::cvar::SetFlagByName("async_shader_compilation", "false");
       rex::cvar::SetFlagByName("d3d12_pipeline_creation_threads", "0");
@@ -330,7 +391,13 @@ int wmain(int argc, wchar_t** argv) {
     auto* memory = rt.memory();
     if (draw_replay) {
       if (plugin == "native") gpu->InitializeShaderStorage(output / "pipeline-cache", 0, true);
-      ReplayDraw(*gpu, *memory, argv[4], output, replay_mode, &registry_gate);
+      std::optional<QueueTimestamps> queue_timestamps;
+      if (replay_mode == ReplayMode::kTiming && backend == "d3d12")
+        queue_timestamps.emplace(*static_cast<rex::ui::d3d12::D3D12Provider*>(
+            static_cast<rex::graphics::GraphicsSystem*>(gpu.get())->provider()));
+      ReplayDraw(*gpu, *memory, argv[4], output, replay_mode, &registry_gate,
+                 queue_timestamps ? &*queue_timestamps : nullptr);
+      queue_timestamps.reset();  // Its D3D12 objects go before the provider's device.
       gpu->Shutdown(); shutdown.gpu = nullptr; gpu.reset(); rt.Shutdown(); rex::FlushLogging();
       std::cout << "PASS isolated draw capture\n"; return 0;
     }
