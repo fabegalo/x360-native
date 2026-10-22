@@ -66,6 +66,8 @@ os arquivos legais dos arquivos baixados. Esses componentes têm termos próprio
 - LLVM/Clang: [Apache-2.0 WITH LLVM-exception e avisos adicionais](licenses/llvm.txt).
 - CMake: [BSD-3-Clause e terceiros incluídos](licenses/cmake.txt).
 - Ninja: [Apache-2.0](licenses/ninja.txt).
+- Python 3.14.8 (pacote embeddable, só durante a compilação do SDK com Vulkan):
+  [PSF-2.0 e componentes incluídos](licenses/python.txt).
 - MinGit/Git for Windows: [GPL-2.0-only para Git](licenses/mingit.txt), além das
   licenças transitivas em `usr/share/licenses`, `ucrt64/share/licenses` e `ucrt64/doc`.
 - SDK completo: SDL Zlib, FFmpeg LGPL-2.1-or-later no build atual, libmspack

@@ -24,6 +24,14 @@
       "sha256": "26a40fa8595694dec2fad4911e62d29e10525d2133c9a4230b66397774ae25bf",
       "entry": "ninja.exe", "prefix": "",
       "verification": "GitHub release asset digest, ninja-build/ninja v1.13.1"
+    },
+    {
+      "id": "python", "version": "3.14.8", "directory": "python-3.14.8",
+      "asset": "python-3.14.8-embed-amd64.zip", "size": 12601679,
+      "url": "https://www.python.org/ftp/python/3.14.8/python-3.14.8-embed-amd64.zip",
+      "sha256": "a93abe456ab01bd96d7a085b3cdb6566b3063f4241360d114142fbdb07f0a310",
+      "entry": "python.exe", "prefix": "",
+      "verification": "python.org release page SHA-256, Python 3.14.8 Windows embeddable package (64-bit); build-time only (glslang/SPIRV-Tools generators of Vulkan builds)"
     }
   ]
 }

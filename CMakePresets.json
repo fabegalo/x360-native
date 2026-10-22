@@ -18,7 +18,8 @@
                 "CMAKE_DEFAULT_BUILD_TYPE": "Release",
                 "REXGLUE_BUILD_TESTS": "ON",
                 "REXGLUE_USE_D3D12": "ON",
-                "REXGLUE_USE_VULKAN": "ON"
+                "REXGLUE_USE_VULKAN": "ON",
+                "PYTHON_EXECUTABLE": "${sourceDir}/.local/toolchains/python-3.14.8/python.exe"
             },
             "condition": { "type": "equals", "lhs": "${hostSystemName}", "rhs": "Windows" }
         }

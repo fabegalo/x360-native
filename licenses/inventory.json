@@ -709,6 +709,18 @@
       "license_sha256": "454649ddc02b5cc098513cea28db6592b45ac0a906386287c4d48cf8dbde651c"
     },
     {
+      "id": "python",
+      "origin": "https://www.python.org/ftp/python/3.14.8/python-3.14.8-embed-amd64.zip",
+      "revision": "3.14.8",
+      "spdx": "PSF-2.0",
+      "original": "LICENSE.txt in python-3.14.8-embed-amd64.zip",
+      "license_file": "licenses/python.txt",
+      "scope": "download",
+      "integration": "standalone build-time interpreter for SDK Vulkan generators (glslang, SPIRV-Tools); never in desktop ZIP or prepared titles; LICENSE.txt also carries the terms of components bundled in the archive",
+      "obligations": "Preserve upstream notices; downloaded tool archive identities in existing locks. If mirroring binaries, fulfill their source and other distribution obligations.",
+      "license_sha256": "935cf13e19f8c31b497d20b05d73623431a226b230c3599bc30fa3348979bc68"
+    },
+    {
       "id": "microsoft-crt-sdk",
       "origin": "https://learn.microsoft.com/cpp/windows/redistributing-visual-cpp-files",
       "revision": "MSVC 14.44.35207; Windows SDK 10.0.26100.0",
