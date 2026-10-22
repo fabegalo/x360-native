@@ -66,6 +66,9 @@ void D3D12Render::Transition(ID3D12Resource* r, D3D12_RESOURCE_STATES& before, D
 void D3D12Render::Barrier() {
   D3D12_RESOURCE_BARRIER b{}; b.Type = D3D12_RESOURCE_BARRIER_TYPE_UAV; b.UAV.pResource = edram_.Get();
   list_->ResourceBarrier(1, &b);
+  // Every earlier EDRAM access, ROV or not, is now ordered before later ones.
+  edram_rov_layout_.reset();
+  if (stats_enabled_) ++edram_barriers_;
 }
 D3D12_CPU_DESCRIPTOR_HANDLE D3D12Render::Cpu(uint32_t i, bool s) {
   auto h = (s ? samplers_ : views_)->GetCPUDescriptorHandleForHeapStart();
@@ -188,6 +191,8 @@ void D3D12Render::LogSubmissionStats() {
       resolve_ns_ / 1000000, flush_ns_ / 1000000, texture_cache_hits_);
   REXLOG_INFO("Native draw costs draw_ms={} guest_upload_ms={} guest_upload_bytes={} gpu_texture_loads={} cpu_texture_loads={} flush_wait_ms={} (draw includes textures; uploads are mirror pages the CPU wrote)",
       draw_ns_ / 1000000, guest_upload_ns_ / 1000000, guest_upload_bytes_, gpu_texture_loads_, cpu_texture_loads_, flush_wait_ns_ / 1000000);
+  REXLOG_INFO("Native EDRAM barriers edram_barriers={} edram_layout_barriers={} draws={}",
+      edram_barriers_, edram_layout_barriers_, draw_count_);
   std::string causes;
   for (unsigned i = 0; i < kFlushCauses; ++i) causes += fmt::format(" {}", flush_causes_[i]);
   REXLOG_INFO("Native flush causes (guest_sync present overlap capacity drain){}", causes);

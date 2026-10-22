@@ -296,7 +296,10 @@ void D3D12Render::Draw(const RegisterFile& r, rex::memory::Memory& memory, Shade
   if (ps) pixel_tables = BindTextures(r, memory, *ps);
   vertex_tables = BindTextures(r, memory, vs);
   Transition(memory_.Get(), memory_state_, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_INDEX_BUFFER);
-  Transition(edram_.Get(), edram_state_, D3D12_RESOURCE_STATE_UNORDERED_ACCESS); Barrier();
+  // A real state transition (after a resolve read the EDRAM) orders all
+  // earlier accesses itself.
+  if (edram_state_ != D3D12_RESOURCE_STATE_UNORDERED_ACCESS) edram_rov_layout_.reset();
+  Transition(edram_.Get(), edram_state_, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
   ID3D12DescriptorHeap* heaps[]{views_.Get(), samplers_.Get()}; list_->SetDescriptorHeaps(2, heaps);
   list_->SetGraphicsRootSignature(root_.Get()); list_->SetPipelineState(pipeline.Get());
   unsigned base = Views(3);
@@ -387,6 +390,23 @@ void D3D12Render::Draw(const RegisterFile& r, rex::memory::Memory& memory, Shade
       c.edram_stencil[side][3] = (depth.value >> (back ? 20 : 8)) & 4095;
     }
   }
+  // ROV orders the accesses of every draw to the same pixel in API order, so
+  // consecutive draws that map pixels to EDRAM bytes identically need no
+  // barrier. Any other mapping (pitch, MSAA, bases, formats, written targets,
+  // depth/stencil) may reach the same bytes through different pixels: barrier,
+  // as the pinned ROV path does when EDRAM ownership changes. Non-ROV writes
+  // (resolve clears) place their own barrier before and after.
+  EdramRovLayout layout{c.sample_count_log2[0], c.sample_count_log2[1], c.edram_32bpp_tile_pitch_dwords_scaled,
+      c.edram_depth_base_dwords_scaled, uint32_t(depth_stencil), c.flags & T::kSysFlag_DepthFloat24};
+  for (unsigned i = 0; i < 4; ++i) {
+    layout[6 + i * 4] = c.edram_rt_base_dwords_scaled[i]; layout[7 + i * 4] = c.edram_rt_format_flags[i];
+    layout[8 + i * 4] = c.edram_rt_keep_mask[i][0]; layout[9 + i * 4] = c.edram_rt_keep_mask[i][1];
+  }
+  if (edram_rov_layout_ && *edram_rov_layout_ != layout) {
+    Barrier();
+    if (stats_enabled_) ++edram_layout_barriers_;
+  }
+  edram_rov_layout_ = layout;
   list_->SetGraphicsRootConstantBufferView(0, Constants(&c, sizeof(c)));
   auto floats = [&](Shader& shader, unsigned start, unsigned root) {
     uint32_t packed[1024]{}; unsigned n = 0;

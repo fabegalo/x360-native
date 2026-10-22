@@ -13,6 +13,7 @@
 #include <map>
 #include <unordered_map>
 #include <unordered_set>
+#include <optional>
 #include <d3d12sdklayers.h>
 #include <chrono>
 namespace x360n::native {
@@ -103,6 +104,11 @@ class D3D12Render {
   uint64_t readback_size_ = 0;
   D3D12_RESOURCE_STATES memory_state_ = D3D12_RESOURCE_STATE_COPY_DEST;
   D3D12_RESOURCE_STATES edram_state_ = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
+  // Pixel-to-EDRAM mapping of the ROV draws recorded since the last EDRAM UAV
+  // barrier or state transition; empty right after one (see Draw).
+  using EdramRovLayout = std::array<uint32_t, 22>;
+  std::optional<EdramRovLayout> edram_rov_layout_;
+  uint64_t edram_barriers_ = 0, edram_layout_barriers_ = 0;
   Ptr<ID3D12DescriptorHeap> views_, samplers_;
   uint32_t view_count_ = 0, sampler_count_ = 0;
   // Samplers already written into the current arena's heap, by exact

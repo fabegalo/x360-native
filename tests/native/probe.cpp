@@ -148,7 +148,7 @@ struct QueueTimestamps {
     return double(ticks[1] - ticks[0]) * 1000.0 / double(frequency);
   }
 };
-enum class ReplayMode { kSingle, kStress, kTiming, kRegistryLocked };
+enum class ReplayMode { kSingle, kStress, kTiming, kRegistryLocked, kInterleaved };
 void ReplayDraw(rex::system::IGraphicsSystem& gpu, rex::memory::Memory& memory,
                 const std::filesystem::path& input, const std::filesystem::path& output,
                 ReplayMode replay, RegistryGate* gate = nullptr, QueueTimestamps* queue_timestamps = nullptr) {
@@ -217,32 +217,55 @@ void ReplayDraw(rex::system::IGraphicsSystem& gpu, rex::memory::Memory& memory,
   auto add_draws = [&](unsigned count) {
     for (unsigned n = 0; n < count; ++n) words.insert(words.end(), {Packet(PM4_DRAW_INDX_2, 1), draw.value});
   };
-  constexpr unsigned kTimingSegments = 4, kTimingDraws = 2048, kLockedDraws = 4096;
+  constexpr unsigned kTimingSegments = 4, kTimingDraws = 2048, kLockedDraws = 4096, kInterleavedDraws = 32;
+  // Resolves the draw's color target to an independently allocated framebuffer.
+  const float xy[]{0, 0, float(width), 0, 0, float(height)};
+  std::memcpy(memory.TranslateVirtual(vertices), xy, sizeof(xy));
+  auto resolve = [&](uint32_t dest, uint32_t copy_control) {
+    xe_gpu_vertex_fetch_t vf{}; vf.type = FetchConstantType::kVertex;
+    vf.address = memory.GetPhysicalAddress(vertices) >> 2; vf.size = 6; vf.endian = Endian::kNone;
+    set(XE_GPU_REG_SHADER_CONSTANT_FETCH_00_0, vf.dword_0);
+    set(XE_GPU_REG_SHADER_CONSTANT_FETCH_00_1, vf.dword_1);
+    reg::RB_MODECONTROL mode{}; mode.edram_mode = EdramMode::kCopy; set(XE_GPU_REG_RB_MODECONTROL, mode.value);
+    set(XE_GPU_REG_PA_SC_WINDOW_OFFSET, 0); set(XE_GPU_REG_PA_SC_WINDOW_SCISSOR_TL, 0x80000000);
+    set(XE_GPU_REG_PA_SC_WINDOW_SCISSOR_BR, width | (height << 16));
+    set(XE_GPU_REG_RB_COPY_DEST_BASE, memory.GetPhysicalAddress(dest));
+    set(XE_GPU_REG_RB_COPY_DEST_PITCH, width | (height << 16));
+    set(XE_GPU_REG_RB_COPY_DEST_INFO, uint32_t(TextureFormat::k_2_10_10_10) << 7);
+    set(XE_GPU_REG_RB_COPY_CONTROL, copy_control);
+    reg::VGT_DRAW_INITIATOR rect = draw; rect.prim_type = PrimitiveType::kRectangleList; rect.num_indices = 3;
+    words.insert(words.end(), {Packet(PM4_DRAW_INDX_2, 1), rect.value});
+  };
   if (replay == ReplayMode::kTiming) {
     add_draws(1); end_kick(1);  // Shader translation and pipeline creation stay outside the timed segments.
     for (unsigned s = 0; s < kTimingSegments; ++s) { add_draws(kTimingDraws); end_kick(kTimingDraws); }
   } else if (replay == ReplayMode::kRegistryLocked) {
     add_draws(1); end_kick(1);
     add_draws(kLockedDraws); end_kick(kLockedDraws);
+  } else if (replay == ReplayMode::kInterleaved) {
+    // ROV draws around a resolve that clears the color target and around a
+    // render target base moved over half of the same EDRAM range.
+    const auto aux = memory.SystemHeapAlloc(width * 736 * 4, 4096, rex::memory::kSystemHeapPhysical);
+    Require(aux != 0, "interleaved resolve allocation");
+    add_draws(1); end_kick(1);
+    add_draws(kInterleavedDraws);
+    set(XE_GPU_REG_RB_COLOR_CLEAR, 0);
+    reg::RB_COPY_CONTROL copy{}; copy.copy_command = CopyCommand(1); copy.color_clear_enable = 1;
+    resolve(aux, copy.value);
+    for (unsigned index : {XE_GPU_REG_SHADER_CONSTANT_FETCH_00_0, XE_GPU_REG_SHADER_CONSTANT_FETCH_00_1,
+        XE_GPU_REG_RB_MODECONTROL, XE_GPU_REG_PA_SC_WINDOW_OFFSET, XE_GPU_REG_PA_SC_WINDOW_SCISSOR_TL,
+        XE_GPU_REG_PA_SC_WINDOW_SCISSOR_BR}) set(index, regs[index]);
+    add_draws(kInterleavedDraws);
+    reg::RB_COLOR_INFO moved; moved.value = regs[XE_GPU_REG_RB_COLOR_INFO];
+    moved.color_base = (moved.color_base + 360) % 2048;
+    set(XE_GPU_REG_RB_COLOR_INFO, moved.value);
+    add_draws(kInterleavedDraws);
+    set(XE_GPU_REG_RB_COLOR_INFO, regs[XE_GPU_REG_RB_COLOR_INFO]);
+    add_draws(kInterleavedDraws);
   } else {
     add_draws(repetitions);
   }
-  // Resolve the draw's color target to an independently allocated framebuffer.
-  const float xy[]{0, 0, float(width), 0, 0, float(height)};
-  std::memcpy(memory.TranslateVirtual(vertices), xy, sizeof(xy));
-  xe_gpu_vertex_fetch_t vf{}; vf.type = FetchConstantType::kVertex;
-  vf.address = memory.GetPhysicalAddress(vertices) >> 2; vf.size = 6; vf.endian = Endian::kNone;
-  set(XE_GPU_REG_SHADER_CONSTANT_FETCH_00_0, vf.dword_0);
-  set(XE_GPU_REG_SHADER_CONSTANT_FETCH_00_1, vf.dword_1);
-  reg::RB_MODECONTROL mode{}; mode.edram_mode = EdramMode::kCopy; set(XE_GPU_REG_RB_MODECONTROL, mode.value);
-  set(XE_GPU_REG_PA_SC_WINDOW_OFFSET, 0); set(XE_GPU_REG_PA_SC_WINDOW_SCISSOR_TL, 0x80000000);
-  set(XE_GPU_REG_PA_SC_WINDOW_SCISSOR_BR, width | (height << 16));
-  set(XE_GPU_REG_RB_COPY_DEST_BASE, memory.GetPhysicalAddress(image));
-  set(XE_GPU_REG_RB_COPY_DEST_PITCH, width | (height << 16));
-  set(XE_GPU_REG_RB_COPY_DEST_INFO, uint32_t(TextureFormat::k_2_10_10_10) << 7);
-  set(XE_GPU_REG_RB_COPY_CONTROL, 0x100000);
-  draw.prim_type = PrimitiveType::kRectangleList; draw.num_indices = 3;
-  words.insert(words.end(), {Packet(PM4_DRAW_INDX_2, 1), draw.value});
+  resolve(image, 0x100000);
   xe_gpu_texture_fetch_t fetch{}; fetch.type = FetchConstantType::kTexture;
   fetch.dimension = DataDimension::k2DOrStacked; fetch.format = TextureFormat::k_2_10_10_10;
   fetch.base_address = memory.GetPhysicalAddress(image) >> 12; fetch.pitch = width / 32;
@@ -316,7 +339,7 @@ void ReplayDraw(rex::system::IGraphicsSystem& gpu, rex::memory::Memory& memory,
 }
 }
 int wmain(int argc, wchar_t** argv) {
-  if (argc != 3 && argc != 4 && argc != 5) { std::cerr << "usage: x360n_native_probe native|xenos OUTPUT_DIRECTORY [--reject|--abi|--replay INPUT_DIRECTORY|--draw-replay|--draw-stress|--draw-timing|--draw-registry-locked INPUT_DIRECTORY]\n"; return 2; }
+  if (argc != 3 && argc != 4 && argc != 5) { std::cerr << "usage: x360n_native_probe native|xenos OUTPUT_DIRECTORY [--reject|--abi|--replay INPUT_DIRECTORY|--draw-replay|--draw-stress|--draw-timing|--draw-registry-locked|--draw-interleaved INPUT_DIRECTORY]\n"; return 2; }
   try {
     Require(SUCCEEDED(CoInitializeEx(nullptr, COINIT_MULTITHREADED)), "COM setup");
     const std::filesystem::path output(argv[2]);
@@ -340,7 +363,8 @@ int wmain(int argc, wchar_t** argv) {
     const bool stress = replay_flag == L"--draw-stress";
     const ReplayMode replay_mode = stress ? ReplayMode::kStress
         : replay_flag == L"--draw-timing" ? ReplayMode::kTiming
-        : replay_flag == L"--draw-registry-locked" ? ReplayMode::kRegistryLocked : ReplayMode::kSingle;
+        : replay_flag == L"--draw-registry-locked" ? ReplayMode::kRegistryLocked
+        : replay_flag == L"--draw-interleaved" ? ReplayMode::kInterleaved : ReplayMode::kSingle;
     const bool draw_replay = replay_flag == L"--draw-replay" || replay_mode != ReplayMode::kSingle;
     RegistryGate registry_gate;
     if (replay_mode == ReplayMode::kRegistryLocked) registry_gate.Register();

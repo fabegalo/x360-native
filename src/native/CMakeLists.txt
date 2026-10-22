@@ -45,6 +45,7 @@ if(TARGET Catch2::Catch2WithMain)
       -P ${CMAKE_CURRENT_SOURCE_DIR}/../../tests/native/reject_packet.cmake)
   set_tests_properties(sdkcheck.Native-packet-guard PROPERTIES LABELS project TIMEOUT 25)
   # Patch 0142: non-memexport Xenos draws must not wait for the cvar registry lock.
+  # native.edram-barriers: Native EDRAM barriers only on ROV layout changes.
   # Replays a retained draw from local evidence (user content, not distributed), so
   # the checks exist only where that snapshot does.
   set(X360N_DRAW_SNAPSHOT "${CMAKE_SOURCE_DIR}/.local/evidence/validation/native-n4/isolated-draw"
@@ -61,5 +62,9 @@ if(TARGET Catch2::Catch2WithMain)
           ${CMAKE_CURRENT_BINARY_DIR}/registry-lock-${_api} --draw-registry-locked ${X360N_DRAW_SNAPSHOT})
       set_tests_properties(sdkcheck.${_name}-draw-registry-lock PROPERTIES LABELS project TIMEOUT 60)
     endforeach()
+    add_test(NAME native.edram-barriers COMMAND ${CMAKE_COMMAND} -DPROBE=$<TARGET_FILE:x360n_native_probe>
+        -DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/edram-barriers -DSNAPSHOT=${X360N_DRAW_SNAPSHOT}
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/../../tests/native/edram_barriers.cmake)
+    set_tests_properties(native.edram-barriers PROPERTIES LABELS project TIMEOUT 150)
   endif()
 endif()
