@@ -53,6 +53,14 @@ double ProcessCpuMs() {
   auto ticks = [](const FILETIME& t) { return (uint64_t(t.dwHighDateTime) << 32) | t.dwLowDateTime; };
   return double(ticks(kernel) + ticks(user)) / 10000.0;
 }
+double ThreadCpuMs() {
+  FILETIME created, exited, kernel, user;
+  Require(GetThreadTimes(GetCurrentThread(), &created, &exited, &kernel, &user), "thread CPU time");
+  auto ticks = [](const FILETIME& t) { return (uint64_t(t.dwHighDateTime) << 32) | t.dwLowDateTime; };
+  return double(ticks(kernel) + ticks(user)) / 10000.0;
+}
+// CPU of every thread but this one, which only polls the completion marker.
+double WorkerCpuMs() { return ProcessCpuMs() - ThreadCpuMs(); }
 // Holds the cvar registry lock from another thread (ListModifiedFlags calls this
 // flag's getter while locked) so a draw path that looks a cvar up by name blocks.
 struct RegistryGate {
@@ -207,17 +215,20 @@ void ReplayDraw(rex::system::IGraphicsSystem& gpu, rex::memory::Memory& memory,
       spin ? std::this_thread::yield() : std::this_thread::sleep_for(std::chrono::milliseconds(1));
     return *marker == value;
   };
+  clock::time_point timed_start{};
+  double timed_worker_cpu = 0;
   for (size_t k = 0; k < kicks.size(); ++k) {
     const Kick& kick = kicks[k];
     const bool locked = replay == ReplayMode::kRegistryLocked && k == 1;
     if (locked) gate->Hold();
-    const double cpu_before = ProcessCpuMs();
+    const double cpu_before = WorkerCpuMs();
     const auto start = clock::now();
+    if (k == 1) { timed_start = start; timed_worker_cpu = cpu_before; }
     mmio->write(nullptr, mmio->callback_context, 0x7fc80714, uint32_t(kick.end));
     bool retired = wait(kick.marker, locked ? std::chrono::seconds(3) : std::chrono::seconds(15),
                         replay == ReplayMode::kTiming);
     const double wall_ms = std::chrono::duration<double, std::milli>(clock::now() - start).count();
-    const double cpu_ms = ProcessCpuMs() - cpu_before;
+    const double cpu_ms = WorkerCpuMs() - cpu_before;
     if (locked) {
       gate->Release();
       std::cout << "registry_locked draws=" << kick.draws << " retired_while_locked=" << retired
@@ -226,10 +237,15 @@ void ReplayDraw(rex::system::IGraphicsSystem& gpu, rex::memory::Memory& memory,
     }
     if (replay == ReplayMode::kTiming && k > 0 && kick.draws)
       std::cout << "segment=" << k << " draws=" << kick.draws << " wall_ms=" << wall_ms
-                << " ns_per_draw=" << wall_ms * 1e6 / kick.draws << " process_cpu_ms=" << cpu_ms << '\n';
+                << " ns_per_draw=" << wall_ms * 1e6 / kick.draws << " worker_cpu_ms=" << cpu_ms << '\n';
     Require(retired, "isolated draw completion");
   }
+  rex::ui::RawImage capture; Require(gpu.presenter()->CaptureGuestOutput(capture), "isolated draw capture");
   if (replay == ReplayMode::kTiming) {
+    // The capture needs the resolve, hence every timed draw, done on the GPU:
+    // unlike the segment marker, this interval includes work still in flight.
+    std::cout << "timed_to_capture_ms=" << std::chrono::duration<double, std::milli>(clock::now() - timed_start).count()
+              << " timed_to_capture_worker_cpu_ms=" << WorkerCpuMs() - timed_worker_cpu << '\n';
     // Cost of one registry query by name, the lookup a readback setting check makes.
     constexpr unsigned kQueries = 1000000;
     unsigned modified = 0;
@@ -238,7 +254,6 @@ void ReplayDraw(rex::system::IGraphicsSystem& gpu, rex::memory::Memory& memory,
     std::cout << "registry_query_ns=" << std::chrono::duration<double, std::nano>(clock::now() - start).count() / kQueries
               << " modified=" << modified << '\n';
   }
-  rex::ui::RawImage capture; Require(gpu.presenter()->CaptureGuestOutput(capture), "isolated draw capture");
   WritePNG(output / "draw.png", capture);
 }
 }
