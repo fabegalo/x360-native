@@ -1,0 +1,99 @@
+diff --git a/include/rex/ppc/intrinsics.h b/include/rex/ppc/intrinsics.h
+index 3c2fe09..b4acc87 100644
+--- a/include/rex/ppc/intrinsics.h
++++ b/include/rex/ppc/intrinsics.h
+@@ -393,6 +393,60 @@ inline simde__m128i simde_mm_sllv_epi8(simde__m128i a, simde__m128i count) {
+   return simde_mm_packus_epi16(r_lo, r_hi);
+ }
+ 
++// vmsum3fp128 / vmsum4fp128 dot products. Host lane 3 holds guest x (element
++// reversal), so 0xEF sums x, y and z and 0xFF all four elements.
++// When the dot product of finite inputs overflows float32, Xenon returns QNaN
++// 0x7FC00000 in every element (Xenia DOT_PRODUCT_3/4, EmitDotProductResult),
++// while dpps returns +-inf, or NaN when products of opposite signs overflow
++// even though their exact sum is finite. A finite dpps result is kept bit for
++// bit; only a non-finite one is evaluated again with a float64 accumulation.
++__attribute__((noinline, cold)) inline simde__m128 vmsum_fp128_nonfinite(simde__m128 a,
++                                                                         simde__m128 b,
++                                                                         simde__m128 dp,
++                                                                         bool four) {
++  alignas(16) float fa[4], fb[4];
++  simde_mm_store_ps(fa, a);
++  simde_mm_store_ps(fb, b);
++  // float products are exact in float64; summed in Xenia's order (x+z)+y(+w).
++  const double x = double(fa[3]) * fb[3];
++  const double y = double(fa[2]) * fb[2];
++  const double z = double(fa[1]) * fb[1];
++  const double w = double(fa[0]) * fb[0];
++  const double sum = four ? (x + z) + (y + w) : (x + z) + y;
++  uint64_t sum_bits;
++  std::memcpy(&sum_bits, &sum, sizeof(sum));
++  // Four float products cannot overflow float64: a non-finite sum comes from
++  // an inf or NaN input, whose dpps result passes through unchanged.
++  if ((sum_bits & 0x7FF0000000000000ull) == 0x7FF0000000000000ull)
++    return dp;
++  const float result = static_cast<float>(sum);
++  uint32_t result_bits;
++  std::memcpy(&result_bits, &result, sizeof(result));
++  if ((result_bits & 0x7FFFFFFF) == 0x7F800000)
++    return simde_mm_castsi128_ps(simde_mm_set1_epi32(0x7FC00000));
++  return simde_mm_set1_ps(result);
++}
++
++// Exponent all ones (inf or NaN). The result is broadcast, so every element
++// is tested at once: ptest sets CF when no exponent bit is clear.
++inline bool vmsum_fp128_is_nonfinite(simde__m128 dp) {
++  return simde_mm_testc_si128(simde_mm_castps_si128(dp), simde_mm_set1_epi32(0x7F800000));
++}
++
++inline simde__m128 simde_mm_vmsum3fp128(simde__m128 a, simde__m128 b) {
++  simde__m128 dp = simde_mm_dp_ps(a, b, 0xEF);
++  if (vmsum_fp128_is_nonfinite(dp)) [[unlikely]]
++    return vmsum_fp128_nonfinite(a, b, dp, false);
++  return dp;
++}
++
++inline simde__m128 simde_mm_vmsum4fp128(simde__m128 a, simde__m128 b) {
++  simde__m128 dp = simde_mm_dp_ps(a, b, 0xFF);
++  if (vmsum_fp128_is_nonfinite(dp)) [[unlikely]]
++    return vmsum_fp128_nonfinite(a, b, dp, true);
++  return dp;
++}
++
+ }  // namespace rex::ppc
+ 
+ //=============================================================================
+diff --git a/src/codegen/builders/vector.cpp b/src/codegen/builders/vector.cpp
+index 2f16f77..94fbb54 100644
+--- a/src/codegen/builders/vector.cpp
++++ b/src/codegen/builders/vector.cpp
+@@ -185,21 +185,23 @@ bool build_vlogefp(BuilderContext& ctx) {
+ 
+ bool build_vmsum3fp128(BuilderContext& ctx) {
+   // 3-element dot product accounting for guest->host vector element reversal
+-  // 0xEF = dot(yzw) with result broadcast to all elements (see constants doc)
++  // 0xEF = dot(yzw) with result broadcast to all elements (see constants doc).
++  // The helper returns QNaN when finite inputs overflow float32, as Xenon does.
+   ctx.emit_set_flush_mode(true);
+   ctx.println(
+-      "\tsimde_mm_store_ps({}.f32, simde_mm_dp_ps(simde_mm_load_ps({}.f32), "
+-      "simde_mm_load_ps({}.f32), 0xEF));",
++      "\tsimde_mm_store_ps({}.f32, rex::ppc::simde_mm_vmsum3fp128(simde_mm_load_ps({}.f32), "
++      "simde_mm_load_ps({}.f32)));",
+       ctx.v(ctx.insn.operands[0]), ctx.v(ctx.insn.operands[1]), ctx.v(ctx.insn.operands[2]));
+   return true;
+ }
+ 
+ bool build_vmsum4fp128(BuilderContext& ctx) {
+-  // 4-element dot product: 0xFF = all 4 elements, result to all (see constants doc)
++  // 4-element dot product: 0xFF = all 4 elements, result to all (see constants doc).
++  // The helper returns QNaN when finite inputs overflow float32, as Xenon does.
+   ctx.emit_set_flush_mode(true);
+   ctx.println(
+-      "\tsimde_mm_store_ps({}.f32, simde_mm_dp_ps(simde_mm_load_ps({}.f32), "
+-      "simde_mm_load_ps({}.f32), 0xFF));",
++      "\tsimde_mm_store_ps({}.f32, rex::ppc::simde_mm_vmsum4fp128(simde_mm_load_ps({}.f32), "
++      "simde_mm_load_ps({}.f32)));",
+       ctx.v(ctx.insn.operands[0]), ctx.v(ctx.insn.operands[1]), ctx.v(ctx.insn.operands[2]));
+   return true;
+ }

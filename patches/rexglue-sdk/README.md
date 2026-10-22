@@ -1479,6 +1479,51 @@ aciona Start. A escolha não é gravada nas configurações (a opção "Iniciar
 sessão em tela cheia" continua valendo para o início). Teste
 `[fullscreen-toggle]`.
 
+## 0141 — overflow de `vmsum3fp128`/`vmsum4fp128` vira QNaN
+
+O codegen emitia `simde_mm_dp_ps` puro. Quando o produto escalar de entradas
+finitas excede float32, o Xenon devolve QNaN `0x7FC00000` nos quatro
+elementos (semântica do Xenia `DOT_PRODUCT_3/4` + `EmitDotProductResult`;
+[rexglue-sdk#491](https://github.com/rexglue/rexglue-sdk/issues/491)); o
+`dpps` devolvia ±inf, ou NaN negativo `0xFFC00000` quando produtos de sinais
+opostos transbordam embora a soma exata seja finita. Os helpers
+`rex::ppc::simde_mm_vmsum3fp128/4fp128` (`include/rex/ppc/intrinsics.h`)
+mantêm o resultado finito do `dpps` bit a bit e, só quando ele não é finito
+(`ptest` no expoente), recalculam em float64 na ordem do Xenia
+`(x+z)+y(+w)`: soma finita que transborda → QNaN; soma finita → valor
+arredondado; soma não finita (inf/NaN vindo de uma entrada) → resultado
+anterior, sem conversão. Sem hack por título ou endereço. Adaptado ao 0036
+(mesmo `vector.cpp`); não copiado do patch 0025 do ForzaHorizon1-ReImagined,
+que usa o mesmo desenho.
+
+Divergências registradas: (1) resultados finitos seguem o `dpps` em float32;
+o Xenia acumula sempre em float64 e diz que isso fica mais próximo do
+hardware em até 1 bit (não verificado em console). (2) Num caso de dupla
+arredondamento em que o `dpps` dá exatamente `FLT_MAX` mas a soma exata
+alcança o limiar de overflow, aqui sai `FLT_MAX` e no Xenia QNaN. (3) O
+arredondamento usa o modo do MXCSR herdado do FPSCR, como as demais
+operações VMX do SDK; o VMX real arredonda sempre ao mais próximo.
+
+Teste `sdkcheck.Vmsum` (`tests/sdkcheck/vmsum`): as duas instruções pelo
+caminho real `as → rexglue recompile-tests → clang++`, overflow positivo,
+negativo e de sinais mistos, quadrado em registrador único, inf/−inf/NaN e
+inf·0 na entrada, produtos que transbordam e se cancelam, `FLT_MAX`
+±¼ ulp e +½ ulp (empate → 2^128 → QNaN), faixa w ignorada pelo vmsum3,
+registradores sobrepostos e 20 000 vetores aleatórios contra modelo escalar.
+Antes do patch: 41 falhas registradas, 40 dos casos fixos e o primeiro vetor
+aleatório, quando o teste para por limite (`.local/evidence/vmsum/before-test.log`);
+depois: 160 416 verificações passam. `ppc.*` do SDK (1459 testes, incluindo
+`ppc.vmsum3fp128.test_1`/`vmsum4fp128.test_1`) continuam passando.
+
+Desempenho (Release, Ryzen 7 5700X3D, `x360n_vmsum_checks --bench`, melhor
+de 5, 3 execuções; base = 0141 revertido com o lock correspondente): função
+de uma instrução 2,20 → 2,84–2,87 ns/chamada; cadeia dependente de 6
+`vmsum` 1,416 → 1,80–1,86 ns/instrução. O custo é o teste do expoente e o
+prólogo exigido pela chamada fria. Variantes medidas e descartadas: ponteiros
+para os registradores (≈1,90), caminho frio `always_inline` + `comiss`
+(≈2,08) e teste inteiro estilo Xenia (≈1,85). Impacto em quadro de jogo não
+medido. Títulos já gerados só recebem a correção ao regenerar o código AOT.
+
 ## 0142 — consulta de cvar fora das draws Vulkan
 
 `VulkanCommandProcessor::IssueDraw` testava `IsReadbackMemexportEnabled` antes

@@ -142,7 +142,7 @@ em [docs/dashboard.md](docs/dashboard.md), especialmente C7.7/C7.8 (§§0.31–0
 e saves em [docs/save-storage.md](docs/save-storage.md). A região experimental
 17559 `0x8E030000` (64 KiB RW) permanece hipótese explícita, exclusiva do título.
 Xenos é padrão; Native está suspenso, experimental e sem aceite de performance.
-O lock contém 139 patches ativos, incluindo 0139 (0073 retirado, guardado em
+O lock contém 140 patches ativos, incluindo 0141 (0073 retirado, guardado em
 `patches/rexglue-sdk/withdrawn/`); a lista do lock define a ordem, não o prefixo.
 Resultados históricos de testes ficam nos relatórios,
 sem repetir suítes ou sessões visuais por uma mudança documental.

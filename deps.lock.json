@@ -477,7 +477,7 @@
                                             "files":  {
                                                           "src/codegen/builders.h":  "fc71001c222656442960e4111d7608c741ee463dc66d0717596369cddee8a9a8",
                                                           "src/codegen/instruction_dispatch.cpp":  "a506c9890d12fa5c6883676ed981bc6287cb9b92461cdfa38b0edb3167610d19",
-                                                          "src/codegen/builders/vector.cpp":  "6e934f5079823e648722fa177308995ded09ba475972bf0c5316990e01b77cbf"
+                                                          "src/codegen/builders/vector.cpp":  "47e4eb7c217848ec351384f12269886c27062120e729d6428e16bec0f33bdbd8"
                                                       },
                                             "test":  "sdkcheck.Vavguw: assemble, recompile and execute unsigned rounded averages, overflow boundaries and destination aliasing; pre-patch throws REX_UNIMPLEMENTED"
                                         },
@@ -1949,6 +1949,19 @@
     "src/ui/rex_app.cpp": "4669c12c285315c7824949fe84ffb03308f987c7d87a0a510597b7745b42c3f0"
   },
   "test": "sdkcheck: [fullscreen-toggle] Alt+Enter/F11 toggle fullscreen"
+},
+{
+  "file": "patches/rexglue-sdk/0141-vmsum-overflow-qnan.patch",
+  "sha256": "1fffe30b85dae56a91cfcdd76db95603c04e38b5408c886acdc6b959c31cabfc",
+  "base_files": {
+    "include/rex/ppc/intrinsics.h": "121c2ddd86917308c7f248ee0950baf04ce5c63c71658141165e93c5cf782451",
+    "src/codegen/builders/vector.cpp": "6e934f5079823e648722fa177308995ded09ba475972bf0c5316990e01b77cbf"
+  },
+  "files": {
+    "include/rex/ppc/intrinsics.h": "258b51ce67a5e139cbfe8c1f624ed6acae45ebb62f68b05aab03fc7e2527fde8",
+    "src/codegen/builders/vector.cpp": "47e4eb7c217848ec351384f12269886c27062120e729d6428e16bec0f33bdbd8"
+  },
+  "test": "sdkcheck.Vmsum: vmsum3fp128/vmsum4fp128 through recompiled PPC; finite overflow -> QNaN 0x7FC00000, inf/NaN inputs and finite results unchanged, cancelling products, FLT_MAX rounding, register aliasing; fails before the patch"
 },
 {
   "file": "patches/rexglue-sdk/0142-vulkan-memexport-readback-check-order.patch",

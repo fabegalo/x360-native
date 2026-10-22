@@ -127,6 +127,14 @@ própria dashboard motivou a correção do supervisor. Sem captura PPC/pilha nes
 sessão; o fluxo visual do novo build ainda precisa de aceite. Detalhes no
 relatório P0 acima.
 
+Forza física (22/10): `vmsum3fp128`/`vmsum4fp128` devolviam ±inf em vez do
+QNaN do Xenon quando entradas finitas transbordam float32. Patch genérico 0141
+e `sdkcheck.Vmsum` (falha antes, passa depois); `ppc.*` do SDK passa. Os
+endereços do GJK citados pelo ReImagined (0.0.0.7) existem no nosso 0.0.0.10;
+AOT do Forza regenerado em Release (2738 sites). Colisões e a queda de 302 s
+acima **não** foram retestadas: a relação com o GJK é hipótese. Relatório:
+[forza-vmsum-collision-2026-10-22](docs/reports/forza-vmsum-collision-2026-10-22.md).
+
 Launcher (21/10): corrigido o fluxo que anunciava jogo pronto pelo recibo mas
 iniciava a dashboard sem concluir o registro na My Games. Preparar/iniciar agora
 concluem o registro pelo aplicativo, com validação independente no supervisor.
