@@ -156,6 +156,7 @@ target_sources(x360n_sdk_runtime_checks PRIVATE sdkcheck/dashboard_region_test.c
 target_sources(x360n_sdk_runtime_checks PRIVATE sdkcheck/xam_language_test.cpp)
 target_sources(x360n_sdk_runtime_checks PRIVATE sdkcheck/dpc_dispatch_test.cpp)
 target_sources(x360n_sdk_runtime_checks PRIVATE sdkcheck/mnk_keystroke_test.cpp)
+target_sources(x360n_sdk_runtime_checks PRIVATE sdkcheck/fullscreen_toggle_test.cpp)
 target_sources(x360n_sdk_runtime_checks PRIVATE sdkcheck/xam_datetime_test.cpp)
 target_sources(x360n_sdk_runtime_checks PRIVATE sdkcheck/dashboard_typeface_test.cpp
     ../titles/dash_17559/src/typeface.cpp)

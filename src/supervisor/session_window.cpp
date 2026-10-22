@@ -11,12 +11,16 @@ namespace x360n {
 namespace {
 constexpr UINT kAttachTitle = WM_APP + 0x360;
 constexpr UINT kSyncTitleFocus = WM_APP + 0x361;
+// Posted by the title (Alt+Enter/F11) or handled here when the frame has focus.
+constexpr UINT kToggleFullscreen = WM_APP + 0x362;
 struct FrameState {
   std::atomic<bool>* closed;
   std::atomic<unsigned>* attached_count;
   HANDLE close_event;
   HANDLE closed_notification;
   HWND child = nullptr;
+  bool fullscreen = false;
+  WINDOWPLACEMENT windowed{sizeof(WINDOWPLACEMENT)};
 };
 void SizeChild(HWND window, HWND child) {
   if (!IsWindow(child) || GetParent(child) != window) return;
@@ -33,6 +37,31 @@ void SyncTitleFocus(HWND window, HWND child) {
   // so SetFocus alone produces no new WM_SETFOCUS. Let SDL reconcile against
   // actual native focus and the foreground root using its existing handler.
   PostMessageW(child, WM_ACTIVATE, active ? WA_ACTIVE : WA_INACTIVE, 0);
+}
+// SDL renders inside this frame. Fullscreen belongs to the frame so it survives
+// every dashboard/title transition without changing the display mode.
+bool SetFrameFullscreen(HWND window, FrameState& state, bool fullscreen) {
+  if (fullscreen == state.fullscreen) return true;
+  if (fullscreen) {
+    MONITORINFO monitor{sizeof(monitor)};
+    if (!GetMonitorInfoW(MonitorFromWindow(window, MONITOR_DEFAULTTONEAREST), &monitor)) return false;
+    GetWindowPlacement(window, &state.windowed);
+    SetWindowLongPtrW(window, GWL_STYLE, WS_POPUP | WS_CLIPCHILDREN | (GetWindowLongPtrW(window, GWL_STYLE) & WS_VISIBLE));
+    const auto& bounds = monitor.rcMonitor;
+    SetWindowPos(window, nullptr, bounds.left, bounds.top, bounds.right - bounds.left,
+                 bounds.bottom - bounds.top, SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
+  } else {
+    SetWindowLongPtrW(window, GWL_STYLE, WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN | (GetWindowLongPtrW(window, GWL_STYLE) & WS_VISIBLE));
+    // A frame started in fullscreen was hidden when its placement was saved.
+    if (state.windowed.showCmd != SW_SHOWMAXIMIZED) state.windowed.showCmd = SW_SHOWNORMAL;
+    if (state.windowed.rcNormalPosition.right > state.windowed.rcNormalPosition.left)
+      SetWindowPlacement(window, &state.windowed);
+    SetWindowPos(window, nullptr, 0, 0, 0, 0,
+                 SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
+  }
+  state.fullscreen = fullscreen;
+  ActionTrace::Event(fullscreen ? "session.window.fullscreen" : "session.window.windowed");
+  return true;
 }
 LRESULT CALLBACK FrameProc(HWND window, UINT message, WPARAM wp, LPARAM lp) {
   auto* state = reinterpret_cast<FrameState*>(GetWindowLongPtrW(window, GWLP_USERDATA));
@@ -52,6 +81,18 @@ LRESULT CALLBACK FrameProc(HWND window, UINT message, WPARAM wp, LPARAM lp) {
       return 0;
     }
     if (message == kSyncTitleFocus) { SyncTitleFocus(window, state->child); return 0; }
+    if (message == kToggleFullscreen) {
+      SetFrameFullscreen(window, *state, !state->fullscreen);
+      PostMessageW(window, kSyncTitleFocus, 0, 0);
+      return 0;
+    }
+    // The frame itself has focus only between titles; same shortcuts.
+    if ((message == WM_SYSKEYDOWN && wp == VK_RETURN && (lp & (1 << 29))) ||
+        (message == WM_KEYDOWN && wp == VK_F11)) {
+      if (!(lp & (1 << 30))) PostMessageW(window, kToggleFullscreen, 0, 0);
+      return 0;
+    }
+    if (message == WM_SYSCHAR && wp == VK_RETURN) return 0;  // no Alt+Enter beep
     if (message == WM_SIZE) { SizeChild(window, state->child); return 0; }
     if (message == WM_ACTIVATE || message == WM_NCACTIVATE || message == WM_SETFOCUS) {
       // Native activation can precede the foreground change. Reconcile after
@@ -90,17 +131,8 @@ SessionWindow::SessionWindow(bool visible, uintptr_t closed_notification, bool f
     auto window = CreateWindowExW(0, wc.lpszClassName, L"x360-native",
         WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN, CW_USEDEFAULT, CW_USEDEFAULT,
         rect.right - rect.left, rect.bottom - rect.top, nullptr, nullptr, instance, &state);
-    if (window && fullscreen) {
-      // SDL renders inside this frame. Fullscreen belongs to the frame so it
-      // survives every dashboard/title transition without resizing the desktop.
-      MONITORINFO monitor{sizeof(monitor)};
-      if (GetMonitorInfoW(MonitorFromWindow(window, MONITOR_DEFAULTTONEAREST), &monitor)) {
-        SetWindowLongPtrW(window, GWL_STYLE, WS_POPUP | WS_CLIPCHILDREN);
-        const auto& bounds = monitor.rcMonitor;
-        SetWindowPos(window, nullptr, bounds.left, bounds.top,
-                     bounds.right - bounds.left, bounds.bottom - bounds.top,
-                     SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
-      } else { DestroyWindow(window); window = nullptr; }
+    if (window && fullscreen && !SetFrameFullscreen(window, state, true)) {
+      DestroyWindow(window); window = nullptr;
     }
     ready.set_value(reinterpret_cast<uintptr_t>(window));
     if (!window) return;

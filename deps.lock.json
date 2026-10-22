@@ -51,7 +51,7 @@
                                             "file":  "patches/rexglue-sdk/0004-app-teardown-order.patch",
                                             "sha256":  "f68d6d6e4e2cc4c7c218eac15cc7c29723c1fb357a735657bed68d312ade4ff1",
                                             "files":  {
-                                                          "src/ui/rex_app.cpp":  "d786538b824605e0b839b02cc7750e8947771ea24089a58055056fd8499e5af6"
+                                                          "src/ui/rex_app.cpp":  "4669c12c285315c7824949fe84ffb03308f987c7d87a0a510597b7745b42c3f0"
                                                       },
                                             "base_files":  {
                                                                "src/ui/rex_app.cpp":  "0ebbd4c0e484eb865f94de37cc71a70e3f25068b78d072cd7f577cdb811020b7"
@@ -1207,7 +1207,7 @@
     "include/rex/runtime.h": "8827c5fd2d3e42656fe1266a0d33af0d3181ef9145990f2bd538b0b78d822d20",
     "src/system/runtime.cpp": "5ba8271148a18c512a4c2d17479934c3c4af718254ea0ac925f00822efbbd8c2",
     "include/rex/rex_app.h": "769ea2f312400d6be8359071bbc03fc854ccf626bbc115ff9ba3dbfdb102c55d",
-    "src/ui/rex_app.cpp": "d786538b824605e0b839b02cc7750e8947771ea24089a58055056fd8499e5af6"
+    "src/ui/rex_app.cpp": "4669c12c285315c7824949fe84ffb03308f987c7d87a0a510597b7745b42c3f0"
   },
   "test": "tests/sdkcheck/entrypoint_dispatch_test.cpp"
 },
@@ -1743,7 +1743,7 @@
                                             "sha256": "117097d188442e603694943db816242963d6aa7935f036bc89cf370ddbff8938",
                                             "files": {
                                                 "include/rex/runtime.h": "8827c5fd2d3e42656fe1266a0d33af0d3181ef9145990f2bd538b0b78d822d20",
-                                                "src/ui/rex_app.cpp": "d786538b824605e0b839b02cc7750e8947771ea24089a58055056fd8499e5af6"
+                                                "src/ui/rex_app.cpp": "4669c12c285315c7824949fe84ffb03308f987c7d87a0a510597b7745b42c3f0"
                                             },
                                             "base_files": {
                                                 "include/rex/runtime.h": "8cc304b2dd3fe9045cfffd9f71c985963ab049b381b509b4e52d44bfc53353ac",
@@ -1933,6 +1933,22 @@
     "src/system/xam/user_profile.cpp": "04a29ea7cbaf110ded62b55c53504072d43b4655b074f076cec5f4d1d561a829"
   },
   "test": "sdkcheck: [profile-content] [profile-delete] profiles as per-device content packages"
+}
+,
+{
+  "file": "patches/rexglue-sdk/0139-fullscreen-toggle-shortcut.patch",
+  "sha256": "f3414035558ff5d62917f64d5586865b2d427cc6754ee1e3ad2aa026d7568273",
+  "base_files": {
+    "include/rex/ui/keybinds.h": "b774eeed20edd323796d2d12854239b8594a47ee73bf1c154e4800d4fcf4d6cc",
+    "src/ui/keybinds.cpp": "6bd03b5587741ac0c6f07371efcc143638dfc1699da895ca2087c13a4cbb034d",
+    "src/ui/rex_app.cpp": "d786538b824605e0b839b02cc7750e8947771ea24089a58055056fd8499e5af6"
+  },
+  "files": {
+    "include/rex/ui/keybinds.h": "c91a000e7101e9853cca487b3606d8b7943518fcfd2f2af5cb864a72ed7152e0",
+    "src/ui/keybinds.cpp": "b094d7db885078a72c6dda265ef2ea3e8f191da904317871345c85838a55e6cd",
+    "src/ui/rex_app.cpp": "4669c12c285315c7824949fe84ffb03308f987c7d87a0a510597b7745b42c3f0"
+  },
+  "test": "sdkcheck: [fullscreen-toggle] Alt+Enter/F11 toggle fullscreen"
 }
 ]
                     },

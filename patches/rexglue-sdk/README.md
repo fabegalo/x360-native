@@ -1460,3 +1460,18 @@ XUID em outro dispositivo é a mesma conta: vale a primeira encontrada
 (hipótese; o console não foi comparado). Testes `[profile-content]`,
 `[profile-delete]`, `[local-profile]` e `[profile-settings]` atualizados para
 o novo contrato.
+
+## 0139 — atalho de tela cheia (Alt+Enter / F11)
+
+Como na maioria dos jogos de PC, Alt+Enter ou F11 alternam a tela cheia
+(`rex::ui::IsFullscreenToggleKey`; só a primeira pressão alterna, repetições
+são consumidas). Num título embutido na janela persistente da sessão
+(`parent_window`), quem tem a tela cheia é a moldura do supervisor: o título
+envia `WM_APP + 0x362` e a moldura alterna entre janela e tela cheia sem
+mudar o modo de vídeo, guardando a posição anterior; com o foco na própria
+moldura (entre títulos) os mesmos atalhos funcionam. Fora da sessão o título
+alterna a própria janela. Enter sem Alt continua sendo tecla do jogo; o
+mapeamento de teclado (mnk) exige modificadores exatos, então Alt+Enter não
+aciona Start. A escolha não é gravada nas configurações (a opção "Iniciar
+sessão em tela cheia" continua valendo para o início). Teste
+`[fullscreen-toggle]`.

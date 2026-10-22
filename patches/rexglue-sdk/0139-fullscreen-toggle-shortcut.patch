@@ -1,0 +1,83 @@
+diff --git a/include/rex/ui/keybinds.h b/include/rex/ui/keybinds.h
+index 3120f16..17c3dbe 100644
+--- a/include/rex/ui/keybinds.h
++++ b/include/rex/ui/keybinds.h
+@@ -82,4 +82,10 @@ void UnregisterBind(std::string_view name);
+  */
+ bool ProcessKeyEvent(KeyEvent& e);
+ 
++/**
++ * Alt+Enter or F11, the usual PC shortcuts to toggle fullscreen.
++ * Held-key repeats also match, so the caller can consume them.
++ */
++bool IsFullscreenToggleKey(const KeyEvent& e);
++
+ }  // namespace rex::ui
+diff --git a/src/ui/keybinds.cpp b/src/ui/keybinds.cpp
+index 9822f3b..f6b3ccf 100644
+--- a/src/ui/keybinds.cpp
++++ b/src/ui/keybinds.cpp
+@@ -208,6 +208,11 @@ void UnregisterBind(std::string_view name) {
+   }
+ }
+ 
++bool IsFullscreenToggleKey(const KeyEvent& e) {
++  return (e.virtual_key() == VirtualKey::kReturn && e.is_alt_pressed()) ||
++         e.virtual_key() == VirtualKey::kF11;
++}
++
+ bool ProcessKeyEvent(KeyEvent& e) {
+   std::lock_guard lock(g_binds_mutex);
+   for (auto& entry : g_binds) {
+diff --git a/src/ui/rex_app.cpp b/src/ui/rex_app.cpp
+index 29bc925..5c793f4 100644
+--- a/src/ui/rex_app.cpp
++++ b/src/ui/rex_app.cpp
+@@ -46,6 +46,11 @@
+ #include <filesystem>
+ #include <string_view>
+ 
++#include <rex/platform.h>
++#if REX_PLATFORM_WIN32
++#include <windows.h>
++#endif
++
+ REXCVAR_DEFINE_STRING(gpu_backend, "any", "GPU",
+                       "Graphics API: any, d3d12 or vulkan (explicit selections never fall back)")
+     .lifecycle(rex::cvar::Lifecycle::kInitOnly);
+@@ -57,6 +62,22 @@ REXCVAR_DEFINE_STRING(gpu_plugin, "", "GPU",
+ 
+ namespace rex {
+ 
++namespace {
++// Alt+Enter and F11 toggle fullscreen, as in most PC games. Inside the
++// persistent session frame (parent_window) the frame owns fullscreen, so it is
++// asked to toggle (message WM_APP + 0x362); a standalone title toggles itself.
++void ToggleFullscreen(ui::Window& window) {
++#if REX_PLATFORM_WIN32
++  const auto parent = std::strtoull(rex::cvar::GetFlagByName("parent_window").c_str(), nullptr, 0);
++  if (parent) {
++    PostMessageW(reinterpret_cast<HWND>(uintptr_t(parent)), WM_APP + 0x362, 0, 0);
++    return;
++  }
++#endif
++  window.SetFullscreen(!window.IsFullscreen());
++}
++}  // namespace
++
+ // --- ReXApp ---
+ 
+ ReXApp::~ReXApp() = default;
+@@ -499,6 +520,12 @@ std::function<void(PathConfig)> ReXApp::MakeResumeCallback() {
+ }
+ 
+ void ReXApp::OnKeyDown(ui::KeyEvent& e) {
++  if (ui::IsFullscreenToggleKey(e)) {
++    // Only the first press toggles; held-key repeats are consumed.
++    if (!e.prev_state() && window_) ToggleFullscreen(*window_);
++    e.set_handled(true);
++    return;
++  }
+   rex::ui::ProcessKeyEvent(e);
+ }
+ 
