@@ -331,6 +331,16 @@ function Get-PreparedArtifacts([string]$Build, [string]$Exe, [string[]]$DllOutpu
         if ($entry.sha256 -ne (Get-ReceiptHash $source)) { throw "Staged DLL differs from the built output: $staged" }
         $entry
     }
+    # Vulkan builds stage a preflight that the supervisor runs before the
+    # title: bind it to the receipt like the DLLs.
+    $preflight = Join-Path $Build 'x360n_gpu_preflight.exe'
+    if ([IO.File]::Exists($preflight)) {
+        $outputs = @(Get-ChildItem -LiteralPath (Join-Path $Build 'gpu-preflight') -Filter 'x360n_gpu_preflight.exe' -File -Recurse -ErrorAction SilentlyContinue)
+        if ($outputs.Count -ne 1) { throw "Staged Vulkan preflight needs exactly one build output, found $($outputs.Count): $preflight" }
+        $entry = Get-ReceiptEntries @($preflight)
+        if ($entry.sha256 -ne (Get-ReceiptHash $outputs[0].FullName)) { throw "Staged Vulkan preflight differs from the built output: $preflight" }
+        $entry
+    }
 }
 function Get-BuildGlobs([string]$Build) {
     $file = Join-Path $Build 'CMakeFiles/VerifyGlobs.cmake'

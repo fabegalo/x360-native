@@ -727,6 +727,10 @@ int Session(const ProjectPaths& paths, const fs::path& manifest, int timeout, bo
       // Step zero already authenticated the dashboard in this same protected
       // transaction. Every later title transition gets a fresh verification.
       if (step != 0) active = load_profile(active.manifest);
+      // The Vulkan preflight runs from the title's directory before Run checks
+      // the receipt, so the receipt (which binds the preflight) comes first.
+      if (step != 0 && renderer_settings.api == GraphicsApi::Vulkan)
+        if (auto why = CheckPreparedLaunch(paths, active.exe)) throw std::runtime_error(*why);
       CheckSessionRenderer(active.exe, renderer_settings);
       auto args = SessionConsoleArguments(SessionRendererArguments(
           SessionProfileArguments(active, skip_boot_intro && active.manifest == dashboard.manifest),

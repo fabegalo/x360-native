@@ -61,6 +61,8 @@ TEST_CASE("missing partial wrong-title and incomplete receipts never qualify a n
   SECTION("incomplete") { fs::create_directories(f.paths.local() / "preparation"); std::ofstream(f.paths.local() / "preparation/sample.incomplete") << "incomplete"; }
   SECTION("unrecorded DLL") { std::ofstream(f.exe.parent_path() / "extra.dll") << "different"; }
   SECTION("deleted DLL") { fs::remove(f.exe.parent_path() / "runtime.dll"); }
+  // The supervisor runs it before the title; the synthetic receipt binds DLLs only.
+  SECTION("unrecorded Vulkan preflight") { std::ofstream(f.exe.parent_path() / "x360n_gpu_preflight.exe") << "preflight"; }
   CHECK(f.Check());
 }
 TEST_CASE("analysis invalidation follows the affected title dependency closure", "[preparation]") {

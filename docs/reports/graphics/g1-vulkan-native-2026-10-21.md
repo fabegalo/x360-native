@@ -93,10 +93,28 @@ loader, driver, recursos ou timeout. Não carrega o driver dentro do launcher.
 A entrada Unicode `wmain` é necessária ao GetExecutablePath do SDK; o failfast
 da primeira implementação estreita foi diagnosticado com pilha e corrigido.
 
-Limites atuais: o preflight experimental ainda não autentica seu próprio
-executável pelo recibo de preparação; a integração de recibos/empacotamento
-precisa ser concluída antes de distribuir Vulkan. O preflight D3D12 legado
-continua principalmente sob autoridade do loader do runtime.
+Limites atuais: o preflight D3D12 legado continua principalmente sob autoridade
+do loader do runtime.
+
+**Atualização 22/10 — Vulkan nos títulos.** A dashboard preparada falhava com
+`x360n_gpu_preflight.exe missing`: os presets dos títulos não ligavam
+`REXGLUE_USE_VULKAN` (padrão do SDK no Windows: OFF), então a `rexgpu-xenos.dll`
+dos títulos só tinha D3D12. Agora os sete presets `x360n-win-amd64`, os presets
+gerados para títulos genéricos (`generic_aot.cpp`) e o preset raiz ligam Vulkan.
+Também apontam `PYTHON_EXECUTABLE` para o Python 3.14.8 embeddable fixado em
+`scripts/setup/desktop-tools.lock.json` (python.org, SHA-256 `a93abe45…f0a310`,
+`python.exe` assinado pela PSF), instalado por `scripts/prepare-tools.ps1`. Ele é
+usado só pelos geradores do glslang/SPIRV-Tools durante a compilação; não vai no
+ZIP desktop nem nos títulos preparados. Licença em `licenses/python.txt`.
+
+O recibo de preparação agora inclui o preflight quando ele é igual à única saída
+de build (`Get-PreparedArtifacts`). O supervisor recusa um preflight fora do
+recibo (`CheckPreparation`), e nas transições Vulkan confere o recibo do título
+antes de executá-lo. A dashboard 17559 foi preparada pelo driver normal
+(`Graphics: D3D12=ON Vulkan=ON`); o preflight staged (`a256bd3d…`) entrou no
+recibo e respondeu `GPU backend initialized: Vulkan`. Isso ainda **não certifica**
+a dashboard em sessão Vulkan: a sessão real é o próximo teste. Os outros títulos
+recebem Vulkan na próxima preparação, o que reconstrói o runtime deles.
 
 ### Native/D3D12
 

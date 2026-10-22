@@ -161,6 +161,21 @@ try {
     try { Get-PreparedArtifacts $build $exe @($dll) | Out-Null } catch { $failed = $true }
     Assert $failed 'publisher certified a DLL outside the build graph'
     [IO.File]::Delete((Join-Path $build 'obsolete.dll'))
+    # A staged Vulkan preflight is bound only when it equals its single build output.
+    $preflight = Join-Path $build 'x360n_gpu_preflight.exe'; [IO.File]::WriteAllText($preflight, 'built preflight')
+    $failed = $false
+    try { Get-PreparedArtifacts $build $exe @($dll) | Out-Null } catch { $failed = $true }
+    Assert $failed 'publisher certified a preflight without a build output'
+    $preflightOutput = Join-Path $build 'gpu-preflight/Release/x360n_gpu_preflight.exe'
+    [IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($preflightOutput)) | Out-Null
+    [IO.File]::WriteAllText($preflightOutput, 'other preflight')
+    $failed = $false
+    try { Get-PreparedArtifacts $build $exe @($dll) | Out-Null } catch { $failed = $true }
+    Assert $failed 'publisher accepted a preflight different from the compiled output'
+    [IO.File]::Copy($preflight, $preflightOutput, $true)
+    $bound = @(Get-PreparedArtifacts $build $exe @($dll))
+    Assert ($bound.Count -eq 3 -and @($bound | Where-Object { $_.path -like '*/x360n_gpu_preflight.exe' -or $_.path -like '*\x360n_gpu_preflight.exe' }).Count -eq 1) 'matching preflight was not bound to the receipt'
+    [IO.File]::Delete($preflight)
     $manifest = Join-Path $scratch 'profile.toml'; [IO.File]::WriteAllText($manifest, 'fixture')
     $receipt = "$exe.preparation.json"
     Publish-PreparationReceipt $receipt @{schema=1; title='sample'; manifest=$manifest; exe=$exe;

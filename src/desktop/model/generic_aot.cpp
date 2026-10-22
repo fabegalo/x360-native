@@ -217,7 +217,10 @@ void GenerateAotProject(const ProjectPaths& paths, const Target& t) {
       {"CMAKE_C_COMPILER", Path(paths.local() / "toolchains/llvm-22.1.8/bin/clang.exe")},
       {"CMAKE_CXX_COMPILER", Path(paths.local() / "toolchains/llvm-22.1.8/bin/clang++.exe")},
       {"CMAKE_C_FLAGS", "-march=x86-64-v2"}, {"CMAKE_CXX_FLAGS", "-march=x86-64-v2"},
-      {"REXSDK_DIR", Path(paths.root / "external/rexglue-sdk")}}}
+      {"REXSDK_DIR", Path(paths.root / "external/rexglue-sdk")},
+      // Vulkan is built beside D3D12; Python only runs the SDK's build-time generators.
+      {"REXGLUE_USE_VULKAN", "ON"},
+      {"PYTHON_EXECUTABLE", Path(paths.local() / "toolchains/python-3.14.8/python.exe")}}}
   }})}};
   publish(dir / "CMakePresets.json", preset.dump(2) + "\n");
 }

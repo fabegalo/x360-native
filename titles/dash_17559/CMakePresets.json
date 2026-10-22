@@ -14,7 +14,9 @@
                 "CMAKE_CXX_COMPILER": "${sourceDir}/../../.local/toolchains/llvm-22.1.8/bin/clang++.exe",
                 "CMAKE_C_FLAGS": "-march=x86-64-v2",
                 "CMAKE_CXX_FLAGS": "-march=x86-64-v2",
-                "REXSDK_DIR": "${sourceDir}/../../external/rexglue-sdk"
+                "REXSDK_DIR": "${sourceDir}/../../external/rexglue-sdk",
+                "REXGLUE_USE_VULKAN": "ON",
+                "PYTHON_EXECUTABLE": "${sourceDir}/../../.local/toolchains/python-3.14.8/python.exe"
             },
             "condition": { "type": "equals", "lhs": "${hostSystemName}", "rhs": "Windows" }
         },

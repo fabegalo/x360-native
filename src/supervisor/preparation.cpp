@@ -197,6 +197,9 @@ std::optional<std::string> CheckPreparation(const ProjectPaths& paths,
       for (auto& c : ext) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
       if (ext == ".dll" && !artifacts.contains(Key(file.path())))
         return fail("DLL sem identidade verificada: " + PathUtf8(file.path()));
+      // The supervisor runs the Vulkan preflight from this directory.
+      if (Key(file.path()) == Key(exe.parent_path() / "x360n_gpu_preflight.exe") && !artifacts.contains(Key(file.path())))
+        return fail("Preflight Vulkan sem identidade verificada: " + PathUtf8(file.path()));
     }
     if (fs::exists(paths.local() / "preparation" / (title + ".incomplete")))
       return fail("A preparação ainda não terminou.");
