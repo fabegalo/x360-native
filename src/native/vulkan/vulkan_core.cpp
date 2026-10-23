@@ -1,9 +1,13 @@
 #include "vulkan_core.h"
 #include <rex/logging.h>
+#include <rex/cvar.h>
 #include <SPIRV/GlslangToSpv.h>
 #include <glslang/Public/ShaderLang.h>
 #include <algorithm>
 #include <bit>
+#include <atomic>
+#include <filesystem>
+#include <fstream>
 #include <limits>
 #include <mutex>
 #include <stdexcept>
@@ -252,12 +256,27 @@ VkShaderModule CreateNativeShaderModule(const rex::ui::vulkan::VulkanDevice& dev
                                         std::span<const uint32_t> spirv) {
   if (spirv.size() < 5 || spirv[0] != 0x07230203u)
     throw std::invalid_argument("Native Vulkan: invalid SPIR-V module");
+  const auto dump_directory = rex::cvar::GetFlagByName("dump_shaders");
+  uint64_t diagnostic_id = 0;
+  if (!dump_directory.empty()) {
+    static std::atomic<uint64_t> sequence{0};
+    diagnostic_id = sequence.fetch_add(1, std::memory_order_relaxed) + 1;
+    const auto directory = std::filesystem::path(dump_directory);
+    std::filesystem::create_directories(directory);
+    const auto path = directory / ("native-module-" + std::to_string(diagnostic_id) + ".spv");
+    std::ofstream out(path, std::ios::binary | std::ios::trunc);
+    out.write(reinterpret_cast<const char*>(spirv.data()), spirv.size_bytes());
+    out.close();
+    if (!out) throw std::runtime_error("Native Vulkan: could not write requested shader diagnostic");
+    REXLOG_INFO("Native Vulkan module begin id={} words={} path={}", diagnostic_id, spirv.size(), path.string());
+  }
   VkShaderModuleCreateInfo info{VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO};
   info.codeSize = spirv.size_bytes();
   info.pCode = spirv.data();
   VkShaderModule result = VK_NULL_HANDLE;
   CheckVulkan(device.functions().vkCreateShaderModule(device.device(), &info, nullptr, &result),
               "create shader module");
+  if (diagnostic_id) REXLOG_INFO("Native Vulkan module end id={} module={:016X}", diagnostic_id, uint64_t(result));
   return result;
 }
 }

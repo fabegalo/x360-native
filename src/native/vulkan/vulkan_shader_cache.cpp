@@ -60,13 +60,15 @@ VulkanShaderCache::Translation VulkanShaderCache::Translate(SpirvShader& shader,
   // independently of the allocator's current alignment for vector<uint8_t>.
   std::vector<uint32_t> words(binary.size() / sizeof(uint32_t));
   std::memcpy(words.data(), binary.data(), binary.size());
+  // Persist the translation before entering the driver, including when driver
+  // compilation terminates the process before vkCreateShaderModule returns.
+  if (created && !REXCVAR_GET(dump_shaders).empty())
+    translated->Dump(REXCVAR_GET(dump_shaders), "native-vulkan");
   const auto module = CreateNativeShaderModule(device_, words);
   try { modules_.emplace(translated, module); } catch (...) {
     device_.functions().vkDestroyShaderModule(device_.device(), module, nullptr);
     throw;
   }
-  if (created && !REXCVAR_GET(dump_shaders).empty())
-    translated->Dump(REXCVAR_GET(dump_shaders), "native-vulkan");
   return {translated, module};
 }
 }

@@ -5,6 +5,9 @@
 #include "../commands/memexport.h"
 #include <rex/graphics/pipeline/render_target/cache.h>
 #include <rex/graphics/pipeline/texture/util.h>
+#include <rex/graphics/flags.h>
+#include <rex/cvar.h>
+#include <rex/logging.h>
 #include <algorithm>
 #include <bit>
 #include <cmath>
@@ -186,8 +189,17 @@ VulkanRender::DrawPipeline& VulkanRender::Pipeline(SpirvShader* vs, SpirvShader*
     pipeline.pDynamicState = &dynamic;
     pipeline.layout = result.layout;
     pipeline.renderPass = draw_pass_;
+    const bool diagnose = !REXCVAR_GET(dump_shaders).empty();
+    if (diagnose) {
+      REXLOG_INFO("Native Vulkan PSO begin id={} VS={:016X} PS={:016X} stages={} topology={} samples={} discard={} tess={} fill={}",
+          draw_pipelines_.size(), vs ? vs->ucode_data_hash() : 0, ps ? ps->ucode_data_hash() : 0,
+          pipeline.stageCount, uint32_t(topology), uint32_t(samples), discard, uint32_t(tess.host), uint32_t(fill));
+      for (uint32_t i = 0; i < pipeline.stageCount; ++i)
+        REXLOG_INFO("Native Vulkan PSO stage={} module={:016X} entry={}", uint32_t(stages[i].stage), uint64_t(stages[i].module), stages[i].pName);
+    }
     CheckVulkan(fn.vkCreateGraphicsPipelines(vk, pipeline_cache_, 1, &pipeline, nullptr, &result.pipeline),
                 "create Native draw graphics pipeline");
+    if (diagnose) REXLOG_INFO("Native Vulkan PSO end id={} pipeline={:016X}", draw_pipelines_.size(), uint64_t(result.pipeline));
     return draw_pipelines_.emplace(key, result).first->second;
   } catch (...) {
     if (result.pipeline) fn.vkDestroyPipeline(vk, result.pipeline, nullptr);
