@@ -9,13 +9,13 @@
 namespace x360n::native {
 using namespace rex::graphics;
 VulkanShaderCache::VulkanShaderCache(const rex::ui::vulkan::VulkanDevice& device,
-                                     bool edram_interlock)
+                                     bool edram_interlock, uint32_t scale_x, uint32_t scale_y)
     : translator(SpirvShaderTranslator::Features(&device),
                  (device.properties().framebufferColorSampleCounts &
                   device.properties().framebufferDepthSampleCounts &
                   device.properties().framebufferStencilSampleCounts & VK_SAMPLE_COUNT_2_BIT) != 0,
                  (device.properties().framebufferNoAttachmentsSampleCounts & VK_SAMPLE_COUNT_2_BIT) != 0,
-                 edram_interlock), device_(device) {
+                 edram_interlock, scale_x, scale_y), device_(device) {
   if (edram_interlock && !device.properties().fragmentShaderSampleInterlock)
     throw std::runtime_error("Native Vulkan: EDRAM requires fragment shader sample interlock");
 }

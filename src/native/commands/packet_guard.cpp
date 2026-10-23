@@ -35,7 +35,7 @@ void ValidatePacketForBackend(uint32_t header, const rex::memory::RingBuffer& pa
     case PM4_SET_BIN_MASK: case PM4_SET_BIN_SELECT: required = 2; break;
     case PM4_SET_BIN_MASK_LO: case PM4_SET_BIN_MASK_HI:
     case PM4_SET_BIN_SELECT_LO: case PM4_SET_BIN_SELECT_HI:
-    case PM4_EVENT_WRITE: case PM4_EVENT_WRITE_ZPD: required = 1; break;
+    case PM4_EVENT_WRITE: case PM4_EVENT_WRITE_ZPD: case PM4_VIZ_QUERY: required = 1; break;
     case PM4_REG_RMW: case PM4_EVENT_WRITE_SHD: required = 3; break;
     // Shared handler reports maximal screen extents: a superset of any draw's
     // coverage, so tile predication may run more draws but never drops pixels.
@@ -45,7 +45,7 @@ void ValidatePacketForBackend(uint32_t header, const rex::memory::RingBuffer& pa
     case PM4_MEM_WRITE: required = 2; variable = true; break;
     case PM4_SET_CONSTANT: case PM4_SET_CONSTANT2: case PM4_SET_SHADER_CONSTANTS: required = 2; variable = true; break;
     case PM4_LOAD_ALU_CONSTANT: required = 3; break;
-    case PM4_INVALIDATE_STATE: required = 1; break;
+    case PM4_INVALIDATE_STATE: case PM4_CONTEXT_UPDATE: case PM4_WAIT_FOR_IDLE: required = 1; break;
     case PM4_IM_LOAD_IMMEDIATE: required = 3; variable = true; break;
     case PM4_DRAW_INDX: required = 2; variable = true; break;
     case PM4_DRAW_INDX_2: required = 1; variable = true; break;
@@ -64,6 +64,8 @@ void ValidatePacketForBackend(uint32_t header, const rex::memory::RingBuffer& pa
   // Inspect a cursor copy: validation must not consume the guest command.
   auto cursor = payload;
   auto word = [&]() { return cursor.ReadAndSwap<uint32_t>(); };
+  if (opcode == PM4_CONTEXT_UPDATE && word() != 0)
+    x360n::native::Unsupported("unsupported PM4 context update value");
   // Decoder stores use the unprotected physical view; reject an invalid
   // destination before that store, including variable-length MEM_WRITE.
   auto physical_write = [&](uint32_t address, uint64_t bytes) {
@@ -139,6 +141,12 @@ void ValidatePacketForBackend(uint32_t header, const rex::memory::RingBuffer& pa
   // These packets read or write guest memory, or let the guest run code:
   // incomplete resolve results must be visible to them first.
   switch (opcode) {
+    case PM4_WAIT_FOR_IDLE:
+      // This packet has no memory destination but requires all queued GPU work,
+      // including color/depth-only draws, to finish before the next command.
+      x360n::native::WaitForIdleBeforePacket();
+      after_guest_sync = true;
+      break;
     // EVENT_WRITE_SHD/EXT store a fence or extents to guest memory after the
     // event register write; a plain EVENT_WRITE (cache flush) publishes
     // nothing the guest can observe, so it does not wait for the GPU.

@@ -8,6 +8,7 @@ namespace rex::ui { class GraphicsProvider; class Presenter; }
 namespace x360n::native {
 // Guest-observable point that requires recorded resolve results in guest memory.
 enum GuestSync : unsigned { kGuestSyncEvent, kGuestSyncPacket, kGuestSyncWait, kGuestSyncBufferEnd, kGuestSyncPresent, kGuestSyncSources };
+enum class ScanoutPostEffect { kNone, kFxaa, kFxaaExtreme };
 // D1OVL plane (Guide, notifications) composed over the title before gamma, as
 // the pinned Xenos path does: rectangle and offset in display coordinates.
 struct ScanoutOverlay {
@@ -23,7 +24,7 @@ class ScanoutBackend {
   // overlay/overlay_pixels: enabled D1OVL plane and its guest surface, or null.
   virtual void Present(rex::ui::Presenter&, const ScanoutTexture&, const void* pixels,
                        const uint32_t* lut, const ScanoutOverlay* overlay,
-                       const void* overlay_pixels) = 0;
+                       const void* overlay_pixels, ScanoutPostEffect = ScanoutPostEffect::kNone) = 0;
   virtual void Drain() = 0;
   virtual void InitializeShaderStorage(const std::filesystem::path&, uint32_t title_id) = 0;
   // Guest-observable point (memory packet, wait, buffer end): publish every
@@ -34,11 +35,15 @@ class ScanoutBackend {
   virtual void SyncGuestRead(uint32_t address, uint32_t length, uint32_t opcode) = 0;
   virtual rex::graphics::Shader* LoadShader(rex::graphics::xenos::ShaderType, const uint32_t*, uint32_t) = 0;
   virtual void Draw(const rex::graphics::RegisterFile&, rex::memory::Memory&, rex::graphics::Shader*, rex::graphics::Shader*,
-      rex::graphics::xenos::PrimitiveType, uint32_t, const DrawIndices*) = 0;
+      rex::graphics::xenos::PrimitiveType, uint32_t, const DrawIndices*, DrawPurpose = DrawPurpose::kGuest) = 0;
   virtual void Resolve(const rex::graphics::RegisterFile&, rex::memory::Memory&) = 0;
   // Snapshot cumulative guest sample counters, waiting for counted work only.
   // No shader instrumentation is used when no query remains active.
   virtual SampleCounts ReadSampleCounts(bool counting_after) = 0;
+  // Query probes use a private counter interval and restore the preceding ZPD
+  // snapshot. Visibility accumulation is boolean OR, so heavy overdraw cannot
+  // wrap back to "not visible". This mode is never enabled for ordinary draws.
+  virtual void SetSampleCounts(const SampleCounts&, bool visibility_only) = 0;
 };
 using ScanoutFactory = std::unique_ptr<ScanoutBackend> (*)(rex::ui::GraphicsProvider&);
 std::unique_ptr<ScanoutBackend> CreateD3D12Scanout(rex::ui::GraphicsProvider& provider);

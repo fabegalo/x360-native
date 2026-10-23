@@ -1,5 +1,7 @@
 #include "command_processor.h"
 #include <rex/graphics/graphics_system.h>
+#include <rex/graphics/pipeline/shader/shader.h>
+#include <rex/chrono/frame_timing.h>
 #include <rex/graphics/display_overlay.h>
 #include <rex/kernel/xboxkrnl/video.h>
 #include <rex/logging.h>
@@ -27,6 +29,11 @@ namespace { CommandProcessor* active_processor = nullptr; }
 void CompleteGuestWritesBeforePacket(GuestSync source, uint32_t opcode) { if (active_processor) active_processor->CompleteGuestWrites(source, opcode); }
 void SyncGuestReadBeforePacket(uint32_t address, uint32_t length, uint32_t opcode) {
   if (active_processor) active_processor->SyncGuestRead(address, length, opcode);
+}
+void WaitForIdleBeforePacket() { if (active_processor) active_processor->WaitForIdle(); }
+void CommandProcessor::WaitForIdle() {
+  try { if (scanout_) scanout_->Drain(); }
+  catch (const std::exception& e) { Unsupported(e.what()); }
 }
 void CommandProcessor::SyncGuestRead(uint32_t address, uint32_t length, uint32_t opcode) {
   try { if (scanout_) scanout_->SyncGuestRead(address, length, opcode); }
@@ -77,8 +84,9 @@ void CommandProcessor::IssueSwap(uint32_t, uint32_t width, uint32_t height) {
   last_swap_succeeded_ = false;
   try {
     if (!scanout_ || !graphics_system_->presenter()) throw std::runtime_error("scanout/presenter unavailable");
-    if (GetActualSwapPostEffect() != SwapPostEffect::kNone)
-      throw std::runtime_error("Native post-processing is not implemented");
+    const auto post_effect = GetActualSwapPostEffect() == SwapPostEffect::kFxaaExtreme
+        ? ScanoutPostEffect::kFxaaExtreme : GetActualSwapPostEffect() == SwapPostEffect::kFxaa
+        ? ScanoutPostEffect::kFxaa : ScanoutPostEffect::kNone;
     const auto texture = DecodeScanout(register_file_->GetTextureFetch(0), width, height);
     uint32_t lut[128 * 3];
     // Original D3D presentation uses PWL for both RGB10A2 fetch formats.
@@ -101,11 +109,13 @@ void CommandProcessor::IssueSwap(uint32_t, uint32_t width, uint32_t height) {
                  plane.offset_x, plane.offset_y, std::max(1u, uint32_t(mode.display_width)),
                  std::max(1u, uint32_t(mode.display_height))};
     }
+    rex::chrono::FrameTiming::PacePresentation();
     scanout_->Present(*graphics_system_->presenter(), texture,
                       memory_->TranslatePhysical(texture.address), lut,
                       plane.valid ? &overlay : nullptr,
-                      plane.valid ? memory_->TranslatePhysical(overlay.surface.address) : nullptr);
+                      plane.valid ? memory_->TranslatePhysical(overlay.surface.address) : nullptr, post_effect);
     last_swap_succeeded_ = true;
+    rex::chrono::FrameTiming::NotifySourceFrame();
   } catch (const std::exception& e) { Unsupported(e.what()); }
 }
 rex::graphics::Shader* CommandProcessor::LoadShader(rex::graphics::xenos::ShaderType type,
@@ -115,11 +125,13 @@ rex::graphics::Shader* CommandProcessor::LoadShader(rex::graphics::xenos::Shader
 }
 bool CommandProcessor::ShouldIssueDraw(uint32_t condition) const {
   using namespace rex::graphics;
-  const auto viz = register_file_->Get<reg::PA_SC_VIZ_QUERY>();
-  if (viz.viz_query_ena)
-    Unsupported("Native visibility-query rasterization is not implemented");
-  return VisibilityDrawEnabled(condition, register_file_->values[XE_GPU_REG_PA_SC_VIZ_QUERY_STATUS_0],
-                               register_file_->values[XE_GPU_REG_PA_SC_VIZ_QUERY_STATUS_1]);
+  draw_visibility_failed_ = !VisibilityDrawEnabled(condition, register_file_->values[XE_GPU_REG_PA_SC_VIZ_QUERY_STATUS_0],
+                                                   register_file_->values[XE_GPU_REG_PA_SC_VIZ_QUERY_STATUS_1]);
+  // Visibility rejects rasterization after vertex processing. Keep guest VS
+  // memory exports even for invisible geometry, as for ordinary face culling.
+  return !draw_visibility_failed_ ||
+      (register_file_->Get<reg::RB_MODECONTROL>().edram_mode != xenos::EdramMode::kCopy &&
+       active_vertex_shader() && active_vertex_shader()->memexport_eM_written());
 }
 bool CommandProcessor::IssueDraw(rex::graphics::xenos::PrimitiveType primitive, uint32_t count, IndexBufferInfo* indices, bool) {
   try {
@@ -136,6 +148,45 @@ bool CommandProcessor::IssueDraw(rex::graphics::xenos::PrimitiveType primitive, 
       if (indices->length > 0x20000000) Unsupported("index buffer exceeds guest physical memory");
       native_indices = {indices->format, indices->endianness, indices->count, indices->guest_base, uint32_t(indices->length)};
     }
+    using namespace rex::graphics;
+    if (draw_visibility_failed_) {
+      auto vertex_regs = std::make_unique<RegisterFile>(*register_file_);
+      auto mode = vertex_regs->Get<reg::RB_MODECONTROL>();
+      mode.edram_mode = xenos::EdramMode::kNoOperation;
+      vertex_regs->values[XE_GPU_REG_RB_MODECONTROL] = mode.value;
+      scanout_->Draw(*vertex_regs, *memory_, active_vertex_shader(), nullptr,
+          primitive, count, indices ? &native_indices : nullptr);
+      draw_visibility_failed_ = false;
+      return true;
+    }
+    const auto viz = register_file_->Get<reg::PA_SC_VIZ_QUERY>();
+    if (viz.viz_query_ena) {
+      // Visibility is decided before the guest pixel shader and cannot be
+      // inferred from its color writes, kill or alpha-test result. Probe real
+      // geometry against the current depth buffer without modifying EDRAM.
+      // Ordinary rendering then executes once, with its original side effects.
+      auto query_regs = std::make_unique<RegisterFile>(*register_file_);
+      auto mode = query_regs->Get<reg::RB_MODECONTROL>();
+      mode.edram_mode = xenos::EdramMode::kDepthOnly;
+      query_regs->values[XE_GPU_REG_RB_MODECONTROL] = mode.value;
+      auto depth = query_regs->Get<reg::RB_DEPTHCONTROL>();
+      depth.z_write_enable = depth.stencil_enable = depth.backface_enable = 0;
+      query_regs->values[XE_GPU_REG_RB_DEPTHCONTROL] = depth.value;
+      query_regs->values[XE_GPU_REG_RB_COLOR_MASK] = 0;
+      auto color = query_regs->Get<reg::RB_COLORCONTROL>();
+      color.alpha_test_enable = color.alpha_to_mask_enable = 0;
+      query_regs->values[XE_GPU_REG_RB_COLORCONTROL] = color.value;
+      const bool query_only = viz.kill_pix_post_hi_z || viz.kill_pix_post_detail_mask;
+      const auto saved = scanout_->ReadSampleCounts(true);
+      scanout_->SetSampleCounts({}, true);
+      scanout_->Draw(*query_regs, *memory_, active_vertex_shader(), nullptr, primitive, count,
+          indices ? &native_indices : nullptr,
+          query_only ? DrawPurpose::kVisibilityWithVertexExports : DrawPurpose::kVisibility);
+      const auto visible = scanout_->ReadSampleCounts(occlusion_queries_.active() != 0);
+      scanout_->SetSampleCounts(saved, false);
+      visibility_queries_.Accumulate(viz.viz_query_id, (visible[4] | visible[5]) != 0);
+      if (query_only) return true;
+    }
     scanout_->Draw(*register_file_, *memory_, active_vertex_shader(), active_pixel_shader(), primitive, count, indices ? &native_indices : nullptr);
     return true;
   } catch (const std::exception& e) { Unsupported(e.what()); }
@@ -143,6 +194,25 @@ bool CommandProcessor::IssueDraw(rex::graphics::xenos::PrimitiveType primitive, 
 bool CommandProcessor::IssueCopy() {
   try { scanout_->Resolve(*register_file_, *memory_); return true; }
   catch (const std::exception& e) { Unsupported(e.what()); }
+}
+bool CommandProcessor::ExecutePacketType3_VIZ_QUERY(rex::memory::RingBuffer* reader, uint32_t, uint32_t count) {
+  try {
+    using namespace rex::graphics;
+    if (count != 1) throw std::runtime_error("Native visibility query: invalid payload size");
+    const auto control = reader->ReadAndSwap<uint32_t>();
+    const unsigned id = control & 63;
+    if (!(control & 0x100)) {
+      visibility_queries_.Begin(id);
+      WriteRegister(XE_GPU_REG_VGT_EVENT_INITIATOR, xenos::VIZQUERY_START);
+    } else {
+      const bool visible = visibility_queries_.End(id);
+      const auto status = id < 32 ? XE_GPU_REG_PA_SC_VIZ_QUERY_STATUS_0 : XE_GPU_REG_PA_SC_VIZ_QUERY_STATUS_1;
+      const uint32_t bit = uint32_t(1) << (id & 31);
+      WriteRegister(status, (register_file_->values[status] & ~bit) | (visible ? bit : 0));
+      WriteRegister(XE_GPU_REG_VGT_EVENT_INITIATOR, xenos::VIZQUERY_END);
+    }
+    return true;
+  } catch (const std::exception& e) { Unsupported(e.what()); }
 }
 bool CommandProcessor::ExecutePacketType3_EVENT_WRITE_ZPD(rex::memory::RingBuffer* reader, uint32_t, uint32_t count) {
   try {

@@ -31,4 +31,25 @@ class OcclusionQueries {
  private:
   uint32_t active_ = 0;
 };
+// The scan converter accumulates an internal result between BEGIN and END;
+// PA_SC_VIZ_QUERY_STATUS is published at END and remains independently writable.
+class VisibilityQueries {
+ public:
+  void Begin(unsigned id) {
+    const auto bit = uint64_t(1) << id;
+    active_ |= bit;
+    visible_ &= ~bit;
+  }
+  void Accumulate(unsigned id, bool visible) {
+    if (visible) visible_ |= uint64_t(1) << id;
+  }
+  bool End(unsigned id) {
+    const auto bit = uint64_t(1) << id;
+    if (!(active_ & bit)) throw std::runtime_error("Native visibility query: END without BEGIN");
+    active_ &= ~bit;
+    return (visible_ & bit) != 0;
+  }
+ private:
+  uint64_t active_ = 0, visible_ = 0;
+};
 }

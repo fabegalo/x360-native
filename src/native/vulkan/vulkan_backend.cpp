@@ -13,13 +13,17 @@ class VulkanBackend final : public ScanoutBackend {
       throw std::runtime_error("Native Vulkan: EDRAM requires fragment sample interlock and fragment storage writes");
   }
   void Present(rex::ui::Presenter& presenter, const ScanoutTexture& texture, const void* pixels,
-      const uint32_t* lut, const ScanoutOverlay* overlay, const void* overlay_pixels) override {
+      const uint32_t* lut, const ScanoutOverlay* overlay, const void* overlay_pixels, ScanoutPostEffect post_effect) override {
+    ScanoutTexture output = texture;
+    std::vector<uint8_t> scaled_pixels;
     if (render_) {
       render_->CompleteGuestWrites(kGuestSyncPresent, 0xFF);
       render_->Flush(false);
+      if (render_->PrepareScanout(texture, pixels, output, scaled_pixels)) pixels = scaled_pixels.data();
       render_->EndFrame();
     }
-    scanout_.Present(presenter, texture, pixels, lut, overlay, overlay_pixels);
+    scanout_.Present(presenter, output, pixels, lut, overlay, overlay_pixels, post_effect,
+                     texture.width, texture.height);
   }
   void Drain() override {
     if (render_) render_->Flush(true);
@@ -41,14 +45,17 @@ class VulkanBackend final : public ScanoutBackend {
   }
   void Draw(const rex::graphics::RegisterFile& regs, rex::memory::Memory& memory,
       rex::graphics::Shader* vs, rex::graphics::Shader* ps,
-      rex::graphics::xenos::PrimitiveType primitive, uint32_t count, const DrawIndices* indices) override {
-    Render().Draw(regs, memory, vs, ps, primitive, count, indices);
+      rex::graphics::xenos::PrimitiveType primitive, uint32_t count, const DrawIndices* indices, DrawPurpose purpose) override {
+    Render().Draw(regs, memory, vs, ps, primitive, count, indices, purpose);
   }
   void Resolve(const rex::graphics::RegisterFile& regs, rex::memory::Memory& memory) override {
     Render().Resolve(regs, memory);
   }
   SampleCounts ReadSampleCounts(bool counting_after) override {
     return Render().ReadSampleCounts(counting_after);
+  }
+  void SetSampleCounts(const SampleCounts& counts, bool visibility_only) override {
+    Render().SetSampleCounts(counts, visibility_only);
   }
  private:
   VulkanRender& Render() {

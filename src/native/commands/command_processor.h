@@ -26,6 +26,7 @@ class CommandProcessor final : public rex::graphics::CommandProcessor {
   // Called before PM4 packets that read or write guest memory.
   void CompleteGuestWrites(GuestSync, uint32_t opcode = 0xFF);
   void SyncGuestRead(uint32_t address, uint32_t length, uint32_t opcode);
+  void WaitForIdle();
  protected:
   rex::graphics::Shader* LoadShader(rex::graphics::xenos::ShaderType type, uint32_t address,
                                     const uint32_t* data, uint32_t count) override;
@@ -33,14 +34,18 @@ class CommandProcessor final : public rex::graphics::CommandProcessor {
   bool IssueCopy() override;
   bool ShouldIssueDraw(uint32_t viz_query_condition) const override;
   bool ExecutePacketType3_EVENT_WRITE_ZPD(rex::memory::RingBuffer*, uint32_t, uint32_t) override;
+  bool ExecutePacketType3_VIZ_QUERY(rex::memory::RingBuffer*, uint32_t, uint32_t) override;
  private:
   ScanoutFactory factory_;
   std::unique_ptr<ScanoutBackend> scanout_;
   OcclusionQueries occlusion_queries_;
+  VisibilityQueries visibility_queries_;
+  mutable bool draw_visibility_failed_ = false;
 };
 [[noreturn]] void Unsupported(const char* message);
 // Single command processor thread per process; no-op before setup.
 // opcode: PM4 type-3 opcode for diagnostics, 0x80 for the packet after a sync.
 void CompleteGuestWritesBeforePacket(GuestSync, uint32_t opcode);
 void SyncGuestReadBeforePacket(uint32_t address, uint32_t length, uint32_t opcode);
+void WaitForIdleBeforePacket();
 }

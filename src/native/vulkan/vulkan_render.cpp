@@ -14,10 +14,12 @@ VulkanRender::VulkanRender(rex::ui::vulkan::VulkanProvider& provider)
   const auto& fn = device_.functions();
   const auto vk = device_.device();
   try {
+    if (edram_size_+sizeof(SampleCounts)>device_.properties().maxStorageBufferRange)
+      throw std::runtime_error("Native: requested scale exceeds device EDRAM storage buffer range");
     guest_buffer_ = std::make_unique<VulkanBuffer>(device_, GuestMemoryMirror::kSize,
         VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
         VulkanBuffer::Access::kDevice);
-    edram_buffer_ = std::make_unique<VulkanBuffer>(device_, rex::graphics::xenos::kEdramSizeBytes + sizeof(SampleCounts),
+    edram_buffer_ = std::make_unique<VulkanBuffer>(device_, edram_size_ + sizeof(SampleCounts),
         VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_TEXEL_BUFFER_BIT |
         VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, VulkanBuffer::Access::kDevice);
     readback_ = std::make_unique<VulkanBuffer>(device_, 16ull << 20, VK_BUFFER_USAGE_TRANSFER_DST_BIT,
@@ -50,6 +52,8 @@ VulkanRender::VulkanRender(rex::ui::vulkan::VulkanProvider& provider)
     layout.pushConstantRangeCount = 1;
     layout.pPushConstantRanges = &constants;
     CheckVulkan(fn.vkCreatePipelineLayout(vk, &layout, nullptr, &copy_layout_), "create resolve copy layout");
+    constants.size = 6 * sizeof(uint32_t);
+    CheckVulkan(fn.vkCreatePipelineLayout(vk, &layout, nullptr, &downscale_layout_), "create scaled resolve publication layout");
     layout.setLayoutCount = 1;
     constants.size = sizeof(rex::graphics::draw_util::ResolveClearShaderConstants);
     CheckVulkan(fn.vkCreatePipelineLayout(vk, &layout, nullptr, &clear_layout_), "create resolve clear layout");
@@ -68,6 +72,7 @@ VulkanRender::~VulkanRender() {
 void VulkanRender::Destroy() {
   DestroyDraw();
   DestroyTextures();
+  scaled_.Clear();
   mirror_.reset();
   const auto& fn = device_.functions();
   const auto vk = device_.device();
@@ -79,6 +84,9 @@ void VulkanRender::Destroy() {
   for (auto pipeline : clear_pipelines_) if (pipeline) fn.vkDestroyPipeline(vk, pipeline, nullptr);
   if (copy_layout_) fn.vkDestroyPipelineLayout(vk, copy_layout_, nullptr);
   if (clear_layout_) fn.vkDestroyPipelineLayout(vk, clear_layout_, nullptr);
+  if (downscale_pipeline_) fn.vkDestroyPipeline(vk, downscale_pipeline_, nullptr);
+  if (downscale_layout_) fn.vkDestroyPipelineLayout(vk, downscale_layout_, nullptr);
+  downscale_pipeline_=VK_NULL_HANDLE; downscale_layout_=VK_NULL_HANDLE;
   if (storage_layout_) fn.vkDestroyDescriptorSetLayout(vk, storage_layout_, nullptr);
   for (auto& arena : arenas_) {
     if (arena.descriptors) fn.vkDestroyDescriptorPool(vk, arena.descriptors, nullptr);
@@ -115,7 +123,7 @@ void VulkanRender::Flush(bool wait) {
     submissions_.Submit();
     commands_ = VK_NULL_HANDLE;
   }
-  if (wait || !writeback_.empty()) submissions_.Drain();
+  if (wait || !writeback_.empty() || !scaled_readbacks_.empty()) submissions_.Drain();
   if (!writeback_.empty()) {
     readback_->Invalidate(0, readback_used_);
     writeback_.Complete([&](const GuestWriteback::Write& write) {
@@ -124,6 +132,13 @@ void VulkanRender::Flush(bool wait) {
     });
     readback_used_ = 0;
   }
+  for (const auto& scaled : scaled_readbacks_) {
+    const size_t bytes=size_t(scaled.ticket.length)*scale_x_*scale_y_;
+    scaled.buffer->Invalidate(scaled.offset, bytes);
+    scaled_.Complete(scaled.ticket, {reinterpret_cast<const uint8_t*>(scaled.buffer->mapped()+scaled.offset), bytes},
+                     scaled.pixel_log2, *memory_);
+  }
+  scaled_readbacks_.clear();
 }
 VulkanRender::UploadSlice VulkanRender::Upload(const void* data, VkDeviceSize size, VkDeviceSize alignment) {
   if (!data || !size || !alignment) throw std::invalid_argument("Native Vulkan: invalid upload");
@@ -238,7 +253,7 @@ SampleCounts VulkanRender::ReadSampleCounts(bool counting_after) {
   if (!writeback_.empty()) Flush(true);
   Begin();
   UseBuffer(edram_buffer_->handle(), edram_access_, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_TRANSFER_READ_BIT);
-  const VkBufferCopy copy{rex::graphics::xenos::kEdramSizeBytes, 0, sizeof(SampleCounts)};
+  const VkBufferCopy copy{edram_size_, 0, sizeof(SampleCounts)};
   const auto& fn = device_.functions();
   fn.vkCmdCopyBuffer(commands_, edram_buffer_->handle(), readback_->handle(), 1, &copy);
   VkBufferMemoryBarrier host{VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER};
@@ -256,11 +271,21 @@ SampleCounts VulkanRender::ReadSampleCounts(bool counting_after) {
   counting_samples_ = counting_after;
   return result;
 }
+void VulkanRender::SetSampleCounts(const SampleCounts& counts, bool visibility_only) {
+  Begin();
+  const auto upload = Upload(counts.data(), sizeof(counts), 4);
+  EndRendering();
+  UseBuffer(edram_buffer_->handle(), edram_access_, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_TRANSFER_WRITE_BIT);
+  const VkBufferCopy copy{upload.offset, edram_size_, sizeof(counts)};
+  device_.functions().vkCmdCopyBuffer(commands_, upload.buffer, edram_buffer_->handle(), 1, &copy);
+  visibility_only_ = visibility_only;
+}
 GuestMemoryMirror& VulkanRender::Mirror(rex::memory::Memory& memory) {
   if (memory_ && memory_ != &memory) throw std::logic_error("Native Vulkan: guest memory domain changed");
   memory_ = &memory;
   if (!mirror_) mirror_ = std::make_unique<GuestMemoryMirror>(memory,
       [this](uint32_t start, uint32_t length) { UploadGuest(start, length); });
+  scaled_.Attach(*mirror_);
   return *mirror_;
 }
 void VulkanRender::UploadGuest(uint32_t address, uint32_t length) {

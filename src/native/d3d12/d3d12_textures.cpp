@@ -1,4 +1,5 @@
 #include "d3d12_render.h"
+#include "../quality/settings.h"
 #include "../textures/texture.h"
 #include "../textures/texture_block.h"
 #include "../textures/texture_load.h"
@@ -29,6 +30,8 @@ DXGI_FORMAT Format(TextureFormat f, bool sign) {
     case TextureFormat::k_16_FLOAT: return DXGI_FORMAT_R16_FLOAT;
     case TextureFormat::k_24_8: case TextureFormat::k_24_8_FLOAT:
     case TextureFormat::k_32_FLOAT: return DXGI_FORMAT_R32_FLOAT;
+    case TextureFormat::k_32_32_FLOAT: return DXGI_FORMAT_R32G32_FLOAT;
+    case TextureFormat::k_32_32_32_32_FLOAT: return DXGI_FORMAT_R32G32B32A32_FLOAT;
     case TextureFormat::k_DXT1: case TextureFormat::k_DXT2_3: case TextureFormat::k_DXT4_5:
     case TextureFormat::k_DXT5A: case TextureFormat::k_DXN:
       // Only reached when a signed component is actually sampled.
@@ -111,16 +114,13 @@ D3D12Render::TextureTables D3D12Render::BindTextures(const RegisterFile& r, rex:
       // The translator also declares a 2D alternative for stacked fetches.
       // A 2D fetch of volume storage views its first base-level slice.
       if (volume && !host_volume) max_level = base ? 0 : min_level;
-      auto format = Format(f.format, binding.is_signed);
+      auto format = (ExpandedTextureBlock(f.format) || ExpandedTextureComponents(f.format, f.num_format)) ? DXGI_FORMAT_R32G32B32A32_FLOAT : Format(f.format, binding.is_signed);
       const bool depth_texture = f.format == TextureFormat::k_24_8 || f.format == TextureFormat::k_24_8_FLOAT;
-      const bool integer16 = f.num_format && f.format == TextureFormat::k_16;
-      if (f.num_format && !integer16 && !depth_texture && !IsFloatTexture(f.format)) throw std::runtime_error("Native integer texture format=" + std::to_string(uint32_t(f.format)) + " signed=" + std::to_string(binding.is_signed) + " binding=" + std::to_string(binding.fetch_constant));
-      if (integer16) format = DXGI_FORMAT_R32_FLOAT;
       // Cube faces and stacked 2D slices are array slices of every level.
       const bool cube = f.dimension == DataDimension::kCube;
       const unsigned array_size = cube || (f.dimension == DataDimension::k2DOrStacked && f.stacked) ? dm + 1 : 1;
       const unsigned levels = max_level + 1;
-      const TextureLoadInput input{f.format, f.dimension, f.endianness, bool(f.tiled), bool(f.packed_mips), wm + 1, hm + 1, dm + 1,
+      TextureLoadInput input{f.format, f.dimension, f.endianness, bool(f.tiled), bool(f.packed_mips), wm + 1, hm + 1, dm + 1,
           f.pitch, base << 12, mip << 12, max_level, host_volume, array_size, format, bool(binding.is_signed), bool(f.num_format)};
       const auto layout = input.Layout();
       const uint32_t base_bytes = (layout.base.level_data_extent_bytes + 3u) & ~3u;
@@ -139,14 +139,20 @@ D3D12Render::TextureTables D3D12Render::BindTextures(const RegisterFile& r, rex:
       unsigned components = 4;
       switch (GetBaseFormat(f.format)) {
         case TextureFormat::k_DXT5A: case TextureFormat::k_24_8: case TextureFormat::k_24_8_FLOAT: case TextureFormat::k_8: case TextureFormat::k_16: case TextureFormat::k_16_FLOAT: case TextureFormat::k_32_FLOAT: components = 1; break;
-        case TextureFormat::k_DXN: case TextureFormat::k_8_8: case TextureFormat::k_16_16: case TextureFormat::k_16_16_FLOAT: components = 2; break;
+        case TextureFormat::k_DXN: case TextureFormat::k_8_8: case TextureFormat::k_16_16: case TextureFormat::k_16_16_FLOAT: case TextureFormat::k_32_32_FLOAT: components = 2; break;
         default: break;
       }
       auto component = [&](unsigned channel) { unsigned s = (f.swizzle >> (channel * 3)) & 7; Require(s <= 5, "reserved swizzle component"); return s < 4 ? std::min(s, components - 1) : s; };
       view.Shader4ComponentMapping = D3D12_ENCODE_SHADER_4_COMPONENT_MAPPING(component(0), component(1), component(2), component(3));
+      const auto* scale_format = FormatInfo::Get(input.format);
+      const bool scaled_texture = scaled_.enabled() && !input.host_volume &&
+          scale_format->block_width == 1 && scale_format->block_height == 1 &&
+          (scaled_.Overlaps(input.base, base_bytes) || scaled_.Overlaps(input.mip, mip_bytes));
+      if (scaled_texture) { input.scale_x=scale_x_; input.scale_y=scale_y_; input.scaled=&scaled_;
+        textures_resolution_scaled_ |= uint32_t(1) << binding.fetch_constant; }
       // Content identity: every field that selects or converts guest bytes.
       // Sampler-only fetch fields (filters, clamps, LOD, swizzle) share it.
-      const uint32_t key_fields[]{base, mip, wm, hm, dm, levels, f.pitch, uint32_t(f.format),
+      const uint32_t key_fields[]{input.scale_x, input.scale_y, base, mip, wm, hm, dm, levels, f.pitch, uint32_t(f.format),
           uint32_t(f.tiled) | uint32_t(f.packed_mips) << 1 | uint32_t(f.endianness) << 2 | uint32_t(f.dimension) << 4 |
           uint32_t(f.stacked) << 6 | uint32_t(binding.is_signed) << 7 | uint32_t(host_volume) << 8 | uint32_t(f.num_format) << 9};
       std::string cache_key(reinterpret_cast<const char*>(key_fields), sizeof(key_fields));
@@ -167,8 +173,9 @@ D3D12Render::TextureTables D3D12Render::BindTextures(const RegisterFile& r, rex:
           }
         }
       }
-      D3D12_RESOURCE_DESC d{}; d.Dimension = host_volume ? D3D12_RESOURCE_DIMENSION_TEXTURE3D : D3D12_RESOURCE_DIMENSION_TEXTURE2D; d.Width = wm + 1; d.Height = hm + 1;
+      D3D12_RESOURCE_DESC d{}; d.Dimension = host_volume ? D3D12_RESOURCE_DIMENSION_TEXTURE3D : D3D12_RESOURCE_DIMENSION_TEXTURE2D; d.Width = uint64_t(wm + 1)*input.scale_x; d.Height = (hm + 1)*input.scale_y;
       d.DepthOrArraySize = UINT16(host_volume ? dm + 1 : array_size); d.MipLevels = UINT16(levels); d.Format = format; d.SampleDesc.Count = 1;
+      Require(d.Width <= D3D12_REQ_TEXTURE2D_U_OR_V_DIMENSION && d.Height <= D3D12_REQ_TEXTURE2D_U_OR_V_DIMENSION, "scaled texture exceeds device dimensions");
       Ptr<ID3D12Resource> texture;
       auto state = D3D12_RESOURCE_STATE_COPY_DEST;
       if (entry) {
@@ -208,7 +215,7 @@ D3D12Render::TextureTables D3D12Render::BindTextures(const RegisterFile& r, rex:
       // Pages the CPU wrote are uploaded; resolve results are already resident.
       mirror_->RequestRange(base << 12, base_bytes);
       if (mip_bytes) mirror_->RequestRange(mip << 12, mip_bytes);
-      const auto shader_index = texture_cpu_ ? LoadShader::kUnknown : GpuLoadShader(input);
+      const auto shader_index = (texture_cpu_ || scaled_texture) ? LoadShader::kUnknown : GpuLoadShader(input);
       if (shader_index != LoadShader::kUnknown) {
         LoadTextureGpu(PlanGpuTextureLoad(input, shader_index), texture.Get());
         if (stats_enabled_) { ++gpu_texture_loads_; ++texture_uploads_; }
@@ -254,7 +261,7 @@ D3D12Render::TextureTables D3D12Render::BindTextures(const RegisterFile& r, rex:
       ClampMode cx, cy, cz;
       texture_util::GetClampModesForDimension(f, cx, cy, cz);
       s.AddressU = Clamp(cx); s.AddressV = Clamp(cy); s.AddressW = Clamp(cz);
-      auto aniso = std::min(b.aniso_filter == AnisoFilter::kUseFetchConst ? f.aniso_filter : b.aniso_filter, AnisoFilter::kMax_16_1);
+      auto aniso = NativeAnisotropy(std::min(b.aniso_filter == AnisoFilter::kUseFetchConst ? f.aniso_filter : b.aniso_filter, AnisoFilter::kMax_16_1));
       s.MaxAnisotropy = 1;
       if (aniso != AnisoFilter::kDisabled) { s.Filter = D3D12_FILTER_ANISOTROPIC; s.MaxAnisotropy = 1u << (uint32_t(aniso) - 1); }
       s.ComparisonFunc = D3D12_COMPARISON_FUNC_NEVER;

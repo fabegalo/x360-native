@@ -1,5 +1,6 @@
 #include "command_processor.h"
 #include <rex/graphics/graphics_system.h>
+#include <rex/chrono/frame_timing.h>
 #include <rex/system/gpu_plugin.h>
 #include <rex/ui/d3d12/d3d12_provider.h>
 #if X360N_NATIVE_VULKAN
@@ -11,7 +12,7 @@
 namespace x360n::native {
 class GraphicsSystem final : public rex::graphics::GraphicsSystem {
  public:
-  explicit GraphicsSystem(bool vulkan) : vulkan_(vulkan) {}
+  explicit GraphicsSystem(bool vulkan) : vulkan_(vulkan) { rex::chrono::FrameTiming::ActivateNative(); }
   std::string name() const override { return vulkan_ ? "Native (Experimental) Vulkan" : "Native (Experimental) D3D12"; }
  protected:
   void CreateProvider(bool with_presentation) override {

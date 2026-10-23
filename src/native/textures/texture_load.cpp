@@ -1,4 +1,5 @@
 #include "texture_load.h"
+#include "../memory/scaled_resolve.h"
 #include "texture.h"
 #include "texture_block.h"
 #include <rex/graphics/pipeline/texture/info.h>
@@ -45,7 +46,7 @@ texture_util::TextureGuestLayout TextureLoadInput::Layout() const {
 }
 bool NeedsCpuConversion(TextureFormat format, bool is_signed, bool num_format) {
   // RGBA4: the pinned D3D12 shaders target B4G4R4A4, not Native's exact RGBA8.
-  return format == TextureFormat::k_4_4_4_4 ||
+  return ExpandedTextureBlock(format) || ExpandedTextureComponents(format, num_format) || format == TextureFormat::k_4_4_4_4 ||
       (GetBaseFormat(format) == TextureFormat::k_2_10_10_10 && is_signed) ||
       (num_format && format == TextureFormat::k_16);
 }
@@ -183,16 +184,19 @@ TextureLoadPlan PlanGpuTextureLoad(const TextureLoadInput& t, LoadShader shader)
 }
 void ConvertTextureCpu(const TextureLoadInput& t, std::span<const uint8_t> base_source, std::span<const uint8_t> mip_source,
     std::span<const D3D12_PLACED_SUBRESOURCE_FOOTPRINT> footprints, uint8_t* linear) {
+  std::unique_lock<std::recursive_mutex> scaled_lock;
+  if (t.scaled) scaled_lock = GuestMemoryMirror::Lock();
   const auto layout = t.Layout();
   const FormatInfo* fi = FormatInfo::Get(t.format);
   const unsigned block = fi->bytes_per_block();
   const bool volume = t.dimension == DataDimension::k3D;
   const bool depth_texture = DepthFormat(t.format);
-  const bool integer16 = t.num_format && t.format == TextureFormat::k_16;
+  const bool expanded = ExpandedTextureComponents(t.format, t.num_format) != 0;
+  const bool expanded_block = ExpandedTextureBlock(t.format);
   const bool rgba4 = t.format == TextureFormat::k_4_4_4_4;
   const bool rgb10_signed = GetBaseFormat(t.format) == TextureFormat::k_2_10_10_10 && t.is_signed;
-  const unsigned host_block = (rgba4 && t.is_signed) || rgb10_signed ? 16 : integer16 || rgba4 ? 4 : block;
-  const bool raw = !depth_texture && !rgb10_signed && !rgba4 && !integer16;
+  const unsigned host_block = expanded_block || expanded || (rgba4 && t.is_signed) || rgb10_signed ? 16 : rgba4 ? 4 : block;
+  const bool raw = !depth_texture && !rgb10_signed && !rgba4 && !expanded && !expanded_block;
   const unsigned block_log2 = std::countr_zero(block);
   const unsigned levels = t.max_level + 1;
   const Endian endian = TextureBlockEndian(block, t.endian);
@@ -210,17 +214,22 @@ void ConvertTextureCpu(const TextureLoadInput& t, std::span<const uint8_t> base_
     for (unsigned slice = 0; slice < t.array_size; ++slice) {
     const size_t level_offset = size_t(address - (level ? mip_page : base_page)) + size_t(slice) * gl.array_slice_stride_bytes;
     const auto& footprint = footprints[level + slice * levels];
+    const unsigned host_bx = t.scaled ? footprint.Footprint.Width : bx;
+    const unsigned host_by = t.scaled ? footprint.Footprint.Height : by;
     for (unsigned z = 0; z < (t.host_volume ? std::max(1u, t.depth_or_slices >> level) : 1u); ++z)
-    for (unsigned y = 0; y < by; ++y) {
-      uint8_t* row = linear + footprint.Offset + (uint64_t(z) * by + y) * footprint.Footprint.RowPitch;
+    for (unsigned host_y = 0; host_y < host_by; ++host_y) {
+      const unsigned y = t.scaled ? uint64_t(host_y)*by/host_by : host_y;
+      const unsigned sample_y = t.scaled ? ((uint64_t(host_y)*by)%host_by)*t.scale_y/host_by : 0;
+      const unsigned host_rows = t.scaled ? host_by : expanded_block ? std::max(1u,t.height>>level) : by;
+      uint8_t* row = linear + footprint.Offset + (uint64_t(z) * host_rows + host_y * (expanded_block ? fi->block_height : 1)) * footprint.Footprint.RowPitch;
       const uint32_t linear_row = ((z + oz) * gl.z_slice_stride_block_rows + y + oy) * gl.row_pitch_bytes + ox * block;
       // Whole linear rows of 32/64/128-bit blocks are word aligned; the
       // per-word endian swap equals the per-byte address XOR below.
-      if (raw && !t.tiled && block >= 4 && !((level_offset + linear_row) & 3)) {
+      if (!t.scaled && raw && !t.tiled && block >= 4 && !((level_offset + linear_row) & 3)) {
         ReadTextureBlock(source, level_offset + linear_row, bx * block, endian, row);
         continue;
       }
-      if (raw && t.tiled && !volume) {
+      if (!t.scaled && raw && t.tiled && !volume) {
         const unsigned run = TiledContiguousBlocks(block_log2);
         for (unsigned x = 0; x < bx;) {
           const unsigned n = std::min(run - ((x + ox) & (run - 1)), bx - x);
@@ -230,16 +239,36 @@ void ConvertTextureCpu(const TextureLoadInput& t, std::span<const uint8_t> base_
         }
         continue;
       }
-      for (unsigned x = 0; x < bx; ++x) {
+      for (unsigned host_x = 0; host_x < host_bx; ++host_x) {
+      const unsigned x = t.scaled ? uint64_t(host_x)*bx/host_bx : host_x;
+      const unsigned sample_x = t.scaled ? ((uint64_t(host_x)*bx)%host_bx)*t.scale_x/host_bx : 0;
       uint32_t offset = t.tiled ? (volume ? uint32_t(texture_util::GetTiledOffset3D(x + ox, y + oy, z + oz,
           pitch_blocks, gl.z_slice_stride_block_rows, block_log2)) :
           texture_util::GetTiledOffset2D(x + ox, y + oy, pitch_blocks, block_log2)) :
           linear_row + x * block;
-      uint8_t* dest = row + size_t(x) * host_block;
-      if (raw) { ReadTextureBlock(source, level_offset + offset, block, endian, dest); continue; }
+      uint8_t* dest = row + size_t(host_x) * host_block;
+      auto read = [&](uint8_t* out) {
+        if (!t.scaled) { ReadTextureBlock(source, level_offset + offset, block, endian, out); return; }
+        const unsigned mask = endian == Endian::k8in16 ? 1 : endian == Endian::k8in32 ? 3 : endian == Endian::k16in32 ? 2 : 0;
+        for (unsigned b=0; b<block; ++b) {
+          const size_t relative=(level_offset+offset+b)^mask;
+          if (relative>=source.size()) throw std::runtime_error("Native scaled texture extent overflow");
+          out[b]=t.scaled->Read((level ? mip_page : base_page)+uint32_t(relative), sample_x+sample_y*t.scale_x, source[relative]);
+        }
+      };
+      if (raw) { read(dest); continue; }
       uint8_t texel[16];
-      ReadTextureBlock(source, level_offset + offset, block, endian, texel);
-      if (depth_texture) {
+      read(texel);
+      if (expanded_block) {
+        for (unsigned py=0;py<fi->block_height && y*fi->block_height+py<std::max(1u,t.height>>level);++py)
+          for (unsigned px=0;px<fi->block_width && x*fi->block_width+px<std::max(1u,t.width>>level);++px) {
+            const auto value=ExpandTextureBlockPixel(texel,t.format,py*fi->block_width+px,t.is_signed,t.num_format);
+            std::memcpy(row+uint64_t(py)*footprint.Footprint.RowPitch+(x*fi->block_width+px)*16,value.data(),16);
+          }
+      } else if (expanded) {
+        const auto values = ExpandTextureTexel(texel, t.format, t.is_signed, t.num_format);
+        std::memcpy(dest, values.data(), sizeof(values));
+      } else if (depth_texture) {
         uint32_t bits; std::memcpy(&bits, texel, 4);
         const float value = DecodeDepthTexture(bits, t.format == TextureFormat::k_24_8_FLOAT);
         std::memcpy(dest, &value, 4);

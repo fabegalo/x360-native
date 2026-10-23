@@ -1,6 +1,7 @@
 #include "d3d12_scanout.h"
 #include "scanout_source.h"
 #include <rex/ui/d3d12/d3d12_presenter.h>
+#include <rex/chrono/frame_layout.h>
 #include <d3dcompiler.h>
 #include <cstring>
 #include <stdexcept>
@@ -91,22 +92,40 @@ SampleCounts D3D12Scanout::ReadSampleCounts(bool counting_after) {
   return render_->ReadSampleCounts(counting_after);
 }
 void D3D12Scanout::Draw(const rex::graphics::RegisterFile& regs, rex::memory::Memory& memory, rex::graphics::Shader* vs, rex::graphics::Shader* ps,
-    rex::graphics::xenos::PrimitiveType primitive, uint32_t count, const DrawIndices* indices) {
+    rex::graphics::xenos::PrimitiveType primitive, uint32_t count, const DrawIndices* indices, DrawPurpose purpose) {
   if (!render_) render_ = std::make_unique<D3D12Render>(provider_);
-  render_->Draw(regs, memory, vs, ps, primitive, count, indices);
+  render_->Draw(regs, memory, vs, ps, primitive, count, indices, purpose);
+}
+void D3D12Scanout::SetSampleCounts(const SampleCounts& counts, bool visibility_only) {
+  if (!render_) render_ = std::make_unique<D3D12Render>(provider_);
+  render_->SetSampleCounts(counts, visibility_only);
 }
 void D3D12Scanout::Resolve(const rex::graphics::RegisterFile& regs, rex::memory::Memory& memory) {
   if (!render_) render_ = std::make_unique<D3D12Render>(provider_);
   render_->Resolve(regs, memory);
 }
-void D3D12Scanout::Present(rex::ui::Presenter& presenter, const ScanoutTexture& t,
-                         const void* pixels, const uint32_t* lut, const ScanoutOverlay* overlay,
-                         const void* overlay_pixels) {
-  if (render_) { render_->CountPresent(); render_->CompleteGuestWrites(kGuestSyncPresent, 0xFF); render_->Flush(D3D12Render::kFlushPresent); render_->EndFrame(); }
+void D3D12Scanout::Present(rex::ui::Presenter& presenter, const ScanoutTexture& input_texture,
+                         const void* input_pixels, const uint32_t* lut, const ScanoutOverlay* overlay,
+                         const void* overlay_pixels, ScanoutPostEffect post_effect) {
+  ScanoutTexture t = input_texture;
+  const void* pixels = input_pixels;
+  std::vector<uint8_t> scaled_pixels;
+  if (render_) {
+    render_->CountPresent();
+    render_->CompleteGuestWrites(kGuestSyncPresent, 0xFF);
+    render_->Flush(D3D12Render::kFlushPresent);
+    if (render_->PrepareScanout(input_texture, input_pixels, t, scaled_pixels)) pixels = scaled_pixels.data();
+    render_->EndFrame();
+  }
+  const auto display_aspect = rex::chrono::FrameLayout::DisplayAspect();
+  const uint32_t aspect_x = display_aspect.x ? display_aspect.x : input_texture.width;
+  const uint32_t aspect_y = display_aspect.y ? display_aspect.y : input_texture.height;
   const unsigned index = unsigned(serial_ % slots_.size());
   auto& slot = slots_[index];
   Wait(slot.serial);
   auto* device = provider_.GetDevice();
+  const bool fxaa = post_effect != ScanoutPostEffect::kNone;
+  if (fxaa && !fxaa_) fxaa_ = std::make_unique<D3D12Fxaa>(device);
   const uint64_t lut_offset = (uint64_t(t.bytes) + 255) & ~255ull;
   const uint32_t lut_bytes = (t.rgb10 ? 128 * 3 : 256) * sizeof(uint32_t);
   const uint64_t overlay_offset = (lut_offset + lut_bytes + 255) & ~255ull;
@@ -128,7 +147,7 @@ void D3D12Scanout::Present(rex::ui::Presenter& presenter, const ScanoutTexture& 
   std::memcpy(static_cast<uint8_t*>(mapped) + lut_offset, lut, lut_bytes);
   if (overlay) std::memcpy(static_cast<uint8_t*>(mapped) + overlay_offset, overlay_pixels, overlay->surface.bytes);
   slot.upload->Unmap(0, nullptr);
-  if (!presenter.RefreshGuestOutput(t.width, t.height, t.width, t.height,
+  if (!presenter.RefreshGuestOutput(t.width, t.height, aspect_x, aspect_y,
       [&](rex::ui::Presenter::GuestOutputRefreshContext& context) {
     using Presenter = rex::ui::d3d12::D3D12Presenter;
     context.SetIs8bpc(!t.rgb10);
@@ -139,11 +158,12 @@ void D3D12Scanout::Present(rex::ui::Presenter& presenter, const ScanoutTexture& 
     auto gpu = descriptors_->GetGPUDescriptorHandleForHeapStart();
     cpu.ptr += index * provider_.GetViewDescriptorSize();
     gpu.ptr += index * provider_.GetViewDescriptorSize();
+    auto* gamma_output = fxaa ? fxaa_->Begin(index, t.width, t.height, slot.list.Get()) : output;
     D3D12_UNORDERED_ACCESS_VIEW_DESC view{};
-    view.Format = Presenter::kGuestOutputFormat; view.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
-    device->CreateUnorderedAccessView(output, nullptr, &view, cpu);
+    view.Format = fxaa ? D3D12Fxaa::kFormat : Presenter::kGuestOutputFormat; view.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
+    device->CreateUnorderedAccessView(gamma_output, nullptr, &view, cpu);
     auto before = Transition(output, Presenter::kGuestOutputInternalState, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
-    slot.list->ResourceBarrier(1, &before);
+    if (!fxaa) slot.list->ResourceBarrier(1, &before);
     ID3D12DescriptorHeap* heaps[] = {descriptors_.Get()};
     slot.list->SetDescriptorHeaps(1, heaps);
     slot.list->SetComputeRootSignature(root_.Get());
@@ -152,7 +172,7 @@ void D3D12Scanout::Present(rex::ui::Presenter& presenter, const ScanoutTexture& 
     slot.list->SetComputeRootDescriptorTable(2, gpu);
     // Without a plane the overlay view aliases the title bytes and is never read.
     slot.list->SetComputeRootShaderResourceView(4, slot.upload->GetGPUVirtualAddress() + (overlay ? overlay_offset : 0));
-    uint32_t constants[24] = {t.width, t.height, t.pitch, t.tiled, t.endian, t.swizzle, t.rgb10, 0};
+    uint32_t constants[24] = {t.width, t.height, t.pitch, t.tiled, t.endian, t.swizzle, t.rgb10, uint32_t(fxaa)};
     if (overlay) {
       const auto& o = *overlay;
       const float scale[] = {float(o.display_width) / float(t.width), float(o.display_height) / float(t.height)};
@@ -164,8 +184,9 @@ void D3D12Scanout::Present(rex::ui::Presenter& presenter, const ScanoutTexture& 
     }
     slot.list->SetComputeRoot32BitConstants(3, 24, constants, 0);
     slot.list->Dispatch((t.width + 7) / 8, (t.height + 7) / 8, 1);
+    if (fxaa) fxaa_->Apply(index, slot.list.Get(), output, Presenter::kGuestOutputFormat, Presenter::kGuestOutputInternalState, post_effect == ScanoutPostEffect::kFxaaExtreme);
     auto after = Transition(output, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, Presenter::kGuestOutputInternalState);
-    slot.list->ResourceBarrier(1, &after);
+    if (!fxaa) slot.list->ResourceBarrier(1, &after);
     Check(slot.list->Close(), "close scanout list");
     ID3D12CommandList* lists[] = {slot.list.Get()};
     provider_.GetDirectQueue()->ExecuteCommandLists(1, lists);

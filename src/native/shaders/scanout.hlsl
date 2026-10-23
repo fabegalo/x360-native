@@ -8,7 +8,7 @@ ByteAddressBuffer overlay_pixels : register(t2);
 RWTexture2D<float4> output_image : register(u0);
 cbuffer Parameters : register(b0) {
   uint width, height, pitch, tiled;
-  uint endian, swizzle, rgb10, unused1;
+  uint endian, swizzle, rgb10, fxaa;
   // D1OVL plane, composed before gamma like the pinned Xenos display_overlay.
   uint overlay_enabled, overlay_width, overlay_height, overlay_pitch;
   uint overlay_tiled, overlay_endian, overlay_swizzle, overlay_rgb10;
@@ -76,7 +76,8 @@ void main(uint3 id : SV_DispatchThreadID) {
     if (((swizzle >> 3) & 7) == 5) i10.y = 1023;
     if (((swizzle >> 6) & 7) == 5) i10.z = 1023;
     if (overlay_enabled != 0) i10 = ComposedIndex(id.xy, float3(i10) / 1023.0, 1023.0);
-    output_image[id.xy] = float4(pwl(i10.x, 0), pwl(i10.y, 1), pwl(i10.z, 2), 1.0);
+    float3 color = float3(pwl(i10.x, 0), pwl(i10.y, 1), pwl(i10.z, 2));
+    output_image[id.xy] = float4(color, fxaa != 0 ? dot(color, float3(0.299, 0.587, 0.114)) : 1.0);
     return;
   }
   float4 c = float4(v & 255, (v >> 8) & 255, (v >> 16) & 255, v >> 24);
@@ -87,6 +88,7 @@ void main(uint3 id : SV_DispatchThreadID) {
   if (((swizzle >> 3) & 7) == 5) index.y = 255;
   if (((swizzle >> 6) & 7) == 5) index.z = 255;
   if (overlay_enabled != 0) index = ComposedIndex(id.xy, float3(index) / 255.0, 255.0);
-  output_image[id.xy] = float4(float3(lut[index.x] & 1023,
-      (lut[index.y] >> 10) & 1023, (lut[index.z] >> 20) & 1023) / 1023.0, 1.0);
+  float3 color = float3(lut[index.x] & 1023,
+      (lut[index.y] >> 10) & 1023, (lut[index.z] >> 20) & 1023) / 1023.0;
+  output_image[id.xy] = float4(color, fxaa != 0 ? dot(color, float3(0.299, 0.587, 0.114)) : 1.0);
 }

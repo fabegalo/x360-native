@@ -185,6 +185,8 @@ std::vector<uint32_t> CompileNativeGlsl(VkShaderStageFlagBits stage, std::string
     case VK_SHADER_STAGE_VERTEX_BIT: language = EShLangVertex; break;
     case VK_SHADER_STAGE_FRAGMENT_BIT: language = EShLangFragment; break;
     case VK_SHADER_STAGE_COMPUTE_BIT: language = EShLangCompute; break;
+    case VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT: language = EShLangTessControl; break;
+    case VK_SHADER_STAGE_GEOMETRY_BIT: language = EShLangGeometry; break;
     default: throw std::invalid_argument("Native Vulkan: unsupported host shader stage");
   }
   if (source.empty() || source.size() > size_t(std::numeric_limits<int>::max()))
@@ -193,7 +195,8 @@ std::vector<uint32_t> CompileNativeGlsl(VkShaderStageFlagBits stage, std::string
   std::call_once(initialized, [] {
     if (!glslang::InitializeProcess()) throw std::runtime_error("Native Vulkan: initialize glslang failed");
   });
-  // Only host presentation/compute shaders use GLSL. Set explicit portable
+  // Native host stages use GLSL; guest shaders use the shared translator.
+  // Set explicit portable
   // resource limits instead of depending on an optional glslang executable.
   TBuiltInResource limits{};
   limits.maxVertexAttribs = 16;
@@ -201,6 +204,17 @@ std::vector<uint32_t> CompileNativeGlsl(VkShaderStageFlagBits stage, std::string
   limits.maxVertexOutputVectors = limits.maxFragmentInputVectors = 16;
   limits.maxVaryingFloats = limits.maxVaryingComponents = 64;
   limits.maxVertexOutputComponents = limits.maxFragmentInputComponents = 64;
+  limits.maxGeometryInputComponents = limits.maxGeometryOutputComponents = 128;
+  limits.maxGeometryOutputVertices = 256;
+  limits.maxGeometryTotalOutputComponents = 1024;
+  limits.maxGeometryUniformComponents = 1024;
+  limits.maxClipDistances = limits.maxCullDistances = limits.maxCombinedClipAndCullDistances = 8;
+  limits.maxPatchVertices = 32;
+  limits.maxTessGenLevel = 64;
+  limits.maxTessControlInputComponents = limits.maxTessControlOutputComponents = 128;
+  limits.maxTessControlTotalOutputComponents = 4096;
+  limits.maxTessPatchComponents = 120;
+  limits.maxTessControlUniformComponents = 1024;
   limits.maxDrawBuffers = 8;
   limits.maxTextureImageUnits = limits.maxCombinedTextureImageUnits = 16;
   limits.maxImageUnits = limits.maxFragmentImageUniforms = limits.maxComputeImageUniforms = 8;

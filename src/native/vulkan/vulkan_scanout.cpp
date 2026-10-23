@@ -1,3 +1,4 @@
+#include <rex/chrono/frame_layout.h>
 #include "vulkan_scanout.h"
 #include "vulkan_scanout_source.h"
 #include <rex/ui/vulkan/presenter.h>
@@ -26,13 +27,14 @@ void VulkanScanout::Destroy() {
     slot.framebuffer = VK_NULL_HANDLE;
     slot.upload.reset();
   }
-  if (pipeline_) fn.vkDestroyPipeline(vk, pipeline_, nullptr);
-  if (render_pass_) fn.vkDestroyRenderPass(vk, render_pass_, nullptr);
+  fxaa_.reset();
+  for (auto pipeline : pipeline_) if (pipeline) fn.vkDestroyPipeline(vk, pipeline, nullptr);
+  for (auto pass : render_pass_) if (pass) fn.vkDestroyRenderPass(vk, pass, nullptr);
   if (pipeline_layout_) fn.vkDestroyPipelineLayout(vk, pipeline_layout_, nullptr);
   if (descriptors_pool_) fn.vkDestroyDescriptorPool(vk, descriptors_pool_, nullptr);
   if (descriptors_layout_) fn.vkDestroyDescriptorSetLayout(vk, descriptors_layout_, nullptr);
-  pipeline_ = VK_NULL_HANDLE;
-  render_pass_ = VK_NULL_HANDLE;
+  pipeline_.fill(VK_NULL_HANDLE);
+  render_pass_.fill(VK_NULL_HANDLE);
   pipeline_layout_ = VK_NULL_HANDLE;
   descriptors_pool_ = VK_NULL_HANDLE;
   descriptors_layout_ = VK_NULL_HANDLE;
@@ -86,7 +88,10 @@ void VulkanScanout::Initialize() {
   pass.pAttachments = &attachment;
   pass.subpassCount = 1;
   pass.pSubpasses = &subpass;
-  CheckVulkan(fn.vkCreateRenderPass(vk, &pass, nullptr, &render_pass_), "create scanout render pass");
+  for (unsigned i=0;i<2;++i) {
+    attachment.format = i ? VulkanFxaa::kFormat : Presenter::kGuestOutputFormat;
+    CheckVulkan(fn.vkCreateRenderPass(vk, &pass, nullptr, &render_pass_[i]), "create scanout render pass");
+  }
 
   VkShaderModule vertex = VK_NULL_HANDLE, fragment = VK_NULL_HANDLE;
   try {
@@ -133,8 +138,10 @@ void VulkanScanout::Initialize() {
     info.pColorBlendState = &blend;
     info.pDynamicState = &dynamic;
     info.layout = pipeline_layout_;
-    info.renderPass = render_pass_;
-    CheckVulkan(fn.vkCreateGraphicsPipelines(vk, VK_NULL_HANDLE, 1, &info, nullptr, &pipeline_), "create scanout graphics pipeline");
+    for (unsigned i=0;i<2;++i) {
+      info.renderPass = render_pass_[i];
+      CheckVulkan(fn.vkCreateGraphicsPipelines(vk, VK_NULL_HANDLE, 1, &info, nullptr, &pipeline_[i]), "create scanout graphics pipeline");
+    }
   } catch (...) {
     if (vertex) fn.vkDestroyShaderModule(vk, vertex, nullptr);
     if (fragment) fn.vkDestroyShaderModule(vk, fragment, nullptr);
@@ -146,7 +153,7 @@ void VulkanScanout::Initialize() {
 
 void VulkanScanout::Present(rex::ui::Presenter& presenter, const ScanoutTexture& texture,
                            const void* pixels, const uint32_t* lut, const ScanoutOverlay* overlay,
-                           const void* overlay_pixels) {
+                           const void* overlay_pixels, ScanoutPostEffect post_effect, uint32_t display_width, uint32_t display_height) {
   if (!pixels || !lut || !texture.width || !texture.height || !texture.bytes ||
       (overlay && (!overlay_pixels || !overlay->surface.bytes ||
                    !overlay->display_width || !overlay->display_height)))
@@ -156,6 +163,8 @@ void VulkanScanout::Present(rex::ui::Presenter& presenter, const ScanoutTexture&
       texture.bytes > device_.properties().maxStorageBufferRange ||
       (overlay && overlay->surface.bytes > device_.properties().maxStorageBufferRange))
     throw std::out_of_range("Native Vulkan: scanout exceeds host limits");
+  const bool fxaa = post_effect != ScanoutPostEffect::kNone;
+  if (fxaa && !fxaa_) fxaa_ = std::make_unique<VulkanFxaa>(device_);
   const auto slot_index = submissions_.current_slot();
   const auto commands = submissions_.Begin();
   auto& slot = slots_[slot_index];
@@ -188,23 +197,30 @@ void VulkanScanout::Present(rex::ui::Presenter& presenter, const ScanoutTexture&
   }
   const auto& fn = device_.functions();
   fn.vkUpdateDescriptorSets(device_.device(), 3, writes, 0, nullptr);
-  if (!presenter.RefreshGuestOutput(texture.width, texture.height, texture.width, texture.height,
+  const auto display_aspect = rex::chrono::FrameLayout::DisplayAspect();
+  const uint32_t aspect_x = display_aspect.x ? display_aspect.x : (display_width ? display_width : texture.width);
+  const uint32_t aspect_y = display_aspect.y ? display_aspect.y : (display_height ? display_height : texture.height);
+  if (!presenter.RefreshGuestOutput(texture.width, texture.height, aspect_x, aspect_y,
       [&](rex::ui::Presenter::GuestOutputRefreshContext& base_context) {
     auto& context = static_cast<Presenter::VulkanGuestOutputRefreshContext&>(base_context);
     context.SetIs8bpc(!texture.rgb10);
-    if (slot.image_version != context.image_version()) {
+    const bool recreate = slot.image_version != context.image_version() || slot.fxaa != fxaa ||
+        slot.width != texture.width || slot.height != texture.height;
+    if (recreate && slot.framebuffer) { fn.vkDestroyFramebuffer(device_.device(), slot.framebuffer, nullptr); slot.framebuffer = VK_NULL_HANDLE; }
+    const auto gamma_view = fxaa ? fxaa_->Begin(slot_index, texture.width, texture.height, commands) : context.image_view();
+    if (recreate) {
       if (slot.framebuffer) fn.vkDestroyFramebuffer(device_.device(), slot.framebuffer, nullptr);
       slot.framebuffer = VK_NULL_HANDLE;
-      const auto view = context.image_view();
+      const auto view = gamma_view;
       VkFramebufferCreateInfo info{VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO};
-      info.renderPass = render_pass_;
+      info.renderPass = render_pass_[fxaa];
       info.attachmentCount = 1;
       info.pAttachments = &view;
       info.width = texture.width;
       info.height = texture.height;
       info.layers = 1;
       CheckVulkan(fn.vkCreateFramebuffer(device_.device(), &info, nullptr, &slot.framebuffer), "create scanout framebuffer");
-      slot.image_version = context.image_version();
+      slot.image_version = context.image_version(); slot.width = texture.width; slot.height = texture.height; slot.fxaa = fxaa;
     }
     VkImageMemoryBarrier barrier{VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
     barrier.srcAccessMask = context.image_ever_written_previously() ? Presenter::kGuestOutputInternalAccessMask : 0;
@@ -214,21 +230,21 @@ void VulkanScanout::Present(rex::ui::Presenter& presenter, const ScanoutTexture&
     barrier.srcQueueFamilyIndex = barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
     barrier.image = context.image();
     barrier.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
-    fn.vkCmdPipelineBarrier(commands,
+    if (!fxaa) fn.vkCmdPipelineBarrier(commands,
         context.image_ever_written_previously() ? Presenter::kGuestOutputInternalStageMask : VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
         VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, 0, 0, nullptr, 0, nullptr, 1, &barrier);
     VkRenderPassBeginInfo pass{VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO};
-    pass.renderPass = render_pass_;
+    pass.renderPass = render_pass_[fxaa];
     pass.framebuffer = slot.framebuffer;
     pass.renderArea = {{0, 0}, {texture.width, texture.height}};
     fn.vkCmdBeginRenderPass(commands, &pass, VK_SUBPASS_CONTENTS_INLINE);
-    fn.vkCmdBindPipeline(commands, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline_);
+    fn.vkCmdBindPipeline(commands, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline_[fxaa]);
     fn.vkCmdBindDescriptorSets(commands, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline_layout_, 0, 1, &slot.descriptors, 0, nullptr);
     const VkViewport viewport{0.0f, 0.0f, float(texture.width), float(texture.height), 0.0f, 1.0f};
     fn.vkCmdSetViewport(commands, 0, 1, &viewport);
     fn.vkCmdSetScissor(commands, 0, 1, &pass.renderArea);
     uint32_t constants[24]{texture.width, texture.height, texture.pitch, texture.tiled,
-                           texture.endian, texture.swizzle, uint32_t(texture.rgb10), 0};
+                           texture.endian, texture.swizzle, uint32_t(texture.rgb10), uint32_t(fxaa)};
     if (overlay) {
       const auto& o = *overlay;
       const uint32_t plane[]{1, o.surface.width, o.surface.height, o.surface.pitch,
@@ -241,11 +257,13 @@ void VulkanScanout::Present(rex::ui::Presenter& presenter, const ScanoutTexture&
     fn.vkCmdPushConstants(commands, pipeline_layout_, VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(constants), constants);
     fn.vkCmdDraw(commands, 3, 1, 0, 0);
     fn.vkCmdEndRenderPass(commands);
+    if (fxaa) fxaa_->Apply(slot_index, commands, context.image(), context.image_view(),
+        context.image_ever_written_previously(), post_effect == ScanoutPostEffect::kFxaaExtreme);
     barrier.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
     barrier.dstAccessMask = Presenter::kGuestOutputInternalAccessMask;
     barrier.oldLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
     barrier.newLayout = Presenter::kGuestOutputInternalLayout;
-    fn.vkCmdPipelineBarrier(commands, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+    if (!fxaa) fn.vkCmdPipelineBarrier(commands, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
         Presenter::kGuestOutputInternalStageMask, 0, 0, nullptr, 0, nullptr, 1, &barrier);
     submissions_.Submit();
     return true;

@@ -8,7 +8,7 @@ namespace x360n::native {
 // lifetime and cache identity belong to Native, independently of Xenos.
 class VulkanShaderCache {
  public:
-  explicit VulkanShaderCache(const rex::ui::vulkan::VulkanDevice&, bool edram_interlock);
+  explicit VulkanShaderCache(const rex::ui::vulkan::VulkanDevice&, bool edram_interlock, uint32_t scale_x = 1, uint32_t scale_y = 1);
   ~VulkanShaderCache();
   VulkanShaderCache(const VulkanShaderCache&) = delete;
   VulkanShaderCache& operator=(const VulkanShaderCache&) = delete;

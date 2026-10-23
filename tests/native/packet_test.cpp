@@ -12,6 +12,7 @@ namespace x360n::native {
 unsigned guest_write_drains = 0, guest_range_reads = 0;
 uint32_t last_read_address = 0, last_read_length = 0;
 void CompleteGuestWritesBeforePacket(GuestSync, uint32_t) { ++guest_write_drains; }
+void WaitForIdleBeforePacket() { ++guest_write_drains; }
 void SyncGuestReadBeforePacket(uint32_t address, uint32_t length, uint32_t) {
   ++guest_range_reads; last_read_address = address; last_read_length = length;
 }

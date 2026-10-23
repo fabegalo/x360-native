@@ -1,4 +1,5 @@
 #include "d3d12_render.h"
+#include "d3d12_tessellation.h"
 #include "../shaders/rectangle_shader.h"
 #include "../shaders/point_shader.h"
 #include "../textures/texture_load.h"
@@ -37,7 +38,7 @@ const std::vector<uint8_t>& D3D12Render::RectangleShader(unsigned interpolators,
 }
 
 void D3D12Render::Draw(const RegisterFile& r, rex::memory::Memory& memory, Shader* vertex, Shader* pixel,
-    PrimitiveType primitive, uint32_t count, const DrawIndices* indices) {
+    PrimitiveType primitive, uint32_t count, const DrawIndices* indices, DrawPurpose purpose) {
   Timer timer(stats_enabled_, draw_ns_);
   Require(vertex, "missing vertex shader");
   auto& vs = *static_cast<DxbcShader*>(vertex);
@@ -81,13 +82,35 @@ void D3D12Render::Draw(const RegisterFile& r, rex::memory::Memory& memory, Shade
   }
   if (r.Get<reg::RB_MODECONTROL>().edram_mode == EdramMode::kDepthOnly) ps = nullptr;
   const bool polygon = draw_util::IsPrimitivePolygonal(r);
+  const auto face_mode = r.Get<reg::PA_SU_SC_MODE_CNTL>();
+  if (polygon && face_mode.poly_mode == PolygonModeEnable::kDualMode &&
+      face_mode.polymode_front_ptype != face_mode.polymode_back_ptype &&
+      !face_mode.cull_front && !face_mode.cull_back && draw_util::IsRasterizationPotentiallyDone(r, polygon)) {
+    // One host fill mode per pipeline. Both passes retain the original winding;
+    // only the first executes guest vertex memory exports.
+    auto pass = std::make_unique<RegisterFile>(r);
+    auto mode = face_mode; mode.cull_back = 1; mode.polymode_back_ptype = mode.polymode_front_ptype;
+    (*pass)[reg::PA_SU_SC_MODE_CNTL::register_index] = mode.value;
+    Draw(*pass, memory, vertex, pixel, primitive, count, indices, purpose);
+    mode = face_mode; mode.cull_front = 1; mode.polymode_front_ptype = mode.polymode_back_ptype;
+    (*pass)[reg::PA_SU_SC_MODE_CNTL::register_index] = mode.value;
+    const auto second_purpose = purpose == DrawPurpose::kGuest || purpose == DrawPurpose::kGuestWithoutVertexExports
+        ? DrawPurpose::kGuestWithoutVertexExports : DrawPurpose::kVisibility;
+    Draw(*pass, memory, vertex, pixel, primitive, count, indices, second_purpose);
+    return;
+  }
+  const auto fill = polygon && face_mode.poly_mode == PolygonModeEnable::kDualMode
+      ? (face_mode.cull_front ? face_mode.polymode_back_ptype : face_mode.polymode_front_ptype)
+      : PolygonType::kTriangles;
+
   const bool rasterization = draw_util::IsRasterizationPotentiallyDone(r, polygon);
-  if (!count || (!rasterization && !vs.memexport_eM_written())) return;
+  if (!count || (!rasterization && !(purpose != DrawPurpose::kVisibility && purpose != DrawPurpose::kGuestWithoutVertexExports && vs.memexport_eM_written()))) return;
   if (!rasterization) ps = nullptr;
-  const bool memexport = vs.memexport_eM_written() || (ps && ps->memexport_eM_written());
+  const bool vertex_export = purpose != DrawPurpose::kVisibility && purpose != DrawPurpose::kGuestWithoutVertexExports && vs.memexport_eM_written();
+  const bool memexport = vertex_export || (ps && ps->memexport_eM_written());
   std::vector<MemExportRange> memexport_ranges;
   if (memexport) {
-    for (auto* shader : {&vs, ps}) if (shader && shader->memexport_eM_written()) {
+    for (auto* shader : {&vs, ps}) if (shader && shader->memexport_eM_written() && (shader != &vs || vertex_export)) {
       auto [entry, inserted] = memexport_addresses_known_.try_emplace(shader, false);
       if (inserted) entry->second = MemExportAddressesKnown(*shader);
       AddMemExportRanges(r, *shader, entry->second, memexport_ranges);
@@ -97,33 +120,35 @@ void D3D12Render::Draw(const RegisterFile& r, rex::memory::Memory& memory, Shade
     for (const auto& range : memexport_ranges) readback_bytes += (uint64_t(range.length) + 255) & ~uint64_t(255);
     ReserveReadback(readback_bytes);
   }
-  Require(r.Get<reg::VGT_OUTPUT_PATH_CNTL>().path_select != VGTOutputPath::kTessellationEnable, "tessellation not implemented");
+  const auto tess = GetTessellation(r, primitive);
   const auto msaa = rasterization ? r.Get<reg::RB_SURFACE_INFO>().msaa_samples : MsaaSamples::k1X;
   Require(msaa <= MsaaSamples::k4X, "invalid MSAA sample count");
   const bool point = rasterization && primitive == PrimitiveType::kPointList;
-  const bool fan = rasterization && primitive == PrimitiveType::kTriangleFan;
-  const bool quad = rasterization && primitive == PrimitiveType::kQuadList;
-  if (rasterization && primitive != PrimitiveType::kTriangleList && primitive != PrimitiveType::kTriangleStrip &&
-      primitive != PrimitiveType::kRectangleList && !fan && !quad && !point)
+  const bool line = rasterization && IsLinePrimitive(primitive);
+  const bool convert = rasterization && !tess && NeedsPrimitiveConversion(primitive);
+  if (rasterization && !tess && primitive != PrimitiveType::kTriangleList && primitive != PrimitiveType::kTriangleStrip &&
+      primitive != PrimitiveType::kRectangleList && !convert && !line && !point && primitive != PrimitiveType::k2DTriStrip)
     throw std::runtime_error("Native draw: primitive conversion not implemented (primitive=" +
         std::to_string(uint32_t(primitive)) + ", count=" + std::to_string(count) + ")");
   if (view_count_ > 60000 || sampler_count_ > 1700 || transient_.size() > 5000) Flush(kFlushCapacity);
   auto program = r.Get<reg::SQ_PROGRAM_CNTL>();
   uint32_t param = kMaxInterpolators;
   auto mask = ps ? vs.writes_interpolators() & ps->GetInterpolatorInputMask(program, r.Get<reg::SQ_CONTEXT_MISC>(), param) : 0;
-  T::Modification vm(shaders.translator.GetDefaultVertexShaderModification(vs.GetDynamicAddressableRegisterCount(program.vs_num_reg)));
+  T::Modification vm(shaders.translator.GetDefaultVertexShaderModification(vs.GetDynamicAddressableRegisterCount(program.vs_num_reg), tess ? tess.host : Shader::HostVertexShaderType::kVertex));
   T::Modification pm(shaders.translator.GetDefaultPixelShaderModification(ps ? ps->GetDynamicAddressableRegisterCount(program.ps_num_reg) : 0));
-  if (vs.memexport_eM_written() && !memexport_addresses_known_.at(&vs)) vm.value |= T::Modification::kMemExportDynamicAddress;
+  if (vertex_export && !memexport_addresses_known_.at(&vs)) vm.value |= T::Modification::kMemExportDynamicAddress;
   if (ps && ps->memexport_eM_written() && !memexport_addresses_known_.at(ps)) pm.value |= T::Modification::kMemExportDynamicAddress;
+  if ((purpose == DrawPurpose::kVisibility || purpose == DrawPurpose::kGuestWithoutVertexExports)) vm.value |= T::Modification::kMemExportDisabled;
   pm.pixel.rov_sample_counts = sample_counting_;
+  if (r.Get<reg::PA_SU_SC_MODE_CNTL>().persp_corr_dis) pm.value |= T::Modification::kInterpolatorNoPerspective;
   vm.vertex.interpolator_mask = pm.pixel.interpolator_mask = mask;
   pm.pixel.interpolators_centroid = mask & ~GetInterpolatorSamplingPattern(msaa, r.Get<reg::SQ_CONTEXT_MISC>().sc_sample_cntl, r.Get<reg::SQ_INTERPOLATOR_CNTL>().sampling_pattern);
   auto clip = r.Get<reg::PA_CL_CLIP_CNTL>();
   unsigned planes = !rasterization || clip.clip_disable ? 0 : clip.ucp_ena;
   vm.vertex.user_clip_plane_count = std::popcount(planes);
   vm.vertex.user_clip_plane_cull = planes && clip.ucp_cull_only_ena;
-  Require(primitive != PrimitiveType::kRectangleList || !vm.vertex.user_clip_plane_cull, "rectangle cull planes not implemented");
-  Require(!rasterization || point || !vs.writes_point_size_edge_flag_kill_vertex(), "point/vertex kill exports not implemented");
+  vm.vertex.vertex_kill_and = (vs.writes_point_size_edge_flag_kill_vertex() & 4) && !clip.vtx_kill_or;
+  if (point || fill == PolygonType::kPoints) vm.vertex.output_point_size = (vs.writes_point_size_edge_flag_kill_vertex() & 1) != 0;
   if (point) {
     vm.vertex.point_ps_ucp_mode = clip.ps_ucp_mode;
     vm.vertex.output_point_size = (vs.writes_point_size_edge_flag_kill_vertex() & 1) != 0;
@@ -131,17 +156,16 @@ void D3D12Render::Draw(const RegisterFile& r, rex::memory::Memory& memory, Shade
     pm.pixel.param_gen_point = param < kMaxInterpolators;
   }
   if (param < kMaxInterpolators) { pm.pixel.param_gen_enable = 1; pm.pixel.param_gen_interpolator = param; }
-  D3D12_GRAPHICS_PIPELINE_STATE_DESC pd{}; pd.pRootSignature = root_.Get();
+  D3D12_GRAPHICS_PIPELINE_STATE_DESC pd{}; pd.pRootSignature = tess ? root_tess_.Get() : root_.Get();
   {
   Timer shader_timer(stats_enabled_, shader_ns_);
   auto* vt = shaders.Translate(vs, vm.value);
   pd.VS = {vt->translated_binary().data(), vt->translated_binary().size()};
   if (ps) { auto* pt = shaders.Translate(*ps, pm.value); pd.PS = {pt->translated_binary().data(), pt->translated_binary().size()}; }
-  else if (rasterization) { auto& depth_shader = depth_shaders_[sample_counting_]; if (depth_shader.empty()) depth_shader = shaders.translator.CreateDepthOnlyPixelShader(sample_counting_); pd.PS = {depth_shader.data(), depth_shader.size()}; }
-  if (rasterization && primitive == PrimitiveType::kRectangleList) { const auto& gs = RectangleShader(std::popcount(mask), std::popcount(planes)); pd.GS = {gs.data(), gs.size()}; }
-  if (point) {
+  else if (rasterization) { auto& depth_shader = depth_shaders_[visibility_only_ ? 2 : sample_counting_]; if (depth_shader.empty()) depth_shader = shaders.translator.CreateDepthOnlyPixelShader(sample_counting_, visibility_only_); pd.PS = {depth_shader.data(), depth_shader.size()}; }
+  if (point || (rasterization && primitive == PrimitiveType::kRectangleList)) {
     GeometryShaderKey key;
-    key.type = PipelineGeometryShader::kPointList;
+    key.type = point ? PipelineGeometryShader::kPointList : PipelineGeometryShader::kRectangleList;
     key.interpolator_count = std::popcount(mask);
     key.user_clip_plane_count = vm.vertex.user_clip_plane_count;
     key.user_clip_plane_cull = vm.vertex.user_clip_plane_cull;
@@ -154,14 +178,22 @@ void D3D12Render::Draw(const RegisterFile& r, rex::memory::Memory& memory, Shade
     pd.GS = {gs.data(), gs.size() * sizeof(uint32_t)};
   }
   }
+  if (rasterization && fill == PolygonType::kPoints) {
+    const unsigned clip_count = vm.vertex.user_clip_plane_cull ? 0 : vm.vertex.user_clip_plane_count;
+    const unsigned cull_count = (vm.vertex.user_clip_plane_cull ? vm.vertex.user_clip_plane_count : 0) + vm.vertex.vertex_kill_and;
+    const unsigned key = std::popcount(mask) | (clip_count << 5) | (cull_count << 9) | (vm.vertex.output_point_size << 13);
+    auto& gs = polygon_points_[key];
+    if (gs.empty()) gs = CompilePolygonPointShader(std::popcount(mask), clip_count, cull_count, vm.vertex.output_point_size);
+    pd.GS = {gs.data(), gs.size()};
+  }
+  if (tess) SetTessellationStages(pd, tess);
   pd.SampleMask = UINT_MAX; pd.SampleDesc.Count = 1;
-  pd.PrimitiveTopologyType = !rasterization || point ? D3D12_PRIMITIVE_TOPOLOGY_TYPE_POINT : D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
+  pd.PrimitiveTopologyType = tess ? D3D12_PRIMITIVE_TOPOLOGY_TYPE_PATCH : !rasterization || point ? D3D12_PRIMITIVE_TOPOLOGY_TYPE_POINT : line ? D3D12_PRIMITIVE_TOPOLOGY_TYPE_LINE : D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
   auto mode = r.Get<reg::PA_SU_SC_MODE_CNTL>();
-  Require(!rasterization || !mode.persp_corr_dis, "non-perspective interpolation not implemented");
   // Restart is applied to CPU-normalized indices below.
-  Require(!rasterization || mode.poly_mode != PolygonModeEnable::kDualMode || (mode.polymode_front_ptype == PolygonType::kTriangles && mode.polymode_back_ptype == PolygonType::kTriangles), "non-solid polygon fill not implemented");
+
   // Polygon offset is applied by the translated ROV depth test (constants below).
-  pd.RasterizerState.FillMode = D3D12_FILL_MODE_SOLID;
+  pd.RasterizerState.FillMode = fill == PolygonType::kLines ? D3D12_FILL_MODE_WIREFRAME : D3D12_FILL_MODE_SOLID;
   pd.RasterizerState.CullMode = !rasterization || !polygon ? D3D12_CULL_MODE_NONE : mode.cull_front ? D3D12_CULL_MODE_FRONT : mode.cull_back ? D3D12_CULL_MODE_BACK : D3D12_CULL_MODE_NONE;
   pd.RasterizerState.FrontCounterClockwise = !mode.face;
   pd.RasterizerState.DepthClipEnable = !clip.clip_disable;
@@ -240,7 +272,7 @@ void D3D12Render::Draw(const RegisterFile& r, rex::memory::Memory& memory, Shade
     for (auto* shader : {&vs, ps}) if (shader)
       for (const auto& t : shader->GetTextureBindingsAfterTranslation()) {
         auto f = r.GetTextureFetch(t.fetch_constant);
-        if (!TextureViewActive(f, t.dimension, t.is_signed) || (!texture_cpu_ && !NeedsCpuConversion(f.format, t.is_signed, f.num_format))) continue;
+        if (!TextureViewActive(f, t.dimension, t.is_signed) || (!texture_cpu_ && !scaled_.enabled() && !NeedsCpuConversion(f.format, t.is_signed, f.num_format))) continue;
         uint32_t wm, hm, dm, base, mip, lo, hi;
         texture_util::GetSubresourcesFromFetchConstant(f, &wm, &hm, &dm, &base, &mip, &lo, &hi);
         // Same extents BindTextures reads (all levels, conservatively).
@@ -278,10 +310,9 @@ void D3D12Render::Draw(const RegisterFile& r, rex::memory::Memory& memory, Shade
     Require(indices->count * (indices->format == IndexFormat::kInt16 ? 2ull : 4ull) <= indices->length, "index count outside buffer");
     Require(uint64_t(indices->guest_base) + indices->length <= 0x20000000 && count <= indices->count, "index physical extent invalid");
   }
-  if (indices || fan || quad) {
-    if ((fan || quad) && count < 3) return;
+  if (indices || convert) {
     std::vector<uint32_t> expanded;
-    expanded.reserve((fan || quad) ? size_t(count) * 3 : count);
+    expanded.reserve(count);
     auto index = [&](uint32_t i) {
       if (!indices) return i;
       uint32_t value = 0;
@@ -303,7 +334,7 @@ void D3D12Render::Draw(const RegisterFile& r, rex::memory::Memory& memory, Shade
     // With no rasterization, the VS still runs for every submitted vertex,
     // including incomplete polygons. Point draws preserve those invocations
     // without assembling/culling guest triangles or creating pixel work.
-    auto converted = rasterization
+    auto converted = tess ? VertexOnlyIndices(expanded, primitive, false, 0) : rasterization
         ? ConvertIndices(expanded, primitive, indices && mode.multi_prim_ib_ena,
             r.Get<reg::VGT_MULTI_PRIM_IB_RESET_INDX>().reset_indx)
         : VertexOnlyIndices(expanded, primitive, indices && mode.multi_prim_ib_ena,
@@ -316,6 +347,7 @@ void D3D12Render::Draw(const RegisterFile& r, rex::memory::Memory& memory, Shade
     count = uint32_t(expanded.size());
   }
   // Texture loads record uploads and compute work: before the draw state.
+  textures_resolution_scaled_ = 0;
   TextureTables pixel_tables, vertex_tables;
   if (ps) pixel_tables = BindTextures(r, memory, *ps);
   vertex_tables = BindTextures(r, memory, vs);
@@ -325,7 +357,7 @@ void D3D12Render::Draw(const RegisterFile& r, rex::memory::Memory& memory, Shade
   if (edram_state_ != D3D12_RESOURCE_STATE_UNORDERED_ACCESS) edram_rov_layout_.reset();
   Transition(edram_.Get(), edram_state_, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
   ID3D12DescriptorHeap* heaps[]{views_.Get(), samplers_.Get()}; list_->SetDescriptorHeaps(2, heaps);
-  list_->SetGraphicsRootSignature(root_.Get()); list_->SetPipelineState(pipeline.Get());
+  list_->SetGraphicsRootSignature(pd.pRootSignature); list_->SetPipelineState(pipeline.Get());
   unsigned base = Views(3);
   D3D12_SHADER_RESOURCE_VIEW_DESC srv{}; srv.Format = DXGI_FORMAT_R32_TYPELESS;
   srv.ViewDimension = D3D12_SRV_DIMENSION_BUFFER; srv.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
@@ -334,19 +366,27 @@ void D3D12Render::Draw(const RegisterFile& r, rex::memory::Memory& memory, Shade
   D3D12_UNORDERED_ACCESS_VIEW_DESC uav{}; uav.Format = DXGI_FORMAT_R32_TYPELESS; uav.ViewDimension = D3D12_UAV_DIMENSION_BUFFER;
   uav.Buffer.NumElements = 0x20000000 / 4; uav.Buffer.Flags = D3D12_BUFFER_UAV_FLAG_RAW;
   device_->CreateUnorderedAccessView(memexport ? memory_.Get() : nullptr, nullptr, &uav, Cpu(base + 1));
-  uav.Format = DXGI_FORMAT_R32_UINT; uav.Buffer.NumElements = kEdramSizeBytes / 4 + 8; uav.Buffer.Flags = D3D12_BUFFER_UAV_FLAG_NONE;
+  uav.Format = DXGI_FORMAT_R32_UINT; uav.Buffer.NumElements = UINT(edram_size_ / 4) + 8; uav.Buffer.Flags = D3D12_BUFFER_UAV_FLAG_NONE;
   device_->CreateUnorderedAccessView(edram_.Get(), nullptr, &uav, Cpu(base + 2));
   list_->SetGraphicsRootDescriptorTable(5, Gpu(base));
   auto depth = draw_util::GetNormalizedDepthControl(r);
   draw_util::ViewportInfo viewport{{0, 0}, {1, 1}, 0, 1, {1, 1, 1}, {0, 0, 0}};
-  if (rasterization) draw_util::GetHostViewportInfo(r, 1, 1, true, D3D12_VIEWPORT_BOUNDS_MAX, D3D12_VIEWPORT_BOUNDS_MAX, false, depth, false, false, ps && ps->writes_depth(), viewport);
+  if (rasterization) draw_util::GetHostViewportInfo(r, scale_x_, scale_y_, true, D3D12_VIEWPORT_BOUNDS_MAX, D3D12_VIEWPORT_BOUNDS_MAX, false, depth, false, false, ps && ps->writes_depth(), viewport);
   D3D12_VIEWPORT vp{float(viewport.xy_offset[0]), float(viewport.xy_offset[1]), float(viewport.xy_extent[0]), float(viewport.xy_extent[1]), viewport.z_min, viewport.z_max};
   list_->RSSetViewports(1, &vp);
   draw_util::Scissor sc{{0, 0}, {0, 0}}; if (rasterization) draw_util::GetScissor(r, sc);
-  D3D12_RECT rect{LONG(sc.offset[0]), LONG(sc.offset[1]), LONG(sc.offset[0] + sc.extent[0]), LONG(sc.offset[1] + sc.extent[1])};
+  D3D12_RECT rect{LONG(sc.offset[0] * scale_x_), LONG(sc.offset[1] * scale_y_),
+      LONG((sc.offset[0] + sc.extent[0]) * scale_x_), LONG((sc.offset[1] + sc.extent[1]) * scale_y_)};
   list_->RSSetScissorRects(1, &rect);
   T::SystemConstants c{};
-  if (point) SetPointConstants(r, viewport, c);
+  c.textures_resolution_scaled = textures_resolution_scaled_;
+  c.tessellation_factor_range[0] = r.Get<float>(XE_GPU_REG_VGT_HOS_MIN_TESS_LEVEL) + 1.0f;
+  c.tessellation_factor_range[1] = r.Get<float>(XE_GPU_REG_VGT_HOS_MAX_TESS_LEVEL) + 1.0f;
+  if (point || fill == PolygonType::kPoints) {
+    SetPointConstants(r, viewport, c);
+    c.point_screen_diameter_to_ndc_radius[0] *= float(scale_x_);
+    c.point_screen_diameter_to_ndc_radius[1] *= float(scale_y_);
+  }
   for (unsigned i = 0, packed = 0; i < 6; ++i) if (planes & (1u << i)) {
     std::memcpy(c.user_clip_planes[packed++], &r[XE_GPU_REG_PA_CL_UCP_0_X + i * 4], 16);
   }
@@ -355,7 +395,8 @@ void D3D12Render::Draw(const RegisterFile& r, rex::memory::Memory& memory, Shade
   auto vte = r.Get<reg::PA_CL_VTE_CNTL>(); auto color = r.Get<reg::RB_COLORCONTROL>();
   c.flags = (vte.vtx_xy_fmt ? T::kSysFlag_XYDividedByW : 0) | (vte.vtx_z_fmt ? T::kSysFlag_ZDividedByW : 0) |
       (vte.vtx_w0_fmt ? T::kSysFlag_WNotReciprocal : 0) | (polygon ? T::kSysFlag_PrimitivePolygonal : 0) |
-      (memexport ? T::kSysFlag_SharedMemoryIsUAV : 0);
+      (memexport ? T::kSysFlag_SharedMemoryIsUAV : 0) |
+      (draw_util::IsPrimitiveLine(r) ? T::kSysFlag_PrimitiveLine : 0);
   auto alpha = color.alpha_test_enable ? color.alpha_func : CompareFunction::kAlways;
   c.flags |= uint32_t(alpha) << T::kSysFlag_AlphaPassIfLess_Shift;
   c.alpha_test_reference = r.Get<float>(XE_GPU_REG_RB_ALPHA_REF);
@@ -368,12 +409,12 @@ void D3D12Render::Draw(const RegisterFile& r, rex::memory::Memory& memory, Shade
   std::memcpy(c.ndc_offset, viewport.ndc_offset, sizeof(c.ndc_offset));
   c.sample_count_log2[0] = msaa >= MsaaSamples::k4X;
   c.sample_count_log2[1] = msaa >= MsaaSamples::k2X;
-  c.edram_32bpp_tile_pitch_dwords_scaled = (((r.Get<reg::RB_SURFACE_INFO>().surface_pitch << c.sample_count_log2[0]) + 79) / 80) * 1280;
+  c.edram_32bpp_tile_pitch_dwords_scaled = (((r.Get<reg::RB_SURFACE_INFO>().surface_pitch << c.sample_count_log2[0]) + 79) / 80) * 1280 * scale_x_ * scale_y_;
   const auto color_mask = draw_util::GetNormalizedColorMask(r, ps ? ps->writes_color_targets() : 0);
   for (unsigned i = 0; i < 4; ++i) {
     auto info = r.Get<reg::RB_COLOR_INFO>(reg::RB_COLOR_INFO::rt_register_indices[i]);
     c.color_exp_bias[i] = std::ldexp(1.0f, info.color_exp_bias);
-    c.edram_rt_base_dwords_scaled[i] = info.color_base * 1280;
+    c.edram_rt_base_dwords_scaled[i] = info.color_base * 1280 * scale_x_ * scale_y_;
     c.edram_rt_format_flags[i] = RenderTargetCache::AddPSIColorFormatFlags(info.color_format);
     RenderTargetCache::GetPSIColorFormatInfo(info.color_format, (color_mask >> (i * 4)) & 15,
         c.edram_rt_clamp[i][0], c.edram_rt_clamp[i][1], c.edram_rt_clamp[i][2], c.edram_rt_clamp[i][3], c.edram_rt_keep_mask[i][0], c.edram_rt_keep_mask[i][1]);
@@ -381,7 +422,7 @@ void D3D12Render::Draw(const RegisterFile& r, rex::memory::Memory& memory, Shade
     c.edram_blend_constant[i] = r.Get<float>(XE_GPU_REG_RB_BLEND_RED + i);
     if (info.color_format == ColorRenderTargetFormat::k_8_8_8_8_GAMMA) c.flags |= T::kSysFlag_ConvertColor0ToGamma << i;
   }
-  auto di = r.Get<reg::RB_DEPTH_INFO>(); c.edram_depth_base_dwords_scaled = di.depth_base * 1280;
+  auto di = r.Get<reg::RB_DEPTH_INFO>(); c.edram_depth_base_dwords_scaled = di.depth_base * 1280 * scale_x_ * scale_y_;
   if (di.depth_format == DepthRenderTargetFormat::kD24FS8) c.flags |= T::kSysFlag_DepthFloat24;
   // As in the pinned ROV path: depth/stencil aliasing a written color target
   // is disabled rather than corrupting that target.
@@ -392,11 +433,11 @@ void D3D12Render::Draw(const RegisterFile& r, rex::memory::Memory& memory, Shade
   // Front offset applies to non-polygons only with POLY_OFFSET_PARA_ENABLE.
   const bool para = !polygon && mode.poly_offset_para_enable;
   if ((polygon && mode.poly_offset_front_enable) || para) {
-    c.edram_poly_offset_front_scale = r.Get<float>(XE_GPU_REG_PA_SU_POLY_OFFSET_FRONT_SCALE) * kPolygonOffsetScaleSubpixelUnit;
+    c.edram_poly_offset_front_scale = r.Get<float>(XE_GPU_REG_PA_SU_POLY_OFFSET_FRONT_SCALE) * kPolygonOffsetScaleSubpixelUnit * float(std::max(scale_x_, scale_y_));
     c.edram_poly_offset_front_offset = r.Get<float>(XE_GPU_REG_PA_SU_POLY_OFFSET_FRONT_OFFSET);
   }
   if (polygon && mode.poly_offset_back_enable) {
-    c.edram_poly_offset_back_scale = r.Get<float>(XE_GPU_REG_PA_SU_POLY_OFFSET_BACK_SCALE) * kPolygonOffsetScaleSubpixelUnit;
+    c.edram_poly_offset_back_scale = r.Get<float>(XE_GPU_REG_PA_SU_POLY_OFFSET_BACK_SCALE) * kPolygonOffsetScaleSubpixelUnit * float(std::max(scale_x_, scale_y_));
     c.edram_poly_offset_back_offset = r.Get<float>(XE_GPU_REG_PA_SU_POLY_OFFSET_BACK_OFFSET);
   } else if (para) {
     c.edram_poly_offset_back_scale = c.edram_poly_offset_front_scale;
@@ -451,8 +492,8 @@ void D3D12Render::Draw(const RegisterFile& r, rex::memory::Memory& memory, Shade
   list_->SetGraphicsRootDescriptorTable(7, Gpu(0, true));
   list_->SetGraphicsRootDescriptorTable(9, Gpu(0));
   list_->OMSetRenderTargets(0, nullptr, FALSE, nullptr);
-  list_->IASetPrimitiveTopology(!rasterization || point ? D3D_PRIMITIVE_TOPOLOGY_POINTLIST : primitive == PrimitiveType::kTriangleStrip ? D3D_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP : D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-  if (indices || fan || quad) { list_->IASetIndexBuffer(&ib); for (const auto& range : index_ranges) list_->DrawIndexedInstanced(range.count, 1, range.offset, 0, 0); }
+  list_->IASetPrimitiveTopology(tess ? D3D_PRIMITIVE_TOPOLOGY(D3D_PRIMITIVE_TOPOLOGY_1_CONTROL_POINT_PATCHLIST + tess.control_points - 1) : !rasterization || point ? D3D_PRIMITIVE_TOPOLOGY_POINTLIST : line ? D3D_PRIMITIVE_TOPOLOGY_LINELIST : (primitive == PrimitiveType::kTriangleStrip || primitive == PrimitiveType::k2DTriStrip) ? D3D_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP : D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+  if (indices || convert) { list_->IASetIndexBuffer(&ib); for (const auto& range : index_ranges) list_->DrawIndexedInstanced(range.count, 1, range.offset, 0, 0); }
   else list_->DrawInstanced(count, 1, 0, 0);
   for (const auto& range : memexport_ranges) QueueGuestWrite(range.address, range.length);
   ++draw_count_;

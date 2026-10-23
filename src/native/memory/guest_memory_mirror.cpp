@@ -71,15 +71,32 @@ void GuestMemoryMirror::Fire(uint32_t page_first, uint32_t page_last, bool by_gp
     bucket.resize(kept);
   }
 }
-void GuestMemoryMirror::MakeValid(uint32_t start, uint32_t length, bool by_gpu, std::vector<uint64_t>* cpu_generations) {
+void GuestMemoryMirror::MakeValid(uint32_t start, uint32_t length, bool by_gpu, std::vector<uint64_t>* cpu_generations,
+    std::span<const uint64_t> snapshot_generations) {
   const uint32_t first = start >> page_log2_, last = (start + length - 1) >> page_log2_;
   {
     auto lock = Lock();
-    if (cpu_generations) cpu_generations->assign(cpu_generations_.begin() + first, cpu_generations_.begin() + last + 1);
+    if (by_gpu) Fire(first, last, true);
+    if (!snapshot_generations.empty() && snapshot_generations.size()!=last-first+1)
+      throw std::logic_error("Native mirror: snapshot epoch extent mismatch");
+    if (cpu_generations) {
+      if (snapshot_generations.empty()) cpu_generations->assign(cpu_generations_.begin()+first,cpu_generations_.begin()+last+1);
+      else cpu_generations->assign(snapshot_generations.begin(),snapshot_generations.end());
+    }
     for (uint32_t i = first >> 6; i <= last >> 6; ++i) {
       const uint64_t mask = BlockMask(i, first, last);
       std::atomic_ref(valid_[i]).fetch_or(mask, std::memory_order_relaxed);
       gpu_written_[i] = by_gpu ? gpu_written_[i] | mask : gpu_written_[i] & ~mask;
+      // A CPU write after a staged resolve snapshot wins, even if it preceded
+      // publication of the GPU write. Keep that page invalid so the next GPU
+      // reader uploads the newer CPU bytes after this recorded GPU work.
+      if (!snapshot_generations.empty()) {
+        uint64_t stale=0;
+        for (uint32_t page=std::max(first,i*64);page<=std::min(last,i*64+63);++page)
+          if (snapshot_generations[page-first]!=cpu_generations_[page]) stale|=uint64_t(1)<<(page&63);
+        std::atomic_ref(valid_[i]).fetch_and(~stale,std::memory_order_relaxed);
+        gpu_written_[i]&=~stale;
+      }
     }
   }
   // Outside the region: heap locks are taken before it by guest faults.
@@ -120,11 +137,11 @@ void GuestMemoryMirror::RequestRange(uint32_t start, uint32_t length) {
     uploaded_bytes_ += uint64_t(count) << page_log2_;
   }
 }
-void GuestMemoryMirror::RangeWrittenByGpu(uint32_t start, uint32_t length, std::vector<uint64_t>* cpu_generations) {
+void GuestMemoryMirror::RangeWrittenByGpu(uint32_t start, uint32_t length, std::vector<uint64_t>* cpu_generations,
+    std::span<const uint64_t> snapshot_generations) {
   if (!length || start >= kSize) return;
   length = std::min(length, kSize - start);
-  Fire(start >> page_log2_, (start + length - 1) >> page_log2_, true);
-  MakeValid(start, length, true, cpu_generations);
+  MakeValid(start, length, true, cpu_generations, snapshot_generations);
 }
 void GuestMemoryMirror::CopyReadbackToGuest(uint32_t start, const uint8_t* source, uint32_t length,
     std::span<const uint64_t> cpu_generations) {
@@ -147,6 +164,19 @@ void GuestMemoryMirror::CopyReadbackToGuest(uint32_t start, const uint8_t* sourc
       std::memcpy(memory_.TranslatePhysical(address), source + offset, chunk);
     offset += chunk;
   }
+}
+std::vector<uint64_t> GuestMemoryMirror::CaptureCpuGenerations(uint32_t start, uint32_t length) {
+  if (!length || uint64_t(start)+length>kSize) throw std::invalid_argument("Native mirror: snapshot outside physical memory");
+  auto lock=Lock();
+  return {cpu_generations_.begin()+(start>>page_log2_),cpu_generations_.begin()+((start+length-1)>>page_log2_)+1};
+}
+bool GuestMemoryMirror::ReadbackCurrent(uint32_t address, uint32_t snapshot_start,
+    std::span<const uint64_t> cpu_generations) {
+  if (address >= kSize || address < snapshot_start) return false;
+  auto lock = Lock();
+  const uint32_t page=address>>page_log2_, first=snapshot_start>>page_log2_;
+  return page-first<cpu_generations.size() && cpu_generations[page-first]==cpu_generations_[page] &&
+      ((std::atomic_ref(valid_[page>>6]).load(std::memory_order_relaxed)>>(page&63))&1);
 }
 void GuestMemoryMirror::InvalidateCpuPages() {
   auto lock = Lock();

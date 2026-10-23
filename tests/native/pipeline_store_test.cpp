@@ -29,7 +29,7 @@ TEST_CASE("Native pipeline store validates full inputs and incomplete files") {
   ComPtr<ID3D12PipelineState> pso;
   REQUIRE(SUCCEEDED(device->CreateGraphicsPipelineState(&pd, IID_PPV_ARGS(&pso))));
   auto directory = std::filesystem::current_path() / ("pipeline-store-test-" + std::to_string(GetCurrentProcessId()));
-  PipelineStore store; store.SetDirectory(directory); store.SetRoot(root_blob->GetBufferPointer(), root_blob->GetBufferSize());
+  PipelineStore store; store.SetDirectory(directory); store.SetRoot(root_blob->GetBufferPointer(), root_blob->GetBufferSize(), root.Get());
   auto miss = store.Load(pd); REQUIRE(miss.blob.empty());
   store.Save(miss, pso.Get());
   INFO(miss.path.string()); REQUIRE(std::filesystem::exists(miss.path));

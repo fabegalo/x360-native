@@ -37,11 +37,17 @@ class GuestMemoryMirror {
   // RequestRange the range first so unwritten bytes of its pages are current.
   // Optional per-page CPU epochs accompany a deferred readback. A later CPU
   // write must invalidate old snapshots even if another draw revalidates the page.
-  void RangeWrittenByGpu(uint32_t start, uint32_t length, std::vector<uint64_t>* cpu_generations = nullptr);
+  void RangeWrittenByGpu(uint32_t start, uint32_t length, std::vector<uint64_t>* cpu_generations = nullptr,
+                         std::span<const uint64_t> snapshot_generations = {});
+  std::vector<uint64_t> CaptureCpuGenerations(uint32_t start, uint32_t length);
   // Publishes GPU results to guest memory, except pages the CPU wrote after
   // the GPU write made them valid (the newer CPU bytes win).
   void CopyReadbackToGuest(uint32_t start, const uint8_t* source, uint32_t length,
                            std::span<const uint64_t> cpu_generations = {});
+  // Same predicate as canonical publication, also used by auxiliary scaled
+  // resolve snapshots. Epochs originate inside RangeWrittenByGpu's lock.
+  bool ReadbackCurrent(uint32_t address, uint32_t snapshot_start,
+                       std::span<const uint64_t> cpu_generations);
   // Frame boundary: pages valid only because they were uploaded are reloaded
   // on their next request (pinned clear_memory_page_state contract).
   void InvalidateCpuPages();
@@ -56,7 +62,8 @@ class GuestMemoryMirror {
   static constexpr uint32_t kBuckets = kSize >> kBucketLog2;
   static std::pair<uint32_t, uint32_t> InvalidationThunk(void*, uint32_t, uint32_t, bool);
   std::pair<uint32_t, uint32_t> Invalidate(uint32_t start, uint32_t length, bool exact);
-  void MakeValid(uint32_t start, uint32_t length, bool by_gpu, std::vector<uint64_t>* cpu_generations = nullptr);
+  void MakeValid(uint32_t start, uint32_t length, bool by_gpu, std::vector<uint64_t>* cpu_generations = nullptr,
+                 std::span<const uint64_t> snapshot_generations = {});
   void Fire(uint32_t page_first, uint32_t page_last, bool by_gpu);
   void Release(WatchRange*);
   rex::memory::Memory& memory_;

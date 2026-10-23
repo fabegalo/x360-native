@@ -6,6 +6,20 @@ namespace rex::graphics {
 void ValidatePacketForBackend(uint32_t, const rex::memory::RingBuffer&);
 }
 using namespace x360n::native;
+TEST_CASE("Native visibility queries accumulate independently and reset on BEGIN", "[native-zpd]") {
+  VisibilityQueries queries;
+  for (unsigned id = 0; id < 64; ++id) queries.Begin(id);
+  for (unsigned id = 0; id < 64; ++id) {
+    queries.Accumulate(id, (id & 1) != 0);
+    queries.Accumulate(id, false); // later occluded draws do not clear visibility
+  }
+  for (unsigned id = 0; id < 64; ++id) {
+    CHECK(queries.End(id) == ((id & 1) != 0));
+    CHECK_THROWS(queries.End(id));
+    queries.Begin(id);
+    CHECK_FALSE(queries.End(id));
+  }
+}
 TEST_CASE("Native draw predication selects all 64 visibility IDs", "[native-zpd]") {
   for (unsigned id = 0; id < 64; ++id) {
     CHECK(VisibilityDrawEnabled(id, 0, 0));

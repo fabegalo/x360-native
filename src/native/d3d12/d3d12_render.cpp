@@ -94,7 +94,7 @@ D3D12Render::D3D12Render(rex::ui::d3d12::D3D12Provider& provider) : provider_(pr
   Check(device_->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&fence_)), "fence");
   event_ = CreateEventW(nullptr, FALSE, FALSE, nullptr); Require(event_ != nullptr, "fence event");
   memory_ = Buffer(0x20000000, D3D12_HEAP_TYPE_DEFAULT, memory_state_, D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS);
-  edram_ = Buffer(kEdramSizeBytes + sizeof(SampleCounts), D3D12_HEAP_TYPE_DEFAULT, edram_state_, D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS);
+  edram_ = Buffer(edram_size_ + sizeof(SampleCounts), D3D12_HEAP_TYPE_DEFAULT, edram_state_, D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS);
   D3D12_DESCRIPTOR_HEAP_DESC hd{D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, 65536, D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE, 0};
   Check(device_->CreateDescriptorHeap(&hd, IID_PPV_ARGS(&views_)), "views");
   hd.Type = D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER; hd.NumDescriptors = 2048;
@@ -125,7 +125,6 @@ D3D12Render::D3D12Render(rex::ui::d3d12::D3D12Provider& provider) : provider_(pr
   D3D12_ROOT_SIGNATURE_DESC rd{10, p, 0, nullptr, D3D12_ROOT_SIGNATURE_FLAG_NONE};
   Ptr<ID3DBlob> blob, errors;
   Check(D3D12SerializeRootSignature(&rd, D3D_ROOT_SIGNATURE_VERSION_1, &blob, &errors), "draw root serialization");
-  pipeline_store_.SetRoot(blob->GetBufferPointer(), blob->GetBufferSize());
   const auto pso_dump = REXCVAR_GET(native_pso_dump);
   if (!pso_dump.empty()) {
     std::filesystem::create_directories(pso_dump);
@@ -134,6 +133,12 @@ D3D12Render::D3D12Render(rex::ui::d3d12::D3D12Provider& provider) : provider_(pr
     Require(bool(out), "PSO root diagnostic write failed");
   }
   Check(device_->CreateRootSignature(0, blob->GetBufferPointer(), blob->GetBufferSize(), IID_PPV_ARGS(&root_)), "draw root");
+  pipeline_store_.SetRoot(blob->GetBufferPointer(), blob->GetBufferSize(), root_.Get());
+  p[1].ShaderVisibility = p[8].ShaderVisibility = D3D12_SHADER_VISIBILITY_DOMAIN;
+  blob.Reset(); errors.Reset();
+  Check(D3D12SerializeRootSignature(&rd, D3D_ROOT_SIGNATURE_VERSION_1, &blob, &errors), "domain root serialization");
+  Check(device_->CreateRootSignature(0, blob->GetBufferPointer(), blob->GetBufferSize(), IID_PPV_ARGS(&root_tess_)), "domain root");
+  pipeline_store_.SetRoot(blob->GetBufferPointer(), blob->GetBufferSize(), root_tess_.Get());
   BeginGpuTimestamp();
 }
 // Watches reference cache entries: retire them before the cache is destroyed.
@@ -142,6 +147,7 @@ D3D12Render::~D3D12Render() {
   if (stats_enabled_) try { CollectGpuTimestamps(); LogSubmissionStats(); } catch (const std::exception& e) {
     REXLOG_WARN("Native final submission stats unavailable: {}", e.what());
   }
+  scaled_.Clear();
   mirror_.reset(); if (event_) CloseHandle(event_);
 }
 void D3D12Render::BeginGpuTimestamp() {
@@ -268,6 +274,14 @@ void D3D12Render::Flush(FlushCause cause) {
     });
     D3D12_RANGE none{}; readback_->Unmap(0, &none);
   }
+  for (const auto& scaled : scaled_readbacks_) {
+    void* mapped; D3D12_RANGE range{size_t(scaled.offset), size_t(scaled.offset)+size_t(scaled.ticket.length)*scale_x_*scale_y_};
+    Check(scaled.buffer->Map(0, &range, &mapped), "map scaled resolve readback");
+    scaled_.Complete(scaled.ticket, {static_cast<const uint8_t*>(mapped)+scaled.offset,
+        size_t(scaled.ticket.length)*scale_x_*scale_y_}, scaled.pixel_log2, *guest_memory_);
+    D3D12_RANGE none{}; scaled.buffer->Unmap(0, &none);
+  }
+  scaled_readbacks_.clear();
   readback_used_ = 0;
   RecycleBatch();
   if (stats_enabled_ && serial_ % 30 == 0) LogSubmissionStats();
@@ -277,7 +291,7 @@ SampleCounts D3D12Render::ReadSampleCounts(bool counting_after) {
     sample_counts_readback_ = Buffer(sizeof(SampleCounts), D3D12_HEAP_TYPE_READBACK, D3D12_RESOURCE_STATE_COPY_DEST);
     const auto initial = Upload(sample_counts_.data(), sizeof(sample_counts_));
     Transition(edram_.Get(), edram_state_, D3D12_RESOURCE_STATE_COPY_DEST);
-    list_->CopyBufferRegion(edram_.Get(), kEdramSizeBytes, initial.resource.Get(), initial.offset, sizeof(SampleCounts));
+    list_->CopyBufferRegion(edram_.Get(), edram_size_, initial.resource.Get(), initial.offset, sizeof(SampleCounts));
     Transition(edram_.Get(), edram_state_, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
     edram_rov_layout_.reset();
   }
@@ -285,7 +299,7 @@ SampleCounts D3D12Render::ReadSampleCounts(bool counting_after) {
     // The transition orders all preceding ROV atomics, including draws in
     // earlier recording arenas. The fence retires the copy before publication.
     Transition(edram_.Get(), edram_state_, D3D12_RESOURCE_STATE_COPY_SOURCE);
-    list_->CopyBufferRegion(sample_counts_readback_.Get(), 0, edram_.Get(), kEdramSizeBytes, sizeof(SampleCounts));
+    list_->CopyBufferRegion(sample_counts_readback_.Get(), 0, edram_.Get(), edram_size_, sizeof(SampleCounts));
     Transition(edram_.Get(), edram_state_, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
     edram_rov_layout_.reset();
     Flush(kFlushGuestSync);
@@ -297,6 +311,16 @@ SampleCounts D3D12Render::ReadSampleCounts(bool counting_after) {
   }
   sample_counting_ = counting_after;
   return sample_counts_;
+}
+void D3D12Render::SetSampleCounts(const SampleCounts& counts, bool visibility_only) {
+  if (!sample_counts_readback_) ReadSampleCounts(false);
+  const auto upload = Upload(counts.data(), sizeof(counts));
+  Transition(edram_.Get(), edram_state_, D3D12_RESOURCE_STATE_COPY_DEST);
+  list_->CopyBufferRegion(edram_.Get(), edram_size_, upload.resource.Get(), upload.offset, sizeof(counts));
+  Transition(edram_.Get(), edram_state_, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+  edram_rov_layout_.reset();
+  sample_counts_ = counts;
+  visibility_only_ = visibility_only;
 }
 void D3D12Render::Wait(uint64_t serial) {
   const auto completed = fence_->GetCompletedValue();
@@ -358,7 +382,7 @@ void D3D12Render::ReserveReadback(uint64_t bytes) {
     }
   }
 }
-void D3D12Render::QueueGuestWrite(uint32_t address, uint32_t length) {
+void D3D12Render::QueueGuestWrite(uint32_t address, uint32_t length, const std::vector<uint64_t>* snapshot_epochs) {
   if (!length) return;
   const uint64_t slot = (uint64_t(length) + 255) & ~uint64_t(255);
   Require(uint64_t(address) + length <= GuestMemoryMirror::kSize && readback_used_ + slot <= readback_size_,
@@ -366,7 +390,7 @@ void D3D12Render::QueueGuestWrite(uint32_t address, uint32_t length) {
   // Make the GPU mirror authoritative and retire texture aliases immediately.
   // The COPY_SOURCE transition also orders UAV stores from the draw/resolve.
   std::vector<uint64_t> cpu_generations;
-  mirror_->RangeWrittenByGpu(address, length, &cpu_generations);
+  mirror_->RangeWrittenByGpu(address, length, &cpu_generations, snapshot_epochs ? std::span<const uint64_t>(*snapshot_epochs) : std::span<const uint64_t>());
   Transition(memory_.Get(), memory_state_, D3D12_RESOURCE_STATE_COPY_SOURCE);
   list_->CopyBufferRegion(readback_.Get(), readback_used_, memory_.Get(), address, length);
   writeback_.Add(address, length, readback_used_, std::move(cpu_generations));
@@ -375,6 +399,7 @@ void D3D12Render::QueueGuestWrite(uint32_t address, uint32_t length) {
 GuestMemoryMirror& D3D12Render::Mirror(rex::memory::Memory& memory) {
   guest_memory_ = &memory;
   if (!mirror_) mirror_ = std::make_unique<GuestMemoryMirror>(memory, [this](uint32_t a, uint32_t n) { UploadGuest(a, n); });
+  scaled_.Attach(*mirror_);
   return *mirror_;
 }
 void D3D12Render::UploadGuest(uint32_t address, uint32_t bytes) {

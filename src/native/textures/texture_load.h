@@ -6,6 +6,7 @@
 #include <span>
 #include <vector>
 namespace x360n::native {
+class ScaledResolveCache;
 // Guest texture storage selected by a fetch constant, in the terms both the
 // CPU conversion and the GPU load use. Base/mip are byte addresses.
 struct TextureLoadInput {
@@ -20,6 +21,8 @@ struct TextureLoadInput {
   unsigned array_size;                             // 2D array slices (cube faces, stacked)
   DXGI_FORMAT host_format;
   bool is_signed, num_format;
+  uint32_t scale_x = 1, scale_y = 1;
+  const ScaledResolveCache* scaled = nullptr;
   rex::graphics::texture_util::TextureGuestLayout Layout() const;
 };
 // Pinned SDK texture_load_* compute shaders Native dispatches (indices are

@@ -1,0 +1,25 @@
+#include "settings.h"
+#include <rex/cvar.h>
+#include <rex/chrono/frame_timing.h>
+#include <stdexcept>
+#include <bit>
+REXCVAR_DEFINE_UINT32(native_scale_x, 1, "GPU/Native", "Enhanced internal horizontal resolution scale (1 to 4)");
+REXCVAR_DEFINE_UINT32(native_scale_y, 1, "GPU/Native", "Enhanced internal vertical resolution scale (1 to 4)");
+REXCVAR_DEFINE_UINT32(native_anisotropy, 0, "GPU/Native", "Enhanced anisotropic filtering: 0 preserves guest, or 2/4/8/16");
+namespace x360n::native {
+NativeQualitySettings GetNativeQualitySettings() {
+  NativeQualitySettings q;
+  if (!rex::chrono::FrameTiming::Enhanced()) return q;
+  q.scale_x = REXCVAR_GET(native_scale_x); q.scale_y = REXCVAR_GET(native_scale_y);
+  q.anisotropy = REXCVAR_GET(native_anisotropy);
+  if (!q.scale_x || q.scale_x > 4 || !q.scale_y || q.scale_y > 4)
+    throw std::invalid_argument("Native resolution scale must be in [1, 4]");
+  if (q.anisotropy && (q.anisotropy < 2 || q.anisotropy > 16 || !std::has_single_bit(q.anisotropy)))
+    throw std::invalid_argument("Native anisotropy must be 0, 2, 4, 8 or 16");
+  return q;
+}
+rex::graphics::xenos::AnisoFilter NativeAnisotropy(rex::graphics::xenos::AnisoFilter guest) {
+  const auto q = GetNativeQualitySettings();
+  return q.anisotropy ? rex::graphics::xenos::AnisoFilter(std::countr_zero(q.anisotropy) + 1) : guest;
+}
+}

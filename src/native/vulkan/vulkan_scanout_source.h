@@ -18,7 +18,7 @@ layout(set = 0, binding = 1, std430) readonly buffer Lut { uint lut[]; };
 layout(set = 0, binding = 2, std430) readonly buffer Overlay { uint overlay_pixels[]; };
 layout(push_constant) uniform Parameters {
   uint width, height, pitch, tiled;
-  uint endian, swizzle, rgb10, unused1;
+  uint endian, swizzle, rgb10, fxaa;
   uint overlay_enabled, overlay_width, overlay_height, overlay_pitch;
   uint overlay_tiled, overlay_endian, overlay_swizzle, overlay_rgb10;
   uvec4 overlay_rect;
@@ -94,6 +94,7 @@ void main() {
     output_color = vec4(vec3(lut[index.x] & 1023, (lut[index.y] >> 10) & 1023,
                             (lut[index.z] >> 20) & 1023) / 1023.0, 1.0);
   }
+  if (fxaa != 0) output_color.a = dot(output_color.rgb, vec3(0.299, 0.587, 0.114));
 }
 )glsl";
 }

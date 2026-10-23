@@ -1,4 +1,5 @@
 #include "vulkan_render.h"
+#include "../quality/settings.h"
 #include "../textures/texture_load.h"
 #include "../textures/texture.h"
 #include <rex/graphics/pipeline/texture/info.h>
@@ -14,11 +15,9 @@ namespace {
 struct Format { VkFormat vk; DXGI_FORMAT conversion; uint32_t bytes, block, components; };
 Format TextureFormatFor(const xe_gpu_texture_fetch_t& fetch, bool sign) {
   const auto format = GetBaseFormat(fetch.format);
-  if (fetch.num_format && format == TextureFormat::k_16)
-    return {VK_FORMAT_R32_SFLOAT, DXGI_FORMAT_R32_FLOAT, 4, 1, 1};
-  if (fetch.num_format && !IsFloatTexture(format) &&
-      format != TextureFormat::k_24_8 && format != TextureFormat::k_24_8_FLOAT)
-    throw std::runtime_error("Native Vulkan: integer texture format is not implemented");
+  if (ExpandedTextureBlock(format)) return {VK_FORMAT_R32G32B32A32_SFLOAT, DXGI_FORMAT_R32G32B32A32_FLOAT, 16, 1, 4};
+  if (const auto components = ExpandedTextureComponents(format, fetch.num_format))
+    return {VK_FORMAT_R32G32B32A32_SFLOAT, DXGI_FORMAT_R32G32B32A32_FLOAT, 16, 1, components};
   switch (format) {
     case TextureFormat::k_2_10_10_10: return sign
         ? Format{VK_FORMAT_R32G32B32A32_SFLOAT, DXGI_FORMAT_R32G32B32A32_FLOAT, 16, 1, 4}
@@ -43,6 +42,8 @@ Format TextureFormatFor(const xe_gpu_texture_fetch_t& fetch, bool sign) {
     case TextureFormat::k_16_16_16_16_FLOAT: return {VK_FORMAT_R16G16B16A16_SFLOAT, DXGI_FORMAT_R16G16B16A16_FLOAT, 8, 1, 4};
     case TextureFormat::k_24_8: case TextureFormat::k_24_8_FLOAT:
     case TextureFormat::k_32_FLOAT: return {VK_FORMAT_R32_SFLOAT, DXGI_FORMAT_R32_FLOAT, 4, 1, 1};
+    case TextureFormat::k_32_32_FLOAT: return {VK_FORMAT_R32G32_SFLOAT, DXGI_FORMAT_R32G32_FLOAT, 8, 1, 2};
+    case TextureFormat::k_32_32_32_32_FLOAT: return {VK_FORMAT_R32G32B32A32_SFLOAT, DXGI_FORMAT_R32G32B32A32_FLOAT, 16, 1, 4};
     case TextureFormat::k_DXT1: case TextureFormat::k_DXT2_3: case TextureFormat::k_DXT4_5:
     case TextureFormat::k_DXT5A: case TextureFormat::k_DXN:
       if (sign) throw std::runtime_error("Native Vulkan: signed compressed texture is not implemented");
@@ -134,7 +135,7 @@ VkDescriptorSetLayout VulkanRender::TextureLayout(SpirvShader* shader) {
   if (auto found = texture_layouts_.find(shader); found != texture_layouts_.end()) return found->second;
   std::vector<VkDescriptorSetLayoutBinding> bindings;
   if (shader) {
-    const auto stage = shader->type() == ShaderType::kVertex ? VK_SHADER_STAGE_VERTEX_BIT : VK_SHADER_STAGE_FRAGMENT_BIT;
+    const auto stage = shader->type() == ShaderType::kVertex ? VkShaderStageFlags(VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT) : VkShaderStageFlags(VK_SHADER_STAGE_FRAGMENT_BIT);
     const auto images = shader->GetTextureBindingsAfterTranslation().size();
     const auto samplers = shader->GetSamplerBindingsAfterTranslation().size();
     for (uint32_t i = 0; i < images + samplers; ++i)
@@ -185,7 +186,7 @@ VkDescriptorSet VulkanRender::BindTextures(const RegisterFile& regs, rex::memory
     barrier.image = image;
     barrier.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, levels, 0, layers};
     fn.vkCmdPipelineBarrier(commands_, ready ? VK_PIPELINE_STAGE_TRANSFER_BIT : VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
-        ready ? VK_PIPELINE_STAGE_VERTEX_SHADER_BIT | VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT : VK_PIPELINE_STAGE_TRANSFER_BIT,
+        ready ? VK_PIPELINE_STAGE_VERTEX_SHADER_BIT | VK_PIPELINE_STAGE_TESSELLATION_EVALUATION_SHADER_BIT | VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT : VK_PIPELINE_STAGE_TRANSFER_BIT,
         0, 0, nullptr, 0, nullptr, 1, &barrier);
   };
   for (size_t i = 0; i < bindings.size(); ++i) {
@@ -241,7 +242,13 @@ VkDescriptorSet VulkanRender::BindTextures(const RegisterFile& regs, rex::memory
       if (uint64_t(input.base) + base_bytes > GuestMemoryMirror::kSize ||
           uint64_t(input.mip) + mip_bytes > GuestMemoryMirror::kSize)
         throw std::runtime_error("Native Vulkan: texture outside physical memory");
-      const uint32_t key_data[]{base, mip, w, h, d, levels, fetch.pitch, uint32_t(fetch.format), fetch.swizzle,
+      const auto* scale_format = FormatInfo::Get(input.format);
+      const bool scaled_texture = scaled_.enabled() && !input.host_volume &&
+          scale_format->block_width == 1 && scale_format->block_height == 1 &&
+          (scaled_.Overlaps(input.base, base_bytes) || scaled_.Overlaps(input.mip, mip_bytes));
+      if (scaled_texture) { input.scale_x=scale_x_; input.scale_y=scale_y_; input.scaled=&scaled_;
+        textures_resolution_scaled_ |= uint32_t(1) << binding.fetch_constant; }
+      const uint32_t key_data[]{input.scale_x, input.scale_y, base, mip, w, h, d, levels, fetch.pitch, uint32_t(fetch.format), fetch.swizzle,
           uint32_t(fetch.tiled) | uint32_t(fetch.packed_mips) << 1 | uint32_t(fetch.endianness) << 2 |
           uint32_t(fetch.dimension) << 4 | uint32_t(fetch.stacked) << 6 | uint32_t(binding.is_signed) << 7 |
           uint32_t(volume) << 8 | uint32_t(fetch.num_format) << 9};
@@ -270,7 +277,9 @@ VkDescriptorSet VulkanRender::BindTextures(const RegisterFile& regs, rex::memory
         image.flags = cube ? VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT : 0;
         image.imageType = volume ? VK_IMAGE_TYPE_3D : VK_IMAGE_TYPE_2D;
         image.format = format.vk;
-        image.extent = {w + 1, h + 1, volume ? d + 1 : 1};
+        image.extent = {(w + 1)*input.scale_x, (h + 1)*input.scale_y, volume ? d + 1 : 1};
+        if (image.extent.width>device_.properties().maxImageDimension2D || image.extent.height>device_.properties().maxImageDimension2D)
+          throw std::runtime_error("Native: scaled texture exceeds Vulkan image dimensions");
         image.mipLevels = levels;
         image.arrayLayers = layers;
         image.samples = VK_SAMPLE_COUNT_1_BIT;
@@ -309,7 +318,7 @@ VkDescriptorSet VulkanRender::BindTextures(const RegisterFile& regs, rex::memory
         uint64_t bytes = 0;
         for (unsigned layer = 0; layer < layers; ++layer) for (unsigned level = 0; level < levels; ++level) {
           auto& footprint = footprints[layer * levels + level];
-          const unsigned width = std::max(1u, (w + 1) >> level), height = std::max(1u, (h + 1) >> level);
+          const unsigned width = std::max(1u, ((w + 1)*input.scale_x) >> level), height = std::max(1u, ((h + 1)*input.scale_y) >> level);
           const unsigned depth = volume ? std::max(1u, (d + 1) >> level) : 1;
           const unsigned row = (((width + format.block - 1) / format.block * format.bytes + 255) / 256) * 256;
           bytes = (bytes + 511) & ~uint64_t(511);
@@ -355,8 +364,8 @@ VkDescriptorSet VulkanRender::BindTextures(const RegisterFile& regs, rex::memory
     info.addressModeU = AddressMode(cx, device_.properties().samplerMirrorClampToEdge);
     info.addressModeV = AddressMode(cy, device_.properties().samplerMirrorClampToEdge);
     info.addressModeW = AddressMode(cz, device_.properties().samplerMirrorClampToEdge);
-    const auto aniso = std::min(binding.aniso_filter == AnisoFilter::kUseFetchConst ? fetch.aniso_filter : binding.aniso_filter,
-                               AnisoFilter::kMax_16_1);
+    const auto aniso = NativeAnisotropy(std::min(binding.aniso_filter == AnisoFilter::kUseFetchConst ? fetch.aniso_filter : binding.aniso_filter,
+                               AnisoFilter::kMax_16_1));
     info.maxAnisotropy = 1;
     if (aniso != AnisoFilter::kDisabled) {
       if (!device_.properties().samplerAnisotropy) throw std::runtime_error("Native Vulkan: anisotropy unavailable");

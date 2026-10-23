@@ -1,4 +1,6 @@
 #pragma once
+#include "../quality/settings.h"
+#include "../memory/scaled_resolve.h"
 #include "../pipeline/shader_cache.h"
 #include "../pipeline/pipeline_store.h"
 #include "../commands/draw_types.h"
@@ -19,16 +21,22 @@
 #include <chrono>
 namespace x360n::native {
 class D3D12Render {
+  const NativeQualitySettings quality_ = GetNativeQualitySettings();
+  const uint32_t scale_x_ = quality_.scale_x, scale_y_ = quality_.scale_y;
+  const uint64_t edram_size_ = uint64_t(rex::graphics::xenos::kEdramSizeBytes) * scale_x_ * scale_y_;
  public:
   explicit D3D12Render(rex::ui::d3d12::D3D12Provider&);
   ~D3D12Render();
-  ShaderCache shaders;
+  ShaderCache shaders{scale_x_, scale_y_};
   void SetPipelineDirectory(const std::filesystem::path& path) { pipeline_store_.SetDirectory(path); }
   void Draw(const rex::graphics::RegisterFile&, rex::memory::Memory&,
       rex::graphics::Shader*, rex::graphics::Shader*, rex::graphics::xenos::PrimitiveType,
-      uint32_t count, const DrawIndices*);
+      uint32_t count, const DrawIndices*, DrawPurpose = DrawPurpose::kGuest);
+  bool PrepareScanout(const ScanoutTexture& input, const void* pixels, ScanoutTexture& output,
+                       std::vector<uint8_t>& storage) const { return scaled_.Scanout(input, pixels, output, storage); }
   void Resolve(const rex::graphics::RegisterFile&, rex::memory::Memory&);
   SampleCounts ReadSampleCounts(bool counting_after);
+  void SetSampleCounts(const SampleCounts&, bool visibility_only);
   // Diagnostic accounting only (native_stats): why a submission waited.
   enum FlushCause : unsigned { kFlushGuestSync, kFlushPresent, kFlushOverlap, kFlushCapacity, kFlushDrain, kFlushCauses };
   void Flush(FlushCause);
@@ -67,12 +75,14 @@ class D3D12Render {
   // Resident guest memory mirror (memory_), created with the guest memory.
   GuestMemoryMirror& Mirror(rex::memory::Memory&);
   std::unique_ptr<GuestMemoryMirror> mirror_;
+  ScaledResolveCache scaled_{scale_x_, scale_y_};
+  uint32_t textures_resolution_scaled_ = 0;
   // Records a copy of current guest bytes into memory_ (mirror upload).
   void UploadGuest(uint32_t address, uint32_t length);
   // Reserve before recording draw/resolve state: this may submit the batch.
   void ReserveReadback(uint64_t bytes);
   // Record a GPU-written range in already reserved readback storage.
-  void QueueGuestWrite(uint32_t address, uint32_t length);
+  void QueueGuestWrite(uint32_t address, uint32_t length, const std::vector<uint64_t>* snapshot_epochs = nullptr);
   std::unordered_map<const rex::graphics::Shader*, bool> memexport_addresses_known_;
   // Before Native reads guest memory that a pending GPU write will change.
   enum ReadSite : unsigned { kReadIndices, kReadCpuTexture, kReadResolveRect, kReadSites };
@@ -125,7 +135,7 @@ class D3D12Render {
   std::unordered_map<SamplerKey, uint32_t, SamplerKeyHash> arena_samplers_;
   uint64_t sampler_reuses_ = 0;
   uint32_t Sampler(const D3D12_SAMPLER_DESC&);
-  Ptr<ID3D12RootSignature> root_, copy_root_, clear_root_;
+  Ptr<ID3D12RootSignature> root_, root_tess_, copy_root_, clear_root_;
   std::vector<Ptr<ID3D12Resource>> transient_;
   // Three independent recording arenas. Queue ordering protects persistent
   // memory/EDRAM/textures; a fence protects each arena's mutable descriptors,
@@ -152,7 +162,7 @@ class D3D12Render {
   void CollectGpuTimestamps();
   void LogSubmissionStats();
   std::map<std::string, Ptr<ID3D12PipelineState>> pipelines_;
-  std::map<unsigned, std::vector<uint8_t>> rectangles_;
+  std::map<unsigned, std::vector<uint8_t>> rectangles_, polygon_points_;
   std::map<unsigned, std::vector<uint32_t>> points_;
   struct CachedTexture {
     Ptr<ID3D12Resource> resource;
@@ -171,13 +181,19 @@ class D3D12Render {
   uint64_t texture_cache_bytes_ = 0, texture_cache_hits_ = 0, gpu_texture_loads_ = 0, cpu_texture_loads_ = 0;
   bool texture_cache_enabled_ = true;
   bool texture_cpu_ = false;
-  std::array<std::vector<uint8_t>, 2> depth_shaders_;
+  std::array<std::vector<uint8_t>, 3> depth_shaders_;
   // Tail of the Native-owned EDRAM allocation; never part of guest EDRAM
   // addressing or resolves. Only the query variant of a shader accesses it.
   Ptr<ID3D12Resource> sample_counts_readback_;
   SampleCounts sample_counts_{};
   bool sample_counting_ = false;
+  bool visibility_only_ = false;
   const std::vector<uint8_t>& RectangleShader(unsigned interpolators, unsigned clip_planes);
+  struct ScaledReadback { ScaledResolveCache::Ticket ticket; Ptr<ID3D12Resource> buffer;
+                          unsigned pixel_log2; uint64_t offset; };
+  std::vector<ScaledReadback> scaled_readbacks_;
+  Ptr<ID3D12RootSignature> downscale_root_;
+  Ptr<ID3D12PipelineState> downscale_pipeline_;
   std::array<Ptr<ID3D12PipelineState>, 9> copy_pipelines_;
   std::array<Ptr<ID3D12PipelineState>, 2> clear_pipelines_;
   uint64_t draw_count_ = 0, resolve_count_ = 0, empty_resolve_count_ = 0, present_count_ = 0;

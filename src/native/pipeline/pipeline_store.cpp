@@ -14,12 +14,18 @@ void Append(std::vector<char>& out, const void* bytes, size_t size) {
   if (size) out.insert(out.end(), static_cast<const char*>(bytes), static_cast<const char*>(bytes)+size);
 }
 }
-void PipelineStore::SetRoot(const void* bytes, size_t size) { root_.clear(); Append(root_, bytes, size); }
+void PipelineStore::SetRoot(const void* bytes, size_t size, ID3D12RootSignature* signature) {
+  auto& root = roots_[signature]; root.clear(); Append(root, bytes, size);
+}
 PipelineStore::Entry PipelineStore::Load(const D3D12_GRAPHICS_PIPELINE_STATE_DESC& pd) const {
   Entry e;
+  auto root = roots_.find(pd.pRootSignature);
+  // nullptr is the explicit root identity used by callers that do not own a
+  // D3D object (for example the serialized pipeline contract tests).
+  if (root == roots_.end()) return e;
   // Native currently has no input layout or stream output. Do not cache pointer
   // structures until their contents participate in the serialized identity.
-  if (directory_.empty() || root_.empty() || pd.InputLayout.NumElements ||
+  if (directory_.empty() || root->second.empty() || pd.InputLayout.NumElements ||
       pd.StreamOutput.NumEntries || pd.StreamOutput.NumStrides) return e;
   auto flat = pd;
   flat.pRootSignature = nullptr;
@@ -28,7 +34,7 @@ PipelineStore::Entry PipelineStore::Load(const D3D12_GRAPHICS_PIPELINE_STATE_DES
   flat.InputLayout.pInputElementDescs = nullptr;
   flat.StreamOutput.pSODeclaration = nullptr; flat.StreamOutput.pBufferStrides = nullptr;
   flat.CachedPSO = {};
-  Append(e.key, &flat, sizeof(flat)); Append(e.key, root_.data(), root_.size());
+  Append(e.key, &flat, sizeof(flat)); Append(e.key, root->second.data(), root->second.size());
   for (auto stage : {pd.VS, pd.PS, pd.GS, pd.HS, pd.DS}) Append(e.key, stage.pShaderBytecode, stage.BytecodeLength);
   auto hash = XXH3_128bits(e.key.data(), e.key.size());
   char name[40]; std::snprintf(name, sizeof(name), "%016llx%016llx.pso", hash.high64, hash.low64);
