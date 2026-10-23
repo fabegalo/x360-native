@@ -25,7 +25,7 @@ D3D12_RESOURCE_BARRIER Transition(ID3D12Resource* r, D3D12_RESOURCE_STATES befor
 D3D12Scanout::D3D12Scanout(rex::ui::d3d12::D3D12Provider& provider) : provider_(provider) {
   auto* device = provider_.GetDevice();
   D3D12_DESCRIPTOR_RANGE range{D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 1, 0, 0, 0};
-  D3D12_ROOT_PARAMETER parameters[4]{};
+  D3D12_ROOT_PARAMETER parameters[5]{};
   parameters[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_SRV;
   parameters[0].Descriptor = {0, 0};
   parameters[1].ParameterType = D3D12_ROOT_PARAMETER_TYPE_SRV;
@@ -33,8 +33,10 @@ D3D12Scanout::D3D12Scanout(rex::ui::d3d12::D3D12Provider& provider) : provider_(
   parameters[2].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
   parameters[2].DescriptorTable = {1, &range};
   parameters[3].ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
-  parameters[3].Constants = {0, 0, 8};
-  D3D12_ROOT_SIGNATURE_DESC desc{4, parameters, 0, nullptr, D3D12_ROOT_SIGNATURE_FLAG_NONE};
+  parameters[3].Constants = {0, 0, 24};
+  parameters[4].ParameterType = D3D12_ROOT_PARAMETER_TYPE_SRV;
+  parameters[4].Descriptor = {2, 0};
+  D3D12_ROOT_SIGNATURE_DESC desc{5, parameters, 0, nullptr, D3D12_ROOT_SIGNATURE_FLAG_NONE};
   Ptr<ID3DBlob> blob, errors;
   Check(D3D12SerializeRootSignature(&desc, D3D_ROOT_SIGNATURE_VERSION_1, &blob, &errors), "root signature");
   Check(device->CreateRootSignature(0, blob->GetBufferPointer(), blob->GetBufferSize(), IID_PPV_ARGS(&root_)), "create root signature");
@@ -94,7 +96,8 @@ void D3D12Scanout::Resolve(const rex::graphics::RegisterFile& regs, rex::memory:
   render_->Resolve(regs, memory);
 }
 void D3D12Scanout::Present(rex::ui::Presenter& presenter, const ScanoutTexture& t,
-                         const void* pixels, const uint32_t* lut) {
+                         const void* pixels, const uint32_t* lut, const ScanoutOverlay* overlay,
+                         const void* overlay_pixels) {
   if (render_) { render_->CountPresent(); render_->CompleteGuestWrites(kGuestSyncPresent, 0xFF); render_->Flush(D3D12Render::kFlushPresent); render_->EndFrame(); }
   const unsigned index = unsigned(serial_ % slots_.size());
   auto& slot = slots_[index];
@@ -102,7 +105,8 @@ void D3D12Scanout::Present(rex::ui::Presenter& presenter, const ScanoutTexture& 
   auto* device = provider_.GetDevice();
   const uint64_t lut_offset = (uint64_t(t.bytes) + 255) & ~255ull;
   const uint32_t lut_bytes = (t.rgb10 ? 128 * 3 : 256) * sizeof(uint32_t);
-  const uint64_t required = lut_offset + lut_bytes;
+  const uint64_t overlay_offset = (lut_offset + lut_bytes + 255) & ~255ull;
+  const uint64_t required = overlay_offset + (overlay ? overlay->surface.bytes : 0);
   if (slot.capacity < required) {
     slot.upload.Reset();
     D3D12_HEAP_PROPERTIES heap{}; heap.Type = D3D12_HEAP_TYPE_UPLOAD;
@@ -118,6 +122,7 @@ void D3D12Scanout::Present(rex::ui::Presenter& presenter, const ScanoutTexture& 
   Check(slot.upload->Map(0, &read_range, &mapped), "map upload");
   std::memcpy(mapped, pixels, t.bytes);
   std::memcpy(static_cast<uint8_t*>(mapped) + lut_offset, lut, lut_bytes);
+  if (overlay) std::memcpy(static_cast<uint8_t*>(mapped) + overlay_offset, overlay_pixels, overlay->surface.bytes);
   slot.upload->Unmap(0, nullptr);
   if (!presenter.RefreshGuestOutput(t.width, t.height, t.width, t.height,
       [&](rex::ui::Presenter::GuestOutputRefreshContext& context) {
@@ -141,8 +146,19 @@ void D3D12Scanout::Present(rex::ui::Presenter& presenter, const ScanoutTexture& 
     slot.list->SetComputeRootShaderResourceView(0, slot.upload->GetGPUVirtualAddress());
     slot.list->SetComputeRootShaderResourceView(1, slot.upload->GetGPUVirtualAddress() + lut_offset);
     slot.list->SetComputeRootDescriptorTable(2, gpu);
-    const uint32_t constants[] = {t.width, t.height, t.pitch, t.tiled, t.endian, t.swizzle, t.rgb10, 0};
-    slot.list->SetComputeRoot32BitConstants(3, 8, constants, 0);
+    // Without a plane the overlay view aliases the title bytes and is never read.
+    slot.list->SetComputeRootShaderResourceView(4, slot.upload->GetGPUVirtualAddress() + (overlay ? overlay_offset : 0));
+    uint32_t constants[24] = {t.width, t.height, t.pitch, t.tiled, t.endian, t.swizzle, t.rgb10, 0};
+    if (overlay) {
+      const auto& o = *overlay;
+      const float scale[] = {float(o.display_width) / float(t.width), float(o.display_height) / float(t.height)};
+      const uint32_t plane[] = {1, o.surface.width, o.surface.height, o.surface.pitch,
+          o.surface.tiled, o.surface.endian, o.surface.swizzle, o.surface.rgb10,
+          o.x, o.y, o.right, o.bottom, o.offset_x, o.offset_y};
+      std::memcpy(constants + 8, plane, sizeof(plane));
+      std::memcpy(constants + 22, scale, sizeof(scale));
+    }
+    slot.list->SetComputeRoot32BitConstants(3, 24, constants, 0);
     slot.list->Dispatch((t.width + 7) / 8, (t.height + 7) / 8, 1);
     auto after = Transition(output, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, Presenter::kGuestOutputInternalState);
     slot.list->ResourceBarrier(1, &after);

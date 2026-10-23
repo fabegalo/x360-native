@@ -49,6 +49,10 @@ void ValidatePacketForBackend(uint32_t header, const rex::memory::RingBuffer& pa
     case PM4_IM_LOAD_IMMEDIATE: required = 3; variable = true; break;
     case PM4_DRAW_INDX: required = 2; variable = true; break;
     case PM4_DRAW_INDX_2: required = 1; variable = true; break;
+    // VdSwap's system command buffer (Guide, notifications). The shared handler
+    // runs it as an indirect buffer, whose packets come through this guard too,
+    // then restores the title state and writes the completion fence.
+    case PM4_XE_SYSTEM_COMMANDS: required = 10; variable = true; break;
     default: {
       char message[96];
       std::snprintf(message, sizeof(message), "PM4 opcode 0x%02X is not supported by Native", opcode);
@@ -68,6 +72,13 @@ void ValidatePacketForBackend(uint32_t header, const rex::memory::RingBuffer& pa
       x360n::native::Unsupported("screen extent endianness not implemented");
     if (uint64_t(address & ~3u) + 12 > 0x20000000)
       x360n::native::Unsupported("screen extent outside guest physical memory");
+  }
+  if (opcode == PM4_XE_SYSTEM_COMMANDS) {
+    const auto list = word() & 0x1fffffff, length = word() & 0xffffff, fence = word();
+    if (uint64_t(list) + uint64_t(length) * 4 > 0x20000000)
+      x360n::native::Unsupported("system command buffer outside guest physical memory");
+    if (uint64_t(fence & 0x1fffffff) + 4 > 0x20000000)
+      x360n::native::Unsupported("system command fence outside guest physical memory");
   }
   if (opcode == PM4_IM_LOAD || opcode == PM4_IM_LOAD_IMMEDIATE) {
     auto source = word(), size = word();

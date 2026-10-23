@@ -11,7 +11,8 @@ class D3D12Scanout final : public ScanoutBackend {
   explicit D3D12Scanout(rex::ui::d3d12::D3D12Provider& provider);
   ~D3D12Scanout();
   void Present(rex::ui::Presenter& presenter, const ScanoutTexture& texture,
-               const void* pixels, const uint32_t* lut) override;
+               const void* pixels, const uint32_t* lut, const ScanoutOverlay* overlay,
+               const void* overlay_pixels) override;
   void Drain() override;
   void InitializeShaderStorage(const std::filesystem::path&, uint32_t title_id) override;
   void CompleteGuestWrites(GuestSync source, uint32_t opcode) override { if (render_) render_->CompleteGuestWrites(source, opcode); }

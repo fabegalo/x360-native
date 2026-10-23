@@ -1559,3 +1559,18 @@ carrega a word 3 e usa os mesmos bits. Mesmo código em `origin/development`
 Xenos/D3D12 e exige capturas idênticas. Antes do patch, Vulkan `21c1d95e…`
 contra D3D12 `038f08b7…`; depois, as duas `038f08b7…`. Só existe onde há o
 snapshot local (`X360N_DRAW_SNAPSHOT`).
+
+## 0144 — gancho de conclusão dos system commands
+
+O handler de `PM4_XE_SYSTEM_COMMANDS` grava a fence de conclusão do buffer de
+sistema (Guide, notificações) logo depois de executá-lo e de restaurar o estado
+do título. Um backend que adia resultados na memória do guest, como o Native com
+os resolves, deixava a fence visível antes desses resultados. O patch acrescenta
+`CommandProcessor::OnSystemCommandsExecuted()`, virtual e vazio, chamado
+imediatamente antes da fence. O Xenos não muda; o Native publica os resolves ali.
+Sem equivalente upstream: o pacote e o handler vêm de patches deste projeto.
+
+`sdkcheck.Native-system-commands` coloca um resolve num buffer de sistema seguido
+de 4.096 draws do título e lê o destino no instante em que a fence fica visível:
+com o gancho o conteúdo já é o final; com o override desativado (diagnóstico),
+3/3 execuções viram a fence antes do resolve.

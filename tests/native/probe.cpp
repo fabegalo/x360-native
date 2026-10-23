@@ -148,7 +148,7 @@ struct QueueTimestamps {
     return double(ticks[1] - ticks[0]) * 1000.0 / double(frequency);
   }
 };
-enum class ReplayMode { kSingle, kStress, kTiming, kRegistryLocked, kInterleaved };
+enum class ReplayMode { kSingle, kStress, kTiming, kRegistryLocked, kInterleaved, kSystemResolve };
 void ReplayDraw(rex::system::IGraphicsSystem& gpu, rex::memory::Memory& memory,
                 const std::filesystem::path& input, const std::filesystem::path& output,
                 ReplayMode replay, RegistryGate* gate = nullptr, QueueTimestamps* queue_timestamps = nullptr) {
@@ -221,21 +221,25 @@ void ReplayDraw(rex::system::IGraphicsSystem& gpu, rex::memory::Memory& memory,
   // Resolves the draw's color target to an independently allocated framebuffer.
   const float xy[]{0, 0, float(width), 0, 0, float(height)};
   std::memcpy(memory.TranslateVirtual(vertices), xy, sizeof(xy));
-  auto resolve = [&](uint32_t dest, uint32_t copy_control) {
+  auto resolve_into = [&](std::vector<uint32_t>& out, uint32_t dest, uint32_t copy_control) {
+    auto put = [&](unsigned index, uint32_t value) { out.insert(out.end(), {index, value}); };
     xe_gpu_vertex_fetch_t vf{}; vf.type = FetchConstantType::kVertex;
     vf.address = memory.GetPhysicalAddress(vertices) >> 2; vf.size = 6; vf.endian = Endian::kNone;
-    set(XE_GPU_REG_SHADER_CONSTANT_FETCH_00_0, vf.dword_0);
-    set(XE_GPU_REG_SHADER_CONSTANT_FETCH_00_1, vf.dword_1);
-    reg::RB_MODECONTROL mode{}; mode.edram_mode = EdramMode::kCopy; set(XE_GPU_REG_RB_MODECONTROL, mode.value);
-    set(XE_GPU_REG_PA_SC_WINDOW_OFFSET, 0); set(XE_GPU_REG_PA_SC_WINDOW_SCISSOR_TL, 0x80000000);
-    set(XE_GPU_REG_PA_SC_WINDOW_SCISSOR_BR, width | (height << 16));
-    set(XE_GPU_REG_RB_COPY_DEST_BASE, memory.GetPhysicalAddress(dest));
-    set(XE_GPU_REG_RB_COPY_DEST_PITCH, width | (height << 16));
-    set(XE_GPU_REG_RB_COPY_DEST_INFO, uint32_t(TextureFormat::k_2_10_10_10) << 7);
-    set(XE_GPU_REG_RB_COPY_CONTROL, copy_control);
+    put(XE_GPU_REG_SHADER_CONSTANT_FETCH_00_0, vf.dword_0);
+    put(XE_GPU_REG_SHADER_CONSTANT_FETCH_00_1, vf.dword_1);
+    reg::RB_MODECONTROL mode{}; mode.edram_mode = EdramMode::kCopy; put(XE_GPU_REG_RB_MODECONTROL, mode.value);
+    put(XE_GPU_REG_PA_SC_WINDOW_OFFSET, 0); put(XE_GPU_REG_PA_SC_WINDOW_SCISSOR_TL, 0x80000000);
+    put(XE_GPU_REG_PA_SC_WINDOW_SCISSOR_BR, width | (height << 16));
+    put(XE_GPU_REG_RB_COPY_DEST_BASE, memory.GetPhysicalAddress(dest));
+    put(XE_GPU_REG_RB_COPY_DEST_PITCH, width | (height << 16));
+    put(XE_GPU_REG_RB_COPY_DEST_INFO, uint32_t(TextureFormat::k_2_10_10_10) << 7);
+    put(XE_GPU_REG_RB_COPY_CONTROL, copy_control);
     reg::VGT_DRAW_INITIATOR rect = draw; rect.prim_type = PrimitiveType::kRectangleList; rect.num_indices = 3;
-    words.insert(words.end(), {Packet(PM4_DRAW_INDX_2, 1), rect.value});
+    out.insert(out.end(), {Packet(PM4_DRAW_INDX_2, 1), rect.value});
   };
+  auto resolve = [&](uint32_t dest, uint32_t copy_control) { resolve_into(words, dest, copy_control); };
+  const uint32_t frame_bytes = width * 736 * 4;
+  uint32_t system_dest = 0, system_fence = 0;
   if (replay == ReplayMode::kTiming) {
     add_draws(1); end_kick(1);  // Shader translation and pipeline creation stay outside the timed segments.
     for (unsigned s = 0; s < kTimingSegments; ++s) { add_draws(kTimingDraws); end_kick(kTimingDraws); }
@@ -262,6 +266,22 @@ void ReplayDraw(rex::system::IGraphicsSystem& gpu, rex::memory::Memory& memory,
     add_draws(kInterleavedDraws);
     set(XE_GPU_REG_RB_COLOR_INFO, regs[XE_GPU_REG_RB_COLOR_INFO]);
     add_draws(kInterleavedDraws);
+  } else if (replay == ReplayMode::kSystemResolve) {
+    // A system command buffer resolves the title's target, then title draws keep
+    // the command processor busy: its completion fence must not become visible
+    // before that resolve is in guest memory.
+    system_dest = memory.SystemHeapAlloc(frame_bytes, 4096, rex::memory::kSystemHeapPhysical);
+    system_fence = memory.SystemHeapAlloc(4096, 4096, rex::memory::kSystemHeapPhysical);
+    const auto list_buffer = memory.SystemHeapAlloc(65536, 4096, rex::memory::kSystemHeapPhysical);
+    Require(system_dest && system_fence && list_buffer, "system resolve allocations");
+    add_draws(1); end_kick(1);
+    std::vector<uint32_t> list;
+    resolve_into(list, system_dest, 0x100000);
+    for (size_t i = 0; i < list.size(); ++i)
+      rex::memory::store_and_swap<uint32_t>(memory.TranslateVirtual(list_buffer + uint32_t(i * 4)), list[i]);
+    words.insert(words.end(), {Packet(PM4_XE_SYSTEM_COMMANDS, 10), memory.GetPhysicalAddress(list_buffer),
+        uint32_t(list.size()), memory.GetPhysicalAddress(system_fence), 1, 0, 0, 0, 0, 0, 0});
+    add_draws(kLockedDraws); end_kick(kLockedDraws);
   } else {
     add_draws(repetitions);
   }
@@ -291,6 +311,8 @@ void ReplayDraw(rex::system::IGraphicsSystem& gpu, rex::memory::Memory& memory,
   };
   clock::time_point timed_start{};
   double timed_worker_cpu = 0;
+  bool fence_seen_first = false;
+  std::vector<uint8_t> at_fence;
   for (size_t k = 0; k < kicks.size(); ++k) {
     const Kick& kick = kicks[k];
     const bool locked = replay == ReplayMode::kRegistryLocked && k == 1;
@@ -302,6 +324,16 @@ void ReplayDraw(rex::system::IGraphicsSystem& gpu, rex::memory::Memory& memory,
       if (queue_timestamps) queue_timestamps->Mark(0);
     }
     mmio->write(nullptr, mmio->callback_context, 0x7fc80714, uint32_t(kick.end));
+    if (replay == ReplayMode::kSystemResolve && k == 1) {
+      // Read the resolve destination the moment the guest could see the fence.
+      auto* fence = memory.TranslateVirtual<volatile uint32_t*>(system_fence);
+      const auto deadline = clock::now() + std::chrono::seconds(15);
+      while (rex::memory::load_and_swap<uint32_t>(const_cast<uint32_t*>(fence)) != 1 &&
+             *marker != kick.marker && clock::now() < deadline) std::this_thread::yield();
+      fence_seen_first = rex::memory::load_and_swap<uint32_t>(const_cast<uint32_t*>(fence)) == 1 && *marker != kick.marker;
+      at_fence.assign(memory.TranslateVirtual<const uint8_t*>(system_dest),
+                      memory.TranslateVirtual<const uint8_t*>(system_dest) + frame_bytes);
+    }
     bool retired = wait(kick.marker, locked ? std::chrono::seconds(3) : std::chrono::seconds(15),
                         replay == ReplayMode::kTiming);
     const double wall_ms = std::chrono::duration<double, std::milli>(clock::now() - start).count();
@@ -320,6 +352,13 @@ void ReplayDraw(rex::system::IGraphicsSystem& gpu, rex::memory::Memory& memory,
   // The last kick ends after XE_SWAP, by which both backends submitted the
   // timed draws, the resolve and the swap; the capture's own work comes later.
   if (queue_timestamps) queue_timestamps->Mark(1);
+  if (replay == ReplayMode::kSystemResolve) {
+    // The title's final resolve of the same unchanged target is the reference.
+    const bool matches = std::memcmp(at_fence.data(), memory.TranslateVirtual<const uint8_t*>(image), frame_bytes) == 0;
+    std::cout << "system_resolve fence_before_draws_done=" << fence_seen_first << " resolve_visible_at_fence=" << matches << '\n';
+    Require(fence_seen_first, "system command fence was not observed while title draws were pending");
+    Require(matches, "system command fence became visible before its resolve reached guest memory");
+  }
   rex::ui::RawImage capture; Require(gpu.presenter()->CaptureGuestOutput(capture), "isolated draw capture");
   if (replay == ReplayMode::kTiming) {
     // The capture needs the resolve, hence every timed draw, done on the GPU:
@@ -339,7 +378,7 @@ void ReplayDraw(rex::system::IGraphicsSystem& gpu, rex::memory::Memory& memory,
 }
 }
 int wmain(int argc, wchar_t** argv) {
-  if (argc != 3 && argc != 4 && argc != 5) { std::cerr << "usage: x360n_native_probe native|xenos OUTPUT_DIRECTORY [--reject|--abi|--replay INPUT_DIRECTORY|--draw-replay|--draw-stress|--draw-timing|--draw-registry-locked|--draw-interleaved INPUT_DIRECTORY]\n"; return 2; }
+  if (argc != 3 && argc != 4 && argc != 5) { std::cerr << "usage: x360n_native_probe native|xenos OUTPUT_DIRECTORY [--reject|--abi|--replay INPUT_DIRECTORY|--draw-replay|--draw-stress|--draw-timing|--draw-registry-locked|--draw-interleaved|--draw-system-resolve INPUT_DIRECTORY|--overlay|--overlay-system]\n"; return 2; }
   try {
     Require(SUCCEEDED(CoInitializeEx(nullptr, COINIT_MULTITHREADED)), "COM setup");
     const std::filesystem::path output(argv[2]);
@@ -364,7 +403,8 @@ int wmain(int argc, wchar_t** argv) {
     const ReplayMode replay_mode = stress ? ReplayMode::kStress
         : replay_flag == L"--draw-timing" ? ReplayMode::kTiming
         : replay_flag == L"--draw-registry-locked" ? ReplayMode::kRegistryLocked
-        : replay_flag == L"--draw-interleaved" ? ReplayMode::kInterleaved : ReplayMode::kSingle;
+        : replay_flag == L"--draw-interleaved" ? ReplayMode::kInterleaved
+        : replay_flag == L"--draw-system-resolve" ? ReplayMode::kSystemResolve : ReplayMode::kSingle;
     const bool draw_replay = replay_flag == L"--draw-replay" || replay_mode != ReplayMode::kSingle;
     RegistryGate registry_gate;
     if (replay_mode == ReplayMode::kRegistryLocked) registry_gate.Register();
@@ -451,9 +491,15 @@ int wmain(int argc, wchar_t** argv) {
     Require(physical_image != UINT32_MAX && physical_ring != UINT32_MAX && physical_done != UINT32_MAX, "physical allocation translation");
     auto* mmio = memory->LookupVirtualMappedRange(0x7fc80714);
     Require(mmio != nullptr, "GPU MMIO registration");
-    const bool overlay_test = argc == 4 && std::wstring_view(argv[3]) == L"--overlay";
+    // --overlay-system programs the plane through VdSwap's system command buffer
+    // (PM4_XE_SYSTEM_COMMANDS), which also clobbers the title's scanout fetch.
+    const bool overlay_system = argc == 4 && std::wstring_view(argv[3]) == L"--overlay-system";
+    const bool overlay_test = overlay_system || (argc == 4 && std::wstring_view(argv[3]) == L"--overlay");
     const auto overlay_image = overlay_test ? memory->SystemHeapAlloc(64 * 64 * 4, 4096, rex::memory::kSystemHeapPhysical) : 0;
     if (overlay_test) Require(overlay_image != 0, "overlay allocation");
+    const auto system_list = overlay_system ? memory->SystemHeapAlloc(4096, 4096, rex::memory::kSystemHeapPhysical) : 0;
+    const auto system_fence = overlay_system ? memory->SystemHeapAlloc(4096, 4096, rex::memory::kSystemHeapPhysical) : 0;
+    if (overlay_system) Require(system_list && system_fence, "system command allocation");
     if (argc == 4 && !overlay_test) {
       std::vector<uint32_t> words;
       const std::wstring_view mode(argv[3]);
@@ -521,7 +567,9 @@ int wmain(int argc, wchar_t** argv) {
           const auto offset = texture_util::GetTiledOffset2D(x, y, 64, 2);
           std::memcpy(memory->TranslateVirtual<uint8_t*>(overlay_image) + offset, &colors[x / 16], 4);
         }
-        auto set = [&](unsigned index, uint32_t value) { words.insert(words.end(), {index, value}); };
+        std::vector<uint32_t> list;
+        auto& target = overlay_system ? list : words;
+        auto set = [&](unsigned index, uint32_t value) { target.insert(target.end(), {index, value}); };
         set(XE_GPU_REG_D1OVL_ENABLE, frame % 4 != 3);
         set(XE_GPU_REG_D1OVL_CONTROL1, 0);
         set(XE_GPU_REG_D1OVL_SURFACE_ADDRESS, memory->GetPhysicalAddress(overlay_image));
@@ -531,6 +579,17 @@ int wmain(int argc, wchar_t** argv) {
         set(XE_GPU_REG_D1OVL_END, (96 << 16) | 80);
         set(XE_GPU_REG_D1OVL_SURFACE_OFFSET_X, 32);
         set(XE_GPU_REG_D1OVL_SURFACE_OFFSET_Y, 16);
+        if (overlay_system) {
+          // The title's state must be restored after the system buffer: a wrong
+          // scanout fetch would fail the swap or the pixel comparison below.
+          target.push_back((5u << 16) | XE_GPU_REG_SHADER_CONSTANT_FETCH_00_0);
+          target.insert(target.end(), 6, 0);
+          for (unsigned i = 0; i < list.size(); ++i)
+            rex::memory::store_and_swap<uint32_t>(memory->TranslateVirtual(system_list + i * 4), list[i]);
+          words.insert(words.end(), {Packet(PM4_XE_SYSTEM_COMMANDS, 10), memory->GetPhysicalAddress(system_list),
+              uint32_t(list.size()), memory->GetPhysicalAddress(system_fence), frame + 1});
+          words.insert(words.end(), raw, raw + 6);
+        }
       }
       if (pwl) {
         // Exercise actual guest PWL programming, with independent RGB slopes.
@@ -555,6 +614,9 @@ int wmain(int argc, wchar_t** argv) {
       while (*marker != frame + 1 && std::chrono::steady_clock::now() < deadline)
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
       Require(*marker == frame + 1, "PM4 completion deadline");
+      if (overlay_system)
+        Require(rex::memory::load_and_swap<uint32_t>(memory->TranslateVirtual(system_fence)) == frame + 1,
+                "system command buffer completion fence");
       rex::ui::RawImage capture;
       Require(gpu->presenter()->CaptureGuestOutput(capture), "GPU capture");
       Require(capture.width == width && capture.height == height, "capture size");
@@ -615,6 +677,7 @@ int wmain(int argc, wchar_t** argv) {
     gpu->Shutdown(); shutdown.gpu = nullptr; gpu.reset();
     memory->SystemHeapFree(image); memory->SystemHeapFree(ring); memory->SystemHeapFree(done);
     if (overlay_image) memory->SystemHeapFree(overlay_image);
+    if (system_list) { memory->SystemHeapFree(system_list); memory->SystemHeapFree(system_fence); }
     rt.Shutdown();
     rex::FlushLogging();
     std::cout << "PASS plugin=" << plugin << " frames=" << (replay ? 1 : 48) << " checked_channels=" << tested

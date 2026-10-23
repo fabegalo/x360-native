@@ -17,6 +17,10 @@ class CommandProcessor final : public rex::graphics::CommandProcessor {
   // primary buffer, and waits poll memory the guest or a resolve may write.
   void OnPrimaryBufferEnd() override { CompleteGuestWrites(kGuestSyncBufferEnd); }
   void PrepareForWait() override { CompleteGuestWrites(kGuestSyncWait); }
+  // The system buffer's completion fence is next: its resolves must be visible first.
+  void OnSystemCommandsExecuted() override {
+    CompleteGuestWrites(kGuestSyncPacket, rex::graphics::xenos::PM4_XE_SYSTEM_COMMANDS);
+  }
  public:
   // Called before PM4 packets that read or write guest memory.
   void CompleteGuestWrites(GuestSync, uint32_t opcode = 0xFF);

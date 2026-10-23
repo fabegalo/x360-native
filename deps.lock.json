@@ -284,8 +284,8 @@
                                             "file":  "patches/rexglue-sdk/0023-synchronize-ring-reinitialization.patch",
                                             "sha256":  "60f4dd12ada95717e385d3edf449b5bb3abae69bbc8c7ff05f0bec07bdfa04fb",
                                             "files":  {
-                                                          "include/rex/graphics/command_processor.h":  "7bf96a1beb75e4495d97c2631573ee666e1fde5ea8b813ca7a034679abb65a63",
-                                                          "src/graphics/command_processor.cpp":  "db782a5c854eb4d0fa6f29d37a9a51894a1a444038516433beaccd2d3f0a6fd0"
+                                                          "include/rex/graphics/command_processor.h":  "ffb125a90bc322132ebc425a35d47c2c12e6b48bcdda7ad305edb1f3f9ac9271",
+                                                          "src/graphics/command_processor.cpp":  "08bc445d18d059218ac63281d2c7aa9ee19a7f6fc2547ab9553f12098c0eb050"
                                                       },
                                             "base_files":  {
                                                                "include/rex/graphics/command_processor.h":  "eb02162883373a0d2ce5d93bd6c12d9931ff26dc27df473249bec85a186c7cfe",
@@ -303,8 +303,8 @@
                                                           "include/rex/system/interfaces/graphics.h":  "491dffd35d938f9fde908ff693a383364d7255133722affe17b0a53cf813f9c3",
                                                           "include/rex/graphics/graphics_system.h":  "259d7acc4e6d6dc01eb546cf101389bf4cf352b54c78c392cb4a2a595531c53f",
                                                           "src/graphics/graphics_system.cpp":  "fb3256cec0bbf518125245b180508aa40587ab239f2db47aeea6981d1a3174de",
-                                                          "include/rex/graphics/command_processor.h":  "7bf96a1beb75e4495d97c2631573ee666e1fde5ea8b813ca7a034679abb65a63",
-                                                          "src/graphics/command_processor.cpp":  "db782a5c854eb4d0fa6f29d37a9a51894a1a444038516433beaccd2d3f0a6fd0",
+                                                          "include/rex/graphics/command_processor.h":  "ffb125a90bc322132ebc425a35d47c2c12e6b48bcdda7ad305edb1f3f9ac9271",
+                                                          "src/graphics/command_processor.cpp":  "08bc445d18d059218ac63281d2c7aa9ee19a7f6fc2547ab9553f12098c0eb050",
                                                           "src/graphics/d3d12/command_processor.cpp":  "55f87348cee13631a4697360f8bdf63fb6fb6f14c96bdc39f120ae322eba6c34",
                                                           "src/graphics/vulkan/command_processor.cpp":  "9dc51bab07f15cccc5039f0b8e7dc6ffcd83204ba6930166cb835a1ede7f9db3",
                                                           "src/audio/sdl/sdl_audio_driver.cpp":  "b563c3686247199c274e55531429f3657a4426a76536c1ebe048910c13eef690"
@@ -944,7 +944,7 @@
                                                           "CMakeLists.txt":  "92c180ed4a4f8c3c2ded043733b8365c356f16746bd64b34860e1ab7af578ae7",
                                                           "include/rex/perf/counter.h":  "c8820222ffe4c5c639269d949c8be9326a78ab046ad2abf6405ab891835716fc",
                                                           "src/core/perf/counter.cpp":  "df95e01382113fcd10e5698b8f6985f7d14486a834e542be95dfc1e59b611268",
-                                                          "src/graphics/command_processor.cpp":  "db782a5c854eb4d0fa6f29d37a9a51894a1a444038516433beaccd2d3f0a6fd0",
+                                                          "src/graphics/command_processor.cpp":  "08bc445d18d059218ac63281d2c7aa9ee19a7f6fc2547ab9553f12098c0eb050",
                                                           "src/graphics/d3d12/pipeline_cache.cpp":  "37d0ee1c01c689f941676b19e3f5049c436f1f50c411a2a32720e2bdc7bac80d",
                                                           "src/system/runtime.cpp":  "5ba8271148a18c512a4c2d17479934c3c4af718254ea0ac925f00822efbbd8c2"
                                                       },
@@ -1002,7 +1002,7 @@
                                             "src/graphics/command_processor.cpp": "98014a045bc4a9403827d0c4de044d7b79b052921f485e0dd8719577d5d0bc91"
                                           },
                                           "files": {
-                                            "src/graphics/command_processor.cpp": "db782a5c854eb4d0fa6f29d37a9a51894a1a444038516433beaccd2d3f0a6fd0"
+                                            "src/graphics/command_processor.cpp": "08bc445d18d059218ac63281d2c7aa9ee19a7f6fc2547ab9553f12098c0eb050"
                                           },
                                           "test": "sdkcheck.Native-packet-guard"
                                         },
@@ -1013,7 +1013,7 @@
     "src/graphics/command_processor.cpp": "79658b4f25a195a8f1e7e29bda143d75551e0b2127596eac50babb2538c78c9a"
   },
   "files": {
-    "src/graphics/command_processor.cpp": "db782a5c854eb4d0fa6f29d37a9a51894a1a444038516433beaccd2d3f0a6fd0"
+    "src/graphics/command_processor.cpp": "08bc445d18d059218ac63281d2c7aa9ee19a7f6fc2547ab9553f12098c0eb050"
   },
   "test": "sdkcheck.Native-packet-guard; native.packet-payload"
 },
@@ -1051,10 +1051,10 @@
     "src/kernel/xboxkrnl/xboxkrnl_video.cpp": "969ba88d7b17cd9fe500cebdd5a53602ebae0df3d7b01b3477a3b65e66c56729"
   },
   "files": {
-    "include/rex/graphics/command_processor.h": "7bf96a1beb75e4495d97c2631573ee666e1fde5ea8b813ca7a034679abb65a63",
+    "include/rex/graphics/command_processor.h": "ffb125a90bc322132ebc425a35d47c2c12e6b48bcdda7ad305edb1f3f9ac9271",
     "include/rex/graphics/xenos.h": "e146b2e41f3c3e7a380a80546309847ac71d02610d414038ec63f1f1e2b5c3a5",
     "include/rex/kernel/xboxkrnl/video.h": "bf901c7557ea5090c89fda079432a22e374a753b3a16224f8dc3e87369906d38",
-    "src/graphics/command_processor.cpp": "db782a5c854eb4d0fa6f29d37a9a51894a1a444038516433beaccd2d3f0a6fd0",
+    "src/graphics/command_processor.cpp": "08bc445d18d059218ac63281d2c7aa9ee19a7f6fc2547ab9553f12098c0eb050",
     "src/kernel/xboxkrnl/xboxkrnl_video.cpp": "276d4ba7897095494ddd1de6182b3327617273ab29943ec520a5ebf6afb9936c"
   },
   "test": "tests/sdkcheck/system_command_buffer_test.cpp"
@@ -1566,7 +1566,7 @@
     "include/rex/graphics/d3d12/command_processor.h": "dcacfe0cee3cf0e21b3684bd3e54cb263f0cc588b5ec36abb4ac5ea912591d46",
     "include/rex/graphics/d3d12/texture_cache.h": "0c88603fa7088d42fea41b00e4db547087adbb849c74d60fdb923bf3ff75a3d4",
     "include/rex/graphics/display_overlay.h": "2841fdc05e4e7c248e9dcfdded2c0edd6503435b22bb1d5af0c8f113a9494cda",
-    "src/graphics/command_processor.cpp": "db782a5c854eb4d0fa6f29d37a9a51894a1a444038516433beaccd2d3f0a6fd0",
+    "src/graphics/command_processor.cpp": "08bc445d18d059218ac63281d2c7aa9ee19a7f6fc2547ab9553f12098c0eb050",
     "src/graphics/d3d12/command_processor.cpp": "55f87348cee13631a4697360f8bdf63fb6fb6f14c96bdc39f120ae322eba6c34",
     "src/graphics/d3d12/texture_cache.cpp": "d737d23e7b989408cdc3c428b9834faaf99bd2dca1fd95e69e9b5f476ca681c0",
     "src/graphics/shaders/bytecode/d3d12_5_1/display_overlay_cs.h": "878b1ca19d0b44a2f730a6d8b312f9180f496651c1c3730e8668cace274f2f40",
@@ -1984,6 +1984,19 @@
     "src/graphics/pipeline/shader/spirv_translator_fetch.cpp": "495fcda602e816d3d19527fe6c86708d820c8f995e9919d75f9c30147ae3c02b"
   },
   "test": "sdkcheck.Vulkan-texture-exp-adjust: the retained draw (textures with fetch exp_adjust +2) captures identically on Xenos/Vulkan and Xenos/D3D12; 4x darker on Vulkan before the patch"
+},
+{
+  "file": "patches/rexglue-sdk/0144-system-commands-completion-hook.patch",
+  "sha256": "ff28d5d6ec2620d5f6a9ef7868430853b087d766136cb60a9d1856dbd3277722",
+  "base_files": {
+    "include/rex/graphics/command_processor.h": "7bf96a1beb75e4495d97c2631573ee666e1fde5ea8b813ca7a034679abb65a63",
+    "src/graphics/command_processor.cpp": "db782a5c854eb4d0fa6f29d37a9a51894a1a444038516433beaccd2d3f0a6fd0"
+  },
+  "files": {
+    "include/rex/graphics/command_processor.h": "ffb125a90bc322132ebc425a35d47c2c12e6b48bcdda7ad305edb1f3f9ac9271",
+    "src/graphics/command_processor.cpp": "08bc445d18d059218ac63281d2c7aa9ee19a7f6fc2547ab9553f12098c0eb050"
+  },
+  "test": "sdkcheck.Native-system-commands: a resolve recorded inside a system command buffer is in guest memory when its completion fence becomes visible; fails before the patch"
 }
 ]
                     },

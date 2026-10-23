@@ -1,6 +1,9 @@
 #include "command_processor.h"
 #include <rex/graphics/graphics_system.h>
+#include <rex/graphics/display_overlay.h>
+#include <rex/kernel/xboxkrnl/video.h>
 #include <rex/logging.h>
+#include <algorithm>
 #include <cstdio>
 #include <cstdlib>
 #include <fstream>
@@ -70,8 +73,20 @@ void CommandProcessor::IssueSwap(uint32_t, uint32_t width, uint32_t height) {
       const auto& c = gamma_ramp_256_entry_table()[i];
       lut[i] = c.color_10_red | (c.color_10_green << 10) | (c.color_10_blue << 20);
     }
+    // Same D1OVL decoding and display coordinates as the pinned Xenos swap.
+    ScanoutOverlay overlay{};
+    const auto plane = rex::graphics::DecodeDisplayOverlay(*register_file_);
+    if (plane.valid) {
+      rex::system::X_VIDEO_MODE mode;
+      rex::kernel::xboxkrnl::VdQueryVideoMode(&mode);
+      overlay = {DecodeScanout(plane.fetch, 0, 0), plane.x, plane.y, plane.right, plane.bottom,
+                 plane.offset_x, plane.offset_y, std::max(1u, uint32_t(mode.display_width)),
+                 std::max(1u, uint32_t(mode.display_height))};
+    }
     scanout_->Present(*graphics_system_->presenter(), texture,
-                      memory_->TranslatePhysical(texture.address), lut);
+                      memory_->TranslatePhysical(texture.address), lut,
+                      plane.valid ? &overlay : nullptr,
+                      plane.valid ? memory_->TranslatePhysical(overlay.surface.address) : nullptr);
     last_swap_succeeded_ = true;
   } catch (const std::exception& e) { Unsupported(e.what()); }
 }

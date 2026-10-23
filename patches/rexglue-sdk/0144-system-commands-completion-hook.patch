@@ -1,0 +1,22 @@
+--- a/include/rex/graphics/command_processor.h
++++ b/include/rex/graphics/command_processor.h
+@@ -174,6 +174,9 @@
+ 
+   uint32_t ExecutePrimaryBuffer(uint32_t start_index, uint32_t end_index);
+   virtual void OnPrimaryBufferEnd() {}
++  // A system command buffer ran and its completion fence is about to become
++  // visible to the guest: backends that defer guest-memory results publish them.
++  virtual void OnSystemCommandsExecuted() {}
+   void ExecuteIndirectBuffer(uint32_t ptr, uint32_t length);
+   bool ExecutePacket(memory::RingBuffer* reader);
+   bool ExecutePacketType0(memory::RingBuffer* reader, uint32_t packet);
+--- a/src/graphics/command_processor.cpp
++++ b/src/graphics/command_processor.cpp
+@@ -1075,6 +1075,7 @@
+   active_pixel_shader_ = pixel_shader;
+   bin_select_ = bin_select;
+   bin_mask_ = bin_mask;
++  OnSystemCommandsExecuted();
+   memory::store_and_swap<uint32_t>(memory_->TranslatePhysical(fence), sequence);
+   return true;
+ }

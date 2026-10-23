@@ -40,6 +40,20 @@ if(TARGET Catch2::Catch2WithMain)
   set_tests_properties(native.packet-payload PROPERTIES LABELS project TIMEOUT 30)
   add_test(NAME native.abi COMMAND x360n_native_probe native ${CMAKE_CURRENT_BINARY_DIR}/abi-probe --abi)
   set_tests_properties(native.abi PROPERTIES LABELS project TIMEOUT 20)
+  # D1OVL plane composed before gamma, programmed directly and through VdSwap's
+  # system command buffer (PM4_XE_SYSTEM_COMMANDS), against computed pixels.
+  set(_overlay_backends native xenos:d3d12)
+  if(REXGLUE_USE_VULKAN)
+    list(APPEND _overlay_backends xenos:vulkan)
+  endif()
+  foreach(_backend IN LISTS _overlay_backends)
+    string(REPLACE ":" "-" _dir "${_backend}")
+    foreach(_mode overlay overlay-system)
+      add_test(NAME native.${_mode}-${_dir} COMMAND x360n_native_probe ${_backend}
+          ${CMAKE_CURRENT_BINARY_DIR}/${_mode}-${_dir} --${_mode})
+      set_tests_properties(native.${_mode}-${_dir} PROPERTIES LABELS project TIMEOUT 60)
+    endforeach()
+  endforeach()
   add_test(NAME sdkcheck.Native-packet-guard COMMAND ${CMAKE_COMMAND}
       -DPROBE=$<TARGET_FILE:x360n_native_probe> -DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/guard-probe
       -P ${CMAKE_CURRENT_SOURCE_DIR}/../../tests/native/reject_packet.cmake)
@@ -66,6 +80,10 @@ if(TARGET Catch2::Catch2WithMain)
         -DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/edram-barriers -DSNAPSHOT=${X360N_DRAW_SNAPSHOT}
         -P ${CMAKE_CURRENT_SOURCE_DIR}/../../tests/native/edram_barriers.cmake)
     set_tests_properties(native.edram-barriers PROPERTIES LABELS project TIMEOUT 150)
+    # Patch 0144: a system command buffer's fence is visible only after its resolves.
+    add_test(NAME sdkcheck.Native-system-commands COMMAND x360n_native_probe native
+        ${CMAKE_CURRENT_BINARY_DIR}/system-resolve --draw-system-resolve ${X360N_DRAW_SNAPSHOT})
+    set_tests_properties(sdkcheck.Native-system-commands PROPERTIES LABELS project TIMEOUT 60)
     if(REXGLUE_USE_VULKAN)
       add_test(NAME sdkcheck.Vulkan-texture-exp-adjust COMMAND ${CMAKE_COMMAND}
           -DPROBE=$<TARGET_FILE:x360n_native_probe> -DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/api-capture
