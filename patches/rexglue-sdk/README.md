@@ -1819,3 +1819,14 @@ limite superior é o stride de linhas da fatia, não a extensão.
 a fórmula `Tiled3D` do Canary (idêntica à do SDK no teste): 6 das 9
 verificações falham com o `util.cpp` anterior; a do limite inferior depende do
 header. `native.texture` continua passando; não houve execução em GPU.
+
+## 0187 — fase de macro tile no destino de resolve tiled
+
+Porta 89609297c: o D3D avança `RB_COPY_DEST_BASE` em macro tiles 32×32, que
+têm menos de 4 KB em 8bpp/16bpp; o resto da base vira deslocamento em X antes
+do cálculo tiled 2D (base, offsets e extensões do destino). O Canary cita a
+refração da água de 534307D5; não reproduzido aqui.
+
+`sdkcheck.canary-resolve-dest`: uma base avançada N macro tiles equivale à
+cópia N×32 pixels à direita da base alinhada; 9 das 16 verificações falham com
+o `draw.cpp` anterior (o caso 32bpp de controle passa nos dois). Sem GPU.
