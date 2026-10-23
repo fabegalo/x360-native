@@ -1574,3 +1574,35 @@ Sem equivalente upstream: o pacote e o handler vêm de patches deste projeto.
 de 4.096 draws do título e lê o destino no instante em que a fence fica visível:
 com o gancho o conteúdo já é o final; com o override desativado (diagnóstico),
 3/3 execuções viram a fence antes do resolve.
+
+## 0145 — fetch de vértice inativo no Vulkan
+
+Porta o 0077 para o Xenos/Vulkan. `VulkanCommandProcessor::IssueDraw` rejeitava o
+draw inteiro quando um slot do bitmap estático de vertex fetch tinha descritor
+inválido, mesmo com o fetch predicado fora. No Forza Horizon em Vulkan, o slot 90
+(`00000001 00000000`) atrás de `setp_eq c127.x` com `c127.x = 0` derrubou 73.432
+draws numa sessão de 8 min, entre passes de profundidade e de cor, enquanto o
+D3D12 com o 0077 desenhava os mesmos shaders
+([X2](../../docs/reports/graphics/xenos-fetch-predication.md)).
+
+A prova sai do header D3D12 para `pipeline/shader/inactive_vertex_fetch.h`,
+compartilhado, com um parâmetro de denormais. O DXBC sempre os descarta. O SPIR-V
+só usa `DenormFlushToZero` quando o device informa
+`shaderDenormFlushToZeroFloat32`. Sem isso, um `c127.x` denormal pode comparar
+como diferente de zero no host, e a prova o trata como desconhecido (mantém a
+rejeição). A RTX 4070 (driver 617.42) informa 0. NaN e zero com sinal valem
+igual nos dois tradutores (`OpFOrdEqual`/`OpFUnordNotEqual` como `eq`/`ne` do
+DXBC). O header D3D12 só encaminha com descarte ligado; o D3D12 não muda.
+Mesmos limites do 0077: sem índice, título ou hash especial; o slot não é marcado
+residente e é reavaliado a cada draw.
+
+`sdkcheck.Vulkan-predicated-vertex-fetch` executa no `x360n_native_probe` um VS
+sintético (sem conteúdo de jogo) com a mesma estrutura do shader do Forza:
+`setp_eq c127.x`, `(!p0) exec` e `vfetch_full` na constante 90 inválida, com
+`edram_mode=5`. O draw com `c127.x = 0` tem que passar, e o mesmo draw com
+`c127.x = 1` tem que ser rejeitado. Isso prova que o draw chegou à checagem e
+que nada fica em cache após mudar a constante. O veredito vem do próprio log do
+backend. Antes do patch, o Vulkan rejeitou o draw inativo
+(`inactive fetch: rejected=1 failed=1`). `sdkcheck.D3D12-predicated-vertex-fetch`
+é o controle: passou antes e depois. `sdkcheck.inactive-vertex-fetch` passa a
+cobrir a prova compartilhada com e sem descarte de denormais.

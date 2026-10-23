@@ -58,6 +58,19 @@ if(TARGET Catch2::Catch2WithMain)
       -DPROBE=$<TARGET_FILE:x360n_native_probe> -DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/guard-probe
       -P ${CMAKE_CURRENT_SOURCE_DIR}/../../tests/native/reject_packet.cmake)
   set_tests_properties(sdkcheck.Native-packet-guard PROPERTIES LABELS project TIMEOUT 25)
+  # Patches 0077 (D3D12) and 0145 (Vulkan): a synthetic draw whose invalid vertex
+  # fetch p0 predicates out is issued; the same fetch made active is rejected.
+  set(_fetch_apis d3d12)
+  if(REXGLUE_USE_VULKAN)
+    list(APPEND _fetch_apis vulkan)
+  endif()
+  foreach(_api IN LISTS _fetch_apis)
+    string(REPLACE "d3d12" "D3D12" _name "${_api}")
+    string(REPLACE "vulkan" "Vulkan" _name "${_name}")
+    add_test(NAME sdkcheck.${_name}-predicated-vertex-fetch COMMAND x360n_native_probe xenos:${_api}
+        ${CMAKE_CURRENT_BINARY_DIR}/predicated-fetch-${_api} --predicated-fetch)
+    set_tests_properties(sdkcheck.${_name}-predicated-vertex-fetch PROPERTIES LABELS project TIMEOUT 60)
+  endforeach()
   # Patch 0142: non-memexport Xenos draws must not wait for the cvar registry lock.
   # native.edram-barriers: Native EDRAM barriers only on ROV layout changes.
   # Replays a retained draw from local evidence (user content, not distributed), so

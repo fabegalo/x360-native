@@ -7,6 +7,7 @@
 #include <rex/graphics/registers.h>
 #include <rex/graphics/register_file.h>
 #include <rex/graphics/flags.h>
+#include <rex/graphics/format/ucode.h>
 #include <rex/graphics/graphics_system.h>
 #include <rex/cvar.h>
 #include <rex/graphics/pipeline/texture/util.h>
@@ -376,9 +377,87 @@ void ReplayDraw(rex::system::IGraphicsSystem& gpu, rex::memory::Memory& memory,
   }
   WritePNG(output / "draw.png", capture);
 }
+// Patches 0077 (D3D12) and 0145 (Vulkan): synthetic VS whose only vertex fetch
+// (constant 90, invalid descriptor as in Forza) runs under !p0 after
+// `setp_eq c127.x`. With c127.x = 0 the fetch never executes and the draw must
+// not be rejected; the same draw with c127.x = 1 must still be, which proves
+// that it reached the descriptor check and that no proof is cached across a
+// constant update. Verdicts come from the backend's own log lines.
+void PredicatedFetchDraws(rex::system::IGraphicsSystem& gpu, rex::memory::Memory& memory,
+                          const std::filesystem::path& output) {
+  using namespace rex::graphics::ucode;
+  auto exec = [](ControlFlowOpcode opcode, uint32_t address, uint32_t sequence, bool condition = false) {
+    return address | (uint64_t(1) << 12) | (uint64_t(sequence) << 16) | (uint64_t(condition) << 42) |
+           (uint64_t(opcode) << 44);
+  };
+  const uint64_t alloc_position = (uint64_t(AllocType::kVsPosition) << 41) | (uint64_t(ControlFlowOpcode::kAlloc) << 44);
+  std::vector<uint32_t> vs;
+  auto pair = [&](uint64_t a, uint64_t b) {
+    vs.insert(vs.end(), {uint32_t(a), uint32_t(a >> 32) | uint32_t(b << 16), uint32_t(b >> 16)});
+  };
+  pair(exec(ControlFlowOpcode::kExec, 2, 0), exec(ControlFlowOpcode::kCondExecPred, 3, 1));
+  pair(alloc_position, exec(ControlFlowOpcode::kExecEnd, 4, 0));
+  // setp_eq c127.x (scalar src3 constant, no register writes).
+  vs.insert(vs.end(), {uint32_t(AluScalarOpcode::kSetpEq) << 26, 0x40, 127});
+  // (!p0) vfetch_full r1.x___, r0.x, constant 90 (30 * 3 + 0), FMT_32_FLOAT, stride 1.
+  vs.insert(vs.end(), {(1u << 12) | (1u << 19) | (30u << 20),
+                       0xFF8u | (uint32_t(VertexFormat::k_32_FLOAT) << 16) | (1u << 31), 1});
+  // max oPos, c0, c0.
+  vs.insert(vs.end(), {62u | (1u << 15) | (0xFu << 16), 0, uint32_t(AluVectorOpcode::kMax) << 24});
+  const auto ring = memory.SystemHeapAlloc(65536, 4096, rex::memory::kSystemHeapPhysical);
+  const auto done = memory.SystemHeapAlloc(4096, 4096, rex::memory::kSystemHeapPhysical);
+  Require(ring && done, "predicated fetch allocations");
+  std::vector<uint32_t> words;
+  auto set = [&](unsigned index, uint32_t value) { words.insert(words.end(), {index, value}); };
+  reg::RB_MODECONTROL mode{}; mode.edram_mode = EdramMode::kDepthOnly; set(XE_GPU_REG_RB_MODECONTROL, mode.value);
+  reg::RB_SURFACE_INFO surface{}; surface.surface_pitch = 1280; set(XE_GPU_REG_RB_SURFACE_INFO, surface.value);
+  reg::SQ_PROGRAM_CNTL program{}; program.vs_num_reg = 3; set(XE_GPU_REG_SQ_PROGRAM_CNTL, program.value);
+  set(XE_GPU_REG_SHADER_CONSTANT_000_X + 3, 0x3F800000);
+  set(XE_GPU_REG_SHADER_CONSTANT_FETCH_00_0 + 90 * 2, 0x00000001);
+  set(XE_GPU_REG_SHADER_CONSTANT_FETCH_00_0 + 90 * 2 + 1, 0);
+  words.insert(words.end(), {Packet(PM4_IM_LOAD_IMMEDIATE, unsigned(vs.size() + 2)), 0, uint32_t(vs.size())});
+  words.insert(words.end(), vs.begin(), vs.end());
+  reg::VGT_DRAW_INITIATOR draw{};
+  draw.prim_type = PrimitiveType::kTriangleList; draw.source_select = SourceSelect::kAutoIndex; draw.num_indices = 3;
+  std::vector<size_t> kicks;
+  for (uint32_t c127 : {0u, 0x3F800000u}) {
+    set(XE_GPU_REG_SHADER_CONSTANT_000_X + 4 * 127, c127);
+    words.insert(words.end(), {Packet(PM4_DRAW_INDX_2, 1), draw.value,
+                               Packet(PM4_MEM_WRITE, 2), memory.GetPhysicalAddress(done), uint32_t(kicks.size() + 1)});
+    kicks.push_back(words.size());
+  }
+  Require(words.size() * 4 <= 65536, "predicated fetch ring capacity");
+  for (size_t i = 0; i < words.size(); ++i)
+    rex::memory::store_and_swap<uint32_t>(memory.TranslateVirtual(ring + uint32_t(i * 4)), words[i]);
+  gpu.InitializeRingBuffer(memory.GetPhysicalAddress(ring), 13);
+  auto* mmio = memory.LookupVirtualMappedRange(0x7fc80714);
+  auto* marker = memory.TranslateVirtual<volatile uint32_t*>(done);
+  auto count_log = [&](const char* text) {
+    rex::FlushLogging();
+    std::ifstream log(output / "runtime.log");
+    unsigned n = 0;
+    for (std::string line; std::getline(log, line);) n += line.find(text) != std::string::npos;
+    return n;
+  };
+  const char* const kRejected = "Vertex fetch constant 90 (";
+  const char* const kFailed = "Failed in backend";
+  // runtime.log is appended to across runs into the same directory.
+  const unsigned rejected_before = count_log(kRejected), failed_before = count_log(kFailed);
+  for (size_t k = 0; k < kicks.size(); ++k) {
+    mmio->write(nullptr, mmio->callback_context, 0x7fc80714, uint32_t(kicks[k]));
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(15);
+    while (*marker != k + 1 && std::chrono::steady_clock::now() < deadline)
+      std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    Require(*marker == k + 1, "predicated fetch draw completion");
+    const unsigned rejected = count_log(kRejected) - rejected_before, failed = count_log(kFailed) - failed_before;
+    std::cout << (k ? "active" : "inactive") << " fetch: rejected=" << rejected << " failed=" << failed << '\n';
+    if (!k) Require(!rejected && !failed, "draw rejected for a vertex fetch that p0 predicates out");
+    else Require(rejected == 1 && failed == 1, "active fetch with an invalid descriptor was not rejected");
+  }
+}
 }
 int wmain(int argc, wchar_t** argv) {
-  if (argc != 3 && argc != 4 && argc != 5) { std::cerr << "usage: x360n_native_probe native|xenos OUTPUT_DIRECTORY [--reject|--abi|--replay INPUT_DIRECTORY|--draw-replay|--draw-stress|--draw-timing|--draw-registry-locked|--draw-interleaved|--draw-system-resolve INPUT_DIRECTORY|--overlay|--overlay-system]\n"; return 2; }
+  if (argc != 3 && argc != 4 && argc != 5) { std::cerr << "usage: x360n_native_probe native|xenos OUTPUT_DIRECTORY [--reject|--abi|--replay INPUT_DIRECTORY|--draw-replay|--draw-stress|--draw-timing|--draw-registry-locked|--draw-interleaved|--draw-system-resolve INPUT_DIRECTORY|--overlay|--overlay-system|--predicated-fetch]\n"; return 2; }
   try {
     Require(SUCCEEDED(CoInitializeEx(nullptr, COINIT_MULTITHREADED)), "COM setup");
     const std::filesystem::path output(argv[2]);
@@ -424,6 +503,13 @@ int wmain(int argc, wchar_t** argv) {
       rex::cvar::SetFlagByName("async_shader_compilation", "false");
       rex::cvar::SetFlagByName("d3d12_pipeline_creation_threads", "0");
     }
+    const bool predicated_fetch = argc == 4 && std::wstring_view(argv[3]) == L"--predicated-fetch";
+    if (predicated_fetch) {
+      // An async placeholder pipeline would skip the draw before the check.
+      rex::cvar::SetFlagByName("async_shader_compilation", "false");
+      std::filesystem::create_directories(output / "shaders");
+      rex::cvar::SetFlagByName("dump_shaders", (output / "shaders").string());
+    }
     if (argc == 4 && std::wstring_view(argv[3]) == L"--abi") {
       using namespace rex::system;
       Require(plugin == "native", "ABI rejection test requires Native");
@@ -453,6 +539,12 @@ int wmain(int argc, wchar_t** argv) {
       ~ShutdownGuard() { if (gpu) gpu->Shutdown(); }
     } shutdown{gpu.get()};
     auto* memory = rt.memory();
+    if (predicated_fetch) {
+      Require(plugin == "xenos", "predicated fetch probe requires Xenos");
+      PredicatedFetchDraws(*gpu, *memory, output);
+      gpu->Shutdown(); shutdown.gpu = nullptr; gpu.reset(); rt.Shutdown(); rex::FlushLogging();
+      std::cout << "PASS predicated-out invalid vertex fetch\n"; return 0;
+    }
     if (draw_replay) {
       if (plugin == "native") gpu->InitializeShaderStorage(output / "pipeline-cache", 0, true);
       std::optional<QueueTimestamps> queue_timestamps;

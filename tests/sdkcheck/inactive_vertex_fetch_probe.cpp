@@ -97,6 +97,21 @@ int main() {
   regs[XE_GPU_REG_SHADER_CONSTANT_BOOL_000_031]=1;
   check(proof(conditional,7),"executed predicate producer");
   regs[XE_GPU_REG_SHADER_CONSTANT_BOOL_000_031]=0;
+  // patch 0145: SPIR-V without DenormFlushToZero may compare a denormal as
+  // non-zero, so only DXBC-like flushing proves it inactive.
+  auto shared=[&](const auto& code,uint32_t index,bool flush){return IsVertexFetchInactive(code,regs,index,flush);};
+  uint32_t& c17=regs[XE_GPU_REG_SHADER_CONSTANT_000_X+4*17];
+  for(bool flush:{false,true}) {
+    c17=0; check(shared(code,7,flush),"shared zero / inactive");
+    c17=0x80000000; check(shared(code,7,flush),"shared negative zero / inactive");
+    c17=0x3F800000; check(!shared(code,7,flush),"shared one / active");
+    c17=0x7FC00000; check(!shared(code,7,flush),"shared NaN / active");
+    c17=0x7F800000; check(!shared(code,7,flush),"shared infinity / active");
+    c17=0x80000001; check(shared(code,7,flush)==flush,"shared negative denormal");
+    c17=1; check(shared(code,7,flush)==flush,"shared denormal");
+    check(shared(ne,7,flush)==false,"shared setp_ne denormal never proves");
+  }
+  c17=0;
   std::cout<<checks<<" checks, "<<failures<<" failures\n";
   return failures ? 1 : 0;
 }
