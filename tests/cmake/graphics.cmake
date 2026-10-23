@@ -84,3 +84,15 @@ target_include_directories(x360n_canary_resolve_dest_checks PRIVATE ${X360_REXGL
 x360n_stage_runtime_dlls(x360n_canary_resolve_dest_checks)
 add_test(NAME sdkcheck.canary-resolve-dest COMMAND x360n_canary_resolve_dest_checks)
 set_tests_properties(sdkcheck.canary-resolve-dest PROPERTIES LABELS project TIMEOUT 30)
+
+# patch 0191: Canary negative host viewport origin.
+add_executable(x360n_canary_viewport_checks sdkcheck/canary_viewport_probe.cpp
+    ${X360_REXGLUE_DIR}/src/graphics/util/draw.cpp
+    ${X360_REXGLUE_DIR}/src/graphics/register_file.cpp
+    ${X360_REXGLUE_DIR}/src/graphics/registers.cpp
+    ${X360_REXGLUE_DIR}/src/graphics/flags.cpp)
+target_link_libraries(x360n_canary_viewport_checks PRIVATE rexruntime)
+target_include_directories(x360n_canary_viewport_checks PRIVATE ${X360_REXGLUE_DIR}/thirdparty/renderdoc)
+x360n_stage_runtime_dlls(x360n_canary_viewport_checks)
+add_test(NAME sdkcheck.canary-viewport COMMAND x360n_canary_viewport_checks)
+set_tests_properties(sdkcheck.canary-viewport PROPERTIES LABELS project TIMEOUT 30)

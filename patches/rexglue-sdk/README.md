@@ -1869,3 +1869,17 @@ payload. O guard Native continua recusando o opcode explicitamente
 `sdkcheck.canary-pm4`: um registrador escrito depois do pacote, no mesmo
 buffer, é aplicado pelo command processor real; falha com a fonte anterior.
 `sdkcheck.register-memory-coherence` continua passando (813 verificações).
+
+## 0191 — origem negativa do viewport de host
+
+Porta 6579cc2a4: a origem do viewport de host pode ser negativa (até −máximo),
+em vez de ser cortada em 0 e compensada na escala/offset NDC. Com tiling
+predicado e offset de janela negativo, cada tile passava a usar outra
+transformação NDC; o Canary cita o tile direito de 4D5307DF (x −608). A
+extensão continua limitada ao máximo. `ViewportInfo::xy_offset` passa a ser
+com sinal (D3D12, Vulkan e Native só o convertem para float).
+
+`sdkcheck.canary-viewport`: o tile com offset −608 começa em −608, mantém a
+extensão 1280 e a mesma transformação NDC do tile sem offset; 3 das 4
+verificações falham com o `draw.cpp` anterior. `native.texture` continua
+passando. Sem GPU.

@@ -1,0 +1,64 @@
+diff --git a/include/rex/graphics/util/draw.h b/include/rex/graphics/util/draw.h
+--- a/include/rex/graphics/util/draw.h
++++ b/include/rex/graphics/util/draw.h
+@@ -251,14 +251,12 @@
+   // and Nvidia hardware (not WARP); as well as to hide the differences between
+   // 0 and 8+ viewportSubPixelBits on Vulkan, and to prevent any numerical error
+   // in bound checking in host APIs, viewport bounds are returned as integers.
+-  // Also they're returned as non-negative, also to make it easier to crop (so
+-  // Vulkan maxViewportDimensions and viewportBoundsRange don't have to be
+-  // handled separately - maxViewportDimensions is greater than or equal to the
+-  // largest framebuffer image size, so it's safe, and viewportBoundsRange is
+-  // always bigger than maxViewportDimensions. All fractional offsetting,
+-  // including the half-pixel offset, and cropping are handled via ndc_scale and
+-  // ndc_offset.
+-  uint32_t xy_offset[2];
++  // The offset may be negative, down to -maxViewportDimensions (Vulkan's
++  // viewportBoundsRange always covers twice that), and the extent is at most
++  // maxViewportDimensions (Xenia Canary 6579cc2a4). All fractional offsetting,
++  // including the half-pixel offset, and cropping beyond those limits are
++  // handled via ndc_scale and ndc_offset.
++  int32_t xy_offset[2];
+   // Extent can be zero for an empty viewport - host APIs not supporting empty
+   // viewports need to use an empty scissor rectangle.
+   uint32_t xy_extent[2];
+diff --git a/src/graphics/util/draw.cpp b/src/graphics/util/draw.cpp
+--- a/src/graphics/util/draw.cpp
++++ b/src/graphics/util/draw.cpp
+@@ -370,20 +370,27 @@
+       // With resolution scaling, do all viewport XY scissoring in guest pixels
+       // if fractional and for the half-pixel offset - we treat guest pixels as
+       // a whole, and also the half-pixel offset would be irreversible in guest
+-      // vertices if we did flooring in host pixels. Instead of flooring, also
+-      // doing truncation for simplicity - since maxing with 0 is done anyway
+-      // (we only return viewports in the positive quarter-plane).
++      // vertices if we did flooring in host pixels.
++      //
++      // The start may be negative, down to -max, instead of being cropped at
++      // 0 (Xenia Canary 6579cc2a4). With a window offset (predicated tiling in
++      // 4D5307DF draws its right-hand tile at x -608) cropping gave the tiles
++      // different NDC scales and offsets, and in some frames the same geometry
++      // came out as a flat wedge or rectangle in one tile only. Vulkan
++      // guarantees that viewportBoundsRange covers -2 * maxViewportDimensions,
++      // and Direct3D 12 allows -32768. The extent still stays within max.
+       uint32_t axis_resolution_scale = i ? draw_resolution_scale_y : draw_resolution_scale_x;
+       float offset_axis = offset_base_xy[i] + offset_add_xy[i];
+       float scale_axis = scale_xy[i];
+       float scale_axis_abs = std::abs(scale_xy[i]);
+       float axis_max_unscaled_float = float(xy_max_unscaled[i]);
+-      uint32_t axis_0_int =
+-          uint32_t(rex::clamp_float(offset_axis - scale_axis_abs, 0.0f, axis_max_unscaled_float));
+-      uint32_t axis_1_int =
+-          uint32_t(rex::clamp_float(offset_axis + scale_axis_abs, 0.0f, axis_max_unscaled_float));
+-      uint32_t axis_extent_int = axis_1_int - axis_0_int;
+-      viewport_info_out.xy_offset[i] = axis_0_int * axis_resolution_scale;
++      int32_t axis_1_int = int32_t(std::floor(
++          rex::clamp_float(offset_axis + scale_axis_abs, 0.0f, axis_max_unscaled_float)));
++      int32_t axis_0_int = int32_t(std::floor(
++          rex::clamp_float(offset_axis - scale_axis_abs,
++                           float(axis_1_int) - axis_max_unscaled_float, axis_max_unscaled_float)));
++      uint32_t axis_extent_int = axis_1_int > 0 ? uint32_t(axis_1_int - axis_0_int) : 0;
++      viewport_info_out.xy_offset[i] = axis_0_int * int32_t(axis_resolution_scale);
+       viewport_info_out.xy_extent[i] = axis_extent_int * axis_resolution_scale;
+       float ndc_scale_axis;
+       float ndc_offset_axis;
