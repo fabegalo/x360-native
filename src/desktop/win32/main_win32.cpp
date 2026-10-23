@@ -1707,7 +1707,7 @@ void DrawButton(App& a, const DRAWITEMSTRUCT& item) {
     ui::Text(dc, a.fonts.bold, label, {s(48), s(8), w - s(16), s(30)}, ink);
     const auto caption = item.CtlID == kApiVulkan
         ? (a.renderer_settings.renderer == Renderer::Native
-           ? WTr("Indisponível no Native · executor incompleto", "Unavailable in Native · incomplete executor")
+           ? WTr("Native experimental · aguarda validação em jogo", "Experimental Native · awaiting in-game validation")
            : WTr("Experimental · driver verificado antes de iniciar", "Experimental · driver checked before launch"))
         : item.CtlID == kApiD3D12 ? WTr("Padrão · disponível para Xenos e Native", "Default · available for Xenos and Native")
         : native ? (disabled ? WTr("Requer o acesso de desenvolvimento abaixo", "Requires the development access below") : WTr("Experimental · executor próprio", "Experimental · independent executor"))
