@@ -1677,3 +1677,23 @@ Casos adicionais de `sdkcheck.register-memory-coherence` cobrem lote rejeitado
 após prefixo válido, lote vazio, faixa seguinte disjunta e sobreposições fora de
 ordem. Foram preparados sem execução nesta retomada. Ganho de tempo/alocações
 em cenário real ainda não foi medido.
+
+## 0156–0159 — uploads, submissão e conclusão de pipelines
+
+0156 e 0157 adaptam 0036 e 0038 do Forza ReImagined, revisão e licença MIT
+acima. Uploads Vulkan só são movidos antes do render pass quando suas páginas
+não foram lidas/escritas nele. MEMEXPORT dinâmico protege todo o espaço físico.
+Os streams pertencem à submissão e a fila tem no máximo oito trabalhos pendentes;
+fences, sparse binds, apresentação e teardown preservam ordem e posse dos recursos.
+Erros do worker são propagados e trabalhos anteriores são drenados antes de destruir recursos.
+
+0158 é implementação própria do objetivo de 0051: cada draw das duas APIs
+aguarda sua pipeline real. Falhas permanecem falhas, sem timeout que descarte o
+draw nem placeholder certificado como shader real. 0159 mantém a atualização
+obrigatória de páginas CPU ao fim do frame, trabalhando apenas nos words alterados
+e preservando a geração de residência quando nada muda. Não incorpora a mudança
+de política de 0039. A heurística de 50% de 0052 foi rejeitada: ela descarta dados
+de resolves e só afeta escala superior a 1, fora do caminho Xenos Fidelity original.
+
+Sondas CPU de hazards e coerência de memória foram preparadas. Execução das
+sondas, validação GPU e medição de desempenho são etapas separadas da compilação.

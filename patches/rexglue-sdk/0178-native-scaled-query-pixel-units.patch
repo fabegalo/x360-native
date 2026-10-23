@@ -1,0 +1,113 @@
+diff --git a/include/rex/graphics/pipeline/shader/dxbc_translator.h b/include/rex/graphics/pipeline/shader/dxbc_translator.h
+index 8e89a32..2585383 100644
+--- a/include/rex/graphics/pipeline/shader/dxbc_translator.h
++++ b/include/rex/graphics/pipeline/shader/dxbc_translator.h
+@@ -743,6 +743,7 @@ class DxbcShaderTranslator : public ShaderTranslator {
+   // unchanged or known that it's safe not to await kills/alphatest/AtoC),
+   // returns from the shader.
+   void ROV_DepthStencilTest();
++  bool ROV_BeginSampleCountScaleGuard();
+   // Unpacks a 32bpp or a 64bpp color in packed_temp.packed_temp_components to
+   // color_temp, using 2 temporary VGPRs.
+   void ROV_UnpackColor(uint32_t rt_index, uint32_t packed_temp, uint32_t packed_temp_components,
+diff --git a/src/graphics/pipeline/shader/dxbc_translator_om.cpp b/src/graphics/pipeline/shader/dxbc_translator_om.cpp
+index edf2d83..9f673a0 100644
+--- a/src/graphics/pipeline/shader/dxbc_translator_om.cpp
++++ b/src/graphics/pipeline/shader/dxbc_translator_om.cpp
+@@ -361,6 +361,22 @@ void DxbcShaderTranslator::StartPixelShader_LoadROVParameters() {
+   a_.OpEndIf();
+ }
+ 
++bool DxbcShaderTranslator::ROV_BeginSampleCountScaleGuard() {
++  if ((draw_resolution_scale_x_ == 1 && draw_resolution_scale_y_ == 1) ||
++      (GetDxbcShaderModification().value & Modification::kNativeVisibilityQuery)) return false;
++  // Match the top-left subpixel published in canonical guest-memory resolves.
++  // Reports retain guest-pixel units; visibility still considers all subpixels.
++  const uint32_t temp = PushSystemTemp();
++  a_.OpFToU(dxbc::Dest::R(temp, 0b0011), dxbc::Src::V1D(in_reg_ps_position_));
++  a_.OpUDiv(dxbc::Dest::Null(), dxbc::Dest::R(temp, 0b0011), dxbc::Src::R(temp),
++             dxbc::Src::LU(draw_resolution_scale_x_, draw_resolution_scale_y_, 1, 1));
++  a_.OpOr(dxbc::Dest::R(temp, 0b0001), dxbc::Src::R(temp, dxbc::Src::kXXXX),
++          dxbc::Src::R(temp, dxbc::Src::kYYYY));
++  a_.OpIf(false, dxbc::Src::R(temp, dxbc::Src::kXXXX));
++  PopSystemTemp();
++  return true;
++}
++
+ void DxbcShaderTranslator::ROV_DepthStencilTest() {
+   uint32_t temp = PushSystemTemp();
+   dxbc::Dest temp_x_dest(dxbc::Dest::R(temp, 0b0001));
+@@ -1013,6 +1029,7 @@ void DxbcShaderTranslator::ROV_DepthStencilTest() {
+     // Count failures where the existing early/late test ran, before an early
+     // return can discard the quad. No depth/stencil or coverage order changes.
+     if (count_samples) {
++      const bool scale_guard = ROV_BeginSampleCountScaleGuard();
+       const auto counter = dxbc::Dest::U(uav_index_edram_, uint32_t(UAVRegister::kEdram));
+       a_.OpIf(true, dxbc::Src::R(count_temp, dxbc::Src::kXXXX));
+       a_.OpIAdd(dxbc::Dest::R(count_temp, 0b0001),
+@@ -1023,6 +1040,7 @@ void DxbcShaderTranslator::ROV_DepthStencilTest() {
+           (xenos::kEdramSizeBytes / 4) * draw_resolution_scale_x_ * draw_resolution_scale_y_),
+           1, dxbc::Src::LU(1));
+       a_.OpEndIf();
++      if (scale_guard) a_.OpEndIf();
+     }
+     // Release sample_temp and the optional failure category.
+     PopSystemTemp();
+@@ -1891,6 +1909,7 @@ void DxbcShaderTranslator::CompletePixelShader_WriteToROV() {
+   }
+ 
+   if (GetDxbcShaderModification().pixel.rov_sample_counts) {
++    const bool scale_guard = ROV_BeginSampleCountScaleGuard();
+     // Passing samples are counted only after guest kill, alpha test, alpha to
+     // coverage and depth/stencil. Host occlusion queries cannot see ROV depth.
+     if (uav_index_edram_ == kBindingIndexUnallocated) uav_index_edram_ = uav_count_++;
+@@ -1908,6 +1927,7 @@ void DxbcShaderTranslator::CompletePixelShader_WriteToROV() {
+       }
+       a_.OpEndIf();
+     }
++    if (scale_guard) a_.OpEndIf();
+   }
+ 
+   // system_temp_rov_params_.y (the depth / stencil sample address) is not
+diff --git a/src/graphics/pipeline/shader/spirv_translator_rb.cpp b/src/graphics/pipeline/shader/spirv_translator_rb.cpp
+index 7eb32ea..5012691 100644
+--- a/src/graphics/pipeline/shader/spirv_translator_rb.cpp
++++ b/src/graphics/pipeline/shader/spirv_translator_rb.cpp
+@@ -1446,6 +1446,29 @@ spv::Id SpirvShaderTranslator::LoadMsaaSamplesFromFlags() {
+ }
+ 
+ void SpirvShaderTranslator::FSI_AccumulateSampleCount(spv::Id category, spv::Id count) {
++  std::unique_ptr<SpirvBuilder::IfBuilder> scale_guard;
++  if ((draw_resolution_scale_x_ != 1 || draw_resolution_scale_y_ != 1) &&
++      !(GetSpirvShaderModification().value & Modification::kNativeVisibilityQuery)) {
++    // Canonical readback retains subpixel (0,0), rather than multiplying guest
++    // query results by the Enhanced resolution scale. Visibility is boolean
++    // and intentionally remains sensitive to every covered host subpixel.
++    spv::Id selected = builder_->makeBoolConstant(true);
++    const uint32_t scales[] = {draw_resolution_scale_x_, draw_resolution_scale_y_};
++    for (uint32_t i = 0; i < 2; ++i) {
++      if (scales[i] == 1) continue;
++      id_vector_temp_.clear();
++      id_vector_temp_.push_back(builder_->makeIntConstant(i));
++      const spv::Id coordinate = builder_->createUnaryOp(spv::OpConvertFToU, type_uint_,
++          builder_->createLoad(builder_->createAccessChain(spv::StorageClassInput,
++              input_fragment_coordinates_, id_vector_temp_), spv::NoPrecision));
++      selected = builder_->createBinOp(spv::OpLogicalAnd, type_bool_, selected,
++          builder_->createBinOp(spv::OpIEqual, type_bool_, const_uint_0_,
++              builder_->createBinOp(spv::OpUMod, type_uint_, coordinate,
++                                     builder_->makeUintConstant(scales[i]))));
++    }
++    scale_guard = std::make_unique<SpirvBuilder::IfBuilder>(selected,
++        spv::SelectionControlDontFlattenMask, *builder_);
++  }
+   // Reports are four pairs of uint32 pipe counters (not uint64 values).
+   // This executor aggregates in pipe A, leaving pipe B at zero; uint32 wrap
+   // is retained so subtraction of cumulative BEGIN/END reports still works.
+@@ -1468,6 +1491,7 @@ void SpirvShaderTranslator::FSI_AccumulateSampleCount(spv::Id category, spv::Id
+       builder_->createQuadOp(spv::OpAtomicIAdd, type_uint_, counter, scope, const_uint_0_, count);
+     }
+   }
++  if (scale_guard) scale_guard->makeEndIf();
+ }
+ 
+ void SpirvShaderTranslator::FSI_LoadSampleMask(spv::Id msaa_samples) {

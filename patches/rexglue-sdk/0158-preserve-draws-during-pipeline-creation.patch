@@ -1,0 +1,291 @@
+diff --git a/include/rex/graphics/d3d12/pipeline_cache.h b/include/rex/graphics/d3d12/pipeline_cache.h
+--- a/include/rex/graphics/d3d12/pipeline_cache.h
++++ b/include/rex/graphics/d3d12/pipeline_cache.h
+@@ -93,6 +93,9 @@
+ 
+   // Returns a pipeline with deferred creation by its handle. May return nullptr
+   // if failed to create the pipeline.
++  // Async work must complete before a guest draw can consume this state.
++  // A failed creation is distinct from a queued pipeline and returns false.
++  bool AwaitPipeline(void* handle);
+   ID3D12PipelineState* GetD3D12PipelineByHandle(void* handle) const {
+     return reinterpret_cast<const Pipeline*>(handle)->state.load(std::memory_order_acquire);
+   }
+@@ -345,6 +348,7 @@
+   struct Pipeline {
+     // nullptr if creation has failed.
+     std::atomic<ID3D12PipelineState*> state{nullptr};
++    std::atomic<bool> creation_complete{false};
+     std::atomic<ID3D12RootSignature*> root_signature{nullptr};
+     PipelineRuntimeDescription description;
+     D3D12Shader::D3D12Translation* pending_vertex_shader = nullptr;
+@@ -399,6 +403,7 @@
+   void CreateQueuedPipelinesOnProcessorThread();
+   std::mutex creation_request_lock_;
+   std::condition_variable creation_request_cond_;
++  std::condition_variable pipeline_creation_done_cond_;
+   // Protected with creation_request_lock_, notify_one creation_request_cond_
+   // when set.
+   std::priority_queue<Pipeline*, std::vector<Pipeline*>, PipelineCreationPriorityComparator>
+diff --git a/include/rex/graphics/vulkan/pipeline_cache.h b/include/rex/graphics/vulkan/pipeline_cache.h
+--- a/include/rex/graphics/vulkan/pipeline_cache.h
++++ b/include/rex/graphics/vulkan/pipeline_cache.h
+@@ -97,6 +97,11 @@
+   void GetPipelineAndLayoutByHandle(void* handle, VkPipeline& pipeline_out,
+                                     const PipelineLayoutProvider*& pipeline_layout_out,
+                                     bool* is_placeholder_out = nullptr) const;
++
++  // Every guest draw must use the real pipeline, including one-shot resolves.
++  // Async compilation remains available, but never turns missing geometry into
++  // a successful draw. Returns false on a real compiler/driver failure.
++  bool AwaitPipeline(void* handle);
+ 
+  private:
+   REXPACKEDSTRUCT(ShaderStoredHeader, {
+@@ -238,13 +243,15 @@
+     // destroyed by it while the pipeline cache is active.
+     std::atomic<const PipelineLayoutProvider*> pipeline_layout{nullptr};
+     std::atomic<bool> is_placeholder{false};
++    std::atomic<bool> creation_failed{false};
+     Pipeline() = default;
+     Pipeline(const PipelineLayoutProvider* pipeline_layout_provider)
+         : pipeline_layout(pipeline_layout_provider) {}
+     Pipeline(const Pipeline& other)
+         : pipeline(other.pipeline.load(std::memory_order_acquire)),
+           pipeline_layout(other.pipeline_layout.load(std::memory_order_acquire)),
+-          is_placeholder(other.is_placeholder.load(std::memory_order_acquire)) {}
++          is_placeholder(other.is_placeholder.load(std::memory_order_acquire)),
++          creation_failed(other.creation_failed.load(std::memory_order_acquire)) {}
+     Pipeline& operator=(const Pipeline& other) {
+       if (this == &other) {
+         return *this;
+@@ -254,6 +261,8 @@
+                             std::memory_order_release);
+       is_placeholder.store(other.is_placeholder.load(std::memory_order_acquire),
+                            std::memory_order_release);
++      creation_failed.store(other.creation_failed.load(std::memory_order_acquire),
++                            std::memory_order_release);
+       return *this;
+     }
+   };
+@@ -459,6 +468,7 @@
+ 
+   mutable std::mutex creation_request_lock_;
+   std::condition_variable creation_request_cond_;
++  std::condition_variable pipeline_creation_done_cond_;
+   std::priority_queue<PipelineCreationArguments, std::vector<PipelineCreationArguments>,
+                       PipelineCreationArgumentsPriorityComparator>
+       creation_queue_;
+diff --git a/src/graphics/d3d12/command_processor.cpp b/src/graphics/d3d12/command_processor.cpp
+--- a/src/graphics/d3d12/command_processor.cpp
++++ b/src/graphics/d3d12/command_processor.cpp
+@@ -2511,9 +2511,9 @@
+           bound_depth_and_color_render_target_formats, &pipeline_handle, &root_signature)) {
+     return false;
+   }
+-  if (REXCVAR_GET(async_shader_compilation) &&
+-      pipeline_cache_->GetD3D12PipelineByHandle(pipeline_handle) == nullptr) {
+-    return true;
++  if (!pipeline_cache_->AwaitPipeline(pipeline_handle)) {
++    REXGPU_ERROR("Failed to create the graphics pipeline required by the draw");
++    return false;
+   }
+ 
+   // Update the textures - this may bind pipelines.
+diff --git a/src/graphics/d3d12/pipeline_cache.cpp b/src/graphics/d3d12/pipeline_cache.cpp
+--- a/src/graphics/d3d12/pipeline_cache.cpp
++++ b/src/graphics/d3d12/pipeline_cache.cpp
+@@ -177,6 +177,7 @@
+       creation_threads_shutdown_from_ = 0;
+     }
+     creation_request_cond_.notify_all();
++    pipeline_creation_done_cond_.notify_all();
+     for (size_t i = 0; i < creation_threads_.size(); ++i) {
+       rex::thread::Wait(creation_threads_[i].get(), false);
+     }
+@@ -646,6 +647,7 @@
+       } else {
+         new_pipeline->state.store(CreateD3D12Pipeline(pipeline_runtime_description),
+                                   std::memory_order_release);
++        new_pipeline->creation_complete.store(true, std::memory_order_release);
+       }
+       ++pipelines_created;
+     }
+@@ -1034,6 +1036,7 @@
+     creation_request_cond_.notify_one();
+   } else {
+     new_pipeline->state.store(CreateD3D12Pipeline(runtime_description), std::memory_order_release);
++    new_pipeline->creation_complete.store(true, std::memory_order_release);
+   }
+ 
+   if (pipeline_storage_file_) {
+@@ -3200,6 +3203,21 @@
+   return true;
+ }
+ 
++bool PipelineCache::AwaitPipeline(void* handle) {
++  if (!handle) {
++    return false;
++  }
++  const auto* pipeline = static_cast<const Pipeline*>(handle);
++  if (!pipeline->creation_complete.load(std::memory_order_acquire)) {
++    std::unique_lock<std::mutex> lock(creation_request_lock_);
++    pipeline_creation_done_cond_.wait(lock, [this, pipeline] {
++      return pipeline->creation_complete.load(std::memory_order_acquire) ||
++             creation_threads_shutdown_from_ == 0;
++    });
++  }
++  return pipeline->state.load(std::memory_order_acquire) != nullptr;
++}
++
+ void PipelineCache::CreationThread(size_t thread_index) {
+   while (true) {
+     Pipeline* pipeline_to_create = nullptr;
+@@ -3242,8 +3260,10 @@
+     // thread).
+     {
+       std::lock_guard<std::mutex> lock(creation_request_lock_);
++      pipeline_to_create->creation_complete.store(true, std::memory_order_release);
+       --creation_threads_busy_;
+     }
++    pipeline_creation_done_cond_.notify_all();
+   }
+ }
+ 
+@@ -3262,10 +3282,14 @@
+     PipelineRuntimeDescription runtime_description;
+     if (!PrepareRuntimeDescriptionForQueuedCreation(pipeline_to_create, runtime_description)) {
+       pipeline_to_create->state.store(nullptr, std::memory_order_release);
++      pipeline_to_create->creation_complete.store(true, std::memory_order_release);
++      pipeline_creation_done_cond_.notify_all();
+       continue;
+     }
+     pipeline_to_create->state.store(CreateD3D12Pipeline(runtime_description),
+                                     std::memory_order_release);
++    pipeline_to_create->creation_complete.store(true, std::memory_order_release);
++    pipeline_creation_done_cond_.notify_all();
+   }
+ }
+ 
+diff --git a/src/graphics/vulkan/command_processor.cpp b/src/graphics/vulkan/command_processor.cpp
+--- a/src/graphics/vulkan/command_processor.cpp
++++ b/src/graphics/vulkan/command_processor.cpp
+@@ -4182,15 +4182,13 @@
+                                           pipeline, pipeline_layout_provider, &pipeline_handle)) {
+     return draw_fail("configure_pipeline");
+   }
+-  bool pipeline_is_placeholder = false;
+-  // Reload the current handle state to observe async hot-swap completions that
+-  // may happen between pipeline configuration and binding.
+-  pipeline_cache_->GetPipelineAndLayoutByHandle(pipeline_handle, pipeline, pipeline_layout_provider,
+-                                                &pipeline_is_placeholder);
+-  if (REXCVAR_GET(async_shader_compilation) && pipeline_is_placeholder) {
+-    frame_used_async_placeholder_pipeline_ = true;
+-    return true;
+-  }
++  // One-shot offscreen draws and memory exports cannot be replayed next frame.
++  // Wait for this shader, not a timer or a placeholder; propagate failure.
++  if (!pipeline_cache_->AwaitPipeline(pipeline_handle)) {
++    return draw_fail("pipeline_creation");
++  }
++  pipeline_cache_->GetPipelineAndLayoutByHandle(pipeline_handle, pipeline,
++                                                pipeline_layout_provider);
+   if (pipeline == VK_NULL_HANDLE || pipeline_layout_provider == nullptr) {
+     return draw_fail("pipeline_lookup");
+   }
+diff --git a/src/graphics/vulkan/pipeline_cache.cpp b/src/graphics/vulkan/pipeline_cache.cpp
+--- a/src/graphics/vulkan/pipeline_cache.cpp
++++ b/src/graphics/vulkan/pipeline_cache.cpp
+@@ -799,6 +799,7 @@
+       creation_threads_shutdown_from_ = 0;
+     }
+     creation_request_cond_.notify_all();
++    pipeline_creation_done_cond_.notify_all();
+     for (size_t i = 0; i < creation_threads_.size(); ++i) {
+       rex::thread::Wait(creation_threads_[i].get(), false);
+     }
+@@ -1211,6 +1212,24 @@
+     return startup_loading_;
+   }
+   return startup_loading_ || !creation_queue_.empty() || creation_threads_busy_ != 0;
++}
++
++bool VulkanPipelineCache::AwaitPipeline(void* handle) {
++  if (!handle) {
++    return false;
++  }
++  const auto* pipeline = static_cast<const Pipeline*>(handle);
++  if (pipeline->is_placeholder.load(std::memory_order_acquire)) {
++    std::unique_lock<std::mutex> lock(creation_request_lock_);
++    pipeline_creation_done_cond_.wait(lock, [this, pipeline] {
++      return !pipeline->is_placeholder.load(std::memory_order_acquire) ||
++             pipeline->creation_failed.load(std::memory_order_acquire) ||
++             creation_threads_shutdown_from_ == 0;
++    });
++  }
++  return !pipeline->creation_failed.load(std::memory_order_acquire) &&
++         !pipeline->is_placeholder.load(std::memory_order_acquire) &&
++         pipeline->pipeline.load(std::memory_order_acquire) != VK_NULL_HANDLE;
+ }
+ 
+ void VulkanPipelineCache::GetPipelineAndLayoutByHandle(
+@@ -3508,9 +3527,7 @@
+   } else {
+     creation_arguments.pipeline->second.is_placeholder.store(false, std::memory_order_release);
+     if (was_placeholder && old_pipeline != VK_NULL_HANDLE) {
+-      std::lock_guard<std::mutex> lock(deferred_destroy_lock_);
+-      deferred_destroy_pipelines_.emplace_back(command_processor_.GetCurrentSubmission(),
+-                                               old_pipeline);
++      dfn.vkDestroyPipeline(device, old_pipeline, nullptr);
+     }
+   }
+ 
+@@ -3540,23 +3557,15 @@
+ 
+     bool created = EnsurePipelineCreated(creation_arguments);
+     if (!created) {
+-      bool has_placeholder =
+-          creation_arguments.pipeline->second.is_placeholder.load(std::memory_order_acquire);
+-      VkPipeline pipeline =
+-          creation_arguments.pipeline->second.pipeline.load(std::memory_order_acquire);
+-      if (has_placeholder && pipeline != VK_NULL_HANDLE) {
+-        // Keep the placeholder resident and stop waiting for a real pipeline.
+-        creation_arguments.pipeline->second.is_placeholder.store(false, std::memory_order_release);
+-      } else {
+-        creation_arguments.pipeline->second.pipeline.store(VK_NULL_HANDLE,
+-                                                           std::memory_order_release);
+-      }
++      creation_arguments.pipeline->second.creation_failed.store(true,
++                                                                 std::memory_order_release);
+     }
+ 
+     {
+       std::lock_guard<std::mutex> lock(creation_request_lock_);
+       --creation_threads_busy_;
+     }
++    pipeline_creation_done_cond_.notify_all();
+   }
+ }
+ 
+@@ -3574,17 +3583,10 @@
+     }
+     bool created = EnsurePipelineCreated(creation_arguments);
+     if (!created) {
+-      bool has_placeholder =
+-          creation_arguments.pipeline->second.is_placeholder.load(std::memory_order_acquire);
+-      VkPipeline pipeline =
+-          creation_arguments.pipeline->second.pipeline.load(std::memory_order_acquire);
+-      if (has_placeholder && pipeline != VK_NULL_HANDLE) {
+-        creation_arguments.pipeline->second.is_placeholder.store(false, std::memory_order_release);
+-      } else {
+-        creation_arguments.pipeline->second.pipeline.store(VK_NULL_HANDLE,
+-                                                           std::memory_order_release);
+-      }
+-    }
++      creation_arguments.pipeline->second.creation_failed.store(true,
++                                                                 std::memory_order_release);
++    }
++    pipeline_creation_done_cond_.notify_all();
+   }
+ }
+ 

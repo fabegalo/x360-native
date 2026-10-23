@@ -1,0 +1,52 @@
+diff --git a/include/rex/chrono/frame_layout.h b/include/rex/chrono/frame_layout.h
+new file mode 100644
+--- /dev/null
++++ b/include/rex/chrono/frame_layout.h
+@@ -0,0 +1,15 @@
++#pragma once
++#include <cstdint>
++#include <rex/cvar.h>
++REXCVAR_DECLARE(bool, native_ultrawide);
++namespace rex::chrono {
++// The identity-checked title host declares presentation geometry after adjusting
++// its guest camera and UI producers. Renderers never identify titles or shaders.
++class FrameLayout {
++ public:
++  struct Aspect { uint32_t x, y; };
++  static void SetDisplayAspect(uint32_t x, uint32_t y);
++  // {0,0} means preserve the original guest display aspect.
++  static Aspect DisplayAspect();
++};
++}
+diff --git a/src/core/clock.cpp b/src/core/clock.cpp
+--- a/src/core/clock.cpp
++++ b/src/core/clock.cpp
+@@ -17,6 +17,7 @@
+ #include <thread>
+ #include <stdexcept>
+ #include <rex/chrono/frame_timing.h>
++#include <rex/chrono/frame_layout.h>
+ 
+ #include <rex/chrono/clock.h>
+ #include <rex/cvar.h>
+@@ -34,7 +35,20 @@
+ REXCVAR_DEFINE_UINT32(native_present_rate, 0, "GPU/Native", "Source presentation limit, independent of simulation and guest vblank (0 = uncapped)")
+     .range(0, 480).lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
+ 
++REXCVAR_DEFINE_BOOL(native_ultrawide, false, "GPU/Native", "Fit the window aspect using identified title camera and UI producers")
++    .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
+ namespace rex::chrono {
++namespace { std::atomic<uint64_t> display_aspect{0}; }
++void FrameLayout::SetDisplayAspect(uint32_t x, uint32_t y) {
++  if ((!x) != (!y)) throw std::invalid_argument("Display aspect must have two nonzero dimensions, or both zero");
++  display_aspect.store((uint64_t(x) << 32) | y, std::memory_order_release);
++}
++FrameLayout::Aspect FrameLayout::DisplayAspect() {
++  if (!FrameTiming::Enhanced() || !REXCVAR_GET(native_ultrawide)) return {};
++  const auto value = display_aspect.load(std::memory_order_acquire);
++  return {uint32_t(value >> 32), uint32_t(value)};
++}
++
+ namespace {
+ std::atomic<uint32_t> title_vblank_rate{0};
+ std::atomic<bool> native_active{false};

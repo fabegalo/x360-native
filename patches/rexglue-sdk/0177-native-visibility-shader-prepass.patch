@@ -1,0 +1,176 @@
+diff --git a/include/rex/graphics/pipeline/shader/dxbc_translator.h b/include/rex/graphics/pipeline/shader/dxbc_translator.h
+index 0462cf2..8e89a32 100644
+--- a/include/rex/graphics/pipeline/shader/dxbc_translator.h
++++ b/include/rex/graphics/pipeline/shader/dxbc_translator.h
+@@ -118,6 +118,11 @@ class DxbcShaderTranslator : public ShaderTranslator {
+     // synchronize writes when eA is computed rather than a known stream MAD.
+     // Bit 63 is outside both stage layouts. Zero preserves existing bytecode.
+     static constexpr uint64_t kMemExportDynamicAddress = uint64_t(1) << 63;
++    // Native visibility prepasses repeat geometry without repeating guest
++    // memory stores. Ordinary draws and all existing modifications retain them.
++    static constexpr uint64_t kMemExportDisabled = uint64_t(1) << 61;
++    // Boolean accumulation cannot wrap back to invisible after 2^32 samples.
++    static constexpr uint64_t kNativeVisibilityQuery = uint64_t(1) << 60;
+     // Native opt-in for PA_SU_SC_MODE_CNTL.persp_corr_dis.
+     static constexpr uint64_t kInterpolatorNoPerspective = uint64_t(1) << 62;
+ 
+@@ -524,7 +529,8 @@ class DxbcShaderTranslator : public ShaderTranslator {
+ 
+   // Creates a special pixel shader without color outputs - this resets the
+   // state of the translator.
+-  std::vector<uint8_t> CreateDepthOnlyPixelShader(bool rov_sample_counts = false);
++  std::vector<uint8_t> CreateDepthOnlyPixelShader(bool rov_sample_counts = false,
++                                                 bool visibility_only = false);
+ 
+   // Common functions useful not only for the translator, but also for render
+   // target reinterpretation.
+diff --git a/include/rex/graphics/pipeline/shader/spirv_translator.h b/include/rex/graphics/pipeline/shader/spirv_translator.h
+index 68d0571..7e2eee8 100644
+--- a/include/rex/graphics/pipeline/shader/spirv_translator.h
++++ b/include/rex/graphics/pipeline/shader/spirv_translator.h
+@@ -40,6 +40,11 @@ class SpirvShaderTranslator : public ShaderTranslator {
+     // synchronize writes when eA is computed rather than a known stream MAD.
+     // Bit 63 is outside both stage layouts. Zero preserves existing bytecode.
+     static constexpr uint64_t kMemExportDynamicAddress = uint64_t(1) << 63;
++    // Native visibility prepasses repeat geometry without repeating guest
++    // memory stores. Ordinary draws and all existing modifications retain them.
++    static constexpr uint64_t kMemExportDisabled = uint64_t(1) << 61;
++    // Boolean accumulation cannot wrap back to invisible after 2^32 samples.
++    static constexpr uint64_t kNativeVisibilityQuery = uint64_t(1) << 60;
+     // Native opt-in for PA_SU_SC_MODE_CNTL.persp_corr_dis.
+     static constexpr uint64_t kInterpolatorNoPerspective = uint64_t(1) << 62;
+ 
+@@ -447,7 +452,8 @@ class SpirvShaderTranslator : public ShaderTranslator {
+   // state of the translator.
+   std::vector<uint8_t> CreateDepthOnlyFragmentShader(
+       Modification::DepthStencilMode depth_stencil_mode =
+-          Modification::DepthStencilMode::kNoModifiers, bool fsi_sample_counts = false);
++          Modification::DepthStencilMode::kNoModifiers, bool fsi_sample_counts = false,
++      bool visibility_only = false);
+ 
+   // Common functions useful not only for the translator, but also for EDRAM
+   // emulation via conventional render targets.
+diff --git a/src/graphics/pipeline/shader/dxbc_translator.cpp b/src/graphics/pipeline/shader/dxbc_translator.cpp
+index eb076a7..feaebb2 100644
+--- a/src/graphics/pipeline/shader/dxbc_translator.cpp
++++ b/src/graphics/pipeline/shader/dxbc_translator.cpp
+@@ -79,7 +79,8 @@ DxbcShaderTranslator::DxbcShaderTranslator(ui::GraphicsProvider::GpuVendorID ven
+ }
+ DxbcShaderTranslator::~DxbcShaderTranslator() = default;
+ 
+-std::vector<uint8_t> DxbcShaderTranslator::CreateDepthOnlyPixelShader(bool rov_sample_counts) {
++std::vector<uint8_t> DxbcShaderTranslator::CreateDepthOnlyPixelShader(
++    bool rov_sample_counts, bool visibility_only) {
+   is_depth_only_pixel_shader_ = true;
+   // TODO(Triang3l): Handle in a nicer way (is_depth_only_pixel_shader_ is a
+   // leftover from when a Shader object wasn't used during translation).
+@@ -87,6 +88,7 @@ std::vector<uint8_t> DxbcShaderTranslator::CreateDepthOnlyPixelShader(bool rov_s
+   shader.AnalyzeUcode(instruction_disassembly_buffer_);
+   Modification modification;
+   modification.pixel.rov_sample_counts = rov_sample_counts;
++  if (visibility_only) modification.value |= Modification::kNativeVisibilityQuery;
+   Shader::Translation& translation = *shader.GetOrCreateTranslation(modification.value);
+   TranslateAnalyzedShader(translation);
+   is_depth_only_pixel_shader_ = false;
+diff --git a/src/graphics/pipeline/shader/spirv_translator.cpp b/src/graphics/pipeline/shader/spirv_translator.cpp
+index 8b4eb93..7b43ee8 100644
+--- a/src/graphics/pipeline/shader/spirv_translator.cpp
++++ b/src/graphics/pipeline/shader/spirv_translator.cpp
+@@ -90,7 +90,8 @@ uint64_t SpirvShaderTranslator::GetDefaultPixelShaderModification(
+ }
+ 
+ std::vector<uint8_t> SpirvShaderTranslator::CreateDepthOnlyFragmentShader(
+-    Modification::DepthStencilMode depth_stencil_mode, bool fsi_sample_counts) {
++    Modification::DepthStencilMode depth_stencil_mode, bool fsi_sample_counts,
++    bool visibility_only) {
+   is_depth_only_fragment_shader_ = true;
+   // TODO(Triang3l): Handle in a nicer way (is_depth_only_fragment_shader_ is a
+   // leftover from when a Shader object wasn't used during translation).
+@@ -100,6 +101,7 @@ std::vector<uint8_t> SpirvShaderTranslator::CreateDepthOnlyFragmentShader(
+   Modification modification(GetDefaultPixelShaderModification(0));
+   modification.pixel.depth_stencil_mode = depth_stencil_mode;
+   modification.pixel.fsi_sample_counts = fsi_sample_counts;
++  if (visibility_only) modification.value |= Modification::kNativeVisibilityQuery;
+   Shader::Translation& translation = *shader.GetOrCreateTranslation(modification.value);
+   TranslateAnalyzedShader(translation);
+   is_depth_only_fragment_shader_ = false;
+diff --git a/src/graphics/pipeline/shader/dxbc_translator_memexport.cpp b/src/graphics/pipeline/shader/dxbc_translator_memexport.cpp
+index 9c8ad89..f24f8e2 100644
+--- a/src/graphics/pipeline/shader/dxbc_translator_memexport.cpp
++++ b/src/graphics/pipeline/shader/dxbc_translator_memexport.cpp
+@@ -21,7 +21,7 @@ namespace rex::graphics {
+ using namespace ucode;
+ 
+ void DxbcShaderTranslator::ExportToMemory(uint8_t export_eM) {
+-  if (!export_eM) {
++  if (!export_eM || (GetDxbcShaderModification().value & Modification::kMemExportDisabled)) {
+     return;
+   }
+ 
+diff --git a/src/graphics/pipeline/shader/spirv_translator_memexport.cpp b/src/graphics/pipeline/shader/spirv_translator_memexport.cpp
+index 14c0ea9..109bd9e 100644
+--- a/src/graphics/pipeline/shader/spirv_translator_memexport.cpp
++++ b/src/graphics/pipeline/shader/spirv_translator_memexport.cpp
+@@ -26,7 +26,7 @@
+ namespace rex::graphics {
+ 
+ void SpirvShaderTranslator::ExportToMemory(uint8_t export_eM) {
+-  if (!export_eM) {
++  if (!export_eM || (GetSpirvShaderModification().value & Modification::kMemExportDisabled)) {
+     return;
+   }
+ 
+diff --git a/src/graphics/pipeline/shader/dxbc_translator_om.cpp b/src/graphics/pipeline/shader/dxbc_translator_om.cpp
+index 1ddc975..edf2d83 100644
+--- a/src/graphics/pipeline/shader/dxbc_translator_om.cpp
++++ b/src/graphics/pipeline/shader/dxbc_translator_om.cpp
+@@ -1016,9 +1016,12 @@ void DxbcShaderTranslator::ROV_DepthStencilTest() {
+       const auto counter = dxbc::Dest::U(uav_index_edram_, uint32_t(UAVRegister::kEdram));
+       a_.OpIf(true, dxbc::Src::R(count_temp, dxbc::Src::kXXXX));
+       a_.OpIAdd(dxbc::Dest::R(count_temp, 0b0001),
+-                dxbc::Src::R(count_temp, dxbc::Src::kXXXX), dxbc::Src::LU(xenos::kEdramSizeBytes / 4));
++                dxbc::Src::R(count_temp, dxbc::Src::kXXXX), dxbc::Src::LU(
++                    (xenos::kEdramSizeBytes / 4) * draw_resolution_scale_x_ * draw_resolution_scale_y_));
+       a_.OpAtomicIAdd(counter, dxbc::Src::R(count_temp, dxbc::Src::kXXXX), 1, dxbc::Src::LU(1));
+-      a_.OpAtomicIAdd(counter, dxbc::Src::LU(xenos::kEdramSizeBytes / 4), 1, dxbc::Src::LU(1));
++      a_.OpAtomicIAdd(counter, dxbc::Src::LU(
++          (xenos::kEdramSizeBytes / 4) * draw_resolution_scale_x_ * draw_resolution_scale_y_),
++          1, dxbc::Src::LU(1));
+       a_.OpEndIf();
+     }
+     // Release sample_temp and the optional failure category.
+@@ -1895,8 +1898,14 @@ void DxbcShaderTranslator::CompletePixelShader_WriteToROV() {
+     for (uint32_t i = 0; i < 4; ++i) {
+       a_.OpAnd(temp_x_dest, dxbc::Src::R(system_temp_rov_params_, dxbc::Src::kXXXX), dxbc::Src::LU(1u << i));
+       a_.OpIf(true, temp_x_src);
+-      a_.OpAtomicIAdd(counter, dxbc::Src::LU(xenos::kEdramSizeBytes / 4 + 4), 1, dxbc::Src::LU(1));
+-      a_.OpAtomicIAdd(counter, dxbc::Src::LU(xenos::kEdramSizeBytes / 4), 1, dxbc::Src::LU(1));
++      const uint32_t counter_base = (xenos::kEdramSizeBytes / 4) *
++          draw_resolution_scale_x_ * draw_resolution_scale_y_;
++      if (GetDxbcShaderModification().value & Modification::kNativeVisibilityQuery) {
++        a_.OpAtomicOr(counter, dxbc::Src::LU(counter_base + 4), 1, dxbc::Src::LU(1));
++      } else {
++        a_.OpAtomicIAdd(counter, dxbc::Src::LU(counter_base + 4), 1, dxbc::Src::LU(1));
++        a_.OpAtomicIAdd(counter, dxbc::Src::LU(counter_base), 1, dxbc::Src::LU(1));
++      }
+       a_.OpEndIf();
+     }
+   }
+diff --git a/src/graphics/pipeline/shader/spirv_translator_rb.cpp b/src/graphics/pipeline/shader/spirv_translator_rb.cpp
+index 3c142cc..7eb32ea 100644
+--- a/src/graphics/pipeline/shader/spirv_translator_rb.cpp
++++ b/src/graphics/pipeline/shader/spirv_translator_rb.cpp
+@@ -1461,7 +1461,12 @@ void SpirvShaderTranslator::FSI_AccumulateSampleCount(spv::Id category, spv::Id
+     const spv::Id counter = builder_->createAccessChain(storage, buffer_edram_, id_vector_temp_);
+     // Relaxed device atomics aggregate different pixels. Snapshot ordering is
+     // supplied by the backend's shader-write/transfer-read barrier and fence.
+-    builder_->createQuadOp(spv::OpAtomicIAdd, type_uint_, counter, scope, const_uint_0_, count);
++    if (GetSpirvShaderModification().value & Modification::kNativeVisibilityQuery) {
++      builder_->createQuadOp(spv::OpAtomicOr, type_uint_, counter, scope, const_uint_0_,
++                             builder_->makeUintConstant(1));
++    } else {
++      builder_->createQuadOp(spv::OpAtomicIAdd, type_uint_, counter, scope, const_uint_0_, count);
++    }
+   }
+ }
+ 

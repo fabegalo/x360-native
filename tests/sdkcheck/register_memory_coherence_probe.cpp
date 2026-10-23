@@ -169,13 +169,19 @@ int main() {
   Check(shared.RequestRange(physical, 4096) && shared.uploads == uploads, "GPU-written page is never overwritten by CPU copy");
   generation = Generation(shared);
   shared.SetSystemPageBlocksValidWithGpuDataWritten();
-  Check(Generation(shared) != generation, "frame validity reset invalidates residency cache");
+  Check(Generation(shared) == generation, "GPU-only frame refresh preserves unchanged residency");
   Check(shared.RequestRange(physical, 4096) && shared.uploads == uploads, "frame reset retains GPU-written data");
   Check(shared.RequestRange(physical + 4096, 4096), "neighbor CPU page uploads");
   uploads = shared.uploads;
   shared.SetSystemPageBlocksValidWithGpuDataWritten();
   Check(shared.RequestRange(physical + 4096, 4096) && shared.uploads == uploads + 1,
         "frame reset refreshes CPU-only page");
+  generation = Generation(shared);
+  shared.SetSystemPageBlocksValidWithGpuDataWritten();
+  Check(Generation(shared) != generation, "reuploaded CPU page is refreshed again next frame");
+  generation = Generation(shared);
+  shared.SetSystemPageBlocksValidWithGpuDataWritten();
+  Check(Generation(shared) == generation, "second empty refresh has no stale queued words");
   generation = Generation(shared);
   shared.InvalidateAllPages();
   Check(Generation(shared) != generation, "explicit GPU memory invalidation reaches residency cache");

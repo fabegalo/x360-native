@@ -1,0 +1,57 @@
+diff --git a/include/rex/graphics/pipeline/shader/dxbc_translator.h b/include/rex/graphics/pipeline/shader/dxbc_translator.h
+--- a/include/rex/graphics/pipeline/shader/dxbc_translator.h
++++ b/include/rex/graphics/pipeline/shader/dxbc_translator.h
+@@ -118,6 +118,8 @@
+     // synchronize writes when eA is computed rather than a known stream MAD.
+     // Bit 63 is outside both stage layouts. Zero preserves existing bytecode.
+     static constexpr uint64_t kMemExportDynamicAddress = uint64_t(1) << 63;
++    // Native opt-in for PA_SU_SC_MODE_CNTL.persp_corr_dis.
++    static constexpr uint64_t kInterpolatorNoPerspective = uint64_t(1) << 62;
+ 
+     enum class DepthStencilMode : uint32_t {
+       kNoModifiers,
+diff --git a/src/graphics/pipeline/shader/dxbc_translator.cpp b/src/graphics/pipeline/shader/dxbc_translator.cpp
+--- a/src/graphics/pipeline/shader/dxbc_translator.cpp
++++ b/src/graphics/pipeline/shader/dxbc_translator.cpp
+@@ -3320,9 +3320,13 @@
+         break;
+       }
+       ao_.OpDclInputPS(
+-          (shader_modification.pixel.interpolators_centroid & (UINT32_C(1) << interpolator_index))
+-              ? dxbc::InterpolationMode::kLinearCentroid
+-              : dxbc::InterpolationMode::kLinear,
++          (shader_modification.value & Modification::kInterpolatorNoPerspective)
++              ? ((shader_modification.pixel.interpolators_centroid & (UINT32_C(1) << interpolator_index))
++                     ? dxbc::InterpolationMode::kLinearNoPerspectiveCentroid
++                     : dxbc::InterpolationMode::kLinearNoPerspective)
++              : ((shader_modification.pixel.interpolators_centroid & (UINT32_C(1) << interpolator_index))
++                     ? dxbc::InterpolationMode::kLinearCentroid
++                     : dxbc::InterpolationMode::kLinear),
+           dxbc::Dest::V1D(interpolator_register_index));
+       ++interpolator_register_index;
+     }
+diff --git a/include/rex/graphics/pipeline/shader/spirv_translator.h b/include/rex/graphics/pipeline/shader/spirv_translator.h
+--- a/include/rex/graphics/pipeline/shader/spirv_translator.h
++++ b/include/rex/graphics/pipeline/shader/spirv_translator.h
+@@ -40,6 +40,8 @@
+     // synchronize writes when eA is computed rather than a known stream MAD.
+     // Bit 63 is outside both stage layouts. Zero preserves existing bytecode.
+     static constexpr uint64_t kMemExportDynamicAddress = uint64_t(1) << 63;
++    // Native opt-in for PA_SU_SC_MODE_CNTL.persp_corr_dis.
++    static constexpr uint64_t kInterpolatorNoPerspective = uint64_t(1) << 62;
+ 
+     enum class DepthStencilMode : uint32_t {
+       kNoModifiers,
+diff --git a/src/graphics/pipeline/shader/spirv_translator.cpp b/src/graphics/pipeline/shader/spirv_translator.cpp
+--- a/src/graphics/pipeline/shader/spirv_translator.cpp
++++ b/src/graphics/pipeline/shader/spirv_translator.cpp
+@@ -2865,6 +2865,9 @@
+             spv::NoPrecision, spv::StorageClassInput, type_float4_,
+             fmt::format("xe_in_interpolator_{}", interpolator_index).c_str());
+         input_output_interpolators_[interpolator_index] = interpolator;
++        if (shader_modification.value & Modification::kInterpolatorNoPerspective) {
++          builder_->addDecoration(interpolator, spv::DecorationNoPerspective);
++        }
+         builder_->addDecoration(interpolator, spv::DecorationLocation, int(input_location));
+         if (shader_modification.pixel.interpolators_centroid &
+             (UINT32_C(1) << interpolator_index)) {

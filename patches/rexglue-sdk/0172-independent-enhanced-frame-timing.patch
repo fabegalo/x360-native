@@ -1,0 +1,140 @@
+diff --git a/include/rex/chrono/frame_timing.h b/include/rex/chrono/frame_timing.h
+new file mode 100644
+--- /dev/null
++++ b/include/rex/chrono/frame_timing.h
+@@ -0,0 +1,25 @@
++#pragma once
++#include <cstdint>
++#include <rex/cvar.h>
++REXCVAR_DECLARE(bool, native_enhanced);
++REXCVAR_DECLARE(uint32_t, native_framerate);
++REXCVAR_DECLARE(uint32_t, native_present_rate);
++namespace rex::chrono {
++// One runtime-owned timeline across the title and GPU plugin. No clock scaling,
++// frame generation or synthetic source-frame counts are performed here.
++class FrameTiming {
++ public:
++  struct Source { uint64_t sequence, tick, wake; double interval; };
++  static bool Enhanced();
++  static void ActivateNative();
++  // Only an identity-checked title host may select a simulation/vblank cadence.
++  // 0 restores the guest video mode. This does not change VdQueryVideoMode.
++  static void SetGuestVblankRate(uint32_t hz);
++  static uint32_t GuestVblankRate();
++  static void PacePresentation();
++  static void NotifySourceFrame();
++  static Source ReadSource();
++  static void WaitSource(Source previous, uint32_t milliseconds);
++  static void WakeSourceWaiters();
++};
++}
+diff --git a/src/core/clock.cpp b/src/core/clock.cpp
+--- a/src/core/clock.cpp
++++ b/src/core/clock.cpp
+@@ -12,6 +12,11 @@
+ #include <algorithm>
+ #include <limits>
+ #include <mutex>
++#include <atomic>
++#include <condition_variable>
++#include <thread>
++#include <stdexcept>
++#include <rex/chrono/frame_timing.h>
+ 
+ #include <rex/chrono/clock.h>
+ #include <rex/cvar.h>
+@@ -22,7 +27,67 @@
+ 
+ REXCVAR_DEFINE_BOOL(clock_source_raw, false, "Clock", "Use raw clock source without scaling");
+ 
++REXCVAR_DEFINE_BOOL(native_enhanced, false, "GPU/Native", "Enable Native enhancements; original timing remains the default")
++    .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
++REXCVAR_DEFINE_UINT32(native_framerate, 30, "GPU/Native", "Title simulation target: 30, 60, 120, 144 or custom 30-240 FPS (requires an identified title profile)")
++    .range(30, 240).lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
++REXCVAR_DEFINE_UINT32(native_present_rate, 0, "GPU/Native", "Source presentation limit, independent of simulation and guest vblank (0 = uncapped)")
++    .range(0, 480).lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
++
+ namespace rex::chrono {
++namespace {
++std::atomic<uint32_t> title_vblank_rate{0};
++std::atomic<bool> native_active{false};
++std::mutex source_mutex;
++std::condition_variable source_condition;
++FrameTiming::Source source{};
++}
++bool FrameTiming::Enhanced() { return native_active.load(std::memory_order_relaxed) && REXCVAR_GET(native_enhanced); }
++void FrameTiming::ActivateNative() { native_active.store(true, std::memory_order_relaxed); }
++void FrameTiming::SetGuestVblankRate(uint32_t hz) {
++  if (hz && (hz < 30 || hz > 480)) throw std::out_of_range("Title vblank rate must be 30-480 Hz");
++  title_vblank_rate.store(hz, std::memory_order_release);
++}
++uint32_t FrameTiming::GuestVblankRate() { return title_vblank_rate.load(std::memory_order_acquire); }
++void FrameTiming::PacePresentation() {
++  if (!Enhanced()) return;
++  const uint32_t rate = REXCVAR_GET(native_present_rate);
++  if (!rate) return;
++  using HostClock = std::chrono::steady_clock;
++  thread_local HostClock::time_point deadline{};
++  const auto period = std::chrono::duration_cast<HostClock::duration>(std::chrono::duration<double>(1.0 / rate));
++  const auto now = HostClock::now();
++  // Do not burst through missed slots following a load or a GPU stall.
++  if (deadline < now) deadline = now;
++  else std::this_thread::sleep_until(deadline);
++  deadline += period;
++}
++void FrameTiming::NotifySourceFrame() {
++  if (!Enhanced()) return;
++  const uint64_t now = Clock::QueryGuestTickCount();
++  {
++    std::lock_guard lock(source_mutex);
++    if (source.tick && now > source.tick) {
++      const double interval = double(now - source.tick);
++      source.interval = source.interval ? source.interval + (interval - source.interval) / 16.0 : interval;
++    }
++    source.tick = now;
++    ++source.sequence;
++  }
++  source_condition.notify_all();
++}
++FrameTiming::Source FrameTiming::ReadSource() { std::lock_guard lock(source_mutex); return source; }
++void FrameTiming::WaitSource(Source previous, uint32_t milliseconds) {
++  std::unique_lock lock(source_mutex);
++  source_condition.wait_for(lock, std::chrono::milliseconds(milliseconds), [&] {
++    return source.sequence != previous.sequence || source.wake != previous.wake;
++  });
++}
++void FrameTiming::WakeSourceWaiters() {
++  { std::lock_guard lock(source_mutex); ++source.wake; }
++  source_condition.notify_all();
++}
++
+ 
+ // Time scalar applied to all time operations.
+ double guest_time_scalar_ = 1.0;
+diff --git a/src/graphics/graphics_system.cpp b/src/graphics/graphics_system.cpp
+--- a/src/graphics/graphics_system.cpp
++++ b/src/graphics/graphics_system.cpp
+@@ -20,6 +20,7 @@
+ #include <utility>
+ 
+ #include <rex/cvar.h>
++#include <rex/chrono/frame_timing.h>
+ #include <rex/graphics/command_processor.h>
+ #include <rex/graphics/flags.h>
+ #include <rex/kernel/xboxkrnl/video.h>
+@@ -160,8 +161,13 @@
+         uint64_t last_frame_time = chrono::Clock::QueryGuestTickCount();
+         while (vsync_worker_running_) {
+           uint64_t current_time = chrono::Clock::QueryGuestTickCount();
+-          uint64_t interval_ticks =
+-              REXCVAR_GET(vsync) ? vsync_interval_ticks : no_vsync_interval_ticks;
++          // Enhanced Native separates guest interrupt cadence from host presentation.
++          // A verified title can supply its own pacing rate without changing the
++          // reported console video mode, system clock or audio clock.
++          const uint32_t title_hz = chrono::FrameTiming::GuestVblankRate();
++          uint64_t interval_ticks = chrono::FrameTiming::Enhanced()
++              ? (title_hz ? std::max(uint64_t(1), guest_tick_frequency / title_hz) : vsync_interval_ticks)
++              : (REXCVAR_GET(vsync) ? vsync_interval_ticks : no_vsync_interval_ticks);
+           while (current_time - last_frame_time >= interval_ticks) {
+             MarkVblank();
+             last_frame_time += interval_ticks;
