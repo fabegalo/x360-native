@@ -14,6 +14,7 @@
 #include <optional>
 
 namespace x360n::native {
+struct TextureLoadPlan;
 // Native's Vulkan command recording and memory domain. The shared SDK types
 // below describe guest registers and shader semantics, never execute Xenos.
 class VulkanRender {
@@ -78,14 +79,24 @@ class VulkanRender {
   VulkanSubmissionRing submissions_;
   VkCommandBuffer commands_ = VK_NULL_HANDLE;
   bool rendering_ = false;
-  struct UploadPage { std::unique_ptr<VulkanBuffer> buffer; VkDeviceSize used = 0; };
+  struct UploadPage { std::unique_ptr<VulkanBuffer> buffer; VkDeviceSize used = 0; VkDescriptorSet load_set = VK_NULL_HANDLE; };
   struct Arena {
     VkDescriptorPool descriptors = VK_NULL_HANDLE;
     uint32_t descriptor_count = 0;
     uint32_t image_descriptors = 0, sampler_descriptors = 0;
     std::vector<UploadPage> uploads;
     size_t upload_index = 0;
+    // GPU texture loads: untiled scratch pages and the guest-memory source set,
+    // valid until this slot's fence, like the descriptor pool they come from.
+    std::vector<UploadPage> load_scratch;
+    VkDescriptorSet guest_load_set = VK_NULL_HANDLE;
   };
+  // Records the shared SDK load shader into scratch, then copies every level
+  // and slice into image (TRANSFER_DST layout), as Native D3D12 does.
+  void LoadTextureGpu(const TextureLoadPlan&, VkImage, uint32_t levels, uint32_t block_bytes,
+                      uint32_t block_width, VkExtent3D extent);
+  VkPipelineLayout load_layout_ = VK_NULL_HANDLE;
+  std::array<VkPipeline, 7> load_pipelines_{};
   std::array<Arena, VulkanSubmissionRing::kSlots> arenas_;
   std::unique_ptr<VulkanBuffer> guest_buffer_, edram_buffer_, readback_;
   BufferAccess guest_access_, edram_access_;

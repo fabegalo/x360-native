@@ -218,6 +218,57 @@ TEST_CASE("Native mip-only GPU bytes equal CPU conversion", "[native-mip-only]")
     }
 }
 
+TEST_CASE("Native Vulkan load regions read the D3D12 copy blocks") {
+  // Every block a Vulkan buffer-to-image region writes must come from the same
+  // scratch byte D3D12 CopyTextureRegion reads for that subresource and box.
+  auto check = [](TextureFormat format, DataDimension dimension, uint32_t width, uint32_t height, uint32_t depth,
+                  uint32_t high, bool packed, bool volume) {
+    const auto* info = FormatInfo::Get(format);
+    const uint32_t layers = dimension == DataDimension::kCube ? 6 : (dimension == DataDimension::k3D ? 1 : depth);
+    TextureLoadInput t{format, dimension, Endian::k8in32, true, packed, width, height, depth,
+        (width + 31) / 32, 0x100000, high ? 0x800000u : 0u, high, volume, layers, DXGI_FORMAT_UNKNOWN, false, false};
+    const auto shader = GpuLoadShader(t);
+    REQUIRE(shader != LoadShader::kUnknown);
+    const auto plan = PlanGpuTextureLoad(t, shader);
+    const uint32_t bw = info->block_width, bytes = info->bytes_per_block(), levels = high + 1;
+    const auto regions = PlanBufferImageRegions(plan, levels, bytes, bw, {width, height, volume ? depth : 1u});
+    REQUIRE(regions.size() == plan.copies.size());
+    for (size_t i = 0; i < regions.size(); ++i) {
+      const auto& copy = plan.copies[i];
+      const auto& r = regions[i];
+      const auto& fp = copy.footprint.Footprint;
+      CHECK(r.level == copy.subresource % levels);
+      CHECK(r.layer == copy.subresource / levels);
+      CHECK(r.extent[0] >= 1); CHECK(r.extent[0] <= std::max(1u, width >> r.level));
+      CHECK(r.extent[1] >= 1); CHECK(r.extent[1] <= std::max(1u, height >> r.level));
+      CHECK(r.extent[2] >= 1); CHECK(r.extent[2] <= std::max(1u, (volume ? depth : 1u) >> r.level));
+      CHECK(r.row_length % bw == 0); CHECK(r.image_height % bw == 0);
+      const uint32_t x0 = copy.boxed ? copy.box.left : 0, y0 = copy.boxed ? copy.box.top : 0, z0 = copy.boxed ? copy.box.front : 0;
+      const uint32_t rows = (fp.Height + bw - 1) / bw;
+      for (uint32_t z = 0; z < r.extent[2]; ++z)
+        for (uint32_t by = 0; by < (r.extent[1] + bw - 1) / bw; ++by)
+          for (uint32_t bx = 0; bx < (r.extent[0] + bw - 1) / bw; ++bx) {
+            const uint64_t d3d12 = copy.footprint.Offset + (uint64_t(z0 + z) * rows + y0 / bw + by) * fp.RowPitch +
+                uint64_t(x0 / bw + bx) * bytes;
+            const uint64_t vulkan = r.buffer_offset + (uint64_t(z) * (r.image_height / bw) + by) *
+                (uint64_t(r.row_length) / bw * bytes) + uint64_t(bx) * bytes;
+            REQUIRE(vulkan == d3d12);
+          }
+    }
+  };
+  for (auto format : {TextureFormat::k_8, TextureFormat::k_8_8_8_8, TextureFormat::k_16_16_16_16, TextureFormat::k_32_FLOAT,
+                      TextureFormat::k_DXT1, TextureFormat::k_DXT4_5, TextureFormat::k_24_8})
+    for (bool packed : {false, true}) {
+      check(format, DataDimension::k2DOrStacked, 256, 128, 1, 8, packed, false);
+      check(format, DataDimension::k2DOrStacked, 200, 100, 1, 5, packed, false);
+      check(format, DataDimension::k2DOrStacked, 64, 64, 4, 3, packed, false);
+      check(format, DataDimension::kCube, 64, 64, 6, 6, packed, false);
+      check(format, DataDimension::k2DOrStacked, 1280, 720, 1, 0, packed, false);
+    }
+  for (auto format : {TextureFormat::k_8_8_8_8, TextureFormat::k_DXT1})
+    for (bool packed : {false, true}) check(format, DataDimension::k3D, 32, 32, 8, 3, packed, true);
+}
+
 TEST_CASE("Native GPU texture loads equal the CPU conversion") {
   Gpu gpu;
   if (FAILED(D3D12CreateDevice(nullptr, D3D_FEATURE_LEVEL_11_0, IID_PPV_ARGS(&gpu.device)))) SKIP("D3D12 device unavailable");

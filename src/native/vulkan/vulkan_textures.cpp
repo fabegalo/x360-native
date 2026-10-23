@@ -3,6 +3,13 @@
 #include "../textures/texture_load.h"
 #include "../textures/texture.h"
 #include <rex/graphics/pipeline/texture/info.h>
+#include "src/graphics/shaders/vulkan_spirv/texture_load_8bpb_cs.h"
+#include "src/graphics/shaders/vulkan_spirv/texture_load_16bpb_cs.h"
+#include "src/graphics/shaders/vulkan_spirv/texture_load_32bpb_cs.h"
+#include "src/graphics/shaders/vulkan_spirv/texture_load_64bpb_cs.h"
+#include "src/graphics/shaders/vulkan_spirv/texture_load_128bpb_cs.h"
+#include "src/graphics/shaders/vulkan_spirv/texture_load_depth_unorm_cs.h"
+#include "src/graphics/shaders/vulkan_spirv/texture_load_depth_float_cs.h"
 #include <algorithm>
 #include <bit>
 #include <cstring>
@@ -120,6 +127,100 @@ void VulkanRender::Unwatch(TextureEntry& entry) {
     if (watch) mirror_->Unwatch(watch);
     watch = nullptr;
   }
+}
+void VulkanRender::LoadTextureGpu(const TextureLoadPlan& plan, VkImage image, uint32_t levels,
+                                  uint32_t block_bytes, uint32_t block_width, VkExtent3D extent) {
+  static_assert(std::tuple_size_v<decltype(load_pipelines_)> == size_t(LoadShader::kCount));
+  const auto& fn = device_.functions();
+  const auto vk = device_.device();
+  if (!load_layout_) {
+    const VkDescriptorSetLayout sets[]{storage_layout_, storage_layout_};
+    const VkPushConstantRange constants{VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(LoadConstants)};
+    VkPipelineLayoutCreateInfo layout{VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};
+    layout.setLayoutCount = 2;  // destination, source (TextureCache kLoadDescriptorSetIndex*)
+    layout.pSetLayouts = sets;
+    layout.pushConstantRangeCount = 1;
+    layout.pPushConstantRanges = &constants;
+    CheckVulkan(fn.vkCreatePipelineLayout(vk, &layout, nullptr, &load_layout_), "create texture load layout");
+  }
+  auto& pipeline = load_pipelines_[size_t(plan.shader)];
+  if (!pipeline) {
+    std::span<const uint32_t> code;
+    switch (plan.shader) {
+      case LoadShader::k8bpb: code = texture_load_8bpb_cs; break;
+      case LoadShader::k16bpb: code = texture_load_16bpb_cs; break;
+      case LoadShader::k32bpb: code = texture_load_32bpb_cs; break;
+      case LoadShader::k64bpb: code = texture_load_64bpb_cs; break;
+      case LoadShader::k128bpb: code = texture_load_128bpb_cs; break;
+      case LoadShader::kDepthUnorm: code = texture_load_depth_unorm_cs; break;
+      case LoadShader::kDepthFloat: code = texture_load_depth_float_cs; break;
+      default: throw std::logic_error("Native Vulkan: texture load shader without SPIR-V");
+    }
+    pipeline = ComputePipeline(load_layout_, code);
+  }
+  Begin();
+  auto& arena = arenas_[submissions_.current_slot()];
+  const VkDeviceSize need = (plan.scratch_bytes + 65535) & ~VkDeviceSize(65535);
+  UploadPage* page = nullptr;
+  for (auto& candidate : arena.load_scratch)
+    if (candidate.buffer->size() - candidate.used >= need) { page = &candidate; break; }
+  if (!page) {
+    arena.load_scratch.push_back({std::make_unique<VulkanBuffer>(device_, std::max<VkDeviceSize>(need, 64ull << 20),
+        VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VulkanBuffer::Access::kDevice)});
+    page = &arena.load_scratch.back();
+  }
+  const VkDeviceSize offset = page->used;
+  page->used += need;
+  if (uint64_t(offset) + need > UINT32_MAX) throw std::runtime_error("Native Vulkan: texture load scratch offset");
+  auto bind = [&](VkDescriptorSet& set, VkBuffer buffer) {
+    if (set) return;
+    set = AllocateDescriptors(storage_layout_);
+    const VkDescriptorBufferInfo info{buffer, 0, VK_WHOLE_SIZE};
+    VkWriteDescriptorSet write{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
+    write.dstSet = set;
+    write.descriptorCount = 1;
+    write.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    write.pBufferInfo = &info;
+    fn.vkUpdateDescriptorSets(vk, 1, &write, 0, nullptr);
+  };
+  bind(page->load_set, page->buffer->handle());
+  bind(arena.guest_load_set, guest_buffer_->handle());
+  EndRendering();
+  // Resolve results are resident in the guest buffer; CPU-written pages were
+  // uploaded by RequestRange before this load.
+  UseBuffer(guest_buffer_->handle(), guest_access_, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_ACCESS_SHADER_READ_BIT);
+  // Earlier copies of this command buffer may still read the reused scratch.
+  VkMemoryBarrier barrier{VK_STRUCTURE_TYPE_MEMORY_BARRIER};
+  barrier.srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+  barrier.dstAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+  fn.vkCmdPipelineBarrier(commands_, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                          0, 1, &barrier, 0, nullptr, 0, nullptr);
+  fn.vkCmdBindPipeline(commands_, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline);
+  const VkDescriptorSet sets[]{page->load_set, arena.guest_load_set};
+  fn.vkCmdBindDescriptorSets(commands_, VK_PIPELINE_BIND_POINT_COMPUTE, load_layout_, 0, 2, sets, 0, nullptr);
+  for (const auto& dispatch : plan.dispatches) {
+    auto constants = dispatch.constants;
+    constants.host_offset += uint32_t(offset);
+    fn.vkCmdPushConstants(commands_, load_layout_, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(constants), &constants);
+    fn.vkCmdDispatch(commands_, dispatch.groups[0], dispatch.groups[1], dispatch.groups[2]);
+  }
+  barrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+  barrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+  fn.vkCmdPipelineBarrier(commands_, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                          0, 1, &barrier, 0, nullptr, 0, nullptr);
+  std::vector<VkBufferImageCopy> copies;
+  for (const auto& region : PlanBufferImageRegions(plan, levels, block_bytes, block_width,
+                                                   {extent.width, extent.height, extent.depth})) {
+    VkBufferImageCopy copy{};
+    copy.bufferOffset = offset + region.buffer_offset;
+    copy.bufferRowLength = region.row_length;
+    copy.bufferImageHeight = region.image_height;
+    copy.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, region.level, region.layer, 1};
+    copy.imageExtent = {region.extent[0], region.extent[1], region.extent[2]};
+    copies.push_back(copy);
+  }
+  fn.vkCmdCopyBufferToImage(commands_, page->buffer->handle(), image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                            uint32_t(copies.size()), copies.data());
 }
 void VulkanRender::DestroyTextures() {
   for (auto& [key, entry] : textures_) Unwatch(entry);
@@ -263,10 +364,6 @@ VkDescriptorSet VulkanRender::BindTextures(const RegisterFile& regs, rex::memory
         resource = found->second.resource;
         found->second.last_use = ++texture_use_;
       } else {
-        // These reads were synchronized before any descriptor sets of the draw
-        // were allocated, so a resolve cannot strand half-recorded draw state.
-        if (writeback_.Overlaps(input.base, base_bytes) || writeback_.Overlaps(input.mip, mip_bytes))
-          throw std::logic_error("Native Vulkan: CPU texture conversion overlaps pending resolve");
         if (found != textures_.end()) {
           Unwatch(found->second);
           submissions_.Retain(found->second.resource);
@@ -313,36 +410,52 @@ VkDescriptorSet VulkanRender::BindTextures(const RegisterFile& regs, rex::memory
         // current, so subsequent CPU writes invalidate the resident texture.
         if (base_bytes) mirror_->RequestRange(input.base, base_bytes);
         if (mip_bytes) mirror_->RequestRange(input.mip, mip_bytes);
-        std::vector<D3D12_PLACED_SUBRESOURCE_FOOTPRINT> footprints(layers * levels);
-        std::vector<VkBufferImageCopy> copies;
-        uint64_t bytes = 0;
-        for (unsigned layer = 0; layer < layers; ++layer) for (unsigned level = 0; level < levels; ++level) {
-          auto& footprint = footprints[layer * levels + level];
-          const unsigned width = std::max(1u, ((w + 1)*input.scale_x) >> level), height = std::max(1u, ((h + 1)*input.scale_y) >> level);
-          const unsigned depth = volume ? std::max(1u, (d + 1) >> level) : 1;
-          const unsigned row = (((width + format.block - 1) / format.block * format.bytes + 255) / 256) * 256;
-          bytes = (bytes + 511) & ~uint64_t(511);
-          footprint.Offset = bytes;
-          footprint.Footprint = {format.conversion, width, height, depth, row};
-          VkBufferImageCopy copy{};
-          copy.bufferOffset = bytes;
-          copy.bufferRowLength = row / format.bytes * format.block;
-          copy.bufferImageHeight = ((height + format.block - 1) / format.block) * format.block;
-          copy.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, level, layer, 1};
-          copy.imageExtent = {width, height, depth};
-          if (base || level) copies.push_back(copy);
-          bytes += uint64_t(row) * ((height + format.block - 1) / format.block) * depth;
+        // The shared load shaders write the guest block layout, which equals the
+        // CPU conversion output whenever GpuLoadShader selects one.
+        const auto* guest_format = FormatInfo::Get(input.format);
+        const auto shader_index = input.scaled || format.bytes != guest_format->bytes_per_block() ||
+            format.block != guest_format->block_width ? LoadShader::kUnknown : GpuLoadShader(input);
+        if (shader_index != LoadShader::kUnknown) {
+          transition(resource->image, levels, layers, false);
+          LoadTextureGpu(PlanGpuTextureLoad(input, shader_index), resource->image, levels, format.bytes,
+                         format.block, image.extent);
+          transition(resource->image, levels, layers, true);
+        } else {
+          // These reads were synchronized before any descriptor sets of the draw
+          // were allocated, so a resolve cannot strand half-recorded draw state.
+          if (writeback_.Overlaps(input.base, base_bytes) || writeback_.Overlaps(input.mip, mip_bytes))
+            throw std::logic_error("Native Vulkan: CPU texture conversion overlaps pending resolve");
+          std::vector<D3D12_PLACED_SUBRESOURCE_FOOTPRINT> footprints(layers * levels);
+          std::vector<VkBufferImageCopy> copies;
+          uint64_t bytes = 0;
+          for (unsigned layer = 0; layer < layers; ++layer) for (unsigned level = 0; level < levels; ++level) {
+            auto& footprint = footprints[layer * levels + level];
+            const unsigned width = std::max(1u, ((w + 1)*input.scale_x) >> level), height = std::max(1u, ((h + 1)*input.scale_y) >> level);
+            const unsigned depth = volume ? std::max(1u, (d + 1) >> level) : 1;
+            const unsigned row = (((width + format.block - 1) / format.block * format.bytes + 255) / 256) * 256;
+            bytes = (bytes + 511) & ~uint64_t(511);
+            footprint.Offset = bytes;
+            footprint.Footprint = {format.conversion, width, height, depth, row};
+            VkBufferImageCopy copy{};
+            copy.bufferOffset = bytes;
+            copy.bufferRowLength = row / format.bytes * format.block;
+            copy.bufferImageHeight = ((height + format.block - 1) / format.block) * format.block;
+            copy.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, level, layer, 1};
+            copy.imageExtent = {width, height, depth};
+            if (base || level) copies.push_back(copy);
+            bytes += uint64_t(row) * ((height + format.block - 1) / format.block) * depth;
+          }
+          std::vector<uint8_t> linear(size_t(bytes), 0);
+          const std::span<const uint8_t> base_source(base_bytes ? memory.TranslatePhysical<const uint8_t*>(input.base) : nullptr, base_bytes);
+          const std::span<const uint8_t> mip_source(mip_bytes ? memory.TranslatePhysical<const uint8_t*>(input.mip) : nullptr, mip_bytes);
+          ConvertTextureCpu(input, base_source, mip_source, footprints, linear.data());
+          const auto upload = Upload(linear.data(), bytes, 512);
+          for (auto& copy : copies) copy.bufferOffset += upload.offset;
+          transition(resource->image, levels, layers, false);
+          fn.vkCmdCopyBufferToImage(commands_, upload.buffer, resource->image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                                    uint32_t(copies.size()), copies.data());
+          transition(resource->image, levels, layers, true);
         }
-        std::vector<uint8_t> linear(size_t(bytes), 0);
-        const std::span<const uint8_t> base_source(base_bytes ? memory.TranslatePhysical<const uint8_t*>(input.base) : nullptr, base_bytes);
-        const std::span<const uint8_t> mip_source(mip_bytes ? memory.TranslatePhysical<const uint8_t*>(input.mip) : nullptr, mip_bytes);
-        ConvertTextureCpu(input, base_source, mip_source, footprints, linear.data());
-        const auto upload = Upload(linear.data(), bytes, 512);
-        for (auto& copy : copies) copy.bufferOffset += upload.offset;
-        transition(resource->image, levels, layers, false);
-        fn.vkCmdCopyBufferToImage(commands_, upload.buffer, resource->image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                                  uint32_t(copies.size()), copies.data());
-        transition(resource->image, levels, layers, true);
       }
     }
     infos[i].imageView = resource->view;

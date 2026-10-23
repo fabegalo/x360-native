@@ -335,6 +335,33 @@ Microsoft::WRL::ComPtr<ID3D12PipelineState> CreateTextureLoadPipeline(ID3D12Devi
   Check(device->CreateComputePipelineState(&desc, IID_PPV_ARGS(&pipeline)), "pipeline");
   return pipeline;
 }
+std::vector<BufferImageRegion> PlanBufferImageRegions(const TextureLoadPlan& plan, uint32_t levels,
+    uint32_t block_bytes, uint32_t block_width, std::array<uint32_t, 3> extent) {
+  std::vector<BufferImageRegion> regions;
+  regions.reserve(plan.copies.size());
+  for (const auto& copy : plan.copies) {
+    const auto& footprint = copy.footprint.Footprint;
+    uint32_t x = 0, y = 0, z = 0, width = footprint.Width, height = footprint.Height, depth = footprint.Depth;
+    if (copy.boxed) {
+      x = copy.box.left; y = copy.box.top; z = copy.box.front;
+      width = copy.box.right - x; height = copy.box.bottom - y; depth = copy.box.back - z;
+    }
+    const uint32_t rows = (footprint.Height + block_width - 1) / block_width;
+    const uint32_t level = copy.subresource % levels;
+    BufferImageRegion region{};
+    region.buffer_offset = copy.footprint.Offset +
+        (uint64_t(z) * rows + y / block_width) * footprint.RowPitch + uint64_t(x / block_width) * block_bytes;
+    region.row_length = footprint.RowPitch / block_bytes * block_width;
+    region.image_height = rows * block_width;
+    region.level = level;
+    region.layer = copy.subresource / levels;
+    region.extent[0] = std::min(width, std::max(1u, extent[0] >> level));
+    region.extent[1] = std::min(height, std::max(1u, extent[1] >> level));
+    region.extent[2] = std::min(depth, std::max(1u, extent[2] >> level));
+    regions.push_back(region);
+  }
+  return regions;
+}
 void RecordTextureLoad(ID3D12GraphicsCommandList* list, const TextureLoadPlan& plan, uint64_t scratch_offset,
     ID3D12Resource* scratch, ID3D12Resource* texture) {
   for (const auto& d : plan.dispatches) {

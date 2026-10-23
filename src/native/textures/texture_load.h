@@ -64,6 +64,12 @@ struct TextureLoadPlan {
   uint64_t scratch_bytes = 0;
 };
 TextureLoadPlan PlanGpuTextureLoad(const TextureLoadInput&, LoadShader);
+// The plan's footprint copies as buffer-to-image regions (Vulkan): each copy
+// reads the same scratch blocks as D3D12 CopyTextureRegion with its box, and
+// stops at the level's edge. Offsets are relative to the plan's scratch base.
+struct BufferImageRegion { uint64_t buffer_offset; uint32_t row_length, image_height, level, layer, extent[3]; };
+std::vector<BufferImageRegion> PlanBufferImageRegions(const TextureLoadPlan&, uint32_t levels,
+    uint32_t block_bytes, uint32_t block_width, std::array<uint32_t, 3> extent);
 // Native's CPU conversion of guest bytes into the subresource footprints of
 // the host resource (GetCopyableFootprints order: level-major per slice).
 void ConvertTextureCpu(const TextureLoadInput&, std::span<const uint8_t> base,

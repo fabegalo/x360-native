@@ -82,6 +82,9 @@ void VulkanRender::Destroy() {
   pipeline_cache_ = VK_NULL_HANDLE;
   for (auto pipeline : copy_pipelines_) if (pipeline) fn.vkDestroyPipeline(vk, pipeline, nullptr);
   for (auto pipeline : clear_pipelines_) if (pipeline) fn.vkDestroyPipeline(vk, pipeline, nullptr);
+  for (auto& pipeline : load_pipelines_) { if (pipeline) fn.vkDestroyPipeline(vk, pipeline, nullptr); pipeline = VK_NULL_HANDLE; }
+  if (load_layout_) fn.vkDestroyPipelineLayout(vk, load_layout_, nullptr);
+  load_layout_ = VK_NULL_HANDLE;
   if (copy_layout_) fn.vkDestroyPipelineLayout(vk, copy_layout_, nullptr);
   if (clear_layout_) fn.vkDestroyPipelineLayout(vk, clear_layout_, nullptr);
   if (downscale_pipeline_) fn.vkDestroyPipeline(vk, downscale_pipeline_, nullptr);
@@ -92,6 +95,7 @@ void VulkanRender::Destroy() {
     if (arena.descriptors) fn.vkDestroyDescriptorPool(vk, arena.descriptors, nullptr);
     arena.descriptors = VK_NULL_HANDLE;
     arena.uploads.clear();
+    arena.load_scratch.clear();
   }
   copy_pipelines_.fill(VK_NULL_HANDLE);
   clear_pipelines_.fill(VK_NULL_HANDLE);
@@ -111,6 +115,9 @@ void VulkanRender::Begin() {
   arena.image_descriptors = arena.sampler_descriptors = 0;
   arena.upload_index = 0;
   for (auto& page : arena.uploads) page.used = 0;
+  // The pool reset above released the load descriptor sets of this slot.
+  for (auto& page : arena.load_scratch) { page.used = 0; page.load_set = VK_NULL_HANDLE; }
+  arena.guest_load_set = VK_NULL_HANDLE;
 }
 void VulkanRender::EndRendering() {
   if (!rendering_) return;
