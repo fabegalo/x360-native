@@ -1,6 +1,7 @@
 #pragma once
 #include "../textures/texture.h"
 #include "draw_types.h"
+#include "occlusion_query.h"
 #include <memory>
 #include <rex/graphics/command_processor.h>
 namespace rex::ui { class GraphicsProvider; class Presenter; }
@@ -35,6 +36,9 @@ class ScanoutBackend {
   virtual void Draw(const rex::graphics::RegisterFile&, rex::memory::Memory&, rex::graphics::Shader*, rex::graphics::Shader*,
       rex::graphics::xenos::PrimitiveType, uint32_t, const DrawIndices*) = 0;
   virtual void Resolve(const rex::graphics::RegisterFile&, rex::memory::Memory&) = 0;
+  // Snapshot cumulative guest sample counters, waiting for counted work only.
+  // No shader instrumentation is used when no query remains active.
+  virtual SampleCounts ReadSampleCounts(bool counting_after) = 0;
 };
 using ScanoutFactory = std::unique_ptr<ScanoutBackend> (*)(rex::ui::GraphicsProvider&);
 std::unique_ptr<ScanoutBackend> CreateD3D12Scanout(rex::ui::GraphicsProvider& provider);

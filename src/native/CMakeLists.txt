@@ -20,17 +20,61 @@ configure_file(shaders/scanout_source.h.in scanout_source.h @ONLY)
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS shaders/scanout.hlsl)
 target_include_directories(rexgpu-native PRIVATE ${CMAKE_CURRENT_BINARY_DIR})
 target_include_directories(rexgpu-native PRIVATE ${X360_REXGLUE_DIR}/thirdparty/renderdoc)
+if(REXGLUE_USE_VULKAN)
+  target_compile_definitions(rexgpu-native PRIVATE X360N_NATIVE_VULKAN=1)
+  # Native owns execution/resources; share only the guest shader translator.
+  # Manual backend selection is explicit; launcher availability requires title validation.
+  set(_native_vulkan_libraries Vulkan::Headers glslang::SPIRV glslang
+      MachineIndependent GenericCodeGen OSDependent OGLCompiler)
+  target_sources(rexgpu-native PRIVATE vulkan/vulkan_core.cpp vulkan/vulkan_scanout.cpp
+      vulkan/vulkan_shader_cache.cpp vulkan/vulkan_render.cpp vulkan/vulkan_draw.cpp
+      vulkan/vulkan_resolve.cpp vulkan/vulkan_textures.cpp vulkan/vulkan_backend.cpp
+      ${_gpu}/pipeline/shader/spirv_builder.cpp ${_gpu}/pipeline/shader/spirv.cpp
+      ${_gpu}/pipeline/shader/spirv_translator.cpp ${_gpu}/pipeline/shader/spirv_translator_alu.cpp
+      ${_gpu}/pipeline/shader/spirv_translator_fetch.cpp ${_gpu}/pipeline/shader/spirv_translator_memexport.cpp
+      ${_gpu}/pipeline/shader/spirv_translator_rb.cpp)
+  target_link_libraries(rexgpu-native PRIVATE ${_native_vulkan_libraries})
+endif()
 if(X360N_NATIVE_PLUGIN_ONLY)
   return()
 endif()
 add_executable(x360n_native_probe ../../tests/native/probe.cpp)
 target_link_libraries(x360n_native_probe PRIVATE rexruntime windowscodecs ole32 d3d12)
 x360n_stage_runtime_dlls(x360n_native_probe PLUGIN_TARGETS rexgpu-native rexgpu-xenos)
+add_executable(x360n_native_occlusion_probe ../../tests/native/occlusion_probe.cpp)
+target_link_libraries(x360n_native_occlusion_probe PRIVATE rexruntime d3d12)
+x360n_stage_runtime_dlls(x360n_native_occlusion_probe PLUGIN_TARGETS rexgpu-native)
+add_test(NAME sdkcheck.Native-ROV-sample-counts COMMAND x360n_native_occlusion_probe
+    ${CMAKE_CURRENT_BINARY_DIR}/occlusion-probe)
+set_tests_properties(sdkcheck.Native-ROV-sample-counts PROPERTIES LABELS project TIMEOUT 60)
+add_executable(x360n_native_memexport_probe ../../tests/native/memexport_probe.cpp memory/guest_memory_mirror.cpp)
+target_link_libraries(x360n_native_memexport_probe PRIVATE rexruntime d3d12)
+x360n_stage_runtime_dlls(x360n_native_memexport_probe PLUGIN_TARGETS rexgpu-native)
+add_test(NAME sdkcheck.Native-MEMEXPORT-d3d12 COMMAND x360n_native_memexport_probe
+    ${CMAKE_CURRENT_BINARY_DIR}/memexport-d3d12 d3d12)
+set_tests_properties(sdkcheck.Native-MEMEXPORT-d3d12 PROPERTIES LABELS project TIMEOUT 90)
+if(REXGLUE_USE_VULKAN)
+  add_test(NAME sdkcheck.Native-MEMEXPORT-vulkan COMMAND x360n_native_memexport_probe
+      ${CMAKE_CURRENT_BINARY_DIR}/memexport-vulkan vulkan)
+  set_tests_properties(sdkcheck.Native-MEMEXPORT-vulkan PROPERTIES LABELS project TIMEOUT 90)
+  add_test(NAME sdkcheck.Native-FSI-sample-counts COMMAND x360n_native_occlusion_probe
+      ${CMAKE_CURRENT_BINARY_DIR}/occlusion-probe-vulkan vulkan)
+  set_tests_properties(sdkcheck.Native-FSI-sample-counts PROPERTIES LABELS project TIMEOUT 60)
+  add_executable(x360n_native_vulkan_probe ../../tests/native/vulkan_probe.cpp
+      vulkan/vulkan_core.cpp vulkan/vulkan_scanout.cpp)
+  target_include_directories(x360n_native_vulkan_probe PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+  target_link_libraries(x360n_native_vulkan_probe PRIVATE rexruntime ${_native_vulkan_libraries})
+  x360n_stage_runtime_dlls(x360n_native_vulkan_probe)
+  add_test(NAME native.vulkan-components COMMAND x360n_native_vulkan_probe
+      ${CMAKE_CURRENT_BINARY_DIR}/vulkan-components)
+  set_tests_properties(native.vulkan-components PROPERTIES LABELS project TIMEOUT 60)
+endif()
 if(TARGET Catch2::Catch2WithMain)
   add_executable(x360n_native_tests ../../tests/native/texture_test.cpp ../../tests/native/packet_test.cpp ../../tests/native/rectangle_test.cpp ../../tests/native/point_test.cpp ../../tests/native/texture_load_test.cpp textures/texture.cpp textures/texture_load.cpp commands/packet_guard.cpp shaders/rectangle_shader.cpp shaders/point_shader.cpp ${_gpu}/util/draw.cpp ${_gpu}/register_file.cpp ${_gpu}/registers.cpp ${_gpu}/flags.cpp ${X360_REXGLUE_DIR}/thirdparty/dxbc/DXBCChecksum.cpp)
   target_include_directories(x360n_native_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${X360_REXGLUE_DIR} ${X360_REXGLUE_DIR}/thirdparty/renderdoc)
   target_link_libraries(x360n_native_tests PRIVATE rexruntime Catch2::Catch2WithMain d3d12 d3dcompiler)
   target_sources(x360n_native_tests PRIVATE ../../tests/native/pipeline_store_test.cpp pipeline/pipeline_store.cpp)
+  target_sources(x360n_native_tests PRIVATE ../../tests/native/occlusion_test.cpp)
   target_link_libraries(x360n_native_tests PRIVATE xxHash::xxhash)
   x360n_stage_runtime_dlls(x360n_native_tests)
   add_test(NAME native.texture COMMAND x360n_native_tests ~[native-packet])
@@ -38,6 +82,8 @@ if(TARGET Catch2::Catch2WithMain)
   set_tests_properties(native.texture PROPERTIES LABELS project TIMEOUT 180)
   add_test(NAME native.packet-payload COMMAND x360n_native_tests [native-packet])
   set_tests_properties(native.packet-payload PROPERTIES LABELS project TIMEOUT 30)
+  add_test(NAME native.occlusion-contract COMMAND x360n_native_tests [native-zpd])
+  set_tests_properties(native.occlusion-contract PROPERTIES LABELS project TIMEOUT 30)
   add_test(NAME native.abi COMMAND x360n_native_probe native ${CMAKE_CURRENT_BINARY_DIR}/abi-probe --abi)
   set_tests_properties(native.abi PROPERTIES LABELS project TIMEOUT 20)
   # D1OVL plane composed before gamma, programmed directly and through VdSwap's

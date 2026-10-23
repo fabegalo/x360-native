@@ -77,12 +77,8 @@ void D3D12Render::Resolve(const RegisterFile& r, rex::memory::Memory& memory) {
   if (!clear_root_) clear_root_ = ComputeRoot(sizeof(draw_util::ResolveClearShaderConstants) / 4, false);
   auto length = info.copy_dest_extent_length;
   const uint64_t slot = (uint64_t(length) + 255) & ~uint64_t(255);
-  if (view_count_ > 65000 || (length && readback_used_ + slot > readback_size_)) Flush(kFlushCapacity);
-  if (slot > readback_size_) {
-    // After the flush no submission references the old buffer.
-    readback_size_ = std::max<uint64_t>(slot, 16ull * 1024 * 1024);
-    readback_ = Buffer(readback_size_, D3D12_HEAP_TYPE_READBACK, D3D12_RESOURCE_STATE_COPY_DEST);
-  }
+  if (view_count_ > 65000) Flush(kFlushCapacity);
+  ReserveReadback(slot);
   ID3D12DescriptorHeap* heaps[]{views_.Get(), samplers_.Get()}; list_->SetDescriptorHeaps(2, heaps);
   if (length) {
     draw_util::ResolveCopyShaderConstants constants; uint32_t gx, gy;
@@ -122,12 +118,7 @@ void D3D12Render::Resolve(const RegisterFile& r, rex::memory::Memory& memory) {
     list_->Dispatch(gx, gy, 1);
     // The mirror now holds these bytes: later fetches read them on the GPU;
     // cached textures over the range reload from the mirror.
-    mirror.RangeWrittenByGpu(info.copy_dest_extent_start, length);
-    Transition(memory_.Get(), memory_state_, D3D12_RESOURCE_STATE_COPY_SOURCE);
-    list_->CopyBufferRegion(readback_.Get(), readback_used_, memory_.Get(), info.copy_dest_extent_start, length);
-    // Guest-visible when this submission's fence completes (see GuestWriteback).
-    writeback_.Add(info.copy_dest_extent_start, length, readback_used_);
-    readback_used_ += slot;
+    QueueGuestWrite(info.copy_dest_extent_start, length);
   }
   if (info.IsClearingColor() || info.IsClearingDepth()) {
     Transition(edram_.Get(), edram_state_, D3D12_RESOURCE_STATE_UNORDERED_ACCESS); Barrier();

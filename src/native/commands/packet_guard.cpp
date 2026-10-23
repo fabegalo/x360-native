@@ -35,7 +35,7 @@ void ValidatePacketForBackend(uint32_t header, const rex::memory::RingBuffer& pa
     case PM4_SET_BIN_MASK: case PM4_SET_BIN_SELECT: required = 2; break;
     case PM4_SET_BIN_MASK_LO: case PM4_SET_BIN_MASK_HI:
     case PM4_SET_BIN_SELECT_LO: case PM4_SET_BIN_SELECT_HI:
-    case PM4_EVENT_WRITE: required = 1; break;
+    case PM4_EVENT_WRITE: case PM4_EVENT_WRITE_ZPD: required = 1; break;
     case PM4_REG_RMW: case PM4_EVENT_WRITE_SHD: required = 3; break;
     // Shared handler reports maximal screen extents: a superset of any draw's
     // coverage, so tile predication may run more draws but never drops pixels.
@@ -64,6 +64,22 @@ void ValidatePacketForBackend(uint32_t header, const rex::memory::RingBuffer& pa
   // Inspect a cursor copy: validation must not consume the guest command.
   auto cursor = payload;
   auto word = [&]() { return cursor.ReadAndSwap<uint32_t>(); };
+  // Decoder stores use the unprotected physical view; reject an invalid
+  // destination before that store, including variable-length MEM_WRITE.
+  auto physical_write = [&](uint32_t address, uint64_t bytes) {
+    if (uint64_t(address & ~3u) + bytes > 0x20000000)
+      x360n::native::Unsupported("PM4 write outside guest physical memory");
+  };
+  if (opcode == PM4_MEM_WRITE || opcode == PM4_REG_TO_MEM || opcode == PM4_EVENT_WRITE_SHD || opcode == PM4_COND_WRITE) {
+    auto write = payload;
+    auto next = [&]() { return write.ReadAndSwap<uint32_t>(); };
+    if (opcode == PM4_MEM_WRITE) physical_write(next(), uint64_t(count - 1) * 4);
+    else if (opcode == PM4_COND_WRITE) {
+      const uint32_t control = next(); next(); next(); next();
+      const uint32_t destination = next();
+      if (control & 0x100) physical_write(destination, 4);
+    } else { next(); physical_write(next(), 4); }
+  }
   if (opcode == PM4_EVENT_WRITE_EXT) {
     word();
     const auto address = word();
@@ -93,7 +109,7 @@ void ValidatePacketForBackend(uint32_t header, const rex::memory::RingBuffer& pa
   }
   if (opcode == PM4_DRAW_INDX || opcode == PM4_DRAW_INDX_2) {
     unsigned prefix = opcode == PM4_DRAW_INDX ? 1 : 0;
-    if (prefix && (word() & 0x100)) x360n::native::Unsupported("conditional visibility draw not implemented");
+    if (prefix) word(); // Visibility predicate is evaluated after decoding the entire draw.
     reg::VGT_DRAW_INITIATOR draw; draw.value = word();
     if (draw.source_select == SourceSelect::kAutoIndex) {
       if (count != prefix + 1) x360n::native::Unsupported("invalid auto-index draw size");
@@ -127,7 +143,7 @@ void ValidatePacketForBackend(uint32_t header, const rex::memory::RingBuffer& pa
     // event register write; a plain EVENT_WRITE (cache flush) publishes
     // nothing the guest can observe, so it does not wait for the GPU.
     // Every guest input of earlier commands was captured when recorded and
-    // the only guest-memory outputs are resolve results.
+    // guest-memory outputs are resolves and shader MEMEXPORT stores.
     case PM4_EVENT_WRITE_SHD:
       x360n::native::CompleteGuestWritesBeforePacket(x360n::native::kGuestSyncEvent, opcode);
       after_guest_sync = true;

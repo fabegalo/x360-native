@@ -86,6 +86,10 @@ rex::graphics::Shader* D3D12Scanout::LoadShader(rex::graphics::xenos::ShaderType
   }
   return render_->shaders.Load(type, data, count);
 }
+SampleCounts D3D12Scanout::ReadSampleCounts(bool counting_after) {
+  if (!render_) render_ = std::make_unique<D3D12Render>(provider_);
+  return render_->ReadSampleCounts(counting_after);
+}
 void D3D12Scanout::Draw(const rex::graphics::RegisterFile& regs, rex::memory::Memory& memory, rex::graphics::Shader* vs, rex::graphics::Shader* ps,
     rex::graphics::xenos::PrimitiveType primitive, uint32_t count, const DrawIndices* indices) {
   if (!render_) render_ = std::make_unique<D3D12Render>(provider_);

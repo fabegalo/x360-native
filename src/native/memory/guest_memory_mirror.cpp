@@ -3,6 +3,7 @@
 #include <rex/system/xmemory.h>
 #include <rex/thread/mutex.h>
 #include <algorithm>
+#include <atomic>
 #include <bit>
 #include <cstring>
 #include <stdexcept>
@@ -25,6 +26,7 @@ GuestMemoryMirror::GuestMemoryMirror(rex::memory::Memory& memory, Upload upload)
   const size_t blocks = ((kSize >> page_log2_) + 63) / 64;
   valid_.assign(blocks, 0);
   gpu_written_.assign(blocks, 0);
+  cpu_generations_.assign(kSize >> page_log2_, 0);
   invalidation_handle_ = memory_.RegisterPhysicalMemoryInvalidationCallback(InvalidationThunk, this);
 }
 GuestMemoryMirror::~GuestMemoryMirror() {
@@ -69,13 +71,14 @@ void GuestMemoryMirror::Fire(uint32_t page_first, uint32_t page_last, bool by_gp
     bucket.resize(kept);
   }
 }
-void GuestMemoryMirror::MakeValid(uint32_t start, uint32_t length, bool by_gpu) {
+void GuestMemoryMirror::MakeValid(uint32_t start, uint32_t length, bool by_gpu, std::vector<uint64_t>* cpu_generations) {
   const uint32_t first = start >> page_log2_, last = (start + length - 1) >> page_log2_;
   {
     auto lock = Lock();
+    if (cpu_generations) cpu_generations->assign(cpu_generations_.begin() + first, cpu_generations_.begin() + last + 1);
     for (uint32_t i = first >> 6; i <= last >> 6; ++i) {
       const uint64_t mask = BlockMask(i, first, last);
-      valid_[i] |= mask;
+      std::atomic_ref(valid_[i]).fetch_or(mask, std::memory_order_relaxed);
       gpu_written_[i] = by_gpu ? gpu_written_[i] | mask : gpu_written_[i] & ~mask;
     }
   }
@@ -86,13 +89,15 @@ void GuestMemoryMirror::RequestRange(uint32_t start, uint32_t length) {
   if (!length) return;
   if (start >= kSize || length > kSize - start) throw std::runtime_error("Native mirror request outside guest physical memory");
   const uint32_t first = start >> page_log2_, last = (start + length - 1) >> page_log2_;
-  // Nearly every request finds its pages valid. Reading without the region
-  // is equivalent to a locked read just before a concurrent invalidation:
-  // that invalidation fires watches and the next request uploads the page.
+  // Nearly every request finds its pages valid. The bitmap never reallocates
+  // after construction. Atomic accesses avoid a C++ data race with CPU fault
+  // callbacks; volatile alone does not synchronize those accesses. Only the
+  // command processor consumes this bitmap and records uploads, so the bit
+  // needs atomicity, not publication of another thread's resource contents.
   bool valid = true;
   for (uint32_t i = first >> 6; valid && i <= last >> 6; ++i) {
     const uint64_t mask = BlockMask(i, first, last);
-    valid = (reinterpret_cast<const volatile uint64_t&>(valid_[i]) & mask) == mask;
+    valid = (std::atomic_ref(valid_[i]).load(std::memory_order_relaxed) & mask) == mask;
   }
   if (valid) return;
   uploads_.clear();
@@ -100,7 +105,8 @@ void GuestMemoryMirror::RequestRange(uint32_t start, uint32_t length) {
     auto lock = Lock();
     uint32_t open = UINT32_MAX;
     for (uint32_t page = first; page <= last; ++page) {
-      const bool page_valid = (valid_[page >> 6] >> (page & 63)) & 1;
+      const bool page_valid =
+          (std::atomic_ref(valid_[page >> 6]).load(std::memory_order_relaxed) >> (page & 63)) & 1;
       if (!page_valid && open == UINT32_MAX) open = page;
       if (page_valid && open != UINT32_MAX) { uploads_.emplace_back(open, page - open); open = UINT32_MAX; }
     }
@@ -114,16 +120,20 @@ void GuestMemoryMirror::RequestRange(uint32_t start, uint32_t length) {
     uploaded_bytes_ += uint64_t(count) << page_log2_;
   }
 }
-void GuestMemoryMirror::RangeWrittenByGpu(uint32_t start, uint32_t length) {
+void GuestMemoryMirror::RangeWrittenByGpu(uint32_t start, uint32_t length, std::vector<uint64_t>* cpu_generations) {
   if (!length || start >= kSize) return;
   length = std::min(length, kSize - start);
   Fire(start >> page_log2_, (start + length - 1) >> page_log2_, true);
-  MakeValid(start, length, true);
+  MakeValid(start, length, true, cpu_generations);
 }
-void GuestMemoryMirror::CopyReadbackToGuest(uint32_t start, const uint8_t* source, uint32_t length) {
+void GuestMemoryMirror::CopyReadbackToGuest(uint32_t start, const uint8_t* source, uint32_t length,
+    std::span<const uint64_t> cpu_generations) {
   if (!length || start >= kSize) return;
   length = std::min(length, kSize - start);
   const uint32_t page_size = 1u << page_log2_;
+  const uint32_t first_page = start >> page_log2_;
+  if (!cpu_generations.empty() && cpu_generations.size() != ((start + length - 1) >> page_log2_) - first_page + 1)
+    throw std::runtime_error("Native readback: invalid CPU epoch extent");
   // Under the region: a guest write faulting on a still-valid page waits,
   // invalidates it and then lands after these bytes, so it wins as well.
   // The physical view written here carries no write watch.
@@ -132,14 +142,16 @@ void GuestMemoryMirror::CopyReadbackToGuest(uint32_t start, const uint8_t* sourc
     const uint32_t address = start + offset;
     const uint32_t chunk = std::min(length - offset, page_size - (address & (page_size - 1)));
     const uint32_t page = address >> page_log2_;
-    if ((valid_[page >> 6] >> (page & 63)) & 1)
+    if (((std::atomic_ref(valid_[page >> 6]).load(std::memory_order_relaxed) >> (page & 63)) & 1) &&
+        (cpu_generations.empty() || cpu_generations[page - first_page] == cpu_generations_[page]))
       std::memcpy(memory_.TranslatePhysical(address), source + offset, chunk);
     offset += chunk;
   }
 }
 void GuestMemoryMirror::InvalidateCpuPages() {
   auto lock = Lock();
-  valid_ = gpu_written_;
+  for (size_t i = 0; i < valid_.size(); ++i)
+    std::atomic_ref(valid_[i]).store(gpu_written_[i], std::memory_order_relaxed);
 }
 std::pair<uint32_t, uint32_t> GuestMemoryMirror::InvalidationThunk(void* context, uint32_t start, uint32_t length, bool exact) {
   return static_cast<GuestMemoryMirror*>(context)->Invalidate(start, length, exact);
@@ -163,8 +175,10 @@ std::pair<uint32_t, uint32_t> GuestMemoryMirror::Invalidate(uint32_t start, uint
   }
   for (uint32_t i = first >> 6; i <= last >> 6; ++i) {
     const uint64_t mask = BlockMask(i, first, last);
-    valid_[i] &= ~mask; gpu_written_[i] &= ~mask;
+    std::atomic_ref(valid_[i]).fetch_and(~mask, std::memory_order_relaxed);
+    gpu_written_[i] &= ~mask;
   }
+  for (uint32_t page = first; page <= last; ++page) ++cpu_generations_[page];
   Fire(first, last, false);
   return {first << page_log2_, (last - first + 1) << page_log2_};
 }

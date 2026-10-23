@@ -13,6 +13,7 @@ class CommandProcessor final : public rex::graphics::CommandProcessor {
   bool SetupContext() override;
   void ShutdownContext() override;
   void WriteRegister(uint32_t index, uint32_t value) override;
+  void OnGuestMemoryWrite(uint32_t address, uint32_t length) override;
   // Guest-observable points: the read pointer is written back after a
   // primary buffer, and waits poll memory the guest or a resolve may write.
   void OnPrimaryBufferEnd() override { CompleteGuestWrites(kGuestSyncBufferEnd); }
@@ -30,10 +31,12 @@ class CommandProcessor final : public rex::graphics::CommandProcessor {
                                     const uint32_t* data, uint32_t count) override;
   bool IssueDraw(rex::graphics::xenos::PrimitiveType, uint32_t, IndexBufferInfo*, bool) override;
   bool IssueCopy() override;
+  bool ShouldIssueDraw(uint32_t viz_query_condition) const override;
   bool ExecutePacketType3_EVENT_WRITE_ZPD(rex::memory::RingBuffer*, uint32_t, uint32_t) override;
  private:
   ScanoutFactory factory_;
   std::unique_ptr<ScanoutBackend> scanout_;
+  OcclusionQueries occlusion_queries_;
 };
 [[noreturn]] void Unsupported(const char* message);
 // Single command processor thread per process; no-op before setup.

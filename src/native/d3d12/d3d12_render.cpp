@@ -94,7 +94,7 @@ D3D12Render::D3D12Render(rex::ui::d3d12::D3D12Provider& provider) : provider_(pr
   Check(device_->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&fence_)), "fence");
   event_ = CreateEventW(nullptr, FALSE, FALSE, nullptr); Require(event_ != nullptr, "fence event");
   memory_ = Buffer(0x20000000, D3D12_HEAP_TYPE_DEFAULT, memory_state_, D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS);
-  edram_ = Buffer(kEdramSizeBytes, D3D12_HEAP_TYPE_DEFAULT, edram_state_, D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS);
+  edram_ = Buffer(kEdramSizeBytes + sizeof(SampleCounts), D3D12_HEAP_TYPE_DEFAULT, edram_state_, D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS);
   D3D12_DESCRIPTOR_HEAP_DESC hd{D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, 65536, D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE, 0};
   Check(device_->CreateDescriptorHeap(&hd, IID_PPV_ARGS(&views_)), "views");
   hd.Type = D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER; hd.NumDescriptors = 2048;
@@ -264,13 +264,39 @@ void D3D12Render::Flush(FlushCause cause) {
     void* mapped; D3D12_RANGE range{0, size_t(readback_used_)};
     Check(readback_->Map(0, &range, &mapped), "map resolve readback");
     writeback_.Complete([&](const GuestWriteback::Write& w) {
-      mirror_->CopyReadbackToGuest(w.address, static_cast<const uint8_t*>(mapped) + w.offset, w.length);
+      mirror_->CopyReadbackToGuest(w.address, static_cast<const uint8_t*>(mapped) + w.offset, w.length, w.cpu_generations);
     });
     D3D12_RANGE none{}; readback_->Unmap(0, &none);
   }
   readback_used_ = 0;
   RecycleBatch();
   if (stats_enabled_ && serial_ % 30 == 0) LogSubmissionStats();
+}
+SampleCounts D3D12Render::ReadSampleCounts(bool counting_after) {
+  if (!sample_counts_readback_) {
+    sample_counts_readback_ = Buffer(sizeof(SampleCounts), D3D12_HEAP_TYPE_READBACK, D3D12_RESOURCE_STATE_COPY_DEST);
+    const auto initial = Upload(sample_counts_.data(), sizeof(sample_counts_));
+    Transition(edram_.Get(), edram_state_, D3D12_RESOURCE_STATE_COPY_DEST);
+    list_->CopyBufferRegion(edram_.Get(), kEdramSizeBytes, initial.resource.Get(), initial.offset, sizeof(SampleCounts));
+    Transition(edram_.Get(), edram_state_, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+    edram_rov_layout_.reset();
+  }
+  if (sample_counting_) {
+    // The transition orders all preceding ROV atomics, including draws in
+    // earlier recording arenas. The fence retires the copy before publication.
+    Transition(edram_.Get(), edram_state_, D3D12_RESOURCE_STATE_COPY_SOURCE);
+    list_->CopyBufferRegion(sample_counts_readback_.Get(), 0, edram_.Get(), kEdramSizeBytes, sizeof(SampleCounts));
+    Transition(edram_.Get(), edram_state_, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+    edram_rov_layout_.reset();
+    Flush(kFlushGuestSync);
+    void* mapped = nullptr;
+    const D3D12_RANGE range{0, sizeof(SampleCounts)}, none{};
+    Check(sample_counts_readback_->Map(0, &range, &mapped), "map sample counts");
+    std::memcpy(sample_counts_.data(), mapped, sizeof(sample_counts_));
+    sample_counts_readback_->Unmap(0, &none);
+  }
+  sample_counting_ = counting_after;
+  return sample_counts_;
 }
 void D3D12Render::Wait(uint64_t serial) {
   const auto completed = fence_->GetCompletedValue();
@@ -320,6 +346,31 @@ void D3D12Render::SyncGuestRead(uint32_t address, uint64_t length, ReadSite site
     if (stats_enabled_) { ++overlap_flushes_; ++overlap_sites_[site]; }
     Flush(kFlushOverlap);
   }
+}
+void D3D12Render::ReserveReadback(uint64_t bytes) {
+  if (!bytes) return;
+  if (readback_used_ + bytes > readback_size_) {
+    // Only an old, nonempty allocation can be referenced by recorded work.
+    if (readback_used_) Flush(kFlushCapacity);
+    if (bytes > readback_size_) {
+      readback_size_ = std::max(bytes, 16ull * 1024 * 1024);
+      readback_ = Buffer(readback_size_, D3D12_HEAP_TYPE_READBACK, D3D12_RESOURCE_STATE_COPY_DEST);
+    }
+  }
+}
+void D3D12Render::QueueGuestWrite(uint32_t address, uint32_t length) {
+  if (!length) return;
+  const uint64_t slot = (uint64_t(length) + 255) & ~uint64_t(255);
+  Require(uint64_t(address) + length <= GuestMemoryMirror::kSize && readback_used_ + slot <= readback_size_,
+          "GPU writeback not reserved or outside guest physical memory");
+  // Make the GPU mirror authoritative and retire texture aliases immediately.
+  // The COPY_SOURCE transition also orders UAV stores from the draw/resolve.
+  std::vector<uint64_t> cpu_generations;
+  mirror_->RangeWrittenByGpu(address, length, &cpu_generations);
+  Transition(memory_.Get(), memory_state_, D3D12_RESOURCE_STATE_COPY_SOURCE);
+  list_->CopyBufferRegion(readback_.Get(), readback_used_, memory_.Get(), address, length);
+  writeback_.Add(address, length, readback_used_, std::move(cpu_generations));
+  readback_used_ += slot;
 }
 GuestMemoryMirror& D3D12Render::Mirror(rex::memory::Memory& memory) {
   guest_memory_ = &memory;

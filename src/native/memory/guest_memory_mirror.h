@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <functional>
 #include <mutex>
+#include <span>
 #include <vector>
 namespace x360n::native {
 class GuestMemoryMirror {
@@ -34,10 +35,13 @@ class GuestMemoryMirror {
   // A GPU write (resolve) now holds the authoritative bytes of the range:
   // fires watches, marks pages valid and GPU-written, and watches CPU writes.
   // RequestRange the range first so unwritten bytes of its pages are current.
-  void RangeWrittenByGpu(uint32_t start, uint32_t length);
+  // Optional per-page CPU epochs accompany a deferred readback. A later CPU
+  // write must invalidate old snapshots even if another draw revalidates the page.
+  void RangeWrittenByGpu(uint32_t start, uint32_t length, std::vector<uint64_t>* cpu_generations = nullptr);
   // Publishes GPU results to guest memory, except pages the CPU wrote after
   // the GPU write made them valid (the newer CPU bytes win).
-  void CopyReadbackToGuest(uint32_t start, const uint8_t* source, uint32_t length);
+  void CopyReadbackToGuest(uint32_t start, const uint8_t* source, uint32_t length,
+                           std::span<const uint64_t> cpu_generations = {});
   // Frame boundary: pages valid only because they were uploaded are reloaded
   // on their next request (pinned clear_memory_page_state contract).
   void InvalidateCpuPages();
@@ -52,15 +56,18 @@ class GuestMemoryMirror {
   static constexpr uint32_t kBuckets = kSize >> kBucketLog2;
   static std::pair<uint32_t, uint32_t> InvalidationThunk(void*, uint32_t, uint32_t, bool);
   std::pair<uint32_t, uint32_t> Invalidate(uint32_t start, uint32_t length, bool exact);
-  void MakeValid(uint32_t start, uint32_t length, bool by_gpu);
+  void MakeValid(uint32_t start, uint32_t length, bool by_gpu, std::vector<uint64_t>* cpu_generations = nullptr);
   void Fire(uint32_t page_first, uint32_t page_last, bool by_gpu);
   void Release(WatchRange*);
   rex::memory::Memory& memory_;
   Upload upload_;
   uint32_t page_log2_;
   void* invalidation_handle_ = nullptr;
-  // Guarded by Lock(); the valid bitmap is also read without it (see RequestRange).
+  // Writers hold Lock(); all live accesses to valid_ use atomic_ref because
+  // RequestRange also reads it without the lock. Storage is fixed after ctor.
   std::vector<uint64_t> valid_, gpu_written_;
+  // Guarded by Lock(), incremented only on CPU invalidation, never revalidation.
+  std::vector<uint64_t> cpu_generations_;
   std::vector<WatchRange*> buckets_[kBuckets];
   std::vector<std::pair<uint32_t, uint32_t>> uploads_;
   uint64_t uploaded_bytes_ = 0;

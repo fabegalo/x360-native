@@ -46,7 +46,7 @@ TEST_CASE("Native rejects dropped and malformed draws", "[native-packet]") {
   draw.source_select = SourceSelect::kAutoIndex; draw.prim_type = PrimitiveType::kTriangleList; draw.num_indices = 3;
   CHECK_NOTHROW(Validate(PM4_DRAW_INDX, {0, draw.value}));
   CHECK_NOTHROW(Validate(PM4_DRAW_INDX_2, {draw.value}));
-  CHECK_THROWS(Validate(PM4_DRAW_INDX, {0x100, draw.value}));
+  CHECK_NOTHROW(Validate(PM4_DRAW_INDX, {0x100, draw.value}));
   draw.source_select = SourceSelect::kImmediate;
   CHECK_THROWS_WITH(Validate(PM4_DRAW_INDX_2, {draw.value}), "immediate index source not implemented");
   draw.source_select = SourceSelect::kDMA;

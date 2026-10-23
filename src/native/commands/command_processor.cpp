@@ -8,6 +8,9 @@
 #include <cstdlib>
 #include <fstream>
 #include <rex/cvar.h>
+#include <rex/memory/ring_buffer.h>
+#include <rex/thread/mutex.h>
+#include <cstring>
 REXCVAR_DEFINE_STRING(native_trace, "", "GPU/Native", "Optional Native diagnostic directory");
 namespace x360n::native {
 [[noreturn]] void Unsupported(const char* message) {
@@ -37,7 +40,7 @@ bool CommandProcessor::SetupContext() {
   try {
     active_processor = this;
     scanout_ = factory_(*graphics_system_->provider());
-    REXLOG_INFO("Native: independent D3D12 scanout and guest renderer ready");
+    REXLOG_INFO("{}: independent scanout and guest renderer ready", graphics_system_->name());
     return true;
   } catch (const std::exception& e) { Unsupported(e.what()); }
 }
@@ -53,7 +56,22 @@ void CommandProcessor::InitializeShaderStorage(const std::filesystem::path& path
 void CommandProcessor::WriteRegister(uint32_t index, uint32_t value) {
   if (index >= rex::graphics::RegisterFile::kRegisterCount)
     Unsupported("GPU register outside Native state");
+  using namespace rex::graphics;
+  if (index >= XE_GPU_REG_SCRATCH_REG0 && index <= XE_GPU_REG_SCRATCH_REG7 &&
+      (register_file_->values[XE_GPU_REG_SCRATCH_UMSK] & (1u << (index - XE_GPU_REG_SCRATCH_REG0)))) {
+    const uint64_t address = uint64_t(register_file_->values[XE_GPU_REG_SCRATCH_ADDR]) + (index - XE_GPU_REG_SCRATCH_REG0) * 4;
+    if (address + 4 > 0x20000000) Unsupported("scratch writeback outside guest physical memory");
+    CompleteGuestWrites(kGuestSyncPacket);
+  }
   rex::graphics::CommandProcessor::WriteRegister(index, value);
+}
+void CommandProcessor::OnGuestMemoryWrite(uint32_t address, uint32_t length) {
+  if (!length) return;
+  if (uint64_t(address) + length > 0x20000000) Unsupported("GPU packet write outside guest physical memory");
+  // Shared packet handlers write through the unprotected physical view.
+  // Notify every alias, including Native's mirror and texture watches.
+  memory_->TriggerPhysicalMemoryCallbacks(rex::thread::global_critical_region::AcquireDirect(),
+      0xA0000000u | address, length, true, true);
 }
 void CommandProcessor::IssueSwap(uint32_t, uint32_t width, uint32_t height) {
   last_swap_succeeded_ = false;
@@ -95,6 +113,14 @@ rex::graphics::Shader* CommandProcessor::LoadShader(rex::graphics::xenos::Shader
   try { return scanout_->LoadShader(type, data, count); }
   catch (const std::exception& e) { Unsupported(e.what()); }
 }
+bool CommandProcessor::ShouldIssueDraw(uint32_t condition) const {
+  using namespace rex::graphics;
+  const auto viz = register_file_->Get<reg::PA_SC_VIZ_QUERY>();
+  if (viz.viz_query_ena)
+    Unsupported("Native visibility-query rasterization is not implemented");
+  return VisibilityDrawEnabled(condition, register_file_->values[XE_GPU_REG_PA_SC_VIZ_QUERY_STATUS_0],
+                               register_file_->values[XE_GPU_REG_PA_SC_VIZ_QUERY_STATUS_1]);
+}
 bool CommandProcessor::IssueDraw(rex::graphics::xenos::PrimitiveType primitive, uint32_t count, IndexBufferInfo* indices, bool) {
   try {
     if (!REXCVAR_GET(native_trace).empty()) {
@@ -118,7 +144,32 @@ bool CommandProcessor::IssueCopy() {
   try { scanout_->Resolve(*register_file_, *memory_); return true; }
   catch (const std::exception& e) { Unsupported(e.what()); }
 }
-bool CommandProcessor::ExecutePacketType3_EVENT_WRITE_ZPD(rex::memory::RingBuffer*, uint32_t, uint32_t) {
-  Unsupported("occlusion query is not implemented");
+bool CommandProcessor::ExecutePacketType3_EVENT_WRITE_ZPD(rex::memory::RingBuffer* reader, uint32_t, uint32_t count) {
+  try {
+    using namespace rex::graphics;
+    if (count != 1) throw std::runtime_error("Native ZPD: invalid payload size");
+    const uint32_t initiator = reader->ReadAndSwap<uint32_t>();
+    if ((initiator & 0x3F) != xenos::ZPASS_DONE)
+      throw std::runtime_error("Native ZPD: unsupported event initiator");
+    WriteRegister(XE_GPU_REG_VGT_EVENT_INITIATOR, initiator & 0x3F);
+    const auto address = register_file_->values[XE_GPU_REG_RB_SAMPLE_COUNT_ADDR];
+    if ((address & 3) || uint64_t(address) + sizeof(SampleCounts) > 0x20000000)
+      throw std::runtime_error("Native ZPD: report outside aligned guest physical memory");
+    // Earlier resolves may alias the report. Publish those first, then observe
+    // the driver's pending token and retire real GPU counters before writing.
+    CompleteGuestWrites(kGuestSyncEvent, xenos::PM4_EVENT_WRITE_ZPD);
+    SampleCounts report;
+    auto* destination = memory_->TranslatePhysical(address);
+    std::memcpy(report.data(), destination, sizeof(report));
+    const bool end = OcclusionQueries::IsEnd(report);
+    const bool counting_after = occlusion_queries_.CountingAfter(end);
+    report = scanout_->ReadSampleCounts(counting_after);
+    // TranslatePhysical bypasses the watched guest aliases. Retire their
+    // cached copies before publishing these new bytes, as a guest write does.
+    OnGuestMemoryWrite(address, sizeof(report));
+    std::memcpy(destination, report.data(), sizeof(report));
+    occlusion_queries_.Commit(end);
+    return true;
+  } catch (const std::exception& e) { Unsupported(e.what()); }
 }
 }

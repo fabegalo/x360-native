@@ -21,6 +21,7 @@ class D3D12Scanout final : public ScanoutBackend {
   void Draw(const rex::graphics::RegisterFile& regs, rex::memory::Memory& memory, rex::graphics::Shader* vs, rex::graphics::Shader* ps,
       rex::graphics::xenos::PrimitiveType primitive, uint32_t count, const DrawIndices* indices) override;
   void Resolve(const rex::graphics::RegisterFile& regs, rex::memory::Memory& memory) override;
+  SampleCounts ReadSampleCounts(bool counting_after) override;
  private:
   template<class T> using Ptr = Microsoft::WRL::ComPtr<T>;
   struct Slot {

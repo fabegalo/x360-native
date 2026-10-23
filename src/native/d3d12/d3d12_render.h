@@ -2,6 +2,7 @@
 #include "../pipeline/shader_cache.h"
 #include "../pipeline/pipeline_store.h"
 #include "../commands/draw_types.h"
+#include "../commands/memexport.h"
 #include "../memory/guest_memory_mirror.h"
 #include "../textures/texture_load.h"
 #include "../memory/guest_writeback.h"
@@ -27,12 +28,13 @@ class D3D12Render {
       rex::graphics::Shader*, rex::graphics::Shader*, rex::graphics::xenos::PrimitiveType,
       uint32_t count, const DrawIndices*);
   void Resolve(const rex::graphics::RegisterFile&, rex::memory::Memory&);
+  SampleCounts ReadSampleCounts(bool counting_after);
   // Diagnostic accounting only (native_stats): why a submission waited.
   enum FlushCause : unsigned { kFlushGuestSync, kFlushPresent, kFlushOverlap, kFlushCapacity, kFlushDrain, kFlushCauses };
   void Flush(FlushCause);
   void CountPresent();
   void EndFrame();
-  // Guest synchronization point: publish recorded resolve results.
+  // Guest synchronization point: publish recorded resolve/MEMEXPORT results.
   void CompleteGuestWrites(GuestSync source, uint32_t opcode) {
     if (writeback_.empty()) return;
     if (stats_enabled_) { ++sync_sources_[source]; ++sync_opcodes_[opcode & 0xFF]; }
@@ -67,7 +69,12 @@ class D3D12Render {
   std::unique_ptr<GuestMemoryMirror> mirror_;
   // Records a copy of current guest bytes into memory_ (mirror upload).
   void UploadGuest(uint32_t address, uint32_t length);
-  // Before Native reads guest memory that a pending resolve will write.
+  // Reserve before recording draw/resolve state: this may submit the batch.
+  void ReserveReadback(uint64_t bytes);
+  // Record a GPU-written range in already reserved readback storage.
+  void QueueGuestWrite(uint32_t address, uint32_t length);
+  std::unordered_map<const rex::graphics::Shader*, bool> memexport_addresses_known_;
+  // Before Native reads guest memory that a pending GPU write will change.
   enum ReadSite : unsigned { kReadIndices, kReadCpuTexture, kReadResolveRect, kReadSites };
   void SyncGuestRead(uint32_t address, uint64_t length, ReadSite);
   uint64_t overlap_sites_[kReadSites]{};
@@ -164,7 +171,12 @@ class D3D12Render {
   uint64_t texture_cache_bytes_ = 0, texture_cache_hits_ = 0, gpu_texture_loads_ = 0, cpu_texture_loads_ = 0;
   bool texture_cache_enabled_ = true;
   bool texture_cpu_ = false;
-  std::vector<uint8_t> depth_shader_;
+  std::array<std::vector<uint8_t>, 2> depth_shaders_;
+  // Tail of the Native-owned EDRAM allocation; never part of guest EDRAM
+  // addressing or resolves. Only the query variant of a shader accesses it.
+  Ptr<ID3D12Resource> sample_counts_readback_;
+  SampleCounts sample_counts_{};
+  bool sample_counting_ = false;
   const std::vector<uint8_t>& RectangleShader(unsigned interpolators, unsigned clip_planes);
   std::array<Ptr<ID3D12PipelineState>, 9> copy_pipelines_;
   std::array<Ptr<ID3D12PipelineState>, 2> clear_pipelines_;

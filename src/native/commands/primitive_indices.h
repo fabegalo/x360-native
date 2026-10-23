@@ -5,6 +5,18 @@
 namespace x360n::native {
 struct IndexRange { uint32_t offset, count; };
 struct ConvertedIndices { std::vector<uint32_t> values; std::vector<IndexRange> ranges; };
+inline ConvertedIndices VertexOnlyIndices(std::span<const uint32_t> input,
+    rex::graphics::xenos::PrimitiveType type, bool restart, uint32_t reset) {
+  using P = rex::graphics::xenos::PrimitiveType;
+  restart &= type == P::kTriangleStrip || type == P::kTriangleFan || type == P::kLineStrip ||
+             type == P::kLineLoop || type == P::kQuadStrip || type == P::kPolygon ||
+             type == P::k2DLineStrip || type == P::k2DTriStrip;
+  ConvertedIndices out;
+  out.values.reserve(input.size());
+  for (auto value : input) if (!restart || (value & 0xFFFFFFu) != reset) out.values.push_back(value);
+  if (!out.values.empty()) out.ranges.push_back({0, uint32_t(out.values.size())});
+  return out;
+}
 inline ConvertedIndices ConvertIndices(std::span<const uint32_t> input,
     rex::graphics::xenos::PrimitiveType type, bool restart, uint32_t reset) {
   using P = rex::graphics::xenos::PrimitiveType;
