@@ -48,7 +48,7 @@
       "spdx": "MIT",
       "license_file": "licenses/forza-reimagined.txt",
       "scope": "source",
-      "integration": "SDK patches 0146, 0147 and 0152 adapt register range/fetch binding reuse, resolve readback identity and shared-memory range scratch reuse; not linked into desktop executables",
+      "integration": "SDK patches 0146, 0147, 0152, 0156 and 0157 adapt register/fetch reuse, resolve readback identity, shared-memory scratch reuse, hazard-aware Vulkan uploads and ordered submission workers; linked into the optional graphics runtime",
       "obligations": "Preserve copyright and permission notices in copies or substantial portions.",
       "license_sha256": "7f27b063b73c7ccf9a4cc01135fb04c60a38dfe3685f6c7bba3895a26e2fad7c"
     },

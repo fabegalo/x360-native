@@ -52,3 +52,11 @@ ConvertFiberToThread = 0x830EBD00
 CreateFiber = 0x830EBD50
 DeleteFiber = 0x830EBE30
 SwitchToFiber = 0x830EBE90
+
+# Optional Native Enhanced: the original UI projection producer, immediately
+# after loading {2/1280,2/720,0.0001,0.5}. The title host is SHA-256 gated.
+# Changes guest constants before renderer submission; no shader identity table.
+[[midasm_hook]]
+address = 0x825E6F08
+name = "ForzaEnhancedUiProjection"
+registers = ["v56"]

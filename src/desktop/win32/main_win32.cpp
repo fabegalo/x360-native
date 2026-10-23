@@ -43,7 +43,12 @@ void VerifyDistribution(const fs::path& directory) {
 constexpr UINT kFinished = WM_APP + 1, kProgress = WM_APP + 2, kDetected = WM_APP + 3, kInitialized = WM_APP + 4, kInspected = WM_APP + 5, kOpenEnvironment = WM_APP + 6, kEnvironmentChecked = WM_APP + 7, kSessionStarted = WM_APP + 8, kSessionClosed = WM_APP + 9, kReveal = WM_APP + 10, kUpdateChecked = WM_APP + 11, kUpdateFinished = WM_APP + 12, kHinted = WM_APP + 13, kPreview = WM_APP + 20;
 enum { kFolder = 101, kTargets, kCheck, kImport, kPrepare, kLaunch, kDetails, kData, kCancel, kLanguage, kInstall, kStorage, kPrimary, kSettings, kImportFolder, kDashboards, kGames, kHome, kImportPage, kAddContent, kLibrary, kGameList, kRenderer, kNativeDevelopment,
        kSearch, kFilter0, kFilter1, kFilter2, kFilter3, kLangPt, kLangEn, kRendererNative, kRetry, kDismiss, kBannerLibrary, kBannerDetails,
-       kConsoleLanguage, kConsoleCountry, kVerifyTarget, kUpdate, kRemove, kFullscreen, kCaptureCrash, kApiD3D12, kApiVulkan };
+       kConsoleLanguage, kConsoleCountry, kVerifyTarget, kUpdate, kRemove, kFullscreen, kCaptureCrash, kApiD3D12, kApiVulkan,
+       kEnhanced, kFps30, kFps60, kFps120, kFps144, kFpsCustom, kPresentRate, kTimingApply, kFpsLabel, kPresentLabel,
+       kEffectBilinear, kEffectCas, kEffectFsr, kSharpnessLabel, kSharpness,
+       kScaleLabel, kScale1, kScale2, kScale3, kScale4,
+       kAnisoLabel, kAnisoGuest, kAniso2, kAniso4, kAniso8, kAniso16,
+       kAaNone, kAaFxaa, kAaExtreme, kUltrawide };
 bool english = false;
 std::string Tr(const char* pt, const char* en) { return english ? en : pt; }
 std::wstring Wide(const std::string& text) {
@@ -548,7 +553,7 @@ void Layout(App& a) {
       for (int id : {kFolder, kStorage, kData, kCheck}) need = std::max(need, ButtonWidth(a, id, false));
       const bool pairs = 2 * need + s(12) <= ow;
       const int storage_rows = pairs ? 2 : 4;
-      const int hg = s(52) + hint_h + s(12) + s(58) + s(8) + s(58) + s(132) + s(16) + s(36) + s(44) + s(20);
+      const int hg = s(52) + hint_h + s(12) + s(886) + s(20);
       const int hs = s(92) + storage_rows * s(46) - s(8) + s(20);
       const int hl = s(178) + console_h + s(20);
       const int hy = s(96) + env_h + s(20);
@@ -575,6 +580,25 @@ void Layout(App& a) {
       put(Item(a, kApiVulkan), gf.left + s(24), oy + s(198), ow, s(58));
       put(Item(a, kNativeDevelopment), gf.left + s(24), oy + s(264) + s(8), ow, s(36));
       put(Item(a, kFullscreen), gf.left + s(24), oy + s(264) + s(52), ow, s(36));
+      put(Item(a, kEnhanced), gf.left + s(24), oy + s(360), ow, s(36));
+      const int fw = (ow - s(18)) / 4;
+      for (int i = 0; i < 4; ++i) put(Item(a, kFps30 + i), gf.left + s(24) + i * (fw + s(6)), oy + s(402), fw, s(36));
+      put(Item(a, kFpsLabel), gf.left + s(24), oy + s(448), ow / 2, s(30));
+      put(Item(a, kFpsCustom), gf.left + s(24) + ow / 2, oy + s(444), ow / 2, s(32));
+      put(Item(a, kPresentLabel), gf.left + s(24), oy + s(488), ow / 2, s(30));
+      put(Item(a, kPresentRate), gf.left + s(24) + ow / 2, oy + s(484), ow / 2, s(32));
+      const int ew = (ow - s(12)) / 3;
+      for (int i = 0; i < 3; ++i) put(Item(a, kEffectBilinear + i), gf.left + s(24) + i * (ew + s(6)), oy + s(526), ew, s(36));
+      put(Item(a, kSharpnessLabel), gf.left + s(24), oy + s(572), ow / 2, s(30));
+      put(Item(a, kSharpness), gf.left + s(24) + ow / 2, oy + s(568), ow / 2, s(32));
+      put(Item(a, kScaleLabel), gf.left + s(24), oy + s(612), ow, s(28));
+      for (int i = 0; i < 4; ++i) put(Item(a, kScale1 + i), gf.left + s(24) + i * (fw + s(6)), oy + s(644), fw, s(36));
+      put(Item(a, kAnisoLabel), gf.left + s(24), oy + s(688), ow, s(28));
+      const int aw = (ow - s(24)) / 5;
+      for (int i = 0; i < 5; ++i) put(Item(a, kAnisoGuest + i), gf.left + s(24) + i * (aw + s(6)), oy + s(720), aw, s(36));
+      for (int i = 0; i < 3; ++i) put(Item(a, kAaNone + i), gf.left + s(24) + i * (ew + s(6)), oy + s(764), ew, s(36));
+      put(Item(a, kUltrawide), gf.left + s(24), oy + s(806), ow, s(36));
+      put(Item(a, kTimingApply), gf.left + s(24), oy + s(850), ow, s(36));
       const RECT& st = g.cards[1];
       put(a.root_text, st.left + s(24), st.top + s(56), ow, s(24));
       const int bw2 = pairs ? (ow - s(12)) / 2 : ow;
@@ -641,6 +665,13 @@ void Enable(App& a) {
   EnableWindow(Item(a, kApiVulkan), !a.busy && !a.root.empty() && native && a.renderer_settings.renderer == Renderer::Xenos);
   EnableWindow(Item(a, kNativeDevelopment), !a.busy && !a.root.empty());
   EnableWindow(Item(a, kFullscreen), !a.busy && !a.root.empty());
+  const bool enhanced_available = !a.busy && !a.root.empty() && native && a.renderer_settings.renderer == Renderer::Native;
+  EnableWindow(Item(a, kEnhanced), enhanced_available);
+  for (int id : {kFps30, kFps60, kFps120, kFps144, kFpsCustom, kPresentRate, kTimingApply, kEffectBilinear, kEffectCas, kEffectFsr,
+      kScale1, kScale2, kScale3, kScale4, kAnisoGuest, kAniso2, kAniso4, kAniso8, kAniso16,
+      kAaNone, kAaFxaa, kAaExtreme, kUltrawide})
+    EnableWindow(Item(a, id), enhanced_available && a.renderer_settings.enhanced);
+  EnableWindow(Item(a, kSharpness), enhanced_available && a.renderer_settings.enhanced && a.renderer_settings.present_effect != "bilinear");
   EnableWindow(Item(a, kConsoleLanguage), !a.busy && !a.root.empty());
   EnableWindow(Item(a, kConsoleCountry), !a.busy && !a.root.empty());
   EnableWindow(a.library_list, !a.busy);
@@ -683,10 +714,13 @@ void SetActivity(App& a, int kind, const std::wstring& title, const std::string&
   SetTimer(a.window, 2, 33, nullptr);
 }
 void UpdateRendererControls(App& a) {
-  Set(a.renderer_hint, Tr("O renderer vale para toda a sessão — dashboard e jogos — e é aplicado na próxima sessão. Não há configuração por título.", "The renderer applies to the whole session — dashboard and games — and takes effect on the next session. There is no per-title setting."));
+  Set(a.renderer_hint, Tr("O renderer vale para toda a sessão e é aplicado no próximo início. Enhanced separa limite visual e FPS de simulação; o alvo de simulação exige um perfil identificado do jogo. Padrão preserva o tempo original.", "The renderer applies to the whole session on the next launch. Enhanced separates display and simulation limits; the simulation target requires an identified game profile. Default preserves original timing."));
   std::string env = a.environment.description;
   if (env.empty()) env = Tr("Escolha um ambiente para verificar este computador.", "Choose an environment to check this computer.");
   Set(a.env_text, env);
+  Set(Item(a, kFpsCustom), std::to_string(a.renderer_settings.framerate));
+  Set(Item(a, kPresentRate), std::to_string(a.renderer_settings.present_rate));
+  Set(Item(a, kSharpness), std::to_string(a.renderer_settings.present_effect == "cas" ? a.renderer_settings.cas_sharpness : 100 - a.renderer_settings.fsr_sharpness_reduction / 2));
   InvalidateRect(a.window, nullptr, FALSE);
 }
 // A snapshot is for presentation only. Navigation never hashes the content.
@@ -1066,6 +1100,18 @@ void Labels(App& a) {
        {kRenderer, "Renderer · Xenos (ReXGlue)", "Renderer · Xenos (ReXGlue)"}, {kRendererNative, "Renderer · Native (Experimental)", "Renderer · Native (Experimental)"},
        {kApiD3D12, "API gráfica · Direct3D 12", "Graphics API · Direct3D 12"}, {kApiVulkan, "API gráfica · Vulkan", "Graphics API · Vulkan"},
        {kNativeDevelopment, "Acesso de desenvolvimento ao Native", "Native development access"},
+       {kEnhanced, "Native Enhanced · próximo início", "Native Enhanced · next launch"},
+       {kFps30, "30", "30"}, {kFps60, "60", "60"}, {kFps120, "120", "120"}, {kFps144, "144", "144"},
+       {kFpsLabel, "FPS · 30–240", "FPS · 30–240"}, {kPresentLabel, "Limite visual · 0 livre", "Display cap · 0 uncapped"},
+       {kTimingApply, "Aplicar limites personalizados", "Apply custom limits"},
+       {kEffectBilinear, "Bilinear", "Bilinear"}, {kEffectCas, "CAS", "CAS"}, {kEffectFsr, "FSR 1", "FSR 1"},
+       {kSharpnessLabel, "Nitidez · 0–100%", "Sharpness · 0–100%"},
+       {kScaleLabel, "Resolução interna · escala X/Y", "Internal resolution · X/Y scale"},
+       {kScale1, "1×", "1×"}, {kScale2, "2×", "2×"}, {kScale3, "3×", "3×"}, {kScale4, "4×", "4×"},
+       {kAnisoLabel, "Filtragem anisotrópica", "Anisotropic filtering"},
+       {kAnisoGuest, "Jogo", "Game"}, {kAniso2, "2×", "2×"}, {kAniso4, "4×", "4×"}, {kAniso8, "8×", "8×"}, {kAniso16, "16×", "16×"},
+       {kAaNone, "AA: jogo", "AA: game"}, {kAaFxaa, "FXAA", "FXAA"}, {kAaExtreme, "FXAA+", "FXAA+"},
+       {kUltrawide, "Ultrawide · câmera e HUD do perfil", "Ultrawide · profile camera and HUD"},
        {kFullscreen, "Iniciar sessão em tela cheia", "Start session in fullscreen"},
        {kCaptureCrash, "Capturar pilha de falhas nas próximas sessões", "Capture crash stacks in upcoming sessions"},
        {kRetry, "Tentar novamente", "Try again"}, {kBannerDetails, "Diagnóstico", "Diagnostics"}, {kBannerLibrary, "Ver biblioteca", "View library"},
@@ -1578,6 +1624,25 @@ void DrawButton(App& a, const DRAWITEMSTRUCT& item) {
     case kApiD3D12: selected = a.renderer_settings.api == GraphicsApi::D3D12; break;
     case kApiVulkan: selected = a.renderer_settings.api == GraphicsApi::Vulkan; break;
     case kNativeDevelopment: selected = a.renderer_settings.experimental; break;
+    case kEnhanced: selected = a.renderer_settings.enhanced; break;
+    case kFps30: selected = a.renderer_settings.framerate == 30; break;
+    case kFps60: selected = a.renderer_settings.framerate == 60; break;
+    case kFps120: selected = a.renderer_settings.framerate == 120; break;
+    case kFps144: selected = a.renderer_settings.framerate == 144; break;
+    case kEffectBilinear: selected = a.renderer_settings.present_effect == "bilinear"; break;
+    case kEffectCas: selected = a.renderer_settings.present_effect == "cas"; break;
+    case kEffectFsr: selected = a.renderer_settings.present_effect == "fsr"; break;
+    case kScale1: case kScale2: case kScale3: case kScale4:
+      selected = a.renderer_settings.scale_x == item.CtlID - kScale1 + 1 && a.renderer_settings.scale_y == a.renderer_settings.scale_x; break;
+    case kAnisoGuest: selected = a.renderer_settings.anisotropy == 0; break;
+    case kAniso2: selected = a.renderer_settings.anisotropy == 2; break;
+    case kAniso4: selected = a.renderer_settings.anisotropy == 4; break;
+    case kAniso8: selected = a.renderer_settings.anisotropy == 8; break;
+    case kAniso16: selected = a.renderer_settings.anisotropy == 16; break;
+    case kAaNone: selected = a.renderer_settings.swap_post_effect == "none"; break;
+    case kAaFxaa: selected = a.renderer_settings.swap_post_effect == "fxaa"; break;
+    case kAaExtreme: selected = a.renderer_settings.swap_post_effect == "fxaa_extreme"; break;
+    case kUltrawide: selected = a.renderer_settings.ultrawide; break;
     case kFullscreen: selected = a.renderer_settings.fullscreen; break;
     case kCaptureCrash: selected = a.capture_crash; break;
   }
@@ -1890,6 +1955,23 @@ LRESULT CALLBACK WndProc(HWND window, UINT message, WPARAM wp, LPARAM lp) {
         Button(*a, kApiVulkan, Kind::Option, nullptr, 2);
         Button(*a, kNativeDevelopment, Kind::Toggle, nullptr, 2);
         Button(*a, kFullscreen, Kind::Toggle, nullptr, 2);
+        Button(*a, kEnhanced, Kind::Toggle, nullptr, 2);
+        for (int id : {kFps30, kFps60, kFps120, kFps144}) Button(*a, id, Kind::Chip);
+        Control(*a, L"STATIC", L"", 0, kFpsLabel);
+        Control(*a, L"STATIC", L"", 0, kPresentLabel);
+        for (int id : {kFpsCustom, kPresentRate}) {
+          auto edit = Control(*a, L"EDIT", L"", ES_NUMBER | ES_AUTOHSCROLL | WS_TABSTOP | WS_BORDER, id);
+          SendMessageW(edit, EM_SETLIMITTEXT, 3, 0);
+        }
+        Button(*a, kTimingApply, Kind::Secondary, nullptr, 2);
+        for (int id : {kEffectBilinear, kEffectCas, kEffectFsr}) Button(*a, id, Kind::Chip);
+        Control(*a, L"STATIC", L"", 0, kSharpnessLabel);
+        auto sharpness = Control(*a, L"EDIT", L"", ES_NUMBER | ES_AUTOHSCROLL | WS_TABSTOP | WS_BORDER, kSharpness);
+        SendMessageW(sharpness, EM_SETLIMITTEXT, 3, 0);
+        Control(*a, L"STATIC", L"", 0, kScaleLabel);
+        Control(*a, L"STATIC", L"", 0, kAnisoLabel);
+        for (int id : {kScale1, kScale2, kScale3, kScale4, kAnisoGuest, kAniso2, kAniso4, kAniso8, kAniso16, kAaNone, kAaFxaa, kAaExtreme}) Button(*a, id, Kind::Chip);
+        Button(*a, kUltrawide, Kind::Toggle, nullptr, 2);
         Button(*a, kCaptureCrash, Kind::Toggle, nullptr, 2);
         a->root_text = Control(*a, L"STATIC", L"", SS_PATHELLIPSIS);
         Button(*a, kFolder, Kind::Secondary, nullptr, 2);
@@ -2045,6 +2127,41 @@ LRESULT CALLBACK WndProc(HWND window, UINT message, WPARAM wp, LPARAM lp) {
         if (id == kCaptureCrash) {
           a->capture_crash = !a->capture_crash;
           InvalidateRect(window, nullptr, FALSE); return 0;
+        }
+        if (id == kEnhanced || (id >= kFps30 && id <= kFps144) || id == kTimingApply || (id >= kEffectBilinear && id <= kEffectFsr) ||
+            (id >= kScale1 && id <= kScale4) || (id >= kAnisoGuest && id <= kAniso16) || (id >= kAaNone && id <= kAaExtreme) || id == kUltrawide) {
+          if (a->root.empty() || !a->renderer_settings.experimental || a->renderer_settings.renderer != Renderer::Native) return 0;
+          auto settings = a->renderer_settings;
+          if (id == kEnhanced) settings.enhanced = !settings.enhanced;
+          else if (id == kUltrawide) settings.ultrawide = !settings.ultrawide;
+          else if (id >= kScale1 && id <= kScale4) settings.scale_x = settings.scale_y = id - kScale1 + 1;
+          else if (id >= kAnisoGuest && id <= kAniso16) {
+            const uint32_t values[] = {0,2,4,8,16}; settings.anisotropy = values[id - kAnisoGuest];
+          }
+          else if (id >= kAaNone && id <= kAaExtreme) {
+            const char* effects[] = {"none", "fxaa", "fxaa_extreme"}; settings.swap_post_effect = effects[id - kAaNone];
+          }
+          else if (id >= kEffectBilinear && id <= kEffectFsr) {
+            const char* effects[] = {"bilinear", "cas", "fsr"}; settings.present_effect = effects[id - kEffectBilinear];
+          }
+          else if (id == kTimingApply) {
+            wchar_t fps[8]{}, present[8]{};
+            GetWindowTextW(Item(*a, kFpsCustom), fps, 8);
+            GetWindowTextW(Item(*a, kPresentRate), present, 8);
+            if (!*fps || !*present) throw std::runtime_error(Tr("Informe FPS e limite visual (0 = livre).", "Enter FPS and display cap (0 = uncapped)."));
+            settings.framerate = uint32_t(_wtoi(fps)); settings.present_rate = uint32_t(_wtoi(present));
+            if (settings.present_effect != "bilinear") {
+              wchar_t sharpness[8]{}; GetWindowTextW(Item(*a, kSharpness), sharpness, 8);
+              const auto strength = uint32_t(_wtoi(sharpness));
+              if (!*sharpness || strength > 100) throw std::runtime_error(Tr("Nitidez deve estar entre 0 e 100%.", "Sharpness must be between 0 and 100%."));
+              if (settings.present_effect == "cas") settings.cas_sharpness = strength;
+              else settings.fsr_sharpness_reduction = (100 - strength) * 2;
+            }
+          } else {
+            const uint32_t presets[] = {30, 60, 120, 144}; settings.framerate = presets[id - kFps30];
+          }
+          SaveRendererSettings(ProjectPaths{a->root}, settings);
+          a->renderer_settings = settings; UpdateRendererControls(*a); Enable(*a); return 0;
         }
         if (id == kRenderer || id == kRendererNative || id == kNativeDevelopment || id == kFullscreen || id == kApiD3D12 || id == kApiVulkan) {
           if (a->root.empty()) return 0;

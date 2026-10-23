@@ -21,6 +21,7 @@ endif()
 # Sources
 set(FORZAHORIZON_SOURCES
     src/main.cpp
+    src/enhanced_timing.cpp
     ../common/launch_handoff.cpp
     ../../src/supervisor/sha256.cpp
     ../../src/supervisor/digest_batch.cpp
