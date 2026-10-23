@@ -2402,9 +2402,9 @@
   },
   "files": {
     "include/rex/graphics/pipeline/texture/cache.h": "bea6e1a25bf65357ed3cd898fbe24b769c2f18863214c53e9923434d5c40d0db",
-    "include/rex/graphics/pipeline/texture/util.h": "081b4ff24c2976e2a8bfbf0dfbdc96a7559413f34008b1105e84191bca2a038e",
+    "include/rex/graphics/pipeline/texture/util.h": "3c2889b10d61346fad8f8b451b389b08705ed40ba4ee14931f7fb22eac7df3e5",
     "src/graphics/d3d12/texture_cache.cpp": "6a6669e3e486bd40eb01253d9d6068e4c31d11e669a527de990f38d2c866d8c9",
-    "src/graphics/pipeline/texture/util.cpp": "781d84584a576e0b2ae6edd5b1a01fac274a247b4406a6fa4741295eb0aaa939",
+    "src/graphics/pipeline/texture/util.cpp": "4d4cc756d53620706975fb14704f39cd7239c007f118a78bd092d663d4305c0d",
     "src/graphics/vulkan/texture_cache.cpp": "d0b0b111dd3abe9f70bd8933f51ece1d904f6a4a793d1febe4385b5821304fee"
   },
   "test": "sdkcheck.canary-texture-layout: synthetic fetch constants; packed level-0 tails use base_address even with a separate mip_address (Canary 344fca7/ace153cb8), a separate base survives nonzero mip_min_level while an aliased one is dropped (4a863a0e1), 2x1 tails pack along X (344fca7). Sampler base-map level 0 (4a863a0e1) is covered by review only; no GPU run."
@@ -2448,6 +2448,19 @@
     "src/graphics/vulkan/render_target_cache.cpp": "75b9d3fffe9dca04811238fca371cd19fa02436b769f5499b378090b1bf45334"
   },
   "test": "sdkcheck.canary-edram-fixed16: real pixel shader translated offline with ROV (DXBC) and FSI (SPIR-V, scale 1/2): no 32767/32 or 32/32767 EDRAM scales remain, s5.10 uses 1024 and 1/1024, FSI clamps to 32767/1024; PSI clamp is [-32, 32767/1024] (Xenia Canary 42c2b88). Vulkan exp-bias scale reuses the 0087 helper (sdkcheck.fixed16-resolve). Precompiled resolve shaders unchanged; no GPU run."
+},
+{
+  "file": "patches/rexglue-sdk/0186-canary-texture-layout.patch",
+  "sha256": "487124498cb88c5204b1157e23371e866cad62dc254103b4d10e60b47a3bdd07",
+  "base_files": {
+    "include/rex/graphics/pipeline/texture/util.h": "081b4ff24c2976e2a8bfbf0dfbdc96a7559413f34008b1105e84191bca2a038e",
+    "src/graphics/pipeline/texture/util.cpp": "781d84584a576e0b2ae6edd5b1a01fac274a247b4406a6fa4741295eb0aaa939"
+  },
+  "files": {
+    "include/rex/graphics/pipeline/texture/util.h": "3c2889b10d61346fad8f8b451b389b08705ed40ba4ee14931f7fb22eac7df3e5",
+    "src/graphics/pipeline/texture/util.cpp": "4d4cc756d53620706975fb14704f39cd7239c007f118a78bd092d663d4305c0d"
+  },
+  "test": "sdkcheck.canary-texture-bounds: SDK 3D tiling equals Canary Tiled3D; tiled 3D upper/lower bounds equal exhaustive max/min (c332733af, c9c8e483b); 2D array mips align to 4 slices and volume mips halve depth (bc6b7a020); packed level-0 volume base uses power-of-two depth (81e3deaee); linear 96bpp mip rows are 32 blocks (19da17403); packed 1x1 Z mips count the tail base (bc6b7a020). No GPU run."
 }
 ]
                     },

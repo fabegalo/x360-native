@@ -1802,3 +1802,20 @@ FSI (escalas 1 e 2): 13 das 19 verificações falham com as fontes anteriores.
 `sdkcheck.fixed16-resolve` e `sdkcheck.SPIRV-*` continuam passando. Os shaders
 de resolve pré-compilados (bytecode sem fontes no SDK) ainda desempacotam com
 32/32767; não houve execução em GPU nem validação SPIRV-Tools.
+
+## 0186 — layout de texturas e limites 3D do Xenia Canary
+
+Porta bc6b7a020, 19da17403, c9c8e483b, 81e3deaee e c332733af. Mips de arrays
+2D com mais de uma fatia ocupam múltiplos de 4 fatias; volumes reduzem a
+profundidade a cada mip; a base 3D compactada no nível 0 usa dimensões em
+potência de dois; linhas de mips lineares alinham o número de blocos a
+max(256 / bytes por bloco, 32) (96bpp: 384 bytes, não 512); mips 1×1 em Z
+contam a base da tail. Os limites tiled 3D passam a ser exatos: o superior é o
+maior endereço da última porção de 32 linhas × 4 fatias mais um bloco, e o
+inferior considera a troca de banco em grupos Z/4 ímpares. A altura passada ao
+limite superior é o stride de linhas da fatia, não a extensão.
+
+`sdkcheck.canary-texture-bounds` compara os limites com busca exaustiva usando
+a fórmula `Tiled3D` do Canary (idêntica à do SDK no teste): 6 das 9
+verificações falham com o `util.cpp` anterior; a do limite inferior depende do
+header. `native.texture` continua passando; não houve execução em GPU.

@@ -62,3 +62,13 @@ target_include_directories(x360n_canary_format_alias_checks PRIVATE ${X360_REXGL
 x360n_stage_runtime_dlls(x360n_canary_format_alias_checks)
 add_test(NAME sdkcheck.canary-format-alias COMMAND x360n_canary_format_alias_checks)
 set_tests_properties(sdkcheck.canary-format-alias PROPERTIES LABELS project TIMEOUT 30)
+
+# patch 0186: Canary guest texture layout and exact tiled 3D bounds.
+add_executable(x360n_canary_texture_bounds_checks sdkcheck/canary_texture_bounds_probe.cpp
+    ${X360_REXGLUE_DIR}/src/graphics/pipeline/texture/util.cpp
+    ${X360_REXGLUE_DIR}/src/graphics/pipeline/texture/info.cpp
+    ${X360_REXGLUE_DIR}/src/graphics/pipeline/texture/info_formats.cpp)
+target_link_libraries(x360n_canary_texture_bounds_checks PRIVATE rexruntime)
+x360n_stage_runtime_dlls(x360n_canary_texture_bounds_checks)
+add_test(NAME sdkcheck.canary-texture-bounds COMMAND x360n_canary_texture_bounds_checks)
+set_tests_properties(sdkcheck.canary-texture-bounds PROPERTIES LABELS project TIMEOUT 60)
