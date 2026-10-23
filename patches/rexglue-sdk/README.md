@@ -1845,3 +1845,15 @@ do cache SPIR-V: 18.
 1 e 2) e verifica o fluxo de dados emitido: as 4 verificações de comportamento
 falham com as fontes anteriores. A seleção de stencil não tem teste
 automático. Sem GPU e sem validação SPIRV-Tools.
+
+## 0189 — limite de camada de textura empilhada no DXBC
+
+Porta 04085efaa: no D3D12, a coordenada Z de texturas 2D empilhadas é limitada
+aos centros das camadas [0,5, tamanho − 0,5] nos quatro caminhos (coordenadas
+normalizadas ou não, com ou sem offset), para que coordenadas Inf/NaN não
+escolham camada indefinida. O Canary cita o fundo preto de 584107FB; não
+reproduzido aqui. Par do 2d5b41080 de 0188 no SPIR-V.
+
+`sdkcheck.canary-dxbc` traduz offline tfetch3D reais nas quatro variantes e
+procura a sequência max/add/min no programa DXBC: as 4 verificações falham com
+a fonte anterior. Sem GPU.

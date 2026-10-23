@@ -2489,6 +2489,17 @@
     "src/graphics/vulkan/command_processor.cpp": "ecd1c8b00b26e15212ea5a6158b124ec5d85a652406a62118e42665213051509"
   },
   "test": "sdkcheck.canary-spirv: real tfetch3D and FSI pixel shaders translated offline; stacked layer lerp starts from the first layer (Canary e519d59e4), stacked layer index is clamped to [0, size-1] (2d5b41080), 2x-as-4x guest sample 1 reads host sample 3 (654a8cacf). Vulkan back-face stencil selection when culling only front faces (77597d62a) matches D3D12 by review only. No GPU run."
+},
+{
+  "file": "patches/rexglue-sdk/0189-canary-d3d12-stacked-layer-clamp.patch",
+  "sha256": "0301e2725d44d876b3f6548a1e736ddbe6512df86a5a77042426ec167cee3b50",
+  "base_files": {
+    "src/graphics/pipeline/shader/dxbc_translator_fetch.cpp": "9bbd02d52432fe55ec95d1b6f03a0cba46ad98a1ee4b974fe1fcaac4f6c47530"
+  },
+  "files": {
+    "src/graphics/pipeline/shader/dxbc_translator_fetch.cpp": "c0fe3c5b2568697f7a2db510a7c2456699766854c05aff1d8bec1e3967900274"
+  },
+  "test": "sdkcheck.canary-dxbc: real tfetch3D microcode (normalized/unnormalized, with/without Z offset) translated offline to DXBC; each emits the stacked layer clamp max(z, 0.5), min(z, size - 0.5) (Xenia Canary 04085efaa). No GPU run."
 }
 ]
                     },
