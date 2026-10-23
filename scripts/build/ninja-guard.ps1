@@ -26,8 +26,26 @@ try {
     if ($title -and -not $query) {
         [IO.File]::WriteAllText($marker, 'incomplete')
     }
-    & $ninja @ninjaArgs
-    $result = $LASTEXITCODE
+    # Windows PowerShell's native-command pipeline can remain blocked after
+    # Ninja has exited. Inherit stdio directly and wait on the process handle,
+    # so completion/lease release depends on Ninja, not pipeline stream EOF.
+    # Quote each argument using the same Windows rules as the read-only Ninja
+    # query in incremental-state.ps1 (including trailing slashes and quotes).
+    $quotedArguments = foreach ($argument in $ninjaArgs) {
+        '"' + [regex]::Replace([regex]::Replace([string]$argument, '(\\*)"', '$1$1\"'), '(\\+)$', '$1$1') + '"'
+    }
+    $processInfo = [Diagnostics.ProcessStartInfo]::new()
+    $processInfo.FileName = $ninja
+    $processInfo.Arguments = $quotedArguments -join ' '
+    $processInfo.UseShellExecute = $false
+    $processInfo.CreateNoWindow = $true
+    $process = [Diagnostics.Process]::new()
+    $process.StartInfo = $processInfo
+    try {
+        if (-not $process.Start()) { throw 'Cannot start Ninja' }
+        $process.WaitForExit()
+        $result = $process.ExitCode
+    } finally { $process.Dispose() }
     if ($result -eq 0 -and $title -and -not $query -and -not $hadMarker -and $lease) {
         # A no-op direct build may retain its already certified preparation.
         # Changed or partially staged products always require build-title.
