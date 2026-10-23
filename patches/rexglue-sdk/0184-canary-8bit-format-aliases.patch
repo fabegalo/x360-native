@@ -1,0 +1,125 @@
+diff --git a/include/rex/graphics/pipeline/texture/info.h b/include/rex/graphics/pipeline/texture/info.h
+--- a/include/rex/graphics/pipeline/texture/info.h
++++ b/include/rex/graphics/pipeline/texture/info.h
+@@ -20,8 +20,14 @@
+ namespace rex::graphics {
+ 
+ inline xenos::TextureFormat GetBaseFormat(xenos::TextureFormat texture_format) {
+-  // These formats are used for resampling textures / gamma control.
++  // These formats are used for resampling, aliasing, and gamma control.
+   switch (texture_format) {
++    // Xenia Canary 8322658: aliases of k_8 and k_8_8_8_8.
++    case xenos::TextureFormat::k_8_A:
++    case xenos::TextureFormat::k_8_B:
++      return xenos::TextureFormat::k_8;
++    case xenos::TextureFormat::k_8_8_8_8_A:
++      return xenos::TextureFormat::k_8_8_8_8;
+     case xenos::TextureFormat::k_16_EXPAND:
+       return xenos::TextureFormat::k_16_FLOAT;
+     case xenos::TextureFormat::k_16_16_EXPAND:
+diff --git a/src/graphics/d3d12/texture_cache.cpp b/src/graphics/d3d12/texture_cache.cpp
+--- a/src/graphics/d3d12/texture_cache.cpp
++++ b/src/graphics/d3d12/texture_cache.cpp
+@@ -121,7 +121,7 @@
+      kLoadShaderIndexUnknown, false, DXGI_FORMAT_UNKNOWN, kLoadShaderIndexUnknown,
+      xenos::XE_GPU_TEXTURE_SWIZZLE_RRRR},
+     // k_8_B
+-    {DXGI_FORMAT_UNKNOWN, DXGI_FORMAT_UNKNOWN, kLoadShaderIndexUnknown, DXGI_FORMAT_UNKNOWN,
++    {DXGI_FORMAT_R8_TYPELESS, DXGI_FORMAT_R8_UNORM, kLoadShaderIndex8bpb, DXGI_FORMAT_R8_SNORM,
+      kLoadShaderIndexUnknown, false, DXGI_FORMAT_UNKNOWN, kLoadShaderIndexUnknown,
+      xenos::XE_GPU_TEXTURE_SWIZZLE_RRRR},
+     // k_8_8
+@@ -150,9 +150,9 @@
+      kLoadShaderIndexUnknown, false, DXGI_FORMAT_UNKNOWN, kLoadShaderIndexUnknown,
+      xenos::XE_GPU_TEXTURE_SWIZZLE_RGGG},
+     // k_8_8_8_8_A
+-    {DXGI_FORMAT_UNKNOWN, DXGI_FORMAT_UNKNOWN, kLoadShaderIndexUnknown, DXGI_FORMAT_UNKNOWN,
+-     kLoadShaderIndexUnknown, false, DXGI_FORMAT_UNKNOWN, kLoadShaderIndexUnknown,
+-     xenos::XE_GPU_TEXTURE_SWIZZLE_RGBA},
++    {DXGI_FORMAT_R8G8B8A8_TYPELESS, DXGI_FORMAT_R8G8B8A8_UNORM, kLoadShaderIndex32bpb,
++     DXGI_FORMAT_R8G8B8A8_SNORM, kLoadShaderIndexUnknown, false, DXGI_FORMAT_UNKNOWN,
++     kLoadShaderIndexUnknown, xenos::XE_GPU_TEXTURE_SWIZZLE_RGBA},
+     // k_4_4_4_4
+     // Red and blue swapped in the load shader for simplicity.
+     {DXGI_FORMAT_B4G4R4A4_UNORM, DXGI_FORMAT_B4G4R4A4_UNORM, kLoadShaderIndexRGBA4ToBGRA4,
+diff --git a/src/graphics/util/draw.cpp b/src/graphics/util/draw.cpp
+--- a/src/graphics/util/draw.cpp
++++ b/src/graphics/util/draw.cpp
+@@ -649,21 +649,6 @@
+       // format, the draw can still be performed.
+       continue;
+     }
+-    // TODO(Triang3l): Remove the unresearched format logging when it's known
+-    // how exactly these formats need to be handled (most importantly what
+-    // components need to be stored and in which order).
+-    switch (stream.format) {
+-      case xenos::ColorFormat::k_8_A:
+-      case xenos::ColorFormat::k_8_B:
+-      case xenos::ColorFormat::k_8_8_8_8_A:
+-        REXGPU_WARN(
+-            "Memexport done to an unresearched format {}, report the game to "
+-            "Xenia developers!",
+-            format_info.name);
+-        break;
+-      default:
+-        break;
+-    }
+     uint32_t stream_size_bytes = stream.index_count * (format_info.bits_per_pixel >> 3);
+     // Try to reduce the number of shared memory operations when writing
+     // different elements into the same buffer through different exports
+@@ -930,24 +915,17 @@
+     dest_format = DepthRenderTargetToTextureFormat(rb_depth_info.depth_format);
+   } else {
+     dest_format = xenos::TextureFormat(rb_copy_dest_info.copy_dest_format);
+-    // For development feedback - not much known about these formats currently.
+-    xenos::TextureFormat dest_closest_format;
++    // Xenia Canary 8322658: aliases of k_8 and k_8_8_8_8.
+     switch (dest_format) {
+       case xenos::TextureFormat::k_8_A:
+       case xenos::TextureFormat::k_8_B:
+-        dest_closest_format = xenos::TextureFormat::k_8;
++        dest_format = xenos::TextureFormat::k_8;
+         break;
+       case xenos::TextureFormat::k_8_8_8_8_A:
+-        dest_closest_format = xenos::TextureFormat::k_8_8_8_8;
++        dest_format = xenos::TextureFormat::k_8_8_8_8;
+         break;
+       default:
+-        dest_closest_format = dest_format;
+-    }
+-    if (dest_format != dest_closest_format) {
+-      REXGPU_WARN(
+-          "Resolving to format {}, which is untested - treating like {}. "
+-          "Report the game to Xenia developers!",
+-          FormatInfo::Get(dest_format)->name, FormatInfo::Get(dest_closest_format)->name);
++        break;
+     }
+   }
+ 
+diff --git a/src/graphics/vulkan/texture_cache.cpp b/src/graphics/vulkan/texture_cache.cpp
+--- a/src/graphics/vulkan/texture_cache.cpp
++++ b/src/graphics/vulkan/texture_cache.cpp
+@@ -150,7 +150,10 @@
+      xenos::XE_GPU_TEXTURE_SWIZZLE_RRRR,
+      true},
+     // k_8_B
+-    {{kLoadShaderIndexUnknown}, {kLoadShaderIndexUnknown}, xenos::XE_GPU_TEXTURE_SWIZZLE_RRRR},
++    {{kLoadShaderIndex8bpb, VK_FORMAT_R8_UNORM},
++     {kLoadShaderIndex8bpb, VK_FORMAT_R8_SNORM},
++     xenos::XE_GPU_TEXTURE_SWIZZLE_RRRR,
++     true},
+     // k_8_8
+     {{kLoadShaderIndex16bpb, VK_FORMAT_R8G8_UNORM},
+      {kLoadShaderIndex16bpb, VK_FORMAT_R8G8_SNORM},
+@@ -176,7 +179,10 @@
+     // Not usable as a texture, also has -32...32 range.
+     {{kLoadShaderIndexUnknown}, {kLoadShaderIndexUnknown}, xenos::XE_GPU_TEXTURE_SWIZZLE_RGGG},
+     // k_8_8_8_8_A
+-    {{kLoadShaderIndexUnknown}, {kLoadShaderIndexUnknown}, xenos::XE_GPU_TEXTURE_SWIZZLE_RGBA},
++    {{kLoadShaderIndex32bpb, VK_FORMAT_R8G8B8A8_UNORM},
++     {kLoadShaderIndex32bpb, VK_FORMAT_R8G8B8A8_SNORM},
++     xenos::XE_GPU_TEXTURE_SWIZZLE_RGBA,
++     true},
+     // k_4_4_4_4
+     // Components swapped in the load shader for simplicity.
+     {{kLoadShaderIndexRGBA4ToARGB4, VK_FORMAT_B4G4R4A4_UNORM_PACK16},

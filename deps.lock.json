@@ -1024,7 +1024,7 @@
     "src/graphics/util/draw.cpp": "a3215a0de2f42d9e2235dd062b4cd2c3c0a27effd033c27ab6b6ca1f7673a25b"
   },
   "files": {
-    "src/graphics/util/draw.cpp": "6716afd6e8eea3c94628bf2c195894ec7288a4e2645e2a190113030b63d1d7f1"
+    "src/graphics/util/draw.cpp": "a5238c8147d2dc12afbcfd80809f742e2eaa109480708939ce9ce9e203417a66"
   },
   "test": "sdkcheck.empty-resolve"
 },
@@ -1176,7 +1176,7 @@
   },
   "files": {
     "include/rex/graphics/util/draw.h": "d299b845b4fcc38a3b727991dd71f84cd1c7c4060dc7bbe074a820f465a8cc01",
-    "src/graphics/util/draw.cpp": "6716afd6e8eea3c94628bf2c195894ec7288a4e2645e2a190113030b63d1d7f1",
+    "src/graphics/util/draw.cpp": "a5238c8147d2dc12afbcfd80809f742e2eaa109480708939ce9ce9e203417a66",
     "src/graphics/d3d12/command_processor.cpp": "63b05ddb0bbe2dfda47486884e9e5422f6621c06366c30ae68c706c334cb373f",
     "src/graphics/d3d12/render_target_cache.cpp": "9e562ab6e87297661341ae76618b28cae2ee668e0848a8347f45115f5b97140f"
   },
@@ -1565,7 +1565,7 @@
     "include/rex/graphics/display_overlay.h": "2841fdc05e4e7c248e9dcfdded2c0edd6503435b22bb1d5af0c8f113a9494cda",
     "src/graphics/command_processor.cpp": "3e1f453f4f4c86510486907ce06fc0530852ca3e68ea67edb1cbf0b6b0a44fd7",
     "src/graphics/d3d12/command_processor.cpp": "63b05ddb0bbe2dfda47486884e9e5422f6621c06366c30ae68c706c334cb373f",
-    "src/graphics/d3d12/texture_cache.cpp": "27aaa40ea7c1fe63ac2d88a7c5d768399d94ee22db026ed97a91103ebeec64d1",
+    "src/graphics/d3d12/texture_cache.cpp": "6a6669e3e486bd40eb01253d9d6068e4c31d11e669a527de990f38d2c866d8c9",
     "src/graphics/shaders/bytecode/d3d12_5_1/display_overlay_cs.h": "878b1ca19d0b44a2f730a6d8b312f9180f496651c1c3730e8668cace274f2f40",
     "src/graphics/shaders/display_overlay.hlsl": "82f2758310438dc43db3fa7b73d25192d52512007830f9d3c2665e64ba99859f",
     "src/kernel/xboxkrnl/xboxkrnl_video.cpp": "276d4ba7897095494ddd1de6182b3327617273ab29943ec520a5ebf6afb9936c"
@@ -1776,7 +1776,7 @@
                                             "sha256": "3e371c4e562e2678d4ab750c5e26b729219d3fb50f9023905cd5c05698e9fc3e",
                                             "files": {
                                                 "include/rex/graphics/vulkan/texture_cache.h": "56a61a90b0afd99d10d3f3405ec141292a2e4f568d7907abdabbbb0382274d04",
-                                                "src/graphics/vulkan/texture_cache.cpp": "5c2cc23c9a56a89ffcc59fb4865bb65d73b027ad89de995ef29fe4b45083bffb",
+                                                "src/graphics/vulkan/texture_cache.cpp": "d0b0b111dd3abe9f70bd8933f51ece1d904f6a4a793d1febe4385b5821304fee",
                                                 "include/rex/graphics/vulkan/command_processor.h": "7169056a52d3cd901f78ebeeec682b069cd5bbad5d12c45343ffe632633dc21b",
                                                 "src/graphics/vulkan/command_processor.cpp": "5384c4512d5c4b87d81f4442cbbc814d6cfe1a84b15d275b20bce23789709164"
                                             },
@@ -2403,11 +2403,28 @@
   "files": {
     "include/rex/graphics/pipeline/texture/cache.h": "bea6e1a25bf65357ed3cd898fbe24b769c2f18863214c53e9923434d5c40d0db",
     "include/rex/graphics/pipeline/texture/util.h": "081b4ff24c2976e2a8bfbf0dfbdc96a7559413f34008b1105e84191bca2a038e",
-    "src/graphics/d3d12/texture_cache.cpp": "27aaa40ea7c1fe63ac2d88a7c5d768399d94ee22db026ed97a91103ebeec64d1",
+    "src/graphics/d3d12/texture_cache.cpp": "6a6669e3e486bd40eb01253d9d6068e4c31d11e669a527de990f38d2c866d8c9",
     "src/graphics/pipeline/texture/util.cpp": "781d84584a576e0b2ae6edd5b1a01fac274a247b4406a6fa4741295eb0aaa939",
-    "src/graphics/vulkan/texture_cache.cpp": "5c2cc23c9a56a89ffcc59fb4865bb65d73b027ad89de995ef29fe4b45083bffb"
+    "src/graphics/vulkan/texture_cache.cpp": "d0b0b111dd3abe9f70bd8933f51ece1d904f6a4a793d1febe4385b5821304fee"
   },
   "test": "sdkcheck.canary-texture-layout: synthetic fetch constants; packed level-0 tails use base_address even with a separate mip_address (Canary 344fca7/ace153cb8), a separate base survives nonzero mip_min_level while an aliased one is dropped (4a863a0e1), 2x1 tails pack along X (344fca7). Sampler base-map level 0 (4a863a0e1) is covered by review only; no GPU run."
+},
+{
+  "file": "patches/rexglue-sdk/0184-canary-8bit-format-aliases.patch",
+  "sha256": "175b13df691ee911db174c43b5aac65de3a40eb1242c45977e446e819d45ba5a",
+  "base_files": {
+    "include/rex/graphics/pipeline/texture/info.h": "50e33125a0bb74237df00f9ab60a8f8108ac42546cdcbdeffea0fc3d3e6cfd1d",
+    "src/graphics/d3d12/texture_cache.cpp": "27aaa40ea7c1fe63ac2d88a7c5d768399d94ee22db026ed97a91103ebeec64d1",
+    "src/graphics/util/draw.cpp": "6716afd6e8eea3c94628bf2c195894ec7288a4e2645e2a190113030b63d1d7f1",
+    "src/graphics/vulkan/texture_cache.cpp": "5c2cc23c9a56a89ffcc59fb4865bb65d73b027ad89de995ef29fe4b45083bffb"
+  },
+  "files": {
+    "include/rex/graphics/pipeline/texture/info.h": "bfbeec5361746f55b1e739ea632b9658c8d5e7ff2a44ac2a02730fb496f73d25",
+    "src/graphics/d3d12/texture_cache.cpp": "6a6669e3e486bd40eb01253d9d6068e4c31d11e669a527de990f38d2c866d8c9",
+    "src/graphics/util/draw.cpp": "a5238c8147d2dc12afbcfd80809f742e2eaa109480708939ce9ce9e203417a66",
+    "src/graphics/vulkan/texture_cache.cpp": "d0b0b111dd3abe9f70bd8933f51ece1d904f6a4a793d1febe4385b5821304fee"
+  },
+  "test": "sdkcheck.canary-format-alias: k_8_A/k_8_B/k_8_8_8_8_A textures use k_8/k_8_8_8_8 (GetBaseFormat) and resolves to them write the aliased destination format (Xenia Canary 8322658). Host format table entries are review-only; no GPU run."
 }
 ]
                     },

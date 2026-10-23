@@ -50,3 +50,15 @@ target_link_libraries(x360n_canary_texture_layout_checks PRIVATE rexruntime)
 x360n_stage_runtime_dlls(x360n_canary_texture_layout_checks)
 add_test(NAME sdkcheck.canary-texture-layout COMMAND x360n_canary_texture_layout_checks)
 set_tests_properties(sdkcheck.canary-texture-layout PROPERTIES LABELS project TIMEOUT 30)
+
+# patch 0184: Canary 8-bit texture / resolve format aliases.
+add_executable(x360n_canary_format_alias_checks sdkcheck/canary_format_alias_probe.cpp
+    ${X360_REXGLUE_DIR}/src/graphics/util/draw.cpp
+    ${X360_REXGLUE_DIR}/src/graphics/register_file.cpp
+    ${X360_REXGLUE_DIR}/src/graphics/registers.cpp
+    ${X360_REXGLUE_DIR}/src/graphics/flags.cpp)
+target_link_libraries(x360n_canary_format_alias_checks PRIVATE rexruntime)
+target_include_directories(x360n_canary_format_alias_checks PRIVATE ${X360_REXGLUE_DIR}/thirdparty/renderdoc)
+x360n_stage_runtime_dlls(x360n_canary_format_alias_checks)
+add_test(NAME sdkcheck.canary-format-alias COMMAND x360n_canary_format_alias_checks)
+set_tests_properties(sdkcheck.canary-format-alias PROPERTIES LABELS project TIMEOUT 30)

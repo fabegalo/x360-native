@@ -1775,3 +1775,14 @@ ao longo de X, como as quadradas.
 `sdkcheck.canary-texture-layout` usa fetch constants sintéticos: 5 das 13
 verificações falham com o `util.cpp` anterior e todas passam com o patch. O
 nível 0 do sampler `kBaseMap` não tem teste automático; não houve execução em GPU.
+
+## 0184 — aliases de formatos de 8 bits do Xenia Canary
+
+Porta 8322658: texturas `k_8_A`/`k_8_B` usam `k_8` e `k_8_8_8_8_A` usa
+`k_8_8_8_8` (`GetBaseFormat`, tabelas de host D3D12 e Vulkan). Resolves para
+esses formatos gravam o formato equivalente. Os avisos de memexport/resolve
+"não pesquisados", emitidos por desenho, foram removidos como no Canary.
+
+`sdkcheck.canary-format-alias`: 3 das 16 verificações falham com o `draw.cpp`
+anterior; as de `GetBaseFormat` falham com o header anterior. As tabelas de host
+não têm teste automático; não houve execução em GPU.
