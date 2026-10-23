@@ -1894,3 +1894,16 @@ como fallback. Resolves 2D não mudam.
 `sdkcheck.canary-resolve-dest` (estendido): com `copy_dest_height` 192 e
 fatia de 256 linhas, a fatia Z = 4 usa 256 linhas e coincide com o destino de
 altura 256; 2 das 20 verificações falham com o `draw.cpp` anterior. Sem GPU.
+
+## 0193 — grade da mip travada em fetches não normalizados
+
+Porta 8486e97a0: em `tfetch2D` com coordenadas não normalizadas, quando
+`mip_min_level == mip_max_level` (word 4 do fetch constant), o denominador
+usa max(tamanho >> mip, 1) em vez do tamanho da base, em DXBC e SPIR-V. O
+Canary cita o popping de visibilidade de 555308B6 e 5553080B (redutores HZB);
+não reproduzido aqui. Versão do cache SPIR-V: 19.
+
+`sdkcheck.canary-spirv` e `sdkcheck.canary-dxbc` traduzem offline um
+tfetch2D não normalizado e procuram a seleção do tamanho travado; cada um
+falha com a fonte anterior, e o fetch normalizado continua sem a seleção.
+Sem GPU.

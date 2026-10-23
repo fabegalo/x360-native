@@ -1,4 +1,5 @@
 // patch 0188: SPIR-V fixes from Xenia Canary (e519d59e4, 2d5b41080, 654a8cacf).
+// patch 0193: locked mip grid for unnormalized fetches (8486e97a0).
 // CPU-only: translate real guest microcode and check the emitted SPIR-V data
 // flow. No Vulkan device or game is used.
 #include <SPIRV/GLSL.std.450.h>
@@ -43,6 +44,7 @@ struct Module {
         case spv::OpVectorTimesScalar:
         case spv::OpBitFieldUExtract:
         case spv::OpExtInst:
+        case spv::OpIEqual:
           defs[instruction.args[1]] = instructions.size();
           break;
         default:
@@ -63,7 +65,10 @@ struct Module {
   }
 };
 
-std::vector<uint32_t> Microcode(bool texture_fetch_3d) {
+std::vector<uint32_t> Microcode(bool texture_fetch_3d,
+                                xenos::FetchOpDimension dimension =
+                                    xenos::FetchOpDimension::k3DOrStacked,
+                                bool unnormalized = false) {
   using namespace rex::graphics::ucode;
   const uint64_t alloc = (uint64_t(AllocType::kPsColors) << 41) |
                          (uint64_t(ControlFlowOpcode::kAlloc) << 44);
@@ -73,12 +78,13 @@ std::vector<uint32_t> Microcode(bool texture_fetch_3d) {
   std::vector<uint32_t> code{uint32_t(alloc), uint32_t(alloc >> 32) | uint32_t(exec << 16),
                              uint32_t(exec >> 16)};
   if (texture_fetch_3d) {
-    // tfetch3D r0.xyzw, r0.xyz, tf0, all filters from the fetch constant.
+    // tfetch r0.xyzw, r0.xyz, tf0, all filters from the fetch constant.
     code.insert(code.end(),
-                {uint32_t(FetchOpcode::kTextureFetch) | (0x24u << 26),
+                {uint32_t(FetchOpcode::kTextureFetch) | (uint32_t(unnormalized) << 25) |
+                     (0x24u << 26),
                  0x688u | (3u << 12) | (3u << 14) | (3u << 16) | (7u << 18) | (3u << 24) |
                      (3u << 26),
-                 uint32_t(xenos::FetchOpDimension::k3DOrStacked) << 14});
+                 uint32_t(dimension) << 14});
   }
   // oC0 = max(r0, r0).
   code.insert(code.end(), {(1u << 15) | (15u << 16), 0, uint32_t(AluVectorOpcode::kMax) << 24});
@@ -136,6 +142,27 @@ int main() {
     }
     check(lerp_good >= 1 && !lerp_bad, "stacked layer lerp starts from the first layer");
     check(layer_clamps >= 1, "stacked layer index is clamped to [0, size - 1]");
+  }
+
+  {
+    SpirvShaderTranslator translator(SpirvShaderTranslator::Features(true), true, true, false);
+    const auto binary =
+        Translate(translator, Microcode(true, xenos::FetchOpDimension::k2D, true));
+    check(!binary.empty(), "unnormalized tfetch2D translation");
+    const Module module(binary);
+    // 8486e97a0: size = locked ? max(size >> mip_min, 1) : size, locked when
+    // mip_min (word 4 bits 2:5) equals mip_max (bits 6:9).
+    uint32_t locked_selects = 0;
+    for (const auto& instruction : module.instructions) {
+      if (instruction.op != spv::OpSelect || instruction.args.size() != 5) continue;
+      const auto* locked = module.Def(instruction.args[2], spv::OpIEqual);
+      if (!locked) continue;
+      const auto* mip_min = module.Def(locked->args[2], spv::OpBitFieldUExtract);
+      const auto* mip_max = module.Def(locked->args[3], spv::OpBitFieldUExtract);
+      locked_selects += mip_min && mip_max && module.IsConstant(mip_min->args[3], 2) &&
+                        module.IsConstant(mip_max->args[3], 6);
+    }
+    check(locked_selects >= 2, "unnormalized 2D size uses the locked mip grid");
   }
 
   for (unsigned scale : {1u, 2u}) {
