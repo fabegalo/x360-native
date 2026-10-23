@@ -1,6 +1,7 @@
 // patch 0187: D3D advances RB_COPY_DEST_BASE by 32x32 macro tiles, which are
 // smaller than 4 KB below 32bpp; the remainder is an X offset (Xenia Canary
-// 89609297c). No GPU.
+// 89609297c). patch 0192: volume resolves take the slice height from
+// RB_COPY_SURFACE_SLICE (d8731edc9). No GPU.
 #include <cstring>
 #include <iostream>
 #include <rex/graphics/register_file.h>
@@ -16,7 +17,8 @@ namespace {
 constexpr uint32_t kVertices = 0x01000000;
 
 bool Resolve(rex::memory::Memory &memory, uint32_t dest_base, float x0,
-             xenos::ColorFormat format, draw_util::ResolveInfo &info) {
+             xenos::ColorFormat format, draw_util::ResolveInfo &info, bool array = false,
+             uint32_t dest_height = 256, uint32_t surface_slice = 0) {
   RegisterFile regs;
   std::memset(regs.values, 0, sizeof(regs.values));
   xenos::xe_gpu_vertex_fetch_t fetch{};
@@ -44,10 +46,15 @@ bool Resolve(rex::memory::Memory &memory, uint32_t dest_base, float x0,
   Set(regs, center);
   reg::RB_COPY_DEST_INFO dest{};
   dest.copy_dest_format = format;
+  dest.copy_dest_array = array;
+  // Slices from Z = 4 on are addressed with the slice height.
+  dest.copy_dest_slice = array ? 4 : 0;
   Set(regs, dest);
   reg::RB_COPY_DEST_PITCH pitch{};
-  pitch.copy_dest_pitch = pitch.copy_dest_height = 256;
+  pitch.copy_dest_pitch = 256;
+  pitch.copy_dest_height = dest_height;
   Set(regs, pitch);
+  regs[XE_GPU_REG_RB_COPY_SURFACE_SLICE] = surface_slice;
   regs[XE_GPU_REG_RB_COPY_DEST_BASE] = dest_base;
   reg::RB_COPY_CONTROL control{};
   control.copy_command = xenos::CopyCommand::kRaw;
@@ -104,6 +111,24 @@ int main() {
     check(advanced.copy_dest_extent_start == shifted.copy_dest_extent_start &&
               advanced.copy_dest_extent_length == shifted.copy_dest_extent_length,
           "destination extents match");
+  }
+  // A volume destination's slice height is RB_COPY_SURFACE_SLICE / pitch, not
+  // copy_dest_height (192 here, the source rectangle bottom).
+  {
+    draw_util::ResolveInfo slice, height, plain;
+    check(Resolve(memory, base, 0, xenos::ColorFormat::k_8_8_8_8, slice, true, 192, 256 * 256) &&
+              Resolve(memory, base, 0, xenos::ColorFormat::k_8_8_8_8, height, true, 256) &&
+              Resolve(memory, base, 0, xenos::ColorFormat::k_8_8_8_8, plain, false, 192,
+                      256 * 256),
+          "volume resolves succeed");
+    check(slice.copy_dest_coordinate_info.height_aligned_div_32 == 8,
+          "volume slice height comes from RB_COPY_SURFACE_SLICE");
+    check(slice.copy_dest_base == height.copy_dest_base &&
+              slice.copy_dest_extent_start == height.copy_dest_extent_start &&
+              slice.copy_dest_extent_length == height.copy_dest_extent_length,
+          "volume destination matches the slice height");
+    check(plain.copy_dest_coordinate_info.height_aligned_div_32 == 6,
+          "2D destinations keep copy_dest_height");
   }
   std::cout << (checks - failures) << '/' << checks << " checks passed\n";
   return failures ? 1 : 0;

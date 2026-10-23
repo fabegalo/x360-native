@@ -1883,3 +1883,14 @@ com sinal (D3D12, Vulkan e Native só o convertem para float).
 extensão 1280 e a mesma transformação NDC do tile sem offset; 3 das 4
 verificações falham com o `draw.cpp` anterior. `native.texture` continua
 passando. Sem GPU.
+
+## 0192 — RB_COPY_SURFACE_SLICE em resolves de volume
+
+Porta d8731edc9: em resolves para texturas de volume, a altura da fatia vem de
+`RB_COPY_SURFACE_SLICE / pitch` (o D3D grava pitch × altura do nível), e
+`copy_dest_height`, que pode incluir o topo do retângulo de origem, fica só
+como fallback. Resolves 2D não mudam.
+
+`sdkcheck.canary-resolve-dest` (estendido): com `copy_dest_height` 192 e
+fatia de 256 linhas, a fatia Z = 4 usa 256 linhas e coincide com o destino de
+altura 256; 2 das 20 verificações falham com o `draw.cpp` anterior. Sem GPU.

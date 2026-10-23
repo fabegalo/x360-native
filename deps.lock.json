@@ -1024,7 +1024,7 @@
     "src/graphics/util/draw.cpp": "a3215a0de2f42d9e2235dd062b4cd2c3c0a27effd033c27ab6b6ca1f7673a25b"
   },
   "files": {
-    "src/graphics/util/draw.cpp": "3e9569abdfd1c424ab6870a3af51f46e0fe9cb3e03d4be1676df0a498975bd94"
+    "src/graphics/util/draw.cpp": "60dce53668c37143023dda333f15d64c3ff18c7fd3c0d7485133a4cd856806a3"
   },
   "test": "sdkcheck.empty-resolve"
 },
@@ -1176,7 +1176,7 @@
   },
   "files": {
     "include/rex/graphics/util/draw.h": "a55966367ccac3b8071a5a4603c309c7f3119cc307de474da21010be79f9bc29",
-    "src/graphics/util/draw.cpp": "3e9569abdfd1c424ab6870a3af51f46e0fe9cb3e03d4be1676df0a498975bd94",
+    "src/graphics/util/draw.cpp": "60dce53668c37143023dda333f15d64c3ff18c7fd3c0d7485133a4cd856806a3",
     "src/graphics/d3d12/command_processor.cpp": "63b05ddb0bbe2dfda47486884e9e5422f6621c06366c30ae68c706c334cb373f",
     "src/graphics/d3d12/render_target_cache.cpp": "9e562ab6e87297661341ae76618b28cae2ee668e0848a8347f45115f5b97140f"
   },
@@ -2421,7 +2421,7 @@
   "files": {
     "include/rex/graphics/pipeline/texture/info.h": "bfbeec5361746f55b1e739ea632b9658c8d5e7ff2a44ac2a02730fb496f73d25",
     "src/graphics/d3d12/texture_cache.cpp": "6a6669e3e486bd40eb01253d9d6068e4c31d11e669a527de990f38d2c866d8c9",
-    "src/graphics/util/draw.cpp": "3e9569abdfd1c424ab6870a3af51f46e0fe9cb3e03d4be1676df0a498975bd94",
+    "src/graphics/util/draw.cpp": "60dce53668c37143023dda333f15d64c3ff18c7fd3c0d7485133a4cd856806a3",
     "src/graphics/vulkan/texture_cache.cpp": "d0b0b111dd3abe9f70bd8933f51ece1d904f6a4a793d1febe4385b5821304fee"
   },
   "test": "sdkcheck.canary-format-alias: k_8_A/k_8_B/k_8_8_8_8_A textures use k_8/k_8_8_8_8 (GetBaseFormat) and resolves to them write the aliased destination format (Xenia Canary 8322658). Host format table entries are review-only; no GPU run."
@@ -2469,7 +2469,7 @@
     "src/graphics/util/draw.cpp": "a5238c8147d2dc12afbcfd80809f742e2eaa109480708939ce9ce9e203417a66"
   },
   "files": {
-    "src/graphics/util/draw.cpp": "3e9569abdfd1c424ab6870a3af51f46e0fe9cb3e03d4be1676df0a498975bd94"
+    "src/graphics/util/draw.cpp": "60dce53668c37143023dda333f15d64c3ff18c7fd3c0d7485133a4cd856806a3"
   },
   "test": "sdkcheck.canary-resolve-dest: a 2D tiled resolve whose RB_COPY_DEST_BASE is advanced by N 8bpp/16bpp macro tiles yields the same destination base, offsets and extents as the copy N*32 pixels right of the 4 KB-aligned base (Xenia Canary 89609297c). No GPU run."
 },
@@ -2521,9 +2521,20 @@
   },
   "files": {
     "include/rex/graphics/util/draw.h": "a55966367ccac3b8071a5a4603c309c7f3119cc307de474da21010be79f9bc29",
-    "src/graphics/util/draw.cpp": "3e9569abdfd1c424ab6870a3af51f46e0fe9cb3e03d4be1676df0a498975bd94"
+    "src/graphics/util/draw.cpp": "60dce53668c37143023dda333f15d64c3ff18c7fd3c0d7485133a4cd856806a3"
   },
   "test": "sdkcheck.canary-viewport: a 1280-wide viewport drawn with window offset x -608 (4D5307DF's right tile in Canary) starts at -608 with the full extent and the same NDC transform as the unoffset tile (Xenia Canary 6579cc2a4). No GPU run."
+},
+{
+  "file": "patches/rexglue-sdk/0192-canary-copy-surface-slice.patch",
+  "sha256": "d58c689081042beb93025f972209f1825c1ff91775ee5bb72ee1ce54f4e96cee",
+  "base_files": {
+    "src/graphics/util/draw.cpp": "3e9569abdfd1c424ab6870a3af51f46e0fe9cb3e03d4be1676df0a498975bd94"
+  },
+  "files": {
+    "src/graphics/util/draw.cpp": "60dce53668c37143023dda333f15d64c3ff18c7fd3c0d7485133a4cd856806a3"
+  },
+  "test": "sdkcheck.canary-resolve-dest: a volume resolve with copy_dest_height 192 and RB_COPY_SURFACE_SLICE = pitch * 256 uses a 256-row slice (same base and extents as copy_dest_height 256), while 2D resolves keep copy_dest_height (Xenia Canary d8731edc9). No GPU run."
 }
 ]
                     },
