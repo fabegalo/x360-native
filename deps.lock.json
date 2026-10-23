@@ -1565,7 +1565,7 @@
     "include/rex/graphics/display_overlay.h": "2841fdc05e4e7c248e9dcfdded2c0edd6503435b22bb1d5af0c8f113a9494cda",
     "src/graphics/command_processor.cpp": "3e1f453f4f4c86510486907ce06fc0530852ca3e68ea67edb1cbf0b6b0a44fd7",
     "src/graphics/d3d12/command_processor.cpp": "63b05ddb0bbe2dfda47486884e9e5422f6621c06366c30ae68c706c334cb373f",
-    "src/graphics/d3d12/texture_cache.cpp": "d737d23e7b989408cdc3c428b9834faaf99bd2dca1fd95e69e9b5f476ca681c0",
+    "src/graphics/d3d12/texture_cache.cpp": "27aaa40ea7c1fe63ac2d88a7c5d768399d94ee22db026ed97a91103ebeec64d1",
     "src/graphics/shaders/bytecode/d3d12_5_1/display_overlay_cs.h": "878b1ca19d0b44a2f730a6d8b312f9180f496651c1c3730e8668cace274f2f40",
     "src/graphics/shaders/display_overlay.hlsl": "82f2758310438dc43db3fa7b73d25192d52512007830f9d3c2665e64ba99859f",
     "src/kernel/xboxkrnl/xboxkrnl_video.cpp": "276d4ba7897095494ddd1de6182b3327617273ab29943ec520a5ebf6afb9936c"
@@ -1776,7 +1776,7 @@
                                             "sha256": "3e371c4e562e2678d4ab750c5e26b729219d3fb50f9023905cd5c05698e9fc3e",
                                             "files": {
                                                 "include/rex/graphics/vulkan/texture_cache.h": "56a61a90b0afd99d10d3f3405ec141292a2e4f568d7907abdabbbb0382274d04",
-                                                "src/graphics/vulkan/texture_cache.cpp": "7243c98ba139184bb276fca4a591527307f1f3988b9d591fc493860eab6e6d9d",
+                                                "src/graphics/vulkan/texture_cache.cpp": "5c2cc23c9a56a89ffcc59fb4865bb65d73b027ad89de995ef29fe4b45083bffb",
                                                 "include/rex/graphics/vulkan/command_processor.h": "7169056a52d3cd901f78ebeeec682b069cd5bbad5d12c45343ffe632633dc21b",
                                                 "src/graphics/vulkan/command_processor.cpp": "5384c4512d5c4b87d81f4442cbbc814d6cfe1a84b15d275b20bce23789709164"
                                             },
@@ -2389,6 +2389,25 @@
     "src/graphics/pipeline/shader/spirv_builder.cpp": "610d63e4082066a2f74449576ab2dff7453e90f47e752c23baa9d972a0f9c3ac"
   },
   "test": "sdkcheck.SPIRV-rectangle-replay-phi: ordinary/rectangle shaders, conditional/predicated/unconditional/unreachable jumps, masks0/1/7; matches Phi predecessors, preserves zero-incoming structural continuation and removes decorations only for blocks omitted by the serializer."
+},
+{
+  "file": "patches/rexglue-sdk/0183-canary-packed-mip-layout.patch",
+  "sha256": "47fe3e0da8c617334223d77b99403122d2f6f0eab325304578721a1b6858ded0",
+  "base_files": {
+    "include/rex/graphics/pipeline/texture/cache.h": "b1d7a9019f1896498372d15827bd8d09a09eb150b54e554ae98678e465394a89",
+    "include/rex/graphics/pipeline/texture/util.h": "d370dded22778c3154eebe06ae2f4fcb7175e8a8e777012744c16391928db81b",
+    "src/graphics/d3d12/texture_cache.cpp": "d737d23e7b989408cdc3c428b9834faaf99bd2dca1fd95e69e9b5f476ca681c0",
+    "src/graphics/pipeline/texture/util.cpp": "c16fb6f11fbfe4327d8e648353b8f10f661d5f3b7520ef831cfc67ce1569b81d",
+    "src/graphics/vulkan/texture_cache.cpp": "7243c98ba139184bb276fca4a591527307f1f3988b9d591fc493860eab6e6d9d"
+  },
+  "files": {
+    "include/rex/graphics/pipeline/texture/cache.h": "bea6e1a25bf65357ed3cd898fbe24b769c2f18863214c53e9923434d5c40d0db",
+    "include/rex/graphics/pipeline/texture/util.h": "081b4ff24c2976e2a8bfbf0dfbdc96a7559413f34008b1105e84191bca2a038e",
+    "src/graphics/d3d12/texture_cache.cpp": "27aaa40ea7c1fe63ac2d88a7c5d768399d94ee22db026ed97a91103ebeec64d1",
+    "src/graphics/pipeline/texture/util.cpp": "781d84584a576e0b2ae6edd5b1a01fac274a247b4406a6fa4741295eb0aaa939",
+    "src/graphics/vulkan/texture_cache.cpp": "5c2cc23c9a56a89ffcc59fb4865bb65d73b027ad89de995ef29fe4b45083bffb"
+  },
+  "test": "sdkcheck.canary-texture-layout: synthetic fetch constants; packed level-0 tails use base_address even with a separate mip_address (Canary 344fca7/ace153cb8), a separate base survives nonzero mip_min_level while an aliased one is dropped (4a863a0e1), 2x1 tails pack along X (344fca7). Sampler base-map level 0 (4a863a0e1) is covered by review only; no GPU run."
 }
 ]
                     },

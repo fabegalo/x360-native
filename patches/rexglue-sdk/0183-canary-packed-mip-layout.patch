@@ -1,0 +1,153 @@
+diff --git a/include/rex/graphics/pipeline/texture/cache.h b/include/rex/graphics/pipeline/texture/cache.h
+--- a/include/rex/graphics/pipeline/texture/cache.h
++++ b/include/rex/graphics/pipeline/texture/cache.h
+@@ -46,10 +46,11 @@
+ //   However, the max level is not ignored because any mip count can be
+ //   specified when creating a texture, and another texture may be placed after
+ //   the last one.
+-// - If the texture has a mip address, but the base address is 0 or the same as
+-//   the mip address, a mipmapped texture is created, but min/max LOD is clamped
+-//   to the lower bound of 1 - the game is expected to do that anyway until the
+-//   largest LOD is loaded.
++// - If the texture has a mip address, but the base address is 0, a mipmapped
++//   texture is created with the minimum LOD clamped to 1.
++// - If the base and mip addresses are the same with a nonzero minimum mip
++//   level, level 0 is already excluded, so the base upload is skipped
++//   (Xenia Canary 4a863a0e1).
+ // TODO(Triang3l): Attach the largest LOD to existing textures with a valid
+ // mip_address but no base ever used yet (no base_address) to save memory
+ // because textures are streamed this way anyway.
+diff --git a/include/rex/graphics/pipeline/texture/util.h b/include/rex/graphics/pipeline/texture/util.h
+--- a/include/rex/graphics/pipeline/texture/util.h
++++ b/include/rex/graphics/pipeline/texture/util.h
+@@ -76,18 +76,11 @@
+ //
+ // Note that the mip tail can be used both for the base level and mips (1...) if
+ // the entire texture has width or height of 16 or smaller. Therefore, both the
+-// base and the mips would be loaded from a mip tail that would be stored like
+-// the level 0 of the texture. But, in this case, under base_address and
+-// mip_address there are two separate mip tails, and the former likely uses the
+-// pitch from the fetch constant and no power of two size rounding, while for
+-// the latter the strides are likely calculated like for usual mips. The same
+-// applies to 17...32 texture sizes, though in this case the base is not packed
+-// tail, but the mips are still packed within an image that's stored like the
+-// level 0 of the texture. So, "storage level 0" is an ambiguous concept - host
+-// texture loading code should distinguish between "base level 0" and "mip tail
+-// for the mips 1... stored like level 0" and load the actual host level 0 from
+-// base_address, with all the base addressing properties, and host levels 1...
+-// from mip_address, with all the mips addressing properties. The base level
++// base and the mips are loaded from the same tail at base_address, even if
++// mip_address is nonzero. The base pitch and mip strides still use separate
++// layout entries. For 17...32 texture sizes, the base is not packed, but the
++// mips are stored at mip_address, as a tail laid out like level 0. Host texture
++// loading keeps the actual base level's pitch distinct from mip strides. The base level
+ // being packed is evident from the function that tiles textures in game
+ // disassembly, which only checks the flag whether the data is packed passed to
+ // it, not the level, to see if it needs to calculate the offset in the mip
+diff --git a/src/graphics/d3d12/texture_cache.cpp b/src/graphics/d3d12/texture_cache.cpp
+--- a/src/graphics/d3d12/texture_cache.cpp
++++ b/src/graphics/d3d12/texture_cache.cpp
+@@ -945,11 +945,9 @@
+     parameters.border_color = xenos::BorderColor::k_ABGR_Black;
+   }
+ 
+-  uint32_t mip_min_level, mip_max_level;
+-  texture_util::GetSubresourcesFromFetchConstant(fetch, nullptr, nullptr, nullptr, nullptr, nullptr,
+-                                                 &mip_min_level, &mip_max_level);
+-  parameters.mip_min_level = mip_min_level;
+-  bool has_mips = mip_max_level > mip_min_level;
++  uint32_t base_page, mip_min_level, mip_max_level;
++  texture_util::GetSubresourcesFromFetchConstant(fetch, nullptr, nullptr, nullptr, &base_page,
++                                                 nullptr, &mip_min_level, &mip_max_level);
+ 
+   xenos::TextureFilter mag_filter = binding.mag_filter == xenos::TextureFilter::kUseFetchConst
+                                         ? fetch.mag_filter
+@@ -965,6 +963,12 @@
+   bool mip_filter_bilinear_or_trilinear =
+       mip_filter == xenos::TextureFilter::kPoint || mip_filter == xenos::TextureFilter::kLinear;
+   bool mip_base_map = mip_filter == xenos::TextureFilter::kBaseMap;
++  // Xenia Canary 4a863a0e1: the base map is level 0 whenever the base exists.
++  if (mip_base_map && base_page != 0) {
++    mip_min_level = 0;
++  }
++  parameters.mip_min_level = mip_min_level;
++  bool has_mips = mip_max_level > mip_min_level;
+ 
+   // TODO(Triang3l): Disable filtering for texture formats not supporting it.
+   xenos::AnisoFilter aniso_filter = binding.aniso_filter == xenos::AnisoFilter::kUseFetchConst
+diff --git a/src/graphics/pipeline/texture/util.cpp b/src/graphics/pipeline/texture/util.cpp
+--- a/src/graphics/pipeline/texture/util.cpp
++++ b/src/graphics/pipeline/texture/util.cpp
+@@ -71,6 +71,14 @@
+   uint32_t base_page = fetch.base_address & 0x1FFFF;
+   uint32_t mip_page = fetch.mip_address & 0x1FFFF;
+ 
++  // Xenia Canary 344fca7: a packed level 0 and its mip tail share the base
++  // address even when the guest supplied a separate mip address.
++  if (base_page != 0 && fetch.packed_mips &&
++      fetch.dimension != xenos::DataDimension::k1D &&
++      GetPackedMipLevel(width_minus_1 + 1, height_minus_1 + 1) == 0) {
++    mip_page = base_page;
++  }
++
+   uint32_t mip_min_level, mip_max_level;
+   // Not taking mip_filter == kBaseMap into account for mip_max_level because
+   // the mip filter may be overridden by shader fetch instructions.
+@@ -83,11 +91,11 @@
+         std::max(std::min(uint32_t(fetch.mip_max_level), size_mip_max_level), mip_min_level);
+   }
+   if (mip_max_level != 0) {
++    if (mip_min_level != 0 && base_page == mip_page) {
++      base_page = 0;
++    }
+     if (base_page == 0) {
+       mip_min_level = std::max(mip_min_level, uint32_t(1));
+-    }
+-    if (mip_min_level != 0) {
+-      base_page = 0;
+     }
+   } else {
+     mip_page = 0;
+@@ -155,9 +163,12 @@
+   uint32_t packed_mip_base = (log2_size > 4) ? (log2_size - 4) : 0;
+   uint32_t packed_mip = mip - packed_mip_base;
+ 
++  // A 2x1 texture uses the square-texture X layout, not the wide-texture Y
++  // layout (Xenia Canary 344fca7, tested on Xbox 360 hardware).
++  bool is_wide = log2_width > std::max(log2_height, uint32_t(1));
+   // Find the block offset of the mip.
+   if (packed_mip < 3) {
+-    if (log2_width > log2_height) {
++    if (is_wide) {
+       // Wider than tall. Laid out vertically.
+       x_blocks = 0;
+       y_blocks = 16 >> packed_mip;
+@@ -169,7 +180,7 @@
+     z_blocks = 0;
+   } else {
+     uint32_t offset;
+-    if (log2_width > log2_height) {
++    if (is_wide) {
+       // Wider than tall. Laid out horizontally.
+       offset = (1 << (log2_width - packed_mip_base)) >> (packed_mip - 2);
+       x_blocks = offset;
+diff --git a/src/graphics/vulkan/texture_cache.cpp b/src/graphics/vulkan/texture_cache.cpp
+--- a/src/graphics/vulkan/texture_cache.cpp
++++ b/src/graphics/vulkan/texture_cache.cpp
+@@ -736,9 +736,13 @@
+   bool mip_filter_bilinear_or_trilinear =
+       mip_filter == xenos::TextureFilter::kPoint || mip_filter == xenos::TextureFilter::kLinear;
+   parameters.mip_base_map = mip_filter == xenos::TextureFilter::kBaseMap;
+-  uint32_t mip_min_level, mip_max_level;
+-  texture_util::GetSubresourcesFromFetchConstant(fetch, nullptr, nullptr, nullptr, nullptr, nullptr,
+-                                                 &mip_min_level, &mip_max_level);
++  uint32_t base_page, mip_min_level, mip_max_level;
++  texture_util::GetSubresourcesFromFetchConstant(fetch, nullptr, nullptr, nullptr, &base_page,
++                                                 nullptr, &mip_min_level, &mip_max_level);
++  // Xenia Canary 4a863a0e1: the base map is level 0 whenever the base exists.
++  if (parameters.mip_base_map && base_page != 0) {
++    mip_min_level = 0;
++  }
+   parameters.mip_min_level = mip_min_level;
+   bool has_mips = mip_max_level > mip_min_level;
+   int32_t anisotropic_override = REXCVAR_GET(anisotropic_override);

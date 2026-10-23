@@ -40,3 +40,13 @@ set_tests_properties(sdkcheck.inactive-vertex-fetch PROPERTIES LABELS project TI
 # A separate staging producer keeps the CPU-only checks independent of GPU
 # plugins staged by other tests in the parent directory.
 add_subdirectory(sdkcheck/g3)
+
+# patch 0183: Canary guest texture addressing (packed tails, base map pages).
+add_executable(x360n_canary_texture_layout_checks sdkcheck/canary_texture_layout_probe.cpp
+    ${X360_REXGLUE_DIR}/src/graphics/pipeline/texture/util.cpp
+    ${X360_REXGLUE_DIR}/src/graphics/pipeline/texture/info.cpp
+    ${X360_REXGLUE_DIR}/src/graphics/pipeline/texture/info_formats.cpp)
+target_link_libraries(x360n_canary_texture_layout_checks PRIVATE rexruntime)
+x360n_stage_runtime_dlls(x360n_canary_texture_layout_checks)
+add_test(NAME sdkcheck.canary-texture-layout COMMAND x360n_canary_texture_layout_checks)
+set_tests_properties(sdkcheck.canary-texture-layout PROPERTIES LABELS project TIMEOUT 30)

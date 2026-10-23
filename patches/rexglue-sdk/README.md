@@ -1762,3 +1762,16 @@ de interpolação 0/1/7. O caso de continuação sem entradas impede que a limpe
 apague o valor ainda referenciado pelo cabeçalho do loop. As 30 variantes e
 15 capturas, junto às 60 variantes FSI de 0181, passaram nos 105 módulos da
 validação CPU isolada registrada acima; não executa dispositivo gráfico.
+
+## 0183 — endereçamento de texturas do Xenia Canary
+
+Porta 344fca7, ace153cb8 e 4a863a0e1 do Canary (`canary_experimental`). Uma
+textura cujo nível 0 já está na mip tail lê toda a tail de `base_address`,
+mesmo com `mip_address` não nulo. Um `mip_min_level` não nulo descarta a base
+somente quando ela coincide com o endereço das mips. O filtro `kBaseMap` usa o
+nível 0 quando a base existe (D3D12 e Vulkan). Texturas 2×1 são compactadas
+ao longo de X, como as quadradas.
+
+`sdkcheck.canary-texture-layout` usa fetch constants sintéticos: 5 das 13
+verificações falham com o `util.cpp` anterior e todas passam com o patch. O
+nível 0 do sampler `kBaseMap` não tem teste automático; não houve execução em GPU.
