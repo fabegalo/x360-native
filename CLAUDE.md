@@ -141,8 +141,10 @@ Estado funcional consolidado em [STATUS.md](STATUS.md). Evidências por versão
 em [docs/dashboard.md](docs/dashboard.md), especialmente C7.7/C7.8 (§§0.31–0.32),
 e saves em [docs/save-storage.md](docs/save-storage.md). A região experimental
 17559 `0x8E030000` (64 KiB RW) permanece hipótese explícita, exclusiva do título.
-Xenos é padrão; Native está suspenso, experimental e sem aceite de performance.
-O lock contém 140 patches ativos, incluindo 0141 (0073 retirado, guardado em
+Xenos é padrão; o trabalho Native foi retomado pela G3, continua experimental
+e sem aceite de performance. A retomada de código deixa testes de execução
+para o mantenedor ou etapa posterior; ver `docs/reports/graphics-g3-2026-10-22.md`.
+O lock contém 165 patches ativos, incluindo 0178 (0073 retirado, guardado em
 `patches/rexglue-sdk/withdrawn/`); a lista do lock define a ordem, não o prefixo.
 Resultados históricos de testes ficam nos relatórios,
 sem repetir suítes ou sessões visuais por uma mudança documental.

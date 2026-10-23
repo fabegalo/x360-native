@@ -8,9 +8,11 @@ necessárias ou usar stubs para obter números melhores. Preservar C7/C8, perfis
 saves e biblioteca. Compilador, AOT, CPU, memória, GPU e carregamento são frentes
 contínuas, priorizadas por evidência.
 
-O desenvolvimento Native está suspenso por decisão do mantenedor em 2026-10-15.
-A prioridade atual é fortalecer o Xenos existente, sem iniciar trabalho Native
-ou Vulkan. A investigação de resolves está em
+O desenvolvimento Native, suspenso em 2026-10-15, foi retomado pelo mantenedor
+na G3 em 22–23/10. Xenos continua padrão; Native D3D12/Vulkan e Enhanced foram
+integrados em código. Os testes de execução e medições foram transferidos pelo
+mantenedor para depois: não há novo ganho comprovado ou aceite de FPS.
+[Entrega G3](reports/graphics-g3-2026-10-22.md). A investigação histórica de resolves está em
 [Xenos: resolves vazios](reports/graphics/xenos-empty-resolves.md) e
 [X2: vertex fetch predicado](reports/graphics/xenos-fetch-predication.md).
 

@@ -1,9 +1,24 @@
 # STATUS
 
-Estado consolidado em **2026-10-21**; a referência funcional integrada histórica é `1844245`.
+Estado consolidado em **2026-10-23**; a referência funcional integrada histórica é `1844245`.
 Este arquivo resume o estado atual; os relatórios vinculados preservam datas,
 falhas iniciais, hashes, comandos e limites de cada validação. Resultados de uma
 etapa histórica não certificam automaticamente o build atual nem outros títulos.
+
+G3 — integração de código em 23/10: Native D3D12/Vulkan independentes com ZPD,
+visibilidade/predicação, MEMEXPORT, tesselação, primitivas e formatos adicionais.
+Enhanced integra escala 1–4× até resolve/textura/scanout, AF, FXAA, CAS/FSR1 e
+perfil Forza identificado para FPS/tempo decorrido, ultrawide e HUD central.
+Xenos ganhou uploads Vulkan com dependências, submissão ordenada em worker,
+espera correta por pipelines e rastreamento esparso de páginas CPU, preservando
+FPS e resolução originais. SDK pinado preservado, 165 patches ativos; Native,
+Xenos, runtime, supervisor e launcher compilaram em Release (build5, saída 0).
+Preparo oficial final de Forza e dashboard 17559 concluído em 23/10 às 01:05 BRT,
+com 7/14 artefatos e 4.472/4.401 entradas autenticadas, sem marcador incompleto.
+O mantenedor transferiu testes de execução e medições para depois; não há novo
+aceite de gameplay nem ganho medido. Native continua experimental e a seleção
+Vulkan no launcher respeita o gate de título real solicitado.
+[Entrega e evidências](docs/reports/graphics-g3-2026-10-22.md).
 
 Criação de perfil — retomada 22/10: no run `20261022T021930Z` (aplicativo
 principal, sem sessões concorrentes) Entrar → Criar perfil criou dois perfis com
@@ -547,7 +562,7 @@ Escritas pelas configurações originais e outras versões ainda pendentes;
 builds visuais diagnósticos, sem renovar recibos de preparação de produção.
 [Evidências e limites](docs/guides/console-language-locale.md).
 
-**Xenos é o padrão; Native está suspenso por decisão do mantenedor.**
+**Xenos é o padrão; Native continua experimental, retomado na G3 de 22/10.**
 O Guide original 17559 é composto pelo buffer de comandos de sistema da própria
 XAM (patch 0078), executado no `VdSwap` de qualquer título, sem hooks por jogo e
 sem compartilhar o dispositivo D3D do título. Em 16/10 abriu, navegou e fechou
