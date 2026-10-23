@@ -1,0 +1,77 @@
+diff --git a/include/rex/graphics/pipeline/shader/spirv_translator.h b/include/rex/graphics/pipeline/shader/spirv_translator.h
+--- a/include/rex/graphics/pipeline/shader/spirv_translator.h
++++ b/include/rex/graphics/pipeline/shader/spirv_translator.h
+@@ -34,7 +34,7 @@
+     // prototyping stage (easier to do small granular updates with an
+     // incremental counter).
+     // Also invalidate stored translations when emitted control-flow changes.
+-    static constexpr uint32_t kVersion = 17;
++    static constexpr uint32_t kVersion = 18;
+ 
+ 
+     // Opt-in for backends that make every possible destination resident and
+diff --git a/src/graphics/pipeline/shader/spirv_translator_fetch.cpp b/src/graphics/pipeline/shader/spirv_translator_fetch.cpp
+--- a/src/graphics/pipeline/shader/spirv_translator_fetch.cpp
++++ b/src/graphics/pipeline/shader/spirv_translator_fetch.cpp
+@@ -1153,6 +1153,12 @@
+             z_stacked =
+                 builder_->createNoContractionBinOp(spv::OpFAdd, type_float_, z_stacked, z_offset);
+           }
++          // Clamp the layer index to a valid range so an Inf or NaN coordinate
++          // does not select an undefined array layer (Xenia Canary 2d5b41080).
++          z_stacked = builder_->createTriBuiltinCall(
++              type_float_, ext_inst_glsl_std_450_, GLSLstd450NClamp, z_stacked, const_float_0_,
++              builder_->createNoContractionBinOp(spv::OpFSub, type_float_, z_size,
++                                                 builder_->makeFloatConstant(1.0f)));
+           builder_->createBranch(&block_dimension_merge);
+           // Select one of the two.
+           builder_->setBuildPoint(&block_dimension_merge);
+@@ -2218,7 +2224,8 @@
+               builder_->createNoContractionBinOp(spv::OpFSub, type_float4_, sign_result,
+                                                  lerp_first),
+               lerp_factor);
+-          sign_result = builder_->createNoContractionBinOp(spv::OpFAdd, type_float4_, sign_result,
++          // Xenia Canary e519d59e4: the lerp starts from the first layer.
++          sign_result = builder_->createNoContractionBinOp(spv::OpFAdd, type_float4_, lerp_first,
+                                                            lerp_difference);
+         }
+       }
+diff --git a/src/graphics/pipeline/shader/spirv_translator_rb.cpp b/src/graphics/pipeline/shader/spirv_translator_rb.cpp
+--- a/src/graphics/pipeline/shader/spirv_translator_rb.cpp
++++ b/src/graphics/pipeline/shader/spirv_translator_rb.cpp
+@@ -1566,11 +1566,12 @@
+         builder_->createUnaryOp(spv::OpBitReverse, type_uint_, input_sample_mask_value),
+         builder_->makeUintConstant(32 - 2));
+   } else {
+-    // 0 and 3 to 0 and 1.
++    // 0 and 3 to 0 and 1. Guest sample 1 comes from host sample 3 (Xenia
++    // Canary 654a8cacf).
+     sample_mask_2x = builder_->createQuadOp(
+         spv::OpBitFieldInsert, type_uint_, input_sample_mask_value,
+         builder_->createTriOp(spv::OpBitFieldUExtract, type_uint_, input_sample_mask_value,
+-                              const_uint_2, const_uint_1),
++                              builder_->makeUintConstant(3), const_uint_1),
+         const_uint_1, builder_->makeUintConstant(32 - 1));
+   }
+   builder_->createBranch(&block_msaa_merge);
+diff --git a/src/graphics/vulkan/command_processor.cpp b/src/graphics/vulkan/command_processor.cpp
+--- a/src/graphics/vulkan/command_processor.cpp
++++ b/src/graphics/vulkan/command_processor.cpp
+@@ -6197,10 +6197,13 @@
+           stencil_ref_mask_front_reg = XE_GPU_REG_RB_STENCILREFMASK;
+           stencil_ref_mask_back_reg = XE_GPU_REG_RB_STENCILREFMASK_BF;
+         } else {
+-          // Choose the back face values only if drawing only back faces.
+-          stencil_ref_mask_front_reg = regs.Get<reg::PA_SU_SC_MODE_CNTL>().cull_front
+-                                           ? XE_GPU_REG_RB_STENCILREFMASK_BF
+-                                           : XE_GPU_REG_RB_STENCILREFMASK;
++          // Choose the back face values only if drawing only back faces, as on
++          // D3D12 (Xenia Canary 77597d62a).
++          auto pa_su_sc_mode_cntl = regs.Get<reg::PA_SU_SC_MODE_CNTL>();
++          stencil_ref_mask_front_reg =
++              (pa_su_sc_mode_cntl.cull_front && !pa_su_sc_mode_cntl.cull_back)
++                  ? XE_GPU_REG_RB_STENCILREFMASK_BF
++                  : XE_GPU_REG_RB_STENCILREFMASK;
+           stencil_ref_mask_back_reg = stencil_ref_mask_front_reg;
+         }
+       } else {

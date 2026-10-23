@@ -1830,3 +1830,18 @@ refração da água de 534307D5; não reproduzido aqui.
 `sdkcheck.canary-resolve-dest`: uma base avançada N macro tiles equivale à
 cópia N×32 pixels à direita da base alinhada; 9 das 16 verificações falham com
 o `draw.cpp` anterior (o caso 32bpp de controle passa nos dois). Sem GPU.
+
+## 0188 — correções SPIR-V/Vulkan do Xenia Canary
+
+Porta e519d59e4 (o lerp entre camadas de textura empilhada parte da primeira
+camada, não da segunda), 2d5b41080 (índice de camada empilhada limitado a
+[0, tamanho − 1] para coordenadas Inf/NaN), 654a8cacf (com 2x emulado como 4x,
+a amostra 1 do guest vem da amostra 3 do host na máscara FSI) e 77597d62a
+(stencil BF só quando apenas as faces frontais são descartadas, como no D3D12).
+A parte de 654a8cacf sobre o Phi de demote já estava coberta por 0181. Versão
+do cache SPIR-V: 18.
+
+`sdkcheck.canary-spirv` traduz offline shaders reais (tfetch3D e FSI, escalas
+1 e 2) e verifica o fluxo de dados emitido: as 4 verificações de comportamento
+falham com as fontes anteriores. A seleção de stencil não tem teste
+automático. Sem GPU e sem validação SPIRV-Tools.

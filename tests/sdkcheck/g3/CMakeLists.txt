@@ -88,3 +88,28 @@ if(REXGLUE_USE_VULKAN AND WIN32)
   add_test(NAME sdkcheck.canary-edram-fixed16 COMMAND x360n_edram_fixed16_checks)
   set_tests_properties(sdkcheck.canary-edram-fixed16 PROPERTIES LABELS project TIMEOUT 30)
 endif()
+
+# patch 0188: Canary SPIR-V stacked texture and 2x-as-4x sample mask fixes.
+if(REXGLUE_USE_VULKAN)
+  set(_canary_gpu ${X360_REXGLUE_DIR}/src/graphics)
+  add_executable(x360n_spirv_canary_checks spirv_canary.cpp
+      ${_canary_gpu}/util/draw.cpp ${_canary_gpu}/registers.cpp
+      ${_canary_gpu}/flags.cpp ${_canary_gpu}/format/ucode.cpp
+      ${_canary_gpu}/pipeline/shader/shader.cpp
+      ${_canary_gpu}/pipeline/shader/translator.cpp
+      ${_canary_gpu}/pipeline/shader/translator_disasm.cpp
+      ${_canary_gpu}/pipeline/shader/spirv_builder.cpp
+      ${_canary_gpu}/pipeline/shader/spirv.cpp
+      ${_canary_gpu}/pipeline/shader/spirv_translator.cpp
+      ${_canary_gpu}/pipeline/shader/spirv_translator_alu.cpp
+      ${_canary_gpu}/pipeline/shader/spirv_translator_fetch.cpp
+      ${_canary_gpu}/pipeline/shader/spirv_translator_memexport.cpp
+      ${_canary_gpu}/pipeline/shader/spirv_translator_rb.cpp)
+  target_link_libraries(x360n_spirv_canary_checks PRIVATE rexruntime xxHash::xxhash
+      Vulkan::Headers glslang::SPIRV glslang MachineIndependent GenericCodeGen OSDependent OGLCompiler)
+  target_include_directories(x360n_spirv_canary_checks PRIVATE
+      ${X360_REXGLUE_DIR}/thirdparty/renderdoc)
+  x360n_stage_runtime_dlls(x360n_spirv_canary_checks)
+  add_test(NAME sdkcheck.canary-spirv COMMAND x360n_spirv_canary_checks)
+  set_tests_properties(sdkcheck.canary-spirv PROPERTIES LABELS project TIMEOUT 30)
+endif()
