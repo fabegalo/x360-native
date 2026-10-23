@@ -1919,3 +1919,17 @@ retângulos (0180) reinicia esse estado por vértice. Versão do cache SPIR-V: 2
 `sdkcheck.canary-spirv` e `sdkcheck.canary-dxbc` traduzem offline um
 `vfetch_full` k_32_32_32_32_FLOAT e procuram a máscara por palavra; cada um
 falha com a fonte anterior. `sdkcheck.SPIRV-*` continua passando. Sem GPU.
+
+## 0195 — alias de cor e profundidade na EDRAM com ROV/FSI
+
+Porta a parte ROV/FSI de 9da693480: com ROV (D3D12) ou FSI (Vulkan), um
+render target de cor no mesmo endereço da profundidade só desliga depth/stencil
+se escrever bits usados por esses testes (profundidade nos bits 8:31, stencil
+nos bits 0:7); antes qualquer escrita desligava ambos. O Canary cita nuvens
+visíveis através da geometria em 4D530A26. A parte de render targets de host
+(RTV/FBO, posse de faixas e profundidade somente leitura) não foi portada.
+
+`sdkcheck.canary-edram-alias` testa `ColorOverlapsDepthStencil` com as
+máscaras PSI reais (6 verificações; a regra anterior falharia na escrita só do
+byte de stencil). A ligação nos command processors não tem teste automático.
+Sem GPU.
