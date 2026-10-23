@@ -1907,3 +1907,15 @@ não reproduzido aqui. Versão do cache SPIR-V: 19.
 tfetch2D não normalizado e procuram a seleção do tamanho travado; cada um
 falha com a fonte anterior, e o fetch normalizado continua sem a seleção.
 Sem GPU.
+
+## 0194 — palavras de vertex fetch fora do buffer leem 0
+
+Porta 9e9d3cdd3: em DXBC e SPIR-V, cada palavra de `vfetch` em ou além de
+base + tamanho (bits 2:25 da word 1 do fetch constant) passa a valer 0, como
+no hardware, em vez de ler dados de outra região da memória física. O limite
+do `vfetch_full` é guardado para os `vfetch_mini` seguintes, e o replay de
+retângulos (0180) reinicia esse estado por vértice. Versão do cache SPIR-V: 20.
+
+`sdkcheck.canary-spirv` e `sdkcheck.canary-dxbc` traduzem offline um
+`vfetch_full` k_32_32_32_32_FLOAT e procuram a máscara por palavra; cada um
+falha com a fonte anterior. `sdkcheck.SPIRV-*` continua passando. Sem GPU.

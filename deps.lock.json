@@ -1968,7 +1968,7 @@
     "src/graphics/pipeline/shader/spirv_translator_fetch.cpp": "b4cba3533cb7f5bdf92206493b49ded9e4e781194a23d363ffabd06ebda77e39"
   },
   "files": {
-    "src/graphics/pipeline/shader/spirv_translator_fetch.cpp": "bd4dce6f6c3e2491e499ce537b0e84efa842af31d59ff44fda5975f4aa788b01"
+    "src/graphics/pipeline/shader/spirv_translator_fetch.cpp": "1457d62823f174d7938eabb77d741275596778beffba7b266ae05c7537d7463c"
   },
   "test": "sdkcheck.Vulkan-texture-exp-adjust: the retained draw (textures with fetch exp_adjust +2) captures identically on Xenos/Vulkan and Xenos/D3D12; 4x darker on Vulkan before the patch"
 },
@@ -2092,8 +2092,8 @@
     "src/graphics/pipeline/shader/spirv_translator_rb.cpp": "a4aaf9e6b8ab5fdce92ab19e1aa228cd439375f302739bc61c89d481d5699a24"
   },
   "files": {
-    "include/rex/graphics/pipeline/shader/spirv_translator.h": "ba94c5a29b16cff7f5126f2f3988876061e05a4b7ee8db767488c5312fdcd842",
-    "src/graphics/pipeline/shader/spirv_translator.cpp": "3375bd858299205fdc11a368f4dfe070d48dffe9dd718f352e7776c046d09775",
+    "include/rex/graphics/pipeline/shader/spirv_translator.h": "084d6b03e670dd567fee2d6ac832d76be3397833d8dbd4b3cc2c5de080fc066e",
+    "src/graphics/pipeline/shader/spirv_translator.cpp": "ae0379da3ea772d121271f1f9c8058083f482e0c37d993a15519872de0328dd3",
     "src/graphics/pipeline/shader/spirv_translator_rb.cpp": "6458df3b4f0dd1e3841d186e3df9cf1ee9ca15cd9a8d139e30a1d3dbb8a7c3df"
   },
   "test": "sdkcheck.Native-FSI-sample-counts: shared PM4 occlusion probe with Native Vulkan FSI sample counters; execution deferred by user"
@@ -2136,8 +2136,8 @@
   "files": {
     "include/rex/graphics/pipeline/shader/dxbc_translator.h": "3935dcb19f52fe74ca987ac0a581bde5a797e0183085090738f33c3427b7b730",
     "src/graphics/pipeline/shader/dxbc_translator.cpp": "53bd365efdb58ccc01cbb6e882f2573aec2404e031bd354c89a49d5ab6aa9673",
-    "include/rex/graphics/pipeline/shader/spirv_translator.h": "ba94c5a29b16cff7f5126f2f3988876061e05a4b7ee8db767488c5312fdcd842",
-    "src/graphics/pipeline/shader/spirv_translator.cpp": "3375bd858299205fdc11a368f4dfe070d48dffe9dd718f352e7776c046d09775"
+    "include/rex/graphics/pipeline/shader/spirv_translator.h": "084d6b03e670dd567fee2d6ac832d76be3397833d8dbd4b3cc2c5de080fc066e",
+    "src/graphics/pipeline/shader/spirv_translator.cpp": "ae0379da3ea772d121271f1f9c8058083f482e0c37d993a15519872de0328dd3"
   },
   "test": "sdkcheck.Native-MEMEXPORT-d3d12 and sdkcheck.Native-MEMEXPORT-vulkan: dynamic export addresses retain shader stores with complete residency and readback; execution deferred by user"
 },
@@ -2241,8 +2241,8 @@
   "files": {
     "include/rex/graphics/pipeline/shader/dxbc_translator.h": "3935dcb19f52fe74ca987ac0a581bde5a797e0183085090738f33c3427b7b730",
     "src/graphics/pipeline/shader/dxbc_translator.cpp": "53bd365efdb58ccc01cbb6e882f2573aec2404e031bd354c89a49d5ab6aa9673",
-    "include/rex/graphics/pipeline/shader/spirv_translator.h": "ba94c5a29b16cff7f5126f2f3988876061e05a4b7ee8db767488c5312fdcd842",
-    "src/graphics/pipeline/shader/spirv_translator.cpp": "3375bd858299205fdc11a368f4dfe070d48dffe9dd718f352e7776c046d09775"
+    "include/rex/graphics/pipeline/shader/spirv_translator.h": "084d6b03e670dd567fee2d6ac832d76be3397833d8dbd4b3cc2c5de080fc066e",
+    "src/graphics/pipeline/shader/spirv_translator.cpp": "ae0379da3ea772d121271f1f9c8058083f482e0c37d993a15519872de0328dd3"
   },
   "test": "sdkcheck.Native-raster-state: NoPerspective bit62 opt-in in translated DXBC/SPIRV; execution deferred by user"
 },
@@ -2286,9 +2286,9 @@
   },
   "files": {
     "include/rex/graphics/pipeline/shader/dxbc_translator.h": "3935dcb19f52fe74ca987ac0a581bde5a797e0183085090738f33c3427b7b730",
-    "include/rex/graphics/pipeline/shader/spirv_translator.h": "ba94c5a29b16cff7f5126f2f3988876061e05a4b7ee8db767488c5312fdcd842",
+    "include/rex/graphics/pipeline/shader/spirv_translator.h": "084d6b03e670dd567fee2d6ac832d76be3397833d8dbd4b3cc2c5de080fc066e",
     "src/graphics/pipeline/shader/dxbc_translator.cpp": "53bd365efdb58ccc01cbb6e882f2573aec2404e031bd354c89a49d5ab6aa9673",
-    "src/graphics/pipeline/shader/spirv_translator.cpp": "3375bd858299205fdc11a368f4dfe070d48dffe9dd718f352e7776c046d09775",
+    "src/graphics/pipeline/shader/spirv_translator.cpp": "ae0379da3ea772d121271f1f9c8058083f482e0c37d993a15519872de0328dd3",
     "src/graphics/pipeline/shader/dxbc_translator_memexport.cpp": "1701313eebf0e3b6dcc0c4e129763c189c68d960f99d15fbcda0887f351fab6a",
     "src/graphics/pipeline/shader/spirv_translator_memexport.cpp": "1dc5cdb991d5b7331d1359f9035b75f344b76898e47b5d02b133dd65dc87fa65",
     "src/graphics/pipeline/shader/dxbc_translator_om.cpp": "186670ed47d639b8ebbd4c8ed3717eb48e170fc6655ac1c7a18a4742964b704a",
@@ -2343,7 +2343,7 @@
   },
   "files": {
     "src/graphics/pipeline/shader/spirv_translator_rb.cpp": "6458df3b4f0dd1e3841d186e3df9cf1ee9ca15cd9a8d139e30a1d3dbb8a7c3df",
-    "include/rex/graphics/pipeline/shader/spirv_translator.h": "ba94c5a29b16cff7f5126f2f3988876061e05a4b7ee8db767488c5312fdcd842"
+    "include/rex/graphics/pipeline/shader/spirv_translator.h": "084d6b03e670dd567fee2d6ac832d76be3397833d8dbd4b3cc2c5de080fc066e"
   },
   "test": "sdkcheck.SPIRV-interlock-control-flow: real translated early/late-depth, kill/alpha, helper-demotion, ZPD/visibility and scaled variants; all reachable CFG paths enter and leave exactly once. Offline only; no crash attribution."
 },
@@ -2355,8 +2355,8 @@
     "include/rex/graphics/pipeline/shader/spirv_translator.h": "c5b036f9651167e5a4dfa815a539c5d69ce177ccd712ba4373fa62138faeced3"
   },
   "files": {
-    "src/graphics/pipeline/shader/spirv_translator.cpp": "3375bd858299205fdc11a368f4dfe070d48dffe9dd718f352e7776c046d09775",
-    "include/rex/graphics/pipeline/shader/spirv_translator.h": "ba94c5a29b16cff7f5126f2f3988876061e05a4b7ee8db767488c5312fdcd842"
+    "src/graphics/pipeline/shader/spirv_translator.cpp": "ae0379da3ea772d121271f1f9c8058083f482e0c37d993a15519872de0328dd3",
+    "include/rex/graphics/pipeline/shader/spirv_translator.h": "084d6b03e670dd567fee2d6ac832d76be3397833d8dbd4b3cc2c5de080fc066e"
   },
   "test": "sdkcheck.SPIRV-rectangle-replay-phi: synthetic conditional/unconditional jumps with rectangle replay and interpolator masks; every OpPhi covers all CFG predecessors and replay resets PC to zero. Captured shader retranslation also passes SPIRV-Tools offline validation."
 },
@@ -2369,7 +2369,7 @@
   },
   "files": {
     "src/graphics/pipeline/shader/spirv_translator_rb.cpp": "6458df3b4f0dd1e3841d186e3df9cf1ee9ca15cd9a8d139e30a1d3dbb8a7c3df",
-    "include/rex/graphics/pipeline/shader/spirv_translator.h": "ba94c5a29b16cff7f5126f2f3988876061e05a4b7ee8db767488c5312fdcd842"
+    "include/rex/graphics/pipeline/shader/spirv_translator.h": "084d6b03e670dd567fee2d6ac832d76be3397833d8dbd4b3cc2c5de080fc066e"
   },
   "test": "sdkcheck.SPIRV-interlock-control-flow (60 real translated variants) plus SPIRV-Tools Vulkan 1.4 validation: all mask definitions dominate uses across alpha ALWAYS/A2C disabled; A2C result retained for demote OFF and ON."
 },
@@ -2383,8 +2383,8 @@
     "src/graphics/pipeline/shader/spirv_builder.cpp": "12a34b805048beee5162de9cdca7f6f4dc3e915eb2dc9ac5849db8ead122526a"
   },
   "files": {
-    "src/graphics/pipeline/shader/spirv_translator.cpp": "3375bd858299205fdc11a368f4dfe070d48dffe9dd718f352e7776c046d09775",
-    "include/rex/graphics/pipeline/shader/spirv_translator.h": "ba94c5a29b16cff7f5126f2f3988876061e05a4b7ee8db767488c5312fdcd842",
+    "src/graphics/pipeline/shader/spirv_translator.cpp": "ae0379da3ea772d121271f1f9c8058083f482e0c37d993a15519872de0328dd3",
+    "include/rex/graphics/pipeline/shader/spirv_translator.h": "084d6b03e670dd567fee2d6ac832d76be3397833d8dbd4b3cc2c5de080fc066e",
     "include/rex/graphics/pipeline/shader/spirv_builder.h": "717f044744ece6bee5f48a9e356e6d69629188538799b61271d7abcf0efa1583",
     "src/graphics/pipeline/shader/spirv_builder.cpp": "610d63e4082066a2f74449576ab2dff7453e90f47e752c23baa9d972a0f9c3ac"
   },
@@ -2440,7 +2440,7 @@
   },
   "files": {
     "include/rex/graphics/pipeline/shader/dxbc_translator.h": "3935dcb19f52fe74ca987ac0a581bde5a797e0183085090738f33c3427b7b730",
-    "include/rex/graphics/pipeline/shader/spirv_translator.h": "ba94c5a29b16cff7f5126f2f3988876061e05a4b7ee8db767488c5312fdcd842",
+    "include/rex/graphics/pipeline/shader/spirv_translator.h": "084d6b03e670dd567fee2d6ac832d76be3397833d8dbd4b3cc2c5de080fc066e",
     "src/graphics/pipeline/render_target/cache.cpp": "37f06ebaa2ed7ef8b5db9541ccf3c6c6969b319976caf2db3902084584f867d1",
     "src/graphics/pipeline/shader/dxbc_translator_om.cpp": "186670ed47d639b8ebbd4c8ed3717eb48e170fc6655ac1c7a18a4742964b704a",
     "src/graphics/pipeline/shader/spirv_translator_rb.cpp": "6458df3b4f0dd1e3841d186e3df9cf1ee9ca15cd9a8d139e30a1d3dbb8a7c3df",
@@ -2483,8 +2483,8 @@
     "src/graphics/vulkan/command_processor.cpp": "2877a19aea1f2d30ed97a1e3e76a96c6a9803c54c15b5f658d5a84bf546f0389"
   },
   "files": {
-    "include/rex/graphics/pipeline/shader/spirv_translator.h": "ba94c5a29b16cff7f5126f2f3988876061e05a4b7ee8db767488c5312fdcd842",
-    "src/graphics/pipeline/shader/spirv_translator_fetch.cpp": "bd4dce6f6c3e2491e499ce537b0e84efa842af31d59ff44fda5975f4aa788b01",
+    "include/rex/graphics/pipeline/shader/spirv_translator.h": "084d6b03e670dd567fee2d6ac832d76be3397833d8dbd4b3cc2c5de080fc066e",
+    "src/graphics/pipeline/shader/spirv_translator_fetch.cpp": "1457d62823f174d7938eabb77d741275596778beffba7b266ae05c7537d7463c",
     "src/graphics/pipeline/shader/spirv_translator_rb.cpp": "6458df3b4f0dd1e3841d186e3df9cf1ee9ca15cd9a8d139e30a1d3dbb8a7c3df",
     "src/graphics/vulkan/command_processor.cpp": "ecd1c8b00b26e15212ea5a6158b124ec5d85a652406a62118e42665213051509"
   },
@@ -2497,7 +2497,7 @@
     "src/graphics/pipeline/shader/dxbc_translator_fetch.cpp": "9bbd02d52432fe55ec95d1b6f03a0cba46ad98a1ee4b974fe1fcaac4f6c47530"
   },
   "files": {
-    "src/graphics/pipeline/shader/dxbc_translator_fetch.cpp": "16cff74cda29914ca2deaec835a95c8bb0ef6e927dea6f865e21a312f7b7251d"
+    "src/graphics/pipeline/shader/dxbc_translator_fetch.cpp": "489264b8218238a4ec16cf1cd022139d14ce17488552c9066653cf31bb5546e3"
   },
   "test": "sdkcheck.canary-dxbc: real tfetch3D microcode (normalized/unnormalized, with/without Z offset) translated offline to DXBC; each emits the stacked layer clamp max(z, 0.5), min(z, size - 0.5) (Xenia Canary 04085efaa). No GPU run."
 },
@@ -2545,11 +2545,28 @@
     "src/graphics/pipeline/shader/spirv_translator_fetch.cpp": "140772902577feb395e1347cdbde3c9d6c3e1f8d2248aa35c7329470679aafc3"
   },
   "files": {
-    "include/rex/graphics/pipeline/shader/spirv_translator.h": "ba94c5a29b16cff7f5126f2f3988876061e05a4b7ee8db767488c5312fdcd842",
-    "src/graphics/pipeline/shader/dxbc_translator_fetch.cpp": "16cff74cda29914ca2deaec835a95c8bb0ef6e927dea6f865e21a312f7b7251d",
-    "src/graphics/pipeline/shader/spirv_translator_fetch.cpp": "bd4dce6f6c3e2491e499ce537b0e84efa842af31d59ff44fda5975f4aa788b01"
+    "include/rex/graphics/pipeline/shader/spirv_translator.h": "084d6b03e670dd567fee2d6ac832d76be3397833d8dbd4b3cc2c5de080fc066e",
+    "src/graphics/pipeline/shader/dxbc_translator_fetch.cpp": "489264b8218238a4ec16cf1cd022139d14ce17488552c9066653cf31bb5546e3",
+    "src/graphics/pipeline/shader/spirv_translator_fetch.cpp": "1457d62823f174d7938eabb77d741275596778beffba7b266ae05c7537d7463c"
   },
   "test": "sdkcheck.canary-spirv and sdkcheck.canary-dxbc: an unnormalized tfetch2D translated offline selects max(size >> mip_min, 1) when mip_min equals mip_max (fetch constant word 4), and normalized fetches are unchanged (Xenia Canary 8486e97a0, cited for 555308B6/5553080B). No GPU run."
+},
+{
+  "file": "patches/rexglue-sdk/0194-canary-vertex-fetch-bounds.patch",
+  "sha256": "7101eca6528b6f5f1d51c19e5f649e27afe636ba7d8d519e89a24376e9da7a66",
+  "base_files": {
+    "include/rex/graphics/pipeline/shader/spirv_translator.h": "ba94c5a29b16cff7f5126f2f3988876061e05a4b7ee8db767488c5312fdcd842",
+    "src/graphics/pipeline/shader/dxbc_translator_fetch.cpp": "16cff74cda29914ca2deaec835a95c8bb0ef6e927dea6f865e21a312f7b7251d",
+    "src/graphics/pipeline/shader/spirv_translator.cpp": "3375bd858299205fdc11a368f4dfe070d48dffe9dd718f352e7776c046d09775",
+    "src/graphics/pipeline/shader/spirv_translator_fetch.cpp": "bd4dce6f6c3e2491e499ce537b0e84efa842af31d59ff44fda5975f4aa788b01"
+  },
+  "files": {
+    "include/rex/graphics/pipeline/shader/spirv_translator.h": "084d6b03e670dd567fee2d6ac832d76be3397833d8dbd4b3cc2c5de080fc066e",
+    "src/graphics/pipeline/shader/dxbc_translator_fetch.cpp": "489264b8218238a4ec16cf1cd022139d14ce17488552c9066653cf31bb5546e3",
+    "src/graphics/pipeline/shader/spirv_translator.cpp": "ae0379da3ea772d121271f1f9c8058083f482e0c37d993a15519872de0328dd3",
+    "src/graphics/pipeline/shader/spirv_translator_fetch.cpp": "1457d62823f174d7938eabb77d741275596778beffba7b266ae05c7537d7463c"
+  },
+  "test": "sdkcheck.canary-spirv and sdkcheck.canary-dxbc: a vfetch_full of k_32_32_32_32_FLOAT translated offline masks every word at or past base + size (fetch constant word 1 bits 2:25) to 0 in SPIR-V (select per word) and DXBC (ubfe/and/umad/iadd/ult mask) (Xenia Canary 9e9d3cdd3). No GPU run."
 }
 ]
                     },

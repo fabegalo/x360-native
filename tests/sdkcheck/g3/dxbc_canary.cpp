@@ -1,5 +1,6 @@
 // patch 0189: stacked texture layer clamp in DXBC (Xenia Canary 04085efaa).
 // patch 0193: locked mip grid for unnormalized fetches (8486e97a0).
+// patch 0194: out-of-bounds vertex fetch words read 0 (9e9d3cdd3).
 // CPU-only: translate real tfetch3D microcode and look for the emitted
 // max(z, 0.5) / add(size, -0.5) / min sequence in the shader program.
 #include <rex/graphics/format/ucode.h>
@@ -92,13 +93,38 @@ uint32_t CountLockedMipSizes(const std::vector<uint8_t>& blob) {
   return count;
 }
 
-std::vector<uint8_t> Translate(const std::vector<uint32_t>& code) {
-  Shader shader(xenos::ShaderType::kPixel, 1, code.data(), code.size(), std::endian::native);
+// vfetch_full r1.xyzw, r0.x, vf0, k_32_32_32_32_FLOAT, stride 4 dwords.
+std::vector<uint32_t> VertexFetchMicrocode() {
+  using namespace rex::graphics::ucode;
+  const uint64_t exec = 1 | (uint64_t(1) << 12) | (uint64_t(1) << 16) |
+                        (uint64_t(ControlFlowOpcode::kExecEnd) << 44);
+  return {uint32_t(exec), uint32_t(exec >> 32), 0,
+          uint32_t(FetchOpcode::kVertexFetch) | (1u << 12) | (1u << 19),
+          0x688u | (uint32_t(xenos::VertexFormat::k_32_32_32_32_FLOAT) << 16), 4};
+}
+
+// Counts ubfe (size), and (base), umad (end), iadd (word addresses), ult.
+uint32_t CountVertexFetchBounds(const std::vector<uint8_t>& blob) {
+  const auto ops = ProgramOps(blob);
+  const uint32_t sequence[] = {0x8A, 0x01, 0x52, 0x1E, 0x4F};
+  uint32_t count = 0;
+  for (size_t j = 0; j + std::size(sequence) <= ops.size(); ++j) {
+    bool match = true;
+    for (size_t k = 0; k < std::size(sequence); ++k) match &= ops[j + k].opcode == sequence[k];
+    count += match;
+  }
+  return count;
+}
+
+std::vector<uint8_t> Translate(const std::vector<uint32_t>& code,
+                               xenos::ShaderType type = xenos::ShaderType::kPixel) {
+  Shader shader(type, 1, code.data(), code.size(), std::endian::native);
   rex::string::StringBuffer disassembly;
   shader.AnalyzeUcode(disassembly);
   DxbcShaderTranslator translator(rex::ui::GraphicsProvider::GpuVendorID::kNvidia, false, false);
-  auto& translation =
-      *shader.GetOrCreateTranslation(translator.GetDefaultPixelShaderModification(1));
+  auto& translation = *shader.GetOrCreateTranslation(
+      type == xenos::ShaderType::kPixel ? translator.GetDefaultPixelShaderModification(2)
+                                        : translator.GetDefaultVertexShaderModification(2));
   if (!translator.TranslateAnalyzedShader(translation) || !translation.is_valid()) return {};
   return translation.translated_binary();
 }
@@ -141,6 +167,11 @@ int main() {
     const auto normalized = Translate(Microcode(false, false, xenos::FetchOpDimension::k2D));
     check(!normalized.empty() && !CountLockedMipSizes(normalized),
           "normalized 2D size is unchanged");
+  }
+  {
+    const auto blob = Translate(VertexFetchMicrocode(), xenos::ShaderType::kVertex);
+    check(!blob.empty(), "vfetch DXBC translation");
+    check(CountVertexFetchBounds(blob) >= 1, "out-of-bounds vertex fetch words read 0");
   }
   std::cout << (checks - failures) << '/' << checks << " checks passed\n";
   return failures ? 1 : 0;

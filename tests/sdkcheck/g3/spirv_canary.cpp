@@ -1,5 +1,6 @@
 // patch 0188: SPIR-V fixes from Xenia Canary (e519d59e4, 2d5b41080, 654a8cacf).
 // patch 0193: locked mip grid for unnormalized fetches (8486e97a0).
+// patch 0194: out-of-bounds vertex fetch words read 0 (9e9d3cdd3).
 // CPU-only: translate real guest microcode and check the emitted SPIR-V data
 // flow. No Vulkan device or game is used.
 #include <SPIRV/GLSL.std.450.h>
@@ -45,6 +46,7 @@ struct Module {
         case spv::OpBitFieldUExtract:
         case spv::OpExtInst:
         case spv::OpIEqual:
+        case spv::OpULessThan:
           defs[instruction.args[1]] = instructions.size();
           break;
         default:
@@ -91,12 +93,24 @@ std::vector<uint32_t> Microcode(bool texture_fetch_3d,
   return code;
 }
 
-std::vector<uint8_t> Translate(SpirvShaderTranslator& translator, const std::vector<uint32_t>& code) {
-  Shader shader(xenos::ShaderType::kPixel, 1, code.data(), code.size(), std::endian::native);
+// vfetch_full r1.xyzw, r0.x, vf0, k_32_32_32_32_FLOAT, stride 4 dwords.
+std::vector<uint32_t> VertexFetchMicrocode() {
+  using namespace rex::graphics::ucode;
+  const uint64_t exec = 1 | (uint64_t(1) << 12) | (uint64_t(1) << 16) |
+                        (uint64_t(ControlFlowOpcode::kExecEnd) << 44);
+  return {uint32_t(exec), uint32_t(exec >> 32), 0,
+          uint32_t(FetchOpcode::kVertexFetch) | (1u << 12) | (1u << 19),
+          0x688u | (uint32_t(xenos::VertexFormat::k_32_32_32_32_FLOAT) << 16), 4};
+}
+
+std::vector<uint8_t> Translate(SpirvShaderTranslator& translator, const std::vector<uint32_t>& code,
+                               xenos::ShaderType type = xenos::ShaderType::kPixel) {
+  Shader shader(type, 1, code.data(), code.size(), std::endian::native);
   rex::string::StringBuffer disassembly;
   shader.AnalyzeUcode(disassembly);
-  auto& translation =
-      *shader.GetOrCreateTranslation(translator.GetDefaultPixelShaderModification(1));
+  auto& translation = *shader.GetOrCreateTranslation(
+      type == xenos::ShaderType::kPixel ? translator.GetDefaultPixelShaderModification(2)
+                                        : translator.GetDefaultVertexShaderModification(2));
   if (!translator.TranslateAnalyzedShader(translation) || !translation.is_valid()) return {};
   return translation.translated_binary();
 }
@@ -163,6 +177,22 @@ int main() {
                         module.IsConstant(mip_max->args[3], 6);
     }
     check(locked_selects >= 2, "unnormalized 2D size uses the locked mip grid");
+  }
+
+  {
+    SpirvShaderTranslator translator(SpirvShaderTranslator::Features(true), true, true, false);
+    const auto binary =
+        Translate(translator, VertexFetchMicrocode(), xenos::ShaderType::kVertex);
+    check(!binary.empty(), "vfetch translation");
+    const Module module(binary);
+    // 9e9d3cdd3: each word is select(address < base + size, word, 0).
+    uint32_t bounded_words = 0;
+    for (const auto& instruction : module.instructions) {
+      if (instruction.op != spv::OpSelect || instruction.args.size() != 5) continue;
+      bounded_words += module.Def(instruction.args[2], spv::OpULessThan) &&
+                       module.IsConstant(instruction.args[4], 0);
+    }
+    check(bounded_words >= 4, "out-of-bounds vertex fetch words read 0");
   }
 
   for (unsigned scale : {1u, 2u}) {
