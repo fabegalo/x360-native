@@ -76,13 +76,31 @@ $stateFile = Join-Path $build '.preparation/incremental.json'
 $incrementalState = $null
 $processed = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
 $runId = [Guid]::NewGuid().ToString('N')
+function Invoke-PreparationCommand([string]$Command, [string]$Log) {
+    # Avoid the Windows PowerShell native pipeline here too: a completed
+    # toolchain inventory or build must not leave its parent waiting on pipes.
+    # cmd owns both redirected streams; this driver waits on the process handle.
+    $info = [Diagnostics.ProcessStartInfo]::new()
+    $info.FileName = $env:ComSpec
+    $info.Arguments = '/d /s /c ""' + $devshell + '" ' + $Command + ' > "' + $Log + '" 2>&1"'
+    $info.WorkingDirectory = $titleDir
+    $info.UseShellExecute = $false
+    $info.CreateNoWindow = $true
+    $process = [Diagnostics.Process]::new()
+    $process.StartInfo = $info
+    try {
+        if (-not $process.Start()) { throw 'Cannot start preparation command' }
+        $process.WaitForExit()
+        return $process.ExitCode
+    } finally { $process.Dispose() }
+}
 function Update-ToolchainSnapshot([string]$Phase) {
     $log = Join-Path $build "x360n-build-$Phase.$runId.log"
     $script = Join-Path $PSScriptRoot 'build/toolchain-snapshot.ps1'
     $priorToolchain = @($previous.inputs | Where-Object path -eq (Join-Path $build '.preparation/toolchain.json'))
     $authenticated = if ($priorToolchain.Count -eq 1) { '-PreviousSha ' + $priorToolchain[0].sha256 } else { '' }
-    cmd /c "`"$devshell`" powershell.exe -NoProfile -ExecutionPolicy Bypass -File `"$script`" -Build `"$build`" $authenticated > `"$log`" 2>&1"
-    if ($LASTEXITCODE) { throw "Cannot identify build toolchain; see $log" }
+    $rc = Invoke-PreparationCommand "powershell.exe -NoProfile -ExecutionPolicy Bypass -File `"$script`" -Build `"$build`" $authenticated" $log
+    if ($rc) { throw "Cannot identify build toolchain; see $log" }
 }
 
 $steps = @(
@@ -229,8 +247,7 @@ try {
             # Redirect inside cmd: in PowerShell 5.1 with ErrorActionPreference=Stop,
             # native stderr (e.g. VsDevCmd's "'vswhere.exe' is not recognized") would
             # otherwise become a terminating NativeCommandError.
-            cmd /c "`"$devshell`" $($invocation.args) > `"$log`" 2>&1"
-            $rc = $LASTEXITCODE
+            $rc = Invoke-PreparationCommand $invocation.args $log
             Write-Host ("step {0}: exit {1} in {2} s (log {3})" -f $invocation.name, $rc, [int]$sw.Elapsed.TotalSeconds, $log)
             if ($rc -ne 0) {
                 [IO.File]::WriteAllText($marker, "Error: $($invocation.name), exit $rc`nLog: $log`n" + ((Get-Content $log -Tail 25) -join "`n"))
