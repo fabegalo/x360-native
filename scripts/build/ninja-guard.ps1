@@ -27,8 +27,9 @@ try {
         [IO.File]::WriteAllText($marker, 'incomplete')
     }
     # Windows PowerShell's native-command pipeline can remain blocked after
-    # Ninja has exited. Inherit stdio directly and wait on the process handle,
-    # so completion/lease release depends on Ninja, not pipeline stream EOF.
+    # Ninja has exited. Wait on its process handle and relay byte streams
+    # directly, bypassing that pipeline. Explicit relaying also preserves
+    # CMake's captured --version / graph-query output in a windowless host.
     # Quote each argument using the same Windows rules as the read-only Ninja
     # query in incremental-state.ps1 (including trailing slashes and quotes).
     $quotedArguments = foreach ($argument in $ninjaArgs) {
@@ -39,12 +40,21 @@ try {
     $processInfo.Arguments = $quotedArguments -join ' '
     $processInfo.UseShellExecute = $false
     $processInfo.CreateNoWindow = $true
+    $processInfo.RedirectStandardOutput = $true
+    $processInfo.RedirectStandardError = $true
     $process = [Diagnostics.Process]::new()
     $process.StartInfo = $processInfo
     try {
         if (-not $process.Start()) { throw 'Cannot start Ninja' }
+        $stdout = $process.StandardOutput.BaseStream.CopyToAsync([Console]::OpenStandardOutput())
+        $stderr = $process.StandardError.BaseStream.CopyToAsync([Console]::OpenStandardError())
         $process.WaitForExit()
         $result = $process.ExitCode
+        if (-not [Threading.Tasks.Task]::WaitAll([Threading.Tasks.Task[]]@($stdout, $stderr), 30000)) {
+            $process.StandardOutput.Dispose()
+            $process.StandardError.Dispose()
+            throw 'Ninja exited but its output streams did not close within 30 seconds'
+        }
     } finally { $process.Dispose() }
     if ($result -eq 0 -and $title -and -not $query -and -not $hadMarker -and $lease) {
         # A no-op direct build may retain its already certified preparation.
