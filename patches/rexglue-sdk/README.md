@@ -1542,3 +1542,20 @@ sem MEMEXPORT terminem. Antes do patch, o Vulkan não terminou em 3 s; depois,
 terminou em 9,9 ms. Os testes só existem onde há o draw retido local
 (`X360N_DRAW_SNAPSHOT`). Capturas byte a byte idênticas antes/depois.
 [Medições e limites](../../docs/reports/performance/g2-xenos-2026-10-22.md).
+
+## 0143 — exp_adjust das texturas no Vulkan
+
+O tradutor SPIR-V aplicava o bias de expoente do resultado de `tfetch` com os
+bits 13:18 da word 4 da fetch constant, que pertencem ao `lod_bias`.
+`exp_adjust` fica nos bits 13:18 da word 3 (`xe_gpu_texture_fetch_t`), e o
+tradutor DXBC já lê dali. No Vulkan, texturas com `exp_adjust` saíam sem o
+fator (4× mais escuras com +2) e LOD bias diferente de zero virava multiplicador.
+No Forza Horizon, isso deixava a cena preta com só a interface visível. O patch
+carrega a word 3 e usa os mesmos bits. Mesmo código em `origin/development`
+(`bd833a2`), sem correção upstream identificada.
+
+`sdkcheck.Vulkan-texture-exp-adjust` reproduz um draw retido do Forza (texturas
+`k_2_10_10_10_AS_16_16_16_16` com `exp_adjust` +2) em Xenos/Vulkan e
+Xenos/D3D12 e exige capturas idênticas. Antes do patch, Vulkan `21c1d95e…`
+contra D3D12 `038f08b7…`; depois, as duas `038f08b7…`. Só existe onde há o
+snapshot local (`X360N_DRAW_SNAPSHOT`).

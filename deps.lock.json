@@ -1973,6 +1973,17 @@
     "src/graphics/vulkan/command_processor.cpp": "9dc51bab07f15cccc5039f0b8e7dc6ffcd83204ba6930166cb835a1ede7f9db3"
   },
   "test": "sdkcheck.Vulkan-draw-registry-lock: 4096 non-memexport Xenos/Vulkan draws retire while the cvar registry is locked; fails before the patch"
+},
+{
+  "file": "patches/rexglue-sdk/0143-vulkan-texture-exp-adjust-word.patch",
+  "sha256": "4cc1b02ec5893ade8286f09211e7f2e1729c1aa610833c8fcb3fe7e9f6ce0dc6",
+  "base_files": {
+    "src/graphics/pipeline/shader/spirv_translator_fetch.cpp": "b4cba3533cb7f5bdf92206493b49ded9e4e781194a23d363ffabd06ebda77e39"
+  },
+  "files": {
+    "src/graphics/pipeline/shader/spirv_translator_fetch.cpp": "495fcda602e816d3d19527fe6c86708d820c8f995e9919d75f9c30147ae3c02b"
+  },
+  "test": "sdkcheck.Vulkan-texture-exp-adjust: the retained draw (textures with fetch exp_adjust +2) captures identically on Xenos/Vulkan and Xenos/D3D12; 4x darker on Vulkan before the patch"
 }
 ]
                     },

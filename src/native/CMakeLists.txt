@@ -66,5 +66,11 @@ if(TARGET Catch2::Catch2WithMain)
         -DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/edram-barriers -DSNAPSHOT=${X360N_DRAW_SNAPSHOT}
         -P ${CMAKE_CURRENT_SOURCE_DIR}/../../tests/native/edram_barriers.cmake)
     set_tests_properties(native.edram-barriers PROPERTIES LABELS project TIMEOUT 150)
+    if(REXGLUE_USE_VULKAN)
+      add_test(NAME sdkcheck.Vulkan-texture-exp-adjust COMMAND ${CMAKE_COMMAND}
+          -DPROBE=$<TARGET_FILE:x360n_native_probe> -DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/api-capture
+          -DSNAPSHOT=${X360N_DRAW_SNAPSHOT} -P ${CMAKE_CURRENT_SOURCE_DIR}/../../tests/native/api_capture_match.cmake)
+      set_tests_properties(sdkcheck.Vulkan-texture-exp-adjust PROPERTIES LABELS project TIMEOUT 150)
+    endif()
   endif()
 endif()
