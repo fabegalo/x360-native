@@ -4,6 +4,26 @@
 #include <memory>
 #include <unordered_map>
 namespace x360n::native {
+// Exact storage mapping of the pinned resolve_*_scaled and
+// texture_load_*_scaled kernels: 8-byte X blocks for 8bpp, 16-byte blocks for
+// 16/32/64/128bpp. Sub-block X precedes subpixel Y in memory. Within each
+// sub-block, pixels are contiguous (they are NOT individually replicated).
+// address is relative to a block-aligned guest base, before endian decoding.
+constexpr uint64_t ScaledResolveByteOffset(uint32_t address, unsigned pixel_log2,
+    uint32_t scale_x, uint32_t scale_y, unsigned sample_x, unsigned sample_y) {
+  const unsigned block = pixel_log2 ? 16u : 8u;
+  const unsigned pixel = 1u << pixel_log2, pixels_per_block = block >> pixel_log2;
+  const uint32_t host_x = ((address & (block-1)) >> pixel_log2) * scale_x + sample_x;
+  return uint64_t(address & ~(block-1)) * scale_x * scale_y +
+      uint64_t((host_x / pixels_per_block) * scale_y + sample_y) * block +
+      (host_x % pixels_per_block) * pixel + (address & (pixel-1));
+}
+static_assert(ScaledResolveByteOffset(4, 2, 2, 2, 0, 0) == 8);
+static_assert(ScaledResolveByteOffset(4, 2, 2, 2, 1, 1) == 28);
+static_assert(ScaledResolveByteOffset(8, 2, 2, 2, 0, 0) == 32);
+static_assert(ScaledResolveByteOffset(1, 0, 3, 2, 2, 1) == 13);
+static_assert(ScaledResolveByteOffset(16, 4, 2, 3, 1, 2) == 176);
+
 // Authoritative subpixels of resolved guest bytes. Pages are sparse and never
 // evicted while valid: discarding them would silently reduce image quality.
 // The ordinary guest mirror always contains the canonical 1x sample.

@@ -183,7 +183,7 @@ void D3D12Render::Resolve(const RegisterFile& r, rex::memory::Memory& memory) {
       source.ViewDimension=D3D12_SRV_DIMENSION_BUFFER; source.Shader4ComponentMapping=D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
       source.Buffer.NumElements=UINT(range*area/4); source.Buffer.Flags=D3D12_BUFFER_SRV_FLAG_RAW;
       device_->CreateShaderResourceView(scaled_buffer.Get(),&source,Cpu(views+1));
-      const uint32_t downsample[]{length,pixel_log2,area,0,(info.copy_dest_extent_start-info.copy_dest_base)*area,info.copy_dest_extent_start};
+      const uint32_t downsample[]{length,pixel_log2,scale_x_,scale_y_,(info.copy_dest_extent_start-info.copy_dest_base)*area,info.copy_dest_extent_start};
       list_->SetComputeRootSignature(downscale_root_.Get()); list_->SetPipelineState(downscale_pipeline_.Get());
       list_->SetComputeRoot32BitConstants(0,6,downsample,0); list_->SetComputeRootDescriptorTable(1,Gpu(views));
       list_->SetComputeRootDescriptorTable(2,Gpu(views+1)); list_->Dispatch((length+255)/256,1,1);

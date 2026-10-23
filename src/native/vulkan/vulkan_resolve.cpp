@@ -141,7 +141,7 @@ void VulkanRender::Resolve(const RegisterFile& regs, rex::memory::Memory& memory
       writes[1].dstSet=canonical_set; writes[1].pBufferInfo=&canonical;
       fn.vkUpdateDescriptorSets(device_.device(),2,writes,0,nullptr);
       UseBuffer(guest_buffer_->handle(),guest_access_,VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,VK_ACCESS_SHADER_WRITE_BIT);
-      const uint32_t downsample[]{length,pixel_log2,area,0,(info.copy_dest_extent_start-info.copy_dest_base)*area,uint32_t(info.copy_dest_extent_start-base)};
+      const uint32_t downsample[]{length,pixel_log2,scale_x_,scale_y_,(info.copy_dest_extent_start-info.copy_dest_base)*area,uint32_t(info.copy_dest_extent_start-base)};
       const VkDescriptorSet downscale_sets[]{source_set,canonical_set};
       fn.vkCmdBindPipeline(commands_,VK_PIPELINE_BIND_POINT_COMPUTE,downscale_pipeline_);
       fn.vkCmdBindDescriptorSets(commands_,VK_PIPELINE_BIND_POINT_COMPUTE,downscale_layout_,0,2,downscale_sets,0,nullptr);

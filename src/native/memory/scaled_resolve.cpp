@@ -31,7 +31,7 @@ uint8_t ScaledResolveCache::Read(uint32_t address, unsigned sample, uint8_t fall
 }
 std::vector<uint8_t> ScaledResolveCache::Hydrate(uint32_t base, uint32_t length,
     unsigned pixel_log2, rex::memory::Memory& memory) const {
-  if (uint64_t(base) + length > GuestMemoryMirror::kSize || pixel_log2 > 4 || (base | length) & ((1u << pixel_log2)-1))
+  if (uint64_t(base) + length > GuestMemoryMirror::kSize || pixel_log2 > 4 || (base | length) & ((pixel_log2 ? 16u : 8u)-1))
     throw std::runtime_error("Native scaled resolve: invalid extent");
   const unsigned pixel = 1u << pixel_log2, area = x_ * y_;
   std::vector<uint8_t> result(size_t(length) * area);
@@ -40,7 +40,7 @@ std::vector<uint8_t> ScaledResolveCache::Hydrate(uint32_t base, uint32_t length,
   for (uint32_t offset = 0; offset < length; offset += pixel)
     for (unsigned sample = 0; sample < area; ++sample)
       for (unsigned b = 0; b < pixel; ++b)
-        result[size_t(offset) * area + sample * pixel + b] = Read(base + offset + b, sample, guest[offset+b]);
+        result[ScaledResolveByteOffset(offset+b,pixel_log2,x_,y_,sample%x_,sample/x_)] = Read(base + offset + b, sample, guest[offset+b]);
   return result;
 }
 ScaledResolveCache::Ticket ScaledResolveCache::Capture(uint32_t start, uint32_t length) const {
@@ -69,8 +69,8 @@ void ScaledResolveCache::Begin(Ticket& ticket) {
 }
 void ScaledResolveCache::Complete(const Ticket& ticket, std::span<const uint8_t> pixels,
     unsigned pixel_log2, rex::memory::Memory& memory) {
-  const unsigned area = x_*y_, pixel = 1u << pixel_log2;
-  if (pixels.size() != size_t(ticket.length)*area) throw std::logic_error("Native scaled readback extent mismatch");
+  const unsigned area = x_*y_;
+  if (((ticket.start | ticket.length) & ((pixel_log2 ? 16u : 8u)-1)) || pixels.size() != size_t(ticket.length)*area) throw std::logic_error("Native scaled readback extent mismatch");
   auto lock = GuestMemoryMirror::Lock();
   for (const auto& pending : ticket.pages) {
     auto& page = *pages_.at(pending.index);
@@ -87,7 +87,7 @@ void ScaledResolveCache::Complete(const Ticket& ticket, std::span<const uint8_t>
     const uint32_t end = std::min(ticket.start+ticket.length, (pending.index+1)*kPage);
     for (unsigned sample=0; sample<area; ++sample) for (uint32_t address=begin; address<end; ++address) {
       const uint32_t relative=address-ticket.start;
-      (*data)[size_t(sample)*kPage+address%kPage] = pixels[size_t(relative/pixel)*pixel*area+sample*pixel+relative%pixel];
+      (*data)[size_t(sample)*kPage+address%kPage] = pixels[ScaledResolveByteOffset(relative,pixel_log2,x_,y_,sample%x_,sample/x_)];
     }
     page.data=std::move(data); page.valid=true;
   }
