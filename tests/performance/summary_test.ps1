@@ -11,7 +11,7 @@ try {
  $rows | Export-Csv -NoTypeInformation $temp
  $r=Get-BenchmarkSummary $temp 0 1 4
  if($r.frames -ne 100 -or [Math]::Abs($r.fps_mean-100) -gt .001 -or [Math]::Abs($r.fps_1pct_low-100) -gt .001){throw 'FPS aggregation failed'}
- if([Math]::Abs($r.frame_ms_p99-10) -gt .001 -or $r.process_cpu_ms_per_frame -ne 20 -or [Math]::Abs($r.process_cpu_percent_machine-50) -gt .001){throw 'CPU/percentile failed'}
+ if([Math]::Abs($r.frame_ms_p50-10) -gt .001 -or [Math]::Abs($r.frame_ms_p99-10) -gt .001 -or $r.process_cpu_ms_per_frame -ne 20 -or [Math]::Abs($r.process_cpu_percent_machine-50) -gt .001){throw 'CPU/percentile failed'}
  if(!$r.window_complete -or $r.counters.draw_calls -ne 100 -or $null -ne $r.gpu_ms_per_frame){throw 'Coverage/counter availability failed'}
  [IO.File]::AppendAllText($temp,'110')
  $r=Get-BenchmarkSummary $temp 0 1 4

@@ -90,6 +90,7 @@ function Get-BenchmarkSummary {
     $sum -ge .95*1000*$DurationSeconds)
   fps_mean=1000*$frames.Count/$sum;fps_1pct_low=1000/$slowMean
   frame_ms_mean=$sum/$frames.Count
+  frame_ms_p50=$sorted[[Math]::Ceiling(.50*$sorted.Count)-1]
   frame_ms_p95=$sorted[[Math]::Ceiling(.95*$sorted.Count)-1]
   frame_ms_p99=$sorted[[Math]::Ceiling(.99*$sorted.Count)-1]
   process_cpu_ms_per_frame=$cpuMean;process_cpu_percent_machine=$cpuPercent

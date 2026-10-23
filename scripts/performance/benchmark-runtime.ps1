@@ -2,18 +2,23 @@
 # Bounded real-title diagnostic. Uses original hash guards, isolated copies of
 # user/cache state, current native artifacts; does not publish preparation receipts.
 param(
- [Parameter(Mandatory)][ValidateSet('dash_17559','castle_crashers','forza_horizon')][string]$Title,
+ [Parameter(Mandatory)][ValidateSet('dash_17559','castle_crashers','forza_horizon','motocross_madness')][string]$Title,
  [Parameter(Mandatory)][ValidatePattern('^[a-zA-Z0-9_-]+$')][string]$Label,
  [string]$ScenarioFile,
  [string]$BinaryDirectory,
  [ValidateSet('Off','On')][string]$Instrumentation='On',
+ [ValidateSet('xenos','native')][string]$Renderer='xenos',
+ [ValidateSet('d3d12','vulkan')][string]$Api='d3d12',
+ # Manual/CUA-controlled sessions do not load the legacy Windows input helper.
+ [switch]$ManualInput,
  [switch]$NoCapture
 )
 $ErrorActionPreference='Stop'
 $root= (Resolve-Path (Join-Path $PSScriptRoot '../..')).Path
 . "$PSScriptRoot/benchmark-summary.ps1"
 . "$PSScriptRoot/benchmark-process-summary.ps1"
-. "$PSScriptRoot/benchmark-window.ps1"
+if($ManualInput -and !$NoCapture){throw 'ManualInput requires NoCapture; capture through the controlling session'}
+if(!$ManualInput){. "$PSScriptRoot/benchmark-window.ps1"}
 function Save-BoundedCapture([int]$ProcessId,[string]$Path) {
  # PrintWindow may block on an unresponsive title. Keep it in an owned helper
  # so a capture cannot defeat the title's bounded execution contract.
@@ -35,6 +40,7 @@ function Save-BoundedCapture([int]$ProcessId,[string]$Path) {
 if(!$ScenarioFile){$ScenarioFile=Join-Path $root 'benchmarks/scenarios.json'}
 $scenario=(Get-Content $ScenarioFile -Raw | ConvertFrom-Json).scenarios.$Title
 if(!$scenario){throw 'Scenario missing'}
+if($ManualInput -and @($scenario.events).Count){throw 'ManualInput requires an event-free scenario'}
 $start=[double]$scenario.start_seconds;$duration=[double]$scenario.duration_seconds
 if(![double]::IsFinite($start) -or ![double]::IsFinite($duration) -or $start -lt 5 -or $duration -lt 5 -or $start+$duration -gt 280){throw 'Scenario plus cleanup must finish within 300 seconds'}
 if(!$NoCapture -and $start -lt 8){throw 'Window capture requires at least 8 seconds of warmup'}
@@ -50,7 +56,7 @@ New-Item -ItemType Directory -Force $out | Out-Null
 if(!$BinaryDirectory){$BinaryDirectory=Join-Path $root ".local/build/titles/$Title"}
 $exe=Join-Path ([IO.Path]::GetFullPath($BinaryDirectory)) "$Title.exe"
 if(!(Test-Path $exe)){throw "Missing $exe"}
-if(Get-Process -Name dash_17559,castle_crashers,forza_horizon -ErrorAction SilentlyContinue){throw 'A reference title is already running; benchmark requires exclusive session'}
+if(Get-Process -Name dash_17559,castle_crashers,forza_horizon,motocross_madness -ErrorAction SilentlyContinue){throw 'A reference title is already running; benchmark requires exclusive session'}
 function Inventory([string]$Directory) {
  @(Get-ChildItem -LiteralPath $Directory -File -Recurse | Sort-Object FullName | ForEach-Object {
   @{path=$_.FullName.Substring($Directory.Length).TrimStart('\','/');bytes=$_.Length;sha256=(Get-FileHash -LiteralPath $_.FullName).Hash.ToLower()}
@@ -74,7 +80,8 @@ try {
 }catch{$hardware['query_error']=$_.Exception.Message}
 $artifacts=@(Get-ChildItem -LiteralPath (Split-Path $exe) -File | Where-Object {$_.Extension -in @('.exe','.dll','.toml')} | ForEach-Object {@{file=$_.Name;sha256=(Get-FileHash $_.FullName).Hash.ToLower()}})
 $csv=Join-Path $out 'frames.csv'
-$argsList=@('--gpu_plugin=xenos','--mnk_mode=true','--log_level=info',"--log_file=$out/rex.log","--game_data_root=$(Join-Path $root $scenario.game_root)","--user_data_root=$user","--cache_root=$user/cache")+@($scenario.arguments)
+if(@($scenario.arguments | Where-Object {$_ -match '^--gpu[_-](plugin|backend)(=|$)'}).Count){throw 'Scenario must not override renderer/API selection'}
+$argsList=@("--gpu_plugin=$Renderer","--gpu_backend=$Api",'--mnk_mode=true','--log_level=info',"--log_file=$out/rex.log","--game_data_root=$(Join-Path $root $scenario.game_root)","--user_data_root=$user","--cache_root=$user/cache")+@($scenario.arguments)
 if(@($scenario.arguments | Where-Object {$_ -match '^--perf_'}).Count){throw 'Scenario must not override instrumentation mode'}
 if($Instrumentation -eq 'On'){$argsList+=@('--perf_counters=true',"--perf_log_csv=$csv")}
 else{
@@ -88,6 +95,9 @@ else{
 $metadata=[ordered]@{schema=1;title=$Title;label=$Label;utc=[DateTime]::UtcNow.ToString('o');head=(& git -C $root rev-parse HEAD).Trim();sdk_head=(& git -C "$root/external/rexglue-sdk" rev-parse HEAD).Trim();lock_sha256=(Get-FileHash "$root/deps.lock.json").Hash.ToLower();scenario=$scenario;scenario_sha256=(Get-FileHash $ScenarioFile).Hash.ToLower();hardware=$hardware;artifacts=$artifacts;arguments=$argsList;seed=$seedInventory;cache_condition='identical existing cache seed, OS filesystem cache uncontrolled';termination=$null;scene_verified=$false;runtime_origin_approx_ms=$null}
 $metadata | ConvertTo-Json -Depth 15 | Set-Content "$out/environment.json" -Encoding utf8
 $metadata['instrumentation']=$Instrumentation.ToLowerInvariant()
+$metadata['renderer']=$Renderer
+$metadata['api']=$Api
+$metadata['input_control']=if($ManualInput){'manual; input timing must be recorded by controlling session'}else{'scripted events'}
 $metadata['measurement_clock']='Runner monotonic clock immediately after Process.Start; same external CPU/RAM window in both modes'
 $metadata['collector']=@('benchmark-runtime.ps1','benchmark-window.ps1','benchmark-summary.ps1','benchmark-process-summary.ps1' | ForEach-Object {
  @{file=$_;sha256=(Get-FileHash (Join-Path $PSScriptRoot $_)).Hash.ToLower()}
@@ -163,7 +173,7 @@ try {
  } else {
   if(Test-Path $csv){throw 'OFF unexpectedly produced a frame CSV'}
   $summary=[ordered]@{schema=1;window_complete=$processSummary.external_window_complete;unavailable=@{};counters=$null}
-  foreach($metric in @('fps_mean','fps_1pct_low','frame_ms_mean','frame_ms_p95','frame_ms_p99','process_cpu_ms_per_frame','runtime_to_first_swap_ms')) {
+  foreach($metric in @('fps_mean','fps_1pct_low','frame_ms_mean','frame_ms_p50','frame_ms_p95','frame_ms_p99','process_cpu_ms_per_frame','runtime_to_first_swap_ms')) {
    $summary[$metric]=$null;$summary.unavailable[$metric]='Instrumentation OFF; no independent frame provider installed'
   }
  }
@@ -178,6 +188,7 @@ try {
  throw
 }
 $summary['title']=$Title;$summary['label']=$Label;$summary['termination']=$metadata.termination
+$summary['renderer']=$Renderer;$summary['api']=$Api
 $summary['scene_verified']=$false
 $summary['log_counts']=@{error=0;warning=0;critical=0}
 $summary['log_count_scope']='Retained rex*.log files only; rotation may discard earlier messages'
