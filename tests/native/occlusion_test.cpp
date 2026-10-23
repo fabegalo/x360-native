@@ -1,5 +1,6 @@
 #include "../../src/native/commands/occlusion_query.h"
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/matchers/catch_matchers.hpp>
 #include <rex/memory/ring_buffer.h>
 #include <rex/graphics/xenos.h>
 namespace rex::graphics {
