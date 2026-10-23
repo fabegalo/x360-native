@@ -55,3 +55,36 @@ if(REXGLUE_USE_VULKAN)
   add_test(NAME sdkcheck.SPIRV-rectangle-replay-phi COMMAND x360n_spirv_interlock_checks)
   set_tests_properties(sdkcheck.SPIRV-rectangle-replay-phi PROPERTIES LABELS project TIMEOUT 30)
 endif()
+
+# patch 0185: EDRAM fixed16 s5.10 pack/unpack in ROV (DXBC) and FSI (SPIR-V).
+if(REXGLUE_USE_VULKAN AND WIN32)
+  set(_fixed16_gpu ${X360_REXGLUE_DIR}/src/graphics)
+  add_executable(x360n_edram_fixed16_checks edram_fixed16.cpp
+      ${_fixed16_gpu}/util/draw.cpp ${_fixed16_gpu}/register_file.cpp ${_fixed16_gpu}/registers.cpp
+      ${_fixed16_gpu}/flags.cpp ${_fixed16_gpu}/format/ucode.cpp
+      ${_fixed16_gpu}/pipeline/render_target/cache.cpp ${_fixed16_gpu}/util/draw_extent_estimator.cpp ${_fixed16_gpu}/pipeline/shader/interpreter.cpp
+      ${_fixed16_gpu}/pipeline/shader/shader.cpp
+      ${_fixed16_gpu}/pipeline/shader/translator.cpp
+      ${_fixed16_gpu}/pipeline/shader/translator_disasm.cpp
+      ${_fixed16_gpu}/pipeline/shader/dxbc.cpp
+      ${_fixed16_gpu}/pipeline/shader/dxbc_translator.cpp
+      ${_fixed16_gpu}/pipeline/shader/dxbc_translator_alu.cpp
+      ${_fixed16_gpu}/pipeline/shader/dxbc_translator_fetch.cpp
+      ${_fixed16_gpu}/pipeline/shader/dxbc_translator_memexport.cpp
+      ${_fixed16_gpu}/pipeline/shader/dxbc_translator_om.cpp
+      ${_fixed16_gpu}/pipeline/shader/spirv_builder.cpp
+      ${_fixed16_gpu}/pipeline/shader/spirv.cpp
+      ${_fixed16_gpu}/pipeline/shader/spirv_translator.cpp
+      ${_fixed16_gpu}/pipeline/shader/spirv_translator_alu.cpp
+      ${_fixed16_gpu}/pipeline/shader/spirv_translator_fetch.cpp
+      ${_fixed16_gpu}/pipeline/shader/spirv_translator_memexport.cpp
+      ${_fixed16_gpu}/pipeline/shader/spirv_translator_rb.cpp
+      ${X360_REXGLUE_DIR}/thirdparty/dxbc/DXBCChecksum.cpp)
+  target_link_libraries(x360n_edram_fixed16_checks PRIVATE rexruntime xxHash::xxhash
+      Vulkan::Headers glslang::SPIRV glslang MachineIndependent GenericCodeGen OSDependent OGLCompiler)
+  target_include_directories(x360n_edram_fixed16_checks PRIVATE
+      ${X360_REXGLUE_DIR} ${X360_REXGLUE_DIR}/thirdparty/renderdoc)
+  x360n_stage_runtime_dlls(x360n_edram_fixed16_checks)
+  add_test(NAME sdkcheck.canary-edram-fixed16 COMMAND x360n_edram_fixed16_checks)
+  set_tests_properties(sdkcheck.canary-edram-fixed16 PROPERTIES LABELS project TIMEOUT 30)
+endif()

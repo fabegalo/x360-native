@@ -1786,3 +1786,19 @@ esses formatos gravam o formato equivalente. Os avisos de memexport/resolve
 `sdkcheck.canary-format-alias`: 3 das 16 verificações falham com o `draw.cpp`
 anterior; as de `GetBaseFormat` falham com o header anterior. As tabelas de host
 não têm teste automático; não houve execução em GPU.
+
+## 0185 — precisão fixed16 da EDRAM do Xenia Canary
+
+Porta 42c2b88: componentes `k_16_16[_16_16]` da EDRAM são s5.10 (10 bits
+fracionários). ROV (DXBC) e FSI (SPIR-V) empacotam `floor(v * 1024 + 0.5)` no
+intervalo [-32, 32767/1024] e desempacotam com 1/1024, sem o antigo limite -1
+do FSI. O clamp PSI usa o mesmo máximo. No Vulkan com render targets de host,
+a escala de exp bias passa pelo `GetColorExpBiasScale` de 0087 (2^bias ×
+1024/32767), e resolves inteiros com bias 10 usam a cópia exata de 0087.
+Versões dos caches de tradução: DXBC `0x20261023`, SPIR-V 17.
+
+`sdkcheck.canary-edram-fixed16` traduz offline um pixel shader real com ROV e
+FSI (escalas 1 e 2): 13 das 19 verificações falham com as fontes anteriores.
+`sdkcheck.fixed16-resolve` e `sdkcheck.SPIRV-*` continuam passando. Os shaders
+de resolve pré-compilados (bytecode sem fontes no SDK) ainda desempacotam com
+32/32767; não houve execução em GPU nem validação SPIRV-Tools.

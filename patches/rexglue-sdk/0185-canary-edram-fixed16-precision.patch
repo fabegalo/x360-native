@@ -1,0 +1,186 @@
+diff --git a/include/rex/graphics/pipeline/shader/dxbc_translator.h b/include/rex/graphics/pipeline/shader/dxbc_translator.h
+--- a/include/rex/graphics/pipeline/shader/dxbc_translator.h
++++ b/include/rex/graphics/pipeline/shader/dxbc_translator.h
+@@ -111,7 +111,7 @@
+     // If anything in this is structure is changed in a way not compatible with
+     // the previous layout, invalidate the pipeline storages by increasing this
+     // version number (0xYYYYMMDD)!
+-    static constexpr uint32_t kVersion = 0x20260226;
++    static constexpr uint32_t kVersion = 0x20261023;
+ 
+ 
+     // Opt-in for backends that make every possible destination resident and
+diff --git a/include/rex/graphics/pipeline/shader/spirv_translator.h b/include/rex/graphics/pipeline/shader/spirv_translator.h
+--- a/include/rex/graphics/pipeline/shader/spirv_translator.h
++++ b/include/rex/graphics/pipeline/shader/spirv_translator.h
+@@ -34,7 +34,7 @@
+     // prototyping stage (easier to do small granular updates with an
+     // incremental counter).
+     // Also invalidate stored translations when emitted control-flow changes.
+-    static constexpr uint32_t kVersion = 16;
++    static constexpr uint32_t kVersion = 17;
+ 
+ 
+     // Opt-in for backends that make every possible destination resident and
+diff --git a/src/graphics/pipeline/render_target/cache.cpp b/src/graphics/pipeline/render_target/cache.cpp
+--- a/src/graphics/pipeline/render_target/cache.cpp
++++ b/src/graphics/pipeline/render_target/cache.cpp
+@@ -93,9 +93,10 @@
+       // k_16_16 (the render target is fixed-point). There's one deviation from
+       // how Direct3D 11.3 functional specification defines SNorm conversion
+       // (NaN should be 0, not the lowest negative number), and that needs to be
+-      // handled separately.
++      // handled separately. -32 is 0x8000 on real hardware, and the largest
++      // value is 32767/1024 (Xenia Canary 42c2b88).
+       clamp_rgb_low = clamp_alpha_low = -32.0f;
+-      clamp_rgb_high = clamp_alpha_high = 32.0f;
++      clamp_rgb_high = clamp_alpha_high = 32767.0f / 1024.0f;
+       if (!(write_mask & 0b0001)) {
+         keep_mask_low |= 0xFFFFu;
+       }
+diff --git a/src/graphics/pipeline/shader/dxbc_translator_om.cpp b/src/graphics/pipeline/shader/dxbc_translator_om.cpp
+--- a/src/graphics/pipeline/shader/dxbc_translator_om.cpp
++++ b/src/graphics/pipeline/shader/dxbc_translator_om.cpp
+@@ -1210,8 +1210,8 @@
+               dxbc::Src::R(packed_temp, 0b01010000 + packed_temp_components * 0b01010101));
+     // Convert from fixed-point.
+     a_.OpIToF(color_components_dest, dxbc::Src::R(color_temp));
+-    // Normalize.
+-    a_.OpMul(color_components_dest, dxbc::Src::R(color_temp), dxbc::Src::LF(32.0f / 32767.0f));
++    // 10 fractional bits (Xenia Canary 42c2b88).
++    a_.OpMul(color_components_dest, dxbc::Src::R(color_temp), dxbc::Src::LF(1.0f / 1024.0f));
+     a_.OpBreak();
+   }
+ 
+@@ -1359,12 +1359,11 @@
+         RenderTargetCache::AddPSIColorFormatFlags(i ? xenos::ColorRenderTargetFormat::k_16_16_16_16
+                                                     : xenos::ColorRenderTargetFormat::k_16_16)));
+     for (uint32_t j = 0; j < (uint32_t(2) << i); ++j) {
+-      // Denormalize and convert to fixed-point, making 0.5 with the proper sign
+-      // in temp2.
+-      a_.OpGE(temp2_dest, dxbc::Src::R(color_temp).Select(j), dxbc::Src::LF(0.0f));
+-      a_.OpMovC(temp2_dest, temp2_src, dxbc::Src::LF(0.5f), dxbc::Src::LF(-0.5f));
+-      a_.OpMAd(temp1_dest, dxbc::Src::R(color_temp).Select(j), dxbc::Src::LF(32767.0f / 32.0f),
+-               temp2_src);
++      // 10 fractional bits, rounded half up (-0.5 packs to 0, -32 to 0x8000),
++      // as on the console (Xenia Canary 42c2b88).
++      a_.OpMAd(temp1_dest, dxbc::Src::R(color_temp).Select(j), dxbc::Src::LF(1024.0f),
++               dxbc::Src::LF(0.5f));
++      a_.OpRoundNI(temp1_dest, temp1_src);
+       dxbc::Dest packed_dest_half(
+           dxbc::Dest::R(packed_temp, 1 << (packed_temp_components + (j >> 1))));
+       // Convert to fixed-point.
+diff --git a/src/graphics/pipeline/shader/spirv_translator_rb.cpp b/src/graphics/pipeline/shader/spirv_translator_rb.cpp
+--- a/src/graphics/pipeline/shader/spirv_translator_rb.cpp
++++ b/src/graphics/pipeline/shader/spirv_translator_rb.cpp
+@@ -2595,12 +2595,13 @@
+     builder_->setBuildPoint(&block_format_16);
+     id_vector_temp_.clear();
+     id_vector_temp_.resize(4, builder_->makeFloatConstant(-32.0f));
+-    spv::Id const_float4_minus_32 = builder_->makeCompositeConstant(type_float4_, id_vector_temp_);
++    spv::Id const_float4_min = builder_->makeCompositeConstant(type_float4_, id_vector_temp_);
+     id_vector_temp_.clear();
+-    id_vector_temp_.resize(4, builder_->makeFloatConstant(32.0f));
+-    spv::Id const_float4_32 = builder_->makeCompositeConstant(type_float4_, id_vector_temp_);
++    // The console range is [-32, 32767/1024] (Xenia Canary 42c2b88).
++    id_vector_temp_.resize(4, builder_->makeFloatConstant(32767.0f / 1024.0f));
++    spv::Id const_float4_max = builder_->makeCompositeConstant(type_float4_, id_vector_temp_);
+     id_vector_temp_.clear();
+-    // NaN to 0, not to -32.
++    // Convert NaN to 0 before clamping.
+     spv::Id color_scaled = builder_->createNoContractionBinOp(
+         spv::OpVectorTimesScalar, type_float4_,
+         builder_->createTriBuiltinCall(
+@@ -2608,18 +2609,13 @@
+             builder_->createTriOp(spv::OpSelect, type_float4_,
+                                   builder_->createUnaryOp(spv::OpIsNan, type_bool4_, color_float4),
+                                   const_float4_0_, color_float4),
+-            const_float4_minus_32, const_float4_32),
+-        builder_->makeFloatConstant(32767.0f / 32.0f));
+-    id_vector_temp_.clear();
+-    id_vector_temp_.resize(4, builder_->makeFloatConstant(-0.5f));
+-    spv::Id unorm_round_offset_negative_float4 =
+-        builder_->makeCompositeConstant(type_float4_, id_vector_temp_);
+-    spv::Id color_offset = builder_->createNoContractionBinOp(
+-        spv::OpFAdd, type_float4_, color_scaled,
+-        builder_->createTriOp(
+-            spv::OpSelect, type_float4_,
+-            builder_->createBinOp(spv::OpFOrdLessThan, type_bool4_, color_scaled, const_float4_0_),
+-            unorm_round_offset_negative_float4, unorm_round_offset_float4));
++            const_float4_min, const_float4_max),
++        builder_->makeFloatConstant(1024.0f));
++    // 10 fractional bits, rounded half up (-0.5 packs to 0, -32 to 0x8000).
++    spv::Id color_offset = builder_->createUnaryBuiltinCall(
++        type_float4_, ext_inst_glsl_std_450_, GLSLstd450Floor,
++        builder_->createNoContractionBinOp(spv::OpFAdd, type_float4_, color_scaled,
++                                           unorm_round_offset_float4));
+     spv::Id color_uint4 = builder_->createUnaryOp(
+         spv::OpBitcast, type_uint4_,
+         builder_->createUnaryOp(spv::OpConvertFToS, type_int4_, color_offset));
+@@ -2892,8 +2888,8 @@
+   std::array<spv::Block*, 2> block_format_16_end;
+   {
+     spv::Id component_width = builder_->makeUintConstant(16);
+-    spv::Id component_scale = builder_->makeFloatConstant(32.0f / 32767.0f);
+-    spv::Id component_min = builder_->makeFloatConstant(-1.0f);
++    // 10 fractional bits. Keep negative values below -1 (Xenia Canary 42c2b88).
++    spv::Id component_scale = builder_->makeFloatConstant(1.0f / 1024.0f);
+     for (uint32_t i = 0; i < 2; ++i) {
+       builder_->setBuildPoint(i ? &block_format_16_16_16_16 : &block_format_16_16);
+       std::array<spv::Id, 2> color_packed_signed;
+@@ -2910,8 +2906,6 @@
+                                       color_packed_signed[j >> 1],
+                                       builder_->makeUintConstant(16 * (j & 1)), component_width)),
+             component_scale);
+-        component = builder_->createBinBuiltinCall(type_float_, ext_inst_glsl_std_450_,
+-                                                   GLSLstd450FMax, component_min, component);
+         unpacked_16[i][j] = component;
+       }
+       builder_->createBranch(&block_format_merge);
+diff --git a/src/graphics/vulkan/command_processor.cpp b/src/graphics/vulkan/command_processor.cpp
+--- a/src/graphics/vulkan/command_processor.cpp
++++ b/src/graphics/vulkan/command_processor.cpp
+@@ -6666,19 +6666,14 @@
+   for (uint32_t i = 0; i < xenos::kMaxColorRenderTargets; ++i) {
+     reg::RB_COLOR_INFO color_info = color_infos[i];
+     // Exponent bias is in bits 20:25 of RB_COLOR_INFO.
+-    int32_t color_exp_bias = color_info.color_exp_bias;
+-    if (render_target_cache_->GetPath() == RenderTargetCache::Path::kHostRenderTargets &&
+-        (color_info.color_format == xenos::ColorRenderTargetFormat::k_16_16 &&
+-             !render_target_cache_->IsFixedRG16TruncatedToMinus1To1() ||
+-         color_info.color_format == xenos::ColorRenderTargetFormat::k_16_16_16_16 &&
+-             !render_target_cache_->IsFixedRGBA16TruncatedToMinus1To1())) {
+-      // Remap from -32...32 to -1...1 by dividing the output values by 32,
+-      // losing blending correctness, but getting the full range.
+-      color_exp_bias -= 5;
+-    }
+-    float color_exp_bias_scale;
+-    *reinterpret_cast<int32_t*>(&color_exp_bias_scale) =
+-        UINT32_C(0x3F800000) + (color_exp_bias << 23);
++    // Full-range SNORM16 keeps the guest's s5.10 integers exactly: the scale is
++    // 2^bias * 1024/32767 (Xenia Canary 42c2b88, as patch 0087 on D3D12).
++    float color_exp_bias_scale = draw_util::GetColorExpBiasScale(
++        color_info.color_format, color_info.color_exp_bias,
++        render_target_cache_->GetPath() == RenderTargetCache::Path::kHostRenderTargets &&
++            (color_info.color_format == xenos::ColorRenderTargetFormat::k_16_16
++                 ? !render_target_cache_->IsFixedRG16TruncatedToMinus1To1()
++                 : !render_target_cache_->IsFixedRGBA16TruncatedToMinus1To1()));
+     dirty |= system_constants_.color_exp_bias[i] != color_exp_bias_scale;
+     system_constants_.color_exp_bias[i] = color_exp_bias_scale;
+     if (edram_fragment_shader_interlock) {
+diff --git a/src/graphics/vulkan/render_target_cache.cpp b/src/graphics/vulkan/render_target_cache.cpp
+--- a/src/graphics/vulkan/render_target_cache.cpp
++++ b/src/graphics/vulkan/render_target_cache.cpp
+@@ -1136,7 +1136,11 @@
+   draw_util::ResolveInfo resolve_info;
+   if (!draw_util::GetResolveInfo(register_file(), memory, draw_resolution_scale_x(),
+                                  draw_resolution_scale_y(), IsFixedRG16TruncatedToMinus1To1(),
+-                                 IsFixedRGBA16TruncatedToMinus1To1(), resolve_info)) {
++                                 IsFixedRGBA16TruncatedToMinus1To1(), resolve_info,
++                                 // As patch 0087 on D3D12: exact s5.10 storage.
++                                 GetPath() == Path::kHostRenderTargets &&
++                                     !IsFixedRG16TruncatedToMinus1To1() &&
++                                     !IsFixedRGBA16TruncatedToMinus1To1())) {
+     return false;
+   }
+ 
