@@ -285,7 +285,7 @@
                                             "sha256":  "60f4dd12ada95717e385d3edf449b5bb3abae69bbc8c7ff05f0bec07bdfa04fb",
                                             "files":  {
                                                           "include/rex/graphics/command_processor.h":  "d5fecaf9e36c803dc89e1e20442ad745f247c770c0f4b4a87a1d0704a5585265",
-                                                          "src/graphics/command_processor.cpp":  "3e1f453f4f4c86510486907ce06fc0530852ca3e68ea67edb1cbf0b6b0a44fd7"
+                                                          "src/graphics/command_processor.cpp":  "e2b42d5012046917f5383f8d0c0eefa9885419246d0c8f085ea178c30cc34792"
                                                       },
                                             "base_files":  {
                                                                "include/rex/graphics/command_processor.h":  "eb02162883373a0d2ce5d93bd6c12d9931ff26dc27df473249bec85a186c7cfe",
@@ -304,7 +304,7 @@
                                                           "include/rex/graphics/graphics_system.h":  "259d7acc4e6d6dc01eb546cf101389bf4cf352b54c78c392cb4a2a595531c53f",
                                                           "src/graphics/graphics_system.cpp":  "7462130450b5eae5069a9b461115eadfa516102ba22ecea0429fd0f419cf5228",
                                                           "include/rex/graphics/command_processor.h":  "d5fecaf9e36c803dc89e1e20442ad745f247c770c0f4b4a87a1d0704a5585265",
-                                                          "src/graphics/command_processor.cpp":  "3e1f453f4f4c86510486907ce06fc0530852ca3e68ea67edb1cbf0b6b0a44fd7",
+                                                          "src/graphics/command_processor.cpp":  "e2b42d5012046917f5383f8d0c0eefa9885419246d0c8f085ea178c30cc34792",
                                                           "src/graphics/d3d12/command_processor.cpp":  "63b05ddb0bbe2dfda47486884e9e5422f6621c06366c30ae68c706c334cb373f",
                                                           "src/graphics/vulkan/command_processor.cpp":  "ecd1c8b00b26e15212ea5a6158b124ec5d85a652406a62118e42665213051509",
                                                           "src/audio/sdl/sdl_audio_driver.cpp":  "b563c3686247199c274e55531429f3657a4426a76536c1ebe048910c13eef690"
@@ -944,7 +944,7 @@
                                                           "CMakeLists.txt":  "92c180ed4a4f8c3c2ded043733b8365c356f16746bd64b34860e1ab7af578ae7",
                                                           "include/rex/perf/counter.h":  "c8820222ffe4c5c639269d949c8be9326a78ab046ad2abf6405ab891835716fc",
                                                           "src/core/perf/counter.cpp":  "df95e01382113fcd10e5698b8f6985f7d14486a834e542be95dfc1e59b611268",
-                                                          "src/graphics/command_processor.cpp":  "3e1f453f4f4c86510486907ce06fc0530852ca3e68ea67edb1cbf0b6b0a44fd7",
+                                                          "src/graphics/command_processor.cpp":  "e2b42d5012046917f5383f8d0c0eefa9885419246d0c8f085ea178c30cc34792",
                                                           "src/graphics/d3d12/pipeline_cache.cpp":  "6c82f52c08125a21492c819be27de453fa5494f607d18e95f3d899e2483c0095",
                                                           "src/system/runtime.cpp":  "5ba8271148a18c512a4c2d17479934c3c4af718254ea0ac925f00822efbbd8c2"
                                                       },
@@ -1002,7 +1002,7 @@
                                             "src/graphics/command_processor.cpp": "98014a045bc4a9403827d0c4de044d7b79b052921f485e0dd8719577d5d0bc91"
                                           },
                                           "files": {
-                                            "src/graphics/command_processor.cpp": "3e1f453f4f4c86510486907ce06fc0530852ca3e68ea67edb1cbf0b6b0a44fd7"
+                                            "src/graphics/command_processor.cpp": "e2b42d5012046917f5383f8d0c0eefa9885419246d0c8f085ea178c30cc34792"
                                           },
                                           "test": "sdkcheck.Native-packet-guard"
                                         },
@@ -1013,7 +1013,7 @@
     "src/graphics/command_processor.cpp": "79658b4f25a195a8f1e7e29bda143d75551e0b2127596eac50babb2538c78c9a"
   },
   "files": {
-    "src/graphics/command_processor.cpp": "3e1f453f4f4c86510486907ce06fc0530852ca3e68ea67edb1cbf0b6b0a44fd7"
+    "src/graphics/command_processor.cpp": "e2b42d5012046917f5383f8d0c0eefa9885419246d0c8f085ea178c30cc34792"
   },
   "test": "sdkcheck.Native-packet-guard; native.packet-payload"
 },
@@ -1054,7 +1054,7 @@
     "include/rex/graphics/command_processor.h": "d5fecaf9e36c803dc89e1e20442ad745f247c770c0f4b4a87a1d0704a5585265",
     "include/rex/graphics/xenos.h": "e146b2e41f3c3e7a380a80546309847ac71d02610d414038ec63f1f1e2b5c3a5",
     "include/rex/kernel/xboxkrnl/video.h": "bf901c7557ea5090c89fda079432a22e374a753b3a16224f8dc3e87369906d38",
-    "src/graphics/command_processor.cpp": "3e1f453f4f4c86510486907ce06fc0530852ca3e68ea67edb1cbf0b6b0a44fd7",
+    "src/graphics/command_processor.cpp": "e2b42d5012046917f5383f8d0c0eefa9885419246d0c8f085ea178c30cc34792",
     "src/kernel/xboxkrnl/xboxkrnl_video.cpp": "276d4ba7897095494ddd1de6182b3327617273ab29943ec520a5ebf6afb9936c"
   },
   "test": "tests/sdkcheck/system_command_buffer_test.cpp"
@@ -1563,7 +1563,7 @@
     "include/rex/graphics/d3d12/command_processor.h": "73c5f16bfe6c5773de1448d7d0f1f172481a057856dcada9cc70ab590fd9bbd9",
     "include/rex/graphics/d3d12/texture_cache.h": "0c88603fa7088d42fea41b00e4db547087adbb849c74d60fdb923bf3ff75a3d4",
     "include/rex/graphics/display_overlay.h": "2841fdc05e4e7c248e9dcfdded2c0edd6503435b22bb1d5af0c8f113a9494cda",
-    "src/graphics/command_processor.cpp": "3e1f453f4f4c86510486907ce06fc0530852ca3e68ea67edb1cbf0b6b0a44fd7",
+    "src/graphics/command_processor.cpp": "e2b42d5012046917f5383f8d0c0eefa9885419246d0c8f085ea178c30cc34792",
     "src/graphics/d3d12/command_processor.cpp": "63b05ddb0bbe2dfda47486884e9e5422f6621c06366c30ae68c706c334cb373f",
     "src/graphics/d3d12/texture_cache.cpp": "6a6669e3e486bd40eb01253d9d6068e4c31d11e669a527de990f38d2c866d8c9",
     "src/graphics/shaders/bytecode/d3d12_5_1/display_overlay_cs.h": "878b1ca19d0b44a2f730a6d8b312f9180f496651c1c3730e8668cace274f2f40",
@@ -1981,7 +1981,7 @@
   },
   "files": {
     "include/rex/graphics/command_processor.h": "d5fecaf9e36c803dc89e1e20442ad745f247c770c0f4b4a87a1d0704a5585265",
-    "src/graphics/command_processor.cpp": "3e1f453f4f4c86510486907ce06fc0530852ca3e68ea67edb1cbf0b6b0a44fd7"
+    "src/graphics/command_processor.cpp": "e2b42d5012046917f5383f8d0c0eefa9885419246d0c8f085ea178c30cc34792"
   },
   "test": "sdkcheck.Native-system-commands: a resolve recorded inside a system command buffer is in guest memory when its completion fence becomes visible; fails before the patch"
 },
@@ -2030,7 +2030,7 @@
     "include/rex/graphics/d3d12/command_processor.h": "dcacfe0cee3cf0e21b3684bd3e54cb263f0cc588b5ec36abb4ac5ea912591d46"
   },
   "files": {
-    "src/graphics/command_processor.cpp": "3e1f453f4f4c86510486907ce06fc0530852ca3e68ea67edb1cbf0b6b0a44fd7",
+    "src/graphics/command_processor.cpp": "e2b42d5012046917f5383f8d0c0eefa9885419246d0c8f085ea178c30cc34792",
     "include/rex/graphics/register_file.h": "446196d919b7830f700ae931a15132e6edc1b843a7bca450d9991442c4c3e3fc",
     "include/rex/graphics/shared_memory.h": "bb7820ada353fec748c0cc201c4099b114dfc44c980b67678f4031c52143ea53",
     "src/graphics/shared_memory.cpp": "42bc20a5d98fd34c1084da3db23d786a7cef0df496c3bb34569dc52b42d0ea0b",
@@ -2068,7 +2068,7 @@
   },
   "files": {
     "include/rex/graphics/command_processor.h": "d5fecaf9e36c803dc89e1e20442ad745f247c770c0f4b4a87a1d0704a5585265",
-    "src/graphics/command_processor.cpp": "3e1f453f4f4c86510486907ce06fc0530852ca3e68ea67edb1cbf0b6b0a44fd7"
+    "src/graphics/command_processor.cpp": "e2b42d5012046917f5383f8d0c0eefa9885419246d0c8f085ea178c30cc34792"
   },
   "test": "native.occlusion: real PM4 VIZ_QUERY and draw predicates consult completed query state, with original Xenos behavior preserved by default hooks"
 },
@@ -2120,7 +2120,7 @@
   },
   "files": {
     "include/rex/graphics/command_processor.h": "d5fecaf9e36c803dc89e1e20442ad745f247c770c0f4b4a87a1d0704a5585265",
-    "src/graphics/command_processor.cpp": "3e1f453f4f4c86510486907ce06fc0530852ca3e68ea67edb1cbf0b6b0a44fd7"
+    "src/graphics/command_processor.cpp": "e2b42d5012046917f5383f8d0c0eefa9885419246d0c8f085ea178c30cc34792"
   },
   "test": "sdkcheck.Native-MEMEXPORT-d3d12 and sdkcheck.Native-MEMEXPORT-vulkan: PM4 CPU-side stores invalidate resident memory aliases after publication; execution deferred by user"
 },
@@ -2500,6 +2500,17 @@
     "src/graphics/pipeline/shader/dxbc_translator_fetch.cpp": "c0fe3c5b2568697f7a2db510a7c2456699766854c05aff1d8bec1e3967900274"
   },
   "test": "sdkcheck.canary-dxbc: real tfetch3D microcode (normalized/unnormalized, with/without Z offset) translated offline to DXBC; each emits the stacked layer clamp max(z, 0.5), min(z, size - 0.5) (Xenia Canary 04085efaa). No GPU run."
+},
+{
+  "file": "patches/rexglue-sdk/0190-canary-wait-ib-pfd-complete.patch",
+  "sha256": "d0ecab84d3337349022e68ee702f616ac98c9c4118a8e9a1b24baa7fcfc91d5d",
+  "base_files": {
+    "src/graphics/command_processor.cpp": "3e1f453f4f4c86510486907ce06fc0530852ca3e68ea67edb1cbf0b6b0a44fd7"
+  },
+  "files": {
+    "src/graphics/command_processor.cpp": "e2b42d5012046917f5383f8d0c0eefa9885419246d0c8f085ea178c30cc34792"
+  },
+  "test": "sdkcheck.canary-pm4: a register write after PM4_WAIT_IB_PFD_COMPLETE in the same command buffer is executed by the real command processor (Xenia Canary 3e9d62ffc). No GPU run."
 }
 ]
                     },

@@ -139,3 +139,17 @@ if(WIN32)
   add_test(NAME sdkcheck.canary-dxbc COMMAND x360n_dxbc_canary_checks)
   set_tests_properties(sdkcheck.canary-dxbc PROPERTIES LABELS project TIMEOUT 30)
 endif()
+
+# patch 0190: Canary PM4_WAIT_IB_PFD_COMPLETE handling.
+add_executable(x360n_canary_pm4_checks ../canary_pm4_probe.cpp
+    ${X360_REXGLUE_DIR}/src/graphics/command_processor.cpp
+    ${X360_REXGLUE_DIR}/src/graphics/graphics_system.cpp
+    ${X360_REXGLUE_DIR}/src/graphics/shared_memory.cpp
+    ${X360_REXGLUE_DIR}/src/graphics/register_file.cpp
+    ${X360_REXGLUE_DIR}/src/graphics/registers.cpp
+    ${X360_REXGLUE_DIR}/src/graphics/flags.cpp)
+target_link_libraries(x360n_canary_pm4_checks PRIVATE rexruntime)
+target_include_directories(x360n_canary_pm4_checks PRIVATE ${X360_REXGLUE_DIR}/thirdparty/renderdoc)
+x360n_stage_runtime_dlls(x360n_canary_pm4_checks)
+add_test(NAME sdkcheck.canary-pm4 COMMAND x360n_canary_pm4_checks)
+set_tests_properties(sdkcheck.canary-pm4 PROPERTIES LABELS project TIMEOUT 30)

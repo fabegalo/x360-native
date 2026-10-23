@@ -1857,3 +1857,15 @@ reproduzido aqui. Par do 2d5b41080 de 0188 no SPIR-V.
 `sdkcheck.canary-dxbc` traduz offline tfetch3D reais nas quatro variantes e
 procura a sequência max/add/min no programa DXBC: as 4 verificações falham com
 a fonte anterior. Sem GPU.
+
+## 0190 — PM4_WAIT_IB_PFD_COMPLETE
+
+Porta 3e9d62ffc: o opcode caía no caso não implementado, que devolve falha e
+descarta o restante do ring buffer primário sempre que um título o envia. Os
+indirect buffers são executados de forma síncrona, então o pacote só avança o
+payload. O guard Native continua recusando o opcode explicitamente
+(`Unsupported`), sem mudança neste patch.
+
+`sdkcheck.canary-pm4`: um registrador escrito depois do pacote, no mesmo
+buffer, é aplicado pelo command processor real; falha com a fonte anterior.
+`sdkcheck.register-memory-coherence` continua passando (813 verificações).
