@@ -1,0 +1,41 @@
+diff --git a/src/graphics/pipeline/shader/spirv_translator_rb.cpp b/src/graphics/pipeline/shader/spirv_translator_rb.cpp
+--- a/src/graphics/pipeline/shader/spirv_translator_rb.cpp
++++ b/src/graphics/pipeline/shader/spirv_translator_rb.cpp
+@@ -800,6 +800,13 @@
+   spv::Block* block_fsi_if_after_depth_stencil_merge = nullptr;
+ 
+   if (edram_fragment_shader_interlock_) {
++    if (!FSI_IsDepthStencilEarly()) {
++      // Every invocation must enter and leave the interlock exactly once,
++      // including invocations with no samples remaining after kill / alpha
++      // tests. Keep EDRAM accesses conditional, but not the critical section.
++      // The early-depth path has already entered it before the guest shader.
++      builder_->createNoResultOp(spv::OpBeginInvocationInterlockEXT);
++    }
+     if (fsi_pixel_potentially_killed) {
+       if (features_.demote_to_helper_invocation) {
+         // Don't do anything related to writing to the EDRAM if the pixel was
+@@ -863,10 +870,6 @@
+         msaa_samples = LoadMsaaSamplesFromFlags();
+       }
+       FSI_LoadEdramOffsets(msaa_samples);
+-      // Begin the critical section on the outermost control flow level so it's
+-      // entered exactly once on any control flow path as required by the SPIR-V
+-      // extension specification.
+-      builder_->createNoResultOp(spv::OpBeginInvocationInterlockEXT);
+       // Do the depth / stencil test.
+       // The sample mask might have been made narrower than the initially loaded
+       // mask by various conditions that discard the whole pixel, as well as by
+diff --git a/include/rex/graphics/pipeline/shader/spirv_translator.h b/include/rex/graphics/pipeline/shader/spirv_translator.h
+--- a/include/rex/graphics/pipeline/shader/spirv_translator.h
++++ b/include/rex/graphics/pipeline/shader/spirv_translator.h
+@@ -33,7 +33,8 @@
+     // TODO(Triang3l): Change to 0xYYYYMMDD once it's out of the rapid
+     // prototyping stage (easier to do small granular updates with an
+     // incremental counter).
+-    static constexpr uint32_t kVersion = 12;
++    // Also invalidate stored translations when emitted control-flow changes.
++    static constexpr uint32_t kVersion = 13;
+ 
+ 
+     // Opt-in for backends that make every possible destination resident and

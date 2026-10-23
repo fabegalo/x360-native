@@ -1,0 +1,124 @@
+diff --git a/src/graphics/pipeline/shader/spirv_translator.cpp b/src/graphics/pipeline/shader/spirv_translator.cpp
+--- a/src/graphics/pipeline/shader/spirv_translator.cpp
++++ b/src/graphics/pipeline/shader/spirv_translator.cpp
+@@ -15,6 +15,7 @@
+ #include <memory>
+ #include <string>
+ #include <utility>
++#include <unordered_set>
+ #include <vector>
+ 
+ #include <SPIRV/GLSL.std.450.h>
+@@ -1125,6 +1126,30 @@
+     function_main_->addBlock(main_loop_continue_);
+     builder_->setBuildPoint(main_loop_continue_);
+     if (has_main_switch) {
++      // Instructions after an unconditional jump may have been translated in
++      // unreachable blocks. glslang omits those blocks when serializing, so
++      // their edges must not become operands of the surviving PC Phi.
++      std::unordered_set<spv::Id> reachable_blocks;
++      std::vector<spv::Block*> pending_blocks{function_main_->getEntryBlock()};
++      while (!pending_blocks.empty()) {
++        spv::Block* block = pending_blocks.back();
++        pending_blocks.pop_back();
++        if (!reachable_blocks.insert(block->getId()).second) {
++          continue;
++        }
++        const auto& successors = block->getSuccessors();
++        pending_blocks.insert(pending_blocks.end(), successors.begin(), successors.end());
++      }
++      size_t reachable_operand_count = 0;
++      for (size_t i = 0; i < main_switch_next_pc_phi_operands_.size(); i += 2) {
++        if (reachable_blocks.contains(main_switch_next_pc_phi_operands_[i + 1])) {
++          main_switch_next_pc_phi_operands_[reachable_operand_count++] =
++              main_switch_next_pc_phi_operands_[i];
++          main_switch_next_pc_phi_operands_[reachable_operand_count++] =
++              main_switch_next_pc_phi_operands_[i + 1];
++        }
++      }
++      main_switch_next_pc_phi_operands_.resize(reachable_operand_count);
+       // OpPhi, if added, must be the first in the block.
+       // If labels were added, but not jumps (for example, due to the call
+       // instruction not being implemented as of October 18, 2020), send an
+@@ -1254,6 +1279,10 @@
+                               int(texture_binding_count + i));
+     }
+   }
++
++  // The serializer omits unreachable instructions. Remove their decorations
++  // too, so metadata never references definitions absent from the module.
++  builder_->RemoveUnreachableDecorations();
+ 
+   // TODO(Triang3l): Avoid copy?
+   std::vector<unsigned int> module_uints;
+diff --git a/include/rex/graphics/pipeline/shader/spirv_translator.h b/include/rex/graphics/pipeline/shader/spirv_translator.h
+--- a/include/rex/graphics/pipeline/shader/spirv_translator.h
++++ b/include/rex/graphics/pipeline/shader/spirv_translator.h
+@@ -34,7 +34,7 @@
+     // prototyping stage (easier to do small granular updates with an
+     // incremental counter).
+     // Also invalidate stored translations when emitted control-flow changes.
+-    static constexpr uint32_t kVersion = 15;
++    static constexpr uint32_t kVersion = 16;
+ 
+ 
+     // Opt-in for backends that make every possible destination resident and
+diff --git a/include/rex/graphics/pipeline/shader/spirv_builder.h b/include/rex/graphics/pipeline/shader/spirv_builder.h
+--- a/include/rex/graphics/pipeline/shader/spirv_builder.h
++++ b/include/rex/graphics/pipeline/shader/spirv_builder.h
+@@ -27,6 +27,10 @@
+  public:
+   SpirvBuilder(unsigned int spv_version, unsigned int user_number, spv::SpvBuildLogger* logger)
+       : spv::Builder(spv_version, user_number, logger) {}
++
++  // Remove metadata only for blocks omitted by glslang serialization. Keep
++  // structural continue / merge definitions even if they are unreachable.
++  void RemoveUnreachableDecorations();
+ 
+   // Make public rather than protected.
+   using spv::Builder::createSelectionMerge;
+diff --git a/src/graphics/pipeline/shader/spirv_builder.cpp b/src/graphics/pipeline/shader/spirv_builder.cpp
+--- a/src/graphics/pipeline/shader/spirv_builder.cpp
++++ b/src/graphics/pipeline/shader/spirv_builder.cpp
+@@ -9,7 +9,9 @@
+  * @modified    Tom Clay, 2026 - Adapted for ReXGlue runtime
+  */
+ 
++#include <algorithm>
+ #include <memory>
++#include <unordered_set>
+ #include <utility>
+ #include <vector>
+ 
+@@ -17,6 +19,31 @@
+ #include <rex/graphics/pipeline/shader/spirv_builder.h>
+ 
+ namespace rex::graphics {
++
++void SpirvBuilder::RemoveUnreachableDecorations() {
++  std::unordered_set<spv::Id> omitted_definitions;
++  for (const auto* function : module.getFunctions()) {
++    std::unordered_set<const spv::Block*> emitted_blocks;
++    spv::inReadableOrder(function->getEntryBlock(),
++        [&emitted_blocks](spv::Block* block, spv::ReachReason, spv::Block*) {
++          emitted_blocks.insert(block);
++        });
++    for (const auto* block : function->getBlocks()) {
++      if (emitted_blocks.contains(block)) {
++        continue;
++      }
++      for (const auto& instruction : block->getInstructions()) {
++        if (instruction->getResultId()) {
++          omitted_definitions.insert(instruction->getResultId());
++        }
++      }
++    }
++  }
++  decorations.erase(std::remove_if(decorations.begin(), decorations.end(),
++      [&omitted_definitions](const std::unique_ptr<spv::Instruction>& decoration) {
++        return omitted_definitions.contains(decoration->getIdOperand(0));
++      }), decorations.end());
++}
+ 
+ spv::Id SpirvBuilder::createQuadOp(spv::Op op_code, spv::Id type_id, spv::Id operand1,
+                                    spv::Id operand2, spv::Id operand3, spv::Id operand4) {

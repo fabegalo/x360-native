@@ -29,3 +29,29 @@ target_link_libraries(x360n_frame_timing_checks PRIVATE rexruntime)
 x360n_stage_runtime_dlls(x360n_frame_timing_checks)
 add_test(NAME sdkcheck.Native-FrameTiming COMMAND x360n_frame_timing_checks)
 set_tests_properties(sdkcheck.Native-FrameTiming PROPERTIES LABELS project TIMEOUT 10)
+
+if(REXGLUE_USE_VULKAN)
+  set(_spirv_gpu ${X360_REXGLUE_DIR}/src/graphics)
+  add_executable(x360n_spirv_interlock_checks spirv_interlock.cpp spirv_rectangle.cpp
+      ${_spirv_gpu}/util/draw.cpp ${_spirv_gpu}/registers.cpp
+      ${_spirv_gpu}/flags.cpp ${_spirv_gpu}/format/ucode.cpp
+      ${_spirv_gpu}/pipeline/shader/shader.cpp
+      ${_spirv_gpu}/pipeline/shader/translator.cpp
+      ${_spirv_gpu}/pipeline/shader/translator_disasm.cpp
+      ${_spirv_gpu}/pipeline/shader/spirv_builder.cpp
+      ${_spirv_gpu}/pipeline/shader/spirv.cpp
+      ${_spirv_gpu}/pipeline/shader/spirv_translator.cpp
+      ${_spirv_gpu}/pipeline/shader/spirv_translator_alu.cpp
+      ${_spirv_gpu}/pipeline/shader/spirv_translator_fetch.cpp
+      ${_spirv_gpu}/pipeline/shader/spirv_translator_memexport.cpp
+      ${_spirv_gpu}/pipeline/shader/spirv_translator_rb.cpp)
+  target_link_libraries(x360n_spirv_interlock_checks PRIVATE rexruntime xxHash::xxhash
+      Vulkan::Headers glslang::SPIRV glslang MachineIndependent GenericCodeGen OSDependent OGLCompiler)
+  target_include_directories(x360n_spirv_interlock_checks PRIVATE
+      ${X360_REXGLUE_DIR}/thirdparty/renderdoc)
+  x360n_stage_runtime_dlls(x360n_spirv_interlock_checks)
+  add_test(NAME sdkcheck.SPIRV-interlock-control-flow COMMAND x360n_spirv_interlock_checks)
+  set_tests_properties(sdkcheck.SPIRV-interlock-control-flow PROPERTIES LABELS project TIMEOUT 30)
+  add_test(NAME sdkcheck.SPIRV-rectangle-replay-phi COMMAND x360n_spirv_interlock_checks)
+  set_tests_properties(sdkcheck.SPIRV-rectangle-replay-phi PROPERTIES LABELS project TIMEOUT 30)
+endif()

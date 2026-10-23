@@ -2092,9 +2092,9 @@
     "src/graphics/pipeline/shader/spirv_translator_rb.cpp": "a4aaf9e6b8ab5fdce92ab19e1aa228cd439375f302739bc61c89d481d5699a24"
   },
   "files": {
-    "include/rex/graphics/pipeline/shader/spirv_translator.h": "229d0230bec422d9ab4383a2beec4a57d9b8277b07c525a73b2adf6ba5addacd",
-    "src/graphics/pipeline/shader/spirv_translator.cpp": "8d244acce6d2f485e12445be04f87a0ba5059a74e85c08c1b8975cd5259a86cc",
-    "src/graphics/pipeline/shader/spirv_translator_rb.cpp": "8928ed9c4c8baa09dcd59a81b4a6b04d4265d04a1cdc3507b6be5f19ca03cc85"
+    "include/rex/graphics/pipeline/shader/spirv_translator.h": "7eda5bc5724718b92026ee780042b5b17d578267224812c063277685a7446a60",
+    "src/graphics/pipeline/shader/spirv_translator.cpp": "3375bd858299205fdc11a368f4dfe070d48dffe9dd718f352e7776c046d09775",
+    "src/graphics/pipeline/shader/spirv_translator_rb.cpp": "1ca697ce741a1996e49955d398ec140472f6dc19f56f8c0874784767b94e238c"
   },
   "test": "sdkcheck.Native-FSI-sample-counts: shared PM4 occlusion probe with Native Vulkan FSI sample counters; execution deferred by user"
 },
@@ -2136,8 +2136,8 @@
   "files": {
     "include/rex/graphics/pipeline/shader/dxbc_translator.h": "df2f90f58715b26e9f31455222f8ffdf734227e82350a6fd1fd2887b9ed4abc9",
     "src/graphics/pipeline/shader/dxbc_translator.cpp": "53bd365efdb58ccc01cbb6e882f2573aec2404e031bd354c89a49d5ab6aa9673",
-    "include/rex/graphics/pipeline/shader/spirv_translator.h": "229d0230bec422d9ab4383a2beec4a57d9b8277b07c525a73b2adf6ba5addacd",
-    "src/graphics/pipeline/shader/spirv_translator.cpp": "8d244acce6d2f485e12445be04f87a0ba5059a74e85c08c1b8975cd5259a86cc"
+    "include/rex/graphics/pipeline/shader/spirv_translator.h": "7eda5bc5724718b92026ee780042b5b17d578267224812c063277685a7446a60",
+    "src/graphics/pipeline/shader/spirv_translator.cpp": "3375bd858299205fdc11a368f4dfe070d48dffe9dd718f352e7776c046d09775"
   },
   "test": "sdkcheck.Native-MEMEXPORT-d3d12 and sdkcheck.Native-MEMEXPORT-vulkan: dynamic export addresses retain shader stores with complete residency and readback; execution deferred by user"
 },
@@ -2241,8 +2241,8 @@
   "files": {
     "include/rex/graphics/pipeline/shader/dxbc_translator.h": "df2f90f58715b26e9f31455222f8ffdf734227e82350a6fd1fd2887b9ed4abc9",
     "src/graphics/pipeline/shader/dxbc_translator.cpp": "53bd365efdb58ccc01cbb6e882f2573aec2404e031bd354c89a49d5ab6aa9673",
-    "include/rex/graphics/pipeline/shader/spirv_translator.h": "229d0230bec422d9ab4383a2beec4a57d9b8277b07c525a73b2adf6ba5addacd",
-    "src/graphics/pipeline/shader/spirv_translator.cpp": "8d244acce6d2f485e12445be04f87a0ba5059a74e85c08c1b8975cd5259a86cc"
+    "include/rex/graphics/pipeline/shader/spirv_translator.h": "7eda5bc5724718b92026ee780042b5b17d578267224812c063277685a7446a60",
+    "src/graphics/pipeline/shader/spirv_translator.cpp": "3375bd858299205fdc11a368f4dfe070d48dffe9dd718f352e7776c046d09775"
   },
   "test": "sdkcheck.Native-raster-state: NoPerspective bit62 opt-in in translated DXBC/SPIRV; execution deferred by user"
 },
@@ -2286,13 +2286,13 @@
   },
   "files": {
     "include/rex/graphics/pipeline/shader/dxbc_translator.h": "df2f90f58715b26e9f31455222f8ffdf734227e82350a6fd1fd2887b9ed4abc9",
-    "include/rex/graphics/pipeline/shader/spirv_translator.h": "229d0230bec422d9ab4383a2beec4a57d9b8277b07c525a73b2adf6ba5addacd",
+    "include/rex/graphics/pipeline/shader/spirv_translator.h": "7eda5bc5724718b92026ee780042b5b17d578267224812c063277685a7446a60",
     "src/graphics/pipeline/shader/dxbc_translator.cpp": "53bd365efdb58ccc01cbb6e882f2573aec2404e031bd354c89a49d5ab6aa9673",
-    "src/graphics/pipeline/shader/spirv_translator.cpp": "8d244acce6d2f485e12445be04f87a0ba5059a74e85c08c1b8975cd5259a86cc",
+    "src/graphics/pipeline/shader/spirv_translator.cpp": "3375bd858299205fdc11a368f4dfe070d48dffe9dd718f352e7776c046d09775",
     "src/graphics/pipeline/shader/dxbc_translator_memexport.cpp": "1701313eebf0e3b6dcc0c4e129763c189c68d960f99d15fbcda0887f351fab6a",
     "src/graphics/pipeline/shader/spirv_translator_memexport.cpp": "1dc5cdb991d5b7331d1359f9035b75f344b76898e47b5d02b133dd65dc87fa65",
     "src/graphics/pipeline/shader/dxbc_translator_om.cpp": "44b3bbc93458877ea9a60c09aba988b364fd4383418f9702effef9796212d029",
-    "src/graphics/pipeline/shader/spirv_translator_rb.cpp": "8928ed9c4c8baa09dcd59a81b4a6b04d4265d04a1cdc3507b6be5f19ca03cc85"
+    "src/graphics/pipeline/shader/spirv_translator_rb.cpp": "1ca697ce741a1996e49955d398ec140472f6dc19f56f8c0874784767b94e238c"
   },
   "test": "Native VIZ_QUERY uses read-only depth prepass, boolean atomics, and suppresses duplicated vertex memory stores; normal shaders unchanged. Runtime validation deferred by maintainer."
 },
@@ -2330,9 +2330,65 @@
   "files": {
     "include/rex/graphics/pipeline/shader/dxbc_translator.h": "df2f90f58715b26e9f31455222f8ffdf734227e82350a6fd1fd2887b9ed4abc9",
     "src/graphics/pipeline/shader/dxbc_translator_om.cpp": "44b3bbc93458877ea9a60c09aba988b364fd4383418f9702effef9796212d029",
-    "src/graphics/pipeline/shader/spirv_translator_rb.cpp": "8928ed9c4c8baa09dcd59a81b4a6b04d4265d04a1cdc3507b6be5f19ca03cc85"
+    "src/graphics/pipeline/shader/spirv_translator_rb.cpp": "1ca697ce741a1996e49955d398ec140472f6dc19f56f8c0874784767b94e238c"
   },
   "test": "ZPD uses canonical subpixel (0,0) with scaled EDRAM; visibility OR sees all host subpixels; 1x emits the original instructions. Runtime validation deferred by maintainer."
+},
+{
+  "file": "patches/rexglue-sdk/0179-spirv-late-interlock-control-flow.patch",
+  "sha256": "041d79c3ff83dd5aac2e3787d33a663377f1963057eb54f2eb6ccd2885e375d5",
+  "base_files": {
+    "src/graphics/pipeline/shader/spirv_translator_rb.cpp": "8928ed9c4c8baa09dcd59a81b4a6b04d4265d04a1cdc3507b6be5f19ca03cc85",
+    "include/rex/graphics/pipeline/shader/spirv_translator.h": "229d0230bec422d9ab4383a2beec4a57d9b8277b07c525a73b2adf6ba5addacd"
+  },
+  "files": {
+    "src/graphics/pipeline/shader/spirv_translator_rb.cpp": "1ca697ce741a1996e49955d398ec140472f6dc19f56f8c0874784767b94e238c",
+    "include/rex/graphics/pipeline/shader/spirv_translator.h": "7eda5bc5724718b92026ee780042b5b17d578267224812c063277685a7446a60"
+  },
+  "test": "sdkcheck.SPIRV-interlock-control-flow: real translated early/late-depth, kill/alpha, helper-demotion, ZPD/visibility and scaled variants; all reachable CFG paths enter and leave exactly once. Offline only; no crash attribution."
+},
+{
+  "file": "patches/rexglue-sdk/0180-spirv-rectangle-replay-phi.patch",
+  "sha256": "e92f42f9b2a2e9ead10e3417ed3c3b3247b6de27a86c44b8446e8241ceed432b",
+  "base_files": {
+    "src/graphics/pipeline/shader/spirv_translator.cpp": "8d244acce6d2f485e12445be04f87a0ba5059a74e85c08c1b8975cd5259a86cc",
+    "include/rex/graphics/pipeline/shader/spirv_translator.h": "c5b036f9651167e5a4dfa815a539c5d69ce177ccd712ba4373fa62138faeced3"
+  },
+  "files": {
+    "src/graphics/pipeline/shader/spirv_translator.cpp": "3375bd858299205fdc11a368f4dfe070d48dffe9dd718f352e7776c046d09775",
+    "include/rex/graphics/pipeline/shader/spirv_translator.h": "7eda5bc5724718b92026ee780042b5b17d578267224812c063277685a7446a60"
+  },
+  "test": "sdkcheck.SPIRV-rectangle-replay-phi: synthetic conditional/unconditional jumps with rectangle replay and interpolator masks; every OpPhi covers all CFG predecessors and replay resets PC to zero. Captured shader retranslation also passes SPIRV-Tools offline validation."
+},
+{
+  "file": "patches/rexglue-sdk/0181-spirv-alpha-sample-mask-merges.patch",
+  "sha256": "98500be5c1bbad8113e58134d9c58de3b99fcac9675215dceb05002f66113086",
+  "base_files": {
+    "src/graphics/pipeline/shader/spirv_translator_rb.cpp": "45295c575d4338ebc540c69b72706ecfa789784c4b4039f8368714b2f2e50c56",
+    "include/rex/graphics/pipeline/shader/spirv_translator.h": "ed8a74c1742cdd368cc4e490734e4f02ee7dd208321407942eb175390f8d05ab"
+  },
+  "files": {
+    "src/graphics/pipeline/shader/spirv_translator_rb.cpp": "1ca697ce741a1996e49955d398ec140472f6dc19f56f8c0874784767b94e238c",
+    "include/rex/graphics/pipeline/shader/spirv_translator.h": "7eda5bc5724718b92026ee780042b5b17d578267224812c063277685a7446a60"
+  },
+  "test": "sdkcheck.SPIRV-interlock-control-flow (60 real translated variants) plus SPIRV-Tools Vulkan 1.4 validation: all mask definitions dominate uses across alpha ALWAYS/A2C disabled; A2C result retained for demote OFF and ON."
+},
+{
+  "file": "patches/rexglue-sdk/0182-spirv-unreachable-jump-phi.patch",
+  "sha256": "25fff6739d2ec08494d12be3fa71265b3901956037b76b578229e924f317888b",
+  "base_files": {
+    "src/graphics/pipeline/shader/spirv_translator.cpp": "9c0f1e26341dee5cdc8e7a2a4f742b54169ade05eb2a52e1795c0584e5454d61",
+    "include/rex/graphics/pipeline/shader/spirv_translator.h": "989df90bcdc57dbd0054d0dfe1089539fca206dc0444793eb7e77bf7180adaea",
+    "include/rex/graphics/pipeline/shader/spirv_builder.h": "85caf6ac81b6bbd47902ec49d35a40e2cbcbf510a9dc67af0c9598936d275493",
+    "src/graphics/pipeline/shader/spirv_builder.cpp": "12a34b805048beee5162de9cdca7f6f4dc3e915eb2dc9ac5849db8ead122526a"
+  },
+  "files": {
+    "src/graphics/pipeline/shader/spirv_translator.cpp": "3375bd858299205fdc11a368f4dfe070d48dffe9dd718f352e7776c046d09775",
+    "include/rex/graphics/pipeline/shader/spirv_translator.h": "7eda5bc5724718b92026ee780042b5b17d578267224812c063277685a7446a60",
+    "include/rex/graphics/pipeline/shader/spirv_builder.h": "717f044744ece6bee5f48a9e356e6d69629188538799b61271d7abcf0efa1583",
+    "src/graphics/pipeline/shader/spirv_builder.cpp": "610d63e4082066a2f74449576ab2dff7453e90f47e752c23baa9d972a0f9c3ac"
+  },
+  "test": "sdkcheck.SPIRV-rectangle-replay-phi: ordinary/rectangle shaders, conditional/predicated/unconditional/unreachable jumps, masks0/1/7; matches Phi predecessors, preserves zero-incoming structural continuation and removes decorations only for blocks omitted by the serializer."
 }
 ]
                     },

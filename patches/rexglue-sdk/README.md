@@ -1697,3 +1697,68 @@ de resolves e só afeta escala superior a 1, fora do caminho Xenos Fidelity orig
 
 Sondas CPU de hazards e coerência de memória foram preparadas. Execução das
 sondas, validação GPU e medição de desempenho são etapas separadas da compilação.
+
+## 0179 — interlock SPIR-V em caminhos de descarte com depth tardio
+
+O tradutor FSI começava o interlock dentro da condição de amostras sobreviventes,
+mas o encerrava fora dela. Um pixel shader que exportasse depth ou MEMEXPORT e
+tivesse kill/alpha test podia executar `EndInvocationInterlockEXT` sem o `Begin`
+correspondente. O patch move somente o início da seção tardia para antes da
+condição; os acessos EDRAM continuam condicionais e o caminho early permanece
+intacto. A versão de traduções/pipelines passa a 13 para invalidar caches antigos.
+
+Correção própria conforme a regra de execução exatamente uma vez e em ordem da
+[SPV_EXT_fragment_shader_interlock](https://github.khronos.org/SPIRV-Registry/extensions/EXT/SPV_EXT_fragment_shader_interlock.html).
+`sdkcheck.SPIRV-interlock-control-flow` traduz microcódigo sintético e percorre o
+CFG emitido, cobrindo early/late, kill/alpha, demote, ZPD/visibilidade e escala,
+sem criar dispositivo ou executar jogo. O PS capturado na queda NVIDIA de
+23/10 às 01:12 usa early-FSI e passa esse contrato; este patch não é apresentado
+como a causa ou a correção daquela queda.
+
+## 0180 — reinício do programa em cada vértice de retângulo
+
+O tradutor construía o `OpPhi` do program counter antes de acrescentar o caminho
+que repete o shader para o próximo vértice do retângulo. Shaders com saltos
+produziam um predecessor sem o respectivo operando no `Phi`. O patch adia a
+emissão da continuação até todas as arestas existirem, preservando o reinício
+em PC zero e os destinos dos saltos. Versão do cache: 14.
+
+A captura da queda Native Vulkan de 23/10 às 01:12 identificou esse defeito no
+VS `EAC91CBA481D5FF8`, modificação `0000000A00000007`, durante a criação do PSO10.
+SPIRV-Tools recusou o original (dois operandos para três predecessores); as 15
+capturas retraduzidas, incluindo esse VS, passaram após 0180. Isso comprova a
+correção estrutural do shader; a confirmação em jogo é uma etapa separada.
+
+## 0181 — máscara de amostras após alpha-test e alpha-to-coverage
+
+O caminho FSI sem helper demotion usava máscaras definidas apenas dentro das
+condições de alpha-test e A2C após sair delas. Com comparação ALWAYS ou A2C
+desligado, as definições não dominavam os usos, gerando SPIR-V inválido. Dois
+`OpPhi` preservam a máscara anterior nos caminhos que pulam essas operações.
+O merge da condição de escrita em RT0 passa também a conservar o resultado de
+A2C quando demotion está disponível; antes, esse resultado era calculado e
+descartado, perdendo o descarte parcial de amostras. Não altera o caminho sem
+FSI nem os shaders depth-only. Versão do cache de traduções: 15.
+
+Correção própria, verificada com `sdkcheck.SPIRV-interlock-control-flow` e
+SPIRV-Tools Vulkan 1.4. A execução CPU isolada com as fontes candidatas 0181 e
+0182 passou 60 variantes FSI e 45 casos de controle de fluxo/capturas; os 105
+módulos resultantes passaram no validador. Evidências locais:
+`.local/g3/spirv-candidates-v2/{translation,validation}.log` e `inputs.json`.
+As 24 falhas anteriores de dominância ocorreram com demotion desligado.
+Esses resultados não são validação de gameplay nem medição de desempenho.
+
+## 0182 — referências de blocos inalcançáveis no SPIR-V
+
+Instruções após um salto incondicional podem ser traduzidas em blocos que o
+serializador do glslang omite. O patch exclui esses predecessores do `Phi` do
+program counter e remove decorações que referenciavam suas definições omitidas.
+O tratamento preserva os blocos estruturais de continuação e merge, inclusive
+quando nenhuma instrução guest alcança a continuação. Versão do cache: 16.
+
+`sdkcheck.SPIRV-rectangle-replay-phi` cobre shaders comuns e retângulos com
+saltos condicionais, predicados, incondicionais e inalcançáveis, usando máscaras
+de interpolação 0/1/7. O caso de continuação sem entradas impede que a limpeza
+apague o valor ainda referenciado pelo cabeçalho do loop. As 30 variantes e
+15 capturas, junto às 60 variantes FSI de 0181, passaram nos 105 módulos da
+validação CPU isolada registrada acima; não executa dispositivo gráfico.

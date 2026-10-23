@@ -1,0 +1,82 @@
+diff --git a/src/graphics/pipeline/shader/spirv_translator.cpp b/src/graphics/pipeline/shader/spirv_translator.cpp
+--- a/src/graphics/pipeline/shader/spirv_translator.cpp
++++ b/src/graphics/pipeline/shader/spirv_translator.cpp
+@@ -679,30 +679,6 @@
+       builder_->createBranch(main_loop_merge_);
+     }
+ 
+-    // Main loop continuation - choose the program counter based on the path
+-    // taken (-1 if not from a jump as a safe fallback, which would result in
+-    // not hitting any switch case and reaching the final break in the body).
+-    function_main_->addBlock(main_loop_continue_);
+-    builder_->setBuildPoint(main_loop_continue_);
+-    if (has_main_switch) {
+-      // OpPhi, if added, must be the first in the block.
+-      // If labels were added, but not jumps (for example, due to the call
+-      // instruction not being implemented as of October 18, 2020), send an
+-      // impossible program counter value (-1) to the OpPhi at the next
+-      // iteration.
+-      if (main_switch_next_pc_phi_operands_.empty()) {
+-        main_switch_next_pc_phi_operands_.push_back(builder_->makeIntConstant(-1));
+-      }
+-      std::unique_ptr<spv::Instruction> main_loop_pc_next_op = std::make_unique<spv::Instruction>(
+-          main_loop_pc_next_, type_int_,
+-          main_switch_next_pc_phi_operands_.size() >= 2 ? spv::OpPhi : spv::OpCopyObject);
+-      for (spv::Id operand : main_switch_next_pc_phi_operands_) {
+-        main_loop_pc_next_op->addIdOperand(operand);
+-      }
+-      builder_->getBuildPoint()->addInstruction(std::move(main_loop_pc_next_op));
+-    }
+-    builder_->createBranch(main_loop_header_);
+-
+     // Add the main loop merge block and go back to the function.
+     function_main_->addBlock(main_loop_merge_);
+     builder_->setBuildPoint(main_loop_merge_);
+@@ -1139,6 +1115,35 @@
+       function_main_->addBlock(main_loop_exit_);
+       builder_->setBuildPoint(main_loop_exit_);
+     }
++
++    // Rectangle replay adds another continuation predecessor with PC zero.
++    // Emit its Phi only after all guest jumps and replay edges are known.
++    spv::Block* main_after_loop = builder_->getBuildPoint();
++    // Main loop continuation - choose the program counter based on the path
++    // taken (-1 if not from a jump as a safe fallback, which would result in
++    // not hitting any switch case and reaching the final break in the body).
++    function_main_->addBlock(main_loop_continue_);
++    builder_->setBuildPoint(main_loop_continue_);
++    if (has_main_switch) {
++      // OpPhi, if added, must be the first in the block.
++      // If labels were added, but not jumps (for example, due to the call
++      // instruction not being implemented as of October 18, 2020), send an
++      // impossible program counter value (-1) to the OpPhi at the next
++      // iteration.
++      if (main_switch_next_pc_phi_operands_.empty()) {
++        main_switch_next_pc_phi_operands_.push_back(builder_->makeIntConstant(-1));
++      }
++      std::unique_ptr<spv::Instruction> main_loop_pc_next_op = std::make_unique<spv::Instruction>(
++          main_loop_pc_next_, type_int_,
++          main_switch_next_pc_phi_operands_.size() >= 2 ? spv::OpPhi : spv::OpCopyObject);
++      for (spv::Id operand : main_switch_next_pc_phi_operands_) {
++        main_loop_pc_next_op->addIdOperand(operand);
++      }
++      builder_->getBuildPoint()->addInstruction(std::move(main_loop_pc_next_op));
++    }
++    builder_->createBranch(main_loop_header_);
++
++    builder_->setBuildPoint(main_after_loop);
+   }
+ 
+   // Write data for the last memexport.
+diff --git a/include/rex/graphics/pipeline/shader/spirv_translator.h b/include/rex/graphics/pipeline/shader/spirv_translator.h
+--- a/include/rex/graphics/pipeline/shader/spirv_translator.h
++++ b/include/rex/graphics/pipeline/shader/spirv_translator.h
+@@ -34,7 +34,7 @@
+     // prototyping stage (easier to do small granular updates with an
+     // incremental counter).
+     // Also invalidate stored translations when emitted control-flow changes.
+-    static constexpr uint32_t kVersion = 13;
++    static constexpr uint32_t kVersion = 14;
+ 
+ 
+     // Opt-in for backends that make every possible destination resident and

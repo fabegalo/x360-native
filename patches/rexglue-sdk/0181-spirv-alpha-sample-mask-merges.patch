@@ -1,0 +1,82 @@
+diff --git a/src/graphics/pipeline/shader/spirv_translator_rb.cpp b/src/graphics/pipeline/shader/spirv_translator_rb.cpp
+--- a/src/graphics/pipeline/shader/spirv_translator_rb.cpp
++++ b/src/graphics/pipeline/shader/spirv_translator_rb.cpp
+@@ -495,6 +495,7 @@
+         builder_->makeUintConstant(kSysFlag_AlphaPassIfLess_Shift), builder_->makeUintConstant(3));
+     // Check if the comparison function is not "always" - that should pass even
+     // for NaN likely, unlike "less, equal or greater".
++    const spv::Id fsi_sample_mask_before_alpha_test = fsi_sample_mask_in_rt_0_alpha_tests;
+     SpirvBuilder::IfBuilder if_alpha_test_function_is_non_always(
+         builder_->createBinOp(
+             spv::OpINotEqual, type_bool_, alpha_test_function,
+@@ -586,6 +587,12 @@
+       }
+     }
+     if_alpha_test_function_is_non_always.makeEndIf();
++    if (edram_fragment_shader_interlock_ && !features_.demote_to_helper_invocation) {
++      // ALWAYS skips the test. Its incoming sample mask must remain defined
++      // when the conditional test did not produce a replacement value.
++      fsi_sample_mask_in_rt_0_alpha_tests = if_alpha_test_function_is_non_always.createMergePhi(
++          fsi_sample_mask_in_rt_0_alpha_tests, fsi_sample_mask_before_alpha_test);
++    }
+ 
+     // Alpha to coverage.
+     if (edram_fragment_shader_interlock_ || output_fragment_sample_mask_ != spv::NoResult) {
+@@ -595,6 +602,7 @@
+           builder_->createAccessChain(spv::StorageClassUniform, uniform_system_constants_,
+                                       id_vector_temp_),
+           spv::NoPrecision);
++      const spv::Id fsi_sample_mask_before_alpha_to_coverage = fsi_sample_mask_in_rt_0_alpha_tests;
+       SpirvBuilder::IfBuilder if_alpha_to_coverage_enabled(
+           builder_->createBinOp(spv::OpINotEqual, type_bool_, alpha_to_mask, const_uint_0_),
+           spv::SelectionControlDontFlattenMask, *builder_);
+@@ -773,6 +781,12 @@
+         }
+       }
+       if_alpha_to_coverage_enabled.makeEndIf();
++      if (edram_fragment_shader_interlock_) {
++        // Disabled A2C preserves the input mask; enabled A2C may remove only
++        // some samples, including when whole-pixel kills use helper demotion.
++        fsi_sample_mask_in_rt_0_alpha_tests = if_alpha_to_coverage_enabled.createMergePhi(
++            fsi_sample_mask_in_rt_0_alpha_tests, fsi_sample_mask_before_alpha_to_coverage);
++      }
+     }
+ 
+     if (edram_fragment_shader_interlock_) {
+@@ -780,16 +794,14 @@
+       builder_->createBranch(block_fsi_rt_0_alpha_tests_rt_written_merge);
+       spv::Block& block_fsi_rt_0_alpha_tests_rt_written_end = *builder_->getBuildPoint();
+       builder_->setBuildPoint(block_fsi_rt_0_alpha_tests_rt_written_merge);
+-      if (!features_.demote_to_helper_invocation) {
+-        // The tests might have modified the sample mask via
+-        // fsi_sample_mask_in_rt_0_alpha_tests.
+-        id_vector_temp_.clear();
+-        id_vector_temp_.push_back(fsi_sample_mask_in_rt_0_alpha_tests);
+-        id_vector_temp_.push_back(block_fsi_rt_0_alpha_tests_rt_written_end.getId());
+-        id_vector_temp_.push_back(main_fsi_sample_mask_);
+-        id_vector_temp_.push_back(block_fsi_rt_0_alpha_tests_rt_written_head->getId());
+-        main_fsi_sample_mask_ = builder_->createOp(spv::OpPhi, type_uint_, id_vector_temp_);
+-      }
++      // A2C changes individual samples regardless of helper-demotion support.
++      // Preserve the original mask when RT0 was not dynamically written.
++      id_vector_temp_.clear();
++      id_vector_temp_.push_back(fsi_sample_mask_in_rt_0_alpha_tests);
++      id_vector_temp_.push_back(block_fsi_rt_0_alpha_tests_rt_written_end.getId());
++      id_vector_temp_.push_back(main_fsi_sample_mask_);
++      id_vector_temp_.push_back(block_fsi_rt_0_alpha_tests_rt_written_head->getId());
++      main_fsi_sample_mask_ = builder_->createOp(spv::OpPhi, type_uint_, id_vector_temp_);
+     }
+   }
+ 
+diff --git a/include/rex/graphics/pipeline/shader/spirv_translator.h b/include/rex/graphics/pipeline/shader/spirv_translator.h
+--- a/include/rex/graphics/pipeline/shader/spirv_translator.h
++++ b/include/rex/graphics/pipeline/shader/spirv_translator.h
+@@ -34,7 +34,7 @@
+     // prototyping stage (easier to do small granular updates with an
+     // incremental counter).
+     // Also invalidate stored translations when emitted control-flow changes.
+-    static constexpr uint32_t kVersion = 14;
++    static constexpr uint32_t kVersion = 15;
+ 
+ 
+     // Opt-in for backends that make every possible destination resident and
