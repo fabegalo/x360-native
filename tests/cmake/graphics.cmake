@@ -36,3 +36,7 @@ target_include_directories(x360n_inactive_fetch_checks PRIVATE ${X360_REXGLUE_DI
 x360n_stage_runtime_dlls(x360n_inactive_fetch_checks)
 add_test(NAME sdkcheck.inactive-vertex-fetch COMMAND x360n_inactive_fetch_checks)
 set_tests_properties(sdkcheck.inactive-vertex-fetch PROPERTIES LABELS project TIMEOUT 30)
+
+# A separate staging producer keeps the CPU-only checks independent of GPU
+# plugins staged by other tests in the parent directory.
+add_subdirectory(sdkcheck/g3)

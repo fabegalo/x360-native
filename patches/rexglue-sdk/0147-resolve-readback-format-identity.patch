@@ -1,0 +1,171 @@
+diff --git a/include/rex/graphics/d3d12/command_processor.h b/include/rex/graphics/d3d12/command_processor.h
+--- a/include/rex/graphics/d3d12/command_processor.h
++++ b/include/rex/graphics/d3d12/command_processor.h
+@@ -24,6 +24,7 @@
+ 
+ #include <rex/assert.h>
+ #include <rex/graphics/command_processor.h>
++#include <rex/graphics/readback_resolve_key.h>
+ #include <rex/graphics/d3d12/deferred_command_list.h>
+ #include <rex/graphics/d3d12/graphics_system.h>
+ #include <rex/graphics/d3d12/pipeline_cache.h>
+@@ -389,7 +390,8 @@
+     uint32_t current_index = 0;
+     uint64_t last_used_frame = 0;
+   };
+-  void EvictOldReadbackBuffers(std::unordered_map<uint64_t, ReadbackBuffer>& buffer_map);
++  template <typename Key, typename Hash>
++  void EvictOldReadbackBuffers(std::unordered_map<Key, ReadbackBuffer, Hash>& buffer_map);
+   static constexpr uint32_t kReadbackBufferSizeIncrement = 16 * 1024 * 1024;
+   static constexpr size_t kMaxReadbackBuffers = 256;
+   static constexpr uint64_t kReadbackBufferEvictionAgeFrames = 60;
+@@ -401,9 +403,6 @@
+       return rex::align(size, 1u * 1024u * 1024u);
+     }
+     return rex::align(size, kReadbackBufferSizeIncrement);
+-  }
+-  static inline uint64_t MakeReadbackResolveKey(uint32_t address, uint32_t length) {
+-    return (uint64_t(address) << 32) | uint64_t(length);
+   }
+   static inline uint64_t MakeMemexportReadbackKey(uint32_t first_base_address_dwords,
+                                                   uint32_t total_size) {
+@@ -653,7 +652,7 @@
+ 
+   ID3D12Resource* readback_buffer_ = nullptr;
+   uint32_t readback_buffer_size_ = 0;
+-  std::unordered_map<uint64_t, ReadbackBuffer> readback_buffers_;
++  std::unordered_map<ReadbackResolveKey, ReadbackBuffer, ReadbackResolveKeyHash> readback_buffers_;
+   std::unordered_map<uint64_t, ReadbackBuffer> memexport_readback_buffers_;
+ 
+   static constexpr uint32_t kMaxOcclusionQueries = 8192;
+diff --git a/src/graphics/d3d12/command_processor.cpp b/src/graphics/d3d12/command_processor.cpp
+--- a/src/graphics/d3d12/command_processor.cpp
++++ b/src/graphics/d3d12/command_processor.cpp
+@@ -3028,7 +3028,7 @@
+   }
+ 
+   bool is_scaled = texture_cache_->IsDrawResolutionScaled();
+-  uint64_t resolve_key = MakeReadbackResolveKey(written_address, written_length);
++  const auto resolve_key = MakeReadbackResolveKey(*register_file_, written_address, written_length);
+   ReadbackBuffer& rb = readback_buffers_[resolve_key];
+   rb.last_used_frame = frame_current_;
+ 
+@@ -4862,8 +4862,9 @@
+   return true;
+ }
+ 
++template <typename Key, typename Hash>
+ void D3D12CommandProcessor::EvictOldReadbackBuffers(
+-    std::unordered_map<uint64_t, ReadbackBuffer>& buffer_map) {
++    std::unordered_map<Key, ReadbackBuffer, Hash>& buffer_map) {
+   if (buffer_map.empty()) {
+     return;
+   }
+diff --git a/include/rex/graphics/vulkan/command_processor.h b/include/rex/graphics/vulkan/command_processor.h
+--- a/include/rex/graphics/vulkan/command_processor.h
++++ b/include/rex/graphics/vulkan/command_processor.h
+@@ -24,6 +24,7 @@
+ 
+ #include <rex/assert.h>
+ #include <rex/graphics/command_processor.h>
++#include <rex/graphics/readback_resolve_key.h>
+ #include <rex/graphics/pipeline/shader/spirv_translator.h>
+ #include <rex/graphics/registers.h>
+ #include <rex/graphics/util/draw.h>
+@@ -453,7 +454,8 @@
+     uint32_t current_index = 0;
+     uint64_t last_used_frame = 0;
+   };
+-  void EvictOldReadbackBuffers(std::unordered_map<uint64_t, ReadbackBuffer>& buffer_map);
++  template <typename Key, typename Hash>
++  void EvictOldReadbackBuffers(std::unordered_map<Key, ReadbackBuffer, Hash>& buffer_map);
+   static constexpr uint32_t kReadbackBufferSizeIncrement = 16 * 1024 * 1024;
+   static constexpr size_t kMaxReadbackBuffers = 256;
+   static constexpr uint64_t kReadbackBufferEvictionAgeFrames = 60;
+@@ -465,9 +467,6 @@
+       return rex::align(size, 1u * 1024u * 1024u);
+     }
+     return rex::align(size, kReadbackBufferSizeIncrement);
+-  }
+-  static inline uint64_t MakeReadbackResolveKey(uint32_t address, uint32_t length) {
+-    return (uint64_t(address) << 32) | uint64_t(length);
+   }
+   static inline uint64_t MakeMemexportReadbackKey(uint32_t first_base_address_dwords,
+                                                   uint32_t total_size) {
+@@ -761,7 +760,7 @@
+   std::array<VertexBufferState, 96> vertex_buffer_states_{};
+   uint64_t vertex_buffers_in_sync_[2] = {};
+   uint64_t vertex_buffer_memory_generation_ = 0;
+-  std::unordered_map<uint64_t, ReadbackBuffer> readback_buffers_;
++  std::unordered_map<ReadbackResolveKey, ReadbackBuffer, ReadbackResolveKeyHash> readback_buffers_;
+   std::unordered_map<uint64_t, ReadbackBuffer> memexport_readback_buffers_;
+ 
+   // The current dynamic state of the graphics pipeline bind point. Note that
+diff --git a/src/graphics/vulkan/command_processor.cpp b/src/graphics/vulkan/command_processor.cpp
+--- a/src/graphics/vulkan/command_processor.cpp
++++ b/src/graphics/vulkan/command_processor.cpp
+@@ -4654,7 +4654,7 @@
+   };
+ 
+   bool is_scaled = texture_cache_->IsDrawResolutionScaled();
+-  uint64_t resolve_key = MakeReadbackResolveKey(written_address, written_length);
++  const auto resolve_key = MakeReadbackResolveKey(*register_file_, written_address, written_length);
+   ReadbackBuffer& readback = readback_buffers_[resolve_key];
+   readback.last_used_frame = frame_current_;
+   uint32_t write_index = readback.current_index;
+@@ -4870,8 +4870,9 @@
+   return true;
+ }
+ 
++template <typename Key, typename Hash>
+ void VulkanCommandProcessor::EvictOldReadbackBuffers(
+-    std::unordered_map<uint64_t, ReadbackBuffer>& buffer_map) {
++    std::unordered_map<Key, ReadbackBuffer, Hash>& buffer_map) {
+   if (buffer_map.empty()) {
+     return;
+   }
+diff --git a/include/rex/graphics/readback_resolve_key.h b/include/rex/graphics/readback_resolve_key.h
+new file mode 100644
+--- /dev/null
++++ b/include/rex/graphics/readback_resolve_key.h
+@@ -0,0 +1,40 @@
++// Resolve readback identity adapted from Forza Horizon 1: ReImagined,
++// cb676f7, patch 0048. Copyright (c) 2026 Dyotson and contributors (MIT).
++#pragma once
++#include <cstddef>
++#include <cstdint>
++#include <functional>
++#include <rex/graphics/register_file.h>
++
++namespace rex::graphics {
++// Equality retains all fields: hashing a range and its format into a uint64_t
++// alone would allow unrelated resolves to alias after a hash collision.
++struct ReadbackResolveKey {
++  uint32_t address;
++  uint32_t length;
++  uint32_t signature;
++  bool operator==(const ReadbackResolveKey&) const = default;
++};
++struct ReadbackResolveKeyHash {
++  size_t operator()(const ReadbackResolveKey& key) const {
++    const uint64_t range = (uint64_t(key.address) << 32) | key.length;
++    return std::hash<uint64_t>{}(range ^ (uint64_t(key.signature) * UINT64_C(0x9E3779B97F4A7C15)));
++  }
++};
++inline ReadbackResolveKey MakeReadbackResolveKey(const RegisterFile& regs,
++                                                uint32_t address, uint32_t length) {
++  const auto control = regs.Get<reg::RB_COPY_CONTROL>();
++  const auto dest = regs.Get<reg::RB_COPY_DEST_INFO>();
++  // Keep a distinct history for depth and color, and for each destination
++  // representation. EDRAM location, exponent bias and source dimensions may
++  // vary between successive frames of the same pass and are not identity.
++  const uint32_t signature = uint32_t(control.copy_src_select >= 4) |
++      (uint32_t(dest.copy_dest_format) << 1) |
++      (uint32_t(dest.copy_dest_number) << 7) |
++      (uint32_t(dest.copy_dest_endian) << 10) |
++      (uint32_t(dest.copy_dest_swap) << 13) |
++      (uint32_t(dest.copy_dest_array) << 14) |
++      (uint32_t(dest.copy_dest_slice) << 15);
++  return {address, length, signature};
++}
++}  // namespace rex::graphics

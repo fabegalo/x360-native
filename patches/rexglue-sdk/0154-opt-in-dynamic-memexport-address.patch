@@ -1,0 +1,77 @@
+diff --git a/include/rex/graphics/pipeline/shader/dxbc_translator.h b/include/rex/graphics/pipeline/shader/dxbc_translator.h
+--- a/include/rex/graphics/pipeline/shader/dxbc_translator.h
++++ b/include/rex/graphics/pipeline/shader/dxbc_translator.h
+@@ -113,6 +113,12 @@
+     // version number (0xYYYYMMDD)!
+     static constexpr uint32_t kVersion = 0x20260226;
+ 
++
++    // Opt-in for backends that make every possible destination resident and
++    // synchronize writes when eA is computed rather than a known stream MAD.
++    // Bit 63 is outside both stage layouts. Zero preserves existing bytecode.
++    static constexpr uint64_t kMemExportDynamicAddress = uint64_t(1) << 63;
++
+     enum class DepthStencilMode : uint32_t {
+       kNoModifiers,
+       // [earlydepthstencil] - enable if alpha test and alpha to coverage are
+diff --git a/src/graphics/pipeline/shader/dxbc_translator.cpp b/src/graphics/pipeline/shader/dxbc_translator.cpp
+--- a/src/graphics/pipeline/shader/dxbc_translator.cpp
++++ b/src/graphics/pipeline/shader/dxbc_translator.cpp
+@@ -1419,7 +1419,8 @@
+       dest = dxbc::Dest::R(system_temp_point_size_edge_flag_kill_vertex_);
+       break;
+     case InstructionStorageTarget::kExportAddress:
+-      if (!can_store_memexport_address) {
++      if (!can_store_memexport_address &&
++          !(GetDxbcShaderModification().value & Modification::kMemExportDynamicAddress)) {
+         return;
+       }
+       if (!current_shader().memexport_eM_written()) {
+diff --git a/include/rex/graphics/pipeline/shader/spirv_translator.h b/include/rex/graphics/pipeline/shader/spirv_translator.h
+--- a/include/rex/graphics/pipeline/shader/spirv_translator.h
++++ b/include/rex/graphics/pipeline/shader/spirv_translator.h
+@@ -34,6 +34,12 @@
+     // prototyping stage (easier to do small granular updates with an
+     // incremental counter).
+     static constexpr uint32_t kVersion = 12;
++
++
++    // Opt-in for backends that make every possible destination resident and
++    // synchronize writes when eA is computed rather than a known stream MAD.
++    // Bit 63 is outside both stage layouts. Zero preserves existing bytecode.
++    static constexpr uint64_t kMemExportDynamicAddress = uint64_t(1) << 63;
+ 
+     enum class DepthStencilMode : uint32_t {
+       kNoModifiers,
+diff --git a/src/graphics/pipeline/shader/spirv_translator.cpp b/src/graphics/pipeline/shader/spirv_translator.cpp
+--- a/src/graphics/pipeline/shader/spirv_translator.cpp
++++ b/src/graphics/pipeline/shader/spirv_translator.cpp
+@@ -3674,7 +3674,8 @@
+       is_clamped = true;
+     } break;
+     case InstructionStorageTarget::kExportAddress: {
+-      if (!can_store_memexport_address) {
++      if (!can_store_memexport_address &&
++          !(GetSpirvShaderModification().value & Modification::kMemExportDynamicAddress)) {
+         return;
+       }
+       if (!current_shader().memexport_eM_written()) {
+@@ -4152,7 +4153,17 @@
+     // The only SSBO struct member.
+     id_vector_temp_.push_back(const_int_0_);
+     id_vector_temp_.push_back(address_dwords_int);
+-    store(builder_->createAccessChain(storage_class, buffers_shared_memory_, id_vector_temp_));
++    if (GetSpirvShaderModification().value & Modification::kMemExportDynamicAddress) {
++      SpirvBuilder::IfBuilder if_in_physical_memory(
++          builder_->createBinOp(spv::OpULessThan, type_bool_,
++              builder_->createUnaryOp(spv::OpBitcast, type_uint_, address_dwords_int),
++              builder_->makeUintConstant(uint32_t(1) << 27)),
++          spv::SelectionControlDontFlattenMask, *builder_);
++      store(builder_->createAccessChain(storage_class, buffers_shared_memory_, id_vector_temp_));
++      if_in_physical_memory.makeEndIf();
++    } else {
++      store(builder_->createAccessChain(storage_class, buffers_shared_memory_, id_vector_temp_));
++    }
+     return;
+   }
+ 

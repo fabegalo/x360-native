@@ -1,0 +1,38 @@
+diff --git a/include/rex/graphics/command_processor.h b/include/rex/graphics/command_processor.h
+--- a/include/rex/graphics/command_processor.h
++++ b/include/rex/graphics/command_processor.h
+@@ -228,6 +228,9 @@
+   virtual bool IssueDraw(xenos::PrimitiveType prim_type, uint32_t index_count,
+                          IndexBufferInfo* index_buffer_info, bool major_mode_explicit) = 0;
+   virtual bool IssueCopy() = 0;
++  // Backends may implement visibility query predication. The default preserves
++  // the legacy executor's query-only suppression until that backend supports it.
++  virtual bool ShouldIssueDraw(uint32_t viz_query_condition) const;
+ 
+   // "Actual" is for the command processor thread, to be read by the
+   // implementations.
+diff --git a/src/graphics/command_processor.cpp b/src/graphics/command_processor.cpp
+--- a/src/graphics/command_processor.cpp
++++ b/src/graphics/command_processor.cpp
+@@ -1403,6 +1403,11 @@
+   return true;
+ }
+ 
++bool CommandProcessor::ShouldIssueDraw(uint32_t) const {
++  auto viz_query = register_file_->Get<reg::PA_SC_VIZ_QUERY>();
++  return !(viz_query.viz_query_ena && viz_query.kill_pix_post_hi_z);
++}
++
+ bool CommandProcessor::ExecutePacketType3Draw(memory::RingBuffer* reader, uint32_t packet,
+                                               const char* opcode_name, uint32_t viz_query_condition,
+                                               uint32_t count_remaining) {
+@@ -1490,8 +1495,7 @@
+   reader->AdvanceRead(count_remaining * sizeof(uint32_t));
+ 
+   if (draw_succeeded) {
+-    auto viz_query = register_file_->Get<reg::PA_SC_VIZ_QUERY>();
+-    if (!(viz_query.viz_query_ena && viz_query.kill_pix_post_hi_z)) {
++    if (ShouldIssueDraw(viz_query_condition)) {
+       // TODO(Triang3l): Don't drop the draw call completely if the vertex
+       // shader has memexport.
+       // TODO(Triang3l || JoelLinn): Handle this properly in the render

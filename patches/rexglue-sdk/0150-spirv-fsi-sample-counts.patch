@@ -1,0 +1,123 @@
+diff --git a/include/rex/graphics/pipeline/shader/spirv_translator.h b/include/rex/graphics/pipeline/shader/spirv_translator.h
+index dce3dbf..cc5cc44 100644
+--- a/include/rex/graphics/pipeline/shader/spirv_translator.h
++++ b/include/rex/graphics/pipeline/shader/spirv_translator.h
+@@ -88,6 +88,9 @@ class SpirvShaderTranslator : public ShaderTranslator {
+       uint32_t param_gen_point : 1;
+       // For host render targets - depth / stencil output mode.
+       DepthStencilMode depth_stencil_mode : 3;
++      // Optional guest counters in eight uint32 words after scaled EDRAM.
++      // The backend supplies the enlarged SSBO and synchronizes snapshots.
++      uint32_t fsi_sample_counts : 1;
+     } pixel;
+     uint64_t value = 0;
+ 
+@@ -436,7 +439,7 @@ class SpirvShaderTranslator : public ShaderTranslator {
+   // state of the translator.
+   std::vector<uint8_t> CreateDepthOnlyFragmentShader(
+       Modification::DepthStencilMode depth_stencil_mode =
+-          Modification::DepthStencilMode::kNoModifiers);
++          Modification::DepthStencilMode::kNoModifiers, bool fsi_sample_counts = false);
+ 
+   // Common functions useful not only for the translator, but also for EDRAM
+   // emulation via conventional render targets.
+@@ -713,6 +716,7 @@ class SpirvShaderTranslator : public ShaderTranslator {
+            !current_shader().memexport_eM_written();
+   }
+   void FSI_LoadSampleMask(spv::Id msaa_samples);
++  void FSI_AccumulateSampleCount(spv::Id category, spv::Id count);
+   void FSI_LoadEdramOffsets(spv::Id msaa_samples);
+   // The address must be a signed int. Whether the render target is 64bpp, if
+   // present at all, must be a bool (if it's NoResult, 32bpp will be assumed).
+diff --git a/src/graphics/pipeline/shader/spirv_translator.cpp b/src/graphics/pipeline/shader/spirv_translator.cpp
+index 1774f97..af3796c 100644
+--- a/src/graphics/pipeline/shader/spirv_translator.cpp
++++ b/src/graphics/pipeline/shader/spirv_translator.cpp
+@@ -90,7 +90,7 @@ uint64_t SpirvShaderTranslator::GetDefaultPixelShaderModification(
+ }
+ 
+ std::vector<uint8_t> SpirvShaderTranslator::CreateDepthOnlyFragmentShader(
+-    Modification::DepthStencilMode depth_stencil_mode) {
++    Modification::DepthStencilMode depth_stencil_mode, bool fsi_sample_counts) {
+   is_depth_only_fragment_shader_ = true;
+   // TODO(Triang3l): Handle in a nicer way (is_depth_only_fragment_shader_ is a
+   // leftover from when a Shader object wasn't used during translation).
+@@ -99,6 +99,7 @@ std::vector<uint8_t> SpirvShaderTranslator::CreateDepthOnlyFragmentShader(
+   shader.AnalyzeUcode(instruction_disassembly_buffer);
+   Modification modification(GetDefaultPixelShaderModification(0));
+   modification.pixel.depth_stencil_mode = depth_stencil_mode;
++  modification.pixel.fsi_sample_counts = fsi_sample_counts;
+   Shader::Translation& translation = *shader.GetOrCreateTranslation(modification.value);
+   TranslateAnalyzedShader(translation);
+   is_depth_only_fragment_shader_ = false;
+diff --git a/src/graphics/pipeline/shader/spirv_translator_rb.cpp b/src/graphics/pipeline/shader/spirv_translator_rb.cpp
+index 765c141..3c142cc 100644
+--- a/src/graphics/pipeline/shader/spirv_translator_rb.cpp
++++ b/src/graphics/pipeline/shader/spirv_translator_rb.cpp
+@@ -881,6 +881,20 @@ void SpirvShaderTranslator::CompleteFragmentShaderInMain() {
+       }
+     }
+ 
++    if (GetSpirvShaderModification().pixel.fsi_sample_counts) {
++      // Count only the surviving guest samples, after kill, alpha/coverage and
++      // depth/stencil; bits 4:7 are deferred writes, not passing samples.
++      spv::Id passed = builder_->createUnaryOp(
++          spv::OpBitCount, type_uint_,
++          builder_->createBinOp(spv::OpBitwiseAnd, type_uint_, main_fsi_sample_mask_,
++                                builder_->makeUintConstant(15)));
++      SpirvBuilder::IfBuilder if_passed(
++          builder_->createBinOp(spv::OpINotEqual, type_bool_, passed, const_uint_0_),
++          spv::SelectionControlDontFlattenMask, *builder_);
++      FSI_AccumulateSampleCount(builder_->makeUintConstant(4), passed);
++      if_passed.makeEndIf();
++    }
++
+     if (color_write_depth_stencil_condition != spv::NoResult) {
+       // Skip all color operations if the pixel has failed the tests entirely.
+       block_fsi_if_after_depth_stencil = &builder_->makeNewBlock();
+@@ -1431,6 +1445,26 @@ spv::Id SpirvShaderTranslator::LoadMsaaSamplesFromFlags() {
+                                builder_->makeUintConstant(2));
+ }
+ 
++void SpirvShaderTranslator::FSI_AccumulateSampleCount(spv::Id category, spv::Id count) {
++  // Reports are four pairs of uint32 pipe counters (not uint64 values).
++  // This executor aggregates in pipe A, leaving pipe B at zero; uint32 wrap
++  // is retained so subtraction of cumulative BEGIN/END reports still works.
++  const spv::Id base = builder_->makeUintConstant(
++      (xenos::kEdramSizeBytes / 4) * draw_resolution_scale_x_ * draw_resolution_scale_y_);
++  const spv::Id scope = builder_->makeUintConstant(spv::ScopeDevice);
++  const auto storage = features_.spirv_version >= spv::Spv_1_3
++                           ? spv::StorageClassStorageBuffer : spv::StorageClassUniform;
++  for (const auto offset : {category, const_uint_0_}) {
++    id_vector_temp_.clear();
++    id_vector_temp_.push_back(const_int_0_);
++    id_vector_temp_.push_back(builder_->createBinOp(spv::OpIAdd, type_uint_, base, offset));
++    const spv::Id counter = builder_->createAccessChain(storage, buffer_edram_, id_vector_temp_);
++    // Relaxed device atomics aggregate different pixels. Snapshot ordering is
++    // supplied by the backend's shader-write/transfer-read barrier and fence.
++    builder_->createQuadOp(spv::OpAtomicIAdd, type_uint_, counter, scope, const_uint_0_, count);
++  }
++}
++
+ void SpirvShaderTranslator::FSI_LoadSampleMask(spv::Id msaa_samples) {
+   // On the Xbox 360, 2x MSAA doubles the storage height, 4x MSAA doubles the
+   // storage width.
+@@ -2192,6 +2226,18 @@ void SpirvShaderTranslator::FSI_DepthStencilTest(spv::Id msaa_samples,
+     // coverage if not.
+     spv::Id depth_stencil_passed =
+         builder_->createBinOp(spv::OpLogicalAnd, type_bool_, depth_passed, stencil_passed);
++    if (GetSpirvShaderModification().pixel.fsi_sample_counts) {
++      // Preserve the existing early/late test order and stencil precedence.
++      // Count here even when early rejection skips the remaining shader.
++      SpirvBuilder::IfBuilder if_failed(
++          builder_->createUnaryOp(spv::OpLogicalNot, type_bool_, depth_stencil_passed),
++          spv::SelectionControlDontFlattenMask, *builder_);
++      FSI_AccumulateSampleCount(
++          builder_->createTriOp(spv::OpSelect, type_uint_, stencil_passed,
++                                builder_->makeUintConstant(2), builder_->makeUintConstant(6)),
++          builder_->makeUintConstant(1));
++      if_failed.makeEndIf();
++    }
+     spv::Id new_sample_mask_after_sample = builder_->createTriOp(
+         spv::OpSelect, type_uint_, depth_stencil_passed, new_sample_mask,
+         builder_->createBinOp(spv::OpBitwiseAnd, type_uint_, new_sample_mask,

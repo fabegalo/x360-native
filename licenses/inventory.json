@@ -42,6 +42,28 @@
   "attributions_sha256": "a7ff3b7ce13deb4f6492e01e62eb9d0e98e0b0855bd92f609e192976a75207d9",
   "components": [
     {
+      "id": "forza-reimagined",
+      "origin": "https://github.com/Dyotson/ForzaHorizon1-ReImagined",
+      "revision": "cb676f7e07149b4cc964dc53d49147dd268939b3",
+      "spdx": "MIT",
+      "license_file": "licenses/forza-reimagined.txt",
+      "scope": "source",
+      "integration": "SDK patches 0146, 0147 and 0152 adapt register range/fetch binding reuse, resolve readback identity and shared-memory range scratch reuse; not linked into desktop executables",
+      "obligations": "Preserve copyright and permission notices in copies or substantial portions.",
+      "license_sha256": "7f27b063b73c7ccf9a4cc01135fb04c60a38dfe3685f6c7bba3895a26e2fad7c"
+    },
+    {
+      "id": "recompiled-halo-reach",
+      "origin": "https://github.com/Dyotson/RecompiledHaloReach",
+      "revision": "LICENSE blob 865f860b53de623291ad956c20a82b0305a8d834; patches inherited through Forza ReImagined cb676f7e07149b4cc964dc53d49147dd268939b3",
+      "spdx": "MIT",
+      "license_file": "licenses/recompiled-halo-reach.txt",
+      "scope": "source",
+      "integration": "Original attribution for ReImagined patches 0029/0032 adapted in SDK patch 0146",
+      "obligations": "Preserve copyright and permission notices in copies or substantial portions.",
+      "license_sha256": "a5753f16dc2942843d5cc24bac0f7e1aeb5244446bb4b49693275e93e025b696"
+    },
+    {
       "id": "shiftglue",
       "origin": "https://github.com/arcanite24/shiftglue-sdk",
       "revision": "1e8968f712824b97d4f4330c5a22389c4c8be1b5",

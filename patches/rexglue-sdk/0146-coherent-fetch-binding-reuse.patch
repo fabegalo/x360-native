@@ -1,0 +1,213 @@
+diff --git a/src/graphics/command_processor.cpp b/src/graphics/command_processor.cpp
+--- a/src/graphics/command_processor.cpp
++++ b/src/graphics/command_processor.cpp
+@@ -740,10 +740,15 @@
+ 
+   uint32_t base_index = (packet & 0x7FFF);
+   uint32_t write_one_reg = (packet >> 15) & 0x1;
++  if (!write_one_reg) {
++    // Use the existing constant-block paths, including ring wrap handling.
++    // Other registers still pass through WriteRegister for their side effects.
++    WriteRegisterRangeFromRing(reader, base_index, count);
++    return true;
++  }
+   for (uint32_t m = 0; m < count; m++) {
+     uint32_t reg_data = reader->ReadAndSwap<uint32_t>();
+-    uint32_t target_index = write_one_reg ? base_index : base_index + m;
+-    WriteRegister(target_index, reg_data);
++    WriteRegister(base_index, reg_data);
+   }
+ 
+   return true;
+diff --git a/include/rex/graphics/register_file.h b/include/rex/graphics/register_file.h
+--- a/include/rex/graphics/register_file.h
++++ b/include/rex/graphics/register_file.h
+@@ -56,6 +56,33 @@
+     return Get<T>(T::register_index);
+   }
+ 
++  // Fetch descriptors have no register-write side effects. Return only the
++  // changed dwords (inclusive); memory residency is invalidated independently.
++  // Adapted from Forza Horizon 1: ReImagined, cb676f7, patch 0032 (MIT).
++  struct FetchConstantChanges {
++    uint32_t first = UINT32_MAX;
++    uint32_t last = 0;
++    explicit operator bool() const { return first != UINT32_MAX; }
++  };
++  FetchConstantChanges WriteFetchConstantsFromMem(uint32_t start_index,
++                                                 const uint32_t* base,
++                                                 uint32_t count) {
++    assert_true(start_index >= XE_GPU_REG_SHADER_CONSTANT_FETCH_00_0);
++    assert_true(start_index <= XE_GPU_REG_SHADER_CONSTANT_FETCH_31_5 + 1);
++    assert_true(count <= XE_GPU_REG_SHADER_CONSTANT_FETCH_31_5 + 1 - start_index);
++    FetchConstantChanges changed;
++    for (uint32_t i = 0; i < count; ++i) {
++      const uint32_t value = memory::load_and_swap<uint32_t>(base + i);
++      const uint32_t index = start_index + i;
++      if (values[index] != value) {
++        values[index] = value;
++        if (!changed) changed.first = index;
++        changed.last = index;
++      }
++    }
++    return changed;
++  }
++
+   xenos::xe_gpu_vertex_fetch_t GetVertexFetch(uint32_t index) const {
+     assert_true(index < 96);
+     xenos::xe_gpu_vertex_fetch_t fetch;
+diff --git a/include/rex/graphics/shared_memory.h b/include/rex/graphics/shared_memory.h
+--- a/include/rex/graphics/shared_memory.h
++++ b/include/rex/graphics/shared_memory.h
+@@ -10,6 +10,7 @@
+  * @modified    Tom Clay, 2026 - Adapted for ReXGlue runtime
+  */
+ 
++#include <atomic>
+ #include <cstdint>
+ #include <mutex>
+ #include <utility>
+@@ -33,6 +34,11 @@
+   virtual void ClearCache();
+   void SetSystemPageBlocksValidWithGpuDataWritten();
+   void InvalidateAllPages();
++  // A residency cache must recheck RequestRange after CPU writes, GPU writes,
++  // or page-valid resets, even if the guest fetch descriptor is unchanged.
++  uint64_t residency_generation() const {
++    return residency_generation_.load(std::memory_order_acquire);
++  }
+ 
+   typedef void (*GlobalWatchCallback)(const std::unique_lock<std::recursive_mutex>& global_lock,
+                                       void* context, uint32_t address_first, uint32_t address_last,
+@@ -142,6 +148,7 @@
+ 
+  private:
+   memory::Memory& memory_;
++  std::atomic<uint64_t> residency_generation_{1};
+ 
+   // Log2 of invalidation granularity (the system page size, but the dependency
+   // on it is not hard - the access callback takes a range as an argument, and
+diff --git a/src/graphics/shared_memory.cpp b/src/graphics/shared_memory.cpp
+--- a/src/graphics/shared_memory.cpp
++++ b/src/graphics/shared_memory.cpp
+@@ -95,6 +95,7 @@
+   std::fill(system_page_flags_valid_.begin(), system_page_flags_valid_.end(), uint64_t(0));
+   std::fill(system_page_flags_valid_and_gpu_written_.begin(),
+             system_page_flags_valid_and_gpu_written_.end(), uint64_t(0));
++  residency_generation_.fetch_add(1, std::memory_order_release);
+ }
+ 
+ void SharedMemory::SetSystemPageBlocksValidWithGpuDataWritten() {
+@@ -103,6 +104,7 @@
+   // Pages that are valid only because the CPU uploaded them lose their valid
+   // bit here, so the next frame re-reads them from guest memory.
+   system_page_flags_valid_ = system_page_flags_valid_and_gpu_written_;
++  residency_generation_.fetch_add(1, std::memory_order_release);
+ }
+ 
+ void SharedMemory::ClearCache() {
+@@ -270,6 +272,7 @@
+   // Mark the range as valid (so pages are not reuploaded until modified by the
+   // CPU) and watch it so the CPU can reuse it and this will be caught.
+   MakeRangeValid(start, length, true);
++  residency_generation_.fetch_add(1, std::memory_order_release);
+ }
+ 
+ bool SharedMemory::AllocateSparseHostGpuMemoryRange(uint32_t offset_allocations,
+@@ -528,6 +531,7 @@
+     system_page_flags_valid_and_gpu_written_[i] &= ~invalidate_bits;
+   }
+ 
++  residency_generation_.fetch_add(1, std::memory_order_release);
+   FireWatches(page_first, page_last, false);
+ 
+   return std::make_pair(page_first << page_size_log2_, (page_last - page_first + 1)
+diff --git a/src/graphics/vulkan/command_processor.cpp b/src/graphics/vulkan/command_processor.cpp
+--- a/src/graphics/vulkan/command_processor.cpp
++++ b/src/graphics/vulkan/command_processor.cpp
+@@ -2234,11 +2234,13 @@
+ 
+   if (start_index >= XE_GPU_REG_SHADER_CONSTANT_FETCH_00_0 &&
+       end_index <= XE_GPU_REG_SHADER_CONSTANT_FETCH_31_5) {
+-    memory::copy_and_swap(register_file_->values + start_index, base, num_registers);
++    const auto changed =
++        register_file_->WriteFetchConstantsFromMem(start_index, base, num_registers);
++    if (!changed) return;
+     current_constant_buffers_up_to_date_ &=
+         ~(UINT32_C(1) << SpirvShaderTranslator::kConstantBufferFetch);
+-    uint32_t first_fetch_dword = start_index - XE_GPU_REG_SHADER_CONSTANT_FETCH_00_0;
+-    uint32_t last_fetch_dword = end_index - XE_GPU_REG_SHADER_CONSTANT_FETCH_00_0;
++    uint32_t first_fetch_dword = changed.first - XE_GPU_REG_SHADER_CONSTANT_FETCH_00_0;
++    uint32_t last_fetch_dword = changed.last - XE_GPU_REG_SHADER_CONSTANT_FETCH_00_0;
+     if (texture_cache_) {
+       texture_cache_->TextureFetchConstantsWritten(first_fetch_dword / 6, last_fetch_dword / 6);
+     }
+@@ -4136,6 +4138,13 @@
+     return draw_fail("update_bindings");
+   }
+ 
++  // Descriptor equality alone does not imply current memory contents. CPU
++  // invalidation may occur on guest threads; reset only on the CP thread.
++  const uint64_t memory_generation = shared_memory_->residency_generation();
++  if (vertex_buffer_memory_generation_ != memory_generation) {
++    InvalidateAllVertexBufferResidency();
++    vertex_buffer_memory_generation_ = memory_generation;
++  }
+   // Ensure vertex buffers are resident.
+   const Shader::ConstantRegisterMap& constant_map_vertex = vertex_shader->constant_register_map();
+   for (uint32_t i = 0; i < rex::countof(constant_map_vertex.vertex_fetch_bitmap); ++i) {
+diff --git a/include/rex/graphics/vulkan/command_processor.h b/include/rex/graphics/vulkan/command_processor.h
+--- a/include/rex/graphics/vulkan/command_processor.h
++++ b/include/rex/graphics/vulkan/command_processor.h
+@@ -760,6 +760,7 @@
+   };
+   std::array<VertexBufferState, 96> vertex_buffer_states_{};
+   uint64_t vertex_buffers_in_sync_[2] = {};
++  uint64_t vertex_buffer_memory_generation_ = 0;
+   std::unordered_map<uint64_t, ReadbackBuffer> readback_buffers_;
+   std::unordered_map<uint64_t, ReadbackBuffer> memexport_readback_buffers_;
+ 
+diff --git a/src/graphics/d3d12/command_processor.cpp b/src/graphics/d3d12/command_processor.cpp
+--- a/src/graphics/d3d12/command_processor.cpp
++++ b/src/graphics/d3d12/command_processor.cpp
+@@ -1875,10 +1875,12 @@
+ 
+   if (start_index >= XE_GPU_REG_SHADER_CONSTANT_FETCH_00_0 &&
+       end_index <= XE_GPU_REG_SHADER_CONSTANT_FETCH_31_5) {
+-    memory::copy_and_swap(register_file_->values + start_index, base, num_registers);
++    const auto changed =
++        register_file_->WriteFetchConstantsFromMem(start_index, base, num_registers);
++    if (!changed) return;
+     cbuffer_binding_fetch_.up_to_date = false;
+-    uint32_t first_fetch_dword = start_index - XE_GPU_REG_SHADER_CONSTANT_FETCH_00_0;
+-    uint32_t last_fetch_dword = end_index - XE_GPU_REG_SHADER_CONSTANT_FETCH_00_0;
++    uint32_t first_fetch_dword = changed.first - XE_GPU_REG_SHADER_CONSTANT_FETCH_00_0;
++    uint32_t last_fetch_dword = changed.last - XE_GPU_REG_SHADER_CONSTANT_FETCH_00_0;
+     if (texture_cache_) {
+       texture_cache_->TextureFetchConstantsWritten(first_fetch_dword / 6, last_fetch_dword / 6);
+     }
+@@ -2586,6 +2588,13 @@
+   }
+   // Must not call anything that can change the descriptor heap from now on!
+ 
++  // Descriptor equality alone does not imply current memory contents. CPU
++  // invalidation may occur on guest threads; reset only on the CP thread.
++  const uint64_t memory_generation = shared_memory_->residency_generation();
++  if (vertex_buffer_memory_generation_ != memory_generation) {
++    InvalidateAllVertexBufferResidency();
++    vertex_buffer_memory_generation_ = memory_generation;
++  }
+   // Ensure vertex buffers are resident.
+   const Shader::ConstantRegisterMap& constant_map_vertex = vertex_shader->constant_register_map();
+   for (uint32_t i = 0; i < rex::countof(constant_map_vertex.vertex_fetch_bitmap); ++i) {
+diff --git a/include/rex/graphics/d3d12/command_processor.h b/include/rex/graphics/d3d12/command_processor.h
+--- a/include/rex/graphics/d3d12/command_processor.h
++++ b/include/rex/graphics/d3d12/command_processor.h
+@@ -673,6 +673,7 @@
+   };
+   std::array<VertexBufferState, 96> vertex_buffer_states_{};
+   uint64_t vertex_buffers_in_sync_[2] = {};
++  uint64_t vertex_buffer_memory_generation_ = 0;
+ 
+   // The current fixed-function drawing state.
+   D3D12_VIEWPORT ff_viewport_;

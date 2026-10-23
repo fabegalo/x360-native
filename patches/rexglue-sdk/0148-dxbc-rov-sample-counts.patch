@@ -1,0 +1,141 @@
+diff --git a/include/rex/graphics/format/dxbc.h b/include/rex/graphics/format/dxbc.h
+--- a/include/rex/graphics/format/dxbc.h
++++ b/include/rex/graphics/format/dxbc.h
+@@ -1443,6 +1443,7 @@
+   kStoreRaw = 166,
+   kAtomicAnd = 169,
+   kAtomicOr = 170,
++  kAtomicIAdd = 173,
+   kEvalSampleIndex = 204,
+   kEvalCentroid = 205,
+ };
+@@ -2260,6 +2261,10 @@
+     ++stat_.instruction_count;
+     ++stat_.c_texture_store_instructions;
+   }
++  void OpAtomicIAdd(const Dest& dest, const Src& address, uint32_t address_components,
++                    const Src& value) {
++    EmitAtomicOp(Opcode::kAtomicIAdd, dest, address, address_components, value);
++  }
+   void OpAtomicAnd(const Dest& dest, const Src& address, uint32_t address_components,
+                    const Src& value) {
+     EmitAtomicOp(Opcode::kAtomicAnd, dest, address, address_components, value);
+diff --git a/include/rex/graphics/pipeline/shader/dxbc_translator.h b/include/rex/graphics/pipeline/shader/dxbc_translator.h
+--- a/include/rex/graphics/pipeline/shader/dxbc_translator.h
++++ b/include/rex/graphics/pipeline/shader/dxbc_translator.h
+@@ -176,6 +176,9 @@
+       uint32_t dynamic_addressable_register_count : 8;
+       // Non-ROV - depth / stencil output mode.
+       DepthStencilMode depth_stencil_mode : 2;
++      // Opt-in ROV sample counters in eight uint32 words after the EDRAM.
++      // The backend must provide the enlarged UAV and synchronize snapshots.
++      uint32_t rov_sample_counts : 1;
+     } pixel;
+ 
+     explicit Modification(uint64_t modification_value = 0) : value(modification_value) {
+@@ -513,7 +516,7 @@
+ 
+   // Creates a special pixel shader without color outputs - this resets the
+   // state of the translator.
+-  std::vector<uint8_t> CreateDepthOnlyPixelShader();
++  std::vector<uint8_t> CreateDepthOnlyPixelShader(bool rov_sample_counts = false);
+ 
+   // Common functions useful not only for the translator, but also for render
+   // target reinterpretation.
+diff --git a/src/graphics/pipeline/shader/dxbc_translator.cpp b/src/graphics/pipeline/shader/dxbc_translator.cpp
+--- a/src/graphics/pipeline/shader/dxbc_translator.cpp
++++ b/src/graphics/pipeline/shader/dxbc_translator.cpp
+@@ -79,13 +79,15 @@
+ }
+ DxbcShaderTranslator::~DxbcShaderTranslator() = default;
+ 
+-std::vector<uint8_t> DxbcShaderTranslator::CreateDepthOnlyPixelShader() {
++std::vector<uint8_t> DxbcShaderTranslator::CreateDepthOnlyPixelShader(bool rov_sample_counts) {
+   is_depth_only_pixel_shader_ = true;
+   // TODO(Triang3l): Handle in a nicer way (is_depth_only_pixel_shader_ is a
+   // leftover from when a Shader object wasn't used during translation).
+   Shader shader(xenos::ShaderType::kPixel, 0, nullptr, 0);
+   shader.AnalyzeUcode(instruction_disassembly_buffer_);
+-  Shader::Translation& translation = *shader.GetOrCreateTranslation(0);
++  Modification modification;
++  modification.pixel.rov_sample_counts = rov_sample_counts;
++  Shader::Translation& translation = *shader.GetOrCreateTranslation(modification.value);
+   TranslateAnalyzedShader(translation);
+   is_depth_only_pixel_shader_ = false;
+   return translation.translated_binary();
+diff --git a/src/graphics/pipeline/shader/dxbc_translator_om.cpp b/src/graphics/pipeline/shader/dxbc_translator_om.cpp
+--- a/src/graphics/pipeline/shader/dxbc_translator_om.cpp
++++ b/src/graphics/pipeline/shader/dxbc_translator_om.cpp
+@@ -490,6 +490,11 @@
+     // temp.w = free
+     a_.OpIf(true, temp_w_src);
+ 
++    // The failure category is local to this sample. Stencil failure takes
++    // precedence over depth failure, matching the guest's separate counters.
++    const bool count_samples = GetDxbcShaderModification().pixel.rov_sample_counts;
++    const uint32_t count_temp = count_samples ? PushSystemTemp() : UINT32_MAX;
++    if (count_samples) a_.OpMov(dxbc::Dest::R(count_temp, 0b0001), dxbc::Src::LU(0));
+     uint32_t sample_temp = PushSystemTemp();
+     dxbc::Dest sample_temp_x_dest(dxbc::Dest::R(sample_temp, 0b0001));
+     dxbc::Src sample_temp_x_src(dxbc::Src::R(sample_temp, dxbc::Src::kXXXX));
+@@ -673,6 +678,8 @@
+     // Depth test has failed.
+     a_.OpElse();
+     {
++      if (count_samples)
++        a_.OpMov(dxbc::Dest::R(count_temp, 0b0001), dxbc::Src::LU(2));
+       // Exclude the bit from the covered sample mask.
+       // sample_temp.x = old depth/stencil
+       // sample_temp.y = old depth
+@@ -805,6 +812,8 @@
+       // Stencil test has failed.
+       a_.OpElse();
+       {
++        if (count_samples)
++          a_.OpMov(dxbc::Dest::R(count_temp, 0b0001), dxbc::Src::LU(6));
+         // Extract the stencil fail operation.
+         // sample_temp.x = old depth/stencil
+         // sample_temp.y = stencil operation
+@@ -1001,8 +1010,20 @@
+       a_.OpEndIf();
+     }
+ 
+-    // Release sample_temp.
++    // Count failures where the existing early/late test ran, before an early
++    // return can discard the quad. No depth/stencil or coverage order changes.
++    if (count_samples) {
++      const auto counter = dxbc::Dest::U(uav_index_edram_, uint32_t(UAVRegister::kEdram));
++      a_.OpIf(true, dxbc::Src::R(count_temp, dxbc::Src::kXXXX));
++      a_.OpIAdd(dxbc::Dest::R(count_temp, 0b0001),
++                dxbc::Src::R(count_temp, dxbc::Src::kXXXX), dxbc::Src::LU(xenos::kEdramSizeBytes / 4));
++      a_.OpAtomicIAdd(counter, dxbc::Src::R(count_temp, dxbc::Src::kXXXX), 1, dxbc::Src::LU(1));
++      a_.OpAtomicIAdd(counter, dxbc::Src::LU(xenos::kEdramSizeBytes / 4), 1, dxbc::Src::LU(1));
++      a_.OpEndIf();
++    }
++    // Release sample_temp and the optional failure category.
+     PopSystemTemp();
++    if (count_samples) PopSystemTemp();
+ 
+     // Close the sample conditional.
+     a_.OpEndIf();
+@@ -1864,6 +1885,20 @@
+     }
+   } else {
+     ROV_DepthStencilTest();
++  }
++
++  if (GetDxbcShaderModification().pixel.rov_sample_counts) {
++    // Passing samples are counted only after guest kill, alpha test, alpha to
++    // coverage and depth/stencil. Host occlusion queries cannot see ROV depth.
++    if (uav_index_edram_ == kBindingIndexUnallocated) uav_index_edram_ = uav_count_++;
++    const auto counter = dxbc::Dest::U(uav_index_edram_, uint32_t(UAVRegister::kEdram));
++    for (uint32_t i = 0; i < 4; ++i) {
++      a_.OpAnd(temp_x_dest, dxbc::Src::R(system_temp_rov_params_, dxbc::Src::kXXXX), dxbc::Src::LU(1u << i));
++      a_.OpIf(true, temp_x_src);
++      a_.OpAtomicIAdd(counter, dxbc::Src::LU(xenos::kEdramSizeBytes / 4 + 4), 1, dxbc::Src::LU(1));
++      a_.OpAtomicIAdd(counter, dxbc::Src::LU(xenos::kEdramSizeBytes / 4), 1, dxbc::Src::LU(1));
++      a_.OpEndIf();
++    }
+   }
+ 
+   // system_temp_rov_params_.y (the depth / stencil sample address) is not

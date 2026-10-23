@@ -23,6 +23,10 @@ file's SHA-256, the SHA-256 of every file it touches before (`base_files`) and
 after the complete patch stack (`files`), and its test. When patches share a
 file, `base_files` records the input to that patch and `files` records the final
 stack hash in every affected entry. Apply in order; revert in reverse order.
+When extending the stack, the official applicator recognizes an intermediate
+checkout only when every patched path matches a complete prefix reconstructed
+from `base_files`. Missing newly introduced files are checked too. The final
+stack hashes remain mandatory after application.
 
 | Patch | Fixes | Test (`ctest -R "sdkcheck[.]"`) |
 |---|---|---|
@@ -1606,3 +1610,70 @@ backend. Antes do patch, o Vulkan rejeitou o draw inativo
 (`inactive fetch: rejected=1 failed=1`). `sdkcheck.D3D12-predicated-vertex-fetch`
 é o controle: passou antes e depois. `sdkcheck.inactive-vertex-fetch` passa a
 cobrir a prova compartilhada com e sem descarte de denormais.
+
+## 0146 — escrita de registradores em lote e bindings com memória coerente
+
+Adapta 0029 (somente Type0 em lote) e 0032 do Forza Horizon 1: ReImagined
+`cb676f7e07149b4cc964dc53d49147dd268939b3` (MIT; avisos em
+`licenses/forza-reimagined.txt` e `licenses/recompiled-halo-reach.txt`). Type0
+consecutivo usa as rotas existentes de constantes em bloco. Escritas repetidas
+no mesmo registrador continuam sequenciais; scratch, COHER e gamma mantêm seus
+efeitos. Não reintroduz a tabela KnownRegisters nem o 0073 retirado.
+
+Nos dois backends Xenos, descritores fetch idênticos preservam os bindings;
+alterações parciais invalidam a faixa que efetivamente mudou. Isso exigiu
+corrigir antes uma pré-condição: o cache de vertex residency do SDK pulava
+`RequestRange` apenas por igualdade de endereço/tamanho, mesmo após CPU writes.
+`SharedMemory` publica uma geração atômica após invalidações CPU, escritas GPU,
+reset de páginas no fim de frame e invalidação explícita. Cada draw confere uma
+vez essa geração e descarta a residência antiga no próprio command processor.
+Os locks, callbacks, proteções de página e política `clear_memory_page_state`
+continuam em vigor. Não altera conteúdo, readback, barriers, FPS ou vblank.
+
+`sdkcheck.register-memory-coherence` usa o CommandProcessor e SharedMemory reais,
+sem GPU: Type0 normal/com wrap, writes com efeitos, intervalos fetch/parciais,
+invalidação CPU e GPU e preservação de páginas GPU no reset. O teste também
+compila contra a base para demonstrar falha funcional anterior. Ganho em jogo
+e aceitação visual dependem da matriz G3; este teste não os comprova.
+
+## 0147 — separar histórico de readback por representação de resolve
+
+Adapta 0048 da mesma revisão do Forza ReImagined (MIT). Um resolve de cor para
+uma faixa antes usada por depth deixava o modo `some` reutilizar a entrada
+antiga; `fast` podia devolver o depth anterior. A chave passa a incluir faixa,
+source depth/color e formato/number/endian/swap/array/slice do destino. Os
+modos, fences, readbacks e expiração dos buffers continuam iguais. Não usa
+endereços, shaders ou identificação de título.
+
+A referência mistura a assinatura num único hash de 64 bits; esta adaptação
+guarda os três campos e compara igualdade, de modo que uma colisão de hash não
+una resolves diferentes. MEMEXPORT mantém a identidade anterior. Exponent
+bias, base EDRAM e dimensões não fragmentam o histórico de um mesmo pass.
+`sdkcheck.resolve-readback-identity` cobre campos, estabilidade e colisões
+forçadas de hash. A fotografia ou outro readback em jogo ainda exige validação.
+
+## 0151 / 0155 — temporário de arredondamento do MEMEXPORT assinado
+
+Corrige o destino de uma instrução BFI no tradutor DXBC: a construção de ±0,5
+sobrescrevia o valor exportado e deixava `round_bias_temp` sem definição antes
+do ADD. O BFI passa a escrever no temporário alocado, preservando o valor para
+a soma e a conversão de float para inteiro. O 0155 corrige também a segunda
+ocorrência, no packing separado de quatro componentes de 16 bits. Aplica-se ao packing inteiro ou
+normalizado assinado compartilhado por Native e Xenos D3D12, sem condição por
+título. Alteração própria sobre o SDK pinado; cabeçalho/licença BSD upstream
+preservados. Execução de validação do MEMEXPORT fica pendente por instrução do
+mantenedor; compilar não certifica os resultados GPU.
+
+## 0152 — reutilizar a memória de intervalos de SharedMemory
+
+Adapta somente a reutilização de `merged_ranges` do patch 0031 do Forza
+ReImagined `cb676f7e07149b4cc964dc53d49147dd268939b3`, MIT, avisos acima.
+O scratch pertence ao command processor, como `upload_ranges_`, e conserva a
+capacidade entre chamadas. Cada lote limpa o conteúdo antes de validar,
+ordenar e juntar os intervalos. Preserva a sincronização das páginas, callbacks,
+proteções e uploads; não incorpora o fast path sem lock da referência.
+
+Casos adicionais de `sdkcheck.register-memory-coherence` cobrem lote rejeitado
+após prefixo válido, lote vazio, faixa seguinte disjunta e sobreposições fora de
+ordem. Foram preparados sem execução nesta retomada. Ganho de tempo/alocações
+em cenário real ainda não foi medido.

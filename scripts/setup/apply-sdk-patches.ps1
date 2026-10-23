@@ -53,11 +53,48 @@ function GitSdk([string[]]$gitArgs, [switch]$Quiet) {
 }
 function IsApplied([string]$path) { (GitSdk @('apply', '--reverse', '--check', $path) -Quiet) -eq 0 }
 
+# The lock records the final hashes after every patch, including patches not yet
+# applied to this checkout. When extending the chain, earlier reverse-checks can
+# fail because their context was changed by another already-applied patch. Match
+# an exact prefix snapshot, reconstructed backwards from the recorded base_files,
+# so that applying new patches does not require temporarily weakening the lock.
+# Check every tracked patch path, including absence before a file was introduced.
+$appliedPrefix = 0
+if (-not $Revert) {
+    $snapshot = @{}
+    foreach ($p in $patches) {
+        foreach ($f in $p.files.PSObject.Properties) {
+            if ($snapshot.ContainsKey($f.Name) -and $snapshot[$f.Name] -ne $f.Value) {
+                throw "$($f.Name): inconsistent final hashes in deps.lock.json"
+            }
+            $snapshot[$f.Name] = $f.Value
+        }
+    }
+    $actualHashes = @{}
+    foreach ($name in $snapshot.Keys) { $actualHashes[$name] = FileHash $name }
+    for ($count = $patches.Count; $count -ge 0; --$count) {
+        $matches = $true
+        foreach ($name in $snapshot.Keys) {
+            if ($actualHashes[$name] -ne $snapshot[$name]) { $matches = $false; break }
+        }
+        if ($matches) { $appliedPrefix = $count; break }
+        if ($count -eq 0) { break }
+        $p = $patches[$count - 1]
+        $base = @{}
+        foreach ($f in $p.base_files.PSObject.Properties) { $base[$f.Name] = $f.Value }
+        foreach ($f in $p.files.PSObject.Properties) {
+            $snapshot[$f.Name] = if ($base.ContainsKey($f.Name)) { $base[$f.Name] } else { '' }
+        }
+    }
+}
+
 $ordered = if ($Revert) { [array]::Reverse($patches); $patches } else { $patches }
 $bad = 0
+$patchIndex = 0
 foreach ($p in $ordered) {
     $path = PatchPath $p
-    $applied = IsApplied $path
+    $applied = (-not $Revert -and $patchIndex -lt $appliedPrefix) -or (IsApplied $path)
+    ++$patchIndex
     # A later patch may change lines introduced by this patch, so reverse-check
     # alone is insufficient. Exact final hashes (also checked below) establish
     # the fully applied state without accepting untracked edits. Revert still

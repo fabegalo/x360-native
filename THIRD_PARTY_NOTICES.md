@@ -53,6 +53,15 @@ avisos ReXGlue/Xenia existentes. `texture_load.{h,cpp}` adapta o planejamento
 de carga do cache D3D12 do SDK pinado e usa seus shaders, sob os mesmos avisos
 ReXGlue/Xenia. Nenhum módulo original de dashboard é compartilhado por isso.
 
+Os patches SDK 0146, 0147 e 0152 adaptam os patches 0029/0032, 0048 e parte do 0031 do
+[Forza Horizon 1: ReImagined](https://github.com/Dyotson/ForzaHorizon1-ReImagined),
+revisão `cb676f7e07149b4cc964dc53d49147dd268939b3`, Copyright 2026 Dyotson
+e colaboradores, [MIT](licenses/forza-reimagined.txt). Os patches 0029/0032
+vieram originalmente do RecompiledHaloReach; preserva-se também seu
+[aviso MIT](licenses/recompiled-halo-reach.txt). A adaptação mantém os avisos
+ReXGlue/Xenia e acrescenta invalidação de residência por geração de memória e
+igualdade estrutural das chaves de readback, sem alterações de FPS ou efeitos.
+
 O pacote contém `x360-native.exe`, `app/x360n.exe` e `app/x360n-extract.exe`.
 Não contém jogos, dashboards, fontes Xbox, firmware, chaves, saída AOT, runtime
 ReXGlue completo, FFmpeg, disasm GNU, SDL binário nem ferramentas de compilação.
