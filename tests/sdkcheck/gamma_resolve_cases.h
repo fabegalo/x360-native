@@ -90,6 +90,7 @@ struct Case {
   xenos::ColorFormat format = xenos::ColorFormat::k_8_8_8_8;
   bool gamma = true, source64 = false, fixed16 = false, swap = false,
        partial = false, array = false, uniform_fixed16 = false;
+  bool uniform_rgb565 = false;
   unsigned slice = 0, endian = 0;
   std::string Name() const {
     return "msaa=" + std::to_string(1u << msaa) +
@@ -167,6 +168,12 @@ inline int16_t FixedSource(unsigned p, unsigned sample, unsigned channel) {
                                0,      1,      1023,   1024,  16384, 32767};
   return codes[(p + sample * 3 + channel * 5) % 12];
 }
+inline unsigned FixtureChannel(const Case& c, unsigned p, unsigned sample,
+                               unsigned channel, unsigned subx, unsigned suby) {
+  constexpr unsigned uniform[] = {64, 128, 192, 255};
+  return c.uniform_rgb565 ? uniform[channel]
+                         : Channel(p, sample, channel, subx, suby);
+}
 inline int16_t FixedCode(const Case& c, unsigned p, unsigned sample, unsigned channel) {
   constexpr int16_t uniform[] = {1024, 512, 256, 2048};
   return c.uniform_fixed16 ? uniform[channel] : FixedSource(p, sample, channel);
@@ -193,7 +200,7 @@ inline void Fill(const Case &c, void *input) {
         unsigned p = (y / c.scale) * c.width + x / c.scale;
         unsigned channels[4];
         for (unsigned ch = 0; ch < 4; ++ch)
-          channels[ch] = Channel(p, sample, ch, x % c.scale, y % c.scale);
+          channels[ch] = FixtureChannel(c, p, sample, ch, x % c.scale, y % c.scale);
         auto address = EdramAddress(c, x, y, sample);
         if (address + (c.source64 ? 8u : 4u) > kEdramBytes)
           throw std::runtime_error("fixed16 fixture EDRAM capacity");
@@ -227,7 +234,7 @@ inline std::array<float, 4> Values(const Case &c, unsigned x, unsigned y) {
     unsigned sum = 0;
     float fixed = 0;
     for (unsigned s = first; s < first + count; ++s) {
-      auto g = Channel(p, s, ch, x % c.scale, y % c.scale);
+      auto g = FixtureChannel(c, p, s, ch, x % c.scale, y % c.scale);
       sum += kDecode[g];
       float v = float(g) * (1.f / 255);
       if (c.fixed16)
@@ -252,6 +259,37 @@ inline std::array<float, 4> Values(const Case &c, unsigned x, unsigned y) {
 }
 inline unsigned Fixed(float f, unsigned bits) {
   return unsigned(std::clamp(f, 0.f, 1.f) * float((1u << bits) - 1) + .5f);
+}
+// RGB565 reference from the uploaded integer codes, using rational arithmetic
+// throughout averaging, exponent bias and quantization. No shader float math.
+inline unsigned Rgb565Channel(const Case& c, unsigned x, unsigned y,
+                             unsigned channel, unsigned bits) {
+  const unsigned first = c.select < 4 ? c.select : c.select == 5 ? 2 : 0;
+  const unsigned count = c.select < 4 ? 1 : c.select == 6 ? 4 : 2;
+  uint64_t numerator = 0;
+  uint64_t denominator = uint64_t(count) * (c.source64 ? (1u << 24) : 255u);
+  for (unsigned s = first; s < first + count; ++s) {
+    const unsigned code = FixtureChannel(c, (y / c.scale) * c.width + x / c.scale,
+                                  s, channel, x % c.scale, y % c.scale);
+    if (c.source64) {
+      const unsigned half = Half(float(code) * (1.f / 255));
+      const unsigned exponent = half >> 10, mantissa = half & 1023;
+      numerator += exponent ? uint64_t(1024 + mantissa) << (exponent - 1)
+                            : mantissa;
+    } else {
+      numerator += code;
+    }
+  }
+  if (c.bias >= 0) numerator <<= c.bias;
+  else denominator <<= -c.bias;
+  const unsigned maximum = (1u << bits) - 1;
+  return numerator >= denominator ? maximum
+      : unsigned((numerator * maximum + denominator / 2) / denominator);
+}
+inline unsigned Rgb565(const Case& c, unsigned x, unsigned y) {
+  return Rgb565Channel(c, x, y, c.swap ? 2 : 0, 5) |
+         (Rgb565Channel(c, x, y, 1, 6) << 5) |
+         (Rgb565Channel(c, x, y, c.swap ? 0 : 2, 5) << 11);
 }
 inline unsigned DestinationAddress(const Case &c, unsigned x, unsigned y) {
   unsigned hx = x + (c.partial ? 8 * c.scale : 0),
@@ -282,6 +320,8 @@ inline std::vector<unsigned char> Expected(const Case &c, bool dxbc = false) {
                               ? Fixed(v[0], 8) | (Fixed(v[1], 8) << 8)
                               : Fixed(v[0], 5) | (Fixed(v[1], 6) << 5) |
                                     (Fixed(v[2], 5) << 11);
+        if (c.format == xenos::ColorFormat::k_5_6_5 && !c.gamma && !c.fixed16)
+          packed = Rgb565(c, x, y);
         uint16_t word = uint16_t(packed);
         std::memcpy(bytes.data() + address, &word, 2);
       } else if (c.log == 2) {
@@ -459,6 +499,51 @@ inline std::vector<Case> Fixed16ExtendedCases() {
           c.source64 = wide;
           c.format = format;
           c.log = log;
+          c.bias = bias;
+          cases.push_back(c);
+        }
+  }
+  return cases;
+}
+inline std::vector<Case> Rgb565ExtendedCases() {
+  std::vector<Case> cases;
+  for (unsigned msaa : {0u, 1u, 2u}) {
+    const std::vector<unsigned> selections = msaa == 0 ? std::vector<unsigned>{0}
+        : msaa == 1 ? std::vector<unsigned>{0, 1, 4}
+                    : std::vector<unsigned>{0, 1, 2, 3, 4, 5, 6};
+    for (unsigned select : selections)
+      for (bool wide : {false, true})
+        for (bool swap : {false, true})
+          for (unsigned scale : {1u, 2u, 3u, 4u}) {
+            Case c;
+            c.gamma = false;
+            c.format = xenos::ColorFormat::k_5_6_5;
+            c.log = 1;
+            c.msaa = msaa;
+            c.select = select;
+            c.source64 = wide;
+            c.swap = swap;
+            c.scale = scale;
+            c.width = 96;
+            c.height = 40;
+            c.partial = true;
+            c.array = scale == 1;
+            c.slice = 7;
+            c.endian = (select + scale + unsigned(swap)) % 6;
+            c.bias = int((select + scale) % 3) - 1;
+            cases.push_back(c);
+          }
+    for (bool wide : {false, true})
+      for (bool swap : {false, true})
+        for (int bias : {-32, -16, -8, -1, 0, 2, 8, 31}) {
+          Case c;
+          c.gamma = false;
+          c.format = xenos::ColorFormat::k_5_6_5;
+          c.log = 1;
+          c.msaa = msaa;
+          c.select = msaa == 0 ? 0 : msaa == 1 ? 4 : 6;
+          c.source64 = wide;
+          c.swap = swap;
           c.bias = bias;
           cases.push_back(c);
         }

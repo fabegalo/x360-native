@@ -121,6 +121,36 @@ int main() {
   check(sizeof(draw_util::ResolveCopyShaderConstants) == 20 &&
             sizeof(draw_util::ResolveCopyShaderConstants::DestRelative) == 16,
         "push constant ABI preserved");
+  check(unsigned(xenos::ColorFormat::k_5_6_5) == 4 &&
+            unsigned(xenos::ColorFormat::k_8) == 2,
+        "historical format=2 differences are R8, not RGB565");
+  check(XePackR5G6B5({1, 0, 0}, 0) == 0x001f &&
+            XePackR5G6B5({0, 1, 0}, 0) == 0x07e0 &&
+            XePackR5G6B5({0, 0, 1}, 0) == 0xf800 &&
+            XePackR5G6B5({1, 1, 1}, 0) == 0xffff,
+        "RGB565 independent channel masks and endpoints");
+  for (unsigned h = 0; h <= 0x3c00; ++h) {
+    const unsigned e = h >> 10, m = h & 1023;
+    const uint64_t units = e ? uint64_t(1024 + m) << (e - 1) : m;
+    const float value = float(double(units) / 16777216.0);
+    const unsigned r = unsigned((units * 31 + 8388608) / 16777216);
+    const unsigned g = unsigned((units * 63 + 8388608) / 16777216);
+    check(XePackR5G6B5({value, value, value}, 0) ==
+              (r | (g << 5) | (r << 11)),
+          "all binary16 codes in [0,1]: shader RGB565 vs integer rational");
+  }
+  for (unsigned bits : {5u, 6u}) {
+    const unsigned maximum = (1u << bits) - 1;
+    check(XePackFixed(-1, bits, 0) == 0 &&
+              XePackFixed(2, bits, 0) == maximum &&
+              XePackFixed(.5f, bits, 0) == (1u << (bits - 1)),
+          "unsigned normalized clamp and half-up quantization");
+    check(XePackFixed(1, bits, 1) == maximum / 2 &&
+              XePackFixed(-1, bits, 1) == (maximum / 2 + 2) &&
+              XePackFixed(2, bits, 2) == 2 &&
+              XePackFixed(-2, bits, 3) == maximum - 1,
+          "number format affects pack independently of channel order");
+  }
   std::cout << checks - failures << '/' << checks << " gamma CPU checks passed"
             << std::endl;
   return failures ? 1 : 0;

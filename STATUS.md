@@ -1,10 +1,23 @@
 # STATUS
 
+Complemento de 25/10 — **investigação RGB565 sobre `5b87e8c`**:
+os logs 0201 identificam as 45 diferenças/API como `format=2` (**R8**),
+não RGB565 (`format=4`). Os 72 controles RGB565 originais passam nas duas APIs.
+A ampliação para 344 casos/API encontrou 120 falhas preexistentes de MSAA
+escalado; referência com helpers Canary e oráculo racional concordam nos 344.
+Candidato local correto numericamente foi rejeitado por regressão Vulkan;
+renderer, SDK, lock e todos os 60 recursos full/gamma/fixed16 preservados.
+As 45 falhas R8 continuam reproduzíveis, sem mudar expectativas. Sem novo
+patch SDK ou aceite de gameplay. Próxima prioridade: pipeline Xenos sintético
+rasterização → EDRAM → resolve → readback em D3D12/Vulkan.
+[Evidências, reprodução e pendências](docs/reports/graphics/rgb565-resolve-2026-10-25.md).
+
 Complemento de 25/10 — **0201: full resolve fixed16** sobre `c6f091e`:
 confirmados bytecodes antigos com `32/32767` e clamp em −1; s5.10 exige
 `1/1024` e preservação dos negativos. As 48 divergências/API foram eliminadas.
 RTX 4070: 864 fixed16/API, 684 gamma/API e 504 controles/API aprovados;
-45 diferenças RGB565/API preservadas separadamente. CPU: 291.132 verificações
+45 diferenças R8/API preservadas separadamente (identificação corrigida acima).
+CPU: 291.132 verificações
 e 11 regressões focadas. Release Xenos/Native com D3D12/Vulkan, regeneração
 determinística e replay de 188 patches/256 hashes aprovados, SDK pinado mantido.
 Compute headless não certifica rasterização completa nem gameplay.

@@ -90,9 +90,14 @@ consomem os headers versionados e dispensam compiladores de manutenção.
 - **684 gamma/API** exatos: 589 não FP16 idênticos entre APIs e 95 FP16
   conferidos segundo RTZ/RTE. **504 controles/API** permanecem byte a byte
   iguais ao readback dos recursos SDK originais.
-- **45 diferenças RGB565/API preservadas e separadas**: nove com fonte 64bpp
+- **45 diferenças R8/API preservadas e separadas**: nove com fonte 64bpp
   sem swap, 18 com swap/fonte 32bpp e 18 com swap/fonte 64bpp. Não há correção
   nem novo aceite de fidelidade desse formato.
+
+**Correção de identificação, 25/10:** a descrição RGB565 originalmente usada
+neste relatório estava errada. O próprio `gpu-accepted.log` registra `format=2`, que é R8;
+RGB565 é `format=4`. As contagens 9/18/18 e os readbacks permanecem válidos.
+[Investigação posterior e reprodução](rgb565-resolve-2026-10-25.md).
 
 A ampliação demonstrou dois casos não cobertos pelo oráculo anterior:
 alpha ausente em resolve **escalar** R8 de fonte 16_16 é 1 antes da média/bias;

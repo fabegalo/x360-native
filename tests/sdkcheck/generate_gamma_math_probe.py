@@ -16,8 +16,26 @@ pixel = (Path(sys.argv[1]).parent / "pixel_formats.xesli").read_text()
 first = pixel.index("float4_xe XeUnpackR16EdramX4(")
 end = pixel.index("}", first) + 1
 functions.append(pixel[first:end])
+for signature in ("uint XePackFixed(", "uint3_xe XePackFixed3(",
+                  "uint XePackR5G6B5("):
+    first = pixel.index(signature)
+    brace = pixel.index("{", first)
+    depth, end = 1, brace + 1
+    while depth:
+        depth += (pixel[end] == "{") - (pixel[end] == "}")
+        end += 1
+    functions.append(pixel[first:end])
 Path(sys.argv[2]).write_text("// Extracted from the production shader; do not edit.\n"
-                            "using uint = unsigned;\nusing std::min;\n" + r'''
+                            "using uint = unsigned;\nusing std::min;\nusing std::max;\n" + r'''
+constexpr uint kXenosSurfaceNumberFormat_SignedRepeatingFraction = 1;
+constexpr uint kXenosSurfaceNumberFormat_UnsignedInteger = 2;
+constexpr uint kXenosSurfaceNumberFormat_SignedInteger = 3;
+inline float saturate_xe(float value) { return std::clamp(value, 0.f, 1.f); }
+struct float3_xe { float x, y, z; };
+struct uint3_xe {
+  uint x, y, z, r, g, b;
+  uint3_xe(uint a, uint c, uint d) : x(a), y(c), z(d), r(a), g(c), b(d) {}
+};
 using uint4_xe = std::array<uint32_t, 4>;
 struct int4_xe {
   std::array<int32_t, 4> v;

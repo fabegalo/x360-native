@@ -22,6 +22,7 @@ def main():
     p.add_argument("--non-gamma", action="store_true")
     p.add_argument("--fixed16", action="store_true")
     p.add_argument("--source64", action="store_true")
+    p.add_argument("--rgb565", action="store_true")
     p.add_argument("--json", type=Path)
     args = p.parse_args()
     if not 1 <= args.trials <= 10 or any(n not in (1, 2, 4) for n in args.msaa):
@@ -42,6 +43,8 @@ def main():
                     command += ["--bench-fixed16"]
                 if args.source64:
                     command += ["--source64"]
+                if args.rgb565:
+                    command += ["--bench-rgb565"]
                 result = subprocess.run(command, capture_output=True, text=True, timeout=90)
                 print(f"trial={trial+1} samples={samples} variant={label}", flush=True)
                 print(result.stdout, result.stderr, flush=True)
@@ -51,6 +54,7 @@ def main():
                     if match:
                         records.append(dict(trial=trial+1, samples=samples, variant=label,
                                             fixed16=args.fixed16, source64=args.source64,
+                                            rgb565=args.rgb565,
                                             api=match[1], metric=match[2],
                                             p50=float(match[3]), p95=float(match[4]), p99=float(match[5])))
     if args.json:

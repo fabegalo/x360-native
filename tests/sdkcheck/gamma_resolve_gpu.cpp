@@ -91,14 +91,31 @@ bool bench_gamma = true;
 bool bench_fixed16 = false, bench_source64 = false;
 bool fixed16_only = false;
 bool extended_fixed16 = false;
+bool rgb565_only = false;
+bool legacy_only = false;
+bool extended_rgb565 = false;
+bool bench_rgb565 = false;
+bool reference_check = false;
 std::vector<Case> TestCases() {
   auto cases = Cases();
   if (extended_fixed16) {
     auto extra = Fixed16ExtendedCases();
     cases.insert(cases.end(), extra.begin(), extra.end());
   }
+  if (extended_rgb565) {
+    auto extra = Rgb565ExtendedCases();
+    cases.insert(cases.end(), extra.begin(), extra.end());
+  }
   if (fixed16_only)
     std::erase_if(cases, [](const Case& c) { return !c.fixed16; });
+  if (rgb565_only)
+    std::erase_if(cases, [](const Case& c) {
+      return c.gamma || c.fixed16 || c.format != xenos::ColorFormat::k_5_6_5;
+    });
+  if (legacy_only)
+    std::erase_if(cases, [](const Case& c) {
+      return c.gamma || c.fixed16 || c.format != xenos::ColorFormat::k_8;
+    });
   return cases;
 }
 unsigned bench_msaa = 2;
@@ -752,7 +769,8 @@ unsigned Check(const Case &c, const std::vector<unsigned char> &got,
   for (unsigned i = 0; i < kDestBytes; ++i)
     if (got[i] != expected[i]) {
       if (bad == 0) {
-        std::cerr << c.Name() << " byte=" << i << " got=" << unsigned(got[i])
+        std::cerr << (dx ? "D3D12 " : "Vulkan ") << c.Name()
+                  << " byte=" << i << " got=" << unsigned(got[i])
                   << " expected=" << unsigned(expected[i]) << '\n';
         for (unsigned y = 0; y < c.height * c.scale; ++y)
           for (unsigned x = 0; x < c.width * c.scale; ++x) {
@@ -804,6 +822,9 @@ template <class Backend> void Validate(const char *name) {
         original = std::make_unique<Backend>(baseline_directory);
       auto before = original->Run(c);
       Need(result.data == before.data, "non-gamma baseline regression");
+      if (rgb565_only || legacy_only || c.format == xenos::ColorFormat::k_5_6_5)
+        Need(Check(c, result.data, std::is_same_v<Backend, Dx>) == 0,
+             "focused independent oracle");
       ++controls;
       if (result.data != Expected(c, std::is_same_v<Backend, Dx>))
         ++legacy_differences;
@@ -826,6 +847,7 @@ void ValidateBoth() {
   std::map<std::string, unsigned> legacy_groups;
   unsigned fixed = 0, fixed_bad_dx = 0, fixed_bad_vk = 0,
            fixed_identical = 0, fixed_half = 0, fixed_half_different = 0;
+  unsigned rgb_bad_dx = 0, rgb_bad_vk = 0;
   for (const auto &c : TestCases()) {
     auto a = dx.Run(c), b = vk.Run(c);
     if (c.fixed16) {
@@ -863,13 +885,23 @@ void ValidateBoth() {
       Need(a.data == old_dx.data && b.data == old_vk.data,
            "non-gamma baseline regression");
       const bool legacy_difference = a.data != Expected(c, true);
+      if (rgb565_only || legacy_only) {
+        Check(c, a.data, true);
+        Check(c, b.data, false);
+      }
       legacy_dx += legacy_difference;
       if (legacy_difference) {
-        auto key = c.fixed16 ? "fixed16 full resolve" : "format=" + std::to_string(unsigned(c.format)) +
+        auto key = std::string(c.format == xenos::ColorFormat::k_8 ? "R8" :
+                              c.format == xenos::ColorFormat::k_5_6_5 ? "RGB565" : "other") +
+            " format=" + std::to_string(unsigned(c.format)) +
             " swap=" + std::to_string(c.swap) + " source64=" + std::to_string(c.source64);
         ++legacy_groups[key];
       }
       legacy_vk += b.data != Expected(c, false);
+      if (c.format == xenos::ColorFormat::k_5_6_5) {
+        rgb_bad_dx += legacy_difference;
+        rgb_bad_vk += b.data != Expected(c, false);
+      }
       ++controls;
     }
     ++passed;
@@ -891,6 +923,25 @@ void ValidateBoth() {
             << fixed_half << " FP16 (" << fixed_half_different
             << " differ: DXBC RTZ / SPIR-V RTE)\n";
   Need(!fixed_bad_dx && !fixed_bad_vk, "fixed16 independent oracle");
+  Need(!rgb_bad_dx && !rgb_bad_vk, "RGB565 independent rational oracle");
+  Need(!legacy_only || (!legacy_dx && !legacy_vk), "R8 independent oracle");
+}
+void ValidateReference() {
+  Need(rgb565_only || legacy_only, "reference check requires a focused format");
+  Need(!shader_directory.empty(), "reference check requires --shader-dir");
+  Dx dx;
+  Vk vk;
+  unsigned cases = 0, failures = 0;
+  for (const auto& c : TestCases()) {
+    auto a = dx.Run(c), b = vk.Run(c);
+    failures += Check(c, a.data, true) != 0;
+    failures += Check(c, b.data, false) != 0;
+    Need(a.data == b.data, "D3D12/Vulkan reference byte equivalence");
+    ++cases;
+  }
+  std::cout << "Reference kernels: " << cases << " cases/API, " << failures
+            << " oracle failures; D3D12/Vulkan byte-identical\n";
+  Need(!failures, "reference independent oracle");
 }
 void Percentiles(const char *api, const char *metric,
                  std::vector<double> values) {
@@ -915,6 +966,14 @@ template <class Backend> void Bench(const char *name) {
   c.select = c.msaa == 0 ? 0 : c.msaa == 1 ? 4 : 6;
   c.log = 2;
   c.format = xenos::ColorFormat::k_8_8_8_8;
+  if (bench_rgb565) {
+    c.gamma = false;
+    c.log = 1;
+    c.format = xenos::ColorFormat::k_5_6_5;
+    c.scale = 2;
+    c.bias = 0;
+    c.uniform_rgb565 = true;
+  }
   // Keep the GPU busy across timestamp batches; short batches let readback
   // and fence latency dominate the duty cycle and destabilize clock states.
   constexpr unsigned repeats = 256;
@@ -936,9 +995,10 @@ template <class Backend> void Bench(const char *name) {
   std::sort(gpu.begin(), gpu.end());
   std::cout << name << " samples=" << (1u << c.msaa) << " gamma=" << c.gamma
             << " fixed16=" << c.fixed16 << " source64=" << c.source64
-            << " pixels/resolve=" << c.width * c.height << " batch=" << repeats
+            << " scale=" << c.scale
+            << " pixels/resolve=" << c.width * c.height * c.scale * c.scale << " batch=" << repeats
             << " throughput pixels/s="
-            << double(c.width * c.height) * 1e9 / gpu[(gpu.size() + 1) / 2 - 1]
+            << double(c.width * c.height * c.scale * c.scale) * 1e9 / gpu[(gpu.size() + 1) / 2 - 1]
             << " input setup ns=" << first.upload_ns
             << " fixture bytes=" << kEdramBytes * 2 + kDestBytes * 2 + 16
             << '\n';
@@ -957,6 +1017,16 @@ int main(int argc, char **argv) {
         fixed16_only = true;
       else if (a == "--extended-fixed16")
         extended_fixed16 = true;
+      else if (a == "--rgb565-only")
+        rgb565_only = true;
+      else if (a == "--legacy-r8-only")
+        legacy_only = true;
+      else if (a == "--extended-rgb565")
+        extended_rgb565 = true;
+      else if (a == "--bench-rgb565")
+        bench_rgb565 = true;
+      else if (a == "--reference-check")
+        reference_check = true;
       else if (a == "--non-gamma")
         bench_gamma = false;
       else if (a == "--bench-fixed16") {
@@ -979,7 +1049,9 @@ int main(int argc, char **argv) {
       else
         throw std::runtime_error("unknown argument");
     }
-    if (api == "both" && !bench)
+    if (reference_check)
+      ValidateReference();
+    else if (api == "both" && !bench)
       ValidateBoth();
     else {
       if (api != "vulkan") {
