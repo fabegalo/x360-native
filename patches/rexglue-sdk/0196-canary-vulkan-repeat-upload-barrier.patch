@@ -1,0 +1,20 @@
+diff --git a/src/graphics/vulkan/texture_cache.cpp b/src/graphics/vulkan/texture_cache.cpp
+--- a/src/graphics/vulkan/texture_cache.cpp
++++ b/src/graphics/vulkan/texture_cache.cpp
+@@ -1757,6 +1757,16 @@
+         vulkan_texture.image(), ui::vulkan::util::InitializeSubresourceRange(),
+         texture_src_stage_mask, texture_dst_stage_mask, texture_src_access_mask,
+         texture_dst_access_mask, texture_old_layout, texture_new_layout);
++  } else {
++    // Same layout/usage, but an earlier upload in this submission may have
++    // written the image. Order the next copy after it, even with equal masks.
++    // Xenia Canary c8f214e2a9b0209ca8a0ad6cb3dfb155fe545ae2.
++    command_processor_.PushImageMemoryBarrier(
++        vulkan_texture.image(), ui::vulkan::util::InitializeSubresourceRange(),
++        VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
++        VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_TRANSFER_WRITE_BIT,
++        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
++        VK_QUEUE_FAMILY_IGNORED, VK_QUEUE_FAMILY_IGNORED, false);
+   }
+   command_processor_.SubmitBarriers(true);
+   VkBufferImageCopy* copy_regions = command_buffer.CmdCopyBufferToImageEmplace(

@@ -12,6 +12,9 @@
 #include <cstring>
 #include <iostream>
 #include <vector>
+#include <string>
+#include <d3dcompiler.h>
+#include <windows.h>
 
 using namespace rex::graphics;
 
@@ -117,14 +120,21 @@ uint32_t CountVertexFetchBounds(const std::vector<uint8_t>& blob) {
 }
 
 std::vector<uint8_t> Translate(const std::vector<uint32_t>& code,
-                               xenos::ShaderType type = xenos::ShaderType::kPixel) {
+                                xenos::ShaderType type = xenos::ShaderType::kPixel,
+                                bool rov = false, bool param_gen = false) {
   Shader shader(type, 1, code.data(), code.size(), std::endian::native);
   rex::string::StringBuffer disassembly;
   shader.AnalyzeUcode(disassembly);
-  DxbcShaderTranslator translator(rex::ui::GraphicsProvider::GpuVendorID::kNvidia, false, false);
-  auto& translation = *shader.GetOrCreateTranslation(
-      type == xenos::ShaderType::kPixel ? translator.GetDefaultPixelShaderModification(2)
-                                        : translator.GetDefaultVertexShaderModification(2));
+  DxbcShaderTranslator translator(rex::ui::GraphicsProvider::GpuVendorID::kNvidia, false, rov);
+  uint64_t modification = type == xenos::ShaderType::kPixel
+      ? translator.GetDefaultPixelShaderModification(2) : translator.GetDefaultVertexShaderModification(2);
+  if (param_gen && type == xenos::ShaderType::kPixel) {
+    DxbcShaderTranslator::Modification m(modification);
+    m.pixel.param_gen_enable = 1;
+    m.pixel.param_gen_interpolator = 0;
+    modification = m.value;
+  }
+  auto& translation = *shader.GetOrCreateTranslation(modification);
   if (!translator.TranslateAnalyzedShader(translation) || !translation.is_valid()) return {};
   return translation.translated_binary();
 }
@@ -172,6 +182,45 @@ int main() {
     const auto blob = Translate(VertexFetchMicrocode(), xenos::ShaderType::kVertex);
     check(!blob.empty(), "vfetch DXBC translation");
     check(CountVertexFetchBounds(blob) >= 1, "out-of-bounds vertex fetch words read 0");
+  }
+  if (HMODULE compiler = LoadLibraryW(L"D3DCompiler_47.dll")) {
+    auto disassemble = reinterpret_cast<pD3DDisassemble>(GetProcAddress(compiler, "D3DDisassemble"));
+    for (bool rov : {false, true}) {
+      const auto blob = Translate(Microcode(false, false), xenos::ShaderType::kPixel, rov);
+      ID3DBlob* assembly = nullptr;
+      const bool valid = disassemble && !blob.empty() && SUCCEEDED(disassemble(
+          blob.data(), blob.size(), 0, nullptr, &assembly));
+      check(valid, "real RTV/ROV DXBC translation accepted by D3DDisassemble");
+      if (assembly) {
+        const std::string text(static_cast<const char*>(assembly->GetBufferPointer()), assembly->GetBufferSize());
+        if (rov) check(text.find("vCoverage") != std::string::npos,
+                       "ROV DXBC includes raster coverage input");
+        assembly->Release();
+      }
+    }
+    for (bool rov : {false, true}) {
+      const auto blob = Translate(Microcode(false,false), xenos::ShaderType::kPixel, rov, true);
+      ID3DBlob* assembly=nullptr;
+      bool valid=disassemble&&!blob.empty()&&SUCCEEDED(disassemble(blob.data(),blob.size(),0,nullptr,&assembly));
+      check(valid,"PsParamGen RTV/ROV DXBC validates");
+      if(assembly) {
+        std::string text(static_cast<const char*>(assembly->GetBufferPointer()),assembly->GetBufferSize());
+        const unsigned slot=offsetof(DxbcShaderTranslator::SystemConstants,param_gen_window_offset)/16;
+        const std::string operand="]["+std::to_string(slot)+"].xy";
+        bool adds=false;
+        for(size_t pos=0;pos<text.size();) {
+          auto end=text.find('\n',pos); if(end==std::string::npos)end=text.size();
+          auto line=text.substr(pos,end-pos);
+          adds|=line.find("add ")!=std::string::npos&&line.find(operand)!=std::string::npos;
+          pos=end+1;
+        }
+        check(adds,"PsParamGen adds original XY offset from actual DXBC constant slot");
+        assembly->Release();
+      }
+    }
+    FreeLibrary(compiler);
+  } else {
+    std::cout << "D3DDisassemble unavailable; DXBC disassembly check skipped\n";
   }
   std::cout << (checks - failures) << '/' << checks << " checks passed\n";
   return failures ? 1 : 0;

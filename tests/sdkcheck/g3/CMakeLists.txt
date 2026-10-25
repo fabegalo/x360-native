@@ -31,6 +31,29 @@ add_test(NAME sdkcheck.Native-FrameTiming COMMAND x360n_frame_timing_checks)
 set_tests_properties(sdkcheck.Native-FrameTiming PROPERTIES LABELS project TIMEOUT 10)
 
 if(REXGLUE_USE_VULKAN)
+  if(PYTHON_EXECUTABLE)
+    set(_upload_probe_python ${PYTHON_EXECUTABLE})
+  else()
+    find_package(Python3 REQUIRED COMPONENTS Interpreter)
+    set(_upload_probe_python ${Python3_EXECUTABLE})
+  endif()
+  set(_upload_probe_inc ${CMAKE_CURRENT_BINARY_DIR}/vulkan_repeat_upload_backend.inc)
+  add_custom_command(OUTPUT ${_upload_probe_inc}
+      COMMAND ${_upload_probe_python} ${CMAKE_CURRENT_SOURCE_DIR}/../generate_vulkan_upload_probe.py
+          ${X360_REXGLUE_DIR} ${_upload_probe_inc}
+      DEPENDS ../generate_vulkan_upload_probe.py
+          ${X360_REXGLUE_DIR}/src/graphics/vulkan/texture_cache.cpp
+          ${X360_REXGLUE_DIR}/src/graphics/vulkan/command_processor.cpp
+          ${X360_REXGLUE_DIR}/src/graphics/vulkan/deferred_command_buffer.cpp
+      VERBATIM)
+  add_executable(x360n_vulkan_repeat_upload_checks ../vulkan_repeat_upload_probe.cpp ${_upload_probe_inc})
+  target_include_directories(x360n_vulkan_repeat_upload_checks PRIVATE ${CMAKE_CURRENT_BINARY_DIR}
+      ${X360_REXGLUE_DIR}/thirdparty/renderdoc)
+  target_link_libraries(x360n_vulkan_repeat_upload_checks PRIVATE rexruntime Vulkan::Headers)
+  x360n_stage_runtime_dlls(x360n_vulkan_repeat_upload_checks)
+  add_test(NAME sdkcheck.Vulkan-repeat-upload COMMAND x360n_vulkan_repeat_upload_checks)
+  set_tests_properties(sdkcheck.Vulkan-repeat-upload PROPERTIES LABELS project TIMEOUT 30)
+
   set(_spirv_gpu ${X360_REXGLUE_DIR}/src/graphics)
   add_executable(x360n_spirv_interlock_checks spirv_interlock.cpp spirv_rectangle.cpp
       ${_spirv_gpu}/util/draw.cpp ${_spirv_gpu}/registers.cpp
@@ -169,3 +192,52 @@ target_include_directories(x360n_edram_alias_checks PRIVATE ${X360_REXGLUE_DIR}/
 x360n_stage_runtime_dlls(x360n_edram_alias_checks)
 add_test(NAME sdkcheck.canary-edram-alias COMMAND x360n_edram_alias_checks)
 set_tests_properties(sdkcheck.canary-edram-alias PROPERTIES LABELS project TIMEOUT 30)
+
+# 0198: execute common renderer ownership and coordinate transforms.
+add_executable(x360n_edram_window_checks edram_window_offsets.cpp
+    ${_alias_gpu}/util/draw.cpp ${_alias_gpu}/register_file.cpp ${_alias_gpu}/registers.cpp
+    ${_alias_gpu}/flags.cpp ${_alias_gpu}/format/ucode.cpp
+    ${_alias_gpu}/pipeline/render_target/cache.cpp ${_alias_gpu}/util/draw_extent_estimator.cpp
+    ${_alias_gpu}/pipeline/shader/interpreter.cpp ${_alias_gpu}/pipeline/shader/shader.cpp
+    ${_alias_gpu}/pipeline/shader/translator.cpp ${_alias_gpu}/pipeline/shader/translator_disasm.cpp)
+target_link_libraries(x360n_edram_window_checks PRIVATE rexruntime xxHash::xxhash)
+target_include_directories(x360n_edram_window_checks PRIVATE ${X360_REXGLUE_DIR}/thirdparty/renderdoc)
+x360n_stage_runtime_dlls(x360n_edram_window_checks)
+add_test(NAME sdkcheck.canary-edram-window COMMAND x360n_edram_window_checks)
+set_tests_properties(sdkcheck.canary-edram-window PROPERTIES LABELS project TIMEOUT 30)
+
+# 0197: shared Xenos sample positions and viewport sample-fraction scaling.
+add_executable(x360n_canary_msaa_checks ../canary_msaa_probe.cpp
+    ${X360_REXGLUE_DIR}/src/graphics/util/draw.cpp
+    ${X360_REXGLUE_DIR}/src/graphics/register_file.cpp
+    ${X360_REXGLUE_DIR}/src/graphics/registers.cpp
+    ${X360_REXGLUE_DIR}/src/graphics/flags.cpp)
+target_link_libraries(x360n_canary_msaa_checks PRIVATE rexruntime)
+target_include_directories(x360n_canary_msaa_checks PRIVATE ${X360_REXGLUE_DIR}/thirdparty/renderdoc)
+x360n_stage_runtime_dlls(x360n_canary_msaa_checks)
+add_test(NAME sdkcheck.canary-msaa COMMAND x360n_canary_msaa_checks)
+set_tests_properties(sdkcheck.canary-msaa PROPERTIES LABELS project TIMEOUT 30)
+
+if(REXGLUE_USE_VULKAN AND WIN32)
+  add_executable(x360n_msaa_gpu_checks ../msaa_gpu_probe.cpp
+      ${X360_REXGLUE_DIR}/src/graphics/util/draw.cpp
+      ${X360_REXGLUE_DIR}/src/graphics/register_file.cpp
+      ${X360_REXGLUE_DIR}/src/graphics/registers.cpp
+      ${X360_REXGLUE_DIR}/src/graphics/flags.cpp)
+  target_include_directories(x360n_msaa_gpu_checks PRIVATE ${X360_REXGLUE_DIR}/thirdparty/renderdoc)
+  target_link_libraries(x360n_msaa_gpu_checks PRIVATE rexruntime Vulkan::Headers d3d12 dxgi)
+  x360n_stage_runtime_dlls(x360n_msaa_gpu_checks)
+  # Opt-in: run manually when a bounded synthetic GPU test is authorized.
+  add_executable(x360n_edram_window_gpu_checks ../edram_window_gpu.cpp
+      ${X360_REXGLUE_DIR}/src/graphics/util/draw.cpp
+      ${X360_REXGLUE_DIR}/src/graphics/register_file.cpp
+      ${X360_REXGLUE_DIR}/src/graphics/registers.cpp
+      ${X360_REXGLUE_DIR}/src/graphics/flags.cpp
+      ${X360_REXGLUE_DIR}/thirdparty/glslang/StandAlone/ResourceLimits.cpp)
+  target_include_directories(x360n_edram_window_gpu_checks PRIVATE
+      ${X360_REXGLUE_DIR}/thirdparty/renderdoc ${X360_REXGLUE_DIR}/thirdparty/glslang)
+  target_link_libraries(x360n_edram_window_gpu_checks PRIVATE rexruntime Vulkan::Headers d3d12 dxgi
+      glslang::SPIRV glslang MachineIndependent GenericCodeGen OSDependent OGLCompiler)
+  x360n_stage_runtime_dlls(x360n_edram_window_gpu_checks)
+  # Manual opt-in, each GPU fence has a five-second timeout.
+endif()

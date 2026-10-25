@@ -10,6 +10,7 @@
 
 #include <bit>
 #include <cstring>
+#include <functional>
 #include <iostream>
 #include <unordered_map>
 #include <vector>
@@ -42,8 +43,19 @@ struct Module {
         case spv::OpConstant:
         case spv::OpFAdd:
         case spv::OpFSub:
+        case spv::OpFMul:
+        case spv::OpFOrdGreaterThanEqual:
+        case spv::OpBitwiseAnd:
+        case spv::OpBitwiseOr:
         case spv::OpVectorTimesScalar:
         case spv::OpBitFieldUExtract:
+        case spv::OpBitFieldInsert:
+        case spv::OpBitReverse:
+        case spv::OpShiftRightLogical:
+        case spv::OpPhi:
+        case spv::OpLoad:
+        case spv::OpAccessChain:
+        case spv::OpCompositeExtract:
         case spv::OpExtInst:
         case spv::OpIEqual:
         case spv::OpULessThan:
@@ -104,13 +116,20 @@ std::vector<uint32_t> VertexFetchMicrocode() {
 }
 
 std::vector<uint8_t> Translate(SpirvShaderTranslator& translator, const std::vector<uint32_t>& code,
-                               xenos::ShaderType type = xenos::ShaderType::kPixel) {
+                               xenos::ShaderType type = xenos::ShaderType::kPixel,
+                               bool param_gen = false) {
   Shader shader(type, 1, code.data(), code.size(), std::endian::native);
   rex::string::StringBuffer disassembly;
   shader.AnalyzeUcode(disassembly);
-  auto& translation = *shader.GetOrCreateTranslation(
-      type == xenos::ShaderType::kPixel ? translator.GetDefaultPixelShaderModification(2)
-                                        : translator.GetDefaultVertexShaderModification(2));
+  uint64_t modification = type == xenos::ShaderType::kPixel
+      ? translator.GetDefaultPixelShaderModification(2) : translator.GetDefaultVertexShaderModification(2);
+  if (param_gen && type == xenos::ShaderType::kPixel) {
+    SpirvShaderTranslator::Modification m(modification);
+    m.pixel.param_gen_enable = 1;
+    m.pixel.param_gen_interpolator = 0;
+    modification = m.value;
+  }
+  auto& translation = *shader.GetOrCreateTranslation(modification);
   if (!translator.TranslateAnalyzedShader(translation) || !translation.is_valid()) return {};
   return translation.translated_binary();
 }
@@ -195,15 +214,16 @@ int main() {
     check(bounded_words >= 4, "out-of-bounds vertex fetch words read 0");
   }
 
-  for (unsigned scale : {1u, 2u}) {
+  for (bool native2 : {false, true}) for (unsigned scale : {1u, 2u}) {
     // 2x MSAA emulated as 4x (no native 2x without attachments).
-    SpirvShaderTranslator translator(SpirvShaderTranslator::Features(true), true, false, true,
+    SpirvShaderTranslator translator(SpirvShaderTranslator::Features(true), true, native2, true,
                                      scale, scale);
     const auto binary = Translate(translator, Microcode(false));
     check(!binary.empty(), "FSI translation");
     const Module module(binary);
-    // 654a8cacf: guest sample 1 is host sample 3 with 2x-as-4x.
-    uint32_t from_3 = 0, from_other = 0;
+    // cc4981a: interlock guest 2x takes host samples 2 and 1. This
+    // supersedes 0188's mapping; inspect the translated data flow.
+    uint32_t paired = 0;
     for (const auto& instruction : module.instructions) {
       if (instruction.op != spv::OpBitFieldInsert || instruction.args.size() != 6 ||
           !module.IsConstant(instruction.args[4], 1) ||
@@ -212,11 +232,115 @@ int main() {
       }
       const auto* extract = module.Def(instruction.args[3], spv::OpBitFieldUExtract);
       if (!extract || !module.IsConstant(extract->args[4], 1)) continue;
-      ++(module.IsConstant(extract->args[3], 3) ? from_3 : from_other);
+      const auto* base = module.Def(instruction.args[2], spv::OpBitFieldUExtract);
+      paired += base && module.IsConstant(base->args[3], 2) &&
+                module.IsConstant(base->args[4], 1) && module.IsConstant(extract->args[3], 1);
     }
-    check(from_3 >= 1 && !from_other, "2x-as-4x guest sample 1 comes from host sample 3");
+    if (!native2) check(paired >= 1, "2x-as-4x guest samples come from host samples 2 and 1");
+    // Evaluate the actual translated coverage expression for every input mask.
+    // Input mask and MSAA selection are the only external values of this DAG.
+    bool evaluated = false;
+    for (const auto& phi : module.instructions) {
+      if (phi.op != spv::OpPhi || phi.args.size() != 8) continue;
+      const auto* two = module.Def(phi.args[4], native2 ? spv::OpShiftRightLogical
+                                                     : spv::OpBitFieldInsert);
+      if (!two) continue;
+      const uint32_t input = phi.args[2];
+      std::function<uint32_t(uint32_t, uint32_t, unsigned)> eval =
+          [&](uint32_t id, uint32_t mask, unsigned depth) -> uint32_t {
+        if (id == input) return mask;
+        if (module.constants.contains(id)) return module.constants.at(id);
+        if (depth > 16 || !module.defs.contains(id)) throw 1;
+        const auto& op = module.instructions[module.defs.at(id)];
+        auto arg = [&](unsigned i) { return eval(op.args[i], mask, depth + 1); };
+        if (op.op == spv::OpShiftRightLogical) return arg(2) >> arg(3);
+        if (op.op == spv::OpBitReverse) {
+          uint32_t x = arg(2), reversed = 0;
+          for (unsigned i = 0; i < 32; ++i) reversed |= ((x >> i) & 1) << (31 - i);
+          return reversed;
+        }
+        if (op.op == spv::OpBitFieldUExtract) {
+          auto width = arg(4); return (arg(2) >> arg(3)) & (width == 32 ? ~0u : (1u << width) - 1);
+        }
+        if (op.op == spv::OpBitFieldInsert) {
+          auto width = arg(5), offset = arg(4);
+          uint32_t bits = (width == 32 ? ~0u : (1u << width) - 1) << offset;
+          return (arg(2) & ~bits) | ((arg(3) << offset) & bits);
+        }
+        throw 1;
+      };
+      try {
+        for (uint32_t mask = 0; mask < 16; ++mask) {
+          const uint32_t expected2 = native2 ? ((mask >> 1) & 1) | ((mask & 1) << 1)
+                                           : ((mask >> 2) & 1) | (mask & 2);
+          const uint32_t expected4 = (mask & 5) | (((mask >> 3) & 1) << 1) |
+                                    (((mask >> 1) & 1) << 3);
+          check(eval(phi.args[4], mask, 0) == expected2, "translated 2x coverage truth table");
+          check(eval(phi.args[6], mask, 0) == expected4, "translated 4x coverage truth table");
+          if (mask < 2) check(eval(input, mask, 0) == mask, "translated 1x coverage unchanged");
+        }
+        evaluated = true; break;
+      } catch (int) { continue; }
+    }
+    check(evaluated, "translated MSAA coverage expression evaluated");
   }
 
+  for (bool interlock : {false, true}) for (bool native2 : {false, true}) {
+    SpirvShaderTranslator translator(SpirvShaderTranslator::Features(true), native2, native2, interlock);
+    Module module(Translate(translator, Microcode(false)));
+    unsigned samples_checked = 0;
+    for (const auto& select : module.instructions) {
+      if (select.op != spv::OpSelect || select.args.size() != 5) continue;
+      const auto* covered = module.Def(select.args[2], spv::OpFOrdGreaterThanEqual);
+      if (!covered) continue;
+      const auto* threshold = module.Def(covered->args[3], spv::OpFSub);
+      if (!threshold || !module.constants.contains(threshold->args[2])) continue;
+      const auto* offset = module.Def(threshold->args[3], spv::OpFMul);
+      if (!offset || !module.constants.contains(offset->args[3])) continue;
+      const float base = std::bit_cast<float>(module.constants.at(threshold->args[2]));
+      const float step = std::bit_cast<float>(module.constants.at(offset->args[3]));
+      const auto* mask = module.Def(select.args[interlock ? 4 : 3],
+                                   interlock ? spv::OpBitwiseAnd : spv::OpBitwiseOr);
+      if (!mask || !module.constants.contains(mask->args[3])) continue;
+      unsigned guest = 0, host = 0;
+      if (step == 0.0625f) {
+        if (base == 0.75f) guest = 0;
+        else if (base == 0.25f) guest = 1;
+        else if (base == 0.5f) guest = 2;
+        else if (base == 1.f) guest = 3;
+        else continue;
+        host = guest;  // Host RT stores/resolves 4x samples in guest index order.
+      } else if (step == 0.125f && (base == 0.5f || base == 1.f)) {
+        guest = base == 0.5f ? 0 : 1;
+        host = native2 ? guest ^ 1u : (guest ? 3 : 0);
+      } else if (step != 0.25f || base != 1.f) continue;
+      const uint32_t expected = interlock ? ~((1u << guest) | (1u << (guest + 4))) : 1u << host;
+      check(module.IsConstant(mask->args[3], expected),
+            "A2C translated threshold masks the matching guest/host and deferred depth sample");
+      ++samples_checked;
+    }
+    check(samples_checked == 7, "A2C translated thresholds cover 1x, 2x and 4x");
+  }
+  for (bool interlock : {false, true}) for (unsigned scale : {1u, 2u}) {
+    SpirvShaderTranslator translator(SpirvShaderTranslator::Features(true), true, true, interlock, scale, scale);
+    const Module module(Translate(translator, Microcode(true), xenos::ShaderType::kPixel, true));
+    uint32_t member = UINT32_MAX;
+    for (const auto& op : module.instructions) {
+      if (op.op == spv::OpMemberName && op.args.size() > 2 &&
+          std::string(reinterpret_cast<const char*>(op.args.data() + 2)) == "param_gen_window_offset")
+        member = op.args[1];
+    }
+    unsigned axes = 0;
+    for (const auto& op : module.instructions) {
+      if (op.op != spv::OpFAdd || op.args.size() != 4) continue;
+      const auto* extract = module.Def(op.args[3], spv::OpCompositeExtract);
+      if (!extract || extract->args.size() != 4 || extract->args[3] > 1) continue;
+      const auto* load = module.Def(extract->args[2], spv::OpLoad);
+      const auto* access = load ? module.Def(load->args[2], spv::OpAccessChain) : nullptr;
+      if (access && module.IsConstant(access->args.back(), member)) axes |= 1u << extract->args[3];
+    }
+    check(axes == 3, "PsParamGen adds both original window offsets in translated SPIR-V");
+  }
   std::cout << (checks - failures) << '/' << checks << " checks passed\n";
   return failures ? 1 : 0;
 }

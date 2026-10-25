@@ -1,0 +1,2444 @@
+diff --git a/include/rex/graphics/d3d12/command_processor.h b/include/rex/graphics/d3d12/command_processor.h
+--- a/include/rex/graphics/d3d12/command_processor.h
++++ b/include/rex/graphics/d3d12/command_processor.h
+@@ -375,12 +375,12 @@
+   void UpdateFixedFunctionState(const draw_util::ViewportInfo& viewport_info,
+                                 const draw_util::Scissor& scissor, bool primitive_polygonal,
+                                 reg::RB_DEPTHCONTROL normalized_depth_control);
+-  void UpdateSystemConstantValues(bool shared_memory_is_uav, bool primitive_polygonal,
+-                                  uint32_t line_loop_closing_index, xenos::Endian index_endian,
+-                                  const draw_util::ViewportInfo& viewport_info,
+-                                  uint32_t used_texture_mask,
+-                                  reg::RB_DEPTHCONTROL normalized_depth_control,
+-                                  uint32_t normalized_color_mask);
++  void UpdateSystemConstantValues(
++      bool shared_memory_is_uav, bool primitive_polygonal,
++      uint32_t line_loop_closing_index, xenos::Endian index_endian,
++      const draw_util::ViewportInfo &viewport_info, uint32_t used_texture_mask,
++      reg::RB_DEPTHCONTROL normalized_depth_control,
++      uint32_t normalized_color_mask, int32_t window_offset_tiles);
+   bool UpdateBindings(const D3D12Shader* vertex_shader, const D3D12Shader* pixel_shader,
+                       ID3D12RootSignature* root_signature, bool shared_memory_is_uav);
+   bool IssueCopy_ReadbackResolvePath();
+@@ -497,7 +497,6 @@
+   // Should bindless textures and samplers be used - many times faster
+   // UpdateBindings than bindful (that becomes a significant bottleneck with
+   // bindful - mainly because of CopyDescriptorsSimple, which takes the majority
+-  // of UpdateBindings time, and that's outside the emulator's control even).
+   // of UpdateBindings time, and that's outside the emulator's control even).
+   bool bindless_resources_used_ = false;
+ 
+diff --git a/include/rex/graphics/d3d12/render_target_cache.h b/include/rex/graphics/d3d12/render_target_cache.h
+--- a/include/rex/graphics/d3d12/render_target_cache.h
++++ b/include/rex/graphics/d3d12/render_target_cache.h
+@@ -56,8 +56,10 @@
+ 
+   Path GetPath() const override { return path_; }
+ 
+-  bool Update(bool is_rasterization_done, reg::RB_DEPTHCONTROL normalized_depth_control,
+-              uint32_t normalized_color_mask, const Shader& vertex_shader) override;
++  bool Update(bool is_rasterization_done,
++              reg::RB_DEPTHCONTROL normalized_depth_control,
++              uint32_t normalized_color_mask, const Shader &vertex_shader,
++              int32_t window_offset_tiles) override;
+ 
+   void InvalidateCommandListRenderTargets() {
+     are_current_command_list_render_targets_valid_ = false;
+@@ -413,13 +415,16 @@
+       uint32_t source_pitch : xenos::kEdramPitchTilesBits;
+       // Destination base in tiles minus source base in tiles (not vice versa
+       // because this is a transform of the coordinate system, not addresses
+-      // themselves).
+-      // + 1 bit because this is a signed difference between two EDRAM bases.
++      // themselves), wrapped, the shader wraps the sum anyway.
+       // 0 for host_depth_source_is_copy (ignored in this case anyway as
+       // destination == source anyway).
+-      int32_t source_to_dest : xenos::kEdramBaseTilesBits + 1;
++      uint32_t source_to_dest : xenos::kEdramBaseTilesBits;
++      // The source render target is in the next period (64bpp color only).
++      uint32_t source_next_period : 1;
+     };
+-    TransferAddressConstant() : constant(0) { static_assert_size(*this, sizeof(constant)); }
++    TransferAddressConstant() : constant(0) {
++      static_assert_size(*this, sizeof(constant));
++    }
+     bool operator==(const TransferAddressConstant& other_constant) const {
+       return constant == other_constant.constant;
+     }
+@@ -503,8 +508,9 @@
+     uint32_t offsets;
+     struct {
+       // May be beyond the EDRAM tile count in case of EDRAM addressing
+-      // wrapping, thus + 1 bit.
+-      uint32_t dispatch_first_tile : xenos::kEdramBaseTilesBits + 1;
++      // wrapping, and another tile count beyond for a render target in the next
++      // period, thus + 2 bits.
++      uint32_t dispatch_first_tile : xenos::kEdramBaseTilesBits + 2;
+       uint32_t source_base_tiles : xenos::kEdramBaseTilesBits;
+     };
+     DumpOffsets() : offsets(0) { static_assert_size(*this, sizeof(offsets)); }
+diff --git a/include/rex/graphics/pipeline/render_target/cache.h b/include/rex/graphics/pipeline/render_target/cache.h
+--- a/include/rex/graphics/pipeline/render_target/cache.h
++++ b/include/rex/graphics/pipeline/render_target/cache.h
+@@ -177,8 +177,19 @@
+ 
+   virtual void BeginFrame();
+ 
+-  virtual bool Update(bool is_rasterization_done, reg::RB_DEPTHCONTROL normalized_depth_control,
+-                      uint32_t normalized_color_mask, const Shader& vertex_shader);
++  // Keeps each tile on one window offset path. If a draw has to leave its
++  // offset in the viewport, later draws with the same offset, surface pitch,
++  // and MSAA do the same until a frame passes without one. This keeps a tiled
++  // depth prepass, and the passes using it, on the same transform instead of
++  // moving the tile between host render targets.
++  int32_t GetWindowOffsetTiles(const RegisterFile &regs,
++                               reg::RB_DEPTHCONTROL normalized_depth_control,
++                               uint32_t normalized_color_mask, uint64_t frame);
++
++  virtual bool Update(bool is_rasterization_done,
++                      reg::RB_DEPTHCONTROL normalized_depth_control,
++                      uint32_t normalized_color_mask,
++                      const Shader &vertex_shader, int32_t window_offset_tiles);
+ 
+   // Returns bits where 0 is whether a depth render target is currently bound on
+   // the host and 1... are whether the same applies to color render targets, and
+@@ -239,6 +250,7 @@
+       uint32_t is_depth : 1;                                      // 22
+       // Ignoring the blending precision and sRGB.
+       uint32_t resource_format : xenos::kRenderTargetFormatBits;  // 26
++      uint32_t next_period : 1; // 64bpp rows in the second EDRAM period.
+     };
+ 
+     RenderTargetKey() : key(0) { static_assert_size(*this, sizeof(key)); }
+@@ -276,7 +288,17 @@
+                       : xenos::GetColorRenderTargetFormatName(GetColorFormat());
+     }
+ 
+-    uint32_t GetPitchTiles() const { return pitch_tiles_at_32bpp << uint32_t(Is64bpp()); }
++    uint32_t GetPitchTiles() const {
++      return pitch_tiles_at_32bpp << uint32_t(Is64bpp());
++    }
++    // The tile index, past the tile count for the tail wrapped around the end
++    // of EDRAM and again for the next period, minus the base it's the offset
++    // into the render target's rows.
++    uint32_t GetNonWrappedTileIndex(uint32_t tile_index) const {
++      return tile_index +
++             (tile_index < base_tiles ? xenos::kEdramTileCount : 0) +
++             (uint32_t(next_period) << xenos::kEdramBaseTilesBits);
++    }
+     static constexpr uint32_t GetWidth(uint32_t pitch_tiles_at_32bpp,
+                                        xenos::MsaaSamples msaa_samples) {
+       return pitch_tiles_at_32bpp *
+@@ -333,15 +355,13 @@
+     // Cutout can be specified for resolve clears - not to transfer areas that
+     // will be cleared to a single value anyway.
+     static uint32_t GetRangeRectangles(uint32_t start_tiles, uint32_t end_tiles,
+-                                       uint32_t base_tiles, uint32_t pitch_tiles,
+-                                       xenos::MsaaSamples msaa_samples, bool is_64bpp,
+-                                       Rectangle* rectangles_out,
+-                                       const Rectangle* cutout = nullptr);
+-    uint32_t GetRectangles(uint32_t base_tiles, uint32_t pitch_tiles,
+-                           xenos::MsaaSamples msaa_samples, bool is_64bpp,
+-                           Rectangle* rectangles_out, const Rectangle* cutout = nullptr) const {
+-      return GetRangeRectangles(start_tiles, end_tiles, base_tiles, pitch_tiles, msaa_samples,
+-                                is_64bpp, rectangles_out, cutout);
++                                       RenderTargetKey key,
++                                       Rectangle *rectangles_out,
++                                       const Rectangle *cutout = nullptr);
++    uint32_t GetRectangles(RenderTargetKey key, Rectangle *rectangles_out,
++                           const Rectangle *cutout = nullptr) const {
++      return GetRangeRectangles(start_tiles, end_tiles, key, rectangles_out,
++                                cutout);
+     }
+     bool AreSourcesSame(const Transfer& other_transfer) const {
+       return source == other_transfer.source &&
+@@ -666,6 +686,19 @@
+   // since standard containers use dynamic allocation for elements, though
+   // changes to this throughout a frame are pretty rare.
+   std::map<uint32_t, OwnershipRange> ownership_ranges_;
++  // PA_SC_WINDOW_OFFSET of the last interlock draw with the offset in the
++  // EDRAM bases, 0 for one with it in the viewport, UINT32_MAX after a full
++  // barrier. Bits 15 and 31 aren't used.
++  uint32_t interlock_last_window_offset_ = UINT32_MAX;
++  // Tiles with the window offset kept in the viewport, the offset with the
++  // surface pitch and MSAA, with the last frame a draw was at them.
++  struct WindowOffsetKeptInViewport {
++    uint32_t window_offset;
++    uint32_t surface_pitch;
++    xenos::MsaaSamples msaa_samples;
++    uint64_t frame;
++  };
++  std::vector<WindowOffsetKeptInViewport> window_offsets_kept_in_viewport_;
+ 
+   // Render targets actually used by the draw call with the last successful
+   // update. 0 is depth, color starting from 1, nullptr if not bound.
+diff --git a/include/rex/graphics/pipeline/shader/dxbc_translator.h b/include/rex/graphics/pipeline/shader/dxbc_translator.h
+--- a/include/rex/graphics/pipeline/shader/dxbc_translator.h
++++ b/include/rex/graphics/pipeline/shader/dxbc_translator.h
+@@ -34,11 +34,7 @@
+ // generalized building blocks, actually it has a lot of restrictions on operand
+ // usage!
+ // !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+-// !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+-// !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+ // !!!DO NOT ADD ANYTHING FXC THAT WOULD NOT PRODUCE!!!
+-// !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+-// !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+ // !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+ // Before adding any sequence that you haven't seen in Xenia, try writing
+ // equivalent code in HLSL and running it through FXC, try with /Od, try with
+@@ -403,8 +399,10 @@
+ 
+     // The constant blend factor for the respective modes.
+     float edram_blend_constant[4];
+-
+-   private:
++    float param_gen_window_offset[2];
++    uint32_t param_gen_window_offset_padding[2];
++
++  private:
+     friend class DxbcShaderTranslator;
+ 
+     enum class Index : uint32_t {
+@@ -455,6 +453,7 @@
+       kEdramRTBlendFactorsOps,
+ 
+       kEdramBlendConstant,
++      kParamGenWindowOffset,
+ 
+       kCount,
+     };
+diff --git a/include/rex/graphics/pipeline/shader/spirv_translator.h b/include/rex/graphics/pipeline/shader/spirv_translator.h
+--- a/include/rex/graphics/pipeline/shader/spirv_translator.h
++++ b/include/rex/graphics/pipeline/shader/spirv_translator.h
+@@ -324,6 +324,8 @@
+     uint32_t vertex_index_max;
+     float tessellation_factor_range_min;
+     float tessellation_factor_range_max;
++    float param_gen_window_offset[2];
++    uint32_t param_gen_window_offset_padding[2];
+   };
+ 
+   enum ConstantBuffer : uint32_t {
+@@ -898,6 +900,7 @@
+     kSystemConstantEdramRTKeepMask,
+     kSystemConstantEdramRTClamp,
+     kSystemConstantEdramBlendConstant,
++    kSystemConstantParamGenWindowOffset,
+   };
+   spv::Id uniform_system_constants_;
+   spv::Id uniform_float_constants_;
+diff --git a/include/rex/graphics/util/draw.h b/include/rex/graphics/util/draw.h
+--- a/include/rex/graphics/util/draw.h
++++ b/include/rex/graphics/util/draw.h
+@@ -309,12 +309,14 @@
+ // a viewport, plus values to multiply-add the returned position by, usable on
+ // host graphics APIs such as Direct3D 11+ and Vulkan, also forcing it to the
+ // Direct3D clip space with 0...W Z rather than -W...W.
+-void GetHostViewportInfo(const RegisterFile& regs, uint32_t draw_resolution_scale_x,
+-                         uint32_t draw_resolution_scale_y, bool origin_bottom_left, uint32_t x_max,
+-                         uint32_t y_max, bool allow_reverse_z,
+-                         reg::RB_DEPTHCONTROL normalized_depth_control, bool convert_z_to_float24,
+-                         bool full_float24_in_0_to_1, bool pixel_shader_writes_depth,
+-                         ViewportInfo& viewport_info_out, bool xenos_sample_positions = false);
++void GetHostViewportInfo(
++    const RegisterFile &regs, uint32_t draw_resolution_scale_x,
++    uint32_t draw_resolution_scale_y, bool origin_bottom_left, uint32_t x_max,
++    uint32_t y_max, bool allow_reverse_z,
++    reg::RB_DEPTHCONTROL normalized_depth_control, bool convert_z_to_float24,
++    bool full_float24_in_0_to_1, bool pixel_shader_writes_depth,
++    ViewportInfo &viewport_info_out, bool xenos_sample_positions = false,
++    bool window_offset_in_edram = false);
+ 
+ struct Scissor {
+   // Offset from render target UV = 0 to +UV.
+@@ -322,7 +324,36 @@
+   // Extent can be zero.
+   uint32_t extent[2];
+ };
+-void GetScissor(const RegisterFile& regs, Scissor& scissor_out, bool clamp_to_surface_pitch = true);
++void GetScissor(const RegisterFile &regs, Scissor &scissor_out,
++                bool clamp_to_surface_pitch = true,
++                bool window_offset_in_edram = false);
++
++// Returns the window offset in 32bpp tiles, doubled for 64bpp color, when it
++// can be moved into the render target bases. The vertices and scissor can then
++// use window offset 0, with PsParamGen getting the original offset back in the
++// shader.
++//
++// Only whole tile negative offsets can be moved. For host render targets,
++// x offsets stay in the viewport because the target is only pitch-wide.
++// Negative EDRAM bases wrap normally.
++//
++// kept_in_viewport_out is set when the offset could be moved, but has to stay
++// in the viewport. RenderTargetCache uses this to keep the tile's subsequent
++// draws on the same path.
++int32_t GetWindowOffsetTiles(const RegisterFile &regs,
++                             reg::RB_DEPTHCONTROL normalized_depth_control,
++                             uint32_t normalized_color_mask,
++                             bool host_render_targets_used,
++                             bool &kept_in_viewport_out);
++
++// The base with the GetWindowOffsetTiles offset added and wrapped.
++inline uint32_t AddWindowOffsetToEdramBase(uint32_t base_tiles,
++                                           int32_t window_offset_tiles,
++                                           bool is_64bpp) {
++  return uint32_t(int32_t(base_tiles) +
++                  window_offset_tiles * (is_64bpp ? 2 : 1)) &
++         (xenos::kEdramTileCount - 1);
++}
+ 
+ // Returns the color component write mask for the draw command taking into
+ // account which color targets are written to by the pixel shader, as well as
+diff --git a/include/rex/graphics/util/draw_extent_estimator.h b/include/rex/graphics/util/draw_extent_estimator.h
+--- a/include/rex/graphics/util/draw_extent_estimator.h
++++ b/include/rex/graphics/util/draw_extent_estimator.h
+@@ -22,17 +22,21 @@
+ 
+ class DrawExtentEstimator {
+  public:
+-  DrawExtentEstimator(const RegisterFile& register_file, const memory::Memory& memory)
+-      : register_file_(register_file),
+-        memory_(memory),
+-        shader_interpreter_(register_file, memory) {}
++   DrawExtentEstimator(const RegisterFile &register_file,
++                       const memory::Memory &memory)
++       : register_file_(register_file), memory_(memory),
++         shader_interpreter_(register_file, memory) {}
+ 
+-  // The shader must have its ucode analyzed.
+-  uint32_t EstimateVertexMaxY(const Shader& vertex_shader);
+-  uint32_t EstimateMaxY(bool try_to_estimate_vertex_max_y, const Shader& vertex_shader);
++   // The shader must have its ucode analyzed.
++   uint32_t EstimateVertexMaxY(const Shader &vertex_shader,
++                               bool window_offset_in_edram);
++   uint32_t EstimateMaxY(bool try_to_estimate_vertex_max_y,
++                         const Shader &vertex_shader,
++                         bool window_offset_in_edram);
+ 
+  private:
+   class PositionYExportSink : public ShaderInterpreter::ExportSink {
++
+    public:
+     void Export(ucode::ExportRegister export_register, const float* value,
+                 uint32_t value_mask) override;
+diff --git a/include/rex/graphics/vulkan/command_processor.h b/include/rex/graphics/vulkan/command_processor.h
+--- a/include/rex/graphics/vulkan/command_processor.h
++++ b/include/rex/graphics/vulkan/command_processor.h
+@@ -529,14 +529,17 @@
+   bool EnsureSwapFxaaSourceImage(uint32_t width, uint32_t height);
+   void DestroySwapFxaaSourceImage();
+ 
+-  void UpdateDynamicState(const draw_util::ViewportInfo& viewport_info, bool primitive_polygonal,
+-                          reg::RB_DEPTHCONTROL normalized_depth_control);
++  void UpdateDynamicState(const draw_util::ViewportInfo &viewport_info,
++                          bool primitive_polygonal,
++                          reg::RB_DEPTHCONTROL normalized_depth_control,
++                          bool window_offset_in_edram);
+   void UpdateSystemConstantValues(
+       bool primitive_polygonal,
+-      const PrimitiveProcessor::ProcessingResult& primitive_processing_result,
++      const PrimitiveProcessor::ProcessingResult &primitive_processing_result,
+       bool shader_32bit_index_dma, uint32_t compute_memexport_vertex_count,
+-      const draw_util::ViewportInfo& viewport_info, uint32_t used_texture_mask,
+-      reg::RB_DEPTHCONTROL normalized_depth_control, uint32_t normalized_color_mask);
++      const draw_util::ViewportInfo &viewport_info, uint32_t used_texture_mask,
++      reg::RB_DEPTHCONTROL normalized_depth_control,
++      uint32_t normalized_color_mask, int32_t window_offset_tiles);
+   bool UpdateBindings(const VulkanShader* vertex_shader, const VulkanShader* pixel_shader);
+   // Allocates a descriptor set and fills one or two VkWriteDescriptorSet
+   // structure instances (for images and samplers).
+diff --git a/include/rex/graphics/vulkan/render_target_cache.h b/include/rex/graphics/vulkan/render_target_cache.h
+--- a/include/rex/graphics/vulkan/render_target_cache.h
++++ b/include/rex/graphics/vulkan/render_target_cache.h
+@@ -114,10 +114,14 @@
+                VulkanTextureCache& texture_cache, uint32_t& written_address_out,
+                uint32_t& written_length_out);
+ 
+-  bool Update(bool is_rasterization_done, reg::RB_DEPTHCONTROL normalized_depth_control,
+-              uint32_t normalized_color_mask, const Shader& vertex_shader) override;
++  bool Update(bool is_rasterization_done,
++              reg::RB_DEPTHCONTROL normalized_depth_control,
++              uint32_t normalized_color_mask, const Shader &vertex_shader,
++              int32_t window_offset_tiles) override;
+   // Binding information for the last successful update.
+-  RenderPassKey last_update_render_pass_key() const { return last_update_render_pass_key_; }
++  RenderPassKey last_update_render_pass_key() const {
++    return last_update_render_pass_key_;
++  }
+   VkRenderPass last_update_render_pass() const { return last_update_render_pass_; }
+   const Framebuffer* last_update_framebuffer() const { return last_update_framebuffer_; }
+   void GetLastUpdateRenderingAttachments(VkRenderingAttachmentInfo* color_attachments,
+@@ -166,10 +170,6 @@
+                               [msaa_samples == xenos::MsaaSamples::k4X];
+     return info.sampleLocationsCount ? &info : nullptr;
+   }
+-
+-  // Returns the render pass object, or VK_NULL_HANDLE if failed to create.
+-  // A render pass managed by the render target cache may be ended and resumed
+-  // at any time (to allow for things like copying and texture loading).
+ 
+   // Returns the render pass object, or VK_NULL_HANDLE if failed to create.
+   // A render pass managed by the render target cache may be ended and resumed
+@@ -616,13 +616,16 @@
+       uint32_t source_pitch : xenos::kEdramPitchTilesBits;
+       // Destination base in tiles minus source base in tiles (not vice versa
+       // because this is a transform of the coordinate system, not addresses
+-      // themselves).
+-      // + 1 bit because this is a signed difference between two EDRAM bases.
++      // themselves), wrapped, the shader wraps the sum anyway.
+       // 0 for host_depth_source_is_copy (ignored in this case anyway as
+       // destination == source anyway).
+-      int32_t source_to_dest : xenos::kEdramBaseTilesBits + 1;
+-    };
+-    TransferAddressConstant() : constant(0) { static_assert_size(*this, sizeof(constant)); }
++      uint32_t source_to_dest : xenos::kEdramBaseTilesBits;
++      // The source render target is in the next period (64bpp color only).
++      uint32_t source_next_period : 1;
++    };
++    TransferAddressConstant() : constant(0) {
++      static_assert_size(*this, sizeof(constant));
++    }
+     bool operator==(const TransferAddressConstant& other_constant) const {
+       return constant == other_constant.constant;
+     }
+@@ -724,8 +727,9 @@
+     uint32_t offsets;
+     struct {
+       // May be beyond the EDRAM tile count in case of EDRAM addressing
+-      // wrapping, thus + 1 bit.
+-      uint32_t dispatch_first_tile : xenos::kEdramBaseTilesBits + 1;
++      // wrapping, and another tile count beyond for a render target in the next
++      // period, thus + 2 bits.
++      uint32_t dispatch_first_tile : xenos::kEdramBaseTilesBits + 2;
+       uint32_t source_base_tiles : xenos::kEdramBaseTilesBits;
+     };
+     DumpOffsets() : offsets(0) { static_assert_size(*this, sizeof(offsets)); }
+diff --git a/src/graphics/d3d12/command_processor.cpp b/src/graphics/d3d12/command_processor.cpp
+--- a/src/graphics/d3d12/command_processor.cpp
++++ b/src/graphics/d3d12/command_processor.cpp
+@@ -2487,8 +2487,15 @@
+   uint32_t normalized_color_mask =
+       pixel_shader ? draw_util::GetNormalizedColorMask(regs, pixel_shader->writes_color_targets())
+                    : 0;
+-  if (!render_target_cache_->Update(is_rasterization_done, normalized_depth_control,
+-                                    normalized_color_mask, *vertex_shader)) {
++
++  // Put the window offset into the EDRAM bases when possible.
++  int32_t window_offset_tiles = render_target_cache_->GetWindowOffsetTiles(
++      regs, normalized_depth_control, normalized_color_mask, frame_current_);
++
++  // Set up the render targets - this may perform dispatches and draws.
++  if (!render_target_cache_->Update(
++          is_rasterization_done, normalized_depth_control,
++          normalized_color_mask, *vertex_shader, window_offset_tiles)) {
+     return false;
+   }
+ 
+@@ -2555,31 +2562,37 @@
+   viewport_key.pa_cl_vte_cntl = regs[XE_GPU_REG_PA_CL_VTE_CNTL];
+   viewport_key.pa_su_sc_mode_cntl = regs[XE_GPU_REG_PA_SU_SC_MODE_CNTL];
+   viewport_key.pa_su_vtx_cntl = regs[XE_GPU_REG_PA_SU_VTX_CNTL];
+-  viewport_key.pa_sc_window_offset = regs[XE_GPU_REG_PA_SC_WINDOW_OFFSET];
++  viewport_key.pa_sc_window_offset =
++      window_offset_tiles ? 0 : regs[XE_GPU_REG_PA_SC_WINDOW_OFFSET];
+   viewport_key.normalized_depth_control = normalized_depth_control.value;
+   std::memcpy(viewport_key.vport_regs, &regs[XE_GPU_REG_PA_CL_VPORT_XSCALE],
+               sizeof(viewport_key.vport_regs));
+-  viewport_key.flags = (uint32_t(convert_z_to_float24) << 0) |
+-                       (uint32_t(host_render_targets_used) << 1) | (uint32_t(ps_writes_depth) << 2) |
+-                       (uint32_t(regs.Get<reg::RB_SURFACE_INFO>().msaa_samples) << 3) |
+-                       (uint32_t(xenos_sample_positions_used_) << 5);
++  viewport_key.flags =
++      (uint32_t(convert_z_to_float24) << 0) |
++      (uint32_t(host_render_targets_used) << 1) |
++      (uint32_t(ps_writes_depth) << 2) |
++      (uint32_t(regs.Get<reg::RB_SURFACE_INFO>().msaa_samples) << 3) |
++      (uint32_t(xenos_sample_positions_used_) << 5) |
++      (uint32_t(window_offset_tiles != 0) << 6);
+ 
+   draw_util::ViewportInfo viewport_info;
+   if (viewport_cache_valid_ && viewport_key == previous_viewport_key_) {
+     viewport_info = previous_viewport_info_;
+   } else {
+-    draw_util::GetHostViewportInfo(regs, draw_resolution_scale_x, draw_resolution_scale_y, true,
+-                                   D3D12_VIEWPORT_BOUNDS_MAX, D3D12_VIEWPORT_BOUNDS_MAX, false,
+-                                   normalized_depth_control, convert_z_to_float24,
+-                                   host_render_targets_used, ps_writes_depth, viewport_info,
+-                                   !host_render_targets_used || xenos_sample_positions_used_);
++    draw_util::GetHostViewportInfo(
++        regs, draw_resolution_scale_x, draw_resolution_scale_y, true,
++        D3D12_VIEWPORT_BOUNDS_MAX, D3D12_VIEWPORT_BOUNDS_MAX, false,
++        normalized_depth_control, convert_z_to_float24,
++        host_render_targets_used, ps_writes_depth, viewport_info,
++        !host_render_targets_used || xenos_sample_positions_used_,
++        window_offset_tiles != 0);
+     previous_viewport_key_ = viewport_key;
+     previous_viewport_info_ = viewport_info;
+     viewport_cache_valid_ = true;
+   }
+ 
+   draw_util::Scissor scissor;
+-  draw_util::GetScissor(regs, scissor);
++  draw_util::GetScissor(regs, scissor, true, window_offset_tiles != 0);
+   scissor.offset[0] *= draw_resolution_scale_x;
+   scissor.offset[1] *= draw_resolution_scale_y;
+   scissor.extent[0] *= draw_resolution_scale_x;
+@@ -2598,10 +2611,12 @@
+ 
+   // Update system constants before uploading them.
+   // TODO(Triang3l): With ROV, pass the disabled render target mask for safety.
+-  UpdateSystemConstantValues(memexport_used, primitive_polygonal,
+-                             primitive_processing_result.line_loop_closing_index,
+-                             primitive_processing_result.host_shader_index_endian, viewport_info,
+-                             used_texture_mask, normalized_depth_control, normalized_color_mask);
++  UpdateSystemConstantValues(
++      memexport_used, primitive_polygonal,
++      primitive_processing_result.line_loop_closing_index,
++      primitive_processing_result.host_shader_index_endian, viewport_info,
++      used_texture_mask, normalized_depth_control, normalized_color_mask,
++      window_offset_tiles);
+ 
+   // Update constant buffers, descriptors and root parameters.
+   if (!UpdateBindings(vertex_shader, pixel_shader, root_signature, memexport_used)) {
+@@ -3767,10 +3782,11 @@
+ }
+ 
+ void D3D12CommandProcessor::UpdateSystemConstantValues(
+-    bool shared_memory_is_uav, bool primitive_polygonal, uint32_t line_loop_closing_index,
+-    xenos::Endian index_endian, const draw_util::ViewportInfo& viewport_info,
+-    uint32_t used_texture_mask, reg::RB_DEPTHCONTROL normalized_depth_control,
+-    uint32_t normalized_color_mask) {
++    bool shared_memory_is_uav, bool primitive_polygonal,
++    uint32_t line_loop_closing_index, xenos::Endian index_endian,
++    const draw_util::ViewportInfo &viewport_info, uint32_t used_texture_mask,
++    reg::RB_DEPTHCONTROL normalized_depth_control,
++    uint32_t normalized_color_mask, int32_t window_offset_tiles) {
+ #if XE_GPU_FINE_GRAINED_DRAW_SCOPES
+   SCOPE_profile_cpu_f("gpu");
+ #endif  // XE_GPU_FINE_GRAINED_DRAW_SCOPES
+@@ -3968,6 +3984,19 @@
+     dirty |= system_constants_.ndc_offset[i] != viewport_info.ndc_offset[i];
+     system_constants_.ndc_scale[i] = viewport_info.ndc_scale[i];
+     system_constants_.ndc_offset[i] = viewport_info.ndc_offset[i];
++  }
++
++  // Window offset carried in the EDRAM bases.
++  float param_gen_window_offset[2] = {0.0f, 0.0f};
++  if (window_offset_tiles) {
++    auto pa_sc_window_offset = regs.Get<reg::PA_SC_WINDOW_OFFSET>();
++    param_gen_window_offset[0] = float(pa_sc_window_offset.window_x_offset);
++    param_gen_window_offset[1] = float(pa_sc_window_offset.window_y_offset);
++  }
++  for (uint32_t i = 0; i < 2; ++i) {
++    dirty |= system_constants_.param_gen_window_offset[i] !=
++             param_gen_window_offset[i];
++    system_constants_.param_gen_window_offset[i] = param_gen_window_offset[i];
+   }
+ 
+   // Point size.
+@@ -4075,7 +4104,13 @@
+       dirty |= system_constants_.edram_rt_keep_mask[i][1] != rt_keep_masks[i][1];
+       system_constants_.edram_rt_keep_mask[i][1] = rt_keep_masks[i][1];
+       if (rt_keep_masks[i][0] != UINT32_MAX || rt_keep_masks[i][1] != UINT32_MAX) {
+-        uint32_t rt_base_dwords_scaled = color_info.color_base * edram_tile_dwords_scaled;
++        uint32_t rt_base_dwords_scaled =
++            draw_util::AddWindowOffsetToEdramBase(
++                color_info.color_base, window_offset_tiles,
++                xenos::IsColorRenderTargetFormat64bpp(
++                    color_info.color_format)) *
++            edram_tile_dwords_scaled;
++
+         dirty |= system_constants_.edram_rt_base_dwords_scaled[i] != rt_base_dwords_scaled;
+         system_constants_.edram_rt_base_dwords_scaled[i] = rt_base_dwords_scaled;
+         uint32_t format_flags = RenderTargetCache::AddPSIColorFormatFlags(color_info.color_format);
+@@ -4095,7 +4130,11 @@
+   }
+ 
+   if (edram_rov_used) {
+-    uint32_t depth_base_dwords_scaled = rb_depth_info.depth_base * edram_tile_dwords_scaled;
++    uint32_t depth_base_dwords_scaled =
++        draw_util::AddWindowOffsetToEdramBase(rb_depth_info.depth_base,
++                                              window_offset_tiles, false) *
++        edram_tile_dwords_scaled;
++
+     dirty |= system_constants_.edram_depth_base_dwords_scaled != depth_base_dwords_scaled;
+     system_constants_.edram_depth_base_dwords_scaled = depth_base_dwords_scaled;
+ 
+diff --git a/src/graphics/d3d12/render_target_cache.cpp b/src/graphics/d3d12/render_target_cache.cpp
+--- a/src/graphics/d3d12/render_target_cache.cpp
++++ b/src/graphics/d3d12/render_target_cache.cpp
+@@ -1056,11 +1056,13 @@
+   }
+ }
+ 
+-bool D3D12RenderTargetCache::Update(bool is_rasterization_done,
+-                                    reg::RB_DEPTHCONTROL normalized_depth_control,
+-                                    uint32_t normalized_color_mask, const Shader& vertex_shader) {
+-  if (!RenderTargetCache::Update(is_rasterization_done, normalized_depth_control,
+-                                 normalized_color_mask, vertex_shader)) {
++bool D3D12RenderTargetCache::Update(
++    bool is_rasterization_done, reg::RB_DEPTHCONTROL normalized_depth_control,
++    uint32_t normalized_color_mask, const Shader &vertex_shader,
++    int32_t window_offset_tiles) {
++  if (!RenderTargetCache::Update(
++          is_rasterization_done, normalized_depth_control,
++          normalized_color_mask, vertex_shader, window_offset_tiles)) {
+     return false;
+   }
+   switch (GetPath()) {
+@@ -2812,17 +2814,27 @@
+ 
+   // Apply the source 32bpp tile index.
+   // r1.w = destination to source EDRAM tile adjustment
+-  a.OpIBFE(dxbc::Dest::R(1, 0b1000), dxbc::Src::LU(xenos::kEdramBaseTilesBits + 1),
++  a.OpUBFE(dxbc::Dest::R(1, 0b1000), dxbc::Src::LU(xenos::kEdramBaseTilesBits),
+            dxbc::Src::LU(xenos::kEdramPitchTilesBits * 2),
+-           dxbc::Src::CB(cbuffer_index_address, kTransferCBVRegisterAddress, 0, dxbc::Src::kXXXX));
+-  // r1.w = 32bpp tile index within the source, or the tile index within the
+-  //        source minus the EDRAM tile count if transferring across addressing
+-  //        wrapping (if negative)
++           dxbc::Src::CB(cbuffer_index_address, kTransferCBVRegisterAddress, 0,
++                         dxbc::Src::kXXXX));
++  // r1.w = 32bpp tile index within the source, not wrapped yet
+   a.OpIAdd(dxbc::Dest::R(1, 0b1000), dxbc::Src::R(0, dxbc::Src::kZZZZ),
+            dxbc::Src::R(1, dxbc::Src::kWWWW));
+   // r1.w = 32bpp tile index within the source
+   a.OpAnd(dxbc::Dest::R(1, 0b1000), dxbc::Src::R(1, dxbc::Src::kWWWW),
+           dxbc::Src::LU(xenos::kEdramTileCount - 1));
++  // r2.x = source in the next period
++  a.OpUBFE(dxbc::Dest::R(2, 0b0001), dxbc::Src::LU(1),
++           dxbc::Src::LU(xenos::kEdramPitchTilesBits * 2 +
++                         xenos::kEdramBaseTilesBits),
++           dxbc::Src::CB(cbuffer_index_address, kTransferCBVRegisterAddress, 0,
++                         dxbc::Src::kXXXX));
++  // r1.w = 32bpp tile index within the source, a period down in the next one
++  // r2.x = free
++  a.OpUMAd(dxbc::Dest::R(1, 0b1000), dxbc::Src::R(2, dxbc::Src::kXXXX),
++           dxbc::Src::LU(xenos::kEdramTileCount),
++           dxbc::Src::R(1, dxbc::Src::kWWWW));
+   // r2.x = source pitch in 32bpp tiles
+   a.OpUBFE(dxbc::Dest::R(2, 0b0001), dxbc::Src::LU(xenos::kEdramPitchTilesBits),
+            dxbc::Src::LU(xenos::kEdramPitchTilesBits),
+@@ -3397,16 +3409,17 @@
+               // Adjust the tile index from the destination to the host depth
+               // source.
+               // r0.w = destination to host depth source EDRAM tile adjustment
+-              a.OpIBFE(dxbc::Dest::R(0, 0b1000), dxbc::Src::LU(xenos::kEdramBaseTilesBits + 1),
++              a.OpUBFE(dxbc::Dest::R(0, 0b1000),
++                       dxbc::Src::LU(xenos::kEdramBaseTilesBits),
+                        dxbc::Src::LU(xenos::kEdramPitchTilesBits * 2),
+                        dxbc::Src::CB(cbuffer_index_host_depth_address,
+-                                     kTransferCBVRegisterHostDepthAddress, 0, dxbc::Src::kXXXX));
+-              // r0.z = tile index relative to the host depth source base, or
+-              //        the tile index within the host depth source minus the
+-              //        EDRAM tile count if transferring across addressing
+-              //        wrapping (if negative)
++                                     kTransferCBVRegisterHostDepthAddress, 0,
++                                     dxbc::Src::kXXXX));
++              // r0.z = tile index relative to the host depth source base, not
++              //        wrapped yet
+               // r0.w = free
+-              a.OpIAdd(dxbc::Dest::R(0, 0b0100), dxbc::Src::R(0, dxbc::Src::kZZZZ),
++              a.OpIAdd(dxbc::Dest::R(0, 0b0100),
++                       dxbc::Src::R(0, dxbc::Src::kZZZZ),
+                        dxbc::Src::R(0, dxbc::Src::kWWWW));
+               // r0.z = tile index relative to the host depth source base
+               a.OpAnd(dxbc::Dest::R(0, 0b0100), dxbc::Src::R(0, dxbc::Src::kZZZZ),
+@@ -3932,8 +3945,6 @@
+         // depth storing, NON_PIXEL_SHADER_RESOURCE -> DEPTH_WRITE will be done
+         // anyway even in the best case, so it's not possible to have all the
+         // barriers in one place here.
+-        // anyway even in the best case, so it's not possible to have all the
+-        // barriers in one place here.
+         TransitionEdramBuffer(D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+         TransitionRenderTarget(dest_d3d12_rt,
+                                D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+@@ -3942,10 +3953,10 @@
+             host_depth_store_pipelines_[size_t(dest_rt_key.msaa_samples)]);
+         host_depth_store_set_up = true;
+       }
+-      Transfer::Rectangle transfer_rectangles[Transfer::kMaxRectanglesWithCutout];
++      Transfer::Rectangle
++          transfer_rectangles[Transfer::kMaxRectanglesWithCutout];
+       uint32_t transfer_rectangle_count = transfer.GetRectangles(
+-          dest_rt_key.base_tiles, dest_rt_key.pitch_tiles_at_32bpp, dest_rt_key.msaa_samples, false,
+-          transfer_rectangles, resolve_clear_rectangle);
++          dest_rt_key, transfer_rectangles, resolve_clear_rectangle);
+       assert_not_zero(transfer_rectangle_count);
+       HostDepthStoreRectangleConstant host_depth_store_rectangle_constant;
+       for (uint32_t j = 0; j < transfer_rectangle_count; ++j) {
+@@ -4008,8 +4019,6 @@
+       }
+       // transfer.host_depth_source == dest_rt means the EDRAM buffer will be
+       // used instead, no need to transition.
+-      // transfer.host_depth_source == dest_rt means the EDRAM buffer will be
+-      // used instead, no need to transition.
+       if (transfer.host_depth_source && transfer.host_depth_source != dest_rt &&
+           !host_depth_source_previously_used_as_dest) {
+         auto& host_depth_source_d3d12_rt =
+@@ -4018,7 +4027,6 @@
+                                D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+       }
+     }
+-    // Transition the destination, only if not going to be used as a source
+     // Transition the destination, only if not going to be used as a source
+     // earlier.
+     bool dest_used_previously_as_source = false;
+@@ -4174,7 +4182,8 @@
+       }
+ 
+       uint32_t dest_pitch_tiles = dest_rt_key.GetPitchTiles();
+-      bool dest_is_64bpp = dest_rt_key.Is64bpp();
++      // GetRectangles returns guest pixels.
++      // Scale to the destination.
+ 
+       // Gather shader keys and sort to reduce pipeline state and binding
+       // switches. Also gather stencil rectangles to clear if needed.
+@@ -4226,12 +4235,11 @@
+                   ? host_depth_source_d3d12_rt->key().msaa_samples
+                   : xenos::MsaaSamples::k1X;
+           if (j) {
+-            new_transfer_shader_key.mode = source_rt_key.is_depth
+-                                               ? TransferMode::kDepthToStencilBit
+-                                               : TransferMode::kColorToStencilBit;
++            new_transfer_shader_key.mode =
++                source_rt_key.is_depth ? TransferMode::kDepthToStencilBit
++                                       : TransferMode::kColorToStencilBit;
+             stencil_clear_rectangle_count += transfer.GetRectangles(
+-                dest_rt_key.base_tiles, dest_pitch_tiles, dest_rt_key.msaa_samples, dest_is_64bpp,
+-                nullptr, resolve_clear_rectangle);
++                dest_rt_key, nullptr, resolve_clear_rectangle);
+           } else {
+             if (dest_rt_key.is_depth) {
+               if (host_depth_source_d3d12_rt) {
+@@ -4259,8 +4267,6 @@
+       // bits that need to be 1 by discarding samples. Clearing everything here
+       // to reduce context switches internally in the driver if clear causes
+       // them.
+-      // to reduce context switches internally in the driver if clear causes
+-      // them.
+       if (stencil_clear_rectangle_count) {
+         // No need to update sample positions here. Sample clears ignore them.
+         command_processor_.SubmitBarriers();
+@@ -4270,11 +4276,14 @@
+             stencil_clear_rectangle_count);
+         assert_not_null(stencil_clear_rect_write_ptr);
+         for (const Transfer& transfer : current_transfers) {
+-          Transfer::Rectangle transfer_stencil_clear_rectangles[Transfer::kMaxRectanglesWithCutout];
+-          uint32_t transfer_stencil_clear_rectangle_count = transfer.GetRectangles(
+-              dest_rt_key.base_tiles, dest_pitch_tiles, dest_rt_key.msaa_samples, dest_is_64bpp,
+-              transfer_stencil_clear_rectangles, resolve_clear_rectangle);
+-          for (uint32_t j = 0; j < transfer_stencil_clear_rectangle_count; ++j) {
++          Transfer::Rectangle transfer_stencil_clear_rectangles
++              [Transfer::kMaxRectanglesWithCutout];
++          uint32_t transfer_stencil_clear_rectangle_count =
++              transfer.GetRectangles(dest_rt_key,
++                                     transfer_stencil_clear_rectangles,
++                                     resolve_clear_rectangle);
++          for (uint32_t j = 0; j < transfer_stencil_clear_rectangle_count;
++               ++j) {
+             const Transfer::Rectangle& stencil_clear_rectangle =
+                 transfer_stencil_clear_rectangles[j];
+             stencil_clear_rect_write_ptr->left =
+@@ -4322,17 +4331,16 @@
+         const TransferInvocation& transfer_invocation_first = *it;
+         // Will be merging transfers from the same source into one mesh.
+         auto it_merged_first = it, it_merged_last = it;
+-        uint32_t transfer_rectangle_count = transfer_invocation_first.transfer.GetRectangles(
+-            dest_rt_key.base_tiles, dest_pitch_tiles, dest_rt_key.msaa_samples, dest_is_64bpp,
+-            nullptr, resolve_clear_rectangle);
++        uint32_t transfer_rectangle_count =
++            transfer_invocation_first.transfer.GetRectangles(
++                dest_rt_key, nullptr, resolve_clear_rectangle);
+         for (auto it_merge = std::next(it_merged_first);
+              it_merge != current_transfer_invocations_.cend(); ++it_merge) {
+           if (!transfer_invocation_first.CanBeMergedIntoOneDraw(*it_merge)) {
+             break;
+           }
+           transfer_rectangle_count += it_merge->transfer.GetRectangles(
+-              dest_rt_key.base_tiles, dest_pitch_tiles, dest_rt_key.msaa_samples, dest_is_64bpp,
+-              nullptr, resolve_clear_rectangle);
++              dest_rt_key, nullptr, resolve_clear_rectangle);
+           it_merged_last = it_merge;
+         }
+         assert_not_zero(transfer_rectangle_count);
+@@ -4356,9 +4364,6 @@
+ 
+         // Late barriers in case there was cross-copying that prevented merging
+         // of barriers.
+-
+-        // Late barriers in case there was cross-copying that prevented merging
+-        // of barriers.
+         TransitionRenderTarget(source_d3d12_rt,
+                                D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+         if (host_depth_source_d3d12_rt) {
+@@ -4388,13 +4393,16 @@
+           continue;
+         }
+         for (auto it_merged = it_merged_first; it_merged <= it_merged_last; ++it_merged) {
+-          Transfer::Rectangle transfer_invocation_rectangles[Transfer::kMaxRectanglesWithCutout];
+-          uint32_t transfer_invocation_rectangle_count = it_merged->transfer.GetRectangles(
+-              dest_rt_key.base_tiles, dest_pitch_tiles, dest_rt_key.msaa_samples, dest_is_64bpp,
+-              transfer_invocation_rectangles, resolve_clear_rectangle);
++          Transfer::Rectangle transfer_invocation_rectangles
++              [Transfer::kMaxRectanglesWithCutout];
++          uint32_t transfer_invocation_rectangle_count =
++              it_merged->transfer.GetRectangles(dest_rt_key,
++                                                transfer_invocation_rectangles,
++                                                resolve_clear_rectangle);
+           assert_not_zero(transfer_invocation_rectangle_count);
+           for (uint32_t j = 0; j < transfer_invocation_rectangle_count; ++j) {
+-            const Transfer::Rectangle& transfer_rectangle = transfer_invocation_rectangles[j];
++            const Transfer::Rectangle &transfer_rectangle =
++                transfer_invocation_rectangles[j];
+             float transfer_rectangle_x0 = -1.0f + transfer_rectangle.x_pixels * pixels_to_ndc_x;
+             float transfer_rectangle_y0 = 1.0f - transfer_rectangle.y_pixels * pixels_to_ndc_y;
+             float transfer_rectangle_x1 =
+@@ -4499,10 +4507,14 @@
+           address_constant.dest_pitch = dest_pitch_tiles;
+           address_constant.source_pitch = source_rt_key.GetPitchTiles();
+           address_constant.source_to_dest =
+-              int32_t(dest_rt_key.base_tiles) - int32_t(source_rt_key.base_tiles);
++              (uint32_t(dest_rt_key.base_tiles) -
++               uint32_t(source_rt_key.base_tiles)) &
++              (xenos::kEdramTileCount - 1);
++          address_constant.source_next_period = source_rt_key.next_period;
+           if (last_address_constant != address_constant) {
+             last_address_constant = address_constant;
+-            transfer_root_parameters_set &= ~kTransferUsedRootParameterAddressConstantBit;
++            transfer_root_parameters_set &=
++                ~kTransferUsedRootParameterAddressConstantBit;
+           }
+         }
+         if (transfer_root_parameters_used & kTransferUsedRootParameterHostDepthAddressConstantBit) {
+@@ -4510,12 +4522,16 @@
+           RenderTargetKey host_depth_source_rt_key = host_depth_source_d3d12_rt->key();
+           TransferAddressConstant host_depth_address_constant;
+           host_depth_address_constant.dest_pitch = dest_pitch_tiles;
+-          host_depth_address_constant.source_pitch = host_depth_source_rt_key.GetPitchTiles();
++          host_depth_address_constant.source_pitch =
++              host_depth_source_rt_key.GetPitchTiles();
+           host_depth_address_constant.source_to_dest =
+-              int32_t(dest_rt_key.base_tiles) - int32_t(host_depth_source_rt_key.base_tiles);
++              (uint32_t(dest_rt_key.base_tiles) -
++               uint32_t(host_depth_source_rt_key.base_tiles)) &
++              (xenos::kEdramTileCount - 1);
+           if (last_host_depth_address_constant != host_depth_address_constant) {
+             last_host_depth_address_constant = host_depth_address_constant;
+-            transfer_root_parameters_set &= ~kTransferUsedRootParameterHostDepthAddressConstantBit;
++            transfer_root_parameters_set &=
++                ~kTransferUsedRootParameterHostDepthAddressConstantBit;
+           }
+         }
+ 
+@@ -5173,9 +5189,10 @@
+   // r0.y = Y sample position within the tile
+   // r0.z = first EDRAM tile index in the dispatch
+   // r0.w = tile index relative to the dump rectangle base
+-  a.OpUBFE(dxbc::Dest::R(0, 0b0100), dxbc::Src::LU(xenos::kEdramBaseTilesBits + 1),
+-           dxbc::Src::LU(0),
+-           dxbc::Src::CB(kDumpCbufferOffsets, kDumpCbufferOffsets, 0, dxbc::Src::kXXXX));
++  a.OpUBFE(dxbc::Dest::R(0, 0b0100),
++           dxbc::Src::LU(xenos::kEdramBaseTilesBits + 2), dxbc::Src::LU(0),
++           dxbc::Src::CB(kDumpCbufferOffsets, kDumpCbufferOffsets, 0,
++                         dxbc::Src::kXXXX));
+   // Add the base tile in the dispatch to the dispatch-local tile index to r0.w,
+   // not wrapping yet so in case of a wraparound, the address relative to the
+   // base in the texture after subtraction of the base won't be negative.
+@@ -5246,8 +5263,9 @@
+   // r0.w = non-wrapped tile index in the EDRAM
+   // r1.x = source texture base tile index
+   a.OpUBFE(dxbc::Dest::R(1, 0b0001), dxbc::Src::LU(xenos::kEdramBaseTilesBits),
+-           dxbc::Src::LU(xenos::kEdramBaseTilesBits + 1),
+-           dxbc::Src::CB(kDumpCbufferOffsets, kDumpCbufferOffsets, 0, dxbc::Src::kXXXX));
++           dxbc::Src::LU(xenos::kEdramBaseTilesBits + 2),
++           dxbc::Src::CB(kDumpCbufferOffsets, kDumpCbufferOffsets, 0,
++                         dxbc::Src::kXXXX));
+   // Get the linear tile index within the source texture to r0.w.
+   // r0.x = X sample position within the tile
+   // r0.y = Y sample position within the tile
+@@ -5825,10 +5843,12 @@
+     DumpOffsets offsets;
+     offsets.source_base_tiles = rt_key.base_tiles;
+     ResolveCopyDumpRectangle::Dispatch dispatches[ResolveCopyDumpRectangle::kMaxDispatches];
+-    uint32_t dispatch_count = rectangle.GetDispatches(dump_pitch, dump_row_length_used, dispatches);
++    uint32_t dispatch_count =
++        rectangle.GetDispatches(dump_pitch, dump_row_length_used, dispatches);
+     for (uint32_t i = 0; i < dispatch_count; ++i) {
+       const ResolveCopyDumpRectangle::Dispatch& dispatch = dispatches[i];
+-      offsets.dispatch_first_tile = dump_base + dispatch.offset;
++      offsets.dispatch_first_tile =
++          rt_key.GetNonWrappedTileIndex(dump_base + dispatch.offset);
+       if (last_offsets != offsets) {
+         last_offsets = offsets;
+         root_parameters_set &= ~kDumpRootParameterOffsetsBit;
+diff --git a/src/graphics/pipeline/render_target/cache.cpp b/src/graphics/pipeline/render_target/cache.cpp
+--- a/src/graphics/pipeline/render_target/cache.cpp
++++ b/src/graphics/pipeline/render_target/cache.cpp
+@@ -189,11 +189,13 @@
+   return (color_written_bits & depth_stencil_used_bits) != 0;
+ }
+ 
+-uint32_t RenderTargetCache::Transfer::GetRangeRectangles(uint32_t start_tiles, uint32_t end_tiles,
+-                                                         uint32_t base_tiles, uint32_t pitch_tiles,
+-                                                         xenos::MsaaSamples msaa_samples,
+-                                                         bool is_64bpp, Rectangle* rectangles_out,
+-                                                         const Rectangle* cutout) {
++uint32_t RenderTargetCache::Transfer::GetRangeRectangles(
++    uint32_t start_tiles, uint32_t end_tiles, RenderTargetKey key,
++    Rectangle *rectangles_out, const Rectangle *cutout) {
++  uint32_t base_tiles = key.base_tiles;
++  uint32_t pitch_tiles = key.GetPitchTiles();
++  xenos::MsaaSamples msaa_samples = key.msaa_samples;
++  bool is_64bpp = key.Is64bpp();
+   // EDRAM addressing wrapping must be handled by doing GetRangeRectangles for
+   // two clamped ranges, in this case start_tiles == end_tiles will also
+   // unambiguously mean an empty range rather than the entire EDRAM.
+@@ -214,11 +216,8 @@
+   // If the first and / or the last rows have the same X spans as the middle
+   // part, merge them with it.
+   uint32_t rectangle_count = 0;
+-  // If start_tiles < base_tiles, this is the tail after EDRAM addressing
+-  // wrapping.
+-  uint32_t local_offset = start_tiles < base_tiles ? xenos::kEdramTileCount : 0;
+-  uint32_t local_start = local_offset + start_tiles - base_tiles;
+-  uint32_t local_end = local_offset + end_tiles - base_tiles;
++  uint32_t local_start = key.GetNonWrappedTileIndex(start_tiles) - base_tiles;
++  uint32_t local_end = local_start + (end_tiles - start_tiles);
+   // Inclusive.
+   uint32_t rows_start = local_start / pitch_tiles;
+   // Exclusive.
+@@ -417,9 +416,59 @@
+   ResetAccumulatedRenderTargets();
+ }
+ 
++int32_t RenderTargetCache::GetWindowOffsetTiles(
++    const RegisterFile &regs, reg::RB_DEPTHCONTROL normalized_depth_control,
++    uint32_t normalized_color_mask, uint64_t frame) {
++  bool kept_in_viewport;
++  int32_t window_offset_tiles = draw_util::GetWindowOffsetTiles(
++      regs, normalized_depth_control, normalized_color_mask,
++      GetPath() == Path::kHostRenderTargets, kept_in_viewport);
++  if (!window_offset_tiles && !kept_in_viewport) {
++    return 0;
++  }
++
++  window_offsets_kept_in_viewport_.erase(
++      std::remove_if(window_offsets_kept_in_viewport_.begin(),
++                     window_offsets_kept_in_viewport_.end(),
++                     [frame](const WindowOffsetKeptInViewport &kept) {
++                       return kept.frame + 1 < frame;
++                     }),
++      window_offsets_kept_in_viewport_.end());
++  auto pa_sc_window_offset = regs.Get<reg::PA_SC_WINDOW_OFFSET>();
++  auto rb_surface_info = regs.Get<reg::RB_SURFACE_INFO>();
++  auto kept_it = std::find_if(
++      window_offsets_kept_in_viewport_.begin(),
++      window_offsets_kept_in_viewport_.end(),
++      [&pa_sc_window_offset,
++       &rb_surface_info](const WindowOffsetKeptInViewport &kept) {
++        return kept.window_offset == pa_sc_window_offset.value &&
++               kept.surface_pitch == rb_surface_info.surface_pitch &&
++               kept.msaa_samples == rb_surface_info.msaa_samples;
++      });
++
++  if (kept_it != window_offsets_kept_in_viewport_.end()) {
++    // Refresh on every draw of the tile, not just the ones kept in the
++    // viewport, so a reason that comes and goes doesn't flip the tile between
++    // the paths.
++    kept_it->frame = frame;
++    return 0;
++  }
++
++  if (kept_in_viewport) {
++    window_offsets_kept_in_viewport_.push_back(
++        {pa_sc_window_offset.value, rb_surface_info.surface_pitch,
++         rb_surface_info.msaa_samples, frame});
++    return 0;
++  }
++
++  return window_offset_tiles;
++}
++
+ bool RenderTargetCache::Update(bool is_rasterization_done,
+                                reg::RB_DEPTHCONTROL normalized_depth_control,
+-                               uint32_t normalized_color_mask, const Shader& vertex_shader) {
++                               uint32_t normalized_color_mask,
++                               const Shader &vertex_shader,
++                               int32_t window_offset_tiles) {
+   const RegisterFile& regs = register_file();
+   bool interlock_barrier_only = GetPath() == Path::kPixelShaderInterlock;
+ 
+@@ -476,31 +525,43 @@
+   uint32_t depth_and_color_rts_used_bits = 0;
+   // depth_and_color_rts_used_bits -> EDRAM base.
+   uint32_t edram_bases[1 + xenos::kMaxColorRenderTargets];
++  // Guest bases for the aliasing tests, the window offset in the bases moves
++  // 64bpp ones twice as far and can bring render targets that don't overlap to
++  // one base.
++  uint32_t guest_bases[1 + xenos::kMaxColorRenderTargets];
+   uint32_t resource_formats[1 + xenos::kMaxColorRenderTargets];
+   uint32_t rts_are_64bpp = 0;
++  // Color targets that leave the depth bits untouched.
+   if (is_rasterization_done) {
+-    if (normalized_depth_control.z_enable || normalized_depth_control.stencil_enable) {
++    if (normalized_depth_control.z_enable ||
++        normalized_depth_control.stencil_enable) {
+       depth_and_color_rts_used_bits |= 1;
+       auto rb_depth_info = regs.Get<reg::RB_DEPTH_INFO>();
+-      edram_bases[0] = rb_depth_info.depth_base;
++      edram_bases[0] = draw_util::AddWindowOffsetToEdramBase(
++          rb_depth_info.depth_base, window_offset_tiles, false);
++      guest_bases[0] = rb_depth_info.depth_base;
+       // With pixel shader interlock, always the same addressing disregarding
+       // the format.
+-      resource_formats[0] = interlock_barrier_only ? 0 : uint32_t(rb_depth_info.depth_format);
++      resource_formats[0] =
++          interlock_barrier_only ? 0 : uint32_t(rb_depth_info.depth_format);
+     }
+     for (uint32_t i = 0; i < xenos::kMaxColorRenderTargets; ++i) {
+       if (!(normalized_color_mask & (uint32_t(0b1111) << (4 * i)))) {
+         continue;
+       }
+-      auto color_info = regs.Get<reg::RB_COLOR_INFO>(reg::RB_COLOR_INFO::rt_register_indices[i]);
++      auto color_info = regs.Get<reg::RB_COLOR_INFO>(
++          reg::RB_COLOR_INFO::rt_register_indices[i]);
+       uint32_t rt_bit_index = 1 + i;
+       depth_and_color_rts_used_bits |= uint32_t(1) << rt_bit_index;
+-      edram_bases[rt_bit_index] = color_info.color_base;
+-      xenos::ColorRenderTargetFormat color_format =
+-          regs.Get<reg::RB_COLOR_INFO>(reg::RB_COLOR_INFO::rt_register_indices[i]).color_format;
++      xenos::ColorRenderTargetFormat color_format = color_info.color_format;
+       bool is_64bpp = xenos::IsColorRenderTargetFormat64bpp(color_format);
++      edram_bases[rt_bit_index] = draw_util::AddWindowOffsetToEdramBase(
++          color_info.color_base, window_offset_tiles, is_64bpp);
++      guest_bases[rt_bit_index] = color_info.color_base;
+       if (is_64bpp) {
+         rts_are_64bpp |= uint32_t(1) << rt_bit_index;
+       }
++
+       xenos::ColorRenderTargetFormat color_resource_format;
+       if (interlock_barrier_only) {
+         // Only changes in mapping between coordinates and addresses are
+@@ -540,13 +601,14 @@
+   rts_remaining = depth_and_color_rts_used_bits & ~(uint32_t(1));
+   while (rex::bit_scan_forward(rts_remaining, &rt_index)) {
+     rts_remaining &= ~(uint32_t(1) << rt_index);
+-    uint32_t edram_base = edram_bases[rt_index];
++    uint32_t guest_base = guest_bases[rt_index];
+     uint32_t rts_other_remaining =
+-        depth_and_color_rts_used_bits & (~((uint32_t(1) << (rt_index + 1)) - 1) | uint32_t(1));
++        depth_and_color_rts_used_bits &
++        (~((uint32_t(1) << (rt_index + 1)) - 1) | uint32_t(1));
+     uint32_t rt_other_index;
+     while (rex::bit_scan_forward(rts_other_remaining, &rt_other_index)) {
+       rts_other_remaining &= ~(uint32_t(1) << rt_other_index);
+-      if (edram_bases[rt_other_index] == edram_base) {
++      if (guest_bases[rt_other_index] == guest_base) {
+         depth_and_color_rts_used_bits &= ~(uint32_t(1) << rt_other_index);
+       }
+     }
+@@ -586,13 +648,19 @@
+ 
+   // Estimate height used by render targets (for color for writes, for depth /
+   // stencil for both reads and writes) from various sources.
+-  uint32_t height_used =
+-      std::min(GetRenderTargetHeight(pitch_tiles_at_32bpp, msaa_samples),
+-               draw_extent_estimator_.EstimateMaxY(
+-                   interlock_barrier_only
+-                       ? REXCVAR_GET(execute_unclipped_draw_vs_on_cpu_for_psi_render_backend)
+-                       : true,
+-                   vertex_shader));
++  uint32_t height_used = draw_extent_estimator_.EstimateMaxY(
++      interlock_barrier_only
++          ? REXCVAR_GET(execute_unclipped_draw_vs_on_cpu_for_psi_render_backend)
++          : true,
++      vertex_shader, window_offset_tiles != 0);
++  if (!(interlock_barrier_only && window_offset_tiles)) {
++    // Don't clamp an interlock range with the window offset in the bases to
++    // the period, it runs on into the next one and the shader wraps the
++    // addresses, the third tile of 1280x720 4x ends 832 tiles into it. Host
++    // render targets keep the offset in the viewport past the period.
++    height_used = std::min(
++        height_used, GetRenderTargetHeight(pitch_tiles_at_32bpp, msaa_samples));
++  }
+ 
+   // Sorted by EDRAM base and then by index in the pipeline - for simplicity,
+   // treat render targets placed closer to the end of the EDRAM as truncating
+@@ -622,9 +690,11 @@
+   // tiles, and a 64bpp color buffer at 675 requiring 1350 tiles, but the
+   // smallest distance between two render target bases is 675 tiles).
+   uint32_t rt_max_distance_tiles_at_64bpp = xenos::kEdramTileCount * 2;
+-  if (REXCVAR_GET(mrt_edram_used_range_clamp_to_min) && edram_bases_sorted_count >= 2) {
++  if (!window_offset_tiles && REXCVAR_GET(mrt_edram_used_range_clamp_to_min) &&
++      edram_bases_sorted_count >= 2) {
+     for (uint32_t i = 1; i < edram_bases_sorted_count; ++i) {
+-      const std::pair<uint32_t, uint32_t>& rt_base_prev = edram_bases_sorted[i - 1];
++      const std::pair<uint32_t, uint32_t> &rt_base_prev =
++          edram_bases_sorted[i - 1];
+       rt_max_distance_tiles_at_64bpp =
+           std::min(rt_max_distance_tiles_at_64bpp,
+                    (edram_bases_sorted[i].first - rt_base_prev.first)
+@@ -644,11 +714,40 @@
+   // ranges used by each render target.
+   RenderTargetKey rt_keys[1 + xenos::kMaxColorRenderTargets];
+   RenderTarget* rts[1 + xenos::kMaxColorRenderTargets];
++  // Make sure all the needed render targets are created, and gather lengths of
++  // ranges used by each render target.
+   uint32_t rt_lengths_tiles[1 + xenos::kMaxColorRenderTargets];
++  uint32_t rt_starts_tiles[1 + xenos::kMaxColorRenderTargets];
+   uint32_t length_used_tiles_at_32bpp =
+       ((height_used << uint32_t(msaa_samples >= xenos::MsaaSamples::k2X)) +
+        (xenos::kEdramTileHeightSamples - 1)) /
+       xenos::kEdramTileHeightSamples * pitch_tiles_at_32bpp;
++  // Start the ranges at the scissor with the window offset in the bases,
++  // without clamping between the bases. The draw touches nothing between a
++  // base and the scissor top, and a range starting past the base distance
++  // would be cut to nothing. An x offset shifts the whole range by its tiles,
++  // the scissor's left tile is past the pitch in the next row and the last
++  // row runs that far past it.
++  uint32_t start_used_tiles_at_32bpp = 0;
++  if (window_offset_tiles) {
++    draw_util::Scissor scissor;
++    draw_util::GetScissor(regs, scissor, true, true);
++    uint32_t msaa_samples_x_log2 =
++        uint32_t(msaa_samples >= xenos::MsaaSamples::k4X);
++    start_used_tiles_at_32bpp =
++        (scissor.offset[1] << uint32_t(msaa_samples >=
++                                       xenos::MsaaSamples::k2X)) /
++            xenos::kEdramTileHeightSamples * pitch_tiles_at_32bpp +
++        (scissor.offset[0] << msaa_samples_x_log2) /
++            xenos::kEdramTileWidthSamples;
++    uint32_t right_tiles_at_32bpp =
++        (((scissor.offset[0] + scissor.extent[0]) << msaa_samples_x_log2) +
++         (xenos::kEdramTileWidthSamples - 1)) /
++        xenos::kEdramTileWidthSamples;
++    if (right_tiles_at_32bpp > pitch_tiles_at_32bpp) {
++      length_used_tiles_at_32bpp += right_tiles_at_32bpp - pitch_tiles_at_32bpp;
++    }
++  }
+   for (uint32_t i = 0; i < edram_bases_sorted_count; ++i) {
+     const std::pair<uint32_t, uint32_t>& rt_base_index = edram_bases_sorted[i];
+     uint32_t rt_base = rt_base_index.first;
+@@ -659,6 +758,22 @@
+     rt_key.msaa_samples = msaa_samples;
+     rt_key.is_depth = rt_bit_index == 0;
+     rt_key.resource_format = resource_formats[rt_bit_index];
++    uint32_t rt_is_64bpp = (rts_are_64bpp >> rt_bit_index) & 1;
++    uint32_t range_start_tiles = 0;
++    uint32_t range_end_tiles = 0;
++    if (window_offset_tiles) {
++      range_start_tiles = start_used_tiles_at_32bpp << rt_is_64bpp;
++      range_end_tiles = length_used_tiles_at_32bpp << rt_is_64bpp;
++      if (!interlock_barrier_only) {
++        // Take the render target of the period the scissor top is in and end
++        // the range with it, 64bpp color rows span two.
++        rt_key.next_period = std::min(
++            range_start_tiles >> xenos::kEdramBaseTilesBits, uint32_t(1));
++        range_end_tiles =
++            std::min(range_end_tiles, (uint32_t(rt_key.next_period) + 1)
++                                          << xenos::kEdramBaseTilesBits);
++      }
++    }
+     if (!interlock_barrier_only) {
+       RenderTarget* render_target = GetOrCreateRenderTarget(rt_key);
+       if (!render_target) {
+@@ -666,16 +781,28 @@
+       }
+       rts[rt_bit_index] = render_target;
+     }
+-    uint32_t rt_is_64bpp = (rts_are_64bpp >> rt_bit_index) & 1;
+-    // The last render target can occupy the EDRAM until the base of the first
+-    // render target (itself in case of 1 render target) with EDRAM addressing
+-    // wrapping.
+-    rt_lengths_tiles[i] = std::min(std::min(length_used_tiles_at_32bpp << rt_is_64bpp,
+-                                            rt_max_distance_tiles_at_64bpp >> (rt_is_64bpp ^ 1)),
+-                                   ((i + 1 < edram_bases_sorted_count)
+-                                        ? edram_bases_sorted[i + 1].first
+-                                        : (xenos::kEdramTileCount + edram_bases_sorted[0].first)) -
+-                                       rt_base);
++    if (window_offset_tiles) {
++      // Wrap the start into the period and take at most one period from it.
++      // ChangeOwnership wraps a range crossing the end of EDRAM, like the last
++      // render target wrapping to the first base below.
++      rt_starts_tiles[i] = range_start_tiles & (xenos::kEdramTileCount - 1);
++      rt_lengths_tiles[i] = std::min(range_end_tiles > range_start_tiles
++                                         ? range_end_tiles - range_start_tiles
++                                         : uint32_t(0),
++                                     xenos::kEdramTileCount);
++    } else {
++      rt_starts_tiles[i] = 0;
++      // The last render target can occupy the EDRAM until the base of the
++      // first render target (itself in case of 1 render target) with EDRAM
++      // addressing wrapping.
++      rt_lengths_tiles[i] = std::min(
++          std::min(length_used_tiles_at_32bpp << rt_is_64bpp,
++                   rt_max_distance_tiles_at_64bpp >> (rt_is_64bpp ^ 1)),
++          ((i + 1 < edram_bases_sorted_count)
++               ? edram_bases_sorted[i + 1].first
++               : (xenos::kEdramTileCount + edram_bases_sorted[0].first)) -
++              rt_base);
++    }
+   }
+ 
+   if (interlock_barrier_only) {
+@@ -684,18 +811,31 @@
+     // barrier if an overlap is encountered later between pre-barrier and
+     // post-barrier usages), check if any overlap requiring a barrier happens,
+     // and then insert the barrier if needed.
+-    bool interlock_barrier_needed = false;
+-    for (uint32_t i = 0; i < edram_bases_sorted_count; ++i) {
+-      const std::pair<uint32_t, uint32_t>& rt_base_index = edram_bases_sorted[i];
+-      if (WouldOwnershipChangeRequireTransfers(rt_keys[rt_base_index.second], 0,
+-                                               rt_lengths_tiles[i])) {
+-        interlock_barrier_needed = true;
+-        break;
++    // Take a barrier when the offset in the bases differs from the last
++    // draw's. Two pixels can reach one word under one key then, an x offset
++    // past the pitch or y offsets a period apart, and the interlock only
++    // orders a pixel against itself.
++    uint32_t interlock_window_offset =
++        window_offset_tiles ? regs.Get<reg::PA_SC_WINDOW_OFFSET>().value : 0;
++    bool interlock_barrier_needed =
++        interlock_last_window_offset_ != UINT32_MAX &&
++        interlock_window_offset != interlock_last_window_offset_;
++    if (!interlock_barrier_needed) {
++      for (uint32_t i = 0; i < edram_bases_sorted_count; ++i) {
++        const std::pair<uint32_t, uint32_t> &rt_base_index =
++            edram_bases_sorted[i];
++        if (WouldOwnershipChangeRequireTransfers(rt_keys[rt_base_index.second],
++                                                 rt_starts_tiles[i],
++                                                 rt_lengths_tiles[i])) {
++          interlock_barrier_needed = true;
++          break;
++        }
+       }
+     }
+     if (interlock_barrier_needed) {
+       RequestPixelShaderInterlockBarrier();
+     }
++    interlock_last_window_offset_ = interlock_window_offset;
+   }
+ 
+   // From now on ownership transfers should succeed for simplicity and
+@@ -706,8 +846,10 @@
+   for (uint32_t i = 0; i < edram_bases_sorted_count; ++i) {
+     const std::pair<uint32_t, uint32_t>& rt_base_index = edram_bases_sorted[i];
+     uint32_t rt_bit_index = rt_base_index.second;
+-    ChangeOwnership(rt_keys[rt_bit_index], 0, rt_lengths_tiles[i],
+-                    interlock_barrier_only ? nullptr : &last_update_transfers_[rt_bit_index]);
++    ChangeOwnership(
++        rt_keys[rt_bit_index], rt_starts_tiles[i], rt_lengths_tiles[i],
++        interlock_barrier_only ? nullptr
++                               : &last_update_transfers_[rt_bit_index]);
+   }
+ 
+   if (interlock_barrier_only) {
+@@ -1146,9 +1288,10 @@
+ 
+ void RenderTargetCache::PixelShaderInterlockFullEdramBarrierPlaced() {
+   assert_true(GetPath() == Path::kPixelShaderInterlock);
++  interlock_last_window_offset_ = UINT32_MAX;
+   // Clear ownership - any overlap of data written before the barrier is safe.
+-  OwnershipRange empty_range(xenos::kEdramTileCount, RenderTargetKey(), RenderTargetKey(),
+-                             RenderTargetKey());
++  OwnershipRange empty_range(xenos::kEdramTileCount, RenderTargetKey(),
++                             RenderTargetKey(), RenderTargetKey());
+   if (ownership_ranges_.size() == 1) {
+     // Do not reallocate map elements if not needed (either nothing drawn since
+     // the last barrier, or all of the EDRAM is owned by one render target).
+@@ -1268,8 +1411,9 @@
+   if (length_tiles == 0) {
+     return;
+   }
+-  uint32_t dest_pitch_tiles = dest.GetPitchTiles();
+-  bool dest_is_64bpp = dest.Is64bpp();
++  // Native scale render targets are kept out of host depth tracking entirely
++  // so the host depth buffer region only ever holds data at the global scale
++  // and transfers never read host depth across scale classes. Ranges keep
+   bool host_depth_encoding_different = dest.is_depth && GetPath() == Path::kHostRenderTargets &&
+                                        IsHostDepthEncodingDifferent(dest.GetDepthFormat());
+   auto change_ownership_in_extent = [&](uint32_t extent_start, uint32_t extent_end) {
+@@ -1315,10 +1459,10 @@
+         // just the latest host depth owner - the transfer source is expected to
+         // be different than the destination.
+         if (!transfer_source.IsEmpty() && transfer_source != dest) {
+-          uint32_t transfer_end_tiles = std::min(it->second.end_tiles, extent_end);
++          uint32_t transfer_end_tiles =
++              std::min(it->second.end_tiles, extent_end);
+           if (!resolve_clear_cutout ||
+-              Transfer::GetRangeRectangles(it->first, transfer_end_tiles, dest.base_tiles,
+-                                           dest_pitch_tiles, dest.msaa_samples, dest_is_64bpp,
++              Transfer::GetRangeRectangles(it->first, transfer_end_tiles, dest,
+                                            nullptr, resolve_clear_cutout)) {
+             RenderTargetKey transfer_host_depth_source =
+                 host_depth_encoding_different
+diff --git a/src/graphics/pipeline/shader/dxbc_translator.cpp b/src/graphics/pipeline/shader/dxbc_translator.cpp
+--- a/src/graphics/pipeline/shader/dxbc_translator.cpp
++++ b/src/graphics/pipeline/shader/dxbc_translator.cpp
+@@ -671,6 +671,13 @@
+                dxbc::Src::LF(1.0f / draw_resolution_scale_x_, 1.0f / draw_resolution_scale_y_, 1.0f,
+                              1.0f));
+     }
++    // Add the window offset back when it's carried in the EDRAM bases.
++    // PsParamGen includes it.
++    a_.OpAdd(
++        dxbc::Dest::R(param_gen_temp, 0b0011), dxbc::Src::R(param_gen_temp),
++        LoadSystemConstant(SystemConstants::Index::kParamGenWindowOffset,
++                           offsetof(SystemConstants, param_gen_window_offset),
++                           dxbc::Src::kXYZW));
+     if (shader_modification.pixel.param_gen_point) {
+       // A point - always front-facing (the upper bit of X is 0), not a line
+       // (the upper bit of Z is 0).
+@@ -1937,56 +1944,81 @@
+          ShaderRdefTypeIndex::kUint4},
+ };
+ 
+-const DxbcShaderTranslator::SystemConstantRdef DxbcShaderTranslator::system_constant_rdef_[size_t(
+-    DxbcShaderTranslator::SystemConstants::Index::kCount)] = {
+-    {"xe_flags", ShaderRdefTypeIndex::kUint, sizeof(uint32_t)},
+-    {"xe_tessellation_factor_range", ShaderRdefTypeIndex::kFloat2, sizeof(float) * 2},
+-    {"xe_line_loop_closing_index", ShaderRdefTypeIndex::kUint, sizeof(uint32_t)},
+-
+-    {"xe_vertex_index_endian", ShaderRdefTypeIndex::kUint, sizeof(uint32_t)},
+-    {"xe_vertex_index_offset", ShaderRdefTypeIndex::kUint, sizeof(int32_t)},
+-    {"xe_vertex_index_min_max", ShaderRdefTypeIndex::kUint2, sizeof(uint32_t) * 2},
+-
+-    {"xe_user_clip_planes", ShaderRdefTypeIndex::kFloat4Array6, sizeof(float) * 4 * 6},
+-
+-    {"xe_ndc_scale", ShaderRdefTypeIndex::kFloat3, sizeof(float) * 3},
+-    {"xe_point_vertex_diameter_min", ShaderRdefTypeIndex::kFloat, sizeof(float)},
+-
+-    {"xe_ndc_offset", ShaderRdefTypeIndex::kFloat3, sizeof(float) * 3},
+-    {"xe_point_vertex_diameter_max", ShaderRdefTypeIndex::kFloat, sizeof(float)},
+-
+-    {"xe_point_constant_diameter", ShaderRdefTypeIndex::kFloat2, sizeof(float) * 2},
+-    {"xe_point_screen_diameter_to_ndc_radius", ShaderRdefTypeIndex::kFloat2, sizeof(float) * 2},
+-
+-    {"xe_texture_swizzled_signs", ShaderRdefTypeIndex::kUint4Array2, sizeof(uint32_t) * 4 * 2},
+-
+-    {"xe_textures_resolution_scaled", ShaderRdefTypeIndex::kUint, sizeof(uint32_t)},
+-    {"xe_sample_count_log2", ShaderRdefTypeIndex::kUint2, sizeof(uint32_t) * 2},
+-    {"xe_alpha_test_reference", ShaderRdefTypeIndex::kFloat, sizeof(float)},
+-
+-    {"xe_alpha_to_mask", ShaderRdefTypeIndex::kUint, sizeof(uint32_t)},
+-    {"xe_edram_32bpp_tile_pitch_dwords_scaled", ShaderRdefTypeIndex::kUint, sizeof(uint32_t)},
+-    {"xe_edram_depth_base_dwords_scaled", ShaderRdefTypeIndex::kUint, sizeof(uint32_t),
+-     sizeof(uint32_t)},
+-
+-    {"xe_color_exp_bias", ShaderRdefTypeIndex::kFloat4, sizeof(float) * 4},
+-
+-    {"xe_edram_poly_offset_front", ShaderRdefTypeIndex::kFloat2, sizeof(float) * 2},
+-    {"xe_edram_poly_offset_back", ShaderRdefTypeIndex::kFloat2, sizeof(float) * 2},
+-
+-    {"xe_edram_stencil", ShaderRdefTypeIndex::kUint4Array2, sizeof(uint32_t) * 4 * 2},
+-
+-    {"xe_edram_rt_base_dwords_scaled", ShaderRdefTypeIndex::kUint4, sizeof(uint32_t) * 4},
+-
+-    {"xe_edram_rt_format_flags", ShaderRdefTypeIndex::kUint4, sizeof(uint32_t) * 4},
+-
+-    {"xe_edram_rt_clamp", ShaderRdefTypeIndex::kFloat4Array4, sizeof(float) * 4 * 4},
+-
+-    {"xe_edram_rt_keep_mask", ShaderRdefTypeIndex::kUint4Array2, sizeof(uint32_t) * 4 * 2},
+-
+-    {"xe_edram_rt_blend_factors_ops", ShaderRdefTypeIndex::kUint4, sizeof(uint32_t) * 4},
+-
+-    {"xe_edram_blend_constant", ShaderRdefTypeIndex::kFloat4, sizeof(float) * 4},
++const DxbcShaderTranslator::SystemConstantRdef
++    DxbcShaderTranslator::system_constant_rdef_[size_t(
++        DxbcShaderTranslator::SystemConstants::Index::kCount)] = {
++        {"xe_flags", ShaderRdefTypeIndex::kUint, sizeof(uint32_t)},
++        {"xe_tessellation_factor_range", ShaderRdefTypeIndex::kFloat2,
++         sizeof(float) * 2},
++        {"xe_line_loop_closing_index", ShaderRdefTypeIndex::kUint,
++         sizeof(uint32_t)},
++
++        {"xe_vertex_index_endian", ShaderRdefTypeIndex::kUint,
++         sizeof(uint32_t)},
++        {"xe_vertex_index_offset", ShaderRdefTypeIndex::kUint, sizeof(int32_t)},
++        {"xe_vertex_index_min_max", ShaderRdefTypeIndex::kUint2,
++         sizeof(uint32_t) * 2},
++
++        {"xe_user_clip_planes", ShaderRdefTypeIndex::kFloat4Array6,
++         sizeof(float) * 4 * 6},
++
++        {"xe_ndc_scale", ShaderRdefTypeIndex::kFloat3, sizeof(float) * 3},
++        {"xe_point_vertex_diameter_min", ShaderRdefTypeIndex::kFloat,
++         sizeof(float)},
++
++        {"xe_ndc_offset", ShaderRdefTypeIndex::kFloat3, sizeof(float) * 3},
++        {"xe_point_vertex_diameter_max", ShaderRdefTypeIndex::kFloat,
++         sizeof(float)},
++
++        {"xe_point_constant_diameter", ShaderRdefTypeIndex::kFloat2,
++         sizeof(float) * 2},
++        {"xe_point_screen_diameter_to_ndc_radius", ShaderRdefTypeIndex::kFloat2,
++         sizeof(float) * 2},
++
++        {"xe_texture_swizzled_signs", ShaderRdefTypeIndex::kUint4Array2,
++         sizeof(uint32_t) * 4 * 2},
++
++        {"xe_textures_resolution_scaled", ShaderRdefTypeIndex::kUint,
++         sizeof(uint32_t)},
++        {"xe_sample_count_log2", ShaderRdefTypeIndex::kUint2,
++         sizeof(uint32_t) * 2},
++        {"xe_alpha_test_reference", ShaderRdefTypeIndex::kFloat, sizeof(float)},
++
++        {"xe_alpha_to_mask", ShaderRdefTypeIndex::kUint, sizeof(uint32_t)},
++        {"xe_edram_32bpp_tile_pitch_dwords_scaled", ShaderRdefTypeIndex::kUint,
++         sizeof(uint32_t)},
++        {"xe_edram_depth_base_dwords_scaled", ShaderRdefTypeIndex::kUint,
++         sizeof(uint32_t), sizeof(uint32_t)},
++
++        {"xe_color_exp_bias", ShaderRdefTypeIndex::kFloat4, sizeof(float) * 4},
++
++        {"xe_edram_poly_offset_front", ShaderRdefTypeIndex::kFloat2,
++         sizeof(float) * 2},
++        {"xe_edram_poly_offset_back", ShaderRdefTypeIndex::kFloat2,
++         sizeof(float) * 2},
++
++        {"xe_edram_stencil", ShaderRdefTypeIndex::kUint4Array2,
++         sizeof(uint32_t) * 4 * 2},
++
++        {"xe_edram_rt_base_dwords_scaled", ShaderRdefTypeIndex::kUint4,
++         sizeof(uint32_t) * 4},
++
++        {"xe_edram_rt_format_flags", ShaderRdefTypeIndex::kUint4,
++         sizeof(uint32_t) * 4},
++
++        {"xe_edram_rt_clamp", ShaderRdefTypeIndex::kFloat4Array4,
++         sizeof(float) * 4 * 4},
++
++        {"xe_edram_rt_keep_mask", ShaderRdefTypeIndex::kUint4Array2,
++         sizeof(uint32_t) * 4 * 2},
++
++        {"xe_edram_rt_blend_factors_ops", ShaderRdefTypeIndex::kUint4,
++         sizeof(uint32_t) * 4},
++
++        {"xe_edram_blend_constant", ShaderRdefTypeIndex::kFloat4,
++         sizeof(float) * 4},
++        {"xe_param_gen_window_offset", ShaderRdefTypeIndex::kFloat2,
++         sizeof(float) * 2, sizeof(uint32_t) * 2},
+ };
+ 
+ void DxbcShaderTranslator::WriteResourceDefinition() {
+diff --git a/src/graphics/pipeline/shader/spirv_translator.cpp b/src/graphics/pipeline/shader/spirv_translator.cpp
+--- a/src/graphics/pipeline/shader/spirv_translator.cpp
++++ b/src/graphics/pipeline/shader/spirv_translator.cpp
+@@ -263,56 +263,77 @@
+   builder_->addDecoration(type_uint4_array_4, spv::DecorationArrayStride, sizeof(uint32_t) * 4);
+   const SystemConstant system_constants[] = {
+       {"flags", offsetof(SystemConstants, flags), type_uint_},
+-      {"vertex_index_load_address", offsetof(SystemConstants, vertex_index_load_address),
++      {"vertex_index_load_address",
++       offsetof(SystemConstants, vertex_index_load_address), type_uint_},
++      {"vertex_index_endian", offsetof(SystemConstants, vertex_index_endian),
+        type_uint_},
+-      {"vertex_index_endian", offsetof(SystemConstants, vertex_index_endian), type_uint_},
+-      {"line_loop_closing_index", offsetof(SystemConstants, line_loop_closing_index), type_uint_},
+-      {"vertex_base_index", offsetof(SystemConstants, vertex_base_index), type_int_},
+-      {"vertex_index_reset", offsetof(SystemConstants, vertex_index_reset), type_uint_},
+-      {"compute_memexport_vertex_count", offsetof(SystemConstants, compute_memexport_vertex_count),
++      {"line_loop_closing_index",
++       offsetof(SystemConstants, line_loop_closing_index), type_uint_},
++      {"vertex_base_index", offsetof(SystemConstants, vertex_base_index),
++       type_int_},
++      {"vertex_index_reset", offsetof(SystemConstants, vertex_index_reset),
+        type_uint_},
+-      {"user_clip_planes", offsetof(SystemConstants, user_clip_planes), type_float4_array_6},
+-      {"vertex_index_min", offsetof(SystemConstants, vertex_index_min), type_uint_},
+-      {"vertex_index_max", offsetof(SystemConstants, vertex_index_max), type_uint_},
++      {"compute_memexport_vertex_count",
++       offsetof(SystemConstants, compute_memexport_vertex_count), type_uint_},
++      {"user_clip_planes", offsetof(SystemConstants, user_clip_planes),
++       type_float4_array_6},
++      {"vertex_index_min", offsetof(SystemConstants, vertex_index_min),
++       type_uint_},
++      {"vertex_index_max", offsetof(SystemConstants, vertex_index_max),
++       type_uint_},
+       {"ndc_scale", offsetof(SystemConstants, ndc_scale), type_float3_},
+-      {"point_vertex_diameter_min", offsetof(SystemConstants, point_vertex_diameter_min),
++      {"point_vertex_diameter_min",
++       offsetof(SystemConstants, point_vertex_diameter_min), type_float_},
++      {"ndc_offset", offsetof(SystemConstants, ndc_offset), type_float3_},
++      {"point_vertex_diameter_max",
++       offsetof(SystemConstants, point_vertex_diameter_max), type_float_},
++      {"point_constant_diameter",
++       offsetof(SystemConstants, point_constant_diameter), type_float2_},
++      {"point_screen_diameter_to_ndc_radius",
++       offsetof(SystemConstants, point_screen_diameter_to_ndc_radius),
++       type_float2_},
++      {"textures_resolution_scaled",
++       offsetof(SystemConstants, textures_resolution_scaled), type_uint_},
++      {"texture_swizzled_signs",
++       offsetof(SystemConstants, texture_swizzled_signs), type_uint4_array_2},
++      {"texture_swizzles", offsetof(SystemConstants, texture_swizzles),
++       type_uint4_array_4},
++      {"alpha_test_reference", offsetof(SystemConstants, alpha_test_reference),
+        type_float_},
+-      {"ndc_offset", offsetof(SystemConstants, ndc_offset), type_float3_},
+-      {"point_vertex_diameter_max", offsetof(SystemConstants, point_vertex_diameter_max),
+-       type_float_},
+-      {"point_constant_diameter", offsetof(SystemConstants, point_constant_diameter), type_float2_},
+-      {"point_screen_diameter_to_ndc_radius",
+-       offsetof(SystemConstants, point_screen_diameter_to_ndc_radius), type_float2_},
+-      {"textures_resolution_scaled", offsetof(SystemConstants, textures_resolution_scaled),
+-       type_uint_},
+-      {"texture_swizzled_signs", offsetof(SystemConstants, texture_swizzled_signs),
+-       type_uint4_array_2},
+-      {"texture_swizzles", offsetof(SystemConstants, texture_swizzles), type_uint4_array_4},
+-      {"alpha_test_reference", offsetof(SystemConstants, alpha_test_reference), type_float_},
+       {"alpha_to_mask", offsetof(SystemConstants, alpha_to_mask), type_uint_},
+       {"edram_32bpp_tile_pitch_dwords_scaled",
+-       offsetof(SystemConstants, edram_32bpp_tile_pitch_dwords_scaled), type_uint_},
+-      {"edram_depth_base_dwords_scaled", offsetof(SystemConstants, edram_depth_base_dwords_scaled),
++       offsetof(SystemConstants, edram_32bpp_tile_pitch_dwords_scaled),
+        type_uint_},
+-      {"color_exp_bias", offsetof(SystemConstants, color_exp_bias), type_float4_},
+-      {"edram_poly_offset_front_scale", offsetof(SystemConstants, edram_poly_offset_front_scale),
+-       type_float_},
+-      {"edram_poly_offset_back_scale", offsetof(SystemConstants, edram_poly_offset_back_scale),
+-       type_float_},
+-      {"edram_poly_offset_front_offset", offsetof(SystemConstants, edram_poly_offset_front_offset),
+-       type_float_},
+-      {"edram_poly_offset_back_offset", offsetof(SystemConstants, edram_poly_offset_back_offset),
+-       type_float_},
+-      {"edram_stencil_front", offsetof(SystemConstants, edram_stencil_front), type_uint2_},
+-      {"edram_stencil_back", offsetof(SystemConstants, edram_stencil_back), type_uint2_},
+-      {"edram_rt_base_dwords_scaled", offsetof(SystemConstants, edram_rt_base_dwords_scaled),
+-       type_uint4_},
+-      {"edram_rt_format_flags", offsetof(SystemConstants, edram_rt_format_flags), type_uint4_},
+-      {"edram_rt_blend_factors_ops", offsetof(SystemConstants, edram_rt_blend_factors_ops),
+-       type_uint4_},
+-      {"edram_rt_keep_mask", offsetof(SystemConstants, edram_rt_keep_mask), type_uint4_array_2},
+-      {"edram_rt_clamp", offsetof(SystemConstants, edram_rt_clamp), type_float4_array_4},
+-      {"edram_blend_constant", offsetof(SystemConstants, edram_blend_constant), type_float4_},
++      {"edram_depth_base_dwords_scaled",
++       offsetof(SystemConstants, edram_depth_base_dwords_scaled), type_uint_},
++      {"color_exp_bias", offsetof(SystemConstants, color_exp_bias),
++       type_float4_},
++      {"edram_poly_offset_front_scale",
++       offsetof(SystemConstants, edram_poly_offset_front_scale), type_float_},
++      {"edram_poly_offset_back_scale",
++       offsetof(SystemConstants, edram_poly_offset_back_scale), type_float_},
++      {"edram_poly_offset_front_offset",
++       offsetof(SystemConstants, edram_poly_offset_front_offset), type_float_},
++      {"edram_poly_offset_back_offset",
++       offsetof(SystemConstants, edram_poly_offset_back_offset), type_float_},
++      {"edram_stencil_front", offsetof(SystemConstants, edram_stencil_front),
++       type_uint2_},
++      {"edram_stencil_back", offsetof(SystemConstants, edram_stencil_back),
++       type_uint2_},
++      {"edram_rt_base_dwords_scaled",
++       offsetof(SystemConstants, edram_rt_base_dwords_scaled), type_uint4_},
++      {"edram_rt_format_flags",
++       offsetof(SystemConstants, edram_rt_format_flags), type_uint4_},
++      {"edram_rt_blend_factors_ops",
++       offsetof(SystemConstants, edram_rt_blend_factors_ops), type_uint4_},
++      {"edram_rt_keep_mask", offsetof(SystemConstants, edram_rt_keep_mask),
++       type_uint4_array_2},
++      {"edram_rt_clamp", offsetof(SystemConstants, edram_rt_clamp),
++       type_float4_array_4},
++      {"edram_blend_constant", offsetof(SystemConstants, edram_blend_constant),
++       type_float4_},
++      {"param_gen_window_offset",
++       offsetof(SystemConstants, param_gen_window_offset), type_float2_},
+   };
+   id_vector_temp_.clear();
+   id_vector_temp_.reserve(rex::countof(system_constants));
+@@ -3244,6 +3265,15 @@
+     // see the actual hardware instructions in both OpBitwiseXor and OpFNegate
+     // cases.
+     spv::Id const_sign_bit = builder_->makeUintConstant(UINT32_C(1) << 31);
++    // Add the window offset back when it's carried in the EDRAM bases.
++    // PsParamGen includes it.
++    id_vector_temp_.clear();
++    id_vector_temp_.push_back(
++        builder_->makeIntConstant(kSystemConstantParamGenWindowOffset));
++    spv::Id param_gen_window_offset = builder_->createLoad(
++        builder_->createAccessChain(spv::StorageClassUniform,
++                                    uniform_system_constants_, id_vector_temp_),
++        spv::NoPrecision);
+     // X - pixel X .0 in the magnitude, is back-facing in the sign bit.
+     assert_true(input_fragment_coordinates_ != spv::NoResult);
+     id_vector_temp_.clear();
+@@ -3259,6 +3289,10 @@
+           spv::OpFMul, type_float_, param_gen_x,
+           builder_->makeFloatConstant(1.0f / float(draw_resolution_scale_x_)));
+     }
++    param_gen_x =
++        builder_->createBinOp(spv::OpFAdd, type_float_, param_gen_x,
++                              builder_->createCompositeExtract(
++                                  param_gen_window_offset, type_float_, 0));
+     param_gen_x = builder_->createUnaryBuiltinCall(type_float_, ext_inst_glsl_std_450_,
+                                                    GLSLstd450FAbs, param_gen_x);
+     if (!modification.pixel.param_gen_point) {
+@@ -3295,6 +3329,10 @@
+           spv::OpFMul, type_float_, param_gen_y,
+           builder_->makeFloatConstant(1.0f / float(draw_resolution_scale_y_)));
+     }
++    param_gen_y =
++        builder_->createBinOp(spv::OpFAdd, type_float_, param_gen_y,
++                              builder_->createCompositeExtract(
++                                  param_gen_window_offset, type_float_, 1));
+     param_gen_y = builder_->createUnaryBuiltinCall(type_float_, ext_inst_glsl_std_450_,
+                                                    GLSLstd450FAbs, param_gen_y);
+     if (modification.pixel.param_gen_point) {
+diff --git a/src/graphics/util/draw.cpp b/src/graphics/util/draw.cpp
+--- a/src/graphics/util/draw.cpp
++++ b/src/graphics/util/draw.cpp
+@@ -40,6 +40,10 @@
+ //     "is necessary for certain games to display the scene graphics).",
+ //     "GPU");
+ 
++REXCVAR_DEFINE_BOOL(
++    window_offset_in_edram, true, "GPU",
++    "Carry eligible predicated tiling window offsets in EDRAM bases");
++
+ namespace rex::graphics::draw_util {
+ 
+ bool IsRasterizationPotentiallyDone(const RegisterFile& regs, bool primitive_polygonal) {
+@@ -196,12 +200,14 @@
+   return false;
+ }
+ 
+-void GetHostViewportInfo(const RegisterFile& regs, uint32_t draw_resolution_scale_x,
+-                         uint32_t draw_resolution_scale_y, bool origin_bottom_left, uint32_t x_max,
+-                         uint32_t y_max, bool allow_reverse_z,
+-                         reg::RB_DEPTHCONTROL normalized_depth_control, bool convert_z_to_float24,
+-                         bool full_float24_in_0_to_1, bool pixel_shader_writes_depth,
+-                         ViewportInfo& viewport_info_out, bool xenos_sample_positions) {
++void GetHostViewportInfo(
++    const RegisterFile &regs, uint32_t draw_resolution_scale_x,
++    uint32_t draw_resolution_scale_y, bool origin_bottom_left, uint32_t x_max,
++    uint32_t y_max, bool allow_reverse_z,
++    reg::RB_DEPTHCONTROL normalized_depth_control, bool convert_z_to_float24,
++    bool full_float24_in_0_to_1, bool pixel_shader_writes_depth,
++    ViewportInfo &viewport_info_out, bool xenos_sample_positions,
++    bool window_offset_in_edram) {
+   assert_not_zero(draw_resolution_scale_x);
+   assert_not_zero(draw_resolution_scale_y);
+ 
+@@ -352,7 +358,7 @@
+   // precision, separately so it can be used in other integer calculations
+   // without double rounding if needed.
+   float offset_add_xy[2] = {};
+-  if (pa_su_sc_mode_cntl.vtx_window_offset_enable) {
++  if (pa_su_sc_mode_cntl.vtx_window_offset_enable && !window_offset_in_edram) {
+     auto pa_sc_window_offset = regs.Get<reg::PA_SC_WINDOW_OFFSET>();
+     offset_add_xy[0] += float(pa_sc_window_offset.window_x_offset);
+     offset_add_xy[1] += float(pa_sc_window_offset.window_y_offset);
+@@ -394,9 +400,6 @@
+       }
+     }
+   }
+-
+-  // The maximum value is at least the maximum host render target size anyway -
+-  // and a guest pixel is always treated as a whole with resolution scaling.
+ 
+   // The maximum value is at least the maximum host render target size anyway -
+   // and a guest pixel is always treated as a whole with resolution scaling.
+@@ -608,16 +611,20 @@
+   }
+ }
+ 
+-void GetScissor(const RegisterFile& regs, Scissor& scissor_out, bool clamp_to_surface_pitch) {
++void GetScissor(const RegisterFile &regs, Scissor &scissor_out,
++                bool clamp_to_surface_pitch, bool window_offset_in_edram) {
+   auto pa_sc_window_scissor_tl = regs.Get<reg::PA_SC_WINDOW_SCISSOR_TL>();
+   int32_t tl_x = int32_t(pa_sc_window_scissor_tl.tl_x);
+   int32_t tl_y = int32_t(pa_sc_window_scissor_tl.tl_y);
+   auto pa_sc_window_scissor_br = regs.Get<reg::PA_SC_WINDOW_SCISSOR_BR>();
+   int32_t br_x = int32_t(pa_sc_window_scissor_br.br_x);
+   int32_t br_y = int32_t(pa_sc_window_scissor_br.br_y);
++  int32_t applied_x = 0, applied_y = 0;
+   if (!pa_sc_window_scissor_tl.window_offset_disable) {
+     auto pa_sc_window_offset = regs.Get<reg::PA_SC_WINDOW_OFFSET>();
+-    tl_x += pa_sc_window_offset.window_x_offset;
++    applied_x = pa_sc_window_offset.window_x_offset;
++    applied_y = pa_sc_window_offset.window_y_offset;
++    tl_x += applied_x;
+     tl_y += pa_sc_window_offset.window_y_offset;
+     br_x += pa_sc_window_offset.window_x_offset;
+     br_y += pa_sc_window_offset.window_y_offset;
+@@ -651,10 +658,130 @@
+   tl_y = std::max(tl_y, int32_t(0));
+   br_x = std::max(br_x, tl_x);
+   br_y = std::max(br_y, tl_y);
++  if (window_offset_in_edram) {
++    tl_x -= applied_x;
++    tl_y -= applied_y;
++    br_x -= applied_x;
++    br_y -= applied_y;
++  }
+   scissor_out.offset[0] = uint32_t(tl_x);
+   scissor_out.offset[1] = uint32_t(tl_y);
+   scissor_out.extent[0] = uint32_t(br_x - tl_x);
+   scissor_out.extent[1] = uint32_t(br_y - tl_y);
++}
++
++int32_t GetWindowOffsetTiles(const RegisterFile &regs,
++                             reg::RB_DEPTHCONTROL normalized_depth_control,
++                             uint32_t normalized_color_mask,
++                             bool host_render_targets_used,
++                             bool &kept_in_viewport_out) {
++  kept_in_viewport_out = false;
++  if (!REXCVAR_GET(window_offset_in_edram)) {
++    return 0;
++  }
++
++  auto pa_sc_window_offset = regs.Get<reg::PA_SC_WINDOW_OFFSET>();
++  int32_t window_x_offset = pa_sc_window_offset.window_x_offset;
++  int32_t window_y_offset = pa_sc_window_offset.window_y_offset;
++  // Only negative offsets go into the bases, tiling moves a tile's region up
++  // to the base with them.
++  if (!regs.Get<reg::PA_SU_SC_MODE_CNTL>().vtx_window_offset_enable ||
++      window_x_offset > 0 || window_y_offset > 0 ||
++      !(window_x_offset | window_y_offset)) {
++    return 0;
++  }
++
++  bool depth_used = normalized_depth_control.z_enable ||
++                    normalized_depth_control.stencil_enable;
++  if (!depth_used && !normalized_color_mask) {
++    return 0;
++  }
++
++  // From here on a 0 keeps the window offset in the viewport.
++  kept_in_viewport_out = true;
++
++  // Keep x offsets in the viewport on the host render target path since the
++  // render target is only the pitch wide.
++  if (window_x_offset && host_render_targets_used) {
++    return 0;
++  }
++
++  // A window scissor with window_offset_disable set can't follow the vertices
++  // to offset 0.
++  if (regs.Get<reg::PA_SC_WINDOW_SCISSOR_TL>().window_offset_disable) {
++    return 0;
++  }
++
++  auto rb_surface_info = regs.Get<reg::RB_SURFACE_INFO>();
++  uint32_t pitch_pixels = rb_surface_info.surface_pitch;
++  if (!pitch_pixels) {
++    return 0;
++  }
++
++  uint32_t msaa_samples_x_log2 =
++      uint32_t(rb_surface_info.msaa_samples >= xenos::MsaaSamples::k4X);
++  uint32_t msaa_samples_y_log2 =
++      uint32_t(rb_surface_info.msaa_samples >= xenos::MsaaSamples::k2X);
++  int32_t tile_width_pixels =
++      int32_t(xenos::kEdramTileWidthSamples >> msaa_samples_x_log2);
++  int32_t tile_height_pixels =
++      int32_t(xenos::kEdramTileHeightSamples >> msaa_samples_y_log2);
++  if (window_x_offset % tile_width_pixels ||
++      window_y_offset % tile_height_pixels) {
++    return 0;
++  }
++
++  uint32_t pitch_tiles_at_32bpp = ((pitch_pixels << msaa_samples_x_log2) +
++                                   (xenos::kEdramTileWidthSamples - 1)) /
++                                  xenos::kEdramTileWidthSamples;
++  int32_t window_offset_tiles =
++      (window_y_offset / tile_height_pixels) * int32_t(pitch_tiles_at_32bpp) +
++      window_x_offset / tile_width_pixels;
++  if (host_render_targets_used) {
++    // Keep the offset in the viewport when the rows at offset 0 reach past the
++    // host render target, it holds one EDRAM addressing period of rows past
++    // its base and a wrapped base can put them there.
++    int32_t scissor_bottom =
++        std::min(int32_t(regs.Get<reg::PA_SC_WINDOW_SCISSOR_BR>().br_y),
++                 int32_t(regs.Get<reg::PA_SC_SCREEN_SCISSOR_BR>().br_y) -
++                     window_y_offset);
++    uint32_t rows_end_tiles_at_32bpp =
++        uint32_t((scissor_bottom + tile_height_pixels - 1) /
++                 tile_height_pixels) *
++        pitch_tiles_at_32bpp;
++    if (rows_end_tiles_at_32bpp > xenos::kEdramTileCount) {
++      return 0;
++    }
++
++    // Keep the offset in the viewport when 64bpp rows cross into the next
++    // period, the draw is bound to the period its scissor top is in.
++    uint32_t rows_end_tiles_at_64bpp = rows_end_tiles_at_32bpp * 2;
++    if (rows_end_tiles_at_64bpp > xenos::kEdramTileCount) {
++      int32_t scissor_top =
++          std::max(int32_t(regs.Get<reg::PA_SC_WINDOW_SCISSOR_TL>().tl_y),
++                   int32_t(regs.Get<reg::PA_SC_SCREEN_SCISSOR_TL>().tl_y) -
++                       window_y_offset);
++      uint32_t rows_start_tiles_at_64bpp =
++          uint32_t(scissor_top / tile_height_pixels) * pitch_tiles_at_32bpp * 2;
++      if (rows_end_tiles_at_64bpp > xenos::kEdramTileCount * 2 ||
++          rows_start_tiles_at_64bpp < xenos::kEdramTileCount) {
++        for (uint32_t i = 0; i < xenos::kMaxColorRenderTargets; ++i) {
++          if (!(normalized_color_mask & (uint32_t(0b1111) << (4 * i)))) {
++            continue;
++          }
++          if (xenos::IsColorRenderTargetFormat64bpp(
++                  regs.Get<reg::RB_COLOR_INFO>(
++                          reg::RB_COLOR_INFO::rt_register_indices[i])
++                      .color_format)) {
++            return 0;
++          }
++        }
++      }
++    }
++  }
++
++  kept_in_viewport_out = false;
++  return window_offset_tiles;
+ }
+ 
+ uint32_t GetNormalizedColorMask(const RegisterFile& regs,
+diff --git a/src/graphics/util/draw_extent_estimator.cpp b/src/graphics/util/draw_extent_estimator.cpp
+--- a/src/graphics/util/draw_extent_estimator.cpp
++++ b/src/graphics/util/draw_extent_estimator.cpp
+@@ -78,7 +78,8 @@
+   }
+ }
+ 
+-uint32_t DrawExtentEstimator::EstimateVertexMaxY(const Shader& vertex_shader) {
++uint32_t DrawExtentEstimator::EstimateVertexMaxY(const Shader &vertex_shader,
++                                                 bool window_offset_in_edram) {
+   SCOPE_profile_cpu_f("gpu");
+ 
+   const RegisterFile& regs = register_file_;
+@@ -237,12 +238,15 @@
+   // so it's safe to add both - adding it will neither move the 16p8 clamping
+   // bounds -32768 and 32767+255/256 into the 0...8192 screen space range, nor
+   // cause 24p8 overflow.
+-  if (regs.Get<reg::PA_SU_VTX_CNTL>().pix_center == xenos::PixelCenter::kD3DZero) {
++  if (regs.Get<reg::PA_SU_VTX_CNTL>().pix_center ==
++      xenos::PixelCenter::kD3DZero) {
+     max_y_24p8 += 128;
+   }
+-  if (pa_su_sc_mode_cntl.vtx_window_offset_enable) {
++  if (pa_su_sc_mode_cntl.vtx_window_offset_enable && !window_offset_in_edram) {
+     max_y_24p8 += regs.Get<reg::PA_SC_WINDOW_OFFSET>().window_y_offset * 256;
+   }
++  // Top-left rule - .5 exclusive without MSAA, 1. exclusive with MSAA.
++
+   // Top-left rule - .5 exclusive without MSAA, 1. exclusive with MSAA.
+   auto rb_surface_info = regs.Get<reg::RB_SURFACE_INFO>();
+   return (uint32_t(std::max(int32_t(0), max_y_24p8)) +
+@@ -251,7 +255,8 @@
+ }
+ 
+ uint32_t DrawExtentEstimator::EstimateMaxY(bool try_to_estimate_vertex_max_y,
+-                                           const Shader& vertex_shader) {
++                                           const Shader &vertex_shader,
++                                           bool window_offset_in_edram) {
+   SCOPE_profile_cpu_f("gpu");
+ 
+   const RegisterFile& regs = register_file_;
+@@ -262,12 +267,17 @@
+   // Scissor.
+   auto pa_sc_window_scissor_br = regs.Get<reg::PA_SC_WINDOW_SCISSOR_BR>();
+   int32_t scissor_bottom = int32_t(pa_sc_window_scissor_br.br_y);
+-  bool scissor_window_offset = !regs.Get<reg::PA_SC_WINDOW_SCISSOR_TL>().window_offset_disable;
++  bool scissor_window_offset =
++      !regs.Get<reg::PA_SC_WINDOW_SCISSOR_TL>().window_offset_disable &&
++      !window_offset_in_edram;
++  auto pa_sc_screen_scissor_br = regs.Get<reg::PA_SC_SCREEN_SCISSOR_BR>();
++  int32_t screen_scissor_bottom = int32_t(pa_sc_screen_scissor_br.br_y);
+   if (scissor_window_offset) {
+     scissor_bottom += window_y_offset;
+-  }
+-  auto pa_sc_screen_scissor_br = regs.Get<reg::PA_SC_SCREEN_SCISSOR_BR>();
+-  scissor_bottom = std::min(scissor_bottom, int32_t(pa_sc_screen_scissor_br.br_y));
++  } else if (window_offset_in_edram) {
++    screen_scissor_bottom -= window_y_offset;
++  }
++  scissor_bottom = std::min(scissor_bottom, screen_scissor_bottom);
+   uint32_t max_y = uint32_t(std::max(scissor_bottom, int32_t(0)));
+ 
+   if (regs.Get<reg::PA_CL_CLIP_CNTL>().clip_disable) {
+@@ -284,17 +294,21 @@
+           // EDRAM size, for instance), no need to process the vertices on the
+           // CPU in this case.
+           int32_t scissor_right = int32_t(pa_sc_window_scissor_br.br_x);
++          int32_t screen_scissor_right = int32_t(pa_sc_screen_scissor_br.br_x);
+           if (scissor_window_offset) {
+             scissor_right += pa_sc_window_offset.window_x_offset;
++          } else if (window_offset_in_edram) {
++            screen_scissor_right -= pa_sc_window_offset.window_x_offset;
+           }
+-          scissor_right = std::min(scissor_right, int32_t(pa_sc_screen_scissor_br.br_x));
++          scissor_right = std::min(scissor_right, screen_scissor_right);
+           if (scissor_right >= xenos::kTexture2DCubeMaxWidthHeight) {
+             estimate_vertex_max_y = true;
+           }
+         }
+       }
+       if (estimate_vertex_max_y) {
+-        max_y = std::min(max_y, EstimateVertexMaxY(vertex_shader));
++        max_y = std::min(
++            max_y, EstimateVertexMaxY(vertex_shader, window_offset_in_edram));
+       }
+     }
+   } else {
+@@ -305,10 +319,12 @@
+     float viewport_bottom = 0.0f;
+     // First calculate all the integer.0 or integer.5 offsetting exactly at full
+     // precision.
+-    if (regs.Get<reg::PA_SU_SC_MODE_CNTL>().vtx_window_offset_enable) {
++    if (regs.Get<reg::PA_SU_SC_MODE_CNTL>().vtx_window_offset_enable &&
++        !window_offset_in_edram) {
+       viewport_bottom += float(window_y_offset);
+     }
+-    if (regs.Get<reg::PA_SU_VTX_CNTL>().pix_center == xenos::PixelCenter::kD3DZero) {
++    if (regs.Get<reg::PA_SU_VTX_CNTL>().pix_center ==
++        xenos::PixelCenter::kD3DZero) {
+       viewport_bottom += 0.5f;
+     }
+     // Then apply the floating-point viewport offset.
+diff --git a/src/graphics/vulkan/command_processor.cpp b/src/graphics/vulkan/command_processor.cpp
+--- a/src/graphics/vulkan/command_processor.cpp
++++ b/src/graphics/vulkan/command_processor.cpp
+@@ -4178,8 +4178,14 @@
+ 
+   const VulkanPipelineCache::PipelineLayoutProvider* pipeline_layout_provider;
+   // Set up the render targets - this may perform dispatches and draws.
+-  if (!render_target_cache_->Update(is_rasterization_done, normalized_depth_control,
+-                                    normalized_color_mask, *vertex_shader)) {
++  // Put the window offset into the EDRAM bases when possible.
++  int32_t window_offset_tiles = render_target_cache_->GetWindowOffsetTiles(
++      regs, normalized_depth_control, normalized_color_mask, frame_current_);
++
++  // Set up the render targets - this may perform dispatches and draws.
++  if (!render_target_cache_->Update(
++          is_rasterization_done, normalized_depth_control,
++          normalized_color_mask, *vertex_shader, window_offset_tiles)) {
+     return draw_fail("render_target_update");
+   }
+ 
+@@ -4264,16 +4270,23 @@
+   // directly to pixel address and to things like ps_param_gen.
+   draw_util::GetHostViewportInfo(
+       regs, draw_resolution_scale_x, draw_resolution_scale_y, false,
+-      device_properties.maxViewportDimensions[0], device_properties.maxViewportDimensions[1], true,
++      device_properties.maxViewportDimensions[0],
++      device_properties.maxViewportDimensions[1], true,
+       normalized_depth_control,
+-      host_render_targets_used && render_target_cache_->depth_float24_convert_in_pixel_shader(),
+-      host_render_targets_used, pixel_shader && pixel_shader->writes_depth(), viewport_info,
+-      !host_render_targets_used || render_target_cache_->GetSampleLocationsInfo(
+-          render_target_cache_->last_update_render_pass_key().msaa_samples,
+-          render_target_cache_->last_update_render_pass_key().depth_and_color_used) != nullptr);
++      host_render_targets_used &&
++          render_target_cache_->depth_float24_convert_in_pixel_shader(),
++      host_render_targets_used, pixel_shader && pixel_shader->writes_depth(),
++      viewport_info,
++      !host_render_targets_used ||
++          render_target_cache_->GetSampleLocationsInfo(
++              render_target_cache_->last_update_render_pass_key().msaa_samples,
++              render_target_cache_->last_update_render_pass_key()
++                  .depth_and_color_used) != nullptr,
++      window_offset_tiles != 0);
+ 
+   // Update dynamic graphics pipeline state.
+-  UpdateDynamicState(viewport_info, primitive_polygonal, normalized_depth_control);
++  UpdateDynamicState(viewport_info, primitive_polygonal,
++                     normalized_depth_control, window_offset_tiles != 0);
+ 
+   auto vgt_draw_initiator = regs.Get<reg::VGT_DRAW_INITIATOR>();
+ 
+@@ -4308,8 +4321,9 @@
+ 
+   // Update system constants before uploading them.
+   UpdateSystemConstantValues(primitive_polygonal, primitive_processing_result,
+-                             shader_32bit_index_dma, 0, viewport_info, used_texture_mask,
+-                             normalized_depth_control, normalized_color_mask);
++                             shader_32bit_index_dma, 0, viewport_info,
++                             used_texture_mask, normalized_depth_control,
++                             normalized_color_mask, window_offset_tiles);
+ 
+   // Update uniform buffers and descriptor sets after binding the pipeline with
+   // the new layout.
+@@ -6102,9 +6116,10 @@
+   swap_fxaa_source_layout_ = VK_IMAGE_LAYOUT_UNDEFINED;
+ }
+ 
+-void VulkanCommandProcessor::UpdateDynamicState(const draw_util::ViewportInfo& viewport_info,
+-                                                bool primitive_polygonal,
+-                                                reg::RB_DEPTHCONTROL normalized_depth_control) {
++void VulkanCommandProcessor::UpdateDynamicState(
++    const draw_util::ViewportInfo &viewport_info, bool primitive_polygonal,
++    reg::RB_DEPTHCONTROL normalized_depth_control,
++    bool window_offset_in_edram) {
+ #if XE_GPU_FINE_GRAINED_DRAW_SCOPES
+   SCOPE_profile_cpu_f("gpu");
+ #endif  // XE_GPU_FINE_GRAINED_DRAW_SCOPES
+@@ -6141,7 +6156,8 @@
+ 
+   // Scissor.
+   draw_util::Scissor scissor;
+-  draw_util::GetScissor(regs, scissor);
++  draw_util::GetScissor(regs, scissor, true, window_offset_in_edram);
++  // Scale the scissor to match the render target resolution scale
+   scissor.offset[0] *= draw_resolution_scale_x;
+   scissor.offset[1] *= draw_resolution_scale_y;
+   scissor.extent[0] *= draw_resolution_scale_x;
+@@ -6314,10 +6330,11 @@
+ 
+ void VulkanCommandProcessor::UpdateSystemConstantValues(
+     bool primitive_polygonal,
+-    const PrimitiveProcessor::ProcessingResult& primitive_processing_result,
++    const PrimitiveProcessor::ProcessingResult &primitive_processing_result,
+     bool shader_32bit_index_dma, uint32_t compute_memexport_vertex_count,
+-    const draw_util::ViewportInfo& viewport_info, uint32_t used_texture_mask,
+-    reg::RB_DEPTHCONTROL normalized_depth_control, uint32_t normalized_color_mask) {
++    const draw_util::ViewportInfo &viewport_info, uint32_t used_texture_mask,
++    reg::RB_DEPTHCONTROL normalized_depth_control,
++    uint32_t normalized_color_mask, int32_t window_offset_tiles) {
+ #if XE_GPU_FINE_GRAINED_DRAW_SCOPES
+   SCOPE_profile_cpu_f("gpu");
+ #endif  // XE_GPU_FINE_GRAINED_DRAW_SCOPES
+@@ -6585,6 +6602,19 @@
+     dirty |= system_constants_.ndc_offset[i] != viewport_info.ndc_offset[i];
+     system_constants_.ndc_scale[i] = viewport_info.ndc_scale[i];
+     system_constants_.ndc_offset[i] = viewport_info.ndc_offset[i];
++  }
++
++  // Window offset carried in the EDRAM bases.
++  float param_gen_window_offset[2] = {0.0f, 0.0f};
++  if (window_offset_tiles) {
++    auto pa_sc_window_offset = regs.Get<reg::PA_SC_WINDOW_OFFSET>();
++    param_gen_window_offset[0] = float(pa_sc_window_offset.window_x_offset);
++    param_gen_window_offset[1] = float(pa_sc_window_offset.window_y_offset);
++  }
++  for (uint32_t i = 0; i < 2; ++i) {
++    dirty |= system_constants_.param_gen_window_offset[i] !=
++             param_gen_window_offset[i];
++    system_constants_.param_gen_window_offset[i] = param_gen_window_offset[i];
+   }
+ 
+   // Point size.
+@@ -6704,10 +6734,18 @@
+       system_constants_.edram_rt_keep_mask[i][0] = rt_keep_masks[i][0];
+       dirty |= system_constants_.edram_rt_keep_mask[i][1] != rt_keep_masks[i][1];
+       system_constants_.edram_rt_keep_mask[i][1] = rt_keep_masks[i][1];
+-      if (rt_keep_masks[i][0] != UINT32_MAX || rt_keep_masks[i][1] != UINT32_MAX) {
+-        uint32_t rt_base_dwords_scaled = color_info.color_base * edram_tile_dwords_scaled;
+-        dirty |= system_constants_.edram_rt_base_dwords_scaled[i] != rt_base_dwords_scaled;
+-        system_constants_.edram_rt_base_dwords_scaled[i] = rt_base_dwords_scaled;
++      if (rt_keep_masks[i][0] != UINT32_MAX ||
++          rt_keep_masks[i][1] != UINT32_MAX) {
++        uint32_t rt_base_dwords_scaled =
++            draw_util::AddWindowOffsetToEdramBase(
++                color_info.color_base, window_offset_tiles,
++                xenos::IsColorRenderTargetFormat64bpp(
++                    color_info.color_format)) *
++            edram_tile_dwords_scaled;
++        dirty |= system_constants_.edram_rt_base_dwords_scaled[i] !=
++                 rt_base_dwords_scaled;
++        system_constants_.edram_rt_base_dwords_scaled[i] =
++            rt_base_dwords_scaled;
+         uint32_t format_flags = RenderTargetCache::AddPSIColorFormatFlags(color_info.color_format);
+         dirty |= system_constants_.edram_rt_format_flags[i] != format_flags;
+         system_constants_.edram_rt_format_flags[i] = format_flags;
+@@ -6725,8 +6763,12 @@
+   }
+ 
+   if (edram_fragment_shader_interlock) {
+-    uint32_t depth_base_dwords_scaled = rb_depth_info.depth_base * edram_tile_dwords_scaled;
+-    dirty |= system_constants_.edram_depth_base_dwords_scaled != depth_base_dwords_scaled;
++    uint32_t depth_base_dwords_scaled =
++        draw_util::AddWindowOffsetToEdramBase(rb_depth_info.depth_base,
++                                              window_offset_tiles, false) *
++        edram_tile_dwords_scaled;
++    dirty |= system_constants_.edram_depth_base_dwords_scaled !=
++             depth_base_dwords_scaled;
+     system_constants_.edram_depth_base_dwords_scaled = depth_base_dwords_scaled;
+ 
+     // For non-polygons, front polygon offset is used, and it's enabled if
+diff --git a/src/graphics/vulkan/render_target_cache.cpp b/src/graphics/vulkan/render_target_cache.cpp
+--- a/src/graphics/vulkan/render_target_cache.cpp
++++ b/src/graphics/vulkan/render_target_cache.cpp
+@@ -1423,11 +1423,13 @@
+   return copied && cleared;
+ }
+ 
+-bool VulkanRenderTargetCache::Update(bool is_rasterization_done,
+-                                     reg::RB_DEPTHCONTROL normalized_depth_control,
+-                                     uint32_t normalized_color_mask, const Shader& vertex_shader) {
+-  if (!RenderTargetCache::Update(is_rasterization_done, normalized_depth_control,
+-                                 normalized_color_mask, vertex_shader)) {
++bool VulkanRenderTargetCache::Update(
++    bool is_rasterization_done, reg::RB_DEPTHCONTROL normalized_depth_control,
++    uint32_t normalized_color_mask, const Shader &vertex_shader,
++    int32_t window_offset_tiles) {
++  if (!RenderTargetCache::Update(
++          is_rasterization_done, normalized_depth_control,
++          normalized_color_mask, vertex_shader, window_offset_tiles)) {
+     return false;
+   }
+ 
+@@ -2359,7 +2361,6 @@
+       VK_SUCCESS) {
+     return nullptr;
+   }
+-  // Creates at a persistent location - safe to use pointers.
+   // Creates at a persistent location - safe to use pointers.
+   return &framebuffers_
+               .emplace(std::piecewise_construct, std::forward_as_tuple(key),
+@@ -3049,37 +3050,47 @@
+         spv::OpBitcast, type_uint,
+         builder.createBinOp(
+             spv::OpIAdd, type_int,
+-            builder.createUnaryOp(spv::OpBitcast, type_int, source_tile_pixel_x),
++            builder.createUnaryOp(spv::OpBitcast, type_int,
++                                  source_tile_pixel_x),
+             builder.createTriOp(
+                 spv::OpSelect, type_int,
+-                builder.createBinOp(spv::OpULessThan, builder.makeBoolType(), source_tile_pixel_x,
+-                                    builder.makeUintConstant(source_32bpp_tile_half_pixels)),
++                builder.createBinOp(
++                    spv::OpULessThan, builder.makeBoolType(),
++                    source_tile_pixel_x,
++                    builder.makeUintConstant(source_32bpp_tile_half_pixels)),
+                 builder.makeIntConstant(int32_t(source_32bpp_tile_half_pixels)),
+-                builder.makeIntConstant(-int32_t(source_32bpp_tile_half_pixels)))));
+-  }
+-
+-  // Transform the destination 32bpp tile index into the source. After the
+-  // addition, it may be negative - in which case, the transfer is done across
+-  // EDRAM addressing wrapping, and xenos::kEdramTileCount must be added to it,
+-  // but `& (xenos::kEdramTileCount - 1)` handles that regardless of the sign.
++                builder.makeIntConstant(
++                    -int32_t(source_32bpp_tile_half_pixels)))));
++  }
++
++  // Transform the destination 32bpp tile index into the source, wrapped, the
++  // base difference is stored wrapped too. Sources in the next period hold
++  // their tiles a period of rows down.
+   spv::Id source_tile_index = builder.createBinOp(
+-      spv::OpBitwiseAnd, type_uint,
+-      builder.createUnaryOp(
+-          spv::OpBitcast, type_uint,
++      spv::OpIAdd, type_uint,
++      builder.createBinOp(
++          spv::OpBitwiseAnd, type_uint,
+           builder.createBinOp(
+-              spv::OpIAdd, type_int,
+-              builder.createUnaryOp(spv::OpBitcast, type_int, dest_tile_index),
+-              builder.createTriOp(spv::OpBitFieldSExtract, type_int,
+-                                  builder.createUnaryOp(spv::OpBitcast, type_int, address_constant),
+-                                  builder.makeUintConstant(xenos::kEdramPitchTilesBits * 2),
+-                                  builder.makeUintConstant(xenos::kEdramBaseTilesBits + 1)))),
+-      builder.makeUintConstant(xenos::kEdramTileCount - 1));
++              spv::OpIAdd, type_uint, dest_tile_index,
++              builder.createTriOp(
++                  spv::OpBitFieldUExtract, type_uint, address_constant,
++                  builder.makeUintConstant(xenos::kEdramPitchTilesBits * 2),
++                  builder.makeUintConstant(xenos::kEdramBaseTilesBits))),
++          builder.makeUintConstant(xenos::kEdramTileCount - 1)),
++      builder.createBinOp(
++          spv::OpIMul, type_uint,
++          builder.createTriOp(
++              spv::OpBitFieldUExtract, type_uint, address_constant,
++              builder.makeUintConstant(xenos::kEdramPitchTilesBits * 2 +
++                                       xenos::kEdramBaseTilesBits),
++              builder.makeUintConstant(1)),
++          builder.makeUintConstant(xenos::kEdramTileCount)));
+   // Split the source 32bpp tile index into X and Y tile index within the source
+   // image.
+-  spv::Id source_pitch_tiles =
+-      builder.createTriOp(spv::OpBitFieldUExtract, type_uint, address_constant,
+-                          builder.makeUintConstant(xenos::kEdramPitchTilesBits),
+-                          builder.makeUintConstant(xenos::kEdramPitchTilesBits));
++  spv::Id source_pitch_tiles = builder.createTriOp(
++      spv::OpBitFieldUExtract, type_uint, address_constant,
++      builder.makeUintConstant(xenos::kEdramPitchTilesBits),
++      builder.makeUintConstant(xenos::kEdramPitchTilesBits));
+   spv::Id source_tile_index_y =
+       builder.createBinOp(spv::OpUDiv, type_uint, source_tile_index, source_pitch_tiles);
+   spv::Id source_tile_index_x =
+@@ -4055,30 +4066,26 @@
+             id_vector_temp.clear();
+             id_vector_temp.push_back(
+                 builder.makeIntConstant(int32_t(push_constants_member_host_depth_address)));
+-            spv::Id host_depth_address_constant =
+-                builder.createLoad(builder.createAccessChain(spv::StorageClassPushConstant,
+-                                                             push_constants, id_vector_temp),
+-                                   spv::NoPrecision);
+-            // Transform the destination tile index into the host depth source.
+-            // After the addition, it may be negative - in which case, the
+-            // transfer is done across EDRAM addressing wrapping, and
+-            // xenos::kEdramTileCount must be added to it, but
+-            // `& (xenos::kEdramTileCount - 1)` handles that regardless of the
+-            // sign.
++            spv::Id host_depth_address_constant = builder.createLoad(
++                builder.createAccessChain(spv::StorageClassPushConstant,
++                                          push_constants, id_vector_temp),
++                spv::NoPrecision);
++            // Transform the destination tile index into the host depth source,
++            // wrapped.
+             spv::Id host_depth_source_tile_index = builder.createBinOp(
+                 spv::OpBitwiseAnd, type_uint,
+-                builder.createUnaryOp(
+-                    spv::OpBitcast, type_uint,
+-                    builder.createBinOp(
+-                        spv::OpIAdd, type_int,
+-                        builder.createUnaryOp(spv::OpBitcast, type_int, dest_tile_index),
+-                        builder.createTriOp(
+-                            spv::OpBitFieldSExtract, type_int,
+-                            builder.createUnaryOp(spv::OpBitcast, type_int,
+-                                                  host_depth_address_constant),
+-                            builder.makeUintConstant(xenos::kEdramPitchTilesBits * 2),
+-                            builder.makeUintConstant(xenos::kEdramBaseTilesBits + 1)))),
++                builder.createBinOp(
++                    spv::OpIAdd, type_uint, dest_tile_index,
++                    builder.createTriOp(
++                        spv::OpBitFieldUExtract, type_uint,
++                        host_depth_address_constant,
++                        builder.makeUintConstant(xenos::kEdramPitchTilesBits *
++                                                 2),
++                        builder.makeUintConstant(xenos::kEdramBaseTilesBits))),
+                 builder.makeUintConstant(xenos::kEdramTileCount - 1));
++            // Split the host depth source tile index into X and Y tile index
++            // within the source image.
++
+             // Split the host depth source tile index into X and Y tile index
+             // within the source image.
+             spv::Id host_depth_source_pitch_tiles =
+@@ -4488,9 +4495,6 @@
+ 
+   // Whether the depth / stencil state is used depends on the presence of a
+   // depth attachment in the render pass - but not making assumptions about
+-
+-  // Whether the depth / stencil state is used depends on the presence of a
+-  // depth attachment in the render pass - but not making assumptions about
+   // whether the render pass contains any specific attachments, so setting up
+   // valid depth / stencil state unconditionally.
+   VkPipelineDepthStencilStateCreateInfo depth_stencil_state = {};
+@@ -4717,10 +4721,9 @@
+         host_depth_store_set_up = true;
+       }
+       Transfer::Rectangle
+- transfer_rectangles[Transfer::kMaxRectanglesWithCutout];
++          transfer_rectangles[Transfer::kMaxRectanglesWithCutout];
+       uint32_t transfer_rectangle_count = transfer.GetRectangles(
+-          dest_rt_key.base_tiles, dest_rt_key.pitch_tiles_at_32bpp, dest_rt_key.msaa_samples, false,
+-          transfer_rectangles, resolve_clear_rectangle);
++          dest_rt_key, transfer_rectangles, resolve_clear_rectangle);
+       assert_not_zero(transfer_rectangle_count);
+       HostDepthStoreRectangleConstant host_depth_store_rectangle_constant;
+       for (uint32_t j = 0; j < transfer_rectangle_count; ++j) {
+@@ -4783,8 +4786,6 @@
+     }
+     // Transition the sources, only if not going to be used as destinations
+     // earlier.
+-    // Transition the sources, only if not going to be used as destinations
+-    // earlier.
+     for (const Transfer& transfer : dest_transfers) {
+       bool source_previously_used_as_dest = false;
+       bool host_depth_source_previously_used_as_dest = false;
+@@ -4806,8 +4807,6 @@
+         TransitionRenderTarget(source_vulkan_rt, kSourceStageMask,
+                                kSourceAccessMask, kSourceLayout);
+       }
+-      // transfer.host_depth_source == dest_rt means the EDRAM buffer will be
+-      // used instead, no need to transition.
+       // transfer.host_depth_source == dest_rt means the EDRAM buffer will be
+       // used instead, no need to transition.
+       if (transfer.host_depth_source && transfer.host_depth_source != dest_rt &&
+@@ -4861,8 +4860,6 @@
+       TransitionRenderTarget(dest_vulkan_rt, dest_dst_stage_mask,
+                              dest_dst_access_mask, dest_new_layout);
+     }
+-
+-    // Get the objects needed for transfers to the destination.
+ 
+     // Get the objects needed for transfers to the destination.
+     // TODO(Triang3l): Reuse the guest render pass for transfers where possible
+@@ -4902,7 +4899,6 @@
+ 
+     if (!current_transfers.empty()) {
+       uint32_t dest_pitch_tiles = dest_rt_key.GetPitchTiles();
+-      bool dest_is_64bpp = dest_rt_key.Is64bpp();
+ 
+       // Gather shader keys and sort to reduce pipeline state and binding
+       // switches. Also gather stencil rectangles to clear if needed.
+@@ -4954,12 +4950,11 @@
+                   ? host_depth_source_vulkan_rt->key().msaa_samples
+                   : xenos::MsaaSamples::k1X;
+           if (j) {
+-            new_transfer_shader_key.mode = source_rt_key.is_depth
+-                                               ? TransferMode::kDepthToStencilBit
+-                                               : TransferMode::kColorToStencilBit;
++            new_transfer_shader_key.mode =
++                source_rt_key.is_depth ? TransferMode::kDepthToStencilBit
++                                       : TransferMode::kColorToStencilBit;
+             stencil_clear_rectangle_count += transfer.GetRectangles(
+-                dest_rt_key.base_tiles, dest_pitch_tiles, dest_rt_key.msaa_samples, dest_is_64bpp,
+-                nullptr, resolve_clear_rectangle);
++                dest_rt_key, nullptr, resolve_clear_rectangle);
+           } else {
+             if (dest_rt_key.is_depth) {
+               if (host_depth_source_vulkan_rt) {
+@@ -5029,11 +5024,14 @@
+         stencil_clear_attachment->clearValue.depthStencil.depth = 0.0f;
+         stencil_clear_attachment->clearValue.depthStencil.stencil = 0;
+         for (const Transfer& transfer : current_transfers) {
+-          Transfer::Rectangle transfer_stencil_clear_rectangles[Transfer::kMaxRectanglesWithCutout];
+-          uint32_t transfer_stencil_clear_rectangle_count = transfer.GetRectangles(
+-              dest_rt_key.base_tiles, dest_pitch_tiles, dest_rt_key.msaa_samples, dest_is_64bpp,
+-              transfer_stencil_clear_rectangles, resolve_clear_rectangle);
+-          for (uint32_t j = 0; j < transfer_stencil_clear_rectangle_count; ++j) {
++          Transfer::Rectangle transfer_stencil_clear_rectangles
++              [Transfer::kMaxRectanglesWithCutout];
++          uint32_t transfer_stencil_clear_rectangle_count =
++              transfer.GetRectangles(dest_rt_key,
++                                     transfer_stencil_clear_rectangles,
++                                     resolve_clear_rectangle);
++          for (uint32_t j = 0; j < transfer_stencil_clear_rectangle_count;
++               ++j) {
+             const Transfer::Rectangle& stencil_clear_rectangle =
+                 transfer_stencil_clear_rectangles[j];
+             stencil_clear_rect_write_ptr->rect.offset.x =
+@@ -5078,17 +5076,16 @@
+         const TransferInvocation& transfer_invocation_first = *it;
+         // Will be merging transfers from the same source into one mesh.
+         auto it_merged_first = it, it_merged_last = it;
+-        uint32_t transfer_rectangle_count = transfer_invocation_first.transfer.GetRectangles(
+-            dest_rt_key.base_tiles, dest_pitch_tiles, dest_rt_key.msaa_samples, dest_is_64bpp,
+-            nullptr, resolve_clear_rectangle);
++        uint32_t transfer_rectangle_count =
++            transfer_invocation_first.transfer.GetRectangles(
++                dest_rt_key, nullptr, resolve_clear_rectangle);
+         for (auto it_merge = std::next(it_merged_first);
+              it_merge != current_transfer_invocations_.cend(); ++it_merge) {
+           if (!transfer_invocation_first.CanBeMergedIntoOneDraw(*it_merge)) {
+             break;
+           }
+           transfer_rectangle_count += it_merge->transfer.GetRectangles(
+-              dest_rt_key.base_tiles, dest_pitch_tiles, dest_rt_key.msaa_samples, dest_is_64bpp,
+-              nullptr, resolve_clear_rectangle);
++              dest_rt_key, nullptr, resolve_clear_rectangle);
+           it_merged_last = it_merge;
+         }
+         assert_not_zero(transfer_rectangle_count);
+@@ -5124,13 +5121,16 @@
+           continue;
+         }
+         for (auto it_merged = it_merged_first; it_merged <= it_merged_last; ++it_merged) {
+-          Transfer::Rectangle transfer_invocation_rectangles[Transfer::kMaxRectanglesWithCutout];
+-          uint32_t transfer_invocation_rectangle_count = it_merged->transfer.GetRectangles(
+-              dest_rt_key.base_tiles, dest_pitch_tiles, dest_rt_key.msaa_samples, dest_is_64bpp,
+-              transfer_invocation_rectangles, resolve_clear_rectangle);
++          Transfer::Rectangle transfer_invocation_rectangles
++              [Transfer::kMaxRectanglesWithCutout];
++          uint32_t transfer_invocation_rectangle_count =
++              it_merged->transfer.GetRectangles(dest_rt_key,
++                                                transfer_invocation_rectangles,
++                                                resolve_clear_rectangle);
+           assert_not_zero(transfer_invocation_rectangle_count);
+           for (uint32_t j = 0; j < transfer_invocation_rectangle_count; ++j) {
+-            const Transfer::Rectangle& transfer_rectangle = transfer_invocation_rectangles[j];
++            const Transfer::Rectangle &transfer_rectangle =
++                transfer_invocation_rectangles[j];
+             float transfer_rectangle_x0 = -1.0f + transfer_rectangle.x_pixels * pixels_to_ndc_x;
+             float transfer_rectangle_y0 = -1.0f + transfer_rectangle.y_pixels * pixels_to_ndc_y;
+             float transfer_rectangle_x1 =
+@@ -5222,12 +5222,16 @@
+           RenderTargetKey host_depth_source_rt_key = host_depth_source_vulkan_rt->key();
+           TransferAddressConstant host_depth_address_constant;
+           host_depth_address_constant.dest_pitch = dest_pitch_tiles;
+-          host_depth_address_constant.source_pitch = host_depth_source_rt_key.GetPitchTiles();
++          host_depth_address_constant.source_pitch =
++              host_depth_source_rt_key.GetPitchTiles();
+           host_depth_address_constant.source_to_dest =
+-              int32_t(dest_rt_key.base_tiles) - int32_t(host_depth_source_rt_key.base_tiles);
++              (uint32_t(dest_rt_key.base_tiles) -
++               uint32_t(host_depth_source_rt_key.base_tiles)) &
++              (xenos::kEdramTileCount - 1);
+           if (last_host_depth_address_constant != host_depth_address_constant) {
+             last_host_depth_address_constant = host_depth_address_constant;
+-            transfer_push_constants_set &= ~kTransferUsedPushConstantDwordHostDepthAddressBit;
++            transfer_push_constants_set &=
++                ~kTransferUsedPushConstantDwordHostDepthAddressBit;
+           }
+         }
+         if (transfer_pipeline_layout_info.used_push_constant_dwords &
+@@ -5237,10 +5241,14 @@
+           address_constant.dest_pitch = dest_pitch_tiles;
+           address_constant.source_pitch = source_rt_key.GetPitchTiles();
+           address_constant.source_to_dest =
+-              int32_t(dest_rt_key.base_tiles) - int32_t(source_rt_key.base_tiles);
++              (uint32_t(dest_rt_key.base_tiles) -
++               uint32_t(source_rt_key.base_tiles)) &
++              (xenos::kEdramTileCount - 1);
++          address_constant.source_next_period = source_rt_key.next_period;
+           if (last_address_constant != address_constant) {
+             last_address_constant = address_constant;
+-            transfer_push_constants_set &= ~kTransferUsedPushConstantDwordAddressBit;
++            transfer_push_constants_set &=
++                ~kTransferUsedPushConstantDwordAddressBit;
+           }
+         }
+ 
+@@ -5611,15 +5619,16 @@
+   id_vector_temp.clear();
+   id_vector_temp.push_back(builder.makeIntConstant(kDumpPushConstantOffsets));
+   spv::Id offsets_constant = builder.createLoad(
+-      builder.createAccessChain(spv::StorageClassPushConstant, push_constants, id_vector_temp),
++      builder.createAccessChain(spv::StorageClassPushConstant, push_constants,
++                                id_vector_temp),
+       spv::NoPrecision);
+-  spv::Id const_edram_base_tiles_bits_plus_1 =
+-      builder.makeUintConstant(xenos::kEdramBaseTilesBits + 1);
+-  spv::Id edram_tile_index_non_wrapped =
+-      builder.createBinOp(spv::OpIAdd, type_uint,
+-                          builder.createTriOp(spv::OpBitFieldUExtract, type_uint, offsets_constant,
+-                                              const_uint_0, const_edram_base_tiles_bits_plus_1),
+-                          rectangle_tile_index);
++  spv::Id const_edram_base_tiles_bits_plus_2 =
++      builder.makeUintConstant(xenos::kEdramBaseTilesBits + 2);
++  spv::Id edram_tile_index_non_wrapped = builder.createBinOp(
++      spv::OpIAdd, type_uint,
++      builder.createTriOp(spv::OpBitFieldUExtract, type_uint, offsets_constant,
++                          const_uint_0, const_edram_base_tiles_bits_plus_2),
++      rectangle_tile_index);
+ 
+   // Combine the tile sample index and the tile index, wrapping the tile
+   // addressing, into the EDRAM sample index.
+@@ -5653,13 +5662,14 @@
+   // Get the linear tile index within the source texture.
+   spv::Id source_tile_index = builder.createBinOp(
+       spv::OpISub, type_uint, edram_tile_index_non_wrapped,
+-      builder.createTriOp(spv::OpBitFieldUExtract, type_uint, offsets_constant,
+-                          const_edram_base_tiles_bits_plus_1,
+-                          builder.makeUintConstant(xenos::kEdramBaseTilesBits)));
++      builder.createTriOp(
++          spv::OpBitFieldUExtract, type_uint, offsets_constant,
++          const_edram_base_tiles_bits_plus_2,
++          builder.makeUintConstant(xenos::kEdramBaseTilesBits)));
+   // Split the linear tile index in the source texture into X and Y in tiles.
+-  spv::Id source_pitch_tiles =
+-      builder.createTriOp(spv::OpBitFieldUExtract, type_uint, pitches_constant,
+-                          const_edram_pitch_tiles_bits, const_edram_pitch_tiles_bits);
++  spv::Id source_pitch_tiles = builder.createTriOp(
++      spv::OpBitFieldUExtract, type_uint, pitches_constant,
++      const_edram_pitch_tiles_bits, const_edram_pitch_tiles_bits);
+   spv::Id source_tile_index_y =
+       builder.createBinOp(spv::OpUDiv, type_uint, source_tile_index, source_pitch_tiles);
+   spv::Id source_tile_index_x =
+@@ -6166,10 +6176,12 @@
+     DumpOffsets offsets;
+     offsets.source_base_tiles = rt_key.base_tiles;
+     ResolveCopyDumpRectangle::Dispatch dispatches[ResolveCopyDumpRectangle::kMaxDispatches];
+-    uint32_t dispatch_count = rectangle.GetDispatches(dump_pitch, dump_row_length_used, dispatches);
++    uint32_t dispatch_count =
++        rectangle.GetDispatches(dump_pitch, dump_row_length_used, dispatches);
+     for (uint32_t i = 0; i < dispatch_count; ++i) {
+       const ResolveCopyDumpRectangle::Dispatch& dispatch = dispatches[i];
+-      offsets.dispatch_first_tile = dump_base + dispatch.offset;
++      offsets.dispatch_first_tile =
++          rt_key.GetNonWrappedTileIndex(dump_base + dispatch.offset);
+       if (last_offsets != offsets) {
+         last_offsets = offsets;
+         offsets_bound = false;

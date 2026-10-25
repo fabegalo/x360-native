@@ -305,8 +305,8 @@
                                                           "src/graphics/graphics_system.cpp":  "7462130450b5eae5069a9b461115eadfa516102ba22ecea0429fd0f419cf5228",
                                                           "include/rex/graphics/command_processor.h":  "d5fecaf9e36c803dc89e1e20442ad745f247c770c0f4b4a87a1d0704a5585265",
                                                           "src/graphics/command_processor.cpp":  "e2b42d5012046917f5383f8d0c0eefa9885419246d0c8f085ea178c30cc34792",
-                                                          "src/graphics/d3d12/command_processor.cpp":  "5a22487ffc9166d76a1fabc603ea2f10dec45eaaa002259552032beda4c5d0ed",
-                                                          "src/graphics/vulkan/command_processor.cpp":  "c9eb7755d2e55d3592d4710cc74c4228ab28e3d45def834121d0ed277760605b",
+                                                          "src/graphics/d3d12/command_processor.cpp":  "0da87b5ea414b79654a997af35c014662aeb74e1257856659bfd805336b5bcba",
+                                                          "src/graphics/vulkan/command_processor.cpp":  "fdbc0459f34cfd343bc1f8097ed5ac1298d6ab5741c60ec885e7c438bf7ea7eb",
                                                           "src/audio/sdl/sdl_audio_driver.cpp":  "b563c3686247199c274e55531429f3657a4426a76536c1ebe048910c13eef690"
                                                       },
                                             "base_files":  {
@@ -945,7 +945,7 @@
                                                           "include/rex/perf/counter.h":  "c8820222ffe4c5c639269d949c8be9326a78ab046ad2abf6405ab891835716fc",
                                                           "src/core/perf/counter.cpp":  "df95e01382113fcd10e5698b8f6985f7d14486a834e542be95dfc1e59b611268",
                                                           "src/graphics/command_processor.cpp":  "e2b42d5012046917f5383f8d0c0eefa9885419246d0c8f085ea178c30cc34792",
-                                                          "src/graphics/d3d12/pipeline_cache.cpp":  "6c82f52c08125a21492c819be27de453fa5494f607d18e95f3d899e2483c0095",
+                                                          "src/graphics/d3d12/pipeline_cache.cpp":  "7112d5d15e154825df9a5389e475a4862524fc51d98368a7a2f2b8d7737660f2",
                                                           "src/system/runtime.cpp":  "5ba8271148a18c512a4c2d17479934c3c4af718254ea0ac925f00822efbbd8c2"
                                                       },
                                             "base_files":  {
@@ -1024,7 +1024,7 @@
     "src/graphics/util/draw.cpp": "a3215a0de2f42d9e2235dd062b4cd2c3c0a27effd033c27ab6b6ca1f7673a25b"
   },
   "files": {
-    "src/graphics/util/draw.cpp": "60dce53668c37143023dda333f15d64c3ff18c7fd3c0d7485133a4cd856806a3"
+    "src/graphics/util/draw.cpp": "399ba66a4e8a0c80b2998ef9e7d3ff328bb6462ad0b05466c7250fac6187a359"
   },
   "test": "sdkcheck.empty-resolve"
 },
@@ -1036,7 +1036,7 @@
   },
   "files": {
     "include/rex/graphics/d3d12/inactive_vertex_fetch.h": "ea3e630caf192ae27eacd4c2178d06bb19e405d5c1ca06aa915ba5174a98a393",
-    "src/graphics/d3d12/command_processor.cpp": "5a22487ffc9166d76a1fabc603ea2f10dec45eaaa002259552032beda4c5d0ed"
+    "src/graphics/d3d12/command_processor.cpp": "0da87b5ea414b79654a997af35c014662aeb74e1257856659bfd805336b5bcba"
   },
   "test": "sdkcheck.inactive-vertex-fetch"
 },
@@ -1175,10 +1175,10 @@
     "src/graphics/d3d12/render_target_cache.cpp": "7bc68f0891b9ec0a108a3e1b34e980619245d28ab86f201846b40230760b1dd0"
   },
   "files": {
-    "include/rex/graphics/util/draw.h": "a55966367ccac3b8071a5a4603c309c7f3119cc307de474da21010be79f9bc29",
-    "src/graphics/util/draw.cpp": "60dce53668c37143023dda333f15d64c3ff18c7fd3c0d7485133a4cd856806a3",
-    "src/graphics/d3d12/command_processor.cpp": "5a22487ffc9166d76a1fabc603ea2f10dec45eaaa002259552032beda4c5d0ed",
-    "src/graphics/d3d12/render_target_cache.cpp": "9e562ab6e87297661341ae76618b28cae2ee668e0848a8347f45115f5b97140f"
+    "include/rex/graphics/util/draw.h": "a2ef1e13fd96e5e8a25280b816d0374c99c8c039841234c068e7818bdbd622cc",
+    "src/graphics/util/draw.cpp": "399ba66a4e8a0c80b2998ef9e7d3ff328bb6462ad0b05466c7250fac6187a359",
+    "src/graphics/d3d12/command_processor.cpp": "0da87b5ea414b79654a997af35c014662aeb74e1257856659bfd805336b5bcba",
+    "src/graphics/d3d12/render_target_cache.cpp": "460bee1f4c2cad584e801dd723524f24bd8c793db00ee7c399ba9d6ff4cafab5"
   },
   "test": "tests/sdkcheck/fixed16_resolve_probe.cpp"
 },
@@ -1560,11 +1560,11 @@
     "src/kernel/xboxkrnl/xboxkrnl_video.cpp": "ea0e09814eedb327c49395eccadc6d6cc55d51844734cd6f53dbeafb56c5efc4"
   },
   "files": {
-    "include/rex/graphics/d3d12/command_processor.h": "73c5f16bfe6c5773de1448d7d0f1f172481a057856dcada9cc70ab590fd9bbd9",
+    "include/rex/graphics/d3d12/command_processor.h": "72f41ba8a323b6cf19cda41ea69ba6f3f176686e28e4e7f3c99bf4cc430c2d62",
     "include/rex/graphics/d3d12/texture_cache.h": "0c88603fa7088d42fea41b00e4db547087adbb849c74d60fdb923bf3ff75a3d4",
     "include/rex/graphics/display_overlay.h": "2841fdc05e4e7c248e9dcfdded2c0edd6503435b22bb1d5af0c8f113a9494cda",
     "src/graphics/command_processor.cpp": "e2b42d5012046917f5383f8d0c0eefa9885419246d0c8f085ea178c30cc34792",
-    "src/graphics/d3d12/command_processor.cpp": "5a22487ffc9166d76a1fabc603ea2f10dec45eaaa002259552032beda4c5d0ed",
+    "src/graphics/d3d12/command_processor.cpp": "0da87b5ea414b79654a997af35c014662aeb74e1257856659bfd805336b5bcba",
     "src/graphics/d3d12/texture_cache.cpp": "6a6669e3e486bd40eb01253d9d6068e4c31d11e669a527de990f38d2c866d8c9",
     "src/graphics/shaders/bytecode/d3d12_5_1/display_overlay_cs.h": "878b1ca19d0b44a2f730a6d8b312f9180f496651c1c3730e8668cace274f2f40",
     "src/graphics/shaders/display_overlay.hlsl": "82f2758310438dc43db3fa7b73d25192d52512007830f9d3c2665e64ba99859f",
@@ -1776,9 +1776,9 @@
                                             "sha256": "3e371c4e562e2678d4ab750c5e26b729219d3fb50f9023905cd5c05698e9fc3e",
                                             "files": {
                                                 "include/rex/graphics/vulkan/texture_cache.h": "56a61a90b0afd99d10d3f3405ec141292a2e4f568d7907abdabbbb0382274d04",
-                                                "src/graphics/vulkan/texture_cache.cpp": "d0b0b111dd3abe9f70bd8933f51ece1d904f6a4a793d1febe4385b5821304fee",
-                                                "include/rex/graphics/vulkan/command_processor.h": "7169056a52d3cd901f78ebeeec682b069cd5bbad5d12c45343ffe632633dc21b",
-                                                "src/graphics/vulkan/command_processor.cpp": "c9eb7755d2e55d3592d4710cc74c4228ab28e3d45def834121d0ed277760605b"
+                                                "src/graphics/vulkan/texture_cache.cpp": "5bd658c580a6eb4b0afa493fff269e8c1fa211d4c34661c244efcd7efecd36dc",
+                                                "include/rex/graphics/vulkan/command_processor.h": "cbab1238329772cd7d2ffa02cb0a3ab1f8d14392493d077cb3157d4d80f31577",
+                                                "src/graphics/vulkan/command_processor.cpp": "fdbc0459f34cfd343bc1f8097ed5ac1298d6ab5741c60ec885e7c438bf7ea7eb"
                                             },
                                             "base_files": {
                                                 "include/rex/graphics/vulkan/texture_cache.h": "384ec034cf009960892703a473df4fe6bdd3ba6ce9027e0d89dd957c01a318e4",
@@ -1957,7 +1957,7 @@
     "src/graphics/vulkan/command_processor.cpp": "1ffefcfb33ec126ed323bdba817ff265e851cf4553df718206e01dd290bd0e6a"
   },
   "files": {
-    "src/graphics/vulkan/command_processor.cpp": "c9eb7755d2e55d3592d4710cc74c4228ab28e3d45def834121d0ed277760605b"
+    "src/graphics/vulkan/command_processor.cpp": "fdbc0459f34cfd343bc1f8097ed5ac1298d6ab5741c60ec885e7c438bf7ea7eb"
   },
   "test": "sdkcheck.Vulkan-draw-registry-lock: 4096 non-memexport Xenos/Vulkan draws retire while the cvar registry is locked; fails before the patch"
 },
@@ -1995,7 +1995,7 @@
   "files": {
     "include/rex/graphics/d3d12/inactive_vertex_fetch.h": "ea3e630caf192ae27eacd4c2178d06bb19e405d5c1ca06aa915ba5174a98a393",
     "include/rex/graphics/pipeline/shader/inactive_vertex_fetch.h": "8d2cf6261d37b4836f9ca5d7a8925fa45983efd27c1b3b91e8a4701d48273bc2",
-    "src/graphics/vulkan/command_processor.cpp": "c9eb7755d2e55d3592d4710cc74c4228ab28e3d45def834121d0ed277760605b"
+    "src/graphics/vulkan/command_processor.cpp": "fdbc0459f34cfd343bc1f8097ed5ac1298d6ab5741c60ec885e7c438bf7ea7eb"
   },
   "test": "sdkcheck.Vulkan-predicated-vertex-fetch: a synthetic draw whose invalid vertex fetch 90 runs under !p0 after setp_eq c127.x is issued with c127.x = 0 and rejected with c127.x = 1; rejected in both cases before the patch (D3D12 control: sdkcheck.D3D12-predicated-vertex-fetch). sdkcheck.inactive-vertex-fetch covers the shared proof, denormals unknown without flush"
 },
@@ -2010,9 +2010,9 @@
   },
   "files": {
     "include/rex/graphics/format/dxbc.h": "3b10292edcbc33915a2d7f9e3f6d9ae4c7d15d76f9fc0f89915bcc9b3083f3af",
-    "include/rex/graphics/pipeline/shader/dxbc_translator.h": "3935dcb19f52fe74ca987ac0a581bde5a797e0183085090738f33c3427b7b730",
-    "src/graphics/pipeline/shader/dxbc_translator.cpp": "53bd365efdb58ccc01cbb6e882f2573aec2404e031bd354c89a49d5ab6aa9673",
-    "src/graphics/pipeline/shader/dxbc_translator_om.cpp": "186670ed47d639b8ebbd4c8ed3717eb48e170fc6655ac1c7a18a4742964b704a"
+    "include/rex/graphics/pipeline/shader/dxbc_translator.h": "14b9412265d45e70c41fb7a51a029bae293031a40f620ecf42b56dfaa3fd3754",
+    "src/graphics/pipeline/shader/dxbc_translator.cpp": "f97091630fe41fb86c1cb633fa37a82af05b63b6361b8ff19df9e03d5ab9f6e8",
+    "src/graphics/pipeline/shader/dxbc_translator_om.cpp": "a5f50732a1a0fa557189f26ddc926bb96c723c1d22057f8d07dddb956d5c939a"
   },
   "test": "native.occlusion: translated DXBC ROV atomic sample counters and real GPU begin/end query, passing/depth/stencil/kill/alpha samples; no fixed query success"
 },
@@ -2034,10 +2034,10 @@
     "include/rex/graphics/register_file.h": "446196d919b7830f700ae931a15132e6edc1b843a7bca450d9991442c4c3e3fc",
     "include/rex/graphics/shared_memory.h": "bb7820ada353fec748c0cc201c4099b114dfc44c980b67678f4031c52143ea53",
     "src/graphics/shared_memory.cpp": "42bc20a5d98fd34c1084da3db23d786a7cef0df496c3bb34569dc52b42d0ea0b",
-    "src/graphics/vulkan/command_processor.cpp": "c9eb7755d2e55d3592d4710cc74c4228ab28e3d45def834121d0ed277760605b",
-    "include/rex/graphics/vulkan/command_processor.h": "7169056a52d3cd901f78ebeeec682b069cd5bbad5d12c45343ffe632633dc21b",
-    "src/graphics/d3d12/command_processor.cpp": "5a22487ffc9166d76a1fabc603ea2f10dec45eaaa002259552032beda4c5d0ed",
-    "include/rex/graphics/d3d12/command_processor.h": "73c5f16bfe6c5773de1448d7d0f1f172481a057856dcada9cc70ab590fd9bbd9"
+    "src/graphics/vulkan/command_processor.cpp": "fdbc0459f34cfd343bc1f8097ed5ac1298d6ab5741c60ec885e7c438bf7ea7eb",
+    "include/rex/graphics/vulkan/command_processor.h": "cbab1238329772cd7d2ffa02cb0a3ab1f8d14392493d077cb3157d4d80f31577",
+    "src/graphics/d3d12/command_processor.cpp": "0da87b5ea414b79654a997af35c014662aeb74e1257856659bfd805336b5bcba",
+    "include/rex/graphics/d3d12/command_processor.h": "72f41ba8a323b6cf19cda41ea69ba6f3f176686e28e4e7f3c99bf4cc430c2d62"
   },
   "test": "sdkcheck.register-memory-coherence: real PM4 Type0 normal/wrapped batches and scratch/COHER/gamma effects; unchanged/partial fetch descriptors; CPU/GPU/frame reset residency invalidation; baseline adapters fail before patch"
 },
@@ -2051,10 +2051,10 @@
     "src/graphics/vulkan/command_processor.cpp": "5ac4a105ed319a2053cf997ea71c49e3d6a2d7531b6d96c5c13e5a4b0b65b0ad"
   },
   "files": {
-    "include/rex/graphics/d3d12/command_processor.h": "73c5f16bfe6c5773de1448d7d0f1f172481a057856dcada9cc70ab590fd9bbd9",
-    "src/graphics/d3d12/command_processor.cpp": "5a22487ffc9166d76a1fabc603ea2f10dec45eaaa002259552032beda4c5d0ed",
-    "include/rex/graphics/vulkan/command_processor.h": "7169056a52d3cd901f78ebeeec682b069cd5bbad5d12c45343ffe632633dc21b",
-    "src/graphics/vulkan/command_processor.cpp": "c9eb7755d2e55d3592d4710cc74c4228ab28e3d45def834121d0ed277760605b",
+    "include/rex/graphics/d3d12/command_processor.h": "72f41ba8a323b6cf19cda41ea69ba6f3f176686e28e4e7f3c99bf4cc430c2d62",
+    "src/graphics/d3d12/command_processor.cpp": "0da87b5ea414b79654a997af35c014662aeb74e1257856659bfd805336b5bcba",
+    "include/rex/graphics/vulkan/command_processor.h": "cbab1238329772cd7d2ffa02cb0a3ab1f8d14392493d077cb3157d4d80f31577",
+    "src/graphics/vulkan/command_processor.cpp": "fdbc0459f34cfd343bc1f8097ed5ac1298d6ab5741c60ec885e7c438bf7ea7eb",
     "include/rex/graphics/readback_resolve_key.h": "97d30346a545d96a371d41b30c157213511a69fd2abbaa91a1b80ffd1d8ed42c"
   },
   "test": "sdkcheck.resolve-readback-identity: color/depth at identical ranges, destination representation bits, stable exponent/source-layout fields and deliberate hash collisions; baseline fails before patch"
@@ -2092,9 +2092,9 @@
     "src/graphics/pipeline/shader/spirv_translator_rb.cpp": "a4aaf9e6b8ab5fdce92ab19e1aa228cd439375f302739bc61c89d481d5699a24"
   },
   "files": {
-    "include/rex/graphics/pipeline/shader/spirv_translator.h": "084d6b03e670dd567fee2d6ac832d76be3397833d8dbd4b3cc2c5de080fc066e",
-    "src/graphics/pipeline/shader/spirv_translator.cpp": "ae0379da3ea772d121271f1f9c8058083f482e0c37d993a15519872de0328dd3",
-    "src/graphics/pipeline/shader/spirv_translator_rb.cpp": "6458df3b4f0dd1e3841d186e3df9cf1ee9ca15cd9a8d139e30a1d3dbb8a7c3df"
+    "include/rex/graphics/pipeline/shader/spirv_translator.h": "af3605a5b254681bb865ffe0e90ab8e8e4fa19616c336e07f49053c793dae6e6",
+    "src/graphics/pipeline/shader/spirv_translator.cpp": "d9a4bdfe126a747fde2bbcc3197c330ea6eb4ace3ea3962734e92a3f9d4f46b6",
+    "src/graphics/pipeline/shader/spirv_translator_rb.cpp": "3c5afd0814326809d557da19c9b7b9c28ea29d0eff5a52fe7ccf3eaa41f5b628"
   },
   "test": "sdkcheck.Native-FSI-sample-counts: shared PM4 occlusion probe with Native Vulkan FSI sample counters; execution deferred by user"
 },
@@ -2134,10 +2134,10 @@
     "src/graphics/pipeline/shader/spirv_translator.cpp": "ceae1e47029dbdd4fe514cb00f562ad2619a091da14675ef7d087fc5e23590a0"
   },
   "files": {
-    "include/rex/graphics/pipeline/shader/dxbc_translator.h": "3935dcb19f52fe74ca987ac0a581bde5a797e0183085090738f33c3427b7b730",
-    "src/graphics/pipeline/shader/dxbc_translator.cpp": "53bd365efdb58ccc01cbb6e882f2573aec2404e031bd354c89a49d5ab6aa9673",
-    "include/rex/graphics/pipeline/shader/spirv_translator.h": "084d6b03e670dd567fee2d6ac832d76be3397833d8dbd4b3cc2c5de080fc066e",
-    "src/graphics/pipeline/shader/spirv_translator.cpp": "ae0379da3ea772d121271f1f9c8058083f482e0c37d993a15519872de0328dd3"
+    "include/rex/graphics/pipeline/shader/dxbc_translator.h": "14b9412265d45e70c41fb7a51a029bae293031a40f620ecf42b56dfaa3fd3754",
+    "src/graphics/pipeline/shader/dxbc_translator.cpp": "f97091630fe41fb86c1cb633fa37a82af05b63b6361b8ff19df9e03d5ab9f6e8",
+    "include/rex/graphics/pipeline/shader/spirv_translator.h": "af3605a5b254681bb865ffe0e90ab8e8e4fa19616c336e07f49053c793dae6e6",
+    "src/graphics/pipeline/shader/spirv_translator.cpp": "d9a4bdfe126a747fde2bbcc3197c330ea6eb4ace3ea3962734e92a3f9d4f46b6"
   },
   "test": "sdkcheck.Native-MEMEXPORT-d3d12 and sdkcheck.Native-MEMEXPORT-vulkan: dynamic export addresses retain shader stores with complete residency and readback; execution deferred by user"
 },
@@ -2167,13 +2167,13 @@
   },
   "files": {
     "include/rex/graphics/primitive_processor.h": "8dc4e6e4b29429e80231f6d6e66179a53e22d56efc0b642af828c4b614c5e0a0",
-    "include/rex/graphics/vulkan/command_processor.h": "7169056a52d3cd901f78ebeeec682b069cd5bbad5d12c45343ffe632633dc21b",
-    "include/rex/graphics/vulkan/deferred_command_buffer.h": "9dbce854d6750283ecb28be84ffe5f8fd3fc0cf695db962613548c160ccb8cdf",
+    "include/rex/graphics/vulkan/command_processor.h": "cbab1238329772cd7d2ffa02cb0a3ab1f8d14392493d077cb3157d4d80f31577",
+    "include/rex/graphics/vulkan/deferred_command_buffer.h": "8a971b89f421decb32c67dcf855f77023015311ecc0f753c2af4f9551cca2474",
     "include/rex/graphics/vulkan/shared_memory.h": "2d0052cfd9aff59b586e6fbd00e37e660f176d077c35af5a657abf4a8785d504",
     "include/rex/graphics/vulkan/upload_hazard_tracker.h": "ecb2a8db57970f59e4a62e8af8f20d185245976c035f07f8997f76250ee3d106",
     "src/graphics/primitive_processor.cpp": "47cf42d176358b5a6b82b8d351eab8ba881f916b8f656ec39a20b0819b761118",
-    "src/graphics/vulkan/command_processor.cpp": "c9eb7755d2e55d3592d4710cc74c4228ab28e3d45def834121d0ed277760605b",
-    "src/graphics/vulkan/deferred_command_buffer.cpp": "4bb229e872770b6f5f768849ae040ead762af381148d8b9ea14c27e038497e75",
+    "src/graphics/vulkan/command_processor.cpp": "fdbc0459f34cfd343bc1f8097ed5ac1298d6ab5741c60ec885e7c438bf7ea7eb",
+    "src/graphics/vulkan/deferred_command_buffer.cpp": "8df43c67c6317e21896898b231582988ccbd619f71c8a81de8c265b8a91c9e46",
     "src/graphics/vulkan/shared_memory.cpp": "80acfe0e04e2eab60bd58bd8c2a5b241827f73a51c772bd159356b7feae0bf0b"
   },
   "test": "sdkcheck.Vulkan-upload-ordering: actual runtime page hazard tracker covers disjoint/overlapping uploads, boundary pages, generation resets and invalid ranges; execution deferred by user"
@@ -2188,10 +2188,10 @@
     "src/graphics/vulkan/deferred_command_buffer.cpp": "3d45412fefcb67762ed6f08b9e77bad5292eca1f1a02948ddde309036e6313c3"
   },
   "files": {
-    "include/rex/graphics/vulkan/command_processor.h": "7169056a52d3cd901f78ebeeec682b069cd5bbad5d12c45343ffe632633dc21b",
-    "include/rex/graphics/vulkan/deferred_command_buffer.h": "9dbce854d6750283ecb28be84ffe5f8fd3fc0cf695db962613548c160ccb8cdf",
-    "src/graphics/vulkan/command_processor.cpp": "c9eb7755d2e55d3592d4710cc74c4228ab28e3d45def834121d0ed277760605b",
-    "src/graphics/vulkan/deferred_command_buffer.cpp": "4bb229e872770b6f5f768849ae040ead762af381148d8b9ea14c27e038497e75"
+    "include/rex/graphics/vulkan/command_processor.h": "cbab1238329772cd7d2ffa02cb0a3ab1f8d14392493d077cb3157d4d80f31577",
+    "include/rex/graphics/vulkan/deferred_command_buffer.h": "8a971b89f421decb32c67dcf855f77023015311ecc0f753c2af4f9551cca2474",
+    "src/graphics/vulkan/command_processor.cpp": "fdbc0459f34cfd343bc1f8097ed5ac1298d6ab5741c60ec885e7c438bf7ea7eb",
+    "src/graphics/vulkan/deferred_command_buffer.cpp": "8df43c67c6317e21896898b231582988ccbd619f71c8a81de8c265b8a91c9e46"
   },
   "test": "Build coverage: immutable queued streams, semaphore lifetimes, fence ownership and worker failure paths; manual Xenos Vulkan rendering validation deferred by user (no standalone submission-ordering test target)"
 },
@@ -2207,12 +2207,12 @@
     "src/graphics/vulkan/pipeline_cache.cpp": "a3dbb1a52cf6a0d6b4ce9dfb278e94e5c9fa3b93e753ad78e8a7bb2a9b6e9ca2"
   },
   "files": {
-    "include/rex/graphics/d3d12/pipeline_cache.h": "a444994eb4182f891784ad700b90870563e84930d25533e3dc92784c6532db8f",
+    "include/rex/graphics/d3d12/pipeline_cache.h": "acb80ebcf3b923202a437fe89922e828aea73b38c565ba11439f53a63852ca5b",
     "include/rex/graphics/vulkan/pipeline_cache.h": "be04596efac46ecdbc6d1a85f89d49ae275570b022104314eb17e9ee8e48ac56",
-    "src/graphics/d3d12/command_processor.cpp": "5a22487ffc9166d76a1fabc603ea2f10dec45eaaa002259552032beda4c5d0ed",
-    "src/graphics/d3d12/pipeline_cache.cpp": "6c82f52c08125a21492c819be27de453fa5494f607d18e95f3d899e2483c0095",
-    "src/graphics/vulkan/command_processor.cpp": "c9eb7755d2e55d3592d4710cc74c4228ab28e3d45def834121d0ed277760605b",
-    "src/graphics/vulkan/pipeline_cache.cpp": "690deb8acda386cd3bba27a8c634b133ea3babc690047190c4100865c8cd1def"
+    "src/graphics/d3d12/command_processor.cpp": "0da87b5ea414b79654a997af35c014662aeb74e1257856659bfd805336b5bcba",
+    "src/graphics/d3d12/pipeline_cache.cpp": "7112d5d15e154825df9a5389e475a4862524fc51d98368a7a2f2b8d7737660f2",
+    "src/graphics/vulkan/command_processor.cpp": "fdbc0459f34cfd343bc1f8097ed5ac1298d6ab5741c60ec885e7c438bf7ea7eb",
+    "src/graphics/vulkan/pipeline_cache.cpp": "ad57019e095bf7956863c2aef2919d36fc96446f70e23221a8bc79453fa96b21"
   },
   "test": "Build coverage of D3D12/Vulkan pipeline completion and error propagation; manual one-shot draw and first-use shader validation deferred by user (no standalone pipeline-completion test target)"
 },
@@ -2239,10 +2239,10 @@
     "src/graphics/pipeline/shader/spirv_translator.cpp": "b08e95a619407046d44265a78c7383d9127448cae59e2be090ca7c16a9ce13d2"
   },
   "files": {
-    "include/rex/graphics/pipeline/shader/dxbc_translator.h": "3935dcb19f52fe74ca987ac0a581bde5a797e0183085090738f33c3427b7b730",
-    "src/graphics/pipeline/shader/dxbc_translator.cpp": "53bd365efdb58ccc01cbb6e882f2573aec2404e031bd354c89a49d5ab6aa9673",
-    "include/rex/graphics/pipeline/shader/spirv_translator.h": "084d6b03e670dd567fee2d6ac832d76be3397833d8dbd4b3cc2c5de080fc066e",
-    "src/graphics/pipeline/shader/spirv_translator.cpp": "ae0379da3ea772d121271f1f9c8058083f482e0c37d993a15519872de0328dd3"
+    "include/rex/graphics/pipeline/shader/dxbc_translator.h": "14b9412265d45e70c41fb7a51a029bae293031a40f620ecf42b56dfaa3fd3754",
+    "src/graphics/pipeline/shader/dxbc_translator.cpp": "f97091630fe41fb86c1cb633fa37a82af05b63b6361b8ff19df9e03d5ab9f6e8",
+    "include/rex/graphics/pipeline/shader/spirv_translator.h": "af3605a5b254681bb865ffe0e90ab8e8e4fa19616c336e07f49053c793dae6e6",
+    "src/graphics/pipeline/shader/spirv_translator.cpp": "d9a4bdfe126a747fde2bbcc3197c330ea6eb4ace3ea3962734e92a3f9d4f46b6"
   },
   "test": "sdkcheck.Native-raster-state: NoPerspective bit62 opt-in in translated DXBC/SPIRV; execution deferred by user"
 },
@@ -2285,14 +2285,14 @@
     "src/graphics/pipeline/shader/spirv_translator_rb.cpp": "abfbade70c303a8ea94d7c2c7739216e0e119c9936ca102c0479f8d9b1de7cba"
   },
   "files": {
-    "include/rex/graphics/pipeline/shader/dxbc_translator.h": "3935dcb19f52fe74ca987ac0a581bde5a797e0183085090738f33c3427b7b730",
-    "include/rex/graphics/pipeline/shader/spirv_translator.h": "084d6b03e670dd567fee2d6ac832d76be3397833d8dbd4b3cc2c5de080fc066e",
-    "src/graphics/pipeline/shader/dxbc_translator.cpp": "53bd365efdb58ccc01cbb6e882f2573aec2404e031bd354c89a49d5ab6aa9673",
-    "src/graphics/pipeline/shader/spirv_translator.cpp": "ae0379da3ea772d121271f1f9c8058083f482e0c37d993a15519872de0328dd3",
+    "include/rex/graphics/pipeline/shader/dxbc_translator.h": "14b9412265d45e70c41fb7a51a029bae293031a40f620ecf42b56dfaa3fd3754",
+    "include/rex/graphics/pipeline/shader/spirv_translator.h": "af3605a5b254681bb865ffe0e90ab8e8e4fa19616c336e07f49053c793dae6e6",
+    "src/graphics/pipeline/shader/dxbc_translator.cpp": "f97091630fe41fb86c1cb633fa37a82af05b63b6361b8ff19df9e03d5ab9f6e8",
+    "src/graphics/pipeline/shader/spirv_translator.cpp": "d9a4bdfe126a747fde2bbcc3197c330ea6eb4ace3ea3962734e92a3f9d4f46b6",
     "src/graphics/pipeline/shader/dxbc_translator_memexport.cpp": "1701313eebf0e3b6dcc0c4e129763c189c68d960f99d15fbcda0887f351fab6a",
     "src/graphics/pipeline/shader/spirv_translator_memexport.cpp": "1dc5cdb991d5b7331d1359f9035b75f344b76898e47b5d02b133dd65dc87fa65",
-    "src/graphics/pipeline/shader/dxbc_translator_om.cpp": "186670ed47d639b8ebbd4c8ed3717eb48e170fc6655ac1c7a18a4742964b704a",
-    "src/graphics/pipeline/shader/spirv_translator_rb.cpp": "6458df3b4f0dd1e3841d186e3df9cf1ee9ca15cd9a8d139e30a1d3dbb8a7c3df"
+    "src/graphics/pipeline/shader/dxbc_translator_om.cpp": "a5f50732a1a0fa557189f26ddc926bb96c723c1d22057f8d07dddb956d5c939a",
+    "src/graphics/pipeline/shader/spirv_translator_rb.cpp": "3c5afd0814326809d557da19c9b7b9c28ea29d0eff5a52fe7ccf3eaa41f5b628"
   },
   "test": "Native VIZ_QUERY uses read-only depth prepass, boolean atomics, and suppresses duplicated vertex memory stores; normal shaders unchanged. Runtime validation deferred by maintainer."
 },
@@ -2328,9 +2328,9 @@
     "src/graphics/pipeline/shader/spirv_translator_rb.cpp": "513511ad2fab65243b331f886f45d7e7e6d0fadf76b711422212a2a783b212ae"
   },
   "files": {
-    "include/rex/graphics/pipeline/shader/dxbc_translator.h": "3935dcb19f52fe74ca987ac0a581bde5a797e0183085090738f33c3427b7b730",
-    "src/graphics/pipeline/shader/dxbc_translator_om.cpp": "186670ed47d639b8ebbd4c8ed3717eb48e170fc6655ac1c7a18a4742964b704a",
-    "src/graphics/pipeline/shader/spirv_translator_rb.cpp": "6458df3b4f0dd1e3841d186e3df9cf1ee9ca15cd9a8d139e30a1d3dbb8a7c3df"
+    "include/rex/graphics/pipeline/shader/dxbc_translator.h": "14b9412265d45e70c41fb7a51a029bae293031a40f620ecf42b56dfaa3fd3754",
+    "src/graphics/pipeline/shader/dxbc_translator_om.cpp": "a5f50732a1a0fa557189f26ddc926bb96c723c1d22057f8d07dddb956d5c939a",
+    "src/graphics/pipeline/shader/spirv_translator_rb.cpp": "3c5afd0814326809d557da19c9b7b9c28ea29d0eff5a52fe7ccf3eaa41f5b628"
   },
   "test": "ZPD uses canonical subpixel (0,0) with scaled EDRAM; visibility OR sees all host subpixels; 1x emits the original instructions. Runtime validation deferred by maintainer."
 },
@@ -2342,8 +2342,8 @@
     "include/rex/graphics/pipeline/shader/spirv_translator.h": "229d0230bec422d9ab4383a2beec4a57d9b8277b07c525a73b2adf6ba5addacd"
   },
   "files": {
-    "src/graphics/pipeline/shader/spirv_translator_rb.cpp": "6458df3b4f0dd1e3841d186e3df9cf1ee9ca15cd9a8d139e30a1d3dbb8a7c3df",
-    "include/rex/graphics/pipeline/shader/spirv_translator.h": "084d6b03e670dd567fee2d6ac832d76be3397833d8dbd4b3cc2c5de080fc066e"
+    "src/graphics/pipeline/shader/spirv_translator_rb.cpp": "3c5afd0814326809d557da19c9b7b9c28ea29d0eff5a52fe7ccf3eaa41f5b628",
+    "include/rex/graphics/pipeline/shader/spirv_translator.h": "af3605a5b254681bb865ffe0e90ab8e8e4fa19616c336e07f49053c793dae6e6"
   },
   "test": "sdkcheck.SPIRV-interlock-control-flow: real translated early/late-depth, kill/alpha, helper-demotion, ZPD/visibility and scaled variants; all reachable CFG paths enter and leave exactly once. Offline only; no crash attribution."
 },
@@ -2355,8 +2355,8 @@
     "include/rex/graphics/pipeline/shader/spirv_translator.h": "c5b036f9651167e5a4dfa815a539c5d69ce177ccd712ba4373fa62138faeced3"
   },
   "files": {
-    "src/graphics/pipeline/shader/spirv_translator.cpp": "ae0379da3ea772d121271f1f9c8058083f482e0c37d993a15519872de0328dd3",
-    "include/rex/graphics/pipeline/shader/spirv_translator.h": "084d6b03e670dd567fee2d6ac832d76be3397833d8dbd4b3cc2c5de080fc066e"
+    "src/graphics/pipeline/shader/spirv_translator.cpp": "d9a4bdfe126a747fde2bbcc3197c330ea6eb4ace3ea3962734e92a3f9d4f46b6",
+    "include/rex/graphics/pipeline/shader/spirv_translator.h": "af3605a5b254681bb865ffe0e90ab8e8e4fa19616c336e07f49053c793dae6e6"
   },
   "test": "sdkcheck.SPIRV-rectangle-replay-phi: synthetic conditional/unconditional jumps with rectangle replay and interpolator masks; every OpPhi covers all CFG predecessors and replay resets PC to zero. Captured shader retranslation also passes SPIRV-Tools offline validation."
 },
@@ -2368,8 +2368,8 @@
     "include/rex/graphics/pipeline/shader/spirv_translator.h": "ed8a74c1742cdd368cc4e490734e4f02ee7dd208321407942eb175390f8d05ab"
   },
   "files": {
-    "src/graphics/pipeline/shader/spirv_translator_rb.cpp": "6458df3b4f0dd1e3841d186e3df9cf1ee9ca15cd9a8d139e30a1d3dbb8a7c3df",
-    "include/rex/graphics/pipeline/shader/spirv_translator.h": "084d6b03e670dd567fee2d6ac832d76be3397833d8dbd4b3cc2c5de080fc066e"
+    "src/graphics/pipeline/shader/spirv_translator_rb.cpp": "3c5afd0814326809d557da19c9b7b9c28ea29d0eff5a52fe7ccf3eaa41f5b628",
+    "include/rex/graphics/pipeline/shader/spirv_translator.h": "af3605a5b254681bb865ffe0e90ab8e8e4fa19616c336e07f49053c793dae6e6"
   },
   "test": "sdkcheck.SPIRV-interlock-control-flow (60 real translated variants) plus SPIRV-Tools Vulkan 1.4 validation: all mask definitions dominate uses across alpha ALWAYS/A2C disabled; A2C result retained for demote OFF and ON."
 },
@@ -2383,8 +2383,8 @@
     "src/graphics/pipeline/shader/spirv_builder.cpp": "12a34b805048beee5162de9cdca7f6f4dc3e915eb2dc9ac5849db8ead122526a"
   },
   "files": {
-    "src/graphics/pipeline/shader/spirv_translator.cpp": "ae0379da3ea772d121271f1f9c8058083f482e0c37d993a15519872de0328dd3",
-    "include/rex/graphics/pipeline/shader/spirv_translator.h": "084d6b03e670dd567fee2d6ac832d76be3397833d8dbd4b3cc2c5de080fc066e",
+    "src/graphics/pipeline/shader/spirv_translator.cpp": "d9a4bdfe126a747fde2bbcc3197c330ea6eb4ace3ea3962734e92a3f9d4f46b6",
+    "include/rex/graphics/pipeline/shader/spirv_translator.h": "af3605a5b254681bb865ffe0e90ab8e8e4fa19616c336e07f49053c793dae6e6",
     "include/rex/graphics/pipeline/shader/spirv_builder.h": "717f044744ece6bee5f48a9e356e6d69629188538799b61271d7abcf0efa1583",
     "src/graphics/pipeline/shader/spirv_builder.cpp": "610d63e4082066a2f74449576ab2dff7453e90f47e752c23baa9d972a0f9c3ac"
   },
@@ -2405,7 +2405,7 @@
     "include/rex/graphics/pipeline/texture/util.h": "3c2889b10d61346fad8f8b451b389b08705ed40ba4ee14931f7fb22eac7df3e5",
     "src/graphics/d3d12/texture_cache.cpp": "6a6669e3e486bd40eb01253d9d6068e4c31d11e669a527de990f38d2c866d8c9",
     "src/graphics/pipeline/texture/util.cpp": "4d4cc756d53620706975fb14704f39cd7239c007f118a78bd092d663d4305c0d",
-    "src/graphics/vulkan/texture_cache.cpp": "d0b0b111dd3abe9f70bd8933f51ece1d904f6a4a793d1febe4385b5821304fee"
+    "src/graphics/vulkan/texture_cache.cpp": "5bd658c580a6eb4b0afa493fff269e8c1fa211d4c34661c244efcd7efecd36dc"
   },
   "test": "sdkcheck.canary-texture-layout: synthetic fetch constants; packed level-0 tails use base_address even with a separate mip_address (Canary 344fca7/ace153cb8), a separate base survives nonzero mip_min_level while an aliased one is dropped (4a863a0e1), 2x1 tails pack along X (344fca7). Sampler base-map level 0 (4a863a0e1) is covered by review only; no GPU run."
 },
@@ -2421,8 +2421,8 @@
   "files": {
     "include/rex/graphics/pipeline/texture/info.h": "bfbeec5361746f55b1e739ea632b9658c8d5e7ff2a44ac2a02730fb496f73d25",
     "src/graphics/d3d12/texture_cache.cpp": "6a6669e3e486bd40eb01253d9d6068e4c31d11e669a527de990f38d2c866d8c9",
-    "src/graphics/util/draw.cpp": "60dce53668c37143023dda333f15d64c3ff18c7fd3c0d7485133a4cd856806a3",
-    "src/graphics/vulkan/texture_cache.cpp": "d0b0b111dd3abe9f70bd8933f51ece1d904f6a4a793d1febe4385b5821304fee"
+    "src/graphics/util/draw.cpp": "399ba66a4e8a0c80b2998ef9e7d3ff328bb6462ad0b05466c7250fac6187a359",
+    "src/graphics/vulkan/texture_cache.cpp": "5bd658c580a6eb4b0afa493fff269e8c1fa211d4c34661c244efcd7efecd36dc"
   },
   "test": "sdkcheck.canary-format-alias: k_8_A/k_8_B/k_8_8_8_8_A textures use k_8/k_8_8_8_8 (GetBaseFormat) and resolves to them write the aliased destination format (Xenia Canary 8322658). Host format table entries are review-only; no GPU run."
 },
@@ -2439,13 +2439,13 @@
     "src/graphics/vulkan/render_target_cache.cpp": "47c8471aae7342701745a095e2ec288ea1fdc6158e4b286f9b60ab7dcf34ac13"
   },
   "files": {
-    "include/rex/graphics/pipeline/shader/dxbc_translator.h": "3935dcb19f52fe74ca987ac0a581bde5a797e0183085090738f33c3427b7b730",
-    "include/rex/graphics/pipeline/shader/spirv_translator.h": "084d6b03e670dd567fee2d6ac832d76be3397833d8dbd4b3cc2c5de080fc066e",
-    "src/graphics/pipeline/render_target/cache.cpp": "2bbbd3e11f91c9e2bc4d0f8af4a73fd0a9fee768e97a4d6a461dc7a0065e36a0",
-    "src/graphics/pipeline/shader/dxbc_translator_om.cpp": "186670ed47d639b8ebbd4c8ed3717eb48e170fc6655ac1c7a18a4742964b704a",
-    "src/graphics/pipeline/shader/spirv_translator_rb.cpp": "6458df3b4f0dd1e3841d186e3df9cf1ee9ca15cd9a8d139e30a1d3dbb8a7c3df",
-    "src/graphics/vulkan/command_processor.cpp": "c9eb7755d2e55d3592d4710cc74c4228ab28e3d45def834121d0ed277760605b",
-    "src/graphics/vulkan/render_target_cache.cpp": "75b9d3fffe9dca04811238fca371cd19fa02436b769f5499b378090b1bf45334"
+    "include/rex/graphics/pipeline/shader/dxbc_translator.h": "14b9412265d45e70c41fb7a51a029bae293031a40f620ecf42b56dfaa3fd3754",
+    "include/rex/graphics/pipeline/shader/spirv_translator.h": "af3605a5b254681bb865ffe0e90ab8e8e4fa19616c336e07f49053c793dae6e6",
+    "src/graphics/pipeline/render_target/cache.cpp": "83ec2739c9c343964abf186375fa2e7bfe78d0874b41c20bade8f2090a9f1a0e",
+    "src/graphics/pipeline/shader/dxbc_translator_om.cpp": "a5f50732a1a0fa557189f26ddc926bb96c723c1d22057f8d07dddb956d5c939a",
+    "src/graphics/pipeline/shader/spirv_translator_rb.cpp": "3c5afd0814326809d557da19c9b7b9c28ea29d0eff5a52fe7ccf3eaa41f5b628",
+    "src/graphics/vulkan/command_processor.cpp": "fdbc0459f34cfd343bc1f8097ed5ac1298d6ab5741c60ec885e7c438bf7ea7eb",
+    "src/graphics/vulkan/render_target_cache.cpp": "66d881a39f57a336c38511c3819625f549f2b195638dc50a5c60920db97d8231"
   },
   "test": "sdkcheck.canary-edram-fixed16: real pixel shader translated offline with ROV (DXBC) and FSI (SPIR-V, scale 1/2): no 32767/32 or 32/32767 EDRAM scales remain, s5.10 uses 1024 and 1/1024, FSI clamps to 32767/1024; PSI clamp is [-32, 32767/1024] (Xenia Canary 42c2b88). Vulkan exp-bias scale reuses the 0087 helper (sdkcheck.fixed16-resolve). Precompiled resolve shaders unchanged; no GPU run."
 },
@@ -2469,7 +2469,7 @@
     "src/graphics/util/draw.cpp": "a5238c8147d2dc12afbcfd80809f742e2eaa109480708939ce9ce9e203417a66"
   },
   "files": {
-    "src/graphics/util/draw.cpp": "60dce53668c37143023dda333f15d64c3ff18c7fd3c0d7485133a4cd856806a3"
+    "src/graphics/util/draw.cpp": "399ba66a4e8a0c80b2998ef9e7d3ff328bb6462ad0b05466c7250fac6187a359"
   },
   "test": "sdkcheck.canary-resolve-dest: a 2D tiled resolve whose RB_COPY_DEST_BASE is advanced by N 8bpp/16bpp macro tiles yields the same destination base, offsets and extents as the copy N*32 pixels right of the 4 KB-aligned base (Xenia Canary 89609297c). No GPU run."
 },
@@ -2483,10 +2483,10 @@
     "src/graphics/vulkan/command_processor.cpp": "2877a19aea1f2d30ed97a1e3e76a96c6a9803c54c15b5f658d5a84bf546f0389"
   },
   "files": {
-    "include/rex/graphics/pipeline/shader/spirv_translator.h": "084d6b03e670dd567fee2d6ac832d76be3397833d8dbd4b3cc2c5de080fc066e",
+    "include/rex/graphics/pipeline/shader/spirv_translator.h": "af3605a5b254681bb865ffe0e90ab8e8e4fa19616c336e07f49053c793dae6e6",
     "src/graphics/pipeline/shader/spirv_translator_fetch.cpp": "1457d62823f174d7938eabb77d741275596778beffba7b266ae05c7537d7463c",
-    "src/graphics/pipeline/shader/spirv_translator_rb.cpp": "6458df3b4f0dd1e3841d186e3df9cf1ee9ca15cd9a8d139e30a1d3dbb8a7c3df",
-    "src/graphics/vulkan/command_processor.cpp": "c9eb7755d2e55d3592d4710cc74c4228ab28e3d45def834121d0ed277760605b"
+    "src/graphics/pipeline/shader/spirv_translator_rb.cpp": "3c5afd0814326809d557da19c9b7b9c28ea29d0eff5a52fe7ccf3eaa41f5b628",
+    "src/graphics/vulkan/command_processor.cpp": "fdbc0459f34cfd343bc1f8097ed5ac1298d6ab5741c60ec885e7c438bf7ea7eb"
   },
   "test": "sdkcheck.canary-spirv: real tfetch3D and FSI pixel shaders translated offline; stacked layer lerp starts from the first layer (Canary e519d59e4), stacked layer index is clamped to [0, size-1] (2d5b41080), 2x-as-4x guest sample 1 reads host sample 3 (654a8cacf). Vulkan back-face stencil selection when culling only front faces (77597d62a) matches D3D12 by review only. No GPU run."
 },
@@ -2520,8 +2520,8 @@
     "src/graphics/util/draw.cpp": "3c1a3323e30e2cc5dcc39311d5baa120a800c43be0a29b42f220997ff23c1454"
   },
   "files": {
-    "include/rex/graphics/util/draw.h": "a55966367ccac3b8071a5a4603c309c7f3119cc307de474da21010be79f9bc29",
-    "src/graphics/util/draw.cpp": "60dce53668c37143023dda333f15d64c3ff18c7fd3c0d7485133a4cd856806a3"
+    "include/rex/graphics/util/draw.h": "a2ef1e13fd96e5e8a25280b816d0374c99c8c039841234c068e7818bdbd622cc",
+    "src/graphics/util/draw.cpp": "399ba66a4e8a0c80b2998ef9e7d3ff328bb6462ad0b05466c7250fac6187a359"
   },
   "test": "sdkcheck.canary-viewport: a 1280-wide viewport drawn with window offset x -608 (4D5307DF's right tile in Canary) starts at -608 with the full extent and the same NDC transform as the unoffset tile (Xenia Canary 6579cc2a4). No GPU run."
 },
@@ -2532,7 +2532,7 @@
     "src/graphics/util/draw.cpp": "3e9569abdfd1c424ab6870a3af51f46e0fe9cb3e03d4be1676df0a498975bd94"
   },
   "files": {
-    "src/graphics/util/draw.cpp": "60dce53668c37143023dda333f15d64c3ff18c7fd3c0d7485133a4cd856806a3"
+    "src/graphics/util/draw.cpp": "399ba66a4e8a0c80b2998ef9e7d3ff328bb6462ad0b05466c7250fac6187a359"
   },
   "test": "sdkcheck.canary-resolve-dest: a volume resolve with copy_dest_height 192 and RB_COPY_SURFACE_SLICE = pitch * 256 uses a 256-row slice (same base and extents as copy_dest_height 256), while 2D resolves keep copy_dest_height (Xenia Canary d8731edc9). No GPU run."
 },
@@ -2545,7 +2545,7 @@
     "src/graphics/pipeline/shader/spirv_translator_fetch.cpp": "140772902577feb395e1347cdbde3c9d6c3e1f8d2248aa35c7329470679aafc3"
   },
   "files": {
-    "include/rex/graphics/pipeline/shader/spirv_translator.h": "084d6b03e670dd567fee2d6ac832d76be3397833d8dbd4b3cc2c5de080fc066e",
+    "include/rex/graphics/pipeline/shader/spirv_translator.h": "af3605a5b254681bb865ffe0e90ab8e8e4fa19616c336e07f49053c793dae6e6",
     "src/graphics/pipeline/shader/dxbc_translator_fetch.cpp": "489264b8218238a4ec16cf1cd022139d14ce17488552c9066653cf31bb5546e3",
     "src/graphics/pipeline/shader/spirv_translator_fetch.cpp": "1457d62823f174d7938eabb77d741275596778beffba7b266ae05c7537d7463c"
   },
@@ -2561,9 +2561,9 @@
     "src/graphics/pipeline/shader/spirv_translator_fetch.cpp": "bd4dce6f6c3e2491e499ce537b0e84efa842af31d59ff44fda5975f4aa788b01"
   },
   "files": {
-    "include/rex/graphics/pipeline/shader/spirv_translator.h": "084d6b03e670dd567fee2d6ac832d76be3397833d8dbd4b3cc2c5de080fc066e",
+    "include/rex/graphics/pipeline/shader/spirv_translator.h": "af3605a5b254681bb865ffe0e90ab8e8e4fa19616c336e07f49053c793dae6e6",
     "src/graphics/pipeline/shader/dxbc_translator_fetch.cpp": "489264b8218238a4ec16cf1cd022139d14ce17488552c9066653cf31bb5546e3",
-    "src/graphics/pipeline/shader/spirv_translator.cpp": "ae0379da3ea772d121271f1f9c8058083f482e0c37d993a15519872de0328dd3",
+    "src/graphics/pipeline/shader/spirv_translator.cpp": "d9a4bdfe126a747fde2bbcc3197c330ea6eb4ace3ea3962734e92a3f9d4f46b6",
     "src/graphics/pipeline/shader/spirv_translator_fetch.cpp": "1457d62823f174d7938eabb77d741275596778beffba7b266ae05c7537d7463c"
   },
   "test": "sdkcheck.canary-spirv and sdkcheck.canary-dxbc: a vfetch_full of k_32_32_32_32_FLOAT translated offline masks every word at or past base + size (fetch constant word 1 bits 2:25) to 0 in SPIR-V (select per word) and DXBC (ubfe/and/umad/iadd/ult mask) (Xenia Canary 9e9d3cdd3). No GPU run."
@@ -2578,12 +2578,123 @@
     "src/graphics/vulkan/command_processor.cpp": "ecd1c8b00b26e15212ea5a6158b124ec5d85a652406a62118e42665213051509"
   },
   "files": {
-    "include/rex/graphics/pipeline/render_target/cache.h": "f603873d7575743d905fbef80799c8327ddaea8ede87c03f7b1155c8fb63b127",
-    "src/graphics/d3d12/command_processor.cpp": "5a22487ffc9166d76a1fabc603ea2f10dec45eaaa002259552032beda4c5d0ed",
-    "src/graphics/pipeline/render_target/cache.cpp": "2bbbd3e11f91c9e2bc4d0f8af4a73fd0a9fee768e97a4d6a461dc7a0065e36a0",
-    "src/graphics/vulkan/command_processor.cpp": "c9eb7755d2e55d3592d4710cc74c4228ab28e3d45def834121d0ed277760605b"
+    "include/rex/graphics/pipeline/render_target/cache.h": "0fd60bee3afcaf87cd15798e960076c4de37c655073bd1cee685d5f6546d81ec",
+    "src/graphics/d3d12/command_processor.cpp": "0da87b5ea414b79654a997af35c014662aeb74e1257856659bfd805336b5bcba",
+    "src/graphics/pipeline/render_target/cache.cpp": "83ec2739c9c343964abf186375fa2e7bfe78d0874b41c20bade8f2090a9f1a0e",
+    "src/graphics/vulkan/command_processor.cpp": "fdbc0459f34cfd343bc1f8097ed5ac1298d6ab5741c60ec885e7c438bf7ea7eb"
   },
   "test": "sdkcheck.canary-edram-alias: RenderTargetCache::ColorOverlapsDepthStencil with real PSI keep masks; a stencil-byte-only 8_8_8_8 write keeps depth testing but conflicts with stencil, other channels overlap depth, 64bpp is conservative (Xenia Canary 9da693480, ROV/FSI part only). D3D12/Vulkan wiring is review-only; the host render target (RTV/FBO) part is not ported. No GPU run."
+},
+{
+  "file": "patches/rexglue-sdk/0196-canary-vulkan-repeat-upload-barrier.patch",
+  "sha256": "5fc5a1b66ddae98e3713010c406e6eddf7989244136e5c46f49fc02cba062270",
+  "base_files": {
+    "src/graphics/vulkan/texture_cache.cpp": "d0b0b111dd3abe9f70bd8933f51ece1d904f6a4a793d1febe4385b5821304fee"
+  },
+  "files": {
+    "src/graphics/vulkan/texture_cache.cpp": "5bd658c580a6eb4b0afa493fff269e8c1fa211d4c34661c244efcd7efecd36dc"
+  },
+  "test": "sdkcheck.Vulkan-repeat-upload: CPU capture compiles production upload barrier branch, PushImageMemoryBarrier, SubmitBarriers and real DeferredCommandBuffer replay; successive copies of one image retain TRANSFER_WRITE -> TRANSFER_WRITE before the second copy, real layout transitions and default elision remain, and hoisted commands keep order. Red: 2 failures; no Vulkan device/gameplay validation. Xenia Canary c8f214e2a9b0209ca8a0ad6cb3dfb155fe545ae2."
+},
+{
+  "file": "patches/rexglue-sdk/0197-canary-xenos-msaa-sample-positions.patch",
+  "sha256": "bda53955c96eba7fd3169604db815aab4e09ab031f503d70f857bab875579fa4",
+  "base_files": {
+    "include/rex/graphics/d3d12/command_processor.h": "73c5f16bfe6c5773de1448d7d0f1f172481a057856dcada9cc70ab590fd9bbd9",
+    "include/rex/graphics/d3d12/deferred_command_list.h": "da2f58b6ce3d7f6a72edbf3d2a577ebe1e6fbc664fb9ea368c9cc65e874fe174",
+    "include/rex/graphics/d3d12/pipeline_cache.h": "a444994eb4182f891784ad700b90870563e84930d25533e3dc92784c6532db8f",
+    "include/rex/graphics/d3d12/render_target_cache.h": "7933dd49bb409393300872b88aaef6c076226a9d3bd02164ecdd8a43a1c52321",
+    "include/rex/graphics/flags.h": "d521f1738e89b843a1a648c7347c9b7d028f27e3b0523cc17b3426c66eb2427e",
+    "include/rex/graphics/util/draw.h": "a55966367ccac3b8071a5a4603c309c7f3119cc307de474da21010be79f9bc29",
+    "include/rex/graphics/vulkan/command_processor.h": "7169056a52d3cd901f78ebeeec682b069cd5bbad5d12c45343ffe632633dc21b",
+    "include/rex/graphics/vulkan/deferred_command_buffer.h": "9dbce854d6750283ecb28be84ffe5f8fd3fc0cf695db962613548c160ccb8cdf",
+    "include/rex/graphics/vulkan/render_target_cache.h": "848a84f910031eb61b73c3291b7c90a6d66891910a8af7ce4b37fa30cf5c9008",
+    "include/rex/ui/vulkan/device.h": "59c01886a9ce3abe25fba042f9561a67a487b23699897001163155f2ec85afcc",
+    "src/graphics/d3d12/command_processor.cpp": "5a22487ffc9166d76a1fabc603ea2f10dec45eaaa002259552032beda4c5d0ed",
+    "src/graphics/d3d12/deferred_command_list.cpp": "ffdf7fb66ec8171557d1e4195147de556bdda342acc7c3ed7eb81279494a3e30",
+    "src/graphics/d3d12/pipeline_cache.cpp": "6c82f52c08125a21492c819be27de453fa5494f607d18e95f3d899e2483c0095",
+    "src/graphics/d3d12/render_target_cache.cpp": "9e562ab6e87297661341ae76618b28cae2ee668e0848a8347f45115f5b97140f",
+    "src/graphics/flags.cpp": "3a2f50f825c856d66f139aa8620f400821470cb09128c741e9a46c1b15fa2f2f",
+    "src/graphics/pipeline/shader/dxbc_translator_om.cpp": "186670ed47d639b8ebbd4c8ed3717eb48e170fc6655ac1c7a18a4742964b704a",
+    "src/graphics/pipeline/shader/spirv_translator_rb.cpp": "6458df3b4f0dd1e3841d186e3df9cf1ee9ca15cd9a8d139e30a1d3dbb8a7c3df",
+    "src/graphics/util/draw.cpp": "60dce53668c37143023dda333f15d64c3ff18c7fd3c0d7485133a4cd856806a3",
+    "src/graphics/vulkan/command_processor.cpp": "c9eb7755d2e55d3592d4710cc74c4228ab28e3d45def834121d0ed277760605b",
+    "src/graphics/vulkan/deferred_command_buffer.cpp": "4bb229e872770b6f5f768849ae040ead762af381148d8b9ea14c27e038497e75",
+    "src/graphics/vulkan/pipeline_cache.cpp": "690deb8acda386cd3bba27a8c634b133ea3babc690047190c4100865c8cd1def",
+    "src/graphics/vulkan/render_target_cache.cpp": "75b9d3fffe9dca04811238fca371cd19fa02436b769f5499b378090b1bf45334",
+    "src/ui/vulkan/vulkan_device.cpp": "c90486459896caec42c6221c8c7ad287f2c4ce84e63ada5766389ab360cc83d6"
+  },
+  "files": {
+    "include/rex/graphics/d3d12/command_processor.h": "72f41ba8a323b6cf19cda41ea69ba6f3f176686e28e4e7f3c99bf4cc430c2d62",
+    "include/rex/graphics/d3d12/deferred_command_list.h": "c82906295496396812a4b85a60e2cff59702d361d5dda43653796c59cdd17919",
+    "include/rex/graphics/d3d12/pipeline_cache.h": "acb80ebcf3b923202a437fe89922e828aea73b38c565ba11439f53a63852ca5b",
+    "include/rex/graphics/d3d12/render_target_cache.h": "d3257b34470b04799c1230524b2dd727ff8443bf7a61078893767e8e819acc6c",
+    "include/rex/graphics/flags.h": "b61697bb7828bc2a0d829c4131044be5991878b1178ae50c0fb45b50ad33de8f",
+    "include/rex/graphics/util/draw.h": "a2ef1e13fd96e5e8a25280b816d0374c99c8c039841234c068e7818bdbd622cc",
+    "include/rex/graphics/vulkan/command_processor.h": "cbab1238329772cd7d2ffa02cb0a3ab1f8d14392493d077cb3157d4d80f31577",
+    "include/rex/graphics/vulkan/deferred_command_buffer.h": "8a971b89f421decb32c67dcf855f77023015311ecc0f753c2af4f9551cca2474",
+    "include/rex/graphics/vulkan/render_target_cache.h": "78f49f620250456524921d7cd00cc76fee305cbaedff0e09ee548e928d58659e",
+    "include/rex/ui/vulkan/device.h": "9f26516716f84747ef2bf39adfdb1dd6f8a643d236a030cf2d5590a8a05545ed",
+    "src/graphics/d3d12/command_processor.cpp": "0da87b5ea414b79654a997af35c014662aeb74e1257856659bfd805336b5bcba",
+    "src/graphics/d3d12/deferred_command_list.cpp": "e73c5ff6d4ed679681c93247c2ffa2381da6af9e6e8df79ac09cf319c1d5e932",
+    "src/graphics/d3d12/pipeline_cache.cpp": "7112d5d15e154825df9a5389e475a4862524fc51d98368a7a2f2b8d7737660f2",
+    "src/graphics/d3d12/render_target_cache.cpp": "460bee1f4c2cad584e801dd723524f24bd8c793db00ee7c399ba9d6ff4cafab5",
+    "src/graphics/flags.cpp": "43ab5109396bd15972ae820f1fcaca396db4527bb0499701be76f4db39d232a1",
+    "src/graphics/pipeline/shader/dxbc_translator_om.cpp": "a5f50732a1a0fa557189f26ddc926bb96c723c1d22057f8d07dddb956d5c939a",
+    "src/graphics/pipeline/shader/spirv_translator_rb.cpp": "3c5afd0814326809d557da19c9b7b9c28ea29d0eff5a52fe7ccf3eaa41f5b628",
+    "src/graphics/util/draw.cpp": "399ba66a4e8a0c80b2998ef9e7d3ff328bb6462ad0b05466c7250fac6187a359",
+    "src/graphics/vulkan/command_processor.cpp": "fdbc0459f34cfd343bc1f8097ed5ac1298d6ab5741c60ec885e7c438bf7ea7eb",
+    "src/graphics/vulkan/deferred_command_buffer.cpp": "8df43c67c6317e21896898b231582988ccbd619f71c8a81de8c265b8a91c9e46",
+    "src/graphics/vulkan/pipeline_cache.cpp": "ad57019e095bf7956863c2aef2919d36fc96446f70e23221a8bc79453fa96b21",
+    "src/graphics/vulkan/render_target_cache.cpp": "66d881a39f57a336c38511c3819625f549f2b195638dc50a5c60920db97d8231",
+    "src/ui/vulkan/vulkan_device.cpp": "22abd6e66a38bead02184d2b3830700f41fe075b73eb24c680ae8d822d65cdfd"
+  },
+  "test": "MSAA sample positions and host/guest mappings, 1x/2x/4x viewport contracts, offline DXBC/SPIR-V coverage/depth and deferred sample-location capture. Canary cc4981a4659086acb1c25a485adebefc3f432ae1. SPIR-V red before port: 2 failures. GPU/gameplay acceptance recorded separately in the focused report."
+},
+{
+  "file": "patches/rexglue-sdk/0198-canary-edram-window-offsets.patch",
+  "sha256": "0b4f4eaab6125be2d94949be191b9af34c46d8290f75169c876a740574ba0f87",
+  "base_files": {
+    "include/rex/graphics/d3d12/command_processor.h": "3135a83869e8401f1807725a7bc8b62844e55311898daff0d0e193ce9fc2f5b8",
+    "include/rex/graphics/d3d12/render_target_cache.h": "53c54e7c30a0a24ab9e1f397c6a5523470f55e28dc7c815ce2d6a982875c89b9",
+    "include/rex/graphics/pipeline/render_target/cache.h": "f603873d7575743d905fbef80799c8327ddaea8ede87c03f7b1155c8fb63b127",
+    "include/rex/graphics/pipeline/shader/dxbc_translator.h": "3935dcb19f52fe74ca987ac0a581bde5a797e0183085090738f33c3427b7b730",
+    "include/rex/graphics/pipeline/shader/spirv_translator.h": "084d6b03e670dd567fee2d6ac832d76be3397833d8dbd4b3cc2c5de080fc066e",
+    "include/rex/graphics/util/draw.h": "09cb18aca7ea3e3dadf6a8e43a870d60bf88091212888644ae6567104e3ac3ca",
+    "include/rex/graphics/util/draw_extent_estimator.h": "99a43a3bfe31fb10098ee7d7d63590d425b92ab269af72bf0cf9df067198dabf",
+    "include/rex/graphics/vulkan/command_processor.h": "d62feeacd27c9a9441f24aa31713d9d4f165588289a7eb3045eb3725b727d11d",
+    "include/rex/graphics/vulkan/render_target_cache.h": "8929a6cd6b3186febbd290961d0659a1255e70293c6e538d4185d8f257952a13",
+    "src/graphics/d3d12/command_processor.cpp": "cf78c6a5008708b77f43ea84f9b2e0fb107ff5d4091a1aee6ae33b930260a4e5",
+    "src/graphics/d3d12/render_target_cache.cpp": "4dd66a37f8ea8361b8d72b5bb63b09bab6a26fe7b4dab5f493aa1fdd7bd7f593",
+    "src/graphics/pipeline/render_target/cache.cpp": "2bbbd3e11f91c9e2bc4d0f8af4a73fd0a9fee768e97a4d6a461dc7a0065e36a0",
+    "src/graphics/pipeline/shader/dxbc_translator.cpp": "53bd365efdb58ccc01cbb6e882f2573aec2404e031bd354c89a49d5ab6aa9673",
+    "src/graphics/pipeline/shader/spirv_translator.cpp": "ae0379da3ea772d121271f1f9c8058083f482e0c37d993a15519872de0328dd3",
+    "src/graphics/util/draw.cpp": "ea2b00b48b1e4ec690f76d10df4bc964c1bf57027aa7d848fbd5a1803c2b9d05",
+    "src/graphics/util/draw_extent_estimator.cpp": "a8ac70d4ec67fd6a84d6742a9efecdb1aed98d3edb4d60de76951ab892397c2e",
+    "src/graphics/vulkan/command_processor.cpp": "cf87b5ac87db2dc5c689a20b7326e0c06ba9625974d44787c5a48ec99b77f085",
+    "src/graphics/vulkan/render_target_cache.cpp": "378a7378a1321a270dc6b79f3fb8a4f55f2d986e78b28532f33cb3cca651899d"
+  },
+  "files": {
+    "include/rex/graphics/d3d12/command_processor.h": "72f41ba8a323b6cf19cda41ea69ba6f3f176686e28e4e7f3c99bf4cc430c2d62",
+    "include/rex/graphics/d3d12/render_target_cache.h": "d3257b34470b04799c1230524b2dd727ff8443bf7a61078893767e8e819acc6c",
+    "include/rex/graphics/pipeline/render_target/cache.h": "0fd60bee3afcaf87cd15798e960076c4de37c655073bd1cee685d5f6546d81ec",
+    "include/rex/graphics/pipeline/shader/dxbc_translator.h": "14b9412265d45e70c41fb7a51a029bae293031a40f620ecf42b56dfaa3fd3754",
+    "include/rex/graphics/pipeline/shader/spirv_translator.h": "af3605a5b254681bb865ffe0e90ab8e8e4fa19616c336e07f49053c793dae6e6",
+    "include/rex/graphics/util/draw.h": "a2ef1e13fd96e5e8a25280b816d0374c99c8c039841234c068e7818bdbd622cc",
+    "include/rex/graphics/util/draw_extent_estimator.h": "968cb742a60fae5cad5f8111010099f9b778032acfe78bd45b3ad676265f0ad0",
+    "include/rex/graphics/vulkan/command_processor.h": "cbab1238329772cd7d2ffa02cb0a3ab1f8d14392493d077cb3157d4d80f31577",
+    "include/rex/graphics/vulkan/render_target_cache.h": "78f49f620250456524921d7cd00cc76fee305cbaedff0e09ee548e928d58659e",
+    "src/graphics/d3d12/command_processor.cpp": "0da87b5ea414b79654a997af35c014662aeb74e1257856659bfd805336b5bcba",
+    "src/graphics/d3d12/render_target_cache.cpp": "460bee1f4c2cad584e801dd723524f24bd8c793db00ee7c399ba9d6ff4cafab5",
+    "src/graphics/pipeline/render_target/cache.cpp": "83ec2739c9c343964abf186375fa2e7bfe78d0874b41c20bade8f2090a9f1a0e",
+    "src/graphics/pipeline/shader/dxbc_translator.cpp": "f97091630fe41fb86c1cb633fa37a82af05b63b6361b8ff19df9e03d5ab9f6e8",
+    "src/graphics/pipeline/shader/spirv_translator.cpp": "d9a4bdfe126a747fde2bbcc3197c330ea6eb4ace3ea3962734e92a3f9d4f46b6",
+    "src/graphics/util/draw.cpp": "399ba66a4e8a0c80b2998ef9e7d3ff328bb6462ad0b05466c7250fac6187a359",
+    "src/graphics/util/draw_extent_estimator.cpp": "2a3047c17a116896d6074fc7aad475dc79e25b089c6067dc9c27c0957dcd233a",
+    "src/graphics/vulkan/command_processor.cpp": "fdbc0459f34cfd343bc1f8097ed5ac1298d6ab5741c60ec885e7c438bf7ea7eb",
+    "src/graphics/vulkan/render_target_cache.cpp": "66d881a39f57a336c38511c3819625f549f2b195638dc50a5c60920db97d8231"
+  },
+  "test": "Predicated tiling EDRAM window offsets, guest alias bases, ownership/wrapping/64bpp periods, viewport/scissor/extent and PsParamGen. Canary e1f4a0d00968ae9ea1d667f28912cc051a5f637f. PsParamGen SPIR-V regression fails before the port; CPU/GPU and measurement scope recorded in the focused report."
 }
 ]
                     },
