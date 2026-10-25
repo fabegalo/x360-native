@@ -27,15 +27,25 @@ namespace dxbc {
 #include "src/graphics/shaders/bytecode/d3d12_5_1/resolve_full_8bpp_cs.h"
 #include "src/graphics/shaders/bytecode/d3d12_5_1/resolve_full_8bpp_scaled_cs.h"
 #include "src/graphics/shaders/bytecode/d3d12_5_1/resolve_gamma_128bpp_cs.h"
+#include "src/graphics/shaders/bytecode/d3d12_5_1/resolve_fixed16_128bpp_cs.h"
 #include "src/graphics/shaders/bytecode/d3d12_5_1/resolve_gamma_128bpp_scaled_cs.h"
+#include "src/graphics/shaders/bytecode/d3d12_5_1/resolve_fixed16_128bpp_scaled_cs.h"
 #include "src/graphics/shaders/bytecode/d3d12_5_1/resolve_gamma_16bpp_cs.h"
+#include "src/graphics/shaders/bytecode/d3d12_5_1/resolve_fixed16_16bpp_cs.h"
 #include "src/graphics/shaders/bytecode/d3d12_5_1/resolve_gamma_16bpp_scaled_cs.h"
+#include "src/graphics/shaders/bytecode/d3d12_5_1/resolve_fixed16_16bpp_scaled_cs.h"
 #include "src/graphics/shaders/bytecode/d3d12_5_1/resolve_gamma_32bpp_cs.h"
+#include "src/graphics/shaders/bytecode/d3d12_5_1/resolve_fixed16_32bpp_cs.h"
 #include "src/graphics/shaders/bytecode/d3d12_5_1/resolve_gamma_32bpp_scaled_cs.h"
+#include "src/graphics/shaders/bytecode/d3d12_5_1/resolve_fixed16_32bpp_scaled_cs.h"
 #include "src/graphics/shaders/bytecode/d3d12_5_1/resolve_gamma_64bpp_cs.h"
+#include "src/graphics/shaders/bytecode/d3d12_5_1/resolve_fixed16_64bpp_cs.h"
 #include "src/graphics/shaders/bytecode/d3d12_5_1/resolve_gamma_64bpp_scaled_cs.h"
+#include "src/graphics/shaders/bytecode/d3d12_5_1/resolve_fixed16_64bpp_scaled_cs.h"
 #include "src/graphics/shaders/bytecode/d3d12_5_1/resolve_gamma_8bpp_cs.h"
+#include "src/graphics/shaders/bytecode/d3d12_5_1/resolve_fixed16_8bpp_cs.h"
 #include "src/graphics/shaders/bytecode/d3d12_5_1/resolve_gamma_8bpp_scaled_cs.h"
+#include "src/graphics/shaders/bytecode/d3d12_5_1/resolve_fixed16_8bpp_scaled_cs.h"
 } // namespace dxbc
 namespace spirv {
 #include "src/graphics/shaders/vulkan_spirv/resolve_full_128bpp_cs.h"
@@ -49,15 +59,25 @@ namespace spirv {
 #include "src/graphics/shaders/vulkan_spirv/resolve_full_8bpp_cs.h"
 #include "src/graphics/shaders/vulkan_spirv/resolve_full_8bpp_scaled_cs.h"
 #include "src/graphics/shaders/vulkan_spirv/resolve_gamma_128bpp_cs.h"
+#include "src/graphics/shaders/vulkan_spirv/resolve_fixed16_128bpp_cs.h"
 #include "src/graphics/shaders/vulkan_spirv/resolve_gamma_128bpp_scaled_cs.h"
+#include "src/graphics/shaders/vulkan_spirv/resolve_fixed16_128bpp_scaled_cs.h"
 #include "src/graphics/shaders/vulkan_spirv/resolve_gamma_16bpp_cs.h"
+#include "src/graphics/shaders/vulkan_spirv/resolve_fixed16_16bpp_cs.h"
 #include "src/graphics/shaders/vulkan_spirv/resolve_gamma_16bpp_scaled_cs.h"
+#include "src/graphics/shaders/vulkan_spirv/resolve_fixed16_16bpp_scaled_cs.h"
 #include "src/graphics/shaders/vulkan_spirv/resolve_gamma_32bpp_cs.h"
+#include "src/graphics/shaders/vulkan_spirv/resolve_fixed16_32bpp_cs.h"
 #include "src/graphics/shaders/vulkan_spirv/resolve_gamma_32bpp_scaled_cs.h"
+#include "src/graphics/shaders/vulkan_spirv/resolve_fixed16_32bpp_scaled_cs.h"
 #include "src/graphics/shaders/vulkan_spirv/resolve_gamma_64bpp_cs.h"
+#include "src/graphics/shaders/vulkan_spirv/resolve_fixed16_64bpp_cs.h"
 #include "src/graphics/shaders/vulkan_spirv/resolve_gamma_64bpp_scaled_cs.h"
+#include "src/graphics/shaders/vulkan_spirv/resolve_fixed16_64bpp_scaled_cs.h"
 #include "src/graphics/shaders/vulkan_spirv/resolve_gamma_8bpp_cs.h"
+#include "src/graphics/shaders/vulkan_spirv/resolve_fixed16_8bpp_cs.h"
 #include "src/graphics/shaders/vulkan_spirv/resolve_gamma_8bpp_scaled_cs.h"
+#include "src/graphics/shaders/vulkan_spirv/resolve_fixed16_8bpp_scaled_cs.h"
 } // namespace spirv
 using namespace gamma_probe;
 using Microsoft::WRL::ComPtr;
@@ -68,6 +88,19 @@ void Need(bool ok, const char *message) {
 void HR(HRESULT value, const char *message) { Need(SUCCEEDED(value), message); }
 std::filesystem::path shader_directory, baseline_directory;
 bool bench_gamma = true;
+bool bench_fixed16 = false, bench_source64 = false;
+bool fixed16_only = false;
+bool extended_fixed16 = false;
+std::vector<Case> TestCases() {
+  auto cases = Cases();
+  if (extended_fixed16) {
+    auto extra = Fixed16ExtendedCases();
+    cases.insert(cases.end(), extra.begin(), extra.end());
+  }
+  if (fixed16_only)
+    std::erase_if(cases, [](const Case& c) { return !c.fixed16; });
+  return cases;
+}
 unsigned bench_msaa = 2;
 std::vector<uint32_t> Code(const Case &c, bool vk,
                            const std::filesystem::path &directory) {
@@ -90,6 +123,8 @@ std::vector<uint32_t> Code(const Case &c, bool vk,
 #define FAMILY(NS, SCALED)                                                     \
   if (c.gamma) {                                                               \
     TABLE(NS, gamma, SCALED)                                                   \
+  } else if (c.fixed16) {                                                      \
+    TABLE(NS, fixed16, SCALED)                                                 \
   } else {                                                                     \
     TABLE(NS, full, SCALED)                                                    \
   }
@@ -115,6 +150,8 @@ std::vector<uint32_t> Code(const Case &c, bool vk,
                 (vk ? ".spv" : ".dxbc");
     auto path =
         directory / ((c.gamma ? "resolve_gamma_" : "resolve_full_") + tail);
+    if (c.fixed16 && std::filesystem::exists(directory / ("resolve_fixed16_" + tail)))
+      path = directory / ("resolve_fixed16_" + tail);
     // Explicit old-resource directories are used to demonstrate the red test.
     if (c.gamma && !std::filesystem::exists(path))
       path = directory / ("resolve_full_" + tail);
@@ -153,7 +190,7 @@ class Dx {
   void *upload_ = nullptr;
   ComPtr<ID3D12DescriptorHeap> heap_;
   ComPtr<ID3D12RootSignature> roots_[2];
-  ComPtr<ID3D12PipelineState> pipelines_[2][10];
+  ComPtr<ID3D12PipelineState> pipelines_[2][15];
   ComPtr<ID3D12Fence> fence_;
   ComPtr<ID3D12QueryHeap> timestamps_;
   UINT64 frequency_ = 0, serial_ = 0;
@@ -292,7 +329,7 @@ public:
     auto upload_end = Clock::now();
     auto constants = c.Constants();
     unsigned scaled = c.scale > 1;
-    auto &pso = pipelines_[scaled][c.log + (c.gamma ? 5 : 0)];
+    auto &pso = pipelines_[scaled][c.log + (c.gamma ? 5 : c.fixed16 ? 10 : 0)];
     if (!pso) {
       auto code = Code(c, false, resources_);
       D3D12_COMPUTE_PIPELINE_STATE_DESC d{};
@@ -388,7 +425,7 @@ class Vk {
   VkDescriptorPool descriptors_ = VK_NULL_HANDLE;
   VkDescriptorSet sets_[2]{};
   VkPipelineLayout layouts_[2]{};
-  VkPipeline pipelines_[2][10]{};
+  VkPipeline pipelines_[2][15]{};
   VkFence fence_ = VK_NULL_HANDLE;
   VkQueryPool queries_ = VK_NULL_HANDLE;
   PFN_vkCmdFillBuffer fill_buffer_ = nullptr;
@@ -588,7 +625,7 @@ public:
     unsigned scaled = c.scale > 1;
     const auto &f = device_->functions();
     auto vk = device_->device();
-    auto &pipeline = pipelines_[scaled][c.log + (c.gamma ? 5 : 0)];
+    auto &pipeline = pipelines_[scaled][c.log + (c.gamma ? 5 : c.fixed16 ? 10 : 0)];
     if (!pipeline) {
       auto code = Code(c, true, resources_);
       VkShaderModuleCreateInfo mi{VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO};
@@ -727,6 +764,20 @@ unsigned Check(const Case &c, const std::vector<unsigned char> &got,
               for (float v : values)
                 std::cerr << " value=" << v << " bits=" << std::hex
                           << std::bit_cast<unsigned>(v) << std::dec;
+              if (c.fixed16) {
+                unsigned p = (y / c.scale) * c.width + x / c.scale;
+                for (unsigned s = 0; s < (1u << c.msaa); ++s) {
+                  std::cerr << " sample" << s << "=[";
+                  for (unsigned ch = 0; ch < (c.source64 ? 4u : 2u); ++ch)
+                    std::cerr << (ch ? "," : "") << FixedCode(c, p, s, ch);
+                  std::cerr << "]";
+                }
+                if (c.log == 4) {
+                  float actual[4];
+                  std::memcpy(actual, got.data() + address, sizeof(actual));
+                  for (float v : actual) std::cerr << " actual=" << v;
+                }
+              }
               std::cerr << '\n';
             }
           }
@@ -738,13 +789,13 @@ unsigned Check(const Case &c, const std::vector<unsigned char> &got,
 template <class Backend> void Validate(const char *name) {
   Backend backend;
   std::unique_ptr<Backend> original;
-  unsigned passed = 0, gamma = 0, controls = 0, legacy_differences = 0;
-  for (const auto &c : Cases()) {
+  unsigned passed = 0, gamma = 0, fixed = 0, controls = 0, legacy_differences = 0;
+  for (const auto &c : TestCases()) {
     auto result = backend.Run(c);
-    if (c.gamma) {
+    if (c.gamma || c.fixed16) {
       Need(Check(c, result.data, std::is_same_v<Backend, Dx>) == 0,
            "gamma independent oracle");
-      ++gamma;
+      if (c.fixed16) ++fixed; else ++gamma;
     } else {
       Need(!baseline_directory.empty(),
            "non-gamma controls require --baseline-dir with original SDK "
@@ -763,6 +814,7 @@ template <class Backend> void Validate(const char *name) {
             << " gamma exact to independent oracle, " << controls
             << " non-gamma exact to original GPU baseline ("
             << legacy_differences << " pre-existing oracle differences)\n";
+  std::cout << fixed << " fixed16 cases exact to independent oracle\n";
 }
 void ValidateBoth() {
   Dx dx;
@@ -772,9 +824,22 @@ void ValidateBoth() {
   unsigned passed = 0, gamma = 0, controls = 0, identical = 0, half = 0,
            half_different = 0, legacy_dx = 0, legacy_vk = 0;
   std::map<std::string, unsigned> legacy_groups;
-  for (const auto &c : Cases()) {
+  unsigned fixed = 0, fixed_bad_dx = 0, fixed_bad_vk = 0,
+           fixed_identical = 0, fixed_half = 0, fixed_half_different = 0;
+  for (const auto &c : TestCases()) {
     auto a = dx.Run(c), b = vk.Run(c);
-    if (c.gamma) {
+    if (c.fixed16) {
+      fixed_bad_dx += Check(c, a.data, true) != 0;
+      fixed_bad_vk += Check(c, b.data, false) != 0;
+      if (c.log != 3) {
+        Need(a.data == b.data, "D3D12/Vulkan fixed16 byte equivalence");
+        ++fixed_identical;
+      } else {
+        ++fixed_half;
+        fixed_half_different += a.data != b.data;
+      }
+      ++fixed;
+    } else if (c.gamma) {
       Need(Check(c, a.data, true) == 0, "D3D12 independent gamma oracle");
       Need(Check(c, b.data, false) == 0, "Vulkan independent gamma oracle");
       if (c.log == 3) {
@@ -820,6 +885,12 @@ void ValidateBoth() {
             << legacy_dx << " Vulkan=" << legacy_vk << "\n";
   for (const auto& [name, count] : legacy_groups)
     std::cout << "Unchanged baseline difference: " << name << " cases=" << count << '\n';
+  std::cout << "Fixed16: " << fixed << " cases/API; oracle failures D3D12="
+            << fixed_bad_dx << " Vulkan=" << fixed_bad_vk << '\n';
+  std::cout << "Fixed16 cross-API: " << fixed_identical << " byte-identical non-FP16; "
+            << fixed_half << " FP16 (" << fixed_half_different
+            << " differ: DXBC RTZ / SPIR-V RTE)\n";
+  Need(!fixed_bad_dx && !fixed_bad_vk, "fixed16 independent oracle");
 }
 void Percentiles(const char *api, const char *metric,
                  std::vector<double> values) {
@@ -836,6 +907,9 @@ template <class Backend> void Bench(const char *name) {
   c.width = 640;
   c.height = 384;
   c.gamma = bench_gamma;
+  c.fixed16 = bench_fixed16;
+  c.uniform_fixed16 = bench_fixed16;
+  c.source64 = bench_source64;
   c.bias = bench_gamma ? 0 : 1;
   c.msaa = bench_msaa;
   c.select = c.msaa == 0 ? 0 : c.msaa == 1 ? 4 : 6;
@@ -861,6 +935,7 @@ template <class Backend> void Bench(const char *name) {
   Percentiles(name, "CPU submit", submit);
   std::sort(gpu.begin(), gpu.end());
   std::cout << name << " samples=" << (1u << c.msaa) << " gamma=" << c.gamma
+            << " fixed16=" << c.fixed16 << " source64=" << c.source64
             << " pixels/resolve=" << c.width * c.height << " batch=" << repeats
             << " throughput pixels/s="
             << double(c.width * c.height) * 1e9 / gpu[(gpu.size() + 1) / 2 - 1]
@@ -878,8 +953,17 @@ int main(int argc, char **argv) {
       std::string_view a = argv[i];
       if (a == "--bench")
         bench = true;
+      else if (a == "--fixed16-only")
+        fixed16_only = true;
+      else if (a == "--extended-fixed16")
+        extended_fixed16 = true;
       else if (a == "--non-gamma")
         bench_gamma = false;
+      else if (a == "--bench-fixed16") {
+        bench_fixed16 = true;
+        bench_gamma = false;
+      } else if (a == "--source64")
+        bench_source64 = true;
       else if (a == "--msaa" && i + 1 < argc) {
         unsigned n = unsigned(std::stoul(argv[++i]));
         Need(n == 1 || n == 2 || n == 4, "MSAA must be 1,2,4");

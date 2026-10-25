@@ -324,3 +324,11 @@ caiu −3,8% em média (t −1,90, 15 pares), sem significância comprovada e se
 medição em jogo. [Relatório G2](reports/performance/g2-xenos-2026-10-22.md).
 Instrumentação e benchmarks preservados; a redução isolada de CPU não foi aceita
 como ganho global diante da piora observada de 1% low.
+
+0201 (25/10): a correção de full resolve fixed16 rejeitou a recompilação
+integral dos kernels após regressões medidas. A versão final preserva o IR
+pinado nos caminhos sem escala de 16–128 bpp e recompila os caminhos escalares
+e escalados necessários à correção. P50 local entre −10,76% e +0,28%, com
+caudas mistas e sem ganho global certificado. Cenário equivalente, resultados
+CPU/GPU e candidato sem ganho estão no
+[relatório fixed16](reports/graphics/full-resolve-fixed16-0201-2026-10-25.md).

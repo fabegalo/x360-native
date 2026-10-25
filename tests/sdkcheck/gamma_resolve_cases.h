@@ -1,5 +1,5 @@
 #pragma once
-// Independent numerical oracle for Canary 534aeb64. Uses an enumerated decode
+// Independent numerical oracle for gamma and full fixed16 resolves. Uses an enumerated decode
 // table, a search over PWL interval boundaries, and rational normalization;
 // none of the production shader functions are called by this oracle.
 #include <algorithm>
@@ -10,11 +10,12 @@
 #include <rex/graphics/pipeline/texture/util.h>
 #include <rex/graphics/util/draw.h>
 #include <string>
+#include <stdexcept>
 #include <vector>
 
 namespace gamma_probe {
 using namespace rex::graphics;
-inline constexpr unsigned kEdramBytes = 10 * 1024 * 1024 * 4;
+inline constexpr unsigned kEdramBytes = 10 * 1024 * 1024 * 16;
 inline constexpr unsigned kDestBytes = 4 * 1024 * 1024;
 inline constexpr unsigned kWidth = 32, kHeight = 8;
 
@@ -58,6 +59,8 @@ inline uint16_t Half(float f) {
     return 0;
   int he = int(e) - 127 + 15;
   if (he <= 0) {
+    if (he < -10)
+      return 0;
     unsigned v = mant | 0x800000, shift = unsigned(14 - he);
     unsigned q = v >> shift, r = v & ((1u << shift) - 1);
     return uint16_t(
@@ -86,7 +89,7 @@ struct Case {
   int bias = 0;
   xenos::ColorFormat format = xenos::ColorFormat::k_8_8_8_8;
   bool gamma = true, source64 = false, fixed16 = false, swap = false,
-       partial = false, array = false;
+       partial = false, array = false, uniform_fixed16 = false;
   unsigned slice = 0, endian = 0;
   std::string Name() const {
     return "msaa=" + std::to_string(1u << msaa) +
@@ -164,6 +167,10 @@ inline int16_t FixedSource(unsigned p, unsigned sample, unsigned channel) {
                                0,      1,      1023,   1024,  16384, 32767};
   return codes[(p + sample * 3 + channel * 5) % 12];
 }
+inline int16_t FixedCode(const Case& c, unsigned p, unsigned sample, unsigned channel) {
+  constexpr int16_t uniform[] = {1024, 512, 256, 2048};
+  return c.uniform_fixed16 ? uniform[channel] : FixedSource(p, sample, channel);
+}
 inline unsigned EdramAddress(const Case &c, unsigned x, unsigned y,
                              unsigned sample) {
   unsigned gx = x / c.scale + (c.partial ? 8 : 0),
@@ -188,10 +195,12 @@ inline void Fill(const Case &c, void *input) {
         for (unsigned ch = 0; ch < 4; ++ch)
           channels[ch] = Channel(p, sample, ch, x % c.scale, y % c.scale);
         auto address = EdramAddress(c, x, y, sample);
+        if (address + (c.source64 ? 8u : 4u) > kEdramBytes)
+          throw std::runtime_error("fixed16 fixture EDRAM capacity");
         if (c.fixed16) {
           int16_t values[4];
           for (unsigned ch = 0; ch < 4; ++ch)
-            values[ch] = FixedSource(p, sample, ch);
+            values[ch] = FixedCode(c, p, sample, ch);
           std::memcpy(bytes + address, values, c.source64 ? 8 : 4);
         } else if (c.source64) {
           uint16_t values[4];
@@ -222,8 +231,8 @@ inline std::array<float, 4> Values(const Case &c, unsigned x, unsigned y) {
       sum += kDecode[g];
       float v = float(g) * (1.f / 255);
       if (c.fixed16)
-        v = (c.source64 || ch < 2) ? float(FixedSource(p, s, ch)) / 1024.f
-                                   : 0.f;
+        v = (c.source64 || ch < 2) ? float(FixedCode(c, p, s, ch)) / 1024.f
+            : (c.log == 0 && ch == 3) ? 1.f : 0.f;
       else if (c.source64) {
         auto h = Half(v);
         unsigned e = (h >> 10) & 31, m = h & 1023;
@@ -292,9 +301,11 @@ inline std::vector<unsigned char> Expected(const Case &c, bool dxbc = false) {
         std::memcpy(bytes.data() + address, v.data(), 16);
     }
     // Canary's resolve stores apply endian conversion within the destination
-    // element width: 32-bit stores ignore 8in64/8in128, 64-bit ignore 8in128.
+    // element width: 8-bit ignores endian, 16-bit accepts only 8in16,
+    // 32-bit ignores 8in64/8in128, 64-bit ignores 8in128.
     // This is distinct from a generic 128-bit buffer byte swap.
-    if (c.endian && c.endian <= c.log + 1) {
+    if (c.log && c.endian &&
+        (c.log == 1 ? c.endian == 1 : c.endian <= c.log + 1)) {
     const unsigned mask = c.endian == 1   ? 1
                           : c.endian == 2 ? 3
                           : c.endian == 3 ? 2
@@ -402,5 +413,56 @@ inline std::vector<Case> Cases() {
       out.push_back(c);
     }
   return out;
+}
+inline std::vector<Case> Fixed16ExtendedCases() {
+  const std::pair<xenos::ColorFormat, unsigned> formats[] = {
+      {xenos::ColorFormat::k_8, 0}, {xenos::ColorFormat::k_8_8, 1},
+      {xenos::ColorFormat::k_8_8_8_8, 2},
+      {xenos::ColorFormat::k_2_10_10_10, 2},
+      {xenos::ColorFormat::k_16_16_16_16_FLOAT, 3},
+      {xenos::ColorFormat::k_32_32_32_32_FLOAT, 4}};
+  std::vector<Case> cases;
+  for (unsigned msaa : {0u, 1u, 2u}) {
+    std::vector<unsigned> selectors{0};
+    if (msaa == 1) selectors = {0, 1, 4};
+    if (msaa == 2) selectors = {0, 1, 2, 3, 4, 5, 6};
+    for (auto select : selectors)
+      for (bool wide : {false, true})
+        for (auto [format, log] : formats)
+          for (unsigned scale : {1u, 2u, 3u, 4u}) {
+            Case c;
+            c.gamma = false;
+            c.fixed16 = true;
+            c.msaa = msaa;
+            c.select = select;
+            c.source64 = wide;
+            c.format = format;
+            c.log = log;
+            c.scale = scale;
+            c.bias = int((select + scale) % 3) - 1;
+            c.swap = (select + scale) & 1;
+            c.partial = true;
+            c.endian = (select + scale) % 6;
+            c.array = scale == 1;
+            c.slice = 7;
+            cases.push_back(c);
+          }
+    for (bool wide : {false, true})
+      for (int bias : {-32, -16, -8, -1, 0, 2, 8, 31})
+        for (auto [format, log] : formats) {
+          if (log == 3 && bias == 31) continue;
+          Case c;
+          c.gamma = false;
+          c.fixed16 = true;
+          c.msaa = msaa;
+          c.select = msaa == 0 ? 0 : msaa == 1 ? 4 : 6;
+          c.source64 = wide;
+          c.format = format;
+          c.log = log;
+          c.bias = bias;
+          cases.push_back(c);
+        }
+  }
+  return cases;
 }
 } // namespace gamma_probe

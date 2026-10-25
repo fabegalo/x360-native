@@ -1933,3 +1933,21 @@ visíveis através da geometria em 4D530A26. A parte de render targets de host
 máscaras PSI reais (6 verificações; a regra anterior falharia na escrita só do
 byte de stencil). A ligação nos command processors não tem teste automático.
 Sem GPU.
+
+## 0201 — full resolve fixed16 em D3D12/Vulkan
+
+Os bytecodes full antigos ainda desempacotavam EDRAM signed16 com
+`32/32767` e clamp em −1, apesar do s5.10 já usado pelo produtor (0185).
+Kernels próprios fixed16 usam os helpers Canary `1/1024`, preservam negativos,
+endereçamento SDK e acumulação precisa de 0199/0200. São 20 recursos
+DXBC/SPIR-V reproduzíveis com `generate_resolves.py --family fixed16`
+e `--dxbc-checksum`: oito preservam o IR pinado com correção dos operandos
+de unpack; R8 escalar e variantes escaladas usam as fontes corrigidas.
+Os caches Xenos selecionam esses pipelines apenas para full resolves de
+16_16/16_16_16_16; cópias raw, gamma e RGB565 conservam seus pipelines.
+
+RTX 4070: 48 falhas anteriores/API eliminadas; 864 fixed16/API aprovados,
+684 gamma/API e 504 controles/API preservados. As 45 diferenças RGB565/API
+continuam separadas. CPU: 291.132 verificações e onze regressões focadas.
+Release Xenos/Native, regeneração e replay do lock aprovados.
+[Evidências e limites](../../docs/reports/graphics/full-resolve-fixed16-0201-2026-10-25.md).

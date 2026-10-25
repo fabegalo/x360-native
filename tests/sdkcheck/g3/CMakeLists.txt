@@ -206,6 +206,7 @@ add_custom_command(OUTPUT ${_gamma_math}
       ${X360_REXGLUE_DIR}/src/graphics/shaders/resolve_sources/resolve.xesli ${_gamma_math}
     DEPENDS ../generate_gamma_math_probe.py
       ${X360_REXGLUE_DIR}/src/graphics/shaders/resolve_sources/resolve.xesli
+      ${X360_REXGLUE_DIR}/src/graphics/shaders/resolve_sources/pixel_formats.xesli
     VERBATIM)
 add_executable(x360n_gamma_resolve_checks ../gamma_resolve_cpu.cpp ${_gamma_math}
     ${X360_REXGLUE_DIR}/src/graphics/util/draw.cpp
@@ -218,6 +219,9 @@ target_link_libraries(x360n_gamma_resolve_checks PRIVATE rexruntime)
 x360n_stage_runtime_dlls(x360n_gamma_resolve_checks)
 add_test(NAME sdkcheck.canary-gamma-resolve COMMAND x360n_gamma_resolve_checks)
 set_tests_properties(sdkcheck.canary-gamma-resolve PROPERTIES LABELS project TIMEOUT 30)
+add_test(NAME sdkcheck.fixed16-full-resources
+    COMMAND ${_gamma_probe_python} ${CMAKE_CURRENT_SOURCE_DIR}/../fixed16_full_resources.py)
+set_tests_properties(sdkcheck.fixed16-full-resources PROPERTIES LABELS project TIMEOUT 30)
 if(REXGLUE_USE_VULKAN AND WIN32)
   add_executable(x360n_gamma_resolve_gpu_checks ../gamma_resolve_gpu.cpp)
   target_include_directories(x360n_gamma_resolve_gpu_checks PRIVATE
@@ -227,6 +231,11 @@ if(REXGLUE_USE_VULKAN AND WIN32)
   # Opt-in headless GPU test; each fence is bounded to five seconds.
 endif()
 # Maintenance tool only; normal Release builds consume the shipped resources.
+add_executable(x360n_resolve_dxbc_checksum EXCLUDE_FROM_ALL
+    ../../../scripts/shaders/resolve_dxbc_checksum.cpp
+    ${X360_REXGLUE_DIR}/thirdparty/dxbc/DXBCChecksum.cpp)
+target_include_directories(x360n_resolve_dxbc_checksum PRIVATE
+    ${X360_REXGLUE_DIR}/thirdparty/dxbc)
 if(REXGLUE_USE_VULKAN)
   add_executable(x360n_resolve_shader_compiler EXCLUDE_FROM_ALL
       ../../../scripts/shaders/compile_resolve_spirv.cpp

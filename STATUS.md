@@ -1,5 +1,15 @@
 # STATUS
 
+Complemento de 25/10 — **0201: full resolve fixed16** sobre `c6f091e`:
+confirmados bytecodes antigos com `32/32767` e clamp em −1; s5.10 exige
+`1/1024` e preservação dos negativos. As 48 divergências/API foram eliminadas.
+RTX 4070: 864 fixed16/API, 684 gamma/API e 504 controles/API aprovados;
+45 diferenças RGB565/API preservadas separadamente. CPU: 291.132 verificações
+e 11 regressões focadas. Release Xenos/Native com D3D12/Vulkan, regeneração
+determinística e replay de 188 patches/256 hashes aprovados, SDK pinado mantido.
+Compute headless não certifica rasterização completa nem gameplay.
+[Causa, validação e medições](docs/reports/graphics/full-resolve-fixed16-0201-2026-10-25.md).
+
 Estado consolidado em **2026-10-23**; a referência funcional integrada histórica é `1844245`.
 Este arquivo resume o estado atual; os relatórios vinculados preservam datas,
 falhas iniciais, hashes, comandos e limites de cada validação. Resultados de uma

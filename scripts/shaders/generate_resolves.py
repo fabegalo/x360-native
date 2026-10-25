@@ -1,4 +1,4 @@
-"""Regenerate the shipped gamma resolve kernels; never run by normal builds.
+"""Regenerate shipped gamma or fixed16 resolve kernels; never run by normal builds.
 
 Uses Windows SDK FXC, the pinned glslang helper, and locally built SPIRV-Tools.
 All intermediates live in a temporary directory; --verify compares exact bytes.
@@ -10,6 +10,84 @@ from pathlib import Path
 import struct
 import subprocess
 import tempfile
+import re
+
+
+def fixed16_ir(data, spirv):
+    """Edit only fixed16 unpack operands, preserving destination conversions."""
+    old, new = 0x3A800100, 0x3A800000
+    w = list(struct.unpack('<' + 'I' * (len(data) // 4), data))
+    scales, clamps = [], []
+    if spirv:
+        assert w[0] == 0x07230203
+        instructions, float_types, constants, negative, composites = [], set(), {}, set(), set()
+        pos = 5
+        while pos < len(w):
+            n, op = w[pos] >> 16, w[pos] & 65535
+            assert n and pos + n <= len(w)
+            instructions.append((pos, n, op))
+            if op == 22 and n == 3 and w[pos + 2] == 32:
+                float_types.add(w[pos + 1])
+            if op == 43 and n == 4 and w[pos + 1] in float_types:
+                if w[pos + 3] == old:
+                    constants[w[pos + 2]] = pos + 3
+                if w[pos + 3] == 0xBF800000:
+                    negative.add(w[pos + 2])
+            if op == 44 and all(v in negative for v in w[pos + 3:pos + n]):
+                composites.add(w[pos + 2])
+            pos += n
+        assert len(constants) == 1
+        scales = list(constants.values())
+        scaled = {w[p + 2] for p, n, op in instructions
+                  if op == 142 and n == 5 and w[p + 4] in constants}
+        assert scaled
+        for p, n, op in instructions:
+            if op != 12 or n != 7 or w[p + 4] != 40:
+                continue  # GLSL.std.450 FMax
+            a, b = w[p + 5:p + 7]
+            if a in scaled and b in composites:
+                clamps.append((p + 6, a))
+            elif b in scaled and a in composites:
+                clamps.append((p + 5, b))
+        # FMax(x, x) preserves every finite signed16 value without changing IR shape.
+    else:
+        assert data[:4] == b'DXBC' and w[6] == len(data)
+        scaled_registers = set()
+        for offset in w[8:8 + w[7]]:
+            if data[offset:offset + 4] not in (b'SHEX', b'SHDR'):
+                continue
+            start = offset // 4 + 2
+            pos, end = start + 2, start + w[start + 1]
+            while pos < end:
+                op = w[pos] & 2047
+                n = w[pos + 1] if op == 53 else (w[pos] >> 24) & 127
+                assert n and pos + n <= end
+                hits = [i for i in range(pos + 1, pos + n) if w[i] == old]
+                if hits:
+                    assert op == 56 and len(hits) in (1, 2, 4)
+                    first = pos + n - (1 if w[pos + n - 2] == 0x4001 else 4)
+                    assert w[first - 1] in (0x4001, 0x4002)
+                    assert all(v in (0, old) for v in w[first:pos + n])
+                    scales.extend(hits)
+                # MAX dst, scaled_temp, immediate lower bound. Never alter packing clamps.
+                if op == 52 and n == 10 and w[pos + 5] == 0x4002 and w[pos + 4] in scaled_registers:
+                    assert (w[pos + 3] >> 12) & 255 == 0
+                    lower = w[pos + 6:pos + 10]
+                    if 0xBF800000 in lower:
+                        assert all(v in (0, 0xBF800000) for v in lower)
+                        clamps.extend((i, 0xC2000000) for i in range(pos + 6, pos + 10) if w[i] == 0xBF800000)
+                if n >= 3 and (w[pos + 1] >> 20) & 3 == 1 and (w[pos + 1] >> 12) & 255 == 0:
+                    register = w[pos + 2]
+                    scaled_registers.discard(register)
+                    if hits:
+                        scaled_registers.add(register)
+                pos += n
+    assert scales and clamps
+    assert [i for i, value in enumerate(w) if value == old] == sorted(scales)
+    edits = [(i, new) for i in scales] + clamps
+    for i, value in edits:
+        w[i] = value
+    return struct.pack('<' + 'I' * len(w), *w), edits
 
 
 def run(args):
@@ -70,8 +148,12 @@ def main():
     p.add_argument("--spirv-compiler", required=True, type=Path)
     p.add_argument("--spirv-tools", required=True, type=Path)
     p.add_argument("--verify", action="store_true")
+    p.add_argument("--family", choices=("gamma", "fixed16"), default="gamma")
+    p.add_argument("--dxbc-checksum", type=Path, help="required for fixed16 pinned IR regeneration")
     p.add_argument("--binary-dir", type=Path, help="optional local output for GPU comparisons")
     args = p.parse_args()
+    if args.family == 'fixed16' and not args.dxbc_checksum:
+        p.error('--family fixed16 requires --dxbc-checksum')
     shaders = args.sdk_root.resolve() / "src/graphics/shaders"
     sources = shaders / "resolve_sources"
     sha = lambda data: hashlib.sha256(data).hexdigest()
@@ -82,20 +164,54 @@ def main():
     tool_sources = {name: subprocess.check_output(
         ["git", "-C", str(vendored / name), "rev-parse", "HEAD"], text=True).strip()
         for name in ("glslang", "spirv-tools", "spirv-headers")}
-    manifest = {"sources": {f.name: sha(f.read_bytes()) for f in sorted(sources.glob("*.xesl*"))},
+    manifest = {"sources": {f.name: sha(f.read_bytes()) for f in sorted(sources.glob("*.xesl*"))
+                            if not f.name.startswith("resolve_" + ("fixed16" if args.family == "gamma" else "gamma"))},
                 "tools": {"fxc_sha256": sha(args.fxc.read_bytes()), **tool_sources,
                           "spirv_compiler_source_sha256": sha((root / "scripts/shaders/compile_resolve_spirv.cpp").read_bytes().replace(b"\r\n", b"\n")),
                           "generator_source_sha256": sha(Path(__file__).read_bytes().replace(b"\r\n", b"\n")),
                           "spirv_target": "vulkan1.0", "fxc_flags": "/T cs_5_1 /O3 /Gfp /Gis /Qstrip_reflect /Qstrip_debug /Qstrip_priv"},
                 "resources": {}}
     generated = {}
-    with tempfile.TemporaryDirectory(prefix="x360-resolve-") as temp:
+    sdk_info = json.loads((root / 'deps.lock.json').read_text())['rexglue_sdk']
+    if args.family == 'fixed16':
+        manifest['tools']['dxbc_checksum_source_sha256'] = sha((root / 'scripts/shaders/resolve_dxbc_checksum.cpp').read_bytes().replace(b'\r\n', b'\n'))
+        manifest['tools']['ir_input_commit'] = sdk_info['commit']
+    temp_root = root / ".local/tmp"
+    temp_root.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix="x360-resolve-", dir=temp_root) as temp:
         temp = Path(temp)
         for bpp in (8, 16, 32, 64, 128):
             for suffix in ("", "_scaled"):
-                name = f"resolve_gamma_{bpp}bpp{suffix}_cs"
-                source = sources / f"resolve_gamma_{bpp}bpp{suffix}.cs.xesl"
+                name = f"resolve_{args.family}_{bpp}bpp{suffix}_cs"
+                source = sources / f"resolve_{args.family}_{bpp}bpp{suffix}.cs.xesl"
                 dxbc, spv, optimized = (temp / (name + ext) for ext in (".dxbc", ".raw.spv", ".spv"))
+                if args.family == 'fixed16' and not suffix and bpp != 8:
+                    for directory, path, spirv in (("bytecode/d3d12_5_1", dxbc, False), ("vulkan_spirv", optimized, True)):
+                        original_name = name.replace('fixed16', 'full')
+                        relative = f'src/graphics/shaders/{directory}/{original_name}.h'
+                        text = subprocess.check_output(['git', '-C', str(root / sdk_info['path']), 'show', sdk_info['commit'] + ':' + relative], text=True)
+                        body = re.search(r'\b' + original_name + r'\[\]\s*=\s*\{(.*?)\};', text, re.S)[1]
+                        values = [int(t, 16 if t.startswith('0x') else 10) for t in re.findall(r'0x[0-9a-fA-F]+|\b[0-9]+\b', body)]
+                        original = struct.pack('<' + 'I' * len(values), *values) if spirv else bytes(values)
+                        data, edits = fixed16_ir(original, spirv)
+                        path.write_bytes(data)
+                        if spirv:
+                            run([args.spirv_tools / 'spirv-val.exe', '--target-env', 'vulkan1.0', path])
+                        else:
+                            run([args.dxbc_checksum, path])
+                        result = path.read_bytes()
+                        before, after = (struct.unpack('<' + 'I' * (len(d) // 4), d) for d in (original, result))
+                        assert len(original) == len(result)
+                        assert {i for i, (a, b) in enumerate(zip(before, after)) if a != b} == {i for i, _ in edits} | (set(range(1, 5)) if not spirv else set())
+                        relative = f'{directory}/{name}.h'
+                        generated[shaders / relative] = header(result, name, spirv)
+                        manifest['resources'][relative] = {'binary_sha256': sha(result), 'bytes': len(result),
+                            'ir_input_sha256': sha(original), 'ir_edits': edits, **statistics(result, spirv)}
+                        if args.binary_dir:
+                            args.binary_dir.mkdir(parents=True, exist_ok=True)
+                            (args.binary_dir / (name + ('.spv' if spirv else '.dxbc'))).write_bytes(result)
+                    print(name, 'pinned IR: fixed16 scale and source-only lower bound regenerated', flush=True)
+                    continue
                 run([args.fxc, "/nologo", "/D", "SHADING_LANGUAGE_HLSL_XE=1", "/T", "cs_5_1",
                      "/E", "main", "/O3", "/Gfp", "/Gis", "/Qstrip_reflect", "/Qstrip_debug", "/Qstrip_priv",
                      "/Fo", dxbc, source])
@@ -114,7 +230,7 @@ def main():
                     manifest["resources"][relative] = {"binary_sha256": sha(data), "bytes": len(data),
                                                          **statistics(data, spirv)}
                 print(name, "DXBC", dxbc.stat().st_size, "SPIR-V", optimized.stat().st_size, flush=True)
-    generated[sources / "generated.json"] = (json.dumps(manifest, indent=2) + "\n").encode()
+    generated[sources / ("generated.json" if args.family == "gamma" else "fixed16_generated.json")] = (json.dumps(manifest, indent=2) + "\n").encode()
     for path, data in generated.items():
         if args.verify:
             if not path.is_file() or path.read_bytes() != data:
@@ -122,7 +238,7 @@ def main():
         else:
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_bytes(data)
-    print("Reproducible resources verified" if args.verify else "20 gamma resolve resources generated")
+    print("Reproducible resources verified" if args.verify else f"20 {args.family} resolve resources generated")
 
 
 if __name__ == "__main__":

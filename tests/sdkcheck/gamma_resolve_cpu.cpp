@@ -46,6 +46,43 @@ int main() {
         "requantization at an encoder segment boundary");
   check(Half(0) == 0 && Half(1) == 0x3c00 && Half(.5f) == 0x3800,
         "independent half packing anchors");
+  for (unsigned code = 0; code < 65536; ++code) {
+    uint4_xe packed{code, code | 0xffff0000u, code | 0xa5a50000u,
+                   code | 0x12340000u};
+    const auto actual = XeUnpackR16EdramX4(packed);
+    const int signed_code = code < 32768 ? int(code) : int(code) - 65536;
+    const float rational = float(double(signed_code) / 1024.0);
+    for (float lane : actual.v)
+      check(std::bit_cast<unsigned>(lane) == std::bit_cast<unsigned>(rational),
+            "all s5.10 codes: production unpack vs independent signed rational");
+  }
+  check(Half(std::ldexp(1.f, -32)) == 0 && Half(std::ldexp(1.f, -24)) == 1 &&
+            Half(-std::ldexp(1.f, -32)) == 0x8000,
+        "half subnormal and signed underflow anchors");
+  Case fixed;
+  fixed.gamma = false;
+  fixed.fixed16 = true;
+  fixed.log = 0;
+  fixed.format = xenos::ColorFormat::k_8;
+  fixed.swap = true;
+  check(Values(fixed, 0, 0)[3] == 1.f,
+        "Canary scalar resolve: missing 16_16 alpha is one before bias");
+  fixed.bias = -1;
+  check(Values(fixed, 0, 0)[3] == .5f,
+        "missing scalar alpha participates in bias");
+  fixed.swap = false;
+  fixed.bias = 0;
+  check(Values(fixed, 0, 0)[0] == -32.f &&
+            Values(fixed, 1, 0)[0] == -32767.f / 1024.f,
+        "s5.10 negative range and asymmetric endpoints");
+  fixed.log = 1;
+  fixed.format = xenos::ColorFormat::k_8_8;
+  const auto no_endian = Expected(fixed);
+  for (unsigned endian : {2u, 3u, 4u, 5u}) {
+    fixed.endian = endian;
+    check(Expected(fixed) == no_endian,
+          "XeEndianSwap16 ignores endians other than 8in16");
+  }
   for (unsigned msaa : {0u, 1u, 2u})
     for (unsigned selection = 0; selection < 7; ++selection) {
       auto selected = draw_util::SanitizeCopySampleSelect(
