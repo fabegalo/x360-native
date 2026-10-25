@@ -253,7 +253,7 @@ VkDescriptorSetLayout VulkanRender::TextureLayout(SpirvShader* shader) {
   return layout;
 }
 void VulkanRender::SyncTextureReads(const RegisterFile& regs, SpirvShader* shader) {
-  if (!shader || writeback_.empty()) return;
+  if (!shader || !HasGuestWrites()) return;
   for (const auto& binding : shader->GetTextureBindingsAfterTranslation()) {
     const auto fetch = regs.GetTextureFetch(binding.fetch_constant);
     if (!TextureViewActive(fetch, binding.dimension, binding.is_signed)) continue;
@@ -423,7 +423,7 @@ VkDescriptorSet VulkanRender::BindTextures(const RegisterFile& regs, rex::memory
         } else {
           // These reads were synchronized before any descriptor sets of the draw
           // were allocated, so a resolve cannot strand half-recorded draw state.
-          if (writeback_.Overlaps(input.base, base_bytes) || writeback_.Overlaps(input.mip, mip_bytes))
+          if (GuestWritesOverlap(input.base, base_bytes) || GuestWritesOverlap(input.mip, mip_bytes))
             throw std::logic_error("Native Vulkan: CPU texture conversion overlaps pending resolve");
           std::vector<D3D12_PLACED_SUBRESOURCE_FOOTPRINT> footprints(layers * levels);
           std::vector<VkBufferImageCopy> copies;
