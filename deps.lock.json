@@ -1024,7 +1024,7 @@
     "src/graphics/util/draw.cpp": "a3215a0de2f42d9e2235dd062b4cd2c3c0a27effd033c27ab6b6ca1f7673a25b"
   },
   "files": {
-    "src/graphics/util/draw.cpp": "399ba66a4e8a0c80b2998ef9e7d3ff328bb6462ad0b05466c7250fac6187a359"
+    "src/graphics/util/draw.cpp": "3f7dde8e3bd36ce76008fc3350045d5f6cff2825c0505ca09ecfd1a139c35f0b"
   },
   "test": "sdkcheck.empty-resolve"
 },
@@ -1175,10 +1175,10 @@
     "src/graphics/d3d12/render_target_cache.cpp": "7bc68f0891b9ec0a108a3e1b34e980619245d28ab86f201846b40230760b1dd0"
   },
   "files": {
-    "include/rex/graphics/util/draw.h": "a2ef1e13fd96e5e8a25280b816d0374c99c8c039841234c068e7818bdbd622cc",
-    "src/graphics/util/draw.cpp": "399ba66a4e8a0c80b2998ef9e7d3ff328bb6462ad0b05466c7250fac6187a359",
+    "include/rex/graphics/util/draw.h": "415174fe3ae2bb5d1acd8a438cbd190a38ff55a823ad3227af06b2a6e4e82c0d",
+    "src/graphics/util/draw.cpp": "3f7dde8e3bd36ce76008fc3350045d5f6cff2825c0505ca09ecfd1a139c35f0b",
     "src/graphics/d3d12/command_processor.cpp": "0da87b5ea414b79654a997af35c014662aeb74e1257856659bfd805336b5bcba",
-    "src/graphics/d3d12/render_target_cache.cpp": "460bee1f4c2cad584e801dd723524f24bd8c793db00ee7c399ba9d6ff4cafab5"
+    "src/graphics/d3d12/render_target_cache.cpp": "6eed2bdee645bbd65125b89cd0abc99ad4d5daaa2b6f0b44764ceae6d2d17184"
   },
   "test": "tests/sdkcheck/fixed16_resolve_probe.cpp"
 },
@@ -2421,7 +2421,7 @@
   "files": {
     "include/rex/graphics/pipeline/texture/info.h": "bfbeec5361746f55b1e739ea632b9658c8d5e7ff2a44ac2a02730fb496f73d25",
     "src/graphics/d3d12/texture_cache.cpp": "6a6669e3e486bd40eb01253d9d6068e4c31d11e669a527de990f38d2c866d8c9",
-    "src/graphics/util/draw.cpp": "399ba66a4e8a0c80b2998ef9e7d3ff328bb6462ad0b05466c7250fac6187a359",
+    "src/graphics/util/draw.cpp": "3f7dde8e3bd36ce76008fc3350045d5f6cff2825c0505ca09ecfd1a139c35f0b",
     "src/graphics/vulkan/texture_cache.cpp": "5bd658c580a6eb4b0afa493fff269e8c1fa211d4c34661c244efcd7efecd36dc"
   },
   "test": "sdkcheck.canary-format-alias: k_8_A/k_8_B/k_8_8_8_8_A textures use k_8/k_8_8_8_8 (GetBaseFormat) and resolves to them write the aliased destination format (Xenia Canary 8322658). Host format table entries are review-only; no GPU run."
@@ -2445,7 +2445,7 @@
     "src/graphics/pipeline/shader/dxbc_translator_om.cpp": "a5f50732a1a0fa557189f26ddc926bb96c723c1d22057f8d07dddb956d5c939a",
     "src/graphics/pipeline/shader/spirv_translator_rb.cpp": "3c5afd0814326809d557da19c9b7b9c28ea29d0eff5a52fe7ccf3eaa41f5b628",
     "src/graphics/vulkan/command_processor.cpp": "fdbc0459f34cfd343bc1f8097ed5ac1298d6ab5741c60ec885e7c438bf7ea7eb",
-    "src/graphics/vulkan/render_target_cache.cpp": "66d881a39f57a336c38511c3819625f549f2b195638dc50a5c60920db97d8231"
+    "src/graphics/vulkan/render_target_cache.cpp": "334d58ab5160d0908c3a4023e6570fe10cd59218040d23105514564d7ed1b461"
   },
   "test": "sdkcheck.canary-edram-fixed16: real pixel shader translated offline with ROV (DXBC) and FSI (SPIR-V, scale 1/2): no 32767/32 or 32/32767 EDRAM scales remain, s5.10 uses 1024 and 1/1024, FSI clamps to 32767/1024; PSI clamp is [-32, 32767/1024] (Xenia Canary 42c2b88). Vulkan exp-bias scale reuses the 0087 helper (sdkcheck.fixed16-resolve). Precompiled resolve shaders unchanged; no GPU run."
 },
@@ -2469,7 +2469,7 @@
     "src/graphics/util/draw.cpp": "a5238c8147d2dc12afbcfd80809f742e2eaa109480708939ce9ce9e203417a66"
   },
   "files": {
-    "src/graphics/util/draw.cpp": "399ba66a4e8a0c80b2998ef9e7d3ff328bb6462ad0b05466c7250fac6187a359"
+    "src/graphics/util/draw.cpp": "3f7dde8e3bd36ce76008fc3350045d5f6cff2825c0505ca09ecfd1a139c35f0b"
   },
   "test": "sdkcheck.canary-resolve-dest: a 2D tiled resolve whose RB_COPY_DEST_BASE is advanced by N 8bpp/16bpp macro tiles yields the same destination base, offsets and extents as the copy N*32 pixels right of the 4 KB-aligned base (Xenia Canary 89609297c). No GPU run."
 },
@@ -2520,8 +2520,8 @@
     "src/graphics/util/draw.cpp": "3c1a3323e30e2cc5dcc39311d5baa120a800c43be0a29b42f220997ff23c1454"
   },
   "files": {
-    "include/rex/graphics/util/draw.h": "a2ef1e13fd96e5e8a25280b816d0374c99c8c039841234c068e7818bdbd622cc",
-    "src/graphics/util/draw.cpp": "399ba66a4e8a0c80b2998ef9e7d3ff328bb6462ad0b05466c7250fac6187a359"
+    "include/rex/graphics/util/draw.h": "415174fe3ae2bb5d1acd8a438cbd190a38ff55a823ad3227af06b2a6e4e82c0d",
+    "src/graphics/util/draw.cpp": "3f7dde8e3bd36ce76008fc3350045d5f6cff2825c0505ca09ecfd1a139c35f0b"
   },
   "test": "sdkcheck.canary-viewport: a 1280-wide viewport drawn with window offset x -608 (4D5307DF's right tile in Canary) starts at -608 with the full extent and the same NDC transform as the unoffset tile (Xenia Canary 6579cc2a4). No GPU run."
 },
@@ -2532,7 +2532,7 @@
     "src/graphics/util/draw.cpp": "3e9569abdfd1c424ab6870a3af51f46e0fe9cb3e03d4be1676df0a498975bd94"
   },
   "files": {
-    "src/graphics/util/draw.cpp": "399ba66a4e8a0c80b2998ef9e7d3ff328bb6462ad0b05466c7250fac6187a359"
+    "src/graphics/util/draw.cpp": "3f7dde8e3bd36ce76008fc3350045d5f6cff2825c0505ca09ecfd1a139c35f0b"
   },
   "test": "sdkcheck.canary-resolve-dest: a volume resolve with copy_dest_height 192 and RB_COPY_SURFACE_SLICE = pitch * 256 uses a 256-row slice (same base and extents as copy_dest_height 256), while 2D resolves keep copy_dest_height (Xenia Canary d8731edc9). No GPU run."
 },
@@ -2628,25 +2628,25 @@
     "include/rex/graphics/d3d12/command_processor.h": "72f41ba8a323b6cf19cda41ea69ba6f3f176686e28e4e7f3c99bf4cc430c2d62",
     "include/rex/graphics/d3d12/deferred_command_list.h": "c82906295496396812a4b85a60e2cff59702d361d5dda43653796c59cdd17919",
     "include/rex/graphics/d3d12/pipeline_cache.h": "acb80ebcf3b923202a437fe89922e828aea73b38c565ba11439f53a63852ca5b",
-    "include/rex/graphics/d3d12/render_target_cache.h": "d3257b34470b04799c1230524b2dd727ff8443bf7a61078893767e8e819acc6c",
+    "include/rex/graphics/d3d12/render_target_cache.h": "2a1773ead3d8fe14da78045742d4c27858b72bac43cf272ed4a12dd032c2e0e0",
     "include/rex/graphics/flags.h": "b61697bb7828bc2a0d829c4131044be5991878b1178ae50c0fb45b50ad33de8f",
-    "include/rex/graphics/util/draw.h": "a2ef1e13fd96e5e8a25280b816d0374c99c8c039841234c068e7818bdbd622cc",
+    "include/rex/graphics/util/draw.h": "415174fe3ae2bb5d1acd8a438cbd190a38ff55a823ad3227af06b2a6e4e82c0d",
     "include/rex/graphics/vulkan/command_processor.h": "cbab1238329772cd7d2ffa02cb0a3ab1f8d14392493d077cb3157d4d80f31577",
     "include/rex/graphics/vulkan/deferred_command_buffer.h": "8a971b89f421decb32c67dcf855f77023015311ecc0f753c2af4f9551cca2474",
-    "include/rex/graphics/vulkan/render_target_cache.h": "78f49f620250456524921d7cd00cc76fee305cbaedff0e09ee548e928d58659e",
+    "include/rex/graphics/vulkan/render_target_cache.h": "e22a4a190edee39d90a6b2a42f4b27b60fd56dac8b4b8ff67c5240a4e3181517",
     "include/rex/ui/vulkan/device.h": "9f26516716f84747ef2bf39adfdb1dd6f8a643d236a030cf2d5590a8a05545ed",
     "src/graphics/d3d12/command_processor.cpp": "0da87b5ea414b79654a997af35c014662aeb74e1257856659bfd805336b5bcba",
     "src/graphics/d3d12/deferred_command_list.cpp": "e73c5ff6d4ed679681c93247c2ffa2381da6af9e6e8df79ac09cf319c1d5e932",
     "src/graphics/d3d12/pipeline_cache.cpp": "7112d5d15e154825df9a5389e475a4862524fc51d98368a7a2f2b8d7737660f2",
-    "src/graphics/d3d12/render_target_cache.cpp": "460bee1f4c2cad584e801dd723524f24bd8c793db00ee7c399ba9d6ff4cafab5",
+    "src/graphics/d3d12/render_target_cache.cpp": "6eed2bdee645bbd65125b89cd0abc99ad4d5daaa2b6f0b44764ceae6d2d17184",
     "src/graphics/flags.cpp": "43ab5109396bd15972ae820f1fcaca396db4527bb0499701be76f4db39d232a1",
     "src/graphics/pipeline/shader/dxbc_translator_om.cpp": "a5f50732a1a0fa557189f26ddc926bb96c723c1d22057f8d07dddb956d5c939a",
     "src/graphics/pipeline/shader/spirv_translator_rb.cpp": "3c5afd0814326809d557da19c9b7b9c28ea29d0eff5a52fe7ccf3eaa41f5b628",
-    "src/graphics/util/draw.cpp": "399ba66a4e8a0c80b2998ef9e7d3ff328bb6462ad0b05466c7250fac6187a359",
+    "src/graphics/util/draw.cpp": "3f7dde8e3bd36ce76008fc3350045d5f6cff2825c0505ca09ecfd1a139c35f0b",
     "src/graphics/vulkan/command_processor.cpp": "fdbc0459f34cfd343bc1f8097ed5ac1298d6ab5741c60ec885e7c438bf7ea7eb",
     "src/graphics/vulkan/deferred_command_buffer.cpp": "8df43c67c6317e21896898b231582988ccbd619f71c8a81de8c265b8a91c9e46",
     "src/graphics/vulkan/pipeline_cache.cpp": "ad57019e095bf7956863c2aef2919d36fc96446f70e23221a8bc79453fa96b21",
-    "src/graphics/vulkan/render_target_cache.cpp": "66d881a39f57a336c38511c3819625f549f2b195638dc50a5c60920db97d8231",
+    "src/graphics/vulkan/render_target_cache.cpp": "334d58ab5160d0908c3a4023e6570fe10cd59218040d23105514564d7ed1b461",
     "src/ui/vulkan/vulkan_device.cpp": "22abd6e66a38bead02184d2b3830700f41fe075b73eb24c680ae8d822d65cdfd"
   },
   "test": "MSAA sample positions and host/guest mappings, 1x/2x/4x viewport contracts, offline DXBC/SPIR-V coverage/depth and deferred sample-location capture. Canary cc4981a4659086acb1c25a485adebefc3f432ae1. SPIR-V red before port: 2 failures. GPU/gameplay acceptance recorded separately in the focused report."
@@ -2676,25 +2676,124 @@
   },
   "files": {
     "include/rex/graphics/d3d12/command_processor.h": "72f41ba8a323b6cf19cda41ea69ba6f3f176686e28e4e7f3c99bf4cc430c2d62",
-    "include/rex/graphics/d3d12/render_target_cache.h": "d3257b34470b04799c1230524b2dd727ff8443bf7a61078893767e8e819acc6c",
+    "include/rex/graphics/d3d12/render_target_cache.h": "2a1773ead3d8fe14da78045742d4c27858b72bac43cf272ed4a12dd032c2e0e0",
     "include/rex/graphics/pipeline/render_target/cache.h": "0fd60bee3afcaf87cd15798e960076c4de37c655073bd1cee685d5f6546d81ec",
     "include/rex/graphics/pipeline/shader/dxbc_translator.h": "14b9412265d45e70c41fb7a51a029bae293031a40f620ecf42b56dfaa3fd3754",
     "include/rex/graphics/pipeline/shader/spirv_translator.h": "af3605a5b254681bb865ffe0e90ab8e8e4fa19616c336e07f49053c793dae6e6",
-    "include/rex/graphics/util/draw.h": "a2ef1e13fd96e5e8a25280b816d0374c99c8c039841234c068e7818bdbd622cc",
+    "include/rex/graphics/util/draw.h": "415174fe3ae2bb5d1acd8a438cbd190a38ff55a823ad3227af06b2a6e4e82c0d",
     "include/rex/graphics/util/draw_extent_estimator.h": "968cb742a60fae5cad5f8111010099f9b778032acfe78bd45b3ad676265f0ad0",
     "include/rex/graphics/vulkan/command_processor.h": "cbab1238329772cd7d2ffa02cb0a3ab1f8d14392493d077cb3157d4d80f31577",
-    "include/rex/graphics/vulkan/render_target_cache.h": "78f49f620250456524921d7cd00cc76fee305cbaedff0e09ee548e928d58659e",
+    "include/rex/graphics/vulkan/render_target_cache.h": "e22a4a190edee39d90a6b2a42f4b27b60fd56dac8b4b8ff67c5240a4e3181517",
     "src/graphics/d3d12/command_processor.cpp": "0da87b5ea414b79654a997af35c014662aeb74e1257856659bfd805336b5bcba",
-    "src/graphics/d3d12/render_target_cache.cpp": "460bee1f4c2cad584e801dd723524f24bd8c793db00ee7c399ba9d6ff4cafab5",
+    "src/graphics/d3d12/render_target_cache.cpp": "6eed2bdee645bbd65125b89cd0abc99ad4d5daaa2b6f0b44764ceae6d2d17184",
     "src/graphics/pipeline/render_target/cache.cpp": "83ec2739c9c343964abf186375fa2e7bfe78d0874b41c20bade8f2090a9f1a0e",
     "src/graphics/pipeline/shader/dxbc_translator.cpp": "f97091630fe41fb86c1cb633fa37a82af05b63b6361b8ff19df9e03d5ab9f6e8",
     "src/graphics/pipeline/shader/spirv_translator.cpp": "d9a4bdfe126a747fde2bbcc3197c330ea6eb4ace3ea3962734e92a3f9d4f46b6",
-    "src/graphics/util/draw.cpp": "399ba66a4e8a0c80b2998ef9e7d3ff328bb6462ad0b05466c7250fac6187a359",
+    "src/graphics/util/draw.cpp": "3f7dde8e3bd36ce76008fc3350045d5f6cff2825c0505ca09ecfd1a139c35f0b",
     "src/graphics/util/draw_extent_estimator.cpp": "2a3047c17a116896d6074fc7aad475dc79e25b089c6067dc9c27c0957dcd233a",
     "src/graphics/vulkan/command_processor.cpp": "fdbc0459f34cfd343bc1f8097ed5ac1298d6ab5741c60ec885e7c438bf7ea7eb",
-    "src/graphics/vulkan/render_target_cache.cpp": "66d881a39f57a336c38511c3819625f549f2b195638dc50a5c60920db97d8231"
+    "src/graphics/vulkan/render_target_cache.cpp": "334d58ab5160d0908c3a4023e6570fe10cd59218040d23105514564d7ed1b461"
   },
   "test": "Predicated tiling EDRAM window offsets, guest alias bases, ownership/wrapping/64bpp periods, viewport/scissor/extent and PsParamGen. Canary e1f4a0d00968ae9ea1d667f28912cc051a5f637f. PsParamGen SPIR-V regression fails before the port; CPU/GPU and measurement scope recorded in the focused report."
+},
+{
+  "file": "patches/rexglue-sdk/0199-canary-gamma-resolve-pwl.patch",
+  "sha256": "6c0091a1572e61617a3755c383f4347bb5b8dfa50905ec662368dea81b28b1fb",
+  "base_files": {
+    "include/rex/graphics/d3d12/render_target_cache.h": "d3257b34470b04799c1230524b2dd727ff8443bf7a61078893767e8e819acc6c",
+    "include/rex/graphics/util/draw.h": "a2ef1e13fd96e5e8a25280b816d0374c99c8c039841234c068e7818bdbd622cc",
+    "include/rex/graphics/vulkan/render_target_cache.h": "78f49f620250456524921d7cd00cc76fee305cbaedff0e09ee548e928d58659e",
+    "src/graphics/d3d12/render_target_cache.cpp": "460bee1f4c2cad584e801dd723524f24bd8c793db00ee7c399ba9d6ff4cafab5",
+    "src/graphics/util/draw.cpp": "399ba66a4e8a0c80b2998ef9e7d3ff328bb6462ad0b05466c7250fac6187a359",
+    "src/graphics/vulkan/render_target_cache.cpp": "66d881a39f57a336c38511c3819625f549f2b195638dc50a5c60920db97d8231"
+  },
+  "files": {
+    "include/rex/graphics/d3d12/render_target_cache.h": "2a1773ead3d8fe14da78045742d4c27858b72bac43cf272ed4a12dd032c2e0e0",
+    "include/rex/graphics/util/draw.h": "415174fe3ae2bb5d1acd8a438cbd190a38ff55a823ad3227af06b2a6e4e82c0d",
+    "include/rex/graphics/vulkan/render_target_cache.h": "e22a4a190edee39d90a6b2a42f4b27b60fd56dac8b4b8ff67c5240a4e3181517",
+    "src/graphics/d3d12/render_target_cache.cpp": "6eed2bdee645bbd65125b89cd0abc99ad4d5daaa2b6f0b44764ceae6d2d17184",
+    "src/graphics/shaders/bytecode/d3d12_5_1/resolve_gamma_128bpp_cs.h": "f2d394d35cb557da0bf50be7286a99aebc7355115dd13d1b5dd66d08916b9594",
+    "src/graphics/shaders/bytecode/d3d12_5_1/resolve_gamma_128bpp_scaled_cs.h": "54c8cdc11f06d785e487ab3519e382c3b49edb69f25d19961020b18438edd436",
+    "src/graphics/shaders/bytecode/d3d12_5_1/resolve_gamma_16bpp_cs.h": "cf466042e27198101deee6f1315209acd9431d3c05b47caa80aae2b9f6a13c5f",
+    "src/graphics/shaders/bytecode/d3d12_5_1/resolve_gamma_16bpp_scaled_cs.h": "702dc6f4c4ab2bacba08e718cab703a91ae9e7b05631ef76496f13f290e5f82c",
+    "src/graphics/shaders/bytecode/d3d12_5_1/resolve_gamma_32bpp_cs.h": "700d9f786662e8b65195b95a49c9ffa93440a9c4ed9f62c33d0ee08c24b4015a",
+    "src/graphics/shaders/bytecode/d3d12_5_1/resolve_gamma_32bpp_scaled_cs.h": "59e2fc06dac0002ac8ba8fefc26f090b266ae076ebbac4f8fb002ac9eff63c08",
+    "src/graphics/shaders/bytecode/d3d12_5_1/resolve_gamma_64bpp_cs.h": "0e7d5f1735d9f5ed06cab25816c6c0313d4ae39afe61f91929c0e2a6c33b4f37",
+    "src/graphics/shaders/bytecode/d3d12_5_1/resolve_gamma_64bpp_scaled_cs.h": "49885f0a708da8c9f77a5439f1595759e7d23505e4e48d7d466f753f8a6efcf8",
+    "src/graphics/shaders/bytecode/d3d12_5_1/resolve_gamma_8bpp_cs.h": "4545aa8b1126d100e8cd53720ea9fb3899654afdd9ca523a0bdcc8931a33c031",
+    "src/graphics/shaders/bytecode/d3d12_5_1/resolve_gamma_8bpp_scaled_cs.h": "1a836901c53232b26e994c90f19f01330a2e5917e8dfcddde562a443c72d28a4",
+    "src/graphics/shaders/resolve_sources/edram.xesli": "ccb68221904efadc3f443a6709b8a8b95f281a8c505c0104935ee84055204778",
+    "src/graphics/shaders/resolve_sources/endian.xesli": "bb149aad12d3a24ecdcc9d1a8edbb9c476e309ec344954ff0e38ae5e6a7b0f2f",
+    "src/graphics/shaders/resolve_sources/generated.json": "8686a9f297cb5f694fb88cace1c31b36366491f228509f0e45a1f9a186736584",
+    "src/graphics/shaders/resolve_sources/pixel_formats.xesli": "1860b7a94f446f40c728fd3402685895035574543bfeca87d4a8f882761875ff",
+    "src/graphics/shaders/resolve_sources/README.md": "9e4e297082b24feed6c30dba667f2de40b6fa71a39c6e153fb2c8855526adc95",
+    "src/graphics/shaders/resolve_sources/resolve.xesli": "059e127cee69b88c5809cf42d4db143019e6c8005e05cad60e17cc5dcac0cece",
+    "src/graphics/shaders/resolve_sources/resolve_full_128bpp.xesli": "6abbe2d84fd09206e926c0aed7ba3247212511d27480c116d493134b70ea28d7",
+    "src/graphics/shaders/resolve_sources/resolve_full_16bpp.xesli": "b543aba81cd36060cc965f508553178540dddf997d3a459e27e22362d8d18c27",
+    "src/graphics/shaders/resolve_sources/resolve_full_32bpp.xesli": "98c47d9d4cfbea2411b9821b1efa6fe83535332de9bc02fe0bd426b8c38cee92",
+    "src/graphics/shaders/resolve_sources/resolve_full_64bpp.xesli": "5e60e749b958dbe31b93691ff5bf64360606e14e791e849211b7ce525d593929",
+    "src/graphics/shaders/resolve_sources/resolve_full_8bpp.xesli": "5209a2effd8a9b82c272b4267a05739c3003a12f2764363e87b7ea2b5df0168f",
+    "src/graphics/shaders/resolve_sources/resolve_gamma_128bpp.cs.xesl": "b4b8f3705e06a1d6cc715db831f4d86bc7e32937202355051f671a5b0e6b6c84",
+    "src/graphics/shaders/resolve_sources/resolve_gamma_128bpp_scaled.cs.xesl": "22b5884f3a28bc62261f2d73b0e8d6632d21e8cee1a21517ddb459b1a2664aca",
+    "src/graphics/shaders/resolve_sources/resolve_gamma_16bpp.cs.xesl": "d41c96b94fc593aae8ac0000fed868610c2954bd2c844ab5b2656dfc189cbb70",
+    "src/graphics/shaders/resolve_sources/resolve_gamma_16bpp_scaled.cs.xesl": "cbd2090b68f6760a02305f10ffe1cb36cc64cbb7a0c8310975f55a374660aed7",
+    "src/graphics/shaders/resolve_sources/resolve_gamma_32bpp.cs.xesl": "19246f74831ed204d0969f75e112556ff1682440679eca17dadd88dcca4e3d3e",
+    "src/graphics/shaders/resolve_sources/resolve_gamma_32bpp_scaled.cs.xesl": "3404e0d812eaa14946dd390cb2405e253ee9b86d92d6c79fb7bf4e82b6a1ba49",
+    "src/graphics/shaders/resolve_sources/resolve_gamma_64bpp.cs.xesl": "b73b2880f4cfa959e0630aae239fa5e05aac2f7407c2728ba6a6d213b37a7307",
+    "src/graphics/shaders/resolve_sources/resolve_gamma_64bpp_scaled.cs.xesl": "056e9c5f0bd5ff76773dedebc8ce4ecc85ccc4ff4aa92ca4c7308aeeb1a1ff8b",
+    "src/graphics/shaders/resolve_sources/resolve_gamma_8bpp.cs.xesl": "2fa2b0fbdf5ae4700ec616a60284ee3d30e4127f78b1fdbd2dbf6ddcc03d5254",
+    "src/graphics/shaders/resolve_sources/resolve_gamma_8bpp_scaled.cs.xesl": "a1bdd159c569edd9d5718b3aaed34c97fdf5e4b9b533a8863fa080bd70166e25",
+    "src/graphics/shaders/resolve_sources/texture_address.xesli": "e8b134657bcb50a95cba062b8eae57337a841337522789149917239e05aff572",
+    "src/graphics/shaders/resolve_sources/xesl.xesli": "f7847e2cf76076e5f71ed5777aa9f33f1fe5b040448e19abe314619423b9c935",
+    "src/graphics/shaders/vulkan_spirv/resolve_gamma_128bpp_cs.h": "1aab56a0bc024d9fe30f6e5c48302d46c7ffe12ae15df56b214265428e6151df",
+    "src/graphics/shaders/vulkan_spirv/resolve_gamma_128bpp_scaled_cs.h": "f15ea959e1fb75f525d7a2b2a758df01968e174a23f0359953b5e433359c58f2",
+    "src/graphics/shaders/vulkan_spirv/resolve_gamma_16bpp_cs.h": "9aaf8a6c9bef93f7ad653b8d8ba9a3c3b0d68040b48422ac75196b43b5402385",
+    "src/graphics/shaders/vulkan_spirv/resolve_gamma_16bpp_scaled_cs.h": "84b656a378f534e11c40f3ed8c2695af32754bee9cc46d792e0391ca975a348c",
+    "src/graphics/shaders/vulkan_spirv/resolve_gamma_32bpp_cs.h": "ee1bf22a4cffdaffd5c57ebf4dba69ca740a6dc845f0071761c544fc87da1df9",
+    "src/graphics/shaders/vulkan_spirv/resolve_gamma_32bpp_scaled_cs.h": "79b9a738f584400cb26f5ee63b795dc70cbe0a80062a5b8c7a49df43916bbfa0",
+    "src/graphics/shaders/vulkan_spirv/resolve_gamma_64bpp_cs.h": "3e70c5b1569ef3609006035c6040ad6e4680d7a1ea41f02938972ca6e7a328b4",
+    "src/graphics/shaders/vulkan_spirv/resolve_gamma_64bpp_scaled_cs.h": "3b5530f49a02e3a784b03afefe3044d4aa3f306880aaccd440e409f42bb6b8b3",
+    "src/graphics/shaders/vulkan_spirv/resolve_gamma_8bpp_cs.h": "7130a6330e1d601cf8417e99e570062fd93abbf733af2f64c66c3d518b5f1180",
+    "src/graphics/shaders/vulkan_spirv/resolve_gamma_8bpp_scaled_cs.h": "12dfecc0c4c06b5c4c6d5adecc63390d1f939842c8848eb077643743e877462d",
+    "src/graphics/util/draw.cpp": "3f7dde8e3bd36ce76008fc3350045d5f6cff2825c0505ca09ecfd1a139c35f0b",
+    "src/graphics/vulkan/render_target_cache.cpp": "334d58ab5160d0908c3a4023e6570fe10cd59218040d23105514564d7ed1b461"
+  },
+  "test": "Gamma-only Xenos resolve pipelines: decode 10-bit PWL codes, average, requantize before exp_bias, preserve fixed alpha and original SDK EDRAM/scaled destination layouts. Twenty reproducibly generated DXBC/SPIR-V resources; non-gamma resources and shared push-constant ABI unchanged. Canary 534aeb64; focused independent CPU oracle and D3D12/Vulkan compute readback regression."
+},
+{
+  "file": "patches/rexglue-sdk/0200-canary-dxbc-resolve-sample-address-reuse.patch",
+  "sha256": "52738207961cf6fbeba2ba54ddefc2792c49986e3bea9ae548de54e7aca9458f",
+  "base_files": {
+    "src/graphics/shaders/bytecode/d3d12_5_1/resolve_gamma_128bpp_cs.h": "9803709c1faf8fb488815822b7309fe48b62d96749a37599fe4a8d15825856be",
+    "src/graphics/shaders/bytecode/d3d12_5_1/resolve_gamma_128bpp_scaled_cs.h": "ad9a7672a3f6d6feb2ab13971f176fd3567443781c537d240691c6cc06206997",
+    "src/graphics/shaders/bytecode/d3d12_5_1/resolve_gamma_16bpp_cs.h": "2436cef120f4c9b81a1ecc0bc4bab6612b9f00c681bb36dcfc24617791c6b4b7",
+    "src/graphics/shaders/bytecode/d3d12_5_1/resolve_gamma_16bpp_scaled_cs.h": "7754b921ba258f64e3e730caed7cf7a96db09dc658c118c38c36a6020c995680",
+    "src/graphics/shaders/bytecode/d3d12_5_1/resolve_gamma_32bpp_cs.h": "d6b435dbeb2495ca6a0a50f1cc326a008079471889a644bf4b0a3e1a4ad77b31",
+    "src/graphics/shaders/bytecode/d3d12_5_1/resolve_gamma_32bpp_scaled_cs.h": "28b0c6d8191574f771dccb26013dc091784a4648f3e4d6bf6d220f318c75b67c",
+    "src/graphics/shaders/bytecode/d3d12_5_1/resolve_gamma_64bpp_cs.h": "074e3c7457d2b54d95878e83313a3e8e6062d5f13b4cf1cce3d96863d3f991e9",
+    "src/graphics/shaders/bytecode/d3d12_5_1/resolve_gamma_64bpp_scaled_cs.h": "65206301933e0d31526476eeb4bf8f2570c83dc2748253bbc4dd8afa3fbaff7e",
+    "src/graphics/shaders/bytecode/d3d12_5_1/resolve_gamma_8bpp_cs.h": "19d7bc644e97916d84adad483af56cf0dee3ef8ed249695c81c46ef760a444a8",
+    "src/graphics/shaders/bytecode/d3d12_5_1/resolve_gamma_8bpp_scaled_cs.h": "d8fc7844f0e3f128355d51a7960e4001fa1ec6b13e7bb9cf137366a078d7e181",
+    "src/graphics/shaders/resolve_sources/generated.json": "727ac1c5ee23034aa0dbe383eb9e31591379e094ec833525228a5183bce347e5",
+    "src/graphics/shaders/resolve_sources/README.md": "1f07a962b512fbbde29421d9fe8b8e8f9770ccd21fc04bb024da27f700ebfc56",
+    "src/graphics/shaders/resolve_sources/resolve.xesli": "692d6e00a63d540cfdefaeee1c19eca554b2b1a4c91e030bdd22cb78ada54533"
+  },
+  "files": {
+    "src/graphics/shaders/bytecode/d3d12_5_1/resolve_gamma_128bpp_cs.h": "f2d394d35cb557da0bf50be7286a99aebc7355115dd13d1b5dd66d08916b9594",
+    "src/graphics/shaders/bytecode/d3d12_5_1/resolve_gamma_128bpp_scaled_cs.h": "54c8cdc11f06d785e487ab3519e382c3b49edb69f25d19961020b18438edd436",
+    "src/graphics/shaders/bytecode/d3d12_5_1/resolve_gamma_16bpp_cs.h": "cf466042e27198101deee6f1315209acd9431d3c05b47caa80aae2b9f6a13c5f",
+    "src/graphics/shaders/bytecode/d3d12_5_1/resolve_gamma_16bpp_scaled_cs.h": "702dc6f4c4ab2bacba08e718cab703a91ae9e7b05631ef76496f13f290e5f82c",
+    "src/graphics/shaders/bytecode/d3d12_5_1/resolve_gamma_32bpp_cs.h": "700d9f786662e8b65195b95a49c9ffa93440a9c4ed9f62c33d0ee08c24b4015a",
+    "src/graphics/shaders/bytecode/d3d12_5_1/resolve_gamma_32bpp_scaled_cs.h": "59e2fc06dac0002ac8ba8fefc26f090b266ae076ebbac4f8fb002ac9eff63c08",
+    "src/graphics/shaders/bytecode/d3d12_5_1/resolve_gamma_64bpp_cs.h": "0e7d5f1735d9f5ed06cab25816c6c0313d4ae39afe61f91929c0e2a6c33b4f37",
+    "src/graphics/shaders/bytecode/d3d12_5_1/resolve_gamma_64bpp_scaled_cs.h": "49885f0a708da8c9f77a5439f1595759e7d23505e4e48d7d466f753f8a6efcf8",
+    "src/graphics/shaders/bytecode/d3d12_5_1/resolve_gamma_8bpp_cs.h": "4545aa8b1126d100e8cd53720ea9fb3899654afdd9ca523a0bdcc8931a33c031",
+    "src/graphics/shaders/bytecode/d3d12_5_1/resolve_gamma_8bpp_scaled_cs.h": "1a836901c53232b26e994c90f19f01330a2e5917e8dfcddde562a443c72d28a4",
+    "src/graphics/shaders/resolve_sources/generated.json": "8686a9f297cb5f694fb88cace1c31b36366491f228509f0e45a1f9a186736584",
+    "src/graphics/shaders/resolve_sources/README.md": "9e4e297082b24feed6c30dba667f2de40b6fa71a39c6e153fb2c8855526adc95",
+    "src/graphics/shaders/resolve_sources/resolve.xesli": "059e127cee69b88c5809cf42d4db143019e6c8005e05cad60e17cc5dcac0cece"
+  },
+  "test": "DXBC-only Canary 3989ba3 sample-address reuse, adapted to the pinned SDK vertical/horizontal sample strides. RTX 4070, 5 paired trials of 30 warmup + 100 measured batches of 256 ordered 640x384 resolves: D3D12 MSAA4 P50 13968 to 13408 ns (-4.01%); P95/P99 15608 to 14984 ns. Same independent GPU oracle passes. Vulkan keeps byte-identical 0199 shaders because measured results were mixed."
 }
 ]
                     },

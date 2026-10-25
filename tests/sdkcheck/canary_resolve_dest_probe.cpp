@@ -18,7 +18,8 @@ constexpr uint32_t kVertices = 0x01000000;
 
 bool Resolve(rex::memory::Memory &memory, uint32_t dest_base, float x0,
              xenos::ColorFormat format, draw_util::ResolveInfo &info, bool array = false,
-             uint32_t dest_height = 256, uint32_t surface_slice = 0) {
+             uint32_t dest_height = 256, uint32_t surface_slice = 0,
+             bool gamma_source = false) {
   RegisterFile regs;
   std::memset(regs.values, 0, sizeof(regs.values));
   xenos::xe_gpu_vertex_fetch_t fetch{};
@@ -32,6 +33,10 @@ bool Resolve(rex::memory::Memory &memory, uint32_t dest_base, float x0,
   reg::RB_SURFACE_INFO surface{};
   surface.surface_pitch = 256;
   Set(regs, surface);
+  reg::RB_COLOR_INFO color{};
+  color.color_format = gamma_source ? xenos::ColorRenderTargetFormat::k_8_8_8_8_GAMMA
+                                   : xenos::ColorRenderTargetFormat::k_8_8_8_8;
+  Set(regs, color);
   reg::PA_SC_WINDOW_SCISSOR_TL tl{};
   tl.window_offset_disable = 1;
   Set(regs, tl);
@@ -130,6 +135,16 @@ int main() {
     check(plain.copy_dest_coordinate_info.height_aligned_div_32 == 6,
           "2D destinations keep copy_dest_height");
   }
-  std::cout << (checks - failures) << '/' << checks << " checks passed\n";
+  {
+    draw_util::ResolveInfo info;
+    check(Resolve(memory, base, 0, xenos::ColorFormat::k_8_8_8_8, info, false, 256, 0, true),
+          "real gamma resolve registers are accepted");
+    draw_util::ResolveCopyShaderConstants constants{}; uint32_t gx=0,gy=0;
+    check(info.color_edram_info.format == unsigned(xenos::ColorRenderTargetFormat::k_8_8_8_8_GAMMA) &&
+              info.GetCopyShader(1,1,constants,gx,gy,true)==draw_util::ResolveCopyShaderIndex::kFull32bpp &&
+              constants.dest_relative.edram_info.format == info.color_edram_info.format,
+          "GetResolveInfo carries PWL decoding through real shader selection/constants");
+  }
+  std::cout << (checks - failures) << '/' << checks << " checks passed" << std::endl;
   return failures ? 1 : 0;
 }

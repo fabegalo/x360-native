@@ -193,6 +193,49 @@ x360n_stage_runtime_dlls(x360n_edram_alias_checks)
 add_test(NAME sdkcheck.canary-edram-alias COMMAND x360n_edram_alias_checks)
 set_tests_properties(sdkcheck.canary-edram-alias PROPERTIES LABELS project TIMEOUT 30)
 
+# 0199: compare the actual shader's scalar functions with an independent oracle.
+set(_gamma_math ${CMAKE_CURRENT_BINARY_DIR}/gamma_resolve_math.h)
+if(PYTHON_EXECUTABLE)
+  set(_gamma_probe_python ${PYTHON_EXECUTABLE})
+else()
+  find_package(Python3 REQUIRED COMPONENTS Interpreter)
+  set(_gamma_probe_python ${Python3_EXECUTABLE})
+endif()
+add_custom_command(OUTPUT ${_gamma_math}
+    COMMAND ${_gamma_probe_python} ${CMAKE_CURRENT_SOURCE_DIR}/../generate_gamma_math_probe.py
+      ${X360_REXGLUE_DIR}/src/graphics/shaders/resolve_sources/resolve.xesli ${_gamma_math}
+    DEPENDS ../generate_gamma_math_probe.py
+      ${X360_REXGLUE_DIR}/src/graphics/shaders/resolve_sources/resolve.xesli
+    VERBATIM)
+add_executable(x360n_gamma_resolve_checks ../gamma_resolve_cpu.cpp ${_gamma_math}
+    ${X360_REXGLUE_DIR}/src/graphics/util/draw.cpp
+    ${X360_REXGLUE_DIR}/src/graphics/register_file.cpp
+    ${X360_REXGLUE_DIR}/src/graphics/registers.cpp
+    ${X360_REXGLUE_DIR}/src/graphics/flags.cpp)
+target_include_directories(x360n_gamma_resolve_checks PRIVATE
+    ${CMAKE_CURRENT_BINARY_DIR} ${X360_REXGLUE_DIR}/thirdparty/renderdoc)
+target_link_libraries(x360n_gamma_resolve_checks PRIVATE rexruntime)
+x360n_stage_runtime_dlls(x360n_gamma_resolve_checks)
+add_test(NAME sdkcheck.canary-gamma-resolve COMMAND x360n_gamma_resolve_checks)
+set_tests_properties(sdkcheck.canary-gamma-resolve PROPERTIES LABELS project TIMEOUT 30)
+if(REXGLUE_USE_VULKAN AND WIN32)
+  add_executable(x360n_gamma_resolve_gpu_checks ../gamma_resolve_gpu.cpp)
+  target_include_directories(x360n_gamma_resolve_gpu_checks PRIVATE
+      ${X360_REXGLUE_DIR} ${X360_REXGLUE_DIR}/thirdparty/renderdoc)
+  target_link_libraries(x360n_gamma_resolve_gpu_checks PRIVATE rexruntime Vulkan::Headers d3d12 dxgi)
+  x360n_stage_runtime_dlls(x360n_gamma_resolve_gpu_checks)
+  # Opt-in headless GPU test; each fence is bounded to five seconds.
+endif()
+# Maintenance tool only; normal Release builds consume the shipped resources.
+if(REXGLUE_USE_VULKAN)
+  add_executable(x360n_resolve_shader_compiler EXCLUDE_FROM_ALL
+      ../../../scripts/shaders/compile_resolve_spirv.cpp
+      ${X360_REXGLUE_DIR}/thirdparty/glslang/StandAlone/ResourceLimits.cpp)
+  target_include_directories(x360n_resolve_shader_compiler PRIVATE
+      ${X360_REXGLUE_DIR}/thirdparty/glslang)
+  target_link_libraries(x360n_resolve_shader_compiler PRIVATE
+      glslang::SPIRV glslang MachineIndependent GenericCodeGen OSDependent OGLCompiler)
+endif()
 # 0198: execute common renderer ownership and coordinate transforms.
 add_executable(x360n_edram_window_checks edram_window_offsets.cpp
     ${_alias_gpu}/util/draw.cpp ${_alias_gpu}/register_file.cpp ${_alias_gpu}/registers.cpp
