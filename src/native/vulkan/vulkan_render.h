@@ -35,10 +35,8 @@ class VulkanRender {
   SampleCounts ReadSampleCounts(bool counting_after);
   void SetSampleCounts(const SampleCounts&, bool visibility_only);
   void SetPipelineDirectory(const std::filesystem::path&);
-  void CompleteGuestWrites(GuestSync, uint32_t) { if (!writeback_.empty()) Flush(true); }
-  void SyncGuestRead(uint32_t address, uint32_t length, uint32_t) {
-    if (writeback_.Overlaps(address, length)) Flush(true);
-  }
+  void CompleteGuestWrites(GuestSync, uint32_t);
+  void SyncGuestRead(uint32_t address, uint32_t length, uint32_t);
   void Flush(bool wait);
   void EndFrame() { if (mirror_) mirror_->InvalidateCpuPages(); }
  private:
@@ -47,6 +45,10 @@ class VulkanRender {
   void SavePipelineCache();
   void Begin();
   void EndRendering();
+  void PublishCompleted();
+  bool HasGuestWrites() const;
+  bool GuestWritesOverlap(uint32_t address, uint32_t length) const;
+  void ReserveReadback(uint64_t bytes);
   struct UploadSlice { VkBuffer buffer; VkDeviceSize offset; std::byte* mapped; };
   UploadSlice Upload(const void*, VkDeviceSize size, VkDeviceSize alignment = 16);
   VkDescriptorSet AllocateDescriptors(VkDescriptorSetLayout);
@@ -80,6 +82,8 @@ class VulkanRender {
   VkCommandBuffer commands_ = VK_NULL_HANDLE;
   bool rendering_ = false;
   struct UploadPage { std::unique_ptr<VulkanBuffer> buffer; VkDeviceSize used = 0; VkDescriptorSet load_set = VK_NULL_HANDLE; };
+  struct ScaledReadback { ScaledResolveCache::Ticket ticket; std::shared_ptr<VulkanBuffer> buffer;
+                          unsigned pixel_log2; uint64_t offset; };
   struct Arena {
     VkDescriptorPool descriptors = VK_NULL_HANDLE;
     uint32_t descriptor_count = 0;
@@ -90,6 +94,12 @@ class VulkanRender {
     // valid until this slot's fence, like the descriptor pool they come from.
     std::vector<UploadPage> load_scratch;
     VkDescriptorSet guest_load_set = VK_NULL_HANDLE;
+    // Staging, offsets, CPU epochs and scaled tickets belong to this serial.
+    // Retire publication before resetting descriptors or reusing these bytes.
+    uint64_t serial = 0, readback_used = 0;
+    std::unique_ptr<VulkanBuffer> readback;
+    GuestWriteback writeback;
+    std::vector<ScaledReadback> scaled_readbacks;
   };
   // Records the shared SDK load shader into scratch, then copies every level
   // and slice into image (TRANSFER_DST layout), as Native D3D12 does.
@@ -98,21 +108,21 @@ class VulkanRender {
   VkPipelineLayout load_layout_ = VK_NULL_HANDLE;
   std::array<VkPipeline, 7> load_pipelines_{};
   std::array<Arena, VulkanSubmissionRing::kSlots> arenas_;
-  std::unique_ptr<VulkanBuffer> guest_buffer_, edram_buffer_, readback_;
+  std::unique_ptr<VulkanBuffer> guest_buffer_, edram_buffer_;
+  VulkanBuffer* readback_ = nullptr; // Borrowed from the current arena.
   BufferAccess guest_access_, edram_access_;
   std::unique_ptr<GuestMemoryMirror> mirror_;
   ScaledResolveCache scaled_{scale_x_, scale_y_};
   uint32_t textures_resolution_scaled_ = 0;
   rex::memory::Memory* memory_ = nullptr;
   GuestWriteback writeback_;
+  size_t pending_readback_batches_ = 0;
   uint64_t readback_used_ = 0;
   VkDescriptorSetLayout storage_layout_ = VK_NULL_HANDLE;
   VkPipelineLayout copy_layout_ = VK_NULL_HANDLE, clear_layout_ = VK_NULL_HANDLE;
   VkPipelineCache pipeline_cache_ = VK_NULL_HANDLE;
   std::filesystem::path pipeline_file_;
   std::array<VkPipeline, size_t(rex::graphics::draw_util::ResolveCopyShaderIndex::kCount)> copy_pipelines_{};
-  struct ScaledReadback { ScaledResolveCache::Ticket ticket; std::shared_ptr<VulkanBuffer> buffer;
-                          unsigned pixel_log2; uint64_t offset; };
   std::vector<ScaledReadback> scaled_readbacks_;
   VkPipelineLayout downscale_layout_ = VK_NULL_HANDLE;
   VkPipeline downscale_pipeline_ = VK_NULL_HANDLE;

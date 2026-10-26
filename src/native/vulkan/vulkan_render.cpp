@@ -22,8 +22,6 @@ VulkanRender::VulkanRender(rex::ui::vulkan::VulkanProvider& provider)
     edram_buffer_ = std::make_unique<VulkanBuffer>(device_, edram_size_ + sizeof(SampleCounts),
         VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_TEXEL_BUFFER_BIT |
         VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, VulkanBuffer::Access::kDevice);
-    readback_ = std::make_unique<VulkanBuffer>(device_, 16ull << 20, VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-                                             VulkanBuffer::Access::kReadback);
     VkPipelineCacheCreateInfo cache{VK_STRUCTURE_TYPE_PIPELINE_CACHE_CREATE_INFO};
     CheckVulkan(LoadNativeVulkanFunction<PFN_vkCreatePipelineCache>(device_, "vkCreatePipelineCache")(
         vk, &cache, nullptr, &pipeline_cache_), "create Native pipeline cache");
@@ -96,19 +94,26 @@ void VulkanRender::Destroy() {
     arena.descriptors = VK_NULL_HANDLE;
     arena.uploads.clear();
     arena.load_scratch.clear();
+    arena.readback.reset();
+    arena.scaled_readbacks.clear();
   }
   copy_pipelines_.fill(VK_NULL_HANDLE);
   clear_pipelines_.fill(VK_NULL_HANDLE);
   copy_layout_ = clear_layout_ = VK_NULL_HANDLE;
   storage_layout_ = VK_NULL_HANDLE;
-  readback_.reset();
+  readback_ = nullptr;
   edram_buffer_.reset();
   guest_buffer_.reset();
 }
 void VulkanRender::Begin() {
   if (commands_) return;
   commands_ = submissions_.Begin();
+  PublishCompleted();
   auto& arena = arenas_[submissions_.current_slot()];
+  if (arena.serial) throw std::logic_error("Native Vulkan: reusing unpublished readback slot");
+  if (!arena.readback) arena.readback = std::make_unique<VulkanBuffer>(device_, 16ull << 20,
+      VK_BUFFER_USAGE_TRANSFER_DST_BIT, VulkanBuffer::Access::kReadback);
+  readback_ = arena.readback.get();
   CheckVulkan(device_.functions().vkResetDescriptorPool(device_.device(), arena.descriptors, 0),
               "reset render descriptor arena");
   arena.descriptor_count = 0;
@@ -127,25 +132,85 @@ void VulkanRender::EndRendering() {
 void VulkanRender::Flush(bool wait) {
   if (commands_) {
     EndRendering();
-    submissions_.Submit();
+    auto& arena = arenas_[submissions_.current_slot()];
+    if (arena.serial) throw std::logic_error("Native Vulkan: overwriting pending publication");
+    const auto serial = submissions_.Submit();
     commands_ = VK_NULL_HANDLE;
+    if (!writeback_.empty() || !scaled_readbacks_.empty()) {
+      arena.serial = serial;
+      std::swap(writeback_, arena.writeback);
+      scaled_readbacks_.swap(arena.scaled_readbacks);
+      arena.readback_used = std::exchange(readback_used_, 0);
+      ++pending_readback_batches_;
+    }
   }
-  if (wait || !writeback_.empty() || !scaled_readbacks_.empty()) submissions_.Drain();
-  if (!writeback_.empty()) {
-    readback_->Invalidate(0, readback_used_);
-    writeback_.Complete([&](const GuestWriteback::Write& write) {
-      mirror_->CopyReadbackToGuest(write.address,
-          reinterpret_cast<const uint8_t*>(readback_->mapped() + write.offset), write.length, write.cpu_generations);
-    });
-    readback_used_ = 0;
+  if (wait) submissions_.Drain();
+  else if (pending_readback_batches_) submissions_.Poll();
+  PublishCompleted();
+}
+void VulkanRender::PublishCompleted() {
+  while (pending_readback_batches_) {
+    Arena* arena = nullptr;
+    for (auto& candidate : arenas_)
+      if (candidate.serial && (!arena || candidate.serial < arena->serial)) arena = &candidate;
+    if (!arena || arena->serial > submissions_.completed()) return;
+    if (!arena->writeback.empty()) {
+      auto& perf = NativeVulkanPerformance();
+      VulkanPerformanceTimer timer(perf.readback_ns);
+      if (perf.enabled) { ++perf.readbacks; perf.readback_bytes += arena->readback_used; }
+      arena->readback->Invalidate(0, arena->readback_used);
+      arena->writeback.Complete([&](const GuestWriteback::Write& write) {
+        mirror_->CopyReadbackToGuest(write.address,
+            reinterpret_cast<const uint8_t*>(arena->readback->mapped() + write.offset), write.length, write.cpu_generations);
+      });
+    }
+    for (const auto& scaled : arena->scaled_readbacks) {
+      const size_t bytes=size_t(scaled.ticket.length)*scale_x_*scale_y_;
+      scaled.buffer->Invalidate(scaled.offset, bytes);
+      scaled_.Complete(scaled.ticket, {reinterpret_cast<const uint8_t*>(scaled.buffer->mapped()+scaled.offset), bytes},
+                       scaled.pixel_log2, *memory_);
+    }
+    arena->scaled_readbacks.clear();
+    arena->readback_used = 0;
+    arena->serial = 0;
+    --pending_readback_batches_;
   }
-  for (const auto& scaled : scaled_readbacks_) {
-    const size_t bytes=size_t(scaled.ticket.length)*scale_x_*scale_y_;
-    scaled.buffer->Invalidate(scaled.offset, bytes);
-    scaled_.Complete(scaled.ticket, {reinterpret_cast<const uint8_t*>(scaled.buffer->mapped()+scaled.offset), bytes},
-                     scaled.pixel_log2, *memory_);
+}
+bool VulkanRender::HasGuestWrites() const {
+  return pending_readback_batches_ || !writeback_.empty() || !scaled_readbacks_.empty();
+}
+bool VulkanRender::GuestWritesOverlap(uint32_t address, uint32_t length) const {
+  if (!length) return false;
+  if (writeback_.Overlaps(address, length)) return true;
+  for (const auto& arena : arenas_) if (arena.writeback.Overlaps(address, length)) return true;
+  return false;
+}
+void VulkanRender::CompleteGuestWrites(GuestSync, uint32_t) {
+  auto& perf = NativeVulkanPerformance();
+  VulkanPerformanceTimer timer(perf.guest_sync_ns);
+  if (perf.enabled) ++perf.guest_syncs;
+  if (HasGuestWrites()) Flush(true);
+}
+void VulkanRender::SyncGuestRead(uint32_t address, uint32_t length, uint32_t) {
+  auto& perf = NativeVulkanPerformance();
+  VulkanPerformanceTimer timer(perf.guest_sync_ns);
+  if (perf.enabled) ++perf.guest_syncs;
+  if (!length) return;
+  if (writeback_.Overlaps(address, length)) Flush(false);
+  uint64_t serial = 0;
+  for (const auto& arena : arenas_)
+    if (arena.writeback.Overlaps(address, length)) serial = std::max(serial, arena.serial);
+  if (serial) { submissions_.Wait(serial); PublishCompleted(); }
+}
+void VulkanRender::ReserveReadback(uint64_t bytes) {
+  Begin();
+  if (bytes > readback_->size() - readback_used_) { Flush(false); Begin(); }
+  if (bytes > readback_->size()) {
+    auto& arena = arenas_[submissions_.current_slot()];
+    arena.readback = std::make_unique<VulkanBuffer>(device_, bytes, VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+                                                   VulkanBuffer::Access::kReadback);
+    readback_ = arena.readback.get();
   }
-  scaled_readbacks_.clear();
 }
 VulkanRender::UploadSlice VulkanRender::Upload(const void* data, VkDeviceSize size, VkDeviceSize alignment) {
   if (!data || !size || !alignment) throw std::invalid_argument("Native Vulkan: invalid upload");
@@ -257,7 +322,7 @@ SampleCounts VulkanRender::ReadSampleCounts(bool counting_after) {
   EndRendering();
   // Resolve readbacks occupy the same staging buffer. Publish them before
   // reusing its first 32 bytes for this independently observable snapshot.
-  if (!writeback_.empty()) Flush(true);
+  if (HasGuestWrites()) Flush(true);
   Begin();
   UseBuffer(edram_buffer_->handle(), edram_access_, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_TRANSFER_READ_BIT);
   const VkBufferCopy copy{edram_size_, 0, sizeof(SampleCounts)};

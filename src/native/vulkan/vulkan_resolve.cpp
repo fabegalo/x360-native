@@ -59,10 +59,7 @@ void VulkanRender::Resolve(const RegisterFile& regs, rex::memory::Memory& memory
   Begin();
   if (arenas_[submissions_.current_slot()].descriptor_count > 4000 ||
       readback_used_ + length > readback_->size()) Flush(false);
-  if (length > readback_->size())
-    readback_ = std::make_unique<VulkanBuffer>(device_, length, VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-                                              VulkanBuffer::Access::kReadback);
-  Begin();
+  ReserveReadback(length);
   EndRendering();
   const auto& fn = device_.functions();
   const auto edram_set = AllocateDescriptors(storage_layout_);

@@ -336,10 +336,7 @@ void VulkanRender::Draw(const RegisterFile& regs, rex::memory::Memory& memory, S
       device_.functions().vkDestroySampler(device_.device(), sampler, nullptr);
     samplers_.clear();
   }
-  if (export_bytes > readback_->size())
-    readback_ = std::make_unique<VulkanBuffer>(device_, export_bytes, VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-                                              VulkanBuffer::Access::kReadback);
-  Begin();
+  ReserveReadback(export_bytes);
   auto& mirror = Mirror(memory);
   for (const auto& range : exports) mirror.RequestRange(range.address, range.length);
   for (const auto& binding : vs.vertex_bindings()) {

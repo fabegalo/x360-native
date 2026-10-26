@@ -12,8 +12,13 @@
 #include <mutex>
 #include <stdexcept>
 #include <string>
+REXCVAR_DEFINE_BOOL(native_vulkan_perf, false, "GPU/Native", "Measure Native Vulkan submission, fence, buffer and publication costs");
 
 namespace x360n::native {
+VulkanPerformance& NativeVulkanPerformance() {
+  thread_local VulkanPerformance counters{REXCVAR_GET(native_vulkan_perf)};
+  return counters;
+}
 void CheckVulkan(VkResult result, const char* operation) {
   if (result != VK_SUCCESS)
     throw std::runtime_error(std::string("Native Vulkan: ") + operation +
@@ -57,6 +62,14 @@ VulkanBuffer::VulkanBuffer(const rex::ui::vulkan::VulkanDevice& device,
       CheckVulkan(fn.vkMapMemory(vk, memory_, 0, VK_WHOLE_SIZE, 0, &mapping), "map buffer memory");
       mapped_ = static_cast<std::byte*>(mapping);
     }
+    auto& perf = NativeVulkanPerformance();
+    if (perf.enabled) {
+      measured_ = true;
+      ++perf.buffers;
+      perf.allocated_bytes += allocation_size_;
+      perf.live_bytes += allocation_size_;
+      perf.peak_bytes = std::max(perf.peak_bytes, perf.live_bytes);
+    }
   } catch (...) {
     fn.vkDestroyBuffer(vk, buffer_, nullptr);
     if (memory_) fn.vkFreeMemory(vk, memory_, nullptr);
@@ -65,6 +78,7 @@ VulkanBuffer::VulkanBuffer(const rex::ui::vulkan::VulkanDevice& device,
 }
 
 VulkanBuffer::~VulkanBuffer() {
+  if (measured_) NativeVulkanPerformance().live_bytes -= allocation_size_;
   const auto& fn = device_.functions();
   const auto vk = device_.device();
   if (mapped_) fn.vkUnmapMemory(vk, memory_);
@@ -100,6 +114,24 @@ VulkanSubmissionRing::VulkanSubmissionRing(const rex::ui::vulkan::VulkanDevice& 
   const auto& fn = device_.functions();
   const auto vk = device_.device();
   try {
+    if (NativeVulkanPerformance().enabled) {
+      VkPhysicalDeviceProperties properties;
+      device_.vulkan_instance()->functions().vkGetPhysicalDeviceProperties(device_.physical_device(), &properties);
+      timestamp_period_ = properties.limits.timestampPeriod;
+      uint32_t count = 0;
+      const auto get_families = device_.vulkan_instance()->functions().vkGetPhysicalDeviceQueueFamilyProperties;
+      get_families(device_.physical_device(), &count, nullptr);
+      std::vector<VkQueueFamilyProperties> families(count);
+      get_families(device_.physical_device(), &count, families.data());
+      timestamp_bits_ = families.at(device_.queue_family_graphics_compute()).timestampValidBits;
+      if (timestamp_bits_) {
+        VkQueryPoolCreateInfo query{VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO};
+        query.queryType = VK_QUERY_TYPE_TIMESTAMP;
+        query.queryCount = uint32_t(kSlots * 2);
+        CheckVulkan(LoadNativeVulkanFunction<PFN_vkCreateQueryPool>(device_, "vkCreateQueryPool")(
+            vk, &query, nullptr, &timestamps_), "create performance timestamps");
+      }
+    }
     for (auto& slot : slots_) {
       VkCommandPoolCreateInfo pool{VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO};
       pool.flags = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT;
@@ -124,6 +156,9 @@ VulkanSubmissionRing::~VulkanSubmissionRing() {
 }
 void VulkanSubmissionRing::Destroy() {
   const auto& fn = device_.functions();
+  if (timestamps_) LoadNativeVulkanFunction<PFN_vkDestroyQueryPool>(device_, "vkDestroyQueryPool")(
+      device_.device(), timestamps_, nullptr);
+  timestamps_ = VK_NULL_HANDLE;
   for (auto& slot : slots_) {
     slot.retained.clear();
     if (slot.pool) fn.vkDestroyCommandPool(device_.device(), slot.pool, nullptr);
@@ -142,6 +177,12 @@ VkCommandBuffer VulkanSubmissionRing::Begin() {
   VkCommandBufferBeginInfo begin{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
   begin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
   CheckVulkan(fn.vkBeginCommandBuffer(slot.commands, &begin), "begin command buffer");
+  if (timestamps_) {
+    const auto query = uint32_t(current_slot() * 2);
+    LoadNativeVulkanFunction<PFN_vkCmdResetQueryPool>(device_, "vkCmdResetQueryPool")(slot.commands, timestamps_, query, 2);
+    LoadNativeVulkanFunction<PFN_vkCmdWriteTimestamp>(device_, "vkCmdWriteTimestamp")(
+        slot.commands, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, timestamps_, query);
+  }
   recording_ = true;
   return slot.commands;
 }
@@ -150,11 +191,15 @@ void VulkanSubmissionRing::RetainResource(std::shared_ptr<void> resource) {
   slots_[current_slot()].retained.push_back(std::move(resource));
 }
 uint64_t VulkanSubmissionRing::Submit() {
+  auto& perf = NativeVulkanPerformance();
+  VulkanPerformanceTimer timer(perf.submit_ns);
   if (!recording_) throw std::logic_error("Native Vulkan: no command buffer to submit");
   if (serial_ == std::numeric_limits<uint64_t>::max())
     throw std::overflow_error("Native Vulkan: submission serial overflow");
   auto& slot = slots_[current_slot()];
   const auto& fn = device_.functions();
+  if (timestamps_) LoadNativeVulkanFunction<PFN_vkCmdWriteTimestamp>(device_, "vkCmdWriteTimestamp")(
+      slot.commands, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, timestamps_, uint32_t(current_slot() * 2 + 1));
   CheckVulkan(fn.vkEndCommandBuffer(slot.commands), "end command buffer");
   CheckVulkan(fn.vkResetFences(device_.device(), 1, &slot.fence), "reset submission fence");
   VkSubmitInfo submit{VK_STRUCTURE_TYPE_SUBMIT_INFO};
@@ -168,6 +213,8 @@ uint64_t VulkanSubmissionRing::Submit() {
   }
   recording_ = false;
   slot.serial = ++serial_;
+  slot.timed = timestamps_ != VK_NULL_HANDLE;
+  if (perf.enabled) ++perf.submissions;
   return serial_;
 }
 void VulkanSubmissionRing::Wait(uint64_t serial) {
@@ -176,12 +223,51 @@ void VulkanSubmissionRing::Wait(uint64_t serial) {
   auto& slot = slots_[size_t((serial - 1) % kSlots)];
   // A slot cannot be overwritten without waiting for its old serial.
   if (slot.serial != serial) throw std::logic_error("Native Vulkan: missing submission fence");
+  auto& perf = NativeVulkanPerformance();
+  VulkanPerformanceTimer timer(perf.wait_ns);
+  if (perf.enabled) {
+    ++perf.waits;
+    const auto status = device_.functions().vkGetFenceStatus(device_.device(), slot.fence);
+    if (status == VK_NOT_READY) ++perf.blocked_waits;
+    else CheckVulkan(status, "measure submission fence");
+  }
   CheckVulkan(device_.functions().vkWaitForFences(device_.device(), 1, &slot.fence,
                                                 VK_TRUE, 5'000'000'000ull),
               "GPU fence (5 second limit)");
   completed_ = serial;
+  MeasureCompleted();
 }
-void VulkanSubmissionRing::Drain() { Wait(serial_); }
+void VulkanSubmissionRing::MeasureCompleted() {
+  if (!timestamps_) return;
+  auto& perf = NativeVulkanPerformance();
+  for (size_t i = 0; i < kSlots; ++i) {
+    auto& slot = slots_[i];
+    if (!slot.timed || !slot.serial || slot.serial > completed_) continue;
+    uint64_t ticks[2];
+    CheckVulkan(LoadNativeVulkanFunction<PFN_vkGetQueryPoolResults>(device_, "vkGetQueryPoolResults")(
+        device_.device(), timestamps_, uint32_t(i * 2), 2, sizeof(ticks), ticks, sizeof(uint64_t), VK_QUERY_RESULT_64_BIT),
+        "read performance timestamps");
+    const uint64_t mask = timestamp_bits_ == 64 ? UINT64_MAX : (uint64_t(1) << timestamp_bits_) - 1;
+    perf.gpu_ns += uint64_t(double((ticks[1] - ticks[0]) & mask) * timestamp_period_);
+    ++perf.gpu_samples;
+    slot.timed = false;
+  }
+}
+void VulkanSubmissionRing::Poll() {
+  for (uint64_t serial = serial_; serial > completed_; --serial) {
+    const auto& slot = slots_[size_t((serial - 1) % kSlots)];
+    const auto status = device_.functions().vkGetFenceStatus(device_.device(), slot.fence);
+    if (status == VK_NOT_READY) continue;
+    CheckVulkan(status, "poll submission fence");
+    completed_ = serial;
+    MeasureCompleted();
+    break;
+  }
+}
+void VulkanSubmissionRing::Drain() {
+  if (NativeVulkanPerformance().enabled) ++NativeVulkanPerformance().drains;
+  Wait(serial_);
+}
 
 std::vector<uint32_t> CompileNativeGlsl(VkShaderStageFlagBits stage, std::string_view source) {
   EShLanguage language;
