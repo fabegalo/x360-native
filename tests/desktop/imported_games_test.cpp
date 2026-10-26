@@ -539,6 +539,32 @@ TEST_CASE("automatic AOT discovers verified XEX dependencies by content and pres
   CHECK_FALSE(IdentifyContent({},f.source/"zero_entry.dll").front().resource_only);
   fs::remove(f.source/"zero_entry.dll");
   Write(f.source/"ordinary.dll", "ordinary native/data asset");
+  SECTION("disc firmware is inventoried but never compiled as a game dependency") {
+    // System updates may contain executable applications and duplicate module
+    // basenames from several firmware versions. None belongs to the title.
+    Write(f.source/"$SyStEmUpDaTe/HostLoader.dll", module(0x84001000));
+    Write(f.source/"$SyStEmUpDaTe/nested/HostLoader.dll", "XEX2firmware");
+    Write(f.source/"$SyStEmUpDaTe/AvatarEditor.xex", Xex());
+    ImportGame(f.paths,{},f.source,f.source); const auto t=ReadCatalog(f.paths).front();
+    GenerateAotProject(f.paths,t);
+    const auto manifest=toml::parse_file(t.manifest.string());
+    REQUIRE(manifest["modules"].as_array());
+    CHECK(manifest["modules"].as_array()->size()==2);
+    const auto setup=toml::parse_file((t.manifest.parent_path()/"preparation.toml").string());
+    REQUIRE(setup["files"].as_array());
+    CHECK(setup["files"].as_array()->size()==3); // entrypoint and two title DLLs
+    std::ifstream inventory_input(t.manifest.parent_path()/"assets.sha256");
+    const std::string inventory{std::istreambuf_iterator<char>(inventory_input),{}};
+    for (const auto& input : t.inputs)
+      CHECK(inventory.find(input.sha256 + "\t" + input.destination.lexically_relative(t.game_root).generic_string() + "\n")!=std::string::npos);
+    Write(f.source/"assets/$SystemUpdate/broken.dll", "XEX2broken");
+    ImportGame(f.paths,{},f.source,f.source);
+    // Only the reserved directory at the disc root has firmware semantics.
+    const auto games=ReadCatalog(f.paths);
+    const auto nested=std::find_if(games.begin(),games.end(),[&](const auto& game) { return game.catalog_id!=t.catalog_id; });
+    REQUIRE(nested!=games.end());
+    CHECK_THROWS_WITH(GenerateAotProject(f.paths,*nested), "Unidentified AOT dependency: assets/$systemupdate/broken.dll");
+  }
   SECTION("zero entry point does not suppress an executable DLL") {
     Write(f.source/"zero_entry.dll",no_entry);
     ImportGame(f.paths,{},f.source,f.source); const auto t=ReadCatalog(f.paths).front();

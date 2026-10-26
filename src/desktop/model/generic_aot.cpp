@@ -74,6 +74,10 @@ void GenerateAotProject(const ProjectPaths& paths, const Target& t) {
     std::transform(guest.begin(), guest.end(), guest.begin(), [](unsigned char c) { return c >= 'A' && c <= 'Z' ? c + 'a' - 'A' : c; });
     if (!guest_paths.insert(guest).second) throw std::runtime_error("Duplicate case-insensitive AOT path: " + guest);
     if (guest == "default.xex") continue;
+    // A disc's reserved root contains console update payloads, not title
+    // dependencies. Keep every byte in the authenticated input inventory, but
+    // never register firmware modules in the game's native module registry.
+    if (guest.starts_with("$systemupdate/")) continue;
     std::ifstream in(input.destination, std::ios::binary);
     char magic[4]{}; in.read(magic, 4);
     if (std::string_view(magic, 3) != "XEX") continue;
