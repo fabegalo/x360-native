@@ -231,6 +231,24 @@ if(REXGLUE_USE_VULKAN AND WIN32)
   # Opt-in headless GPU test; each fence is bounded to five seconds.
 endif()
 # Maintenance tool only; normal Release builds consume the shipped resources.
+set(_scaled_address_math ${CMAKE_CURRENT_BINARY_DIR}/scaled_resolve_address_math.h)
+add_custom_command(OUTPUT ${_scaled_address_math}
+    COMMAND ${_gamma_probe_python} ${CMAKE_CURRENT_SOURCE_DIR}/../generate_scaled_resolve_address_probe.py
+        ${X360_REXGLUE_DIR}/src/graphics/shaders/resolve_sources/resolve_msaa_scaled_address.xesli
+        ${_scaled_address_math}
+    DEPENDS ../generate_scaled_resolve_address_probe.py
+        ${X360_REXGLUE_DIR}/src/graphics/shaders/resolve_sources/resolve_msaa_scaled_address.xesli
+    VERBATIM)
+add_executable(x360n_scaled_resolve_address_checks ../scaled_resolve_address_cpu.cpp ${_scaled_address_math})
+target_include_directories(x360n_scaled_resolve_address_checks PRIVATE ${CMAKE_CURRENT_BINARY_DIR})
+target_link_libraries(x360n_scaled_resolve_address_checks PRIVATE rexruntime)
+x360n_stage_runtime_dlls(x360n_scaled_resolve_address_checks)
+add_test(NAME sdkcheck.scaled-resolve-address COMMAND x360n_scaled_resolve_address_checks)
+set_tests_properties(sdkcheck.scaled-resolve-address PROPERTIES LABELS project TIMEOUT 30)
+add_test(NAME sdkcheck.scaled-resolve-resources
+    COMMAND ${_gamma_probe_python} ${CMAKE_CURRENT_SOURCE_DIR}/../msaa_scaled_resources.py)
+set_tests_properties(sdkcheck.scaled-resolve-resources PROPERTIES LABELS project TIMEOUT 30)
+
 add_executable(x360n_resolve_dxbc_checksum EXCLUDE_FROM_ALL
     ../../../scripts/shaders/resolve_dxbc_checksum.cpp
     ${X360_REXGLUE_DIR}/thirdparty/dxbc/DXBCChecksum.cpp)
