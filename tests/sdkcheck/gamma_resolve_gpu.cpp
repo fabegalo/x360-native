@@ -10,12 +10,14 @@
 #include <map>
 #include <rex/ui/vulkan/device.h>
 #include <rex/ui/vulkan/instance.h>
+#include <rex/graphics/pipeline/render_target/scaled_resolve.h>
 #include <stdexcept>
 #include <string_view>
 #include <type_traits>
 #include <windows.h>
 #include <wrl/client.h>
 namespace dxbc {
+#include "src/graphics/shaders/bytecode/d3d12_5_1/resolve_msaa_scaled_16bpp_cs.h"
 #include "src/graphics/shaders/bytecode/d3d12_5_1/resolve_full_128bpp_cs.h"
 #include "src/graphics/shaders/bytecode/d3d12_5_1/resolve_full_128bpp_scaled_cs.h"
 #include "src/graphics/shaders/bytecode/d3d12_5_1/resolve_full_16bpp_cs.h"
@@ -48,6 +50,7 @@ namespace dxbc {
 #include "src/graphics/shaders/bytecode/d3d12_5_1/resolve_fixed16_8bpp_scaled_cs.h"
 } // namespace dxbc
 namespace spirv {
+#include "src/graphics/shaders/vulkan_spirv/resolve_msaa_scaled_16bpp_cs.h"
 #include "src/graphics/shaders/vulkan_spirv/resolve_full_128bpp_cs.h"
 #include "src/graphics/shaders/vulkan_spirv/resolve_full_128bpp_scaled_cs.h"
 #include "src/graphics/shaders/vulkan_spirv/resolve_full_16bpp_cs.h"
@@ -119,6 +122,13 @@ std::vector<Case> TestCases() {
   return cases;
 }
 unsigned bench_msaa = 2;
+bool OptimizedCase(const Case& c) {
+  auto constants = c.Constants();
+  return UseScaledRgb565Resolve(c.scale > 1, false,
+      constants.dest_relative.edram_info.format,
+      constants.dest_relative.edram_info.msaa_samples,
+      constants.dest_relative.dest_info);
+}
 std::vector<uint32_t> Code(const Case &c, bool vk,
                            const std::filesystem::path &directory) {
   const unsigned char *data = nullptr;
@@ -161,12 +171,21 @@ std::vector<uint32_t> Code(const Case &c, bool vk,
 #undef FAMILY
 #undef TABLE
 #undef PICK
+  if (OptimizedCase(c)) {
+    data = vk ? reinterpret_cast<const unsigned char*>(spirv::resolve_msaa_scaled_16bpp_cs)
+              : dxbc::resolve_msaa_scaled_16bpp_cs;
+    size = vk ? sizeof(spirv::resolve_msaa_scaled_16bpp_cs)
+              : sizeof(dxbc::resolve_msaa_scaled_16bpp_cs);
+  }
   if (!directory.empty()) {
     auto tail = std::to_string(8u << c.log) + "bpp" +
                 (c.scale > 1 ? "_scaled" : "") + "_cs" +
                 (vk ? ".spv" : ".dxbc");
     auto path =
         directory / ((c.gamma ? "resolve_gamma_" : "resolve_full_") + tail);
+    const auto optimized = directory / (std::string("resolve_msaa_scaled_16bpp_cs") +
+                                        (vk ? ".spv" : ".dxbc"));
+    if (OptimizedCase(c) && std::filesystem::exists(optimized)) path = optimized;
     if (c.fixed16 && std::filesystem::exists(directory / ("resolve_fixed16_" + tail)))
       path = directory / ("resolve_fixed16_" + tail);
     // Explicit old-resource directories are used to demonstrate the red test.
@@ -207,7 +226,7 @@ class Dx {
   void *upload_ = nullptr;
   ComPtr<ID3D12DescriptorHeap> heap_;
   ComPtr<ID3D12RootSignature> roots_[2];
-  ComPtr<ID3D12PipelineState> pipelines_[2][15];
+  ComPtr<ID3D12PipelineState> pipelines_[2][16];
   ComPtr<ID3D12Fence> fence_;
   ComPtr<ID3D12QueryHeap> timestamps_;
   UINT64 frequency_ = 0, serial_ = 0;
@@ -346,7 +365,7 @@ public:
     auto upload_end = Clock::now();
     auto constants = c.Constants();
     unsigned scaled = c.scale > 1;
-    auto &pso = pipelines_[scaled][c.log + (c.gamma ? 5 : c.fixed16 ? 10 : 0)];
+    auto &pso = pipelines_[scaled][OptimizedCase(c) ? 15 : c.log + (c.gamma ? 5 : c.fixed16 ? 10 : 0)];
     if (!pso) {
       auto code = Code(c, false, resources_);
       D3D12_COMPUTE_PIPELINE_STATE_DESC d{};
@@ -442,7 +461,7 @@ class Vk {
   VkDescriptorPool descriptors_ = VK_NULL_HANDLE;
   VkDescriptorSet sets_[2]{};
   VkPipelineLayout layouts_[2]{};
-  VkPipeline pipelines_[2][15]{};
+  VkPipeline pipelines_[2][16]{};
   VkFence fence_ = VK_NULL_HANDLE;
   VkQueryPool queries_ = VK_NULL_HANDLE;
   PFN_vkCmdFillBuffer fill_buffer_ = nullptr;
@@ -642,7 +661,7 @@ public:
     unsigned scaled = c.scale > 1;
     const auto &f = device_->functions();
     auto vk = device_->device();
-    auto &pipeline = pipelines_[scaled][c.log + (c.gamma ? 5 : c.fixed16 ? 10 : 0)];
+    auto &pipeline = pipelines_[scaled][OptimizedCase(c) ? 15 : c.log + (c.gamma ? 5 : c.fixed16 ? 10 : 0)];
     if (!pipeline) {
       auto code = Code(c, true, resources_);
       VkShaderModuleCreateInfo mi{VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO};
@@ -821,7 +840,8 @@ template <class Backend> void Validate(const char *name) {
       if (!original)
         original = std::make_unique<Backend>(baseline_directory);
       auto before = original->Run(c);
-      Need(result.data == before.data, "non-gamma baseline regression");
+      if (!OptimizedCase(c))
+        Need(result.data == before.data, "non-gamma baseline regression");
       if (rgb565_only || legacy_only || c.format == xenos::ColorFormat::k_5_6_5)
         Need(Check(c, result.data, std::is_same_v<Backend, Dx>) == 0,
              "focused independent oracle");
@@ -848,6 +868,7 @@ void ValidateBoth() {
   unsigned fixed = 0, fixed_bad_dx = 0, fixed_bad_vk = 0,
            fixed_identical = 0, fixed_half = 0, fixed_half_different = 0;
   unsigned rgb_bad_dx = 0, rgb_bad_vk = 0;
+  unsigned corrected = 0;
   for (const auto &c : TestCases()) {
     auto a = dx.Run(c), b = vk.Run(c);
     if (c.fixed16) {
@@ -882,8 +903,12 @@ void ValidateBoth() {
         original_vk = std::make_unique<Vk>(baseline_directory);
       }
       auto old_dx = original_dx->Run(c), old_vk = original_vk->Run(c);
-      Need(a.data == old_dx.data && b.data == old_vk.data,
-           "non-gamma baseline regression");
+      if (OptimizedCase(c)) {
+        corrected += a.data != old_dx.data || b.data != old_vk.data;
+      } else {
+        Need(a.data == old_dx.data && b.data == old_vk.data,
+             "non-gamma baseline regression");
+      }
       const bool legacy_difference = a.data != Expected(c, true);
       if (rgb565_only || legacy_only) {
         Check(c, a.data, true);
@@ -911,8 +936,8 @@ void ValidateBoth() {
             << " gamma byte-identical non-FP16 cases, " << half
             << " gamma FP16 cases (" << half_different
             << " differ: DXBC RTZ / SPIR-V RTE)\n";
-  std::cout << controls
-            << " non-gamma cases/API exact to original GPU baseline; "
+  std::cout << controls << " non-gamma cases/API checked; " << controls - corrected
+            << " exact to original GPU baseline; " << corrected << " corrected scaled; "
                "pre-existing oracle differences D3D12="
             << legacy_dx << " Vulkan=" << legacy_vk << "\n";
   for (const auto& [name, count] : legacy_groups)

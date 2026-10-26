@@ -17,12 +17,14 @@ def main():
     p.add_argument("--probe", type=Path, default=root / ".local/build/win-amd64/tests/sdkcheck/g3/Release/x360n_gamma_resolve_gpu_checks.exe")
     p.add_argument("--reference", type=Path)
     p.add_argument("--candidate", required=True, type=Path)
+    p.add_argument("--rejected", type=Path, help="optional third variant; never a performance baseline")
     p.add_argument("--trials", type=int, default=5)
     p.add_argument("--msaa", type=int, nargs="+", default=[1, 2, 4])
     p.add_argument("--non-gamma", action="store_true")
     p.add_argument("--fixed16", action="store_true")
     p.add_argument("--source64", action="store_true")
     p.add_argument("--rgb565", action="store_true")
+    p.add_argument("--api", choices=("both", "d3d12", "vulkan"), default="both")
     p.add_argument("--json", type=Path)
     args = p.parse_args()
     if not 1 <= args.trials <= 10 or any(n not in (1, 2, 4) for n in args.msaa):
@@ -31,10 +33,14 @@ def main():
     for trial in range(args.trials):
         for samples in args.msaa:
             order = [("reference", args.reference), ("candidate", args.candidate)]
+            if args.rejected:
+                order.insert(1, ("rejected", args.rejected))
             if trial % 2:
                 order.reverse()
             for label, directory in order:
                 command = [str(args.probe), "--bench", "--msaa", str(samples)]
+                if args.api != "both":
+                    command += ["--" + args.api]
                 if directory:
                     command += ["--shader-dir", str(directory.resolve())]
                 if args.non_gamma:
