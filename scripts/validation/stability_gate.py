@@ -38,6 +38,18 @@ def git(repo, *args):
     return subprocess.check_output(['git', '-C', str(repo), *args], text=True).strip()
 
 
+def check_sdk_changes(sdk, expected):
+    changed = git(sdk, 'diff', '--name-only', 'HEAD', '--ignore-submodules=all').splitlines()
+    if set(changed) - set(expected):
+        raise ValueError('SDK has undeclared tracked changes: ' + ', '.join(sorted(set(changed) - set(expected))))
+    for name, sha in expected.items():
+        if digest(sdk / name) != sha:
+            raise ValueError('SDK file identity mismatch: ' + name)
+    if any(line and line[0] != ' ' for line in subprocess.check_output(
+            ['git', '-C', str(sdk), 'submodule', 'status', '--recursive'], text=True).splitlines()):
+        raise ValueError('SDK submodule pin missing/divergent')
+
+
 def command(args, cwd, log, timeout):
     env = os.environ.copy()
     # pwsh's inherited module path can hide Windows PowerShell's built-in
@@ -120,6 +132,17 @@ def verify(report, policy):
         errors.append('source commit changed/absent')
     elif digest(source / 'deps.lock.json') != identity.get('lock_sha256'):
         errors.append('lock identity changed')
+    elif 'rexglue_sdk' in (lock := json.loads((source / 'deps.lock.json').read_text())):
+        sdk = source / 'external/rexglue-sdk'
+        if git(sdk, 'rev-parse', 'HEAD') != identity.get('sdk_commit'):
+            errors.append('SDK commit changed')
+        expected = {}
+        for patch in lock['rexglue_sdk']['patches']:
+            expected.update(patch['files'])
+        try:
+            check_sdk_changes(sdk, expected)
+        except ValueError as e:
+            errors.append(str(e))
     artifacts_by_path = {x['path']: x['sha256'] for x in report.get('artifacts', [])}
     for folder in report.get('artifact_directories', []):
         for path in Path(folder).glob('*'):
@@ -197,6 +220,10 @@ def run(args):
         # both byte identities; compare the parsed lock across checkouts only.
         if report['identity']['sdk_commit'] != lock['rexglue_sdk']['commit'] or json.loads((ROOT / 'deps.lock.json').read_text()) != lock:
             raise ValueError('SDK/lock identity mismatch')
+        expected = {}
+        for patch in lock['rexglue_sdk']['patches']:
+            expected.update(patch['files'])
+        check_sdk_changes(repo / 'external/rexglue-sdk', expected)
         dev = repo / 'scripts/devshell.cmd'
         steps = [(['powershell', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', repo / 'scripts/setup/apply-sdk-patches.ps1', '-Check'], 'sdk', 180),
                  ([dev, 'cmake', '--build', build, '--config', 'Release', '--target', 'x360n_tests', 'x360n_sdk_runtime_checks'], 'build-main', 600),

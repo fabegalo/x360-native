@@ -143,6 +143,23 @@ class Certification(unittest.TestCase):
         self.assertEqual(rc, 124)
         self.assertIn('exceeded bounded timeout', log.read_text())
 
+    def test_sdk_rejects_undeclared_tracked_changes(self):
+        sdk = self.file.parent
+        gate.check_sdk_changes(sdk, {})
+        (sdk / 'deps.lock.json').write_text('undeclared SDK modification')
+        with self.assertRaises(ValueError):
+            gate.check_sdk_changes(sdk, {})
+
+    def test_sdk_declared_patch_still_requires_exact_bytes(self):
+        sdk = self.file.parent
+        path = sdk / 'deps.lock.json'
+        path.write_text('declared patch')
+        expected = {'deps.lock.json': gate.digest(path)}
+        gate.check_sdk_changes(sdk, expected)
+        path.write_text('corrupt patch')
+        with self.assertRaises(ValueError):
+            gate.check_sdk_changes(sdk, expected)
+
 
 if __name__ == '__main__':
     unittest.main()
