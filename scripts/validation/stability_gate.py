@@ -42,7 +42,8 @@ def command(args, cwd, log, timeout):
     env = os.environ.copy()
     # pwsh's inherited module path can hide Windows PowerShell's built-in
     # Get-FileHash. Use the Windows built-in modules for the child commands.
-    env['PSModulePath'] = str(Path(env.get('SystemRoot', 'C:/Windows')) / 'System32/WindowsPowerShell/v1.0/Modules')
+    windows = Path(os.environ.get('SystemRoot', 'C:/Windows'))
+    env['PSMODULEPATH'] = str(windows / 'System32/WindowsPowerShell/v1.0/Modules')
     with Path(log).open('w', encoding='utf-8') as f:
         f.write(json.dumps({'command': [str(x) for x in args], 'cwd': str(cwd), 'timeout_seconds': timeout}) + '\n')
         f.flush()
@@ -53,7 +54,7 @@ def command(args, cwd, log, timeout):
             return proc.wait(timeout=timeout)
         except subprocess.TimeoutExpired:
             if os.name == 'nt':
-                subprocess.run([str(Path(env['SystemRoot']) / 'System32/taskkill.exe'),
+                subprocess.run([str(windows / 'System32/taskkill.exe'),
                                 '/PID', str(proc.pid), '/T', '/F'], stdout=f,
                                stderr=subprocess.STDOUT, timeout=15,
                                creationflags=subprocess.CREATE_NO_WINDOW)
