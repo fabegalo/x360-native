@@ -39,6 +39,11 @@ divergente ou artefato omitido: reprovação. Cada execução exige diretório n
 Comandos, limites, logs, XML, binários/DLLs e hashes ficam no recibo local.
 O verificador relê o XML; editar apenas o estado JSON não transforma falha em PASS.
 Hashes verificam integridade, não autenticidade de uma observação humana.
+`--reuse-contracts <report.json>` permite aproveitar os contratos da main sem
+repeti-los após corrigir apenas testes desktop/gate. Exige mesma identidade,
+mesmo conjunto de artefatos main/SDK e evidência intacta; preserva inclusive FAIL
+e SKIP. O restante do gate continua executando. Não recertifica um binário novo
+com resultados de outro. Timeouts encerram a árvore dos processos no Windows.
 
 Os quatro aceites reais começam **NOT RUN** em toda execução automatizada;
 o runner não os promove. `verify` aceita um recibo revisado com evidência

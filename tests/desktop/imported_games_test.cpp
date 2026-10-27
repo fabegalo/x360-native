@@ -53,9 +53,12 @@ struct Fixture {
   Fixture() { Write(source/"default.xex", Xex()); Write(source/"assets/data", "asset"); Write(root/".local/user/save", "keep"); }
   void Infrastructure() {
     for (const auto& file : {"titles/common/generic/CMakeLists.txt", "titles/common/generic/main.cpp",
-         "titles/common/generic/modules.cmake", "external/rexglue-sdk/resources/templates/init/rexglue_cmake.inja"}) {
+         "titles/common/generic/modules.cmake"}) {
       auto dest=root/file; fs::create_directories(dest.parent_path()); fs::copy_file(fs::path(X360N_SOURCE_ROOT)/file,dest);
     }
+    const auto dest = root / "external/rexglue-sdk/resources/templates/init/rexglue_cmake.inja";
+    fs::create_directories(dest.parent_path());
+    fs::copy_file(fs::path(X360N_TEST_SDK_ROOT) / "resources/templates/init/rexglue_cmake.inja", dest);
   }
   ~Fixture() { std::error_code ec; fs::remove_all(root, ec); }
 };

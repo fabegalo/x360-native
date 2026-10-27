@@ -4,6 +4,7 @@ import importlib.util
 import json
 from pathlib import Path
 import subprocess
+import sys
 import tempfile
 import unittest
 
@@ -117,6 +118,30 @@ class Certification(unittest.TestCase):
     def test_missing_original_attestation_blocks(self):
         self.report['results'][-1].pop('observation')
         self.assertTrue(self.errors())
+
+    def test_reuse_preserves_failed_result(self):
+        xml = Path(self.report['junit']['contracts']['path'])
+        xml.write_text('<testsuite><testcase name="contract"><failure/></testcase></testsuite>')
+        self.report['junit']['contracts'] = gate.artifact(xml)
+        self.report['results'][0].update(state='FAIL', evidence=[gate.artifact(xml)])
+        rows, _ = gate.reuse_contracts(self.report, copy.deepcopy(self.report), self.policy, self.file.parent)
+        self.assertEqual(rows, [{'id': 'contract', 'state': 'FAIL'}])
+
+    def test_reuse_refuses_changed_identity_or_omitted_artifact(self):
+        for key in ['identity', 'artifacts']:
+            previous = copy.deepcopy(self.report)
+            if key == 'identity':
+                previous['identity']['commit'] = 'b' * 40
+            else:
+                previous['artifacts'] = []
+            with self.assertRaises(ValueError):
+                gate.reuse_contracts(previous, self.report, self.policy, self.file.parent)
+
+    def test_command_timeout_stops_the_child(self):
+        log = self.file.parent / 'timeout.log'
+        rc = gate.command([sys.executable, '-c', 'import time; time.sleep(30)'], self.file.parent, log, 1)
+        self.assertEqual(rc, 124)
+        self.assertIn('exceeded bounded timeout', log.read_text())
 
 
 if __name__ == '__main__':

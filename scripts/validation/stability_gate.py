@@ -41,15 +41,25 @@ def git(repo, *args):
 def command(args, cwd, log, timeout):
     env = os.environ.copy()
     # pwsh's inherited module path can hide Windows PowerShell's built-in
-    # Get-FileHash. Let each shell construct its own default module path.
-    env.pop('PSModulePath', None)
+    # Get-FileHash. Use the Windows built-in modules for the child commands.
+    env['PSModulePath'] = str(Path(env.get('SystemRoot', 'C:/Windows')) / 'System32/WindowsPowerShell/v1.0/Modules')
     with Path(log).open('w', encoding='utf-8') as f:
         f.write(json.dumps({'command': [str(x) for x in args], 'cwd': str(cwd), 'timeout_seconds': timeout}) + '\n')
         f.flush()
+        proc = subprocess.Popen([str(x) for x in args], cwd=cwd, stdout=f,
+                                stderr=subprocess.STDOUT, env=env,
+                                creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
         try:
-            return subprocess.run([str(x) for x in args], cwd=cwd, stdout=f,
-                                  stderr=subprocess.STDOUT, timeout=timeout, env=env).returncode
+            return proc.wait(timeout=timeout)
         except subprocess.TimeoutExpired:
+            if os.name == 'nt':
+                subprocess.run([str(Path(env['SystemRoot']) / 'System32/taskkill.exe'),
+                                '/PID', str(proc.pid), '/T', '/F'], stdout=f,
+                               stderr=subprocess.STDOUT, timeout=15,
+                               creationflags=subprocess.CREATE_NO_WINDOW)
+            else:
+                proc.kill()
+            proc.wait(timeout=15)
             f.write('\nFAIL: command exceeded bounded timeout\n')
             return 124
 
@@ -67,6 +77,29 @@ def junit(path, expected):
             for x in cases]
 
 
+def reuse_contracts(previous, current, policy, build):
+    """Reuse only unchanged main/SDK evidence; preserve every failure/skip."""
+    if previous.get('identity') != current['identity'] or previous.get('preflight') != 'PASS':
+        raise ValueError('reused contracts have a different identity/preflight')
+    def baseline(items):
+        return {x['path']: x['sha256'] for x in items
+                if Path(x['path']).is_relative_to(build) or x.get('role') in ('sdk-source', 'sdk-patch', 'lock')}
+    if not baseline(current['artifacts']) or baseline(previous['artifacts']) != baseline(current['artifacts']):
+        raise ValueError('reused main/SDK artifact set changed')
+    for item in previous['artifacts']:
+        if item['path'] in baseline(current['artifacts']) and not intact(item):
+            raise ValueError('reused main/SDK artifact changed or disappeared')
+    xml = previous['junit']['contracts']
+    if not intact(xml):
+        raise ValueError('reused JUnit changed or disappeared')
+    rows = junit(xml['path'], policy['tests'])
+    for row in rows:
+        recorded = [x for x in previous['results'] if x['id'] == row['id']]
+        if len(recorded) != 1 or recorded[0]['state'] != row['state'] or not recorded[0].get('evidence') or not all(intact(x) for x in recorded[0]['evidence']):
+            raise ValueError('reused result/evidence mismatch')
+    return rows, xml
+
+
 def verify(report, policy):
     errors = []
     if report.get('schema') != 1 or report.get('configuration') != 'Windows-x64/Release/Xenos/D3D12/17559':
@@ -79,6 +112,8 @@ def verify(report, policy):
         errors.append('policy identity changed')
     if report.get('preflight') != 'PASS':
         errors.append('SDK/build preflight failed')
+    if report.get('reused_contracts') and not intact(report['reused_contracts']):
+        errors.append('reused report missing/changed')
     source = Path(report.get('source', 'missing-source'))
     if not source.is_dir() or git(source, 'rev-parse', 'HEAD') != identity.get('commit'):
         errors.append('source commit changed/absent')
@@ -205,9 +240,18 @@ def run(args):
         for folder, names, regex, label in [(build, policy['tests'], pattern, 'contracts'),
                 (desktop, ['desktop.catalog', 'desktop.update-recovery'], '^desktop[.](catalog|update-recovery)$', 'desktop')]:
             xml = out / (label + '.xml')
-            rc = command([ctest, '--test-dir', folder, '-C', 'Release', '-R', regex,
-                          '--output-junit', xml, '--output-on-failure', '--timeout', '180'], repo, out / (label + '.log'), 600)
-            rows = junit(xml, names)
+            if label == 'contracts' and args.reuse_contracts:
+                previous = json.loads(args.reuse_contracts.read_text())
+                rows, item = reuse_contracts(previous, report, policy, build)
+                xml = Path(item['path'])
+                (out / (label + '.log')).write_text(json.dumps({'reused_from': artifact(args.reuse_contracts),
+                    'reason': 'unchanged main/SDK artifacts; failures preserved'}), encoding='utf-8')
+                report['reused_contracts'] = artifact(args.reuse_contracts)
+                rc = 0
+            else:
+                rc = command([ctest, '--test-dir', folder, '-C', 'Release', '-R', regex,
+                              '--output-junit', xml, '--output-on-failure', '--timeout', '180'], repo, out / (label + '.log'), 600)
+                rows = junit(xml, names)
             report.setdefault('junit', {})[label] = artifact(xml)
             if rc and all(x['state'] == 'PASS' for x in rows):
                 raise ValueError('CTest command failed despite PASS rows')
@@ -239,6 +283,8 @@ def main():
     r = sub.add_parser('run')
     for name in ['source', 'build', 'desktop', 'output']:
         r.add_argument('--' + name, type=Path, required=True)
+    r.add_argument('--reuse-contracts', type=Path,
+                   help='reuse intact main/SDK results from a previous report, including failures')
     v = sub.add_parser('verify')
     v.add_argument('report', type=Path)
     args = p.parse_args()

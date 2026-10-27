@@ -148,6 +148,8 @@ TEST_CASE("console preferences survive title handoffs and reload on session rest
   // First child changes the saved preferences. The running session retains its
   // snapshot, while a new supervisor process reads the new values.
   result = f.Run();
+  INFO(Read(f.root / "err.log"));
+  INFO(Read(f.root / "out.log"));
   REQUIRE(result.exit_code == 0);
   CHECK(Read(f.paths.inputs() / "console-observed.txt") == "9 13\n9 13\n9 13\n1 103\n1 103\n1 103\n");
 }
@@ -328,5 +330,15 @@ TEST_CASE("stable session crash and relaunch preserve the single HDD bytes", "[s
     for (size_t i = 0; i < files.size(); ++i)
       REQUIRE(DigestFile(files[i])->sha256 == hashes[i]);
   }
-  CHECK(Read(f.paths.inputs() / "observed.txt") == "0 1\n1 0\n2 1\n0 1\n1 0\n2 1\n");
+  std::istringstream observed(Read(f.paths.inputs() / "observed.txt"));
+  for (int launch = 0; launch < 2; ++launch) {
+    for (unsigned expected = 0; expected < 3; ++expected) {
+      unsigned step = 99; bool dashboard = false;
+      REQUIRE(bool(observed >> step >> dashboard));
+      CHECK(step == expected);
+      CHECK(dashboard == (expected != 1));
+    }
+  }
+  std::string extra;
+  CHECK_FALSE(bool(observed >> extra));
 }
