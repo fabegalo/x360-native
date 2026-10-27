@@ -1,5 +1,19 @@
 # STATUS
 
+27/10 — **STABLE-02: main `f84436d` recertificada nos 37 contratos**:
+nova execução, sem reaproveitar o FAIL histórico de `9abb880`; relançamento com
+preferências e 80 transições aprovados. A correção `c788f9d` já está integrada.
+Build Release e integridade dos 201 patches/271 arquivos SDK aprovados;
+catálogo, update recovery e crash/relançamento sintéticos PASS, 23 controles
+negativos PASS. Runner e verificador recusam v1.0.0 somente pelos quatro NOT RUN.
+Os quatro aceites reais continuam NOT RUN e impedem certificação v1.0.0.
+Console 17559 completo e cache Forza 1 copiados para seed/working isolados,
+3.095 arquivos por cópia, hashes e origem preservados. Forza Horizon 1 integral
+é o candidato recomendado; requer renovar preparo, licença/conteúdo autorizados
+e autorização específica antes do ensaio real. [Execução e matriz](docs/stability/execution-stable-02-2026-10-27.md),
+[roteiro e bloqueios UI/Windows limpo](docs/stability/persistence-rehearsal.md).
+SDK/renderer preservados; sem gameplay, Computer Use, tag ou Release.
+
 27/10 — **STABLE-01 iniciada sobre Preview 25 / main `9abb880`**: contrato
 candidato Windows x64/Release/Xenos D3D12/Retail 17559 e gate de evidências
 obrigatórias em [docs/stability](docs/stability/README.md). A certificação segue

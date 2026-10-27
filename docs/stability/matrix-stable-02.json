@@ -1,0 +1,747 @@
+{
+  "schema": 1,
+  "cycle": "STABLE-02",
+  "baseline": "0.69.27-preview.25",
+  "identity": {
+    "commit": "f84436df94ab2e17275fa4272107cc1aa4c400f3",
+    "sdk_commit": "f5337cdc947ff6d4c4196737e2c807a48f2a1fc2",
+    "lock_sha256": "9d5e165a941a580adf84cfbd9d9b32b9422a8f5ab0d3ebad2bd3eeb8b4711763",
+    "policy_sha256": "431d171c92513341ac8ed659a9fa7c52d2d34f161a0e45dba5add36e3b366a8a"
+  },
+  "started_utc": "2026-10-27T23:30:21.457639+00:00",
+  "configuration": "Windows-x64/Release/Xenos/D3D12/17559",
+  "certified": false,
+  "certification_state": "FAIL",
+  "verification_exit_code": 1,
+  "executed_fresh": true,
+  "sdk_patch_count": 201,
+  "sdk_patched_files_count": 271,
+  "sdk_patched_files_sha256": "1e6ad948180747e595e3546b06a86a312c4269f484c48358d4f4a72bec199def",
+  "evidence_report": {
+    "path": ".local/evidence/stable-02/run-01/report.json",
+    "sha256": "31ada22e2fc26ad56a18a0e3a5c296f9a9f257fe3650deb125f27d80ee1e296f"
+  },
+  "preflight": {
+    "state": "PASS",
+    "evidence": [
+      {
+        "path": ".local/evidence/stable-02/run-01/sdk.log",
+        "sha256": "d46fcfe0f33f035f1f83f0944f74d312624fa96e385a3665f6c33c9f5edfd5a1"
+      },
+      {
+        "path": ".local/evidence/stable-02/run-01/build-main.log",
+        "sha256": "5f1006ea689e0920878da080e750e450768d10079c3146c4aa520b8fb99961f3"
+      },
+      {
+        "path": ".local/evidence/stable-02/run-01/build-candidate.log",
+        "sha256": "04b2c120642b57dd2e38e43d76f57d6085217ab98bb1b0efd2aedd2382bba957"
+      },
+      {
+        "path": ".local/evidence/stable-02/run-01/negative-controls.log",
+        "sha256": "08fda4a78688f632b557d490004e7b9fe4b29650e18d92396c751abbe221fc6a"
+      }
+    ]
+  },
+  "negative_controls": {
+    "state": "PASS",
+    "tests": 23
+  },
+  "snapshot": {
+    "state": "PASS",
+    "gameplay": "NOT RUN",
+    "files_per_copy": 3095,
+    "bytes_per_copy": 9097881575,
+    "evidence": {
+      "path": ".local/evidence/stable-02/persistence-01/snapshot.json",
+      "sha256": "5661c8633cc2da94fcea62de39e4eed18e3b986f08a0628799136a59e04ae74e"
+    }
+  },
+  "results": [
+    {
+      "id": "x360n.session survives 80 transitions with intact handoffs and states",
+      "state": "PASS",
+      "required": true,
+      "commit": "f84436df94ab2e17275fa4272107cc1aa4c400f3",
+      "evidence": [
+        {
+          "path": ".local/evidence/stable-02/run-01/contracts.xml",
+          "sha256": "7ffae601f4a301127268a2badb03aeacab5995df89db1566902e0cdff83aba0e"
+        },
+        {
+          "path": ".local/evidence/stable-02/run-01/contracts.log",
+          "sha256": "1cbf939139808b83adc5b4de9c51bb5fb6c20993f18a83833cfe108f8f536731"
+        }
+      ]
+    },
+    {
+      "id": "x360n.dashboard return from the dashboard preserves context instead of closing the platform",
+      "state": "PASS",
+      "required": true,
+      "commit": "f84436df94ab2e17275fa4272107cc1aa4c400f3",
+      "evidence": [
+        {
+          "path": ".local/evidence/stable-02/run-01/contracts.xml",
+          "sha256": "7ffae601f4a301127268a2badb03aeacab5995df89db1566902e0cdff83aba0e"
+        },
+        {
+          "path": ".local/evidence/stable-02/run-01/contracts.log",
+          "sha256": "1cbf939139808b83adc5b4de9c51bb5fb6c20993f18a83833cfe108f8f536731"
+        }
+      ]
+    },
+    {
+      "id": "x360n.avatar service files belong to the session dashboard version and bytes",
+      "state": "PASS",
+      "required": true,
+      "commit": "f84436df94ab2e17275fa4272107cc1aa4c400f3",
+      "evidence": [
+        {
+          "path": ".local/evidence/stable-02/run-01/contracts.xml",
+          "sha256": "7ffae601f4a301127268a2badb03aeacab5995df89db1566902e0cdff83aba0e"
+        },
+        {
+          "path": ".local/evidence/stable-02/run-01/contracts.log",
+          "sha256": "1cbf939139808b83adc5b4de9c51bb5fb6c20993f18a83833cfe108f8f536731"
+        }
+      ]
+    },
+    {
+      "id": "x360n.a same-time replacement keeps the hint but fails the receipt check",
+      "state": "PASS",
+      "required": true,
+      "commit": "f84436df94ab2e17275fa4272107cc1aa4c400f3",
+      "evidence": [
+        {
+          "path": ".local/evidence/stable-02/run-01/contracts.xml",
+          "sha256": "7ffae601f4a301127268a2badb03aeacab5995df89db1566902e0cdff83aba0e"
+        },
+        {
+          "path": ".local/evidence/stable-02/run-01/contracts.log",
+          "sha256": "1cbf939139808b83adc5b4de9c51bb5fb6c20993f18a83833cfe108f8f536731"
+        }
+      ]
+    },
+    {
+      "id": "x360n.session cancellation stops the child without reporting a timeout",
+      "state": "PASS",
+      "required": true,
+      "commit": "f84436df94ab2e17275fa4272107cc1aa4c400f3",
+      "evidence": [
+        {
+          "path": ".local/evidence/stable-02/run-01/contracts.xml",
+          "sha256": "7ffae601f4a301127268a2badb03aeacab5995df89db1566902e0cdff83aba0e"
+        },
+        {
+          "path": ".local/evidence/stable-02/run-01/contracts.log",
+          "sha256": "1cbf939139808b83adc5b4de9c51bb5fb6c20993f18a83833cfe108f8f536731"
+        }
+      ]
+    },
+    {
+      "id": "x360n.console preferences persist independent language and locale across reload",
+      "state": "PASS",
+      "required": true,
+      "commit": "f84436df94ab2e17275fa4272107cc1aa4c400f3",
+      "evidence": [
+        {
+          "path": ".local/evidence/stable-02/run-01/contracts.xml",
+          "sha256": "7ffae601f4a301127268a2badb03aeacab5995df89db1566902e0cdff83aba0e"
+        },
+        {
+          "path": ".local/evidence/stable-02/run-01/contracts.log",
+          "sha256": "1cbf939139808b83adc5b4de9c51bb5fb6c20993f18a83833cfe108f8f536731"
+        }
+      ]
+    },
+    {
+      "id": "x360n.supervisor blocks an exchanged executable or DLL before creating a child run",
+      "state": "PASS",
+      "required": true,
+      "commit": "f84436df94ab2e17275fa4272107cc1aa4c400f3",
+      "evidence": [
+        {
+          "path": ".local/evidence/stable-02/run-01/contracts.xml",
+          "sha256": "7ffae601f4a301127268a2badb03aeacab5995df89db1566902e0cdff83aba0e"
+        },
+        {
+          "path": ".local/evidence/stable-02/run-01/contracts.log",
+          "sha256": "1cbf939139808b83adc5b4de9c51bb5fb6c20993f18a83833cfe108f8f536731"
+        }
+      ]
+    },
+    {
+      "id": "x360n.selected storage persists without moving or deleting existing saves",
+      "state": "PASS",
+      "required": true,
+      "commit": "f84436df94ab2e17275fa4272107cc1aa4c400f3",
+      "evidence": [
+        {
+          "path": ".local/evidence/stable-02/run-01/contracts.xml",
+          "sha256": "7ffae601f4a301127268a2badb03aeacab5995df89db1566902e0cdff83aba0e"
+        },
+        {
+          "path": ".local/evidence/stable-02/run-01/contracts.log",
+          "sha256": "1cbf939139808b83adc5b4de9c51bb5fb6c20993f18a83833cfe108f8f536731"
+        }
+      ]
+    },
+    {
+      "id": "x360n.session captures an unhandled exception only with explicit crash diagnostics",
+      "state": "PASS",
+      "required": true,
+      "commit": "f84436df94ab2e17275fa4272107cc1aa4c400f3",
+      "evidence": [
+        {
+          "path": ".local/evidence/stable-02/run-01/contracts.xml",
+          "sha256": "7ffae601f4a301127268a2badb03aeacab5995df89db1566902e0cdff83aba0e"
+        },
+        {
+          "path": ".local/evidence/stable-02/run-01/contracts.log",
+          "sha256": "1cbf939139808b83adc5b4de9c51bb5fb6c20993f18a83833cfe108f8f536731"
+        }
+      ]
+    },
+    {
+      "id": "x360n.session dashboard version reaches the game and dashboard return",
+      "state": "PASS",
+      "required": true,
+      "commit": "f84436df94ab2e17275fa4272107cc1aa4c400f3",
+      "evidence": [
+        {
+          "path": ".local/evidence/stable-02/run-01/contracts.xml",
+          "sha256": "7ffae601f4a301127268a2badb03aeacab5995df89db1566902e0cdff83aba0e"
+        },
+        {
+          "path": ".local/evidence/stable-02/run-01/contracts.log",
+          "sha256": "1cbf939139808b83adc5b4de9c51bb5fb6c20993f18a83833cfe108f8f536731"
+        }
+      ]
+    },
+    {
+      "id": "x360n.session watchdog resets after sustained execution without a lifetime limit",
+      "state": "PASS",
+      "required": true,
+      "commit": "f84436df94ab2e17275fa4272107cc1aa4c400f3",
+      "evidence": [
+        {
+          "path": ".local/evidence/stable-02/run-01/contracts.xml",
+          "sha256": "7ffae601f4a301127268a2badb03aeacab5995df89db1566902e0cdff83aba0e"
+        },
+        {
+          "path": ".local/evidence/stable-02/run-01/contracts.log",
+          "sha256": "1cbf939139808b83adc5b4de9c51bb5fb6c20993f18a83833cfe108f8f536731"
+        }
+      ]
+    },
+    {
+      "id": "x360n.handoff distinguishes title return from closing the platform",
+      "state": "PASS",
+      "required": true,
+      "commit": "f84436df94ab2e17275fa4272107cc1aa4c400f3",
+      "evidence": [
+        {
+          "path": ".local/evidence/stable-02/run-01/contracts.xml",
+          "sha256": "7ffae601f4a301127268a2badb03aeacab5995df89db1566902e0cdff83aba0e"
+        },
+        {
+          "path": ".local/evidence/stable-02/run-01/contracts.log",
+          "sha256": "1cbf939139808b83adc5b4de9c51bb5fb6c20993f18a83833cfe108f8f536731"
+        }
+      ]
+    },
+    {
+      "id": "x360n.missing partial wrong-title and incomplete receipts never qualify a native exe",
+      "state": "PASS",
+      "required": true,
+      "commit": "f84436df94ab2e17275fa4272107cc1aa4c400f3",
+      "evidence": [
+        {
+          "path": ".local/evidence/stable-02/run-01/contracts.xml",
+          "sha256": "7ffae601f4a301127268a2badb03aeacab5995df89db1566902e0cdff83aba0e"
+        },
+        {
+          "path": ".local/evidence/stable-02/run-01/contracts.log",
+          "sha256": "1cbf939139808b83adc5b4de9c51bb5fb6c20993f18a83833cfe108f8f536731"
+        }
+      ]
+    },
+    {
+      "id": "x360n.session diagnostic arguments belong to the selected profile",
+      "state": "PASS",
+      "required": true,
+      "commit": "f84436df94ab2e17275fa4272107cc1aa4c400f3",
+      "evidence": [
+        {
+          "path": ".local/evidence/stable-02/run-01/contracts.xml",
+          "sha256": "7ffae601f4a301127268a2badb03aeacab5995df89db1566902e0cdff83aba0e"
+        },
+        {
+          "path": ".local/evidence/stable-02/run-01/contracts.log",
+          "sha256": "1cbf939139808b83adc5b4de9c51bb5fb6c20993f18a83833cfe108f8f536731"
+        }
+      ]
+    },
+    {
+      "id": "x360n.handoff preserves launch bytes and rejects truncated records",
+      "state": "PASS",
+      "required": true,
+      "commit": "f84436df94ab2e17275fa4272107cc1aa4c400f3",
+      "evidence": [
+        {
+          "path": ".local/evidence/stable-02/run-01/contracts.xml",
+          "sha256": "7ffae601f4a301127268a2badb03aeacab5995df89db1566902e0cdff83aba0e"
+        },
+        {
+          "path": ".local/evidence/stable-02/run-01/contracts.log",
+          "sha256": "1cbf939139808b83adc5b4de9c51bb5fb6c20993f18a83833cfe108f8f536731"
+        }
+      ]
+    },
+    {
+      "id": "x360n.preparation requires every declared AOT dependency in its receipt",
+      "state": "PASS",
+      "required": true,
+      "commit": "f84436df94ab2e17275fa4272107cc1aa4c400f3",
+      "evidence": [
+        {
+          "path": ".local/evidence/stable-02/run-01/contracts.xml",
+          "sha256": "7ffae601f4a301127268a2badb03aeacab5995df89db1566902e0cdff83aba0e"
+        },
+        {
+          "path": ".local/evidence/stable-02/run-01/contracts.log",
+          "sha256": "1cbf939139808b83adc5b4de9c51bb5fb6c20993f18a83833cfe108f8f536731"
+        }
+      ]
+    },
+    {
+      "id": "x360n.session dashboard version comes from its preparation receipt",
+      "state": "PASS",
+      "required": true,
+      "commit": "f84436df94ab2e17275fa4272107cc1aa4c400f3",
+      "evidence": [
+        {
+          "path": ".local/evidence/stable-02/run-01/contracts.xml",
+          "sha256": "7ffae601f4a301127268a2badb03aeacab5995df89db1566902e0cdff83aba0e"
+        },
+        {
+          "path": ".local/evidence/stable-02/run-01/contracts.log",
+          "sha256": "1cbf939139808b83adc5b4de9c51bb5fb6c20993f18a83833cfe108f8f536731"
+        }
+      ]
+    },
+    {
+      "id": "x360n.console preferences survive title handoffs and reload on session restart",
+      "state": "PASS",
+      "required": true,
+      "commit": "f84436df94ab2e17275fa4272107cc1aa4c400f3",
+      "evidence": [
+        {
+          "path": ".local/evidence/stable-02/run-01/contracts.xml",
+          "sha256": "7ffae601f4a301127268a2badb03aeacab5995df89db1566902e0cdff83aba0e"
+        },
+        {
+          "path": ".local/evidence/stable-02/run-01/contracts.log",
+          "sha256": "1cbf939139808b83adc5b4de9c51bb5fb6c20993f18a83833cfe108f8f536731"
+        }
+      ]
+    },
+    {
+      "id": "x360n.firmware powerdown closes the platform from either session participant",
+      "state": "PASS",
+      "required": true,
+      "commit": "f84436df94ab2e17275fa4272107cc1aa4c400f3",
+      "evidence": [
+        {
+          "path": ".local/evidence/stable-02/run-01/contracts.xml",
+          "sha256": "7ffae601f4a301127268a2badb03aeacab5995df89db1566902e0cdff83aba0e"
+        },
+        {
+          "path": ".local/evidence/stable-02/run-01/contracts.log",
+          "sha256": "1cbf939139808b83adc5b4de9c51bb5fb6c20993f18a83833cfe108f8f536731"
+        }
+      ]
+    },
+    {
+      "id": "x360n.session UI host belongs to its dashboard build and receipt",
+      "state": "PASS",
+      "required": true,
+      "commit": "f84436df94ab2e17275fa4272107cc1aa4c400f3",
+      "evidence": [
+        {
+          "path": ".local/evidence/stable-02/run-01/contracts.xml",
+          "sha256": "7ffae601f4a301127268a2badb03aeacab5995df89db1566902e0cdff83aba0e"
+        },
+        {
+          "path": ".local/evidence/stable-02/run-01/contracts.log",
+          "sha256": "1cbf939139808b83adc5b4de9c51bb5fb6c20993f18a83833cfe108f8f536731"
+        }
+      ]
+    },
+    {
+      "id": "x360n.graphics API migrates old files and strips every conflicting manifest override",
+      "state": "PASS",
+      "required": true,
+      "commit": "f84436df94ab2e17275fa4272107cc1aa4c400f3",
+      "evidence": [
+        {
+          "path": ".local/evidence/stable-02/run-01/contracts.xml",
+          "sha256": "7ffae601f4a301127268a2badb03aeacab5995df89db1566902e0cdff83aba0e"
+        },
+        {
+          "path": ".local/evidence/stable-02/run-01/contracts.log",
+          "sha256": "1cbf939139808b83adc5b4de9c51bb5fb6c20993f18a83833cfe108f8f536731"
+        }
+      ]
+    },
+    {
+      "id": "x360n.session storage override follows handoffs without changing global storage",
+      "state": "PASS",
+      "required": true,
+      "commit": "f84436df94ab2e17275fa4272107cc1aa4c400f3",
+      "evidence": [
+        {
+          "path": ".local/evidence/stable-02/run-01/contracts.xml",
+          "sha256": "7ffae601f4a301127268a2badb03aeacab5995df89db1566902e0cdff83aba0e"
+        },
+        {
+          "path": ".local/evidence/stable-02/run-01/contracts.log",
+          "sha256": "1cbf939139808b83adc5b4de9c51bb5fb6c20993f18a83833cfe108f8f536731"
+        }
+      ]
+    },
+    {
+      "id": "x360n.graphics API is immutable through dashboard game dashboard transitions",
+      "state": "PASS",
+      "required": true,
+      "commit": "f84436df94ab2e17275fa4272107cc1aa4c400f3",
+      "evidence": [
+        {
+          "path": ".local/evidence/stable-02/run-01/contracts.xml",
+          "sha256": "7ffae601f4a301127268a2badb03aeacab5995df89db1566902e0cdff83aba0e"
+        },
+        {
+          "path": ".local/evidence/stable-02/run-01/contracts.log",
+          "sha256": "1cbf939139808b83adc5b4de9c51bb5fb6c20993f18a83833cfe108f8f536731"
+        }
+      ]
+    },
+    {
+      "id": "x360n.preparation binds content tools configuration and native artifacts by bytes",
+      "state": "PASS",
+      "required": true,
+      "commit": "f84436df94ab2e17275fa4272107cc1aa4c400f3",
+      "evidence": [
+        {
+          "path": ".local/evidence/stable-02/run-01/contracts.xml",
+          "sha256": "7ffae601f4a301127268a2badb03aeacab5995df89db1566902e0cdff83aba0e"
+        },
+        {
+          "path": ".local/evidence/stable-02/run-01/contracts.log",
+          "sha256": "1cbf939139808b83adc5b4de9c51bb5fb6c20993f18a83833cfe108f8f536731"
+        }
+      ]
+    },
+    {
+      "id": "x360n.session profile and launch request preserve Unicode paths",
+      "state": "PASS",
+      "required": true,
+      "commit": "f84436df94ab2e17275fa4272107cc1aa4c400f3",
+      "evidence": [
+        {
+          "path": ".local/evidence/stable-02/run-01/contracts.xml",
+          "sha256": "7ffae601f4a301127268a2badb03aeacab5995df89db1566902e0cdff83aba0e"
+        },
+        {
+          "path": ".local/evidence/stable-02/run-01/contracts.log",
+          "sha256": "1cbf939139808b83adc5b4de9c51bb5fb6c20993f18a83833cfe108f8f536731"
+        }
+      ]
+    },
+    {
+      "id": "x360n.session launch requires matching path and exact XEX bytes",
+      "state": "PASS",
+      "required": true,
+      "commit": "f84436df94ab2e17275fa4272107cc1aa4c400f3",
+      "evidence": [
+        {
+          "path": ".local/evidence/stable-02/run-01/contracts.xml",
+          "sha256": "7ffae601f4a301127268a2badb03aeacab5995df89db1566902e0cdff83aba0e"
+        },
+        {
+          "path": ".local/evidence/stable-02/run-01/contracts.log",
+          "sha256": "1cbf939139808b83adc5b4de9c51bb5fb6c20993f18a83833cfe108f8f536731"
+        }
+      ]
+    },
+    {
+      "id": "x360n.session stops rapid loops and never retries failures or invalid transitions",
+      "state": "PASS",
+      "required": true,
+      "commit": "f84436df94ab2e17275fa4272107cc1aa4c400f3",
+      "evidence": [
+        {
+          "path": ".local/evidence/stable-02/run-01/contracts.xml",
+          "sha256": "7ffae601f4a301127268a2badb03aeacab5995df89db1566902e0cdff83aba0e"
+        },
+        {
+          "path": ".local/evidence/stable-02/run-01/contracts.log",
+          "sha256": "1cbf939139808b83adc5b4de9c51bb5fb6c20993f18a83833cfe108f8f536731"
+        }
+      ]
+    },
+    {
+      "id": "x360n.session hands only its dashboard's verified avatar files to an avatar title",
+      "state": "PASS",
+      "required": true,
+      "commit": "f84436df94ab2e17275fa4272107cc1aa4c400f3",
+      "evidence": [
+        {
+          "path": ".local/evidence/stable-02/run-01/contracts.xml",
+          "sha256": "7ffae601f4a301127268a2badb03aeacab5995df89db1566902e0cdff83aba0e"
+        },
+        {
+          "path": ".local/evidence/stable-02/run-01/contracts.log",
+          "sha256": "1cbf939139808b83adc5b4de9c51bb5fb6c20993f18a83833cfe108f8f536731"
+        }
+      ]
+    },
+    {
+      "id": "sdkcheck.Profiles are storage content listed refreshed and locked while signed in",
+      "state": "PASS",
+      "required": true,
+      "commit": "f84436df94ab2e17275fa4272107cc1aa4c400f3",
+      "evidence": [
+        {
+          "path": ".local/evidence/stable-02/run-01/contracts.xml",
+          "sha256": "7ffae601f4a301127268a2badb03aeacab5995df89db1566902e0cdff83aba0e"
+        },
+        {
+          "path": ".local/evidence/stable-02/run-01/contracts.log",
+          "sha256": "1cbf939139808b83adc5b4de9c51bb5fb6c20993f18a83833cfe108f8f536731"
+        }
+      ]
+    },
+    {
+      "id": "sdkcheck.Profile packages and failed session writes preserve the last committed identities",
+      "state": "PASS",
+      "required": true,
+      "commit": "f84436df94ab2e17275fa4272107cc1aa4c400f3",
+      "evidence": [
+        {
+          "path": ".local/evidence/stable-02/run-01/contracts.xml",
+          "sha256": "7ffae601f4a301127268a2badb03aeacab5995df89db1566902e0cdff83aba0e"
+        },
+        {
+          "path": ".local/evidence/stable-02/run-01/contracts.log",
+          "sha256": "1cbf939139808b83adc5b4de9c51bb5fb6c20993f18a83833cfe108f8f536731"
+        }
+      ]
+    },
+    {
+      "id": "sdkcheck.Local profile rejects corruption and failed disk writes without publishing state",
+      "state": "PASS",
+      "required": true,
+      "commit": "f84436df94ab2e17275fa4272107cc1aa4c400f3",
+      "evidence": [
+        {
+          "path": ".local/evidence/stable-02/run-01/contracts.xml",
+          "sha256": "7ffae601f4a301127268a2badb03aeacab5995df89db1566902e0cdff83aba0e"
+        },
+        {
+          "path": ".local/evidence/stable-02/run-01/contracts.log",
+          "sha256": "1cbf939139808b83adc5b4de9c51bb5fb6c20993f18a83833cfe108f8f536731"
+        }
+      ]
+    },
+    {
+      "id": "sdkcheck.Confirmed profile deletion removes only the profile package and keeps account content",
+      "state": "PASS",
+      "required": true,
+      "commit": "f84436df94ab2e17275fa4272107cc1aa4c400f3",
+      "evidence": [
+        {
+          "path": ".local/evidence/stable-02/run-01/contracts.xml",
+          "sha256": "7ffae601f4a301127268a2badb03aeacab5995df89db1566902e0cdff83aba0e"
+        },
+        {
+          "path": ".local/evidence/stable-02/run-01/contracts.log",
+          "sha256": "1cbf939139808b83adc5b4de9c51bb5fb6c20993f18a83833cfe108f8f536731"
+        }
+      ]
+    },
+    {
+      "id": "sdkcheck.Save storage reports real failures and completes overlapped operations",
+      "state": "PASS",
+      "required": true,
+      "commit": "f84436df94ab2e17275fa4272107cc1aa4c400f3",
+      "evidence": [
+        {
+          "path": ".local/evidence/stable-02/run-01/contracts.xml",
+          "sha256": "7ffae601f4a301127268a2badb03aeacab5995df89db1566902e0cdff83aba0e"
+        },
+        {
+          "path": ".local/evidence/stable-02/run-01/contracts.log",
+          "sha256": "1cbf939139808b83adc5b4de9c51bb5fb6c20993f18a83833cfe108f8f536731"
+        }
+      ]
+    },
+    {
+      "id": "sdkcheck.Local profiles enumerate independently switch atomically and survive restart",
+      "state": "PASS",
+      "required": true,
+      "commit": "f84436df94ab2e17275fa4272107cc1aa4c400f3",
+      "evidence": [
+        {
+          "path": ".local/evidence/stable-02/run-01/contracts.xml",
+          "sha256": "7ffae601f4a301127268a2badb03aeacab5995df89db1566902e0cdff83aba0e"
+        },
+        {
+          "path": ".local/evidence/stable-02/run-01/contracts.log",
+          "sha256": "1cbf939139808b83adc5b4de9c51bb5fb6c20993f18a83833cfe108f8f536731"
+        }
+      ]
+    },
+    {
+      "id": "sdkcheck.Save storage routes separate volumes and enforces capacity through NT",
+      "state": "PASS",
+      "required": true,
+      "commit": "f84436df94ab2e17275fa4272107cc1aa4c400f3",
+      "evidence": [
+        {
+          "path": ".local/evidence/stable-02/run-01/contracts.xml",
+          "sha256": "7ffae601f4a301127268a2badb03aeacab5995df89db1566902e0cdff83aba0e"
+        },
+        {
+          "path": ".local/evidence/stable-02/run-01/contracts.log",
+          "sha256": "1cbf939139808b83adc5b4de9c51bb5fb6c20993f18a83833cfe108f8f536731"
+        }
+      ]
+    },
+    {
+      "id": "x360n.preparation-receipt-publication",
+      "state": "PASS",
+      "required": true,
+      "commit": "f84436df94ab2e17275fa4272107cc1aa4c400f3",
+      "evidence": [
+        {
+          "path": ".local/evidence/stable-02/run-01/contracts.xml",
+          "sha256": "7ffae601f4a301127268a2badb03aeacab5995df89db1566902e0cdff83aba0e"
+        },
+        {
+          "path": ".local/evidence/stable-02/run-01/contracts.log",
+          "sha256": "1cbf939139808b83adc5b4de9c51bb5fb6c20993f18a83833cfe108f8f536731"
+        }
+      ]
+    },
+    {
+      "id": "sdkcheck.save-storage-processes",
+      "state": "PASS",
+      "required": true,
+      "commit": "f84436df94ab2e17275fa4272107cc1aa4c400f3",
+      "evidence": [
+        {
+          "path": ".local/evidence/stable-02/run-01/contracts.xml",
+          "sha256": "7ffae601f4a301127268a2badb03aeacab5995df89db1566902e0cdff83aba0e"
+        },
+        {
+          "path": ".local/evidence/stable-02/run-01/contracts.log",
+          "sha256": "1cbf939139808b83adc5b4de9c51bb5fb6c20993f18a83833cfe108f8f536731"
+        }
+      ]
+    },
+    {
+      "id": "desktop.catalog",
+      "state": "PASS",
+      "required": true,
+      "commit": "f84436df94ab2e17275fa4272107cc1aa4c400f3",
+      "evidence": [
+        {
+          "path": ".local/evidence/stable-02/run-01/desktop.xml",
+          "sha256": "1736c94cda78d29804186d4db76143f49b0eaaa789b5c9d80236d4db3d15220d"
+        },
+        {
+          "path": ".local/evidence/stable-02/run-01/desktop.log",
+          "sha256": "f448aac447deee44439356c6eee8629b8b4a336a94818b8ba22e7800672be688"
+        }
+      ]
+    },
+    {
+      "id": "desktop.update-recovery",
+      "state": "PASS",
+      "required": true,
+      "commit": "f84436df94ab2e17275fa4272107cc1aa4c400f3",
+      "evidence": [
+        {
+          "path": ".local/evidence/stable-02/run-01/desktop.xml",
+          "sha256": "1736c94cda78d29804186d4db76143f49b0eaaa789b5c9d80236d4db3d15220d"
+        },
+        {
+          "path": ".local/evidence/stable-02/run-01/desktop.log",
+          "sha256": "f448aac447deee44439356c6eee8629b8b4a336a94818b8ba22e7800672be688"
+        }
+      ]
+    },
+    {
+      "id": "synthetic-recovery",
+      "state": "PASS",
+      "required": true,
+      "commit": "f84436df94ab2e17275fa4272107cc1aa4c400f3",
+      "evidence": [
+        {
+          "path": ".local/evidence/stable-02/run-01/synthetic.xml",
+          "sha256": "d9891222145b7748278790a25edbcbb17822685affd3edffe95f566ac28026fb"
+        },
+        {
+          "path": ".local/evidence/stable-02/run-01/synthetic.log",
+          "sha256": "ac7fcea1c4068fb535863ae7d281766d9cabc3e62dbc7ad70a481ce6d0754277"
+        }
+      ]
+    },
+    {
+      "id": "original-17559-cycle-input-audio-profiles",
+      "state": "NOT RUN",
+      "required": true,
+      "commit": "f84436df94ab2e17275fa4272107cc1aa4c400f3",
+      "evidence": []
+    },
+    {
+      "id": "application-import-prepare",
+      "state": "NOT RUN",
+      "required": true,
+      "commit": "f84436df94ab2e17275fa4272107cc1aa4c400f3",
+      "evidence": []
+    },
+    {
+      "id": "commercial-save-load",
+      "state": "NOT RUN",
+      "required": true,
+      "commit": "f84436df94ab2e17275fa4272107cc1aa4c400f3",
+      "evidence": []
+    },
+    {
+      "id": "clean-windows-distribution-update",
+      "state": "NOT RUN",
+      "required": true,
+      "commit": "f84436df94ab2e17275fa4272107cc1aa4c400f3",
+      "evidence": []
+    }
+  ],
+  "blockers": [
+    "original-17559-cycle-input-audio-profiles: NOT RUN",
+    "application-import-prepare: NOT RUN",
+    "commercial-save-load: NOT RUN",
+    "clean-windows-distribution-update: NOT RUN"
+  ],
+  "historical_matrix": "docs/stability/matrix.json",
+  "note": "Historical failures were not reused. No original content executed. Local evidence must remain intact; verifier also requires the recorded source HEAD.",
+  "verification_evidence": [
+    {
+      "path": ".local/evidence/stable-02/run-01/verify.log",
+      "sha256": "f2128457a2bcc2a75eb2e83cb346eed710840dffe0cc7b3aa9998b485255f88f"
+    },
+    {
+      "path": ".local/evidence/stable-02/run-01/verify.exit.txt",
+      "sha256": "f1b2f662800122bed0ff255693df89c4487fbdcf453d3524a42d4ec20c3d9c04"
+    }
+  ]
+}

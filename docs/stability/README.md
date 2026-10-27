@@ -1,4 +1,10 @@
-# STABLE-01 — contrato candidato, baseline Preview 25
+# Contrato candidato de estabilidade, baseline Preview 25
+
+Recertificação atual: [STABLE-02](execution-stable-02-2026-10-27.md), main
+`f84436d`, com [matriz por contrato](matrix-stable-02.json).
+A [execução STABLE-01](execution-2026-10-27.md) e sua matriz
+preservam o FAIL histórico; não representam o resultado da main corrigida.
+Ensaio futuro: [roteiro de persistência](persistence-rehearsal.md).
 
 Primeiro alvo: **Windows x64, Release, Xenos D3D12, dashboard Retail
 17559 original**. Ainda não certificado. Native e Vulkan permanecem
@@ -16,7 +22,7 @@ aceite entre backends, dashboards ou revisões de jogos.
 `criteria.json` fixa os nomes individuais obrigatórios. O runner executa apenas
 esse conjunto focado, dois testes desktop existentes e o cenário novo de
 recuperação. Não abre originais nem usa Computer Use. Usa os binários Release
-atuais da main e compila os testes desktop alterados na worktree isolada.
+atuais da main e compila os testes desktop no checkout indicado.
 Não muda o SDK: verifica o pin e os hashes de todos os patches/arquivos finais.
 
 Configurar o desktop isolado com `scripts/devshell.cmd cmake`, usando
@@ -85,9 +91,9 @@ dos perfis/saves/conteúdo preservados. Probes sintéticos não substituem esse 
 
 ## Limites e sequência das próximas correções
 
-1. Integrar e acompanhar a correção de colisão de diretórios de execução:
-   main mantém FAIL no relançamento; a candidata aloca diretório exclusivo
-   atomicamente, preservando a recusa de handoff antigo e todos os logs.
+1. A correção de colisão de diretórios `c788f9d` já integra a main `f84436d`.
+   Consultar a execução STABLE-02 para seu resultado atual; o FAIL da STABLE-01
+   continua histórico, sem ser reutilizado como veredicto da revisão corrigida.
 2. Renovar somente os recibos necessários ao jogo escolhido para save/load;
    resolver falhas de preparo sem afrouxar verificações. Castle tem marcador
    incompleto; outros títulos têm recibos antigos conforme auditoria Preview 25.
