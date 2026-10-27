@@ -1,5 +1,18 @@
 # STATUS
 
+27/10 — **auditoria da preview.25**: main inicial `b50671c6…18e3`, replay
+limpo de 201 patches/271 hashes sem divergências, Release D3D12/Vulkan,
+903/28 XAM/UI e 767/19 AOT aprovados. Xenos: 2.324 casos/API e 45 diferenças
+R8/API históricas preservadas. Quatro probes Native falham de modo idêntico ao
+baseline; triagem N-PERF-01 não mostrou regressão grave reproduzível. Corrigidos
+o include RenderDoc do probe Vulkan, seu teste de ABI e dois fixtures de sessão,
+sem enfraquecer as rejeições de produção. 17559 concluiu preparo novo; Minecraft
+chegou ao tutorial, e A/B concluíram a caixa original nos dois jogos autorizados.
+Três tentativas limitadas sem crash e 37/37 arquivos de origem preservados em
+cada. Movimento Minecraft/condução Forza não recertificados; outros recibos
+locais antigos continuam exigindo preparo. [Auditoria e NOT RUN](docs/reports/release-audit-2026-10-27.md),
+[notas da candidata 0.69.27-preview.25](docs/releases/0.69.27-preview.25.md).
+
 27/10 — **caixa de mensagem original validada**: snapshot anterior publicado
 em `origin/main` (`fb99547`). 0213 substitui o caminho ImGui/headless-default de
 `XamShowMessageBoxUI` pelo pedido original FE/2100D de 1.148 bytes. O host 17559
@@ -626,8 +639,8 @@ pela My Games e gameplay continuam pendentes. [Evidência histórica](docs/repor
 
 Windows x64/D3D12 é o ambiente demonstrado. Linux, macOS, ARM64 e Windows limpo
 continuam sem aceite funcional completo. ReXGlue v0.10.0 permanece fixado em
-`f5337cdc947ff6d4c4196737e2c807a48f2a1fc2`, LLVM 22.1.8, **104 patches ativos**
-no [lock](deps.lock.json); numeração até 0105, com 0073 retirado.
+`f5337cdc947ff6d4c4196737e2c807a48f2a1fc2`, LLVM 22.1.8, **201 patches ativos**
+no [lock](deps.lock.json); numeração até 0214, com retirados fora da cadeia ativa.
 O submódulo modificado pelos patches/materialização do libmspack é esperado.
 Nunca substituir módulos ou fontes originais entre versões de dashboard.
 

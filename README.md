@@ -32,7 +32,7 @@ The project also works to run the **original Xbox 360 dashboard** as its own tar
 
 <a id="current-status"></a>
 
-## Current status · 18 October 2026
+## Current status · 27 October 2026
 
 The primary demonstrated configuration is **Windows x64 with the Xenos D3D12 graphics backend**. Other operating systems and CPU architectures are goals, not supported releases. Recorded compatibility observations refer to specific source revisions and local tests; the published package does not automatically certify the same behavior on every Windows system or content dump.
 
@@ -45,11 +45,15 @@ The primary demonstrated configuration is **Windows x64 with the Xenos D3D12 gra
 | **Motocross Madness 0.0.0.3** | Historical tutorial movement/objectives; terrain/rider fixes, restored AOT callback and original 17559 sign-in callback; bounded runtime smoke recorded swaps. | Complete My Games/profile/Guide flow, graphics fidelity, full races and commercial save/load are not certified. |
 | **Iruka / Dolphin sample (historical)** | Rendering and animation regression checks. | Removed from local inputs by the maintainer on 18 October. Input, audio, normal shutdown, and long sessions remain unvalidated. |
 | **Charlie Murder 0.0.0.2** | AOT preparation, 31 native DLL registrations and My Games routing verified. An isolated session reached HostLoader, RuntimeHost and NetCF bootstrap, then returned to the dashboard. | XNA initialization, rendering, input, Guide, gameplay and saves remain unvalidated; NetCF PTE mapping blocker documented. |
-| **Native D3D12 renderer** | Experimental dashboard/game flows were observed. | Development is suspended; performance is not approved, an occlusion query is missing, and Vulkan is unavailable. Xenos results do not transfer to Native. |
+| **Minecraft Xbox 360 Edition 0.0.0.1** | Generic AOT reached the trial tutorial, movement and block extraction on Xenos D3D12. | Bounded sessions; commercial save/reload and sustained playability are unverified. |
+| **Forza Horizon 2 0.0.0.12** | Generic AOT reached the initial drive with HUD/minimap and input on Xenos D3D12. | Campaign, save/reload, Native and sustained playability are unverified. |
+| **Native D3D12/Vulkan renderers** | Experimental execution and synthetic GPU contracts; Vulkan writeback measurements are recorded in N-PERF-01. | Experimental; MEMEXPORT/occlusion probes retain documented failures. No gameplay FPS approval. Xenos results do not transfer to Native. |
 
 **No listed game is certified as Playable or Fully Functional.** A short launch, a successful build, or reaching a menu does not establish complete gameplay, progression, saves, or overall compatibility. The detailed [compatibility matrix](docs/compatibility.md) and dated [project status](STATUS.md) contain evidence and qualifications.
 
 The [18 October audit closure](docs/reports/audit-closure-2026-10-18.md) records incremental rebuild measurements, product integrity and the remaining manual acceptance checks. No game sessions or new release were produced by that audit.
+
+The [preview.25 notes](docs/releases/0.69.27-preview.25.md) describe the newer Generic AOT/CRT, original HUD message boxes and Xenos/Native changes, with dated evidence and limits.
 
 ### Engineering progress since preview.21
 
@@ -83,7 +87,7 @@ The 17559 `vk.xex` is the identified Retail 17559 component. The 13604 `vk.xex` 
 
 ## See the original dashboard
 
-These are real 1280×720 GPU readback screenshots captured on 14 October 2026 during a dashboard navigation comparison. Home uses the default **Xenos / D3D12** backend. Games uses the **experimental Native D3D12** backend, whose development is suspended and whose performance is not approved. They show dashboard states, not gameplay or a performance benchmark, and the two images are not a backend comparison.
+These are real 1280×720 GPU readback screenshots captured on 14 October 2026 during a dashboard navigation comparison. Home uses the default **Xenos / D3D12** backend. Games uses the **experimental Native D3D12** backend, whose performance is not approved. They show dashboard states, not gameplay or a performance benchmark, and the two images are not a backend comparison.
 
 | Dashboard 17559 · Home · Xenos | Dashboard 17559 · Games · Native experimental |
 |---|---|
@@ -105,9 +109,9 @@ More detail: [architecture and decisions](docs/architecture.md), [universal libr
 
 ## Download and try the preview
 
-**[Download the experimental Windows x64 preview](https://github.com/fabegalo/x360-native/releases/tag/v0.1.0-preview.22).** v0.1.0-preview.22 is a technical preview, not a general compatibility release. It contains the desktop app, not proprietary Xbox content, game binaries or the complete build toolchain. Clean Windows first-use is unverified.
+**[Download the experimental Windows x64 preview](https://github.com/fabegalo/x360-native/releases/tag/v0.69.27-preview.25).** v0.69.27-preview.25 is a technical preview, not a general compatibility release. It contains the desktop app, not proprietary Xbox content, game binaries or the complete build toolchain. Clean Windows first-use is unverified. [Release notes](docs/releases/0.69.27-preview.25.md).
 
-1. Download the Windows x64 application ZIP and matching SHA-256 checksum from the [preview.22 Release page](https://github.com/fabegalo/x360-native/releases/tag/v0.1.0-preview.22). GitHub's automatic “Source code” archives are not the application.
+1. Download the Windows x64 application ZIP and matching SHA-256 checksum from the [preview.25 Release page](https://github.com/fabegalo/x360-native/releases/tag/v0.69.27-preview.25). GitHub's automatic “Source code” archives are not the application.
 2. Extract the complete ZIP and run `x360-native.exe`. Keep its `data/` folder: it stores the local environment, imported content, preparations, and settings.
 3. In the app, import dashboard files and games that you are authorized to use. The app identifies them and reports missing or unsupported components.
 4. Prepare a supported dashboard and any game you want to try. The app obtains pinned tools with consent and compiles locally; additional Microsoft C++ build components may require their official installer.

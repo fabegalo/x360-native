@@ -32,7 +32,7 @@ O projeto também busca executar a **dashboard original do Xbox 360** como um al
 
 <a id="estado-atual"></a>
 
-## Estado atual · 18 de outubro de 2026
+## Estado atual · 27 de outubro de 2026
 
 A configuração principal demonstrada é **Windows x64 com o backend gráfico Xenos D3D12**. Outros sistemas operacionais e arquiteturas são objetivos, não plataformas com suporte de distribuição. As observações de compatibilidade se referem a revisões identificadas e testes locais; a prévia publicada não certifica automaticamente os mesmos resultados em qualquer Windows ou conjunto de arquivos.
 
@@ -45,11 +45,15 @@ A configuração principal demonstrada é **Windows x64 com o backend gráfico X
 | **Motocross Madness 0.0.0.3** | Movimento/objetivos no tutorial histórico; correções de terreno/piloto, callback AOT restaurado e callback original de sign-in 17559; smoke limitado registrou swaps. | Fluxo completo My Games/perfil/Guide, fidelidade visual, corridas completas e save/load comercial sem aceite. |
 | **Amostra Iruka / Dolphin (histórico)** | Verificações de regressão de renderização e animação. | Removida dos inputs locais pelo mantenedor em 18/10. Entrada, áudio, encerramento normal e sessões longas continuam sem validação. |
 | **Charlie Murder 0.0.0.2** | Preparação AOT, registro das 31 DLLs nativas e roteamento My Games verificados. Sessão isolada alcançou HostLoader, RuntimeHost e bootstrap NetCF, retornando à dashboard. | Inicialização XNA, renderização, entrada, Guide, gameplay e saves sem aceite; bloqueio PTE/mapper NetCF documentado. |
-| **Renderer Native D3D12** | Fluxos experimentais de dashboard/jogo foram observados. | Desenvolvimento suspenso; desempenho não aprovado, falta uma consulta de oclusão e Vulkan está indisponível. Resultados do Xenos não se aplicam ao Native. |
+| **Minecraft Xbox 360 Edition 0.0.0.1** | AOT genérico chegou ao tutorial de avaliação, deslocamento e extração de blocos em Xenos D3D12. | Tentativas limitadas; save/reload comercial e jogabilidade sustentada sem aceite. |
+| **Forza Horizon 2 0.0.0.12** | AOT genérico chegou à condução inicial com HUD/minimapa e entrada em Xenos D3D12. | Campanha, save/reload, Native e jogabilidade sustentada sem aceite. |
+| **Renderers Native D3D12/Vulkan** | Execução experimental e contratos GPU sintéticos; medições de writeback Vulkan em N-PERF-01. | Experimental; probes MEMEXPORT/oclusão mantêm falhas documentadas. FPS de gameplay sem aceite. Resultados do Xenos não se aplicam ao Native. |
 
 **Nenhum jogo listado está certificado como Jogável ou Plenamente Funcional.** Um início breve, build bem-sucedido ou chegada a um menu não comprova gameplay completo, progressão, saves ou compatibilidade geral. A [matriz de compatibilidade](docs/compatibility.md) e o [estado do projeto](STATUS.md), com datas, registram as evidências e ressalvas detalhadas.
 
 O [fechamento da auditoria de 18/10](docs/reports/audit-closure-2026-10-18.md) registra medições incrementais, integridade dos produtos e aceites manuais restantes. Essa auditoria não executou jogos nem produziu nova Release.
+
+As [notas da preview.25](docs/releases/0.69.27-preview.25.md) detalham AOT/CRT genéricos, caixas de mensagem no HUD original e mudanças Xenos/Native, com evidências datadas e limites.
 
 ### Avanços técnicos desde a preview.21
 
@@ -83,7 +87,7 @@ O `vk.xex` 17559 identificado corresponde à versão Retail 17559. O `vk.xex` 13
 
 ## Veja a dashboard original
 
-Estas são capturas reais de leitura da GPU em 1280×720, feitas em 14 de outubro de 2026 durante uma comparação de navegação da dashboard. A Home usa o backend padrão **Xenos / D3D12**. Games usa o backend **Native D3D12 experimental**, cujo desenvolvimento está suspenso e cujo desempenho não foi aprovado. As imagens mostram estados da dashboard, não gameplay nem um benchmark de desempenho, e não são uma comparação entre os dois backends.
+Estas são capturas reais de leitura da GPU em 1280×720, feitas em 14 de outubro de 2026 durante uma comparação de navegação da dashboard. A Home usa o backend padrão **Xenos / D3D12**. Games usa o backend **Native D3D12 experimental**, cujo desempenho não foi aprovado. As imagens mostram estados da dashboard, não gameplay nem um benchmark de desempenho, e não são uma comparação entre os dois backends.
 
 | Dashboard 17559 · Home · Xenos | Dashboard 17559 · Games · Native experimental |
 |---|---|
@@ -105,9 +109,9 @@ Mais detalhes: [arquitetura e decisões](docs/architecture.md), [biblioteca e pr
 
 ## Baixe e experimente a prévia
 
-**[Baixe a prévia experimental para Windows x64](https://github.com/fabegalo/x360-native/releases/tag/v0.1.0-preview.22).** A v0.1.0-preview.22 é uma prévia técnica, não uma versão de compatibilidade geral. Contém o aplicativo desktop, não conteúdo proprietário do Xbox, binários de jogos nem a toolchain completa. Windows limpo continua sem aceite.
+**[Baixe a prévia experimental para Windows x64](https://github.com/fabegalo/x360-native/releases/tag/v0.69.27-preview.25).** A v0.69.27-preview.25 é uma prévia técnica, não uma versão de compatibilidade geral. Contém o aplicativo desktop, não conteúdo proprietário do Xbox, binários de jogos nem a toolchain completa. Windows limpo continua sem aceite. [Notas da Release](docs/releases/0.69.27-preview.25.md).
 
-1. Baixe o ZIP Windows x64 e seu checksum SHA-256 da [Release preview.22](https://github.com/fabegalo/x360-native/releases/tag/v0.1.0-preview.22). Os arquivos automáticos “Source code” do GitHub não são o aplicativo.
+1. Baixe o ZIP Windows x64 e seu checksum SHA-256 da [Release preview.25](https://github.com/fabegalo/x360-native/releases/tag/v0.69.27-preview.25). Os arquivos automáticos “Source code” do GitHub não são o aplicativo.
 2. Extraia o ZIP inteiro e execute `x360-native.exe`. Preserve a pasta `data/`: ela armazena o ambiente local, conteúdo importado, preparações e configurações.
 3. No aplicativo, importe arquivos de dashboard e jogos que você esteja autorizado a usar. O programa os identifica e informa componentes ausentes ou sem suporte.
 4. Prepare uma dashboard compatível e os jogos que deseja experimentar. Com consentimento, o app obtém ferramentas fixadas e compila localmente; componentes adicionais de C++ da Microsoft podem exigir o instalador oficial.

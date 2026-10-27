@@ -1,6 +1,6 @@
 # Matriz de resultados
 
-Consolidada em **2026-10-18**. Resultados por conteúdo e backend; não há título
+Consolidada em **2026-10-27**. Resultados por conteúdo e backend; não há título
 certificado como plenamente funcional. Importar, gerar e compilar não comprovam
 jogabilidade. Os links preservam hashes completos, runs, testes e falhas anteriores.
 
@@ -13,18 +13,30 @@ jogabilidade. Os links preservam hashes completos, runs, testes e falhas anterio
 | Castle Crashers 584108B7 / 0.0.1.3 | Menu, entrada e ciclo original 17559 ↔ jogo; cenas observadas no trial Native N3 | Sem campanha/save/load comercial ou licença completa certificados. [Castle](reports/titles/validation-castle-crashers.md), [N3](reports/graphics/native-renderer-n3.md) |
 | Motocross Madness 58410B0F / 0.0.0.3 | Tutorial histórico; correções de terreno/piloto em 16/10. Callback `0x82B36410`, dependência 17559 e perfil existente em cópia verificados em 18/10 | Callback de sign-in corrigido, sem novo teste pela interface. Corrida completa, fidelidade e save/load pendentes. [Avatares](avatar-system.md#16-construtores-estáticos-do-xam-17559-2026-10-16), [auditoria](reports/audit-closure-2026-10-18.md) |
 | Forza Horizon 4D5309C9 / 0.0.0.10 / Xenos | My Games → condução com entrada/áudio → Guide/Xbox Home → 17559, mesma janela/perfil | Ciclo com recibos aprovado em 14/10; X2 em harness isolado, gate de produção não recertificado e navegação pós-retorno inconclusiva. Campanha/saves pendentes. [Forza](reports/titles/validation-forza-horizon.md), [X2](reports/graphics/xenos-fetch-predication.md) |
-| Charlie Murder 58410B83 / 0.0.0.2 | Recibos atuais e 31 DLLs verificados; pedido My Games executou HostLoader/RuntimeHost/NetCF e retornou sozinho. Registro duplicado por tipo divergente corrigido genericamente | Bootstrap XNA incompleto; renderização, entrada, Guide/Xbox Home, gameplay e saves não aprovados. [Teste manual e limites](reports/charlie-functional-2026-10-18.md) |
+| Charlie Murder 58410B83 / 0.0.0.2 | Em 18/10, recibos e 31 DLLs verificados; pedido My Games executou HostLoader/RuntimeHost/NetCF e retornou sozinho. Registro duplicado por tipo divergente corrigido genericamente | Bootstrap XNA incompleto; renderização, entrada, Guide/Xbox Home, gameplay e saves não aprovados. Recibo antigo exige novo preparo no SDK atual. [Teste manual e limites](reports/charlie-functional-2026-10-18.md) |
 | Minecraft 584111F7 / 0.0.0.1 / genérico / Xenos D3D12 | 27/10, build com 0212: tutorial 3D, deslocamento e extração de madeira na hotbar; 120 s sem crash usando configuração global. Build 0210 também mostrou pesca | Cópia completa isolada do console, encerramento no limite. Versão de avaliação explícita; save/reload e versão integral sem aceite. [Evidência](reports/titles/generic-forza-horizon-2-minecraft-2026-10-26.md) |
 | Forza Horizon 2 4D530AA4 / 0.0.0.12 / genérico / Xenos D3D12 | 27/10, build com 0212: introdução e condução “Dirija até o Festival”, HUD/minimapa, 138–206 km/h e distância 9,3 → 6,9 km; 180 s sem crash | Console completo isolado, encerramento no limite. Campanha, save/reload e Native sem aceite; a lista nula anterior não reapareceu nesta tentativa, sem causa demonstrada. [Evidência](reports/titles/generic-forza-horizon-2-minecraft-2026-10-26.md) |
 
-## Native D3D12
+## Native D3D12/Vulkan
 
-Backend experimental separado, **desenvolvimento suspenso**. Retail 17559 em
+Backend experimental separado, retomado na G3 de 22–23/10. Retail 17559 em
 boot direto → Castle trial → retorno demonstrado em [N3](reports/graphics/native-renderer-n3.md).
 Forza passou do bloqueio PointList; [N4.1](reports/graphics/native-renderer-n4-1.md) corrigiu cores
 e [N4.2](reports/graphics/native-renderer-n4-2.md) chegou à condução, com entrada confirmada.
-Desempenho não aprovado, hitches e `EVENT_WRITE_ZPD` (0x5B) não implementado.
-Vulkan indisponível. Compatibilidade e desempenho Xenos não são herdados.
+Desempenho de gameplay não aprovado. A G3 implementou ZPD e Vulkan, mas os
+probes de oclusão ainda falham na invalidação dos aliases guest; MEMEXPORT
+mantém falhas em triângulos incompletos, aliases e quatro conversões inteiras
+Vulkan. O baseline reproduz essas falhas; não estão corrigidas.
+[N-PERF-01](../tests/native/PERF-01.md) mede writebacks Vulkan em cenários
+sintéticos, sem certificar FPS ou gameplay. Compatibilidade Xenos não é herdada.
+
+## HUD original 17559
+
+`XamShowMessageBoxUI` usa o HUD/XUI original da versão selecionada (0213/0214),
+com conclusão assíncrona no contexto do solicitante. A confirmou o índice 1,
+B cancelou com 1627/1223 e ambos retornaram ao Minecraft; B também retornou
+à abertura do Forza Horizon 2. Navegação entre botões ainda sem aceite.
+[Evidências e limites](reports/original-message-box-2026-10-27.md).
 
 ## Importação, perfis e armazenamento
 

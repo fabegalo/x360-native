@@ -13,7 +13,7 @@ No exemplo anterior (RGBA8, MSAA 2×, escala 2×, offset parcial, bias +1,
 pixel 16,1), Y deve ser 33, não 34; o byte 2064 deve ser `23`, não `FF`.
 Os 120 casos são 30 por combinação fonte 32/64bpp × swap on/off.
 
-Consulta XERJ exclusivamente local e confronto dos fontes confirmaram a
+O confronto dos fontes confirmou a
 separação de coordenadas do Canary e a reutilização de amostras de 0200.
 Mantido o layout do SDK pinado: bit 0 da amostra é Y, bit 1 é X;
 o interleave 4×4 mais novo do Canary não corresponde aos produtores deste SDK.
