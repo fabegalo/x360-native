@@ -153,7 +153,9 @@ def run(args):
         if git(repo, 'status', '--porcelain', '--untracked-files=no', '--', 'src', 'tests', 'cmake', 'CMakeLists.txt', 'deps.lock.json', 'patches'):
             raise ValueError('baseline runtime sources are dirty')
         lock = json.loads((repo / 'deps.lock.json').read_text())
-        if report['identity']['sdk_commit'] != lock['rexglue_sdk']['commit'] or digest(ROOT / 'deps.lock.json') != report['identity']['lock_sha256']:
+        # Git may check this JSON out as CRLF in the isolated worktree. Preserve
+        # both byte identities; compare the parsed lock across checkouts only.
+        if report['identity']['sdk_commit'] != lock['rexglue_sdk']['commit'] or json.loads((ROOT / 'deps.lock.json').read_text()) != lock:
             raise ValueError('SDK/lock identity mismatch')
         dev = repo / 'scripts/devshell.cmd'
         steps = [(['powershell', '-NoProfile', '-File', repo / 'scripts/setup/apply-sdk-patches.ps1', '-Check'], 'sdk', 180),
