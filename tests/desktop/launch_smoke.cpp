@@ -1,5 +1,5 @@
 // Explicit, bounded diagnostic only. Never registered as an automatic test.
-// <root> <title> <output> <isolated-user> <dashboard> [seconds] [--probe-storage] [--xenos-d3d12] [--debug-log]
+// <root> <title> <output> <isolated-user> <dashboard> [seconds] [--probe-storage|--probe-message-box] [--xenos-d3d12] [--debug-log]
 #include "catalog.h"
 #include "launch_preflight.h"
 #include "digest_batch.h"
@@ -19,7 +19,7 @@
 using namespace x360n;
 using namespace x360n::desktop;
 int main(int argc, char** argv) {
-  if (argc < 6 || argc > 11) return 2;
+  if (argc < 6 || argc > 12) return 2;
   namespace fs = std::filesystem;
   try {
     const ProjectPaths paths{fs::absolute(PathFromUtf8(argv[1]))};
@@ -28,10 +28,11 @@ int main(int argc, char** argv) {
     const auto user = fs::absolute(PathFromUtf8(argv[4]));
     const std::string dashboard_id = argv[5];
     const auto seconds = argc >= 7 ? std::stoi(argv[6]) : 30;
-    bool storage_probe = false, xenos_d3d12 = false, debug_log = false;
+    bool storage_probe = false, message_box_probe = false, xenos_d3d12 = false, debug_log = false;
     uint64_t crash_memory_base = 0;
     for (int i = 7; i < argc; ++i) {
       if (std::string(argv[i]) == "--probe-storage") storage_probe = true;
+      else if (std::string(argv[i]) == "--probe-message-box") message_box_probe = true;
       else if (std::string(argv[i]) == "--xenos-d3d12") xenos_d3d12 = true;
       else if (std::string(argv[i]) == "--debug-log") debug_log = true;
       else if (std::string(argv[i]).starts_with("--crash-memory-base="))
@@ -39,6 +40,7 @@ int main(int argc, char** argv) {
       else return 2;
     }
     if (seconds < 1 || seconds > 180) throw std::runtime_error("Diagnostic duration must be 1..180 seconds");
+    if (storage_probe && message_box_probe) throw std::runtime_error("Select one modal service probe per attempt");
     if (fs::exists(output) || !fs::is_directory(user)) return 2;
     if (!IsWithin(user, paths.local() / "evidence") || !IsWithin(output.parent_path(), paths.local() / "evidence") ||
         IsWithin(output.parent_path(), user))
@@ -107,6 +109,11 @@ int main(int argc, char** argv) {
         throw std::runtime_error("Storage service probe requires the verified 17559 host");
       args.push_back("--dash17559_selector_probe_seconds=5");
     }
+    if (message_box_probe) {
+      if (dashboard.dashboard_version != "2.0.17559.0" || dashboard.system_ui_host.empty())
+        throw std::runtime_error("Message-box service probe requires the verified 17559 host");
+      args.push_back("--dash17559_message_box_probe_seconds=5");
+    }
     args.push_back("--log_file=" + PathUtf8(output / "rex.log"));
     if (debug_log) args.push_back("--log_level=debug");
     if (selected.generic_aot)
@@ -145,6 +152,7 @@ int main(int argc, char** argv) {
         .Number("child_ms", result.duration.count()).Number("exit_code", result.exit_code)
         .Bool("launched", result.launched).Bool("timed_out", result.timed_out)
         .Bool("storage_probe", storage_probe).Bool("crash_captured", result.crash.captured)
+        .Bool("message_box_probe", message_box_probe)
         .Bool("xenos_d3d12_override", xenos_d3d12)
         .Bool("debug_log", debug_log).Bool("crash_memory_capture", crash_memory_base != 0)
         .Number("crash_code", result.crash.code).Number("crash_address", result.crash.address)

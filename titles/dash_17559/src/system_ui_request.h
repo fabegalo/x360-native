@@ -21,6 +21,10 @@ inline constexpr SystemUiApplication kCreateProfile{
     "game:\\system\\createprofile.xex", "createprofile", 136, 0, 14};
 inline constexpr SystemUiApplication kGuide{
     "game:\\system\\hud.xex", "hud", 12, 4, 0};
+// XAM 816C5508 packs 1148 bytes; FE/2100D at 816C7964 loads hud.xex.
+// Request +8 selects the original HUD's message-box application.
+inline constexpr SystemUiApplication kMessageBox{
+    "game:\\system\\hud.xex", "hud message box", 1148, 4, 0};
 // Original XAM 816C7230: FE/2100B, user +4, request 40 bytes.
 // Original deviceselector DLL 916D6C60 registers resource ID 2.
 inline constexpr SystemUiApplication kDeviceSelector{
@@ -43,6 +47,7 @@ inline constexpr const SystemUiApplication* SystemUiApplicationFor(uint32_t mess
     case 0x21008: return &kGamerCard;
     case 0x2100E: return &kCreateProfile;
     case 0x21015: return &kGuide;
+    case 0x2100D: return &kMessageBox;
     case 0x2100B: return &kDeviceSelector;
     default: return nullptr;
   }

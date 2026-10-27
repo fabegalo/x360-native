@@ -1,0 +1,37 @@
+diff --git a/src/kernel/xam/xam_ui.cpp b/src/kernel/xam/xam_ui.cpp
+--- a/src/kernel/xam/xam_ui.cpp
++++ b/src/kernel/xam/xam_ui.cpp
+@@ -353,7 +353,7 @@
+   }
+   if (io) {
+     io->result = X_ERROR_IO_PENDING;
+-    io->context = XThread::GetCurrentThreadHandle();
++    io->context = XThread::IsInThread() ? XThread::GetCurrentThreadHandle() : 0;
+   }
+   const auto status = state->app_manager()->DispatchMessageSync(0xFE, 0x2100D, request, 1148);
+   mem->SystemHeapFree(request);
+@@ -553,6 +553,7 @@
+   words[6] = device_id_ptr.guest_address(); words[7] = overlapped.guest_address();
+   auto* io = overlapped.as<XAM_OVERLAPPED*>();
+   io->result = X_ERROR_IO_PENDING;
++  io->context = XThread::IsInThread() ? XThread::GetCurrentThreadHandle() : 0;
+   const auto status = state->app_manager()->DispatchMessageSync(0xFE, 0x2100B, request, 40);
+   state->memory()->SystemHeapFree(request);
+   if (XFAILED(status)) {
+diff --git a/src/kernel/xam/xam_msg.cpp b/src/kernel/xam/xam_msg.cpp
+--- a/src/kernel/xam/xam_msg.cpp
++++ b/src/kernel/xam/xam_msg.cpp
+@@ -118,8 +118,11 @@
+ 
+ u32 XMsgCompleteIORequest_entry(ppc_ptr_t<XAM_OVERLAPPED> overlapped_ptr, u32 result,
+                                 u32 extended_error, u32 length) {
+-  REX_KERNEL_STATE()->CompleteOverlappedImmediateEx(overlapped_ptr.guest_address(), result,
+-                                                    extended_error, length);
++  // The public completion API may run on the system UI's worker/presenting
++  // thread. Submission already recorded the requester for its completion APC;
++  // rebinding it here sends that APC to the wrong guest thread.
++  REX_KERNEL_STATE()->CompleteOverlappedEx(overlapped_ptr.guest_address(), result,
++                                           extended_error, length);
+   return X_ERROR_SUCCESS;
+ }
+ 

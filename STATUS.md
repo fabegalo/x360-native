@@ -1,5 +1,25 @@
 # STATUS
 
+27/10 — **caixa de mensagem original validada**: snapshot anterior publicado
+em `origin/main` (`fb99547`). 0213 substitui o caminho ImGui/headless-default de
+`XamShowMessageBoxUI` pelo pedido original FE/2100D de 1.148 bytes. O host 17559
+carrega seu próprio HUD original, com cenas, fontes e skin já verificadas, sem
+condição por jogo. Controles iniciais: 217/2 da API, 688/22 relacionados e 185/4
+de input. Teste adicional revelou a troca do
+solicitante por um worker ao completar o I/O (1/13 falhou); 0214 corrige esse
+contrato; 903 verificações/28 casos focados aprovados e replay final de
+201 patches/271 arquivos sem divergências. Minecraft e host 17559 concluíram
+preparo oficial. Duas tentativas Minecraft isoladas de 120 s mostraram a caixa original:
+B cancelou com 1627/1223; A selecionou o botão 1 com sucesso, liberou o foco
+e retornou à tela do Minecraft. Sem crash; 37/37 originais preservados em ambas.
+O toque para cima não mudou o destaque; navegação entre botões ainda sem aceite.
+Forza também concluiu preparo oficial com 0214 e mostrou a mesma caixa:
+B devolveu 1627/1223 e retornou a “Pressione Start”; 90 s sem crash e 37/37
+originais preservados. Os três produtos estão atualizados, sem marcador incompleto.
+Diagnóstico visual opcional, desligado normalmente, sem escolha automática.
+Os resultados de gameplay 0212 abaixo são históricos; esta etapa valida a UI.
+[Implementação e evidências](docs/reports/original-message-box-2026-10-27.md).
+
 Retomada de 26/10 — **Forza Horizon 2 e Minecraft pelo preparo genérico**:
 a exclusão do firmware de disco está integrada em `e407eb8`. A análise real
 do Forza revelou seis destinos diretos sem função; 0203 recupera entradas

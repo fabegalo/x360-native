@@ -1,0 +1,192 @@
+diff --git a/src/kernel/xam/apps/xam_app.cpp b/src/kernel/xam/apps/xam_app.cpp
+--- a/src/kernel/xam/apps/xam_app.cpp
++++ b/src/kernel/xam/apps/xam_app.cpp
+@@ -31,6 +31,7 @@
+   // NOTE: buffer_length may be zero or valid.
+   auto buffer = memory_->TranslateVirtual(buffer_ptr);
+   switch (message) {
++    case 0x0002100D:
+     case 0x0002100B:
+     case 0x00021001:
+     case 0x00021015:
+diff --git a/src/kernel/xam/xam_ui.cpp b/src/kernel/xam/xam_ui.cpp
+--- a/src/kernel/xam/xam_ui.cpp
++++ b/src/kernel/xam/xam_ui.cpp
+@@ -25,6 +25,8 @@
+ #include <rex/hook.h>
+ #include <rex/types.h>
+ #include <rex/system/xtypes.h>
++#include <rex/system/xmemory.h>
++#include <rex/system/xthread.h>
+ #include <rex/thread.h>
+ #include <rex/ui/imgui_dialog.h>
+ #include <rex/ui/imgui_drawer.h>
+@@ -267,7 +269,36 @@
+   uint32_t chosen_button_ = 0;
+ };
+ 
+-// https://www.se7ensins.com/forums/threads/working-xshowmessageboxui.844116/
++// Shared guest-memory guards for this bounded request. A heap reservation is
++// not evidence that its pages are committed or have the requested access.
++static bool MessageBoxSpan(memory::Memory* mem, uint32_t address, uint64_t size,
++                           uint32_t access) {
++  if (!address || !size || uint64_t(address) + size > 0x1'0000'0000ull) return false;
++  const uint64_t end = uint64_t(address) + size;
++  for (uint64_t page = address; page < end; page = (page & ~0xFFFull) + 0x1000) {
++    auto* heap = mem->LookupHeap(static_cast<uint32_t>(page));
++    memory::HeapAllocationInfo info{};
++    if (!heap || !heap->QueryRegionInfo(static_cast<uint32_t>(page), &info) ||
++        !(info.state & memory::kMemoryAllocationCommit) || (info.protect & access) != access)
++      return false;
++  }
++  return true;
++}
++
++static bool CopyMessageBoxText(memory::Memory* mem, uint32_t source,
++                               uint8_t* output, uint32_t capacity) {
++  if (!source) return true; // Optional title/body; destination is already zeroed.
++  for (uint32_t i = 0; i + 1 < capacity; ++i) {
++    const uint64_t at = uint64_t(source) + uint64_t(i) * 2;
++    if (at > UINT32_MAX || !MessageBoxSpan(mem, uint32_t(at), 2, memory::kMemoryProtectRead))
++      return false;
++    const auto value = memory::load_and_swap<uint16_t>(mem->TranslateVirtual(uint32_t(at)));
++    if (!value) break;
++    memory::store_and_swap<uint16_t>(output + i * 2, value);
++  }
++  return true;
++}
++
+ u32 XamShowMessageBoxUI_entry(u32 user_index, mapped_wstring title_ptr, mapped_wstring text_ptr,
+                               u32 button_count, mapped_u32 button_ptrs, u32 active_button,
+                               u32 flags, mapped_u32 result_ptr, mapped_void overlapped) {
+@@ -276,70 +307,66 @@
+       uint32_t(user_index), title_ptr.guest_address(), text_ptr.guest_address(),
+       uint32_t(button_count), button_ptrs.guest_address(), uint32_t(active_button), uint32_t(flags),
+       result_ptr.guest_address(), overlapped.guest_address());
+-  std::string title;
+-  if (title_ptr) {
+-    title = rex::string::to_utf8(rex::memory::load_and_swap<std::u16string>(
+-        REX_KERNEL_MEMORY()->TranslateVirtual(title_ptr.guest_address())));
+-  } else {
+-    title = "";  // TODO(gibbed): default title based on flags?
+-  }
+-  std::string text_str = text_ptr
+-                             ? rex::string::to_utf8(rex::memory::load_and_swap<std::u16string>(
+-                                   REX_KERNEL_MEMORY()->TranslateVirtual(text_ptr.guest_address())))
+-                             : "";
+-
+-  std::vector<std::string> buttons;
+-  for (uint32_t i = 0; i < button_count; ++i) {
+-    uint32_t button_ptr = button_ptrs[i];
+-    auto button = rex::memory::load_and_swap<std::u16string>(
+-        REX_KERNEL_MEMORY()->TranslateVirtual(button_ptr));
+-    buttons.push_back(rex::string::to_utf8(button));
+-  }
+-
+-  X_RESULT result;
+-  if (REXCVAR_GET(headless)) {
+-    // Auto-pick the focused button.
+-    auto run = [result_ptr, active_button]() -> X_RESULT {
+-      *result_ptr = static_cast<uint32_t>(active_button);
+-      return X_ERROR_SUCCESS;
+-    };
+-    result = xeXamDispatchHeadless(run, overlapped.guest_address());
+-  } else {
+-    // TODO(benvanik): setup icon states.
+-    switch (flags & 0xF) {
+-      case 0:
+-        // config.pszMainIcon = nullptr;
+-        break;
+-      case 1:
+-        // config.pszMainIcon = TD_ERROR_ICON;
+-        break;
+-      case 2:
+-        // config.pszMainIcon = TD_WARNING_ICON;
+-        break;
+-      case 3:
+-        // config.pszMainIcon = TD_INFORMATION_ICON;
+-        break;
+-    }
+-    auto close = [result_ptr](MessageBoxDialog* dialog) -> X_RESULT {
+-      *result_ptr = dialog->chosen_button();
+-      return X_ERROR_SUCCESS;
+-    };
+-    const Runtime* emulator = REX_KERNEL_STATE()->emulator();
+-    ui::ImGuiDrawer* imgui_drawer = emulator->imgui_drawer();
+-    if (imgui_drawer) {
+-      result = xeXamDispatchDialog<MessageBoxDialog>(
+-          new MessageBoxDialog(imgui_drawer, title, text_str, buttons, active_button), close,
+-          overlapped.guest_address());
+-    } else {
+-      // Fallback to headless if no drawer available
+-      auto run = [result_ptr, active_button]() -> X_RESULT {
+-        *result_ptr = static_cast<uint32_t>(active_button);
+-        return X_ERROR_SUCCESS;
+-      };
+-      result = xeXamDispatchHeadless(run, overlapped.guest_address());
+-    }
+-  }
+-  return result;
++  auto* state = REX_KERNEL_STATE();
++  auto* mem = state->memory();
++  const auto io_address = overlapped.guest_address();
++  constexpr auto rw = memory::kMemoryProtectRead | memory::kMemoryProtectWrite;
++  if (io_address && !MessageBoxSpan(mem, io_address, sizeof(XAM_OVERLAPPED), rw))
++    return X_ERROR_INVALID_PARAMETER;
++  auto* io = io_address ? mem->TranslateVirtual<XAM_OVERLAPPED*>(io_address) : nullptr;
++  const auto invalid = [io]() -> X_RESULT {
++    // Original 17559 816C55E0: invalid requests only set the extended status.
++    if (io) io->extended_error = X_ERROR_INVALID_PARAMETER;
++    return X_ERROR_INVALID_PARAMETER;
++  };
++  // Original 17559 816C5508-816C55FC, including built-in button combinations.
++  if ((user_index >= 4 && user_index != 0xFF) || (flags & 0xFFC00EF8u) ||
++      (!((button_count >= 1 && button_count <= 3) && active_button < button_count) &&
++       !(button_count == 0 && (flags & 0x370000u))) ||
++      ((flags & 0x100000u) && (flags & 0x200000u)) ||
++      ((flags & 0x100000u) && (button_count > 1 || active_button != 0)) ||
++      ((flags & 0x200000u) && (button_count > 2 || active_button > 1)) ||
++      (io_address ? !result_ptr : bool(result_ptr))) return invalid();
++  if ((result_ptr && !MessageBoxSpan(mem, result_ptr.guest_address(), 8, memory::kMemoryProtectWrite)) ||
++      (button_count && !MessageBoxSpan(mem, button_ptrs.guest_address(), uint64_t(button_count) * 4,
++                                      memory::kMemoryProtectRead))) return invalid();
++  // FE/2100D loads this dashboard's original hud.xex. Copy every string into
++  // the original inline request before dispatch: no caller-string lifetime,
++  // ImGui fallback, default selection, title identity or graphics hot-path work.
++  const auto request = mem->SystemHeapAlloc(1148);
++  if (!request) return X_RESULT(14);
++  auto* bytes = mem->TranslateVirtual<uint8_t*>(request);
++  std::memset(bytes, 0, 1148);
++  auto* words = reinterpret_cast<be<uint32_t>*>(bytes);
++  words[1] = user_index; words[2] = 1;
++  bool valid = CopyMessageBoxText(mem, title_ptr.guest_address(), bytes + 12, 43) &&
++               CopyMessageBoxText(mem, text_ptr.guest_address(), bytes + 98, 384);
++  for (uint32_t i = 0; valid && i < button_count; ++i) {
++    const auto label = uint32_t(button_ptrs[i]);
++    valid = label && CopyMessageBoxText(mem, label, bytes + 872 + i * 86, 43);
++  }
++  if (!valid) { mem->SystemHeapFree(request); return invalid(); }
++  words[217] = button_count; words[283] = active_button; words[284] = flags;
++  words[285] = result_ptr.guest_address(); words[286] = io_address;
++  if (result_ptr && !(flags & 0x70000u)) {
++    result_ptr[0] = 0; result_ptr[1] = 0;
++  }
++  if (io) {
++    io->result = X_ERROR_IO_PENDING;
++    io->context = XThread::GetCurrentThreadHandle();
++  }
++  const auto status = state->app_manager()->DispatchMessageSync(0xFE, 0x2100D, request, 1148);
++  mem->SystemHeapFree(request);
++  if (XFAILED(status)) {
++    // Original 816C16C8 exposes the service HRESULT in last-error and maps
++    // only E_OUTOFMEMORY specially. Never silently approve an unavailable UI.
++    XThread::SetLastError(status);
++    const uint32_t error = uint32_t(status) == 0x8007000Eu ? 14 : X_ERROR_FUNCTION_FAILED;
++    if (io) state->CompleteOverlappedImmediateEx(io_address, error, status, 0);
++    REXKRNL_WARN("Original system message-box service failed: {:08X}", uint32_t(status));
++    return error;
++  }
++  return io ? X_ERROR_IO_PENDING : X_ERROR_SUCCESS;
+ }
+ 
+ class KeyboardInputDialog : public XamDialog {

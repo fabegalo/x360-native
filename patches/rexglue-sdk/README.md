@@ -2104,3 +2104,42 @@ eight representative encodings. Real-content analysis recovers the missing
 callback with zero graph errors. Replay: 199 patches/271 files, zero SHA-256
 mismatches. No native arithmetic or runtime behavior was changed, and the SDK
 revision remains pinned. A new executable still requires gameplay validation.
+
+### 0213 — route message boxes to the original system application
+
+Replace XamShowMessageBoxUI's ImGui/headless-default path with the original
+FE/2100D request. Copy bounded inline UTF16 title/body/button labels, validate
+flags and guest buffers, preserve the ninth PPC argument and output pointers,
+and leave accepted asynchronous work pending for the selected original host.
+Missing services fail instead of selecting a button or displaying a replica.
+The 17559 profile owns its original HUD, skin, fonts, module hashes and renderer;
+no title identity or module from another dashboard is used by the SDK.
+
+Synthetic regression: one of six assertions fails before applying this patch
+because no request reaches the original service. Initial focused result:
+217 assertions/two cases, including truncation, invalid/unmapped arguments,
+early completion and explicit service errors. Related UI/selector/context and
+input controls pass separately. No upstream equivalent identified.
+
+### 0214 — preserve the requesting thread when system I/O completes
+
+XMsgCompleteIORequest may run on an original UI worker or presenting thread.
+Complete its existing OVERLAPPED without rebinding the stored requester, which
+is the target of its completion APC. Record that owner at modal submission,
+including the storage selector. No thread migration or title condition.
+
+Synthetic regression with two guest threads: one of 13 assertions fails before
+the patch because completion replaces the requesting handle. With the API,
+submission-owner, UI, selector, context and input controls, 903 assertions in
+28 focused cases pass. Both patches preserve the pinned SDK and require
+reproducible preparation before visual validation. No upstream equivalent identified.
+
+After official preparation, two bounded Minecraft attempts display the original
+17559 HUD message box. A returns success with the selected button index; B
+returns the original cancellation (1627/1223). Both release system UI focus,
+preserve all 37 source-console files and finish at their 120-second limit
+without a captured crash. See `docs/reports/original-message-box-2026-10-27.md`
+for the API contract, exact observations and validation limits.
+A separate 90-second Forza attempt displays the same original box and returns
+to its Start screen after B, with the same cancellation status, no captured
+crash and 37/37 source files preserved. No title-specific code or settings.

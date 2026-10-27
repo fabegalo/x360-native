@@ -2,6 +2,7 @@
 #include "boot_intro.h"
 #include "system_ui_request.h"
 #include "storage_selector_diagnostic.h"
+#include "message_box_diagnostic.h"
 #include "system_ui_saved_state.h"
 #include "../../common/system_ui_context.h"
 #include "../../common/system_ui_execution.h"
@@ -107,18 +108,21 @@ uint32_t Read32(rex::memory::Memory& memory, uint32_t address) {
 void Write32(rex::memory::Memory& memory, uint32_t address, uint32_t value) {
   rex::memory::store_and_swap<uint32_t>(memory.TranslateVirtual(address), value);
 }
-// A nested selector request is accepted before the previous app is suspended.
+// A nested modal request is accepted before the previous app is suspended.
 // If loading its successor fails at the frame boundary, complete that accepted
 // I/O instead of leaving the game or CreateProfile waiting indefinitely.
-void FailQueuedSelector(rex::Runtime& runtime, uint32_t message,
+void FailQueuedModal(rex::Runtime& runtime, uint32_t message,
                         const std::vector<uint8_t>& request, X_HRESULT status) {
-  if (message != 0x2100B || request.size() != 40 || static_cast<int32_t>(status) >= 0) return;
-  const auto address = rex::memory::load_and_swap<uint32_t>(request.data() + 0x1C);
+  if (static_cast<int32_t>(status) >= 0) return;
+  const bool message_box = message == 0x2100D && request.size() == 1148;
+  if (!message_box && (message != 0x2100B || request.size() != 40)) return;
+  const auto address = rex::memory::load_and_swap<uint32_t>(request.data() + (message_box ? 1144 : 0x1C));
   if (!address) return;
   const auto* io = runtime.memory()->TranslateVirtual<rex::system::XAM_OVERLAPPED*>(address);
   if (io->result != 997) return; // The original app may already have completed.
-  const uint32_t error = (status & 0x7FFF0000) == 0x00070000 ? status & 0xFFFF : 1627;
-  runtime.kernel_state()->CompleteOverlappedImmediateEx(address, error, status, 0);
+  const uint32_t error = message_box ? (uint32_t(status) == 0x8007000Eu ? 14 : 1627)
+      : (status & 0x7FFF0000) == 0x00070000 ? status & 0xFFFF : 1627;
+  runtime.kernel_state()->CompleteOverlappedEx(address, error, status, 0);
 }
 // Static host state written by the original host 816CE8B0 before and after
 // its compositor setup: dispatcher headers of its events (type byte, signal
@@ -254,6 +258,7 @@ void InstallSystemUi(rex::Runtime& runtime, std::string drive, std::string nativ
     };
   }
   poll_guide = WithStorageSelectorDiagnostic(runtime, std::move(poll_guide));
+  poll_guide = WithMessageBoxDiagnostic(runtime, std::move(poll_guide));
   // Every title presents through VdSwap: run system frames there, not from
   // title-specific render hooks.
   rex::kernel::xboxkrnl::SetSystemSwapCallback(&SystemSwap);
@@ -336,7 +341,7 @@ void InstallSystemUi(rex::Runtime& runtime, std::string drive, std::string nativ
         auto xam = runtime.kernel_state()->GetKernelModule<rex::kernel::xam::XamModule>("xam.xex");
         const auto buffer = bytes.empty() ? 0 : runtime.memory()->SystemHeapAlloc(uint32_t(bytes.size()));
         if (!bytes.empty() && !buffer) {
-          FailQueuedSelector(runtime, message, bytes, static_cast<X_HRESULT>(0x8007000Eu));
+          FailQueuedModal(runtime, message, bytes, static_cast<X_HRESULT>(0x8007000Eu));
           REXLOG_ERROR("17559 system UI: queued request allocation failed"); return;
         }
         if (buffer) std::memcpy(runtime.memory()->TranslateVirtual(buffer), bytes.data(), bytes.size());
@@ -344,7 +349,7 @@ void InstallSystemUi(rex::Runtime& runtime, std::string drive, std::string nativ
         const auto result = xam->system_ui_request(message, buffer, uint32_t(bytes.size()));
         load_user.reset();
         if (buffer) runtime.memory()->SystemHeapFree(buffer);
-        FailQueuedSelector(runtime, message, bytes, result);
+        FailQueuedModal(runtime, message, bytes, result);
         REXLOG_INFO("17559 system UI: queued request {:08X} -> {:08X}", message, uint32_t(result));
       };
       xam->RequestSystemUiClose();
