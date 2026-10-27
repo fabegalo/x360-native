@@ -165,12 +165,27 @@ void Packages(const fs::path& root) {
   Write(root / "installed/data/saves/save.bin", "save");
   Write(root / "installed/data/library/imported.bin", "imported");
   Write(root / "installed/local-not-in-index.txt", "user file");
+  // The console has one HDD; profile and per-user/title saves are content.
+  // Include binary/truncated payloads: updater must preserve opaque bytes,
+  // never interpret or repair a game's save format.
+  for (const auto* relative : {"E000000000000001/FFFE07D1/00010000/profile",
+       "E000000000000001/1234C800/00000001/progress/data",
+       "E000000000000002/1234C800/00000001/progress/data",
+       "E000000000000001/1234C801/00000001/progress/data"})
+    Write(root / "installed/data/console/HDD/Content" / relative,
+          std::string("\0\xffpartial\0", 10) + relative);
 }
 void Preserved(const fs::path& root) {
   CHECK(Read(root / "installed/data/profiles/profile.bin") == "profile");
   CHECK(Read(root / "installed/data/saves/save.bin") == "save");
   CHECK(Read(root / "installed/data/library/imported.bin") == "imported");
   CHECK(Read(root / "installed/local-not-in-index.txt") == "user file");
+  for (const auto* relative : {"E000000000000001/FFFE07D1/00010000/profile",
+       "E000000000000001/1234C800/00000001/progress/data",
+       "E000000000000002/1234C800/00000001/progress/data",
+       "E000000000000001/1234C801/00000001/progress/data"})
+    CHECK(Read(root / "installed/data/console/HDD/Content" / relative) ==
+          std::string("\0\xffpartial\0", 10) + relative);
 }
 }
 

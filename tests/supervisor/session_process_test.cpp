@@ -284,3 +284,49 @@ TEST_CASE("session stops rapid loops and never retries failures or invalid trans
     if (mode == "rapid") CHECK(Read(f.root / "err.log").find("without sustained execution") != std::string::npos);
   }
 }
+
+TEST_CASE("stable session crash and relaunch preserve the single HDD bytes", "[stability][cli]") {
+  Fixture f("crash-game");
+  // Opaque synthetic payloads: this checks supervisor protection, not a game's
+  // save format or XAM persistence (covered separately by C8).
+  const auto hdd = f.paths.local() / "user/dashboard/Content";
+  const std::vector<fs::path> files{
+      hdd / "E000000000000001/FFFE07D1/00010000/profile",
+      hdd / "E000000000000001/1234C800/00000001/progress/data",
+      hdd / "E000000000000002/1234C800/00000001/progress/data",
+      hdd / "E000000000000001/1234C801/00000001/progress/data"};
+  std::vector<std::string> hashes;
+  for (size_t i = 0; i < files.size(); ++i) {
+    fs::create_directories(files[i].parent_path());
+    std::ofstream(files[i], std::ios::binary) << "committed fixture " << i;
+    hashes.push_back(DigestFile(files[i])->sha256);
+  }
+  auto result = f.Run(10);
+  REQUIRE(result.launched);
+  REQUIRE_FALSE(result.timed_out);
+  REQUIRE(result.exit_code != 0);
+  for (size_t i = 0; i < files.size(); ++i)
+    REQUIRE(DigestFile(files[i])->sha256 == hashes[i]);
+  // Explicit user relaunch after the crash; no automatic crash retry. Replace
+  // only the synthetic participant mode and publish fresh fixture receipts.
+  for (const std::string role : {"dashboard", "game"}) {
+    const auto manifest = f.root / "titles" / role / (role + "_manifest.toml");
+    auto text = Read(manifest);
+    const auto pos = text.find("crash-game");
+    REQUIRE(pos != std::string::npos);
+    text.replace(pos, 10, "version");
+    std::ofstream(manifest, std::ios::binary) << text;
+    WriteTestReceipt(f.paths, role, manifest, f.paths.build() / (role + ".exe"),
+                     {f.paths.inputs() / (role + ".xex")});
+  }
+  fs::remove(f.paths.inputs() / "observed.txt");
+  for (int launch = 0; launch < 2; ++launch) {
+    result = f.Run(10);
+    INFO(Read(f.root / "err.log"));
+    REQUIRE(result.exit_code == 0);
+    REQUIRE_FALSE(result.timed_out);
+    for (size_t i = 0; i < files.size(); ++i)
+      REQUIRE(DigestFile(files[i])->sha256 == hashes[i]);
+  }
+  CHECK(Read(f.paths.inputs() / "observed.txt") == "0 1\n1 0\n2 1\n0 1\n1 0\n2 1\n");
+}
