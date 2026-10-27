@@ -453,11 +453,10 @@ int Run(const ProjectPaths& p, const fs::path& exe_in, std::vector<std::string> 
   }
 
   std::string started = UtcStamp();
-  fs::path dir = p.runs() / (started + "-" + label);
   std::error_code ec;
-  fs::create_directories(dir, ec);
+  const fs::path dir = CreateRunDirectory(p.runs(), started, label, ec);
   if (ec) {
-    fmt::print(stderr, "run: cannot create {}: {}\n", PathUtf8(dir), ec.message());
+    fmt::print(stderr, "run: cannot create run in {}: {}\n", PathUtf8(p.runs()), ec.message());
     return kExitUsage;
   }
 

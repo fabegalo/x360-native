@@ -10,6 +10,10 @@
 
 namespace x360n {
 
+// Atomically claim a fresh diagnostic directory; never reuse old handoffs.
+std::filesystem::path CreateRunDirectory(const std::filesystem::path& runs,
+    const std::string& stamp, const std::string& label, std::error_code& error);
+
 std::string JsonEscape(std::string_view s);  // returns a quoted JSON string
 
 // Tiny writer for nested objects; keeps emission order. Not a general library.

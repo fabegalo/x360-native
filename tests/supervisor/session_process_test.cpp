@@ -289,6 +289,20 @@ TEST_CASE("session stops rapid loops and never retries failures or invalid trans
 
 TEST_CASE("stable session crash and relaunch preserve the single HDD bytes", "[stability][cli]") {
   Fixture f("crash-game");
+  std::error_code directory_error;
+  const auto old = CreateRunDirectory(f.paths.runs(), "fixed-second", "dashboard", directory_error);
+  REQUIRE_FALSE(directory_error);
+  std::ofstream(old / "handoff.bin") << "stale handoff must survive";
+  for (int collision = 0; collision < 3; ++collision) {
+    const auto fresh = CreateRunDirectory(f.paths.runs(), "fixed-second", "dashboard", directory_error);
+    REQUIRE_FALSE(directory_error);
+    REQUIRE(fresh != old);
+    REQUIRE_FALSE(fs::exists(fresh / "handoff.bin"));
+  }
+  REQUIRE(Read(old / "handoff.bin") == "stale handoff must survive");
+  std::ofstream(f.root / "blocked") << "not a directory";
+  CHECK(CreateRunDirectory(f.root / "blocked", "fixed", "dashboard", directory_error).empty());
+  REQUIRE(directory_error);
   // Opaque synthetic payloads: this checks supervisor protection, not a game's
   // save format or XAM persistence (covered separately by C8).
   const auto hdd = f.paths.local() / "user/dashboard/Content";
@@ -325,6 +339,9 @@ TEST_CASE("stable session crash and relaunch preserve the single HDD bytes", "[s
   for (int launch = 0; launch < 2; ++launch) {
     result = f.Run(10);
     INFO(Read(f.root / "err.log"));
+    INFO(Read(f.root / "out.log"));
+    INFO(result.launch_error);
+    REQUIRE(result.launched);
     REQUIRE(result.exit_code == 0);
     REQUIRE_FALSE(result.timed_out);
     for (size_t i = 0; i < files.size(); ++i)
