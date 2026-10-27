@@ -129,6 +129,7 @@ SessionProfile LoadSessionProfile(const ProjectPaths& paths, const std::filesyst
     for (const auto& value : *array) {
       auto arg = text(value);
       if (arg.starts_with("--game_data_root") || arg.starts_with("--user_data_root") ||
+          arg.starts_with("--content_data_root") ||
           arg.starts_with("--x360n_handoff") || arg.starts_with("--log_file") ||
           arg.starts_with("--x360n_profile_root") ||
           arg.starts_with("--x360n_dashboard_version") ||
@@ -220,6 +221,19 @@ bool MatchesLaunch(const SessionProfile& p, const LaunchRequest& request,
   if (!matches) return false;
   auto digest = DigestFile(path);
   return digest && digest->sha256 == p.sha256;
+}
+std::vector<std::string> SessionPlatformArguments(const SessionProfile& dashboard, const SessionProfile& active) {
+  std::vector<std::string> args{
+      "--x360n_profile_root=" + PathUtf8(dashboard.user_root),
+      "--content_data_root=" + PathUtf8(dashboard.user_root)};
+  if (!dashboard.dashboard_version.empty())
+    args.push_back("--x360n_dashboard_version=" + dashboard.dashboard_version);
+  if (active.manifest != dashboard.manifest && !dashboard.system_ui_host.empty()) {
+    args.push_back("--x360n_system_ui_host=" + PathUtf8(dashboard.system_ui_host));
+    args.push_back("--x360n_system_ui_root=" + PathUtf8(dashboard.game_root));
+  }
+  for (auto& arg : AvatarServiceArguments(dashboard, active)) args.push_back(std::move(arg));
+  return args;
 }
 std::vector<std::string> AvatarServiceArguments(const SessionProfile& dashboard, const SessionProfile& title) {
   if (title.avatar_service.empty()) return {};

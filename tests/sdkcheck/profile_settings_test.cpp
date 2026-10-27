@@ -5,6 +5,8 @@
 #include <rex/system/xio.h>
 #include <rex/system/xthread.h>
 #include <rex/ppc/func.h>
+#include <rex/logging.h>
+#include <spdlog/sinks/ostream_sink.h>
 #include <array>
 #include <chrono>
 #include <cstring>
@@ -12,6 +14,7 @@
 #include <fstream>
 #include <thread>
 #include <atomic>
+#include <sstream>
 
 extern "C" REX_FUNC(__imp__XamUserWriteProfileSettings);
 extern "C" REX_FUNC(__imp__XamUserReadProfileSettings);
@@ -99,6 +102,100 @@ TEST_CASE("Profile setting types persist through the real write and read ABI", "
   REQUIRE(f.profile()->RenameLocal(xuid, "Renamed") == 0);
   f.Open(); CHECK(f.profile()->xuid() == xuid); CHECK(f.profile()->name() == "Renamed");
   verify();
+}
+
+TEST_CASE("Profile settings sizing and async completion preserve a large mixed batch header",
+          "[sdk][profile-settings][profile-settings-large-batch]") {
+  SettingsFixture f;
+  REQUIRE(f.profile()->CreateLocal("Batch") == 0);
+  REQUIRE(f.profile()->SetLocalSession(f.profile()->xuid()) == 0);
+  const std::array<uint32_t, 29> ids{
+      0x10040013, 0x10040006, 0x402C0011, 0x10040005, 0x5004000B, 0x4064000F,
+      0x10040012, 0x10040004, 0x1004000C, 0x1004000D, 0x1004000E, 0x10040018,
+      0x10040015, 0x1004001D, 0x1004001E, 0x10040022, 0x10040023, 0x10040024,
+      0x10040026, 0x10040027, 0x10040028, 0x10040029, 0x10040039, 0x10040038,
+      0x10040003, 0x63E83FFF, 0x63E83FFE, 0x63E83FFD, 0x10040002};
+  for (size_t i = 0; i < ids.size(); ++i)
+    rex::memory::store_and_swap<uint32_t>(f.base() + f.block + i * 4, ids[i]);
+  const auto size = f.block + 256, output = f.block + 512, io = f.block + 6000;
+  auto read = [&](uint32_t buffer, bool async) {
+    uint32_t result = ~0u;
+    auto thread = rex::system::object_ref<rex::system::XHostThread>(new rex::system::XHostThread(
+        f.runtime->kernel_state(), 128 * 1024, 0, [&] {
+          PPCContext ctx{};
+          ctx.r1.u64 = f.block + 12000; ctx.r3.u64 = 0x12345678;
+          ctx.r7.u64 = ids.size(); ctx.r8.u64 = f.block;
+          ctx.r9.u64 = size; ctx.r10.u64 = buffer;
+          rex::memory::store_and_swap<uint32_t>(f.base() + ctx.r1.u32 + 0x54, async ? io : 0);
+          __imp__XamUserReadProfileSettings(ctx, f.base());
+          result = ctx.r3.u32;
+          return 0;
+        }));
+    REQUIRE(thread->Create() == 0);
+    uint64_t timeout = uint64_t(-50'000'000ll);
+    REQUIRE(thread->Wait(0, 0, 0, &timeout) == 0);
+    return result;
+  };
+  for (const bool async : {false, true}) {
+    rex::memory::store_and_swap<uint32_t>(f.base() + size, 0);
+    REQUIRE(read(0, async) == X_ERROR_INSUFFICIENT_BUFFER);
+    const auto needed = rex::memory::load_and_swap<uint32_t>(f.base() + size);
+    REQUIRE(needed == 4312);
+    std::memset(f.base() + output, 0xA5, needed + 16);
+    std::memset(f.base() + io, 0, sizeof(rex::system::XAM_OVERLAPPED));
+    REQUIRE(read(output, async) == (async ? X_ERROR_IO_PENDING : X_ERROR_SUCCESS));
+    if (async) CHECK(rex::memory::load_and_swap<uint32_t>(f.base() + io) == X_ERROR_SUCCESS);
+    CHECK(rex::memory::load_and_swap<uint32_t>(f.base() + output) == ids.size());
+    CHECK(rex::memory::load_and_swap<uint32_t>(f.base() + output + 4) == output + 8);
+    for (size_t i = 0; i < ids.size(); ++i) {
+      const auto* row = reinterpret_cast<const Setting*>(f.base() + output + 8 + i * sizeof(Setting));
+      CHECK(row->setting_id == ids[i]);
+    }
+    for (size_t i = 0; i < 16; ++i) CHECK(f.base()[output + needed + i] == 0xA5);
+  }
+}
+
+TEST_CASE("Profile read debug diagnostics identify completed writes without changing results",
+          "[sdk][profile-settings][profile-read-trace]") {
+  SettingsFixture f;
+  REQUIRE(f.profile()->CreateLocal("Trace") == 0);
+  REQUIRE(f.profile()->SetLocalSession(f.profile()->xuid()) == 0);
+  rex::InitLogging(nullptr, spdlog::level::info);
+  const auto logger = rex::GetLogger(rex::log::krnl());
+  REQUIRE(logger);
+  std::ostringstream captured;
+  const auto previous = logger->sinks();
+  const auto level = logger->level();
+  struct Restore {
+    std::shared_ptr<spdlog::logger> logger;
+    std::vector<spdlog::sink_ptr> sinks;
+    spdlog::level::level_enum level;
+    ~Restore() { logger->sinks() = std::move(sinks); logger->set_level(level); }
+  } restore{logger, previous, level};
+  logger->sinks().push_back(std::make_shared<spdlog::sinks::ostream_sink_mt>(captured, true));
+  logger->set_level(spdlog::level::debug);
+  REQUIRE(f.Read({0x10040002}) == 0);
+  CHECK(f.Row(0)->data.s32 == 0);
+  const auto text = captured.str();
+  CHECK(text.find("ProfileSettingsRead wrote") != std::string::npos);
+  CHECK(text.find("count=1") != std::string::npos);
+  CHECK(text.find(fmt::format("settings={:08X}", f.block + 4408)) != std::string::npos);
+  CHECK(text.find("ProfileSettingsRead api=base") != std::string::npos);
+  CHECK(text.find("result=00000000") != std::string::npos);
+  captured.str({}); captured.clear();
+  PPCContext ctx{};
+  ctx.r1.u64 = f.block + 12000;
+  ctx.r7.u64 = 1; ctx.r8.u64 = f.block + 4096; ctx.r9.u64 = 5; ctx.r10.u64 = 5;
+  rex::memory::store_and_swap<uint32_t>(f.base() + ctx.r1.u32 + 0x54, 0);
+  __imp__XamUserReadProfileSettings(ctx, f.base());
+  CHECK(ctx.r3.u32 == X_ERROR_INVALID_PARAMETER);
+  CHECK(captured.str().find("result=00000057") != std::string::npos);
+  CHECK(captured.str().find("ProfileSettingsRead wrote") == std::string::npos);
+  captured.str({}); captured.clear();
+  logger->set_level(spdlog::level::info);
+  REQUIRE(f.Read({0x10040002}) == 0);
+  CHECK(f.Row(0)->data.s32 == 0);
+  CHECK(captured.str().find("ProfileSettingsRead") == std::string::npos);
 }
 
 TEST_CASE("Profile setting caches follow XUID when switching accounts", "[sdk][profile-settings][profile-settings-state]") {

@@ -1,0 +1,113 @@
+diff --git a/src/codegen/phase_gapfill.cpp b/src/codegen/phase_gapfill.cpp
+--- a/src/codegen/phase_gapfill.cpp
++++ b/src/codegen/phase_gapfill.cpp
+@@ -272,26 +272,31 @@
+   }
+ }
+ 
++std::map<uint32_t, uint32_t> declaredFunctionEnds(CodegenContext& ctx) {
++  std::map<uint32_t, uint32_t> declaredEnds;
++  for (const auto& [start, size] : ctx.scan.pdataSizes) {
++    if (size && start + size > start) declaredEnds[start] = start + size;
++  }
++  for (const auto& [start, config] : ctx.Config().functions) {
++    const auto size = config.getSize(start);
++    if (size && start + size > start)
++      declaredEnds[start] = std::max(declaredEnds[start], start + size);
++  }
++  uint32_t end = 0;
++  for (auto& [start, limit] : declaredEnds) {
++    end = std::max(end, limit);
++    limit = end;
++  }
++  return declaredEnds;
++}
++
+ // A linear gap can start with a tail wrapper and hide later independent
+ // entries. Once gap ownership is known, only explicit unconditional external
+ // branches may seed still-unowned executable targets. Never split an existing
+ // body, a jump-table case, or a hole protected by original/declared metadata.
+ void discoverUnownedTailTargets(CodegenContext& ctx) {
+   auto& graph = ctx.graph;
+-  std::map<uint32_t, uint32_t> declaredEnds;
+-  for (const auto& [start, size] : ctx.scan.pdataSizes) {
+-    if (size && start + size > start) declaredEnds[start] = start + size;
+-  }
+-  for (const auto& [start, config] : ctx.Config().functions) {
+-    const auto size = config.getSize(start);
+-    if (size && start + size > start)
+-      declaredEnds[start] = std::max(declaredEnds[start], start + size);
+-  }
+-  uint32_t end = 0;
+-  for (auto& [start, limit] : declaredEnds) {
+-    end = std::max(end, limit);
+-    limit = end;
+-  }
++  const auto declaredEnds = declaredFunctionEnds(ctx);
+   const auto maxIterations = REXCVAR_GET(max_discovery_iterations);
+   for (uint32_t iteration = 0; iteration < maxIterations; ++iteration) {
+     std::set<uint32_t> targets;
+@@ -318,12 +323,63 @@
+   }
+ }
+ 
++// Aligned data references can name frameless callbacks even without RTTI.
++// Require an unowned executable boundary after non-fall-through code/padding
++// and a bounded valid prefix ending in an unconditional terminator. This only
++// seeds entries: normal CFG discovery still determines all reachable blocks.
++void discoverDataReferencedEntries(CodegenContext& ctx) {
++  auto& graph = ctx.graph;
++  auto& decoded = ctx.decoded();
++  const auto declaredEnds = declaredFunctionEnds(ctx);
++  std::set<uint32_t> targets;
++  const uint64_t imageEnd = uint64_t(ctx.binary().baseAddress()) + ctx.binary().imageSize();
++  const auto terminates = [](uint32_t word) {
++    return word == 0x4E800020 || word == 0x4E800420 ||
++           (word & 0xFC000003) == 0x48000000;
++  };
++  for (const auto& section : ctx.binary().sections()) {
++    if (section.executable || !section.data || section.baseAddress >= imageEnd) continue;
++    const uint64_t limit = std::min<uint64_t>(section.size, imageEnd - section.baseAddress);
++    const uint32_t first = (4 - (section.baseAddress & 3)) & 3;
++    for (uint64_t offset = first; offset + 4 <= limit; offset += 4) {
++      const uint32_t target = load_and_swap<uint32_t>(section.data + offset);
++      if (!target || (target & 3) || targets.contains(target) || graph.isEntryPoint(target) ||
++          ctx.binary().isInImportExportRange(target)) continue;
++      const auto* region = decoded.regionContaining(target);
++      if (!region || graph.getFunctionContaining(target)) continue;
++      auto owner = declaredEnds.upper_bound(target);
++      if (owner != declaredEnds.begin() && std::prev(owner)->second > target) continue;
++      const auto previous = decoded.read<uint32_t>(target - 4);
++      if (!previous || (*previous != 0 && !terminates(*previous))) continue;
++      bool bounded = false;
++      for (uint32_t word = 0; word < 64; ++word) {
++        const uint64_t address = uint64_t(target) + word * 4;
++        if (address >= region->end || (word && graph.isEntryPoint(uint32_t(address))) ||
++            ctx.binary().isInImportExportRange(uint32_t(address))) break;
++        const auto* instruction = decoded.get(uint32_t(address));
++        if (!instruction || instruction->opcode == Opcode::kUnknown) break;
++        const uint32_t code = instruction->code;
++        if (terminates(code)) { bounded = true; break; }
++      }
++      if (bounded) targets.insert(target);
++    }
++  }
++  for (uint32_t target : targets)
++    graph.addFunction(target, 4, FunctionAuthority::DISCOVERED, true);
++  const auto maxIterations = REXCVAR_GET(max_discovery_iterations);
++  for (uint32_t iteration = 0; iteration < maxIterations; ++iteration) {
++    const auto known = buildKnownFunctions(graph);
++    if (!discoverPendingFunctions(ctx, known)) break;
++  }
++}
++
+ }  // anonymous namespace
+ 
+ namespace phases {
+ 
+ VoidResult GapFill(CodegenContext& ctx, ProgressReporter* reporter) {
+   (void)reporter;
++  discoverDataReferencedEntries(ctx);
+   // Direct references outrank speculative linear gap ownership. Seed them
+   // first so a preceding fall-through cannot swallow a callable entry.
+   discoverUnownedTailTargets(ctx);

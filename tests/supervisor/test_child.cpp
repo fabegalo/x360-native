@@ -16,6 +16,7 @@
 #include <iostream>
 #include <string>
 #include <thread>
+#include <array>
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
@@ -30,6 +31,21 @@ int main(int argc, char** argv) {
   }
   if (argc < 2) return 64;
 #ifdef _WIN32
+  if (!std::strcmp(argv[1], "crash-memory")) {
+    constexpr uintptr_t arena = 0x100000000ull;
+    auto* bytes = static_cast<uint8_t*>(VirtualAlloc(reinterpret_cast<void*>(arena),0x10000,
+        MEM_RESERVE|MEM_COMMIT,PAGE_READWRITE));
+    if (!bytes) return 65;
+    std::array<uint64_t,32> registers{};
+    registers[24] = 0x2000;
+    const uint8_t direct[]{0xDE,0xAD,0xBE,0xEF,0,0,0x30,0};
+    const uint8_t nested[]{0xCA,0xFE,0xBA,0xBE};
+    std::memcpy(bytes+0x2000,direct,sizeof(direct));
+    std::memcpy(bytes+0x3000,nested,sizeof(nested));
+    // Pin a synthetic register block in a native GPR at the actual AV.
+    asm volatile("movl (%0), %%eax" : : "r"(uintptr_t(4)), "D"(registers.data()) : "rax","memory");
+    return 66;
+  }
   if (!std::strcmp(argv[1], "console")) {
     std::printf("console=%d\n", GetConsoleWindow() != nullptr);
     return GetConsoleWindow() ? 1 : 0;

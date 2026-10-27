@@ -124,6 +124,85 @@ TEST_CASE("invalid function table requests are rejected without side effects", "
 }
 
 #include <rex/system/function_dispatcher.h>
+#include <rex/kernel/init.h>
+#include <rex/runtime.h>
+#include <rex/system/kernel_state.h>
+#include <rex/system/user_module.h>
+#include "synthetic_xex.h"
+
+TEST_CASE("user exports preserve identity without exhausting caller thunks",
+          "[sdk][memory][user-exports]") {
+  using rex::X_STATUS;
+  bool host = true;
+  SECTION("host dispatch returns the original export address") {}
+  SECTION("legacy cross-module dispatch reuses a caller-local thunk") { host = false; }
+  x360n::test::Workdir work("x360n_user_exports", host ? "host" : "legacy");
+  auto bytes = x360n::test::BuildXex({}, nullptr, 0, x360n::test::Entry::kReturnZero);
+  auto be32 = [&](size_t at, uint32_t value) {
+    for (unsigned n = 0; n < 4; ++n) bytes.at(at + n) = uint8_t(value >> (24 - 8 * n));
+  };
+  constexpr uint32_t table = 0x82002000;
+  be32(0x800 + 0x160, table);
+  const size_t file_table = 0x1000 + table - x360n::test::kXexBase;
+  be32(file_table + 0x20, 0x8200);
+  be32(file_table + 0x24, 2);
+  be32(file_table + 0x28, 6);
+  be32(file_table + 0x2C, 0x10000);
+  be32(file_table + 0x30, 0x2004);  // A data export must remain a data address.
+  work.write("default.xex", bytes);
+  rex::Runtime runtime(work.dir);
+  rex::RuntimeConfig config{};
+  config.tool_mode = true;
+  config.kernel_init = rex::kernel::InitializeKernel;
+  REQUIRE(runtime.Setup(std::move(config)) == X_STATUS_SUCCESS);
+  auto module = rex::system::object_ref<rex::system::UserModule>(
+      new rex::system::UserModule(runtime.kernel_state()));
+  REQUIRE(module->LoadFromFile("game:\\default.xex") == X_STATUS_SUCCESS);
+  auto& dispatcher = *runtime.function_dispatcher();
+  REQUIRE(dispatcher.InitializeFunctionTable(kGame.code_base, kGame.code_size,
+      kGame.image_base, kGame.image_size, true, true));
+  dispatcher.RegisterModule("exporter", kGame.code_base, [](auto* d) {
+    REQUIRE(d->SetFunction(0x82010000, &FnA));
+  });
+  REQUIRE(dispatcher.InitializeFunctionTable(0x88010000, 0x10000,
+      0x88000000, 0x30000, false, host));
+  dispatcher.RegisterModule("caller", 0x88010000, [](auto*) {});
+  const auto address = module->GetProcAddressByOrdinal(6, 0x88010000);
+  REQUIRE(address == (host ? 0x82010000 : 0x88020000));
+  bool stable = true;
+  for (unsigned i = 0; i < 20000; ++i) {
+    if (module->GetProcAddressByOrdinal(6, 0x88010000) != address) { stable = false; break; }
+  }
+  CHECK(stable);
+  CHECK(dispatcher.GetFunction(address) == &FnA);
+  CHECK(module->GetProcAddressByOrdinal(7, 0x88010000) == 0x82002004);
+  CHECK(module->GetProcAddressByOrdinal(6, 0) == 0x82010000);
+  CHECK(module->GetProcAddressByOrdinal(6, kGame.code_base) == 0x82010000);
+  REQUIRE(dispatcher.InitializeFunctionTable(0x89010000, 0x10000,
+      0x89000000, 0x30000, false, host));
+  dispatcher.RegisterModule("other-caller", 0x89010000, [](auto*) {});
+  const auto other = module->GetProcAddressByOrdinal(6, 0x89010000);
+  CHECK(other == (host ? 0x82010000 : 0x89020000));
+  CHECK(dispatcher.GetFunction(other) == &FnA);
+  REQUIRE(dispatcher.UnregisterModule("exporter").has_value());
+  CHECK(dispatcher.GetFunction(address) == nullptr);
+  CHECK(dispatcher.GetFunction(other) == nullptr);
+  REQUIRE(dispatcher.InitializeFunctionTable(kGame.code_base, kGame.code_size,
+      kGame.image_base, kGame.image_size, true, true));
+  dispatcher.RegisterModule("exporter", kGame.code_base, [](auto* d) {
+    REQUIRE(d->SetFunction(0x82010000, &FnB));
+  });
+  const auto reloaded = module->GetProcAddressByOrdinal(6, 0x88010000);
+  CHECK(reloaded == address);  // Unload/reload recycles the dedicated slot.
+  CHECK(dispatcher.GetFunction(reloaded) == &FnB);
+  CHECK(module->GetProcAddressByOrdinal(6, 0x88010000) == reloaded);
+  const auto other_reloaded = module->GetProcAddressByOrdinal(6, 0x89010000);
+  CHECK(other_reloaded == other);
+  CHECK(dispatcher.GetFunction(other_reloaded) == &FnB);
+  REQUIRE(dispatcher.UnregisterModule("caller").has_value());
+  CHECK_FALSE(dispatcher.GetFunction(host ? 0x88020000 : reloaded));
+  CHECK(dispatcher.GetFunction(other_reloaded) == &FnB);
+}
 
 TEST_CASE("host-only dispatch preserves aliased guest images", "[sdk][memory][host-dispatch]") {
   rex::memory::Memory memory;

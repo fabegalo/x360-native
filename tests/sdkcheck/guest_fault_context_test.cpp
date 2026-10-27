@@ -65,6 +65,9 @@ TEST_CASE("Guest fault diagnostic records PPC context without handling the real 
     CHECK(text.find("lr=0000000090105000 ctr=00000000913F847C") != std::string::npos);
     CHECK(text.find("last_indirect_target=90116C88 cr=A0000005") != std::string::npos);
     CHECK(text.find("LR is not PC") != std::string::npos);
+    CHECK(text.find("guest_memory[") != std::string::npos);
+    CHECK(text.find("CAFEBABE") != std::string::npos);
+    CHECK(text.find("DEADC0DE") != std::string::npos);
   }
 }
 

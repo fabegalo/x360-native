@@ -2,6 +2,8 @@
 
 #include <fmt/format.h>
 #include <algorithm>
+#include <cstring>
+#include <unordered_set>
 #include "action_trace.h"
 
 #ifdef _WIN32
@@ -122,7 +124,7 @@ std::string WideToUtf8(const wchar_t* w) {
 // Called while the child is stopped at a second-chance exception: every thread
 // is suspended by the debug API, so its memory and the thread context are stable.
 void CaptureCrash(HANDLE process, const DEBUG_EVENT& ev, const std::filesystem::path& exe,
-                  CrashInfo& crash) {
+                  uint64_t guest_base, CrashInfo& crash) {
   const EXCEPTION_RECORD& er = ev.u.Exception.ExceptionRecord;
   crash.captured = true;
   crash.code = er.ExceptionCode;
@@ -145,6 +147,49 @@ void CaptureCrash(HANDLE process, const DEBUG_EVENT& ev, const std::filesystem::
   if (!GetThreadContext(thread.h, &ctx)) {
     crash.frames.push_back(LastError("GetThreadContext"));
     return;
+  }
+
+  if (guest_base && guest_base <= UINT64_MAX - UINT32_MAX) {
+    crash.native_registers = {{"rax",ctx.Rax},{"rbx",ctx.Rbx},{"rcx",ctx.Rcx},{"rdx",ctx.Rdx},
+        {"rsi",ctx.Rsi},{"rdi",ctx.Rdi},{"rbp",ctx.Rbp},{"rsp",ctx.Rsp},
+        {"r8",ctx.R8},{"r9",ctx.R9},{"r10",ctx.R10},{"r11",ctx.R11},
+        {"r12",ctx.R12},{"r13",ctx.R13},{"r14",ctx.R14},{"r15",ctx.R15}};
+    std::unordered_set<uint64_t> seen;
+    unsigned attempts = 0;
+    auto capture = [&](uint64_t address) {
+      if (crash.memory.size() >= 64 || attempts >= 1024 || address < 4096 ||
+          address > UINT64_MAX - 256 || !seen.insert(address).second) return;
+      ++attempts;
+      CrashInfo::MemoryBlock block{address,std::vector<uint8_t>(256)};
+      SIZE_T count = 0;
+      if (ReadProcessMemory(process,reinterpret_cast<const void*>(uintptr_t(address)),
+                            block.bytes.data(),block.bytes.size(),&count) && count == block.bytes.size())
+        crash.memory.push_back(std::move(block));
+    };
+    // Native register roots may contain the live AOT PPCContext or a stack
+    // frame. Inspect them before StackWalk mutates the native CONTEXT.
+    for (const auto& [name,value] : crash.native_registers) capture(value);
+    const size_t roots = crash.memory.size();
+    for (size_t root = 0; root < roots; ++root) {
+      // A PPCContext stores its GPR values as native 64-bit words. Snapshot
+      // possible guest pointers without assuming which host register holds it.
+      const auto bytes = crash.memory[root].bytes;
+      for (size_t offset = 0; offset + 8 <= bytes.size(); offset += 8) {
+        uint64_t value = 0; std::memcpy(&value,bytes.data()+offset,8);
+        if (value >= 4096 && value <= UINT32_MAX) capture(guest_base+value);
+      }
+    }
+    const size_t direct = crash.memory.size();
+    for (size_t block = roots; block < direct; ++block) {
+      // Guest objects contain big-endian pointers. Follow one level only,
+      // with the same hard record and attempt bounds, including failed reads.
+      const auto bytes = crash.memory[block].bytes;
+      for (size_t offset = 0; offset + 4 <= bytes.size(); offset += 4) {
+        const uint32_t value = uint32_t(bytes[offset])<<24 | uint32_t(bytes[offset+1])<<16 |
+            uint32_t(bytes[offset+2])<<8 | bytes[offset+3];
+        if (value >= 4096) capture(guest_base+value);
+      }
+    }
   }
 
   SymSetOptions(SYMOPT_UNDNAME | SYMOPT_DEFERRED_LOADS | SYMOPT_LOAD_LINES | SYMOPT_FAIL_CRITICAL_ERRORS);
@@ -295,7 +340,7 @@ ProcessResult RunProcess(const ProcessSpec& spec) {
           }
           cont = DBG_EXCEPTION_NOT_HANDLED;  // let the child's own handlers run
           if (!ev.u.Exception.dwFirstChance && !r.crash.captured) {
-            CaptureCrash(process.h, ev, spec.exe, r.crash);
+            CaptureCrash(process.h, ev, spec.exe, spec.crash_guest_memory_base, r.crash);
           }
           break;
         case EXIT_PROCESS_DEBUG_EVENT:

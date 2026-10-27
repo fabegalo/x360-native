@@ -7,6 +7,7 @@
 #include <fstream>
 #include <iterator>
 #include <string>
+#include <algorithm>
 
 #include "child_process.h"
 #include "scratch.h"
@@ -51,6 +52,30 @@ TEST_CASE("captures stdout, stderr and the exit code", "[process]") {
 }
 
 #ifdef _WIN32
+TEST_CASE("second chance memory capture is opt in bounded and read only", "[process-crash-memory]") {
+  Scratch s;
+  auto spec=s.Spec({"crash-memory"});spec.capture_crash=true;
+  const auto off=RunProcess(spec);
+  REQUIRE(off.launched);REQUIRE(off.crash.captured);
+  CHECK(off.exit_code==0xC0000005u);
+  CHECK(off.crash.native_registers.empty());CHECK(off.crash.memory.empty());
+  spec.crash_guest_memory_base=0x100000000ull;
+  const auto on=RunProcess(spec);
+  REQUIRE(on.launched);REQUIRE(on.crash.captured);
+  CHECK(on.exit_code==off.exit_code);
+  CHECK(on.crash.native_registers.size()==16);
+  CHECK(on.crash.memory.size()<=64);
+  const auto marker=[&](uint64_t address,std::initializer_list<uint8_t> bytes) {
+    for(const auto& block:on.crash.memory)
+      if(block.address==address) {
+        CHECK(block.bytes.size()==256);
+        return std::equal(bytes.begin(),bytes.end(),block.bytes.begin());
+      }
+    return false;
+  };
+  CHECK(marker(0x100002000ull,{0xDE,0xAD,0xBE,0xEF}));
+  CHECK(marker(0x100003000ull,{0xCA,0xFE,0xBA,0xBE}));
+}
 TEST_CASE("process tree resource accounting is opt in", "[process]") {
   Scratch s;
   auto spec = s.Spec({"exit", "0"}); spec.collect_metrics = true;

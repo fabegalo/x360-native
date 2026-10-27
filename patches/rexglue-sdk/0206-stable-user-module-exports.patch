@@ -1,0 +1,99 @@
+diff --git a/include/rex/system/function_dispatcher.h b/include/rex/system/function_dispatcher.h
+--- a/include/rex/system/function_dispatcher.h
++++ b/include/rex/system/function_dispatcher.h
+@@ -87,6 +87,9 @@
+                                uint32_t image_size, bool is_entrypoint, bool host_function_table);
+   bool SetFunction(uint32_t guest_address, ::PPCFunc* func) override;
+   ::PPCFunc* GetFunction(uint32_t guest_address);
++  // Host dispatch and same-module exports retain the original guest address.
++  // Legacy cross-module callers need one stable, caller-local thunk per export.
++  uint32_t ResolveUserExport(uint32_t guest_address, uint32_t caller_address);
+   bool HasAnyFunctionTable() const { return !module_tables_.empty(); }
+   /**
+    * caller_address must be inside a registered module, or 0 to mean "host-
+@@ -126,6 +129,8 @@
+     uint32_t next_thunk_address;
+     uint32_t thunk_limit;
+     bool host_function_table;
++    std::unordered_map<uint32_t, uint32_t> user_export_thunks;
++    std::vector<uint32_t> free_user_export_thunks;
+   };
+ 
+   ModuleTableInfo* FindModuleByAddress(uint32_t guest_address);
+diff --git a/src/system/function_dispatcher.cpp b/src/system/function_dispatcher.cpp
+--- a/src/system/function_dispatcher.cpp
++++ b/src/system/function_dispatcher.cpp
+@@ -295,6 +295,28 @@
+   return nullptr;
+ }
+ 
++uint32_t FunctionDispatcher::ResolveUserExport(uint32_t guest_address, uint32_t caller_address) {
++  std::lock_guard<std::recursive_mutex> lock(dispatch_mutex_);
++  auto* func = GetFunction(guest_address);
++  if (!guest_address || !caller_address || !func) return guest_address;
++  auto* caller = FindModuleByAddress(caller_address);
++  if (!caller) return AllocateThunk(func, caller_address);  // retains the invalid-caller error
++  if (caller->host_function_table || caller == FindModuleByAddress(guest_address))
++    return guest_address;
++  if (auto found = caller->user_export_thunks.find(guest_address);
++      found != caller->user_export_thunks.end()) return found->second;
++  uint32_t thunk = 0;
++  if (!caller->free_user_export_thunks.empty()) {
++    thunk = caller->free_user_export_thunks.back();
++    if (!SetFunction(thunk, func)) return 0;
++    caller->free_user_export_thunks.pop_back();
++  } else {
++    thunk = AllocateThunk(func, caller_address);
++  }
++  if (thunk) caller->user_export_thunks.emplace(guest_address, thunk);
++  return thunk;
++}
++
+ uint32_t FunctionDispatcher::AllocateThunk(::PPCFunc* func, uint32_t caller_address) {
+   std::lock_guard<std::recursive_mutex> lock(dispatch_mutex_);
+   auto* mod = FindModuleByAddress(caller_address);
+@@ -382,6 +404,26 @@
+                                [code_base = it->second.code_base](const ModuleTableInfo& mti) {
+                                  return mti.code_base == code_base;
+                                });
++
++  // A legacy caller may have thunks into this module's native DLL. Remove
++  // those bindings before unloading it, and recycle only these dedicated slots.
++  if (table_it != module_tables_.end()) {
++    const uint32_t target_begin = table_it->code_base;
++    const uint64_t target_end = uint64_t(target_begin) + table_it->code_size + kThunkReserveSize;
++    for (auto& caller : module_tables_) {
++      for (auto cached = caller.user_export_thunks.begin();
++           cached != caller.user_export_thunks.end();) {
++        if (cached->first >= target_begin && uint64_t(cached->first) < target_end) {
++          function_table_.erase(cached->second);
++          if (!caller.host_function_table) memory_->SetFunction(cached->second, nullptr);
++          caller.free_user_export_thunks.push_back(cached->second);
++          cached = caller.user_export_thunks.erase(cached);
++        } else {
++          ++cached;
++        }
++      }
++    }
++  }
+ 
+   for (uint32_t addr : it->second.addresses) {
+     function_table_.erase(addr);
+diff --git a/src/system/user_module.cpp b/src/system/user_module.cpp
+--- a/src/system/user_module.cpp
++++ b/src/system/user_module.cpp
+@@ -242,13 +242,7 @@
+     return guest_addr;
+   }
+ 
+-  auto* dispatcher = kernel_state_->function_dispatcher();
+-  auto* func = dispatcher->GetFunction(guest_addr);
+-  if (!func) {
+-    return guest_addr;
+-  }
+-
+-  return dispatcher->AllocateThunk(func, caller_address);
++  return kernel_state_->function_dispatcher()->ResolveUserExport(guest_addr, caller_address);
+ }
+ 
+ uint32_t UserModule::GetProcAddressByName(std::string_view name) {

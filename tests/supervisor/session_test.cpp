@@ -20,6 +20,30 @@ TEST_CASE("session diagnostic arguments belong to the selected profile", "[sessi
   CHECK(SessionProfileArguments(second, true) == second.args);
   CHECK(first.args.front() == "--other_dashboard_intro=true");
 }
+TEST_CASE("direct diagnostics and title transitions use the selected console storage and UI", "[session-platform]") {
+  SessionProfile console, game;
+  console.manifest = "console/profile.toml";
+  console.user_root = "isolated/console";
+  console.game_root = "originals/console";
+  console.dashboard_version = "2.0.17559.0";
+  console.system_ui_host = "build/console/ui.dll";
+  game.manifest = "game/profile.toml";
+  game.user_root = "isolated/game";
+  game.system_ui_host = "another-version/ui.dll";
+  const auto args = SessionPlatformArguments(console, game);
+  CHECK(args == std::vector<std::string>{
+      "--x360n_profile_root=isolated/console", "--content_data_root=isolated/console",
+      "--x360n_dashboard_version=2.0.17559.0", "--x360n_system_ui_host=build/console/ui.dll",
+      "--x360n_system_ui_root=originals/console"});
+  CHECK(SessionPlatformArguments(console, console) == std::vector<std::string>{
+      "--x360n_profile_root=isolated/console", "--content_data_root=isolated/console",
+      "--x360n_dashboard_version=2.0.17559.0"});
+  console.dashboard_version = "2.0.6717.0";
+  console.system_ui_host.clear();
+  CHECK(SessionPlatformArguments(console, game) == std::vector<std::string>{
+      "--x360n_profile_root=isolated/console", "--content_data_root=isolated/console",
+      "--x360n_dashboard_version=2.0.6717.0"});
+}
 TEST_CASE("session watchdog resets after sustained execution without a lifetime limit", "[session]") {
   SessionProgress progress;
   for (unsigned cycle = 0; cycle < 1000; ++cycle) {
@@ -121,6 +145,8 @@ TEST_CASE("session UI host belongs to its dashboard build and receipt", "[sessio
     CHECK_THROWS(LoadSessionProfile(ProjectPaths{dir}, manifest, false));
   }
   write("system_ui.dll", "args=['--x360n_system_ui_root=another-dashboard']\n");
+  CHECK_THROWS(LoadSessionProfile(ProjectPaths{dir}, manifest, false));
+  write("system_ui.dll", "args=['--content_data_root=another-console']\n");
   CHECK_THROWS(LoadSessionProfile(ProjectPaths{dir}, manifest, false));
   fs::remove_all(dir);
 }

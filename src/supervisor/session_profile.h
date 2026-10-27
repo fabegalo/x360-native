@@ -33,6 +33,10 @@ struct SessionProfile {
 SessionProfile LoadSessionProfile(const ProjectPaths& paths, const std::filesystem::path& manifest,
                                   bool validate_execution = true);
 std::vector<std::string> SessionProfileArguments(const SessionProfile& profile, bool skip_boot_intro);
+// The selected console owns identity, storage and original system services.
+// Callers authenticate both profiles before using these arguments.
+std::vector<std::string> SessionPlatformArguments(const SessionProfile& dashboard,
+                                                 const SessionProfile& active);
 bool MatchesLaunch(const SessionProfile& profile, const LaunchRequest& request,
                    const std::filesystem::path& dashboard_user_root = {});
 // Arguments that hand the session dashboard's verified avatar files to a title

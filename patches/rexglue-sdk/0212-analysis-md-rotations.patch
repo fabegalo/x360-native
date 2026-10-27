@@ -1,0 +1,119 @@
+diff --git a/src/codegen/ppc/opcode.h b/src/codegen/ppc/opcode.h
+--- a/src/codegen/ppc/opcode.h
++++ b/src/codegen/ppc/opcode.h
+@@ -476,6 +476,12 @@
+   // Vector status/control
+   mfvscr,  // Move from vector status and control register
+   mtvscr,  // Move to vector status and control register
++
++  // Appended to preserve existing analysis opcode values.
++  rldicl,  // Rotate left double-word immediate then clear left
++  rldicr,  // Rotate left double-word immediate then clear right
++  rldic,   // Rotate left double-word immediate then clear
++  rldimi,  // Rotate left double-word immediate then mask insert
+ };
+ 
+ /**
+diff --git a/src/codegen/ppc/opcode.cpp b/src/codegen/ppc/opcode.cpp
+--- a/src/codegen/ppc/opcode.cpp
++++ b/src/codegen/ppc/opcode.cpp
+@@ -30,7 +30,7 @@
+ // Opcode information table
+ //=============================================================================
+ 
+-static const std::array<OpcodeInfo, 320> g_opcode_table = {{
++static const std::array<OpcodeInfo, 324> g_opcode_table = {{
+     // Primary opcode 16: bcx (conditional branch) - all variants
+     {Opcode::bc, InstrFormat::kB, OpcodeGroup::kBranch, "bc", 16, 0, false},
+     {Opcode::bca, InstrFormat::kB, OpcodeGroup::kBranch, "bca", 16, 0, false},
+@@ -155,6 +155,13 @@
+ 
+     // Primary opcode 23: rlwnm
+     {Opcode::rlwnm, InstrFormat::kM, OpcodeGroup::kGeneral, "rlwnm", 23, 0, false},
++
++    // Primary opcode 30: MD forms. SH[5] and mask[5] are operands,
++    // not part of the three-bit extended opcode.
++    {Opcode::rldicl, InstrFormat::kMD, OpcodeGroup::kGeneral, "rldicl", 30, 0, true},
++    {Opcode::rldicr, InstrFormat::kMD, OpcodeGroup::kGeneral, "rldicr", 30, 1, true},
++    {Opcode::rldic, InstrFormat::kMD, OpcodeGroup::kGeneral, "rldic", 30, 2, true},
++    {Opcode::rldimi, InstrFormat::kMD, OpcodeGroup::kGeneral, "rldimi", 30, 3, true},
+ 
+     // Primary opcode 17: sc
+     {Opcode::sc, InstrFormat::kX, OpcodeGroup::kSystem, "sc", 17, 0, false},
+@@ -552,6 +559,14 @@
+       return Opcode::andi_;
+     case 29:
+       return Opcode::andis_;
++    case 30:
++      switch ((code >> 2) & 7) {
++        case 0: return Opcode::rldicl;
++        case 1: return Opcode::rldicr;
++        case 2: return Opcode::rldic;
++        case 3: return Opcode::rldimi;
++        default: return Opcode::kUnknown;  // MDS/reserved remain unsupported here.
++      }
+     case 32:
+       return Opcode::lwz;
+     case 33:
+diff --git a/src/codegen/ppc/instruction.h b/src/codegen/ppc/instruction.h
+--- a/src/codegen/ppc/instruction.h
++++ b/src/codegen/ppc/instruction.h
+@@ -201,13 +201,18 @@
+    * Fields: RS (5-bit), RA (5-bit), sh (6-bit), mb (6-bit), XO (3-bit), Rc (1-bit)
+    */
+   struct FormatMD {
+-    uint32_t Rc : 1;    // Record bit (bit 31)
+-    uint32_t XO : 3;    // Extended opcode (bits 27-30, includes sh bit 5)
+-    uint32_t mb : 6;    // Mask begin (bits 21-26, includes bit 5)
+-    uint32_t sh : 6;    // Shift amount (bits 16-20, includes bit 30)
+-    uint32_t RA : 5;    // Register A (bits 11-15)
+-    uint32_t RS : 5;    // Register S (bits 6-10)
+-    uint32_t _pad : 6;  // Primary opcode (bits 0-5)
++    uint32_t Rc : 1;       // Bit 31
++    uint32_t sh_high : 1;  // SH[5], bit 30
++    uint32_t XO : 3;       // Bits 27-29
++    uint32_t mb_high : 1;  // Mask[5], bit 26
++    uint32_t mb_low : 5;   // Bits 21-25
++    uint32_t sh_low : 5;   // Bits 16-20
++    uint32_t RA : 5;       // Bits 11-15
++    uint32_t RS : 5;       // Bits 6-10
++    uint32_t _pad : 6;
++
++    uint32_t shift() const { return sh_low | (sh_high << 5); }
++    uint32_t mask() const { return mb_low | (mb_high << 5); }
+   };
+ 
+   /**
+diff --git a/src/codegen/ppc/instruction.cpp b/src/codegen/ppc/instruction.cpp
+--- a/src/codegen/ppc/instruction.cpp
++++ b/src/codegen/ppc/instruction.cpp
+@@ -120,6 +120,10 @@
+     case InstrFormat::kM:
+       regs.push_back((u8)M.RS);
+       break;
++    case InstrFormat::kMD:
++      regs.push_back((u8)MD.RS);
++      if (opcode == Opcode::rldimi) regs.push_back((u8)MD.RA);
++      break;
+     default:
+       break;
+   }
+@@ -142,6 +146,9 @@
+       break;
+     case InstrFormat::kM:
+       regs.push_back((u8)M.RA);
++      break;
++    case InstrFormat::kMD:
++      regs.push_back((u8)MD.RA);
+       break;
+     default:
+       break;
+@@ -187,6 +194,8 @@
+         break;
+     }
+   }
++
++  if (format == InstrFormat::kMD && is_record_form()) sem.writes_cr = true;
+ 
+   // Special register access
+   if (opcode == Opcode::mfspr) {

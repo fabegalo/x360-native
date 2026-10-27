@@ -35,7 +35,7 @@
                                             "sha256":  "39ca70edb6444fa3a42495c8a9d7bd241b9972849e4ac2b35974ed4a6002d5bd",
                                             "files":  {
                                                           "src/system/xex_module.cpp":  "3ca9480d0c644f3c9258a551a89225aebb146c63a6a257c7ae54a3a206563206",
-                                                          "src/codegen/phase_register.cpp":  "5cfccd37d29d8cc4eacad6f0b76b69f56526b90f19dfb216b2fe9dd383193935",
+                                                          "src/codegen/phase_register.cpp":  "8c9a6f031110bcca15cb9fc89856749083df690342b630c34c44c9526563b185",
                                                           "include/rex/codegen/analysis_errors.h":  "088eb6768d0839b1fc3cc13c4d766f4f1130a4bf82556b7984d3b095b33e11eb",
                                                           "src/codegen/analyze.cpp":  "aea3234592d2b8076af8591d5244f4b934504049f27e53f1d68d2cae614f042a"
                                                       },
@@ -134,7 +134,7 @@
                                             "file":  "patches/rexglue-sdk/0011-xam-user-preference.patch",
                                             "sha256":  "9cfbe27ea058fbcb5f80a63714dfd38a0127317398e461443ca6687ae7780120",
                                             "files":  {
-                                                          "src/kernel/xam/xam_user.cpp":  "d5d91facac17ef961a1491cac5bb01204c932baf6edd14ee340bebbefba7fa74"
+                                                          "src/kernel/xam/xam_user.cpp":  "5589f20461e56111d75d2cc8f79abd5c9a6fef1f65a29555dd706ffcb409f1be"
                                                       },
                                             "base_files":  {
                                                                "src/kernel/xam/xam_user.cpp":  "7b84ddf00e12b1c9de33e00df75d8d692a686fcbbd939a0d706fecd36bc609e9"
@@ -344,7 +344,7 @@
                                                                "src/kernel/xam/xam_ui.cpp":  "03e89d1119cb059d706b790304f2f26be668d1fce8660a2ff7a22e70c2c7b5d4"
                                                            },
                                             "files":  {
-                                                          "src/kernel/xam/xam_user.cpp":  "d5d91facac17ef961a1491cac5bb01204c932baf6edd14ee340bebbefba7fa74",
+                                                          "src/kernel/xam/xam_user.cpp":  "5589f20461e56111d75d2cc8f79abd5c9a6fef1f65a29555dd706ffcb409f1be",
                                                           "src/kernel/xam/xam_ui.cpp":  "ee936a9494da9ca7ebd2afd7332b00e1f1059639b4f7cf2607868f51d0e003a3"
                                                       },
                                             "test":  "tests/sdkcheck/profile_ui_request_test.cpp"
@@ -397,7 +397,7 @@
                                                                "src/system/function_dispatcher.cpp":  "628485431855ec605420c134bace64e7361a03267a437512d8f14d689d65989b"
                                                            },
                                             "files":  {
-                                                          "src/system/function_dispatcher.cpp":  "4d1908666ae36a68b009eef802573934362730a78f472cfe0628c93ebb92c36d"
+                                                          "src/system/function_dispatcher.cpp":  "e830ae8d0fc649036222c0ad406963af053a22fdb918e5ae1993a6b4e7a6e877"
                                                       },
                                             "test":  "live profile UI crash stack; diagnostic only"
                                         },
@@ -412,8 +412,8 @@
                                                                "resources/templates/codegen/register_cpp.inja":  "a71d3e9b956954e540a87a02b55d1d38f1e33ae4ec7198ef18f8463e95ac9f2d"
                                                            },
                                             "files":  {
-                                                          "include/rex/system/function_dispatcher.h":  "9e504486d44bee777241055800a35330eada66e0b02f5edebe1909379ace9b88",
-                                                          "src/system/function_dispatcher.cpp":  "4d1908666ae36a68b009eef802573934362730a78f472cfe0628c93ebb92c36d",
+                                                          "include/rex/system/function_dispatcher.h":  "90fb84bfbbf4ed0447ccd1de4fccec02dcb4c0737e7ae66bc6a62a0d5fd3e2da",
+                                                          "src/system/function_dispatcher.cpp":  "e830ae8d0fc649036222c0ad406963af053a22fdb918e5ae1993a6b4e7a6e877",
                                                           "src/system/kernel_state.cpp":  "1e2b192f599ed33aa492555a05516f1a34a56cba580c45afbe8feed8c71cda55",
                                                           "resources/templates/codegen/_indirect_call.inja":  "de4c1576a91dd4b63913ab848fa1626da65a65cdccd71442765da271e67b7519",
                                                           "resources/templates/codegen/register_cpp.inja":  "671dc785a40dc482a10160bdc311c2fe613ca6cee0b1f85c54c735a807865645"
@@ -550,7 +550,7 @@
                                                           "include/rex/system/xam/user_profile.h":  "95b5837de2ea3a549f1d83244c57525b2e90f8b8b28c89bbc337f780da0c5ca3",
                                                           "src/system/xam/user_profile.cpp":  "04a29ea7cbaf110ded62b55c53504072d43b4655b074f076cec5f4d1d561a829",
                                                           "src/system/kernel_state.cpp":  "1e2b192f599ed33aa492555a05516f1a34a56cba580c45afbe8feed8c71cda55",
-                                                          "src/kernel/xam/xam_user.cpp":  "d5d91facac17ef961a1491cac5bb01204c932baf6edd14ee340bebbefba7fa74"
+                                                          "src/kernel/xam/xam_user.cpp":  "5589f20461e56111d75d2cc8f79abd5c9a6fef1f65a29555dd706ffcb409f1be"
                                                       },
                                             "test":  "sdkcheck.Local profile: persistent identity, XAM logon/logoff, restart, corruption and write failure"
                                         },
@@ -564,7 +564,7 @@
                                                            },
                                             "files":  {
                                                           "src/kernel/xam/xam_enum.cpp":  "40c7e4b2118ac9ba192c6705408909cf124497ea90f4373677e42874b52307a6",
-                                                          "src/kernel/xam/xam_user.cpp":  "d5d91facac17ef961a1491cac5bb01204c932baf6edd14ee340bebbefba7fa74",
+                                                          "src/kernel/xam/xam_user.cpp":  "5589f20461e56111d75d2cc8f79abd5c9a6fef1f65a29555dd706ffcb409f1be",
                                                           "src/kernel/xam/xam_misc.cpp":  "b612fdef71b80e5b2004a2c0ba6d59497586e5e789295e685fb2daa2b78dac1c"
                                                       },
                                             "test":  "sdkcheck.Local profile: original Sign-in enumeration ABI, confirmation, cancellation boundary and restart"
@@ -598,7 +598,7 @@
                                                                "src/kernel/xam/xam_user.cpp":  "ee961c8e3af100e5fbc79abf60d7d9c0761d91c9548c1a033ce99846b9605d8d"
                                                            },
                                             "files":  {
-                                                          "src/kernel/xam/xam_user.cpp":  "d5d91facac17ef961a1491cac5bb01204c932baf6edd14ee340bebbefba7fa74"
+                                                          "src/kernel/xam/xam_user.cpp":  "5589f20461e56111d75d2cc8f79abd5c9a6fef1f65a29555dd706ffcb409f1be"
                                                       },
                                             "test":  "sdkcheck.Local profile enumerates the original Sign-in record and commits only on confirmation"
                                         },
@@ -615,7 +615,7 @@
                                                           "src/kernel/xam/xam_task.cpp":  "45e845db1ca4343f7da05424b338a281a95635480498efe646a208204882453c",
                                                           "include/rex/system/xobject.h":  "37930c4cdbf022d716b4033a2f278153f3535ef7a13b7b3ebb798d42dca8b319",
                                                           "src/kernel/xam/xam_misc.cpp":  "b612fdef71b80e5b2004a2c0ba6d59497586e5e789295e685fb2daa2b78dac1c",
-                                                          "src/kernel/xam/xam_user.cpp":  "d5d91facac17ef961a1491cac5bb01204c932baf6edd14ee340bebbefba7fa74"
+                                                          "src/kernel/xam/xam_user.cpp":  "5589f20461e56111d75d2cc8f79abd5c9a6fef1f65a29555dd706ffcb409f1be"
                                                       },
                                             "test":  "sdkcheck.Sign-in task lifetime and local session contracts"
                                         },
@@ -650,7 +650,7 @@
                                                                "src/kernel/xam/xam_user.cpp":  "770dff46e6ad83abcfeaa76fb213b493b0a939feaac0544340ec196de295becb"
                                                            },
                                             "files":  {
-                                                          "src/kernel/xam/xam_user.cpp":  "d5d91facac17ef961a1491cac5bb01204c932baf6edd14ee340bebbefba7fa74"
+                                                          "src/kernel/xam/xam_user.cpp":  "5589f20461e56111d75d2cc8f79abd5c9a6fef1f65a29555dd706ffcb409f1be"
                                                       },
                                             "test":  "sdkcheck.Local profile logon completes overlapped with the real result"
                                         },
@@ -723,7 +723,7 @@
                                                            },
                                             "files":  {
                                                           "src/kernel/xam/xam_ui.cpp":  "ee936a9494da9ca7ebd2afd7332b00e1f1059639b4f7cf2607868f51d0e003a3",
-                                                          "src/kernel/xam/xam_user.cpp":  "d5d91facac17ef961a1491cac5bb01204c932baf6edd14ee340bebbefba7fa74",
+                                                          "src/kernel/xam/xam_user.cpp":  "5589f20461e56111d75d2cc8f79abd5c9a6fef1f65a29555dd706ffcb409f1be",
                                                           "src/kernel/xam/apps/xam_app.cpp":  "b5c8d87976fbf041f798ab4738f8117fefcc72e490312ef2750a3cc9ffa15f8a"
                                                       },
                                             "test":  "sdkcheck.Profile UI requests reach the system application without invented signin notifications"
@@ -798,7 +798,7 @@
                                                                "src/kernel/xam/xam_user.cpp":  "b3101a12066fcfedb07019b26423d654da090c2ccfb08252a9d66b8f71eb2b93"
                                                            },
                                             "files":  {
-                                                          "src/kernel/xam/xam_user.cpp":  "d5d91facac17ef961a1491cac5bb01204c932baf6edd14ee340bebbefba7fa74"
+                                                          "src/kernel/xam/xam_user.cpp":  "5589f20461e56111d75d2cc8f79abd5c9a6fef1f65a29555dd706ffcb409f1be"
                                                       },
                                             "test":  "sdkcheck.Local profile creation uses guest account and consumable operation handles"
                                         },
@@ -812,7 +812,7 @@
                                                            },
                                             "files":  {
                                                           "src/kernel/xam/xam_ui.cpp":  "ee936a9494da9ca7ebd2afd7332b00e1f1059639b4f7cf2607868f51d0e003a3",
-                                                          "src/kernel/xam/xam_user.cpp":  "d5d91facac17ef961a1491cac5bb01204c932baf6edd14ee340bebbefba7fa74",
+                                                          "src/kernel/xam/xam_user.cpp":  "5589f20461e56111d75d2cc8f79abd5c9a6fef1f65a29555dd706ffcb409f1be",
                                                           "src/kernel/xam/apps/xam_app.cpp":  "b5c8d87976fbf041f798ab4738f8117fefcc72e490312ef2750a3cc9ffa15f8a"
                                                       },
                                             "test":  "sdkcheck.Profile UI requests reach the system application without invented signin notifications"
@@ -828,7 +828,7 @@
                                             "files":  {
                                                           "src/kernel/xam/xam_misc.cpp":  "b612fdef71b80e5b2004a2c0ba6d59497586e5e789295e685fb2daa2b78dac1c",
                                                           "src/kernel/xam/xam_ui.cpp":  "ee936a9494da9ca7ebd2afd7332b00e1f1059639b4f7cf2607868f51d0e003a3",
-                                                          "src/kernel/xam/xam_user.cpp":  "d5d91facac17ef961a1491cac5bb01204c932baf6edd14ee340bebbefba7fa74"
+                                                          "src/kernel/xam/xam_user.cpp":  "5589f20461e56111d75d2cc8f79abd5c9a6fef1f65a29555dd706ffcb409f1be"
                                                       },
                                             "test":  "sdkcheck.Guide sign-out removes only the active local identity"
                                         },
@@ -916,7 +916,7 @@
                                             "file":  "patches/rexglue-sdk/0068-gapfill-pdata-end-boundaries.patch",
                                             "sha256":  "9632659ad82cf7da44c026ce7e61d7f3b6071e16976dea3a7c29041d0483dc30",
                                             "files":  {
-                                                          "src/codegen/phase_gapfill.cpp":  "b64c94daa2639315f6ec4b15243c5d608d04a25a4156f5625e5ea229d7adb813"
+                                                          "src/codegen/phase_gapfill.cpp":  "6be4cb31baad2f41b0a9d22375fa850d1aa9027b2a8df4021af2c5773daa188d"
                                                       },
                                             "base_files":  {
                                                                "src/codegen/phase_gapfill.cpp":  "878a120c08c772e005f92ec44ed5121c65b5b5764c4725896dfe2d7d5e7d20e3"
@@ -1082,7 +1082,7 @@
   "files": {
     "include/rex/system/xam/user_profile.h": "95b5837de2ea3a549f1d83244c57525b2e90f8b8b28c89bbc337f780da0c5ca3",
     "src/kernel/xam/xam_misc.cpp": "b612fdef71b80e5b2004a2c0ba6d59497586e5e789295e685fb2daa2b78dac1c",
-    "src/kernel/xam/xam_user.cpp": "d5d91facac17ef961a1491cac5bb01204c932baf6edd14ee340bebbefba7fa74",
+    "src/kernel/xam/xam_user.cpp": "5589f20461e56111d75d2cc8f79abd5c9a6fef1f65a29555dd706ffcb409f1be",
     "src/system/xam/user_profile.cpp": "04a29ea7cbaf110ded62b55c53504072d43b4655b074f076cec5f4d1d561a829"
   },
   "test": "tests/sdkcheck/local_profile_gamercard_test.cpp"
@@ -1111,7 +1111,7 @@
     "src/kernel/xam/xam_user.cpp": "679084f458f9adc32c00963b8cfc117549c0d2b6e620dd931e7f4e583879fb6e"
   },
   "files": {
-    "src/kernel/xam/xam_user.cpp": "d5d91facac17ef961a1491cac5bb01204c932baf6edd14ee340bebbefba7fa74"
+    "src/kernel/xam/xam_user.cpp": "5589f20461e56111d75d2cc8f79abd5c9a6fef1f65a29555dd706ffcb409f1be"
   },
   "test": "tests/sdkcheck/local_profile_gamercard_test.cpp"
 },
@@ -1189,7 +1189,7 @@
     "src/codegen/phase_gapfill.cpp": "3b89f9a207f52ae832403a84aa52b9683fbdb32800c9ab3423096dbb16c4c457"
   },
   "files": {
-    "src/codegen/phase_gapfill.cpp": "b64c94daa2639315f6ec4b15243c5d608d04a25a4156f5625e5ea229d7adb813"
+    "src/codegen/phase_gapfill.cpp": "6be4cb31baad2f41b0a9d22375fa850d1aa9027b2a8df4021af2c5773daa188d"
   },
   "test": "tests/sdkcheck/virtual_thunk_discovery_test.cpp"
 },
@@ -1222,8 +1222,8 @@
     "src/codegen/decoded_binary.cpp": "382a9fc4f240d61d039dd1372c1d3750dd705676f0a0beb38c3757cf34b664c3"
   },
   "files": {
-    "include/rex/codegen/function_types.h": "98691be9bb440a786a7788158f3b08a781f2723faffd236029c4e70c5c6015d8",
-    "src/codegen/function_scanner.cpp": "583f1a89d0a62f23fbc5549db2808541ad05f894965292c38c10ed75b81a3c0d",
+    "include/rex/codegen/function_types.h": "fc597f4c33c3ec730fb0c7d9af0a1216e24057cac9c8f5e4a7b2ad75e030ad05",
+    "src/codegen/function_scanner.cpp": "5b532b879054397447e92f4ab72ea8a56a922be702bdd382bb944478f40e5d4e",
     "src/codegen/function_graph.cpp": "8b6df66b04ebdf665cb311a51c0abd19290eaa545e44f74863f29a2090ba8546",
     "src/codegen/builders/control_flow.cpp": "b71bf91c2c7feafc5dc5efb5f1e8d1307d788d850ac08a67e657b5d52c0ee829",
     "src/codegen/decoded_binary.h": "d790f56981a58b3e6b44d41a44cc59d7e64df37452342110342227ba4bb934b2",
@@ -1251,7 +1251,7 @@
     "src/codegen/function_scanner.cpp": "a6a23f7cc730f6ceed23875d5e14c4d8d254afc70a03e3ccdadb6dd77c5c96a0"
   },
   "files": {
-    "src/codegen/function_scanner.cpp": "583f1a89d0a62f23fbc5549db2808541ad05f894965292c38c10ed75b81a3c0d"
+    "src/codegen/function_scanner.cpp": "5b532b879054397447e92f4ab72ea8a56a922be702bdd382bb944478f40e5d4e"
   },
   "test": "tests/sdkcheck/ctr_dispatch_test.cpp"
 },
@@ -1277,7 +1277,7 @@
   "files": {
     "include/rex/kernel/xam/module.h": "a5fc75694094a6f7248b116de587f60c0d1fa68e26fede58414d051055d7cc9c",
     "src/kernel/xboxkrnl/xboxkrnl_hal.cpp": "f3e83cbe3bc899bc60bb81ad8e9431102a663a7de7993b93004a80c77e0d969d",
-    "src/kernel/xam/xam_user.cpp": "d5d91facac17ef961a1491cac5bb01204c932baf6edd14ee340bebbefba7fa74"
+    "src/kernel/xam/xam_user.cpp": "5589f20461e56111d75d2cc8f79abd5c9a6fef1f65a29555dd706ffcb409f1be"
   },
   "test": "tests/sdkcheck/firmware_exit_test.ps1"
 },
@@ -1461,7 +1461,7 @@
                   "include/rex/system/xam/app_manager.h":  "b21cbaab39de95b8287382effb3ea581d02ed35ace0e868f7f26a1d90f8b815f",
                   "src/kernel/xam/xam_enum.cpp":  "40c7e4b2118ac9ba192c6705408909cf124497ea90f4373677e42874b52307a6",
                   "src/kernel/xam/xam_msg.cpp":  "b856edfa56d9376649d819730981f0b8e91a3768ba333446a5ceb1ccfad81376",
-                  "src/kernel/xam/xam_user.cpp":  "d5d91facac17ef961a1491cac5bb01204c932baf6edd14ee340bebbefba7fa74",
+                  "src/kernel/xam/xam_user.cpp":  "5589f20461e56111d75d2cc8f79abd5c9a6fef1f65a29555dd706ffcb409f1be",
                   "src/kernel/xam/apps/xgi_app.cpp":  "ed7b589b4620cbc9c781169ea4755b0cc542de68ae84f2fa4418df31e137c7fe"
               },
     "test":  "tests/sdkcheck/offline_achievement_api_test.cpp"
@@ -1638,7 +1638,7 @@
     "include/rex/system/xam/user_profile.h": "cc0a3f9d1bebeb6b5e30dad1f1e54319c83a37e9785a5b6f66479bffc7ff5067"
   },
   "files": {
-    "src/kernel/xam/xam_user.cpp": "d5d91facac17ef961a1491cac5bb01204c932baf6edd14ee340bebbefba7fa74",
+    "src/kernel/xam/xam_user.cpp": "5589f20461e56111d75d2cc8f79abd5c9a6fef1f65a29555dd706ffcb409f1be",
     "src/system/xam/user_profile.cpp": "04a29ea7cbaf110ded62b55c53504072d43b4655b074f076cec5f4d1d561a829",
     "include/rex/system/xam/user_profile.h": "95b5837de2ea3a549f1d83244c57525b2e90f8b8b28c89bbc337f780da0c5ca3"
   },
@@ -1706,7 +1706,7 @@
   },
   "files": {
     "src/system/xam/user_profile.cpp": "04a29ea7cbaf110ded62b55c53504072d43b4655b074f076cec5f4d1d561a829",
-    "src/kernel/xam/xam_user.cpp": "d5d91facac17ef961a1491cac5bb01204c932baf6edd14ee340bebbefba7fa74"
+    "src/kernel/xam/xam_user.cpp": "5589f20461e56111d75d2cc8f79abd5c9a6fef1f65a29555dd706ffcb409f1be"
   },
   "test": "sdkcheck: [profile-settings-optional], [profile-settings], [offline-achievement-api]"
 },
@@ -1730,7 +1730,7 @@
   },
   "files": {
     "src/kernel/xam/apps/xgi_app.cpp": "ed7b589b4620cbc9c781169ea4755b0cc542de68ae84f2fa4418df31e137c7fe",
-    "src/kernel/xam/xam_user.cpp": "d5d91facac17ef961a1491cac5bb01204c932baf6edd14ee340bebbefba7fa74"
+    "src/kernel/xam/xam_user.cpp": "5589f20461e56111d75d2cc8f79abd5c9a6fef1f65a29555dd706ffcb409f1be"
   },
   "test": "sdkcheck: [user-preference], [profile-preference-flags], [profile-settings]"
 }
@@ -1766,7 +1766,7 @@
     "src/kernel/xam/xam_user.cpp": "8a2f1be6a3547cac8258777901c53564b878442e0ddf5e6dbce9909d14e5bfbf"
   },
   "files": {
-    "src/kernel/xam/xam_user.cpp": "d5d91facac17ef961a1491cac5bb01204c932baf6edd14ee340bebbefba7fa74"
+    "src/kernel/xam/xam_user.cpp": "5589f20461e56111d75d2cc8f79abd5c9a6fef1f65a29555dd706ffcb409f1be"
   },
   "test": "sdkcheck: [profile-tile-key], [profile-settings], [offline-achievement-api]"
 }
@@ -1832,7 +1832,7 @@
     "src/kernel/xam/xam_user.cpp": "349fce5739ca32a1b3ab8f4582cfdcb983a24b99dc4066fb2ec54e0bbd8c7935"
   },
   "files": {
-    "src/kernel/xam/xam_user.cpp": "d5d91facac17ef961a1491cac5bb01204c932baf6edd14ee340bebbefba7fa74"
+    "src/kernel/xam/xam_user.cpp": "5589f20461e56111d75d2cc8f79abd5c9a6fef1f65a29555dd706ffcb409f1be"
   },
   "test": "sdkcheck: [partial-profile] local profiles are never partial (Guide opens Games list)"
 },
@@ -1845,7 +1845,7 @@
   },
   "files": {
     "src/kernel/xam/xam_enum.cpp": "40c7e4b2118ac9ba192c6705408909cf124497ea90f4373677e42874b52307a6",
-    "src/kernel/xam/xam_user.cpp": "d5d91facac17ef961a1491cac5bb01204c932baf6edd14ee340bebbefba7fa74"
+    "src/kernel/xam/xam_user.cpp": "5589f20461e56111d75d2cc8f79abd5c9a6fef1f65a29555dd706ffcb409f1be"
   },
   "test": "diagnostic log only; sdkcheck: [achievement-ui], [offline-achievement-api] unchanged"
 },
@@ -1856,7 +1856,7 @@
     "src/kernel/xam/xam_user.cpp": "338c7a2155fae43b03dec8836c6402d5f5549cd8aede1809ed3dcdc9203c172e"
   },
   "files": {
-    "src/kernel/xam/xam_user.cpp": "d5d91facac17ef961a1491cac5bb01204c932baf6edd14ee340bebbefba7fa74"
+    "src/kernel/xam/xam_user.cpp": "5589f20461e56111d75d2cc8f79abd5c9a6fef1f65a29555dd706ffcb409f1be"
   },
   "test": "sdkcheck: [offline-achievement-api] flags 0x27/0x20 as original 81670190"
 },
@@ -2878,6 +2878,142 @@
     "src/graphics/vulkan/render_target_cache.cpp": "fb3d2210c665fba33ba465d96ece33f91a202fbe5690712955bcf82047ae1f1f"
   },
   "test": "Exact scaled MSAA RGB565 addresses with sample reuse and proven contiguous vector loads; 1x/unscaled and other format pipelines preserved. CPU shader helper vs independent physical tile oracle; complete GPU readback on D3D12/Vulkan."
+},
+{
+  "file": "patches/rexglue-sdk/0203-unowned-direct-tail-discovery.patch",
+  "sha256": "d4f895781068b55dc5154d62a28161379fe59c431015956d3a471ca8a2a349a5",
+  "base_files": {
+    "src/codegen/phase_gapfill.cpp": "b64c94daa2639315f6ec4b15243c5d608d04a25a4156f5625e5ea229d7adb813"
+  },
+  "files": {
+    "src/codegen/phase_gapfill.cpp": "6be4cb31baad2f41b0a9d22375fa850d1aa9027b2a8df4021af2c5773daa188d"
+  },
+  "test": "sdkcheck GapFill direct-tail discovery: adjacent wrappers/getters, transitive targets, protected metadata holes, data targets, existing callable ownership; synthetic XEX without title-specific hints."
+},
+{
+  "file": "patches/rexglue-sdk/0204-explicit-tail-entry-precedence.patch",
+  "sha256": "4d1ea49b1a74a4458bd3220658b9a5490ea4a1e2fa4372c85a51dd49a26b9ba9",
+  "base_files": {
+    "src/codegen/phase_gapfill.cpp": "3eaf3ec3fc437519f8a5a035d41106877aa632fc8a6cdc4bc306098a9527d96a"
+  },
+  "files": {
+    "src/codegen/phase_gapfill.cpp": "6be4cb31baad2f41b0a9d22375fa850d1aa9027b2a8df4021af2c5773daa188d"
+  },
+  "test": "sdkcheck direct tail entries take precedence over speculative gap fallthrough; synthetic XEX preserves the gap prefix and creates the referenced entry before linear gap discovery."
+},
+{
+  "file": "patches/rexglue-sdk/0205-data-referenced-frameless-entries.patch",
+  "sha256": "b5390e1452bf51f7ae105e89c8513acb800f8c608284292e4b6ec8b943cebb2e",
+  "base_files": {
+    "src/codegen/phase_gapfill.cpp": "a742d8486085686fbfefd0c94c224211eb119fc78847afb81b7c6bf088259bd1"
+  },
+  "files": {
+    "src/codegen/phase_gapfill.cpp": "6be4cb31baad2f41b0a9d22375fa850d1aa9027b2a8df4021af2c5773daa188d"
+  },
+  "test": "sdkcheck data-entry: synthetic RTTI-free callbacks in rdata/data, alignment, original metadata interiors, ordinary fallthrough and non-executable references. Real Minecraft/Forza startup missing indirect entries motivate shared discovery only; no title addresses or hashes in compiler."
+},
+{
+  "file": "patches/rexglue-sdk/0206-stable-user-module-exports.patch",
+  "sha256": "4cb38f3b11a64a0b7c523f7658dc5e213b2df82fb5a6d0f4188c4aca5effbe39",
+  "base_files": {
+    "include/rex/system/function_dispatcher.h": "9e504486d44bee777241055800a35330eada66e0b02f5edebe1909379ace9b88",
+    "src/system/function_dispatcher.cpp": "4d1908666ae36a68b009eef802573934362730a78f472cfe0628c93ebb92c36d",
+    "src/system/user_module.cpp": "43505572e7c6a1deefa051e1eb4307db57c0823f4a7f00424a33841c12f325c6"
+  },
+  "files": {
+    "include/rex/system/function_dispatcher.h": "90fb84bfbbf4ed0447ccd1de4fccec02dcb4c0737e7ae66bc6a62a0d5fd3e2da",
+    "src/system/function_dispatcher.cpp": "e830ae8d0fc649036222c0ad406963af053a22fdb918e5ae1993a6b4e7a6e877",
+    "src/system/user_module.cpp": "98a87177b10e94e8041b60799c9a79913b66892187d9d9071d841641a91da989"
+  },
+  "test": "sdkcheck [user-exports]: synthetic XEX export table through UserModule, 20000 repeat lookups, host/legacy caller capability, data exports, same-module identity, unload invalidation and reload binding. No title-specific runtime adjustments."
+},
+{
+  "file": "patches/rexglue-sdk/0207-detect-crt-nonlocal-jumps.patch",
+  "sha256": "8143d43d9f9113ddd6daeb0c090ba0a6e8ec16158d00d9e69d806d1aedc67220",
+  "base_files": {
+    "include/rex/codegen/codegen_context.h": "ca7a85f953920c005b14d3e381e15360d6b4bdb1896f52be9e91096e4e1590dd",
+    "include/rex/codegen/function_types.h": "98691be9bb440a786a7788158f3b08a781f2723faffd236029c4e70c5c6015d8",
+    "src/codegen/phase_register.cpp": "5cfccd37d29d8cc4eacad6f0b76b69f56526b90f19dfb216b2fe9dd383193935",
+    "src/codegen/codegen_writer.cpp": "7054b3f02ef4537e6a4dcfbd7612e0ed7175d246479e5053cedf9bcdf8382b49",
+    "src/codegen/builders/context.cpp": "6d316103deaef5428ab644aa19f15eb3eae7641c4444f61fd0d12e468b380193"
+  },
+  "files": {
+    "include/rex/codegen/codegen_context.h": "94086fc1d14d41e6c8188063696642fd842408279a367ac1c6178ff0c9b9506f",
+    "include/rex/codegen/function_types.h": "fc597f4c33c3ec730fb0c7d9af0a1216e24057cac9c8f5e4a7b2ad75e030ad05",
+    "src/codegen/phase_register.cpp": "8c9a6f031110bcca15cb9fc89856749083df690342b630c34c44c9526563b185",
+    "src/codegen/codegen_writer.cpp": "db2a4d2a423dee1c46d9a1e9ed0352f202806f9077c7349ad13429dee5445f25",
+    "src/codegen/builders/context.cpp": "d689d30e11e0df9f905bbbcf4c6d4844937f7107aa897b124fd5ed8246db742e"
+  },
+  "test": "sdkcheck [nonlocal-jumps]: complete synthetic console CRT register/VMX jump-buffer ABI, optional prefix, relocated helpers, malformed slots, malformed VMX operation and section truncation; existing direct-call native setjmp/longjmp emission without title addresses. Minecraft fault context motivates automatic recognition only."
+},
+{
+  "file": "patches/rexglue-sdk/0208-bounded-materialized-code-entries.patch",
+  "sha256": "52e5895edd0d2e95b7b95db218792ee03a87ee2a6031eca05b50b2301e95c307",
+  "base_files": {
+    "src/codegen/phase_gapfill.cpp": "569dfde0b28560ad4ed73a8622e98a51ee9485fb5372d7a245b9bb33fe47fc28"
+  },
+  "files": {
+    "src/codegen/phase_gapfill.cpp": "6be4cb31baad2f41b0a9d22375fa850d1aa9027b2a8df4021af2c5773daa188d"
+  },
+  "test": "sdkcheck [code-address-entry]: synthetic lis/addi and lis/ori callbacks, signed low half, different destination register, clobbers, block boundary, original metadata, ordinary fallthrough and non-code target. Reuses conservative 0205 candidate validation; broad disabled scanner remains off. No title addresses or runtime changes."
+},
+{
+  "file": "patches/rexglue-sdk/0209-protect-jump-table-data-entries.patch",
+  "sha256": "f05511dd9254c677f2b0e7cdb609b35077130a4285a2dd194f989089fbceb361",
+  "base_files": {
+    "include/rex/codegen/function_types.h": "388b3cef1929d9f8eb1a239507d9dfb8d13fab9a6d2f870827b9a7ef556402d0",
+    "src/codegen/function_scanner.cpp": "583f1a89d0a62f23fbc5549db2808541ad05f894965292c38c10ed75b81a3c0d",
+    "src/codegen/phase_gapfill.cpp": "12d8ad6686ea93ec4470b2b4d2d2c2563a6fde663db2addbcdc2b748e6d37fbc"
+  },
+  "files": {
+    "include/rex/codegen/function_types.h": "fc597f4c33c3ec730fb0c7d9af0a1216e24057cac9c8f5e4a7b2ad75e030ad05",
+    "src/codegen/function_scanner.cpp": "5b532b879054397447e92f4ab72ea8a56a922be702bdd382bb944478f40e5d4e",
+    "src/codegen/phase_gapfill.cpp": "6be4cb31baad2f41b0a9d22375fa850d1aa9027b2a8df4021af2c5773daa188d"
+  },
+  "test": "sdkcheck [embedded-table]: inferred absolute inline switch table whose words decode as instructions, materialized table address, out-of-line cases and actual code/data boundary. Preserve byte/short/computed table widths as metadata. Real Minecraft 0208 codegen emitted new unresolved branches because table data became entries; 0209 rejects those data spans, without weakening validation."
+},
+{
+  "file": "patches/rexglue-sdk/0210-profile-read-debug-diagnostics.patch",
+  "sha256": "53009d66dbe6840a29ef6a44ee2e023fe0e06fe2df09d08a050390789b7e45b1",
+  "base_files": {
+    "src/kernel/xam/xam_user.cpp": "d5d91facac17ef961a1491cac5bb01204c932baf6edd14ee340bebbefba7fa74"
+  },
+  "files": {
+    "src/kernel/xam/xam_user.cpp": "5589f20461e56111d75d2cc8f79abd5c9a6fef1f65a29555dd706ffcb409f1be"
+  },
+  "test": "sdkcheck [profile-read-trace]: six failures before patch; debug read result, completed header/pointer, rejected unmapped input and normal-info silence, without changing API results. [profile-settings-large-batch] controls 29 mixed IDs, two-pass size and async completion. Optional debug-level evidence only; no title selection or profile values logged."
+},
+{
+  "file": "patches/rexglue-sdk/0211-aot-auto-crt-fibers.patch",
+  "sha256": "53e147dee6322436351832a7750728e66e74e56e5cfd62fb51394c4ff5602a0a",
+  "base_files": {
+    "include/rex/codegen/codegen_context.h": "e8e1ac77830bd02c5c24e75d49f66cc66d150039655e5402cfe3c237c7fbe415",
+    "src/codegen/codegen_writer.cpp": "d5c50405e2565bf038aee4b926b5ac7bff8bf3c57083dd7394aefe969eba1a02",
+    "src/codegen/phase_register.cpp": "e4960306c9b04bf6e8e288df777eee5ea406384b97a130ae2b5d8ac24cee5a83"
+  },
+  "files": {
+    "include/rex/codegen/codegen_context.h": "94086fc1d14d41e6c8188063696642fd842408279a367ac1c6178ff0c9b9506f",
+    "src/codegen/codegen_writer.cpp": "db2a4d2a423dee1c46d9a1e9ed0352f202806f9077c7349ad13429dee5445f25",
+    "src/codegen/phase_register.cpp": "8c9a6f031110bcca15cb9fc89856749083df690342b630c34c44c9526563b185"
+  },
+  "test": "sdkcheck [crt-fiber-discovery]: 10/112 assertions fail before patch. Complete mutually linked XAPI fiber lifecycle, all GPR/FPR/VMX context slots, executable bounds and bootstrap; existing native hooks selected in inferred analysis only, without title addresses or changes to explicit overrides. Negative altered-slot, truncated-section and broken-link controls. Bounded CPU native continuation probe accompanies discovery coverage."
+},
+{
+  "file": "patches/rexglue-sdk/0212-analysis-md-rotations.patch",
+  "sha256": "36214b44c1220dbda181715e0f8b8543fa2d75dae3057cbd91b097eef1951eea",
+  "base_files": {
+    "src/codegen/ppc/instruction.cpp": "431c454ff0c9e3181a354c04481e11b91420301f0d7d7e30422a91e3a1fd0be3",
+    "src/codegen/ppc/instruction.h": "ec5adc815e3c40b1300565eceaade723311e2911436e9183331236f6cffc4f98",
+    "src/codegen/ppc/opcode.cpp": "6cbde9c1ac05b877055cb3e9c2f457bddb1d6c685aa2ef9b4c066e95b535ea56",
+    "src/codegen/ppc/opcode.h": "84325568327bd25d2ed4ef64c6a8bc7b304a0d91711799573e464df5929cd8c4"
+  },
+  "files": {
+    "src/codegen/ppc/instruction.cpp": "9ffc303e26f729fee3a3f4312e2d7de8ca2c6e4e6f12ba54e9ee903c78d78711",
+    "src/codegen/ppc/instruction.h": "c439c4bb82fd5131a218842245750a2fef71b48170b39e5c26b067ef6c973aa1",
+    "src/codegen/ppc/opcode.cpp": "3dc1792202a7b440c7ed3374af24e133ccc52a3fa4edb1c9159a2c9d22300269",
+    "src/codegen/ppc/opcode.h": "f3f3a5d9111c22f93cfde983c14f9773f39a6696ef900600a347e89198ca2373"
+  },
+  "test": "sdkcheck [ppc-md-decode]: before patch all 32768 MD shift/mask/record encodings unknown; five aggregate assertions fail. Synthetic bounded callback containing rldicr fails decode and entry discovery. Add four MD opcodes and correct split SH/mask operands and GPR/CR contracts without changing existing opcode values or native arithmetic emission; unknown MDS/reserved forms remain barriers. No title addresses or relaxed boundary protections."
 }
 ]
                     },

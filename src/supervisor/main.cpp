@@ -739,23 +739,16 @@ int Session(const ProjectPaths& paths, const fs::path& manifest, int timeout, bo
       args.push_back("--user_data_root=" + PathUtf8(active.user_root));
       // Identity and the console hard drive (XContent: saves, DLC, installs)
       // follow the platform session; caches stay in each title's own root.
-      args.push_back("--x360n_profile_root=" + PathUtf8(dashboard.user_root));
-      args.push_back("--content_data_root=" + PathUtf8(dashboard.user_root));
-      // Account rules that changed between dashboard versions follow this one.
-      if (!dashboard.dashboard_version.empty())
-        args.push_back("--x360n_dashboard_version=" + dashboard.dashboard_version);
       // Every title presents through VdSwap, where the session dashboard's own
       // host composes its original Guide. A dashboard version without a host
       // offers no Guide; its titles never receive another version's modules.
       if (active.manifest != dashboard.manifest && !dashboard.system_ui_host.empty()) {
         // Recheck the dashboard receipt that owns this native host and modules.
         load_profile(dashboard.manifest);
-        args.push_back("--x360n_system_ui_host=" + PathUtf8(dashboard.system_ui_host));
-        args.push_back("--x360n_system_ui_root=" + PathUtf8(dashboard.game_root));
       }
       // A title's original avatar service uses only the session dashboard's own
       // verified files; a missing or different one refuses the title here.
-      for (auto& arg : AvatarServiceArguments(dashboard, active)) args.push_back(std::move(arg));
+      for (auto& arg : SessionPlatformArguments(dashboard, active)) args.push_back(std::move(arg));
       if (!incoming.empty()) args.push_back("--x360n_handoff_in=" + PathUtf8(incoming));
       fs::path handoff;
       std::chrono::milliseconds child_lifetime{};

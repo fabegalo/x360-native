@@ -1,0 +1,57 @@
+diff --git a/src/kernel/xam/xam_user.cpp b/src/kernel/xam/xam_user.cpp
+--- a/src/kernel/xam/xam_user.cpp
++++ b/src/kernel/xam/xam_user.cpp
+@@ -296,6 +296,9 @@
+     if (!buffer_size) {
+       *buffer_size_ptr = needed_size;
+     }
++    REXKRNL_DEBUG("ProfileSettingsRead sizing title={:08X} user={} count={} requested={} needed={} buffer={:08X}",
++                  title_id, user_index, setting_count, buffer_size, needed_size,
++                  buffer ? REX_KERNEL_MEMORY()->HostToGuestVirtual(buffer) : 0);
+     return X_ERROR_INSUFFICIENT_BUFFER;
+   }
+   if (!AchievementGuestSpan(REX_KERNEL_MEMORY(), REX_KERNEL_MEMORY()->HostToGuestVirtual(buffer),
+@@ -431,6 +434,13 @@
+     ++out_setting;
+   }
+ 
++  // Debug-only values already validated/written by this call. Do not inspect
++  // caller memory after completing it, or add pointer probes to normal reads.
++  REXKRNL_DEBUG("ProfileSettingsRead wrote title={:08X} user={} count={} buffer={:08X} settings={:08X} size={} overlapped={:08X}",
++                title_id, user_index, setting_count,
++                REX_KERNEL_MEMORY()->HostToGuestVirtual(buffer),
++                REX_KERNEL_MEMORY()->HostToGuestVirtual(&out_header[1]), buffer_size,
++                overlapped ? REX_KERNEL_MEMORY()->HostToGuestVirtual(overlapped) : 0);
+   if (overlapped) {
+     REX_KERNEL_STATE()->CompleteOverlappedImmediate(
+         REX_KERNEL_MEMORY()->HostToGuestVirtual(overlapped), X_ERROR_SUCCESS);
+@@ -443,8 +453,13 @@
+                                      u32 setting_count, mapped_u32 setting_ids,
+                                      mapped_u32 buffer_size_ptr, mapped_void buffer_ptr,
+                                      ppc_ptr_t<XAM_OVERLAPPED> overlapped) {
+-  return XamUserReadProfileSettingsEx(title_id, user_index, xuid_count, xuids, setting_count,
++  const auto result = XamUserReadProfileSettingsEx(title_id, user_index, xuid_count, xuids, setting_count,
+                                       setting_ids, 0, buffer_size_ptr, buffer_ptr, overlapped);
++  REXKRNL_DEBUG("ProfileSettingsRead api=base title={:08X} user={} count={} result={:08X} ids={:08X} size_ptr={:08X} buffer={:08X} overlapped={:08X}",
++                uint32_t(title_id), uint32_t(user_index), uint32_t(setting_count), result,
++                setting_ids.guest_address(), buffer_size_ptr.guest_address(),
++                buffer_ptr.guest_address(), overlapped.guest_address());
++  return result;
+ }
+ 
+ // XAM 17559 816B16A8: flags in r9 and the size pointer in r10. Its own
+@@ -455,8 +470,13 @@
+                                        u32 unk_2, mapped_u32 buffer_size_ptr,
+                                        mapped_void buffer_ptr,
+                                        ppc_ptr_t<XAM_OVERLAPPED> overlapped) {
+-  return XamUserReadProfileSettingsEx(title_id, user_index, xuid_count, xuids, setting_count,
++  const auto result = XamUserReadProfileSettingsEx(title_id, user_index, xuid_count, xuids, setting_count,
+                                       setting_ids, unk_2, buffer_size_ptr, buffer_ptr, overlapped);
++  REXKRNL_DEBUG("ProfileSettingsRead api=ex title={:08X} user={} count={} result={:08X} ids={:08X} size_ptr={:08X} buffer={:08X} overlapped={:08X}",
++                uint32_t(title_id), uint32_t(user_index), uint32_t(setting_count), result,
++                setting_ids.guest_address(), buffer_size_ptr.guest_address(),
++                buffer_ptr.guest_address(), overlapped.guest_address());
++  return result;
+ }
+ 
+ u32 XamUserWriteProfileSettings_entry(u32 title_id, u32 user_index, u32 setting_count,

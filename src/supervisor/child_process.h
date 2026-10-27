@@ -10,6 +10,7 @@
 #include <optional>
 #include <string>
 #include <vector>
+#include <utility>
 
 namespace x360n {
 
@@ -35,6 +36,10 @@ struct ProcessSpec {
   uintptr_t notification_event = 0;  // borrowed auto-reset lifecycle event
   std::function<void()> on_notification;
   bool collect_metrics = false;  // Opt-in Job Object accounting, including descendants.
+  // Explicit diagnostic only: bounded memory snapshots at a second-chance
+  // exception. Zero disables them. The caller supplies the observed guest
+  // arena base; this never changes guest memory or exception handling.
+  uint64_t crash_guest_memory_base = 0;
 };
 
 struct CrashInfo {
@@ -44,6 +49,9 @@ struct CrashInfo {
   std::string access;         // access violations: "read 0x...", "write 0x...", "execute 0x..."
   uint32_t thread_id = 0;
   std::vector<std::string> frames;  // "module!symbol+0xoff (file:line)", innermost first
+  struct MemoryBlock { uint64_t address = 0; std::vector<uint8_t> bytes; };
+  std::vector<std::pair<std::string,uint64_t>> native_registers;
+  std::vector<MemoryBlock> memory;  // <=64 readable spans of 256 bytes, opt-in
 };
 
 struct ProcessResult {

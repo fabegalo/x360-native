@@ -10,19 +10,24 @@
 
 int main(int argc, char** argv) {
   if (argc < 3) {
-    std::cerr << "usage: aot_discovery_probe <config.toml> <graph.tsv> [hex address ...]\n";
+    std::cerr << "usage: aot_discovery_probe <config.toml> <graph.tsv> [--no-emit] [hex address ...]\n";
     return 2;
   }
   auto pipeline = rex::codegen::CodegenPipeline::Create(argv[1]);
   if (!pipeline) { std::cerr << pipeline.error().message; return 1; }
   auto result = pipeline->RunAnalyze();
   auto& ctx = pipeline->context();
+  const bool emit_fingerprints = argc < 4 || std::string_view(argv[3]) != "--no-emit";
   std::ofstream out(argv[2]);
   if (!out) return 1;
   const auto hex = [&](uint32_t a) -> std::ostream& {
     return out << std::hex << std::uppercase << std::setw(8) << std::setfill('0') << a << std::dec;
   };
   out << "analysis\t" << (result.has_value() ? "ok" : "failed") << '\n';
+  std::vector<std::pair<uint32_t,std::string>> crt_hooks(ctx.analysisState().crtFiberHooks.begin(),
+                                                       ctx.analysisState().crtFiberHooks.end());
+  std::sort(crt_hooks.begin(),crt_hooks.end());
+  for(const auto& [address,name]:crt_hooks) { out << "crt_hook\t";hex(address) << '\t' << name << '\n'; }
   std::vector<uint32_t> entries;
   std::set<uint32_t> covered;
   size_t tables = 0, slots = 0, nonPdata = 0;
@@ -32,9 +37,11 @@ int main(int argc, char** argv) {
     const auto* n = ctx.graph.getFunction(a);
     out << "function\t"; hex(a) << '\t' << rex::codegen::AuthorityName(n->authority())
       << '\t' << n->size() << '\t' << int(n->state()) << '\n';
-    if (n->isSealed()) {
-      const rex::codegen::EmitContext emit{ctx.binary(), ctx.Config(), ctx.graph,
+    if (emit_fingerprints && n->isSealed()) {
+      rex::codegen::EmitContext emit{ctx.binary(), ctx.Config(), ctx.graph,
           static_cast<uint32_t>(ctx.analysisState().entryPoint), ctx.resolver()};
+      emit.setJmpAddresses = &ctx.analysisState().setJmpAddresses;
+      emit.longJmpAddresses = &ctx.analysisState().longJmpAddresses;
       // Same emitter as CodegenWriter, fingerprint only (XXH3-128, not an identity/security hash).
       out << "emit_xxh3\t"; hex(a) << '\t' << rex::hash_bytes(n->emitCpp(emit)) << '\n';
     }
@@ -50,6 +57,8 @@ int main(int argc, char** argv) {
       out << "table\t"; hex(a) << '\t'; hex(t.bctrAddress) << '\t'; hex(t.tableAddress);
       for (auto target : t.targets) { out << '\t'; hex(target); }
       out << '\n';
+      out << "table_data\t"; hex(a) << '\t'; hex(t.tableAddress) << '\t'
+          << t.tableByteLength << '\n';
     }
   }
   auto errors = ctx.errors.Entries();
@@ -64,7 +73,7 @@ int main(int argc, char** argv) {
   for (const auto& s : ctx.binary().sections()) {
     out << "section\t" << s.name << '\t'; hex(s.baseAddress) << '\t' << s.size << '\t' << s.executable << '\n';
   }
-  for (int i = 3; i < argc; ++i) {
+  for (int i = emit_fingerprints ? 3 : 4; i < argc; ++i) {
     const auto a = static_cast<uint32_t>(std::stoul(argv[i], nullptr, 16));
     const auto* section = ctx.binary().findSection(a);
     const auto* owner = ctx.graph.getFunctionContaining(a);

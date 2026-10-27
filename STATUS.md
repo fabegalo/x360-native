@@ -1,5 +1,85 @@
 # STATUS
 
+Retomada de 26/10 — **Forza Horizon 2 e Minecraft pelo preparo genérico**:
+a exclusão do firmware de disco está integrada em `e407eb8`. A análise real
+do Forza revelou seis destinos diretos sem função; 0203 recupera entradas
+ocultas por wrappers, e 0204 dá precedência a destinos explícitos sobre gaps
+especulativos, sem hints por título. Ambos concluíram Release/recibo, mas as
+primeiras execuções caíram antes do menu em callbacks sem entrada AOT (Minecraft
+`8233F020`, Forza `83243750`), referenciados nos dados originais. 0205 acrescenta
+descoberta conservadora dessas entradas sem RTTI. SDK pinado e runtime preservados;
+aplicação/hashes, replay e 200 verificações em dez casos `[gapfill]` aprovados.
+Ambos concluíram preparo com 0205 e superaram esses callbacks. Minecraft agora
+falhava numa leitura guest `000001A4`; o diagnóstico opcional revelou longjmp
+traduzido como retorno C++ comum. 0207 reconhece automaticamente o CRT completo
+e seleciona os hooks nativos existentes. Forza superou a exaustão de thunks com
+0206 (identidade/reuso/invalidação de exports; 139 verificações em quatro casos),
+mas encontrou callback montado por lis/addi sem entrada. 0208 descobre endereços
+em bloco conhecido, sem clobber, com as proteções de metadados/corpo de 0205.
+Na conferência real, 0208 confundiu tabelas de salto inline com código; esse
+produto não foi executado. 0209 registra os bytes da tabela no grafo e protege
+seus intervalos. CRT/fronteiras/callbacks: 360 verificações em 13 casos; CTR:
+234/4; replay completo 196 patches/267 arquivos, zero divergências.
+Ambos concluíram preparo oficial com 0209.
+Minecraft com 0209 concluiu Release/recibo e uma tentativa de 180 s sem exceção
+não tratada/chamada ausente; o supervisor encerrou no limite. Sem observação
+visual/input, não comprova menu ou gameplay. Forza também concluiu Release/recibo
+e 180 s sem exceção não tratada/chamada ausente; continuam quatro erros de
+dispositivos/app F1 e um stub. Seed 28/28 preservado em cada tentativa.
+O observador de falhas fica desligado normalmente.
+Em 27/10, o usuário liberou os dois executáveis no Computer Use. Minecraft
+mostrou o menu e o mundo 3D do tutorial; movimentação e interação ainda sem aceite.
+Forza mostrou a abertura e o aviso “No Device Selected”. O diagnóstico direto
+omitia o contexto da sessão de console, incluindo o seletor original existente.
+Diagnóstico corrigido para compartilhar os argumentos da sessão: 32.125
+verificações/12 casos aprovados. Preparo 17559 concluído em `78cdd481…`;
+diagnóstico isolado Forza abriu o seletor original, concluiu HDD 1 e criou os
+arquivos do perfil do jogo. Caiu depois na leitura de configurações em
+`82E2DD2C` (guest `0008039D`; repetição `00000368`). Minecraft abriu o seletor,
+cancelou com 1627/1223 sem escrever o dispositivo e completou 60 s sem crash.
+28/28 originais preservados em cada tentativa. Captura opcional ampliada para
+16 blocos de 64 bytes/um salto de ponteiro: 62 verificações/2 casos; lote XAM
+de 29 configurações: 113/1, correto isoladamente. Trace DEBUG 0210 (311/8;
+replay 197 patches/267 arquivos) mostrou retorno assíncrono sem serialização.
+Probe CPU com XEX e perfil reais reproduziu ERROR_NOT_FOUND nos totais:
+a cópia do diagnóstico omitia metadados de conquistas de jogos anteriores,
+embora copiasse seus desbloqueios. Com a cópia completa, síncrono e assíncrono
+preenchem os 29 campos com sucesso. Corrigida a cópia isolada; Forza superou
+essa queda e mostrou céu 3D/carregamento, mas caiu depois na troca de fibers
+do CRT, ainda traduzida sem transferência da continuação C++. 0211 seleciona
+os hooks nativos existentes somente após reconhecer o ciclo CRT completo;
+706 verificações/18 casos compartilhados, quatro trocas nativas em CPU,
+135 verificações de descoberta/overrides e replay 198/267 aprovados. XEX real
+reconhecido sem hints; Forza/17559 concluíram preparo. No jogo, as fibers antes
+problemáticas executaram e encerraram corretamente e apareceu a tela de
+controles. Nova queda posterior em outra thread lê uma lista nula de comandos
+gráficos (`82426CF4`, guest 4), após 90,8 s; causa em investigação com captura
+opcional do supervisor, sem mudança de renderer ou bypass. Minecraft com 0210 concluiu preparo e 180 s:
+Computer Use observou tutorial 3D, deslocamento, extração e vara de pesca;
+37/37 arquivos originais preservados, encerramento no limite, sem crash.
+Nova tentativa com Start físico encontrou callback ausente `82460DC8` na fila
+de comandos. O decoder de análise desconhecia rldicr, já suportado pelo emissor.
+0212 implementa as quatro rotações MD na análise, sem relaxar fronteiras:
+767 verificações/19 casos e 32.768 combinações, callback real recuperado sem
+erros, replay 199 patches/271 arquivos sem divergências. Forza e 17559 concluíram
+preparo oficial com 0212. A tentativa 15 chegou à condução “Dirija até o Festival”:
+HUD/minimapa, 138–206 km/h, distância 9,3 → 6,9 km, 180 s sem crash e 37/37
+originais preservados. A lista gráfica nula anterior não reapareceu neste teste;
+sua relação com o callback corrigido ainda não está comprovada.
+O preparo Minecraft antes interrompido foi concluído oficialmente com 0212:
+287 fontes geradas têm os mesmos hashes do build 0210. Nova tentativa de 120 s
+usou a configuração global Xenos D3D12, sem override de renderer, e mostrou
+tutorial 3D, deslocamento e extração de madeira na hotbar, sem crash; 37/37
+originais preservados. O aviso de versão de avaliação continua explícito.
+Configuração local global alinhada a Xenos D3D12, fullscreen preservado e cópia
+anterior guardada nas evidências; não houve mudança de renderer ou ajuste por título.
+Sem seleção automática de HDD ou mudança do contrato XAM para esconder o erro.
+**Ambos com gameplay inicial demonstrado no build 0212: Minecraft no tutorial
+de avaliação e Forza na condução até o festival. Save/reload comercial,
+campanha completa, Native e sessões longas não certificados**.
+Testes visuais/Computer Use autorizados somente nesses jogos, em cópias isoladas,
+com três minutos por tentativa. [Diagnóstico e estado](docs/reports/titles/generic-forza-horizon-2-minecraft-2026-10-26.md).
+
 Complemento de 25/10 — **investigação RGB565 sobre `5b87e8c`**:
 os logs 0201 identificam as 45 diferenças/API como `format=2` (**R8**),
 não RGB565 (`format=4`). Os 72 controles RGB565 originais passam nas duas APIs.

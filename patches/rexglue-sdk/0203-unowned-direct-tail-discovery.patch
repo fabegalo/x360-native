@@ -1,0 +1,76 @@
+diff --git a/src/codegen/phase_gapfill.cpp b/src/codegen/phase_gapfill.cpp
+--- a/src/codegen/phase_gapfill.cpp
++++ b/src/codegen/phase_gapfill.cpp
+@@ -11,9 +11,11 @@
+ 
+ #include "ppc/instruction.h"
+ #include "decoded_binary.h"
++#include "codegen_flags.h"
+ 
+ #include <unordered_set>
+ #include <map>
++#include <set>
+ 
+ #include <rex/codegen/phases.h>
+ #include "phase_helpers.h"
+@@ -270,6 +272,52 @@
+   }
+ }
+ 
++// A linear gap can start with a tail wrapper and hide later independent
++// entries. Once gap ownership is known, only explicit unconditional external
++// branches may seed still-unowned executable targets. Never split an existing
++// body, a jump-table case, or a hole protected by original/declared metadata.
++void discoverUnownedTailTargets(CodegenContext& ctx) {
++  auto& graph = ctx.graph;
++  std::map<uint32_t, uint32_t> declaredEnds;
++  for (const auto& [start, size] : ctx.scan.pdataSizes) {
++    if (size && start + size > start) declaredEnds[start] = start + size;
++  }
++  for (const auto& [start, config] : ctx.Config().functions) {
++    const auto size = config.getSize(start);
++    if (size && start + size > start)
++      declaredEnds[start] = std::max(declaredEnds[start], start + size);
++  }
++  uint32_t end = 0;
++  for (auto& [start, limit] : declaredEnds) {
++    end = std::max(end, limit);
++    limit = end;
++  }
++  const auto maxIterations = REXCVAR_GET(max_discovery_iterations);
++  for (uint32_t iteration = 0; iteration < maxIterations; ++iteration) {
++    std::set<uint32_t> targets;
++    for (const auto& [start, node] : graph.functions()) {
++      for (const auto& jump : node->unresolvedJumps()) {
++        if (jump.isCall || jump.isConditional || graph.isEntryPoint(jump.target) ||
++            graph.getFunctionContaining(jump.target) ||
++            ctx.binary().isInImportExportRange(jump.target)) continue;
++        const auto* branch = ctx.decoded().get(jump.site);
++        const auto* target = ctx.decoded().get(jump.target);
++        if (!branch || branch->opcode != Opcode::b || !target ||
++            target->opcode == Opcode::kUnknown ||
++            !ctx.decoded().regionContaining(jump.target)) continue;
++        auto owner = declaredEnds.upper_bound(jump.target);
++        if (owner != declaredEnds.begin() && std::prev(owner)->second > jump.target) continue;
++        targets.insert(jump.target);
++      }
++    }
++    for (uint32_t target : targets)
++      graph.addFunction(target, 4, FunctionAuthority::DISCOVERED, true);
++    const auto known = buildKnownFunctions(graph);
++    const auto discovered = discoverPendingFunctions(ctx, known);
++    if (targets.empty() && !discovered) break;
++  }
++}
++
+ }  // anonymous namespace
+ 
+ namespace phases {
+@@ -284,6 +332,7 @@
+   REXCODEGEN_TRACE("Analyze: discovered blocks for {} gap-filled functions", discovered);
+ 
+   cleanupAbsorbedGapFills(ctx);
++  discoverUnownedTailTargets(ctx);
+ 
+   return Ok();
+ }

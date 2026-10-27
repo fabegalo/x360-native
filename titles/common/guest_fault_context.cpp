@@ -76,7 +76,7 @@ bool GuestFaultContext::Observe(rex::arch::Exception* exception, void* data) {
       rex::arch::Exception::AccessViolationOperation::kWrite ? "write" : "unknown";
   // Fixed stack buffer; no logger, guest dereference, dispatcher or heap lock
   // in the fault path. LR and last_indirect_target are evidence, not guest PC.
-  char output[2048];
+  char output[8192];
   int used = std::snprintf(output, sizeof(output),
       "runtime-declined guest access; observer does not handle exception\n"
       "host_pc=%016llX host_thread=%08lX guest_thread=%08X\n"
@@ -93,6 +93,42 @@ bool GuestFaultContext::Observe(rex::arch::Exception* exception, void* data) {
         i % 4 == 3 ? "\n" : " ");
     if (added < 0) break;
     used += added;
+  }
+  // Small read-only snapshots of conventional object/argument/stack pointers.
+  // ReadProcessMemory safely rejects unmapped spans; do not dereference guest
+  // pointers in an exception observer or follow an unbounded pointer graph.
+  struct Snapshot { uint32_t address; std::array<uint8_t, 64> bytes; };
+  std::array<Snapshot, 16> snapshots{};
+  size_t count = 0;
+  auto capture = [&](uint32_t guest) {
+    if (guest < 0x10000 || guest > UINT32_MAX - 64 || count == snapshots.size()) return;
+    for (size_t i = 0; i < count; ++i) if (snapshots[i].address == guest) return;
+    SIZE_T read = 0;
+    auto& snapshot = snapshots[count];
+    if (!ReadProcessMemory(GetCurrentProcess(), reinterpret_cast<const void*>(begin + guest),
+                           snapshot.bytes.data(), snapshot.bytes.size(), &read) || read != snapshot.bytes.size()) return;
+    snapshot.address = guest;
+    ++count;
+  };
+  for (const size_t reg : {31u, 30u, 29u, 28u, 3u, 1u}) {
+    const auto low = uint32_t(gpr[reg]);
+    if (gpr[reg] == low || gpr[reg] == uint64_t(int64_t(int32_t(low)))) capture(low);
+  }
+  const auto roots = count;
+  for (size_t i = 0; i < roots && count < snapshots.size(); ++i)
+    for (size_t offset = 0; offset < 64 && count < snapshots.size(); offset += 4)
+      capture(rex::memory::load_and_swap<uint32_t>(snapshots[i].bytes.data() + offset));
+  for (size_t i = 0; i < count && used > 0 && size_t(used) < sizeof(output); ++i) {
+    int added = std::snprintf(output + used, sizeof(output) - size_t(used),
+                             "guest_memory[%08X]=", snapshots[i].address);
+    if (added < 0) break;
+    used += added;
+    for (size_t offset = 0; offset < 64 && size_t(used) < sizeof(output); offset += 4) {
+      added = std::snprintf(output + used, sizeof(output) - size_t(used), "%08X%s",
+          rex::memory::load_and_swap<uint32_t>(snapshots[i].bytes.data() + offset), offset == 60 ? "\n" : " ");
+      if (added < 0) break;
+      used += added;
+    }
   }
   if (used > 0) {
     DWORD written = 0;

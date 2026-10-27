@@ -1951,3 +1951,156 @@ RTX 4070: 48 falhas anteriores/API eliminadas; 864 fixed16/API aprovados,
 continuam separadas. CPU: 291.132 verificações e onze regressões focadas.
 Release Xenos/Native, regeneração e replay do lock aprovados.
 [Evidências e limites](../../docs/reports/graphics/full-resolve-fixed16-0201-2026-10-25.md).
+
+## 0203 — descoberta de destinos diretos sem proprietário
+
+Após o GapFill, saltos diretos incondicionais ainda sem destino resolvido podem
+revelar getters e adjustors ocultos depois de wrappers que terminam em `b`.
+O compilador descobre esses destinos somente em regiões executáveis sem dono,
+preservando blocos já pertencentes a funções, dados, limites `.pdata`, extensões
+declaradas e casos de switches. Usa o limite existente de iterações; não adiciona
+endereços por título nem modifica o runtime. Sem equivalente upstream identificado.
+O teste sintético falha sem o patch; os sete casos `[gapfill]` passam 159
+verificações com ele. O SDK continua na revisão pinada.
+[Diagnóstico e limites](../../docs/reports/titles/generic-forza-horizon-2-minecraft-2026-10-26.md).
+
+## 0204 — precedência de entradas de cauda explícitas
+
+Executa a descoberta de 0203 também antes do preenchimento especulativo dos gaps.
+Um destino explícito não pode desaparecer dentro do corpo inferido de um gap
+anterior. O prefixo que chega por fall-through continua executando o corpo
+original; não é substituído por retorno antecipado. O teste sintético reproduz
+a entrada ausente antes do patch. Os oito casos `[gapfill]` passam 170 verificações.
+Sem equivalente upstream identificado; nenhuma mudança no runtime ou no pin.
+
+## 0205 — entradas frameless referenciadas em dados
+
+Descobre callbacks sem RTTI apontados por palavras alinhadas em seções não
+executáveis, tanto `.rdata` quanto `.data`. Só aceita destinos executáveis sem
+dono, fora de metadados declarados, após padding ou término incondicional e com
+prefixo válido limitado a 64 palavras. A CFG determina o corpo completo; imports,
+casos já pertencentes a funções, interiores e referências desalinhadas ficam
+protegidos. As leituras respeitam os limites da seção e da imagem.
+O teste sintético falha sem o patch. Os dez casos `[gapfill]` passam 200 checks.
+Sem endereços por título, mudanças no runtime ou atualização do SDK pinado;
+nenhum equivalente upstream identificado. Execução real continua necessária.
+
+### 0206 — stable user-module exports
+
+Repeated UserModule ordinal lookups allocated a new caller thunk every time,
+including host-dispatch callers, eventually exhausting the fixed reserve. Host
+and same-module callers now retain the original guest export address. Legacy
+cross-module callers reuse a per-caller export thunk. Exporter unload clears
+those bindings before DLL unload and recycles only their dedicated slots;
+caller unload destroys its own cache. Data exports remain unchanged. No shared
+cache of original modules or title-specific adjustment is introduced.
+
+`sdkcheck [user-exports]` loads an entirely synthetic XEX export table through
+UserModule: host/legacy capability, 20,000 repeated queries, data exports,
+caller isolation, unload invalidation, reload and slot reuse. Before the patch,
+the initial fixture reported five failures (identity, repeat stability,
+same-module address, stale function after unload, reload stability).
+
+With 0206 applied, exports, host dispatch and optional fault context passed
+139 assertions in four focused cases. Independent replay matched the three
+recorded final SHA-256 values. The SDK revision remains pinned.
+
+### 0207 — automatic CRT nonlocal jumps
+
+Recognizes the complete console CRT register/VMX jump-buffer ABI in executable
+sections, including the optional setjmp dispatch prefix. Stores discovered
+addresses separately from manual configuration and selects the existing native
+setjmp/longjmp emitter at direct call sites. Supports multiple copies; rejects
+altered slots, altered VMX operations, data sections and truncated bodies.
+No title addresses, hashes or manual hints are introduced. The original guest
+error path resumes at its saved continuation, instead of returning into an old
+host frame. Unrecognized ABI variants and indirect setjmp are not certified.
+
+Synthetic regression: ten failures before the patch; with CRT and existing
+boundary checks, 275 assertions in 11 cases passed. Independent replay matched
+all five final SHA-256 values. No upstream equivalent identified.
+
+### 0208 — bounded materialized code entries
+
+Finds lis/addi and lis/ori code addresses in an already discovered basic block,
+within eight instructions and with a conservative instruction whitelist that
+preserves the source register. Uses the candidate checks from 0205: executable
+boundary, bounded terminating prefix, no declared metadata interior or owned
+body. The broad, disabled pointer scanner stays disabled. No runtime change or
+title-specific address is needed.
+
+Synthetic regression: three missing entries before the patch. Controls cover
+signed low halves, distinct destination registers, clobbers, control-flow joins,
+metadata interiors, ordinary fallthrough and data addresses. CRT plus focused
+boundary/callback tests pass 347 assertions in 12 cases. Independent replay
+matched the final SHA-256. SDK revision pinned; no upstream equivalent identified.
+
+### 0209 — protect inline jump-table data
+
+Real-content verification of 0208 found inline switch tables being registered
+as functions: their pointer words decode as loads and an adjacent case ends
+with blr. Preserve the actual table byte length in the analysis graph, including
+absolute, byte and halfword formats, and exclude those spans from entry seeding.
+Finite computed domains without backing tables and manual tables keep size zero.
+
+An independent synthetic function without pdata reproduces the false entry
+before this patch. After applying it: 360 assertions/13 focused CRT/boundary
+cases and 234/4 CTR cases pass. Replay matches all three final SHA-256 values.
+No title addresses, runtime adjustments or weakened validation; SDK pinned.
+
+### 0210 — optional profile-read DEBUG diagnostics
+
+The Forza Horizon 2 storage selector now completes through the original 17559
+service, but the subsequent profile getter reads an invalid settings pointer.
+A private fault snapshot shows that the supposed result lacks XAM's header;
+the isolated 29-setting read contract still passes. Log sizing, successful
+buffer writes and base/Ex API results at DEBUG to distinguish the API response
+from later guest changes. These records contain guest addresses/counts/status,
+not profile values. The normal INFO path evaluates no diagnostic pointer probes
+or formatting and preserves the existing request and completion semantics.
+
+`[profile-read-trace]` failed six checks before the patch. Afterwards,
+`[profile-settings],[profile-sizing]` passes 311 assertions/eight cases, including
+unmapped-input rejection, persisted values, normal-level silence and the mixed
+4,312-byte batch. Replay: 197 patches/267 files, zero SHA-256 mismatches. This
+is diagnostic instrumentation, not a claimed gameplay fix or performance gain.
+
+### 0211 — infer complete console CRT fiber lifecycles
+
+The generic title reaches a guest fiber switch that restores another guest
+stack and returns on the old AOT C++ stack. Select the SDK's existing native
+fiber hooks only after matching the complete linked ConvertThreadToFiber,
+ConvertFiberToThread, CreateFiber, DeleteFiber and SwitchToFiber family,
+including the full GPR/FPR/VMX switch body and bootstrap. Keep inferred hooks
+in analysis state; preserve explicit lifecycle overrides. Reject partial
+families, changed save slots, broken links and section truncation. All addresses
+come from executable instructions; no game identity or address table is used.
+
+The synthetic discovery control fails ten of 112 checks before applying this
+patch, and passes all 112 afterwards. Shared discovery/CRT/CTR regressions pass
+706 checks in 18 cases. A bounded CPU probe performs four native fiber round
+trips with independent continuations and GPR/FPR/VMX/stack preservation. Real
+XEX analysis recognizes all five wrappers plus the direct switch body without
+configuration hints. Replay: 198 patches/267 files, zero SHA mismatches.
+Additional explicit-override and inferred-state controls pass 135 discovery
+assertions in nine variants; user configuration stays untouched.
+SDK revision and normal runtime behavior remain unchanged until a recognized
+complete CRT family selects those existing hooks.
+
+### 0212 — decode MD immediate rotations during analysis
+
+The native emitter already supports rldicl, rldicr, rldic and rldimi, but the
+analysis decoder classified them as unknown. This rejected otherwise bounded
+callbacks containing a valid 64-bit rotation. Add the four MD opcodes without
+renumbering existing entries, correct the split shift/mask fields, and record
+source/destination GPRs and optional CR writes. Leave unimplemented MDS and
+reserved encodings unknown; preserve all entry and inline-table guards.
+
+The synthetic callback fails discovery before this patch. Exhaustive controls
+cover 32,768 opcode/shift/mask/record combinations, including r0 destinations
+and rldimi's destination read. Together with focused CRT, callback and CTR
+controls, 767 assertions in 19 cases pass. GNU binutils independently confirms
+eight representative encodings. Real-content analysis recovers the missing
+callback with zero graph errors. Replay: 199 patches/271 files, zero SHA-256
+mismatches. No native arithmetic or runtime behavior was changed, and the SDK
+revision remains pinned. A new executable still requires gameplay validation.

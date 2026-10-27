@@ -1,0 +1,13 @@
+diff --git a/src/codegen/phase_gapfill.cpp b/src/codegen/phase_gapfill.cpp
+--- a/src/codegen/phase_gapfill.cpp
++++ b/src/codegen/phase_gapfill.cpp
+@@ -324,6 +324,9 @@
+ 
+ VoidResult GapFill(CodegenContext& ctx, ProgressReporter* reporter) {
+   (void)reporter;
++  // Direct references outrank speculative linear gap ownership. Seed them
++  // first so a preceding fall-through cannot swallow a callable entry.
++  discoverUnownedTailTargets(ctx);
+   gapFillCodeRegions(ctx);
+ 
+   // Discover blocks for gap-filled functions

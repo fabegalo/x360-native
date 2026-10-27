@@ -5,6 +5,7 @@
 #include <rex/system/xthread.h>
 #include <rex/system/thread_state.h>
 #include <string_view>
+#include <cstring>
 #include <windows.h>
 
 namespace {
@@ -45,6 +46,14 @@ int main(int argc, char** argv) {
         ctx->r0.u64 = 0x0011223344556677ull;
         ctx->r3.u64 = 0x123456789ABCDEF0ull;
         ctx->r31.u64 = 0xFFEEDDCCBBAA9988ull;
+        const auto snapshot = runtime.memory()->SystemHeapAlloc(128);
+        if (!snapshot) return 8;
+        std::memset(runtime.memory()->TranslateVirtual(snapshot), 0, 128);
+        rex::memory::store_and_swap<uint32_t>(runtime.memory()->TranslateVirtual(snapshot), 0xCAFEBABE);
+        rex::memory::store_and_swap<uint32_t>(runtime.memory()->TranslateVirtual(snapshot + 4), snapshot + 64);
+        rex::memory::store_and_swap<uint32_t>(runtime.memory()->TranslateVirtual(snapshot + 64), 0xDEADC0DE);
+        ctx->r28.u64 = snapshot;
+        ctx->r29.u64 = 5;  // Unreadable memory must not trigger another fault.
         ctx->lr = 0x90105000;
         ctx->ctr.u64 = 0x913F847C;
         ctx->last_indirect_target = 0x90116C88;

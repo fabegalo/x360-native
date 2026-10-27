@@ -12,6 +12,16 @@ if(WIN32)
   # Explicit offscreen GPU diagnostic, not automatically added to CTest.
 endif()
 if(WIN32)
+  add_executable(x360n_crt_fiber_probe EXCLUDE_FROM_ALL tools/crt_fiber_probe.cpp)
+  target_link_libraries(x360n_crt_fiber_probe PRIVATE rexruntime)
+  target_compile_options(x360n_crt_fiber_probe PRIVATE
+      -UTRACY_ENABLE -UREXGLUE_ENABLE_PROFILING -UREXGLUE_ENABLE_PERF_COUNTERS)
+  x360n_stage_runtime_dlls(x360n_crt_fiber_probe)
+  add_executable(x360n_profile_settings_probe EXCLUDE_FROM_ALL tools/profile_settings_probe.cpp)
+  target_link_libraries(x360n_profile_settings_probe PRIVATE rexruntime x360n_core)
+  target_compile_options(x360n_profile_settings_probe PRIVATE
+      -UTRACY_ENABLE -UREXGLUE_ENABLE_PROFILING -UREXGLUE_ENABLE_PERF_COUNTERS)
+  x360n_stage_runtime_dlls(x360n_profile_settings_probe)
   add_executable(x360n_profile_17559_probe EXCLUDE_FROM_ALL tools/profile_17559_probe.cpp
       ../titles/common/dashboard_assets.cpp)
   target_link_libraries(x360n_profile_17559_probe PRIVATE rexruntime x360n_core)
@@ -41,6 +51,8 @@ if(WIN32)
 endif()
 target_sources(x360n_sdk_checks PRIVATE sdkcheck/gapfill_boundary_test.cpp sdkcheck/synthetic_xex.cpp)
 target_sources(x360n_sdk_checks PRIVATE sdkcheck/virtual_thunk_discovery_test.cpp)
+target_sources(x360n_sdk_checks PRIVATE sdkcheck/crt_fiber_discovery_test.cpp)
+target_sources(x360n_sdk_checks PRIVATE sdkcheck/ppc_md_decode_test.cpp)
 target_sources(x360n_sdk_checks PRIVATE sdkcheck/ctr_dispatch_test.cpp)
 target_link_libraries(x360n_sdk_checks PRIVATE rexcodegen Catch2::Catch2WithMain)
 target_compile_options(x360n_sdk_checks PRIVATE

@@ -1,0 +1,77 @@
+diff --git a/include/rex/codegen/function_types.h b/include/rex/codegen/function_types.h
+--- a/include/rex/codegen/function_types.h
++++ b/include/rex/codegen/function_types.h
+@@ -254,6 +254,9 @@
+   // Finite computed branch domain, not table slots. Preserve the original
+   // loads/arithmetic and dispatch on CTR; other destinations use the resolver.
+   bool dispatchByTarget = false;
++  // Bytes actually read as table slots, before targets are filtered/reordered.
++  // Zero for manual tables or finite domains without backing table data.
++  uint32_t tableByteLength = 0;
+ };
+ 
+ //=============================================================================
+diff --git a/src/codegen/function_scanner.cpp b/src/codegen/function_scanner.cpp
+--- a/src/codegen/function_scanner.cpp
++++ b/src/codegen/function_scanner.cpp
+@@ -200,6 +200,11 @@
+   kByteOffset,   // lbzx + add - byte offset added directly to base
+   kShortOffset,  // lhzx + add - 16-bit offset added to base
+ };
++
++uint32_t jumpTableEntrySize(JumpTableType type) {
++  return type == JumpTableType::kAbsolute ? 4 :
++         type == JumpTableType::kShortOffset ? 2 : 1;
++}
+ 
+ // Helper struct for tracking pattern match state
+ struct JumpTableMatch {
+@@ -838,6 +843,7 @@
+   jt.tableAddress = static_cast<uint32_t>(table_address);
+   jt.indexRegister = match.index_reg;
+   jt.targets = std::move(targets);
++  jt.tableByteLength = uint32_t(jt.targets.size()) * jumpTableEntrySize(match.type);
+ 
+   return jt;
+ }
+@@ -1923,6 +1929,7 @@
+     return std::nullopt;
+   }
+ 
++  jt.tableByteLength = uint32_t(jt.targets.size()) * jumpTableEntrySize(tableType);
+   REXCODEGEN_TRACE("detectJumpTable: bctr=0x{:08X} table=0x{:08X} entries={} funcEnd=0x{:08X}",
+                    bctrAddr, tableAddr, jt.targets.size(), funcEnd);
+   return jt;
+diff --git a/src/codegen/phase_gapfill.cpp b/src/codegen/phase_gapfill.cpp
+--- a/src/codegen/phase_gapfill.cpp
++++ b/src/codegen/phase_gapfill.cpp
+@@ -337,9 +337,29 @@
+     return word == 0x4E800020 || word == 0x4E800420 ||
+            (word & 0xFC000003) == 0x48000000;
+   };
++  // Executable sections may also contain inline switch data. A decoded
++  // pointer word can resemble lwz, and the next case can contain blr; neither
++  // turns the table itself into a callable entry. Preserve its exact byte span.
++  std::map<uint32_t, uint64_t> tableEnds;
++  for (const auto& [address, function] : graph.functions()) {
++    (void)address;
++    for (const auto& table : function->jumpTables()) {
++      if (!table.tableByteLength) continue;
++      auto& end = tableEnds[table.tableAddress];
++      end = std::max(end, uint64_t(table.tableAddress) + table.tableByteLength);
++    }
++  }
++  uint64_t tableEnd = 0;
++  for (auto& [address, end] : tableEnds) {
++    (void)address;
++    tableEnd = std::max(tableEnd, end);
++    end = tableEnd;
++  }
+   const auto consider = [&](uint32_t target) {
+     if (!target || (target & 3) || targets.contains(target) || graph.isEntryPoint(target) ||
+         ctx.binary().isInImportExportRange(target)) return;
++    auto table = tableEnds.upper_bound(target);
++    if (table != tableEnds.begin() && std::prev(table)->second > target) return;
+     const auto* region = decoded.regionContaining(target);
+     if (!region || graph.getFunctionContaining(target)) return;
+     auto owner = declaredEnds.upper_bound(target);

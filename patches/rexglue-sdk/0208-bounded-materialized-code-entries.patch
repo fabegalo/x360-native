@@ -1,0 +1,124 @@
+diff --git a/src/codegen/phase_gapfill.cpp b/src/codegen/phase_gapfill.cpp
+--- a/src/codegen/phase_gapfill.cpp
++++ b/src/codegen/phase_gapfill.cpp
+@@ -323,11 +323,11 @@
+   }
+ }
+ 
+-// Aligned data references can name frameless callbacks even without RTTI.
++// Aligned data references and bounded address materializations can name frameless callbacks.
+ // Require an unowned executable boundary after non-fall-through code/padding
+ // and a bounded valid prefix ending in an unconditional terminator. This only
+ // seeds entries: normal CFG discovery still determines all reachable blocks.
+-void discoverDataReferencedEntries(CodegenContext& ctx) {
++void discoverReferencedEntries(CodegenContext& ctx) {
+   auto& graph = ctx.graph;
+   auto& decoded = ctx.decoded();
+   const auto declaredEnds = declaredFunctionEnds(ctx);
+@@ -337,31 +337,78 @@
+     return word == 0x4E800020 || word == 0x4E800420 ||
+            (word & 0xFC000003) == 0x48000000;
+   };
++  const auto consider = [&](uint32_t target) {
++    if (!target || (target & 3) || targets.contains(target) || graph.isEntryPoint(target) ||
++        ctx.binary().isInImportExportRange(target)) return;
++    const auto* region = decoded.regionContaining(target);
++    if (!region || graph.getFunctionContaining(target)) return;
++    auto owner = declaredEnds.upper_bound(target);
++    if (owner != declaredEnds.begin() && std::prev(owner)->second > target) return;
++    const auto previous = decoded.read<uint32_t>(target - 4);
++    if (!previous || (*previous != 0 && !terminates(*previous))) return;
++    bool bounded = false;
++    for (uint32_t word = 0; word < 64; ++word) {
++      const uint64_t address = uint64_t(target) + word * 4;
++      if (address >= region->end || (word && graph.isEntryPoint(uint32_t(address))) ||
++          ctx.binary().isInImportExportRange(uint32_t(address))) break;
++      const auto* instruction = decoded.get(uint32_t(address));
++      if (!instruction || instruction->opcode == Opcode::kUnknown) break;
++      const uint32_t code = instruction->code;
++      if (terminates(code)) { bounded = true; break; }
++    }
++    if (bounded) targets.insert(target);
++  };
+   for (const auto& section : ctx.binary().sections()) {
+     if (section.executable || !section.data || section.baseAddress >= imageEnd) continue;
+     const uint64_t limit = std::min<uint64_t>(section.size, imageEnd - section.baseAddress);
+     const uint32_t first = (4 - (section.baseAddress & 3)) & 3;
+     for (uint64_t offset = first; offset + 4 <= limit; offset += 4) {
+       const uint32_t target = load_and_swap<uint32_t>(section.data + offset);
+-      if (!target || (target & 3) || targets.contains(target) || graph.isEntryPoint(target) ||
+-          ctx.binary().isInImportExportRange(target)) continue;
+-      const auto* region = decoded.regionContaining(target);
+-      if (!region || graph.getFunctionContaining(target)) continue;
+-      auto owner = declaredEnds.upper_bound(target);
+-      if (owner != declaredEnds.begin() && std::prev(owner)->second > target) continue;
+-      const auto previous = decoded.read<uint32_t>(target - 4);
+-      if (!previous || (*previous != 0 && !terminates(*previous))) continue;
+-      bool bounded = false;
+-      for (uint32_t word = 0; word < 64; ++word) {
+-        const uint64_t address = uint64_t(target) + word * 4;
+-        if (address >= region->end || (word && graph.isEntryPoint(uint32_t(address))) ||
+-            ctx.binary().isInImportExportRange(uint32_t(address))) break;
+-        const auto* instruction = decoded.get(uint32_t(address));
+-        if (!instruction || instruction->opcode == Opcode::kUnknown) break;
+-        const uint32_t code = instruction->code;
+-        if (terminates(code)) { bounded = true; break; }
+-      }
+-      if (bounded) targets.insert(target);
++      consider(target);
++    }
++  }
++  // Unlike the disabled broad function-pointer scan, only accept a bounded
++  // materialization inside one discovered block and an independently validated
++  // unowned entry. Unknown instructions or a write to the source stop the search.
++  for (const auto& [functionAddress, function] : graph.functions()) {
++    (void)functionAddress;
++    for (const auto& block : function->blocks()) {
++      for (uint32_t address = block.base; address < block.end(); address += 4) {
++        const auto* instruction = decoded.get(address);
++        if (!instruction) continue;
++        const uint32_t word = instruction->code;
++        const uint32_t primary = word >> 26;
++        if (primary != 14 && primary != 24) continue;  // addi or ori
++        const bool useOr = primary == 24;
++        const uint32_t source = useOr ? ((word >> 21) & 31) : ((word >> 16) & 31);
++        if (!useOr && !source) continue;  // li has no register input
++        for (uint32_t distance = 1; distance <= 8 &&
++             uint64_t(block.base) + distance * 4 <= address; ++distance) {
++          const auto* previous = decoded.get(address - distance * 4);
++          if (!previous) break;
++          const uint32_t code = previous->code;
++          if ((code & 0xFC1F0000) == 0x3C000000 && ((code >> 21) & 31) == source) {
++            const uint32_t high = uint32_t(int32_t(int16_t(code & 0xFFFF))) << 16;
++            consider(useOr ? high | (word & 0xFFFF) :
++                            high + uint32_t(int32_t(int16_t(word & 0xFFFF))));
++            break;
++          }
++          bool preserved = false;
++          switch (code >> 26) {
++            case 14: case 15: case 32: case 34: case 40: case 42:
++              preserved = ((code >> 21) & 31) != source; break;
++            case 20: case 21: case 23: case 24: case 25:
++              preserved = ((code >> 16) & 31) != source; break;
++            case 10: case 11: case 36: case 38: case 44: case 48: case 50:
++              preserved = true; break;  // compares, plain stores, plain FPR loads
++            case 31:
++              preserved = (code & 0xFC0007FE) == 0x7C000378 &&
++                          ((code >> 16) & 31) != source; break;  // or / mr
++            default: break;  // branches, calls, update forms and unknown effects
++          }
++          if (!preserved) break;
++        }
++      }
+     }
+   }
+   for (uint32_t target : targets)
+@@ -379,7 +426,7 @@
+ 
+ VoidResult GapFill(CodegenContext& ctx, ProgressReporter* reporter) {
+   (void)reporter;
+-  discoverDataReferencedEntries(ctx);
++  discoverReferencedEntries(ctx);
+   // Direct references outrank speculative linear gap ownership. Seed them
+   // first so a preceding fall-through cannot swallow a callable entry.
+   discoverUnownedTailTargets(ctx);
