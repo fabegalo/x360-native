@@ -156,7 +156,10 @@ TEST_CASE("session dashboard version reaches the game and dashboard return", "[g
     Fixture f("version");
     const auto manifest = f.root / "titles/dashboard/dashboard_manifest.toml";
     std::ofstream(manifest.parent_path() / "preparation.toml")
-        << "kind='dashboard'\ndashboard_version='" << version << "'\n";
+        << "label='Dashboard fixture'\nlimitations='Synthetic session test'\n"
+        << "kind='dashboard'\ndashboard_version='" << version << "'\n"
+        << "[[files]]\npath='dashboard.xex'\nsource_name='dashboard.xex'\nsha256='"
+        << DigestFile(f.paths.inputs() / "dashboard.xex")->sha256 << "'\n";
     WriteTestReceipt(f.paths, "dashboard", manifest, f.paths.build() / "dashboard.exe",
                      {f.paths.inputs() / "dashboard.xex"});
     auto result = f.Run();
@@ -184,6 +187,7 @@ TEST_CASE("session hands only its dashboard's verified avatar files to an avatar
     std::ofstream(f.paths.build() / "session_ui.dll", std::ios::binary) << "host fixture";
     std::ofstream(dashboard, std::ios::app) << "system_ui_host = 'session_ui.dll'\n";
     std::ofstream(dashboard.parent_path() / "preparation.toml")
+        << "label='Dashboard fixture'\nlimitations='Synthetic avatar test'\n"
         << "kind='dashboard'\ndashboard_version='" << version << "'\nruntime_files=['session_ui.dll']\n"
         << "[[files]]\npath='system/xam_ui.xex'\nsource_name='xam.xex'\nsha256='" << xam_sha << "'\n"
         << "[[files]]\npath='avatar/AvatarAssetPack.toc'\nsource_name='AvatarAssetPack.toc'\nsha256='"
