@@ -39,12 +39,16 @@ def git(repo, *args):
 
 
 def command(args, cwd, log, timeout):
+    env = os.environ.copy()
+    # pwsh's inherited module path can hide Windows PowerShell's built-in
+    # Get-FileHash. Let each shell construct its own default module path.
+    env.pop('PSModulePath', None)
     with Path(log).open('w', encoding='utf-8') as f:
         f.write(json.dumps({'command': [str(x) for x in args], 'cwd': str(cwd), 'timeout_seconds': timeout}) + '\n')
         f.flush()
         try:
             return subprocess.run([str(x) for x in args], cwd=cwd, stdout=f,
-                                  stderr=subprocess.STDOUT, timeout=timeout).returncode
+                                  stderr=subprocess.STDOUT, timeout=timeout, env=env).returncode
         except subprocess.TimeoutExpired:
             f.write('\nFAIL: command exceeded bounded timeout\n')
             return 124
@@ -158,7 +162,7 @@ def run(args):
         if report['identity']['sdk_commit'] != lock['rexglue_sdk']['commit'] or json.loads((ROOT / 'deps.lock.json').read_text()) != lock:
             raise ValueError('SDK/lock identity mismatch')
         dev = repo / 'scripts/devshell.cmd'
-        steps = [(['powershell', '-NoProfile', '-File', repo / 'scripts/setup/apply-sdk-patches.ps1', '-Check'], 'sdk', 180),
+        steps = [(['powershell', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', repo / 'scripts/setup/apply-sdk-patches.ps1', '-Check'], 'sdk', 180),
                  ([dev, 'cmake', '--build', build, '--config', 'Release', '--target', 'x360n_tests', 'x360n_sdk_runtime_checks'], 'build-main', 600),
                  ([dev, 'cmake', '--build', desktop, '--config', 'Release', '--target', 'x360n_launcher_tests', 'x360n_desktop_tests'], 'build-candidate', 600)]
         steps.append(([sys.executable, '-m', 'unittest', 'discover', '-s', ROOT / 'tests/stability', '-v'], 'negative-controls', 90))
