@@ -474,7 +474,7 @@ int wmain(int argc, wchar_t** argv) {
     auto gpu = rex::system::LoadGpuPlugin(plugin, backend);
     Require(bool(gpu), "load plugin ABI");
     const auto implementation = static_cast<rex::graphics::GraphicsSystem*>(gpu.get())->name();
-    if (backend == "vulkan") Require(implementation == "Vulkan", "requested actual Vulkan graphics system");
+    if (backend == "vulkan") Require(implementation == (plugin == "native" ? "Native (Experimental) Vulkan" : "Vulkan"), "requested actual Vulkan graphics system");
     if (backend == "d3d12" && plugin == "xenos") Require(implementation == "Direct3D 12", "requested actual D3D12 graphics system");
     std::cout << "API selected: " << backend << "; implementation: " << implementation << '\n';
     const std::wstring_view replay_flag = argc == 5 ? std::wstring_view(argv[3]) : std::wstring_view();
@@ -525,11 +525,20 @@ int wmain(int argc, wchar_t** argv) {
       Require(create(kGpuPluginAbiVersion, nullptr) == nullptr, "reject null create info");
       info.struct_size = sizeof(GpuCreateInfo) - 1;
       Require(create(kGpuPluginAbiVersion, &info) == nullptr, "reject short create info");
-      Require(!LoadGpuPlugin("native", "vulkan"), "reject Vulkan without fallback");
+      Require(!LoadGpuPlugin("native", "invalid-api"), "reject unsupported API without fallback");
+#if REX_HAS_VULKAN
+      auto vulkan = LoadGpuPlugin("native", "vulkan");
+      Require(bool(vulkan), "load enabled Native Vulkan API");
+      Require(static_cast<rex::graphics::GraphicsSystem*>(vulkan.get())->name() ==
+                  "Native (Experimental) Vulkan", "Vulkan must not fall back to D3D12");
+      vulkan.reset();
+#else
+      Require(!LoadGpuPlugin("native", "vulkan"), "reject disabled Vulkan without fallback");
+#endif
       for (const auto* name : {L"rexgpu-xenos.dll", L"rexgpu-xenosd.dll", L"rexgpu-xenosrd.dll"})
         Require(GetModuleHandleW(name) == nullptr, "Native must not load Xenos plugin");
       gpu.reset(); rt.Shutdown(); rex::FlushLogging();
-      std::cout << "PASS ABI1, invalid ABI/info rejected, Vulkan rejected, no Xenos loaded\n";
+      std::cout << "PASS ABI1, invalid ABI/info/API rejected, configured Vulkan contract, no Xenos loaded\n";
       return 0;
     }
     Require(gpu->SetupPresentation(nullptr) == X_STATUS_SUCCESS, "presentation setup");

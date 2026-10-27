@@ -75,7 +75,8 @@ if(REXGLUE_USE_VULKAN)
   set_tests_properties(sdkcheck.Native-FSI-sample-counts PROPERTIES LABELS project TIMEOUT 60)
   add_executable(x360n_native_vulkan_probe ../../tests/native/vulkan_probe.cpp
       vulkan/vulkan_core.cpp vulkan/vulkan_scanout.cpp)
-  target_include_directories(x360n_native_vulkan_probe PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+  target_include_directories(x360n_native_vulkan_probe PRIVATE
+      ${CMAKE_CURRENT_SOURCE_DIR} ${X360_REXGLUE_DIR}/thirdparty/renderdoc)
   target_link_libraries(x360n_native_vulkan_probe PRIVATE rexruntime ${_native_vulkan_libraries})
   x360n_stage_runtime_dlls(x360n_native_vulkan_probe)
   add_test(NAME native.vulkan-components COMMAND x360n_native_vulkan_probe
