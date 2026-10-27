@@ -160,6 +160,30 @@ class Certification(unittest.TestCase):
         with self.assertRaises(ValueError):
             gate.check_sdk_changes(sdk, expected)
 
+    def test_sdk_rejects_dirty_submodule_at_the_correct_pin(self):
+        sdk = self.file.parent
+        dep = sdk / 'dependency-source'
+        dep.mkdir()
+        subprocess.run(['git', 'init', '-q', str(dep)], check=True)
+        (dep / 'code').write_text('original dependency')
+        subprocess.run(['git', '-C', str(dep), 'add', '.'], check=True)
+        commit = ['-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', 'commit', '-qm', 'test: dependency']
+        subprocess.run(['git', '-C', str(dep), *commit], check=True)
+        subprocess.run(['git', '-C', str(sdk), '-c', 'protocol.file.allow=always',
+                        'submodule', 'add', '-q', str(dep), 'external/dep'], check=True)
+        subprocess.run(['git', '-C', str(sdk), *commit], check=True)
+        gate.check_sdk_changes(sdk, {})
+        (sdk / 'external/dep/code').write_text('corrupt dependency at unchanged commit')
+        with self.assertRaises(ValueError):
+            gate.check_sdk_changes(sdk, {})
+
+    def test_candidate_reuse_refuses_changed_native_artifact(self):
+        current = copy.deepcopy(self.report)
+        self.file.write_bytes(b'different candidate')
+        current['artifacts'][0] = dict(gate.artifact(self.file), role='runtime')
+        with self.assertRaises(ValueError):
+            gate.reuse_contracts(self.report, current, self.policy, self.file.parent, candidate=True)
+
 
 if __name__ == '__main__':
     unittest.main()

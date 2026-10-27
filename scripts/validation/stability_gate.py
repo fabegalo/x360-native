@@ -45,9 +45,29 @@ def check_sdk_changes(sdk, expected):
     for name, sha in expected.items():
         if digest(sdk / name) != sha:
             raise ValueError('SDK file identity mismatch: ' + name)
-    if any(line and line[0] != ' ' for line in subprocess.check_output(
-            ['git', '-C', str(sdk), 'submodule', 'status', '--recursive'], text=True).splitlines()):
+    modules = subprocess.check_output(['git', '-C', str(sdk), 'submodule', 'status', '--recursive'], text=True).splitlines()
+    if any(line and line[0] != ' ' for line in modules):
         raise ValueError('SDK submodule pin missing/divergent')
+    for line in modules:
+        module_name = line[1:].split()[1]
+        module = (sdk / module_name).resolve()
+        if not module.is_relative_to(sdk.resolve()):
+            raise ValueError('SDK submodule outside checkout')
+        for name in git(module, 'diff', '--name-only', 'HEAD', '--ignore-submodules=all').splitlines():
+            if module_name + '/' + name in expected:
+                continue  # already checked by SHA-256 above
+            # Windows materialization of libmspack's original symlinks is the
+            # only undeclared working-tree difference accepted by the project.
+            entry = git(module, 'ls-files', '-s', '--', name)
+            if module_name != 'thirdparty/libmspack' or not entry.startswith('120000 '):
+                raise ValueError('SDK submodule has undeclared changes: ' + module_name + '/' + name)
+            target = (module / name).parent / git(module, 'show', 'HEAD:' + name)
+            target = target.resolve()
+            if not target.is_relative_to(module):
+                raise ValueError('materialized symlink escapes SDK submodule')
+            expected_blob = git(module, 'rev-parse', 'HEAD:' + target.relative_to(module).as_posix())
+            if git(module, 'hash-object', '--', name) != expected_blob:
+                raise ValueError('materialized symlink bytes differ from original target')
 
 
 def command(args, cwd, log, timeout):
@@ -90,24 +110,26 @@ def junit(path, expected):
             for x in cases]
 
 
-def reuse_contracts(previous, current, policy, build):
+def reuse_contracts(previous, current, policy, build, label='contracts', candidate=False):
     """Reuse only unchanged main/SDK evidence; preserve every failure/skip."""
     if previous.get('identity') != current['identity'] or previous.get('preflight') != 'PASS':
         raise ValueError('reused contracts have a different identity/preflight')
     def baseline(items):
         return {x['path']: x['sha256'] for x in items
-                if Path(x['path']).is_relative_to(build) or x.get('role') in ('sdk-source', 'sdk-patch', 'lock')}
+                if (x.get('role') != 'gate' if candidate else
+                    Path(x['path']).is_relative_to(build) or x.get('role') in ('sdk-source', 'sdk-patch', 'lock'))}
     if not baseline(current['artifacts']) or baseline(previous['artifacts']) != baseline(current['artifacts']):
         raise ValueError('reused main/SDK artifact set changed')
     for item in previous['artifacts']:
         if item['path'] in baseline(current['artifacts']) and not intact(item):
             raise ValueError('reused main/SDK artifact changed or disappeared')
-    xml = previous['junit']['contracts']
+    xml = previous['junit'][label]
     if not intact(xml):
         raise ValueError('reused JUnit changed or disappeared')
     rows = junit(xml['path'], policy['tests'])
     for row in rows:
-        recorded = [x for x in previous['results'] if x['id'] == row['id']]
+        result_id = 'synthetic-recovery' if label == 'synthetic' else row['id']
+        recorded = [x for x in previous['results'] if x['id'] == result_id]
         if len(recorded) != 1 or recorded[0]['state'] != row['state'] or not recorded[0].get('evidence') or not all(intact(x) for x in recorded[0]['evidence']):
             raise ValueError('reused result/evidence mismatch')
     return rows, xml
@@ -127,6 +149,8 @@ def verify(report, policy):
         errors.append('SDK/build preflight failed')
     if report.get('reused_contracts') and not intact(report['reused_contracts']):
         errors.append('reused report missing/changed')
+    if report.get('reused_candidate') and not intact(report['reused_candidate']):
+        errors.append('reused candidate report missing/changed')
     source = Path(report.get('source', 'missing-source'))
     if not source.is_dir() or git(source, 'rev-parse', 'HEAD') != identity.get('commit'):
         errors.append('source commit changed/absent')
@@ -268,13 +292,14 @@ def run(args):
         for folder, names, regex, label in [(build, policy['tests'], pattern, 'contracts'),
                 (desktop, ['desktop.catalog', 'desktop.update-recovery'], '^desktop[.](catalog|update-recovery)$', 'desktop')]:
             xml = out / (label + '.xml')
-            if label == 'contracts' and args.reuse_contracts:
-                previous = json.loads(args.reuse_contracts.read_text())
-                rows, item = reuse_contracts(previous, report, policy, build)
+            reuse = args.reuse_contracts if label == 'contracts' else args.reuse_candidate
+            if reuse:
+                previous = json.loads(reuse.read_text())
+                rows, item = reuse_contracts(previous, report, {'tests': names}, build, label, label != 'contracts')
                 xml = Path(item['path'])
-                (out / (label + '.log')).write_text(json.dumps({'reused_from': artifact(args.reuse_contracts),
+                (out / (label + '.log')).write_text(json.dumps({'reused_from': artifact(reuse),
                     'reason': 'unchanged main/SDK artifacts; failures preserved'}), encoding='utf-8')
-                report['reused_contracts'] = artifact(args.reuse_contracts)
+                report['reused_contracts' if label == 'contracts' else 'reused_candidate'] = artifact(reuse)
                 rc = 0
             else:
                 rc = command([ctest, '--test-dir', folder, '-C', 'Release', '-R', regex,
@@ -287,9 +312,17 @@ def run(args):
                 row['evidence'] = [artifact(xml), artifact(out / (label + '.log'))]
             report['results'].extend(rows)
         xml = out / 'synthetic.xml'
-        rc = command([roles['synthetic-tests'], '[stability]', '--reporter', 'junit', '--out', xml],
-                     out, out / 'synthetic.log', 90)
-        rows = junit(xml, ['stable session crash and relaunch preserve the single HDD bytes'])
+        names = ['stable session crash and relaunch preserve the single HDD bytes']
+        if args.reuse_candidate:
+            previous = json.loads(args.reuse_candidate.read_text())
+            rows, item = reuse_contracts(previous, report, {'tests': names}, build, 'synthetic', True)
+            xml = Path(item['path'])
+            (out / 'synthetic.log').write_text(json.dumps({'reused_from': artifact(args.reuse_candidate)}))
+            rc = 0
+        else:
+            rc = command([roles['synthetic-tests'], '[stability]', '--reporter', 'junit', '--out', xml],
+                         out, out / 'synthetic.log', 90)
+            rows = junit(xml, names)
         report['junit']['synthetic'] = artifact(xml)
         report['results'].append({'id': 'synthetic-recovery', 'state': rows[0]['state'] if rc == 0 else 'FAIL',
                                   'evidence': [artifact(xml), artifact(out / 'synthetic.log')]})
@@ -313,6 +346,8 @@ def main():
         r.add_argument('--' + name, type=Path, required=True)
     r.add_argument('--reuse-contracts', type=Path,
                    help='reuse intact main/SDK results from a previous report, including failures')
+    r.add_argument('--reuse-candidate', type=Path,
+                   help='reuse desktop/synthetic evidence only when every native artifact is identical')
     v = sub.add_parser('verify')
     v.add_argument('report', type=Path)
     args = p.parse_args()
