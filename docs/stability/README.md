@@ -44,6 +44,9 @@ repeti-los após corrigir apenas testes desktop/gate. Exige mesma identidade,
 mesmo conjunto de artefatos main/SDK e evidência intacta; preserva inclusive FAIL
 e SKIP. O restante do gate continua executando. Não recertifica um binário novo
 com resultados de outro. Timeouts encerram a árvore dos processos no Windows.
+`--reuse-candidate <report.json>` aplica a mesma regra ao desktop e cenário
+sintético: todos os artefatos nativos, SDK, lock e política precisam ser idênticos.
+Permite fortalecer apenas o verificador sem repetir regressões já aprovadas.
 
 Os quatro aceites reais começam **NOT RUN** em toda execução automatizada;
 o runner não os promove. `verify` aceita um recibo revisado com evidência
@@ -82,21 +85,24 @@ dos perfis/saves/conteúdo preservados. Probes sintéticos não substituem esse 
 
 ## Limites e sequência das próximas correções
 
-1. Renovar somente os recibos necessários ao jogo escolhido para save/load;
+1. Integrar e acompanhar a correção de colisão de diretórios de execução:
+   main mantém FAIL no relançamento; a candidata aloca diretório exclusivo
+   atomicamente, preservando a recusa de handoff antigo e todos os logs.
+2. Renovar somente os recibos necessários ao jogo escolhido para save/load;
    resolver falhas de preparo sem afrouxar verificações. Castle tem marcador
    incompleto; outros títulos têm recibos antigos conforme auditoria Preview 25.
-2. Escolher conteúdo/licença e obter autorização do ensaio real acima; corrigir
+3. Escolher conteúdo/licença e obter autorização do ensaio real acima; corrigir
    o primeiro bloqueio reproduzível até completar save/load e ciclo original.
-3. Completar entrada/Guide/perfis/áudio e fidelidade Xenos na mesma identidade;
+4. Completar entrada/Guide/perfis/áudio e fidelidade Xenos na mesma identidade;
    classificar/resolver diferenças gráficas aplicáveis, sem remover efeitos.
-4. Executar distribuição limpa e recuperação com o pacote exato; só então
+5. Executar distribuição limpa e recuperação com o pacote exato; só então
    revisar o contrato estável. Publicação requer outra tarefa.
 
 As falhas históricas Native MEMEXPORT/oclusão e as 45 diferenças Xenos R8/API
 continuam registradas na [auditoria Preview 25](../reports/release-audit-2026-10-27.md).
 O teste upstream Depfile permanece falha histórica, fora deste conjunto focado.
 Não foram reexecutados GPU, jogos ou a suíte completa por mudanças em testes/gate.
-Nenhuma correção de renderer/runtime ou alegação de desempenho nesta etapa.
+Nenhuma correção de renderer/SDK ou alegação de desempenho nesta etapa.
 
 Confronto: [STATUS](../../STATUS.md), [compatibilidade](../compatibility.md),
 [checklist §§5.3, 6, 13, 16–18](../CHECKLIST_FUNCIONAL_x360-native.md) e auditoria

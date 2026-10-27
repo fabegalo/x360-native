@@ -1,5 +1,15 @@
 # STATUS
 
+27/10 — **STABLE-01 iniciada sobre Preview 25 / main `9abb880`**: contrato
+candidato Windows x64/Release/Xenos D3D12/Retail 17559 e gate de evidências
+obrigatórias em [docs/stability](docs/stability/README.md). A certificação segue
+bloqueada: save/load comercial e Windows limpo sem aceite; uma falha no
+relançamento com preferências na main foi preservada. Colisão de diretórios
+de diagnóstico no mesmo segundo foi identificada e corrigida na candidata.
+Novos controles negativos, proteção do HDD em crash/relançamento e atualização
+sintética não certificam conteúdo original. [Execução e matriz](docs/stability/execution-2026-10-27.md).
+SDK/renderers preservados; sem Computer Use, jogos, tag ou Release nesta etapa.
+
 27/10 — **auditoria da preview.25**: main inicial `b50671c6…18e3`, replay
 limpo de 201 patches/271 hashes sem divergências, Release D3D12/Vulkan,
 903/28 XAM/UI e 767/19 AOT aprovados. Xenos: 2.324 casos/API e 45 diferenças
