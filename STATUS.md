@@ -1,5 +1,12 @@
 # STATUS
 
+28/10 — **MAINT-01: limpeza executada**: 17.794 arquivos e 1.325 diretórios
+vazios de ensaios aposentados removidos; 38,442 GiB recuperados no volume.
+Originais, perfis/saves reais, SDK, preparações e STABLE-01/02/03 preservados.
+Planos, hashes, journal, guardas de processos/links e prevenção no empacotamento;
+20 testes de limpeza, 23 do gate e três CTests focados passaram, sem jogos ou UI.
+Main avançada em paralelo foi preservada. [Relatório e limites](docs/reports/maintenance/maint-01-2026-10-28.md).
+
 28/10 — **STABLE-03: quatro aceites manuais confirmados pelo mantenedor** no
 ambiente `Desktop/x360-release`, Preview 25/`9abb880`. ZIP e 1.178 arquivos
 conferidos; recibos Retail 17559 e Forza Horizon 0.0.0.10 íntegros (4.468/4.534

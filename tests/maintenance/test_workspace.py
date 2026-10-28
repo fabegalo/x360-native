@@ -133,5 +133,40 @@ class Maintenance(unittest.TestCase):
         self.put('.local/user-data-root.txt',str(self.obj.parent).encode())
         self.assertEqual(self.audit()['items'],[])
 
+    def test_interrupted_delete_can_resume(self):
+        plan = self.audit(); item = plan['items'][0]
+        (self.out/'journal.jsonl').write_text(json.dumps({'status':'intent','item':item})+'\n')
+        self.obj.unlink()  # simulates a crash after delete and before completion record
+        a.execute(self.root,self.out)
+        self.assertIn('absent-after-intent',(self.out/'journal.jsonl').read_text())
+
+    def test_traversal_cannot_disguise_protected_storage(self):
+        self.assertFalse(a.eligible(self.root,'.local/build/../user/CMakeFiles/save.obj',set(),[],[]))
+
+    def test_reports_cannot_write_into_protected_roots(self):
+        with self.assertRaises(ValueError): a.audit(self.root,self.root/'.local/inputs/report',1,60)
+
+    def test_explicit_trial_retirement_keeps_production_and_run_logs(self):
+        trial='.local/tmp/moto-regression-fixture/profile-snapshot'
+        old=self.put(trial+'/profile.dat',b'discardable copied profile fixture')
+        log=self.put('.local/tmp/moto-regression-fixture/run.log',b'keep evidence')
+        a.plan_retirement(self.root,self.out,[trial]); a.execute(self.root,self.out)
+        self.assertFalse(old.exists()); self.assertTrue(log.exists()); self.assertTrue(self.obj.exists())
+
+    def test_trial_retirement_refuses_real_data_and_current_references(self):
+        with self.assertRaises(ValueError): a.plan_retirement(self.root,self.out,['.local/user'])
+        trial='.local/tmp/moto-regression-fixture/profile-snapshot'
+        self.put(trial+'/profile.dat',b'fixture')
+        self.put('.local/catalog/active.json',json.dumps({'user_root':str(self.root/trial)}).encode())
+        with self.assertRaises(ValueError): a.plan_retirement(self.root,self.out,[trial])
+
+    def test_reviewed_image_does_not_exempt_another_path(self):
+        image=self.put('.local/evidence/current/launcher.exe',b'image fixture')
+        other=self.put('.local/evidence/other/launcher.exe',b'image fixture')
+        review=[{'path':str(image),'image_sha256':a.digest(image)}]
+        with patch.object(a,'processes',return_value=[{'pid':123,'path':str(image)}]): a.assert_processes(review)
+        with patch.object(a,'processes',return_value=[{'pid':124,'path':str(other)}]):
+            with self.assertRaises(RuntimeError): a.assert_processes(review)
+
 
 if __name__ == '__main__': unittest.main()

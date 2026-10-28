@@ -117,11 +117,16 @@ def storage_api():
 def measure_allocation(root, out):
     root = Path(os.path.abspath(root)); out = Path(out)
     db = sqlite3.connect(out/'inventory.sqlite')
-    total = logical = count = 0; physical = set()
+    total = logical = count = 0; physical = set(); changed = []; missing = []
     for rel,ident in list(db.execute('SELECT path,identity FROM files')):
-        p = root/rel; s = info(p)
+        p = root/rel
+        try:
+            s = info(p)
+        except FileNotFoundError:
+            missing.append(rel); continue
         if file_key(s) != ident:
-            raise ValueError(f'Changed physical identity: {rel}')
+            changed.append(rel)
+            ident = file_key(s)
         alloc = allocated(p,s)
         db.execute('UPDATE files SET allocated=? WHERE path=?',(alloc,rel))
         logical += s.st_size; count += 1
@@ -131,6 +136,7 @@ def measure_allocation(root, out):
             db.commit(); print(f'Allocation measured: {count} files',file=sys.stderr,flush=True)
     db.commit(); db.close()
     value = {'files':count,'logical_bytes':logical,'allocated_unique_bytes':total,
+             'changed_identity_paths':changed,'missing_paths':missing,
              'free_bytes':shutil.disk_usage(root).free,
              'method':'Win32 FileStandardInfo.AllocationSize; sparse/compressed GetCompressedFileSizeW; unique volume/file IDs; excludes filesystem metadata and report directory'}
     write_json(out/'allocation.json',value); print(json.dumps(value,indent=2))
@@ -172,7 +178,7 @@ def compiler_graph(build):
 def compiler_proof(root, rel):
     p = root / rel
     for parent in p.parents:
-        if not beneath(parent, root / '.local' / 'build'):
+        if not beneath(parent, root / '.local'):
             break
         outputs, refs = compiler_graph(parent)
         if norm(p) in outputs:
@@ -193,6 +199,9 @@ def processes():
         k.Process32FirstW.argtypes = [W.HANDLE, ctypes.POINTER(Entry)]
         k.Process32NextW.argtypes = [W.HANDLE, ctypes.POINTER(Entry)]
         k.CloseHandle.argtypes = [W.HANDLE]
+        k.OpenProcess.restype=W.HANDLE
+        k.QueryFullProcessImageNameW.argtypes=[W.HANDLE,W.DWORD,W.LPWSTR,ctypes.POINTER(W.DWORD)]
+        k.GetProcessTimes.argtypes=[W.HANDLE,ctypes.POINTER(W.FILETIME),ctypes.POINTER(W.FILETIME),ctypes.POINTER(W.FILETIME),ctypes.POINTER(W.FILETIME)]
         h = k.CreateToolhelp32Snapshot(2, 0)
         if h == W.HANDLE(-1).value:
             raise ctypes.WinError(ctypes.get_last_error())
@@ -204,7 +213,16 @@ def processes():
                 raise ctypes.WinError(ctypes.get_last_error())
             while ok:
                 if e.pid != os.getpid() and BUSY.fullmatch(e.exe):
-                    result.append({'pid': e.pid, 'name': e.exe})
+                    item={'pid':e.pid,'name':e.exe}
+                    process=k.OpenProcess(0x1000,False,e.pid)
+                    if process:
+                        try:
+                            buf=ctypes.create_unicode_buffer(32768); size=W.DWORD(len(buf))
+                            if k.QueryFullProcessImageNameW(process,0,buf,ctypes.byref(size)): item['path']=buf.value
+                            times=[W.FILETIME() for _ in range(4)]
+                            if k.GetProcessTimes(process,*[ctypes.byref(t) for t in times]): item['created']=(times[0].dwHighDateTime<<32)|times[0].dwLowDateTime
+                        finally:k.CloseHandle(process)
+                    result.append(item)
                 ok = k.Process32NextW(h, ctypes.byref(e))
         finally:
             k.CloseHandle(h)
@@ -212,6 +230,15 @@ def processes():
     output = subprocess.check_output(['ps', '-eo', 'pid=,comm='], text=True)
     return [{'pid': int(line.split()[0]), 'name': line.split()[-1]} for line in output.splitlines()
             if BUSY.fullmatch(Path(line.split()[-1]).name)]
+
+
+def assert_processes(reviewed=()):
+    active=processes()
+    def allowed(p):
+        return p in reviewed or any('image_sha256' in r and norm(p.get('path',''))==norm(r['path'])
+                                   and digest(r['path'])==r['image_sha256'] for r in reviewed)
+    if any(not allowed(p) for p in active):
+        raise RuntimeError(f'Unreviewed runtime/build active; cleanup withheld: {active}')
 
 
 def walk(root, excluded=()):
@@ -239,7 +266,7 @@ def class_of(rel, worktrees=()):
     low = [x.lower() for x in parts]
     if any(beneath(rel, w) for w in worktrees):
         return 'PROTECTED'
-    if low[0] in {'.git', 'external'} or any(x in low for x in ('xerj', '.xerj')):
+    if low[0] in {'.git', 'external'} or any('xerj' in x for x in low):
         return 'PROTECTED'
     if low[0] != '.local':
         return 'REQUIRED'
@@ -247,8 +274,13 @@ def class_of(rel, worktrees=()):
         return 'PROTECTED'
     if low[1] == 'evidence' and any(x.startswith('stable-') for x in low):
         return 'PROTECTED'
+    historical_package = (len(low) > 6 and low[1:3] == ['archive','work']
+                          and low[3].startswith('distribution-')
+                          and re.fullmatch('[a-f0-9]{32}',low[4]) and low[5] == 'build')
+    if historical_package and 'cmakefiles' in low and Path(rel).suffix.lower() in COMPILER:
+        return 'REGENERABLE'
     if low[1] in {'evidence', 'archive'}:
-        return 'HISTORICAL_UNIQUE'
+        return 'UNKNOWN'  # Historical content is not presumed unique or disposable.
     if low[1] == 'build':
         if 'cmakefiles' in low and Path(rel).suffix.lower() in COMPILER:
             return 'REGENERABLE'
@@ -333,6 +365,8 @@ def references(root, files):
 
 
 def eligible(root, rel, protected, blocked, worktrees):
+    if Path(rel).drive or '..' in Path(rel).parts or ':' in rel:
+        return False
     p = root / rel
     if class_of(rel) != 'REGENERABLE':
         return False
@@ -349,11 +383,11 @@ def refresh_plan(root, out):
     Execution still re-discovers references and rechecks each identity and hash.
     """
     root = Path(os.path.abspath(root)); out = Path(out)
-    with sqlite3.connect(out / 'inventory.sqlite') as db:
+    with sqlite3.connect(out / 'inventory.sqlite',timeout=120) as db:
         rows = list(db.execute('SELECT * FROM files'))
     db.close()
     protected, blocked, refs = references(root, [r[0] for r in rows if r[6] != 'PROTECTED'])
-    wt = worktree_paths(root); items = []
+    wt = worktree_paths(root); items = []; changed_roots = set()
     for rel,size,mtime,ident,nlink,alloc,c,sha in rows:
         if nlink != 1 or not eligible(root,rel,protected,blocked,wt):
             continue
@@ -362,14 +396,28 @@ def refresh_plan(root, out):
             continue
         s = info(root / rel)
         if (s.st_size,s.st_mtime_ns,file_key(s)) != (size,mtime,ident):
-            raise ValueError(f'Inventory changed; re-audit: {rel}')
+            changed_roots.add(str(proof[0].parent))
+            continue
         sha = digest(root / rel)  # refreshed plan never trusts cached content
-        for path in proof:
-            refs[str(path.relative_to(root))] = digest(path)
+        alloc = allocated(root / rel,s)
         items.append({'path':rel,'size':size,'mtime':mtime,'identity':ident,'allocated':alloc,
                       'sha256':sha,'class':'REGENERABLE','proof':[str(p) for p in proof],
                       'reason':'CMake/Ninja-declared compiler intermediate; sources present; no certified/reference dependency. Next build recompiles this output.'})
+    items = [item for item in items if not any(beneath(root/item['path'],p) for p in changed_roots)]
+    for item in items:
+        for path in item['proof']:
+            key = str(Path(path).relative_to(root))
+            if key not in refs:
+                refs[key] = digest(path)
     write_json(out/'plan.json',{'schema':SCHEMA,'workspace':str(root),'references':refs,'worktrees':wt,'items':items})
+    write_json(out/'concurrent-builds-preserved.json',sorted(changed_roots))
+    summary_path = out/'summary.json'
+    if summary_path.exists():
+        summary = json.loads(summary_path.read_text(encoding='utf-8'))
+        summary.update(candidate_files=len(items), candidate_bytes=sum(i['size'] for i in items),
+                       candidate_allocated_bytes=sum(i['allocated'] for i in items),
+                       blocked_receipt_roots=sorted(set(blocked)), plan_refined=True)
+        write_json(summary_path,summary)
     print(json.dumps({'candidate_files':len(items),'candidate_bytes':sum(i['size'] for i in items),
                       'allocated_bytes':sum(i['allocated'] for i in items)},indent=2))
 
@@ -377,6 +425,71 @@ def refresh_plan(root, out):
 def worktree_paths(root):
     output = subprocess.check_output(['git', '-C', str(root), 'worktree', 'list', '--porcelain'], text=True)
     return [line[9:] for line in output.splitlines() if line.startswith('worktree ') and norm(line[9:]) != norm(root)]
+
+
+def trial_allowed(rel):
+    parts = Path(rel).parts
+    return (len(parts) == 4 and parts[:2] == ('.local','tmp')
+            and parts[2].startswith('moto-regression-') and parts[3] == 'profile-snapshot') or (
+            len(parts) == 5 and parts[:3] == ('.local','evidence','generic-games-2026-10-26')
+            and parts[4] in {'user','console-copy'} and not parts[3].startswith('release-audit-'))
+
+
+def plan_retirement(root,out,trial_roots,inventory_report=None,review_pids=(),review_images=()):
+    """Explicitly requested retirement of completed trial data; keep run evidence.
+
+    This is never part of automatic inventory/cleaning. The caller must name each
+    scoped old trial data root. Certified/current stability roots cannot match.
+    """
+    root=Path(os.path.abspath(root)); out=Path(out); out.mkdir(parents=True,exist_ok=True)
+    reviewed=[p for p in processes() if p['pid'] in review_pids and 'path' in p and 'created' in p]
+    reviewed.extend({'path':str(Path(p).absolute()),'image_sha256':digest(p)} for p in review_images)
+    assert_processes(reviewed)
+    trials=[]; items=[]; cache={}
+    if inventory_report:
+        with sqlite3.connect(Path(inventory_report)/'inventory.sqlite',timeout=120) as db:
+            for rel in trial_roots:
+                prefix=rel.replace('/',os.sep)+os.sep
+                cache.update({r[0]:r[1:] for r in db.execute('SELECT path,size,mtime,identity,sha FROM files WHERE path>=? AND path<?',(prefix,prefix+'\U0010ffff'))})
+        db.close()
+    for rel in trial_roots:
+        if not trial_allowed(rel): raise ValueError(f'Not an approved old trial data scope: {rel}')
+        directory=safe_path(root,rel)
+        if any(beneath(p['path'],directory) for p in reviewed): raise ValueError('Reviewed process runs from retired trial')
+        if any(beneath(directory,w) or beneath(w,directory) for w in worktree_paths(root)):
+            raise ValueError('Trial overlaps a registered worktree')
+        trials.append(str(directory.relative_to(root)))
+        for p,s,kind in walk(directory):
+            if kind!='file' or s.st_nlink!=1: raise ValueError('Trial contains redirects/hardlinks; retained')
+            relative=str(p.relative_to(root))
+            if p.name.endswith('.preparation.json'): raise ValueError('Trial contains preparation receipts; retained')
+            old=cache.get(relative)
+            sha=old[3] if old and old[:3]==(s.st_size,s.st_mtime_ns,file_key(s)) and old[3] else digest(p)
+            items.append({'path':relative,'size':s.st_size,'mtime':s.st_mtime_ns,'identity':file_key(s),
+                          'allocated':allocated(p,s),'sha256':sha,'class':'UNKNOWN',
+                          'reason':'Explicit user request: retire no-longer-used trial data; preserve production data and run logs.'})
+    # Current catalog/settings and all production preparation receipts must not
+    # refer into a retired trial, even after explicit retirement authorization.
+    refs={}
+    for base in [root/'.local/catalog',root/'.local/preparation',root/'.local/build']:
+        if not base.exists():continue
+        for p,s,kind in walk(base):
+            if kind!='file' or not (p.name.endswith('.preparation.json') or p.suffix.lower() in {'.json','.toml','.txt'} and base.name!='build'):
+                continue
+            with open(native(p),encoding='utf-8-sig',errors='replace') as f:text=f.read()
+            normalized=text.replace('\\\\','\\').replace('/','\\').lower()
+            if any(str(root/t).lower() in normalized for t in trials):
+                raise ValueError(f'Current preparation/catalog references trial: {p}')
+            refs[str(p.relative_to(root))]=digest(p)
+    selected=root/'.local/user-data-root.txt'
+    if selected.exists():
+        text=selected.read_text(encoding='utf-8-sig').strip()
+        if any(beneath(text,root/t) or beneath(root/t,text) for t in trials):
+            raise ValueError('Selected persistent storage overlaps trial')
+        refs[str(selected.relative_to(root))]=digest(selected)
+    write_json(out/'plan.json',{'schema':SCHEMA,'workspace':str(root),'references':refs,
+                              'retired_trial_roots':trials,'reviewed_processes':reviewed,'items':items})
+    print(json.dumps({'retired_trial_roots':trials,'files':len(items),'bytes':sum(i['size'] for i in items)},indent=2))
 
 
 def write_json(path, data):
@@ -388,6 +501,11 @@ def audit(root, out, budget_gib=64, seconds=1200):
     root = Path(os.path.abspath(root)); out = Path(os.path.abspath(out))
     if redirected(root.lstat()) or root.resolve() != root:
         raise ValueError('Workspace must be a real, unredirected absolute path')
+    if beneath(out,root) and not beneath(out,root/'.local/evidence/maintenance'):
+        raise ValueError('Reports inside a workspace must remain under .local/evidence/maintenance')
+    for parent in [out,*out.parents]:
+        if parent.exists() and redirected(info(parent)):
+            raise ValueError(f'Redirected report directory: {parent}')
     out.mkdir(parents=True, exist_ok=True)
     wt = worktree_paths(root)
     db = sqlite3.connect(out / 'inventory.sqlite')
@@ -516,16 +634,38 @@ def execute(root, out, seconds=1200):
             lease.seek(0); msvcrt.locking(lease.fileno(), msvcrt.LK_UNLCK, 1)
 
 
+def prune_trials(root,out):
+    root=Path(os.path.abspath(root));out=Path(out)
+    plan=json.loads((out/'plan.json').read_text(encoding='utf-8'))
+    if norm(plan['workspace'])!=norm(root):raise ValueError('Wrong workspace')
+    count=0
+    for rel in plan.get('retired_trial_roots',[]):
+        if not trial_allowed(rel):raise ValueError('Unapproved trial root')
+        directory=root/rel
+        if not os.path.exists(native(directory)):continue
+        safe_path(root,rel)
+        for parent,dirs,files in os.walk(native(directory),topdown=False,followlinks=False):
+            p=Path(parent.removeprefix('\\\\?\\'))
+            safe_path(root,str(p.relative_to(root)))
+            try:os.rmdir(native(p));count+=1
+            except OSError:pass  # A populated/in-use directory is always retained.
+    write_json(out/'empty-directories.json',{'removed_empty_directories':count})
+    print(json.dumps({'removed_empty_directories':count}))
+
+
 def execute_locked(root, out, seconds=1200):
     root = Path(os.path.abspath(root)); out = Path(out)
     plan = json.loads((out / 'plan.json').read_text(encoding='utf-8'))
     if plan.get('schema') != SCHEMA or norm(plan['workspace']) != norm(root):
         raise ValueError('Plan belongs to another workspace/schema')
-    if processes():
-        raise RuntimeError(f'Active build/runtime processes; no deletion: {processes()}')
+    reviewed=plan.get('reviewed_processes',[]) if plan.get('retired_trial_roots') else []
+    assert_processes(reviewed)
     wt = worktree_paths(root)
+    trials=plan.get('retired_trial_roots',[])
+    if any(not trial_allowed(p) for p in trials): raise ValueError('Invalid trial retirement scope')
     # Discover new receipts as well as validate every reference in the plan.
-    files = [str(p.relative_to(root)) for p,s,k in walk(root, [out]) if k == 'file'
+    bases = [root] if not trials else [root/'.local'/sub for sub in ('build','catalog','preparation','evidence/stable-01','evidence/stable-02') if (root/'.local'/sub).exists()]
+    files = [str(p.relative_to(root)) for base in bases for p,s,k in walk(base, [out]) if k == 'file'
              and p.suffix in {'.json','.toml','.md','.sha256','.txt','.tsv'}
              and class_of(str(p.relative_to(root))) != 'PROTECTED'
              and not any(beneath(p,w) for w in wt)]
@@ -538,11 +678,13 @@ def execute_locked(root, out, seconds=1200):
     with open(lock_path, 'a+b') as lock:
         before = shutil.disk_usage(root).free; removed = []; start = time.monotonic()
         journal_path = out / 'journal.jsonl'
-        done = {}
+        done = {}; intents = {}
         if journal_path.exists():
             for line in journal_path.read_text(encoding='utf-8').splitlines():
                 entry = json.loads(line)
-                if entry['status'] == 'removed':
+                if entry['status'] == 'intent':
+                    intents[entry['item']['path']] = entry['item']
+                if entry['status'] in {'removed','absent-after-intent'}:
                     done[entry['item']['path']] = entry['item']
         with journal_path.open('a', encoding='utf-8') as journal:
             def record(status, item, **extra):
@@ -552,16 +694,22 @@ def execute_locked(root, out, seconds=1200):
                 for i, item in enumerate(plan['items']):
                     if time.monotonic()-start > seconds:
                         raise TimeoutError('Cleanup deadline; journal can be resumed')
-                    if i % 32 == 0 and processes():
-                        raise RuntimeError('Build/runtime started; cleanup interrupted')
+                    if i % 32 == 0:
+                        assert_processes(reviewed)
                     rel = item['path']
                     if rel in done:
                         if (root / rel).exists():
                             raise ValueError(f'Previously deleted file recreated; create a new plan: {rel}')
                         continue
-                    if not eligible(root, rel, protected, blocked, wt):
+                    if not os.path.exists(native(root/rel)) and intents.get(rel) == item:
+                        record('absent-after-intent',item)
+                        continue
+                    retired = any(beneath(root/rel,root/t) for t in trials)
+                    if not retired and not eligible(root, rel, protected, blocked, wt):
                         raise ValueError(f'Protected or referenced item: {rel}')
-                    if not compiler_proof(root, rel):
+                    if retired and (norm(root/rel) in protected or any(beneath(root/rel,w) for w in wt)):
+                        raise ValueError(f'Retired trial acquired a current reference: {rel}')
+                    if not retired and not compiler_proof(root, rel):
                         raise ValueError(f'Not a declared CMake compiler output: {rel}')
                     record('intent', item)
                     try:
@@ -586,10 +734,19 @@ if __name__ == '__main__':
     parser.add_argument('--execute', action='store_true')
     parser.add_argument('--refresh-plan', action='store_true')
     parser.add_argument('--measure-allocation', action='store_true')
+    parser.add_argument('--retire-trial', action='append',default=[])
+    parser.add_argument('--inventory-report',type=Path)
+    parser.add_argument('--prune-trials',action='store_true')
+    parser.add_argument('--review-process',type=int,action='append',default=[])
+    parser.add_argument('--review-process-image',type=Path,action='append',default=[])
     parser.add_argument('--hash-gib', type=float, default=64)
     parser.add_argument('--seconds', type=int, default=1200)
     args = parser.parse_args()
-    if args.measure_allocation:
+    if args.prune_trials:
+        prune_trials(args.workspace,args.report)
+    elif args.retire_trial:
+        plan_retirement(args.workspace,args.report,args.retire_trial,args.inventory_report,args.review_process,args.review_process_image)
+    elif args.measure_allocation:
         measure_allocation(args.workspace,args.report)
     elif args.refresh_plan:
         refresh_plan(args.workspace, args.report)

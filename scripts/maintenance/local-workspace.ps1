@@ -8,6 +8,11 @@ param(
     [double]$HashGiB = 64,
     [int]$TimeoutSeconds = 1200,
     [switch]$Apply,
+    [switch]$RefreshPlan,
+    [switch]$MeasureAllocation,
+    [string[]]$RetireTrial = @(),
+    [string]$InventoryReport = '',
+    [string[]]$ReviewedProcessImage = @(),
     [switch]$Clean
 )
 $ErrorActionPreference = 'Stop'
@@ -19,5 +24,16 @@ if (-not $ReportDirectory) {
 $arguments = @((Join-Path $PSScriptRoot 'workspace_audit.py'), '--workspace', $workspaceRoot,
     '--report', [IO.Path]::GetFullPath($ReportDirectory), '--hash-gib', $HashGiB, '--seconds', $TimeoutSeconds)
 if ($Apply) { $arguments += '--execute' }
+if ($RefreshPlan) {
+    if ($Apply) { throw 'RefreshPlan and Apply are separate steps.' }
+    $arguments += '--refresh-plan'
+}
+if ($MeasureAllocation) { $arguments += '--measure-allocation' }
+if ($RetireTrial.Count) {
+    if ($Apply -or $RefreshPlan -or $MeasureAllocation) { throw 'Trial retirement planning is a separate explicit step.' }
+    foreach ($trialPath in $RetireTrial) { $arguments += @('--retire-trial',$trialPath) }
+    if ($InventoryReport) { $arguments += @('--inventory-report',$InventoryReport) }
+    foreach ($imagePath in $ReviewedProcessImage) { $arguments += @('--review-process-image',$imagePath) }
+}
 & $PythonExecutable @arguments
 if ($LASTEXITCODE -ne 0) { throw "Workspace maintenance failed ($LASTEXITCODE); inspect the report/journal before retrying." }
