@@ -1,5 +1,16 @@
 # STATUS
 
+28/10 — **STABLE-03: quatro aceites manuais confirmados pelo mantenedor** no
+ambiente `Desktop/x360-release`, Preview 25/`9abb880`. ZIP e 1.178 arquivos
+conferidos; recibos Retail 17559 e Forza Horizon 0.0.0.10 íntegros (4.468/4.534
+referências). Xenos/D3D12 e RTX 4070 documentados; Windows limpo/update e
+save/load aceitos por relato, com lacunas de metadados históricos preservadas.
+MAINT-01 revisada e integrada; 14 testes de manutenção e tooling de release
+aprovados. Preparação local `v1.0.0-rc.1`, sem publicação definitiva. Gate e ZIP
+finais têm recibos próprios, sem herdar PASS manual de outra identidade.
+[Homologação e matriz](docs/stability/homologation-stable-03-2026-10-28.md).
+Native/Vulkan continuam experimentais; SDK/201 patches/originais preservados.
+
 27/10 — **STABLE-02: main `f84436d` recertificada nos 37 contratos**:
 nova execução, sem reaproveitar o FAIL histórico de `9abb880`; relançamento com
 preferências e 80 transições aprovados. A correção `c788f9d` já está integrada.

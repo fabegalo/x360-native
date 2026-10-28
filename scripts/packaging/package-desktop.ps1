@@ -1,7 +1,7 @@
 # Build from committed source in a fresh distribution-only tree. Never publishes.
 param([string]$Version = '', [string]$OutputDirectory = '.local/packages',
       [ValidateSet('local-candidate','public-prerelease')][string]$Publication = 'local-candidate',
-      [string]$ProvenanceFile = '')
+      [string]$ProvenanceFile = '', [switch]$KeepIntermediates)
 $ErrorActionPreference = 'Stop'
 $env:PSModulePath = Join-Path $PSHOME 'Modules'
 $root = (Resolve-Path (Join-Path $PSScriptRoot '../..')).Path
@@ -94,7 +94,7 @@ if ($LASTEXITCODE -ne 0) { throw 'Distribution tests failed; ZIP withheld' }
 if ($LASTEXITCODE -ne 0) { throw 'Update recovery tests failed; ZIP withheld' }
 $binaries = Join-Path $build 'src/desktop'
 Copy-Item -LiteralPath (Join-Path $binaries 'x360-native.exe') -Destination $destination
-Copy-Item -LiteralPath (Join-Path $binaries 'x360n.exe') -Destination $internal
+Copy-Item -LiteralPath (Join-Path $build 'src/supervisor/x360n.exe') -Destination $internal
 Copy-Item -LiteralPath (Join-Path $build 'src/content/x360n-extract.exe') -Destination $internal
 # Static compiler runtime, explicit OS-only import allowlist. Never harvest DLLs.
 foreach ($binary in @((Join-Path $destination 'x360-native.exe'), (Join-Path $internal 'x360n.exe'), (Join-Path $internal 'x360n-extract.exe'))) {
@@ -216,5 +216,13 @@ try {
     }
 } finally { $archive.Dispose(); $stream.Dispose() }
 [IO.File]::WriteAllText("$zip.sha256", (Hash $zip) + '  ' + [IO.Path]::GetFileName($zip) + "`n")
+# No cleanup on failure/cancellation. Only after every gate, index and final ZIP
+# succeeds may this disposable private tree lose its compiler intermediates.
+@{schema=1;status='complete';commit=$head;zip=$zip;sha256=(Hash $zip)} | ConvertTo-Json |
+    Set-Content -LiteralPath (Join-Path $job '.x360n-packaging-complete.json') -Encoding UTF8
+if (-not $KeepIntermediates) {
+    . (Join-Path $source 'scripts/packaging/clear-package-intermediates.ps1')
+    Clear-PackageIntermediates $root $build
+}
 Write-Output "Candidate: $zip"
 Write-Output "Build evidence: $build"

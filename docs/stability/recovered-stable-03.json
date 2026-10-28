@@ -1,0 +1,117 @@
+{
+  "schema": 1,
+  "manual_status": "accepted-by-maintainer",
+  "recorded_date": "2026-10-28",
+  "baseline_commit": "9abb880096d3433f04b991ef5491c8b4a80c763c",
+  "version": "0.69.27-preview.25",
+  "zip": {
+    "name": "x360-native-0.69.27-preview.25-windows-x64.zip",
+    "sha256": "8ae222d09374e010bca9055284a966fd824b79d4923a5eeca9fc3bcd54b257c3",
+    "bytes": 11210133
+  },
+  "sdk_commit": "f5337cdc947ff6d4c4196737e2c807a48f2a1fc2",
+  "active_patches": 201,
+  "package_index_files": 1178,
+  "zip_mismatches": 0,
+  "installed_mismatches": 0,
+  "products": [
+    {
+      "title": "dash_17559",
+      "receipt_sha256": "9d65aec7524341a58bd13f6b177928106ed3d4b7fea4ef8c82a48ae5d5d10ded",
+      "checked_references": 4468,
+      "mismatches": 0,
+      "artifacts": [
+        {
+          "name": "dash_17559.exe",
+          "sha256": "10acf173e89ec1b36516d103332b1113eee281aa97a3e96ed93445c89646c487"
+        },
+        {
+          "name": "dash_17559_bootanim.dll",
+          "sha256": "44db01f9ff03e08f1276d099ad08e3f63fd5058b741aa03c2b96c96c2ab35a19"
+        },
+        {
+          "name": "dash_17559_createprofile.dll",
+          "sha256": "d4afccbd50d60f144e2185078e60b751d710c52df773f00f5fb9ee8dc2b374b0"
+        },
+        {
+          "name": "dash_17559_deviceselector.dll",
+          "sha256": "af170984fba2e4a392057da87fcef2418d4b8f8d93d6b9e482edb56df4f80eef"
+        },
+        {
+          "name": "dash_17559_gamerprofile.dll",
+          "sha256": "87d7f00492d88f696f4e2001ca7f3a097acff59a47a5a8dc4ffd4c80a4f7e2e3"
+        },
+        {
+          "name": "dash_17559_hud.dll",
+          "sha256": "2255c6c66316d3b5831b5d248410744fa7c227a874467789d9f25cbb023963ec"
+        },
+        {
+          "name": "dash_17559_session_ui.dll",
+          "sha256": "686cee903277e09d09f64843d492b5d2334ae158531072e349ddb313e6ab5b74"
+        },
+        {
+          "name": "dash_17559_signin.dll",
+          "sha256": "e778933bff115140d5e42dab63b6f8daec02aeb317da823f3bba9c06d2fcac5d"
+        },
+        {
+          "name": "dash_17559_vk.dll",
+          "sha256": "4561ed2c9e94428efd1d14a8627aed9b0d2e974ee8a66481aabcde1e7cbf8b55"
+        },
+        {
+          "name": "dash_17559_xam_ui.dll",
+          "sha256": "756299e273a9ecc286d391d1914d11153e0c4fdd2794043ef02c622921128760"
+        },
+        {
+          "name": "rexgpu-xenos.dll",
+          "sha256": "80bb0ff26981f66ff22a96df43b08810ebdeddb065f0c421ee3b811dbf0bf337"
+        },
+        {
+          "name": "rexruntime.dll",
+          "sha256": "78375f074a93d420c933122071f7353ad9cc8cf5cc947cc6563cc13619ab0a2f"
+        },
+        {
+          "name": "x360n_gpu_preflight.exe",
+          "sha256": "55b97f7ff75bc6eca07be552850b4807299e32a24d44528ad026ce499dc3596d"
+        }
+      ]
+    },
+    {
+      "title": "forza_horizon",
+      "receipt_sha256": "fee1a3f1b6c7c1ef1027b279963aec7ac4b39f21bf8e9735b630b2c80cb850b0",
+      "checked_references": 4534,
+      "mismatches": 0,
+      "artifacts": [
+        {
+          "name": "forza_horizon.exe",
+          "sha256": "b9ed00019cea76e99009ddfbad789a95a62b8e135f7a1d2dc341f9bc1de2dfb9"
+        },
+        {
+          "name": "forza_horizon_SpeechFacade_default.dll",
+          "sha256": "7556483d7d3057b92f117cb2d58fff89cf04127cc66856a94f948c5585086c03"
+        },
+        {
+          "name": "forza_horizon_XMediaFacade_default.dll",
+          "sha256": "d4587a434c77a2fc0b1dd7263b78357a6e79b2ca067bcbfbb041b0c26cb4ae73"
+        },
+        {
+          "name": "rexgpu-xenos.dll",
+          "sha256": "272cbe63af1483537969d08836584641b479511e76d6b85e5e6346e7030f046f"
+        },
+        {
+          "name": "rexruntime.dll",
+          "sha256": "55e4082791b7ed2c8f1283be9aa327fa8b75f1b80e17e2f2d4a64fd1f6c7a7b0"
+        },
+        {
+          "name": "x360n_gpu_preflight.exe",
+          "sha256": "9890e95e18b31e35958b92a04e7d85cf2f21c62ae2747387638ff32ff7a5770d"
+        }
+      ]
+    }
+  ],
+  "limits": [
+    "No new visual execution",
+    "Historical clean-machine OS/CPU/driver not recovered",
+    "Saved-progress milestone and before/after update hashes not independently recovered",
+    "Manual baseline identity differs from RC"
+  ]
+}

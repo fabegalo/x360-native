@@ -1,5 +1,11 @@
 # Contrato candidato de estabilidade, baseline Preview 25
 
+**Atualização STABLE-03 (28/10):** os quatro fluxos manuais foram aceitos pelo
+mantenedor no ambiente `Desktop/x360-release`. Identidade, evidências recuperadas,
+MAINT-01 e limites da candidata estão na [homologação STABLE-03](homologation-stable-03-2026-10-28.md).
+Os NOT RUN abaixo descrevem as execuções automatizadas históricas. O aceite
+relatado da Preview 25 não é transferido silenciosamente para a identidade do RC.
+
 Recertificação atual: [STABLE-02](execution-stable-02-2026-10-27.md), main
 `f84436d`, com [matriz por contrato](matrix-stable-02.json).
 A [execução STABLE-01](execution-2026-10-27.md) e sua matriz
