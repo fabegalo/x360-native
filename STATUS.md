@@ -7,8 +7,7 @@ testes reais do carregador; red 5/36, green 534 asserções/21 casos relacionado
 Preparo oficial concluído; Settings → System → Storage → Hard Drive → Profiles
 listou `P0Player1` e abriu seus detalhes em sessão isolada de 180 s. Teclas
 direcionais simples foram remapeadas somente no diagnóstico; miniatura com
-ícone de aviso, mover/excluir conteúdo e ciclo dashboard/jogo/dashboard continuam
-sem novo aceite. Sem Release.
+ícone de aviso e mover/excluir conteúdo continuam sem aceite. Sem Release.
 
 28/10 — **IMPORT-17559 implementado, aceite gráfico pendente**: ZIP oficial,
 pasta `$SystemUpdate` e PIRS reconhecidos por conteúdo; flash 17559, recurso
@@ -31,8 +30,12 @@ criou XUID persistente, fez logon e retornou ao tutorial; aceite do mantenedor.
 Reinício recuperou o mesmo XUID no jogo e no Guide; Sign-out registrado com
 resultado 0 e confirmado pelo mantenedor. 992/22 verificações focadas, mais
 375/19 após conferir a limpeza de falhas do host; replay 203 patches/273 hashes.
-Outros serviços offline e ciclo completo posterior até a dashboard continuam
-pendentes. Sem nova homologação de saves, recertificação geral ou Release.
+Complemento manual: My Games → Minecraft → Sign-in existente → Guide → Xbox
+Home retornou à dashboard original com `P0Player1`, mesmo XUID e estado 1.
+Três processos concluíram normalmente (47/31/47 s), em janelas separadas;
+captura da janela embutida não validada. Dashboard e jogo na main concluíram
+preparo oficial com 203 patches. Demais serviços offline continuam pendentes;
+sem nova homologação de saves, recertificação geral ou Release.
 
 28/10 — **MAINT-01: limpeza executada**: 17.794 arquivos e 1.325 diretórios
 vazios de ensaios aposentados removidos; 38,442 GiB recuperados no volume.

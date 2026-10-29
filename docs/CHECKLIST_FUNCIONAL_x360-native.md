@@ -102,7 +102,7 @@ Nome, identificador e estado de entrada precisam permanecer coerentes; as implem
 - [x] Criar um perfil local persistente com nome e identificador estável pela interface original. Em 28/10, Guide → Sign In → Create Profile editou `P0Player1` no vk original, fez logon e voltou ao tutorial; reinício recuperou o mesmo XUID. Aceite do mantenedor; outras versões pendentes.
 - [ ] Substituir o estado fixo de usuário, quando ainda presente, por seleção e entrada/saída reais; notificações devem refletir mudanças reais.
 - [ ] Entrar, sair e trocar de perfil sem reiniciar a plataforma.
-- [ ] Fazer dashboard e jogo enxergarem o mesmo perfil e o mesmo estado de entrada.
+- [x] Fazer dashboard e jogo enxergarem o mesmo perfil e o mesmo estado de entrada. Retail 17559/Windows x64/Xenos/Minecraft, 28/10: Sign-in existente no jogo e Guide → Xbox Home recuperaram `P0Player1`, XUID `E00E29232DB956E1` e estado 1 na dashboard original; ciclo em janelas separadas. Outros jogos/versões pendentes.
 - [ ] Associar corretamente perfis aos jogadores/controles e suportar múltiplos usuários locais.
 - [ ] Recuperar perfis e preferências após fechar e reabrir a plataforma.
 - [ ] Manter saves e conquistas separados por usuário, sem misturar dados.
