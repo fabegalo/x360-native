@@ -94,6 +94,18 @@ public static class X360NPreparationProcess {
         return result.ToArray();
     }
     static void Check(bool success) { if(!success) throw new Win32Exception(Marshal.GetLastWin32Error()); }
+    // A setup child can sample the job assigned by the GUI/measurement runner.
+    // NULL queries its current job, including completed native descendants.
+    public static X360NPreparationMeasurement CurrentJob() {
+        Accounting accounting; ExtendedLimits peaks;
+        Check(QueryInformationJobObject(IntPtr.Zero,8,out accounting,(uint)Marshal.SizeOf(typeof(Accounting)),IntPtr.Zero));
+        Check(QueryInformationJobObject(IntPtr.Zero,9,out peaks,(uint)Marshal.SizeOf(typeof(ExtendedLimits)),IntPtr.Zero));
+        return new X360NPreparationMeasurement {
+            cpu_seconds=(accounting.user+accounting.kernel)/10000000.0,
+            read_bytes=accounting.io.readBytes,write_bytes=accounting.io.writeBytes,
+            read_operations=accounting.io.reads,write_operations=accounting.io.writes,
+            peak_job_commit_bytes=peaks.peakJob.ToUInt64(),peak_process_commit_bytes=peaks.peakProcess.ToUInt64() };
+    }
     public static X360NPreparationMeasurement Run(string application,string arguments,string cwd,int timeoutSeconds) {
         return Run(application,arguments,cwd,timeoutSeconds,false);
     }

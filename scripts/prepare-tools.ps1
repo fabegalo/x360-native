@@ -14,7 +14,18 @@ try { $lease = [IO.File]::Open((Join-Path $root '.local/environment.lock'), [IO.
 catch { throw 'Environment in use. Close the platform or other preparation and retry.' }
 try {
 if (Test-Path -LiteralPath (Join-Path $root '.local/payload-update/pending')) { throw 'Atualizacao interrompida. Reabra o aplicativo antes de preparar.' }
-function Stage([string]$message) { Write-Output "X360N_STAGE $message" }
+function Stage([string]$message) {
+    if ($env:X360N_PREPARATION_METRICS) {
+        try {
+            if (-not ('X360NPreparationProcess' -as [type])) { Add-Type -Path (Join-Path $PSScriptRoot 'build/preparation-process.cs') }
+            $sample = [X360NPreparationProcess]::CurrentJob()
+            $row = [ordered]@{schema=1;kind='setup-cumulative';stage=$message;
+                monotonic_seconds=([Diagnostics.Stopwatch]::GetTimestamp()/[double][Diagnostics.Stopwatch]::Frequency);metrics=$sample}
+            [IO.File]::AppendAllText($env:X360N_PREPARATION_METRICS,(($row | ConvertTo-Json -Depth 5 -Compress)+"`n"),[Text.UTF8Encoding]::new($false))
+        } catch { Write-Warning "Setup metrics unavailable: $($_.Exception.Message)" }
+    }
+    Write-Output "X360N_STAGE $message"
+}
 function PreserveDependency([string]$Directory) {
     if (-not $UpdateDependencies) { throw 'Esta instalacao precisa atualizar suas ferramentas. Confirme Preparar no aplicativo; seus jogos e dados serao preservados.' }
     $resolved = [IO.Path]::GetFullPath($Directory)

@@ -31,6 +31,9 @@ $state=[ordered]@{scenario=$Scenario;title=$Title;shared_sdk=(-not $DisableShare
     codegen_stamps=$stamps;shared_sdk_pointers=@(Get-ChildItem $cache -File -Filter '*.json' -ErrorAction SilentlyContinue | ForEach-Object Name);
     deps_lock_sha256=(Get-FileHash "$root/deps.lock.json").Hash.ToLowerInvariant();
     sdk_commit=(Get-Content "$root/deps.lock.json" -Raw | ConvertFrom-Json).rexglue_sdk.commit;
+    source_revision=(& git -C $root rev-parse HEAD).Trim();
+    manifest_sha256=(Get-ReceiptHash (Join-Path $project ($Title+'_manifest.toml')));
+    compiler_sha256=(Get-ReceiptHash (Join-Path $root '.local/toolchains/llvm-22.1.8/bin/clang++.exe'));
     windows_page_cache='not flushed or controlled';patch_count=([IO.File]::ReadAllText("$root/deps.lock.json") | ConvertFrom-Json).rexglue_sdk.patches.Count;
     downloads='not performed by this runner';scope='official preparation driver; excludes UI, import, SDK download/install and registration'}
 if($Scenario -in @('FirstBuild','NewTitle') -and ($state.cache_file_exists -or $state.receipt_exists -or $stamps.Count)){throw 'Cold title state required; preserve/reset task-owned build and generated outputs before measuring'}
