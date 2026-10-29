@@ -5,6 +5,9 @@ Base `292ad19`; worktree `.local/worktrees/cross-platform-final`, branch
 O primeiro incremento abaixo foi integrado ao main. O segundo incremento
 implementa o supervisor/pipeline compartilhados e os valida em Windows e Linux
 x64; isso não certifica o aplicativo gráfico nas seis variantes.
+Segundo incremento: `8625338`, integrado por fast-forward ao `main`. O launcher
+Windows da pasta principal foi recompilado em Release (69 etapas, saída 0), com
+supervisor atualizado em `.local/build/desktop-only/src/desktop/`.
 
 ## Implementação
 
@@ -179,6 +182,7 @@ métricas de árvore POSIX são recusados explicitamente antes de lançar. Linux
 exige glibc com `addclosefrom_np` (>=2.34); Darwin precisa das APIs de spawn/cwd
 verificadas no configure. Esses limites não são certificados por cross-compilation.
 
-Fontes do SDK, lock, patches, originais, perfis/saves e recibos de títulos reais
-não foram alterados. Sem push, tag, pacote novo ou Release. Não herdar PASS de contratos
+Fontes do SDK, lock, patches, originais, perfis/saves e recibos existentes da pasta
+principal não foram alterados. O Iruka do teste tem inputs/build/recibo próprios
+na worktree. Sem push, tag, pacote novo ou Release. Não herdar PASS de contratos
 para boot, imagem, gameplay ou fluxo completo em qualquer plataforma.
