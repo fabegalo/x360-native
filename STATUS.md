@@ -1,5 +1,18 @@
 # STATUS
 
+29/10 — **supervisor e pipeline AOT nativos, Windows/Linux x64**: driver C++ único
+`x360n prepare`, SDK genérico por host/ABI, fingerprints de conteúdo, guard Ninja
+nativo e recuperação após interrupção; wrappers mínimos. Windows preserva seus
+caminhos e D3D12. WSL: supervisor com LLVM 22.1.8, processos/caminhos 182/30,
+sessões 956/6 com 80 transições, integração AOT com compilação ELF real aprovada.
+SDK pinado e Xenos/Vulkan Linux compilados; PPC próprio traduzido pelo ReXGlue
+real e cinco testes aprovados, incluindo FP/aliasing. Estágio do preflight ELF
+compilado, sem inicializar GPU. Iruka real preparado em ELF pelo mesmo pipeline;
+repetição verificada sem compilar. Integração AOT Windows PE também aprovada;
+contratos de processos/caminhos 112/20. Não certifica GUI POSIX, jogo/dashboard,
+GPU real, macOS, ARM64, pacotes ou CI. SDK/203 patches, originais e saves intactos.
+[Implementação, evidências e limites](docs/reports/cross-platform-final-2026-10-29.md).
+
 29/10 — **CROSS-PLATFORM-FINAL parcial: processos e caminhos nativos**:
 biblioteca única com backend POSIX, cancelamento/timeout/grupos, logs protegidos
 e notificações por sessão; caminhos Unicode e executáveis sem sufixo Windows.

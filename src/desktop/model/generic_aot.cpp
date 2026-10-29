@@ -3,6 +3,7 @@
 #include "sha256.h"
 #include "digest_batch.h"
 #include "workspace_lease.h"
+#include "host_platform.h"
 #include <nlohmann/json.hpp>
 #include <toml++/toml.hpp>
 #include <fstream>
@@ -110,7 +111,8 @@ void GenerateAotProject(const ProjectPaths& paths, const Target& t) {
   const auto dir = paths.local() / "aot" / t.id;
   const auto generated = t.exe.parent_path() / "generated/default";
   const auto owner_file = t.exe.parent_path() / ".x360n-aot-owner";
-  const auto owner = t.id + "\n" + Utf8(t.game_root.filename()) + "\n";
+  const auto owner = t.id + "\n" + Utf8(t.game_root.filename()) + "\n" +
+      (HostPlatform()=="windows-x64" ? "" : HostPlatform()+"\n");
   if (fs::exists(owner_file) && ReadText(owner_file) != owner)
     throw std::runtime_error("AOT build directory belongs to another content identity; existing files were preserved.");
   if (!fs::exists(owner_file) && fs::is_directory(t.exe.parent_path()) &&
@@ -217,16 +219,25 @@ void GenerateAotProject(const ProjectPaths& paths, const Target& t) {
     publish(dir / name, text);
   }
   using J = nlohmann::json;
+#ifdef _WIN32
+  const auto preset_name=HostPlatform()=="windows-x64" ? "x360n-win-amd64" : "x360n-"+HostPlatform();
+  const auto llvm=paths.local()/"toolchains"/(HostPlatform()=="windows-x64" ? "llvm-22.1.8" : "llvm-22.1.8-"+HostPlatform());
+  const auto python=paths.local()/"toolchains/python-3.14.8/python.exe";
+#else
+  const auto preset_name="x360n-"+HostPlatform();
+  const auto llvm=paths.local()/"toolchains"/("llvm-22.1.8-"+HostPlatform());
+  const auto python=FindHostTool("python3");
+#endif
   J preset{{"version", 6}, {"configurePresets", J::array({{
-    {"name", "x360n-win-amd64"}, {"generator", "Ninja"}, {"binaryDir", Path(t.exe.parent_path())},
+    {"name", preset_name}, {"generator", "Ninja"}, {"binaryDir", Path(t.exe.parent_path())},
     {"cacheVariables", {{"CMAKE_BUILD_TYPE", "Release"},
-      {"CMAKE_C_COMPILER", Path(paths.local() / "toolchains/llvm-22.1.8/bin/clang.exe")},
-      {"CMAKE_CXX_COMPILER", Path(paths.local() / "toolchains/llvm-22.1.8/bin/clang++.exe")},
-      {"CMAKE_C_FLAGS", "-march=x86-64-v2"}, {"CMAKE_CXX_FLAGS", "-march=x86-64-v2"},
+      {"CMAKE_C_COMPILER", Path(llvm / ("bin/clang"+ExecutableSuffix()))},
+      {"CMAKE_CXX_COMPILER", Path(llvm / ("bin/clang++"+ExecutableSuffix()))},
+      {"CMAKE_C_FLAGS", HostPlatform().ends_with("-x64") ? "-march=x86-64-v2" : ""}, {"CMAKE_CXX_FLAGS", HostPlatform().ends_with("-x64") ? "-march=x86-64-v2" : ""},
       {"REXSDK_DIR", Path(paths.root / "external/rexglue-sdk")},
       // Vulkan is built beside D3D12; Python only runs the SDK's build-time generators.
       {"REXGLUE_USE_VULKAN", "ON"},
-      {"PYTHON_EXECUTABLE", Path(paths.local() / "toolchains/python-3.14.8/python.exe")}}}
+      {"PYTHON_EXECUTABLE", Path(python)}}}
   }})}};
   publish(dir / "CMakePresets.json", preset.dump(2) + "\n");
 }

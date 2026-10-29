@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <cstring>
 #include <unordered_set>
+#include <map>
 #include "action_trace.h"
 
 #ifdef _WIN32
@@ -294,6 +295,29 @@ ProcessResult RunProcess(const ProcessSpec& spec) {
   PROCESS_INFORMATION pi{};
   std::wstring cmd = BuildCommandLine(spec.exe, spec.args);
   std::wstring cwd = spec.working_dir.empty() ? std::wstring() : spec.working_dir.wstring();
+  std::vector<wchar_t> environment;
+  if (!spec.environment.empty()) {
+    struct Less { bool operator()(const std::wstring& a, const std::wstring& b) const { return _wcsicmp(a.c_str(), b.c_str()) < 0; } };
+    std::map<std::wstring, std::wstring, Less> entries;
+    auto* inherited = GetEnvironmentStringsW();
+    if (!inherited) { r.launch_error = LastError("GetEnvironmentStringsW"); return r; }
+    for (const wchar_t* value = inherited; *value; value += wcslen(value) + 1) {
+      const std::wstring entry(value); const auto equals = entry.find(L'=', 1);
+      if (equals != std::wstring::npos) entries[entry.substr(0, equals)] = entry.substr(equals + 1);
+    }
+    FreeEnvironmentStringsW(inherited);
+    for (const auto& [key, value] : spec.environment) {
+      if (key.empty() || key.find_first_of("=\0", 0, 2) != std::string::npos || value.find('\0') != std::string::npos) {
+        r.launch_error = "Invalid child environment override"; return r;
+      }
+      entries[Utf8ToWide(key)] = Utf8ToWide(value);
+    }
+    for (const auto& [key, value] : entries) {
+      const auto entry = key + L"=" + value;
+      environment.insert(environment.end(), entry.begin(), entry.end()); environment.push_back(0);
+    }
+    environment.push_back(0);
+  }
 
   // Crash dialogs would block unattended runs; the error mode is inherited.
   UINT old_mode = SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX);
@@ -301,7 +325,7 @@ ProcessResult RunProcess(const ProcessSpec& spec) {
   DWORD flags = CREATE_SUSPENDED | CREATE_UNICODE_ENVIRONMENT;
   if (spec.no_console) flags |= CREATE_NO_WINDOW;
   if (spec.capture_crash) flags |= DEBUG_ONLY_THIS_PROCESS;
-  BOOL ok = CreateProcessW(spec.exe.c_str(), cmd.data(), nullptr, nullptr, TRUE, flags, nullptr,
+  BOOL ok = CreateProcessW(spec.exe.c_str(), cmd.data(), nullptr, nullptr, TRUE, flags, environment.empty() ? nullptr : environment.data(),
                            cwd.empty() ? nullptr : cwd.c_str(), &si, &pi);
   SetErrorMode(old_mode);
   if (!ok) {

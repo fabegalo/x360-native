@@ -8,7 +8,11 @@
 #include <iostream>
 #include <chrono>
 
+#ifdef _WIN32
 int wmain(int argc, wchar_t** argv) try {
+#else
+int main(int argc, char** argv) try {
+#endif
   if (argc < 3) return 2;
   const auto backend = std::filesystem::path(argv[2]).string();
   if (backend != "d3d12" && backend != "vulkan") return 2;

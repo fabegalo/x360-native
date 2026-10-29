@@ -6,6 +6,8 @@ add_library(x360n_core STATIC
     preparation.cpp
     xex_identity.cpp
     paths.cpp
+    host_platform.cpp
+    aot_pipeline.cpp
     report.cpp
     session_profile.cpp
     renderer_settings.cpp

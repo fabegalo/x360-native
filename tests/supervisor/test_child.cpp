@@ -28,6 +28,7 @@
 #endif
 #ifdef X360N_PLATFORM_CHILD
 #include "session_notification.h"
+#include "child_process.h"
 #endif
 
 int main(int argc, char** argv) {
@@ -43,7 +44,19 @@ int main(int argc, char** argv) {
     --argc;
   }
   if (argc < 2) return 64;
+  if (!std::strcmp(argv[1], "environment")) {
+    const auto* value=std::getenv("X360N_TEST_OVERRIDE");
+    if (!value) return 65;
+    std::cout << value;
+    return 0;
+  }
 #ifdef X360N_PLATFORM_CHILD
+  if (!std::strcmp(argv[1],"parent-tree") && argc>=3) {
+    const auto marker=std::filesystem::path(argv[2]);
+    x360n::ProcessSpec spec{std::filesystem::absolute(argv[0]),{"tree",marker.string(),"wait"},marker.parent_path(),
+        marker.parent_path()/"nested.out",marker.parent_path()/"nested.err",std::chrono::seconds(10)};
+    return int(x360n::RunProcess(spec).exit_code);
+  }
   if (!std::strcmp(argv[1], "notify") && argc >= 3) {
     x360n::SessionNotification notification(argv[2]);
     if (!notification.Signal()) return 65;

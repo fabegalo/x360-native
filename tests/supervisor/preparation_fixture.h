@@ -2,6 +2,7 @@
 #include "preparation.h"
 #include "report.h"
 #include "sha256.h"
+#include "host_platform.h"
 #include <fstream>
 #include <set>
 
@@ -30,7 +31,7 @@ inline void WriteTestReceipt(const x360n::ProjectPaths& paths, const std::string
     out.BeginObject().String("path", PathUtf8(fs::absolute(path))).String("sha256", DigestFile(path)->sha256).EndObject();
   out.EndArray().BeginArray("artifacts");
   out.BeginObject().String("path", PathUtf8(fs::absolute(exe))).String("sha256", DigestFile(exe)->sha256).EndObject();
-  for (const auto& file : fs::directory_iterator(exe.parent_path())) if (file.path().extension() == ".dll")
+  for (const auto& file : fs::directory_iterator(exe.parent_path())) if (file.path().extension() == ".dll" || IsNativeModule(file.path()) || file.path().filename()=="x360n_gpu_preflight"+ExecutableSuffix())
     out.BeginObject().String("path", PathUtf8(file.path())).String("sha256", DigestFile(file.path())->sha256).EndObject();
   out.EndArray().EndObject();
   std::ofstream(PreparationReceipt(exe), std::ios::binary) << out.Take();

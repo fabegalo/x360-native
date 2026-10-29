@@ -6,6 +6,7 @@
 #include "renderer_settings.h"
 #include "preparation_fixture.h"
 #include "scratch.h"
+#include "host_platform.h"
 #include <algorithm>
 #include <sstream>
 
@@ -25,8 +26,11 @@ struct Fixture {
     fs::create_directories(paths.build());
     fs::create_directories(paths.inputs());
     for (const std::string role : {"dashboard", "game"}) {
-      auto exe = paths.build() / (role + ".exe");
+      auto exe = paths.build() / (role + ExecutableSuffix());
       fs::copy_file(PathFromUtf8(X360N_SESSION_CHILD), exe, fs::copy_options::overwrite_existing);
+#ifndef _WIN32
+      fs::copy_file(PathFromUtf8(X360N_SESSION_CHILD),paths.build()/"x360n_gpu_preflight",fs::copy_options::overwrite_existing);
+#endif
       auto xex = paths.inputs() / (role + ".xex");
       std::ofstream(xex) << role;
       auto manifest = root / "titles" / role / (role + "_manifest.toml");
@@ -34,7 +38,7 @@ struct Fixture {
       std::ofstream out(manifest);
       out << "[project]\nname = '" << role << "'\ngame_root = '../../.local/inputs'\n"
           << "[entrypoint]\nfile_path = '../../.local/inputs/" << role << ".xex'\n"
-          << "[x360n]\nnative_exe = '../../.local/build/" << role << ".exe'\n"
+          << "[x360n]\nnative_exe = '../../.local/build/" << role << ExecutableSuffix() << "'\n"
           << "user_data_root = '../../.local/user/" << role << "'\nxex_sha256 = '" << DigestFile(xex)->sha256 << "'\n"
           << "args = ['--gpu_plugin=native', '--role=" << role << "', '--mode=" << mode << "']\n";
       if (role == "dashboard") out << "launch_targets = ['../game/game_manifest.toml']\ndashboard_return_flags = [256]\n";
@@ -162,7 +166,7 @@ TEST_CASE("session dashboard version reaches the game and dashboard return", "[g
         << "kind='dashboard'\ndashboard_version='" << version << "'\n"
         << "[[files]]\npath='dashboard.xex'\nsource_name='dashboard.xex'\nsha256='"
         << DigestFile(f.paths.inputs() / "dashboard.xex")->sha256 << "'\n";
-    WriteTestReceipt(f.paths, "dashboard", manifest, f.paths.build() / "dashboard.exe",
+    WriteTestReceipt(f.paths, "dashboard", manifest, f.paths.build() / ("dashboard"+ExecutableSuffix()),
                      {f.paths.inputs() / "dashboard.xex"});
     auto result = f.Run();
     INFO(Read(f.root / "err.log"));
@@ -186,7 +190,7 @@ TEST_CASE("session hands only its dashboard's verified avatar files to an avatar
     const auto xam_sha = DigestFile(xam)->sha256;
     const std::string version = variant == "version" ? "2.0.6717.0" : "2.0.17559.0";
     // The dashboard's system UI host binds the XAM image the service shares.
-    std::ofstream(f.paths.build() / "session_ui.dll", std::ios::binary) << "host fixture";
+    std::ofstream(f.paths.build() / NativeRuntimeFilename("session_ui.dll"), std::ios::binary) << "host fixture";
     std::ofstream(dashboard, std::ios::app) << "system_ui_host = 'session_ui.dll'\n";
     std::ofstream(dashboard.parent_path() / "preparation.toml")
         << "label='Dashboard fixture'\nlimitations='Synthetic avatar test'\n"
@@ -196,10 +200,10 @@ TEST_CASE("session hands only its dashboard's verified avatar files to an avatar
         << DigestFile(catalog)->sha256 << "'\noptional=true\n"
         << "[avatar]\nversion='" << version << "'\nxam.path='system/xam_ui.xex'\nxam.provenance='fixture'\n"
         << "catalog.path='avatar/AvatarAssetPack.toc'\ncatalog.provenance='fixture'\n";
-    WriteTestReceipt(f.paths, "dashboard", dashboard, f.paths.build() / "dashboard.exe",
+    WriteTestReceipt(f.paths, "dashboard", dashboard, f.paths.build() / ("dashboard"+ExecutableSuffix()),
                      {f.paths.inputs() / "dashboard.xex"});
     std::ofstream(game, std::ios::app) << "avatar_service = '2.0.17559.0'\navatar_xam_sha256 = '" << xam_sha << "'\n";
-    WriteTestReceipt(f.paths, "game", game, f.paths.build() / "game.exe", {f.paths.inputs() / "game.xex"});
+    WriteTestReceipt(f.paths, "game", game, f.paths.build() / ("game"+ExecutableSuffix()), {f.paths.inputs() / "game.xex"});
     if (variant == "missing") fs::remove(catalog);
     if (variant == "different") std::ofstream(catalog, std::ios::binary) << "another catalog";
     auto result = f.Run();
@@ -234,7 +238,11 @@ TEST_CASE("graphics API is immutable through dashboard game dashboard transition
   REQUIRE(result.launched);
   REQUIRE_FALSE(result.timed_out);
   REQUIRE(result.exit_code == 0);
+#ifdef _WIN32
   CHECK(Read(f.paths.inputs() / "graphics-observed.txt") == "d3d12\nd3d12\nd3d12\n");
+#else
+  CHECK(Read(f.paths.inputs() / "graphics-observed.txt") == "vulkan\nvulkan\nvulkan\n");
+#endif
   // The child's new preference applies only on the next platform session.
   CHECK(LoadRendererSettings(f.paths).api == GraphicsApi::Vulkan);
 }
@@ -332,7 +340,7 @@ TEST_CASE("stable session crash and relaunch preserve the single HDD bytes", "[s
     REQUIRE(pos != std::string::npos);
     text.replace(pos, 10, "version");
     std::ofstream(manifest, std::ios::binary) << text;
-    WriteTestReceipt(f.paths, role, manifest, f.paths.build() / (role + ".exe"),
+    WriteTestReceipt(f.paths, role, manifest, f.paths.build() / (role + ExecutableSuffix()),
                      {f.paths.inputs() / (role + ".xex")});
   }
   fs::remove(f.paths.inputs() / "observed.txt");

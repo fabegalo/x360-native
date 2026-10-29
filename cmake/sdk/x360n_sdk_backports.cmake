@@ -102,19 +102,21 @@ endfunction()
 # target that copies them when they differ, built before the executable itself:
 # building only that executable (--target) stages them too.
 function(x360n_stage_runtime_dlls target)
-    if(NOT WIN32)
-        return()
-    endif()
     # The SDK accepts UTF-8 cvars and uses narrow filesystem paths internally.
     # Windows 10 1903+ can declare UTF-8 per process without changing the user's
     # system locale. This covers every title using the common runtime staging.
     # https://learn.microsoft.com/windows/apps/design/globalizing/use-utf8-code-page
     get_target_property(_kind ${target} TYPE)
-    if(_kind STREQUAL "EXECUTABLE")
+    if(WIN32 AND _kind STREQUAL "EXECUTABLE")
         target_link_options(${target} PRIVATE
             "LINKER:/MANIFESTINPUT:${CMAKE_CURRENT_FUNCTION_LIST_DIR}/../runtime/x360n_runtime.manifest")
         set_property(TARGET ${target} APPEND PROPERTY LINK_DEPENDS
             "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/../runtime/x360n_runtime.manifest")
+    endif()
+    if(APPLE)
+        set_property(TARGET ${target} APPEND PROPERTY BUILD_RPATH "@loader_path")
+    elseif(UNIX)
+        set_property(TARGET ${target} APPEND PROPERTY BUILD_RPATH "$ORIGIN")
     endif()
     cmake_parse_arguments(ARG "" "" "PLUGIN_TARGETS" ${ARGN})
     if(REXGLUE_USE_VULKAN AND "rexgpu-xenos" IN_LIST ARG_PLUGIN_TARGETS)
@@ -123,11 +125,19 @@ function(x360n_stage_runtime_dlls target)
             target_link_libraries(x360n_gpu_preflight PRIVATE rexruntime)
             set_target_properties(x360n_gpu_preflight PROPERTIES
                 RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/gpu-preflight/$<CONFIG>")
+            if(APPLE)
+                set_property(TARGET x360n_gpu_preflight APPEND PROPERTY BUILD_RPATH "@loader_path")
+            elseif(UNIX)
+                set_property(TARGET x360n_gpu_preflight APPEND PROPERTY BUILD_RPATH "$ORIGIN")
+            endif()
         endif()
         list(APPEND ARG_PLUGIN_TARGETS x360n_gpu_preflight)
     endif()
     option(X360N_NATIVE_RENDERER "Build and stage the experimental Native graphics plugin for development" OFF)
     if(X360N_NATIVE_RENDERER AND "rexgpu-xenos" IN_LIST ARG_PLUGIN_TARGETS)
+        if(NOT WIN32)
+            message(FATAL_ERROR "The experimental Native renderer is currently implemented only on Windows")
+        endif()
         if(NOT TARGET rexgpu-native)
             if(NOT REXGLUE_USE_D3D12)
                 message(FATAL_ERROR "The Windows Native plugin includes D3D12 and requires REXGLUE_USE_D3D12; Vulkan is built alongside it when enabled")
@@ -165,6 +175,11 @@ function(x360n_stage_runtime_dlls target)
     # their DLL files explicit so staging and receipt inventories see the same
     # authenticated inputs as CMake's runtime-DLL generator expressions.
     set(_native_files "$<TARGET_RUNTIME_DLLS:${target}>")
+    if(NOT WIN32)
+        # ELF/Mach-O shared libraries are not listed by TARGET_RUNTIME_DLLS.
+        set(_native_files "")
+        set_property(DIRECTORY APPEND PROPERTY X360N_STAGE_EXTRA "$<TARGET_FILE:rexruntime>")
+    endif()
     foreach(_native rexruntime ${ARG_PLUGIN_TARGETS} amd_fidelityfx_vk amd_fidelityfx_dx12)
         if(TARGET ${_native})
             list(APPEND _native_files "$<TARGET_FILE:${_native}>")

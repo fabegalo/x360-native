@@ -4,9 +4,15 @@
 #include <cstdio>
 #include <rex/ppc/context.h>
 
+#ifdef _WIN32
+#define X360N_NOINLINE __declspec(noinline)
+#else
+#define X360N_NOINLINE __attribute__((noinline))
+#endif
+
 // Same typed, overlapping guest-memory accesses used by the recompiler.
 // Separate pointers prevent the caller's known storage from hiding TBAA bugs.
-__declspec(noinline) uint32_t alias_word_half(uint32_t* word, uint16_t* half) {
+X360N_NOINLINE uint32_t alias_word_half(uint32_t* word, uint16_t* half) {
     *word = 0xffffffffu;
     *half = 0;
     return *word;
@@ -14,9 +20,9 @@ __declspec(noinline) uint32_t alias_word_half(uint32_t* word, uint16_t* half) {
 
 // Constants are intentional: without strict FP the optimizer folds this using
 // round-to-nearest even after the guest FPSCR has selected upward rounding.
-__declspec(noinline) double rounded_sum() { return 1.0 + 0x1p-53; }
-__declspec(noinline) double cancellation(double a, double b) { return a - b; }
-__declspec(noinline) double divide(double a, double b) { return a / b; }
+X360N_NOINLINE double rounded_sum() { return 1.0 + 0x1p-53; }
+X360N_NOINLINE double cancellation(double a, double b) { return a - b; }
+X360N_NOINLINE double divide(double a, double b) { return a / b; }
 
 int main() {
     unsigned failures = 0;

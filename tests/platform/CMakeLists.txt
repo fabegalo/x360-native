@@ -1,6 +1,7 @@
 add_executable(x360n_platform_child ../supervisor/test_child.cpp)
 target_include_directories(x360n_platform_child PRIVATE ../../src/supervisor)
 target_compile_definitions(x360n_platform_child PRIVATE X360N_PLATFORM_CHILD=1)
+target_link_libraries(x360n_platform_child PRIVATE x360n_process)
 add_executable(x360n_platform_tests ../supervisor/process_test.cpp process_contract_test.cpp
     ../supervisor/paths_test.cpp path_contract_test.cpp ../../src/supervisor/paths.cpp)
 target_link_libraries(x360n_platform_tests PRIVATE x360n_process Catch2::Catch2WithMain)

@@ -44,7 +44,11 @@ target_compile_options(x360n_ppc_smoke PRIVATE
     -UTRACY_ENABLE -UREXGLUE_ENABLE_PROFILING
     -UREXGLUE_ENABLE_PERF_COUNTERS -UREXGLUE_PROFILE_GUEST_FUNCTIONS
     -msse4.1 -mssse3)
-x360n_stage_runtime_dlls(x360n_ppc_smoke)
+if(X360N_PPC_VALIDATE_GPU_STAGING)
+    x360n_stage_runtime_dlls(x360n_ppc_smoke PLUGIN_TARGETS rexgpu-xenos)
+else()
+    x360n_stage_runtime_dlls(x360n_ppc_smoke)
+endif()
 catch_discover_tests(x360n_ppc_smoke TEST_PREFIX "x360n.ppc." PROPERTIES LABELS "project" TIMEOUT 60
     DISCOVERY_MODE PRE_TEST)
 

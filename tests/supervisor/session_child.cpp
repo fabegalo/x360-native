@@ -9,6 +9,9 @@
 using namespace x360n;
 namespace fs = std::filesystem;
 int main(int argc, char** argv) {
+#ifndef _WIN32
+  if (argc==3 && std::string(argv[1])=="xenos" && std::string(argv[2])=="vulkan") return 0;
+#endif
   CLI::App app;
   argv = app.ensure_utf8(argv);
   auto arg = [&](const std::string& prefix) {
@@ -19,7 +22,11 @@ int main(int argc, char** argv) {
   const auto mode = arg("--mode=");
   const bool self_return = mode == "dashboard-self-return" || mode == "dashboard-self-invalid";
   if (arg("--gpu_plugin=") != "xenos") return 76;
+#ifdef _WIN32
   if (arg("--gpu_backend=") != "d3d12") return 78;
+#else
+  if (arg("--gpu_backend=") != "vulkan") return 78;
+#endif
   const bool dashboard = arg("--role=") == "dashboard";
   const auto root = PathFromUtf8(arg("--game_data_root="));
   const auto storage = root.parent_path() / (mode == "storage" ? "isolated" : "user");

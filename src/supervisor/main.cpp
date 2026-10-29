@@ -16,10 +16,12 @@
 #include <string>
 #include <string_view>
 #include <vector>
+#include <csignal>
 
 #include <CLI/CLI.hpp>
 #include <fmt/chrono.h>
 #include <fmt/format.h>
+#include <nlohmann/json.hpp>
 
 #include "paths.h"
 #include "preparation.h"
@@ -39,6 +41,8 @@
 #include "update.h"
 #include "session_notification.h"
 #include "workspace_lease.h"
+#include "host_platform.h"
+#include "aot_pipeline.h"
 
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
@@ -50,6 +54,8 @@ namespace fs = std::filesystem;
 using namespace x360n;
 
 namespace {
+volatile std::sig_atomic_t stop_requested=0;
+void StopSignal(int) { stop_requested=1; }
 
 // Exit codes (documented in README.md).
 constexpr int kExitOk = 0;
@@ -62,15 +68,9 @@ fs::path SelfPath() {
 }
 
 std::optional<fs::path> FindOnPath(const std::wstring& name) {
-#ifdef _WIN32
-  wchar_t buf[MAX_PATH];
-  DWORD n = SearchPathW(nullptr, name.c_str(), nullptr, MAX_PATH, buf, nullptr);
-  if (n == 0 || n >= MAX_PATH) return std::nullopt;
-  return fs::path(buf);
-#else
-  (void)name;
-  return std::nullopt;
-#endif
+  auto tool = std::string(name.begin(), name.end());
+  if (tool.ends_with(".exe")) tool.resize(tool.size() - 4);
+  try { return FindHostTool(tool); } catch (...) { return std::nullopt; }
 }
 
 std::string ReadText(const fs::path& p) {
@@ -133,8 +133,16 @@ std::string ConfigPostfix(const std::string& config) {
 }
 
 fs::path RexglueExe(const ProjectPaths& p, const std::string& config) {
-  return p.build() / "win-amd64" / "rexglue-sdk" / "out" / "win-amd64" / config /
-         ("rexglue" + ConfigPostfix(config) + ".exe");
+#ifdef _WIN32
+  const std::string os="win";
+#elif defined(__APPLE__)
+  const std::string os="mac";
+#else
+  const std::string os="linux";
+#endif
+  const auto sdk_host=os+(HostPlatform().ends_with("-x64") ? "-amd64" : "-arm64");
+  const auto directory=HostPlatform()=="windows-x64" ? "win-amd64" : HostPlatform();
+  return p.build()/directory/"rexglue-sdk/out"/sdk_host/config/("rexglue"+ConfigPostfix(config)+ExecutableSuffix());
 }
 
 std::optional<std::string> GitHead(const ProjectPaths& p, const fs::path& repo) {
@@ -149,20 +157,22 @@ std::optional<std::string> GitHead(const ProjectPaths& p, const fs::path& repo) 
 // doctor
 //---------------------------------------------------------------------------
 
-int Doctor(const ProjectPaths& p, const std::string& config) {
+int Doctor(const ProjectPaths& p, const std::string& config, const fs::path& sdk_override={},
+           const fs::path& compiler_override={}, const fs::path& tool_override={}) {
   int fails = 0, warns = 0;
   auto ok = [](const std::string& m) { fmt::print("[ OK ] {}\n", m); };
   auto warn = [&](const std::string& m) { ++warns; fmt::print("[WARN] {}\n", m); };
   auto fail = [&](const std::string& m) { ++fails; fmt::print("[FAIL] {}\n", m); };
 
   fmt::print("x360n doctor  (root: {}, config: {})\n", PathUtf8(p.root), config);
+  const auto sdk=sdk_override.empty() ? p.sdk() : fs::absolute(sdk_override);
 
   // Pinned SDK revision.
   auto git = FindOnPath(L"git.exe");
   if (!git) {
     fail("git not found on PATH");
   } else {
-    auto head = GitHead(p, p.sdk());
+    auto head = GitHead(p, sdk);
     if (!head) {
       fail("cannot read external/rexglue-sdk HEAD (run: git submodule update --init --recursive)");
     } else if (*head != X360N_SDK_COMMIT_LOCKED) {
@@ -171,7 +181,7 @@ int Doctor(const ProjectPaths& p, const std::string& config) {
     } else {
       ok(fmt::format("ReXGlue SDK at pinned {} ({})", *head, X360N_SDK_TAG_LOCKED));
     }
-    auto st = Capture(p, *git, {"-C", PathUtf8(p.sdk()), "status", "--porcelain", "--ignore-submodules=none"});
+    auto st = Capture(p, *git, {"-C", PathUtf8(sdk), "status", "--porcelain", "--ignore-submodules=none"});
     if (st.ok) {
       std::istringstream lines(st.out);
       std::string line;
@@ -192,9 +202,17 @@ int Doctor(const ProjectPaths& p, const std::string& config) {
   }
 
   // Toolchain.
-  fs::path clang = p.local() / "toolchains" / ("llvm-" X360N_LLVM_VERSION_LOCKED) / "bin" / "clang++.exe";
+  fs::path clang=compiler_override;
+  if (clang.empty()) {
+#ifdef _WIN32
+    clang=p.local()/"toolchains"/("llvm-" X360N_LLVM_VERSION_LOCKED)/"bin/clang++.exe";
+#else
+    clang=p.local()/"toolchains"/("llvm-" X360N_LLVM_VERSION_LOCKED "-"+HostPlatform())/"bin/clang++";
+    if (!fs::is_regular_file(clang)) { try { clang=FindHostTool("clang++"); } catch (...) {} }
+#endif
+  }
   if (!fs::exists(clang)) {
-    fail("pinned clang++ missing at " + PathUtf8(clang) + " (run scripts/setup/bootstrap-llvm.ps1)");
+    fail("pinned native clang++ missing at " + PathUtf8(clang) + " (provide --cxx or install the pinned toolchain)");
   } else {
     auto c = Capture(p, clang, {"--version"});
     std::string want = "clang version " X360N_LLVM_VERSION_LOCKED;
@@ -226,9 +244,9 @@ int Doctor(const ProjectPaths& p, const std::string& config) {
 #endif
 
   // SDK tools built from the pinned revision.
-  fs::path rexglue = RexglueExe(p, config);
+  fs::path rexglue = tool_override.empty() ? RexglueExe(p, config) : tool_override;
   if (!fs::exists(rexglue)) {
-    fail("rexglue CLI not built: " + PathUtf8(rexglue) + " (cmake --build --preset win-amd64-debug)");
+    fail("rexglue CLI not built: " + PathUtf8(rexglue) + "; provide --rexglue for a verified SDK preparation generation");
   } else {
     auto c = Capture(p, rexglue, {"--version"});
     std::string v = FirstLine(c.out + c.err);
@@ -242,7 +260,7 @@ int Doctor(const ProjectPaths& p, const std::string& config) {
       ok("rexglue --version: " + v);
     }
   }
-  fs::path as = p.sdk() / "tools" / "binutils" / "powerpc-none-elf-as.exe";
+  fs::path as = sdk / "tools" / "binutils" / ("powerpc-none-elf-as"+ExecutableSuffix());
   if (!fs::exists(as)) {
     fail("PowerPC assembler missing: " + PathUtf8(as));
   } else {
@@ -482,9 +500,7 @@ int Run(const ProjectPaths& p, const fs::path& exe_in, std::vector<std::string> 
   {
     std::error_code ec;
     for (const auto& file : fs::directory_iterator(exe.parent_path(), ec)) {
-      auto ext = file.path().extension().string();
-      for (auto& c : ext) c = char(std::tolower(static_cast<unsigned char>(c)));
-      if (file.is_regular_file() && ext == ".dll") dll_digests.emplace_back(file.path(), DigestFile(file.path()));
+      if (file.is_regular_file() && IsNativeModule(file.path())) dll_digests.emplace_back(file.path(), DigestFile(file.path()));
     }
     std::sort(dll_digests.begin(), dll_digests.end(), [](const auto& a, const auto& b) { return a.first < b.first; });
   }
@@ -497,6 +513,9 @@ int Run(const ProjectPaths& p, const fs::path& exe_in, std::vector<std::string> 
                    std::chrono::seconds(timeout_s)};
   spec.capture_crash = crash_stack;
   spec.no_console = true;  // Keep the title GUI, with logs in the run directory.
+#ifndef _WIN32
+  spec.should_cancel=[] { return stop_requested!=0; };
+#endif
   if (window) spec.cancel_event = window->close_event();
   fmt::print("run: {} (working dir {}) -> {}\n", PathUtf8(exe), PathUtf8(spec.working_dir),
              PathUtf8(dir));
@@ -676,6 +695,13 @@ int Session(const ProjectPaths& paths, const fs::path& manifest, int timeout, bo
     const auto renderer_settings = LoadRendererSettings(paths);
     const auto console_settings = LoadConsoleSettings(paths);
     SessionNotification notification(closed_event);
+#ifndef _WIN32
+    // Native SDL title windows own presentation/focus on X11, Wayland and
+    // Darwin. Keep the same session/handoff loop, never cross-process embed.
+    separate_windows = true;
+    struct NotifyEnd { SessionNotification& event; ~NotifyEnd() { event.Signal(); } } notify_end{notification};
+    fmt::print("session: native title windows ({})\n", HostPlatform());
+#endif
     std::unique_ptr<SessionWindow> window;
     // Discovery of generated AOT routes also inspects receipts. Keep it in the
     // same protected transaction as the first selected launch, rather than
@@ -711,7 +737,7 @@ int Session(const ProjectPaths& paths, const fs::path& manifest, int timeout, bo
     fs::path incoming;
     SessionProgress progress;
     for (uint64_t step = 0; ; ++step) {
-      if (window && window->closed()) return kExitOk;
+      if ((window && window->closed()) || stop_requested) return kExitOk;
       if (!verification) verification = std::make_unique<DigestBatch>([&] { return window && window->closed(); });
       // Step zero already authenticated the dashboard in this same protected
       // transaction. Every later title transition gets a fresh verification.
@@ -818,8 +844,16 @@ int Session(const ProjectPaths& paths, const fs::path& manifest, int timeout, bo
 }  // namespace
 
 int main(int argc, char** argv) {
+  std::signal(SIGINT,StopSignal);
+  std::signal(SIGTERM,StopSignal);
   CLI::App app{"x360n - x360-native development supervisor", "x360n"};
   argv = app.ensure_utf8(argv);
+  if (CurrentExecutablePath().filename().native().find(PathFromUtf8("x360n-ninja").native())==0) {
+    try {
+      std::vector<std::string> arguments; for (int i=1;i<argc;++i) arguments.emplace_back(argv[i]);
+      return GuardNinja(CurrentExecutablePath().parent_path()/"x360n-ninja.json",arguments,[] { return stop_requested!=0; });
+    } catch (const std::exception& error) { fmt::print(stderr,"ninja guard: {}\n",error.what()); return 73; }
+  }
   app.set_version_flag("--version", X360N_VERSION);
   app.require_subcommand(1);
   std::string root_opt;
@@ -830,7 +864,25 @@ int main(int argc, char** argv) {
   recover->add_option("--transaction", recovery_transaction)->required();
 
   auto* doctor = app.add_subcommand("doctor", "Verify toolchain, pinned SDK and SDK tools");
+  auto* prepare = app.add_subcommand("prepare", "Prepare native AOT with verified SDK, codegen, incremental products and receipts");
+  std::string prepare_title, prepare_build, prepare_sdk, prepare_cc, prepare_cxx, prepare_cmake, prepare_ninja;
+  bool keep_incomplete=false, no_shared_sdk=false;
+  std::vector<std::string> preparation_variables;
+  int prepare_timeout=1800;
+  prepare->add_option("title",prepare_title)->required();
+  prepare->add_option("--build-dir",prepare_build);
+  prepare->add_option("--sdk",prepare_sdk);
+  prepare->add_option("--cc",prepare_cc); prepare->add_option("--cxx",prepare_cxx);
+  prepare->add_option("--cmake",prepare_cmake); prepare->add_option("--ninja",prepare_ninja);
+  prepare->add_option("--define",preparation_variables,"Additional CMake NAME=VALUE");
+  prepare->add_flag("--keep-incomplete",keep_incomplete);
+  prepare->add_flag("--no-shared-sdk",no_shared_sdk);
+  prepare->add_option("--timeout",prepare_timeout,"Timeout per preparation tool (seconds)")->check(CLI::PositiveNumber);
   std::string config = X360N_BUILD_CONFIG;
+  std::string doctor_sdk,doctor_compiler,doctor_tool;
+  doctor->add_option("--sdk",doctor_sdk,"Explicit pinned SDK sources to diagnose");
+  doctor->add_option("--cxx",doctor_compiler,"Native pinned clang++ to diagnose");
+  doctor->add_option("--rexglue",doctor_tool,"Explicit native codegen producer to diagnose");
   doctor->add_option("--config", config, "SDK build configuration to check")
       ->check(CLI::IsMember({"Debug", "Release", "RelWithDebInfo"}));
 
@@ -905,7 +957,26 @@ int main(int argc, char** argv) {
     fmt::print(stderr, "x360n: project root (deps.lock.json) not found; pass --root\n");
     return kExitUsage;
   }
-  if (doctor->parsed()) return Doctor(*paths, config);
+  if (doctor->parsed()) return Doctor(*paths, config,PathFromUtf8(doctor_sdk),PathFromUtf8(doctor_compiler),PathFromUtf8(doctor_tool));
+  if (prepare->parsed()) {
+    try {
+      AotOptions options; options.paths=*paths; options.title=prepare_title;
+      options.build=PathFromUtf8(prepare_build); options.sdk=PathFromUtf8(prepare_sdk);
+      options.cc=PathFromUtf8(prepare_cc); options.cxx=PathFromUtf8(prepare_cxx);
+      options.cmake=PathFromUtf8(prepare_cmake); options.ninja=PathFromUtf8(prepare_ninja);
+      options.keep_incomplete=keep_incomplete; options.shared_sdk=!no_shared_sdk;
+      options.timeout=std::chrono::seconds(prepare_timeout);
+      options.cancelled=[] { return stop_requested!=0; };
+      for (const auto& variable : preparation_variables) {
+        const auto equals=variable.find('='); if (equals==std::string::npos) throw std::runtime_error("CMake definition requires NAME=VALUE");
+        options.variables[variable.substr(0,equals)]=variable.substr(equals+1);
+      }
+      options.progress=[](const auto& stage) { fmt::print("{}\n",stage); std::fflush(stdout); };
+      const auto result=PrepareAot(std::move(options));
+      fmt::print("{}: {}\n",result.reused ? "reused verified preparation" : "built",PathUtf8(result.executable));
+      return kExitOk;
+    } catch (const std::exception& error) { fmt::print(stderr,"prepare: {}\n",error.what()); return kExitFailed; }
+  }
   if (session->parsed()) return Session(*paths, PathFromUtf8(session_manifest), session_timeout, separate_windows, skip_boot_intro, session_crash_stack, PathFromUtf8(session_user_data_root), session_closed_event, catalog_target);
   if (run->parsed()) {
     try {

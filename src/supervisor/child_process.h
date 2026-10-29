@@ -41,6 +41,10 @@ struct ProcessSpec {
   // exception. Zero disables them. The caller supplies the observed guest
   // arena base; this never changes guest memory or exception handling.
   uint64_t crash_guest_memory_base = 0;
+  // Per-child overrides. Never mutates the launcher's process-wide environment.
+  std::vector<std::pair<std::string, std::string>> environment;
+  // Internal POSIX guard child: stay in the already supervised CMake group.
+  bool inherit_process_group = false;
 };
 
 struct CrashInfo {

@@ -5,6 +5,7 @@
 #include "preparation.h"
 #include "sha256.h"
 #include "workspace_lease.h"
+#include "host_platform.h"
 #include "xex_identity.h"
 #include <chrono>
 #include <algorithm>
@@ -114,13 +115,13 @@ std::vector<Target> ReadCatalog(const ProjectPaths& paths) {
     Inside(t.game_root, paths.inputs());
     const bool absent_content = !fs::exists(t.game_root);
     CatalogPaths content_paths(t.game_root);
-    t.exe = paths.build() / "titles" / t.id / (t.id + ".exe");
+    t.exe = NativeTitleExecutable(paths,t.id);
     if (auto value = profile["x360n"]["native_exe"].value<std::string>())
-      t.exe = Resolve(dir.path(), *value);
+      t.exe = ResolveNativeExecutable(paths,t.id,Resolve(dir.path(), *value));
     Inside(t.exe, paths.build());
     if (const auto* runtime = info["runtime_files"].as_array())
       for (const auto& file : *runtime) {
-        auto path = Resolve(t.exe.parent_path(), Text(file));
+        auto path = Resolve(t.exe.parent_path(), PathUtf8(NativeRuntimeFilename(PathFromUtf8(Text(file)))));
         Inside(path, t.exe.parent_path());
         t.runtime_files.push_back(path);
       }

@@ -9,6 +9,7 @@
 #include <csignal>
 #include <stdexcept>
 #include <future>
+#include <cstdlib>
 #ifndef _WIN32
 #include <fcntl.h>
 #include <unistd.h>
@@ -21,8 +22,8 @@ using namespace x360n;
 using namespace std::chrono_literals;
 namespace {
 struct Fixture {
-  fs::path root = UniqueTempPath("platform") / fs::path(u8"João 日本 🎮");
-  Fixture() { fs::create_directories(root); }
+  fs::path root;
+  explicit Fixture(const std::string& name="platform") : root(UniqueTempPath(name) / fs::path(u8"João 日本 🎮")) { fs::create_directories(root); }
   ~Fixture() { std::error_code ec; fs::remove_all(root.parent_path(), ec); }
   ProcessSpec Spec(std::vector<std::string> args, std::chrono::milliseconds timeout = 5s) {
     return {fs::path(X360N_TEST_CHILD), std::move(args), root, root / "out.log", root / "err.log", timeout};
@@ -60,6 +61,22 @@ TEST_CASE("prelaunch cancellation does not start or create logs", "[process]") {
   CHECK_FALSE(result.launched);
   CHECK(result.cancelled);
   CHECK_FALSE(fs::exists(spec.stdout_file));
+}
+
+TEST_CASE("child environment overrides are isolated between concurrent launches", "[process]") {
+  Fixture first("platform-env-first"), second("platform-env-second");
+  auto a=first.Spec({"environment"}), b=second.Spec({"environment"});
+  a.environment={{"X360N_TEST_OVERRIDE","first child"}};
+  b.environment={{"X360N_TEST_OVERRIDE","second child"}};
+  const auto* inherited=std::getenv("X360N_TEST_OVERRIDE");
+  const std::string before=inherited ? inherited : "";
+  auto future=std::async(std::launch::async,[&] { return RunProcess(a); });
+  const auto result=RunProcess(b), other=future.get();
+  REQUIRE(result.launched); REQUIRE(other.launched);
+  CHECK(result.exit_code==0); CHECK(other.exit_code==0);
+  CHECK(first.Read()=="first child"); CHECK(second.Read()=="second child");
+  const auto* after=std::getenv("X360N_TEST_OVERRIDE");
+  CHECK(std::string(after ? after : "")==before);
 }
 
 TEST_CASE("process cancellation leaves an unrelated session running", "[process-isolation]") {
@@ -127,6 +144,17 @@ TEST_CASE("named session notifications cross process boundaries and remain priva
 }
 
 #ifndef _WIN32
+TEST_CASE("POSIX supervisor death kills nested process groups without cleanup callbacks", "[process-posix]") {
+  Fixture f;
+  const auto marker=f.root/"escaped";
+  auto spec=f.Spec({"parent-tree",marker.string()});
+  spec.should_cancel=[&] { return f.Read("nested.out").find("ready")!=std::string::npos; };
+  const auto result=RunProcess(spec);
+  REQUIRE(result.launched); REQUIRE(result.cancelled);
+  std::this_thread::sleep_for(1100ms);
+  CHECK_FALSE(fs::exists(marker));
+}
+
 TEST_CASE("POSIX log FIFOs and hardlinks are refused without waiting or modifying their targets", "[process-posix]") {
   Fixture f;
   auto spec = f.Spec({"exit", "0"});

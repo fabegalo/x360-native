@@ -1,5 +1,7 @@
 cmake_minimum_required(VERSION 3.25)
 project(x360n_shared_sdk LANGUAGES C CXX)
+include("${X360N_ROOT}/cmake/build/x360n_build_isolation.cmake")
+x360n_guard_ninja()
 file(TO_CMAKE_PATH "${X360N_ROOT}" X360N_ROOT)
 file(TO_CMAKE_PATH "${REXSDK_DIR}" REXSDK_DIR)
 set(CMAKE_CXX_STANDARD 23)

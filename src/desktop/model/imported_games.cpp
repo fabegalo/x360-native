@@ -4,6 +4,7 @@
 #include "digest_batch.h"
 #include "sha256.h"
 #include "workspace_lease.h"
+#include "host_platform.h"
 #include <nlohmann/json.hpp>
 #include <toml++/toml.hpp>
 #include <rex/filesystem/devices/stfs_xbox.h>
@@ -376,7 +377,11 @@ void ReadImportedGames(const ProjectPaths& paths, std::vector<Target>& targets) 
       t.manifest = paths.local() / "aot" / t.id / (t.id + "_manifest.toml");
       // Keep the full catalog/title identity, but leave room for SDK try_compile
       // directories in an extracted package with a long installation path.
-      t.exe = paths.build() / "aot" / t.id.substr(0, 17) / (t.id + ".exe");
+#ifdef _WIN32
+      if (HostPlatform()=="windows-x64") t.exe = paths.build() / "aot" / t.id.substr(0, 17) / (t.id + ExecutableSuffix());
+      else
+#endif
+      t.exe = paths.build() / HostPlatform() / "aot" / t.id.substr(0,17) / (t.id+ExecutableSuffix());
       t.user_root = UserDataRoot(paths, paths.local() / "user" / t.id);
       if (!t.title_id.empty())
         t.library = {t.title_id, r.value("content_type", std::string("00004000")), content_id.substr(0, 40), name, content_id};

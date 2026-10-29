@@ -1,0 +1,10 @@
+add_executable(x360n_native_session_child "${PROJECT_SOURCE_DIR}/tests/supervisor/session_child.cpp")
+target_link_libraries(x360n_native_session_child PRIVATE x360n_core)
+add_executable(x360n_native_session_tests "${PROJECT_SOURCE_DIR}/tests/supervisor/session_process_test.cpp")
+target_link_libraries(x360n_native_session_tests PRIVATE x360n_core Catch2::Catch2WithMain)
+target_include_directories(x360n_native_session_tests PRIVATE "${X360_REXGLUE_DIR}/thirdparty/inja/third_party/include")
+target_compile_definitions(x360n_native_session_tests PRIVATE X360N_SOURCE_ROOT="${PROJECT_SOURCE_DIR}"
+    X360N_EXE="$<TARGET_FILE:x360n>" X360N_SESSION_CHILD="$<TARGET_FILE:x360n_native_session_child>")
+add_dependencies(x360n_native_session_tests x360n x360n_native_session_child)
+add_test(NAME supervisor.native-session COMMAND x360n_native_session_tests "[session],[session-storage],[console-settings],[games-played],[firmware-exit]")
+set_tests_properties(supervisor.native-session PROPERTIES LABELS project TIMEOUT 240)

@@ -1,5 +1,6 @@
 #include "renderer_settings.h"
 #include "child_process.h"
+#include "host_platform.h"
 #include <toml++/toml.hpp>
 #include <fstream>
 #include <stdexcept>
@@ -23,7 +24,15 @@ void Validate(RendererSettings s) {
     throw std::runtime_error("Unknown global renderer");
   if (s.api != GraphicsApi::D3D12 && s.api != GraphicsApi::Vulkan)
     throw std::runtime_error("Unknown global graphics API");
-  if (s.api == GraphicsApi::Vulkan && !s.experimental)
+#ifndef _WIN32
+  if (s.api == GraphicsApi::D3D12)
+    throw std::runtime_error("D3D12 is unavailable on this platform; select Vulkan");
+#endif
+  if (s.api == GraphicsApi::Vulkan && !s.experimental
+#ifndef _WIN32
+      && s.renderer != Renderer::Xenos
+#endif
+      )
     throw std::runtime_error("Vulkan is experimental; explicit development access is required");
   if (s.renderer == Renderer::Native && !s.experimental)
     throw std::runtime_error("Native is experimental; current title/gameplay validation has not been completed. Explicit development access is required.");
@@ -172,9 +181,9 @@ void CheckSessionRenderer(const std::filesystem::path& exe, RendererSettings set
     throw std::runtime_error("Native (Experimental) unavailable: rexgpu-native.dll missing beside " +
                              PathUtf8(exe) + "; no fallback to Xenos.");
   if (settings.api == GraphicsApi::Vulkan) {
-    const auto probe = exe.parent_path() / "x360n_gpu_preflight.exe";
+    const auto probe = exe.parent_path() / ("x360n_gpu_preflight" + ExecutableSuffix());
     if (!std::filesystem::is_regular_file(probe))
-      throw std::runtime_error("Vulkan unavailable: x360n_gpu_preflight.exe missing beside " + PathUtf8(exe) + "; rebuild/stage this title. No API fallback.");
+      throw std::runtime_error("Vulkan unavailable: x360n_gpu_preflight" + ExecutableSuffix() + " missing beside " + PathUtf8(exe) + "; rebuild/stage this title. No API fallback.");
     const auto log = std::filesystem::temp_directory_path() /
         ("x360n-gpu-preflight-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()) + ".log");
     ProcessSpec spec;

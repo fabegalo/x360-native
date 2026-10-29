@@ -2,6 +2,7 @@
 #include "action_trace.h"
 #include "digest_batch.h"
 #include "sha256.h"
+#include "host_platform.h"
 #include <nlohmann/json.hpp>
 #include <toml++/toml.hpp>
 #include <fstream>
@@ -60,7 +61,11 @@ std::optional<std::string> CheckPreparation(const ProjectPaths& paths,
     // hashes are collected. Legacy receipts still follow all C2 validations.
     const auto lease_path = paths.local() / "preparation" / (title + ".lock");
     std::ifstream build_lease;
+    std::unique_ptr<FileLease> native_lease;
     if (fs::exists(lease_path)) {
+#ifndef _WIN32
+      native_lease = std::make_unique<FileLease>(lease_path, false, false);
+#endif
       build_lease.open(lease_path, std::ios::binary);
       if (!build_lease) return fail("O título está sendo compilado; aguarde a preparação.");
     }
@@ -74,7 +79,25 @@ std::optional<std::string> CheckPreparation(const ProjectPaths& paths,
         Key(PathFromUtf8(receipt.at("exe").get<std::string>())) != Key(exe))
       return fail("O recibo pertence a outro título ou build.");
     const auto sdk_commit = receipt.at("sdk_commit").get<std::string>();
-    if (sdk_commit.size() != 40 || sdk_commit != ReadHead(paths.sdk()))
+    auto sdk_source=paths.sdk();
+    bool native_image_required=receipt.contains("native_identity");
+#if !defined(_WIN32) || defined(_M_ARM64) || defined(__aarch64__)
+    // A legacy Windows receipt must not invoke WSL's PE interop as if it were
+    // a native Linux build, or count x64 emulation as a native ARM64 build.
+    native_image_required=true;
+#endif
+    if (native_image_required) {
+      try { ValidateNativeImage(exe); }
+      catch (const std::exception& error) { return fail(error.what()); }
+    }
+    if (receipt.contains("native_identity")) {
+      if (receipt.at("native_identity").at("platform")!=HostPlatform()) return fail("O produto pertence a outro sistema/arquitetura.");
+      if (const auto source=receipt.at("native_identity").value("sdk_source",std::string{}); !source.empty()) {
+        sdk_source=PathFromUtf8(source);
+        if (!sdk_source.is_absolute()) return fail("Caminho do SDK nativo inválido.");
+      }
+    }
+    if (sdk_commit.size() != 40 || sdk_commit != ReadHead(sdk_source))
       return fail("A revisão do ReXGlue mudou.");
     std::unordered_set<std::string> inputs, artifacts;
     for (auto group : {"inputs", "artifacts"}) {
@@ -185,7 +208,7 @@ std::optional<std::string> CheckPreparation(const ProjectPaths& paths,
     const auto registration = manifest.parent_path() / "preparation.toml";
     if (fs::is_regular_file(registration) && !inputs.contains(Key(registration)))
       return fail("O registro do título mudou.");
-    if (IsWithin(exe, paths.build() / "aot")) {
+    if (IsWithin(exe, paths.build() / "aot") || IsWithin(exe, paths.build()/HostPlatform()/"aot")) {
       const auto owner = exe.parent_path() / ".x360n-aot-owner";
       if (!inputs.contains(Key(owner))) return fail("Propriedade do build AOT ausente do recibo.");
       std::ifstream owner_input(owner); std::string owner_title;
@@ -193,12 +216,10 @@ std::optional<std::string> CheckPreparation(const ProjectPaths& paths,
       if (owner_title != title) return fail("O build AOT pertence a outro título.");
     }
     for (const auto& file : fs::directory_iterator(exe.parent_path())) {
-      auto ext = file.path().extension().string();
-      for (auto& c : ext) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-      if (ext == ".dll" && !artifacts.contains(Key(file.path())))
-        return fail("DLL sem identidade verificada: " + PathUtf8(file.path()));
+      if (IsNativeModule(file.path()) && !artifacts.contains(Key(file.path())))
+        return fail("Módulo nativo sem identidade verificada: " + PathUtf8(file.path()));
       // The supervisor runs the Vulkan preflight from this directory.
-      if (Key(file.path()) == Key(exe.parent_path() / "x360n_gpu_preflight.exe") && !artifacts.contains(Key(file.path())))
+      if (Key(file.path()) == Key(exe.parent_path() / ("x360n_gpu_preflight" + ExecutableSuffix())) && !artifacts.contains(Key(file.path())))
         return fail("Preflight Vulkan sem identidade verificada: " + PathUtf8(file.path()));
     }
     if (fs::exists(paths.local() / "preparation" / (title + ".incomplete")))
@@ -268,7 +289,7 @@ std::optional<std::string> CheckPreparedLaunch(const ProjectPaths& paths, const 
       try {
         std::ifstream in(manifest, std::ios::binary); auto table = toml::parse(in, PathUtf8(manifest));
         auto configured = table["x360n"]["native_exe"].value<std::string>();
-        auto target = configured ? dir.path() / PathFromUtf8(*configured) : paths.build() / "titles" / dir.path().filename() / PathFromUtf8(id + ".exe");
+        auto target = configured ? ResolveNativeExecutable(paths, id, dir.path() / PathFromUtf8(*configured)) : NativeTitleExecutable(paths, id);
         if (Key(target) == Key(exe)) return CheckPreparation(paths, id, manifest, exe);
       } catch (const toml::parse_error&) {
         // An unrelated broken registration cannot invalidate this title. A title

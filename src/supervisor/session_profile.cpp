@@ -1,4 +1,5 @@
 #include "session_profile.h"
+#include "host_platform.h"
 #include "sha256.h"
 #include "preparation.h"
 #include "digest_batch.h"
@@ -38,14 +39,14 @@ SessionProfile LoadSessionProfile(const ProjectPaths& paths, const std::filesyst
   // own content root for import and execution is then declared separately.
   if (table["x360n"]["game_data_root"]) p.game_root = resolve(text(table["x360n"]["game_data_root"]));
   p.xex = resolve(text(table["entrypoint"]["file_path"]));
-  p.exe = resolve(text(table["x360n"]["native_exe"]));
+  p.exe = ResolveNativeExecutable(paths, p.name, resolve(text(table["x360n"]["native_exe"])));
   p.user_root = UserDataRoot(paths, resolve(text(table["x360n"]["user_data_root"])));
   p.sha256 = text(table["x360n"]["xex_sha256"]);
   if (auto host = table["x360n"]["system_ui_host"].value<std::string>()) {
     const auto relative_host = PathFromUtf8(*host);
     if (relative_host.empty() || relative_host.has_parent_path() || relative_host.is_absolute())
       throw std::runtime_error("system UI host must belong to this dashboard build");
-    p.system_ui_host = p.exe.parent_path() / relative_host;
+    p.system_ui_host = p.exe.parent_path() / NativeRuntimeFilename(relative_host);
     if (validate_execution && !std::filesystem::is_regular_file(p.system_ui_host))
       throw std::runtime_error("missing dashboard system UI host: " + PathUtf8(p.system_ui_host));
   }
@@ -72,7 +73,7 @@ SessionProfile LoadSessionProfile(const ProjectPaths& paths, const std::filesyst
     bool recorded = false;
     if (auto files = preparation["runtime_files"].as_array())
       for (const auto& value : *files)
-        if (value.value<std::string>() == PathUtf8(p.system_ui_host.filename())) recorded = true;
+        if (auto name=value.value<std::string>(); name && NativeRuntimeFilename(PathFromUtf8(*name))==p.system_ui_host.filename()) recorded = true;
     if (!recorded) throw std::runtime_error("system UI host is not owned by the dashboard preparation receipt");
   }
   if (auto version = preparation["dashboard_version"].value<std::string>()) {
@@ -163,13 +164,13 @@ SessionProfile LoadSessionProfile(const ProjectPaths& paths, const std::filesyst
       const auto candidate = dir.path() / PathFromUtf8(id + "_manifest.toml");
       // Generated projects declare their native output. It can use a compact
       // build directory while retaining the complete catalog/title identity.
-      auto native = paths.build() / "titles" / id / (id + ".exe");
+      auto native = NativeTitleExecutable(paths, id);
       if (root == paths.local() / "aot") {
         std::ifstream manifest_input(candidate, std::ios::binary);
         const auto registration = toml::parse(manifest_input, PathUtf8(candidate));
         const auto configured = registration["x360n"]["native_exe"].value<std::string>();
         if (!configured || configured->empty()) continue;
-        native = std::filesystem::weakly_canonical(dir.path() / PathFromUtf8(*configured));
+        native = ResolveNativeExecutable(paths, id, std::filesystem::weakly_canonical(dir.path() / PathFromUtf8(*configured)));
       }
       if (root == paths.local() / "aot" &&
           (std::filesystem::exists(paths.local() / "preparation" / (id + ".runtime-error")) ||

@@ -10,7 +10,11 @@ struct RendererSettings {
   Renderer renderer = Renderer::Xenos;
   bool experimental = false;
   bool fullscreen = false;
+#ifdef _WIN32
   GraphicsApi api = GraphicsApi::D3D12;
+#else
+  GraphicsApi api = GraphicsApi::Vulkan;
+#endif
   bool enhanced = false;
   uint32_t framerate = 30;
   uint32_t present_rate = 0;

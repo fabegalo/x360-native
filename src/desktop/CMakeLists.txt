@@ -8,7 +8,8 @@ target_include_directories(x360n_desktop_model PUBLIC ${CMAKE_CURRENT_SOURCE_DIR
 # The supervisor owns launch preflight so one protected digest transaction can
 # cover catalog, original library, receipts and process identity reporting.
 target_link_libraries(x360n PRIVATE x360n_desktop_model)
-if(WIN32)
+target_include_directories(x360n PRIVATE ${X360_REXGLUE_DIR}/thirdparty/inja/third_party/include)
+if(WIN32 AND NOT X360_SUPERVISOR_ONLY)
   # The version comes from cmake/distribution/x360n_version.cmake; x360n_core
   # already defines X360N_VERSION, the resource compiler gets it from this header.
   configure_file(resources/version.h.in ${CMAKE_CURRENT_BINARY_DIR}/generated/x360n_version.h @ONLY)
@@ -44,4 +45,6 @@ if(WIN32)
   endif()
   endif()
 endif()
-include(${PROJECT_SOURCE_DIR}/tests/desktop/targets.cmake)
+if(NOT X360_SUPERVISOR_ONLY)
+  include(${PROJECT_SOURCE_DIR}/tests/desktop/targets.cmake)
+endif()
