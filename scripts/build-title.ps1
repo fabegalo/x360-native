@@ -25,11 +25,14 @@ $root = (Resolve-Path (Split-Path -Parent $PSScriptRoot)).Path
 . (Join-Path $PSScriptRoot 'build/build-lease.ps1')
 . (Join-Path $PSScriptRoot 'build/incremental-state.ps1')
 . (Join-Path $PSScriptRoot 'build/release-configuration.ps1')
+. (Join-Path $PSScriptRoot 'build/shared-sdk.ps1')
 $driverSnapshot = @(Get-ReceiptEntries @($PSCommandPath, (Join-Path $PSScriptRoot 'build/preparation-receipt.ps1'), (Join-Path $PSScriptRoot 'build/build-lease.ps1'), (Join-Path $PSScriptRoot 'build/incremental-state.ps1'), (Join-Path $PSScriptRoot 'build/release-configuration.ps1'), (Join-Path $PSScriptRoot 'build/toolchain-snapshot.ps1'), (Join-Path $PSScriptRoot 'build/product-fingerprint.cs')))
 $previousXexKeys = $env:X360N_XEX_KEYS
+$previousParallel = $env:CMAKE_BUILD_PARALLEL_LEVEL
 $localKeys = if ($previousXexKeys) { [IO.Path]::GetFullPath($previousXexKeys) } else { Join-Path $root '.local/keys/xex-keys.txt' }
 $keySnapshot = if (Test-Path -LiteralPath $localKeys -PathType Leaf) { @(Get-ReceiptEntries @($localKeys)) } else { @() }
 $driverSnapshot += $keySnapshot
+$driverSnapshot += @(Get-ReceiptEntries @((Join-Path $PSScriptRoot 'build/shared-sdk.ps1'), (Join-Path $PSScriptRoot 'build/preparation-process.cs')))
 if ($Title -notmatch '^[a-z][a-z0-9_]*$') { throw "invalid title name '$Title'" }
 $titleDir = Join-Path $root "titles\$Title"
 if (-not (Test-Path (Join-Path $titleDir 'CMakePresets.json'))) {
@@ -74,6 +77,7 @@ $finalSourceSnapshot = @()
 $codegenInputMetadata = @()
 $stateFile = Join-Path $build '.preparation/incremental.json'
 $incrementalState = $null
+$sharedProtection = $null
 $processed = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
 $runId = [Guid]::NewGuid().ToString('N')
 function Invoke-PreparationCommand([string]$Command, [string]$Log) {
@@ -86,6 +90,13 @@ function Invoke-PreparationCommand([string]$Command, [string]$Log) {
     $info.WorkingDirectory = $titleDir
     $info.UseShellExecute = $false
     $info.CreateNoWindow = $true
+    if ($env:X360N_PREPARATION_METRICS) {
+        if (-not ('X360NPreparationProcess' -as [type])) { Add-Type -Path (Join-Path $PSScriptRoot 'build/preparation-process.cs') }
+        $measurement = [X360NPreparationProcess]::Run($info.FileName, $info.Arguments, $titleDir, 1800)
+        $row = [ordered]@{schema=1; log=$Log; utc=[DateTime]::UtcNow.ToString('o'); metrics=$measurement}
+        [IO.File]::AppendAllText($env:X360N_PREPARATION_METRICS, (($row | ConvertTo-Json -Depth 5 -Compress) + "`n"), [Text.UTF8Encoding]::new($false))
+        return $measurement.exit_code
+    }
     $process = [Diagnostics.Process]::new()
     $process.StartInfo = $info
     try {
@@ -112,6 +123,11 @@ $steps = @(
 )
 Push-Location $titleDir
 try {
+    if (-not $previousParallel) {
+        if (-not ('X360NPreparationProcess' -as [type])) { Add-Type -Path (Join-Path $PSScriptRoot 'build/preparation-process.cs') }
+        $env:CMAKE_BUILD_PARALLEL_LEVEL = [string][X360NPreparationProcess]::ParallelJobs()
+        Write-Host "preparation parallel jobs: $env:CMAKE_BUILD_PARALLEL_LEVEL"
+    }
     if ($keySnapshot.Count) { $env:X360N_XEX_KEYS = $localKeys }
     Update-ToolchainSnapshot '0-toolchain'
     $releaseConfigured = Test-ReleaseBuildConfiguration $build
@@ -137,12 +153,32 @@ try {
         $head = & git -C (Join-Path $root 'external/rexglue-sdk') rev-parse HEAD
         if ($LASTEXITCODE -or $head.Trim() -ne $previous.sdk_commit) { $incrementalState = $null }
     }
+    $sharedSdk = $null
+    if ($env:X360N_SHARED_SDK -ne '0') {
+        $sharedSdk = Get-SharedSdk $root $titleDir $build
+        $sharedProtection = [X360NProducts]::ProtectReceipt([string[]]@($sharedSdk.inputs.path), [string[]]@($sharedSdk.inputs.sha256))
+        $binding = Join-Path $build '.preparation/shared-sdk.json'
+        Publish-PreparationReceipt $binding @{schema=1; inputs=@($sharedSdk.inputs + @(Get-ReceiptEntries @($sharedSdk.receipt))); globs=$sharedSdk.globs}
+        foreach ($step in $steps) {
+            if ($step.name -in @('1-configure','3-reconfigure')) {
+                $step.args += " -DX360N_SHARED_SDK_EXPORT=`"$($sharedSdk.export)`""
+            }
+        }
+    } else {
+        [IO.File]::Delete((Join-Path $build '.preparation/shared-sdk.json'))
+        foreach ($step in $steps) {
+            if ($step.name -in @('1-configure','3-reconfigure')) { $step.args += ' -UX360N_SHARED_SDK_EXPORT' }
+        }
+    }
     $configureSnapshot = @()
     $skipConfigure = $false
     if ($incrementalState) {
         $configureSnapshot = @(Get-IncrementalConfigureInputs $build $titleDir)
         $skipConfigure = $releaseConfigured -and (Test-ReceiptGlobs $previous.globs) -and
             (Test-IncrementalConfigureInputs $configureSnapshot $previous.configure)
+        $configuredExport = (Get-BuildCache $build).X360N_SHARED_SDK_EXPORT
+        if ($sharedSdk -and $configuredExport -ne $sharedSdk.export) { $skipConfigure = $false }
+        if (-not $sharedSdk -and $configuredExport) { $skipConfigure = $false }
     }
     foreach ($s in $steps) {
         if ($s.name -eq '1-configure' -and $skipConfigure) {
@@ -184,7 +220,7 @@ try {
             $codegenInputMetadata = @(Get-CodegenInputMetadata (@($manifest) + @(Get-AdditionalCodegenManifests $titleDir $build)))
         }
         if ($s.name -eq '2-codegen') {
-            $tool = @(Get-NinjaNodes $build @('rexglue') | Where-Object { $_ -match '[\\/]rexglue[^\\/]*\.exe$' })[0]
+            $tool = if ($sharedSdk) { $sharedSdk.tool } else { @(Get-NinjaNodes $build @('rexglue') | Where-Object { $_ -match '[\\/]rexglue[^\\/]*\.exe$' })[0] }
             if (-not $tool) { throw 'Codegen executable missing from build graph' }
             # Keep the exact producer used by this preparation. The SDK's shared
             # output directory is replaced by other title builds (C5); provenance
@@ -192,7 +228,7 @@ try {
             # compiler dependency closure is still checked by the receipt.
             $producerDir = Join-Path $build '.preparation/codegen'
             [void][IO.Directory]::CreateDirectory($producerDir)
-            $producerFiles = @($tool) + @(Get-NinjaNodes $build @('rexglue') | Where-Object { $_ -match '\.dll$' -and [IO.File]::Exists($_) })
+            $producerFiles = if ($sharedSdk) { @($sharedSdk.producer) } else { @($tool) + @(Get-NinjaNodes $build @('rexglue') | Where-Object { $_ -match '\.dll$' -and [IO.File]::Exists($_) }) }
             $copies = foreach ($file in $producerFiles) {
                 $copy = Join-Path $producerDir ([IO.Path]::GetFileName($file))
                 if (-not [IO.File]::Exists($copy) -or (Get-ReceiptHash $copy) -ne (Get-ReceiptHash $file)) { [IO.File]::Copy($file, $copy, $true) }
@@ -231,6 +267,7 @@ try {
             }))
         }
         $invocations = @($s)
+        if ($sharedSdk -and $s.name -eq '2-tool') { continue }
         if ($s.name -eq '2-codegen') {
             $invocations += @(Get-AdditionalCodegenManifests $titleDir $build | ForEach-Object {
                 @{ name = '2-codegen-' + [IO.Path]::GetFileNameWithoutExtension($_);
@@ -305,6 +342,7 @@ try {
     $sdkCommit = (& git -C (Join-Path $root 'external/rexglue-sdk') rev-parse HEAD).Trim()
     if ($LASTEXITCODE) { throw 'Cannot identify SDK revision' }
     $globs = @(Get-BuildGlobs $build)
+    if ($sharedSdk) { $globs += @($sharedSdk.globs) }
     $configuration = @(Get-IncrementalConfigureInputs $build $titleDir)
     if (-not (Test-ReceiptGlobs $globs)) { throw 'Build source inventory changed; prepare again. No receipt published.' }
     if (-not (Test-ReceiptEntries $sourceSnapshot) -or -not (Test-ReceiptEntries $producer)) {
@@ -333,9 +371,11 @@ try {
     [IO.File]::AppendAllText($marker, "`nError: $($_.Exception.Message)`n")
     throw
 } finally {
+    if ($sharedProtection) { $sharedProtection.Dispose() }
     Pop-Location
     $env:X360N_OWNED_BUILD = $previousOwnedBuild
     $env:X360N_XEX_KEYS = $previousXexKeys
+    $env:CMAKE_BUILD_PARALLEL_LEVEL = $previousParallel
     foreach ($handle in $lease) { $handle.Dispose() }
 }
 Write-Host "built: $(Join-Path $build "$Title.exe")"

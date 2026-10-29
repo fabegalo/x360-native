@@ -24,9 +24,35 @@ if not defined VSINSTALL (
   exit /b 3
 )
 
-call "%VSINSTALL%\VC\Auxiliary\Build\vcvars64.bat" >nul
+rem Initialize the same native x64 toolset and Windows SDK without optional
+rem VS extensions. vcpkg's shell bootstrap can start PowerShell or download tools;
+rem this project uses pinned vendored dependencies and does not consume vcpkg.
+rem VsDevCmd's core initializes the Windows SDK; its VC extension selects the
+rem exact default MSVC toolset used by vcvars64.bat.
+if not exist "%VSINSTALL%\Common7\Tools\vsdevcmd\ext\vcvars.bat" (
+  echo [devshell] Native Visual Studio environment script missing. 1>&2
+  exit /b 3
+)
+set "VSCMD_SKIP_SENDTELEMETRY=1"
+set "VSCMD_VCVARSALL_INIT=1"
+call "%VSINSTALL%\Common7\Tools\VsDevCmd.bat" -no_logo -no_ext -arch=amd64 -host_arch=amd64 >nul
 if errorlevel 1 (
-  echo [devshell] vcvars64.bat failed. 1>&2
+  echo [devshell] Windows SDK environment initialization failed. 1>&2
+  exit /b 3
+)
+call "%VSINSTALL%\Common7\Tools\vsdevcmd\ext\vcvars.bat" >nul
+if errorlevel 1 (
+  echo [devshell] Native MSVC environment initialization failed. 1>&2
+  exit /b 3
+)
+rem VsDevCmd normally folds the VC extension's include list after all extensions.
+rem We called that extension explicitly, so preserve its native include ordering.
+set "INCLUDE=%__VSCMD_VCVARS_INCLUDE%%INCLUDE%"
+set "EXTERNAL_INCLUDE=%__VSCMD_VCVARS_INCLUDE%%EXTERNAL_INCLUDE%"
+set "__VSCMD_VCVARS_INCLUDE="
+set "VSCMD_VCVARSALL_INIT="
+if not exist "%VCToolsInstallDir%include\vcruntime.h" (
+  echo [devshell] Native MSVC headers missing. 1>&2
   exit /b 3
 )
 set "PATH=%X360_LLVM%\bin;%X360_ROOT%\.local\toolchains\mingit-2.56.0.2\cmd;%X360_ROOT%\.local\toolchains\cmake-3.31.6\bin;%X360_ROOT%\.local\toolchains\ninja-1.13.1;%PATH%"

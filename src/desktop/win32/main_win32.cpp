@@ -1461,6 +1461,7 @@ void Start(App& a, int action, fs::path source = {}) {
         spec.exe = exe; spec.args = args; spec.working_dir = a.root;
         spec.stdout_file = a.logs / (label + ".log"); spec.stderr_file = a.logs / (label + ".error.log");
         spec.no_console = true;
+        spec.collect_metrics = action == kPrepare && GetEnvironmentVariableW(L"X360N_PREPARATION_METRICS", nullptr, 0) != 0;
         if (action != kInstall) spec.should_cancel = [&] { return a.cancel.load(); };
         if (action == kLaunch) spec.on_started = [&] { Post(a.window, kSessionStarted, ""); };
         spec.notification_event = closed_event;
@@ -1486,6 +1487,19 @@ void Start(App& a, int action, fs::path source = {}) {
           Post(a.window, kProgress, Tr("Preparação: ", "Preparation: ") + last);
         };
         auto result = RunProcess(spec);
+        if (spec.collect_metrics) {
+          std::ofstream metrics(a.logs / "preparation-metrics.tsv", std::ios::app);
+          // Whole process-tree totals, including every compiler worker. The
+          // PowerShell driver separately records configure/codegen/build phases.
+          metrics << label << '\t' << result.duration.count() << '\t' << result.exit_code
+                  << '\t' << result.cancelled << '\t' << result.timed_out;
+          if (result.metrics) {
+            const auto& m = *result.metrics;
+            metrics << '\t' << m.cpu_us << '\t' << m.read_bytes << '\t' << m.read_operations
+                    << '\t' << m.write_bytes << '\t' << m.peak_job_commit_bytes;
+          } else metrics << "\tunavailable";
+          metrics << '\n';
+        }
         std::string launch_detail;
         if (action == kLaunch) {
           // The supervisor performs the complete preflight. Consume its bounded

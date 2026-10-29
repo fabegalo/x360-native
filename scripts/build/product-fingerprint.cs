@@ -18,6 +18,12 @@ public sealed class X360NReceiptEntry {
     public string sha256 { get; set; }
 }
 public sealed class X360NProducts : IDisposable {
+    // A preparation may retain immutable shared producer inputs. Reuse is only
+    // for ordinary names whose complete ancestor chain and file are still held
+    // against writes/deletion, exactly like the existing per-computation cache.
+    [ThreadStatic] static X360NProducts protectedReceipt;
+    X360NProducts previousReceipt;
+    bool receiptScope;
     static readonly StringComparer Comparer = StringComparer.OrdinalIgnoreCase;
     readonly Dictionary<string, string> hashes = new Dictionary<string, string>(Comparer);
     // Do not assume case-insensitive directory entries for path protection.
@@ -39,11 +45,29 @@ public sealed class X360NProducts : IDisposable {
             return Hex(sha.Hash);
         }
     }
+    public static X360NProducts ProtectReceipt(string[] files, string[] expected) {
+        if(files.Length != expected.Length) throw new ArgumentException("Receipt length mismatch");
+        var scope = new X360NProducts();
+        try {
+            for(int i=0;i<files.Length;++i) if(!Comparer.Equals(scope.Digest(files[i]),expected[i]))
+                throw new IOException("Shared producer input changed: " + files[i]);
+            scope.previousReceipt=protectedReceipt; scope.receiptScope=true; protectedReceipt=scope;
+            return scope;
+        } catch { scope.Dispose(); throw; }
+    }
+    public static string ProtectedHash(string file) {
+        string result; string path=Path.GetFullPath(file);
+        for(var scope=protectedReceipt;scope!=null;scope=scope.previousReceipt)
+            if(scope.paths.TryGetValue(path,out result)) return result;
+        return null;
+    }
     public static X360NReceiptEntry[] ReceiptEntries(string[] files) {
         var result = new List<X360NReceiptEntry>(); var buffer = new byte[1048576];
         foreach (string file in files) {
             string path = Path.GetFullPath(file);
-            using (var stream = File.OpenRead(Io(path))) result.Add(new X360NReceiptEntry { path = path, sha256 = HashStream(stream, buffer) });
+            string known=ProtectedHash(path);
+            if(known!=null) result.Add(new X360NReceiptEntry {path=path,sha256=known});
+            else using (var stream = File.OpenRead(Io(path))) result.Add(new X360NReceiptEntry { path = path, sha256 = HashStream(stream, buffer) });
         }
         return result.ToArray();
     }
@@ -51,6 +75,8 @@ public sealed class X360NProducts : IDisposable {
         if (files.Length != expected.Length) return false;
         var buffer = new byte[1048576];
         for (int i = 0; i < files.Length; ++i) {
+            string known=ProtectedHash(files[i]);
+            if(known!=null) { if(!Comparer.Equals(known,expected[i])) return false; continue; }
             string path = Io(files[i]);
             if (!File.Exists(path)) return false;
             // No approval/hash cache here: read every file on every call,
@@ -117,6 +143,8 @@ public sealed class X360NProducts : IDisposable {
     static string Hex(byte[] hash) { return BitConverter.ToString(hash).Replace("-", "").ToLowerInvariant(); }
     string Digest(string path) {
         string cached;
+        cached=ProtectedHash(path);
+        if(cached!=null) return cached;
         if (paths.TryGetValue(path, out cached)) return cached;
         path = Path.GetFullPath(path);
         if (paths.TryGetValue(path, out cached)) return cached;
@@ -157,6 +185,7 @@ public sealed class X360NProducts : IDisposable {
         } finally { if (stream != null) stream.Dispose(); }
     }
     public void Dispose() {
+        if(receiptScope) { protectedReceipt=previousReceipt; receiptScope=false; }
         foreach (FileStream file in readers) file.Dispose();
         foreach (SafeFileHandle directory in directoryReaders) directory.Dispose();
     }

@@ -1,0 +1,76 @@
+cmake_minimum_required(VERSION 3.25)
+project(x360n_shared_sdk LANGUAGES C CXX)
+file(TO_CMAKE_PATH "${X360N_ROOT}" X360N_ROOT)
+file(TO_CMAKE_PATH "${REXSDK_DIR}" REXSDK_DIR)
+set(CMAKE_CXX_STANDARD 23)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+if(NOT X360N_ROOT OR NOT REXSDK_DIR OR NOT CMAKE_BUILD_TYPE STREQUAL "Release")
+    message(FATAL_ERROR "The shared SDK requires an explicit root, pinned SDK and Release")
+endif()
+option(X360N_PARALLEL_PROBES "Run independent libc checks using original CMake modules in parallel" ON)
+if(X360N_PARALLEL_PROBES AND WIN32 AND CMAKE_GENERATOR STREQUAL "Ninja" AND
+   CMAKE_C_COMPILER_ID STREQUAL "Clang" AND CMAKE_VERSION VERSION_EQUAL "3.31.6" AND
+   NOT CMAKE_TOOLCHAIN_FILE AND NOT CMAKE_TRY_COMPILE_PLATFORM_VARIABLES AND NOT CMAKE_PROJECT_SDL3_INCLUDE)
+    set(CMAKE_PROJECT_SDL3_INCLUDE "${X360N_ROOT}/cmake/build/x360n_parallel_probes.cmake")
+endif()
+add_subdirectory("${REXSDK_DIR}" rexglue-sdk)
+include("${X360N_ROOT}/cmake/sdk/x360n_sdk_backports.cmake")
+x360n_apply_sdk_backports("${REXSDK_DIR}")
+
+function(x360n_sdk_targets directory)
+    get_property(_targets DIRECTORY "${directory}" PROPERTY BUILDSYSTEM_TARGETS)
+    foreach(_target IN LISTS _targets)
+        # These upstream libraries already export build-tree targets separately.
+        # Exporting them again makes dependencies in upstream's own exports
+        # ambiguous (notably SDL3-static -> SDL3_Headers and spdlog -> fmt).
+        if(_target IN_LIST X360N_UPSTREAM_EXPORTS)
+            continue()
+        endif()
+        get_target_property(_type "${_target}" TYPE)
+        if(NOT _type STREQUAL "UTILITY")
+            # Keep real names in the export. CMake rewrites internal alias
+            # references; consumers recreate only the public SDK aliases below.
+            set_property(TARGET "${_target}" PROPERTY EXPORT_NAME "${_target}")
+            set_property(GLOBAL APPEND PROPERTY X360N_SDK_EXPORT_TARGETS "${_target}")
+        endif()
+    endforeach()
+    get_property(_children DIRECTORY "${directory}" PROPERTY SUBDIRECTORIES)
+    foreach(_child IN LISTS _children)
+        x360n_sdk_targets("${_child}")
+    endforeach()
+endfunction()
+set(X360N_UPSTREAM_EXPORTS fmt fmt-header-only spdlog spdlog_header_only SDL3-static SDL3_test SDL3_Headers)
+x360n_sdk_targets("${REXSDK_DIR}")
+get_property(_export GLOBAL PROPERTY X360N_SDK_EXPORT_TARGETS)
+export(TARGETS ${_export} FILE "${CMAKE_CURRENT_BINARY_DIR}/targets.cmake")
+set(_aliases "")
+foreach(_pair "runtime|rexruntime" "system|rexruntime" "kernel|rexruntime" "core|rexcore" "filesystem|rexfilesystem" "ui|rexui" "audio|rexaudio" "input|rexinput" "codegen|rexcodegen")
+    string(REPLACE "|" ";" _parts "${_pair}")
+    list(GET _parts 0 _alias)
+    list(GET _parts 1 _target)
+    string(APPEND _aliases "add_library(rex::${_alias} ALIAS ${_target})\n")
+endforeach()
+string(APPEND _aliases "add_executable(rex::rexglue ALIAS rexglue)\n")
+set(_checks "")
+foreach(_setting CMAKE_C_COMPILER CMAKE_CXX_COMPILER CMAKE_C_COMPILER_ARG1 CMAKE_CXX_COMPILER_ARG1
+        CMAKE_C_COMPILER_TARGET CMAKE_CXX_COMPILER_TARGET CMAKE_C_COMPILER_EXTERNAL_TOOLCHAIN CMAKE_CXX_COMPILER_EXTERNAL_TOOLCHAIN
+        CMAKE_C_FLAGS CMAKE_CXX_FLAGS CMAKE_C_FLAGS_RELEASE CMAKE_CXX_FLAGS_RELEASE
+        CMAKE_C_FLAGS_DEBUG CMAKE_CXX_FLAGS_DEBUG CMAKE_C_FLAGS_RELWITHDEBINFO CMAKE_CXX_FLAGS_RELWITHDEBINFO
+        CMAKE_C_FLAGS_MINSIZEREL CMAKE_CXX_FLAGS_MINSIZEREL CMAKE_EXE_LINKER_FLAGS CMAKE_SHARED_LINKER_FLAGS
+        CMAKE_MSVC_RUNTIME_LIBRARY CMAKE_POSITION_INDEPENDENT_CODE CMAKE_INTERPROCEDURAL_OPTIMIZATION CMAKE_BUILD_TYPE)
+    string(APPEND _checks "if(NOT \"\${${_setting}}\" STREQUAL [==[${${_setting}}]==])\nmessage(FATAL_ERROR \"Shared SDK ${_setting} differs; prepare again with matching flags\")\nendif()\n")
+endforeach()
+get_cmake_property(_cache_variables CACHE_VARIABLES)
+foreach(_setting IN LISTS _cache_variables)
+    if(_setting MATCHES "^(REXGLUE_|SDL_|FMT_|SPDLOG_|GLSLANG_|ENABLE_|TRACY_|VULKAN_)")
+        get_property(_type CACHE "${_setting}" PROPERTY TYPE)
+        if(_type STREQUAL "BOOL" OR _type STREQUAL "STRING")
+            if("${${_setting}}" MATCHES "\\]==\\]")
+                message(FATAL_ERROR "Unsupported bracket delimiter in shared SDK setting ${_setting}")
+            endif()
+            string(APPEND _checks "if(DEFINED ${_setting} AND NOT \"\${${_setting}}\" STREQUAL [==[${${_setting}}]==])\nmessage(FATAL_ERROR \"Shared SDK ${_setting} differs; declare the option in the title preset or prepare with X360N_SHARED_SDK=0\")\nendif()\nset(${_setting} [==[${${_setting}}]==])\n")
+        endif()
+    endif()
+endforeach()
+file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/sdk.cmake"
+    "${_checks}find_package(Threads REQUIRED)\ninclude(\"${CMAKE_CURRENT_BINARY_DIR}/rexglue-sdk/thirdparty/fmt/fmt-targets.cmake\")\ninclude(\"${CMAKE_CURRENT_BINARY_DIR}/rexglue-sdk/thirdparty/spdlog/spdlogConfigTargets.cmake\")\ninclude(\"${CMAKE_CURRENT_BINARY_DIR}/rexglue-sdk/thirdparty/sdl3/SDL3headersTargets.cmake\")\ninclude(\"${CMAKE_CURRENT_BINARY_DIR}/rexglue-sdk/thirdparty/sdl3/SDL3staticTargets.cmake\")\ninclude(\"${CMAKE_CURRENT_BINARY_DIR}/targets.cmake\")\n${_aliases}set(REXGLUE_ROOT \"${REXSDK_DIR}\")\nset(REXGLUE_SHARE_DIR \"${REXSDK_DIR}/src/ui\")\nset(REXGLUE_USE_VULKAN ${REXGLUE_USE_VULKAN})\nset(REXGLUE_USE_D3D12 ${REXGLUE_USE_D3D12})\ninclude(\"${REXSDK_DIR}/cmake/rexglue_helpers.cmake\")\n")

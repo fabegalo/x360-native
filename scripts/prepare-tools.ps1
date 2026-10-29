@@ -24,6 +24,20 @@ function PreserveDependency([string]$Directory) {
     Move-Item -LiteralPath $resolved -Destination $backup
     Stage "preserved previous dependency: $backup"
 }
+. (Join-Path $PSScriptRoot 'setup/download-tools.ps1')
+$pendingTools = @($lock.tools | Where-Object {
+    $destination = Join-Path $tools $_.directory
+    $receipt = Join-Path $destination '.x360n-archive-sha256'
+    -not ((Test-Path -LiteralPath (Join-Path $destination $_.entry)) -and
+        (Test-Path -LiteralPath $receipt) -and (Get-Content -Raw -LiteralPath $receipt).Trim() -eq $_.sha256)
+})
+foreach ($tool in $pendingTools) {
+    if ((Test-Path -LiteralPath (Join-Path $tools $tool.directory)) -and -not $UpdateDependencies) {
+        throw 'Ferramenta incompleta ou alterada. Confirme a atualizacao em Preparar; os arquivos anteriores serao preservados.'
+    }
+}
+$downloads = Get-VerifiedToolArchives $pendingTools $cache -AllowDownloads:$AllowDownloads
+try {
 foreach ($tool in $lock.tools) {
     $destination = Join-Path $tools $tool.directory
     $receipt = Join-Path $destination '.x360n-archive-sha256'
@@ -33,16 +47,7 @@ foreach ($tool in $lock.tools) {
         continue
     }
     if ((Test-Path -LiteralPath $destination) -and -not $UpdateDependencies) { throw 'Ferramenta incompleta ou alterada. Confirme a atualizacao em Preparar; os arquivos anteriores serao preservados.' }
-    $archive = Join-Path $cache $tool.asset
-    if (-not (Test-Path -LiteralPath $archive)) {
-        if (-not $AllowDownloads) { throw "Download consent required: $($tool.url) ($($tool.size) bytes)" }
-        Stage "download $($tool.id) $($tool.size) bytes"
-        & "$env:SystemRoot\System32\curl.exe" --fail --location --retry 3 --output "$archive.part" $tool.url
-        if ($LASTEXITCODE -ne 0) { throw "Download failed ($LASTEXITCODE): $($tool.url). Retry to resume preparation." }
-        if ((Get-FileHash -LiteralPath "$archive.part" -Algorithm SHA256).Hash.ToLowerInvariant() -ne $tool.sha256) { throw "Downloaded archive checksum mismatch: $($tool.asset)" }
-        Move-Item -LiteralPath "$archive.part" -Destination $archive
-    }
-    if ((Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant() -ne $tool.sha256) { throw "Cached archive checksum mismatch: $archive" }
+    $archive = $downloads.archives[$tool.id]
     Stage "extract $($tool.id)"
     # A unique staging directory makes interruption retryable without deleting anything.
     $staging = Join-Path $tools ('.staging-' + $tool.id + '-' + [guid]::NewGuid().ToString('N'))
@@ -61,6 +66,7 @@ foreach ($tool in $lock.tools) {
     Move-Item -LiteralPath $payload -Destination $destination
     if ($payload -ne $staging) { Remove-Item -LiteralPath $staging } # Empty directory only.
 }
+} finally { foreach ($handle in $downloads.leases) { $handle.Dispose() } }
 $git = Join-Path $tools 'mingit-2.56.0.2/cmd/git.exe'
 $env:PATH = (Split-Path $git) + ';' + $env:PATH
 if ($ToolsOnly) { Stage 'tools-ready'; exit 0 } # Cannot certify SDK/LLVM or clear a pending full update.

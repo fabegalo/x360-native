@@ -37,6 +37,15 @@ function(x360n_apply_sdk_backports sdk_dir)
     include(${CMAKE_CURRENT_FUNCTION_LIST_DIR}/../build/x360n_build_isolation.cmake)
     x360n_guard_ninja()
 
+    get_target_property(_imported rexruntime IMPORTED)
+    if(_imported)
+        # The driver authenticated an immutable generic generation, including
+        # its compiler, flags, dependencies and every original SDK source.
+        # Imported libraries already carry the producer's usage requirements.
+        x360n_verify_sdk_patches("${sdk_dir}" "${X360N_LOCK_FILE}")
+        return()
+    endif()
+
     if(WIN32 AND TARGET rexglue)
         # The preparation tool consumes the same UTF-8 manifest/file paths as
         # title processes. Do not change the machine's ANSI code page.
@@ -152,6 +161,21 @@ function(x360n_stage_runtime_dlls target)
         endif()
     endforeach()
     add_dependencies(${_stage} rexruntime ${ARG_PLUGIN_TARGETS})
+    # Imported targets have no producer edge in a consumer's Ninja graph. Keep
+    # their DLL files explicit so staging and receipt inventories see the same
+    # authenticated inputs as CMake's runtime-DLL generator expressions.
+    set(_native_files "$<TARGET_RUNTIME_DLLS:${target}>")
+    foreach(_native rexruntime ${ARG_PLUGIN_TARGETS} amd_fidelityfx_vk amd_fidelityfx_dx12)
+        if(TARGET ${_native})
+            list(APPEND _native_files "$<TARGET_FILE:${_native}>")
+        endif()
+    endforeach()
+    string(SHA256 _input_key "${target};${_native_files}")
+    set(_input_target "x360n_runtime_inputs_${_input_key}")
+    if(NOT TARGET ${_input_target})
+        add_custom_target(${_input_target} DEPENDS ${_native_files})
+    endif()
+    add_dependencies(${_stage} ${_input_target})
     add_dependencies(${target} ${_stage})
 endfunction()
 

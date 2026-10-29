@@ -84,7 +84,8 @@ function Get-IncrementalProducts([string]$Build) {
     # Compile once in this PowerShell host. The driver snapshots this source and
     # its SHA-256 participates in both policy and final preparation receipts.
     Initialize-ProductFingerprints
-    $graph = Invoke-IncrementalNinjaQuery $Build @('graph','all','rexglue')
+    $targets = if ((Get-BuildCache $Build).X360N_SHARED_SDK_EXPORT) { @('graph','all') } else { @('graph','all','rexglue') }
+    $graph = Invoke-IncrementalNinjaQuery $Build $targets
     $deps = Invoke-IncrementalNinjaQuery $Build @('deps')
     $commands = @((Invoke-IncrementalNinjaQuery $Build @('compdb','-x')) | ConvertFrom-Json)
     foreach ($command in $commands) { Assert-IncrementalResponseFlags $command.command }

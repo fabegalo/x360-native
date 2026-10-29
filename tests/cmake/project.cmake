@@ -97,6 +97,15 @@ if(WIN32)
   add_test(NAME x360n.toolchain-snapshot COMMAND powershell -NoProfile -ExecutionPolicy Bypass
     -File ${CMAKE_CURRENT_SOURCE_DIR}/build_isolation/toolchain_snapshot_test.ps1 -Ninja "${X360N_REAL_NINJA}")
   set_tests_properties(x360n.toolchain-snapshot PROPERTIES LABELS project TIMEOUT 300)
+  foreach(_case shared_sdk shared_protection preparation_metrics download_tools)
+    string(REPLACE "_" "-" _name "${_case}")
+    add_test(NAME x360n.${_name} COMMAND powershell -NoProfile -ExecutionPolicy Bypass
+      -File ${CMAKE_CURRENT_SOURCE_DIR}/build_isolation/${_case}_test.ps1)
+    set_tests_properties(x360n.${_name} PROPERTIES LABELS project TIMEOUT 90)
+  endforeach()
+  add_test(NAME x360n.parallel-probes COMMAND powershell -NoProfile -ExecutionPolicy Bypass
+    -File ${CMAKE_CURRENT_SOURCE_DIR}/build_isolation/parallel_probes_test.ps1)
+  set_tests_properties(x360n.parallel-probes PROPERTIES LABELS project TIMEOUT 240)
   add_test(NAME x360n.ppc.compile-contract COMMAND powershell -NoProfile -ExecutionPolicy Bypass
     -File ${CMAKE_CURRENT_SOURCE_DIR}/ppc_contract/contract_test.ps1)
   set_tests_properties(x360n.ppc.compile-contract PROPERTIES LABELS project TIMEOUT 180)

@@ -1,5 +1,8 @@
 # Included in the src/desktop directory scope to preserve binary locations.
 if(TARGET Catch2::Catch2WithMain)
+  add_executable(x360n_first_preparation_probe EXCLUDE_FROM_ALL ../../tests/desktop/first_preparation_probe.cpp)
+  target_link_libraries(x360n_first_preparation_probe PRIVATE x360n_desktop_model)
+  target_include_directories(x360n_first_preparation_probe PRIVATE ${X360_REXGLUE_DIR}/thirdparty/inja/third_party/include)
   add_executable(x360n_preparation_benchmark EXCLUDE_FROM_ALL ../../tests/desktop/preparation_benchmark.cpp)
   target_link_libraries(x360n_preparation_benchmark PRIVATE x360n_core)
   add_executable(x360n_launch_benchmark EXCLUDE_FROM_ALL ../../tests/desktop/launch_benchmark.cpp)

@@ -9,7 +9,8 @@ set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 include(verify-input.cmake)
 
-include(generated/rexglue.cmake)
+include(../../cmake/sdk/x360n_title_sdk.cmake)
+x360n_include_rexglue(generated/rexglue.cmake)
 
 # x360-native: fixes for the pinned SDK commit, applied from outside the SDK
 # tree (see cmake/sdk/x360n_sdk_backports.cmake). Only meaningful with REXSDK_DIR.

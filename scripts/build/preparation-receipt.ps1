@@ -19,6 +19,10 @@ function Get-BuildIoPath([string]$File) {
 }
 function Test-BuildFile([string]$File) { [IO.File]::Exists((Get-BuildIoPath $File)) }
 function Get-ReceiptHash([string]$File) {
+    if ('X360NProducts' -as [type]) {
+        $protected = [X360NProducts]::ProtectedHash($File)
+        if ($protected) { return $protected }
+    }
     $stream = [IO.File]::OpenRead((Get-BuildIoPath $File))
     # HashAlgorithm.ComputeHash(Stream) feeds CNG only 4 KiB at a time on .NET
     # Framework. Larger blocks reduce read/interop calls without caching hashes.
@@ -133,6 +137,14 @@ function Get-BuildInputs([string]$Root, [string]$Title, [string]$Build, [string[
     $projectDirectory = (Get-BuildCache $Build).CMAKE_HOME_DIRECTORY
     $cache = Get-BuildCache $Build
     $files = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    $sharedBinding = Join-Path $Build '.preparation/shared-sdk.json'
+    if (Test-BuildFile $sharedBinding) {
+        $shared = [IO.File]::ReadAllText($sharedBinding) | ConvertFrom-Json
+        if ($shared.schema -ne 1 -or -not $shared.inputs) { throw 'Invalid shared SDK binding' }
+        if (-not (Test-ReceiptEntries $shared.inputs) -or -not (Test-ReceiptGlobs $shared.globs)) { throw 'Shared SDK changed during preparation' }
+        [void]$files.Add($sharedBinding)
+        foreach ($entry in $shared.inputs) { [void]$files.Add($entry.path) }
+    }
     foreach ($file in Get-BuildPresetFiles $projectDirectory) { [void]$files.Add($file) }
     $nodes = @(Get-NinjaNodes $Build $Targets)
     $objects = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
@@ -176,6 +188,8 @@ function Get-BuildInputs([string]$Root, [string]$Title, [string]$Build, [string[
     }
     foreach ($file in @('deps.lock.json','scripts/build-title.ps1','scripts/build/preparation-receipt.ps1','scripts/devshell.cmd',
                        'scripts/build/build-lease.ps1','scripts/build/ninja-guard.ps1','scripts/build/incremental-state.ps1','scripts/build/release-configuration.ps1','scripts/build/toolchain-snapshot.ps1','scripts/build/product-fingerprint.cs',
+                       'scripts/build/shared-sdk.ps1','scripts/build/preparation-process.cs',
+                       'scripts/build/parallel-probes.ps1',
                        'cmake/build/x360n_stage_files.cmake','cmake/runtime/x360n_runtime.manifest')) {
         [void]$files.Add([IO.Path]::GetFullPath((Join-Path $Root $file)))
     }
