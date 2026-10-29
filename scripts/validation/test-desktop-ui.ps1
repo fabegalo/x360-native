@@ -29,7 +29,14 @@ try {
     $h = [IntPtr]::Zero
     for ($i = 0; $i -lt 60 -and $h -eq [IntPtr]::Zero; $i++) { $p.Refresh(); $h = $p.MainWindowHandle; Start-Sleep -Milliseconds 500 }
     if ($h -eq [IntPtr]::Zero) { throw 'no window' }
-    Start-Sleep 6
+    # Commands are ignored while the initial listing runs: wait until the process goes idle.
+    $deadline = (Get-Date).AddSeconds(120); $quiet = 0; $last = $p.TotalProcessorTime
+    Start-Sleep 5
+    while ((Get-Date) -lt $deadline -and $quiet -lt 4) {
+        Start-Sleep 2; $p.Refresh(); $now = $p.TotalProcessorTime
+        if (($now - $last).TotalMilliseconds -lt 150) { $quiet++ } else { $quiet = 0 }
+        $last = $now
+    }
     function Cmd([int]$id) { [void][X360T]::SendMessage($h, 0x111, [IntPtr]$id, [IntPtr]::Zero); Start-Sleep -Milliseconds 500 }
     function Text([int]$id) { $sb = New-Object System.Text.StringBuilder 512; [void][X360T]::GetWindowText([X360T]::GetDlgItem($h, $id), $sb, 512); $sb.ToString() }
     function Rows { [int][X360T]::SendMessage([X360T]::GetDlgItem($h, 122), 0x18B, [IntPtr]::Zero, [IntPtr]::Zero) }
