@@ -61,7 +61,8 @@ if(TARGET Catch2::Catch2WithMain)
     add_test(NAME desktop.launcher COMMAND x360n_launcher_tests "[launcher-ui],[digest-batch],[session-event]")
     set_tests_properties(desktop.launcher PROPERTIES LABELS project TIMEOUT 90)
     add_test(NAME desktop.launcher-layout COMMAND x360n_launcher_tests "[launcher-layout]")
-    set_tests_properties(desktop.launcher-layout PROPERTIES LABELS project TIMEOUT 60)
+    # Settings is also reviewed at 1280x720 to 1920x1080 and 120/192 DPI.
+    set_tests_properties(desktop.launcher-layout PROPERTIES LABELS project TIMEOUT 120)
     add_test(NAME desktop.session-fullscreen COMMAND x360n_launcher_tests "[session-fullscreen]")
     set_tests_properties(desktop.session-fullscreen PROPERTIES LABELS project TIMEOUT 30)
     add_test(NAME desktop.version-from-commits COMMAND powershell -NoProfile -ExecutionPolicy Bypass

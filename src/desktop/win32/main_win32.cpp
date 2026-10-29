@@ -49,7 +49,7 @@ enum { kFolder = 101, kTargets, kCheck, kImport, kPrepare, kLaunch, kDetails, kD
        kEffectBilinear, kEffectCas, kEffectFsr, kSharpnessLabel, kSharpness,
        kScaleLabel, kScale1, kScale2, kScale3, kScale4,
        kAnisoLabel, kAnisoGuest, kAniso2, kAniso4, kAniso8, kAniso16,
-       kAaNone, kAaFxaa, kAaExtreme, kUltrawide };
+       kAaNone, kAaFxaa, kAaExtreme, kUltrawide, kAaLabel };
 bool english = false;
 std::string Tr(const char* pt, const char* en) { return english ? en : pt; }
 std::wstring Wide(const std::string& text) {
@@ -60,6 +60,29 @@ std::wstring Wide(const std::string& text) {
   return out;
 }
 std::wstring WTr(const char* pt, const char* en) { return Wide(Tr(pt, en)); }
+// Channel named by the prerelease tag of the version CMake derives from the
+// commit history (cmake/distribution/x360n_version.cmake). A "dev" identifier
+// wins over any other tag; an unknown tag is a pre-release, never stable.
+std::string VersionChannel(std::string_view version) {
+  const auto dash = version.find('-');
+  if (dash == std::string_view::npos) return Tr("Estável", "Stable");
+  std::vector<std::string_view> ids;
+  for (size_t at = dash + 1; at <= version.size();) {
+    const auto end = std::min(version.find_first_of(".-", at), version.size());
+    ids.push_back(version.substr(at, end - at)); at = end + 1;
+  }
+  if (std::find(ids.begin(), ids.end(), "dev") != ids.end()) return Tr("Desenvolvimento", "Development");
+  if (ids.front() == "rc") return "Release Candidate";
+  if (ids.front() == "preview" || ids.front() == "beta" || ids.front() == "alpha") return Tr("Prévia", "Preview");
+  return Tr("Pré-lançamento", "Pre-release");
+}
+std::string VersionLabel(std::string_view version) { return "v" + std::string(version) + " · " + VersionChannel(version); }
+// No-break space: wrapped text never splits the platform name.
+#if defined(_M_ARM64)
+constexpr const char* kPlatform = "Windows ARM64";
+#else
+constexpr const char* kPlatform = "Windows x64";
+#endif
 
 enum class Page { Home, Library, Import, Dashboard, Settings, Diagnostics };
 enum class Row { Ready, Preparing, Imported, Unsupported, Error, Pending, Unchecked };
@@ -67,7 +90,9 @@ enum class Kind { Secondary, Primary, Nav, Chip, Ghost, Option, Toggle };
 enum class Tone { Neutral, Ok, Warn, Err, Info };
 struct Style { Kind kind = Kind::Secondary; const wchar_t* glyph = nullptr; int back = 0; };  // back: 0 bg, 1 sidebar, 2 surface
 struct Geo {
-  RECT banner{}, bar{}, steps{}, elapsed{}, hero{}, stats[4]{}, drop{}, tiles[3]{}, list_card{}, detail{}, search{}, cards[4]{}, details_card{}, empty{}, sidebar{};
+  RECT banner{}, bar{}, steps{}, elapsed{}, hero{}, stats[4]{}, drop{}, tiles[3]{}, list_card{}, detail{}, search{}, cards[5]{}, details_card{}, empty{}, sidebar{}, footer_rule{};
+  RECT fields[3]{};  // frames behind the Settings numeric edits
+  std::vector<std::pair<RECT, std::wstring>> captions;  // painted Settings section captions
   bool banner_on = false;
   int banner_text = 0, title_right = 0, action_w = 0;
   // Settings content scrolls inside the viewport; its controls are clipped to it.
@@ -79,7 +104,7 @@ struct Fonts { HFONT body{}, bold{}, caption{}, headline{}, big{}, icon{}, icon_
 
 struct App {
   HWND library_list{}, window{}, subtitle{}, root_text{}, status{}, details{}, headline{}, footer{}, search{};
-  HWND activity_text{}, drop_text{}, renderer_hint{}, env_text{}, hot{};
+  HWND activity_text{}, drop_text{}, renderer_hint{}, env_text{}, hot{}, privacy{}, about{}, enhanced_hint{};
   HWND console_language_label{}, console_country_label{}, console_hint{};
   Fonts fonts;
   HICON icon{};
@@ -204,6 +229,10 @@ void ApplyFonts(App& a) {
   SendMessageW(a.headline, WM_SETFONT, reinterpret_cast<WPARAM>(a.fonts.headline), TRUE);
   SendMessageW(a.details, WM_SETFONT, reinterpret_cast<WPARAM>(a.fonts.mono), TRUE);
   SendMessageW(a.footer, WM_SETFONT, reinterpret_cast<WPARAM>(a.fonts.caption), TRUE);
+  SendMessageW(a.privacy, WM_SETFONT, reinterpret_cast<WPARAM>(a.fonts.caption), TRUE);
+  // Borderless edits align with the labels and painted frames around them.
+  for (auto h : {a.about, GetDlgItem(a.window, kFpsCustom), GetDlgItem(a.window, kPresentRate), GetDlgItem(a.window, kSharpness)})
+    SendMessageW(h, EM_SETMARGINS, EC_LEFTMARGIN | EC_RIGHTMARGIN, 0);
 }
 LRESULT CALLBACK HotProc(HWND h, UINT m, WPARAM wp, LPARAM lp, UINT_PTR, DWORD_PTR ref) {
   auto* a = reinterpret_cast<App*>(ref);
@@ -403,8 +432,25 @@ void Layout(App& a) {
   const int nx = s(12), nw = sb - s(24), nh = s(42);
   int ny = s(92);
   for (auto id : {kHome, kGames, kImportPage, kDashboards}) { put(Item(a, id), nx, ny, nw, nh); ny += nh + s(4); }
-  int by = H - s(70) - s(8);
-  put(a.footer, s(20), H - s(70), sb - s(36), s(54));
+  // Footer: version and platform, then the privacy note, each measured so a
+  // long prerelease tag or a translation wraps instead of being cut.
+  const int fx = s(20), fw = sb - s(36);
+  {
+    const auto label = Wide(VersionLabel(X360N_VERSION));
+    HDC dc = GetDC(a.window);
+    const bool fits = ui::TextWidth(dc, a.fonts.caption, label) <= fw;
+    ReleaseDC(a.window, dc);
+    const auto version = fits ? label : Wide("v" + std::string(X360N_VERSION) + "\r\n" + VersionChannel(X360N_VERSION));
+    const auto text = version + L"\r\n" + Wide(kPlatform);
+    wchar_t now[256]{}; GetWindowTextW(a.footer, now, 256);
+    if (text != now) SetWindowTextW(a.footer, text.c_str());
+  }
+  const int privacy_h = TextHeight(a.privacy, fw), footer_h = TextHeight(a.footer, fw);
+  const int privacy_y = H - s(18) - privacy_h, footer_y = privacy_y - s(8) - footer_h;
+  put(a.privacy, fx, privacy_y, fw, privacy_h);
+  put(a.footer, fx, footer_y, fw, footer_h);
+  g.footer_rule = rect(fx, footer_y - s(12), fw, 1);
+  int by = footer_y - s(24);
   by -= nh; put(Item(a, kLanguage), nx, by, nw, nh);
   by -= nh + s(4); put(Item(a, kDetails), nx, by, nw, nh);
   by -= nh + s(4); put(Item(a, kSettings), nx, by, nw, nh);
@@ -542,29 +588,41 @@ void Layout(App& a) {
       break;
     }
     case Page::Settings: {
-      const bool two = cw >= s(700);
+      // Cards fill two columns, or three on wide windows, each one placed under
+      // the shortest column in reading order, so no column ends far below the other.
       const int gap = s(16);
-      const int colw = two ? (cw - gap) / 2 : cw;
+      const int columns = cw >= s(1150) ? 3 : cw >= s(700) ? 2 : 1;
+      const int colw = (cw - (columns - 1) * gap) / columns;
       const int ow = colw - s(48);
-      // Card heights follow their wrapped texts; storage actions pair up only when every label fits.
+      // Heights follow wrapped texts; storage actions pair up only when every label fits.
       const int hint_h = TextHeight(a.renderer_hint, ow);
+      const int enhanced_h = TextHeight(a.enhanced_hint, ow);
       const int console_h = TextHeight(a.console_hint, ow);
       const int env_h = TextHeight(a.env_text, ow);
+      const int about_h = TextHeight(a.about, ow);
       int need = 0;
       for (int id : {kFolder, kStorage, kData, kCheck}) need = std::max(need, ButtonWidth(a, id, false));
       const bool pairs = 2 * need + s(12) <= ow;
       const int storage_rows = pairs ? 2 : 4;
-      const int hg = s(52) + hint_h + s(12) + s(886) + s(20);
-      const int hs = s(92) + storage_rows * s(46) - s(8) + s(20);
-      const int hl = s(178) + console_h + s(20);
-      const int hy = s(96) + env_h + s(20);
+      RECT combo{}; GetWindowRect(Item(a, kConsoleLanguage), &combo);
+      const int combo_h = combo.bottom - combo.top;
+      // Section caption (painted), option (two text lines), toggle/chip/field rows, label above a row.
+      const int cap = s(26), opt = s(58), row = s(36), label = s(26);
+      const int heights[5] = {
+        s(52) + hint_h + s(16) + 3 * cap + 4 * opt + 2 * s(8) + 2 * s(16) + 2 * row + s(4) + s(20),       // graphics
+        s(52) + enhanced_h + s(12) + row + s(16) + label + 3 * (row + s(12)) + row + s(16) + row + s(20) +
+          3 * (label + row + s(12)) + row + s(20),                                                         // Native Enhanced
+        s(56) + s(24) + s(12) + storage_rows * s(46) - s(8) + s(16) + env_h + s(20),                    // storage
+        s(50) + 2 * (s(22) + s(4) + combo_h + s(14)) + console_h + s(20),                                // console
+        s(48) + row + s(16) + about_h + s(20)};                                                           // desktop
       // Lay the cards out from the viewport top, then shift them by the clamped scroll.
       const int top = yc;
-      int lx = cx, rx = two ? cx + colw + gap : cx;
-      g.cards[0] = rect(lx, top, colw, hg);                     // graphics
-      g.cards[1] = two ? rect(rx, top, colw, hs) : rect(lx, top + hg + gap, colw, hs);  // storage
-      g.cards[2] = rect(two ? rx : lx, g.cards[1].bottom + gap, colw, hl);              // console
-      g.cards[3] = rect(lx, two ? g.cards[0].bottom + gap : g.cards[2].bottom + gap, colw, hy);  // desktop
+      int column_bottom[3] = {top, top, top};
+      for (int i = 0; i < 5; ++i) {
+        const int c = int(std::min_element(column_bottom, column_bottom + columns) - column_bottom);
+        g.cards[i] = rect(cx + c * (colw + gap), column_bottom[c], colw, heights[i]);
+        column_bottom[c] += heights[i] + gap;
+      }
       LONG content = 0;
       for (const auto& c : g.cards) content = std::max(content, c.bottom);
       g.viewport = RECT{sb + 1, top, W, H};
@@ -572,61 +630,101 @@ void Layout(App& a) {
       a.scroll = std::clamp(a.scroll, 0, g.scroll_max);
       for (auto& c : g.cards) OffsetRect(&c, 0, -a.scroll);
       clip = g.viewport;
-      const RECT& gf = g.cards[0];
-      put(a.renderer_hint, gf.left + s(24), gf.top + s(52), ow, hint_h);
-      const int oy = gf.top + s(52) + hint_h + s(12);
-      put(Item(a, kRenderer), gf.left + s(24), oy, ow, s(58));
-      put(Item(a, kRendererNative), gf.left + s(24), oy + s(66), ow, s(58));
-      put(Item(a, kApiD3D12), gf.left + s(24), oy + s(132), ow, s(58));
-      put(Item(a, kApiVulkan), gf.left + s(24), oy + s(198), ow, s(58));
-      put(Item(a, kNativeDevelopment), gf.left + s(24), oy + s(264) + s(8), ow, s(36));
-      put(Item(a, kFullscreen), gf.left + s(24), oy + s(264) + s(52), ow, s(36));
-      put(Item(a, kEnhanced), gf.left + s(24), oy + s(360), ow, s(36));
-      const int fw = (ow - s(18)) / 4;
-      for (int i = 0; i < 4; ++i) put(Item(a, kFps30 + i), gf.left + s(24) + i * (fw + s(6)), oy + s(402), fw, s(36));
-      put(Item(a, kFpsLabel), gf.left + s(24), oy + s(448), ow / 2, s(30));
-      put(Item(a, kFpsCustom), gf.left + s(24) + ow / 2, oy + s(444), ow / 2, s(32));
-      put(Item(a, kPresentLabel), gf.left + s(24), oy + s(488), ow / 2, s(30));
-      put(Item(a, kPresentRate), gf.left + s(24) + ow / 2, oy + s(484), ow / 2, s(32));
-      const int ew = (ow - s(12)) / 3;
-      for (int i = 0; i < 3; ++i) put(Item(a, kEffectBilinear + i), gf.left + s(24) + i * (ew + s(6)), oy + s(526), ew, s(36));
-      put(Item(a, kSharpnessLabel), gf.left + s(24), oy + s(572), ow / 2, s(30));
-      put(Item(a, kSharpness), gf.left + s(24) + ow / 2, oy + s(568), ow / 2, s(32));
-      put(Item(a, kScaleLabel), gf.left + s(24), oy + s(612), ow, s(28));
-      for (int i = 0; i < 4; ++i) put(Item(a, kScale1 + i), gf.left + s(24) + i * (fw + s(6)), oy + s(644), fw, s(36));
-      put(Item(a, kAnisoLabel), gf.left + s(24), oy + s(688), ow, s(28));
-      const int aw = (ow - s(24)) / 5;
-      for (int i = 0; i < 5; ++i) put(Item(a, kAnisoGuest + i), gf.left + s(24) + i * (aw + s(6)), oy + s(720), aw, s(36));
-      for (int i = 0; i < 3; ++i) put(Item(a, kAaNone + i), gf.left + s(24) + i * (ew + s(6)), oy + s(764), ew, s(36));
-      put(Item(a, kUltrawide), gf.left + s(24), oy + s(806), ow, s(36));
-      put(Item(a, kTimingApply), gf.left + s(24), oy + s(850), ow, s(36));
-      const RECT& st = g.cards[1];
-      put(a.root_text, st.left + s(24), st.top + s(56), ow, s(24));
-      const int bw2 = pairs ? (ow - s(12)) / 2 : ow;
-      int slot = 0;
-      for (int id : {kFolder, kStorage, kData, kCheck}) {
-        const int col = pairs ? slot % 2 : 0, row = pairs ? slot / 2 : slot;
-        put(Item(a, id), st.left + s(24) + col * (bw2 + s(12)), st.top + s(92) + row * s(46), bw2, s(38));
-        ++slot;
+      auto caption = [&](int x, int y, const std::wstring& text) { g.captions.push_back({rect(x, y, ow, s(18)), text}); };
+      // A label on the left, its numeric field on the right (frame painted behind the edit).
+      auto field = [&](int index, int label_id, int edit_id, int x, int y) {
+        const int field_w = s(88), eh = LineHeight(Item(a, edit_id));
+        put(Item(a, label_id), x, y + (row - s(22)) / 2, ow - field_w - s(12), s(22));
+        g.fields[index] = rect(x + ow - field_w, y, field_w, row);
+        put(Item(a, edit_id), x + ow - field_w + s(10), y + (row - eh) / 2, field_w - s(20), eh);
+      };
+      // Equal-width chips across the row with a fixed gutter.
+      auto chips = [&](int first, int count, int x, int y, int width) {
+        const int w = (width - (count - 1) * s(6)) / count;
+        for (int i = 0; i < count; ++i) put(Item(a, first + i), x + i * (w + s(6)), y, w, row);
+      };
+      {
+        const RECT& c = g.cards[0];
+        const int x = c.left + s(24);
+        int y = c.top + s(52);
+        put(a.renderer_hint, x, y, ow, hint_h); y += hint_h + s(16);
+        caption(x, y, L"Renderer"); y += cap;
+        put(Item(a, kRenderer), x, y, ow, opt); y += opt + s(8);
+        put(Item(a, kRendererNative), x, y, ow, opt); y += opt + s(16);
+        caption(x, y, WTr("API gráfica", "Graphics API")); y += cap;
+        put(Item(a, kApiD3D12), x, y, ow, opt); y += opt + s(8);
+        put(Item(a, kApiVulkan), x, y, ow, opt); y += opt + s(16);
+        caption(x, y, WTr("Sessão", "Session")); y += cap;
+        put(Item(a, kNativeDevelopment), x, y, ow, row); y += row + s(4);
+        put(Item(a, kFullscreen), x, y, ow, row);
       }
-      const RECT& lg = g.cards[2];
-      put(a.console_language_label, lg.left + s(24), lg.top + s(50), ow, s(22));
-      put(Item(a, kConsoleLanguage), lg.left + s(24), lg.top + s(76), ow, s(300));
-      put(a.console_country_label, lg.left + s(24), lg.top + s(112), ow, s(22));
-      put(Item(a, kConsoleCountry), lg.left + s(24), lg.top + s(138), ow, s(300));
-      put(a.console_hint, lg.left + s(24), lg.top + s(178), ow, console_h);
-      const RECT& sy = g.cards[3];
-      const int chip_w = std::max({s(140), ButtonWidth(a, kLangPt, false), ButtonWidth(a, kLangEn, false)});
-      put(Item(a, kLangPt), sy.left + s(24), sy.top + s(48), chip_w, s(36));
-      put(Item(a, kLangEn), sy.left + s(24) + chip_w + s(8), sy.top + s(48), chip_w, s(36));
-      put(a.env_text, sy.left + s(24), sy.top + s(96), ow, env_h);
+      {
+        const RECT& c = g.cards[1];
+        const int x = c.left + s(24);
+        int y = c.top + s(52);
+        put(a.enhanced_hint, x, y, ow, enhanced_h); y += enhanced_h + s(12);
+        put(Item(a, kEnhanced), x, y, ow, row); y += row + s(16);
+        // Presets and the custom target share one row; the custom value needs Apply.
+        put(Item(a, kFpsLabel), x, y, ow, s(22)); y += label;
+        const int field_w = s(88);
+        chips(kFps30, 4, x, y, ow - field_w - s(6));
+        g.fields[0] = rect(x + ow - field_w, y, field_w, row);
+        { const int eh = LineHeight(Item(a, kFpsCustom)); put(Item(a, kFpsCustom), x + ow - field_w + s(10), y + (row - eh) / 2, field_w - s(20), eh); }
+        y += row + s(12);
+        field(1, kPresentLabel, kPresentRate, x, y); y += row + s(12);
+        chips(kEffectBilinear, 3, x, y, ow); y += row + s(12);
+        field(2, kSharpnessLabel, kSharpness, x, y); y += row + s(16);
+        put(Item(a, kTimingApply), x, y, std::min(ow, std::max(s(220), ButtonWidth(a, kTimingApply, false))), row); y += row + s(20);
+        put(Item(a, kScaleLabel), x, y, ow, s(22)); y += label;
+        chips(kScale1, 4, x, y, ow); y += row + s(12);
+        put(Item(a, kAnisoLabel), x, y, ow, s(22)); y += label;
+        chips(kAnisoGuest, 5, x, y, ow); y += row + s(12);
+        put(Item(a, kAaLabel), x, y, ow, s(22)); y += label;
+        chips(kAaNone, 3, x, y, ow); y += row + s(12);
+        put(Item(a, kUltrawide), x, y, ow, row);
+      }
+      {
+        const RECT& c = g.cards[2];
+        const int x = c.left + s(24);
+        put(a.root_text, x, c.top + s(56), ow, s(24));
+        const int bw2 = pairs ? (ow - s(12)) / 2 : ow;
+        int slot = 0;
+        for (int id : {kFolder, kStorage, kData, kCheck}) {
+          const int col = pairs ? slot % 2 : 0, line = pairs ? slot / 2 : slot;
+          put(Item(a, id), x + col * (bw2 + s(12)), c.top + s(92) + line * s(46), bw2, s(38));
+          ++slot;
+        }
+        put(a.env_text, x, c.top + s(92) + storage_rows * s(46) - s(8) + s(16), ow, env_h);
+      }
+      {
+        const RECT& c = g.cards[3];
+        const int x = c.left + s(24);
+        int y = c.top + s(50);
+        put(a.console_language_label, x, y, ow, s(22)); y += s(22) + s(4);
+        put(Item(a, kConsoleLanguage), x, y, ow, s(300)); y += combo_h + s(14);
+        put(a.console_country_label, x, y, ow, s(22)); y += s(22) + s(4);
+        put(Item(a, kConsoleCountry), x, y, ow, s(300)); y += combo_h + s(14);
+        put(a.console_hint, x, y, ow, console_h);
+      }
+      {
+        const RECT& c = g.cards[4];
+        const int x = c.left + s(24);
+        const int chip_w = std::min((ow - s(8)) / 2, std::max({s(140), ButtonWidth(a, kLangPt, false), ButtonWidth(a, kLangEn, false)}));
+        put(Item(a, kLangPt), x, c.top + s(48), chip_w, row);
+        put(Item(a, kLangEn), x + chip_w + s(8), c.top + s(48), chip_w, row);
+        put(a.about, x, c.top + s(48) + row + s(16), ow, about_h);
+      }
       clip = {};
       break;
     }
     case Page::Diagnostics: {
       g.details_card = rect(cx, yc, cw, std::max(s(160), bottom - yc));
       put(Item(a, kCaptureCrash), cx + s(16), yc + s(14), cw - s(32), s(36));
-      put(a.details, cx + s(16), yc + s(58), cw - s(32), g.details_card.bottom - g.details_card.top - s(72));
+      // The exact build identification heads every diagnostic report.
+      const int about_h = TextHeight(a.about, cw - s(32));
+      put(a.about, cx + s(16), yc + s(58), cw - s(32), about_h);
+      const int dy = s(58) + about_h + s(10);
+      put(a.details, cx + s(16), yc + dy, cw - s(32), g.details_card.bottom - g.details_card.top - dy - s(14));
       break;
     }
   }
@@ -648,8 +746,8 @@ void Enable(App& a) {
   EnableWindow(Item(a, kLanguage), !a.busy);
   EnableWindow(a.details, TRUE);
   EnableWindow(a.status, TRUE); EnableWindow(a.activity_text, TRUE); EnableWindow(a.subtitle, TRUE);
-  EnableWindow(a.headline, TRUE); EnableWindow(a.footer, TRUE); EnableWindow(a.root_text, TRUE);
-  EnableWindow(a.drop_text, TRUE); EnableWindow(a.renderer_hint, TRUE); EnableWindow(a.env_text, TRUE);
+  EnableWindow(a.headline, TRUE); EnableWindow(a.footer, TRUE); EnableWindow(a.privacy, TRUE); EnableWindow(a.about, TRUE); EnableWindow(a.root_text, TRUE);
+  EnableWindow(a.drop_text, TRUE); EnableWindow(a.renderer_hint, TRUE); EnableWindow(a.enhanced_hint, TRUE); EnableWindow(a.env_text, TRUE);
   const bool action_ok = a.next_action == kFolder || a.next_action == kDashboards || a.next_action == kImportPage ||
     (a.next_action == kImport && !a.root.empty()) ||
     (a.next_action == kPrepare && has && (a.targets[a.selected].importable || a.targets[a.selected].generic_aot) && !a.current.prepared && (a.current.inputs_ok || a.current.verification_pending) && a.environment.writable && a.environment.architecture) ||
@@ -715,7 +813,10 @@ void SetActivity(App& a, int kind, const std::wstring& title, const std::string&
   SetTimer(a.window, 2, 33, nullptr);
 }
 void UpdateRendererControls(App& a) {
-  Set(a.renderer_hint, Tr("O renderer vale para toda a sessão e é aplicado no próximo início. Enhanced separa limite visual e FPS de simulação; o alvo de simulação exige um perfil identificado do jogo. Padrão preserva o tempo original.", "The renderer applies to the whole session on the next launch. Enhanced separates display and simulation limits; the simulation target requires an identified game profile. Default preserves original timing."));
+  Set(a.renderer_hint, Tr("O renderer vale para toda a sessão e é aplicado no próximo início.", "The renderer applies to the whole session on the next launch."));
+  const bool native = a.renderer_settings.experimental && a.renderer_settings.renderer == Renderer::Native;
+  Set(a.enhanced_hint, std::string(native ? "" : Tr("Disponível somente com o renderer Native, liberado pelo acesso de desenvolvimento. ", "Available only with the Native renderer, unlocked by the development access. ")) +
+    Tr("Separa limite visual e FPS de simulação; o alvo de simulação exige um perfil identificado do jogo. Padrão preserva o tempo original.", "Separates display and simulation limits; the simulation target requires an identified game profile. Default preserves original timing."));
   std::string env = a.environment.description;
   if (env.empty()) env = Tr("Escolha um ambiente para verificar este computador.", "Choose an environment to check this computer.");
   Set(a.env_text, env);
@@ -1098,10 +1199,11 @@ void Labels(App& a) {
        {kImportPage, "Importar", "Import"}, {kAddContent, "Adicionar conteúdo", "Add content"}, {kLibrary, "Ver biblioteca", "View library"},
        {kFilter0, "Todos", "All"}, {kFilter1, "Prontos", "Ready"}, {kFilter2, "Preparar", "To prepare"}, {kFilter3, "Atenção", "Attention"},
        {kLangPt, "Português (BR)", "Portuguese (BR)"}, {kLangEn, "English", "English"},
-       {kRenderer, "Renderer · Xenos (ReXGlue)", "Renderer · Xenos (ReXGlue)"}, {kRendererNative, "Renderer · Native (Experimental)", "Renderer · Native (Experimental)"},
-       {kApiD3D12, "API gráfica · Direct3D 12", "Graphics API · Direct3D 12"}, {kApiVulkan, "API gráfica · Vulkan", "Graphics API · Vulkan"},
+       {kRenderer, "Xenos (ReXGlue)", "Xenos (ReXGlue)"}, {kRendererNative, "Native (Experimental)", "Native (Experimental)"},
+       {kApiD3D12, "Direct3D 12", "Direct3D 12"}, {kApiVulkan, "Vulkan", "Vulkan"},
        {kNativeDevelopment, "Acesso de desenvolvimento ao Native", "Native development access"},
-       {kEnhanced, "Native Enhanced · próximo início", "Native Enhanced · next launch"},
+       {kEnhanced, "Ativar no próximo início", "Enable on next launch"},
+       {kAaLabel, "Antisserrilhamento", "Anti-aliasing"},
        {kFps30, "30", "30"}, {kFps60, "60", "60"}, {kFps120, "120", "120"}, {kFps144, "144", "144"},
        {kFpsLabel, "FPS · 30–240", "FPS · 30–240"}, {kPresentLabel, "Limite visual · 0 livre", "Display cap · 0 uncapped"},
        {kTimingApply, "Aplicar limites personalizados", "Apply custom limits"},
@@ -1120,7 +1222,11 @@ void Labels(App& a) {
   Set(Item(a, kLanguage), english ? "Language: English" : "Idioma: Português");
   if (a.update) Set(Item(a, kUpdate), Tr("Instalar ", "Install ") + a.update->version);
   SendMessageW(a.search, EM_SETCUEBANNER, TRUE, reinterpret_cast<LPARAM>(WTr("Buscar jogo, Title ID ou versão", "Search game, Title ID or version").c_str()));
-  Set(a.footer, Tr("Prévia v", "Preview v") + X360N_VERSION + Tr(" · Windows\r\nSeus arquivos permanecem neste computador.", " · Windows\r\nYour files stay on this computer."));
+  // The sidebar footer may break the version line at its separator (Layout);
+  // the full identification stays in Settings and Diagnostics for support.
+  Set(a.footer, VersionLabel(X360N_VERSION) + "\r\n" + kPlatform);
+  Set(a.privacy, Tr("Seus arquivos permanecem neste computador.", "Your files stay on this computer."));
+  Set(a.about, "x360-native " + VersionLabel(X360N_VERSION) + " · " + kPlatform);
   UpdateRendererControls(a);
 }
 fs::path PickFolder(HWND owner, const wchar_t* title, bool folder = true) {
@@ -1500,6 +1606,7 @@ void Paint(App& a, HDC capture = nullptr) {
   ui::Text(dc, a.fonts.big, L"X", {s(20), s(28), s(56), s(64)}, P.on_accent, DT_SINGLELINE | DT_VCENTER | DT_CENTER);
   ui::Text(dc, a.fonts.bold, L"x360-native", {s(66), s(26), sb - s(12), s(46)}, P.text);
   ui::Text(dc, a.fonts.caption, L"Xbox 360 · AOT", {s(66), s(44), sb - s(12), s(64)}, P.muted);
+  ui::Fill(dc, g.footer_rule, P.border);
   const Page page = PageOf(a);
   auto card = [&](const RECT& rc) { ui::Round(dc, rc, s(14), P.surface, P.border); };
   if (g.banner_on) PaintBanner(dc, a);
@@ -1595,9 +1702,18 @@ void Paint(App& a, HDC capture = nullptr) {
       IntersectClipRect(dc, view.left, view.top, view.right, view.bottom);
       for (const auto& c : g.cards) card(c);
       DrawHeading(dc, a, g.cards[0], ui::icon::chip, WTr("Gráficos", "Graphics"));
-      DrawHeading(dc, a, g.cards[1], ui::icon::save, WTr("Armazenamento e ambiente", "Storage and environment"));
-      DrawHeading(dc, a, g.cards[2], ui::icon::language, WTr("Console Xbox 360", "Xbox 360 console"));
-      DrawHeading(dc, a, g.cards[3], ui::icon::tools, WTr("Aplicativo desktop", "Desktop application"));
+      DrawHeading(dc, a, g.cards[1], ui::icon::settings, L"Native Enhanced");
+      const auto experimental = WTr("Experimental", "Experimental");
+      DrawChip(dc, a, g.cards[1].right - s(24) - ChipWidth(dc, a, experimental), g.cards[1].top + s(17), experimental, Tone::Warn);
+      DrawHeading(dc, a, g.cards[2], ui::icon::save, WTr("Armazenamento e ambiente", "Storage and environment"));
+      DrawHeading(dc, a, g.cards[3], ui::icon::language, WTr("Console Xbox 360", "Xbox 360 console"));
+      DrawHeading(dc, a, g.cards[4], ui::icon::tools, WTr("Aplicativo desktop", "Desktop application"));
+      for (const auto& [rc, text] : g.captions) ui::Text(dc, a.fonts.caption, text, rc, P.muted);
+      for (int i = 0; i < 3; ++i) {
+        const HWND edit = Item(a, i == 0 ? kFpsCustom : i == 1 ? kPresentRate : kSharpness);
+        const bool on = IsWindowEnabled(edit), focused = GetFocus() == edit;
+        ui::Round(dc, g.fields[i], s(8), P.surface2, focused ? P.accent_text : on ? P.border : ui::Mix(P.surface, P.border, 50), focused ? 2 : 1);
+      }
       RestoreDC(dc, saved);
       if (g.scroll_max > 0) {
         // Position indicator for the scrolled cards (wheel, Tab and the gamepad reveal them).
@@ -1728,10 +1844,10 @@ void DrawButton(App& a, const DRAWITEMSTRUCT& item) {
     ui::Text(dc, a.fonts.bold, label, {s(48), s(8), w - s(16), s(30)}, ink);
     const auto caption = item.CtlID == kApiVulkan
         ? (a.renderer_settings.renderer == Renderer::Native
-           ? WTr("Native experimental · aguarda validação em jogo", "Experimental Native · awaiting in-game validation")
-           : WTr("Experimental · driver verificado antes de iniciar", "Experimental · driver checked before launch"))
+           ? WTr("Experimental · sem validação em jogo", "Experimental · not validated in game")
+           : WTr("Experimental · driver conferido no início", "Experimental · driver checked at launch"))
         : item.CtlID == kApiD3D12 ? WTr("Padrão · disponível para Xenos e Native", "Default · available for Xenos and Native")
-        : native ? (disabled ? WTr("Requer o acesso de desenvolvimento abaixo", "Requires the development access below") : WTr("Experimental · executor próprio", "Experimental · independent executor"))
+        : native ? (disabled ? WTr("Requer acesso de desenvolvimento", "Requires development access") : WTr("Experimental · executor próprio", "Experimental · independent executor"))
         : WTr("Padrão · compatível com o ReXGlue", "Default · ReXGlue compatible");
     ui::Text(dc, a.fonts.caption, caption, {s(48), s(30), w - s(16), s(52)}, disabled ? P.faint : P.muted);
   } else if (style.kind == Kind::Toggle) {
@@ -1817,9 +1933,10 @@ void DrawRow(App& a, const DRAWITEMSTRUCT& item) {
   buffer.Flush(item.rcItem.left, item.rcItem.top);
 }
 COLORREF BackOf(const App& a, HWND h) {
-  if (h == a.footer) return P.sidebar;
+  if (h == a.footer || h == a.privacy) return P.sidebar;
   if (h == a.headline || h == a.subtitle) return P.bg;
-  if (h == a.search) return P.surface2;
+  const int id = GetDlgCtrlID(h);
+  if (h == a.search || id == kFpsCustom || id == kPresentRate || id == kSharpness) return P.surface2;
   return P.surface;
 }
 HBRUSH BrushFor(COLORREF c) {
@@ -1930,7 +2047,11 @@ LRESULT CALLBACK WndProc(HWND window, UINT message, WPARAM wp, LPARAM lp) {
       case WM_CTLCOLORSTATIC: case WM_CTLCOLOREDIT: case WM_CTLCOLORLISTBOX: {
         auto h = reinterpret_cast<HWND>(lp);
         const COLORREF back = message == WM_CTLCOLORLISTBOX ? P.bg : BackOf(*a, h);
-        const COLORREF ink = h == a->subtitle || h == a->footer || h == a->root_text || h == a->env_text || h == a->renderer_hint ? P.muted : P.text;
+        const int id = GetDlgCtrlID(h);
+        // Labels of the Native Enhanced options dim with the options they name.
+        const bool option_label = id == kFpsLabel || id == kPresentLabel || id == kSharpnessLabel || id == kScaleLabel || id == kAnisoLabel || id == kAaLabel;
+        const COLORREF ink = option_label && !IsWindowEnabled(Item(*a, kFps30)) ? P.faint :
+          h == a->subtitle || h == a->privacy || h == a->root_text || h == a->env_text || h == a->renderer_hint || h == a->enhanced_hint || h == a->console_hint ? P.muted : P.text;
         SetTextColor(reinterpret_cast<HDC>(wp), ink);
         SetBkColor(reinterpret_cast<HDC>(wp), back);
         return reinterpret_cast<LRESULT>(BrushFor(back));
@@ -1945,6 +2066,7 @@ LRESULT CALLBACK WndProc(HWND window, UINT message, WPARAM wp, LPARAM lp) {
                                                        {kSettings, ui::icon::settings}, {kDetails, ui::icon::info}, {kLanguage, ui::icon::language}};
         for (auto [id, glyph] : nav) Button(*a, id, Kind::Nav, glyph, 1);
         a->footer = Control(*a, L"STATIC", L"", 0);
+        a->privacy = Control(*a, L"STATIC", L"", 0);
         a->headline = Control(*a, L"STATIC", L"", SS_ENDELLIPSIS);
         a->subtitle = Control(*a, L"STATIC", L"", 0);
         Button(*a, kUpdate, Kind::Primary, ui::icon::download, 1);
@@ -1976,30 +2098,32 @@ LRESULT CALLBACK WndProc(HWND window, UINT message, WPARAM wp, LPARAM lp) {
         Button(*a, kApiVulkan, Kind::Option, nullptr, 2);
         Button(*a, kNativeDevelopment, Kind::Toggle, nullptr, 2);
         Button(*a, kFullscreen, Kind::Toggle, nullptr, 2);
+        a->enhanced_hint = Control(*a, L"STATIC", L"", 0);
         Button(*a, kEnhanced, Kind::Toggle, nullptr, 2);
-        for (int id : {kFps30, kFps60, kFps120, kFps144}) Button(*a, id, Kind::Chip);
+        // Numeric fields draw on a painted frame (Layout's fields) instead of the classic 3D border.
+        auto number = [&](int id) { SendMessageW(Control(*a, L"EDIT", L"", ES_NUMBER | ES_AUTOHSCROLL | WS_TABSTOP, id), EM_SETLIMITTEXT, 3, 0); };
         Control(*a, L"STATIC", L"", 0, kFpsLabel);
+        // Settings chips sit on a card: their corners erase to the card surface.
+        for (int id : {kFps30, kFps60, kFps120, kFps144}) Button(*a, id, Kind::Chip, nullptr, 2);
+        number(kFpsCustom);
         Control(*a, L"STATIC", L"", 0, kPresentLabel);
-        for (int id : {kFpsCustom, kPresentRate}) {
-          auto edit = Control(*a, L"EDIT", L"", ES_NUMBER | ES_AUTOHSCROLL | WS_TABSTOP | WS_BORDER, id);
-          SendMessageW(edit, EM_SETLIMITTEXT, 3, 0);
-        }
-        Button(*a, kTimingApply, Kind::Secondary, nullptr, 2);
-        for (int id : {kEffectBilinear, kEffectCas, kEffectFsr}) Button(*a, id, Kind::Chip);
+        number(kPresentRate);
+        for (int id : {kEffectBilinear, kEffectCas, kEffectFsr}) Button(*a, id, Kind::Chip, nullptr, 2);
         Control(*a, L"STATIC", L"", 0, kSharpnessLabel);
-        auto sharpness = Control(*a, L"EDIT", L"", ES_NUMBER | ES_AUTOHSCROLL | WS_TABSTOP | WS_BORDER, kSharpness);
-        SendMessageW(sharpness, EM_SETLIMITTEXT, 3, 0);
+        number(kSharpness);
+        Button(*a, kTimingApply, Kind::Secondary, nullptr, 2);
         Control(*a, L"STATIC", L"", 0, kScaleLabel);
+        for (int id : {kScale1, kScale2, kScale3, kScale4}) Button(*a, id, Kind::Chip, nullptr, 2);
         Control(*a, L"STATIC", L"", 0, kAnisoLabel);
-        for (int id : {kScale1, kScale2, kScale3, kScale4, kAnisoGuest, kAniso2, kAniso4, kAniso8, kAniso16, kAaNone, kAaFxaa, kAaExtreme}) Button(*a, id, Kind::Chip);
+        for (int id : {kAnisoGuest, kAniso2, kAniso4, kAniso8, kAniso16}) Button(*a, id, Kind::Chip, nullptr, 2);
+        Control(*a, L"STATIC", L"", 0, kAaLabel);
+        for (int id : {kAaNone, kAaFxaa, kAaExtreme}) Button(*a, id, Kind::Chip, nullptr, 2);
         Button(*a, kUltrawide, Kind::Toggle, nullptr, 2);
         Button(*a, kCaptureCrash, Kind::Toggle, nullptr, 2);
         a->root_text = Control(*a, L"STATIC", L"", SS_PATHELLIPSIS);
         Button(*a, kFolder, Kind::Secondary, nullptr, 2);
         Button(*a, kStorage, Kind::Secondary, nullptr, 2);
         Button(*a, kCheck, Kind::Secondary, nullptr, 2);
-        Button(*a, kLangPt, Kind::Chip, nullptr, 2);
-        Button(*a, kLangEn, Kind::Chip, nullptr, 2);
         a->console_language_label = Control(*a, L"STATIC", L"", 0);
         a->console_country_label = Control(*a, L"STATIC", L"", 0);
         a->console_hint = Control(*a, L"STATIC", L"", 0);
@@ -2016,7 +2140,17 @@ LRESULT CALLBACK WndProc(HWND window, UINT message, WPARAM wp, LPARAM lp) {
           else for (const auto& v : ConsoleLocales()) add(v.country, v.name);
         }
         a->env_text = Control(*a, L"STATIC", L"", 0);
+        Button(*a, kLangPt, Kind::Chip, nullptr, 2);
+        Button(*a, kLangEn, Kind::Chip, nullptr, 2);
+        // Selectable, so the exact build can be copied into a support report.
+        a->about = Control(*a, L"EDIT", L"", ES_MULTILINE | ES_READONLY | WS_TABSTOP);
         a->details = Control(*a, L"EDIT", L"", ES_MULTILINE | ES_READONLY | ES_AUTOVSCROLL | WS_VSCROLL | WS_TABSTOP);
+        // The system BUTTON, STATIC and EDIT classes draw with their parent's clipping
+        // (CS_PARENTDC), which ignores the window region that clips scrolled Settings
+        // controls, so a control above the viewport painted over the page header.
+        // The class copies are per process; controls without the flag clip to themselves.
+        for (HWND h : {Item(*a, kHome), a->status, a->search})
+          SetClassLongPtrW(h, GCL_STYLE, GetClassLongPtrW(h, GCL_STYLE) & ~ULONG_PTR(CS_PARENTDC));
         SetWindowTheme(a->library_list, L"DarkMode_Explorer", nullptr);
         SetWindowTheme(a->details, L"DarkMode_Explorer", nullptr);
         ApplyFonts(*a);
@@ -2111,8 +2245,12 @@ LRESULT CALLBACK WndProc(HWND window, UINT message, WPARAM wp, LPARAM lp) {
         if (id == kPrimary) id = a->next_action;
         if (id == IDOK) {
           auto focus = GetFocus();
+          const int focus_id = focus ? GetDlgCtrlID(focus) : 0;
           if (focus == a->library_list && IsWindowEnabled(Item(*a, kPrimary))) SendMessageW(Item(*a, kPrimary), BM_CLICK, 0, 0);
-          else if (focus && focus != a->search && focus != a->details && IsWindowEnabled(focus)) SendMessageW(focus, BM_CLICK, 0, 0);
+          // Enter in a custom limit applies the limits, as the button beside them does.
+          else if ((focus_id == kFpsCustom || focus_id == kPresentRate || focus_id == kSharpness) && IsWindowEnabled(Item(*a, kTimingApply)))
+            SendMessageW(Item(*a, kTimingApply), BM_CLICK, 0, 0);
+          else if (focus && focus != a->search && focus != a->details && focus != a->about && IsWindowEnabled(focus)) SendMessageW(focus, BM_CLICK, 0, 0);
           return 0;
         }
         if (id == IDCANCEL) { GoBack(*a); return 0; }
@@ -2131,6 +2269,12 @@ LRESULT CALLBACK WndProc(HWND window, UINT message, WPARAM wp, LPARAM lp) {
         }
         if (id == kData && !a->root.empty()) { auto p = a->root / ".local"; fs::create_directories(p); ShellExecuteW(window, L"open", p.c_str(), nullptr, nullptr, SW_SHOWNORMAL); return 0; }
         if (id == kCancel) { a->cancel = true; Set(a->activity_text, Tr("Cancelando... Aguarde a etapa atual terminar com segurança.", "Cancelling... Wait for the current step to finish safely.")); RefreshBanner(*a); return 0; }
+        // Edits are not subclassed: their focus reveals the scrolled field and redraws its frame.
+        if ((id == kFpsCustom || id == kPresentRate || id == kSharpness || reinterpret_cast<HWND>(lp) == a->about) &&
+            (HIWORD(wp) == EN_SETFOCUS || HIWORD(wp) == EN_KILLFOCUS)) {
+          if (HIWORD(wp) == EN_SETFOCUS) Reveal(*a, reinterpret_cast<HWND>(lp));
+          InvalidateRect(window, nullptr, FALSE); return 0;
+        }
         if (id == kConsoleLanguage || id == kConsoleCountry) {
           if (HIWORD(wp) == CBN_SETFOCUS) { Reveal(*a, reinterpret_cast<HWND>(lp)); return 0; }
           if (a->root.empty() || HIWORD(wp) != CBN_SELCHANGE) return 0;

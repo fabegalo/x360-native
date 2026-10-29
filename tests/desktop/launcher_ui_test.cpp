@@ -397,6 +397,25 @@ void SaveCapture(App& a, const fs::path& output) {
   DeleteObject(bitmap);
 }
 }
+TEST_CASE("version label names the build channel and never calls a development build stable", "[launcher-ui]") {
+  struct Case { const char* version; const char* pt; const char* en; };
+  const Case cases[] = {
+    {"1.0.0-dev", "v1.0.0-dev · Desenvolvimento", "v1.0.0-dev · Development"},
+    {"1.0.0-rc.1", "v1.0.0-rc.1 · Release Candidate", "v1.0.0-rc.1 · Release Candidate"},
+    {"1.0.0", "v1.0.0 · Estável", "v1.0.0 · Stable"},
+    {"0.69.27-preview.25", "v0.69.27-preview.25 · Prévia", "v0.69.27-preview.25 · Preview"},
+    {"1.0.0-rc.1-dev", "v1.0.0-rc.1-dev · Desenvolvimento", "v1.0.0-rc.1-dev · Development"},
+    {"2.1.0-nightly.3", "v2.1.0-nightly.3 · Pré-lançamento", "v2.1.0-nightly.3 · Pre-release"},
+    {"1.0.0-device", "v1.0.0-device · Pré-lançamento", "v1.0.0-device · Pre-release"}};
+  for (const auto& c : cases) {
+    INFO(c.version);
+    english = false; CHECK(VersionLabel(c.version) == c.pt);
+    english = true; CHECK(VersionLabel(c.version) == c.en);
+  }
+  english = false;
+  // The running build is labelled from the version CMake configured, never a fixed prefix.
+  CHECK(VersionLabel(X360N_VERSION).rfind(std::string("v") + X360N_VERSION + " · ", 0) == 0);
+}
 // Geometry review of every page, banner state, size and scale without showing
 // the window. Set X360N_LAYOUT_CAPTURE to a folder to also save PNG renders.
 TEST_CASE("launcher layout keeps controls inside the window, their cards and their labels", "[launcher-layout]") {
@@ -412,8 +431,12 @@ TEST_CASE("launcher layout keeps controls inside the window, their cards and the
   struct BannerCase { const char* name; int preview; };
   const BannerCase banners[] = {{"idle", 5}, {"busy", 2}, {"error", 3}, {"imported", 4}};
   struct SizeCase { const char* name; int w, h; };
-  const SizeCase sizes[] = {{"min", 1000, 700}, {"default", 1220, 800}};
-  for (const bool en : {false, true}) for (const UINT dpi : {96u, 144u}) for (const auto& size : sizes) for (const auto& page : pages) for (const auto& banner : banners) {
+  // Every page and banner at the minimum and default sizes; idle Settings, whose
+  // card grid changes with the width, also at common window sizes and scale steps.
+  const SizeCase sizes[] = {{"min", 1000, 700}, {"default", 1220, 800}, {"720p", 1280, 720}, {"900p", 1600, 900}, {"1080p", 1920, 1080}};
+  for (const bool en : {false, true}) for (const UINT dpi : {96u, 120u, 144u, 192u}) for (const auto& size : sizes) for (const auto& page : pages) for (const auto& banner : banners) {
+    const bool base = (dpi == 96 || dpi == 144) && size.w <= 1220;
+    if (!base && (page.command != kSettings || banner.preview != 5)) continue;
     english = en;
     if (f.app.dpi != dpi) { f.app.dpi = dpi; ApplyFonts(f.app); }
     Labels(f.app);
