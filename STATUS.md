@@ -1,5 +1,19 @@
 # STATUS
 
+29/10 — **LAUNCHER-UNIFIED-01: launcher único SDL3 + Dear ImGui**: estado,
+regras e operações extraídos para `src/desktop/app/` e um só frontend em
+`src/desktop/ui/` (6 páginas, mesma paleta e disposição, ícones vetoriais
+próprios, fontes Apache-2.0); frontend Win32/GDI removido. Preparação chama
+`x360n prepare` com as 7 etapas reais do supervisor, sem percentual inventado;
+APIs por sistema sem troca silenciosa; atualização por sistema/arquitetura.
+Windows x64: compilado; controller 16 casos/179 asserções; layout headless em
+5 tamanhos × 4 escalas × PT/EN, 208.685 asserções; modelo 116/54.465; smoke real
+com SDL_GPU D3D12 e com rasterizador de software. CPU ociosa 0 %, memória
+26,7 → 94,2 MB (D3D12). Linux x64/WSLg: mesmo target compilado, controller
+15/165 e layout 203.968 asserções, smoke real com SDL_GPU Vulkan e software.
+Sem fluxo real com dados do mantenedor, extrator fora do Windows, macOS/ARM64
+ou pacote. [Relatório](docs/reports/launcher-unified-01-2026-10-29.md).
+
 29/10 — **sessão gráfica Linux x64 demonstrada no WSLg**: Iruka AOT ELF,
 Xenos/Vulkan, janela SDL/X11 e animação/textos observados por 40 s, com dados
 isolados. Preflight aprovado; supervisor encerrou no limite, zero erros/stubs

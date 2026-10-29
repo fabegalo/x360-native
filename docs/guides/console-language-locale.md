@@ -108,10 +108,10 @@ O runner `scripts/validation/validate-console-locale.ps1` limita o tempo e regis
 argumentos, hashes, saída e capturas do presenter. O diagnóstico opt-in
 `dash17559_guide_probe_seconds` solicita o serviço original do Guide uma vez,
 sem mouse/teclado. Desligado, não adiciona consultas ao relógio no frame.
-O desktop tem `--capture-settings <png>` apenas no build de desenvolvimento:
-mostra a janela sem ativá-la, renderiza seus próprios controles após carregar
-as preferências e termina. O arquivo `.state.txt` registra as contagens e
-seleções dos controles, sem depender da leitura visual.
+O desktop Win32 tinha `--capture-settings <png>` no build de desenvolvimento; o
+frontend único (LAUNCHER-UNIFIED-01) o substituiu pelas capturas headless do
+teste `desktop.launcher-layout` (`X360N_LAYOUT_CAPTURE`), que usam os mesmos
+combos de idioma e país a partir de `.local/console.toml`.
 
 Os processos de jogo foram encerrados pelo limite diagnóstico: **não foi
 certificado encerramento normal nem um ciclo visual completo de handoff**.

@@ -433,7 +433,7 @@ Referência de facilidade de uso: [Pinyon Shift](https://github.com/arcanite24/p
 |---|---|---|---|
 | Windows | x86-64 | Execuções locais relatadas da 17559, intro e Castle Crashers, com os limites acima. | Pendente. |
 | Windows | ARM64 | Viabilidade, implementação e execução não demonstradas. | Pendente; não anunciado como suportado. |
-| Linux | x86-64 | Iruka AOT ELF: janela e animação em sessão de 40 s no WSLg/Xenos/Vulkan com llvmpipe (CPU), 29/10. [Evidência e limites](reports/linux-wslg-iruka-2026-10-29.md). GPU física, frontend, dashboard/retorno, áudio e controles pendentes. | Pendente; não anunciado como suportado. |
+| Linux | x86-64 | Iruka AOT ELF: janela e animação em sessão de 40 s no WSLg/Xenos/Vulkan com llvmpipe (CPU), 29/10. [Evidência e limites](reports/linux-wslg-iruka-2026-10-29.md). Launcher único compilado e aberto no WSLg (SDL_GPU Vulkan e software), testes do launcher aprovados, 29/10 ([LAUNCHER-UNIFIED-01](reports/launcher-unified-01-2026-10-29.md)); extrator, GPU física, dashboard/retorno, áudio e controles pendentes. | Pendente; não anunciado como suportado. |
 | Linux | ARM64 | Viabilidade, implementação e execução não demonstradas. | Pendente; não anunciado como suportado. |
 | macOS | x86-64 | Viabilidade, implementação e execução não demonstradas. | Pendente; não anunciado como suportado. |
 | macOS | ARM64 | Viabilidade, implementação e execução não demonstradas. | Pendente; não anunciado como suportado. |

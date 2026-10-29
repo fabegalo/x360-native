@@ -333,7 +333,6 @@ x360-native/  (tracked source + additions from this reorganization)
 |   |   |-- ninja-guard.ps1
 |   |   `-- preparation-receipt.ps1
 |   |-- diagnostics/
-|   |   |-- capture-desktop-ui.ps1
 |   |   |-- capture-window.ps1
 |   |   |-- image-stats.ps1
 |   |   |-- native-stats-window.ps1
@@ -367,8 +366,6 @@ x360-native/  (tracked source + additions from this reorganization)
 |   |   `-- materialize-symlinks.ps1
 |   |-- validation/
 |   |   |-- regress-iruka.ps1
-|   |   |-- test-desktop-ui.ps1
-|   |   |-- test-library-desktop.ps1
 |   |   |-- test-local-profiles-17559.ps1
 |   |   |-- test-signin-17559.ps1
 |   |   |-- validate-console-locale.ps1
@@ -393,6 +390,16 @@ x360-native/  (tracked source + additions from this reorganization)
 |   |   |-- xex_patch.cpp
 |   |   `-- xex_patch.h
 |   |-- desktop/
+|   |   |-- app/
+|   |   |   |-- app_controller.cpp
+|   |   |   |-- app_controller.h
+|   |   |   |-- app_state.h
+|   |   |   |-- environment.h
+|   |   |   |-- environment_common.cpp
+|   |   |   |-- environment_posix.cpp
+|   |   |   |-- environment_win32.cpp
+|   |   |   |-- operations.cpp
+|   |   |   `-- app_text.h
 |   |   |-- model/
 |   |   |   |-- catalog.cpp
 |   |   |   |-- catalog.h
@@ -407,11 +414,21 @@ x360-native/  (tracked source + additions from this reorganization)
 |   |   |   |-- desktop.ico
 |   |   |   |-- desktop.manifest
 |   |   |   `-- desktop.rc
-|   |   |-- win32/
-|   |   |   |-- environment_win32.cpp
-|   |   |   |-- environment_win32.h
-|   |   |   |-- main_win32.cpp
-|   |   |   `-- ui_theme.h
+|   |   |-- ui/
+|   |   |   |-- pages/  (home, library, dashboard, import, settings, diagnostics)
+|   |   |   |-- components.cpp
+|   |   |   |-- components.h
+|   |   |   |-- frontend.cpp
+|   |   |   |-- frontend.h
+|   |   |   |-- icons.cpp
+|   |   |   |-- icons.h
+|   |   |   |-- main.cpp
+|   |   |   |-- renderer.cpp
+|   |   |   |-- renderer.h
+|   |   |   |-- soft_raster.cpp
+|   |   |   |-- soft_raster.h
+|   |   |   |-- theme.cpp
+|   |   |   `-- theme.h
 |   |   `-- CMakeLists.txt
 |   |-- native/
 |   |   |-- commands/
