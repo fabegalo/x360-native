@@ -1,5 +1,15 @@
 # STATUS
 
+28/10 — **IMPORT-17559 implementado, aceite gráfico pendente**: ZIP oficial,
+pasta `$SystemUpdate` e PIRS reconhecidos por conteúdo; flash 17559, recurso
+`shrdres` do XAM e avatar organizados pelos SHA-256 do perfil. O ZIP local
+fornece 14 arquivos, mas JKLatin/CLatin vêm somente como XTTP: duas fontes
+completas exigidas, sem falsa prontidão. Build Release isolado, 493 asserções
+em 21 casos focados e 12 controles de fontes LGPL aprovados. O helper gráfico
+bloqueou o seletor mesmo após reserva; fluxo gráfico completo, novo preparo
+AOT e boot com esses inputs não certificados. SDK/XAM/patches/renderers e dados
+preservados; sem Release. [Evidências e limites](docs/reports/import-17559-2026-10-28.md).
+
 28/10 — **MAINT-01: limpeza executada**: 17.794 arquivos e 1.325 diretórios
 vazios de ensaios aposentados removidos; 38,442 GiB recuperados no volume.
 Originais, perfis/saves reais, SDK, preparações e STABLE-01/02/03 preservados.
