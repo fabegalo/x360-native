@@ -207,6 +207,8 @@ target_link_libraries(x360n_sdk_runtime_checks PRIVATE tomlplusplus)
 target_sources(x360n_sdk_runtime_checks PRIVATE sdkcheck/audio_drain_test.cpp)
 target_sources(x360n_sdk_runtime_checks PRIVATE sdkcheck/profile_ui_request_test.cpp)
 target_sources(x360n_sdk_runtime_checks PRIVATE sdkcheck/message_box_request_test.cpp)
+target_sources(x360n_sdk_runtime_checks PRIVATE sdkcheck/keyboard_request_test.cpp)
+target_sources(x360n_sdk_runtime_checks PRIVATE sdkcheck/keyboard_text_input_test.cpp)
 target_sources(x360n_sdk_runtime_checks PRIVATE ../titles/dash_17559/src/system_ui.cpp)
 set_source_files_properties("${PROJECT_SOURCE_DIR}/titles/dash_17559/src/system_ui.cpp"
     PROPERTIES COMPILE_DEFINITIONS X360N_SYSTEM_UI_PLUGIN=1)

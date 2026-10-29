@@ -3,6 +3,7 @@
 #include "system_ui_request.h"
 #include "storage_selector_diagnostic.h"
 #include "message_box_diagnostic.h"
+#include "keyboard_diagnostic.h"
 #include "system_ui_saved_state.h"
 #include "../../common/system_ui_context.h"
 #include "../../common/system_ui_execution.h"
@@ -115,12 +116,14 @@ void FailQueuedModal(rex::Runtime& runtime, uint32_t message,
                         const std::vector<uint8_t>& request, X_HRESULT status) {
   if (static_cast<int32_t>(status) >= 0) return;
   const bool message_box = message == 0x2100D && request.size() == 1148;
-  if (!message_box && (message != 0x2100B || request.size() != 40)) return;
+  const bool keyboard = (message == 0x21005 && request.size() == 32) ||
+      (message == 0x21010 && request.size() == 36);
+  if (!message_box && !keyboard && (message != 0x2100B || request.size() != 40)) return;
   const auto address = rex::memory::load_and_swap<uint32_t>(request.data() + (message_box ? 1144 : 0x1C));
   if (!address) return;
   const auto* io = runtime.memory()->TranslateVirtual<rex::system::XAM_OVERLAPPED*>(address);
   if (io->result != 997) return; // The original app may already have completed.
-  const uint32_t error = message_box ? (uint32_t(status) == 0x8007000Eu ? 14 : 1627)
+  const uint32_t error = (message_box || keyboard) ? (uint32_t(status) == 0x8007000Eu ? 14 : 1627)
       : (status & 0x7FFF0000) == 0x00070000 ? status & 0xFFFF : 1627;
   runtime.kernel_state()->CompleteOverlappedEx(address, error, status, 0);
 }
@@ -259,6 +262,7 @@ void InstallSystemUi(rex::Runtime& runtime, std::string drive, std::string nativ
   }
   poll_guide = WithStorageSelectorDiagnostic(runtime, std::move(poll_guide));
   poll_guide = WithMessageBoxDiagnostic(runtime, std::move(poll_guide));
+  poll_guide = WithKeyboardDiagnostic(runtime, std::move(poll_guide));
   // Every title presents through VdSwap: run system frames there, not from
   // title-specific render hooks.
   rex::kernel::xboxkrnl::SetSystemSwapCallback(&SystemSwap);
@@ -269,9 +273,6 @@ void InstallSystemUi(rex::Runtime& runtime, std::string drive, std::string nativ
   };
   bind("hud.xex", "game:\\system\\hud.xex", "dash_17559_hud");
   bind("vk.xex", "game:\\vk.xex", "dash_17559_vk");
-  const auto keyboard_library = native_directory.empty() ? std::string("dash_17559_vk")
-      : native_directory + "/dash_17559_vk";
-  runtime.kernel_state()->RegisterRecompiledModule("vk.xex", "\\Device\\Harddisk0\\Partition1\\vk.xex", keyboard_library.c_str());
   bind("signin.xex", "game:\\system\\signin.xex", "dash_17559_signin");
   bind("createprofile.xex", "game:\\system\\createprofile.xex", "dash_17559_createprofile");
   bind("deviceselector.xex", "game:\\system\\deviceselector.xex", "dash_17559_deviceselector");
@@ -593,10 +594,12 @@ void InstallSystemUi(rex::Runtime& runtime, std::string drive, std::string nativ
                 restored ? "restore" : "initialize", uint32_t(result));
     const auto saved_size = rex::memory::load_and_swap<uint32_t>(runtime.memory()->TranslateVirtual(context + 16));
     runtime.memory()->SystemHeapFree(context);
+    // Sign-in 901050FC-90105124 and vk 917DE4C0-917DE4E8 delete and
+    // clear their own instance when initialization fails.
+    const bool cleans_failed_initialization = application == &kSignin ||
+        application == &kKeyboard || application == &kBrandedKeyboard;
     if (static_cast<int32_t>(result) < 0) {
-      // Sign-in 901050FC-90105124 already deletes and clears its app on
-      // initialization failure. A destroy message would dereference that null.
-      if (application != &kSignin) {
+      if (!cleans_failed_initialization) {
         uint64_t destroy[] = {0x80000005, 0, 0};
         dispatcher->ExecuteTrap(thread, registration->callback, destroy, 3);
       }
@@ -629,7 +632,7 @@ void InstallSystemUi(rex::Runtime& runtime, std::string drive, std::string nativ
       REXLOG_INFO("17559 system UI: original attach scene -> {:08X}", uint32_t(linked));
       if (static_cast<int32_t>(linked) >= 0) {
         auto active_scene = std::make_shared<uint32_t>(scene);
-        auto destroy_scene = [&runtime, dispatcher, hud, active_scene, registration, release_module] {
+        auto destroy_scene = [&runtime, dispatcher, hud, active_scene, registration, release_module](bool destroy_app = true) {
           auto* thread = rex::system::XThread::GetCurrentThread()->thread_state();
           // App owns the scene. Unlink and clear the host's reference before
           // its destroy callback and original DLL detach release the app.
@@ -642,8 +645,10 @@ void InstallSystemUi(rex::Runtime& runtime, std::string drive, std::string nativ
           const auto container = rex::memory::load_and_swap<uint32_t>(runtime.memory()->TranslateVirtual(hud + 0x40));
           uint64_t hide[] = {container, 0};
           dispatcher->ExecuteTrap(thread, 0x817B4D00, hide, 2);
-          uint64_t destroy[] = {0x80000005, 0, 0};
-          dispatcher->ExecuteTrap(thread, registration->callback, destroy, 3);
+          if (destroy_app) {
+            uint64_t destroy[] = {0x80000005, 0, 0};
+            dispatcher->ExecuteTrap(thread, registration->callback, destroy, 3);
+          }
           release_module();
         };
         const auto root = rex::memory::load_and_swap<uint32_t>(runtime.memory()->TranslateVirtual(hud + 8));
@@ -661,7 +666,7 @@ void InstallSystemUi(rex::Runtime& runtime, std::string drive, std::string nativ
         std::vector<uint8_t> request_bytes(size);
         if (size) std::memcpy(request_bytes.data(), runtime.memory()->TranslateVirtual(owned_request), size);
         draw_ui = [&runtime, dispatcher, hud, registration, xam, destroy_scene, active_scene, saved_size, user,
-                   message, request_bytes = std::move(request_bytes), frame = 0u]() mutable -> bool {
+                   message, cleans_failed_initialization, request_bytes = std::move(request_bytes), frame = 0u]() mutable -> bool {
           auto* thread = rex::system::XThread::GetCurrentThread()->thread_state();
           if (xam->ConsumeSystemUiResume(registration->module)) {
             // Match the original XAM stack lifecycle: serialize (80000009),
@@ -694,15 +699,15 @@ void InstallSystemUi(rex::Runtime& runtime, std::string drive, std::string nativ
             words[3] = user; words[4] = 0; words[5] = 0;
             uint64_t args[] = {0x80000004, resume, resume + 16};
             const auto result = dispatcher->ExecuteTrap(thread, registration->callback, args, 3);
-            auto failed_restore = [&](const char* stage, uint32_t error) {
+            auto failed_restore = [&](const char* stage, uint32_t error, bool initialized = true) {
               REXLOG_ERROR("17559 system UI: original restore {} failed {:08X}", stage, error);
               runtime.memory()->SystemHeapFree(resume);
-              destroy_scene();
+              destroy_scene(initialized || !cleans_failed_initialization);
               runtime.kernel_state()->BroadcastNotification(0x9, false);
               return false;
             };
             if (static_cast<int32_t>(result) < 0)
-              return failed_restore("init", uint32_t(result));
+              return failed_restore("init", uint32_t(result), false);
             uint64_t prepare[] = {0x8000000B, 0, 0};
             const auto prepared = dispatcher->ExecuteTrap(thread, registration->callback, prepare, 3);
             if (static_cast<int32_t>(prepared) < 0)

@@ -2143,3 +2143,20 @@ for the API contract, exact observations and validation limits.
 A separate 90-second Forza attempt displays the same original box and returns
 to its Start screen after B, with the same cancellation status, no captured
 crash and 37/37 source files preserved. No title-specific code or settings.
+
+### 0215–0216 — original keyboard requests and PC text input
+
+0215 replaces default-text acceptance with the original 17559 FE/21005 (32
+bytes) and FE/21010 (36 bytes) requests. The selected dashboard host owns its
+verified vk.xex, editing and completion. Preserve UTF-16 buffers, the branded
+descriptor and ninth PPC argument, pending I/O and its requesting thread;
+unavailable services fail. No ImGui/headless acceptance or title condition.
+
+0216 implements the original keyboard translation switch: vk selects text with
+0 and restores controller shortcuts with 1. Route SDL text as UTF-16, including
+surrogate pairs, and keep modal input ahead of diagnostic overlays. Drain held
+keys and deferred callbacks at focus/lifetime boundaries. Mouse capture and
+text activation have independent lifetimes. Focused red/green coverage includes
+the real Window listener chain; the pre-fix overlay/capture test fails 2/6
+assertions. The independent replay verifies 203 patches and 273 final hashes.
+No upstream equivalent identified.
