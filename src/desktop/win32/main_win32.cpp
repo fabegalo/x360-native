@@ -1461,7 +1461,7 @@ void Start(App& a, int action, fs::path source = {}) {
         spec.exe = exe; spec.args = args; spec.working_dir = a.root;
         spec.stdout_file = a.logs / (label + ".log"); spec.stderr_file = a.logs / (label + ".error.log");
         spec.no_console = true;
-        spec.collect_metrics = action == kPrepare && GetEnvironmentVariableW(L"X360N_PREPARATION_METRICS", nullptr, 0) != 0;
+        spec.collect_metrics = action == kPrepare && (ActionTrace::Enabled() || GetEnvironmentVariableW(L"X360N_PREPARATION_METRICS", nullptr, 0) != 0);
         if (action != kInstall) spec.should_cancel = [&] { return a.cancel.load(); };
         if (action == kLaunch) spec.on_started = [&] { Post(a.window, kSessionStarted, ""); };
         spec.notification_event = closed_event;

@@ -1,5 +1,6 @@
 #include "import_source.h"
 #include "catalog.h"
+#include "action_trace.h"
 #include "child_process.h"
 #include "../../content/system_update.h"
 #include <algorithm>
@@ -12,6 +13,7 @@ ImportSource::ImportSource(const fs::path& original, const fs::path& extractor,
     const fs::path& logs, const std::function<bool()>& cancelled,
     const std::function<void()>& extracting,
     const std::function<void(const std::string&)>& progress) : source_(original) {
+  ActionTrace trace("import.source");
   if (cancelled && cancelled()) throw std::runtime_error("Importação cancelada. Seus originais foram preservados.");
   system_update_ = fs::is_directory(original)
       ? !content::FindSystemUpdatePackage(original).empty()
@@ -45,6 +47,7 @@ ImportSource::ImportSource(const fs::path& original, const fs::path& extractor,
     spec.exe = extractor; spec.args = {system_update_ ? "extract-system-update" : package ? "extract" : "extract-disc", Utf8(fs::absolute(original)), Utf8(fs::absolute(source_))};
     spec.working_dir = temporary_; spec.stdout_file = logs / "extraction.log";
     spec.stderr_file = logs / "extraction.error.log"; spec.no_console = true; spec.should_cancel = cancelled;
+    spec.collect_metrics = ActionTrace::Enabled();
     spec.timeout = system_update_ ? std::chrono::minutes(5) : std::chrono::minutes(30);
     auto next_sample = std::chrono::steady_clock::now();
     std::string previous_stage;
@@ -61,6 +64,17 @@ ImportSource::ImportSource(const fs::path& original, const fs::path& extractor,
     };
     std::ofstream(logs / "source.txt", std::ios::binary) << Utf8(original) << '\n';
     const auto result = RunProcess(spec);
+    if (spec.collect_metrics) {
+      std::ofstream metrics(logs / "extraction-metrics.tsv", std::ios::app);
+      metrics << "extract\t" << result.duration.count() << '\t' << result.exit_code
+              << '\t' << result.cancelled << '\t' << result.timed_out;
+      if (result.metrics) {
+        const auto& m = *result.metrics;
+        metrics << '\t' << m.cpu_us << '\t' << m.read_bytes << '\t' << m.read_operations
+                << '\t' << m.write_bytes << '\t' << m.peak_job_commit_bytes;
+      } else metrics << "\tunavailable";
+      metrics << '\n';
+    }
     if (result.cancelled || (cancelled && cancelled()))
       throw std::runtime_error("Importação cancelada. O arquivo original e seus dados foram preservados.");
     if (!result.launched || result.exit_code != 0 || !fs::is_directory(source_) ||

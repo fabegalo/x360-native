@@ -1,4 +1,5 @@
 #include "catalog.h"
+#include "action_trace.h"
 #include "sha256.h"
 #include "digest_batch.h"
 #include "workspace_lease.h"
@@ -52,6 +53,7 @@ std::string Toml(const toml::table& t) { std::ostringstream out; out << t; retur
 }
 
 void GenerateAotProject(const ProjectPaths& paths, const Target& t) {
+  ActionTrace trace("preparation.project");
   if (!t.generic_aot || !IsSafeLabel(t.id) || t.inputs.empty()) throw std::runtime_error("Not an imported generic AOT title");
   auto validation = std::make_unique<DigestBatch>();
   if (!Inspect(paths, t).inputs_ok) throw std::runtime_error("Imported content changed; cannot prepare this identity");

@@ -198,6 +198,7 @@ void DiscArt(const fs::path& root, Json& r, std::vector<uint8_t>& thumbnail) {
 
 std::string ImportGame(const ProjectPaths& paths, const std::vector<Target>& targets,
     const fs::path& source, const fs::path& original, const std::function<bool()>& cancelled) {
+  ActionTrace trace("import.game");
   const auto stop = [&] { if (cancelled && cancelled()) throw std::runtime_error("Import cancelled; retry with the same content to resume."); };
   stop();
   if (!fs::is_directory(source)) throw std::runtime_error("Select an extracted game folder, ISO or STFS package.");

@@ -1,4 +1,5 @@
 #include "catalog.h"
+#include "action_trace.h"
 #include "sha256.h"
 #include "workspace_lease.h"
 #include "digest_batch.h"
@@ -163,6 +164,7 @@ std::vector<std::string> InstalledGames(const ProjectPaths& paths, const std::ve
 }
 bool CompleteLibraryPreparation(const ProjectPaths& paths, const Target& target,
     const std::vector<Target>& catalog, const std::function<bool()>& cancelled) {
+  ActionTrace trace("preparation.library");
   if (!target.aot || (!target.session && !InGameLibrary(target))) return false;
   std::vector<Target> pending;
   {
