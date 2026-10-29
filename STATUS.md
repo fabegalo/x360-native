@@ -1,5 +1,17 @@
 # STATUS
 
+29/10 — **PERF-BOOT-01 implementado, aceite visual pendente**: SDK genérico com
+gerações verificadas reutilizáveis, probes/downloads paralelos e inventários
+reduzidos. Setup com downloads reais + importação/projeto + preparo 17559/jogo
+e registro, medidos separadamente: 1.909,702 → 1.097,788 s (**42,515%**); drivers
+47,73%, objetos 2.045 → 1.210. Primeira 17559 com ferramentas prontas 10min16s;
+meta <10min não atingida, setup completo 2% mais lento. Repetições 8,888/7,888 s,
+sem CMake/codegen/objetos. Testes focados e builds Release passaram; 203 patches
+preservados. Smoke limitado carregou o runtime, com stubs/erros registrados, sem
+certificar imagem. ZIP/fluxo original My Games/retorno **NOT RUN**: Computer Use
+falhou ao inicializar (os error 3). Sem push ou Release.
+[Medições e limites](docs/reports/perf-boot-01-2026-10-29.md).
+
 28/10 — **ponte original de armazenamento 17559 corrigida**: corrigido o
 caminho escapado do XAM e interrompido o despacho quando sua imagem não carrega.
 Ordenação e localização continuam executadas pelo código original, agora com

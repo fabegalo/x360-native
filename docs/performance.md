@@ -66,6 +66,17 @@ o custo de handles/inventários e acrescentam memória/leitura especulativa em
 alguns caminhos. Controle antigo com `-O2`, experiência sem ganho, I/O e resultados:
 [preflight de 18/10/2026](reports/startup-preflight-2026-10-18.md).
 
+## Primeira preparação
+
+PERF-BOOT-01 compartilha somente o SDK genérico por identidade e recibo
+verificados, paraleliza probes/downloads e reduz inventários/canonicalizações
+redundantes. O agregado explícito de setup com downloads, importação/projeto,
+dois preparos e registro caiu 42,515% (1.909,702 → 1.097,788 s); os dois drivers
+caíram 47,73%. A primeira 17559 ainda levou 10min16s; setup completo não ganhou
+parede e operações de leitura/pico de commit aumentaram. ZIP e fluxo visual
+continuam NOT RUN por falha do helper Computer Use. Não é medição completa da
+primeira abertura nem aceite gráfico. [Condições, recursos, garantias e limites](reports/perf-boot-01-2026-10-29.md).
+
 ## Builds incrementais
 
 A otimização seguinte reduziu a reconstrução nativa completa da 17559 em 21,40%
