@@ -88,7 +88,7 @@ Os itens gerais abaixo continuam pendentes quando a evidência cobre só este pa
 - [x] Abrir e fechar o Guide original na dashboard. Retail 17559, Windows x64/Xenos, 16/10: abas, B, reabertura, botão Guide; [relatório](reports/graphics/guide-composition-2026-10-16.md).
 - [x] Abrir e fechar o Guide original durante o jogo, permitindo acionar o pedido de retorno. Forza (Xbox Home → handoff Dashboard) e Castle Crashers, Windows x64/Xenos, 16/10; outros jogos não verificados; [relatório](reports/graphics/guide-composition-2026-10-16.md).
 - [x] Direcionar a entrada para a interface ativa, sem acionar simultaneamente o jogo por trás do Guide. Windows x64/Xenos, 16/10: Castle Crashers ao vivo e `system_ui_input_test` (estado, keystrokes, botão Guide e botões segurados ao fechar); outros jogos não verificados; [relatório](reports/graphics/guide-composition-2026-10-16.md).
-- [ ] Exibir e utilizar o teclado virtual original quando solicitado.
+- [x] Exibir e utilizar o teclado virtual original quando solicitado. Retail 17559/Windows x64/Xenos, 28/10: Keyboard/Branded na dashboard e Keyboard no Minecraft; edição, limite, confirmação e cancelamento exercitados, sem seleção automática. Outras versões pendentes.
 - [ ] Mostrar diálogos reais de confirmação, erros e notificações.
 - [ ] Tratar telas dependentes de serviços indisponíveis sem travar nem informar conexão fictícia.
 
@@ -98,8 +98,8 @@ Os itens gerais abaixo continuam pendentes quando a evidência cobre só este pa
 
 Nome, identificador e estado de entrada precisam permanecer coerentes; as implementações de referência consultam esses dados por operações distintas. [R1]
 
-- [ ] Iniciar sem usuário conectado e abrir o fluxo original de criação/seleção de perfil.
-- [ ] Criar um perfil local persistente com nome e identificador estável pela interface original.
+- [x] Iniciar sem usuário conectado e abrir o fluxo original de criação/seleção de perfil. Retail 17559/Windows x64/Xenos: dashboard (aceites abaixo) e Guide durante Minecraft em 28/10.
+- [x] Criar um perfil local persistente com nome e identificador estável pela interface original. Em 28/10, Guide → Sign In → Create Profile editou `P0Player1` no vk original, fez logon e voltou ao tutorial; reinício recuperou o mesmo XUID. Aceite do mantenedor; outras versões pendentes.
 - [ ] Substituir o estado fixo de usuário, quando ainda presente, por seleção e entrada/saída reais; notificações devem refletir mudanças reais.
 - [ ] Entrar, sair e trocar de perfil sem reiniciar a plataforma.
 - [ ] Fazer dashboard e jogo enxergarem o mesmo perfil e o mesmo estado de entrada.

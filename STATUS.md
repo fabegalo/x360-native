@@ -1,5 +1,19 @@
 # STATUS
 
+28/10 — **SYSTEM-UI-P0: teclado original dentro dos jogos**: 0215/0216
+encaminham Keyboard/Branded aos pedidos originais 17559, sem aceitar o texto
+padrão automaticamente; entrada SDL UTF-16, foco modal e restauração dos controles.
+Corrigido separadamente o carregamento de vk.xex pelo CreateProfile no namespace
+verificado da dashboard, em vez do HDD do jogo. Windows x64/Xenos: edição,
+confirmação e cancelamento na dashboard; no Minecraft, limite do buffer e
+retorno ao menu. Guide → Sign In → Create Profile → nome editado `P0Player1`
+criou XUID persistente, fez logon e retornou ao tutorial; aceite do mantenedor.
+Reinício recuperou o mesmo XUID no jogo e no Guide; Sign-out registrado com
+resultado 0 e confirmado pelo mantenedor. 992/22 verificações focadas, mais
+375/19 após conferir a limpeza de falhas do host; replay 203 patches/273 hashes.
+Outros serviços offline e ciclo completo posterior até a dashboard continuam
+pendentes. Sem nova homologação de saves, recertificação geral ou Release.
+
 28/10 — **MAINT-01: limpeza executada**: 17.794 arquivos e 1.325 diretórios
 vazios de ensaios aposentados removidos; 38,442 GiB recuperados no volume.
 Originais, perfis/saves reais, SDK, preparações e STABLE-01/02/03 preservados.

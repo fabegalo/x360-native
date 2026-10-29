@@ -29,9 +29,13 @@ int main(int argc, char** argv) {
     const std::string dashboard_id = argv[5];
     const auto seconds = argc >= 7 ? std::stoi(argv[6]) : 30;
     bool storage_probe = false, message_box_probe = false, xenos_d3d12 = false, debug_log = false;
+    bool keyboard_probe = false, branded_probe = false, guide_probe = false;
     uint64_t crash_memory_base = 0;
     for (int i = 7; i < argc; ++i) {
       if (std::string(argv[i]) == "--probe-storage") storage_probe = true;
+      else if (std::string(argv[i]) == "--probe-keyboard") keyboard_probe = true;
+      else if (std::string(argv[i]) == "--probe-branded-keyboard") {keyboard_probe = true; branded_probe = true;}
+      else if (std::string(argv[i]) == "--probe-guide") guide_probe = true;
       else if (std::string(argv[i]) == "--probe-message-box") message_box_probe = true;
       else if (std::string(argv[i]) == "--xenos-d3d12") xenos_d3d12 = true;
       else if (std::string(argv[i]) == "--debug-log") debug_log = true;
@@ -40,7 +44,7 @@ int main(int argc, char** argv) {
       else return 2;
     }
     if (seconds < 1 || seconds > 180) throw std::runtime_error("Diagnostic duration must be 1..180 seconds");
-    if (storage_probe && message_box_probe) throw std::runtime_error("Select one modal service probe per attempt");
+    if (int(storage_probe)+int(message_box_probe)+int(keyboard_probe)+int(guide_probe)>1) throw std::runtime_error("Select one modal service probe per attempt");
     if (fs::exists(output) || !fs::is_directory(user)) return 2;
     if (!IsWithin(user, paths.local() / "evidence") || !IsWithin(output.parent_path(), paths.local() / "evidence") ||
         IsWithin(output.parent_path(), user))
@@ -114,6 +118,12 @@ int main(int argc, char** argv) {
         throw std::runtime_error("Message-box service probe requires the verified 17559 host");
       args.push_back("--dash17559_message_box_probe_seconds=5");
     }
+    if (keyboard_probe || guide_probe) {
+      if (dashboard.dashboard_version != "2.0.17559.0" || dashboard.system_ui_host.empty())
+        throw std::runtime_error("Original UI probe requires the verified 17559 host");
+      args.push_back(guide_probe ? "--dash17559_guide_probe_seconds=5" : "--dash17559_keyboard_probe_seconds=5");
+      if (branded_probe) args.push_back("--dash17559_keyboard_probe_branded=true");
+    }
     args.push_back("--log_file=" + PathUtf8(output / "rex.log"));
     if (debug_log) args.push_back("--log_level=debug");
     if (selected.generic_aot)
@@ -153,6 +163,7 @@ int main(int argc, char** argv) {
         .Bool("launched", result.launched).Bool("timed_out", result.timed_out)
         .Bool("storage_probe", storage_probe).Bool("crash_captured", result.crash.captured)
         .Bool("message_box_probe", message_box_probe)
+        .Bool("keyboard_probe", keyboard_probe).Bool("branded_keyboard_probe", branded_probe).Bool("guide_probe", guide_probe)
         .Bool("xenos_d3d12_override", xenos_d3d12)
         .Bool("debug_log", debug_log).Bool("crash_memory_capture", crash_memory_base != 0)
         .Number("crash_code", result.crash.code).Number("crash_address", result.crash.address)

@@ -99,8 +99,8 @@
                                             "file":  "patches/rexglue-sdk/0008-mnk-button-keystrokes.patch",
                                             "sha256":  "d5513222aeae0dba4869e84b6d024806acbd56af2d8a27247c797daf9e3b9483",
                                             "files":  {
-                                                          "include/rex/input/mnk/mnk_input_driver.h":  "7990608ea158fc89e97344140e4c20844c910437837399a38ad0ffc5af73a81f",
-                                                          "src/input/mnk/mnk_input_driver.cpp":  "997c76ab09d65c04b1b012910235caef7e19972e51a70a5824ba95904b150dfd"
+                                                          "include/rex/input/mnk/mnk_input_driver.h":  "f9b18ae4fc9d0cad2a76b9e8a1ae10d3cd66ee341a1d9a8fd8f41fe94a6bec52",
+                                                          "src/input/mnk/mnk_input_driver.cpp":  "03493ef06ee43f4d675016462302e1e1237fa113ecb08f4604a4e742d3babbe3"
                                                       },
                                             "base_files":  {
                                                                "include/rex/input/mnk/mnk_input_driver.h":  "b91ac65d89760bdfb1a59d83a5dd2e5c1f1eb3f7d8ea93a514c68c49075fcf9c",
@@ -208,7 +208,7 @@
                                             "file":  "patches/rexglue-sdk/0017-parent-window-surface.patch",
                                             "sha256":  "92661b908b671d959c4e883c162390a4ddfe2f5284f6c53a41ba0e8911783d3b",
                                             "files":  {
-                                                          "src/ui/window_sdl.cpp":  "5ec2513751e6a27ae0638281a71b879c3d7f3023f3144f1e822a84c605d0c924"
+                                                          "src/ui/window_sdl.cpp":  "99201e54a15c598aceffaa899525ea1244348c08dce0da432e5c95dea1a670e5"
                                                       },
                                             "base_files":  {
                                                                "src/ui/window_sdl.cpp":  "9607ebfefb9e5ba4a82c2681b5725f0bb52a2263bf5dbcc92e57ea299bbf3f08"
@@ -345,7 +345,7 @@
                                                            },
                                             "files":  {
                                                           "src/kernel/xam/xam_user.cpp":  "5589f20461e56111d75d2cc8f79abd5c9a6fef1f65a29555dd706ffcb409f1be",
-                                                          "src/kernel/xam/xam_ui.cpp":  "fe75bc19d1b9ad0bef0ba759cfc1553bb2ee1a39af63c383d03eff251d534244"
+                                                          "src/kernel/xam/xam_ui.cpp":  "3e41d19a9f6fd9cff4f185a4b07310c5c2b35fa7ea8ba2b927efae1a1ebd671a"
                                                       },
                                             "test":  "tests/sdkcheck/profile_ui_request_test.cpp"
                                         },
@@ -359,7 +359,7 @@
                                                            },
                                             "files":  {
                                                           "include/rex/kernel/xam/module.h":  "a5fc75694094a6f7248b116de587f60c0d1fa68e26fede58414d051055d7cc9c",
-                                                          "src/kernel/xam/apps/xam_app.cpp":  "c75d090a328afa6d58fb3026e6f160c23d493c631177eb09c1f970767b807040",
+                                                          "src/kernel/xam/apps/xam_app.cpp":  "9af76203f02339b76adff487b3fba7a88f885d2a1cbfed61c35646b0b523720d",
                                                           "src/kernel/xam/xam_misc.cpp":  "b612fdef71b80e5b2004a2c0ba6d59497586e5e789295e685fb2daa2b78dac1c"
                                                       },
                                             "test":  "tests/sdkcheck/profile_ui_request_test.cpp"
@@ -518,9 +518,9 @@
                                                            },
                                             "files":  {
                                                           "include/rex/kernel/xam/module.h":  "a5fc75694094a6f7248b116de587f60c0d1fa68e26fede58414d051055d7cc9c",
-                                                          "src/kernel/xam/xam_input.cpp":  "9ed0d3b9348a82e4f5777917396dbb23397bcf6ad1c3ce5d551598778a150538",
+                                                          "src/kernel/xam/xam_input.cpp":  "737a5cad7f9685185ac0efe5fdd0e5d486d9203170a68c60cdc553ecc87b897d",
                                                           "src/kernel/xam/xam_misc.cpp":  "b612fdef71b80e5b2004a2c0ba6d59497586e5e789295e685fb2daa2b78dac1c",
-                                                          "src/kernel/xam/xam_ui.cpp":  "fe75bc19d1b9ad0bef0ba759cfc1553bb2ee1a39af63c383d03eff251d534244"
+                                                          "src/kernel/xam/xam_ui.cpp":  "3e41d19a9f6fd9cff4f185a4b07310c5c2b35fa7ea8ba2b927efae1a1ebd671a"
                                                       },
                                             "test":  "sdkcheck.System UI host exports and session input/lifecycle isolation"
                                         },
@@ -533,7 +533,7 @@
                                                            },
                                             "files":  {
                                                           "include/rex/kernel/xam/module.h":  "a5fc75694094a6f7248b116de587f60c0d1fa68e26fede58414d051055d7cc9c",
-                                                          "src/kernel/xam/xam_input.cpp":  "9ed0d3b9348a82e4f5777917396dbb23397bcf6ad1c3ce5d551598778a150538"
+                                                          "src/kernel/xam/xam_input.cpp":  "737a5cad7f9685185ac0efe5fdd0e5d486d9203170a68c60cdc553ecc87b897d"
                                                       },
                                             "test":  "sdkcheck.Sign-in ANY_USER session and HUD Ex ABI; title application routing and request outcomes"
                                         },
@@ -722,9 +722,9 @@
                                                                "src/kernel/xam/apps/xam_app.cpp":  "fdd173b7fd448dae593c5a1fa7c2cb6fffa0c539bacaf534e3628051bb15ec07"
                                                            },
                                             "files":  {
-                                                          "src/kernel/xam/xam_ui.cpp":  "fe75bc19d1b9ad0bef0ba759cfc1553bb2ee1a39af63c383d03eff251d534244",
+                                                          "src/kernel/xam/xam_ui.cpp":  "3e41d19a9f6fd9cff4f185a4b07310c5c2b35fa7ea8ba2b927efae1a1ebd671a",
                                                           "src/kernel/xam/xam_user.cpp":  "5589f20461e56111d75d2cc8f79abd5c9a6fef1f65a29555dd706ffcb409f1be",
-                                                          "src/kernel/xam/apps/xam_app.cpp":  "c75d090a328afa6d58fb3026e6f160c23d493c631177eb09c1f970767b807040"
+                                                          "src/kernel/xam/apps/xam_app.cpp":  "9af76203f02339b76adff487b3fba7a88f885d2a1cbfed61c35646b0b523720d"
                                                       },
                                             "test":  "sdkcheck.Profile UI requests reach the system application without invented signin notifications"
                                         },
@@ -737,7 +737,7 @@
                                                            },
                                             "files":  {
                                                           "include/rex/kernel/xam/module.h":  "a5fc75694094a6f7248b116de587f60c0d1fa68e26fede58414d051055d7cc9c",
-                                                          "src/kernel/xam/xam_ui.cpp":  "fe75bc19d1b9ad0bef0ba759cfc1553bb2ee1a39af63c383d03eff251d534244"
+                                                          "src/kernel/xam/xam_ui.cpp":  "3e41d19a9f6fd9cff4f185a4b07310c5c2b35fa7ea8ba2b927efae1a1ebd671a"
                                                       },
                                             "test":  "sdkcheck.System UI sessions isolate input and defer closure until the host releases ownership"
                                         },
@@ -811,9 +811,9 @@
                                                                "src/kernel/xam/apps/xam_app.cpp":  "da8a29bdcd121d6983b4394da282197c5aefe45f78a65dde58def91893085b15"
                                                            },
                                             "files":  {
-                                                          "src/kernel/xam/xam_ui.cpp":  "fe75bc19d1b9ad0bef0ba759cfc1553bb2ee1a39af63c383d03eff251d534244",
+                                                          "src/kernel/xam/xam_ui.cpp":  "3e41d19a9f6fd9cff4f185a4b07310c5c2b35fa7ea8ba2b927efae1a1ebd671a",
                                                           "src/kernel/xam/xam_user.cpp":  "5589f20461e56111d75d2cc8f79abd5c9a6fef1f65a29555dd706ffcb409f1be",
-                                                          "src/kernel/xam/apps/xam_app.cpp":  "c75d090a328afa6d58fb3026e6f160c23d493c631177eb09c1f970767b807040"
+                                                          "src/kernel/xam/apps/xam_app.cpp":  "9af76203f02339b76adff487b3fba7a88f885d2a1cbfed61c35646b0b523720d"
                                                       },
                                             "test":  "sdkcheck.Profile UI requests reach the system application without invented signin notifications"
                                         },
@@ -827,7 +827,7 @@
                                                            },
                                             "files":  {
                                                           "src/kernel/xam/xam_misc.cpp":  "b612fdef71b80e5b2004a2c0ba6d59497586e5e789295e685fb2daa2b78dac1c",
-                                                          "src/kernel/xam/xam_ui.cpp":  "fe75bc19d1b9ad0bef0ba759cfc1553bb2ee1a39af63c383d03eff251d534244",
+                                                          "src/kernel/xam/xam_ui.cpp":  "3e41d19a9f6fd9cff4f185a4b07310c5c2b35fa7ea8ba2b927efae1a1ebd671a",
                                                           "src/kernel/xam/xam_user.cpp":  "5589f20461e56111d75d2cc8f79abd5c9a6fef1f65a29555dd706ffcb409f1be"
                                                       },
                                             "test":  "sdkcheck.Guide sign-out removes only the active local identity"
@@ -850,7 +850,7 @@
                                                                "src/kernel/xam/xam_input.cpp":  "c194bd782927f6057e8a5d97611d6fa64d8d67a2de5753fb76ae4b481bea44c7"
                                                            },
                                             "files":  {
-                                                          "src/kernel/xam/xam_input.cpp":  "9ed0d3b9348a82e4f5777917396dbb23397bcf6ad1c3ce5d551598778a150538"
+                                                          "src/kernel/xam/xam_input.cpp":  "737a5cad7f9685185ac0efe5fdd0e5d486d9203170a68c60cdc553ecc87b897d"
                                                       },
                                             "test":  "sdkcheck.Sign-in ANY_USER session preserves exclusivity and validates HUD Ex ABI"
                                         },
@@ -1066,7 +1066,7 @@
     "src/kernel/xam/xam_input.cpp": "168638f2d39571fd98fff13e57cfd88e2a942312100a9b7c228c44a80a21dfa7"
   },
   "files": {
-    "src/kernel/xam/xam_input.cpp": "9ed0d3b9348a82e4f5777917396dbb23397bcf6ad1c3ce5d551598778a150538"
+    "src/kernel/xam/xam_input.cpp": "737a5cad7f9685185ac0efe5fdd0e5d486d9203170a68c60cdc553ecc87b897d"
   },
   "test": "tests/sdkcheck/system_ui_input_test.cpp"
 },
@@ -1351,7 +1351,7 @@
     "src/kernel/xam/xam_input.cpp": "16b99785eb442c048ff5d6e988200580971b418c28aa0ad02a94de495ea452d6"
   },
   "files": {
-    "src/kernel/xam/xam_input.cpp": "9ed0d3b9348a82e4f5777917396dbb23397bcf6ad1c3ce5d551598778a150538"
+    "src/kernel/xam/xam_input.cpp": "737a5cad7f9685185ac0efe5fdd0e5d486d9203170a68c60cdc553ecc87b897d"
   },
   "test": "tests/sdkcheck/local_profile_test.cpp"
 },
@@ -1364,7 +1364,7 @@
                    },
     "files":  {
                   "include/rex/kernel/xam/module.h":  "a5fc75694094a6f7248b116de587f60c0d1fa68e26fede58414d051055d7cc9c",
-                  "src/kernel/xam/xam_input.cpp":  "9ed0d3b9348a82e4f5777917396dbb23397bcf6ad1c3ce5d551598778a150538"
+                  "src/kernel/xam/xam_input.cpp":  "737a5cad7f9685185ac0efe5fdd0e5d486d9203170a68c60cdc553ecc87b897d"
               },
     "test":  "tests/sdkcheck/system_ui_input_test.cpp"
 },
@@ -1377,9 +1377,9 @@
     "src/kernel/xam/xam_input.cpp": "d00abcca28c73cd7b4941363d0b5b76e69a836b97dd832fbfa925a4f9fa43acf"
   },
   "files": {
-    "include/rex/input/input_system.h": "994af33cf8d9579f63b6e8b6aa32bfdcc6bf3a771166b1dfb726da614e5e0cd4",
-    "src/input/input_system.cpp": "ddf8a3de904de43f3df17447e651e87b54bb23746036bd27fdd964d35f2be786",
-    "src/kernel/xam/xam_input.cpp": "9ed0d3b9348a82e4f5777917396dbb23397bcf6ad1c3ce5d551598778a150538"
+    "include/rex/input/input_system.h": "4e6aadcee6ab69ec46cd705b452714b16ed968d9c4d5e9384181f4332a0ce002",
+    "src/input/input_system.cpp": "158eafedc6adab9ca3d42aac1be5743e907feed29057b79b26426cfc8618458e",
+    "src/kernel/xam/xam_input.cpp": "737a5cad7f9685185ac0efe5fdd0e5d486d9203170a68c60cdc553ecc87b897d"
   },
   "test": "tests/sdkcheck/system_ui_input_test.cpp"
 },
@@ -1391,8 +1391,8 @@
     "src/input/input_system.cpp": "51b74e5784bf1d29d0c5dc47a914f5b0af8518e314ce6d551cf7d57cb2eb2d3f"
   },
   "files": {
-    "include/rex/input/input_system.h": "994af33cf8d9579f63b6e8b6aa32bfdcc6bf3a771166b1dfb726da614e5e0cd4",
-    "src/input/input_system.cpp": "ddf8a3de904de43f3df17447e651e87b54bb23746036bd27fdd964d35f2be786"
+    "include/rex/input/input_system.h": "4e6aadcee6ab69ec46cd705b452714b16ed968d9c4d5e9384181f4332a0ce002",
+    "src/input/input_system.cpp": "158eafedc6adab9ca3d42aac1be5743e907feed29057b79b26426cfc8618458e"
   },
   "test": "tests/sdkcheck/input_hotplug_probe.cpp"
 },
@@ -1405,9 +1405,9 @@
     "src/kernel/xam/xam_input.cpp": "1d6d94480cbc54cebbb1a687c3605bfa0e7d2e63ebbaad51416347c9b5af6ede"
   },
   "files": {
-    "include/rex/input/input_system.h": "994af33cf8d9579f63b6e8b6aa32bfdcc6bf3a771166b1dfb726da614e5e0cd4",
+    "include/rex/input/input_system.h": "4e6aadcee6ab69ec46cd705b452714b16ed968d9c4d5e9384181f4332a0ce002",
     "include/rex/kernel/xam/module.h": "a5fc75694094a6f7248b116de587f60c0d1fa68e26fede58414d051055d7cc9c",
-    "src/kernel/xam/xam_input.cpp": "9ed0d3b9348a82e4f5777917396dbb23397bcf6ad1c3ce5d551598778a150538"
+    "src/kernel/xam/xam_input.cpp": "737a5cad7f9685185ac0efe5fdd0e5d486d9203170a68c60cdc553ecc87b897d"
   },
   "test": "tests/sdkcheck/system_ui_input_test.cpp"
 },
@@ -1477,9 +1477,9 @@
                    },
     "files":  {
                   "include/rex/kernel/xam/module.h":  "a5fc75694094a6f7248b116de587f60c0d1fa68e26fede58414d051055d7cc9c",
-                  "src/kernel/xam/apps/xam_app.cpp":  "c75d090a328afa6d58fb3026e6f160c23d493c631177eb09c1f970767b807040",
+                  "src/kernel/xam/apps/xam_app.cpp":  "9af76203f02339b76adff487b3fba7a88f885d2a1cbfed61c35646b0b523720d",
                   "src/kernel/xam/xam_notify.cpp":  "4012bda2c03505d63c6c5668b7811f2a5e8843217f426cad6eb4557050649102",
-                  "src/kernel/xam/xam_ui.cpp":  "fe75bc19d1b9ad0bef0ba759cfc1553bb2ee1a39af63c383d03eff251d534244"
+                  "src/kernel/xam/xam_ui.cpp":  "3e41d19a9f6fd9cff4f185a4b07310c5c2b35fa7ea8ba2b927efae1a1ebd671a"
               },
     "test":  "tests/sdkcheck/achievement_ui_test.cpp"
 },
@@ -1508,7 +1508,7 @@
                   "src/kernel/xam/xam_enum.cpp":  "40c7e4b2118ac9ba192c6705408909cf124497ea90f4373677e42874b52307a6",
                   "src/kernel/xam/xam_misc.cpp":  "b612fdef71b80e5b2004a2c0ba6d59497586e5e789295e685fb2daa2b78dac1c",
                   "src/kernel/xam/xam_notify.cpp":  "4012bda2c03505d63c6c5668b7811f2a5e8843217f426cad6eb4557050649102",
-                  "src/kernel/xam/xam_ui.cpp":  "fe75bc19d1b9ad0bef0ba759cfc1553bb2ee1a39af63c383d03eff251d534244"
+                  "src/kernel/xam/xam_ui.cpp":  "3e41d19a9f6fd9cff4f185a4b07310c5c2b35fa7ea8ba2b927efae1a1ebd671a"
               },
     "test":  "tests/sdkcheck/achievement_cached_title_test.cpp"
 },
@@ -1531,8 +1531,8 @@
     "include/rex/input/input_system.h": "0e2f0e00505512aec508c676ed4c5d3ded9e7e82e465c255a2f002827aec017c"
   },
   "files": {
-    "src/kernel/xam/xam_input.cpp": "9ed0d3b9348a82e4f5777917396dbb23397bcf6ad1c3ce5d551598778a150538",
-    "include/rex/input/input_system.h": "994af33cf8d9579f63b6e8b6aa32bfdcc6bf3a771166b1dfb726da614e5e0cd4"
+    "src/kernel/xam/xam_input.cpp": "737a5cad7f9685185ac0efe5fdd0e5d486d9203170a68c60cdc553ecc87b897d",
+    "include/rex/input/input_system.h": "4e6aadcee6ab69ec46cd705b452714b16ed968d9c4d5e9384181f4332a0ce002"
   },
   "test": "tests/sdkcheck/system_ui_input_test.cpp"
 },
@@ -1589,7 +1589,7 @@
     "src/kernel/xam/xam_ui.cpp": "a12fa57aaa3c55a8f9878b3f43400446504f4738a32053dac2f6e5e0342b8d6c"
   },
   "files": {
-    "src/kernel/xam/xam_ui.cpp": "fe75bc19d1b9ad0bef0ba759cfc1553bb2ee1a39af63c383d03eff251d534244"
+    "src/kernel/xam/xam_ui.cpp": "3e41d19a9f6fd9cff4f185a4b07310c5c2b35fa7ea8ba2b927efae1a1ebd671a"
   },
   "test": "tests/sdkcheck/achievement_ui_test.cpp"
 },
@@ -1604,7 +1604,7 @@
     "include/rex/system/xam/user_profile.h": "ff1302506590e8b5cc483d7fc710cf55b7a69af6052f209a818ff04e1bff18ee"
   },
   "files": {
-    "src/kernel/xam/xam_ui.cpp": "fe75bc19d1b9ad0bef0ba759cfc1553bb2ee1a39af63c383d03eff251d534244",
+    "src/kernel/xam/xam_ui.cpp": "3e41d19a9f6fd9cff4f185a4b07310c5c2b35fa7ea8ba2b927efae1a1ebd671a",
     "src/kernel/xam/xam_misc.cpp": "b612fdef71b80e5b2004a2c0ba6d59497586e5e789295e685fb2daa2b78dac1c",
     "src/kernel/xam/xam_enum.cpp": "40c7e4b2118ac9ba192c6705408909cf124497ea90f4373677e42874b52307a6",
     "src/system/xam/user_profile.cpp": "04a29ea7cbaf110ded62b55c53504072d43b4655b074f076cec5f4d1d561a829",
@@ -1681,8 +1681,8 @@
     "src/kernel/xam/apps/xam_app.cpp": "dc3380aeb89d3283ce8524eb7da21041cdd8688a449b2a6d5753fabe234a9c70"
   },
   "files": {
-    "src/kernel/xam/xam_ui.cpp": "fe75bc19d1b9ad0bef0ba759cfc1553bb2ee1a39af63c383d03eff251d534244",
-    "src/kernel/xam/apps/xam_app.cpp": "c75d090a328afa6d58fb3026e6f160c23d493c631177eb09c1f970767b807040"
+    "src/kernel/xam/xam_ui.cpp": "3e41d19a9f6fd9cff4f185a4b07310c5c2b35fa7ea8ba2b927efae1a1ebd671a",
+    "src/kernel/xam/apps/xam_app.cpp": "9af76203f02339b76adff487b3fba7a88f885d2a1cbfed61c35646b0b523720d"
   },
   "test": "tests/sdkcheck/storage_device_test.cpp"
 },
@@ -1717,7 +1717,7 @@
     "src/kernel/xam/xam_ui.cpp": "01dd2c09250b7fe163e8ddf27e3f42f2493f45bc437c9d4ff1391534b13dbf59"
   },
   "files": {
-    "src/kernel/xam/xam_ui.cpp": "fe75bc19d1b9ad0bef0ba759cfc1553bb2ee1a39af63c383d03eff251d534244"
+    "src/kernel/xam/xam_ui.cpp": "3e41d19a9f6fd9cff4f185a4b07310c5c2b35fa7ea8ba2b927efae1a1ebd671a"
   },
   "test": "sdkcheck: [profile-options], [profile-navigation], [profile-ui]"
 },
@@ -3023,8 +3023,8 @@
     "src/kernel/xam/apps/xam_app.cpp": "b5c8d87976fbf041f798ab4738f8117fefcc72e490312ef2750a3cc9ffa15f8a"
   },
   "files": {
-    "src/kernel/xam/xam_ui.cpp": "fe75bc19d1b9ad0bef0ba759cfc1553bb2ee1a39af63c383d03eff251d534244",
-    "src/kernel/xam/apps/xam_app.cpp": "c75d090a328afa6d58fb3026e6f160c23d493c631177eb09c1f970767b807040"
+    "src/kernel/xam/xam_ui.cpp": "3e41d19a9f6fd9cff4f185a4b07310c5c2b35fa7ea8ba2b927efae1a1ebd671a",
+    "src/kernel/xam/apps/xam_app.cpp": "9af76203f02339b76adff487b3fba7a88f885d2a1cbfed61c35646b0b523720d"
   },
   "test": "sdkcheck [message-box-request]: before patch original FE/2100D request not delivered (1/6 assertions fails). Replace XamShowMessageBoxUI ImGui/headless default acceptance with bounded original 1148-byte request transport to selected system UI; preserve inline UTF16 limits, flags, output pointers, ninth PPC argument, pending completion and service failure. No title identity, visual replica or default-selection fallback."
 },
@@ -3037,9 +3037,47 @@
   },
   "files": {
     "src/kernel/xam/xam_msg.cpp": "0ad4bd1da7b73b9d22299e260b44801d8c72951f20dbafe8f33c699c0741b893",
-    "src/kernel/xam/xam_ui.cpp": "fe75bc19d1b9ad0bef0ba759cfc1553bb2ee1a39af63c383d03eff251d534244"
+    "src/kernel/xam/xam_ui.cpp": "3e41d19a9f6fd9cff4f185a4b07310c5c2b35fa7ea8ba2b927efae1a1ebd671a"
   },
   "test": "sdkcheck [message-box-io-context]: before patch 1/13 assertions fails because XMsgCompleteIORequest replaces the requesting thread handle with the completing worker. Preserve the recorded OVERLAPPED caller during completion; capture caller at original UI submission, including the storage selector. No title condition, default completion, or runtime thread migration."
+},
+{
+  "file": "patches/rexglue-sdk/0215-original-keyboard-ui.patch",
+  "sha256": "24b213bc72bc51961dc47846cf944485e73f483989c496a7a9716b2b5a59250e",
+  "base_files": {
+    "src/kernel/xam/xam_ui.cpp": "fe75bc19d1b9ad0bef0ba759cfc1553bb2ee1a39af63c383d03eff251d534244",
+    "src/kernel/xam/apps/xam_app.cpp": "c75d090a328afa6d58fb3026e6f160c23d493c631177eb09c1f970767b807040"
+  },
+  "files": {
+    "src/kernel/xam/xam_ui.cpp": "3e41d19a9f6fd9cff4f185a4b07310c5c2b35fa7ea8ba2b927efae1a1ebd671a",
+    "src/kernel/xam/apps/xam_app.cpp": "9af76203f02339b76adff487b3fba7a88f885d2a1cbfed61c35646b0b523720d"
+  },
+  "test": "tests/sdkcheck/keyboard_request_test.cpp: red 2 cases fail against 0214; original FE/21005 and FE/21010, no default acceptance, pending I/O and requester preserved."
+},
+{
+  "file": "patches/rexglue-sdk/0216-original-keyboard-text-input.patch",
+  "sha256": "1898ba6775dede247edf36695c476d9e23c2a245304089e889b842a131f68033",
+  "base_files": {
+    "src/input/input_system.cpp": "ddf8a3de904de43f3df17447e651e87b54bb23746036bd27fdd964d35f2be786",
+    "src/ui/imgui_drawer.cpp": "cb413f84a111f3d2acc99d924b794e7dbadc0e353bf56194ae4503bd778ee8ed",
+    "src/ui/window_sdl.cpp": "5ec2513751e6a27ae0638281a71b879c3d7f3023f3144f1e822a84c605d0c924",
+    "src/kernel/xam/xam_input.cpp": "9ed0d3b9348a82e4f5777917396dbb23397bcf6ad1c3ce5d551598778a150538",
+    "src/input/mnk/mnk_input_driver.cpp": "997c76ab09d65c04b1b012910235caef7e19972e51a70a5824ba95904b150dfd",
+    "include/rex/input/input_driver.h": "8ba62757ca6b82f6bfd2eea70040f1111493494bac04a7923164aa94092478eb",
+    "include/rex/input/input_system.h": "994af33cf8d9579f63b6e8b6aa32bfdcc6bf3a771166b1dfb726da614e5e0cd4",
+    "include/rex/input/mnk/mnk_input_driver.h": "7990608ea158fc89e97344140e4c20844c910437837399a38ad0ffc5af73a81f"
+  },
+  "files": {
+    "src/input/input_system.cpp": "158eafedc6adab9ca3d42aac1be5743e907feed29057b79b26426cfc8618458e",
+    "src/ui/imgui_drawer.cpp": "0c28001dd6998158817860bcde855685a3b778771e909a4cb775e3ce33c741a6",
+    "src/ui/window_sdl.cpp": "99201e54a15c598aceffaa899525ea1244348c08dce0da432e5c95dea1a670e5",
+    "src/kernel/xam/xam_input.cpp": "737a5cad7f9685185ac0efe5fdd0e5d486d9203170a68c60cdc553ecc87b897d",
+    "src/input/mnk/mnk_input_driver.cpp": "03493ef06ee43f4d675016462302e1e1237fa113ecb08f4604a4e742d3babbe3",
+    "include/rex/input/input_driver.h": "11efd768e021c4ff6b91e3d64f34637174bd1b6d5baae7709d79a15f847e8803",
+    "include/rex/input/input_system.h": "4e6aadcee6ab69ec46cd705b452714b16ed968d9c4d5e9384181f4332a0ce002",
+    "include/rex/input/mnk/mnk_input_driver.h": "f9b18ae4fc9d0cad2a76b9e8a1ae10d3cd66ee341a1d9a8fd8f41fe94a6bec52"
+  },
+  "test": "tests/sdkcheck/keyboard_text_input_test.cpp: red HUD queue remains empty. Honor original XamInputSetKeyboardTranslationHud 0/1, UTF16 input and controls, suppress emulated pad shortcuts, restore text activation and drain queued work on detach. Window listener regression: 2/6 fail before priority/capture correction; original modal receives text ahead of overlays and mouse release preserves text activation."
 }
 ]
                     },
