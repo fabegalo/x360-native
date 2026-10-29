@@ -4,9 +4,11 @@
 caminho escapado do XAM e interrompido o despacho quando sua imagem não carrega.
 Ordenação e localização continuam executadas pelo código original, agora com
 testes reais do carregador; red 5/36, green 534 asserções/21 casos relacionados.
-Preparo oficial concluído; Settings → System abriu em sessão isolada de 180 s,
-mas a navegação automatizada não alcançou Storage. Gerenciamento de conteúdo
-e ciclo dashboard/jogo/dashboard continuam sem novo aceite. Sem Release.
+Preparo oficial concluído; Settings → System → Storage → Hard Drive → Profiles
+listou `P0Player1` e abriu seus detalhes em sessão isolada de 180 s. Teclas
+direcionais simples foram remapeadas somente no diagnóstico; miniatura com
+ícone de aviso, mover/excluir conteúdo e ciclo dashboard/jogo/dashboard continuam
+sem novo aceite. Sem Release.
 
 28/10 — **IMPORT-17559 implementado, aceite gráfico pendente**: ZIP oficial,
 pasta `$SystemUpdate` e PIRS reconhecidos por conteúdo; flash 17559, recurso
