@@ -53,6 +53,23 @@ foreach(_pair "runtime|rexruntime" "system|rexruntime" "kernel|rexruntime" "core
     string(APPEND _aliases "add_library(rex::${_alias} ALIAS ${_target})\n")
 endforeach()
 string(APPEND _aliases "add_executable(rex::rexglue ALIAS rexglue)\n")
+# Upstream aliases linked by this project's own SDK consumers (src/native's
+# Native plugin). The export keeps real names, so recreate them as the source
+# tree defines them; an alias whose target is not exported fails here, in the
+# shared SDK build, instead of in a title's configure.
+foreach(_alias xxHash::xxhash Vulkan::Headers glslang::SPIRV)
+    if(NOT TARGET "${_alias}")
+        continue()
+    endif()
+    get_target_property(_real "${_alias}" ALIASED_TARGET)
+    if(NOT _real)
+        continue()  # not an alias in the source tree
+    endif()
+    if(NOT _real IN_LIST _export)
+        message(FATAL_ERROR "Shared SDK alias ${_alias} names a target that is not exported: ${_real}")
+    endif()
+    string(APPEND _aliases "if(NOT TARGET ${_alias})\nadd_library(${_alias} ALIAS ${_real})\nendif()\n")
+endforeach()
 set(_checks "")
 foreach(_setting CMAKE_C_COMPILER CMAKE_CXX_COMPILER CMAKE_C_COMPILER_ARG1 CMAKE_CXX_COMPILER_ARG1
         CMAKE_C_COMPILER_TARGET CMAKE_CXX_COMPILER_TARGET CMAKE_C_COMPILER_EXTERNAL_TOOLCHAIN CMAKE_CXX_COMPILER_EXTERNAL_TOOLCHAIN
