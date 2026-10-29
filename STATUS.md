@@ -1,5 +1,13 @@
 # STATUS
 
+28/10 — **ponte original de armazenamento 17559 corrigida**: corrigido o
+caminho escapado do XAM e interrompido o despacho quando sua imagem não carrega.
+Ordenação e localização continuam executadas pelo código original, agora com
+testes reais do carregador; red 5/36, green 534 asserções/21 casos relacionados.
+Preparo oficial concluído; Settings → System abriu em sessão isolada de 180 s,
+mas a navegação automatizada não alcançou Storage. Gerenciamento de conteúdo
+e ciclo dashboard/jogo/dashboard continuam sem novo aceite. Sem Release.
+
 28/10 — **IMPORT-17559 implementado, aceite gráfico pendente**: ZIP oficial,
 pasta `$SystemUpdate` e PIRS reconhecidos por conteúdo; flash 17559, recurso
 `shrdres` do XAM e avatar organizados pelos SHA-256 do perfil. O ZIP local

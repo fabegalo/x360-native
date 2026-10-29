@@ -77,7 +77,19 @@ TEST_CASE("Original keyboard owns window text ahead of overlays and survives mou
 TEST_CASE("Original keyboard text mode accepts UTF16 without controller shortcuts or title leakage",
           "[sdk][keyboard-text-input]") {
   const bool previous=REXCVAR_GET(mnk_mode);
-  struct Restore { bool value; ~Restore(){REXCVAR_SET(mnk_mode,value);} } restore{previous};
+  struct Restore {
+    bool value;
+    std::string chord;
+    rex::cvar::Source source;
+    ~Restore(){
+      REXCVAR_SET(mnk_mode,value);
+      if(source==rex::cvar::Source::kDefault)rex::cvar::ResetToDefault("guide_chord_ms");
+      else rex::cvar::SetFlagByName("guide_chord_ms",chord);
+    }
+  } restore{previous,rex::cvar::GetFlagByName("guide_chord_ms"),rex::cvar::GetFlagSource("guide_chord_ms")};
+  // This fixture tests text/pad mode boundaries; Guide chord timing has its
+  // own tests. Do not inherit another fixture's configured delay for START.
+  REQUIRE(rex::cvar::SetFlagByName("guide_chord_ms","0"));
   REXCVAR_SET(mnk_mode,true);
   rex::input::mnk::MnkInputDriver* keyboard=nullptr;
   rex::Runtime rt(std::filesystem::temp_directory_path());

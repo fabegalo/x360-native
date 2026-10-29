@@ -32,6 +32,7 @@ set(DASH17559_SOURCES
     src/launch_uri.cpp
     src/boot_intro.cpp
     src/system_ui.cpp
+    src/original_xam_services.cpp
     src/display_transition.cpp
 )
 

@@ -208,6 +208,7 @@ void ReleaseSystemUiHost() {
   pending_ui = {};
   poll_guide = {};
   active_application = nullptr;
+  bound_xam_path.clear();
   for (const auto& app : suspended_apps)
     ReleaseDiscardedSystemUiState(*rex::Runtime::instance()->memory(), app.message, app.state);
   suspended_apps.clear();
@@ -224,6 +225,7 @@ void ReleaseSystemUiHost() {
 }
 void InstallSystemUi(rex::Runtime& runtime, std::string drive, std::string native_directory) {
   system_drive = std::move(drive);
+  bound_xam_path = UiPath("game:\\system\\xam_ui.xex");
   // XAM normally handles the physical Guide button outside the foreground
   // title. Poll its edge here because the original XAM scheduler is not run.
   x360n::ConfigureGuideButton();
@@ -278,7 +280,6 @@ void InstallSystemUi(rex::Runtime& runtime, std::string drive, std::string nativ
   bind("deviceselector.xex", "game:\\system\\deviceselector.xex", "dash_17559_deviceselector");
   if (!native_directory.empty()) {
     bind("xam.xex", "game:\\system\\xam_ui.xex", "dash_17559_xam_ui");
-    bound_xam_path = UiPath("game:\\system\\xam_ui.xex");
     bind("gamerprofile.xex", "game:\\system\\gamerprofile.xex", "dash_17559_gamerprofile");
   }
   if (REXCVAR_GET(dash17559_signin_ui)) {
@@ -913,41 +914,3 @@ void dash17559::DrawSystemUiFrame(PPCContext& ctx) {
     }
   }
 }
-
-#ifndef X360N_SYSTEM_UI_PLUGIN
-namespace dash17559 {
-namespace {
-// Pure original XAM 17559 routines imported by dash.xex itself (the Storage
-// list): run them from the original image, mapped on first use without its
-// entry point, exactly as the Guide host maps it. No reimplementation of
-// their collation/localization tables.
-void CallOriginalXam(PPCContext& ctx, uint8_t* base, uint32_t address, const char* name) {
-  static std::mutex mapping;
-  auto& runtime = *rex::Runtime::instance();
-  auto* state = runtime.kernel_state();
-  {
-    std::lock_guard lock(mapping);
-    const auto path = UiPath("game:\system\xam_ui.xex");
-    if (!state->GetModule(path) && !state->LoadUserModule(path, false))
-      REXLOG_ERROR("17559: original XAM image unavailable for {}", name);
-  }
-  auto* fn = runtime.function_dispatcher()->GetFunction(address);
-  if (!fn) {
-    REXLOG_ERROR("17559: missing original {} {:08X}", name, address);
-    ctx.r3.u64 = 0x80004001;  // E_NOTIMPL, never a fabricated result
-    return;
-  }
-  fn(ctx, base);
-}
-}  // namespace
-}  // namespace dash17559
-// Original export 0x1E6 (816E35A8): (str1, str2, count, flags) UTF-16 collation.
-extern "C" REX_FUNC(__imp__XamUniSortCmpString) {
-  dash17559::CallOriginalXam(ctx, base, 0x816E35A8, "XamUniSortCmpString");
-}
-// Original export 0x283 (816EE090): localized title/display strings of a
-// content metadata block in the console language; 87 without metadata.
-extern "C" REX_FUNC(__imp__XamContentGetLocalizedString) {
-  dash17559::CallOriginalXam(ctx, base, 0x816EE090, "XamContentGetLocalizedString");
-}
-#endif

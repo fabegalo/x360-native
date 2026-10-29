@@ -209,6 +209,7 @@ target_sources(x360n_sdk_runtime_checks PRIVATE sdkcheck/profile_ui_request_test
 target_sources(x360n_sdk_runtime_checks PRIVATE sdkcheck/message_box_request_test.cpp)
 target_sources(x360n_sdk_runtime_checks PRIVATE sdkcheck/keyboard_request_test.cpp)
 target_sources(x360n_sdk_runtime_checks PRIVATE sdkcheck/keyboard_text_input_test.cpp)
+target_sources(x360n_sdk_runtime_checks PRIVATE sdkcheck/original_xam_service_test.cpp ../titles/dash_17559/src/original_xam_services.cpp)
 target_sources(x360n_sdk_runtime_checks PRIVATE ../titles/dash_17559/src/system_ui.cpp)
 set_source_files_properties("${PROJECT_SOURCE_DIR}/titles/dash_17559/src/system_ui.cpp"
     PROPERTIES COMPILE_DEFINITIONS X360N_SYSTEM_UI_PLUGIN=1)
