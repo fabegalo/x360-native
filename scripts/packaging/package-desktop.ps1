@@ -31,8 +31,26 @@ function ExportTree([string]$Repository, [string]$Revision, [string]$Directory) 
     $archive = Join-Path $job ([guid]::NewGuid().ToString('N') + '.zip')
     git -c core.autocrlf=false -c core.eol=lf -C $Repository archive --format=zip "--output=$archive" $Revision
     if ($LASTEXITCODE -ne 0) { throw "Cannot export committed dependency: $Repository $Revision" }
-    & "$env:SystemRoot\System32\tar.exe" -xf $archive -C $Directory
+    # Git symlinks (libmspack's cabextract/mspack) cannot be created without the
+    # symlink privilege. Like scripts/setup/materialize-symlinks.ps1, export them
+    # as copies of their in-tree targets, each checked against the target blob.
+    $links = @(git -C $Repository ls-tree -r $Revision | Where-Object { $_ -match '^120000 blob ([0-9a-f]+)\t(.+)$' } |
+        ForEach-Object { [pscustomobject]@{blob=$Matches[1]; path=$Matches[2]} })
+    $exclude = @($links | ForEach-Object { "--exclude=$($_.path)" })
+    & "$env:SystemRoot\System32\tar.exe" -xf $archive -C $Directory @exclude
     if ($LASTEXITCODE -ne 0) { throw 'Source snapshot extraction failed' }
+    foreach ($link in $links) {
+        $target = (git -C $Repository cat-file -p $link.blob)
+        $linkFile = [IO.Path]::GetFullPath((Join-Path $Directory $link.path))
+        $source = [IO.Path]::GetFullPath((Join-Path (Split-Path -Parent $linkFile) $target))
+        if (-not $source.StartsWith($Directory + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase) -or
+            -not (Test-Path -LiteralPath $source -PathType Leaf)) { throw "Unsupported symlink in export: $($link.path) -> $target" }
+        $relative = $source.Substring($Directory.Length + 1).Replace('\','/')
+        $expected = (git -C $Repository rev-parse "${Revision}:$relative")
+        $actual = (git hash-object --no-filters -- $source)
+        if ($expected -ne $actual) { throw "Symlink target differs from its committed blob: $relative" }
+        Copy-Item -LiteralPath $source -Destination $linkFile
+    }
     Remove-Item -LiteralPath $archive
 }
 function Hash([string]$File) { (Get-FileHash -LiteralPath $File -Algorithm SHA256).Hash.ToLowerInvariant() }
