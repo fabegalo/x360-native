@@ -1,4 +1,4 @@
-param([Parameter(Mandatory)][string]$Build, [string]$PreviousSha)
+param([Parameter(Mandatory)][string]$Build, [string]$PreviousSha, [string]$SnapshotOutput)
 $ErrorActionPreference = 'Stop'
 $env:PSModulePath = Join-Path $PSHOME 'Modules'
 . "$PSScriptRoot/preparation-receipt.ps1"
@@ -132,7 +132,7 @@ foreach ($name in @($environmentNames | Sort-Object)) {
 $snapshot = [ordered]@{schema=1; graph_trusted=$graphTrusted; environment=$variables; includes=$inventory;
     dependency_database=$dependencyHash; dependency_directories=@($dependencyDirectories | Sort-Object);
     libraries=@($libraries | Sort-Object -Unique); resources=@($resources | Sort-Object)}
-$file = Join-Path $Build '.preparation/toolchain.json'
+$file = if ($SnapshotOutput) { [IO.Path]::GetFullPath($SnapshotOutput) } else { Join-Path $Build '.preparation/toolchain.json' }
 [void][IO.Directory]::CreateDirectory((Split-Path $file))
 $text = $snapshot | ConvertTo-Json -Depth 5
 if (-not [IO.File]::Exists($file) -or [IO.File]::ReadAllText($file) -ne $text) {

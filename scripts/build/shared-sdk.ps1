@@ -1,6 +1,6 @@
 # Immutable generations of the generic SDK. No guest binaries or writable game
 # state enter this cache. A bad/interrupted generation is preserved, never reused.
-function Assert-SharedSdkSources($Commands, [string]$Sdk, [string]$Build) {
+function Assert-SharedSdkSources($Commands, [string]$Sdk, [string]$Build, [Collections.Generic.HashSet[string]]$OwnedSources) {
     $sdkBoundary = [IO.Path]::GetFullPath($Sdk).TrimEnd('\','/') + [IO.Path]::DirectorySeparatorChar
     $buildBoundary = [IO.Path]::GetFullPath($Build).TrimEnd('\','/') + [IO.Path]::DirectorySeparatorChar
     foreach ($entry in @($Commands | ForEach-Object { $_ })) {
@@ -10,10 +10,38 @@ function Assert-SharedSdkSources($Commands, [string]$Sdk, [string]$Build) {
             -not $file.StartsWith($buildBoundary,[StringComparison]::OrdinalIgnoreCase)) {
             throw "Title or external source cannot enter the generic SDK cache: $file"
         }
+        if ($file.StartsWith($sdkBoundary,[StringComparison]::OrdinalIgnoreCase) -and
+            (-not $OwnedSources -or -not $OwnedSources.Contains($file))) {
+            throw "Untracked/unidentified SDK translation unit cannot be shared: $file"
+        }
         if ((Test-BuildFile $file) -and ([IO.File]::GetAttributes($file) -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
             throw "Shared SDK translation unit cannot be a reparse point: $file"
         }
     }
+}
+function Assert-SharedSdkInputs([string]$Root, $Entries) {
+    $boundary = [IO.Path]::GetFullPath($Root).TrimEnd('\','/') + [IO.Path]::DirectorySeparatorChar
+    foreach ($entry in $Entries) {
+        $path = [IO.Path]::GetFullPath($entry.path)
+        if (-not $path.StartsWith($boundary,[StringComparison]::OrdinalIgnoreCase)) { continue }
+        $relative = $path.Substring($boundary.Length).Replace('\','/')
+        if ($relative -match '^(titles/|\.local/(aot|inputs|user|keys|preparation)/)') {
+            throw "Title-specific or writable content cannot enter the shared SDK: $($entry.path)"
+        }
+    }
+}
+function Assert-SharedSdkToolchain([string]$Root, $Ready, [string]$TitleBuild) {
+    $original = Join-Path $Ready.build '.preparation/toolchain.json'
+    $expected = @($Ready.inputs | Where-Object path -eq $original)
+    if ($expected.Count -ne 1) { throw 'Shared SDK compiler inventory is not authenticated' }
+    # Query the real producer graph into a separate file. Never rewrite a ready
+    # generation. This detects newly shadowing headers in explicit -I paths,
+    # including directories that did not exist when the producer was built.
+    $probe = Join-Path $Root '.local/cache/shared-sdk/identity/.preparation/verify.json'
+    $log = Join-Path $TitleBuild ('x360n-build-sdk-verify.'+[Guid]::NewGuid().ToString('N')+'.log')
+    $script = Join-Path $Root 'scripts/build/toolchain-snapshot.ps1'
+    if (Invoke-PreparationCommand "powershell.exe -NoProfile -ExecutionPolicy Bypass -File `"$script`" -Build `"$($Ready.build)`" -SnapshotOutput `"$probe`"" $log) { throw 'Shared SDK compiler inventory verification failed' }
+    if ((Get-ReceiptHash $probe) -ne $expected[0].sha256) { throw 'Shared SDK compiler search inventory changed; rebuild required' }
 }
 function Read-SharedSdkGeneration([string]$Root, [string]$Pointer, [string]$Identity) {
     $binding = [IO.File]::ReadAllText($Pointer) | ConvertFrom-Json
@@ -125,6 +153,7 @@ function Get-SharedSdk([string]$Root, [string]$Project, [string]$TitleBuild) {
         if (Test-BuildFile $pointer) {
             try {
                 $ready = Read-SharedSdkGeneration $Root $pointer $identity
+                Assert-SharedSdkToolchain $Root $ready $TitleBuild
                 Write-Host "reused verified shared SDK: $($ready.build)"
                 return $ready
             } catch { Write-Host "shared SDK cache rejected: $($_.Exception.Message)" }
@@ -145,7 +174,13 @@ function Get-SharedSdk([string]$Root, [string]$Project, [string]$TitleBuild) {
             if (-not (Test-ReleaseBuildConfiguration $generation)) { throw 'Shared SDK is not Release' }
             $commands = @((Invoke-IncrementalNinjaQuery $generation @('compdb','-x')) | ConvertFrom-Json)
             Assert-ReleaseCompileCommands $commands -NinjaGraph
-            Assert-SharedSdkSources $commands $sdk $generation
+            $ownedSources = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+            $tracked = @(& git -c core.quotepath=false -C $sdk ls-files --recurse-submodules)
+            if ($LASTEXITCODE) { throw 'Cannot authenticate SDK translation unit ownership' }
+            foreach ($file in $tracked) { [void]$ownedSources.Add([IO.Path]::GetFullPath((Join-Path $sdk $file))) }
+            $locked = [IO.File]::ReadAllText((Join-Path $Root 'deps.lock.json')) | ConvertFrom-Json
+            foreach ($patch in $locked.rexglue_sdk.patches) { foreach ($file in $patch.files.PSObject.Properties.Name) { [void]$ownedSources.Add([IO.Path]::GetFullPath((Join-Path $sdk $file))) } }
+            Assert-SharedSdkSources $commands $sdk $generation $ownedSources
             if (-not (Test-ReceiptEntries $inputs)) { throw 'Shared SDK inputs changed while building; no receipt published' }
             $nodes = @(Get-NinjaNodes $generation @('rexglue','rexgpu-xenos'))
             $tool = @($nodes | Where-Object { $_ -match '[\\/]rexglue\.exe$' })[0]
@@ -162,6 +197,7 @@ function Get-SharedSdk([string]$Root, [string]$Project, [string]$TitleBuild) {
             # utilities and SDK tests must not tax every subsequent game launch.
             $closure = @(Get-ReceiptEntries @((Get-BuildInputs $Root '' $generation @('rexglue','rexgpu-xenos')) +
                 @((Join-Path $Root 'scripts/build/shared-sdk.ps1')) | Sort-Object -Unique))
+            Assert-SharedSdkInputs $Root $closure
             $receipt = @{schema=1;identity=$identity;inputs=$closure;artifacts=$artifacts;tool=$tool;producer=$producer;globs=@(Get-BuildGlobs $generation)}
             $receiptFile = Join-Path $generation 'sdk.preparation.json'
             Publish-PreparationReceipt $receiptFile $receipt

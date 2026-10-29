@@ -55,6 +55,7 @@ try {
     $result=[X360NPreparationProcess]::Run($env:ComSpec,$arguments,$root,2400,$Scenario -ne 'Validation')
     $result | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $outputPath 'result.json')
     if($result.exit_code){Get-Content -LiteralPath $log -Tail 20;throw "Preparation benchmark failed: $($result.exit_code)"}
+    [IO.File]::Copy((Join-Path $build ($Title+'.exe.preparation.json')),(Join-Path $outputPath 'preparation-receipt.json'))
     $objects=0
     if(Test-Path (Join-Path $outputPath 'phases.jsonl')){
         foreach($row in (Get-Content (Join-Path $outputPath 'phases.jsonl') | ForEach-Object {$_ | ConvertFrom-Json})){

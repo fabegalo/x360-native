@@ -31,7 +31,16 @@ function ChangePreservingMetadata([string]$File) {
     [IO.File]::SetLastWriteTimeUtc($File,$time)
 }
 $sdk=Join-Path $scratch 'sdk'
-Assert-SharedSdkSources @(@{file=(Join-Path $sdk 'runtime.cpp');output='runtime.obj'},@{file=(Join-Path $generation 'generated.cpp');output='generated.obj'}) $sdk $generation
+$owned=[Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+[void]$owned.Add((Join-Path $sdk 'runtime.cpp'))
+Assert-SharedSdkSources @(@{file=(Join-Path $sdk 'runtime.cpp');output='runtime.obj'},@{file=(Join-Path $generation 'generated.cpp');output='generated.obj'}) $sdk $generation $owned
+$foreign=$false
+try{Assert-SharedSdkSources @(@{file=(Join-Path $sdk 'out/guest.cpp');output='guest.obj'}) $sdk $generation $owned}catch{$foreign=$true}
+Assert $foreign 'Unidentified generated SDK guest source entered generic cache'
+$foreign=$false
+try{Assert-SharedSdkInputs $scratch @(@{path=(Join-Path $scratch 'titles/guest/generated.h')})}catch{$foreign=$true}
+Assert $foreign 'Title-specific forced header entered generic cache'
+Assert-SharedSdkInputs $scratch @(@{path=(Join-Path $sdk 'runtime.h')},@{path=(Join-Path $generation 'generated.h')})
 $foreign=$false
 try{Assert-SharedSdkSources @(@{file=(Join-Path $scratch 'titles/guest.cpp');output='guest.obj'}) $sdk $generation}catch{$foreign=$true}
 Assert $foreign 'Guest/title translation unit entered generic cache'

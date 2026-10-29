@@ -333,6 +333,7 @@ try {
         }
         throw 'An input changed during preparation; prepare again. No receipt published.'
     }
+    if ($sharedSdk) { Assert-SharedSdkToolchain $root $sharedSdk $build }
     Update-ToolchainSnapshot '5-toolchain'
     if (-not (Test-ReleaseBuildConfiguration $build)) { throw 'Cannot certify a non-Release title' }
     Assert-ReleaseCompileCommands @((Invoke-IncrementalNinjaQuery $build @('compdb', '-x')) | ConvertFrom-Json) -NinjaGraph
