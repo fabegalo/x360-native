@@ -109,10 +109,10 @@ struct AchievementGuest {
     return Call(__imp__XamUserCreateAchievementEnumerator,
                 {title, user, xuid, flags, offset, count, block + 300, block + 304});
   }
-  uint32_t Enumerate(uint32_t handle, uint32_t size, bool async = false) {
-    if (!async) return Call(__imp__XamEnumerate, {handle, 0, block + 1024, size, block + 308, 0});
+  uint32_t Enumerate(uint32_t handle, uint32_t size, bool async = false, uint32_t flags = 0) {
+    if (!async) return Call(__imp__XamEnumerate, {handle, flags, block + 1024, size, block + 308, 0});
     std::memset(base + block + 256, 0, 32);
-    const auto result = Call(__imp__XamEnumerate, {handle, 0, block + 1024, size, 0, block + 256});
+    const auto result = Call(__imp__XamEnumerate, {handle, flags, block + 1024, size, 0, block + 256});
     REQUIRE(result == X_ERROR_IO_PENDING);
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(3);
     while (Word(256) == X_ERROR_IO_PENDING && std::chrono::steady_clock::now() < deadline)
@@ -297,6 +297,37 @@ TEST_CASE("Offline achievement enumeration honors PPC XUID Title ID offsets stri
   CHECK(guest.Word(1024) == kTitleA); CHECK(guest.Word(1028) == 2);
   CHECK(guest.Word(1032) == 1); CHECK(guest.Word(1036) == 35); CHECK(guest.Word(1040) == 10);
   CHECK(guest.Word(1192) == kTitleB); CHECK(guest.Word(1204) == 65); CHECK(guest.Word(1208) == 0);
+}
+
+TEST_CASE("Original direct enumeration flag preserves title and achievement pages", "[sdk][offline-achievement-api][enumerate-direct]") {
+  TestDirectory directory; AchievementGuest guest(directory.path);
+  auto* state = guest.runtime.kernel_state();
+  REQUIRE(state->offline_achievements().ImportTitle(kTitleA, offline_achievement_fixture::Metadata()) == Result::kSuccess);
+  uint64_t xuid = 0;
+  REQUIRE(state->user_profile()->CreateLocal("Direct", &xuid) == 0);
+  REQUIRE(state->user_profile()->SetLocalSession(xuid) == 0);
+  REQUIRE(state->user_profile()->RecordTitlePlayed(kTitleA));
+  for (const bool titles : {false,true}) {
+    if (titles) REQUIRE(guest.Call(__imp__XamUserCreateTitlesPlayedEnumerator,
+        {0,0,xuid,0,1,guest.block+300,guest.block+304}) == 0);
+    else REQUIRE(guest.Create(kTitleA,xuid,0,1,0x27) == 0);
+    const auto handle=guest.Word(304), size=guest.Word(300);
+    // Invalid output/capacity/flags must not consume a page.
+    CHECK(guest.Call(__imp__XamEnumerate,{handle,2,guest.block+1024,size,0xFFFFFFFC,0})==87);
+    CHECK(guest.Enumerate(handle,size-1,false,2)==122);
+    CHECK(guest.Enumerate(handle,size,false,1)==87);
+    REQUIRE(guest.Enumerate(handle,size,false,2)==0);
+    CHECK(guest.Word(308)==1);CHECK(guest.Word(1024)==(titles?kTitleA:1));
+    if (!titles) {
+      std::memset(guest.base+guest.block+256,0,32);
+      REQUIRE(guest.Call(__imp__XamEnumerate,{handle,2,guest.block+1024,size,0,guest.block+256})==997);
+      // Bit 1 dispatches directly, completing before the export returns.
+      CHECK(guest.Word(256)==0);CHECK(guest.Word(260)==1);CHECK(guest.Word(1024)==2);
+    }
+    CHECK(guest.Enumerate(handle,size,false,2)==X_ERROR_NO_MORE_FILES);
+    CHECK(guest.Word(308)==0);
+    CHECK(guest.Call(__imp__NtClose,{handle})==0);
+  }
 }
 
 TEST_CASE("Offline achievement tile APIs preserve encoded resources and decode real pixels", "[sdk][offline-achievement-api]") {

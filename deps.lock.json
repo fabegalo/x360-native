@@ -563,7 +563,7 @@
                                                                "src/kernel/xam/xam_misc.cpp":  "1355b25b416bde112daaa06d34acedd2078cc63e58898cc53ef5493277cd59c7"
                                                            },
                                             "files":  {
-                                                          "src/kernel/xam/xam_enum.cpp":  "40c7e4b2118ac9ba192c6705408909cf124497ea90f4373677e42874b52307a6",
+                                                          "src/kernel/xam/xam_enum.cpp":  "d2406cb8956d1df31c7e2cefe01a535f7661a230920b4175fa23b7bf083636b0",
                                                           "src/kernel/xam/xam_user.cpp":  "5589f20461e56111d75d2cc8f79abd5c9a6fef1f65a29555dd706ffcb409f1be",
                                                           "src/kernel/xam/xam_misc.cpp":  "b612fdef71b80e5b2004a2c0ba6d59497586e5e789295e685fb2daa2b78dac1c"
                                                       },
@@ -708,7 +708,7 @@
                                                            },
                                             "files":  {
                                                           "include/rex/system/xam/user_profile.h":  "95b5837de2ea3a549f1d83244c57525b2e90f8b8b28c89bbc337f780da0c5ca3",
-                                                          "src/kernel/xam/xam_enum.cpp":  "40c7e4b2118ac9ba192c6705408909cf124497ea90f4373677e42874b52307a6",
+                                                          "src/kernel/xam/xam_enum.cpp":  "d2406cb8956d1df31c7e2cefe01a535f7661a230920b4175fa23b7bf083636b0",
                                                           "src/system/xam/user_profile.cpp":  "04a29ea7cbaf110ded62b55c53504072d43b4655b074f076cec5f4d1d561a829"
                                                       },
                                             "test":  "sdkcheck.Local profiles enumerate independently switch atomically and survive restart"
@@ -751,7 +751,7 @@
                                                            },
                                             "files":  {
                                                           "include/rex/system/xobject.h":  "37930c4cdbf022d716b4033a2f278153f3535ef7a13b7b3ebb798d42dca8b319",
-                                                          "src/kernel/xam/xam_enum.cpp":  "40c7e4b2118ac9ba192c6705408909cf124497ea90f4373677e42874b52307a6",
+                                                          "src/kernel/xam/xam_enum.cpp":  "d2406cb8956d1df31c7e2cefe01a535f7661a230920b4175fa23b7bf083636b0",
                                                           "src/kernel/xam/xam_misc.cpp":  "b612fdef71b80e5b2004a2c0ba6d59497586e5e789295e685fb2daa2b78dac1c"
                                                       },
                                             "test":  "sdkcheck.Local profile creation uses guest account and consumable operation handles"
@@ -763,7 +763,7 @@
                                                                "src/kernel/xam/xam_enum.cpp":  "0f3d9510787c2f79ff0e6ec8f0a47a307452062d380bc0de3c3cfef6ee0d761c"
                                                            },
                                             "files":  {
-                                                          "src/kernel/xam/xam_enum.cpp":  "40c7e4b2118ac9ba192c6705408909cf124497ea90f4373677e42874b52307a6"
+                                                          "src/kernel/xam/xam_enum.cpp":  "d2406cb8956d1df31c7e2cefe01a535f7661a230920b4175fa23b7bf083636b0"
                                                       },
                                             "test":  "sdkcheck.Local profile creation uses guest account and consumable operation handles"
                                         },
@@ -787,7 +787,7 @@
                                                                "src/kernel/xam/xam_enum.cpp":  "1f6ad1dd35baf490e6bf32a8e2f0c0755fcb8b1c43b7019c1796b1b1725505c1"
                                                            },
                                             "files":  {
-                                                          "src/kernel/xam/xam_enum.cpp":  "40c7e4b2118ac9ba192c6705408909cf124497ea90f4373677e42874b52307a6"
+                                                          "src/kernel/xam/xam_enum.cpp":  "d2406cb8956d1df31c7e2cefe01a535f7661a230920b4175fa23b7bf083636b0"
                                                       },
                                             "test":  "sdkcheck.Local profiles enumerate independently switch atomically and survive restart"
                                         },
@@ -1459,7 +1459,7 @@
     "files":  {
                   "include/rex/kernel/xam/offline_achievement_helpers.h":  "97ac17e69eb4fcf91c4bfb6c69aa428b90a04161c0f6a77cf0a78729d4c94889",
                   "include/rex/system/xam/app_manager.h":  "b21cbaab39de95b8287382effb3ea581d02ed35ace0e868f7f26a1d90f8b815f",
-                  "src/kernel/xam/xam_enum.cpp":  "40c7e4b2118ac9ba192c6705408909cf124497ea90f4373677e42874b52307a6",
+                  "src/kernel/xam/xam_enum.cpp":  "d2406cb8956d1df31c7e2cefe01a535f7661a230920b4175fa23b7bf083636b0",
                   "src/kernel/xam/xam_msg.cpp":  "0ad4bd1da7b73b9d22299e260b44801d8c72951f20dbafe8f33c699c0741b893",
                   "src/kernel/xam/xam_user.cpp":  "5589f20461e56111d75d2cc8f79abd5c9a6fef1f65a29555dd706ffcb409f1be",
                   "src/kernel/xam/apps/xgi_app.cpp":  "ed7b589b4620cbc9c781169ea4755b0cc542de68ae84f2fa4418df31e137c7fe"
@@ -1505,7 +1505,7 @@
                        "src/kernel/xam/xam_ui.cpp":  "1673724ec92dcefd39e6ecd7151095f11103347eb38095dc717c7b05ac2aa025"
                    },
     "files":  {
-                  "src/kernel/xam/xam_enum.cpp":  "40c7e4b2118ac9ba192c6705408909cf124497ea90f4373677e42874b52307a6",
+                  "src/kernel/xam/xam_enum.cpp":  "d2406cb8956d1df31c7e2cefe01a535f7661a230920b4175fa23b7bf083636b0",
                   "src/kernel/xam/xam_misc.cpp":  "b612fdef71b80e5b2004a2c0ba6d59497586e5e789295e685fb2daa2b78dac1c",
                   "src/kernel/xam/xam_notify.cpp":  "4012bda2c03505d63c6c5668b7811f2a5e8843217f426cad6eb4557050649102",
                   "src/kernel/xam/xam_ui.cpp":  "3e41d19a9f6fd9cff4f185a4b07310c5c2b35fa7ea8ba2b927efae1a1ebd671a"
@@ -1606,7 +1606,7 @@
   "files": {
     "src/kernel/xam/xam_ui.cpp": "3e41d19a9f6fd9cff4f185a4b07310c5c2b35fa7ea8ba2b927efae1a1ebd671a",
     "src/kernel/xam/xam_misc.cpp": "b612fdef71b80e5b2004a2c0ba6d59497586e5e789295e685fb2daa2b78dac1c",
-    "src/kernel/xam/xam_enum.cpp": "40c7e4b2118ac9ba192c6705408909cf124497ea90f4373677e42874b52307a6",
+    "src/kernel/xam/xam_enum.cpp": "d2406cb8956d1df31c7e2cefe01a535f7661a230920b4175fa23b7bf083636b0",
     "src/system/xam/user_profile.cpp": "04a29ea7cbaf110ded62b55c53504072d43b4655b074f076cec5f4d1d561a829",
     "include/rex/system/xam/user_profile.h": "95b5837de2ea3a549f1d83244c57525b2e90f8b8b28c89bbc337f780da0c5ca3"
   },
@@ -1623,7 +1623,7 @@
   },
   "files": {
     "src/kernel/xam/xam_misc.cpp": "b612fdef71b80e5b2004a2c0ba6d59497586e5e789295e685fb2daa2b78dac1c",
-    "src/kernel/xam/xam_enum.cpp": "40c7e4b2118ac9ba192c6705408909cf124497ea90f4373677e42874b52307a6",
+    "src/kernel/xam/xam_enum.cpp": "d2406cb8956d1df31c7e2cefe01a535f7661a230920b4175fa23b7bf083636b0",
     "src/system/xam/user_profile.cpp": "04a29ea7cbaf110ded62b55c53504072d43b4655b074f076cec5f4d1d561a829",
     "include/rex/system/xam/user_profile.h": "95b5837de2ea3a549f1d83244c57525b2e90f8b8b28c89bbc337f780da0c5ca3"
   },
@@ -1844,7 +1844,7 @@
     "src/kernel/xam/xam_user.cpp": "c21714d57cc4e437a175c7d20398a62448cc7e2c2105d333eb36b1d6c52c0181"
   },
   "files": {
-    "src/kernel/xam/xam_enum.cpp": "40c7e4b2118ac9ba192c6705408909cf124497ea90f4373677e42874b52307a6",
+    "src/kernel/xam/xam_enum.cpp": "d2406cb8956d1df31c7e2cefe01a535f7661a230920b4175fa23b7bf083636b0",
     "src/kernel/xam/xam_user.cpp": "5589f20461e56111d75d2cc8f79abd5c9a6fef1f65a29555dd706ffcb409f1be"
   },
   "test": "diagnostic log only; sdkcheck: [achievement-ui], [offline-achievement-api] unchanged"
@@ -1915,7 +1915,7 @@
   "files": {
     "include/rex/system/offline_achievement_store.h": "deb9093a5c15286e6a882318a922c1bd9a22cab37bb34589877dc769c4487dee",
     "include/rex/system/xam/user_profile.h": "95b5837de2ea3a549f1d83244c57525b2e90f8b8b28c89bbc337f780da0c5ca3",
-    "src/kernel/xam/xam_enum.cpp": "40c7e4b2118ac9ba192c6705408909cf124497ea90f4373677e42874b52307a6",
+    "src/kernel/xam/xam_enum.cpp": "d2406cb8956d1df31c7e2cefe01a535f7661a230920b4175fa23b7bf083636b0",
     "src/system/offline_achievement_store.cpp": "ee7506eefb3d1c92dbca82a6a200cc58678370c050b37c329a94cdee62b3af21",
     "src/system/xam/content_manager.cpp": "136a91c0965d63d9ba2d0569530a6b04348819bb5a6fac78263f0bbac17018c3",
     "src/system/xam/user_profile.cpp": "04a29ea7cbaf110ded62b55c53504072d43b4655b074f076cec5f4d1d561a829"
@@ -3078,6 +3078,17 @@
     "include/rex/input/mnk/mnk_input_driver.h": "f9b18ae4fc9d0cad2a76b9e8a1ae10d3cd66ee341a1d9a8fd8f41fe94a6bec52"
   },
   "test": "tests/sdkcheck/keyboard_text_input_test.cpp: red HUD queue remains empty. Honor original XamInputSetKeyboardTranslationHud 0/1, UTF16 input and controls, suppress emulated pad shortcuts, restore text activation and drain queued work on detach. Window listener regression: 2/6 fail before priority/capture correction; original modal receives text ahead of overlays and mouse release preserves text activation."
+},
+{
+  "file": "patches/rexglue-sdk/0217-original-direct-enumeration.patch",
+  "sha256": "36ec5ca724964f265cc2a2e22aec12a75c856ec466e9f1da538f8ffd5b13453f",
+  "base_files": {
+    "src/kernel/xam/xam_enum.cpp": "40c7e4b2118ac9ba192c6705408909cf124497ea90f4373677e42874b52307a6"
+  },
+  "files": {
+    "src/kernel/xam/xam_enum.cpp": "d2406cb8956d1df31c7e2cefe01a535f7661a230920b4175fa23b7bf083636b0"
+  },
+  "test": "sdkcheck [enumerate-direct]: before patch 2/27 assertions fail (87 instead of direct enumeration). Original 17559 816F1134 selects direct dispatch with bit 1. Preserve synchronous title/achievement pages, bounds, cursor and direct OVERLAPPED completion with real item count; flags 0 retain deferred behavior. No invented records."
 }
 ]
                     },

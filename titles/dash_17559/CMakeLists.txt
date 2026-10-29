@@ -34,6 +34,7 @@ set(DASH17559_SOURCES
     src/boot_intro.cpp
     src/system_ui.cpp
     src/original_xam_services.cpp
+    src/system_ui_images.cpp
     src/display_transition.cpp
 )
 
@@ -66,7 +67,7 @@ endif()
 
 # Original system UI also queries the camera state; use the shared platform contract.
 if(TARGET dash_17559_gamerprofile)
-    target_sources(dash_17559_gamerprofile PRIVATE ../common/camera_state.cpp src/system_ui_imports.cpp)
+    target_sources(dash_17559_gamerprofile PRIVATE ../common/camera_state.cpp src/system_ui_imports.cpp src/system_ui_images.cpp)
 endif()
 
 # Overlapping guest images require separate codegen invocations. A fresh install
@@ -91,7 +92,7 @@ foreach(module signin createprofile vk hud deviceselector)
         WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
         VERBATIM)
     set(module_target "dash_17559_${module}")
-    add_library(${module_target} SHARED ${GENERATED_SOURCES} src/system_ui_imports.cpp)
+    add_library(${module_target} SHARED ${GENERATED_SOURCES} src/system_ui_imports.cpp src/system_ui_images.cpp)
     if(module STREQUAL "createprofile")
         target_sources(${module_target} PRIVATE src/createprofile_imports.cpp)
     endif()

@@ -429,6 +429,13 @@ void InstallSystemUi(rex::Runtime& runtime, std::string drive, std::string nativ
                   uint32_t(resources), Read32(*memory, kSystemTarget), Read32(*memory, 0x81A826F0),
                   Read32(*memory, 0x81A826F4));
       if (static_cast<int32_t>(resources) < 0) return resources;
+      // Original global image cache startup (81691ED0 -> 81691B08).
+      // Sign-in and GamerCard use this cache through export 2F2; the original
+      // constructor allocates its textures only after the system DC exists.
+      const auto image_cache = static_cast<X_HRESULT>(
+          dispatcher->ExecuteTrap(thread, 0x81691ED0, nullptr, 0));
+      REXLOG_INFO("17559 system UI: original image cache -> {:08X}", uint32_t(image_cache));
+      if (static_cast<int32_t>(image_cache) < 0) return image_cache;
       Write32(*memory, kFadeTarget, Read32(*memory, kFadeHidden));
       Write32(*memory, kFadeCurrent, Read32(*memory, kFadeHidden));
       uint64_t bootstrap[] = {0};

@@ -1,0 +1,27 @@
+diff --git a/src/kernel/xam/xam_enum.cpp b/src/kernel/xam/xam_enum.cpp
+--- a/src/kernel/xam/xam_enum.cpp
++++ b/src/kernel/xam/xam_enum.cpp
+@@ -201,7 +201,8 @@
+   const auto* header = REX_KERNEL_MEMORY()->TranslateVirtual<X_KENUMERATOR*>(e->guest_object());
+   if (header->app_id == 0xFB &&
+       (header->open_message == 0xB000A || header->open_message == 0xB0050)) {
+-    if (flags) {
++    // Original 17559 816F1134: bit 1 selects direct dispatch.
++    if (flags != 0 && flags != 2) {
+       REXKRNL_INFO("Achievement/title enumerate message={:05X} rejected flags={:X}",
+                    uint32_t(header->open_message), flags);
+       return X_ERROR_INVALID_PARAMETER;
+@@ -263,6 +264,13 @@
+     return result;
+   } else if (overlapped_ptr) {
+     assert_true(!items_returned);
++    if (flags & 2) {
++      uint32_t extended_error, item_count;
++      const auto result = run(extended_error, item_count);
++      REX_KERNEL_STATE()->CompleteOverlappedImmediateEx(
++          overlapped_ptr, result, extended_error, item_count);
++      return X_ERROR_IO_PENDING;
++    }
+     REX_KERNEL_STATE()->CompleteOverlappedDeferredEx(run, overlapped_ptr);
+     return X_ERROR_IO_PENDING;
+   } else {
