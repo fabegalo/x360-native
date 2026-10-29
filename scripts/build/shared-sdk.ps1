@@ -40,7 +40,7 @@ function Assert-SharedSdkToolchain([string]$Root, $Ready, [string]$TitleBuild) {
     $probe = Join-Path $Root '.local/cache/shared-sdk/identity/.preparation/verify.json'
     $log = Join-Path $TitleBuild ('x360n-build-sdk-verify.'+[Guid]::NewGuid().ToString('N')+'.log')
     $script = Join-Path $Root 'scripts/build/toolchain-snapshot.ps1'
-    if (Invoke-PreparationCommand "powershell.exe -NoProfile -ExecutionPolicy Bypass -File `"$script`" -Build `"$($Ready.build)`" -SnapshotOutput `"$probe`"" $log) { throw 'Shared SDK compiler inventory verification failed' }
+    if (Invoke-PreparationCommand "powershell.exe -NoProfile -ExecutionPolicy Bypass -File `"$script`" -Build `"$($Ready.build)`" -PreviousSha $($expected[0].sha256) -SnapshotOutput `"$probe`"" $log) { throw 'Shared SDK compiler inventory verification failed' }
     if ((Get-ReceiptHash $probe) -ne $expected[0].sha256) { throw 'Shared SDK compiler search inventory changed; rebuild required' }
 }
 function Read-SharedSdkGeneration([string]$Root, [string]$Pointer, [string]$Identity) {

@@ -73,9 +73,9 @@ if ([IO.File]::Exists($cacheFile)) {
         foreach ($directory in $cachedDirectories) { [void]$dependencyDirectories.Add($directory) }
         Write-Host 'reused authenticated compiler include directories'
     } elseif ($graphTrusted) {
-        foreach ($line in ((Invoke-IncrementalNinjaQuery $Build @('deps')) -split '\r?\n')) {
-            if ($line.StartsWith('    ')) { [void]$localInputs.Add((Resolve-BuildPath $Build $line.Substring(4))) }
-        }
+        Initialize-ProductFingerprints
+        $dependencies = Invoke-IncrementalNinjaQuery $Build @('deps')
+        foreach ($file in [X360NProducts]::AllCompilerDependencies($Build,$dependencies)) { [void]$localInputs.Add($file) }
     }
     foreach ($file in $localInputs) {
         $directory = Split-Path $file

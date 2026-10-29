@@ -1,5 +1,5 @@
 param([Parameter(Mandatory)][string]$CMake,[Parameter(Mandatory)][string]$Source,
-    [Parameter(Mandatory)][string]$Directory,[ValidateRange(1,8)][int]$Jobs=8)
+    [Parameter(Mandatory)][string]$Directory,[ValidateRange(1,16)][int]$Jobs=16)
 $ErrorActionPreference='Stop'
 $running=[Collections.Generic.List[object]]::new()
 $watch=[Diagnostics.Stopwatch]::StartNew()
@@ -8,7 +8,11 @@ try {
     $match=[regex]::Match($context,'set\(PROBE_NAMES \[==\[(.*?)\]==\]\)',[Text.RegularExpressions.RegexOptions]::Singleline)
     if(-not $match.Success){throw 'Libc probe inventory missing'}
     $names=@($match.Groups[1].Value.Split(';') | Where-Object {$_})
-    $Jobs=[Math]::Min([Math]::Min($Jobs,[Environment]::ProcessorCount),$names.Count)
+    if(-not ('X360NPreparationProcess' -as [type])){Add-Type -Path (Join-Path $PSScriptRoot 'preparation-process.cs')}
+    $Jobs=[Math]::Min([Math]::Min($Jobs,[X360NPreparationProcess]::ParallelJobs()),$names.Count)
+    $requestedJobs=0
+    if([int]::TryParse($env:CMAKE_BUILD_PARALLEL_LEVEL,[ref]$requestedJobs) -and $requestedJobs -gt 0){$Jobs=[Math]::Min($Jobs,$requestedJobs)}
+    Write-Output "x360n: $Jobs bounded libc probe workers"
     $logs=[Collections.Generic.List[string]]::new()
     for($index=0;$index -lt $Jobs;$index++) {
         $bucket=@(for($entry=$index;$entry -lt $names.Count;$entry+=$Jobs){$names[$entry]})

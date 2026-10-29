@@ -137,6 +137,20 @@ public sealed class X360NProducts : IDisposable {
         var sorted = new List<string>(result); sorted.Sort(StringComparer.CurrentCultureIgnoreCase);
         return sorted.ToArray();
     }
+    public static string[] AllCompilerDependencies(string build, string deps) {
+        // Inventory-only equivalent of the PowerShell Ninja deps walk. Resolve
+        // each distinct spelling once; do not cache any content/approval here.
+        var raw = new HashSet<string>(Comparer);
+        using (var input = new StringReader(deps)) {
+            string line;
+            while ((line = input.ReadLine()) != null)
+                if (line.StartsWith("    ")) raw.Add(line.Substring(4));
+        }
+        var paths = new HashSet<string>(Comparer);
+        foreach (string file in raw) paths.Add(Resolve(build, file));
+        var sorted = new List<string>(paths); sorted.Sort(StringComparer.CurrentCultureIgnoreCase);
+        return sorted.ToArray();
+    }
     static IEnumerable<string> Parents(Dictionary<string, List<string>> edges, string id) {
         List<string> result; return edges.TryGetValue(id, out result) ? result : (IEnumerable<string>)new string[0];
     }

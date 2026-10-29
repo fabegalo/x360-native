@@ -97,7 +97,7 @@ if(WIN32)
   add_test(NAME x360n.toolchain-snapshot COMMAND powershell -NoProfile -ExecutionPolicy Bypass
     -File ${CMAKE_CURRENT_SOURCE_DIR}/build_isolation/toolchain_snapshot_test.ps1 -Ninja "${X360N_REAL_NINJA}")
   set_tests_properties(x360n.toolchain-snapshot PROPERTIES LABELS project TIMEOUT 300)
-  foreach(_case shared_sdk shared_protection preparation_metrics download_tools preparation_reuse shared_toolchain)
+  foreach(_case shared_sdk shared_protection preparation_metrics download_tools preparation_reuse shared_toolchain dependency_inventory)
     string(REPLACE "_" "-" _name "${_case}")
     add_test(NAME x360n.${_name} COMMAND powershell -NoProfile -ExecutionPolicy Bypass
       -File ${CMAKE_CURRENT_SOURCE_DIR}/build_isolation/${_case}_test.ps1)
