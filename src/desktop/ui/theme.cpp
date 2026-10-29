@@ -22,7 +22,14 @@ void LoadFonts(ImGuiIO& io) {
   auto add = [&](const unsigned char* data, unsigned int size) {
     ImFontConfig config;
     config.FontDataOwnedByAtlas = false;  // static data
-    config.OversampleH = 2;
+    // Crisp small text: one texel per screen pixel and whole-pixel glyph
+    // positions, so bilinear sampling never spreads a stem over two columns.
+    config.OversampleH = 1;
+    config.OversampleV = 1;
+    config.PixelSnapH = true;
+    // Light text on the dark palette loses weight without ClearType's contrast
+    // boost; strengthen glyph coverage slightly instead.
+    config.RasterizerMultiply = 1.3f;
     return io.Fonts->AddFontFromMemoryTTF(const_cast<unsigned char*>(data), int(size), 14.0f, &config);
   };
   auto& fonts = T().fonts;
