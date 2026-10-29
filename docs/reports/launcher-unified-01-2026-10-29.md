@@ -75,15 +75,54 @@ smoke; na validação anterior do mesmo ambiente era llvmpipe (CPU). GPU física
 controle, diálogos de arquivo (portal/zenity) e arrastar e soltar não foram
 exercitados no Linux.
 
+## Fluxo real pelo launcher (Windows, autorizado em 29/10)
+
+Ambiente de desenvolvimento do repositório, dashboard Retail 17559, saves e
+perfis da sessão redirecionados para uma pasta descartável em `.local/runs`
+(`--user-data-root` do supervisor); dados reais do mantenedor intocados. O
+launcher foi conduzido pelo auxílio de revisão `--auto-start` (somente fora da
+distribuição), que emite os mesmos comandos dos botões e registra o que a
+interface mostra; nenhuma entrada foi injetada em janelas.
+
+1. A listagem marcou a 17559 como candidata (“Conferir e iniciar”).
+2. Iniciar foi recusado pela conferência antes da sessão: o recibo citava
+   `cmake/build/x360n_build_isolation.cmake`, alterado depois da preparação de
+   28/10. Mensagem: “A preparação mudou. Selecione Preparar…”.
+3. **Defeito encontrado:** a ação principal virava “Adicionar conteúdo”, porque
+   uma falha de início marcava os arquivos como inválidos mesmo quando o worker
+   acabara de verificá-los (regra herdada do Win32). Corrigido: um início
+   recusado depois da verificação adota o estado verificado; com arquivos
+   íntegros a ação é “Verificar e preparar”. Teste novo: “a launch refused for a
+   changed preparation offers to prepare again”.
+4. Com a correção, a preparação começou pelo launcher (downloads recusados;
+   ferramentas reutilizadas do cache) e mostrou as etapas reais do supervisor:
+   `sdk-configure`, `sdk-build` (geração compartilhada do SDK reconstruída) e
+   `1-configure`. Essas três não estavam mapeadas nas etapas da barra; agora
+   estão (SDK, SDK e Configuração), com teste.
+5. **A preparação falhou em 8 min 53 s** no configure do título: o plugin
+   Native (`src/native/CMakeLists.txt`) vincula `xxHash::xxhash`, alvo que a
+   geração compartilhada do SDK não exporta. O plugin entra porque o cache do
+   build do título no ambiente do mantenedor guarda `X360N_NATIVE_RENDERER=ON`
+   de trabalho Native anterior, e o `x360n prepare` não fixa essa variável.
+   Reproduzido fora do launcher com `scripts/build-title.ps1 -Title dash_17559`
+   (mesma falha em 32 s). É defeito do pipeline compartilhado (commit
+   `8625338`) com esse cache, não do launcher; não foi corrigido aqui.
+6. O launcher mostrou o erro com o caminho do log e voltou ao estado ocioso.
+   Nenhuma sessão foi iniciada; a pasta isolada de saves ficou vazia; o
+   retorno de foco após uma sessão real continua **não observado**.
+
+Na tentativa anterior (início recusado, sem preparar) o launcher terminou com
+foco de entrada (`SDL_RaiseWindow`), mas sem sessão aberta isso não comprova o
+retorno de foco depois da dashboard.
+
 ## Não executado / pendente
 
-- **Fluxos reais com dados do mantenedor** (importar ISO/STFS real, preparar
-  pelo launcher, iniciar a dashboard e voltar o foco): não executados para não
-  alterar os dados reais e porque exigem sessão visual/entrada na janela, que
-  pedem autorização própria. O ciclo de sessão (iniciar, fechar, finalizar,
-  repetir, cancelar) foi exercido pelo controller com o processo-fixture
-  `x360n_launcher_child`; o retorno de foco usa `SDL_RaiseWindow` ao fim da
-  sessão, não observado em tela.
+- **Sessão real da dashboard pelo launcher:** autorizada e tentada (seção
+  acima); bloqueada pela falha de preparação do pipeline compartilhado.
+  Importação de ISO/STFS real não foi executada. O ciclo de sessão (iniciar,
+  fechar, finalizar, repetir, cancelar) só foi exercido pelo controller com o
+  processo-fixture `x360n_launcher_child`; o retorno de foco usa
+  `SDL_RaiseWindow` ao fim da sessão, não observado com a dashboard.
 - **Extrator em Linux/macOS:** `x360n-extract` só compila no Windows (BCrypt
   para AES/SHA-1, `wmain`, `windows.h` em `system_update.cpp`, fontes `*_win`
   do SDK e DLL do libmspack). A importação de pasta extraída é o mesmo código;
