@@ -1,5 +1,16 @@
 # STATUS
 
+29/10 — **CROSS-PLATFORM-FINAL parcial: processos e caminhos nativos**:
+biblioteca única com backend POSIX, cancelamento/timeout/grupos, logs protegidos
+e notificações por sessão; caminhos Unicode e executáveis sem sufixo Windows.
+Windows: processos/IPC 48/12, crash 14/1, regressões de caminhos 45/5; launcher
+Release compilado. Ubuntu/WSL x64: processos/IPC 110/20, caminhos novos 17/3 e
+regressões 45/5. Três objetos Windows ARM64 compilados por cross-compilation.
+Linux executou somente contratos com GCC local; aplicativo/AOT, frontend único,
+macOS, outras arquiteturas, pacotes/CI e fluxos originais continuam pendentes.
+Sem nova sessão visual, alteração do SDK/dados, push ou Release.
+[Código, evidências e limites](docs/reports/cross-platform-final-2026-10-29.md).
+
 29/10 — **PERF-BOOT-01 implementado, aceite visual pendente**: SDK genérico com
 gerações verificadas reutilizáveis, probes/downloads paralelos e inventários
 reduzidos. Setup com downloads reais + importação/projeto + preparo 17559/jogo
