@@ -25,6 +25,13 @@ struct TempProject {
     std::ofstream(root / ".local" / "build" / "cfg" / "script.bat") << "x";
     std::ofstream(root / ".local" / "inputs" / "game" / "evil.exe") << "x";
     std::ofstream(root.parent_path() / "outside.exe") << "x";
+#ifndef _WIN32
+    // Exercise the same trust boundaries with native executable permissions.
+    for (const auto& file : {root / ".local/build/cfg/tool.exe",
+                            root / ".local/inputs/game/evil.exe",
+                            root.parent_path() / "outside.exe"})
+      fs::permissions(file, fs::perms::owner_exec, fs::perm_options::add);
+#endif
   }
   ~TempProject() {
     std::error_code ec;

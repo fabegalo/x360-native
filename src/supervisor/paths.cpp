@@ -6,14 +6,58 @@
 #include <system_error>
 #include <fstream>
 #include <stdexcept>
+#include <vector>
+#include <cerrno>
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
+#else
+#include <unistd.h>
+#ifdef __APPLE__
+#include <mach-o/dyld.h>
+#endif
 #endif
 
 namespace fs = std::filesystem;
 
 namespace x360n {
+uint32_t CurrentProcessId() {
+#ifdef _WIN32
+  return GetCurrentProcessId();
+#else
+  return uint32_t(getpid());
+#endif
+}
+
+fs::path CurrentExecutablePath() {
+#ifdef _WIN32
+  std::wstring buffer(1024, L'\0');
+  for (;;) {
+    const auto count = GetModuleFileNameW(nullptr, buffer.data(), DWORD(buffer.size()));
+    if (!count) throw std::system_error(int(GetLastError()), std::system_category(), "GetModuleFileNameW");
+    if (count < buffer.size()) { buffer.resize(count); return fs::path(buffer); }
+    if (buffer.size() >= 32768) throw std::runtime_error("Executable path exceeds Windows path limit");
+    buffer.resize(std::min<size_t>(buffer.size() * 2, 32768));
+  }
+#elif defined(__APPLE__)
+  uint32_t count = 0;
+  _NSGetExecutablePath(nullptr, &count);
+  std::vector<char> buffer(count);
+  if (buffer.empty() || _NSGetExecutablePath(buffer.data(), &count) != 0)
+    throw std::runtime_error("Could not resolve native executable path");
+  return fs::canonical(fs::path(buffer.data()));
+#else
+  std::string buffer(1024, '\0');
+  for (;;) {
+    const auto count = readlink("/proc/self/exe", buffer.data(), buffer.size());
+    if (count < 0) throw std::system_error(errno, std::generic_category(), "readlink /proc/self/exe");
+    if (size_t(count) < buffer.size()) { buffer.resize(size_t(count)); return fs::path(buffer); }
+    if (buffer.size() >= 1024 * 1024) throw std::runtime_error("Executable path exceeds diagnostic limit");
+    buffer.resize(buffer.size() * 2);
+  }
+#endif
+}
+
 std::string PathUtf8(const fs::path& path) {
   auto value = path.u8string(); return {value.begin(), value.end()};
 }
@@ -53,13 +97,13 @@ void SetUserDataRoot(const ProjectPaths& paths, const fs::path& directory) {
 }
 namespace {
 
-std::wstring Folded(const fs::path& p) {
-  std::wstring s = p.lexically_normal().wstring();
+fs::path::string_type Folded(const fs::path& p) {
+  auto s = p.lexically_normal().native();
 #ifdef _WIN32
   std::transform(s.begin(), s.end(), s.begin(), [](wchar_t c) { return wchar_t(std::towlower(c)); });
   std::replace(s.begin(), s.end(), L'/', L'\\');
 #endif
-  while (s.size() > 1 && (s.back() == L'\\' || s.back() == L'/')) s.pop_back();
+  while (s.size() > 1 && s.back() == fs::path::preferred_separator) s.pop_back();
   return s;
 }
 
@@ -84,17 +128,24 @@ bool IsWithin(const fs::path& path, const fs::path& base) {
   if (ec) return false;
   fs::path b = fs::canonical(base, ec);
   if (ec) return false;
-  std::wstring ps = Folded(p), bs = Folded(b);
+  const auto ps = Folded(p), bs = Folded(b);
   if (ps.size() < bs.size() || ps.compare(0, bs.size(), bs) != 0) return false;
-  return ps.size() == bs.size() || ps[bs.size()] == L'\\' || ps[bs.size()] == L'/';
+  // On POSIX, a backslash is a filename character, not a directory boundary.
+  // A filesystem root already ends in its separator ("/" on POSIX).
+  return ps.size() == bs.size() || bs.back() == fs::path::preferred_separator ||
+         ps[bs.size()] == fs::path::preferred_separator;
 }
 
 std::optional<std::string> CheckLaunchable(const ProjectPaths& p, const fs::path& exe) {
   std::error_code ec;
   if (!fs::is_regular_file(exe, ec)) return "not an existing file: " + PathUtf8(exe);
+#ifdef _WIN32
   std::wstring ext = exe.extension().wstring();
   std::transform(ext.begin(), ext.end(), ext.begin(), [](wchar_t c) { return wchar_t(std::towlower(c)); });
   if (ext != L".exe") return "only .exe build outputs can be launched: " + PathUtf8(exe);
+#else
+  if (access(exe.c_str(), X_OK) != 0) return "build output is not executable: " + PathUtf8(exe);
+#endif
   if (fs::exists(p.inputs(), ec) && IsWithin(exe, p.inputs()))
     return "refusing to launch a file from .local/inputs (untrusted content): " + PathUtf8(exe);
   bool in_build = fs::exists(p.build(), ec) && IsWithin(exe, p.build());

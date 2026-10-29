@@ -58,14 +58,7 @@ constexpr int kExitTimeout = 2;
 constexpr int kExitUsage = 3;
 
 fs::path SelfPath() {
-#ifdef _WIN32
-  std::wstring buf(32768, L'\0');
-  DWORD n = GetModuleFileNameW(nullptr, buf.data(), DWORD(buf.size()));
-  buf.resize(n);
-  return fs::path(buf);
-#else
-  return fs::current_path();
-#endif
+  return CurrentExecutablePath();
 }
 
 std::optional<fs::path> FindOnPath(const std::wstring& name) {
@@ -105,11 +98,7 @@ struct Captured {
 };
 
 uint32_t ProcessId() {
-#ifdef _WIN32
-  return GetCurrentProcessId();
-#else
-  return 0;
-#endif
+  return CurrentProcessId();
 }
 
 // Runs a short helper command and captures its output (doctor, git queries).

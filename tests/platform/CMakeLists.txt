@@ -1,7 +1,8 @@
 add_executable(x360n_platform_child ../supervisor/test_child.cpp)
 target_include_directories(x360n_platform_child PRIVATE ../../src/supervisor)
 target_compile_definitions(x360n_platform_child PRIVATE X360N_PLATFORM_CHILD=1)
-add_executable(x360n_platform_tests ../supervisor/process_test.cpp process_contract_test.cpp)
+add_executable(x360n_platform_tests ../supervisor/process_test.cpp process_contract_test.cpp
+    ../supervisor/paths_test.cpp path_contract_test.cpp ../../src/supervisor/paths.cpp)
 target_link_libraries(x360n_platform_tests PRIVATE x360n_process Catch2::Catch2WithMain)
 target_include_directories(x360n_platform_tests PRIVATE ../supervisor)
 target_compile_definitions(x360n_platform_tests PRIVATE
@@ -12,3 +13,7 @@ add_test(NAME platform.process COMMAND x360n_platform_tests "[process],[process-
 set_tests_properties(platform.process PROPERTIES LABELS project TIMEOUT 45)
 add_test(NAME platform.process-isolation COMMAND x360n_platform_tests "[process-isolation]")
 set_tests_properties(platform.process-isolation PROPERTIES LABELS project TIMEOUT 10)
+add_test(NAME platform.paths COMMAND x360n_platform_tests "[platform-paths]")
+set_tests_properties(platform.paths PROPERTIES LABELS project TIMEOUT 10)
+add_test(NAME platform.path-regressions COMMAND x360n_platform_tests "[paths]")
+set_tests_properties(platform.path-regressions PROPERTIES LABELS project TIMEOUT 10)

@@ -5,8 +5,13 @@
 #include <filesystem>
 #include <optional>
 #include <string>
+#include <cstdint>
 
 namespace x360n {
+
+// Actual native process identity; independent of the caller's working directory.
+std::filesystem::path CurrentExecutablePath();
+uint32_t CurrentProcessId();
 std::string PathUtf8(const std::filesystem::path& path);
 std::filesystem::path PathFromUtf8(const std::string& value);
 
@@ -28,7 +33,8 @@ std::optional<ProjectPaths> FindProjectRoot(const std::filesystem::path& start);
 // differing case on Windows are handled by weakly_canonical + case folding.
 bool IsWithin(const std::filesystem::path& path, const std::filesystem::path& base);
 
-// Decides whether the supervisor may launch `exe`: it must be an existing .exe
+// Decides whether the supervisor may launch `exe`: an existing native executable
+// (.exe on Windows, executable permission on POSIX),
 // produced by a build (under .local/build or the SDK's out/), and never
 // anything under .local/inputs, where untrusted game/dashboard data lives.
 // Returns an error message, or nullopt if allowed.
