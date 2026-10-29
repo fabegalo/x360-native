@@ -1,5 +1,13 @@
 # STATUS
 
+29/10 — **sessão gráfica Linux x64 demonstrada no WSLg**: Iruka AOT ELF,
+Xenos/Vulkan, janela SDL/X11 e animação/textos observados por 40 s, com dados
+isolados. Preflight aprovado; supervisor encerrou no limite, zero erros/stubs
+nos logs e nenhum processo de teste restante. Vulkan usou **llvmpipe na CPU**;
+GPU física, áudio/controles, frontend Linux, dashboard e retorno continuam sem
+aceite. Windows e dados originais preservados.
+[Evidências e limites](docs/reports/linux-wslg-iruka-2026-10-29.md).
+
 29/10 — **supervisor e pipeline AOT nativos, Windows/Linux x64**: driver C++ único
 `x360n prepare`, SDK genérico por host/ABI, fingerprints de conteúdo, guard Ninja
 nativo e recuperação após interrupção; wrappers mínimos. Windows preserva seus

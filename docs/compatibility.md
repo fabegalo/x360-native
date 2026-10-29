@@ -17,6 +17,15 @@ jogabilidade. Os links preservam hashes completos, runs, testes e falhas anterio
 | Minecraft 584111F7 / 0.0.0.1 / genérico / Xenos D3D12 | 27/10, build com 0212: tutorial 3D, deslocamento e extração de madeira na hotbar; 120 s sem crash usando configuração global. Build 0210 também mostrou pesca | Cópia completa isolada do console, encerramento no limite. Versão de avaliação explícita; save/reload e versão integral sem aceite. [Evidência](reports/titles/generic-forza-horizon-2-minecraft-2026-10-26.md) |
 | Forza Horizon 2 4D530AA4 / 0.0.0.12 / genérico / Xenos D3D12 | 27/10, build com 0212: introdução e condução “Dirija até o Festival”, HUD/minimapa, 138–206 km/h e distância 9,3 → 6,9 km; 180 s sem crash | Console completo isolado, encerramento no limite. Campanha, save/reload e Native sem aceite; a lista nula anterior não reapareceu nesta tentativa, sem causa demonstrada. [Evidência](reports/titles/generic-forza-horizon-2-minecraft-2026-10-26.md) |
 
+## Linux x64 / WSLg
+
+29/10: Iruka AOT ELF abriu janela SDL/X11 e apresentou golfinho animado, fundo e
+textos por 40 s, com Xenos/Vulkan e **llvmpipe (CPU)**. Encerramento pelo prazo
+do supervisor, sem erros/stubs nos logs. GPU física, áudio/controles, frontend
+Linux, dashboard/retorno e pacote permanecem sem aceite. Os resultados Windows
+acima mantêm seus próprios limites.
+[Evidências locais e alcance](reports/linux-wslg-iruka-2026-10-29.md).
+
 ## Native D3D12/Vulkan
 
 Backend experimental separado, retomado na G3 de 22–23/10. Retail 17559 em
