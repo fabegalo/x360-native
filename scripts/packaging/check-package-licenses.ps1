@@ -96,7 +96,7 @@ foreach($dep in $metadata.dependencies.PSObject.Properties) {
     if($record.Count -ne 1 -or $record[0].revision -ne $dep.Value) { throw "Dependency revision differs from license inventory: $($dep.Name)" }
 }
 if(@($metadata.dependencies.PSObject.Properties).Count -ne @($inventory.desktop_dependencies).Count) { throw 'Missing build dependency identity' }
-$units=@(); $thirdpartyUnits=@()
+$units=@(); $thirdpartyUnits=@(); $generatedUnits=@()
 $compileCommands = @(Get-Content (Join-Path $package 'app/compile-commands.json') -Raw | ConvertFrom-Json | ForEach-Object { $_ })
 Assert-ReleaseCompileCommands $compileCommands
 foreach($command in $compileCommands) {
@@ -106,10 +106,15 @@ foreach($command in $compileCommands) {
         if ($f.Substring('<source>/external/rexglue-sdk/'.Length) -in $inventory.thirdparty_translation_units) {
             $thirdpartyUnits += $f.Substring('<source>/external/rexglue-sdk/'.Length)
         } elseif($Matches[1] -notin @('fmt','spdlog','catch2')) { throw 'Unreviewed third-party translation unit' }
+    } elseif($f -match '^<build>/(.+)$') {
+        # Build-generated units: SDL's precompiled header and the launcher's embedded fonts.
+        if($Matches[1] -notin $inventory.generated_translation_units) { throw 'Unreviewed generated translation unit' }
+        $generatedUnits += $Matches[1]
     } elseif($f -notmatch '^<source>/(src/(desktop|supervisor|content)/|tests/(supervisor|content|desktop)/)') { throw 'Unreviewed distribution translation unit' }
 }
 if(Compare-Object @($inventory.sdk_translation_units | Sort-Object) @($units | Sort-Object -Unique)) { throw 'SDK extraction source scope changed' }
-if(Compare-Object @($inventory.thirdparty_translation_units | Sort-Object) @($thirdpartyUnits | Sort-Object -Unique)) { throw 'Decoder source scope changed' }
+if(Compare-Object @($inventory.thirdparty_translation_units | Sort-Object) @($thirdpartyUnits | Sort-Object -Unique)) { throw 'Third-party source scope changed' }
+if(Compare-Object @($inventory.generated_translation_units | Sort-Object) @($generatedUnits | Sort-Object -Unique)) { throw 'Generated source scope changed' }
 $dependencyInputs=Get-Content (Join-Path $package 'app/dependency-inputs.json') -Raw | ConvertFrom-Json
 foreach($dependencyInput in $dependencyInputs) {
     if($dependencyInput -notin $inventory.sdk_inputs) { throw 'Unreviewed transitive header dependency' }
