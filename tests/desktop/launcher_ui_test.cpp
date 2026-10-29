@@ -129,6 +129,9 @@ TEST_CASE("preparation stages come from the shared supervisor pipeline in order"
   REQUIRE(names.size() == 7);
   CHECK(PreparationStage("dash_17559 sdk-build") == 1);
   CHECK(PreparationStage("dash_17559 reused-shared-sdk") == 1);
+  CHECK(PreparationStage("dash_17559 sdk-configure") == 1);
+  CHECK(PreparationStage("dash_17559 1-configure") == 2);
+  CHECK(PreparationStage("dash_17559 3-reconfigure") == 2);
   CHECK(PreparationStage("dash_17559 2-tool") == 2);
   CHECK(PreparationStage("dash_17559 2-codegen") == 3);
   CHECK(PreparationStage("dash_17559 reused-codegen") == 3);
@@ -305,6 +308,25 @@ TEST_CASE("preview launch must reject changed content with preserved timestamps"
   CHECK_FALSE(f.app.checked[0].state.prepared);
   REQUIRE_FALSE(f.app.checked[0].state.issues.empty());
   CHECK(f.app.checked[0].state.issues.back().find("dash.xex") != std::string::npos);
+  CHECK_FALSE(fs::exists(f.root / "child-started.txt"));
+}
+TEST_CASE("a launch refused for a changed preparation offers to prepare again", "[launcher-ui]") {
+  Frontend f; const auto target = f.TargetFixture();
+  f.app.home = false;  // the Dashboard page, where the version is started
+  f.Seed(target);
+  f.app.checked[0].state = Inspect(f.paths, target, InspectionMode::Preview);
+  InspectSelected(f.app);
+  REQUIRE(f.app.next_action == kLaunch);
+  // The preparation recipe changed after the receipt; the original files did not.
+  std::ofstream(target.manifest, std::ios::app) << "# changed after preparation\n";
+  Command(f.app, kLaunch);
+  REQUIRE(f.Until([&] { return !f.app.busy; }));
+  INFO(f.app.details);
+  CHECK(f.app.failed);
+  CHECK(f.app.result == 3);
+  CHECK(f.app.checked[0].state.inputs_ok);
+  CHECK_FALSE(f.app.checked[0].state.prepared);
+  CHECK(f.app.next_action == kPrepare);  // not "add content": the files are intact
   CHECK_FALSE(fs::exists(f.root / "child-started.txt"));
 }
 TEST_CASE("selected verification authenticates only its preparation without launching tools", "[launcher-ui]") {

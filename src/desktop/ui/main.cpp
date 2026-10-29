@@ -3,6 +3,7 @@
 #include <SDL3/SDL_main.h>
 #include <imgui.h>
 #include <imgui_impl_sdl3.h>
+#include <algorithm>
 #include <cstdlib>
 #include <fstream>
 #include "frontend.h"
@@ -30,6 +31,74 @@ float UiScale(SDL_Window* window) {
   const float density = SDL_GetWindowPixelDensity(window), display = SDL_GetWindowDisplayScale(window);
   return density > 0 && display > 0 ? display / density : 1.0f;
 }
+// Review aid (development builds only): selects one catalog title and runs the
+// launcher's own commands — prepare when needed, then start the session — while
+// logging what the user would see. It issues commands to the controller; it
+// never injects input into this or any other window.
+struct ReviewFlow {
+  std::string target;
+  std::ofstream log;
+  int stage = 0;  // 0 wait for listing, 1 preparing, 2 session, 3 ended, 4 done
+  std::string last_text;
+  bool was_session = false, was_finishing = false, prepared = false;
+  Uint64 ended_at = 0;
+  void Write(const App& a, const std::string& event) {
+    if (!log) return;
+    log << SDL_GetTicks() << "\t" << event << "\tbusy=" << a.busy << " stage=" << a.stage.load() << " result=" << a.result
+        << " chip=" << a.chip_text << " next=" << a.next_action << "\n" << std::flush;
+  }
+  void Step(App& a, SDL_Window* window, bool& running) {
+    if (target.empty() || stage == 4) return;
+    if (a.busy && a.activity_text != last_text) { last_text = a.activity_text; Write(a, "activity: " + a.activity_title + " | " + last_text); }
+    if (a.prompt) {
+      // Downloads stay refused; only files already present are used.
+      Write(a, "prompt: " + a.prompt->title + " -> " + (a.prompt->buttons.size() > 1 ? a.prompt->buttons[1] : a.prompt->buttons[0]));
+      Answer(a, a.prompt->buttons.size() > 1 ? 1 : 0);
+    }
+    switch (stage) {
+      case 0: {
+        if (a.busy || !a.catalog_loaded) return;
+        const auto it = std::find_if(a.targets.begin(), a.targets.end(), [&](const auto& t) { return t.id == target; });
+        if (it == a.targets.end()) { Write(a, "target missing: " + target); stage = 4; running = false; return; }
+        Command(a, kDashboards);
+        if (a.busy) return;
+        a.selected = size_t(it - a.targets.begin()); InspectSelected(a);
+        Write(a, "selected " + target + " primary=" + a.primary_label + " status=" + a.status);
+        if (a.next_action == kLaunch) { Command(a, kLaunch); stage = 2; }
+        else if (a.next_action == kPrepare) { Command(a, kPrepare); stage = 1; }
+        else { Write(a, "no action available"); stage = 4; running = false; }
+        Write(a, "command issued");
+        return;
+      }
+      case 1:
+        if (a.busy || a.prompt) return;
+        Write(a, "preparation ended: " + a.result_title + " | " + a.activity_text);
+        if (a.result != 1) { stage = 4; running = false; return; }
+        InspectSelected(a);
+        if (a.next_action != kLaunch) { Write(a, "not launchable after preparation: " + a.status); stage = 4; running = false; return; }
+        Command(a, kLaunch); stage = 2; Write(a, "launch issued");
+        return;
+      case 2:
+        if (a.session && !was_session) Write(a, "session running");
+        if (a.finishing_session && !was_finishing) Write(a, "platform window closed");
+        was_session = a.session; was_finishing = a.finishing_session;
+        if (a.busy) return;
+        Write(a, "session ended: " + a.result_title + " | " + a.activity_text);
+        // A refused start that asks for preparation follows the launcher's own next action once.
+        if (a.result == 3 && !prepared && a.next_action == kPrepare) {
+          prepared = true; Write(a, "prepare issued: " + a.primary_label);
+          Command(a, kPrepare); stage = 1; return;
+        }
+        stage = 3; ended_at = SDL_GetTicks();
+        return;
+      case 3:
+        if (SDL_GetTicks() - ended_at < 3000) return;
+        Write(a, std::string("launcher focus after session: ") + ((SDL_GetWindowFlags(window) & SDL_WINDOW_INPUT_FOCUS) ? "input-focus" : "no-focus"));
+        stage = 4; running = false;
+        return;
+    }
+  }
+};
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -37,6 +106,7 @@ int main(int argc, char** argv) {
   a.self = SelfExecutable();
   std::string forced_renderer;
   fs::path smoke;  // review aid: report the frontend after real frames, then close
+  ReviewFlow review;
   int frames = 0;
   for (int i = 1; i < argc; ++i) {
     const std::string option = argv[i];
@@ -46,6 +116,9 @@ int main(int argc, char** argv) {
     else if (option == "--lang" && i + 1 < argc) english = std::string(argv[++i]) == "en";
     else if (option == "--import" && i + 1 < argc) a.auto_import = PathFromUtf8(argv[++i]);
     else if (option == "--smoke" && i + 1 < argc) smoke = PathFromUtf8(argv[++i]);
+    else if (option == "--auto-start" && i + 1 < argc) review.target = argv[++i];
+    else if (option == "--auto-log" && i + 1 < argc) review.log.open(PathFromUtf8(argv[++i]), std::ios::app);
+    else if (option == "--session-user-data" && i + 1 < argc) a.session_user_data = PathFromUtf8(argv[++i]);
 #endif
     else if (option == "--renderer" && i + 1 < argc) forced_renderer = argv[++i];
   }
@@ -125,7 +198,7 @@ int main(int argc, char** argv) {
   int settle = 3;  // frames to draw after the last event so ImGui settles
   while (running) {
     SDL_Event event;
-    const bool animate = a.busy || settle > 0 || !smoke.empty();
+    const bool animate = a.busy || settle > 0 || !smoke.empty() || (!review.target.empty() && review.stage != 4);
     const bool got = animate ? SDL_WaitEventTimeout(&event, a.busy ? 33 : 0) : SDL_WaitEvent(&event);
     for (bool more = got; more; more = SDL_PollEvent(&event)) {
       settle = 3;
@@ -152,6 +225,7 @@ int main(int argc, char** argv) {
     }
     if (settle > 0) --settle;
     Pump(a);
+    review.Step(a, window, running);
     if (a.pick && !pick_open) {
       pick_open = true;
       const auto request = *a.pick;

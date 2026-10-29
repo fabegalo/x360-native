@@ -106,6 +106,7 @@ struct App {
   std::function<void()> quit;     // the application may close now
   bool preview_empty = false;
   std::filesystem::path auto_import;  // review aid: import this path once the first verification finishes
+  std::filesystem::path session_user_data;  // review aid: isolated saves/profiles parent for sessions
   // Self-update: the release check runs beside the main worker; installing uses the worker.
   std::thread update_check;
   std::atomic<bool> closing{false};

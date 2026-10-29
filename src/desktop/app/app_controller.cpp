@@ -466,13 +466,16 @@ void OnFinished(App& a, const std::string& text) {
   ActionTrace trace("ui.finished");
   if (a.worker.joinable()) a.worker.join();
   a.busy = false; a.session = false; a.finishing_session = false; a.installing = false; a.preparing_id.clear();
+  // A launch refused after the worker verified the title (a changed preparation)
+  // adopts that verified state, so intact files lead to Prepare again.
+  const bool verified = a.pending_snapshot && !a.cancel.load();
   AdoptSnapshot(a);
   if ((a.last_action == kLaunch && a.failed && !a.launch_verified) || a.cancel.load()) {
     const auto index = IndexOf(a, a.operation_target);
     if (index < a.targets.size()) {
       auto& state = a.checked.at(index).state;
       state.verification_pending = false;
-      state.inputs_ok = false;
+      if (!verified) state.inputs_ok = false;
       state.prepared = false; state.issues.push_back(text);
     }
   }

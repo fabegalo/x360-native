@@ -173,8 +173,8 @@ std::vector<std::string> PreparationStageNames() {
 int PreparationStage(const std::string& line) {
   const auto space = line.find_last_of(' ');
   const auto name = space == std::string::npos ? line : line.substr(space + 1);
-  if (name == "reused-shared-sdk" || name == "sdk-build") return 1;
-  if (name == "2-tool" || name == "safe-rebuild") return 2;
+  if (name == "reused-shared-sdk" || name == "sdk-configure" || name == "sdk-build") return 1;
+  if (name == "1-configure" || name == "3-reconfigure" || name == "2-tool" || name == "safe-rebuild") return 2;
   if (name == "2-codegen" || name == "reused-codegen") return 3;
   if (name == "4-build") return 4;
   if (name == "prepared" || name == "reused-preparation") return 5;
@@ -422,6 +422,7 @@ void Start(App& a, int action, fs::path source) {
         progress(Tr("Conferindo ", "Verifying ") + (english ? target.label_en : target.label));
         std::vector<std::string> args{"--root", Utf8(a.root), "session", Utf8(target.manifest), "--catalog-target", target.id, "--timeout", "0", "--closed-event", notification.name()};
         if (capture_crash) args.push_back("--crash-stack");
+        if (!a.session_user_data.empty()) { args.push_back("--user-data-root"); args.push_back(Utf8(a.session_user_data)); }
         run(Supervisor(a), args, "session", notification.handle());
         finish("Sessão encerrada. Consulte os logs para os resultados da execução.");
         return;
