@@ -1,6 +1,7 @@
 // Child process execution with captured output, timeout and reliable exit
 // status. On Windows the child runs in a Job Object with KILL_ON_JOB_CLOSE, so
-// it (and anything it spawns) dies with the supervisor or on timeout.
+// it (and anything it spawns) dies with the supervisor or on timeout. POSIX uses
+// a private process group, terminated on return, timeout or cancellation.
 #pragma once
 
 #include <chrono>
@@ -35,7 +36,7 @@ struct ProcessSpec {
   std::function<void()> on_tick;  // worker-only, bounded progress/log sampling
   uintptr_t notification_event = 0;  // borrowed auto-reset lifecycle event
   std::function<void()> on_notification;
-  bool collect_metrics = false;  // Opt-in Job Object accounting, including descendants.
+  bool collect_metrics = false;  // Currently Job Object accounting on Windows.
   // Explicit diagnostic only: bounded memory snapshots at a second-chance
   // exception. Zero disables them. The caller supplies the observed guest
   // arena base; this never changes guest memory or exception handling.
@@ -66,6 +67,9 @@ struct ProcessResult {
     uint64_t cpu_us = 0, read_bytes = 0, read_operations = 0, write_bytes = 0, peak_job_commit_bytes = 0;
   };
   std::optional<Metrics> metrics;
+  // POSIX: normal exit status, or 128 + termination_signal in exit_code.
+  // Keep the actual signal separate from an explicit exit(128 + signal).
+  int termination_signal = 0;
 };
 
 ProcessResult RunProcess(const ProcessSpec& spec);

@@ -8,6 +8,7 @@
 #include <iterator>
 #include <string>
 #include <algorithm>
+#include <csignal>
 
 #include "child_process.h"
 #include "scratch.h"
@@ -63,7 +64,11 @@ TEST_CASE("second chance memory capture is opt in bounded and read only", "[proc
   const auto on=RunProcess(spec);
   REQUIRE(on.launched);REQUIRE(on.crash.captured);
   CHECK(on.exit_code==off.exit_code);
+#if defined(_M_ARM64) || defined(__aarch64__)
+  CHECK(on.crash.native_registers.size()==33);
+#else
   CHECK(on.crash.native_registers.size()==16);
+#endif
   CHECK(on.crash.memory.size()<=64);
   const auto marker=[&](uint64_t address,std::initializer_list<uint8_t> bytes) {
     for(const auto& block:on.crash.memory)
@@ -117,11 +122,16 @@ TEST_CASE("session cancellation stops the child without reporting a timeout", "[
   CHECK(r.duration < 10s);
 }
 
-TEST_CASE("reports a crash as an NTSTATUS code without a dialog", "[process]") {
+TEST_CASE("reports a crash using the host termination status without a dialog", "[process]") {
   Scratch s;
   auto r = RunProcess(s.Spec({"crash"}));
   REQUIRE(r.launched);
+#ifdef _WIN32
   CHECK(r.exit_code == 0xC0000005u);
+#else
+  CHECK(r.termination_signal == SIGSEGV);
+  CHECK(r.exit_code == 128 + SIGSEGV);
+#endif
 }
 
 TEST_CASE("launch failure is reported, not hidden", "[process]") {
@@ -135,6 +145,7 @@ TEST_CASE("launch failure is reported, not hidden", "[process]") {
 
 // End to end through the x360n CLI: exit-code mapping, refusal of non-build
 // executables, and the JSON report including stub counts.
+#ifndef X360N_PROCESS_CONTRACTS_ONLY
 TEST_CASE("x360n run maps outcomes to its exit codes and writes a report", "[cli]") {
   Scratch s;
   auto run = [&](std::vector<std::string> args) {
@@ -204,6 +215,7 @@ TEST_CASE("x360n run maps outcomes to its exit codes and writes a report", "[cli
 // --crash-stack: the child runs under the debug API; an unhandled access
 // violation is recorded with its stack (symbols from the fixture's PDB), and the
 // child still dies with the exception as its exit code. A clean exit records none.
+#ifdef _WIN32
 TEST_CASE("x360n run --crash-stack records the stack of an unhandled exception", "[cli]") {
   Scratch s;
   auto run = [&](std::vector<std::string> args) {
@@ -237,3 +249,5 @@ TEST_CASE("x360n run --crash-stack records the stack of an unhandled exception",
   CHECK(json.find("\"captured\": false") != std::string::npos);
   CHECK_FALSE(fs::exists(report_of().parent_path() / "crash.txt"));
 }
+#endif
+#endif

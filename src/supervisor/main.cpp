@@ -569,10 +569,11 @@ int Run(const ProjectPaths& p, const fs::path& exe_in, std::vector<std::string> 
   w.BeginObject("result");
   w.String("started_utc", started);
   w.Bool("launched", r.launched);
-  if (!r.launched) w.String("launch_error", r.launch_error);
+  if (!r.launch_error.empty()) w.String("launch_error", r.launch_error);
   w.Bool("timed_out", r.timed_out);
   w.Bool("cancelled", r.cancelled);
   w.Number("exit_code", int64_t(int32_t(r.exit_code)));
+  w.Number("termination_signal", r.termination_signal);
   w.String("exit_code_hex", fmt::format("0x{:08X}", r.exit_code));
   w.String("exit_description", !r.launched ? "not launched"
                                  : r.cancelled ? "session window closed by user"

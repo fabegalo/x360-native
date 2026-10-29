@@ -1,0 +1,14 @@
+add_executable(x360n_platform_child ../supervisor/test_child.cpp)
+target_include_directories(x360n_platform_child PRIVATE ../../src/supervisor)
+target_compile_definitions(x360n_platform_child PRIVATE X360N_PLATFORM_CHILD=1)
+add_executable(x360n_platform_tests ../supervisor/process_test.cpp process_contract_test.cpp)
+target_link_libraries(x360n_platform_tests PRIVATE x360n_process Catch2::Catch2WithMain)
+target_include_directories(x360n_platform_tests PRIVATE ../supervisor)
+target_compile_definitions(x360n_platform_tests PRIVATE
+    X360N_PROCESS_CONTRACTS_ONLY=1
+    X360N_TEST_CHILD="$<TARGET_FILE:x360n_platform_child>")
+add_dependencies(x360n_platform_tests x360n_platform_child)
+add_test(NAME platform.process COMMAND x360n_platform_tests "[process],[process-posix]")
+set_tests_properties(platform.process PROPERTIES LABELS project TIMEOUT 45)
+add_test(NAME platform.process-isolation COMMAND x360n_platform_tests "[process-isolation]")
+set_tests_properties(platform.process-isolation PROPERTIES LABELS project TIMEOUT 10)

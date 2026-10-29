@@ -17,12 +17,25 @@
 #include <string>
 #include <thread>
 #include <array>
+#include <csignal>
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
+#else
+#include <unistd.h>
+#include <sys/resource.h>
+#include <fcntl.h>
+#endif
+#ifdef X360N_PLATFORM_CHILD
+#include "session_notification.h"
 #endif
 
 int main(int argc, char** argv) {
+#ifndef _WIN32
+  // Synthetic crash contracts must never leave a core dump on the user's HDD.
+  const rlimit no_core{0, 0};
+  setrlimit(RLIMIT_CORE, &no_core);
+#endif
   std::string log_path;
   if (argc >= 2 && !std::strncmp(argv[1], "--log_file=", 11)) {
     log_path = argv[1] + 11;
@@ -30,6 +43,56 @@ int main(int argc, char** argv) {
     --argc;
   }
   if (argc < 2) return 64;
+#ifdef X360N_PLATFORM_CHILD
+  if (!std::strcmp(argv[1], "notify") && argc >= 3) {
+    x360n::SessionNotification notification(argv[2]);
+    if (!notification.Signal()) return 65;
+    // Keep the receiver's run loop alive long enough to observe the event.
+    std::this_thread::sleep_for(std::chrono::milliseconds(200));
+    return 0;
+  }
+#endif
+  if (!std::strcmp(argv[1], "args")) {
+    for (int i = 2; i < argc; ++i) std::cout << std::strlen(argv[i]) << ':' << argv[i] << '\n';
+    return 0;
+  }
+#ifndef _WIN32
+  if (!std::strcmp(argv[1], "fd-state") && argc >= 3)
+    return fcntl(std::atoi(argv[2]), F_GETFD) < 0 && errno == EBADF ? 0 : 1;
+  if (!std::strcmp(argv[1], "ignore-term")) {
+    std::signal(SIGTERM, SIG_IGN);
+    std::cout << "ready\n" << std::flush;
+    std::this_thread::sleep_for(std::chrono::seconds(20));
+    return 0;
+  }
+  if (!std::strcmp(argv[1], "term-clean")) {
+    std::signal(SIGTERM, [](int) {
+      const char message[] = "clean termination\n";
+      const auto written = write(STDOUT_FILENO, message, sizeof(message) - 1);
+      (void)written;
+      _exit(23);
+    });
+    std::cout << "ready\n" << std::flush;
+    std::this_thread::sleep_for(std::chrono::seconds(20));
+    return 0;
+  }
+  if (!std::strcmp(argv[1], "tree") && argc >= 3) {
+    // Descendant attempts a delayed write after the supervisor has returned.
+    // It deliberately ignores TERM to exercise forced group cleanup.
+    const pid_t child = fork();
+    if (child < 0) return 65;
+    if (child == 0) {
+      std::signal(SIGTERM, SIG_IGN);
+      std::this_thread::sleep_for(std::chrono::milliseconds(900));
+      std::ofstream(argv[2]) << "escaped descendant";
+      _exit(0);
+    }
+    std::cout << "ready\n" << std::flush;
+    if (argc >= 4 && !std::strcmp(argv[3], "exit")) return 0;
+    std::this_thread::sleep_for(std::chrono::seconds(20));
+    return 0;
+  }
+#endif
 #ifdef _WIN32
   if (!std::strcmp(argv[1], "crash-memory")) {
     constexpr uintptr_t arena = 0x100000000ull;
@@ -43,7 +106,11 @@ int main(int argc, char** argv) {
     std::memcpy(bytes+0x2000,direct,sizeof(direct));
     std::memcpy(bytes+0x3000,nested,sizeof(nested));
     // Pin a synthetic register block in a native GPR at the actual AV.
+#if defined(_M_ARM64) || defined(__aarch64__)
+    asm volatile("ldr w0, [%0]" : : "r"(uintptr_t(4)), "r"(registers.data()) : "x0", "memory");
+#else
     asm volatile("movl (%0), %%eax" : : "r"(uintptr_t(4)), "D"(registers.data()) : "rax","memory");
+#endif
     return 66;
   }
   if (!std::strcmp(argv[1], "console")) {
@@ -61,8 +128,12 @@ int main(int argc, char** argv) {
     return 0;
   }
   if (!std::strcmp(argv[1], "crash")) {
+#ifdef _WIN32
     volatile int* p = nullptr;
     *p = 1;
+#else
+    std::raise(SIGSEGV);
+#endif
     return 0;
   }
   if (!std::strcmp(argv[1], "stub-log")) {
@@ -81,7 +152,8 @@ int main(int argc, char** argv) {
     return 0;
   }
   if (!std::strcmp(argv[1], "cwd")) {
-    std::cout << "cwd " << std::filesystem::current_path().string() << "\n";
+    const auto path = std::filesystem::current_path().u8string();
+    std::cout << "cwd " << std::string(path.begin(), path.end()) << "\n";
     return 0;
   }
   return 64;

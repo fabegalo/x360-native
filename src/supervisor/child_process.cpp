@@ -64,6 +64,7 @@ std::wstring BuildCommandLine(const std::filesystem::path& exe, const std::vecto
 }
 
 std::string DescribeExitCode(uint32_t code) {
+#ifdef _WIN32
   switch (code) {
     case 0: return "success";
     case 0x80000003: return "STATUS_BREAKPOINT (assert/__debugbreak with no debugger attached)";
@@ -80,6 +81,7 @@ std::string DescribeExitCode(uint32_t code) {
     default: break;
   }
   if ((code & 0xC0000000u) == 0xC0000000u) return fmt::format("NTSTATUS error 0x{:08X}", code);
+#endif
   return fmt::format("exit code {}", int32_t(code));
 }
 
@@ -150,10 +152,17 @@ void CaptureCrash(HANDLE process, const DEBUG_EVENT& ev, const std::filesystem::
   }
 
   if (guest_base && guest_base <= UINT64_MAX - UINT32_MAX) {
+#if defined(_M_ARM64) || defined(__aarch64__)
+    for (unsigned i = 0; i < 29; ++i)
+      crash.native_registers.emplace_back("x" + std::to_string(i), ctx.X[i]);
+    crash.native_registers.insert(crash.native_registers.end(),
+        {{"fp", ctx.Fp}, {"lr", ctx.Lr}, {"sp", ctx.Sp}, {"pc", ctx.Pc}});
+#else
     crash.native_registers = {{"rax",ctx.Rax},{"rbx",ctx.Rbx},{"rcx",ctx.Rcx},{"rdx",ctx.Rdx},
         {"rsi",ctx.Rsi},{"rdi",ctx.Rdi},{"rbp",ctx.Rbp},{"rsp",ctx.Rsp},
         {"r8",ctx.R8},{"r9",ctx.R9},{"r10",ctx.R10},{"r11",ctx.R11},
         {"r12",ctx.R12},{"r13",ctx.R13},{"r14",ctx.R14},{"r15",ctx.R15}};
+#endif
     std::unordered_set<uint64_t> seen;
     unsigned attempts = 0;
     auto capture = [&](uint64_t address) {
@@ -199,15 +208,23 @@ void CaptureCrash(HANDLE process, const DEBUG_EVENT& ev, const std::filesystem::
     return;
   }
   STACKFRAME64 frame{};
+#if defined(_M_ARM64) || defined(__aarch64__)
+  constexpr DWORD machine = IMAGE_FILE_MACHINE_ARM64;
+  frame.AddrPC.Offset = ctx.Pc;
+  frame.AddrFrame.Offset = ctx.Fp;
+  frame.AddrStack.Offset = ctx.Sp;
+#else
+  constexpr DWORD machine = IMAGE_FILE_MACHINE_AMD64;
   frame.AddrPC.Offset = ctx.Rip;
-  frame.AddrPC.Mode = AddrModeFlat;
   frame.AddrFrame.Offset = ctx.Rbp;
-  frame.AddrFrame.Mode = AddrModeFlat;
   frame.AddrStack.Offset = ctx.Rsp;
+#endif
+  frame.AddrPC.Mode = AddrModeFlat;
+  frame.AddrFrame.Mode = AddrModeFlat;
   frame.AddrStack.Mode = AddrModeFlat;
   alignas(SYMBOL_INFOW) char sym_buf[sizeof(SYMBOL_INFOW) + 512 * sizeof(wchar_t)];
   for (int i = 0; i < 64; ++i) {
-    if (!StackWalk64(IMAGE_FILE_MACHINE_AMD64, process, thread.h, &frame, &ctx, nullptr,
+    if (!StackWalk64(machine, process, thread.h, &frame, &ctx, nullptr,
                      SymFunctionTableAccess64, SymGetModuleBase64, nullptr) ||
         frame.AddrPC.Offset == 0) {
       break;
@@ -398,14 +415,6 @@ ProcessResult RunProcess(const ProcessSpec& spec) {
           accounting.IoInfo.WriteTransferCount, uint64_t(memory.PeakJobMemoryUsed)};
     }
   }
-  return r;
-}
-
-#else
-
-ProcessResult RunProcess(const ProcessSpec&) {
-  ProcessResult r;
-  r.launch_error = "process supervision is only implemented for Windows in this revision";
   return r;
 }
 
