@@ -99,30 +99,53 @@ interface mostra; nenhuma entrada foi injetada em janelas.
    `sdk-configure`, `sdk-build` (geração compartilhada do SDK reconstruída) e
    `1-configure`. Essas três não estavam mapeadas nas etapas da barra; agora
    estão (SDK, SDK e Configuração), com teste.
-5. **A preparação falhou em 8 min 53 s** no configure do título: o plugin
-   Native (`src/native/CMakeLists.txt`) vincula `xxHash::xxhash`, alvo que a
-   geração compartilhada do SDK não exporta. O plugin entra porque o cache do
-   build do título no ambiente do mantenedor guarda `X360N_NATIVE_RENDERER=ON`
-   de trabalho Native anterior, e o `x360n prepare` não fixa essa variável.
-   Reproduzido fora do launcher com `scripts/build-title.ps1 -Title dash_17559`
-   (mesma falha em 32 s). É defeito do pipeline compartilhado (commit
-   `8625338`) com esse cache, não do launcher; não foi corrigido aqui.
-6. O launcher mostrou o erro com o caminho do log e voltou ao estado ocioso.
-   Nenhuma sessão foi iniciada; a pasta isolada de saves ficou vazia; o
-   retorno de foco após uma sessão real continua **não observado**.
+5. **A primeira preparação falhou em 8 min 53 s** no configure do título: o plugin
+   Native (`src/native/CMakeLists.txt`) vincula `xxHash::xxhash`, mas a
+   geração compartilhada do SDK exporta os alvos com o nome real (`xxhash`) e
+   o consumidor só recriava os aliases `rex::*`. O plugin entra porque o cache
+   do build do título guarda `X360N_NATIVE_RENDERER=ON` de trabalho Native
+   anterior. Reproduzido fora do launcher com `scripts/build-title.ps1 -Title
+   dash_17559` (mesma falha em 32 s): defeito do pipeline compartilhado
+   (commit `8625338`), não do launcher.
+6. **Correção do pipeline:** `cmake/sdk/shared/CMakeLists.txt` passa a recriar
+   no `sdk.cmake` os aliases upstream usados pelos alvos do próprio projeto
+   (`xxHash::xxhash`, `Vulkan::Headers`, `glslang::SPIRV`), apontando para os
+   alvos exportados; um alias cujo alvo não esteja exportado falha já na
+   geração do SDK, não no configure de um título. O Native continua sendo
+   construído quando o mantenedor o habilita; nada foi desligado.
+7. **Fluxo completo após a correção (29/10, 19:31–19:46):** a listagem marcou a
+   falha anterior (“Conferir e preparar”); a preparação pelo launcher gerou a
+   nova geração do SDK e passou por `sdk-configure`, `sdk-build`,
+   `1-configure`, `safe-rebuild`, `2-codegen`, `3-reconfigure` e `4-build` até
+   “Preparação concluída” (≈13 min com SDK e título recompilados). O launcher
+   iniciou a sessão; a janela da sessão mostrou a dashboard 17559 original em
+   PT-BR (Meus Jogos vazio, porque os dados estavam isolados). Um pedido de
+   fechamento normal da janela (`WM_CLOSE`, como o botão fechar) levou o
+   launcher a “janela fechada” e a “Sessão encerrada” (sucesso) em 41 ms; 3 s
+   depois o launcher tinha o foco de entrada e mostrava “Pronta para iniciar”.
+   Nenhum processo `x360n`, `dash_17559` ou `x360-native` ficou ativo. As
+   gravações da dashboard (cache de shaders, conquistas offline) ficaram
+   apenas na pasta isolada `.local/runs/launcher-session-20261029-193105/user`.
 
-Na tentativa anterior (início recusado, sem preparar) o launcher terminou com
-foco de entrada (`SDL_RaiseWindow`), mas sem sessão aberta isso não comprova o
-retorno de foco depois da dashboard.
+Limites: uma execução, com a sessão fechada por mensagem de janela e não por
+clique físico; jogo pela My Games, controle e áudio não foram exercitados.
 
+## Nitidez do texto
+
+Relato do mantenedor: textos com aspecto “meio embaçado”. Medido: o processo
+é per-monitor DPI aware e roda a 96 DPI, sem escala do Windows. A causa era a
+rasterização das fontes: sobreamostragem horizontal 2× com amostragem
+bilinear, posições de glifo fracionárias e nenhum hinting/ClearType (o
+rasterizador do Dear ImGui é o stb_truetype). Agora: sobreamostragem 1×,
+`PixelSnapH` e `RasterizerMultiply` 1,3 para compensar texto claro sobre fundo
+escuro. A comparação ampliada 3× das capturas mostra hastes mais firmes e
+mais contraste; continua sem hinting nem ClearType, que exigiriam FreeType ou
+DirectWrite (não fixados no SDK).
 ## Não executado / pendente
 
-- **Sessão real da dashboard pelo launcher:** autorizada e tentada (seção
-  acima); bloqueada pela falha de preparação do pipeline compartilhado.
-  Importação de ISO/STFS real não foi executada. O ciclo de sessão (iniciar,
-  fechar, finalizar, repetir, cancelar) só foi exercido pelo controller com o
-  processo-fixture `x360n_launcher_child`; o retorno de foco usa
-  `SDL_RaiseWindow` ao fim da sessão, não observado com a dashboard.
+- **Fluxo real:** importação de ISO/STFS real não foi executada; a sessão da
+  dashboard pelo launcher foi validada uma vez no Windows (seção acima), não
+  no Linux; jogo pela My Games, controle e áudio não foram exercitados.
 - **Extrator em Linux/macOS:** `x360n-extract` só compila no Windows (BCrypt
   para AES/SHA-1, `wmain`, `windows.h` em `system_update.cpp`, fontes `*_win`
   do SDK e DLL do libmspack). A importação de pasta extraída é o mesmo código;

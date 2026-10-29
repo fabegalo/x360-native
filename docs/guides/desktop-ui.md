@@ -37,7 +37,9 @@ renderer da sessão, e o rasterizador de software é o último recurso
 - Tipografia Droid Sans (corpo, legenda, logs) e Roboto Medium (ênfase e
   títulos), cópias Apache-2.0 do Dear ImGui fixado, embutidas no executável;
   14 px corpo, 12 px legenda, 22/30 px títulos. Ícones vetoriais desenhados por
-  código (`ui/icons.cpp`), sem fonte de ícones. Tudo escala pela escala de
+  código (`ui/icons.cpp`), sem fonte de ícones. Glifos sem sobreamostragem e
+  alinhados ao pixel, com cobertura reforçada para texto claro no fundo escuro
+  (sem hinting/ClearType). Tudo escala pela escala de
   conteúdo da janela (`ui::T().S`), inclusive ao trocar de monitor.
 - Componentes: botão primário/secundário/fantasma, item de navegação, chip de
   filtro, cartão de opção (renderer), interruptor, selo de estado, card, banner

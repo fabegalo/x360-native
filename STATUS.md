@@ -11,12 +11,13 @@ Windows x64: compilado; controller 16 casos/179 asserções; layout headless em
 com SDL_GPU D3D12 e com rasterizador de software. CPU ociosa 0 %, memória
 26,7 → 94,2 MB (D3D12). Linux x64/WSLg: mesmo target compilado, controller
 15/165 e layout 203.968 asserções, smoke real com SDL_GPU Vulkan e software.
-Fluxo real 17559 pelo launcher (dados isolados): início recusado por recibo
-antigo; corrigido o launcher que oferecia “Adicionar conteúdo” em vez de
-Preparar; preparação real falhou no `x360n prepare` (Native em cache +
-SDK compartilhado sem `xxHash::xxhash`), reproduzida fora do launcher; sessão
-não aberta. Sem extrator fora do Windows, macOS/ARM64 ou pacote.
-[Relatório](docs/reports/launcher-unified-01-2026-10-29.md).
+Fluxo real 17559 pelo launcher, dados isolados: recibo antigo recusado; corrigidos
+o launcher (oferecia “Adicionar conteúdo” em vez de Preparar) e o `x360n
+prepare` (SDK compartilhado sem os aliases `xxHash::xxhash`/Vulkan/glslang usados
+pelo Native); preparação concluída, dashboard aberta, fechamento → “Sessão
+encerrada” em 41 ms e foco de volta ao launcher. Texto mais nítido (sem
+sobreamostragem, glifos no pixel). Sem extrator fora do Windows, macOS/ARM64 ou
+pacote. [Relatório](docs/reports/launcher-unified-01-2026-10-29.md).
 
 29/10 — **sessão gráfica Linux x64 demonstrada no WSLg**: Iruka AOT ELF,
 Xenos/Vulkan, janela SDL/X11 e animação/textos observados por 40 s, com dados
