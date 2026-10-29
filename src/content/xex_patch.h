@@ -3,6 +3,7 @@
 // file, and checks the result against the page digests of the patched header.
 #pragma once
 
+#include <array>
 #include <filesystem>
 #include <cstdint>
 #include <string_view>

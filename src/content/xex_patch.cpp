@@ -19,8 +19,13 @@
 // every delta record is bounds-checked before use.
 #include "xex_patch.h"
 
+#ifdef _WIN32
 #include <windows.h>
-#include <bcrypt.h>
+#else
+#include <fcntl.h>
+#include <unistd.h>
+#endif
+#include "xex_crypto.h"
 
 #include <algorithm>
 #include <array>
@@ -32,6 +37,7 @@
 #include <optional>
 #include <sstream>
 #include <string>
+#include <stdexcept>
 #include <system_error>
 #include <vector>
 
@@ -139,27 +145,12 @@ Bytes ReadFile(const fs::path& p) {
 
 // AES-128-CBC with a zero IV and no padding over whole 16-byte blocks; a tail is
 // left unchanged, as the SDK loader's aes_decrypt_buffer does. Authentication
-// comes from the block and page digests checked by the callers.
+// comes from the block and page digests checked by the callers. Windows uses
+// CNG; other systems the pinned SDK's aes_128/TinySHA1 (crypto namespace).
 Bytes AesCbcDecrypt(const Key& key, const uint8_t* data, size_t len) {
-  if (len > std::numeric_limits<ULONG>::max())
-    throw Error{"AES ciphertext size is not supported"};
-  Bytes out(data, data + len);
-  const ULONG whole = ULONG(len & ~size_t(15));
-  if (!whole) return out;
-  BCRYPT_ALG_HANDLE alg = nullptr;
-  BCRYPT_KEY_HANDLE k = nullptr;
-  bool ok = BCryptOpenAlgorithmProvider(&alg, BCRYPT_AES_ALGORITHM, nullptr, 0) == 0 &&
-            BCryptSetProperty(alg, BCRYPT_CHAINING_MODE, (PUCHAR)BCRYPT_CHAIN_MODE_CBC,
-                              sizeof(BCRYPT_CHAIN_MODE_CBC), 0) == 0 &&
-            BCryptGenerateSymmetricKey(alg, &k, nullptr, 0, (PUCHAR)key.data(), 16, 0) == 0;
-  uint8_t iv[16] = {};
-  ULONG got = 0;
-  ok = ok && BCryptDecrypt(k, (PUCHAR)data, whole, nullptr, iv, 16, out.data(), whole, &got, 0) == 0 &&
-       got == whole;
-  if (k) BCryptDestroyKey(k);
-  if (alg) BCryptCloseAlgorithmProvider(alg, 0);
-  if (!ok) throw Error{"AES decryption failed (CNG)"};
-  return out;
+  try {
+    return crypto::AesCbcDecrypt(key.data(), data, len);
+  } catch (const std::exception& e) { throw Error{e.what()}; }
 }
 Key DecryptKey(const Key& master, const uint8_t* block16) {
   Bytes b = AesCbcDecrypt(master, block16, 16);
@@ -169,22 +160,9 @@ Key DecryptKey(const Key& master, const uint8_t* block16) {
 }
 
 Digest Sha1(const uint8_t* p, size_t n) {
-  BCRYPT_ALG_HANDLE alg = nullptr;
-  BCRYPT_HASH_HANDLE hash = nullptr;
-  Digest d{};
-  bool ok = BCryptOpenAlgorithmProvider(&alg, BCRYPT_SHA1_ALGORITHM, nullptr, 0) == 0 &&
-            BCryptCreateHash(alg, &hash, nullptr, 0, nullptr, 0, 0) == 0;
-  while (ok && n) {
-    const auto chunk = ULONG(std::min(n, size_t(std::numeric_limits<ULONG>::max())));
-    ok = BCryptHashData(hash, const_cast<PUCHAR>(p), chunk, 0) == 0;
-    p += chunk;
-    n -= chunk;
-  }
-  ok = ok && BCryptFinishHash(hash, d.data(), ULONG(d.size()), 0) == 0;
-  if (hash) BCryptDestroyHash(hash);
-  if (alg) BCryptCloseAlgorithmProvider(alg, 0);
-  if (!ok) throw Error{"SHA-1 failed (CNG)"};
-  return d;
+  try {
+    return crypto::Sha1(p, n);
+  } catch (const std::exception& e) { throw Error{e.what()}; }
 }
 
 struct Header {
@@ -369,6 +347,19 @@ void CheckDelta(const uint8_t* p, size_t len, size_t dest_size, uint32_t window,
 }
 
 void WriteNew(const fs::path& p, const uint8_t* data, size_t n) {
+#ifndef _WIN32
+  // O_EXCL keeps the no-overwrite contract atomic, including concurrent runs.
+  const int file = ::open(p.c_str(), O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0644);
+  if (file < 0) throw Error{"cannot create new output (refusing to overwrite) " + p.string()};
+  bool ok = true;
+  while (n && ok) {
+    const auto written = ::write(file, data, std::min<size_t>(n, 1u << 30));
+    ok = written > 0;
+    if (ok) { data += written; n -= size_t(written); }
+  }
+  if (::close(file) != 0) ok = false;
+  if (!ok) throw Error{"cannot write " + p.string()};
+#else
   // CREATE_NEW keeps the no-overwrite contract atomic, including concurrent runs.
   HANDLE file = CreateFileW(p.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_NEW,
                             FILE_ATTRIBUTE_NORMAL, nullptr);
@@ -384,9 +375,11 @@ void WriteNew(const fs::path& p, const uint8_t* data, size_t n) {
   }
   if (!CloseHandle(file)) ok = false;
   if (!ok) throw Error{"cannot write " + p.string()};
+#endif
 }
 
 }  // namespace
+
 
 std::vector<uint8_t> ReadUnencryptedXexResource(const fs::path& path, std::string_view name) {
   try {

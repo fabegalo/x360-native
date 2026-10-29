@@ -12,7 +12,9 @@
 #include <iostream>
 #include <map>
 #include <stdexcept>
+#ifdef _WIN32
 #include <windows.h>
+#endif
 
 namespace fs = std::filesystem;
 namespace x360n::content {
@@ -25,8 +27,13 @@ void NoLinks(const fs::path& path) {
   fs::path parent;
   for (const auto& part : fs::absolute(path)) {
     parent /= part;
+#ifdef _WIN32
     const auto attributes = GetFileAttributesW(parent.c_str());
     if (attributes != INVALID_FILE_ATTRIBUTES && (attributes & FILE_ATTRIBUTE_REPARSE_POINT))
+#else
+    std::error_code ec;
+    if (fs::is_symlink(fs::symlink_status(parent, ec)))
+#endif
       throw std::runtime_error("System Update: refusing reparse point/link: " + Text(parent));
   }
 }
