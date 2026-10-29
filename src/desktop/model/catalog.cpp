@@ -112,6 +112,7 @@ std::vector<Target> ReadCatalog(const ProjectPaths& paths) {
     // A codegen VFS root wider than the content (embedded system modules).
     if (profile["x360n"]["game_data_root"]) t.game_root = Resolve(dir.path(), Text(profile["x360n"]["game_data_root"]));
     Inside(t.game_root, paths.inputs());
+    const bool absent_content = !fs::exists(t.game_root);
     CatalogPaths content_paths(t.game_root);
     t.exe = paths.build() / "titles" / t.id / (t.id + ".exe");
     if (auto value = profile["x360n"]["native_exe"].value<std::string>())
@@ -158,7 +159,12 @@ std::vector<Target> ReadCatalog(const ProjectPaths& paths) {
         auto relative = fs::path(std::u8string(line.begin() + 65, line.end()));
         for (const auto& component : relative)
           if (!IsSafePackageEntryName(Utf8(component))) throw std::runtime_error("Caminho inválido no inventário.");
-        auto fast = content_paths.Resolve(t.game_root / relative);
+        // This is metadata construction, never an authorization to copy/launch.
+        // With an absent, already-contained root there are no descendants to
+        // canonicalize. Every component above is still validated; Import and
+        // launch preflight revalidate the filesystem at their trust boundary.
+        auto fast = absent_content ? std::optional<fs::path>(t.game_root / relative)
+                                   : content_paths.Resolve(t.game_root / relative);
         auto destination = fast ? *fast : Resolve(t.game_root, Utf8(relative));
         if (!fast) Inside(destination, t.game_root);
         t.inputs.push_back({destination, Utf8(relative.filename()), line.substr(0, 64), relative});

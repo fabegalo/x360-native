@@ -58,6 +58,39 @@ TEST_CASE("asset inventory rejects missing data and same-name files in the wrong
   Write(f.target.inputs.back().destination, "broken");
   CHECK_FALSE(Inspect(f.paths, f.target).inputs_ok);
 }
+
+TEST_CASE("absent catalog inventory is metadata and never authorizes unverified copying", "[catalog-missing-root]") {
+  Fixture f;
+  const auto recipe = f.root / "titles/sample";
+  Write(recipe / "preparation.toml", "label='sample'\nlimitations='fixture'\ninventory='assets.tsv'\n"
+      "[[files]]\npath='dash.xex'\nsource_name='dash.xex'\nsha256='" + Hash("dashboard") + "'\n");
+  Write(recipe / "sample_manifest.toml", "[project]\ngame_root='../../.local/inputs/missing'\n");
+  Write(recipe / "assets.tsv", Hash("module") + "\tsystem/xam.xex\n");
+  const auto catalog = ReadCatalog(f.paths);
+  REQUIRE(catalog.size() == 1);
+  const auto& target = catalog.front();
+  REQUIRE_FALSE(fs::exists(target.game_root));
+  REQUIRE(target.inputs.size() == 2);
+  CHECK(target.inputs[1].destination == target.game_root / "system/xam.xex");
+  SECTION("traversal is still rejected for an absent root") {
+    Write(recipe / "assets.tsv", Hash("module") + "\t../outside.xex\n");
+    CHECK_THROWS(ReadCatalog(f.paths));
+  }
+  SECTION("source hashes are checked again before the first destination write") {
+    const auto save = f.paths.local() / "user/save.bin";
+    Write(save, "preserved save");
+    Write(f.source / "system/xam.xex", "wrong version");
+    CHECK_THROWS(Import(f.paths, target, f.source));
+    CHECK_FALSE(fs::exists(target.inputs[0].destination));
+    Write(f.source / "system/xam.xex", "module");
+    CHECK(Import(f.paths, target, f.source) == 2);
+    CHECK(DigestFile(save)->sha256 == Hash("preserved save"));
+    const auto populated = ReadCatalog(f.paths);
+    REQUIRE(populated.size() == 1);
+    CHECK(populated[0].inputs[1].destination == target.inputs[1].destination);
+    CHECK(DigestFile(target.inputs[1].destination)->sha256 == Hash("module"));
+  }
+}
 TEST_CASE("supervisor launch preflight binds the complete catalog validation to its protected batch", "[launch-preflight]") {
   Fixture f;
   Write(f.target.inputs[0].destination, "dashboard");
