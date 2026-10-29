@@ -46,7 +46,24 @@ std::optional<int> CompareVersions(const std::string& left, const std::string& r
   }
   return x.size() == y.size() ? 0 : x.size() < y.size() ? -1 : 1;
 }
-std::optional<AvailableUpdate> SelectUpdate(const std::string& releases_json, const std::string& current, UpdateChannel channel) {
+std::string PackagePlatform() {
+#if defined(_WIN32)
+  const std::string system = "windows";
+#elif defined(__APPLE__)
+  const std::string system = "macos";
+#else
+  const std::string system = "linux";
+#endif
+#if defined(_M_ARM64) || defined(__aarch64__)
+  return system + "-arm64";
+#else
+  return system + "-x64";
+#endif
+}
+std::optional<AvailableUpdate> SelectUpdate(const std::string& releases_json, const std::string& current, UpdateChannel channel,
+                                           const std::string& platform) {
+  if (platform.empty() || platform.find_first_not_of("abcdefghijklmnopqrstuvwxyz0123456789-") != std::string::npos)
+    throw std::runtime_error("Plataforma de pacote inválida.");
   const auto releases = nlohmann::json::parse(releases_json);
   if (!releases.is_array()) throw std::runtime_error("Resposta inesperada da lista de versões.");
   std::optional<AvailableUpdate> best;
@@ -61,7 +78,7 @@ std::optional<AvailableUpdate> SelectUpdate(const std::string& releases_json, co
     if (version.find('+') != std::string::npos) continue;
     const auto newer = CompareVersions(version, current);
     if (!newer || *newer <= 0 || (best && CompareVersions(version, best->version).value_or(0) <= 0)) continue;
-    const std::string package = "x360-native-" + version + "-windows-x64";
+    const std::string package = "x360-native-" + version + "-" + platform;
     std::set<std::string> names;
     if (release.contains("assets") && release["assets"].is_array())
       for (const auto& asset : release["assets"]) if (asset.is_object() && asset.contains("name") && asset["name"].is_string()) names.insert(asset["name"].get<std::string>());

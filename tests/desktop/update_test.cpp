@@ -63,15 +63,19 @@ TEST_CASE("the newest complete published release is selected with pinned URLs", 
   };
   const auto json = "[" + release("v0.60.0", true, true) + "," + release("v0.59.0", false, false) + "," + release("0.58.0", false, true) + "," +
                     release("v0.57.0", false, true) + "," + release("v0.56.1", false, true) + "," + release("v0.50.0", false, true) + "]";
-  CHECK_FALSE(SelectUpdate(json, "0.54.0")); // Every fixture release is marked prerelease.
-  const auto found = SelectUpdate(json, "0.54.0", UpdateChannel::Preview);
+  CHECK_FALSE(SelectUpdate(json, "0.54.0", UpdateChannel::Stable, "windows-x64")); // Every fixture release is marked prerelease.
+  const auto found = SelectUpdate(json, "0.54.0", UpdateChannel::Preview, "windows-x64");
+  // Another system or architecture never installs the Windows x64 package.
+  CHECK_FALSE(SelectUpdate(json, "0.54.0", UpdateChannel::Preview, "linux-x64"));
+  CHECK_FALSE(SelectUpdate(json, "0.54.0", UpdateChannel::Preview, "windows-arm64"));
+  CHECK_THROWS(SelectUpdate(json, "0.54.0", UpdateChannel::Preview, "../x64"));
   REQUIRE(found);
   CHECK(found->version == "0.57.0");
   CHECK(found->package == "x360-native-0.57.0-windows-x64");
   CHECK(found->archive_url == "https://github.com/fabegalo/x360-native/releases/download/v0.57.0/x360-native-0.57.0-windows-x64.zip");
   CHECK(found->checksum_url == found->archive_url + ".sha256");
   CHECK(found->page_url == "https://github.com/fabegalo/x360-native/releases/tag/v0.57.0");
-  CHECK_FALSE(SelectUpdate(json, "0.57.0"));
+  CHECK_FALSE(SelectUpdate(json, "0.57.0", UpdateChannel::Stable, "windows-x64"));
   CHECK_FALSE(SelectUpdate("[]", "0.54.0"));
   CHECK_THROWS(SelectUpdate("{\"message\":\"API rate limit exceeded\"}", "0.54.0"));
 }
@@ -141,9 +145,9 @@ TEST_CASE("stable updates exclude prerelease tags and GitHub prerelease flags", 
                 {"assets", json::array({json{{"name", stem}}, json{{"name", stem + ".sha256"}}})}};
   };
   const auto releases = json::array({release("2.0.0", false), release("3.0.0-rc.1", false), release("4.0.0", true)}).dump();
-  REQUIRE(SelectUpdate(releases, "1.0.0"));
-  CHECK(SelectUpdate(releases, "1.0.0")->version == "2.0.0");
-  CHECK(SelectUpdate(releases, "1.0.0", UpdateChannel::Preview)->version == "4.0.0");
+  REQUIRE(SelectUpdate(releases, "1.0.0", UpdateChannel::Stable, "windows-x64"));
+  CHECK(SelectUpdate(releases, "1.0.0", UpdateChannel::Stable, "windows-x64")->version == "2.0.0");
+  CHECK(SelectUpdate(releases, "1.0.0", UpdateChannel::Preview, "windows-x64")->version == "4.0.0");
 }
 
 namespace {
