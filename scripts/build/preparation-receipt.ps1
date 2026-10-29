@@ -408,6 +408,8 @@ function Get-PreviousReceipt([string]$File, [string]$Title, [string]$Manifest, [
         $registration = Join-Path (Split-Path $Manifest) 'preparation.toml'
         if ([IO.File]::Exists($registration) -and $registration -notin @($r.inputs.path)) { Write-Verbose 'Previous registration input absent'; return $null }
         $artifacts = @($Exe) + @(Get-ChildItem -LiteralPath (Split-Path $Exe) -Filter '*.dll' -File | ForEach-Object FullName)
+        $preflight = Join-Path (Split-Path $Exe) 'x360n_gpu_preflight.exe'
+        if (Test-BuildFile $preflight) { $artifacts += $preflight }
         if ((@($artifacts | Sort-Object) -join "`n") -ne (@($r.artifacts.path | Sort-Object) -join "`n")) { Write-Verbose 'Previous native DLL inventory differs'; return $null }
         return $r
     } catch { Write-Verbose "Previous receipt rejected: $($_.Exception.Message)"; return $null }
