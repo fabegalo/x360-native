@@ -3,6 +3,7 @@ param([Parameter(Mandatory)][string]$PackageDirectory,
       [Parameter(Mandatory)][string]$SdkDirectory)
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot '../build/release-configuration.ps1')
+. (Join-Path $PSScriptRoot 'lgpl-sources.ps1')
 $package = (Resolve-Path -LiteralPath $PackageDirectory).Path
 $sdk = (Resolve-Path -LiteralPath $SdkDirectory).Path
 function Digest($path) {
@@ -44,6 +45,8 @@ foreach($required in @('LICENSE','THIRD_PARTY_NOTICES.md')) {
 $expected=@('LICENSE','THIRD_PARTY_NOTICES.md','READ-ME.txt','package.json','package.sha256','app/compile-commands.json','app/dependency-inputs.json','app/link-inputs.json','licenses/inventory.json','licenses/rexglue-attributions.txt','licenses/header-attributions.txt') + @($inventory.executables)
 $ids=@{}
 $expected += 'licenses/excluded-loader-constants.json'
+$expected += 'licenses/relinking.txt'
+$expected += @(Assert-LgplSources $inventory $package $payload $sdk)
 foreach($component in $inventory.components) {
     if($ids.ContainsKey($component.id)) { throw 'Duplicate component identity' }; $ids[$component.id]=$true
     if($component.scope -like 'binary*' -and $component.spdx -eq 'NOASSERTION') { throw "Unidentified desktop component: $($component.id)" }
@@ -70,6 +73,7 @@ foreach($unit in $inventory.sdk_translation_units) {
     if(-not $sdkAttributions.Contains("--- $unit ---")) { throw 'SDK file attribution missing' }
 }
 if(-not $ids.ContainsKey('nlohmann-json') -or -not $ids.ContainsKey('microsoft-stl') -or -not $ids.ContainsKey('microsoft-crt-sdk')) { throw 'Missing embedded component identity' }
+if(-not $ids.ContainsKey('miniz') -or -not $ids.ContainsKey('libmspack')) { throw 'Missing extraction decoder identity' }
 if((Digest (Join-Path $package 'licenses/header-attributions.txt')) -ne $inventory.header_attributions_sha256) { throw 'Header attribution text changed' }
 $icon=@($inventory.components | Where-Object id -eq 'desktop-icon')
 if($icon.Count -ne 1 -or $icon[0].spdx -ne 'BSD-3-Clause' -or
@@ -89,17 +93,20 @@ foreach($dep in $metadata.dependencies.PSObject.Properties) {
     if($record.Count -ne 1 -or $record[0].revision -ne $dep.Value) { throw "Dependency revision differs from license inventory: $($dep.Name)" }
 }
 if(@($metadata.dependencies.PSObject.Properties).Count -ne @($inventory.desktop_dependencies).Count) { throw 'Missing build dependency identity' }
-$units=@()
+$units=@(); $thirdpartyUnits=@()
 $compileCommands = @(Get-Content (Join-Path $package 'app/compile-commands.json') -Raw | ConvertFrom-Json | ForEach-Object { $_ })
 Assert-ReleaseCompileCommands $compileCommands
 foreach($command in $compileCommands) {
     $f=$command.file.Replace('\','/')
     if($f -match '^<source>/external/rexglue-sdk/(src/.+)$') { $units += $Matches[1] }
     elseif($f -match '^<source>/external/rexglue-sdk/thirdparty/([^/]+)/') {
-        if($Matches[1] -notin @('fmt','spdlog','catch2')) { throw 'Unreviewed third-party translation unit' }
+        if ($f.Substring('<source>/external/rexglue-sdk/'.Length) -in $inventory.thirdparty_translation_units) {
+            $thirdpartyUnits += $f.Substring('<source>/external/rexglue-sdk/'.Length)
+        } elseif($Matches[1] -notin @('fmt','spdlog','catch2')) { throw 'Unreviewed third-party translation unit' }
     } elseif($f -notmatch '^<source>/(src/(desktop|supervisor|content)/|tests/(supervisor|content|desktop)/)') { throw 'Unreviewed distribution translation unit' }
 }
 if(Compare-Object @($inventory.sdk_translation_units | Sort-Object) @($units | Sort-Object -Unique)) { throw 'SDK extraction source scope changed' }
+if(Compare-Object @($inventory.thirdparty_translation_units | Sort-Object) @($thirdpartyUnits | Sort-Object -Unique)) { throw 'Decoder source scope changed' }
 $dependencyInputs=Get-Content (Join-Path $package 'app/dependency-inputs.json') -Raw | ConvertFrom-Json
 foreach($dependencyInput in $dependencyInputs) {
     if($dependencyInput -notin $inventory.sdk_inputs) { throw 'Unreviewed transitive header dependency' }

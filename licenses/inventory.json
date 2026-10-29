@@ -15,7 +15,8 @@
     "sdl3",
     "spdlog",
     "simde",
-    "utfcpp"
+    "utfcpp",
+    "libmspack"
   ],
   "sdk_translation_units": [
     "src/core/cvar.cpp",
@@ -37,9 +38,11 @@
     "src/filesystem/devices/stfs_container_device.cpp",
     "src/filesystem/devices/stfs_container_entry.cpp",
     "src/filesystem/devices/stfs_container_file.cpp",
-    "src/filesystem/entry.cpp"
+    "src/filesystem/entry.cpp",
+    "src/system/lzx.cpp",
+    "src/core/math_msvc.cpp"
   ],
-  "attributions_sha256": "a7ff3b7ce13deb4f6492e01e62eb9d0e98e0b0855bd92f609e192976a75207d9",
+  "attributions_sha256": "96f297fea9fd61c918e206ac7a2efa12e1dd0a43071376e29b8c18581c905304",
   "components": [
     {
       "id": "forza-reimagined",
@@ -201,10 +204,16 @@
       "spdx": "LGPL-2.1-only",
       "original": "thirdparty/libmspack/libmspack/COPYING.LIB",
       "license_file": "licenses/libmspack.txt",
-      "scope": "download",
-      "integration": "cabextract/mspack/lzxd.c statically in runtime",
-      "obligations": "Source, notices, modification/relinking route if redistributing combined runtime; review license section 6.",
-      "license_sha256": "a190dc9c8043755d90f8b0a75fa66b9e42d4af4c980bf5ddc633f0124db3cee7"
+      "scope": "binary-static",
+      "integration": "LZX decoder in x360n-extract and optional runtime; unchanged pinned source",
+      "obligations": "LGPL 2.1 section 6(a): complete corresponding decoder source in licenses/sources/libmspack, application source in app/workspace, rebuild instructions in licenses/relinking.txt; permit modification and reverse engineering for debugging modifications.",
+      "license_sha256": "a190dc9c8043755d90f8b0a75fa66b9e42d4af4c980bf5ddc633f0124db3cee7",
+      "source_evidence": [
+        {
+          "sdk_path": "thirdparty/libmspack/libmspack/mspack/lzxd.c",
+          "sha256": "2ada35d1fa8855bbcc645234d5745eba90f8c37d7c8a694a22df3b1159c6e21f"
+        }
+      ]
     },
     {
       "id": "imgui",
@@ -1499,6 +1508,23 @@
       "content_sha256": "9539edca04a3e2f2b5460fdcee8925cc0974af265fb715cf5a524fc32be31ed1",
       "obligations": "Copyright (c) 2026, x360-native; public holder confirmed by maintainer. Preserve BSD-3-Clause notice. Old icon history is a separate unresolved provenance question.",
       "license_sha256": "bc3a3590ae6dfa3fa6ff8bb0025f09466657cac73438d625e223269557ca4f37"
+    },
+    {
+      "id": "miniz",
+      "origin": "https://github.com/libsdl-org/SDL/blob/8bf3b7215ad9fc3deb583c6a3a37c6c67f2e24e4/src/video/miniz.h",
+      "revision": "SDL 8bf3b7215ad9fc3deb583c6a3a37c6c67f2e24e4; miniz v1.15",
+      "spdx": "Unlicense",
+      "license_file": "licenses/miniz.txt",
+      "license_sha256": "6a872e74952f8f332fc8eec087bf08ada61c4ef5cab5266de3a6dfb3e0ee309e",
+      "scope": "binary-static",
+      "integration": "ZIP reader/inflate in x360n-extract; SDL allocator names mapped locally to the standard allocator; no SDL binary",
+      "obligations": "Preserve original public domain dedication and disclaimer.",
+      "source_evidence": [
+        {
+          "sdk_path": "thirdparty/sdl3/src/video/miniz.h",
+          "sha256": "38cbe13345c175ef41c52c6af9174b93a7226d088343c93eeca22e65136e395e"
+        }
+      ]
     }
   ],
   "sdk_inputs": [
@@ -1982,7 +2008,17 @@
     "thirdparty/utfcpp/source/utf8/core.h",
     "thirdparty/utfcpp/source/utf8/cpp11.h",
     "thirdparty/utfcpp/source/utf8/cpp17.h",
-    "thirdparty/utfcpp/source/utf8/unchecked.h"
+    "thirdparty/utfcpp/source/utf8/unchecked.h",
+    "include/rex/system/lzx.h",
+    "src/system/lzx.cpp",
+    "thirdparty/libmspack/libmspack/mspack/lzx.h",
+    "thirdparty/libmspack/libmspack/mspack/lzxd.c",
+    "thirdparty/libmspack/libmspack/mspack/macros.h",
+    "thirdparty/libmspack/libmspack/mspack/mspack.h",
+    "thirdparty/libmspack/libmspack/mspack/readbits.h",
+    "thirdparty/libmspack/libmspack/mspack/readhuff.h",
+    "thirdparty/libmspack/libmspack/mspack/system.h",
+    "src/core/math_msvc.cpp"
   ],
   "link_libraries": [
     "desktop-deps/fmt/fmt.lib",
@@ -1990,5 +2026,45 @@
     "src/desktop/x360n_desktop_model.lib",
     "src/supervisor/x360n_core.lib"
   ],
-  "header_attributions_sha256": "2665566ff7188440d4b6455e560c6d1d52e5dd703573464d8e8659746c69aa9e"
+  "header_attributions_sha256": "2665566ff7188440d4b6455e560c6d1d52e5dd703573464d8e8659746c69aa9e",
+  "thirdparty_translation_units": [
+    "thirdparty/libmspack/libmspack/mspack/lzxd.c"
+  ],
+  "lgpl_sources": [
+    {
+      "sdk_path": "thirdparty/libmspack/libmspack/mspack/lzxd.c",
+      "package_path": "licenses/sources/libmspack/lzxd.c",
+      "sha256": "2ada35d1fa8855bbcc645234d5745eba90f8c37d7c8a694a22df3b1159c6e21f"
+    },
+    {
+      "sdk_path": "thirdparty/libmspack/libmspack/mspack/lzx.h",
+      "package_path": "licenses/sources/libmspack/lzx.h",
+      "sha256": "3fab60d43d09aec570558125e4f6c391a69fc906738ef5fe56e15f22027bddf5"
+    },
+    {
+      "sdk_path": "thirdparty/libmspack/libmspack/mspack/system.h",
+      "package_path": "licenses/sources/libmspack/system.h",
+      "sha256": "62e06060ee7f1cf0d254a0d0c8751c23badaa28fc339fc10e74bbf560a1b5d9d"
+    },
+    {
+      "sdk_path": "thirdparty/libmspack/libmspack/mspack/mspack.h",
+      "package_path": "licenses/sources/libmspack/mspack.h",
+      "sha256": "e651545f9619f74e2ae3416895e243072b400e47e494426007ba1503a0dc2921"
+    },
+    {
+      "sdk_path": "thirdparty/libmspack/libmspack/mspack/macros.h",
+      "package_path": "licenses/sources/libmspack/macros.h",
+      "sha256": "31e34df474e5b2e5781ae2ed52c329c9f4e6eb8fe935139200f566253e6a8436"
+    },
+    {
+      "sdk_path": "thirdparty/libmspack/libmspack/mspack/readbits.h",
+      "package_path": "licenses/sources/libmspack/readbits.h",
+      "sha256": "fe0ff476fd8ad602a1eb1a6d3131afa43210fc2fb7dd230a806a0fe2c7f51618"
+    },
+    {
+      "sdk_path": "thirdparty/libmspack/libmspack/mspack/readhuff.h",
+      "package_path": "licenses/sources/libmspack/readhuff.h",
+      "sha256": "e2217871a1446e8881f9013280f6532b0d65da7fdaeb08762cfdea9b42a10546"
+    }
+  ]
 }

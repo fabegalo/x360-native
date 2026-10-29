@@ -4,7 +4,7 @@ $ErrorActionPreference = 'Stop'
 $root = (Resolve-Path (Join-Path $PSScriptRoot '../..')).Path
 $scratch = Join-Path $root ('.local/evidence/constant-export-' + [guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Force "$scratch/policy/scripts/packaging", "$scratch/policy/scripts/build", "$scratch/policy/licenses" | Out-Null
-foreach ($file in @('check-package-licenses.ps1','excluded-constants.ps1','generate-desktop-icon.ps1')) {
+foreach ($file in @('check-package-licenses.ps1','lgpl-sources.ps1','excluded-constants.ps1','generate-desktop-icon.ps1')) {
     Copy-Item -LiteralPath (Join-Path $root "scripts/packaging/$file") -Destination "$scratch/policy/scripts/packaging"
 }
 Copy-Item -LiteralPath (Join-Path $root 'scripts/build/release-configuration.ps1') -Destination "$scratch/policy/scripts/build"

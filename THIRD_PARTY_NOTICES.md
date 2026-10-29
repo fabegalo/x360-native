@@ -27,6 +27,8 @@ forma de uso, texto e SHA-256. Os índices existentes `package.sha256` e
 | Microsoft C++ Standard Library | Templates/objetos incorporados | [Apache-2.0 WITH LLVM-exception](licenses/microsoft-stl.txt), copyright Microsoft Corporation |
 | CRT/UCRT Microsoft | Runtime estático Release | Termos de redistribuição Visual Studio/Windows SDK; não é coberto pela licença própria |
 | SDL | Somente trechos de patches; não há SDL.dll no ZIP desktop | [Zlib](licenses/sdl3.txt) |
+| miniz 1.15, cópia do SDL fixado | Leitor ZIP/inflate estático no extrator; sem SDL.dll | [Unlicense](licenses/miniz.txt) |
+| libmspack | Decoder LZX estático no extrator para recursos do XAM | [LGPL-2.1-only](licenses/libmspack.txt), [fontes e relink](licenses/relinking.txt) |
 
 Preservar os copyrights, condições e disclaimers nos formatos exigidos pelos
 textos originais. [Atribuições dos headers](licenses/header-attributions.txt)
@@ -36,7 +38,10 @@ desabilitado em C++23; seu aviso Apache também é conservado no inventário.
 Patches em `app/workspace/patches/rexglue-sdk` identificam
 modificações locais; seus hashes e a base estão no lock e em `package.json`.
 O código adaptado em `src/content/xex_patch.cpp` deriva do ReXGlue/Xenia e conserva
-esses avisos; não é compilado nos três executáveis deste ZIP.
+esses avisos; a leitura autenticada de recursos também é compilada no extrator.
+O pacote inclui as fontes correspondentes do decoder libmspack em
+`licenses/sources/libmspack`, o código do aplicativo em `app/workspace` e
+instruções para modificar/recompilar/religar em `licenses/relinking.txt`.
 
 O scanout experimental em `src/native/shaders/scanout.hlsl` adapta a permutação de
 endereços tiled de `src/graphics/pipeline/texture/util.cpp` do SDK pinado:

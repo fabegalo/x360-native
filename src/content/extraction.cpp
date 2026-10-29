@@ -29,10 +29,15 @@ struct Extractor {
   // Nonzero for a disc image: every entry is a DiscImageEntry whose data must lie
   // inside the first disc_size bytes of the image.
   uint64_t disc_size = 0;
+  uint64_t entries = 0, declared_bytes = 0;
   std::vector<uint8_t> buffer = std::vector<uint8_t>(4 << 20);
 
-  void Walk(rex::filesystem::Entry* entry, const fs::path& rel) {
+  void Walk(rex::filesystem::Entry* entry, const fs::path& rel, size_t depth = 0) {
+    if (depth > 64) throw std::runtime_error("container directory depth limit exceeded");
     for (auto& child : entry->children()) {
+      if (++entries > 65536 || child->size() > (2ull << 30) || child->size() > (8ull << 30)-declared_bytes)
+        throw std::runtime_error("container extraction limit exceeded");
+      if (!(child->attributes() & rex::filesystem::kFileAttributeDirectory)) declared_bytes += child->size();
       const std::string& name = child->name();
       if (!x360n::IsSafePackageEntryName(name)) {
         fmt::print(stderr, "extract: refusing unsafe entry name '{}' under '{}'\n", name,
@@ -43,8 +48,8 @@ struct Extractor {
       fs::path child_rel = rel / Utf8Path(name);
       fs::path out = dest / child_rel;
       if (child->attributes() & rex::filesystem::kFileAttributeDirectory) {
-        fs::create_directories(out);
-        Walk(child.get(), child_rel);
+        if (!fs::create_directory(out)) throw std::runtime_error("duplicate/conflicting container directory");
+        Walk(child.get(), child_rel, depth+1);
         continue;
       }
       Copy(child.get(), child_rel, out);
@@ -82,7 +87,7 @@ struct Extractor {
       size_t want = std::min(buffer.size(), total - offset);
       size_t got = 0;
       if (in->ReadSync(std::span<uint8_t>(buffer.data(), want), offset, &got) != X_STATUS_SUCCESS ||
-          got == 0) {
+          got == 0 || got > want) {
         ok = false;
         break;
       }

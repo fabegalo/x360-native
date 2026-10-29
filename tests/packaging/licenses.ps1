@@ -20,6 +20,9 @@ function Refresh($p) {
 }
 & $gate -PackageDirectory $PackageDirectory -SdkDirectory $SdkDirectory
 $cases=@(
+ @{name='missing-lgpl-source'; expected='Missing required file'; mutate={param($p) Remove-Item -LiteralPath (Join-Path $p 'licenses/sources/libmspack/lzxd.c')}},
+ @{name='changed-lgpl-source'; expected='Missing or changed LGPL corresponding source'; mutate={param($p) Add-Content -LiteralPath (Join-Path $p 'licenses/sources/libmspack/lzxd.c') 'tamper'}},
+ @{name='removed-lgpl-inventory'; expected='Missing LGPL corresponding source inventory'; mutate={param($p) foreach($base in @($p,(Join-Path $p 'app/workspace'))) { $i=Get-Content (Join-Path $base 'licenses/inventory.json') -Raw | ConvertFrom-Json; $i.lgpl_sources=@(); $i | ConvertTo-Json -Depth 12 | Set-Content (Join-Path $base 'licenses/inventory.json') }}},
  @{name='changed-icon'; expected='Desktop icon provenance mismatch'; mutate={param($p) [IO.File]::WriteAllBytes((Join-Path $p 'app/workspace/src/desktop/resources/desktop.ico'),[byte[]]@(0,0,1,0))}},
  @{name='unproven-icon'; expected='Desktop icon differs from original'; mutate={param($p) $path=Join-Path $p 'app/workspace/src/desktop/resources/desktop.ico'; $b=[IO.File]::ReadAllBytes($path); $b[$b.Length-1]=1; [IO.File]::WriteAllBytes($path,$b); foreach($base in @($p,(Join-Path $p 'app/workspace'))) { $i=Get-Content (Join-Path $base 'licenses/inventory.json') -Raw | ConvertFrom-Json; ($i.components | Where-Object id -eq 'desktop-icon').content_sha256=(Get-FileHash $path).Hash.ToLowerInvariant(); $i | ConvertTo-Json -Depth 12 | Set-Content (Join-Path $base 'licenses/inventory.json') }}},
  @{name='missing-icon-provenance'; expected='Missing desktop icon provenance'; mutate={param($p) Remove-Item -LiteralPath (Join-Path $p 'app/workspace/docs/reports/maintenance/ICON_PROVENANCE.md')}},

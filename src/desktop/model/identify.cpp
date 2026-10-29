@@ -78,7 +78,7 @@ std::vector<ContentIdentity> IdentifyContent(const std::vector<Target>& targets,
       item.problem = "Não foi possível ler a identidade. Selecione novamente o arquivo original completo.";
     } else {
       item.label = "Arquivo não reconhecido";
-      item.problem = "Selecione uma ISO, um pacote Xbox 360 (CON/LIVE/PIRS), um arquivo XEX ou uma pasta extraída. Arquivos ZIP, RAR e 7z precisam ser descompactados primeiro.";
+      item.problem = "Selecione uma ISO, pacote Xbox 360 (CON/LIVE/PIRS), System Update 17559 em ZIP, arquivo XEX ou pasta extraída. Outros ZIPs, RAR e 7z precisam ser descompactados primeiro.";
     }
     result.push_back(std::move(item));
   };

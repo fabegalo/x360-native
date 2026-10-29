@@ -4,6 +4,9 @@
 #pragma once
 
 #include <filesystem>
+#include <cstdint>
+#include <string_view>
+#include <vector>
 
 namespace x360n::content {
 
@@ -20,5 +23,10 @@ int ApplyXexPatch(const std::filesystem::path& base, const std::filesystem::path
 // $X360N_XEX_KEYS if set, else .local/keys/xex-keys.txt (relative to the working
 // directory; .local/ is ignored by Git).
 std::filesystem::path DefaultXexKeyFile();
+
+// Decode an unencrypted compressed XEX with block/page digest verification.
+// No runtime, keys, import fixups or PowerPC execution are involved.
+std::vector<uint8_t> ReadUnencryptedXexResource(const std::filesystem::path& xex,
+                                               std::string_view resource);
 
 }  // namespace x360n::content

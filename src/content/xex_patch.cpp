@@ -283,8 +283,8 @@ BaseImage DecodeBase(const Bytes& x, const std::vector<MasterKey>& keys) {
   HeaderRange(hd, *ffi, 0x24);
   const size_t format = *ffi;
   const uint16_t enc = Be16(x, format + 4), comp = Be16(x, format + 6);
-  if (enc != 1 || comp != 2)
-    throw Error{fmt::format("base: encryption {} compression {} not handled (needs 1, 2)", enc, comp)};
+  if (enc > 1 || comp != 2)
+    throw Error{fmt::format("base: encryption {} compression {} not handled (needs 0/1, 2)", enc, comp)};
   BaseImage r{};
   r.window_size = Be32(x, format + 8);
   CheckWindow(r.window_size);
@@ -293,7 +293,12 @@ BaseImage DecodeBase(const Bytes& x, const std::vector<MasterKey>& keys) {
   const uint8_t* first_hash = At(x, format + 0x10, 20);
   const size_t body_len = x.size() - hd.header_size;
   Bytes body;
+  if (enc == 0) {
+    body.assign(x.begin() + hd.header_size, x.end());
+    r.key_name = "unencrypted";
+  }
   for (const auto& mk : keys) {
+    if (enc == 0) break;
     const Key session = DecryptKey(mk.key, At(x, hd.sec + 0x150, 16));
     Bytes b = AesCbcDecrypt(session, At(x, hd.header_size, body_len), body_len);
     if (first_size <= b.size() && std::memcmp(Sha1(b.data(), first_size).data(), first_hash, 20) == 0) {
@@ -382,6 +387,35 @@ void WriteNew(const fs::path& p, const uint8_t* data, size_t n) {
 }
 
 }  // namespace
+
+std::vector<uint8_t> ReadUnencryptedXexResource(const fs::path& path, std::string_view name) {
+  try {
+    if (fs::file_size(path) > (64u << 20)) throw Error{"resource XEX exceeds size limit"};
+    const auto bytes = ReadFile(path);
+    const auto hd = ParseHeader(bytes);
+    if (ImageSize(hd) > (128u << 20)) throw Error{"resource image exceeds size limit"};
+    auto decoded = DecodeBase(bytes, {});
+    std::string report;
+    if (!VerifyPages(bytes, decoded.image, &report)) throw Error{"resource image: " + report};
+    const auto table = OptHeader(bytes, hd, 0x000002FF);
+    if (!table) return {};
+    HeaderRange(hd, *table, 4);
+    const auto size = Be32(bytes, *table);
+    if (size < 4 || (size-4)%16) throw Error{"invalid XEX resource table"};
+    HeaderRange(hd, *table, size);
+    const auto base = Be32(bytes, hd.sec + 0x110);
+    for (size_t p = *table+4; p < size_t(*table)+size; p += 16) {
+      std::string_view resource(reinterpret_cast<const char*>(At(bytes,p,8)),8);
+      resource = resource.substr(0, resource.find('\0'));
+      if (resource != name) continue;
+      const auto address = Be32(bytes,p+8), length = Be32(bytes,p+12);
+      if (address < base) throw Error{"XEX resource precedes image"};
+      const auto* data = At(decoded.image,address-base,length);
+      return {data,data+length};
+    }
+    return {};
+  } catch (const Error& e) { throw std::runtime_error(e.what); }
+}
 
 fs::path DefaultXexKeyFile() {
   if (const char* env = std::getenv("X360N_XEX_KEYS"); env && *env) return fs::path(env);

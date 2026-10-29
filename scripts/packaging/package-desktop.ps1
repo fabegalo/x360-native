@@ -53,7 +53,6 @@ foreach ($file in Get-ChildItem -LiteralPath $payload -Recurse -File) {
     if ($rel -match '(^|/)(\.local|\.git|external)/' -or $rel -match '\.(xex|xexp|xtt|ttf|otf|pdb|dll|exe|stfs|iso)$' -or
         ($rel -match '/generated/' -and $rel -notmatch '/generated/rexglue\.cmake$')) { throw "Non-distributable payload entry: $rel" }
 }
-WriteIndex $payload 'payload.sha256'
 $lock = Get-Content -Raw (Join-Path $source 'deps.lock.json') | ConvertFrom-Json
 $sdk = Join-Path $source 'external/rexglue-sdk'
 # A private checkout uses only pinned Git objects, never developer working bytes.
@@ -63,13 +62,24 @@ if ($LASTEXITCODE -ne 0) { throw 'SDK snapshot failed' }
 git -c core.longpaths=true -c core.autocrlf=false -c core.eol=lf -C $sdk checkout --detach $lock.rexglue_sdk.commit
 if ($LASTEXITCODE -ne 0) { throw 'Pinned SDK checkout failed' }
 $dependencies = [ordered]@{}
-foreach ($component in @('fmt','tomlplusplus','cli11','catch2','inja','sdl3','spdlog','simde','utfcpp')) {
+foreach ($component in @('fmt','tomlplusplus','cli11','catch2','inja','sdl3','spdlog','simde','utfcpp','libmspack')) {
     $tree = git -C $sdk ls-tree HEAD "thirdparty/$component"
     if ($LASTEXITCODE -ne 0 -or $tree -notmatch '^160000 commit ([a-f0-9]{40})') { throw "Unpinned dependency: $component" }
     $revision = $Matches[1]
     ExportTree (Join-Path $root "external/rexglue-sdk/thirdparty/$component") $revision (Join-Path $sdk "thirdparty/$component")
     $dependencies[$component] = $revision
 }
+# LGPL 2.1 section 6(a): ship the exact decoder source alongside the complete
+# application source/relink instructions. Only pinned public Git bytes enter.
+$licenseInventory = Get-Content (Join-Path $source 'licenses/inventory.json') -Raw | ConvertFrom-Json
+foreach ($entry in $licenseInventory.lgpl_sources) {
+    $original = Join-Path $sdk $entry.sdk_path
+    if ((Hash $original) -ne $entry.sha256) { throw 'LGPL source differs from the pinned inventory' }
+    $copied = Join-Path $payload $entry.package_path
+    New-Item -ItemType Directory -Force (Split-Path $copied) | Out-Null
+    Copy-Item -LiteralPath $original -Destination $copied
+}
+WriteIndex $payload 'payload.sha256'
 & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $source 'scripts/setup/apply-sdk-patches.ps1')
 if ($LASTEXITCODE -ne 0) { throw 'Pinned SDK patch verification failed' }
 $llvm = Join-Path $root $lock.llvm.install_dir
@@ -105,7 +115,7 @@ foreach ($binary in @((Join-Path $destination 'x360-native.exe'), (Join-Path $in
     }
 }
 # Legal material is visible at the ZIP root, and comes from the same commit.
-Copy-Item -LiteralPath (Join-Path $source 'licenses') -Destination $destination -Recurse
+Copy-Item -LiteralPath (Join-Path $payload 'licenses') -Destination $destination -Recurse
 foreach ($notice in @('LICENSE','THIRD_PARTY_NOTICES.md')) {
     Copy-Item -LiteralPath (Join-Path $source $notice) -Destination $destination
 }
@@ -146,8 +156,11 @@ x360-native $Version — prévia para Windows x64
 
 Extraia o ZIP inteiro em uma pasta vazia e abra x360-native.exe.
 Em Importar > Adicionar arquivo, selecione uma ISO ou um pacote Xbox 360
-(CON/LIVE/PIRS, incluindo XBLA). A extração é local e não requer instalar
-ferramentas de compilação. ZIP, RAR e 7z devem ser descompactados antes.
+(CON/LIVE/PIRS, incluindo XBLA), ou o ZIP oficial System Update 17559.
+A extração é local e não requer instalar ferramentas de compilação. Também
+aceita a pasta `$SystemUpdate ou seu PIRS interno. Componentes ausentes são
+listados para complementação; a preparação AOT exige a ação Preparar.
+Outros ZIPs, RAR e 7z devem ser descompactados antes.
 Ao abrir, o aplicativo consulta somente a lista pública de versões no GitHub
 Releases do x360-native. Havendo versão mais nova, "Instalar <versão>" na barra
 lateral baixa o ZIP, confere o SHA-256 publicado e o índice do pacote, troca os

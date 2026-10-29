@@ -16,6 +16,7 @@
 #include <thread>
 #include "../model/catalog.h"
 #include "../model/import_source.h"
+#include <sstream>
 #include "child_process.h"
 #include "environment_win32.h"
 #include "workspace_lease.h"
@@ -694,7 +695,7 @@ void SetPageTexts(App& a) {
       Set(a.subtitle, Tr("Jogos importados e o estado de preparação de cada um.\r\nPara jogar, use a My Games dentro da dashboard original.", "Imported games and the preparation state of each one.\r\nTo play, use My Games inside the original dashboard.")); break;
     case Page::Import:
       Set(a.headline, Tr("Importar", "Import"));
-      Set(a.subtitle, Tr("Adicione uma ISO, um pacote Xbox 360 (XBLA/STFS) ou uma pasta extraída.\r\nO conteúdo é extraído e verificado; seus originais ficam preservados.", "Add an ISO, an Xbox 360 package (XBLA/STFS) or an extracted folder.\r\nContent is extracted and verified; your originals stay untouched.")); break;
+      Set(a.subtitle, Tr("Adicione uma ISO, pacote Xbox 360, System Update 17559 (ZIP/PIRS) ou pasta extraída.\r\nO conteúdo é extraído e verificado; seus originais ficam preservados.", "Add an ISO, Xbox 360 package, System Update 17559 (ZIP/PIRS) or extracted folder.\r\nContent is extracted and verified; your originals stay untouched.")); break;
     case Page::Dashboard:
       Set(a.headline, Tr("Dashboard", "Dashboard"));
       Set(a.subtitle, Tr("Versões da dashboard original e o estado de cada preparação.\r\nCada versão usa somente seus próprios componentes.", "Original dashboard versions and the preparation state of each.\r\nEach version uses only its own components.")); break;
@@ -1266,8 +1267,28 @@ void Start(App& a, int action, fs::path source = {}) {
       if (action == kImport) {
         ImportSource content(source, Supervisor(a).parent_path() / "x360n-extract.exe", a.logs,
           [&] { return a.cancel.load(); }, [&] {
-            Post(a.window, kProgress, Tr("Extraindo o jogo...\r\nIsso pode levar alguns minutos. Você pode cancelar; o arquivo original será preservado.", "Extracting the game...\r\nThis may take a few minutes. You can cancel; the original file will be preserved."));
-          });
+            Post(a.window, kProgress, Tr("Extraindo o conteúdo...\r\nIsso pode levar alguns minutos. Você pode cancelar; o arquivo original será preservado.", "Extracting content...\r\nThis may take a few minutes. You can cancel; the original file will be preserved."));
+          }, [&](const std::string& stage) { Post(a.window,kProgress,stage); });
+        if (content.system_update()) {
+          const auto it=std::find_if(a.targets.begin(),a.targets.end(),[](const auto& t){return t.id=="dash_17559";});
+          if (it==a.targets.end()) throw std::runtime_error("Falta o perfil de preparação Retail 17559 nesta instalação.");
+          a.stage=2; a.imported_id=it->id;
+          Post(a.window,kProgress,Tr("Dashboard Xbox 360 — Retail 17559: adicionando componentes verificados...", "Xbox 360 Dashboard — Retail 17559: adding verified components..."));
+          Import(ProjectPaths{a.root},*it,content.path(),[&]{return a.cancel.load();},true);
+          a.import_recognized=true;
+          const auto state=Inspect(ProjectPaths{a.root},*it);
+          std::string message=Tr("Dashboard Xbox 360 — Retail 17559\r\n", "Xbox 360 Dashboard — Retail 17559\r\n");
+          if (state.inputs_ok) message+=Tr("Conteúdo completo e verificado. Selecione Preparar para executar a preparação AOT.", "Complete, verified content. Select Prepare to run AOT preparation.");
+          else {
+            message+=Tr("Importação parcial. Complete os arquivos abaixo usando Importar arquivo ou pasta; a dashboard ainda não está pronta.\r\n", "Partial import. Supply the files below using Import file or folder; the dashboard is not ready yet.\r\n");
+            for (const auto& issue:state.issues) message+=issue+"\r\n";
+            for (std::istringstream report(content.report());report;) {
+              std::string line;std::getline(report,line);
+              if (line.starts_with("missing\t")) message+=line.substr(8)+"\r\n";
+            }
+          }
+          finish(message); return;
+        }
         a.stage = 1;
         Post(a.window, kProgress, Tr("Identificando o conteúdo...\r\nConferindo versão, Title ID e arquivos antes de adicionar.", "Identifying the content...\r\nChecking version, Title ID and files before adding."));
         if (fs::is_directory(content.path()) && fs::is_regular_file(content.path() / "default.xex")) {

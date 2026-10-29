@@ -1,9 +1,12 @@
 // Extraction-only process: no PPC execution, XEX keys or title runtime.
 #include "extraction.h"
+#include "system_update.h"
 #include <iostream>
 #include <string_view>
 int wmain(int argc, wchar_t** argv) {
   try {
+    if (argc == 4 && std::wstring_view(argv[1]) == L"extract-system-update")
+      return x360n::content::ExtractSystemUpdate(argv[2], argv[3]);
     if (argc == 4 && std::wstring_view(argv[1]) == L"extract")
       return x360n::content::Extract(argv[2], argv[3]);
     if (argc == 4 && std::wstring_view(argv[1]) == L"extract-disc")

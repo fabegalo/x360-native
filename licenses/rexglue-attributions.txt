@@ -1330,3 +1330,44 @@ Original file headers from ReXGlue f5337cdc947ff6d4c4196737e2c807a48f2a1fc2. BSD
  *
  * @remarks     Derived from Xenia's window_win.cc (Ben Vanik, 2020).
  */
+
+--- src/system/lzx.cpp ---
+/**
+ ******************************************************************************
+ * Xenia : Xbox 360 Emulator Research Project                                 *
+ ******************************************************************************
+ * Copyright 2013 Ben Vanik. All rights reserved.                             *
+ * Released under the BSD license - see LICENSE in the root for more details. *
+ ******************************************************************************
+ *
+ * @modified    Tom Clay, 2026 - Adapted for ReXGlue runtime
+ */
+
+--- include/rex/system/lzx.h ---
+/**
+ * @file        runtime/lzx.h
+ * @brief       LZX decompression interface for XEX loading
+ *
+ * @copyright   Copyright 2022 Ben Vanik. All rights reserved. (Xenia Project)
+ *
+ * @license     BSD 3-Clause License
+ *              See LICENSE file in the project root for full license text.
+ *
+ * @modified    Tom Clay, 2026 - Adapted for ReXGlue runtime
+ */
+
+--- thirdparty/libmspack/libmspack/mspack/lzxd.c ---
+/* This file is part of libmspack.
+ * (C) 2003-2023 Stuart Caie.
+ *
+ * The LZX method was created by Jonathan Forbes and Tomi Poutanen, adapted
+ * by Microsoft Corporation.
+ *
+ * libmspack is free software; you can redistribute it and/or modify it under
+ * the terms of the GNU Lesser General Public License (LGPL) version 2.1
+ *
+ * For further details, see the file COPYING.LIB distributed with libmspack
+ */
+
+--- src/core/math_msvc.cpp ---
+No file-level copyright header; covered by the pinned ReXGlue BSD-3-Clause license.
