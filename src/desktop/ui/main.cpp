@@ -47,9 +47,19 @@ struct ReviewFlow {
     log << SDL_GetTicks() << "\t" << event << "\tbusy=" << a.busy << " stage=" << a.stage.load() << " result=" << a.result
         << " chip=" << a.chip_text << " next=" << a.next_action << "\n" << std::flush;
   }
+  bool import_watch = false;  // --import with --auto-log: log the import, then close
+  bool import_started = false;
   void Step(App& a, SDL_Window* window, bool& running) {
-    if (target.empty() || stage == 4) return;
+    if ((target.empty() && !import_watch) || stage == 4) return;
     if (a.busy && a.activity_text != last_text) { last_text = a.activity_text; Write(a, "activity: " + a.activity_title + " | " + last_text); }
+    if (import_watch) {
+      if (a.busy && a.importing) import_started = true;
+      if (import_started && !a.busy) {
+        Write(a, "import ended: " + a.result_title + " | " + a.activity_text + " | selected=" + a.selection_title + " status=" + a.status);
+        stage = 4; running = false;
+      }
+      return;
+    }
     if (a.prompt) {
       // Downloads stay refused; only files already present are used.
       Write(a, "prompt: " + a.prompt->title + " -> " + (a.prompt->buttons.size() > 1 ? a.prompt->buttons[1] : a.prompt->buttons[0]));
@@ -124,6 +134,7 @@ int main(int argc, char** argv) {
   }
   if (const char* env = std::getenv("X360N_LAUNCHER_RENDERER"); env && forced_renderer.empty()) forced_renderer = env;
   ConfigureFromPreferences(a);
+  review.import_watch = review.log.is_open() && !a.auto_import.empty();
 #ifdef _WIN32
   SDL_SetHint(SDL_HINT_WINDOWS_INTRESOURCE_ICON, "1");
 #endif
@@ -198,7 +209,7 @@ int main(int argc, char** argv) {
   int settle = 3;  // frames to draw after the last event so ImGui settles
   while (running) {
     SDL_Event event;
-    const bool animate = a.busy || settle > 0 || !smoke.empty() || (!review.target.empty() && review.stage != 4);
+    const bool animate = a.busy || settle > 0 || !smoke.empty() || ((!review.target.empty() || review.import_watch) && review.stage != 4);
     const bool got = animate ? SDL_WaitEventTimeout(&event, a.busy ? 33 : 0) : SDL_WaitEvent(&event);
     for (bool more = got; more; more = SDL_PollEvent(&event)) {
       settle = 3;
