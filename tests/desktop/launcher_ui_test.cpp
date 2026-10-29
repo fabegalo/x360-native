@@ -1,71 +1,67 @@
-// Exercise the actual Win32 procedure on hidden fixture windows; no Computer
-// Use, screenshots, input injection, title executables or renderer validation.
+// Exercise the shared launcher controller and the one frontend headless: no
+// window, Computer Use, screenshots, input injection, title executables or
+// renderer validation. Frames are laid out by the real pages and, on request,
+// rasterized by the launcher's own CPU renderer into PNG files.
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/catch_message.hpp>
+#include <cstdlib>
+#include <fstream>
+#include <cstring>
 #include <iostream>
-#ifdef X360N_FRONTEND_BASELINE
-#include X360N_FRONTEND_BASELINE
-#else
-#include "../../src/desktop/win32/main_win32.cpp"
-#endif
+#include <SDL3/SDL.h>
+#include <thread>
+#include "app_controller.h"
+#include "frontend.h"
+#include "soft_raster.h"
+#include "app_text.h"
+#include "digest_batch.h"
+#include "preparation.h"
+#include "host_platform.h"
 #include "../supervisor/preparation_fixture.h"
 #include "../supervisor/scratch.h"
 #include "catalog_paths.h"
+#ifdef _WIN32
+#define WIN32_LEAN_AND_MEAN
+#define NOMINMAX
+#include <windows.h>
+#endif
+namespace fs = std::filesystem;
+using namespace x360n;
+using namespace x360n::desktop;
 namespace {
 using Clock = std::chrono::steady_clock;
 int64_t Now() { return std::chrono::duration_cast<std::chrono::milliseconds>(Clock::now().time_since_epoch()).count(); }
 struct Frontend {
-  fs::path root = UniqueTempPath("launcher-ui") / std::to_string(GetTickCount64());
+  fs::path root = UniqueTempPath("launcher-ui") / std::to_string(Now());
   ProjectPaths paths{root};
   App app;
-  ULONG_PTR gdiplus = 0;
   Frontend() {
     fs::create_directories(root);
-    CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
-    Gdiplus::GdiplusStartupInput input; Gdiplus::GdiplusStartup(&gdiplus, &input, nullptr);
-    INITCOMMONCONTROLSEX controls{sizeof(controls), ICC_STANDARD_CLASSES | ICC_PROGRESS_CLASS}; InitCommonControlsEx(&controls);
-    app.root = root; app.self = root / "launcher.exe";
+    app.root = root; app.self = root / ("launcher" + ExecutableSuffix());
     app.environment.description = "synthetic environment";
     app.environment.graphics = app.environment.writable = app.environment.architecture = true;
-#ifndef X360N_FRONTEND_BASELINE
     app.supervisor_available = true;
-#endif
-    fs::copy_file(X360N_LAUNCHER_CHILD, root / "x360n.exe");
-    WNDCLASSW cls{}; cls.lpfnWndProc = WndProc; cls.hInstance = GetModuleHandleW(nullptr); cls.lpszClassName = L"LauncherUiFixture";
-    RegisterClassW(&cls);
-    app.window = CreateWindowExW(0, cls.lpszClassName, L"fixture", WS_OVERLAPPEDWINDOW,
-        0, 0, 900, 700, nullptr, nullptr, cls.hInstance, &app);
-    if (!app.window) throw std::runtime_error("fixture window creation failed");
-    MSG msg{}; // The fixture controls loading explicitly.
-    while (PeekMessageW(&msg, app.window, kOpenEnvironment, kOpenEnvironment, PM_REMOVE)) {}
+    fs::copy_file(X360N_LAUNCHER_CHILD, root / ("x360n" + ExecutableSuffix()));
   }
   ~Frontend() {
     app.cancel = true;
     if (app.worker.joinable()) app.worker.join();
-    Pump();
-    if (IsWindow(app.window)) DestroyWindow(app.window);
-    MSG msg{}; while (PeekMessageW(&msg, nullptr, WM_QUIT, WM_QUIT, PM_REMOVE)) {}
-    Gdiplus::GdiplusShutdown(gdiplus); CoUninitialize();
+    Pump(app);
     std::error_code ec; fs::remove_all(root, ec);
-  }
-  void Pump() {
-    MSG msg{};
-    while (PeekMessageW(&msg, nullptr, 0, 0, PM_REMOVE)) {
-      if (msg.message != WM_QUIT) { TranslateMessage(&msg); DispatchMessageW(&msg); }
-    }
   }
   bool Until(const std::function<bool()>& done, int milliseconds = 15000) {
     const auto end = Now() + milliseconds;
-    do { Pump(); if (done()) return true; MsgWaitForMultipleObjects(0, nullptr, FALSE, 5, QS_ALLINPUT); } while (Now() < end);
+    do { Pump(app); if (done()) return true; std::this_thread::sleep_for(std::chrono::milliseconds(5)); } while (Now() < end);
     return false;
   }
   Target TargetFixture() {
     const auto dir = root / "titles/dashboard";
     const auto game = paths.inputs() / "dashboard";
-    const auto exe = paths.build() / "titles/dashboard/dashboard.exe";
+    const auto exe = NativeTitleExecutable(paths, "dashboard");  // build/titles/... (.exe) on Windows x64, build/<host>/titles/... elsewhere
     fs::create_directories(dir); fs::create_directories(game); fs::create_directories(exe.parent_path());
     std::ofstream(game / "dash.xex") << "synthetic input";
-    std::ofstream(exe) << "synthetic artifact; not executed";
+    // A real native image of this host (the fixture child), never executed by these tests.
+    fs::copy_file(X360N_LAUNCHER_CHILD, exe, fs::copy_options::overwrite_existing);
     const auto hash = DigestFile(game / "dash.xex")->sha256;
     const auto manifest = dir / "dashboard_manifest.toml";
     std::ofstream(manifest) << "[project]\nname='dashboard'\ngame_root='../../.local/inputs/dashboard'\n"
@@ -77,9 +73,7 @@ struct Frontend {
   }
   void Seed(const Target& target, bool unrelated = false) {
     app.targets = {target}; app.checked.resize(1); app.checked[0].state = Inspect(paths, target);
-#ifndef X360N_FRONTEND_BASELINE
     app.catalog_loaded = true;
-#endif
     if (unrelated) {
       Target slow; slow.id = "unrelated"; slow.aot = false;
       for (unsigned i = 0; i != 6000; ++i) slow.inputs.push_back({paths.inputs() / ("missing-" + std::to_string(i)), "missing", std::string(64, 'a')});
@@ -88,20 +82,71 @@ struct Frontend {
     app.selected = 0; InspectSelected(app);
   }
 };
-}
+}  // namespace
 TEST_CASE("launcher fullscreen and crash capture controls do not start a session", "[launcher-options]") {
   Frontend f;
   CHECK_FALSE(f.app.renderer_settings.fullscreen);
   CHECK_FALSE(f.app.capture_crash);
-  SendMessageW(f.app.window, WM_COMMAND, kFullscreen, 0);
+  Command(f.app, kFullscreen);
   CHECK(f.app.renderer_settings.fullscreen);
   CHECK(LoadRendererSettings(f.paths).fullscreen);
-  SendMessageW(f.app.window, WM_COMMAND, kCaptureCrash, 0);
+  Command(f.app, kCaptureCrash);
   CHECK(f.app.capture_crash);
   CHECK_FALSE(f.app.busy);
   CHECK_FALSE(fs::exists(f.root / "child-started.txt"));
-  SendMessageW(f.app.window, WM_COMMAND, kFullscreen, 0);
+  Command(f.app, kFullscreen);
   CHECK_FALSE(LoadRendererSettings(f.paths).fullscreen);
+}
+TEST_CASE("launcher offers only the graphics APIs of this system and never swaps a choice silently", "[launcher-ui]") {
+  Frontend f;
+  const auto initial = f.app.renderer_settings;
+#ifdef _WIN32
+  CHECK(initial.api == GraphicsApi::D3D12);
+  CHECK(Enabled(f.app, kApiD3D12));
+  CHECK_FALSE(Enabled(f.app, kApiVulkan));  // Vulkan stays behind the development access on Windows
+  Command(f.app, kNativeDevelopment);
+  CHECK(Enabled(f.app, kApiVulkan));
+  CHECK(Enabled(f.app, kRendererNative));
+  Command(f.app, kApiVulkan);
+  CHECK(LoadRendererSettings(f.paths).api == GraphicsApi::Vulkan);
+#else
+  CHECK(initial.api == GraphicsApi::Vulkan);
+  CHECK_FALSE(Enabled(f.app, kApiD3D12));
+  CHECK(Enabled(f.app, kApiVulkan));
+  Command(f.app, kApiD3D12);  // unavailable here: refused, nothing saved
+  CHECK(f.app.renderer_settings.api == GraphicsApi::Vulkan);
+  Command(f.app, kNativeDevelopment);
+  CHECK_FALSE(Enabled(f.app, kRendererNative));  // Native requires Direct3D 12
+#endif
+  // Leaving development access returns to this host's default renderer and API.
+  Command(f.app, kNativeDevelopment);
+  CHECK(f.app.renderer_settings.renderer == Renderer::Xenos);
+  CHECK(f.app.renderer_settings.api == initial.api);
+  CHECK(LoadRendererSettings(f.paths).api == initial.api);
+}
+TEST_CASE("preparation stages come from the shared supervisor pipeline in order", "[launcher-ui]") {
+  const auto names = PreparationStageNames();
+  REQUIRE(names.size() == 7);
+  CHECK(PreparationStage("dash_17559 sdk-build") == 1);
+  CHECK(PreparationStage("dash_17559 reused-shared-sdk") == 1);
+  CHECK(PreparationStage("dash_17559 2-tool") == 2);
+  CHECK(PreparationStage("dash_17559 2-codegen") == 3);
+  CHECK(PreparationStage("dash_17559 reused-codegen") == 3);
+  CHECK(PreparationStage("dash_17559 4-build") == 4);
+  CHECK(PreparationStage("dash_17559 prepared") == 5);
+  CHECK(PreparationStage("dash_17559 reused-preparation") == 5);
+  CHECK(PreparationStage("dash_17559 something-new") == -1);  // unknown never advances progress
+  const auto command = PreparationCommand("C:/x360 env", "C:/x360 env/x360n" + ExecutableSuffix(), {"--root", "C:/x360 env", "prepare", "dash_17559", "--keep-incomplete"});
+#ifdef _WIN32
+  REQUIRE(command.args.size() == 10);
+  CHECK(command.args[2] == "call");
+  CHECK(command.args[3].find("devshell.cmd") != std::string::npos);
+  CHECK(command.args[7] == "prepare");
+  CHECK_THROWS(PreparationCommand("C:/100%", "C:/100%/x360n.exe", {"--root", "C:/100%"}));
+#else
+  CHECK(command.exe == fs::path("C:/x360 env/x360n"));
+  CHECK(command.args.size() == 5);
+#endif
 }
 TEST_CASE("reopening a prepared launcher restores ready without hashing content", "[launcher-ready]") {
   Frontend f; const auto target = f.TargetFixture();
@@ -128,14 +173,13 @@ TEST_CASE("reopening a prepared launcher restores ready without hashing content"
   f.app.checked = CheckContents(f.root, f.app.targets, InspectionMode::Preview);
   CHECK(StatusOf(f.app, 0) != Row::Ready);
 }
-TEST_CASE("launcher catalog loading leaves the message thread responsive", "[launcher-ui]") {
+TEST_CASE("launcher catalog loading leaves the frontend thread responsive", "[launcher-ui]") {
   Frontend f; f.TargetFixture();
   // Resolving a large inventory used to run synchronously inside Load().
   const auto inventory = f.root / "titles/dashboard/inventory.tsv";
   std::ofstream list(inventory);
   for (int i = 0; i != 5000; ++i) list << std::string(64, 'a') << '\t' << i << ".bin\n";
   list.close();
-  std::ofstream(f.root / "titles/dashboard/preparation.toml", std::ios::app) << "\n";
   // inventory belongs at table root, before [[files]].
   auto setup = f.root / "titles/dashboard/preparation.toml";
   std::ifstream in(setup); std::string text{std::istreambuf_iterator<char>(in), {}}; in.close();
@@ -144,7 +188,7 @@ TEST_CASE("launcher catalog loading leaves the message thread responsive", "[lau
   std::cout << "catalog UI dispatch ms=" << dispatch << '\n';
   CHECK(dispatch < 200);
   REQUIRE(f.app.busy);
-  const auto heartbeat = Now(); SendMessageW(f.app.window, WM_COMMAND, kDetails, 0);
+  const auto heartbeat = Now(); Command(f.app, kDetails);
   CHECK(Now() - heartbeat < 200);
   f.app.cancel = true;
   REQUIRE(f.Until([&] { return !f.app.busy; }));
@@ -174,30 +218,24 @@ TEST_CASE("launcher lists and removes every game through its import record", "[l
 }
 TEST_CASE("launcher completes consecutive sessions without scanning unrelated content", "[launcher-ui]") {
   Frontend f; const auto target = f.TargetFixture(); f.Seed(target, true);
-#ifndef X360N_FRONTEND_BASELINE
   f.app.checked[0].state = Inspect(f.paths, target, InspectionMode::Preview);
   InspectSelected(f.app);
-#endif
   const std::string modes[]{"ok", "fail", "ok"};
   for (unsigned step = 0; step != 3; ++step) {
     const auto& mode = modes[step];
     std::ofstream(f.root / "child-mode.txt") << mode;
     fs::remove(f.root / "child-ended.txt");
     const auto launch_start = Now();
-    if (step == 2) { SendMessageW(f.app.window, WM_COMMAND, kRetry, 0); f.Pump(); }
-    else {
-#ifndef X360N_FRONTEND_BASELINE
-      if (step == 0) SendMessageW(f.app.window, WM_COMMAND, kPrimary, 0);
-      else
-#endif
-        Start(f.app, kLaunch);
-    }
+    if (step == 2) Command(f.app, kRetry);
+    else if (step == 0) Command(f.app, kPrimary);
+    else Start(f.app, kLaunch);
     REQUIRE(f.app.busy);
-    SendMessageW(f.app.window, WM_COMMAND, kDetails, 0);
-    SendMessageW(f.app.window, WM_COMMAND, mode == "fail" ? kGames : kHome, 0);
+    Command(f.app, kDetails);
+    Command(f.app, mode == "fail" ? kGames : kHome);
     CHECK(f.app.busy);
-    CHECK_FALSE(IsWindowEnabled(Item(f.app, kPrimary)));
+    CHECK_FALSE(Enabled(f.app, kPrimary));
     REQUIRE(f.Until([&] { return !f.app.busy; }));
+    INFO(f.app.details);
     int64_t ended = 0; std::ifstream(f.root / "child-ended.txt") >> ended;
     REQUIRE(ended != 0);
     const auto latency = Now() - ended;
@@ -209,8 +247,8 @@ TEST_CASE("launcher completes consecutive sessions without scanning unrelated co
     CHECK(latency < 500);
     CHECK_FALSE(f.app.session);
     CHECK(f.app.failed.load() == (mode == "fail"));
-    CHECK(IsWindowEnabled(Item(f.app, kFolder)));
-    CHECK(IsWindowEnabled(Item(f.app, kPrimary))); // Runtime failure needs no rebuild.
+    CHECK(Enabled(f.app, kFolder));
+    CHECK(Enabled(f.app, kPrimary));  // Runtime failure needs no rebuild.
   }
 }
 TEST_CASE("launcher cancels verification before creating a session process", "[launcher-ui]") {
@@ -220,7 +258,6 @@ TEST_CASE("launcher cancels verification before creating a session process", "[l
   CHECK_FALSE(fs::exists(f.root / "child-started.txt"));
   CHECK_FALSE(f.app.session);
 }
-#ifndef X360N_FRONTEND_BASELINE
 TEST_CASE("launcher lists a complete inventory without authenticating or executing it", "[launcher-ui]") {
   Frontend f; const auto target = f.TargetFixture();
   const auto setup = f.root / "titles/dashboard/preparation.toml";
@@ -248,8 +285,8 @@ TEST_CASE("launcher lists a complete inventory without authenticating or executi
   REQUIRE(f.app.catalog_loaded);
   CHECK(f.app.next_action == kLaunch);
   CHECK_FALSE(f.app.current.prepared);
-  SendMessageW(f.app.window, WM_COMMAND, kGames, 0);
-  SendMessageW(f.app.window, WM_COMMAND, kHome, 0);
+  Command(f.app, kGames);
+  Command(f.app, kHome);
   CHECK_FALSE(f.app.busy);
   CHECK_FALSE(fs::exists(f.root / "child-started.txt"));
 }
@@ -259,7 +296,7 @@ TEST_CASE("preview launch must reject changed content with preserved timestamps"
   const auto file = target.inputs.front().destination;
   const auto timestamp = fs::last_write_time(file);
   std::ofstream(file) << "corrupted input"; fs::last_write_time(file, timestamp);
-  SendMessageW(f.app.window, WM_COMMAND, kLaunch, 0);
+  Command(f.app, kLaunch);
   REQUIRE(f.app.busy);
   REQUIRE(f.Until([&] { return !f.app.busy; }));
   CHECK(f.app.failed);
@@ -287,9 +324,32 @@ TEST_CASE("empty catalogs finish loading once and navigation does not restart wo
   Frontend f; Load(f.app, f.root);
   REQUIRE(f.Until([&] { return !f.app.busy; }));
   CHECK(f.app.catalog_loaded); CHECK(f.app.targets.empty());
-  SendMessageW(f.app.window, WM_COMMAND, kGames, 0);
+  Command(f.app, kGames);
   CHECK_FALSE(f.app.busy);
 }
+TEST_CASE("questions wait for an answer and a declined removal changes nothing", "[launcher-ui]") {
+  Frontend f; auto target = f.TargetFixture();
+  target.kind = "game"; target.catalogued = true; target.catalog_id = "import-record";
+  f.Seed(target);
+  f.app.games = true; f.app.home = false;
+  REQUIRE(Removable(f.app));
+  Command(f.app, kRemove);
+  REQUIRE(f.app.prompt);
+  CHECK_FALSE(f.app.busy);
+  CHECK(f.app.prompt->warning);
+  Answer(f.app, 0);  // the default answer keeps the game
+  CHECK_FALSE(f.app.prompt);
+  CHECK_FALSE(f.app.busy);
+  CHECK(fs::exists(target.exe));
+  // Pickers are requested from the frontend; a cancelled pick does nothing.
+  Command(f.app, kImportFolder);
+  REQUIRE(f.app.pick);
+  CHECK(f.app.pick->folder);
+  Picked(f.app, f.app.pick->command, {});
+  CHECK_FALSE(f.app.pick);
+  CHECK_FALSE(f.app.busy);
+}
+#ifdef _WIN32
 TEST_CASE("catalog path reuse pins directory identities for only one catalog read", "[launcher-ui]") {
   Frontend f;
   const auto parent = f.root / "content";
@@ -311,91 +371,24 @@ TEST_CASE("catalog path reuse pins directory identities for only one catalog rea
   CHECK_FALSE(fresh.Resolve(dir / "asset"));
   CHECK(fresh.Resolve(parent / "moved/asset"));
 }
+#endif
 TEST_CASE("launcher reports native closure before supervisor diagnostic cleanup completes", "[launcher-ui]") {
   Frontend f; f.Seed(f.TargetFixture());
   std::ofstream(f.root / "child-mode.txt") << "cleanup";
   Start(f.app, kLaunch);
-  REQUIRE(f.Until([&] { return fs::exists(f.root / "child-closed.txt") && f.app.finishing_session; }));
+
+  const bool closed_seen = f.Until([&] { return fs::exists(f.root / "child-closed.txt") && f.app.finishing_session; });
+  INFO(f.app.details);
+  REQUIRE(closed_seen);
   int64_t closed = 0; std::ifstream(f.root / "child-closed.txt") >> closed;
   CHECK(Now() - closed < 200);
   CHECK_FALSE(f.app.session);
-  CHECK(f.app.busy); // Do not overlap two supervisors still holding the lease.
-  CHECK_FALSE(IsWindowEnabled(Item(f.app, kPrimary)));
-  CHECK_FALSE(IsWindowEnabled(Item(f.app, kCancel)));
+  CHECK(f.app.busy);  // Do not overlap two supervisors still holding the lease.
+  CHECK_FALSE(Enabled(f.app, kPrimary));
+  CHECK_FALSE(Enabled(f.app, kCancel));
   REQUIRE(f.Until([&] { return !f.app.busy; }));
   CHECK_FALSE(f.app.finishing_session);
   CHECK_FALSE(f.app.failed);
-}
-namespace {
-struct Placed { HWND h; int id; RECT r; };
-// Child rectangles in client coordinates; WS_VISIBLE because the fixture parent stays hidden.
-std::vector<Placed> VisibleControls(const App& a) {
-  std::vector<Placed> out;
-  for (auto h : a.all) {
-    if (!(GetWindowLongPtrW(h, GWL_STYLE) & WS_VISIBLE)) continue;
-    RECT r{}; GetWindowRect(h, &r);
-    MapWindowPoints(nullptr, a.window, reinterpret_cast<POINT*>(&r), 2);
-    // A clipped (scrolled) control only shows its window region.
-    RECT box{};
-    const int kind = GetWindowRgnBox(h, &box);
-    if (kind == NULLREGION) continue;
-    if (kind != ERROR) { OffsetRect(&box, r.left, r.top); IntersectRect(&r, &r, &box); }
-    out.push_back({h, GetDlgCtrlID(h), r});
-  }
-  return out;
-}
-std::wstring Describe(const Placed& p) {
-  wchar_t cls[32]{}, text[96]{}; GetClassNameW(p.h, cls, 32); GetWindowTextW(p.h, text, 96);
-  return std::wstring(cls) + L"#" + std::to_wstring(p.id) + L" '" + text + L"' [" + std::to_wstring(p.r.left) + L"," +
-         std::to_wstring(p.r.top) + L"," + std::to_wstring(p.r.right) + L"," + std::to_wstring(p.r.bottom) + L"]";
-}
-std::string Narrow(const std::wstring& s) { std::string out; for (auto c : s) out += c < 128 ? char(c) : '?'; return out; }
-// Space the owner-drawn label needs, mirroring DrawButton.
-int NeededWidth(App& a, HDC dc, const Placed& p) {
-  auto s = [&](int v) { return ui::S(v, a.dpi); };
-  const auto style = a.styles[p.id];
-  wchar_t text[256]{}; GetWindowTextW(p.h, text, 256);
-  const std::wstring label = text;
-  switch (style.kind) {
-    case Kind::Nav: return s(50) + ui::TextWidth(dc, a.fonts.bold, label) + s(8);
-    case Kind::Option: return s(48) + ui::TextWidth(dc, a.fonts.bold, label) + s(16);
-    case Kind::Toggle: return s(52) + ui::TextWidth(dc, a.fonts.body, label);
-    case Kind::Chip: return ui::TextWidth(dc, a.fonts.bold, label) + s(16);
-    default: break;
-  }
-  const bool glyph = style.glyph || p.id == kPrimary;
-  return glyph ? s(22) + s(8) + ui::TextWidth(dc, a.fonts.bold, label) + s(16) : ui::TextWidth(dc, a.fonts.body, label) + s(16);
-}
-void SaveCapture(App& a, const fs::path& output) {
-  RECT client{}; GetClientRect(a.window, &client);
-  HDC screen = GetDC(nullptr), dc = CreateCompatibleDC(screen);
-  HBITMAP bitmap = CreateCompatibleBitmap(screen, client.right, client.bottom);
-  const auto old = SelectObject(dc, bitmap);
-  Paint(a, dc);
-  for (auto child : a.all) {
-    if (!(GetWindowLongPtrW(child, GWL_STYLE) & WS_VISIBLE)) continue;
-    RECT rect{}; GetWindowRect(child, &rect);
-    MapWindowPoints(nullptr, a.window, reinterpret_cast<POINT*>(&rect), 2);
-    const auto saved = SaveDC(dc);
-    SetViewportOrgEx(dc, rect.left, rect.top, nullptr);
-    HRGN region = CreateRectRgn(0, 0, 0, 0);
-    if (GetWindowRgn(child, region) != ERROR) { OffsetRgn(region, rect.left, rect.top); ExtSelectClipRgn(dc, region, RGN_AND); }
-    else IntersectClipRect(dc, 0, 0, rect.right - rect.left, rect.bottom - rect.top);
-    DeleteObject(region);
-    SendMessageW(child, WM_PRINT, reinterpret_cast<WPARAM>(dc), PRF_CLIENT | PRF_ERASEBKGND | PRF_CHILDREN);
-    RestoreDC(dc, saved);
-  }
-  SelectObject(dc, old); DeleteDC(dc); ReleaseDC(nullptr, screen);
-  UINT count = 0, size = 0; Gdiplus::GetImageEncodersSize(&count, &size);
-  std::vector<uint8_t> storage(size);
-  auto* codecs = reinterpret_cast<Gdiplus::ImageCodecInfo*>(storage.data());
-  Gdiplus::GetImageEncoders(count, size, codecs);
-  {
-    Gdiplus::Bitmap image(bitmap, nullptr);
-    for (UINT i = 0; i < count; ++i) if (std::wstring_view(codecs[i].MimeType) == L"image/png") image.Save(output.c_str(), &codecs[i].Clsid);
-  }
-  DeleteObject(bitmap);
-}
 }
 TEST_CASE("version label names the build channel and never calls a development build stable", "[launcher-ui]") {
   struct Case { const char* version; const char* pt; const char* en; };
@@ -416,15 +409,61 @@ TEST_CASE("version label names the build channel and never calls a development b
   // The running build is labelled from the version CMake configured, never a fixed prefix.
   CHECK(VersionLabel(X360N_VERSION).rfind(std::string("v") + X360N_VERSION + " · ", 0) == 0);
 }
+
+namespace {
+// One headless ImGui context with the launcher's fonts and style.
+struct Headless {
+  ImGuiContext* context = ImGui::CreateContext();
+  Headless() {
+    auto& io = ImGui::GetIO();
+    io.IniFilename = nullptr;
+    io.BackendFlags |= ImGuiBackendFlags_RendererHasTextures | ImGuiBackendFlags_RendererHasVtxOffset;
+    io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
+    ui::LoadFonts(io);
+  }
+  ~Headless() { ImGui::DestroyContext(context); }
+  void Frame(ui::Ui& view, float w, float h) {
+    auto& io = ImGui::GetIO();
+    io.DisplaySize = ImVec2(w, h); io.DeltaTime = 1.0f / 60;
+    ImGui::NewFrame();
+    ui::DrawFrame(view);
+    ImGui::Render();
+    if (auto* textures = ImGui::GetDrawData()->Textures) for (auto* t : *textures) ui::UpdateSoftTexture(t);
+  }
+  void Capture(const fs::path& file) {
+    auto* data = ImGui::GetDrawData();
+    ui::Canvas canvas; canvas.Resize(int(data->DisplaySize.x), int(data->DisplaySize.y));
+    std::fill(canvas.pixels.begin(), canvas.pixels.end(), IM_COL32(13, 15, 18, 255));
+    ui::Rasterize(canvas, data);
+    CHECK(ui::WritePng(file, canvas));
+  }
+};
+bool Inside(const ImRect& outer, const ImRect& inner) {
+  constexpr float e = 0.51f;
+  return inner.Min.x >= outer.Min.x - e && inner.Min.y >= outer.Min.y - e && inner.Max.x <= outer.Max.x + e && inner.Max.y <= outer.Max.y + e;
+}
+bool Overlap(const ImRect& a, const ImRect& b) {
+  constexpr float e = 0.51f;
+  return a.Min.x < b.Max.x - e && b.Min.x < a.Max.x - e && a.Min.y < b.Max.y - e && b.Min.y < a.Max.y - e;
+}
+std::string Describe(const ui::Placed& p) {
+  return p.kind + "#" + std::to_string(p.id) + " '" + p.text.substr(0, 60) + "' [" + std::to_string(int(p.rect.Min.x)) + "," + std::to_string(int(p.rect.Min.y)) +
+         "," + std::to_string(int(p.rect.Max.x)) + "," + std::to_string(int(p.rect.Max.y)) + "]";
+}
+}  // namespace
 // Geometry review of every page, banner state, size and scale without showing
-// the window. Set X360N_LAYOUT_CAPTURE to a folder to also save PNG renders.
+// a window. Set X360N_LAYOUT_CAPTURE to a folder to also save PNG renders.
 TEST_CASE("launcher layout keeps controls inside the window, their cards and their labels", "[launcher-layout]") {
   Frontend f; f.Seed(f.TargetFixture());
   // The sidebar update action takes room only while a newer release is known.
-  f.app.update = AvailableUpdate{"10.100.100", "x360-native-10.100.100-windows-x64", "", "", ""};
-  wchar_t capture[MAX_PATH]{};
-  const fs::path captures = GetEnvironmentVariableW(L"X360N_LAYOUT_CAPTURE", capture, MAX_PATH) ? fs::path(capture) : fs::path();
+  f.app.update = AvailableUpdate{"10.100.100", "x360-native-10.100.100-" + PackagePlatform(), "", "", ""};
+  const char* capture = std::getenv("X360N_LAYOUT_CAPTURE");
+  const fs::path captures = capture ? fs::path(capture) : fs::path();
   if (!captures.empty()) fs::create_directories(captures);
+  Headless headless;
+  ui::Ui view(f.app);
+  view.upload = ui::UpdateSoftTexture;
+  view.record = true;
   struct PageCase { const char* name; int command; int preview; };  // preview 6: game list, 7: empty library
   const PageCase pages[] = {{"home", kHome, 0}, {"library", kGames, 7}, {"library-list", kGames, 6}, {"import", kImportPage, 0},
                             {"dashboard", kDashboards, 0}, {"settings", kSettings, 0}, {"diagnostics", kDetails, 0}};
@@ -434,97 +473,91 @@ TEST_CASE("launcher layout keeps controls inside the window, their cards and the
   // Every page and banner at the minimum and default sizes; idle Settings, whose
   // card grid changes with the width, also at common window sizes and scale steps.
   const SizeCase sizes[] = {{"min", 1000, 700}, {"default", 1220, 800}, {"720p", 1280, 720}, {"900p", 1600, 900}, {"1080p", 1920, 1080}};
-  for (const bool en : {false, true}) for (const UINT dpi : {96u, 120u, 144u, 192u}) for (const auto& size : sizes) for (const auto& page : pages) for (const auto& banner : banners) {
-    const bool base = (dpi == 96 || dpi == 144) && size.w <= 1220;
+  for (const bool en : {false, true}) for (const float scale : {1.0f, 1.25f, 1.5f, 2.0f}) for (const auto& size : sizes) for (const auto& page : pages) for (const auto& banner : banners) {
+    const bool base = (scale == 1.0f || scale == 1.5f) && size.w <= 1220;
     if (!base && (page.command != kSettings || banner.preview != 5)) continue;
     english = en;
-    if (f.app.dpi != dpi) { f.app.dpi = dpi; ApplyFonts(f.app); }
-    Labels(f.app);
-    // Client size equals the outer size the window would have at this scale.
-    RECT outer{0, 0, MulDiv(size.w, int(dpi), 96), MulDiv(size.h, int(dpi), 96)};
-    SetWindowPos(f.app.window, nullptr, 0, 0, outer.right, outer.bottom, SWP_NOZORDER | SWP_NOACTIVATE);
+    ui::ApplyStyle(scale);
+    // Window pixels equal the outer size the window would have at this scale.
+    const float W = float(int(size.w * scale)), H = float(int(size.h * scale));
     ApplyPreview(f.app, 5);
     f.app.settings = f.app.show_details = false;
-    SendMessageW(f.app.window, WM_COMMAND, page.command == kSettings || page.command == kDetails ? kHome : page.command, 0);
+    Command(f.app, page.command == kSettings || page.command == kDetails ? kHome : page.command);
     if (page.preview) ApplyPreview(f.app, page.preview);
-    if (page.command == kSettings || page.command == kDetails) SendMessageW(f.app.window, WM_COMMAND, page.command, 0);
+    if (page.command == kSettings || page.command == kDetails) Command(f.app, page.command);
     if (banner.preview != 5) ApplyPreview(f.app, banner.preview);
-    Layout(f.app);
-    const std::string state = std::string(page.name) + "-" + banner.name + "-" + size.name + "-" + std::to_string(dpi) + (en ? "-en" : "-pt");
+    view.settings_scroll = 0;
+    for (int frame = 0; frame != 3; ++frame) headless.Frame(view, W, H);
+    view.deferred.clear();
+    const std::string state = std::string(page.name) + "-" + banner.name + "-" + size.name + "-" + std::to_string(int(scale * 100)) + (en ? "-en" : "-pt");
     INFO(state);
-    RECT client{}; GetClientRect(f.app.window, &client);
-    const auto controls = VisibleControls(f.app);
-    std::vector<RECT> cards;
-    const auto& g = f.app.geo;
-    for (const auto& r : {g.banner, g.hero, g.drop, g.list_card, g.detail, g.search, g.details_card, g.empty}) cards.push_back(r);
-    for (const auto& r : g.stats) cards.push_back(r);
-    for (const auto& r : g.tiles) cards.push_back(r);
-    for (const auto& r : g.cards) cards.push_back(r);
-    HDC dc = GetDC(f.app.window);
-    for (size_t i = 0; i < controls.size(); ++i) {
-      const auto& c = controls[i];
-      INFO(Narrow(Describe(c)));
-      CHECK(c.r.left >= 0); CHECK(c.r.top >= 0);
-      CHECK(c.r.right <= client.right); CHECK(c.r.bottom <= client.bottom);
-      for (const auto& card : cards) {
-        RECT hit{};
-        if (IsRectEmpty(&card) || !IntersectRect(&hit, &card, &c.r)) continue;
-        RECT inside{}; UnionRect(&inside, &card, &c.r);
-        CHECK(EqualRect(&inside, &card));
+    const ImRect window(0, 0, W, H);
+    const auto& placed = view.placed;
+    REQUIRE_FALSE(placed.empty());
+    for (size_t i = 0; i < placed.size(); ++i) {
+      const auto& c = placed[i];
+      INFO(Describe(c));
+      CHECK(c.rect.Min.x >= -0.5f); CHECK(c.rect.Max.x <= W + 0.5f);
+      if (!c.scrolled) { CHECK(c.rect.Min.y >= -0.5f); CHECK(c.rect.Max.y <= H + 0.5f); }
+      if (c.card.GetWidth() > 0) CHECK(Inside(c.card, c.rect));
+      for (size_t j = i + 1; j < placed.size(); ++j) {
+        INFO("overlaps " << Describe(placed[j]));
+        CHECK_FALSE(Overlap(c.rect, placed[j].rect));
       }
-      for (size_t j = i + 1; j < controls.size(); ++j) {
-        RECT hit{};
-        INFO("overlaps " << Narrow(Describe(controls[j])));
-        CHECK_FALSE(IntersectRect(&hit, &c.r, &controls[j].r));
-      }
-      wchar_t cls[16]{}; GetClassNameW(c.h, cls, 16);
-      const int w = c.r.right - c.r.left, h = c.r.bottom - c.r.top;
-      RECT region{};
-      const bool whole = GetWindowRgnBox(c.h, &region) == ERROR;
-      if (std::wstring_view(cls) == L"Button" && w > h && whole) CHECK(NeededWidth(f.app, dc, c) <= w);
-      if (std::wstring_view(cls) == L"Static" && !(GetWindowLongPtrW(c.h, GWL_STYLE) & (SS_ENDELLIPSIS | SS_PATHELLIPSIS)) && whole) {
-        wchar_t text[2048]{}; GetWindowTextW(c.h, text, 2048);
-        RECT need{0, 0, w, 0};
-        auto font = reinterpret_cast<HFONT>(SendMessageW(c.h, WM_GETFONT, 0, 0));
-        auto previous = SelectObject(dc, font);
-        DrawTextW(dc, text, -1, &need, DT_CALCRECT | DT_WORDBREAK | DT_NOPREFIX | DT_EDITCONTROL);
-        SelectObject(dc, previous);
-        CHECK(need.bottom <= h);
-      }
+      if (c.kind == "button" && c.need > 0) CHECK(c.need <= c.rect.GetWidth() + 0.5f);
+      if (c.kind == "text") CHECK(c.need <= c.rect.GetHeight() + 0.5f);
     }
-    ReleaseDC(f.app.window, dc);
-    if (!captures.empty()) SaveCapture(f.app, captures / (state + ".png"));
+    if (!captures.empty()) headless.Capture(captures / (state + ".png"));
     if (page.command == kSettings) {
-      // Clipped content stays reachable: focus reveals the last control, and the
-      // fully scrolled page shows every card above the window's bottom edge.
-      const auto last = Item(f.app, kLangEn);
-      Reveal(f.app, last);
-      RECT box{};
-      CHECK(GetWindowRgnBox(last, &box) == ERROR);
-      f.app.scroll = 1 << 20; Layout(f.app);
-      CHECK(f.app.scroll == f.app.geo.scroll_max);
-      for (const auto& card : f.app.geo.cards) CHECK(card.bottom <= client.bottom);
-      if (!captures.empty() && f.app.geo.scroll_max > 0) SaveCapture(f.app, captures / (state + "-scrolled.png"));
-      f.app.scroll = 0; Layout(f.app);
+      // Clipped content stays reachable: the fully scrolled page shows every card above the window's bottom edge.
+      view.settings_scroll = 1e9f;
+      for (int frame = 0; frame != 3; ++frame) headless.Frame(view, W, H);
+      view.deferred.clear();
+      for (const auto& card : view.cards) CHECK(card.Max.y <= H + 0.5f);
+      if (!captures.empty() && view.settings_scroll_max > 0) headless.Capture(captures / (state + "-scrolled.png"));
+      view.settings_scroll = 0;
     }
   }
   english = false;
   ApplyPreview(f.app, 5);
 }
-TEST_CASE("owner-drawn buttons never erase to the default background before drawing", "[launcher-layout]") {
-  Frontend f;
-  HDC screen = GetDC(nullptr), dc = CreateCompatibleDC(screen);
-  HBITMAP bitmap = CreateCompatibleBitmap(screen, 8, 8);
-  const auto old = SelectObject(dc, bitmap);
-  ReleaseDC(nullptr, screen);
-  for (auto h : f.app.all) {
-    wchar_t cls[16]{}; GetClassNameW(h, cls, 16);
-    if (std::wstring_view(cls) != L"Button") continue;
-    INFO(GetDlgCtrlID(h));
-    RECT all{0, 0, 8, 8}; ui::Fill(dc, all, RGB(1, 2, 3));
-    CHECK(SendMessageW(h, WM_ERASEBKGND, reinterpret_cast<WPARAM>(dc), 0) != 0);
-    CHECK(GetPixel(dc, 4, 4) == RGB(1, 2, 3));
+TEST_CASE("captures are valid PNG files that SDL decodes back pixel for pixel", "[launcher-layout]") {
+  const auto file = UniqueTempPath("launcher-png") / "capture.png";
+  fs::create_directories(file.parent_path());
+  ui::Canvas canvas; canvas.Resize(3, 2);
+  for (size_t i = 0; i < canvas.pixels.size(); ++i) canvas.pixels[i] = IM_COL32(16 * i, 255 - 16 * i, 7, 255);
+  REQUIRE(ui::WritePng(file, canvas));
+  std::ifstream in(file, std::ios::binary);
+  const std::string png{std::istreambuf_iterator<char>(in), {}};
+  // The same decoder the launcher uses for package icons.
+  SDL_Surface* decoded = SDL_LoadPNG_IO(SDL_IOFromConstMem(png.data(), png.size()), true);
+  REQUIRE(decoded);
+  SDL_Surface* rgba = SDL_ConvertSurface(decoded, SDL_PIXELFORMAT_RGBA32);
+  SDL_DestroySurface(decoded);
+  REQUIRE(rgba);
+  CHECK(rgba->w == 3); CHECK(rgba->h == 2);
+  for (int y = 0; y < 2; ++y) for (int x = 0; x < 3; ++x) {
+    uint32_t pixel = 0; std::memcpy(&pixel, static_cast<const unsigned char*>(rgba->pixels) + y * rgba->pitch + x * 4, 4);
+    CHECK(pixel == canvas.pixels[size_t(y) * 3 + x]);
   }
-  SelectObject(dc, old); DeleteObject(bitmap); DeleteDC(dc);
+  SDL_DestroySurface(rgba);
+  std::error_code ec; fs::remove_all(file.parent_path(), ec);
 }
-#endif
+TEST_CASE("every page opens from an empty environment and navigates by command", "[launcher-layout]") {
+  Frontend f;
+  Headless headless;
+  ui::Ui view(f.app);
+  view.upload = ui::UpdateSoftTexture;
+  ui::ApplyStyle(1.0f);
+  Load(f.app, f.root);
+  REQUIRE(f.Until([&] { return !f.app.busy; }));
+  for (int id : {kHome, kGames, kImportPage, kDashboards, kSettings, kDetails, kGoBack, kLanguage, kLanguage}) {
+    Command(f.app, id);
+    for (int frame = 0; frame != 2; ++frame) headless.Frame(view, 1220, 800);
+    ui::RunDeferred(view);
+    CHECK_FALSE(f.app.busy);
+    CHECK(f.app.result != 3);
+  }
+  CHECK(PageOf(f.app) == Page::Dashboard);
+  CHECK_FALSE(english);
+}

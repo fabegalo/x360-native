@@ -41,18 +41,31 @@ if(TARGET Catch2::Catch2WithMain)
   add_executable(x360n_launcher_benchmark EXCLUDE_FROM_ALL ../../tests/desktop/launcher_benchmark.cpp)
   target_link_libraries(x360n_launcher_benchmark PRIVATE x360n_desktop_model)
   target_compile_definitions(x360n_launcher_benchmark PRIVATE X360N_BENCHMARK_BATCH=1)
+  # The shared launcher (controller and headless frontend) is tested on every system.
+  add_executable(x360n_launcher_child ../../tests/desktop/launcher_child.cpp)
+  target_link_libraries(x360n_launcher_child PRIVATE x360n_desktop_model)
+  if(NOT WIN32)
+    add_executable(x360n_launcher_tests ../../tests/desktop/launcher_ui_test.cpp)
+    target_link_libraries(x360n_launcher_tests PRIVATE x360n_launcher_ui Catch2::Catch2WithMain)
+    target_compile_definitions(x360n_launcher_tests PRIVATE X360N_SOURCE_ROOT="${PROJECT_SOURCE_DIR}"
+      X360N_LAUNCHER_CHILD="$<TARGET_FILE:x360n_launcher_child>")
+    target_include_directories(x360n_launcher_tests PRIVATE ${X360_REXGLUE_DIR}/thirdparty/inja/third_party/include)
+    add_dependencies(x360n_launcher_tests x360n x360n_launcher_child)
+    add_test(NAME desktop.launcher COMMAND x360n_launcher_tests "[launcher-ui],[launcher-options],[launcher-ready],[library-membership]")
+    set_tests_properties(desktop.launcher PROPERTIES LABELS project TIMEOUT 90)
+    add_test(NAME desktop.launcher-layout COMMAND x360n_launcher_tests "[launcher-layout]")
+    set_tests_properties(desktop.launcher-layout PROPERTIES LABELS project TIMEOUT 300)
+  endif()
   if(WIN32)
-    add_executable(x360n_launcher_child ../../tests/desktop/launcher_child.cpp)
-    target_link_libraries(x360n_launcher_child PRIVATE x360n_desktop_model)
     add_executable(x360n_launcher_test_child ../../tests/supervisor/test_child.cpp)
     add_executable(x360n_launcher_session_child ../../tests/supervisor/session_child.cpp)
     target_link_libraries(x360n_launcher_session_child PRIVATE x360n_core)
     add_executable(x360n_launcher_tests ../../tests/desktop/launcher_ui_test.cpp
       ../../tests/supervisor/digest_batch_test.cpp ../../tests/supervisor/sha256_test.cpp
       ../../tests/supervisor/preparation_test.cpp ../../tests/supervisor/process_test.cpp
-      ../../tests/supervisor/session_process_test.cpp win32/environment_win32.cpp)
-    target_link_libraries(x360n_launcher_tests PRIVATE x360n_desktop_model Catch2::Catch2WithMain
-      comctl32 ole32 shell32 uuid d3d12 dxgi xinput advapi32 dwmapi gdiplus uxtheme)
+      ../../tests/supervisor/session_process_test.cpp)
+    # The shared controller and the one frontend, driven without a window.
+    target_link_libraries(x360n_launcher_tests PRIVATE x360n_launcher_ui Catch2::Catch2WithMain)
     target_compile_definitions(x360n_launcher_tests PRIVATE UNICODE _UNICODE
       X360N_SOURCE_ROOT="${PROJECT_SOURCE_DIR}"
       X360N_TEST_CHILD="$<TARGET_FILE:x360n_launcher_test_child>"
@@ -61,11 +74,11 @@ if(TARGET Catch2::Catch2WithMain)
       X360N_EXE="$<TARGET_FILE:x360n>")
     target_include_directories(x360n_launcher_tests PRIVATE ${X360_REXGLUE_DIR}/thirdparty/inja/third_party/include)
     add_dependencies(x360n_launcher_tests x360n x360n_launcher_child x360n_launcher_test_child x360n_launcher_session_child)
-    add_test(NAME desktop.launcher COMMAND x360n_launcher_tests "[launcher-ui],[digest-batch],[session-event]")
+    add_test(NAME desktop.launcher COMMAND x360n_launcher_tests "[launcher-ui],[launcher-options],[launcher-ready],[library-membership],[digest-batch],[session-event]")
     set_tests_properties(desktop.launcher PROPERTIES LABELS project TIMEOUT 90)
     add_test(NAME desktop.launcher-layout COMMAND x360n_launcher_tests "[launcher-layout]")
-    # Settings is also reviewed at 1280x720 to 1920x1080 and 120/192 DPI.
-    set_tests_properties(desktop.launcher-layout PROPERTIES LABELS project TIMEOUT 120)
+    # Every page at 1000x700 to 1920x1080 and 100/125/150/200% scale, headless.
+    set_tests_properties(desktop.launcher-layout PROPERTIES LABELS project TIMEOUT 300)
     add_test(NAME desktop.session-fullscreen COMMAND x360n_launcher_tests "[session-fullscreen]")
     set_tests_properties(desktop.session-fullscreen PROPERTIES LABELS project TIMEOUT 30)
     add_test(NAME desktop.version-from-commits COMMAND powershell -NoProfile -ExecutionPolicy Bypass

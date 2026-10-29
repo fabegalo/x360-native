@@ -6,8 +6,11 @@
 #include <iostream>
 #include "catalog.h"
 #include "digest_batch.h"
+#ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
+#endif
+#include "session_notification.h"
 int main(int argc, char** argv) {
   // The frontend now delegates validation to its supervised process. Exercise
   // that same model before recording synthetic title creation in this fixture.
@@ -32,10 +35,8 @@ int main(int argc, char** argv) {
   if (mode == "cleanup") {
     std::string event;
     for (int i = 1; i + 1 < argc; ++i) if (std::string(argv[i]) == "--closed-event") event = argv[i + 1];
-    const std::wstring name(event.begin(), event.end());
-    const auto closed = OpenEventW(EVENT_MODIFY_STATE, FALSE, name.c_str());
-    if (!closed) return 8;
-    SetEvent(closed); CloseHandle(closed);
+    // The supervisor's own frame-close channel (event on Windows, FIFO elsewhere).
+    try { if (!x360n::SessionNotification(event).Signal()) return 8; } catch (const std::exception&) { return 8; }
     std::ofstream("child-closed.txt") << std::chrono::duration_cast<std::chrono::milliseconds>(
         std::chrono::steady_clock::now().time_since_epoch()).count();
     std::this_thread::sleep_for(std::chrono::milliseconds(500));

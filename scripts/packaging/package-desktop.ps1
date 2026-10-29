@@ -62,7 +62,7 @@ if ($LASTEXITCODE -ne 0) { throw 'SDK snapshot failed' }
 git -c core.longpaths=true -c core.autocrlf=false -c core.eol=lf -C $sdk checkout --detach $lock.rexglue_sdk.commit
 if ($LASTEXITCODE -ne 0) { throw 'Pinned SDK checkout failed' }
 $dependencies = [ordered]@{}
-foreach ($component in @('fmt','tomlplusplus','cli11','catch2','inja','sdl3','spdlog','simde','utfcpp','libmspack')) {
+foreach ($component in @('fmt','tomlplusplus','cli11','catch2','inja','sdl3','imgui','vulkan-headers','spdlog','simde','utfcpp','libmspack')) {
     $tree = git -C $sdk ls-tree HEAD "thirdparty/$component"
     if ($LASTEXITCODE -ne 0 -or $tree -notmatch '^160000 commit ([a-f0-9]{40})') { throw "Unpinned dependency: $component" }
     $revision = $Matches[1]
