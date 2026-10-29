@@ -155,8 +155,14 @@ struct App {
   int next_action = kFolder;
   // Presentation state
   Geo geo;
-  std::vector<HWND> clipped;  // controls with a window region set by Layout
+  std::map<HWND, RECT> clipped;  // controls with a window region set by Layout, and that region
+  bool scroll_defer = false;     // set by ScrollSettings for steps in the middle of an animation
+  bool scroll_deferred = false;  // a scroll step left controls outside the viewport unmoved
   int scroll = 0;
+  int scroll_target = 0;        // the wheel animates `scroll` toward it (timer 3)
+  int scroll_from = 0;          // animation start, eased over kScrollMs
+  double scroll_started = 0;    // NowMs() when the animation (re)started
+  bool scroll_paint = false;    // Layout leaves repainting to ScrollSettings
   int filter = 0;
   std::wstring query, chip_text, activity_title, selection_title;
   Tone chip_tone = Tone::Neutral;
@@ -195,6 +201,8 @@ struct App {
   }
 };
 UINT g_dpi_override = 0;
+// Milliseconds from the performance counter (GetTickCount64 advances in ~16 ms steps).
+double NowMs() { LARGE_INTEGER f{}, c{}; QueryPerformanceFrequency(&f); QueryPerformanceCounter(&c); return double(c.QuadPart) * 1000.0 / double(f.QuadPart); }
 void Set(HWND h, const std::string& text) { SetWindowTextW(h, Wide(text).c_str()); }
 fs::path Payload(const App& a) { return a.self.parent_path() / "app/workspace"; }
 fs::path Supervisor(const App& a) {
@@ -399,29 +407,49 @@ bool Removable(const App& a) {
 // ---------- Layout ----------
 void Layout(App& a) {
   if (!a.details) return;
+  if (!a.scroll_defer) a.scroll_deferred = false;  // this pass places every control
   RECT client{}; GetClientRect(a.window, &client);
   const int W = client.right, H = client.bottom;
   auto s = [&](int v) { return ui::S(v, a.dpi); };
   std::vector<HWND> placed;
   Geo g;
   RECT clip{};  // non-empty while placing scrolled content
+  // Window moves and regions are costly (each recomputes the parent's clipping):
+  // unchanged ones are skipped, which keeps a Settings scroll step cheap.
   auto put = [&](HWND h, int x, int y, int w, int hgt, bool visible = true) {
     placed.push_back(h);
+    RECT now{}; GetWindowRect(h, &now);
+    MapWindowPoints(nullptr, a.window, reinterpret_cast<POINT*>(&now), 2);
+    const RECT want{x, y, x + std::max(0, w), y + std::max(0, hgt)};
+    const bool shown_now = (GetWindowLongPtrW(h, GWL_STYLE) & WS_VISIBLE) != 0;
+    // A scroll step leaves controls that stay outside the viewport where they are
+    // (they are invisible there); the step that ends the animation places them.
+    if (a.scroll_defer && !IsRectEmpty(&clip) && shown_now == visible) {
+      RECT hit{};
+      if (!IntersectRect(&hit, &now, &clip) && !IntersectRect(&hit, &want, &clip)) { g.scrolled.push_back(h); a.scroll_deferred = true; return; }
+    }
+    // A drop-down list reports only its closed height, so its height is not compared.
+    wchar_t cls[16]{}; GetClassNameW(h, cls, 16);
+    const bool same = now.left == want.left && now.top == want.top && now.right == want.right &&
+                      (now.bottom == want.bottom || std::wstring_view(cls) == L"ComboBox");
     // No intermediate repaint: the whole window is invalidated once at the end.
-    SetWindowPos(h, nullptr, x, y, std::max(0, w), std::max(0, hgt), SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOREDRAW | (visible ? SWP_SHOWWINDOW : SWP_HIDEWINDOW));
+    if (!same || shown_now != visible)
+      SetWindowPos(h, nullptr, x, y, std::max(0, w), std::max(0, hgt), SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOREDRAW | (visible ? SWP_SHOWWINDOW : SWP_HIDEWINDOW));
     bool clipped = false;
+    RECT shown{};
     if (!IsRectEmpty(&clip)) {
       g.scrolled.push_back(h);
       // Measure the real window: a drop-down list keeps only its closed height.
       RECT r{}; GetWindowRect(h, &r);
       MapWindowPoints(nullptr, a.window, reinterpret_cast<POINT*>(&r), 2);
-      RECT shown{};
       if (!IntersectRect(&shown, &r, &clip)) shown = {};
       else if (!EqualRect(&shown, &r)) OffsetRect(&shown, -r.left, -r.top);
-      if (!EqualRect(&shown, &r)) { SetWindowRgn(h, CreateRectRgnIndirect(&shown), FALSE); clipped = true; }
+      clipped = !EqualRect(&shown, &r);
     }
-    const auto known = std::find(a.clipped.begin(), a.clipped.end(), h);
-    if (clipped && known == a.clipped.end()) a.clipped.push_back(h);
+    const auto known = a.clipped.find(h);
+    if (clipped && (known == a.clipped.end() || !EqualRect(&known->second, &shown))) {
+      SetWindowRgn(h, CreateRectRgnIndirect(&shown), FALSE); a.clipped[h] = shown;
+    }
     if (!clipped && known != a.clipped.end()) { a.clipped.erase(known); SetWindowRgn(h, nullptr, FALSE); }
   };
   auto rect = [](int x, int y, int w, int h) { return RECT{x, y, x + w, y + h}; };
@@ -628,6 +656,7 @@ void Layout(App& a) {
       g.viewport = RECT{sb + 1, top, W, H};
       g.scroll_max = std::max(0, int(content) + s(28) - H);
       a.scroll = std::clamp(a.scroll, 0, g.scroll_max);
+      a.scroll_target = std::clamp(a.scroll_target, 0, g.scroll_max);
       for (auto& c : g.cards) OffsetRect(&c, 0, -a.scroll);
       clip = g.viewport;
       auto caption = [&](int x, int y, const std::wstring& text) { g.captions.push_back({rect(x, y, ow, s(18)), text}); };
@@ -733,7 +762,8 @@ void Layout(App& a) {
       (GetWindowLongPtrW(h, GWL_STYLE) & WS_VISIBLE))
     SetWindowPos(h, nullptr, 0, 0, 0, 0, SWP_HIDEWINDOW | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOREDRAW);
   // A single invalidation; repeated layouts in one message coalesce into one paint.
-  RedrawWindow(a.window, nullptr, nullptr, RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN);
+  // A scroll step (ScrollSettings) has already moved the pixels; it repaints only what it exposed.
+  if (!a.scroll_paint) RedrawWindow(a.window, nullptr, nullptr, RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN);
 }
 void Enable(App& a) {
   bool has = a.selected < a.targets.size();
@@ -1813,9 +1843,13 @@ void DrawButton(App& a, const DRAWITEMSTRUCT& item) {
       glyph_ink = selected ? P.accent_text : ink; break;
     }
     case Kind::Chip: {
-      if (selected) ui::Round(dc, box, h / 2, ui::Mix(P.bg, P.accent, 55), P.accent_text);
-      else ui::Round(dc, box, h / 2, hot ? white(6) : P.surface, P.border);
-      ink = selected ? P.on_accent : P.muted; break;
+      // Inset by a pixel: the anti-aliased outline of the round ends stays inside the button.
+      const RECT pill{1, 1, w - 1, h - 1};
+      const COLORREF base = P.surface;
+      if (selected && disabled) ui::Round(dc, pill, (h - 2) / 2, ui::Mix(base, P.accent, 22), ui::Mix(base, P.accent_text, 35));
+      else if (selected) ui::Round(dc, pill, (h - 2) / 2, ui::Mix(P.bg, P.accent, 55), P.accent_text);
+      else ui::Round(dc, pill, (h - 2) / 2, hot && !disabled ? white(6) : base, disabled ? ui::Mix(base, P.border, 55) : P.border);
+      ink = disabled ? P.faint : selected ? P.on_accent : P.muted; break;
     }
     case Kind::Ghost: {
       if (hot && !disabled) ui::Round(dc, box, s(10), white(8));
@@ -1954,12 +1988,35 @@ void GoBack(App& a) { if (a.settings || a.show_details) { a.settings = a.show_de
 void Reveal(App& a, HWND h) {
   const auto& g = a.geo;
   if (g.scroll_max <= 0 || std::find(g.scrolled.begin(), g.scrolled.end(), h) == g.scrolled.end()) return;
+  // Mid-animation, controls outside the viewport may still be at an older place.
+  if (a.scroll_deferred) { a.scroll_paint = true; Layout(a); a.scroll_paint = false; }
   RECT r{}; GetWindowRect(h, &r);
   MapWindowPoints(nullptr, a.window, reinterpret_cast<POINT*>(&r), 2);
   const int margin = ui::S(16, a.dpi);
   const int delta = r.top < g.viewport.top + margin ? r.top - g.viewport.top - margin :
                     r.bottom > g.viewport.bottom - margin ? r.bottom - g.viewport.bottom + margin : 0;
-  if (delta) { a.scroll += delta; Layout(a); }
+  if (delta) { KillTimer(a.window, 3); a.scroll += delta; Layout(a); }
+  a.scroll_target = a.scroll;
+}
+// One scroll step: the system moves the viewport's pixels together with the
+// controls on them (one blit), Layout places the controls that were outside and
+// updates clipping without repainting, and only the exposed band and the
+// position indicator are painted, synchronously. Steps before the last leave
+// controls that stay outside the viewport for the last one to place.
+void ScrollSettings(App& a, int to, bool last) {
+  const RECT view = a.geo.viewport;
+  to = std::clamp(to, 0, a.geo.scroll_max);
+  const int dy = a.scroll - to;
+  if (!dy) return;
+  HRGN exposed = CreateRectRgn(0, 0, 0, 0);
+  ScrollWindowEx(a.window, 0, dy, &view, &view, exposed, nullptr, SW_SCROLLCHILDREN);
+  a.scroll = to;
+  a.scroll_paint = true; a.scroll_defer = !last; Layout(a); a.scroll_paint = a.scroll_defer = false;
+  // Separate passes: one bounding rectangle for both would repaint the whole viewport.
+  RedrawWindow(a.window, nullptr, exposed, RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN | RDW_UPDATENOW);
+  const RECT track{view.right - ui::S(18, a.dpi), view.top, view.right, view.bottom};
+  RedrawWindow(a.window, &track, nullptr, RDW_INVALIDATE | RDW_ERASE | RDW_UPDATENOW);
+  DeleteObject(exposed);
 }
 // Progress text can wrap to another line; resize the banner only when it does.
 void RefreshBanner(App& a) {
@@ -2233,8 +2290,11 @@ LRESULT CALLBACK WndProc(HWND window, UINT message, WPARAM wp, LPARAM lp) {
       }
       case WM_MOUSEWHEEL:
         if (PageOf(*a) == Page::Settings && a->geo.scroll_max > 0) {
-          a->scroll -= GET_WHEEL_DELTA_WPARAM(wp) * ui::S(72, a->dpi) / WHEEL_DELTA;
-          Layout(*a); return 0;
+          // Notches accumulate on the target; timer 3 eases the page toward it.
+          a->scroll_target = std::clamp(a->scroll_target - GET_WHEEL_DELTA_WPARAM(wp) * ui::S(96, a->dpi) / WHEEL_DELTA, 0, a->geo.scroll_max);
+          a->scroll_from = a->scroll; a->scroll_started = NowMs();
+          if (a->scroll_target != a->scroll) SetTimer(window, 3, USER_TIMER_MINIMUM, nullptr);
+          return 0;
         }
         break;
       case kReveal: Reveal(*a, reinterpret_cast<HWND>(wp)); return 0;
@@ -2262,7 +2322,7 @@ LRESULT CALLBACK WndProc(HWND window, UINT message, WPARAM wp, LPARAM lp) {
             id != kSearch && id != kGameList && !(id >= kFilter0 && id <= kFilter3)) return 0;
         if (id == kDetails || id == kSettings) {
           if (id == kDetails) { a->show_details = !a->show_details; a->settings = false; }
-          else { if (a->busy) return 0; a->settings = !a->settings; a->show_details = false; a->scroll = 0; }
+          else { if (a->busy) return 0; a->settings = !a->settings; a->show_details = false; a->scroll = a->scroll_target = 0; KillTimer(window, 3); }
           SetPageTexts(*a);
           if (!a->show_details && !a->settings && !a->busy) InspectSelected(*a);
           Layout(*a); return 0;
@@ -2468,6 +2528,22 @@ LRESULT CALLBACK WndProc(HWND window, UINT message, WPARAM wp, LPARAM lp) {
         return 0;
       }
       case WM_TIMER: {
+        if (wp == 3) {
+          // Cubic ease-out over a fixed duration, independent of how long a frame takes.
+          if (PageOf(*a) != Page::Settings || a->scroll == a->scroll_target) { KillTimer(window, 3); return 0; }
+          constexpr double kScrollMs = 160;
+          const double t = std::min(1.0, (NowMs() - a->scroll_started) / kScrollMs), eased = 1 - (1 - t) * (1 - t) * (1 - t);
+          const int wanted = t >= 1 ? a->scroll_target : a->scroll_from + int(std::lround((a->scroll_target - a->scroll_from) * eased));
+          if (wanted == a->scroll) return 0;
+          ScrollSettings(*a, wanted, wanted == a->scroll_target);
+          // Scrolling clamps to the content (a resize may have shortened it): stop there,
+          // placing any control a step left outside the viewport.
+          if (a->scroll != wanted) {
+            a->scroll_target = a->scroll; KillTimer(window, 3);
+            if (a->scroll_deferred) { a->scroll_paint = true; Layout(*a); a->scroll_paint = false; }
+          }
+          return 0;
+        }
         ActionTrace trace("ui.timer");
 #ifndef X360N_DISTRIBUTION
         if (!a->capture_settings.empty() && !a->busy && !a->initializing && ++a->capture_ticks > 10) {
