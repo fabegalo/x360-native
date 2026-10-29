@@ -313,6 +313,9 @@ da UI após reiniciar. [Evidências e aceite manual](reports/offline-achievement
   ([avatares](avatar-system.md#16-construtores-estáticos-do-xam-17559-2026-10-16),
   [auditoria sem jogos de 18/10](reports/audit-closure-2026-10-18.md)).
 - [ ] Navegar no gerenciamento original de armazenamento e conteúdo.
+  Windows x64/Xenos/17559, 28/10: categorias do Hard Drive e Profiles abriram,
+  listando `P0Player1` criado no jogo; detalhes preservaram nome e localização.
+  Miniatura com aviso; mover/excluir e demais tipos de conteúdo não validados.
 - [ ] Reproduzir música, fotos e vídeos locais nas interfaces e formatos que forem suportados por cada versão.
 - [ ] Implementar as opções de família/privacidade locais presentes, ou informar claramente as que ainda não têm efeito.
 
