@@ -36,6 +36,19 @@ foreach ($tool in $pendingTools) {
         throw 'Ferramenta incompleta ou alterada. Confirme a atualizacao em Preparar; os arquivos anteriores serao preservados.'
     }
 }
+if (-not $ToolsOnly) {
+    $llvm = (Get-Content -Raw (Join-Path $root 'deps.lock.json') | ConvertFrom-Json).llvm
+    $llvmDirectory = Join-Path $root $llvm.install_dir
+    if (-not (Test-Path -LiteralPath (Join-Path $llvmDirectory 'bin/clang++.exe'))) {
+        if (Test-Path -LiteralPath $llvmDirectory) {
+            if (-not $UpdateDependencies) { throw 'LLVM incompleto. Confirme a atualizacao em Preparar; os arquivos anteriores serao preservados.' }
+            PreserveDependency $llvmDirectory
+        }
+        # Download the large compiler archive alongside independent tools. The
+        # existing LLVM bootstrap still verifies SHA and atomically extracts it.
+        $pendingTools += [pscustomobject]@{id='llvm';asset=$llvm.asset;url=$llvm.url;sha256=$llvm.sha256;size=0}
+    }
+}
 $downloads = Get-VerifiedToolArchives $pendingTools $cache -AllowDownloads:$AllowDownloads
 try {
 foreach ($tool in $lock.tools) {

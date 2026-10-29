@@ -27,7 +27,7 @@ function Get-VerifiedToolArchives($Tools, [string]$Cache, [switch]$AllowDownload
             }
             $part = "$archive.part"
             # A transfer can finish immediately before its parent is cancelled.
-            if ([IO.File]::Exists($part) -and ([IO.FileInfo]::new($part)).Length -eq $tool.size) {
+            if ([IO.File]::Exists($part) -and (-not $tool.size -or ([IO.FileInfo]::new($part)).Length -eq $tool.size)) {
                 try {
                     $complete = Open-VerifiedToolArchive $part $tool.sha256
                     $complete.Dispose()
@@ -38,7 +38,7 @@ function Get-VerifiedToolArchives($Tools, [string]$Cache, [switch]$AllowDownload
                 } catch {
                     # A full-length corrupt prefix cannot be repaired by a
                     # Range request at EOF. Retain it and restart with consent.
-                    if ([IO.File]::Exists($part)) {
+                    if ($tool.size -and [IO.File]::Exists($part)) {
                         [IO.File]::Move($part,"$archive.rejected-$([Guid]::NewGuid().ToString('N'))")
                     }
                 }
@@ -69,7 +69,12 @@ function Get-VerifiedToolArchives($Tools, [string]$Cache, [switch]$AllowDownload
                     continue
                 }
                 $errorText = $item.error.GetAwaiter().GetResult()
-                if ($item.process.ExitCode) { throw "Download interrupted (curl $($item.process.ExitCode)): $($item.tool.url). Partial bytes preserved. $errorText" }
+                if ($item.process.ExitCode) {
+                    if ($errorText -match '\b416\b' -and [IO.File]::Exists("$($item.archive).part")) {
+                        [IO.File]::Move("$($item.archive).part", "$($item.archive).rejected-$([Guid]::NewGuid().ToString('N'))")
+                    }
+                    throw "Download interrupted (curl $($item.process.ExitCode)): $($item.tool.url). Partial bytes preserved. $errorText"
+                }
                 try {
                     $verified = Open-VerifiedToolArchive "$($item.archive).part" $item.tool.sha256
                     $verified.Dispose()

@@ -38,6 +38,13 @@ $part=Join-Path $cache 'tool-2.zip.part'
 $cached=Get-VerifiedToolArchives $tools $cache -AllowDownloads
 foreach($lease in $cached.leases){$lease.Dispose()}
 if(-not @(Get-ChildItem $cache -Filter 'tool-2.zip.rejected-*').Count){throw 'Corrupt full-length prefix was not retained'}
+$unknown=[pscustomobject]@{id='unknown';asset='unknown.zip';size=0;sha256=$tools[0].sha256;url=$tools[0].url}
+[IO.File]::WriteAllBytes((Join-Path $cache 'unknown.zip.part'),[Text.Encoding]::UTF8.GetBytes('payload-1;'))
+$cached=Get-VerifiedToolArchives @($unknown) $cache -AllowDownloads
+foreach($lease in $cached.leases){$lease.Dispose()}
+[IO.File]::Move((Join-Path $cache 'unknown.zip'),(Join-Path $cache 'unknown.zip.part'))
+$cached=Get-VerifiedToolArchives @($unknown) $cache
+foreach($lease in $cached.leases){$lease.Dispose()}
 $wrong=[pscustomobject]@{id='wrong';asset='wrong.zip';size=$tools[0].size;sha256=('0'*64);url=$tools[0].url}
 $rejected=$false
 try {$null=Get-VerifiedToolArchives @($wrong) $cache -AllowDownloads} catch {$rejected=$_.Exception.Message -like '*checksum mismatch*'}

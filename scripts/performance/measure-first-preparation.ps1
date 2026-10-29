@@ -6,6 +6,9 @@ param([Parameter(Mandatory)][string]$Title,[Parameter(Mandatory)][string]$Output
     [switch]$DisableSharedSdk,[ValidateRange(1,64)][int]$Jobs=16)
 $ErrorActionPreference='Stop'
 $root=(Resolve-Path "$PSScriptRoot/../..").Path
+if($Scenario -ne 'Validation' -and -not @([Diagnostics.Process]::GetProcessesByName('System') | Where-Object Id -eq 4).Count){
+    throw 'Benchmark requires host process visibility; a restricted process namespace cannot exclude competing builds/sessions'
+}
 . "$root/scripts/build/preparation-receipt.ps1"
 $project=Join-Path $root "titles/$Title"
 $build=Join-Path $root ".local/build/titles/$Title"
@@ -28,6 +31,7 @@ $state=[ordered]@{scenario=$Scenario;title=$Title;shared_sdk=(-not $DisableShare
     codegen_stamps=$stamps;shared_sdk_pointers=@(Get-ChildItem $cache -File -Filter '*.json' -ErrorAction SilentlyContinue | ForEach-Object Name);
     deps_lock_sha256=(Get-FileHash "$root/deps.lock.json").Hash.ToLowerInvariant();
     sdk_commit=(Get-Content "$root/deps.lock.json" -Raw | ConvertFrom-Json).rexglue_sdk.commit;
+    windows_page_cache='not flushed or controlled';patch_count=([IO.File]::ReadAllText("$root/deps.lock.json") | ConvertFrom-Json).rexglue_sdk.patches.Count;
     downloads='not performed by this runner';scope='official preparation driver; excludes UI, import, SDK download/install and registration'}
 if($Scenario -in @('FirstBuild','NewTitle') -and ($state.cache_file_exists -or $state.receipt_exists -or $stamps.Count)){throw 'Cold title state required; preserve/reset task-owned build and generated outputs before measuring'}
 if($Scenario -eq 'FirstBuild' -and -not $DisableSharedSdk -and $state.shared_sdk_pointers.Count){throw 'FirstBuild requires an empty shared SDK index'}
