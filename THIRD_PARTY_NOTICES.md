@@ -26,7 +26,10 @@ forma de uso, texto e SHA-256. Os índices existentes `package.sha256` e
 | utfcpp | Headers usados pelo extrator | [BSL-1.0](licenses/utfcpp.txt) |
 | Microsoft C++ Standard Library | Templates/objetos incorporados | [Apache-2.0 WITH LLVM-exception](licenses/microsoft-stl.txt), copyright Microsoft Corporation |
 | CRT/UCRT Microsoft | Runtime estático Release | Termos de redistribuição Visual Studio/Windows SDK; não é coberto pela licença própria |
-| SDL | Somente trechos de patches; não há SDL.dll no ZIP desktop | [Zlib](licenses/sdl3.txt) |
+| SDL | Biblioteca estática no launcher `x360-native` (janela, entrada, diálogos, SDL_GPU) e trechos de patches; não há SDL.dll no ZIP desktop | [Zlib](licenses/sdl3.txt) |
+| Dear ImGui | Interface do launcher, com os backends SDL3/SDL_GPU, estática | [MIT](licenses/imgui.txt) |
+| Vulkan-Headers | Headers da verificação opcional de dispositivo Vulkan do launcher; o loader é o do sistema | [Apache-2.0 OR MIT](licenses/vulkan-headers.txt) |
+| Droid Sans, Roboto Medium (cópias do Dear ImGui fixado) | Fontes incorporadas sem alteração no launcher | [Apache-2.0](licenses/launcher-fonts.txt) |
 | miniz 1.15, cópia do SDL fixado | Leitor ZIP/inflate estático no extrator; sem SDL.dll | [Unlicense](licenses/miniz.txt) |
 | libmspack | Decoder LZX em `app/x360n-mspack.dll`, substituível, para recursos do XAM | [LGPL-2.1-only](licenses/libmspack.txt), [fontes e reconstrução](licenses/relinking.txt) |
 
@@ -71,7 +74,8 @@ igualdade estrutural das chaves de readback, sem alterações de FPS ou efeitos.
 O pacote contém `x360-native.exe`, `app/x360n.exe`, `app/x360n-extract.exe` e
 o decoder `app/x360n-mspack.dll`.
 Não contém jogos, dashboards, fontes Xbox, firmware, chaves, saída AOT, runtime
-ReXGlue completo, FFmpeg, disasm GNU, SDL binário nem ferramentas de compilação.
+ReXGlue completo, FFmpeg, disasm GNU, SDL dinâmico (SDL e Dear ImGui entram
+somente estáticos no launcher) nem ferramentas de compilação.
 As DLLs de sistema são fornecidas pelo Windows, não copiadas da máquina de build.
 
 ## Preparação opcional, mediante download autorizado

@@ -14,6 +14,8 @@
     "catch2",
     "inja",
     "sdl3",
+    "imgui",
+    "vulkan-headers",
     "spdlog",
     "simde",
     "utfcpp",
@@ -169,8 +171,8 @@
       "spdx": "Zlib",
       "original": "thirdparty/sdl3/LICENSE.txt",
       "license_file": "licenses/sdl3.txt",
-      "scope": "source-patches",
-      "integration": "static in runtime; patch excerpts in payload",
+      "scope": "binary",
+      "integration": "static in runtime and in the x360-native launcher (windowing, input, dialogs, SDL_GPU); patch excerpts in payload",
       "obligations": "Preserve original notices and applicable source/binary license conditions.",
       "license_sha256": "1c040b8271b37e5076359f8fd54240e371114112924d2df81ef87c7d6a1dfdfd"
     },
@@ -223,10 +225,21 @@
       "spdx": "MIT",
       "original": "thirdparty/imgui/LICENSE.txt",
       "license_file": "licenses/imgui.txt",
-      "scope": "download",
-      "integration": "static in runtime",
+      "scope": "binary",
+      "integration": "static in runtime and in the x360-native launcher (interface, SDL3/SDL_GPU backends)",
       "obligations": "Preserve original notices and applicable source/binary license conditions.",
       "license_sha256": "c80c5789748d955c4a650562baa0d750494e2c7128c2ca66aaebe2e3c4e198bf"
+    },
+    {
+      "id": "launcher-fonts",
+      "origin": "https://github.com/ocornut/imgui.git (misc/fonts/DroidSans.ttf, misc/fonts/Roboto-Medium.ttf)",
+      "revision": "6d910d5487d11ca567b61c7824b0c78c569d62f0",
+      "spdx": "Apache-2.0",
+      "license_file": "licenses/launcher-fonts.txt",
+      "scope": "binary",
+      "integration": "font files embedded unchanged in the x360-native launcher; DroidSans.ttf 4e2371bc0e4cf6983342e150412f140da79d674c9be0b56458401f581072ecd3, Roboto-Medium.ttf 8559132c89ad51d8a2ba5b171887a44a7ba93776e205f553573de228e64b45f8",
+      "obligations": "Preserve the attribution and the Apache License 2.0 text.",
+      "license_sha256": "fd69285e07bdc535b6a235f19546ace9496a9bf47715a6fff582f174b26fddfc"
     },
     {
       "id": "o1heap",
@@ -304,12 +317,13 @@
       "id": "vulkan-headers",
       "origin": "https://github.com/KhronosGroup/Vulkan-Headers.git",
       "revision": "e3b1eec08173d6b825cd3ac88c885a63b621504a",
-      "spdx": "NOASSERTION",
+      "spdx": "Apache-2.0 OR MIT",
       "original": "thirdparty/vulkan-headers/",
-      "license_file": null,
-      "scope": "download-optional",
-      "integration": "optional Vulkan disabled; per-file Apache/MIT",
-      "obligations": "Per-file review required before redistribution; not in desktop binaries."
+      "license_file": "licenses/vulkan-headers.txt",
+      "scope": "binary",
+      "integration": "headers only (include/vulkan, Apache-2.0 OR MIT) in the x360-native launcher's optional Vulkan device probe; the loader is the system's, loaded at run time",
+      "obligations": "Preserve original notices and applicable source/binary license conditions.",
+      "license_sha256": "7a06c19cb0c27d91eb450f50f1faaaf08e05f0d4851cdcf5c3899b1d6992d9d2"
     },
     {
       "id": "vulkan-loader",
