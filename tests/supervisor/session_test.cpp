@@ -83,7 +83,9 @@ TEST_CASE("session profile and launch request preserve Unicode paths", "[session
   auto dir = UniqueTempPath("unicode") / fs::path(u8"João 日本");
   fs::create_directories(dir / ".local/build"); fs::create_directories(dir / ".local/inputs");
   auto xex = dir / ".local/inputs/default.xex"; std::ofstream(xex) << "test fixture";
-  auto exe = dir / ".local/build/test.exe"; std::ofstream(exe) << "synthetic executable";
+  // The configured .exe on Windows; the native title path of this host elsewhere.
+  auto exe = ResolveNativeExecutable(ProjectPaths{dir}, "test", dir / ".local/build/test.exe");
+  fs::create_directories(exe.parent_path()); std::ofstream(exe) << "synthetic executable";
   auto manifest = dir / "profile.toml";
   std::ofstream(manifest) << "[project]\nname = 'test'\ngame_root = '.local/inputs'\n"
     "[entrypoint]\nfile_path = '.local/inputs/default.xex'\n"
@@ -139,7 +141,11 @@ TEST_CASE("session UI host belongs to its dashboard build and receipt", "[sessio
   std::ofstream(setup) << "runtime_files=['system_ui.dll']\n";
   const auto profile = LoadSessionProfile(ProjectPaths{dir}, manifest, false);
   // TEMP may use an 8.3 alias; the loader canonicalizes the existing root.
+#ifdef _WIN32
   CHECK(profile.system_ui_host == fs::canonical(dir) / "build/system_ui.dll");
+#else  // native module beside the title build of this host
+  CHECK(profile.system_ui_host == NativeTitleExecutable(ProjectPaths{fs::canonical(dir)}, "test").parent_path() / NativeRuntimeFilename("system_ui.dll"));
+#endif
   for (const auto* host : {"../other-version/system_ui.dll", "C:/other/system_ui.dll", ""}) {
     write(host);
     CHECK_THROWS(LoadSessionProfile(ProjectPaths{dir}, manifest, false));

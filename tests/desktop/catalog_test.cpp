@@ -32,7 +32,7 @@ struct Fixture {
     fs::create_directories(source);
     target.id = "dash_test"; target.game_root = paths.inputs() / "dashboards/test";
     target.catalogued = true; target.catalog_id = "synthetic-import-record";
-    target.exe = paths.build() / "titles/dash_test/dash_test.exe";
+    target.exe = NativeTitleExecutable(paths, "dash_test");
     target.inputs = {{target.game_root / "dash.xex", "dash.xex", Hash("dashboard"), {}},
                      {target.game_root / "system/xam_ui.xex", "xam.xex", Hash("module"), {}}};
     Write(source / "dash.xex", "dashboard"); Write(source / "system/xam.xex", "module");
@@ -105,7 +105,9 @@ TEST_CASE("supervisor launch preflight binds the complete catalog validation to 
     const auto streamed = batch.files;
     CHECK_FALSE(CheckPreparation(f.paths, f.target.id, f.target.manifest, f.target.exe));
     CHECK(batch.files == streamed);
+#ifdef _WIN32  // Protected, reusable verification handles are a Windows sharing guarantee.
     CHECK(batch.hits > 0);
+#endif
     CHECK_THROWS(VerifyCatalogLaunch(f.paths, {f.target}, "unknown", f.target.manifest));
     CHECK_THROWS(VerifyCatalogLaunch(f.paths, {f.target}, f.target.id, f.root / "other.toml"));
   }
@@ -116,7 +118,7 @@ TEST_CASE("supervisor launch preflight binds the complete catalog validation to 
   SECTION("missing dependency") { f.target.dependencies = {"missing"}; }
   SECTION("incomplete build") { Write(PreparationMarker(f.paths, f.target), "interrupted"); }
   SECTION("changed executable") { Write(f.target.exe, "corrupted"); }
-  SECTION("unverified DLL") { Write(f.target.exe.parent_path() / "extra.dll", "corrupted"); }
+  SECTION("unverified DLL") { Write(f.target.exe.parent_path() / ("extra" + ModuleSuffix()), "corrupted"); }
   SECTION("runtime failure") { Write(f.paths.local() / "preparation" / (f.target.id + ".runtime-error"), "failed"); }
   DigestBatch next_launch;
   PrimeLaunchVerification(f.paths, {f.target}, f.target.id);
@@ -144,7 +146,9 @@ TEST_CASE("launch path scope preserves catalog metadata and unwinds without chan
     CHECK(launched[0].game_root == ordinary[0].game_root);
     CHECK(launched[0].inputs[0].destination == ordinary[0].inputs[0].destination);
     CHECK(launched[0].inputs[0].sha256 == ordinary[0].inputs[0].sha256);
+#ifdef _WIN32
     CHECK(HasProtectedVerificationPath(launched[0].inputs[0].destination));
+#endif
   }
   CHECK_FALSE(CatalogLaunchVerificationActive());
   CHECK_FALSE(HasProtectedVerificationPath(ordinary[0].inputs[0].destination));
@@ -540,7 +544,8 @@ TEST_CASE("modified imported module disables prepared state") {
 TEST_CASE("catalog requires the receipt and rejects replaced native artifacts") {
   Fixture f; Import(f.paths, f.target, f.source); Write(f.target.exe, "build fixture");
   CHECK_FALSE(Inspect(f.paths, f.target).prepared);
-  f.Receipt(); REQUIRE(Inspect(f.paths, f.target).prepared);
+  f.Receipt();
+  { const auto prepared = Inspect(f.paths, f.target); for (const auto& issue : prepared.issues) UNSCOPED_INFO(issue); REQUIRE(prepared.prepared); }
   Write(f.target.exe, "other version");
   auto state = Inspect(f.paths, f.target);
   CHECK(state.inputs_ok); CHECK_FALSE(state.prepared);
@@ -628,7 +633,7 @@ TEST_CASE("launcher completes missing registration from a valid build without ma
   dashboard.session = true; dashboard.launch_library = true;
   dashboard.user_root = f.paths.local() / "user/dashboard";
   dashboard.manifest = f.root / "titles/dashboard/dashboard_manifest.toml";
-  dashboard.exe = f.paths.build() / "titles/dashboard/dashboard.exe";
+  dashboard.exe = NativeTitleExecutable(f.paths, "dashboard");
   Write(dashboard.manifest, "[project]\nname='dashboard'\n[entrypoint]\nfile_path='../../.local/inputs/dashboards/test/dash.xex'\n");
   Write(dashboard.exe, "dashboard fixture");
   WriteTestReceipt(f.paths, dashboard.id, dashboard.manifest, dashboard.exe,
@@ -740,7 +745,9 @@ TEST_CASE("original library supports long content paths without Windows policy c
   Target session; session.session = true; session.launch_library = true;
   session.user_root = f.root / std::string(110, 'x');
   session.dependencies = {game.id};
+#ifdef _WIN32  // beyond the classic MAX_PATH; other systems have no such limit to cross
   REQUIRE((session.user_root / "0000000000000000/584108B7/000D0000" / game.library.file_name / "system/xam_ui.xex.x360n-library-tmp").native().size() > 260);
+#endif
   REQUIRE_NOTHROW(PrepareLibrary(f.paths, session, {game}));
   CHECK(InspectLibrary(f.paths, session, {game}).empty());
   CHECK_NOTHROW(PrepareLibrary(f.paths, session, {game}));
@@ -755,6 +762,7 @@ TEST_CASE("original library archives only verified obsolete content type registr
   PrepareLibrary(f.paths, dashboard, {game});
   const auto base = dashboard.user_root / "0000000000000000/12345678";
   const auto old_header = base / "Headers/00004000/same-package.header";
+  REQUIRE(fs::exists(old_header));
   const auto old_hash = DigestFile(old_header)->sha256;
   const auto old_file = base / "00004000/same-package/dash.xex";
   Write(dashboard.user_root / "profiles/account", "existing account");
@@ -818,7 +826,7 @@ TEST_CASE("original library archives only verified obsolete content type registr
     auto other = game; other.library.content_type = "00004000";
     other.id = "other";
     other.manifest = f.root / "titles/other/other_manifest.toml";
-    other.exe = f.paths.build() / "titles/other/other.exe";
+    other.exe = NativeTitleExecutable(f.paths, "other");
     Write(other.manifest, "[project]\nname='other'\n[entrypoint]\nfile_path='../../.local/inputs/dashboards/test/dash.xex'\n");
     Write(other.exe, "other build");
     WriteTestReceipt(f.paths, other.id, other.manifest, other.exe,
@@ -844,7 +852,7 @@ TEST_CASE("original library withdraws stale builds and discovers additional reci
   auto second = game; second.id = "second";
   second.library = {"87654321", "000D0000", "second", "Second game", Hash("package2")};
   second.manifest = f.root / "titles/second/second_manifest.toml";
-  second.exe = f.paths.build()/"titles/second/second.exe";
+  second.exe = NativeTitleExecutable(f.paths, "second");
   Write(second.manifest, "[project]\nname='second'\n[entrypoint]\nfile_path='../../.local/inputs/dashboards/test/dash.xex'\n");
   Write(second.exe,"second build");
   WriteTestReceipt(f.paths,second.id,second.manifest,second.exe,{second.inputs[0].destination,second.inputs[1].destination});

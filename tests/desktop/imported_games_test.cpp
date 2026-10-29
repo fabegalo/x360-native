@@ -4,6 +4,7 @@
 #include "../../src/desktop/model/import_source.h"
 #include "session_profile.h"
 #include "preparation.h"
+#include "host_platform.h"
 #include "../supervisor/scratch.h"
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_string.hpp>
@@ -447,7 +448,9 @@ TEST_CASE("automatic AOT generates a stable project without a manual recipe", "[
   ImportGame(f.paths,{},f.source,f.source); const auto t=ReadCatalog(f.paths).front();
   REQUIRE(t.generic_aot); REQUIRE(t.aot);
   CHECK(t.id.size() == 64);
-  CHECK(t.exe.parent_path() == f.paths.build()/"aot"/t.id.substr(0,17));
+  // Windows x64 keeps its historical build/aot; other hosts build under build/<host>/aot.
+  const auto aot = HostPlatform() == "windows-x64" ? f.paths.build() : f.paths.build() / HostPlatform();
+  CHECK(t.exe.parent_path() == aot/"aot"/t.id.substr(0,17));
   const auto user_root = t.user_root;
   GenerateAotProject(f.paths,t);
   std::ifstream preset_input(t.manifest.parent_path()/"CMakePresets.json");

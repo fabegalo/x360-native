@@ -105,6 +105,7 @@ TEST_CASE("an update replaces application files, keeps data and restores on fail
     CHECK(Read(package / "x360-native.exe") == "launcher 1.0.0");
     CHECK(fs::exists(staged / "x360-native.exe"));
   }
+#ifdef _WIN32  // Windows sharing denial injects the failure; POSIX has no mandatory file locks.
   SECTION("a locked file rolls every move back") {
     std::ifstream held(package / "x360-native.exe", std::ios::binary);  // no delete sharing: the rename fails
     CHECK_THROWS(ApplyUpdate(package, staged, "2.0.0", rollback));
@@ -115,6 +116,7 @@ TEST_CASE("an update replaces application files, keeps data and restores on fail
     CHECK(Read(staged / "app/x360n.exe") == "supervisor 2.0.0");
     CHECK(Read(package / "data/environment/save.bin") == "user save");
   }
+#endif
   SECTION("success") {
     ApplyUpdate(package, staged, "2.0.0", rollback);
     CHECK_NOTHROW(VerifyPackage(package));
@@ -265,6 +267,7 @@ TEST_CASE("consecutive update transactions preserve previous backups", "[update]
   fs::remove_all(root);
 }
 
+#ifdef _WIN32  // the failure is injected by a Windows sharing denial
 TEST_CASE("rollback failure remains explicit and recoverable after releasing the lock", "[update]") {
   const auto root = UniqueTempPath("update-rollback-locked"); Packages(root);
   const auto package = root / "installed", txn = package / "data/updates/txn-test";
@@ -277,6 +280,7 @@ TEST_CASE("rollback failure remains explicit and recoverable after releasing the
   CHECK_NOTHROW(VerifyPackage(package)); Preserved(root);
   fs::remove_all(root);
 }
+#endif
 
 TEST_CASE("the saved supervisor recovers when the main executable is missing or cannot start", "[update][update-crash]") {
   const auto root = UniqueTempPath("update-independent-helper"); Packages(root);
