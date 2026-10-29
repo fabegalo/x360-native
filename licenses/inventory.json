@@ -214,7 +214,7 @@
       "source_evidence": [
         {
           "sdk_path": "thirdparty/libmspack/libmspack/mspack/lzxd.c",
-          "sha256": "2ada35d1fa8855bbcc645234d5745eba90f8c37d7c8a694a22df3b1159c6e21f"
+          "sha256": "622183f03bac71a12327bc9f036395dcb5c3b7c6cc7d766785de24ac1354256a"
         }
       ]
     },
@@ -2866,37 +2866,37 @@
     {
       "sdk_path": "thirdparty/libmspack/libmspack/mspack/lzxd.c",
       "package_path": "licenses/sources/libmspack/lzxd.c",
-      "sha256": "2ada35d1fa8855bbcc645234d5745eba90f8c37d7c8a694a22df3b1159c6e21f"
+      "sha256": "622183f03bac71a12327bc9f036395dcb5c3b7c6cc7d766785de24ac1354256a"
     },
     {
       "sdk_path": "thirdparty/libmspack/libmspack/mspack/lzx.h",
       "package_path": "licenses/sources/libmspack/lzx.h",
-      "sha256": "3fab60d43d09aec570558125e4f6c391a69fc906738ef5fe56e15f22027bddf5"
+      "sha256": "22b1ffa9ddc15aa5fac95d4f4f0c60486f590e55636a17ab94f3ad1b770f907f"
     },
     {
       "sdk_path": "thirdparty/libmspack/libmspack/mspack/system.h",
       "package_path": "licenses/sources/libmspack/system.h",
-      "sha256": "62e06060ee7f1cf0d254a0d0c8751c23badaa28fc339fc10e74bbf560a1b5d9d"
+      "sha256": "98997127296c7baccd61b5ade9362cab509c9664b00259f9f62e6008b7369e42"
     },
     {
       "sdk_path": "thirdparty/libmspack/libmspack/mspack/mspack.h",
       "package_path": "licenses/sources/libmspack/mspack.h",
-      "sha256": "e651545f9619f74e2ae3416895e243072b400e47e494426007ba1503a0dc2921"
+      "sha256": "df9e9e2b18cc145e6cf652a43ffbc88bde21bfd6fd3024318fbc2140a4efd059"
     },
     {
       "sdk_path": "thirdparty/libmspack/libmspack/mspack/macros.h",
       "package_path": "licenses/sources/libmspack/macros.h",
-      "sha256": "31e34df474e5b2e5781ae2ed52c329c9f4e6eb8fe935139200f566253e6a8436"
+      "sha256": "29a9628cd7a8881bd36defb811209c2a48852e0bf6899d579d6cb80d65337b0d"
     },
     {
       "sdk_path": "thirdparty/libmspack/libmspack/mspack/readbits.h",
       "package_path": "licenses/sources/libmspack/readbits.h",
-      "sha256": "fe0ff476fd8ad602a1eb1a6d3131afa43210fc2fb7dd230a806a0fe2c7f51618"
+      "sha256": "7c849edb9b939b4eb1e9e2b895b7fee3eb19e23d0a1dab87c6c504cf007010ab"
     },
     {
       "sdk_path": "thirdparty/libmspack/libmspack/mspack/readhuff.h",
       "package_path": "licenses/sources/libmspack/readhuff.h",
-      "sha256": "e2217871a1446e8881f9013280f6532b0d65da7fdaeb08762cfdea9b42a10546"
+      "sha256": "446c7ca1cfb11a80cd1b4e86006abea3f6052059636361ddb1e227f29ccee560"
     }
   ]
 }
