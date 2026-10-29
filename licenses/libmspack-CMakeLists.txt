@@ -1,0 +1,7 @@
+# Standalone rebuild of the shipped unmodified LGPL decoder.
+cmake_minimum_required(VERSION 3.25)
+project(x360n_mspack LANGUAGES C)
+set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+add_library(x360n-mspack SHARED lzxd.c)
+target_include_directories(x360n-mspack PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
+set_target_properties(x360n-mspack PROPERTIES WINDOWS_EXPORT_ALL_SYMBOLS ON)

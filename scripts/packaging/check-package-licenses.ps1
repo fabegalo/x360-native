@@ -46,6 +46,9 @@ $expected=@('LICENSE','THIRD_PARTY_NOTICES.md','READ-ME.txt','package.json','pac
 $ids=@{}
 $expected += 'licenses/excluded-loader-constants.json'
 $expected += 'licenses/relinking.txt'
+$expected += @('licenses/libmspack-CMakeLists.txt','licenses/sources/libmspack/CMakeLists.txt')
+if ((Digest (Join-Path $package 'licenses/sources/libmspack/CMakeLists.txt')) -ne
+    (Digest (Join-Path $payload 'licenses/libmspack-CMakeLists.txt'))) { throw 'Decoder rebuild script differs' }
 $expected += @(Assert-LgplSources $inventory $package $payload $sdk)
 foreach($component in $inventory.components) {
     if($ids.ContainsKey($component.id)) { throw 'Duplicate component identity' }; $ids[$component.id]=$true

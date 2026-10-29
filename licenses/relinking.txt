@@ -1,27 +1,26 @@
-The desktop extractor incorporates libmspack's LZX decoder (LGPL-2.1-only).
-Copyright (C) 2003-2023 Stuart Caie. See libmspack.txt for the full license.
-The library implementation is unmodified. Source filenames, upstream revision
-and SHA-256 digests are recorded in inventory.json. Its corresponding source
-is shipped in licenses/sources/libmspack in both the package and source payload.
+The desktop extractor dynamically links x360n-mspack.dll, an unmodified build
+of libmspack's LZX decoder, Copyright (C) 2003-2023 Stuart Caie, LGPL-2.1-only.
+See libmspack.txt. Exact corresponding source and a standalone CMake build are
+included in licenses/sources/libmspack. inventory.json records hashes and the
+upstream revision. No Xbox originals, keys or SDK runtime are needed to rebuild
+this decoder DLL.
 
-You may modify this library and reverse engineer the combined extractor for
-debugging such modifications, as permitted by LGPL 2.1. The application source
-and build scripts are included in app/workspace under their respective licenses.
-No original Xbox files or keys are needed to rebuild the extractor.
+You may modify/replace this library and reverse engineer the combined work
+for debugging such modifications, as permitted by LGPL 2.1.
 
-Rebuild and relink (Windows x64):
-1. Copy app/workspace to a writable directory. Follow its documented bootstrap
-   to obtain the pinned public SDK, LLVM and Microsoft C++ build tools.
-2. Replace external/rexglue-sdk/thirdparty/libmspack/libmspack/mspack's decoder
-   files with your modified copies from licenses/sources/libmspack.
-3. Through scripts/devshell.cmd configure CMake with X360_DESKTOP_ONLY=ON and
-   build x360n-extract in Release. src/content/CMakeLists.txt lists all sources
-   and flags. This relinks the application directly with the modified decoder.
-4. Use the rebuilt extractor in your own local build. Published package hashes
-   deliberately identify the publisher's original build; they do not approve
-   a modified executable as an official update.
+Rebuild on Windows x64, with CMake and a C compiler/Windows build tools:
+  cmake -S licenses/sources/libmspack -B decoder-build
+  cmake --build decoder-build --config Release
 
-The ZIP reader uses miniz 1.15 from the pinned SDL source (Unlicense, miniz.txt).
-src/content/CMakeLists.txt enables its inflate/archive feature switches in a
-private generated header, leaving the SDK source untouched. safe_zip.cpp maps
-SDL allocator names to the standard C allocator and disables unused writers.
+Use your rebuilt x360n-mspack.dll beside x360n-extract.exe in your local build.
+For a modified copy of a published package, update the DLL's SHA-256 entry in
+package.sha256. This public integrity index has no secret signing key. This
+identifies your local modified package, not an official update. Preserve source
+notices and identify your library modifications.
+
+Application source/build scripts are also included in app/workspace. For a
+complete application rebuild, follow its documented bootstrap, configure with
+X360_DESKTOP_ONLY=ON through scripts/devshell.cmd and build x360n-extract in Release.
+The ZIP reader uses miniz 1.15 from pinned SDL (Unlicense, miniz.txt). The CMake
+recipe enables inflate/archive switches in a private header; safe_zip.cpp maps
+SDL allocator names to the standard C allocator. No SDL DLL is linked.

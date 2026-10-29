@@ -36,6 +36,12 @@ if(WIN32)
     COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:x360n-extract> $<TARGET_FILE_DIR:x360-native>
     DEPENDS x360n x360n-extract)
   add_dependencies(x360-native x360n_stage_desktop_tools)
+  if(TARGET x360n-mspack)
+    add_custom_target(x360n_stage_update_decoder
+      COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:x360n-mspack> $<TARGET_FILE_DIR:x360-native>
+      DEPENDS x360n-mspack)
+    add_dependencies(x360n_stage_desktop_tools x360n_stage_update_decoder)
+  endif()
   endif()
 endif()
 include(${PROJECT_SOURCE_DIR}/tests/desktop/targets.cmake)

@@ -69,8 +69,8 @@ foreach ($component in @('fmt','tomlplusplus','cli11','catch2','inja','sdl3','sp
     ExportTree (Join-Path $root "external/rexglue-sdk/thirdparty/$component") $revision (Join-Path $sdk "thirdparty/$component")
     $dependencies[$component] = $revision
 }
-# LGPL 2.1 section 6(a): ship the exact decoder source alongside the complete
-# application source/relink instructions. Only pinned public Git bytes enter.
+# Ship the replaceable LGPL decoder's corresponding source and build script.
+# Only pinned public Git bytes enter the decoder source snapshot.
 $licenseInventory = Get-Content (Join-Path $source 'licenses/inventory.json') -Raw | ConvertFrom-Json
 foreach ($entry in $licenseInventory.lgpl_sources) {
     $original = Join-Path $sdk $entry.sdk_path
@@ -79,6 +79,7 @@ foreach ($entry in $licenseInventory.lgpl_sources) {
     New-Item -ItemType Directory -Force (Split-Path $copied) | Out-Null
     Copy-Item -LiteralPath $original -Destination $copied
 }
+Copy-Item -LiteralPath (Join-Path $source 'licenses/libmspack-CMakeLists.txt') -Destination (Join-Path $payload 'licenses/sources/libmspack/CMakeLists.txt')
 WriteIndex $payload 'payload.sha256'
 & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $source 'scripts/setup/apply-sdk-patches.ps1')
 if ($LASTEXITCODE -ne 0) { throw 'Pinned SDK patch verification failed' }
@@ -106,11 +107,13 @@ $binaries = Join-Path $build 'src/desktop'
 Copy-Item -LiteralPath (Join-Path $binaries 'x360-native.exe') -Destination $destination
 Copy-Item -LiteralPath (Join-Path $build 'src/supervisor/x360n.exe') -Destination $internal
 Copy-Item -LiteralPath (Join-Path $build 'src/content/x360n-extract.exe') -Destination $internal
+Copy-Item -LiteralPath (Join-Path $build 'src/content/x360n-mspack.dll') -Destination $internal
 # Static compiler runtime, explicit OS-only import allowlist. Never harvest DLLs.
-foreach ($binary in @((Join-Path $destination 'x360-native.exe'), (Join-Path $internal 'x360n.exe'), (Join-Path $internal 'x360n-extract.exe'))) {
+foreach ($binary in @((Join-Path $destination 'x360-native.exe'), (Join-Path $internal 'x360n.exe'), (Join-Path $internal 'x360n-extract.exe'), (Join-Path $internal 'x360n-mspack.dll'))) {
     $imports = & (Join-Path $llvm 'bin/llvm-readobj.exe') --coff-imports $binary
     if ($LASTEXITCODE -ne 0) { throw 'Cannot inspect binary imports' }
     foreach ($line in $imports) {
+        if ($line -match '^  Name: x360n-mspack\.dll$' -and [IO.Path]::GetFileName($binary) -eq 'x360n-extract.exe') { continue }
         if ($line -match '^  Name: (.+)$' -and $Matches[1] -notmatch '^(KERNEL32|USER32|GDI32|ADVAPI32|SHELL32|ole32|OLEAUT32|COMDLG32|COMCTL32|bcrypt|dbghelp|d3d12|dxgi|XINPUT1_4|dwmapi|WS2_32|ntdll|VERSION|IMM32|SHLWAPI|gdiplus|uxtheme)\.dll$' -and $Matches[1] -notmatch '^api-ms-win-.*\.dll$') { throw "Unexpected runtime dependency: $($Matches[1])" }
     }
 }
@@ -128,7 +131,7 @@ $sdkInputs = @($ninjaInputs | ForEach-Object {
 } | Sort-Object -Unique)
 if (-not $sdkInputs.Count) { throw 'Compiler dependency evidence is empty' }
 [IO.File]::WriteAllText((Join-Path $internal 'dependency-inputs.json'), (ConvertTo-Json -InputObject $sdkInputs), [Text.UTF8Encoding]::new($false))
-$links = & $devshell ninja -C $build -t query src/desktop/x360-native.exe src/supervisor/x360n.exe src/content/x360n-extract.exe
+$links = & $devshell ninja -C $build -t query src/desktop/x360-native.exe src/supervisor/x360n.exe src/content/x360n-extract.exe src/content/x360n-mspack.dll
 if ($LASTEXITCODE -ne 0) { throw 'Cannot inspect linker dependency evidence' }
 $libraries = @($links | ForEach-Object {
     if ($_ -match '^\s+\|\s+(.+\.(?:lib|a))$') { $Matches[1].Replace('\','/') }

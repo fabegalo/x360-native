@@ -29,7 +29,7 @@ if(WIN32)
   target_link_libraries(x360n-extract PRIVATE x360n_core)
   if(X360_DESKTOP_ONLY)
     # Only the pinned SDK's container readers and their core utilities. No title,
-    # graphics backend, XAM or runtime DLL enters the desktop distribution.
+    # graphics backend, XAM or ReXGlue runtime enters the desktop distribution.
     set(SPDLOG_FMT_EXTERNAL ON CACHE BOOL "" FORCE)
     add_subdirectory("${X360_REXGLUE_DIR}/thirdparty/spdlog" "${CMAKE_CURRENT_BINARY_DIR}/spdlog")
     set(_sdk_sources
@@ -47,7 +47,10 @@ if(WIN32)
     target_link_libraries(x360n-extract PRIVATE spdlog::spdlog tomlplusplus shell32 ole32)
     # Original files avoid cabextract's Git symlinks on Windows.
     set(_update_mspack "${X360_REXGLUE_DIR}/thirdparty/libmspack/libmspack/mspack")
-    target_sources(x360n-extract PRIVATE "${_update_mspack}/lzxd.c")
+    add_library(x360n-mspack SHARED "${_update_mspack}/lzxd.c")
+    set_target_properties(x360n-mspack PROPERTIES WINDOWS_EXPORT_ALL_SYMBOLS ON)
+    target_include_directories(x360n-mspack PRIVATE "${_update_mspack}")
+    target_link_libraries(x360n-extract PRIVATE x360n-mspack)
     target_include_directories(x360n-extract PRIVATE "${_update_mspack}")
   else()
     target_link_libraries(x360n-extract PRIVATE rexruntime)

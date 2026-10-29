@@ -4,7 +4,8 @@
   "executables": [
     "x360-native.exe",
     "app/x360n.exe",
-    "app/x360n-extract.exe"
+    "app/x360n-extract.exe",
+    "app/x360n-mspack.dll"
   ],
   "desktop_dependencies": [
     "fmt",
@@ -204,9 +205,9 @@
       "spdx": "LGPL-2.1-only",
       "original": "thirdparty/libmspack/libmspack/COPYING.LIB",
       "license_file": "licenses/libmspack.txt",
-      "scope": "binary-static",
-      "integration": "LZX decoder in x360n-extract and optional runtime; unchanged pinned source",
-      "obligations": "LGPL 2.1 section 6(a): complete corresponding decoder source in licenses/sources/libmspack, application source in app/workspace, rebuild instructions in licenses/relinking.txt; permit modification and reverse engineering for debugging modifications.",
+      "scope": "binary-shared",
+      "integration": "Unmodified LZX decoder in replaceable x360n-mspack.dll; corresponding source and standalone CMake build included",
+      "obligations": "LGPL 2.1: preserve notices, provide corresponding source and permit modification, replacement and reverse engineering for debugging modifications; see licenses/relinking.txt.",
       "license_sha256": "a190dc9c8043755d90f8b0a75fa66b9e42d4af4c980bf5ddc633f0124db3cee7",
       "source_evidence": [
         {
@@ -2024,7 +2025,8 @@
     "desktop-deps/fmt/fmt.lib",
     "src/content/spdlog/spdlog.lib",
     "src/desktop/x360n_desktop_model.lib",
-    "src/supervisor/x360n_core.lib"
+    "src/supervisor/x360n_core.lib",
+    "src/content/x360n-mspack.lib"
   ],
   "header_attributions_sha256": "2665566ff7188440d4b6455e560c6d1d52e5dd703573464d8e8659746c69aa9e",
   "thirdparty_translation_units": [

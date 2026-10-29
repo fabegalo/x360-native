@@ -28,7 +28,7 @@ forma de uso, texto e SHA-256. Os índices existentes `package.sha256` e
 | CRT/UCRT Microsoft | Runtime estático Release | Termos de redistribuição Visual Studio/Windows SDK; não é coberto pela licença própria |
 | SDL | Somente trechos de patches; não há SDL.dll no ZIP desktop | [Zlib](licenses/sdl3.txt) |
 | miniz 1.15, cópia do SDL fixado | Leitor ZIP/inflate estático no extrator; sem SDL.dll | [Unlicense](licenses/miniz.txt) |
-| libmspack | Decoder LZX estático no extrator para recursos do XAM | [LGPL-2.1-only](licenses/libmspack.txt), [fontes e relink](licenses/relinking.txt) |
+| libmspack | Decoder LZX em `app/x360n-mspack.dll`, substituível, para recursos do XAM | [LGPL-2.1-only](licenses/libmspack.txt), [fontes e reconstrução](licenses/relinking.txt) |
 
 Preservar os copyrights, condições e disclaimers nos formatos exigidos pelos
 textos originais. [Atribuições dos headers](licenses/header-attributions.txt)
@@ -68,7 +68,8 @@ vieram originalmente do RecompiledHaloReach; preserva-se também seu
 ReXGlue/Xenia e acrescenta invalidação de residência por geração de memória e
 igualdade estrutural das chaves de readback, sem alterações de FPS ou efeitos.
 
-O pacote contém `x360-native.exe`, `app/x360n.exe` e `app/x360n-extract.exe`.
+O pacote contém `x360-native.exe`, `app/x360n.exe`, `app/x360n-extract.exe` e
+o decoder `app/x360n-mspack.dll`.
 Não contém jogos, dashboards, fontes Xbox, firmware, chaves, saída AOT, runtime
 ReXGlue completo, FFmpeg, disasm GNU, SDL binário nem ferramentas de compilação.
 As DLLs de sistema são fornecidas pelo Windows, não copiadas da máquina de build.
