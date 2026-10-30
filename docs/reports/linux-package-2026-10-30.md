@@ -39,6 +39,42 @@ no Windows (38 s) e no Linux (17 s), com registro de catálogo
 Nenhuma ISO de Xbox 360 foi encontrada nos discos locais (só ISOs de PSP), por
 isso o caminho ISO não foi exercitado com conteúdo real.
 
+## Piso glibc 2.35: sysroot Ubuntu 22.04
+
+O candidato `1.12.1` herdava a glibc 2.43 do sysroot de validação (Ubuntu
+26.04). O pacote passou a ligar contra um sysroot de destino próprio, como o
+build `linux-amd64` do SDK upstream (container `ubuntu:22.04`):
+
+- `scripts/packaging/prepare-linux-sysroot.sh` baixa, num estado apt privado e
+  sem instalar nada no host, exatamente os 68 `.deb` de
+  `scripts/packaging/linux-sysroot-jammy.lock` (arquivo oficial: `jammy`,
+  `jammy-updates`, `jammy-security`; `main`/`universe`; 16,7 MB), confere nome,
+  versão e SHA-256 de cada um, extrai e reescreve links absolutos para dentro
+  do sysroot. Índices apt: 31 MB, descartados depois.
+- Runtime C++: GCC 12.3.0-1ubuntu1~22.04.3 (`jammy-updates`). O upstream usa o
+  GCC 13 do PPA `ubuntu-toolchain-r/test` por causa de `<format>`; o escopo
+  desktop não usa `<format>` e compilou com o libstdc++ 12 sem mudança de código.
+  glibc 2.35-0ubuntu3.15 e cabeçalhos X11/Wayland/GL do jammy.
+- CMake, Ninja, pkg-config e `wayland-scanner` continuam vindo do toolchain de
+  validação no host; o build recusa um sysroot cujo lock difere do exportado e
+  grava o hash dele em `package.json` (`sysroot.lock_sha256`).
+- `package-desktop.ps1` falha se o piso medido passar de 2.35.
+- Notices de runtime trocados pelos `copyright` do jammy (`gcc-12-base`,
+  `libc6`); o arquivo da glibc 2.35 não traz o texto da exceção dos objetos de
+  inicialização, que continua nas fontes originais da glibc.
+
+| Item | Evidência |
+|---|---|
+| Arquivo | `x360-native-1.13.0-linux-x64.tar.gz` (commit `59cc807`), 13.504.933 bytes, SHA-256 `c3da9ca06c820ef5d26efba48a693b943eaca484d1e6e2f879ebe2ca3acbcc8a` |
+| Testes da árvore isolada | `desktop.catalog`, `desktop.update-recovery` PASS |
+| Piso medido (`llvm-readobj --version-info`) | `GLIBC_2.35` em `x360-native`, `x360n`, `x360n-extract`; `GLIBC_2.2.5` em `libx360n-mspack.so`; NEEDED só `libc`, `libm`, `ld-linux` (+ mspack no extrator) |
+| Gate | PASS, 96 componentes, 4 executáveis linux-x64; 7 negativos Linux rejeitados; Windows (1.10.1 com o inventário novo) 1 positivo + 24 negativos PASS |
+| Uso no host (Ubuntu 26.04, sem sysroot) | SHA-256, índice e modos conferem; `ldd` sem ausentes; `x360n --help` exit 0; launcher abre com SDL_GPU Vulkan |
+| Execução sobre glibc 2.35 real (loader e `libc.so.6` do sysroot jammy, “GNU C Library (Ubuntu GLIBC 2.35-0ubuntu3.15)”) | `x360n --help` exit 0; `x360n-extract extract` no Castle Crashers: 708 arquivos, 143.818.078 bytes, 0 erros, 10 s, original igual; launcher abre (renderer software: o sysroot não tem carregador Vulkan) |
+
+A execução com o loader do sysroot usa o kernel e a sessão gráfica do WSL;
+não substitui um sistema Ubuntu 22.04 ou Debian 12 limpo.
+
 ## Gate por plataforma
 
 `licenses/inventory.json` agora separa `platforms.windows-x64` e
@@ -64,9 +100,8 @@ desconhecida), todos rejeitados com a mensagem esperada.
 
 ## Limites
 
-- O piso glibc 2.43 restringe o pacote a distribuições muito recentes (o SDK
-  upstream compila no jammy para manter 2.35). Reduzi-lo exige um sysroot mais
-  antigo, ainda não obtido; nada foi baixado.
+- Piso glibc reduzido a 2.35 no `1.13.0` (seção acima); ainda sem execução num
+  sistema 22.04/Debian 12 completo nem com Vulkan sobre a glibc antiga.
 - O empacotamento Linux exige host Windows com WSL. Um runner Linux nativo
   (PowerShell 7 + o mesmo script de build) ainda não foi feito.
 - Linux limpo fora do ambiente de build, sessão da dashboard no Linux e

@@ -347,7 +347,9 @@ x360-native/  (tracked source + additions from this reorganization)
 |   |   |-- build-desktop-linux.sh
 |   |   |-- check-package-licenses.ps1
 |   |   |-- generate-desktop-icon.ps1
-|   |   `-- package-desktop.ps1
+|   |   |-- linux-sysroot-jammy.lock
+|   |   |-- package-desktop.ps1
+|   |   `-- prepare-linux-sysroot.sh
 |   |-- performance/
 |   |   |-- benchmark-counters.ps1
 |   |   |-- benchmark-gpu.ps1

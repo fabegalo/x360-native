@@ -18,8 +18,11 @@ libstdc++/libgcc estáticos e dependências ELF só da glibc. Testes de distribu
 PASS; gate de licenças/conteúdo PASS com escopo por plataforma no inventário (Windows
 inalterado: 1+24 casos; Linux: 7 negativos). Extraído e usado sem sysroot no WSL:
 hashes e modos conferem, launcher abre com Vulkan, extrator empacotado leu o Castle
-Crashers real (708 arquivos, 0 erros, original intacto). Piso glibc medido 2.43;
-nenhuma ISO Xbox 360 local. Linux limpo, dashboard no Linux e macOS pendentes.
+Crashers real (708 arquivos, 0 erros, original intacto). Piso glibc: 2.43 no
+primeiro candidato; com o sysroot Ubuntu 22.04 fixado (68 `.deb` oficiais, GCC 12.3)
+o `1.13.0` mede **2.35**, o gate recusa piso acima disso, e extrator, `x360n` e
+launcher (software) rodaram sobre a glibc 2.35 do sysroot. Nenhuma ISO Xbox 360 local.
+Linux limpo, dashboard no Linux e macOS pendentes.
 [Relatório](docs/reports/linux-package-2026-10-30.md).
 
 30/10 — **Guide 17559: fechamento pelo controlador original do HUD**: retirada
