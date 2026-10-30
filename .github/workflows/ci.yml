@@ -158,6 +158,8 @@ jobs:
             .local/build/distribution/*/${{ matrix.platform }}/*.txt
             .local/build/distribution/*/${{ matrix.platform }}/*.json
             .local/build/distribution/*/*.json
+            .local/packages/*/app/*.json
+            .local/packages/*/package.json
             .local/release/*.json
           if-no-files-found: ignore
           include-hidden-files: true

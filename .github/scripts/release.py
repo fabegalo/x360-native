@@ -16,7 +16,7 @@ import zipfile
 VERSION = re.compile(r"(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)(?:-[0-9A-Za-z]+(?:[.-][0-9A-Za-z]+)*)?")
 # Every published version carries one complete package per supported system.
 PLATFORMS = {
-    "windows-x64": dict(archive=".zip", executables={"x360-native.exe", "app/x360n.exe", "app/x360n-extract.exe"}),
+    "windows-x64": dict(archive=".zip", executables={"x360-native.exe", "app/x360n.exe", "app/x360n-extract.exe", "app/x360n-mspack.dll"}),
     "linux-x64": dict(archive=".tar.gz", executables={"x360-native", "app/x360n", "app/x360n-extract", "app/libx360n-mspack.so"}),
     "macos-arm64": dict(archive=".zip", executables={"x360-native", "app/x360n", "app/x360n-extract", "app/libx360n-mspack.dylib"}),
 }
@@ -258,7 +258,7 @@ def verify(directory, version, commit, ref, run_id, platform="windows-x64", exac
     else:
         files, modes = read_zip(archive_path, name)
     for rel, data in files.items():
-        require(not FORBIDDEN.search(rel) and not {".local", ".git", "external"}.intersection(PurePosixPath(rel).parts),
+        require((rel in executables or not FORBIDDEN.search(rel)) and not {".local", ".git", "external"}.intersection(PurePosixPath(rel).parts),
                 f"Forbidden distribution content: {rel}")
         require("/generated/" not in rel or rel.endswith("/generated/rexglue.cmake"), "Generated original code in archive")
         require(data[:4] not in {b"XEX0", b"XEX1", b"XEX2", b"CON ", b"LIVE", b"PIRS"}, "Original executable/container in archive")
