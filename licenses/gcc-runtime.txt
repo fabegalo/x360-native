@@ -6,11 +6,12 @@ the same source package, or built from a separate same source package.
 Packaging is done by the Debian GCC Maintainers
 <debian-gcc@lists.debian.org>, with sources obtained from:
 
-  ftp://gcc.gnu.org/pub/gcc/releases/            (for full releases)
-  https://gcc.gnu.org/git/gitweb.cgi?p=gcc.git   (for prereleases)
-  ftp://sourceware.org/pub/newlib/               (for newlib)
+  ftp://gcc.gnu.org/pub/gcc/releases/  (for full releases)
+  svn://gcc.gnu.org/svn/gcc/           (for prereleases)
+  ftp://sourceware.org/pub/newlib/     (for newlib)
+  git://git.savannah.gnu.org/gm2.git   (for Modula-2)
 
-The current gcc-15 source package is taken from the git gcc-15-branch.
+The current gcc-12 source package is taken from the git gcc-12-branch.
 
 Changes: See changelog.Debian.gz
 
@@ -19,18 +20,15 @@ library, and documentation as follows:
 
 Language       Compiler package  Library package    Documentation
 ---------------------------------------------------------------------------
-Ada            gnat-15          libgnat-15          gnat-15-doc
-Algol-68       ga68-15          libga68-1          libga68-15-doc
-C              gcc-15                              gcc-15-doc
-C++            g++-15           libstdc++6         libstdc++6-15-doc
-COBOL          gcobol-15        libgcobol1
-D              gdc-15           libgphobos6
-Fortran 95     gfortran-15      libgfortran5       gfortran-15-doc
-Go             gccgo-15         libgo0
-Objective C    gobjc-15         libobjc4
-Objective C++  gobjc++-15
-Modula-2       gm2-15           libgm2             libgm2-15-doc
-Rust           gccrs-15
+Ada            gnat-12          libgnat-12          gnat-12-doc
+C              gcc-12                              gcc-12-doc
+C++            g++-12           libstdc++6         libstdc++6-12-doc
+D              gdc-12
+Fortran 95     gfortran-12      libgfortran5       gfortran-12-doc
+Go             gccgo-12         libgo0
+Objective C    gobjc-12         libobjc4
+Objective C++  gobjc++-12
+Modula-2       gm2-12           libgm2
 
 For some language run-time libraries, Debian provides source files,
 development files, debugging symbols and libraries containing position-
@@ -38,22 +36,22 @@ independent code in separate packages:
 
 Language  Sources      Development   Debugging            Position-Independent
 ------------------------------------------------------------------------------
-C++                                  libstdc++6-15-dbg  libstdc++6-15-pic
-D         libphobos-15-dev
+C++                                  libstdc++6-12-dbg  libstdc++6-12-pic
+D         libphobos-12-dev
 
 Additional packages include:
 
 All languages:
 libgcc1, libgcc2, libgcc4       GCC intrinsics (platform-dependent)
-gcc-15-base                    Base files common to all compilers
-gcc-15-soft-float              Software floating point (ARM only)
-gcc-15-source                  The sources with patches
+gcc-12-base                    Base files common to all compilers
+gcc-12-soft-float              Software floating point (ARM only)
+gcc-12-source                  The sources with patches
 
 Ada:
-libgnat-util15-dev, libgnat-util15   GNAT version library
+libgnat-util12-dev, libgnat-util12   GNAT version library
 
 C:
-cpp-15, cpp-15-doc            GNU C Preprocessor
+cpp-12, cpp-12-doc            GNU C Preprocessor
 libssp0-dev, libssp0            GCC stack smashing protection library
 libquadmath0                    Math routines for the __float128 type
 fixincludes                     Fix non-ANSI header files
@@ -76,7 +74,10 @@ packages are identical to the ones for the lib packages.
 COPYRIGHT STATEMENTS AND LICENSING TERMS
 
 
-GCC is Copyright (C) 1986-2025 Free Software Foundation, Inc.
+GCC is Copyright (C) 1986, 1987, 1988, 1989, 1990, 1991, 1992, 1993, 1994,
+1995, 1996, 1997, 1998, 1999, 2000, 2001, 2002, 2003, 2004, 2005, 2006, 2007,
+2008, 2009, 2010, 2011, 2012, 2013, 2014, 2015, 2016, 2017, 2018, 2019
+Free Software Foundation, Inc.
 
 GCC is free software; you can redistribute it and/or modify it under
 the terms of the GNU General Public License as published by the Free
@@ -106,15 +107,13 @@ Runtime Library Exception (included in this file):
    gcc/tsystem.h, gcc/typeclass.h).
  - libatomic
  - libdecnumber
- - libgm2
  - libgomp
- - libgrust
  - libitm
  - libssp
  - libstdc++-v3
  - libobjc
  - libgfortran
- - The libgnat-15 Ada support library and libgnat-util15 library.
+ - The libgnat-12 Ada support library and libgnat-util12 library.
  - Various config files in gcc/config/ used in runtime libraries.
  - libvtv
 
@@ -212,7 +211,7 @@ THE SOFTWARE.
 
 The libffi library is licensed under the following terms:
 
-    libffi - Copyright (c) 1996-2011  Red Hat, Inc.
+    libffi - Copyright (c) 1996-2003  Red Hat, Inc.
 
     Permission is hereby granted, free of charge, to any person obtaining
     a copy of this software and associated documentation files (the
@@ -313,24 +312,22 @@ presumption that third-party software is unaffected by the copyleft
 requirements of the license of GCC.
 
 
-libquadmath/
-  Copyright (C) 1992-2018 Free Software Foundation, Inc.
+libquadmath/*.[hc]:
 
-  Written by Francois-Xavier Coudert  <fxcoudert@gcc.gnu.org>
-  Written by Tobias Burnus  <burnus@net-b.de>
-  Contributions by Ulrich Drepper <drepper@gnu.ai.mit.edu>
-  Conversion to long double by Jakub Jelinek <jj@ultra.linux.cz>
+   Copyright (C) 2010 Free Software Foundation, Inc.
+   Written by Francois-Xavier Coudert  <fxcoudert@gcc.gnu.org>
+   Written by Tobias Burnus  <burnus@net-b.de>
 
-  This file is part of the libquadmath library.
-  Libquadmath is free software; you can redistribute it and/or
-  modify it under the terms of the GNU Library General Public
-  License as published by the Free Software Foundation; either
-  version 2 of the License, or (at your option) any later version.
+This file is part of the libiberty library.
+Libiberty is free software; you can redistribute it and/or
+modify it under the terms of the GNU Library General Public
+License as published by the Free Software Foundation; either
+version 2 of the License, or (at your option) any later version.
 
-  Libiberty is distributed in the hope that it will be useful,
-  but WITHOUT ANY WARRANTY; without even the implied warranty of
-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
-  Library General Public License for more details.
+Libiberty is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+Library General Public License for more details.
 
 libquadmath/math:
 
@@ -348,108 +345,90 @@ atanq.c, expm1q.c, j0q.c, j1q.c, log1pq.c, logq.c:
     Lesser General Public License for more details.
 
 coshq.c, erfq.c, jnq.c, lgammaq.c, powq.c, roundq.c:
-  Changes for 128-bit __float128 are
-  Copyright (C) 2001 Stephen L. Moshier <moshier@na-net.ornl.gov>
-  and are incorporated herein by permission of the author.  The author
-  reserves the right to distribute this material elsewhere under different
-  copying permissions.  These modifications are distributed here under
-  the following terms:
+   Changes for 128-bit __float128 are
+   Copyright (C) 2001 Stephen L. Moshier <moshier@na-net.ornl.gov>
+   and are incorporated herein by permission of the author.  The author 
+   reserves the right to distribute this material elsewhere under different
+   copying permissions.  These modifications are distributed here under 
+   the following terms:
 
-  This library is free software; you can redistribute it and/or
-  modify it under the terms of the GNU Lesser General Public
-  License as published by the Free Software Foundation; either
-  version 2.1 of the License, or (at your option) any later version.
+    This library is free software; you can redistribute it and/or
+    modify it under the terms of the GNU Lesser General Public
+    License as published by the Free Software Foundation; either
+    version 2.1 of the License, or (at your option) any later version.
 
-  This library is distributed in the hope that it will be useful,
-  but WITHOUT ANY WARRANTY; without even the implied warranty of
-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
-  Lesser General Public License for more details.
+    This library is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+    Lesser General Public License for more details.
 
-libquadmath/math/
+ldexpq.c:
+   * Conversion to long double by Ulrich Drepper,
+   * Cygnus Support, drepper@cygnus.com.
 
 cosq_kernel.c, expq.c, sincos_table.c, sincosq.c, sincosq_kernel.c,
 sinq_kernel.c, truncq.c:
-  Copyright (C) 1997, 1999 Free Software Foundation, Inc.
+   Copyright (C) 1997, 1999 Free Software Foundation, Inc.
 
-  The GNU C Library is free software; you can redistribute it and/or
-  modify it under the terms of the GNU Lesser General Public
-  License as published by the Free Software Foundation; either
-  version 2.1 of the License, or (at your option) any later version.
+   The GNU C Library is free software; you can redistribute it and/or
+   modify it under the terms of the GNU Lesser General Public
+   License as published by the Free Software Foundation; either
+   version 2.1 of the License, or (at your option) any later version.
 
-  The GNU C Library is distributed in the hope that it will be useful,
-  but WITHOUT ANY WARRANTY; without even the implied warranty of
-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
-  Lesser General Public License for more details.
+   The GNU C Library is distributed in the hope that it will be useful,
+   but WITHOUT ANY WARRANTY; without even the implied warranty of
+   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+   Lesser General Public License for more details.
 
-libquadmath/math/isinfq.c:
-  Written by J.T. Conklin <jtc@netbsd.org>.
-  Change for long double by Jakub Jelinek <jj@ultra.linux.cz>
-  Public domain.
+isinfq.c:
+ * Written by J.T. Conklin <jtc@netbsd.org>.
+ * Change for long double by Jakub Jelinek <jj@ultra.linux.cz>
+ * Public domain.
 
-libquadmath/math/
-  llroundq.c, lroundq.c, tgammaq.c:
+llroundq.c, lroundq.c, tgammaq.c:
+   Copyright (C) 1997, 1999, 2002, 2004 Free Software Foundation, Inc.
+   This file is part of the GNU C Library.
+   Contributed by Ulrich Drepper <drepper@cygnus.com>, 1997 and
+                  Jakub Jelinek <jj@ultra.linux.cz>, 1999.
 
-  Copyright (C) 1997, 1999, 2002, 2004 Free Software Foundation, Inc.
-  This file is part of the GNU C Library.
-  Contributed by Ulrich Drepper <drepper@cygnus.com>, 1997 and
-                 Jakub Jelinek <jj@ultra.linux.cz>, 1999.
+   The GNU C Library is free software; you can redistribute it and/or
+   modify it under the terms of the GNU Lesser General Public
+   License as published by the Free Software Foundation; either
+   version 2.1 of the License, or (at your option) any later version.
 
-  The GNU C Library is free software; you can redistribute it and/or
-  modify it under the terms of the GNU Lesser General Public
-  License as published by the Free Software Foundation; either
-  version 2.1 of the License, or (at your option) any later version.
+   The GNU C Library is distributed in the hope that it will be useful,
+   but WITHOUT ANY WARRANTY; without even the implied warranty of
+   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+   Lesser General Public License for more details.
 
-  The GNU C Library is distributed in the hope that it will be useful,
-  but WITHOUT ANY WARRANTY; without even the implied warranty of
-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
-  Lesser General Public License for more details.
+log10q.c:
+   Cephes Math Library Release 2.2:  January, 1991
+   Copyright 1984, 1991 by Stephen L. Moshier
+   Adapted for glibc November, 2001
 
-libquadmath/math/log10q.c:
-  Cephes Math Library Release 2.2:  January, 1991
-  Copyright 1984, 1991 by Stephen L. Moshier
-  Adapted for glibc November, 2001
+    This library is free software; you can redistribute it and/or
+    modify it under the terms of the GNU Lesser General Public
+    License as published by the Free Software Foundation; either
+    version 2.1 of the License, or (at your option) any later version.
 
-  This library is free software; you can redistribute it and/or
-  modify it under the terms of the GNU Lesser General Public
-  License as published by the Free Software Foundation; either
-  version 2.1 of the License, or (at your option) any later version.
+    This library is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+    Lesser General Public License for more details.
 
-  This library is distributed in the hope that it will be useful,
-  but WITHOUT ANY WARRANTY; without even the implied warranty of
-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
-  Lesser General Public License for more details.
+remaining files:
 
-libquadmath/math/
-  acoshq.c, acosq.c, asinhq.c, asinq.c, atan2q.c, atanhq.c, ceilq.c,
-  copysignq.c, coshq.c, cosq.c, erfq.c, fabsq.c, finiteq.c, floorq.c,
-  fmodq.c, frexpq.c, hypotq.c, ilogbq.c, isnanq.c, jnq.c, ldexpq.c,
-  logbq.c, modfq.c, nearbyintq.c, nextafterq.c, powq.c, remainderq.c,
-  rem_pio2q.c, rintq.c, scalblnq.c, scalbnq.c, sinhq.c, sinq.c,
-  tanhq.c, tanq.c, tanq_kernel.c:
+ * Copyright (C) 1993 by Sun Microsystems, Inc. All rights reserved.
+ *
+ * Developed at SunPro, a Sun Microsystems, Inc. business.
+ * Permission to use, copy, modify, and distribute this
+ * software is freely granted, provided that this notice
+ * is preserved.
 
-  Copyright (C) 1993 by Sun Microsystems, Inc. All rights reserved.
-  .
-  Developed at SunPro, a Sun Microsystems, Inc. business.
-  Permission to use, copy, modify, and distribute this
-  software is freely granted, provided that this notice
-  is preserved.
-
-libquadmath/math/
-  acosq.c, asinq.c, coshq.c, erfq.c, jnq.c, powq.c, sinhq.c, tanq_kernel.c:
-  
-  In addition to the Sun Microsystems copyright:
-
-  Long double expansions are
-  Copyright (C) 2001 Stephen L. Moshier <moshier@na-net.ornl.gov>
-  and are incorporated herein by permission of the author.  The author
-  reserves the right to distribute this material elsewhere under different
-  copying permissions.  These modifications are distributed here under
-  the LGPL 2.1 or later.
-   
 
 gcc/go/gofrontend, libgo:
 
-Copyright (c) 2009-2023 The Go Authors. All rights reserved.
+Copyright (c) 2009 The Go Authors. All rights reserved.
 
 Redistribution and use in source and binary forms, with or without
 modification, are permitted provided that the following conditions are
@@ -479,8 +458,8 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 
 D:
-gdc-15                         GNU D Compiler
-libphobos-15-dev               D standard runtime library
+gdc-12                         GNU D Compiler
+libphobos-12-dev               D standard runtime library
 
 The D source package is made up of the following components.
 
@@ -489,21 +468,21 @@ The D front-end for GCC:
 
 Copyright (C) 2004-2007 David Friedman
 Modified by Vincenzo Ampolo, Michael Parrot, Iain Buclaw, (C) 2009, 2010
-Copyright (C) 2015-2024 Free Software Foundation, Inc.
 
 This program is free software; you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
-the Free Software Foundation; either version 3 of the License, or
+the Free Software Foundation; either version 2 of the License, or
 (at your option) any later version.
 
 On Debian GNU/Linux systems, the complete text of the GNU General
 Public License is in `/usr/share/common-licenses/GPL', version 2 of this
-license in `/usr/share/common-licenses/GPL-3'.
+license in `/usr/share/common-licenses/GPL-2'.
+
 
 The DMD Compiler implementation of the D programming language:
  - d/dmd/*
 
-Copyright (C) 1999-2023 by The D Language Foundation, All Rights Reserved
+Copyright (c) 1999-2010 by Digital Mars
 All Rights Reserved
 written by Walter Bright
 http://www.digitalmars.com
@@ -516,9 +495,9 @@ license in `/usr/share/common-licenses/Artistic'.
 
 
 The Zlib data compression library:
- - zlib/*
+ - d/phobos/etc/c/zlib/*
 
- (C) 1995-2016 Jean-loup Gailly and Mark Adler
+ (C) 1995-2004 Jean-loup Gailly and Mark Adler
 
   This software is provided 'as-is', without any express or implied
   warranty.  In no event will the authors be held liable for any damages
@@ -538,14 +517,13 @@ The Zlib data compression library:
 
 
 The Phobos standard runtime library:
- - libphobos/*
+ - d/phobos/*
 
 Unless otherwise marked within the file, each file in the source
 is under the following licenses:
 
-Copyright (C) 2004-2022 by Digital Mars, www.digitalmars.com
+Copyright (C) 2004-2005 by Digital Mars, www.digitalmars.com
 Written by Walter Bright
-Copyright (C) 2018-2023, The D Language Foundation
 
 This software is provided 'as-is', without any express or implied
 warranty. In no event will the authors be held liable for any damages
@@ -589,7 +567,8 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
 General Public License for more details.
 
 gcc/m2/**/*.texi:
-Copyright (C) 2000-2024 Free Software Foundation, Inc.
+Copyright (C) 2000, 2001, 2002, 2003, 2004, 2005, 2006, 2007, 2008, 2009, 2010,
+2011, 2012, 2012, 2013 Free Software Foundation, Inc.
 
 Permission is granted to copy, distribute and/or modify this document
 under the terms of the GNU Free Documentation License, Version 1.3 or
@@ -601,7 +580,7 @@ gcc/m2/gm2-libs:
 gcc/m2/gm2-libs-min:
 gcc/m2/gm2-libs-pim:
 gcc/m2/gm2-libs-ch:
-Copyright (C) 2002-2024 Free Software Foundation, Inc.
+Copyright (C) 2002-2019 Free Software Foundation, Inc.
 
 This library is free software; you can redistribute it and/or
 modify it under the terms of the GNU Lesser General Public
@@ -630,14 +609,14 @@ Copyright ISO/IEC (International Organization for Standardization
 and International Electrotechnical Commission) 1996, 1997, 1998,
 1999, 2000, 2001, 2002, 2003, 2004, 2005, 2006, 2007, 2008, 2009, 2010
 
-Copyright (C) 2001-2024 Free Software Foundation, Inc.
+Copyright (C) 2001-2019 Free Software Foundation, Inc.
 mix of GPL-3.0 and LGPL-2.1/3
 
-Copyright (C) 2001-2024 Free Software Foundation, Inc.
+Copyright (C) 2001-2019 Free Software Foundation, Inc.
 mix of GPL-3.0 and LGPL-2.1/3
 
 gcc/m2/examples:
-Copyright (C) 2005-2024 Free Software Foundation, Inc.
+Copyright (C) 2005-2015 Free Software Foundation, Inc.
 Mix of LGPL-2.1 and GPL-3.0.
 
 gcc/m2/images:
@@ -652,7 +631,7 @@ gcc/m2/el/gm2-mode.el:
 ;; file named COPYING.  Among other things, the copyright notice
 ;; and this notice must be preserved on all copies.
 
-Copyright (C) 2001-2024 Free Software Foundation, Inc.
+Copyright (C) 2001-2018 Free Software Foundation, Inc.
 Contributed by Gaius Mulley <gaius@glam.ac.uk>.
 Mix of GPL-3 and LGPL-2.1.
 
@@ -667,7 +646,7 @@ libgm2/libpim/:
 libgm2/liblog/:
 libgm2/libcor/:
 libgm2/libmin/:
-Copyright (C) 2002-2024 Free Software Foundation, Inc.
+Copyright (C) 2002-2019 Free Software Foundation, Inc.
 
 This library is free software; you can redistribute it and/or
 modify it under the terms of the GNU Lesser General Public
@@ -683,7 +662,7 @@ Under Section 7 of GPL version 3, you are granted additional
 permissions described in the GCC Runtime Library Exception, version
 3.1, as published by the Free Software Foundation.
 
-newlib-X.Y.Z/ (only for the offload compilers):
+newlib-X.Y.Z/:
 
 Upstream Authors:
 newlib@sources.redhat.com
@@ -1244,7 +1223,7 @@ warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 
 (21) Free Software Foundation LGPL License (*-linux* targets only)
 
-   Copyright (C) 1990-2025
+   Copyright (C) 1990-1999, 2000, 2001 
    Free Software Foundation, Inc.
    This file is part of the GNU C Library.
    Contributed by Mark Kettenis <kettenis@phys.uva.nl>, 1997.
@@ -1259,8 +1238,10 @@ warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
    Lesser General Public License for more details.
 
-   You should have received a copy of the GNU Lesser General Public License
-   along with the GNU C Library; if not, see https://www.gnu.org/licenses/.
+   You should have received a copy of the GNU Lesser General Public
+   License along with the GNU C Library; if not, write to the Free
+   Software Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA
+   02110-1301 USA
 
 (22) Xavier Leroy LGPL License (i[3456]86-*-linux* targets only)
 
@@ -1529,110 +1510,3 @@ contrib/unicode/from_glibc:
 # You should have received a copy of the GNU Lesser General Public
 # License along with the GNU C Library; if not, see
 # <https://www.gnu.org/licenses/>.
-
-gcc/cobol, libgcobol:
-
- * Copyright (c) 2021-2024 Symas Corporation
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions are
- * met:
- *
- * * Redistributions of source code must retain the above copyright
- *   notice, this list of conditions and the following disclaimer.
- * * Redistributions in binary form must reproduce the above
- *   copyright notice, this list of conditions and the following disclaimer
- *   in the documentation and/or other materials provided with the
- *   distribution.
- * * Neither the name of the Symas Corporation nor the names of its
- *   contributors may be used to endorse or promote products derived from
- *   this software without specific prior written permission.
- *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
- * A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
- * OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
- * SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
- * LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
- * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
- * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-
-gcc/algol68
-
-   Copyright (C) 2025 Jose E. Marchesi.
-
-   This file is NOT part of GCC.
-
-   GCC is free software; you can redistribute it and/or modify it under the
-   terms of the GNU General Public License as published by the Free Software
-   Foundation; either version 3, or (at your option) any later version.
-
-   GCC is distributed in the hope that it will be useful, but WITHOUT ANY
-   WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
-   FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
-   details.
-
-   You should have received a copy of the GNU General Public License along with
-   GCC; see the file COPYING3.  If not see <http://www.gnu.org/licenses/>.
-
-libga68:
-
-   Copyright (C) 2025 Jose E. Marchesi.
-
-   This file is NOT part of GCC.
-
-   GCC is free software; you can redistribute it and/or modify it under the
-   terms of the GNU General Public License as published by the Free Software
-   Foundation; either version 3, or (at your option) any later version.
-
-   GCC is distributed in the hope that it will be useful, but WITHOUT ANY
-   WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
-   FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
-   details.
-
-   Under Section 7 of GPL version 3, you are granted additional permissions
-   described in the GCC Runtime Library Exception, version 3.1, as published by
-   the Free Software Foundation.
-
-   You should have received a copy of the GNU General Public License and a copy
-   of the GCC Runtime Library Exception along with this program; see the files
-   COPYING3 and COPYING.RUNTIME respectively.  If not, see
-   <http://www.gnu.org/licenses/>.
-
-gcc/rust/checks/errors/borrowck/ffi-polonius/vendor/
-libgrust/libformat_parser/vendor/
-
-   Vendored crates are authored by "The Rust Project Developers",
-   licensed under the Apache-2.0/MIT licenses.
-
-   MIT License:
-   
-   Permission is hereby granted, free of charge, to any
-   person obtaining a copy of this software and associated
-   documentation files (the "Software"), to deal in the
-   Software without restriction, including without
-   limitation the rights to use, copy, modify, merge,
-   publish, distribute, sublicense, and/or sell copies of
-   the Software, and to permit persons to whom the Software
-   is furnished to do so, subject to the following
-   conditions:
-
-   The above copyright notice and this permission notice
-   shall be included in all copies or substantial portions
-   of the Software.
-
-   THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF
-   ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED
-   TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
-   PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT
-   SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
-   CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
-   OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
-   IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
-   DEALINGS IN THE SOFTWARE.
-
-On Debian GNU/Linux systems, the complete text of Apache 2.0 License
-is in `/usr/share/common-licenses/Apache-2.0'.

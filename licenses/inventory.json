@@ -750,26 +750,26 @@
     {
       "id": "gcc-runtime",
       "origin": "https://gcc.gnu.org/",
-      "revision": "GCC 15.2.0 (Ubuntu 15.2.0-16ubuntu1 sysroot)",
+      "revision": "GCC 12.3.0 (Ubuntu 12.3.0-1ubuntu1~22.04.3 sysroot)",
       "spdx": "GPL-3.0-or-later WITH GCC-exception-3.1",
-      "original": "Ubuntu gcc-15-base 15.2.0-16ubuntu1 /usr/share/doc/gcc-15-base/copyright",
+      "original": "Ubuntu gcc-12-base 12.3.0-1ubuntu1~22.04.3 /usr/share/doc/gcc-12-base/copyright",
       "license_file": "licenses/gcc-runtime.txt",
       "scope": "binary-linux",
       "integration": "Linux x64 package only: libstdc++ templates and static libstdc++/libgcc objects (-static-libstdc++ -static-libgcc), compiled by Clang (an eligible compilation process)",
       "obligations": "GCC Runtime Library Exception 3.1 permits distributing the resulting binaries under the project terms; preserve this notice.",
-      "license_sha256": "41a2d69df964174fb042b6513e99b72177318e94ca0c29a813e6f3155a9c5048"
+      "license_sha256": "da8191658b3452ce9caf31638ba61dab31a38c619fa39df119812e050f592fd3"
     },
     {
       "id": "glibc",
       "origin": "https://www.gnu.org/software/libc/",
-      "revision": "glibc 2.43 (Ubuntu 2.43-2ubuntu2 sysroot)",
+      "revision": "glibc 2.35 (Ubuntu 2.35-0ubuntu3.15 sysroot)",
       "spdx": "LGPL-2.1-or-later",
-      "original": "Ubuntu libc6 2.43-2ubuntu2 /usr/share/doc/libc6/copyright",
+      "original": "Ubuntu libc6 2.35-0ubuntu3.15 /usr/share/doc/libc6/copyright",
       "license_file": "licenses/glibc.txt",
       "scope": "binary-linux",
       "integration": "Linux x64 package only: shared system glibc, not shipped; startup objects (crt1.o, crti.o, crtn.o) and libc_nonshared.a are linked under their linking exception",
-      "obligations": "System library supplied by the distribution; preserve the startup-file exception notice.",
-      "license_sha256": "c31d10900fdb95d1889005145a2205bb75e3bc018d3ec8265b81364901748e09"
+      "obligations": "System library supplied by the distribution; preserve this LGPL notice. The linked startup objects carry the upstream linking exception in their own glibc sources.",
+      "license_sha256": "d3c95b56fa33e28b57860580f0baf4e4f4de2a268a2b80f1d031a5191bade265"
     },
     {
       "id": "git/usr/share/licenses/gcc-libs",

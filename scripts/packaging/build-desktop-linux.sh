@@ -3,7 +3,9 @@
 # Builds the exported, patched source with the locked LLVM and a private sysroot,
 # runs only the distribution tests and writes binaries plus raw compiler/linker
 # evidence to <evidence>. Never installs, publishes or touches the user's data.
-#   build <exported-source> <evidence> <job> <version> <payload-sha256> <toolchain> <llvm-version>
+#   build <exported-source> <evidence> <job> <version> <payload-sha256> <toolchain> <llvm-version> <sysroot-dir>
+# <toolchain>/root holds the host build tools; <sysroot-dir>/root is the target
+# (prepare-linux-sysroot.sh), checked against the exported linux-sysroot-jammy.lock.
 #   archive <package-dir> <job> <output.tar.gz> <executable>...
 #   clean <job>
 set -eu
@@ -33,14 +35,18 @@ archive)
 build) ;;
 *) echo "usage: build|archive|clean" >&2; exit 2 ;;
 esac
-export_tree=$2 evidence=$3 job=$4 version=$5 payload=$6 toolchain=$7 llvm_version=$8
+export_tree=$2 evidence=$3 job=$4 version=$5 payload=$6 toolchain=$7 llvm_version=$8 sysroot_dir=$9
 case "$job" in *[!0-9a-f]* | "") echo "invalid job" >&2; exit 2 ;; esac
-sysroot="$toolchain/root"
+tools="$toolchain/root"
+sysroot="$sysroot_dir/root"
 llvm="$toolchain/llvm-$llvm_version-linux-x64"
 source="$cache/$job/source" build="$cache/$job/build"
-for tool in "$llvm/bin/clang" "$llvm/bin/clang++" "$sysroot/usr/bin/cmake" "$sysroot/usr/bin/ctest" "$sysroot/usr/bin/ninja" "$sysroot/usr/bin/pkg-config"; do
+for tool in "$llvm/bin/clang" "$llvm/bin/clang++" "$tools/usr/bin/cmake" "$tools/usr/bin/ctest" "$tools/usr/bin/ninja" "$tools/usr/bin/pkg-config" "$tools/usr/bin/wayland-scanner"; do
   [ -x "$tool" ] || { echo "toolchain component missing: $tool" >&2; exit 3; }
 done
+# The glibc floor comes from this sysroot: refuse one that is not the locked set.
+cmp -s "$export_tree/scripts/packaging/linux-sysroot-jammy.lock" "$sysroot_dir/sysroot.lock" ||
+  { echo "sysroot differs from linux-sysroot-jammy.lock: $sysroot_dir" >&2; exit 3; }
 [ ! -e "$cache/$job" ] || { echo "build directory already exists" >&2; exit 2; }
 mkdir -p "$build" "$evidence"
 : > "$cache/$job/.x360n-linux-build"
@@ -48,8 +54,8 @@ mkdir -p "$build" "$evidence"
 # compiler launcher passes the source path relative to the build directory.
 cp -R "$export_tree" "$source"
 # Only the private toolchain: no global packages, include or library paths.
-export PATH="$llvm/bin:$sysroot/usr/bin:/usr/bin:/bin"
-export LD_LIBRARY_PATH="$sysroot/usr/lib/x86_64-linux-gnu:$sysroot/lib/x86_64-linux-gnu"
+export PATH="$llvm/bin:$tools/usr/bin:/usr/bin:/bin"
+export LD_LIBRARY_PATH="$tools/usr/lib/x86_64-linux-gnu:$tools/lib/x86_64-linux-gnu"
 export PKG_CONFIG_SYSROOT_DIR="$sysroot"
 export PKG_CONFIG_LIBDIR="$sysroot/usr/lib/x86_64-linux-gnu/pkgconfig:$sysroot/usr/share/pkgconfig:$sysroot/usr/lib/pkgconfig"
 unset CPATH LIBRARY_PATH C_INCLUDE_PATH CPLUS_INCLUDE_PATH
@@ -59,7 +65,7 @@ links="-static-libstdc++ -static-libgcc"
 cmake -S "$source" -B "$build" -G Ninja -DX360_DESKTOP_ONLY=ON -DX360_DISTRIBUTION=ON \
   "-DX360_PACKAGE_PAYLOAD_SHA256=$payload" "-DX360_VERSION=$version" -DCMAKE_BUILD_TYPE=Release \
   "-DCMAKE_C_COMPILER=$llvm/bin/clang" "-DCMAKE_CXX_COMPILER=$llvm/bin/clang++" "-DCMAKE_SYSROOT=$sysroot" \
-  "-DCMAKE_MAKE_PROGRAM=$sysroot/usr/bin/ninja" "-DPKG_CONFIG_EXECUTABLE=$sysroot/usr/bin/pkg-config" \
+  "-DCMAKE_MAKE_PROGRAM=$tools/usr/bin/ninja" "-DPKG_CONFIG_EXECUTABLE=$tools/usr/bin/pkg-config" \
   "-DCMAKE_C_FLAGS=$flags" "-DCMAKE_CXX_FLAGS=$flags" "-DCMAKE_EXE_LINKER_FLAGS=$links" "-DCMAKE_SHARED_LINKER_FLAGS=$links" \
   -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
 cmake --build "$build" --target x360-native x360n_desktop_tests
@@ -78,4 +84,6 @@ clang="$(readlink -f "$llvm/bin/clang++")"
   echo "build=$build"
   echo "llvm=$llvm"
   echo "sysroot=$sysroot"
+  echo "tools=$tools"
+  echo "sysroot_lock_sha256=$(sha256sum "$sysroot_dir/sysroot.lock" | cut -d' ' -f1)"
 } > "$evidence/toolchain.txt"

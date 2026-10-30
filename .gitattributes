@@ -10,3 +10,5 @@ patches/**/*.patch -text
 /titles/**/*.toml text eol=lf
 /titles/*/generated/rexglue.cmake text eol=lf
 /scripts/*.sh text eol=lf
+/scripts/packaging/*.sh text eol=lf
+/scripts/packaging/*.lock text eol=lf

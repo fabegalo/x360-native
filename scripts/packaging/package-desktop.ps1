@@ -2,10 +2,12 @@
 param([string]$Version = '', [string]$OutputDirectory = '.local/packages',
       [ValidateSet('local-candidate','public-prerelease')][string]$Publication = 'local-candidate',
       [string]$ProvenanceFile = '', [switch]$KeepIntermediates,
-      # linux-x64 builds in WSL with the locked LLVM and a private sysroot; the
+      # linux-x64 builds in WSL with the locked LLVM, host tools from $LinuxToolchain
+      # and the Ubuntu 22.04 target sysroot of prepare-linux-sysroot.sh; the
       # export, patches, evidence and license gate stay in this one script.
       [ValidateSet('windows-x64','linux-x64')][string]$Platform = 'windows-x64',
-      [string]$WslDistribution = 'Ubuntu', [string]$LinuxToolchain = '/root/.cache/x360n-native-validation')
+      [string]$WslDistribution = 'Ubuntu', [string]$LinuxToolchain = '/root/.cache/x360n-native-validation',
+      [string]$LinuxSysroot = '/root/.cache/x360n-sysroot-jammy')
 $ErrorActionPreference = 'Stop'
 $env:PSModulePath = Join-Path $PSHOME 'Modules'
 $root = (Resolve-Path (Join-Path $PSScriptRoot '../..')).Path
@@ -26,7 +28,7 @@ if ($ProvenanceFile) {
     $provenance = Get-Content -Raw -LiteralPath $ProvenanceFile | ConvertFrom-Json
     if ($provenance.commit -ne $head -or $provenance.version -ne $Version) { throw 'CI provenance differs from the committed package source/version' }
 }
-git -C $root diff --quiet HEAD -- scripts/packaging/package-desktop.ps1 scripts/packaging/build-desktop-linux.sh
+git -C $root diff --quiet HEAD -- scripts/packaging/package-desktop.ps1 scripts/packaging/build-desktop-linux.sh scripts/packaging/linux-sysroot-jammy.lock
 if ($LASTEXITCODE -ne 0) { throw 'Commit the packaging script before using it.' }
 $jobId = [guid]::NewGuid().ToString('N')
 $job = Join-Path $root ".local/build/distribution/$jobId"
@@ -123,13 +125,15 @@ if ($linux) {
     }
     $evidence = Join-Path $job 'linux'
     $linuxBuild = Join-Path $source 'scripts/packaging/build-desktop-linux.sh'
-    & wsl.exe -d $WslDistribution -e sh (WslPath $linuxBuild) build (WslPath $source) (WslPath $evidence) $jobId $Version $payloadHash $LinuxToolchain $lock.llvm.version
+    & wsl.exe -d $WslDistribution -e sh (WslPath $linuxBuild) build (WslPath $source) (WslPath $evidence) $jobId $Version $payloadHash $LinuxToolchain $lock.llvm.version $LinuxSysroot
     if ($LASTEXITCODE -ne 0) { throw 'Linux distribution build or tests failed; archive withheld' }
     $toolchain = @{}
     foreach ($line in Get-Content -LiteralPath (Join-Path $evidence 'toolchain.txt')) { if ($line -match '^([a-z0-9_]+)=(.+)$') { $toolchain[$Matches[1]] = $Matches[2] } }
     $compilerVersion = $toolchain.compiler_version
     $compilerHash = $toolchain.compiler_sha256
     if ($compilerHash -notmatch '^[a-f0-9]{64}$') { throw 'Linux compiler identity missing' }
+    $sysrootLock = Hash (Join-Path $source 'scripts/packaging/linux-sysroot-jammy.lock')
+    if ($toolchain.sysroot_lock_sha256 -ne $sysrootLock) { throw 'Linux sysroot differs from linux-sysroot-jammy.lock' }
     $build = "wsl:$($toolchain.build)"
     $programs = @((Join-Path $destination 'x360-native'), (Join-Path $internal 'x360n'), (Join-Path $internal 'x360n-extract'), (Join-Path $internal 'libx360n-mspack.so'))
     foreach ($program in $programs) { Copy-Item -LiteralPath (Join-Path $evidence (Split-Path -Leaf $program)) -Destination $program }
@@ -151,10 +155,12 @@ if ($linux) {
             if ($line -match 'Name: GLIBC_([0-9.]+)$' -and [version]$Matches[1] -gt $glibc) { $glibc = [version]$Matches[1] }
         }
     }
+    # The Ubuntu 22.04 floor, like the upstream SDK's linux-amd64 build.
+    if ($glibc -gt [version]'2.35') { throw "glibc floor $glibc exceeds 2.35" }
     $ninjaInputs = Get-Content -LiteralPath (Join-Path $evidence 'ninja-deps.txt')
     $links = Get-Content -LiteralPath (Join-Path $evidence 'ninja-query.txt')
     $commands = Get-Content -Raw -LiteralPath (Join-Path $evidence 'compile_commands.json') | ConvertFrom-Json
-    $mappings = @(@($toolchain.source, '<source>'), @($toolchain.build, '<build>'), @($toolchain.llvm, '<llvm>'), @($toolchain.sysroot, '<sysroot>'))
+    $mappings = @(@($toolchain.source, '<source>'), @($toolchain.build, '<build>'), @($toolchain.llvm, '<llvm>'), @($toolchain.sysroot, '<sysroot>'), @($toolchain.tools, '<tools>'))
     $absolute = '(?i)[a-z]:[/\\]|/mnt/|/root/|/home/|/tmp/'
 } else {
     $compilerVersion = (& $clang --version | Select-Object -First 1)
@@ -332,7 +338,8 @@ $metadata = [ordered]@{
 if ($linux) {
     $metadata.configuration = 'Release'; $metadata.desktop_only = $true; $metadata.relative_source_paths = $true
     $metadata.compiler_flags = '-march=x86-64-v2 -ffile-prefix-map=<source>=/x360-source'; $metadata.linker_flags = '-static-libstdc++ -static-libgcc'
-    $metadata.glibc_minimum = $glibc.ToString(); $metadata.publication = $Publication; $metadata.clean_linux = 'pending'
+    $metadata.glibc_minimum = $glibc.ToString(); $metadata.sysroot = [ordered]@{ distribution = 'ubuntu-22.04'; lock_sha256 = $sysrootLock }
+    $metadata.publication = $Publication; $metadata.clean_linux = 'pending'
 } else {
     $metadata.resource_compiler_sha256 = Hash $rcCompiler
     $metadata.configuration = 'Release'; $metadata.desktop_only = $true; $metadata.relative_source_paths = $true
