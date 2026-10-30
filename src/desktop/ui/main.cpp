@@ -9,6 +9,7 @@
 #include "frontend.h"
 #include "renderer.h"
 #include "app_text.h"
+#include "handheld.h"
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
@@ -146,8 +147,14 @@ int main(int argc, char** argv) {
   g_wake = SDL_RegisterEvents(2); g_picked = g_wake + 1;
   const float content = SDL_GetDisplayContentScale(SDL_GetPrimaryDisplay());
   const float start_scale = content > 0 ? content : 1.0f;
+  // SteamOS Gaming Mode (Steam Deck LCD/OLED or any gamescope session) shows one
+  // fullscreen app; Desktop Mode and other systems keep the normal window.
+  const auto handheld = DetectHandheld();
+  if (const auto described = DescribeHandheld(handheld); !described.empty())
+    SDL_Log("x360-native handheld session: %s", described.c_str());
   SDL_Window* window = SDL_CreateWindow("x360-native", int(1220 * start_scale), int(800 * start_scale),
-                                        SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY | SDL_WINDOW_HIDDEN);
+                                        SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY | SDL_WINDOW_HIDDEN |
+                                            (LauncherStartsFullscreen(handheld) ? SDL_WINDOW_FULLSCREEN : 0));
   if (!window) {
     SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "x360-native", SDL_GetError(), nullptr);
     SDL_Quit(); return 1;

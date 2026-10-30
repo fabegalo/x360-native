@@ -11,6 +11,7 @@
 #include <sys/sysinfo.h>
 #endif
 #include "environment.h"
+#include "handheld.h"
 #include "host_platform.h"
 extern char** environ;
 namespace fs = std::filesystem;
@@ -75,6 +76,8 @@ Environment CheckEnvironment(const fs::path& root) {
   struct sysinfo info{};
   if (sysinfo(&info) == 0) r.memory = std::to_string((uint64_t(info.totalram) * info.mem_unit + (512ull << 20)) >> 30) + " GiB";
   r.description = std::string("Linux ") + machine + "\r\n";
+  // Steam Deck LCD/OLED and Gaming Mode: the same package, reported for diagnostics.
+  r.description += DescribeHandheld(DetectHandheld());
 #endif
   if (!r.architecture) r.description += "Unsupported architecture / arquitetura não validada\r\n";
   r.gpu = ProbeVulkanDevice();

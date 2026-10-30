@@ -88,7 +88,7 @@ if(TARGET Catch2::Catch2WithMain)
     set_tests_properties(desktop.launcher-contracts PROPERTIES LABELS project TIMEOUT 120)
   endif()
   add_executable(x360n_desktop_tests ../../tests/desktop/catalog_test.cpp ../../tests/desktop/imported_games_test.cpp
-    ../../tests/desktop/update_test.cpp)
+    ../../tests/desktop/update_test.cpp ../../tests/desktop/handheld_test.cpp)
   add_executable(x360n_update_crash_probe ../../tests/desktop/update_crash_probe.cpp)
   target_link_libraries(x360n_update_crash_probe PRIVATE x360n_desktop_model)
   add_dependencies(x360n_desktop_tests x360n_update_crash_probe x360n)
