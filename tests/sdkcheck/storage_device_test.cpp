@@ -209,6 +209,47 @@ TEST_CASE("Storage path validation rejects reparse ancestors and preserves missi
 #endif
 }
 
+TEST_CASE("Quota traversal rejects linked entries and volume ancestors without changing its snapshot",
+          "[sdk][storage-device][storage-quota-links]") {
+#if defined(_WIN32)
+  namespace fs = std::filesystem;
+  using rex::system::xam::ContentDeviceInfo;
+  using rex::system::xam::DeviceType;
+  using rex::system::xam::QueryContentDeviceSpace;
+  for (bool linked_ancestor : {false, true}) {
+    DYNAMIC_SECTION("linked volume ancestor " << linked_ancestor) {
+      StorageRoot root;
+      const auto volume = root.path / "actual/volume";
+      fs::create_directories(volume / "branch/nested");
+      std::ofstream(volume / "branch/nested/payload") << "inside";
+      const auto outside = root.path / "unrelated";
+      fs::create_directories(outside);
+      std::ofstream(outside / "sentinel") << "outside";
+      ContentDeviceInfo device{7, DeviceType::MU, 0, 0, u"Test", volume, 1048576, 0};
+      REQUIRE(QueryContentDeviceSpace(device) == 0);
+      REQUIRE(device.total_bytes == 1048576);
+      REQUIRE(device.free_bytes == 1048576 - 6);
+      const auto total = device.total_bytes, free = device.free_bytes;
+      const auto link = linked_ancestor ? root.path / "linked-parent"
+                                       : volume / "branch/nested/linked-entry";
+      CreateStorageJunction(link, linked_ancestor ? root.path / "actual" : outside);
+      if (linked_ancestor) device.root = link / "volume";
+      CHECK(QueryContentDeviceSpace(device) ==
+            (linked_ancestor ? X_ERROR_DEVICE_NOT_CONNECTED : X_ERROR_ACCESS_DENIED));
+      CHECK(device.total_bytes == total);
+      CHECK(device.free_bytes == free);
+      CHECK(fs::file_size(outside / "sentinel") == 7);
+      REQUIRE(RemoveDirectoryW(link.c_str()));
+      device.root = volume;
+      CHECK(QueryContentDeviceSpace(device) == 0);
+      CHECK(device.free_bytes == free);
+    }
+  }
+#else
+  SKIP("Windows reparse-point quota fixtures");
+#endif
+}
+
 TEST_CASE("Storage selector preserves original request and defers selection to the system app", "[sdk][storage-selector]") {
   StorageRoot root;
   DeviceGuest guest(root.path);

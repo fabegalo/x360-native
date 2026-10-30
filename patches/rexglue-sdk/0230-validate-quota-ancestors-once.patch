@@ -1,0 +1,22 @@
+--- a/src/system/xam/content_manager.cpp
++++ b/src/system/xam/content_manager.cpp
+@@ -87,7 +87,18 @@
+     std::filesystem::recursive_directory_iterator it(device.root, ec), end;
+     if (ec) return X_ERROR_ACCESS_DENIED;
+     for (; it != end; it.increment(ec)) {
+-      if (ec || !IsUnlinkedStoragePath(it->path())) return X_ERROR_ACCESS_DENIED;
++      if (ec) return X_ERROR_ACCESS_DENIED;
++      // The root and its ancestors were checked before traversal. The iterator
++      // visits each parent before descending into it, so validate each existing
++      // entry once rather than querying all of its ancestors again per file.
++      // Reject reparse points before increment can descend into a junction.
++#ifdef _WIN32
++      const auto attrs = GetFileAttributesW(it->path().c_str());
++      if (attrs == INVALID_FILE_ATTRIBUTES || (attrs & FILE_ATTRIBUTE_REPARSE_POINT))
++        return X_ERROR_ACCESS_DENIED;
++#else
++      if (it->is_symlink(ec) || ec) return X_ERROR_ACCESS_DENIED;
++#endif
+       // Secondary volumes have independent accounting; never count them in HDD.
+       if (device.device_id == 1 && it->path() == device.root / "storage") {
+         it.disable_recursion_pending(); continue;

@@ -2268,3 +2268,12 @@ checksum detects corruption, not authenticity. Host-only optional checkpoints
 exercise real process termination at the three publication boundaries; normal
 guest progress and cancellation contracts remain unchanged. This is process
 interruption recovery, not power-loss durability or atomic move-source deletion.
+
+### 0230 — validate quota traversal ancestors once
+
+Keep fresh quota accounting and reject linked volume roots/ancestors. Once the
+root is validated, inspect each iterator entry before descending, rejecting every
+Windows reparse point or POSIX symlink without rechecking the same ancestor paths
+for every file. Preserve independent secondary-volume accounting and error
+snapshots. Focused tests use real nested junctions and a linked volume ancestor;
+the unchanged quota/path scale scenario provides comparable before/after samples.

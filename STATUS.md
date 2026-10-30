@@ -20,8 +20,13 @@ assistente atingiu o limite de 300 s sem iniciar outra transferência.
 novas, 1.522/24 casos focados aprovados, replay de 17 patches/2 arquivos e preparo
 oficial concluído. XUI exibiu “Transfer save” recuperado na MU; sessão fechada
 normalmente em 76 s, hashes completos e origem preservados, sem staging.
-Cancelamento gráfico durante I/O sem aceite (a cópia terminou antes do comando);
-exclusão parcial da origem de move interrompido ainda não é atômica.
+0230 reduz a mediana do cenário de quota de 4.612 para 454 ms (−90,16%), sem
+retirar proteção contra links; 1.550 asserções/25 casos focados e preparo oficial
+aprovados. **Cancelamento gráfico aceito:** assistente original → Parar
+Transferência → Sim, `XMsgCancelIORequest(wait=1)`, resultado real 1223; origem
+de 480 MiB/8.192 arquivos íntegra, USB sem destino parcial/staging. Sessão fechada
+normalmente em 210 s. Exclusão parcial da origem de move interrompido ainda não
+é atômica.
 Conquistas/P1 não ampliados antes de concluir Storage; sem Release.
 [Evidências e limites](docs/reports/dash-os-features-03-2026-10-30.md).
 

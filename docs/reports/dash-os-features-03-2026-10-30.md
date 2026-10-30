@@ -370,3 +370,41 @@ ausente. Cópia USB anterior foi arquivada antes de restaurar a origem de teste.
 Enumeração de volumes e resposta da XUI ainda lentas com ambos os volumes cheios;
 não confundir barra atrasada com I/O ainda cancelável. Estes resultados não
 comprovam a hipótese sobre o instante exato de início do commit.
+
+## Ancestrais na varredura de quota — 0230
+
+`QueryContentDeviceSpace` chamava `IsUnlinkedStoragePath` em cada arquivo: além
+da entrada, consultava repetidamente os mesmos pais até a raiz do Windows. 0230
+valida a raiz/ancestrais antes da varredura e cada entrada antes de o iterador
+descer nela. Continua rejeitando reparse points/junctions no Windows e symlinks
+no POSIX, com quota fresca, reservas e separação HDD/volumes secundários.
+
+Teste novo com junction real aninhada e ancestral de volume: **28 asserções
+aprovadas antes/depois**, incluindo snapshot inalterado no erro e nova consulta
+após retirar somente a junction. Mesmo teste de escala protegido de 0229:
+antes **4.648,15 / 4.370,45 / 4.612,38 ms**; depois
+**453,757 / 454,023 / 504,485 ms**. Mediana −90,16% (10,16×), 56 asserções
+aprovadas. Gate local optativo de 1.000 ms recusa a referência e aprova a variante;
+sem limite temporal novo no CI. Sem compilação ou sessão gráfica simultânea.
+
+Conjunto focado fora do sandbox: **1.550 asserções/25 casos aprovados**, log
+`.local/storage-quota-ancestors-regression.log`; tempos desse executor não são
+comparados aos protegidos. Replay de **18 patches/1 arquivo**, SHA-256 conferido
+em `storage-replay-1793402815940691700/result.json`. Nenhuma afirmação de FPS,
+ganho gráfico ou validação POSIX a partir destes testes Windows.
+
+Preparo oficial concluído (`.local/storage-quota-ancestors-prepare.log`).
+`20261030T234552Z-storage-quota-cancel-ui`, massa nova com **8.192 × 60 KiB**
+(480 MiB), mesmos limites lógicos de HDD/MU/USB: assistente original HDD → USB,
+Player1 desmarcado, Iniciar → B → “Parar Transferência” → Sim. Request às
+20:48:53.244; `XMsgCancelIORequest(40760A90,1)` às 20:49:03.974; resultado real
+**1223** às 20:49:05.716 (`rex.1.log`). XUI mostrou **0 de 1 transferidos com êxito**.
+Encerramento normal em **210.017 ms**, exit 0, sem exceção ou timeout. Permanecem
+as mensagens não implementadas `FC/58003`.
+
+`storage-quota-ui-verification.json`: 8.192 hashes e header da origem intactos,
+perfil preservado, pacote/header de destino ausentes e staging removido. É aceite
+de cancelamento pelo fluxo original, sem retardador de I/O, mudança de retorno ou
+instrumentação no loop de cópia. Os conjuntos de arquivos das sessões diferem;
+não são uma comparação equivalente de desempenho gráfico. Medição de ganho
+permanece restrita ao teste protegido acima.

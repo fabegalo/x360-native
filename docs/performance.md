@@ -359,3 +359,11 @@ erros. Na mesma medição protegida, mediana de 8.450,17 para 4.466,78 ms (−47
 junction real e descendentes rejeitados antes/depois. Sem extrapolação para
 desktop sem sandbox ou FPS; 1.337 asserções/21 regressões de Storage aprovadas.
 [Cenário e limites](reports/dash-os-features-03-2026-10-30.md).
+
+0230 (30/10): a varredura de quota valida raiz/ancestrais uma vez e cada entrada
+antes de descer nela, mantendo rejeição de links/junctions e valores atuais.
+Mesmo cenário protegido de 0229: mediana de 4.612,38 para 454,023 ms (−90,16%,
+10,16×), 3 amostras por variante. Junction aninhada e ancestral de volume:
+28 asserções antes/depois, sem alterar snapshot no erro. Conjunto focado:
+1.550 asserções/25 casos aprovados. Sem extrapolar para FPS ou sessões gráficas.
+[Cenário e limites](reports/dash-os-features-03-2026-10-30.md).
