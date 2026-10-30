@@ -75,7 +75,7 @@ function ExportTree([string]$Repository, [string]$Revision, [string]$Directory) 
 }
 function Hash([string]$File) { (Get-FileHash -LiteralPath $File -Algorithm SHA256).Hash.ToLowerInvariant() }
 function WriteIndex([string]$Directory, [string]$Name) {
-    $lines = @(Get-ChildItem -LiteralPath $Directory -Recurse -File | Sort-Object FullName | ForEach-Object {
+    $lines = @(Get-ChildItem -LiteralPath $Directory -Recurse -File -Force | Sort-Object FullName | ForEach-Object {
         (Hash $_.FullName) + "`t" + $_.FullName.Substring($Directory.Length + 1).Replace('\','/')
     })
     [IO.File]::WriteAllText((Join-Path $Directory $Name), ($lines -join "`n") + "`n", [Text.UTF8Encoding]::new($false))
@@ -86,7 +86,7 @@ $payload = Join-Path $internal 'workspace'
 New-Item -ItemType Directory -Force $payload | Out-Null
 # Separate source export: build coordination files must never enter the payload.
 ExportTree $root $head $payload
-foreach ($file in Get-ChildItem -LiteralPath $payload -Recurse -File) {
+foreach ($file in Get-ChildItem -LiteralPath $payload -Recurse -File -Force) {
     $rel = $file.FullName.Substring($payload.Length + 1).Replace('\','/')
     if ($rel -match '(^|/)(\.local|\.git|external)/' -or $rel -match '\.(xex|xexp|xtt|ttf|otf|pdb|dll|exe|stfs|iso)$' -or
         ($rel -match '/generated/' -and $rel -notmatch '/generated/rexglue\.cmake$')) { throw "Non-distributable payload entry: $rel" }
@@ -472,7 +472,7 @@ Add-Type -AssemblyName System.IO.Compression.FileSystem
 $stream = [IO.File]::Open($archiveFile, 'CreateNew')
 $archive = [IO.Compression.ZipArchive]::new($stream, [IO.Compression.ZipArchiveMode]::Create)
 try {
-    foreach ($file in Get-ChildItem -LiteralPath $destination -Recurse -File | Sort-Object FullName) {
+    foreach ($file in Get-ChildItem -LiteralPath $destination -Recurse -File -Force | Sort-Object FullName) {
         $rel = $name + '/' + $file.FullName.Substring($destination.Length + 1).Replace('\','/')
         $entry = $archive.CreateEntry($rel, [IO.Compression.CompressionLevel]::Optimal)
         $entry.LastWriteTime = [DateTimeOffset]::new(2000,1,1,0,0,0,[TimeSpan]::Zero)

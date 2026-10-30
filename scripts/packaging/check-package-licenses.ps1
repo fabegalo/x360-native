@@ -25,7 +25,7 @@ function VerifyIndex($base, $name) {
         $seen[$rel]=$true
         if ((Digest (Under $base $rel)) -ne $hash) { throw "Index mismatch: $rel" }
     }
-    foreach($f in Get-ChildItem -LiteralPath $base -Recurse -File) {
+    foreach($f in Get-ChildItem -LiteralPath $base -Recurse -File -Force) {
         $r=$f.FullName.Substring($base.Length+1).Replace('\','/')
         if ($r -ne $name -and -not $seen.ContainsKey($r)) { throw "Unindexed package entry: $r" }
     }
@@ -131,7 +131,7 @@ foreach($dependencyInput in $dependencyInputs) {
 . (Join-Path $PSScriptRoot 'excluded-constants.ps1')
 $policy = Get-Content (Join-Path $PSScriptRoot '../../licenses/excluded-loader-constants.json') -Raw | ConvertFrom-Json
 if ($policy.schema -ne 1 -or $policy.rules.Count -lt 3) { throw 'SDK constant exclusion evidence missing' }
-foreach($file in Get-ChildItem -LiteralPath $package -Recurse -File) {
+foreach($file in Get-ChildItem -LiteralPath $package -Recurse -File -Force) {
     $rel=$file.FullName.Substring($package.Length+1).Replace('\','/')
     if($file.Attributes -band [IO.FileAttributes]::ReparsePoint) { throw 'Reparse point in package' }
     if($rel -notlike 'app/workspace/*' -and $rel -notin $expected) { throw "Unidentified distributed file: $rel" }
