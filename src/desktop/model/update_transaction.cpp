@@ -52,7 +52,7 @@ fs::path Under(const fs::path& root, const std::string& relative) {
   for (const auto& part : rel)
     if (!IsSafePackageEntryName(Utf8(part))) throw std::runtime_error("Componente inválido na atualização");
   const auto top = Lower(Utf8(*rel.begin()));
-  if (top == "data" || top == ".local" || top == ".git" || top == "recover-update.cmd")
+  if (top == "data" || top == ".local" || top == ".git" || top == "recover-update.cmd" || top == "recover-update.sh")
     throw std::runtime_error("Inventário da atualização tentou incluir dados locais ou recuperação");
   const auto result = root / rel;
   CheckPath(result);
@@ -235,11 +235,16 @@ void ApplyUpdate(const fs::path& package, const fs::path& staged, const std::str
   for (const auto& entry : fs::directory_iterator(package / "data/updates"))
     if (entry.is_directory() && fs::exists(entry.path() / "plan.json") &&
         !fs::exists(entry.path() / "rolled-back") && !fs::exists(entry.path() / "confirmed"))
-      throw std::runtime_error("Atualização anterior pendente; inicie-a ou execute recover-update.cmd");
+      throw std::runtime_error("Atualização anterior pendente; inicie-a ou execute " + RecoveryScriptName());
   const auto old = Inventory(package, false), incoming = Inventory(staged, true);
+#ifdef _WIN32
   constexpr const char* recovery_header = "@echo off\r\n:: x360-native update recovery v1\r\n";
-  if (fs::exists(package / "recover-update.cmd") && !Text(package / "recover-update.cmd").starts_with(recovery_header))
-    throw std::runtime_error("recover-update.cmd já existe e não pertence ao atualizador; arquivo preservado");
+#else
+  constexpr const char* recovery_header = "#!/bin/sh\n# x360-native update recovery v1\n";
+#endif
+  const auto script = package / RecoveryScriptName();
+  if (fs::exists(script) && !Text(script).starts_with(recovery_header))
+    throw std::runtime_error(RecoveryScriptName() + " já existe e não pertence ao atualizador; arquivo preservado");
   if (Json::parse(Text(staged / "package.json")).value("version", std::string()) != version)
     throw std::runtime_error("Pacote não corresponde à versão anunciada");
   for (const auto& [name, hash] : incoming) {
@@ -261,9 +266,16 @@ void ApplyUpdate(const fs::path& package, const fs::path& staged, const std::str
   }
   // Recovery survives a missing launcher/app directory and a broken new build.
   // This is the old supervisor, copied outside all application moves.
-  FlushCopy(package / "app/x360n.exe", transaction / "recovery.exe");
+  FlushCopy(package / PackageExecutable("app/x360n"), transaction / PackageExecutable("recovery"));
+#ifdef _WIN32
   const auto relative = "data\\updates\\" + Utf8(transaction.filename());
-  DurableWrite(package / "recover-update.cmd", std::string(recovery_header) + "\"%~dp0" + relative + "\\recovery.exe\" recover-update --package \"%~dp0.\" --transaction \"%~dp0" + relative + "\"\r\nif errorlevel 1 pause\r\n");
+  DurableWrite(script, std::string(recovery_header) + "\"%~dp0" + relative + "\\recovery.exe\" recover-update --package \"%~dp0.\" --transaction \"%~dp0" + relative + "\"\r\nif errorlevel 1 pause\r\n");
+#else
+  const auto relative = "data/updates/" + Utf8(transaction.filename());
+  DurableWrite(script, std::string(recovery_header) + "here=$(CDPATH= cd -- \"$(dirname -- \"$0\")\" && pwd)\nexec \"$here/" + relative +
+               "/recovery\" recover-update --package \"$here\" --transaction \"$here/" + relative + "\"\n");
+  fs::permissions(script, fs::perms::owner_exec | fs::perms::group_exec | fs::perms::others_exec, fs::perm_options::add);
+#endif
   DurableWrite(transaction / "plan.json", plan.dump(2) + "\n");
   try {
     Checkpoint(checkpoint, "journal");
@@ -285,12 +297,19 @@ void ApplyUpdate(const fs::path& package, const fs::path& staged, const std::str
     const auto cause = std::string(error.what());
     try { Rollback(package, transaction, {}); }
     catch (const std::exception& recovery) {
-      throw std::runtime_error(cause + "\nRollback pendente: " + recovery.what() + "\nFeche o aplicativo e execute recover-update.cmd.");
+      throw std::runtime_error(cause + "\nRollback pendente: " + recovery.what() + "\nFeche o aplicativo e execute " + RecoveryScriptName() + ".");
     }
     throw std::runtime_error(cause + "\nVersão anterior restaurada e verificada.");
   }
 }
 
+std::string RecoveryScriptName() {
+#ifdef _WIN32
+  return "recover-update.cmd";
+#else
+  return "recover-update.sh";
+#endif
+}
 void ConfirmUpdates(const fs::path& package, const std::string& version) {
   const auto updates = package / "data/updates";
   if (!fs::exists(updates)) return;
@@ -299,7 +318,7 @@ void ConfirmUpdates(const fs::path& package, const std::string& version) {
     if (!entry.is_directory() || !fs::exists(entry.path() / "plan.json") || fs::exists(entry.path() / "rolled-back") || fs::exists(entry.path() / "confirmed")) continue;
     const auto plan = ReadPlan(package, entry.path());
     if (!fs::exists(entry.path() / "installed") || plan.at("version") != version)
-      throw std::runtime_error("Atualização interrompida. Feche o aplicativo e execute recover-update.cmd.");
+      throw std::runtime_error("Atualização interrompida. Feche o aplicativo e execute " + RecoveryScriptName() + ".");
     VerifyPackage(package);
     DurableWrite(entry.path() / "confirmed", "1\n");
   }

@@ -139,7 +139,7 @@ void StartUpdate(App& a) {
       const auto dir = Updates(a) / update.version;
       fs::remove_all(dir);
       fs::create_directories(dir / "extract");
-      const auto archive = dir / (update.package + ".zip"), checksum = dir / (update.package + ".zip.sha256");
+      const auto archive = dir / (update.package + PackageArchiveExtension()), checksum = dir / (update.package + PackageArchiveExtension() + ".sha256");
       Download(a, update.checksum_url, checksum, 60, a.cancel);
       Download(a, update.archive_url, archive, 3600, a.cancel);
       a.stage = 1;

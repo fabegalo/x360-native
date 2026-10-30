@@ -132,6 +132,8 @@ struct PayloadStatus {
 };
 PayloadStatus InspectEnvironment(const std::filesystem::path& payload,
                                 const std::filesystem::path& destination);
+// Name of a packaged program on this system: x360-native(.exe), app/x360n(.exe), ...
+std::string PackageExecutable(const std::string& name);
 void VerifyPackage(const std::filesystem::path& directory, const std::string& expected_payload = {});
 // Replacement requires explicit consent; originals remain in local backups.
 void InitializeEnvironment(const std::filesystem::path& payload,

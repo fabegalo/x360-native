@@ -14,6 +14,7 @@
 namespace fs = std::filesystem;
 using namespace x360n;
 using namespace x360n::desktop;
+static const std::string kExe = ExecutableSuffix();  // packaged program names of this system
 namespace {
 void Write(const fs::path& file, const std::string& value) {
   fs::create_directories(file.parent_path());
@@ -379,21 +380,21 @@ TEST_CASE("source update relies on C2 receipts and invalidates only affected pre
 
 TEST_CASE("package identity rejects swapped binaries missing payload and foreign DLLs") {
   Fixture f; auto package = f.root / "distribution";
-  Write(package / "x360-native.exe", "frontend"); Write(package / "app/x360n.exe", "supervisor");
-  Write(package / "app/x360n-extract.exe", "extractor");
+  Write(package / ("x360-native" + kExe), "frontend"); Write(package / ("app/x360n" + kExe), "supervisor");
+  Write(package / ("app/x360n-extract" + kExe), "extractor");
   Write(package / "package.json", "metadata");
   Write(package / "app/workspace/deps.lock.json", "lock");
   auto payloadIndex = Hash("lock") + "\tdeps.lock.json\n";
   Write(package / "app/workspace/payload.sha256", payloadIndex);
-  Write(package / "package.sha256", Hash("extractor") + "\tapp/x360n-extract.exe\n" + Hash("frontend") + "\tx360-native.exe\n" + Hash("supervisor") + "\tapp/x360n.exe\n" + Hash("metadata") + "\tpackage.json\n" + Hash(payloadIndex) + "\tapp/workspace/payload.sha256\n" + Hash("lock") + "\tapp/workspace/deps.lock.json\n");
+  Write(package / "package.sha256", Hash("extractor") + "\tapp/x360n-extract" + kExe + "\n" + Hash("frontend") + "\tx360-native" + kExe + "\n" + Hash("supervisor") + "\tapp/x360n" + kExe + "\n" + Hash("metadata") + "\tpackage.json\n" + Hash(payloadIndex) + "\tapp/workspace/payload.sha256\n" + Hash("lock") + "\tapp/workspace/deps.lock.json\n");
   REQUIRE_NOTHROW(VerifyPackage(package));
   CHECK_NOTHROW(VerifyPackage(package, Hash(payloadIndex)));
   CHECK_THROWS(VerifyPackage(package, Hash("another source revision")));
   SECTION("foreign DLL") { Write(package / "app/fmt.dll", "incompatible"); CHECK_THROWS(VerifyPackage(package)); }
-  SECTION("swapped supervisor") { Write(package / "app/x360n.exe", "other version"); CHECK_THROWS(VerifyPackage(package)); }
-  SECTION("swapped extractor") { Write(package / "app/x360n-extract.exe", "other version"); CHECK_THROWS(VerifyPackage(package)); }
-  SECTION("missing extractor") { fs::remove(package / "app/x360n-extract.exe"); CHECK_THROWS(VerifyPackage(package)); }
-  SECTION("swapped frontend") { Write(package / "x360-native.exe", "other version"); CHECK_THROWS(VerifyPackage(package)); }
+  SECTION("swapped supervisor") { Write(package / ("app/x360n" + kExe), "other version"); CHECK_THROWS(VerifyPackage(package)); }
+  SECTION("swapped extractor") { Write(package / ("app/x360n-extract" + kExe), "other version"); CHECK_THROWS(VerifyPackage(package)); }
+  SECTION("missing extractor") { fs::remove(package / ("app/x360n-extract" + kExe)); CHECK_THROWS(VerifyPackage(package)); }
+  SECTION("swapped frontend") { Write(package / ("x360-native" + kExe), "other version"); CHECK_THROWS(VerifyPackage(package)); }
   SECTION("incomplete payload") { fs::remove(package / "app/workspace/deps.lock.json"); CHECK_THROWS(VerifyPackage(package)); }
   SECTION("missing index") { fs::remove(package / "package.sha256"); CHECK_THROWS(VerifyPackage(package)); }
 }

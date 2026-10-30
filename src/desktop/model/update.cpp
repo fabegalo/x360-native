@@ -60,6 +60,7 @@ std::string PackagePlatform() {
   return system + "-x64";
 #endif
 }
+std::string PackageArchiveExtension(const std::string& platform) { return platform.starts_with("linux-") ? ".tar.gz" : ".zip"; }
 std::optional<AvailableUpdate> SelectUpdate(const std::string& releases_json, const std::string& current, UpdateChannel channel,
                                            const std::string& platform) {
   if (platform.empty() || platform.find_first_not_of("abcdefghijklmnopqrstuvwxyz0123456789-") != std::string::npos)
@@ -82,9 +83,10 @@ std::optional<AvailableUpdate> SelectUpdate(const std::string& releases_json, co
     std::set<std::string> names;
     if (release.contains("assets") && release["assets"].is_array())
       for (const auto& asset : release["assets"]) if (asset.is_object() && asset.contains("name") && asset["name"].is_string()) names.insert(asset["name"].get<std::string>());
-    if (!names.contains(package + ".zip") || !names.contains(package + ".zip.sha256")) continue;
+    const auto archive = PackageArchiveExtension(platform);
+    if (!names.contains(package + archive) || !names.contains(package + archive + ".sha256")) continue;
     const std::string base = std::string(kRepository) + "/releases/download/" + tag + "/" + package;
-    best = AvailableUpdate{version, package, base + ".zip", base + ".zip.sha256", std::string(kRepository) + "/releases/tag/" + tag};
+    best = AvailableUpdate{version, package, base + archive, base + archive + ".sha256", std::string(kRepository) + "/releases/tag/" + tag};
   }
   return best;
 }

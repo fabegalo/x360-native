@@ -1,6 +1,7 @@
 #include "catalog.h"
 #include "sha256.h"
 #include "workspace_lease.h"
+#include "host_platform.h"
 #include <chrono>
 #include <cctype>
 #include <fstream>
@@ -93,11 +94,13 @@ Index Retired(const fs::path& destination, const Index& index) {
   return old;
 }
 }
+std::string PackageExecutable(const std::string& name) { return name + ExecutableSuffix(); }
 void VerifyPackage(const fs::path& directory, const std::string& expected_payload) {
   if (!expected_payload.empty() && !Matches(directory / "app/workspace/payload.sha256", expected_payload))
     throw std::runtime_error("Os componentes do aplicativo pertencem a versões diferentes. Extraia novamente o ZIP completo; seus dados serão preservados.");
   auto index = ReadIndex(directory / "package.sha256", false);
-  for (const auto& required : {"x360-native.exe", "app/x360n.exe", "app/x360n-extract.exe", "app/workspace/payload.sha256", "package.json"})
+  for (const auto& required : {PackageExecutable("x360-native"), PackageExecutable("app/x360n"), PackageExecutable("app/x360n-extract"),
+                               std::string("app/workspace/payload.sha256"), std::string("package.json")})
     if (!index.contains(required)) throw std::runtime_error("Pacote incompleto. Extraia novamente o ZIP completo.");
   for (const auto& [rel, hash] : index) {
     Safe(directory, rel);
@@ -107,7 +110,10 @@ void VerifyPackage(const fs::path& directory, const std::string& expected_payloa
     const auto rel = it->path().lexically_relative(directory);
     if (*rel.begin() == "data") { it.disable_recursion_pending(); continue; }
     auto ext = Utf8(it->path().extension()); for (auto& c : ext) c = char(std::tolower(static_cast<unsigned char>(c)));
-    if ((ext == ".dll" || ext == ".exe") && !index.contains(rel))
+    // Programs and native modules of any installation (POSIX programs have no extension).
+    const bool component = ext == ".dll" || ext == ".exe" || ext == ".so" || ext == ".dylib" ||
+        (ext.empty() && it->is_regular_file() && Utf8(it->path().filename()).starts_with("x360"));
+    if (component && !index.contains(rel))
       throw std::runtime_error("Há componentes de outra instalação nesta pasta. Extraia o ZIP em uma pasta vazia e selecione seu ambiente anterior.");
   }
   Payload(directory / "app/workspace");

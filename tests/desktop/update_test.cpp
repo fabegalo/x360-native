@@ -6,11 +6,14 @@
 #include "sha256.h"
 #include "update.h"
 #include "child_process.h"
+#include "host_platform.h"
 #include <nlohmann/json.hpp>
 #include "../supervisor/scratch.h"
 
 namespace fs = std::filesystem;
 using namespace x360n::desktop;
+// Packaged program names of this system (x360-native.exe on Windows, x360-native elsewhere).
+static const std::string kExe = x360n::ExecutableSuffix();
 using x360n::DigestFile;
 namespace {
 void Write(const fs::path& file, const std::string& text) {
@@ -22,9 +25,9 @@ std::string Read(const fs::path& file) {
 }
 // Minimal package that VerifyPackage accepts: required files, payload and package indexes.
 void MakePackage(const fs::path& dir, const std::string& version, const std::vector<std::string>& extra = {}) {
-  Write(dir / "x360-native.exe", "launcher " + version);
-  Write(dir / "app/x360n.exe", "supervisor " + version);
-  Write(dir / "app/x360n-extract.exe", "extractor " + version);
+  Write(dir / ("x360-native" + kExe), "launcher " + version);
+  Write(dir / ("app/x360n" + kExe), "supervisor " + version);
+  Write(dir / ("app/x360n-extract" + kExe), "extractor " + version);
   Write(dir / "app/workspace/deps.lock.json", "{\"version\":\"" + version + "\"}");
   Write(dir / "app/workspace/payload.sha256", DigestFile(dir / "app/workspace/deps.lock.json")->sha256 + "\tdeps.lock.json\n");
   Write(dir / "package.json", "{\"version\":\"" + version + "\"}");
@@ -67,6 +70,14 @@ TEST_CASE("the newest complete published release is selected with pinned URLs", 
   const auto found = SelectUpdate(json, "0.54.0", UpdateChannel::Preview, "windows-x64");
   // Another system or architecture never installs the Windows x64 package.
   CHECK_FALSE(SelectUpdate(json, "0.54.0", UpdateChannel::Preview, "linux-x64"));
+  // Linux publishes a .tar.gz the system tar extracts; a .zip of that name is not it.
+  const auto linux_release = R"([{"tag_name":"v0.58.0","draft":false,"prerelease":true,"assets":[{"name":"x360-native-0.58.0-linux-x64.tar.gz"},{"name":"x360-native-0.58.0-linux-x64.tar.gz.sha256"},{"name":"x360-native-0.58.0-linux-x64.zip"}]}])";
+  const auto on_linux = SelectUpdate(linux_release, "0.54.0", UpdateChannel::Preview, "linux-x64");
+  REQUIRE(on_linux);
+  CHECK(on_linux->archive_url == "https://github.com/fabegalo/x360-native/releases/download/v0.58.0/x360-native-0.58.0-linux-x64.tar.gz");
+  CHECK(on_linux->checksum_url == on_linux->archive_url + ".sha256");
+  CHECK(PackageArchiveExtension("windows-x64") == ".zip");
+  CHECK(PackageArchiveExtension("macos-arm64") == ".zip");
   CHECK_FALSE(SelectUpdate(json, "0.54.0", UpdateChannel::Preview, "windows-arm64"));
   CHECK_THROWS(SelectUpdate(json, "0.54.0", UpdateChannel::Preview, "../x64"));
   REQUIRE(found);
@@ -102,39 +113,39 @@ TEST_CASE("an update replaces application files, keeps data and restores on fail
 
   SECTION("version mismatch changes nothing") {
     CHECK_THROWS(ApplyUpdate(package, staged, "3.0.0", rollback));
-    CHECK(Read(package / "x360-native.exe") == "launcher 1.0.0");
-    CHECK(fs::exists(staged / "x360-native.exe"));
+    CHECK(Read(package / ("x360-native" + kExe)) == "launcher 1.0.0");
+    CHECK(fs::exists(staged / ("x360-native" + kExe)));
   }
 #ifdef _WIN32  // Windows sharing denial injects the failure; POSIX has no mandatory file locks.
   SECTION("a locked file rolls every move back") {
-    std::ifstream held(package / "x360-native.exe", std::ios::binary);  // no delete sharing: the rename fails
+    std::ifstream held(package / ("x360-native" + kExe), std::ios::binary);  // no delete sharing: the rename fails
     CHECK_THROWS(ApplyUpdate(package, staged, "2.0.0", rollback));
     held.close();
-    CHECK(Read(package / "x360-native.exe") == "launcher 1.0.0");
-    CHECK(Read(package / "app/x360n.exe") == "supervisor 1.0.0");
+    CHECK(Read(package / ("x360-native" + kExe)) == "launcher 1.0.0");
+    CHECK(Read(package / ("app/x360n" + kExe)) == "supervisor 1.0.0");
     CHECK(Read(package / "README-old.txt") == "README-old.txt 1.0.0");
-    CHECK(Read(staged / "app/x360n.exe") == "supervisor 2.0.0");
+    CHECK(Read(staged / ("app/x360n" + kExe)) == "supervisor 2.0.0");
     CHECK(Read(package / "data/environment/save.bin") == "user save");
   }
 #endif
   SECTION("success") {
     ApplyUpdate(package, staged, "2.0.0", rollback);
     CHECK_NOTHROW(VerifyPackage(package));
-    CHECK(Read(package / "x360-native.exe") == "launcher 2.0.0");
+    CHECK(Read(package / ("x360-native" + kExe)) == "launcher 2.0.0");
     CHECK(Read(package / "licenses/b.txt") == "licenses/b.txt 2.0.0");
     CHECK_FALSE(fs::exists(package / "README-old.txt"));
     CHECK(Read(package / "data/preferences.txt") == "pt\n.\n");
     CHECK(Read(package / "data/environment/save.bin") == "user save");
-    CHECK(Read(rollback / "backup/x360-native.exe") == "launcher 1.0.0");
+    CHECK(Read(rollback / ("backup/x360-native" + kExe)) == "launcher 1.0.0");
     CHECK(Read(rollback / "backup/README-old.txt") == "README-old.txt 1.0.0");
     CHECK_NOTHROW(VerifyPackage(rollback / "backup"));
-    CHECK(fs::exists(package / "recover-update.cmd"));
-    CHECK(fs::exists(rollback / "recovery.exe"));
+    CHECK(fs::exists(package / RecoveryScriptName()));
+    CHECK(fs::exists(rollback / ("recovery" + kExe)));
     CHECK_NOTHROW(ConfirmUpdates(package, "2.0.0"));
     CHECK(fs::exists(rollback / "confirmed"));
     CHECK_NOTHROW(RecoverUpdate(package, rollback));
     CHECK_NOTHROW(RecoverUpdate(package, rollback));
-    CHECK(Read(package / "x360-native.exe") == "launcher 1.0.0");
+    CHECK(Read(package / ("x360-native" + kExe)) == "launcher 1.0.0");
   }
   fs::remove_all(root);
 }
@@ -208,7 +219,7 @@ TEST_CASE("process death at every update boundary is recoverable by a new proces
     const auto root = UniqueTempPath("update-crash"); Packages(root);
     REQUIRE(RunProbe(root, "apply", step) == 91);
     REQUIRE(RunProbe(root, "recover", 0) == 0);
-    CHECK(Read(root / "installed/x360-native.exe") == "launcher 1.0.0");
+    CHECK(Read(root / ("installed/x360-native" + kExe)) == "launcher 1.0.0");
     CHECK_NOTHROW(VerifyPackage(root / "installed"));
     Preserved(root);
     REQUIRE(RunProbe(root, "recover", 0) == 0);
@@ -226,7 +237,9 @@ TEST_CASE("rollback itself can be resumed after process death", "[update][update
   for (int step = 1; step <= count; ++step) {
     CAPTURE(step);
     const auto root = UniqueTempPath("rollback-crash"); Packages(root);
-    REQUIRE(RunProbe(root, "apply", 0) == 0);
+    const auto code = RunProbe(root, "apply", 0);
+    INFO(Read(root / "probe-error.txt"));
+    REQUIRE(code == 0);
     REQUIRE(RunProbe(root, "recover", step) == 91);
     REQUIRE(RunProbe(root, "recover", 0) == 0);
     CHECK_NOTHROW(VerifyPackage(root / "installed")); Preserved(root);
@@ -237,16 +250,16 @@ TEST_CASE("rollback itself can be resumed after process death", "[update][update
 TEST_CASE("update rejects invalid paths inventories and collisions before moving application files", "[update]") {
   const auto root = UniqueTempPath("update-invalid"); Packages(root);
   const auto package = root / "installed", staged = root / "staged", txn = package / "data/updates/txn-test";
-  SECTION("staging hash mismatch") { Write(staged / "x360-native.exe", "tampered"); }
+  SECTION("staging hash mismatch") { Write(staged / ("x360-native" + kExe), "tampered"); }
   SECTION("unindexed staging file") { Write(staged / "unindexed.txt", "unknown"); }
   SECTION("case folded data") { Write(staged / "DATA/saves.bin", "forbidden"); }
   SECTION("inventory traversal") { std::ofstream(staged / "package.sha256", std::ios::app) << std::string(64, 'a') << "\t../escape\n"; }
   SECTION("corrupt installed inventory") { Write(package / "package.sha256", "invalid"); }
   SECTION("local collision") { Write(package / "new.txt", "local user file"); }
-  SECTION("local recovery script collision") { Write(package / "recover-update.cmd", "user script"); }
+  SECTION("local recovery script collision") { Write(package / RecoveryScriptName(), "user script"); }
   SECTION("previous transaction preserved") { Write(txn / "backup/old.txt", "previous backup"); }
   CHECK_THROWS(ApplyUpdate(package, staged, "2.0.0", txn));
-  CHECK(Read(package / "x360-native.exe") == "launcher 1.0.0");
+  CHECK(Read(package / ("x360-native" + kExe)) == "launcher 1.0.0");
   Preserved(root);
   fs::remove_all(root);
 }
@@ -259,10 +272,10 @@ TEST_CASE("consecutive update transactions preserve previous backups", "[update]
   CHECK_THROWS(ApplyUpdate(package, root / "third", "3.0.0", second));
   CHECK_NOTHROW(ConfirmUpdates(package, "2.0.0"));
   ApplyUpdate(package, root / "third", "3.0.0", second);
-  CHECK(Read(first / "backup/x360-native.exe") == "launcher 1.0.0");
-  CHECK(Read(second / "backup/x360-native.exe") == "launcher 2.0.0");
+  CHECK(Read(first / ("backup/x360-native" + kExe)) == "launcher 1.0.0");
+  CHECK(Read(second / ("backup/x360-native" + kExe)) == "launcher 2.0.0");
   CHECK_NOTHROW(RecoverUpdate(package, second));
-  CHECK(Read(package / "x360-native.exe") == "launcher 2.0.0");
+  CHECK(Read(package / ("x360-native" + kExe)) == "launcher 2.0.0");
   Preserved(root);
   fs::remove_all(root);
 }
@@ -272,7 +285,7 @@ TEST_CASE("rollback failure remains explicit and recoverable after releasing the
   const auto root = UniqueTempPath("update-rollback-locked"); Packages(root);
   const auto package = root / "installed", txn = package / "data/updates/txn-test";
   ApplyUpdate(package, root / "staged", "2.0.0", txn);
-  std::ifstream held(package / "x360-native.exe", std::ios::binary);
+  std::ifstream held(package / ("x360-native" + kExe), std::ios::binary);
   CHECK_THROWS(RecoverUpdate(package, txn));
   CHECK_FALSE(fs::exists(txn / "rolled-back"));
   held.close();
@@ -285,27 +298,31 @@ TEST_CASE("rollback failure remains explicit and recoverable after releasing the
 TEST_CASE("the saved supervisor recovers when the main executable is missing or cannot start", "[update][update-crash]") {
   const auto root = UniqueTempPath("update-independent-helper"); Packages(root);
   const auto package = root / "installed", txn = package / "data/updates/txn-test";
-  fs::copy_file(X360N_RECOVERY_EXE, package / "app/x360n.exe", fs::copy_options::overwrite_existing);
+  fs::copy_file(X360N_RECOVERY_EXE, package / ("app/x360n" + kExe), fs::copy_options::overwrite_existing);
   auto index = Read(package / "package.sha256");
-  const auto line_end = index.find("\tapp/x360n.exe");
+  const auto line_end = index.find("\tapp/x360n" + kExe + "\n");  // not app/x360n-extract
   REQUIRE(line_end != std::string::npos);
-  index.replace(line_end - 64, 64, DigestFile(package / "app/x360n.exe")->sha256);
+  index.replace(line_end - 64, 64, DigestFile(package / ("app/x360n" + kExe))->sha256);
   Write(package / "package.sha256", index);
   SECTION("power loss after the launcher was renamed") {
     const auto files = int(std::count(index.begin(), index.end(), '\n')) + 1;
-    REQUIRE(RunProbe(root, "apply", 1 + 2 * files) == 91);
-    REQUIRE_FALSE(fs::exists(package / "x360-native.exe"));
+    const auto code = RunProbe(root, "apply", 1 + 2 * files);
+    INFO(Read(root / "probe-error.txt"));
+    REQUIRE(code == 91);
+    REQUIRE_FALSE(fs::exists(package / ("x360-native" + kExe)));
   }
   SECTION("the replacement executable is invalid") {
-    REQUIRE(RunProbe(root, "apply", 0) == 0);
+    const auto code = RunProbe(root, "apply", 0);
+    INFO(Read(root / "probe-error.txt"));
+    REQUIRE(code == 0);
     x360n::ProcessSpec broken;
-    broken.exe = package / "x360-native.exe"; broken.working_dir = package;
+    broken.exe = package / ("x360-native" + kExe); broken.working_dir = package;
     broken.timeout = std::chrono::seconds(5); broken.no_console = true;
     broken.stdout_file = root / "broken-out.txt"; broken.stderr_file = root / "broken-error.txt";
     CHECK_FALSE(x360n::RunProcess(broken).launched);
   }
   x360n::ProcessSpec recovery;
-  recovery.exe = txn / "recovery.exe"; recovery.working_dir = txn;
+  recovery.exe = txn / ("recovery" + kExe); recovery.working_dir = txn;
   recovery.args = {"recover-update", "--package", Utf8(package), "--transaction", Utf8(txn)};
   recovery.timeout = std::chrono::seconds(15); recovery.no_console = true;
   recovery.stdout_file = root / "recovery-out.txt"; recovery.stderr_file = root / "recovery-error.txt";
@@ -313,7 +330,7 @@ TEST_CASE("the saved supervisor recovers when the main executable is missing or 
   INFO(Read(recovery.stderr_file));
   REQUIRE(result.launched); CHECK(result.exit_code == 0);
   CHECK_NOTHROW(VerifyPackage(package));
-  CHECK(Read(package / "x360-native.exe") == "launcher 1.0.0");
+  CHECK(Read(package / ("x360-native" + kExe)) == "launcher 1.0.0");
   Preserved(root);
   fs::remove_all(root);
 }

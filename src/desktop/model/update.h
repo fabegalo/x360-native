@@ -16,6 +16,9 @@ struct AvailableUpdate {
 // Package suffix of this build: <system>-<architecture>, e.g. windows-x64,
 // linux-x64, macos-arm64. Each published package serves exactly one of them.
 std::string PackagePlatform();
+// Archive of a published package: .tar.gz on Linux (extracted by the system tar),
+// .zip elsewhere.
+std::string PackageArchiveExtension(const std::string& platform = PackagePlatform());
 // Highest published (non-draft) release above `current` whose tag is v<version> and
 // that carries both x360-native-<version>-<platform>.zip and its .sha256. URLs are
 // rebuilt from the pinned repository, never taken from the response.
@@ -35,4 +38,7 @@ void ApplyUpdate(const std::filesystem::path& package, const std::filesystem::pa
 void RecoverUpdate(const std::filesystem::path& package, const std::filesystem::path& transaction,
                    const UpdateCheckpoint& checkpoint = {});
 void ConfirmUpdates(const std::filesystem::path& package, const std::string& version);
+// Recovery entry written beside the package during an update: recover-update.cmd
+// on Windows, recover-update.sh elsewhere.
+std::string RecoveryScriptName();
 }
