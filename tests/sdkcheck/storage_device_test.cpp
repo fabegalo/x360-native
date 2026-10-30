@@ -1,4 +1,5 @@
 #include <catch2/catch_test_macros.hpp>
+#include <atomic>
 #include <chrono>
 #include <filesystem>
 #include <fstream>
@@ -221,6 +222,9 @@ TEST_CASE("Offline devices do not advertise a nonexistent network storage cache"
 
 STORAGE_IMPORT(XamContentCopyInternal);
 STORAGE_IMPORT(XamContentMoveInternal);
+STORAGE_IMPORT(XMsgCancelIORequest);
+STORAGE_IMPORT(XMsgSystemProcessCall);
+STORAGE_IMPORT(XMsgStartIORequest);
 namespace {
 // Stand-in for the dashboard's CopyProgressRoutine-style callback (922FDB00):
 // records each call and cancels on the call selected by the test.
@@ -266,6 +270,170 @@ std::filesystem::path HeaderOn(const std::filesystem::path& root) {
   return root / "E000000012345678" / "1234ABCD" / "Headers" / "00000001" / "SAVE0001.header";
 }
 }  // namespace
+
+namespace {
+uint32_t cancel_io = 0;
+std::atomic<uint32_t> cancel_calls{0};
+void CancelTransferCallback(PPCContext& ctx, uint8_t* base) {
+  // Cancel on the worker itself without waiting. QUIET must suppress guest
+  // callbacks, never the host's cancellation checks.
+  ctx.r3.u32 = cancel_io;
+  ctx.r4.u32 = 0;
+  __imp__XMsgCancelIORequest(ctx, base);
+  cancel_calls.fetch_add(1);
+  ctx.r3.u64 = 3;
+}
+}
+
+TEST_CASE("XMsg cancellation stops storage I/O without an event and preserves the source",
+          "[sdk][storage-transfer][storage-cancel]") {
+  StorageRoot root;
+  root.config("version=1\n[[device]]\nid=7\ntype='mu'\ncapacity_bytes=4194304\n");
+  const auto mu = root.path / "storage/00000007";
+  std::filesystem::create_directories(mu);
+  DeviceGuest guest(root.path);
+  auto* dispatcher = guest.runtime.function_dispatcher();
+  REQUIRE(dispatcher->InitializeFunctionTable(0x82000000, 0x1000, 0x82000000, 0x10000, true, true));
+  REQUIRE(dispatcher->SetFunction(0x82000100, &CancelTransferCallback));
+  const auto device = guest.address + 2048;
+  cancel_io = guest.address + 2304;
+  rex::memory::store_and_swap<uint32_t>(guest.bytes + device, 7);
+  for (auto operation : {__imp__XamContentCopyInternal, __imp__XamContentMoveInternal}) {
+    MakeItem(guest, 1, root.path, 300000);
+    std::memset(guest.bytes + cancel_io, 0, 28);
+    cancel_calls = 0;
+    REQUIRE(guest.call(operation, {0, device, guest.address + 1024, 0x82000100, 0, 0, cancel_io}) == 997);
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    while (guest.word(cancel_io - guest.address) == 997 && std::chrono::steady_clock::now() < deadline)
+      std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    REQUIRE(guest.word(cancel_io - guest.address) != 997);
+    CHECK(cancel_calls.load() == 1);
+    CHECK(guest.word(cancel_io - guest.address) == 1223);
+    CHECK(guest.word(cancel_io - guest.address + 24) == 0x800704C7);
+    CHECK(std::filesystem::file_size(PackageOn(root.path) / "dir/slot.dat") == 300000);
+    CHECK(std::filesystem::exists(HeaderOn(root.path)));
+    CHECK_FALSE(std::filesystem::exists(PackageOn(mu)));
+    CHECK_FALSE(std::filesystem::exists(HeaderOn(mu)));
+    CHECK_FALSE(std::filesystem::exists(mu / ".x360n-transfer"));
+    CHECK(guest.call(__imp__XMsgCancelIORequest, {cancel_io, 1}) == 0);
+    // A regression must not contaminate the second independent operation.
+    if (std::filesystem::exists(PackageOn(mu))) break;
+  }
+  CHECK(guest.call(__imp__XMsgCancelIORequest, {0, 0}) == X_ERROR_INVALID_PARAMETER);
+  CHECK(guest.call(__imp__XMsgCancelIORequest, {0x1234, 0}) == X_ERROR_INVALID_PARAMETER);
+}
+
+TEST_CASE("Storage FE transfer requests use the original 552-byte packet and complete once",
+          "[sdk][storage-transfer][storage-message]") {
+  StorageRoot root;
+  root.config("version=1\n[[device]]\nid=7\ntype='mu'\ncapacity_bytes=4194304\n"
+              "[[device]]\nid=12\ntype='usb'\ncapacity_bytes=4194304\n");
+  const auto mu = root.path / "storage/00000007";
+  const auto usb = root.path / "storage/0000000C";
+  std::filesystem::create_directories(mu);
+  std::filesystem::create_directories(usb);
+  DeviceGuest guest(root.path);
+  const auto packet = guest.address + 4096;
+  const auto io = guest.address + 2304;
+  auto put = [&](uint32_t offset, uint32_t value) {
+    rex::memory::store_and_swap<uint32_t>(guest.bytes + packet + offset, value);
+  };
+  MakeItem(guest, 1, root.path, 300000);
+  std::memcpy(guest.bytes + packet + 16, guest.bytes + guest.address + 1024, 512);
+  put(8, 7); put(532, 2); // device supplied, copy
+  auto dispatch = [&] {
+    return guest.call(__imp__XMsgSystemProcessCall, {0xFE, 0x2000C, packet, 552});
+  };
+  REQUIRE(dispatch() == 0);
+  CHECK(std::filesystem::file_size(PackageOn(mu) / "dir/slot.dat") == 300000);
+  CHECK(std::filesystem::exists(HeaderOn(mu)));
+  CHECK(std::filesystem::exists(PackageOn(root.path)));
+  CHECK(dispatch() == 0x800700B7); // duplicate, no overwrite
+
+  // The original move wrapper sets bit 0. Packet +528 is its OVERLAPPED.
+  put(16, 7); put(8, 12); put(532, 3); put(528, io);
+  REQUIRE(guest.call(__imp__XMsgStartIORequest, {0xFE, 0x2000C, io, packet, 552}) == 0);
+  const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+  while (guest.word(io - guest.address) == 997 && std::chrono::steady_clock::now() < deadline)
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  REQUIRE(guest.word(io - guest.address) == 0);
+  CHECK(guest.word(io - guest.address + 24) == 0);
+  CHECK(std::filesystem::exists(PackageOn(usb)));
+  CHECK_FALSE(std::filesystem::exists(PackageOn(mu)));
+  CHECK_FALSE(std::filesystem::exists(HeaderOn(mu)));
+  CHECK(std::filesystem::exists(PackageOn(root.path)));
+
+  // The message acknowledgement must not complete the worker's OVERLAPPED.
+  auto* dispatcher = guest.runtime.function_dispatcher();
+  REQUIRE(dispatcher->InitializeFunctionTable(0x82000000, 0x1000, 0x82000000, 0x10000, true, true));
+  REQUIRE(dispatcher->SetFunction(0x82000100, &CancelTransferCallback));
+  cancel_io = io; cancel_calls = 0;
+  put(16, 12); put(8, 7); put(536, 0x82000100);
+  REQUIRE(guest.call(__imp__XMsgStartIORequest, {0xFE, 0x2000C, io, packet, 552}) == 0);
+  const auto cancel_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+  while (guest.word(io - guest.address) == 997 && std::chrono::steady_clock::now() < cancel_deadline)
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  REQUIRE(guest.word(io - guest.address) == 1223);
+  CHECK(guest.word(io - guest.address + 24) == 0x800704C7);
+  CHECK(cancel_calls.load() == 1);
+  CHECK(std::filesystem::exists(PackageOn(usb)));
+  CHECK_FALSE(std::filesystem::exists(PackageOn(mu)));
+
+  // Invalid descriptors and unsupported optional data must not start I/O.
+  put(528, 0); put(532, 0);
+  CHECK(dispatch() == 0x80070057);
+  put(532, 0xA);
+  CHECK(dispatch() == 0x80070057);
+  put(532, 2); put(544, 1);
+  CHECK(dispatch() == 0x80070032);
+  CHECK(guest.call(__imp__XMsgSystemProcessCall, {0xFE, 0x2000C, packet, 551}) == 0x80070057);
+  CHECK(guest.call(__imp__XMsgSystemProcessCall, {0xFE, 0x2000C, 0x1234, 552}) == 0x80070057);
+  CHECK(guest.call(__imp__XMsgStartIORequest, {0xFE, 0x2000C, io, packet, 552}) == 0x80070057);
+}
+
+TEST_CASE("XMsg cancellation waits for worker cleanup even without a guest event",
+          "[sdk][storage-transfer][storage-cancel]") {
+  StorageRoot root;
+  DeviceGuest guest(root.path);
+  const auto io = guest.address + 2304;
+  auto* content = guest.runtime.kernel_state()->content_manager();
+  auto request = content->BeginTransfer(io);
+  REQUIRE(request);
+  CHECK_FALSE(content->BeginTransfer(io));
+  rex::memory::store_and_swap<uint32_t>(guest.bytes + io, 997);
+  std::atomic<uint32_t> returned{~0u};
+  auto waiter = rex::system::object_ref<rex::system::XHostThread>(new rex::system::XHostThread(
+      guest.runtime.kernel_state(), 128 * 1024, 0, [&] {
+    auto& ctx = *rex::system::XThread::GetCurrentThread()->thread_state()->context();
+    ctx.r3.u64 = io; ctx.r4.u64 = 1;
+    __imp__XMsgCancelIORequest(ctx, guest.bytes);
+    returned.store(ctx.r3.u32);
+    return 0;
+  }));
+  REQUIRE(waiter->Create() == 0);
+  const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+  while (!request->cancelled.load() && std::chrono::steady_clock::now() < deadline)
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  CHECK(request->cancelled.load());
+  CHECK(returned.load() == ~0u);
+  content->FinishTransfer(io, request, [&] {
+    guest.runtime.kernel_state()->CompleteOverlappedEx(io, 1223, 0x800704C7, 0);
+  });
+  uint64_t timeout = uint64_t(-50'000'000ll);
+  REQUIRE(waiter->Wait(0, 0, 0, &timeout) == 0);
+  CHECK(returned.load() == 0);
+  CHECK(guest.word(io - guest.address) == 1223);
+  CHECK(guest.word(io - guest.address + 24) == 0x800704C7);
+  CHECK(guest.call(__imp__XMsgCancelIORequest, {io, 1}) == 0);
+  // Reuse is allowed after completion, with a fresh cancellation state.
+  const auto reused = content->BeginTransfer(io);
+  REQUIRE(reused);
+  CHECK_FALSE(reused->cancelled.load());
+  content->FinishTransfer(io, reused, [] {});
+  rex::memory::store_and_swap<uint32_t>(guest.bytes + io, 997);
+  CHECK(guest.call(__imp__XMsgCancelIORequest, {io, 0}) == 50);
+  CHECK(guest.word(io - guest.address) == 997);
+}
 
 TEST_CASE("Storage copies and moves packages between volumes without partial results",
           "[sdk][storage-transfer]") {

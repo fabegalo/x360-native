@@ -2160,3 +2160,24 @@ text activation have independent lifetimes. Focused red/green coverage includes
 the real Window listener chain; the pre-fix overlay/capture test fails 2/6
 assertions. The independent replay verifies 203 patches and 273 final hashes.
 No upstream equivalent identified.
+
+### 0220–0221 — cancellable Storage I/O and FE transfer packets
+
+0220 registers asynchronous content transfers per runtime and OVERLAPPED.
+XMsgCancelIORequest requests cancellation and optionally waits for worker
+cleanup, including requests without guest events or progress callbacks.
+PROGRESS_QUIET suppresses guest callbacks while cancellation remains active.
+Invalid guest buffers and pending requests without a cancellation owner return
+real errors. Completion retains the requesting thread and occurs once.
+
+0221 decodes the original 17559 FE/2000C 552-byte packet and uses the same
+copy/move backend. XMsg acknowledgement leaves asynchronous I/O pending;
+invalid modes, inconsistent OVERLAPPEDs and unverified nonzero extra arguments
+fail explicitly. No original module, UI or version address is substituted.
+
+The cancellation control fails four assertions before 0220; the packet control
+fails before 0221 with 80004005. Final focused Storage/content/profile controls
+pass 1,030 assertions in 15 cases. Replay of the 25 patches affecting these
+five files reproduces their final SHA-256 hashes from the pinned revision.
+See `docs/reports/dash-os-features-03-2026-10-30.md` for graphical evidence and
+remaining scope. No upstream equivalent identified.

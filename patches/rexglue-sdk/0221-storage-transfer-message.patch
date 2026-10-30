@@ -1,0 +1,74 @@
+--- a/src/kernel/xam/xam_content.cpp
++++ b/src/kernel/xam/xam_content.cpp
+@@ -760,6 +760,33 @@
+   return X_ERROR_IO_PENDING;
+ }
+ }  // namespace
++namespace rex::kernel::xam {
++// Original 17559 816EEA78: owner +0, device +8, item +16 (512 bytes),
++// OVERLAPPED +528, mode +532, progress +536, context +540, extra +544.
++// Mode bits: move=1, device supplied=2, owner supplied=4.
++X_HRESULT DispatchContentTransfer(uint32_t packet, uint32_t length) {
++  auto* kernel = REX_KERNEL_STATE();
++  if (length != 552 || !AchievementGuestSpan(kernel->memory(), packet, length,
++          memory::kMemoryProtectRead) || !XThread::IsInThread()) return X_E_INVALIDARG;
++  auto* base = kernel->memory()->virtual_membase();
++  auto word = [&](uint32_t offset) { return memory::load_and_swap<uint32_t>(base + packet + offset); };
++  const auto flags = word(532);
++  if ((flags & ~7u) || !(flags & 6u)) return X_E_INVALIDARG;
++  // Meaning of the extra argument is unverified; do not silently discard it.
++  if (word(544)) return X_HRESULT_FROM_WIN32(50);
++  auto context = *XThread::GetCurrentThread()->thread_state()->context();
++  context.r3.u64 = flags & 4 ? packet : 0;
++  context.r4.u64 = flags & 2 ? packet + 8 : 0;
++  context.r5.u64 = packet + 16;
++  context.r6.u64 = word(536);
++  context.r7.u64 = word(540);
++  context.r8.u64 = 0;
++  context.r9.u64 = word(528);
++  const auto result = ContentTransfer(context, base, (flags & 1) != 0);
++  // S_OK acknowledges asynchronous acceptance; only the worker completes I/O.
++  return result == X_ERROR_IO_PENDING ? X_E_SUCCESS : X_HRESULT_FROM_WIN32(result);
++}
++}  // namespace rex::kernel::xam
+ extern "C" REX_FUNC(__imp__XamContentCopyInternal) { ctx.r3.u64 = ContentTransfer(ctx, base, false); }
+ extern "C" REX_FUNC(__imp__XamContentMoveInternal) { ctx.r3.u64 = ContentTransfer(ctx, base, true); }
+ static rex::ppc::detail::PPCFuncRegistrar content_copy_internal_reg(
+--- a/src/kernel/xam/apps/xam_app.cpp
++++ b/src/kernel/xam/apps/xam_app.cpp
+@@ -21,6 +21,7 @@
+ namespace xam {
+ using namespace rex::system;
+ using namespace rex::system::xam;
++X_HRESULT DispatchContentTransfer(uint32_t packet, uint32_t length);
+ namespace apps {
+ using namespace rex::system;
+ 
+@@ -31,6 +32,8 @@
+   // NOTE: buffer_length may be zero or valid.
+   auto buffer = memory_->TranslateVirtual(buffer_ptr);
+   switch (message) {
++    case 0x0002000C:
++      return DispatchContentTransfer(buffer_ptr, buffer_length);
+     case 0x00021005:
+     case 0x00021010:
+     case 0x0002100D:
+--- a/src/kernel/xam/xam_msg.cpp
++++ b/src/kernel/xam/xam_msg.cpp
+@@ -55,6 +55,16 @@
+ X_HRESULT xeXMsgStartIORequestEx(uint32_t app, uint32_t message, uint32_t overlapped_ptr,
+                                  uint32_t buffer_ptr, uint32_t buffer_length,
+                                  XMSGSTARTIOREQUEST_UNKNOWNARG* unknown) {
++  if (app == 0xFE && message == 0x2000C) {
++    // This packet carries its own OVERLAPPED. Validate both descriptions before
++    // dispatch and never replace a pending transfer with immediate completion.
++    if (buffer_length != 552 || !AchievementGuestSpan(REX_KERNEL_MEMORY(), buffer_ptr,
++            buffer_length, memory::kMemoryProtectRead) ||
++        memory::load_and_swap<uint32_t>(REX_KERNEL_MEMORY()->TranslateVirtual(buffer_ptr + 528)) !=
++            overlapped_ptr) return X_E_INVALIDARG;
++    return REX_KERNEL_STATE()->app_manager()->DispatchMessageAsync(
++        app, message, buffer_ptr, buffer_length);
++  }
+   if (app == 0xFB && message == 0xB0008) {
+     if (overlapped_ptr &&
+         !AchievementGuestSpan(REX_KERNEL_MEMORY(), overlapped_ptr, sizeof(XAM_OVERLAPPED),
