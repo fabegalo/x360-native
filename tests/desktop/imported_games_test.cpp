@@ -306,7 +306,7 @@ TEST_CASE("universal library adopts verified local games without duplicating dis
   auto games = ReadCatalog(f.paths); REQUIRE(games.size() == 1);
   CHECK(games[0].game_root == source);
   CHECK(Inspect(f.paths, games[0]).inputs_ok);
-  CHECK(fs::last_write_time(source/"default.xex") == before);
+  CHECK((fs::last_write_time(source/"default.xex") == before));
   CHECK_FALSE(fs::exists(f.paths.inputs()/"games/12345678"));
   CHECK(ImportGame(f.paths, games, source, source) == id);
   Write(source/"assets/data", "changed revision");
@@ -477,7 +477,7 @@ TEST_CASE("automatic AOT generates a stable project without a manual recipe", "[
   CHECK(fs::weakly_canonical(profile.user_root)==fs::weakly_canonical(user_root));
   const auto stamp=fs::last_write_time(t.manifest); const auto hash=DigestFile(integration)->sha256;
   GenerateAotProject(f.paths,t);
-  CHECK(fs::last_write_time(t.manifest)==stamp); CHECK(DigestFile(integration)->sha256==hash);
+  CHECK((fs::last_write_time(t.manifest)==stamp)); CHECK(DigestFile(integration)->sha256==hash);
   Write(t.manifest.parent_path()/"generated/rexglue.cmake","SDK-owned regenerated glue");
   GenerateAotProject(f.paths,t);
   CHECK(DigestFile(integration)->sha256==hash);
@@ -506,10 +506,10 @@ TEST_CASE("automatic AOT generates a stable project without a manual recipe", "[
   Write(t.manifest.parent_path()/"preparation.toml","broken optional project");
   CHECK(LoadSessionProfile(f.paths,dashboard,false).launch_targets.empty());
   GenerateAotProject(f.paths,t); // repair interrupted project without touching content
-  CHECK(fs::last_write_time(t.manifest)==repaired_stamp);
+  CHECK((fs::last_write_time(t.manifest)==repaired_stamp));
   Write(t.game_root/"default.xex",Xex(9));
   CHECK_THROWS(GenerateAotProject(f.paths,t));
-  CHECK(fs::last_write_time(t.manifest)==repaired_stamp);
+  CHECK((fs::last_write_time(t.manifest)==repaired_stamp));
 }
 TEST_CASE("automatic AOT discovers verified XEX dependencies by content and preserves their identity", "[universal][generic-aot]") {
   Fixture f; f.Infrastructure();
@@ -635,7 +635,7 @@ TEST_CASE("unchanged AOT generation does not invalidate preparation and preserve
   const auto manifest_time = fs::last_write_time(game.manifest);
   GenerateAotProject(f.paths, game);
   CHECK_FALSE(fs::exists(marker));
-  CHECK(fs::last_write_time(game.manifest) == manifest_time);
+  CHECK((fs::last_write_time(game.manifest) == manifest_time));
   CHECK_FALSE(Inspect(f.paths, game).prepared); // no receipt/exe is implicitly approved
   std::ofstream(f.root / "titles/common/generic/modules.cmake", std::ios::app) << "\n# changed build integration\n";
   GenerateAotProject(f.paths, game);

@@ -347,7 +347,7 @@ TEST_CASE("payload update resumes after interruption and preserves content and o
   for (auto rel : {".local/inputs/game/default.xex", ".local/inputs/dashboards/dash.xex", ".local/user/profile", ".local/user/save"}) CHECK(DigestFile(destination / rel)->sha256 == Hash("keep"));
   const auto time = fs::last_write_time(destination / "titles/one/source.cpp");
   InitializeEnvironment(payload, destination);
-  CHECK(fs::last_write_time(destination / "titles/one/source.cpp") == time);
+  CHECK((fs::last_write_time(destination / "titles/one/source.cpp") == time));
 }
 
 TEST_CASE("source update relies on C2 receipts and invalidates only affected preparations") {
@@ -425,7 +425,7 @@ TEST_CASE("legacy environment archives obsolete sources but keeps generated AOT 
   CHECK(InspectEnvironment(payload, destination).current);
   CHECK_FALSE(fs::exists(destination / "src/old.cpp"));
   CHECK(DigestFile(destination / ".local/payload-update/backup/src/old.cpp")->sha256 == Hash("obsolete source"));
-  CHECK(fs::last_write_time(destination / "titles/game/generated/game.0.cpp") == generatedTime);
+  CHECK((fs::last_write_time(destination / "titles/game/generated/game.0.cpp") == generatedTime));
 }
 
 TEST_CASE("real distribution updates a previous source payload and preserves imported sets", "[.local-update]") {
