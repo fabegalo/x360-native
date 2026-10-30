@@ -203,6 +203,13 @@ extern "C" REX_FUNC(sub_816E6B18) {
 extern "C" REX_FUNC(sub_816E6B68) {
   ctx.r3.u64 = REX_KERNEL_MEMORY()->SystemHeapAlloc(std::max(1u, ctx.r3.u32));
 }
+// Tagged virtual allocation (size, tag). The image cache uses tag 17 for its
+// D3D texture headers. 816E6C78 always selects a virtual XAM heap, via
+// 816E5F10/816E63D8; the tag is accounting metadata, not physical attributes.
+// These blocks are released through the XMemFree/delete boundaries above.
+extern "C" REX_FUNC(sub_816E6C78) {
+  ctx.r3.u64 = REX_KERNEL_MEMORY()->SystemHeapAlloc(ctx.r3.u32, 0x20);
+}
 extern "C" REX_FUNC(sub_816E6B10) {
   if (ctx.r3.u32) REX_KERNEL_MEMORY()->SystemHeapFree(ctx.r3.u32);
 }
