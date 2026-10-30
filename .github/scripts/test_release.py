@@ -1,7 +1,9 @@
 """Synthetic release-gate tests; no original Xbox content or native execution."""
 
+import io
 import json
 from pathlib import Path
+import tarfile
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -10,7 +12,33 @@ import zipfile
 import release
 
 
+POSIX_LOCK = ("# synthetic\n"
+              f"linux-x64 llvm 22.1.8 {'1' * 64} LLVM https://example.invalid/llvm.tar.xz\n"
+              f"linux-x64 cmake 3.31.6 {'2' * 64} cmake https://example.invalid/cmake.tar.gz\n"
+              f"macos-arm64 cmake 3.31.6 {'3' * 64} cmake https://example.invalid/cmake.tar.gz\n")
+SYSROOT_LOCK = b"# synthetic jammy lock\nlibc6 2.35 " + b"4" * 64 + b"\n"
+
+
+def native_image(platform):
+    if platform == "windows-x64":
+        image = bytearray(128)
+        image[:2] = b"MZ"
+        image[60:64] = (64).to_bytes(4, "little")
+        image[64:70] = b"PE\0\0\x64\x86"
+    elif platform == "linux-x64":
+        image = bytearray(64)
+        image[:6] = b"\x7fELF\x02\x01"
+        image[18:20] = (0x3E).to_bytes(2, "little")
+    else:
+        image = bytearray(64)
+        image[:4] = b"\xcf\xfa\xed\xfe"
+        image[4:8] = (0x0100000C).to_bytes(4, "little")
+    return bytes(image)
+
+
 class ReleaseTests(unittest.TestCase):
+    platform = "windows-x64"
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
@@ -18,13 +46,11 @@ class ReleaseTests(unittest.TestCase):
         self.version = "0.1.0-preview.21"
         self.commit = "a" * 40
         self.ref = "refs/tags/v" + self.version
-        self.name = f"x360-native-{self.version}-windows-x64"
-        self.archive = self.directory / (self.name + ".zip")
-        pe = bytearray(128)
-        pe[:2] = b"MZ"
-        pe[60:64] = (64).to_bytes(4, "little")
-        pe[64:70] = b"PE\0\0\x64\x86"
-        self.files = {exe: bytes(pe) for exe in release.EXECUTABLES}
+        self.name = release.package_name(self.version, self.platform)
+        self.archive = self.directory / (self.name + release.PLATFORMS[self.platform]["archive"])
+        self.executables = release.PLATFORMS[self.platform]["executables"]
+        self.files = {exe: native_image(self.platform) for exe in self.executables}
+        self.modes = {}
         self.files["app/compile-commands.json"] = json.dumps([
             dict(file="<source>/src/supervisor/main.cpp", command="clang++ -O3 -DNDEBUG --dependent-lib=libcmt -c main.cpp")
         ]).encode()
@@ -33,9 +59,13 @@ class ReleaseTests(unittest.TestCase):
         patches = [{"file": "patches/rexglue-sdk/fixture.patch", "sha256": release.digest(patch_bytes)}]
         inventory = {"sdk_commit": "b" * 40, "components": [{"id": "fmt", "revision": "c" * 40}], "desktop_dependencies": ["fmt"]}
         tool = dict(id="ninja", version="1.13.1", sha256="d" * 64)
+        self.files["app/workspace/scripts/setup/desktop-tools.lock.json"] = json.dumps({"tools": [tool]}).encode()
+        self.files["app/workspace/scripts/packaging/posix-toolchain.lock"] = POSIX_LOCK.encode()
+        self.files["app/workspace/scripts/packaging/linux-sysroot-jammy.lock"] = SYSROOT_LOCK
+        tools = release.expected_tools(self.platform, lambda rel: self.files["app/workspace/" + rel])
         provenance = dict(commit=self.commit, version=self.version, ref=self.ref, run_id="42",
-                          tag="v" + self.version, llvm_archive_sha256="e" * 64, tools=[tool])
-        self.metadata = dict(version=self.version, commit=self.commit, platform="windows-x64", configuration="Release",
+                          tag="v" + self.version, llvm_archive_sha256="e" * 64, tools=tools)
+        self.metadata = dict(version=self.version, commit=self.commit, platform=self.platform, configuration="Release",
                              desktop_only=True, sdk_commit=inventory["sdk_commit"], patches=patches,
                              dependencies={"fmt": "c" * 40}, provenance=provenance)
         self.files["licenses/inventory.json"] = json.dumps(inventory).encode()
@@ -43,7 +73,9 @@ class ReleaseTests(unittest.TestCase):
             self.files["app/workspace/" + notice] = self.files[notice]
         self.files["app/workspace/" + patches[0]["file"]] = patch_bytes
         self.files["app/workspace/deps.lock.json"] = json.dumps({"rexglue_sdk": {"commit": inventory["sdk_commit"], "patches": patches}, "llvm": {"sha256": "e" * 64}}).encode()
-        self.files["app/workspace/scripts/setup/desktop-tools.lock.json"] = json.dumps({"tools": [tool]}).encode()
+
+    def mode(self, name):
+        return self.modes.get(name, 0o755 if name in self.executables else 0o644)
 
     def write_archive(self):
         def index(prefix, name):
@@ -53,16 +85,26 @@ class ReleaseTests(unittest.TestCase):
         self.metadata["payload_sha256"] = release.digest(self.files["app/workspace/payload.sha256"])
         self.files["package.json"] = json.dumps(self.metadata).encode()
         self.files["package.sha256"] = index("", "package.sha256")
-        with zipfile.ZipFile(self.archive, "w") as archive:
-            for name, data in self.files.items():
-                archive.writestr(self.name + "/" + name, data)
+        if self.archive.name.endswith(".tar.gz"):
+            with tarfile.open(self.archive, "w:gz") as archive:
+                for name, data in self.files.items():
+                    entry = tarfile.TarInfo(self.name + "/" + name)
+                    entry.size, entry.mode = len(data), self.mode(name)
+                    archive.addfile(entry, io.BytesIO(data))
+        else:
+            with zipfile.ZipFile(self.archive, "w") as archive:
+                for name, data in self.files.items():
+                    entry = zipfile.ZipInfo(self.name + "/" + name)
+                    if self.platform != "windows-x64":
+                        entry.create_system, entry.external_attr = 3, (0o100000 | self.mode(name)) << 16
+                    archive.writestr(entry, data)
         self.write_checksum()
 
     def write_checksum(self):
         Path(str(self.archive) + ".sha256").write_text(f"{release.file_digest(self.archive)}  {self.archive.name}\n")
 
     def verify(self):
-        return release.verify(self.directory, self.version, self.commit, self.ref, "42")
+        return release.verify(self.directory, self.version, self.commit, self.ref, "42", self.platform)
 
     def test_complete_archive(self):
         self.write_archive()
@@ -87,14 +129,6 @@ class ReleaseTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "SHA-256 mismatch"):
             self.verify()
 
-    def test_unindexed_file(self):
-        self.write_archive()
-        with zipfile.ZipFile(self.archive, "a") as archive:
-            archive.writestr(self.name + "/extra.txt", b"extra")
-        self.write_checksum()
-        with self.assertRaisesRegex(ValueError, "Unindexed"):
-            self.verify()
-
     def test_incomplete_deliverables(self):
         self.write_archive()
         Path(str(self.archive) + ".sha256").unlink()
@@ -104,8 +138,12 @@ class ReleaseTests(unittest.TestCase):
     def test_self_consistent_forbidden_files(self):
         for name, data, reason in (("font.xtt", b"synthetic", "Forbidden"),
                                    ("foreign.dll", b"MZ", "Forbidden"),
+                                   ("app/foreign.so", b"synthetic", "Unexpected executable"),
+                                   ("app/foreign.dylib", b"synthetic", "Unexpected executable"),
                                    ("renamed.dat", b"XEX2synthetic", "Original"),
                                    ("renamed.dat", b"MZsynthetic", "Renamed"),
+                                   ("renamed.dat", b"\x7fELFsynthetic", "Renamed"),
+                                   ("renamed.dat", b"\xcf\xfa\xed\xfesynthetic", "Renamed"),
                                    ("app/workspace/titles/fixture/generated/guest.cpp", b"synthetic", "Generated"),
                                    ("../escape.txt", b"synthetic", "Unsafe")):
             with self.subTest(name=name, data=data):
@@ -118,23 +156,30 @@ class ReleaseTests(unittest.TestCase):
     def test_duplicate_case_insensitive_path(self):
         self.files["license"] = b"duplicate"
         self.write_archive()
-        with self.assertRaisesRegex(ValueError, "Duplicate ZIP"):
+        with self.assertRaisesRegex(ValueError, "Duplicate archive"):
             self.verify()
 
     def test_missing_and_wrong_architecture(self):
-        original = self.files.pop("app/x360n.exe")
+        exe = sorted(self.executables)[-1]
+        original = self.files.pop(exe)
         self.write_archive()
         with self.assertRaisesRegex(ValueError, "Missing/invalid"):
             self.verify()
         wrong = bytearray(original)
-        wrong[68:70] = b"\x4c\x01"
-        self.files["app/x360n.exe"] = bytes(wrong)
+        if self.platform == "windows-x64":
+            wrong[68:70] = b"\x4c\x01"
+        elif self.platform == "linux-x64":
+            wrong[18:20] = (0xB7).to_bytes(2, "little")
+        else:
+            wrong[4:8] = (0x01000007).to_bytes(4, "little")
+        self.files[exe] = bytes(wrong)
         self.write_archive()
-        with self.assertRaisesRegex(ValueError, "not Windows x64"):
+        with self.assertRaisesRegex(ValueError, "is not"):
             self.verify()
 
     def test_wrong_build_provenance(self):
         for field, value, reason in (("commit", "wrong", "source/version"), ("configuration", "Debug", "Release"),
+                                     ("platform", "linux-arm64", "Release"),
                                      ("sdk_commit", "wrong", "SDK provenance"), ("dependencies", {}, "dependency provenance")):
             with self.subTest(field=field):
                 previous = self.metadata[field]
@@ -154,26 +199,121 @@ class ReleaseTests(unittest.TestCase):
                     self.verify()
                 self.metadata["provenance"][field] = previous
 
+    def test_wrong_tool_provenance(self):
+        self.metadata["provenance"]["tools"] = self.metadata["provenance"]["tools"][1:]
+        self.write_archive()
+        with self.assertRaisesRegex(ValueError, "Tool provenance"):
+            self.verify()
+
     def test_changed_patch_with_refreshed_indices(self):
         self.files["app/workspace/patches/rexglue-sdk/fixture.patch"] = b"changed patch"
         self.write_archive()
         with self.assertRaisesRegex(ValueError, "patch hash"):
             self.verify()
 
+
+class LinuxReleaseTests(ReleaseTests):
+    platform = "linux-x64"
+
+    def test_posix_modes(self):
+        for name, mode in ((sorted(self.executables)[0], 0o644), ("LICENSE", 0o755)):
+            with self.subTest(name=name):
+                self.modes = {name: mode}
+                self.write_archive()
+                with self.assertRaisesRegex(ValueError, "file mode"):
+                    self.verify()
+
+    def test_links_and_owners_refused(self):
+        self.write_archive()
+        for kind in ("symlink", "owner"):
+            with self.subTest(kind=kind):
+                with tarfile.open(self.archive, "r:gz") as source:
+                    members = [(m, source.extractfile(m).read() if m.isfile() else None) for m in source.getmembers()]
+                with tarfile.open(self.archive, "w:gz") as target:
+                    for member, data in members:
+                        target.addfile(member, io.BytesIO(data) if data is not None else None)
+                    extra = tarfile.TarInfo(self.name + "/app/linked")
+                    if kind == "symlink":
+                        extra.type, extra.linkname = tarfile.SYMTYPE, "/etc/passwd"
+                        target.addfile(extra)
+                    else:
+                        extra.uid, extra.size = 1000, 1
+                        target.addfile(extra, io.BytesIO(b"x"))
+                self.write_checksum()
+                with self.assertRaisesRegex(ValueError, "Link or special|owned by"):
+                    self.verify()
+                self.write_archive()
+
+    def test_posix_tool_and_sysroot_provenance(self):
+        ids = [tool["id"] for tool in self.metadata["provenance"]["tools"]]
+        self.assertEqual(ids, ["llvm", "cmake", "sysroot-jammy"])
+        self.files["app/workspace/scripts/packaging/linux-sysroot-jammy.lock"] = SYSROOT_LOCK + b"libfoo 1 " + b"5" * 64 + b"\n"
+        self.write_archive()
+        with self.assertRaisesRegex(ValueError, "Tool provenance"):
+            self.verify()
+
+
+class MacReleaseTests(ReleaseTests):
+    platform = "macos-arm64"
+
+    def test_posix_modes(self):
+        self.modes = {"app/x360n": 0o644}
+        self.write_archive()
+        with self.assertRaisesRegex(ValueError, "file mode"):
+            self.verify()
+
+
+class PublicationTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.directory = Path(self.temp.name)
+        self.version, self.commit = "0.1.0-preview.21", "a" * 40
+        self.ref = "refs/tags/v" + self.version
+        self.env = dict(GITHUB_EVENT_NAME="push", GITHUB_REF=self.ref, GITHUB_SHA=self.commit, GITHUB_RUN_ID="42", GITHUB_REPOSITORY="owner/repo")
+        self.notes = self.directory.parent / f"{self.directory.name}-notes.md"
+        self.notes.write_text("# Test release\n\nSynthetic notes.\n")
+        self.addCleanup(self.notes.unlink)
+        self.metadata = dict(provenance=dict(repository="owner/repo", event="push", release_notes_sha256=release.file_digest(self.notes)))
+        for platform in release.PLATFORMS:
+            for name in release.asset_names(self.version, platform):
+                (self.directory / name).write_bytes(name.encode())
+
+    def publish(self, command, verify=None, on_main=True):
+        with patch.dict("os.environ", self.env), patch.object(release, "command", side_effect=command) as mocked, \
+                patch.object(release, "verify", side_effect=verify or (lambda *a, **k: self.metadata)), \
+                patch.object(release, "on_main", return_value=on_main), \
+                patch.object(release, "notes_for", return_value=(self.notes, "Test release")), \
+                patch.object(release, "remote_tag_commit", return_value=self.commit):
+            try:
+                release.publish(self.directory)
+            finally:
+                self.calls = [call.args for call in mocked.call_args_list]
+
+    def git_only(self, *args):
+        require_git = args[0] == "git"
+        self.assertTrue(require_git, f"mutation before gates: {args}")
+        return self.commit
+
     def test_versions_and_modes(self):
         self.assertEqual(release.release_identity("push", self.ref, "ignored"), self.version)
         self.assertEqual(release.release_identity("push", "refs/tags/v1.2.3", ""), "1.2.3")
         self.assertEqual(release.release_identity("workflow_dispatch", "refs/heads/main", "1.2.3-ci"), "1.2.3-ci")
-        for event, ref, version in (("pull_request", self.ref, "1.2.3"), ("push", "refs/heads/main", "1.2.3"),
+        self.assertEqual(release.release_identity("push", "refs/heads/main", "1.2.3-ci.7"), "1.2.3-ci.7")
+        self.assertEqual(release.release_identity("pull_request", "refs/pull/9/merge", "1.2.3-ci.7"), "1.2.3-ci.7")
+        for event, ref, version in (("schedule", "refs/heads/main", "1.2.3"), ("pull_request", self.ref, "1.2.3"),
+                                    ("push", "refs/tags/x1.2.3", "1.2.3"), ("push", "refs/heads/main", "../../escape"),
                                     ("workflow_dispatch", self.ref, "../../escape"), ("workflow_dispatch", self.ref, "v1.2.3")):
-            with self.subTest(event=event, version=version), self.assertRaises(ValueError):
+            with self.subTest(event=event, ref=ref, version=version), self.assertRaises(ValueError):
                 release.release_identity(event, ref, version)
 
-    def test_manual_tag_run_cannot_publish(self):
-        with patch.dict("os.environ", GITHUB_EVENT_NAME="workflow_dispatch", GITHUB_REF=self.ref), patch.object(release, "command") as command:
-            with self.assertRaisesRegex(ValueError, "Manual runs"):
-                release.publish()
-            command.assert_not_called()
+    def test_manual_and_branch_runs_cannot_publish(self):
+        for event, ref in (("workflow_dispatch", self.ref), ("push", "refs/heads/main"), ("pull_request", "refs/pull/9/merge")):
+            with self.subTest(event=event), patch.dict("os.environ", GITHUB_EVENT_NAME=event, GITHUB_REF=ref), \
+                    patch.object(release, "command") as command:
+                with self.assertRaisesRegex(ValueError, "Manual runs|Only v\\* tag"):
+                    release.publish(self.directory)
+                command.assert_not_called()
 
     def test_missing_release_notes(self):
         with self.assertRaisesRegex(ValueError, "notes missing"):
@@ -184,34 +324,37 @@ class ReleaseTests(unittest.TestCase):
                                                              json.dumps({"object": {"type": "commit", "sha": self.commit}})]):
             self.assertEqual(release.remote_tag_commit("owner/repo", "v1.2.3"), self.commit)
 
+    def test_tag_outside_main_never_publishes(self):
+        with self.assertRaisesRegex(ValueError, "not on main"):
+            self.publish(self.git_only, on_main=False)
+
+    def test_every_platform_required(self):
+        for platform in release.PLATFORMS:
+            with self.subTest(platform=platform):
+                removed = sorted(release.asset_names(self.version, platform))[0]
+                data = (self.directory / removed).read_bytes()
+                (self.directory / removed).unlink()
+                with self.assertRaisesRegex(ValueError, "every platform"):
+                    self.publish(self.git_only)
+                (self.directory / removed).write_bytes(data)
+
     def test_publish_has_no_mutation_before_gate_success(self):
-        env = dict(GITHUB_EVENT_NAME="push", GITHUB_REF=self.ref, GITHUB_SHA=self.commit, GITHUB_RUN_ID="42")
-        with patch.dict("os.environ", env), patch.object(release, "command", return_value=self.commit) as command, \
-                patch.object(release, "verify", side_effect=ValueError("Incomplete artifact")):
-            with self.assertRaisesRegex(ValueError, "Incomplete"):
-                release.publish()
-            self.assertTrue(all(call.args[0] == "git" for call in command.call_args_list))
+        with self.assertRaisesRegex(ValueError, "Incomplete"):
+            self.publish(self.git_only, verify=ValueError("Incomplete artifact"))
 
     def test_incomplete_draft_never_publishes(self):
-        env = dict(GITHUB_EVENT_NAME="push", GITHUB_REF=self.ref, GITHUB_SHA=self.commit, GITHUB_RUN_ID="42", GITHUB_REPOSITORY="owner/repo")
-        notes = self.directory / "notes.md"
-        notes.write_text("# Test release\n\nSynthetic notes.\n")
-        self.metadata["provenance"].update(repository="owner/repo", event="push", release_notes_sha256=release.file_digest(notes))
-        with patch.dict("os.environ", env), patch.object(release, "command", side_effect=[self.commit, self.commit, "draft-url", json.dumps({"isDraft": True, "assets": []})]) as command, \
-                patch.object(release, "verify", return_value=self.metadata), patch.object(release, "notes_for", return_value=(notes, "Test release")), \
-                patch.object(release, "remote_tag_commit", return_value=self.commit), patch.object(Path, "iterdir", return_value=iter([self.archive])), \
-                patch.object(Path, "is_file", return_value=True):
-            with self.assertRaisesRegex(ValueError, "Draft assets incomplete"):
-                release.publish()
-            self.assertFalse(any(call.args[:3] == ("gh", "release", "edit") for call in command.call_args_list))
+        def command(*args):
+            if args[0] == "git":
+                return self.commit
+            if args[:3] == ("gh", "release", "view"):
+                return json.dumps({"isDraft": True, "assets": []})
+            return "draft-url"
+        with self.assertRaisesRegex(ValueError, "Draft assets incomplete"):
+            self.publish(command)
+        self.assertFalse(any(call[:3] == ("gh", "release", "edit") for call in self.calls))
 
-    def test_verified_preview_draft_publishes_after_download(self):
-        self.write_archive()
-        assets = [self.archive, Path(str(self.archive) + ".sha256")]
-        notes = self.directory / "notes.md"
-        notes.write_text("# Test release\n\nSynthetic notes.\n")
-        self.metadata["provenance"].update(repository="owner/repo", event="push", release_notes_sha256=release.file_digest(notes))
-        env = dict(GITHUB_EVENT_NAME="push", GITHUB_REF=self.ref, GITHUB_SHA=self.commit, GITHUB_RUN_ID="42", GITHUB_REPOSITORY="owner/repo")
+    def test_verified_preview_draft_publishes_all_platforms_after_download(self):
+        assets = sorted(p for p in self.directory.iterdir())
 
         def command(*args):
             if args[0] == "git":
@@ -224,16 +367,16 @@ class ReleaseTests(unittest.TestCase):
                     (destination / asset.name).write_bytes(asset.read_bytes())
             return "mocked"
 
-        with patch.dict("os.environ", env), patch.object(release, "command", side_effect=command) as mocked, \
-                patch.object(release, "verify", return_value=self.metadata), patch.object(release, "notes_for", return_value=(notes, "Test release")), \
-                patch.object(release, "remote_tag_commit", return_value=self.commit), patch.object(Path, "iterdir", side_effect=lambda: iter(assets)):
-            release.publish()
-            mutations = [call.args for call in mocked.call_args_list if call.args[:2] == ("gh", "release")]
-            self.assertEqual([args[2] for args in mutations], ["create", "view", "download", "edit"])
-            self.assertIn("--draft", mutations[0])
-            self.assertIn("--verify-tag", mutations[0])
-            self.assertIn("--prerelease=true", mutations[-1])
-            self.assertIn("--latest=false", mutations[-1])
+        verified = []
+        self.publish(command, verify=lambda *a, **k: verified.append(a[5]) or self.metadata)
+        self.assertEqual(sorted(verified), sorted(release.PLATFORMS))
+        mutations = [args for args in self.calls if args[:2] == ("gh", "release")]
+        self.assertEqual([args[2] for args in mutations], ["create", "view", "download", "edit"])
+        self.assertEqual(len([a for a in mutations[0] if Path(a).parent == self.directory]), 6)
+        self.assertIn("--draft", mutations[0])
+        self.assertIn("--verify-tag", mutations[0])
+        self.assertIn("--prerelease=true", mutations[-1])
+        self.assertIn("--latest=false", mutations[-1])
 
 
 if __name__ == "__main__":

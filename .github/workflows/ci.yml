@@ -1,0 +1,193 @@
+name: CI/CD
+
+# Pull requests, main and manual runs build, test and verify every platform package
+# and keep them as Actions artifacts. Only a v* tag push on main publishes, and only
+# after all three platforms produced verified packages in the same run.
+on:
+  pull_request:
+    paths-ignore: ['docs/**', '**/*.md', 'LICENSE']
+  push:
+    branches: [main]
+    # Path filters are not evaluated for tag pushes.
+    tags: ['v*']
+    paths-ignore: ['docs/**', '**/*.md', 'LICENSE']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  # A newer commit supersedes artifacts of an older one; tags always finish.
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
+
+jobs:
+  tooling:
+    name: Release tooling and version
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    defaults:
+      run:
+        shell: pwsh
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - name: Check out the exact event commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          submodules: false
+          persist-credentials: false
+          lfs: false
+      - name: Test release gates and packaging helpers
+        run: |
+          python3 -m unittest discover -s .github/scripts -p test_release.py
+          if ($LASTEXITCODE -ne 0) { throw 'Release gate tests failed' }
+          & tests/packaging/compute_version_test.ps1
+          & tests/packaging/release-configuration.ps1
+          & tests/packaging/excluded-constants.ps1
+      - name: Compute the version from Conventional Commits
+        id: version
+        env:
+          TAG_NAME: ${{ github.ref_name }}
+          RUN_NUMBER: ${{ github.run_number }}
+        run: |
+          $computed = & scripts/packaging/compute-version.ps1
+          if ($env:GITHUB_REF.StartsWith('refs/tags/')) {
+              $tagged = $env:TAG_NAME.Substring(1)
+              if ($tagged -ne $computed -and -not $tagged.StartsWith("$computed-")) { throw "Tag $env:TAG_NAME differs from the computed version $computed" }
+              $version = $tagged
+          } else {
+              $version = "$computed-ci.$env:RUN_NUMBER"
+          }
+          "version=$version" >> $env:GITHUB_OUTPUT
+          "Computed version: $computed; package version: $version"
+
+  package:
+    name: Package ${{ matrix.platform }}
+    needs: tooling
+    strategy:
+      # A tag publishes all platforms or none: stop paying for the rest on a failure.
+      fail-fast: ${{ startsWith(github.ref, 'refs/tags/') }}
+      matrix:
+        include:
+          - platform: windows-x64
+            runner: windows-2022
+            shell: powershell
+            python: python
+            archive: zip
+          - platform: linux-x64
+            runner: ubuntu-24.04
+            shell: pwsh
+            python: python3
+            archive: tar.gz
+          - platform: macos-arm64
+            runner: macos-15
+            shell: pwsh
+            python: python3
+            archive: zip
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: ${{ matrix.shell }}
+    env:
+      PACKAGE_PLATFORM: ${{ matrix.platform }}
+      PACKAGE_VERSION: ${{ needs.tooling.outputs.version }}
+    steps:
+      - name: Check out the exact event commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          submodules: false
+          persist-credentials: false
+          lfs: false
+      - name: Select the pinned Xcode
+        if: matrix.platform == 'macos-arm64'
+        run: |
+          $xcode = '/Applications/Xcode_16.4.app/Contents/Developer'
+          if (-not (Test-Path -LiteralPath $xcode)) { throw "Pinned Xcode missing on runner: $xcode" }
+          "DEVELOPER_DIR=$xcode" >> $env:GITHUB_ENV
+      - name: Test Windows startup selection
+        if: matrix.platform == 'windows-x64'
+        run: '& tests/packaging/local-startup.ps1'
+      - name: Validate commit, tag and release notes
+        id: identity
+        run: ${{ matrix.python }} .github/scripts/release.py identity
+      - name: Restore the verified POSIX toolchain
+        # Tag builds always download and verify every archive from its lock.
+        if: matrix.platform != 'windows-x64' && !startsWith(github.ref, 'refs/tags/')
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .local/toolchains/posix-${{ matrix.platform }}
+          key: posix-${{ matrix.platform }}-${{ hashFiles('scripts/packaging/posix-toolchain.lock', 'scripts/packaging/linux-sysroot-jammy.lock', 'scripts/packaging/prepare-posix-toolchain.sh', 'scripts/packaging/prepare-linux-sysroot.sh') }}
+      - name: Prepare pinned distribution dependencies
+        run: .github/scripts/prepare-release.ps1
+      - name: Record toolchain versions
+        run: |
+          if ($env:PACKAGE_PLATFORM -eq 'windows-x64') {
+              & scripts/devshell.cmd powershell -NoProfile -ExecutionPolicy Bypass -File .github/scripts/prepare-release.ps1 -RecordEnvironment
+          } else {
+              & .github/scripts/prepare-release.ps1 -RecordEnvironment
+          }
+          if ($LASTEXITCODE -ne 0) { throw 'Cannot identify the build environment' }
+      - name: Build, test and package the desktop distribution
+        run: |
+          & scripts/packaging/package-desktop.ps1 -Platform $env:PACKAGE_PLATFORM -Version $env:PACKAGE_VERSION -OutputDirectory .local/packages -ProvenanceFile .local/release/provenance.json
+      - name: Verify archive, checksums, payload and provenance
+        run: ${{ matrix.python }} .github/scripts/release.py verify --platform ${{ matrix.platform }} --directory .local/packages --version ${{ env.PACKAGE_VERSION }} --commit ${{ github.sha }} --ref ${{ github.ref }} --run-id ${{ github.run_id }}
+      - name: Upload only complete verified deliverables
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ${{ steps.identity.outputs.artifact }}
+          path: |
+            .local/packages/*.${{ matrix.archive }}
+            .local/packages/*.${{ matrix.archive }}.sha256
+          if-no-files-found: error
+          include-hidden-files: true
+          compression-level: 0
+          retention-days: ${{ startsWith(github.ref, 'refs/tags/') && 30 || 7 }}
+      - name: Upload failure evidence
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: failure-evidence-${{ matrix.platform }}
+          path: |
+            .local/build/distribution/*/${{ matrix.platform }}/*.txt
+            .local/build/distribution/*/${{ matrix.platform }}/*.json
+            .local/build/distribution/*/*.json
+            .local/release/*.json
+          if-no-files-found: ignore
+          include-hidden-files: true
+          retention-days: 3
+
+  publish:
+    name: Publish the verified tag release
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    needs: [tooling, package]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - name: Check out the same exact tag commit and notes
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+          submodules: false
+          lfs: false
+      - name: Download every verified platform package from this run
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: x360-native-*
+          merge-multiple: true
+          path: .local/packages
+      - name: Verify all assets and publish atomically through a draft
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PACKAGE_VERSION: ${{ needs.tooling.outputs.version }}
+        run: python3 .github/scripts/release.py publish
