@@ -2,11 +2,12 @@
 param([string]$Version = '', [string]$OutputDirectory = '.local/packages',
       [ValidateSet('local-candidate','public-prerelease')][string]$Publication = 'local-candidate',
       [string]$ProvenanceFile = '', [switch]$KeepIntermediates,
-      # Default: the host system. linux-x64 and macos-arm64 build natively with the
-      # tools of prepare-posix-toolchain.sh ($Toolchain, default .local/toolchains/posix-<platform>);
-      # on Windows, linux-x64 builds in WSL with a toolchain prepared there. The export,
-      # patches, evidence and license gate stay in this one script on every system.
-      [ValidateSet('','windows-x64','linux-x64','macos-arm64')][string]$Platform = '',
+      # Default: the host system and architecture. Every platform builds natively on its
+      # own system and architecture; Linux and macOS with the tools of prepare-posix-toolchain.sh
+      # ($Toolchain, default .local/toolchains/posix-<platform>). On Windows x64, linux-x64
+      # may also build in WSL with a toolchain prepared there. The export, patches,
+      # evidence and license gate stay in this one script on every system.
+      [ValidateSet('','windows-x64','windows-arm64','linux-x64','linux-arm64','macos-arm64','macos-x64')][string]$Platform = '',
       [string]$Toolchain = '', [string]$WslDistribution = 'Ubuntu')
 $ErrorActionPreference = 'Stop'
 $env:PSModulePath = Join-Path $PSHOME 'Modules'
@@ -18,13 +19,19 @@ $base = [IO.Path]::GetFullPath((Join-Path $root $OutputDirectory))
 if (-not $base.StartsWith((Join-Path $root '.local') + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) { throw 'Packages must remain below .local' }
 # Windows PowerShell 5.1 has no $IsWindows/$IsMacOS.
 $onWindows = $env:OS -eq 'Windows_NT'
-$onMac = -not $onWindows -and [Runtime.InteropServices.RuntimeInformation]::IsOSPlatform([Runtime.InteropServices.OSPlatform]::OSX)
-if (-not $Platform) { $Platform = if ($onWindows) { 'windows-x64' } elseif ($onMac) { 'macos-arm64' } else { 'linux-x64' } }
-$linux = $Platform -eq 'linux-x64'
-$mac = $Platform -eq 'macos-arm64'
+. (Join-Path $PSScriptRoot '../setup/host-platform.ps1')
+$hostPlatform = Get-HostPlatform
+if (-not $Platform) { $Platform = $hostPlatform }
+$linux = $Platform -like 'linux-*'
+$mac = $Platform -like 'macos-*'
 $posix = $linux -or $mac
+$arm64 = $Platform -like '*-arm64'
 $wsl = $linux -and $onWindows
-if (($Platform -eq 'windows-x64' -and -not $onWindows) -or ($mac -and -not $onMac) -or ($linux -and $onMac)) { throw "Cannot build $Platform on this system" }
+# No cross builds: the distribution tests run the binaries they package.
+if ($Platform -ne $hostPlatform -and -not ($wsl -and $Platform -eq 'linux-x64' -and $hostPlatform -eq 'windows-x64')) { throw "Cannot build $Platform on this system ($hostPlatform)" }
+# Baseline ISA of every compiled unit: x86-64-v2 on x64, ARMv8.0-A on ARM64.
+$isa = if ($arm64) { 'armv8-a' } else { 'x86-64-v2' }
+$architecture = if ($arm64) { 'ARM64' } else { 'x64' }
 # Child scripts run in the same PowerShell (powershell.exe 5.1 or pwsh 7).
 $shell = (Get-Process -Id $PID).Path
 $name = "x360-native-$Version-$Platform"
@@ -38,7 +45,7 @@ if ($ProvenanceFile) {
     $provenance = Get-Content -Raw -LiteralPath $ProvenanceFile | ConvertFrom-Json
     if ($provenance.commit -ne $head -or $provenance.version -ne $Version) { throw 'CI provenance differs from the committed package source/version' }
 }
-git -C $root diff --quiet HEAD -- scripts/packaging/package-desktop.ps1 scripts/packaging/build-desktop-posix.sh scripts/packaging/prepare-posix-toolchain.sh scripts/packaging/posix-toolchain.lock scripts/packaging/linux-sysroot-jammy.lock
+git -C $root diff --quiet HEAD -- scripts/packaging/package-desktop.ps1 scripts/packaging/build-desktop-posix.sh scripts/packaging/prepare-posix-toolchain.sh scripts/packaging/posix-toolchain.lock scripts/packaging/linux-sysroot-jammy.lock scripts/packaging/linux-sysroot-jammy-arm64.lock scripts/setup/host-platform.ps1
 if ($LASTEXITCODE -ne 0) { throw 'Commit the packaging script before using it.' }
 $jobId = [guid]::NewGuid().ToString('N')
 $job = Join-Path $root ".local/build/distribution/$jobId"
@@ -122,7 +129,8 @@ WriteIndex $payload 'payload.sha256'
 & $shell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $source 'scripts/setup/apply-sdk-patches.ps1')
 if ($LASTEXITCODE -ne 0) { throw 'Pinned SDK patch verification failed' }
 if ($onWindows) {
-    $llvm = Join-Path $root $lock.llvm.install_dir
+    # The native LLVM of this Windows host; under WSL it inspects the ELF binaries.
+    $llvm = Join-Path $root (Get-LockedWindowsLlvm $lock $hostPlatform).install_dir
     $clang = Join-Path $llvm 'bin/clang++.exe'
     $readobj = Join-Path $llvm 'bin/llvm-readobj.exe'
     foreach ($tool in @($clang, $readobj)) {
@@ -169,8 +177,9 @@ if ($posix) {
     $commands = Get-Content -Raw -LiteralPath (Join-Path $evidence 'compile_commands.json') | ConvertFrom-Json
 }
 if ($linux) {
-    $sysrootLock = Hash (Join-Path $source 'scripts/packaging/linux-sysroot-jammy.lock')
-    if ($recorded.sysroot_lock_sha256 -ne $sysrootLock) { throw 'Linux sysroot differs from linux-sysroot-jammy.lock' }
+    $sysrootName = if ($arm64) { 'linux-sysroot-jammy-arm64.lock' } else { 'linux-sysroot-jammy.lock' }
+    $sysrootLock = Hash (Join-Path $source "scripts/packaging/$sysrootName")
+    if ($recorded.sysroot_lock_sha256 -ne $sysrootLock) { throw "Linux sysroot differs from $sysrootName" }
     if (-not $wsl) { $readobj = Join-Path $recorded.llvm 'bin/llvm-readobj' }
     # Static C++ runtime, explicit glibc-only dependency allowlist. Never harvest .so files.
     $glibc = [version]'2.2.5'
@@ -181,7 +190,7 @@ if ($linux) {
             $lib = $line.Trim()
             if ($lib -notmatch '^\S+\.so(\.\S+)?$') { continue }
             if ($lib -eq 'libx360n-mspack.so' -and (Split-Path -Leaf $binary) -eq 'x360n-extract') { continue }
-            if ($lib -notmatch '^(libc\.so\.6|libm\.so\.6|libdl\.so\.2|libpthread\.so\.0|librt\.so\.1|ld-linux-x86-64\.so\.2)$') { throw "Unexpected runtime dependency: $lib" }
+            if ($lib -notmatch '^(libc\.so\.6|libm\.so\.6|libdl\.so\.2|libpthread\.so\.0|librt\.so\.1|ld-linux-x86-64\.so\.2|ld-linux-aarch64\.so\.1)$') { throw "Unexpected runtime dependency: $lib" }
         }
         $versions = & $readobj --version-info $binary
         if ($LASTEXITCODE -ne 0) { throw 'Cannot inspect symbol versions' }
@@ -214,11 +223,15 @@ if ($linux) {
         $loadCommands = @(& otool -l $binary) -join "`n"
         if ($loadCommands -notmatch 'cmd LC_BUILD_VERSION\s+cmdsize \d+\s+platform (?:1|MACOS|macos)\s+minos (\d+\.\d+(?:\.\d+)?)') { throw "macOS deployment target missing: $leaf" }
         if ([version]$Matches[1] -gt $minimum) { $minimum = [version]$Matches[1] }
+        $expected = if ($arm64) { 'arm64' } else { 'x86_64' }
         $architectures = (& lipo $binary -archs) -join ' '
-        if ($LASTEXITCODE -ne 0 -or $architectures.Trim() -ne 'arm64') { throw "Not an arm64-only binary: $leaf ($architectures)" }
+        if ($LASTEXITCODE -ne 0 -or $architectures.Trim() -ne $expected) { throw "Not an $expected-only binary: $leaf ($architectures)" }
         # Apple silicon only runs signed code; the linker's ad-hoc signature must be intact.
-        & codesign --verify --strict $binary
-        if ($LASTEXITCODE -ne 0) { throw "Invalid code signature: $leaf" }
+        # The x86_64 linker does not sign: Intel Macs run the unsigned binaries.
+        if ($arm64) {
+            & codesign --verify --strict $binary
+            if ($LASTEXITCODE -ne 0) { throw "Invalid code signature: $leaf" }
+        }
     }
     if ($minimum -gt [version]'13.3') { throw "macOS deployment target $minimum exceeds 13.3" }
     $mappings = @(@($recorded.source, '<source>'), @($recorded.build, '<build>'), @($recorded.sdk, '<macos-sdk>'), @($recorded.developer_dir, '<xcode>'), @($recorded.tools, '<tools>'))
@@ -227,7 +240,7 @@ if ($linux) {
     $compilerVersion = (& $clang --version | Select-Object -First 1)
     $compilerHash = Hash $clang
     $sourceMap = $source.Replace('\','/')
-    $flags = "-march=x86-64-v2 -mno-incremental-linker-compatible -ffile-prefix-map=$sourceMap=/x360-source"
+    $flags = "-march=$isa -mno-incremental-linker-compatible -ffile-prefix-map=$sourceMap=/x360-source"
     & $devshell cmake -S $source -B $build -G Ninja -DX360_DESKTOP_ONLY=ON -DX360_DISTRIBUTION=ON "-DX360_PACKAGE_PAYLOAD_SHA256=$payloadHash" "-DX360_VERSION=$Version" -DCMAKE_BUILD_TYPE=Release "-DCMAKE_C_COMPILER=$llvm/bin/clang.exe" "-DCMAKE_CXX_COMPILER=$clang" "-DCMAKE_C_FLAGS=$flags" "-DCMAKE_CXX_FLAGS=$flags" '-DCMAKE_EXE_LINKER_FLAGS=-Wl,/Brepro' -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
     if ($LASTEXITCODE -ne 0) { throw 'Distribution configure failed' }
     & $devshell cmake --build $build --target x360-native x360n_desktop_tests
@@ -293,12 +306,15 @@ $portableCommands = @($commands | ForEach-Object {
 })
 [IO.File]::WriteAllText((Join-Path $internal 'compile-commands.json'), ($portableCommands | ConvertTo-Json -Depth 5), [Text.UTF8Encoding]::new($false))
 if ($linux) { [IO.File]::WriteAllText((Join-Path $destination 'READ-ME.txt'), @"
-x360-native $Version — prévia para Linux x64
+x360-native $Version — prévia para Linux $architecture
 
 Extraia o arquivo inteiro em uma pasta vazia (tar -xzf <arquivo>.tar.gz) e
-abra ./x360-native. Requer glibc $glibc ou mais recente, x86-64-v2 e uma sessão
+abra ./x360-native. Requer glibc $glibc ou mais recente, $isa e uma sessão
 gráfica X11 ou Wayland; a biblioteca C++ está incluída no executável.
-Em Importar > Adicionar arquivo, selecione uma ISO ou um pacote Xbox 360
+$(if (-not $arm64) { "Steam Deck LCD/OLED usa este mesmo pacote. No Modo Jogo (gamescope) o aplicativo
+abre em tela cheia; adicione-o como jogo não Steam para usar os controles integrados
+pelo Steam Input. A homologação em hardware real ainda está pendente.
+" })Em Importar > Adicionar arquivo, selecione uma ISO ou um pacote Xbox 360
 (CON/LIVE/PIRS, incluindo XBLA), ou o ZIP oficial System Update 17559.
 A extração é local e não requer instalar ferramentas de compilação. Também
 aceita a pasta `$SystemUpdate ou seu PIRS interno. Componentes ausentes são
@@ -340,10 +356,10 @@ validação. Serviços da dashboard, perfis e saves continuam com as limitaçõe
 registradas no relatório do projeto.
 Código correspondente: $head
 "@, [Text.UTF8Encoding]::new($false)) } elseif ($mac) { [IO.File]::WriteAllText((Join-Path $destination 'READ-ME.txt'), @"
-x360-native $Version — prévia para macOS (Apple silicon)
+x360-native $Version — prévia para macOS ($(if ($arm64) { 'Apple silicon' } else { 'Intel x64' }))
 
 Extraia o ZIP inteiro em uma pasta vazia e abra ./x360-native pelo Terminal.
-Requer macOS $minimum ou mais recente em um Mac com Apple silicon. O pacote não
+Requer macOS $minimum ou mais recente em um Mac $(if ($arm64) { 'com Apple silicon' } else { 'Intel' }). O pacote não
 é notarizado: se o macOS bloquear a abertura, remova a quarentena da pasta com
 xattr -dr com.apple.quarantine <pasta>, somente para este download conferido.
 Em Importar > Adicionar arquivo, selecione uma ISO ou um pacote Xbox 360
@@ -387,7 +403,7 @@ dashboard, perfis e saves continuam com as limitações registradas no relatóri
 Código correspondente: $head
 "@, [Text.UTF8Encoding]::new($false)) } else {
 [IO.File]::WriteAllText((Join-Path $destination 'READ-ME.txt'), @"
-x360-native $Version — prévia para Windows x64
+x360-native $Version — prévia para Windows $architecture
 
 Extraia o ZIP inteiro em uma pasta vazia e abra x360-native.exe.
 Em Importar > Adicionar arquivo, selecione uma ISO ou um pacote Xbox 360
@@ -444,7 +460,7 @@ $metadata = [ordered]@{
 }
 if ($linux) {
     $metadata.configuration = 'Release'; $metadata.desktop_only = $true; $metadata.relative_source_paths = $true
-    $metadata.compiler_flags = '-march=x86-64-v2 -ffile-prefix-map=<source>=/x360-source'; $metadata.linker_flags = '-fuse-ld=lld -static-libstdc++ -static-libgcc'
+    $metadata.compiler_flags = "-march=$isa -ffile-prefix-map=<source>=/x360-source"; $metadata.linker_flags = '-fuse-ld=lld -static-libstdc++ -static-libgcc'
     $metadata.glibc_minimum = $glibc.ToString(); $metadata.sysroot = [ordered]@{ distribution = 'ubuntu-22.04'; lock_sha256 = $sysrootLock }
     $metadata.publication = $Publication; $metadata.clean_linux = 'pending'
 } elseif ($mac) {
@@ -455,7 +471,7 @@ if ($linux) {
 } else {
     $metadata.resource_compiler_sha256 = Hash $rcCompiler
     $metadata.configuration = 'Release'; $metadata.desktop_only = $true; $metadata.relative_source_paths = $true
-    $metadata.compiler_flags = '-march=x86-64-v2 -mno-incremental-linker-compatible -ffile-prefix-map=<source>=/x360-source'; $metadata.linker_flags = '-Wl,/Brepro'
+    $metadata.compiler_flags = "-march=$isa -mno-incremental-linker-compatible -ffile-prefix-map=<source>=/x360-source"; $metadata.linker_flags = '-Wl,/Brepro'
     $metadata.publication = $Publication; $metadata.clean_windows = 'pending'
 }
 if ($provenance) { $metadata.provenance = $provenance }

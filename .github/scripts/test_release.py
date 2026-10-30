@@ -15,25 +15,38 @@ import release
 POSIX_LOCK = ("# synthetic\n"
               f"linux-x64 llvm 22.1.8 {'1' * 64} LLVM https://example.invalid/llvm.tar.xz\n"
               f"linux-x64 cmake 3.31.6 {'2' * 64} cmake https://example.invalid/cmake.tar.gz\n"
-              f"macos-arm64 cmake 3.31.6 {'3' * 64} cmake https://example.invalid/cmake.tar.gz\n")
+              f"macos-arm64 cmake 3.31.6 {'3' * 64} cmake https://example.invalid/cmake.tar.gz\n"
+              f"linux-arm64 llvm 22.1.8 {'6' * 64} LLVM https://example.invalid/llvm.tar.xz\n"
+              f"linux-arm64 cmake 3.31.6 {'7' * 64} cmake https://example.invalid/cmake.tar.gz\n"
+              f"macos-x64 cmake 3.31.6 {'3' * 64} cmake https://example.invalid/cmake.tar.gz\n")
 SYSROOT_LOCK = b"# synthetic jammy lock\nlibc6 2.35 " + b"4" * 64 + b"\n"
+SYSROOT_ARM64_LOCK = b"# synthetic jammy arm64 lock\nlibc6 2.35 " + b"8" * 64 + b"\n"
+# Locked LLVM archive digest of each Windows platform in the synthetic deps.lock.json.
+WINDOWS_LLVM_SHA256 = {"windows-x64": "e" * 64, "windows-arm64": "f" * 64}
 
 
-def native_image(platform):
-    if platform == "windows-x64":
+def native_image(platform, machine=None):
+    machine = release.PLATFORMS[platform]["machine"] if machine is None else machine
+    if platform.startswith("windows-"):
         image = bytearray(128)
         image[:2] = b"MZ"
         image[60:64] = (64).to_bytes(4, "little")
-        image[64:70] = b"PE\0\0\x64\x86"
-    elif platform == "linux-x64":
+        image[64:68] = b"PE\0\0"
+        image[68:70] = machine.to_bytes(2, "little")
+    elif platform.startswith("linux-"):
         image = bytearray(64)
         image[:6] = b"\x7fELF\x02\x01"
-        image[18:20] = (0x3E).to_bytes(2, "little")
+        image[18:20] = machine.to_bytes(2, "little")
     else:
         image = bytearray(64)
         image[:4] = b"\xcf\xfa\xed\xfe"
-        image[4:8] = (0x0100000C).to_bytes(4, "little")
+        image[4:8] = machine.to_bytes(4, "little")
     return bytes(image)
+
+
+def other_architecture(platform):
+    """The same system's package for the other architecture."""
+    return platform.replace("-x64", "-arm64") if platform.endswith("-x64") else platform.replace("-arm64", "-x64")
 
 
 class ReleaseTests(unittest.TestCase):
@@ -58,13 +71,15 @@ class ReleaseTests(unittest.TestCase):
         patch_bytes = b"synthetic patch fixture"
         patches = [{"file": "patches/rexglue-sdk/fixture.patch", "sha256": release.digest(patch_bytes)}]
         inventory = {"sdk_commit": "b" * 40, "components": [{"id": "fmt", "revision": "c" * 40}], "desktop_dependencies": ["fmt"]}
-        tool = dict(id="ninja", version="1.13.1", sha256="d" * 64)
-        self.files["app/workspace/scripts/setup/desktop-tools.lock.json"] = json.dumps({"tools": [tool]}).encode()
+        tools = [dict(id="ninja", version="1.13.1", sha256="d" * 64),
+                 dict(platform="windows-arm64", id="ninja", version="1.13.1", sha256="9" * 64)]
+        self.files["app/workspace/scripts/setup/desktop-tools.lock.json"] = json.dumps({"tools": tools}).encode()
         self.files["app/workspace/scripts/packaging/posix-toolchain.lock"] = POSIX_LOCK.encode()
         self.files["app/workspace/scripts/packaging/linux-sysroot-jammy.lock"] = SYSROOT_LOCK
+        self.files["app/workspace/scripts/packaging/linux-sysroot-jammy-arm64.lock"] = SYSROOT_ARM64_LOCK
         tools = release.expected_tools(self.platform, lambda rel: self.files["app/workspace/" + rel])
         provenance = dict(commit=self.commit, version=self.version, ref=self.ref, run_id="42",
-                          tag="v" + self.version, llvm_archive_sha256="e" * 64, tools=tools)
+                          tag="v" + self.version, llvm_archive_sha256=WINDOWS_LLVM_SHA256.get(self.platform), tools=tools)
         self.metadata = dict(version=self.version, commit=self.commit, platform=self.platform, configuration="Release",
                              desktop_only=True, sdk_commit=inventory["sdk_commit"], patches=patches,
                              dependencies={"fmt": "c" * 40}, provenance=provenance)
@@ -72,7 +87,8 @@ class ReleaseTests(unittest.TestCase):
         for notice in ("LICENSE", "THIRD_PARTY_NOTICES.md", "licenses/inventory.json"):
             self.files["app/workspace/" + notice] = self.files[notice]
         self.files["app/workspace/" + patches[0]["file"]] = patch_bytes
-        self.files["app/workspace/deps.lock.json"] = json.dumps({"rexglue_sdk": {"commit": inventory["sdk_commit"], "patches": patches}, "llvm": {"sha256": "e" * 64}}).encode()
+        self.files["app/workspace/deps.lock.json"] = json.dumps({"rexglue_sdk": {"commit": inventory["sdk_commit"], "patches": patches}, "llvm": {"sha256": WINDOWS_LLVM_SHA256["windows-x64"]},
+                                                                  "llvm_windows_arm64": {"sha256": WINDOWS_LLVM_SHA256["windows-arm64"]}}).encode()
 
     def mode(self, name):
         return self.modes.get(name, 0o755 if name in self.executables else 0o644)
@@ -95,7 +111,7 @@ class ReleaseTests(unittest.TestCase):
             with zipfile.ZipFile(self.archive, "w") as archive:
                 for name, data in self.files.items():
                     entry = zipfile.ZipInfo(self.name + "/" + name)
-                    if self.platform != "windows-x64":
+                    if not self.platform.startswith("windows-"):
                         entry.create_system, entry.external_attr = 3, (0o100000 | self.mode(name)) << 16
                     archive.writestr(entry, data)
         self.write_checksum()
@@ -165,21 +181,31 @@ class ReleaseTests(unittest.TestCase):
         self.write_archive()
         with self.assertRaisesRegex(ValueError, "Missing/invalid"):
             self.verify()
-        wrong = bytearray(original)
-        if self.platform == "windows-x64":
-            wrong[68:70] = b"\x4c\x01"
-        elif self.platform == "linux-x64":
-            wrong[18:20] = (0xB7).to_bytes(2, "little")
-        else:
-            wrong[4:8] = (0x01000007).to_bytes(4, "little")
-        self.files[exe] = bytes(wrong)
+        # The other architecture of the same system, and Windows x86 (0x14C).
+        for machine in (release.PLATFORMS[other_architecture(self.platform)]["machine"], 0x14C):
+            with self.subTest(machine=machine):
+                self.files[exe] = native_image(self.platform, machine)
+                self.write_archive()
+                with self.assertRaisesRegex(ValueError, "is not"):
+                    self.verify()
+        self.files[exe] = original
+
+    def test_only_this_platform_tools(self):
+        def tools(platform):
+            return release.expected_tools(platform, lambda rel: self.files["app/workspace/" + rel])
+        if self.platform.startswith("macos-"):
+            # The locked macOS CMake/Ninja are universal archives that serve both architectures.
+            self.assertEqual(tools(self.platform), tools(other_architecture(self.platform)))
+            return
+        self.assertNotEqual(tools(self.platform), tools(other_architecture(self.platform)))
+        self.metadata["provenance"]["tools"] = tools(other_architecture(self.platform))
         self.write_archive()
-        with self.assertRaisesRegex(ValueError, "is not"):
+        with self.assertRaisesRegex(ValueError, "Tool provenance"):
             self.verify()
 
     def test_wrong_build_provenance(self):
         for field, value, reason in (("commit", "wrong", "source/version"), ("configuration", "Debug", "Release"),
-                                     ("platform", "linux-arm64", "Release"),
+                                     ("platform", "linux-riscv64", "Release"),
                                      ("sdk_commit", "wrong", "SDK provenance"), ("dependencies", {}, "dependency provenance")):
             with self.subTest(field=field):
                 previous = self.metadata[field]
@@ -203,6 +229,14 @@ class ReleaseTests(unittest.TestCase):
         self.metadata["provenance"]["tools"] = self.metadata["provenance"]["tools"][1:]
         self.write_archive()
         with self.assertRaisesRegex(ValueError, "Tool provenance"):
+            self.verify()
+
+    def test_wrong_llvm_architecture(self):
+        if not self.platform.startswith("windows-"):
+            self.skipTest("Windows packages record the locked LLVM archive")
+        self.metadata["provenance"]["llvm_archive_sha256"] = WINDOWS_LLVM_SHA256[other_architecture(self.platform)]
+        self.write_archive()
+        with self.assertRaisesRegex(ValueError, "LLVM archive"):
             self.verify()
 
     def test_changed_patch_with_refreshed_indices(self):
@@ -247,10 +281,15 @@ class LinuxReleaseTests(ReleaseTests):
     def test_posix_tool_and_sysroot_provenance(self):
         ids = [tool["id"] for tool in self.metadata["provenance"]["tools"]]
         self.assertEqual(ids, ["llvm", "cmake", "sysroot-jammy"])
-        self.files["app/workspace/scripts/packaging/linux-sysroot-jammy.lock"] = SYSROOT_LOCK + b"libfoo 1 " + b"5" * 64 + b"\n"
+        lock = "app/workspace/scripts/packaging/" + release.LINUX_SYSROOTS[self.platform]
+        self.files[lock] += b"libfoo 1 " + b"5" * 64 + b"\n"
         self.write_archive()
         with self.assertRaisesRegex(ValueError, "Tool provenance"):
             self.verify()
+
+
+class LinuxArm64ReleaseTests(LinuxReleaseTests):
+    platform = "linux-arm64"
 
 
 class MacReleaseTests(ReleaseTests):
@@ -261,6 +300,14 @@ class MacReleaseTests(ReleaseTests):
         self.write_archive()
         with self.assertRaisesRegex(ValueError, "file mode"):
             self.verify()
+
+
+class MacX64ReleaseTests(MacReleaseTests):
+    platform = "macos-x64"
+
+
+class WindowsArm64ReleaseTests(ReleaseTests):
+    platform = "windows-arm64"
 
 
 class PublicationTests(unittest.TestCase):
@@ -372,7 +419,7 @@ class PublicationTests(unittest.TestCase):
         self.assertEqual(sorted(verified), sorted(release.PLATFORMS))
         mutations = [args for args in self.calls if args[:2] == ("gh", "release")]
         self.assertEqual([args[2] for args in mutations], ["create", "view", "download", "edit"])
-        self.assertEqual(len([a for a in mutations[0] if Path(a).parent == self.directory]), 6)
+        self.assertEqual(len([a for a in mutations[0] if Path(a).parent == self.directory]), 12)
         self.assertIn("--draft", mutations[0])
         self.assertIn("--verify-tag", mutations[0])
         self.assertIn("--prerelease=true", mutations[-1])

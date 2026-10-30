@@ -205,7 +205,9 @@ int Doctor(const ProjectPaths& p, const std::string& config, const fs::path& sdk
   fs::path clang=compiler_override;
   if (clang.empty()) {
 #ifdef _WIN32
-    clang=p.local()/"toolchains"/("llvm-" X360N_LLVM_VERSION_LOCKED)/"bin/clang++.exe";
+    // windows-x64 keeps its historical directory; other hosts name their platform.
+    clang=p.local()/"toolchains"/(HostPlatform()=="windows-x64" ? std::string("llvm-" X360N_LLVM_VERSION_LOCKED)
+                                                                : "llvm-" X360N_LLVM_VERSION_LOCKED "-"+HostPlatform())/"bin/clang++.exe";
 #else
     clang=p.local()/"toolchains"/("llvm-" X360N_LLVM_VERSION_LOCKED "-"+HostPlatform())/"bin/clang++";
     if (!fs::is_regular_file(clang)) { try { clang=FindHostTool("clang++"); } catch (...) {} }
@@ -232,13 +234,17 @@ int Doctor(const ProjectPaths& p, const std::string& config, const fs::path& sdk
   if (!fs::exists(vswhere)) {
     fail("vswhere.exe not found: install Visual Studio 2022 Build Tools with the C++ workload");
   } else {
+    // The same native MSVC component as scripts/devshell.cmd.
+    const bool arm64 = HostPlatform() == "windows-arm64";
+    const std::string tools = arm64 ? "ARM64" : "x64";
     auto c = Capture(p, vswhere, {"-latest", "-products", "*", "-requires",
-                                  "Microsoft.VisualStudio.Component.VC.Tools.x86.x64",
+                                  arm64 ? "Microsoft.VisualStudio.Component.VC.Tools.ARM64"
+                                        : "Microsoft.VisualStudio.Component.VC.Tools.x86.x64",
                                   "-property", "catalog_productDisplayVersion"});
     if (c.ok && !Trim(c.out).empty()) {
-      ok("MSVC x64 tools present (Visual Studio " + Trim(c.out) + ")");
+      ok("MSVC " + tools + " tools present (Visual Studio " + Trim(c.out) + ")");
     } else {
-      fail("no Visual Studio instance with MSVC x64 tools");
+      fail("no Visual Studio instance with MSVC " + tools + " tools");
     }
   }
 #endif

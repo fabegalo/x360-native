@@ -90,6 +90,28 @@ TEST_CASE("the newest complete published release is selected with pinned URLs", 
   CHECK_FALSE(SelectUpdate("[]", "0.54.0"));
   CHECK_THROWS(SelectUpdate("{\"message\":\"API rate limit exceeded\"}", "0.54.0"));
 }
+TEST_CASE("each of the six packages updates only its own system and architecture", "[update]") {
+  const std::vector<std::string> platforms{"windows-x64", "windows-arm64", "linux-x64", "linux-arm64", "macos-arm64", "macos-x64"};
+  std::string assets;
+  for (const auto& platform : platforms) {
+    const auto archive = "x360-native-0.58.0-" + platform + PackageArchiveExtension(platform);
+    assets += (assets.empty() ? "" : ",") + std::string(R"({"name":")") + archive + R"("},{"name":")" + archive + R"(.sha256"})";
+  }
+  const auto json = R"([{"tag_name":"v0.58.0","draft":false,"prerelease":false,"assets":[)" + assets + "]}]";
+  for (const auto& platform : platforms) {
+    const auto found = SelectUpdate(json, "0.54.0", UpdateChannel::Stable, platform);
+    REQUIRE(found);
+    CHECK(found->package == "x360-native-0.58.0-" + platform);
+    CHECK(found->archive_url == "https://github.com/fabegalo/x360-native/releases/download/v0.58.0/x360-native-0.58.0-" + platform +
+                                    PackageArchiveExtension(platform));
+  }
+  CHECK(PackageArchiveExtension("linux-arm64") == ".tar.gz");
+  CHECK(PackageArchiveExtension("windows-arm64") == ".zip");
+  CHECK(PackageArchiveExtension("macos-x64") == ".zip");
+  // This build updates from the package of its own system and architecture.
+  CHECK(std::find(platforms.begin(), platforms.end(), PackagePlatform()) != platforms.end());
+  CHECK(PackagePlatform() == x360n::HostPlatform());
+}
 TEST_CASE("a downloaded archive must match its published checksum line", "[update]") {
   const auto dir = UniqueTempPath("update-archive");
   const auto archive = dir / "x360-native-1.0.0-windows-x64.zip", checksum = dir / "x360-native-1.0.0-windows-x64.zip.sha256";

@@ -14,6 +14,18 @@ using Microsoft::WRL::ComPtr;
 namespace fs = std::filesystem;
 namespace x360n::desktop {
 namespace {
+// Toolchain of this build's architecture: devshell.cmd selects the same MSVC component.
+#if defined(_M_ARM64)
+constexpr WORD kNativeArchitecture = PROCESSOR_ARCHITECTURE_ARM64;
+constexpr const char* kArchitectureLabel = "Windows ARM64";
+constexpr const char* kSdkArchitecture = "arm64";
+constexpr const char* kMsvcComponent = "Microsoft.VisualStudio.Component.VC.Tools.ARM64";
+#else
+constexpr WORD kNativeArchitecture = PROCESSOR_ARCHITECTURE_AMD64;
+constexpr const char* kArchitectureLabel = "Windows x64";
+constexpr const char* kSdkArchitecture = "x64";
+constexpr const char* kMsvcComponent = "Microsoft.VisualStudio.Component.VC.Tools.x86.x64";
+#endif
 std::string Registry(HKEY key, const wchar_t* path, const wchar_t* name) {
   wchar_t value[512]{}; DWORD length = sizeof(value);
   if (RegGetValueW(key, path, name, RRF_RT_REG_SZ, nullptr, value, &length) != ERROR_SUCCESS) return {};
@@ -49,8 +61,9 @@ Command PreparationCommand(const fs::path& root, const fs::path& supervisor, con
 Environment CheckEnvironment(const fs::path& root) {
   Environment r;
   SYSTEM_INFO sys{}; GetNativeSystemInfo(&sys);
-  r.architecture = sys.wProcessorArchitecture == PROCESSOR_ARCHITECTURE_AMD64;
-  r.description = r.architecture ? "Windows x64\r\n" : "Unsupported architecture / arquitetura não validada\r\n";
+  // Native tools of the architecture this launcher was built for; emulation is not native.
+  r.architecture = sys.wProcessorArchitecture == kNativeArchitecture;
+  r.description = r.architecture ? std::string(kArchitectureLabel) + "\r\n" : "Unsupported architecture / arquitetura não validada\r\n";
   r.cpu = Registry(HKEY_LOCAL_MACHINE, L"HARDWARE\\DESCRIPTION\\System\\CentralProcessor\\0", L"ProcessorNameString");
   while (!r.cpu.empty() && r.cpu.back() == ' ') r.cpu.pop_back();
   MEMORYSTATUSEX memory{sizeof(memory)};
@@ -91,9 +104,9 @@ Environment CheckEnvironment(const fs::path& root) {
         auto id = version.path().filename();
         if (fs::is_regular_file(version.path() / "um/Windows.h") &&
             fs::is_regular_file(version.path() / "um/d3d12.h") &&
-            fs::is_regular_file(kits / "Lib" / id / "um/x64/kernel32.lib") &&
-            fs::is_regular_file(kits / "Lib" / id / "ucrt/x64/ucrt.lib") &&
-            fs::is_regular_file(kits / "bin" / id / "x64/rc.exe")) { windows_sdk = true; break; }
+            fs::is_regular_file(kits / "Lib" / id / "um" / kSdkArchitecture / "kernel32.lib") &&
+            fs::is_regular_file(kits / "Lib" / id / "ucrt" / kSdkArchitecture / "ucrt.lib") &&
+            fs::is_regular_file(kits / "bin" / id / kSdkArchitecture / "rc.exe")) { windows_sdk = true; break; }
       }
     }
     r.description += windows_sdk ? "Windows SDK: OK\r\n" : "Windows SDK: installation required / instalação necessária\r\n";
@@ -104,7 +117,7 @@ Environment CheckEnvironment(const fs::path& root) {
       std::error_code ec;
       auto out = temp / ("vswhere-" + std::to_string(GetCurrentProcessId()) + ".txt");
       ProcessSpec spec; spec.exe = vswhere;
-      spec.args = {"-latest", "-version", "[17.0,18.0)", "-products", "*", "-requires", "Microsoft.VisualStudio.Component.VC.Tools.x86.x64", "-property", "installationPath"};
+      spec.args = {"-latest", "-version", "[17.0,18.0)", "-products", "*", "-requires", kMsvcComponent, "-property", "installationPath"};
       spec.stdout_file = out; spec.stderr_file = out; spec.stderr_file += ".err";
       spec.no_console = true; spec.timeout = std::chrono::seconds(10);
       auto result = RunProcess(spec);

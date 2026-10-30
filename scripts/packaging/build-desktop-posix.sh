@@ -1,5 +1,5 @@
 #!/bin/sh
-# Linux x64 / macOS ARM64 distribution build for package-desktop.ps1.
+# Linux (x64, ARM64) / macOS (ARM64, x64) distribution build for package-desktop.ps1.
 # Builds the exported, patched source with the pinned tools of
 # prepare-posix-toolchain.sh, runs only the distribution tests and writes the
 # binaries plus raw compiler/linker evidence to <evidence>. Never installs,
@@ -42,36 +42,41 @@ source="$work/source" build="$work/build"
 [ ! -e "$build" ] || { echo "build directory already exists" >&2; exit 2; }
 cmake="$tools/cmake/bin/cmake" ctest="$tools/cmake/bin/ctest" ninja="$tools/ninja/ninja"
 case "$platform" in
-linux-x64)
+linux-x64 | linux-arm64)
+  # One recipe; only the target triplet, baseline ISA and sysroot lock differ.
+  case "$platform" in
+  linux-x64) triplet=x86_64-linux-gnu flags="-march=x86-64-v2" sysroot_lock=linux-sysroot-jammy.lock ;;
+  *) triplet=aarch64-linux-gnu flags="-march=armv8-a" sysroot_lock=linux-sysroot-jammy-arm64.lock ;;
+  esac
   llvm="$tools/llvm" sysroot="$tools/sysroot-jammy/root"
   cc="$llvm/bin/clang" cxx="$llvm/bin/clang++"
   for tool in "$cc" "$cxx" "$llvm/bin/ld.lld" "$llvm/bin/llvm-ar" "$llvm/bin/llvm-ranlib" "$cmake" "$ctest" "$ninja"; do
     [ -x "$tool" ] || { echo "toolchain component missing: $tool" >&2; exit 3; }
   done
   # The glibc floor comes from this sysroot: refuse one that is not the locked set.
-  cmp -s "$export_tree/scripts/packaging/linux-sysroot-jammy.lock" "$tools/sysroot-jammy/sysroot.lock" ||
-    { echo "sysroot differs from linux-sysroot-jammy.lock: $tools/sysroot-jammy" >&2; exit 3; }
+  cmp -s "$export_tree/scripts/packaging/$sysroot_lock" "$tools/sysroot-jammy/sysroot.lock" ||
+    { echo "sysroot differs from $sysroot_lock: $tools/sysroot-jammy" >&2; exit 3; }
   # The sysroot's wayland-scanner runs on the build host; a host one only if it cannot.
   scanner="$sysroot/usr/bin/wayland-scanner"
   "$scanner" --version >/dev/null 2>&1 || scanner=$(command -v wayland-scanner) ||
     { echo "wayland-scanner unavailable" >&2; exit 3; }
   pkgconfig=${PKG_CONFIG:-$(command -v pkg-config)} || { echo "pkg-config unavailable" >&2; exit 3; }
   export PKG_CONFIG_SYSROOT_DIR="$sysroot"
-  export PKG_CONFIG_LIBDIR="$sysroot/usr/lib/x86_64-linux-gnu/pkgconfig:$sysroot/usr/share/pkgconfig:$sysroot/usr/lib/pkgconfig"
-  flags="-march=x86-64-v2"
+  export PKG_CONFIG_LIBDIR="$sysroot/usr/lib/$triplet/pkgconfig:$sysroot/usr/share/pkgconfig:$sysroot/usr/lib/pkgconfig"
   # The C++ runtime is linked statically, like the static CRT on Windows; glibc stays the system's.
   links="-fuse-ld=lld -static-libstdc++ -static-libgcc"
   set -- "-DCMAKE_SYSROOT=$sysroot" "-DCMAKE_AR=$llvm/bin/llvm-ar" "-DCMAKE_RANLIB=$llvm/bin/llvm-ranlib" \
     "-DPKG_CONFIG_EXECUTABLE=$pkgconfig" "-DWAYLAND_SCANNER=$scanner"
   launcher=src/desktop/x360-native mspack=src/content/libx360n-mspack.so ;;
-macos-arm64)
+macos-arm64 | macos-x64)
   # Apple clang of the selected Xcode (DEVELOPER_DIR), against its macOS SDK.
+  if [ "$platform" = macos-arm64 ]; then arch=arm64; else arch=x86_64; fi
   cc=$(xcrun -f clang) cxx=$(xcrun -f clang++) sdk=$(xcrun --show-sdk-path)
   for tool in "$cc" "$cxx" "$cmake" "$ctest" "$ninja"; do
     [ -x "$tool" ] || { echo "toolchain component missing: $tool" >&2; exit 3; }
   done
   flags="" links=""
-  set -- -DCMAKE_OSX_ARCHITECTURES=arm64 -DCMAKE_OSX_DEPLOYMENT_TARGET=13.3 "-DCMAKE_OSX_SYSROOT=$sdk"
+  set -- "-DCMAKE_OSX_ARCHITECTURES=$arch" -DCMAKE_OSX_DEPLOYMENT_TARGET=13.3 "-DCMAKE_OSX_SYSROOT=$sdk"
   launcher=src/desktop/x360-native.app/Contents/MacOS/x360-native mspack=src/content/libx360n-mspack.dylib ;;
 *) echo "unsupported platform: $platform" >&2; exit 2 ;;
 esac
@@ -108,7 +113,7 @@ cp "$build/$launcher" "$build/src/supervisor/x360n" "$build/src/content/x360n-ex
   echo "tools=$tools"
   echo "cmake=$("$cmake" --version | head -n 1)"
   echo "ninja=$("$ninja" --version)"
-  if [ "$platform" = linux-x64 ]; then
+  if [ -n "${llvm:-}" ]; then
     echo "llvm=$llvm"
     echo "sysroot=$sysroot"
     echo "sysroot_lock_sha256=$(sha256 "$tools/sysroot-jammy/sysroot.lock")"

@@ -14,13 +14,23 @@ import zipfile
 
 
 VERSION = re.compile(r"(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)(?:-[0-9A-Za-z]+(?:[.-][0-9A-Za-z]+)*)?")
-# Every published version carries one complete package per supported system.
+WINDOWS = {"x360-native.exe", "app/x360n.exe", "app/x360n-extract.exe", "app/x360n-mspack.dll"}
+LINUX = {"x360-native", "app/x360n", "app/x360n-extract", "app/libx360n-mspack.so"}
+MACOS = {"x360-native", "app/x360n", "app/x360n-extract", "app/libx360n-mspack.dylib"}
+# Every published version carries one complete package per supported system and
+# architecture: PE machine, ELF e_machine or Mach-O cputype of its executables.
 PLATFORMS = {
-    "windows-x64": dict(archive=".zip", executables={"x360-native.exe", "app/x360n.exe", "app/x360n-extract.exe", "app/x360n-mspack.dll"}),
-    "linux-x64": dict(archive=".tar.gz", executables={"x360-native", "app/x360n", "app/x360n-extract", "app/libx360n-mspack.so"}),
-    "macos-arm64": dict(archive=".zip", executables={"x360-native", "app/x360n", "app/x360n-extract", "app/libx360n-mspack.dylib"}),
+    "windows-x64": dict(archive=".zip", executables=WINDOWS, machine=0x8664),
+    "windows-arm64": dict(archive=".zip", executables=WINDOWS, machine=0xAA64),
+    "linux-x64": dict(archive=".tar.gz", executables=LINUX, machine=0x3E),
+    "linux-arm64": dict(archive=".tar.gz", executables=LINUX, machine=0xB7),
+    "macos-arm64": dict(archive=".zip", executables=MACOS, machine=0x0100000C),
+    "macos-x64": dict(archive=".zip", executables=MACOS, machine=0x01000007),
 }
-EXECUTABLES = PLATFORMS["windows-x64"]["executables"]
+EXECUTABLES = WINDOWS
+# Locks of the per-architecture toolchain pieces outside posix-toolchain.lock.
+LINUX_SYSROOTS = {"linux-x64": "linux-sysroot-jammy.lock", "linux-arm64": "linux-sysroot-jammy-arm64.lock"}
+WINDOWS_LLVM = {"windows-x64": "llvm", "windows-arm64": "llvm_windows_arm64"}
 FORBIDDEN = re.compile(r"\.(?:xex|xexp|xtt|ttf|otf|stfs|iso|nand|key|pem|pfx|bin|dll|lib|pdb)$", re.I)
 NATIVE = re.compile(r"\.(?:exe|dll|so|dylib)$", re.I)
 NATIVE_MAGIC = (b"MZ", b"\x7fELF", b"\xcf\xfa\xed\xfe", b"\xca\xfe\xba\xbe")
@@ -152,13 +162,20 @@ def posix_tools(lock_text, platform):
     return tools
 
 
+def windows_tools(lock, platform):
+    """desktop-tools.lock.json entries of one Windows platform; unmarked entries are windows-x64."""
+    tools = [t for t in lock["tools"] if t.get("platform", "windows-x64") == platform]
+    require(tools, f"No pinned tools for {platform}")
+    return tools
+
+
 def expected_tools(platform, read):
     """Tool provenance a package must carry, from the locks in its own source payload."""
-    if platform == "windows-x64":
-        return [{k: t[k] for k in ("id", "version", "sha256")} for t in json.loads(read("scripts/setup/desktop-tools.lock.json"))["tools"]]
+    if platform.startswith("windows-"):
+        return [{k: t[k] for k in ("id", "version", "sha256")} for t in windows_tools(json.loads(read("scripts/setup/desktop-tools.lock.json")), platform)]
     tools = posix_tools(read("scripts/packaging/posix-toolchain.lock").decode("utf-8"), platform)
-    if platform == "linux-x64":
-        tools.append(dict(id="sysroot-jammy", version="ubuntu-22.04", sha256=digest(read("scripts/packaging/linux-sysroot-jammy.lock"))))
+    if platform in LINUX_SYSROOTS:
+        tools.append(dict(id="sysroot-jammy", version="ubuntu-22.04", sha256=digest(read("scripts/packaging/" + LINUX_SYSROOTS[platform]))))
     return tools
 
 
@@ -167,14 +184,14 @@ def environment(platform, versions):
     path = Path(".local/release/provenance.json")
     provenance = json.loads(path.read_text(encoding="utf-8"))
     tools = expected_tools(platform, lambda rel: Path(rel).read_bytes())
-    if platform == "windows-x64":
+    if platform.startswith("windows-"):
         msvc, sdk = versions.strip().split(";")
         require(msvc and sdk, "Microsoft C++/Windows SDK environment missing")
-        locked = {t["id"]: t for t in json.loads(Path("scripts/setup/desktop-tools.lock.json").read_text(encoding="utf-8"))["tools"]}
+        locked = {t["id"]: t for t in windows_tools(json.loads(Path("scripts/setup/desktop-tools.lock.json").read_text(encoding="utf-8")), platform)}
         for tool in tools:
             receipt = Path(".local/toolchains") / locked[tool["id"]]["directory"] / ".x360n-archive-sha256"
             require(receipt.read_text().strip() == tool["sha256"], f"Tool archive receipt differs: {tool['id']}")
-        llvm = json.loads(Path("deps.lock.json").read_text(encoding="utf-8"))["llvm"]
+        llvm = json.loads(Path("deps.lock.json").read_text(encoding="utf-8"))[WINDOWS_LLVM[platform]]
         provenance["llvm_archive_sha256"] = llvm["sha256"]
         provenance["llvm_extractor"] = json.loads(Path(".local/release/llvm-extractor.json").read_text(encoding="utf-8"))
         provenance["msvc_tools_version"], provenance["windows_sdk_version"] = msvc, sdk.rstrip("\\")
@@ -186,7 +203,7 @@ def environment(platform, versions):
                 require(digest(prepared) == tool["sha256"], "Prepared sysroot differs from its lock")
             else:
                 require((base / tool["id"] / ".x360n-sha256").read_text().strip() == tool["sha256"], f"Tool archive receipt differs: {tool['id']}")
-        if platform == "macos-arm64":
+        if platform.startswith("macos-"):
             require(versions.startswith("Xcode "), "Xcode version missing")
             provenance["xcode"] = versions.strip()
     provenance["tools"] = tools
@@ -227,16 +244,18 @@ def read_tar(archive_path, name):
 
 
 def check_executable(platform, rel, data):
-    if platform == "windows-x64":
+    machine = PLATFORMS[platform]["machine"]
+    if platform.startswith("windows-"):
         require(data.startswith(b"MZ") and len(data) >= 64, f"Missing/invalid executable: {rel}")
         offset = int.from_bytes(data[60:64], "little")
-        require(data[offset:offset+6] == b"PE\0\0\x64\x86", f"Executable is not Windows x64: {rel}")
-    elif platform == "linux-x64":
+        require(data[offset:offset+4] == b"PE\0\0" and int.from_bytes(data[offset+4:offset+6], "little") == machine,
+                f"Executable is not {platform}: {rel}")
+    elif platform.startswith("linux-"):
         require(data[:4] == b"\x7fELF" and len(data) >= 20, f"Missing/invalid executable: {rel}")
-        require(data[4] == 2 and data[5] == 1 and int.from_bytes(data[18:20], "little") == 0x3E, f"Executable is not Linux x86-64: {rel}")
+        require(data[4] == 2 and data[5] == 1 and int.from_bytes(data[18:20], "little") == machine, f"Executable is not {platform}: {rel}")
     else:
         require(data[:4] == b"\xcf\xfa\xed\xfe" and len(data) >= 32, f"Missing/invalid executable: {rel}")
-        require(int.from_bytes(data[4:8], "little") == 0x0100000C, f"Executable is not macOS arm64: {rel}")
+        require(int.from_bytes(data[4:8], "little") == machine, f"Executable is not {platform}: {rel}")
 
 
 def verify(directory, version, commit, ref, run_id, platform="windows-x64", exact=True):
@@ -253,7 +272,7 @@ def verify(directory, version, commit, ref, run_id, platform="windows-x64", exac
     checksum = checksum_path.read_text(encoding="utf-8").strip()
     actual = file_digest(archive_path)
     require(checksum == f"{actual}  {archive_path.name}", "Archive SHA-256 mismatch or wrong checksum filename")
-    if platform == "linux-x64":
+    if PLATFORMS[platform]["archive"] == ".tar.gz":
         files, modes = read_tar(archive_path, name)
     else:
         files, modes = read_zip(archive_path, name)
@@ -264,7 +283,7 @@ def verify(directory, version, commit, ref, run_id, platform="windows-x64", exac
         require(data[:4] not in {b"XEX0", b"XEX1", b"XEX2", b"CON ", b"LIVE", b"PIRS"}, "Original executable/container in archive")
         require(not NATIVE.search(rel) or rel in executables, "Unexpected executable in archive")
         require(not data.startswith(NATIVE_MAGIC) or rel in executables, "Renamed executable in archive")
-        if platform != "windows-x64":
+        if not platform.startswith("windows-"):
             # POSIX packages must start without a chmod: 0755 binaries, 0644 data.
             require(modes[rel] == (0o755 if rel in executables else 0o644), f"Unexpected file mode: {rel}")
     for exe in executables:
@@ -306,8 +325,8 @@ def verify(directory, version, commit, ref, run_id, platform="windows-x64", exac
     expected_tag = ref.removeprefix("refs/tags/") if ref.startswith("refs/tags/") else None
     require(provenance["commit"] == commit and provenance["version"] == version and provenance["ref"] == ref and
             provenance["run_id"] == str(run_id) and provenance["tag"] == expected_tag, "Actions provenance differs")
-    if platform == "windows-x64":
-        require(provenance["llvm_archive_sha256"] == lock["llvm"]["sha256"], "LLVM archive provenance differs")
+    if platform.startswith("windows-"):
+        require(provenance["llvm_archive_sha256"] == lock[WINDOWS_LLVM[platform]]["sha256"], "LLVM archive provenance differs")
     require(provenance["tools"] == expected_tools(platform, lambda rel: files["app/workspace/" + rel]), "Tool provenance differs")
     print(f"Verified {archive_path.name}: {actual}; {len(files)} files; exact commit {commit}")
     return metadata

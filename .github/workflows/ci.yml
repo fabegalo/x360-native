@@ -2,7 +2,8 @@ name: CI/CD
 
 # Pull requests, main and manual runs build, test and verify every platform package
 # and keep them as Actions artifacts. Only a v* tag push on main publishes, and only
-# after all three platforms produced verified packages in the same run.
+# after all six platforms (Windows, Linux and macOS, each x64 and ARM64) produced
+# verified packages in the same run. Each package builds natively on its own runner.
 on:
   pull_request:
     paths-ignore: ['docs/**', '**/*.md', 'LICENSE']
@@ -77,13 +78,28 @@ jobs:
             shell: powershell
             python: python
             archive: zip
+          - platform: windows-arm64
+            runner: windows-11-arm
+            shell: powershell
+            python: python
+            archive: zip
           - platform: linux-x64
             runner: ubuntu-24.04
             shell: pwsh
             python: python3
             archive: tar.gz
+          - platform: linux-arm64
+            runner: ubuntu-24.04-arm
+            shell: pwsh
+            python: python3
+            archive: tar.gz
           - platform: macos-arm64
             runner: macos-15
+            shell: pwsh
+            python: python3
+            archive: zip
+          - platform: macos-x64
+            runner: macos-15-intel
             shell: pwsh
             python: python3
             archive: zip
@@ -105,29 +121,29 @@ jobs:
           persist-credentials: false
           lfs: false
       - name: Select the pinned Xcode
-        if: matrix.platform == 'macos-arm64'
+        if: startsWith(matrix.platform, 'macos-')
         run: |
           $xcode = '/Applications/Xcode_16.4.app/Contents/Developer'
           if (-not (Test-Path -LiteralPath $xcode)) { throw "Pinned Xcode missing on runner: $xcode" }
           "DEVELOPER_DIR=$xcode" >> $env:GITHUB_ENV
       - name: Test Windows startup selection
-        if: matrix.platform == 'windows-x64'
+        if: startsWith(matrix.platform, 'windows-')
         run: '& tests/packaging/local-startup.ps1'
       - name: Validate commit, tag and release notes
         id: identity
         run: ${{ matrix.python }} .github/scripts/release.py identity
       - name: Restore the verified POSIX toolchain
         # Tag builds always download and verify every archive from its lock.
-        if: matrix.platform != 'windows-x64' && !startsWith(github.ref, 'refs/tags/')
+        if: ${{ !startsWith(matrix.platform, 'windows-') && !startsWith(github.ref, 'refs/tags/') }}
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: .local/toolchains/posix-${{ matrix.platform }}
-          key: posix-${{ matrix.platform }}-${{ hashFiles('scripts/packaging/posix-toolchain.lock', 'scripts/packaging/linux-sysroot-jammy.lock', 'scripts/packaging/prepare-posix-toolchain.sh', 'scripts/packaging/prepare-linux-sysroot.sh') }}
+          key: posix-${{ matrix.platform }}-${{ hashFiles('scripts/packaging/posix-toolchain.lock', 'scripts/packaging/linux-sysroot-jammy.lock', 'scripts/packaging/linux-sysroot-jammy-arm64.lock', 'scripts/packaging/prepare-posix-toolchain.sh', 'scripts/packaging/prepare-linux-sysroot.sh') }}
       - name: Prepare pinned distribution dependencies
         run: .github/scripts/prepare-release.ps1
       - name: Record toolchain versions
         run: |
-          if ($env:PACKAGE_PLATFORM -eq 'windows-x64') {
+          if ($env:PACKAGE_PLATFORM -like 'windows-*') {
               & scripts/devshell.cmd powershell -NoProfile -ExecutionPolicy Bypass -File .github/scripts/prepare-release.ps1 -RecordEnvironment
           } else {
               & .github/scripts/prepare-release.ps1 -RecordEnvironment

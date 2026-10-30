@@ -1,19 +1,23 @@
 # Distribution dependencies only; no full runtime, title codegen or installation.
-# Windows: pinned Git/CMake/Ninja/LLVM and the hosted MSVC workload. Linux x64 and
-# macOS ARM64: pinned tools of prepare-posix-toolchain.sh (and the jammy sysroot).
+# Windows (x64, ARM64): pinned Git/CMake/Ninja/LLVM and the hosted MSVC workload.
+# Linux (x64, ARM64) and macOS (ARM64, x64): pinned tools of prepare-posix-toolchain.sh
+# (and the jammy sysroot of the architecture).
 param([switch]$RecordEnvironment)
 $ErrorActionPreference = 'Stop'
 $env:PSModulePath = Join-Path $PSHOME 'Modules'
 $root = (Resolve-Path (Join-Path $PSScriptRoot '../..')).Path
 Set-Location -LiteralPath $root
 $onWindows = $env:OS -eq 'Windows_NT'
-$platform = if ($onWindows) { 'windows-x64' } elseif ([Runtime.InteropServices.RuntimeInformation]::IsOSPlatform([Runtime.InteropServices.OSPlatform]::OSX)) { 'macos-arm64' } else { 'linux-x64' }
+. (Join-Path $root 'scripts/setup/host-platform.ps1')
+# Every package builds natively: the runner's system and architecture name the platform.
+$platform = Get-HostPlatform
+if ($env:PACKAGE_PLATFORM -and $env:PACKAGE_PLATFORM -ne $platform) { throw "Runner is $platform, not $env:PACKAGE_PLATFORM" }
 $python = if ($onWindows) { 'python' } else { 'python3' }
 if ($RecordEnvironment) {
     if ($onWindows) {
         if (-not $env:VCToolsVersion -or -not $env:WindowsSDKVersion) { throw 'Microsoft C++/Windows SDK environment missing' }
         & $python .github/scripts/release.py environment --platform $platform --versions "$env:VCToolsVersion;$env:WindowsSDKVersion"
-    } elseif ($platform -eq 'macos-arm64') {
+    } elseif ($platform -like 'macos-*') {
         & $python .github/scripts/release.py environment --platform $platform --versions ((& xcodebuild -version) -join ' ')
     } else {
         & $python .github/scripts/release.py environment --platform $platform --versions 'linux'

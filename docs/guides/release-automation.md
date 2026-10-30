@@ -6,9 +6,21 @@ GitHub-hosted runners for every supported package, reusing
 
 | Package | Runner | Toolchain |
 |---|---|---|
-| `windows-x64` (`.zip`) | `windows-2022` | MSVC/Windows SDK of the image, pinned Git/CMake/Ninja/LLVM |
-| `linux-x64` (`.tar.gz`) | `ubuntu-24.04` | pinned LLVM/CMake/Ninja and Ubuntu 22.04 sysroot (glibc 2.35) |
-| `macos-arm64` (`.zip`) | `macos-15` | pinned Xcode, CMake/Ninja; deployment target macOS 13.3 |
+| `windows-x64` (`.zip`) | `windows-2022` | MSVC/Windows SDK of the image, pinned Git/CMake/Ninja/LLVM, `-march=x86-64-v2` |
+| `windows-arm64` (`.zip`) | `windows-11-arm` | native ARM64 MSVC/Windows SDK, pinned ARM64 Git/CMake/Ninja/LLVM (`llvm_windows_arm64`), `-march=armv8-a` |
+| `linux-x64` (`.tar.gz`) | `ubuntu-24.04` | pinned LLVM/CMake/Ninja and Ubuntu 22.04 sysroot (glibc 2.35), `-march=x86-64-v2` |
+| `linux-arm64` (`.tar.gz`) | `ubuntu-24.04-arm` | pinned ARM64 LLVM/CMake/Ninja and Ubuntu 22.04 arm64 sysroot, `-march=armv8-a` |
+| `macos-arm64` (`.zip`) | `macos-15` | pinned Xcode, CMake/Ninja; deployment target macOS 13.3, ad-hoc signed |
+| `macos-x64` (`.zip`) | `macos-15-intel` | same Xcode and universal CMake/Ninja, `x86_64` only; deployment target macOS 13.3 |
+
+Every package is built and tested natively on a runner of its own system and
+architecture (no cross builds), from one code base: `scripts/setup/host-platform.ps1`
+names the platform, the locks select its tools, and `release.py` checks the PE
+machine, ELF `e_machine` or Mach-O CPU type of every executable. A runner build
+is packaging evidence only: it says nothing about gameplay on that platform.
+Steam Deck LCD/OLED uses the `linux-x64` package; see
+[steam-deck.md](steam-deck.md) for what is automated and what still needs
+real hardware.
 
 Pull requests, pushes to `main` and manual runs upload each verified archive and
 its `.sha256` as an Actions artifact for 7 days, with version
@@ -16,8 +28,8 @@ its `.sha256` as an Actions artifact for 7 days, with version
 the build; the fast `PR checks` workflow (required "Contribution checks") is
 separate. A newer commit cancels the run of an older one on the same ref.
 
-The POSIX toolchains (`scripts/packaging/posix-toolchain.lock`, and the sysroot of
-`linux-sysroot-jammy.lock`) are cached by lock hash; every component is verified
+The POSIX toolchains (`scripts/packaging/posix-toolchain.lock`, and the sysroots of
+`linux-sysroot-jammy.lock` / `linux-sysroot-jammy-arm64.lock`) are cached per platform by lock hash; every component is verified
 against its lock receipt when restored. Tag builds bypass the cache and download
 and verify every archive. Locally, `sh scripts/packaging/prepare-posix-toolchain.sh
 <platform> <dir>` prepares the same tools (WSL default:
@@ -46,9 +58,9 @@ the release, push the corresponding `v<version>` tag. Both lightweight and
 annotated tags resolve to the exact event commit, including in the publisher.
 Tag creation/publication is not part of manual validation.
 
-Only a tag on `main` whose three package jobs all succeeded can start
+Only a tag on `main` whose six package jobs all succeeded can start
 publication. A separate Ubuntu job downloads the artifacts from that same run,
-requires exactly the six assets of the three platforms, checks their complete
+requires exactly the twelve assets of the six platforms, checks their complete
 inventories, SHA-256, file modes, PE/ELF/Mach-O architectures, source/SDK/patch/tool identities and run metadata, then
 creates a draft release using the committed notes and `--verify-tag`. It
 downloads and compares all uploaded assets before publishing the draft.
