@@ -429,13 +429,6 @@ void InstallSystemUi(rex::Runtime& runtime, std::string drive, std::string nativ
                   uint32_t(resources), Read32(*memory, kSystemTarget), Read32(*memory, 0x81A826F0),
                   Read32(*memory, 0x81A826F4));
       if (static_cast<int32_t>(resources) < 0) return resources;
-      // Original global image cache startup (81691ED0 -> 81691B08).
-      // Sign-in and GamerCard use this cache through export 2F2; the original
-      // constructor allocates its textures only after the system DC exists.
-      const auto image_cache = static_cast<X_HRESULT>(
-          dispatcher->ExecuteTrap(thread, 0x81691ED0, nullptr, 0));
-      REXLOG_INFO("17559 system UI: original image cache -> {:08X}", uint32_t(image_cache));
-      if (static_cast<int32_t>(image_cache) < 0) return image_cache;
       Write32(*memory, kFadeTarget, Read32(*memory, kFadeHidden));
       Write32(*memory, kFadeCurrent, Read32(*memory, kFadeHidden));
       uint64_t bootstrap[] = {0};
@@ -485,6 +478,21 @@ void InstallSystemUi(rex::Runtime& runtime, std::string drive, std::string nativ
       uint64_t skin_path[] = {0x815FA690, 0};
       skin_result = static_cast<X_HRESULT>(dispatcher->ExecuteTrap(thread, 0x817C5EE0, skin_path, 2));
       if (static_cast<int32_t>(skin_result) < 0) return skin_result;
+      // Original 816CEA68..816CEA90 loads the image tables after its skin,
+      // before starting the global cache. The cache constructor reads table
+      // zero through 816C8E70 for its original default PNG (not a host image).
+      uint64_t image_resources[] = {0x81A82714, 3};
+      dispatcher->ExecuteTrap(thread, 0x816C8D68, image_resources, 2);
+      uint64_t image_variants[] = {0x81A82748, 8};
+      dispatcher->ExecuteTrap(thread, 0x816C8D68, image_variants, 2);
+      if (!Read32(*memory, 0x81A8271C)) {
+        REXLOG_ERROR("17559 system UI: original default image resource unavailable");
+        return X_E_NOTFOUND;
+      }
+      const auto image_cache = static_cast<X_HRESULT>(
+          dispatcher->ExecuteTrap(thread, 0x81691ED0, nullptr, 0));
+      REXLOG_INFO("17559 system UI: original image cache -> {:08X}", uint32_t(image_cache));
+      if (static_cast<int32_t>(image_cache) < 0) return image_cache;
       // Original host 816CE8B0 calls 816C8450 before constructing hudbkgnd.
       // Let that original routine select the language, strings, font path and
       // fallback descriptor instead of synthesizing only part of its typeface.

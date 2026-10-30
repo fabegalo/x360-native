@@ -27,13 +27,15 @@ TEST_CASE("XAM allocation size reports usable storage instead of leaving the inp
   REQUIRE(output);
   PPCContext ctx{};
   for (const auto size : std::array<uint32_t, 3>{32, 4097, 65537}) {
-    for (unsigned allocator = 0; allocator < 4; ++allocator) {
+    for (unsigned allocator = 0; allocator < 6; ++allocator) {
       uint32_t pointer = 0;
-      if (allocator == 0) {
-        ctx.r3.u64 = 0; ctx.r4.u64 = size; ctx.r5.u64 = output;
+      if (allocator == 0 || allocator == 5) {
+        ctx.r3.u64 = allocator == 5 ? 0x20000000 : 0; ctx.r4.u64 = size; ctx.r5.u64 = output;
         __imp__XamAlloc(ctx, base);
-      } else if (allocator < 3) {
-        ctx.r3.u64 = 0; ctx.r4.u64 = allocator == 2 ? 0x01000000 : 0;
+      } else if (allocator < 4) {
+        // Original image cache 81691B98 uses the system virtual class
+        // 0x20000000 (816E67E8 -> 816E5F10 -> pool selector 816E5E40).
+        ctx.r3.u64 = 0; ctx.r4.u64 = allocator == 3 ? 0x20000000 : allocator == 2 ? 0x01000000 : 0;
         ctx.r5.u64 = size; ctx.r6.u64 = output;
         __imp__XamAllocEx(ctx, base);
       } else {
@@ -41,7 +43,7 @@ TEST_CASE("XAM allocation size reports usable storage instead of leaving the inp
         __imp__XMemAlloc(ctx, base);
         pointer = ctx.r3.u32;
       }
-      if (allocator < 3) {
+      if (allocator < 4 || allocator == 5) {
         REQUIRE(ctx.r3.u32 == 0);
         pointer = rex::memory::load_and_swap<uint32_t>(base + output);
       }

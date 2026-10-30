@@ -4,6 +4,9 @@
 #include <fstream>
 #include <thread>
 #include <vector>
+#if defined(_WIN32)
+#include <windows.h>
+#endif
 #include <rex/cvar.h>
 #include <rex/kernel/init.h>
 #include <rex/system/function_dispatcher.h>
@@ -348,6 +351,45 @@ TEST_CASE("Storage copies and moves packages between volumes without partial res
   CHECK_FALSE(std::filesystem::exists(PackageOn(mu)));
   CHECK(std::filesystem::exists(PackageOn(root.path)));  // a refused move keeps the source
 }
+
+#if defined(_WIN32)
+TEST_CASE("A failed move cleanup preserves the complete committed destination",
+          "[sdk][storage-transfer][storage-transfer-recovery]") {
+  StorageRoot root;
+  root.config("version=1\n[[device]]\nid=7\ntype='mu'\ncapacity_bytes=4194304\n");
+  const auto mu=root.path/"storage/00000007";
+  std::filesystem::create_directories(mu);
+  {
+    DeviceGuest guest(root.path);
+    MakeItem(guest,1,root.path,300000);
+    // The copy can read the header, but Windows refuses to delete it. The
+    // source package itself is removed before DeleteContent reaches this file.
+    struct LockedHeader {
+      HANDLE handle;
+      ~LockedHeader(){if(handle!=INVALID_HANDLE_VALUE)CloseHandle(handle);}
+    } locked{CreateFileW(HeaderOn(root.path).c_str(),GENERIC_READ,
+        FILE_SHARE_READ|FILE_SHARE_WRITE,nullptr,OPEN_EXISTING,FILE_ATTRIBUTE_NORMAL,nullptr)};
+    REQUIRE(locked.handle!=INVALID_HANDLE_VALUE);
+    rex::memory::store_and_swap<uint32_t>(guest.bytes+guest.address+2048,7);
+    REQUIRE(guest.call(__imp__XamContentMoveInternal,
+        {0,guest.address+2048,guest.address+1024,0,0,0,0})==X_ERROR_ACCESS_DENIED);
+    CHECK_FALSE(std::filesystem::exists(PackageOn(root.path)));
+    REQUIRE(std::filesystem::exists(PackageOn(mu)/"dir/slot.dat"));
+    CHECK(std::filesystem::file_size(PackageOn(mu)/"dir/slot.dat")==300000);
+    CHECK(std::filesystem::file_size(PackageOn(mu)/"small.bin")==3);
+    CHECK(std::filesystem::exists(HeaderOn(mu)));
+  }
+  // Recovery must remain discoverable after the original runtime is gone.
+  DeviceGuest restarted(root.path);
+  const auto data=restarted.runtime.kernel_state()->content_manager()->ListContent(
+      7,kOwner,rex::system::XContentType::kSavedGame,kTitle);
+  REQUIRE(data.size()==1);
+  CHECK(data.front().file_name()=="SAVE0001");
+  std::ifstream input(PackageOn(mu)/"dir/slot.dat",std::ios::binary);
+  const std::string bytes(std::istreambuf_iterator<char>{input},{});
+  CHECK(bytes==std::string(300000,'s'));
+}
+#endif
 
 TEST_CASE("A session's titles share the console hard drive, not their own user root",
           "[sdk][storage-device][storage-hdd-root]") {

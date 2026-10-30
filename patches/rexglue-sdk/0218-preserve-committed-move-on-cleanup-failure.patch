@@ -1,0 +1,19 @@
+diff --git a/src/system/xam/content_manager.cpp b/src/system/xam/content_manager.cpp
+--- a/src/system/xam/content_manager.cpp
++++ b/src/system/xam/content_manager.cpp
+@@ -955,10 +955,11 @@
+   if (move) {
+     const auto deleted = DeleteContent(xuid, source);
+     if (deleted != X_ERROR_SUCCESS) {
+-      // Keep exactly one copy: the source stays, the new destination goes.
+-      std::error_code e;
+-      fs::remove_all(destination_path, e);
+-      fs::remove(destination_header, e);
++      // DeleteContent may have removed some or all source files before a
++      // later file/header fails. Never roll back the committed destination:
++      // it may now be the only complete copy. Preserve the real error and
++      // make surviving profile packages discoverable for recovery.
++      RefreshProfiles(kernel_state_, destination);
+       return deleted;
+     }
+   }
