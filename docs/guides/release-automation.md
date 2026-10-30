@@ -1,24 +1,41 @@
-# Automated Windows x64 releases
+# Automated desktop releases
 
-`.github/workflows/release.yml` builds the desktop distribution entirely on a
-GitHub-hosted `windows-2022` runner. It reuses `scripts/packaging/package-desktop.ps1`;
-there is no separate packager or dependency on a maintainer's computer.
+`.github/workflows/ci.yml` builds, tests and verifies the desktop distribution on
+GitHub-hosted runners for every supported package, reusing
+`scripts/packaging/package-desktop.ps1` on all of them:
+
+| Package | Runner | Toolchain |
+|---|---|---|
+| `windows-x64` (`.zip`) | `windows-2022` | MSVC/Windows SDK of the image, pinned Git/CMake/Ninja/LLVM |
+| `linux-x64` (`.tar.gz`) | `ubuntu-24.04` | pinned LLVM/CMake/Ninja and Ubuntu 22.04 sysroot (glibc 2.35) |
+| `macos-arm64` (`.zip`) | `macos-15` | pinned Xcode, CMake/Ninja; deployment target macOS 13.3 |
+
+Pull requests, pushes to `main` and manual runs upload each verified archive and
+its `.sha256` as an Actions artifact for 7 days, with version
+`<computed>-ci.<run number>`. They never publish. Documentation-only changes skip
+the build; the fast `PR checks` workflow (required "Contribution checks") is
+separate. A newer commit cancels the run of an older one on the same ref.
+
+The POSIX toolchains (`scripts/packaging/posix-toolchain.lock`, and the sysroot of
+`linux-sysroot-jammy.lock`) are cached by lock hash; every component is verified
+against its lock receipt when restored. Tag builds bypass the cache and download
+and verify every archive. Locally, `sh scripts/packaging/prepare-posix-toolchain.sh
+<platform> <dir>` prepares the same tools (WSL default:
+`~/.cache/x360n-posix-toolchain/linux-x64`).
 
 ## Manual validation
 
-After the workflow is committed on the default branch:
-
 ```powershell
-gh workflow run release.yml --ref main -f version=0.1.0-ci
-gh run list --workflow release.yml --event workflow_dispatch
+gh workflow run ci.yml --ref main
+gh run list --workflow ci.yml --event workflow_dispatch
 gh run view <run-id> --log-failed
-gh run download <run-id> --name x360-native-0.1.0-ci-windows-x64 --dir .local/ci-download
-python .github/scripts/release.py verify --directory .local/ci-download --version 0.1.0-ci --commit <run-head-sha> --ref refs/heads/main --run-id <run-id>
+gh run download <run-id> --pattern 'x360-native-*' --dir .local/ci-download
+python .github/scripts/release.py verify --platform linux-x64 --directory .local/ci-download --version <version> --commit <run-head-sha> --ref refs/heads/main --run-id <run-id>
 ```
 
-The manual event only uploads a ZIP and its `.zip.sha256` to Actions for 14 days.
-It cannot invoke the publishing job, even if dispatched against a tag. Versions
-use `MAJOR.MINOR.PATCH[-prerelease]` without the `v` prefix.
+A failed package job uploads only its build evidence (toolchain, dependency and
+compile-command records) for 3 days, never a partial package. Versions use
+`MAJOR.MINOR.PATCH[-prerelease]` without the `v` prefix.
 
 ## Publishing the next version
 
@@ -29,11 +46,12 @@ the release, push the corresponding `v<version>` tag. Both lightweight and
 annotated tags resolve to the exact event commit, including in the publisher.
 Tag creation/publication is not part of manual validation.
 
-Only a successful packaging job can start publication. A separate Ubuntu job
-downloads the artifacts from that same run, checks their complete inventories,
-SHA-256, x64 PE headers, source/SDK/patch/tool identities and run metadata, then
+Only a tag on `main` whose three package jobs all succeeded can start
+publication. A separate Ubuntu job downloads the artifacts from that same run,
+requires exactly the six assets of the three platforms, checks their complete
+inventories, SHA-256, file modes, PE/ELF/Mach-O architectures, source/SDK/patch/tool identities and run metadata, then
 creates a draft release using the committed notes and `--verify-tag`. It
-downloads and compares both uploaded assets before publishing the draft.
+downloads and compares all uploaded assets before publishing the draft.
 Versions with a prerelease suffix (including `preview`) become pre-releases
 and are not marked Latest. Stable versions become regular releases.
 
@@ -71,7 +89,7 @@ Inspect/remove that draft before retrying; do not move a published tag.
   inventories and the ZIP checksum are verified again after download.
 - XEX, games, firmware, original resources, generated original code, runtime
   DLLs and private machine data are rejected by the existing distribution gate.
-  There is no artifact upload step on failure.
+  On failure only build evidence is uploaded, never a package.
 
 The workflow has `contents: read`; only the tag publisher gets `contents: write`.
 Jobs have bounded timeouts and runs for the same ref cannot overlap. The fast

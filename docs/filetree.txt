@@ -12,8 +12,8 @@ x360-native/  (tracked source + additions from this reorganization)
 |   |   |-- release.py
 |   |   `-- test_release.py
 |   |-- workflows/
-|   |   |-- pr-checks.yml
-|   |   `-- release.yml
+|   |   |-- ci.yml
+|   |   `-- pr-checks.yml
 |   |-- CODEOWNERS
 |   |-- MAINTAINERS.md
 |   `-- PULL_REQUEST_TEMPLATE.md
@@ -344,12 +344,14 @@ x360-native/  (tracked source + additions from this reorganization)
 |   |   |-- local-layout.json
 |   |   `-- local-workspace.ps1
 |   |-- packaging/
-|   |   |-- build-desktop-linux.sh
+|   |   |-- build-desktop-posix.sh
 |   |   |-- check-package-licenses.ps1
 |   |   |-- generate-desktop-icon.ps1
 |   |   |-- linux-sysroot-jammy.lock
 |   |   |-- package-desktop.ps1
-|   |   `-- prepare-linux-sysroot.sh
+|   |   |-- posix-toolchain.lock
+|   |   |-- prepare-linux-sysroot.sh
+|   |   `-- prepare-posix-toolchain.sh
 |   |-- performance/
 |   |   |-- benchmark-counters.ps1
 |   |   |-- benchmark-gpu.ps1
