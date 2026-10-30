@@ -137,7 +137,8 @@ function Get-SharedSdk([string]$Root, [string]$Project, [string]$TitleBuild) {
         }
         # This function runs outside devshell. Its toolchain inventory and pinned
         # LLVM tree identify the compiler's built-in headers, DLLs and linker too.
-        $llvm = Join-Path $Root '.local/toolchains/llvm-22.1.8'
+        . (Join-Path $Root 'scripts/setup/host-platform.ps1')
+        $llvm = Join-Path $Root (Get-LockedWindowsLlvm ([IO.File]::ReadAllText((Join-Path $Root 'deps.lock.json')) | ConvertFrom-Json) (Get-HostPlatform)).install_dir
         $files += @(Get-SharedSdkFiles (Join-Path $llvm 'lib/clang'))
         $files += @([IO.Directory]::EnumerateFiles((Join-Path $llvm 'bin'), '*.dll'))
         foreach ($name in @('clang.exe','clang++.exe','lld-link.exe','llvm-lib.exe')) { $files += Join-Path $llvm "bin/$name" }

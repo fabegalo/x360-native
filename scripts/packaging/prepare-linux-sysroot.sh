@@ -1,12 +1,17 @@
 #!/bin/sh
-# Private Ubuntu 22.04 target sysroot for package-desktop.ps1 -Platform linux-x64.
+# Private Ubuntu 22.04 target sysroot for package-desktop.ps1 -Platform linux-x64/linux-arm64.
 # Downloads exactly the .deb files pinned in <lock> from the official archive into
 # a private apt state, checks each SHA-256 and extracts them under <dest>/root.
 # Installs nothing on the host. Build tools (CMake, Ninja, pkg-config) are not
 # part of it: they stay in the validation toolchain and run on the host.
-#   prepare-linux-sysroot.sh <dest> <lock>
+#   prepare-linux-sysroot.sh <dest> <lock> [amd64|arm64]
 set -eu
-dest=$1 lock=$2
+dest=$1 lock=$2 arch=${3:-amd64}
+case "$arch" in
+amd64) archive=http://archive.ubuntu.com/ubuntu security=http://security.ubuntu.com/ubuntu ;;
+arm64) archive=http://ports.ubuntu.com/ubuntu-ports security=http://ports.ubuntu.com/ubuntu-ports ;;
+*) echo "unsupported sysroot architecture: $arch" >&2; exit 2 ;;
+esac
 [ ! -e "$dest" ] || { echo "sysroot already exists: $dest" >&2; exit 2; }
 keyring=/usr/share/keyrings/ubuntu-archive-keyring.gpg
 [ -f "$keyring" ] || { echo "Ubuntu archive keyring missing: $keyring" >&2; exit 3; }
@@ -15,12 +20,12 @@ mkdir -p "$apt/etc/apt/apt.conf.d" "$apt/etc/apt/preferences.d" "$apt/var/lib/ap
   "$apt/var/cache/apt/archives/partial" "$apt/var/lib/dpkg" "$dest/debs" "$dest/root"
 : > "$apt/var/lib/dpkg/status"
 cat > "$apt/etc/apt/sources.list" <<EOF
-deb [arch=amd64 signed-by=$keyring] http://archive.ubuntu.com/ubuntu jammy main universe
-deb [arch=amd64 signed-by=$keyring] http://archive.ubuntu.com/ubuntu jammy-updates main universe
-deb [arch=amd64 signed-by=$keyring] http://security.ubuntu.com/ubuntu jammy-security main universe
+deb [arch=$arch signed-by=$keyring] $archive jammy main universe
+deb [arch=$arch signed-by=$keyring] $archive jammy-updates main universe
+deb [arch=$arch signed-by=$keyring] $security jammy-security main universe
 EOF
 set -- -o "Dir=$apt" -o "Dir::State::status=$apt/var/lib/dpkg/status" -o Dir::Etc::SourceParts=/nonexistent \
-  -o APT::Architecture=amd64 -o APT::Architectures::=amd64 -o Acquire::Languages=none -o APT::Sandbox::User=root
+  -o APT::Architecture=$arch -o APT::Architectures::=$arch -o Acquire::Languages=none -o APT::Sandbox::User=root
 apt-get "$@" -q update
 pins=$(tr -d '\r' < "$lock" | grep -v '^#' | awk 'NF == 3 { print $1 "=" $2 }')
 (cd "$dest/debs" && apt-get "$@" -q download $pins)

@@ -1,5 +1,5 @@
 #!/bin/sh
-# Pinned build tools for the Linux x64 / macOS ARM64 desktop packages.
+# Pinned build tools for the Linux (x64, ARM64) / macOS (ARM64, x64) desktop packages.
 # Downloads each asset of posix-toolchain.lock for <platform>, checks its SHA-256
 # and extracts it under <dest>/<id>; on Linux also prepares the Ubuntu 22.04
 # target sysroot (prepare-linux-sysroot.sh) under <dest>/sysroot-jammy.
@@ -10,7 +10,7 @@ set -eu
 platform=$1 dest=$2
 here=$(cd "$(dirname "$0")" && pwd)
 lock="$here/posix-toolchain.lock"
-case "$platform" in linux-x64 | macos-arm64) ;; *) echo "unsupported platform: $platform" >&2; exit 2 ;; esac
+case "$platform" in linux-x64 | linux-arm64 | macos-arm64 | macos-x64) ;; *) echo "unsupported platform: $platform" >&2; exit 2 ;; esac
 mkdir -p "$dest"
 dest=$(cd "$dest" && pwd)
 sha256() { if command -v sha256sum >/dev/null 2>&1; then sha256sum "$1" | cut -d' ' -f1; else shasum -a 256 "$1" | cut -d' ' -f1; fi; }
@@ -43,11 +43,16 @@ tr -d '\r' < "$lock" | grep -v '^#' | awk -v p="$platform" '$1 == p && NF == 6' 
   printf '%s\n' "$sha" > "$receipt"
   echo "$id $version: ready"
 done
-if [ "$platform" = linux-x64 ]; then
-  if ! cmp -s "$dest/sysroot-jammy/sysroot.lock" "$here/linux-sysroot-jammy.lock" 2>/dev/null &&
-     ! tr -d '\r' < "$here/linux-sysroot-jammy.lock" | cmp -s - "$dest/sysroot-jammy/sysroot.lock" 2>/dev/null; then
+case "$platform" in
+linux-x64) sysroot_lock="$here/linux-sysroot-jammy.lock" sysroot_arch=amd64 ;;
+linux-arm64) sysroot_lock="$here/linux-sysroot-jammy-arm64.lock" sysroot_arch=arm64 ;;
+*) sysroot_lock="" sysroot_arch="" ;;
+esac
+if [ -n "$sysroot_lock" ]; then
+  if ! cmp -s "$dest/sysroot-jammy/sysroot.lock" "$sysroot_lock" 2>/dev/null &&
+     ! tr -d '\r' < "$sysroot_lock" | cmp -s - "$dest/sysroot-jammy/sysroot.lock" 2>/dev/null; then
     rm -rf "$dest/sysroot-jammy"
-    sh "$here/prepare-linux-sysroot.sh" "$dest/sysroot-jammy" "$here/linux-sysroot-jammy.lock"
+    sh "$here/prepare-linux-sysroot.sh" "$dest/sysroot-jammy" "$sysroot_lock" "$sysroot_arch"
   else
     echo "sysroot-jammy: cached"
   fi

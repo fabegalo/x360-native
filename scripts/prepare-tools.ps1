@@ -8,7 +8,12 @@ $env:PSModulePath = Join-Path $PSHOME 'Modules'
 $root = (Resolve-Path (Split-Path -Parent $PSScriptRoot)).Path
 $tools = Join-Path $root '.local/toolchains'
 $cache = Join-Path $root '.local/cache/downloads'
+. (Join-Path $PSScriptRoot 'setup/host-platform.ps1')
+$hostPlatform = Get-HostPlatform
 $lock = Get-Content -Raw (Join-Path $PSScriptRoot 'setup/desktop-tools.lock.json') | ConvertFrom-Json
+# Only the native tools of this machine (x64 or ARM64), under the same directory names.
+$lockedTools = Select-PlatformTools $lock $hostPlatform
+if (-not $lockedTools.Count) { throw "No locked tools for $hostPlatform" }
 New-Item -ItemType Directory -Force $tools, $cache | Out-Null
 try { $lease = [IO.File]::Open((Join-Path $root '.local/environment.lock'), [IO.FileMode]::OpenOrCreate, [IO.FileAccess]::ReadWrite, [IO.FileShare]::None) }
 catch { throw 'Environment in use. Close the platform or other preparation and retry.' }
@@ -36,7 +41,7 @@ function PreserveDependency([string]$Directory) {
     Stage "preserved previous dependency: $backup"
 }
 . (Join-Path $PSScriptRoot 'setup/download-tools.ps1')
-$pendingTools = @($lock.tools | Where-Object {
+$pendingTools = @($lockedTools | Where-Object {
     $destination = Join-Path $tools $_.directory
     $receipt = Join-Path $destination '.x360n-archive-sha256'
     -not ((Test-Path -LiteralPath (Join-Path $destination $_.entry)) -and
@@ -48,7 +53,7 @@ foreach ($tool in $pendingTools) {
     }
 }
 if (-not $ToolsOnly) {
-    $llvm = (Get-Content -Raw (Join-Path $root 'deps.lock.json') | ConvertFrom-Json).llvm
+    $llvm = Get-LockedWindowsLlvm (Get-Content -Raw (Join-Path $root 'deps.lock.json') | ConvertFrom-Json) $hostPlatform
     $llvmDirectory = Join-Path $root $llvm.install_dir
     if (-not (Test-Path -LiteralPath (Join-Path $llvmDirectory 'bin/clang++.exe'))) {
         if (Test-Path -LiteralPath $llvmDirectory) {
@@ -62,7 +67,7 @@ if (-not $ToolsOnly) {
 }
 $downloads = Get-VerifiedToolArchives $pendingTools $cache -AllowDownloads:$AllowDownloads
 try {
-foreach ($tool in $lock.tools) {
+foreach ($tool in $lockedTools) {
     $destination = Join-Path $tools $tool.directory
     $receipt = Join-Path $destination '.x360n-archive-sha256'
     if ((Test-Path -LiteralPath (Join-Path $destination $tool.entry)) -and

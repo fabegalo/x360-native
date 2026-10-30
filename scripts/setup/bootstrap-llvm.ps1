@@ -4,7 +4,9 @@
 param([switch]$AllowDownloads, [ValidateSet('tar','7zip')][string]$Extractor = 'tar')
 $ErrorActionPreference = 'Stop'
 $root = (Resolve-Path (Join-Path $PSScriptRoot '../..')).Path
-$lock = (Get-Content -Raw (Join-Path $root 'deps.lock.json') | ConvertFrom-Json).llvm
+. (Join-Path $PSScriptRoot 'host-platform.ps1')
+# The native LLVM of this machine (x64 or ARM64).
+$lock = Get-LockedWindowsLlvm (Get-Content -Raw (Join-Path $root 'deps.lock.json') | ConvertFrom-Json) (Get-HostPlatform)
 
 $installDir = Join-Path $root $lock.install_dir
 $clang = Join-Path $installDir 'bin\clang++.exe'

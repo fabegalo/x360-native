@@ -32,6 +32,42 @@
       "sha256": "a93abe456ab01bd96d7a085b3cdb6566b3063f4241360d114142fbdb07f0a310",
       "entry": "python.exe", "prefix": "",
       "verification": "python.org release page SHA-256, Python 3.14.8 Windows embeddable package (64-bit); build-time only (glslang/SPIRV-Tools generators of Vulkan builds)"
+    },
+    {
+      "platform": "windows-arm64",
+      "id": "git", "version": "2.56.0.2", "directory": "mingit-2.56.0.2",
+      "asset": "MinGit-2.56.0.2-arm64.zip", "size": 37936336,
+      "url": "https://github.com/git-for-windows/git/releases/download/v2.56.0.windows.2/MinGit-2.56.0.2-arm64.zip",
+      "sha256": "38b33dc6024026e3315cf88ab2cfea65205bbd7bb3a8e824bd21c8ad4fe609a7",
+      "entry": "cmd/git.exe", "prefix": "",
+      "verification": "GitHub release asset digest, git-for-windows/git v2.56.0.windows.2"
+    },
+    {
+      "platform": "windows-arm64",
+      "id": "cmake", "version": "3.31.6", "directory": "cmake-3.31.6",
+      "asset": "cmake-3.31.6-windows-arm64.zip", "size": 45483423,
+      "url": "https://github.com/Kitware/CMake/releases/download/v3.31.6/cmake-3.31.6-windows-arm64.zip",
+      "sha256": "fa648fd417f44e6cb08928964a480ade0d18df421f9b623639dba22f9b301e4e",
+      "entry": "bin/cmake.exe", "prefix": "cmake-3.31.6-windows-arm64",
+      "verification": "Kitware/CMake v3.31.6 cmake-3.31.6-SHA-256.txt"
+    },
+    {
+      "platform": "windows-arm64",
+      "id": "ninja", "version": "1.13.1", "directory": "ninja-1.13.1",
+      "asset": "ninja-winarm64.zip", "size": 266805,
+      "url": "https://github.com/ninja-build/ninja/releases/download/v1.13.1/ninja-winarm64.zip",
+      "sha256": "fb959b674970e36a7c9a23191524b80fb5298fc71fc98bfa42456bcc0a8dfb2f",
+      "entry": "ninja.exe", "prefix": "",
+      "verification": "GitHub release asset digest, ninja-build/ninja v1.13.1"
+    },
+    {
+      "platform": "windows-arm64",
+      "id": "python", "version": "3.14.8", "directory": "python-3.14.8",
+      "asset": "python-3.14.8-embed-arm64.zip", "size": 11923092,
+      "url": "https://www.python.org/ftp/python/3.14.8/python-3.14.8-embed-arm64.zip",
+      "sha256": "155be84ccb57c6331cf0e39001c78a1dfac3be62f403f3ff5f2e29b80dda7ebe",
+      "entry": "python.exe", "prefix": "",
+      "verification": "python.org release page SHA-256, Python 3.14.8 Windows embeddable package (ARM64); build-time only"
     }
   ]
 }

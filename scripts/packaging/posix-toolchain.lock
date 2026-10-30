@@ -1,4 +1,4 @@
-# Build tools for the Linux x64 and macOS ARM64 desktop packages, consumed by
+# Build tools for the Linux (x64, ARM64) and macOS (ARM64, x64) desktop packages, consumed by
 # prepare-posix-toolchain.sh. Official release assets only; SHA-256 from the
 # GitHub release asset digest (LLVM, Ninja) or Kitware's cmake-*-SHA-256.txt.
 # macOS compiles with the runner's pinned Xcode (Apple clang), like the upstream
@@ -9,3 +9,8 @@ linux-x64 cmake 3.31.6 5a1133ff103c71eb5120e2cc3de922733e7d8a26a98ae716397e8676a
 linux-x64 ninja 1.13.1 0830252db77884957a1a4b87b05a1e2d9b5f658b8367f82999a941884cbe0238 . https://github.com/ninja-build/ninja/releases/download/v1.13.1/ninja-linux.zip
 macos-arm64 cmake 3.31.6 330b9514f5112e5ed4fb08b8b05803b776fd9b539a6ae12927d14dcc0ee2ba8d cmake-3.31.6-macos-universal/CMake.app/Contents https://github.com/Kitware/CMake/releases/download/v3.31.6/cmake-3.31.6-macos-universal.tar.gz
 macos-arm64 ninja 1.13.1 da7797794153629aca5570ef7c813342d0be214ba84632af886856e8f0063dd9 . https://github.com/ninja-build/ninja/releases/download/v1.13.1/ninja-mac.zip
+linux-arm64 llvm 22.1.8 805efad2bb91cb4967fa569e0881d10c0f69c04461cf671cccbae19f547acc34 LLVM-22.1.8-Linux-ARM64 https://github.com/llvm/llvm-project/releases/download/llvmorg-22.1.8/LLVM-22.1.8-Linux-ARM64.tar.xz
+linux-arm64 cmake 3.31.6 b4cc788d63112b2749b40627e719eb5d3b8ed8f00c36d77189f4019cfe64bc9e cmake-3.31.6-linux-aarch64 https://github.com/Kitware/CMake/releases/download/v3.31.6/cmake-3.31.6-linux-aarch64.tar.gz
+linux-arm64 ninja 1.13.1 740f1b9f9d8ae68438240a6a2f3f7a27fc8b1946d2024a6a6b25857ee877987b . https://github.com/ninja-build/ninja/releases/download/v1.13.1/ninja-linux-aarch64.zip
+macos-x64 cmake 3.31.6 330b9514f5112e5ed4fb08b8b05803b776fd9b539a6ae12927d14dcc0ee2ba8d cmake-3.31.6-macos-universal/CMake.app/Contents https://github.com/Kitware/CMake/releases/download/v3.31.6/cmake-3.31.6-macos-universal.tar.gz
+macos-x64 ninja 1.13.1 da7797794153629aca5570ef7c813342d0be214ba84632af886856e8f0063dd9 . https://github.com/ninja-build/ninja/releases/download/v1.13.1/ninja-mac.zip

@@ -3191,6 +3191,14 @@
                  "install_dir":  ".local/toolchains/llvm-22.1.8",
                  "why":  "ReXGlue v0.10.0 CMakeLists.txt rejects non-Clang compilers and Clang \u003c 18; official win-amd64 CI installs upstream LLVM. 22.1.8 was the newest stable LLVM when v0.10.0 was tagged (2026-08-21)."
              },
+    "llvm_windows_arm64":  {
+                               "version":  "22.1.8",
+                               "asset":  "clang+llvm-22.1.8-aarch64-pc-windows-msvc.tar.xz",
+                               "url":  "https://github.com/llvm/llvm-project/releases/download/llvmorg-22.1.8/clang+llvm-22.1.8-aarch64-pc-windows-msvc.tar.xz",
+                               "sha256":  "de718c58ebbc5f61d58c17b90457fcf42983bc2c4a4aba3e010d108713bfd7f1",
+                               "install_dir":  ".local/toolchains/llvm-22.1.8-windows-arm64",
+                               "why":  "Same LLVM release as llvm, native Windows ARM64 host build (GitHub release asset digest); selected on ARM64 Windows hosts."
+                           },
     "reference_examples":  {
                                "demo-iruka":  {
                                                   "url":  "https://github.com/rexglue/demo-iruka.git",
