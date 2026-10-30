@@ -60,6 +60,7 @@ std::atomic<bool> achievement_notices_pending{false};
 uint64_t achievement_notice_generation = 0;  // guarded by achievement_notices_mutex
 bool notification_host_ready = false;
 const SystemUiApplication* active_application = nullptr;
+bool system_ui_visible = false;
 // XAM stacks a system app that launches another one (Guide -> Profile): the
 // caller is serialized with 80000009 and restored with flags=2 when its
 // successor closes, as in the existing resume path.
@@ -208,6 +209,7 @@ void ReleaseSystemUiHost() {
   pending_ui = {};
   poll_guide = {};
   active_application = nullptr;
+  system_ui_visible = false;
   bound_xam_path.clear();
   for (const auto& app : suspended_apps)
     ReleaseDiscardedSystemUiState(*rex::Runtime::instance()->memory(), app.message, app.state);
@@ -692,7 +694,6 @@ void InstallSystemUi(rex::Runtime& runtime, std::string drive, std::string nativ
             if (!resume) {
               REXLOG_ERROR("17559 system UI: invalid save size or allocation failure ({})", saved_size);
               destroy_scene();
-              runtime.kernel_state()->BroadcastNotification(0x9, false);
               return false;
             }
             uint64_t save[] = {0x80000009, resume + 24, 0};
@@ -701,7 +702,6 @@ void InstallSystemUi(rex::Runtime& runtime, std::string drive, std::string nativ
             if (saved != 0) {
               runtime.memory()->SystemHeapFree(resume);
               destroy_scene();
-              runtime.kernel_state()->BroadcastNotification(0x9, false);
               return false;
             }
             uint64_t unlink[] = {*active_scene};
@@ -719,7 +719,6 @@ void InstallSystemUi(rex::Runtime& runtime, std::string drive, std::string nativ
               REXLOG_ERROR("17559 system UI: original restore {} failed {:08X}", stage, error);
               runtime.memory()->SystemHeapFree(resume);
               destroy_scene(initialized || !cleans_failed_initialization);
-              runtime.kernel_state()->BroadcastNotification(0x9, false);
               return false;
             };
             if (static_cast<int32_t>(result) < 0)
@@ -785,8 +784,7 @@ void InstallSystemUi(rex::Runtime& runtime, std::string drive, std::string nativ
               }
             }
             destroy_scene();
-            runtime.kernel_state()->BroadcastNotification(0x9, false);
-            REXLOG_INFO("17559 system UI: closed original app after {} frames; dashboard focus released", frame);
+            REXLOG_INFO("17559 system UI: closed original app after {} frames", frame);
             return false;
           }
           // Original HUD frame 816CD6E8: when the kernel accepts another system
@@ -807,7 +805,10 @@ void InstallSystemUi(rex::Runtime& runtime, std::string drive, std::string nativ
         Write32(*runtime.memory(), kDisplayChanged, 1);
         Write32(*runtime.memory(), kHudVisible, 1);
         xam->SetSystemUiVisible(module->hmodule_ptr());
-        state->BroadcastNotification(0x9, true);
+        if (!system_ui_visible) {
+          state->BroadcastNotification(0x9, true);
+          system_ui_visible = true;
+        }
         runtime.memory()->SystemHeapFree(output);
         return 0;
       }
@@ -894,7 +895,6 @@ void dash17559::DrawSystemUiFrame(PPCContext& ctx) {
   }
   if (dash17559::draw_ui && !dash17559::draw_ui()) {
     dash17559::draw_ui = {};
-    dash17559::HideSystemFrame(*rex::Runtime::instance(), frame.thread_state());
   }
   if (!dash17559::draw_ui && !dash17559::pending_ui && !dash17559::suspended_apps.empty()) {
     // Also resume the parent when its queued successor failed to load.
@@ -913,6 +913,20 @@ void dash17559::DrawSystemUiFrame(PPCContext& ctx) {
       REXLOG_INFO("17559 system UI: restored suspended {:08X} -> {:08X}", app.message, uint32_t(result));
     };
     dash17559::suspended_apps.pop_back();
+  }
+  // Original 816CE22C..816CE348 switches to the pending/suspended app before
+  // its final hide path (816CE390..816CE478). A module change is not a return
+  // to the title: retain the system target, dimming and UI notification while
+  // the next original app is loaded. Do not publish an empty system frame.
+  if (!dash17559::draw_ui && dash17559::pending_ui) {
+    auto request = std::move(dash17559::pending_ui);
+    request();
+  }
+  if (!dash17559::draw_ui && !dash17559::pending_ui &&
+      dash17559::suspended_apps.empty() && dash17559::system_ui_visible) {
+    dash17559::HideSystemFrame(*rex::Runtime::instance(), frame.thread_state());
+    rex::Runtime::instance()->kernel_state()->BroadcastNotification(0x9, false);
+    dash17559::system_ui_visible = false;
   }
   // A notification is a non-modal system frame: the original presenter owns
   // animation and expiry; it never captures game controls or opens the Guide.
