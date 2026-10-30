@@ -13,6 +13,8 @@ Rebuild on Windows x64, with CMake and a C compiler/Windows build tools:
   cmake --build decoder-build --config Release
 
 Use your rebuilt x360n-mspack.dll beside x360n-extract.exe in your local build.
+On Linux x64 the same commands build libx360n-mspack.so; x360n-extract loads it
+from its own folder (app/, RPATH $ORIGIN).
 For a modified copy of a published package, update the DLL's SHA-256 entry in
 package.sha256. This public integrity index has no secret signing key. This
 identifies your local modified package, not an official update. Preserve source

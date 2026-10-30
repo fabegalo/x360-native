@@ -36,13 +36,17 @@ $metadata=Get-Content -LiteralPath (Join-Path $package 'package.json') -Raw | Co
 $lock=Get-Content -LiteralPath (Join-Path $payload 'deps.lock.json') -Raw | ConvertFrom-Json
 if($inventory.schema -ne 1 -or $metadata.sdk_commit -ne $inventory.sdk_commit -or $lock.rexglue_sdk.commit -ne $inventory.sdk_commit) { throw 'License inventory SDK revision mismatch' }
 if(-not $metadata.desktop_only) { throw 'License scope only covers the desktop distribution' }
+# Binaries, compiled units and link inputs differ per system; notices are shared.
+$platform=if($metadata.platform) { [string]$metadata.platform } else { 'windows-x64' }
+$scope=$inventory.platforms.$platform
+if(-not $scope) { throw "No license inventory for platform: $platform" }
 if((Digest (Join-Path $package 'licenses/inventory.json')) -ne (Digest (Join-Path $payload 'licenses/inventory.json'))) { throw 'Payload/license inventory mismatch' }
 if((Digest (Join-Path $package 'licenses/excluded-loader-constants.json')) -ne (Digest (Join-Path $payload 'licenses/excluded-loader-constants.json'))) { throw 'Payload/exclusion policy mismatch' }
 if((Digest (Join-Path $payload 'payload.sha256')) -ne $metadata.payload_sha256) { throw 'Payload identity mismatch' }
 foreach($required in @('LICENSE','THIRD_PARTY_NOTICES.md')) {
     if((Digest (Join-Path $package $required)) -ne (Digest (Join-Path $payload $required))) { throw "Notice differs from committed payload: $required" }
 }
-$expected=@('LICENSE','THIRD_PARTY_NOTICES.md','READ-ME.txt','package.json','package.sha256','app/compile-commands.json','app/dependency-inputs.json','app/link-inputs.json','licenses/inventory.json','licenses/rexglue-attributions.txt','licenses/header-attributions.txt') + @($inventory.executables)
+$expected=@('LICENSE','THIRD_PARTY_NOTICES.md','READ-ME.txt','package.json','package.sha256','app/compile-commands.json','app/dependency-inputs.json','app/link-inputs.json','licenses/inventory.json','licenses/rexglue-attributions.txt','licenses/header-attributions.txt') + @($scope.executables)
 $ids=@{}
 $expected += 'licenses/excluded-loader-constants.json'
 $expected += 'licenses/relinking.txt'
@@ -72,10 +76,10 @@ foreach($component in $inventory.components) {
 }
 if((Digest (Join-Path $package 'licenses/rexglue-attributions.txt')) -ne $inventory.attributions_sha256) { throw 'Attribution text changed' }
 $sdkAttributions=Get-Content (Join-Path $package 'licenses/rexglue-attributions.txt') -Raw
-foreach($unit in $inventory.sdk_translation_units) {
+foreach($unit in @($scope.sdk_translation_units) + @($scope.sdk_private_headers)) {
     if(-not $sdkAttributions.Contains("--- $unit ---")) { throw 'SDK file attribution missing' }
 }
-if(-not $ids.ContainsKey('nlohmann-json') -or -not $ids.ContainsKey('microsoft-stl') -or -not $ids.ContainsKey('microsoft-crt-sdk')) { throw 'Missing embedded component identity' }
+foreach($id in @('nlohmann-json') + @($scope.runtime_components)) { if(-not $ids.ContainsKey($id)) { throw 'Missing embedded component identity' } }
 if(-not $ids.ContainsKey('miniz') -or -not $ids.ContainsKey('libmspack')) { throw 'Missing extraction decoder identity' }
 if((Digest (Join-Path $package 'licenses/header-attributions.txt')) -ne $inventory.header_attributions_sha256) { throw 'Header attribution text changed' }
 $icon=@($inventory.components | Where-Object id -eq 'desktop-icon')
@@ -89,7 +93,7 @@ foreach($id in @('tiny-aes-c','disruptorplus','dxc-headers','dxbc-md5','sha256',
     if($record.Count -ne 1 -or -not $record[0].license_file) { throw "Missing supplemental SDK license: $id" }
 }
 $linkInputs=Get-Content (Join-Path $package 'app/link-inputs.json') -Raw | ConvertFrom-Json
-if(Compare-Object @($inventory.link_libraries | Sort-Object) @($linkInputs | Sort-Object -Unique)) { throw 'Unreviewed static link dependency' }
+if(Compare-Object @($scope.link_libraries | Sort-Object) @($linkInputs | Sort-Object -Unique)) { throw 'Unreviewed static link dependency' }
 foreach($dep in $metadata.dependencies.PSObject.Properties) {
     if($dep.Name -notin $inventory.desktop_dependencies) { throw "Unidentified build dependency: $($dep.Name)" }
     $record=@($inventory.components | Where-Object id -eq $dep.Name)
@@ -103,25 +107,25 @@ foreach($command in $compileCommands) {
     $f=$command.file.Replace('\','/')
     if($f -match '^<source>/external/rexglue-sdk/(src/.+)$') { $units += $Matches[1] }
     elseif($f -match '^<source>/external/rexglue-sdk/thirdparty/([^/]+)/') {
-        if ($f.Substring('<source>/external/rexglue-sdk/'.Length) -in $inventory.thirdparty_translation_units) {
+        if ($f.Substring('<source>/external/rexglue-sdk/'.Length) -in $scope.thirdparty_translation_units) {
             $thirdpartyUnits += $f.Substring('<source>/external/rexglue-sdk/'.Length)
         } elseif($Matches[1] -notin @('fmt','spdlog','catch2')) { throw 'Unreviewed third-party translation unit' }
     } elseif($f -match '^<build>/(.+)$') {
         # Build-generated units: SDL's precompiled header and the launcher's embedded fonts.
-        if($Matches[1] -notin $inventory.generated_translation_units) { throw 'Unreviewed generated translation unit' }
+        if($Matches[1] -notin $scope.generated_translation_units) { throw 'Unreviewed generated translation unit' }
         $generatedUnits += $Matches[1]
     } elseif($f -notmatch '^<source>/(src/(desktop|supervisor|content)/|tests/(supervisor|content|desktop)/)') { throw 'Unreviewed distribution translation unit' }
 }
-if(Compare-Object @($inventory.sdk_translation_units | Sort-Object) @($units | Sort-Object -Unique)) { throw 'SDK extraction source scope changed' }
-if(Compare-Object @($inventory.thirdparty_translation_units | Sort-Object) @($thirdpartyUnits | Sort-Object -Unique)) { throw 'Third-party source scope changed' }
-if(Compare-Object @($inventory.generated_translation_units | Sort-Object) @($generatedUnits | Sort-Object -Unique)) { throw 'Generated source scope changed' }
+if(Compare-Object @($scope.sdk_translation_units | Sort-Object) @($units | Sort-Object -Unique)) { throw 'SDK extraction source scope changed' }
+if(Compare-Object @($scope.thirdparty_translation_units | Sort-Object) @($thirdpartyUnits | Sort-Object -Unique)) { throw 'Third-party source scope changed' }
+if(Compare-Object @($scope.generated_translation_units | Sort-Object) @($generatedUnits | Sort-Object -Unique)) { throw 'Generated source scope changed' }
 $dependencyInputs=Get-Content (Join-Path $package 'app/dependency-inputs.json') -Raw | ConvertFrom-Json
 foreach($dependencyInput in $dependencyInputs) {
-    if($dependencyInput -notin $inventory.sdk_inputs) { throw 'Unreviewed transitive header dependency' }
+    if($dependencyInput -notin $scope.sdk_inputs) { throw 'Unreviewed transitive header dependency' }
     if($dependencyInput -match '^thirdparty/([^/]+)/') {
         if($Matches[1] -notin $inventory.desktop_dependencies) { throw 'Unreviewed transitive header dependency' }
         if($dependencyInput -like 'thirdparty/inja/*' -and $dependencyInput -notlike 'thirdparty/inja/third_party/include/nlohmann/*') { throw 'Unreviewed inja nested dependency' }
-    } elseif($dependencyInput -notlike 'include/rex/*' -and $dependencyInput -ne 'src/core/platform_win.h' -and $dependencyInput -notin $inventory.sdk_translation_units) { throw 'Unreviewed SDK input' }
+    } elseif($dependencyInput -notlike 'include/rex/*' -and $dependencyInput -notin @($scope.sdk_private_headers) -and $dependencyInput -notin $scope.sdk_translation_units) { throw 'Unreviewed SDK input' }
 }
 . (Join-Path $PSScriptRoot 'excluded-constants.ps1')
 $policy = Get-Content (Join-Path $PSScriptRoot '../../licenses/excluded-loader-constants.json') -Raw | ConvertFrom-Json
@@ -131,10 +135,10 @@ foreach($file in Get-ChildItem -LiteralPath $package -Recurse -File) {
     if($file.Attributes -band [IO.FileAttributes]::ReparsePoint) { throw 'Reparse point in package' }
     if($rel -notlike 'app/workspace/*' -and $rel -notin $expected) { throw "Unidentified distributed file: $rel" }
     if($rel -match '\.(xex|xexp|xtt|ttf|otf|stfs|iso|nand|key|pem|pfx|bin)$' -or $rel -match '(^|/)(\.git|\.local|external)/' -or ($rel -match '/generated/' -and $rel -notmatch '/generated/rexglue\.cmake$')) { throw "Forbidden distribution content: $rel" }
-    if($rel -match '\.(exe|dll|lib|pdb)$' -and $rel -notin $inventory.executables) { throw "Unidentified binary: $rel" }
+    if($rel -match '\.(exe|dll|lib|pdb|so|a|o)$' -and $rel -notin $scope.executables) { throw "Unidentified binary: $rel" }
     $bytes=[IO.File]::ReadAllBytes($file.FullName)
     $magic=[Text.Encoding]::ASCII.GetString($bytes,0,[Math]::Min(4,$bytes.Length))
-    if($magic -in @('XEX1','XEX2','CON ','LIVE','PIRS') -or ($magic.StartsWith('MZ') -and $rel -notin $inventory.executables)) { throw "Embedded executable/container: $rel" }
+    if($magic -in @('XEX1','XEX2','CON ','LIVE','PIRS') -or (($magic.StartsWith('MZ') -or $magic -eq ([string][char]0x7f + 'ELF')) -and $rel -notin $scope.executables)) { throw "Embedded executable/container: $rel" }
     $textFile = $rel -match '\.(cpp|h|hpp|c|patch|json|toml|ps1|md|txt)$'
     if (Test-ExcludedConstant $bytes $policy.rules -Text:$textFile) { throw "Sensitive loader constant in: $rel" }
     if($rel -match '\.(cpp|h|hpp|c|patch|json|toml|ps1|md|txt)$') {
@@ -142,7 +146,7 @@ foreach($file in Get-ChildItem -LiteralPath $package -Recurse -File) {
         if($text -match '-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----') { throw "Private key material in: $rel" }
     }
 }
-foreach($exe in $inventory.executables) { if(-not (Test-Path -LiteralPath (Under $package $exe))) { throw 'Missing inventoried executable' } }
+foreach($exe in $scope.executables) { if(-not (Test-Path -LiteralPath (Under $package $exe))) { throw 'Missing inventoried executable' } }
 VerifyIndex $payload 'payload.sha256'
 if(Test-Path (Join-Path $package 'package.sha256')) { VerifyIndex $package 'package.sha256' }
-Write-Output "License/content gate passed: $($inventory.components.Count) components; $($inventory.executables.Count) executables; original notices and existing payload identity verified. Publication approval remains separate."
+Write-Output "License/content gate passed: $($inventory.components.Count) components; $(@($scope.executables).Count) $platform executables; original notices and existing payload identity verified. Publication approval remains separate."

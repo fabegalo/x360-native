@@ -26,6 +26,8 @@ forma de uso, texto e SHA-256. Os índices existentes `package.sha256` e
 | utfcpp | Headers usados pelo extrator | [BSL-1.0](licenses/utfcpp.txt) |
 | Microsoft C++ Standard Library | Templates/objetos incorporados | [Apache-2.0 WITH LLVM-exception](licenses/microsoft-stl.txt), copyright Microsoft Corporation |
 | CRT/UCRT Microsoft | Runtime estático Release | Termos de redistribuição Visual Studio/Windows SDK; não é coberto pela licença própria |
+| GNU libstdc++/libgcc (GCC 15.2) | Pacote Linux: templates e objetos estáticos | [GPL-3.0-or-later WITH GCC-exception-3.1](licenses/gcc-runtime.txt), copyright Free Software Foundation |
+| GNU C Library 2.43 | Pacote Linux: biblioteca do sistema, não distribuída; objetos de inicialização ligados sob a exceção | [LGPL-2.1-or-later](licenses/glibc.txt), copyright Free Software Foundation |
 | SDL | Biblioteca estática no launcher `x360-native` (janela, entrada, diálogos, SDL_GPU) e trechos de patches; não há SDL.dll no ZIP desktop | [Zlib](licenses/sdl3.txt) |
 | Dear ImGui | Interface do launcher, com os backends SDL3/SDL_GPU, estática | [MIT](licenses/imgui.txt) |
 | Vulkan-Headers | Headers da verificação opcional de dispositivo Vulkan do launcher; o loader é o do sistema | [Apache-2.0 OR MIT](licenses/vulkan-headers.txt) |
