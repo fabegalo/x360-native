@@ -88,7 +88,33 @@ Logs `.local/storage-recovery-tests.log`, `.local/storage-stale-quota-red.log`,
 `.local/evidence/validation/storage-replay-1793374933296375800/result.json`.
 Diagnóstico de retorno do seletor no host 17559 é opcional e desligado normalmente;
 os novos registros de submissão/conclusão XMsg exigem log DEBUG.
-Novo preparo e rastreamento do retorno da XUI seguem em andamento.
+Preparo oficial com 0222 e observadores concluído. A sessão
+`20261030T172919Z-storage-ui` comprovou o bloqueio: `FC/58072` retornava
+`80004005`, propagado pela inicialização de `OperationProgress.xur`, que
+terminava sem handle e antes de submeter qualquer transferência. Cancelamento
+de I/O já concluído retornou zero; não era a causa.
+
+## Cálculo original de buffers — 17559
+
+O dispatcher FC original (`818CCE08`, caso `818CD4E0`) chama `818E1828`.
+Esse método não usa `this`: analisa os filtros e calcula os buffers de URI,
+headers, schemas e tarefa. O host 17559 passa somente essa mensagem ao método
+original verificado, preservando erros; as demais mensagens seguem no SDK.
+Também usa `XamLookupCommonStringByIndex` original (`816E0BF0`) para os botões.
+Os observadores de cena/controlador/progresso são opcionais e desligados normalmente.
+
+Teste CPU `x360n_storage_17559_probe --web-task-size`: cinco verificações
+aprovadas, incluindo repetibilidade, acréscimo de memória por flag, schema
+válido e rejeição de tipo inválido (`80004001`, saída zero), com canários
+preservados. Tamanhos observados: 10.100, 282.276 e 10.380 bytes.
+Logs `.local/storage-web-size-{build,probe}.log`.
+Preparo oficial concluído (`.local/storage-web-native-prepare.log`). Na sessão
+`20261030T175127Z-storage-ui`, as sete consultas reais retornaram sucesso com
+tamanhos entre 36.024 e 314.536 bytes. A inicialização e criação da tela original
+de progresso retornaram zero, com handle válido. A XUI exibiu a barra e seu
+diálogo original de falha; a transferência ainda não foi submetida porque a
+consulta de metadados do save retornou `ERROR_NOT_SUPPORTED` (50). O serviço
+atual só atende pacotes executáveis. Esse é o próximo bloqueio reproduzido.
 
 Não há novo aceite de conquistas/GamerCard, configurações, múltiplos usuários,
 1888 ou 6717. Esses itens não foram ampliados antes de concluir Storage.

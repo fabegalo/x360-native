@@ -111,6 +111,26 @@ void SystemSwap(const rex::kernel::xboxkrnl::SystemSwapFrame& frame) {
 uint32_t Read32(rex::memory::Memory& memory, uint32_t address) {
   return rex::memory::load_and_swap<uint32_t>(memory.TranslateVirtual(address));
 }
+uint32_t storage_observe_object = 0, storage_observe_vtable = 0, storage_observe_frames = 0;
+std::array<uint32_t, 6> storage_observe_last{};
+void ObserveStorageController(rex::memory::Memory& memory) {
+  if (!storage_observe_frames) return;
+  --storage_observe_frames;
+  const auto object = storage_observe_object;
+  if (!rex::kernel::xam::AchievementGuestSpan(&memory, object, 144, rex::memory::kMemoryProtectRead) ||
+      Read32(memory, object) != storage_observe_vtable) {
+    storage_observe_frames = 0;
+    return;
+  }
+  const std::array<uint32_t, 6> fields = {Read32(memory, object + 92), Read32(memory, object + 96),
+      Read32(memory, object + 104), Read32(memory, object + 112),
+      Read32(memory, object + 116), Read32(memory, object + 140)};
+  if (fields != storage_observe_last) {
+    REXLOG_INFO("17559 storage controller {:08X}: operation={} state={} answer={} device={:08X} result={:08X} extended={:08X}",
+                object, fields[0], fields[1], fields[2], fields[3], fields[4], fields[5]);
+    storage_observe_last = fields;
+  }
+}
 void Write32(rex::memory::Memory& memory, uint32_t address, uint32_t value) {
   rex::memory::store_and_swap<uint32_t>(memory.TranslateVirtual(address), value);
 }
@@ -788,6 +808,20 @@ void InstallSystemUi(rex::Runtime& runtime, std::string drive, std::string nativ
                 const auto* result = memory->TranslateVirtual<rex::system::XAM_OVERLAPPED*>(io);
                 REXLOG_INFO("17559 storage selector: device={:08X} io={:08X} result={:08X} extended={:08X}",
                             Read32(*memory, device), io, uint32_t(result->result), uint32_t(result->extended_error));
+                  // Native 92306CF8 uses object+112/+116 for destination/I/O.
+                  // Observe only a committed original controller, for at most
+                  // 120 frames; stop as soon as its vtable changes on teardown.
+                  if (device >= 112 && io == device + 4 &&
+                      rex::kernel::xam::AchievementGuestSpan(memory, device - 112, 144,
+                                                              rex::memory::kMemoryProtectRead)) {
+                    const auto vtable = Read32(*memory, device - 112);
+                    if (vtable >= 0x92000000 && vtable < 0x93028000) {
+                      storage_observe_object = device - 112;
+                      storage_observe_vtable = vtable;
+                      storage_observe_frames = 120;
+                      storage_observe_last.fill(~0u);
+                    }
+                  }
               }
             }
             // CreateProfile's completion calls UnloadStack, not UnloadSelf.
@@ -864,6 +898,8 @@ void InstallSystemUi(rex::Runtime& runtime, std::string drive, std::string nativ
 void dash17559::DrawSystemUiFrame(PPCContext& ctx) {
   x360n::SystemUiExecution::Scope execution(dash17559::ui_execution);
   if (!execution) return;
+  if (REXCVAR_GET(dash17559_storage_io_diagnostics))
+    dash17559::ObserveStorageController(*rex::Runtime::instance()->memory());
   // The original renderer also reaches this context through ThreadState. Keep
   // the frame bridge free of REX_FUNC's restrict qualifier and restore even
   // when guest execution unwinds (for example an Xbox Home request).

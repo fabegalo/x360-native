@@ -171,3 +171,19 @@ labels = [0x922B48F0, 0x922B4940, 0x922B490C, 0x922B4950, 0x922B4B2C, 0x922B4B2C
           0x922B4B2C, 0x922B4AEC, 0x922B4B2C, 0x922B4B2C, 0x922B4B38, 0x922B4B38,
           0x922B4B2C, 0x922B4B38, 0x922B4B2C, 0x922B4B2C, 0x922B4B2C, 0x922B4B2C,
           0x922B4B1C, 0x922B4B08, 0x922B4AF4, 0x922B4950, 0x922B4B2C]
+
+# Observational Storage diagnostics only: no register writes or redirected flow.
+[[midasm_hook]]
+address = 0x922F59A8
+name = "Trace17559StorageScene"
+registers = ["r30", "r31", "r1"]
+
+[[midasm_hook]]
+address = 0x92301448
+name = "Trace17559StorageProgressInit"
+registers = ["r26", "r31"]
+
+[[midasm_hook]]
+address = 0x92301BF8
+name = "Trace17559StorageProgressTick"
+registers = ["r3"]

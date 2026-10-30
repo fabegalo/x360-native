@@ -1,6 +1,14 @@
 # Original Retail 17559 XAM; UI-only execution, no module startup.
 [functions]
 
+# Common strings used by the dashboard's original confirmation buttons.
+# Export 020F; the existing localization path loads the same original XUS table.
+0x816E0BF0 = {}
+
+# FC/58072 size method; original dispatcher case at 818CD4E0. Pure schema/URI
+# calculation, no XLiveBase object state, network task or module startup.
+0x818E1828 = {}
+
 # XUI render DC vtable 81604CC0+CC; reached by image rendering after first timer.
 0x8177C980 = {}
 

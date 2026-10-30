@@ -4,10 +4,12 @@
 espera sem evento e despacho FE/`2000C` (0220/0221); 0222 recupera staging
 interrompido antes de consultar quota, com proteção por volume. Release focado:
 1.054 asserções/17 casos; replay de 26 patches/5 arquivos afetados aprovado.
-Preparo oficial 0220/0221 concluído. Sessões isoladas de 300 s mostraram as
+Preparo oficial 0222 concluído. Sessões isoladas de 300 s mostraram as
 telas originais, dispositivos, perfil/save e seletor de destino; a cópia não
 produziu destino, portanto transferências/exclusão visuais continuam sem aceite.
-Diagnóstico opcional de conclusão acrescentado; novo preparo em andamento.
+O cálculo original FC/58072 foi integrado e testado em CPU (cinco verificações)
+e GPU: a tela original de progresso agora inicializa. A cópia encontra o próximo
+bloqueio: metadados de saves retornam `ERROR_NOT_SUPPORTED` antes da submissão.
 Conquistas e P1 não ampliados antes de concluir Storage; sem Release.
 [Evidências e limites](docs/reports/dash-os-features-03-2026-10-30.md).
 
