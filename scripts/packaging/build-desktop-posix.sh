@@ -92,7 +92,7 @@ flags="$flags -ffile-prefix-map=$source=/x360-source"
   "-DCMAKE_C_COMPILER=$cc" "-DCMAKE_CXX_COMPILER=$cxx" "-DCMAKE_MAKE_PROGRAM=$ninja" "$@" \
   "-DCMAKE_C_FLAGS=$flags" "-DCMAKE_CXX_FLAGS=$flags" "-DCMAKE_EXE_LINKER_FLAGS=$links" "-DCMAKE_SHARED_LINKER_FLAGS=$links" \
   -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
-"$cmake" --build "$build" --target x360-native x360n_desktop_tests
+"$cmake" --build "$build" --target x360-native x360n_desktop_tests -- -k 0
 # This isolated tree registers only distribution tests, never SDK/game suites.
 "$ctest" --test-dir "$build" -R desktop.catalog --no-tests=error --output-on-failure
 "$ctest" --test-dir "$build" -R desktop.update-recovery --no-tests=error --output-on-failure

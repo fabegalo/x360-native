@@ -155,12 +155,12 @@ if ($posix) {
         if (-not $Toolchain) { $Toolchain = Join-Path $root ".local/toolchains/posix-$Platform" }
     }
     PosixBuild @('build', $Platform, (PosixPath $source), $work, (PosixPath $evidence), $Version, $payloadHash, $Toolchain)
-    $toolchain = @{}
-    foreach ($line in Get-Content -LiteralPath (Join-Path $evidence 'toolchain.txt')) { if ($line -match '^([a-z0-9_]+)=(.+)$') { $toolchain[$Matches[1]] = $Matches[2] } }
-    $compilerVersion = $toolchain.compiler_version
-    $compilerHash = $toolchain.compiler_sha256
+    $recorded = @{}
+    foreach ($line in Get-Content -LiteralPath (Join-Path $evidence 'toolchain.txt')) { if ($line -match '^([a-z0-9_]+)=(.+)$') { $recorded[$Matches[1]] = $Matches[2] } }
+    $compilerVersion = $recorded.compiler_version
+    $compilerHash = $recorded.compiler_sha256
     if ($compilerHash -notmatch '^[a-f0-9]{64}$') { throw 'POSIX compiler identity missing' }
-    $build = if ($wsl) { "wsl:$($toolchain.build)" } else { $toolchain.build }
+    $build = if ($wsl) { "wsl:$($recorded.build)" } else { $recorded.build }
     $extension = if ($linux) { 'so' } else { 'dylib' }
     $programs = @((Join-Path $destination 'x360-native'), (Join-Path $internal 'x360n'), (Join-Path $internal 'x360n-extract'), (Join-Path $internal "libx360n-mspack.$extension"))
     foreach ($program in $programs) { Copy-Item -LiteralPath (Join-Path $evidence (Split-Path -Leaf $program)) -Destination $program }
@@ -170,8 +170,8 @@ if ($posix) {
 }
 if ($linux) {
     $sysrootLock = Hash (Join-Path $source 'scripts/packaging/linux-sysroot-jammy.lock')
-    if ($toolchain.sysroot_lock_sha256 -ne $sysrootLock) { throw 'Linux sysroot differs from linux-sysroot-jammy.lock' }
-    if (-not $wsl) { $readobj = Join-Path $toolchain.llvm 'bin/llvm-readobj' }
+    if ($recorded.sysroot_lock_sha256 -ne $sysrootLock) { throw 'Linux sysroot differs from linux-sysroot-jammy.lock' }
+    if (-not $wsl) { $readobj = Join-Path $recorded.llvm 'bin/llvm-readobj' }
     # Static C++ runtime, explicit glibc-only dependency allowlist. Never harvest .so files.
     $glibc = [version]'2.2.5'
     foreach ($binary in $programs) {
@@ -193,7 +193,7 @@ if ($linux) {
     # The Ubuntu 22.04 floor, like the upstream SDK's linux-amd64 build.
     if ($glibc -gt [version]'2.35') { throw "glibc floor $glibc exceeds 2.35" }
     # Longer roots first: the LLVM and sysroot trees live inside the tools directory.
-    $mappings = @(@($toolchain.source, '<source>'), @($toolchain.build, '<build>'), @($toolchain.llvm, '<llvm>'), @($toolchain.sysroot, '<sysroot>'), @($toolchain.tools, '<tools>'))
+    $mappings = @(@($recorded.source, '<source>'), @($recorded.build, '<build>'), @($recorded.llvm, '<llvm>'), @($recorded.sysroot, '<sysroot>'), @($recorded.tools, '<tools>'))
     $absolute = '(?i)[a-z]:[/\\]|/mnt/|/root/|/home/|/Users/|/tmp/'
 } elseif ($mac) {
     if ($compilerVersion -notmatch '^Apple clang version ') { throw 'macOS package requires Apple clang' }
@@ -221,7 +221,7 @@ if ($linux) {
         if ($LASTEXITCODE -ne 0) { throw "Invalid code signature: $leaf" }
     }
     if ($minimum -gt [version]'13.3') { throw "macOS deployment target $minimum exceeds 13.3" }
-    $mappings = @(@($toolchain.source, '<source>'), @($toolchain.build, '<build>'), @($toolchain.sdk, '<macos-sdk>'), @($toolchain.developer_dir, '<xcode>'), @($toolchain.tools, '<tools>'))
+    $mappings = @(@($recorded.source, '<source>'), @($recorded.build, '<build>'), @($recorded.sdk, '<macos-sdk>'), @($recorded.developer_dir, '<xcode>'), @($recorded.tools, '<tools>'))
     $absolute = '(?i)[a-z]:[/\\]|/Users/|/Applications/|/Library/Developer/|/private/|/var/folders/|/tmp/|/home/'
 } else {
     $compilerVersion = (& $clang --version | Select-Object -First 1)
@@ -450,7 +450,7 @@ if ($linux) {
 } elseif ($mac) {
     $metadata.configuration = 'Release'; $metadata.desktop_only = $true; $metadata.relative_source_paths = $true
     $metadata.compiler_flags = '-ffile-prefix-map=<source>=/x360-source'; $metadata.linker_flags = ''
-    $metadata.macos_minimum = $minimum.ToString(); $metadata.xcode = [ordered]@{ version = $toolchain.xcode_version; sdk = $toolchain.sdk_version }
+    $metadata.macos_minimum = $minimum.ToString(); $metadata.xcode = [ordered]@{ version = $recorded.xcode_version; sdk = $recorded.sdk_version }
     $metadata.publication = $Publication; $metadata.clean_macos = 'pending'
 } else {
     $metadata.resource_compiler_sha256 = Hash $rcCompiler
