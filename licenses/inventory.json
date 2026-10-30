@@ -417,19 +417,19 @@
       "upstream_revision": "23856752fbd139da0b8ca6e471a13d5bcc99a08d",
       "source_evidence": [
         {
-          "sdk_path": "thirdparty/tiny-AES-c/aes.c",
+          "sdk_path": "thirdparty/tiny-aes-c/aes.c",
           "sha256": "f7f78b44654efd3542b6886923dd05194286807ebcfeb078ea05d21fe901ee9e",
           "upstream_url": "https://raw.githubusercontent.com/kokke/tiny-AES-c/23856752fbd139da0b8ca6e471a13d5bcc99a08d/aes.c",
           "upstream_sha256": "f7f78b44654efd3542b6886923dd05194286807ebcfeb078ea05d21fe901ee9e"
         },
         {
-          "sdk_path": "thirdparty/tiny-AES-c/aes.h",
+          "sdk_path": "thirdparty/tiny-aes-c/aes.h",
           "sha256": "9f74a4de3bd11621ff6e8fb9b352b060f699e6c1c67f81a22d104aacad61a23b",
           "upstream_url": "https://raw.githubusercontent.com/kokke/tiny-AES-c/23856752fbd139da0b8ca6e471a13d5bcc99a08d/aes.h",
           "upstream_sha256": "9f74a4de3bd11621ff6e8fb9b352b060f699e6c1c67f81a22d104aacad61a23b"
         },
         {
-          "sdk_path": "thirdparty/tiny-AES-c/aes.hpp",
+          "sdk_path": "thirdparty/tiny-aes-c/aes.hpp",
           "sha256": "d59bcf29c91a796aa735c4ca204e0140f98fac7b68006a78d900c14c344e0883",
           "upstream_url": "https://raw.githubusercontent.com/kokke/tiny-AES-c/23856752fbd139da0b8ca6e471a13d5bcc99a08d/aes.hpp",
           "upstream_sha256": "d59bcf29c91a796aa735c4ca204e0140f98fac7b68006a78d900c14c344e0883"
