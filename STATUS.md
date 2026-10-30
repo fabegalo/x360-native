@@ -1,18 +1,17 @@
 # STATUS
 
 30/10 — **DASH-OS-FEATURES-03, Storage parcial**: cancelamento real de I/O,
-espera sem evento e despacho FE/`2000C` (0220/0221); 0222 recupera staging
-interrompido antes de consultar quota, com proteção por volume. Release focado:
-1.178 asserções/18 casos; replay anterior de 26 patches/5 arquivos preservado,
-mais 12 patches/1 arquivo para metadados locais (0223), SHA-256 conferidos.
-Preparo oficial 0222 concluído. Sessões isoladas de 300 s mostraram as
-telas originais, dispositivos, perfil/save e seletor de destino; a cópia não
-produziu destino, portanto transferências/exclusão visuais continuam sem aceite.
-O cálculo original FC/58072 foi integrado e testado em CPU (cinco verificações)
-e GPU: a tela original de progresso agora inicializa. A cópia encontra o próximo
-bloqueio: a flag de transferência entre dispositivos está zerada nos metadados
-locais; a consulta de saves/perfis já funciona, inclusive na sessão gráfica.
-Conquistas e P1 não ampliados antes de concluir Storage; sem Release.
+FE/`2000C`, recuperação de staging antes da quota, cálculo original de buffers
+17559 e metadados persistidos de saves/perfis locais (0220–0224). Cópia HDD → MU,
+move HDD → USB e exclusão com confirmação original executados, com hashes e
+persistência conferidos. 0225 registra/emite os callbacks reais; 67 verificações
+novas e 1.269 asserções/19 casos aprovados, replay de 32 patches/4 arquivos conferido.
+**Bloqueio gráfico reproduzido:** o callback original recebe a exclusão, mas
+`XamAlloc(0x08000000,528,...)` é recusado, impedindo a fila do cache. A linha fica
+obsoleta e a cópia nova não aparece até reiniciar. Preparo oficial concluído;
+observadores opcionais identificam o ponto sem alterar a XUI. Quota lógica com
+muitos arquivos também torna a leitura lenta; cancelamento gráfico ainda sem aceite.
+Conquistas/P1 não ampliados antes de concluir Storage; sem Release.
 [Evidências e limites](docs/reports/dash-os-features-03-2026-10-30.md).
 
 30/10 — **pacote Linux x64 do launcher e gate por plataforma**: `package-desktop.ps1

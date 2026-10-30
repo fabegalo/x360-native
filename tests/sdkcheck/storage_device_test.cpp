@@ -635,3 +635,97 @@ TEST_CASE("A session's titles share the console hard drive, not their own user r
   CHECK(std::filesystem::exists(hard_drive.path / "E000000012345678" / "1234ABCD" / "Headers"));
   CHECK_FALSE(std::filesystem::exists(title_root.path / "E000000012345678"));
 }
+
+
+STORAGE_IMPORT(XamContentRegisterChangeCallback);
+STORAGE_IMPORT(XamContentDeleteInternal);
+namespace {
+struct ContentEvent { uint32_t reason, device; uint64_t owner, size; bool present; };
+std::vector<ContentEvent> content_events;
+void ContentChangeCallback(PPCContext& ctx, uint8_t* base) {
+  auto* data = reinterpret_cast<rex::system::xam::XCONTENT_AGGREGATE_DATA*>(base + ctx.r4.u32);
+  content_events.push_back({ctx.r3.u32, data->device_id, data->xuid,
+      rex::memory::load_and_swap<uint64_t>(base + ctx.r4.u32 + 328),
+      rex::Runtime::instance()->kernel_state()->content_manager()->ContentExists(data->xuid, *data)});
+  // A callback cannot replace the export's return value or caller registers.
+  ctx.r3.u64 = 0xBADBAD;
+}
+}
+TEST_CASE("Storage mutations notify the registered original content cache", "[sdk][storage-transfer][storage-change]") {
+  StorageRoot root;
+  root.config("version=1\n[[device]]\nid=7\ntype='mu'\n[[device]]\nid=12\ntype='usb'\n");
+  const auto mu = root.path / "storage/00000007", usb = root.path / "storage/0000000C";
+  std::filesystem::create_directories(mu); std::filesystem::create_directories(usb);
+  DeviceGuest guest(root.path);
+  auto* dispatcher = guest.runtime.function_dispatcher();
+  REQUIRE(dispatcher->InitializeFunctionTable(0x82000000, 0x1000, 0x82000000, 0x10000, true, true));
+  REQUIRE(dispatcher->SetFunction(0x82000200, &ContentChangeCallback));
+  MakeItem(guest, 1, root.path, 1234);
+  const auto item = guest.address + 1024, device = guest.address + 2048, io = guest.address + 2304;
+  guest.call(__imp__XamContentRegisterChangeCallback, {0x82000200});
+  content_events.clear();
+  rex::memory::store_and_swap<uint32_t>(guest.bytes + device, 7);
+  REQUIRE(guest.call(__imp__XamContentCopyInternal, {0, device, item, 0, 0, 0, 0}) == 0);
+  CHECK(content_events.size() == 1);
+  if (!content_events.empty()) {
+    CHECK(content_events[0].reason == 0); CHECK(content_events[0].device == 7);
+    CHECK(content_events[0].owner == kOwner); CHECK(content_events[0].size == 1237);
+    CHECK(content_events[0].present);
+  }
+  const auto copied_count = content_events.size();
+  CHECK(guest.call(__imp__XamContentCopyInternal, {0, device, item, 0, 0, 0, 0}) == 183);
+  CHECK(content_events.size() == copied_count);
+  REQUIRE(dispatcher->SetFunction(0x82000100, &ProgressCallback));
+  progress_log = {}; progress_log.cancel_at = 0;
+  rex::memory::store_and_swap<uint32_t>(guest.bytes + device, 12);
+  CHECK(guest.call(__imp__XamContentCopyInternal, {0, device, item, 0x82000100, 0, 0, 0}) == 1223);
+  CHECK(content_events.size() == copied_count);
+  rex::memory::store_and_swap<uint32_t>(guest.bytes + item, 7);
+  rex::memory::store_and_swap<uint32_t>(guest.bytes + device, 12);
+  REQUIRE(guest.call(__imp__XamContentMoveInternal, {0, device, item, 0, 0, 0, io}) == 997);
+  const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+  while (guest.word(io - guest.address) == 997 && std::chrono::steady_clock::now() < deadline)
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  REQUIRE(guest.word(io - guest.address) == 0);
+  CHECK(content_events.size() == 3);
+  if (content_events.size() == 3) {
+    CHECK(content_events[1].reason == 0); CHECK(content_events[1].device == 12);
+    CHECK(content_events[1].present);
+    CHECK(content_events[2].reason == 1); CHECK(content_events[2].device == 7);
+    CHECK_FALSE(content_events[2].present);
+  }
+  rex::memory::store_and_swap<uint32_t>(guest.bytes + item, 12);
+  REQUIRE(guest.call(__imp__XamContentDeleteInternal, {item, 0}) == 0);
+  CHECK(content_events.size() == 4);
+  if (content_events.size() == 4) {
+    CHECK(content_events[3].reason == 1); CHECK(content_events[3].device == 12);
+    CHECK_FALSE(content_events[3].present);
+  }
+  const auto deleted_count = content_events.size();
+  CHECK(guest.call(__imp__XamContentDeleteInternal, {item, 0}) == 2);
+  CHECK(content_events.size() == deleted_count);
+  guest.call(__imp__XamContentRegisterChangeCallback, {0});
+  rex::memory::store_and_swap<uint32_t>(guest.bytes + item, 1);
+  CHECK(guest.call(__imp__XamContentDeleteInternal, {item, 0}) == 0);
+  CHECK(content_events.size() == deleted_count);
+#if defined(_WIN32)
+  // Move commits the destination even if Windows locks the source header.
+  MakeItem(guest, 1, root.path, 1234);
+  content_events.clear();
+  guest.call(__imp__XamContentRegisterChangeCallback, {0x82000200});
+  struct LockedHeader {
+    HANDLE handle;
+    ~LockedHeader() { if (handle != INVALID_HANDLE_VALUE) CloseHandle(handle); }
+  } locked{CreateFileW(HeaderOn(root.path).c_str(), GENERIC_READ,
+      FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr)};
+  REQUIRE(locked.handle != INVALID_HANDLE_VALUE);
+  rex::memory::store_and_swap<uint32_t>(guest.bytes + device, 7);
+  CHECK(guest.call(__imp__XamContentMoveInternal, {0, device, item, 0, 0, 0, 0}) == 5);
+  CHECK(content_events.size() == 1);
+  if (content_events.size() == 1) {
+    CHECK(content_events[0].reason == 0); CHECK(content_events[0].device == 7);
+    CHECK(content_events[0].present); CHECK(content_events[0].size == 1237);
+  }
+  guest.call(__imp__XamContentRegisterChangeCallback, {0});
+#endif
+}

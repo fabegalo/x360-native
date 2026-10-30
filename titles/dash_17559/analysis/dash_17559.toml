@@ -187,3 +187,13 @@ registers = ["r26", "r31"]
 address = 0x92301BF8
 name = "Trace17559StorageProgressTick"
 registers = ["r3"]
+
+[[midasm_hook]]
+address = 0x92263530
+name = "Trace17559StorageContentEvent"
+registers = ["r3", "r4"]
+
+[[midasm_hook]]
+address = 0x92264B44
+name = "Trace17559StorageContentDispatch"
+registers = ["r11", "r29", "r28"]

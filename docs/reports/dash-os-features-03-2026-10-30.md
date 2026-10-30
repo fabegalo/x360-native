@@ -136,3 +136,75 @@ na listagem e na tela de progresso. A XUI passou à verificação de permissões
 e exibiu "Impossível Transferir Item": o byte de atributos está zerado.
 `922FF3CC..922FF474` exige a flag de transferência de dispositivo (`0x40`)
 para esse fluxo. Nenhum destino foi criado; cópia visual ainda sem aceite.
+
+## Transferência local pela XUI — 0224
+
+O controle novo comprovou cópia real de save e perfil HDD → MU e leitura após
+reiniciar, enquanto dez verificações da permissão anunciada falharam (flags=0).
+0224 anuncia somente a transferência entre dispositivos (`0x40`) desses pacotes
+locais. Não habilita reatribuição de perfil nem altera permissões STFS assinadas.
+Release: 146 asserções no caso novo; **1.198 asserções/18 casos** no conjunto focado.
+Replay: **13 patches/1 arquivo**, SHA-256 conferido em
+`storage-replay-1793384919001732200/result.json`. Logs
+`.local/storage-transfer-flag-{red,tests,regression,prepare}.log`.
+
+Preparo oficial concluído. Na sessão `20261030T184405Z-storage-ui` a XUI original
+copiou o save de 1 MiB HDD → MU7 e moveu HDD → USB12; callbacks/progresso e I/O
+concluíram com zero. A origem foi preservada na cópia e removida no move.
+Os dois destinos têm SHA-256
+`30E14955EBF1352266DC2FF8067E68104607E750ABB9D3B36582B8AF909FCB58`.
+Após reiniciar (`20261030T184835Z-storage-ui`), a MU exibiu o save com nome,
+tamanho e proprietário preservados. Excluir abriu a confirmação original,
+inicialmente em Não; após escolher Sim removeu pacote e header da MU, mantendo
+a cópia USB com o mesmo hash. As sessões encerraram normalmente em 236.352 ms e
+291.589 ms, sem exceção não tratada; os logs ainda contêm stubs/erros preexistentes.
+
+**Aceite parcial:** a lista mantém a linha após mover/excluir; reabrir o jogo
+após excluir mostra o item inválido. O callback `XamContentRegisterChangeCallback`
+ainda é stub. Seu registro e os eventos reais precisam ser implementados antes
+do aceite completo da atualização da lista. Progresso/cancelamento gráfico em
+transferência maior, falhas durante o commit, jogos/outros tipos de conteúdo e
+gestão completa de perfis continuam sem aceite. Gamerpic/conquistas e P1 pendentes.
+
+## Eventos reais para o cache original — 0225
+
+A sessão de exclusão reproduziu a linha obsoleta mesmo reabrindo a lista. O
+registro `XamContentRegisterChangeCallback` era stub. O original 17559 registra
+um callback único em `8167CCC0`; `81684E90` passa motivo e item de 512 bytes.
+Os caminhos `81685700`/`81686790` comprovam removido=1/adicionado=0.
+
+0225 implementa o registro por runtime e emite os eventos de copiar/mover/excluir
+pelos exports XAM reais, após a alteração correspondente. Tamanho/data de criação
+vêm dos atributos persistidos. O callback executa com restauração do contexto
+PPC; zero desregistra. A dashboard original continua responsável pelo cache e
+pela tela. Se o destino já foi confirmado e a limpeza da origem falha, anuncia
+o destino e preserva o erro. Não emite eventos por conflito/cancelamento anterior
+ao commit, nem afirma que uma origem parcialmente removida foi excluída com sucesso.
+
+Controle antes do patch: 3 verificações de eventos falharam (31/34 passaram;
+as operações de arquivo já eram reais). Após: **67 asserções aprovadas**, incluindo
+reentrada para consultar a existência durante o callback e move assíncrono.
+Conjunto afetado: **1.269 asserções/19 casos aprovados**. Replay dos quatro
+arquivos alterados: **32 patches**, SHA-256 idênticos, em
+`storage-replay-1793387060211883200/result.json`. Logs
+`.local/storage-change-{red,tests,regression}.log`. O primeiro build encontrou
+qualificação de namespace ausente em dois chamadores; corrigida antes do build
+final. Preparo oficial concluído (`.local/storage-change-prepare.log`), refeito
+após alteração concorrente de `deps.lock.json` para Windows ARM64; essa alteração
+foi preservada. O preparo dos observadores reutilizou o SDK.
+
+Em `20261030T194803Z-storage-ui`, a cópia USB → MU produziu o mesmo hash, mas a
+MU continuou vazia no cache. Encerrou normalmente em 264.891 ms, sem exceção.
+Observadores opcionais/desligados normalmente em `original_xam_services.cpp`
+e no perfil de análise confirmaram em `20261030T201434Z-storage-ui`: registro
+`92263530`, evento removido=1, device=7, title=4D5309C9, manager=92969878.
+O callback chega ao original, que falha ao alocar sua mensagem de 528 bytes:
+`XamAllocEx: unsupported flags 08000000`. Não chega ao consumidor `92264B44`;
+a linha continua visível. **O cache visual ainda não está corrigido.**
+
+A massa descartável de 256 MiB/4.096 arquivos atrasou a inicialização; foi
+preservada fora do volume ativo. Outra com 256 arquivos reproduziu leitura lenta
+com quota lógica de HDD, atingindo o limite de 300 s antes da exclusão em
+`20261030T200853Z-storage-ui`. Para isolar o callback, somente o HDD descartável
+passou a usar a capacidade física real; MU/USB mantiveram suas quotas. O custo
+isolado da varredura permanece por medir/corrigir. Cancelamento gráfico sem aceite.

@@ -1,0 +1,129 @@
+--- a/include/rex/kernel/xam/module.h
++++ b/include/rex/kernel/xam/module.h
+@@ -37,6 +37,7 @@
+   XamModule(Runtime* emulator, system::KernelState* kernel_state);
+   virtual ~XamModule();
+ 
++  std::atomic<uint32_t> content_change_callback{0};
+   std::atomic<uint32_t> launch_request_callback{0};
+   std::atomic<uint32_t> launch_request_internal_flags{0};
+   // Optional, explicitly selected system-version implementation. No default fade.
+--- a/include/rex/system/xam/content_manager.h
++++ b/include/rex/system/xam/content_manager.h
+@@ -209,7 +209,7 @@
+   using TransferProgress = std::function<bool(uint64_t, uint64_t, bool)>;
+   X_RESULT TransferContent(uint64_t xuid, const XCONTENT_AGGREGATE_DATA& source,
+                            uint32_t destination_device, uint64_t destination_xuid, bool move,
+-                           const TransferProgress& progress);
++                           const TransferProgress& progress, bool* destination_committed = nullptr);
+   X_RESULT UnmountContent(uint64_t xuid, const XCONTENT_AGGREGATE_DATA& data);
+   X_RESULT UnmountAndDeleteContent(uint64_t xuid, const XCONTENT_AGGREGATE_DATA& data);
+ 
+--- a/src/system/xam/content_manager.cpp
++++ b/src/system/xam/content_manager.cpp
+@@ -893,7 +893,9 @@
+ 
+ X_RESULT ContentManager::TransferContent(uint64_t xuid, const XCONTENT_AGGREGATE_DATA& source,
+                                          uint32_t destination_device, uint64_t destination_xuid,
+-                                         bool move, const TransferProgress& progress) try {
++                                         bool move, const TransferProgress& progress,
++                                         bool* destination_committed) try {
++  if (destination_committed) *destination_committed = false;
+   namespace fs = std::filesystem;
+   constexpr X_RESULT kDiskFull = X_RESULT_FROM_WIN32(112);
+   std::error_code ec;
+@@ -1042,6 +1044,7 @@
+     fs::remove_all(destination_path, e);
+     return X_ERROR_ACCESS_DENIED;
+   }
++  if (destination_committed) *destination_committed = true;
+   if (move) {
+     const auto deleted = DeleteContent(xuid, source);
+     if (deleted != X_ERROR_SUCCESS) {
+--- a/src/kernel/xam/xam_content.cpp
++++ b/src/kernel/xam/xam_content.cpp
+@@ -37,6 +37,39 @@
+ namespace xam {
+ using namespace rex::system;
+ using namespace rex::system::xam;
++
++// Original content cache callback: one process registration (zero unregisters),
++// reason 0 = added, 1 = removed; the second argument is a 512-byte item.
++// 17559: 8167CCC0, 81684E90, 81685700 and 81686790. Keep original addresses
++// out of runtime dispatch; the registered guest owns cache/UI updates.
++void XamContentRegisterChangeCallback_entry(u32 callback) {
++  REX_KERNEL_STATE()->GetKernelModule<XamModule>("xam.xex")->content_change_callback.store(callback);
++}
++
++static void NotifyContentChange(KernelState* state, uint32_t reason,
++                                const XCONTENT_AGGREGATE_DATA& data) {
++  const auto callback = state->GetKernelModule<XamModule>("xam.xex")->content_change_callback.load();
++  if (!callback) return;
++  auto* thread = XThread::GetCurrentThread(); // XAM exports and transfer workers are guest threads.
++  const auto item = state->memory()->SystemHeapAlloc(512);
++  if (!item) { REXKRNL_ERROR("Content change callback: allocation failed"); return; }
++  struct Guard {
++    memory::Memory* memory; uint32_t address;
++    ~Guard() { memory->SystemHeapFree(address); }
++  } guard{state->memory(), item};
++  auto* bytes = state->memory()->TranslateVirtual<uint8_t*>(item);
++  std::memset(bytes, 0, 512);
++  std::memcpy(bytes, &data, sizeof(data));
++  if (reason == 0) {
++    std::array<uint8_t, 36> attributes{};
++    if (state->content_manager()->GetContentAttributes(data, attributes.data()) == 0) {
++      std::memcpy(bytes + 0x148, attributes.data() + 28, 8);
++      std::memcpy(bytes + 0x150, attributes.data() + 4, 8);
++    }
++  }
++  uint64_t args[] = {reason, item};
++  state->function_dispatcher()->ExecuteTrap(thread->thread_state(), callback, args, 2);
++}
+ 
+ // A save operation captures a real connected identity, never a display name.
+ static X_RESULT ContentUser(uint32_t index, XCONTENT_AGGREGATE_DATA& data, uint64_t& xuid) {
+@@ -507,6 +540,7 @@
+   REX_KERNEL_STATE()->content_manager()->RetireStaleSaves();
+ 
+   auto result = REX_KERNEL_STATE()->content_manager()->DeleteContent(xuid, content_data);
++  if (result == X_ERROR_SUCCESS) NotifyContentChange(REX_KERNEL_STATE(), 1, content_data);
+ 
+   if (overlapped_ptr) {
+     REX_KERNEL_STATE()->CompleteOverlappedImmediate(overlapped_ptr.guest_address(), result);
+@@ -523,6 +557,7 @@
+   XCONTENT_AGGREGATE_DATA content_data = *content_data_ptr.as<XCONTENT_AGGREGATE_DATA*>();
+ 
+   auto result = REX_KERNEL_STATE()->content_manager()->DeleteContent(xuid, content_data);
++  if (result == X_ERROR_SUCCESS) NotifyContentChange(REX_KERNEL_STATE(), 1, content_data);
+ 
+   if (overlapped_ptr) {
+     REX_KERNEL_STATE()->CompleteOverlappedImmediate(overlapped_ptr.guest_address(), result);
+@@ -732,8 +767,18 @@
+                !(request && request->cancelled.load(std::memory_order_acquire));
+       };
+     }
++    bool committed = false;
+     const auto result = kernel->content_manager()->TransferContent(user, source, device, owner,
+-                                                                   move, progress);
++                                                                   move, progress, &committed);
++    if (committed) {
++      auto destination = source;
++      destination.device_id = device;
++      destination.xuid = owner ? owner : ((source.xuid != 0 && source.xuid != uint64_t(-1))
++          ? uint64_t(source.xuid) : user);
++      // A committed destination survives failed move cleanup and must be discoverable.
++      rex::kernel::xam::NotifyContentChange(kernel, 0, destination);
++      if (move && result == X_ERROR_SUCCESS) rex::kernel::xam::NotifyContentChange(kernel, 1, source);
++    }
+     REXKRNL_INFO("Content {} {:08X}/{:08X} device {} -> {}: {}", move ? "move" : "copy",
+                  uint32_t(source.title_id), static_cast<uint32_t>(XContentType(source.content_type)),
+                  uint32_t(source.device_id), device, result);
+@@ -822,7 +867,7 @@
+ REX_EXPORT_STUB(__imp__XamContentOpenFileInternal);
+ REX_EXPORT_STUB(__imp__XamContentOpenPackageFile);
+ REX_EXPORT_STUB(__imp__XamContentQueryLicenseInternal);
+-REX_EXPORT_STUB(__imp__XamContentRegisterChangeCallback);
++REX_EXPORT(__imp__XamContentRegisterChangeCallback, rex::kernel::xam::XamContentRegisterChangeCallback_entry)
+ REX_EXPORT_STUB(__imp__XamContentResolveInternal);
+ REX_EXPORT_STUB(__imp__XamContentSetAttributes);
+ REX_EXPORT_STUB(__imp__XamContentSetMediaMetaDataInternal);

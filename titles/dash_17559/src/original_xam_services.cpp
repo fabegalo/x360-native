@@ -11,11 +11,13 @@
 #include <rex/kernel/xam/offline_achievement_helpers.h>
 #include <rex/system/xio.h>
 #include <rex/system/xam/app_manager.h>
+#include <rex/kernel/xam/module.h>
 #include <array>
 
 REXCVAR_DECLARE(bool, dash17559_storage_io_diagnostics);
 namespace rex::kernel::xam {
 uint32_t XMsgCancelIORequest_entry(rex::MappedPtr<rex::system::XAM_OVERLAPPED>, uint32_t);
+void XamContentRegisterChangeCallback_entry(uint32_t);
 }
 
 namespace dash17559 {
@@ -119,6 +121,35 @@ extern "C" REX_FUNC(__imp__XMsgCancelIORequest) {
     }
   }
   rex::ppc::HostToGuestFunction<rex::kernel::xam::XMsgCancelIORequest_entry>(ctx, base);
+}
+
+extern "C" REX_FUNC(__imp__XamContentRegisterChangeCallback) {
+  const auto callback = ctx.r3.u32;
+  rex::ppc::HostToGuestFunction<rex::kernel::xam::XamContentRegisterChangeCallback_entry>(ctx, base);
+  if (REXCVAR_GET(dash17559_storage_io_diagnostics)) {
+    auto module = rex::Runtime::instance()->kernel_state()->GetKernelModule<rex::kernel::xam::XamModule>("xam.xex");
+    REXLOG_INFO("17559 content callback register: lr={:08X} requested={:08X} stored={:08X}",
+                uint32_t(ctx.lr), callback, module->content_change_callback.load());
+  }
+}
+
+void Trace17559StorageContentEvent(PPCRegister& reason, PPCRegister& item) {
+  if (!REXCVAR_GET(dash17559_storage_io_diagnostics)) return;
+  auto* memory = rex::Runtime::instance()->memory();
+  if (!rex::kernel::xam::AchievementGuestSpan(memory, item.u32, 512, rex::memory::kMemoryProtectRead)) return;
+  const auto* bytes = memory->TranslateVirtual<uint8_t*>(item.u32);
+  const auto manager = rex::memory::load_and_swap<uint32_t>(memory->TranslateVirtual(0x9296F5F8));
+  REXLOG_INFO("17559 content event: reason={} item={:08X} manager={:08X} device={} title={:08X} size={} flags={:08X}",
+              reason.u32, item.u32, manager, rex::memory::load_and_swap<uint32_t>(bytes),
+              rex::memory::load_and_swap<uint32_t>(bytes + 0x140),
+              rex::memory::load_and_swap<uint64_t>(bytes + 0x148),
+              rex::memory::load_and_swap<uint32_t>(bytes + 508));
+}
+
+void Trace17559StorageContentDispatch(PPCRegister& reason, PPCRegister& item, PPCRegister& manager) {
+  if (REXCVAR_GET(dash17559_storage_io_diagnostics))
+    REXLOG_INFO("17559 content dispatch: reason={} item={:08X} manager={:08X}",
+                reason.u32, item.u32, manager.u32);
 }
 
 void Trace17559StorageScene(PPCRegister& result, PPCRegister& name, PPCRegister& stack) {

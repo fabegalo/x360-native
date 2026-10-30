@@ -2206,7 +2206,7 @@ certificates or licenses. Missing/malformed content remains an error. The focuse
 control reproduced ERROR_NOT_SUPPORTED (50) before this patch; it checks sync
 and async queries, restart, thumbnails and unchanged output on errors.
 
-### 0224 � announce real local device transfer support
+### 0224 — announce real local device transfer support
 
 Local save/profile packages can already copy/move between devices, but their
 metadata advertised no device transfer permission. Expose raw PPC mask 0x40;
@@ -2215,3 +2215,14 @@ leave profile reassignment disabled. The original 17559 UI checks that byte at
 to MU copies and payload reads after restart succeed. No UI bypass or fabricated
 transfer completion; other content types and signed-package permissions stay
 outside this local-content projection.
+
+### 0225 — notify the original content cache after storage mutations
+
+Implement process callback registration and real 512-byte added/removed events
+for XAM copy/move/delete. Populate size/creation time from actual content attributes;
+execute with the guest context restored. No events for precommit failures,
+conflicts or cancellation. A destination committed before failed move cleanup is
+still announced. The original dashboard callback maintains its cache and UI;
+no host list manipulation. Original 17559 contract: 8167CCC0 / 81684E90,
+removed at 81685700, added at 81686790. Shared services contain no version addresses
+in dispatch or behavior. Registration zero unregisters; state belongs to XamModule.
