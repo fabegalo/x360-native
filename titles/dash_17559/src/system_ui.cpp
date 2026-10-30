@@ -5,6 +5,7 @@
 #include "message_box_diagnostic.h"
 #include "keyboard_diagnostic.h"
 #include "system_ui_saved_state.h"
+#include "system_ui_transition.h"
 #include "../../common/system_ui_context.h"
 #include "../../common/system_ui_execution.h"
 #include <rex/runtime.h>
@@ -154,8 +155,6 @@ void InitializeHostState(rex::memory::Memory& memory) {
 void HideSystemFrame(rex::Runtime& runtime, rex::runtime::ThreadState* thread) {
   auto* memory = runtime.memory();
   Write32(*memory, kHudVisible, 0);
-  Write32(*memory, kFadeTarget, Read32(*memory, kFadeHidden));
-  Write32(*memory, kFadeCurrent, Read32(*memory, kFadeHidden));
   runtime.function_dispatcher()->ExecuteTrap(thread, 0x816C9A20, nullptr, 0);
 }
 // The kernel delivers display (type 3, 88 bytes) and title scaler (type 1,
@@ -650,7 +649,8 @@ void InstallSystemUi(rex::Runtime& runtime, std::string drive, std::string nativ
       REXLOG_INFO("17559 system UI: original attach scene -> {:08X}", uint32_t(linked));
       if (static_cast<int32_t>(linked) >= 0) {
         auto active_scene = std::make_shared<uint32_t>(scene);
-        auto destroy_scene = [&runtime, dispatcher, hud, active_scene, registration, release_module](bool destroy_app = true) {
+        auto destroy_scene = [&runtime, dispatcher, hud, active_scene, registration, release_module](
+                                 bool destroy_app = true, bool release = true) {
           auto* thread = rex::system::XThread::GetCurrentThread()->thread_state();
           // App owns the scene. Unlink and clear the host's reference before
           // its destroy callback and original DLL detach release the app.
@@ -667,7 +667,7 @@ void InstallSystemUi(rex::Runtime& runtime, std::string drive, std::string nativ
             uint64_t destroy[] = {0x80000005, 0, 0};
             dispatcher->ExecuteTrap(thread, registration->callback, destroy, 3);
           }
-          release_module();
+          if (release) release_module();
         };
         const auto root = rex::memory::load_and_swap<uint32_t>(runtime.memory()->TranslateVirtual(hud + 8));
         uint64_t layout[] = {root};
@@ -678,14 +678,33 @@ void InstallSystemUi(rex::Runtime& runtime, std::string drive, std::string nativ
           runtime.memory()->SystemHeapFree(output);
           return static_cast<X_HRESULT>(laid_out);
         }
+        if (application == &kGuide && !system_ui_visible) {
+          const auto opening = BeginGuideBackground(runtime, thread, hud);
+          if (static_cast<int32_t>(opening) < 0 && opening != 0x8000000Au) {
+            REXLOG_ERROR("17559 system UI: original Guide background failed {:08X}", opening);
+            destroy_scene();
+            runtime.memory()->SystemHeapFree(output);
+            return static_cast<X_HRESULT>(opening);
+          }
+        }
         // The original dashboard resolves/presents this target after its XUI
         // present call. Composite the original HUD here, with no extra swap,
         // image copy, window, blocking loop, or per-frame resource creation.
         std::vector<uint8_t> request_bytes(size);
         if (size) std::memcpy(request_bytes.data(), runtime.memory()->TranslateVirtual(owned_request), size);
-        draw_ui = [&runtime, dispatcher, hud, registration, xam, destroy_scene, active_scene, saved_size, user,
-                   message, cleans_failed_initialization, request_bytes = std::move(request_bytes), frame = 0u]() mutable -> bool {
+        draw_ui = [&runtime, dispatcher, hud, registration, xam, destroy_scene, release_module, active_scene, saved_size, user,
+                   message, cleans_failed_initialization, request_bytes = std::move(request_bytes), frame = 0u,
+                   close_transition = SystemUiCloseTransition{}]() mutable -> bool {
           auto* thread = rex::system::XThread::GetCurrentThread()->thread_state();
+          auto close_frame = [&] {
+            if (close_transition.Advance(runtime, thread, hud)) return true;
+            release_module();
+            REXLOG_INFO("17559 system UI: original closing transition ended");
+            return false;
+          };
+          // The app has already been destroyed, as in 816CE1B4..816CE204.
+          // Only the original HUD background runs until 81695880 completes.
+          if (close_transition.started()) return close_frame();
           if (xam->ConsumeSystemUiResume(registration->module)) {
             // Match the original XAM stack lifecycle: serialize (80000009),
             // destroy the application, then restore a new instance with flags=2.
@@ -783,8 +802,13 @@ void InstallSystemUi(rex::Runtime& runtime, std::string drive, std::string nativ
                 runtime.memory()->SystemHeapFree(buffer);
               }
             }
-            destroy_scene();
+            const bool final_close = !pending_ui && suspended_apps.empty();
+            // App-to-app handoffs retain the compositor without closing its
+            // background. Only the final return to the title animates out.
+            // Keep the module/session until then so title input stays captured.
+            destroy_scene(true, !final_close);
             REXLOG_INFO("17559 system UI: closed original app after {} frames", frame);
+            if (final_close) return close_frame();
             return false;
           }
           // Original HUD frame 816CD6E8: when the kernel accepts another system

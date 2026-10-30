@@ -1,5 +1,19 @@
 # STATUS
 
+30/10 — **Guide 17559: fechamento pelo controlador original do HUD**: retirada
+a troca instantânea do fade atual e a ocultação antes do fim da transição.
+O host consulta `81695880` e continua compondo entre `VdSwap` enquanto a XAM
+retorna `8000000A`, preservando entrada até terminar. A abertura inicializa o
+fundo no modo 1 do export original; sucessor/pai suspenso continua sem ocultação
+entre módulos. Testes focados: 677 asserções / 20 casos
+aprovados, sem GPU ou sessão visual. Preparo oficial Release concluído com
+recibo novo, 14 hashes de artefatos e dois de fontes conferidos. Na sessão
+manual solicitada, os logs registraram vários términos da transição e troca
+Guide → Perfil → Guide; primeiro processo saiu com código 0 e handoff para a
+dashboard. Comparação visual quadro a quadro pendente; SDK, originais e demais
+versões preservados.
+[Implementação e limites](docs/reports/guide-close-transition-2026-10-30.md).
+
 29/10 — **LAUNCHER-UNIFIED-01: launcher único SDL3 + Dear ImGui**: estado,
 regras e operações extraídos para `src/desktop/app/` e um só frontend em
 `src/desktop/ui/` (6 páginas, mesma paleta e disposição, ícones vetoriais

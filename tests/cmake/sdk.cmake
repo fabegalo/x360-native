@@ -215,6 +215,7 @@ target_sources(x360n_sdk_runtime_checks PRIVATE ../titles/dash_17559/src/system_
 set_source_files_properties("${PROJECT_SOURCE_DIR}/titles/dash_17559/src/system_ui.cpp"
     PROPERTIES COMPILE_DEFINITIONS X360N_SYSTEM_UI_PLUGIN=1)
 target_sources(x360n_sdk_runtime_checks PRIVATE sdkcheck/system_ui_context_test.cpp)
+target_sources(x360n_sdk_runtime_checks PRIVATE sdkcheck/system_ui_transition_test.cpp)
 if(WIN32)
   add_executable(x360n_guest_fault_context_probe tools/guest_fault_context_probe.cpp
       ../titles/common/guest_fault_context.cpp)
