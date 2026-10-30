@@ -61,7 +61,7 @@ pkg-config, X11/Wayland), sem pacote global. SDL3 configurado com vídeo
 | Controller (`[launcher-ui]`, opções, recibos, biblioteca) | 15 casos, 165 asserções, aprovado; listagem completa 811 ms |
 | Layout headless (`[launcher-layout]`) | 3 casos, 203.968 asserções, aprovado (Linux oferece só a API Vulkan, por isso menos controles) |
 | Smoke real no WSLg, ambiente vazio | `SDL_GPU vulkan`: 1220×800, Início/“Biblioteca vazia”, sem erro, 1,1 s; `software`: mesmo estado, 5,1 s para 60 quadros |
-| `x360n_desktop_tests ~[update-crash]` | 58/75 casos; as 17 falhas são testes pré-existentes do modelo, nunca rodados no Linux, que (a) usam artefatos `build/titles/<id>/<id>.exe` em texto, recusados pela validação de imagem nativa do POSIX, ou (b) injetam falha por bloqueio de arquivo do Windows. O teste de atualização por plataforma deste incremento passa |
+| `x360n_desktop_tests ~[update-crash]` | 116/116 casos, 54.449 asserções, depois de corrigir os fixtures (seção “Extrator e modelo no Linux”); o caso de bloqueio de arquivo é só do Windows |
 
 Correções que o Linux exigiu: `app/strings.h` foi renomeado para
 `app/app_text.h`, porque o `<string.h>` da glibc inclui `<strings.h>` e
@@ -69,6 +69,30 @@ resolvia para o arquivo do projeto; o fixture do launcher passou a usar o
 caminho nativo do título (`NativeTitleExecutable`) e uma imagem nativa real
 (o próprio processo-fixture, nunca executado como título); o fixture de sessão
 sinaliza o fechamento por `SessionNotification`, portável.
+
+### Extrator e modelo no Linux
+
+`x360n-extract` agora compila em todos os sistemas no modo desktop-only: fontes
+`*_posix` do SDK fixado, `main` UTF-8, recusa de links simbólicos no lugar de
+pontos de reanálise, saída com `O_EXCL`, AES-128/SHA-1 do `aes_128`/`TinySHA1`
+do SDK fora do Windows (o Windows mantém o CNG; o pacote Windows não ganha
+unidades) e `libx360n-mspack.so` substituível ao lado do extrator (`$ORIGIN`).
+Teste novo `[xex-crypto]` com vetores FIPS-197/FIPS 180 nos dois sistemas.
+
+| Verificação (Linux) | Resultado |
+|---|---|
+| Conteúdo `[content],[extraction],[system-update]` | 20 casos, 436 asserções, aprovado |
+| `[xex-crypto]` | aprovado (Windows: CNG; Linux: aes_128/TinySHA1) |
+| Importação real pelo launcher no WSLg, ambiente descartável | pacote STFS original de *A World of Keflings* (lido no lugar, SHA-256 inalterado) extraído, identificado e adicionado à Biblioteca em 18 s; registro com o mesmo identificador do Windows |
+
+Os testes do modelo falhavam no Linux por fixtures escritos para o Windows:
+executável em texto no caminho `.exe` (o POSIX resolve o caminho nativo do
+título e exige cabeçalho ELF/Mach-O e bit de execução), o `d3d12` como API
+padrão e o caminho `build/aot`. O fixture compartilhado agora gera imagens
+nativas válidas; garantias exclusivas do Windows (falha injetada por
+negação de compartilhamento, handles protegidos de verificação e o limite de
+260 caracteres) são verificadas só no Windows. Um teste que desreferenciava
+um digest vazio (segfault) agora falha com `REQUIRE`.
 
 O dispositivo Vulkan usado pelo WSLg nesta execução não foi identificado no
 smoke; na validação anterior do mesmo ambiente era llvmpipe (CPU). GPU física,
@@ -141,21 +165,32 @@ rasterizador do Dear ImGui é o stb_truetype). Agora: sobreamostragem 1×,
 escuro. A comparação ampliada 3× das capturas mostra hastes mais firmes e
 mais contraste; continua sem hinting nem ClearType, que exigiriam FreeType ou
 DirectWrite (não fixados no SDK).
+## Gate de distribuição (Windows x64, local, sem publicação)
+
+`scripts/packaging/package-desktop.ps1` no commit `3e1dd90`, em árvore nova:
+configure e build Release do zero, `desktop.catalog` (27,9 s) e
+`desktop.update-recovery` (215,0 s) aprovados, importações dos executáveis
+dentro da allowlist e “License/content gate passed: 94 components; 4
+executables”. Candidato local `x360-native-1.10.1-windows-x64.zip`
+(13.472.717 bytes) com `.sha256`, em `.local/packages`. Para chegar lá foram
+corrigidos defeitos antigos do gate, não do launcher: a exportação falhava ao
+recriar os links simbólicos do libmspack sem privilégio (agora cópias
+verificadas contra o blob do alvo), e os hashes LGPL do libmspack e a
+procedência do `miniz` tinham sido tirados de cópias CRLF (agora os bytes
+commitados). O inventário lista as 267 unidades de terceiros (SDL3, ImGui,
+libmspack), as 4 unidades geradas (PCH do SDL e fontes), as 10 bibliotecas
+estáticas e 1.030 headers do SDK; HID, SETUPAPI e WINMM entraram na allowlist
+de importações do sistema.
+
 ## Não executado / pendente
 
-- **Fluxo real:** importação de ISO/STFS real não foi executada; a sessão da
+- **Fluxo real:** importação de STFS real validada no Linux; ISO real e importação real no Windows por este launcher não; a sessão da
   dashboard pelo launcher foi validada uma vez no Windows (seção acima), não
   no Linux; jogo pela My Games, controle e áudio não foram exercitados.
-- **Extrator em Linux/macOS:** `x360n-extract` só compila no Windows (BCrypt
-  para AES/SHA-1, `wmain`, `windows.h` em `system_update.cpp`, fontes `*_win`
-  do SDK e DLL do libmspack). A importação de pasta extraída é o mesmo código;
-  ISO/GDFX, STFS/PIRS e System Update fora do Windows dependem desse port.
+- **Extrator no macOS:** o código é o do Linux, mas não foi compilado nem testado.
 - **macOS e ARM64:** sem host; o target gera `.app` no macOS, não compilado.
-- **Distribuição:** `package-desktop.ps1` e `check-package-licenses.ps1` não
-  foram executados. O inventário já identifica SDL3, Dear ImGui, Vulkan-Headers
-  e as fontes (`licenses/launcher-fonts.txt`, `licenses/vulkan-headers.txt`),
-  mas `thirdparty_translation_units`/`sdk_inputs` ainda precisam listar as
-  unidades SDL3/ImGui antes de uma Release.
+- **Distribuição:** gate executado e aprovado (abaixo). Release não publicada;
+  pacotes Linux/macOS ainda não têm script nem gate próprios.
 - Troca real de DPI entre monitores, leitor de tela e alto contraste.
 
 Removidos por dependerem de mensagens Win32/IDs de controle do frontend

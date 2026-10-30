@@ -16,8 +16,12 @@ o launcher (oferecia “Adicionar conteúdo” em vez de Preparar) e o `x360n
 prepare` (SDK compartilhado sem os aliases `xxHash::xxhash`/Vulkan/glslang usados
 pelo Native); preparação concluída, dashboard aberta, fechamento → “Sessão
 encerrada” em 41 ms e foco de volta ao launcher. Texto mais nítido (sem
-sobreamostragem, glifos no pixel). Sem extrator fora do Windows, macOS/ARM64 ou
-pacote. [Relatório](docs/reports/launcher-unified-01-2026-10-29.md).
+sobreamostragem, glifos no pixel). Extrator `x360n-extract` portado (Linux:
+conteúdo 20 casos e importação STFS real pelo launcher em 18 s, original
+intacto); modelo Linux 116/116 após corrigir fixtures escritos para o Windows;
+Windows 117/117. Gate de distribuição aprovado (candidato local 1.10.1, sem publicação).
+Sem macOS/ARM64 nem sessão da dashboard no Linux.
+[Relatório](docs/reports/launcher-unified-01-2026-10-29.md).
 
 29/10 — **sessão gráfica Linux x64 demonstrada no WSLg**: Iruka AOT ELF,
 Xenos/Vulkan, janela SDL/X11 e animação/textos observados por 40 s, com dados

@@ -126,9 +126,9 @@ não foi medida neste incremento.
 - Windows x64 compilado e validado (testes, capturas headless, smoke real com
   D3D12 e software). Linux, macOS e as demais arquiteturas: ver o relatório
   [LAUNCHER-UNIFIED-01](../reports/launcher-unified-01-2026-10-29.md).
-- O extrator `x360n-extract` (ISO/GDFX, STFS/PIRS, System Update) ainda só é
-  compilado no Windows; em Linux/macOS a importação de pasta extraída usa o
-  mesmo código, mas contêineres dependem desse port.
+- O extrator `x360n-extract` (ISO/GDFX, STFS/PIRS, System Update) compila e
+  passa nos testes no Windows e no Linux; no Linux uma importação STFS real pelo
+  launcher foi validada. No macOS não foi compilado.
 - DPI foi exercitado por escala nos testes e no Windows real a 100 %; troca
   real entre monitores e Wayland fracionário não foram observados.
 - Sem modo de alto contraste, sem tema claro; PT-BR e inglês somente.
