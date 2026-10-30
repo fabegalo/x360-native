@@ -1537,7 +1537,7 @@
       "source_evidence": [
         {
           "sdk_path": "thirdparty/sdl3/src/video/miniz.h",
-          "sha256": "38cbe13345c175ef41c52c6af9174b93a7226d088343c93eeca22e65136e395e"
+          "sha256": "dc605862897b82717e36a97239b4efda2a1175f9683ed2644015bb660f711e4a"
         }
       ]
     }
