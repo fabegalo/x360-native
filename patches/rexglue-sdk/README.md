@@ -2256,3 +2256,15 @@ components remain valid for content creation; other query failures are denied.
 Other platforms retain their original symlink_status checks. Focused validation
 uses a real disposable junction, including a nonexistent descendant beneath it;
 scale measurements use the same quota-backed fixture as 0227.
+
+### 0229 — recover interrupted package/header publication
+
+Publish a checksummed ready header only after closing every staged payload and
+the complete header. Before catalog/quota access, recover the package/header
+rename boundaries on that volume without overwriting existing content. Discard
+unmarked partial copies; preserve and reject corrupt, conflicting or linked
+pending work. Keep a fully published package if its header rename fails. The
+checksum detects corruption, not authenticity. Host-only optional checkpoints
+exercise real process termination at the three publication boundaries; normal
+guest progress and cancellation contracts remain unchanged. This is process
+interruption recovery, not power-loss durability or atomic move-source deletion.

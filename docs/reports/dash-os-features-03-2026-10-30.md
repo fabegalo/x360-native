@@ -298,3 +298,54 @@ A inspeção posterior do assistente de transferência mostrou seleção de cont
 e permitiu desmarcar Player1, mas não iniciou outra transferência. O supervisor
 encerrou pelo limite de **300.204 ms**, sem exceção: não houve encerramento normal
 nem aceite de cancelamento de I/O. Não comparar seu tempo com a sessão protegida.
+
+## Recuperação entre publicação do pacote e header — 0229
+
+O controle novo reproduziu perda do header ao reiniciar entre os dois renames:
+**6/40 verificações falharam**, com nome de fallback e staging restante
+(`.local/storage-commit-recovery-red.log`). 0229 fecha os arquivos antes de
+renomear o header para uma intenção de commit com checksum XXH3-128. Antes da
+primeira consulta de quota/catálogo do volume, publica o pacote e o header
+pendentes. Cópias parciais sem intenção são descartadas. Falha ao publicar o
+header preserva o pacote completo e a intenção para nova tentativa.
+
+Não substitui arquivos existentes. Checksum inválido, dispositivo/nome inválido,
+conflito ou junction preservam a pendência e tornam o volume indisponível; a causa
+real fica no log. O checksum detecta corrupção, não autentica conteúdo. A
+recuperação permanece restrita ao staging privado desse volume, sem seguir links.
+Estado de recuperação pertence ao runtime; quotas continuam sendo recalculadas.
+
+**185 asserções/3 casos novos aprovados**, incluindo três processos filhos
+encerrados por `_Exit(93)` nos pontos reais: intenção pronta, pacote publicado,
+header publicado. Cada filho tem limite de 20 s; reinício confere bytes completos,
+metadados opacos, origem preservada e staging ausente. Negativos conferem sentinel,
+preservação do conflito e recuperação após reparar a pendência descartável.
+Conjunto final: **1.522 asserções/24 casos aprovados**, log
+`.local/storage-commit-recovery-regression.log`, fora do sandbox para junction real.
+Replay: **17 patches/2 arquivos**, SHA-256 conferido em
+`storage-replay-1793399698170083000/result.json`. O build detectou e corrigiu um
+cast de enum antes destes testes. Wrappers próprios concluídos foram encerrados
+após verificar ausência de compiladores ativos.
+
+Limite: comprova interrupção de processo, sem promessa de durabilidade a corte de
+energia. A exclusão parcial da origem de uma movimentação interrompida ainda não
+é atômica; o destino completo é preservado. Cancelamento gráfico durante I/O
+continua sem aceite. Conquistas/P1 não ampliados enquanto Storage está em curso.
+
+Preparo oficial aprovado (`.local/storage-commit-recovery-prepare.log`). Sessão
+`20261030T230207Z-storage-recovery-ui`: uma cópia da massa descartável recebeu
+interrupção real após publicar o pacote, sem header final. Ao reiniciar a 17559,
+a MU apareceu com 509 MB livres e a XUI listou **“Transfer save”**, tipo Jogo Salvo,
+sob Jogo/Perfil Desconhecido (title/XUID sintéticos sem cadastro). Exibiu 2 MB
+arredondados para 1.048.579 bytes de payload. Sessão de consulta encerrada
+normalmente em **76.495 ms**, exit 0, sem exceção/timeout. Continuam os erros
+`FC/58003`; não é aceite integral dos serviços da dashboard.
+`storage-recovery-ui-verification.json` confere SHA-256 do header completo
+`cf55eaa33216daa354a225c0387bc89491cd314b96006643aa3326ca16138db8`,
+payload, origem da cópia e massa anterior preservados, staging ausente.
+
+Escala protegida após 0229: **4.648,15 / 4.370,45 / 4.612,38 ms**, 56 asserções
+aprovadas, `.local/storage-commit-recovery-scale.log`. Mediana 4.612,38 ms contra
+4.466,78 ms de 0228 (+3,26% nesta rodada); sem ganho medido e sem inferência de
+mudança estável ou de desempenho gráfico. Não houve compilação/sessão gráfica
+simultânea à medição.

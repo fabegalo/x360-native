@@ -16,8 +16,12 @@ focados aprovados, incluindo junction real e C8. Preparo oficial concluído.
 Sessão nativa com quota: save de 256 MiB excluído com confirmação, linha removida
 e espaço da MU de 254 para 510 MiB; origem íntegra. A inspeção posterior do
 assistente atingiu o limite de 300 s sem iniciar outra transferência.
-Cancelamento gráfico durante I/O sem aceite
-(a cópia terminou antes do comando), recuperação entre os renames ainda incompleta.
+0229 recupera pacote/header entre renames após interrupção real: 185 asserções
+novas, 1.522/24 casos focados aprovados, replay de 17 patches/2 arquivos e preparo
+oficial concluído. XUI exibiu “Transfer save” recuperado na MU; sessão fechada
+normalmente em 76 s, hashes completos e origem preservados, sem staging.
+Cancelamento gráfico durante I/O sem aceite (a cópia terminou antes do comando);
+exclusão parcial da origem de move interrompido ainda não é atômica.
 Conquistas/P1 não ampliados antes de concluir Storage; sem Release.
 [Evidências e limites](docs/reports/dash-os-features-03-2026-10-30.md).
 

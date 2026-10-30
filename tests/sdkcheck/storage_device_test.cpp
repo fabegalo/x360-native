@@ -1,6 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <atomic>
 #include <chrono>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -12,6 +13,7 @@
 #endif
 #include <rex/cvar.h>
 #include <rex/kernel/init.h>
+#include <rex/hash.h>
 #include <rex/system/function_dispatcher.h>
 #include <rex/system/xam/content_manager.h>
 #include <rex/kernel/xam/module.h>
@@ -83,6 +85,35 @@ struct DeviceGuest {
   uint32_t word(size_t offset) { return rex::memory::load_and_swap<uint32_t>(bytes + address + offset); }
   uint64_t wide(size_t offset) { return rex::memory::load_and_swap<uint64_t>(bytes + address + offset); }
 };
+#if defined(_WIN32)
+void CreateStorageJunction(const std::filesystem::path& link, const std::filesystem::path& target_path) {
+  REQUIRE(CreateDirectoryW(link.c_str(), nullptr));
+  const auto target = target_path.wstring();
+  const auto substitute = L"\\??\\" + target;
+  struct JunctionData {
+    DWORD tag;
+    WORD size, reserved, substitute_offset, substitute_length, print_offset, print_length;
+    wchar_t path[2048];
+  } data{};
+  data.tag = IO_REPARSE_TAG_MOUNT_POINT;
+  data.substitute_length = WORD(substitute.size() * sizeof(wchar_t));
+  data.print_offset = data.substitute_length + sizeof(wchar_t);
+  data.print_length = WORD(target.size() * sizeof(wchar_t));
+  data.size = WORD(8 + data.print_offset + data.print_length + sizeof(wchar_t));
+  REQUIRE(substitute.size() + target.size() + 2 < std::size(data.path));
+  std::memcpy(data.path, substitute.c_str(), data.substitute_length);
+  std::memcpy(reinterpret_cast<uint8_t*>(data.path) + data.print_offset,
+              target.c_str(), data.print_length);
+  const auto handle = CreateFileW(link.c_str(), GENERIC_WRITE, 0, nullptr, OPEN_EXISTING,
+                                 FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_BACKUP_SEMANTICS, nullptr);
+  REQUIRE(handle != INVALID_HANDLE_VALUE);
+  DWORD returned = 0;
+  const auto created = DeviceIoControl(handle, FSCTL_SET_REPARSE_POINT, &data,
+                                      8 + data.size, nullptr, 0, &returned, nullptr);
+  CloseHandle(handle);
+  REQUIRE(created);
+}
+#endif
 }
 
 TEST_CASE("Storage devices report real backing space and omit absent optical media", "[sdk][storage-device]") {
@@ -168,31 +199,7 @@ TEST_CASE("Storage path validation rejects reparse ancestors and preserves missi
 #if defined(_WIN32)
   // Directory junctions do not require the symbolic-link creation privilege.
   const auto link = root.path / "junction";
-  REQUIRE(CreateDirectoryW(link.c_str(), nullptr));
-  const auto target = (root.path / "target").wstring();
-  const auto substitute = L"\\??\\" + target;
-  struct JunctionData {
-    DWORD tag;
-    WORD size, reserved, substitute_offset, substitute_length, print_offset, print_length;
-    wchar_t path[2048];
-  } data{};
-  data.tag = IO_REPARSE_TAG_MOUNT_POINT;
-  data.substitute_length = WORD(substitute.size() * sizeof(wchar_t));
-  data.print_offset = data.substitute_length + sizeof(wchar_t);
-  data.print_length = WORD(target.size() * sizeof(wchar_t));
-  data.size = WORD(8 + data.print_offset + data.print_length + sizeof(wchar_t));
-  REQUIRE(substitute.size() + target.size() + 2 < std::size(data.path));
-  std::memcpy(data.path, substitute.c_str(), data.substitute_length);
-  std::memcpy(reinterpret_cast<uint8_t*>(data.path) + data.print_offset,
-              target.c_str(), data.print_length);
-  const auto handle = CreateFileW(link.c_str(), GENERIC_WRITE, 0, nullptr, OPEN_EXISTING,
-                                 FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_BACKUP_SEMANTICS, nullptr);
-  REQUIRE(handle != INVALID_HANDLE_VALUE);
-  DWORD returned = 0;
-  const auto created = DeviceIoControl(handle, FSCTL_SET_REPARSE_POINT, &data,
-                                      8 + data.size, nullptr, 0, &returned, nullptr);
-  CloseHandle(handle);
-  REQUIRE(created);
+  CreateStorageJunction(link, root.path / "target");
   CHECK_FALSE(IsUnlinkedStoragePath(link));
   CHECK_FALSE(IsUnlinkedStoragePath(link / "payload"));
   CHECK_FALSE(IsUnlinkedStoragePath(link / "missing" / "child"));
@@ -604,6 +611,260 @@ TEST_CASE("Quota-backed content attributes stay current across repeated reads an
   REQUIRE(after);
   CHECK(after->free_bytes + 4 == before->free_bytes);
 }
+
+TEST_CASE("Restart recovers the package and header publication boundaries without losing metadata",
+          "[sdk][storage-transfer][storage-transfer-recovery][storage-commit-recovery]") {
+  for (unsigned phase = 0; phase != 3; ++phase) {
+    DYNAMIC_SECTION("publication phase " << phase) {
+      StorageRoot root;
+      root.config("version=1\n[[device]]\nid=7\ntype='mu'\ncapacity_bytes=2097152\n");
+      const auto mu = root.path / "storage/00000007";
+      std::filesystem::create_directories(mu);
+      std::string header;
+      {
+        DeviceGuest guest(root.path);
+        auto data = MakeItem(guest, 1, root.path, 8192);
+        data.device_id = 7;
+        header.assign(reinterpret_cast<const char*>(&data), sizeof(data));
+        header += "opaque header bytes";  // recovery must preserve the complete file
+      }
+      const auto staging = mu / ".x360n-transfer/interrupted";
+      std::filesystem::create_directories(staging);
+      std::filesystem::copy(PackageOn(root.path), staging / "package",
+                            std::filesystem::copy_options::recursive);
+      const auto ready = staging / (phase == 0 ? "header" : "header-" + rex::hash_bytes(header) + ".ready");
+      std::ofstream(ready, std::ios::binary).write(header.data(), header.size());
+      if (phase >= 1) {
+        std::filesystem::create_directories(PackageOn(mu).parent_path());
+        std::filesystem::rename(staging / "package", PackageOn(mu));
+      }
+      if (phase == 2) {
+        std::filesystem::create_directories(HeaderOn(mu).parent_path());
+        std::filesystem::rename(ready, HeaderOn(mu));
+      }
+      DeviceGuest restarted(root.path);
+      auto* manager = restarted.runtime.kernel_state()->content_manager();
+      CHECK(manager->GetDevice(7).has_value());
+      CHECK_FALSE(std::filesystem::exists(mu / ".x360n-transfer"));
+      const auto items = manager->ListContent(7, kOwner, rex::system::XContentType::kSavedGame, kTitle);
+      if (phase == 0) {
+        CHECK(items.empty());
+        CHECK_FALSE(std::filesystem::exists(PackageOn(mu)));
+        CHECK_FALSE(std::filesystem::exists(HeaderOn(mu)));
+      } else {
+        REQUIRE(items.size() == 1);
+        CHECK(items.front().display_name() == u"Transfer save");
+        CHECK(std::filesystem::exists(HeaderOn(mu)));
+        std::ifstream input(HeaderOn(mu), std::ios::binary);
+        const std::string actual(std::istreambuf_iterator<char>{input}, {});
+        const bool complete_header = actual == header;
+        CHECK(complete_header);
+        CHECK(std::filesystem::file_size(PackageOn(mu) / "dir/slot.dat") == 8192);
+      }
+      std::ifstream input(PackageOn(root.path) / "dir/slot.dat", std::ios::binary);
+      CHECK(std::string(std::istreambuf_iterator<char>{input}, {}) == std::string(8192, 's'));
+      CHECK(std::filesystem::exists(HeaderOn(root.path)));
+    }
+  }
+}
+
+TEST_CASE("Content publication recovery preserves corrupt conflicting and linked pending work",
+          "[sdk][storage-transfer][storage-transfer-recovery][storage-commit-recovery]") {
+#if defined(_WIN32)
+  constexpr unsigned modes = 5;
+#else
+  constexpr unsigned modes = 4;
+#endif
+  for (unsigned mode = 0; mode != modes; ++mode) {
+    DYNAMIC_SECTION("invalid publication " << mode) {
+      StorageRoot root;
+      root.config("version=1\n[[device]]\nid=7\ntype='mu'\n");
+      const auto mu = root.path / "storage/00000007";
+      std::filesystem::create_directories(mu);
+      rex::system::xam::XCONTENT_AGGREGATE_DATA data{};
+      {
+        DeviceGuest guest(root.path);
+        data = MakeItem(guest, 1, root.path, 8192);
+      }
+      data.device_id = mode == 1 ? 12 : 7;
+      if (mode == 2) data.set_file_name("../outside");
+      std::string header(reinterpret_cast<const char*>(&data), sizeof(data));
+      header += "opaque header bytes";
+      const auto staging = mu / ".x360n-transfer/interrupted";
+      std::filesystem::create_directories(staging);
+      std::filesystem::create_directories(PackageOn(mu).parent_path());
+      std::filesystem::copy(PackageOn(root.path), PackageOn(mu),
+                            std::filesystem::copy_options::recursive);
+      const auto ready = staging / ("header-" + rex::hash_bytes(header) + ".ready");
+      auto bytes = header;
+      if (mode == 0) bytes.back() ^= 1;
+      std::ofstream(ready, std::ios::binary).write(bytes.data(), bytes.size());
+      if (mode == 3) {
+        std::filesystem::create_directories(HeaderOn(mu).parent_path());
+        std::ofstream(HeaderOn(mu)) << "do not overwrite";
+      }
+      const auto outside = root.path / "unrelated";
+      std::filesystem::create_directories(outside);
+      std::ofstream(outside / "sentinel") << "sentinel";
+#if defined(_WIN32)
+      if (mode == 4) CreateStorageJunction(staging / "linked", outside);
+#endif
+      {
+        DeviceGuest restarted(root.path);
+        CHECK_FALSE(restarted.runtime.kernel_state()->content_manager()->GetDevice(7).has_value());
+        CHECK(std::filesystem::exists(ready));
+        std::ifstream input(ready, std::ios::binary);
+        const bool unchanged = std::string(std::istreambuf_iterator<char>{input}, {}) == bytes;
+        CHECK(unchanged);
+        CHECK(std::filesystem::file_size(PackageOn(root.path) / "dir/slot.dat") == 8192);
+        CHECK(std::filesystem::file_size(PackageOn(mu) / "dir/slot.dat") == 8192);
+        std::ifstream sentinel(outside / "sentinel");
+        CHECK(std::string(std::istreambuf_iterator<char>{sentinel}, {}) == "sentinel");
+        if (mode == 3) {
+          std::ifstream existing(HeaderOn(mu));
+          CHECK(std::string(std::istreambuf_iterator<char>{existing}, {}) == "do not overwrite");
+        } else CHECK_FALSE(std::filesystem::exists(HeaderOn(mu)));
+      }
+#if defined(_WIN32)
+      if (mode == 4) CHECK(RemoveDirectoryW((staging / "linked").c_str()));
+#endif
+      if (mode == 0 || mode == 3) {
+        if (mode == 0) std::ofstream(ready, std::ios::binary | std::ios::trunc).write(header.data(), header.size());
+        else REQUIRE(std::filesystem::remove(HeaderOn(mu)));
+        DeviceGuest repaired(root.path);
+        CHECK(repaired.runtime.kernel_state()->content_manager()->GetDevice(7).has_value());
+        std::ifstream input(HeaderOn(mu), std::ios::binary);
+        const bool restored = std::string(std::istreambuf_iterator<char>{input}, {}) == header;
+        CHECK(restored);
+        CHECK_FALSE(std::filesystem::exists(mu / ".x360n-transfer"));
+      }
+    }
+  }
+}
+
+#if defined(_WIN32)
+namespace {
+std::optional<std::wstring> StorageCrashVariable(const wchar_t* name) {
+  SetLastError(ERROR_SUCCESS);
+  const auto size = GetEnvironmentVariableW(name, nullptr, 0);
+  if (!size) return GetLastError() == ERROR_ENVVAR_NOT_FOUND
+      ? std::nullopt : std::optional<std::wstring>{L""};
+  std::wstring value(size, L'\0');
+  const auto length = GetEnvironmentVariableW(name, value.data(), size);
+  if (length >= size) return std::nullopt;
+  value.resize(length);
+  return value;
+}
+struct StorageCrashEnvironment {
+  std::wstring name;
+  std::optional<std::wstring> previous;
+  explicit StorageCrashEnvironment(std::wstring value) : name(std::move(value)) {
+    previous = StorageCrashVariable(name.c_str());
+  }
+  ~StorageCrashEnvironment() {
+    SetEnvironmentVariableW(name.c_str(), previous ? previous->c_str() : nullptr);
+  }
+  void set(const std::wstring& value) { REQUIRE(SetEnvironmentVariableW(name.c_str(), value.c_str())); }
+};
+}
+
+TEST_CASE("Storage crash child exits only at an actual publication checkpoint",
+          "[.][storage-transfer-crash-child]") {
+  const auto configured = StorageCrashVariable(L"X360N_STORAGE_CRASH_TEST_ROOT");
+  if (!configured) SKIP("Only run by the bounded storage crash parent");
+  const auto root = std::filesystem::absolute(*configured).lexically_normal();
+  REQUIRE(root.parent_path() == std::filesystem::current_path());
+  REQUIRE(root.filename().wstring().starts_with(L"storage-contract-"));
+  REQUIRE(rex::system::xam::IsUnlinkedStoragePath(root));
+  std::ifstream marker(root / ".crash-test-root");
+  REQUIRE(std::string(std::istreambuf_iterator<char>{marker}, {}) == "x360n-copy-crash-v1");
+  const auto requested = StorageCrashVariable(L"X360N_STORAGE_CRASH_TEST_STAGE");
+  REQUIRE(requested);
+  REQUIRE(requested->size() == 1);
+  REQUIRE((*requested)[0] >= L'0');
+  REQUIRE((*requested)[0] <= L'2');
+  const auto stage = uint32_t((*requested)[0] - L'0');
+  DeviceGuest guest(root);
+  if (const auto seed = StorageCrashVariable(L"X360N_STORAGE_CRASH_TEST_SEED"); seed && *seed == L"1") {
+    REQUIRE_FALSE(std::filesystem::exists(PackageOn(root)));
+    MakeItem(guest, 1, root, 1024 * 1024);
+  }
+  rex::system::xam::XCONTENT_AGGREGATE_DATA data{};
+  std::ifstream input(HeaderOn(root), std::ios::binary);
+  input.read(reinterpret_cast<char*>(&data), sizeof(data));
+  REQUIRE(input.gcount() == sizeof(data));
+  guest.runtime.kernel_state()->content_manager()->TransferContent(
+      kOwner, data, 7, 0, false, {}, nullptr,
+      [stage](rex::system::xam::ContentManager::TransferStage reached) {
+        if (uint32_t(reached) == stage) std::_Exit(93);  // no destructors or staging cleanup
+      });
+  FAIL("The requested publication checkpoint was not reached");
+}
+
+TEST_CASE("A real process interruption at each publication boundary recovers on restart",
+          "[sdk][storage-transfer][storage-transfer-recovery][storage-commit-recovery]") {
+  for (unsigned stage = 0; stage != 3; ++stage) {
+    DYNAMIC_SECTION("process interrupted at publication " << stage) {
+      StorageRoot root;
+      root.config("version=1\n[[device]]\nid=7\ntype='mu'\ncapacity_bytes=4194304\n");
+      const auto mu = root.path / "storage/00000007";
+      std::filesystem::create_directories(mu);
+      std::ofstream(root.path / ".crash-test-root") << "x360n-copy-crash-v1";
+      std::string expected_header;
+      {
+        DeviceGuest guest(root.path);
+        auto data = MakeItem(guest, 1, root.path, 1024 * 1024);
+        std::ofstream(HeaderOn(root.path), std::ios::binary | std::ios::app) << "opaque header bytes";
+        data.device_id = 7;
+        expected_header.assign(reinterpret_cast<const char*>(&data), sizeof(data));
+        expected_header += "opaque header bytes";
+      }
+      StorageCrashEnvironment child_root(L"X360N_STORAGE_CRASH_TEST_ROOT");
+      StorageCrashEnvironment child_stage(L"X360N_STORAGE_CRASH_TEST_STAGE");
+      child_root.set(root.path.wstring());
+      child_stage.set(std::to_wstring(stage));
+      std::vector<wchar_t> module(32768);
+      const auto length = GetModuleFileNameW(nullptr, module.data(), DWORD(module.size()));
+      REQUIRE(length > 0);
+      REQUIRE(length < module.size());
+      const std::wstring exe(module.data(), length);
+      auto command = L"\"" + exe + L"\" \"[storage-transfer-crash-child]\"";
+      const auto cwd = std::filesystem::current_path().wstring();
+      STARTUPINFOW startup{};
+      startup.cb = sizeof(startup);
+      PROCESS_INFORMATION process{};
+      REQUIRE(CreateProcessW(exe.c_str(), command.data(), nullptr, nullptr, FALSE,
+                             CREATE_NO_WINDOW, nullptr, cwd.c_str(), &startup, &process));
+      CloseHandle(process.hThread);
+      struct ProcessHandle { HANDLE handle; ~ProcessHandle() { CloseHandle(handle); } } handle{process.hProcess};
+      const auto waited = WaitForSingleObject(process.hProcess, 20000);
+      if (waited != WAIT_OBJECT_0) {
+        TerminateProcess(process.hProcess, 97);  // only the exact test child we just created
+        WaitForSingleObject(process.hProcess, 5000);
+      }
+      REQUIRE(waited == WAIT_OBJECT_0);
+      DWORD code = 0;
+      REQUIRE(GetExitCodeProcess(process.hProcess, &code));
+      REQUIRE(code == 93);
+      REQUIRE(std::filesystem::exists(mu / ".x360n-transfer"));
+      CHECK(std::filesystem::exists(PackageOn(mu)) == (stage >= 1));
+      CHECK(std::filesystem::exists(HeaderOn(mu)) == (stage >= 2));
+      DeviceGuest restarted(root.path);
+      CHECK(restarted.runtime.kernel_state()->content_manager()->GetDevice(7).has_value());
+      REQUIRE(std::filesystem::exists(HeaderOn(mu)));
+      std::ifstream header(HeaderOn(mu), std::ios::binary);
+      const bool complete_header = std::string(std::istreambuf_iterator<char>{header}, {}) == expected_header;
+      CHECK(complete_header);
+      std::ifstream payload(PackageOn(mu) / "dir/slot.dat", std::ios::binary);
+      const bool complete_payload = std::string(std::istreambuf_iterator<char>{payload}, {}) == std::string(1024 * 1024, 's');
+      CHECK(complete_payload);
+      CHECK(std::filesystem::file_size(PackageOn(root.path) / "dir/slot.dat") == 1024 * 1024);
+      CHECK(std::filesystem::exists(HeaderOn(root.path)));
+      CHECK_FALSE(std::filesystem::exists(mu / ".x360n-transfer"));
+    }
+  }
+}
+#endif
 
 TEST_CASE("Interrupted storage staging is reclaimed before checking the destination quota",
           "[sdk][storage-transfer][storage-transfer-recovery][storage-stale-quota]") {
