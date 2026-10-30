@@ -69,6 +69,11 @@ if(X360_DESKTOP_ONLY)
     find_package(Threads REQUIRED)
     target_link_libraries(x360n-extract PRIVATE Threads::Threads ${CMAKE_DL_LIBS})
   endif()
+  if(APPLE)
+    # The SDK's CMake defines this for its own sources; memory_posix.cpp selects
+    # its Mach headers before including rex/platform.h.
+    target_compile_definitions(x360n-extract PRIVATE REX_PLATFORM_MAC=1)
+  endif()
   # The LZX decoder stays a separate, replaceable LGPL library on every system.
   # Original files avoid cabextract's Git symlinks on Windows.
   set(_update_mspack "${X360_REXGLUE_DIR}/thirdparty/libmspack/libmspack/mspack")
