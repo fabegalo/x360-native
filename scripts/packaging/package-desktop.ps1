@@ -214,8 +214,8 @@ if ($linux) {
         $loadCommands = @(& otool -l $binary) -join "`n"
         if ($loadCommands -notmatch 'cmd LC_BUILD_VERSION\s+cmdsize \d+\s+platform (?:1|MACOS|macos)\s+minos (\d+\.\d+(?:\.\d+)?)') { throw "macOS deployment target missing: $leaf" }
         if ([version]$Matches[1] -gt $minimum) { $minimum = [version]$Matches[1] }
-        & lipo -verify_arch $binary arm64
-        if ($LASTEXITCODE -ne 0) { throw "Not an arm64 binary: $leaf" }
+        $architectures = (& lipo $binary -archs) -join ' '
+        if ($LASTEXITCODE -ne 0 -or $architectures.Trim() -ne 'arm64') { throw "Not an arm64-only binary: $leaf ($architectures)" }
         # Apple silicon only runs signed code; the linker's ad-hoc signature must be intact.
         & codesign --verify --strict $binary
         if ($LASTEXITCODE -ne 0) { throw "Invalid code signature: $leaf" }
