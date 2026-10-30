@@ -193,9 +193,11 @@ x360-native/  (tracked source + additions from this reorganization)
 |   |-- dxc-headers.txt
 |   |-- FFmpeg.txt
 |   |-- fmt.txt
+|   |-- gcc-runtime.txt
 |   |-- git-credential-manager-notice.txt
 |   |-- git-credential-manager.txt
 |   |-- glslang.txt
+|   |-- glibc.txt
 |   |-- header-attributions.txt
 |   |-- imgui.txt
 |   |-- inja.txt
@@ -342,6 +344,7 @@ x360-native/  (tracked source + additions from this reorganization)
 |   |   |-- local-layout.json
 |   |   `-- local-workspace.ps1
 |   |-- packaging/
+|   |   |-- build-desktop-linux.sh
 |   |   |-- check-package-licenses.ps1
 |   |   |-- generate-desktop-icon.ps1
 |   |   `-- package-desktop.ps1

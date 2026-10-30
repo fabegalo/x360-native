@@ -448,7 +448,7 @@ Arquiteturas candidatas só se tornam alvos suportados quando viáveis, implemen
 
 O requisito é **um download principal por sistema/arquitetura suportados**, não um executável universal. Exemplos de apresentação: ZIP com aplicativo principal no Windows, pacote de uso simples no Linux e `.app` em ZIP ou pacote adequado no macOS. Não exigir que o usuário escolha e combine downloads de DLLs, ferramentas e componentes internos.
 
-- [x] Identificar claramente o pacote principal por versão, sistema e arquitetura — candidato local `x360-native-0.1.0-preview.*-windows-x64.zip`, com commit e hashes no manifesto.
+- [x] Identificar claramente o pacote principal por versão, sistema e arquitetura — candidato local `x360-native-0.1.0-preview.*-windows-x64.zip`, com commit e hashes no manifesto; Linux: candidato local `x360-native-1.12.1-linux-x64.tar.gz` com o mesmo manifesto e piso glibc medido (`docs/reports/linux-package-2026-10-30.md`).
 - [x] Oferecer aplicativo principal com nome e ícone claros — `x360-native.exe`, ícone próprio XN e metadados de versão.
 - [x] Abrir a interface gráfica sem terminal no uso normal — demonstrado na prévia local Windows `x360-native.exe`; preparação e supervisor usam processos sem console. Distribuição autônoma ainda pendente.
 - [x] Incluir dependências redistribuíveis ou obtê-las pelo assistente quando necessário e permitido — CRT Release incluído; Git/CMake/Ninja/LLVM/SDK fixados preparados localmente; instalador oficial C++ verificado e oferecido com consentimento. Instalação de MSVC ausente ainda não executada.

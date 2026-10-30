@@ -1,5 +1,16 @@
 # STATUS
 
+30/10 — **pacote Linux x64 do launcher e gate por plataforma**: `package-desktop.ps1
+-Platform linux-x64` gera `x360-native-1.12.1-linux-x64.tar.gz` (13,7 MB, candidato
+local, não publicado) a partir do commit, com LLVM 22.1.8 e sysroot privado no WSL,
+libstdc++/libgcc estáticos e dependências ELF só da glibc. Testes de distribuição
+PASS; gate de licenças/conteúdo PASS com escopo por plataforma no inventário (Windows
+inalterado: 1+24 casos; Linux: 7 negativos). Extraído e usado sem sysroot no WSL:
+hashes e modos conferem, launcher abre com Vulkan, extrator empacotado leu o Castle
+Crashers real (708 arquivos, 0 erros, original intacto). Piso glibc medido 2.43;
+nenhuma ISO Xbox 360 local. Linux limpo, dashboard no Linux e macOS pendentes.
+[Relatório](docs/reports/linux-package-2026-10-30.md).
+
 30/10 — **Guide 17559: fechamento pelo controlador original do HUD**: retirada
 a troca instantânea do fade atual e a ocultação antes do fim da transição.
 O host consulta `81695880` e continua compondo entre `VdSwap` enquanto a XAM
