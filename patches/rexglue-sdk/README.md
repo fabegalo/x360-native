@@ -2206,3 +2206,12 @@ certificates or licenses. Missing/malformed content remains an error. The focuse
 control reproduced ERROR_NOT_SUPPORTED (50) before this patch; it checks sync
 and async queries, restart, thumbnails and unchanged output on errors.
 
+### 0224 — announce real local device transfer support
+
+Local save/profile packages can already copy/move between devices, but their
+metadata advertised no device transfer permission. Expose raw PPC mask 0x40;
+leave profile reassignment disabled. The original 17559 UI checks that byte at
+922FF3CC..922FF474. Ten attribute checks fail before this patch while real HDD
+to MU copies and payload reads after restart succeed. No UI bypass or fabricated
+transfer completion; other content types and signed-package permissions stay
+outside this local-content projection.

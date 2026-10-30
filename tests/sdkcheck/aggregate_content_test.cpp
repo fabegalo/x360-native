@@ -115,6 +115,8 @@ TEST_CASE("Local save and profile metadata comes from persisted content",
       ("x360n-local-metadata-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
   struct Cleanup { std::filesystem::path path; ~Cleanup() { std::error_code ec; std::filesystem::remove_all(path, ec); } } cleanup{root};
   std::filesystem::create_directories(root);
+  std::ofstream(root / "storage.toml") << "version=1\n[[device]]\nid=7\ntype=\"mu\"\n";
+  std::filesystem::create_directories(root / "storage/00000007");
   constexpr uint64_t owner = 0xE003000000000123;
   for (unsigned restart = 0; restart != 2; ++restart) {
     rex::Runtime rt(root, root);
@@ -170,7 +172,25 @@ TEST_CASE("Local save and profile metadata comes from persisted content",
         CHECK(metadata->display_name(rex::system::XLanguage(12)) == u"Persisted name");
         CHECK(metadata->thumbnail_size == 3);
         CHECK(std::memcmp(metadata->thumbnail, "pic", 3) == 0);
+        // The original PPC UI tests raw bit 0x40, not host C++ bitfield order.
+        CHECK(metadata->flags.as_byte == 0x40);
         CHECK(bytes[0x400 + 0x93D6] == 0xA5);
+      }
+      if (!restart) {
+        data->set_display_name(u"Persisted name");
+        REQUIRE(manager->TransferContent(owner, *data, 7, owner, false, {}) == 0);
+      } else {
+        const auto copied = root / "storage/00000007/E003000000000123" /
+            (type == 1 ? "12345678/00000001/local" : "FFFE07D1/00010000/local");
+        std::ifstream payload(copied / "payload", std::ios::binary);
+        CHECK(std::string(std::istreambuf_iterator<char>(payload), {}) == "actual-data");
+        data->device_id = 7;
+        REQUIRE(query(false) == 0);
+        const auto* metadata = reinterpret_cast<const rex::filesystem::XContentMetadata*>(bytes + 0x400);
+        CHECK(metadata->flags.as_byte == 0x40);
+        CHECK(metadata->profile_id == owner);
+        CHECK(metadata->content_size == 14);
+        data->device_id = 1;
       }
       if (restart) {
         auto header = path.parent_path().parent_path() / "Headers" /

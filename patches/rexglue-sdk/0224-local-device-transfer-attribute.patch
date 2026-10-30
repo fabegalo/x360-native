@@ -1,0 +1,13 @@
+--- a/src/system/xam/content_manager.cpp
++++ b/src/system/xam/content_manager.cpp
+@@ -535,6 +535,10 @@
+     metadata.content_size = memory::load_and_swap<uint64_t>(attributes.data() + 28);
+     metadata.execution_info.title_id = stored.title_id;
+     metadata.profile_id = stored.xuid;
++    // These local packages support real device-to-device copy/move. The
++    // original PPC metadata ABI uses raw mask 0x40 (922FF3CC..922FF474), not
++    // the host compiler's bitfield order. Do not grant profile reassignment.
++    metadata.flags.as_byte = 0x40;
+     for (uint32_t language = 1; language <= 12; ++language)
+       metadata.set_display_name(XLanguage(language), stored.display_name());
+     std::vector<uint8_t> thumbnail;
