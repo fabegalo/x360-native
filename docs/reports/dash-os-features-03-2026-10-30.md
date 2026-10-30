@@ -118,3 +118,21 @@ atual só atende pacotes executáveis. Esse é o próximo bloqueio reproduzido.
 
 Não há novo aceite de conquistas/GamerCard, configurações, múltiplos usuários,
 1888 ou 6717. Esses itens não foram ampliados antes de concluir Storage.
+
+## Metadados de saves e perfis locais — 0223
+
+O controle `[local-content-metadata]` falhou antes do patch com retorno 50.
+0223 projeta identidade/nome do header persistido, tamanho da árvore instalada
+e miniatura armazenada, sem inventar versões XEX, certificados ou licenças.
+Verifica a identidade do header antes de publicar o resultado.
+Controle novo: 122 asserções aprovadas; conjunto focado afetado: **1.178
+asserções/18 casos aprovados**, incluindo reinício, sync/async e erros sem
+alterar a saída. Replay do arquivo alterado: **12 patches/1 arquivo**, SHA-256
+final conferido em `storage-replay-1793383313989767100/result.json`.
+Logs `.local/storage-local-metadata-{red,tests,regression}.log`.
+Preparo oficial concluído em `.local/storage-local-metadata-prepare.log`.
+Na sessão `20261030T181654Z-storage-ui`, a consulta do save retornou zero
+na listagem e na tela de progresso. A XUI passou à verificação de permissões
+e exibiu "Impossível Transferir Item": o byte de atributos está zerado.
+`922FF3CC..922FF474` exige a flag de transferência de dispositivo (`0x40`)
+para esse fluxo. Nenhum destino foi criado; cópia visual ainda sem aceite.

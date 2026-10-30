@@ -2196,3 +2196,13 @@ The focused 1 MiB MU regression fails before the patch (112 instead of success
 with 900,000 abandoned bytes). Coverage also checks the recovered bytes and
 enumeration after restart, plus nested transfers on separate volumes.
 No upstream equivalent identified.
+
+### 0223 — metadata for local save/profile content
+
+Expose metadata from the persisted aggregate header, installed byte count and
+stored thumbnail for local saves and profiles. Verify the persisted owner,
+title, type and name before publishing output. Do not fabricate XEX versions,
+certificates or licenses. Missing/malformed content remains an error. The focused
+control reproduced ERROR_NOT_SUPPORTED (50) before this patch; it checks sync
+and async queries, restart, thumbnails and unchanged output on errors.
+

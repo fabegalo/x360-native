@@ -109,6 +109,82 @@ TEST_CASE("Extracted executable metadata preserves disc and arcade identities", 
   }
 }
 
+TEST_CASE("Local save and profile metadata comes from persisted content",
+          "[sdk][aggregate-content][local-content-metadata]") {
+  const auto root = std::filesystem::temp_directory_path() /
+      ("x360n-local-metadata-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+  struct Cleanup { std::filesystem::path path; ~Cleanup() { std::error_code ec; std::filesystem::remove_all(path, ec); } } cleanup{root};
+  std::filesystem::create_directories(root);
+  constexpr uint64_t owner = 0xE003000000000123;
+  for (unsigned restart = 0; restart != 2; ++restart) {
+    rex::Runtime rt(root, root);
+    rex::RuntimeConfig config{};
+    config.tool_mode = true; config.kernel_init = rex::kernel::InitializeKernel;
+    REQUIRE(rt.Setup(std::move(config)) == X_STATUS_SUCCESS);
+    const auto output = rt.memory()->SystemHeapAlloc(0xA000);
+    REQUIRE(output);
+    auto* bytes = rt.memory()->TranslateVirtual<uint8_t*>(output);
+    auto* data = reinterpret_cast<rex::system::xam::XCONTENT_AGGREGATE_DATA*>(bytes);
+    auto* manager = rt.kernel_state()->content_manager();
+    auto query = [&](bool async) {
+      uint32_t result = ~0u;
+      auto thread = rex::system::object_ref<rex::system::XHostThread>(new rex::system::XHostThread(
+          rt.kernel_state(), 128 * 1024, 0, [&] {
+        auto* ctx = rex::system::XThread::GetCurrentThread()->thread_state()->context();
+        ctx->r3.u64 = output; ctx->r4.u64 = output + 0x400;
+        ctx->r5.u64 = async ? output + 0x200 : 0;
+        __imp__XamContentGetMetaDataInternal(*ctx, rt.memory()->virtual_membase());
+        result = ctx->r3.u32; return 0;
+      }));
+      REQUIRE(thread->Create() == X_STATUS_SUCCESS);
+      uint64_t timeout = uint64_t(-50'000'000ll);
+      REQUIRE(thread->Wait(0, 0, 0, &timeout) == X_STATUS_SUCCESS);
+      return result;
+    };
+    for (const auto type : {1u, 0x10000u}) {
+      *data = {}; data->device_id = 1; data->xuid = owner;
+      data->title_id = type == 1 ? 0x12345678 : 0xFFFE07D1;
+      data->content_type = rex::system::XContentType(type);
+      data->set_file_name("local"); data->set_display_name(u"Persisted name");
+      const auto path = root / "E003000000000123" /
+          (type == 1 ? "12345678/00000001/local" : "FFFE07D1/00010000/local");
+      if (!restart) {
+        std::filesystem::create_directories(path);
+        std::ofstream(path / "payload", std::ios::binary).write("actual-data", 11);
+        REQUIRE(manager->WriteContentHeaderFile(owner, *data) == 0);
+        REQUIRE(manager->SetContentThumbnail(owner, *data, {'p','i','c'}) == 0);
+      }
+      // The request routes the query; its display name is not persisted truth.
+      data->set_display_name(u"Untrusted request name");
+      for (const auto async : {false, true}) {
+        std::memset(bytes + 0x400, 0xA5, 0x93D7);
+        std::memset(bytes + 0x200, 0, sizeof(rex::system::XAM_OVERLAPPED));
+        REQUIRE(query(async) == (async ? X_ERROR_IO_PENDING : 0));
+        if (async) CHECK(rex::memory::load_and_swap<uint32_t>(bytes + 0x200) == 0);
+        const auto* metadata = reinterpret_cast<const rex::filesystem::XContentMetadata*>(bytes + 0x400);
+        CHECK(metadata->content_type == data->content_type);
+        CHECK(metadata->execution_info.title_id == data->title_id);
+        CHECK(metadata->profile_id == owner);
+        CHECK(metadata->content_size == 14);
+        CHECK(metadata->display_name(rex::system::XLanguage(1)) == u"Persisted name");
+        CHECK(metadata->display_name(rex::system::XLanguage(12)) == u"Persisted name");
+        CHECK(metadata->thumbnail_size == 3);
+        CHECK(std::memcmp(metadata->thumbnail, "pic", 3) == 0);
+        CHECK(bytes[0x400 + 0x93D6] == 0xA5);
+      }
+      if (restart) {
+        auto header = path.parent_path().parent_path() / "Headers" /
+            (type == 1 ? "00000001/local.header" : "00010000/local.header");
+        std::ofstream(header, std::ios::binary | std::ios::trunc).write("short", 5);
+        std::memset(bytes + 0x400, 0xA5, 0x93D7);
+        CHECK(query(false) != 0);
+        CHECK(bytes[0x400] == 0xA5);
+        data->set_file_name("missing"); CHECK(query(false) == X_ERROR_FILE_NOT_FOUND);
+      }
+    }
+  }
+}
+
 TEST_CASE("Aggregate all-types query enumerates installed titles with their real types",
           "[sdk][aggregate-content]") {
   const auto root = std::filesystem::temp_directory_path() /

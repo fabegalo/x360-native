@@ -1,0 +1,41 @@
+--- a/src/system/xam/content_manager.cpp
++++ b/src/system/xam/content_manager.cpp
+@@ -515,6 +515,38 @@
+                                           uint8_t* output) try {
+   if (!ValidName(data.file_name())) return X_ERROR_INVALID_PARAMETER;
+   const auto type = uint32_t(data.content_type.get());
++  if (data.content_type == XContentType::kSavedGame || data.content_type == XContentType::kProfile) {
++    // Runtime-created local content has an aggregate header and an installed
++    // tree, not a signed STFS container. Read its persisted identity/name and
++    // actual bytes; do not invent execution versions, certificates or licenses.
++    XCONTENT_AGGREGATE_DATA stored{};
++    const auto read = ReadContentHeaderFile(data.file_name(), data.xuid, data.title_id,
++                                            data.content_type, stored, data.device_id);
++    if (read) return read;
++    if (stored.xuid != data.xuid || stored.title_id != data.title_id ||
++        stored.content_type != data.content_type || stored.file_name() != data.file_name())
++      return 13 /* ERROR_INVALID_DATA */;
++    std::array<uint8_t, 36> attributes{};
++    const auto result = GetContentAttributes(data, attributes.data());
++    if (result) return result;
++    filesystem::XContentMetadata metadata{};
++    metadata.content_type = stored.content_type;
++    metadata.metadata_version = 2;
++    metadata.content_size = memory::load_and_swap<uint64_t>(attributes.data() + 28);
++    metadata.execution_info.title_id = stored.title_id;
++    metadata.profile_id = stored.xuid;
++    for (uint32_t language = 1; language <= 12; ++language)
++      metadata.set_display_name(XLanguage(language), stored.display_name());
++    std::vector<uint8_t> thumbnail;
++    const auto picture = GetContentThumbnail(data.xuid, data, &thumbnail);
++    if (picture != X_ERROR_SUCCESS && picture != X_ERROR_FILE_NOT_FOUND) return picture;
++    if (thumbnail.size() > filesystem::XContentMetadata::kThumbLengthV2)
++      return 13 /* ERROR_INVALID_DATA */;
++    metadata.thumbnail_size = uint32_t(thumbnail.size());
++    if (!thumbnail.empty()) memcpy(metadata.thumbnail, thumbnail.data(), thumbnail.size());
++    memcpy(output, &metadata, sizeof(metadata));
++    return X_ERROR_SUCCESS;
++  }
+   if (type != 0x4000 && type != 0x7000 && type != 0x80000 && type != 0xD0000)
+     return X_RESULT_FROM_WIN32(50);
+   const auto path = ResolvePackagePath(data.xuid, data);
