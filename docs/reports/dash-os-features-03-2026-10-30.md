@@ -349,3 +349,24 @@ aprovadas, `.local/storage-commit-recovery-scale.log`. Mediana 4.612,38 ms contr
 4.466,78 ms de 0228 (+3,26% nesta rodada); sem ganho medido e sem inferência de
 mudança estável ou de desempenho gráfico. Não houve compilação/sessão gráfica
 simultânea à medição.
+
+## Limite do cancelamento gráfico com 480 MiB
+
+Massa nova: 1.024 arquivos × 480 KiB, Player1 descartável, quotas preservadas.
+`20261030T230612Z-storage-cancel-ui`: cópia HDD → MU concluída, encerramento normal
+em 192.357 ms. `20261030T231006Z-storage-bulk-cancel-ui`: assistente original,
+perfil desmarcado, move HDD → USB; B abriu “Parar Transferência”, Sim chamou
+`XMsgCancelIORequest(407816F0,1)` às 20:14:25.225, resultado da movimentação 0
+às 20:14:25.863. Encerramento normal em 273.923 ms.
+
+Tentativa com confirmação antecipada `20261030T231613Z-storage-bulk-cancel-ui`:
+request às 20:20:28.446, cancel `(407500F0,1)` às 20:20:42.123, resultado 0 às
+20:20:44.573; XUI mostrou 1/1 transferido com êxito. A conferência final atingiu
+300.195 ms, sem exceção, portanto essa sessão terminou por timeout. Não houve
+aceite de cancelamento antes do commit nem novas repetições gráficas.
+`storage-cancel-ui-final-verification.json` confirma 2.048 hashes, os headers
+completos de MU/USB, origem removida após sucesso, perfil intacto e staging
+ausente. Cópia USB anterior foi arquivada antes de restaurar a origem de teste.
+Enumeração de volumes e resposta da XUI ainda lentas com ambos os volumes cheios;
+não confundir barra atrasada com I/O ainda cancelável. Estes resultados não
+comprovam a hipótese sobre o instante exato de início do commit.
