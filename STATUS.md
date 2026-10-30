@@ -10,7 +10,10 @@ aparece na MU na mesma sessão e exclusão confirmada remove a linha obsoleta.
 Cópia adicional de 256 MiB íntegra (256 hashes por origem/destino); eventos Add e
 Remove chegam ao consumidor original. Preparo oficial concluído; 91 verificações
 novas e 1.439 asserções/21 casos focados aprovados, replay de 10 patches/1 arquivo.
-Quota lógica com muitos arquivos continua lenta; cancelamento gráfico sem aceite
+0227 elimina varreduras repetidas na validação de caminhos: mediana sintética
+−65,54%, 56 checks antes/depois, 1.325 asserções/20 regressões aprovadas. Preparo
+oficial e listagem gráfica com quotas de HDD/MU conferidos; enumeração ainda lenta.
+Cancelamento gráfico sem aceite
 (a cópia terminou antes do comando), recuperação entre os renames ainda incompleta.
 Conquistas/P1 não ampliados antes de concluir Storage; sem Release.
 [Evidências e limites](docs/reports/dash-os-features-03-2026-10-30.md).

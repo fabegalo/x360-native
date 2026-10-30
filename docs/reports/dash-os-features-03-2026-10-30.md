@@ -242,3 +242,32 @@ os 256 hashes de cada volume conferiram; header de origem intacto e header de
 destino presente. Verificação em `message-allocation-ui-verification.json` na
 raiz da massa descartável. Quota lógica de HDD restaurada para 8 GiB depois de
 encerrar; não houve alteração no algoritmo de quota nem nos dados reais.
+
+## Custo de resolução com quota lógica — 0227
+
+`ResolvePackagePath` chamava `DeviceRoot` na condição de cada ancestral;
+cada chamada recalculava a quota percorrendo todos os arquivos do volume.
+0227 resolve esse limite uma vez por chamada, mantendo os testes de todos os
+ancestrais, a rejeição de links/junctions e a quota atualizada nas chamadas
+seguintes. Não há cache persistente nem dispensa da quota.
+
+Medição Release, mesmo teste/volume sintético: 258 arquivos, 4 consultas de
+atributos por amostra, 3 amostras. Antes: **25.862,4 / 24.191,9 / 24.521,4 ms**;
+depois: **8.999,79 / 8.450,17 / 8.023,34 ms**. Mediana −65,54% (2,90×).
+Correção funcional passou nos dois lados (56 asserções): tamanho real, canários
+e redução exata de espaço livre após crescimento de arquivo. Não mede FPS nem
+estabelece ganho de tempo gráfico. Logs `.local/storage-path-{before,after}.log`.
+Gate local optativo `tests/sdkcheck/storage_path_scale_budget.py`, com limite
+explícito de 15.000 ms para essa mediana: referência recusada (exit 1), variante
+aprovada (exit 0). O teste normal de correção não impõe limite temporal ao CI.
+Regressões pertinentes: **1.325 asserções/20 casos aprovados**; replay do arquivo
+afetado: **15 patches/1 arquivo**, hashes conferidos em
+`storage-replay-1793394044119081000/result.json`. Preparo oficial concluído
+(`.local/storage-path-prepare.log`). A compilação unitária linkou e seus testes
+passaram; o wrapper remanescente sem compiladores ativos foi encerrado.
+
+`20261030T212124Z-storage-ui`: com HDD lógico de 8 GiB e MU de 512 MiB,
+dispositivos apareceram com 7,7 GiB/254 MiB livres, e a categoria Jogos da MU
+mostrou os 256 MiB persistidos. Enumeração ainda lenta; não houve exclusão grande
+nessa sessão. Encerramento normal em 286.868 ms, sem exceção ou timeout.
+Não é benchmark gráfico equivalente nem aceite de cancelamento.

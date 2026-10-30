@@ -2237,3 +2237,12 @@ retain errors for unsupported physical and unknown classes. The focused test
 checks actual writable memory, allocation size, free, output canaries and errors.
 The storage callback test also allocates/copies/frees its 528-byte queue message,
 so a successful host notification alone cannot hide this regression.
+
+### 0227 — resolve the quota-backed volume once per path check
+
+ResolvePackagePath queried the complete volume quota again at every ancestor
+in its validation loop. Keep the same ancestor checks and fresh accounting,
+but resolve the loop boundary once per call. No persistent quota cache or
+permission shortcut. The focused scale test times three equivalent samples
+and verifies content size, output canaries and exact free-space changes after
+file growth; the existing save isolation and transfer tests remain applicable.

@@ -3,6 +3,7 @@
 #include <chrono>
 #include <filesystem>
 #include <fstream>
+#include <iostream>
 #include <thread>
 #include <vector>
 #if defined(_WIN32)
@@ -518,6 +519,43 @@ TEST_CASE("Storage copies and moves packages between volumes without partial res
   CHECK(guest.call(__imp__XamContentMoveInternal, {0, device, item, 0, 0, 0, 0}) == 112);
   CHECK_FALSE(std::filesystem::exists(PackageOn(mu)));
   CHECK(std::filesystem::exists(PackageOn(root.path)));  // a refused move keeps the source
+}
+
+TEST_CASE("Quota-backed content attributes stay current across repeated reads and file growth",
+          "[sdk][storage-device][storage-path-scale]") {
+  StorageRoot root;
+  root.config("version=1\n[hdd]\ncapacity_bytes=1073741824\nreserve_bytes=4096\n");
+  DeviceGuest guest(root.path);
+  const auto data = MakeItem(guest, 1, root.path, 5);
+  for (unsigned i = 0; i != 256; ++i)
+    std::ofstream(PackageOn(root.path) / "dir" / std::to_string(i), std::ios::binary)
+        << std::string(1024, 'x');
+  auto* manager = guest.runtime.kernel_state()->content_manager();
+  uint8_t attributes[38];
+  constexpr uint64_t expected_size = 5 + 3 + 256 * 1024;
+  for (unsigned sample = 0; sample != 3; ++sample) {
+    const auto started = std::chrono::steady_clock::now();
+    for (unsigned query = 0; query != 4; ++query) {
+      std::memset(attributes, 0xA5, sizeof(attributes));
+      REQUIRE(manager->GetContentAttributes(data, attributes + 1) == 0);
+      CHECK(rex::memory::load_and_swap<uint64_t>(attributes + 29) == expected_size);
+      CHECK(attributes[0] == 0xA5);
+      CHECK(attributes[37] == 0xA5);
+    }
+    const auto elapsed = std::chrono::duration<double, std::milli>(
+        std::chrono::steady_clock::now() - started).count();
+    std::cout << "storage-path-scale files=258 queries=4 sample=" << sample
+              << " elapsed_ms=" << elapsed << '\n';
+  }
+  const auto before = manager->GetDevice(1);
+  REQUIRE(before);
+  std::ofstream(PackageOn(root.path) / "dir" / "slot.dat", std::ios::binary | std::ios::app)
+      << "grow";
+  REQUIRE(manager->GetContentAttributes(data, attributes + 1) == 0);
+  CHECK(rex::memory::load_and_swap<uint64_t>(attributes + 29) == expected_size + 4);
+  const auto after = manager->GetDevice(1);
+  REQUIRE(after);
+  CHECK(after->free_bytes + 4 == before->free_bytes);
 }
 
 TEST_CASE("Interrupted storage staging is reclaimed before checking the destination quota",

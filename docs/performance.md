@@ -343,3 +343,12 @@ e escalados necessários à correção. P50 local entre −10,76% e +0,28%, com
 caudas mistas e sem ganho global certificado. Cenário equivalente, resultados
 CPU/GPU e candidato sem ganho estão no
 [relatório fixed16](reports/graphics/full-resolve-fixed16-0201-2026-10-25.md).
+
+0227 (30/10): resolução de caminhos de conteúdo com quota lógica deixa de
+recalcular o volume na condição de cada ancestral. Preserva todos os checks e
+consulta dados atuais na próxima chamada. Teste Release sintético, 258 arquivos,
+4 leituras de atributos por amostra: mediana de 24.521,4 para 8.450,17 ms em
+3 amostras por variante (−65,54%). Sem ganho de FPS ou tempo gráfico certificado;
+varreduras restantes continuam custosas. Tamanho, canários e quota após escrita
+passaram antes/depois; 1.325 asserções/20 regressões focadas aprovadas.
+[Cenário e limites](reports/dash-os-features-03-2026-10-30.md).

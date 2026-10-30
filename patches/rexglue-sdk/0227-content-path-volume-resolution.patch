@@ -1,0 +1,15 @@
+--- a/src/system/xam/content_manager.cpp
++++ b/src/system/xam/content_manager.cpp
+@@ -333,7 +333,11 @@
+   // Never follow an existing junction/symlink into another owner's storage.
+   if (!IsUnlinkedStoragePath(path)) throw std::filesystem::filesystem_error(
+       "linked content path", path, std::make_error_code(std::errc::permission_denied));
+-  for (auto p = path; p != DeviceRoot(data.device_id) && !p.empty(); p = p.parent_path()) {
++  // Resolving a volume also queries its current quota. Resolve it once for
++  // this path validation, rather than rescanning every file at each ancestor.
++  // Keep every ancestor check and take a fresh quota snapshot on the next call.
++  const auto device_root = DeviceRoot(data.device_id);
++  for (auto p = path; p != device_root && !p.empty(); p = p.parent_path()) {
+     std::error_code ec;
+     auto status = std::filesystem::symlink_status(p, ec);
+     if (std::filesystem::is_symlink(status)) throw std::filesystem::filesystem_error(
