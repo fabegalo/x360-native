@@ -27,7 +27,7 @@ Index ReadIndex(const fs::path& file, bool payload = true) {
     if (line.size() < 66 || line[64] != '\t' || line.substr(0,64).find_first_not_of("0123456789abcdef") != std::string::npos)
       throw std::runtime_error("Índice do pacote inválido.");
     auto rel = fs::path(std::u8string(line.begin()+65, line.end()));
-    for (auto& part : rel) if (!IsSafePackageEntryName(Utf8(part))) throw std::runtime_error("Caminho inválido no pacote.");
+    for (const auto& part : rel) if (!IsSafePackageEntryName(Utf8(part))) throw std::runtime_error("Caminho inválido no pacote.");
     if (rel.is_absolute() || rel.empty() || *rel.begin() == ".local" || *rel.begin() == ".git" || *rel.begin() == "external" || *rel.begin() == "data")
       throw std::runtime_error("O pacote tentou incluir dados locais ou dependências não verificadas.");
     auto key = Utf8(rel); for (auto& c : key) if (c >= 'A' && c <= 'Z') c += 'a' - 'A';
