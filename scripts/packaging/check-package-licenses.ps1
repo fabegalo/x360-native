@@ -136,10 +136,13 @@ foreach($file in Get-ChildItem -LiteralPath $package -Recurse -File) {
     if($file.Attributes -band [IO.FileAttributes]::ReparsePoint) { throw 'Reparse point in package' }
     if($rel -notlike 'app/workspace/*' -and $rel -notin $expected) { throw "Unidentified distributed file: $rel" }
     if($rel -match '\.(xex|xexp|xtt|ttf|otf|stfs|iso|nand|key|pem|pfx|bin)$' -or $rel -match '(^|/)(\.git|\.local|external)/' -or ($rel -match '/generated/' -and $rel -notmatch '/generated/rexglue\.cmake$')) { throw "Forbidden distribution content: $rel" }
-    if($rel -match '\.(exe|dll|lib|pdb|so|a|o)$' -and $rel -notin $scope.executables) { throw "Unidentified binary: $rel" }
+    if($rel -match '\.(exe|dll|lib|pdb|so|dylib|a|o)$' -and $rel -notin $scope.executables) { throw "Unidentified binary: $rel" }
     $bytes=[IO.File]::ReadAllBytes($file.FullName)
     $magic=[Text.Encoding]::ASCII.GetString($bytes,0,[Math]::Min(4,$bytes.Length))
-    if($magic -in @('XEX1','XEX2','CON ','LIVE','PIRS') -or (($magic.StartsWith('MZ') -or $magic -eq ([string][char]0x7f + 'ELF')) -and $rel -notin $scope.executables)) { throw "Embedded executable/container: $rel" }
+    # Mach-O 64-bit (CF FA ED FE) and universal (CA FE BA BE) images, like PE and ELF.
+    $machO=$bytes.Length -ge 4 -and (($bytes[0] -eq 0xCF -and $bytes[1] -eq 0xFA -and $bytes[2] -eq 0xED -and $bytes[3] -eq 0xFE) -or
+        ($bytes[0] -eq 0xCA -and $bytes[1] -eq 0xFE -and $bytes[2] -eq 0xBA -and $bytes[3] -eq 0xBE))
+    if($magic -in @('XEX1','XEX2','CON ','LIVE','PIRS') -or (($magic.StartsWith('MZ') -or $magic -eq ([string][char]0x7f + 'ELF') -or $machO) -and $rel -notin $scope.executables)) { throw "Embedded executable/container: $rel" }
     $textFile = $rel -match '\.(cpp|h|hpp|c|patch|json|toml|ps1|md|txt)$'
     if (Test-ExcludedConstant $bytes $policy.rules -Text:$textFile) { throw "Sensitive loader constant in: $rel" }
     if($rel -match '\.(cpp|h|hpp|c|patch|json|toml|ps1|md|txt)$') {

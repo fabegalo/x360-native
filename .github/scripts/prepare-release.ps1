@@ -1,12 +1,23 @@
 # Distribution dependencies only; no full runtime, title codegen or installation.
+# Windows: pinned Git/CMake/Ninja/LLVM and the hosted MSVC workload. Linux x64 and
+# macOS ARM64: pinned tools of prepare-posix-toolchain.sh (and the jammy sysroot).
 param([switch]$RecordEnvironment)
 $ErrorActionPreference = 'Stop'
 $env:PSModulePath = Join-Path $PSHOME 'Modules'
 $root = (Resolve-Path (Join-Path $PSScriptRoot '../..')).Path
 Set-Location -LiteralPath $root
+$onWindows = $env:OS -eq 'Windows_NT'
+$platform = if ($onWindows) { 'windows-x64' } elseif ([Runtime.InteropServices.RuntimeInformation]::IsOSPlatform([Runtime.InteropServices.OSPlatform]::OSX)) { 'macos-arm64' } else { 'linux-x64' }
+$python = if ($onWindows) { 'python' } else { 'python3' }
 if ($RecordEnvironment) {
-    if (-not $env:VCToolsVersion -or -not $env:WindowsSDKVersion) { throw 'Microsoft C++/Windows SDK environment missing' }
-    python .github/scripts/release.py environment --versions "$env:VCToolsVersion;$env:WindowsSDKVersion"
+    if ($onWindows) {
+        if (-not $env:VCToolsVersion -or -not $env:WindowsSDKVersion) { throw 'Microsoft C++/Windows SDK environment missing' }
+        & $python .github/scripts/release.py environment --platform $platform --versions "$env:VCToolsVersion;$env:WindowsSDKVersion"
+    } elseif ($platform -eq 'macos-arm64') {
+        & $python .github/scripts/release.py environment --platform $platform --versions ((& xcodebuild -version) -join ' ')
+    } else {
+        & $python .github/scripts/release.py environment --platform $platform --versions 'linux'
+    }
     exit $LASTEXITCODE
 }
 $env:GIT_CONFIG_COUNT = '3'
@@ -18,14 +29,17 @@ $tree = git ls-tree HEAD external/rexglue-sdk
 if ($LASTEXITCODE -ne 0 -or $tree -notmatch '^160000 commit ([0-9a-f]{40})' -or $Matches[1] -ne $lock.rexglue_sdk.commit) {
     throw 'SDK gitlink differs from deps.lock.json'
 }
-& powershell -NoProfile -ExecutionPolicy Bypass -File scripts/prepare-tools.ps1 -AllowDownloads -ToolsOnly
-if ($LASTEXITCODE -ne 0) { throw 'Pinned Git/CMake/Ninja preparation failed' }
-$tools = Join-Path $root '.local/toolchains'
-$gitDirectory = Join-Path $tools 'mingit-2.56.0.2/cmd'
-$env:PATH = $gitDirectory + ';' + $env:PATH
-# Each Actions step starts a new shell; retain the locked Git for archive/clone
-# calls outside devshell in the existing packager as well.
-if ($env:GITHUB_PATH) { [IO.File]::AppendAllText($env:GITHUB_PATH, $gitDirectory + "`n", [Text.UTF8Encoding]::new($false)) }
+$shell = (Get-Process -Id $PID).Path
+if ($onWindows) {
+    & $shell -NoProfile -ExecutionPolicy Bypass -File scripts/prepare-tools.ps1 -AllowDownloads -ToolsOnly
+    if ($LASTEXITCODE -ne 0) { throw 'Pinned Git/CMake/Ninja preparation failed' }
+    $tools = Join-Path $root '.local/toolchains'
+    $gitDirectory = Join-Path $tools 'mingit-2.56.0.2/cmd'
+    $env:PATH = $gitDirectory + ';' + $env:PATH
+    # Each Actions step starts a new shell; retain the locked Git for archive/clone
+    # calls outside devshell in the existing packager as well.
+    if ($env:GITHUB_PATH) { [IO.File]::AppendAllText($env:GITHUB_PATH, $gitDirectory + "`n", [Text.UTF8Encoding]::new($false)) }
+}
 git submodule update --init --depth 1 external/rexglue-sdk
 if ($LASTEXITCODE -ne 0) { throw 'Pinned ReXGlue checkout failed' }
 $sdk = Join-Path $root $lock.rexglue_sdk.path
@@ -42,11 +56,17 @@ foreach ($path in $paths) {
     $actual = (git -C (Join-Path $sdk $path) rev-parse HEAD).Trim()
     if ($LASTEXITCODE -ne 0 -or $actual -ne $expected) { throw "Dependency revision differs: $path" }
 }
-& powershell -NoProfile -ExecutionPolicy Bypass -File scripts/setup/apply-sdk-patches.ps1
+& $shell -NoProfile -ExecutionPolicy Bypass -File scripts/setup/apply-sdk-patches.ps1
 if ($LASTEXITCODE -ne 0) { throw 'Reproducible SDK patch application failed' }
-& powershell -NoProfile -ExecutionPolicy Bypass -File scripts/setup/apply-sdk-patches.ps1 -Check
+& $shell -NoProfile -ExecutionPolicy Bypass -File scripts/setup/apply-sdk-patches.ps1 -Check
 if ($LASTEXITCODE -ne 0) { throw 'SDK patch hash verification failed' }
-& powershell -NoProfile -ExecutionPolicy Bypass -File scripts/setup/bootstrap-llvm.ps1 -AllowDownloads -Extractor 7zip
+if (-not $onWindows) {
+    # Restored from the Actions cache when the locks are unchanged; verified either way.
+    & sh scripts/packaging/prepare-posix-toolchain.sh $platform (Join-Path $root ".local/toolchains/posix-$platform")
+    if ($LASTEXITCODE -ne 0) { throw 'Pinned POSIX toolchain preparation failed' }
+    exit 0
+}
+& $shell -NoProfile -ExecutionPolicy Bypass -File scripts/setup/bootstrap-llvm.ps1 -AllowDownloads -Extractor 7zip
 if ($LASTEXITCODE -ne 0) { throw 'Pinned LLVM preparation failed' }
 # devshell requires the hosted VS C++ workload; fail before building if absent.
 & scripts/devshell.cmd cmake --version

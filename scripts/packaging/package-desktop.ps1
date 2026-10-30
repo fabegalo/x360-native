@@ -2,12 +2,12 @@
 param([string]$Version = '', [string]$OutputDirectory = '.local/packages',
       [ValidateSet('local-candidate','public-prerelease')][string]$Publication = 'local-candidate',
       [string]$ProvenanceFile = '', [switch]$KeepIntermediates,
-      # linux-x64 builds in WSL with the locked LLVM, host tools from $LinuxToolchain
-      # and the Ubuntu 22.04 target sysroot of prepare-linux-sysroot.sh; the
-      # export, patches, evidence and license gate stay in this one script.
-      [ValidateSet('windows-x64','linux-x64')][string]$Platform = 'windows-x64',
-      [string]$WslDistribution = 'Ubuntu', [string]$LinuxToolchain = '/root/.cache/x360n-native-validation',
-      [string]$LinuxSysroot = '/root/.cache/x360n-sysroot-jammy')
+      # Default: the host system. linux-x64 and macos-arm64 build natively with the
+      # tools of prepare-posix-toolchain.sh ($Toolchain, default .local/toolchains/posix-<platform>);
+      # on Windows, linux-x64 builds in WSL with a toolchain prepared there. The export,
+      # patches, evidence and license gate stay in this one script on every system.
+      [ValidateSet('','windows-x64','linux-x64','macos-arm64')][string]$Platform = '',
+      [string]$Toolchain = '', [string]$WslDistribution = 'Ubuntu')
 $ErrorActionPreference = 'Stop'
 $env:PSModulePath = Join-Path $PSHOME 'Modules'
 $root = (Resolve-Path (Join-Path $PSScriptRoot '../..')).Path
@@ -16,7 +16,17 @@ if (-not $Version) { $Version = & (Join-Path $PSScriptRoot 'compute-version.ps1'
 if ($Version -notmatch '^[a-zA-Z0-9._-]+$') { throw 'Invalid package version' }
 $base = [IO.Path]::GetFullPath((Join-Path $root $OutputDirectory))
 if (-not $base.StartsWith((Join-Path $root '.local') + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) { throw 'Packages must remain below .local' }
+# Windows PowerShell 5.1 has no $IsWindows/$IsMacOS.
+$onWindows = $env:OS -eq 'Windows_NT'
+$onMac = -not $onWindows -and [Runtime.InteropServices.RuntimeInformation]::IsOSPlatform([Runtime.InteropServices.OSPlatform]::OSX)
+if (-not $Platform) { $Platform = if ($onWindows) { 'windows-x64' } elseif ($onMac) { 'macos-arm64' } else { 'linux-x64' } }
 $linux = $Platform -eq 'linux-x64'
+$mac = $Platform -eq 'macos-arm64'
+$posix = $linux -or $mac
+$wsl = $linux -and $onWindows
+if (($Platform -eq 'windows-x64' -and -not $onWindows) -or ($mac -and -not $onMac) -or ($linux -and $onMac)) { throw "Cannot build $Platform on this system" }
+# Child scripts run in the same PowerShell (powershell.exe 5.1 or pwsh 7).
+$shell = (Get-Process -Id $PID).Path
 $name = "x360-native-$Version-$Platform"
 $destination = Join-Path $base $name
 $archiveFile = $destination + $(if ($linux) { '.tar.gz' } else { '.zip' })
@@ -28,7 +38,7 @@ if ($ProvenanceFile) {
     $provenance = Get-Content -Raw -LiteralPath $ProvenanceFile | ConvertFrom-Json
     if ($provenance.commit -ne $head -or $provenance.version -ne $Version) { throw 'CI provenance differs from the committed package source/version' }
 }
-git -C $root diff --quiet HEAD -- scripts/packaging/package-desktop.ps1 scripts/packaging/build-desktop-linux.sh scripts/packaging/linux-sysroot-jammy.lock
+git -C $root diff --quiet HEAD -- scripts/packaging/package-desktop.ps1 scripts/packaging/build-desktop-posix.sh scripts/packaging/prepare-posix-toolchain.sh scripts/packaging/posix-toolchain.lock scripts/packaging/linux-sysroot-jammy.lock
 if ($LASTEXITCODE -ne 0) { throw 'Commit the packaging script before using it.' }
 $jobId = [guid]::NewGuid().ToString('N')
 $job = Join-Path $root ".local/build/distribution/$jobId"
@@ -37,8 +47,8 @@ $build = Join-Path $job 'build'
 New-Item -ItemType Directory -Force $source, $destination | Out-Null
 function ExportTree([string]$Repository, [string]$Revision, [string]$Directory) {
     New-Item -ItemType Directory -Force $Directory | Out-Null
-    $archive = Join-Path $job ([guid]::NewGuid().ToString('N') + '.zip')
-    git -c core.autocrlf=false -c core.eol=lf -C $Repository archive --format=zip "--output=$archive" $Revision
+    $archive = Join-Path $job ([guid]::NewGuid().ToString('N') + '.tar')
+    git -c core.autocrlf=false -c core.eol=lf -C $Repository archive --format=tar "--output=$archive" $Revision
     if ($LASTEXITCODE -ne 0) { throw "Cannot export committed dependency: $Repository $Revision" }
     # Git symlinks (libmspack's cabextract/mspack) cannot be created without the
     # symlink privilege. Like scripts/setup/materialize-symlinks.ps1, export them
@@ -46,7 +56,8 @@ function ExportTree([string]$Repository, [string]$Revision, [string]$Directory) 
     $links = @(git -C $Repository ls-tree -r $Revision | Where-Object { $_ -match '^120000 blob ([0-9a-f]+)\t(.+)$' } |
         ForEach-Object { [pscustomobject]@{blob=$Matches[1]; path=$Matches[2]} })
     $exclude = @($links | ForEach-Object { "--exclude=$($_.path)" })
-    & "$env:SystemRoot\System32\tar.exe" -xf $archive -C $Directory @exclude
+    $tar = if ($onWindows) { "$env:SystemRoot\System32\tar.exe" } else { 'tar' }
+    & $tar -xf $archive -C $Directory @exclude
     if ($LASTEXITCODE -ne 0) { throw 'Source snapshot extraction failed' }
     foreach ($link in $links) {
         $target = (git -C $Repository cat-file -p $link.blob)
@@ -108,35 +119,59 @@ foreach ($entry in $licenseInventory.lgpl_sources) {
 }
 Copy-Item -LiteralPath (Join-Path $source 'licenses/libmspack-CMakeLists.txt') -Destination (Join-Path $payload 'licenses/sources/libmspack/CMakeLists.txt')
 WriteIndex $payload 'payload.sha256'
-& powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $source 'scripts/setup/apply-sdk-patches.ps1')
+& $shell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $source 'scripts/setup/apply-sdk-patches.ps1')
 if ($LASTEXITCODE -ne 0) { throw 'Pinned SDK patch verification failed' }
-$llvm = Join-Path $root $lock.llvm.install_dir
-$clang = Join-Path $llvm 'bin/clang++.exe'
-$readobj = Join-Path $llvm 'bin/llvm-readobj.exe'
-foreach ($tool in @($clang, $readobj)) {
-    if (-not (Test-Path -LiteralPath $tool -PathType Leaf)) { throw "Locked LLVM dependency missing: $tool" }
+if ($onWindows) {
+    $llvm = Join-Path $root $lock.llvm.install_dir
+    $clang = Join-Path $llvm 'bin/clang++.exe'
+    $readobj = Join-Path $llvm 'bin/llvm-readobj.exe'
+    foreach ($tool in @($clang, $readobj)) {
+        if (-not (Test-Path -LiteralPath $tool -PathType Leaf)) { throw "Locked LLVM dependency missing: $tool" }
+    }
 }
 $payloadHash = Hash (Join-Path $payload 'payload.sha256')
 $devshell = Join-Path $root 'scripts/devshell.cmd'
-if ($linux) {
-    function WslPath([string]$Path) {
+if ($posix) {
+    # Native paths, or the same files seen from WSL.
+    function PosixPath([string]$Path) {
+        if (-not $wsl) { return $Path }
         if ([IO.Path]::GetFullPath($Path) -notmatch '^([A-Za-z]):\\(.*)$') { throw "Path not reachable from WSL: $Path" }
         '/mnt/' + $Matches[1].ToLowerInvariant() + '/' + $Matches[2].Replace('\','/')
     }
-    $evidence = Join-Path $job 'linux'
-    $linuxBuild = Join-Path $source 'scripts/packaging/build-desktop-linux.sh'
-    & wsl.exe -d $WslDistribution -e sh (WslPath $linuxBuild) build (WslPath $source) (WslPath $evidence) $jobId $Version $payloadHash $LinuxToolchain $lock.llvm.version $LinuxSysroot
-    if ($LASTEXITCODE -ne 0) { throw 'Linux distribution build or tests failed; archive withheld' }
+    function PosixBuild([string[]]$Arguments) {
+        $script = PosixPath (Join-Path $source 'scripts/packaging/build-desktop-posix.sh')
+        if ($wsl) { & wsl.exe -d $WslDistribution -e sh $script @Arguments } else { & sh $script @Arguments }
+        if ($LASTEXITCODE -ne 0) { throw "POSIX distribution step failed: $($Arguments[0])" }
+    }
+    $evidence = Join-Path $job $Platform
+    if ($wsl) {
+        # The WSL file system keeps the build tree; drvfs is slow and has no POSIX modes.
+        $wslHome = (& wsl.exe -d $WslDistribution -e sh -c 'printf %s "$HOME"')
+        if ($LASTEXITCODE -ne 0 -or $wslHome -notmatch '^/') { throw 'WSL home directory unavailable' }
+        $work = "$wslHome/.cache/x360n-distribution/$jobId"
+        if (-not $Toolchain) { $Toolchain = "$wslHome/.cache/x360n-posix-toolchain/$Platform" }
+    } else {
+        $work = $job
+        if (-not $Toolchain) { $Toolchain = Join-Path $root ".local/toolchains/posix-$Platform" }
+    }
+    PosixBuild @('build', $Platform, (PosixPath $source), $work, (PosixPath $evidence), $Version, $payloadHash, $Toolchain)
     $toolchain = @{}
     foreach ($line in Get-Content -LiteralPath (Join-Path $evidence 'toolchain.txt')) { if ($line -match '^([a-z0-9_]+)=(.+)$') { $toolchain[$Matches[1]] = $Matches[2] } }
     $compilerVersion = $toolchain.compiler_version
     $compilerHash = $toolchain.compiler_sha256
-    if ($compilerHash -notmatch '^[a-f0-9]{64}$') { throw 'Linux compiler identity missing' }
+    if ($compilerHash -notmatch '^[a-f0-9]{64}$') { throw 'POSIX compiler identity missing' }
+    $build = if ($wsl) { "wsl:$($toolchain.build)" } else { $toolchain.build }
+    $extension = if ($linux) { 'so' } else { 'dylib' }
+    $programs = @((Join-Path $destination 'x360-native'), (Join-Path $internal 'x360n'), (Join-Path $internal 'x360n-extract'), (Join-Path $internal "libx360n-mspack.$extension"))
+    foreach ($program in $programs) { Copy-Item -LiteralPath (Join-Path $evidence (Split-Path -Leaf $program)) -Destination $program }
+    $ninjaInputs = Get-Content -LiteralPath (Join-Path $evidence 'ninja-deps.txt')
+    $links = Get-Content -LiteralPath (Join-Path $evidence 'ninja-query.txt')
+    $commands = Get-Content -Raw -LiteralPath (Join-Path $evidence 'compile_commands.json') | ConvertFrom-Json
+}
+if ($linux) {
     $sysrootLock = Hash (Join-Path $source 'scripts/packaging/linux-sysroot-jammy.lock')
     if ($toolchain.sysroot_lock_sha256 -ne $sysrootLock) { throw 'Linux sysroot differs from linux-sysroot-jammy.lock' }
-    $build = "wsl:$($toolchain.build)"
-    $programs = @((Join-Path $destination 'x360-native'), (Join-Path $internal 'x360n'), (Join-Path $internal 'x360n-extract'), (Join-Path $internal 'libx360n-mspack.so'))
-    foreach ($program in $programs) { Copy-Item -LiteralPath (Join-Path $evidence (Split-Path -Leaf $program)) -Destination $program }
+    if (-not $wsl) { $readobj = Join-Path $toolchain.llvm 'bin/llvm-readobj' }
     # Static C++ runtime, explicit glibc-only dependency allowlist. Never harvest .so files.
     $glibc = [version]'2.2.5'
     foreach ($binary in $programs) {
@@ -157,11 +192,37 @@ if ($linux) {
     }
     # The Ubuntu 22.04 floor, like the upstream SDK's linux-amd64 build.
     if ($glibc -gt [version]'2.35') { throw "glibc floor $glibc exceeds 2.35" }
-    $ninjaInputs = Get-Content -LiteralPath (Join-Path $evidence 'ninja-deps.txt')
-    $links = Get-Content -LiteralPath (Join-Path $evidence 'ninja-query.txt')
-    $commands = Get-Content -Raw -LiteralPath (Join-Path $evidence 'compile_commands.json') | ConvertFrom-Json
+    # Longer roots first: the LLVM and sysroot trees live inside the tools directory.
     $mappings = @(@($toolchain.source, '<source>'), @($toolchain.build, '<build>'), @($toolchain.llvm, '<llvm>'), @($toolchain.sysroot, '<sysroot>'), @($toolchain.tools, '<tools>'))
-    $absolute = '(?i)[a-z]:[/\\]|/mnt/|/root/|/home/|/tmp/'
+    $absolute = '(?i)[a-z]:[/\\]|/mnt/|/root/|/home/|/Users/|/tmp/'
+} elseif ($mac) {
+    if ($compilerVersion -notmatch '^Apple clang version ') { throw 'macOS package requires Apple clang' }
+    # System libraries and frameworks only; the LGPL decoder stays a separate,
+    # replaceable dylib next to the extractor. Never harvest dylibs.
+    $minimum = [version]'0.0'
+    foreach ($binary in $programs) {
+        $leaf = Split-Path -Leaf $binary
+        $libraries = @(& otool -L $binary)
+        if ($LASTEXITCODE -ne 0) { throw 'Cannot inspect binary dependencies' }
+        foreach ($line in $libraries | Select-Object -Skip 1) {
+            if ($line -notmatch '^\s+(\S+) \(compatibility version') { throw "Unparsed dependency line: $line" }
+            $lib = $Matches[1]
+            if ($lib -eq '@rpath/libx360n-mspack.dylib' -and $leaf -in @('x360n-extract','libx360n-mspack.dylib')) { continue }
+            if ($lib -notmatch '^/usr/lib/(libSystem\.B|libc\+\+\.1|libobjc\.A|libiconv\.2|libz\.1)\.dylib$' -and
+                $lib -notmatch '^/System/Library/Frameworks/[A-Za-z0-9]+\.framework/(Versions/[A-Z]/)?[A-Za-z0-9]+$') { throw "Unexpected runtime dependency: $lib ($leaf)" }
+        }
+        $loadCommands = @(& otool -l $binary) -join "`n"
+        if ($loadCommands -notmatch 'cmd LC_BUILD_VERSION\s+cmdsize \d+\s+platform (?:1|MACOS|macos)\s+minos (\d+\.\d+(?:\.\d+)?)') { throw "macOS deployment target missing: $leaf" }
+        if ([version]$Matches[1] -gt $minimum) { $minimum = [version]$Matches[1] }
+        & lipo -verify_arch $binary arm64
+        if ($LASTEXITCODE -ne 0) { throw "Not an arm64 binary: $leaf" }
+        # Apple silicon only runs signed code; the linker's ad-hoc signature must be intact.
+        & codesign --verify --strict $binary
+        if ($LASTEXITCODE -ne 0) { throw "Invalid code signature: $leaf" }
+    }
+    if ($minimum -gt [version]'13.3') { throw "macOS deployment target $minimum exceeds 13.3" }
+    $mappings = @(@($toolchain.source, '<source>'), @($toolchain.build, '<build>'), @($toolchain.sdk, '<macos-sdk>'), @($toolchain.developer_dir, '<xcode>'), @($toolchain.tools, '<tools>'))
+    $absolute = '(?i)[a-z]:[/\\]|/Users/|/Applications/|/Library/Developer/|/private/|/var/folders/|/tmp/|/home/'
 } else {
     $compilerVersion = (& $clang --version | Select-Object -First 1)
     $compilerHash = Hash $clang
@@ -203,7 +264,7 @@ if ($linux) {
     $mappings = @(@($source, '<source>'), @($build, '<build>'), @($llvm, '<llvm>'), @($rcCompiler, '<windows-sdk>/rc.exe'), @($rcActual, '<windows-sdk>/rc.exe'))
     $absolute = '(?i)[a-z]:[/\\]'
 }
-if ($compilerVersion -notlike "* $($lock.llvm.version)*") { throw 'Compiler differs from the locked LLVM version' }
+if (-not $mac -and $compilerVersion -notlike "* $($lock.llvm.version)*") { throw 'Compiler differs from the locked LLVM version' }
 # Legal material is visible at the archive root, and comes from the same commit.
 Copy-Item -LiteralPath (Join-Path $payload 'licenses') -Destination $destination -Recurse
 foreach ($notice in @('LICENSE','THIRD_PARTY_NOTICES.md')) {
@@ -217,7 +278,7 @@ $sdkInputs = @($ninjaInputs | ForEach-Object {
 if (-not $sdkInputs.Count) { throw 'Compiler dependency evidence is empty' }
 [IO.File]::WriteAllText((Join-Path $internal 'dependency-inputs.json'), (ConvertTo-Json -InputObject $sdkInputs), [Text.UTF8Encoding]::new($false))
 $libraries = @($links | ForEach-Object {
-    if ($_ -match '^\s+\|\s+(.+\.(?:lib|a|so))$') { $Matches[1].Replace('\','/') }
+    if ($_ -match '^\s+\|\s+(.+\.(?:lib|a|so|dylib))$') { $Matches[1].Replace('\','/') }
 } | Sort-Object -Unique)
 [IO.File]::WriteAllText((Join-Path $internal 'link-inputs.json'), (ConvertTo-Json -InputObject $libraries), [Text.UTF8Encoding]::new($false))
 # Keep the effective compiler commands as reviewable evidence, with portable
@@ -278,6 +339,52 @@ Prévia experimental. Linux limpo (fora do ambiente de build) ainda requer
 validação. Serviços da dashboard, perfis e saves continuam com as limitações
 registradas no relatório do projeto.
 Código correspondente: $head
+"@, [Text.UTF8Encoding]::new($false)) } elseif ($mac) { [IO.File]::WriteAllText((Join-Path $destination 'READ-ME.txt'), @"
+x360-native $Version — prévia para macOS (Apple silicon)
+
+Extraia o ZIP inteiro em uma pasta vazia e abra ./x360-native pelo Terminal.
+Requer macOS $minimum ou mais recente em um Mac com Apple silicon. O pacote não
+é notarizado: se o macOS bloquear a abertura, remova a quarentena da pasta com
+xattr -dr com.apple.quarantine <pasta>, somente para este download conferido.
+Em Importar > Adicionar arquivo, selecione uma ISO ou um pacote Xbox 360
+(CON/LIVE/PIRS, incluindo XBLA), ou o ZIP oficial System Update 17559.
+A extração é local e não requer instalar ferramentas de compilação. Também
+aceita a pasta `$SystemUpdate ou seu PIRS interno. Componentes ausentes são
+listados para complementação; a preparação AOT exige a ação Preparar.
+Outros ZIPs, RAR e 7z devem ser descompactados antes.
+Ao abrir, o aplicativo consulta somente a lista pública de versões no GitHub
+Releases do x360-native. Havendo versão mais nova, "Instalar <versão>" na barra
+lateral baixa o ZIP, confere o SHA-256 publicado e o índice do pacote, troca
+os arquivos de aplicativo e guarda a versão anterior em uma transação em data/updates.
+Perfis, saves e conteúdo importado são preservados. Se houver interrupção ou a
+versão nova não iniciar, feche o aplicativo e execute ./recover-update.sh na pasta
+principal: a cópia independente do supervisor restaura a versão anterior.
+Falhas de recuperação são mostradas e não apagam o backup. Não remova a transação.
+Atualizações usam o canal estável por padrão. Para aderir explicitamente a previews,
+crie data/update-channel.txt contendo somente preview; remova o arquivo para sair.
+Chaves legadas de XEX não são distribuídas. Forneça seu arquivo local em
+data/environment/.local/keys/xex-keys.txt (ou no ambiente selecionado), no formato
+<nome> <32 dígitos hexadecimais>, com nomes xex1-retail e xex1-devkit necessários.
+A versão vem dos Conventional Commits do projeto (feat: minor; fix/perf: patch).
+Para atualizar manualmente, extraia em outra pasta e selecione seu ambiente anterior em
+Configurações > Selecionar ambiente. Não misture arquivos de pacotes diferentes.
+
+A pasta app contém componentes internos. data guarda o ambiente padrão e suas
+preferências. Não apague a pasta data anterior ao trocar o aplicativo.
+
+Nenhum conteúdo proprietário do Xbox 360 está incluído. A preparação AOT de
+jogos no macOS ainda não é suportada. Nada é enviado automaticamente.
+
+Projeto independente, sem afiliação oficial com a Microsoft ou a Apple. Forneça
+apenas conteúdo cuja utilização seja autorizada. O código próprio usa BSD-3-Clause:
+consulte LICENSE. Avisos de terceiros: THIRD_PARTY_NOTICES.md e pasta licenses,
+ao lado deste arquivo. Essas licenças não abrangem os arquivos originais Xbox.
+A biblioteca de descompressão LGPL fica separada em app/libx360n-mspack.dylib e
+pode ser substituída; consulte licenses/relinking.txt.
+
+Prévia experimental, compilada e testada somente no ambiente de CI. Serviços da
+dashboard, perfis e saves continuam com as limitações registradas no relatório.
+Código correspondente: $head
 "@, [Text.UTF8Encoding]::new($false)) } else {
 [IO.File]::WriteAllText((Join-Path $destination 'READ-ME.txt'), @"
 x360-native $Version — prévia para Windows x64
@@ -337,9 +444,14 @@ $metadata = [ordered]@{
 }
 if ($linux) {
     $metadata.configuration = 'Release'; $metadata.desktop_only = $true; $metadata.relative_source_paths = $true
-    $metadata.compiler_flags = '-march=x86-64-v2 -ffile-prefix-map=<source>=/x360-source'; $metadata.linker_flags = '-static-libstdc++ -static-libgcc'
+    $metadata.compiler_flags = '-march=x86-64-v2 -ffile-prefix-map=<source>=/x360-source'; $metadata.linker_flags = '-fuse-ld=lld -static-libstdc++ -static-libgcc'
     $metadata.glibc_minimum = $glibc.ToString(); $metadata.sysroot = [ordered]@{ distribution = 'ubuntu-22.04'; lock_sha256 = $sysrootLock }
     $metadata.publication = $Publication; $metadata.clean_linux = 'pending'
+} elseif ($mac) {
+    $metadata.configuration = 'Release'; $metadata.desktop_only = $true; $metadata.relative_source_paths = $true
+    $metadata.compiler_flags = '-ffile-prefix-map=<source>=/x360-source'; $metadata.linker_flags = ''
+    $metadata.macos_minimum = $minimum.ToString(); $metadata.xcode = [ordered]@{ version = $toolchain.xcode_version; sdk = $toolchain.sdk_version }
+    $metadata.publication = $Publication; $metadata.clean_macos = 'pending'
 } else {
     $metadata.resource_compiler_sha256 = Hash $rcCompiler
     $metadata.configuration = 'Release'; $metadata.desktop_only = $true; $metadata.relative_source_paths = $true
@@ -351,10 +463,8 @@ if ($provenance) { $metadata.provenance = $provenance }
 & (Join-Path $source 'scripts/packaging/check-package-licenses.ps1') -PackageDirectory $destination -SdkDirectory $sdk
 WriteIndex $destination 'package.sha256'
 if ($linux) {
-    # Deterministic tar.gz with POSIX modes, built by the same committed Linux script.
-    $executables = @('x360-native','app/x360n','app/x360n-extract','app/libx360n-mspack.so')
-    & wsl.exe -d $WslDistribution -e sh (WslPath $linuxBuild) archive (WslPath $destination) $jobId (WslPath $archiveFile) @executables
-    if ($LASTEXITCODE -ne 0) { throw 'Linux archive creation failed' }
+    # Deterministic tar.gz with POSIX modes, built by the same committed POSIX script.
+    PosixBuild (@('archive', (PosixPath $destination), $work, (PosixPath $archiveFile)) + @('x360-native','app/x360n','app/x360n-extract','app/libx360n-mspack.so'))
 } else {
 # Deterministic ZIP: fixed timestamps, entry order and relative paths only.
 Add-Type -AssemblyName System.IO.Compression
@@ -366,6 +476,11 @@ try {
         $rel = $name + '/' + $file.FullName.Substring($destination.Length + 1).Replace('\','/')
         $entry = $archive.CreateEntry($rel, [IO.Compression.CompressionLevel]::Optimal)
         $entry.LastWriteTime = [DateTimeOffset]::new(2000,1,1,0,0,0,[TimeSpan]::Zero)
+        if ($mac) {
+            # Unix modes (0755 executables, 0644 data); .NET records the entry as made on Unix.
+            $mode = if ($rel.Substring($name.Length + 1) -in @('x360-native','app/x360n','app/x360n-extract','app/libx360n-mspack.dylib')) { 0x81ED } else { 0x81A4 }
+            $entry.ExternalAttributes = [BitConverter]::ToInt32([BitConverter]::GetBytes([uint32]($mode * 65536)), 0)
+        }
         $output = $entry.Open(); $input = [IO.File]::OpenRead($file.FullName)
         try { $input.CopyTo($output) } finally { $input.Dispose(); $output.Dispose() }
     }
@@ -377,10 +492,9 @@ try {
 @{schema=1;status='complete';commit=$head;zip=$archiveFile;sha256=(Hash $archiveFile)} | ConvertTo-Json |
     Set-Content -LiteralPath (Join-Path $job '.x360n-packaging-complete.json') -Encoding UTF8
 if (-not $KeepIntermediates) {
-    if ($linux) {
-        # Binaries and raw build evidence were already copied to the job's linux folder.
-        & wsl.exe -d $WslDistribution -e sh (WslPath $linuxBuild) clean $jobId
-        if ($LASTEXITCODE -ne 0) { throw 'Linux build tree cleanup failed; package is complete' }
+    if ($posix) {
+        # Binaries and raw build evidence were already copied to the job's platform folder.
+        PosixBuild @('clean', $work)
     } else {
         . (Join-Path $source 'scripts/packaging/clear-package-intermediates.ps1')
         Clear-PackageIntermediates $root $build
