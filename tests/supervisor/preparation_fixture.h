@@ -6,23 +6,30 @@
 #include <fstream>
 #include <set>
 
-// Fixture executables are text. Windows accepts them; Linux/macOS validate the
-// native image header of a prepared title, so the fixture prefixes one (ELF or
-// Mach-O for this host). Distinct fixture contents stay distinct.
+// Fixture executables are text. Windows x64 accepts them; Linux, macOS and
+// Windows ARM64 validate the native image header of a prepared title, so the
+// fixture prefixes one (ELF, Mach-O or PE for this host). Distinct fixture
+// contents stay distinct.
 inline void MakeFixtureNativeImage(const std::filesystem::path& exe) {
-#ifndef _WIN32
+#if !defined(_WIN32) || defined(_M_ARM64)
   namespace fs = std::filesystem;
   const auto executable = [&] {
+#ifndef _WIN32
     fs::permissions(exe, fs::perms::owner_exec | fs::perms::group_exec | fs::perms::others_exec, fs::perm_options::add);
+#endif
   };
   try { x360n::ValidateNativeImage(exe); executable(); return; } catch (const std::exception&) {}
   std::ifstream in(exe, std::ios::binary);
   const std::string body{std::istreambuf_iterator<char>(in), {}};
   in.close();
   std::string header(64, '\0');
-  const bool arm64 = x360n::HostPlatform().ends_with("-arm64");
+  [[maybe_unused]] const bool arm64 = x360n::HostPlatform().ends_with("-arm64");
   auto put32 = [&](size_t at, uint32_t v) { for (int i = 0; i < 4; ++i) header[at + size_t(i)] = char(v >> (8 * i)); };
-#ifdef __APPLE__
+#ifdef _WIN32
+  // DOS header pointing at a PE signature with the ARM64 machine (0xAA64).
+  header[0] = 'M'; header[1] = 'Z'; put32(60, 64);
+  header += std::string("PE\0\0", 4) + char(0x64) + char(0xAA);
+#elif defined(__APPLE__)
   put32(0, 0xFEEDFACF); put32(4, arm64 ? 0x0100000C : 0x01000007);
 #else
   header[0] = 0x7F; header[1] = 'E'; header[2] = 'L'; header[3] = 'F'; header[4] = 2; header[5] = 1;
