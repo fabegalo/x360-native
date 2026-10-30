@@ -79,7 +79,7 @@ $sdkAttributions=Get-Content (Join-Path $package 'licenses/rexglue-attributions.
 foreach($unit in @($scope.sdk_translation_units) + @($scope.sdk_private_headers)) {
     if(-not $sdkAttributions.Contains("--- $unit ---")) { throw 'SDK file attribution missing' }
 }
-foreach($id in @('nlohmann-json') + @($scope.runtime_components)) { if(-not $ids.ContainsKey($id)) { throw 'Missing embedded component identity' } }
+foreach($id in @('nlohmann-json') + @($scope.runtime_components) + @($scope.vendored_dependencies.PSObject.Properties | ForEach-Object { $_.Value })) { if(-not $ids.ContainsKey($id)) { throw 'Missing embedded component identity' } }
 if(-not $ids.ContainsKey('miniz') -or -not $ids.ContainsKey('libmspack')) { throw 'Missing extraction decoder identity' }
 if((Digest (Join-Path $package 'licenses/header-attributions.txt')) -ne $inventory.header_attributions_sha256) { throw 'Header attribution text changed' }
 $icon=@($inventory.components | Where-Object id -eq 'desktop-icon')
@@ -114,7 +114,7 @@ foreach($command in $compileCommands) {
         # Build-generated units: SDL's precompiled header and the launcher's embedded fonts.
         if($Matches[1] -notin $scope.generated_translation_units) { throw 'Unreviewed generated translation unit' }
         $generatedUnits += $Matches[1]
-    } elseif($f -notmatch '^<source>/(src/(desktop|supervisor|content)/|tests/(supervisor|content|desktop)/)') { throw 'Unreviewed distribution translation unit' }
+    } elseif($f -notmatch '^<source>/(src/(desktop|supervisor|content|platform)/|tests/(supervisor|content|desktop)/)') { throw 'Unreviewed distribution translation unit' }
 }
 if(Compare-Object @($scope.sdk_translation_units | Sort-Object) @($units | Sort-Object -Unique)) { throw 'SDK extraction source scope changed' }
 if(Compare-Object @($scope.thirdparty_translation_units | Sort-Object) @($thirdpartyUnits | Sort-Object -Unique)) { throw 'Third-party source scope changed' }
@@ -123,7 +123,8 @@ $dependencyInputs=Get-Content (Join-Path $package 'app/dependency-inputs.json') 
 foreach($dependencyInput in $dependencyInputs) {
     if($dependencyInput -notin $scope.sdk_inputs) { throw 'Unreviewed transitive header dependency' }
     if($dependencyInput -match '^thirdparty/([^/]+)/') {
-        if($Matches[1] -notin $inventory.desktop_dependencies) { throw 'Unreviewed transitive header dependency' }
+        # In-tree SDK sources compiled on this platform only, each mapped to its license record.
+        if($Matches[1] -notin $inventory.desktop_dependencies -and -not $scope.vendored_dependencies.($Matches[1])) { throw 'Unreviewed transitive header dependency' }
         if($dependencyInput -like 'thirdparty/inja/*' -and $dependencyInput -notlike 'thirdparty/inja/third_party/include/nlohmann/*') { throw 'Unreviewed inja nested dependency' }
     } elseif($dependencyInput -notlike 'include/rex/*' -and $dependencyInput -notin @($scope.sdk_private_headers) -and $dependencyInput -notin $scope.sdk_translation_units) { throw 'Unreviewed SDK input' }
 }

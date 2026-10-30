@@ -206,7 +206,7 @@ foreach ($notice in @('LICENSE','THIRD_PARTY_NOTICES.md')) {
 # Actual compiler-discovered transitive SDK inputs, for the scope check below.
 $sdkInputs = @($ninjaInputs | ForEach-Object {
     $line = $_.Trim().Replace('\','/')
-    if ($line -match '/external/rexglue-sdk/([^:]+)$') { $Matches[1] }
+    if ($line -match '/external/rexglue-sdk/([^:]+)$' -and $Matches[1] -notmatch '\.(?:o|obj)$') { $Matches[1] }
 } | Sort-Object -Unique)
 if (-not $sdkInputs.Count) { throw 'Compiler dependency evidence is empty' }
 [IO.File]::WriteAllText((Join-Path $internal 'dependency-inputs.json'), (ConvertTo-Json -InputObject $sdkInputs), [Text.UTF8Encoding]::new($false))

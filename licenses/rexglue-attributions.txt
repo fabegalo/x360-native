@@ -1371,3 +1371,54 @@ Original file headers from ReXGlue f5337cdc947ff6d4c4196737e2c807a48f2a1fc2. BSD
 
 --- src/core/math_msvc.cpp ---
 No file-level copyright header; covered by the pinned ReXGlue BSD-3-Clause license.
+
+--- src/core/filesystem_posix.cpp ---
+/**
+ ******************************************************************************
+ * Xenia : Xbox 360 Emulator Research Project                                 *
+ ******************************************************************************
+ * Copyright 2022 Ben Vanik. All rights reserved.                             *
+ * Released under the BSD license - see LICENSE in the root for more details. *
+ ******************************************************************************
+ *
+ * @modified    Tom Clay & Rien Gupta, 2026 - Adapted for ReXGlue runtime (POSIX + macOS)
+ */
+
+--- src/core/mapped_memory_posix.cpp ---
+/**
+ ******************************************************************************
+ * Xenia : Xbox 360 Emulator Research Project                                 *
+ ******************************************************************************
+ * Copyright 2020 Ben Vanik. All rights reserved.                             *
+ * Released under the BSD license - see LICENSE in the root for more details. *
+ ******************************************************************************
+ *
+ * @modified    Tom Clay & Rien Gupta, 2026 - Adapted for ReXGlue runtime (POSIX + macOS)
+ */
+
+--- src/core/memory_posix.cpp ---
+/**
+ ******************************************************************************
+ * Xenia : Xbox 360 Emulator Research Project                                 *
+ ******************************************************************************
+ * Copyright 2020 Ben Vanik. All rights reserved.                             *
+ * Released under the BSD license - see LICENSE in the root for more details. *
+ ******************************************************************************
+ *
+ * @modified    Tom Clay & Rien Gupta, 2026 - Adapted for ReXGlue runtime (POSIX + macOS)
+ */
+
+--- src/core/platform/env_posix.cpp ---
+/**
+ * @file        core/platform/env_posix.cpp
+ * @brief       POSIX implementation of rex::platform::env.
+ *
+ * @copyright   Copyright (c) 2026 Tom Clay <tomc@tctechstuff.com>
+ *              All rights reserved.
+ *
+ * @license     BSD 3-Clause License
+ *              See LICENSE file in the project root for full license text.
+ */
+
+--- src/core/math_gcc.cpp ---
+No file-level copyright header; covered by the pinned ReXGlue BSD-3-Clause license.
