@@ -10,10 +10,13 @@ aparece na MU na mesma sessão e exclusão confirmada remove a linha obsoleta.
 Cópia adicional de 256 MiB íntegra (256 hashes por origem/destino); eventos Add e
 Remove chegam ao consumidor original. Preparo oficial concluído; 91 verificações
 novas e 1.439 asserções/21 casos focados aprovados, replay de 10 patches/1 arquivo.
-0227 elimina varreduras repetidas na validação de caminhos: mediana sintética
-−65,54%, 56 checks antes/depois, 1.325 asserções/20 regressões aprovadas. Preparo
-oficial e listagem gráfica com quotas de HDD/MU conferidos; enumeração ainda lenta.
-Cancelamento gráfico sem aceite
+0227–0228 retiram consultas redundantes de quota/atributos: reduções locais de
+65,54% e 47,14%, sem extrapolar do executor protegido; 1.337 asserções/21 casos
+focados aprovados, incluindo junction real e C8. Preparo oficial concluído.
+Sessão nativa com quota: save de 256 MiB excluído com confirmação, linha removida
+e espaço da MU de 254 para 510 MiB; origem íntegra. A inspeção posterior do
+assistente atingiu o limite de 300 s sem iniciar outra transferência.
+Cancelamento gráfico durante I/O sem aceite
 (a cópia terminou antes do comando), recuperação entre os renames ainda incompleta.
 Conquistas/P1 não ampliados antes de concluir Storage; sem Release.
 [Evidências e limites](docs/reports/dash-os-features-03-2026-10-30.md).

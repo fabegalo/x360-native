@@ -2246,3 +2246,13 @@ but resolve the loop boundary once per call. No persistent quota cache or
 permission shortcut. The focused scale test times three equivalent samples
 and verifies content size, output canaries and exact free-space changes after
 file growth; the existing save isolation and transfer tests remain applicable.
+
+### 0228 — query Windows path attributes once per ancestor
+
+Keep validation of every ancestor and rejection of every reparse point, including
+junctions. On Windows, use the existing native attribute check for both reparse
+and error handling, avoiding a second query through symlink_status. Missing
+components remain valid for content creation; other query failures are denied.
+Other platforms retain their original symlink_status checks. Focused validation
+uses a real disposable junction, including a nonexistent descendant beneath it;
+scale measurements use the same quota-backed fixture as 0227.

@@ -8,6 +8,7 @@
 #include <vector>
 #if defined(_WIN32)
 #include <windows.h>
+#include <winioctl.h>
 #endif
 #include <rex/cvar.h>
 #include <rex/kernel/init.h>
@@ -153,6 +154,52 @@ TEST_CASE("Storage rejects corrupt configuration without silently inventing devi
     DeviceGuest guest(root.path);
     CHECK(guest.call(__imp__XamContentGetDeviceState, {1, 0}) == X_ERROR_DEVICE_NOT_CONNECTED);
   }
+}
+
+TEST_CASE("Storage path validation rejects reparse ancestors and preserves missing paths",
+          "[sdk][storage-device][storage-path-validation]") {
+  StorageRoot root;
+  using rex::system::xam::IsUnlinkedStoragePath;
+  CHECK(IsUnlinkedStoragePath(root.path));
+  CHECK(IsUnlinkedStoragePath(root.path / "missing" / "child"));
+  std::filesystem::create_directories(root.path / "target");
+  std::ofstream(root.path / "target" / "payload") << "private";
+  CHECK(IsUnlinkedStoragePath(root.path / "target" / "payload"));
+#if defined(_WIN32)
+  // Directory junctions do not require the symbolic-link creation privilege.
+  const auto link = root.path / "junction";
+  REQUIRE(CreateDirectoryW(link.c_str(), nullptr));
+  const auto target = (root.path / "target").wstring();
+  const auto substitute = L"\\??\\" + target;
+  struct JunctionData {
+    DWORD tag;
+    WORD size, reserved, substitute_offset, substitute_length, print_offset, print_length;
+    wchar_t path[2048];
+  } data{};
+  data.tag = IO_REPARSE_TAG_MOUNT_POINT;
+  data.substitute_length = WORD(substitute.size() * sizeof(wchar_t));
+  data.print_offset = data.substitute_length + sizeof(wchar_t);
+  data.print_length = WORD(target.size() * sizeof(wchar_t));
+  data.size = WORD(8 + data.print_offset + data.print_length + sizeof(wchar_t));
+  REQUIRE(substitute.size() + target.size() + 2 < std::size(data.path));
+  std::memcpy(data.path, substitute.c_str(), data.substitute_length);
+  std::memcpy(reinterpret_cast<uint8_t*>(data.path) + data.print_offset,
+              target.c_str(), data.print_length);
+  const auto handle = CreateFileW(link.c_str(), GENERIC_WRITE, 0, nullptr, OPEN_EXISTING,
+                                 FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_BACKUP_SEMANTICS, nullptr);
+  REQUIRE(handle != INVALID_HANDLE_VALUE);
+  DWORD returned = 0;
+  const auto created = DeviceIoControl(handle, FSCTL_SET_REPARSE_POINT, &data,
+                                      8 + data.size, nullptr, 0, &returned, nullptr);
+  CloseHandle(handle);
+  REQUIRE(created);
+  CHECK_FALSE(IsUnlinkedStoragePath(link));
+  CHECK_FALSE(IsUnlinkedStoragePath(link / "payload"));
+  CHECK_FALSE(IsUnlinkedStoragePath(link / "missing" / "child"));
+  // Remove only the junction itself before the ordinary fixture cleanup.
+  CHECK(RemoveDirectoryW(link.c_str()));
+  CHECK(std::filesystem::file_size(root.path / "target" / "payload") == 7);
+#endif
 }
 
 TEST_CASE("Storage selector preserves original request and defers selection to the system app", "[sdk][storage-selector]") {

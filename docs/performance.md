@@ -352,3 +352,10 @@ consulta dados atuais na próxima chamada. Teste Release sintético, 258 arquivo
 varreduras restantes continuam custosas. Tamanho, canários e quota após escrita
 passaram antes/depois; 1.325 asserções/20 regressões focadas aprovadas.
 [Cenário e limites](reports/dash-os-features-03-2026-10-30.md).
+
+0228 (30/10): a consulta nativa de atributos no Windows evita consultar cada
+ancestral também por `symlink_status`, mantendo a rejeição de reparse points e
+erros. Na mesma medição protegida, mediana de 8.450,17 para 4.466,78 ms (−47,14%);
+junction real e descendentes rejeitados antes/depois. Sem extrapolação para
+desktop sem sandbox ou FPS; 1.337 asserções/21 regressões de Storage aprovadas.
+[Cenário e limites](reports/dash-os-features-03-2026-10-30.md).

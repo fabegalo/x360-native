@@ -271,3 +271,30 @@ dispositivos apareceram com 7,7 GiB/254 MiB livres, e a categoria Jogos da MU
 mostrou os 256 MiB persistidos. Enumeração ainda lenta; não houve exclusão grande
 nessa sessão. Encerramento normal em 286.868 ms, sem exceção ou timeout.
 Não é benchmark gráfico equivalente nem aceite de cancelamento.
+
+## Consulta de atributos Windows — 0228
+
+Cada ancestral era consultado por `symlink_status` e novamente por
+`GetFileAttributesW`. 0228 usa a consulta nativa para reparse points e erros;
+mantém todos os ancestrais, componentes inexistentes permitidos para criação,
+demais falhas negadas e o caminho anterior nas outras plataformas. Junction real,
+arquivo abaixo dela e descendente inexistente rejeitados: **12 verificações
+antes/depois**, fora do sandbox que bloqueia sua criação.
+
+Mesmo cenário e executor protegido de 0227, após 0228:
+**4.825,85 / 4.466,78 / 4.444,73 ms**. Mediana −47,14% sobre 8.450,17 ms;
+gate local de 6.000 ms rejeita a referência e aprova a variante. Não extrapolar
+para desktop sem sandbox ou FPS. Logs `.local/storage-path-attributes-*.log`.
+Regressões de Storage fora do sandbox: **1.337 asserções/21 casos aprovados**;
+seus tempos não são comparados com a medição protegida. Replay: **16 patches/1
+arquivo**, SHA-256 conferido em `storage-replay-1793395964964730000/result.json`.
+Preparo oficial concluído (`.local/storage-path-attributes-prepare.log`).
+Em `20261030T215426Z-storage-ui`, fora do sandbox e com as quotas originais do
+fixture, a XUI excluiu o save de 256 MiB da MU após Excluir → Sim, removeu a
+linha e mostrou 0 KB na categoria e 510 MiB livres (antes 254 MiB). Origem HDD:
+256 hashes e header intactos; pacote/header da MU ausentes, sem staging; save
+pequeno do USB intacto. `native-attributes-ui-verification.json` registra isso.
+A inspeção posterior do assistente de transferência mostrou seleção de conteúdo
+e permitiu desmarcar Player1, mas não iniciou outra transferência. O supervisor
+encerrou pelo limite de **300.204 ms**, sem exceção: não houve encerramento normal
+nem aceite de cancelamento de I/O. Não comparar seu tempo com a sessão protegida.

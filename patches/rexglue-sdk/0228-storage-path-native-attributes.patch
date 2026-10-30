@@ -1,0 +1,26 @@
+--- a/src/system/xam/content_manager.cpp
++++ b/src/system/xam/content_manager.cpp
+@@ -53,13 +53,20 @@
+ bool IsUnlinkedStoragePath(const std::filesystem::path& path) {
+   if (path.empty()) return false;
+   for (auto p = std::filesystem::absolute(path).lexically_normal(); !p.empty();) {
++#ifdef _WIN32
++    // This attribute query covers every kind of reparse point, including
++    // junctions. Avoid querying the same ancestor again through symlink_status.
++    const auto attrs = GetFileAttributesW(p.c_str());
++    if (attrs == INVALID_FILE_ATTRIBUTES) {
++      const auto error = GetLastError();
++      // Missing components are valid when preparing a new content path.
++      if (error != ERROR_FILE_NOT_FOUND && error != ERROR_PATH_NOT_FOUND) return false;
++    } else if (attrs & FILE_ATTRIBUTE_REPARSE_POINT) return false;
++#else
+     std::error_code ec;
+     const auto status = std::filesystem::symlink_status(p, ec);
+     if (ec && ec != std::errc::no_such_file_or_directory) return false;
+     if (std::filesystem::is_symlink(status)) return false;
+-#ifdef _WIN32
+-    const auto attrs = GetFileAttributesW(p.c_str());
+-    if (attrs != INVALID_FILE_ATTRIBUTES && (attrs & FILE_ATTRIBUTE_REPARSE_POINT)) return false;
+ #endif
+     auto parent = p.parent_path();
+     if (parent == p) break;
