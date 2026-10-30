@@ -637,16 +637,34 @@ TEST_CASE("A session's titles share the console hard drive, not their own user r
 }
 
 
+STORAGE_IMPORT(XamAlloc);
+STORAGE_IMPORT(XamFree);
 STORAGE_IMPORT(XamContentRegisterChangeCallback);
 STORAGE_IMPORT(XamContentDeleteInternal);
 namespace {
 struct ContentEvent { uint32_t reason, device; uint64_t owner, size; bool present; };
 std::vector<ContentEvent> content_events;
 void ContentChangeCallback(PPCContext& ctx, uint8_t* base) {
+  const auto reason = ctx.r3.u32, source = ctx.r4.u32;
+  auto* memory = rex::Runtime::instance()->memory();
+  const auto output = memory->SystemHeapAlloc(4);
+  if (!output) return;
+  // Exercise the original queue's allocator too (92263398), rather than
+  // accepting an event that the original consumer cannot enqueue.
+  ctx.r3.u64 = 0x08000000; ctx.r4.u64 = 528; ctx.r5.u64 = output;
+  __imp__XamAlloc(ctx, base);
+  const auto result = ctx.r3.u32;
+  const auto message = rex::memory::load_and_swap<uint32_t>(base + output);
+  memory->SystemHeapFree(output);
+  if (result) return;
+  rex::memory::store_and_swap<uint32_t>(base + message, reason);
+  std::memcpy(base + message + 8, base + source, 512);
+  ctx.r3.u64 = reason; ctx.r4.u64 = message + 8;
   auto* data = reinterpret_cast<rex::system::xam::XCONTENT_AGGREGATE_DATA*>(base + ctx.r4.u32);
   content_events.push_back({ctx.r3.u32, data->device_id, data->xuid,
       rex::memory::load_and_swap<uint64_t>(base + ctx.r4.u32 + 328),
       rex::Runtime::instance()->kernel_state()->content_manager()->ContentExists(data->xuid, *data)});
+  ctx.r3.u64 = message; __imp__XamFree(ctx, base);
   // A callback cannot replace the export's return value or caller registers.
   ctx.r3.u64 = 0xBADBAD;
 }

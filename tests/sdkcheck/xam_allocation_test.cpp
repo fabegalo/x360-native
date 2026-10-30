@@ -74,3 +74,48 @@ TEST_CASE("XAM allocation size reports usable storage instead of leaving the inp
   }
   memory->SystemHeapFree(output);
 }
+
+
+TEST_CASE("Content cache messages receive real process virtual allocations", "[sdk][xam-allocation][storage-message-allocation]") {
+  x360n::test::Workdir work("x360n_xam_alloc", "content-message");
+  rex::Runtime rt(work.dir);
+  rex::RuntimeConfig config{};
+  config.tool_mode = true; config.kernel_init = rex::kernel::InitializeKernel;
+  REQUIRE(rt.Setup(std::move(config)) == X_STATUS_SUCCESS);
+  auto* memory = rt.memory(); auto* base = memory->virtual_membase();
+  const auto output = memory->SystemHeapAlloc(12);
+  REQUIRE(output);
+  PPCContext ctx{};
+  for (const auto extended : {false, true}) {
+    rex::memory::store_and_swap<uint32_t>(base + output, 0x13579BDF);
+    rex::memory::store_and_swap<uint32_t>(base + output + 4, 0xFFFFFFFF);
+    rex::memory::store_and_swap<uint32_t>(base + output + 8, 0x2468ACE0);
+    // Original dashboard 92263398 queues a 528-byte message this way.
+    if (extended) {
+      ctx.r3.u64 = 0; ctx.r4.u64 = 0x08000000; ctx.r5.u64 = 528; ctx.r6.u64 = output + 4;
+      __imp__XamAllocEx(ctx, base);
+    } else {
+      ctx.r3.u64 = 0x08000000; ctx.r4.u64 = 528; ctx.r5.u64 = output + 4;
+      __imp__XamAlloc(ctx, base);
+    }
+    CHECK(ctx.r3.u32 == 0);
+    CHECK(rex::memory::load_and_swap<uint32_t>(base + output) == 0x13579BDF);
+    CHECK(rex::memory::load_and_swap<uint32_t>(base + output + 8) == 0x2468ACE0);
+    if (ctx.r3.u32) continue;
+    const auto pointer = rex::memory::load_and_swap<uint32_t>(base + output + 4);
+    REQUIRE(pointer);
+    std::memset(base + pointer, 0x7E, 528);
+    CHECK(base[pointer] == 0x7E); CHECK(base[pointer + 527] == 0x7E);
+    ctx.r3.u64 = pointer; __imp__XamAllocSize(ctx, base); CHECK(ctx.r3.u32 >= 528);
+    ctx.r3.u64 = pointer; __imp__XamFree(ctx, base); CHECK(ctx.r3.u32 == 0);
+    ctx.r3.u64 = pointer; __imp__XamAllocSize(ctx, base); CHECK(ctx.r3.u32 == 0);
+  }
+  for (const auto flags : {0x40000000u, 0x08000001u}) {
+    rex::memory::store_and_swap<uint32_t>(base + output + 4, 0xFFFFFFFF);
+    ctx.r3.u64 = 0; ctx.r4.u64 = flags; ctx.r5.u64 = 528; ctx.r6.u64 = output + 4;
+    __imp__XamAllocEx(ctx, base);
+    CHECK(ctx.r3.u32 == 0x80004001);
+    CHECK(rex::memory::load_and_swap<uint32_t>(base + output + 4) == 0);
+  }
+  memory->SystemHeapFree(output);
+}

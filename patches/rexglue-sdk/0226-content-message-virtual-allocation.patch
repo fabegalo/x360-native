@@ -1,0 +1,15 @@
+--- a/src/kernel/xam/xam_info.cpp
++++ b/src/kernel/xam/xam_info.cpp
+@@ -349,8 +349,11 @@
+   // Image cache 81691B98 requests 0x20000000: 816E67E8 takes the
+   // virtual path through 816E5F10, and 816E5E40 selects pool 3. Keep owned
+   // guest virtual storage, as for the existing pool 1; quotas are not modeled.
++  // The original content cache (92263398) allocates its 528-byte queue
++  // message with 0x08000000. 816E67E8 sends this through the virtual path
++  // (816E5F10), just like the supported classes, never the physical path.
+   // Physical/special classes such as 0x40000000 remain unsupported here.
+-  if (flags != 0 && flags != 0x01000000u && flags != 0x20000000u) {
++  if (flags != 0 && flags != 0x01000000u && flags != 0x08000000u && flags != 0x20000000u) {
+     REXKRNL_WARN("XamAllocEx: unsupported flags {:08X}, tag {:08X}", uint32_t(flags), uint32_t(tag));
+     return 0x80004001u;
+   }

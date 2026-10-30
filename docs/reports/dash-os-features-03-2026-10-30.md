@@ -159,7 +159,7 @@ inicialmente em Não; após escolher Sim removeu pacote e header da MU, mantendo
 a cópia USB com o mesmo hash. As sessões encerraram normalmente em 236.352 ms e
 291.589 ms, sem exceção não tratada; os logs ainda contêm stubs/erros preexistentes.
 
-**Aceite parcial:** a lista mantém a linha após mover/excluir; reabrir o jogo
+**Aceite parcial:** a lista mantém a linha após excluir; reabrir o jogo
 após excluir mostra o item inválido. O callback `XamContentRegisterChangeCallback`
 ainda é stub. Seu registro e os eventos reais precisam ser implementados antes
 do aceite completo da atualização da lista. Progresso/cancelamento gráfico em
@@ -208,3 +208,37 @@ com quota lógica de HDD, atingindo o limite de 300 s antes da exclusão em
 `20261030T200853Z-storage-ui`. Para isolar o callback, somente o HDD descartável
 passou a usar a capacidade física real; MU/USB mantiveram suas quotas. O custo
 isolado da varredura permanece por medir/corrigir. Cancelamento gráfico sem aceite.
+
+
+## Alocação virtual da mensagem — 0226
+
+A falha do callback foi isolada: chega a `92263530`, mas `92263398` recebe
+`80004001` ao pedir `XamAlloc(0x08000000,528,out)`. O original `816E67E8`
+encaminha essa classe à alocação virtual (`816E5F10`). 0226 acrescenta somente
+essa classe ao adaptador existente, com memória guest real, gravável e liberável;
+classes físicas/desconhecidas continuam retornando erro.
+
+O controle novo falhou em **6/61 verificações** antes do patch, incluindo os
+quatro resultados de eventos quando o callback tenta alocar/copiar/liberar sua
+mensagem como o original. Após: **91 verificações/2 casos aprovados**; regressões
+focadas de alocação e Storage: **1.439 asserções/21 casos**. Replay do alocador:
+**10 patches/1 arquivo**, SHA-256 conferido em
+`storage-replay-1793391974320837700/result.json`. Logs
+`.local/storage-message-alloc-{red,tests,regression}.log`.
+Preparo oficial concluído (`.local/storage-message-alloc-prepare.log`). Em
+`20261030T204628Z-storage-ui`, a XUI original copiou USB → MU e mostrou o save
+na MU na mesma sessão (1 MB, Player1). Após Excluir → Sim, mostrou
+“Nenhum item encontrado”, sem linha obsoleta. O consumidor original recebeu
+reason=1 em `92264B44`, sem falha da classe `08000000`. Pacote e header da MU
+ausentes após fechar; origem USB preservada com SHA-256
+`30e14955ebf1352266dc2ff8067e68104607e750abb9d3b36582b8af909fcb58`.
+Encerramento normal em 239.520 ms, sem exceção; permanecem mensagens
+`FC/58003` não implementadas, portanto o log não está livre de erros.
+
+Em `20261030T205102Z-storage-ui`, cópia HDD → MU de 256 MiB/256 arquivos
+concluiu com I/O=0 antes do comando B; não é aceite de cancelamento. Add=0 chegou
+ao callback e ao consumidor original. Após encerrar normalmente (189.481 ms),
+os 256 hashes de cada volume conferiram; header de origem intacto e header de
+destino presente. Verificação em `message-allocation-ui-verification.json` na
+raiz da massa descartável. Quota lógica de HDD restaurada para 8 GiB depois de
+encerrar; não houve alteração no algoritmo de quota nem nos dados reais.

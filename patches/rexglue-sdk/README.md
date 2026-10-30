@@ -2226,3 +2226,14 @@ still announced. The original dashboard callback maintains its cache and UI;
 no host list manipulation. Original 17559 contract: 8167CCC0 / 81684E90,
 removed at 81685700, added at 81686790. Shared services contain no version addresses
 in dispatch or behavior. Registration zero unregisters; state belongs to XamModule.
+
+### 0226 — allocate real virtual content-cache messages
+
+The original 17559 callback reaches 92263398, but XamAlloc(0x08000000,528,out)
+was rejected, dropping the content-cache event before it could be queued.
+816E67E8 takes the virtual allocation path through 816E5F10 for this class.
+Support exactly this additional class with owned, committed guest storage;
+retain errors for unsupported physical and unknown classes. The focused test
+checks actual writable memory, allocation size, free, output canaries and errors.
+The storage callback test also allocates/copies/frees its 528-byte queue message,
+so a successful host notification alone cannot hide this regression.
