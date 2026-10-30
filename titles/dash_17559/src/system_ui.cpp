@@ -6,6 +6,7 @@
 #include "keyboard_diagnostic.h"
 #include "system_ui_saved_state.h"
 #include "system_ui_transition.h"
+#include <rex/kernel/xam/offline_achievement_helpers.h>
 #include "../../common/system_ui_context.h"
 #include "../../common/system_ui_execution.h"
 #include <rex/runtime.h>
@@ -40,6 +41,8 @@ extern "C" REX_FUNC(__imp__XamShowGuideUI);
 
 REXCVAR_DEFINE_BOOL(dash17559_signin_ui, false, "Dashboard 17559",
                    "Submit the original Sign-in request once at the first dashboard frame (manual validation)");
+REXCVAR_DEFINE_BOOL(dash17559_storage_io_diagnostics, false, "Diagnostics",
+                   "Log original storage selector output at app close; disabled by default");
 REXCVAR_DEFINE_UINT32(dash17559_guide_probe_seconds, 0, "Diagnostics",
                      "Request original Guide once after 1..120 seconds; zero disables the diagnostic");
 
@@ -775,6 +778,18 @@ void InstallSystemUi(rex::Runtime& runtime, std::string drive, std::string nativ
           dispatcher->ExecuteTrap(thread, 0x816927C0, input, 1);
           const auto closing = xam->GetSystemUiSession();
           if (closing.close_requested) {
+            if (REXCVAR_GET(dash17559_storage_io_diagnostics) && message == 0x2100B && request_bytes.size() == 40) {
+              auto* memory = runtime.memory();
+              const auto device = rex::memory::load_and_swap<uint32_t>(request_bytes.data() + 24);
+              const auto io = rex::memory::load_and_swap<uint32_t>(request_bytes.data() + 28);
+              if (rex::kernel::xam::AchievementGuestSpan(memory, device, 4, rex::memory::kMemoryProtectRead) &&
+                  rex::kernel::xam::AchievementGuestSpan(memory, io, sizeof(rex::system::XAM_OVERLAPPED),
+                                                         rex::memory::kMemoryProtectRead)) {
+                const auto* result = memory->TranslateVirtual<rex::system::XAM_OVERLAPPED*>(io);
+                REXLOG_INFO("17559 storage selector: device={:08X} io={:08X} result={:08X} extended={:08X}",
+                            Read32(*memory, device), io, uint32_t(result->result), uint32_t(result->extended_error));
+              }
+            }
             // CreateProfile's completion calls UnloadStack, not UnloadSelf.
             // Its completed parents must not be restored. A successor queued
             // by the same callback still runs after this frame's destruction.

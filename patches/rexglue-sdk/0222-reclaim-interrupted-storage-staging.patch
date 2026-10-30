@@ -1,0 +1,90 @@
+--- a/src/system/xam/content_manager.cpp
++++ b/src/system/xam/content_manager.cpp
+@@ -849,7 +849,9 @@
+ 
+ // Staging directories of transfers in progress. With none active, a leftover
+ // one comes from an interrupted process and is removed before the next copy.
+-static std::atomic<int> active_transfers_{0};
++// Protect only transfer startup/cleanup, never the copy loop or kernel state.
++static std::mutex staging_mutex_;
++static std::unordered_map<std::filesystem::path, uint32_t> active_transfers_;
+ static std::atomic<uint64_t> transfer_sequence_{0};
+ static constexpr const char* kTransferStagingDirName = ".x360n-transfer";
+ 
+@@ -912,15 +914,23 @@
+   if (header.size() < sizeof(destination)) header.resize(sizeof(destination));
+   std::memcpy(header.data(), &destination, sizeof(destination));
+   total += header.size();
++  const auto staging_root = DeviceRoot(destination_device) / kTransferStagingDirName;
+   {
+-    auto snapshot = *device;
+-    if (const auto queried = QueryContentDeviceSpace(snapshot)) return queried;
+-    if (total > snapshot.free_bytes) return kDiskFull;
+-  }
+-
+-  const auto staging_root = DeviceRoot(destination_device) / kTransferStagingDirName;
+-  if (active_transfers_.fetch_add(1) == 0) fs::remove_all(staging_root, ec);
+-  struct Active { ~Active() { active_transfers_.fetch_sub(1); } } active;
++    std::lock_guard lock(staging_mutex_);
++    // A different volume's active transfer must not prevent recovery here.
++    // Serialize cleanup and registration so no newcomer stages into a root
++    // while its predecessor is removing interrupted work.
++    if (active_transfers_[staging_root]++ == 0) fs::remove_all(staging_root, ec);
++  }
++  struct Active {
++    fs::path root;
++    ~Active() {
++      std::lock_guard lock(staging_mutex_);
++      const auto it = active_transfers_.find(root);
++      if (--it->second == 0) active_transfers_.erase(it);
++    }
++  } active{staging_root};
++  if (ec) return X_ERROR_ACCESS_DENIED;
+   const auto staging = staging_root / fmt::format(
+       "{:016X}-{:08X}", uint64_t(std::chrono::steady_clock::now().time_since_epoch().count()),
+       uint32_t(transfer_sequence_.fetch_add(1)));
+@@ -932,6 +942,14 @@
+       fs::remove(root, e);  // only when no other transfer still stages there
+     }
+   } cleanup{staging_root, staging};
++  // Reclaim interrupted bytes before the quota snapshot. Otherwise a failed
++  // copy can permanently make its own retry appear to have insufficient space.
++  {
++    auto snapshot = *device;
++    if (const auto queried = QueryContentDeviceSpace(snapshot)) return queried;
++    if (total > snapshot.free_bytes) return kDiskFull;
++  }
++
+   const auto staged_package = staging / "package";
+   const auto staged_header = staging / "header";
+   if (!fs::create_directories(staged_package, ec) || !IsUnlinkedStoragePath(staged_package))
+--- a/src/kernel/xam/xam_content.cpp
++++ b/src/kernel/xam/xam_content.cpp
+@@ -696,6 +696,8 @@
+   using namespace rex::system::xam;
+   const uint32_t xuid_ptr = ctx.r3.u32, device_ptr = ctx.r4.u32, item = ctx.r5.u32;
+   const uint32_t callback = ctx.r6.u32, context = ctx.r7.u32, overlapped = ctx.r9.u32;
++  REXKRNL_DEBUG("Content transfer submit move={} owner_ptr={:08X} device_ptr={:08X} item={:08X} callback={:08X} context={:08X} io={:08X}",
++                 move, xuid_ptr, device_ptr, item, callback, context, overlapped);
+   if ((!xuid_ptr && !device_ptr) || !item) return 87;
+   auto* kernel = REX_KERNEL_STATE();
+   if (!rex::kernel::xam::AchievementGuestSpan(kernel->memory(), item, 512,
+--- a/src/kernel/xam/xam_msg.cpp
++++ b/src/kernel/xam/xam_msg.cpp
+@@ -115,6 +115,7 @@
+ }
+ 
+ u32 XMsgCancelIORequest_entry(ppc_ptr_t<XAM_OVERLAPPED> overlapped_ptr, u32 wait) {
++  REXKRNL_DEBUG("XMsgCancelIORequest io={:08X} wait={}", overlapped_ptr.guest_address(), uint32_t(wait));
+   if (!overlapped_ptr || !AchievementGuestSpan(REX_KERNEL_MEMORY(), overlapped_ptr.guest_address(),
+           sizeof(XAM_OVERLAPPED), memory::kMemoryProtectRead | memory::kMemoryProtectWrite))
+     return X_ERROR_INVALID_PARAMETER;
+@@ -127,6 +128,8 @@
+ 
+ u32 XMsgCompleteIORequest_entry(ppc_ptr_t<XAM_OVERLAPPED> overlapped_ptr, u32 result,
+                                 u32 extended_error, u32 length) {
++  REXKRNL_DEBUG("XMsgCompleteIORequest io={:08X} result={:08X} extended={:08X} length={}",
++                 overlapped_ptr.guest_address(), uint32_t(result), uint32_t(extended_error), uint32_t(length));
+   // The public completion API may run on the system UI's worker/presenting
+   // thread. Submission already recorded the requester for its completion APC;
+   // rebinding it here sends that APC to the wrong guest thread.

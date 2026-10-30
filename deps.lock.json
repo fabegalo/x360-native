@@ -157,7 +157,7 @@
                                             "sha256":  "2b0d9f55bc1d94c119f128a0e292ee8aa79e027956b30fd5613253fb889b7e8e",
                                             "files":  {
                                                           "include/rex/system/xam/content_manager.h":  "1d80714e38222582f455b67409166d1a3558190e9f582d0188c4273714de6a34",
-                                                          "src/system/xam/content_manager.cpp":  "bdf9fd6f48037c637e8a7701859d61b1a271ecfea6896c7eb8d4175dda0ff386",
+                                                          "src/system/xam/content_manager.cpp":  "b4cd97c6c1823db919d2d864eec1e0541952b5892678a71d77978762901fddb6",
                                                           "src/kernel/xam/xam_content_aggregate.cpp":  "2808297cce799fe42aa61edf20755c5a5d522d15bb2c04e492c027d4d0f1af57"
                                                       },
                                             "base_files":  {
@@ -172,8 +172,8 @@
                                             "sha256":  "ec407f9d48abc036730da6884dd1fed9d75faab2153abf1f5012eeaae32e9279",
                                             "files":  {
                                                           "include/rex/system/xam/content_manager.h":  "1d80714e38222582f455b67409166d1a3558190e9f582d0188c4273714de6a34",
-                                                          "src/system/xam/content_manager.cpp":  "bdf9fd6f48037c637e8a7701859d61b1a271ecfea6896c7eb8d4175dda0ff386",
-                                                          "src/kernel/xam/xam_content.cpp":  "75403e6b7969222c0616dea5514b03be37489dc545ca28860cafc95929473db4"
+                                                          "src/system/xam/content_manager.cpp":  "b4cd97c6c1823db919d2d864eec1e0541952b5892678a71d77978762901fddb6",
+                                                          "src/kernel/xam/xam_content.cpp":  "5a8d033a7562bde17d688fba19dcb41ff740b186001622349bfc9097a1b64189"
                                                       },
                                             "base_files":  {
                                                                "include/rex/system/xam/content_manager.h":  "62bc5c3b2a9260b2691998453c4a8e2810b58e3925a2395297e98e0227167585",
@@ -186,7 +186,7 @@
                                             "file":  "patches/rexglue-sdk/0015-internal-shared-content-owner.patch",
                                             "sha256":  "aff8a9357d60acca967f99f6a69cf74b8ce2e45f3d7a458929dacf1f155d70a5",
                                             "files":  {
-                                                          "src/kernel/xam/xam_content.cpp":  "75403e6b7969222c0616dea5514b03be37489dc545ca28860cafc95929473db4"
+                                                          "src/kernel/xam/xam_content.cpp":  "5a8d033a7562bde17d688fba19dcb41ff740b186001622349bfc9097a1b64189"
                                                       },
                                             "base_files":  {
                                                                "src/kernel/xam/xam_content.cpp":  "4bef33d3a5db8dbcda982c83da85d06a9cde9a6479188acbd39fbe2c5f01427e"
@@ -197,7 +197,7 @@
                                             "file":  "patches/rexglue-sdk/0016-content-launch-image.patch",
                                             "sha256":  "382677db936c677c864e759f565f0d9f28276b9428c7f4a51bf8306c42bfc4e6",
                                             "files":  {
-                                                          "src/kernel/xam/xam_content.cpp":  "75403e6b7969222c0616dea5514b03be37489dc545ca28860cafc95929473db4"
+                                                          "src/kernel/xam/xam_content.cpp":  "5a8d033a7562bde17d688fba19dcb41ff740b186001622349bfc9097a1b64189"
                                                       },
                                             "base_files":  {
                                                                "src/kernel/xam/xam_content.cpp":  "b531e5b14f79a7296d821344ee1d04da25b47711450c8bddb40ef86ea92aa012"
@@ -270,7 +270,7 @@
                                             "sha256":  "ee7b05f1cca4cb5b54534aa5664e6e7256fb370a420d32bb302a4614b7acbdbb",
                                             "files":  {
                                                           "include/rex/kernel/xam/module.h":  "a5fc75694094a6f7248b116de587f60c0d1fa68e26fede58414d051055d7cc9c",
-                                                          "src/kernel/xam/xam_content.cpp":  "75403e6b7969222c0616dea5514b03be37489dc545ca28860cafc95929473db4",
+                                                          "src/kernel/xam/xam_content.cpp":  "5a8d033a7562bde17d688fba19dcb41ff740b186001622349bfc9097a1b64189",
                                                           "src/kernel/xam/xam_misc.cpp":  "b612fdef71b80e5b2004a2c0ba6d59497586e5e789295e685fb2daa2b78dac1c"
                                                       },
                                             "base_files":  {
@@ -299,7 +299,7 @@
                                                           "include/rex/system/kernel_state.h":  "64e615eca4a78e4ff37f72cebc850781d510738eeca687076a5ec52ddaae11ab",
                                                           "src/kernel/xboxkrnl/xboxkrnl_video.cpp":  "276d4ba7897095494ddd1de6182b3327617273ab29943ec520a5ebf6afb9936c",
                                                           "include/rex/kernel/xam/module.h":  "a5fc75694094a6f7248b116de587f60c0d1fa68e26fede58414d051055d7cc9c",
-                                                          "src/kernel/xam/xam_content.cpp":  "75403e6b7969222c0616dea5514b03be37489dc545ca28860cafc95929473db4",
+                                                          "src/kernel/xam/xam_content.cpp":  "5a8d033a7562bde17d688fba19dcb41ff740b186001622349bfc9097a1b64189",
                                                           "include/rex/system/interfaces/graphics.h":  "491dffd35d938f9fde908ff693a383364d7255133722affe17b0a53cf813f9c3",
                                                           "include/rex/graphics/graphics_system.h":  "259d7acc4e6d6dc01eb546cf101389bf4cf352b54c78c392cb4a2a595531c53f",
                                                           "src/graphics/graphics_system.cpp":  "7462130450b5eae5069a9b461115eadfa516102ba22ecea0429fd0f419cf5228",
@@ -776,7 +776,7 @@
                                                            },
                                             "files":  {
                                                           "src/kernel/xam/xam_misc.cpp":  "b612fdef71b80e5b2004a2c0ba6d59497586e5e789295e685fb2daa2b78dac1c",
-                                                          "src/kernel/xam/xam_msg.cpp":  "a0d35fe1f4f66da47e61edfbb2f5f832bb09bcda3eddbfac4944c4a19742d9a3"
+                                                          "src/kernel/xam/xam_msg.cpp":  "cf2cfa272c8be5e94e9dcf01574b67a2780c7f112d74808dbaf2b711a7495a9b"
                                                       },
                                             "test":  "sdkcheck.Profile device completion queries return results and honor nonblocking waits"
                                         },
@@ -907,8 +907,8 @@
                                                           "include/rex/system/xam/user_profile.h":  "95b5837de2ea3a549f1d83244c57525b2e90f8b8b28c89bbc337f780da0c5ca3",
                                                           "src/system/xam/user_profile.cpp":  "04a29ea7cbaf110ded62b55c53504072d43b4655b074f076cec5f4d1d561a829",
                                                           "include/rex/system/xam/content_manager.h":  "1d80714e38222582f455b67409166d1a3558190e9f582d0188c4273714de6a34",
-                                                          "src/system/xam/content_manager.cpp":  "bdf9fd6f48037c637e8a7701859d61b1a271ecfea6896c7eb8d4175dda0ff386",
-                                                          "src/kernel/xam/xam_content.cpp":  "75403e6b7969222c0616dea5514b03be37489dc545ca28860cafc95929473db4"
+                                                          "src/system/xam/content_manager.cpp":  "b4cd97c6c1823db919d2d864eec1e0541952b5892678a71d77978762901fddb6",
+                                                          "src/kernel/xam/xam_content.cpp":  "5a8d033a7562bde17d688fba19dcb41ff740b186001622349bfc9097a1b64189"
                                                       },
                                             "test":  "sdkcheck.Save storage uses XAM and NT file contracts across profiles and restarts"
                                         },
@@ -933,8 +933,8 @@
                                                            },
                                             "files":  {
                                                           "include/rex/system/xam/content_manager.h":  "1d80714e38222582f455b67409166d1a3558190e9f582d0188c4273714de6a34",
-                                                          "src/system/xam/content_manager.cpp":  "bdf9fd6f48037c637e8a7701859d61b1a271ecfea6896c7eb8d4175dda0ff386",
-                                                          "src/kernel/xam/xam_content.cpp":  "75403e6b7969222c0616dea5514b03be37489dc545ca28860cafc95929473db4"
+                                                          "src/system/xam/content_manager.cpp":  "b4cd97c6c1823db919d2d864eec1e0541952b5892678a71d77978762901fddb6",
+                                                          "src/kernel/xam/xam_content.cpp":  "5a8d033a7562bde17d688fba19dcb41ff740b186001622349bfc9097a1b64189"
                                                       },
                                             "test":  "sdkcheck.Extracted executable metadata preserves disc and arcade identities"
                                         },
@@ -1460,7 +1460,7 @@
                   "include/rex/kernel/xam/offline_achievement_helpers.h":  "97ac17e69eb4fcf91c4bfb6c69aa428b90a04161c0f6a77cf0a78729d4c94889",
                   "include/rex/system/xam/app_manager.h":  "b21cbaab39de95b8287382effb3ea581d02ed35ace0e868f7f26a1d90f8b815f",
                   "src/kernel/xam/xam_enum.cpp":  "d2406cb8956d1df31c7e2cefe01a535f7661a230920b4175fa23b7bf083636b0",
-                  "src/kernel/xam/xam_msg.cpp":  "a0d35fe1f4f66da47e61edfbb2f5f832bb09bcda3eddbfac4944c4a19742d9a3",
+                  "src/kernel/xam/xam_msg.cpp":  "cf2cfa272c8be5e94e9dcf01574b67a2780c7f112d74808dbaf2b711a7495a9b",
                   "src/kernel/xam/xam_user.cpp":  "5589f20461e56111d75d2cc8f79abd5c9a6fef1f65a29555dd706ffcb409f1be",
                   "src/kernel/xam/apps/xgi_app.cpp":  "ed7b589b4620cbc9c781169ea4755b0cc542de68ae84f2fa4418df31e137c7fe"
               },
@@ -1662,9 +1662,9 @@
   "files": {
     "include/rex/system/xam/content_device.h": "be4bf00300c04d165af657a050666be586350e8ff3381a7ece01f108e4cf06bc",
     "include/rex/system/xam/content_manager.h": "1d80714e38222582f455b67409166d1a3558190e9f582d0188c4273714de6a34",
-    "src/system/xam/content_manager.cpp": "bdf9fd6f48037c637e8a7701859d61b1a271ecfea6896c7eb8d4175dda0ff386",
+    "src/system/xam/content_manager.cpp": "b4cd97c6c1823db919d2d864eec1e0541952b5892678a71d77978762901fddb6",
     "src/kernel/xam/xam_content_device.cpp": "c5b37a8a47f09debccc489dc10b4fdaca8a3db26aae88a9da986f720f0549a30",
-    "src/kernel/xam/xam_content.cpp": "75403e6b7969222c0616dea5514b03be37489dc545ca28860cafc95929473db4",
+    "src/kernel/xam/xam_content.cpp": "5a8d033a7562bde17d688fba19dcb41ff740b186001622349bfc9097a1b64189",
     "src/kernel/xam/xam_content_aggregate.cpp": "2808297cce799fe42aa61edf20755c5a5d522d15bb2c04e492c027d4d0f1af57",
     "include/rex/filesystem/devices/host_path_device.h": "c63adaa7165af35ea7be00fa250d9ea7f9d40587d21aac2f6af69e4b4eea45b2",
     "src/filesystem/devices/host_path_device.cpp": "1e85a56d44b655af150674387b2e83a3eabee6180414ba2f98b6e3cd010800a6",
@@ -1870,8 +1870,8 @@
   },
   "files": {
     "include/rex/system/xam/content_manager.h": "1d80714e38222582f455b67409166d1a3558190e9f582d0188c4273714de6a34",
-    "src/kernel/xam/xam_content.cpp": "75403e6b7969222c0616dea5514b03be37489dc545ca28860cafc95929473db4",
-    "src/system/xam/content_manager.cpp": "bdf9fd6f48037c637e8a7701859d61b1a271ecfea6896c7eb8d4175dda0ff386"
+    "src/kernel/xam/xam_content.cpp": "5a8d033a7562bde17d688fba19dcb41ff740b186001622349bfc9097a1b64189",
+    "src/system/xam/content_manager.cpp": "b4cd97c6c1823db919d2d864eec1e0541952b5892678a71d77978762901fddb6"
   },
   "test": "sdkcheck: [storage-transfer] copy/move, progress, cancel, space, conflict"
 },
@@ -1897,7 +1897,7 @@
   "files": {
     "include/rex/system/xam/content_manager.h": "1d80714e38222582f455b67409166d1a3558190e9f582d0188c4273714de6a34",
     "src/kernel/xam/xam_content_aggregate.cpp": "2808297cce799fe42aa61edf20755c5a5d522d15bb2c04e492c027d4d0f1af57",
-    "src/system/xam/content_manager.cpp": "bdf9fd6f48037c637e8a7701859d61b1a271ecfea6896c7eb8d4175dda0ff386"
+    "src/system/xam/content_manager.cpp": "b4cd97c6c1823db919d2d864eec1e0541952b5892678a71d77978762901fddb6"
   },
   "test": "sdkcheck: [aggregate-content] 584-byte records, original owner filter"
 },
@@ -1917,7 +1917,7 @@
     "include/rex/system/xam/user_profile.h": "95b5837de2ea3a549f1d83244c57525b2e90f8b8b28c89bbc337f780da0c5ca3",
     "src/kernel/xam/xam_enum.cpp": "d2406cb8956d1df31c7e2cefe01a535f7661a230920b4175fa23b7bf083636b0",
     "src/system/offline_achievement_store.cpp": "ee7506eefb3d1c92dbca82a6a200cc58678370c050b37c329a94cdee62b3af21",
-    "src/system/xam/content_manager.cpp": "bdf9fd6f48037c637e8a7701859d61b1a271ecfea6896c7eb8d4175dda0ff386",
+    "src/system/xam/content_manager.cpp": "b4cd97c6c1823db919d2d864eec1e0541952b5892678a71d77978762901fddb6",
     "src/system/xam/user_profile.cpp": "04a29ea7cbaf110ded62b55c53504072d43b4655b074f076cec5f4d1d561a829"
   },
   "test": "sdkcheck: [profile-content] [profile-delete] profiles as per-device content packages"
@@ -3036,7 +3036,7 @@
     "src/kernel/xam/xam_ui.cpp": "09f1091f50a8733c73d28a65fb2e4397a72ef147ce17ba0fd73dacf8c945b257"
   },
   "files": {
-    "src/kernel/xam/xam_msg.cpp": "a0d35fe1f4f66da47e61edfbb2f5f832bb09bcda3eddbfac4944c4a19742d9a3",
+    "src/kernel/xam/xam_msg.cpp": "cf2cfa272c8be5e94e9dcf01574b67a2780c7f112d74808dbaf2b711a7495a9b",
     "src/kernel/xam/xam_ui.cpp": "3e41d19a9f6fd9cff4f185a4b07310c5c2b35fa7ea8ba2b927efae1a1ebd671a"
   },
   "test": "sdkcheck [message-box-io-context]: before patch 1/13 assertions fails because XMsgCompleteIORequest replaces the requesting thread handle with the completing worker. Preserve the recorded OVERLAPPED caller during completion; capture caller at original UI submission, including the storage selector. No title condition, default completion, or runtime thread migration."
@@ -3097,7 +3097,7 @@
     "src/system/xam/content_manager.cpp": "136a91c0965d63d9ba2d0569530a6b04348819bb5a6fac78263f0bbac17018c3"
   },
   "files": {
-    "src/system/xam/content_manager.cpp": "bdf9fd6f48037c637e8a7701859d61b1a271ecfea6896c7eb8d4175dda0ff386"
+    "src/system/xam/content_manager.cpp": "b4cd97c6c1823db919d2d864eec1e0541952b5892678a71d77978762901fddb6"
   },
   "test": "sdkcheck [storage-transfer-recovery]: red loses both source package and destination when source-header deletion fails (1/9 assertions fails). Preserve the fully committed destination and propagate the cleanup error, rescan profile packages. Windows sharing lock reproduces partial deletion; destination bytes and enumeration survive runtime restart. Related [storage-transfer]: 75 assertions / 2 cases pass. No fabricated success or title condition."
 },
@@ -3123,9 +3123,9 @@
   },
   "files": {
     "include/rex/system/xam/content_manager.h": "1d80714e38222582f455b67409166d1a3558190e9f582d0188c4273714de6a34",
-    "src/system/xam/content_manager.cpp": "bdf9fd6f48037c637e8a7701859d61b1a271ecfea6896c7eb8d4175dda0ff386",
-    "src/kernel/xam/xam_content.cpp": "75403e6b7969222c0616dea5514b03be37489dc545ca28860cafc95929473db4",
-    "src/kernel/xam/xam_msg.cpp": "a0d35fe1f4f66da47e61edfbb2f5f832bb09bcda3eddbfac4944c4a19742d9a3"
+    "src/system/xam/content_manager.cpp": "b4cd97c6c1823db919d2d864eec1e0541952b5892678a71d77978762901fddb6",
+    "src/kernel/xam/xam_content.cpp": "5a8d033a7562bde17d688fba19dcb41ff740b186001622349bfc9097a1b64189",
+    "src/kernel/xam/xam_msg.cpp": "cf2cfa272c8be5e94e9dcf01574b67a2780c7f112d74808dbaf2b711a7495a9b"
   },
   "test": "tests/sdkcheck/storage_device_test.cpp [storage-cancel]"
 },
@@ -3138,11 +3138,26 @@
     "src/kernel/xam/xam_msg.cpp": "5fc51d9ce6b655c83651a604c37ef598356305bc7c61524f98508d377a7c9c8e"
   },
   "files": {
-    "src/kernel/xam/xam_content.cpp": "75403e6b7969222c0616dea5514b03be37489dc545ca28860cafc95929473db4",
+    "src/kernel/xam/xam_content.cpp": "5a8d033a7562bde17d688fba19dcb41ff740b186001622349bfc9097a1b64189",
     "src/kernel/xam/apps/xam_app.cpp": "040da19d97e48446f5db20c36af737c8c96d30fa889b25dbdb347a36051e13de",
-    "src/kernel/xam/xam_msg.cpp": "a0d35fe1f4f66da47e61edfbb2f5f832bb09bcda3eddbfac4944c4a19742d9a3"
+    "src/kernel/xam/xam_msg.cpp": "cf2cfa272c8be5e94e9dcf01574b67a2780c7f112d74808dbaf2b711a7495a9b"
   },
   "test": "tests/sdkcheck/storage_device_test.cpp [storage-message]"
+},
+{
+  "file": "patches/rexglue-sdk/0222-reclaim-interrupted-storage-staging.patch",
+  "sha256": "ee39d17b1cc1afce4031be540b8f86c5c8a99466b2b15dd421ff26d98afc6630",
+  "base_files": {
+    "src/system/xam/content_manager.cpp": "bdf9fd6f48037c637e8a7701859d61b1a271ecfea6896c7eb8d4175dda0ff386",
+    "src/kernel/xam/xam_content.cpp": "75403e6b7969222c0616dea5514b03be37489dc545ca28860cafc95929473db4",
+    "src/kernel/xam/xam_msg.cpp": "a0d35fe1f4f66da47e61edfbb2f5f832bb09bcda3eddbfac4944c4a19742d9a3"
+  },
+  "files": {
+    "src/system/xam/content_manager.cpp": "b4cd97c6c1823db919d2d864eec1e0541952b5892678a71d77978762901fddb6",
+    "src/kernel/xam/xam_content.cpp": "5a8d033a7562bde17d688fba19dcb41ff740b186001622349bfc9097a1b64189",
+    "src/kernel/xam/xam_msg.cpp": "cf2cfa272c8be5e94e9dcf01574b67a2780c7f112d74808dbaf2b711a7495a9b"
+  },
+  "test": "tests/sdkcheck/storage_device_test.cpp [storage-stale-quota]: red 112 instead of success with 900000 abandoned bytes on a 1 MiB MU; reclaim before quota, retain active staging per volume."
 }
 ]
                     },

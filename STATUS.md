@@ -1,5 +1,16 @@
 # STATUS
 
+30/10 — **DASH-OS-FEATURES-03, Storage parcial**: cancelamento real de I/O,
+espera sem evento e despacho FE/`2000C` (0220/0221); 0222 recupera staging
+interrompido antes de consultar quota, com proteção por volume. Release focado:
+1.054 asserções/17 casos; replay de 26 patches/5 arquivos afetados aprovado.
+Preparo oficial 0220/0221 concluído. Sessões isoladas de 300 s mostraram as
+telas originais, dispositivos, perfil/save e seletor de destino; a cópia não
+produziu destino, portanto transferências/exclusão visuais continuam sem aceite.
+Diagnóstico opcional de conclusão acrescentado; novo preparo em andamento.
+Conquistas e P1 não ampliados antes de concluir Storage; sem Release.
+[Evidências e limites](docs/reports/dash-os-features-03-2026-10-30.md).
+
 30/10 — **pacote Linux x64 do launcher e gate por plataforma**: `package-desktop.ps1
 -Platform linux-x64` gera `x360-native-1.12.1-linux-x64.tar.gz` (13,7 MB, candidato
 local, não publicado) a partir do commit, com LLVM 22.1.8 e sysroot privado no WSL,

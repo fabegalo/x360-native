@@ -520,6 +520,60 @@ TEST_CASE("Storage copies and moves packages between volumes without partial res
   CHECK(std::filesystem::exists(PackageOn(root.path)));  // a refused move keeps the source
 }
 
+TEST_CASE("Interrupted storage staging is reclaimed before checking the destination quota",
+          "[sdk][storage-transfer][storage-transfer-recovery][storage-stale-quota]") {
+  StorageRoot root;
+  root.config("version=1\n[[device]]\nid=7\ntype='mu'\ncapacity_bytes=1048576\n");
+  const auto mu = root.path / "storage/00000007";
+  const auto stale = mu / ".x360n-transfer/interrupted/package";
+  std::filesystem::create_directories(stale);
+  std::ofstream(stale / "partial.bin", std::ios::binary) << std::string(900000, 'x');
+  {
+    DeviceGuest guest(root.path);
+    MakeItem(guest, 1, root.path, 300000);
+    rex::memory::store_and_swap<uint32_t>(guest.bytes + guest.address + 2048, 7);
+    REQUIRE(guest.call(__imp__XamContentCopyInternal,
+        {0, guest.address + 2048, guest.address + 1024, 0, 0, 0, 0}) == 0);
+    CHECK_FALSE(std::filesystem::exists(mu / ".x360n-transfer"));
+    CHECK(std::filesystem::exists(PackageOn(root.path)));
+  }
+  DeviceGuest restarted(root.path);
+  const auto items = restarted.runtime.kernel_state()->content_manager()->ListContent(
+      7, kOwner, rex::system::XContentType::kSavedGame, kTitle);
+  REQUIRE(items.size() == 1);
+  CHECK(items.front().file_name() == "SAVE0001");
+  std::ifstream input(PackageOn(mu) / "dir/slot.dat", std::ios::binary);
+  const std::string bytes(std::istreambuf_iterator<char>{input}, {});
+  CHECK(bytes == std::string(300000, 's'));
+}
+
+TEST_CASE("An active transfer preserves its staging while another volume recovers",
+          "[sdk][storage-transfer][storage-transfer-recovery][storage-stale-quota]") {
+  StorageRoot root;
+  root.config("version=1\n[[device]]\nid=7\ntype='mu'\ncapacity_bytes=1048576\n"
+              "[[device]]\nid=12\ntype='usb'\ncapacity_bytes=1048576\n");
+  const auto mu=root.path/"storage/00000007", usb=root.path/"storage/0000000C";
+  std::filesystem::create_directories(mu);
+  std::filesystem::create_directories(usb/".x360n-transfer/interrupted");
+  std::ofstream(usb/".x360n-transfer/interrupted/partial.bin",std::ios::binary)
+      << std::string(900000,'x');
+  DeviceGuest guest(root.path);
+  const auto data=MakeItem(guest,1,root.path,300000);
+  auto* content=guest.runtime.kernel_state()->content_manager();
+  uint32_t other_result=~0u;
+  REQUIRE(content->TransferContent(kOwner,data,7,0,false,[&](uint64_t,uint64_t,bool first) {
+    if(first) other_result=content->TransferContent(kOwner,data,12,0,false,{});
+    return true;
+  })==0);
+  CHECK(other_result==0);
+  CHECK(std::filesystem::file_size(PackageOn(mu)/"dir/slot.dat")==300000);
+  CHECK(std::filesystem::file_size(PackageOn(usb)/"dir/slot.dat")==300000);
+  CHECK(std::filesystem::exists(HeaderOn(mu)));
+  CHECK(std::filesystem::exists(HeaderOn(usb)));
+  CHECK_FALSE(std::filesystem::exists(mu/".x360n-transfer"));
+  CHECK_FALSE(std::filesystem::exists(usb/".x360n-transfer"));
+}
+
 #if defined(_WIN32)
 TEST_CASE("A failed move cleanup preserves the complete committed destination",
           "[sdk][storage-transfer][storage-transfer-recovery]") {

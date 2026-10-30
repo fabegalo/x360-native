@@ -2181,3 +2181,18 @@ pass 1,030 assertions in 15 cases. Replay of the 25 patches affecting these
 five files reproduces their final SHA-256 hashes from the pinned revision.
 See `docs/reports/dash-os-features-03-2026-10-30.md` for graphical evidence and
 remaining scope. No upstream equivalent identified.
+
+### 0222 — reclaim interrupted transfer staging before quota checks
+
+An interrupted copy can leave enough staging bytes to make its own retry fail
+with ERROR_DISK_FULL before recovery runs. Reclaim inactive staging before the
+quota snapshot, serialize staging registration/cleanup, and track active work
+per destination root. Another volume can recover while an existing copy keeps
+its staging. No kernel lock is held during cleanup or copying; the staging
+mutex is used only at transfer startup and teardown. Debug-level I/O submission,
+cancellation and completion logs remain off at the normal log level.
+
+The focused 1 MiB MU regression fails before the patch (112 instead of success
+with 900,000 abandoned bytes). Coverage also checks the recovered bytes and
+enumeration after restart, plus nested transfers on separate volumes.
+No upstream equivalent identified.
