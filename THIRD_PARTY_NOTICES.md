@@ -31,7 +31,7 @@ forma de uso, texto e SHA-256. Os índices existentes `package.sha256` e
 | SDL | Biblioteca estática no launcher `x360-native` (janela, entrada, diálogos, SDL_GPU) e trechos de patches; não há SDL.dll no ZIP desktop | [Zlib](licenses/sdl3.txt) |
 | Dear ImGui | Interface do launcher, com os backends SDL3/SDL_GPU, estática | [MIT](licenses/imgui.txt) |
 | Vulkan-Headers | Headers da verificação opcional de dispositivo Vulkan do launcher; o loader é o do sistema | [Apache-2.0 OR MIT](licenses/vulkan-headers.txt) |
-| Droid Sans, Roboto Medium (cópias do Dear ImGui fixado) | Fontes incorporadas sem alteração no launcher | [Apache-2.0](licenses/launcher-fonts.txt) |
+| Noto Sans CJK JP Regular/Medium, Adobe | Família incorporada sem alteração no launcher, igual em todas as plataformas | [OFL-1.1](licenses/launcher-fonts.txt) |
 | miniz 1.15, cópia do SDL fixado | Leitor ZIP/inflate estático no extrator; sem SDL.dll | [Unlicense](licenses/miniz.txt) |
 | libmspack | Decoder LZX em `app/x360n-mspack.dll`, substituível, para recursos do XAM | [LGPL-2.1-only](licenses/libmspack.txt), [fontes e reconstrução](licenses/relinking.txt) |
 

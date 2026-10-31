@@ -22,6 +22,10 @@ Page PageOf(const App& a);
 struct PageText { std::string headline, subtitle; };
 PageText PageTexts(const App& a);
 std::string DropText();
+std::string DisplayName(const Target& target);
+// Snapshot only: no probes, file reads or worker launches while drawing/copying.
+enum class DiagnosticSection { Environment, Content, Operation, All };
+std::string DiagnosticReport(const App& a, DiagnosticSection section = DiagnosticSection::All);
 Row StatusOf(const App& a, size_t i);
 std::string RowLabel(Row row, bool dashboard);
 Tone RowTone(Row row);

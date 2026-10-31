@@ -35,6 +35,7 @@ void Fail(App& a, const std::string& what) {
   a.result = 3; a.result_title = Tr("Não foi possível concluir", "Could not finish");
   a.activity_text = Tr("Verifique o Diagnóstico e tente novamente. Seus arquivos foram preservados.", "Check Diagnostics and try again. Your files were preserved.");
   a.details = what;
+  a.operation_details = what;
 }
 template <class F> void Guard(App& a, F&& f) {
   try { f(); } catch (const std::exception& error) { Fail(a, error.what()); }
@@ -64,26 +65,109 @@ Page PageOf(const App& a) {
 }
 PageText PageTexts(const App& a) {
   switch (PageOf(a)) {
-    case Page::Home: return {Tr("Seu Xbox 360, no PC.", "Your Xbox 360, on PC."),
-      Tr("Configure sua dashboard original e adicione seus jogos.\nA experiência de console continua nos menus originais do Xbox 360.", "Set up your original dashboard and add your games.\nThe console experience stays in the original Xbox 360 menus.")};
+    case Page::Home: return {Tr("Início", "Home"),
+      Tr("Sua dashboard, seus jogos e o estado das preparações.", "Your dashboard, games and preparation status.")};
     case Page::Library: return {Tr("Biblioteca", "Library"),
-      Tr("Jogos importados e o estado de preparação de cada um.\nPara jogar, use a My Games dentro da dashboard original.", "Imported games and the preparation state of each one.\nTo play, use My Games inside the original dashboard.")};
+      Tr("Gerencie seus jogos. Os títulos preparados ficam disponíveis na My Games.", "Manage your games. Prepared titles are available in My Games.")};
     case Page::Import: return {Tr("Importar", "Import"),
-      Tr("Adicione uma ISO, pacote Xbox 360, System Update 17559 (ZIP/PIRS) ou pasta extraída.\nO conteúdo é extraído e verificado; seus originais ficam preservados.", "Add an ISO, Xbox 360 package, System Update 17559 (ZIP/PIRS) or extracted folder.\nContent is extracted and verified; your originals stay untouched.")};
+      Tr("Adicione jogos ou os arquivos originais da dashboard.", "Add games or original dashboard files.")};
     case Page::Dashboard: return {"Dashboard",
-      Tr("Versões da dashboard original e o estado de cada preparação.\nCada versão usa somente seus próprios componentes.", "Original dashboard versions and the preparation state of each.\nEach version uses only its own components.")};
+      Tr("Selecione uma versão para preparar ou iniciar o Xbox 360.", "Select a version to prepare or start Xbox 360.")};
     case Page::Settings: return {Tr("Configurações", "Settings"),
-      Tr("Renderer gráfico, armazenamento e idioma.\nTrocar uma pasta nunca apaga dados existentes.", "Graphics renderer, storage and language.\nChanging a folder never deletes existing data.")};
+      Tr("Idioma, armazenamento e opções gráficas.", "Language, storage and graphics options.")};
     case Page::Diagnostics: return {Tr("Diagnóstico", "Diagnostics"),
-      Tr("O diagnóstico fica neste computador. Nada é enviado automaticamente.\nLogs de execução ficam na pasta local do ambiente.", "Diagnostics stay on this computer. Nothing is uploaded automatically.\nExecution logs live in the environment's local folder.")};
+      Tr("Ambiente, conteúdo selecionado e registros da última operação.", "Environment, selected content and the latest operation.")};
   }
   return {};
 }
 std::string DropText() {
-  return Tr("Tudo acontece neste computador. Apenas conteúdos com uma preparação disponível poderão ser executados; nenhum jogo ou dashboard está incluído.", "Everything stays on this computer. Only content with an available preparation can run; no games or dashboards are included.");
+  return Tr("ISO, pacote Xbox 360, System Update 17559 (ZIP/PIRS) ou pasta extraída.\nOs arquivos originais são preservados.", "ISO, Xbox 360 package, System Update 17559 (ZIP/PIRS) or extracted folder.\nOriginal files are preserved.");
+}
+std::string DisplayName(const Target& target) {
+  if (target.kind != "dashboard" && !target.library.display_name.empty()) return target.library.display_name;
+  std::string name = english ? target.label_en : target.label;
+  // Recipe annotations belong in diagnostics, not in the content's display name.
+  for (const std::string_view suffix : {" (diagnóstico)", " (diagnostic)", " (preparação)", " (preparation)"})
+    if (name.ends_with(suffix)) { name.resize(name.size() - suffix.size()); break; }
+  return name;
+}
+std::string DiagnosticReport(const App& a, DiagnosticSection section) {
+  std::string out = "x360-native " + VersionLabel(X360N_VERSION) + " · " + kPlatform + "\n";
+  auto value = [&](const std::string& label, const std::string& text) {
+    out += label + ": " + (text.empty() ? Tr("Não informado", "Not reported") : text) + "\n";
+  };
+  const auto yes = Tr("OK", "OK"), no = Tr("Pendente", "Pending");
+  if (section == DiagnosticSection::Environment || section == DiagnosticSection::All) {
+    out += Tr("\nAMBIENTE\n", "\nENVIRONMENT\n");
+    const auto& e = a.environment;
+    if (e.description.empty()) out += Tr("Ambiente ainda não verificado.\n", "Environment has not been checked.\n");
+    else {
+      value("CPU", e.cpu); value("GPU", e.gpu); value(Tr("Memória", "Memory"), e.memory);
+      value(Tr("Arquitetura", "Architecture"), e.architecture ? yes : no);
+      value("Direct3D 12", e.d3d12 ? yes : no); value("Vulkan", e.vulkan ? yes : no);
+      value(Tr("Permissão de gravação", "Write permission"), e.writable ? yes : no);
+      value(Tr("Espaço livre", "Free space"), FormatBytes(e.available));
+      value("Toolchain", e.toolchain ? yes : no);
+      for (const auto& tool : e.missing_tools) value(Tr("Ferramenta ausente", "Missing tool"), tool);
+    }
+    value("Renderer", a.renderer_settings.renderer == Renderer::Native ? "Native" : "Xenos");
+    value("API", a.renderer_settings.api == GraphicsApi::D3D12 ? "Direct3D 12" : "Vulkan");
+    value("Supervisor", a.supervisor_available ? yes : no);
+    value(Tr("Pasta do ambiente", "Environment folder"), Utf8(a.root));
+    value(Tr("Executável", "Executable"), Utf8(a.self));
+  }
+  if (section == DiagnosticSection::Content || section == DiagnosticSection::All) {
+    out += Tr("\nCONTEÚDO SELECIONADO\n", "\nSELECTED CONTENT\n");
+    if (a.selected >= a.targets.size()) out += Tr("Nenhum conteúdo selecionado.\n", "No content selected.\n");
+    else {
+      const auto& t = a.targets[a.selected];
+      value(Tr("Nome", "Name"), english ? t.label_en : t.label);
+      value(Tr("Perfil", "Profile"), t.id); value("Title ID", t.title_id);
+      value(Tr("Versão", "Version"), t.version); value("Media ID", t.media_id);
+      value(Tr("Origem", "Source"), Utf8(t.game_root));
+      value(Tr("Executável preparado", "Prepared executable"), Utf8(t.exe));
+      value(Tr("Dados do usuário", "User data"), Utf8(t.user_root));
+      value(Tr("Estado", "Status"), a.chip_text);
+      if (a.current.verification_pending) out += Tr("Verificação completa pendente.\n", "Full verification pending.\n");
+      for (const auto& issue : a.current.issues) out += "\n" + issue + "\n";
+      if (a.selected < a.checked.size()) for (const auto& issue : a.checked[a.selected].library) out += "\n" + issue + "\n";
+      for (const auto& dependency : t.dependencies) {
+        value(Tr("Dependência", "Dependency"), dependency);
+        const auto index = IndexOf(a, dependency);
+        if (index >= a.targets.size() || index >= a.checked.size()) {
+          out += Tr("Perfil necessário não encontrado.\n", "Required profile was not found.\n");
+          continue;
+        }
+        const auto& checked = a.checked[index];
+        value(Tr("Arquivos", "Files"), checked.state.inputs_ok ? yes : no);
+        value(Tr("Preparação", "Preparation"), checked.state.prepared ? yes : no);
+        for (const auto& issue : checked.state.issues) out += issue + "\n";
+        for (const auto& issue : checked.library) out += issue + "\n";
+      }
+    }
+  }
+  if (section == DiagnosticSection::Operation || section == DiagnosticSection::All) {
+    out += Tr("\nÚLTIMA OPERAÇÃO\n", "\nLATEST OPERATION\n");
+    if (!a.last_action && !a.result && a.logs.empty() && !a.busy)
+      out += Tr("Nenhuma operação nesta sessão. Use Abrir registros para consultar sessões anteriores.\n", "No operation in this session. Use Open logs to inspect previous sessions.\n");
+    else {
+      value(Tr("Operação", "Operation"), a.busy || a.result_title.empty() ? a.activity_title : a.result_title);
+      if (!a.operation_target.empty()) value(Tr("Alvo da operação", "Operation target"), a.operation_target);
+      if (a.busy && a.started != App::Clock::time_point{}) value(Tr("Tempo decorrido", "Elapsed time"), Elapsed(a));
+      const int stage = a.stage.load();
+      if (a.busy && stage >= 0 && stage < int(a.stage_names.size())) value(Tr("Etapa", "Stage"), a.stage_names[size_t(stage)]);
+      if (!a.activity_text.empty()) out += "\n" + a.activity_text + "\n";
+      if (!a.logs.empty()) value("Logs", Utf8(a.logs));
+      if (!a.operation_details.empty() && a.operation_details != a.activity_text)
+        out += Tr("\nDETALHES\n", "\nDETAILS\n") + a.operation_details + "\n";
+    }
+  }
+  out.erase(std::remove(out.begin(), out.end(), '\r'), out.end());
+  return out;
 }
 void SetActivity(App& a, Activity kind, const std::string& title, const std::string& text, std::vector<std::string> stages) {
   a.activity_kind = kind; a.activity_title = title; a.stage_names = std::move(stages);
+  a.operation_target.clear(); a.operation_details = text;
   a.started = App::Clock::now(); a.extracted_bytes = 0;
   a.activity_text = text;
 }
@@ -204,34 +288,34 @@ void InspectSelected(App& a) {
     if (!a.root.empty() && (a.games || page == Page::Home || page == Page::Import)) {
       a.next_action = a.games || page == Page::Import ? kImportPage : kDashboards;
       chip(Tr("Biblioteca vazia", "Library is empty"), Tone::Neutral);
-      a.status = Tr("Os jogos que você adicionar aparecerão aqui com seu estado de preparação.\nTítulos cadastrados como compatíveis não contam como jogos instalados.", "Games you add appear here with their preparation status.\nCompatibility entries are not installed games.");
+      a.status = Tr("Adicione seus jogos para começar.", "Add your games to get started.");
       primary(Tr("Adicionar conteúdo", "Add content"));
     } else {
       a.next_action = kFolder;
       chip(Tr("Ambiente não configurado", "Environment not set up"), Tone::Warn);
-      a.status = Tr("Escolha onde guardar seus arquivos. Depois, adicione suas dashboards e jogos.\nA preparação acontece neste computador; seus arquivos não são enviados.", "Choose where to keep your files, then add dashboards and games.\nPreparation happens on this computer; your files are never uploaded.");
+      a.status = Tr("Escolha onde guardar seus arquivos. Depois, adicione suas dashboards e jogos.", "Choose where to keep your files, then add dashboards and games.");
       primary(Tr("Escolher pasta", "Choose folder"));
     }
     if (page == Page::Import) { a.next_action = kImport; primary(Tr("Escolher arquivo", "Choose file")); }
     return;
   }
   const auto& t = a.targets[a.selected];
-  a.selection_title = english ? t.label_en : t.label;
+  a.selection_title = DisplayName(t);
   a.current = a.checked.at(a.selected).state;
   if (a.games && !a.import_view && !a.home && !t.aot) {
     a.next_action = kImportPage;
     const bool identified = a.current.inputs_ok || a.current.verification_pending;
     chip(identified ? Tr("Não suportado", "Not supported") : Tr("Erro", "Error"), identified ? Tone::Warn : Tone::Err);
-    a.status = Tr("Este jogo foi cadastrado, mas não tem preparação AOT disponível.\nEle não pode ser executado nem aparece na My Games.", "This game is catalogued but has no available AOT preparation.\nIt cannot run and does not appear in My Games.");
+    a.status = Tr("Este jogo foi adicionado à biblioteca. Ainda não é possível prepará-lo.", "This game was added to your library. It cannot be prepared yet.");
     primary(Tr("Adicionar conteúdo", "Add content"));
-    std::string details = english ? t.limitations_en : t.limitations;
+    std::string details;
     details += "\nTitle ID: " + (t.title_id.empty() ? "—" : t.title_id) + "\nVersion: " + (t.version.empty() ? "—" : t.version);
     details += "\nMedia ID: " + t.media_id + "\nOriginal PE: " + t.original_name + "\n" + Utf8(t.game_root);
     for (const auto& issue : a.current.issues) details += "\n" + issue;
     a.details = details; return;
   }
   if (a.current.verification_pending) {
-    std::string detail = a.environment.description + "\n" + (english ? t.limitations_en : t.limitations);
+    std::string detail = a.environment.description;
     a.current.launch_candidate &= a.supervisor_available;
     for (const auto& dep : t.dependencies) {
       const auto found = std::find_if(a.targets.begin(), a.targets.end(), [&](const auto& candidate) { return candidate.id == dep; });
@@ -242,20 +326,19 @@ void InspectSelected(App& a) {
       }
     }
     a.next_action = a.current.launch_candidate && t.session ? kLaunch : kPrepare;
-    primary(a.next_action == kLaunch ? Tr("Conferir e iniciar", "Verify and start") : Tr("Conferir e preparar", "Verify and prepare"));
+    primary(a.next_action == kLaunch ? Tr("Iniciar Xbox 360", "Start Xbox 360") : Tr("Preparar", "Prepare"));
     // The row's listing hint, explained; the full check runs before any action.
     const auto row = StatusOf(a, a.selected);
     if (row == Row::Error) {
       chip(Tr("Falha na última tentativa", "Last attempt failed"), Tone::Err);
-      a.status = Tr("A última preparação ou execução falhou. O motivo está no Diagnóstico.\nPreparar de novo retoma as etapas válidas.",
-                    "The last preparation or run failed. The reason is in Diagnostics.\nPreparing again resumes the valid steps.");
+      a.status = Tr("A última tentativa falhou. Selecione Ver erro para consultar o motivo.", "The last attempt failed. Select View error to see the cause.");
     } else if (row == Row::Imported) {
       chip(a.current.receipt_stale ? Tr("Precisa preparar de novo", "Needs preparing again") : Tr("Não preparado", "Not prepared"), Tone::Warn);
       a.status = a.current.receipt_stale ?
-          Tr("Arquivos mudaram desde a última preparação, por exemplo numa atualização do aplicativo.\nPrepare novamente para usar esta versão.",
-             "Files changed since the last preparation, for example in an application update.\nPrepare again to use this version.") :
-          Tr("Ainda não preparado neste computador.\nA preparação compila o título; seus arquivos são conferidos antes.",
-             "Not prepared on this computer yet.\nPreparation compiles the title; your files are verified first.");
+          Tr("É necessário preparar esta versão novamente antes de iniciar.",
+             "Prepare this version again before starting.") :
+          Tr("Selecione Preparar para usar este conteúdo no computador.",
+             "Select Prepare to use this content on your computer.");
     } else if (row == Row::Ready) {
       chip(t.session ? Tr("Pronta para iniciar", "Ready to start") : Tr("Preparado", "Prepared"), Tone::Ok);
       primary(t.session ? Tr("Iniciar Xbox 360", "Start Xbox 360") : Tr("Preparado para My Games", "Prepared for My Games"));
@@ -263,11 +346,11 @@ void InspectSelected(App& a) {
                     "Preparation up to date. Start your games through the dashboard's My Games.");
     } else {
       chip(Tr("Verificação pendente", "Verification pending"), Tone::Info);
-      a.status = Tr("Conteúdo listado. Arquivos e recibos serão conferidos antes de preparar ou iniciar.\nEsta listagem ainda não comprova integridade ou compatibilidade.",
-                    "Content listed. Files and receipts will be verified before preparation or launch.\nThis listing does not yet establish integrity or compatibility.");
+      a.status = Tr("Selecione Preparar para verificar os arquivos e deixar o conteúdo pronto.",
+                    "Select Prepare to check the files and get the content ready.");
     }
     for (const auto& issue : a.current.issues) detail += "\n" + issue;
-    if (page == Page::Home && !a.current.launch_candidate) { a.next_action = kDashboards; primary(Tr("Configurar Xbox 360", "Set up Xbox 360")); }
+    if (page == Page::Home && !a.current.launch_candidate) { a.next_action = kDashboards; primary(Tr("Escolher dashboard", "Choose dashboard")); }
     if (page == Page::Import) { a.next_action = kImport; primary(Tr("Escolher arquivo", "Choose file")); }
     if (!t.importable && !t.generic_aot && !a.current.launch_candidate) { a.next_action = kDashboards; primary(Tr("Escolher dashboard", "Choose dashboard")); }
     a.details = detail; return;
@@ -298,7 +381,7 @@ void InspectSelected(App& a) {
   }
   a.next_action = !a.current.inputs_ok ? kImport : !a.current.prepared ? kPrepare : t.session ? kLaunch : kPrepare;
   primary(a.next_action == kImport ? Tr("Selecionar arquivos", "Choose files") :
-          a.next_action == kPrepare ? Tr("Verificar e preparar", "Verify and prepare") : Tr("Abrir dashboard", "Open dashboard"));
+          a.next_action == kPrepare ? Tr("Preparar", "Prepare") : Tr("Iniciar Xbox 360", "Start Xbox 360"));
   std::string state = !missing.empty() ? Tr("Próximo conjunto: ", "Next set: ") + missing :
     a.current.prepared ? Tr("Conteúdo verificado. Inicie seus jogos pela My Games da dashboard.\nO menu do próprio jogo permite retornar à dashboard.", "Content verified. Launch games through the dashboard's My Games.\nReturn to the dashboard from the game's own menu.") :
     Tr("Conteúdo verificado. A preparação será feita nesta pasta.\nDownloads e instalações serão informados antes de começar.", "Content verified. Preparation will use this folder.\nDownloads and installations will be explained before they start.");
@@ -315,12 +398,11 @@ void InspectSelected(App& a) {
     chip(Tr("Indisponível", "Unavailable"), Tone::Warn);
   }
   if (t.session && !t.launch_library && a.current.inputs_ok && a.current.prepared)
-    state = Tr("Dashboard original preparada para iniciar.\nConsulte as limitações desta versão no Diagnóstico.",
-               "Original dashboard prepared to start.\nSee this version's limitations in Diagnostics.");
-  if (t.generic_aot) state = a.current.prepared ? Tr("Build AOT verificado. Compatibilidade de execução ainda não comprovada.\nTente iniciar pela My Games original.", "AOT build verified. Runtime compatibility is not yet proven.\nTry launching through original My Games.") :
-      Tr("Preparação AOT automática disponível. Compilar não garante execução.\nFalhas e estágios ficam registrados no Diagnóstico para nova tentativa.", "Automatic AOT preparation available. Compilation does not guarantee execution.\nErrors and stages are saved in Diagnostics for retry.");
+    state = Tr("Dashboard pronta para iniciar.",
+               "Dashboard ready to start.");
+  if (t.generic_aot) state = a.current.prepared ? Tr("Preparação concluída. Abra o jogo pela My Games.", "Preparation complete. Open the game in My Games.") :
+      Tr("Selecione Preparar para adicionar este jogo à My Games.", "Select Prepare to add this game to My Games.");
   if (a.games && a.current.prepared) primary(Tr("Preparado para My Games", "Prepared for My Games"));
-  detail += "\n" + (english ? t.limitations_en : t.limitations);
   if (t.catalogued) {
     detail += "\nTitle ID: " + (t.title_id.empty() ? "—" : t.title_id) +
       "\nVersion: " + (t.version.empty() ? "—" : t.version) +
@@ -331,7 +413,7 @@ void InspectSelected(App& a) {
   a.details = detail.empty() ? "Verificação concluída. Nenhum dado é enviado automaticamente.\nLogs de execução: " + Utf8(a.root / ".local/evidence/runs") : detail;
   if (page == Page::Home) {
     a.next_action = a.current.prepared ? kLaunch : kDashboards;
-    primary(a.current.prepared ? Tr("Iniciar Xbox 360", "Start Xbox 360") : Tr("Configurar Xbox 360", "Set up Xbox 360"));
+    primary(a.current.prepared ? Tr("Iniciar Xbox 360", "Start Xbox 360") : Tr("Escolher dashboard", "Choose dashboard"));
     if (a.current.prepared) { chip(Tr("Pronta para iniciar", "Ready to start"), Tone::Ok); a.status = (english ? t.label_en : t.label) + "\n" + Tr("Abra o menu original do Xbox 360. Seus jogos continuam na My Games, dentro da dashboard.", "Open the original Xbox 360 menu. Your games stay in My Games, inside the dashboard."); }
     else { chip(Tr("Configuração pendente", "Setup pending"), Tone::Warn); a.status = Tr("Configure uma dashboard original para começar.\nJogos são adicionados separadamente, em Importar.", "Set up an original dashboard to get started.\nGames are added separately, in Import."); }
   } else if (page == Page::Import) {
@@ -419,6 +501,7 @@ void OnInspected(App& a, const std::string& error) {
     a.result = 3; a.result_title = Tr("Não foi possível conferir o conteúdo", "Could not check content");
     a.activity_text = Tr("Consulte o Diagnóstico para o motivo. Seus arquivos não foram alterados.", "See Diagnostics for the reason. Your files were not changed.");
     a.details = error;
+    a.operation_details = error;
   }
 }
 void OnInitialized(App& a, const std::string& error) {
@@ -431,6 +514,7 @@ void OnInitialized(App& a, const std::string& error) {
     a.result = 3; a.result_title = Tr("Não foi possível organizar esta pasta", "Could not prepare this folder");
     a.activity_text = Tr("Escolha outra pasta em Configurações. Seus arquivos não foram alterados.", "Choose another folder in Settings. Your files were not changed.");
     a.details = error;
+    a.operation_details = error;
   }
 }
 void InitializeRoot(App& a, const fs::path& root) {
@@ -487,6 +571,7 @@ void OnFinished(App& a, const std::string& text) {
   }
   InspectSelected(a);
   a.details = text + "\n\nLogs: " + Utf8(a.logs) + "\n\n" + a.details;
+  a.operation_details = text;
   const bool cancelled = a.cancel.load();
   if (a.failed) {
     a.result = cancelled ? 2 : 3;
@@ -501,11 +586,13 @@ void OnFinished(App& a, const std::string& text) {
       a.last_action == kRemove ? Tr("Jogo removido", "Game removed") :
       a.last_action == kInstall ? Tr("Instalador encerrado", "Installer closed") : Tr("Preparação concluída", "Preparation finished");
   }
-  a.activity_text = text;
+  a.activity_text = cancelled ? Tr("A operação foi cancelada. Você pode tentar novamente.", "The operation was cancelled. You can try again.") :
+    a.failed ? Tr("Consulte o Diagnóstico para ver o motivo e tente novamente.", "Check Diagnostics for the cause and try again.") : text;
   StartHints(a);
 }
 void OnProgress(App& a, const std::string& text) {
   a.details = text;
+  a.operation_details = text;
   if (!a.cancel) a.activity_text = text;
 }
 void OnHinted(App& a, const App::Hints& found) {
@@ -520,14 +607,14 @@ void OnSessionStarted(App& a) {
   if (a.busy && a.last_action == kLaunch) {
     a.session = true;
     a.activity_title = Tr("Sessão em andamento", "Session running");
-    a.activity_text = Tr("A dashboard está sob supervisão. Feche a janela da plataforma para encerrar.", "The dashboard is supervised. Close the platform window to end the session.");
+    a.activity_text = Tr("Feche a janela da dashboard para encerrar a sessão.", "Close the dashboard window to end the session.");
   }
 }
 void OnSessionClosed(App& a) {
   if (a.busy && a.last_action == kLaunch) {
     a.session = false; a.finishing_session = true;
     a.activity_title = Tr("Sessão encerrada", "Session ended");
-    a.activity_text = Tr("A janela foi fechada. Finalizando os registros locais.", "The window closed. Finalizing local diagnostics.");
+    a.activity_text = Tr("Finalizando a sessão…", "Finishing the session…");
     ActionTrace::Event("ui.session.closed");
   }
 }
@@ -546,7 +633,9 @@ void OnUpdateFinished(App& a, std::string error) {
   }
   a.result = a.cancel ? 2 : 3;
   a.result_title = Tr("Atualização não instalada", "Update not installed");
-  a.activity_text = error;
+  a.operation_details = error;
+  a.activity_text = a.cancel ? Tr("A atualização foi cancelada.", "The update was cancelled.") :
+    Tr("Consulte o Diagnóstico para ver o motivo e tente novamente.", "Check Diagnostics for the cause and try again.");
   a.details = error + "\n" + Utf8(Updates(a));
 }
 
@@ -604,7 +693,7 @@ bool Enabled(const App& a, int id) {
     case kHome: case kDashboards: case kGames: case kImportPage: case kLibrary: case kSearch:
     case kFilter0: case kFilter1: case kFilter2: case kFilter3: return !a.initializing;
     case kGameList: return !a.initializing && a.checked.size() == a.targets.size();
-    case kDetails: case kDismiss: case kGoBack: return true;
+    case kDetails: case kDismiss: case kGoBack: case kViewIssue: return true;
     case kData: case kOpenLogs: return !a.root.empty();
     case kCancel: return a.busy && !a.session && !a.finishing_session && !a.installing;
     case kStorage: case kRenderer: case kNativeDevelopment: case kFullscreen: case kConsoleLanguage: case kConsoleCountry: return configured;
@@ -676,8 +765,8 @@ bool Selected(const App& a, int id) {
 }
 std::string Label(const App& a, int id) {
   struct Text { int id; const char* pt; const char* en; };
-  static const Text texts[] = {{kFolder, "Selecionar ambiente", "Choose environment"},
-       {kCheck, "Verificar ambiente", "Check environment"},
+  static const Text texts[] = {{kFolder, "Pasta do aplicativo", "Application folder"},
+       {kCheck, "Verificar computador", "Check computer"},
        {kDetails, "Diagnóstico", "Diagnostics"}, {kData, "Abrir dados locais", "Open local data"},
        {kCancel, "Cancelar", "Cancel"}, {kStorage, "Pasta de saves", "Save data folder"},
        {kSettings, "Configurações", "Settings"}, {kImportFolder, "Escolher pasta", "Choose folder"},
@@ -685,55 +774,48 @@ std::string Label(const App& a, int id) {
        {kImportPage, "Importar", "Import"}, {kAddContent, "Adicionar conteúdo", "Add content"}, {kLibrary, "Ver biblioteca", "View library"},
        {kFilter0, "Todos", "All"}, {kFilter1, "Prontos", "Ready"}, {kFilter2, "Preparar", "To prepare"}, {kFilter3, "Atenção", "Attention"},
        {kLangPt, "Português (BR)", "Portuguese (BR)"}, {kLangEn, "English", "English"},
-       {kRenderer, "Xenos (ReXGlue)", "Xenos (ReXGlue)"}, {kRendererNative, "Native (Experimental)", "Native (Experimental)"},
+       {kRenderer, "Xenos", "Xenos"}, {kRendererNative, "Native", "Native"},
        {kApiD3D12, "Direct3D 12", "Direct3D 12"}, {kApiVulkan, "Vulkan", "Vulkan"},
-       {kNativeDevelopment, "Acesso de desenvolvimento ao Native", "Native development access"},
+       {kNativeDevelopment, "Habilitar opções avançadas", "Enable advanced options"},
        {kEnhanced, "Ativar no próximo início", "Enable on next launch"},
        {kAaLabel, "Antisserrilhamento", "Anti-aliasing"},
        {kFps30, "30", "30"}, {kFps60, "60", "60"}, {kFps120, "120", "120"}, {kFps144, "144", "144"},
        {kFpsLabel, "FPS · 30–240", "FPS · 30–240"}, {kPresentLabel, "Limite visual · 0 livre", "Display cap · 0 uncapped"},
-       {kTimingApply, "Aplicar limites personalizados", "Apply custom limits"},
+       {kTimingApply, "Aplicar ajustes", "Apply changes"},
        {kEffectBilinear, "Bilinear", "Bilinear"}, {kEffectCas, "CAS", "CAS"}, {kEffectFsr, "FSR 1", "FSR 1"},
        {kSharpnessLabel, "Nitidez · 0–100%", "Sharpness · 0–100%"},
-       {kScaleLabel, "Resolução interna · escala X/Y", "Internal resolution · X/Y scale"},
+       {kScaleLabel, "Resolução interna", "Internal resolution"},
        {kScale1, "1×", "1×"}, {kScale2, "2×", "2×"}, {kScale3, "3×", "3×"}, {kScale4, "4×", "4×"},
        {kAnisoLabel, "Filtragem anisotrópica", "Anisotropic filtering"},
        {kAnisoGuest, "Jogo", "Game"}, {kAniso2, "2×", "2×"}, {kAniso4, "4×", "4×"}, {kAniso8, "8×", "8×"}, {kAniso16, "16×", "16×"},
        {kAaNone, "AA: jogo", "AA: game"}, {kAaFxaa, "FXAA", "FXAA"}, {kAaExtreme, "FXAA+", "FXAA+"},
-       {kUltrawide, "Ultrawide · câmera e HUD do perfil", "Ultrawide · profile camera and HUD"},
+       {kUltrawide, "Tela ultrawide", "Ultrawide display"},
        {kFullscreen, "Iniciar sessão em tela cheia", "Start session in fullscreen"},
-       {kCaptureCrash, "Capturar pilha de falhas nas próximas sessões", "Capture crash stacks in upcoming sessions"},
+       {kCaptureCrash, "Salvar relatório em caso de falha", "Save a report if a session fails"},
        {kRetry, "Tentar novamente", "Try again"}, {kBannerDetails, "Diagnóstico", "Diagnostics"}, {kBannerLibrary, "Ver biblioteca", "View library"},
        {kDismiss, "Fechar", "Dismiss"}, {kRemove, "Remover da biblioteca", "Remove from library"},
-       {kOpenLogs, "Abrir logs", "Open logs"}};
+       {kOpenLogs, "Abrir registros", "Open logs"}};
   if (id == kPrimary) return a.primary_label;
+  if (id == kViewIssue) return a.chip_tone == Tone::Err ? Tr("Ver erro", "View error") : Tr("Ver detalhes", "View details");
   if (id == kLanguage) return english ? "Language: English" : "Idioma: Português";
   if (id == kUpdate) return a.update ? Tr("Instalar ", "Install ") + a.update->version : std::string();
   for (const auto& t : texts) if (t.id == id) return Tr(t.pt, t.en);
   return {};
 }
 std::string OptionCaption(const App& a, int id) {
+  if (id == kRendererNative) return Enabled(a, kRendererNative) || a.busy ?
+    Tr("Permite ajustes de imagem e fluidez", "Enables picture and frame rate adjustments") :
 #ifdef _WIN32
-  if (id == kApiVulkan) return a.renderer_settings.renderer == Renderer::Native ?
-      Tr("Experimental · sem validação em jogo", "Experimental · not validated in game") :
-      Tr("Experimental · driver conferido no início", "Experimental · driver checked at launch");
-  if (id == kApiD3D12) return Tr("Padrão · disponível para Xenos e Native", "Default · available for Xenos and Native");
-  if (id == kRendererNative) return Enabled(a, kRendererNative) || a.busy ? Tr("Experimental · executor próprio", "Experimental · independent executor")
-                                                                          : Tr("Requer acesso de desenvolvimento", "Requires development access");
+    Tr("Habilite as opções avançadas abaixo", "Enable advanced options below");
 #else
-  if (id == kApiVulkan) {
-#ifdef __APPLE__
-    return Tr("Padrão · Vulkan via MoltenVK, driver conferido no início", "Default · Vulkan through MoltenVK, driver checked at launch");
-#else
-    return Tr("Padrão · driver conferido no início", "Default · driver checked at launch");
+    Tr("Não disponível neste sistema", "Not available on this system");
 #endif
-  }
-  if (id == kRendererNative) return Tr("Indisponível neste sistema · requer Direct3D 12", "Unavailable on this system · requires Direct3D 12");
-#endif
-  (void)a;
-  return Tr("Padrão · compatível com o ReXGlue", "Default · ReXGlue compatible");
+  if (id == kApiD3D12) return Tr("Padrão do Windows", "Windows default");
+  if (id == kApiVulkan) return Tr("Alternativa de compatibilidade gráfica", "Alternative graphics compatibility mode");
+  return Tr("Configuração padrão", "Default configuration");
 }
 const char* PrimaryGlyph(const App& a) {
+  if (a.next_action == kDashboards) return "dashboard";
   return a.next_action == kLaunch ? "play" : a.next_action == kPrepare ? "tools" : a.next_action == kImport ? "file" :
          a.next_action == kImportPage ? "add" : a.next_action == kFolder ? "folder" : "settings";
 }
@@ -754,18 +836,15 @@ void Prepare(App& a) {
     a.prompt = Prompt{"Microsoft Build Tools 2022", Tr("Falta o componente C++ do Microsoft Build Tools 2022. Abrir o instalador oficial com os componentes necessários selecionados?\n\nEsta é uma instalação no sistema: o Windows pode pedir permissão de administrador. O instalador mostra espaço, downloads e termos antes da instalação. Use o próprio instalador para cancelar. Jogos e dados serão preservados.", "Microsoft Build Tools 2022 C++ is missing. Open the official installer with the required components preselected?\n\nThis changes the system: Windows may request administrator permission. The installer shows space, downloads and terms before installation. Cancel using the installer itself. Games and data are preserved."),
                       {Tr("Abrir instalador", "Open installer"), Tr("Cancelar", "Cancel")}, false, [](App& app, int answer) { if (answer == 0) Start(app, kInstall); }};
 #else
-    std::string missing;
-    for (const auto& tool : a.environment.missing_tools) missing += "\n• " + tool;
-    a.prompt = Prompt{Tr("Ferramentas de compilação ausentes", "Build tools missing"),
-      Tr("A preparação AOT compila o título neste computador e precisa destas ferramentas no PATH:", "AOT preparation compiles the title on this computer and needs these tools on PATH:") + missing +
-      Tr("\n\nInstale-as pelo gerenciador de pacotes do sistema e selecione Verificar ambiente em Configurações. O aplicativo não instala nada no sistema.",
-         "\n\nInstall them through the system package manager, then select Check environment in Settings. The application installs nothing system-wide."),
+    a.prompt = Prompt{Tr("Componentes necessários", "Required components"),
+      Tr("Faltam componentes para preparar este conteúdo. Consulte a lista no Diagnóstico. Depois de instalá-los, selecione Verificar computador.",
+         "Components needed to prepare this content are missing. See the list in Diagnostics. After installing them, select Check computer."),
       {"OK"}, true, {}};
 #endif
     return;
   }
 #ifdef _WIN32
-  a.prompt = Prompt{"x360-native", Tr("Preparar verifica e obtém Git, CMake, Ninja, LLVM e o SDK fixados. Downloads de ferramentas: até 905 MiB; o SDK e suas dependências são adicionais. Arquivos verificados em cache são reutilizados. Ferramentas incompatíveis serão atualizadas com uma cópia anterior preservada. Reserve espaço para fontes e compilação (recomendação inicial: 30 GiB, não uma medição do mínimo).\n\nPermitir os downloads necessários? Não há instalação global nem elevação. Não = usar somente os arquivos já presentes.", "Preparation verifies and obtains pinned Git, CMake, Ninja, LLVM and SDK. Tool downloads: up to 905 MiB; SDK and its dependencies are additional. Verified cached files are reused. Incompatible tools will be updated with their previous copies preserved. Reserve space for sources and compilation (initial recommendation: 30 GiB, not a measured minimum).\n\nAllow required downloads? No global installation or elevation. No = use only existing files."),
+  a.prompt = Prompt{"x360-native", Tr("Para preparar este conteúdo, o aplicativo pode precisar baixar componentes. O download inicial pode chegar a 905 MiB, além de componentes adicionais. Recomendamos 30 GiB de espaço livre para a preparação. Os arquivos ficam na pasta do aplicativo.\n\nPermitir os downloads necessários? Se escolher Não, serão usados apenas os arquivos já disponíveis.", "Preparing this content may require downloading components. The initial download can be up to 905 MiB, plus additional components. We recommend 30 GiB of free space for preparation. Files stay in the application folder.\n\nAllow required downloads? Choose No to use only files already available."),
                     {Tr("Sim", "Yes"), Tr("Não", "No"), Tr("Cancelar", "Cancel")}, false,
                     [](App& app, int answer) {
                       if (answer != 0 && answer != 1) return;
@@ -774,7 +853,7 @@ void Prepare(App& a) {
                       if (app.current.inputs_ok || app.current.verification_pending) Start(app, kPrepare);
                     }};
 #else
-  a.prompt = Prompt{"x360-native", Tr("Preparar compila o título com as ferramentas nativas deste sistema (clang, CMake, Ninja) e o SDK fixado. Arquivos verificados em cache são reutilizados. Reserve espaço para fontes e compilação (recomendação inicial: 30 GiB, não uma medição do mínimo).\n\nContinuar? Não há instalação global nem elevação.", "Preparation compiles the title with this system's native tools (clang, CMake, Ninja) and the pinned SDK. Verified cached files are reused. Reserve space for sources and compilation (initial recommendation: 30 GiB, not a measured minimum).\n\nContinue? No global installation or elevation."),
+  a.prompt = Prompt{"x360-native", Tr("Este conteúdo será preparado para o seu computador. Isso pode levar alguns minutos. Recomendamos 30 GiB de espaço livre. Os arquivos ficam na pasta do aplicativo.\n\nContinuar?", "This content will be prepared for your computer. This can take a few minutes. We recommend 30 GiB of free space. Files stay in the application folder.\n\nContinue?"),
                     {Tr("Preparar", "Prepare"), Tr("Cancelar", "Cancel")}, false,
                     [](App& app, int answer) {
                       if (answer != 0) return;
@@ -789,6 +868,7 @@ void Command(App& a, int id) {
   Guard(a, [&] {
     ActionTrace trace("ui.command." + std::to_string(id));
     if (id == kPrimary) id = a.next_action;
+    if (id == kViewIssue) { a.show_details = true; a.settings = false; return; }
     if (id == kGoBack) { GoBack(a); return; }
     if (id == kDismiss) { a.result = 0; return; }
     if (id == kBannerDetails) id = kDetails;
@@ -863,23 +943,21 @@ void Command(App& a, int id) {
     }
     if (id == kUpdate && a.update) {
       const auto question = Tr("Instalar a versão ", "Install version ") + a.update->version + Tr(" (atual: ", " (current: ") + X360N_VERSION + ")?\n\n" +
-        Tr("O pacote é baixado do GitHub Releases do x360-native e conferido pelo SHA-256 publicado e pelo índice do próprio pacote. "
-           "Ambiente, jogos, perfis e saves são preservados; a versão atual fica em data/updates; recover-update permite restaurá-la. "
-           "O aplicativo reinicia ao final; o ambiente pode pedir para ser atualizado em seguida.",
-           "The package is downloaded from x360-native's GitHub Releases and checked against the published SHA-256 and its own index. "
-           "Environment, games, profiles and saves are preserved; the current version stays in data/updates; recover-update can restore it. "
-           "The application restarts at the end; the environment may then ask to be updated.");
+        Tr("A atualização será baixada e verificada. Seus jogos, perfis, saves e configurações serão mantidos. "
+           "O aplicativo será reiniciado ao terminar.",
+           "The update will be downloaded and verified. Your games, profiles, saves and settings will be kept. "
+           "The application will restart when finished.");
       a.prompt = Prompt{"x360-native", question, {Tr("Instalar", "Install"), Tr("Cancelar", "Cancel")}, false, [](App& app, int answer) { if (answer == 0) StartUpdate(app); }};
       return;
     }
     if (id == kRemove) {
       if (!Removable(a)) return;
       const auto& t = a.targets[a.selected];
-      const auto question = Tr("Remover \"", "Remove \"") + (english ? t.label_en : t.label) + Tr("\" da biblioteca?\n\n", "\" from the library?\n\n") +
-        Tr("Serão apagados deste ambiente: a cópia importada do jogo, sua cópia na My Games das dashboards e a preparação AOT gerada para ele. "
+      const auto question = Tr("Remover \"", "Remove \"") + DisplayName(t) + Tr("\" da biblioteca?\n\n", "\" from the library?\n\n") +
+        Tr("Serão apagados deste ambiente: a cópia importada do jogo, sua cópia na My Games das dashboards e os arquivos preparados para este computador. "
            "Saves, perfis e o arquivo original que você importou são mantidos. Uma pasta importada no próprio local não é apagada.\n\n"
            "Para jogar de novo, importe e prepare o jogo outra vez.",
-           "This deletes from the environment: the game's imported copy, its copy in the dashboards' My Games and the AOT preparation generated for it. "
+           "This deletes from the environment: the game's imported copy, its copy in the dashboards' My Games and its prepared files for this computer. "
            "Saves, profiles and the original file you imported are kept. A folder imported in place is not deleted.\n\n"
            "To play again, import and prepare the game again.");
       // The safe answer is the default one.

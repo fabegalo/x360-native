@@ -1,6 +1,7 @@
 #include <cstdio>
 #include "../frontend.h"
 #include "app_text.h"
+#include "console_options.h"
 
 namespace x360n::ui {
 using namespace desktop;
@@ -41,13 +42,13 @@ void Field(Ui& ui, int id, std::string& value, const ImRect& frame) {
 }
 void Combo(Ui& ui, int id, const ImRect& r) {
   auto& a = ui.a;
-  struct Item { uint32_t value; const char* name; };
-  std::vector<Item> items;
+  std::vector<ConsoleOption> languages;
+  if (id == kConsoleLanguage) for (const auto& v : ConsoleLanguages()) languages.push_back({v.id, v.name});
+  const auto& items = id == kConsoleLanguage ? languages : CountryOptions();
   uint32_t selected = 0;
-  if (id == kConsoleLanguage) { for (const auto& v : ConsoleLanguages()) items.push_back({v.id, v.name}); selected = a.console_settings.language; }
-  else { for (const auto& v : ConsoleLocales()) items.push_back({v.country, v.name}); selected = a.console_settings.country; }
+  selected = id == kConsoleLanguage ? a.console_settings.language : a.console_settings.country;
   const char* preview = "";
-  for (const auto& item : items) if (item.value == selected) preview = item.name;
+  for (const auto& item : items) if (item.value == selected) preview = item.name.c_str();
   ImGui::SetCursorScreenPos(r.Min);
   ImGui::SetNextItemWidth(r.GetWidth());
   ImGui::PushStyleColor(ImGuiCol_FrameBg, ImGui::ColorConvertU32ToFloat4(P.surface2));
@@ -63,11 +64,15 @@ void Combo(Ui& ui, int id, const ImRect& r) {
   Push(Font::Body);
   ImGui::PushID(id);
   if (ImGui::BeginCombo("##combo", preview, ImGuiComboFlags_HeightLarge)) {
+    ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(s(8), s(8)));
     for (const auto& item : items) {
       const bool is = item.value == selected;
-      if (ImGui::Selectable(item.name, is)) ui.deferred.push_back([&a, id, value = item.value] { SetConsoleValue(a, id, value); });
+      if (ImGui::Selectable(item.name.c_str(), is)) ui.deferred.push_back([&a, id, value = item.value] { SetConsoleValue(a, id, value); });
       if (is) ImGui::SetItemDefaultFocus();
     }
+    ImGui::PopStyleVar();
+    // Closing this popup must never consume a second navigation level.
+    if (ImGui::IsKeyPressed(ImGuiKey_Escape, false) || ImGui::IsKeyPressed(ImGuiKey_GamepadFaceRight, false)) ImGui::CloseCurrentPopup();
     ImGui::EndCombo();
   }
   ImGui::PopID();
@@ -78,31 +83,29 @@ void Combo(Ui& ui, int id, const ImRect& r) {
 }
 std::string EnvironmentText(const App& a) {
   const auto& e = a.environment;
-  if (e.description.empty()) return Tr("Escolha um ambiente para verificar este computador.", "Choose an environment to check this computer.");
-  std::string text;
-  if (!e.cpu.empty()) text += "CPU: " + e.cpu + "\n";
-  if (!e.memory.empty()) text += Tr("Memória: ", "Memory: ") + e.memory + "\n";
-  for (const char c : e.description) if (c != '\r') text += c;
-  while (!text.empty() && text.back() == '\n') text.pop_back();
-  return text;
+  if (e.description.empty()) return Tr("Selecione a pasta de dados do aplicativo.", "Select the application data folder.");
+  return e.graphics && e.architecture && e.writable ?
+    Tr("Tudo pronto neste computador.", "This computer is ready.") :
+    Tr("Este computador precisa de atenção. Consulte o Diagnóstico.", "This computer needs attention. See Diagnostics.");
 }
 }  // namespace
 void SettingsPage(Ui& ui, const Frame& f) {
   auto& a = ui.a;
   const float cx = f.cx, cw = f.cw;
-  // Cards fill two columns, or three on wide windows, each one placed under
-  // the shortest column in reading order, so no column ends far below the other.
+  const bool native_expanded = ui.native_expanded;
+  // Stable groups: console/application/storage on the left, graphics and its
+  // experiments on the right. Resizing or translating never swaps categories.
   const float gap = s(16);
-  const int columns = cw >= s(1150) ? 3 : cw >= s(700) ? 2 : 1;
+  const int columns = cw >= s(880) ? 2 : 1;
   const float colw = (cw - (columns - 1) * gap) / columns;
   const float ow = colw - s(48);
   const bool native = a.renderer_settings.experimental && a.renderer_settings.renderer == Renderer::Native;
-  const auto renderer_hint = Tr("O renderer vale para toda a sessão e é aplicado no próximo início.", "The renderer applies to the whole session on the next launch.");
-  const auto enhanced_hint = std::string(native ? "" : Tr("Disponível somente com o renderer Native, liberado pelo acesso de desenvolvimento. ", "Available only with the Native renderer, unlocked by the development access. ")) +
-    Tr("Separa limite visual e FPS de simulação; o alvo de simulação exige um perfil identificado do jogo. Padrão preserva o tempo original.", "Separates display and simulation limits; the simulation target requires an identified game profile. Default preserves original timing.");
-  const auto console_hint = Tr("Aplicado ao iniciar uma nova sessão.\nIdiomas disponíveis dependem dos recursos originais de cada versão e jogo.", "Applies when starting a new session.\nAvailable languages depend on each version's and game's original resources.");
+  const auto renderer_hint = Tr("As alterações são aplicadas ao iniciar a próxima sessão.", "Changes apply when you start the next session.");
+  const auto enhanced_hint = native ? Tr("Ajuste a resolução, a fluidez e os filtros de imagem.", "Adjust resolution, frame rate and picture filters.") :
+    Tr("Selecione Native em Gráficos para usar estes ajustes.", "Select Native in Graphics to use these settings.");
+  const auto console_hint = Tr("As alterações serão usadas na próxima sessão.", "Changes will be used in the next session.");
   const auto env_text = EnvironmentText(a);
-  const auto about = "x360-native " + VersionLabel(X360N_VERSION) + " · " + kPlatform;
+  const auto about = "x360-native v" + std::string(X360N_VERSION) + " · " + kPlatform;
   const float hint_h = WrappedHeight(Font::Body, renderer_hint, ow), enhanced_h = WrappedHeight(Font::Body, enhanced_hint, ow);
   const float console_h = WrappedHeight(Font::Body, console_hint, ow), env_h = WrappedHeight(Font::Body, env_text, ow);
   const float about_h = WrappedHeight(Font::Body, about, ow) + s(4);
@@ -110,13 +113,13 @@ void SettingsPage(Ui& ui, const Frame& f) {
   for (int id : {kFolder, kStorage, kData, kCheck}) need = std::max(need, ButtonWidth(ui, id, false));
   const bool pairs = 2 * need + s(12) <= ow;
   const int storage_rows = pairs ? 2 : 4;
-  const float combo_h = s(34);
+  const float combo_h = s(40);
   // Section caption, option (two text lines), toggle/chip/field rows, label above a row.
-  const float cap = s(26), opt = s(58), row = s(36), label = s(26);
+  const float cap = s(28), opt = s(64), row = s(40), label = s(28);
   const int apis = kD3D12 ? 2 : 1;
   const float heights[5] = {
     s(52) + hint_h + s(16) + 3 * cap + (2 + apis) * opt + (apis) * s(8) + 2 * s(16) + 2 * row + s(4) + s(20),
-    s(52) + enhanced_h + s(12) + row + s(16) + label + 3 * (row + s(12)) + row + s(16) + row + s(20) + 3 * (label + row + s(12)) + row + s(20),
+    native_expanded ? s(96) + enhanced_h + s(12) + row + s(16) + label + 3 * (row + s(12)) + row + s(16) + row + s(20) + 3 * (label + row + s(12)) + row + s(20) : s(112),
     s(56) + s(24) + s(12) + storage_rows * s(46) - s(8) + s(16) + env_h + s(20),
     s(50) + 2 * (s(22) + s(4) + combo_h + s(14)) + console_h + s(20),
     s(48) + row + s(16) + about_h + s(20)};
@@ -130,22 +133,19 @@ void SettingsPage(Ui& ui, const Frame& f) {
   ui.dl = ImGui::GetWindowDrawList();
   ui.scrolled = true;
   const float top = ImGui::GetCursorScreenPos().y;
-  float column_bottom[3] = {top, top, top};
+  float column_bottom[2] = {top, top};
   ImRect cards[5];
-  for (int i = 0; i < 5; ++i) {
-    const int c = int(std::min_element(column_bottom, column_bottom + columns) - column_bottom);
+  for (int i : {3, 4, 2, 0, 1}) {
+    const int c = columns == 2 && (i == 0 || i == 1) ? 1 : 0;
     cards[i] = Rect(cx + c * (colw + gap), column_bottom[c], colw, heights[i]);
     column_bottom[c] += heights[i] + gap;
   }
   for (const auto& c : cards) Card(ui, c);
   Heading(ui, cards[0], "chip", Tr("Gráficos", "Graphics"));
-  Heading(ui, cards[1], "settings", "Native Enhanced");
-  const auto experimental = Tr("Experimental", "Experimental");
-  Chip(ui, cards[1].Max.x - s(24) - ChipWidth(experimental), cards[1].Min.y + s(17), experimental, Tone::Warn);
-  Heading(ui, cards[2], "save", Tr("Armazenamento e ambiente", "Storage and environment"));
+  Heading(ui, cards[2], "save", Tr("Armazenamento", "Storage"));
   Heading(ui, cards[3], "language", Tr("Console Xbox 360", "Xbox 360 console"));
   Heading(ui, cards[4], "tools", Tr("Aplicativo desktop", "Desktop application"));
-  auto caption = [&](float x, float y, const std::string& text) { Text(ui.dl, Font::Caption, text, Rect(x, y, ow, s(18)), P.muted); };
+  auto caption = [&](float x, float y, const std::string& text) { Text(ui.dl, Font::Caption, text, Rect(x, y, ow, s(22)), P.muted); };
   auto option_label = [&](int id, float x, float y, float w) {
     TextBlock(ui, id, Label(a, id), Rect(x, y, w, s(22)), Font::Body, Enabled(a, kFps30) ? P.text : P.faint, false);
   };
@@ -164,10 +164,10 @@ void SettingsPage(Ui& ui, const Frame& f) {
     const float x = c.Min.x + s(24);
     float y = c.Min.y + s(52);
     TextBlock(ui, 0, renderer_hint, Rect(x, y, ow, hint_h), Font::Body, P.muted); y += hint_h + s(16);
-    caption(x, y, "Renderer"); y += cap;
+    caption(x, y, Tr("Modo gráfico", "Graphics mode")); y += cap;
     Button(ui, kRenderer, Kind::Option, Rect(x, y, ow, opt), nullptr, 2); y += opt + s(8);
     Button(ui, kRendererNative, Kind::Option, Rect(x, y, ow, opt), nullptr, 2); y += opt + s(16);
-    caption(x, y, Tr("API gráfica", "Graphics API")); y += cap;
+    caption(x, y, Tr("Interface gráfica", "Graphics interface")); y += cap;
     if (kD3D12) { Button(ui, kApiD3D12, Kind::Option, Rect(x, y, ow, opt), nullptr, 2); y += opt + s(8); }
     Button(ui, kApiVulkan, Kind::Option, Rect(x, y, ow, opt), nullptr, 2); y += opt + s(16);
     caption(x, y, Tr("Sessão", "Session")); y += cap;
@@ -177,7 +177,17 @@ void SettingsPage(Ui& ui, const Frame& f) {
   {
     const ImRect& c = cards[1]; ui.card = c;
     const float x = c.Min.x + s(24);
-    float y = c.Min.y + s(52);
+    const ImRect disclosure = Rect(x, c.Min.y + s(16), ow, s(40));
+    const auto text = (native_expanded ? "- " : "+ ") + Tr("Ajustes de imagem", "Picture settings");
+    ImGui::SetCursorScreenPos(disclosure.Min);
+    Push(Font::Bold);
+    if (ImGui::Button(text.c_str(), disclosure.GetSize())) ui.native_expanded = !ui.native_expanded;
+    Pop();
+    ui.Place(0, disclosure, "button", text, TextWidth(Font::Bold, text) + s(16));
+    if (!native_expanded) {
+      TextBlock(ui, 0, Tr("Resolução, fluidez e filtros.", "Resolution, frame rate and filters."), Rect(x, c.Min.y + s(64), ow, s(40)), Font::Body, P.muted);
+    } else {
+    float y = c.Min.y + s(96);
     TextBlock(ui, 0, enhanced_hint, Rect(x, y, ow, enhanced_h), Font::Body, P.muted); y += enhanced_h + s(12);
     Button(ui, kEnhanced, Kind::Toggle, Rect(x, y, ow, row), nullptr, 2); y += row + s(16);
     // Presets and the custom target share one row; the custom value needs Apply.
@@ -197,6 +207,7 @@ void SettingsPage(Ui& ui, const Frame& f) {
     option_label(kAaLabel, x, y, ow); y += label;
     chips(kAaNone, 3, x, y, ow); y += row + s(12);
     Button(ui, kUltrawide, Kind::Toggle, Rect(x, y, ow, row), nullptr, 2);
+    }
   }
   {
     const ImRect& c = cards[2]; ui.card = c;
@@ -204,7 +215,7 @@ void SettingsPage(Ui& ui, const Frame& f) {
     // Display only: a shortcut's "scripts/.." root reads as the folder it names.
     auto shown = a.root.lexically_normal();
     if (shown.has_relative_path() && !shown.has_filename()) shown = shown.parent_path();
-    TextBlock(ui, 0, a.root.empty() ? Tr("Nenhum ambiente selecionado", "No environment selected") : Utf8(shown), Rect(x, c.Min.y + s(56), ow, s(24)), Font::Body, P.muted, false);
+    TextBlock(ui, 0, a.root.empty() ? Tr("Nenhuma pasta selecionada", "No folder selected") : Utf8(shown), Rect(x, c.Min.y + s(56), ow, s(24)), Font::Body, P.muted, false);
     const float bw2 = pairs ? (ow - s(12)) / 2 : ow;
     int slot = 0;
     for (int id : {kFolder, kStorage, kData, kCheck}) {
@@ -220,7 +231,7 @@ void SettingsPage(Ui& ui, const Frame& f) {
     float y = c.Min.y + s(50);
     TextBlock(ui, 0, Tr("Idioma da dashboard, Guide e jogos", "Dashboard, Guide and game language"), Rect(x, y, ow, s(22)), Font::Body, P.text, false); y += s(22) + s(4);
     Combo(ui, kConsoleLanguage, Rect(x, y, ow, combo_h)); y += combo_h + s(14);
-    TextBlock(ui, 0, Tr("Região / localidade", "Region / locale"), Rect(x, y, ow, s(22)), Font::Body, P.text, false); y += s(22) + s(4);
+    TextBlock(ui, 0, Tr("País / região do console", "Console country / region"), Rect(x, y, ow, s(22)), Font::Body, P.text, false); y += s(22) + s(4);
     Combo(ui, kConsoleCountry, Rect(x, y, ow, combo_h)); y += combo_h + s(14);
     TextBlock(ui, 0, console_hint, Rect(x, y, ow, console_h), Font::Body, P.muted);
   }

@@ -131,7 +131,7 @@ void StartUpdate(App& a) {
   a.cancel = false; a.failed = false; a.busy = true; a.result = 0; a.stage = 0; a.last_action = kUpdate;
   a.show_details = false; a.settings = false;
   SetActivity(a, Activity::Import, Tr("Atualizando o aplicativo", "Updating the application"),
-    Tr("Baixando a versão ", "Downloading version ") + update.version + Tr(" do GitHub. Seus dados em data/ são preservados.", " from GitHub. Your data in data/ is preserved."),
+    Tr("Baixando a versão ", "Downloading version ") + update.version + Tr(". Seus jogos e configurações serão mantidos.", ". Your games and settings will be kept."),
     {Tr("Download", "Download"), Tr("Verificação", "Verification"), Tr("Instalação", "Installation")});
   a.worker = std::thread([&a, update] {
     std::string error;
@@ -143,7 +143,7 @@ void StartUpdate(App& a) {
       Download(a, update.checksum_url, checksum, 60, a.cancel);
       Download(a, update.archive_url, archive, 3600, a.cancel);
       a.stage = 1;
-      Post(a, [](App& app) { OnProgress(app, Tr("Conferindo o SHA-256 e o conteúdo do pacote...", "Checking the SHA-256 and the package contents...")); });
+      Post(a, [](App& app) { OnProgress(app, Tr("Verificando a atualização...", "Verifying the update...")); });
       VerifyArchive(archive, checksum);
       ProcessSpec tar;
       tar.exe = SystemTool("tar"); tar.args = {"-xf", Utf8(archive), "-C", Utf8(dir / "extract")};
@@ -154,7 +154,7 @@ void StartUpdate(App& a) {
       if (!extracted.launched || extracted.exit_code != 0) throw std::runtime_error(Tr("Não foi possível extrair a atualização. Nada foi alterado.", "Could not extract the update. Nothing was changed."));
       if (a.cancel) throw std::runtime_error(Cancelled());
       a.stage = 2;
-      Post(a, [](App& app) { OnProgress(app, Tr("Instalando. A versão anterior fica em data/updates.", "Installing. The previous version stays in data/updates.")); });
+      Post(a, [](App& app) { OnProgress(app, Tr("Instalando a atualização...", "Installing the update...")); });
       const auto transaction = Updates(a) / ("txn-" + std::to_string(CurrentProcess()) + "-" + std::to_string(Stamp()));
       ApplyUpdate(a.self.parent_path(), dir / "extract" / update.package, update.version, transaction);
       std::error_code ec; fs::remove_all(dir, ec);  // only this download
@@ -165,8 +165,9 @@ void StartUpdate(App& a) {
 
 // ---------- Preparation stages ----------
 std::vector<std::string> PreparationStageNames() {
-  return {Tr("Ferramentas", "Tools"), "SDK", Tr("Configuração", "Configuration"), "Codegen",
-          Tr("Compilação", "Compilation"), Tr("Verificação", "Verification"), Tr("Registro", "Registration")};
+  return {Tr("Computador", "Computer"), Tr("Componentes", "Components"), Tr("Ajustes", "Setup"),
+          Tr("Conversão", "Conversion"), Tr("Preparação", "Preparation"),
+          Tr("Verificação", "Verification"), Tr("Conclusão", "Completion")};
 }
 // Stages the supervisor's `x360n prepare` reports (aot_pipeline.cpp). Reused
 // steps count as done; no percentage is ever derived from them.
@@ -191,7 +192,6 @@ void Start(App& a, int action, fs::path source) {
   a.cancel = false; a.failed = false; a.busy = true; a.session = false; a.installing = action == kInstall; a.importing = action == kImport; a.import_recognized = false; a.imported_id.clear();
   a.result = 0; a.last_action = action; a.last_source = source;
   const auto target = a.selected < a.targets.size() ? a.targets[a.selected] : Target{};
-  a.operation_target = target.id;
   a.launch_verified = false;
   a.pending_snapshot = false;
   a.preparing_id = action == kPrepare ? target.id : std::string();
@@ -202,14 +202,15 @@ void Start(App& a, int action, fs::path source) {
   else if (action == kLaunch)
     SetActivity(a, Activity::Session, Tr("Preparando sessão", "Preparing session"), Tr("Conferindo a integridade antes de abrir a dashboard.", "Verifying integrity before opening the dashboard."));
   else if (action == kVerifyTarget)
-    SetActivity(a, Activity::Check, Tr("Conferindo preparação", "Checking preparation"), Tr("Conferindo os arquivos e recibos do título selecionado. Você pode cancelar.", "Verifying the selected title's files and receipts. You can cancel."));
+    SetActivity(a, Activity::Check, Tr("Conferindo preparação", "Checking preparation"), Tr("Conferindo os arquivos do conteúdo selecionado. Você pode cancelar.", "Checking the selected content. You can cancel."));
   else if (action == kInstall)
     SetActivity(a, Activity::Check, Tr("Instalando componentes", "Installing components"), Tr("Conclua ou cancele pelo instalador da Microsoft e aguarde o retorno.", "Finish or cancel in the Microsoft installer and wait for it to return."));
   else if (action == kRemove)
     SetActivity(a, Activity::Check, Tr("Removendo da biblioteca", "Removing from library"), Tr("Retirando o jogo da My Games e apagando a cópia importada. Saves e perfis são mantidos.", "Withdrawing the game from My Games and deleting the imported copy. Saves and profiles are kept."));
   else
-    SetActivity(a, Activity::Prepare, Tr("Preparando para você", "Preparing for you"), Tr("Preparação em andamento. As etapas reais serão registradas no Diagnóstico.", "Preparation running. Actual stages are recorded in Diagnostics."),
+    SetActivity(a, Activity::Prepare, Tr("Preparando conteúdo", "Preparing content"), Tr("Preparando para este computador. Você pode cancelar e continuar depois.", "Preparing for this computer. You can cancel and continue later."),
       PreparationStageNames());
+  a.operation_target = target.id;
   a.show_details = false; a.settings = false;
   const bool capture_crash = a.capture_crash;
   a.worker = std::thread([&a, target, action, source, capture_crash] {
@@ -308,7 +309,7 @@ void Start(App& a, int action, fs::path source) {
           a.import_recognized = true;
           const auto state = Inspect(ProjectPaths{a.root}, *it);
           std::string message = Tr("Dashboard Xbox 360 — Retail 17559\n", "Xbox 360 Dashboard — Retail 17559\n");
-          if (state.inputs_ok) message += Tr("Conteúdo completo e verificado. Selecione Preparar para executar a preparação AOT.", "Complete, verified content. Select Prepare to run AOT preparation.");
+          if (state.inputs_ok) message += Tr("Conteúdo adicionado. Selecione Preparar para continuar.", "Content added. Select Prepare to continue.");
           else {
             message += Tr("Importação parcial. Complete os arquivos abaixo usando Importar arquivo ou pasta; a dashboard ainda não está pronta.\n", "Partial import. Supply the files below using Import file or folder; the dashboard is not ready yet.\n");
             for (const auto& issue : state.issues) message += issue + "\n";
@@ -320,12 +321,12 @@ void Start(App& a, int action, fs::path source) {
           finish(message); return;
         }
         a.stage = 1;
-        progress(Tr("Identificando o conteúdo...\nConferindo versão, Title ID e arquivos antes de adicionar.", "Identifying the content...\nChecking version, Title ID and files before adding."));
+        progress(Tr("Identificando o conteúdo...\nConferindo os arquivos antes de adicionar.", "Identifying the content...\nChecking the files before adding."));
         if (fs::is_directory(content.path()) && fs::is_regular_file(content.path() / "default.xex")) {
           a.stage = 2;
           a.imported_id = ImportGame(ProjectPaths{a.root}, a.targets, content.path(), source, [&] { return a.cancel.load(); });
           a.import_recognized = true;
-          finish(Tr("Jogo adicionado à Biblioteca. Importar não significa poder executar.", "Game added to Library. Importing does not mean it can run.")); return;
+          finish(Tr("Jogo adicionado à Biblioteca.", "Game added to Library.")); return;
         }
         const auto found = IdentifyContent(a.targets, content.identity_path(), [&] { return a.cancel.load(); });
         std::vector<std::string> ids;
@@ -340,7 +341,7 @@ void Start(App& a, int action, fs::path source) {
         if (selected.kind == "game") {
           a.imported_id = ImportGame(ProjectPaths{a.root}, a.targets, content.path(), source, [&] { return a.cancel.load(); });
           a.import_recognized = true;
-          finish(Tr("Jogo adicionado à Biblioteca. Importar não significa poder executar.", "Game added to Library. Importing does not mean it can run.")); return;
+          finish(Tr("Jogo adicionado à Biblioteca.", "Game added to Library.")); return;
         }
         a.imported_id = selected.id;
         if (!selected.importable) { finish((english ? selected.label_en : selected.label) + "\n" + Tr("Esta versão foi reconhecida. Preparação ainda indisponível; consulte o Diagnóstico.", "This version was recognized. Preparation is not yet available; see Diagnostics.")); return; }
@@ -381,7 +382,8 @@ void Start(App& a, int action, fs::path source) {
           previous_stage = last;
           const int mapped = label == "tools" ? 0 : PreparationStage(last);
           if (mapped > a.stage.load()) a.stage = mapped;
-          progress(Tr("Preparação: ", "Preparation: ") + last);
+          if (mapped >= 0)
+            progress(Tr("Preparação: ", "Preparation: ") + PreparationStageNames().at(mapped));
         };
         auto result = RunProcess(spec);
         if (spec.collect_metrics) {
@@ -424,7 +426,7 @@ void Start(App& a, int action, fs::path source) {
         if (capture_crash) args.push_back("--crash-stack");
         if (!a.session_user_data.empty()) { args.push_back("--user-data-root"); args.push_back(Utf8(a.session_user_data)); }
         run(Supervisor(a), args, "session", notification.handle());
-        finish("Sessão encerrada. Consulte os logs para os resultados da execução.");
+        finish(Tr("Sessão encerrada.", "Session ended."));
         return;
       }
 #ifdef _WIN32
@@ -436,11 +438,11 @@ void Start(App& a, int action, fs::path source) {
       // Pinned Git/CMake/Ninja/LLVM; the shared preparation then runs natively.
       auto tool_args = std::vector<std::string>{"-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", Utf8(a.root / "scripts/prepare-tools.ps1"), "-UpdateDependencies"};
       if (a.allow_downloads) tool_args.push_back("-AllowDownloads");
-      progress(Tr("Verificando ferramentas e dependências...", "Checking tools and dependencies..."));
+      progress(Tr("Verificando os componentes necessários...", "Checking required components..."));
       run(powershell, tool_args, "tools");
 #else
       if (action == kInstall) throw std::runtime_error("System installers are only offered on Windows.");
-      progress(Tr("Verificando ferramentas e dependências...", "Checking tools and dependencies..."));
+      progress(Tr("Verificando os componentes necessários...", "Checking required components..."));
       std::string missing;
       for (const char* tool : {"clang", "clang++", "cmake", "ninja", "git"}) {
         try { (void)FindHostTool(tool); } catch (const std::exception&) { missing += std::string(missing.empty() ? "" : ", ") + tool; }
@@ -489,11 +491,12 @@ void ApplyPreview(App& a, int state) {
         {Tr("Extração", "Extraction"), Tr("Verificação", "Verification"), Tr("Importação", "Import")});
       a.started = App::Clock::now() - 75s; a.extracted_bytes = 1503238553ull; break;
     case 2: a.busy = true; a.importing = false; a.session = false; a.initializing = false; a.stage = 4;
-      SetActivity(a, Activity::Prepare, Tr("Preparando para você", "Preparing for you"), Tr("Compilando a execução para este computador…\nVocê pode cancelar e continuar depois. O diagnóstico está no Diagnóstico.", "Compiling native execution for this computer…\nYou can cancel and continue later."),
+      SetActivity(a, Activity::Prepare, Tr("Preparando conteúdo", "Preparing content"), Tr("Preparando para este computador…\nVocê pode cancelar e continuar depois.", "Preparing for this computer…\nYou can cancel and continue later."),
         PreparationStageNames());
       a.started = App::Clock::now() - 421s; break;
     case 3: a.busy = false; a.result = 3; a.importing = false; a.result_title = Tr("Não foi possível concluir", "Could not finish");
-      a.activity_text = Tr("A etapa codegen não concluiu. Seus arquivos foram preservados.\nDiagnóstico local: .local/evidence/logs/desktop/0000", "The codegen step did not finish. Your files were preserved.\nLocal diagnostics: .local/evidence/logs/desktop/0000"); break;
+      a.activity_text = Tr("Consulte o Diagnóstico para ver o motivo e tente novamente.", "Check Diagnostics for the cause and try again.");
+      a.operation_details = "codegen failed; exit_code=1"; break;
     case 4: a.busy = false; a.result = 1; a.importing = true; a.result_title = Tr("Importação concluída", "Import finished");
       a.activity_text = Tr("Forza Horizon 0.0.0.10\nConteúdo verificado e adicionado. Seus originais foram preservados.", "Forza Horizon 0.0.0.10\nContent verified and added. Your originals are preserved."); break;
     case 5: a.busy = false; a.result = 0; a.importing = false; a.preview_empty = false; a.preparing_id.clear(); break;

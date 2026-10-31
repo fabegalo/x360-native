@@ -4,7 +4,9 @@
 // rasterized by the launcher's own CPU renderer into PNG files.
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/catch_message.hpp>
+#include <catch2/generators/catch_generators.hpp>
 #include <cstdlib>
+#include <cmath>
 #include <fstream>
 #include <cstring>
 #include <iostream>
@@ -14,6 +16,7 @@
 #include "frontend.h"
 #include "soft_raster.h"
 #include "app_text.h"
+#include "console_options.h"
 #include "digest_batch.h"
 #include "preparation.h"
 #include "host_platform.h"
@@ -473,22 +476,318 @@ std::string Describe(const ui::Placed& p) {
          "," + std::to_string(int(p.rect.Max.x)) + "," + std::to_string(int(p.rect.Max.y)) + "]";
 }
 }  // namespace
+TEST_CASE("visible launcher buttons have independent hover identities", "[launcher-usability]") {
+  Frontend f; f.Seed(f.TargetFixture());
+  Headless headless; ui::Ui view(f.app); view.record = true;
+  ui::ApplyStyle(1);
+  auto& io = ImGui::GetIO();
+  REQUIRE(io.ConfigDebugHighlightIdConflicts);
+  for (int page : {kHome, kGames, kImportPage, kDashboards, kSettings, kDetails}) {
+    Command(f.app, kHome); Command(f.app, page);
+    for (int frame = 0; frame != 3; ++frame) headless.Frame(view, 1220, 800);
+    const auto controls = view.placed;
+    std::vector<ImGuiID> hovered;
+    for (const auto& control : controls) {
+      if (control.kind != "button" || !Inside(view.window, control.rect)) continue;
+      if (control.id && !Enabled(f.app, control.id)) continue;
+      INFO("page=" << page << " " << Describe(control));
+      const auto center = control.rect.GetCenter();
+      io.AddMousePosEvent(center.x, center.y);
+      for (int frame = 0; frame != 3; ++frame) headless.Frame(view, 1220, 800);
+      CHECK(GImGui->HoveredIdPreviousFrameItemCount <= 1);
+      const auto id = GImGui->HoveredId;
+      if (id) {
+        CHECK(std::ranges::find(hovered, id) == hovered.end());
+        hovered.push_back(id);
+      }
+    }
+  }
+}
+TEST_CASE("country options translate and sort without changing console IDs", "[launcher-usability]") {
+  const bool en = GENERATE(false, true);
+  english = en;
+  const auto& options = CountryOptions();
+  REQUIRE(options.size() == ConsoleLocales().size());
+  std::vector<uint32_t> ids;
+  std::string previous;
+  for (const auto& option : options) {
+    INFO(option.name);
+    const auto key = OptionSearchKey(option.name);
+    CHECK(previous <= key); previous = key;
+    CHECK(std::ranges::any_of(ConsoleLocales(), [&](const auto& value) { return value.country == option.value; }));
+    CHECK(std::ranges::find(ids, option.value) == ids.end());
+    ids.push_back(option.value);
+  }
+  const auto germany = std::ranges::find_if(options, [](const auto& v) { return v.value == 24; });
+  REQUIRE(germany != options.end());
+  CHECK(germany->name == (en ? "Germany (DE)" : "Alemanha (DE)"));
+  CHECK(OptionSearchKey("ÍNDIA (IN)").find("india") == 0);
+  CHECK(OptionSearchKey("Japão (JP)").find("japao") == 0);
+  CHECK(OptionSearchKey("África do Sul (ZA)").find("za") != std::string::npos);
+  english = false;
+}
+TEST_CASE("failed items expose the recorded cause without preparing again", "[launcher-usability]") {
+  Frontend f; f.Seed(f.TargetFixture());
+  f.app.home = false;
+  auto& inspection = f.app.checked[0].state;
+  inspection.verification_pending = inspection.interrupted = true;
+  inspection.prepared = inspection.launch_candidate = false;
+  inspection.issues = {"compile step failed: fixture-specific diagnostic", "logs/fixture.log"};
+  InspectSelected(f.app);
+  CHECK(f.app.status.find(inspection.issues.front()) == std::string::npos);
+  CHECK(f.app.primary_label == "Preparar");
+  CHECK(Label(f.app, kViewIssue) == "Ver erro");
+  const auto details = f.app.details;
+  Command(f.app, kViewIssue);
+  CHECK(PageOf(f.app) == Page::Diagnostics);
+  CHECK(f.app.details == details);
+  CHECK(f.app.details.find("logs/fixture.log") != std::string::npos);
+  CHECK(DiagnosticReport(f.app, DiagnosticSection::Content).find(inspection.issues.front()) != std::string::npos);
+  CHECK_FALSE(f.app.busy);
+  CHECK_FALSE(fs::exists(f.root / "child-started.txt"));
+}
+TEST_CASE("launcher fonts cover every console language and country label", "[launcher-fonts]") {
+  Headless headless;
+  auto& io = ImGui::GetIO();
+  io.DisplaySize = ImVec2(1000, 700);
+  ImGui::NewFrame();
+  REQUIRE(io.Fonts->Fonts.Size == 2);
+  CHECK(std::string(ui::T().fonts.regular->GetDebugName()) == "Noto Sans CJK JP Regular");
+  CHECK(std::string(ui::T().fonts.bold->GetDebugName()) == "Noto Sans CJK JP Medium");
+  for (auto* font : io.Fonts->Fonts) CHECK(font->Sources.Size == 1);
+  auto check = [&](const char* label) {
+    INFO(label);
+    for (auto* font : {ui::T().fonts.regular, ui::T().fonts.bold}) {
+      const char* at = label;
+      while (*at) {
+        unsigned int codepoint = 0;
+        const int bytes = ImTextCharFromUtf8(&codepoint, at, nullptr);
+        REQUIRE(bytes > 0);
+        INFO("codepoint " << codepoint);
+        REQUIRE(codepoint != 0xFFFD);
+        CHECK(font->IsGlyphInFont(ImWchar(codepoint)));
+        // Check the actual baked glyph too, so fallback '?' cannot pass.
+        for (float size : {14.0f, 28.0f}) {
+          const auto* glyph = font->GetFontBaked(size)->FindGlyphNoFallback(ImWchar(codepoint));
+          CHECK(glyph != nullptr);
+          if (glyph && codepoint != ' ') CHECK(glyph->Visible);
+        }
+        at += bytes;
+      }
+    }
+  };
+  for (const auto& language : ConsoleLanguages()) check(language.name);
+  // Country names are displayed by CountryOptions in the application language.
+  for (const bool en : {false, true}) {
+    english = en;
+    for (const auto& option : CountryOptions()) check(option.name.c_str());
+  }
+  english = false;
+  ImGui::EndFrame();
+}
+TEST_CASE("closing a console selector does not also navigate back", "[launcher-usability]") {
+  const ImGuiKey key = GENERATE(ImGuiKey_Escape, ImGuiKey_GamepadFaceRight);
+  Frontend f; f.Seed(f.TargetFixture());
+  Command(f.app, kSettings);
+  Headless headless;
+  ui::ApplyStyle(1);
+  ui::Ui view(f.app); view.record = true;
+  auto& io = ImGui::GetIO();
+  io.ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad;
+  io.BackendFlags |= ImGuiBackendFlags_HasGamepad;
+  auto frame = [&] { headless.Frame(view, 1220, 800); ui::RunDeferred(view); };
+  frame(); frame();
+  const auto combo = std::ranges::find_if(view.placed, [](const auto& p) { return p.id == kConsoleLanguage; });
+  REQUIRE(combo != view.placed.end());
+  const auto center = combo->rect.GetCenter();
+  io.AddMousePosEvent(center.x, center.y); frame();
+  io.AddMouseButtonEvent(0, true); frame();
+  io.AddMouseButtonEvent(0, false); frame(); frame();
+  REQUIRE(view.popup_was_open);
+  CHECK_FALSE(io.WantTextInput);  // selectors contain only the options, no search field
+  io.AddKeyEvent(key, true); frame();
+  CHECK(PageOf(f.app) == Page::Settings);
+  CHECK_FALSE(view.popup_was_open);
+  io.AddKeyEvent(key, false); frame(); frame();
+  CHECK_FALSE(view.popup_was_open);
+  io.AddKeyEvent(key, true); frame();
+  CHECK(PageOf(f.app) != Page::Settings);
+  io.AddKeyEvent(key, false); frame();
+}
+TEST_CASE("diagnostic reports distinguish selected content from the operation target", "[launcher-usability]") {
+  english = false;
+  Frontend f; auto target = f.TargetFixture(); target.label = target.label_en = "Selected content";
+  target.limitations = target.limitations_en = "Unrelated development validation notes";
+  f.Seed(target);
+  InspectSelected(f.app);
+  CHECK(f.app.details.find("Unrelated development validation notes") == std::string::npos);
+  f.app.environment.cpu = "Test CPU"; f.app.environment.gpu = "Test GPU";
+  f.app.environment.missing_tools = {"clang++"}; f.app.environment.toolchain = false;
+  f.app.activity_kind = Activity::Prepare; f.app.result = 3;
+  f.app.operation_target = "previous-operation-target";
+  f.app.result_title = "Preparation failed"; f.app.activity_text = "Required input is missing";
+  f.app.logs = f.root / "operation.log"; f.app.operation_details = "exit_code=7";
+  f.app.details = "Details of a different selection";
+  const auto environment = DiagnosticReport(f.app, DiagnosticSection::Environment);
+  CHECK(environment.find("Test CPU") != std::string::npos);
+  CHECK(environment.find("Test GPU") != std::string::npos);
+  CHECK(environment.find("clang++") != std::string::npos);
+  const auto content = DiagnosticReport(f.app, DiagnosticSection::Content);
+  CHECK(content.find("Selected content") != std::string::npos);
+  CHECK(content.find("previous-operation-target") == std::string::npos);
+  const auto operation = DiagnosticReport(f.app, DiagnosticSection::Operation);
+  CHECK(operation.find("previous-operation-target") != std::string::npos);
+  CHECK(operation.find("Required input is missing") != std::string::npos);
+  CHECK(operation.find("operation.log") != std::string::npos);
+  CHECK(operation.find("exit_code=7") != std::string::npos);
+  CHECK(operation.find("Selected content") == std::string::npos);
+  CHECK(operation.find("Details of a different selection") == std::string::npos);
+  const auto full = DiagnosticReport(f.app);
+  CHECK(full.find(X360N_VERSION) != std::string::npos);
+  CHECK(full.find("Unrelated development validation notes") == std::string::npos);
+  CHECK_FALSE(f.app.busy);
+  CHECK_FALSE(fs::exists(f.root / "child-started.txt"));
+  Target dependency; dependency.id = "required-profile";
+  f.app.targets[0].dependencies = {dependency.id, "missing-profile"};
+  f.app.targets.push_back(dependency); f.app.checked.resize(2);
+  f.app.checked[1].state.issues = {"Required component hash mismatch"};
+  const auto dependencies = DiagnosticReport(f.app, DiagnosticSection::Content);
+  CHECK(dependencies.find("Required component hash mismatch") != std::string::npos);
+  CHECK(dependencies.find("missing-profile") != std::string::npos);
+  CHECK(dependencies.find("Perfil necessário não encontrado") != std::string::npos);
+  OnInspected(f.app, "Environment verification failed: fixture-specific cause");
+  CHECK(DiagnosticReport(f.app, DiagnosticSection::Operation).find("fixture-specific cause") != std::string::npos);
+  f.app.environment = {}; f.app.targets.clear(); f.app.selected = 0;
+  CHECK(DiagnosticReport(f.app, DiagnosticSection::Environment).find("Ambiente ainda não verificado") != std::string::npos);
+  CHECK(DiagnosticReport(f.app, DiagnosticSection::Content).find("Nenhum conteúdo selecionado") != std::string::npos);
+}
+TEST_CASE("small status icons are centered and symmetric in rendered pixels", "[launcher-icons]") {
+  const float density = GENERATE(1.f, 1.5f, 2.f);
+  Headless headless;
+  ui::ApplyStyle(1);
+  auto& io = ImGui::GetIO(); io.DisplaySize = ImVec2(128, 128);
+  io.DisplayFramebufferScale = ImVec2(density, density);
+  const int pixels = int(128 * density);
+  for (const char* name : {"warning", "error", "info", "language", "dashboard", "chip"}) for (float size : {16.f, 20.f, 24.f, 32.f}) {
+    INFO(name << " at " << size);
+    ImGui::NewFrame();
+    ui::Icon(ImGui::GetForegroundDrawList(), name, ImRect(44, 44, 84, 84), IM_COL32_WHITE, size);
+    ImGui::Render();
+    ui::Canvas canvas; canvas.Resize(pixels, pixels);
+    std::fill(canvas.pixels.begin(), canvas.pixels.end(), 0);
+    ui::Rasterize(canvas, ImGui::GetDrawData());
+    int min_x = pixels, min_y = pixels, max_x = -1, max_y = -1;
+    for (int y = 0; y < pixels; ++y) for (int x = 0; x < pixels; ++x) if ((canvas.pixels[y * pixels + x] & 255) > 8) {
+      min_x = std::min(min_x, x); max_x = std::max(max_x, x);
+      min_y = std::min(min_y, y); max_y = std::max(max_y, y);
+    }
+    REQUIRE(max_x >= min_x); REQUIRE(max_y >= min_y);
+    CHECK(std::abs((min_x + max_x + 1) / 2.f - 64.f * density) <= 1.f);
+    CHECK(std::abs((min_y + max_y + 1) / 2.f - 64.f * density) <= 1.f);
+    uint64_t difference = 0, ink = 0;
+    for (int y = min_y; y <= max_y; ++y) for (int x = min_x; x <= max_x; ++x) {
+      const int a = canvas.pixels[y * pixels + x] & 255;
+      const int b = canvas.pixels[y * pixels + min_x + max_x - x] & 255;
+      difference += std::abs(a - b); ink += a + b;
+    }
+    REQUIRE(ink > 0);
+    CHECK(double(difference) / double(ink) < 0.03);
+    if (std::string_view(name) == "dashboard") {
+      // Four separate tiles, not a connected cross or an eight-shaped outline.
+      const int center_x = (min_x + max_x) / 2, center_y = (min_y + max_y) / 2;
+      for (int y = min_y; y <= max_y; ++y) CHECK((canvas.pixels[y * pixels + center_x] & 255) <= 8);
+      for (int x = min_x; x <= max_x; ++x) CHECK((canvas.pixels[center_y * pixels + x] & 255) <= 8);
+    }
+  }
+  const char* file = std::getenv("X360N_ICON_CAPTURE");
+  if (file && density == 1.f) {
+    io.DisplaySize = ImVec2(1024, 360);
+    const char* names[] = {"warning", "error", "info", "check", "settings", "language", "dashboard", "save"};
+    ImGui::NewFrame();
+    auto* dl = ImGui::GetForegroundDrawList();
+    dl->AddRectFilled(ImVec2(0, 0), io.DisplaySize, ui::P.bg);
+    for (int i = 0; i < 8; ++i) {
+      const float x = i * 128.f;
+      ui::Text(dl, ui::Font::Body, names[i], ImRect(x, 8, x + 128, 40), ui::P.text, ui::Center);
+      for (int row = 0; row < 4; ++row) {
+        const float sizes[] = {16, 20, 24, 32};
+        const auto color = i == 0 ? ui::P.warn : i == 1 ? ui::P.err : ui::P.text;
+        ui::Icon(dl, names[i], ImRect(x, 48 + row * 72.f, x + 128, 112 + row * 72.f), color, sizes[row]);
+      }
+    }
+    ImGui::Render();
+    ui::Canvas canvas; canvas.Resize(1024, 360); ui::Rasterize(canvas, ImGui::GetDrawData());
+    CHECK(ui::WritePng(file, canvas));
+  }
+}
+TEST_CASE("launcher text stays centered and rasterizes at the current display density", "[launcher-fonts]") {
+  Headless headless;
+  ui::ApplyStyle(1);
+  auto& io = ImGui::GetIO();
+  io.DisplaySize = ImVec2(160, 80);
+  // Reuse the same fonts across monitor changes; direct draw-list text must
+  // update even when no ImGui widget has pushed that face in this frame.
+  for (float density : {1.f, 2.f, 1.5f, 1.f}) {
+    io.DisplayFramebufferScale = ImVec2(density, density);
+    for (auto font : {ui::Font::Body, ui::Font::Bold, ui::Font::Caption, ui::Font::Headline}) {
+      INFO("density=" << density << " font=" << int(font));
+      ImGui::NewFrame();
+      ui::Text(ImGui::GetForegroundDrawList(), font, "HHH", ImRect(0, 20, 160, 60), IM_COL32_WHITE, ui::Center);
+      auto* face = font == ui::Font::Bold || font == ui::Font::Headline ? ui::T().fonts.bold : ui::T().fonts.regular;
+      CHECK(face->GetFontBaked(ui::FontSize(font))->RasterizerDensity == density);
+      ImGui::Render();
+      ui::Canvas canvas; canvas.Resize(int(160 * density), int(80 * density));
+      std::fill(canvas.pixels.begin(), canvas.pixels.end(), 0);
+      ui::Rasterize(canvas, ImGui::GetDrawData());
+      int lo = canvas.height, hi = -1;
+      for (int y = 0; y < canvas.height; ++y) for (int x = 0; x < canvas.width; ++x)
+        if ((canvas.pixels[y * canvas.width + x] & 255) > 32) { lo = std::min(lo, y); hi = std::max(hi, y); }
+      REQUIRE(hi >= lo);
+      CHECK(std::abs((lo + hi + 1) / 2.f - 40 * density) <= density);
+    }
+  }
+}
+TEST_CASE("control borders have crisp physical pixel edges", "[launcher-layout]") {
+  const float density = GENERATE(1.f, 1.5f, 2.f);
+  const float stroke = GENERATE(1.f, 2.f);
+  INFO("density=" << density << " stroke=" << stroke);
+  Headless headless;
+  auto& io = ImGui::GetIO(); io.DisplaySize = ImVec2(100, 80);
+  io.DisplayFramebufferScale = ImVec2(density, density);
+  ImGui::NewFrame();
+  ui::Round(ImGui::GetForegroundDrawList(), ImRect(20, 20, 80, 60), 8, 0, IM_COL32_WHITE, stroke);
+  ImGui::Render();
+  ui::Canvas canvas; canvas.Resize(int(100 * density), int(80 * density));
+  std::fill(canvas.pixels.begin(), canvas.pixels.end(), 0);
+  ui::Rasterize(canvas, ImGui::GetDrawData());
+  const int left = int(20 * density), right = int(80 * density), width = int(std::round(stroke * density));
+  for (int x = left - 2; x < right + 2; ++x) {
+    const bool ink = (x >= left && x < left + width) || (x >= right - width && x < right);
+    const int pixel = canvas.pixels[int(40 * density) * canvas.width + x] & 255;
+    CHECK(pixel == (ink ? 255 : 0));
+  }
+}
 // Geometry review of every page, banner state, size and scale without showing
 // a window. Set X360N_LAYOUT_CAPTURE to a folder to also save PNG renders.
 TEST_CASE("launcher layout keeps controls inside the window, their cards and their labels", "[launcher-layout]") {
+  const bool expanded = GENERATE(false, true);
+  INFO((expanded ? "expanded experiments" : "collapsed experiments"));
   Frontend f; f.Seed(f.TargetFixture());
   // The sidebar update action takes room only while a newer release is known.
   f.app.update = AvailableUpdate{"10.100.100", "x360-native-10.100.100-" + PackagePlatform(), "", "", ""};
   const char* capture = std::getenv("X360N_LAYOUT_CAPTURE");
   const fs::path captures = capture ? fs::path(capture) : fs::path();
   if (!captures.empty()) fs::create_directories(captures);
+  const bool quick_capture = std::getenv("X360N_LAYOUT_CAPTURE_QUICK") != nullptr;
   Headless headless;
   ui::Ui view(f.app);
+  view.native_expanded = expanded;
   view.upload = ui::UpdateSoftTexture;
   view.record = true;
-  struct PageCase { const char* name; int command; int preview; };  // preview 6: game list, 7: empty library
+  struct PageCase { const char* name; int command; int preview; int diagnostic_tab = 0; };  // preview 6: game list, 7: empty library
   const PageCase pages[] = {{"home", kHome, 0}, {"library", kGames, 7}, {"library-list", kGames, 6}, {"import", kImportPage, 0},
-                            {"dashboard", kDashboards, 0}, {"settings", kSettings, 0}, {"diagnostics", kDetails, 0}};
+                            {"dashboard", kDashboards, 0}, {"settings", kSettings, 0}, {"diagnostics", kDetails, 0},
+                            {"diagnostics-content", kDetails, 0, 1}, {"diagnostics-operation", kDetails, 0, 2}};
   struct BannerCase { const char* name; int preview; };
   const BannerCase banners[] = {{"idle", 5}, {"busy", 2}, {"error", 3}, {"imported", 4}};
   struct SizeCase { const char* name; int w, h; };
@@ -509,6 +808,7 @@ TEST_CASE("launcher layout keeps controls inside the window, their cards and the
     if (page.command == kSettings || page.command == kDetails) Command(f.app, page.command);
     if (banner.preview != 5) ApplyPreview(f.app, banner.preview);
     view.settings_scroll = 0;
+    view.diagnostic_tab = page.diagnostic_tab;
     for (int frame = 0; frame != 3; ++frame) headless.Frame(view, W, H);
     view.deferred.clear();
     const std::string state = std::string(page.name) + "-" + banner.name + "-" + size.name + "-" + std::to_string(int(scale * 100)) + (en ? "-en" : "-pt");
@@ -529,14 +829,16 @@ TEST_CASE("launcher layout keeps controls inside the window, their cards and the
       if (c.kind == "button" && c.need > 0) CHECK(c.need <= c.rect.GetWidth() + 0.5f);
       if (c.kind == "text") CHECK(c.need <= c.rect.GetHeight() + 0.5f);
     }
-    if (!captures.empty()) headless.Capture(captures / (state + ".png"));
+    const bool save_capture = !captures.empty() && (!quick_capture ||
+      (!expanded && !en && scale == 1.f && size.w == 1220));
+    if (save_capture) headless.Capture(captures / (state + ".png"));
     if (page.command == kSettings) {
       // Clipped content stays reachable: the fully scrolled page shows every card above the window's bottom edge.
       view.settings_scroll = 1e9f;
       for (int frame = 0; frame != 3; ++frame) headless.Frame(view, W, H);
       view.deferred.clear();
       for (const auto& card : view.cards) CHECK(card.Max.y <= H + 0.5f);
-      if (!captures.empty() && view.settings_scroll_max > 0) headless.Capture(captures / (state + "-scrolled.png"));
+      if (save_capture && view.settings_scroll_max > 0) headless.Capture(captures / (state + "-scrolled.png"));
       view.settings_scroll = 0;
     }
   }

@@ -202,14 +202,14 @@
     },
     {
       "id": "launcher-fonts",
-      "origin": "https://github.com/ocornut/imgui.git (misc/fonts/DroidSans.ttf, misc/fonts/Roboto-Medium.ttf)",
-      "revision": "6d910d5487d11ca567b61c7824b0c78c569d62f0",
-      "spdx": "Apache-2.0",
+      "origin": "https://github.com/notofonts/noto-cjk (Sans/OTF/Japanese/NotoSansCJKjp-Regular.otf, NotoSansCJKjp-Medium.otf)",
+      "revision": "523d033d6cb47f4a80c58a35753646f5c3608a78",
+      "spdx": "OFL-1.1",
       "license_file": "licenses/launcher-fonts.txt",
       "scope": "binary",
-      "integration": "font files embedded unchanged in the x360-native launcher; DroidSans.ttf 4e2371bc0e4cf6983342e150412f140da79d674c9be0b56458401f581072ecd3, Roboto-Medium.ttf 8559132c89ad51d8a2ba5b171887a44a7ba93776e205f553573de228e64b45f8",
-      "obligations": "Preserve the attribution and the Apache License 2.0 text.",
-      "license_sha256": "fd69285e07bdc535b6a235f19546ace9496a9bf47715a6fff582f174b26fddfc"
+      "integration": "Unmodified Noto Sans CJK JP family embedded on every platform; Regular SHA-256 68a3fc98800b2a27b371f2fb79991daf3633bd89309d4ffaa6946fd587f375b5; Medium SHA-256 dd523e580e3413c480b2d701bf64e534c20f8419e3cfb6a44c2bdcd8d2a6c052",
+      "obligations": "Preserve Adobe copyright and OFL-1.1. Do not sell separately.",
+      "license_sha256": "0f2fceca6604fa464d13c33efbc8ff3be88b313a8ca36bef1dce0d82f1cdf818"
     },
     {
       "id": "o1heap",
@@ -1878,8 +1878,8 @@
       "generated_translation_units": [
         "src/desktop/desktop-deps/sdl3/CMakeFiles/SDL3-static.dir/cmake_pch.h.c",
         "src/desktop/desktop-deps/sdl3/CMakeFiles/SDL3-static.dir/cmake_pch.hxx.cxx",
-        "src/desktop/embedded/x360n_font_droid_sans.c",
-        "src/desktop/embedded/x360n_font_roboto_medium.c"
+        "src/desktop/embedded/x360n_font_noto_regular.c",
+        "src/desktop/embedded/x360n_font_noto_medium.c"
       ],
       "link_libraries": [
         "desktop-deps/fmt/fmt.lib",
@@ -3284,8 +3284,8 @@
         "src/desktop/desktop-deps/sdl3/wayland-generated-protocols/xdg-output-unstable-v1-protocol.c",
         "src/desktop/desktop-deps/sdl3/wayland-generated-protocols/xdg-shell-protocol.c",
         "src/desktop/desktop-deps/sdl3/wayland-generated-protocols/xdg-toplevel-icon-v1-protocol.c",
-        "src/desktop/embedded/x360n_font_droid_sans.c",
-        "src/desktop/embedded/x360n_font_roboto_medium.c"
+        "src/desktop/embedded/x360n_font_noto_regular.c",
+        "src/desktop/embedded/x360n_font_noto_medium.c"
       ],
       "link_libraries": [
         "desktop-deps/fmt/libfmt.a",
@@ -4675,8 +4675,8 @@
       ],
       "generated_translation_units": [
         "src/desktop/desktop-deps/sdl3/CMakeFiles/SDL3-static.dir/cmake_pch.h.c",
-        "src/desktop/embedded/x360n_font_droid_sans.c",
-        "src/desktop/embedded/x360n_font_roboto_medium.c"
+        "src/desktop/embedded/x360n_font_noto_regular.c",
+        "src/desktop/embedded/x360n_font_noto_medium.c"
       ],
       "link_libraries": [
         "desktop-deps/fmt/libfmt.a",
@@ -6061,8 +6061,8 @@
         "src/desktop/desktop-deps/sdl3/wayland-generated-protocols/xdg-output-unstable-v1-protocol.c",
         "src/desktop/desktop-deps/sdl3/wayland-generated-protocols/xdg-shell-protocol.c",
         "src/desktop/desktop-deps/sdl3/wayland-generated-protocols/xdg-toplevel-icon-v1-protocol.c",
-        "src/desktop/embedded/x360n_font_droid_sans.c",
-        "src/desktop/embedded/x360n_font_roboto_medium.c"
+        "src/desktop/embedded/x360n_font_noto_regular.c",
+        "src/desktop/embedded/x360n_font_noto_medium.c"
       ],
       "link_libraries": [
         "desktop-deps/fmt/libfmt.a",
@@ -7451,8 +7451,8 @@
       ],
       "generated_translation_units": [
         "src/desktop/desktop-deps/sdl3/CMakeFiles/SDL3-static.dir/cmake_pch.h.c",
-        "src/desktop/embedded/x360n_font_droid_sans.c",
-        "src/desktop/embedded/x360n_font_roboto_medium.c"
+        "src/desktop/embedded/x360n_font_noto_regular.c",
+        "src/desktop/embedded/x360n_font_noto_medium.c"
       ],
       "link_libraries": [
         "desktop-deps/fmt/libfmt.a",
@@ -8791,8 +8791,8 @@
       "generated_translation_units": [
         "src/desktop/desktop-deps/sdl3/CMakeFiles/SDL3-static.dir/cmake_pch.h.c",
         "src/desktop/desktop-deps/sdl3/CMakeFiles/SDL3-static.dir/cmake_pch.hxx.cxx",
-        "src/desktop/embedded/x360n_font_droid_sans.c",
-        "src/desktop/embedded/x360n_font_roboto_medium.c"
+        "src/desktop/embedded/x360n_font_noto_regular.c",
+        "src/desktop/embedded/x360n_font_noto_medium.c"
       ],
       "link_libraries": [
         "desktop-deps/fmt/fmt.lib",

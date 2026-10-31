@@ -1,5 +1,33 @@
 # STATUS
 
+31/10 — **revisão final do launcher**: reproduzido e corrigido conflito de IDs
+ImGui entre navegação e cartões de passos; escopos separados sem ocultar avisos.
+Teste de interação cobre os botões das seis telas. Diagnóstico preserva erros
+de verificação e pendências de dependências; diálogos de uso comum simplificados.
+SDK conferido contra os hashes dos patches fixados; fontes e licença verificadas.
+Builds e testes focados finais aprovados: Windows (29 casos), Linux/WSL (28).
+
+31/10 — **ícones do launcher**: dashboard com quatro blocos separados, sem
+traços se encostando; globo de idioma simplificado para círculo, meridiano e
+equador. Desenho compartilhado entre plataformas. Build Windows aprovado;
+simetria/centralização e separação dos blocos conferidas em 16/20/24/32 px,
+densidades 1x/1,5x/2x; capturas de Início e Dashboard revisadas. Evidências:
+`.local/tools/launcher-review/icons-{before,after}.png` e `icons-tests.log`.
+
+31/10 — **launcher: revisão de layout, textos e Diagnóstico**: uma família
+Noto Sans CJK JP Regular/Medium embutida em todas as plataformas, sem fontes do
+sistema, merges, subconjunto, peso artificial ou FreeType. Ajustados densidade
+dos textos, alinhamento com ícones e bordas no pixel físico. Configurações em
+colunas estáveis, países traduzidos/ordenados e seletores sem busca. Cartões de
+passos mantidos; textos de uso comum encurtados, sem relatos de desenvolvimento
+ou validação de jogos. Diagnóstico técnico com indicadores de ambiente, três
+abas, relatório copiável e contexto da operação separado da seleção.
+Build Windows e testes focados de UI/fontes/layout/ícones aprovados; seis telas
+conferidas no launcher real. Linux x64/WSL: build e testes headless aprovados.
+macOS/ARM64 e execução de jogos não validados nesta revisão. Arquivos completos
+de fonte acrescentam cerca de 32 MiB; não há alegação de ganho de performance.
+[Implementação e evidências](docs/guides/desktop-ui.md).
+
 31/10 — **PERF-GPU-01, entrega parcial**: 0235 elimina o lock global nos
 pedidos Xenos de memória já residente; 0236 corrige saturação inteira MEMEXPORT
 no tradutor Vulkan. Native/D3D12 mantém readbacks por arena/fence e espera nas

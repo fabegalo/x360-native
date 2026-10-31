@@ -2,12 +2,11 @@
 #include <imgui_internal.h>
 #include <algorithm>
 #include <cmath>
-
-// Font files embedded at build time (cmake/desktop/embed_file.cmake).
-extern "C" const unsigned char x360n_font_droid_sans[];
-extern "C" const unsigned int x360n_font_droid_sans_size;
-extern "C" const unsigned char x360n_font_roboto_medium[];
-extern "C" const unsigned int x360n_font_roboto_medium_size;
+// One unmodified font family embedded on every platform.
+extern "C" const unsigned char x360n_font_noto_regular[];
+extern "C" const unsigned int x360n_font_noto_regular_size;
+extern "C" const unsigned char x360n_font_noto_medium[];
+extern "C" const unsigned int x360n_font_noto_medium_size;
 
 namespace x360n::ui {
 Color Mix(Color base, Color over, int percent) {
@@ -19,42 +18,39 @@ Color Mix(Color base, Color over, int percent) {
 }
 Theme& T() { static Theme theme; return theme; }
 void LoadFonts(ImGuiIO& io) {
-  auto add = [&](const unsigned char* data, unsigned int size) {
+  auto add = [&](const unsigned char* data, unsigned int bytes, const char* name) {
     ImFontConfig config;
-    config.FontDataOwnedByAtlas = false;  // static data
-    // Crisp small text: one texel per screen pixel and whole-pixel glyph
-    // positions, so bilinear sampling never spreads a stem over two columns.
-    config.OversampleH = 1;
-    config.OversampleV = 1;
+    config.FontDataOwnedByAtlas = false;
+    config.OversampleH = config.OversampleV = 1;
     config.PixelSnapH = true;
-    // Light text on the dark palette loses weight without ClearType's contrast
-    // boost; strengthen glyph coverage slightly instead.
-    config.RasterizerMultiply = 1.3f;
-    return io.Fonts->AddFontFromMemoryTTF(const_cast<unsigned char*>(data), int(size), 14.0f, &config);
+    ImFormatString(config.Name, IM_ARRAYSIZE(config.Name), "%s", name);
+    return io.Fonts->AddFontFromMemoryTTF(const_cast<unsigned char*>(data), int(bytes), 20.0f, &config);
   };
   auto& fonts = T().fonts;
-  fonts.regular = add(x360n_font_droid_sans, x360n_font_droid_sans_size);
-  fonts.bold = add(x360n_font_roboto_medium, x360n_font_roboto_medium_size);
-  fonts.mono = fonts.regular;
+  fonts.regular = add(x360n_font_noto_regular, x360n_font_noto_regular_size, "Noto Sans CJK JP Regular");
+  fonts.bold = add(x360n_font_noto_medium, x360n_font_noto_medium_size, "Noto Sans CJK JP Medium");
   io.FontDefault = fonts.regular;
 }
 namespace {
 ImFont* FontOf(Font font) {
   const auto& f = T().fonts;
+  ImFont* result = f.regular;
   switch (font) {
-    case Font::Bold: case Font::Headline: case Font::Big: return f.bold;
-    case Font::Mono: return f.mono;
-    default: return f.regular;
+    case Font::Bold: case Font::Headline: case Font::Big: result = f.bold; break;
+    default: break;
   }
+  // Direct AddText/CalcTextSizeA bypass PushFont, which normally propagates
+  // framebuffer density. Without this, headings can reuse a 1x bitmap on Retina.
+  result->CurrentRasterizerDensity = ImGui::GetFontRasterizerDensity();
+  return result;
 }
 }  // namespace
 float FontSize(Font font) {
   switch (font) {
-    case Font::Caption: return T().S(12);
-    case Font::Headline: return T().S(30);
-    case Font::Big: return T().S(22);
-    case Font::Mono: return T().S(13);
-    default: return T().S(14);
+    case Font::Caption: return T().S(18);
+    case Font::Headline: return T().S(36);
+    case Font::Big: return T().S(26);
+    default: return T().S(20);
   }
 }
 void Push(Font font) { ImGui::PushFont(FontOf(font), FontSize(font)); }
@@ -80,7 +76,10 @@ void Text(ImDrawList* dl, Font font, const std::string& text, const ImRect& r, C
     } while (keep > 0 && w > avail);
   }
   const float x = align == Center ? r.Min.x + (avail - w) / 2 : align == Right ? r.Max.x - w : r.Min.x;
-  const float y = vcenter ? r.Min.y + (r.GetHeight() - size) / 2 : r.Min.y;
+  // Center visible capitals, not the font's ascent/descent box, so labels
+  // share a stable optical baseline beside icons.
+  const auto* cap = f->GetFontBaked(size)->FindGlyph('H');
+  const float y = vcenter ? r.GetCenter().y - (cap->Y0 + cap->Y1) / 2 : r.Min.y;
   const ImVec4 clip(r.Min.x, r.Min.y - size, r.Max.x + 1, r.Max.y + size);
   dl->AddText(f, size, ImVec2(std::floor(x), std::floor(y)), color, shown.data(), shown.data() + shown.size(), 0.0f, &clip);
 }
@@ -114,12 +113,20 @@ float Wrapped(ImDrawList* dl, Font font, const std::string& text, const ImRect& 
   return y - r.Min.y;
 }
 void Round(ImDrawList* dl, const ImRect& r, float radius, Color fill, Color border, float bw, bool dashed) {
-  if (fill) dl->AddRectFilled(r.Min, r.Max, fill, radius);
+  const float density = std::max(1.0f, ImGui::GetIO().DisplayFramebufferScale.x);
+  struct RestoreFringe { ImDrawList* list; float value; ~RestoreFringe() { list->_FringeScale = value; } } restore{dl, dl->_FringeScale};
+  dl->_FringeScale = 1.0f / density;  // antialias only one physical pixel at any DPI
+  auto snap = [density](ImVec2 p) { return ImVec2(std::round(p.x * density) / density, std::round(p.y * density) / density); };
+  const ImRect box(snap(r.Min), snap(r.Max));
+  if (fill) dl->AddRectFilled(box.Min, box.Max, fill, radius);
   if (!border) return;
+  bw = std::max(1.0f, std::round(bw * density)) / density;
   const ImVec2 inset(bw / 2, bw / 2);
-  if (!dashed) { dl->AddRect(r.Min + inset, r.Max - inset, border, radius, 0, bw); return; }
+  // AddRect adds another half-pixel offset. Applying both offsets blurs every
+  // straight card/control edge, especially the two-pixel selection outline.
+  if (!dashed) { dl->PathRect(box.Min + inset, box.Max - inset, radius); dl->PathStroke(border, ImDrawFlags_Closed, bw); return; }
   // Dashed outline: the same rounded path, stroked in segments.
-  dl->PathRect(r.Min + inset, r.Max - inset, radius);
+  dl->PathRect(box.Min + inset, box.Max - inset, radius);
   ImVector<ImVec2> points; points.swap(dl->_Path);
   const float dash = T().S(6), gap = T().S(4);
   float carry = 0; bool on = true;
@@ -131,7 +138,7 @@ void Round(ImDrawList* dl, const ImRect& r, float radius, Color fill, Color bord
     float t = 0;
     while (t < length) {
       const float span = std::min((on ? dash : gap) - carry, length - t);
-      if (on) dl->AddLine(a + dir * t, a + dir * (t + span), border, bw);
+      if (on) { const ImVec2 segment[] = {a + dir * t, a + dir * (t + span)}; dl->AddPolyline(segment, 2, border, 0, bw); }
       t += span; carry += span;
       if (carry >= (on ? dash : gap) - 0.01f) { carry = 0; on = !on; }
     }
@@ -156,6 +163,9 @@ void ApplyStyle(float scale) {
   style.Colors[ImGuiCol_FrameBg] = c(P.surface2);
   style.Colors[ImGuiCol_FrameBgHovered] = c(Mix(P.surface2, Rgb(255, 255, 255), 6));
   style.Colors[ImGuiCol_FrameBgActive] = c(Mix(P.surface2, Rgb(255, 255, 255), 10));
+  style.Colors[ImGuiCol_Button] = c(P.surface2);
+  style.Colors[ImGuiCol_ButtonHovered] = c(Mix(P.surface2, Rgb(255, 255, 255), 9));
+  style.Colors[ImGuiCol_ButtonActive] = c(Mix(P.surface2, Rgb(255, 255, 255), 14));
   style.Colors[ImGuiCol_ScrollbarBg] = ImVec4(0, 0, 0, 0);
   style.Colors[ImGuiCol_ScrollbarGrab] = c(P.faint);
   style.Colors[ImGuiCol_ScrollbarGrabHovered] = c(P.muted);
@@ -169,7 +179,7 @@ void ApplyStyle(float scale) {
   style.WindowBorderSize = 0; style.ChildBorderSize = 0; style.PopupBorderSize = 1;
   style.FrameRounding = 8; style.PopupRounding = 10; style.ScrollbarRounding = 4; style.GrabRounding = 4;
   style.ScrollbarSize = 10;
-  style.FontSizeBase = 14;
+  style.FontSizeBase = 20;
   style.ScaleAllSizes(scale);
   ImGui::GetStyle() = style;
 }

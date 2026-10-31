@@ -1,5 +1,22 @@
 # Idioma e localidade do console — 16/10/2026
 
+## Fontes do launcher compartilhado — 31/10/2026
+
+Os seletores usam a família Noto Sans CJK JP embutida, igual em todos os
+sistemas. Idiomas mantêm os nomes nativos; países são traduzidos e ordenados
+no idioma do aplicativo. As duas listas não têm campo de busca. A escolha
+continua persistindo os mesmos IDs, sem alterar idioma e país em conjunto.
+
+O teste de fontes confere os glifos realmente exibidos nas 16 opções de idioma
+e nas 42 opções de país em PT/EN, sem aceitar um glifo substituto como cobertura.
+Não há procura por fontes do sistema, mistura de famílias, subconjunto gerado
+ou FreeType. Fonte, licença, hashes e cobertura estão em
+`src/desktop/resources/fonts/README.md`. Layout e evidências da revisão de todas
+as telas estão em `docs/guides/desktop-ui.md`.
+
+O restante deste documento descreve os contratos do console e as evidências
+históricas de 16/10; a troca da fonte só afeta o launcher.
+
 Implementação Windows x64/Xenos, SDK fixado em `f5337cdc`, patch 0081.
 O idioma do aplicativo desktop permanece independente do idioma do console.
 

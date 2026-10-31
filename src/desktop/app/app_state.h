@@ -28,7 +28,7 @@ enum : int {
   kEffectBilinear, kEffectCas, kEffectFsr, kSharpnessLabel, kSharpness,
   kScaleLabel, kScale1, kScale2, kScale3, kScale4,
   kAnisoLabel, kAnisoGuest, kAniso2, kAniso4, kAniso8, kAniso16,
-  kAaNone, kAaFxaa, kAaExtreme, kUltrawide, kAaLabel, kOpenLogs, kGoBack };
+  kAaNone, kAaFxaa, kAaExtreme, kUltrawide, kAaLabel, kOpenLogs, kGoBack, kViewIssue };
 enum class Page { Home, Library, Import, Dashboard, Settings, Diagnostics };
 enum class Row { Ready, Preparing, Imported, Unsupported, Error, Pending, Unchecked };
 enum class Tone { Neutral, Ok, Warn, Err, Info };
@@ -96,6 +96,7 @@ struct App {
   int result = 0;  // 0 none, 1 success, 2 warning, 3 error
   int last_action = 0; std::filesystem::path last_source;
   std::string preparing_id, operation_target;
+  std::string operation_details;  // last operation snapshot; selection changes do not overwrite it
   // Native Enhanced custom limits as typed; applied by kTimingApply.
   std::string fps_text, present_text, sharpness_text;
   std::optional<Prompt> prompt;

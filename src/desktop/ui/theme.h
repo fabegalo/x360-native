@@ -17,16 +17,15 @@ struct Palette {
 // muted text on surface is above 5:1; white on the accent fill is above 5:1.
 inline constexpr Palette P{
   Rgb(13, 15, 18),   Rgb(10, 12, 14),   Rgb(22, 26, 31),   Rgb(31, 36, 43),   Rgb(46, 53, 62),
-  Rgb(236, 240, 245), Rgb(151, 161, 174), Rgb(98, 108, 121),
+  Rgb(236, 240, 245), Rgb(174, 184, 196), Rgb(130, 142, 157),
   Rgb(16, 124, 16),  Rgb(21, 143, 21),  Rgb(12, 104, 12),  Rgb(96, 214, 96),  Rgb(255, 255, 255),
   Rgb(96, 214, 96),  Rgb(245, 183, 64), Rgb(240, 96, 96),  Rgb(104, 168, 255)};
 Color Mix(Color base, Color over, int percent);
 
-// Fonts: Droid Sans for text and logs, Roboto Medium for emphasis (Apache-2.0,
-// shipped with the pinned Dear ImGui). Sizes are
-// in 96-DPI pixels and scaled by Theme::scale like every other metric.
-struct Fonts { ImFont* regular = nullptr; ImFont* bold = nullptr; ImFont* mono = nullptr; };
-enum class Font { Body, Bold, Caption, Headline, Big, Mono };
+// Noto Sans CJK JP regular/medium, identical embedded files on every platform.
+// Sizes are logical pixels scaled by Theme::scale.
+struct Fonts { ImFont* regular = nullptr; ImFont* bold = nullptr; };
+enum class Font { Body, Bold, Caption, Headline, Big };
 struct Theme {
   float scale = 1.0f;
   Fonts fonts;

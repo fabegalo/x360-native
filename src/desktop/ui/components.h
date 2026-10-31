@@ -26,10 +26,18 @@ struct Ui {
   std::function<void(ImTextureData*)> upload;   // renderer texture upload
   std::string search;                            // search box text
   bool focus_search = false;
+  bool popup_was_open = false, native_expanded = false;
+  int diagnostic_tab = 0;
+  bool diagnostic_copied = false;
   float settings_scroll = -1, settings_scroll_max = 0;  // review aid: force the Settings scroll position
   int last_page = -1;
   explicit Ui(App& app) : a(app) {}
-  void Run(int id) { deferred.push_back([this, id] { desktop::Command(a, id); }); }
+  void Run(int id) { deferred.push_back([this, id] {
+    if (id == desktop::kViewIssue) diagnostic_tab = 1;
+    if (id == desktop::kBannerDetails) diagnostic_tab = 2;
+    diagnostic_copied = false;
+    desktop::Command(a, id);
+  }); }
   void Place(int id, const ImRect& r, const char* kind, const std::string& text = {}, float need = 0) {
     if (record) placed.push_back({id, r, card, kind, text, need, scrolled});
   }

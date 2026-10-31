@@ -112,22 +112,18 @@ void Sidebar(Ui& ui, const Frame& f) {
   Round(dl, ImRect(s(20), s(28), s(56), s(64)), s(9), P.accent);
   Text(dl, Font::Big, "X", ImRect(s(20), s(28), s(56), s(64)), P.on_accent, Center);
   Text(dl, Font::Bold, "x360-native", ImRect(s(66), s(26), sb - s(12), s(46)), P.text);
-  Text(dl, Font::Caption, "Xbox 360 · AOT", ImRect(s(66), s(44), sb - s(12), s(64)), P.muted);
+  Text(dl, Font::Caption, "Xbox 360", ImRect(s(66), s(44), sb - s(12), s(64)), P.muted);
   const float nx = s(12), nw = sb - s(24), nh = s(42);
   float ny = s(92);
   const std::pair<int, const char*> nav[] = {{kHome, "home"}, {kGames, "library"}, {kImportPage, "download"}, {kDashboards, "dashboard"}};
   for (auto [id, glyph] : nav) { Button(ui, id, Kind::Nav, Rect(nx, ny, nw, nh), glyph, 1); ny += nh + s(4); }
-  // Footer: version and platform, then the privacy note, each measured so a
-  // long prerelease tag or a translation wraps instead of being cut.
+  // Measure the footer so long version identifiers wrap instead of being cut.
   const float fx = s(20), fw = sb - s(36);
-  const auto label = VersionLabel(X360N_VERSION);
-  const auto version = TextWidth(Font::Caption, label) <= fw ? label : "v" + std::string(X360N_VERSION) + "\n" + VersionChannel(X360N_VERSION);
+  const auto version = "v" + std::string(X360N_VERSION);
   const auto footer = version + "\n" + kPlatform;
-  const auto privacy = Tr("Seus arquivos permanecem neste computador.", "Your files stay on this computer.");
-  const float privacy_h = WrappedHeight(Font::Caption, privacy, fw), footer_h = WrappedHeight(Font::Caption, footer, fw);
-  const float privacy_y = H - s(18) - privacy_h, footer_y = privacy_y - s(8) - footer_h;
+  const float footer_h = WrappedHeight(Font::Caption, footer, fw);
+  const float footer_y = H - s(20) - footer_h;
   ui.card = Rect(0, 0, sb, H);
-  TextBlock(ui, 0, privacy, Rect(fx, privacy_y, fw, privacy_h), Font::Caption, P.muted);
   TextBlock(ui, 0, footer, Rect(fx, footer_y, fw, footer_h), Font::Caption, P.muted);
   dl->AddRectFilled(ImVec2(fx, footer_y - s(12)), ImVec2(fx + fw, footer_y - s(11)), P.border);
   float by = footer_y - s(24);
@@ -225,7 +221,7 @@ void ReadOnlyText(Ui& ui, const char* id, const std::string& text, const ImRect&
   ImGui::PushStyleColor(ImGuiCol_Text, ImGui::ColorConvertU32ToFloat4(P.text));
   ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(0, 0));
   Push(font);
-  ImGui::InputTextMultiline(id, const_cast<char*>(text.c_str()), text.size() + 1, r.GetSize(), ImGuiInputTextFlags_ReadOnly);
+  ImGui::InputTextMultiline(id, const_cast<char*>(text.c_str()), text.size() + 1, r.GetSize(), ImGuiInputTextFlags_ReadOnly | ImGuiInputTextFlags_WordWrap);
   Pop();
   ImGui::PopStyleVar(); ImGui::PopStyleColor(2);
   ui.Place(0, r, "edit", text);
@@ -235,7 +231,9 @@ void DrawFrame(Ui& ui) {
   const auto& io = ImGui::GetIO();
   ui.placed.clear(); ui.cards.clear(); ui.card = {};
   // Escape and the gamepad's B go back from Settings/Diagnostics; Ctrl+F searches.
-  if (!ImGui::IsPopupOpen("", ImGuiPopupFlags_AnyPopupId) && !io.WantTextInput &&
+  // NewFrame may already have consumed Escape to close a combo. Remember the
+  // preceding frame so that the same key never also leaves the whole page.
+  if (!ui.popup_was_open && !ImGui::IsPopupOpen("", ImGuiPopupFlags_AnyPopupId | ImGuiPopupFlags_AnyPopupLevel) && !io.WantTextInput &&
       (ImGui::IsKeyPressed(ImGuiKey_Escape, false) || ImGui::IsKeyPressed(ImGuiKey_GamepadFaceRight, false))) ui.Run(kGoBack);
   if (ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiKey_F) && PageOf(a) == Page::Library) ui.focus_search = true;
   ImGui::SetNextWindowPos(ImVec2(0, 0));
@@ -250,8 +248,11 @@ void DrawFrame(Ui& ui) {
   f.W = io.DisplaySize.x; f.H = io.DisplaySize.y;
   ui.window = ImRect(0, 0, f.W, f.H);
   ui.dl->AddRectFilled(ImVec2(0, 0), io.DisplaySize, P.bg);
-  f.sb = s(216); f.pad = s(32);
+  f.sb = s(240); f.pad = s(28);
+  // Navigation and page actions may share a command, but not a widget identity.
+  ImGui::PushID("sidebar");
   Sidebar(ui, f);
+  ImGui::PopID();
   const Page page = PageOf(a);
   if (int(page) != ui.last_page) { ui.last_page = int(page); ImGui::SetScrollY(0); }
   f.cx = f.sb + f.pad; f.cw = std::max(s(300), f.W - f.sb - 2 * f.pad);
@@ -260,11 +261,16 @@ void DrawFrame(Ui& ui) {
   const auto texts = PageTexts(a);
   Text(ui.dl, Font::Headline, texts.headline, Rect(f.cx, y, f.cw - (diag ? s(216) : 0), s(44)), P.text);
   ui.Place(0, Rect(f.cx, y, f.cw - (diag ? s(216) : 0), s(44)), "line", texts.headline);
-  TextBlock(ui, 0, texts.subtitle, Rect(f.cx, y + s(46), f.cw, s(44)), Font::Body, P.muted);
+  TextBlock(ui, 0, texts.subtitle, Rect(f.cx, y + s(46), f.cw, s(28)), Font::Body, P.muted);
   if (diag) Button(ui, kData, Kind::Secondary, Rect(f.cx + f.cw - s(204), y + s(2), s(204), s(40)));
-  f.yc = s(128); f.bottom = f.H - s(28);
+  f.yc = s(116); f.bottom = f.H - s(28);
   f.banner = (a.busy || a.result) && !diag;
-  if (f.banner) f.yc += Banner(ui, f, f.yc) + s(16);
+  if (f.banner) {
+    ImGui::PushID("operation");
+    f.yc += Banner(ui, f, f.yc) + s(16);
+    ImGui::PopID();
+  }
+  ImGui::PushID(int(page));
   switch (page) {
     case Page::Home: HomePage(ui, f); break;
     case Page::Library: ListPage(ui, f, false); break;
@@ -273,7 +279,9 @@ void DrawFrame(Ui& ui) {
     case Page::Settings: SettingsPage(ui, f); break;
     case Page::Diagnostics: DiagnosticsPage(ui, f); break;
   }
+  ImGui::PopID();
   PromptModal(ui);
+  ui.popup_was_open = ImGui::IsPopupOpen("", ImGuiPopupFlags_AnyPopupId | ImGuiPopupFlags_AnyPopupLevel);
   ImGui::End();
 }
 void RunDeferred(Ui& ui) {

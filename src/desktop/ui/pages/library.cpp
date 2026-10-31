@@ -28,7 +28,7 @@ void DrawRow(Ui& ui, size_t row, size_t index, const ImRect& item) {
   if (GImGui->NavJustMovedToId == gid && !sel) ui.deferred.push_back([&a, row] { SelectRow(a, row); });
   const bool focus = ImGui::GetFocusID() == gid && GImGui->NavCursorVisible;
   const Row state = StatusOf(a, index); const Tone tone = RowTone(state);
-  const ImRect card(item.Min.x + s(8), item.Min.y + s(4), item.Max.x - s(8), item.Max.y - s(4));
+  const ImRect card(item.Min.x, item.Min.y + s(4), item.Max.x, item.Max.y - s(4));
   auto* dl = ImGui::GetWindowDrawList();
   Round(dl, card, s(12), sel ? Mix(P.surface, P.accent, 18) : hot ? Mix(P.surface2, Rgb(255, 255, 255), 4) : P.surface2, sel ? P.accent_text : P.border, sel && focus ? 2.0f : 1.0f);
   const ImRect badge = Rect(card.Min.x + s(14), card.Min.y + s(10), s(44), s(44));
@@ -45,9 +45,9 @@ void DrawRow(Ui& ui, size_t row, size_t index, const ImRect& item) {
   Chip(ui, chip_x, chip_y, status, tone);
   ui.dl = page;
   const float tx = badge.Max.x + s(16);
-  Text(dl, Font::Bold, english ? t.label_en : t.label, ImRect(tx, card.Min.y + s(10), chip_x - s(12), card.Min.y + s(32)), P.text);
-  std::string line = dashboard ? "Perfil: " + t.id + (t.version.empty() ? "" : "   ·   " + t.version) :
-    "Title ID: " + (t.title_id.empty() ? std::string("—") : t.title_id) + "   ·   " + Tr("Versão: ", "Version: ") + (t.version.empty() ? std::string("—") : t.version);
+  Text(dl, Font::Bold, DisplayName(t), ImRect(tx, card.Min.y + s(10), chip_x - s(12), card.Min.y + s(32)), P.text);
+  const std::string line = dashboard ? Tr("Dashboard Xbox 360", "Xbox 360 dashboard") :
+    Tr("Versão: ", "Version: ") + (t.version.empty() ? std::string("—") : t.version);
   Text(dl, Font::Caption, line, ImRect(tx, card.Min.y + s(34), chip_x - s(12), card.Min.y + s(56)), P.muted);
 }
 }  // namespace
@@ -70,7 +70,7 @@ void ListPage(Ui& ui, const Frame& f, bool dashboard) {
     ImGui::BeginDisabled(!Enabled(a, kSearch));
     char buffer[256]{};
     std::snprintf(buffer, sizeof(buffer), "%s", ui.search.c_str());
-    if (ImGui::InputTextWithHint("##search", Tr("Buscar jogo, Title ID ou versão", "Search game, Title ID or version").c_str(), buffer, sizeof(buffer))) {
+    if (ImGui::InputTextWithHint("##search", Tr("Buscar jogos", "Search games").c_str(), buffer, sizeof(buffer))) {
       ui.search = buffer;
       ui.deferred.push_back([&ui] { SetQuery(ui.a, ui.search); });
     }
@@ -103,9 +103,13 @@ void ListPage(Ui& ui, const Frame& f, bool dashboard) {
     return;
   }
   const bool removable = !dashboard && Removable(a);
-  const float dh = dashboard || removable ? s(196) : s(150);
-  const ImRect detail = Rect(cx, f.bottom - dh, cw, dh);
-  const ImRect list = Rect(cx, top, cw, std::max(s(96), detail.Min.y - s(12) - top));
+  std::vector<int> actions{!dashboard && a.current.prepared ? kDashboards : kPrimary, kViewIssue};
+  if (!a.current.inputs_ok && !a.current.verification_pending) actions.push_back(kAddContent);
+  if (removable) actions.push_back(kRemove);
+  const float dh = std::max(s(dashboard ? 204 : 178), s(44) + actions.size() * s(44));
+  const float list_h = std::min(float(a.rows.size()) * s(76) + s(8), std::max(s(76), f.bottom - dh - s(12) - top));
+  const ImRect list = Rect(cx, top, cw, list_h);
+  const ImRect detail = Rect(cx, list.Max.y + s(12), cw, dh);
   // Rows scroll inside the list; wheel, arrows and the gamepad move through them.
   ImGui::SetCursorScreenPos(list.Min);
   ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
@@ -123,14 +127,25 @@ void ListPage(Ui& ui, const Frame& f, bool dashboard) {
   ImGui::PopStyleVar(2);
   ui.Place(kGameList, list, "list");
   Card(ui, detail); ui.card = detail;
-  Chip(ui, detail.Min.x + s(24), detail.Min.y + s(20), a.chip_text, a.chip_tone);
   const float aw = std::min(cw / 2, std::max({s(220), ButtonWidth(ui, kPrimary, true), ButtonWidth(ui, kAddContent, true)}));
-  const float tx = detail.Min.x + s(24) + ChipWidth(a.chip_text) + s(12);
-  Text(ui.dl, Font::Bold, a.selection_title, ImRect(tx, detail.Min.y + s(18), detail.Max.x - s(24) - aw - s(24), detail.Min.y + s(46)), P.text);
-  TextBlock(ui, 0, a.status, Rect(cx + s(24), detail.Min.y + s(58), cw - s(48) - aw - s(24), s(80)));
-  Button(ui, kPrimary, Kind::Primary, Rect(cx + cw - s(24) - aw, detail.Min.y + s(22), aw, s(46)), nullptr, 2);
-  Button(ui, kAddContent, Kind::Secondary, Rect(cx + cw - s(24) - aw, detail.Min.y + s(22) + s(46) + s(12), aw, s(40)), "add", 2);
-  if (removable) Button(ui, kRemove, Kind::Secondary, Rect(cx + cw - s(24) - aw, detail.Min.y + s(22) + s(46) + s(12) + s(40) + s(8), aw, s(36)), "remove", 2);
+  const float message_w = cw - s(48) - aw - s(24);
+  Text(ui.dl, Font::Bold, a.selection_title, Rect(cx + s(24), detail.Min.y + s(16), message_w, s(26)), P.text);
+  Chip(ui, detail.Min.x + s(24), detail.Min.y + s(46), a.chip_text, a.chip_tone);
+  const ImRect message = Rect(cx + s(24), detail.Min.y + s(84), message_w, dashboard ? s(64) : dh - s(104));
+  ImGui::SetCursorScreenPos(message.Min);
+  ImGui::BeginChild("selection-status", message.GetSize(), ImGuiChildFlags_None, ImGuiWindowFlags_NoBackground);
+  Push(Font::Body);
+  ImGui::PushTextWrapPos(0);
+  ImGui::TextUnformatted(a.status.c_str());
+  ImGui::PopTextWrapPos(); Pop();
+  ImGui::EndChild();
+  ui.Place(0, message, "scroll-text", a.status);
+  for (size_t i = 0; i < actions.size(); ++i) {
+    const int id = actions[i];
+    Button(ui, id, i == 0 ? Kind::Primary : Kind::Secondary,
+      Rect(cx + cw - s(24) - aw, detail.Min.y + s(20) + i * s(44), aw, s(38)),
+      id == kDashboards ? "dashboard" : id == kViewIssue ? "info" : id == kRemove ? "remove" : id == kAddContent ? "add" : nullptr, 2);
+  }
   if (dashboard) DashboardNeeds(ui, detail);
   ui.card = {};
 }

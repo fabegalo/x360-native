@@ -4,7 +4,7 @@ Gerenciador da plataforma: extrair → abrir → importar → preparar → inici
 Xbox 360. A dashboard original continua sendo a experiência de console e o
 fluxo de execução (`x360n session`) não mudou. Desde LAUNCHER-UNIFIED-01
 (2026-10-29) existe **um único launcher** para Windows, Linux e macOS, com a
-mesma identidade visual do launcher Win32 de 2026-10-15; fatos medidos e
+identidade visual compartilhada entre plataformas; fatos medidos e
 limites ficam no fim.
 
 ## Arquitetura
@@ -34,15 +34,18 @@ renderer da sessão, e o rasterizador de software é o último recurso
   `#161A1F` cards, `#1F242B` controles) e verde Xbox (`#107C10` ação, `#60D660`
   destaque). Estados: verde = pronto, âmbar = atenção/não suportado, vermelho =
   erro, azul = preparando/informação, cinza = importado.
-- Tipografia Droid Sans (corpo, legenda, logs) e Roboto Medium (ênfase e
-  títulos), cópias Apache-2.0 do Dear ImGui fixado, embutidas no executável;
-  14 px corpo, 12 px legenda, 22/30 px títulos. Ícones vetoriais desenhados por
-  código (`ui/icons.cpp`), sem fonte de ícones. Glifos sem sobreamostragem e
-  alinhados ao pixel, com cobertura reforçada para texto claro no fundo escuro
-  (sem hinting/ClearType). Tudo escala pela escala de
-  conteúdo da janela (`ui::T().S`), inclusive ao trocar de monitor.
+- Uma família embutida: Noto Sans CJK JP Regular/Medium, sem alteração dos
+  arquivos originais, busca por fontes do sistema ou mistura de famílias.
+  Corpo de 20 px, legendas de 18 px e títulos de 26/36 px. Fonte, hashes,
+  licença, custo de tamanho e cobertura em `src/desktop/resources/fonts/README.md`.
+  Rasterização stb_truetype, sem FreeType ou reforço artificial de peso.
+- Ícones vetoriais de 20 px, com traços e bordas ajustados aos pixels físicos.
+  Alertas usam triângulo preenchido e marca central. Texto direto recebe a
+  densidade atual do framebuffer; rótulos centralizados usam a altura das
+  capitais. Bordas não duplicam o deslocamento de meio pixel, e a faixa de
+  antialias permanece de um pixel físico. A escala acompanha o monitor.
 - Componentes: botão primário/secundário/fantasma, item de navegação, chip de
-  filtro, cartão de opção (renderer), interruptor, selo de estado, card, banner
+  filtro, cartão de opção gráfica, interruptor, selo de estado, card, banner
   de atividade/resultado, barra de progresso por etapas, lista de cartões.
 - Hover, selecionado, desabilitado, carregando e foco visível (anel verde de
   2 px, só no uso do teclado ou controle) em todos os controles.
@@ -51,18 +54,19 @@ renderer da sessão, e o rasterizador de software é o último recurso
 
 | Tela | Conteúdo |
 |---|---|
-| Início | Estado da dashboard configurada, ação principal (Iniciar/Configurar Xbox 360), resumo (dashboards preparadas, jogos importados, jogos preparados, renderer global) e atalhos |
-| Biblioteca | Lista de cartões (nome, Title ID, versão, selo Pronto/Preparando/Importado/Não suportado/Erro), busca (Ctrl+F), filtros Todos/Prontos/Preparar/Atenção, painel da seleção com a ação disponível |
+| Início | Estado da dashboard configurada, ação principal (Iniciar Xbox 360/Escolher dashboard), resumo e passos para preparar console, adicionar jogos e jogar pela My Games |
+| Biblioteca | Lista de cartões (nome, versão, selo Pronto/Preparando/Importado/Não suportado/Erro), busca por nome/versão (Ctrl+F), filtros Todos/Prontos/Preparar/Atenção, painel da seleção com a ação disponível |
 | Importar | Área de soltar arquivo/pasta, ISO/GDFX, XBLA/STFS e pasta extraída; progresso por etapas (Extração → Verificação → Importação) |
 | Dashboard | Versões da dashboard original, estado de cada preparação e requisitos (arquivos originais, preparação AOT, ambiente do PC) |
-| Configurações | Renderer global (Xenos padrão; Native experimental somente com o acesso de desenvolvimento existente), armazenamento e ambiente, idioma PT-BR/EN do desktop, dados do PC e idioma/localidade independentes do console ([contratos e validação](console-language-locale.md)) |
-| Diagnóstico | Captura de pilha nas próximas sessões, identificação exata do build, abrir logs, detalhes, requisitos e logs da operação (texto selecionável) |
+| Configurações | Colunas estáveis: console, aplicativo e armazenamento à esquerda; gráficos e ajustes de imagem à direita. Em janelas estreitas, uma coluna na mesma ordem. Ajustes de imagem recolhidos por padrão. Países traduzidos e ordenados em PT/EN; seletores de país e idioma sem busca, com nomes nativos preservados ([contratos e validação](console-language-locale.md)) |
+| Diagnóstico | Indicadores de gráficos/toolchain/armazenamento, abas Ambiente/Conteúdo/Última operação, identificação exata do build, captura de falhas, verificar computador, abrir logs e copiar relatório completo. O alvo da última operação é preservado ao mudar a seleção |
 
 O banner no topo mostra a operação em andamento (título, mensagem, tempo,
 etapas, Cancelar) ou o resultado (sucesso/aviso/erro) com **Tentar novamente**,
 **Diagnóstico** e **Fechar**. A janela é redimensionável (mínimo 1000×700 na
 escala 100 %, proporcional à escala do monitor). Teclado: Tab/setas movem o
-foco, Enter ativa, Esc volta de Configurações/Diagnóstico, Ctrl+F busca. Controle:
+foco, Enter ativa, Esc fecha primeiro a lista aberta e só depois volta de
+Configurações/Diagnóstico, Ctrl+F busca. Controle:
 direcional move o foco, A ativa, B volta; o launcher só lê o controle quando
 está em foco e sem operação, porque durante a sessão o controle é do jogo.
 Perguntas (downloads, remoção, instalador, pasta de saves) são diálogos
@@ -96,6 +100,8 @@ em 1000×700, 1220×800, 1280×720, 1600×900 e 1920×1080, nas escalas 100/125/
 e em PT-BR/EN, conferindo que cada controle fica dentro da janela e do seu card,
 sem sobreposição e com o texto cabendo. Com `X360N_LAYOUT_CAPTURE=<pasta>` grava
 PNGs pelo rasterizador do próprio launcher, sem captura de tela do sistema.
+`X360N_LAYOUT_CAPTURE_QUICK=1` limita a gravação às telas PT-BR em 1220×800,
+100 %, com os quatro estados de banner; as verificações continuam completas.
 
 Opções somente de builds fora da distribuição: `--lang pt|en`, `--import
 <caminho>` (inicia a importação ao fim da primeira verificação) e `--smoke
@@ -136,3 +142,29 @@ não foi medida neste incremento.
 - Pacote de distribuição (`X360N_DISTRIBUTION`) e o gate de licenças do pacote
   não foram executados; o inventário precisa listar as unidades SDL3/ImGui
   compiladas (`thirdparty_translation_units`) antes de uma Release.
+
+## Revisão de interface — 31/10/2026
+
+Configurações usa grupos estáveis e ajustes de imagem recolhidos; Início mantém
+os três cartões de passos. Textos de uso comum foram encurtados. O Diagnóstico
+reúne ambiente, conteúdo e última operação; preserva causas de falhas e
+pendências das dependências mesmo após mudar a seleção. Não faz sondagens
+nem leituras de arquivos durante o desenho.
+
+O conflito entre o atalho Dashboard e o cartão de passos foi reproduzido com o
+verificador de IDs do ImGui ativo. Barra lateral, páginas e faixa da operação
+agora têm escopos distintos; o comando continua compartilhado. O teste percorre
+os botões visíveis das seis telas e verifica suas identidades ao passar o mouse.
+
+Validação em PT/EN, cinco tamanhos e escalas 100/125/150/200 %, cobrindo páginas,
+abas, ajustes expandidos/recolhidos e estados ocioso/preparando/erro/importado.
+Bordas e ícones conferidos em pixels a 1x/1,5x/2x. Testes de glifos não aceitam
+substitutos. Windows: seis telas e seletores conferidos no aplicativo. Linux
+x64: compilação e testes sem janela. macOS e ARM64 não executados; nenhuma
+sessão de jogo nem mudança de preferências do console ou do SDK.
+
+Evidências locais em `.local/tools/launcher-review/`: `id-conflict-before.log`
+(reprodução), `precommit-final-tests.log` (Windows: 29 casos),
+`linux-precommit-final-tests.log` (Linux: 28 casos), `icons-tests.log` e capturas
+das telas. Todos os testes finais passaram. O atalho Dashboard do cartão
+também foi usado no executável Windows atualizado, sem o aviso de IDs.

@@ -1,6 +1,7 @@
 # Launcher dependencies, all from the pinned SDK's thirdparty tree: SDL3 (Zlib),
 # Dear ImGui with its SDL3/SDL_GPU backends (MIT), Vulkan headers for the
-# environment probe (Apache-2.0) and the fonts Roboto/Cousine (Apache-2.0).
+# environment probe (Apache-2.0). The single Noto Sans CJK font family (OFL-1.1)
+# is vendored unchanged in src/desktop/resources/fonts.
 # The full build reuses the SDK's own SDL3/imgui targets; the desktop-only build
 # configures the same SDL3 options here, without the title runtime.
 
