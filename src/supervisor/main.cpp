@@ -681,7 +681,7 @@ int Run(const ProjectPaths& p, const fs::path& exe_in, std::vector<std::string> 
   return r.exit_code == 0 ? kExitOk : kExitFailed;
 }
 
-int Session(const ProjectPaths& paths, const fs::path& manifest, int timeout, bool separate_windows, bool skip_boot_intro, bool crash_stack, const fs::path& user_data_root, const std::string& closed_event, const std::string& catalog_target) {
+int Session(const ProjectPaths& paths, const fs::path& manifest, int timeout, bool separate_windows, bool skip_boot_intro, bool crash_stack, const fs::path& user_data_root, const std::string& closed_event, const std::string& catalog_target, bool diagnostic_xenos) {
   ActionTrace trace("session.total");
   try {
     WorkspaceLease lease(paths);
@@ -698,7 +698,7 @@ int Session(const ProjectPaths& paths, const fs::path& manifest, int timeout, bo
       return profile;
     };
     // Immutable for this session, including Guide and all title transitions.
-    const auto renderer_settings = LoadRendererSettings(paths);
+    const auto renderer_settings = diagnostic_xenos ? RendererSettings{} : LoadRendererSettings(paths);
     const auto console_settings = LoadConsoleSettings(paths);
     SessionNotification notification(closed_event);
 #ifndef _WIN32
@@ -733,7 +733,8 @@ int Session(const ProjectPaths& paths, const fs::path& manifest, int timeout, bo
     auto dashboard = load_profile(manifest);
     BindLibraryLaunchTargets(dashboard, catalog);
     CheckSessionRenderer(dashboard.exe, renderer_settings);
-    fmt::print("session: global renderer {}{}\n",
+    fmt::print("session: {}renderer {}{}\n",
+        diagnostic_xenos ? "diagnostic " : "global ",
         renderer_settings.renderer == Renderer::Native ? "Native" : "Xenos",
         renderer_settings.experimental ? " (explicit experimental development access)" : "");
     std::vector<SessionProfile> targets;
@@ -908,6 +909,7 @@ int main(int argc, char** argv) {
   bool skip_boot_intro = false;
   bool separate_windows = false;
   bool session_crash_stack = false;
+  bool diagnostic_xenos = false;
   std::string session_user_data_root;
   std::string session_closed_event;
   std::string catalog_target;
@@ -916,6 +918,8 @@ int main(int argc, char** argv) {
   session->add_option("manifest", session_manifest)->required();
   session->add_flag("--separate-windows", separate_windows, "Diagnostic mode: one window per title");
   session->add_flag("--skip-boot-intro", skip_boot_intro, "Diagnostic mode: skip the optional dashboard boot animation");
+  session->add_flag("--diagnostic-xenos", diagnostic_xenos,
+                   "Diagnostic mode: Xenos with the platform default API for this session; preserves saved graphics settings");
   session->add_flag("--crash-stack", session_crash_stack,
                    "Diagnostic mode: record unhandled exception stacks for each session child; slower");
   session->add_option("--user-data-root", session_user_data_root,
@@ -983,7 +987,7 @@ int main(int argc, char** argv) {
       return kExitOk;
     } catch (const std::exception& error) { fmt::print(stderr,"prepare: {}\n",error.what()); return kExitFailed; }
   }
-  if (session->parsed()) return Session(*paths, PathFromUtf8(session_manifest), session_timeout, separate_windows, skip_boot_intro, session_crash_stack, PathFromUtf8(session_user_data_root), session_closed_event, catalog_target);
+  if (session->parsed()) return Session(*paths, PathFromUtf8(session_manifest), session_timeout, separate_windows, skip_boot_intro, session_crash_stack, PathFromUtf8(session_user_data_root), session_closed_event, catalog_target, diagnostic_xenos);
   if (run->parsed()) {
     try {
       // Session already owns this lease. Standalone prepared-title launches

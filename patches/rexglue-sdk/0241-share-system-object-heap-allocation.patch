@@ -1,0 +1,25 @@
+--- a/src/system/xmemory.cpp
++++ b/src/system/xmemory.cpp
+@@ -1326,10 +1326,8 @@
+   size = rex::round_up(size, page_size_);
+   alignment = rex::round_up(alignment, page_size_);
+ 
++  // Share ordinary free holes while retaining the reserved system range.
+   uint32_t low_address = heap_base_;
+-  if (heap_type_ == memory::HeapType::kGuestVirtual) {
+-    low_address = heap_base_ + heap_size_ - 0x10000000;
+-  }
+   uint32_t high_address = heap_base_ + (heap_size_ - 1);
+   return AllocRange(low_address, high_address, size, alignment, allocation_type, protect, top_down,
+                     out_address);
+--- a/include/rex/system/xmemory.h
++++ b/include/rex/system/xmemory.h
+@@ -188,7 +188,7 @@
+                           uint32_t alignment, uint32_t allocation_type, uint32_t protect,
+                           bool top_down, uint32_t* out_address);
+ 
+-  // Allocates from the system portion of the heap (top of virtual heaps).
++  // Allocates system objects from shared free holes and the reserved upper range.
+   // Physical heaps delegate to regular Alloc since there is no split.
+   virtual bool AllocSystemHeap(uint32_t size, uint32_t alignment, uint32_t allocation_type,
+                                uint32_t protect, bool top_down, uint32_t* out_address);

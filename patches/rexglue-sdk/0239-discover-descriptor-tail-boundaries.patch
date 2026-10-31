@@ -1,0 +1,62 @@
+Subject: fix(codegen): preserve descriptor tail thunk boundaries
+
+diff --git a/src/codegen/phase_gapfill.cpp b/src/codegen/phase_gapfill.cpp
+--- a/src/codegen/phase_gapfill.cpp
++++ b/src/codegen/phase_gapfill.cpp
+@@ -61,6 +61,37 @@
+          static_cast<uint32_t>(branch->code) == 0x4E800420;
+ }
+ 
++// A descriptor invoker transfers to an external callable loaded from a fixed
++// field, after constructing its this argument. Unlike a switch, this exact
++// data flow has no indexed code table or local labels. Do not split generic bctr.
++bool isDescriptorTailThunk(DecodedBinary& decoded, uint32_t start, uint32_t end) {
++  if (end - start != 28) return false;
++  uint32_t words[8];
++  for (unsigned i = 0; i < 8; ++i) {
++    const auto* instruction = decoded.get(start + i * 4);
++    if (!instruction) return false;
++    words[i] = instruction->code;
++  }
++  const uint32_t descriptor = (words[0] >> 16) & 31;
++  const uint32_t object = (words[2] >> 21) & 31;
++  const uint32_t adjustment = (words[3] >> 21) & 31;
++  const auto scratch = [](uint32_t reg) { return reg >= 9 && reg <= 12; };
++  if (!scratch(descriptor) || !scratch(object) || !scratch(adjustment) ||
++      descriptor == object || descriptor == adjustment || object == adjustment) return false;
++  const auto move = [](uint32_t to, uint32_t from) {
++    return 0x7C000378u | (from << 21) | (to << 16) | (from << 11);
++  };
++  const auto load = [](uint32_t to, uint32_t from, uint32_t offset) {
++    return (32u << 26) | (to << 21) | (from << 16) | offset;
++  };
++  return words[0] == move(descriptor, 4) && words[1] == move(4, 3) &&
++         words[2] == load(object, descriptor, 8) &&
++         words[3] == load(adjustment, descriptor, 4) &&
++         words[4] == load(descriptor, descriptor, 0) &&
++         words[5] == (0x7C000214u | (3u << 21) | (object << 16) | (adjustment << 11)) &&
++         words[6] == (0x7C0903A6u | (descriptor << 21)) && words[7] == 0x4E800420;
++}
++
+ // Split a code region into function segments based on terminators (blr, tail calls).
+ std::vector<CodeRegion> splitRegionOnTerminators(
+     const CodeRegion& region, DecodedBinary& decoded,
+@@ -89,14 +120,16 @@
+     if (insn->is_return()) {
+       shouldSplit = true;
+       reason = "blr";
+-    } else if (insn->opcode == Opcode::bcctr && isVirtualTailThunk(decoded, segmentStart, addr)) {
++    } else if (insn->opcode == Opcode::bcctr &&
++               (isVirtualTailThunk(decoded, segmentStart, addr) ||
++                isDescriptorTailThunk(decoded, segmentStart, addr))) {
+       const auto boundary = addr + 4;
+       auto owner = protectedEnds.upper_bound(boundary);
+       // A recognized sequence does not override original metadata or an
+       // explicit config extent, including unreachable holes in that extent.
+       if (owner == protectedEnds.begin() || std::prev(owner)->second <= boundary) {
+         shouldSplit = true;
+-        reason = "virtual tail thunk";
++        reason = "indirect tail thunk";
+       }
+     } else if (insn->opcode == Opcode::b && insn->branch_target.has_value()) {
+       uint32_t target = insn->branch_target.value();

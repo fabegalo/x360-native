@@ -47,10 +47,11 @@ struct Fixture {
     }
   }
   ~Fixture() { std::error_code ec; fs::remove_all(root.parent_path(), ec); }
-  ProcessResult Run(int timeout = 0, bool crash_stack = false, const fs::path& user_root = {}) {
+  ProcessResult Run(int timeout = 0, bool crash_stack = false, const fs::path& user_root = {}, bool diagnostic_xenos = false) {
     std::vector<std::string> args{"--root", PathUtf8(root), "session",
         PathUtf8(root / "titles/dashboard/dashboard_manifest.toml"), "--separate-windows", "--timeout", std::to_string(timeout)};
     if (crash_stack) args.push_back("--crash-stack");
+    if (diagnostic_xenos) args.push_back("--diagnostic-xenos");
     if (!user_root.empty()) { args.push_back("--user-data-root"); args.push_back(PathUtf8(user_root)); }
     return RunProcess({PathFromUtf8(X360N_EXE), std::move(args),
         root, root / "out.log", root / "err.log", 90s});
@@ -116,6 +117,29 @@ TEST_CASE("session storage override follows handoffs without changing global sto
     CHECK(f.Run(10, false, invalid).exit_code != 0);
   }
   CHECK(Read(f.paths.inputs() / "storage-observed.txt").find("relative") == std::string::npos);
+}
+TEST_CASE("explicit Xenos diagnostic follows handoffs without changing saved Native graphics",
+          "[session-renderer-diagnostic][cli]") {
+  Fixture f("storage");
+  const auto copy = f.paths.local() / "isolated";
+  fs::create_directories(copy);
+  SaveRendererSettings(f.paths, {Renderer::Native, true});
+  const auto saved = Read(f.paths.local() / "graphics.toml");
+  // This fixture deliberately has no Native plugin. The ordinary session
+  // must honor Native and reject it, rather than silently falling back.
+  REQUIRE(f.Run(10, false, copy).exit_code != 0);
+  CHECK_FALSE(fs::exists(f.paths.inputs() / "storage-observed.txt"));
+  const auto result = f.Run(10, false, copy, true);
+  INFO(Read(f.root / "err.log"));
+  INFO(Read(f.root / "out.log"));
+  REQUIRE(result.exit_code == 0);
+  // Each real fixture process checks Xenos and the platform's default API.
+  CHECK(Read(f.paths.inputs() / "storage-observed.txt") ==
+        PathUtf8(copy / "dashboard") + "\n" + PathUtf8(copy / "game") + "\n" + PathUtf8(copy / "dashboard") + "\n");
+  CHECK(Read(f.root / "out.log").find("session: diagnostic renderer Xenos") != std::string::npos);
+  CHECK(Read(f.paths.local() / "graphics.toml") == saved);
+  CHECK(LoadRendererSettings(f.paths).renderer == Renderer::Native);
+  CHECK(f.Run(10, false, copy).exit_code != 0);
 }
 TEST_CASE("session captures an unhandled exception only with explicit crash diagnostics", "[session-crash][cli]") {
   for (const bool capture : {false, true}) {

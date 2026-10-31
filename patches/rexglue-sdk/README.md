@@ -2363,3 +2363,151 @@ The shared translator benefits Xenos/Vulkan and Native/Vulkan. The Native GPU
 probe exercises 88 cases including 8/16-bit extremes; before this change, four
 signed cases and additional unsigned saturation cases fail. Alias publication
 is fixed independently in Native's physical-write notification helper.
+
+### 0237 — retain explicit emission owners and late callable edges
+
+Classify branches using the FunctionNode being emitted. A nearest-base lookup
+can miss discontiguous blocks when another entry lies between the owner and its
+out-of-line code. Keep the address-based API for callers without an explicit
+owner, and preserve recursion, loop-back and import precedence.
+
+Before sealing, reconcile direct branches to entries present in the final
+graph. An entry discovered after an earlier block scan may have been followed
+as an internal label, leaving no call edge for the emitter. Register only known
+destinations and preserve existing edges; do not invent boundaries, callbacks,
+imports or runtime fallbacks. No renderer or guest runtime changes.
+Include the standard algorithm header explicitly for portable host builds.
+
+`tests/sdkcheck/emission_owner_test.cpp` reproduces both emission failures with
+synthetic XEX images: three assertions fail without this patch. The corrected
+code passes the two cases and the focused gap/CTR controls. Real-title codegen,
+native compilation and gameplay remain separate validation stages.
+
+### 0238 — discover virtual tails with distinct volatile registers
+
+Recognize the bounded `lwz vtable,0(r3); lwz callable,slot(vtable); mtctr
+callable; bctr` sequence when its two loads use different scratch GPRs
+(r10–r12). The data flow and unconditional terminal branch must still match;
+the slot remains nonnegative and aligned. Preserve metadata/config extents and
+reject mismatched CTR registers, indexed switches and calls with fallthrough.
+This prevents a virtual tail from hiding the adjacent frameless function.
+
+`tests/sdkcheck/virtual_tail_registers_test.cpp` covers all nine scratch register
+pairs and emission of the following leaf. The baseline fails to register that
+leaf; the candidate and focused gap/CTR controls pass 737 assertions in 18 cases.
+The failure was reproduced during original-title Quick Play loading, as a
+missing indirect target. No title address or runtime fallback is added.
+
+### 0239 — preserve descriptor invoker boundaries
+
+Recognize a frameless descriptor invoker that preserves its incoming argument,
+loads a callable, object and adjustment from fixed descriptor fields, constructs
+the this argument and transfers unconditionally through CTR. Match the complete
+data flow with distinct volatile scratch registers. Arbitrary or conditional
+CTR branches, indexed switches and metadata/config ownership remain protected.
+This prevents adjacent invokers from disappearing behind the first tail branch.
+
+`tests/sdkcheck/descriptor_tail_test.cpp` reproduces two missing boundaries
+without the patch. Both valid register assignments and ten negative/protected
+variants pass with the candidate (102 assertions); focused gap/CTR controls pass
+764 assertions in 18 cases. The next missing target was reproduced while loading
+an original-title race after 0238. No title-specific address, stub or runtime
+fallback is introduced; gameplay acceptance requires a separate real execution.
+
+### 0240 — preserve RI and IR during interrupt writes
+
+For `mtmsrd L=1`, update EE and RI (PowerPC bit numbers 48 and 62,
+mask `0x8002`). The previous `0x8020` mask silently discarded RI writes and
+overwrote IR, which this form must preserve. `mfmsr` now reads the modeled MSR
+bits along with EE from the runtime lock, rather than discarding everything
+except EE. Keep the existing L=0 path and interrupt-lock mechanism unchanged.
+No title identity or guest address is used.
+Architecture reference: [PowerPC Book III v2.01, page 19](https://kib.kiev.ua/x86docs/POWER/ISA/es-archpub3.pdf).
+
+`tests/sdkcheck/msr_codegen_test.cpp` creates a synthetic XEX and generates its
+real AOT output. `x360n_msr_native` compiles that output and executes 80 MSR
+state/readback checks, including unrelated bits and balanced runtime interrupt
+locks. The baseline fails on RI; a write-only correction still fails the
+readback; the complete candidate passes. This fixes instructions used
+by Skate 3's initialization but does not establish the cause of its null-offset
+read or demonstrate gameplay.
+
+### 0241 — share the allocator for guest-visible system objects
+
+Start system allocation at the shared heap's free holes, following the low-first
+policy of the [Xenia reference](https://github.com/xenia-project/xenia/blob/95a5c3ee250f80c3b9d139658649d9ffb6db3eec/src/xenia/memory.cc).
+Retain the full system range, including its existing upper reserve when ordinary
+space is exhausted. Ordinary guest limits, stack bounds, metadata, protections,
+zeroing and physical delegation remain unchanged.
+The change adds no implicit mapping or commit; system allocations retain their
+ordinary heap metadata. No title or fault address is matched. This is a
+reference allocation policy, not evidence of the
+console's precise internal address layout.
+
+`tests/sdkcheck/system_heap_layout_test.cpp` covers shared holes, committed
+regions, zeroed reuse, page accounting, unchanged zero-page protection and the
+physical path and system capacity after ordinary-space exhaustion. The baseline
+fails three placement checks. A rejected first candidate also exhausted the
+kernel's reserve; the final change preserves it. A private runtime relinked from
+the official objects passes 357 assertions in 14 focused allocator, XEX import
+and dispatch cases. Kernel-only
+setup also confirms that real HLE allocations account for the formerly absent
+low page; it never executes a game. Original-title gameplay remains unverified.
+
+### 0242 — discover callbacks materialized by late constructors
+
+Repeat the bounded reference scan after gap-filled code receives its CFG. A
+constructor found in that pass can materialize an otherwise unreferenced callback
+after an indirect tail. Such a reference may promote speculative GAP_FILL
+ownership; declared metadata/config extents, import/export ranges, switch table
+spans and authoritative CFG ownership retain their protection. The scan still
+requires a non-fall-through predecessor and a valid bounded terminating prefix.
+No title address or runtime fallback is introduced.
+
+`tests/sdkcheck/late_callback_discovery_test.cpp` reproduces the missing entry
+and verifies its generated function registration, with controls for a known
+constructor, source clobber, conditional predecessor and metadata/config extents.
+The baseline fails the late-constructor case; the candidate passes. Focused
+gap/CTR/emission controls also pass (867 assertions in 21 cases). An analysis
+of the original Skate 3 XEX emits the callback that caused the reproduced
+startup abort; compilation and execution remain separate acceptance steps.
+
+### 0243 — register independently referenced shared tails
+
+A bounded address materialization can name a shared tail inside an inferred
+wrapper. If its predecessor is an unconditional direct branch to that exact
+existing CFG block, register the tail independently even when it exceeds the
+short linear-prefix limit. Allow this proof for GAP_FILL and DISCOVERED owners;
+keep original metadata/config extents, helpers, vtable owners, imports/exports
+and switch-table spans protected. Other candidates retain the previous limits.
+The wrapper keeps its entry and argument adaptation; ordinary merge records
+its transfer to the newly callable tail. No title identity or runtime fallback
+is added.
+
+`tests/sdkcheck/shared_tail_entry_test.cpp` covers long/short tails in inferred
+and speculative wrappers, registration and emitted tail calls, wrong/conditional
+predecessors, source clobber and declared extents (108 assertions). Baseline
+misses shared entries; the complete candidate passes 1,035 assertions in 23
+focused discovery/emission cases and emits the reproduced original-XEX target.
+An earlier candidate covering only speculative ownership passed its smaller
+fixture but failed the original XEX; it was rejected before SDK replay.
+
+### 0244 — recognize unsigned guards with a split default edge
+
+Recognize `cmplwi; ble dispatch; b default` when the taken edge enters the
+straight-line dispatch, the default leaves it, the CR field/condition match and
+the index remains unchanged. Reject entry prefixes that bypass the guard,
+linking defaults, unknown suffix effects and 64-bit/signed comparisons for this
+proof. The proven unsigned count drives table discovery; the 512-entry
+heuristic remains unchanged when the proof is unavailable. No title constants
+or runtime fallback are added.
+
+The reproduced original switch has 643 slots; the unrecognized guard caused a
+512-slot guess and a native `ud2` on a valid index. The synthetic baseline
+reproduces the omission; the candidate passes 101 assertions including eight
+negative guard variants, and 1,136 focused discovery/emission assertions in
+24 cases. `x360n_large_switch_native` compiles the actual generated fixture and
+executes all 65,536 16-bit indices, checking values, CTR, LR and a nonvolatile
+GPR. The candidate passes, including cases above 511 and the original default
+path. The original-XEX analysis also emits all 643 cases; gameplay requires
+a separate execution.

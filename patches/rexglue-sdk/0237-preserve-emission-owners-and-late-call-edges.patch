@@ -1,0 +1,121 @@
+Subject: fix(codegen): preserve emission owners and late callable edges
+
+diff --git a/include/rex/codegen/function_graph.h b/include/rex/codegen/function_graph.h
+--- a/include/rex/codegen/function_graph.h
++++ b/include/rex/codegen/function_graph.h
+@@ -189,6 +189,8 @@
+   // isCallInstruction: true for bl (expects return), false for b (no return)
+   // Returns how the target should be treated during code generation.
+   TargetKind classifyTarget(uint32_t target, uint32_t callerAddr, bool isCallInstruction) const;
++  // Emission knows the exact owner, including discontiguous or shared blocks.
++  TargetKind classifyTarget(uint32_t target, const FunctionNode& caller, bool isCallInstruction) const;
+ 
+  private:
+   std::vector<CodeBuffer> codeBuffers_;
+diff --git a/src/codegen/function_graph.cpp b/src/codegen/function_graph.cpp
+--- a/src/codegen/function_graph.cpp
++++ b/src/codegen/function_graph.cpp
+@@ -1257,8 +1257,15 @@
+ 
+ TargetKind FunctionGraph::classifyTarget(uint32_t target, uint32_t callerAddr,
+                                          bool isCallInstruction) const {
+-  // Find the caller's function
+-  const FunctionNode* callerFn = getFunctionContaining(callerAddr);
++  if (const auto* caller = getFunctionContaining(callerAddr))
++    return classifyTarget(target, *caller, isCallInstruction);
++  return isImport(target) ? TargetKind::Import
++                         : isEntryPoint(target) ? TargetKind::Function : TargetKind::Unknown;
++}
++
++TargetKind FunctionGraph::classifyTarget(uint32_t target, const FunctionNode& caller,
++                                         bool isCallInstruction) const {
++  const auto* callerFn = &caller;
+ 
+   // Case 1: Target is an import - always a call/tail-call
+   if (isImport(target)) {
+diff --git a/src/codegen/phase_merge.cpp b/src/codegen/phase_merge.cpp
+--- a/src/codegen/phase_merge.cpp
++++ b/src/codegen/phase_merge.cpp
+@@ -17,6 +17,8 @@
+ 
+ #include "codegen_logging.h"
+ #include <rex/memory/utils.h>
++#include <ppc.h>
++#include <algorithm>
+ 
+ using rex::memory::load_and_swap;
+ 
+@@ -44,6 +46,31 @@
+     }
+     return load_and_swap<uint32_t>(section->data + offset);
+   });
++
++  // Gap discovery can publish a callable entry after an earlier scan followed
++  // that address as a local label. Such branches have no unresolved jump.
++  // Reconcile only final, known entries; never guess a target or new boundary.
++  for (const auto& [entry, node] : graph.functions()) {
++    for (const auto& block : node->blocks()) {
++      const auto* data = binary.translate(block.base);
++      if (!data) continue;
++      for (uint32_t offset = 0; offset < block.size; offset += 4) {
++        const auto word = load_and_swap<uint32_t>(data + offset);
++        const auto op = PPC_OP(word);
++        if (op != PPC_OP_B && op != PPC_OP_BC) continue;
++        const auto site = block.base + offset;
++        const int32_t displacement = op == PPC_OP_B ? PPC_BI(word) : PPC_BD(word);
++        const uint32_t target = PPC_BA(word) ? uint32_t(displacement) : site + displacement;
++        const bool call = PPC_BL(word);
++        if ((!call && target == entry) || !graph.isEntryPoint(target)) continue;
++        const auto hasSite = [site](const auto& edges) {
++          return std::any_of(edges.begin(), edges.end(), [site](const auto& edge) { return edge.site == site; });
++        };
++        if (hasSite(node->calls()) || hasSite(node->tailCalls())) continue;
++        graph.addUnresolvedJumpToFunction(entry, site, target, call, op == PPC_OP_BC);
++      }
++    }
++  }
+ 
+   size_t iteration = 0;
+   size_t totalResolved = 0;
+diff --git a/src/codegen/builders/control_flow.cpp b/src/codegen/builders/control_flow.cpp
+--- a/src/codegen/builders/control_flow.cpp
++++ b/src/codegen/builders/control_flow.cpp
+@@ -29,7 +29,7 @@
+ 
+   // Use graph to classify the target - handles thunks that branch to nearby functions
+   // false = branch instruction (not a call), so own-base means loop back
+-  auto kind = ctx.graph().classifyTarget(target, ctx.base, false);
++  auto kind = ctx.graph().classifyTarget(target, ctx.fn, false);
+ 
+   switch (kind) {
+     case TargetKind::InternalLabel:
+@@ -67,7 +67,7 @@
+ 
+   // Use graph to classify the target
+   // true = call instruction, so own-base means recursive call (not loop back)
+-  auto kind = ctx.graph().classifyTarget(target, ctx.base, true);
++  auto kind = ctx.graph().classifyTarget(target, ctx.fn, true);
+ 
+   switch (kind) {
+     case TargetKind::InternalLabel:
+@@ -144,7 +144,7 @@
+         continue;
+       }
+ 
+-      auto kind = ctx.graph().classifyTarget(label, ctx.base, false);
++      auto kind = ctx.graph().classifyTarget(label, ctx.fn, false);
+       switch (kind) {
+         case TargetKind::InternalLabel:
+           ctx.println("\t\tgoto loc_{:X};", label);
+diff --git a/src/codegen/builders/context.cpp b/src/codegen/builders/context.cpp
+--- a/src/codegen/builders/context.cpp
++++ b/src/codegen/builders/context.cpp
+@@ -283,7 +283,7 @@
+ 
+   // Use classifyTarget for consistent branch classification
+   // false = branch instruction (not a call), so own-base means loop back
+-  auto kind = graph().classifyTarget(target, base, false);
++  auto kind = graph().classifyTarget(target, fn, false);
+ 
+   switch (kind) {
+     case TargetKind::InternalLabel:

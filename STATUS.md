@@ -1,5 +1,37 @@
 # STATUS
 
+31/10 — **Skate 3, AOT genérico em validação**: Skate e EAWebkit importados e
+preparados em Windows x64, com recibo final emitido. Correções compartilhadas
+de emissão/fronteiras indiretas e MSR (0237–0240); 0241 reutiliza lacunas baixas
+para objetos HLE e preserva a reserva do kernel, metadados e delegação física.
+Regressões: 80 verificações MSR em código AOT compilado e 357 asserções/14 casos
+focados de alocador/imports/dispatch contra o SDK oficial. A página do acesso
+que falhava foi conferida como alocação HLE real num probe sem executar jogo.
+Na abertura solicitada pelo mantenedor, 0241 avançou além da falha baixa,
+mas encerrou em callback indireto omitido. 0242 corrige a descoberta tardia:
+regressão base falha, candidata passa 60 asserções e 867 controles focados;
+o SDK oficial passa 927 asserções/22 casos de descoberta/emissão. O preparo
+0242 terminou, mas a abertura seguinte encontrou um shared tail ausente.
+0243 passa 1.035 asserções/23 casos na candidata e no SDK oficial, e registra
+esse destino no XEX original. O preparo terminou e a janela abriu, mas encerrou
+em trap de switch: tabela original de 643 slots emitida com apenas 512.
+0244 corrige a guarda com default separado; candidata e SDK oficial passam
+1.136 asserções/24 casos e 65.536 índices em AOT nativo compilado. Preparo
+oficial concluído, recibo e 643 casos conferidos; abertura para teste manual
+iniciada.
+Na sessão manual 0244 houve relato de travamento e posterior `C0000374`
+detectado ao liberar memória na thread de timers; origem da corrupção pendente.
+Uma repetição limitada a 180 s não capturou exceção e mostrou CPU do jogo
+avançando nas três amostras. O mantenedor confirmou: "entrou normal no jogo".
+Entrada relatada pelo mantenedor; estabilidade, controles/saves e encerramento
+seguem sem validação completa. Sessão manual reaberta sem limite de tempo.
+O mantenedor relata congeladas ocasionais em menus/carregamentos. Coleta de
+23 s registrou 42 MiB de I/O de leitura e CPU ativa; amostras de contexto
+concentraram-se numa rotina de espera do jogo. Sem correlação pontual com as
+pausas, a causa e qualquer ganho de performance permanecem não demonstrados.
+Renderizadores não foram editados neste incremento.
+[Código, originais, evidências e limites](docs/reports/titles/generic-skate3-mostwanted-2026-10-31.md).
+
 31/10 — **preparação Native no Windows/D3D12**: a preparação inclui os plugins
 Xenos e Native; o driver reavalia o antigo `OFF` implícito do cache, preservando
 opções explícitas no preset/`--define`. Regressão sintética reproduziu a omissão

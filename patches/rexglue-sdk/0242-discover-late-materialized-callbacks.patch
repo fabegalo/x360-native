@@ -1,0 +1,42 @@
+diff --git a/src/codegen/phase_gapfill.cpp b/src/codegen/phase_gapfill.cpp
+--- a/src/codegen/phase_gapfill.cpp
++++ b/src/codegen/phase_gapfill.cpp
+@@ -360,7 +360,7 @@
+ }
+ 
+ // Aligned data references and bounded address materializations can name frameless callbacks.
+-// Require an unowned executable boundary after non-fall-through code/padding
++// Require an executable boundary with no authoritative owner after non-fall-through code/padding
+ // and a bounded valid prefix ending in an unconditional terminator. This only
+ // seeds entries: normal CFG discovery still determines all reachable blocks.
+ void discoverReferencedEntries(CodegenContext& ctx) {
+@@ -397,7 +397,9 @@
+     auto table = tableEnds.upper_bound(target);
+     if (table != tableEnds.begin() && std::prev(table)->second > target) return;
+     const auto* region = decoded.regionContaining(target);
+-    if (!region || graph.getFunctionContaining(target)) return;
++    if (!region) return;
++    const auto* containing = graph.getFunctionContaining(target);
++    if (containing && containing->authority() != FunctionAuthority::GAP_FILL) return;
+     auto owner = declaredEnds.upper_bound(target);
+     if (owner != declaredEnds.begin() && std::prev(owner)->second > target) return;
+     const auto previous = decoded.read<uint32_t>(target - 4);
+@@ -425,7 +427,7 @@
+   }
+   // Unlike the disabled broad function-pointer scan, only accept a bounded
+   // materialization inside one discovered block and an independently validated
+-  // unowned entry. Unknown instructions or a write to the source stop the search.
++  // entry without authoritative ownership. Unknown instructions or source writes stop the search.
+   for (const auto& [functionAddress, function] : graph.functions()) {
+     (void)functionAddress;
+     for (const auto& block : function->blocks()) {
+@@ -494,6 +496,9 @@
+   REXCODEGEN_TRACE("Analyze: discovered blocks for {} gap-filled functions", discovered);
+ 
+   cleanupAbsorbedGapFills(ctx);
++  // Newly discovered constructors may materialize callbacks after indirect tails.
++  discoverReferencedEntries(ctx);
++  cleanupAbsorbedGapFills(ctx);
+   discoverUnownedTailTargets(ctx);
+ 
+   return Ok();

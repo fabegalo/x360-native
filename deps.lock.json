@@ -12,7 +12,7 @@
       "file": "patches/rexglue-sdk/0001-function-table-xex-heap.patch",
       "sha256": "8a1c4a81611e3c733e5e9697dc501e8acbab24efaf26d68a7df80fc10cc4cb8c",
       "files": {
-        "src/system/xmemory.cpp": "7bf4c225a13f98c5a34a2821fd0db2c0f5c4b49283b243ac528c9270e7639949"
+        "src/system/xmemory.cpp": "9edc41885c779338a141c5fe7ef34b7da450ba8146077a21735387a8aa2b8342"
       },
       "base_files": {
         "src/system/xmemory.cpp": "97d19808714c2cb656c8d3c053cfd29a42d9b399bae47c9b3652ae21807fbf48"
@@ -916,7 +916,7 @@
       "file": "patches/rexglue-sdk/0068-gapfill-pdata-end-boundaries.patch",
       "sha256": "9632659ad82cf7da44c026ce7e61d7f3b6071e16976dea3a7c29041d0483dc30",
       "files": {
-        "src/codegen/phase_gapfill.cpp": "6be4cb31baad2f41b0a9d22375fa850d1aa9027b2a8df4021af2c5773daa188d"
+        "src/codegen/phase_gapfill.cpp": "78ff568e4623a44f6d39c8ae466b88bee5cd0202612629fc0f2430aad389594a"
       },
       "base_files": {
         "src/codegen/phase_gapfill.cpp": "878a120c08c772e005f92ec44ed5121c65b5b5764c4725896dfe2d7d5e7d20e3"
@@ -1123,8 +1123,8 @@
         "include/rex/system/xmemory.h": "21d05c176449d6dd12cfb4134bcad615565f4255458fde5e0a70915f1e05062b"
       },
       "files": {
-        "src/system/xmemory.cpp": "7bf4c225a13f98c5a34a2821fd0db2c0f5c4b49283b243ac528c9270e7639949",
-        "include/rex/system/xmemory.h": "a99190619ec6d0748977a579b811da31504a8d21081e13fce29f6de745766ae2"
+        "src/system/xmemory.cpp": "9edc41885c779338a141c5fe7ef34b7da450ba8146077a21735387a8aa2b8342",
+        "include/rex/system/xmemory.h": "54b31fd4db2729a5aa1567f4b3ff57c84aee733e1a377740fcefebf3a12022e3"
       },
       "test": "tests/sdkcheck/physical_heap_transaction_test.cpp"
     },
@@ -1189,7 +1189,7 @@
         "src/codegen/phase_gapfill.cpp": "3b89f9a207f52ae832403a84aa52b9683fbdb32800c9ab3423096dbb16c4c457"
       },
       "files": {
-        "src/codegen/phase_gapfill.cpp": "6be4cb31baad2f41b0a9d22375fa850d1aa9027b2a8df4021af2c5773daa188d"
+        "src/codegen/phase_gapfill.cpp": "78ff568e4623a44f6d39c8ae466b88bee5cd0202612629fc0f2430aad389594a"
       },
       "test": "tests/sdkcheck/virtual_thunk_discovery_test.cpp"
     },
@@ -1223,9 +1223,9 @@
       },
       "files": {
         "include/rex/codegen/function_types.h": "fc597f4c33c3ec730fb0c7d9af0a1216e24057cac9c8f5e4a7b2ad75e030ad05",
-        "src/codegen/function_scanner.cpp": "5b532b879054397447e92f4ab72ea8a56a922be702bdd382bb944478f40e5d4e",
-        "src/codegen/function_graph.cpp": "8b6df66b04ebdf665cb311a51c0abd19290eaa545e44f74863f29a2090ba8546",
-        "src/codegen/builders/control_flow.cpp": "b71bf91c2c7feafc5dc5efb5f1e8d1307d788d850ac08a67e657b5d52c0ee829",
+        "src/codegen/function_scanner.cpp": "ed3a78f48db5a74507a8efdba9feb653e34aaab94fae4daee6b999f1b5d0d861",
+        "src/codegen/function_graph.cpp": "d39766210de17d242e5134f3303fc65e68592fe4099e2826a06787bea7354f62",
+        "src/codegen/builders/control_flow.cpp": "fa4e6b076f1e6e7389c33c6e57730e302df3abc1cbda4fa8258ef5cc13400d6e",
         "src/codegen/decoded_binary.h": "d790f56981a58b3e6b44d41a44cc59d7e64df37452342110342227ba4bb934b2",
         "src/codegen/decoded_binary.cpp": "adb2e7e42a37f8bdcae7d9bdb2e0e468091b4ebf49cadbdeed847f4826c93ea3"
       },
@@ -1251,7 +1251,7 @@
         "src/codegen/function_scanner.cpp": "a6a23f7cc730f6ceed23875d5e14c4d8d254afc70a03e3ccdadb6dd77c5c96a0"
       },
       "files": {
-        "src/codegen/function_scanner.cpp": "5b532b879054397447e92f4ab72ea8a56a922be702bdd382bb944478f40e5d4e"
+        "src/codegen/function_scanner.cpp": "ed3a78f48db5a74507a8efdba9feb653e34aaab94fae4daee6b999f1b5d0d861"
       },
       "test": "tests/sdkcheck/ctr_dispatch_test.cpp"
     },
@@ -2883,7 +2883,7 @@
         "src/codegen/phase_gapfill.cpp": "b64c94daa2639315f6ec4b15243c5d608d04a25a4156f5625e5ea229d7adb813"
       },
       "files": {
-        "src/codegen/phase_gapfill.cpp": "6be4cb31baad2f41b0a9d22375fa850d1aa9027b2a8df4021af2c5773daa188d"
+        "src/codegen/phase_gapfill.cpp": "78ff568e4623a44f6d39c8ae466b88bee5cd0202612629fc0f2430aad389594a"
       },
       "test": "sdkcheck GapFill direct-tail discovery: adjacent wrappers/getters, transitive targets, protected metadata holes, data targets, existing callable ownership; synthetic XEX without title-specific hints."
     },
@@ -2894,7 +2894,7 @@
         "src/codegen/phase_gapfill.cpp": "3eaf3ec3fc437519f8a5a035d41106877aa632fc8a6cdc4bc306098a9527d96a"
       },
       "files": {
-        "src/codegen/phase_gapfill.cpp": "6be4cb31baad2f41b0a9d22375fa850d1aa9027b2a8df4021af2c5773daa188d"
+        "src/codegen/phase_gapfill.cpp": "78ff568e4623a44f6d39c8ae466b88bee5cd0202612629fc0f2430aad389594a"
       },
       "test": "sdkcheck direct tail entries take precedence over speculative gap fallthrough; synthetic XEX preserves the gap prefix and creates the referenced entry before linear gap discovery."
     },
@@ -2905,7 +2905,7 @@
         "src/codegen/phase_gapfill.cpp": "a742d8486085686fbfefd0c94c224211eb119fc78847afb81b7c6bf088259bd1"
       },
       "files": {
-        "src/codegen/phase_gapfill.cpp": "6be4cb31baad2f41b0a9d22375fa850d1aa9027b2a8df4021af2c5773daa188d"
+        "src/codegen/phase_gapfill.cpp": "78ff568e4623a44f6d39c8ae466b88bee5cd0202612629fc0f2430aad389594a"
       },
       "test": "sdkcheck data-entry: synthetic RTTI-free callbacks in rdata/data, alignment, original metadata interiors, ordinary fallthrough and non-executable references. Real Minecraft/Forza startup missing indirect entries motivate shared discovery only; no title addresses or hashes in compiler."
     },
@@ -2939,7 +2939,7 @@
         "include/rex/codegen/function_types.h": "fc597f4c33c3ec730fb0c7d9af0a1216e24057cac9c8f5e4a7b2ad75e030ad05",
         "src/codegen/phase_register.cpp": "8c9a6f031110bcca15cb9fc89856749083df690342b630c34c44c9526563b185",
         "src/codegen/codegen_writer.cpp": "db2a4d2a423dee1c46d9a1e9ed0352f202806f9077c7349ad13429dee5445f25",
-        "src/codegen/builders/context.cpp": "d689d30e11e0df9f905bbbcf4c6d4844937f7107aa897b124fd5ed8246db742e"
+        "src/codegen/builders/context.cpp": "b7697b46ecd3793cf402cf8400b32f8dc43118f40d1a66b81c03299cb7829434"
       },
       "test": "sdkcheck [nonlocal-jumps]: complete synthetic console CRT register/VMX jump-buffer ABI, optional prefix, relocated helpers, malformed slots, malformed VMX operation and section truncation; existing direct-call native setjmp/longjmp emission without title addresses. Minecraft fault context motivates automatic recognition only."
     },
@@ -2950,7 +2950,7 @@
         "src/codegen/phase_gapfill.cpp": "569dfde0b28560ad4ed73a8622e98a51ee9485fb5372d7a245b9bb33fe47fc28"
       },
       "files": {
-        "src/codegen/phase_gapfill.cpp": "6be4cb31baad2f41b0a9d22375fa850d1aa9027b2a8df4021af2c5773daa188d"
+        "src/codegen/phase_gapfill.cpp": "78ff568e4623a44f6d39c8ae466b88bee5cd0202612629fc0f2430aad389594a"
       },
       "test": "sdkcheck [code-address-entry]: synthetic lis/addi and lis/ori callbacks, signed low half, different destination register, clobbers, block boundary, original metadata, ordinary fallthrough and non-code target. Reuses conservative 0205 candidate validation; broad disabled scanner remains off. No title addresses or runtime changes."
     },
@@ -2964,8 +2964,8 @@
       },
       "files": {
         "include/rex/codegen/function_types.h": "fc597f4c33c3ec730fb0c7d9af0a1216e24057cac9c8f5e4a7b2ad75e030ad05",
-        "src/codegen/function_scanner.cpp": "5b532b879054397447e92f4ab72ea8a56a922be702bdd382bb944478f40e5d4e",
-        "src/codegen/phase_gapfill.cpp": "6be4cb31baad2f41b0a9d22375fa850d1aa9027b2a8df4021af2c5773daa188d"
+        "src/codegen/function_scanner.cpp": "ed3a78f48db5a74507a8efdba9feb653e34aaab94fae4daee6b999f1b5d0d861",
+        "src/codegen/phase_gapfill.cpp": "78ff568e4623a44f6d39c8ae466b88bee5cd0202612629fc0f2430aad389594a"
       },
       "test": "sdkcheck [embedded-table]: inferred absolute inline switch table whose words decode as instructions, materialized table address, out-of-line cases and actual code/data boundary. Preserve byte/short/computed table widths as metadata. Real Minecraft 0208 codegen emitted new unresolved branches because table data became entries; 0209 rejects those data spans, without weakening validation."
     },
@@ -3333,6 +3333,104 @@
     "src/graphics/pipeline/shader/spirv_translator_memexport.cpp": "7d87b758263f99f8cf05e9dc91c5e6ca3448d8ef19fd17dfc18129427fd0c8d3"
   },
   "test": "sdkcheck.Native-MEMEXPORT-vulkan / tests/native/memexport_probe.cpp: signed 8/16-bit saturation extremes, half-away-from-zero rounding, normalized endpoints, endian, adjacent bytes and real GPU readback; before patch four signed-integer cases fail after alias publication is corrected."
+},
+{
+  "file": "patches/rexglue-sdk/0237-preserve-emission-owners-and-late-call-edges.patch",
+  "sha256": "dd873f4db096d154a55261666e81ddc47d9014ff18420a5412efcca7bd0b94f3",
+  "files": {
+    "include/rex/codegen/function_graph.h": "6ba421ef52d676eae60d65e2482256d7713f0e8c6acdf16e6475a53bdba36958",
+    "src/codegen/function_graph.cpp": "d39766210de17d242e5134f3303fc65e68592fe4099e2826a06787bea7354f62",
+    "src/codegen/phase_merge.cpp": "450653c9a867f96e3b8780a79741e9fa8be41c9d8a519fc1fdd273bd67e314bf",
+    "src/codegen/builders/control_flow.cpp": "fa4e6b076f1e6e7389c33c6e57730e302df3abc1cbda4fa8258ef5cc13400d6e",
+    "src/codegen/builders/context.cpp": "b7697b46ecd3793cf402cf8400b32f8dc43118f40d1a66b81c03299cb7829434"
+  },
+  "base_files": {
+    "include/rex/codegen/function_graph.h": "63787ee4693de5558f9157c4ea0860aba2510ee7db1eca534c27aac93e17b9fd",
+    "src/codegen/function_graph.cpp": "8b6df66b04ebdf665cb311a51c0abd19290eaa545e44f74863f29a2090ba8546",
+    "src/codegen/phase_merge.cpp": "34b4346cef23c386dfc87087f83ae0a192a6fa6e2dc239d8626d59cdcf7e5390",
+    "src/codegen/builders/control_flow.cpp": "b71bf91c2c7feafc5dc5efb5f1e8d1307d788d850ac08a67e657b5d52c0ee829",
+    "src/codegen/builders/context.cpp": "d689d30e11e0df9f905bbbcf4c6d4844937f7107aa897b124fd5ed8246db742e"
+  },
+  "test": "tests/sdkcheck/emission_owner_test.cpp"
+},
+{
+  "file": "patches/rexglue-sdk/0238-discover-distinct-register-virtual-tails.patch",
+  "sha256": "44a3a7025d095f98d0bd25b854254acdae8dce258692a9079814999a7fc8621b",
+  "base_files": {
+    "src/codegen/phase_gapfill.cpp": "6be4cb31baad2f41b0a9d22375fa850d1aa9027b2a8df4021af2c5773daa188d"
+  },
+  "files": {
+    "src/codegen/phase_gapfill.cpp": "78ff568e4623a44f6d39c8ae466b88bee5cd0202612629fc0f2430aad389594a"
+  },
+  "test": "tests/sdkcheck/virtual_tail_registers_test.cpp: distinct r10-r12 vtable/callable registers, adjacent leaf registration and complete AOT emission; focused metadata/ambiguous-CTR controls preserved."
+},
+{
+  "file": "patches/rexglue-sdk/0239-discover-descriptor-tail-boundaries.patch",
+  "sha256": "9d638810ee4a3ec57665c665c6b5569ba79b665c7061c45892959dbe80a513c5",
+  "base_files": {
+    "src/codegen/phase_gapfill.cpp": "f32a388425be18e7325f902d2aaaf7b658bab5261d19d47e313b1fb58095114d"
+  },
+  "files": {
+    "src/codegen/phase_gapfill.cpp": "78ff568e4623a44f6d39c8ae466b88bee5cd0202612629fc0f2430aad389594a"
+  },
+  "test": "tests/sdkcheck/descriptor_tail_test.cpp: descriptor data flow, alternate scratch registers, mismatched fields/registers, conditional transfers, metadata/config extents and adjacent callable emission."
+},
+{
+  "file": "patches/rexglue-sdk/0240-preserve-msr-ri-and-ir.patch",
+  "sha256": "77a869fd9f3ee8c73e3851ba68eff7a21b579bdd6b4749d1a017143af495f518",
+  "base_files": {
+    "src/codegen/builders/system.cpp": "4f8fae95ce008a588400a4fd2e696b6ea107a88309ae9843fa5266f3f64f7e28"
+  },
+  "files": {
+    "src/codegen/builders/system.cpp": "36d3fdc410a23be53e3f872cc539ba553a9b3fcc0cad88e30960a55acb422f99"
+  },
+  "test": "tests/sdkcheck/msr_codegen_test.cpp and msr_native.cpp: compile synthetic mtmsrd L=1 and mfmsr through production AOT and execute 80 state/readback checks; baseline loses RI and overwrites IR, corrected output preserves unrelated bits and balances runtime interrupt locks."
+},
+{
+  "file": "patches/rexglue-sdk/0241-share-system-object-heap-allocation.patch",
+  "sha256": "f8394ea7d69978256cff73cf8a722d5050aa7e6fdd85ce50052948563c023522",
+  "base_files": {
+    "src/system/xmemory.cpp": "7bf4c225a13f98c5a34a2821fd0db2c0f5c4b49283b243ac528c9270e7639949",
+    "include/rex/system/xmemory.h": "a99190619ec6d0748977a579b811da31504a8d21081e13fce29f6de745766ae2"
+  },
+  "files": {
+    "src/system/xmemory.cpp": "9edc41885c779338a141c5fe7ef34b7da450ba8146077a21735387a8aa2b8342",
+    "include/rex/system/xmemory.h": "54b31fd4db2729a5aa1567f4b3ff57c84aee733e1a377740fcefebf3a12022e3"
+  },
+  "test": "tests/sdkcheck/system_heap_layout_test.cpp: shared first-fit holes, committed/protected metadata, zeroed reuse, free page accounting, unchanged physical allocation and retained system capacity after ordinary-range exhaustion; refined private runtime passes 357 assertions in 14 allocator/import/dispatch cases."
+},
+{
+  "file": "patches/rexglue-sdk/0242-discover-late-materialized-callbacks.patch",
+  "sha256": "b50f83d62b4658bf6ae6e151e0aa77f34b6aa3e31679b5b5ae147b33f17a8a8b",
+  "base_files": {
+    "src/codegen/phase_gapfill.cpp": "0ec9e3b5db6f7e00e10d7a1169b5bc57642b391365e8532d605e1631038c6111"
+  },
+  "files": {
+    "src/codegen/phase_gapfill.cpp": "78ff568e4623a44f6d39c8ae466b88bee5cd0202612629fc0f2430aad389594a"
+  },
+  "test": "tests/sdkcheck/late_callback_discovery_test.cpp: rescan constructors found by gap fill, promote referenced speculative entries, verify generated registration, reject source clobber, conditional predecessors and metadata/config ownership; focused gap/CTR/emission controls."
+},
+{
+  "file": "patches/rexglue-sdk/0243-register-referenced-shared-tails.patch",
+  "sha256": "752ff3a4c5d830cebd68318c3d53a6dbcf19b2b4add97d516aa5fa6f76a80df4",
+  "base_files": {
+    "src/codegen/phase_gapfill.cpp": "621516e2c99f07cc001b5856286116fafb6932d38fafd6d93d7d32bdbdfbce8f"
+  },
+  "files": {
+    "src/codegen/phase_gapfill.cpp": "78ff568e4623a44f6d39c8ae466b88bee5cd0202612629fc0f2430aad389594a"
+  },
+  "test": "tests/sdkcheck/shared_tail_entry_test.cpp: long/short shared tails inside speculative or inferred wrappers, generated registration and tail-call emission, invalid predecessors/targets, source clobber and declared extent controls; 108 assertions plus focused discovery/emission controls."
+},
+{
+  "file": "patches/rexglue-sdk/0244-recognize-split-default-switch-bounds.patch",
+  "sha256": "4043293981e390e565536ac2822c65dca7538212b0a292d08ae25b473e79899c",
+  "base_files": {
+    "src/codegen/function_scanner.cpp": "5b532b879054397447e92f4ab72ea8a56a922be702bdd382bb944478f40e5d4e"
+  },
+  "files": {
+    "src/codegen/function_scanner.cpp": "ed3a78f48db5a74507a8efdba9feb653e34aaab94fae4daee6b999f1b5d0d861"
+  },
+  "test": "tests/sdkcheck/split_default_switch_test.cpp and split_default_switch_native.cpp: 643-slot switch with unsigned branch-over-default guard, CR/condition/edge/index/dominance controls, and all 65536 16-bit indices executed through real compiled AOT; heuristic scan limit unchanged."
 }
 ]
 },
