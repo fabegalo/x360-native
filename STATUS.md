@@ -1,5 +1,18 @@
 # STATUS
 
+31/10 — **RENDER-FINAL, Windows x64**: Native D3D12 reutiliza SRVs por arena,
+lê índices compatíveis da memória GPU residente e reaproveita uploads de
+constantes idênticas; Native Vulkan também lê índices residentes. Xenos
+preserva bytes CPU em MEMEXPORT parcial (0246) e aplica depth bias Vulkan em
+unidades exatas (0247, Canary a8d034c); o toast de achievements ocioso deixa
+de forçar redesenho contínuo da UI (0248). Cada mudança tem contrato com
+controle negativo, aprovado em Release na RTX 4070; lock com 235 patches.
+Skate 3 D3D12, rodadas manuais de 60 s: 15,65 FPS na `main` e 19,34 FPS com
+índices residentes (1% low 9,72 → 14,59); trajetos sem replay determinístico,
+**sem aceite de fluidez**. Constantes D3D12 e 0248 sem medição de gameplay;
+Vulkan, Xenos e demais títulos sem gameplay nesta etapa.
+[Medições, condições e limites](docs/reports/performance/render-final-2026-10-31.md).
+
 31/10 — **PERF-GPU-02, continuação Windows sobre o PR #9**: integrada a main
 `58cd9dd` à base do PR. Native D3D12/Vulkan reutiliza os workers para PSOs
 compute; D3D12 evita submissões vazias preservando fences/readbacks; Vulkan
