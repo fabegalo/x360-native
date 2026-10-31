@@ -69,10 +69,8 @@ D3D12Render::TextureTables D3D12Render::BindTextures(const RegisterFile& r, rex:
   for (const auto& b : samplers) index_count = std::max(index_count, size_t(b.bindless_descriptor_index) + 1);
   std::vector<uint32_t> indices(index_count);
   if (!textures.empty()) {
-    auto first = Views(uint32_t(textures.size()));
     for (unsigned i = 0; i < textures.size(); ++i) {
       const auto& binding = textures[i]; auto f = r.GetTextureFetch(binding.fetch_constant);
-      indices.at(binding.bindless_descriptor_index) = first + i;
       // As the pinned texture cache, a fetch constant that is not a texture,
       // or has no data, gives an invalid binding: its view is null (zeros)
       // and the draw still runs. Rate-limited, never silent.
@@ -106,7 +104,7 @@ D3D12Render::TextureTables D3D12Render::BindTextures(const RegisterFile& r, rex:
         } else {
           unused.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2DARRAY; unused.Texture2DArray.MipLevels = 1; unused.Texture2DArray.ArraySize = 1;
         }
-        device_->CreateShaderResourceView(nullptr, &unused, Cpu(first + i));
+        indices.at(binding.bindless_descriptor_index) = TextureView(nullptr, unused);
         continue;
       }
       const bool volume = f.dimension == DataDimension::k3D;
@@ -165,8 +163,7 @@ D3D12Render::TextureTables D3D12Render::BindTextures(const RegisterFile& r, rex:
           const bool current = !std::atomic_ref(entry->outdated).load(std::memory_order_relaxed);
           // Unchanged since loaded: no CPU or GPU write touched its pages.
           if (current) {
-            device_->CreateShaderResourceView(entry->resource.Get(), &view, Cpu(first + i));
-            transient_.push_back(entry->resource); // Keep alive through in-flight eviction.
+            indices.at(binding.bindless_descriptor_index) = TextureView(entry->resource.Get(), view);
             if (stats_enabled_) ++texture_cache_hits_;
             continue;
           }
@@ -243,7 +240,7 @@ D3D12Render::TextureTables D3D12Render::BindTextures(const RegisterFile& r, rex:
         if (stats_enabled_) { ++cpu_texture_loads_; ++texture_uploads_; texture_upload_bytes_ += bytes; }
       }
       Transition(texture.Get(), state, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
-      device_->CreateShaderResourceView(texture.Get(), &view, Cpu(first + i)); transient_.push_back(texture);
+      indices.at(binding.bindless_descriptor_index) = TextureView(texture.Get(), view);
     }
   }
   if (!samplers.empty()) {
@@ -283,6 +280,26 @@ D3D12Render::TextureTables D3D12Render::BindTextures(const RegisterFile& r, rex:
   return tables;
 }
 static_assert(sizeof(D3D12_SAMPLER_DESC) == 13 * 4, "sampler key covers every byte of the description");
+size_t D3D12Render::TextureViewKeyHash::operator()(const TextureViewKey& key) const {
+  return size_t(XXH3_64bits(key.data(), sizeof(key)));
+}
+uint32_t D3D12Render::TextureView(ID3D12Resource* resource, const D3D12_SHADER_RESOURCE_VIEW_DESC& view) {
+  TextureViewKey key{};
+  std::memcpy(key.data(), &resource, sizeof(resource));
+  std::memcpy(reinterpret_cast<uint8_t*>(key.data()) + sizeof(resource), &view, sizeof(view));
+  auto [it, inserted] = arena_texture_views_.try_emplace(key, 0);
+  if (!inserted) {
+    if (stats_enabled_) ++texture_view_reuses_;
+    return it->second;
+  }
+  it->second = Views(1);
+  device_->CreateShaderResourceView(resource, &view, Cpu(it->second));
+  // Keep the resource alive even if its content-cache entry is evicted. This
+  // also prevents pointer reuse from aliasing a descriptor in the same arena.
+  if (resource) transient_.emplace_back(resource);
+  if (stats_enabled_) ++texture_views_;
+  return it->second;
+}
 size_t D3D12Render::SamplerKeyHash::operator()(const SamplerKey& key) const {
   return size_t(XXH3_64bits(key.data(), sizeof(key)));
 }

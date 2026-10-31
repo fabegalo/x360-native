@@ -220,6 +220,12 @@ void D3D12Render::LogSubmissionStats() {
       resolve_ns_ / 1000000, flush_ns_ / 1000000, texture_cache_hits_);
   REXLOG_INFO("Native draw costs draw_ms={} guest_upload_ms={} guest_upload_bytes={} gpu_texture_loads={} cpu_texture_loads={} flush_wait_ms={} (draw includes textures; uploads are mirror pages the CPU wrote)",
       draw_ns_ / 1000000, guest_upload_ns_ / 1000000, guest_upload_bytes_, gpu_texture_loads_, cpu_texture_loads_, flush_wait_ns_ / 1000000);
+  REXLOG_INFO("Native texture views created={} reused={}", texture_views_, texture_view_reuses_);
+  REXLOG_INFO("Native resident indices draws={} bytes={} normalized_indices={}",
+      gpu_index_draws_, gpu_index_bytes_, normalized_indices_);
+  REXLOG_INFO("Native draw phases prepare_us={} memory_us={} indices_us={} bind_us={} issue_us={} normalized_indices={} (completed draw phases; inclusive of internal waits)",
+      draw_prepare_ns_ / 1000, draw_memory_ns_ / 1000, draw_indices_ns_ / 1000,
+      draw_bind_ns_ / 1000, draw_issue_ns_ / 1000, normalized_indices_);
   REXLOG_INFO("Native EDRAM barriers edram_barriers={} edram_layout_barriers={} draws={}",
       edram_barriers_, edram_layout_barriers_, draw_count_);
   std::string causes;
@@ -426,6 +432,7 @@ void D3D12Render::RecycleBatch() {
   next.serial = 0;
   transient_.clear(); view_count_ = sampler_count_ = 0;
   arena_samplers_.clear();
+  arena_texture_views_.clear();
   arena_memory_tables_.fill(UINT32_MAX);
   for (auto& s : scratch_) s.used = 0;
   uint64_t retained = 0;

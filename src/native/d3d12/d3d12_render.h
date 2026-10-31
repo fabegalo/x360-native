@@ -48,10 +48,13 @@ class D3D12Render {
   void EndFrame();
   struct Performance {
     uint64_t submissions, waits, wait_ns, gpu_ticks, gpu_frequency, gpu_samples;
+    uint64_t texture_views, texture_view_reuses;
+    uint64_t gpu_index_draws, gpu_index_bytes, normalized_indices;
   };
   Performance performance() {
     if (stats_enabled_) CollectGpuTimestamps();
-    return {serial_, fence_waits_, flush_wait_ns_, gpu_busy_ticks_, timestamp_frequency_, gpu_timed_};
+    return {serial_, fence_waits_, flush_wait_ns_, gpu_busy_ticks_, timestamp_frequency_, gpu_timed_,
+        texture_views_, texture_view_reuses_, gpu_index_draws_, gpu_index_bytes_, normalized_indices_};
   }
   // Guest synchronization point: publish recorded resolve/MEMEXPORT results.
   void CompleteGuestWrites(GuestSync source, uint32_t opcode) {
@@ -156,6 +159,15 @@ class D3D12Render {
   std::unordered_map<SamplerKey, uint32_t, SamplerKeyHash> arena_samplers_;
   uint64_t sampler_reuses_ = 0;
   uint32_t Sampler(const D3D12_SAMPLER_DESC&);
+  // Bindless texture descriptors are immutable within the recording arena.
+  // The exact resource/view pair may be referenced by any number of draws;
+  // retaining it once per view is sufficient until that arena's fence.
+  using TextureViewKey = std::array<uint64_t,
+      (sizeof(ID3D12Resource*) + sizeof(D3D12_SHADER_RESOURCE_VIEW_DESC) + 7) / 8>;
+  struct TextureViewKeyHash { size_t operator()(const TextureViewKey&) const; };
+  std::unordered_map<TextureViewKey, uint32_t, TextureViewKeyHash> arena_texture_views_;
+  uint64_t texture_views_ = 0, texture_view_reuses_ = 0;
+  uint32_t TextureView(ID3D12Resource*, const D3D12_SHADER_RESOURCE_VIEW_DESC&);
   Ptr<ID3D12RootSignature> root_, root_tess_, copy_root_, clear_root_;
   std::vector<Ptr<ID3D12Resource>> transient_;
   // Three independent recording arenas. Queue ordering protects persistent
@@ -234,6 +246,10 @@ class D3D12Render {
   uint64_t texture_ns_ = 0, resolve_ns_ = 0, flush_ns_ = 0;
   uint64_t texture_uploads_ = 0, texture_upload_bytes_ = 0;
   uint64_t draw_ns_ = 0, guest_upload_ns_ = 0, guest_upload_bytes_ = 0;
+  // Opt-in draw phase timings; inclusive of any waits within that phase.
+  uint64_t draw_prepare_ns_ = 0, draw_memory_ns_ = 0, draw_indices_ns_ = 0;
+  uint64_t draw_bind_ns_ = 0, draw_issue_ns_ = 0, normalized_indices_ = 0;
+  uint64_t gpu_index_draws_ = 0, gpu_index_bytes_ = 0;
   uint64_t shader_ns_ = 0;
   // Updated by pipeline workers.
   std::atomic<uint64_t> pipeline_ns_async_{0}, pipeline_thread_ns_async_{0}, pipeline_creations_{0};

@@ -91,6 +91,13 @@ D3D12Render::Ptr<ID3D12PipelineState> D3D12Render::CreatePipeline(D3D12_GRAPHICS
 void D3D12Render::Draw(const RegisterFile& r, rex::memory::Memory& memory, Shader* vertex, Shader* pixel,
     PrimitiveType primitive, uint32_t count, const DrawIndices* indices, DrawPurpose purpose) {
   Timer timer(stats_enabled_, draw_ns_);
+  auto phase_start = stats_enabled_ ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
+  auto finish_phase = [&](uint64_t& elapsed) {
+    if (!stats_enabled_) return;
+    const auto now = std::chrono::steady_clock::now();
+    elapsed += std::chrono::duration_cast<std::chrono::nanoseconds>(now - phase_start).count();
+    phase_start = now;
+  };
   Require(vertex, "missing vertex shader");
   auto& vs = *static_cast<DxbcShader*>(vertex);
   auto* ps = static_cast<DxbcShader*>(pixel);
@@ -174,6 +181,24 @@ void D3D12Render::Draw(const RegisterFile& r, rex::memory::Memory& memory, Shade
   const bool point = rasterization && primitive == PrimitiveType::kPointList;
   const bool line = rasterization && IsLinePrimitive(primitive);
   const bool convert = rasterization && !tess && NeedsPrimitiveConversion(primitive);
+  const uint32_t index_bytes = indices && indices->format == IndexFormat::kInt16 ? 2 : 4;
+  if (indices) {
+    Require(uint64_t(indices->count) * index_bytes <= indices->length, "index count outside buffer");
+    Require(uint64_t(indices->guest_base) + indices->length <= 0x20000000 && count <= indices->count,
+        "index physical extent invalid");
+  }
+  // The guest shader already swaps SV_VertexID before applying the original
+  // index offset and clamp. Read ordinary indices directly from the resident
+  // mirror, as Xenos does, without CPU normalization or another upload. R16
+  // zero-extension followed by 8-in-16 swaps only its low two bytes. The other
+  // R16 endian modes swap adjacent indices as well and stay on the CPU path.
+  // Restart/conversion/tessellation retain the existing normalized topology.
+  // MEMEXPORT also stays there: a UAV cannot simultaneously be an IA buffer.
+  const bool index_restart = face_mode.multi_prim_ib_ena &&
+      (primitive == PrimitiveType::kTriangleStrip || primitive == PrimitiveType::k2DTriStrip);
+  const bool gpu_indices = indices && !tess && !convert && !memexport && !index_restart &&
+      !(indices->guest_base & (index_bytes - 1)) &&
+      (index_bytes == 4 || indices->endianness == Endian::kNone || indices->endianness == Endian::k8in16);
   if (rasterization && !tess && primitive != PrimitiveType::kTriangleList && primitive != PrimitiveType::kTriangleStrip &&
       primitive != PrimitiveType::kRectangleList && !convert && !line && !point && primitive != PrimitiveType::k2DTriStrip)
     throw std::runtime_error("Native draw: primitive conversion not implemented (primitive=" +
@@ -281,8 +306,9 @@ void D3D12Render::Draw(const RegisterFile& r, rex::memory::Memory& memory, Shade
   // CPU) must hold earlier resolve results before anything is recorded (a
   // later flush would orphan state). Vertices and GPU-loaded textures read
   // the resident mirror, where resolve results already are.
+  finish_phase(draw_prepare_ns_);
   if (!writeback_.empty() || pending_readback_batches_) {
-    if (indices) SyncGuestRead(indices->guest_base, indices->length, kReadIndices);
+    if (indices && !gpu_indices) SyncGuestRead(indices->guest_base, indices->length, kReadIndices);
     for (auto* shader : {&vs, ps}) if (shader)
       for (const auto& t : shader->GetTextureBindingsAfterTranslation()) {
         auto f = r.GetTextureFetch(t.fetch_constant);
@@ -301,6 +327,7 @@ void D3D12Render::Draw(const RegisterFile& r, rex::memory::Memory& memory, Shade
   for (const auto& range : memexport_ranges) readback_bytes += (uint64_t(range.length) + 255) & ~uint64_t(255);
   ReserveReadback(readback_bytes);
   auto& mirror = Mirror(memory);
+  if (gpu_indices) mirror.RequestRange(indices->guest_base, count * index_bytes);
   for (const auto& range : memexport_ranges) mirror.RequestRange(range.address, range.length);
   for (const auto& b : vs.vertex_bindings()) {
     auto f = r.GetVertexFetch(b.fetch_constant);
@@ -324,12 +351,14 @@ void D3D12Render::Draw(const RegisterFile& r, rex::memory::Memory& memory, Shade
     mirror.RequestRange(f.address << 2, f.size << 2);
   }
   D3D12_INDEX_BUFFER_VIEW ib{};
+  finish_phase(draw_memory_ns_);
   std::vector<IndexRange> index_ranges;
-  if (indices) {
-    Require(indices->count * (indices->format == IndexFormat::kInt16 ? 2ull : 4ull) <= indices->length, "index count outside buffer");
-    Require(uint64_t(indices->guest_base) + indices->length <= 0x20000000 && count <= indices->count, "index physical extent invalid");
-  }
-  if (indices || convert) {
+  if (gpu_indices) {
+    ib = {memory_->GetGPUVirtualAddress() + indices->guest_base, count * index_bytes,
+        index_bytes == 2 ? DXGI_FORMAT_R16_UINT : DXGI_FORMAT_R32_UINT};
+    index_ranges.push_back({0, count});
+  } else if (indices || convert) {
+    if (stats_enabled_) normalized_indices_ += count;
     std::vector<uint32_t> expanded;
     expanded.reserve(count);
     auto index = [&](uint32_t i) {
@@ -366,11 +395,18 @@ void D3D12Render::Draw(const RegisterFile& r, rex::memory::Memory& memory, Shade
     count = uint32_t(expanded.size());
   }
   // Texture loads record uploads and compute work: before the draw state.
+  finish_phase(draw_indices_ns_);
   textures_resolution_scaled_ = 0;
   TextureTables pixel_tables, vertex_tables;
   if (ps) pixel_tables = BindTextures(r, memory, *ps);
   vertex_tables = BindTextures(r, memory, vs);
-  Transition(memory_.Get(), memory_state_, memexport ? D3D12_RESOURCE_STATE_UNORDERED_ACCESS : D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+  // BindTextures already records its own timing. Restart for state/constants.
+  if (stats_enabled_) phase_start = std::chrono::steady_clock::now();
+  // Keep both compatible read usages between draws. A later mirror upload or
+  // MEMEXPORT still transitions from this exact state and orders IA reads.
+  const auto memory_read_state = D3D12_RESOURCE_STATES(
+      D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_INDEX_BUFFER);
+  Transition(memory_.Get(), memory_state_, memexport ? D3D12_RESOURCE_STATE_UNORDERED_ACCESS : memory_read_state);
   // A real state transition (after a resolve read the EDRAM) orders all
   // earlier accesses itself.
   if (edram_state_ != D3D12_RESOURCE_STATE_UNORDERED_ACCESS) edram_rov_layout_.reset();
@@ -410,7 +446,7 @@ void D3D12Render::Draw(const RegisterFile& r, rex::memory::Memory& memory, Shade
   c.flags |= uint32_t(alpha) << T::kSysFlag_AlphaPassIfLess_Shift;
   c.alpha_test_reference = r.Get<float>(XE_GPU_REG_RB_ALPHA_REF);
   c.alpha_to_mask = color.alpha_to_mask_enable ? (color.value >> 24) | 256 : 0;
-  c.vertex_index_endian = Endian::kNone; // CPU-normalized, including 16-bit index pair swaps.
+  c.vertex_index_endian = gpu_indices ? indices->endianness : Endian::kNone;
   c.vertex_index_offset = r.Get<reg::VGT_INDX_OFFSET>().indx_offset;
   c.vertex_index_min = r.Get<reg::VGT_MIN_VTX_INDX>().min_indx;
   c.vertex_index_max = r.Get<reg::VGT_MAX_VTX_INDX>().max_indx;
@@ -502,9 +538,12 @@ void D3D12Render::Draw(const RegisterFile& r, rex::memory::Memory& memory, Shade
   cmd_.SetGraphicsRootDescriptorTable(9, Gpu(0));
   cmd_.OMSetRenderTargets(0, nullptr, FALSE, nullptr);
   cmd_.IASetPrimitiveTopology(tess ? D3D_PRIMITIVE_TOPOLOGY(D3D_PRIMITIVE_TOPOLOGY_1_CONTROL_POINT_PATCHLIST + tess.control_points - 1) : !rasterization || point ? D3D_PRIMITIVE_TOPOLOGY_POINTLIST : line ? D3D_PRIMITIVE_TOPOLOGY_LINELIST : (primitive == PrimitiveType::kTriangleStrip || primitive == PrimitiveType::k2DTriStrip) ? D3D_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP : D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+  finish_phase(draw_bind_ns_);
   if (indices || convert) { cmd_.IASetIndexBuffer(&ib); for (const auto& range : index_ranges) cmd_.DrawIndexedInstanced(range.count, 1, range.offset, 0, 0); }
   else cmd_.DrawInstanced(count, 1, 0, 0);
   for (const auto& range : memexport_ranges) QueueGuestWrite(range.address, range.length);
+  if (stats_enabled_ && gpu_indices) { ++gpu_index_draws_; gpu_index_bytes_ += uint64_t(count) * index_bytes; }
+  finish_phase(draw_issue_ns_);
   ++draw_count_;
 }
 }
