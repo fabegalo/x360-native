@@ -2,10 +2,13 @@
 # Bounded real-title diagnostic. Uses original hash guards, isolated copies of
 # user/cache state, current native artifacts; does not publish preparation receipts.
 param(
- [Parameter(Mandatory)][ValidateSet('dash_17559','castle_crashers','forza_horizon','motocross_madness')][string]$Title,
+ [Parameter(Mandatory)][ValidateSet('dash_17559','castle_crashers','forza_horizon','motocross_madness','minecraft_xbox_360_edition')][string]$Title,
  [Parameter(Mandatory)][ValidatePattern('^[a-zA-Z0-9_-]+$')][string]$Label,
  [string]$ScenarioFile,
  [string]$BinaryDirectory,
+ [ValidatePattern('^[a-zA-Z0-9_.-]+[.]exe$')][string]$ExecutableName,
+ # Explicit frozen console fixture; preserves old benchmark seeds by default.
+ [string]$SeedDirectory,
  [ValidateSet('Off','On')][string]$Instrumentation='On',
  [ValidateSet('xenos','native')][string]$Renderer='xenos',
  [ValidateSet('d3d12','vulkan')][string]$Api='d3d12',
@@ -54,16 +57,18 @@ $out=Join-Path $root ".local/evidence/benchmarks/$Label/$Title"
 if(Test-Path $out){throw "Refusing to overwrite $out"}
 New-Item -ItemType Directory -Force $out | Out-Null
 if(!$BinaryDirectory){$BinaryDirectory=Join-Path $root ".local/build/titles/$Title"}
-$exe=Join-Path ([IO.Path]::GetFullPath($BinaryDirectory)) "$Title.exe"
+$exe=Join-Path ([IO.Path]::GetFullPath($BinaryDirectory)) $(if($ExecutableName){$ExecutableName}else{"$Title.exe"})
 if(!(Test-Path $exe)){throw "Missing $exe"}
-if(Get-Process -Name dash_17559,castle_crashers,forza_horizon,motocross_madness -ErrorAction SilentlyContinue){throw 'A reference title is already running; benchmark requires exclusive session'}
+$referenceProcesses=@('dash_17559','castle_crashers','forza_horizon','motocross_madness',[IO.Path]::GetFileNameWithoutExtension($exe)) | Select-Object -Unique
+if(Get-Process -Name $referenceProcesses -ErrorAction SilentlyContinue){throw 'A reference title is already running; benchmark requires exclusive session'}
 function Inventory([string]$Directory) {
  @(Get-ChildItem -LiteralPath $Directory -File -Recurse | Sort-Object FullName | ForEach-Object {
   @{path=$_.FullName.Substring($Directory.Length).TrimStart('\','/');bytes=$_.Length;sha256=(Get-FileHash -LiteralPath $_.FullName).Hash.ToLower()}
  })
 }
 # Immutable seed reused for both sides; never change real profiles, saves or caches.
-$seed=Join-Path $root ".local/evidence/benchmarks/seeds/$Title"
+$seed=if($SeedDirectory){[IO.Path]::GetFullPath($SeedDirectory)}else{Join-Path $root ".local/evidence/benchmarks/seeds/$Title"}
+if($SeedDirectory -and !(Test-Path -LiteralPath $seed -PathType Container)){throw "Missing frozen seed $seed"}
 if(!(Test-Path $seed)) {
  New-Item -ItemType Directory -Force $seed | Out-Null
  Get-ChildItem -LiteralPath (Join-Path $root $scenario.user_root) | Copy-Item -Destination $seed -Recurse
@@ -81,7 +86,8 @@ try {
 $artifacts=@(Get-ChildItem -LiteralPath (Split-Path $exe) -File | Where-Object {$_.Extension -in @('.exe','.dll','.toml')} | ForEach-Object {@{file=$_.Name;sha256=(Get-FileHash $_.FullName).Hash.ToLower()}})
 $csv=Join-Path $out 'frames.csv'
 if(@($scenario.arguments | Where-Object {$_ -match '^--gpu[_-](plugin|backend)(=|$)'}).Count){throw 'Scenario must not override renderer/API selection'}
-$argsList=@("--gpu_plugin=$Renderer","--gpu_backend=$Api",'--mnk_mode=true','--log_level=info',"--log_file=$out/rex.log","--game_data_root=$(Join-Path $root $scenario.game_root)","--user_data_root=$user","--cache_root=$user/cache")+@($scenario.arguments)
+$scenarioArguments=@($scenario.arguments | ForEach-Object {$_.Replace('{user_root}',$user)})
+$argsList=@("--gpu_plugin=$Renderer","--gpu_backend=$Api",'--mnk_mode=true','--log_level=info',"--log_file=$out/rex.log","--game_data_root=$(Join-Path $root $scenario.game_root)","--user_data_root=$user","--cache_root=$user/cache")+$scenarioArguments
 if(@($scenario.arguments | Where-Object {$_ -match '^--perf_'}).Count){throw 'Scenario must not override instrumentation mode'}
 if($Instrumentation -eq 'On'){$argsList+=@('--perf_counters=true',"--perf_log_csv=$csv")}
 else{

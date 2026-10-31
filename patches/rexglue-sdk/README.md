@@ -2343,3 +2343,23 @@ Recovery covers process interruption, without claiming power-loss durability or
 concurrent writers from independent console processes. The 17559 PNG service and
 native-task predicate bridge live in the title profile and retain its original
 libpng encoder; no original module or asset is edited.
+
+### 0235 — avoid the global lock for resident memory requests
+
+Read fixed-size validity words with atomic_ref when every requested page is
+resident. Writers remain serialized by the guest-fault critical region and use
+atomic accesses too. Preserve range validation/merging, sparse allocation,
+upload planning, residency generations, GPU-written pages and mandatory CPU
+frame refresh. The miss path still takes the original lock. The CPU service
+probe covers mask edges, batches, bounded contention and concurrent CPU writes;
+its paired timings measure operation costs, not frames or game FPS.
+
+### 0236 — saturate Vulkan MEMEXPORT integer conversions
+
+Clamp signed and unsigned integer components to their representable range before
+rounding and packing, matching the pinned DXBC implementation. Keep normalized
+conversion, half-away-from-zero rounding, endian and adjacent-byte masks intact.
+The shared translator benefits Xenos/Vulkan and Native/Vulkan. The Native GPU
+probe exercises 88 cases including 8/16-bit extremes; before this change, four
+signed cases and additional unsigned saturation cases fail. Alias publication
+is fixed independently in Native's physical-write notification helper.

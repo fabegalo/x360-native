@@ -33,6 +33,7 @@ class D3D12Scanout final : public ScanoutBackend {
     uint64_t capacity = 0, serial = 0;
   };
   void Wait(uint64_t serial);
+  D3D12Render& Render();
   rex::ui::d3d12::D3D12Provider& provider_;
   Ptr<ID3D12RootSignature> root_;
   Ptr<ID3D12PipelineState> pipeline_;

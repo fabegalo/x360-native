@@ -12,6 +12,7 @@
 #include <rex/cvar.h>
 #include <rex/memory/ring_buffer.h>
 #include <rex/thread/mutex.h>
+#include "../memory/physical_write.h"
 #include <cstring>
 REXCVAR_DEFINE_STRING(native_trace, "", "GPU/Native", "Optional Native diagnostic directory");
 namespace x360n::native {
@@ -77,8 +78,7 @@ void CommandProcessor::OnGuestMemoryWrite(uint32_t address, uint32_t length) {
   if (uint64_t(address) + length > 0x20000000) Unsupported("GPU packet write outside guest physical memory");
   // Shared packet handlers write through the unprotected physical view.
   // Notify every alias, including Native's mirror and texture watches.
-  memory_->TriggerPhysicalMemoryCallbacks(rex::thread::global_critical_region::AcquireDirect(),
-      0xA0000000u | address, length, true, true);
+  NotifyPhysicalWrite(*memory_, address, length);
 }
 void CommandProcessor::IssueSwap(uint32_t, uint32_t width, uint32_t height) {
   last_swap_succeeded_ = false;

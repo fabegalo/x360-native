@@ -80,29 +80,28 @@ void D3D12Scanout::InitializeShaderStorage(const std::filesystem::path& root, ui
   pipeline_directory_ = root / "native-d3d12-pso-v1" / std::to_string(title_id);
   if (render_) render_->SetPipelineDirectory(pipeline_directory_);
 }
-rex::graphics::Shader* D3D12Scanout::LoadShader(rex::graphics::xenos::ShaderType type, const uint32_t* data, uint32_t count) {
+D3D12Render& D3D12Scanout::Render() {
   if (!render_) {
     render_ = std::make_unique<D3D12Render>(provider_);
     render_->SetPipelineDirectory(pipeline_directory_);
   }
-  return render_->shaders.Load(type, data, count);
+  return *render_;
+}
+rex::graphics::Shader* D3D12Scanout::LoadShader(rex::graphics::xenos::ShaderType type, const uint32_t* data, uint32_t count) {
+  return Render().shaders.Load(type, data, count);
 }
 SampleCounts D3D12Scanout::ReadSampleCounts(bool counting_after) {
-  if (!render_) render_ = std::make_unique<D3D12Render>(provider_);
-  return render_->ReadSampleCounts(counting_after);
+  return Render().ReadSampleCounts(counting_after);
 }
 void D3D12Scanout::Draw(const rex::graphics::RegisterFile& regs, rex::memory::Memory& memory, rex::graphics::Shader* vs, rex::graphics::Shader* ps,
     rex::graphics::xenos::PrimitiveType primitive, uint32_t count, const DrawIndices* indices, DrawPurpose purpose) {
-  if (!render_) render_ = std::make_unique<D3D12Render>(provider_);
-  render_->Draw(regs, memory, vs, ps, primitive, count, indices, purpose);
+  Render().Draw(regs, memory, vs, ps, primitive, count, indices, purpose);
 }
 void D3D12Scanout::SetSampleCounts(const SampleCounts& counts, bool visibility_only) {
-  if (!render_) render_ = std::make_unique<D3D12Render>(provider_);
-  render_->SetSampleCounts(counts, visibility_only);
+  Render().SetSampleCounts(counts, visibility_only);
 }
 void D3D12Scanout::Resolve(const rex::graphics::RegisterFile& regs, rex::memory::Memory& memory) {
-  if (!render_) render_ = std::make_unique<D3D12Render>(provider_);
-  render_->Resolve(regs, memory);
+  Render().Resolve(regs, memory);
 }
 void D3D12Scanout::Present(rex::ui::Presenter& presenter, const ScanoutTexture& input_texture,
                          const void* input_pixels, const uint32_t* lut, const ScanoutOverlay* overlay,

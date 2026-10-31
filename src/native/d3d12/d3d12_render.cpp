@@ -8,6 +8,7 @@
 #include <cmath>
 #include <algorithm>
 #include <fstream>
+#include <utility>
 REXCVAR_DEFINE_BOOL(native_stats, false, "GPU/Native", "Log cumulative Native CPU submission costs for bounded diagnostics");
 REXCVAR_DEFINE_BOOL(native_texture_cache, true, "GPU/Native", "Reuse textures only while every guest source byte matches; disable for diagnostics");
 REXCVAR_DEFINE_BOOL(native_texture_cpu, false, "GPU/Native", "Diagnose texture loads with CPU conversion and synchronized guest bytes");
@@ -72,14 +73,30 @@ void D3D12Render::Barrier() {
 }
 D3D12_CPU_DESCRIPTOR_HANDLE D3D12Render::Cpu(uint32_t i, bool s) {
   auto h = (s ? samplers_ : views_)->GetCPUDescriptorHandleForHeapStart();
-  h.ptr += i * device_->GetDescriptorHandleIncrementSize(s ? D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER : D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV); return h;
+  h.ptr += i * provider_.GetDescriptorSize(s ? D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER : D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV); return h;
 }
 D3D12_GPU_DESCRIPTOR_HANDLE D3D12Render::Gpu(uint32_t i, bool s) {
   auto h = (s ? samplers_ : views_)->GetGPUDescriptorHandleForHeapStart();
-  h.ptr += i * device_->GetDescriptorHandleIncrementSize(s ? D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER : D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV); return h;
+  h.ptr += i * provider_.GetDescriptorSize(s ? D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER : D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV); return h;
 }
 uint32_t D3D12Render::Views(uint32_t n) { Require(view_count_ + n <= 65536, "view heap exhausted"); auto i = view_count_; view_count_ += n; return i; }
 uint32_t D3D12Render::Samplers(uint32_t n) { Require(sampler_count_ + n <= 2048, "sampler heap exhausted"); auto i = sampler_count_; sampler_count_ += n; return i; }
+D3D12_GPU_DESCRIPTOR_HANDLE D3D12Render::MemoryTable(bool memexport) {
+  auto& base=arena_memory_tables_[unsigned(memexport)];
+  if (base!=UINT32_MAX) return Gpu(base);
+  base=Views(3);
+  D3D12_SHADER_RESOURCE_VIEW_DESC srv{}; srv.Format=DXGI_FORMAT_R32_TYPELESS;
+  srv.ViewDimension=D3D12_SRV_DIMENSION_BUFFER; srv.Shader4ComponentMapping=D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+  srv.Buffer.NumElements=GuestMemoryMirror::kSize/4; srv.Buffer.Flags=D3D12_BUFFER_SRV_FLAG_RAW;
+  device_->CreateShaderResourceView(memexport ? nullptr : memory_.Get(),&srv,Cpu(base));
+  D3D12_UNORDERED_ACCESS_VIEW_DESC uav{}; uav.Format=DXGI_FORMAT_R32_TYPELESS;
+  uav.ViewDimension=D3D12_UAV_DIMENSION_BUFFER; uav.Buffer.NumElements=GuestMemoryMirror::kSize/4;
+  uav.Buffer.Flags=D3D12_BUFFER_UAV_FLAG_RAW;
+  device_->CreateUnorderedAccessView(memexport ? memory_.Get() : nullptr,nullptr,&uav,Cpu(base+1));
+  uav.Format=DXGI_FORMAT_R32_UINT; uav.Buffer.NumElements=UINT(edram_size_/4)+8; uav.Buffer.Flags=D3D12_BUFFER_UAV_FLAG_NONE;
+  device_->CreateUnorderedAccessView(edram_.Get(),nullptr,&uav,Cpu(base+2));
+  return Gpu(base);
+}
 D3D12Render::D3D12Render(rex::ui::d3d12::D3D12Provider& provider) : provider_(provider), device_(provider.GetDevice()) {
   stats_enabled_ = REXCVAR_GET(native_stats);
   texture_cache_enabled_ = REXCVAR_GET(native_texture_cache);
@@ -143,7 +160,10 @@ D3D12Render::D3D12Render(rex::ui::d3d12::D3D12Provider& provider) : provider_(pr
 }
 // Watches reference cache entries: retire them before the cache is destroyed.
 D3D12Render::~D3D12Render() {
-  // Submissions still in flight are not awaited here; they stay uncounted.
+  // Submitted resources and pending guest publication outlive their fence,
+  // even when the caller did not explicitly drain before teardown.
+  try { Wait(serial_); PublishCompleted(); }
+  catch (const std::exception& e) { REX_FATAL("Native D3D12: unsafe render teardown: {}", e.what()); }
   if (stats_enabled_) try { CollectGpuTimestamps(); LogSubmissionStats(); } catch (const std::exception& e) {
     REXLOG_WARN("Native final submission stats unavailable: {}", e.what());
   }
@@ -236,7 +256,7 @@ void D3D12Render::CountPresent() {
   std::string opcodes;
   for (unsigned i = 0; i < 256; ++i) if (sync_opcodes_[i]) opcodes += fmt::format(" {:02X}:{}", i, sync_opcodes_[i]);
   REXLOG_INFO("Native guest sync opcodes{}", opcodes);
-  REXLOG_INFO("Native overlap sites indices={} cpu_texture={} resolve_rect={} mirror_upload_bytes={}", overlap_sites_[kReadIndices], overlap_sites_[kReadCpuTexture], overlap_sites_[kReadResolveRect], mirror_ ? mirror_->uploaded_bytes() : 0);
+  REXLOG_INFO("Native overlap sites indices={} cpu_texture={} resolve_rect={} packet={} mirror_upload_bytes={}", overlap_sites_[kReadIndices], overlap_sites_[kReadCpuTexture], overlap_sites_[kReadResolveRect], overlap_sites_[kReadPacket], mirror_ ? mirror_->uploaded_bytes() : 0);
   frame_ms_.clear(); window_start_ = now;
 }
 void D3D12Render::Flush(FlushCause cause) {
@@ -246,10 +266,10 @@ void D3D12Render::Flush(FlushCause cause) {
   Check(list_->Close(), "close"); ID3D12CommandList* lists[]{list_.Get()};
   provider_.GetDirectQueue()->ExecuteCommandLists(1, lists);
   Check(provider_.GetDirectQueue()->Signal(fence_.Get(), ++serial_), "signal");
-  // CPU-visible writes and drain still require completion. Pure GPU work can
-  // remain queued until its recording arena is needed again. The same direct
-  // queue orders persistent EDRAM/mirror/texture accesses and scanout work.
-  if (!writeback_.empty() || cause == kFlushDrain || cause == kFlushGuestSync || cause == kFlushOverlap)
+  // Keep staging, epochs and scaled tickets with the submitted arena. CPU
+  // publication waits only at an observable dependency or arena reuse; the
+  // direct queue still orders GPU RAW/WAR/WAW on memory/EDRAM/textures.
+  if (cause == kFlushDrain || cause == kFlushGuestSync || cause == kFlushOverlap)
     Wait(serial_);
   else if (stats_enabled_) ++async_submissions_;
   Check(device_->GetDeviceRemovedReason(), "device status");
@@ -265,26 +285,46 @@ void D3D12Render::Flush(FlushCause cause) {
     }
     debug_->ClearStoredMessages();
   }
-  if (!writeback_.empty()) {
-    // The fence above retired every resolve copy of this submission.
-    void* mapped; D3D12_RANGE range{0, size_t(readback_used_)};
-    Check(readback_->Map(0, &range, &mapped), "map resolve readback");
-    writeback_.Complete([&](const GuestWriteback::Write& w) {
-      mirror_->CopyReadbackToGuest(w.address, static_cast<const uint8_t*>(mapped) + w.offset, w.length, w.cpu_generations);
-    });
-    D3D12_RANGE none{}; readback_->Unmap(0, &none);
-  }
-  for (const auto& scaled : scaled_readbacks_) {
-    void* mapped; D3D12_RANGE range{size_t(scaled.offset), size_t(scaled.offset)+size_t(scaled.ticket.length)*scale_x_*scale_y_};
-    Check(scaled.buffer->Map(0, &range, &mapped), "map scaled resolve readback");
-    scaled_.Complete(scaled.ticket, {static_cast<const uint8_t*>(mapped)+scaled.offset,
-        size_t(scaled.ticket.length)*scale_x_*scale_y_}, scaled.pixel_log2, *guest_memory_);
-    D3D12_RANGE none{}; scaled.buffer->Unmap(0, &none);
-  }
-  scaled_readbacks_.clear();
-  readback_used_ = 0;
   RecycleBatch();
   if (stats_enabled_ && serial_ % 30 == 0) LogSubmissionStats();
+}
+void D3D12Render::PublishCompleted() {
+  if (!pending_readback_batches_) return;
+  const auto completed = fence_->GetCompletedValue();
+  Require(completed != UINT64_MAX, "render device removed");
+  for (;;) {
+    RetiredBatch* batch = nullptr;
+    for (auto& candidate : batches_)
+      if ((!candidate.writeback.empty() || !candidate.scaled_readbacks.empty()) &&
+          (!batch || candidate.serial < batch->serial)) batch = &candidate;
+    if (!batch || batch->serial > completed) return;
+    if (!batch->writeback.empty()) {
+      void* mapped; D3D12_RANGE range{0, size_t(batch->readback_used)};
+      Check(batch->readback->Map(0, &range, &mapped), "map resolve readback");
+      batch->writeback.Complete([&](const GuestWriteback::Write& w) {
+        mirror_->CopyReadbackToGuest(w.address, static_cast<const uint8_t*>(mapped) + w.offset,
+                                     w.length, w.cpu_generations);
+      });
+      D3D12_RANGE none{}; batch->readback->Unmap(0, &none);
+    }
+    for (const auto& scaled : batch->scaled_readbacks) {
+      const size_t bytes = size_t(scaled.ticket.length)*scale_x_*scale_y_;
+      void* mapped; D3D12_RANGE range{size_t(scaled.offset), size_t(scaled.offset)+bytes};
+      Check(scaled.buffer->Map(0, &range, &mapped), "map scaled resolve readback");
+      scaled_.Complete(scaled.ticket, {static_cast<const uint8_t*>(mapped)+scaled.offset, bytes},
+                        scaled.pixel_log2, *guest_memory_);
+      D3D12_RANGE none{}; scaled.buffer->Unmap(0, &none);
+    }
+    batch->scaled_readbacks.clear();
+    batch->readback_used = 0;
+    --pending_readback_batches_;
+  }
+}
+bool D3D12Render::GuestWritesOverlap(uint32_t address, uint32_t length) const {
+  if (!length) return false;
+  if (writeback_.Overlaps(address, length)) return true;
+  for (const auto& batch : batches_) if (batch.writeback.Overlaps(address, length)) return true;
+  return false;
 }
 SampleCounts D3D12Render::ReadSampleCounts(bool counting_after) {
   if (!sample_counts_readback_) {
@@ -333,7 +373,14 @@ void D3D12Render::Wait(uint64_t serial) {
 }
 void D3D12Render::RecycleBatch() {
   auto& retired = batches_[batch_index_];
+  Require(retired.writeback.empty() && retired.scaled_readbacks.empty(), "overwriting pending readback batch");
   retired.serial = serial_;
+  retired.readback = std::move(readback_);
+  retired.readback_size = std::exchange(readback_size_, 0);
+  retired.readback_used = std::exchange(readback_used_, 0);
+  std::swap(retired.writeback, writeback_);
+  retired.scaled_readbacks.swap(scaled_readbacks_);
+  if (!retired.writeback.empty() || !retired.scaled_readbacks.empty()) ++pending_readback_batches_;
   retired.allocator = std::move(allocator_);
   retired.views = std::move(views_); retired.samplers = std::move(samplers_);
   retired.transient = std::move(transient_);
@@ -341,14 +388,19 @@ void D3D12Render::RecycleBatch() {
   batch_index_ = (batch_index_ + 1) % batches_.size();
   auto& next = batches_[batch_index_];
   Wait(next.serial);
+  PublishCompleted();
   if (stats_enabled_) CollectGpuTimestamps();
   allocator_ = std::move(next.allocator);
   views_ = std::move(next.views); samplers_ = std::move(next.samplers);
   transient_ = std::move(next.transient);
   upload_pages_ = std::move(next.uploads); scratch_ = std::move(next.scratch);
+  Require(next.writeback.empty() && next.scaled_readbacks.empty(), "reusing pending readback batch");
+  readback_ = std::move(next.readback);
+  readback_size_ = std::exchange(next.readback_size, 0);
   next.serial = 0;
   transient_.clear(); view_count_ = sampler_count_ = 0;
   arena_samplers_.clear();
+  arena_memory_tables_.fill(UINT32_MAX);
   for (auto& s : scratch_) s.used = 0;
   uint64_t retained = 0;
   for (auto& page : upload_pages_) { page.used = 0; retained += page.size; }
@@ -366,10 +418,14 @@ void D3D12Render::RecycleBatch() {
   BeginGpuTimestamp();
 }
 void D3D12Render::SyncGuestRead(uint32_t address, uint64_t length, ReadSite site) {
-  if (length && writeback_.Overlaps(address, uint32_t(std::min<uint64_t>(length, 0x20000000)))) {
-    if (stats_enabled_) { ++overlap_flushes_; ++overlap_sites_[site]; }
-    Flush(kFlushOverlap);
-  }
+  const auto extent = uint32_t(std::min<uint64_t>(length, GuestMemoryMirror::kSize));
+  if (!GuestWritesOverlap(address, extent)) return;
+  if (stats_enabled_) { ++overlap_flushes_; ++overlap_sites_[site]; }
+  if (writeback_.Overlaps(address, extent)) Flush(kFlushCapacity);
+  uint64_t serial = 0;
+  for (const auto& batch : batches_)
+    if (batch.writeback.Overlaps(address, extent)) serial = std::max(serial, batch.serial);
+  if (serial) { Wait(serial); PublishCompleted(); }
 }
 void D3D12Render::ReserveReadback(uint64_t bytes) {
   if (!bytes) return;

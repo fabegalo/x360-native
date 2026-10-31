@@ -1,5 +1,20 @@
 # STATUS
 
+31/10 — **PERF-GPU-01, entrega parcial**: 0235 elimina o lock global nos
+pedidos Xenos de memória já residente; 0236 corrige saturação inteira MEMEXPORT
+no tradutor Vulkan. Native/D3D12 mantém readbacks por arena/fence e espera nas
+dependências observáveis; stores físicos do CP notificam os aliases corretos
+nas duas APIs Native. Corrigida inicialização D3D12 que perdia o cache PSO se
+consulta/resolve criasse o renderer antes do shader; teste base falha e candidato
+persiste/reutiliza nas três ordens. Testes focados, 88 casos MEMEXPORT por API, ZPD, gates,
+epochs e resolves escalados aprovados; comparações de pixels preservadas.
+Medições finais demonstram redução do custo de MEMEXPORT/resolve, **não ganho
+de FPS de gameplay**. O mantenedor relata Native lento em tudo, com período
+preto antes de renderizar; desempenho aceitável não aprovado. Sessões visuais
+interrompidas por interferência no uso da máquina. PSOs frios, pacing de jogos,
+Guide/ciclo completo e comparação com Canary continuam pendentes.
+[Código, evidências, resultados sem ganho e limites](docs/reports/performance/perf-gpu-01-2026-10-31.md).
+
 31/10 — **DASH-OS-FEATURES-03, gravação de Gamerpic parcial**: 0234 persiste
 PNGs públicos/pessoais 64/32 e chave por XUID no modo bruto observado de
 `XamWriteGamerTileEx`, com validação, conclusão/erros reais, quota e recuperação

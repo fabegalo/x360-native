@@ -2029,8 +2029,8 @@
       "files": {
         "src/graphics/command_processor.cpp": "e2b42d5012046917f5383f8d0c0eefa9885419246d0c8f085ea178c30cc34792",
         "include/rex/graphics/register_file.h": "446196d919b7830f700ae931a15132e6edc1b843a7bca450d9991442c4c3e3fc",
-        "include/rex/graphics/shared_memory.h": "bb7820ada353fec748c0cc201c4099b114dfc44c980b67678f4031c52143ea53",
-        "src/graphics/shared_memory.cpp": "42bc20a5d98fd34c1084da3db23d786a7cef0df496c3bb34569dc52b42d0ea0b",
+        "include/rex/graphics/shared_memory.h": "1f65f9daf5cb21a77b1de54aff182e08a3b538fb5a315510b230e02e8f843f9f",
+        "src/graphics/shared_memory.cpp": "1fae10e526df9b9798d2e644a318c2e25404c49323966fee339c4c3f312d0a2e",
         "src/graphics/vulkan/command_processor.cpp": "fdbc0459f34cfd343bc1f8097ed5ac1298d6ab5741c60ec885e7c438bf7ea7eb",
         "include/rex/graphics/vulkan/command_processor.h": "cbab1238329772cd7d2ffa02cb0a3ab1f8d14392493d077cb3157d4d80f31577",
         "src/graphics/d3d12/command_processor.cpp": "0da87b5ea414b79654a997af35c014662aeb74e1257856659bfd805336b5bcba",
@@ -2103,8 +2103,8 @@
         "src/graphics/shared_memory.cpp": "ee6a4f52159e5f7ff78d52deda50e5ecb0cf2e8fda0dbed94f4d58e58142ca4d"
       },
       "files": {
-        "include/rex/graphics/shared_memory.h": "bb7820ada353fec748c0cc201c4099b114dfc44c980b67678f4031c52143ea53",
-        "src/graphics/shared_memory.cpp": "42bc20a5d98fd34c1084da3db23d786a7cef0df496c3bb34569dc52b42d0ea0b"
+        "include/rex/graphics/shared_memory.h": "1f65f9daf5cb21a77b1de54aff182e08a3b538fb5a315510b230e02e8f843f9f",
+        "src/graphics/shared_memory.cpp": "1fae10e526df9b9798d2e644a318c2e25404c49323966fee339c4c3f312d0a2e"
       },
       "test": "sdkcheck.register-memory-coherence: RequestRanges retains coherent CPU/GPU residency and resets scratch after empty/rejected/disjoint batches; runtime execution deferred by user"
     },
@@ -2221,8 +2221,8 @@
         "src/graphics/shared_memory.cpp": "e5ffdceed32e19bf6bdce7728fe26fa45438f142fb58c46d80560a3454c8ef8b"
       },
       "files": {
-        "include/rex/graphics/shared_memory.h": "bb7820ada353fec748c0cc201c4099b114dfc44c980b67678f4031c52143ea53",
-        "src/graphics/shared_memory.cpp": "42bc20a5d98fd34c1084da3db23d786a7cef0df496c3bb34569dc52b42d0ea0b"
+        "include/rex/graphics/shared_memory.h": "1f65f9daf5cb21a77b1de54aff182e08a3b538fb5a315510b230e02e8f843f9f",
+        "src/graphics/shared_memory.cpp": "1fae10e526df9b9798d2e644a318c2e25404c49323966fee339c4c3f312d0a2e"
       },
       "test": "sdkcheck.register-memory-coherence: CPU-only pages refresh each frame, GPU pages remain resident, unchanged reset preserves generation, repeated/disjoint uploads; execution deferred by user"
     },
@@ -2287,7 +2287,7 @@
         "src/graphics/pipeline/shader/dxbc_translator.cpp": "f97091630fe41fb86c1cb633fa37a82af05b63b6361b8ff19df9e03d5ab9f6e8",
         "src/graphics/pipeline/shader/spirv_translator.cpp": "d9a4bdfe126a747fde2bbcc3197c330ea6eb4ace3ea3962734e92a3f9d4f46b6",
         "src/graphics/pipeline/shader/dxbc_translator_memexport.cpp": "1701313eebf0e3b6dcc0c4e129763c189c68d960f99d15fbcda0887f351fab6a",
-        "src/graphics/pipeline/shader/spirv_translator_memexport.cpp": "1dc5cdb991d5b7331d1359f9035b75f344b76898e47b5d02b133dd65dc87fa65",
+        "src/graphics/pipeline/shader/spirv_translator_memexport.cpp": "7d87b758263f99f8cf05e9dc91c5e6ca3448d8ef19fd17dfc18129427fd0c8d3",
         "src/graphics/pipeline/shader/dxbc_translator_om.cpp": "a5f50732a1a0fa557189f26ddc926bb96c723c1d22057f8d07dddb956d5c939a",
         "src/graphics/pipeline/shader/spirv_translator_rb.cpp": "3c5afd0814326809d557da19c9b7b9c28ea29d0eff5a52fe7ccf3eaa41f5b628"
       },
@@ -3309,6 +3309,30 @@
     "src/kernel/xam/xam_misc.cpp": "cdfb3b4582c6a86edfeb96ae0f39c5ee7341903da080af6ec6022074c4c91163"
   },
   "test": "tests/sdkcheck/profile_picture_write_test.cpp: raw 64/32 PNGs, original PPC stack ABI, public/personal namespaces, per-XUID persistence, CRC validation, real error completion and rollback/recovery."
+},
+{
+  "file": "patches/rexglue-sdk/0235-avoid-resident-memory-request-lock.patch",
+  "sha256": "7e2ed47eaa41c5f7852c03d56f0869ca331590d67d60f4b6fb11d5f2f5114c0a",
+  "base_files": {
+    "include/rex/graphics/shared_memory.h": "bb7820ada353fec748c0cc201c4099b114dfc44c980b67678f4031c52143ea53",
+    "src/graphics/shared_memory.cpp": "42bc20a5d98fd34c1084da3db23d786a7cef0df496c3bb34569dc52b42d0ea0b"
+  },
+  "files": {
+    "include/rex/graphics/shared_memory.h": "1f65f9daf5cb21a77b1de54aff182e08a3b538fb5a315510b230e02e8f843f9f",
+    "src/graphics/shared_memory.cpp": "1fae10e526df9b9798d2e644a318c2e25404c49323966fee339c4c3f312d0a2e"
+  },
+  "test": "tests/sdkcheck/resident_memory_probe.cpp: baseline RED on bounded guest-fault lock contention; atomic resident masks/batches, 10000 concurrent CPU invalidations, GPU retention and mandatory CPU frame refresh; production-service paired benchmark."
+},
+{
+  "file": "patches/rexglue-sdk/0236-saturate-vulkan-memexport-integers.patch",
+  "sha256": "e55e561792820a3f6e123d5bcf449a39493de9c5d807c48164a0719f94c631df",
+  "base_files": {
+    "src/graphics/pipeline/shader/spirv_translator_memexport.cpp": "1dc5cdb991d5b7331d1359f9035b75f344b76898e47b5d02b133dd65dc87fa65"
+  },
+  "files": {
+    "src/graphics/pipeline/shader/spirv_translator_memexport.cpp": "7d87b758263f99f8cf05e9dc91c5e6ca3448d8ef19fd17dfc18129427fd0c8d3"
+  },
+  "test": "sdkcheck.Native-MEMEXPORT-vulkan / tests/native/memexport_probe.cpp: signed 8/16-bit saturation extremes, half-away-from-zero rounding, normalized endpoints, endian, adjacent bytes and real GPU readback; before patch four signed-integer cases fail after alias publication is corrected."
 }
 ]
 },

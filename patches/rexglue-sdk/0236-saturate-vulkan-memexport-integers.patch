@@ -1,0 +1,68 @@
+diff --git a/src/graphics/pipeline/shader/spirv_translator_memexport.cpp b/src/graphics/pipeline/shader/spirv_translator_memexport.cpp
+--- a/src/graphics/pipeline/shader/spirv_translator_memexport.cpp
++++ b/src/graphics/pipeline/shader/spirv_translator_memexport.cpp
+@@ -240,10 +240,33 @@
+               const_max_value);
+         });
+       }
++      if_norm.makeBeginElse();
++      EMIdArray eM_integer;
++      {
++        // Integer render-target conversion saturates to the component's range;
++        // packing an unclamped value would wrap at 8/16 bits.
++        id_vector_temp_.clear();
++        for (unsigned int component_index = 0; component_index < component_count; ++component_index)
++          id_vector_temp_.push_back(builder_->makeFloatConstant(float((uint32_t(1) << (widths[component_index] - 1)) - 1)));
++        const spv::Id maximum = component_count > 1
++            ? builder_->makeCompositeConstant(type_float_vectors_[component_count - 1], id_vector_temp_)
++            : id_vector_temp_.front();
++        id_vector_temp_.clear();
++        for (unsigned int component_index = 0; component_index < component_count; ++component_index)
++          id_vector_temp_.push_back(builder_->makeFloatConstant(-float(uint32_t(1) << (widths[component_index] - 1))));
++        const spv::Id minimum = component_count > 1
++            ? builder_->makeCompositeConstant(type_float_vectors_[component_count - 1], id_vector_temp_)
++            : id_vector_temp_.front();
++        for_each_eM([&](uint32_t eM_index) {
++          eM_integer[eM_index] = builder_->createTriBuiltinCall(
++              type_float_vectors_[component_count - 1], ext_inst_glsl_std_450_, GLSLstd450FClamp,
++              eM_flushed[eM_index], minimum, maximum);
++        });
++      }
+       if_norm.makeEndIf();
+       // All phi instructions must be in the beginning of the block.
+       for_each_eM([&](uint32_t eM_index) {
+-        eM_signed[eM_index] = if_norm.createMergePhi(eM_norm[eM_index], eM_flushed[eM_index]);
++        eM_signed[eM_index] = if_norm.createMergePhi(eM_norm[eM_index], eM_integer[eM_index]);
+       });
+       // Convert to signed integer, adding plus/minus 0.5 before truncating
+       // according to the Direct3D format conversion rules.
+@@ -291,10 +314,28 @@
+               const_max_value);
+         });
+       }
++      if_norm.makeBeginElse();
++      EMIdArray eM_integer;
++      {
++        // Integer render-target conversion saturates to the component's range;
++        // packing an unclamped value would wrap at 8/16 bits.
++        id_vector_temp_.clear();
++        for (unsigned int component_index = 0; component_index < component_count; ++component_index)
++          id_vector_temp_.push_back(builder_->makeFloatConstant(float((uint32_t(1) << widths[component_index]) - 1)));
++        const spv::Id maximum = component_count > 1
++            ? builder_->makeCompositeConstant(type_float_vectors_[component_count - 1], id_vector_temp_)
++            : id_vector_temp_.front();
++
++        for_each_eM([&](uint32_t eM_index) {
++          eM_integer[eM_index] = builder_->createTriBuiltinCall(
++              type_float_vectors_[component_count - 1], ext_inst_glsl_std_450_, GLSLstd450FClamp,
++              eM_flushed[eM_index], const_float_vectors_0_[component_count - 1], maximum);
++        });
++      }
+       if_norm.makeEndIf();
+       // All phi instructions must be in the beginning of the block.
+       for_each_eM([&](uint32_t eM_index) {
+-        eM_unsigned[eM_index] = if_norm.createMergePhi(eM_norm[eM_index], eM_flushed[eM_index]);
++        eM_unsigned[eM_index] = if_norm.createMergePhi(eM_norm[eM_index], eM_integer[eM_index]);
+       });
+       // Convert to unsigned integer, adding 0.5 before truncating according to
+       // the Direct3D format conversion rules.

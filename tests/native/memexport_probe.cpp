@@ -148,6 +148,15 @@ void Run(rex::system::IGraphicsSystem& gpu, rex::memory::Memory& memory) {
           {value, value, value, value}, 1, bits / 8, bytes);
     }
   }
+  for (unsigned bits : {8u,16u}) {
+    for (float value : {-70000.0f,-1.0f,0.0f,.4f,.5f,.6f,1.5f,254.5f,255.0f,256.0f,65535.0f,70000.0f}) {
+      const uint32_t packed=uint32_t(std::round(std::clamp(value,0.0f,float((1u<<bits)-1))));
+      std::vector<uint8_t> bytes(bits/8);
+      for (unsigned b=0;b<bytes.size();++b) bytes[b]=uint8_t(packed>>(b*8));
+      issue("unsigned integer saturation/rounding",bits==8 ? ColorFormat::k_8 : ColorFormat::k_16,
+          SurfaceNumberFormat::kUnsignedInteger,{value,value,value,value},1,bits/8,bytes);
+    }
+  }
   for (bool normalized : {false, true}) {
     const std::array<float, 4> value = normalized ? std::array<float, 4>{-.4f, -.5f, .5f, .4f} : std::array<float, 4>{-1.4f, -1.5f, -1.6f, 2.5f};
     std::vector<uint8_t> bytes(8);

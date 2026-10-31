@@ -116,9 +116,6 @@ void D3D12Render::Draw(const RegisterFile& r, rex::memory::Memory& memory, Shade
       AddMemExportRanges(r, *shader, entry->second, memexport_ranges);
     }
     MergeMemExportRanges(memexport_ranges);
-    uint64_t readback_bytes = 0;
-    for (const auto& range : memexport_ranges) readback_bytes += (uint64_t(range.length) + 255) & ~uint64_t(255);
-    ReserveReadback(readback_bytes);
   }
   const auto tess = GetTessellation(r, primitive);
   const auto msaa = rasterization ? r.Get<reg::RB_SURFACE_INFO>().msaa_samples : MsaaSamples::k1X;
@@ -267,7 +264,7 @@ void D3D12Render::Draw(const RegisterFile& r, rex::memory::Memory& memory, Shade
   // CPU) must hold earlier resolve results before anything is recorded (a
   // later flush would orphan state). Vertices and GPU-loaded textures read
   // the resident mirror, where resolve results already are.
-  if (!writeback_.empty()) {
+  if (!writeback_.empty() || pending_readback_batches_) {
     if (indices) SyncGuestRead(indices->guest_base, indices->length, kReadIndices);
     for (auto* shader : {&vs, ps}) if (shader)
       for (const auto& t : shader->GetTextureBindingsAfterTranslation()) {
@@ -281,6 +278,11 @@ void D3D12Render::Draw(const RegisterFile& r, rex::memory::Memory& memory, Shade
         if (mip && hi) SyncGuestRead(mip << 12, (layout.mips_total_extent_bytes + 3u) & ~3u, kReadCpuTexture);
       }
   }
+  // CPU dependencies and capacity checks may rotate recording arenas. Reserve
+  // in the final arena before recording any draw bindings or mirror uploads.
+  uint64_t readback_bytes = 0;
+  for (const auto& range : memexport_ranges) readback_bytes += (uint64_t(range.length) + 255) & ~uint64_t(255);
+  ReserveReadback(readback_bytes);
   auto& mirror = Mirror(memory);
   for (const auto& range : memexport_ranges) mirror.RequestRange(range.address, range.length);
   for (const auto& b : vs.vertex_bindings()) {
@@ -358,17 +360,7 @@ void D3D12Render::Draw(const RegisterFile& r, rex::memory::Memory& memory, Shade
   Transition(edram_.Get(), edram_state_, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
   ID3D12DescriptorHeap* heaps[]{views_.Get(), samplers_.Get()}; list_->SetDescriptorHeaps(2, heaps);
   list_->SetGraphicsRootSignature(pd.pRootSignature); list_->SetPipelineState(pipeline.Get());
-  unsigned base = Views(3);
-  D3D12_SHADER_RESOURCE_VIEW_DESC srv{}; srv.Format = DXGI_FORMAT_R32_TYPELESS;
-  srv.ViewDimension = D3D12_SRV_DIMENSION_BUFFER; srv.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-  srv.Buffer.NumElements = 0x20000000 / 4; srv.Buffer.Flags = D3D12_BUFFER_SRV_FLAG_RAW;
-  device_->CreateShaderResourceView(memexport ? nullptr : memory_.Get(), &srv, Cpu(base));
-  D3D12_UNORDERED_ACCESS_VIEW_DESC uav{}; uav.Format = DXGI_FORMAT_R32_TYPELESS; uav.ViewDimension = D3D12_UAV_DIMENSION_BUFFER;
-  uav.Buffer.NumElements = 0x20000000 / 4; uav.Buffer.Flags = D3D12_BUFFER_UAV_FLAG_RAW;
-  device_->CreateUnorderedAccessView(memexport ? memory_.Get() : nullptr, nullptr, &uav, Cpu(base + 1));
-  uav.Format = DXGI_FORMAT_R32_UINT; uav.Buffer.NumElements = UINT(edram_size_ / 4) + 8; uav.Buffer.Flags = D3D12_BUFFER_UAV_FLAG_NONE;
-  device_->CreateUnorderedAccessView(edram_.Get(), nullptr, &uav, Cpu(base + 2));
-  list_->SetGraphicsRootDescriptorTable(5, Gpu(base));
+  list_->SetGraphicsRootDescriptorTable(5, MemoryTable(memexport));
   auto depth = draw_util::GetNormalizedDepthControl(r);
   draw_util::ViewportInfo viewport{{0, 0}, {1, 1}, 0, 1, {1, 1, 1}, {0, 0, 0}};
   if (rasterization) draw_util::GetHostViewportInfo(r, scale_x_, scale_y_, true, D3D12_VIEWPORT_BOUNDS_MAX, D3D12_VIEWPORT_BOUNDS_MAX, false, depth, false, false, ps && ps->writes_depth(), viewport);

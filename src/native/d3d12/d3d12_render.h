@@ -42,16 +42,23 @@ class D3D12Render {
   void Flush(FlushCause);
   void CountPresent();
   void EndFrame();
+  struct Performance {
+    uint64_t submissions, waits, wait_ns, gpu_ticks, gpu_frequency, gpu_samples;
+  };
+  Performance performance() {
+    if (stats_enabled_) CollectGpuTimestamps();
+    return {serial_, fence_waits_, flush_wait_ns_, gpu_busy_ticks_, timestamp_frequency_, gpu_timed_};
+  }
   // Guest synchronization point: publish recorded resolve/MEMEXPORT results.
   void CompleteGuestWrites(GuestSync source, uint32_t opcode) {
-    if (writeback_.empty()) return;
+    if (writeback_.empty() && !pending_readback_batches_) return;
     if (stats_enabled_) { ++sync_sources_[source]; ++sync_opcodes_[opcode & 0xFF]; }
     Flush(kFlushGuestSync);
   }
   void SyncPacketRead(uint32_t address, uint32_t length, uint32_t opcode) {
-    if (!writeback_.Overlaps(address, length)) return;
+    if (!GuestWritesOverlap(address, length)) return;
     if (stats_enabled_) ++sync_opcodes_[opcode & 0xFF];
-    Flush(kFlushOverlap);
+    SyncGuestRead(address, length, kReadPacket);
   }
  private:
   template<class T> using Ptr = Microsoft::WRL::ComPtr<T>;
@@ -72,6 +79,8 @@ class D3D12Render {
   void Barrier();
   void Wait(uint64_t serial);
   void RecycleBatch();
+  void PublishCompleted();
+  bool GuestWritesOverlap(uint32_t address, uint32_t length) const;
   // Resident guest memory mirror (memory_), created with the guest memory.
   GuestMemoryMirror& Mirror(rex::memory::Memory&);
   std::unique_ptr<GuestMemoryMirror> mirror_;
@@ -85,7 +94,7 @@ class D3D12Render {
   void QueueGuestWrite(uint32_t address, uint32_t length, const std::vector<uint64_t>* snapshot_epochs = nullptr);
   std::unordered_map<const rex::graphics::Shader*, bool> memexport_addresses_known_;
   // Before Native reads guest memory that a pending GPU write will change.
-  enum ReadSite : unsigned { kReadIndices, kReadCpuTexture, kReadResolveRect, kReadSites };
+  enum ReadSite : unsigned { kReadIndices, kReadCpuTexture, kReadResolveRect, kReadPacket, kReadSites };
   void SyncGuestRead(uint32_t address, uint64_t length, ReadSite);
   uint64_t overlap_sites_[kReadSites]{};
   GuestWriteback writeback_;
@@ -95,6 +104,10 @@ class D3D12Render {
   D3D12_GPU_DESCRIPTOR_HANDLE Gpu(uint32_t, bool sampler = false);
   uint32_t Views(uint32_t);
   uint32_t Samplers(uint32_t);
+  D3D12_GPU_DESCRIPTOR_HANDLE MemoryTable(bool memexport);
+  // Immutable views of persistent memory/EDRAM, separately for SRV and UAV
+  // access. Retired with the descriptor arena; never overwrite a live table.
+  std::array<uint32_t,2> arena_memory_tables_{UINT32_MAX,UINT32_MAX};
   // Loads or reuses the textures of a shader and writes its view and sampler
   // tables before the draw state is recorded; Tables binds them afterwards.
   struct TextureTables { D3D12_GPU_VIRTUAL_ADDRESS indices = 0; };
@@ -119,6 +132,7 @@ class D3D12Render {
   uint64_t serial_ = 0;
   Ptr<ID3D12Resource> memory_, edram_, readback_;
   uint64_t readback_size_ = 0;
+  size_t pending_readback_batches_ = 0;
   D3D12_RESOURCE_STATES memory_state_ = D3D12_RESOURCE_STATE_COPY_DEST;
   D3D12_RESOURCE_STATES edram_state_ = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
   // Pixel-to-EDRAM mapping of the ROV draws recorded since the last EDRAM UAV
@@ -140,6 +154,8 @@ class D3D12Render {
   // Three independent recording arenas. Queue ordering protects persistent
   // memory/EDRAM/textures; a fence protects each arena's mutable descriptors,
   // uploads, scratch regions and command allocator from premature reuse.
+  struct ScaledReadback { ScaledResolveCache::Ticket ticket; Ptr<ID3D12Resource> buffer;
+                          unsigned pixel_log2; uint64_t offset; };
   struct RetiredBatch {
     uint64_t serial = 0;
     Ptr<ID3D12CommandAllocator> allocator;
@@ -147,6 +163,10 @@ class D3D12Render {
     std::vector<Ptr<ID3D12Resource>> transient;
     std::vector<UploadPage> uploads;
     std::vector<Scratch> scratch;
+    Ptr<ID3D12Resource> readback;
+    uint64_t readback_size = 0, readback_used = 0;
+    GuestWriteback writeback;
+    std::vector<ScaledReadback> scaled_readbacks;
   };
   std::array<RetiredBatch, 3> batches_;
   unsigned batch_index_ = 0;
@@ -189,8 +209,6 @@ class D3D12Render {
   bool sample_counting_ = false;
   bool visibility_only_ = false;
   const std::vector<uint8_t>& RectangleShader(unsigned interpolators, unsigned clip_planes);
-  struct ScaledReadback { ScaledResolveCache::Ticket ticket; Ptr<ID3D12Resource> buffer;
-                          unsigned pixel_log2; uint64_t offset; };
   std::vector<ScaledReadback> scaled_readbacks_;
   Ptr<ID3D12RootSignature> downscale_root_;
   Ptr<ID3D12PipelineState> downscale_pipeline_;

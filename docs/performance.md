@@ -10,8 +10,8 @@ contínuas, priorizadas por evidência.
 
 O desenvolvimento Native, suspenso em 2026-10-15, foi retomado pelo mantenedor
 na G3 em 22–23/10. Xenos continua padrão; Native D3D12/Vulkan e Enhanced foram
-integrados em código. Os testes de execução e medições foram transferidos pelo
-mantenedor para depois: não há novo ganho comprovado ou aceite de FPS.
+integrados em código. Naquela entrega, os testes de execução e medições foram
+transferidos pelo mantenedor para depois, sem novo ganho comprovado ou aceite de FPS.
 [Entrega G3](reports/graphics-g3-2026-10-22.md). A investigação histórica de resolves está em
 [Xenos: resolves vazios](reports/graphics/xenos-empty-resolves.md) e
 [X2: vertex fetch predicado](reports/graphics/xenos-fetch-predication.md).
@@ -25,6 +25,17 @@ RAM/VRAM e pacing, sem mudar física/áudio/simulação. Ainda não há resultad
 competitivo. Native N3 demonstrou dashboard e ciclo Castle em modo trial, mas
 continua lento; Forza Native não está certificado. [Resultados N3](reports/graphics/native-renderer-n3.md).
 P1/P2/P3 preservados.
+
+## Renderizadores — PERF-GPU-01 (31/10)
+
+Pedidos residentes Xenos evitam o lock global; Native/D3D12 conserva readbacks
+até a fence e espera somente onde seus bytes são observáveis. Corrigidos
+aliases de escrita física Native e saturação inteira MEMEXPORT Vulkan.
+Custos de operações reduziram em testes pareados, com bytes conferidos; isso
+não demonstra ganho de FPS de jogos. Native continua com desempenho não aceito
+pelo mantenedor. Resultados sem ganho, tentativas Vulkan retiradas, PSO frio,
+testes focados e validação manual pendente estão no
+[relatório PERF-GPU-01](reports/performance/perf-gpu-01-2026-10-31.md).
 
 ## Launcher desktop
 

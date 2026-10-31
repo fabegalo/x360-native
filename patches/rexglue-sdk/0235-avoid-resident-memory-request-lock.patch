@@ -1,0 +1,110 @@
+diff --git a/include/rex/graphics/shared_memory.h b/include/rex/graphics/shared_memory.h
+--- a/include/rex/graphics/shared_memory.h
++++ b/include/rex/graphics/shared_memory.h
+@@ -181,7 +181,10 @@
+   // Things below should be fully protected by global_critical_region.
+   // ***************************************************************************
+ 
+-  // Pages whose contents in the buffer are in sync with guest memory.
++  // Pages whose contents in the buffer are in sync with guest memory. Storage
++  // is fixed from InitializeCommon until shutdown. After initialization every
++  // access uses atomic_ref: resident RequestRanges readers may run without the
++  // critical region; all writers and every other field below still require it.
+   std::vector<uint64_t> system_page_flags_valid_;
+   // Subset of valid pages containing data written by the GPU.
+   std::vector<uint64_t> system_page_flags_valid_and_gpu_written_;
+diff --git a/src/graphics/shared_memory.cpp b/src/graphics/shared_memory.cpp
+--- a/src/graphics/shared_memory.cpp
++++ b/src/graphics/shared_memory.cpp
+@@ -10,6 +10,7 @@
+  */
+ 
+ #include <algorithm>
++#include <atomic>
+ #include <cstring>
+ #include <utility>
+ 
+@@ -103,7 +104,8 @@
+     cpu_validity_refresh_queued_[word] = 0;
+   }
+   cpu_validity_refresh_words_.clear();
+-  std::fill(system_page_flags_valid_.begin(), system_page_flags_valid_.end(), uint64_t(0));
++  for (auto& word : system_page_flags_valid_)
++    std::atomic_ref(word).store(0, std::memory_order_relaxed);
+   std::fill(system_page_flags_valid_and_gpu_written_.begin(),
+             system_page_flags_valid_and_gpu_written_.end(), uint64_t(0));
+   residency_generation_.fetch_add(1, std::memory_order_release);
+@@ -118,8 +120,9 @@
+   bool changed = false;
+   for (uint32_t word : cpu_validity_refresh_words_) {
+     const uint64_t gpu_valid = system_page_flags_valid_and_gpu_written_[word];
+-    changed |= system_page_flags_valid_[word] != gpu_valid;
+-    system_page_flags_valid_[word] = gpu_valid;
++    auto valid = std::atomic_ref(system_page_flags_valid_[word]);
++    changed |= valid.load(std::memory_order_relaxed) != gpu_valid;
++    valid.store(gpu_valid, std::memory_order_relaxed);
+     cpu_validity_refresh_queued_[word] = 0;
+   }
+   cpu_validity_refresh_words_.clear();
+@@ -326,7 +329,8 @@
+       if (i == valid_block_last && (valid_page_last & 63) != 63) {
+         valid_bits &= (uint64_t(1) << ((valid_page_last & 63) + 1)) - 1;
+       }
+-      system_page_flags_valid_[i] |= valid_bits;
++      auto valid = std::atomic_ref(system_page_flags_valid_[i]);
++      valid.store(valid.load(std::memory_order_relaxed) | valid_bits, std::memory_order_relaxed);
+       uint64_t& gpu_written = system_page_flags_valid_and_gpu_written_[i];
+       gpu_written = written_by_gpu ? (gpu_written | valid_bits) : (gpu_written & ~valid_bits);
+       if (!written_by_gpu && !cpu_validity_refresh_queued_[i]) {
+@@ -418,6 +422,32 @@
+     }
+   }
+ 
++  // A resident request needs neither the global guest-fault lock nor an upload
++  // scan. Fixed-size words are atomic for these readers; all writers remain
++  // serialized by global_critical_region_. Sparse allocation above is retained.
++  bool all_valid = true;
++  for (const auto& range : merged_ranges) {
++    const uint32_t first = range.first >> page_size_log2_;
++    const uint32_t last = (range.first + range.second - 1) >> page_size_log2_;
++    for (uint32_t word = first >> 6; word <= last >> 6; ++word) {
++      uint64_t mask = UINT64_MAX;
++      if (word == first >> 6) mask &= UINT64_MAX << (first & 63);
++      if (word == last >> 6 && (last & 63) != 63)
++        mask &= (uint64_t(1) << ((last & 63) + 1)) - 1;
++      if ((std::atomic_ref(system_page_flags_valid_[word]).load(std::memory_order_relaxed) & mask) != mask) {
++        all_valid = false;
++        break;
++      }
++    }
++    if (!all_valid) break;
++  }
++  if (all_valid) {
++    COUNT_profile_set("gpu/shared_memory/request_ranges_count", uint32_t(count));
++    COUNT_profile_set("gpu/shared_memory/request_ranges_merged_count", uint32_t(merged_ranges.size()));
++    COUNT_profile_set("gpu/shared_memory/request_ranges_upload_count", 0);
++    return true;
++  }
++
+   upload_ranges_.clear();
+   auto append_upload_range = [this](uint32_t page_start, uint32_t page_count) {
+     if (!page_count) {
+@@ -441,7 +471,7 @@
+       uint32_t block_last = page_last >> 6;
+       uint32_t range_start = UINT32_MAX;
+       for (uint32_t i = block_first; i <= block_last; ++i) {
+-        uint64_t block_valid = system_page_flags_valid_[i];
++        uint64_t block_valid = std::atomic_ref(system_page_flags_valid_[i]).load(std::memory_order_relaxed);
+         // Consider pages in the block outside the requested range valid.
+         if (i == block_first) {
+           uint64_t block_before = (uint64_t(1) << (page_first & 63)) - 1;
+@@ -553,7 +583,8 @@
+     if (i == block_last && (page_last & 63) != 63) {
+       invalidate_bits &= (uint64_t(1) << ((page_last & 63) + 1)) - 1;
+     }
+-    system_page_flags_valid_[i] &= ~invalidate_bits;
++    auto valid = std::atomic_ref(system_page_flags_valid_[i]);
++    valid.store(valid.load(std::memory_order_relaxed) & ~invalidate_bits, std::memory_order_relaxed);
+     system_page_flags_valid_and_gpu_written_[i] &= ~invalidate_bits;
+   }
+ 

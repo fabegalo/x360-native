@@ -173,7 +173,7 @@ int main(int argc, char** argv) {
     const unsigned scale=argc>4?std::stoul(argv[4]):1;
     const bool measured=argc<=5 || std::stoi(argv[5])!=0;
     Require(iterations>0,"positive iteration count");
-    Require(mode=="export"||mode=="resolve"||mode=="sync"||mode=="none","unknown workload");
+    Require(mode=="export"||mode=="resolve"||mode=="sync"||mode=="none"||mode=="batch","unknown workload");
     rex::InitLogging((out/"runtime.log").string().c_str());
     rex::cvar::SetFlagByName("native_vulkan_perf", measured?"true":"false");
     if (scale>1) {
@@ -238,7 +238,7 @@ int main(int argc, char** argv) {
           draw[XE_GPU_REG_SHADER_CONSTANT_000_X]=((physical+(i%8)*16)>>2)|(1u<<30);
           render.Draw(draw,memory,vs,nullptr,PrimitiveType::kTriangleList,1,nullptr);
         } else render.SetSampleCounts({},false);
-        render.Flush(false);
+        if(mode!="batch") render.Flush(false);
         if(mode=="sync") render.SyncGuestRead(physical,128,0xFF);
       };
       for(unsigned i=0;i<64;++i) workload(i);
@@ -257,7 +257,7 @@ int main(int argc, char** argv) {
       const auto wall=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-start).count();
       const auto cpu_ns=CpuNs()-cpu;
       const auto video=VideoMemory(*provider->vulkan_device());
-      if(mode=="export"||mode=="sync") for(unsigned i=0;i<8;++i)
+      if(mode=="export"||mode=="sync"||mode=="batch") for(unsigned i=0;i<8;++i)
         Require(!std::memcmp(memory.TranslatePhysical(physical+i*16),data.data(),16),"MEMEXPORT byte equality");
       if(mode=="resolve") for(unsigned i=0;i<8*4096;++i)
         Require(memory.TranslatePhysical<const uint8_t*>(physical+4096)[i]==0,"resolve byte equality");

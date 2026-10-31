@@ -221,7 +221,7 @@ D3D12Render::TextureTables D3D12Render::BindTextures(const RegisterFile& r, rex:
         if (stats_enabled_) { ++gpu_texture_loads_; ++texture_uploads_; }
       } else {
         // Draw synchronized every CPU-converted range with incomplete resolves first.
-        Require(!writeback_.Overlaps(base << 12, base_bytes) && (!mip_bytes || !writeback_.Overlaps(mip << 12, mip_bytes)),
+        Require(!GuestWritesOverlap(base << 12, base_bytes) && (!mip_bytes || !GuestWritesOverlap(mip << 12, mip_bytes)),
             "texture read overlaps an incomplete resolve");
         std::span<const uint8_t> base_source(memory.TranslatePhysical<const uint8_t*>(base << 12), base_bytes);
         std::span<const uint8_t> mip_source;
