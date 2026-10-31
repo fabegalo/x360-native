@@ -25,8 +25,13 @@ retirar proteção contra links; 1.550 asserções/25 casos focados e preparo of
 aprovados. **Cancelamento gráfico aceito:** assistente original → Parar
 Transferência → Sim, `XMsgCancelIORequest(wait=1)`, resultado real 1223; origem
 de 480 MiB/8.192 arquivos íntegra, USB sem destino parcial/staging. Sessão fechada
-normalmente em 210 s. Exclusão parcial da origem de move interrompido ainda não
-é atômica.
+normalmente em 210 s. 0231 recupera a retirada da origem de move: restaura antes
+do commit ou limpa somente bytes privados depois, sem sobrescrever conflitos.
+272 asserções/4 casos e 1.803/28 casos focados aprovados; replay de 24
+patches/3 arquivos. Preparo oficial e XUI aprovados: origem restaurada no HDD e
+destino completo na MU, hashes/perfil preservados, sem staging; encerramento
+normal em 93,5 s. Exclusão direta ainda mantém o comportamento anterior;
+durabilidade a corte de energia não validada.
 Conquistas/P1 não ampliados antes de concluir Storage; sem Release.
 [Evidências e limites](docs/reports/dash-os-features-03-2026-10-30.md).
 

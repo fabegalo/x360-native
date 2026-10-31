@@ -2277,3 +2277,17 @@ Windows reparse point or POSIX symlink without rechecking the same ancestor path
 for every file. Preserve independent secondary-volume accounting and error
 snapshots. Focused tests use real nested junctions and a linked volume ancestor;
 the unchanged quota/path scale scenario provides comparable before/after samples.
+
+### 0231 — recover interrupted move-source retirement
+
+After publishing the complete destination, hide the source package/header in
+private staging with a checksummed prepared journal. Before its committed marker,
+restart restores the original names without overwriting conflicts; afterwards,
+restart deletes only the private tree. Failed header retirement rolls back the
+complete source. Failed physical cleanup reports its real error, preserves the
+destination and retries recovery on the next device query. Notify source removal
+only after the committed marker, including when private cleanup subsequently
+fails. Optional host checkpoints exercise four real process interruptions; guest
+progress/cancellation and direct DeleteContent remain unchanged. This recovers
+process interruption, not power loss. Corrupt or conflicting work remains intact
+and makes the volume unavailable until the underlying problem is resolved.

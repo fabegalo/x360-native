@@ -408,3 +408,50 @@ de cancelamento pelo fluxo original, sem retardador de I/O, mudança de retorno 
 instrumentação no loop de cópia. Os conjuntos de arquivos das sessões diferem;
 não são uma comparação equivalente de desempenho gráfico. Medição de ganho
 permanece restrita ao teste protegido acima.
+
+## Recuperação da origem de move — 0231
+
+Reprodução focada: após publicar o destino, `DeleteContent` removia primeiro o
+payload da origem. Um header aberto no Windows recusava a exclusão com erro 5,
+deixando a origem sem payload. Controle anterior: **5 falhas/62 asserções** em
+dois casos (`storage-retirement-red.log`), incluindo os quatro checkpoints de
+origem ainda ausentes. Não é resultado aprovado.
+
+0231 retira pacote e header da origem para staging privado, com journal de
+intenção fechado e checksum. Antes do marcador de commit, recupera os nomes
+originais; depois dele, só termina a limpeza privada. Nunca substitui conteúdo
+novo que ocupe o nome antigo. Falha ao retirar o header restaura o pacote;
+falha ao limpar bytes privados retorna o erro real e permite nova recuperação
+na próxima consulta ao dispositivo. O destino completo permanece em ambos os
+casos. O callback Remove segue a remoção lógica efetiva, inclusive se a limpeza
+privada falhar depois; não é emitido após rollback. Sem endereços específicos de
+versão no serviço compartilhado, telas próprias ou alteração de cancelamento.
+
+**272 asserções/4 casos aprovados**, com interrupção real de subprocessos
+limitados nos quatro pontos da origem, header bloqueado, limpeza privada parcial,
+payload privado bloqueado, conflitos com conteúdo novo e journal corrompido.
+Reparar/liberar somente a fixture permite nova tentativa no mesmo runtime.
+Conjunto final: **1.803 asserções/28 casos focados aprovados**,
+`.local/storage-retirement-regression.log`; junctions reais fora do sandbox.
+Replay: **24 patches/3 arquivos**, hashes conferidos a partir do SDK pinado em
+`storage-replay-1793405240513241900/result.json`.
+
+Limites: recuperação de interrupção de processo, sem promessa de durabilidade
+a corte de energia. `DeleteContent` direto continua com o contrato anterior;
+esta alteração cobre especificamente a retirada da origem de move.
+
+Preparo oficial aprovado (`.local/storage-retirement-prepare.log`). A fixture
+descartável recebeu interrupção real em `SourceHeaderRetired` (exit 93), com
+pacote/header da origem privados e destino completo. Na sessão nativa
+`20261031T002726Z-storage-retirement-ui`, a XUI original listou **“Transfer save”**
+no HDD restaurado e na MU, ambos Jogo Salvo/2 MB arredondados, sob título/perfil
+desconhecidos (IDs sintéticos). MU com 509 MB livres. Encerramento normal em
+**93.539 ms**, exit 0, sem exceção/timeout. Persistem erros `FC/58003`; não é
+aceite integral dos serviços originais.
+
+`storage-retirement-ui-verification.json` confere origem, destino, perfil e
+ausência de staging. SHA-256 do payload em ambos:
+`7e31e5962974900441e745f400f9dc5060c7a21acfd97f197b4cbece12fed3d8`;
+headers origem/destino respectivamente
+`2d1085a44126adb0bfcd3902aefbb0961c6811f87564738bca0ea915bab1eeb4` e
+`cf55eaa33216daa354a225c0387bc89491cd314b96006643aa3326ca16138db8`.
