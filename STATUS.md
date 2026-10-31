@@ -1,6 +1,6 @@
 # STATUS
 
-30/10 — **DASH-OS-FEATURES-03, Storage parcial**: cancelamento real de I/O,
+30/10 — **DASH-OS-FEATURES-03, Storage e Gamerpic parciais**: cancelamento real de I/O,
 FE/`2000C`, recuperação de staging antes da quota, cálculo original de buffers
 17559 e metadados persistidos de saves/perfis locais (0220–0224). Cópia HDD → MU,
 move HDD → USB e exclusão com confirmação original executados, com hashes e
@@ -36,7 +36,13 @@ focados e 2.084/34 casos de regressão aprovados. Preparo oficial e XUI aprovado
 save restaurado com hashes conferidos → Excluir → Sim → “Nenhum item encontrado”,
 sem pacote/header/staging residual e perfil intacto. Encerramento normal em
 104,3 s; durabilidade a corte de energia não validada.
-Conquistas/P1 não ampliados antes de concluir Storage; sem Release.
+0233 lê PNGs públicos/pessoais do pacote real do XUID, incluindo o pedido original
+tipo 10/usuário FE; 252 asserções/3 casos novos e 755/11 casos focados aprovados,
+replay de 24 patches/1 arquivo. Preparo e XUI aprovados: pessoal visível junto
+a Player1 na dashboard, pública distinta no GamerCard; dados reais de um jogo,
+10 G/uma conquista e 18 arquivos anteriores preservados, assim como os PNGs.
+Encerramento normal em 61,6 s. Novos eventos de conquista e P1 não ampliados;
+sem Release.
 [Evidências e limites](docs/reports/dash-os-features-03-2026-10-30.md).
 
 30/10 — **pacote Linux x64 do launcher e gate por plataforma**: `package-desktop.ps1

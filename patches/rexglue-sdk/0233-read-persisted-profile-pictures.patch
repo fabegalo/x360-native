@@ -1,0 +1,71 @@
+--- a/src/kernel/xam/xam_user.cpp
++++ b/src/kernel/xam/xam_user.cpp
+@@ -16,6 +16,8 @@
+ #include <array>
+ #include <limits>
+ #include <mutex>
++#include <fstream>
++#include <rex/system/xam/content_manager.h>
+ 
+ #include <rex/cvar.h>
+ #include <rex/kernel/xam/private.h>
+@@ -1063,11 +1065,57 @@
+   return X_ERROR_SUCCESS;
+ }
+ 
++// Public and personal pictures are different files inside a known local
++// profile package. The original 17559 image cache requests a personal picture
++// with user FE and the complete XUID as tile_id, including before sign-in UI.
++static uint32_t ReadOfflineProfileImage(uint32_t tile_type, uint64_t tile_id,
++                                        uint32_t user_index, std::vector<uint8_t>& image) try {
++  const bool personal = tile_type == 10 || tile_type == 11;
++  const bool small = tile_type == 3 || tile_type == 11;
++  auto* kernel = REX_KERNEL_STATE();
++  auto* profiles = kernel->user_profile();
++  auto identity = profiles->identity();
++  if (personal && user_index == 0xFE) {
++    identity = profiles->FindLocal(tile_id);
++    if (!identity.xuid) return X_ERROR_NOT_FOUND;
++  } else {
++    if (user_index >= 4) return X_ERROR_INVALID_PARAMETER;
++    if (user_index != 0) return X_ERROR_NO_SUCH_USER;
++    if (!identity.signin_state) return X_ERROR_NOT_FOUND;
++    if (personal && tile_id && tile_id != identity.xuid) return X_ERROR_NOT_FOUND;
++  }
++  // PackagePath resolves and validates the current volume, including recovery.
++  const auto package = profiles->PackagePath(identity.xuid);
++  if (package.empty()) return X_ERROR_DEVICE_NOT_CONNECTED;
++  const auto path = package / (personal ? (small ? "pp_32.png" : "pp_64.png")
++                                        : (small ? "tile_32.png" : "tile_64.png"));
++  if (!rex::system::xam::IsUnlinkedStoragePath(path)) return X_ERROR_ACCESS_DENIED;
++  std::error_code ec;
++  const bool exists = std::filesystem::exists(path, ec);
++  if (ec) return X_ERROR_ACCESS_DENIED;
++  if (!exists) return X_ERROR_NOT_FOUND;
++  if (!std::filesystem::is_regular_file(path, ec) || ec) return X_ERROR_ACCESS_DENIED;
++  const auto size = std::filesystem::file_size(path, ec);
++  if (ec) return X_ERROR_ACCESS_DENIED;
++  // Bound malformed local inputs before allocation; no generated or substituted
++  // picture. PNG validation/texture creation remain with the existing decoder.
++  if (!size || size > 16 * 1024 * 1024) return 13;
++  std::ifstream input(path, std::ios::binary);
++  if (!input) return X_ERROR_ACCESS_DENIED;
++  std::vector<uint8_t> bytes(size);
++  input.read(reinterpret_cast<char*>(bytes.data()), std::streamsize(size));
++  if (!input || input.peek() != std::char_traits<char>::eof()) return X_ERROR_ACCESS_DENIED;
++  image = std::move(bytes);
++  return X_ERROR_SUCCESS;
++} catch (const std::filesystem::filesystem_error&) { return X_ERROR_ACCESS_DENIED; }
++
+ static uint32_t ReadOfflineAchievementImage(uint32_t tile_type, uint32_t title_id,
+                                            uint64_t tile_id, uint32_t user_index,
+                                            std::vector<uint8_t>& image) {
+-  // XTILETYPE_ACHIEVEMENT = 0, XTILETYPE_GAME_ICON = 1. Profile pictures
+-  // have separate namespaces and must never resolve against a game's XDBF.
++  // Profile pictures never resolve against a game's XDBF or another picture
++  // namespace; preserve the full XUID carried by the personal-image request.
++  if (tile_type == 2 || tile_type == 3 || tile_type == 10 || tile_type == 11)
++    return ReadOfflineProfileImage(tile_type, tile_id, user_index, image);
+   if (tile_type > 1) return X_ERROR_NOT_FOUND;
+   if (tile_id > UINT32_MAX || user_index >= 4) return X_ERROR_INVALID_PARAMETER;
+   auto* ks = REX_KERNEL_STATE();

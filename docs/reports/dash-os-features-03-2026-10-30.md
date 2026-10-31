@@ -1,4 +1,4 @@
-# DASH-OS-FEATURES-03 — Storage
+# DASH-OS-FEATURES-03 — Storage e imagens
 
 Incremento sobre `main`; alterações paralelas de Guide e empacotamento preservadas.
 Sem interfaces próprias, alterações de originais, dados reais, push ou Release.
@@ -489,3 +489,51 @@ sessão, sem alteração manual de lista/cache. Encerramento normal em
 da ação e, após encerrar o processo, pacote/header ausentes, perfil preservado e
 staging ausente. Não comprova durabilidade a corte de energia. Wrappers próprios
 concluídos foram encerrados após recusar qualquer árvore com worker nativo ativo.
+
+## Gamerpic persistida — 0233
+
+Sessão de diagnóstico `20261031T010418Z-gamerpic-contract-ui`, encerrada
+normalmente em **77.127 ms**, confirmou pedidos reais do cache original:
+tipo **10**, título 0, XUID completo `E0031A573AB1A3BF`, usuário **FE**; GamerCard
+tipo **2**, título `FFFE07D1`, tile 0, usuário 0. A imagem estava ausente; os
+dados existentes mostraram um jogo, 10 G e uma conquista, sem criar desbloqueios.
+O leitor recusava todo tipo maior que 1. Controle: **38 falhas/80 asserções**
+na primeira versão dos testes de imagem.
+
+0233 lê `pp_64.png`/`pp_32.png` pessoais e `tile_64.png`/`tile_32.png` públicos
+do pacote do perfil local conhecido. Usuário FE seleciona o XUID inteiro;
+o pedido público usa a conta conectada. Arquivos e perfis não substituem uns
+aos outros. Os quatro nomes constam em ASCII na própria XAM 17559, em
+`8162FDD0`, `8162FDDC`, `8162FDE8` e `8162FDF4`; comparação adicional com
+[UserProfile do Xenia Canary](https://github.com/xenia-canary/xenia-canary/blob/canary_experimental/src/xenia/kernel/xam/user_profile.h);
+o contrato FE foi observado na própria 17559. Dispositivo atual e proteção contra links
+continuam validados. Arquivo vazio, não regular, bloqueado ou maior que 16 MiB
+é recusado; o decoder existente valida PNG e os limites da textura.
+
+**252 asserções/3 casos novos aprovados**: arquivos reais temporários, dois
+XUIDs, reinício, bytes encoded, pixels ARGB e limites, erros síncronos/assíncronos
+e bloqueio real Windows. **755 asserções/11 casos** de regressão focada de
+GamerCard, chaves, perfis e APIs de conquistas aprovados; sem suíte completa.
+Replay de **24 patches/1 arquivo**, hash conferido em
+`storage-replay-1793409529869708600/result.json`.
+
+Preparo oficial aprovado (`profile-picture-prepare.log`). A fixture preserva os
+18 arquivos anteriores e recebeu somente dois PNGs originais 64×64 da XAM 17559,
+copiados para os arquivos pessoais/públicos do perfil descartável. Fonte:
+imagem carregada da XAM com SHA-256
+`235c5f6aa71a98ec7ec94d7e825198bf97c38099af9bb174ad2ab0642b182d07`.
+PNG pessoal no offset `5BEB47`, SHA-256
+`3ff8da2d7d197666b2eafe9195cf19320bc1c11ae9516b5de977bc07ec8fa346`;
+público no offset `5D5976`, SHA-256
+`c9933428f6cd173fe87d195dd2cc7450aaf7e287c625db167306a89d660ac9ab`.
+Bytes extraídos e seus CRCs PNG foram conferidos, sem edição das imagens.
+
+`20261031T014006Z-gamerpic-local-ui`: imagem pessoal apareceu junto a Player1
+na dashboard; a imagem pública distinta apareceu no GamerCard original. Dados
+existentes mantidos: um jogo, **10 G e uma conquista**. A pessoal já estava
+visível no início; não foi necessário abrir o Guide para esse aceite.
+Encerramento normal em **61.580 ms**, exit 0, sem exceção/timeout. Persistem
+mensagens não implementadas e `DASHUSER` ausente; não é aceite integral da XAM.
+`gamerpic-ui-verification.json` confere os pedidos reais, os dois PNGs e todos
+os 18 arquivos anteriores, tanto na fonte quanto na cópia. Não certifica seleção
+ou gravação de imagem pela XUI nem notificação de nova conquista.

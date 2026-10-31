@@ -2307,3 +2307,17 @@ durability. Tests reproduce the old header-lock failure and use bounded real
 child exits at each deletion checkpoint, plus cleanup locks and content shapes.
 The journal checksum covers the original package/header presence bits, so
 recovery also rejects new content in a name that was absent before retirement.
+
+### 0233 — read persisted public and personal profile pictures
+
+Read public tile_64.png/tile_32.png and personal pp_64.png/pp_32.png from the
+known local profile package. The original 17559 cache was observed requesting
+type 10 with user FE and the complete XUID; its GamerCard requested type 2 for
+user 0. Keep these namespaces separate, select the requested local identity and
+resolve its current storage device without another quota scan. Retain absence,
+I/O and invalid-input errors, reject linked/nonregular files and bound malformed
+encoded files to 16 MiB before allocation. The existing APIs own sizing, guest
+bounds, async completion and texture decoding; the original XUI owns rendering.
+No image generation, fallback to another profile/picture, picture selection or
+achievement award. Tests cover independent accounts/restart, encoded bytes,
+real PNG pixels, canaries, malformed/oversized files and Windows read locks.
