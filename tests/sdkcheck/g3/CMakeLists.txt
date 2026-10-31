@@ -319,3 +319,28 @@ if(REXGLUE_USE_VULKAN AND WIN32)
   x360n_stage_runtime_dlls(x360n_edram_window_gpu_checks)
   # Manual opt-in, each GPU fence has a five-second timeout.
 endif()
+
+# 0247: Vulkan constant depth-bias units through VK_EXT_depth_bias_control,
+# with the legacy command on devices lacking any required feature.
+if(REXGLUE_USE_VULKAN)
+  set(_depth_bias_sources
+      ${X360_REXGLUE_DIR}/src/graphics/util/draw.cpp
+      ${X360_REXGLUE_DIR}/src/graphics/register_file.cpp
+      ${X360_REXGLUE_DIR}/src/graphics/registers.cpp
+      ${X360_REXGLUE_DIR}/src/graphics/flags.cpp)
+  add_executable(x360n_vulkan_depth_bias_tests ../vulkan_depth_bias_test.cpp ${_depth_bias_sources})
+  target_include_directories(x360n_vulkan_depth_bias_tests PRIVATE ${X360_REXGLUE_DIR}/thirdparty/renderdoc)
+  target_link_libraries(x360n_vulkan_depth_bias_tests PRIVATE rexruntime Vulkan::Headers Catch2::Catch2WithMain)
+  x360n_stage_runtime_dlls(x360n_vulkan_depth_bias_tests)
+  add_test(NAME sdkcheck.vulkan-depth-bias COMMAND x360n_vulkan_depth_bias_tests)
+  set_tests_properties(sdkcheck.vulkan-depth-bias PROPERTIES LABELS project TIMEOUT 30)
+  # Manual opt-in real-GPU rasterization: correct | legacy (negative control)
+  # | fallback (device created without the optional features).
+  add_executable(x360n_vulkan_depth_bias_gpu EXCLUDE_FROM_ALL ../vulkan_depth_bias_gpu.cpp
+      ${_depth_bias_sources} ${X360_REXGLUE_DIR}/thirdparty/glslang/StandAlone/ResourceLimits.cpp)
+  target_include_directories(x360n_vulkan_depth_bias_gpu PRIVATE
+      ${X360_REXGLUE_DIR}/thirdparty/renderdoc ${X360_REXGLUE_DIR}/thirdparty/glslang)
+  target_link_libraries(x360n_vulkan_depth_bias_gpu PRIVATE rexruntime Vulkan::Headers
+      glslang::SPIRV glslang MachineIndependent GenericCodeGen OSDependent OGLCompiler)
+  x360n_stage_runtime_dlls(x360n_vulkan_depth_bias_gpu)
+endif()

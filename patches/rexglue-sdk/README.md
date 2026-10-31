@@ -2549,3 +2549,30 @@ Snapshots require an additional GPU copy and capacity for both images. No FPS
 improvement is claimed for this correctness fix. Like Canary, byte differences
 do not identify an idempotent GPU store racing a CPU write to the same byte;
 this change does not claim to solve every guest CPU/GPU ownership race.
+
+### 0247 — Vulkan constant depth-bias units
+
+Adapt [JTM-rootstorm's Canary correction](https://github.com/xenia-canary/xenia-canary/commit/a8d034c00df4570f68fa14186cbde8c6f172870a),
+verified against Canary `44e6489cf87567b5dc9c982207765d722b71b966`, retaining
+the original BSD notices. Vulkan's default floating-point depth bias depends
+on the primitive's depth exponent. The existing conversion therefore shrinks
+an absolute guest polygon offset at low depths, especially with reversed Z.
+
+Query and enable optional `VK_EXT_depth_bias_control` features and load its
+command. Use exact FORCE_UNORM units only when all three required features are
+enabled. The float24 constant factor accounts explicitly for the host's half
+depth range; D24 conversion and slope scaling retain their existing meaning.
+Devices lacking any required feature use the prior command and factors.
+The generic `vulkan_depth_bias_force_unorm` switch permits controlled diagnosis.
+The dynamic-state cache also tracks representation changes when numerical
+factors are unchanged. ROV/FSI shader depth handling is unaffected.
+
+Deferred commands copy their scalar arguments; their `pNext` chain is built
+at execution, including threaded execution. The CP and focused regression
+share the production conversion and dispatch helpers. The GPU probe checks
+D32 float24 host storage and native D24 rasterized depth, both signs, high/low
+depths and reversed viewports. It includes the legacy-command control and a
+real device created without optional GPU-emulation features. These synthetic
+depth checks do not establish complete shader conversion or gameplay fidelity.
+Execution results are recorded in the RENDER-FINAL report, not inferred from
+the source change.
