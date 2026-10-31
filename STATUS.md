@@ -4,6 +4,9 @@
 Codegen, Compilação, Verificação e Registro, conforme preferência do mantenedor.
 Build Windows e testes focados de etapas/layout aprovados; executável atualizado
 sem interromper a preparação em andamento.
+Preparar mantém uma chave inglesa própria, agora com contorno completo;
+Verificar computador usa duas setas circulares e Gráficos mantém o chip com
+detalhes mais espaçados. Testes de pixels/layout e capturas revisados.
 
 31/10 — **revisão final do launcher**: reproduzido e corrigido conflito de IDs
 ImGui entre navegação e cartões de passos; escopos separados sem ocultar avisos.

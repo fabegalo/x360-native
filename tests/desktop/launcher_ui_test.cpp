@@ -702,7 +702,7 @@ TEST_CASE("small status icons are centered and symmetric in rendered pixels", "[
   const char* file = std::getenv("X360N_ICON_CAPTURE");
   if (file && density == 1.f) {
     io.DisplaySize = ImVec2(1024, 360);
-    const char* names[] = {"warning", "error", "info", "check", "settings", "language", "dashboard", "save"};
+    const char* names[] = {"tools", "refresh", "chip", "warning", "settings", "language", "dashboard", "check"};
     ImGui::NewFrame();
     auto* dl = ImGui::GetForegroundDrawList();
     dl->AddRectFilled(ImVec2(0, 0), io.DisplaySize, ui::P.bg);
@@ -711,7 +711,7 @@ TEST_CASE("small status icons are centered and symmetric in rendered pixels", "[
       ui::Text(dl, ui::Font::Body, names[i], ImRect(x, 8, x + 128, 40), ui::P.text, ui::Center);
       for (int row = 0; row < 4; ++row) {
         const float sizes[] = {16, 20, 24, 32};
-        const auto color = i == 0 ? ui::P.warn : i == 1 ? ui::P.err : ui::P.text;
+        const auto color = std::string_view(names[i]) == "warning" ? ui::P.warn : ui::P.text;
         ui::Icon(dl, names[i], ImRect(x, 48 + row * 72.f, x + 128, 112 + row * 72.f), color, sizes[row]);
       }
     }

@@ -96,9 +96,10 @@ void Icon(ImDrawList* dl, const char* name, const ImRect& r, Color color, float 
   } else if (is("search")) {
     p.Ring(-0.18f, -0.18f, 0.55f); p.Line(0.22f, 0.22f, 0.85f, 0.85f);
   } else if (is("refresh")) {
-    p.Arc(0, 0, 0.72f, -pi * 0.35f, pi * 1.45f);
-    const ImVec2 tip(std::cos(-pi * 0.35f) * 0.72f, std::sin(-pi * 0.35f) * 0.72f);
-    p.Poly({{tip.x - 0.42f, tip.y - 0.12f}, {tip.x, tip.y}, {tip.x + 0.05f, tip.y - 0.42f}});
+    p.Arc(0, 0, 0.7f, pi * 1.05f, pi * 1.9f);
+    p.Poly({{0.31f, -0.15f}, {0.75f, -0.15f}, {0.75f, -0.59f}});
+    p.Arc(0, 0, 0.7f, pi * 0.05f, pi * 0.9f);
+    p.Poly({{-0.31f, 0.15f}, {-0.75f, 0.15f}, {-0.75f, 0.59f}});
   } else if (is("cancel")) {
     p.Line(-0.65f, -0.65f, 0.65f, 0.65f); p.Line(0.65f, -0.65f, -0.65f, 0.65f);
   } else if (is("add")) {
@@ -116,17 +117,25 @@ void Icon(ImDrawList* dl, const char* name, const ImRect& r, Color color, float 
     p.Line(-0.6f, 0.02f, -0.18f, 0.02f); p.Line(-0.39f, -0.19f, -0.39f, 0.23f);
     p.Dot(0.35f, 0.12f, 0.1f); p.Dot(0.58f, -0.1f, 0.1f);
   } else if (is("chip")) {
-    p.Rect(-0.5f, -0.5f, 0.5f, 0.5f, 0.1f); p.Rect(-0.2f, -0.2f, 0.2f, 0.2f);
-    for (float x : {-0.25f, 0.0f, 0.25f}) {
-      p.Line(x, -0.5f, x, -0.82f); p.Line(x, 0.5f, x, 0.82f);
-      p.Line(-0.5f, x, -0.82f, x); p.Line(0.5f, x, 0.82f, x);
+    p.Rect(-0.55f, -0.55f, 0.55f, 0.55f, 0.08f);
+    p.Fill(-0.15f, -0.15f, 0.15f, 0.15f);
+    for (float x : {-0.3f, 0.3f}) {
+      p.Line(x, -0.55f, x, -0.85f); p.Line(x, 0.55f, x, 0.85f);
+      p.Line(-0.55f, x, -0.85f, x); p.Line(0.55f, x, 0.85f, x);
     }
   } else if (is("save")) {
     p.Poly({{-0.82f, -0.82f}, {0.5f, -0.82f}, {0.82f, -0.5f}, {0.82f, 0.82f}, {-0.82f, 0.82f}}, true);
     p.Rect(-0.45f, -0.82f, 0.35f, -0.35f); p.Rect(-0.5f, 0.15f, 0.5f, 0.82f);
   } else if (is("tools")) {
-    p.Line(-0.72f, 0.72f, 0.1f, -0.1f);
-    p.Arc(0.38f, -0.38f, 0.4f, pi * 0.95f, pi * 2.55f);
+    // Rounded open jaws and a full handle distinguish the wrench from a key.
+    dl->PathArcTo(p.P(0.25f, -0.25f), 0.62f * h, -pi / 2, -pi * 13 / 12, 14);
+    dl->PathLineTo(p.P(-0.8f, 0.36f));
+    dl->PathArcTo(p.P(-0.61f, 0.55f), 0.27f * h, -pi * 0.75f, -pi * 1.75f, 12);
+    dl->PathLineTo(p.P(0.09f, 0.35f));
+    dl->PathArcTo(p.P(0.25f, -0.25f), 0.62f * h, pi * 7 / 12, 0, 14);
+    dl->PathLineTo(p.P(0.48f, -0.25f));
+    dl->PathLineTo(p.P(0.25f, -0.48f));
+    dl->PathStroke(color, ImDrawFlags_Closed, p.t);
   } else if (is("disc")) {
     p.Ring(0, 0, 0.85f); p.Ring(0, 0, 0.22f); p.Arc(0, 0, 0.55f, -pi * 0.9f, -pi * 0.55f);
   } else if (is("remove")) {
