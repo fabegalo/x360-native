@@ -1,0 +1,33 @@
+Subject: fix(codegen): register referenced shared tail entries
+
+diff --git a/src/codegen/phase_gapfill.cpp b/src/codegen/phase_gapfill.cpp
+--- a/src/codegen/phase_gapfill.cpp
++++ b/src/codegen/phase_gapfill.cpp
+@@ -399,11 +399,26 @@
+     const auto* region = decoded.regionContaining(target);
+     if (!region) return;
+     const auto* containing = graph.getFunctionContaining(target);
+-    if (containing && containing->authority() != FunctionAuthority::GAP_FILL) return;
++    if (containing && containing->authority() != FunctionAuthority::GAP_FILL &&
++        containing->authority() != FunctionAuthority::DISCOVERED) return;
+     auto owner = declaredEnds.upper_bound(target);
+     if (owner != declaredEnds.begin() && std::prev(owner)->second > target) return;
+     const auto previous = decoded.read<uint32_t>(target - 4);
+     if (!previous || (*previous != 0 && !terminates(*previous))) return;
++    // A referenced shared tail may be longer than the short linear prefix.
++    // Its existing inferred CFG already proves a block boundary reached by
++    // a direct, non-linking tail branch. Keep authoritative extents protected.
++    const auto* predecessor = decoded.get(target - 4);
++    if (containing && predecessor && predecessor->opcode == Opcode::b &&
++        predecessor->branch_target == target) {
++      for (const auto& block : containing->blocks()) {
++        if (block.base == target) {
++          targets.insert(target);
++          return;
++        }
++      }
++    }
++    if (containing && containing->authority() != FunctionAuthority::GAP_FILL) return;
+     bool bounded = false;
+     for (uint32_t word = 0; word < 64; ++word) {
+       const uint64_t address = uint64_t(target) + word * 4;

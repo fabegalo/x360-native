@@ -1,0 +1,23 @@
+Subject: fix(codegen): recognize virtual tails with distinct volatile registers
+
+diff --git a/src/codegen/phase_gapfill.cpp b/src/codegen/phase_gapfill.cpp
+--- a/src/codegen/phase_gapfill.cpp
++++ b/src/codegen/phase_gapfill.cpp
+@@ -50,11 +50,14 @@
+   if (!object || !slot || !ctr || !branch)
+     return false;
+   const auto scratch = object->D.RT;
++  // MSVC may keep the vtable and its callable in different volatile GPRs.
++  // Match the data flow through both loads and mtctr, not register equality.
++  const auto callable = slot->D.RT;
+   return object->opcode == Opcode::lwz && object->D.RA == 3 && object->D.d == 0 &&
+-         (scratch == 11 || scratch == 12) &&
+-         slot->opcode == Opcode::lwz && slot->D.RA == scratch && slot->D.RT == scratch &&
++         (scratch >= 10 && scratch <= 12) &&
++         slot->opcode == Opcode::lwz && slot->D.RA == scratch && (callable >= 10 && callable <= 12) &&
+          static_cast<int16_t>(slot->D.d) >= 0 && (slot->D.d & 3) == 0 &&
+-         ctr->opcode == Opcode::mtctr && ctr->XFX.RT == scratch &&
++         ctr->opcode == Opcode::mtctr && ctr->XFX.RT == callable &&
+          static_cast<uint32_t>(branch->code) == 0x4E800420;
+ }
+ 

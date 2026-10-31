@@ -1,0 +1,30 @@
+--- a/src/codegen/builders/system.cpp
++++ b/src/codegen/builders/system.cpp
+@@ -251,9 +251,9 @@
+   if (!ctx.config().skipMsr) {
+     // Memory barrier for MSR read
+     ctx.println("\tstd::atomic_thread_fence(std::memory_order_seq_cst);");
+-    // Check global lock and return appropriate value
+-    // Returns 0x8000 if unlocked (interrupts enabled), 0 if locked
+-    ctx.println("\t{}.u64 = REX_CHECK_GLOBAL_LOCK();", ctx.r(ctx.insn.operands[0]));
++    // The runtime lock supplies EE; preserve the other modeled MSR bits.
++    ctx.println("\t{}.u64 = (ctx.msr & ~0x8000u) | REX_CHECK_GLOBAL_LOCK();",
++                ctx.r(ctx.insn.operands[0]));
+   }
+   return true;
+ }
+@@ -319,9 +319,11 @@
+   if (!ctx.config().skipMsr) {
+     // Memory barrier for MSR write
+     ctx.println("\tstd::atomic_thread_fence(std::memory_order_seq_cst);");
+-    // Update MSR bits
+-    ctx.println("\tctx.msr = ({}.u32 & 0x8020) | (ctx.msr & ~0x8020);",
+-                ctx.r(ctx.insn.operands[0]));
++    // PowerPC Book III v2.01, mtmsrd L=1 updates only EE (48) and RI (62).
++    // Preserve IR and every other bit; retain the existing L=0 path.
++    const uint32_t mask = ctx.insn.operands[1] ? 0x8002u : 0x8020u;
++    ctx.println("\tctx.msr = ({}.u32 & 0x{:X}u) | (ctx.msr & ~0x{:X}u);",
++                ctx.r(ctx.insn.operands[0]), mask, mask);
+     // Global lock mechanism:
+     // R13 = enter lock (disable interrupts)
+     // Other = leave lock (enable interrupts)

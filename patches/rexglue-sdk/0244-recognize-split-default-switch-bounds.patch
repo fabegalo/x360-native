@@ -1,0 +1,82 @@
+Subject: fix(codegen): recover unsigned split-default switch bounds
+
+diff --git a/src/codegen/function_scanner.cpp b/src/codegen/function_scanner.cpp
+--- a/src/codegen/function_scanner.cpp
++++ b/src/codegen/function_scanner.cpp
+@@ -1288,6 +1288,59 @@
+ // Helper: Detect bounds check for jump table
+ //=============================================================================
+ 
++// Recognize an unsigned guard that branches over an unconditional default:
++// cmplwi index,N; ble dispatch; b default; dispatch: ...; bctr.
++// Do not scan arbitrarily across a terminator or infer a bound from a nearby
++// compare: validate both successors, CR, index preservation and entry prefix.
++std::optional<BoundsInfo> splitDefaultBounds(DecodedBinary& decoded, uint32_t branchAddress,
++                                            uint32_t bctr, uint8_t index, uint32_t start) {
++  using namespace rex::codegen::ppc;
++  if (branchAddress < start + 8) return std::nullopt;
++  const auto* fallback = decoded.get(branchAddress);
++  const auto* guard = decoded.get(branchAddress - 4);
++  const auto* compare = decoded.get(branchAddress - 8);
++  if (!fallback || fallback->opcode != Opcode::b || fallback->I.LK ||
++      !fallback->branch_target ||
++      !guard || guard->opcode != Opcode::bc || guard->B.LK ||
++      (guard->B.BO & ~1u) != 4 || guard->branch_target != branchAddress + 4 ||
++      !compare || compare->opcode != Opcode::cmpli || compare->D.RA != index ||
++      (static_cast<uint32_t>(compare->code) & 0x00200000u) ||
++      guard->B.BI != ((static_cast<uint32_t>(compare->code) >> 23) & 7u) * 4 + 1 ||
++      (*fallback->branch_target >= compare->address && *fallback->branch_target <= bctr))
++    return std::nullopt;
++  for (uint32_t address = start; address < compare->address; address += 4) {
++    const auto* insn = decoded.get(address);
++    if (!insn || insn->opcode == Opcode::kUnknown) return std::nullopt;
++    if (isBranch(*insn) &&
++        (!isCall(*insn) || !insn->branch_target ||
++         (*insn->branch_target > compare->address && *insn->branch_target <= bctr)))
++      return std::nullopt;
++  }
++  for (uint32_t address = branchAddress + 4; address < bctr; address += 4) {
++    const auto* insn = decoded.get(address);
++    if (!insn) return std::nullopt;
++    // Only a straight-line dispatch setup with known GPR effects is accepted.
++    switch (insn->opcode) {
++      case Opcode::lis: case Opcode::addi: case Opcode::lwz:
++        if (insn->D.RT == index) return std::nullopt;
++        break;
++      case Opcode::ori:
++        if (insn->D.RA == index) return std::nullopt;
++        break;
++      case Opcode::rlwinm:
++        if (insn->M.RA == index) return std::nullopt;
++        break;
++      case Opcode::lwzx:
++        if (insn->X.RT == index) return std::nullopt;
++        break;
++      case Opcode::mtctr: case Opcode::nop:
++        break;
++      default: return std::nullopt;
++    }
++  }
++  return BoundsInfo{compare->D.UIMM() + 1, index, *fallback->branch_target, true};
++}
++
+ BoundsInfo scanForBounds(DecodedBinary& decoded, uint32_t bctrAddr, const CodeRegion& region,
+                          uint8_t expectedReg, uint32_t funcStart) {
+   BoundsInfo result;
+@@ -1307,10 +1360,13 @@
+     if (!insn)
+       break;
+ 
+-    // Stop at unconditional terminators - scanning past basic block boundaries
+-    // risks finding unrelated comparisons on the index register
+-    if (isTerminator(*insn) && !isConditional(*insn))
++    // Only a validated split default may cross this block boundary.
++    if (isTerminator(*insn) && !isConditional(*insn)) {
++      if (auto bounds = splitDefaultBounds(decoded, scanAddr, bctrAddr,
++                                            expectedReg, scanLowerBound))
++        return *bounds;
+       break;
++    }
+ 
+     using namespace rex::codegen::ppc;
+ 

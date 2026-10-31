@@ -57,7 +57,18 @@ if(WIN32)
   target_link_libraries(x360n_sdk_checks PRIVATE bcrypt)
 endif()
 target_sources(x360n_sdk_checks PRIVATE sdkcheck/gapfill_boundary_test.cpp sdkcheck/synthetic_xex.cpp)
+target_sources(x360n_sdk_checks PRIVATE sdkcheck/emission_owner_test.cpp)
 target_sources(x360n_sdk_checks PRIVATE sdkcheck/virtual_thunk_discovery_test.cpp)
+target_sources(x360n_sdk_checks PRIVATE sdkcheck/virtual_tail_registers_test.cpp)
+target_sources(x360n_sdk_checks PRIVATE sdkcheck/descriptor_tail_test.cpp)
+
+target_sources(x360n_sdk_checks PRIVATE sdkcheck/late_callback_discovery_test.cpp)
+
+target_sources(x360n_sdk_checks PRIVATE sdkcheck/shared_tail_entry_test.cpp)
+
+target_sources(x360n_sdk_checks PRIVATE sdkcheck/split_default_switch_test.cpp)
+
+target_sources(x360n_sdk_checks PRIVATE sdkcheck/msr_codegen_test.cpp)
 target_sources(x360n_sdk_checks PRIVATE sdkcheck/crt_fiber_discovery_test.cpp)
 target_sources(x360n_sdk_checks PRIVATE sdkcheck/ppc_md_decode_test.cpp)
 target_sources(x360n_sdk_checks PRIVATE sdkcheck/ctr_dispatch_test.cpp)
@@ -112,6 +123,56 @@ target_link_libraries(x360n_bounded_byte_native PRIVATE rexruntime simde x360n_p
 target_compile_options(x360n_bounded_byte_native PRIVATE -msse4.1
     -UTRACY_ENABLE -UREXGLUE_ENABLE_PROFILING -UREXGLUE_ENABLE_PERF_COUNTERS)
 x360n_stage_runtime_dlls(x360n_bounded_byte_native)
+
+# Small, headless execution regression for the actual generated interrupt writes.
+set(msr_fixture "${CMAKE_CURRENT_BINARY_DIR}/msr_fixture")
+set(msr_generated "${msr_fixture}/x360n_codegen/msr/out")
+add_custom_command(
+    OUTPUT "${msr_generated}/msr_recomp.0.cpp" "${msr_generated}/msr_init.cpp"
+    COMMAND ${CMAKE_COMMAND} -E make_directory "${msr_fixture}"
+    COMMAND ${CMAKE_COMMAND} -E env "TEMP=${msr_fixture}" "TMP=${msr_fixture}"
+        X360N_KEEP_TEST_DIRS=1 $<TARGET_FILE:x360n_sdk_checks>
+        "MSR interrupt writes produce a compilable native fixture"
+    DEPENDS x360n_sdk_checks
+    VERBATIM)
+add_executable(x360n_msr_native sdkcheck/msr_native.cpp
+    "${msr_generated}/msr_recomp.0.cpp")
+target_include_directories(x360n_msr_native PRIVATE "${msr_generated}")
+target_link_libraries(x360n_msr_native PRIVATE rexruntime simde x360n_ppc_options)
+target_compile_options(x360n_msr_native PRIVATE
+    -UTRACY_ENABLE -UREXGLUE_ENABLE_PROFILING -UREXGLUE_ENABLE_PERF_COUNTERS)
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(AMD64|amd64|x86_64)$")
+  target_compile_options(x360n_msr_native PRIVATE -msse4.1)
+endif()
+x360n_stage_runtime_dlls(x360n_msr_native)
+add_test(NAME sdkcheck.msr-native COMMAND x360n_msr_native)
+set_tests_properties(sdkcheck.msr-native PROPERTIES LABELS project TIMEOUT 15)
+
+set(large_switch_fixture "${CMAKE_CURRENT_BINARY_DIR}/large_switch_fixture")
+set(large_switch_generated "${large_switch_fixture}/x360n_codegen/large_switch/out")
+add_custom_command(
+    OUTPUT "${large_switch_generated}/large_switch_recomp.0.cpp"
+        "${large_switch_generated}/large_switch_init.cpp"
+    COMMAND ${CMAKE_COMMAND} -E make_directory "${large_switch_fixture}"
+    COMMAND ${CMAKE_COMMAND} -E env "TEMP=${large_switch_fixture}" "TMP=${large_switch_fixture}"
+        X360N_KEEP_TEST_DIRS=1 $<TARGET_FILE:x360n_sdk_checks>
+        "Unsigned split defaults preserve complete large switch tables"
+    DEPENDS x360n_sdk_checks VERBATIM)
+add_executable(x360n_large_switch_native sdkcheck/split_default_switch_native.cpp
+    "${large_switch_generated}/large_switch_recomp.0.cpp"
+    "${large_switch_generated}/large_switch_init.cpp")
+target_include_directories(x360n_large_switch_native PRIVATE "${large_switch_generated}")
+target_compile_definitions(x360n_large_switch_native PRIVATE REX_HOST_FUNCTION_TABLE=1
+    X360N_LARGE_SWITCH_FIXTURE="${large_switch_fixture}/x360n_codegen/large_switch")
+target_link_libraries(x360n_large_switch_native PRIVATE rexruntime simde x360n_ppc_options)
+target_compile_options(x360n_large_switch_native PRIVATE
+    -UTRACY_ENABLE -UREXGLUE_ENABLE_PROFILING -UREXGLUE_ENABLE_PERF_COUNTERS)
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(AMD64|amd64|x86_64)$")
+  target_compile_options(x360n_large_switch_native PRIVATE -msse4.1)
+endif()
+x360n_stage_runtime_dlls(x360n_large_switch_native)
+add_test(NAME sdkcheck.large-switch-native COMMAND x360n_large_switch_native)
+set_tests_properties(sdkcheck.large-switch-native PROPERTIES LABELS project TIMEOUT 15)
 
 add_executable(x360n_usbcam_unavailable_checks sdkcheck/usbcam_unavailable_probe.cpp)
 target_link_libraries(x360n_usbcam_unavailable_checks PRIVATE rexruntime)
@@ -207,6 +268,7 @@ target_sources(x360n_sdk_runtime_checks PRIVATE
     sdkcheck/achievement_xdbf_test.cpp
     sdkcheck/offline_achievement_metadata_test.cpp)
 target_sources(x360n_sdk_runtime_checks PRIVATE sdkcheck/physical_heap_transaction_test.cpp)
+target_sources(x360n_sdk_runtime_checks PRIVATE sdkcheck/system_heap_layout_test.cpp)
 target_sources(x360n_sdk_runtime_checks PRIVATE sdkcheck/xctd_query_test.cpp)
 target_sources(x360n_sdk_runtime_checks PRIVATE sdkcheck/mic_array_idle_test.cpp)
 target_sources(x360n_sdk_runtime_checks PRIVATE sdkcheck/xex_heap_ownership_test.cpp)
