@@ -807,11 +807,13 @@ struct StorageCrashEnvironment {
   }
   void set(const std::wstring& value) { REQUIRE(SetEnvironmentVariableW(name.c_str(), value.c_str())); }
 };
-void InterruptStorageTransfer(const std::filesystem::path& root, unsigned stage) {
+void InterruptStorageTransfer(const std::filesystem::path& root, unsigned stage, bool remove = false) {
   StorageCrashEnvironment child_root(L"X360N_STORAGE_CRASH_TEST_ROOT");
   StorageCrashEnvironment child_stage(L"X360N_STORAGE_CRASH_TEST_STAGE");
+  StorageCrashEnvironment child_operation(L"X360N_STORAGE_CRASH_TEST_OPERATION");
   child_root.set(root.wstring());
   child_stage.set(std::to_wstring(stage));
+  child_operation.set(remove ? L"delete" : L"transfer");
   std::vector<wchar_t> module(32768);
   const auto length = GetModuleFileNameW(nullptr, module.data(), DWORD(module.size()));
   REQUIRE(length > 0);
@@ -860,15 +862,24 @@ TEST_CASE("Storage crash child exits only at an actual publication checkpoint",
     MakeItem(guest, 1, root, 1024 * 1024);
   }
   rex::system::xam::XCONTENT_AGGREGATE_DATA data{};
-  std::ifstream input(HeaderOn(root), std::ios::binary);
+  const auto operation = StorageCrashVariable(L"X360N_STORAGE_CRASH_TEST_OPERATION");
+  REQUIRE((!operation || *operation == L"transfer" || *operation == L"delete"));
+  const auto separate_metadata = root / ".crash-content-data";
+  const auto metadata = operation && *operation == L"delete" && std::filesystem::exists(separate_metadata)
+      ? separate_metadata : HeaderOn(root);
+  REQUIRE(rex::system::xam::IsUnlinkedStoragePath(metadata));
+  std::ifstream input(metadata, std::ios::binary);
   input.read(reinterpret_cast<char*>(&data), sizeof(data));
   REQUIRE(input.gcount() == sizeof(data));
   input.close();
-  guest.runtime.kernel_state()->content_manager()->TransferContent(
-      kOwner, data, 7, 0, stage >= 3, {}, nullptr,
-      [stage](rex::system::xam::ContentManager::TransferStage reached) {
-        if (uint32_t(reached) == stage) std::_Exit(93);  // no destructors or staging cleanup
-      });
+  auto checkpoint = [stage](rex::system::xam::ContentManager::TransferStage reached) {
+    if (uint32_t(reached) == stage) std::_Exit(93);  // no destructors or staging cleanup
+  };
+  auto* manager = guest.runtime.kernel_state()->content_manager();
+  if (operation && *operation == L"delete") {
+    REQUIRE(stage >= 3);
+    manager->DeleteContent(kOwner, data, nullptr, checkpoint);
+  } else manager->TransferContent(kOwner, data, 7, 0, stage >= 3, {}, nullptr, checkpoint);
   FAIL("The requested publication checkpoint was not reached");
 }
 
@@ -1076,6 +1087,227 @@ TEST_CASE("A failed move cleanup preserves the full source and committed destina
 #endif
 
 #if defined(_WIN32)
+TEST_CASE("A locked content header cannot leave a partially deleted public save",
+          "[sdk][storage-transfer][storage-delete-recovery]") {
+  for (const bool unmount : {false, true}) {
+    DYNAMIC_SECTION("unmount before delete " << unmount) {
+      StorageRoot root;
+      DeviceGuest guest(root.path);
+      const auto data = MakeItem(guest, 1, root.path, 8192);
+      struct LockedHeader {
+        HANDLE handle;
+        ~LockedHeader() { if (handle != INVALID_HANDLE_VALUE) CloseHandle(handle); }
+      } locked{CreateFileW(HeaderOn(root.path).c_str(), GENERIC_READ,
+          FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr)};
+      REQUIRE(locked.handle != INVALID_HANDLE_VALUE);
+      auto* manager = guest.runtime.kernel_state()->content_manager();
+      auto remove = [&] { return unmount ? manager->UnmountAndDeleteContent(kOwner, data)
+                                        : manager->DeleteContent(kOwner, data); };
+      CHECK(remove() == X_ERROR_ACCESS_DENIED);
+      REQUIRE(std::filesystem::exists(PackageOn(root.path)));
+      CHECK(std::filesystem::file_size(PackageOn(root.path) / "dir/slot.dat") == 8192);
+      CHECK(std::filesystem::file_size(PackageOn(root.path) / "small.bin") == 3);
+      CHECK(std::filesystem::exists(HeaderOn(root.path)));
+      REQUIRE(CloseHandle(locked.handle));
+      locked.handle = INVALID_HANDLE_VALUE;
+      CHECK(remove() == X_ERROR_SUCCESS);
+      CHECK_FALSE(std::filesystem::exists(PackageOn(root.path)));
+      CHECK_FALSE(std::filesystem::exists(HeaderOn(root.path)));
+      CHECK_FALSE(std::filesystem::exists(root.path / ".x360n-transfer"));
+    }
+  }
+}
+
+TEST_CASE("Direct deletion recovers real interruption at every retirement boundary",
+          "[sdk][storage-transfer][storage-delete-recovery]") {
+  for (unsigned stage = 3; stage != 7; ++stage) {
+    DYNAMIC_SECTION("delete checkpoint " << stage) {
+      StorageRoot root;
+      std::ofstream(root.path / ".crash-test-root") << "x360n-copy-crash-v1";
+      std::string expected_header;
+      {
+        DeviceGuest guest(root.path);
+        MakeItem(guest, 1, root.path, 8192);
+        std::ofstream(HeaderOn(root.path), std::ios::binary | std::ios::app) << "opaque metadata";
+        std::ifstream input(HeaderOn(root.path), std::ios::binary);
+        expected_header.assign(std::istreambuf_iterator<char>{input}, {});
+      }
+      InterruptStorageTransfer(root.path, stage, true);
+      CHECK(std::filesystem::exists(PackageOn(root.path)) == (stage == 3));
+      CHECK(std::filesystem::exists(HeaderOn(root.path)) == (stage <= 4));
+      const auto pending = root.path / ".x360n-transfer";
+      REQUIRE(std::filesystem::exists(pending));
+      if (stage == 6) {
+        std::vector<std::filesystem::path> entries;
+        for (const auto& entry : std::filesystem::directory_iterator(pending)) entries.push_back(entry.path());
+        REQUIRE(entries.size() == 1);
+        REQUIRE(std::filesystem::remove(entries.front() / "package/small.bin"));
+      }
+      DeviceGuest restarted(root.path);
+      auto* manager = restarted.runtime.kernel_state()->content_manager();
+      REQUIRE(manager->GetDevice(1));
+      CHECK_FALSE(std::filesystem::exists(pending));
+      const auto items = manager->ListContent(1, kOwner, rex::system::XContentType::kSavedGame, kTitle);
+      if (stage < 6) {
+        REQUIRE(items.size() == 1);
+        CHECK(items.front().display_name() == u"Transfer save");
+        std::ifstream payload(PackageOn(root.path) / "dir/slot.dat", std::ios::binary);
+        CHECK(std::string(std::istreambuf_iterator<char>{payload}, {}) == std::string(8192, 's'));
+        CHECK(std::filesystem::file_size(PackageOn(root.path) / "small.bin") == 3);
+        std::ifstream header(HeaderOn(root.path), std::ios::binary);
+        CHECK(std::string(std::istreambuf_iterator<char>{header}, {}) == expected_header);
+      } else {
+        CHECK(items.empty());
+        CHECK_FALSE(std::filesystem::exists(PackageOn(root.path)));
+        CHECK_FALSE(std::filesystem::exists(HeaderOn(root.path)));
+      }
+    }
+  }
+}
+
+TEST_CASE("Direct deletion preserves header-only and package-only content contracts",
+          "[sdk][storage-transfer][storage-delete-recovery]") {
+  for (unsigned mode = 0; mode != 4; ++mode) {
+    DYNAMIC_SECTION("content shape " << mode) {
+      StorageRoot root;
+      DeviceGuest guest(root.path);
+      auto data = MakeItem(guest, 1, root.path, 8192);
+      if (mode == 0 || mode == 3) std::filesystem::remove_all(PackageOn(root.path));
+      if (mode == 1 || mode == 3) REQUIRE(std::filesystem::remove(HeaderOn(root.path)));
+      if (mode == 2) {
+        std::filesystem::remove_all(PackageOn(root.path));
+        std::ofstream(PackageOn(root.path)) << "flat package";
+      }
+      bool removed = true;
+      auto* manager = guest.runtime.kernel_state()->content_manager();
+      CHECK(manager->DeleteContent(kOwner, data, &removed) == (mode == 3 ? X_ERROR_FILE_NOT_FOUND : X_ERROR_SUCCESS));
+      CHECK(removed == (mode != 3));
+      CHECK_FALSE(std::filesystem::exists(PackageOn(root.path)));
+      CHECK_FALSE(std::filesystem::exists(HeaderOn(root.path)));
+      CHECK_FALSE(std::filesystem::exists(root.path / ".x360n-transfer"));
+    }
+  }
+}
+
+TEST_CASE("Direct deletion keeps committed failed cleanup private and retryable",
+          "[sdk][storage-transfer][storage-delete-recovery]") {
+  StorageRoot root;
+  DeviceGuest guest(root.path);
+  const auto data = MakeItem(guest, 1, root.path, 8192);
+  auto* manager = guest.runtime.kernel_state()->content_manager();
+  struct LockedPayload {
+    HANDLE handle = INVALID_HANDLE_VALUE;
+    ~LockedPayload() { if (handle != INVALID_HANDLE_VALUE) CloseHandle(handle); }
+  } locked;
+  bool removed = false;
+  std::filesystem::path private_payload;
+  const auto result = manager->DeleteContent(kOwner, data, &removed,
+      [&](rex::system::xam::ContentManager::TransferStage stage) {
+        if (stage != rex::system::xam::ContentManager::TransferStage::SourceRetired) return;
+        const auto pending = root.path / ".x360n-transfer";
+        std::vector<std::filesystem::path> entries;
+        for (const auto& entry : std::filesystem::directory_iterator(pending)) entries.push_back(entry.path());
+        REQUIRE(entries.size() == 1);
+        private_payload = entries.front() / "package/dir/slot.dat";
+        locked.handle = CreateFileW(private_payload.c_str(), GENERIC_READ,
+            FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+        REQUIRE(locked.handle != INVALID_HANDLE_VALUE);
+      });
+  CHECK(result == X_ERROR_ACCESS_DENIED);
+  CHECK(removed);
+  CHECK_FALSE(std::filesystem::exists(PackageOn(root.path)));
+  CHECK_FALSE(std::filesystem::exists(HeaderOn(root.path)));
+  REQUIRE(std::filesystem::exists(private_payload));
+  CHECK(std::filesystem::file_size(private_payload) == 8192);
+  CHECK_FALSE(manager->GetDevice(1));
+  REQUIRE(CloseHandle(locked.handle));
+  locked.handle = INVALID_HANDLE_VALUE;
+  CHECK(manager->GetDevice(1));
+  CHECK_FALSE(std::filesystem::exists(root.path / ".x360n-transfer"));
+  CHECK(manager->ListContent(1, kOwner, rex::system::XContentType::kSavedGame, kTitle).empty());
+}
+
+TEST_CASE("Deletion recovery restores header-only and flat packages without changing their shape",
+          "[sdk][storage-transfer][storage-delete-recovery]") {
+  for (const bool flat : {false, true}) {
+    DYNAMIC_SECTION("flat package " << flat) {
+      StorageRoot root;
+      std::ofstream(root.path / ".crash-test-root") << "x360n-copy-crash-v1";
+      std::string expected_header;
+      {
+        DeviceGuest guest(root.path);
+        MakeItem(guest, 1, root.path, 8192);
+        std::filesystem::remove_all(PackageOn(root.path));
+        if (flat) std::ofstream(PackageOn(root.path)) << "flat package bytes";
+        std::ifstream input(HeaderOn(root.path), std::ios::binary);
+        expected_header.assign(std::istreambuf_iterator<char>{input}, {});
+      }
+      InterruptStorageTransfer(root.path, 5, true);
+      DeviceGuest restarted(root.path);
+      auto* manager = restarted.runtime.kernel_state()->content_manager();
+      REQUIRE(manager->GetDevice(1));
+      CHECK_FALSE(std::filesystem::exists(root.path / ".x360n-transfer"));
+      CHECK(std::filesystem::exists(PackageOn(root.path)) == flat);
+      if (flat) {
+        REQUIRE(std::filesystem::is_regular_file(PackageOn(root.path)));
+        std::ifstream input(PackageOn(root.path));
+        CHECK(std::string(std::istreambuf_iterator<char>{input}, {}) == "flat package bytes");
+      }
+      std::ifstream header(HeaderOn(root.path), std::ios::binary);
+      CHECK(std::string(std::istreambuf_iterator<char>{header}, {}) == expected_header);
+    }
+  }
+}
+
+TEST_CASE("Recovery cannot pair retired content with a newly created missing component",
+          "[sdk][storage-transfer][storage-delete-recovery]") {
+  for (const bool header_only : {false, true}) {
+    DYNAMIC_SECTION("header only " << header_only) {
+      StorageRoot root;
+      std::ofstream(root.path / ".crash-test-root") << "x360n-copy-crash-v1";
+      {
+        DeviceGuest guest(root.path);
+        MakeItem(guest, 1, root.path, 8192);
+        std::filesystem::copy_file(HeaderOn(root.path), root.path / ".crash-content-data");
+        if (header_only) std::filesystem::remove_all(PackageOn(root.path));
+        else REQUIRE(std::filesystem::remove(HeaderOn(root.path)));
+      }
+      InterruptStorageTransfer(root.path, 5, true);
+      const auto pending = root.path / ".x360n-transfer";
+      if (header_only) {
+        std::filesystem::create_directories(PackageOn(root.path));
+        std::ofstream(PackageOn(root.path) / "new.bin") << "new payload";
+      } else std::ofstream(HeaderOn(root.path)) << "new header";
+      DeviceGuest restarted(root.path);
+      auto* manager = restarted.runtime.kernel_state()->content_manager();
+      CHECK_FALSE(manager->GetDevice(1));
+      CHECK(std::filesystem::exists(pending));
+      if (header_only) {
+        std::ifstream input(PackageOn(root.path) / "new.bin");
+        CHECK(std::string(std::istreambuf_iterator<char>{input}, {}) == "new payload");
+        input.close();
+        CHECK_FALSE(std::filesystem::exists(HeaderOn(root.path)));
+        REQUIRE(std::filesystem::remove(PackageOn(root.path) / "new.bin"));
+        REQUIRE(std::filesystem::remove(PackageOn(root.path)));
+      } else {
+        std::ifstream input(HeaderOn(root.path));
+        CHECK(std::string(std::istreambuf_iterator<char>{input}, {}) == "new header");
+        input.close();
+        CHECK_FALSE(std::filesystem::exists(PackageOn(root.path)));
+        REQUIRE(std::filesystem::remove(HeaderOn(root.path)));
+      }
+      REQUIRE(manager->GetDevice(1));
+      CHECK_FALSE(std::filesystem::exists(pending));
+      CHECK(std::filesystem::exists(PackageOn(root.path)) != header_only);
+      CHECK(std::filesystem::exists(HeaderOn(root.path)) == header_only);
+      if (!header_only) {
+        std::ifstream input(PackageOn(root.path) / "dir/slot.dat", std::ios::binary);
+        CHECK(std::string(std::istreambuf_iterator<char>{input}, {}) == std::string(8192, 's'));
+      }
+    }
+  }
+}
+
 TEST_CASE("Committed source retirement keeps failed physical cleanup private and retryable",
           "[sdk][storage-transfer][storage-source-retirement]") {
   StorageRoot root;
@@ -1151,6 +1383,9 @@ TEST_CASE("Source retirement recovery preserves conflicts and rejects corrupt jo
         std::ifstream original(ready, std::ios::binary);
         const std::string journal(std::istreambuf_iterator<char>{original}, {});
         original.close();
+        std::ifstream saved_header(entries.front() / "header", std::ios::binary);
+        const std::string expected_header(std::istreambuf_iterator<char>{saved_header}, {});
+        saved_header.close();
         if (corrupt) {
           auto bytes = journal;
           bytes.back() ^= 1;
@@ -1190,7 +1425,7 @@ TEST_CASE("Source retirement recovery preserves conflicts and rejects corrupt jo
           std::ifstream restored(PackageOn(root.path) / "dir/slot.dat", std::ios::binary);
           CHECK(std::string(std::istreambuf_iterator<char>{restored}, {}) == std::string(8192, 's'));
           std::ifstream restored_header(HeaderOn(root.path), std::ios::binary);
-          CHECK(std::string(std::istreambuf_iterator<char>{restored_header}, {}) == journal);
+          CHECK(std::string(std::istreambuf_iterator<char>{restored_header}, {}) == expected_header);
         } else if (corrupt) {
           CHECK_FALSE(std::filesystem::exists(PackageOn(root.path)));
           CHECK_FALSE(std::filesystem::exists(HeaderOn(root.path)));
@@ -1329,6 +1564,11 @@ TEST_CASE("Storage mutations notify the registered original content cache", "[sd
   } locked{CreateFileW(HeaderOn(root.path).c_str(), GENERIC_READ,
       FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr)};
   REQUIRE(locked.handle != INVALID_HANDLE_VALUE);
+  CHECK(guest.call(__imp__XamContentDeleteInternal, {item, 0}) == X_ERROR_ACCESS_DENIED);
+  CHECK(content_events.empty());
+  REQUIRE(std::filesystem::exists(PackageOn(root.path) / "dir/slot.dat"));
+  CHECK(std::filesystem::file_size(PackageOn(root.path) / "dir/slot.dat") == 1234);
+  CHECK(std::filesystem::exists(HeaderOn(root.path)));
   rex::memory::store_and_swap<uint32_t>(guest.bytes + device, 7);
   CHECK(guest.call(__imp__XamContentMoveInternal, {0, device, item, 0, 0, 0, 0}) == 5);
   CHECK(content_events.size() == 1);

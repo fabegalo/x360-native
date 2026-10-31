@@ -455,3 +455,37 @@ ausência de staging. SHA-256 do payload em ambos:
 headers origem/destino respectivamente
 `2d1085a44126adb0bfcd3902aefbb0961c6811f87564738bca0ea915bab1eeb4` e
 `cf55eaa33216daa354a225c0387bc89491cd314b96006643aa3326ca16138db8`.
+
+## Exclusão direta recuperável — 0232
+
+Reprodução: `DeleteContent` com header realmente bloqueado retornava erro 5
+depois de apagar o pacote público. **1 falha/6 asserções** no controle anterior
+(`storage-delete-recovery-red.log`). A exclusão direta e desmontar/excluir agora
+usam a mesma retirada privada recuperável do move. Preservam os bloqueios de
+conteúdo aberto/perfil ativo e os contratos de conteúdo inexistente, só header,
+só pacote e pacote como arquivo regular. O journal cobre com checksum quais
+componentes existiam, recusando também conteúdo novo criado no nome que antes
+estava ausente. XAM só emite Remove após a remoção lógica efetiva, inclusive se
+a limpeza privada retornar erro real posteriormente.
+
+**615 asserções/11 casos focados aprovados** em exclusão, move e callbacks,
+incluindo interrupções reais limitadas antes/depois do commit, header/payload
+bloqueados, formas de conteúdo, conflitos e recuperação após remover somente
+o impedimento da fixture. **2.084 asserções/34 casos** na regressão relevante,
+`.local/storage-delete-recovery-regression.log`; C8 com reinício/dois XUIDs e
+junctions reais aprovados, sem suíte completa. Replay final de **25 patches/3
+arquivos**, hashes conferidos em
+`storage-replay-1793407061417661800/result.json`.
+
+Preparo oficial aprovado (`storage-delete-recovery-prepare.log`). Sessão
+`20261031T005718Z-storage-delete-recovery-ui`: fixture recebeu interrupção real
+em `SourceHeaderRetired` durante exclusão, exit 93. A 17559 recuperou e listou
+“Transfer save” no HDD; hashes do pacote/header conferidos antes da ação. Fluxo
+original **Excluir → Sim** terminou com **“Nenhum item encontrado”** na mesma
+sessão, sem alteração manual de lista/cache. Encerramento normal em
+**104.311 ms**, exit 0, sem exceção/timeout. Persistem mensagens `FC/58003`.
+
+`storage-delete-recovery-ui-verification.json` confere restauração íntegra antes
+da ação e, após encerrar o processo, pacote/header ausentes, perfil preservado e
+staging ausente. Não comprova durabilidade a corte de energia. Wrappers próprios
+concluídos foram encerrados após recusar qualquer árvore com worker nativo ativo.

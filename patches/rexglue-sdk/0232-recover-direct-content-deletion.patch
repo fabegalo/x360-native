@@ -1,0 +1,286 @@
+--- a/include/rex/system/xam/content_manager.h
++++ b/include/rex/system/xam/content_manager.h
+@@ -191,7 +191,6 @@
+                                std::vector<uint8_t>* buffer);
+   X_RESULT SetContentThumbnail(uint64_t xuid, const XCONTENT_AGGREGATE_DATA& data,
+                                std::vector<uint8_t> buffer);
+-  X_RESULT DeleteContent(uint64_t xuid, const XCONTENT_AGGREGATE_DATA& data);
+   // Copies one package and its header to another device and/or owner; a move
+   // then deletes the source. The copy is staged on the destination volume and
+   // renamed into place, so a failure or cancellation leaves the source intact
+@@ -215,6 +214,9 @@
+     SourcePrepared, SourcePackageRetired, SourceHeaderRetired, SourceRetired
+   };
+   using TransferCheckpoint = std::function<void(TransferStage)>;
++  X_RESULT DeleteContent(uint64_t xuid, const XCONTENT_AGGREGATE_DATA& data,
++                          bool* source_removed = nullptr,
++                          const TransferCheckpoint& checkpoint = {});
+   X_RESULT TransferContent(uint64_t xuid, const XCONTENT_AGGREGATE_DATA& source,
+                            uint32_t destination_device, uint64_t destination_xuid, bool move,
+                            const TransferProgress& progress, bool* destination_committed = nullptr,
+--- a/src/system/xam/content_manager.cpp
++++ b/src/system/xam/content_manager.cpp
+@@ -857,33 +857,39 @@
+     kernel_state->user_profile()->RescanLocal();
+ }
+ 
+-X_RESULT ContentManager::DeleteContent(uint64_t xuid, const XCONTENT_AGGREGATE_DATA& data) try {
++// Deletion and move-source retirement use the same recoverable private tree.
++static X_RESULT RetireContent(const ContentDeviceInfo& device,
++                              const XCONTENT_AGGREGATE_DATA& data,
++                              const std::filesystem::path& package,
++                              const std::filesystem::path& header,
++                              const ContentManager::TransferCheckpoint& checkpoint,
++                              bool& removed, bool require_package);
++
++X_RESULT ContentManager::DeleteContent(uint64_t xuid, const XCONTENT_AGGREGATE_DATA& data,
++                                       bool* source_removed,
++                                       const TransferCheckpoint& checkpoint) try {
++  if (source_removed) *source_removed = false;
+   auto global_lock = global_critical_region_.Acquire();
+-
+-  if (IsContentOpen(data) || SignedInProfile(kernel_state_, data)) {
+-    // TODO(Gliniak): Get real error code for this case.
++  if (IsContentOpen(data) || SignedInProfile(kernel_state_, data))
+     return X_ERROR_ACCESS_DENIED;
+-  }
+-
+-  auto package_path = ResolvePackagePath(xuid, data);
+-  std::error_code ec;
+-  auto dir_removed = std::filesystem::remove_all(package_path, ec);
+-  if (ec) {
+-    return X_ERROR_ACCESS_DENIED;
+-  }
+-
+-  uint64_t used_xuid = (data.xuid != uint64_t(-1) && data.xuid != 0) ? uint64_t(data.xuid) : xuid;
+-  auto header_path =
+-      ResolvePackageHeaderPath(data.file_name(), used_xuid, data.title_id, data.content_type, data.device_id);
+-  std::error_code ec2;
+-  bool header_removed = std::filesystem::remove(header_path, ec2);
+-  if (ec2) return X_ERROR_ACCESS_DENIED;
+-
+-  if (dir_removed > 0 || header_removed) {
+-    RefreshProfiles(kernel_state_, data);
+-    return X_ERROR_SUCCESS;
+-  }
+-  return X_ERROR_FILE_NOT_FOUND;
++  const auto device = GetDevice(data.device_id);
++  if (!device) return X_ERROR_DEVICE_NOT_CONNECTED;
++  const auto package = ResolvePackagePath(xuid, data);
++  const uint64_t owner = (data.xuid != uint64_t(-1) && data.xuid != 0) ? uint64_t(data.xuid) : xuid;
++  const auto header = ResolvePackageHeaderPath(data.file_name(), owner, data.title_id,
++                                               data.content_type, data.device_id);
++  auto normalized = data;
++  normalized.xuid = owner;
++  if (normalized.title_id == kCurrentlyRunningTitleId) normalized.title_id = kernel_state_->title_id();
++  bool ignored_removed = false;
++  bool& removed = source_removed ? *source_removed : ignored_removed;
++  const auto result = RetireContent(*device, normalized, package, header, checkpoint, removed, false);
++  if (result) {
++    std::lock_guard lock(recovery_mutex_);
++    recovered_devices_.erase(data.device_id);
++  }
++  if (removed) RefreshProfiles(kernel_state_, data);
++  return result;
+ } catch (const std::filesystem::filesystem_error&) { return X_ERROR_ACCESS_DENIED; }
+ 
+ std::shared_ptr<ContentManager::TransferRequest> ContentManager::BeginTransfer(uint32_t overlapped) {
+@@ -951,7 +957,7 @@
+ // All conflict checks precede the first rename; a partial rollback is retryable.
+ static X_RESULT RestoreRetiredSource(const std::filesystem::path& staging,
+                                     const std::filesystem::path& package,
+-                                    const std::filesystem::path& header) {
++                                    const std::filesystem::path& header, uint8_t shape) {
+   namespace fs = std::filesystem;
+   std::error_code ec;
+   const std::array<std::pair<fs::path, fs::path>, 2> paths{{
+@@ -960,8 +966,16 @@
+     const auto& [from, to] = paths[i];
+     const bool exists = fs::exists(from, ec);
+     if (ec || !IsUnlinkedStoragePath(from) || !IsUnlinkedStoragePath(to)) return X_ERROR_ACCESS_DENIED;
++    // A missing original component must remain absent during restoration.
++    if (shape && !(shape & (1u << i))) {
++      if (exists) return X_RESULT_FROM_WIN32(13);
++      if (fs::exists(to, ec)) return X_ERROR_ALREADY_EXISTS;
++      if (ec) return X_ERROR_ACCESS_DENIED;
++      continue;
++    }
+     if (!exists) continue;
+-    if ((i == 0 ? !fs::is_directory(from, ec) : !fs::is_regular_file(from, ec)) || ec)
++    if ((i == 0 ? (!fs::is_directory(from, ec) && !fs::is_regular_file(from, ec))
++                : !fs::is_regular_file(from, ec)) || ec)
+       return X_RESULT_FROM_WIN32(13);
+     if (fs::exists(to, ec)) return X_ERROR_ALREADY_EXISTS;
+     if (ec) return X_ERROR_ACCESS_DENIED;
+@@ -1024,9 +1038,20 @@
+       auto* file = rex::filesystem::OpenFile(*ready, "rb");
+       if (!file) return X_ERROR_ACCESS_DENIED;
+       const bool read = fread(&data, 1, sizeof(data), file) == sizeof(data);
++      uint8_t shape = 0;  // prior move intents contain only the aggregate
++      bool valid_shape = true;
++      if (retire || retired) {
++        const int value = fgetc(file);
++        if (value != EOF) {
++          shape = uint8_t(value);
++          valid_shape = value >= 1 && value <= 3 && fgetc(file) == EOF;
++        }
++        if (ferror(file)) valid_shape = false;
++      }
+       const bool closed = fclose(file) == 0;
+-      if (!read || !closed || uint32_t(data.device_id) != device.device_id ||
+-          uint32_t(data.title_id) == kCurrentlyRunningTitleId || !ContentManager::ValidName(data.file_name()))
++      if (!read || !closed || !valid_shape || uint32_t(data.device_id) != device.device_id ||
++          (!retire && !retired && uint32_t(data.title_id) == kCurrentlyRunningTitleId) ||
++          !ContentManager::ValidName(data.file_name()))
+         return kInvalidData;
+       const uint64_t owner = data.content_type == XContentType::kMarketplaceContent ? 0 : uint64_t(data.xuid);
+       const auto title_root = volume_root / fmt::format("{:016X}", owner) /
+@@ -1041,7 +1066,7 @@
+         // cleanup touches only this private tree, even if new content now
+         // occupies the old public name. Never expose partially deleted bytes.
+         if (retire) {
+-          const auto restored = RestoreRetiredSource(staging, destination, header);
++          const auto restored = RestoreRetiredSource(staging, destination, header, shape);
+           if (restored) return restored;
+         }
+       } else {
+@@ -1085,20 +1110,29 @@
+   return RecoverTransferStagingLocked(device);
+ }
+ 
+-// Moves retire their source only after publishing a complete destination.
++// Retire content privately; moves call this after publishing their destination.
+ // The ready intent allows rollback until both source names have been hidden.
+ // The retired intent commits their removal; restart cleans only private bytes.
+-static X_RESULT RetireMovedSource(const ContentDeviceInfo& device,
++static X_RESULT RetireContent(const ContentDeviceInfo& device,
+                                  const XCONTENT_AGGREGATE_DATA& data,
+                                  const std::filesystem::path& package,
+                                  const std::filesystem::path& header,
+                                  const ContentManager::TransferCheckpoint& checkpoint,
+-                                 bool& removed) try {
++                                 bool& removed, bool require_package) try {
+   namespace fs = std::filesystem;
+   std::error_code ec;
+   removed = false;
+   if (!IsUnlinkedStoragePath(package) || !IsUnlinkedStoragePath(header)) return X_ERROR_ACCESS_DENIED;
+-  if (!fs::is_directory(package, ec)) return ec ? X_ERROR_ACCESS_DENIED : X_ERROR_FILE_NOT_FOUND;
++  const bool package_exists = fs::exists(package, ec);
++  if (ec) return X_ERROR_ACCESS_DENIED;
++  const bool header_exists = fs::exists(header, ec);
++  if (ec) return X_ERROR_ACCESS_DENIED;
++  if (!package_exists && !header_exists) return X_ERROR_FILE_NOT_FOUND;
++  if (require_package && !fs::is_directory(package, ec))
++    return ec ? X_ERROR_ACCESS_DENIED : X_ERROR_FILE_NOT_FOUND;
++  if (package_exists && !fs::is_directory(package, ec) && !fs::is_regular_file(package, ec))
++    return X_ERROR_ACCESS_DENIED;
++  if (ec || (header_exists && !fs::is_regular_file(header, ec)) || ec) return X_ERROR_ACCESS_DENIED;
+   const auto root = fs::absolute(device.root).lexically_normal() / kTransferStagingDirName;
+   X_RESULT recovered = X_ERROR_SUCCESS;
+   {
+@@ -1134,27 +1168,32 @@
+   const auto journal = staging / "journal";
+   auto* file = rex::filesystem::OpenFile(journal, "wb");
+   if (!file) return X_ERROR_ACCESS_DENIED;
+-  const bool written = fwrite(&data, 1, sizeof(data), file) == sizeof(data);
++  // Record both original components so recovery cannot pair an old header or
++  // package with newly created content in a previously absent public name.
++  const uint8_t shape = (package_exists ? 1 : 0) | (header_exists ? 2 : 0);
++  std::array<char, sizeof(data) + 1> journal_bytes{};
++  std::memcpy(journal_bytes.data(), &data, sizeof(data));
++  journal_bytes.back() = char(shape);
++  const bool written = fwrite(journal_bytes.data(), 1, journal_bytes.size(), file) == journal_bytes.size();
+   const bool closed = fclose(file) == 0;
+   if (!written || !closed) return X_ERROR_ACCESS_DENIED;
+-  const auto digest = rex::hash_bytes(std::string_view(
+-      reinterpret_cast<const char*>(&data), sizeof(data)));
++  const auto digest = rex::hash_bytes(std::string_view(journal_bytes.data(), journal_bytes.size()));
+   const auto prepared = staging / ("retire-" + digest + ".ready");
+   const auto committed = staging / ("retired-" + digest + ".ready");
+   fs::rename(journal, prepared, ec);
+   if (ec) return X_ERROR_ACCESS_DENIED;
+   if (checkpoint) checkpoint(ContentManager::TransferStage::SourcePrepared);
+   auto rollback = [&] {
+-    const auto result = RestoreRetiredSource(staging, package, header);
++    const auto result = RestoreRetiredSource(staging, package, header, shape);
+     cleanup.keep = result != X_ERROR_SUCCESS;
+     return X_ERROR_ACCESS_DENIED;
+   };
+   cleanup.keep = true;
+-  fs::rename(package, staging / "package", ec);
+-  if (ec) return rollback();
++  if (package_exists) {
++    fs::rename(package, staging / "package", ec);
++    if (ec) return rollback();
++  }
+   if (checkpoint) checkpoint(ContentManager::TransferStage::SourcePackageRetired);
+-  const bool header_exists = fs::exists(header, ec);
+-  if (ec) return rollback();
+   if (header_exists) {
+     fs::rename(header, staging / "header", ec);
+     if (ec) return rollback();
+@@ -1349,7 +1388,7 @@
+     bool ignored_removed = false;
+     bool& removed = source_removed ? *source_removed : ignored_removed;
+     const auto deleted = source_device
+-        ? RetireMovedSource(*source_device, normalized_source, source_path, source_header, checkpoint, removed)
++        ? RetireContent(*source_device, normalized_source, source_path, source_header, checkpoint, removed, true)
+         : X_ERROR_DEVICE_NOT_CONNECTED;
+     if (deleted != X_ERROR_SUCCESS) {
+       // Restore uncommitted retirement, or finish private cleanup on the next
+@@ -1398,28 +1437,7 @@
+   }
+   delete package;
+ 
+-  // Delete phase: remove package directory and .header file
+-  auto package_path = ResolvePackagePath(xuid, data);
+-
+-  uint64_t used_xuid = (data.xuid != uint64_t(-1) && data.xuid != 0) ? uint64_t(data.xuid) : xuid;
+-  auto header_path =
+-      ResolvePackageHeaderPath(data.file_name(), used_xuid, data.title_id, data.content_type, data.device_id);
+-
+-  std::error_code ec;
+-  auto dir_removed = std::filesystem::remove_all(package_path, ec);
+-  if (ec) {
+-    return X_ERROR_ACCESS_DENIED;
+-  }
+-
+-  std::error_code ec2;
+-  bool header_removed = std::filesystem::remove(header_path, ec2);
+-  if (ec2) return X_ERROR_ACCESS_DENIED;
+-
+-  if (dir_removed > 0 || header_removed) {
+-    RefreshProfiles(kernel_state_, data);
+-    return X_ERROR_SUCCESS;
+-  }
+-  return X_ERROR_FILE_NOT_FOUND;
++  return DeleteContent(xuid, data);
+ }
+ 
+ std::filesystem::path ContentManager::ResolveGameUserContentPath() {
+--- a/src/kernel/xam/xam_content.cpp
++++ b/src/kernel/xam/xam_content.cpp
+@@ -539,8 +539,9 @@
+   if (identity_error) return identity_error;
+   REX_KERNEL_STATE()->content_manager()->RetireStaleSaves();
+ 
+-  auto result = REX_KERNEL_STATE()->content_manager()->DeleteContent(xuid, content_data);
+-  if (result == X_ERROR_SUCCESS) NotifyContentChange(REX_KERNEL_STATE(), 1, content_data);
++  bool removed = false;
++  auto result = REX_KERNEL_STATE()->content_manager()->DeleteContent(xuid, content_data, &removed);
++  if (removed) NotifyContentChange(REX_KERNEL_STATE(), 1, content_data);
+ 
+   if (overlapped_ptr) {
+     REX_KERNEL_STATE()->CompleteOverlappedImmediate(overlapped_ptr.guest_address(), result);
+@@ -556,8 +557,9 @@
+   uint64_t xuid = REX_KERNEL_STATE()->user_profile()->xuid();
+   XCONTENT_AGGREGATE_DATA content_data = *content_data_ptr.as<XCONTENT_AGGREGATE_DATA*>();
+ 
+-  auto result = REX_KERNEL_STATE()->content_manager()->DeleteContent(xuid, content_data);
+-  if (result == X_ERROR_SUCCESS) NotifyContentChange(REX_KERNEL_STATE(), 1, content_data);
++  bool removed = false;
++  auto result = REX_KERNEL_STATE()->content_manager()->DeleteContent(xuid, content_data, &removed);
++  if (removed) NotifyContentChange(REX_KERNEL_STATE(), 1, content_data);
+ 
+   if (overlapped_ptr) {
+     REX_KERNEL_STATE()->CompleteOverlappedImmediate(overlapped_ptr.guest_address(), result);

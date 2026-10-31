@@ -2291,3 +2291,19 @@ fails. Optional host checkpoints exercise four real process interruptions; guest
 progress/cancellation and direct DeleteContent remain unchanged. This recovers
 process interruption, not power loss. Corrupt or conflicting work remains intact
 and makes the volume unavailable until the underlying problem is resolved.
+
+### 0232 — recover direct content deletion
+
+Use the same prepared/committed private retirement for DeleteContent and
+UnmountAndDeleteContent. A locked header can no longer leave a public save
+without its payload. Before commit, recovery restores the exact package/header;
+afterwards it finishes only private cleanup. Preserve header-only, package-only
+and flat-file deletion, resolve the current title before journaling, and retain
+open-content/signed-in-profile guards. XAM Remove callbacks follow actual logical
+removal even if subsequent private cleanup returns an error. Missing content is
+still an error, and blocked cleanup is retryable after the real lock is released.
+Checksummed recovery is for process interruption, without claiming power-loss
+durability. Tests reproduce the old header-lock failure and use bounded real
+child exits at each deletion checkpoint, plus cleanup locks and content shapes.
+The journal checksum covers the original package/header presence bits, so
+recovery also rejects new content in a name that was absent before retirement.

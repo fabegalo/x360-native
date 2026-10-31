@@ -30,8 +30,12 @@ do commit ou limpa somente bytes privados depois, sem sobrescrever conflitos.
 272 asserções/4 casos e 1.803/28 casos focados aprovados; replay de 24
 patches/3 arquivos. Preparo oficial e XUI aprovados: origem restaurada no HDD e
 destino completo na MU, hashes/perfil preservados, sem staging; encerramento
-normal em 93,5 s. Exclusão direta ainda mantém o comportamento anterior;
-durabilidade a corte de energia não validada.
+normal em 93,5 s. 0232 aplica a recuperação à exclusão direta/desmontar-excluir,
+incluindo conflitos em componentes antes ausentes; 615 asserções/11 casos
+focados e 2.084/34 casos de regressão aprovados. Preparo oficial e XUI aprovados:
+save restaurado com hashes conferidos → Excluir → Sim → “Nenhum item encontrado”,
+sem pacote/header/staging residual e perfil intacto. Encerramento normal em
+104,3 s; durabilidade a corte de energia não validada.
 Conquistas/P1 não ampliados antes de concluir Storage; sem Release.
 [Evidências e limites](docs/reports/dash-os-features-03-2026-10-30.md).
 
