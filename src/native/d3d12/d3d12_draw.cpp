@@ -518,21 +518,21 @@ void D3D12Render::Draw(const RegisterFile& r, rex::memory::Memory& memory, Shade
     if (stats_enabled_) ++edram_layout_barriers_;
   }
   edram_rov_layout_ = layout;
-  cmd_.SetGraphicsRootConstantBufferView(0, Constants(&c, sizeof(c)));
+  cmd_.SetGraphicsRootConstantBufferView(0, DrawConstants(0, &c, sizeof(c)));
   auto floats = [&](Shader& shader, unsigned start, unsigned root) {
     uint32_t packed[1024]{}; unsigned n = 0;
     const auto& map = shader.constant_register_map();
     for (unsigned i = 0; i < 256; ++i) if ((map.float_bitmap[i / 64] >> (i % 64)) & 1) {
       std::memcpy(packed + n, &r[start + i * 4], 16); n += 4;
     }
-    cmd_.SetGraphicsRootConstantBufferView(root, Constants(packed, std::max(n * 4, 16u)));
+    cmd_.SetGraphicsRootConstantBufferView(root, DrawConstants(root, packed, std::max(n * 4, 16u)));
   };
   const uint32_t vs_constants = FloatConstantBase(r, true), ps_constants = FloatConstantBase(r, false);
   Require(vs_constants + 256 <= 512 && (!ps || ps_constants + 256 <= 512), "float constant bank outside register file");
   floats(vs, XE_GPU_REG_SHADER_CONSTANT_000_X + vs_constants * 4, 1);
   if (ps) floats(*ps, XE_GPU_REG_SHADER_CONSTANT_000_X + ps_constants * 4, 2);
-  cmd_.SetGraphicsRootConstantBufferView(3, Constants(&r[XE_GPU_REG_SHADER_CONSTANT_BOOL_000_031], 40 * 4));
-  cmd_.SetGraphicsRootConstantBufferView(4, Constants(&r[XE_GPU_REG_SHADER_CONSTANT_FETCH_00_0], 192 * 4));
+  cmd_.SetGraphicsRootConstantBufferView(3, DrawConstants(3, &r[XE_GPU_REG_SHADER_CONSTANT_BOOL_000_031], 40 * 4));
+  cmd_.SetGraphicsRootConstantBufferView(4, DrawConstants(4, &r[XE_GPU_REG_SHADER_CONSTANT_FETCH_00_0], 192 * 4));
   SetTextureTables(pixel_tables, 6); SetTextureTables(vertex_tables, 8);
   cmd_.SetGraphicsRootDescriptorTable(7, Gpu(0, true));
   cmd_.SetGraphicsRootDescriptorTable(9, Gpu(0));

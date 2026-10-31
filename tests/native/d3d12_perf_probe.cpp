@@ -50,7 +50,7 @@ std::vector<uint32_t> TextureExportShader() {
       33 | (1u << 15) | (15u << 16), 0,
       (uint32_t(AluVectorOpcode::kMax) << 24) | (1u << 16) | (1u << 8) | (3u << 30)};
 }
-std::vector<uint32_t> RasterShader(bool vertex) {
+std::vector<uint32_t> RasterShader(bool vertex, unsigned constant = 0) {
   using namespace ucode;
   const uint64_t alloc = (uint64_t(vertex ? AllocType::kVsPosition : AllocType::kPsColors) << 41) |
       (uint64_t(ControlFlowOpcode::kAlloc) << 44);
@@ -60,7 +60,8 @@ std::vector<uint32_t> RasterShader(bool vertex) {
   if (vertex) code.insert(code.end(), {(1u << 12) | (1u << 19),
       0x688u | (1u << 13) | (uint32_t(VertexFormat::k_32_32_32_32_FLOAT) << 16), 4});
   code.insert(code.end(), {(vertex ? 62u : 0u) | (1u << 15) | (15u << 16), 0,
-      (uint32_t(AluVectorOpcode::kMax) << 24) | (vertex ? (1u << 16) | (1u << 8) | (3u << 30) : 0)});
+      (uint32_t(AluVectorOpcode::kMax) << 24) |
+          (vertex ? (1u << 16) | (1u << 8) | (3u << 30) : (constant << 16) | (constant << 8))});
   return code;
 }
 uint64_t CpuNs() {
@@ -179,8 +180,68 @@ void CheckTextureViews(Render& render, RegisterFile draw, rex::memory::Memory& m
   memory.SystemHeapFree(source);
   std::cout << "PASS immutable texture descriptors: 6000 reuses, live swizzles, CPU writes, null view and arena lifetime\n";
 }
+void CheckConstantUploads(Render& render, RegisterFile draw, rex::memory::Memory& memory, uint32_t output) {
+  const uint32_t physical = memory.GetPhysicalAddress(output) + 65536;
+  auto load = [&](bool alternate) {
+    auto code = ExportShader();
+    if (alternate) code.back() = (uint32_t(ucode::AluVectorOpcode::kMax) << 24) | (3u << 16) | (3u << 8);
+    for (auto& word : code) word = rex::byte_swap(word);
+    return render.LoadShader(ShaderType::kVertex, code.data(), uint32_t(code.size()));
+  };
+  auto* vs = load(false); auto* other_vs = load(true);
+  const std::array<float, 4> a{.25f, .5f, .75f, 1}, b{1, .75f, .5f, .25f};
+  auto issue = [&](unsigned slot, const std::array<float, 4>& value, unsigned bank = 0, bool alternate = false) {
+    draw[XE_GPU_REG_SQ_VS_CONST] = 0x000FF000 | bank;
+    xe_gpu_memexport_stream_t stream{};
+    stream.base_address = (physical + slot * 16) >> 2; stream.const_0x1 = 1;
+    stream.const_0x4b000000 = 0x4B000000; stream.format = ColorFormat::k_32_32_32_32_FLOAT;
+    stream.num_format = SurfaceNumberFormat::kFloat; stream.const_0x4b0 = 0x4B0;
+    stream.index_count = 1; stream.const_0x96 = 0x96;
+    const auto base = XE_GPU_REG_SHADER_CONSTANT_000_X + bank * 4;
+    std::memcpy(&draw[base], &stream, sizeof(stream));
+    std::memset(&draw[base + 4], 0, 16); draw[base + 5] = std::bit_cast<uint32_t>(1.f);
+    std::memcpy(&draw[base + (alternate ? 12 : 8)], value.data(), sizeof(value));
+    render.Draw(draw, memory, alternate ? other_vs : vs, nullptr, PrimitiveType::kTriangleList, 1, nullptr);
+  };
+  auto verify = [&](unsigned slot, const std::array<float, 4>& value) {
+    Require(!std::memcmp(memory.TranslatePhysical(physical + slot * 16), value.data(), sizeof(value)),
+        "cached draw constants changed exported bytes");
+  };
+  issue(0, a);
+  const auto before = render.performance();
+  for (unsigned i = 0; i < 64; ++i) issue(0, a);
+  const auto after = render.performance();
+  for (unsigned root : {0u, 1u, 3u, 4u}) {
+    Require(after.constant_uploads[root] == before.constant_uploads[root] &&
+        after.constant_reuses[root] - before.constant_reuses[root] == 64,
+        "identical draw constants allocated another upload");
+  }
+  // Even unconsumed fields are compared, never trusted to a guest dirty bit.
+  for (const auto change : {std::pair{XE_GPU_REG_PA_CL_VTE_CNTL, 0u},
+                            std::pair{XE_GPU_REG_SHADER_CONSTANT_BOOL_000_031, 3u},
+                            std::pair{XE_GPU_REG_SHADER_CONSTANT_FETCH_00_0, 4u}}) {
+    const auto prior = render.performance();
+    draw[change.first] ^= change.second == 0 ? 1u << 8 : 1u;
+    issue(0, a);
+    Require(render.performance().constant_uploads[change.second] == prior.constant_uploads[change.second] + 1,
+        "changed system/bool/fetch constants reused stale upload");
+  }
+  // All four different packed buffers remain referenced by queued draws.
+  issue(1, a); issue(2, b); issue(3, b, 8); issue(4, a, 0, true);
+  render.Flush(true);
+  verify(0, a); verify(1, a); verify(2, b); verify(3, b); verify(4, a);
+  for (unsigned i = 0; i < 4; ++i) {
+    const auto prior = render.performance();
+    issue(5, i & 1 ? a : b);
+    for (unsigned root : {0u, 1u, 3u, 4u})
+      Require(render.performance().constant_uploads[root] == prior.constant_uploads[root] + 1,
+          "draw constant address survived recording arena rotation");
+    render.Flush(true); verify(5, i & 1 ? a : b);
+  }
+  std::cout << "PASS draw constants: exact reuse, changed system/bool/fetch bytes, VS maps/banks, immutable exports and arenas\n";
+}
 void CheckResidentIndices(Render& render, RegisterFile draw, RegisterFile resolve,
-    rex::memory::Memory& memory, uint32_t output) {
+    rex::memory::Memory& memory, uint32_t output, bool check_constants = false) {
   const auto vertices = memory.SystemHeapAlloc(4096, 4096, rex::memory::kSystemHeapPhysical);
   const auto index_storage = memory.SystemHeapAlloc(4096, 4096, rex::memory::kSystemHeapPhysical);
   Require(vertices && index_storage, "resident index allocations");
@@ -223,6 +284,38 @@ void CheckResidentIndices(Render& render, RegisterFile draw, RegisterFile resolv
     return std::vector<uint8_t>(bytes, bytes + 4096);
   };
   capture(); // Clear EDRAM before the first comparison.
+  if (check_constants) {
+    std::memcpy(memory.TranslateVirtual(vertices), triangle, sizeof(triangle));
+    reg::VGT_DRAW_INITIATOR initiator{}; initiator.prim_type = PrimitiveType::kTriangleList;
+    draw[XE_GPU_REG_VGT_DRAW_INITIATOR] = initiator.value;
+    auto issue = [&](Shader* pixel) { render.Draw(draw, memory, vs, pixel, PrimitiveType::kTriangleList, 3, nullptr); };
+    issue(ps);
+    const auto prior = render.performance(); issue(ps);
+    Require(render.performance().constant_uploads[2] == prior.constant_uploads[2] &&
+        render.performance().constant_reuses[2] == prior.constant_reuses[2] + 1,
+        "identical pixel constants allocated another upload");
+    const auto first = capture();
+    Require(std::any_of(first.begin(), first.end(), [](uint8_t b) { return b != 0; }),
+        "constant test reference triangle did not render");
+    auto* other_ps = load(false, RasterShader(false, 1));
+    const std::array<float, 4> other_color{1, .75f, .5f, .25f};
+    std::memcpy(&draw[XE_GPU_REG_SHADER_CONSTANT_000_X + 257 * 4], other_color.data(), sizeof(other_color));
+    issue(other_ps); const auto second = capture();
+    Require(first != second, "pixel shader constant maps did not change color");
+    // Keep both pixel uploads alive across compute resolve roots, in one list.
+    issue(ps); render.Resolve(resolve, memory);
+    issue(other_ps); resolve[XE_GPU_REG_RB_COPY_DEST_BASE] += 4096; render.Resolve(resolve, memory);
+    render.Flush(true);
+    Require(!std::memcmp(memory.TranslatePhysical(resolve[XE_GPU_REG_RB_COPY_DEST_BASE] - 4096), first.data(), first.size()) &&
+        !std::memcmp(memory.TranslatePhysical(resolve[XE_GPU_REG_RB_COPY_DEST_BASE]), second.data(), second.size()),
+        "queued draws overwrote earlier immutable pixel constants");
+    resolve[XE_GPU_REG_RB_COPY_DEST_BASE] -= 4096;
+    draw[XE_GPU_REG_SQ_PS_CONST] = 0x000FF080;
+    std::memcpy(&draw[XE_GPU_REG_SHADER_CONSTANT_000_X + 128 * 4], other_color.data(), sizeof(other_color));
+    issue(ps); Require(capture() == second, "pixel constant bank reused stale packed bytes");
+    draw[XE_GPU_REG_SQ_PS_CONST] = 0x000FF100;
+    std::cout << "PASS pixel constants: exact reuse, shader maps/banks and immutable pixels across compute roots\n";
+  }
   const uint32_t indices_physical = memory.GetPhysicalAddress(index_storage);
   auto encode = [&](std::span<const uint32_t> indices, IndexFormat format, Endian endian, bool unaligned) {
     const unsigned bytes = format == IndexFormat::kInt16 ? 2 : 4;
@@ -580,6 +673,10 @@ int main(int argc, char** argv) {
         CheckTextureViews(render,draw,memory,output);
       if(argc>6 && std::string(argv[6])=="index-contracts")
         CheckResidentIndices(render,draw,resolve,memory,output);
+      if(argc>6 && std::string(argv[6])=="constant-contracts") {
+        CheckConstantUploads(render,draw,memory,output);
+        CheckResidentIndices(render,draw,resolve,memory,output,true);
+      }
     }
     if(argc>6) for(unsigned i=0;i<3;++i) {
       Render recreated(*provider); recreated.SetSampleCounts({},false); recreated.Flush(false);

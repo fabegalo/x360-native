@@ -50,11 +50,13 @@ class D3D12Render {
     uint64_t submissions, waits, wait_ns, gpu_ticks, gpu_frequency, gpu_samples;
     uint64_t texture_views, texture_view_reuses;
     uint64_t gpu_index_draws, gpu_index_bytes, normalized_indices;
+    std::array<uint64_t, 5> constant_uploads, constant_reuses, constant_bytes;
   };
   Performance performance() {
     if (stats_enabled_) CollectGpuTimestamps();
     return {serial_, fence_waits_, flush_wait_ns_, gpu_busy_ticks_, timestamp_frequency_, gpu_timed_,
-        texture_views_, texture_view_reuses_, gpu_index_draws_, gpu_index_bytes_, normalized_indices_};
+        texture_views_, texture_view_reuses_, gpu_index_draws_, gpu_index_bytes_, normalized_indices_,
+        constant_uploads_, constant_reuses_, constant_bytes_};
   }
   // Guest synchronization point: publish recorded resolve/MEMEXPORT results.
   void CompleteGuestWrites(GuestSync source, uint32_t opcode) {
@@ -83,6 +85,12 @@ class D3D12Render {
   std::vector<UploadPage> upload_pages_;
   size_t upload_page_index_ = 0;
   D3D12_GPU_VIRTUAL_ADDRESS Constants(const void*, size_t);
+  // CPU copies of the exact packed draw constants, never read from the
+  // write-combined upload heap. Each GPU address is immutable for this arena.
+  struct DrawConstant { std::vector<uint8_t> bytes; D3D12_GPU_VIRTUAL_ADDRESS address = 0; };
+  std::array<DrawConstant, 5> draw_constants_;
+  std::array<uint64_t, 5> constant_uploads_{}, constant_reuses_{}, constant_bytes_{};
+  D3D12_GPU_VIRTUAL_ADDRESS DrawConstants(unsigned root, const void*, size_t);
   void Transition(ID3D12Resource*, D3D12_RESOURCE_STATES&, D3D12_RESOURCE_STATES);
   void Barrier();
   void Wait(uint64_t serial);

@@ -58,6 +58,21 @@ D3D12Render::UploadSlice D3D12Render::Reserve(size_t bytes, uint8_t*& mapped) {
   return {page.resource, offset};
 }
 D3D12_GPU_VIRTUAL_ADDRESS D3D12Render::Constants(const void* p, size_t n) { return Upload(p, n).Address(); }
+D3D12_GPU_VIRTUAL_ADDRESS D3D12Render::DrawConstants(unsigned root, const void* p, size_t n) {
+  auto& cached = draw_constants_[root];
+  // Compare the final packed bytes and their extent. A shader map, float bank,
+  // system setting or guest register change is significant exactly when it
+  // changes those bytes; pointer identity and dirty flags are insufficient.
+  if (cached.address && cached.bytes.size() == n && !std::memcmp(cached.bytes.data(), p, n)) {
+    if (stats_enabled_) ++constant_reuses_[root];
+    return cached.address;
+  }
+  const auto address = Constants(p, n);
+  cached.bytes.assign(static_cast<const uint8_t*>(p), static_cast<const uint8_t*>(p) + n);
+  cached.address = address;
+  if (stats_enabled_) { ++constant_uploads_[root]; constant_bytes_[root] += n; }
+  return address;
+}
 void D3D12Render::Transition(ID3D12Resource* r, D3D12_RESOURCE_STATES& before, D3D12_RESOURCE_STATES after) {
   if (before == after) return;
   D3D12_RESOURCE_BARRIER b{}; b.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
@@ -223,6 +238,9 @@ void D3D12Render::LogSubmissionStats() {
   REXLOG_INFO("Native texture views created={} reused={}", texture_views_, texture_view_reuses_);
   REXLOG_INFO("Native resident indices draws={} bytes={} normalized_indices={}",
       gpu_index_draws_, gpu_index_bytes_, normalized_indices_);
+  for (unsigned root = 0; root < draw_constants_.size(); ++root)
+    REXLOG_INFO("Native draw constants root={} uploads={} reuses={} bytes={}",
+        root, constant_uploads_[root], constant_reuses_[root], constant_bytes_[root]);
   REXLOG_INFO("Native draw phases prepare_us={} memory_us={} indices_us={} bind_us={} issue_us={} normalized_indices={} (completed draw phases; inclusive of internal waits)",
       draw_prepare_ns_ / 1000, draw_memory_ns_ / 1000, draw_indices_ns_ / 1000,
       draw_bind_ns_ / 1000, draw_issue_ns_ / 1000, normalized_indices_);
@@ -433,6 +451,9 @@ void D3D12Render::RecycleBatch() {
   transient_.clear(); view_count_ = sampler_count_ = 0;
   arena_samplers_.clear();
   arena_texture_views_.clear();
+  // Addresses refer to the retired arena, even if another arena happens to
+  // contain equal bytes. Never retain them after changing the upload pages.
+  for (auto& constants : draw_constants_) constants.address = 0;
   arena_memory_tables_.fill(UINT32_MAX);
   for (auto& s : scratch_) s.used = 0;
   uint64_t retained = 0;
