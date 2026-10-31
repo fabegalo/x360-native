@@ -118,7 +118,7 @@ struct VulkanRender::TextureResource {
 };
 void VulkanRender::TextureWatch(void*, void* data, uint64_t range, bool) {
   auto& entry = *static_cast<TextureEntry*>(data);
-  entry.outdated = true;
+  std::atomic_ref(entry.outdated).store(true, std::memory_order_relaxed);
   entry.watches[range] = nullptr;
 }
 void VulkanRender::Unwatch(TextureEntry& entry) {
@@ -144,7 +144,7 @@ void VulkanRender::LoadTextureGpu(const TextureLoadPlan& plan, VkImage image, ui
     CheckVulkan(fn.vkCreatePipelineLayout(vk, &layout, nullptr, &load_layout_), "create texture load layout");
   }
   auto& pipeline = load_pipelines_[size_t(plan.shader)];
-  if (!pipeline) {
+  if (!pipeline.valid()) {
     std::span<const uint32_t> code;
     switch (plan.shader) {
       case LoadShader::k8bpb: code = texture_load_8bpb_cs; break;
@@ -357,8 +357,7 @@ VkDescriptorSet VulkanRender::BindTextures(const RegisterFile& regs, rex::memory
       auto found = textures_.find(key);
       bool current = false;
       if (found != textures_.end()) {
-        auto lock = GuestMemoryMirror::Lock();
-        current = !found->second.outdated;
+        current = !std::atomic_ref(found->second.outdated).load(std::memory_order_relaxed);
       }
       if (current) {
         resource = found->second.resource;

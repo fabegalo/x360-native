@@ -111,6 +111,25 @@ TEST_CASE("Native publishes incomplete resolves before guest memory packets", "[
   Validate(PM4_EVENT_WRITE_EXT, {0x0A, 0x1000 | 1});
   CHECK(drains == 9);
 }
+TEST_CASE("Native register polls do not publish guest memory", "[native-packet]") {
+  auto& drains = x360n::native::guest_write_drains;
+  Validate(PM4_SET_CONSTANT, {1u << 16, 0}); // Consume the previous case's epoch.
+  drains = 0;
+  Validate(PM4_WAIT_REG_MEM, {3, XE_GPU_REG_COHER_STATUS_HOST, 0, 0xffffffff, 0x100});
+  CHECK(drains == 0);
+  Validate(PM4_WAIT_REG_MEM, {7, XE_GPU_REG_SCRATCH_REG0, 0, 0, 0});
+  CHECK(drains == 0);
+  Validate(PM4_SET_CONSTANT, {1u << 16, 0});
+  CHECK(drains == 0); // Neither poll created a guest-memory publication epoch.
+  Validate(PM4_WAIT_REG_MEM, {0x13, 0x1000, 0, 0xffffffff, 0x100});
+  CHECK(drains == 1); // Memory polling still publishes before reading.
+  Validate(PM4_SET_CONSTANT, {1u << 16, 0});
+  CHECK(drains == 2);
+  Validate(PM4_WAIT_FOR_IDLE, {0});
+  CHECK(drains == 3); // Explicit GPU-idle semantics are unchanged.
+  Validate(PM4_SET_CONSTANT, {1u << 16, 0});
+  CHECK(drains == 4);
+}
 #include "../../src/native/memory/guest_writeback.h"
 TEST_CASE("Native resolve writeback tracks overlap and submission order") {
   x360n::native::GuestWriteback w;

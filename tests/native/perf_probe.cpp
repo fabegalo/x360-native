@@ -163,10 +163,60 @@ void CheckStagingGrowth(VulkanRender& render, RegisterFile& regs,
   memory.SystemHeapFree(allocation);
   std::cout<<"PASS staging overflow/growth: 17 MiB checked byte-for-byte\n";
 }
+// Hold real compute creation while shader storage is initialized after Resolve.
+// The cache merge must not race the compilation workers (Vulkan host contract).
+struct ComputeGate {
+  PFN_vkCreateComputePipelines original;
+  std::mutex mutex;
+  std::condition_variable cv;
+  bool entered = false, release = false, timed_out = false;
+  inline static ComputeGate* active = nullptr;
+  static VKAPI_ATTR VkResult VKAPI_CALL Create(VkDevice device, VkPipelineCache cache,
+      uint32_t count, const VkComputePipelineCreateInfo* info,
+      const VkAllocationCallbacks* allocator, VkPipeline* pipelines) {
+    auto& gate = *active;
+    {
+      std::unique_lock lock(gate.mutex);
+      gate.entered = true;
+      gate.cv.notify_all();
+      if (!gate.cv.wait_for(lock, std::chrono::seconds(3), [&] { return gate.release; }))
+        gate.timed_out = true;
+    }
+    return gate.original(device, cache, count, info, allocator, pipelines);
+  }
+};
+void CheckCacheMerge(rex::ui::vulkan::VulkanProvider& provider, RegisterFile& regs,
+    rex::memory::Memory& memory, const std::filesystem::path& output) {
+  const auto cache = output / "late-cache";
+  { VulkanRender seed(provider); seed.SetPipelineDirectory(cache); }
+  Require(std::filesystem::file_size(cache / "pipelines.bin") >= 32, "seed driver cache");
+  auto& functions = const_cast<rex::ui::vulkan::VulkanDevice::Functions&>(provider.vulkan_device()->functions());
+  ComputeGate gate{functions.vkCreateComputePipelines};
+  ComputeGate::active = &gate;
+  functions.vkCreateComputePipelines = ComputeGate::Create;
+  struct Restore {
+    rex::ui::vulkan::VulkanDevice::Functions& functions; ComputeGate& gate;
+    ~Restore() { functions.vkCreateComputePipelines = gate.original; ComputeGate::active = nullptr; }
+  } restore{functions, gate};
+  VulkanRender render(provider);
+  render.Resolve(regs, memory);
+  {
+    std::unique_lock lock(gate.mutex);
+    Require(gate.cv.wait_for(lock, std::chrono::seconds(2), [&] { return gate.entered; }), "compute worker entered");
+  }
+  auto merge = std::async(std::launch::async, [&] { render.SetPipelineDirectory(cache); });
+  const bool waited = merge.wait_for(std::chrono::milliseconds(150)) == std::future_status::timeout;
+  { std::lock_guard lock(gate.mutex); gate.release = true; }
+  gate.cv.notify_all();
+  merge.get();
+  render.Flush(true);
+  Require(!gate.timed_out && waited, "cache merge did not wait for active compute creation");
+  std::cout << "PASS late cache merge waits for compute workers\n";
+}
 }
 int main(int argc, char** argv) {
   try {
-    Require(argc >= 3, "usage: perf OUTPUT export|resolve|sync|none [iterations=4096] [scale=1] [instrument=1]");
+    Require(argc >= 3, "usage: perf OUTPUT export|resolve|sync|none [iterations=4096] [scale=1] [instrument=1] [contracts] [pipeline_threads]");
     const std::filesystem::path out=argv[1]; std::filesystem::create_directories(out);
     const std::string mode=argv[2];
     const unsigned iterations=argc>3?std::stoul(argv[3]):4096;
@@ -175,6 +225,7 @@ int main(int argc, char** argv) {
     Require(iterations>0,"positive iteration count");
     Require(mode=="export"||mode=="resolve"||mode=="sync"||mode=="none"||mode=="batch","unknown workload");
     rex::InitLogging((out/"runtime.log").string().c_str());
+    if (argc > 7) rex::cvar::SetFlagByName("native_pipeline_threads", argv[7]);
     rex::cvar::SetFlagByName("native_vulkan_perf", measured?"true":"false");
     if (scale>1) {
       rex::chrono::FrameTiming::ActivateNative();
@@ -287,6 +338,7 @@ int main(int argc, char** argv) {
         CheckPendingContracts(render,draw,memory,vs,output,*provider->vulkan_device());
         CheckStagingGrowth(render,draw,memory,vs);
         CheckResolveContracts(render,resolve,memory,output);
+        if (argc <= 7 || std::stoi(argv[7]) != 0) CheckCacheMerge(*provider, resolve, memory, out);
       }
     }
     Require(!measured||NativeVulkanPerformance().live_bytes==0,"Native buffers survived renderer destruction");

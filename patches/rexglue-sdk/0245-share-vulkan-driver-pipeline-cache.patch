@@ -1,0 +1,59 @@
+diff --git a/src/graphics/vulkan/pipeline_cache.cpp b/src/graphics/vulkan/pipeline_cache.cpp
+--- a/src/graphics/vulkan/pipeline_cache.cpp
++++ b/src/graphics/vulkan/pipeline_cache.cpp
+@@ -287,6 +287,19 @@
+ 
+ bool VulkanPipelineCache::Initialize() {
+   const ui::vulkan::VulkanDevice* const vulkan_device = command_processor_.GetVulkanDevice();
++
++  // The default cache is internally synchronized by Vulkan, so all existing
++  // compilation workers can share driver intermediate results. Do not request
++  // EXTERNALLY_SYNCHRONIZED: that would serialize pipeline creation here.
++  const auto create_cache = reinterpret_cast<PFN_vkCreatePipelineCache>(
++      vulkan_device->vulkan_instance()->functions().vkGetDeviceProcAddr(
++          vulkan_device->device(), "vkCreatePipelineCache"));
++  VkPipelineCacheCreateInfo cache_info{VK_STRUCTURE_TYPE_PIPELINE_CACHE_CREATE_INFO};
++  if (!create_cache || create_cache(vulkan_device->device(), &cache_info, nullptr,
++                                    &driver_pipeline_cache_) != VK_SUCCESS) {
++    driver_pipeline_cache_ = VK_NULL_HANDLE;
++    REXGPU_WARN("VulkanPipelineCache: driver cache unavailable; compiling without it");
++  }
+ 
+   bool edram_fragment_shader_interlock =
+       render_target_cache_.GetPath() == RenderTargetCache::Path::kPixelShaderInterlock;
+@@ -822,6 +835,15 @@
+   const ui::vulkan::VulkanDevice* const vulkan_device = command_processor_.GetVulkanDevice();
+   const ui::vulkan::VulkanDevice::Functions& dfn = vulkan_device->functions();
+   const VkDevice device = vulkan_device->device();
++
++  // Creation threads have joined above; no driver call still uses this cache.
++  if (driver_pipeline_cache_ != VK_NULL_HANDLE) {
++    const auto destroy_cache = reinterpret_cast<PFN_vkDestroyPipelineCache>(
++        vulkan_device->vulkan_instance()->functions().vkGetDeviceProcAddr(
++            device, "vkDestroyPipelineCache"));
++    destroy_cache(device, driver_pipeline_cache_, nullptr);
++    driver_pipeline_cache_ = VK_NULL_HANDLE;
++  }
+ 
+   ProcessDeferredPipelineDestructions(true);
+ 
+@@ -3517,7 +3539,7 @@
+   const ui::vulkan::VulkanDevice::Functions& dfn = vulkan_device->functions();
+   const VkDevice device = vulkan_device->device();
+   VkPipeline pipeline;
+-  VkResult create_result = dfn.vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1,
++  VkResult create_result = dfn.vkCreateGraphicsPipelines(device, driver_pipeline_cache_, 1,
+                                                          &pipeline_create_info, nullptr, &pipeline);
+   if (create_result != VK_SUCCESS) {
+     uint64_t ps_hash = creation_arguments.pixel_shader
+diff --git a/include/rex/graphics/vulkan/pipeline_cache.h b/include/rex/graphics/vulkan/pipeline_cache.h
+--- a/include/rex/graphics/vulkan/pipeline_cache.h
++++ b/include/rex/graphics/vulkan/pipeline_cache.h
+@@ -380,6 +380,7 @@
+   void CreateQueuedPipelinesOnProcessorThread();
+   void ProcessDeferredPipelineDestructions(bool force_all);
+ 
++  VkPipelineCache driver_pipeline_cache_ = VK_NULL_HANDLE;
+   VulkanCommandProcessor& command_processor_;
+   const RegisterFile& register_file_;
+   VulkanRenderTargetCache& render_target_cache_;

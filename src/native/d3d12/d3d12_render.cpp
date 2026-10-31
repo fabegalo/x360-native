@@ -159,6 +159,7 @@ D3D12Render::D3D12Render(rex::ui::d3d12::D3D12Provider& provider) : provider_(pr
   Check(device_->CreateRootSignature(0, blob->GetBufferPointer(), blob->GetBufferSize(), IID_PPV_ARGS(&root_tess_)), "domain root");
   pipeline_store_.SetRoot(blob->GetBufferPointer(), blob->GetBufferSize(), root_tess_.Get());
   BeginGpuTimestamp();
+  cmd_.ResetWorkTracking();
 }
 // Watches reference cache entries: retire them before the cache is destroyed.
 D3D12Render::~D3D12Render() {
@@ -275,6 +276,15 @@ void D3D12Render::ReplayCommands() {
   pipeline_wait_ns_ += std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - start).count();
 }
 void D3D12Render::Flush(FlushCause cause) {
+  if (cmd_.empty()) {
+    // A guest resolve may have already submitted this frame. Do not submit
+    // another list just for presentation, but a drain must still wait for
+    // earlier submissions and publish their pending guest writes.
+    if (cause == kFlushDrain || cause == kFlushGuestSync || cause == kFlushOverlap)
+      Wait(serial_);
+    PublishCompleted();
+    return;
+  }
   Timer timer(stats_enabled_, flush_ns_);
   if (stats_enabled_) ++flush_causes_[cause];
   EndGpuTimestamp();
@@ -432,6 +442,7 @@ void D3D12Render::RecycleBatch() {
   }
   Check(list_->Reset(allocator_.Get(), nullptr), "reset list");
   BeginGpuTimestamp();
+  cmd_.ResetWorkTracking();
 }
 void D3D12Render::SyncGuestRead(uint32_t address, uint64_t length, ReadSite site) {
   const auto extent = uint32_t(std::min<uint64_t>(length, GuestMemoryMirror::kSize));

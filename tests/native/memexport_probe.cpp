@@ -130,8 +130,16 @@ void Run(rex::system::IGraphicsSystem& gpu, rex::memory::Memory& memory) {
   };
   const std::array<float, 4> data{1.25f, -2.5f, 4.0f, .75f}, changed{9, 8, 7, 6};
   const auto source = issue("VS-only incomplete triangle", ColorFormat::k_32_32_32_32_FLOAT, SurfaceNumberFormat::kFloat, data, 2, 16, raw(data, 2));
+  // A cache-register poll between a GPU store and its vertex-fetch consumer
+  // does not publish memory to the CPU. GPU ordering must preserve the alias.
+  set(XE_GPU_REG_COHER_STATUS_HOST, 0);
+  words.insert(words.end(), {Packet(PM4_WAIT_REG_MEM, 5), 3, XE_GPU_REG_COHER_STATUS_HOST, 0, 0xffffffff, 0x100});
   vertex_fetch(source, 8);
   issue("GPU vertex alias", ColorFormat::k_32_32_32_32_FLOAT, SurfaceNumberFormat::kFloat, data, 2, 16, raw(data, 2), true, false, true);
+  // The corresponding memory poll must publish the export before the shared
+  // decoder reads it, otherwise this wait cannot observe the GPU's value.
+  words.insert(words.end(), {Packet(PM4_WAIT_REG_MEM, 5), 0x13, source,
+      std::bit_cast<uint32_t>(data[0]), 0xffffffff, 0x100});
   words.insert(words.end(), {Packet(PM4_MEM_WRITE, 9), source});
   for (unsigned i = 0; i < 2; ++i) for (float value : changed) words.push_back(std::bit_cast<uint32_t>(value));
   // MEM_WRITE legitimately replaces the first export's guest-visible bytes.

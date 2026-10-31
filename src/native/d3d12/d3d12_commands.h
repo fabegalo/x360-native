@@ -19,9 +19,13 @@ class D3D12Commands {
   void Attach(ID3D12GraphicsCommandList* list) { commands_.Attach(list); }
   bool deferred() const { return commands_.deferred(); }
   void Replay() { commands_.Replay(); }
+  bool empty() const { return empty_; }
+  // Only after resetting the command list, past the optional timestamp preamble.
+  void ResetWorkTracking() { empty_ = true; }
 
   void SetPipelineState(ID3D12PipelineState* p) { Rec([=](L* l) { l->SetPipelineState(p); }); }
   void SetPipelineState(const std::shared_future<Pipeline>& p) {
+    empty_ = false;
     commands_.BindPending(p, [](L* l, const Pipeline& pipeline) { l->SetPipelineState(pipeline.Get()); });
   }
   void SetDescriptorHeaps(UINT count, ID3D12DescriptorHeap* const* heaps) {
@@ -105,9 +109,10 @@ class D3D12Commands {
   }
  private:
   using L = ID3D12GraphicsCommandList;
-  template <class F> void Rec(F&& f) { commands_.Record(std::forward<F>(f)); }
+  template <class F> void Rec(F&& f) { empty_ = false; commands_.Record(std::forward<F>(f)); }
   // Only while nothing is deferred: the caller's arguments are used at once.
-  L* Direct() const { return commands_.list(); }
+  L* Direct() { empty_ = false; return commands_.list(); }
   DeferredCommands<L> commands_;
+  bool empty_ = true;
 };
 }

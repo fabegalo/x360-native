@@ -325,7 +325,7 @@ Microsoft::WRL::ComPtr<ID3D12RootSignature> CreateTextureLoadRoot(ID3D12Device* 
   Check(device->CreateRootSignature(0, blob->GetBufferPointer(), blob->GetBufferSize(), IID_PPV_ARGS(&root)), "root");
   return root;
 }
-Microsoft::WRL::ComPtr<ID3D12PipelineState> CreateTextureLoadPipeline(ID3D12Device* device, ID3D12RootSignature* root, LoadShader shader) {
+D3D12_SHADER_BYTECODE TextureLoadBytecode(LoadShader shader) {
   using namespace bytecode;
   D3D12_SHADER_BYTECODE code{};
   switch (shader) {
@@ -338,7 +338,10 @@ Microsoft::WRL::ComPtr<ID3D12PipelineState> CreateTextureLoadPipeline(ID3D12Devi
     case LoadShader::kDepthFloat: code = {texture_load_depth_float_cs, sizeof(texture_load_depth_float_cs)}; break;
     default: throw std::runtime_error("Native texture load: no pipeline for shader");
   }
-  D3D12_COMPUTE_PIPELINE_STATE_DESC desc{}; desc.pRootSignature = root; desc.CS = code;
+  return code;
+}
+Microsoft::WRL::ComPtr<ID3D12PipelineState> CreateTextureLoadPipeline(ID3D12Device* device, ID3D12RootSignature* root, LoadShader shader) {
+  D3D12_COMPUTE_PIPELINE_STATE_DESC desc{}; desc.pRootSignature = root; desc.CS = TextureLoadBytecode(shader);
   Microsoft::WRL::ComPtr<ID3D12PipelineState> pipeline;
   Check(device->CreateComputePipelineState(&desc, IID_PPV_ARGS(&pipeline)), "pipeline");
   return pipeline;

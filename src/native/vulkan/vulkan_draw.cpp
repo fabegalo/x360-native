@@ -539,25 +539,28 @@ void VulkanRender::Draw(const RegisterFile& regs, rex::memory::Memory& memory, S
     UseBuffer(edram_buffer_->handle(), edram_access_, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
                VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT, true);
   edram_draw_layout_ = edram_layout;
-  const auto memory_set = AllocateDescriptors(memory_layout_);
-  const uint32_t chunks = 1u << shaders_->translator.GetSharedMemoryStorageBufferCountLog2();
-  std::vector<VkDescriptorBufferInfo> guest_infos(chunks);
-  const uint64_t chunk_size = GuestMemoryMirror::kSize / chunks;
-  for (uint32_t i = 0; i < chunks; ++i) guest_infos[i] = {guest_buffer_->handle(), chunk_size * i, chunk_size};
-  const VkDescriptorBufferInfo edram_info{edram_buffer_->handle(), 0, edram_buffer_->size()};
-  VkWriteDescriptorSet memory_writes[2]{};
-  for (auto& write : memory_writes) {
-    write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-    write.dstSet = memory_set;
-    write.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-  }
-  memory_writes[0].descriptorCount = chunks;
-  memory_writes[0].pBufferInfo = guest_infos.data();
-  memory_writes[1].dstBinding = 1;
-  memory_writes[1].descriptorCount = 1;
-  memory_writes[1].pBufferInfo = &edram_info;
   const auto& fn = device_.functions();
-  fn.vkUpdateDescriptorSets(device_.device(), 2, memory_writes, 0, nullptr);
+  auto& memory_set = arenas_[submissions_.current_slot()].draw_memory_set;
+  if (!memory_set) {
+    memory_set = AllocateDescriptors(memory_layout_);
+    const uint32_t chunks = 1u << shaders_->translator.GetSharedMemoryStorageBufferCountLog2();
+    std::vector<VkDescriptorBufferInfo> guest_infos(chunks);
+    const uint64_t chunk_size = GuestMemoryMirror::kSize / chunks;
+    for (uint32_t i = 0; i < chunks; ++i) guest_infos[i] = {guest_buffer_->handle(), chunk_size * i, chunk_size};
+    const VkDescriptorBufferInfo edram_info{edram_buffer_->handle(), 0, edram_buffer_->size()};
+    VkWriteDescriptorSet memory_writes[2]{};
+    for (auto& write : memory_writes) {
+      write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+      write.dstSet = memory_set;
+      write.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    }
+    memory_writes[0].descriptorCount = chunks;
+    memory_writes[0].pBufferInfo = guest_infos.data();
+    memory_writes[1].dstBinding = 1;
+    memory_writes[1].descriptorCount = 1;
+    memory_writes[1].pBufferInfo = &edram_info;
+    fn.vkUpdateDescriptorSets(device_.device(), 2, memory_writes, 0, nullptr);
+  }
   const auto constants_set = AllocateDescriptors(constants_layout_);
   VkDescriptorBufferInfo constant_infos[T::kConstantBufferCount]{};
   auto constant = [&](unsigned index, const void* data, size_t bytes) {

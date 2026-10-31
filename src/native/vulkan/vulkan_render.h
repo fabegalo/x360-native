@@ -16,6 +16,7 @@
 #include <optional>
 #include <future>
 #include <memory>
+#include <atomic>
 
 namespace x360n::native {
 struct TextureLoadPlan;
@@ -45,6 +46,7 @@ class VulkanRender {
   void EndFrame() { if (mirror_) mirror_->InvalidateCpuPages(); }
  private:
   using Device = rex::ui::vulkan::VulkanDevice;
+  using PendingPipeline = std::shared_future<VkPipeline>;
   void Destroy();
   void SavePipelineCache();
   void Begin();
@@ -56,7 +58,7 @@ class VulkanRender {
   struct UploadSlice { VkBuffer buffer; VkDeviceSize offset; std::byte* mapped; };
   UploadSlice Upload(const void*, VkDeviceSize size, VkDeviceSize alignment = 16);
   VkDescriptorSet AllocateDescriptors(VkDescriptorSetLayout);
-  VkPipeline ComputePipeline(VkPipelineLayout, std::span<const uint32_t>);
+  PendingPipeline ComputePipeline(VkPipelineLayout, std::span<const uint32_t>);
   GuestMemoryMirror& Mirror(rex::memory::Memory&);
   void UploadGuest(uint32_t address, uint32_t length);
   struct BufferAccess { VkPipelineStageFlags stage = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT; VkAccessFlags access = 0; };
@@ -64,7 +66,8 @@ class VulkanRender {
   struct TextureResource;
   struct TextureEntry {
     std::shared_ptr<TextureResource> resource;
-    bool outdated = true;
+    // Only the invalidation bit crosses threads; watch handles stay locked.
+    alignas(std::atomic_ref<bool>::required_alignment) bool outdated = true;
     uint64_t last_use = 0;
     GuestMemoryMirror::WatchHandle watches[2]{};
   };
@@ -103,6 +106,9 @@ class VulkanRender {
     // valid until this slot's fence, like the descriptor pool they come from.
     std::vector<UploadPage> load_scratch;
     VkDescriptorSet guest_load_set = VK_NULL_HANDLE;
+    // The guest/EDRAM buffers and their extents do not change between draws.
+    // This immutable set has the same fence lifetime as its descriptor pool.
+    VkDescriptorSet draw_memory_set = VK_NULL_HANDLE;
     // Staging, offsets, CPU epochs and scaled tickets belong to this serial.
     // Retire publication before resetting descriptors or reusing these bytes.
     uint64_t serial = 0, readback_used = 0;
@@ -115,7 +121,7 @@ class VulkanRender {
   void LoadTextureGpu(const TextureLoadPlan&, VkImage, uint32_t levels, uint32_t block_bytes,
                       uint32_t block_width, VkExtent3D extent);
   VkPipelineLayout load_layout_ = VK_NULL_HANDLE;
-  std::array<VkPipeline, 7> load_pipelines_{};
+  std::array<PendingPipeline, 7> load_pipelines_{};
   std::array<Arena, VulkanSubmissionRing::kSlots> arenas_;
   std::unique_ptr<VulkanBuffer> guest_buffer_, edram_buffer_;
   VulkanBuffer* readback_ = nullptr; // Borrowed from the current arena.
@@ -131,11 +137,11 @@ class VulkanRender {
   VkPipelineLayout copy_layout_ = VK_NULL_HANDLE, clear_layout_ = VK_NULL_HANDLE;
   VkPipelineCache pipeline_cache_ = VK_NULL_HANDLE;
   std::filesystem::path pipeline_file_;
-  std::array<VkPipeline, size_t(rex::graphics::draw_util::ResolveCopyShaderIndex::kCount)> copy_pipelines_{};
+  std::array<PendingPipeline, size_t(rex::graphics::draw_util::ResolveCopyShaderIndex::kCount)> copy_pipelines_{};
   std::vector<ScaledReadback> scaled_readbacks_;
   VkPipelineLayout downscale_layout_ = VK_NULL_HANDLE;
-  VkPipeline downscale_pipeline_ = VK_NULL_HANDLE;
-  std::array<VkPipeline, 2> clear_pipelines_{};
+  PendingPipeline downscale_pipeline_;
+  std::array<PendingPipeline, 2> clear_pipelines_{};
   std::unordered_map<std::string, TextureEntry> textures_;
   uint64_t texture_use_ = 0, texture_bytes_ = 0;
   std::map<std::string, VkSampler> samplers_;

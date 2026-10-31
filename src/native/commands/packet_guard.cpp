@@ -167,8 +167,22 @@ void ValidatePacketForBackend(uint32_t header, const rex::memory::RingBuffer& pa
       x360n::native::SyncGuestReadBeforePacket(address, bytes, opcode);
       break;
     }
+    case PM4_WAIT_REG_MEM: {
+      auto read = payload;
+      if (read.ReadAndSwap<uint32_t>() & 0x10) {
+        // A memory poll may consume GPU output or handshake with the CPU.
+        // Keep all preceding guest writes visible before it starts polling.
+        x360n::native::CompleteGuestWritesBeforePacket(x360n::native::kGuestSyncPacket, opcode);
+        after_guest_sync = true;
+      }
+      // Register polling reads the command processor's register file, not
+      // guest memory. Cache-coherency polls do not publish CPU-visible data;
+      // dependencies between GPU consumers remain ordered by the backend.
+      // If polling actually blocks, PrepareForWait still publishes writes.
+      break;
+    }
     case PM4_EVENT_WRITE_EXT:
-    case PM4_INTERRUPT: case PM4_REG_TO_MEM: case PM4_WAIT_REG_MEM:
+    case PM4_INTERRUPT: case PM4_REG_TO_MEM:
     case PM4_COND_WRITE: case PM4_MEM_WRITE:
       x360n::native::CompleteGuestWritesBeforePacket(x360n::native::kGuestSyncPacket, opcode);
       after_guest_sync = true;

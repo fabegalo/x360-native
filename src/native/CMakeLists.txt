@@ -31,6 +31,11 @@ target_include_directories(rexgpu-native PRIVATE ${X360_REXGLUE_DIR})
 set_target_properties(rexgpu-native PROPERTIES DEBUG_POSTFIX d RELWITHDEBINFO_POSTFIX rd)
 target_compile_options(rexgpu-native PRIVATE -Wall -Wextra -Wno-unused-parameter)
 target_compile_definitions(rexgpu-native PRIVATE REX_GPU_VALIDATE_PACKET=1)
+if(REXGLUE_ENABLE_PERF_COUNTERS)
+  # The SDK's directory definition does not reach this sibling plugin, including
+  # consumers of the exported SDK. Keep guest-frame CSV collection consistent.
+  target_compile_definitions(rexgpu-native PRIVATE REXGLUE_ENABLE_PERF_COUNTERS)
+endif()
 target_include_directories(rexgpu-native PRIVATE ${CMAKE_CURRENT_BINARY_DIR})
 target_include_directories(rexgpu-native PRIVATE ${X360_REXGLUE_DIR}/thirdparty/renderdoc)
 if(REXGLUE_USE_VULKAN)
@@ -197,6 +202,11 @@ if(TARGET Catch2::Catch2WithMain)
         ${CMAKE_CURRENT_BINARY_DIR}/predicated-fetch-${_api} --predicated-fetch)
     set_tests_properties(sdkcheck.${_name}-predicated-vertex-fetch PROPERTIES LABELS project TIMEOUT 60)
   endforeach()
+  if(REXGLUE_USE_VULKAN)
+    add_test(NAME sdkcheck.Vulkan-driver-pipeline-cache COMMAND x360n_native_probe xenos:vulkan
+        ${CMAKE_CURRENT_BINARY_DIR}/driver-pipeline-cache --pipeline-driver-cache)
+    set_tests_properties(sdkcheck.Vulkan-driver-pipeline-cache PROPERTIES LABELS project TIMEOUT 60)
+  endif()
   # Patch 0142: non-memexport Xenos draws must not wait for the cvar registry lock.
   # native.edram-barriers: Native EDRAM barriers only on ROV layout changes.
   # Replays a retained draw from local evidence (user content, not distributed), so

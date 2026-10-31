@@ -1,5 +1,23 @@
 # STATUS
 
+31/10 — **PERF-GPU-02, continuação Windows sobre o PR #9**: integrada a main
+`58cd9dd` à base do PR. Native D3D12/Vulkan reutiliza os workers para PSOs
+compute; D3D12 evita submissões vazias preservando fences/readbacks; Vulkan
+reutiliza descritores imutáveis por arena e exclui compilações durante merge
+do cache. Xenos Vulkan compartilha cache de driver pelo patch 0245, com controle
+negativo/positivo real. Contratos de resolve, publicação, workers síncronos/
+assíncronos, MEMEXPORT e cache aprovados em Windows. Em Castle manual, D3D12
+passou de aproximadamente dois envios por frame para um, sem aumento de FPS.
+Skate D3D12 passou de 25,98 para 6,10 envios/frame após distinguir polls de
+registradores/memória e evitar o lock global nos hits de textura. FPS observado
+14,58 → 16,31, mas 1% low 9,93 → 9,68, com trajetos manuais diferentes:
+sem aceite de fluidez. Native Vulkan teve percentis piores na rodada de Castle.
+Em Skate Vulkan: 13,25 → 13,76 FPS e 1% low 3,85 → 9,58 na janela manual,
+com P95 ligeiramente pior; a lentidão geral Native permanece.
+Dashboard/Guide 17559 observados, sem aceite completo de C7/C8 nem comparação
+com Canary. AOT genérico não alterado.
+[Medições, condições e limites](docs/reports/performance/perf-gpu-02-windows-2026-10-31.md).
+
 31/10 — **Native: pipelines assíncronos e Vulkan em Linux/macOS**: o Native
 cria pipelines gráficos em threads (¾ dos processadores lógicos) e grava os
 comandos direto até um bind pendente; daí em diante guarda-os em ordem e os

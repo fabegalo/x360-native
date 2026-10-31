@@ -37,6 +37,17 @@ pelo mantenedor. Resultados sem ganho, tentativas Vulkan retiradas, PSO frio,
 testes focados e validação manual pendente estão no
 [relatório PERF-GPU-01](reports/performance/perf-gpu-01-2026-10-31.md).
 
+Continuação Windows sobre o PR #9: PSOs compute nos workers existentes,
+supressão de listas D3D12 vazias com dependências preservadas, descritores
+Vulkan por arena e cache de driver Xenos Vulkan (0245). Contratos reais
+aprovados; Castle manual confirma menos submissões, mas não aumento de FPS.
+Polls de registradores deixaram de drenar readbacks e hits de textura evitam
+o lock global. Em Skate D3D12 manual, 25,98 → 6,10 submissões/frame e
+14,58 → 16,31 FPS observados, com 1% low menor e trajetos diferentes.
+Resultados desfavoráveis de frametime também registrados. Sem novo aceite de
+performance Native ou superioridade ao Canary; detalhes e evidências no
+[relatório Windows PERF-GPU-02](reports/performance/perf-gpu-02-windows-2026-10-31.md).
+
 ## Launcher desktop
 
 O launcher desktop mantém I/O e autenticação fora da thread Win32 e reutiliza

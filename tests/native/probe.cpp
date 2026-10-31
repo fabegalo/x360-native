@@ -13,7 +13,11 @@
 #include <rex/graphics/pipeline/texture/util.h>
 #include <rex/ui/presenter.h>
 #include <rex/ui/d3d12/d3d12_provider.h>
+#if REX_HAS_VULKAN
+#include <rex/ui/vulkan/provider.h>
+#endif
 #include <chrono>
+#include <atomic>
 #include <condition_variable>
 #include <mutex>
 #include <optional>
@@ -28,6 +32,33 @@ using rex::X_STATUS;
 using namespace rex::graphics::xenos;
 namespace {
 void Require(bool value, const char* message) { if (!value) throw std::runtime_error(message); }
+#if REX_HAS_VULKAN
+// The real driver still compiles every requested pipeline. Observe only the
+// cache argument, after setup and before any guest commands are submitted.
+struct DriverCacheProbe {
+  inline static PFN_vkCreateGraphicsPipelines original = nullptr;
+  inline static std::atomic<uint32_t> calls{0}, uncached{0};
+  static VKAPI_ATTR VkResult VKAPI_CALL Create(VkDevice device, VkPipelineCache cache,
+      uint32_t count, const VkGraphicsPipelineCreateInfo* info,
+      const VkAllocationCallbacks* allocator, VkPipeline* pipelines) {
+    // This fixture draws depth-only with a guest vertex shader. Ignore the
+    // internal color/transfer pipelines created lazily by the render target cache.
+    for (uint32_t i = 0; i < count; ++i) {
+      if (info[i].stageCount != 1 || info[i].pStages[0].stage != VK_SHADER_STAGE_VERTEX_BIT) continue;
+      calls.fetch_add(1, std::memory_order_relaxed);
+      if (!cache) uncached.fetch_add(1, std::memory_order_relaxed);
+    }
+    return original(device, cache, count, info, allocator, pipelines);
+  }
+  static void Install(rex::graphics::GraphicsSystem& gpu) {
+    auto& device = *static_cast<rex::ui::vulkan::VulkanProvider*>(gpu.provider())->vulkan_device();
+    auto& functions = const_cast<rex::ui::vulkan::VulkanDevice::Functions&>(device.functions());
+    original = functions.vkCreateGraphicsPipelines;
+    calls = 0; uncached = 0;
+    functions.vkCreateGraphicsPipelines = Create;
+  }
+};
+#endif
 uint32_t Packet(uint32_t op, uint32_t count) { return 0xc0000000 | ((count - 1) << 16) | (op << 8); }
 void WritePNG(const std::filesystem::path& path, const rex::ui::RawImage& image) {
   using Microsoft::WRL::ComPtr;
@@ -457,7 +488,7 @@ void PredicatedFetchDraws(rex::system::IGraphicsSystem& gpu, rex::memory::Memory
 }
 }
 int wmain(int argc, wchar_t** argv) {
-  if (argc != 3 && argc != 4 && argc != 5) { std::cerr << "usage: x360n_native_probe native|xenos OUTPUT_DIRECTORY [--reject|--abi|--replay INPUT_DIRECTORY|--draw-replay|--draw-stress|--draw-timing|--draw-registry-locked|--draw-interleaved|--draw-system-resolve INPUT_DIRECTORY|--overlay|--overlay-system|--predicated-fetch]\n"; return 2; }
+  if (argc != 3 && argc != 4 && argc != 5) { std::cerr << "usage: x360n_native_probe native|xenos OUTPUT_DIRECTORY [--reject|--abi|--replay INPUT_DIRECTORY|--draw-replay|--draw-stress|--draw-timing|--draw-registry-locked|--draw-interleaved|--draw-system-resolve INPUT_DIRECTORY|--overlay|--overlay-system|--predicated-fetch|--pipeline-driver-cache]\n"; return 2; }
   try {
     Require(SUCCEEDED(CoInitializeEx(nullptr, COINIT_MULTITHREADED)), "COM setup");
     const std::filesystem::path output(argv[2]);
@@ -503,7 +534,8 @@ int wmain(int argc, wchar_t** argv) {
       rex::cvar::SetFlagByName("async_shader_compilation", "false");
       rex::cvar::SetFlagByName("d3d12_pipeline_creation_threads", "0");
     }
-    const bool predicated_fetch = argc == 4 && std::wstring_view(argv[3]) == L"--predicated-fetch";
+    const bool driver_cache = argc == 4 && std::wstring_view(argv[3]) == L"--pipeline-driver-cache";
+    const bool predicated_fetch = driver_cache || (argc == 4 && std::wstring_view(argv[3]) == L"--predicated-fetch");
     if (predicated_fetch) {
       // An async placeholder pipeline would skip the draw before the check.
       rex::cvar::SetFlagByName("async_shader_compilation", "false");
@@ -550,8 +582,23 @@ int wmain(int argc, wchar_t** argv) {
     auto* memory = rt.memory();
     if (predicated_fetch) {
       Require(plugin == "xenos", "predicated fetch probe requires Xenos");
+#if REX_HAS_VULKAN
+      if (driver_cache) {
+        Require(backend == "vulkan", "driver cache probe requires Vulkan");
+        DriverCacheProbe::Install(*static_cast<rex::graphics::GraphicsSystem*>(gpu.get()));
+      }
+#else
+      Require(!driver_cache, "driver cache probe requires Vulkan build");
+#endif
       PredicatedFetchDraws(*gpu, *memory, output);
       gpu->Shutdown(); shutdown.gpu = nullptr; gpu.reset(); rt.Shutdown(); rex::FlushLogging();
+#if REX_HAS_VULKAN
+      if (driver_cache) {
+        Require(DriverCacheProbe::calls.load() != 0, "no graphics pipelines observed");
+        Require(DriverCacheProbe::uncached.load() == 0, "Xenos Vulkan guest pipelines bypass the driver cache");
+        std::cout << "PASS driver pipeline cache used for " << DriverCacheProbe::calls.load() << " pipelines\n";
+      }
+#endif
       std::cout << "PASS predicated-out invalid vertex fetch\n"; return 0;
     }
     if (draw_replay) {

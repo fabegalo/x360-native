@@ -82,6 +82,7 @@ void ConvertTextureCpu(const TextureLoadInput&, std::span<const uint8_t> base,
 // Root signature and pipelines of the shared load shaders (constants, source
 // SRV table, destination UAV table).
 Microsoft::WRL::ComPtr<ID3D12RootSignature> CreateTextureLoadRoot(ID3D12Device*);
+D3D12_SHADER_BYTECODE TextureLoadBytecode(LoadShader);
 Microsoft::WRL::ComPtr<ID3D12PipelineState> CreateTextureLoadPipeline(ID3D12Device*, ID3D12RootSignature*, LoadShader);
 DXGI_FORMAT UintPow2Format(uint32_t log2);
 // Records the dispatches into scratch (UAV state, bound by the caller at

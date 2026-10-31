@@ -77,7 +77,7 @@ void VulkanRender::Resolve(const RegisterFile& regs, rex::memory::Memory& memory
     if (shader == draw_util::ResolveCopyShaderIndex::kUnknown)
       throw std::runtime_error("Native Vulkan: unsupported resolve conversion");
     const auto index = size_t(shader);
-    if (!copy_pipelines_[index]) {
+    if (!copy_pipelines_[index].valid()) {
       using namespace kernels;
       const std::span<const uint32_t> programs[]{resolve_fast_32bpp_1x2xmsaa_cs,
           resolve_fast_32bpp_4xmsaa_cs, resolve_fast_64bpp_1x2xmsaa_cs,
@@ -130,7 +130,7 @@ void VulkanRender::Resolve(const RegisterFile& regs, rex::memory::Memory& memory
     cmd_.PushConstants(copy_layout_, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(constants), &constants);
     cmd_.Dispatch(groups_x, groups_y, 1);
     if (scaled) {
-      if (!downscale_pipeline_) downscale_pipeline_=ComputePipeline(downscale_layout_,CompileNativeGlsl(VK_SHADER_STAGE_COMPUTE_BIT,kResolveDownsampleGlsl));
+      if (!downscale_pipeline_.valid()) downscale_pipeline_=ComputePipeline(downscale_layout_,CompileNativeGlsl(VK_SHADER_STAGE_COMPUTE_BIT,kResolveDownsampleGlsl));
       UseBuffer(scaled_buffer->handle(),scaled_access,VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,VK_ACCESS_SHADER_READ_BIT);
       const auto source_set=AllocateDescriptors(storage_layout_), canonical_set=AllocateDescriptors(storage_layout_);
       const VkDescriptorBufferInfo source{scaled_buffer->handle(),0,scaled_range*area}, canonical{guest_buffer_->handle(),base,range};
@@ -177,7 +177,7 @@ void VulkanRender::Resolve(const RegisterFile& regs, rex::memory::Memory& memory
   const auto groups = info.GetClearShaderGroupCount(scale_x_, scale_y_);
   auto clear = [&](bool depth) {
     const unsigned index = !depth && info.color_edram_info.format_is_64bpp;
-    if (!clear_pipelines_[index])
+    if (!clear_pipelines_[index].valid())
       clear_pipelines_[index] = ComputePipeline(clear_layout_, scaled ? (index ? std::span<const uint32_t>(kernels::resolve_clear_64bpp_scaled_cs)
           : std::span<const uint32_t>(kernels::resolve_clear_32bpp_scaled_cs)) : index
           ? std::span<const uint32_t>(kernels::resolve_clear_64bpp_cs)

@@ -2205,11 +2205,11 @@
       },
       "files": {
         "include/rex/graphics/d3d12/pipeline_cache.h": "acb80ebcf3b923202a437fe89922e828aea73b38c565ba11439f53a63852ca5b",
-        "include/rex/graphics/vulkan/pipeline_cache.h": "be04596efac46ecdbc6d1a85f89d49ae275570b022104314eb17e9ee8e48ac56",
+        "include/rex/graphics/vulkan/pipeline_cache.h": "e36e596f03f03b78841d70d2faf59bb9ea7494aab3bb2c8e07c8f6dcf9ef9d7f",
         "src/graphics/d3d12/command_processor.cpp": "0da87b5ea414b79654a997af35c014662aeb74e1257856659bfd805336b5bcba",
         "src/graphics/d3d12/pipeline_cache.cpp": "7112d5d15e154825df9a5389e475a4862524fc51d98368a7a2f2b8d7737660f2",
         "src/graphics/vulkan/command_processor.cpp": "fdbc0459f34cfd343bc1f8097ed5ac1298d6ab5741c60ec885e7c438bf7ea7eb",
-        "src/graphics/vulkan/pipeline_cache.cpp": "ad57019e095bf7956863c2aef2919d36fc96446f70e23221a8bc79453fa96b21"
+        "src/graphics/vulkan/pipeline_cache.cpp": "088c717b82555c78cedea61188764b8aca8d7512fee1e734d46a40ee87f7dc4e"
       },
       "test": "Build coverage of D3D12/Vulkan pipeline completion and error propagation; manual one-shot draw and first-use shader validation deferred by user (no standalone pipeline-completion test target)"
     },
@@ -2642,7 +2642,7 @@
         "src/graphics/util/draw.cpp": "3f7dde8e3bd36ce76008fc3350045d5f6cff2825c0505ca09ecfd1a139c35f0b",
         "src/graphics/vulkan/command_processor.cpp": "fdbc0459f34cfd343bc1f8097ed5ac1298d6ab5741c60ec885e7c438bf7ea7eb",
         "src/graphics/vulkan/deferred_command_buffer.cpp": "8df43c67c6317e21896898b231582988ccbd619f71c8a81de8c265b8a91c9e46",
-        "src/graphics/vulkan/pipeline_cache.cpp": "ad57019e095bf7956863c2aef2919d36fc96446f70e23221a8bc79453fa96b21",
+        "src/graphics/vulkan/pipeline_cache.cpp": "088c717b82555c78cedea61188764b8aca8d7512fee1e734d46a40ee87f7dc4e",
         "src/graphics/vulkan/render_target_cache.cpp": "fb3d2210c665fba33ba465d96ece33f91a202fbe5690712955bcf82047ae1f1f",
         "src/ui/vulkan/vulkan_device.cpp": "22abd6e66a38bead02184d2b3830700f41fe075b73eb24c680ae8d822d65cdfd"
       },
@@ -3431,6 +3431,19 @@
     "src/codegen/function_scanner.cpp": "ed3a78f48db5a74507a8efdba9feb653e34aaab94fae4daee6b999f1b5d0d861"
   },
   "test": "tests/sdkcheck/split_default_switch_test.cpp and split_default_switch_native.cpp: 643-slot switch with unsigned branch-over-default guard, CR/condition/edge/index/dominance controls, and all 65536 16-bit indices executed through real compiled AOT; heuristic scan limit unchanged."
+},
+{
+  "file": "patches/rexglue-sdk/0245-share-vulkan-driver-pipeline-cache.patch",
+  "sha256": "ae8674dffbe6944bb6ad4caea26cc207c76eb9dcc190ebe484aaa3f4d7bd02b5",
+  "base_files": {
+    "src/graphics/vulkan/pipeline_cache.cpp": "ad57019e095bf7956863c2aef2919d36fc96446f70e23221a8bc79453fa96b21",
+    "include/rex/graphics/vulkan/pipeline_cache.h": "be04596efac46ecdbc6d1a85f89d49ae275570b022104314eb17e9ee8e48ac56"
+  },
+  "files": {
+    "src/graphics/vulkan/pipeline_cache.cpp": "088c717b82555c78cedea61188764b8aca8d7512fee1e734d46a40ee87f7dc4e",
+    "include/rex/graphics/vulkan/pipeline_cache.h": "e36e596f03f03b78841d70d2faf59bb9ea7494aab3bb2c8e07c8f6dcf9ef9d7f"
+  },
+  "test": "sdkcheck.Vulkan-driver-pipeline-cache: real Vulkan depth-only guest draw; base rejects uncached creation, patched driver cache used. Existing predicated fetch acceptance/rejection remains checked."
 }
 ]
 },

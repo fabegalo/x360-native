@@ -81,16 +81,26 @@ void VulkanRender::Destroy() {
   if (pipeline_cache_) LoadNativeVulkanFunction<PFN_vkDestroyPipelineCache>(device_, "vkDestroyPipelineCache")(
       vk, pipeline_cache_, nullptr);
   pipeline_cache_ = VK_NULL_HANDLE;
-  for (auto pipeline : copy_pipelines_) if (pipeline) fn.vkDestroyPipeline(vk, pipeline, nullptr);
-  for (auto pipeline : clear_pipelines_) if (pipeline) fn.vkDestroyPipeline(vk, pipeline, nullptr);
-  for (auto& pipeline : load_pipelines_) { if (pipeline) fn.vkDestroyPipeline(vk, pipeline, nullptr); pipeline = VK_NULL_HANDLE; }
+  // DestroyDraw has joined the shared workers. Cancelled jobs have broken
+  // promises; failed jobs have already reported their error at the bind.
+  const auto destroy_pipeline = [&](PendingPipeline& pending) {
+    if (pending.valid()) {
+      try {
+        if (const auto pipeline = pending.get()) fn.vkDestroyPipeline(vk, pipeline, nullptr);
+      } catch (const std::exception&) {}
+      pending = {};
+    }
+  };
+  for (auto& pipeline : copy_pipelines_) destroy_pipeline(pipeline);
+  for (auto& pipeline : clear_pipelines_) destroy_pipeline(pipeline);
+  for (auto& pipeline : load_pipelines_) destroy_pipeline(pipeline);
   if (load_layout_) fn.vkDestroyPipelineLayout(vk, load_layout_, nullptr);
   load_layout_ = VK_NULL_HANDLE;
   if (copy_layout_) fn.vkDestroyPipelineLayout(vk, copy_layout_, nullptr);
   if (clear_layout_) fn.vkDestroyPipelineLayout(vk, clear_layout_, nullptr);
-  if (downscale_pipeline_) fn.vkDestroyPipeline(vk, downscale_pipeline_, nullptr);
+  destroy_pipeline(downscale_pipeline_);
   if (downscale_layout_) fn.vkDestroyPipelineLayout(vk, downscale_layout_, nullptr);
-  downscale_pipeline_=VK_NULL_HANDLE; downscale_layout_=VK_NULL_HANDLE;
+  downscale_layout_=VK_NULL_HANDLE;
   if (storage_layout_) fn.vkDestroyDescriptorSetLayout(vk, storage_layout_, nullptr);
   for (auto& arena : arenas_) {
     if (arena.descriptors) fn.vkDestroyDescriptorPool(vk, arena.descriptors, nullptr);
@@ -100,8 +110,6 @@ void VulkanRender::Destroy() {
     arena.readback.reset();
     arena.scaled_readbacks.clear();
   }
-  copy_pipelines_.fill(VK_NULL_HANDLE);
-  clear_pipelines_.fill(VK_NULL_HANDLE);
   copy_layout_ = clear_layout_ = VK_NULL_HANDLE;
   storage_layout_ = VK_NULL_HANDLE;
   readback_ = nullptr;
@@ -127,6 +135,7 @@ void VulkanRender::Begin() {
   // The pool reset above released the load descriptor sets of this slot.
   for (auto& page : arena.load_scratch) { page.used = 0; page.load_set = VK_NULL_HANDLE; }
   arena.guest_load_set = VK_NULL_HANDLE;
+  arena.draw_memory_set = VK_NULL_HANDLE;
 }
 void VulkanRender::EndRendering() {
   if (!rendering_) return;
@@ -257,20 +266,26 @@ VkDescriptorSet VulkanRender::AllocateDescriptors(VkDescriptorSetLayout layout) 
   ++arena.descriptor_count;
   return result;
 }
-VkPipeline VulkanRender::ComputePipeline(VkPipelineLayout layout, std::span<const uint32_t> spirv) {
-  const auto module = CreateNativeShaderModule(device_, spirv);
-  VkComputePipelineCreateInfo info{VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO};
-  info.stage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-  info.stage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
-  info.stage.module = module;
-  info.stage.pName = "main";
-  info.layout = layout;
-  VkPipeline result = VK_NULL_HANDLE;
-  const auto status = device_.functions().vkCreateComputePipelines(device_.device(), pipeline_cache_,
-                                                                  1, &info, nullptr, &result);
-  device_.functions().vkDestroyShaderModule(device_.device(), module, nullptr);
-  CheckVulkan(status, "create resolve compute pipeline");
-  return result;
+VulkanRender::PendingPipeline VulkanRender::ComputePipeline(VkPipelineLayout layout, std::span<const uint32_t> spirv) {
+  // A generated downscale shader is temporary. Copy it before returning and
+  // create the module inside the job so cancellation cannot leak a module.
+  return pipeline_workers_->Submit<VkPipeline>([this, layout, code = std::vector<uint32_t>(spirv.begin(), spirv.end())] {
+    const auto module = CreateNativeShaderModule(device_, code);
+    VkComputePipelineCreateInfo info{VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO};
+    info.stage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+    info.stage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+    info.stage.module = module;
+    info.stage.pName = "main";
+    info.layout = layout;
+    VkPipeline result = VK_NULL_HANDLE;
+    const auto status = device_.functions().vkCreateComputePipelines(device_.device(), pipeline_cache_,
+                                                                    1, &info, nullptr, &result);
+    device_.functions().vkDestroyShaderModule(device_.device(), module, nullptr);
+    if (status != VK_SUCCESS && result)
+      device_.functions().vkDestroyPipeline(device_.device(), result, nullptr);
+    CheckVulkan(status, "create resolve compute pipeline");
+    return result;
+  });
 }
 void VulkanRender::SetPipelineDirectory(const std::filesystem::path& directory) {
   const auto file = directory.empty() ? std::filesystem::path{} : directory / "pipelines.bin";
@@ -298,6 +313,15 @@ void VulkanRender::SetPipelineDirectory(const std::filesystem::path& directory) 
   VkPipelineCache loaded = VK_NULL_HANDLE;
   if (LoadNativeVulkanFunction<PFN_vkCreatePipelineCache>(device_, "vkCreatePipelineCache")(
       device_.device(), &info, nullptr, &loaded) != VK_SUCCESS) return;
+  // The command thread owns every submitted future, so waiting for them here
+  // gives vkMergePipelineCaches exclusive cache access even when shader storage
+  // is initialized after a resolve. Ordinary creations remain concurrent.
+  const auto wait = [](const PendingPipeline& pipeline) { if (pipeline.valid()) pipeline.wait(); };
+  for (const auto& [key, pipeline] : draw_pipelines_) wait(pipeline.pipeline);
+  for (const auto& pipeline : load_pipelines_) wait(pipeline);
+  for (const auto& pipeline : copy_pipelines_) wait(pipeline);
+  for (const auto& pipeline : clear_pipelines_) wait(pipeline);
+  wait(downscale_pipeline_);
   const auto status = LoadNativeVulkanFunction<PFN_vkMergePipelineCaches>(device_, "vkMergePipelineCaches")(
       device_.device(), pipeline_cache_, 1, &loaded);
   LoadNativeVulkanFunction<PFN_vkDestroyPipelineCache>(device_, "vkDestroyPipelineCache")(

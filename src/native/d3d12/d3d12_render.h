@@ -66,6 +66,7 @@ class D3D12Render {
   }
  private:
   template<class T> using Ptr = Microsoft::WRL::ComPtr<T>;
+  using PendingPipeline = std::shared_future<Ptr<ID3D12PipelineState>>;
   Ptr<ID3D12Resource> Buffer(uint64_t, D3D12_HEAP_TYPE, D3D12_RESOURCE_STATES, D3D12_RESOURCE_FLAGS = D3D12_RESOURCE_FLAG_NONE);
   struct UploadSlice {
     Ptr<ID3D12Resource> resource;
@@ -122,10 +123,10 @@ class D3D12Render {
   struct Scratch { Ptr<ID3D12Resource> buffer; uint64_t size, used; D3D12_RESOURCE_STATES state; };
   std::vector<Scratch> scratch_;
   Ptr<ID3D12RootSignature> load_root_;
-  std::array<Ptr<ID3D12PipelineState>, size_t(LoadShader::kCount)> load_pipelines_;
+  std::array<PendingPipeline, size_t(LoadShader::kCount)> load_pipelines_;
   static void TextureWatch(void* context, void* data, uint64_t argument, bool by_gpu);
   Ptr<ID3D12RootSignature> ComputeRoot(unsigned constants, bool source);
-  Ptr<ID3D12PipelineState> ComputePSO(ID3D12RootSignature*, const void*, size_t);
+  PendingPipeline ComputePSO(ID3D12RootSignature*, const void*, size_t);
   rex::ui::d3d12::D3D12Provider& provider_;
   ID3D12Device* device_;
   Ptr<ID3D12InfoQueue> debug_;
@@ -200,9 +201,9 @@ class D3D12Render {
   struct CachedTexture {
     Ptr<ID3D12Resource> resource;
     uint64_t bytes = 0, last_use = 0;
-    // Guarded by GuestMemoryMirror::Lock(): set by a CPU or GPU write to the
-    // base (0) or mip (1) range; a fired watch clears its own handle.
-    bool outdated = true;
+    // Atomic reads let resident hits avoid the global memory lock. Watch
+    // installation/removal and handles remain protected by the mirror lock.
+    alignas(std::atomic_ref<bool>::required_alignment) bool outdated = true;
     GuestMemoryMirror::WatchHandle watches[2]{};
   };
   void Unwatch(CachedTexture&);
@@ -224,9 +225,9 @@ class D3D12Render {
   const std::vector<uint8_t>& RectangleShader(unsigned interpolators, unsigned clip_planes);
   std::vector<ScaledReadback> scaled_readbacks_;
   Ptr<ID3D12RootSignature> downscale_root_;
-  Ptr<ID3D12PipelineState> downscale_pipeline_;
-  std::array<Ptr<ID3D12PipelineState>, 9> copy_pipelines_;
-  std::array<Ptr<ID3D12PipelineState>, 2> clear_pipelines_;
+  PendingPipeline downscale_pipeline_;
+  std::array<PendingPipeline, 9> copy_pipelines_;
+  std::array<PendingPipeline, 2> clear_pipelines_;
   uint64_t draw_count_ = 0, resolve_count_ = 0, empty_resolve_count_ = 0, present_count_ = 0;
   uint64_t invalid_vertex_fetches_ = 0, invalid_texture_fetches_ = 0;
   bool stats_enabled_ = false;

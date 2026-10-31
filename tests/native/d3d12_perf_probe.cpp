@@ -185,7 +185,7 @@ void CheckStagingGrowth(Render& render, RegisterFile& regs,
 }
 int main(int argc, char** argv) {
   try {
-    Require(argc >= 3, "usage: perf OUTPUT export|resolve|sync|none [iterations=4096] [scale=1] [instrument=1]");
+    Require(argc >= 3, "usage: perf OUTPUT export|resolve|sync|none [iterations=4096] [scale=1] [instrument=1] [contracts] [pipeline_threads]");
     const std::filesystem::path out=argv[1]; std::filesystem::create_directories(out);
     const std::string mode=argv[2];
     const unsigned iterations=argc>3?std::stoul(argv[3]):4096;
@@ -194,6 +194,7 @@ int main(int argc, char** argv) {
     Require(iterations>0,"positive iteration count");
     Require(mode=="export"||mode=="resolve"||mode=="sync"||mode=="none"||mode=="batch","unknown workload");
     rex::InitLogging((out/"runtime.log").string().c_str());
+    if (argc > 7) rex::cvar::SetFlagByName("native_pipeline_threads", argv[7]);
     rex::cvar::SetFlagByName("native_stats", measured?"true":"false");
     if (scale>1) {
       rex::chrono::FrameTiming::ActivateNative();
@@ -216,6 +217,21 @@ int main(int argc, char** argv) {
     std::memset(memory.TranslateVirtual(output),0xCD,1<<20);
     {
       Render render(*provider);
+      if (argc > 6 && std::string(argv[6]) == "contracts") {
+        render.Flush(true);
+        const auto before = render.performance().submissions;
+        for (unsigned i = 0; i < 8; ++i) {
+          render.D3D12Render::Flush(D3D12Render::kFlushPresent);
+          render.Flush(true);
+        }
+        Require(render.performance().submissions == before, "empty present/drain submitted GPU work");
+        const SampleCounts counts{1, 2, 3, 4, 5, 6, 7, 8};
+        render.SetSampleCounts(counts, false);
+        render.Flush(false);
+        Require(render.performance().submissions == before + 1, "real GPU commands were skipped");
+        Require(render.ReadSampleCounts(false) == counts, "empty drain lost pending GPU results");
+        std::cout << "PASS empty present/drain avoids submissions and preserves real work\n";
+      }
       RegisterFile draw, resolve;
       reg::SQ_PROGRAM_CNTL program{}; program.vs_num_reg=2; program.ps_num_reg=1;
       draw[XE_GPU_REG_SQ_PROGRAM_CNTL]=program.value;

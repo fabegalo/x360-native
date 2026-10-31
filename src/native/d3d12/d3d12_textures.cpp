@@ -162,8 +162,7 @@ D3D12Render::TextureTables D3D12Render::BindTextures(const RegisterFile& r, rex:
         if (found != textures_.end()) {
           entry = &found->second;
           entry->last_use = ++texture_use_;
-          bool current;
-          { auto lock = GuestMemoryMirror::Lock(); current = !entry->outdated; }
+          const bool current = !std::atomic_ref(entry->outdated).load(std::memory_order_relaxed);
           // Unchanged since loaded: no CPU or GPU write touched its pages.
           if (current) {
             device_->CreateShaderResourceView(entry->resource.Get(), &view, Cpu(first + i));
@@ -208,7 +207,7 @@ D3D12Render::TextureTables D3D12Render::BindTextures(const RegisterFile& r, rex:
         // Watch before the mirror upload: a CPU write after this point marks
         // the texture outdated again, so no write between upload and use is lost.
         auto lock = GuestMemoryMirror::Lock();
-        entry->outdated = false;
+        std::atomic_ref(entry->outdated).store(false, std::memory_order_relaxed);
         if (base_bytes && !entry->watches[0]) entry->watches[0] = mirror_->Watch(base << 12, base_bytes, TextureWatch, this, entry, 0);
         if (mip_bytes && !entry->watches[1]) entry->watches[1] = mirror_->Watch(mip << 12, mip_bytes, TextureWatch, this, entry, 1);
       }
@@ -303,7 +302,7 @@ void D3D12Render::SetTextureTables(const TextureTables& tables, unsigned root) {
 void D3D12Render::TextureWatch(void*, void* data, uint64_t argument, bool) {
   // Under GuestMemoryMirror::Lock(); the fired watch is already retired.
   auto* entry = static_cast<CachedTexture*>(data);
-  entry->outdated = true;
+  std::atomic_ref(entry->outdated).store(true, std::memory_order_relaxed);
   entry->watches[argument] = nullptr;
 }
 void D3D12Render::Unwatch(CachedTexture& entry) {
@@ -313,7 +312,10 @@ void D3D12Render::Unwatch(CachedTexture& entry) {
 void D3D12Render::LoadTextureGpu(const TextureLoadPlan& plan, ID3D12Resource* texture) {
   if (!load_root_) load_root_ = CreateTextureLoadRoot(device_);
   auto& pipeline = load_pipelines_[size_t(plan.shader)];
-  if (!pipeline) pipeline = CreateTextureLoadPipeline(device_, load_root_.Get(), plan.shader);
+  if (!pipeline.valid()) {
+    const auto code = TextureLoadBytecode(plan.shader);
+    pipeline = ComputePSO(load_root_.Get(), code.pShaderBytecode, code.BytecodeLength);
+  }
   // Scratch regions live until the submission's fence (reset in Flush).
   const uint64_t need = (plan.scratch_bytes + 65535) & ~uint64_t(65535);
   Scratch* scratch = nullptr;
@@ -336,7 +338,7 @@ void D3D12Render::LoadTextureGpu(const TextureLoadPlan& plan, ID3D12Resource* te
   uav.Buffer.NumElements = UINT(scratch->size >> plan.dest_bpe_log2);
   device_->CreateUnorderedAccessView(scratch->buffer.Get(), nullptr, &uav, Cpu(v + 1));
   ID3D12DescriptorHeap* heaps[]{views_.Get(), samplers_.Get()}; cmd_.SetDescriptorHeaps(2, heaps);
-  cmd_.SetComputeRootSignature(load_root_.Get()); cmd_.SetPipelineState(pipeline.Get());
+  cmd_.SetComputeRootSignature(load_root_.Get()); cmd_.SetPipelineState(pipeline);
   cmd_.SetComputeRootDescriptorTable(1, Gpu(v)); cmd_.SetComputeRootDescriptorTable(2, Gpu(v + 1));
   RecordTextureLoad(cmd_, plan, offset, scratch->buffer.Get(), texture);
   scratch->state = D3D12_RESOURCE_STATE_COPY_SOURCE;

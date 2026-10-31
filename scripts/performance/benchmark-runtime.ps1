@@ -2,7 +2,7 @@
 # Bounded real-title diagnostic. Uses original hash guards, isolated copies of
 # user/cache state, current native artifacts; does not publish preparation receipts.
 param(
- [Parameter(Mandatory)][ValidateSet('dash_17559','castle_crashers','forza_horizon','motocross_madness','minecraft_xbox_360_edition')][string]$Title,
+ [Parameter(Mandatory)][ValidateSet('dash_17559','castle_crashers','forza_horizon','motocross_madness','minecraft_xbox_360_edition','skate_3')][string]$Title,
  [Parameter(Mandatory)][ValidatePattern('^[a-zA-Z0-9_-]+$')][string]$Label,
  [string]$ScenarioFile,
  [string]$BinaryDirectory,

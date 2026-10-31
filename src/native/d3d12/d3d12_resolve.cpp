@@ -51,9 +51,18 @@ D3D12Render::Ptr<ID3D12RootSignature> D3D12Render::ComputeRoot(unsigned count, b
   Ptr<ID3D12RootSignature> result;
   Check(device_->CreateRootSignature(0, blob->GetBufferPointer(), blob->GetBufferSize(), IID_PPV_ARGS(&result)), "root"); return result;
 }
-D3D12Render::Ptr<ID3D12PipelineState> D3D12Render::ComputePSO(ID3D12RootSignature* root, const void* data, size_t bytes) {
-  D3D12_COMPUTE_PIPELINE_STATE_DESC desc{}; desc.pRootSignature = root; desc.CS = {data, bytes};
-  Ptr<ID3D12PipelineState> p; Check(device_->CreateComputePipelineState(&desc, IID_PPV_ARGS(&p)), "pipeline"); return p;
+D3D12Render::PendingPipeline D3D12Render::ComputePSO(ID3D12RootSignature* root, const void* data, size_t bytes) {
+  // Downscale bytecode may belong to a temporary compiler blob. Own both
+  // inputs until creation completes, including when the job is still queued.
+  const auto* begin = static_cast<const uint8_t*>(data);
+  return pipeline_workers_->Submit<Ptr<ID3D12PipelineState>>(
+      [this, root = Ptr<ID3D12RootSignature>(root), code = std::vector<uint8_t>(begin, begin + bytes)] {
+    D3D12_COMPUTE_PIPELINE_STATE_DESC desc{};
+    desc.pRootSignature = root.Get(); desc.CS = {code.data(), code.size()};
+    Ptr<ID3D12PipelineState> pipeline;
+    Check(device_->CreateComputePipelineState(&desc, IID_PPV_ARGS(&pipeline)), "pipeline");
+    return pipeline;
+  });
 }
 void D3D12Render::Resolve(const RegisterFile& r, rex::memory::Memory& memory) {
   Timer timer(stats_enabled_, resolve_ns_);
@@ -109,7 +118,7 @@ void D3D12Render::Resolve(const RegisterFile& r, rex::memory::Memory& memory) {
     auto index = info.GetCopyShader(scale_x_, scale_y_, constants, gx, gy);
     if (index == draw_util::ResolveCopyShaderIndex::kUnknown) throw std::runtime_error("Native: unsupported resolve conversion");
     const auto& si = draw_util::resolve_copy_shader_info[size_t(index)];
-    if (!copy_pipelines_[size_t(index)]) {
+    if (!copy_pipelines_[size_t(index)].valid()) {
       using namespace kernels;
       const D3D12_SHADER_BYTECODE code[]{
         {resolve_fast_32bpp_1x2xmsaa_cs, sizeof(resolve_fast_32bpp_1x2xmsaa_cs)},
@@ -159,7 +168,7 @@ void D3D12Render::Resolve(const RegisterFile& r, rex::memory::Memory& memory) {
     s.Buffer.NumElements = edram_size_ >> (si.source_is_raw ? 2 : si.source_bpe_log2);
     s.Buffer.Flags = si.source_is_raw ? D3D12_BUFFER_SRV_FLAG_RAW : D3D12_BUFFER_SRV_FLAG_NONE;
     device_->CreateShaderResourceView(edram_.Get(), &s, Cpu(v + 1));
-    cmd_.SetComputeRootSignature(copy_root_.Get()); cmd_.SetPipelineState(copy_pipelines_[size_t(index)].Get());
+    cmd_.SetComputeRootSignature(copy_root_.Get()); cmd_.SetPipelineState(copy_pipelines_[size_t(index)]);
     cmd_.SetComputeRoot32BitConstants(0, sizeof(constants) / 4, &constants, 0);
     cmd_.SetComputeRootDescriptorTable(1, Gpu(v)); cmd_.SetComputeRootDescriptorTable(2, Gpu(v + 1));
     cmd_.Dispatch(gx, gy, 1);
@@ -168,7 +177,7 @@ void D3D12Render::Resolve(const RegisterFile& r, rex::memory::Memory& memory) {
     if (scaled) {
       Transition(scaled_buffer.Get(),scaled_state,D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
       if (!downscale_root_) downscale_root_=ComputeRoot(6,true);
-      if (!downscale_pipeline_) {
+      if (!downscale_pipeline_.valid()) {
         Ptr<ID3DBlob> code,errors;
         Check(D3DCompile(kResolveDownsampleHlsl,sizeof(kResolveDownsampleHlsl)-1,"native-resolve-downsample",nullptr,nullptr,
             "main","cs_5_1",D3DCOMPILE_OPTIMIZATION_LEVEL3,0,&code,&errors),"compile canonical resolve publication");
@@ -184,7 +193,7 @@ void D3D12Render::Resolve(const RegisterFile& r, rex::memory::Memory& memory) {
       source.Buffer.NumElements=UINT(range*area/4); source.Buffer.Flags=D3D12_BUFFER_SRV_FLAG_RAW;
       device_->CreateShaderResourceView(scaled_buffer.Get(),&source,Cpu(views+1));
       const uint32_t downsample[]{length,pixel_log2,scale_x_,scale_y_,(info.copy_dest_extent_start-info.copy_dest_base)*area,info.copy_dest_extent_start};
-      cmd_.SetComputeRootSignature(downscale_root_.Get()); cmd_.SetPipelineState(downscale_pipeline_.Get());
+      cmd_.SetComputeRootSignature(downscale_root_.Get()); cmd_.SetPipelineState(downscale_pipeline_);
       cmd_.SetComputeRoot32BitConstants(0,6,downsample,0); cmd_.SetComputeRootDescriptorTable(1,Gpu(views));
       cmd_.SetComputeRootDescriptorTable(2,Gpu(views+1)); cmd_.Dispatch((length+255)/256,1,1);
       Transition(scaled_buffer.Get(),scaled_state,D3D12_RESOURCE_STATE_COPY_SOURCE);
@@ -208,10 +217,10 @@ void D3D12Render::Resolve(const RegisterFile& r, rex::memory::Memory& memory) {
       draw_util::ResolveClearShaderConstants c;
       if (depth) info.GetDepthClearShaderConstants(c); else info.GetColorClearShaderConstants(c);
       auto i = unsigned(!depth && info.color_edram_info.format_is_64bpp);
-      if (!clear_pipelines_[i]) clear_pipelines_[i] = scaled ? (i ? ComputePSO(clear_root_.Get(), kernels::resolve_clear_64bpp_scaled_cs, sizeof(kernels::resolve_clear_64bpp_scaled_cs))
+      if (!clear_pipelines_[i].valid()) clear_pipelines_[i] = scaled ? (i ? ComputePSO(clear_root_.Get(), kernels::resolve_clear_64bpp_scaled_cs, sizeof(kernels::resolve_clear_64bpp_scaled_cs))
           : ComputePSO(clear_root_.Get(), kernels::resolve_clear_32bpp_scaled_cs, sizeof(kernels::resolve_clear_32bpp_scaled_cs))) : i ? ComputePSO(clear_root_.Get(), kernels::resolve_clear_64bpp_cs, sizeof(kernels::resolve_clear_64bpp_cs))
           : ComputePSO(clear_root_.Get(), kernels::resolve_clear_32bpp_cs, sizeof(kernels::resolve_clear_32bpp_cs));
-      cmd_.SetPipelineState(clear_pipelines_[i].Get()); cmd_.SetComputeRoot32BitConstants(0, sizeof(c) / 4, &c, 0);
+      cmd_.SetPipelineState(clear_pipelines_[i]); cmd_.SetComputeRoot32BitConstants(0, sizeof(c) / 4, &c, 0);
       cmd_.Dispatch(groups.first, groups.second, 1); Barrier();
     };
     if (info.IsClearingDepth()) clear(true); if (info.IsClearingColor()) clear(false);
