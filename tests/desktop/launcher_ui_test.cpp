@@ -668,7 +668,7 @@ TEST_CASE("small status icons are centered and symmetric in rendered pixels", "[
   auto& io = ImGui::GetIO(); io.DisplaySize = ImVec2(128, 128);
   io.DisplayFramebufferScale = ImVec2(density, density);
   const int pixels = int(128 * density);
-  for (const char* name : {"warning", "error", "info", "language", "dashboard", "chip"}) for (float size : {16.f, 20.f, 24.f, 32.f}) {
+  for (const char* name : {"warning", "error", "info", "language", "dashboard", "chip", "tools", "refresh"}) for (float size : {16.f, 20.f, 24.f, 32.f}) {
     INFO(name << " at " << size);
     ImGui::NewFrame();
     ui::Icon(ImGui::GetForegroundDrawList(), name, ImRect(44, 44, 84, 84), IM_COL32_WHITE, size);
@@ -684,6 +684,8 @@ TEST_CASE("small status icons are centered and symmetric in rendered pixels", "[
     REQUIRE(max_x >= min_x); REQUIRE(max_y >= min_y);
     CHECK(std::abs((min_x + max_x + 1) / 2.f - 64.f * density) <= 1.f);
     CHECK(std::abs((min_y + max_y + 1) / 2.f - 64.f * density) <= 1.f);
+    CHECK(max_x - min_x + 1 <= (size + 2.f) * density);
+    CHECK(max_y - min_y + 1 <= (size + 2.f) * density);
     uint64_t difference = 0, ink = 0;
     for (int y = min_y; y <= max_y; ++y) for (int x = min_x; x <= max_x; ++x) {
       const int a = canvas.pixels[y * pixels + x] & 255;
@@ -691,7 +693,8 @@ TEST_CASE("small status icons are centered and symmetric in rendered pixels", "[
       difference += std::abs(a - b); ink += a + b;
     }
     REQUIRE(ink > 0);
-    CHECK(double(difference) / double(ink) < 0.03);
+    if (std::string_view(name) != "tools" && std::string_view(name) != "refresh")
+      CHECK(double(difference) / double(ink) < 0.03);
     if (std::string_view(name) == "dashboard") {
       // Four separate tiles, not a connected cross or an eight-shaped outline.
       const int center_x = (min_x + max_x) / 2, center_y = (min_y + max_y) / 2;
@@ -826,7 +829,7 @@ TEST_CASE("launcher layout keeps controls inside the window, their cards and the
         INFO("overlaps " << Describe(placed[j]));
         CHECK_FALSE(Overlap(c.rect, placed[j].rect));
       }
-      if (c.kind == "button" && c.need > 0) CHECK(c.need <= c.rect.GetWidth() + 0.5f);
+      if ((c.kind == "button" || c.kind == "stage") && c.need > 0) CHECK(c.need <= c.rect.GetWidth() + 0.5f);
       if (c.kind == "text") CHECK(c.need <= c.rect.GetHeight() + 0.5f);
     }
     const bool save_capture = !captures.empty() && (!quick_capture ||

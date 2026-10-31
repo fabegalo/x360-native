@@ -7,6 +7,9 @@ sem interromper a preparação em andamento.
 Preparar mantém uma chave inglesa própria, agora com contorno completo;
 Verificar computador usa duas setas circulares e Gráficos mantém o chip com
 detalhes mais espaçados. Testes de pixels/layout e capturas revisados.
+Ponto e nome centralizados em cada segmento da barra, com tamanho de texto
+estável entre etapas; nomes completos conferidos em PT/EN na janela mínima.
+Contorno da chave inglesa refinado e limites dos ícones cobertos por teste.
 
 31/10 — **revisão final do launcher**: reproduzido e corrigido conflito de IDs
 ImGui entre navegação e cartões de passos; escopos separados sem ocultar avisos.

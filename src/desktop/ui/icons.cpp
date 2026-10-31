@@ -128,13 +128,11 @@ void Icon(ImDrawList* dl, const char* name, const ImRect& r, Color color, float 
     p.Rect(-0.45f, -0.82f, 0.35f, -0.35f); p.Rect(-0.5f, 0.15f, 0.5f, 0.82f);
   } else if (is("tools")) {
     // Rounded open jaws and a full handle distinguish the wrench from a key.
-    dl->PathArcTo(p.P(0.25f, -0.25f), 0.62f * h, -pi / 2, -pi * 13 / 12, 14);
-    dl->PathLineTo(p.P(-0.8f, 0.36f));
-    dl->PathArcTo(p.P(-0.61f, 0.55f), 0.27f * h, -pi * 0.75f, -pi * 1.75f, 12);
-    dl->PathLineTo(p.P(0.09f, 0.35f));
-    dl->PathArcTo(p.P(0.25f, -0.25f), 0.62f * h, pi * 7 / 12, 0, 14);
-    dl->PathLineTo(p.P(0.48f, -0.25f));
-    dl->PathLineTo(p.P(0.25f, -0.48f));
+    dl->PathArcTo(p.P(0.22f, -0.22f), 0.6f * h, -pi / 2, -pi * 13 / 12, 14);
+    dl->PathArcTo(p.P(-0.58f, 0.58f), 0.27f * h, -pi * 0.75f, -pi * 1.75f, 12);
+    dl->PathArcTo(p.P(0.22f, -0.22f), 0.6f * h, pi * 7 / 12, 0, 14);
+    dl->PathLineTo(p.P(0.42f, -0.05f));
+    dl->PathLineTo(p.P(0.05f, -0.42f));
     dl->PathStroke(color, ImDrawFlags_Closed, p.t);
   } else if (is("disc")) {
     p.Ring(0, 0, 0.85f); p.Ring(0, 0, 0.22f); p.Arc(0, 0, 0.55f, -pi * 0.9f, -pi * 0.55f);

@@ -72,9 +72,13 @@ float Banner(Ui& ui, const Frame& f, float yc) {
       const float sw = st.GetWidth() / count;
       for (int i = 0; i < count; ++i) {
         const bool d = i < done, cur = i == done;
-        const float dx = st.Min.x + i * sw, cy = st.GetCenter().y;
-        Circle(ui.dl, ImRect(dx, cy - s(5), dx + s(10), cy + s(5)), d ? P.accent_text : cur ? P.info : P.faint);
-        Text(ui.dl, cur ? Font::Bold : Font::Caption, a.stage_names[i], ImRect(dx + s(16), st.Min.y, dx + sw - s(4), st.Max.y), d ? P.muted : cur ? P.text : P.faint);
+        const auto slot = Rect(st.Min.x + i * sw, st.Min.y, sw, st.GetHeight());
+        const float text_width = TextWidth(Font::Caption, a.stage_names[i]);
+        const float label_width = std::min(text_width, sw - s(12));
+        const float dx = slot.GetCenter().x - (s(12) + label_width) / 2, cy = st.GetCenter().y;
+        Circle(ui.dl, ImRect(dx, cy - s(4), dx + s(8), cy + s(4)), d ? P.accent_text : cur ? P.info : P.faint);
+        Text(ui.dl, Font::Caption, a.stage_names[i], Rect(dx + s(12), st.Min.y, label_width, st.GetHeight()), d ? P.muted : cur ? P.text : P.faint);
+        ui.Place(0, slot, "stage", a.stage_names[i], text_width + s(12));
       }
     }
   } else {
