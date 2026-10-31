@@ -5,7 +5,9 @@ somente os caminhos e SHA-256 das duas fontes OFL do launcher, registrados no
 inventário. Fontes desconhecidas/alteradas e conteúdo de console continuam
 bloqueados. Regressão sobre exportação real do Git aprovada em PowerShell 5/7;
 testes do verificador de releases aprovados (101 casos, quatro skips existentes),
-incluindo arquivos ZIP/TAR dos seis alvos. Builds nativos remotos em validação.
+incluindo arquivos ZIP/TAR dos seis alvos. CI/CD aprovado nos seis builds nativos
+(Windows, Linux e macOS, x64/ARM64), com testes, gates e artefatos verificados:
+https://github.com/fabegalo/x360-native/actions/runs/41186182882 (commit fddaa51).
 
 31/10 — **nomes das etapas**: restaurados Ferramentas, SDK, Configuração,
 Codegen, Compilação, Verificação e Registro, conforme preferência do mantenedor.
