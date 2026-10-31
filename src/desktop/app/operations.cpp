@@ -165,9 +165,8 @@ void StartUpdate(App& a) {
 
 // ---------- Preparation stages ----------
 std::vector<std::string> PreparationStageNames() {
-  return {Tr("Computador", "Computer"), Tr("Componentes", "Components"), Tr("Ajustes", "Setup"),
-          Tr("Conversão", "Conversion"), Tr("Preparação", "Preparation"),
-          Tr("Verificação", "Verification"), Tr("Conclusão", "Completion")};
+  return {Tr("Ferramentas", "Tools"), "SDK", Tr("Configuração", "Configuration"), "Codegen",
+          Tr("Compilação", "Compilation"), Tr("Verificação", "Verification"), Tr("Registro", "Registration")};
 }
 // Stages the supervisor's `x360n prepare` reports (aot_pipeline.cpp). Reused
 // steps count as done; no percentage is ever derived from them.

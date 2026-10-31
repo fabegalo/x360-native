@@ -1,5 +1,10 @@
 # STATUS
 
+31/10 — **nomes das etapas**: restaurados Ferramentas, SDK, Configuração,
+Codegen, Compilação, Verificação e Registro, conforme preferência do mantenedor.
+Build Windows e testes focados de etapas/layout aprovados; executável atualizado
+sem interromper a preparação em andamento.
+
 31/10 — **revisão final do launcher**: reproduzido e corrigido conflito de IDs
 ImGui entre navegação e cartões de passos; escopos separados sem ocultar avisos.
 Teste de interação cobre os botões das seis telas. Diagnóstico preserva erros
