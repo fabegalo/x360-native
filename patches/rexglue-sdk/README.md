@@ -2576,3 +2576,23 @@ real device created without optional GPU-emulation features. These synthetic
 depth checks do not establish complete shader conversion or gameplay fidelity.
 Execution results are recorded in the RENDER-FINAL report, not inferred from
 the source change.
+
+### 0248 — Idle achievement toast stops continuous UI repaints
+
+The achievement toast was registered with `ImGuiDrawer` for the whole session.
+A non-empty dialog list makes the presenter repaint continuously, so an empty
+toast kept the host presenting at the monitor rate (66,631 host presents in
+245.7 s during a 19.34 FPS guest window on a 279 Hz display) on the queue
+shared with the guest renderer. The toast now detaches when its queue is
+empty and a pushed event schedules one coalesced UI-thread wake that
+reattaches it. Shared state lets destruction cancel queued wakes without
+touching a dead dialog or drawer. Achievement callbacks from guest threads
+are forwarded to the UI thread, so the last strong dialog reference is never
+released off-thread. Expiry compares the exact clock duration: a `float` age
+of exactly 4.5 s rounds below the display time and held each toast one extra
+frame. Display time, fade, layout and other dialogs are unchanged.
+
+The regression drives real ImGui frames with a CPU recording drawer: the
+baseline fails because the idle toast keeps the dialog list non-empty. No
+game or Guide session was run for this change and no FPS gain is claimed;
+execution results are recorded in the RENDER-FINAL report.

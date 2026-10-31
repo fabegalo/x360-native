@@ -266,7 +266,8 @@ target_sources(x360n_sdk_runtime_checks PRIVATE
     sdkcheck/achievement_ui_test.cpp
     sdkcheck/achievement_cached_title_test.cpp
     sdkcheck/achievement_xdbf_test.cpp
-    sdkcheck/offline_achievement_metadata_test.cpp)
+    sdkcheck/offline_achievement_metadata_test.cpp
+    sdkcheck/achievement_toast_test.cpp) # 0248
 target_sources(x360n_sdk_runtime_checks PRIVATE sdkcheck/physical_heap_transaction_test.cpp)
 target_sources(x360n_sdk_runtime_checks PRIVATE sdkcheck/system_heap_layout_test.cpp)
 target_sources(x360n_sdk_runtime_checks PRIVATE sdkcheck/xctd_query_test.cpp)

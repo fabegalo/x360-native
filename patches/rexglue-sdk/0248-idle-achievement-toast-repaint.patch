@@ -1,0 +1,206 @@
+diff --git a/include/rex/ui/imgui_drawer.h b/include/rex/ui/imgui_drawer.h
+index a570fa0..56f259d 100644
+--- a/include/rex/ui/imgui_drawer.h
++++ b/include/rex/ui/imgui_drawer.h
+@@ -40,6 +40,7 @@ class ImGuiDrawer : public WindowInputListener, public UIDrawer {
+   ~ImGuiDrawer();
+ 
+   ImGuiIO& GetIO();
++  WindowedAppContext& app_context() const { return window_->app_context(); }
+ 
+   // Per-overlay styling, patched by the consumer in OnConfigureStyle.
+   Style& style() { return style_; }
+diff --git a/include/rex/ui/overlay/achievement_notification.h b/include/rex/ui/overlay/achievement_notification.h
+index f9921ed..d503dae 100644
+--- a/include/rex/ui/overlay/achievement_notification.h
++++ b/include/rex/ui/overlay/achievement_notification.h
+@@ -10,6 +10,8 @@
+  */
+ #pragma once
+ 
++#include <memory>
++#include <utility>
+ #include <rex/system/achievement_manager.h>
+ #include <rex/ui/imgui_dialog.h>
+ 
+@@ -22,6 +24,19 @@ class AchievementNotificationDialog : public ImGuiDialog {
+   // Thread-safe implementations may receive events from guest threads.
+   virtual void Push(const rex::system::AchievementEvent& event) = 0;
+ 
++  // AchievementManager may invoke callbacks on guest threads. Acquire the
++  // dialog only on the UI thread, so a callback can never keep the last strong
++  // reference past UI teardown and destroy the dialog off-thread or after its
++  // drawer. Pending callbacks after teardown simply find an expired weak_ptr.
++  static rex::system::AchievementCallback MakeUICallback(WindowedAppContext& context,
++      std::weak_ptr<AchievementNotificationDialog> notification) {
++    return [notification = std::move(notification), context = &context](const auto& event) {
++      context->CallInUIThreadDeferred([notification, event] {
++        if (auto dialog = notification.lock()) dialog->Push(event);
++      });
++    };
++  }
++
+  protected:
+   explicit AchievementNotificationDialog(ImGuiDrawer* drawer) : ImGuiDialog(drawer) {}
+ };
+diff --git a/include/rex/ui/overlay/achievement_toast.h b/include/rex/ui/overlay/achievement_toast.h
+index 7642601..72c342e 100644
+--- a/include/rex/ui/overlay/achievement_toast.h
++++ b/include/rex/ui/overlay/achievement_toast.h
+@@ -14,6 +14,7 @@
+ #include <chrono>
+ #include <deque>
+ #include <mutex>
++#include <memory>
+ #include <optional>
+ #include <rex/ui/overlay/achievement_notification.h>
+ #include <rex/ui/overlay/achievement_icon_cache.h>
+@@ -37,6 +38,7 @@ class AchievementToastDialog : public AchievementNotificationDialog {
+ 
+  protected:
+   void OnDraw(ImGuiIO& io) override;
++  void DrawAt(ImGuiIO& io, std::chrono::steady_clock::time_point now);
+ 
+  private:
+   static constexpr float kDisplaySeconds = 4.5f;
+@@ -47,8 +49,16 @@ class AchievementToastDialog : public AchievementNotificationDialog {
+     std::optional<std::chrono::steady_clock::time_point> visible_since;
+   };
+ 
+-  std::mutex mutex_;
+-  std::deque<PendingToast> queue_;
++  struct State {
++    std::mutex mutex;
++    std::deque<PendingToast> queue;
++    // UI-thread lifetime; queued wakeups retain State, never the dialog.
++    AchievementToastDialog* owner = nullptr;
++    bool attached = false;
++    bool wake_pending = false;
++  };
++  std::shared_ptr<State> state_ = std::make_shared<State>();
++  WindowedAppContext& app_context_;
+   AchievementIconCache icon_cache_;
+ };
+ 
+diff --git a/src/ui/overlay/achievement_toast.cpp b/src/ui/overlay/achievement_toast.cpp
+index 53b8c0b..078e1a2 100644
+--- a/src/ui/overlay/achievement_toast.cpp
++++ b/src/ui/overlay/achievement_toast.cpp
+@@ -20,37 +20,82 @@ namespace rex::ui {
+ AchievementToastDialog::AchievementToastDialog(ImGuiDrawer* drawer,
+                                                ImmediateDrawer* immediate_drawer,
+                                                rex::Runtime* runtime)
+-    : AchievementNotificationDialog(drawer), icon_cache_(immediate_drawer, runtime) {}
++    : AchievementNotificationDialog(drawer), app_context_(drawer->app_context()),
++      icon_cache_(immediate_drawer, runtime) {
++  state_->owner = this;
++  // A registered ImGui dialog asks the presenter to repaint continuously.
++  // An idle notification sink must not keep the UI present loop running.
++  drawer->RemoveDialog(this);
++}
+ 
+-AchievementToastDialog::~AchievementToastDialog() {}
++AchievementToastDialog::~AchievementToastDialog() {
++  std::lock_guard lock(state_->mutex);
++  state_->owner = nullptr;
++}
+ 
+ void AchievementToastDialog::Push(const rex::system::AchievementEvent& event) {
+-  std::lock_guard<std::mutex> lock(mutex_);
+-  queue_.push_back({event, std::chrono::steady_clock::now()});
++  auto state = state_;
++  {
++    std::lock_guard lock(state->mutex);
++    state->queue.push_back({event, std::chrono::steady_clock::now()});
++    if (state->attached || state->wake_pending) return;
++    state->wake_pending = true;
++  }
++  // Always defer, including Push on the UI thread. This avoids attachment
++  // changes within callers' locks, coalesces bursts, and lets destruction
++  // cancel an outstanding wake without retaining a dead drawer/window.
++  app_context_.CallInUIThreadDeferred([state] {
++    AchievementToastDialog* owner;
++    {
++      std::lock_guard lock(state->mutex);
++      state->wake_pending = false;
++      owner = state->owner;
++      if (!owner || state->queue.empty()) return;
++      state->attached = true;
++    }
++    // UI lifetime and dialog-list mutations are serialized on this thread.
++    // Adding the first dialog also requests the initial presenter repaint.
++    owner->imgui_drawer()->AddDialog(owner);
++  });
+ }
+ 
+ void AchievementToastDialog::OnDraw(ImGuiIO& io) {
+-  auto now = std::chrono::steady_clock::now();
++  DrawAt(io, std::chrono::steady_clock::now());
++}
+ 
++void AchievementToastDialog::DrawAt(ImGuiIO& io, std::chrono::steady_clock::time_point now) {
++  // Expire on the exact clock duration. A float age of exactly 4.5 s rounds
++  // below kDisplaySeconds, which kept every expired toast for another frame.
++  constexpr auto display_duration = std::chrono::duration_cast<std::chrono::steady_clock::duration>(
++      std::chrono::duration<double>(kDisplaySeconds));
+   PendingToast toast;
+   float age = 0.0f;
++  bool empty;
+   {
+-    std::lock_guard<std::mutex> lock(mutex_);
+-    while (!queue_.empty()) {
+-      if (!queue_.front().visible_since) {
+-        queue_.front().visible_since = now;
++    std::lock_guard lock(state_->mutex);
++    auto& queue = state_->queue;
++    while (!queue.empty()) {
++      if (!queue.front().visible_since) {
++        queue.front().visible_since = now;
+       }
+-      age = std::chrono::duration<float>(now - *queue_.front().visible_since).count();
+-      if (age >= kDisplaySeconds) {
+-        queue_.pop_front();
++      const auto elapsed = now - *queue.front().visible_since;
++      age = std::chrono::duration<float>(elapsed).count();
++      if (elapsed >= display_duration) {
++        queue.pop_front();
+       } else {
+         break;
+       }
+     }
+-    if (queue_.empty()) {
+-      return;
+-    }
+-    toast = queue_.front();
++    empty = queue.empty();
++    if (empty) state_->attached = false;
++    else toast = queue.front();
++  }
++  if (empty) {
++    // Push racing this transition observes attached=false and schedules a
++    // new UI wake. Removal during Draw is supported by ImGuiDrawer and its
++    // presenter detachment is deferred until the current frame is finished.
++    imgui_drawer()->RemoveDialog(this);
++    return;
+   }
+ 
+   float alpha = 1.0f;
+diff --git a/src/ui/rex_app.cpp b/src/ui/rex_app.cpp
+index 5c793f4..8b88b8d 100644
+--- a/src/ui/rex_app.cpp
++++ b/src/ui/rex_app.cpp
+@@ -466,13 +466,8 @@ void ReXApp::LaunchModule() {
+     }
+     if (achievement_notification_ && achievement_notification_listener_ == 0 && runtime_ &&
+         runtime_->kernel_state()) {
+-      std::weak_ptr<ui::AchievementNotificationDialog> notification = achievement_notification_;
+       achievement_notification_listener_ = achievements().RegisterNotificationCallback(
+-          [notification](const rex::system::AchievementEvent& event) {
+-            if (auto dialog = notification.lock()) {
+-              dialog->Push(event);
+-            }
+-          });
++          ui::AchievementNotificationDialog::MakeUICallback(app_context(), achievement_notification_));
+     }
+ 
+     OnPreLaunchModule();

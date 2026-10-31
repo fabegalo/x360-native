@@ -51,7 +51,7 @@
       "file": "patches/rexglue-sdk/0004-app-teardown-order.patch",
       "sha256": "f68d6d6e4e2cc4c7c218eac15cc7c29723c1fb357a735657bed68d312ade4ff1",
       "files": {
-        "src/ui/rex_app.cpp": "4669c12c285315c7824949fe84ffb03308f987c7d87a0a510597b7745b42c3f0"
+        "src/ui/rex_app.cpp": "8f11e7c95c057c42852ec4b2a1d5bca13af71d22b146b3371fbe8264d0a938c7"
       },
       "base_files": {
         "src/ui/rex_app.cpp": "0ebbd4c0e484eb865f94de37cc71a70e3f25068b78d072cd7f577cdb811020b7"
@@ -1206,7 +1206,7 @@
         "include/rex/runtime.h": "8827c5fd2d3e42656fe1266a0d33af0d3181ef9145990f2bd538b0b78d822d20",
         "src/system/runtime.cpp": "5ba8271148a18c512a4c2d17479934c3c4af718254ea0ac925f00822efbbd8c2",
         "include/rex/rex_app.h": "769ea2f312400d6be8359071bbc03fc854ccf626bbc115ff9ba3dbfdb102c55d",
-        "src/ui/rex_app.cpp": "4669c12c285315c7824949fe84ffb03308f987c7d87a0a510597b7745b42c3f0"
+        "src/ui/rex_app.cpp": "8f11e7c95c057c42852ec4b2a1d5bca13af71d22b146b3371fbe8264d0a938c7"
       },
       "test": "tests/sdkcheck/entrypoint_dispatch_test.cpp"
     },
@@ -1738,7 +1738,7 @@
       "sha256": "117097d188442e603694943db816242963d6aa7935f036bc89cf370ddbff8938",
       "files": {
         "include/rex/runtime.h": "8827c5fd2d3e42656fe1266a0d33af0d3181ef9145990f2bd538b0b78d822d20",
-        "src/ui/rex_app.cpp": "4669c12c285315c7824949fe84ffb03308f987c7d87a0a510597b7745b42c3f0"
+        "src/ui/rex_app.cpp": "8f11e7c95c057c42852ec4b2a1d5bca13af71d22b146b3371fbe8264d0a938c7"
       },
       "base_files": {
         "include/rex/runtime.h": "8cc304b2dd3fe9045cfffd9f71c985963ab049b381b509b4e52d44bfc53353ac",
@@ -1930,7 +1930,7 @@
       "files": {
         "include/rex/ui/keybinds.h": "c91a000e7101e9853cca487b3606d8b7943518fcfd2f2af5cb864a72ed7152e0",
         "src/ui/keybinds.cpp": "b094d7db885078a72c6dda265ef2ea3e8f191da904317871345c85838a55e6cd",
-        "src/ui/rex_app.cpp": "4669c12c285315c7824949fe84ffb03308f987c7d87a0a510597b7745b42c3f0"
+        "src/ui/rex_app.cpp": "8f11e7c95c057c42852ec4b2a1d5bca13af71d22b146b3371fbe8264d0a938c7"
       },
       "test": "sdkcheck: [fullscreen-toggle] Alt+Enter/F11 toggle fullscreen"
     },
@@ -3485,6 +3485,25 @@
     "src/graphics/vulkan/command_processor.cpp": "ab31157debc89156b62c22f37dec6f2140c44f38917462ad3321fc9eeae0c3e9"
   },
   "test": "sdkcheck.vulkan-depth-bias: 65 assertions in 3 cases passed Release. Opt-in x360n_vulkan_depth_bias_gpu on RTX 4070: correct 24/24 exact (D32 float24 and D24, both signs, high/low depth, reversed viewports); legacy control 18/24 exact failures; fallback device without optional features keeps the legacy command. All eight applied files match the staged tested bytes."
+},
+{
+  "file": "patches/rexglue-sdk/0248-idle-achievement-toast-repaint.patch",
+  "sha256": "12f755d128f5ca8096680ae47fb59fb1d1d10de41c7e02bb994d12de374ad1ef",
+  "base_files": {
+    "include/rex/ui/imgui_drawer.h": "931534a68dbeb10d85b3a100152e390170289ddf283c75d9c3246f4d3a96ecb7",
+    "include/rex/ui/overlay/achievement_notification.h": "ab220f95052caeca16a184ffe419abacf9ea6dbc8af49464a17b31a60b909c55",
+    "include/rex/ui/overlay/achievement_toast.h": "1aed84f6b5073765a9259a745dc8d01c39076f25889fe1b7e7d2be15fc89ab50",
+    "src/ui/overlay/achievement_toast.cpp": "01df27592ce1a8612082d8eaf7856f2f61a36c5d03cc017df6b67ee74133bc81",
+    "src/ui/rex_app.cpp": "4669c12c285315c7824949fe84ffb03308f987c7d87a0a510597b7745b42c3f0"
+  },
+  "files": {
+    "include/rex/ui/imgui_drawer.h": "b09bd96993f7a6dd95e9ecf5b6411994a9914585a80037a266302fa43fd8046d",
+    "include/rex/ui/overlay/achievement_notification.h": "80e168b7cbde328edc2672e8f6a05294f30f2769a3e040610b85f2f48e64bd60",
+    "include/rex/ui/overlay/achievement_toast.h": "48cbc99e55feaa5de38ec1547bf7585c8e402cbbe868255db8c93247dc4dcf3a",
+    "src/ui/overlay/achievement_toast.cpp": "579e66e3503e1effe90876eaf02bcede36039ad98ce174510504f4c2d61c4062",
+    "src/ui/rex_app.cpp": "8f11e7c95c057c42852ec4b2a1d5bca13af71d22b146b3371fbe8264d0a938c7"
+  },
+  "test": "sdkcheck achievement toast cases in x360n_sdk_runtime_checks: 227 assertions in 5 cases passed Release three consecutive runs (idle drawer list empty, one coalesced wake for four concurrent producers with full 4.5 s display per event, shutdown cancels queued wakes, push during detachment, UI-thread callback ownership). Baseline control fails: the idle toast keeps the ImGui dialog list non-empty. Patched rex_app.cpp compiled. All five applied files match the staged tested bytes."
 }
 ]
 },
