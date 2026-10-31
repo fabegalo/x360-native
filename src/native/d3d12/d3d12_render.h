@@ -3,6 +3,8 @@
 #include "../memory/scaled_resolve.h"
 #include "../pipeline/shader_cache.h"
 #include "../pipeline/pipeline_store.h"
+#include "../pipeline/pipeline_workers.h"
+#include "d3d12_commands.h"
 #include "../commands/draw_types.h"
 #include "../commands/memexport.h"
 #include "../memory/guest_memory_mirror.h"
@@ -18,7 +20,9 @@
 #include <unordered_set>
 #include <optional>
 #include <d3d12sdklayers.h>
+#include <atomic>
 #include <chrono>
+#include <future>
 namespace x360n::native {
 class D3D12Render {
   const NativeQualitySettings quality_ = GetNativeQualitySettings();
@@ -127,6 +131,8 @@ class D3D12Render {
   Ptr<ID3D12InfoQueue> debug_;
   Ptr<ID3D12CommandAllocator> allocator_;
   Ptr<ID3D12GraphicsCommandList> list_;
+  // Every command of the open list goes through cmd_ (see D3D12Commands).
+  D3D12Commands cmd_;
   Ptr<ID3D12Fence> fence_;
   HANDLE event_{};
   uint64_t serial_ = 0;
@@ -181,7 +187,14 @@ class D3D12Render {
   void EndGpuTimestamp();
   void CollectGpuTimestamps();
   void LogSubmissionStats();
-  std::map<std::string, Ptr<ID3D12PipelineState>> pipelines_;
+  // Graphics pipelines by exact description bytes. A pipeline is created by
+  // pipeline_workers_ and bound through cmd_ while it may still be compiling;
+  // the submission waits for the pipelines of its commands (Flush).
+  std::map<std::string, std::shared_future<Ptr<ID3D12PipelineState>>> pipelines_;
+  Ptr<ID3D12PipelineState> CreatePipeline(D3D12_GRAPHICS_PIPELINE_STATE_DESC, uint64_t vs_hash, uint64_t ps_hash,
+      uint64_t vm, uint64_t pm, uint32_t primitive, uint32_t msaa, unsigned planes, uint32_t mask, size_t id);
+  void ReplayCommands();
+  uint64_t pipeline_wait_ns_ = 0, pipeline_waits_ = 0;
   std::map<unsigned, std::vector<uint8_t>> rectangles_, polygon_points_;
   std::map<unsigned, std::vector<uint32_t>> points_;
   struct CachedTexture {
@@ -220,9 +233,10 @@ class D3D12Render {
   uint64_t texture_ns_ = 0, resolve_ns_ = 0, flush_ns_ = 0;
   uint64_t texture_uploads_ = 0, texture_upload_bytes_ = 0;
   uint64_t draw_ns_ = 0, guest_upload_ns_ = 0, guest_upload_bytes_ = 0;
-  uint64_t shader_ns_ = 0, pipeline_ns_ = 0, pipeline_thread_ns_ = 0, pipeline_process_ns_ = 0;
-  uint64_t pipeline_creations_ = 0;
-  uint64_t pipeline_disk_hits_ = 0, pipeline_disk_rejects_ = 0;
+  uint64_t shader_ns_ = 0;
+  // Updated by pipeline workers.
+  std::atomic<uint64_t> pipeline_ns_async_{0}, pipeline_thread_ns_async_{0}, pipeline_creations_{0};
+  std::atomic<uint64_t> pipeline_disk_hits_{0}, pipeline_disk_rejects_{0};
   PipelineStore pipeline_store_;
   uint64_t flush_causes_[kFlushCauses]{}, flush_wait_ns_ = 0;
   uint64_t sync_sources_[kGuestSyncSources]{};
@@ -230,6 +244,8 @@ class D3D12Render {
   // Guest present intervals of the current stats window (native_stats).
   std::vector<float> frame_ms_;
   std::chrono::steady_clock::time_point last_present_{}, window_start_{};
+  // Declared last: destroyed first, before anything its running jobs use.
+  std::unique_ptr<PipelineWorkers> pipeline_workers_;
   struct Timer {
     bool enabled; uint64_t& total; std::chrono::steady_clock::time_point start{};
     Timer(bool on, uint64_t& result) : enabled(on), total(result) { if (enabled) start = std::chrono::steady_clock::now(); }

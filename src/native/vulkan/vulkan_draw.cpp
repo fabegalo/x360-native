@@ -30,8 +30,14 @@ Shader* VulkanRender::LoadShader(ShaderType type, const uint32_t* data, uint32_t
 void VulkanRender::DestroyDraw() {
   const auto& fn = device_.functions();
   const auto vk = device_.device();
+  // Running creations finish first; queued ones are dropped (broken promise).
+  pipeline_workers_.reset();
   for (const auto& [key, pipeline] : draw_pipelines_) {
-    if (pipeline.pipeline) fn.vkDestroyPipeline(vk, pipeline.pipeline, nullptr);
+    if (pipeline.pipeline.valid()) {
+      try {
+        if (const VkPipeline created = pipeline.pipeline.get()) fn.vkDestroyPipeline(vk, created, nullptr);
+      } catch (const std::exception&) {}  // Never created: reported where it was bound.
+    }
     if (pipeline.layout) fn.vkDestroyPipelineLayout(vk, pipeline.layout, nullptr);
   }
   draw_pipelines_.clear();
@@ -102,6 +108,23 @@ void VulkanRender::InitializeDraw() {
     depth_only_[counted] = CreateNativeShaderModule(device_, words);
   }
 }
+namespace {
+// A graphics pipeline description that owns everything it points to, so a
+// pipeline worker can create the pipeline after Pipeline() has returned.
+struct GraphicsPipelineState {
+  VkPipelineShaderStageCreateInfo stages[5]{};
+  VkPipelineTessellationStateCreateInfo tessellation{VK_STRUCTURE_TYPE_PIPELINE_TESSELLATION_STATE_CREATE_INFO};
+  VkPipelineVertexInputStateCreateInfo inputs{VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO};
+  VkPipelineInputAssemblyStateCreateInfo assembly{VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO};
+  VkPipelineViewportStateCreateInfo viewport{VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO};
+  VkPipelineRasterizationStateCreateInfo raster{VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO};
+  VkPipelineMultisampleStateCreateInfo multisample{VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO};
+  VkPipelineColorBlendStateCreateInfo blend{VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO};
+  VkDynamicState dynamic_states[2]{VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR};
+  VkPipelineDynamicStateCreateInfo dynamic{VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO};
+  VkGraphicsPipelineCreateInfo info{VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO};
+};
+}
 VulkanRender::DrawPipeline& VulkanRender::Pipeline(SpirvShader* vs, SpirvShader* ps,
     VkShaderModule vertex, VkShaderModule pixel, VkPrimitiveTopology topology, VkSampleCountFlagBits samples,
     VkCullModeFlags cull, VkFrontFace front, bool clamp, bool restart, bool discard, const Tessellation& tess, VkPolygonMode fill, uint32_t point_key) {
@@ -118,7 +141,8 @@ VulkanRender::DrawPipeline& VulkanRender::Pipeline(SpirvShader* vs, SpirvShader*
   layout.pSetLayouts = layouts;
   CheckVulkan(fn.vkCreatePipelineLayout(vk, &layout, nullptr, &result.layout), "create Native draw pipeline layout");
   try {
-    VkPipelineShaderStageCreateInfo stages[5]{};
+    auto state = std::make_shared<GraphicsPipelineState>();
+    auto& stages = state->stages;
     for (auto& stage : stages) {
       stage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
       stage.pName = "main";
@@ -127,7 +151,6 @@ VulkanRender::DrawPipeline& VulkanRender::Pipeline(SpirvShader* vs, SpirvShader*
     stages[0].module = vertex;
     stages[1].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
     stages[1].module = pixel;
-    VkPipelineTessellationStateCreateInfo tessellation{VK_STRUCTURE_TYPE_PIPELINE_TESSELLATION_STATE_CREATE_INFO};
     if (tess) {
       auto module = [&](uint32_t key, VkShaderStageFlagBits stage, const std::string& source) {
         auto found = tessellation_modules_.find(key);
@@ -145,7 +168,7 @@ VulkanRender::DrawPipeline& VulkanRender::Pipeline(SpirvShader* vs, SpirvShader*
           GetTessellationControlShaderGlsl(tess.host, tess.mode, tess.control_points, outputs));
       stages[2].stage = VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT;
       stages[2].module = vertex;
-      tessellation.patchControlPoints = tess.control_points;
+      state->tessellation.patchControlPoints = tess.control_points;
     }
     uint32_t pixel_stage = tess ? 3 : 1;
     if (fill == VK_POLYGON_MODE_POINT && !discard) {
@@ -156,53 +179,54 @@ VulkanRender::DrawPipeline& VulkanRender::Pipeline(SpirvShader* vs, SpirvShader*
       stages[pixel_stage].module = module;
       ++pixel_stage;
     }
-    const VkPipelineVertexInputStateCreateInfo inputs{VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO};
-    VkPipelineInputAssemblyStateCreateInfo assembly{VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO};
-    assembly.topology = topology;
-    assembly.primitiveRestartEnable = restart;
-    VkPipelineViewportStateCreateInfo viewport{VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO};
-    viewport.viewportCount = viewport.scissorCount = 1;
-    VkPipelineRasterizationStateCreateInfo raster{VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO};
+    state->assembly.topology = topology;
+    state->assembly.primitiveRestartEnable = restart;
+    state->viewport.viewportCount = state->viewport.scissorCount = 1;
+    auto& raster = state->raster;
     raster.depthClampEnable = clamp;
     raster.rasterizerDiscardEnable = discard;
     raster.polygonMode = fill == VK_POLYGON_MODE_POINT ? VK_POLYGON_MODE_FILL : fill;
     raster.cullMode = cull;
     raster.frontFace = front;
     raster.lineWidth = 1.0f;
-    VkPipelineMultisampleStateCreateInfo multisample{VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO};
-    multisample.rasterizationSamples = samples;
-    const VkPipelineColorBlendStateCreateInfo blend{VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO};
-    const VkDynamicState dynamic_states[]{VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR};
-    VkPipelineDynamicStateCreateInfo dynamic{VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO};
-    dynamic.dynamicStateCount = 2;
-    dynamic.pDynamicStates = dynamic_states;
-    VkGraphicsPipelineCreateInfo pipeline{VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO};
+    state->multisample.rasterizationSamples = samples;
+    state->dynamic.dynamicStateCount = 2;
+    state->dynamic.pDynamicStates = state->dynamic_states;
+    auto& pipeline = state->info;
     pipeline.stageCount = pixel_stage + (discard ? 0 : 1);
-    pipeline.pTessellationState = tess ? &tessellation : nullptr;
+    pipeline.pTessellationState = tess ? &state->tessellation : nullptr;
     pipeline.pStages = stages;
-    pipeline.pVertexInputState = &inputs;
-    pipeline.pInputAssemblyState = &assembly;
-    pipeline.pViewportState = &viewport;
+    pipeline.pVertexInputState = &state->inputs;
+    pipeline.pInputAssemblyState = &state->assembly;
+    pipeline.pViewportState = &state->viewport;
     pipeline.pRasterizationState = &raster;
-    pipeline.pMultisampleState = &multisample;
-    pipeline.pColorBlendState = &blend;
-    pipeline.pDynamicState = &dynamic;
+    pipeline.pMultisampleState = &state->multisample;
+    pipeline.pColorBlendState = &state->blend;
+    pipeline.pDynamicState = &state->dynamic;
     pipeline.layout = result.layout;
     pipeline.renderPass = draw_pass_;
     const bool diagnose = !REXCVAR_GET(dump_shaders).empty();
+    const size_t id = draw_pipelines_.size();
     if (diagnose) {
       REXLOG_INFO("Native Vulkan PSO begin id={} VS={:016X} PS={:016X} stages={} topology={} samples={} discard={} tess={} fill={}",
-          draw_pipelines_.size(), vs ? vs->ucode_data_hash() : 0, ps ? ps->ucode_data_hash() : 0,
+          id, vs ? vs->ucode_data_hash() : 0, ps ? ps->ucode_data_hash() : 0,
           pipeline.stageCount, uint32_t(topology), uint32_t(samples), discard, uint32_t(tess.host), uint32_t(fill));
       for (uint32_t i = 0; i < pipeline.stageCount; ++i)
         REXLOG_INFO("Native Vulkan PSO stage={} module={:016X} entry={}", uint32_t(stages[i].stage), uint64_t(stages[i].module), stages[i].pName);
     }
-    CheckVulkan(fn.vkCreateGraphicsPipelines(vk, pipeline_cache_, 1, &pipeline, nullptr, &result.pipeline),
-                "create Native draw graphics pipeline");
-    if (diagnose) REXLOG_INFO("Native Vulkan PSO end id={} pipeline={:016X}", draw_pipelines_.size(), uint64_t(result.pipeline));
-    return draw_pipelines_.emplace(key, result).first->second;
+    // Shader modules, the render pass and the layout live as long as this
+    // renderer; the pipeline cache is internally synchronized. Pipelines of
+    // one submission compile concurrently while recording continues.
+    result.pipeline = pipeline_workers_->Submit(std::function<VkPipeline()>([this, state, diagnose, id] {
+      const auto& fn = device_.functions();
+      VkPipeline created = VK_NULL_HANDLE;
+      CheckVulkan(fn.vkCreateGraphicsPipelines(device_.device(), pipeline_cache_, 1, &state->info, nullptr, &created),
+                  "create Native draw graphics pipeline");
+      if (diagnose) REXLOG_INFO("Native Vulkan PSO end id={} pipeline={:016X}", id, uint64_t(created));
+      return created;
+    }));
+    return draw_pipelines_.emplace(key, std::move(result)).first->second;
   } catch (...) {
-    if (result.pipeline) fn.vkDestroyPipeline(vk, result.pipeline, nullptr);
     fn.vkDestroyPipelineLayout(vk, result.layout, nullptr);
     throw;
   }
@@ -583,17 +607,17 @@ void VulkanRender::Draw(const RegisterFile& regs, rex::memory::Memory& memory, S
     pass.renderPass = draw_pass_;
     pass.framebuffer = draw_framebuffer_;
     pass.renderArea = {{0, 0}, draw_extent_};
-    fn.vkCmdBeginRenderPass(commands_, &pass, VK_SUBPASS_CONTENTS_INLINE);
+    cmd_.BeginRenderPass(&pass, VK_SUBPASS_CONTENTS_INLINE);
     rendering_ = true;
   }
-  fn.vkCmdBindPipeline(commands_, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline.pipeline);
+  cmd_.BindPipeline(VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline.pipeline);
   const VkDescriptorSet sets[]{memory_set, constants_set, vertex_textures, pixel_textures};
-  fn.vkCmdBindDescriptorSets(commands_, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline.layout, 0, 4, sets, 0, nullptr);
+  cmd_.BindDescriptorSets(VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline.layout, 0, 4, sets, 0, nullptr);
   const VkViewport host_viewport = rasterize
       ? VkViewport{float(viewport.xy_offset[0]), float(viewport.xy_offset[1]),
           float(viewport.xy_extent[0]), float(viewport.xy_extent[1]), viewport.z_min, viewport.z_max}
       : VkViewport{0, 0, 1, 1, 0, 1};
-  fn.vkCmdSetViewport(commands_, 0, 1, &host_viewport);
+  cmd_.SetViewport(0, 1, &host_viewport);
   VkRect2D host_scissor{{int32_t(scissor.offset[0]), int32_t(scissor.offset[1])},
       {scissor.extent[0], scissor.extent[1]}};
   host_scissor.extent.width = host_scissor.offset.x < int32_t(draw_extent_.width)
@@ -601,11 +625,11 @@ void VulkanRender::Draw(const RegisterFile& regs, rex::memory::Memory& memory, S
   host_scissor.extent.height = host_scissor.offset.y < int32_t(draw_extent_.height)
       ? std::min(host_scissor.extent.height, draw_extent_.height - host_scissor.offset.y) : 0;
   if (!rasterize) host_scissor = {{0, 0}, {1, 1}};
-  fn.vkCmdSetScissor(commands_, 0, 1, &host_scissor);
+  cmd_.SetScissor(0, 1, &host_scissor);
   if (!normalized.empty()) {
-    fn.vkCmdBindIndexBuffer(commands_, index_buffer.buffer, index_buffer.offset, VK_INDEX_TYPE_UINT32);
-    for (const auto& range : ranges) fn.vkCmdDrawIndexed(commands_, range.count, 1, range.offset, 0, 0);
-  } else fn.vkCmdDraw(commands_, count, 1, 0, 0);
+    cmd_.BindIndexBuffer(index_buffer.buffer, index_buffer.offset, VK_INDEX_TYPE_UINT32);
+    for (const auto& range : ranges) cmd_.DrawIndexed(range.count, 1, range.offset, 0, 0);
+  } else cmd_.Draw(count, 1, 0, 0);
   if (!exports.empty()) {
     EndRendering();
     UseBuffer(guest_buffer_->handle(), guest_access_, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_TRANSFER_READ_BIT);
@@ -615,7 +639,7 @@ void VulkanRender::Draw(const RegisterFile& regs, rex::memory::Memory& memory, S
       std::vector<uint64_t> cpu_generations;
       mirror.RangeWrittenByGpu(address, range.length, &cpu_generations);
       const VkBufferCopy copy{address, readback_used_, range.length};
-      fn.vkCmdCopyBuffer(commands_, guest_buffer_->handle(), readback_->handle(), 1, &copy);
+      cmd_.CopyBuffer(guest_buffer_->handle(), readback_->handle(), 1, &copy);
       writeback_.Add(address, range.length, readback_used_, std::move(cpu_generations));
       readback_used_ += range.length;
     }
@@ -626,7 +650,7 @@ void VulkanRender::Draw(const RegisterFile& regs, rex::memory::Memory& memory, S
     host.buffer = readback_->handle();
     host.offset = first;
     host.size = readback_used_ - first;
-    fn.vkCmdPipelineBarrier(commands_, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_HOST_BIT,
+    cmd_.PipelineBarrier(VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_HOST_BIT,
         0, 0, nullptr, 1, &host, 0, nullptr);
   }
 }

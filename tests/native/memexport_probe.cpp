@@ -1,5 +1,6 @@
 // Real guest microcode -> Native GPU stores -> aliases -> guest readback.
 // Prepared for focused validation; synthetic coverage is not gameplay acceptance.
+#include "probe_main.h"
 #include <rex/runtime.h>
 #include <rex/logging.h>
 #include <rex/kernel/init.h>
@@ -198,18 +199,18 @@ void Run(rex::system::IGraphicsSystem& gpu, rex::memory::Memory& memory) {
   Require(passed, "GPU MEMEXPORT bytes differ from contract");
 }
 }
-int wmain(int argc, wchar_t** argv) {
+X360N_PROBE_MAIN {
   try {
     Require(argc == 2 || argc == 3, "usage: x360n_native_memexport_probe OUTPUT [d3d12|vulkan]");
-    const std::wstring_view api = argc == 3 ? argv[2] : L"d3d12";
-    Require(api == L"d3d12" || api == L"vulkan", "invalid graphics API");
+    const ProbeArg api = argc == 3 ? argv[2] : X360N_PROBE_ARG("d3d12");
+    Require(api == X360N_PROBE_ARG("d3d12") || api == X360N_PROBE_ARG("vulkan"), "invalid graphics API");
     const std::filesystem::path output(argv[1]); std::filesystem::create_directories(output);
     rex::InitLogging((output / "runtime.log").string().c_str());
     rex::Runtime runtime(output, output / "user");
     rex::RuntimeConfig config; config.tool_mode = true; config.kernel_init = rex::kernel::InitializeKernel;
     Require(runtime.Setup(std::move(config)) == X_STATUS_SUCCESS, "runtime setup");
-    if (api == L"d3d12") rex::cvar::SetFlagByName("d3d12_debug", "true");
-    auto gpu = rex::system::LoadGpuPlugin("native", api == L"d3d12" ? "d3d12" : "vulkan"); Require(bool(gpu), "Native plugin load");
+    if (api == X360N_PROBE_ARG("d3d12")) rex::cvar::SetFlagByName("d3d12_debug", "true");
+    auto gpu = rex::system::LoadGpuPlugin("native", api == X360N_PROBE_ARG("d3d12") ? "d3d12" : "vulkan"); Require(bool(gpu), "Native plugin load");
     Require(gpu->SetupPresentation(nullptr) == X_STATUS_SUCCESS, "presentation setup");
     Require(gpu->SetupGuestGpu(runtime.function_dispatcher(), runtime.kernel_state()) == X_STATUS_SUCCESS, "guest GPU setup");
     struct Shutdown { rex::system::IGraphicsSystem* gpu; ~Shutdown() { if (gpu) gpu->Shutdown(); } } shutdown{gpu.get()};

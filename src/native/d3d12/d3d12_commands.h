@@ -1,0 +1,113 @@
+#pragma once
+#include "../pipeline/deferred_commands.h"
+#include <d3d12.h>
+#include <wrl/client.h>
+#include <algorithm>
+#include <array>
+#include <cstring>
+#include <optional>
+#include <stdexcept>
+#include <vector>
+namespace x360n::native {
+// The ID3D12GraphicsCommandList subset Native records, through
+// DeferredCommands. Pointer arguments are copied: deferred commands outlive
+// the caller's frame. Referenced D3D12 objects already live until the
+// submission's fence (the same lifetime the GPU needs), which is after replay.
+class D3D12Commands {
+ public:
+  using Pipeline = Microsoft::WRL::ComPtr<ID3D12PipelineState>;
+  void Attach(ID3D12GraphicsCommandList* list) { commands_.Attach(list); }
+  bool deferred() const { return commands_.deferred(); }
+  void Replay() { commands_.Replay(); }
+
+  void SetPipelineState(ID3D12PipelineState* p) { Rec([=](L* l) { l->SetPipelineState(p); }); }
+  void SetPipelineState(const std::shared_future<Pipeline>& p) {
+    commands_.BindPending(p, [](L* l, const Pipeline& pipeline) { l->SetPipelineState(pipeline.Get()); });
+  }
+  void SetDescriptorHeaps(UINT count, ID3D12DescriptorHeap* const* heaps) {
+    if (count > 2) throw std::invalid_argument("Native D3D12: more than two descriptor heaps");
+    std::array<ID3D12DescriptorHeap*, 2> copy{};
+    std::copy_n(heaps, count, copy.begin());
+    Rec([=](L* l) { l->SetDescriptorHeaps(count, copy.data()); });
+  }
+  void SetGraphicsRootSignature(ID3D12RootSignature* r) { Rec([=](L* l) { l->SetGraphicsRootSignature(r); }); }
+  void SetComputeRootSignature(ID3D12RootSignature* r) { Rec([=](L* l) { l->SetComputeRootSignature(r); }); }
+  void SetGraphicsRootDescriptorTable(UINT i, D3D12_GPU_DESCRIPTOR_HANDLE h) {
+    Rec([=](L* l) { l->SetGraphicsRootDescriptorTable(i, h); });
+  }
+  void SetComputeRootDescriptorTable(UINT i, D3D12_GPU_DESCRIPTOR_HANDLE h) {
+    Rec([=](L* l) { l->SetComputeRootDescriptorTable(i, h); });
+  }
+  void SetGraphicsRootConstantBufferView(UINT i, D3D12_GPU_VIRTUAL_ADDRESS a) {
+    Rec([=](L* l) { l->SetGraphicsRootConstantBufferView(i, a); });
+  }
+  void SetComputeRoot32BitConstants(UINT i, UINT count, const void* data, UINT offset) {
+    if (!commands_.deferred()) { Direct()->SetComputeRoot32BitConstants(i, count, data, offset); return; }
+    std::vector<uint32_t> copy(count);
+    std::memcpy(copy.data(), data, size_t(count) * 4);
+    Rec([=, copy = std::move(copy)](L* l) { l->SetComputeRoot32BitConstants(i, count, copy.data(), offset); });
+  }
+  void RSSetViewports(UINT count, const D3D12_VIEWPORT* v) {
+    if (!commands_.deferred()) { Direct()->RSSetViewports(count, v); return; }
+    std::vector<D3D12_VIEWPORT> copy(v, v + count);
+    Rec([copy = std::move(copy)](L* l) { l->RSSetViewports(UINT(copy.size()), copy.data()); });
+  }
+  void RSSetScissorRects(UINT count, const D3D12_RECT* r) {
+    if (!commands_.deferred()) { Direct()->RSSetScissorRects(count, r); return; }
+    std::vector<D3D12_RECT> copy(r, r + count);
+    Rec([copy = std::move(copy)](L* l) { l->RSSetScissorRects(UINT(copy.size()), copy.data()); });
+  }
+  void OMSetRenderTargets(UINT count, const D3D12_CPU_DESCRIPTOR_HANDLE* targets, BOOL single,
+                          const D3D12_CPU_DESCRIPTOR_HANDLE* depth) {
+    if (!commands_.deferred()) { Direct()->OMSetRenderTargets(count, targets, single, depth); return; }
+    // A single-handle range passes one descriptor for all targets.
+    std::vector<D3D12_CPU_DESCRIPTOR_HANDLE> copy;
+    if (targets) copy.assign(targets, targets + (single ? std::min(count, 1u) : count));
+    std::optional<D3D12_CPU_DESCRIPTOR_HANDLE> ds;
+    if (depth) ds = *depth;
+    Rec([=, copy = std::move(copy)](L* l) {
+      l->OMSetRenderTargets(count, copy.empty() ? nullptr : copy.data(), single, ds ? &*ds : nullptr);
+    });
+  }
+  void IASetPrimitiveTopology(D3D12_PRIMITIVE_TOPOLOGY t) { Rec([=](L* l) { l->IASetPrimitiveTopology(t); }); }
+  void IASetIndexBuffer(const D3D12_INDEX_BUFFER_VIEW* view) {
+    std::optional<D3D12_INDEX_BUFFER_VIEW> copy;
+    if (view) copy = *view;
+    Rec([=](L* l) { l->IASetIndexBuffer(copy ? &*copy : nullptr); });
+  }
+  void DrawInstanced(UINT v, UINT i, UINT sv, UINT si) { Rec([=](L* l) { l->DrawInstanced(v, i, sv, si); }); }
+  void DrawIndexedInstanced(UINT n, UINT i, UINT si, INT bv, UINT sinst) {
+    Rec([=](L* l) { l->DrawIndexedInstanced(n, i, si, bv, sinst); });
+  }
+  void Dispatch(UINT x, UINT y, UINT z) { Rec([=](L* l) { l->Dispatch(x, y, z); }); }
+  void ResourceBarrier(UINT count, const D3D12_RESOURCE_BARRIER* b) {
+    if (!commands_.deferred()) { Direct()->ResourceBarrier(count, b); return; }
+    std::vector<D3D12_RESOURCE_BARRIER> copy(b, b + count);
+    Rec([copy = std::move(copy)](L* l) { l->ResourceBarrier(UINT(copy.size()), copy.data()); });
+  }
+  void CopyBufferRegion(ID3D12Resource* dst, UINT64 dst_offset, ID3D12Resource* src, UINT64 src_offset, UINT64 bytes) {
+    Rec([=](L* l) { l->CopyBufferRegion(dst, dst_offset, src, src_offset, bytes); });
+  }
+  void CopyTextureRegion(const D3D12_TEXTURE_COPY_LOCATION* dst, UINT x, UINT y, UINT z,
+                         const D3D12_TEXTURE_COPY_LOCATION* src, const D3D12_BOX* box) {
+    if (!commands_.deferred()) { Direct()->CopyTextureRegion(dst, x, y, z, src, box); return; }
+    const auto d = *dst, s = *src;
+    std::optional<D3D12_BOX> b;
+    if (box) b = *box;
+    Rec([=](L* l) { l->CopyTextureRegion(&d, x, y, z, &s, b ? &*b : nullptr); });
+  }
+  void EndQuery(ID3D12QueryHeap* heap, D3D12_QUERY_TYPE type, UINT index) {
+    Rec([=](L* l) { l->EndQuery(heap, type, index); });
+  }
+  void ResolveQueryData(ID3D12QueryHeap* heap, D3D12_QUERY_TYPE type, UINT start, UINT count,
+                        ID3D12Resource* destination, UINT64 offset) {
+    Rec([=](L* l) { l->ResolveQueryData(heap, type, start, count, destination, offset); });
+  }
+ private:
+  using L = ID3D12GraphicsCommandList;
+  template <class F> void Rec(F&& f) { commands_.Record(std::forward<F>(f)); }
+  // Only while nothing is deferred: the caller's arguments are used at once.
+  L* Direct() const { return commands_.list(); }
+  DeferredCommands<L> commands_;
+};
+}

@@ -239,7 +239,7 @@ D3D12Render::TextureTables D3D12Render::BindTextures(const RegisterFile& r, rex:
           D3D12_TEXTURE_COPY_LOCATION src{}; src.pResource = upload.resource.Get(); src.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT; src.PlacedFootprint = footprints[subresource];
           src.PlacedFootprint.Offset += upload.offset;
           D3D12_TEXTURE_COPY_LOCATION dst{}; dst.pResource = texture.Get(); dst.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX; dst.SubresourceIndex = subresource;
-          list_->CopyTextureRegion(&dst, 0, 0, 0, &src, nullptr);
+          cmd_.CopyTextureRegion(&dst, 0, 0, 0, &src, nullptr);
         }
         if (stats_enabled_) { ++cpu_texture_loads_; ++texture_uploads_; texture_upload_bytes_ += bytes; }
       }
@@ -298,7 +298,7 @@ uint32_t D3D12Render::Sampler(const D3D12_SAMPLER_DESC& s) {
   return it->second;
 }
 void D3D12Render::SetTextureTables(const TextureTables& tables, unsigned root) {
-  if (tables.indices) list_->SetGraphicsRootConstantBufferView(root, tables.indices);
+  if (tables.indices) cmd_.SetGraphicsRootConstantBufferView(root, tables.indices);
 }
 void D3D12Render::TextureWatch(void*, void* data, uint64_t argument, bool) {
   // Under GuestMemoryMirror::Lock(); the fired watch is already retired.
@@ -335,10 +335,10 @@ void D3D12Render::LoadTextureGpu(const TextureLoadPlan& plan, ID3D12Resource* te
   D3D12_UNORDERED_ACCESS_VIEW_DESC uav{}; uav.Format = UintPow2Format(plan.dest_bpe_log2); uav.ViewDimension = D3D12_UAV_DIMENSION_BUFFER;
   uav.Buffer.NumElements = UINT(scratch->size >> plan.dest_bpe_log2);
   device_->CreateUnorderedAccessView(scratch->buffer.Get(), nullptr, &uav, Cpu(v + 1));
-  ID3D12DescriptorHeap* heaps[]{views_.Get(), samplers_.Get()}; list_->SetDescriptorHeaps(2, heaps);
-  list_->SetComputeRootSignature(load_root_.Get()); list_->SetPipelineState(pipeline.Get());
-  list_->SetComputeRootDescriptorTable(1, Gpu(v)); list_->SetComputeRootDescriptorTable(2, Gpu(v + 1));
-  RecordTextureLoad(list_.Get(), plan, offset, scratch->buffer.Get(), texture);
+  ID3D12DescriptorHeap* heaps[]{views_.Get(), samplers_.Get()}; cmd_.SetDescriptorHeaps(2, heaps);
+  cmd_.SetComputeRootSignature(load_root_.Get()); cmd_.SetPipelineState(pipeline.Get());
+  cmd_.SetComputeRootDescriptorTable(1, Gpu(v)); cmd_.SetComputeRootDescriptorTable(2, Gpu(v + 1));
+  RecordTextureLoad(cmd_, plan, offset, scratch->buffer.Get(), texture);
   scratch->state = D3D12_RESOURCE_STATE_COPY_SOURCE;
 }
 }

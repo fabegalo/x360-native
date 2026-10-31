@@ -1,4 +1,5 @@
 #include "../../src/native/textures/texture_load.h"
+#include "../../src/native/d3d12/d3d12_commands.h"
 #include <rex/graphics/pipeline/texture/info.h>
 #include <catch2/catch_test_macros.hpp>
 #include <d3d12.h>
@@ -141,7 +142,9 @@ void Compare(Gpu& gpu, TextureFormat format, DataDimension dimension, bool tiled
   gpu.list->SetComputeRootSignature(gpu.root.Get()); gpu.list->SetPipelineState(pipeline.Get());
   gpu.list->SetComputeRootDescriptorTable(1, gpu_handle);
   gpu_handle.ptr += increment; gpu.list->SetComputeRootDescriptorTable(2, gpu_handle);
-  RecordTextureLoad(gpu.list.Get(), plan, scratch_offset, scratch.Get(), texture.Get());
+  D3D12Commands recorder;
+  recorder.Attach(gpu.list.Get());
+  RecordTextureLoad(recorder, plan, scratch_offset, scratch.Get(), texture.Get());
   b.Transition = {texture.Get(), D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES, D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_COPY_SOURCE};
   gpu.list->ResourceBarrier(1, &b);
   auto readback = gpu.Buffer(total, D3D12_HEAP_TYPE_READBACK, D3D12_RESOURCE_STATE_COPY_DEST);

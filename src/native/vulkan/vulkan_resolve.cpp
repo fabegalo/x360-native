@@ -111,7 +111,7 @@ void VulkanRender::Resolve(const RegisterFile& regs, rex::memory::Memory& memory
       const auto upload=Upload(initial.data(),initial.size(),4);
       UseBuffer(scaled_buffer->handle(),scaled_access,VK_PIPELINE_STAGE_TRANSFER_BIT,VK_ACCESS_TRANSFER_WRITE_BIT);
       const VkBufferCopy initial_copy{upload.offset,0,initial.size()};
-      fn.vkCmdCopyBuffer(commands_,upload.buffer,scaled_buffer->handle(),1,&initial_copy);
+      cmd_.CopyBuffer(upload.buffer,scaled_buffer->handle(),1,&initial_copy);
       UseBuffer(scaled_buffer->handle(),scaled_access,VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,VK_ACCESS_SHADER_WRITE_BIT);
       submissions_.Retain(scaled_buffer); submissions_.Retain(scaled_readback);
     }
@@ -123,12 +123,12 @@ void VulkanRender::Resolve(const RegisterFile& regs, rex::memory::Memory& memory
     fn.vkUpdateDescriptorSets(device_.device(), 1, &dest_write, 0, nullptr);
     UseBuffer(guest_buffer_->handle(), guest_access_, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_ACCESS_SHADER_WRITE_BIT);
     UseBuffer(edram_buffer_->handle(), edram_access_, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_ACCESS_SHADER_READ_BIT);
-    fn.vkCmdBindPipeline(commands_, VK_PIPELINE_BIND_POINT_COMPUTE, copy_pipelines_[index]);
+    cmd_.BindPipeline(VK_PIPELINE_BIND_POINT_COMPUTE, copy_pipelines_[index]);
     const VkDescriptorSet sets[]{edram_set, dest_set};
-    fn.vkCmdBindDescriptorSets(commands_, VK_PIPELINE_BIND_POINT_COMPUTE, copy_layout_, 0, 2, sets, 0, nullptr);
+    cmd_.BindDescriptorSets(VK_PIPELINE_BIND_POINT_COMPUTE, copy_layout_, 0, 2, sets, 0, nullptr);
     if (!scaled) constants.dest_base -= uint32_t(base);
-    fn.vkCmdPushConstants(commands_, copy_layout_, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(constants), &constants);
-    fn.vkCmdDispatch(commands_, groups_x, groups_y, 1);
+    cmd_.PushConstants(copy_layout_, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(constants), &constants);
+    cmd_.Dispatch(groups_x, groups_y, 1);
     if (scaled) {
       if (!downscale_pipeline_) downscale_pipeline_=ComputePipeline(downscale_layout_,CompileNativeGlsl(VK_SHADER_STAGE_COMPUTE_BIT,kResolveDownsampleGlsl));
       UseBuffer(scaled_buffer->handle(),scaled_access,VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,VK_ACCESS_SHADER_READ_BIT);
@@ -140,18 +140,18 @@ void VulkanRender::Resolve(const RegisterFile& regs, rex::memory::Memory& memory
       UseBuffer(guest_buffer_->handle(),guest_access_,VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,VK_ACCESS_SHADER_WRITE_BIT);
       const uint32_t downsample[]{length,pixel_log2,scale_x_,scale_y_,(info.copy_dest_extent_start-info.copy_dest_base)*area,uint32_t(info.copy_dest_extent_start-base)};
       const VkDescriptorSet downscale_sets[]{source_set,canonical_set};
-      fn.vkCmdBindPipeline(commands_,VK_PIPELINE_BIND_POINT_COMPUTE,downscale_pipeline_);
-      fn.vkCmdBindDescriptorSets(commands_,VK_PIPELINE_BIND_POINT_COMPUTE,downscale_layout_,0,2,downscale_sets,0,nullptr);
-      fn.vkCmdPushConstants(commands_,downscale_layout_,VK_SHADER_STAGE_COMPUTE_BIT,0,sizeof(downsample),downsample);
-      fn.vkCmdDispatch(commands_,(length+255)/256,1,1);
+      cmd_.BindPipeline(VK_PIPELINE_BIND_POINT_COMPUTE,downscale_pipeline_);
+      cmd_.BindDescriptorSets(VK_PIPELINE_BIND_POINT_COMPUTE,downscale_layout_,0,2,downscale_sets,0,nullptr);
+      cmd_.PushConstants(downscale_layout_,VK_SHADER_STAGE_COMPUTE_BIT,0,sizeof(downsample),downsample);
+      cmd_.Dispatch((length+255)/256,1,1);
       UseBuffer(scaled_buffer->handle(),scaled_access,VK_PIPELINE_STAGE_TRANSFER_BIT,VK_ACCESS_TRANSFER_READ_BIT);
       const VkBufferCopy scaled_copy{0,0,scaled_range*area};
-      fn.vkCmdCopyBuffer(commands_,scaled_buffer->handle(),scaled_readback->handle(),1,&scaled_copy);
+      cmd_.CopyBuffer(scaled_buffer->handle(),scaled_readback->handle(),1,&scaled_copy);
       VkBufferMemoryBarrier ready{VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER};
       ready.srcAccessMask=VK_ACCESS_TRANSFER_WRITE_BIT; ready.dstAccessMask=VK_ACCESS_HOST_READ_BIT;
       ready.srcQueueFamilyIndex=ready.dstQueueFamilyIndex=VK_QUEUE_FAMILY_IGNORED;
       ready.buffer=scaled_readback->handle(); ready.size=VK_WHOLE_SIZE;
-      fn.vkCmdPipelineBarrier(commands_,VK_PIPELINE_STAGE_TRANSFER_BIT,VK_PIPELINE_STAGE_HOST_BIT,0,0,nullptr,1,&ready,0,nullptr);
+      cmd_.PipelineBarrier(VK_PIPELINE_STAGE_TRANSFER_BIT,VK_PIPELINE_STAGE_HOST_BIT,0,0,nullptr,1,&ready,0,nullptr);
     }
     std::vector<uint64_t> cpu_generations;
     mirror.RangeWrittenByGpu(info.copy_dest_extent_start, length, &cpu_generations, ticket.cpu_generations);
@@ -161,7 +161,7 @@ void VulkanRender::Resolve(const RegisterFile& regs, rex::memory::Memory& memory
     }
     UseBuffer(guest_buffer_->handle(), guest_access_, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_TRANSFER_READ_BIT);
     const VkBufferCopy copy{info.copy_dest_extent_start, readback_used_, length};
-    fn.vkCmdCopyBuffer(commands_, guest_buffer_->handle(), readback_->handle(), 1, &copy);
+    cmd_.CopyBuffer(guest_buffer_->handle(), readback_->handle(), 1, &copy);
     VkBufferMemoryBarrier host{VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER};
     host.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
     host.dstAccessMask = VK_ACCESS_HOST_READ_BIT;
@@ -169,7 +169,7 @@ void VulkanRender::Resolve(const RegisterFile& regs, rex::memory::Memory& memory
     host.buffer = readback_->handle();
     host.offset = readback_used_;
     host.size = length;
-    fn.vkCmdPipelineBarrier(commands_, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_HOST_BIT,
+    cmd_.PipelineBarrier(VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_HOST_BIT,
         0, 0, nullptr, 1, &host, 0, nullptr);
     writeback_.Add(info.copy_dest_extent_start, length, readback_used_, std::move(cpu_generations));
     readback_used_ += length;
@@ -187,10 +187,10 @@ void VulkanRender::Resolve(const RegisterFile& regs, rex::memory::Memory& memory
     // Preserve depth/color clear ordering even when their EDRAM regions alias.
     UseBuffer(edram_buffer_->handle(), edram_access_, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
                VK_ACCESS_SHADER_WRITE_BIT);
-    fn.vkCmdBindPipeline(commands_, VK_PIPELINE_BIND_POINT_COMPUTE, clear_pipelines_[index]);
-    fn.vkCmdBindDescriptorSets(commands_, VK_PIPELINE_BIND_POINT_COMPUTE, clear_layout_, 0, 1, &edram_set, 0, nullptr);
-    fn.vkCmdPushConstants(commands_, clear_layout_, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(constants), &constants);
-    fn.vkCmdDispatch(commands_, groups.first, groups.second, 1);
+    cmd_.BindPipeline(VK_PIPELINE_BIND_POINT_COMPUTE, clear_pipelines_[index]);
+    cmd_.BindDescriptorSets(VK_PIPELINE_BIND_POINT_COMPUTE, clear_layout_, 0, 1, &edram_set, 0, nullptr);
+    cmd_.PushConstants(clear_layout_, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(constants), &constants);
+    cmd_.Dispatch(groups.first, groups.second, 1);
   };
   if (info.IsClearingDepth()) clear(true);
   if (info.IsClearingColor()) clear(false);

@@ -37,6 +37,57 @@ const std::vector<uint8_t>& D3D12Render::RectangleShader(unsigned interpolators,
   return binary;
 }
 
+D3D12Render::Ptr<ID3D12PipelineState> D3D12Render::CreatePipeline(D3D12_GRAPHICS_PIPELINE_STATE_DESC pd,
+    uint64_t vs_hash, uint64_t ps_hash, uint64_t vm, uint64_t pm, uint32_t primitive, uint32_t msaa,
+    unsigned planes, uint32_t mask, size_t id) {
+  // Runs on a pipeline worker (or inline with native_pipeline_threads=0).
+  // Uses only immutable renderer state, the thread-safe device and atomics.
+  auto disk = pipeline_store_.Load(pd);
+  const auto start = stats_enabled_ ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
+  const auto thread_start = stats_enabled_ ? CpuNs(false) : 0;
+  if (stats_enabled_) REXLOG_INFO("Native PSO begin id={} VS={:016X} PS={:016X} vm={:016X} pm={:016X} primitive={} msaa={}",
+      id, vs_hash, ps_hash, vm, pm, primitive, msaa);
+  Ptr<ID3D12PipelineState> pipeline;
+  pd.CachedPSO = {disk.blob.data(), disk.blob.size()};
+  auto hr = device_->CreateGraphicsPipelineState(&pd, IID_PPV_ARGS(&pipeline));
+  if (!disk.blob.empty()) {
+    if (SUCCEEDED(hr)) ++pipeline_disk_hits_;
+    else {
+      ++pipeline_disk_rejects_; pipeline.Reset(); pd.CachedPSO = {};
+      // Opaque blobs may become invalid after a driver or adapter change.
+      hr = device_->CreateGraphicsPipelineState(&pd, IID_PPV_ARGS(&pipeline));
+    }
+  }
+  if (SUCCEEDED(hr) && (disk.blob.empty() || !pd.CachedPSO.CachedBlobSizeInBytes)) pipeline_store_.Save(disk, pipeline.Get());
+  if (stats_enabled_) {
+    auto wall = std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - start).count();
+    auto thread = CpuNs(false) - thread_start;
+    pipeline_ns_async_ += wall; pipeline_thread_ns_async_ += thread; ++pipeline_creations_;
+    REXLOG_INFO("Native PSO end id={} wall_ms={} thread_cpu_ms={} HRESULT={:08X}",
+        id, wall / 1000000, thread / 1000000, uint32_t(hr));
+  }
+  if (FAILED(hr)) {
+    REXLOG_ERROR("Native PSO HRESULT={:08X} VS={:016X} PS={:016X} primitive={} MSAA={} clip={} interpolators={:X}",
+        uint32_t(hr), vs_hash, ps_hash, primitive, msaa, planes, mask);
+    if (!REXCVAR_GET(dump_shaders).empty()) {
+      const char* names[]{"failed-vs", "failed-ps", "failed-gs"};
+      D3D12_SHADER_BYTECODE stages[]{pd.VS, pd.PS, pd.GS};
+      for (unsigned i = 0; i < 3; ++i) if (stages[i].BytecodeLength) {
+        auto path = std::filesystem::path(REXCVAR_GET(dump_shaders)) / names[i];
+        std::ofstream binary(path.string() + ".dxbc", std::ios::binary);
+        binary.write(static_cast<const char*>(stages[i].pShaderBytecode), stages[i].BytecodeLength);
+        Ptr<ID3DBlob> disassembly;
+        if (SUCCEEDED(D3DDisassemble(stages[i].pShaderBytecode, stages[i].BytecodeLength, 0, nullptr, &disassembly))) {
+          std::ofstream text(path.string() + ".txt");
+          text.write(static_cast<const char*>(disassembly->GetBufferPointer()), disassembly->GetBufferSize());
+        }
+      }
+    }
+    throw std::runtime_error("Native draw: graphics pipeline creation failed HRESULT=" + std::to_string(uint32_t(hr)));
+  }
+  return pipeline;
+}
+
 void D3D12Render::Draw(const RegisterFile& r, rex::memory::Memory& memory, Shader* vertex, Shader* pixel,
     PrimitiveType primitive, uint32_t count, const DrawIndices* indices, DrawPurpose purpose) {
   Timer timer(stats_enabled_, draw_ns_);
@@ -198,8 +249,7 @@ void D3D12Render::Draw(const RegisterFile& r, rex::memory::Memory& memory, Shade
   // Pointer identity is stable in the shader cache. The zeroed descriptor also includes every pipeline state.
   std::string key(reinterpret_cast<const char*>(&pd), sizeof(pd));
   auto& pipeline = pipelines_[key];
-  if (!pipeline) {
-    auto disk = pipeline_store_.Load(pd);
+  if (!pipeline.valid()) {
     static const auto pso_dump = REXCVAR_GET(native_pso_dump);
     if (!pso_dump.empty()) {
       const auto dir = std::filesystem::path(pso_dump);
@@ -216,49 +266,16 @@ void D3D12Render::Draw(const RegisterFile& r, rex::memory::Memory& memory, Shade
       save("ps.dxbc", pd.PS.pShaderBytecode, pd.PS.BytecodeLength);
       save("gs.dxbc", pd.GS.pShaderBytecode, pd.GS.BytecodeLength);
     }
-    const auto start = stats_enabled_ ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
-    const auto thread_start = stats_enabled_ ? CpuNs(false) : 0;
-    const auto process_start = stats_enabled_ ? CpuNs(true) : 0;
-    if (stats_enabled_) REXLOG_INFO("Native PSO begin id={} VS={:016X} PS={:016X} vm={:016X} pm={:016X} primitive={} msaa={}",
-        pipelines_.size(), vs.ucode_data_hash(), ps ? ps->ucode_data_hash() : 0, vm.value, pm.value, uint32_t(primitive), uint32_t(msaa));
-    pd.CachedPSO = {disk.blob.data(), disk.blob.size()};
-    auto hr = device_->CreateGraphicsPipelineState(&pd, IID_PPV_ARGS(&pipeline));
-    if (!disk.blob.empty()) {
-      if (SUCCEEDED(hr)) ++pipeline_disk_hits_;
-      else {
-        ++pipeline_disk_rejects_; pipeline.Reset(); pd.CachedPSO = {};
-        // Opaque blobs may become invalid after a driver or adapter change.
-        hr = device_->CreateGraphicsPipelineState(&pd, IID_PPV_ARGS(&pipeline));
-      }
-    }
-    if (SUCCEEDED(hr) && (disk.blob.empty() || !pd.CachedPSO.CachedBlobSizeInBytes)) pipeline_store_.Save(disk, pipeline.Get());
-    if (stats_enabled_) {
-      auto wall = std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - start).count();
-      auto thread = CpuNs(false) - thread_start, process = CpuNs(true) - process_start;
-      pipeline_ns_ += wall; pipeline_thread_ns_ += thread; pipeline_process_ns_ += process; ++pipeline_creations_;
-      REXLOG_INFO("Native PSO end id={} wall_ms={} thread_cpu_ms={} process_cpu_ms={} HRESULT={:08X}",
-          pipelines_.size(), wall / 1000000, thread / 1000000, process / 1000000, uint32_t(hr));
-    }
-    if (FAILED(hr)) {
-      REXLOG_ERROR("Native PSO HRESULT={:08X} VS={:016X} PS={:016X} primitive={} MSAA={} clip={} interpolators={:X}",
-          uint32_t(hr), vs.ucode_data_hash(), ps ? ps->ucode_data_hash() : 0,
-          uint32_t(primitive), uint32_t(msaa), planes, mask);
-      if (!REXCVAR_GET(dump_shaders).empty()) {
-        const char* names[]{"failed-vs", "failed-ps", "failed-gs"};
-        D3D12_SHADER_BYTECODE stages[]{pd.VS, pd.PS, pd.GS};
-        for (unsigned i = 0; i < 3; ++i) if (stages[i].BytecodeLength) {
-          auto path = std::filesystem::path(REXCVAR_GET(dump_shaders)) / names[i];
-          std::ofstream binary(path.string() + ".dxbc", std::ios::binary);
-          binary.write(static_cast<const char*>(stages[i].pShaderBytecode), stages[i].BytecodeLength);
-          Ptr<ID3DBlob> disassembly;
-          if (SUCCEEDED(D3DDisassemble(stages[i].pShaderBytecode, stages[i].BytecodeLength, 0, nullptr, &disassembly))) {
-            std::ofstream text(path.string() + ".txt");
-            text.write(static_cast<const char*>(disassembly->GetBufferPointer()), disassembly->GetBufferSize());
-          }
-        }
-      }
-      throw std::runtime_error("Native draw: graphics pipeline creation failed HRESULT=" + std::to_string(uint32_t(hr)));
-    }
+    // The description points at translations, geometry/tessellation shaders
+    // and root signatures that live as long as this renderer. Creation runs
+    // on a pipeline worker; the draw is recorded now and bound to the result
+    // (D3D12Commands), so the render thread keeps recording while drivers
+    // compile, and pipelines of one submission compile concurrently.
+    pipeline = pipeline_workers_->Submit(std::function<Ptr<ID3D12PipelineState>()>(
+        [this, pd, vs_hash = vs.ucode_data_hash(), ps_hash = ps ? ps->ucode_data_hash() : 0, vm = vm.value, pm = pm.value,
+         primitive = uint32_t(primitive), msaa = uint32_t(msaa), planes, mask, id = pipelines_.size()] {
+          return CreatePipeline(pd, vs_hash, ps_hash, vm, pm, primitive, msaa, planes, mask, id);
+        }));
   }
   // Ranges this draw reads on the CPU (indices, textures converted on the
   // CPU) must hold earlier resolve results before anything is recorded (a
@@ -358,18 +375,18 @@ void D3D12Render::Draw(const RegisterFile& r, rex::memory::Memory& memory, Shade
   // earlier accesses itself.
   if (edram_state_ != D3D12_RESOURCE_STATE_UNORDERED_ACCESS) edram_rov_layout_.reset();
   Transition(edram_.Get(), edram_state_, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
-  ID3D12DescriptorHeap* heaps[]{views_.Get(), samplers_.Get()}; list_->SetDescriptorHeaps(2, heaps);
-  list_->SetGraphicsRootSignature(pd.pRootSignature); list_->SetPipelineState(pipeline.Get());
-  list_->SetGraphicsRootDescriptorTable(5, MemoryTable(memexport));
+  ID3D12DescriptorHeap* heaps[]{views_.Get(), samplers_.Get()}; cmd_.SetDescriptorHeaps(2, heaps);
+  cmd_.SetGraphicsRootSignature(pd.pRootSignature); cmd_.SetPipelineState(pipeline);
+  cmd_.SetGraphicsRootDescriptorTable(5, MemoryTable(memexport));
   auto depth = draw_util::GetNormalizedDepthControl(r);
   draw_util::ViewportInfo viewport{{0, 0}, {1, 1}, 0, 1, {1, 1, 1}, {0, 0, 0}};
   if (rasterization) draw_util::GetHostViewportInfo(r, scale_x_, scale_y_, true, D3D12_VIEWPORT_BOUNDS_MAX, D3D12_VIEWPORT_BOUNDS_MAX, false, depth, false, false, ps && ps->writes_depth(), viewport);
   D3D12_VIEWPORT vp{float(viewport.xy_offset[0]), float(viewport.xy_offset[1]), float(viewport.xy_extent[0]), float(viewport.xy_extent[1]), viewport.z_min, viewport.z_max};
-  list_->RSSetViewports(1, &vp);
+  cmd_.RSSetViewports(1, &vp);
   draw_util::Scissor sc{{0, 0}, {0, 0}}; if (rasterization) draw_util::GetScissor(r, sc);
   D3D12_RECT rect{LONG(sc.offset[0] * scale_x_), LONG(sc.offset[1] * scale_y_),
       LONG((sc.offset[0] + sc.extent[0]) * scale_x_), LONG((sc.offset[1] + sc.extent[1]) * scale_y_)};
-  list_->RSSetScissorRects(1, &rect);
+  cmd_.RSSetScissorRects(1, &rect);
   T::SystemConstants c{};
   c.textures_resolution_scaled = textures_resolution_scaled_;
   c.tessellation_factor_range[0] = r.Get<float>(XE_GPU_REG_VGT_HOS_MIN_TESS_LEVEL) + 1.0f;
@@ -465,28 +482,28 @@ void D3D12Render::Draw(const RegisterFile& r, rex::memory::Memory& memory, Shade
     if (stats_enabled_) ++edram_layout_barriers_;
   }
   edram_rov_layout_ = layout;
-  list_->SetGraphicsRootConstantBufferView(0, Constants(&c, sizeof(c)));
+  cmd_.SetGraphicsRootConstantBufferView(0, Constants(&c, sizeof(c)));
   auto floats = [&](Shader& shader, unsigned start, unsigned root) {
     uint32_t packed[1024]{}; unsigned n = 0;
     const auto& map = shader.constant_register_map();
     for (unsigned i = 0; i < 256; ++i) if ((map.float_bitmap[i / 64] >> (i % 64)) & 1) {
       std::memcpy(packed + n, &r[start + i * 4], 16); n += 4;
     }
-    list_->SetGraphicsRootConstantBufferView(root, Constants(packed, std::max(n * 4, 16u)));
+    cmd_.SetGraphicsRootConstantBufferView(root, Constants(packed, std::max(n * 4, 16u)));
   };
   const uint32_t vs_constants = FloatConstantBase(r, true), ps_constants = FloatConstantBase(r, false);
   Require(vs_constants + 256 <= 512 && (!ps || ps_constants + 256 <= 512), "float constant bank outside register file");
   floats(vs, XE_GPU_REG_SHADER_CONSTANT_000_X + vs_constants * 4, 1);
   if (ps) floats(*ps, XE_GPU_REG_SHADER_CONSTANT_000_X + ps_constants * 4, 2);
-  list_->SetGraphicsRootConstantBufferView(3, Constants(&r[XE_GPU_REG_SHADER_CONSTANT_BOOL_000_031], 40 * 4));
-  list_->SetGraphicsRootConstantBufferView(4, Constants(&r[XE_GPU_REG_SHADER_CONSTANT_FETCH_00_0], 192 * 4));
+  cmd_.SetGraphicsRootConstantBufferView(3, Constants(&r[XE_GPU_REG_SHADER_CONSTANT_BOOL_000_031], 40 * 4));
+  cmd_.SetGraphicsRootConstantBufferView(4, Constants(&r[XE_GPU_REG_SHADER_CONSTANT_FETCH_00_0], 192 * 4));
   SetTextureTables(pixel_tables, 6); SetTextureTables(vertex_tables, 8);
-  list_->SetGraphicsRootDescriptorTable(7, Gpu(0, true));
-  list_->SetGraphicsRootDescriptorTable(9, Gpu(0));
-  list_->OMSetRenderTargets(0, nullptr, FALSE, nullptr);
-  list_->IASetPrimitiveTopology(tess ? D3D_PRIMITIVE_TOPOLOGY(D3D_PRIMITIVE_TOPOLOGY_1_CONTROL_POINT_PATCHLIST + tess.control_points - 1) : !rasterization || point ? D3D_PRIMITIVE_TOPOLOGY_POINTLIST : line ? D3D_PRIMITIVE_TOPOLOGY_LINELIST : (primitive == PrimitiveType::kTriangleStrip || primitive == PrimitiveType::k2DTriStrip) ? D3D_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP : D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-  if (indices || convert) { list_->IASetIndexBuffer(&ib); for (const auto& range : index_ranges) list_->DrawIndexedInstanced(range.count, 1, range.offset, 0, 0); }
-  else list_->DrawInstanced(count, 1, 0, 0);
+  cmd_.SetGraphicsRootDescriptorTable(7, Gpu(0, true));
+  cmd_.SetGraphicsRootDescriptorTable(9, Gpu(0));
+  cmd_.OMSetRenderTargets(0, nullptr, FALSE, nullptr);
+  cmd_.IASetPrimitiveTopology(tess ? D3D_PRIMITIVE_TOPOLOGY(D3D_PRIMITIVE_TOPOLOGY_1_CONTROL_POINT_PATCHLIST + tess.control_points - 1) : !rasterization || point ? D3D_PRIMITIVE_TOPOLOGY_POINTLIST : line ? D3D_PRIMITIVE_TOPOLOGY_LINELIST : (primitive == PrimitiveType::kTriangleStrip || primitive == PrimitiveType::k2DTriStrip) ? D3D_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP : D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+  if (indices || convert) { cmd_.IASetIndexBuffer(&ib); for (const auto& range : index_ranges) cmd_.DrawIndexedInstanced(range.count, 1, range.offset, 0, 0); }
+  else cmd_.DrawInstanced(count, 1, 0, 0);
   for (const auto& range : memexport_ranges) QueueGuestWrite(range.address, range.length);
   ++draw_count_;
 }

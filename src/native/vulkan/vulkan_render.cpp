@@ -1,7 +1,9 @@
 #include "vulkan_render.h"
 #include <rex/ui/vulkan/provider.h>
 #include <rex/ui/vulkan/instance.h>
+#if defined(_WIN32)
 #include <Windows.h>
+#endif
 #include <rex/logging.h>
 #include <algorithm>
 #include <cstring>
@@ -10,7 +12,8 @@
 
 namespace x360n::native {
 VulkanRender::VulkanRender(rex::ui::vulkan::VulkanProvider& provider)
-    : device_(*provider.vulkan_device()), submissions_(device_) {
+    : device_(*provider.vulkan_device()), submissions_(device_),
+      pipeline_workers_(std::make_unique<PipelineWorkers>(NativePipelineThreads())) {
   const auto& fn = device_.functions();
   const auto vk = device_.device();
   try {
@@ -57,8 +60,8 @@ VulkanRender::VulkanRender(rex::ui::vulkan::VulkanProvider& provider)
     CheckVulkan(fn.vkCreatePipelineLayout(vk, &layout, nullptr, &clear_layout_), "create resolve clear layout");
     Begin();
     UseBuffer(edram_buffer_->handle(), edram_access_, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_TRANSFER_WRITE_BIT);
-    LoadNativeVulkanFunction<PFN_vkCmdFillBuffer>(device_, "vkCmdFillBuffer")(
-        commands_, edram_buffer_->handle(), 0, VK_WHOLE_SIZE, 0);
+    cmd_.FillBuffer(LoadNativeVulkanFunction<PFN_vkCmdFillBuffer>(device_, "vkCmdFillBuffer"),
+        edram_buffer_->handle(), 0, VK_WHOLE_SIZE, 0);
   } catch (...) { Destroy(); throw; }
 }
 VulkanRender::~VulkanRender() {
@@ -108,6 +111,7 @@ void VulkanRender::Destroy() {
 void VulkanRender::Begin() {
   if (commands_) return;
   commands_ = submissions_.Begin();
+  cmd_.Attach(commands_);
   PublishCompleted();
   auto& arena = arenas_[submissions_.current_slot()];
   if (arena.serial) throw std::logic_error("Native Vulkan: reusing unpublished readback slot");
@@ -126,12 +130,15 @@ void VulkanRender::Begin() {
 }
 void VulkanRender::EndRendering() {
   if (!rendering_) return;
-  device_.functions().vkCmdEndRenderPass(commands_);
+  cmd_.EndRenderPass();
   rendering_ = false;
 }
 void VulkanRender::Flush(bool wait) {
   if (commands_) {
     EndRendering();
+    // Bind pipelines that were still compiling and emit the commands kept
+    // behind them, in order, before the command buffer is ended.
+    cmd_.Replay();
     auto& arena = arenas_[submissions_.current_slot()];
     if (arena.serial) throw std::logic_error("Native Vulkan: overwriting pending publication");
     const auto serial = submissions_.Submit();
@@ -308,14 +315,20 @@ void VulkanRender::SavePipelineCache() {
   std::error_code error;
   std::filesystem::create_directories(pipeline_file_.parent_path(), error);
   if (error) return;
-  const auto temporary = std::filesystem::path(pipeline_file_.wstring() + L".tmp");
+  auto temporary = pipeline_file_;
+  temporary += ".tmp";
   std::ofstream stream(temporary, std::ios::binary | std::ios::trunc);
   if (!stream.write(reinterpret_cast<const char*>(bytes.data()), size)) return;
   stream.close();
   // Cache contents are optional and device-specific; a failed replacement must
   // never interfere with guest execution or discard the preceding valid file.
-  if (!MoveFileExW(temporary.c_str(), pipeline_file_.c_str(), MOVEFILE_REPLACE_EXISTING))
-    REXLOG_WARN("Native Vulkan: unable to persist pipeline cache");
+#if defined(_WIN32)
+  const bool replaced = MoveFileExW(temporary.c_str(), pipeline_file_.c_str(), MOVEFILE_REPLACE_EXISTING);
+#else
+  std::filesystem::rename(temporary, pipeline_file_, error);  // rename(2) replaces atomically.
+  const bool replaced = !error;
+#endif
+  if (!replaced) REXLOG_WARN("Native Vulkan: unable to persist pipeline cache");
 }
 SampleCounts VulkanRender::ReadSampleCounts(bool counting_after) {
   Begin();
@@ -327,14 +340,14 @@ SampleCounts VulkanRender::ReadSampleCounts(bool counting_after) {
   UseBuffer(edram_buffer_->handle(), edram_access_, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_TRANSFER_READ_BIT);
   const VkBufferCopy copy{edram_size_, 0, sizeof(SampleCounts)};
   const auto& fn = device_.functions();
-  fn.vkCmdCopyBuffer(commands_, edram_buffer_->handle(), readback_->handle(), 1, &copy);
+  cmd_.CopyBuffer(edram_buffer_->handle(), readback_->handle(), 1, &copy);
   VkBufferMemoryBarrier host{VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER};
   host.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
   host.dstAccessMask = VK_ACCESS_HOST_READ_BIT;
   host.srcQueueFamilyIndex = host.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
   host.buffer = readback_->handle();
   host.size = sizeof(SampleCounts);
-  fn.vkCmdPipelineBarrier(commands_, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_HOST_BIT,
+  cmd_.PipelineBarrier(VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_HOST_BIT,
       0, 0, nullptr, 1, &host, 0, nullptr);
   Flush(true);
   readback_->Invalidate(0, sizeof(SampleCounts));
@@ -349,7 +362,7 @@ void VulkanRender::SetSampleCounts(const SampleCounts& counts, bool visibility_o
   EndRendering();
   UseBuffer(edram_buffer_->handle(), edram_access_, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_TRANSFER_WRITE_BIT);
   const VkBufferCopy copy{upload.offset, edram_size_, sizeof(counts)};
-  device_.functions().vkCmdCopyBuffer(commands_, upload.buffer, edram_buffer_->handle(), 1, &copy);
+  cmd_.CopyBuffer(upload.buffer, edram_buffer_->handle(), 1, &copy);
   visibility_only_ = visibility_only;
 }
 GuestMemoryMirror& VulkanRender::Mirror(rex::memory::Memory& memory) {
@@ -365,7 +378,7 @@ void VulkanRender::UploadGuest(uint32_t address, uint32_t length) {
   EndRendering();
   UseBuffer(guest_buffer_->handle(), guest_access_, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_TRANSFER_WRITE_BIT);
   const VkBufferCopy copy{upload.offset, address, length};
-  device_.functions().vkCmdCopyBuffer(commands_, upload.buffer, guest_buffer_->handle(), 1, &copy);
+  cmd_.CopyBuffer(upload.buffer, guest_buffer_->handle(), 1, &copy);
 }
 void VulkanRender::UseBuffer(VkBuffer buffer, BufferAccess& previous,
                              VkPipelineStageFlags stage, VkAccessFlags access, bool force) {
@@ -384,7 +397,7 @@ void VulkanRender::UseBuffer(VkBuffer buffer, BufferAccess& previous,
   barrier.srcQueueFamilyIndex = barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
   barrier.buffer = buffer;
   barrier.size = VK_WHOLE_SIZE;
-  device_.functions().vkCmdPipelineBarrier(commands_, previous.stage, stage, 0,
+  cmd_.PipelineBarrier(previous.stage, stage, 0,
                                            0, nullptr, 1, &barrier, 0, nullptr);
   previous = {stage, access};
 }

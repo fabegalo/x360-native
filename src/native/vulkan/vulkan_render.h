@@ -3,6 +3,8 @@
 #include "../memory/scaled_resolve.h"
 #include "vulkan_core.h"
 #include "vulkan_shader_cache.h"
+#include "vulkan_commands.h"
+#include "../pipeline/pipeline_workers.h"
 #include "../commands/tessellation.h"
 #include "../memory/guest_memory_mirror.h"
 #include "../memory/guest_writeback.h"
@@ -12,6 +14,8 @@
 #include <unordered_map>
 #include <map>
 #include <optional>
+#include <future>
+#include <memory>
 
 namespace x360n::native {
 struct TextureLoadPlan;
@@ -73,13 +77,18 @@ class VulkanRender {
   void DestroyTextures();
   void InitializeDraw();
   void DestroyDraw();
-  struct DrawPipeline { VkPipelineLayout layout = VK_NULL_HANDLE; VkPipeline pipeline = VK_NULL_HANDLE; };
+  // The layout is created at once; the pipeline by pipeline_workers_ and bound
+  // through cmd_ while it may still be compiling (see VulkanCommands).
+  struct DrawPipeline { VkPipelineLayout layout = VK_NULL_HANDLE; std::shared_future<VkPipeline> pipeline; };
   DrawPipeline& Pipeline(rex::graphics::SpirvShader*, rex::graphics::SpirvShader*, VkShaderModule,
       VkShaderModule, VkPrimitiveTopology, VkSampleCountFlagBits, VkCullModeFlags, VkFrontFace,
       bool clamp, bool restart, bool discard, const Tessellation&, VkPolygonMode fill, uint32_t point_key);
   const Device& device_;
   VulkanSubmissionRing submissions_;
   VkCommandBuffer commands_ = VK_NULL_HANDLE;
+  // Every command of commands_ is recorded through cmd_.
+  VulkanCommands cmd_{device_.functions()};
+  std::unique_ptr<PipelineWorkers> pipeline_workers_;
   bool rendering_ = false;
   struct UploadPage { std::unique_ptr<VulkanBuffer> buffer; VkDeviceSize used = 0; VkDescriptorSet load_set = VK_NULL_HANDLE; };
   struct ScaledReadback { ScaledResolveCache::Ticket ticket; std::shared_ptr<VulkanBuffer> buffer;
