@@ -28,6 +28,14 @@ Vulkan do sistema não inicializa os jogos: a apresentação não depende do
 renderer da sessão, e o rasterizador de software é o último recurso
 (`--renderer software` ou `X360N_LAUNCHER_RENDERER=software` forçam esse caminho).
 
+A preparação Windows com D3D12 inclui os plugins Xenos e Native junto ao
+executável de cada título, ambos cobertos pelo recibo de preparação. A escolha
+continua nas configurações globais; Native exige acesso experimental e não
+recorre ao Xenos quando indisponível. O driver reavalia o padrão ao configurar
+builds antigos que guardavam `X360N_NATIVE_RENDERER=OFF` implicitamente;
+`--define X360N_NATIVE_RENDERER=OFF` ou a opção explícita no preset continuam
+válidos. Builds sem D3D12 e outras plataformas não ativam Native por padrão.
+
 ## Identidade visual
 
 - Tema escuro único: grafite (`#0D0F12` página, `#0A0C0E` barra lateral,

@@ -1,5 +1,16 @@
 # STATUS
 
+31/10 — **preparação Native no Windows/D3D12**: a preparação inclui os plugins
+Xenos e Native; o driver reavalia o antigo `OFF` implícito do cache, preservando
+opções explícitas no preset/`--define`. Regressão sintética reproduziu a omissão
+anterior e aprovou cópia, recibo e recuperação do cache; contratos de preparação
+(12 casos/103 asserções) e renderer (5/52) passaram. Build/recibo 17559 concluídos,
+DLL x64 com exports e SHA-256 conferidos e preflight completo aprovado com Native
+selecionado, sem janela ou execução de título. A primeira publicação foi recusada
+por alteração paralela no CMake do Native; nova preparação preservou as mudanças
+e reutilizou o SDK verificado. Native segue experimental, sem novo aceite visual
+ou de performance. [Preparação dos plugins](docs/guides/desktop-ui.md).
+
 31/10 — **CI/CD: fontes no pacote**: os três gates de conteúdo reconhecem
 somente os caminhos e SHA-256 das duas fontes OFL do launcher, registrados no
 inventário. Fontes desconhecidas/alteradas e conteúdo de console continuam

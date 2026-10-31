@@ -18,6 +18,7 @@ parser = argparse.ArgumentParser()
 for name in ("supervisor", "cc", "cxx", "cmake", "ninja", "source_root", "git"):
     parser.add_argument("--" + name.replace("_", "-"), required=True)
 parser.add_argument("--sysroot")
+parser.add_argument("--native-staging-only", action="store_true", help="Only test renderer staging/default cache recovery")
 parser.add_argument("--work-dir", help="Private temporary fixture directory, e.g. the WSL Linux filesystem")
 args = parser.parse_args()
 source = Path(args.source_root).resolve()
@@ -94,26 +95,32 @@ project(fixture_sdk LANGUAGES C CXX)
 set(CMAKE_CXX_STANDARD 17)
 add_executable(rexglue codegen.cpp)
 add_library(rexgpu-xenos SHARED gpu.cpp)
+add_library(rexruntime SHARED gpu.cpp)
+target_link_libraries(rexgpu-xenos PRIVATE rexruntime)
 ''')
 run([args.git, "-C", sdk, "init", "-q"])
 run([args.git, "-C", sdk, "add", "."])
 run([args.git, "-C", sdk, "-c", "user.name=Fixture", "-c", "user.email=fixture@x360-native.invalid", "commit", "-qm", "test(fixture): snapshot generic producer"])
 head = run([args.git, "-C", sdk, "rev-parse", "HEAD"]).strip()
 write(root / "deps.lock.json", json.dumps({"rexglue_sdk":{"commit":head,"patches":[]}, "llvm":{"version":"22.1.8"}}))
-for name in ("x360n_verify_sdk_patches.cmake",):
+for name in ("x360n_verify_sdk_patches.cmake", "x360n_sdk_backports.cmake"):
     target = root / "cmake/sdk" / name
     target.parent.mkdir(parents=True, exist_ok=True)
     shutil.copyfile(source / "cmake/sdk" / name, target)
 target = root / "cmake/build/x360n_build_isolation.cmake"
 target.parent.mkdir(parents=True, exist_ok=True)
 shutil.copyfile(source / "cmake/build/x360n_build_isolation.cmake", target)
+for relative in ("cmake/build/x360n_stage_files.cmake", "cmake/runtime/x360n_runtime.manifest"):
+    target = root / relative
+    target.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(source / relative, target)
 write(root / "cmake/sdk/shared/CMakeLists.txt", '''cmake_minimum_required(VERSION 3.25)
 project(fixture_shared LANGUAGES C CXX)
 include("${X360N_ROOT}/cmake/build/x360n_build_isolation.cmake")
 x360n_guard_ninja()
 find_package(Threads REQUIRED) # try_compile must retain its nested working directory
 add_subdirectory("${REXSDK_DIR}" rexglue-sdk)
-export(TARGETS rexglue rexgpu-xenos FILE "${CMAKE_BINARY_DIR}/targets.cmake")
+export(TARGETS rexglue rexgpu-xenos rexruntime FILE "${CMAKE_BINARY_DIR}/targets.cmake")
 file(WRITE "${CMAKE_BINARY_DIR}/sdk.cmake" "include(\\"${CMAKE_BINARY_DIR}/targets.cmake\\")\\n")
 ''')
 write(project / "fixture_manifest.toml", """[project]
@@ -129,6 +136,7 @@ write(project / "payload.cpp.txt", "int fixture_value() { return 7; }\n")
 write(project / "main.cpp", '#include "generated/guest.inc"\nint main(){return fixture_value();}\n')
 write(project / "CMakeLists.txt", '''cmake_minimum_required(VERSION 3.25)
 project(fixture LANGUAGES C CXX)
+file(TO_CMAKE_PATH "${REXSDK_DIR}" REXSDK_DIR)
 if(X360N_SHARED_SDK_EXPORT)
  include("${X360N_SHARED_SDK_EXPORT}")
 else()
@@ -136,7 +144,16 @@ else()
 endif()
 include("${CMAKE_SOURCE_DIR}/../../cmake/build/x360n_build_isolation.cmake")
 x360n_guard_ninja()
+include("${CMAKE_SOURCE_DIR}/../../cmake/sdk/x360n_sdk_backports.cmake")
+set(REXGLUE_USE_VULKAN OFF) # No real GPU preflight in this synthetic SDK.
+if(WIN32)
+ set(REXGLUE_USE_D3D12 ON)
+ # Synthetic plugin: exercise the real staging policy without a GPU/window.
+ add_library(rexgpu-native SHARED "${REXSDK_DIR}/gpu.cpp")
+ set_target_properties(rexgpu-native PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/plugins")
+endif()
 add_executable(fixture main.cpp)
+x360n_stage_runtime_dlls(fixture PLUGIN_TARGETS rexgpu-xenos)
 ''')
 command = [args.supervisor, "--root", root, "prepare", "fixture", "--build-dir", build, "--cc", args.cc, "--cxx", args.cxx, "--cmake", args.cmake, "--ninja", args.ninja]
 if args.sysroot:
@@ -146,7 +163,25 @@ if os.name == "nt":
 exe = build / ("fixture" + suffix)
 receipt = Path(str(exe) + ".preparation.json")
 print("fixture:", root, flush=True)
+# Existing preparations cached the former implicit OFF. Default preparation
+# must clear it while still respecting an explicitly supplied --define.
+write(build / "CMakeCache.txt", "X360N_NATIVE_RENDERER:BOOL=OFF\n")
 run(command, log="first")
+if os.name == "nt":
+    native = build / "rexgpu-native.dll"
+    assert native.is_file(), "default preparation omitted Native from the executable directory"
+    artifacts = json.loads(receipt.read_text(encoding="utf-8"))["artifacts"]
+    assert any(Path(item["path"]).resolve() == native.resolve() and item["sha256"] == digest(native) for item in artifacts)
+    run(command + ["--define", "X360N_NATIVE_RENDERER=OFF"], log="explicit-native-off")
+    assert "X360N_NATIVE_RENDERER:BOOL=OFF" in (build / "CMakeCache.txt").read_text()
+    native.unlink()
+    run(command, log="restore-native-default")
+    assert native.is_file(), "default preparation retained the previous OFF cache"
+else:
+    assert "X360N_NATIVE_RENDERER:BOOL=OFF" in (build / "CMakeCache.txt").read_text()
+if args.native_staging_only:
+    print("PASS: Native staging, authenticated receipt, cached OFF recovery and explicit override", flush=True)
+    raise SystemExit(0)
 run([exe], expected=7)
 run([args.supervisor, "--root", root, "run", exe, "--timeout", "10"], expected=1, log="verified-launch")
 if os.name != "nt":

@@ -272,6 +272,10 @@ class Driver {
                                   Path(output), "-G",         "Ninja"};
     for (const auto& [key, value] : options.variables)
       args.push_back("-D" + key + "=" + value);
+    // Re-evaluate the platform default instead of retaining the historical
+    // implicit OFF in an existing title cache. Explicit presets/--define win.
+    if (!sdk && !options.variables.contains("X360N_NATIVE_RENDERER"))
+      args.push_back("-UX360N_NATIVE_RENDERER");
     args.insert(args.end(), {"-DCMAKE_BUILD_TYPE=Release",
                              "-DCMAKE_C_COMPILER=" + Path(options.cc),
                              "-DCMAKE_CXX_COMPILER=" + Path(options.cxx),

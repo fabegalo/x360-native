@@ -133,7 +133,14 @@ function(x360n_stage_runtime_dlls target)
         endif()
         list(APPEND ARG_PLUGIN_TARGETS x360n_gpu_preflight)
     endif()
-    option(X360N_NATIVE_RENDERER "Build and stage the experimental Native graphics plugin for development" OFF)
+    # The launcher can select either renderer without preparing a title again.
+    # Stage both supported plugins; selection and experimental access stay in
+    # the session settings. Other platforms / D3D12-disabled builds omit Native.
+    set(_native_default OFF)
+    if(WIN32 AND REXGLUE_USE_D3D12)
+        set(_native_default ON)
+    endif()
+    option(X360N_NATIVE_RENDERER "Build and stage the experimental Native graphics plugin" ${_native_default})
     if(X360N_NATIVE_RENDERER AND "rexgpu-xenos" IN_LIST ARG_PLUGIN_TARGETS)
         if(NOT WIN32)
             message(FATAL_ERROR "The experimental Native renderer is currently implemented only on Windows")
