@@ -93,11 +93,8 @@ $payload = Join-Path $internal 'workspace'
 New-Item -ItemType Directory -Force $payload | Out-Null
 # Separate source export: build coordination files must never enter the payload.
 ExportTree $root $head $payload
-foreach ($file in Get-ChildItem -LiteralPath $payload -Recurse -File -Force) {
-    $rel = $file.FullName.Substring($payload.Length + 1).Replace('\','/')
-    if ($rel -match '(^|/)(\.local|\.git|external)/' -or $rel -match '\.(xex|xexp|xtt|ttf|otf|pdb|dll|exe|stfs|iso)$' -or
-        ($rel -match '/generated/' -and $rel -notmatch '/generated/rexglue\.cmake$')) { throw "Non-distributable payload entry: $rel" }
-}
+. (Join-Path $source 'scripts/packaging/payload-content.ps1')
+Assert-SourcePayload $payload
 $lock = Get-Content -Raw (Join-Path $source 'deps.lock.json') | ConvertFrom-Json
 $sdk = Join-Path $source 'external/rexglue-sdk'
 # A private checkout uses only pinned Git objects, never developer working bytes.

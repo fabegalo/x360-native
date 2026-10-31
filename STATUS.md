@@ -1,5 +1,12 @@
 # STATUS
 
+31/10 — **CI/CD: fontes no pacote**: os três gates de conteúdo reconhecem
+somente os caminhos e SHA-256 das duas fontes OFL do launcher, registrados no
+inventário. Fontes desconhecidas/alteradas e conteúdo de console continuam
+bloqueados. Regressão sobre exportação real do Git aprovada em PowerShell 5/7;
+testes do verificador de releases aprovados (101 casos, quatro skips existentes),
+incluindo arquivos ZIP/TAR dos seis alvos. Builds nativos remotos em validação.
+
 31/10 — **nomes das etapas**: restaurados Ferramentas, SDK, Configuração,
 Codegen, Compilação, Verificação e Registro, conforme preferência do mantenedor.
 Build Windows e testes focados de etapas/layout aprovados; executável atualizado

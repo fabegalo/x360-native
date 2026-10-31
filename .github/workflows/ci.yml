@@ -48,6 +48,7 @@ jobs:
           & tests/packaging/compute_version_test.ps1
           & tests/packaging/release-configuration.ps1
           & tests/packaging/excluded-constants.ps1
+          & tests/packaging/payload-content.ps1
       - name: Compute the version from Conventional Commits
         id: version
         env:

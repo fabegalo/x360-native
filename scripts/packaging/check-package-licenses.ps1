@@ -4,6 +4,7 @@ param([Parameter(Mandatory)][string]$PackageDirectory,
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot '../build/release-configuration.ps1')
 . (Join-Path $PSScriptRoot 'lgpl-sources.ps1')
+. (Join-Path $PSScriptRoot 'payload-content.ps1')
 $package = (Resolve-Path -LiteralPath $PackageDirectory).Path
 $sdk = (Resolve-Path -LiteralPath $SdkDirectory).Path
 function Digest($path) {
@@ -135,7 +136,9 @@ foreach($file in Get-ChildItem -LiteralPath $package -Recurse -File -Force) {
     $rel=$file.FullName.Substring($package.Length+1).Replace('\','/')
     if($file.Attributes -band [IO.FileAttributes]::ReparsePoint) { throw 'Reparse point in package' }
     if($rel -notlike 'app/workspace/*' -and $rel -notin $expected) { throw "Unidentified distributed file: $rel" }
-    if($rel -match '\.(xex|xexp|xtt|ttf|otf|stfs|iso|nand|key|pem|pfx|bin)$' -or $rel -match '(^|/)(\.git|\.local|external)/' -or ($rel -match '/generated/' -and $rel -notmatch '/generated/rexglue\.cmake$')) { throw "Forbidden distribution content: $rel" }
+    $launcherFont = $rel.StartsWith('app/workspace/', [StringComparison]::Ordinal) -and
+        (Test-LauncherFont $rel.Substring('app/workspace/'.Length) $file.FullName)
+    if(($rel -match '\.(xex|xexp|xtt|ttf|otf|stfs|iso|nand|key|pem|pfx|bin)$' -and -not $launcherFont) -or $rel -match '(^|/)(\.git|\.local|external)/' -or ($rel -match '/generated/' -and $rel -notmatch '/generated/rexglue\.cmake$')) { throw "Forbidden distribution content: $rel" }
     if($rel -match '\.(exe|dll|lib|pdb|so|dylib|a|o)$' -and $rel -notin $scope.executables) { throw "Unidentified binary: $rel" }
     $bytes=[IO.File]::ReadAllBytes($file.FullName)
     $magic=[Text.Encoding]::ASCII.GetString($bytes,0,[Math]::Min(4,$bytes.Length))

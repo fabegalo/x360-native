@@ -126,6 +126,20 @@ class ReleaseTests(unittest.TestCase):
         self.write_archive()
         self.assertEqual(self.verify()["commit"], self.commit)
 
+    def test_reviewed_launcher_fonts(self):
+        root = Path(__file__).resolve().parents[2]
+        self.assertEqual(len(release.LAUNCHER_FONTS), 2)
+        for name in release.LAUNCHER_FONTS:
+            self.files[name] = (root / name.removeprefix("app/workspace/")).read_bytes()
+        self.write_archive()
+        self.assertEqual(self.verify()["commit"], self.commit)
+        # Even internally consistent archive indices must not authorize changed bytes.
+        name = next(iter(release.LAUNCHER_FONTS))
+        self.files[name] += b"modified"
+        self.write_archive()
+        with self.assertRaisesRegex(ValueError, "Forbidden"):
+            self.verify()
+
     def test_debug_flags_rejected_even_with_release_metadata_and_valid_hashes(self):
         for flags in ("-O0 -DNDEBUG", "-O3 -DNDEBUG -D_DEBUG", "-O3 -DNDEBUG --dependent-lib=libcmtd",
                       "-O3 -DNDEBUG -O2", "-O3", "-O3 -DNDEBUG /MDd", "-O3 -DNDEBUG -D_ITERATOR_DEBUG_LEVEL=2",
@@ -153,6 +167,9 @@ class ReleaseTests(unittest.TestCase):
 
     def test_self_consistent_forbidden_files(self):
         for name, data, reason in (("font.xtt", b"synthetic", "Forbidden"),
+                                   ("app/workspace/font.otf", b"synthetic", "Forbidden"),
+                                   ("app/workspace/font.ttf", b"synthetic", "Forbidden"),
+                                   ("app/workspace/src/desktop/resources/fonts/NotoSansCJKjp-Regular.otf", b"synthetic", "Forbidden"),
                                    ("foreign.dll", b"MZ", "Forbidden"),
                                    ("app/foreign.so", b"synthetic", "Unexpected executable"),
                                    ("app/foreign.dylib", b"synthetic", "Unexpected executable"),

@@ -202,6 +202,10 @@
     },
     {
       "id": "launcher-fonts",
+      "source_files": {
+        "src/desktop/resources/fonts/NotoSansCJKjp-Regular.otf": "68a3fc98800b2a27b371f2fb79991daf3633bd89309d4ffaa6946fd587f375b5",
+        "src/desktop/resources/fonts/NotoSansCJKjp-Medium.otf": "dd523e580e3413c480b2d701bf64e534c20f8419e3cfb6a44c2bdcd8d2a6c052"
+      },
       "origin": "https://github.com/notofonts/noto-cjk (Sans/OTF/Japanese/NotoSansCJKjp-Regular.otf, NotoSansCJKjp-Medium.otf)",
       "revision": "523d033d6cb47f4a80c58a35753646f5c3608a78",
       "spdx": "OFL-1.1",

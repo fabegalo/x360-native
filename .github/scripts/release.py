@@ -34,6 +34,13 @@ WINDOWS_LLVM = {"windows-x64": "llvm", "windows-arm64": "llvm_windows_arm64"}
 FORBIDDEN = re.compile(r"\.(?:xex|xexp|xtt|ttf|otf|stfs|iso|nand|key|pem|pfx|bin|dll|lib|pdb)$", re.I)
 NATIVE = re.compile(r"\.(?:exe|dll|so|dylib)$", re.I)
 NATIVE_MAGIC = (b"MZ", b"\x7fELF", b"\xcf\xfa\xed\xfe", b"\xca\xfe\xba\xbe")
+# Trust the reviewed checkout's inventory, not an inventory supplied in an archive.
+LAUNCHER_FONTS = {
+    "app/workspace/" + path: sha256
+    for component in json.loads((Path(__file__).resolve().parents[2] / "licenses/inventory.json").read_text(encoding="utf-8"))["components"]
+    if component["id"] == "launcher-fonts" and component["spdx"] == "OFL-1.1"
+    for path, sha256 in component["source_files"].items()
+}
 
 
 def require(condition, message):
@@ -277,7 +284,8 @@ def verify(directory, version, commit, ref, run_id, platform="windows-x64", exac
     else:
         files, modes = read_zip(archive_path, name)
     for rel, data in files.items():
-        require((rel in executables or not FORBIDDEN.search(rel)) and not {".local", ".git", "external"}.intersection(PurePosixPath(rel).parts),
+        launcher_font = rel in LAUNCHER_FONTS and digest(data) == LAUNCHER_FONTS[rel]
+        require((rel in executables or launcher_font or not FORBIDDEN.search(rel)) and not {".local", ".git", "external"}.intersection(PurePosixPath(rel).parts),
                 f"Forbidden distribution content: {rel}")
         require("/generated/" not in rel or rel.endswith("/generated/rexglue.cmake"), "Generated original code in archive")
         require(data[:4] not in {b"XEX0", b"XEX1", b"XEX2", b"CON ", b"LIVE", b"PIRS"}, "Original executable/container in archive")
