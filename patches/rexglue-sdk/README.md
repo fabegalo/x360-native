@@ -2511,3 +2511,41 @@ executes all 65,536 16-bit indices, checking values, CTR, LR and a nonvolatile
 GPR. The candidate passes, including cases above 511 and the original default
 path. The original-XEX analysis also emits all 643 cases; gameplay requires
 a separate execution.
+
+### 0246 — preserve CPU bytes outside actual MEMEXPORT changes
+
+Backport the GPU before/after snapshots from AdrianCassar's Xenia Canary
+[D3D12 change](https://github.com/xenia-canary/xenia-canary/commit/0bfc8faf7da90c7619123f3d7338965828e03469)
+and [Vulkan change](https://github.com/xenia-canary/xenia-canary/commit/1d8489b44e08f1e85e69a746f24b0d17a0dd6fe8),
+verified against Canary `44e6489cf87567b5dc9c982207765d722b71b966`.
+Original BSD notices remain intact. The local Vulkan implementation already
+ended the render pass before copying; that part was not duplicated.
+
+Both Xenos backends previously restored the entire stream range from GPU memory,
+including bytes never exported by the shader. CPU updates to those bytes could
+therefore be overwritten by an older GPU snapshot. Compare the GPU snapshots
+byte by byte and publish only differences, including 8/16-bit formats. Extend
+this to the existing delayed path, and require identical complete range layouts
+before reading a previous slot. A matching first address and total length alone
+does not establish that identity.
+
+Allocate and retire slots before recording the new draw's bindings. Mark each
+slot's submission when its first snapshot copy is recorded, including draws
+that subsequently fail, and retain resources until their submission completes.
+Synchronous readback shares one reusable allocation across streams; delayed
+readback keeps its two slots. Eviction skips resources in flight and newly
+prepared entries. Reject overflowing/out-of-buffer readback extents explicitly.
+
+`tests/sdkcheck/memexport_readback_probe.cpp` uses a real guest vertex shader
+with partial exports and CPU writes to neighboring stream bytes. Its Vulkan
+concurrent fixture calls the original `vkQueueSubmit` and then writes the CPU
+bytes before publication. The synchronous variant also checks through the real
+driver that eight distinct streams reuse one readback allocation.
+`tests/sdkcheck/memexport_readback_test.cpp` checks byte preservation, exact
+range identity and allocation bounds. Final execution evidence belongs in the
+RENDER-FINAL report; the fixture is not a gameplay or image-quality acceptance.
+
+Snapshots require an additional GPU copy and capacity for both images. No FPS
+improvement is claimed for this correctness fix. Like Canary, byte differences
+do not identify an idempotent GPU store racing a CPU write to the same byte;
+this change does not claim to solve every guest CPU/GPU ownership race.

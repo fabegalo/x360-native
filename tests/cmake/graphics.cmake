@@ -97,6 +97,18 @@ x360n_stage_runtime_dlls(x360n_canary_viewport_checks)
 add_test(NAME sdkcheck.canary-viewport COMMAND x360n_canary_viewport_checks)
 set_tests_properties(sdkcheck.canary-viewport PROPERTIES LABELS project TIMEOUT 30)
 
+# 0246: preserve CPU-owned bytes surrounding partial shader memory exports.
+# The CPU contract is portable; actual GPU probes are explicit opt-in targets.
+add_executable(x360n_memexport_readback_tests sdkcheck/memexport_readback_test.cpp)
+target_link_libraries(x360n_memexport_readback_tests PRIVATE rexruntime Catch2::Catch2WithMain)
+x360n_stage_runtime_dlls(x360n_memexport_readback_tests)
+add_test(NAME sdkcheck.memexport-readback-contract COMMAND x360n_memexport_readback_tests)
+set_tests_properties(sdkcheck.memexport-readback-contract PROPERTIES LABELS project TIMEOUT 30)
+add_executable(x360n_memexport_readback_probe EXCLUDE_FROM_ALL sdkcheck/memexport_readback_probe.cpp)
+target_include_directories(x360n_memexport_readback_probe PRIVATE ${X360_REXGLUE_DIR}/thirdparty/renderdoc)
+target_link_libraries(x360n_memexport_readback_probe PRIVATE rexruntime)
+x360n_stage_runtime_dlls(x360n_memexport_readback_probe PLUGIN_TARGETS rexgpu-xenos)
+
 # Native asynchronous pipeline creation: worker pool and deferred command
 # order. Platform-neutral (no GPU, no D3D12/Vulkan), built on every host.
 add_executable(x360n_native_pipeline_tests native/pipeline_recording_test.cpp

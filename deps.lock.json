@@ -305,8 +305,8 @@
         "src/graphics/graphics_system.cpp": "7462130450b5eae5069a9b461115eadfa516102ba22ecea0429fd0f419cf5228",
         "include/rex/graphics/command_processor.h": "d5fecaf9e36c803dc89e1e20442ad745f247c770c0f4b4a87a1d0704a5585265",
         "src/graphics/command_processor.cpp": "e2b42d5012046917f5383f8d0c0eefa9885419246d0c8f085ea178c30cc34792",
-        "src/graphics/d3d12/command_processor.cpp": "0da87b5ea414b79654a997af35c014662aeb74e1257856659bfd805336b5bcba",
-        "src/graphics/vulkan/command_processor.cpp": "fdbc0459f34cfd343bc1f8097ed5ac1298d6ab5741c60ec885e7c438bf7ea7eb",
+        "src/graphics/d3d12/command_processor.cpp": "cff6aead6e853654d31f341e5436c412a7c7bab45d3c371638024d9f522fca71",
+        "src/graphics/vulkan/command_processor.cpp": "a48758704f53cebcb4ae4f05896f4dcfc1278fe3d274f61a9595b7940df0e846",
         "src/audio/sdl/sdl_audio_driver.cpp": "b563c3686247199c274e55531429f3657a4426a76536c1ebe048910c13eef690"
       },
       "base_files": {
@@ -1036,7 +1036,7 @@
       },
       "files": {
         "include/rex/graphics/d3d12/inactive_vertex_fetch.h": "ea3e630caf192ae27eacd4c2178d06bb19e405d5c1ca06aa915ba5174a98a393",
-        "src/graphics/d3d12/command_processor.cpp": "0da87b5ea414b79654a997af35c014662aeb74e1257856659bfd805336b5bcba"
+        "src/graphics/d3d12/command_processor.cpp": "cff6aead6e853654d31f341e5436c412a7c7bab45d3c371638024d9f522fca71"
       },
       "test": "sdkcheck.inactive-vertex-fetch"
     },
@@ -1177,7 +1177,7 @@
       "files": {
         "include/rex/graphics/util/draw.h": "415174fe3ae2bb5d1acd8a438cbd190a38ff55a823ad3227af06b2a6e4e82c0d",
         "src/graphics/util/draw.cpp": "3f7dde8e3bd36ce76008fc3350045d5f6cff2825c0505ca09ecfd1a139c35f0b",
-        "src/graphics/d3d12/command_processor.cpp": "0da87b5ea414b79654a997af35c014662aeb74e1257856659bfd805336b5bcba",
+        "src/graphics/d3d12/command_processor.cpp": "cff6aead6e853654d31f341e5436c412a7c7bab45d3c371638024d9f522fca71",
         "src/graphics/d3d12/render_target_cache.cpp": "a3f5e7ff82919f979656af927ce80f1df0404b5ed8273d9e11e9c86a90b1b950"
       },
       "test": "tests/sdkcheck/fixed16_resolve_probe.cpp"
@@ -1559,11 +1559,11 @@
         "src/kernel/xboxkrnl/xboxkrnl_video.cpp": "ea0e09814eedb327c49395eccadc6d6cc55d51844734cd6f53dbeafb56c5efc4"
       },
       "files": {
-        "include/rex/graphics/d3d12/command_processor.h": "72f41ba8a323b6cf19cda41ea69ba6f3f176686e28e4e7f3c99bf4cc430c2d62",
+        "include/rex/graphics/d3d12/command_processor.h": "a73c767e214609b31c999625defad743aec8c7185098555b7aeb4d2787c40969",
         "include/rex/graphics/d3d12/texture_cache.h": "0c88603fa7088d42fea41b00e4db547087adbb849c74d60fdb923bf3ff75a3d4",
         "include/rex/graphics/display_overlay.h": "2841fdc05e4e7c248e9dcfdded2c0edd6503435b22bb1d5af0c8f113a9494cda",
         "src/graphics/command_processor.cpp": "e2b42d5012046917f5383f8d0c0eefa9885419246d0c8f085ea178c30cc34792",
-        "src/graphics/d3d12/command_processor.cpp": "0da87b5ea414b79654a997af35c014662aeb74e1257856659bfd805336b5bcba",
+        "src/graphics/d3d12/command_processor.cpp": "cff6aead6e853654d31f341e5436c412a7c7bab45d3c371638024d9f522fca71",
         "src/graphics/d3d12/texture_cache.cpp": "6a6669e3e486bd40eb01253d9d6068e4c31d11e669a527de990f38d2c866d8c9",
         "src/graphics/shaders/bytecode/d3d12_5_1/display_overlay_cs.h": "878b1ca19d0b44a2f730a6d8b312f9180f496651c1c3730e8668cace274f2f40",
         "src/graphics/shaders/display_overlay.hlsl": "82f2758310438dc43db3fa7b73d25192d52512007830f9d3c2665e64ba99859f",
@@ -1774,8 +1774,8 @@
       "files": {
         "include/rex/graphics/vulkan/texture_cache.h": "56a61a90b0afd99d10d3f3405ec141292a2e4f568d7907abdabbbb0382274d04",
         "src/graphics/vulkan/texture_cache.cpp": "5bd658c580a6eb4b0afa493fff269e8c1fa211d4c34661c244efcd7efecd36dc",
-        "include/rex/graphics/vulkan/command_processor.h": "cbab1238329772cd7d2ffa02cb0a3ab1f8d14392493d077cb3157d4d80f31577",
-        "src/graphics/vulkan/command_processor.cpp": "fdbc0459f34cfd343bc1f8097ed5ac1298d6ab5741c60ec885e7c438bf7ea7eb"
+        "include/rex/graphics/vulkan/command_processor.h": "349742c6d7b21d352c6cc2821aff318f0fd46c40339443fe56910db99efcce22",
+        "src/graphics/vulkan/command_processor.cpp": "a48758704f53cebcb4ae4f05896f4dcfc1278fe3d274f61a9595b7940df0e846"
       },
       "base_files": {
         "include/rex/graphics/vulkan/texture_cache.h": "384ec034cf009960892703a473df4fe6bdd3ba6ce9027e0d89dd957c01a318e4",
@@ -1954,7 +1954,7 @@
         "src/graphics/vulkan/command_processor.cpp": "1ffefcfb33ec126ed323bdba817ff265e851cf4553df718206e01dd290bd0e6a"
       },
       "files": {
-        "src/graphics/vulkan/command_processor.cpp": "fdbc0459f34cfd343bc1f8097ed5ac1298d6ab5741c60ec885e7c438bf7ea7eb"
+        "src/graphics/vulkan/command_processor.cpp": "a48758704f53cebcb4ae4f05896f4dcfc1278fe3d274f61a9595b7940df0e846"
       },
       "test": "sdkcheck.Vulkan-draw-registry-lock: 4096 non-memexport Xenos/Vulkan draws retire while the cvar registry is locked; fails before the patch"
     },
@@ -1992,7 +1992,7 @@
       "files": {
         "include/rex/graphics/d3d12/inactive_vertex_fetch.h": "ea3e630caf192ae27eacd4c2178d06bb19e405d5c1ca06aa915ba5174a98a393",
         "include/rex/graphics/pipeline/shader/inactive_vertex_fetch.h": "8d2cf6261d37b4836f9ca5d7a8925fa45983efd27c1b3b91e8a4701d48273bc2",
-        "src/graphics/vulkan/command_processor.cpp": "fdbc0459f34cfd343bc1f8097ed5ac1298d6ab5741c60ec885e7c438bf7ea7eb"
+        "src/graphics/vulkan/command_processor.cpp": "a48758704f53cebcb4ae4f05896f4dcfc1278fe3d274f61a9595b7940df0e846"
       },
       "test": "sdkcheck.Vulkan-predicated-vertex-fetch: a synthetic draw whose invalid vertex fetch 90 runs under !p0 after setp_eq c127.x is issued with c127.x = 0 and rejected with c127.x = 1; rejected in both cases before the patch (D3D12 control: sdkcheck.D3D12-predicated-vertex-fetch). sdkcheck.inactive-vertex-fetch covers the shared proof, denormals unknown without flush"
     },
@@ -2031,10 +2031,10 @@
         "include/rex/graphics/register_file.h": "446196d919b7830f700ae931a15132e6edc1b843a7bca450d9991442c4c3e3fc",
         "include/rex/graphics/shared_memory.h": "1f65f9daf5cb21a77b1de54aff182e08a3b538fb5a315510b230e02e8f843f9f",
         "src/graphics/shared_memory.cpp": "1fae10e526df9b9798d2e644a318c2e25404c49323966fee339c4c3f312d0a2e",
-        "src/graphics/vulkan/command_processor.cpp": "fdbc0459f34cfd343bc1f8097ed5ac1298d6ab5741c60ec885e7c438bf7ea7eb",
-        "include/rex/graphics/vulkan/command_processor.h": "cbab1238329772cd7d2ffa02cb0a3ab1f8d14392493d077cb3157d4d80f31577",
-        "src/graphics/d3d12/command_processor.cpp": "0da87b5ea414b79654a997af35c014662aeb74e1257856659bfd805336b5bcba",
-        "include/rex/graphics/d3d12/command_processor.h": "72f41ba8a323b6cf19cda41ea69ba6f3f176686e28e4e7f3c99bf4cc430c2d62"
+        "src/graphics/vulkan/command_processor.cpp": "a48758704f53cebcb4ae4f05896f4dcfc1278fe3d274f61a9595b7940df0e846",
+        "include/rex/graphics/vulkan/command_processor.h": "349742c6d7b21d352c6cc2821aff318f0fd46c40339443fe56910db99efcce22",
+        "src/graphics/d3d12/command_processor.cpp": "cff6aead6e853654d31f341e5436c412a7c7bab45d3c371638024d9f522fca71",
+        "include/rex/graphics/d3d12/command_processor.h": "a73c767e214609b31c999625defad743aec8c7185098555b7aeb4d2787c40969"
       },
       "test": "sdkcheck.register-memory-coherence: real PM4 Type0 normal/wrapped batches and scratch/COHER/gamma effects; unchanged/partial fetch descriptors; CPU/GPU/frame reset residency invalidation; baseline adapters fail before patch"
     },
@@ -2048,10 +2048,10 @@
         "src/graphics/vulkan/command_processor.cpp": "5ac4a105ed319a2053cf997ea71c49e3d6a2d7531b6d96c5c13e5a4b0b65b0ad"
       },
       "files": {
-        "include/rex/graphics/d3d12/command_processor.h": "72f41ba8a323b6cf19cda41ea69ba6f3f176686e28e4e7f3c99bf4cc430c2d62",
-        "src/graphics/d3d12/command_processor.cpp": "0da87b5ea414b79654a997af35c014662aeb74e1257856659bfd805336b5bcba",
-        "include/rex/graphics/vulkan/command_processor.h": "cbab1238329772cd7d2ffa02cb0a3ab1f8d14392493d077cb3157d4d80f31577",
-        "src/graphics/vulkan/command_processor.cpp": "fdbc0459f34cfd343bc1f8097ed5ac1298d6ab5741c60ec885e7c438bf7ea7eb",
+        "include/rex/graphics/d3d12/command_processor.h": "a73c767e214609b31c999625defad743aec8c7185098555b7aeb4d2787c40969",
+        "src/graphics/d3d12/command_processor.cpp": "cff6aead6e853654d31f341e5436c412a7c7bab45d3c371638024d9f522fca71",
+        "include/rex/graphics/vulkan/command_processor.h": "349742c6d7b21d352c6cc2821aff318f0fd46c40339443fe56910db99efcce22",
+        "src/graphics/vulkan/command_processor.cpp": "a48758704f53cebcb4ae4f05896f4dcfc1278fe3d274f61a9595b7940df0e846",
         "include/rex/graphics/readback_resolve_key.h": "97d30346a545d96a371d41b30c157213511a69fd2abbaa91a1b80ffd1d8ed42c"
       },
       "test": "sdkcheck.resolve-readback-identity: color/depth at identical ranges, destination representation bits, stable exponent/source-layout fields and deliberate hash collisions; baseline fails before patch"
@@ -2164,12 +2164,12 @@
       },
       "files": {
         "include/rex/graphics/primitive_processor.h": "8dc4e6e4b29429e80231f6d6e66179a53e22d56efc0b642af828c4b614c5e0a0",
-        "include/rex/graphics/vulkan/command_processor.h": "cbab1238329772cd7d2ffa02cb0a3ab1f8d14392493d077cb3157d4d80f31577",
+        "include/rex/graphics/vulkan/command_processor.h": "349742c6d7b21d352c6cc2821aff318f0fd46c40339443fe56910db99efcce22",
         "include/rex/graphics/vulkan/deferred_command_buffer.h": "8a971b89f421decb32c67dcf855f77023015311ecc0f753c2af4f9551cca2474",
         "include/rex/graphics/vulkan/shared_memory.h": "2d0052cfd9aff59b586e6fbd00e37e660f176d077c35af5a657abf4a8785d504",
         "include/rex/graphics/vulkan/upload_hazard_tracker.h": "ecb2a8db57970f59e4a62e8af8f20d185245976c035f07f8997f76250ee3d106",
         "src/graphics/primitive_processor.cpp": "47cf42d176358b5a6b82b8d351eab8ba881f916b8f656ec39a20b0819b761118",
-        "src/graphics/vulkan/command_processor.cpp": "fdbc0459f34cfd343bc1f8097ed5ac1298d6ab5741c60ec885e7c438bf7ea7eb",
+        "src/graphics/vulkan/command_processor.cpp": "a48758704f53cebcb4ae4f05896f4dcfc1278fe3d274f61a9595b7940df0e846",
         "src/graphics/vulkan/deferred_command_buffer.cpp": "8df43c67c6317e21896898b231582988ccbd619f71c8a81de8c265b8a91c9e46",
         "src/graphics/vulkan/shared_memory.cpp": "80acfe0e04e2eab60bd58bd8c2a5b241827f73a51c772bd159356b7feae0bf0b"
       },
@@ -2185,9 +2185,9 @@
         "src/graphics/vulkan/deferred_command_buffer.cpp": "3d45412fefcb67762ed6f08b9e77bad5292eca1f1a02948ddde309036e6313c3"
       },
       "files": {
-        "include/rex/graphics/vulkan/command_processor.h": "cbab1238329772cd7d2ffa02cb0a3ab1f8d14392493d077cb3157d4d80f31577",
+        "include/rex/graphics/vulkan/command_processor.h": "349742c6d7b21d352c6cc2821aff318f0fd46c40339443fe56910db99efcce22",
         "include/rex/graphics/vulkan/deferred_command_buffer.h": "8a971b89f421decb32c67dcf855f77023015311ecc0f753c2af4f9551cca2474",
-        "src/graphics/vulkan/command_processor.cpp": "fdbc0459f34cfd343bc1f8097ed5ac1298d6ab5741c60ec885e7c438bf7ea7eb",
+        "src/graphics/vulkan/command_processor.cpp": "a48758704f53cebcb4ae4f05896f4dcfc1278fe3d274f61a9595b7940df0e846",
         "src/graphics/vulkan/deferred_command_buffer.cpp": "8df43c67c6317e21896898b231582988ccbd619f71c8a81de8c265b8a91c9e46"
       },
       "test": "Build coverage: immutable queued streams, semaphore lifetimes, fence ownership and worker failure paths; manual Xenos Vulkan rendering validation deferred by user (no standalone submission-ordering test target)"
@@ -2206,9 +2206,9 @@
       "files": {
         "include/rex/graphics/d3d12/pipeline_cache.h": "acb80ebcf3b923202a437fe89922e828aea73b38c565ba11439f53a63852ca5b",
         "include/rex/graphics/vulkan/pipeline_cache.h": "e36e596f03f03b78841d70d2faf59bb9ea7494aab3bb2c8e07c8f6dcf9ef9d7f",
-        "src/graphics/d3d12/command_processor.cpp": "0da87b5ea414b79654a997af35c014662aeb74e1257856659bfd805336b5bcba",
+        "src/graphics/d3d12/command_processor.cpp": "cff6aead6e853654d31f341e5436c412a7c7bab45d3c371638024d9f522fca71",
         "src/graphics/d3d12/pipeline_cache.cpp": "7112d5d15e154825df9a5389e475a4862524fc51d98368a7a2f2b8d7737660f2",
-        "src/graphics/vulkan/command_processor.cpp": "fdbc0459f34cfd343bc1f8097ed5ac1298d6ab5741c60ec885e7c438bf7ea7eb",
+        "src/graphics/vulkan/command_processor.cpp": "a48758704f53cebcb4ae4f05896f4dcfc1278fe3d274f61a9595b7940df0e846",
         "src/graphics/vulkan/pipeline_cache.cpp": "088c717b82555c78cedea61188764b8aca8d7512fee1e734d46a40ee87f7dc4e"
       },
       "test": "Build coverage of D3D12/Vulkan pipeline completion and error propagation; manual one-shot draw and first-use shader validation deferred by user (no standalone pipeline-completion test target)"
@@ -2441,7 +2441,7 @@
         "src/graphics/pipeline/render_target/cache.cpp": "83ec2739c9c343964abf186375fa2e7bfe78d0874b41c20bade8f2090a9f1a0e",
         "src/graphics/pipeline/shader/dxbc_translator_om.cpp": "a5f50732a1a0fa557189f26ddc926bb96c723c1d22057f8d07dddb956d5c939a",
         "src/graphics/pipeline/shader/spirv_translator_rb.cpp": "3c5afd0814326809d557da19c9b7b9c28ea29d0eff5a52fe7ccf3eaa41f5b628",
-        "src/graphics/vulkan/command_processor.cpp": "fdbc0459f34cfd343bc1f8097ed5ac1298d6ab5741c60ec885e7c438bf7ea7eb",
+        "src/graphics/vulkan/command_processor.cpp": "a48758704f53cebcb4ae4f05896f4dcfc1278fe3d274f61a9595b7940df0e846",
         "src/graphics/vulkan/render_target_cache.cpp": "fb3d2210c665fba33ba465d96ece33f91a202fbe5690712955bcf82047ae1f1f"
       },
       "test": "sdkcheck.canary-edram-fixed16: real pixel shader translated offline with ROV (DXBC) and FSI (SPIR-V, scale 1/2): no 32767/32 or 32/32767 EDRAM scales remain, s5.10 uses 1024 and 1/1024, FSI clamps to 32767/1024; PSI clamp is [-32, 32767/1024] (Xenia Canary 42c2b88). Vulkan exp-bias scale reuses the 0087 helper (sdkcheck.fixed16-resolve). Precompiled resolve shaders unchanged; no GPU run."
@@ -2483,7 +2483,7 @@
         "include/rex/graphics/pipeline/shader/spirv_translator.h": "af3605a5b254681bb865ffe0e90ab8e8e4fa19616c336e07f49053c793dae6e6",
         "src/graphics/pipeline/shader/spirv_translator_fetch.cpp": "1457d62823f174d7938eabb77d741275596778beffba7b266ae05c7537d7463c",
         "src/graphics/pipeline/shader/spirv_translator_rb.cpp": "3c5afd0814326809d557da19c9b7b9c28ea29d0eff5a52fe7ccf3eaa41f5b628",
-        "src/graphics/vulkan/command_processor.cpp": "fdbc0459f34cfd343bc1f8097ed5ac1298d6ab5741c60ec885e7c438bf7ea7eb"
+        "src/graphics/vulkan/command_processor.cpp": "a48758704f53cebcb4ae4f05896f4dcfc1278fe3d274f61a9595b7940df0e846"
       },
       "test": "sdkcheck.canary-spirv: real tfetch3D and FSI pixel shaders translated offline; stacked layer lerp starts from the first layer (Canary e519d59e4), stacked layer index is clamped to [0, size-1] (2d5b41080), 2x-as-4x guest sample 1 reads host sample 3 (654a8cacf). Vulkan back-face stencil selection when culling only front faces (77597d62a) matches D3D12 by review only. No GPU run."
     },
@@ -2576,9 +2576,9 @@
       },
       "files": {
         "include/rex/graphics/pipeline/render_target/cache.h": "0fd60bee3afcaf87cd15798e960076c4de37c655073bd1cee685d5f6546d81ec",
-        "src/graphics/d3d12/command_processor.cpp": "0da87b5ea414b79654a997af35c014662aeb74e1257856659bfd805336b5bcba",
+        "src/graphics/d3d12/command_processor.cpp": "cff6aead6e853654d31f341e5436c412a7c7bab45d3c371638024d9f522fca71",
         "src/graphics/pipeline/render_target/cache.cpp": "83ec2739c9c343964abf186375fa2e7bfe78d0874b41c20bade8f2090a9f1a0e",
-        "src/graphics/vulkan/command_processor.cpp": "fdbc0459f34cfd343bc1f8097ed5ac1298d6ab5741c60ec885e7c438bf7ea7eb"
+        "src/graphics/vulkan/command_processor.cpp": "a48758704f53cebcb4ae4f05896f4dcfc1278fe3d274f61a9595b7940df0e846"
       },
       "test": "sdkcheck.canary-edram-alias: RenderTargetCache::ColorOverlapsDepthStencil with real PSI keep masks; a stencil-byte-only 8_8_8_8 write keeps depth testing but conflicts with stencil, other channels overlap depth, 64bpp is conservative (Xenia Canary 9da693480, ROV/FSI part only). D3D12/Vulkan wiring is review-only; the host render target (RTV/FBO) part is not ported. No GPU run."
     },
@@ -2622,17 +2622,17 @@
         "src/ui/vulkan/vulkan_device.cpp": "c90486459896caec42c6221c8c7ad287f2c4ce84e63ada5766389ab360cc83d6"
       },
       "files": {
-        "include/rex/graphics/d3d12/command_processor.h": "72f41ba8a323b6cf19cda41ea69ba6f3f176686e28e4e7f3c99bf4cc430c2d62",
+        "include/rex/graphics/d3d12/command_processor.h": "a73c767e214609b31c999625defad743aec8c7185098555b7aeb4d2787c40969",
         "include/rex/graphics/d3d12/deferred_command_list.h": "c82906295496396812a4b85a60e2cff59702d361d5dda43653796c59cdd17919",
         "include/rex/graphics/d3d12/pipeline_cache.h": "acb80ebcf3b923202a437fe89922e828aea73b38c565ba11439f53a63852ca5b",
         "include/rex/graphics/d3d12/render_target_cache.h": "6706e94ae09b43b08ba41e976098d48dc7358e7a53c9c9bb48e40f536b69c34b",
         "include/rex/graphics/flags.h": "b61697bb7828bc2a0d829c4131044be5991878b1178ae50c0fb45b50ad33de8f",
         "include/rex/graphics/util/draw.h": "415174fe3ae2bb5d1acd8a438cbd190a38ff55a823ad3227af06b2a6e4e82c0d",
-        "include/rex/graphics/vulkan/command_processor.h": "cbab1238329772cd7d2ffa02cb0a3ab1f8d14392493d077cb3157d4d80f31577",
+        "include/rex/graphics/vulkan/command_processor.h": "349742c6d7b21d352c6cc2821aff318f0fd46c40339443fe56910db99efcce22",
         "include/rex/graphics/vulkan/deferred_command_buffer.h": "8a971b89f421decb32c67dcf855f77023015311ecc0f753c2af4f9551cca2474",
         "include/rex/graphics/vulkan/render_target_cache.h": "1bd8b4978ce7103a7c90205865e2d8562cce9514041e715cc1133299f2f79240",
         "include/rex/ui/vulkan/device.h": "9f26516716f84747ef2bf39adfdb1dd6f8a643d236a030cf2d5590a8a05545ed",
-        "src/graphics/d3d12/command_processor.cpp": "0da87b5ea414b79654a997af35c014662aeb74e1257856659bfd805336b5bcba",
+        "src/graphics/d3d12/command_processor.cpp": "cff6aead6e853654d31f341e5436c412a7c7bab45d3c371638024d9f522fca71",
         "src/graphics/d3d12/deferred_command_list.cpp": "e73c5ff6d4ed679681c93247c2ffa2381da6af9e6e8df79ac09cf319c1d5e932",
         "src/graphics/d3d12/pipeline_cache.cpp": "7112d5d15e154825df9a5389e475a4862524fc51d98368a7a2f2b8d7737660f2",
         "src/graphics/d3d12/render_target_cache.cpp": "a3f5e7ff82919f979656af927ce80f1df0404b5ed8273d9e11e9c86a90b1b950",
@@ -2640,7 +2640,7 @@
         "src/graphics/pipeline/shader/dxbc_translator_om.cpp": "a5f50732a1a0fa557189f26ddc926bb96c723c1d22057f8d07dddb956d5c939a",
         "src/graphics/pipeline/shader/spirv_translator_rb.cpp": "3c5afd0814326809d557da19c9b7b9c28ea29d0eff5a52fe7ccf3eaa41f5b628",
         "src/graphics/util/draw.cpp": "3f7dde8e3bd36ce76008fc3350045d5f6cff2825c0505ca09ecfd1a139c35f0b",
-        "src/graphics/vulkan/command_processor.cpp": "fdbc0459f34cfd343bc1f8097ed5ac1298d6ab5741c60ec885e7c438bf7ea7eb",
+        "src/graphics/vulkan/command_processor.cpp": "a48758704f53cebcb4ae4f05896f4dcfc1278fe3d274f61a9595b7940df0e846",
         "src/graphics/vulkan/deferred_command_buffer.cpp": "8df43c67c6317e21896898b231582988ccbd619f71c8a81de8c265b8a91c9e46",
         "src/graphics/vulkan/pipeline_cache.cpp": "088c717b82555c78cedea61188764b8aca8d7512fee1e734d46a40ee87f7dc4e",
         "src/graphics/vulkan/render_target_cache.cpp": "fb3d2210c665fba33ba465d96ece33f91a202fbe5690712955bcf82047ae1f1f",
@@ -2672,23 +2672,23 @@
         "src/graphics/vulkan/render_target_cache.cpp": "378a7378a1321a270dc6b79f3fb8a4f55f2d986e78b28532f33cb3cca651899d"
       },
       "files": {
-        "include/rex/graphics/d3d12/command_processor.h": "72f41ba8a323b6cf19cda41ea69ba6f3f176686e28e4e7f3c99bf4cc430c2d62",
+        "include/rex/graphics/d3d12/command_processor.h": "a73c767e214609b31c999625defad743aec8c7185098555b7aeb4d2787c40969",
         "include/rex/graphics/d3d12/render_target_cache.h": "6706e94ae09b43b08ba41e976098d48dc7358e7a53c9c9bb48e40f536b69c34b",
         "include/rex/graphics/pipeline/render_target/cache.h": "0fd60bee3afcaf87cd15798e960076c4de37c655073bd1cee685d5f6546d81ec",
         "include/rex/graphics/pipeline/shader/dxbc_translator.h": "14b9412265d45e70c41fb7a51a029bae293031a40f620ecf42b56dfaa3fd3754",
         "include/rex/graphics/pipeline/shader/spirv_translator.h": "af3605a5b254681bb865ffe0e90ab8e8e4fa19616c336e07f49053c793dae6e6",
         "include/rex/graphics/util/draw.h": "415174fe3ae2bb5d1acd8a438cbd190a38ff55a823ad3227af06b2a6e4e82c0d",
         "include/rex/graphics/util/draw_extent_estimator.h": "968cb742a60fae5cad5f8111010099f9b778032acfe78bd45b3ad676265f0ad0",
-        "include/rex/graphics/vulkan/command_processor.h": "cbab1238329772cd7d2ffa02cb0a3ab1f8d14392493d077cb3157d4d80f31577",
+        "include/rex/graphics/vulkan/command_processor.h": "349742c6d7b21d352c6cc2821aff318f0fd46c40339443fe56910db99efcce22",
         "include/rex/graphics/vulkan/render_target_cache.h": "1bd8b4978ce7103a7c90205865e2d8562cce9514041e715cc1133299f2f79240",
-        "src/graphics/d3d12/command_processor.cpp": "0da87b5ea414b79654a997af35c014662aeb74e1257856659bfd805336b5bcba",
+        "src/graphics/d3d12/command_processor.cpp": "cff6aead6e853654d31f341e5436c412a7c7bab45d3c371638024d9f522fca71",
         "src/graphics/d3d12/render_target_cache.cpp": "a3f5e7ff82919f979656af927ce80f1df0404b5ed8273d9e11e9c86a90b1b950",
         "src/graphics/pipeline/render_target/cache.cpp": "83ec2739c9c343964abf186375fa2e7bfe78d0874b41c20bade8f2090a9f1a0e",
         "src/graphics/pipeline/shader/dxbc_translator.cpp": "f97091630fe41fb86c1cb633fa37a82af05b63b6361b8ff19df9e03d5ab9f6e8",
         "src/graphics/pipeline/shader/spirv_translator.cpp": "d9a4bdfe126a747fde2bbcc3197c330ea6eb4ace3ea3962734e92a3f9d4f46b6",
         "src/graphics/util/draw.cpp": "3f7dde8e3bd36ce76008fc3350045d5f6cff2825c0505ca09ecfd1a139c35f0b",
         "src/graphics/util/draw_extent_estimator.cpp": "2a3047c17a116896d6074fc7aad475dc79e25b089c6067dc9c27c0957dcd233a",
-        "src/graphics/vulkan/command_processor.cpp": "fdbc0459f34cfd343bc1f8097ed5ac1298d6ab5741c60ec885e7c438bf7ea7eb",
+        "src/graphics/vulkan/command_processor.cpp": "a48758704f53cebcb4ae4f05896f4dcfc1278fe3d274f61a9595b7940df0e846",
         "src/graphics/vulkan/render_target_cache.cpp": "fb3d2210c665fba33ba465d96ece33f91a202fbe5690712955bcf82047ae1f1f"
       },
       "test": "Predicated tiling EDRAM window offsets, guest alias bases, ownership/wrapping/64bpp periods, viewport/scissor/extent and PsParamGen. Canary e1f4a0d00968ae9ea1d667f28912cc051a5f637f. PsParamGen SPIR-V regression fails before the port; CPU/GPU and measurement scope recorded in the focused report."
@@ -3444,6 +3444,24 @@
     "include/rex/graphics/vulkan/pipeline_cache.h": "e36e596f03f03b78841d70d2faf59bb9ea7494aab3bb2c8e07c8f6dcf9ef9d7f"
   },
   "test": "sdkcheck.Vulkan-driver-pipeline-cache: real Vulkan depth-only guest draw; base rejects uncached creation, patched driver cache used. Existing predicated fetch acceptance/rejection remains checked."
+},
+{
+  "file": "patches/rexglue-sdk/0246-preserve-memexport-unwritten-bytes.patch",
+  "sha256": "ac6aec6cb49487c674002bc648e58e01feee7193c71e74bef82192cfefe5a079",
+  "base_files": {
+    "include/rex/graphics/d3d12/command_processor.h": "72f41ba8a323b6cf19cda41ea69ba6f3f176686e28e4e7f3c99bf4cc430c2d62",
+    "src/graphics/d3d12/command_processor.cpp": "0da87b5ea414b79654a997af35c014662aeb74e1257856659bfd805336b5bcba",
+    "include/rex/graphics/vulkan/command_processor.h": "cbab1238329772cd7d2ffa02cb0a3ab1f8d14392493d077cb3157d4d80f31577",
+    "src/graphics/vulkan/command_processor.cpp": "fdbc0459f34cfd343bc1f8097ed5ac1298d6ab5741c60ec885e7c438bf7ea7eb"
+  },
+  "files": {
+    "include/rex/graphics/d3d12/command_processor.h": "a73c767e214609b31c999625defad743aec8c7185098555b7aeb4d2787c40969",
+    "src/graphics/d3d12/command_processor.cpp": "cff6aead6e853654d31f341e5436c412a7c7bab45d3c371638024d9f522fca71",
+    "include/rex/graphics/vulkan/command_processor.h": "349742c6d7b21d352c6cc2821aff318f0fd46c40339443fe56910db99efcce22",
+    "src/graphics/vulkan/command_processor.cpp": "a48758704f53cebcb4ae4f05896f4dcfc1278fe3d274f61a9595b7940df0e846",
+    "include/rex/graphics/memexport_readback.h": "3bb4cda28f0add344757c103e85e44bf8fbed51bcb7fd9050bb8bc0c1307db4d"
+  },
+  "test": "sdkcheck.memexport-readback-contract: 13 assertions in 3 cases passed Release. GPU MEMEXPORT probes passed D3D12 fast/full and Vulkan fast/full on RTX 4070. Final baseline red D3D12 fast iteration 1 and Vulkan full concurrent iteration 0; candidate preserves non-exported CPU bytes with same real guest shader. Vulkan full eight distinct streams allocate no additional staging after first draw. All five applied LF files match staged bytes."
 }
 ]
 },
