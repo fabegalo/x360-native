@@ -537,3 +537,42 @@ mensagens não implementadas e `DASHUSER` ausente; não é aceite integral da XA
 `gamerpic-ui-verification.json` confere os pedidos reais, os dois PNGs e todos
 os 18 arquivos anteriores, tanto na fonte quanto na cópia. Não certifica seleção
 ou gravação de imagem pela XUI nem notificação de nova conquista.
+
+## Reabertura do aviso de conquista — 17559
+
+O mantenedor esclareceu o sintoma: o primeiro aviso apareceu; as conquistas
+seguintes fizeram som e constaram no histórico/Gamerscore, mas sem aviso visual.
+O defeito relatado é de apresentação, não de gravação dos desbloqueios.
+
+O original `816B7C28` compara a thread atual do KPCR (`r13+256`) com o worker
+do compositor em `81AA09F0`. `816C7D00` só emite o comando `D1OVL_ENABLE` se
+essa identidade coincide; em outra thread apenas registra a solicitação para
+o loop XAM. O host compõe sincronicamente na thread de VdSwap e não executa
+esse loop. Após a expiração desabilitar o plano, a próxima solicitação podia
+continuar atualizando cena/som sem reabilitar a imagem.
+
+`SystemCompositorContext` vincula a identidade apenas durante a composição de
+notificações sem modal e restaura o valor anterior ao retornar ou desenrolar
+uma exceção. Os comandos continuam vindo do compositor original. Guide,
+navegação, recursos, persistência e a fila de desbloqueios não foram alterados;
+endereços ficam exclusivamente no perfil 17559. Não há alocação, passe gráfico,
+instrumentação ou trabalho adicional em frames sem notificação ativa.
+
+Reprodução focada, sem entrypoint, GPU, perfil ou desbloqueio: a opção
+`--compositor-rearm` do probe carrega a XAM original verificada e chama sua
+rotina real nas transições `1 → 0 → 1 → 0 → 1`. Sem o vínculo, todas as cinco
+transições produziram zero bytes de comandos (exit 7). Com a correção, cada
+transição produziu os 40 bytes originais, com registrador/valor e shadow
+conferidos e identidade restaurada (exit 0). Logs locais
+`notification-rearm-red.log` e `notification-rearm-original_rearm.log`.
+O teste de escopo passou dez asserções, incluindo duas threads, aninhamento e
+exceção; o conjunto de regressão focado passou **150 asserções/3 casos**
+(`notification-rearm-regression.log`). Isso comprova o rearmamento dos comandos;
+o aceite visual de uma conquista seguinte no jogo permanece separado.
+
+O probe anterior de construtor/fila também passou, preservando a cópia própria
+do texto pelo original (`notification-rearm-original-queue.log`). Preparo oficial
+17559 concluído (`notification-rearm-prepare.log`); recibo conferido por SHA-256
+para executável, host de sessão e as duas fontes de produção alteradas
+(`notification-rearm-prepared-verification.json`). Nenhuma conquista existente
+foi apagada ou reemitida para produzir evidência visual.

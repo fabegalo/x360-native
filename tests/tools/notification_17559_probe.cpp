@@ -1,8 +1,10 @@
-// Explicit headless check of the original notification constructor/queue, no entrypoint,
-// graphics, input, profiles or gameplay. Caller supplies verified local assets.
+// Explicit headless check of the original notification constructor/queue or
+// compositor rearming, no entrypoint, GPU, input, profiles or gameplay.
+// Caller supplies verified local assets; no achievement is unlocked here.
 #include "../supervisor/scratch.h"
 #include "../../titles/common/system_ui_context.h"
 #include "../../titles/dash_17559/src/original_assets.h"
+#include "../../titles/dash_17559/src/system_ui_compositor.h"
 #include <rex/runtime.h>
 #include <rex/kernel/init.h>
 #include <rex/kernel/xam/task_context.h>
@@ -13,7 +15,8 @@
 #include <windows.h>
 
 int main(int argc, char** argv) {
-  if (argc != 3) return 2;
+  const bool rearm = argc == 4 && std::string(argv[3]) == "--compositor-rearm";
+  if (argc != 3 && !rearm) return 2;
   SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX);
   for (const auto& asset : dash17559::kOriginalAssets) {
     if (asset.path != "system/xam_ui.xex") continue;
@@ -39,6 +42,43 @@ int main(int argc, char** argv) {
       rt.kernel_state(), 512 * 1024, 0, [&] {
     x360n::SystemUiContext context(*rt.memory());
     auto* dispatcher = rt.function_dispatcher();
+    if (rearm) {
+      auto read = [&](uint32_t address) {
+        return rex::memory::load_and_swap<uint32_t>(rt.memory()->TranslateVirtual(address));
+      };
+      auto put = [&](uint32_t address, uint32_t value) {
+        rex::memory::store_and_swap<uint32_t>(rt.memory()->TranslateVirtual(address), value);
+      };
+      const auto device = rt.memory()->SystemHeapAlloc(128);
+      const auto commands = rt.memory()->SystemHeapAlloc(4096);
+      if (!device || !commands) return 0;
+      put(0x81AA1B14, device);
+      put(device + 48, commands);
+      put(device + 56, commands + 4096);
+      put(0x81AA1868, 0); // compositor's programmed enable shadow
+      put(0x81AA186C, 0); // requested enable
+      const auto prior_worker = read(0x81AA09F0);
+      bool correct = true;
+      for (const uint32_t enabled : {1u, 0u, 1u, 0u, 1u}) {
+        const auto before = read(device + 48);
+        {
+          dash17559::SystemCompositorContext compositor(*rt.memory(), context.thread_state());
+          uint64_t enable[]{enabled};
+          dispatcher->ExecuteTrap(context.thread_state(), 0x816C7D00, enable, 1);
+        }
+        const auto after = read(device + 48);
+        const bool emitted = after == before + 40 && read(before + 28) == 6240 &&
+            read(before + 32) == enabled && read(0x81AA1868) == enabled;
+        correct &= emitted && read(0x81AA09F0) == prior_worker;
+        std::cout << "overlay_enable=" << enabled << " emitted=" << emitted
+                  << " command_bytes=" << (after - before) << std::endl;
+      }
+      put(0x81AA1B14, 0);
+      rt.memory()->SystemHeapFree(commands);
+      rt.memory()->SystemHeapFree(device);
+      presenter = correct ? 1 : 0;
+      return 0;
+    }
     uint64_t args[]{240};
     const auto allocation = dispatcher->ExecuteTrap(context.thread_state(), 0x816E6B18, args, 1);
     std::cout << "allocation=" << std::hex << allocation << std::endl;

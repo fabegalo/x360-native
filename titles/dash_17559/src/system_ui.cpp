@@ -7,6 +7,7 @@
 #include "system_ui_saved_state.h"
 #include "system_ui_transition.h"
 #include <rex/kernel/xam/offline_achievement_helpers.h>
+#include "system_ui_compositor.h"
 #include "../../common/system_ui_context.h"
 #include "../../common/system_ui_execution.h"
 #include <rex/runtime.h>
@@ -1011,6 +1012,7 @@ void dash17559::DrawSystemUiFrame(PPCContext& ctx) {
     auto* memory = runtime.memory();
     if (dash17559::Read32(*memory, dash17559::kNotificationVisible) &&
         runtime.function_dispatcher()->ExecuteTrap(frame.thread_state(), 0x81842110, nullptr, 0)) {
+      dash17559::SystemCompositorContext compositor(*memory, frame.thread_state());
       uint64_t compose[] = {dash17559::Read32(*memory, dash17559::kSystemTarget)};
       runtime.function_dispatcher()->ExecuteTrap(frame.thread_state(), 0x816CCF00, compose, 1);
       // 816CD678-816CD6BC publishes the empty descriptor when the last

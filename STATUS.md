@@ -41,7 +41,14 @@ tipo 10/usuário FE; 252 asserções/3 casos novos e 755/11 casos focados aprova
 replay de 24 patches/1 arquivo. Preparo e XUI aprovados: pessoal visível junto
 a Player1 na dashboard, pública distinta no GamerCard; dados reais de um jogo,
 10 G/uma conquista e 18 arquivos anteriores preservados, assim como os PNGs.
-Encerramento normal em 61,6 s. Novos eventos de conquista e P1 não ampliados;
+Encerramento normal em 61,6 s. O mantenedor esclareceu que somente o primeiro
+aviso de conquista apareceu; os seguintes fizeram som e foram registrados no
+histórico/Gamerscore, mas ficaram sem imagem. Corrigido o vínculo temporário da
+thread do compositor original 17559 para rearmar `D1OVL_ENABLE`: três ativações
+intercaladas com duas desativações reais emitiram os comandos antes ausentes.
+150 asserções/3 casos focados e preparo oficial aprovados, com SHA-256 do
+executável, host e duas fontes conferidos. Aceite visual da próxima conquista
+real ainda pendente; persistência e som não eram o defeito relatado. P1 não ampliado;
 sem Release.
 [Evidências e limites](docs/reports/dash-os-features-03-2026-10-30.md).
 
