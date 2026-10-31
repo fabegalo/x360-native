@@ -20,7 +20,8 @@ VulkanRender::VulkanRender(rex::ui::vulkan::VulkanProvider& provider)
     if (edram_size_+sizeof(SampleCounts)>device_.properties().maxStorageBufferRange)
       throw std::runtime_error("Native: requested scale exceeds device EDRAM storage buffer range");
     guest_buffer_ = std::make_unique<VulkanBuffer>(device_, GuestMemoryMirror::kSize,
-        VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+        VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT |
+        VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
         VulkanBuffer::Access::kDevice);
     edram_buffer_ = std::make_unique<VulkanBuffer>(device_, edram_size_ + sizeof(SampleCounts),
         VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_TEXEL_BUFFER_BIT |
@@ -60,6 +61,14 @@ VulkanRender::~VulkanRender() {
     REX_FATAL("Native Vulkan: unsafe render teardown: {}", error.what());
   }
   Destroy();
+}
+void VulkanRender::EndFrame() {
+  if (mirror_) mirror_->InvalidateCpuPages();
+  auto& perf = NativeVulkanPerformance();
+  if (perf.enabled && ++perf.presents % 120 == 0)
+    REXLOG_INFO("Native Vulkan draw indices presents={} draws={} draw_us={} indices_us={} gpu_index_draws={} gpu_index_bytes={} normalized_indices={}",
+        perf.presents, perf.draws, perf.draw_ns / 1000, perf.indices_ns / 1000,
+        perf.gpu_index_draws, perf.gpu_index_bytes, perf.normalized_indices);
 }
 void VulkanRender::Destroy() {
   DestroyDraw();

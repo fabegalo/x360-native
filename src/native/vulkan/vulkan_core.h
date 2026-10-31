@@ -21,6 +21,8 @@ struct VulkanPerformance {
   uint64_t readbacks = 0, readback_bytes = 0, guest_syncs = 0;
   uint64_t buffers = 0, allocated_bytes = 0, live_bytes = 0, peak_bytes = 0;
   uint64_t gpu_ns = 0, gpu_samples = 0;
+  uint64_t presents = 0, draws = 0, draw_ns = 0, indices_ns = 0;
+  uint64_t gpu_index_draws = 0, gpu_index_bytes = 0, normalized_indices = 0;
 };
 VulkanPerformance& NativeVulkanPerformance();
 class VulkanPerformanceTimer {

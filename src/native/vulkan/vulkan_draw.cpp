@@ -233,6 +233,8 @@ VulkanRender::DrawPipeline& VulkanRender::Pipeline(SpirvShader* vs, SpirvShader*
 }
 void VulkanRender::Draw(const RegisterFile& regs, rex::memory::Memory& memory, Shader* vertex, Shader* pixel,
     PrimitiveType primitive, uint32_t count, const DrawIndices* indices, DrawPurpose purpose) {
+  auto& perf = NativeVulkanPerformance();
+  VulkanPerformanceTimer draw_timer(perf.draw_ns);
   Require(vertex, "missing vertex shader");
   auto& vs = *static_cast<SpirvShader*>(vertex);
   auto* ps = static_cast<SpirvShader*>(pixel);
@@ -289,6 +291,23 @@ void VulkanRender::Draw(const RegisterFile& regs, rex::memory::Memory& memory, S
   const bool expand = point || rectangle;
   const bool line = rasterize && IsLinePrimitive(primitive);
   const bool convert = rasterize && !tess && NeedsPrimitiveConversion(primitive);
+  const uint32_t index_bytes = indices && indices->format == IndexFormat::kInt16 ? 2 : 4;
+  if (indices) {
+    Require(uint64_t(indices->guest_base) + indices->length <= GuestMemoryMirror::kSize && count <= indices->count,
+            "index buffer extent is invalid");
+    Require(uint64_t(indices->count) * index_bytes <= indices->length, "index count exceeds buffer");
+  }
+  const bool index_restart = face_mode.multi_prim_ib_ena &&
+      (primitive == PrimitiveType::kTriangleStrip || primitive == PrimitiveType::k2DTriStrip);
+  // The translator bitcasts VertexIndex to uint, then swaps endian before
+  // the guest offset/mask/clamp. R16 pair swaps and special topology keep the
+  // existing path. Raw R32 values can exceed 24 bits before the shader swaps
+  // them, so hosts without fullDrawIndexUint32 still validate them on the CPU.
+  const bool gpu_indices = indices && !expand && !tess && !convert &&
+      !vertex_export && !pixel_export && !index_restart &&
+      !(indices->guest_base & (index_bytes - 1)) &&
+      (index_bytes == 2 || device_.properties().fullDrawIndexUint32) &&
+      (index_bytes == 4 || indices->endianness == Endian::kNone || indices->endianness == Endian::k8in16);
   Require(!rasterize || tess || primitive == PrimitiveType::kTriangleList || primitive == PrimitiveType::kTriangleStrip ||
           expand || convert || line || primitive == PrimitiveType::k2DTriStrip, "primitive conversion is not implemented");
   const auto mode = regs.Get<reg::PA_SU_SC_MODE_CNTL>();
@@ -335,14 +354,8 @@ void VulkanRender::Draw(const RegisterFile& regs, rex::memory::Memory& memory, S
   const auto translated_vs = shaders_->Translate(vs, vm.value);
   const auto translated_ps = ps ? shaders_->Translate(*ps, pm.value).module : depth_only_[visibility_only_ ? 2 : counting_samples_];
 
-  // CPU reads must complete earlier resolves before any per-draw bindings.
-  if (indices) {
-    Require(uint64_t(indices->guest_base) + indices->length <= GuestMemoryMirror::kSize && count <= indices->count,
-            "index buffer extent is invalid");
-    Require(uint64_t(indices->count) * (indices->format == IndexFormat::kInt16 ? 2 : 4) <= indices->length,
-            "index count exceeds buffer");
-    if (!expand) SyncGuestRead(indices->guest_base, indices->length, 0xFF);
-  }
+  // Only CPU-normalized indices need publication of earlier GPU results.
+  if (indices && !expand && !gpu_indices) SyncGuestRead(indices->guest_base, indices->length, 0xFF);
   SyncTextureReads(regs, &vs);
   SyncTextureReads(regs, ps);
   Begin();
@@ -362,6 +375,7 @@ void VulkanRender::Draw(const RegisterFile& regs, rex::memory::Memory& memory, S
   }
   ReserveReadback(export_bytes);
   auto& mirror = Mirror(memory);
+  if (gpu_indices) mirror.RequestRange(indices->guest_base, count * index_bytes);
   for (const auto& range : exports) mirror.RequestRange(range.address, range.length);
   for (const auto& binding : vs.vertex_bindings()) {
     const auto fetch = regs.GetVertexFetch(binding.fetch_constant);
@@ -380,6 +394,9 @@ void VulkanRender::Draw(const RegisterFile& regs, rex::memory::Memory& memory, S
   if (line) topology = VK_PRIMITIVE_TOPOLOGY_LINE_LIST;
   if (!rasterize) topology = VK_PRIMITIVE_TOPOLOGY_POINT_LIST;
   if (tess) topology = VK_PRIMITIVE_TOPOLOGY_PATCH_LIST;
+  UploadSlice index_buffer{};
+  {
+  VulkanPerformanceTimer index_timer(perf.indices_ns);
   if (expand) {
     const uint32_t primitive_count = rectangle ? count / 3 : count;
     Require(primitive_count <= UINT32_MAX / 5, "expanded index count overflow");
@@ -390,7 +407,8 @@ void VulkanRender::Draw(const RegisterFile& regs, rex::memory::Memory& memory, S
     }
     if (normalized.empty()) return;
     ranges.push_back({0, uint32_t(normalized.size())});
-  } else if (indices || convert) {
+  } else if (!gpu_indices && (indices || convert)) {
+    if (perf.enabled) perf.normalized_indices += count;
     normalized.reserve(count);
     for (uint32_t i = 0; i < count; ++i) {
       uint32_t value = i;
@@ -421,8 +439,8 @@ void VulkanRender::Draw(const RegisterFile& regs, rex::memory::Memory& memory, S
   for (const auto index : normalized)
     Require(device_.properties().fullDrawIndexUint32 || index <= 0xFFFFFF || (expand && index == UINT32_MAX),
             "32-bit vertex index unsupported by host");
-  UploadSlice index_buffer{};
   if (!normalized.empty()) index_buffer = Upload(normalized.data(), normalized.size() * sizeof(uint32_t), 4);
+  }
   textures_resolution_scaled_ = 0;
   const auto vertex_textures = BindTextures(regs, memory, &vs);
   const auto pixel_textures = BindTextures(regs, memory, ps);
@@ -456,6 +474,7 @@ void VulkanRender::Draw(const RegisterFile& regs, rex::memory::Memory& memory, S
   constants.vertex_base_index = regs.Get<int32_t>(XE_GPU_REG_VGT_INDX_OFFSET);
   constants.vertex_index_min = regs.Get<reg::VGT_MIN_VTX_INDX>().min_indx;
   constants.vertex_index_max = regs.Get<reg::VGT_MAX_VTX_INDX>().max_indx;
+  constants.vertex_index_endian = gpu_indices ? indices->endianness : Endian::kNone;
   if (expand && indices) {
     constants.flags |= T::kSysFlag_ComputeOrPrimitiveVertexIndexLoad;
     if (indices->format == IndexFormat::kInt32) constants.flags |= T::kSysFlag_ComputeOrPrimitiveVertexIndexLoad32Bit;
@@ -533,6 +552,10 @@ void VulkanRender::Draw(const RegisterFile& regs, rex::memory::Memory& memory, S
     edram_layout[8 + i * 4] = constants.edram_rt_keep_mask[i][0];
     edram_layout[9 + i * 4] = constants.edram_rt_keep_mask[i][1];
   }
+  // Distinct read scopes must each see the last CPU upload/resolve/MEMEXPORT
+  // writer. The tracker also retains IA reads for the next write-after-read.
+  if (gpu_indices)
+    UseBuffer(guest_buffer_->handle(), guest_access_, VK_PIPELINE_STAGE_VERTEX_INPUT_BIT, VK_ACCESS_INDEX_READ_BIT);
   UseBuffer(guest_buffer_->handle(), guest_access_, VK_PIPELINE_STAGE_VERTEX_SHADER_BIT | VK_PIPELINE_STAGE_TESSELLATION_EVALUATION_SHADER_BIT | VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
              VK_ACCESS_SHADER_READ_BIT | (vertex_export || pixel_export ? VK_ACCESS_SHADER_WRITE_BIT : 0));
   if (!edram_draw_layout_ || *edram_draw_layout_ != edram_layout)
@@ -629,10 +652,16 @@ void VulkanRender::Draw(const RegisterFile& regs, rex::memory::Memory& memory, S
       ? std::min(host_scissor.extent.height, draw_extent_.height - host_scissor.offset.y) : 0;
   if (!rasterize) host_scissor = {{0, 0}, {1, 1}};
   cmd_.SetScissor(0, 1, &host_scissor);
-  if (!normalized.empty()) {
+  if (gpu_indices) {
+    cmd_.BindIndexBuffer(guest_buffer_->handle(), indices->guest_base,
+        index_bytes == 2 ? VK_INDEX_TYPE_UINT16 : VK_INDEX_TYPE_UINT32);
+    cmd_.DrawIndexed(count, 1, 0, 0, 0);
+    if (perf.enabled) { ++perf.gpu_index_draws; perf.gpu_index_bytes += uint64_t(count) * index_bytes; }
+  } else if (!normalized.empty()) {
     cmd_.BindIndexBuffer(index_buffer.buffer, index_buffer.offset, VK_INDEX_TYPE_UINT32);
     for (const auto& range : ranges) cmd_.DrawIndexed(range.count, 1, range.offset, 0, 0);
   } else cmd_.Draw(count, 1, 0, 0);
+  if (perf.enabled) ++perf.draws;
   if (!exports.empty()) {
     EndRendering();
     UseBuffer(guest_buffer_->handle(), guest_access_, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_TRANSFER_READ_BIT);

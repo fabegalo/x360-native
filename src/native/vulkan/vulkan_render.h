@@ -44,7 +44,7 @@ class VulkanRender {
   void CompleteGuestWrites(GuestSync, uint32_t);
   void SyncGuestRead(uint32_t address, uint32_t length, uint32_t);
   void Flush(bool wait);
-  void EndFrame() { if (mirror_) mirror_->InvalidateCpuPages(); }
+  void EndFrame();
  private:
   using Device = rex::ui::vulkan::VulkanDevice;
   using PendingPipeline = std::shared_future<VkPipeline>;

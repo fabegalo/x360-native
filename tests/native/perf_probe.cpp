@@ -2,6 +2,7 @@
 #include "../../src/native/vulkan/vulkan_render.h"
 #include "../../src/native/vulkan/vulkan_storage_buffer_range.h"
 #include "../../src/native/textures/texture_load.h"
+#include "../../src/native/commands/primitive_indices.h"
 #include <rex/runtime.h>
 #include <rex/kernel/init.h>
 #include <rex/cvar.h>
@@ -11,7 +12,10 @@
 #include <Windows.h>
 #include <dxgi1_4.h>
 #include <wrl/client.h>
+#include <algorithm>
+#include <array>
 #include <bit>
+#include <span>
 #include <cmath>
 #include <cstring>
 #include <fstream>
@@ -82,6 +86,19 @@ std::vector<uint32_t> TextureExportShader(FetchOpDimension dimension = FetchOpDi
       uint32_t(dimension) << 14,
       33 | (1u << 15) | (15u << 16), 0,
       (uint32_t(AluVectorOpcode::kMax) << 24) | (2u << 16) | (2u << 8) | (3u << 30)};
+}
+std::vector<uint32_t> RasterShader(bool vertex) {
+  using namespace ucode;
+  const uint64_t alloc = (uint64_t(vertex ? AllocType::kVsPosition : AllocType::kPsColors) << 41) |
+      (uint64_t(ControlFlowOpcode::kAlloc) << 44);
+  const uint64_t exec = 1 | (uint64_t(vertex ? 2 : 1) << 12) | (uint64_t(vertex) << 16) |
+      (uint64_t(ControlFlowOpcode::kExecEnd) << 44);
+  std::vector<uint32_t> code{uint32_t(alloc), uint32_t(alloc >> 32) | uint32_t(exec << 16), uint32_t(exec >> 16)};
+  if (vertex) code.insert(code.end(), {(1u << 12) | (1u << 19),
+      0x688u | (1u << 13) | (uint32_t(VertexFormat::k_32_32_32_32_FLOAT) << 16), 4});
+  code.insert(code.end(), {(vertex ? 62u : 0u) | (1u << 15) | (15u << 16), 0,
+      (uint32_t(AluVectorOpcode::kMax) << 24) | (vertex ? (1u << 16) | (1u << 8) | (3u << 30) : 0)});
+  return code;
 }
 uint64_t CpuNs() {
   FILETIME c, e, k, u;
@@ -195,6 +212,167 @@ void CheckTextureResolveDependency(VulkanRender& render, const RegisterFile& dra
     }
   }
   std::cout << "PASS resolve-to-texture dependencies: GPU stays queued, CPU conversion publishes, sampled bytes exact\n";
+}
+// Same contract as the D3D12 probe: an unaligned copy of identical guest
+// indices selects the CPU-normalized reference; the aligned copy must render
+// identical pixels from the resident mirror, or keep the documented fallback.
+void CheckResidentIndices(VulkanRender& render, RegisterFile draw, RegisterFile resolve,
+    rex::memory::Memory& memory, uint32_t output, const rex::ui::vulkan::VulkanDevice& device) {
+  auto& perf = NativeVulkanPerformance();
+  Require(perf.enabled, "resident index contracts require native_vulkan_perf");
+  const auto vertices = memory.SystemHeapAlloc(4096, 4096, rex::memory::kSystemHeapPhysical);
+  const auto index_storage = memory.SystemHeapAlloc(4096, 4096, rex::memory::kSystemHeapPhysical);
+  Require(vertices && index_storage, "resident index allocations");
+  auto load = [&](bool vertex, std::vector<uint32_t> words) {
+    for (auto& word : words) word = rex::byte_swap(word);
+    return render.LoadShader(vertex ? ShaderType::kVertex : ShaderType::kPixel, words.data(), uint32_t(words.size()));
+  };
+  auto* vs = load(true, RasterShader(true));
+  auto* ps = load(false, RasterShader(false));
+  const float triangle[]{-1, -1, .5f, 1, -1, 3, .5f, 1, 3, -1, .5f, 1};
+  xe_gpu_vertex_fetch_t fetch{};
+  fetch.type = FetchConstantType::kVertex; fetch.address = memory.GetPhysicalAddress(vertices) >> 2; fetch.size = 16;
+  draw[XE_GPU_REG_SHADER_CONSTANT_FETCH_00_0] = fetch.dword_0;
+  draw[XE_GPU_REG_SHADER_CONSTANT_FETCH_00_1] = fetch.dword_1;
+  draw[XE_GPU_REG_RB_MODECONTROL] = uint32_t(EdramMode::kColorDepth);
+  draw[XE_GPU_REG_RB_SURFACE_INFO] = 80;
+  draw[XE_GPU_REG_RB_COLOR_MASK] = 15;
+  draw[XE_GPU_REG_RB_COLOR_INFO] = 0; // RGBA8 at EDRAM base 0.
+  reg::RB_BLENDCONTROL blend{};
+  blend.color_srcblend = blend.alpha_srcblend = BlendFactor::kOne;
+  draw[XE_GPU_REG_RB_BLENDCONTROL0] = blend.value;
+  draw[XE_GPU_REG_PA_CL_VTE_CNTL] = 0x3F;
+  auto fp = [&](unsigned reg, float value) { draw[reg] = std::bit_cast<uint32_t>(value); };
+  fp(XE_GPU_REG_PA_CL_VPORT_XSCALE, 16); fp(XE_GPU_REG_PA_CL_VPORT_XOFFSET, 16);
+  fp(XE_GPU_REG_PA_CL_VPORT_YSCALE, -16); fp(XE_GPU_REG_PA_CL_VPORT_YOFFSET, 16);
+  fp(XE_GPU_REG_PA_CL_VPORT_ZSCALE, 1); fp(XE_GPU_REG_PA_CL_VPORT_ZOFFSET, 0);
+  draw[XE_GPU_REG_PA_SC_SCREEN_SCISSOR_BR] = 32 | (32 << 16);
+  draw[XE_GPU_REG_PA_SC_WINDOW_SCISSOR_TL] = 0x80000000;
+  draw[XE_GPU_REG_PA_SC_WINDOW_SCISSOR_BR] = 32 | (32 << 16);
+  draw[XE_GPU_REG_PA_SU_VTX_CNTL] = 1;
+  const std::array<float, 4> color{.25f, .5f, .75f, 1};
+  std::memcpy(&draw[XE_GPU_REG_SHADER_CONSTANT_000_X + 256 * 4], color.data(), sizeof(color));
+  reg::RB_COPY_CONTROL copy{}; copy.copy_command = CopyCommand(1); copy.color_clear_enable = 1;
+  resolve[XE_GPU_REG_RB_COPY_CONTROL] = copy.value;
+  resolve[XE_GPU_REG_RB_COLOR_CLEAR] = resolve[XE_GPU_REG_RB_COLOR_CLEAR_LO] = 0;
+  resolve[XE_GPU_REG_RB_COPY_DEST_BASE] = memory.GetPhysicalAddress(output) + 4096;
+  auto capture = [&] {
+    render.Resolve(resolve, memory); render.Flush(true);
+    render.CompleteGuestWrites(kGuestSyncPacket, 0);
+    const auto* bytes = memory.TranslatePhysical<const uint8_t*>(resolve[XE_GPU_REG_RB_COPY_DEST_BASE]);
+    return std::vector<uint8_t>(bytes, bytes + 4096);
+  };
+  capture(); // Clear EDRAM before the first comparison.
+  const uint32_t indices_physical = memory.GetPhysicalAddress(index_storage);
+  auto encode = [&](std::span<const uint32_t> indices, IndexFormat format, Endian endian, bool unaligned) {
+    const unsigned bytes = format == IndexFormat::kInt16 ? 2 : 4;
+    const unsigned size = (unsigned(indices.size()) * bytes + 3) & ~3u;
+    std::vector<uint8_t> encoded(size);
+    for (unsigned i = 0; i < indices.size(); ++i) for (unsigned b = 0; b < bytes; ++b) {
+      const unsigned offset = (i * bytes + b) ^ (endian == Endian::k8in16 ? 1u : endian == Endian::k8in32 ? 3u : endian == Endian::k16in32 ? 2u : 0u);
+      encoded.at(offset) = uint8_t(indices[i] >> (b * 8));
+    }
+    const unsigned offset = unaligned ? 65 : bytes == 2 ? 2 : 0;
+    std::memcpy(memory.TranslateVirtual<uint8_t*>(index_storage) + offset, encoded.data(), encoded.size());
+    return DrawIndices{format, endian, uint32_t(indices.size()), indices_physical + offset, size};
+  };
+  unsigned comparisons = 0;
+  auto compare = [&](std::span<const uint32_t> indices, IndexFormat format, Endian endian,
+                     PrimitiveType primitive, bool restart, int32_t offset, uint32_t minimum, uint32_t maximum) {
+    std::memset(memory.TranslateVirtual(vertices), 0, 4096);
+    std::memcpy(memory.TranslateVirtual<uint8_t*>(vertices) + minimum * 16, triangle, sizeof(triangle));
+    draw[XE_GPU_REG_VGT_INDX_OFFSET] = uint32_t(offset);
+    draw[XE_GPU_REG_VGT_MIN_VTX_INDX] = minimum; draw[XE_GPU_REG_VGT_MAX_VTX_INDX] = maximum;
+    reg::VGT_DRAW_INITIATOR initiator{}; initiator.prim_type = primitive;
+    draw[XE_GPU_REG_VGT_DRAW_INITIATOR] = initiator.value;
+    reg::PA_SU_SC_MODE_CNTL mode{}; mode.multi_prim_ib_ena = restart;
+    draw[XE_GPU_REG_PA_SU_SC_MODE_CNTL] = mode.value;
+    draw[XE_GPU_REG_VGT_MULTI_PRIM_IB_RESET_INDX] = 0xFFFFFF;
+    auto cpu = encode(indices, format, endian, true);
+    render.Draw(draw, memory, vs, ps, primitive, uint32_t(indices.size()), &cpu);
+    const auto expected = capture();
+    Require(std::any_of(expected.begin(), expected.end(), [](uint8_t b) { return b != 0; }),
+        "reference indexed triangle did not render");
+    auto gpu = encode(indices, format, endian, false);
+    const auto before = perf;
+    render.Draw(draw, memory, vs, ps, primitive, uint32_t(indices.size()), &gpu);
+    const auto after = perf;
+    const auto actual = capture();
+    Require(actual == expected, "resident and normalized index pixels differ");
+    const bool direct = !restart && !NeedsPrimitiveConversion(primitive) &&
+        (format == IndexFormat::kInt16 || device.properties().fullDrawIndexUint32) &&
+        (format == IndexFormat::kInt32 || endian == Endian::kNone || endian == Endian::k8in16);
+    Require(after.gpu_index_draws - before.gpu_index_draws == unsigned(direct),
+        "resident index path/fallback selection changed");
+    Require(after.normalized_indices - before.normalized_indices == (direct ? 0 : indices.size()),
+        "resident indices were normalized on the CPU");
+    ++comparisons;
+  };
+  for (const auto format : {IndexFormat::kInt16, IndexFormat::kInt32})
+    for (const auto endian : {Endian::kNone, Endian::k8in16, Endian::k8in32, Endian::k16in32}) {
+      const std::array<uint32_t, 3> ordinary{0, 1, 2};
+      compare(ordinary, format, endian, PrimitiveType::kTriangleList, false, 0, 0, 0xFFFFFF);
+      const std::array<uint32_t, 3> high = format == IndexFormat::kInt16
+          ? std::array<uint32_t, 3>{65533, 65534, 65535}
+          : std::array<uint32_t, 3>{0xAB000000, 0xAB000001, 0xAB000002};
+      compare(high, format, endian, PrimitiveType::kTriangleList, false,
+          format == IndexFormat::kInt16 ? -65533 : 0, 0, 0xFFFFFF);
+    }
+  const std::array<uint32_t, 3> clamped{0, 2, 999};
+  compare(clamped, IndexFormat::kInt32, Endian::k8in32, PrimitiveType::kTriangleList, false, 0, 1, 3);
+  const std::array<uint32_t, 3> strip{0, 1, 2};
+  compare(strip, IndexFormat::kInt16, Endian::k8in16, PrimitiveType::kTriangleStrip, false, 0, 0, 0xFFFFFF);
+  compare(strip, IndexFormat::kInt32, Endian::k8in32, PrimitiveType::kTriangleFan, false, 0, 0, 0xFFFFFF);
+  const std::array<uint32_t, 7> restarted{0, 1, 2, 0xFFFFFF, 0, 1, 2};
+  compare(restarted, IndexFormat::kInt32, Endian::k8in32, PrimitiveType::kTriangleStrip, true, 0, 0, 0xFFFFFF);
+
+  // A GPU producer updates the index bytes in the resident mirror. The draw
+  // must consume them without waiting for their guest readback publication.
+  draw[XE_GPU_REG_VGT_INDX_OFFSET] = draw[XE_GPU_REG_VGT_MIN_VTX_INDX] = 0;
+  draw[XE_GPU_REG_VGT_MAX_VTX_INDX] = 0xFFFFFF; draw[XE_GPU_REG_PA_SU_SC_MODE_CNTL] = 0;
+  reg::VGT_DRAW_INITIATOR initiator{}; initiator.prim_type = PrimitiveType::kTriangleList;
+  draw[XE_GPU_REG_VGT_DRAW_INITIATOR] = initiator.value;
+  std::memcpy(memory.TranslateVirtual(vertices), triangle, sizeof(triangle));
+  std::memset(memory.TranslateVirtual(index_storage), 0xCC, 16);
+  RegisterFile producer;
+  producer[XE_GPU_REG_SQ_PROGRAM_CNTL] = draw[XE_GPU_REG_SQ_PROGRAM_CNTL];
+  producer[XE_GPU_REG_SQ_VS_CONST] = 0x000FF000;
+  producer[XE_GPU_REG_VGT_MAX_VTX_INDX] = 0xFFFFFF;
+  producer[XE_GPU_REG_RB_MODECONTROL] = uint32_t(EdramMode::kNoOperation);
+  xe_gpu_memexport_stream_t stream{}; stream.base_address = indices_physical >> 2; stream.const_0x1 = 1;
+  stream.const_0x4b000000 = 0x4B000000; stream.format = ColorFormat::k_16_16_16_16;
+  stream.num_format = SurfaceNumberFormat::kUnsignedInteger; stream.const_0x4b0 = 0x4B0;
+  stream.index_count = 1; stream.const_0x96 = 0x96;
+  std::memcpy(&producer[XE_GPU_REG_SHADER_CONSTANT_000_X], &stream, sizeof(stream));
+  producer[XE_GPU_REG_SHADER_CONSTANT_000_X + 5] = std::bit_cast<uint32_t>(1.f);
+  const std::array<float, 4> produced{0, 1, 2, 0};
+  std::memcpy(&producer[XE_GPU_REG_SHADER_CONSTANT_000_X + 8], produced.data(), sizeof(produced));
+  auto* exporter = load(true, ExportShader());
+  render.Draw(producer, memory, exporter, nullptr, PrimitiveType::kTriangleList, 1, nullptr);
+  const auto before = perf;
+  DrawIndices produced_indices{IndexFormat::kInt16, Endian::kNone, 3, indices_physical, 8};
+  render.Draw(draw, memory, vs, ps, PrimitiveType::kTriangleList, 3, &produced_indices);
+  Require(perf.submissions == before.submissions && perf.readbacks == before.readbacks,
+      "GPU index consumer waited for CPU readback");
+  Require(perf.gpu_index_draws == before.gpu_index_draws + 1, "GPU-produced indices left the resident path");
+  const auto produced_pixels = capture();
+  const std::array<uint16_t, 4> expected_indices{0, 1, 2, 0};
+  Require(!std::memcmp(memory.TranslatePhysical(indices_physical), expected_indices.data(), 8), "GPU index producer bytes");
+  const auto cpu = encode(strip, IndexFormat::kInt16, Endian::kNone, true);
+  render.Draw(draw, memory, vs, ps, PrimitiveType::kTriangleList, 3, &cpu);
+  Require(capture() == produced_pixels, "GPU-produced resident indices differ from CPU-normalized pixels");
+  for (const auto invalid : {DrawIndices{IndexFormat::kInt16, Endian::kNone, 3, indices_physical, 5},
+                            DrawIndices{IndexFormat::kInt32, Endian::kNone, 3, 0x1FFFFFF8, 12},
+                            DrawIndices{IndexFormat::kInt32, Endian::kNone, 2, indices_physical, 12}}) {
+    bool rejected = false;
+    try { render.Draw(draw, memory, vs, ps, PrimitiveType::kTriangleList, 3, &invalid); }
+    catch (const std::runtime_error&) { rejected = true; }
+    Require(rejected, "resident indices bypassed extent validation");
+  }
+  render.Flush(true);
+  memory.SystemHeapFree(index_storage); memory.SystemHeapFree(vertices);
+  std::cout << "PASS Vulkan resident indices: " << comparisons
+      << " normalized/GPU pixel pairs, endian, offset/clamp, restart/conversion fallbacks, CPU writes, GPU producer and bounds\n";
 }
 void CheckStorageRangeSelection() {
   constexpr VkDeviceSize mib = 1ull << 20, buffer = 512 * mib, limit = 128 * mib;
@@ -676,6 +854,8 @@ int main(int argc, char** argv) {
       }
       if(argc>6 && std::string(argv[6])=="storage-contracts")
         CheckTextureStorageLimit(*provider, draw, memory, output);
+      if(argc>6 && std::string(argv[6])=="index-contracts")
+        CheckResidentIndices(render, draw, resolve, memory, output, *provider->vulkan_device());
     }
     Require(!measured||NativeVulkanPerformance().live_bytes==0,"Native buffers survived renderer destruction");
     if(argc>6) for(unsigned i=0;i<3;++i) {
