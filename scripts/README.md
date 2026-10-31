@@ -1,7 +1,11 @@
 # Ferramentas
 
 Executar a partir da raiz do repositório. Os pontos de entrada permanecem
-`bootstrap.ps1`, `devshell.cmd`, `prepare-tools.ps1` e `build-title.ps1`.
+`bootstrap.ps1`, `devshell.cmd`, `prepare-tools.ps1` e `build-title.ps1` no
+Windows. Em Linux/macOS: `bootstrap.sh` (submódulos rasos, ferramentas de
+`packaging/posix-toolchain.lock` e patches) e `build-title.sh`; os patches do SDK
+são aplicados/conferidos por `setup/apply-sdk-patches.py`, com o mesmo contrato
+do `.ps1` e sem `git apply` quando os hashes do lock já comprovam o estado.
 
 | Diretório | Responsabilidade |
 |---|---|

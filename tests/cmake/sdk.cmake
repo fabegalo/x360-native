@@ -137,10 +137,13 @@ x360n_stage_runtime_dlls(x360n_user_mode_page_probe)
 # Minimal ReXApp built like a title, for the teardown checks in
 # sdkcheck/app_shutdown_test.cpp (patches 0002 and 0004). It runs the synthetic
 # XEX that the test writes; see shutdown_probe/probe_app.cpp.
-add_executable(x360n_shutdown_probe WIN32 shutdown_probe/probe_app.cpp)
-target_link_libraries(x360n_shutdown_probe PRIVATE rex::runtime)
-rexglue_configure_target(x360n_shutdown_probe GPU_PLUGINS xenos)
-x360n_stage_runtime_dlls(x360n_shutdown_probe PLUGIN_TARGETS rexgpu-xenos)
+# Win32 window and focus checks: Windows only, like the tests that use them.
+if(WIN32)
+  add_executable(x360n_shutdown_probe WIN32 shutdown_probe/probe_app.cpp)
+  target_link_libraries(x360n_shutdown_probe PRIVATE rex::runtime)
+  rexglue_configure_target(x360n_shutdown_probe GPU_PLUGINS xenos)
+  x360n_stage_runtime_dlls(x360n_shutdown_probe PLUGIN_TARGETS rexgpu-xenos)
+endif()
 
 # SDK runtime checks (link rexruntime): behavior our local SDK patches fix
 # (patches/rexglue-sdk/). Synthetic inputs only.
@@ -169,14 +172,18 @@ add_executable(x360n_sdk_runtime_checks
     sdkcheck/function_table_test.cpp
     sdkcheck/setup_failure_test.cpp
     sdkcheck/import_records_test.cpp
-    sdkcheck/app_shutdown_test.cpp
     sdkcheck/image_page_entry_test.cpp)
+if(WIN32)
+  target_sources(x360n_sdk_runtime_checks PRIVATE sdkcheck/app_shutdown_test.cpp)
+endif()
 target_sources(x360n_sdk_runtime_checks PRIVATE sdkcheck/dashboard_region_test.cpp)
 target_sources(x360n_sdk_runtime_checks PRIVATE sdkcheck/xam_language_test.cpp)
 target_sources(x360n_sdk_runtime_checks PRIVATE sdkcheck/dpc_dispatch_test.cpp)
 target_sources(x360n_sdk_runtime_checks PRIVATE sdkcheck/mnk_keystroke_test.cpp)
-target_sources(x360n_sdk_runtime_checks PRIVATE sdkcheck/fullscreen_toggle_test.cpp)
-target_sources(x360n_sdk_runtime_checks PRIVATE sdkcheck/xam_datetime_test.cpp)
+if(WIN32)
+  target_sources(x360n_sdk_runtime_checks PRIVATE sdkcheck/fullscreen_toggle_test.cpp)
+  target_sources(x360n_sdk_runtime_checks PRIVATE sdkcheck/xam_datetime_test.cpp)
+endif()
 target_sources(x360n_sdk_runtime_checks PRIVATE sdkcheck/dashboard_typeface_test.cpp
     ../titles/dash_17559/src/typeface.cpp)
 target_sources(x360n_sdk_runtime_checks PRIVATE sdkcheck/xam_common_string_test.cpp)
@@ -256,12 +263,20 @@ target_sources(x360n_sdk_runtime_checks PRIVATE sdkcheck/dashboard_6717_curl_bin
     ${PROJECT_SOURCE_DIR}/titles/dash_6717/src/curl_bind.cpp)
 # Exercise the SDL driver and its SDL instance in the same binary; a second SDL
 # instance in the test cannot configure/pause devices owned inside rexruntime.
-target_link_libraries(x360n_sdk_runtime_checks PRIVATE rexruntime rexcodegen rexaudio x360n_core Catch2::Catch2WithMain)
+# The audio objects (OBJECT library) are inside rexruntime as well. A separate
+# copy keeps its own SDL instance next to the Windows DLL; ELF/Mach-O bind both
+# copies to one cvar registry, so elsewhere the shared library provides them.
+target_link_libraries(x360n_sdk_runtime_checks PRIVATE rexruntime rexcodegen x360n_core Catch2::Catch2WithMain)
+if(WIN32)
+  target_link_libraries(x360n_sdk_runtime_checks PRIVATE rexaudio)
+endif()
 target_compile_options(x360n_sdk_runtime_checks PRIVATE
     -UTRACY_ENABLE -UREXGLUE_ENABLE_PROFILING -UREXGLUE_ENABLE_PERF_COUNTERS)
-target_compile_definitions(x360n_sdk_runtime_checks PRIVATE
-    X360N_SHUTDOWN_PROBE="$<TARGET_FILE:x360n_shutdown_probe>")
-add_dependencies(x360n_sdk_runtime_checks x360n_shutdown_probe)
+if(WIN32)
+  target_compile_definitions(x360n_sdk_runtime_checks PRIVATE
+      X360N_SHUTDOWN_PROBE="$<TARGET_FILE:x360n_shutdown_probe>")
+  add_dependencies(x360n_sdk_runtime_checks x360n_shutdown_probe)
+endif()
 
 add_executable(x360n_firmware_exit_probe sdkcheck/firmware_exit_probe.cpp ../titles/common/launch_handoff.cpp)
 add_executable(x360n_input_hotplug_probe sdkcheck/input_hotplug_probe.cpp)

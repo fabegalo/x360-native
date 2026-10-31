@@ -1,6 +1,10 @@
 {
     "version": 6,
-    "cmakeMinimumRequired": { "major": 3, "minor": 25, "patch": 0 },
+    "cmakeMinimumRequired": {
+        "major": 3,
+        "minor": 25,
+        "patch": 0
+    },
     "configurePresets": [
         {
             "name": "win-amd64",
@@ -21,25 +25,232 @@
                 "REXGLUE_USE_VULKAN": "ON",
                 "PYTHON_EXECUTABLE": "${sourceDir}/.local/toolchains/python-3.14.8/python.exe"
             },
-            "condition": { "type": "equals", "lhs": "${hostSystemName}", "rhs": "Windows" }
+            "condition": {
+                "type": "equals",
+                "lhs": "${hostSystemName}",
+                "rhs": "Windows"
+            }
+        },
+        {
+            "name": "posix-base",
+            "hidden": true,
+            "generator": "Ninja Multi-Config",
+            "binaryDir": "${sourceDir}/.local/build/${presetName}",
+            "cacheVariables": {
+                "CMAKE_CXX_STANDARD": "23",
+                "CMAKE_CONFIGURATION_TYPES": "Debug;Release;RelWithDebInfo",
+                "CMAKE_DEFAULT_BUILD_TYPE": "Release",
+                "REXGLUE_BUILD_TESTS": "ON",
+                "REXGLUE_USE_VULKAN": "ON"
+            }
+        },
+        {
+            "name": "linux-amd64",
+            "inherits": "posix-base",
+            "displayName": "Linux x86-64 (pinned LLVM, host libraries)",
+            "description": "Development build with the LLVM of scripts/packaging/posix-toolchain.lock (scripts/bootstrap.sh). Mirrors the SDK's linux-base preset.",
+            "cacheVariables": {
+                "CMAKE_C_COMPILER": "${sourceDir}/.local/toolchains/posix-linux-x64/llvm/bin/clang",
+                "CMAKE_CXX_COMPILER": "${sourceDir}/.local/toolchains/posix-linux-x64/llvm/bin/clang++",
+                "CMAKE_MAKE_PROGRAM": "${sourceDir}/.local/toolchains/posix-linux-x64/ninja/ninja",
+                "CMAKE_C_FLAGS": "-march=x86-64-v2",
+                "CMAKE_CXX_FLAGS": "-march=x86-64-v2"
+            },
+            "condition": {
+                "type": "equals",
+                "lhs": "${hostSystemName}",
+                "rhs": "Linux"
+            }
+        },
+        {
+            "name": "linux-arm64",
+            "inherits": "posix-base",
+            "displayName": "Linux ARM64 (pinned LLVM, host libraries)",
+            "description": "Development build with the LLVM of scripts/packaging/posix-toolchain.lock (scripts/bootstrap.sh). Mirrors the SDK's linux-arm64-base preset.",
+            "cacheVariables": {
+                "CMAKE_C_COMPILER": "${sourceDir}/.local/toolchains/posix-linux-arm64/llvm/bin/clang",
+                "CMAKE_CXX_COMPILER": "${sourceDir}/.local/toolchains/posix-linux-arm64/llvm/bin/clang++",
+                "CMAKE_MAKE_PROGRAM": "${sourceDir}/.local/toolchains/posix-linux-arm64/ninja/ninja",
+                "CMAKE_C_FLAGS": "-march=armv8-a",
+                "CMAKE_CXX_FLAGS": "-march=armv8-a"
+            },
+            "condition": {
+                "type": "equals",
+                "lhs": "${hostSystemName}",
+                "rhs": "Linux"
+            }
+        },
+        {
+            "name": "mac-arm64",
+            "inherits": "posix-base",
+            "displayName": "macOS ARM64 (Xcode clang)",
+            "description": "Development build with the selected Xcode's Apple clang and the pinned Ninja (scripts/bootstrap.sh). Mirrors the SDK's mac-arm64-base preset.",
+            "cacheVariables": {
+                "CMAKE_C_COMPILER": "clang",
+                "CMAKE_CXX_COMPILER": "clang++",
+                "CMAKE_MAKE_PROGRAM": "${sourceDir}/.local/toolchains/posix-macos-arm64/ninja/ninja",
+                "CMAKE_C_FLAGS": "-march=armv8-a",
+                "CMAKE_CXX_FLAGS": "-march=armv8-a",
+                "CMAKE_OSX_ARCHITECTURES": "arm64"
+            },
+            "condition": {
+                "type": "equals",
+                "lhs": "${hostSystemName}",
+                "rhs": "Darwin"
+            }
+        },
+        {
+            "name": "mac-amd64",
+            "inherits": "posix-base",
+            "displayName": "macOS x86-64 (Xcode clang)",
+            "description": "Development build with the selected Xcode's Apple clang and the pinned Ninja (scripts/bootstrap.sh). Mirrors the SDK's mac-base preset.",
+            "cacheVariables": {
+                "CMAKE_C_COMPILER": "clang",
+                "CMAKE_CXX_COMPILER": "clang++",
+                "CMAKE_MAKE_PROGRAM": "${sourceDir}/.local/toolchains/posix-macos-x64/ninja/ninja",
+                "CMAKE_C_FLAGS": "-march=x86-64-v3",
+                "CMAKE_CXX_FLAGS": "-march=x86-64-v3",
+                "CMAKE_OSX_ARCHITECTURES": "x86_64"
+            },
+            "condition": {
+                "type": "equals",
+                "lhs": "${hostSystemName}",
+                "rhs": "Darwin"
+            }
         }
     ],
     "buildPresets": [
-        { "name": "win-amd64-debug", "configurePreset": "win-amd64", "configuration": "Debug" },
-        { "name": "win-amd64-release", "configurePreset": "win-amd64", "configuration": "Release" }
+        {
+            "name": "win-amd64-debug",
+            "configurePreset": "win-amd64",
+            "configuration": "Debug"
+        },
+        {
+            "name": "win-amd64-release",
+            "configurePreset": "win-amd64",
+            "configuration": "Release"
+        },
+        {
+            "name": "linux-amd64-debug",
+            "configurePreset": "linux-amd64",
+            "configuration": "Debug"
+        },
+        {
+            "name": "linux-amd64-release",
+            "configurePreset": "linux-amd64",
+            "configuration": "Release"
+        },
+        {
+            "name": "linux-arm64-debug",
+            "configurePreset": "linux-arm64",
+            "configuration": "Debug"
+        },
+        {
+            "name": "linux-arm64-release",
+            "configurePreset": "linux-arm64",
+            "configuration": "Release"
+        },
+        {
+            "name": "mac-arm64-debug",
+            "configurePreset": "mac-arm64",
+            "configuration": "Debug"
+        },
+        {
+            "name": "mac-arm64-release",
+            "configurePreset": "mac-arm64",
+            "configuration": "Release"
+        },
+        {
+            "name": "mac-amd64-debug",
+            "configurePreset": "mac-amd64",
+            "configuration": "Debug"
+        },
+        {
+            "name": "mac-amd64-release",
+            "configurePreset": "mac-amd64",
+            "configuration": "Release"
+        }
     ],
     "testPresets": [
         {
             "name": "win-amd64-debug",
             "configurePreset": "win-amd64",
             "configuration": "Debug",
-            "output": { "outputOnFailure": true }
+            "output": {
+                "outputOnFailure": true
+            }
         },
         {
             "name": "win-amd64-release",
             "configurePreset": "win-amd64",
             "configuration": "Release",
-            "output": { "outputOnFailure": true }
+            "output": {
+                "outputOnFailure": true
+            }
+        },
+        {
+            "name": "linux-amd64-debug",
+            "configurePreset": "linux-amd64",
+            "configuration": "Debug",
+            "output": {
+                "outputOnFailure": true
+            }
+        },
+        {
+            "name": "linux-amd64-release",
+            "configurePreset": "linux-amd64",
+            "configuration": "Release",
+            "output": {
+                "outputOnFailure": true
+            }
+        },
+        {
+            "name": "linux-arm64-debug",
+            "configurePreset": "linux-arm64",
+            "configuration": "Debug",
+            "output": {
+                "outputOnFailure": true
+            }
+        },
+        {
+            "name": "linux-arm64-release",
+            "configurePreset": "linux-arm64",
+            "configuration": "Release",
+            "output": {
+                "outputOnFailure": true
+            }
+        },
+        {
+            "name": "mac-arm64-debug",
+            "configurePreset": "mac-arm64",
+            "configuration": "Debug",
+            "output": {
+                "outputOnFailure": true
+            }
+        },
+        {
+            "name": "mac-arm64-release",
+            "configurePreset": "mac-arm64",
+            "configuration": "Release",
+            "output": {
+                "outputOnFailure": true
+            }
+        },
+        {
+            "name": "mac-amd64-debug",
+            "configurePreset": "mac-amd64",
+            "configuration": "Debug",
+            "output": {
+                "outputOnFailure": true
+            }
+        },
+        {
+            "name": "mac-amd64-release",
+            "configurePreset": "mac-amd64",
+            "configuration": "Release",
+            "output": {
+                "outputOnFailure": true
+            }
         }
     ]
 }

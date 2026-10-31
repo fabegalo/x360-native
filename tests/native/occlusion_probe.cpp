@@ -1,5 +1,6 @@
 // PM4 -> Native -> translated ROV/FSI shader -> GPU counter -> guest report.
 // Synthetic contract test only; this does not establish gameplay acceptance.
+#include "probe_main.h"
 #include <rex/runtime.h>
 #include <rex/logging.h>
 #include <rex/kernel/init.h>
@@ -188,18 +189,18 @@ void Run(rex::system::IGraphicsSystem& gpu, rex::memory::Memory& memory) {
   Require(passed, "GPU sample counters differ from expected sample coverage");
 }
 }
-int wmain(int argc, wchar_t** argv) {
+X360N_PROBE_MAIN {
   try {
     Require(argc == 2 || argc == 3, "usage: x360n_native_occlusion_probe OUTPUT [d3d12|vulkan]");
-    const std::wstring_view requested = argc == 3 ? argv[2] : L"d3d12";
-    Require(requested == L"d3d12" || requested == L"vulkan", "invalid probe graphics API");
-    const char* backend = requested == L"vulkan" ? "vulkan" : "d3d12";
+    const ProbeArg requested = argc == 3 ? argv[2] : X360N_PROBE_ARG("d3d12");
+    Require(requested == X360N_PROBE_ARG("d3d12") || requested == X360N_PROBE_ARG("vulkan"), "invalid probe graphics API");
+    const char* backend = requested == X360N_PROBE_ARG("vulkan") ? "vulkan" : "d3d12";
     const std::filesystem::path output(argv[1]); std::filesystem::create_directories(output);
     rex::InitLogging((output / "runtime.log").string().c_str());
     rex::Runtime rt(output, output / "user");
     rex::RuntimeConfig config; config.tool_mode = true; config.kernel_init = rex::kernel::InitializeKernel;
     Require(rt.Setup(std::move(config)) == X_STATUS_SUCCESS, "runtime setup");
-    if (requested == L"d3d12") rex::cvar::SetFlagByName("d3d12_debug", "true");
+    if (requested == X360N_PROBE_ARG("d3d12")) rex::cvar::SetFlagByName("d3d12_debug", "true");
     auto gpu = rex::system::LoadGpuPlugin("native", backend); Require(bool(gpu), "Native plugin load");
     Require(gpu->SetupPresentation(nullptr) == X_STATUS_SUCCESS, "presentation setup");
     Require(gpu->SetupGuestGpu(rt.function_dispatcher(), rt.kernel_state()) == X_STATUS_SUCCESS, "guest GPU setup");

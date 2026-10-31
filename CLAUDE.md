@@ -119,6 +119,18 @@ scripts\devshell.cmd ctest --preset win-amd64-debug -L project   # só este repo
 .local\build\win-amd64\src\supervisor\Debug\x360n.exe doctor
 ```
 
+Linux/macOS (sh, raiz do repositório; mesmas regras de não rodar suítes completas):
+
+```sh
+scripts/bootstrap.sh                                   # submódulos rasos, LLVM/CMake/Ninja do lock, patches
+.local/toolchains/posix-linux-x64/cmake/bin/cmake --preset linux-amd64   # mac-arm64/mac-amd64/linux-arm64
+.local/toolchains/posix-linux-x64/cmake/bin/cmake --build --preset linux-amd64-release
+python3 scripts/setup/apply-sdk-patches.py --check     # mesmo contrato do .ps1
+```
+
+Fora do Windows o Native compila só o backend Vulkan (D3D12 continua exclusivo
+do Windows); `ctest -R "native[.]|Native-"` roda os contratos Vulkan reais.
+
 - Sempre compilar via `scripts\devshell.cmd` (vcvars64 + LLVM fixado). Não há
   clang no PATH global, de propósito.
 - `devshell.cmd` repassa os argumentos com as regras do cmd: `|` vira pipe e `^`

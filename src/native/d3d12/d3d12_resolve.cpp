@@ -103,7 +103,7 @@ void D3D12Render::Resolve(const RegisterFile& r, rex::memory::Memory& memory) {
   const uint64_t slot = (uint64_t(length) + 255) & ~uint64_t(255);
   if (view_count_ > 65000) Flush(kFlushCapacity);
   ReserveReadback(slot);
-  ID3D12DescriptorHeap* heaps[]{views_.Get(), samplers_.Get()}; list_->SetDescriptorHeaps(2, heaps);
+  ID3D12DescriptorHeap* heaps[]{views_.Get(), samplers_.Get()}; cmd_.SetDescriptorHeaps(2, heaps);
   if (length) {
     draw_util::ResolveCopyShaderConstants constants; uint32_t gx, gy;
     auto index = info.GetCopyShader(scale_x_, scale_y_, constants, gx, gy);
@@ -144,7 +144,7 @@ void D3D12Render::Resolve(const RegisterFile& r, rex::memory::Memory& memory) {
       scaled_buffer=Buffer(initial.size(),D3D12_HEAP_TYPE_DEFAULT,scaled_state,D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS);
       scaled_readback=Buffer(initial.size(),D3D12_HEAP_TYPE_READBACK,D3D12_RESOURCE_STATE_COPY_DEST);
       auto upload=Upload(initial.data(),initial.size());
-      list_->CopyBufferRegion(scaled_buffer.Get(),0,upload.resource.Get(),upload.offset,initial.size());
+      cmd_.CopyBufferRegion(scaled_buffer.Get(),0,upload.resource.Get(),upload.offset,initial.size());
       Transition(scaled_buffer.Get(),scaled_state,D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
       transient_.push_back(scaled_buffer);
     }
@@ -159,10 +159,10 @@ void D3D12Render::Resolve(const RegisterFile& r, rex::memory::Memory& memory) {
     s.Buffer.NumElements = edram_size_ >> (si.source_is_raw ? 2 : si.source_bpe_log2);
     s.Buffer.Flags = si.source_is_raw ? D3D12_BUFFER_SRV_FLAG_RAW : D3D12_BUFFER_SRV_FLAG_NONE;
     device_->CreateShaderResourceView(edram_.Get(), &s, Cpu(v + 1));
-    list_->SetComputeRootSignature(copy_root_.Get()); list_->SetPipelineState(copy_pipelines_[size_t(index)].Get());
-    list_->SetComputeRoot32BitConstants(0, sizeof(constants) / 4, &constants, 0);
-    list_->SetComputeRootDescriptorTable(1, Gpu(v)); list_->SetComputeRootDescriptorTable(2, Gpu(v + 1));
-    list_->Dispatch(gx, gy, 1);
+    cmd_.SetComputeRootSignature(copy_root_.Get()); cmd_.SetPipelineState(copy_pipelines_[size_t(index)].Get());
+    cmd_.SetComputeRoot32BitConstants(0, sizeof(constants) / 4, &constants, 0);
+    cmd_.SetComputeRootDescriptorTable(1, Gpu(v)); cmd_.SetComputeRootDescriptorTable(2, Gpu(v + 1));
+    cmd_.Dispatch(gx, gy, 1);
     // The mirror now holds these bytes: later fetches read them on the GPU;
     // cached textures over the range reload from the mirror.
     if (scaled) {
@@ -184,11 +184,11 @@ void D3D12Render::Resolve(const RegisterFile& r, rex::memory::Memory& memory) {
       source.Buffer.NumElements=UINT(range*area/4); source.Buffer.Flags=D3D12_BUFFER_SRV_FLAG_RAW;
       device_->CreateShaderResourceView(scaled_buffer.Get(),&source,Cpu(views+1));
       const uint32_t downsample[]{length,pixel_log2,scale_x_,scale_y_,(info.copy_dest_extent_start-info.copy_dest_base)*area,info.copy_dest_extent_start};
-      list_->SetComputeRootSignature(downscale_root_.Get()); list_->SetPipelineState(downscale_pipeline_.Get());
-      list_->SetComputeRoot32BitConstants(0,6,downsample,0); list_->SetComputeRootDescriptorTable(1,Gpu(views));
-      list_->SetComputeRootDescriptorTable(2,Gpu(views+1)); list_->Dispatch((length+255)/256,1,1);
+      cmd_.SetComputeRootSignature(downscale_root_.Get()); cmd_.SetPipelineState(downscale_pipeline_.Get());
+      cmd_.SetComputeRoot32BitConstants(0,6,downsample,0); cmd_.SetComputeRootDescriptorTable(1,Gpu(views));
+      cmd_.SetComputeRootDescriptorTable(2,Gpu(views+1)); cmd_.Dispatch((length+255)/256,1,1);
       Transition(scaled_buffer.Get(),scaled_state,D3D12_RESOURCE_STATE_COPY_SOURCE);
-      list_->CopyBufferRegion(scaled_readback.Get(),0,scaled_buffer.Get(),0,range*area);
+      cmd_.CopyBufferRegion(scaled_readback.Get(),0,scaled_buffer.Get(),0,range*area);
     }
     QueueGuestWrite(info.copy_dest_extent_start, length, scaled ? &ticket.cpu_generations : nullptr);
     if (scaled) {
@@ -202,7 +202,7 @@ void D3D12Render::Resolve(const RegisterFile& r, rex::memory::Memory& memory) {
     auto v = Views(1); D3D12_UNORDERED_ACCESS_VIEW_DESC u{};
     u.Format = DXGI_FORMAT_R32G32B32A32_UINT; u.ViewDimension = D3D12_UAV_DIMENSION_BUFFER; u.Buffer.NumElements = edram_size_ / 16;
     device_->CreateUnorderedAccessView(edram_.Get(), nullptr, &u, Cpu(v));
-    list_->SetComputeRootSignature(clear_root_.Get()); list_->SetComputeRootDescriptorTable(1, Gpu(v));
+    cmd_.SetComputeRootSignature(clear_root_.Get()); cmd_.SetComputeRootDescriptorTable(1, Gpu(v));
     auto groups = info.GetClearShaderGroupCount(scale_x_, scale_y_);
     auto clear = [&](bool depth) {
       draw_util::ResolveClearShaderConstants c;
@@ -211,8 +211,8 @@ void D3D12Render::Resolve(const RegisterFile& r, rex::memory::Memory& memory) {
       if (!clear_pipelines_[i]) clear_pipelines_[i] = scaled ? (i ? ComputePSO(clear_root_.Get(), kernels::resolve_clear_64bpp_scaled_cs, sizeof(kernels::resolve_clear_64bpp_scaled_cs))
           : ComputePSO(clear_root_.Get(), kernels::resolve_clear_32bpp_scaled_cs, sizeof(kernels::resolve_clear_32bpp_scaled_cs))) : i ? ComputePSO(clear_root_.Get(), kernels::resolve_clear_64bpp_cs, sizeof(kernels::resolve_clear_64bpp_cs))
           : ComputePSO(clear_root_.Get(), kernels::resolve_clear_32bpp_cs, sizeof(kernels::resolve_clear_32bpp_cs));
-      list_->SetPipelineState(clear_pipelines_[i].Get()); list_->SetComputeRoot32BitConstants(0, sizeof(c) / 4, &c, 0);
-      list_->Dispatch(groups.first, groups.second, 1); Barrier();
+      cmd_.SetPipelineState(clear_pipelines_[i].Get()); cmd_.SetComputeRoot32BitConstants(0, sizeof(c) / 4, &c, 0);
+      cmd_.Dispatch(groups.first, groups.second, 1); Barrier();
     };
     if (info.IsClearingDepth()) clear(true); if (info.IsClearingColor()) clear(false);
   }

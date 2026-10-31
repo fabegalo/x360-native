@@ -1,12 +1,15 @@
 #pragma once
 #include <rex/graphics/pipeline/texture/util.h>
-#include <d3d12.h>
+#include "host_layout.h"
+#if defined(_WIN32)
 #include <wrl/client.h>
+#endif
 #include <array>
 #include <span>
 #include <vector>
 namespace x360n::native {
 class ScaledResolveCache;
+class D3D12Commands;
 // Guest texture storage selected by a fetch constant, in the terms both the
 // CPU conversion and the GPU load use. Base/mip are byte addresses.
 struct TextureLoadInput {
@@ -75,6 +78,7 @@ std::vector<BufferImageRegion> PlanBufferImageRegions(const TextureLoadPlan&, ui
 void ConvertTextureCpu(const TextureLoadInput&, std::span<const uint8_t> base,
     std::span<const uint8_t> mips, std::span<const D3D12_PLACED_SUBRESOURCE_FOOTPRINT> footprints,
     uint8_t* output);
+#if defined(_WIN32)
 // Root signature and pipelines of the shared load shaders (constants, source
 // SRV table, destination UAV table).
 Microsoft::WRL::ComPtr<ID3D12RootSignature> CreateTextureLoadRoot(ID3D12Device*);
@@ -82,7 +86,9 @@ Microsoft::WRL::ComPtr<ID3D12PipelineState> CreateTextureLoadPipeline(ID3D12Devi
 DXGI_FORMAT UintPow2Format(uint32_t log2);
 // Records the dispatches into scratch (UAV state, bound by the caller at
 // scratch_offset), then the copies into texture (COPY_DEST state). Leaves the
-// scratch buffer in COPY_SOURCE.
-void RecordTextureLoad(ID3D12GraphicsCommandList*, const TextureLoadPlan&, uint64_t scratch_offset,
+// scratch buffer in COPY_SOURCE. Recorded through D3D12Commands, so the
+// commands keep their order when a pipeline is still being created.
+void RecordTextureLoad(D3D12Commands&, const TextureLoadPlan&, uint64_t scratch_offset,
     ID3D12Resource* scratch, ID3D12Resource* texture);
+#endif
 }

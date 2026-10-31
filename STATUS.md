@@ -1,5 +1,19 @@
 # STATUS
 
+31/10 — **Native: pipelines assíncronos e Vulkan em Linux/macOS**: o Native
+cria pipelines gráficos em threads (¾ dos processadores lógicos) e grava os
+comandos direto até um bind pendente; daí em diante guarda-os em ordem e os
+reproduz antes de fechar a lista, sem pular draws nem mudar barreiras.
+D3D12 e Vulkan usam o mesmo mecanismo; `native_pipeline_threads=0` restaura o
+caminho anterior. Native Vulkan/lavapipe, 128 pipelines frios em uma submissão,
+7 pares: 3,831 → 1,281 s (razão 0,347); modo síncrono igual à `main`;
+MEMEXPORT 88/88 e ZPD sem mudança mensurável. **D3D12 só compilado/checado por
+sintaxe; sem execução.** Sem FPS de jogos. O Native Vulkan e seus contratos
+reais agora compilam e rodam em Linux; `scripts/bootstrap.sh`, presets POSIX e
+`apply-sdk-patches.py` permitem desenvolver em Linux/macOS sem mudar o fluxo
+Windows. Build completo Linux x64: 9 min 39 s em 4 CPUs.
+[Relatório e validação local](docs/reports/performance/perf-gpu-02-2026-10-31.md).
+
 31/10 — **preparação Native no Windows/D3D12**: a preparação inclui os plugins
 Xenos e Native; o driver reavalia o antigo `OFF` implícito do cache, preservando
 opções explícitas no preset/`--define`. Regressão sintética reproduziu a omissão

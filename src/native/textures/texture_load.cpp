@@ -7,10 +7,14 @@
 #include <bit>
 #include <stdexcept>
 #include <string>
+#if defined(_WIN32)
+#include "../d3d12/d3d12_commands.h"
+#endif
 namespace x360n::native {
 using namespace rex::graphics;
 using namespace rex::graphics::xenos;
 namespace bytecode {
+#if defined(_WIN32)
 #include "src/graphics/shaders/bytecode/d3d12_5_1/texture_load_8bpb_cs.h"
 #include "src/graphics/shaders/bytecode/d3d12_5_1/texture_load_16bpb_cs.h"
 #include "src/graphics/shaders/bytecode/d3d12_5_1/texture_load_32bpb_cs.h"
@@ -18,11 +22,14 @@ namespace bytecode {
 #include "src/graphics/shaders/bytecode/d3d12_5_1/texture_load_128bpb_cs.h"
 #include "src/graphics/shaders/bytecode/d3d12_5_1/texture_load_depth_unorm_cs.h"
 #include "src/graphics/shaders/bytecode/d3d12_5_1/texture_load_depth_float_cs.h"
+#endif
 }
 namespace {
+#if defined(_WIN32)
 void Check(HRESULT hr, const char* what) {
   if (FAILED(hr)) throw std::runtime_error(std::string("Native texture load: ") + what + " HRESULT=" + std::to_string(uint32_t(hr)));
 }
+#endif
 // Values of TextureCache::load_shader_info_ in the pinned SDK
 // (src/graphics/pipeline/texture/cache.cpp) for the shaders Native uses:
 // source/dest element log2, host bytes per block, guest X blocks per thread log2.
@@ -297,6 +304,7 @@ void ConvertTextureCpu(const TextureLoadInput& t, std::span<const uint8_t> base_
     }
   }
 }
+#if defined(_WIN32)
 DXGI_FORMAT UintPow2Format(uint32_t log2) {
   switch (log2) {
     case 0: return DXGI_FORMAT_R8_UINT; case 1: return DXGI_FORMAT_R16_UINT; case 2: return DXGI_FORMAT_R32_UINT;
@@ -335,6 +343,7 @@ Microsoft::WRL::ComPtr<ID3D12PipelineState> CreateTextureLoadPipeline(ID3D12Devi
   Check(device->CreateComputePipelineState(&desc, IID_PPV_ARGS(&pipeline)), "pipeline");
   return pipeline;
 }
+#endif
 std::vector<BufferImageRegion> PlanBufferImageRegions(const TextureLoadPlan& plan, uint32_t levels,
     uint32_t block_bytes, uint32_t block_width, std::array<uint32_t, 3> extent) {
   std::vector<BufferImageRegion> regions;
@@ -362,23 +371,25 @@ std::vector<BufferImageRegion> PlanBufferImageRegions(const TextureLoadPlan& pla
   }
   return regions;
 }
-void RecordTextureLoad(ID3D12GraphicsCommandList* list, const TextureLoadPlan& plan, uint64_t scratch_offset,
+#if defined(_WIN32)
+void RecordTextureLoad(D3D12Commands& list, const TextureLoadPlan& plan, uint64_t scratch_offset,
     ID3D12Resource* scratch, ID3D12Resource* texture) {
   for (const auto& d : plan.dispatches) {
     auto c = d.constants;
     c.host_offset += uint32_t(scratch_offset);
-    list->SetComputeRoot32BitConstants(0, sizeof(c) / 4, &c, 0);
-    list->Dispatch(d.groups[0], d.groups[1], d.groups[2]);
+    list.SetComputeRoot32BitConstants(0, sizeof(c) / 4, &c, 0);
+    list.Dispatch(d.groups[0], d.groups[1], d.groups[2]);
   }
   D3D12_RESOURCE_BARRIER b{}; b.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
   b.Transition = {scratch, D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_COPY_SOURCE};
-  list->ResourceBarrier(1, &b);
+  list.ResourceBarrier(1, &b);
   for (const auto& copy : plan.copies) {
     D3D12_TEXTURE_COPY_LOCATION src{}; src.pResource = scratch; src.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
     src.PlacedFootprint = copy.footprint; src.PlacedFootprint.Offset += scratch_offset;
     D3D12_TEXTURE_COPY_LOCATION dst{}; dst.pResource = texture; dst.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
     dst.SubresourceIndex = copy.subresource;
-    list->CopyTextureRegion(&dst, 0, 0, 0, &src, copy.boxed ? &copy.box : nullptr);
+    list.CopyTextureRegion(&dst, 0, 0, 0, &src, copy.boxed ? &copy.box : nullptr);
   }
 }
+#endif
 }

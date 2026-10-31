@@ -1,0 +1,342 @@
+{
+  "report": "PERF-GPU-02",
+  "date": "2026-10-31",
+  "method": "tests/native/probe_pairs.py: alternating pairs, per-arm warmed Mesa shader cache, baseline = main Vulkan sources rebuilt in the same tree (portability fixes only), candidate = this change; Native Vulkan on lavapipe (llvmpipe, LLVM 20.1.2), Linux x86-64 container, 4 logical CPUs, Release, pinned LLVM 22.1.8. Probe timings, not game frame rates.",
+  "cold_pipelines_128_draws_default_and_sync": {
+    "api": "vulkan",
+    "draws": 128,
+    "host": "Linux-6.18.44-fc-v185-x86_64-with-glibc2.39",
+    "processor": "x86_64",
+    "cpus": 4,
+    "rounds": 7,
+    "warmup": 2,
+    "variants": {
+      "baseline": [],
+      "candidate": [],
+      "sync": [
+        "native_pipeline_threads=0"
+      ]
+    },
+    "probes": {
+      "pipeline": {
+        "baseline": {
+          "seconds": [
+            3.7674,
+            4.0103,
+            3.9506,
+            3.9057,
+            3.8308,
+            3.2401,
+            3.5706
+          ],
+          "median_s": 3.8308,
+          "paired_ratio_median": 1.0,
+          "paired_ratio_min": 1.0,
+          "paired_ratio_max": 1.0
+        },
+        "candidate": {
+          "seconds": [
+            1.3083,
+            1.2072,
+            1.0899,
+            1.1158,
+            1.3398,
+            1.281,
+            1.3927
+          ],
+          "median_s": 1.281,
+          "paired_ratio_median": 0.3473,
+          "paired_ratio_min": 0.2759,
+          "paired_ratio_max": 0.3954
+        },
+        "sync": {
+          "seconds": [
+            3.3665,
+            4.2119,
+            3.5522,
+            3.4332,
+            4.1197,
+            3.5449,
+            4.2125
+          ],
+          "median_s": 3.5522,
+          "paired_ratio_median": 1.0503,
+          "paired_ratio_min": 0.879,
+          "paired_ratio_max": 1.1798
+        }
+      }
+    }
+  },
+  "memexport_and_occlusion": {
+    "api": "vulkan",
+    "draws": 128,
+    "host": "Linux-6.18.44-fc-v185-x86_64-with-glibc2.39",
+    "processor": "x86_64",
+    "cpus": 4,
+    "rounds": 7,
+    "warmup": 2,
+    "variants": {
+      "baseline": [],
+      "candidate": []
+    },
+    "probes": {
+      "memexport": {
+        "baseline": {
+          "seconds": [
+            2.6942,
+            2.9989,
+            2.7501,
+            2.9484,
+            2.6374,
+            3.0344,
+            2.8233
+          ],
+          "median_s": 2.8233,
+          "paired_ratio_median": 1.0,
+          "paired_ratio_min": 1.0,
+          "paired_ratio_max": 1.0
+        },
+        "candidate": {
+          "seconds": [
+            2.9749,
+            2.6535,
+            2.8075,
+            2.7159,
+            2.7755,
+            2.6461,
+            2.8528
+          ],
+          "median_s": 2.7755,
+          "paired_ratio_median": 1.0104,
+          "paired_ratio_min": 0.872,
+          "paired_ratio_max": 1.1042
+        }
+      },
+      "occlusion": {
+        "baseline": {
+          "seconds": [
+            0.9761,
+            0.9384,
+            1.0603,
+            1.0505,
+            0.9987,
+            1.071,
+            1.1533
+          ],
+          "median_s": 1.0505,
+          "paired_ratio_median": 1.0,
+          "paired_ratio_min": 1.0,
+          "paired_ratio_max": 1.0
+        },
+        "candidate": {
+          "seconds": [
+            1.1383,
+            1.0596,
+            1.0805,
+            0.8582,
+            0.9368,
+            0.83,
+            0.9896
+          ],
+          "median_s": 0.9896,
+          "paired_ratio_median": 0.9381,
+          "paired_ratio_min": 0.775,
+          "paired_ratio_max": 1.1661
+        }
+      }
+    }
+  },
+  "worker_scaling": {
+    "api": "vulkan",
+    "draws": 128,
+    "host": "Linux-6.18.44-fc-v185-x86_64-with-glibc2.39",
+    "processor": "x86_64",
+    "cpus": 4,
+    "rounds": 5,
+    "warmup": 2,
+    "variants": {
+      "baseline": [],
+      "candidate": [],
+      "t3": [
+        "native_pipeline_threads=3"
+      ],
+      "t4": [
+        "native_pipeline_threads=4"
+      ],
+      "t8": [
+        "native_pipeline_threads=8"
+      ]
+    },
+    "probes": {
+      "pipeline": {
+        "baseline": {
+          "seconds": [
+            3.037,
+            2.8617,
+            3.0907,
+            3.5761,
+            3.3627
+          ],
+          "median_s": 3.0907,
+          "paired_ratio_median": 1.0,
+          "paired_ratio_min": 1.0,
+          "paired_ratio_max": 1.0
+        },
+        "candidate": {
+          "seconds": [
+            1.3802,
+            1.6783,
+            1.5971,
+            1.838,
+            1.8038
+          ],
+          "median_s": 1.6783,
+          "paired_ratio_median": 0.5167,
+          "paired_ratio_min": 0.4545,
+          "paired_ratio_max": 0.5865
+        },
+        "t3": {
+          "seconds": [
+            1.0019,
+            1.1406,
+            1.2677,
+            1.1504,
+            1.2472
+          ],
+          "median_s": 1.1504,
+          "paired_ratio_median": 0.3709,
+          "paired_ratio_min": 0.3217,
+          "paired_ratio_max": 0.4102
+        },
+        "t4": {
+          "seconds": [
+            1.0311,
+            0.9672,
+            1.1208,
+            0.9336,
+            1.1587
+          ],
+          "median_s": 1.0311,
+          "paired_ratio_median": 0.3395,
+          "paired_ratio_min": 0.2611,
+          "paired_ratio_max": 0.3626
+        },
+        "t8": {
+          "seconds": [
+            1.0126,
+            1.1695,
+            1.1978,
+            1.1975,
+            1.0069
+          ],
+          "median_s": 1.1695,
+          "paired_ratio_median": 0.3349,
+          "paired_ratio_min": 0.2994,
+          "paired_ratio_max": 0.4087
+        }
+      }
+    }
+  },
+  "worker_scaling_first_series": {
+    "api": "vulkan",
+    "draws": 128,
+    "host": "Linux-6.18.44-fc-v185-x86_64-with-glibc2.39",
+    "processor": "x86_64",
+    "cpus": 4,
+    "rounds": 7,
+    "warmup": 2,
+    "variants": {
+      "baseline": [],
+      "candidate": [],
+      "sync": [
+        "native_pipeline_threads=0"
+      ],
+      "t1": [
+        "native_pipeline_threads=1"
+      ],
+      "t4": [
+        "native_pipeline_threads=4"
+      ]
+    },
+    "probes": {
+      "pipeline": {
+        "baseline": {
+          "seconds": [
+            2.913,
+            3.2337,
+            3.504,
+            2.86,
+            3.4711,
+            3.4298,
+            3.5704
+          ],
+          "median_s": 3.4298,
+          "paired_ratio_median": 1.0,
+          "paired_ratio_min": 1.0,
+          "paired_ratio_max": 1.0
+        },
+        "candidate": {
+          "seconds": [
+            1.6498,
+            1.7315,
+            1.7373,
+            1.6698,
+            1.6144,
+            1.722,
+            1.8545
+          ],
+          "median_s": 1.722,
+          "paired_ratio_median": 0.5194,
+          "paired_ratio_min": 0.4651,
+          "paired_ratio_max": 0.5838
+        },
+        "sync": {
+          "seconds": [
+            3.1569,
+            3.1179,
+            2.941,
+            4.0135,
+            3.3647,
+            3.2986,
+            3.6157
+          ],
+          "median_s": 3.2986,
+          "paired_ratio_median": 0.9693,
+          "paired_ratio_min": 0.8393,
+          "paired_ratio_max": 1.4033
+        },
+        "t1": {
+          "seconds": [
+            3.1764,
+            3.181,
+            3.1542,
+            3.3479,
+            2.9712,
+            3.7462,
+            3.0832
+          ],
+          "median_s": 3.1764,
+          "paired_ratio_median": 0.9837,
+          "paired_ratio_min": 0.856,
+          "paired_ratio_max": 1.1706
+        },
+        "t4": {
+          "seconds": [
+            0.982,
+            1.1607,
+            1.0381,
+            0.9735,
+            1.0956,
+            1.116,
+            0.9735
+          ],
+          "median_s": 1.0381,
+          "paired_ratio_median": 0.3254,
+          "paired_ratio_min": 0.2727,
+          "paired_ratio_max": 0.3589
+        }
+      }
+    }
+  },
+  "invalidated_series": "An earlier series passed REX_NATIVE_PIPELINE_THREADS through the environment; the SDK applies environment cvars only after cvar::Init, which headless probes do not call, so its sync/thread variants were not applied. Discarded; probes now take cvars as arguments."
+}

@@ -2,7 +2,9 @@
 #include <rex/graphics/graphics_system.h>
 #include <rex/chrono/frame_timing.h>
 #include <rex/system/gpu_plugin.h>
+#if X360N_NATIVE_D3D12
 #include <rex/ui/d3d12/d3d12_provider.h>
+#endif
 #if X360N_NATIVE_VULKAN
 #include "../vulkan/vulkan_backend.h"
 #include <rex/ui/vulkan/provider.h>
@@ -22,13 +24,19 @@ class GraphicsSystem final : public rex::graphics::GraphicsSystem {
       return;
     }
 #endif
+#if X360N_NATIVE_D3D12
     provider_ = rex::ui::d3d12::D3D12Provider::Create();
+#endif
   }
   std::unique_ptr<rex::graphics::CommandProcessor> CreateCommandProcessor() override {
 #if X360N_NATIVE_VULKAN
     if (vulkan_) return std::make_unique<CommandProcessor>(this, kernel_state_, &CreateVulkanScanout);
 #endif
+#if X360N_NATIVE_D3D12
     return std::make_unique<CommandProcessor>(this, kernel_state_, &CreateD3D12Scanout);
+#else
+    return nullptr;
+#endif
   }
  private:
   bool vulkan_;
@@ -46,8 +54,14 @@ extern "C" REX_GPU_PLUGIN_EXPORT rex::system::IGraphicsSystem* rex_gpu_create(
 #if X360N_NATIVE_VULKAN
   if (backend == "vulkan") return new x360n::native::GraphicsSystem(true);
 #endif
+#if !X360N_NATIVE_D3D12
+  // Hosts without D3D12 (Linux, macOS) have only the Vulkan backend.
+  if (backend == "any") return new x360n::native::GraphicsSystem(true);
+  REXLOG_ERROR("Native: backend '{}' is unsupported; Vulkan required", backend); return nullptr;
+#else
   if (backend != "any" && backend != "d3d12") {
     REXLOG_ERROR("Native: backend '{}' is unsupported; D3D12 required", backend); return nullptr;
   }
   return new x360n::native::GraphicsSystem(false);
+#endif
 }

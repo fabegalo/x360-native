@@ -193,20 +193,20 @@ void VulkanRender::LoadTextureGpu(const TextureLoadPlan& plan, VkImage image, ui
   VkMemoryBarrier barrier{VK_STRUCTURE_TYPE_MEMORY_BARRIER};
   barrier.srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
   barrier.dstAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-  fn.vkCmdPipelineBarrier(commands_, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+  cmd_.PipelineBarrier(VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
                           0, 1, &barrier, 0, nullptr, 0, nullptr);
-  fn.vkCmdBindPipeline(commands_, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline);
+  cmd_.BindPipeline(VK_PIPELINE_BIND_POINT_COMPUTE, pipeline);
   const VkDescriptorSet sets[]{page->load_set, arena.guest_load_set};
-  fn.vkCmdBindDescriptorSets(commands_, VK_PIPELINE_BIND_POINT_COMPUTE, load_layout_, 0, 2, sets, 0, nullptr);
+  cmd_.BindDescriptorSets(VK_PIPELINE_BIND_POINT_COMPUTE, load_layout_, 0, 2, sets, 0, nullptr);
   for (const auto& dispatch : plan.dispatches) {
     auto constants = dispatch.constants;
     constants.host_offset += uint32_t(offset);
-    fn.vkCmdPushConstants(commands_, load_layout_, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(constants), &constants);
-    fn.vkCmdDispatch(commands_, dispatch.groups[0], dispatch.groups[1], dispatch.groups[2]);
+    cmd_.PushConstants(load_layout_, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(constants), &constants);
+    cmd_.Dispatch(dispatch.groups[0], dispatch.groups[1], dispatch.groups[2]);
   }
   barrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
   barrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
-  fn.vkCmdPipelineBarrier(commands_, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
+  cmd_.PipelineBarrier(VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
                           0, 1, &barrier, 0, nullptr, 0, nullptr);
   std::vector<VkBufferImageCopy> copies;
   for (const auto& region : PlanBufferImageRegions(plan, levels, block_bytes, block_width,
@@ -219,7 +219,7 @@ void VulkanRender::LoadTextureGpu(const TextureLoadPlan& plan, VkImage image, ui
     copy.imageExtent = {region.extent[0], region.extent[1], region.extent[2]};
     copies.push_back(copy);
   }
-  fn.vkCmdCopyBufferToImage(commands_, page->buffer->handle(), image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+  cmd_.CopyBufferToImage(page->buffer->handle(), image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
                             uint32_t(copies.size()), copies.data());
 }
 void VulkanRender::DestroyTextures() {
@@ -286,7 +286,7 @@ VkDescriptorSet VulkanRender::BindTextures(const RegisterFile& regs, rex::memory
     barrier.srcQueueFamilyIndex = barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
     barrier.image = image;
     barrier.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, levels, 0, layers};
-    fn.vkCmdPipelineBarrier(commands_, ready ? VK_PIPELINE_STAGE_TRANSFER_BIT : VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+    cmd_.PipelineBarrier(ready ? VK_PIPELINE_STAGE_TRANSFER_BIT : VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
         ready ? VK_PIPELINE_STAGE_VERTEX_SHADER_BIT | VK_PIPELINE_STAGE_TESSELLATION_EVALUATION_SHADER_BIT | VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT : VK_PIPELINE_STAGE_TRANSFER_BIT,
         0, 0, nullptr, 0, nullptr, 1, &barrier);
   };
@@ -321,7 +321,7 @@ VkDescriptorSet VulkanRender::BindTextures(const RegisterFile& regs, rex::memory
         transition(null->image, 1, image.arrayLayers, false);
         const VkClearColorValue zero{};
         const VkImageSubresourceRange range{VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, image.arrayLayers};
-        fn.vkCmdClearColorImage(commands_, null->image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &zero, 1, &range);
+        cmd_.ClearColorImage(null->image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &zero, 1, &range);
         transition(null->image, 1, image.arrayLayers, true);
       }
       resource = null;
@@ -452,7 +452,7 @@ VkDescriptorSet VulkanRender::BindTextures(const RegisterFile& regs, rex::memory
           const auto upload = Upload(linear.data(), bytes, 512);
           for (auto& copy : copies) copy.bufferOffset += upload.offset;
           transition(resource->image, levels, layers, false);
-          fn.vkCmdCopyBufferToImage(commands_, upload.buffer, resource->image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+          cmd_.CopyBufferToImage(upload.buffer, resource->image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
                                     uint32_t(copies.size()), copies.data());
           transition(resource->image, levels, layers, true);
         }
