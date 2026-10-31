@@ -178,7 +178,7 @@ Incremento Perfil do Guide (2026-10-16, patch 0080): GamerCard original do Guide
 
 - [x] Mostrar a contagem real de jogos da conta conectada no Perfil do Guide, na dashboard, no Forza e no Castle Crashers.
 - [x] Recuperar essa contagem após reiniciar e trocá-la com o perfil no mesmo processo (Player1 1, Player2 0).
-- [ ] Gamerpic e símbolo de gamerscore: apresentação ainda sem aceite; ver [relatório](reports/graphics/guide-composition-2026-10-16.md). Gamerscore e conquistas offline possuem serviços e metadados originais implementados, com aceite de gameplay/UI pendente; ver [implementação e roteiro](reports/offline-achievements-2026-10-21.md).
+- [ ] Gamerpic e símbolo de gamerscore: leitura de imagens pessoais/públicas aceita na XUI 17559; gravação PNG bruta e recuperação por XUID testadas como serviço, seletor ainda pendente. Rearmamento do compositor de conquistas corrigido; próxima notificação real ainda sem aceite visual. Ver [evidências e limites atuais](reports/dash-os-features-03-2026-10-30.md) e [implementação de conquistas](reports/offline-achievements-2026-10-21.md).
 
 Não amplia o aceite de conquistas por usuário nem de outros jogos.
 

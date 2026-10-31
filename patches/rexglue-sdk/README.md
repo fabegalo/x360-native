@@ -2321,3 +2321,25 @@ bounds, async completion and texture decoding; the original XUI owns rendering.
 No image generation, fallback to another profile/picture, picture selection or
 achievement award. Tests cover independent accounts/restart, encoded bytes,
 real PNG pixels, canaries, malformed/oversized files and Windows read locks.
+
+### 0234 — persist raw profile picture updates
+
+Implement the observed 17559 XamWriteGamerTileEx raw PNG mode, including the
+stack arguments at 54/5C/64, independent public/personal selection, picture key,
+actual errors, OVERLAPPED completion and the original profile-change event.
+Validate PNG dimensions, chunk CRCs and decoding before storing the supplied
+64/32 images unchanged in the signed-in XUID package. Catalog, award and Avatar
+modes remain unsupported; the legacy award export no longer reports success
+without a stored image.
+
+Keep closed new/old snapshots and a checksummed intent in private staging.
+Before commit, recovery restores the previous image set/key without overwriting
+conflicts; afterwards it cleans only private files. Reads and picture-key access
+recover pending work, invalidate stale key state, reject linked/nonregular paths
+and retry actual cleanup failures. Recheck quota after recovery; reserve all
+snapshots, public growth and one publication/rollback temporary file. Optional
+host checkpoints support bounded process-exit tests and add no guest polling.
+Recovery covers process interruption, without claiming power-loss durability or
+concurrent writers from independent console processes. The 17559 PNG service and
+native-task predicate bridge live in the title profile and retain its original
+libpng encoder; no original module or asset is edited.

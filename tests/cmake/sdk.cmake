@@ -40,6 +40,13 @@ if(WIN32)
   target_compile_options(x360n_notification_17559_probe PRIVATE
       -UTRACY_ENABLE -UREXGLUE_ENABLE_PROFILING -UREXGLUE_ENABLE_PERF_COUNTERS)
   x360n_stage_runtime_dlls(x360n_notification_17559_probe)
+  add_executable(x360n_png_17559_probe EXCLUDE_FROM_ALL tools/png_17559_probe.cpp
+      ../titles/common/dashboard_assets.cpp ../titles/common/guest_fault_context.cpp
+      ../titles/dash_17559/src/system_ui_images.cpp)
+  target_link_libraries(x360n_png_17559_probe PRIVATE rexruntime x360n_core)
+  target_compile_options(x360n_png_17559_probe PRIVATE
+      -UTRACY_ENABLE -UREXGLUE_ENABLE_PROFILING -UREXGLUE_ENABLE_PERF_COUNTERS)
+  x360n_stage_runtime_dlls(x360n_png_17559_probe)
 endif()
 # SDK behavior checks (link the SDK codegen library).
 add_executable(x360n_sdk_checks sdkcheck/depfile_escape_test.cpp)
@@ -217,6 +224,9 @@ set_source_files_properties("${PROJECT_SOURCE_DIR}/titles/dash_17559/src/system_
 target_sources(x360n_sdk_runtime_checks PRIVATE sdkcheck/system_ui_context_test.cpp)
 target_sources(x360n_sdk_runtime_checks PRIVATE sdkcheck/system_ui_transition_test.cpp)
 target_sources(x360n_sdk_runtime_checks PRIVATE sdkcheck/system_ui_compositor_test.cpp)
+target_sources(x360n_sdk_runtime_checks PRIVATE sdkcheck/system_ui_task_test.cpp)
+target_sources(x360n_sdk_runtime_checks PRIVATE sdkcheck/png_17559_service_test.cpp)
+target_sources(x360n_sdk_runtime_checks PRIVATE sdkcheck/profile_picture_write_test.cpp)
 if(WIN32)
   add_executable(x360n_guest_fault_context_probe tools/guest_fault_context_probe.cpp
       ../titles/common/guest_fault_context.cpp)
@@ -301,6 +311,10 @@ endif()
 catch_discover_tests(x360n_sdk_runtime_checks TEST_PREFIX "sdkcheck." PROPERTIES LABELS "project" TIMEOUT 120
     DISCOVERY_MODE PRE_TEST)
 if(WIN32)
+  add_test(NAME sdkcheck.profile-pictures-processes COMMAND powershell -NoProfile -ExecutionPolicy Bypass
+    -File ${CMAKE_CURRENT_SOURCE_DIR}/local/profile-pictures-process.ps1
+    -Checks $<TARGET_FILE:x360n_sdk_runtime_checks>)
+  set_tests_properties(sdkcheck.profile-pictures-processes PROPERTIES LABELS project TIMEOUT 75)
   add_test(NAME sdkcheck.offline-achievements-processes COMMAND powershell -NoProfile -ExecutionPolicy Bypass
     -File ${CMAKE_CURRENT_SOURCE_DIR}/local/offline-achievements-process.ps1
     -Executable $<TARGET_FILE:x360n_sdk_runtime_checks>)

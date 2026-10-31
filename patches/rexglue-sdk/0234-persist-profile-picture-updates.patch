@@ -1,0 +1,550 @@
+--- a/include/rex/system/xam/user_profile.h
++++ b/include/rex/system/xam/user_profile.h
+@@ -14,6 +14,8 @@
+ #include <memory>
+ #include <atomic>
+ #include <filesystem>
++#include <functional>
++#include <optional>
+ #include <mutex>
+ #include <string>
+ #include <unordered_map>
+@@ -261,6 +263,17 @@
+   bool AddSetting(std::unique_ptr<Setting> setting);
+   Setting* GetSetting(uint32_t setting_id);
+ 
++  struct PictureUpdate {
++    std::vector<uint8_t> large_png, small_png;
++    bool public_picture = false, personal_picture = false;
++    std::optional<std::u16string> key;
++  };
++  X_RESULT ReadPicture(uint64_t xuid, bool personal, bool small_picture, std::vector<uint8_t>& bytes);
++  X_RESULT RecoverPictures(uint64_t xuid);
++  // Checkpoint is a host-only interruption-test hook, empty in ordinary calls.
++  X_RESULT WritePictures(uint64_t xuid, const PictureUpdate& update, bool* committed = nullptr,
++      const std::function<void(uint32_t)>& checkpoint = {});
++
+  private:
+   mutable std::mutex identity_mutex_;
+   Identity identity_;
+--- a/src/system/xam/user_profile.cpp
++++ b/src/system/xam/user_profile.cpp
+@@ -10,6 +10,8 @@
+  */
+ 
+ #include <sstream>
++#include <span>
++#include <cerrno>
+ #include <algorithm>
+ #include <array>
+ #include <cstring>
+@@ -640,6 +642,7 @@
+ 
+ bool UserProfile::AddSetting(std::unique_ptr<Setting> setting) {
+   if (!setting) return false;
++  if (!initializing_settings_ && setting->setting_id == 0x4064000F && xuid() && RecoverPictures(xuid())) return false;
+   if (initializing_settings_) {
+     const auto encoded = EncodeSetting(*setting);
+     if (!encoded) return false;
+@@ -669,6 +672,7 @@
+ }
+ 
+ UserProfile::Setting* UserProfile::GetSetting(uint32_t setting_id) {
++  const bool picture_error = setting_id == 0x4064000F && xuid() && RecoverPictures(xuid());
+   auto it = settings_.find(setting_id);
+   if (it == settings_.end()) {
+     auto setting = EmptySetting(setting_id);
+@@ -686,6 +690,7 @@
+       ? kernel_state_->title_id() : 0;
+   if (setting->loaded_xuid != xuid() || (setting->is_title_specific() && setting->loaded_title_id != title))
+     LoadSetting(setting);
++  if (picture_error) { setting->load_failed = true; setting->loaded_xuid = 0; }
+   if (setting_id == 0x10040012 && setting->type == Setting::Type::INT32) {
+     // XPROFILE_GAMERCARD_TITLES_PLAYED follows the signed-in account's record.
+     static_cast<Int32Setting*>(setting)->value = int32_t(TitlesPlayed(xuid()).size());
+@@ -760,6 +765,299 @@
+   return ok;
+ }
+ 
++namespace {
++namespace fs = std::filesystem;
++std::mutex picture_store_mutex;
++constexpr std::array<const char*, 5> kPictureNames{
++    "tile_64.png", "tile_32.png", "pp_64.png", "pp_32.png", "settings-v1/4064000F.dat"};
++constexpr size_t kPictureLimit = 16 * 1024 * 1024;
++constexpr size_t kPictureIntentSize = 144;
++uint64_t PictureHash(std::span<const uint8_t> bytes) {
++  uint64_t hash = 14695981039346656037ull;
++  for (const auto byte : bytes) { hash ^= byte; hash *= 1099511628211ull; }
++  return hash;
++}
++X_RESULT PictureErrno(int value) {
++  switch (value) {
++    case ENOSPC: return 112;
++    case ENOENT: return 2;
++    case ENOMEM: return 14;
++    case EACCES: case EPERM: return 5;
++    case EEXIST: return 183;
++    case EIO: return 1117;
++    default: return 31;
++  }
++}
++X_RESULT PictureFsError(const std::error_code& error) {
++#if REX_PLATFORM_WIN32
++  if (error.category() == std::system_category()) return uint32_t(error.value());
++#endif
++  return PictureErrno(error.value());
++}
++X_RESULT PictureRead(const fs::path& path, std::vector<uint8_t>& bytes, size_t limit) {
++  if (!IsUnlinkedStoragePath(path)) return 5;
++  std::error_code ec;
++  if (!fs::exists(path, ec)) return ec ? PictureFsError(ec) : 2;
++  if (!fs::is_regular_file(path, ec)) return ec ? PictureFsError(ec) : 5;
++  const auto size = fs::file_size(path, ec);
++  if (ec) return PictureFsError(ec);
++  if (size > limit) return 13;
++  auto* file = rex::filesystem::OpenFile(path, "rb");
++  if (!file) return PictureErrno(errno);
++  std::vector<uint8_t> result(size);
++  const bool read = result.empty() || fread(result.data(), 1, result.size(), file) == result.size();
++  const bool valid = read && fgetc(file) == EOF && !ferror(file);
++  const auto error = valid ? X_RESULT(0) : PictureErrno(errno);
++  const auto closed = fclose(file);
++  if (error) return error;
++  if (closed) return PictureErrno(errno);
++  bytes = std::move(result);
++  return 0;
++}
++// These files are private staging payloads. Public names are replaced only
++// after every payload and the closed, checksummed intent have been written.
++X_RESULT PictureSave(const fs::path& path, std::span<const uint8_t> bytes) {
++  if (!IsUnlinkedStoragePath(path)) return 5;
++  auto* file = rex::filesystem::OpenFile(path, "wb");
++  if (!file) return PictureErrno(errno);
++  X_RESULT result = 0;
++  if ((!bytes.empty() && fwrite(bytes.data(), 1, bytes.size(), file) != bytes.size()) || fflush(file))
++    result = PictureErrno(errno);
++#if REX_PLATFORM_WIN32
++  if (!result && _commit(_fileno(file))) result = PictureErrno(errno);
++#else
++  if (!result && fsync(fileno(file))) result = PictureErrno(errno);
++#endif
++  if (fclose(file) && !result) result = PictureErrno(errno);
++  return result;
++}
++X_RESULT PictureRename(const fs::path& from, const fs::path& to, bool replace = false) {
++  if (!IsUnlinkedStoragePath(from) || !IsUnlinkedStoragePath(to)) return 5;
++#if REX_PLATFORM_WIN32
++  if (!MoveFileExW(from.c_str(), to.c_str(), MOVEFILE_WRITE_THROUGH |
++      (replace ? MOVEFILE_REPLACE_EXISTING : 0))) return GetLastError();
++#else
++  std::error_code ec;
++  if (!replace && fs::exists(to, ec)) return 183;
++  if (ec) return PictureFsError(ec);
++  fs::rename(from, to, ec);
++  if (ec) return PictureFsError(ec);
++#endif
++  return 0;
++}
++X_RESULT PicturePublish(const fs::path& stage, const fs::path& destination,
++                        std::span<const uint8_t> bytes) {
++  if (!IsUnlinkedStoragePath(destination)) return 5;
++  std::error_code ec;
++  fs::create_directories(destination.parent_path(), ec);
++  if (ec) return PictureFsError(ec);
++  const auto result = PictureSave(stage / "publish", bytes);
++  return result ? result : PictureRename(stage / "publish", destination, true);
++}
++X_RESULT PictureValidateStage(const fs::path& stage) {
++  if (!IsUnlinkedStoragePath(stage)) return 5;
++  for (const auto& entry : fs::directory_iterator(stage)) {
++    const auto name = entry.path().filename().string();
++    const bool payload = name.size() == 4 && (name.starts_with("new") || name.starts_with("old")) &&
++        name[3] >= '0' && name[3] <= '4';
++    if (!payload && name != "intent" && name != "ready" && name != "committed" &&
++        name != "rolledback" && name != "publish") return 13;
++    if (!IsUnlinkedStoragePath(entry.path()) || !entry.is_regular_file()) return 5;
++  }
++  return 0;
++}
++X_RESULT PictureCleanup(const fs::path& stage) {
++  if (const auto error = PictureValidateStage(stage)) return error;
++  std::error_code ec;
++  for (const auto& entry : fs::directory_iterator(stage)) {
++    fs::remove(entry.path(), ec);
++    if (ec) return PictureFsError(ec);
++  }
++  fs::remove(stage, ec);
++  return ec ? PictureFsError(ec) : 0;
++}
++X_RESULT PictureRecover(const fs::path& package, bool& changed) {
++  const auto stage = package / ".x360n-picture-update";
++  if (!IsUnlinkedStoragePath(stage)) return 5;
++  std::error_code ec;
++  if (!fs::exists(stage, ec)) return ec ? PictureFsError(ec) : 0;
++  changed = true;
++  if (!fs::is_directory(stage, ec)) return ec ? PictureFsError(ec) : 5;
++  if (const auto error = PictureValidateStage(stage)) return error;
++  const bool ready = fs::exists(stage / "ready", ec);
++  if (ec) return PictureFsError(ec);
++  const bool committed = fs::exists(stage / "committed", ec);
++  if (ec) return PictureFsError(ec);
++  const bool rolledback = fs::exists(stage / "rolledback", ec);
++  if (ec) return PictureFsError(ec);
++  if (unsigned(ready) + unsigned(committed) + unsigned(rolledback) > 1) return 13;
++  if (!ready && !committed && !rolledback) return PictureCleanup(stage);
++  std::vector<uint8_t> intent;
++  const auto marker = stage / (ready ? "ready" : committed ? "committed" : "rolledback");
++  if (const auto error = PictureRead(marker, intent, kPictureIntentSize)) return error;
++  if (intent.size() != kPictureIntentSize || std::memcmp(intent.data(), "X360PIC1", 8) ||
++      Get64(intent.data() + 136) != PictureHash(std::span(intent).first(136))) return 13;
++  const auto mask = memory::load_and_swap<uint32_t>(intent.data() + 8);
++  const auto old_mask = memory::load_and_swap<uint32_t>(intent.data() + 12);
++  if (!mask || (mask & ~31u) || (old_mask & ~mask)) return 13;
++  // After a committed/rolled-back marker, cleanup must never rewrite a public
++  // name: a later caller may already have installed new bytes there.
++  if (!ready) return PictureCleanup(stage);
++  std::array<std::vector<uint8_t>, 5> old, next;
++  std::array<bool, 5> restore{};
++  for (unsigned i = 0; i < 5; ++i) {
++    const auto bit = 1u << i;
++    if (!(mask & bit)) {
++      if (fs::exists(stage / ("new" + std::to_string(i))) || fs::exists(stage / ("old" + std::to_string(i)))) return 13;
++      continue;
++    }
++    const auto* row = intent.data() + 16 + i * 24;
++    const auto check = [&](const fs::path& path, std::vector<uint8_t>& bytes, bool previous) {
++      const auto error = PictureRead(path, bytes, kPictureLimit);
++      if (error) return error;
++      return bytes.size() == memory::load_and_swap<uint32_t>(row + (previous ? 4 : 0)) &&
++          PictureHash(bytes) == Get64(row + (previous ? 16 : 8)) ? X_RESULT(0) : X_RESULT(13);
++    };
++    if (const auto error = check(stage / ("new" + std::to_string(i)), next[i], false)) return error;
++    if (old_mask & bit) {
++      if (const auto error = check(stage / ("old" + std::to_string(i)), old[i], true)) return error;
++    }
++    std::vector<uint8_t> current;
++    const auto error = PictureRead(package / kPictureNames[i], current, kPictureLimit);
++    if (error != 0 && error != 2) return error;
++    if (!error && current != next[i] && (!(old_mask & bit) || current != old[i])) return 183;
++    restore[i] = old_mask & bit ? error == 2 || current != old[i] : error == 0;
++  }
++  for (unsigned i = 0; i < 5; ++i) {
++    if (!(mask & (1u << i))) continue;
++    if (!restore[i]) continue;
++    const auto destination = package / kPictureNames[i];
++    if (old_mask & (1u << i)) {
++      if (const auto error = PicturePublish(stage, destination, old[i])) return error;
++    } else {
++      fs::remove(destination, ec);
++      if (ec) return PictureFsError(ec);
++    }
++  }
++  if (const auto error = PictureRename(stage / "ready", stage / "rolledback")) return error;
++  return PictureCleanup(stage);
++}
++}  // namespace
++
++X_RESULT UserProfile::RecoverPictures(uint64_t xuid) try {
++  std::lock_guard lock(picture_store_mutex);
++  const auto package = PackagePath(xuid);
++  if (package.empty()) return 1167;
++  bool changed = false;
++  const auto result = PictureRecover(package, changed);
++  if (changed) if (const auto it = settings_.find(0x4064000F); it != settings_.end()) it->second->loaded_xuid = 0;
++  return result;
++} catch (const fs::filesystem_error& error) { return PictureFsError(error.code()); }
++
++X_RESULT UserProfile::ReadPicture(uint64_t xuid, bool personal, bool small_picture, std::vector<uint8_t>& bytes) try {
++  std::lock_guard lock(picture_store_mutex);
++  const auto package = PackagePath(xuid);
++  if (package.empty()) return 1167;
++  bool changed = false;
++  if (const auto error = PictureRecover(package, changed)) return error;
++  if (changed) if (const auto it = settings_.find(0x4064000F); it != settings_.end()) it->second->loaded_xuid = 0;
++  std::vector<uint8_t> result;
++  const auto error = PictureRead(package / kPictureNames[(personal ? 2 : 0) + unsigned(small_picture)], result, kPictureLimit);
++  if (error) return error == 2 ? X_ERROR_NOT_FOUND : error;
++  if (result.empty()) return 13;
++  bytes = std::move(result);
++  return 0;
++} catch (const fs::filesystem_error& error) { return PictureFsError(error.code()); }
++
++X_RESULT UserProfile::WritePictures(uint64_t xuid, const PictureUpdate& update, bool* committed,
++    const std::function<void(uint32_t)>& checkpoint) try {
++  if (committed) *committed = false;
++  if ((!update.public_picture && !update.personal_picture) || update.large_png.empty() || update.small_png.empty() ||
++      update.large_png.size() > kPictureLimit || update.small_png.size() > kPictureLimit) return 87;
++  const auto profile = FindLocal(xuid);
++  if (!profile.xuid || !kernel_state_) return X_ERROR_NO_SUCH_USER;
++  std::lock_guard lock(picture_store_mutex);
++  auto device = kernel_state_->content_manager()->GetDevice(profile.device_id);
++  if (!device) return 1167;
++  const auto package = device->root / XuidName(xuid) / "FFFE07D1/00010000" / XuidName(xuid);
++  if (!IsUnlinkedStoragePath(package) || !fs::is_directory(package)) return 5;
++  bool changed = false;
++  if (const auto error = PictureRecover(package, changed)) return error;
++  if (changed) if (const auto it = settings_.find(0x4064000F); it != settings_.end()) it->second->loaded_xuid = 0;
++  if (changed) {
++    // Recovery can release staging bytes. Quota must use the post-recovery
++    // snapshot, while ordinary writes retain the first fresh device query.
++    const auto previous_root = device->root;
++    device = kernel_state_->content_manager()->GetDevice(profile.device_id);
++    if (!device || device->root != previous_root) return 1167;
++  }
++  std::array<std::span<const uint8_t>, 5> next;
++  if (update.public_picture) { next[0] = update.large_png; next[1] = update.small_png; }
++  if (update.personal_picture) { next[2] = update.large_png; next[3] = update.small_png; }
++  std::vector<uint8_t> key;
++  if (update.key) {
++    const auto encoded = EncodeSetting(UnicodeSetting(0x4064000F, *update.key));
++    if (!encoded) return 87;
++    key = *encoded; next[4] = key;
++  }
++  std::array<std::vector<uint8_t>, 5> previous;
++  std::array<uint8_t, kPictureIntentSize> intent{};
++  std::memcpy(intent.data(), "X360PIC1", 8);
++  uint32_t mask = 0, old_mask = 0;
++  uint64_t required = kPictureIntentSize, largest = 0, growth = 0;
++  for (unsigned i = 0; i < 5; ++i) {
++    if (next[i].empty()) continue;
++    mask |= 1u << i;
++    const auto error = PictureRead(package / kPictureNames[i], previous[i], kPictureLimit);
++    if (error && error != 2) return error;
++    if (!error) old_mask |= 1u << i;
++    auto* row = intent.data() + 16 + i * 24;
++    memory::store_and_swap<uint32_t>(row, uint32_t(next[i].size()));
++    memory::store_and_swap<uint32_t>(row + 4, uint32_t(previous[i].size()));
++    Put64(row + 8, PictureHash(next[i])); Put64(row + 16, PictureHash(previous[i]));
++    required += next[i].size() + previous[i].size();
++    if (next[i].size() > previous[i].size()) growth += next[i].size() - previous[i].size();
++    largest = std::max<uint64_t>(largest, std::max(next[i].size(), previous[i].size()));
++  }
++  // Snapshots remain until commit. Published names can grow independently;
++  // reserve that growth as well as one publication/rollback temporary file.
++  if (required + growth + largest > device->free_bytes) return 112;
++  memory::store_and_swap<uint32_t>(intent.data() + 8, mask);
++  memory::store_and_swap<uint32_t>(intent.data() + 12, old_mask);
++  Put64(intent.data() + 136, PictureHash(std::span(intent).first(136)));
++  const auto stage = package / ".x360n-picture-update";
++  if (!IsUnlinkedStoragePath(stage)) return 5;
++  std::error_code ec;
++  if (!fs::create_directory(stage, ec)) return ec ? PictureFsError(ec) : 183;
++  auto fail = [&](X_RESULT result) {
++    bool recovered = false;
++    const auto rollback = PictureRecover(package, recovered);
++    if (rollback) REXLOG_ERROR("Profile picture rollback failed: error={}", uint32_t(rollback));
++    if (const auto it = settings_.find(0x4064000F); it != settings_.end()) it->second->loaded_xuid = 0;
++    return result;
++  };
++  for (unsigned i = 0; i < 5; ++i) {
++    if (!(mask & (1u << i))) continue;
++    if (const auto error = PictureSave(stage / ("new" + std::to_string(i)), next[i])) return fail(error);
++    if (old_mask & (1u << i))
++      if (const auto error = PictureSave(stage / ("old" + std::to_string(i)), previous[i])) return fail(error);
++  }
++  if (const auto error = PictureSave(stage / "intent", intent)) return fail(error);
++  if (const auto error = PictureRename(stage / "intent", stage / "ready")) return fail(error);
++  if (checkpoint) checkpoint(0);
++  for (unsigned i = 0; i < 5; ++i) {
++    if (!(mask & (1u << i))) continue;
++    if (const auto error = PicturePublish(stage, package / kPictureNames[i], next[i])) return fail(error);
++    if (checkpoint) checkpoint(i + 1);
++  }
++  if (const auto error = PictureRename(stage / "ready", stage / "committed")) return fail(error);
++  if (committed) *committed = true;
++  if (const auto it = settings_.find(0x4064000F); it != settings_.end()) it->second->loaded_xuid = 0;
++  if (checkpoint) checkpoint(6);
++  return PictureCleanup(stage);
++} catch (const fs::filesystem_error& error) { return PictureFsError(error.code()); }
++
++
+ }  // namespace xam
+ }  // namespace system
+ }  // namespace rex
+--- a/src/kernel/xam/xam_user.cpp
++++ b/src/kernel/xam/xam_user.cpp
+@@ -17,6 +17,7 @@
+ #include <limits>
+ #include <mutex>
+ #include <fstream>
++#include <span>
+ #include <rex/system/xam/content_manager.h>
+ 
+ #include <rex/cvar.h>
+@@ -1069,9 +1070,9 @@
+ // profile package. The original 17559 image cache requests a personal picture
+ // with user FE and the complete XUID as tile_id, including before sign-in UI.
+ static uint32_t ReadOfflineProfileImage(uint32_t tile_type, uint64_t tile_id,
+-                                        uint32_t user_index, std::vector<uint8_t>& image) try {
++                                        uint32_t user_index, std::vector<uint8_t>& image) {
+   const bool personal = tile_type == 10 || tile_type == 11;
+-  const bool small = tile_type == 3 || tile_type == 11;
++  const bool small_picture = tile_type == 3 || tile_type == 11;
+   auto* kernel = REX_KERNEL_STATE();
+   auto* profiles = kernel->user_profile();
+   auto identity = profiles->identity();
+@@ -1084,30 +1085,8 @@
+     if (!identity.signin_state) return X_ERROR_NOT_FOUND;
+     if (personal && tile_id && tile_id != identity.xuid) return X_ERROR_NOT_FOUND;
+   }
+-  // PackagePath resolves and validates the current volume, including recovery.
+-  const auto package = profiles->PackagePath(identity.xuid);
+-  if (package.empty()) return X_ERROR_DEVICE_NOT_CONNECTED;
+-  const auto path = package / (personal ? (small ? "pp_32.png" : "pp_64.png")
+-                                        : (small ? "tile_32.png" : "tile_64.png"));
+-  if (!rex::system::xam::IsUnlinkedStoragePath(path)) return X_ERROR_ACCESS_DENIED;
+-  std::error_code ec;
+-  const bool exists = std::filesystem::exists(path, ec);
+-  if (ec) return X_ERROR_ACCESS_DENIED;
+-  if (!exists) return X_ERROR_NOT_FOUND;
+-  if (!std::filesystem::is_regular_file(path, ec) || ec) return X_ERROR_ACCESS_DENIED;
+-  const auto size = std::filesystem::file_size(path, ec);
+-  if (ec) return X_ERROR_ACCESS_DENIED;
+-  // Bound malformed local inputs before allocation; no generated or substituted
+-  // picture. PNG validation/texture creation remain with the existing decoder.
+-  if (!size || size > 16 * 1024 * 1024) return 13;
+-  std::ifstream input(path, std::ios::binary);
+-  if (!input) return X_ERROR_ACCESS_DENIED;
+-  std::vector<uint8_t> bytes(size);
+-  input.read(reinterpret_cast<char*>(bytes.data()), std::streamsize(size));
+-  if (!input || input.peek() != std::char_traits<char>::eof()) return X_ERROR_ACCESS_DENIED;
+-  image = std::move(bytes);
+-  return X_ERROR_SUCCESS;
+-} catch (const std::filesystem::filesystem_error&) { return X_ERROR_ACCESS_DENIED; }
++  return profiles->ReadPicture(identity.xuid, personal, small_picture, image);
++}
+ 
+ static uint32_t ReadOfflineAchievementImage(uint32_t tile_type, uint32_t title_id,
+                                            uint64_t tile_id, uint32_t user_index,
+@@ -1200,12 +1179,96 @@
+ u32 XamUserIsGuest_entry(u32 user_index) { return 0; }
+ u32 XamUserGetCachedUserFlags_entry(u32 user_index) { return 0; }
+ 
+-u32 XamWriteGamerTile_entry(u32 arg1, u32 arg2, u32 arg3, u32 arg4, u32 arg5, u32 overlapped_ptr) {
+-  if (overlapped_ptr) {
+-    REX_KERNEL_STATE()->CompleteOverlappedImmediate(overlapped_ptr, X_ERROR_SUCCESS);
++static bool ValidProfilePng(std::span<const uint8_t> bytes, uint32_t side) {
++  constexpr uint8_t magic[]{137,80,78,71,13,10,26,10};
++  if (bytes.size() < 45 || std::memcmp(bytes.data(), magic, 8) ||
++      memory::load_and_swap<uint32_t>(bytes.data() + 8) != 13 ||
++      std::memcmp(bytes.data() + 12, "IHDR", 4) ||
++      memory::load_and_swap<uint32_t>(bytes.data() + 16) != side ||
++      memory::load_and_swap<uint32_t>(bytes.data() + 20) != side) return false;
++  // stb_image decodes pixels but does not verify PNG CRCs. Validate every
++  // original chunk before persisting bytes that XAM's libpng must consume.
++  size_t offset = 8;
++  bool end = false;
++  while (offset <= bytes.size() - 12) {
++    const uint32_t count = memory::load_and_swap<uint32_t>(bytes.data() + offset);
++    if (count > bytes.size() - offset - 12) return false;
++    uint32_t crc = 0xFFFFFFFF;
++    for (size_t i = offset + 4; i < offset + 8 + count; ++i) {
++      crc ^= bytes[i];
++      for (unsigned bit = 0; bit < 8; ++bit) crc = (crc >> 1) ^ ((crc & 1) ? 0xEDB88320u : 0);
++    }
++    if (~crc != memory::load_and_swap<uint32_t>(bytes.data() + offset + 8 + count)) return false;
++    if (!std::memcmp(bytes.data() + offset + 4, "IEND", 4)) {
++      if (count) return false;
++      end = true;
++    }
++    offset += 12 + count;
++    if (end) break;
++  }
++  if (!end || offset != bytes.size()) return false;
++  int width = 0, height = 0;
++  const auto decoded = rex::ui::DecodeImageRGBA(bytes.data(), bytes.size(), width, height);
++  return width == int(side) && height == int(side) && decoded.size() == size_t(side) * side * 4;
++}
++
++static uint32_t CompletePictureWrite(uint32_t error, uint32_t overlapped) {
++  const auto result = error ? X_HRESULT_FROM_WIN32(error) : 0;
++  if (overlapped) {
++    REX_KERNEL_STATE()->CompleteOverlappedImmediateEx(overlapped,
++        error ? X_ERROR_FUNCTION_FAILED : X_ERROR_SUCCESS, result, 0);
+     return X_ERROR_IO_PENDING;
+   }
+-  return X_ERROR_SUCCESS;
++  XThread::SetLastError(result);
++  return error ? X_ERROR_FUNCTION_FAILED : X_ERROR_SUCCESS;
++}
++
++// Original 17559 export 2FB/81670740 builds XGI B0037 (44 bytes):
++// enumeration, user, title, large/small IDs, flags, large/small PNG buffers,
++// large/small byte lengths, zero. Stack arguments are at 54/5C/64.
++u32 XamWriteGamerTileEx_entry(uint32_t user, uint32_t flags, uint32_t title,
++    uint32_t large_id, uint32_t small_id, uint32_t enumeration, uint32_t large_buffer,
++    uint32_t small_buffer, uint32_t large_size, uint32_t small_size, uint32_t overlapped) {
++  auto* memory = REX_KERNEL_MEMORY();
++  if (overlapped && !AchievementGuestSpan(memory, overlapped, sizeof(XAM_OVERLAPPED),
++      memory::kMemoryProtectRead | memory::kMemoryProtectWrite)) return X_ERROR_INVALID_PARAMETER;
++  auto lock = rex::thread::global_critical_region::AcquireDirect();
++  auto* profile = REX_KERNEL_STATE()->user_profile();
++  const auto identity = profile->identity();
++  if (user >= 4) return CompletePictureWrite(X_ERROR_INVALID_PARAMETER, overlapped);
++  if (user || !identity.signin_state) return CompletePictureWrite(X_ERROR_NO_SUCH_USER, overlapped);
++  // The observed original capture path supplies encoded 64/32 PNGs (mode 2).
++  // Catalog/award/Avatar modes require their own resource contracts, never a
++  // different picture, fabricated unlock or success without a stored image.
++  if ((flags & 15) != 2 || (flags & ~0xB2u) || !(flags & 0x30) || enumeration)
++    return CompletePictureWrite(50, overlapped);
++  constexpr uint32_t limit = 16 * 1024 * 1024;
++  if (!large_size || !small_size || large_size > limit || small_size > limit ||
++      !AchievementGuestSpan(memory, large_buffer, large_size, memory::kMemoryProtectRead) ||
++      !AchievementGuestSpan(memory, small_buffer, small_size, memory::kMemoryProtectRead))
++    return CompletePictureWrite(X_ERROR_INVALID_PARAMETER, overlapped);
++  rex::system::xam::UserProfile::PictureUpdate update;
++  update.large_png.assign(memory->TranslateVirtual<uint8_t*>(large_buffer),
++                      memory->TranslateVirtual<uint8_t*>(large_buffer) + large_size);
++  update.small_png.assign(memory->TranslateVirtual<uint8_t*>(small_buffer),
++                      memory->TranslateVirtual<uint8_t*>(small_buffer) + small_size);
++  if (!ValidProfilePng(update.large_png, 64) || !ValidProfilePng(update.small_png, 32))
++    return CompletePictureWrite(13, overlapped);
++  update.public_picture = (flags & 0x10) != 0;
++  update.personal_picture = (flags & 0x20) != 0;
++  if (!(flags & 0x80)) update.key = rex::string::to_utf16(fmt::format("{:08x}{:08x}{:08x}", title, large_id, small_id));
++  bool committed = false;
++  const auto result = profile->WritePictures(identity.xuid, update, &committed);
++  if (committed) REX_KERNEL_STATE()->BroadcastNotification(0xE, 1u << user);
++  return CompletePictureWrite(result, overlapped);
++}
++
++u32 XamWriteGamerTile_entry(u32 user, u32 title, u32 large, u32 small_id, u32 enumeration, u32 overlapped) {
++  if (overlapped && !AchievementGuestSpan(REX_KERNEL_MEMORY(), overlapped, sizeof(XAM_OVERLAPPED),
++      memory::kMemoryProtectRead | memory::kMemoryProtectWrite)) return X_ERROR_INVALID_PARAMETER;
++  // Picture awards need the original title catalog and enumeration contract.
++  // The previous implementation completed success without writing any bytes.
++  return CompletePictureWrite(50, overlapped);
+ }
+ 
+ struct XMSGSTARTIOREQUEST_UNKNOWNARG;
+@@ -1314,6 +1377,18 @@
+ static rex::ppc::detail::PPCFuncRegistrar achievement_texture_reg(
+     "__imp__XamReadTileToTexture", &__imp__XamReadTileToTexture);
+ REX_EXPORT(__imp__XamWriteGamerTile, rex::kernel::xam::XamWriteGamerTile_entry)
++extern "C" REX_FUNC(__imp__XamWriteGamerTileEx) {
++  using namespace rex::kernel::xam;
++  const uint64_t stack = uint64_t(ctx.r1.u32) + 0x54;
++  if (stack > UINT32_MAX || !AchievementGuestSpan(REX_KERNEL_MEMORY(), uint32_t(stack), 20,
++      rex::memory::kMemoryProtectRead)) { ctx.r3.u64 = 87; return; }
++  const auto load = [&](uint32_t offset) { return rex::memory::load_and_swap<uint32_t>(base + ctx.r1.u32 + offset); };
++  ctx.r3.u64 = XamWriteGamerTileEx_entry(ctx.r3.u32,ctx.r4.u32,ctx.r5.u32,ctx.r6.u32,ctx.r7.u32,
++      ctx.r8.u32,ctx.r9.u32,ctx.r10.u32,load(0x54),load(0x5C),load(0x64));
++}
++static rex::ppc::detail::PPCFuncRegistrar write_gamer_tile_ex_reg(
++    "__imp__XamWriteGamerTileEx", &__imp__XamWriteGamerTileEx);
++
+ extern "C" REX_FUNC(__imp__XamReadTileEx) {
+   ctx.r3.u64 = rex::kernel::xam::XamReadTileEx_entry(ctx.r3.u32, ctx.r4.u32,
+       ctx.r5.u64, ctx.r6.u32, ctx.r7.u32, ctx.r8.u32, AchievementBuffer(base, ctx.r9.u32),
+--- a/src/kernel/xam/xam_misc.cpp
++++ b/src/kernel/xam/xam_misc.cpp
+@@ -936,7 +936,7 @@
+ REX_EXPORT_STUB(__imp__XamWebInstrumentationSetUserVar);
+ REX_EXPORT_STUB(__imp__XamWebInstrumentationSetUserVarNoEscape);
+ REX_EXPORT_STUB(__imp__XamWriteBiometricData);
+-REX_EXPORT_STUB(__imp__XamWriteGamerTileEx);
++
+ REX_EXPORT_STUB(__imp__XamWriteTile);
+ REX_EXPORT_STUB(__imp__XamXStudioRequest);
+ REX_EXPORT_STUB(__imp__XamXgiBlobTrackerSetMockInfo);

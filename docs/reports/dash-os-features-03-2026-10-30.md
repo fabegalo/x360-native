@@ -576,3 +576,69 @@ do texto pelo original (`notification-rearm-original-queue.log`). Preparo oficia
 para executável, host de sessão e as duas fontes de produção alteradas
 (`notification-rearm-prepared-verification.json`). Nenhuma conquista existente
 foi apagada ou reemitida para produzir evidência visual.
+
+## Gravação de Gamerpic e PNG original — 17559
+
+0234 implementa o modo PNG bruto observado no export `2FB/81670740`:
+buffers 64×64/32×32, argumentos PPC em `SP+54/5C/64`, seleção pública/pessoal,
+chave persistida e notificação original `0E` após commit. Valida dimensões,
+CRCs e decodificação antes de gravar os bytes recebidos no pacote do XUID.
+Conclusão síncrona/OVERLAPPED comunica os erros reais. Modos de catálogo,
+premiação e Avatar continuam retornando não suportado; o export legado deixou
+de concluir sucesso sem gravar imagem. Não é aceite completo do seletor XUI.
+
+A gravação guarda snapshots novos/anteriores e intent com checksum em staging
+privado. Interrupção antes do commit restaura imagens/chave; depois dele apenas
+limpa arquivos privados. Conflitos e corrupção são preservados e recusados,
+sem sobrescrever conteúdo novo. Leituras/chave recuperam trabalho pendente,
+invalidam cache obsoleto e repetem limpeza bloqueada. A quota considera snapshots,
+crescimento dos nomes públicos e um temporário; é consultada novamente após
+recuperação. Proteções contra links permanecem. Não certifica corte de energia
+nem escritores concorrentes de consoles independentes.
+
+`XamPngEncode`/`Ex` do perfil 17559 chamam o encoder libpng recompilado original
+`816B0BA8`, preservando pitch, alpha, HRESULT e conclusão. A consulta original
+de cancelamento `816B8090` acessava TLS de tarefa inexistente no worker host
+(AV reproduzida); agora consulta a tarefa real do runtime e balanceia seu handle,
+mantendo fallback original para workers originais. Endereços permanecem somente
+na 17559; nenhum binário ou recurso original foi editado.
+
+Evidência focada: o teste da API nova falhou sem 0234 (20 falhas/43 asserções).
+O conjunto final passou **1.142 asserções/19 casos**, incluindo GamerCard,
+conquistas offline, imagens, chave, PNG, cancelamento, bloqueio real de destino,
+limpeza bloqueada e quota (`gamerpic-picture-verified-tests.log`). O script
+`tests/local/profile-pictures-process.ps1` passou sete encerramentos reais com
+exit 93, reinício independente, rollback/commit, intent corrompido e conflito
+público (`gamerpic-picture-process-final.log`). Todas as fixtures são próprias.
+Replay desde o SDK pinado: **51 patches/4 arquivos**, SHA-256 conferidos
+(`gamerpic-picture-write-final-replay.log`).
+
+Probe sem entrypoint/GPU: imagem XAM 17559 verificada, PNG opaco e com alpha,
+pitch não compacto e buffer insuficiente passaram, com pixels e canários
+conferidos. O fluxo encoder original → `XamWriteGamerTileEx` → leitura pública/
+pessoal passou para 64/32, preservando bytes e pixels
+(`gamerpic-picture-roundtrip.log`). A tentativa gráfica anterior
+`gamerpic-write-contract-ui` não certifica navegação: a captura/ativação não
+correspondeu à dashboard; não foram enviados comandos nessa condição e apenas
+o processo diagnóstico próprio foi encerrado. Aceite do fluxo de gravação pela
+XUI e da próxima notificação real continuam pendentes.
+
+Preparo oficial final aprovado (`gamerpic-picture-write-final-prepare.log`),
+com quatro artefatos nativos e quatro fontes/lock conferidos no recibo; SHA do
+patch conferido pelo lock verificado (`gamerpic-picture-prepared-verification.json`).
+O probe integrado voltou a passar com a XAM recém-preparada
+(`gamerpic-picture-prepared-roundtrip.log`). O primeiro preparo fora recusado
+por uma edição documental própria no README dos patches durante o build;
+o candidato final foi repetido com essa closure congelada.
+
+`20261031T050921Z-gamerpic-write-ui`: a XUI exibiu a pessoal na dashboard,
+pública distinta no Perfil e **um jogo/10 G/uma conquista**. Configurações →
+Perfil → Editar Perfil → Imagem do Jogador abriu o seletor original, com um
+item sem imagem; pedidos reais de tiles 4/13 e catálogo agregado com zero itens
+constam no log. Selecionar não comprovou gravação; retorno ao editor funcionou.
+Esse bloqueio de catálogo permanece, sem imagem substituta nem aceite fictício.
+Fechamento normal por Alt+F4 em **170.444 ms**, exit 0, sem exceção/timeout.
+Os 25 arquivos da fonte e dez arquivos protegidos do perfil privado, incluindo
+imagens, conta e histórico, continuam idênticos por SHA-256
+(`gamerpic-picture-ui-verification.json`). Persistem stubs e mensagens XLIVEBASE
+não implementadas; a sessão não certifica cobertura integral da XAM.

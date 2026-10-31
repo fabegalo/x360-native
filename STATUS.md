@@ -1,5 +1,23 @@
 # STATUS
 
+31/10 — **DASH-OS-FEATURES-03, gravação de Gamerpic parcial**: 0234 persiste
+PNGs públicos/pessoais 64/32 e chave por XUID no modo bruto observado de
+`XamWriteGamerTileEx`, com validação, conclusão/erros reais, quota e recuperação
+transacional. Sete interrupções reais de processo, rollback/commit, locks,
+corrupção e conflitos preservados passaram; conjunto focado de GamerCard,
+conquistas, imagens, PNG e perfis: **1.142 asserções/19 casos**. Replay de
+51 patches/4 arquivos conferido. `XamPngEncode`/`Ex` chama o encoder original
+17559; a consulta de cancelamento usa a tarefa real do runtime quando necessário.
+Probe integrado encoder original → gravação → leitura 64/32 aprovado, com
+bytes/pixels conferidos. Catálogo, premiação e Avatar continuam não suportados,
+sem sucesso fictício. Preparo oficial aprovado, recibo/artefatos conferidos.
+Na XUI, Perfil → Editar Perfil → Imagem do Jogador abriu, mas o catálogo mostrou
+um item sem imagem: gravação pelo seletor continua sem aceite. Sessão encerrada
+normalmente em 170,4 s; 25 arquivos da origem e dez do perfil privado preservados.
+Próxima notificação real ainda sem aceite visual; nenhum desbloqueio
+apagado/reemitido. P1 não ampliado.
+[Evidências e limites](docs/reports/dash-os-features-03-2026-10-30.md).
+
 30/10 — **DASH-OS-FEATURES-03, Storage e Gamerpic parciais**: cancelamento real de I/O,
 FE/`2000C`, recuperação de staging antes da quota, cálculo original de buffers
 17559 e metadados persistidos de saves/perfis locais (0220–0224). Cópia HDD → MU,

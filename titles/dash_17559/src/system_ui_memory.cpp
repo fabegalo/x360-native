@@ -5,6 +5,7 @@
 #include <rex/system/kernel_state.h>
 #include <rex/system/user_module.h>
 #include <rex/kernel/xam/task_context.h>
+#include "system_ui_task.h"
 
 // Notifications run as host system tasks. Route their task identity/attributes
 // through the runtime; retain original behavior for original XAM-owned handles.
@@ -24,6 +25,14 @@ BRIDGE_RUNTIME_TASK(816B7BF0, XamTaskGetAttributes)
 BRIDGE_RUNTIME_TASK(816B7B80, XamTaskCloseHandle)
 #undef BRIDGE_RUNTIME_TASK
 
+// Original PNG encoding polls export 1B3 directly. Its internal implementation
+// dereferences original task TLS, which host-dispatched runtime tasks do not own.
+extern "C" REX_FUNC(__imp__sub_816B8090);
+extern "C" REX_FUNC(sub_816B8090) {
+  if (const auto result = dash17559::RuntimeSystemTaskShouldExit()) ctx.r3.u64 = *result;
+  else __imp__sub_816B8090(ctx, base);
+}
+
 // XuiGamerCard calls XAM services internally, without an import thunk. Use the
 // same identity and settings service as the dashboard and system applications.
 #define BRIDGE_XAM_SERVICE(address, name) \
@@ -41,6 +50,8 @@ BRIDGE_XAM_SERVICE(816B16A8, XamUserReadProfileSettingsEx)
 // statistics when a picture is unavailable.
 BRIDGE_XAM_SERVICE(81670C00, XamReadTileEx)
 BRIDGE_XAM_SERVICE(81670B68, XamReadTile)
+BRIDGE_XAM_SERVICE(81670740, XamWriteGamerTileEx)
+BRIDGE_XAM_SERVICE(81670E08, XamWriteGamerTile)
 #undef BRIDGE_XAM_SERVICE
 
 // The original HUD polls the system input queue, rather than the suspended
