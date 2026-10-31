@@ -4,6 +4,7 @@
 #include "vulkan_core.h"
 #include "vulkan_shader_cache.h"
 #include "vulkan_commands.h"
+#include "vulkan_buffer_access.h"
 #include "../pipeline/pipeline_workers.h"
 #include "../commands/tessellation.h"
 #include "../memory/guest_memory_mirror.h"
@@ -57,11 +58,12 @@ class VulkanRender {
   void ReserveReadback(uint64_t bytes);
   struct UploadSlice { VkBuffer buffer; VkDeviceSize offset; std::byte* mapped; };
   UploadSlice Upload(const void*, VkDeviceSize size, VkDeviceSize alignment = 16);
+  VkDescriptorPool CreateDescriptorPool();
   VkDescriptorSet AllocateDescriptors(VkDescriptorSetLayout);
   PendingPipeline ComputePipeline(VkPipelineLayout, std::span<const uint32_t>);
   GuestMemoryMirror& Mirror(rex::memory::Memory&);
   void UploadGuest(uint32_t address, uint32_t length);
-  struct BufferAccess { VkPipelineStageFlags stage = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT; VkAccessFlags access = 0; };
+  using BufferAccess = VulkanBufferAccess;
   void UseBuffer(VkBuffer, BufferAccess&, VkPipelineStageFlags, VkAccessFlags, bool force = false);
   struct TextureResource;
   struct TextureEntry {
@@ -98,6 +100,9 @@ class VulkanRender {
                           unsigned pixel_log2; uint64_t offset; };
   struct Arena {
     VkDescriptorPool descriptors = VK_NULL_HANDLE;
+    std::vector<VkDescriptorPool> extra_descriptor_pools;
+    size_t descriptor_pool_index = 0;
+    uint32_t descriptor_pool_sets = 0;
     uint32_t descriptor_count = 0;
     uint32_t image_descriptors = 0, sampler_descriptors = 0;
     std::vector<UploadPage> uploads;
@@ -106,6 +111,9 @@ class VulkanRender {
     // valid until this slot's fence, like the descriptor pool they come from.
     std::vector<UploadPage> load_scratch;
     VkDescriptorSet guest_load_set = VK_NULL_HANDLE;
+    // Small storage-range devices use immutable aligned windows instead of a
+    // descriptor spanning all 512 MiB of guest memory (or an oversized scratch).
+    std::map<std::array<uint64_t, 3>, VkDescriptorSet> load_range_sets;
     // The guest/EDRAM buffers and their extents do not change between draws.
     // This immutable set has the same fence lifetime as its descriptor pool.
     VkDescriptorSet draw_memory_set = VK_NULL_HANDLE;

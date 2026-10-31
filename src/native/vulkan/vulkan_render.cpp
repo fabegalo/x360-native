@@ -28,16 +28,7 @@ VulkanRender::VulkanRender(rex::ui::vulkan::VulkanProvider& provider)
     VkPipelineCacheCreateInfo cache{VK_STRUCTURE_TYPE_PIPELINE_CACHE_CREATE_INFO};
     CheckVulkan(LoadNativeVulkanFunction<PFN_vkCreatePipelineCache>(device_, "vkCreatePipelineCache")(
         vk, &cache, nullptr, &pipeline_cache_), "create Native pipeline cache");
-    for (auto& arena : arenas_) {
-      const VkDescriptorPoolSize sizes[]{{VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 16384},
-          {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 16384}, {VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 32768},
-          {VK_DESCRIPTOR_TYPE_SAMPLER, 32768}, {VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER, 4096}};
-      VkDescriptorPoolCreateInfo pool{VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO};
-      pool.maxSets = 4096;
-      pool.poolSizeCount = uint32_t(std::size(sizes));
-      pool.pPoolSizes = sizes;
-      CheckVulkan(fn.vkCreateDescriptorPool(vk, &pool, nullptr, &arena.descriptors), "create render descriptor arena");
-    }
+    for (auto& arena : arenas_) arena.descriptors = CreateDescriptorPool();
     const VkDescriptorSetLayoutBinding binding{0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1,
                                                VK_SHADER_STAGE_COMPUTE_BIT, nullptr};
     VkDescriptorSetLayoutCreateInfo set{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO};
@@ -105,6 +96,8 @@ void VulkanRender::Destroy() {
   for (auto& arena : arenas_) {
     if (arena.descriptors) fn.vkDestroyDescriptorPool(vk, arena.descriptors, nullptr);
     arena.descriptors = VK_NULL_HANDLE;
+    for (auto pool : arena.extra_descriptor_pools) fn.vkDestroyDescriptorPool(vk, pool, nullptr);
+    arena.extra_descriptor_pools.clear();
     arena.uploads.clear();
     arena.load_scratch.clear();
     arena.readback.reset();
@@ -128,6 +121,10 @@ void VulkanRender::Begin() {
   readback_ = arena.readback.get();
   CheckVulkan(device_.functions().vkResetDescriptorPool(device_.device(), arena.descriptors, 0),
               "reset render descriptor arena");
+  for (auto pool : arena.extra_descriptor_pools)
+    CheckVulkan(device_.functions().vkResetDescriptorPool(device_.device(), pool, 0), "reset render descriptor overflow pool");
+  arena.descriptor_pool_index = 0;
+  arena.descriptor_pool_sets = 0;
   arena.descriptor_count = 0;
   arena.image_descriptors = arena.sampler_descriptors = 0;
   arena.upload_index = 0;
@@ -135,6 +132,7 @@ void VulkanRender::Begin() {
   // The pool reset above released the load descriptor sets of this slot.
   for (auto& page : arena.load_scratch) { page.used = 0; page.load_set = VK_NULL_HANDLE; }
   arena.guest_load_set = VK_NULL_HANDLE;
+  arena.load_range_sets.clear();
   arena.draw_memory_set = VK_NULL_HANDLE;
 }
 void VulkanRender::EndRendering() {
@@ -250,20 +248,52 @@ VulkanRender::UploadSlice VulkanRender::Upload(const void* data, VkDeviceSize si
     ++arena.upload_index;
   }
 }
+VkDescriptorPool VulkanRender::CreateDescriptorPool() {
+  const VkDescriptorPoolSize sizes[]{{VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 16384},
+      {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 16384}, {VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 32768},
+      {VK_DESCRIPTOR_TYPE_SAMPLER, 32768}, {VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER, 4096}};
+  VkDescriptorPoolCreateInfo pool{VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO};
+  pool.maxSets = 4096;
+  pool.poolSizeCount = uint32_t(std::size(sizes));
+  pool.pPoolSizes = sizes;
+  VkDescriptorPool result = VK_NULL_HANDLE;
+  CheckVulkan(device_.functions().vkCreateDescriptorPool(device_.device(), &pool, nullptr, &result),
+              "create render descriptor arena");
+  return result;
+}
 VkDescriptorSet VulkanRender::AllocateDescriptors(VkDescriptorSetLayout layout) {
   Begin();
   auto& arena = arenas_[submissions_.current_slot()];
-  // Callers reserve enough descriptors before recording an indivisible draw
-  // or resolve. Flushing inside this function could invalidate its bindings.
-  if (arena.descriptor_count >= 4096) throw std::runtime_error("Native Vulkan: descriptor arena overflow");
+  // A draw normally fits in the caller's reservation, but small storage
+  // ranges may require extra immutable load windows. Never flush or reset
+  // descriptors in the middle of a draw. Additional pools share this arena's
+  // fence and are reset only when the whole slot can be reused.
   VkDescriptorSetAllocateInfo allocate{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};
-  allocate.descriptorPool = arena.descriptors;
   allocate.descriptorSetCount = 1;
   allocate.pSetLayouts = &layout;
   VkDescriptorSet result = VK_NULL_HANDLE;
-  CheckVulkan(device_.functions().vkAllocateDescriptorSets(device_.device(), &allocate, &result),
-              "allocate render descriptors");
+  for (;;) {
+    allocate.descriptorPool = arena.descriptor_pool_index
+        ? arena.extra_descriptor_pools[arena.descriptor_pool_index - 1] : arena.descriptors;
+    const auto status = arena.descriptor_pool_sets < 4096
+        ? device_.functions().vkAllocateDescriptorSets(device_.device(), &allocate, &result)
+        : VK_ERROR_OUT_OF_POOL_MEMORY;
+    if (status == VK_SUCCESS) break;
+    // Failure in an empty pool cannot be fixed by allocating another equal
+    // pool (and must not turn a bad layout or driver failure into an OOM loop).
+    if (!arena.descriptor_pool_sets || (status != VK_ERROR_OUT_OF_POOL_MEMORY && status != VK_ERROR_FRAGMENTED_POOL))
+      CheckVulkan(status, "allocate render descriptors");
+    if (arena.descriptor_pool_index == arena.extra_descriptor_pools.size()) {
+      // Reserve before creating the Vulkan object so vector growth cannot
+      // leak a successfully-created pool if allocation throws.
+      arena.extra_descriptor_pools.reserve(arena.descriptor_pool_index + 1);
+      arena.extra_descriptor_pools.push_back(CreateDescriptorPool());
+    }
+    ++arena.descriptor_pool_index;
+    arena.descriptor_pool_sets = 0;
+  }
   ++arena.descriptor_count;
+  ++arena.descriptor_pool_sets;
   return result;
 }
 VulkanRender::PendingPipeline VulkanRender::ComputePipeline(VkPipelineLayout layout, std::span<const uint32_t> spirv) {
@@ -407,22 +437,17 @@ void VulkanRender::UploadGuest(uint32_t address, uint32_t length) {
 void VulkanRender::UseBuffer(VkBuffer buffer, BufferAccess& previous,
                              VkPipelineStageFlags stage, VkAccessFlags access, bool force) {
   Begin();
-  constexpr VkAccessFlags kWrites = VK_ACCESS_SHADER_WRITE_BIT | VK_ACCESS_TRANSFER_WRITE_BIT | VK_ACCESS_HOST_WRITE_BIT;
-  if (!force && !(previous.access & kWrites) && !(access & kWrites)) {
-    previous.stage |= stage;
-    previous.access |= access;
-    return;
-  }
+  const auto dependency = previous.Use(stage, access, force);
+  if (!dependency) return;
   EndRendering();
   if (buffer == edram_buffer_->handle()) edram_draw_layout_.reset();
   VkBufferMemoryBarrier barrier{VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER};
-  barrier.srcAccessMask = previous.access;
+  barrier.srcAccessMask = dependency->access;
   barrier.dstAccessMask = access;
   barrier.srcQueueFamilyIndex = barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
   barrier.buffer = buffer;
   barrier.size = VK_WHOLE_SIZE;
-  cmd_.PipelineBarrier(previous.stage, stage, 0,
+  cmd_.PipelineBarrier(dependency->stages, stage, 0,
                                            0, nullptr, 1, &barrier, 0, nullptr);
-  previous = {stage, access};
 }
 }

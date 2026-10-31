@@ -1,4 +1,5 @@
 #include "vulkan_render.h"
+#include "vulkan_storage_buffer_range.h"
 #include "../quality/settings.h"
 #include "../textures/texture_load.h"
 #include "../textures/texture.h"
@@ -73,6 +74,30 @@ VkSamplerAddressMode AddressMode(ClampMode mode, bool mirror_clamp) {
       return VK_SAMPLER_ADDRESS_MODE_MIRROR_CLAMP_TO_EDGE;
     default: throw std::runtime_error("Native Vulkan: invalid sampler address mode");
   }
+}
+VkDeviceSize LoadSourceExtent(const LoadConstants& c, uint32_t block_bytes, uint32_t element_log2) {
+  // Every invocation reads a full X run, including the unused texels at the
+  // right edge. This matters for 3D's exact tiled bound as well as linear rows.
+  const uint32_t run_blocks = block_bytes == 1 ? 16 : 32 / block_bytes;
+  const uint32_t width = (c.size_blocks[0] + run_blocks - 1) / run_blocks * run_blocks;
+  VkDeviceSize size;
+  if (c.is_tiled_3d_endian_scale & 1) {
+    const uint32_t block_log2 = std::countr_zero(block_bytes);
+    size = c.is_tiled_3d_endian_scale & 2
+        ? texture_util::GetTiledAddressUpperBound3D(width, c.size_blocks[1], c.size_blocks[2],
+            c.guest_pitch_aligned, c.guest_z_stride_block_rows_aligned, block_log2)
+        : texture_util::GetTiledAddressUpperBound2D(width, c.size_blocks[1],
+            c.guest_pitch_aligned, block_log2);
+  } else {
+    // The pinned shader's linear pitch is in bytes, tiled pitch in blocks.
+    const VkDeviceSize row = VkDeviceSize(width) * block_bytes;
+    size = (VkDeviceSize(c.size_blocks[2] - 1) * c.guest_z_stride_block_rows_aligned +
+        c.size_blocks[1] - 1) * c.guest_pitch_aligned + row;
+  }
+  // Storage elements are vectors. A partial final vector may read as zero
+  // with robust buffer access even when the requested texel is in bounds.
+  const VkDeviceSize element = VkDeviceSize(1) << element_log2;
+  return (size + element - 1) / element * element;
 }
 }
 struct VulkanRender::TextureResource {
@@ -172,10 +197,13 @@ void VulkanRender::LoadTextureGpu(const TextureLoadPlan& plan, VkImage image, ui
   const VkDeviceSize offset = page->used;
   page->used += need;
   if (uint64_t(offset) + need > UINT32_MAX) throw std::runtime_error("Native Vulkan: texture load scratch offset");
-  auto bind = [&](VkDescriptorSet& set, VkBuffer buffer) {
+  const VkDeviceSize storage_limit = device_.properties().maxStorageBufferRange;
+  const VkDeviceSize alignment = std::max<VkDeviceSize>(device_.properties().minStorageBufferOffsetAlignment,
+      VkDeviceSize(1) << std::max(plan.source_bpe_log2, plan.dest_bpe_log2));
+  auto bind = [&](VkDescriptorSet& set, VkBuffer buffer, VulkanStorageBufferRange range) {
     if (set) return;
     set = AllocateDescriptors(storage_layout_);
-    const VkDescriptorBufferInfo info{buffer, 0, VK_WHOLE_SIZE};
+    const VkDescriptorBufferInfo info{buffer, range.offset, range.size};
     VkWriteDescriptorSet write{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
     write.dstSet = set;
     write.descriptorCount = 1;
@@ -183,8 +211,15 @@ void VulkanRender::LoadTextureGpu(const TextureLoadPlan& plan, VkImage image, ui
     write.pBufferInfo = &info;
     fn.vkUpdateDescriptorSets(vk, 1, &write, 0, nullptr);
   };
-  bind(page->load_set, page->buffer->handle());
-  bind(arena.guest_load_set, guest_buffer_->handle());
+  const bool full_source = guest_buffer_->size() <= storage_limit;
+  const bool full_dest = page->buffer->size() <= storage_limit;
+  if (full_source) bind(arena.guest_load_set, guest_buffer_->handle(), {0, guest_buffer_->size()});
+  if (full_dest) bind(page->load_set, page->buffer->handle(), {0, page->buffer->size()});
+  auto window_set = [&](const VulkanBuffer& buffer, VulkanStorageBufferRange range) {
+    auto& set = arena.load_range_sets[{uint64_t(buffer.handle()), range.offset, range.size}];
+    bind(set, buffer.handle(), range);
+    return set;
+  };
   EndRendering();
   // Resolve results are resident in the guest buffer; CPU-written pages were
   // uploaded by RequestRange before this load.
@@ -196,11 +231,28 @@ void VulkanRender::LoadTextureGpu(const TextureLoadPlan& plan, VkImage image, ui
   cmd_.PipelineBarrier(VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
                           0, 1, &barrier, 0, nullptr, 0, nullptr);
   cmd_.BindPipeline(VK_PIPELINE_BIND_POINT_COMPUTE, pipeline);
-  const VkDescriptorSet sets[]{page->load_set, arena.guest_load_set};
-  cmd_.BindDescriptorSets(VK_PIPELINE_BIND_POINT_COMPUTE, load_layout_, 0, 2, sets, 0, nullptr);
+  VkDescriptorSet previous_sets[2]{};
   for (const auto& dispatch : plan.dispatches) {
     auto constants = dispatch.constants;
     constants.host_offset += uint32_t(offset);
+    VkDescriptorSet sets[]{page->load_set, arena.guest_load_set};
+    if (!full_source) {
+      const auto range = TextureStorageBufferRange(guest_buffer_->size(), constants.guest_offset,
+          LoadSourceExtent(constants, block_bytes, plan.source_bpe_log2), storage_limit, alignment);
+      sets[1] = window_set(*guest_buffer_, range);
+      constants.guest_offset -= uint32_t(range.offset);
+    }
+    if (!full_dest) {
+      const auto range = TextureStorageBufferRange(page->buffer->size(), constants.host_offset,
+          VkDeviceSize(constants.host_pitch) * constants.size_blocks[1] * constants.size_blocks[2],
+          storage_limit, alignment);
+      sets[0] = window_set(*page->buffer, range);
+      constants.host_offset -= uint32_t(range.offset);
+    }
+    if (sets[0] != previous_sets[0] || sets[1] != previous_sets[1]) {
+      cmd_.BindDescriptorSets(VK_PIPELINE_BIND_POINT_COMPUTE, load_layout_, 0, 2, sets, 0, nullptr);
+      std::copy_n(sets, 2, previous_sets);
+    }
     cmd_.PushConstants(load_layout_, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(constants), &constants);
     cmd_.Dispatch(dispatch.groups[0], dispatch.groups[1], dispatch.groups[2]);
   }
@@ -257,6 +309,12 @@ void VulkanRender::SyncTextureReads(const RegisterFile& regs, SpirvShader* shade
   for (const auto& binding : shader->GetTextureBindingsAfterTranslation()) {
     const auto fetch = regs.GetTextureFetch(binding.fetch_constant);
     if (!TextureViewActive(fetch, binding.dimension, binding.is_signed)) continue;
+    // GPU loads consume the resident guest buffer directly, with UseBuffer
+    // ordering the preceding resolve before the load dispatch. Publishing that
+    // resolve to CPU memory here would submit and wait in the middle of an
+    // otherwise GPU-only dependency. CPU conversions (including scaled resolve
+    // snapshots) still need their bytes before any draw bindings are allocated.
+    if (!scaled_.enabled() && !NeedsCpuConversion(fetch.format, binding.is_signed, fetch.num_format)) continue;
     uint32_t w, h, d, base, mip, low, high;
     texture_util::GetSubresourcesFromFetchConstant(fetch, &w, &h, &d, &base, &mip, &low, &high);
     const auto layout = texture_util::GetGuestTextureLayout(fetch.dimension, fetch.pitch,

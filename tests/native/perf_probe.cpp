@@ -1,5 +1,7 @@
 // Headless production VulkanRender workloads. Synthetic throughput is not FPS.
 #include "../../src/native/vulkan/vulkan_render.h"
+#include "../../src/native/vulkan/vulkan_storage_buffer_range.h"
+#include "../../src/native/textures/texture_load.h"
 #include <rex/runtime.h>
 #include <rex/kernel/init.h>
 #include <rex/cvar.h>
@@ -23,6 +25,40 @@ using namespace rex::graphics;
 using namespace rex::graphics::xenos;
 namespace {
 void Require(bool ok, const char* message) { if (!ok) throw std::runtime_error(message); }
+void CheckBufferDependencies() {
+  VulkanBufferAccess state;
+  const auto shader_write = VK_ACCESS_SHADER_WRITE_BIT;
+  const auto shader_read = VK_ACCESS_SHADER_READ_BIT;
+  const auto transfer_read = VK_ACCESS_TRANSFER_READ_BIT;
+  state.Use(VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, shader_write);
+  auto dependency = state.Use(VK_PIPELINE_STAGE_TRANSFER_BIT, transfer_read);
+  Require(dependency && dependency->stages == VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT &&
+      dependency->access == shader_write, "compute write to readback memory dependency");
+  Require(!state.Use(VK_PIPELINE_STAGE_TRANSFER_BIT, transfer_read), "repeated readback added a dependency");
+  dependency = state.Use(VK_PIPELINE_STAGE_VERTEX_SHADER_BIT, shader_read);
+  Require(dependency && dependency->stages == VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT &&
+      dependency->access == shader_write, "new shader reader lost the preceding compute writer");
+  Require(!state.Use(VK_PIPELINE_STAGE_VERTEX_SHADER_BIT, shader_read), "repeated shader read added a dependency");
+  dependency = state.Use(VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, shader_write);
+  const auto all_stages = VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_TRANSFER_BIT |
+      VK_PIPELINE_STAGE_VERTEX_SHADER_BIT;
+  Require(dependency && (dependency->stages & all_stages) == all_stages &&
+      (dependency->access & (shader_write | shader_read | transfer_read)) == (shader_write | shader_read | transfer_read),
+      "next buffer write did not wait for every reader and writer");
+  Require(bool(state.Use(VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, shader_write)), "consecutive writes lost WAW dependency");
+  Require(bool(state.Use(VK_PIPELINE_STAGE_VERTEX_SHADER_BIT, shader_read)), "new write retained stale read visibility");
+  Require(bool(state.Use(VK_PIPELINE_STAGE_VERTEX_SHADER_BIT, shader_read, true)), "forced dependency was removed");
+  dependency = state.Use(VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, shader_read);
+  Require(dependency && dependency->stages == VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT &&
+      dependency->access == shader_write, "forced read discarded the last writer");
+  VulkanBufferAccess split;
+  split.Use(VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, shader_write);
+  split.Use(VK_PIPELINE_STAGE_VERTEX_SHADER_BIT, VK_ACCESS_UNIFORM_READ_BIT);
+  split.Use(VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, shader_read);
+  Require(bool(split.Use(VK_PIPELINE_STAGE_VERTEX_SHADER_BIT, shader_read)),
+      "independent read scopes incorrectly covered a new stage/access pair");
+  std::cout << "PASS Vulkan buffer dependencies: all readers see their writer; WAR/WAW and repeated readers preserved\n";
+}
 std::vector<uint32_t> ExportShader() {
   using namespace ucode;
   const uint64_t alloc = (uint64_t(AllocType::kMemory) << 41) | (uint64_t(ControlFlowOpcode::kAlloc) << 44);
@@ -30,6 +66,22 @@ std::vector<uint32_t> ExportShader() {
   return {uint32_t(alloc), uint32_t(alloc >> 32) | uint32_t(exec << 16), uint32_t(exec >> 16),
       32 | (1u << 15) | (15u << 16), 0x6Cu << 16, (1u << 8) | (1u << 31) | (uint32_t(AluVectorOpcode::kMad) << 24),
       33 | (1u << 15) | (15u << 16), 0, (uint32_t(AluVectorOpcode::kMax) << 24) | (2u << 16) | (2u << 8)};
+}
+std::vector<uint32_t> TextureExportShader(FetchOpDimension dimension = FetchOpDimension::k2D) {
+  using namespace ucode;
+  const uint64_t alloc = (uint64_t(AllocType::kMemory) << 41) | (uint64_t(ControlFlowOpcode::kAlloc) << 44);
+  // eA = r0.x * c1 + c0; r1 = c2; tfetch r2, r1, tf0; eM0 = r2.
+  const uint64_t exec = 1 | (uint64_t(4) << 12) | (uint64_t(1) << 20) |
+      (uint64_t(ControlFlowOpcode::kExecEnd) << 44);
+  return {uint32_t(alloc), uint32_t(alloc >> 32) | uint32_t(exec << 16), uint32_t(exec >> 16),
+      32 | (1u << 15) | (15u << 16), 0x6Cu << 16,
+      (1u << 8) | (1u << 31) | (uint32_t(AluVectorOpcode::kMad) << 24),
+      1 | (15u << 16), 0, (uint32_t(AluVectorOpcode::kMax) << 24) | (2u << 16) | (2u << 8),
+      uint32_t(FetchOpcode::kTextureFetch) | (1u << 5) | (2u << 12) | (0x24u << 26),
+      0x688u | (3u << 12) | (3u << 14) | (3u << 16) | (7u << 18) | (3u << 24) | (3u << 26),
+      uint32_t(dimension) << 14,
+      33 | (1u << 15) | (15u << 16), 0,
+      (uint32_t(AluVectorOpcode::kMax) << 24) | (2u << 16) | (2u << 8) | (3u << 30)};
 }
 uint64_t CpuNs() {
   FILETIME c, e, k, u;
@@ -85,6 +137,286 @@ void CheckResolveContracts(VulkanRender& render, RegisterFile& regs,
     Require(!render.PrepareScanout(input,memory.TranslatePhysical(input.address),scaled,bytes),"CPU write kept stale scaled cache");
   }
   std::cout<<"PASS colored resolves and scaled snapshots byte-for-byte\n";
+}
+void CheckTextureResolveDependency(VulkanRender& render, const RegisterFile& draw_template,
+    const RegisterFile& resolve_template, rex::memory::Memory& memory, uint32_t output) {
+  const uint32_t physical = memory.GetPhysicalAddress(output);
+  const uint32_t source = physical + 0x40000, destination = physical + 0x50000;
+  RegisterFile draw(draw_template), resolve(resolve_template);
+  reg::SQ_PROGRAM_CNTL program{}; program.vs_num_reg = 3;
+  draw[XE_GPU_REG_SQ_PROGRAM_CNTL] = program.value;
+  xe_gpu_memexport_stream_t stream{};
+  stream.base_address = destination >> 2; stream.const_0x1 = 1;
+  stream.const_0x4b000000 = 0x4B000000; stream.format = ColorFormat::k_32_32_32_32_FLOAT;
+  stream.num_format = SurfaceNumberFormat::kFloat; stream.const_0x4b0 = 0x4B0;
+  stream.index_count = 1; stream.const_0x96 = 0x96;
+  std::memcpy(&draw[XE_GPU_REG_SHADER_CONSTANT_000_X], &stream, sizeof(stream));
+  const float address_scale[]{0, 1, 0, 0}, uv[]{0.5f, 0.5f, 0, 0};
+  std::memcpy(&draw[XE_GPU_REG_SHADER_CONSTANT_000_X + 4], address_scale, sizeof(address_scale));
+  std::memcpy(&draw[XE_GPU_REG_SHADER_CONSTANT_000_X + 8], uv, sizeof(uv));
+  auto code = TextureExportShader();
+  for (auto& word : code) word = rex::byte_swap(word);
+  auto* vs = render.LoadShader(ShaderType::kVertex, code.data(), uint32_t(code.size()));
+  // Exercise the GPU load and the RGBA4 CPU conversion from a real resolve.
+  // Both fetch a uniform white texture, producing an exactly representable
+  // float4 through the guest vertex shader's MEMEXPORT.
+  for (const bool cpu_conversion : {false, true}) {
+    render.Flush(true);
+    std::memset(memory.TranslateVirtual(output + 0x40000), 0xCD, 4096);
+    std::memset(memory.TranslateVirtual(output + 0x50000), 0xCD, 4096);
+    reg::RB_COPY_CONTROL control{}; control.copy_command = CopyCommand(1); control.color_clear_enable = 1;
+    resolve[XE_GPU_REG_RB_COPY_CONTROL] = control.value;
+    resolve[XE_GPU_REG_RB_COPY_DEST_BASE] = physical + 0x60000;
+    resolve[XE_GPU_REG_RB_COLOR_CLEAR] = resolve[XE_GPU_REG_RB_COLOR_CLEAR_LO] = UINT32_MAX;
+    render.Resolve(resolve, memory);
+    control.color_clear_enable = 0;
+    resolve[XE_GPU_REG_RB_COPY_CONTROL] = control.value;
+    resolve[XE_GPU_REG_RB_COPY_DEST_BASE] = source;
+    render.Resolve(resolve, memory);
+    xe_gpu_texture_fetch_t fetch{}; fetch.type = FetchConstantType::kTexture;
+    fetch.dimension = DataDimension::k2DOrStacked;
+    fetch.format = cpu_conversion ? TextureFormat::k_4_4_4_4 : TextureFormat::k_8_8_8_8;
+    fetch.base_address = source >> 12; fetch.pitch = 1; fetch.tiled = true;
+    fetch.size_2d.width = fetch.size_2d.height = 31; fetch.swizzle = 0x688;
+    std::memcpy(&draw[XE_GPU_REG_SHADER_CONSTANT_FETCH_00_0], &fetch, sizeof(fetch));
+    const auto before = NativeVulkanPerformance();
+    render.Draw(draw, memory, vs, nullptr, PrimitiveType::kTriangleList, 1, nullptr);
+    const auto submitted = NativeVulkanPerformance().submissions - before.submissions;
+    const auto published = NativeVulkanPerformance().readbacks - before.readbacks;
+    render.CompleteGuestWrites(kGuestSyncPacket, 0);
+    const std::array<float, 4> white{1, 1, 1, 1};
+    Require(!std::memcmp(memory.TranslatePhysical(destination), white.data(), sizeof(white)),
+        "resolve texture fetch/MEMEXPORT bytes");
+    const bool cpu_read = cpu_conversion || GetNativeQualitySettings().scale_x > 1;
+    if (before.enabled) {
+      Require(cpu_read ? submitted != 0 && published != 0 : submitted == 0 && published == 0,
+          cpu_read ? "CPU texture conversion did not publish its resolve dependency" :
+                     "GPU texture load waited for CPU resolve publication");
+    }
+  }
+  std::cout << "PASS resolve-to-texture dependencies: GPU stays queued, CPU conversion publishes, sampled bytes exact\n";
+}
+void CheckStorageRangeSelection() {
+  constexpr VkDeviceSize mib = 1ull << 20, buffer = 512 * mib, limit = 128 * mib;
+  auto range = TextureStorageBufferRange(buffer, 129 * mib, 4096, UINT32_MAX, 256);
+  Require(range.offset == 0 && range.size == buffer, "large-range device lost whole-buffer binding");
+  range = TextureStorageBufferRange(buffer, 129 * mib, 4096, limit, 256);
+  Require(range.offset == limit && range.size == limit, "aligned source window");
+  const auto adjacent = TextureStorageBufferRange(buffer, 130 * mib, 4096, limit, 256);
+  Require(adjacent.offset == range.offset && adjacent.size == range.size, "adjacent loads cannot reuse a source window");
+  range = TextureStorageBufferRange(buffer, limit - 11, 32, limit, 256);
+  Require(range.offset == limit - 256 && range.size == limit, "cross-window load was truncated or misaligned");
+  range = TextureStorageBufferRange(144 * mib, 128 * mib, 16 * mib, limit, 256);
+  Require(range.offset == limit && range.size == 16 * mib, "scratch tail range");
+  range = TextureStorageBufferRange(buffer, buffer - 16, 16, limit, 256);
+  Require(range.offset + range.size == buffer, "last guest vector range");
+  bool rejected = false;
+  try { TextureStorageBufferRange(buffer, 0, limit + 16, limit, 256); }
+  catch (const std::runtime_error& e) { rejected = std::string(e.what()).find("maxStorageBufferRange") != std::string::npos; }
+  Require(rejected, "oversized texture dispatch did not report the device storage limit");
+  rejected = false;
+  try { TextureStorageBufferRange(buffer, buffer - 8, 16, limit, 256); }
+  catch (const std::runtime_error&) { rejected = true; }
+  Require(rejected, "texture descriptor exceeded its backing buffer");
+  std::cout << "PASS storage range selection: aligned/cross-window/tail spans, reuse and explicit oversized rejection\n";
+}
+// The physical GPU still has its real limit. This fixture lowers Native's
+// advertised limit and checks every descriptor passed to the real driver;
+// it does not claim validation on hardware with a native 128 MiB limit.
+struct StorageLimitFixture {
+  using Device = rex::ui::vulkan::VulkanDevice;
+  Device::Properties& properties;
+  Device::Functions& functions;
+  uint32_t original_limit;
+  PFN_vkCreateBuffer create;
+  PFN_vkDestroyBuffer destroy;
+  PFN_vkUpdateDescriptorSets update;
+  PFN_vkAllocateDescriptorSets allocate_sets;
+  PFN_vkResetDescriptorPool reset_pool;
+  std::map<VkBuffer, VkDeviceSize> buffers;
+  std::map<VkDescriptorPool, uint32_t> pool_counts;
+  unsigned source_sets = 0, rebased_scratch_sets = 0;
+  unsigned pool_rollovers = 0;
+  bool invalid_range = false;
+  inline static StorageLimitFixture* active = nullptr;
+  explicit StorageLimitFixture(const Device& device)
+      : properties(const_cast<Device::Properties&>(device.properties())),
+        functions(const_cast<Device::Functions&>(device.functions())),
+        original_limit(properties.maxStorageBufferRange), create(functions.vkCreateBuffer),
+        destroy(functions.vkDestroyBuffer), update(functions.vkUpdateDescriptorSets),
+        allocate_sets(functions.vkAllocateDescriptorSets), reset_pool(functions.vkResetDescriptorPool) {
+    properties.maxStorageBufferRange = 128u << 20;
+    active = this;
+    functions.vkCreateBuffer = Create;
+    functions.vkDestroyBuffer = Destroy;
+    functions.vkUpdateDescriptorSets = Update;
+    functions.vkAllocateDescriptorSets = AllocateSets;
+    functions.vkResetDescriptorPool = ResetPool;
+  }
+  ~StorageLimitFixture() {
+    functions.vkCreateBuffer = create;
+    functions.vkDestroyBuffer = destroy;
+    functions.vkUpdateDescriptorSets = update;
+    functions.vkAllocateDescriptorSets = allocate_sets;
+    functions.vkResetDescriptorPool = reset_pool;
+    properties.maxStorageBufferRange = original_limit;
+    active = nullptr;
+  }
+  static VKAPI_ATTR VkResult VKAPI_CALL AllocateSets(VkDevice device, const VkDescriptorSetAllocateInfo* info,
+      VkDescriptorSet* sets) {
+    auto& fixture = *active;
+    auto& count = fixture.pool_counts[info->descriptorPool];
+    // Force real descriptor allocations to span several pools with a small
+    // bounded workload. Both retryable Vulkan allocation errors are covered.
+    if (count + info->descriptorSetCount > 8)
+      return ++fixture.pool_rollovers & 1 ? VK_ERROR_OUT_OF_POOL_MEMORY : VK_ERROR_FRAGMENTED_POOL;
+    const auto result = fixture.allocate_sets(device, info, sets);
+    if (result == VK_SUCCESS) count += info->descriptorSetCount;
+    return result;
+  }
+  static VKAPI_ATTR VkResult VKAPI_CALL ResetPool(VkDevice device, VkDescriptorPool pool, VkDescriptorPoolResetFlags flags) {
+    const auto result = active->reset_pool(device, pool, flags);
+    if (result == VK_SUCCESS) active->pool_counts[pool] = 0;
+    return result;
+  }
+  static VKAPI_ATTR VkResult VKAPI_CALL Create(VkDevice device, const VkBufferCreateInfo* info,
+      const VkAllocationCallbacks* allocator, VkBuffer* buffer) {
+    const auto result = active->create(device, info, allocator, buffer);
+    if (result == VK_SUCCESS) active->buffers.emplace(*buffer, info->size);
+    return result;
+  }
+  static VKAPI_ATTR void VKAPI_CALL Destroy(VkDevice device, VkBuffer buffer, const VkAllocationCallbacks* allocator) {
+    active->buffers.erase(buffer);
+    active->destroy(device, buffer, allocator);
+  }
+  static VKAPI_ATTR void VKAPI_CALL Update(VkDevice device, uint32_t count, const VkWriteDescriptorSet* writes,
+      uint32_t copy_count, const VkCopyDescriptorSet* copies) {
+    auto& fixture = *active;
+    for (uint32_t w = 0; w < count; ++w) {
+      const auto& write = writes[w];
+      if (write.descriptorType != VK_DESCRIPTOR_TYPE_STORAGE_BUFFER) continue;
+      for (uint32_t b = 0; b < write.descriptorCount; ++b) {
+        const auto& info = write.pBufferInfo[b];
+        const auto found = fixture.buffers.find(info.buffer);
+        if (found == fixture.buffers.end()) { fixture.invalid_range = true; continue; }
+        const auto size = found->second;
+        const auto range = info.range == VK_WHOLE_SIZE ? size - info.offset : info.range;
+        fixture.invalid_range |= info.offset >= size || !range || range > size - info.offset ||
+            range > fixture.properties.maxStorageBufferRange ||
+            info.offset % fixture.properties.minStorageBufferOffsetAlignment != 0;
+        if (write.descriptorCount == 1 && size == GuestMemoryMirror::kSize) ++fixture.source_sets;
+        if (size > fixture.properties.maxStorageBufferRange && size != GuestMemoryMirror::kSize && info.offset)
+          ++fixture.rebased_scratch_sets;
+      }
+    }
+    fixture.update(device, count, writes, copy_count, copies);
+  }
+};
+void CheckTextureStorageLimit(rex::ui::vulkan::VulkanProvider& provider, const RegisterFile& draw_template,
+    rex::memory::Memory& memory, uint32_t output) {
+  CheckStorageRangeSelection();
+  StorageLimitFixture fixture(*provider.vulkan_device());
+  struct Allocations {
+    rex::memory::Memory& memory;
+    std::vector<uint32_t> addresses;
+    void Add(uint32_t physical, uint32_t size) {
+      const uint32_t address = 0xA0000000u | physical;
+      Require(memory.LookupHeap(address)->AllocFixed(address, size, 65536,
+          rex::memory::kMemoryAllocationReserve | rex::memory::kMemoryAllocationCommit,
+          rex::memory::kMemoryProtectRead | rex::memory::kMemoryProtectWrite), "storage-limit fixture physical allocation");
+      addresses.push_back(address);
+    }
+    ~Allocations() { for (auto address : addresses) memory.LookupHeap(address)->Release(address); }
+  } allocations{memory};
+  allocations.Add(0x07FF0000, 0x40000);
+  allocations.Add(0x18000000, 0x20000);
+  // Nine 16 MiB array layers force a real scratch buffer larger than the
+  // emulated limit, while each indivisible shader dispatch still fits.
+  allocations.Add(0x08040000, 144u << 20);
+  VulkanRender render(provider);
+  RegisterFile draw(draw_template);
+  reg::SQ_PROGRAM_CNTL program{}; program.vs_num_reg = 3;
+  draw[XE_GPU_REG_SQ_PROGRAM_CNTL] = program.value;
+  auto shader2d = TextureExportShader(), shader3d = TextureExportShader(FetchOpDimension::k3DOrStacked);
+  for (auto* words : {&shader2d, &shader3d}) for (auto& word : *words) word = rex::byte_swap(word);
+  auto* vs2d = render.LoadShader(ShaderType::kVertex, shader2d.data(), uint32_t(shader2d.size()));
+  auto* vs3d = render.LoadShader(ShaderType::kVertex, shader3d.data(), uint32_t(shader3d.size()));
+  std::vector<std::array<float, 4>> expected;
+  const uint32_t destination = memory.GetPhysicalAddress(output) + 0x70000;
+  auto sample = [&](const xe_gpu_texture_fetch_t& fetch, bool use_3d, std::array<float, 4> uv,
+                    std::array<float, 4> color) {
+    xe_gpu_memexport_stream_t stream{};
+    stream.base_address = (destination + uint32_t(expected.size()) * 16) >> 2; stream.const_0x1 = 1;
+    stream.const_0x4b000000 = 0x4B000000; stream.format = ColorFormat::k_32_32_32_32_FLOAT;
+    stream.num_format = SurfaceNumberFormat::kFloat; stream.const_0x4b0 = 0x4B0;
+    stream.index_count = 1; stream.const_0x96 = 0x96;
+    const std::array<float, 4> stride{0, 1, 0, 0};
+    std::memcpy(&draw[XE_GPU_REG_SHADER_CONSTANT_000_X], &stream, sizeof(stream));
+    std::memcpy(&draw[XE_GPU_REG_SHADER_CONSTANT_000_X + 4], stride.data(), sizeof(stride));
+    std::memcpy(&draw[XE_GPU_REG_SHADER_CONSTANT_000_X + 8], uv.data(), sizeof(uv));
+    std::memcpy(&draw[XE_GPU_REG_SHADER_CONSTANT_FETCH_00_0], &fetch, sizeof(fetch));
+    render.Draw(draw, memory, use_3d ? vs3d : vs2d, nullptr, PrimitiveType::kTriangleList, 1, nullptr);
+    expected.push_back(color);
+  };
+  auto fill = [&](uint32_t physical, size_t size, uint32_t rgba) {
+    auto* begin = memory.TranslateVirtual<uint32_t*>(0xA0000000u | physical);
+    std::fill_n(begin, size / 4, rgba);
+  };
+  xe_gpu_texture_fetch_t fetch{}; fetch.type = FetchConstantType::kTexture;
+  fetch.dimension = DataDimension::k2DOrStacked; fetch.format = TextureFormat::k_8_8_8_8; fetch.swizzle = 0x688;
+  fetch.size_2d.width = 64; fetch.size_2d.height = 31; fetch.pitch = 3;
+  fetch.base_address = 0x07FFF000 >> 12;
+  fill(0x07FFF000, 0x4000, 0xFF0000FF);
+  sample(fetch, false, {.99f, .99f, 0, 0}, {1, 0, 0, 1}); // Crosses the 128 MiB window; non-vector width.
+  fetch.tiled = true; fetch.base_address = 0x08010000 >> 12;
+  fetch.size_2d.height = 64;
+  fill(0x08010000, 0x10000, 0xFF00FF00);
+  sample(fetch, false, {.99f, .99f, 0, 0}, {0, 1, 0, 1});
+  fetch.size_2d.width = fetch.size_2d.height = 63; fetch.pitch = 2;
+  fetch.base_address = 0x08020000 >> 12; fetch.mip_address = 0x18000000 >> 12;
+  fetch.mip_min_level = fetch.mip_max_level = 1;
+  fill(0x08020000, 0x10000, 0xFF0000FF); fill(0x18000000, 0x10000, 0xFFFF0000);
+  sample(fetch, false, {.5f, .5f, 0, 0}, {0, 0, 1, 1}); // Base and mip occupy different windows.
+  fetch.mip_min_level = fetch.mip_max_level = fetch.mip_address = 0;
+  fetch.dimension = DataDimension::k3D;
+  fetch.size_3d.width = 63; fetch.size_3d.height = 31; fetch.size_3d.depth = 3;
+  fetch.base_address = 0x18010000 >> 12;
+  fill(0x18010000, 0x10000, 0xFFFFFFFF);
+  sample(fetch, true, {.99f, .99f, .99f, 0}, {1, 1, 1, 1});
+  // Reuse all arena slots, changing a watched texture each time. Previously
+  // recorded descriptors and upload bytes must survive until their own fence.
+  fetch.dimension = DataDimension::k2DOrStacked;
+  fetch.size_2d.width = fetch.size_2d.height = 31; fetch.size_2d.stack_depth = 0;
+  fetch.pitch = 1; fetch.base_address = 0x08020000 >> 12;
+  for (unsigned i = 0; i < 4; ++i) {
+    fill(0x08020000, 4096, i & 1 ? 0xFFFFFFFF : 0);
+    const float value = float(i & 1);
+    sample(fetch, false, {.5f, .5f, 0, 0}, {value, value, value, value});
+    render.Flush(false);
+  }
+  fetch.tiled = false; fetch.stacked = true; fetch.pitch = 128;
+  fetch.size_2d.width = 4095; fetch.size_2d.height = 1023; fetch.size_2d.stack_depth = 8;
+  fetch.base_address = 0x08040000 >> 12;
+  fill(0x08040000, 144u << 20, 0);
+  fill(0x10040000, 16u << 20, 0xFFFFFFFF);
+  sample(fetch, true, {.99f, .99f, .5f / 9, 0}, {0, 0, 0, 0});
+  sample(fetch, true, {.99f, .99f, 8.5f / 9, 0}, {1, 1, 1, 1});
+  render.CompleteGuestWrites(kGuestSyncPacket, 0);
+  render.Flush(true);
+  for (size_t i = 0; i < expected.size(); ++i) {
+    const auto* actual = memory.TranslatePhysical<const float*>(destination + uint32_t(i) * 16);
+    if (std::memcmp(actual, expected[i].data(), 16)) {
+      std::cerr << "storage sample " << i << " actual=" << actual[0] << ',' << actual[1] << ',' << actual[2] << ',' << actual[3] << '\n';
+      throw std::runtime_error("storage-limit texture sample differs from exact float4");
+    }
+  }
+  Require(!fixture.invalid_range, "texture load created an invalid storage descriptor under emulated 128 MiB limit");
+  Require(fixture.source_sets > 0 && fixture.rebased_scratch_sets > 0, "storage test did not exercise source and scratch windows");
+  Require(fixture.pool_rollovers >= 2, "storage test did not exercise descriptor pool exhaustion/fragmentation");
+  std::cout << "PASS emulated maxStorageBufferRange=128 MiB (actual=" << fixture.original_limit
+      << "): linear/tiled/3D/mip/array texture samples, 144 MiB scratch and arena reuse; source_sets="
+      << fixture.source_sets << " rebased_scratch_sets=" << fixture.rebased_scratch_sets
+      << " pool_rollovers=" << fixture.pool_rollovers << " (emulated 8 sets/pool)\n";
 }
 void CheckPendingContracts(VulkanRender& render, RegisterFile& regs,
     rex::memory::Memory& memory, rex::graphics::Shader* vs, uint32_t output,
@@ -216,6 +548,7 @@ void CheckCacheMerge(rex::ui::vulkan::VulkanProvider& provider, RegisterFile& re
 }
 int main(int argc, char** argv) {
   try {
+    CheckBufferDependencies();
     Require(argc >= 3, "usage: perf OUTPUT export|resolve|sync|none [iterations=4096] [scale=1] [instrument=1] [contracts] [pipeline_threads]");
     const std::filesystem::path out=argv[1]; std::filesystem::create_directories(out);
     const std::string mode=argv[2];
@@ -338,8 +671,11 @@ int main(int argc, char** argv) {
         CheckPendingContracts(render,draw,memory,vs,output,*provider->vulkan_device());
         CheckStagingGrowth(render,draw,memory,vs);
         CheckResolveContracts(render,resolve,memory,output);
+        CheckTextureResolveDependency(render,draw,resolve,memory,output);
         if (argc <= 7 || std::stoi(argv[7]) != 0) CheckCacheMerge(*provider, resolve, memory, out);
       }
+      if(argc>6 && std::string(argv[6])=="storage-contracts")
+        CheckTextureStorageLimit(*provider, draw, memory, output);
     }
     Require(!measured||NativeVulkanPerformance().live_bytes==0,"Native buffers survived renderer destruction");
     if(argc>6) for(unsigned i=0;i<3;++i) {
