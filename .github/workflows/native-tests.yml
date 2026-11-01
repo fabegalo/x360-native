@@ -98,7 +98,8 @@ jobs:
       - name: Install the pinned redistributable WARP next to the tests
         run: |
           $ErrorActionPreference = 'Stop'
-          $package = "$env:RUNNER_TEMP/warp.nupkg"
+          # A .nupkg is a zip; Expand-Archive accepts only the .zip extension.
+          $package = "$env:RUNNER_TEMP/warp.zip"
           Invoke-WebRequest "https://api.nuget.org/v3-flatcontainer/microsoft.direct3d.warp/$env:WARP_VERSION/microsoft.direct3d.warp.$env:WARP_VERSION.nupkg" -OutFile $package
           $hash = (Get-FileHash $package -Algorithm SHA256).Hash.ToLower()
           if ($hash -ne $env:WARP_SHA256) { throw "WARP package hash $hash differs from the pinned $env:WARP_SHA256" }
