@@ -78,8 +78,9 @@ jobs:
       - name: Run capture/replay and pipeline contracts on D3D12 WARP
         run: |
           # devshell.cmd passes arguments through cmd, where '|' is a pipe: one
-          # regex per call.
-          foreach ($tests in 'native[.]capture', 'native[.]pipeline-recording') {
+          # regex per call. Hosted Windows runners have no Vulkan driver: the
+          # Vulkan contracts run in the Linux job.
+          foreach ($tests in 'native[.]capture-replay-d3d12', 'native[.]capture-format', 'native[.]pipeline-recording') {
             & scripts/devshell.cmd ctest --preset win-amd64-release -R $tests --output-on-failure --timeout 900
             if ($LASTEXITCODE -ne 0) { throw "Native tests $tests failed" }
           }
