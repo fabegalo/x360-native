@@ -276,7 +276,11 @@ void D3D12Render::Draw(const RegisterFile& r, rex::memory::Memory& memory, Shade
   // Pointer identity is stable in the shader cache. The zeroed descriptor also includes every pipeline state.
   PipelineKey key;
   std::memcpy(key.bytes.data(), &pd, sizeof(pd));
-  auto& pipeline = pipelines_[key];
+  if (!last_pipeline_ || !(key == last_pipeline_key_)) {
+    last_pipeline_ = &pipelines_[key];
+    last_pipeline_key_ = key;
+  }
+  auto& pipeline = *last_pipeline_;
   if (!pipeline.valid()) {
     static const auto pso_dump = REXCVAR_GET(native_pso_dump);
     if (!pso_dump.empty()) {

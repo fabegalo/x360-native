@@ -84,16 +84,18 @@ jobs:
           # devshell.cmd passes arguments through cmd, where '|' is a pipe: one
           # regex per call. Hosted Windows runners have no Vulkan driver: the
           # Vulkan contracts run in the Linux job.
-          foreach ($tests in 'native[.]capture-replay-d3d12', 'native[.]capture-format', 'native[.]pipeline-recording') {
+          foreach ($tests in 'native[.]capture-replay-d3d12', 'native[.]capture-format', 'native[.]pipeline-recording', 'native[.]d3d12-commands') {
             & scripts/devshell.cmd ctest --preset win-amd64-release -R $tests --output-on-failure --timeout 900
             if ($LASTEXITCODE -ne 0) { throw "Native tests $tests failed" }
           }
-      - name: A/B early submission on the same recorded frames (WARP, informative timing)
+      - name: A/B submission strategies and state filter on the same recorded frames (WARP, informative timing)
         run: |
           $ErrorActionPreference = 'Stop'
           $replay = Split-Path (Get-ChildItem -Recurse -Filter x360n_native_replay.exe .local/build/win-amd64 | Select-Object -First 1).FullName
           $out = '.local/build/win-amd64/src/native/capture-replay-d3d12'
           python scripts/performance/native_replay_ab.py --capture "$out/heavy/frames.x360nfc" --output "$out/ab-eager-submit.json" --backend d3d12 --rounds 5 --repeat 5 --cvar d3d12_adapter=-2 --cvar native_gpu_timeout_ms=120000 --arm off $replay native_eager_submit=0 --arm idle64 $replay native_eager_submit=64 --arm queued64 $replay native_eager_submit=64 native_eager_submit_depth=1
+          if ($LASTEXITCODE -ne 0) { throw 'A/B replay failed or differed from the capture' }
+          python scripts/performance/native_replay_ab.py --capture "$out/heavy/frames.x360nfc" --output "$out/ab-state-filter.json" --backend d3d12 --rounds 5 --repeat 5 --cvar d3d12_adapter=-2 --cvar native_gpu_timeout_ms=120000 --arm unfiltered $replay native_redundant_state_filter=false --arm filtered $replay native_redundant_state_filter=true
           if ($LASTEXITCODE -ne 0) { throw 'A/B replay failed or differed from the capture' }
       - name: Upload logs and replay reports
         if: always()

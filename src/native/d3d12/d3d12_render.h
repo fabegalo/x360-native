@@ -213,13 +213,14 @@ class D3D12Render {
   void EndGpuTimestamp();
   void CollectGpuTimestamps();
   void LogSubmissionStats();
-  // Graphics pipelines by exact description bytes. A pipeline is created by
-  // pipeline_workers_ and bound through cmd_ while it may still be compiling;
-  // the submission waits for the pipelines of its commands (Flush).
   // Graphics pipelines by their whole description (zeroed, so padding is
-  // fixed). A fixed-size key and a hash: no allocation or ordered string
-  // compares on each draw's lookup. Entries are never erased: their address
-  // identifies the bound pipeline (D3D12Commands).
+  // fixed). A pipeline is created by pipeline_workers_ and bound through cmd_
+  // while it may still be compiling; the submission waits for the pipelines
+  // of its commands (Flush). A fixed-size key and a hash: no allocation or
+  // ordered string compares per draw, and consecutive draws with the same
+  // description reuse the previous entry without hashing. Entries are never
+  // erased: their address identifies the bound pipeline (D3D12Commands) and
+  // stays valid across rehashing.
   struct PipelineKey {
     std::array<uint8_t, sizeof(D3D12_GRAPHICS_PIPELINE_STATE_DESC)> bytes;
     bool operator==(const PipelineKey&) const = default;
@@ -228,6 +229,8 @@ class D3D12Render {
     size_t operator()(const PipelineKey& key) const noexcept { return size_t(XXH3_64bits(key.bytes.data(), key.bytes.size())); }
   };
   std::unordered_map<PipelineKey, std::shared_future<Ptr<ID3D12PipelineState>>, PipelineKeyHash> pipelines_;
+  PipelineKey last_pipeline_key_{};
+  std::shared_future<Ptr<ID3D12PipelineState>>* last_pipeline_ = nullptr;
   Ptr<ID3D12PipelineState> CreatePipeline(D3D12_GRAPHICS_PIPELINE_STATE_DESC, uint64_t vs_hash, uint64_t ps_hash,
       uint64_t vm, uint64_t pm, uint32_t primitive, uint32_t msaa, unsigned planes, uint32_t mask, size_t id);
   void ReplayCommands();
