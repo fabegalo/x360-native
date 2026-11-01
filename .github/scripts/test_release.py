@@ -417,6 +417,38 @@ class PublicationTests(unittest.TestCase):
             self.publish(command)
         self.assertFalse(any(call[:3] == ("gh", "release", "edit") for call in self.calls))
 
+    def test_stable_bridge_includes_checksums_for_existing_launchers(self):
+        self.version = "1.28.13"
+        self.ref = "refs/tags/v" + self.version
+        self.env["GITHUB_REF"] = self.ref
+        self.directory = Path(tempfile.mkdtemp())
+        self.addCleanup(lambda: __import__("shutil").rmtree(self.directory))
+        self.metadata["provenance"]["release_notes_sha256"] = release.file_digest(self.notes)
+        for platform in release.PLATFORMS:
+            for name in release.asset_names(self.version, platform):
+                (self.directory / name).write_bytes(name.encode())
+
+        def command(*args):
+            if args[0] == "git":
+                return self.commit
+            if args[:3] == ("gh", "release", "view"):
+                return json.dumps({"isDraft": True, "assets": [
+                    {"name": name} for platform in release.PLATFORMS
+                    for name in sorted(release.asset_names(self.version, platform))
+                ]})
+            if args[:3] == ("gh", "release", "download"):
+                destination = Path(args[args.index("--dir") + 1])
+                for asset in self.directory.iterdir():
+                    (destination / asset.name).write_bytes(asset.read_bytes())
+            return "mocked"
+
+        self.publish(command)
+        create = next(c for c in self.calls if c[:3] == ("gh", "release", "create"))
+        upload = [Path(a) for a in create if str(a).startswith(str(self.directory))]
+        self.assertEqual(len(upload), 12)
+        self.assertEqual(sum(a.name.endswith(".sha256") for a in upload), 6)
+        self.assertIn("--latest=true", next(c for c in self.calls if c[:3] == ("gh", "release", "edit")))
+
     def test_verified_preview_draft_publishes_only_six_archives_after_download(self):
         assets = sorted(self.directory / release.archive_name(self.version, platform)
                         for platform in release.PLATFORMS)

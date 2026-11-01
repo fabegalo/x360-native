@@ -365,9 +365,15 @@ def publish(directory=Path(".local/packages")):
         require(metadata["provenance"]["repository"] == repository and metadata["provenance"]["event"] == event,
                 "Release repository/event provenance differs")
     require(remote_tag_commit(repository, tag) == commit, "Remote tag moved since the build event")
-    # Keep all twelve verified CI inputs, but expose only installation archives
-    # on the public Release page. GitHub calculates each public asset's SHA-256.
-    assets = sorted(directory / archive_name(version, platform) for platform in PLATFORMS)
+    # Temporary migration bridge: the already-published v1.28.11 launcher
+    # requires separate .sha256 assets to *discover* an update. Publish both
+    # for one stable version, then restore archive-only public releases.
+    # Every CI source archive/checksum is always verified above.
+    legacy_updater_bridge = version == "1.28.13"
+    assets = sorted(directory / name for platform in PLATFORMS
+                    for name in (sorted(asset_names(version, platform))
+                                 if legacy_updater_bridge
+                                 else [archive_name(version, platform)]))
     require(all(p.is_file() for p in assets), "Unexpected artifact directory")
     # gh refuses an existing release; never replace published or partial assets.
     command("gh", "release", "create", tag, *(str(p) for p in assets), "--repo", repository,
