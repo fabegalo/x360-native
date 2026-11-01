@@ -236,10 +236,10 @@ informa os valores da fence; o CI Windows usa 120 s.
 | `native.capture-replay-vulkan`: efeitos `none` e `fxaa`, replay 3 passes = 12/12 scanouts, 12/12 faixas GPU, 48/48 contadores, 12/12 imagens compostas, `visual_checked`, repetível | Linux lavapipe | aprovado |
 | Mesmo teste, controles: sem EDRAM (3), vértices alterados (3), presenter sem imagem `--drop-output` → "presenter returned no composed image" em 4/4 frames (3), arquivo truncado (2) | Linux lavapipe | detectados |
 | Mesmo teste, workload pesado com submissão desligada, ociosa e enfileirada (7 → 8 → 9 submissões/frame) | Linux lavapipe | equivalentes, repetíveis |
-| `native.d3d12-commands`: estado efetivo de 13 draws idêntico com e sem filtro (regras de invalidação estritas, PSO diferido, compute, reset); mutação sem invalidação por root signature falha | Linux (DirectX-Headers + shim, ASan/UBSan) e Windows CI | aprovado no Linux; Windows: ver PR |
+| `native.d3d12-commands`: estado efetivo de 13 draws idêntico com e sem filtro (regras de invalidação estritas, PSO diferido, compute, reset); mutação sem invalidação por root signature falha | Linux (DirectX-Headers + shim, ASan/UBSan) e Windows CI | aprovado nos dois |
 | `native.pipeline-recording`, `native.pipeline-cold-vulkan`, `native.vulkan-components`, `sdkcheck.Native-MEMEXPORT-vulkan`, `sdkcheck.Native-FSI-sample-counts`, `sdkcheck.Native-FrameTiming` | Linux lavapipe | aprovados |
 | Build Windows x64 Release do plugin D3D12, replay, workloads e testes (toolchain fixado, sem checagem de sintaxe) | Windows CI | aprovado |
-| `native.capture-format`, `native.pipeline-recording`, `native.d3d12-commands` | Windows CI | ver PR |
+| `native.capture-format`, `native.pipeline-recording`, `native.d3d12-commands` | Windows CI (run 16, `b6c626c`) | aprovados |
 | `native.capture-replay-d3d12` | Windows WARP (CI) | **não executável no WARP: pulado com motivo** (abaixo) |
 | Sessão de captura (`native_capture_session.py`) com título simulado: gatilho, detecção do arquivo completo, replay equivalente e A/B de 5 braços | Linux | aprovado (sem jogo real) |
 
