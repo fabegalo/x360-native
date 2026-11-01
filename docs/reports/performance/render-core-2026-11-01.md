@@ -48,7 +48,7 @@ D3D12/Vulkan; com os cvars vazios ele nem é instalado (custo zero).
   resolução 1 (recusa explícita).
 - **Capturas contêm dados do título: somente em `.local/`, nunca no Git.**
 
-### Formato `X360NFC1` versão 2 e validação
+### Formato `X360NFC1` versão 3 e validação
 
 Cabeçalho de 80 bytes; registros `{u32 tipo, u64 tamanho, payload}`. Antes de
 qualquer chamada ao renderer, `capture::ValidateFile` percorre o arquivo
@@ -60,8 +60,17 @@ tamanho válidos e declarado antes do draw, enumerações (primitiva, propósito
 formato/endian de índices, origem de sync, efeito pós), LUT com 256 ou 384
 entradas conforme o formato, overlay coerente, dimensões ≤ 8192/16384 e pares
 largura/altura e aspecto consistentes, número de frames igual ao cabeçalho.
-Versão 1, magia errada, escala fora de 1–4, nome de backend sem terminador,
-truncamento em qualquer byte e corrupção são recusados com código 2.
+Versões 1 e 2, magia errada, escala fora de 1–4, nome de backend sem
+terminador, truncamento em qualquer byte e corrupção são recusados com código 2.
+
+**Imagem composta obrigatória (versão 3).** Antes, se `CaptureGuestOutput()`
+falhasse, o present era gravado sem saída e o replay pulava a checagem visual
+em silêncio. Agora: a captura é interrompida e o arquivo apagado quando o
+presenter não devolve imagem completa (erro "Native frame capture rejected" no
+log); o writer recusa present sem saída; o decodificador exige largura/altura
+não nulas; o hash da imagem (`HashRgbxImage`) recusa imagem vazia, truncada,
+com stride menor que a linha ou acima de 16384 — nunca compara menos linhas —
+e cobre só RGB (o byte X é indefinido).
 
 ## Replay determinístico (`x360n_native_replay`)
 
@@ -80,9 +89,21 @@ todos os resultados; passes diferentes entre si = **não repetível**. Saída
 diferenças, `per_frame`). Códigos: 0 = equivalente e repetível, 2 = arquivo
 inválido, 3 = diferença ou não repetível.
 
-Controles negativos (só diagnóstico): `--skip-edram` (não restaura a EDRAM) e
-`--tamper-memory N` (altera 16 bytes do N-ésimo registro de memória).
+No replay, um presenter que não devolve imagem (ou devolve imagem inválida)
+conta como diferença ("presenter returned no composed image"), e
+`equivalent` exige uma checagem visual por frame (`visual_checked`).
+`--no-present` não confere a imagem: `replay.json` diz
+`"visual_checked":false` e o A/B recusa essa execução.
 
+Tempo de frame no replay: do fim das checagens do frame anterior até o fim do
+present — alimentação das chamadas gravadas mais o renderer. As checagens do
+próprio replay (hashes, leitura da imagem do presenter) ficam fora.
+
+Controles negativos (só diagnóstico): `--skip-edram` (não restaura a EDRAM),
+`--tamper-memory N` (altera 16 bytes do N-ésimo registro de memória) e
+`--drop-output` (simula presenter sem imagem).
+
+`replay.json` traz P50/P95/P99 (posto mais próximo) do frame aquecido.
 `per_frame` (com `--stats`): médias dos passes aquecidos de frame, renderer e
 cada fase (draw, resolve, sync, contadores, present, shaders), draws, resolves,
 syncs, submissões, esperas e tempo de fence, GPU ocupada/ociosa e o gargalo
@@ -108,35 +129,104 @@ de novo para a própria cópia; agora tem readback próprio (5 → 4 esperas por
 frame, determinístico; tempo sem ganho confirmado: razão 0,955 [0,771; 1,081]).
 Dados: [JSON](render-core-2026-11-01.json).
 
-### D3D12 e Vulkan: submissão antecipada com a GPU ociosa (`native_eager_submit`)
+### D3D12 e Vulkan: submissão antecipada (`native_eager_submit`, `native_eager_submit_depth`)
 
 Gargalo comprovado pelo replay: no workload pesado (`--draws 1024 --resolves
 8`), `per_frame.bottleneck = guest_syncs_and_counters`, GPU ociosa ~37 ms do
 frame enquanto a CPU gravava trabalho que só era submetido na próxima
-sincronização — o mesmo padrão do Skate 3 no RENDER-FINAL (GPU ociosa 42 ms).
-Mudança: quando há `native_eager_submit` draws gravados (um resolve conta como
-o limiar inteiro) e a última submissão já terminou, a lista é submetida. Ordem
-e conteúdo do trabalho GPU não mudam; no D3D12 a causa aparece como `eager=` no
-log de `native_stats`.
+sincronização — o mesmo padrão do Skate 3 no RENDER-FINAL (RTX 4070: fila GPU
+ocupada 12,6–14,8 ms, esperas de fence 11,8–13,9 ms, ociosa 42 ms; CPU e GPU
+serializadas).
+
+Duas estratégias, as duas sem mudar ordem, barreiras nem sincronizações
+visíveis ao guest (só acrescentam fronteiras de submissão):
+
+- **ociosa** (`native_eager_submit=N`, `depth=0`): após N draws gravados (um
+  resolve conta como N), submete se a fila já terminou tudo;
+- **enfileirada** (`depth=1`): submete também com uma submissão ainda em
+  execução, para a GPU receber o próximo lote antes de esvaziar. Com três
+  arenas de gravação, a arena reutilizada é sempre a de uma submissão mais
+  antiga: a CPU nunca bloqueia nisso (valores maiores são limitados a 1).
 
 Equivalência: `native.capture-replay-*` grava o workload pesado e o reproduz
-com `native_eager_submit=0` e `=1` (o mais agressivo): os dois equivalentes e
-repetíveis em 3 passes, e o braço `1` precisa submeter mais (lavapipe: 7 → 8
-submissões por frame).
+desligado, ocioso em 1 e enfileirado em 1: todos equivalentes e repetíveis, e
+cada braço submete mais que o anterior (lavapipe: 7 → 8 → 9 por frame).
 
-A/B no mesmo `.x360nfc` (`scripts/performance/native_replay_ab.py`, ordem
-alternada, todas as execuções equivalentes), lavapipe, 4 CPUs, `0` vs `64`:
+A/B no mesmo `.x360nfc` (`native_replay_ab.py`, 6 rodadas em ordem rotativa ×
+4 passes aquecidos, todas as execuções equivalentes e com checagem visual),
+lavapipe, 4 CPUs, 1024 draws + 8 resolves:
 
-| Workload | Pares | GPU ociosa | Fence (ms) | Frame aquecido | Razão pareada |
-|---|---:|---|---|---|---|
-| 1024 draws + 8 resolves | 7 | 37,6 → 23,5 ms | 53,8 → 52,9 | 90,8 → 89,0 ms | 0,98 [0,88; 1,14] |
-| 256 draws + 4 resolves | 9 | 12,8 → 10,5 ms | 38,0 → 43,9 | 49,3 → 56,5 ms | 1,06 [1,02; 1,21] |
+| Braço | Frame P50/P95/P99 (ms) | CPU do renderer (ms) | GPU ociosa (ms) | Razão pareada [IC 95%] |
+|---|---|---:|---:|---|
+| desligado (referência) | 91,4 / 117,6 / 123,5 | 33,8 | 36,6 | — |
+| desligado, A/A (ruído) | 89,7 / 115,2 / 137,3 | 34,1 | 37,0 | 1,004 [0,925; 1,107] |
+| ocioso, 64 | 94,7 / 111,4 / 129,5 | 34,8 | 22,5 | 1,03 [0,95; 1,13] inconclusivo |
+| enfileirado, 64 | 149,5 / 187,1 / 201,7 | 109,4 | 23,0 | **1,66 [1,49; 1,76] mais lento** |
 
-A ociosidade da GPU cai como previsto, mas no lavapipe a "GPU" usa as mesmas
-CPUs que gravam os comandos e o frame não encurta (piora no workload menor).
-**Por isso `native_eager_submit` fica 0 (desligado) por padrão**; 64 é o valor
-candidato para o A/B em GPU real com capturas do Skate 3 (comando abaixo). Sem
-afirmação de ganho. Dados: [JSON](render-core-eager-submit-2026-11-01.json).
+A ociosidade cai nos dois, mas no lavapipe a "GPU" roda nas mesmas CPUs que
+gravam os comandos: sobrepor as duas multiplica o tempo de CPU do renderer.
+**As duas estratégias ficam desligadas por padrão** (regra: nenhuma
+configuração com regressão medida é ativada). O efeito numa GPU real, onde a
+execução não disputa a CPU, só pode ser decidido pelo A/B do Skate 3 na
+RTX 4070 (comando abaixo, braços off/idle64/queued64/idle256/queued256).
+Dados: [JSON](render-core-eager-submit-2026-11-01.json).
+
+### D3D12: estado gráfico redundante e busca de PSO sem alocação
+
+Cada draw D3D12 reespecificava todo o estado (heaps, root signature, PSO,
+argumentos de root, viewport, scissor, topologia, índice, render targets) e
+procurava o PSO num `std::map` com chave `std::string` de uma cópia da
+descrição inteira (alocação e comparações de centenas de bytes por draw). No
+Skate 3 a fase "estado/constantes" custava ~9,3 ms/frame e o draw na CPU
+6–7 µs por draw (RENDER-FINAL).
+
+`D3D12Commands` agora não grava estado igual ao que a lista já tem. Regras
+D3D12 preservadas: root signature diferente invalida os argumentos; heaps
+diferentes invalidam as tabelas; o PSO é compartilhado com compute (dispatches
+atualizam o cache); reset da lista limpa tudo; a gravação diferida repete a
+mesma ordem. PSOs ficam num hash map com chave de tamanho fixo, e um draw
+com a mesma descrição do anterior reutiliza a entrada sem hash.
+Microbenchmark só da busca (descrição D3D12 de 656 bytes, 400 PSOs, 2800
+draws com troca a cada ~4, melhor de 30, contêiner desta nuvem): 127 ns por
+draw com `std::map<std::string>`, 87 ns com chave fixa, 42 ns com a checagem
+do anterior (~0,24 ms por frame de 2800 draws).
+`native_redundant_state_filter=false` grava tudo (A/B, diagnóstico) e
+`native_stats` informa as chamadas evitadas (`redundant_state_skipped`).
+
+Prova de equivalência: `native.d3d12-commands` compara o estado efetivo de
+cada draw com e sem filtro numa lista falsa com as regras de invalidação mais
+estritas (PSO diferido, compute no meio, reset); retirar a invalidação por
+root signature faz o teste falhar (draws 5–7). O contrato D3D12 de
+captura/replay reproduz a captura pesada também com o filtro desligado.
+Tempo: A/B informativo no WARP do CI (filtro on/off, mesmos frames) — ver
+"Testes"; sem medição em GPU real.
+
+### Vulkan: constantes por draw e descriptor set reutilizados
+
+Cada draw Vulkan enviava os cinco buffers de constantes e alocava e escrevia
+um descriptor set novo (no lavapipe, alocação/reset de descriptors foi ~38%
+das amostras da thread do renderer, por amostragem de pilhas com gdb). Como o
+`DrawConstants` do D3D12 (commit `86c70bb`, RENDER-FINAL: −15% de CPU por
+draw no Skate 3), um buffer cujos bytes finais são iguais aos do draw
+anterior na mesma arena reutiliza o upload, e com os cinco iguais o descriptor
+set anterior é ligado de novo. O cache é limpo com a arena dona dos uploads e
+do pool.
+
+Mesmos frames, build antes/depois, lavapipe (1024 draws + 8 resolves,
+sintético, todas as execuções equivalentes): CPU do renderer 33,98 → 32,54 ms e
+33,59 → 31,93 ms por frame em duas rodadas (7 e 9 pares); frame 0,90
+[0,87; 0,95] e 0,94 [0,88; 1,04] contra A/A de 0,94 e 1,00 — **redução de CPU
+repetida, ganho de tempo de frame não comprovado**. O workload repete as
+mesmas constantes (melhor caso). Dados:
+[JSON](render-core-vulkan-constants-2026-11-01.json).
+
+### D3D12: limite de espera de fence configurável
+
+O renderer e o scanout lançavam erro após 5 s fixos de espera. O WARP compila
+os shaders ROV traduzidos no primeiro uso e o primeiro frame do CI excedia
+esse limite ("render GPU timeout"), sem distinguir lentidão de travamento.
+`native_gpu_timeout_ms` (padrão 5000, mínimo 1000) define o limite e o erro
+informa os valores da fence; o CI Windows usa 120 s.
 
 ## Testes
 
@@ -159,49 +249,45 @@ texturas são gravadas pelos bindings (conservador); a decisão de visibilidade
 do CP é gravada, não reexecutada; o replay não mede o PM4 nem a CPU do título;
 WARP e lavapipe não representam o desempenho de GPU real.
 
-## Skate 3 no Windows (D3D12, GPU real) — teste local
+## Skate 3 no Windows/RTX 4070 (D3D12) — teste local
 
-Build (o `|` não pode ir num argumento de `devshell.cmd`: um `-R` por chamada):
+Nada abaixo foi executado nesta nuvem (sem GPU real e sem o jogo): **nenhum
+FPS é aprovado por esta entrega**. Build (um `-R` por chamada: `devshell.cmd`
+transforma `|` em pipe):
 
 ```powershell
 scripts\devshell.cmd cmake --build --preset win-amd64-release --target rexgpu-native x360n_native_replay x360n_native_frame_probe x360n_native_pipeline_tests
 scripts\devshell.cmd ctest --preset win-amd64-release -R "native[.]capture" --output-on-failure
+scripts\devshell.cmd ctest --preset win-amd64-release -R "native[.]d3d12-commands" --output-on-failure
 ```
 
-Sessão com perfil ao vivo e captura de **3 frames** por gatilho (mesmo preparo/
-seed do RENDER-FINAL; acrescentar aos argumentos do cenário de
-`benchmark-runtime.ps1` ou à linha de comando do executável):
-
-```text
---gpu_plugin=native --gpu_backend=d3d12 --native_stats=true
---native_frame_profile=.local\captures\skate3\live-frames.csv
---native_capture=.local\captures\skate3\street.x360nfc
---native_capture_trigger=.local\captures\skate3\go
---native_capture_frames=3
-```
-
-Com a cena da rua na tela: `New-Item .local\captures\skate3\go`. O log registra
-"recording after present N" e o tamanho final; `capture_ms` mostra o custo da
-gravação, separado de `outside_ms`.
-
-Replay repetido, sem o jogo:
+Captura, validação e A/B numa sessão (o executável AOT do Skate 3 precisa
+incluir o plugin deste build; seed congelado do RENDER-FINAL; tudo fica em
+`.local\captures`):
 
 ```powershell
-.local\build\win-amd64\src\native\Release\x360n_native_replay.exe .local\captures\skate3\street.x360nfc .local\captures\skate3\replay-d3d12 --backend d3d12 --repeat 30 --stats native_stats=true
+python scripts\performance\native_capture_session.py --exe .local\build\titles\skate_3\skate_3.exe --game-data-root <pasta do jogo usada no cenário> --user-seed .local\perf-gpu-pr9\seed-skate --out .local\captures\skate3\street-1 --trigger-on-enter --frames 3 --ab --title-arg=--mnk_mode=true
 ```
 
-`replay.json`: `"equivalent":true`, `"repeatable":true` e `per_frame` com
-draws, resolves, submissões, esperas de fence, GPU ocupada/ociosa e
-`bottleneck`. Replay muito mais rápido que `live-frames.csv` = gargalo fora do
-renderer (`outside_ms`).
+O script inicia o jogo com Native D3D12, perfil ao vivo e captura armada;
+com a cena da rua na tela, Enter inicia a captura de 3 frames (ou
+`--trigger-after SEGUNDOS` / `--skip-presents N` sem intervenção). Ele espera
+o arquivo completo, fecha o jogo após `--profile-seconds`, reproduz a captura
+10 vezes exigindo equivalência com checagem visual e roda o A/B dos braços
+off, idle64, queued64, idle256 e queued256 nos mesmos frames.
+`session.json` guarda argumentos e SHA-256 do executável, DLLs e captura.
 
-A/B da submissão antecipada nos mesmos frames (mesmo build, um braço com a
-mudança desligada; para dois builds, `--baseline`/`--candidate` diferentes):
+Leitura: `replay\replay.json` (`per_frame`: draws, resolves, submissões,
+fence, GPU ocupada/ociosa, `bottleneck`) e `ab-submission.json` (P50/P95/P99,
+CPU do renderer, GPU, razão pareada com IC 95% e veredito). Uma estratégia só
+pode virar padrão com veredito "faster" e sem piora de P95/P99.
+
+A/B de dois builds (por exemplo antes/depois do filtro de estado) nos mesmos
+frames:
 
 ```powershell
-python scripts\performance\native_replay_ab.py --baseline .local\build\win-amd64\src\native\Release --candidate .local\build\win-amd64\src\native\Release --capture .local\captures\skate3\street.x360nfc --output .local\captures\skate3\ab-eager-submit.json --backend d3d12 --rounds 7 --repeat 10 --cvar native_stats=true --baseline-cvar native_eager_submit=0 --candidate-cvar native_eager_submit=64
+python scripts\performance\native_replay_ab.py --capture .local\captures\skate3\street-1\frames.x360nfc --output .local\captures\skate3\ab-builds.json --backend d3d12 --rounds 7 --repeat 10 --arm base <dir do build base> --arm candidate .local\build\win-amd64\src\native\Release
 ```
 
-O script aborta (código 3) se qualquer execução divergir da captura. Ligar
-`native_eager_submit` por padrão só se a razão pareada do frame ficar abaixo
-de 1 com intervalo que não inclua 1, e o A/A do mesmo build mostrar o ruído.
+E o filtro de estado ligado/desligado no mesmo build:
+`--arm unfiltered <dir> native_redundant_state_filter=false --arm filtered <dir>`.
