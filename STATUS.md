@@ -65,6 +65,16 @@ reais agora compilam e rodam em Linux; `scripts/bootstrap.sh`, presets POSIX e
 Windows. Build completo Linux x64: 9 min 39 s em 4 CPUs.
 [Relatório e validação local](docs/reports/performance/perf-gpu-02-2026-10-31.md).
 
+31/10 — **Dashboard 17559 voltou a passar da intro (0249)**: desde 0241, toda
+sessão fechava ao fim da intro com escrita em `30001002`, em Native e Xenos.
+`AllocRange` arredondava para cima o limite superior inclusivo e admitia a
+primeira página acima da faixa comum. A reserva top-down do heap do bootanim
+caía em `2FD01000-30001000`, sem alinhamento a 64 KiB, e o `RtlFreeHeap`
+original escrevia além dela. Teste base falha; patch passa 55 + 594 asserções
+focadas e 173 do SDK. Sessão reconstruída chegou à entrada da dashboard;
+navegação e lançamento de títulos não foram revalidados. Relação com o
+`C0000374` do Skate 3 não verificada.
+
 31/10 — **Skate 3, AOT genérico em validação**: Skate e EAWebkit importados e
 preparados em Windows x64, com recibo final emitido. Correções compartilhadas
 de emissão/fronteiras indiretas e MSR (0237–0240); 0241 reutiliza lacunas baixas

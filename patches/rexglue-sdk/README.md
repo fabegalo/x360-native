@@ -2596,3 +2596,25 @@ The regression drives real ImGui frames with a CPU recording drawer: the
 baseline fails because the idle toast keeps the dialog list non-empty. No
 game or Guide session was run for this change and no FPS gain is claimed;
 execution results are recorded in the RENDER-FINAL report.
+
+### 0249 — keep the inclusive heap allocation limit
+
+`BaseHeap::AllocRange` rounded its inclusive high bound up to the alignment,
+so `Alloc` admitted the first page above the ordinary range: `0x30000000` in
+the 4 KiB heap and `0x70000000` in the 64 KiB heap. The system objects used to
+occupy `0x30000000` and hid this; after 0241 that page became free. The 17559
+`bootanim.xex` heap then received the top-down `NtAllocateVirtualMemory`
+reservation `0x300000` at `2FD01000-30001000` instead of `2FD00000-30000000`.
+Its original 64 KiB segment arithmetic (`RtlFreeHeap` → `0x98046A50` on intro
+teardown) wrote at `30001002`, an unhandled access violation that closed the
+dashboard after the intro with both Native and Xenos. The bound is now clamped
+without rounding up, as `PhysicalHeap::AllocRange` already does. The pinned
+Xenia reference rounds the same way; this is a deliberate divergence.
+
+Whether the console always returns 64 KiB-aligned bases for `base=0` is not
+established; the allocation alignment is unchanged. No title or address is
+matched.
+
+`tests/sdkcheck/system_heap_layout_test.cpp` checks that top-down allocations
+end exactly at both limits, 64 KiB-aligned, with the page above left free. The
+baseline fails with `2FD01000` and `70000000`.
