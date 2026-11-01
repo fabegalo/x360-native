@@ -75,6 +75,14 @@ focadas e 173 do SDK. Sessão reconstruída chegou à entrada da dashboard;
 navegação e lançamento de títulos não foram revalidados. Relação com o
 `C0000374` do Skate 3 não verificada.
 
+01/11 — **Preparações voltaram a configurar o SDK após a tag v1.28.8 (0251)**:
+o SDK lia a versão do `git describe` no repositório consumidor
+(`cmake/sdk/shared`, dentro do x360-native). A primeira tag estável do projeto
+fez toda preparação nova abortar em `sdk-configure` com "floor version (0.10)
+is behind tag version (1.28)" (Superman Returns, 13:00). Agora o SDK lê o
+próprio repositório e reporta `0.10.0 (release)`; `sdkcheck.sdk-version-source`
+falha no baseline com o mesmo erro. Títulos já preparados precisam repreparar.
+
 01/11 — **Skate 3: entrada referenciada `8246CED8` voltou a ser emitida (0250)**:
 após minutos de jogo, uma chamada indireta via tabela em `.rdata` caía num
 endereço não registrado. Dois ajustadores de contagem sem PDATA (`mfmsr`/

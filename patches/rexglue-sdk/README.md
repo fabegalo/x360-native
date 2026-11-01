@@ -2649,3 +2649,24 @@ from instructions written for the test, with no title bytes. The baseline fails 
 register the second entry; controls with an undecodable word or PDATA-owned
 bytes stay unregistered. On Skate 3 `default.xex`, the GapFill phase now
 registers `8246CEA0` and `8246CED8` as separate 0x38-byte entries.
+
+### 0251 — resolve the SDK version from its own repository
+
+`rex_resolve_version` runs `git describe` in `SOURCE_DIR`, which defaults to
+`CMAKE_SOURCE_DIR`. Added as a subdirectory, that is the consumer: here the
+shared SDK is configured from `cmake/sdk/shared` inside x360-native. While the
+project had only hyphenated preview tags, which the call excludes, the SDK fell
+back to `0.10.0.0-dev.unknown`. The first stable project tag, `v1.28.8`, made
+it read 1.28 and abort with "floor version (0.10) is behind tag version
+(1.28)", so every new preparation failed at `sdk-configure`.
+
+The SDK's own call now passes `SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}"`. A
+full SDK clone, as `prepare-tools.ps1` makes and this checkout has, reports its
+exact tag `0.10.0`; a clone without tags keeps the upstream fallback. Upstream
+still defaults to `CMAKE_SOURCE_DIR` (`docs/architecture.md` §7.1).
+
+`sdkcheck.sdk-version-source` (`tests/sdkcheck/sdk_version_source_test.cmake`)
+evaluates the call exactly as written in the SDK `CMakeLists.txt`, from a
+consumer repository tagged above the floor with a commit after the tag. It
+expects the SDK tag, and the fallback for an untagged SDK repository. The
+baseline aborts with the floor error.

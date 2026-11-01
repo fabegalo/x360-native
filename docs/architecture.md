@@ -223,11 +223,13 @@ diferentes têm executáveis diferentes. Pinyon Shift faz o mesmo
 
 ## 7. Problemas conhecidos no SDK v0.10.0 (observados aqui)
 
-1. **Versão errada em modo submódulo**: `rex_resolve_version()` usa
-   `CMAKE_SOURCE_DIR` (`cmake/rex_version.cmake`), que é o nosso repositório;
-   resultado `0.10.0.0-dev.unknown`. Se este repositório tiver uma tag `vX.Y`
-   maior que 0.10, o configure do SDK aborta. Correção sugerida upstream: passar
-   `SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}`.
+1. **Versão errada em modo submódulo** (corrigido localmente pelo patch 0251):
+   `rex_resolve_version()` usa `CMAKE_SOURCE_DIR` (`cmake/rex_version.cmake`),
+   que é o nosso repositório; resultado `0.10.0.0-dev.unknown`. A tag `v1.28.8`
+   deste repositório (01/11) fez o configure do SDK abortar em toda preparação.
+   O 0251 passa `SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}`; o SDK agora reporta
+   `0.10.0`, ou o fallback `dev.unknown` num clone sem tags. Upstream ainda
+   usa `CMAKE_SOURCE_DIR`.
 2. **`unit_tests` não compila** sem o backport D4 (corrigido upstream em `b5e0cf8`).
 3. **Teste `unit.Depfile escapes characters make treats as syntax` falha**: o
    literal `"has\ space.toml"` (`tests/unit/codegen/output_stamp_test.cpp:227-228`)

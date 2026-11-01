@@ -260,8 +260,8 @@ int Doctor(const ProjectPaths& p, const std::string& config, const fs::path& sdk
       fail(fmt::format("rexglue --version failed ({}): {}", DescribeExitCode(c.exit_code), v));
     } else if (v.find("dev.unknown") != std::string::npos) {
       warn("rexglue --version reports '" + v +
-           "': known issue, rex_resolve_version() reads git tags from CMAKE_SOURCE_DIR (this "
-           "repo) in submodule mode; the real pin is " X360N_SDK_TAG_LOCKED);
+           "': the SDK checkout has no reachable release tag (a clone without tags); the "
+           "real pin is " X360N_SDK_TAG_LOCKED);
     } else {
       ok("rexglue --version: " + v);
     }

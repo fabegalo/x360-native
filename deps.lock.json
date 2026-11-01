@@ -503,7 +503,7 @@
       },
       "files": {
         "cmake/rexglue_helpers.cmake": "9b4a5408eb1e363be24e509f5b091ae13c48ff827f53020b49deac4472dfbec4",
-        "CMakeLists.txt": "92c180ed4a4f8c3c2ded043733b8365c356f16746bd64b34860e1ab7af578ae7"
+        "CMakeLists.txt": "6e1f7b52bc060f521ff69385cd49026c33ff170c91c99101146829961c5324c6"
       },
       "test": "C5: isolated parallel SDK builds and one atomic staging producer per destination"
     },
@@ -941,7 +941,7 @@
     {
       "test": "sdkcheck.Performance counters are optional and preserve concurrent totals",
       "files": {
-        "CMakeLists.txt": "92c180ed4a4f8c3c2ded043733b8365c356f16746bd64b34860e1ab7af578ae7",
+        "CMakeLists.txt": "6e1f7b52bc060f521ff69385cd49026c33ff170c91c99101146829961c5324c6",
         "include/rex/perf/counter.h": "c8820222ffe4c5c639269d949c8be9326a78ab046ad2abf6405ab891835716fc",
         "src/core/perf/counter.cpp": "df95e01382113fcd10e5698b8f6985f7d14486a834e542be95dfc1e59b611268",
         "src/graphics/command_processor.cpp": "e2b42d5012046917f5383f8d0c0eefa9885419246d0c8f085ea178c30cc34792",
@@ -3526,6 +3526,17 @@
     "src/codegen/phase_gapfill.cpp": "49f148fce87ae19883db793f9db4f77550a5c7c6f9d597066c9bf9bf16301722"
   },
   "test": "tests/sdkcheck/adjacent_referenced_entry_test.cpp: two PDATA-less mfmsr/mtmsrd + lwarx/stwcx. adjusters ending in bctr, named only from .rdata; the second (0x82010078) is an entry and registered, controls with an undecodable word or PDATA-owned bytes stay unregistered. Skate 3 default.xex analysis registers 8246CED8 (0x38 bytes) after GapFill; the region-bounded baseline did not."
+},
+{
+  "file": "patches/rexglue-sdk/0251-resolve-sdk-version-from-its-own-repository.patch",
+  "sha256": "d2681588083440b35f79961dbc52825df389a7e0785cfb9d5de6f81f61f93cac",
+  "base_files": {
+    "CMakeLists.txt": "92c180ed4a4f8c3c2ded043733b8365c356f16746bd64b34860e1ab7af578ae7"
+  },
+  "files": {
+    "CMakeLists.txt": "6e1f7b52bc060f521ff69385cd49026c33ff170c91c99101146829961c5324c6"
+  },
+  "test": "sdkcheck.sdk-version-source (tests/sdkcheck/sdk_version_source_test.cmake): the SDK's own rex_resolve_version call, run from a consumer repository tagged above the floor with a commit after the tag, resolves the SDK's exact tag (0.10.0) and, for an untagged SDK repository, the 0.10.0.0-dev.unknown fallback. The baseline aborts with 'floor version (0.10) is behind tag version (99.0)', as every preparation did after x360-native tagged v1.28.8."
 }
 ]
 },
