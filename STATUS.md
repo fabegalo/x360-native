@@ -1,5 +1,16 @@
 # STATUS
 
+01/11 — **RENDER-CORE: captura, replay e perfil por frame do Native**: o
+decorador opt-in de `ScanoutBackend` grava frames (chamadas, registradores,
+memória lida, EDRAM inicial) e `x360n_native_replay` os reproduz sem o título
+em D3D12 ou Vulkan, conferindo scanout, memória escrita pela GPU e contadores;
+`native_frame_profile` registra por frame o tempo dentro/fora do renderer,
+submissões, fences e GPU. Linux/lavapipe: equivalência em 3 passes e controle
+negativo sem EDRAM detectado. Vulkan: leitura de contadores sem drenar
+resolves antes (5 → 4 esperas/frame, tempo sem ganho confirmado). D3D12 só
+checado por sintaxe; otimização estrutural D3D12 pendente da captura de Skate 3.
+[Relatório e comandos](docs/reports/performance/render-core-2026-11-01.md).
+
 31/10 — **RENDER-FINAL, Windows x64**: Native D3D12 reutiliza SRVs por arena,
 lê índices compatíveis da memória GPU residente e reaproveita uploads de
 constantes idênticas; Native Vulkan também lê índices residentes. Xenos
