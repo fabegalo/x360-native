@@ -31,10 +31,12 @@ struct ProjectPaths {
   std::filesystem::path sdk_out() const { return sdk() / "out"; }
 };
 
-// Builds the shared SDK under a short, isolated path. Windows CMake/SDL3
-// nested try_compile paths can exceed Ninja's legacy path limit even when
-// normal file I/O supports long paths. User content and AOT title builds stay
-// in the project's original directories.
+// User-local, persistent, per-installation build owner. Windows uses a short
+// path outside the installation to avoid SDL3's nested CMake try_compile limit.
+// Linux/macOS keep their existing project-local shared-SDK build owner.
+std::filesystem::path SharedSdkBuildRoot(const ProjectPaths& paths);
+// A unique, short generation inside the shared SDK owner. Source, game data,
+// title outputs, and verified receipts retain their established locations.
 std::filesystem::path SharedSdkGenerationPath(const ProjectPaths& paths,
                                               const std::string& generation_id);
 
