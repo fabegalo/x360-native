@@ -19,16 +19,23 @@
 #include <optional>
 #include <unordered_map>
 #include <vector>
+namespace rex::ui { struct RawImage; }
 namespace x360n::native {
 struct FrameStats {
   uint64_t frame = 0;
   double frame_ms = 0, backend_ms = 0, draw_ms = 0, resolve_ms = 0, sync_ms = 0, sample_ms = 0, present_ms = 0, shader_ms = 0;
+  // Overhead of this decorator inside the frame, never charged to the title,
+  // the command processor or the renderer: recording (hashing, file writes,
+  // EDRAM snapshot, presenter readback) and the profile row of the last frame.
+  double capture_ms = 0, profile_ms = 0;
   uint64_t draws = 0, resolves = 0, guest_syncs = 0, packet_reads = 0, sample_reads = 0, shaders = 0;
   BackendCounters counters;  // Delta over the frame.
 };
 // Shared by the live profile and replay: the CSV columns of one frame.
 std::string FrameStatsCsvHeader();
 std::string FrameStatsCsvRow(const FrameStats&);
+// The presenter's composed output: rows only (stride padding excluded) and size.
+capture::Hash HashImage(const rex::ui::RawImage&);
 BackendCounters operator-(const BackendCounters& later, const BackendCounters& earlier);
 
 class CaptureBackend final : public ScanoutBackend {
@@ -72,13 +79,23 @@ class CaptureBackend final : public ScanoutBackend {
     CaptureBackend& self; double& total; Clock::time_point start = Clock::now();
     ~Scope();
   };
+  // Recording work: charged to capture_ms only; nested scopes count once.
+  struct CaptureWork {
+    explicit CaptureWork(CaptureBackend& owner) : self(owner) { ++self.capture_depth_; }
+    ~CaptureWork();
+    CaptureBackend& self; Clock::time_point start = Clock::now();
+  };
+  unsigned capture_depth_ = 0;
   struct ShaderInfo { uint32_t id, type; std::vector<uint32_t> words; bool emitted = false; };
   bool recording() const { return writer_ != nullptr; }
   void StartRecording();
   void FinishRecording();
   void EmitRegisters(const rex::graphics::RegisterFile&);
   uint32_t EmitShader(rex::graphics::Shader*);
+  // Records guest bytes a call reads, except pages that hold GPU results.
   void EmitRange(uint32_t address, uint32_t length);
+  void EmitRun(uint32_t address, uint32_t length);
+  void MarkGpuWritten(uint32_t address, uint32_t length);
   void EmitDrawInputs(const rex::graphics::RegisterFile&, rex::graphics::Shader*, rex::graphics::Shader*,
                       const DrawIndices*, DrawPurpose);
   void EndProfileFrame();
@@ -101,6 +118,10 @@ class CaptureBackend final : public ScanoutBackend {
   std::unique_ptr<uint32_t[]> registers_;
   std::map<std::pair<uint32_t, uint32_t>, capture::Hash> emitted_ranges_;
   std::vector<std::pair<uint32_t, uint32_t>> written_ranges_;
+  // Pages written by resolves/MEMEXPORT since recording began; hashed at each
+  // frame end (after publication) to recognize later CPU writes.
+  struct GpuPage { bool hashed = false; capture::Hash hash{}; };
+  std::unordered_map<uint32_t, GpuPage> gpu_pages_;
   std::unordered_map<const rex::graphics::Shader*, bool> memexport_known_;
 };
 }

@@ -1,17 +1,20 @@
 #include "frame_replay.h"
 #include "../memory/physical_write.h"
+#include <rex/chrono/frame_layout.h>
 #include <rex/graphics/register_file.h>
 #include <rex/system/xmemory.h>
+#include <rex/ui/presenter.h>
 #include <fmt/format.h>
+#include <xxhash.h>
 #include <chrono>
 namespace x360n::native {
 using namespace rex::graphics;
 using capture::Record;
-using capture::Word;
 namespace {
 using Clock = std::chrono::steady_clock;
 double Ms(Clock::duration d) { return std::chrono::duration<double, std::milli>(d).count(); }
-bool Recorded(const capture::Hash& hash) { return hash[0] || hash[1]; }
+static_assert(unsigned(kGuestSyncSources) == 5, "capture_format.cpp validates GuestSync against 5 sources");
+ScanoutTexture Texture(const uint32_t* f) { return {f[0], f[1], f[2], f[3], f[4], f[5], f[6], f[7], f[8] != 0}; }
 }
 void EnsurePhysicalAllocated(rex::memory::Memory& memory, uint32_t address, uint32_t length) {
   if (!length) return;
@@ -37,6 +40,8 @@ void EnsurePhysicalAllocated(rex::memory::Memory& memory, uint32_t address, uint
 }
 ReplayResult ReplayCapture(capture::Reader& reader, ScanoutBackend& backend, rex::memory::Memory& memory,
                            const ReplayOptions& options) {
+  // Every record is decoded and range-checked before the renderer sees one.
+  capture::ValidateFile(reader, RegisterFile::kRegisterCount);
   ReplayResult result;
   auto regs = std::make_unique<RegisterFile>();
   std::vector<Shader*> shaders;
@@ -44,10 +49,13 @@ ReplayResult ReplayCapture(capture::Reader& reader, ScanoutBackend& backend, rex
   for (uint32_t pass = 0; pass < std::max(1u, options.repeat); ++pass) {
     reader.Rewind();
     std::memset(regs->values, 0, sizeof(regs->values));
+    XXH3_state_t* digest = XXH3_createState();
+    XXH3_128bits_reset(digest);
     FrameStats frame;
     BackendCounters counters = backend.Counters();
     auto frame_start = Clock::now();
     uint32_t frame_index = 0;
+    int64_t memory_index = 0;
     auto timed = [&](double& total, auto&& call) {
       const auto start = Clock::now();
       call();
@@ -55,116 +63,132 @@ ReplayResult ReplayCapture(capture::Reader& reader, ScanoutBackend& backend, rex
       total += ms;
       frame.backend_ms += ms;
     };
+    auto shader = [&](uint32_t id) -> Shader* {
+      if (id == capture::kNoShader) return nullptr;
+      if (id >= shaders.size() || !shaders[id]) throw std::runtime_error("Native replay: draw before its shader");
+      return shaders[id];
+    };
     Record type;
     const uint8_t* p;
     uint64_t size;
     while (reader.Next(type, p, size)) {
       switch (type) {
         case Record::kEdram: {
-          uint64_t blob; std::memcpy(&blob, p, 8);
-          const auto bytes = reader.blob(blob);
-          EdramSnapshot snapshot{std::vector<uint8_t>(bytes.begin(), bytes.end()), Word(p, size, 2) != 0};
-          if (!options.skip_edram) backend.WriteEdram(snapshot);
+          const auto record = capture::DecodeEdram(reader, p, size);
+          if (!options.skip_edram)
+            backend.WriteEdram({std::vector<uint8_t>(record.bytes.begin(), record.bytes.end()), record.sample_counting});
           break;
         }
         case Record::kMemory: {
-          const uint32_t address = Word(p, size, 0), length = Word(p, size, 1);
-          uint64_t blob; std::memcpy(&blob, p + 8, 8);
-          const auto bytes = reader.blob(blob);
-          if (bytes.size() != length) throw std::runtime_error("Native replay: memory record size mismatch");
-          EnsurePhysicalAllocated(memory, address, length);
+          const auto record = capture::DecodeMemory(reader, p, size);
+          EnsurePhysicalAllocated(memory, record.address, record.length);
           ++result.memory_records;
-          for (uint32_t offset = 0; offset < length;) {
-            const uint32_t page_end = std::min<uint32_t>(length, ((address + offset) | 4095u) + 1 - address);
-            uint8_t* target = memory.TranslatePhysical(address + offset);
-            if (std::memcmp(target, bytes.data() + offset, page_end - offset)) {
-              NotifyPhysicalWrite(memory, address + offset, page_end - offset);
-              std::memcpy(target, bytes.data() + offset, page_end - offset);
+          const bool tamper = memory_index++ == options.tamper_memory_record;
+          for (uint32_t offset = 0; offset < record.length;) {
+            const uint32_t end = std::min<uint32_t>(record.length, ((record.address + offset) | 4095u) + 1 - record.address);
+            uint8_t* target = memory.TranslatePhysical(record.address + offset);
+            std::vector<uint8_t> bytes(record.bytes.begin() + offset, record.bytes.begin() + end);
+            if (tamper && offset == 0) for (size_t i = 0; i < std::min<size_t>(16, bytes.size()); ++i) bytes[i] ^= 0x5A;
+            if (std::memcmp(target, bytes.data(), bytes.size())) {
+              NotifyPhysicalWrite(memory, record.address + offset, uint32_t(bytes.size()));
+              std::memcpy(target, bytes.data(), bytes.size());
               ++result.memory_pages_written;
             }
-            offset = page_end;
+            offset = end;
           }
           break;
         }
-        case Record::kRegisters: {
-          const uint32_t count = Word(p, size, 0);
-          for (uint32_t i = 0; i < count; ++i) {
-            const uint32_t index = Word(p, size, 1 + i * 2);
-            if (index >= RegisterFile::kRegisterCount) throw std::runtime_error("Native replay: register outside file");
-            regs->values[index] = Word(p, size, 2 + i * 2);
-          }
+        case Record::kRegisters:
+          for (const auto& write : capture::DecodeRegisters(p, size, RegisterFile::kRegisterCount))
+            regs->values[write.index] = write.value;
           break;
-        }
         case Record::kShader: {
-          const uint32_t id = Word(p, size, 0), type_value = Word(p, size, 1), count = Word(p, size, 2);
-          if (size != 12 + uint64_t(count) * 4) throw std::runtime_error("Native replay: shader record size");
-          if (id >= shaders.size()) shaders.resize(id + 1, nullptr);
-          if (!shaders[id]) {
-            std::vector<uint32_t> words(count);
-            std::memcpy(words.data(), p + 12, size_t(count) * 4);
-            timed(frame.shader_ms, [&] { shaders[id] = backend.LoadShader(xenos::ShaderType(type_value), words.data(), count); });
+          auto record = capture::DecodeShader(p, size);
+          if (record.id >= shaders.size()) shaders.resize(record.id + 1, nullptr);
+          if (!shaders[record.id]) {
+            timed(frame.shader_ms, [&] {
+              shaders[record.id] = backend.LoadShader(xenos::ShaderType(record.type), record.words.data(), uint32_t(record.words.size()));
+            });
             ++frame.shaders;
           }
           break;
         }
         case Record::kDraw: {
-          auto shader = [&](uint32_t id) -> Shader* {
-            if (id == capture::kNoShader) return nullptr;
-            if (id >= shaders.size() || !shaders[id]) throw std::runtime_error("Native replay: draw before its shader");
-            return shaders[id];
-          };
-          DrawIndices indices{xenos::IndexFormat(Word(p, size, 6)), xenos::Endian(Word(p, size, 7)),
-                              Word(p, size, 8), Word(p, size, 9), Word(p, size, 10)};
+          const auto d = capture::DecodeDraw(p, size);
+          DrawIndices indices{xenos::IndexFormat(d.index_format), xenos::Endian(d.index_endian), d.index_count, d.index_base, d.index_length};
+          if (d.indexed) EnsurePhysicalAllocated(memory, d.index_base, d.index_length);
           timed(frame.draw_ms, [&] {
-            backend.Draw(*regs, memory, shader(Word(p, size, 0)), shader(Word(p, size, 1)),
-                         xenos::PrimitiveType(Word(p, size, 2)), Word(p, size, 3),
-                         Word(p, size, 5) ? &indices : nullptr, DrawPurpose(Word(p, size, 4)));
+            backend.Draw(*regs, memory, shader(d.vs), shader(d.ps), xenos::PrimitiveType(d.primitive), d.count,
+                         d.indexed ? &indices : nullptr, DrawPurpose(d.purpose));
           });
           ++frame.draws;
           break;
         }
         case Record::kResolve:
+          capture::DecodeEmpty(type, size);
           timed(frame.resolve_ms, [&] { backend.Resolve(*regs, memory); });
           ++frame.resolves;
           break;
-        case Record::kCompleteGuestWrites:
-          timed(frame.sync_ms, [&] { backend.CompleteGuestWrites(GuestSync(Word(p, size, 0)), Word(p, size, 1)); });
+        case Record::kCompleteGuestWrites: {
+          const auto record = capture::DecodeCompleteGuestWrites(p, size);
+          timed(frame.sync_ms, [&] { backend.CompleteGuestWrites(GuestSync(record.source), record.opcode); });
           ++frame.guest_syncs;
           break;
-        case Record::kSyncGuestRead:
-          timed(frame.sync_ms, [&] { backend.SyncGuestRead(Word(p, size, 0), Word(p, size, 1), Word(p, size, 2)); });
+        }
+        case Record::kSyncGuestRead: {
+          const auto record = capture::DecodeSyncGuestRead(p, size);
+          timed(frame.sync_ms, [&] { backend.SyncGuestRead(record.address, record.length, record.opcode); });
           ++frame.packet_reads;
           break;
+        }
         case Record::kDrain:
+          capture::DecodeEmpty(type, size);
           timed(frame.sync_ms, [&] { backend.Drain(); });
           break;
         case Record::kReadSampleCounts: {
-          SampleCounts recorded, actual;
-          for (unsigned i = 0; i < 8; ++i) recorded[i] = Word(p, size, 1 + i);
-          timed(frame.sample_ms, [&] { actual = backend.ReadSampleCounts(Word(p, size, 0) != 0); });
+          const auto record = capture::DecodeReadSampleCounts(p, size);
+          SampleCounts actual;
+          timed(frame.sample_ms, [&] { actual = backend.ReadSampleCounts(record.flag); });
           ++frame.sample_reads;
           ++result.sample_checks;
-          if (actual != recorded) {
+          XXH3_128bits_update(digest, actual.data(), sizeof(actual));
+          if (actual != record.counts) {
             ++result.sample_mismatches;
             mismatch(fmt::format("pass {} frame {}: sample counts differ", pass, frame_index));
           }
           break;
         }
         case Record::kSetSampleCounts: {
-          SampleCounts counts;
-          for (unsigned i = 0; i < 8; ++i) counts[i] = Word(p, size, i);
-          timed(frame.sample_ms, [&] { backend.SetSampleCounts(counts, Word(p, size, 8) != 0); });
+          const auto record = capture::DecodeSetSampleCounts(p, size);
+          timed(frame.sample_ms, [&] { backend.SetSampleCounts(record.counts, record.flag); });
           break;
         }
         case Record::kPresent: {
-          const auto record = capture::Reader::ParsePresent(p, size);
-          const auto* f = record.texture;
-          const ScanoutTexture texture{f[0], f[1], f[2], f[3], f[4], f[5], f[6], f[7], f[8] != 0};
+          const auto record = capture::DecodePresent(p, size);
+          const auto texture = Texture(record.texture);
           EnsurePhysicalAllocated(memory, texture.address, texture.bytes);
-          timed(frame.present_ms, [&] { backend.CompleteFrame(texture, memory.TranslatePhysical(texture.address)); });
-          if (Recorded(record.frontbuffer)) {
+          if (options.presenter) {
+            ScanoutOverlay overlay{};
+            const void* overlay_pixels = nullptr;
+            if (record.has_overlay) {
+              const auto* o = record.overlay;
+              overlay = {Texture(o), o[9], o[10], o[11], o[12], o[13], o[14], o[15], o[16]};
+              EnsurePhysicalAllocated(memory, overlay.surface.address, overlay.surface.bytes);
+              overlay_pixels = memory.TranslatePhysical(overlay.surface.address);
+            }
+            rex::chrono::FrameLayout::SetDisplayAspect(record.aspect_x, record.aspect_y);
+            timed(frame.present_ms, [&] {
+              backend.Present(*options.presenter, texture, memory.TranslatePhysical(texture.address), record.lut.data(),
+                              record.has_overlay ? &overlay : nullptr, overlay_pixels, ScanoutPostEffect(record.post_effect));
+            });
+          } else {
+            timed(frame.present_ms, [&] { backend.CompleteFrame(texture, memory.TranslatePhysical(texture.address)); });
+          }
+          const auto frontbuffer = capture::HashBytes(memory.TranslatePhysical(texture.address), texture.bytes);
+          XXH3_128bits_update(digest, frontbuffer.data(), sizeof(frontbuffer));
+          if (capture::Recorded(record.frontbuffer)) {
             ++result.frontbuffer_checks;
-            if (capture::HashBytes(memory.TranslatePhysical(texture.address), texture.bytes) != record.frontbuffer) {
+            if (frontbuffer != record.frontbuffer) {
               ++result.frontbuffer_mismatches;
               mismatch(fmt::format("pass {} frame {}: scanout {:08X}+{} differs", pass, frame_index, texture.address, texture.bytes));
             }
@@ -172,9 +196,23 @@ ReplayResult ReplayCapture(capture::Reader& reader, ScanoutBackend& backend, rex
           for (const auto& range : record.written) {
             ++result.written_checks;
             EnsurePhysicalAllocated(memory, range.address, range.length);
-            if (capture::HashBytes(memory.TranslatePhysical(range.address), range.length) != range.hash) {
+            const auto hash = capture::HashBytes(memory.TranslatePhysical(range.address), range.length);
+            XXH3_128bits_update(digest, hash.data(), sizeof(hash));
+            if (hash != range.hash) {
               ++result.written_mismatches;
               mismatch(fmt::format("pass {} frame {}: GPU-written {:08X}+{} differs", pass, frame_index, range.address, range.length));
+            }
+          }
+          if (options.presenter && record.output_width) {
+            ++result.output_checks;
+            rex::ui::RawImage image;
+            const bool captured = options.presenter->CaptureGuestOutput(image);
+            const auto output = captured ? HashImage(image) : capture::Hash{};
+            XXH3_128bits_update(digest, output.data(), sizeof(output));
+            if (!captured || image.width != record.output_width || image.height != record.output_height || output != record.output) {
+              ++result.output_mismatches;
+              mismatch(fmt::format("pass {} frame {}: presenter output {}x{} differs from the captured {}x{}", pass,
+                                   frame_index, image.width, image.height, record.output_width, record.output_height));
             }
           }
           const auto now = Clock::now();
@@ -189,10 +227,13 @@ ReplayResult ReplayCapture(capture::Reader& reader, ScanoutBackend& backend, rex
           frame_start = Clock::now();
           break;
         }
-        default:
-          throw std::runtime_error(fmt::format("Native replay: unknown record {}", uint32_t(type)));
+        case Record::kBlob:
+          throw std::logic_error("Native replay: blob record reached the replay");
       }
     }
+    const auto value = XXH3_128bits_digest(digest);
+    XXH3_freeState(digest);
+    result.pass_digests.push_back({value.low64, value.high64});
     ++result.passes;
   }
   return result;

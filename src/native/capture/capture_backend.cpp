@@ -6,6 +6,9 @@
 #include <rex/graphics/util/draw.h>
 #include <rex/logging.h>
 #include <rex/system/xmemory.h>
+#include <rex/chrono/frame_layout.h>
+#include <rex/ui/presenter.h>
+#include <xxhash.h>
 #include <fmt/format.h>
 #include <algorithm>
 namespace x360n::native {
@@ -52,15 +55,17 @@ BackendCounters operator-(const BackendCounters& a, const BackendCounters& b) {
   return c;
 }
 std::string FrameStatsCsvHeader() {
-  return "frame,frame_ms,backend_ms,outside_ms,draws,draw_ms,resolves,resolve_ms,guest_syncs,packet_reads,sync_ms,"
+  return "frame,frame_ms,backend_ms,outside_ms,capture_ms,profile_ms,draws,draw_ms,resolves,resolve_ms,guest_syncs,packet_reads,sync_ms,"
          "sample_reads,sample_ms,shaders,shader_ms,present_ms,submissions,fence_waits,fence_wait_ms,gpu_busy_ms,counters";
 }
 std::string FrameStatsCsvRow(const FrameStats& f) {
   const auto& c = f.counters;
   // Unmeasured counters are empty fields, never zero readings.
   auto measured = [&](double value, bool valid) { return valid ? fmt::format("{:.3f}", value) : std::string(); };
-  return fmt::format("{},{:.3f},{:.3f},{:.3f},{},{:.3f},{},{:.3f},{},{},{:.3f},{},{:.3f},{},{:.3f},{:.3f},{},{},{},{},{}",
-      f.frame, f.frame_ms, f.backend_ms, std::max(0.0, f.frame_ms - f.backend_ms), f.draws, f.draw_ms, f.resolves,
+  // Outside the renderer and this decorator: PM4 decoding and waiting for the title.
+  const double outside = std::max(0.0, f.frame_ms - f.backend_ms - f.capture_ms - f.profile_ms);
+  return fmt::format("{},{:.3f},{:.3f},{:.3f},{:.3f},{:.3f},{},{:.3f},{},{:.3f},{},{},{:.3f},{},{:.3f},{},{:.3f},{:.3f},{},{},{},{},{}",
+      f.frame, f.frame_ms, f.backend_ms, outside, f.capture_ms, f.profile_ms, f.draws, f.draw_ms, f.resolves,
       f.resolve_ms, f.guest_syncs, f.packet_reads, f.sync_ms, f.sample_reads, f.sample_ms, f.shaders, f.shader_ms,
       f.present_ms, c.submissions, measured(double(c.fence_waits), c.measured),
       measured(double(c.fence_wait_ns) / 1e6, c.measured), measured(double(c.gpu_busy_ns) / 1e6, c.gpu_timed),
@@ -99,6 +104,21 @@ CaptureBackend::~CaptureBackend() {
   }
   if (profile_) std::fclose(profile_);
 }
+capture::Hash HashImage(const rex::ui::RawImage& image) {
+  XXH3_state_t* state = XXH3_createState();
+  XXH3_128bits_reset(state);
+  const uint32_t size[2]{image.width, image.height};
+  XXH3_128bits_update(state, size, sizeof(size));
+  const size_t row = size_t(image.width) * 4;
+  for (uint32_t y = 0; y < image.height && image.stride * y + row <= image.data.size(); ++y)
+    XXH3_128bits_update(state, image.data.data() + image.stride * y, row);
+  const auto hash = XXH3_128bits_digest(state);
+  XXH3_freeState(state);
+  return {hash.low64, hash.high64};
+}
+CaptureBackend::CaptureWork::~CaptureWork() {
+  if (--self.capture_depth_ == 0) self.frame_.capture_ms += Ms(Clock::now() - start);
+}
 CaptureBackend::Scope::~Scope() {
   const double ms = Ms(Clock::now() - start);
   total += ms;
@@ -106,6 +126,7 @@ CaptureBackend::Scope::~Scope() {
 }
 
 void CaptureBackend::StartRecording() {
+  CaptureWork work(*this);
   capture::Header header{};
   std::memcpy(header.magic, capture::kMagic, sizeof(header.magic));
   header.version = capture::kVersion;
@@ -122,12 +143,14 @@ void CaptureBackend::StartRecording() {
   writer_->Put(uint32_t(edram.sample_counting));
   registers_ = std::make_unique<uint32_t[]>(RegisterFile::kRegisterCount);  // Replay starts from zeros.
   emitted_ranges_.clear();
+  gpu_pages_.clear();
   for (auto& [shader, info] : shaders_) info.emitted = false;
   written_ranges_.clear();
   recorded_frames_ = 0;
   REXLOG_INFO("Native frame capture: recording after present {}", presents_);
 }
 void CaptureBackend::FinishRecording() {
+  CaptureWork work(*this);
   writer_->Finish(recorded_frames_);
   REXLOG_INFO("Native frame capture: {} frame(s), {} MiB ({} MiB guest memory) written to {}", recorded_frames_,
               writer_->bytes() >> 20, writer_->blob_bytes() >> 20, options_.capture.string());
@@ -160,6 +183,33 @@ uint32_t CaptureBackend::EmitShader(Shader* shader) {
 }
 void CaptureBackend::EmitRange(uint32_t address, uint32_t length) {
   if (!length || uint64_t(address) + length > capture::kPhysicalSize) return;
+  // Pages the GPU produced during the recording are results, not inputs: the
+  // replay must produce them itself, or every comparison would be satisfied
+  // by the recorded bytes. A page whose bytes changed after its GPU write was
+  // published (hashed at the frame end) was rewritten by the CPU: an input again.
+  const uint64_t end = uint64_t(address) + length;
+  uint64_t run = address;
+  for (uint64_t page = address & ~uint64_t(capture::kPageSize - 1); page < end; page += capture::kPageSize) {
+    auto owned = gpu_pages_.find(uint32_t(page / capture::kPageSize));
+    if (owned == gpu_pages_.end()) continue;
+    if (owned->second.hashed) {
+      const auto bytes = memory_.TranslatePhysical(uint32_t(page));
+      if (capture::HashBytes(bytes, capture::kPageSize) != owned->second.hash) {
+        gpu_pages_.erase(owned);
+        continue;
+      }
+    }
+    if (run < page) EmitRun(uint32_t(run), uint32_t(page - run));
+    run = std::max<uint64_t>(run, page + capture::kPageSize);
+  }
+  if (run < end) EmitRun(uint32_t(run), uint32_t(end - run));
+}
+void CaptureBackend::MarkGpuWritten(uint32_t address, uint32_t length) {
+  if (!length || uint64_t(address) + length > capture::kPhysicalSize) return;
+  for (uint64_t page = address / capture::kPageSize; page <= (uint64_t(address) + length - 1) / capture::kPageSize; ++page)
+    gpu_pages_[uint32_t(page)] = {};
+}
+void CaptureBackend::EmitRun(uint32_t address, uint32_t length) {
   const auto key = std::make_pair(address, length);
   auto found = emitted_ranges_.find(key);
   if (found == emitted_ranges_.end() && !Accessible(memory_, address, length)) return;
@@ -193,12 +243,16 @@ void CaptureBackend::EmitDrawInputs(const RegisterFile& regs, Shader* vs, Shader
     AddMemExportRanges(regs, *shader, known->second, exports);
   }
   for (const auto& range : exports)
-    if (range.length && range.length < capture::kPhysicalSize) written_ranges_.emplace_back(range.address, range.length);
+    if (range.length && range.length < capture::kPhysicalSize) {
+      written_ranges_.emplace_back(range.address, range.length);
+      MarkGpuWritten(range.address, range.length);
+    }
 }
 
 void CaptureBackend::Present(rex::ui::Presenter& presenter, const ScanoutTexture& texture, const void* pixels,
     const uint32_t* lut, const ScanoutOverlay* overlay, const void* overlay_pixels, ScanoutPostEffect effect) {
   if (recording()) {
+    CaptureWork work(*this);
     EmitRange(texture.address, texture.bytes);
     if (overlay) EmitRange(overlay->surface.address, overlay->surface.bytes);
   }
@@ -207,6 +261,7 @@ void CaptureBackend::Present(rex::ui::Presenter& presenter, const ScanoutTexture
     inner_->Present(presenter, texture, pixels, lut, overlay, overlay_pixels, effect);
   }
   if (recording()) {
+    CaptureWork work(*this);
     capture::PresentRecord record{};
     const ScanoutTexture& t = texture;
     const uint32_t fields[9]{t.address, t.width, t.height, t.pitch, t.tiled, t.endian, t.swizzle, t.bytes, uint32_t(t.rgb10)};
@@ -230,6 +285,21 @@ void CaptureBackend::Present(rex::ui::Presenter& presenter, const ScanoutTexture
       if (Accessible(memory_, address, length))
         record.written.push_back({address, length, capture::HashBytes(memory_.TranslatePhysical(address), length)});
     written_ranges_.clear();
+    // GPU results of this and earlier frames as published now: a later
+    // difference means the CPU wrote the page.
+    for (auto& [page, state] : gpu_pages_)
+      if (Accessible(memory_, page * capture::kPageSize, capture::kPageSize))
+        state = {true, capture::HashBytes(memory_.TranslatePhysical(page * capture::kPageSize), capture::kPageSize)};
+    // The composed output (gamma, overlay, post effect) of this present.
+    rex::ui::RawImage image;
+    if (presenter.CaptureGuestOutput(image)) {
+      record.output_width = image.width;
+      record.output_height = image.height;
+      record.output = HashImage(image);
+    }
+    const auto aspect = rex::chrono::FrameLayout::DisplayAspect();
+    record.aspect_x = aspect.x;
+    record.aspect_y = aspect.y;
     writer_->Present(record);
     if (++recorded_frames_ == options_.frames) FinishRecording();
   }
@@ -253,20 +323,22 @@ void CaptureBackend::EndProfileFrame() {
   frame_ = {};
   frame_counters_ = counters;
   frame_start_ = now;
+  // This profiler's own row costs fall inside the next frame's interval.
+  frame_.profile_ms = Ms(Clock::now() - now);
 }
 void CaptureBackend::Drain() {
-  if (recording()) writer_->Simple(Record::kDrain, {});
+  if (recording()) { CaptureWork work(*this); writer_->Simple(Record::kDrain, {}); }
   Scope scope{*this, frame_.sync_ms};
   inner_->Drain();
 }
 void CaptureBackend::CompleteGuestWrites(GuestSync source, uint32_t opcode) {
-  if (recording()) writer_->Simple(Record::kCompleteGuestWrites, {uint32_t(source), opcode});
+  if (recording()) { CaptureWork work(*this); writer_->Simple(Record::kCompleteGuestWrites, {uint32_t(source), opcode}); }
   ++frame_.guest_syncs;
   Scope scope{*this, frame_.sync_ms};
   inner_->CompleteGuestWrites(source, opcode);
 }
 void CaptureBackend::SyncGuestRead(uint32_t address, uint32_t length, uint32_t opcode) {
-  if (recording()) writer_->Simple(Record::kSyncGuestRead, {address, length, opcode});
+  if (recording()) { CaptureWork work(*this); writer_->Simple(Record::kSyncGuestRead, {address, length, opcode}); }
   ++frame_.packet_reads;
   Scope scope{*this, frame_.sync_ms};
   inner_->SyncGuestRead(address, length, opcode);
@@ -286,6 +358,7 @@ Shader* CaptureBackend::LoadShader(ShaderType type, const uint32_t* data, uint32
 void CaptureBackend::Draw(const RegisterFile& regs, rex::memory::Memory& memory, Shader* vs, Shader* ps,
     PrimitiveType primitive, uint32_t count, const DrawIndices* indices, DrawPurpose purpose) {
   if (recording()) {
+    CaptureWork work(*this);
     EmitRegisters(regs);
     const uint32_t vs_id = EmitShader(vs), ps_id = EmitShader(ps);
     EmitDrawInputs(regs, vs, ps, indices, purpose);
@@ -299,6 +372,7 @@ void CaptureBackend::Draw(const RegisterFile& regs, rex::memory::Memory& memory,
 }
 void CaptureBackend::Resolve(const RegisterFile& regs, rex::memory::Memory& memory) {
   if (recording()) {
+    CaptureWork work(*this);
     EmitRegisters(regs);
     const auto rect = regs.GetVertexFetch(0);
     if (rect.type == FetchConstantType::kVertex) EmitRange(rect.address << 2, std::max<uint32_t>(rect.size << 2, 24u));
@@ -309,6 +383,7 @@ void CaptureBackend::Resolve(const RegisterFile& regs, rex::memory::Memory& memo
       // Bytes of the destination pages the resolve does not write still reach the mirror.
       EmitRange(begin, uint32_t(std::min<uint64_t>(end, capture::kPhysicalSize) - begin));
       written_ranges_.emplace_back(info.copy_dest_extent_start, info.copy_dest_extent_length);
+      MarkGpuWritten(info.copy_dest_extent_start, info.copy_dest_extent_length);
     }
     writer_->Simple(Record::kResolve, {});
   }
@@ -324,6 +399,7 @@ SampleCounts CaptureBackend::ReadSampleCounts(bool counting_after) {
     result = inner_->ReadSampleCounts(counting_after);
   }
   if (recording()) {
+    CaptureWork work(*this);
     writer_->Begin(Record::kReadSampleCounts, 4 + sizeof(result));
     writer_->Put(uint32_t(counting_after));
     writer_->Put(result);
@@ -332,6 +408,7 @@ SampleCounts CaptureBackend::ReadSampleCounts(bool counting_after) {
 }
 void CaptureBackend::SetSampleCounts(const SampleCounts& counts, bool visibility_only) {
   if (recording()) {
+    CaptureWork work(*this);
     writer_->Begin(Record::kSetSampleCounts, sizeof(counts) + 4);
     writer_->Put(counts);
     writer_->Put(uint32_t(visibility_only));

@@ -1,7 +1,7 @@
 // Synthetic multi-frame workload of the real Native plugin, for frame capture
 // and replay contracts on any host: per frame the CPU rewrites the vertex
-// buffer, a rasterized draw accumulates into EDRAM (never cleared, so frames
-// depend on EDRAM from earlier frames), a ZPD query reads sample counters, a
+// buffer, a rasterized draw writes EDRAM (never cleared: half of every later
+// frame comes only from EDRAM persisted from frames 0-1), a ZPD query reads sample counters, a
 // resolve copies EDRAM to guest memory, a visibility-tested draw follows while
 // that result is unpublished, and XE_SWAP presents the resolve offscreen.
 //   x360n_native_frame_probe OUTPUT d3d12|vulkan FRAMES [cvar=value...]
@@ -64,9 +64,14 @@ void Run(rex::system::IGraphicsSystem& gpu, rex::memory::Memory& memory, uint32_
   uint32_t write = 0;
   for (uint32_t frame = 0; frame < frames; ++frame) {
     // CPU-written vertex data that changes every frame.
-    const float shift = float(frame % 5) * 0.25f;
-    const float triangle[]{-1 + shift, -1, .5f, 1, 1, -1 + shift, .5f, 1, -1, 1 - shift, .5f, 1};
-    std::memcpy(memory.TranslateVirtual(vertices), triangle, sizeof(triangle));
+    // Frames 0-1 draw only the upper-left half, later frames only the
+    // lower-right half (varying with the frame): the upper-left half of every
+    // later scanout exists only in EDRAM persisted from earlier frames.
+    const float shift = float(frame % 4) * 0.125f;
+    const float triangle_early[]{-1, -1, .5f, 1, 1, -1, .5f, 1, -1, 1, .5f, 1};
+    const float triangle_late[]{1, 1 - shift, .5f, 1, -1 + shift, 1, .5f, 1, 1, -1, .5f, 1};
+    const float* triangle = frame < 2 ? triangle_early : triangle_late;
+    std::memcpy(memory.TranslateVirtual(vertices), triangle, sizeof(triangle_early));
     std::vector<uint32_t> words;
     auto set = [&](uint32_t index, uint32_t value) { words.insert(words.end(), {index, value}); };
     auto fp = [&](uint32_t index, float value) { set(index, std::bit_cast<uint32_t>(value)); };
@@ -87,7 +92,7 @@ void Run(rex::system::IGraphicsSystem& gpu, rex::memory::Memory& memory, uint32_
     reg::RB_BLENDCONTROL blend{};
     // Accumulate: the scanout depends on every earlier frame's EDRAM contents.
     blend.color_srcblend = blend.alpha_srcblend = BlendFactor::kOne;
-    blend.color_destblend = blend.alpha_destblend = BlendFactor::kOne;
+    blend.color_destblend = blend.alpha_destblend = BlendFactor::kZero;
     set(XE_GPU_REG_RB_BLENDCONTROL0, blend.value);
     set(XE_GPU_REG_PA_CL_VTE_CNTL, 0x3F);
     fp(XE_GPU_REG_PA_CL_VPORT_XSCALE, kSide / 2.0f); fp(XE_GPU_REG_PA_CL_VPORT_XOFFSET, kSide / 2.0f);
@@ -96,7 +101,7 @@ void Run(rex::system::IGraphicsSystem& gpu, rex::memory::Memory& memory, uint32_
     set(XE_GPU_REG_PA_SC_SCREEN_SCISSOR_TL, 0); set(XE_GPU_REG_PA_SC_SCREEN_SCISSOR_BR, kSide | (kSide << 16));
     set(XE_GPU_REG_PA_SC_WINDOW_SCISSOR_TL, 0x80000000); set(XE_GPU_REG_PA_SC_WINDOW_SCISSOR_BR, kSide | (kSide << 16));
     set(XE_GPU_REG_PA_SU_VTX_CNTL, 1);
-    const float color[]{.0625f * float(frame % 3 + 1), .03125f, .015625f * float(frame % 4), .0625f};
+    const float color[]{float(frame % 7 + 1) / 8, float(frame % 3) / 4, frame < 2 ? 1.0f : 0.25f, 1};
     for (unsigned c = 0; c < 4; ++c) fp(XE_GPU_REG_SHADER_CONSTANT_000_X + 256 * 4 + c, color[c]);
     vertex_fetch(memory.GetPhysicalAddress(vertices), 12);
     load(true); load(false);
@@ -154,6 +159,11 @@ void Run(rex::system::IGraphicsSystem& gpu, rex::memory::Memory& memory, uint32_
 }
 X360N_PROBE_MAIN {
   try {
+    // Test helper: shorten a file (damaged capture control).
+    if (argc == 4 && std::filesystem::path(argv[1]).string() == "--truncate") {
+      std::filesystem::resize_file(argv[2], std::stoull(std::filesystem::path(argv[3]).string()));
+      return 0;
+    }
     Require(argc >= 4, "usage: x360n_native_frame_probe OUTPUT d3d12|vulkan FRAMES [cvar=value...]");
     const ProbeArg api = argv[2];
     Require(api == X360N_PROBE_ARG("d3d12") || api == X360N_PROBE_ARG("vulkan"), "invalid graphics API");
