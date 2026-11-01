@@ -16,6 +16,7 @@
 
 #include "../supervisor/scratch.h"
 #include "child_process.h"
+#include "paths.h"
 
 namespace fs = std::filesystem;
 using namespace x360n;
@@ -110,6 +111,30 @@ TEST_CASE("extract-disc copies files and writes the manifest beside the destinat
   CHECK(Slurp(s.dir / "out" / "hello.txt") == "hello");
   CHECK(Slurp(s.dir / "out.sha256") ==
         "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824 *hello.txt\n");
+}
+
+TEST_CASE("extract-disc writes beyond MAX_PATH in a clean Windows installation", "[content]") {
+  Scratch s;
+  auto img = MakeImage({{"long.bin", 34, 5}}, 35);
+  std::memcpy(&img[34 * kSector], "hello", 5);
+  const auto source = s.Write(img);
+  // A release may live in an arbitrary user folder. Its logs/extraction/content
+  // tree and a deeply nested guest path must not require LongPathsEnabled.
+  auto nested = s.dir / "nested";
+  fs::create_directories(LongPath(nested));
+  while ((nested / "out" / "long.bin").native().size() <= 270) {
+    nested /= std::string(35, 'd');
+    fs::create_directory(LongPath(nested));
+  }
+  auto output = nested / "out";
+  const auto result = s.Extract(source, output);
+  INFO(s.Err());
+  REQUIRE(result.exit_code == 0);
+  CHECK(Slurp(LongPath(output / "long.bin")) == "hello");
+  CHECK(Slurp(LongPath(fs::path(output.native() + fs::path(".sha256").native()))).find(" *long.bin") != std::string::npos);
+  // Scratch removes the parent tree. Long-path cleanup is intentionally
+  // explicit here since Windows directory traversal depends on API policy.
+  fs::remove_all(LongPath(s.dir / "nested"));
 }
 
 TEST_CASE("extract-disc refuses file ranges outside the image", "[content]") {

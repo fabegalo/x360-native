@@ -48,7 +48,8 @@ struct Extractor {
       fs::path child_rel = rel / Utf8Path(name);
       fs::path out = dest / child_rel;
       if (child->attributes() & rex::filesystem::kFileAttributeDirectory) {
-        if (!fs::create_directory(out)) throw std::runtime_error("duplicate/conflicting container directory");
+        if (!fs::create_directory(x360n::LongPath(out)))
+          throw std::runtime_error("duplicate/conflicting container directory");
         Walk(child.get(), child_rel, depth+1);
         continue;
       }
@@ -58,8 +59,15 @@ struct Extractor {
 
   void Copy(rex::filesystem::Entry* entry, const fs::path& rel, const fs::path& out) {
     std::error_code ec;
-    if (fs::exists(out, ec)) {
-      fmt::print(stderr, "extract: refusing to overwrite {}\n", PathText(out));
+    const auto output = x360n::LongPath(out);
+    if (fs::exists(output, ec)) {
+      fmt::print(stderr, "extract: refusing to overwrite {}\n", PathText(rel));
+      ++errors;
+      return;
+    }
+    if (ec) {
+      fmt::print(stderr, "extract: cannot inspect destination {}: {}\n",
+                 PathText(rel), ec.message());
       ++errors;
       return;
     }
@@ -79,27 +87,53 @@ struct Extractor {
       ++errors;
       return;
     }
-    std::ofstream o(out, std::ios::binary);
+    // Windows' default MAX_PATH policy can reject a nested output file even
+    // though the source entry is readable. Never label an output-open failure
+    // as a corrupt source or "short read".
+    std::ofstream o(output, std::ios::binary);
+    if (!o) {
+      in->Destroy();
+      fmt::print(stderr, "extract: cannot create output {} (destination path {} characters)\n",
+                 PathText(rel), PathText(out).size());
+      ++errors;
+      return;
+    }
     x360n::Sha256 h;
     size_t offset = 0, total = entry->size();
-    bool ok = bool(o);
-    while (ok && offset < total) {
+    bool read_ok = true, write_ok = true;
+    uint32_t read_status = 0;
+    size_t read_count = 0;
+    while (offset < total) {
       size_t want = std::min(buffer.size(), total - offset);
       size_t got = 0;
-      if (in->ReadSync(std::span<uint8_t>(buffer.data(), want), offset, &got) != X_STATUS_SUCCESS ||
-          got == 0 || got > want) {
-        ok = false;
+      const auto status = in->ReadSync(
+          std::span<uint8_t>(buffer.data(), want), offset, &got);
+      if (status != X_STATUS_SUCCESS || got == 0 || got > want) {
+        read_ok = false;
+        read_status = static_cast<uint32_t>(status);
+        read_count = got;
         break;
       }
       o.write(reinterpret_cast<const char*>(buffer.data()), std::streamsize(got));
+      if (!o) {
+        write_ok = false;
+        break;
+      }
       h.Update({buffer.data(), got});
       offset += got;
     }
     in->Destroy();
     o.close();
-    if (!ok || offset != total || !o) {
-      fmt::print(stderr, "extract: short read for {} ({} of {} bytes)\n", PathText(rel),
-                 offset, total);
+    if (!write_ok || !o) {
+      fmt::print(stderr, "extract: cannot write output {} ({} of {} bytes)\n",
+                 PathText(rel), offset, total);
+      ++errors;
+      return;
+    }
+    if (!read_ok || offset != total) {
+      fmt::print(stderr,
+                 "extract: short read from source {} ({} of {} bytes; status {:#x}, last read {})\n",
+                 PathText(rel), offset, total, read_status, read_count);
       ++errors;
       return;
     }
@@ -123,11 +157,11 @@ int ExtractTree(rex::filesystem::Entry* root, const fs::path& dest, uint64_t dis
     return 1;
   }
   try {
-    fs::create_directories(dest.parent_path());
+    fs::create_directories(x360n::LongPath(dest.parent_path()));
     auto manifest_path = dest;
     manifest_path += ".sha256";
     x360n::content::ExtractionManifest manifest(manifest_path);
-    if (!fs::create_directory(dest))
+    if (!fs::create_directory(x360n::LongPath(dest)))
       throw std::runtime_error("destination already exists; not extracting");
     Extractor x{dest, manifest.stream()};
     x.disc_size = disc_size;
@@ -151,7 +185,7 @@ bool DestinationFree(const fs::path& dest) {
   manifest += ".sha256";
   for (const auto& path : {dest, manifest}) {
     std::error_code ec;
-    const auto status = fs::symlink_status(path, ec);
+    const auto status = fs::symlink_status(x360n::LongPath(path), ec);
     if ((ec && ec != std::errc::no_such_file_or_directory) || fs::exists(status)) {
       fmt::print(stderr, "extract: destination exists or cannot be inspected: {}\n", PathText(path));
       return false;
