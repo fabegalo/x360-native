@@ -185,6 +185,10 @@ ReplayResult ReplayCapture(capture::Reader& reader, ScanoutBackend& backend, rex
           } else {
             timed(frame.present_ms, [&] { backend.CompleteFrame(texture, memory.TranslatePhysical(texture.address)); });
           }
+          // The frame ends with its present; the checks below are the replay's
+          // own work (hashes, presenter readback) and are not frame time.
+          const auto frame_end = Clock::now();
+          const auto latest = backend.Counters();
           const auto frontbuffer = capture::HashBytes(memory.TranslatePhysical(texture.address), texture.bytes);
           XXH3_128bits_update(digest, frontbuffer.data(), sizeof(frontbuffer));
           if (capture::Recorded(record.frontbuffer)) {
@@ -224,10 +228,8 @@ ReplayResult ReplayCapture(capture::Reader& reader, ScanoutBackend& backend, rex
                                    frame_index, image.width, image.height, record.output_width, record.output_height));
             }
           }
-          const auto now = Clock::now();
-          const auto latest = backend.Counters();
           frame.frame = frame_index++;
-          frame.frame_ms = Ms(now - frame_start);
+          frame.frame_ms = Ms(frame_end - frame_start);
           frame.counters = latest - counters;
           if (options.on_frame) options.on_frame(pass, frame);
           ++result.frames;

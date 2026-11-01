@@ -117,9 +117,15 @@ void Writer::Finish(uint32_t frames) {
 }
 
 Reader::Reader(const std::filesystem::path& path) {
-  std::ifstream in(path, std::ios::binary);
+  std::ifstream in(path, std::ios::binary | std::ios::ate);
   if (!in) throw std::runtime_error("Native capture: cannot open " + path.string());
-  data_.assign(std::istreambuf_iterator<char>(in), {});
+  // One read of the whole file (captures reach hundreds of MiB).
+  const auto size = in.tellg();
+  if (size < 0) throw std::runtime_error("Native capture: cannot size " + path.string());
+  data_.resize(size_t(size));
+  in.seekg(0);
+  if (size && !in.read(reinterpret_cast<char*>(data_.data()), size))
+    throw std::runtime_error("Native capture: cannot read " + path.string());
   Open();
 }
 Reader::Reader(std::vector<uint8_t> bytes) : data_(std::move(bytes)) { Open(); }

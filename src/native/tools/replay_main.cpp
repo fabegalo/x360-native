@@ -33,6 +33,7 @@
 #include <fmt/format.h>
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <fstream>
 #include <iostream>
 #include <string>
@@ -148,8 +149,11 @@ X360N_PROBE_MAIN {
     presenter.reset();
     provider.reset();
     std::sort(warm_frame_ms.begin(), warm_frame_ms.end());
+    // Nearest-rank percentile of the warm frames.
     auto percentile = [&](double q) {
-      return warm_frame_ms.empty() ? 0.0 : warm_frame_ms[std::min(warm_frame_ms.size() - 1, size_t(q * warm_frame_ms.size()))];
+      if (warm_frame_ms.empty()) return 0.0;
+      const size_t rank = size_t(std::ceil(q * double(warm_frame_ms.size())));
+      return warm_frame_ms[std::clamp<size_t>(rank, 1, warm_frame_ms.size()) - 1];
     };
     const Means& m = warm.n ? warm : all;
     auto mean = [&](double total) { return m.n ? total / m.n : 0.0; };
@@ -176,12 +180,12 @@ X360N_PROBE_MAIN {
     for (const auto& text : result.mismatches) mismatches += fmt::format("{}\"{}\"", mismatches.empty() ? "" : ",", text);
     const auto json = fmt::format(
         "{{\"capture\":\"{}\",\"backend\":\"{}\",\"passes\":{},\"frames\":{},\"visual_checked\":{},\"total_ms\":{:.3f},"
-        "\"warm_frame_ms_p50\":{:.3f},\"warm_frame_ms_p95\":{:.3f},\"equivalent\":{},\"repeatable\":{},"
+        "\"warm_frame_ms_p50\":{:.3f},\"warm_frame_ms_p95\":{:.3f},\"warm_frame_ms_p99\":{:.3f},\"equivalent\":{},\"repeatable\":{},"
         "\"frontbuffer_checks\":{},\"frontbuffer_mismatches\":{},\"written_checks\":{},\"written_mismatches\":{},"
         "\"sample_checks\":{},\"sample_mismatches\":{},\"output_checks\":{},\"output_mismatches\":{},"
         "\"memory_records\":{},\"memory_pages_written\":{},\"per_frame\":{},\"mismatches\":[{}]}}\n",
         capture_path.filename().string(), backend_name, result.passes, result.frames, result.visual_checked, total_ms, percentile(0.5),
-        percentile(0.95), result.equivalent(), result.repeatable(), result.frontbuffer_checks, result.frontbuffer_mismatches,
+        percentile(0.95), percentile(0.99), result.equivalent(), result.repeatable(), result.frontbuffer_checks, result.frontbuffer_mismatches,
         result.written_checks, result.written_mismatches, result.sample_checks, result.sample_mismatches,
         result.output_checks, result.output_mismatches, result.memory_records, result.memory_pages_written, summary, mismatches);
     std::ofstream(output / "replay.json") << json;

@@ -10,6 +10,8 @@
 // resolves and memory exports wrote (after publication), sample counters and,
 // with a presenter, the composed output (gamma LUT, overlay, post effect).
 // The whole file is validated (capture::ValidateFile) before any call.
+// Frame time runs from the end of the previous frame's checks to the end of
+// the present: feeding the recorded calls plus the renderer, never the checks.
 #include "capture_backend.h"
 #include <functional>
 #include <string>
