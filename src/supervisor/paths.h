@@ -31,6 +31,13 @@ struct ProjectPaths {
   std::filesystem::path sdk_out() const { return sdk() / "out"; }
 };
 
+// Builds the shared SDK under a short, isolated path. Windows CMake/SDL3
+// nested try_compile paths can exceed Ninja's legacy path limit even when
+// normal file I/O supports long paths. User content and AOT title builds stay
+// in the project's original directories.
+std::filesystem::path SharedSdkGenerationPath(const ProjectPaths& paths,
+                                              const std::string& generation_id);
+
 // Walks up from `start` looking for deps.lock.json.
 std::optional<ProjectPaths> FindProjectRoot(const std::filesystem::path& start);
 
