@@ -169,8 +169,9 @@ class VulkanRender {
   // Early submission: work recorded since the last submission and the
   // threshold (draws; a resolve counts as the whole threshold).
   const uint32_t eager_threshold_ = NativeEagerSubmitWork();
+  const uint32_t eager_depth_ = NativeEagerSubmitDepth();
   uint32_t recorded_work_ = 0;
-  void SubmitIfGpuIdle();
+  void SubmitEarly();
   // Host copy of the sample counter tail (ReadSampleCounts), never shared.
   std::unique_ptr<VulkanBuffer> sample_counts_readback_;
   bool visibility_only_ = false;

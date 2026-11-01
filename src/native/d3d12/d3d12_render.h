@@ -222,8 +222,9 @@ class D3D12Render {
   // Early submission: work recorded since the last submission and the
   // threshold (draws; a resolve counts as the whole threshold).
   const uint32_t eager_threshold_ = NativeEagerSubmitWork();
+  const uint32_t eager_depth_ = NativeEagerSubmitDepth();
   uint32_t recorded_work_ = 0;
-  void SubmitIfGpuIdle();
+  void SubmitEarly();
   uint64_t pipeline_wait_ns_ = 0, pipeline_waits_ = 0;
   std::map<unsigned, std::vector<uint8_t>> rectangles_, polygon_points_;
   std::map<unsigned, std::vector<uint32_t>> points_;

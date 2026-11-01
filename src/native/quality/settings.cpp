@@ -15,8 +15,11 @@ REXCVAR_DEFINE_INT32(native_pipeline_threads, -1, "GPU/Native",
 // GPU with native_replay_ab.py (docs/reports/performance/render-core-2026-11-01.md).
 REXCVAR_DEFINE_UINT32(native_eager_submit, 0, "GPU/Native",
     "Submit recorded work early when the GPU queue is idle, after this many draws (a resolve counts as many; 64 is the measured candidate); 0 waits for the next guest sync");
+REXCVAR_DEFINE_UINT32(native_eager_submit_depth, 0, "GPU/Native",
+    "Early submission (native_eager_submit) also while this many submissions are still executing: 0 only when the GPU queue is idle, 1 keeps the next batch queued (higher values are clamped to 1: three recording arenas)");
 namespace x360n::native {
 unsigned NativeEagerSubmitWork() { return REXCVAR_GET(native_eager_submit); }
+unsigned NativeEagerSubmitDepth() { return std::min(REXCVAR_GET(native_eager_submit_depth), 1u); }
 unsigned NativePipelineThreads() {
   const auto threads = REXCVAR_GET(native_pipeline_threads);
   return threads < 0 ? PipelineWorkers::DefaultThreads() : unsigned(std::min(threads, 64));

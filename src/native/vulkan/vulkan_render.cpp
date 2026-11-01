@@ -154,10 +154,11 @@ void VulkanRender::EndRendering() {
 // CPU recorded long before. Submitting only adds a queue boundary: order,
 // barriers and guest-visible syncs are unchanged, nothing waits here, and
 // pending pipeline creations are never forced (deferred commands stay open).
-void VulkanRender::SubmitIfGpuIdle() {
+void VulkanRender::SubmitEarly() {
   if (!eager_threshold_ || !commands_ || recorded_work_ < eager_threshold_ || cmd_.deferred()) return;
   submissions_.Poll();
-  if (submissions_.completed() != submissions_.last_submitted()) return;
+  // Depth 1 queues the next batch behind the running one (see D3D12Render).
+  if (submissions_.last_submitted() - submissions_.completed() > eager_depth_) return;
   Flush(false);
 }
 void VulkanRender::Flush(bool wait) {

@@ -304,9 +304,14 @@ void D3D12Render::ReplayCommands() {
 // recording). Submitting adds only a queue boundary: order, barriers and
 // guest-visible syncs are unchanged, nothing waits here, and pipelines still
 // being created are never forced (deferred commands keep the list open).
-void D3D12Render::SubmitIfGpuIdle() {
+void D3D12Render::SubmitEarly() {
   if (!eager_threshold_ || recorded_work_ < eager_threshold_ || cmd_.deferred() || cmd_.empty()) return;
-  if (fence_->GetCompletedValue() < serial_) return;
+  // Submissions still executing; with depth 1 the next batch is queued behind
+  // the running one, so the GPU does not run dry. Arena reuse never blocks:
+  // the recycled arena belongs to the submission before the running one.
+  const uint64_t completed = fence_->GetCompletedValue();
+  Require(completed != UINT64_MAX, "render device removed");
+  if (serial_ - std::min(completed, serial_) > eager_depth_) return;
   Flush(kFlushEager);
 }
 void D3D12Render::Flush(FlushCause cause) {
