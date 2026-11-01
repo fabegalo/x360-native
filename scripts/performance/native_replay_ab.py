@@ -22,8 +22,8 @@ mean/P50/P95/P99 of frame time, renderer time, renderer CPU time not waiting
 on fences, fence waits, GPU busy and idle time, submissions and draws.
 Per non-reference arm: paired ratio of each round's mean frame time to the
 reference's, with a bootstrap 95% interval of the median ratio; the verdict
-is "faster" or "slower" only when the interval excludes 1, otherwise
-"inconclusive". Exit 0 when every run was equivalent (4 with
+is "faster" or "slower" only when the interval excludes 1 over at least 5
+rounds, otherwise "inconclusive" (or "insufficient rounds"). Exit 0 when every run was equivalent (4 with
 --fail-on-regression if an arm is "slower"), 3 on a non-equivalent run, 1 on
 an error.
 """
@@ -177,7 +177,9 @@ def main() -> int:
             ratios = [statistics.fmean(f['frame_ms'] for f in candidate) / statistics.fmean(f['frame_ms'] for f in base)
                       for base, candidate in zip(runs[reference], runs[name])]
             low, high = bootstrap_median(ratios)
-            verdict = 'faster' if high < 1 else 'slower' if low > 1 else 'inconclusive'
+            # A bootstrap over fewer than 5 paired rounds understates the spread.
+            verdict = 'insufficient rounds' if len(ratios) < 5 else \
+                'faster' if high < 1 else 'slower' if low > 1 else 'inconclusive'
             regression = regression or verdict == 'slower'
             result[name]['paired_frame_ratio'] = {'median': round(statistics.median(ratios), 4),
                                                   'ci95': [round(low, 4), round(high, 4)],
