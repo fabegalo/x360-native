@@ -5,14 +5,17 @@
 
   **Uma plataforma de pesquisa aberta para executar software do Xbox 360 por recompilação estática de PowerPC.**
 
-  [![Windows x64](https://img.shields.io/badge/plataforma-Windows%20x64-107c10)](#estado-atual)
+  [![Versão mais recente](https://img.shields.io/github/v/release/fabegalo/x360-native?label=versão)](https://github.com/fabegalo/x360-native/releases/latest)
+  [![Pacotes: Windows, Linux, macOS](https://img.shields.io/badge/pacotes-Windows%20%7C%20Linux%20%7C%20macOS-555)](#download)
+  [![CI/CD](https://img.shields.io/github/actions/workflow/status/fabegalo/x360-native/ci.yml?branch=main&event=push&label=CI%2FCD)](https://github.com/fabegalo/x360-native/actions/workflows/ci.yml?query=branch%3Amain)
+  [![Evidência: Windows x64](https://img.shields.io/badge/evidência-Windows%20x64-107c10)](#estado-atual)
   [![Experimental](https://img.shields.io/badge/estado-experimental-orange)](#estado-atual)
   [![BSD-3-Clause](https://img.shields.io/badge/licença-BSD--3--Clause-blue)](LICENSE)
 
   [English](README.md) · [Português (Brasil)](README.pt-BR.md) · [Documentação](docs/README.md) · [Como contribuir](CONTRIBUTING.md)
 </div>
 
-> **Software experimental.** Windows x64 é a única plataforma com evidências de ponta a ponta, os resultados dependem da versão exata da dashboard e do jogo, e nenhum jogo está certificado como plenamente funcional.
+> **Software experimental.** Windows x64 é a única plataforma com evidências de ponta a ponta, os resultados dependem da versão exata da dashboard e do jogo, e nenhum jogo está certificado como plenamente funcional. A versão 1.28.8 é a primeira do canal estável; estável designa o canal de distribuição, não uma afirmação de compatibilidade.
 
 ## Veja funcionando
 
@@ -36,7 +39,7 @@ A **dashboard original do Xbox 360** é um alvo próprio: inicialização, naveg
 
 ## Estado atual
 
-Configuração principal: **Windows x64 com o backend Xenos D3D12.** Outros sistemas e arquiteturas são objetivos, não plataformas com suporte.
+Configuração principal: **Windows x64 com o backend Xenos D3D12.** A versão 1.28.8 também traz pacotes para Windows ARM64, Linux x64 (incluindo Steam Deck), Linux ARM64 e macOS (Apple Silicon e Intel), cada um compilado e conferido num runner do GitHub correspondente. Um pacote não é evidência de execução: nenhum fluxo de dashboard ou de jogo foi demonstrado nesses alvos.
 
 | Alvo | Alcançado | Ainda não certificado |
 |---|---|---|
@@ -66,17 +69,28 @@ Configuração principal: **Windows x64 com o backend Xenos D3D12.** Outros sist
 
 </details>
 
-## Experimente a prévia
+## Download
 
-**[Baixe a prévia para Windows x64 (v0.69.27-preview.25)](https://github.com/fabegalo/x360-native/releases/tag/v0.69.27-preview.25)** · [notas da versão](docs/releases/0.69.27-preview.25.md)
+**[Baixe o x360-native 1.28.8](https://github.com/fabegalo/x360-native/releases/tag/v1.28.8)** · [notas da versão](docs/releases/1.28.8.md)
 
-1. Baixe o ZIP do aplicativo e o checksum SHA-256 na página da Release (não o arquivo "Source code" do GitHub).
-2. Extraia e execute `x360-native.exe`. Mantenha a pasta `data/` ao lado dele: ela guarda biblioteca, preparações e configurações.
+| Sistema | Arquitetura | Pacote |
+|---|---|---|
+| Windows | x64 | `x360-native-1.28.8-windows-x64.zip` |
+| Windows | ARM64 | `x360-native-1.28.8-windows-arm64.zip` |
+| Linux / Steam Deck | x64 | `x360-native-1.28.8-linux-x64.tar.gz` |
+| Linux | ARM64 | `x360-native-1.28.8-linux-arm64.tar.gz` |
+| macOS | Apple Silicon / ARM64 | `x360-native-1.28.8-macos-arm64.zip` |
+| macOS | Intel / x64 | `x360-native-1.28.8-macos-x64.zip` |
+
+1. Baixe o pacote do seu sistema e o arquivo `.sha256` correspondente na página da Release (não o arquivo "Source code" do GitHub).
+2. Extraia o pacote inteiro numa pasta vazia e abra o aplicativo: `x360-native.exe` no Windows, `./x360-native` no Linux (X11 ou Wayland) e no macOS (pelo Terminal; o pacote não é notarizado). Mantenha a pasta `data/` ao lado dele: ela guarda biblioteca, preparações e configurações.
 3. Importe os arquivos da dashboard e os jogos que você tem autorização para usar. O aplicativo identifica cada um e informa o que falta ou não é suportado.
 4. Prepare a dashboard e os jogos que quiser testar. As ferramentas fixadas são baixadas com o seu consentimento e o código é compilado localmente; alguns componentes de compilação C++ da Microsoft podem exigir o instalador oficial.
 5. Inicie a dashboard original, abra **My Games** e inicie um jogo preparado.
 
 O pacote não contém conteúdo do Xbox. Importado ou preparado não significa que o jogo vai rodar, e o primeiro uso num Windows limpo ainda não foi verificado. Mais no [guia de preparação](docs/guides/desktop-preparation.md).
+
+**Atualização:** o aplicativo consulta a lista pública do GitHub Releases e oferece versões estáveis mais novas, preservando perfis, saves e conteúdo importado. Para atualizar manualmente, faça backup da pasta `data/` e extraia numa pasta nova, não sobre uma instalação em uso. Títulos preparados podem precisar de nova preparação quando o SDK ou o runtime mudam.
 
 ## Como funciona
 
@@ -116,7 +130,7 @@ Não. Use arquivos obtidos legalmente e mantenha os módulos originais de cada d
 </details>
 
 <details><summary><strong>Funciona em Linux, macOS ou ARM?</strong></summary>
-São objetivos. As evidências atuais de ponta a ponta são para Windows x64; compilar em outra plataforma não comprova suporte em execução.
+A versão 1.28.8 tem pacotes para Windows ARM64, Linux x64/ARM64 e macOS ARM64/x64, mas as evidências de ponta a ponta continuam sendo só do Windows x64. Um pacote que compila e passa nas verificações em outra plataforma não comprova suporte em execução, e a jogabilidade no Steam Deck não está certificada.
 </details>
 
 <details><summary><strong>Saves, Xbox Live, multiplayer e periféricos são suportados?</strong></summary>
