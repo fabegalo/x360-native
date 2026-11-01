@@ -125,6 +125,43 @@ TEST_CASE("a downloaded archive must match its published checksum line", "[updat
   CHECK_THROWS(VerifyArchive(archive, checksum));
   fs::remove_all(dir);
 }
+TEST_CASE("archive-only GitHub Releases use the published asset digest", "[update]") {
+  const auto hash = std::string(64, 'a');
+  const auto assets = std::string(R"([{"tag_name":"v1.28.12","draft":false,"prerelease":false,"assets":[{"name":"x360-native-1.28.12-windows-x64.zip","digest":"sha256:)") + hash + R"("}]}])";
+  const auto modern = SelectUpdate(assets, "1.28.11", UpdateChannel::Stable, "windows-x64");
+  REQUIRE(modern);
+  CHECK(modern->version == "1.28.12");
+  CHECK(modern->checksum_url.empty());
+  CHECK(modern->archive_sha256 == hash);
+  CHECK_FALSE(SelectUpdate(assets, "1.28.12", UpdateChannel::Stable, "windows-x64"));
+  CHECK_FALSE(SelectUpdate(assets, "1.28.11", UpdateChannel::Stable, "linux-x64"));
+  auto invalid = assets;
+  auto at = invalid.find("sha256:");
+  REQUIRE(at != std::string::npos);
+  invalid.replace(at, 7 + 64, "sha256:invalid");
+  CHECK_FALSE(SelectUpdate(invalid, "1.28.11", UpdateChannel::Stable, "windows-x64"));
+  const auto no_digest = R"([{"tag_name":"v1.28.12","draft":false,"prerelease":false,"assets":[{"name":"x360-native-1.28.12-windows-x64.zip"}]}])";
+  CHECK_FALSE(SelectUpdate(no_digest, "1.28.11", UpdateChannel::Stable, "windows-x64"));
+  const auto legacy = R"([{"tag_name":"v1.28.12","draft":false,"prerelease":false,"assets":[{"name":"x360-native-1.28.12-windows-x64.zip"},{"name":"x360-native-1.28.12-windows-x64.zip.sha256"}]}])";
+  const auto old = SelectUpdate(legacy, "1.28.11", UpdateChannel::Stable, "windows-x64");
+  REQUIRE(old);
+  CHECK(old->archive_sha256.empty());
+  CHECK(old->checksum_url == old->archive_url + ".sha256");
+}
+
+TEST_CASE("GitHub asset digest verifies the archive before installation", "[update]") {
+  const auto dir = UniqueTempPath("update-digest");
+  const auto archive = dir / "download.zip";
+  Write(archive, "trusted bytes");
+  const auto hash = DigestFile(archive)->sha256;
+  CHECK_NOTHROW(VerifyArchiveDigest(archive, hash));
+  CHECK_THROWS(VerifyArchiveDigest(archive, std::string(64, '0')));
+  CHECK_THROWS(VerifyArchiveDigest(archive, "invalid"));
+  Write(archive, "changed bytes");
+  CHECK_THROWS(VerifyArchiveDigest(archive, hash));
+  fs::remove_all(dir);
+}
+
 TEST_CASE("an update replaces application files, keeps data and restores on failure", "[update]") {
   const auto root = UniqueTempPath("update-apply");
   const auto package = root / "installed", staged = root / "staged" / "x360-native-2.0.0-windows-x64", rollback = package / "data/updates/previous";

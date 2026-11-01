@@ -140,11 +140,18 @@ void StartUpdate(App& a) {
       fs::remove_all(dir);
       fs::create_directories(dir / "extract");
       const auto archive = dir / (update.package + PackageArchiveExtension()), checksum = dir / (update.package + PackageArchiveExtension() + ".sha256");
-      Download(a, update.checksum_url, checksum, 60, a.cancel);
+      if (update.archive_sha256.empty()) {
+        if (update.checksum_url.empty())
+          throw std::runtime_error("Atualização sem SHA-256 verificável. Nada foi alterado.");
+        Download(a, update.checksum_url, checksum, 60, a.cancel);
+      }
       Download(a, update.archive_url, archive, 3600, a.cancel);
       a.stage = 1;
       Post(a, [](App& app) { OnProgress(app, Tr("Verificando a atualização...", "Verifying the update...")); });
-      VerifyArchive(archive, checksum);
+      if (update.archive_sha256.empty())
+        VerifyArchive(archive, checksum);
+      else
+        VerifyArchiveDigest(archive, update.archive_sha256);
       ProcessSpec tar;
       tar.exe = SystemTool("tar"); tar.args = {"-xf", Utf8(archive), "-C", Utf8(dir / "extract")};
       tar.working_dir = dir; tar.stdout_file = dir / "tar.log"; tar.stderr_file = dir / "tar.error.log"; tar.no_console = true;

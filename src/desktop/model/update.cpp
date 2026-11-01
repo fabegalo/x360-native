@@ -80,13 +80,36 @@ std::optional<AvailableUpdate> SelectUpdate(const std::string& releases_json, co
     const auto newer = CompareVersions(version, current);
     if (!newer || *newer <= 0 || (best && CompareVersions(version, best->version).value_or(0) <= 0)) continue;
     const std::string package = "x360-native-" + version + "-" + platform;
-    std::set<std::string> names;
-    if (release.contains("assets") && release["assets"].is_array())
-      for (const auto& asset : release["assets"]) if (asset.is_object() && asset.contains("name") && asset["name"].is_string()) names.insert(asset["name"].get<std::string>());
     const auto archive = PackageArchiveExtension(platform);
-    if (!names.contains(package + archive) || !names.contains(package + archive + ".sha256")) continue;
+    const std::string archive_name = package + archive;
+    const nlohmann::json* archive_asset = nullptr;
+    bool legacy_checksum = false;
+    if (release.contains("assets") && release["assets"].is_array())
+      for (const auto& asset : release["assets"]) {
+        if (!asset.is_object() || !asset.contains("name") || !asset["name"].is_string()) continue;
+        const std::string name = asset["name"];
+        if (name == archive_name) archive_asset = &asset;
+        if (name == archive_name + ".sha256") legacy_checksum = true;
+      }
+    if (!archive_asset) continue;
+    std::string trusted_sha256;
+    if (archive_asset->contains("digest") && !(*archive_asset)["digest"].is_null()) {
+      if (!(*archive_asset)["digest"].is_string()) continue;
+      const std::string field = (*archive_asset)["digest"];
+      if (!field.empty()) {
+        if (field.size() != 71 || !field.starts_with("sha256:") ||
+            field.substr(7).find_first_not_of("0123456789abcdef") != std::string::npos)
+          continue;  // Reject an invalid GitHub digest; never install unchecked bytes.
+        trusted_sha256 = field.substr(7);
+      }
+    }
+    // Modern Releases publish only the archive. Older Releases have a .sha256
+    // sidecar and can still be used if the API does not provide an asset digest.
+    if (trusted_sha256.empty() && !legacy_checksum) continue;
     const std::string base = std::string(kRepository) + "/releases/download/" + tag + "/" + package;
-    best = AvailableUpdate{version, package, base + archive, base + archive + ".sha256", std::string(kRepository) + "/releases/tag/" + tag};
+    best = AvailableUpdate{version, package, base + archive,
+                           trusted_sha256.empty() ? base + archive + ".sha256" : "",
+                           std::string(kRepository) + "/releases/tag/" + tag, trusted_sha256};
   }
   return best;
 }
@@ -96,5 +119,13 @@ void VerifyArchive(const fs::path& archive, const fs::path& checksum) {
   const auto digest = DigestFile(archive);
   if (!digest || text != digest->sha256 + "  " + Utf8(archive.filename()))
     throw std::runtime_error("O download da atualização não confere com o SHA-256 publicado. Nada foi alterado.");
+}
+void VerifyArchiveDigest(const fs::path& archive, const std::string& trusted_sha256) {
+  if (trusted_sha256.size() != 64 ||
+      trusted_sha256.find_first_not_of("0123456789abcdef") != std::string::npos)
+    throw std::runtime_error("SHA-256 inválido nos metadados da atualização. Nada foi alterado.");
+  const auto digest = DigestFile(archive);
+  if (!digest || digest->sha256 != trusted_sha256)
+    throw std::runtime_error("O download da atualização não confere com o SHA-256 do GitHub. Nada foi alterado.");
 }
 }
