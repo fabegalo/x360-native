@@ -101,7 +101,7 @@ class BasicD3D12Commands {
     if (!commands_.deferred()) { Direct()->OMSetRenderTargets(count, targets, single, depth); return; }
     // A single-handle range passes one descriptor for all targets.
     std::vector<D3D12_CPU_DESCRIPTOR_HANDLE> copy;
-    if (targets) copy.assign(targets, targets + (single ? std::min(count, 1u) : count));
+    if (targets) copy.assign(targets, targets + (single ? (std::min)(count, 1u) : count));
     std::optional<D3D12_CPU_DESCRIPTOR_HANDLE> ds;
     if (depth) ds = *depth;
     Rec([=, copy = std::move(copy)](L* l) {
