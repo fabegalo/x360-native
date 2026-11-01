@@ -10,8 +10,11 @@ REXCVAR_DEFINE_UINT32(native_scale_y, 1, "GPU/Native", "Enhanced internal vertic
 REXCVAR_DEFINE_UINT32(native_anisotropy, 0, "GPU/Native", "Enhanced anisotropic filtering: 0 preserves guest, or 2/4/8/16");
 REXCVAR_DEFINE_INT32(native_pipeline_threads, -1, "GPU/Native",
     "Graphics pipeline creation threads: -1 automatic, 0 creates each pipeline at its first draw (previous behavior)");
-REXCVAR_DEFINE_UINT32(native_eager_submit, 64, "GPU/Native",
-    "Submit recorded work early when the GPU queue is idle, after this many draws (a resolve counts as many); 0 waits for the next guest sync");
+// Off by default: on software rasterizers (lavapipe) the early submissions cut
+// GPU idle time but did not shorten frames; enabling it needs an A/B on a real
+// GPU with native_replay_ab.py (docs/reports/performance/render-core-2026-11-01.md).
+REXCVAR_DEFINE_UINT32(native_eager_submit, 0, "GPU/Native",
+    "Submit recorded work early when the GPU queue is idle, after this many draws (a resolve counts as many; 64 is the measured candidate); 0 waits for the next guest sync");
 namespace x360n::native {
 unsigned NativeEagerSubmitWork() { return REXCVAR_GET(native_eager_submit); }
 unsigned NativePipelineThreads() {
