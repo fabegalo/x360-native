@@ -16,6 +16,7 @@
 #include <rex/graphics/registers.h>
 #include <rex/graphics/format/ucode.h>
 #include <rex/cvar.h>
+#include <algorithm>
 #include <array>
 #include <bit>
 #include <chrono>
@@ -46,14 +47,19 @@ std::vector<uint32_t> RasterShader(bool vertex) {
   return code;
 }
 constexpr uint32_t kSide = 32;
-void Run(rex::system::IGraphicsSystem& gpu, rex::memory::Memory& memory, uint32_t frames) {
+// Optional game-like load per frame: extra_draws rasterized draws in
+// extra_resolves groups, each group followed by a resolve into its own guest
+// buffer (results the next guest sync publishes), before the ZPD/scanout part.
+void Run(rex::system::IGraphicsSystem& gpu, rex::memory::Memory& memory, uint32_t frames,
+         uint32_t extra_draws, uint32_t extra_resolves) {
   const auto ring = memory.SystemHeapAlloc(2u << 20, 4096, rex::memory::kSystemHeapPhysical);
   const auto vertices = memory.SystemHeapAlloc(4096, 4096, rex::memory::kSystemHeapPhysical);
   const auto rect = memory.SystemHeapAlloc(4096, 4096, rex::memory::kSystemHeapPhysical);
   const auto image = memory.SystemHeapAlloc(kSide * kSide * 4, 4096, rex::memory::kSystemHeapPhysical);
   const auto reports = memory.SystemHeapAlloc(4096, 4096, rex::memory::kSystemHeapPhysical);
   const auto done = memory.SystemHeapAlloc(4096, 4096, rex::memory::kSystemHeapPhysical);
-  Require(ring && vertices && rect && image && reports && done, "frame probe allocations");
+  const auto targets = memory.SystemHeapAlloc(std::max(1u, extra_resolves) * kSide * kSide * 4, 4096, rex::memory::kSystemHeapPhysical);
+  Require(ring && vertices && rect && image && reports && done && targets, "frame probe allocations");
   std::memset(memory.TranslateVirtual(done), 0, 4);
   const float xy[]{0, 0, float(kSide), 0, 0, float(kSide)};
   std::memcpy(memory.TranslateVirtual(rect), xy, sizeof(xy));
@@ -107,6 +113,27 @@ void Run(rex::system::IGraphicsSystem& gpu, rex::memory::Memory& memory, uint32_
     load(true); load(false);
     reg::VGT_DRAW_INITIATOR draw{}; draw.prim_type = PrimitiveType::kTriangleList;
     draw.source_select = SourceSelect::kAutoIndex; draw.num_indices = 3;
+    auto resolve_to = [&](uint32_t dest) {
+      vertex_fetch(memory.GetPhysicalAddress(rect), 6);
+      set(XE_GPU_REG_RB_MODECONTROL, uint32_t(EdramMode::kCopy));
+      set(XE_GPU_REG_RB_COPY_DEST_BASE, dest);
+      set(XE_GPU_REG_RB_COPY_DEST_PITCH, kSide | (kSide << 16));
+      set(XE_GPU_REG_RB_COPY_DEST_INFO, uint32_t(TextureFormat::k_8_8_8_8) << 7);
+      reg::RB_COPY_CONTROL copy{}; copy.copy_command = CopyCommand(1);
+      set(XE_GPU_REG_RB_COPY_CONTROL, copy.value);
+      reg::VGT_DRAW_INITIATOR rect_draw = draw; rect_draw.prim_type = PrimitiveType::kRectangleList;
+      words.insert(words.end(), {Packet(PM4_DRAW_INDX_2, 1), rect_draw.value});
+      set(XE_GPU_REG_RB_MODECONTROL, uint32_t(EdramMode::kColorDepth));
+      vertex_fetch(memory.GetPhysicalAddress(vertices), 12);
+    };
+    for (uint32_t group = 0; group < extra_resolves; ++group) {
+      for (uint32_t i = group * extra_draws / extra_resolves; i < (group + 1) * extra_draws / extra_resolves; ++i) {
+        fp(XE_GPU_REG_SHADER_CONSTANT_000_X + 256 * 4, float((frame + i) % 8) / 8);
+        words.insert(words.end(), {Packet(PM4_DRAW_INDX_2, 1), draw.value});
+      }
+      resolve_to(memory.GetPhysicalAddress(targets) + group * kSide * kSide * 4);
+    }
+    for (unsigned c = 0; c < 4; ++c) fp(XE_GPU_REG_SHADER_CONSTANT_000_X + 256 * 4 + c, color[c]);
     // ZPD around the draw: BEGIN, END with the big-endian pending token.
     const uint32_t report = memory.GetPhysicalAddress(reports) + (frame % 32) * 64;
     auto* end = memory.TranslatePhysical<uint32_t*>(report + 32);
@@ -143,7 +170,12 @@ void Run(rex::system::IGraphicsSystem& gpu, rex::memory::Memory& memory, uint32_
     for (unsigned i = 0; i < 6; ++i) set(XE_GPU_REG_SHADER_CONSTANT_FETCH_00_0 + i, reinterpret_cast<const uint32_t*>(&fetch)[i]);
     words.insert(words.end(), {Packet(PM4_XE_SWAP, 4), kSwapSignature, memory.GetPhysicalAddress(image), kSide, kSide,
         Packet(PM4_MEM_WRITE, 2), memory.GetPhysicalAddress(done), frame + 1});
-    Require((write + words.size()) * 4 < (2u << 20), "frame probe ring capacity");
+    if ((write + words.size()) * 4 >= (2u << 20)) {
+      // Restart the ring after the previous frame completed (it is idle).
+      gpu.InitializeRingBuffer(memory.GetPhysicalAddress(ring), 19);
+      write = 0;
+    }
+    Require(words.size() * 4 < (2u << 20), "frame probe ring capacity");
     for (size_t i = 0; i < words.size(); ++i)
       rex::memory::store_and_swap<uint32_t>(memory.TranslateVirtual(ring + uint32_t((write + i) * 4)), words[i]);
     write += uint32_t(words.size());
@@ -164,7 +196,7 @@ X360N_PROBE_MAIN {
       std::filesystem::resize_file(argv[2], std::stoull(std::filesystem::path(argv[3]).string()));
       return 0;
     }
-    Require(argc >= 4, "usage: x360n_native_frame_probe OUTPUT d3d12|vulkan FRAMES [cvar=value...]");
+    Require(argc >= 4, "usage: x360n_native_frame_probe OUTPUT d3d12|vulkan FRAMES [--draws N --resolves K] [cvar=value...]");
     const ProbeArg api = argv[2];
     Require(api == X360N_PROBE_ARG("d3d12") || api == X360N_PROBE_ARG("vulkan"), "invalid graphics API");
     const uint32_t frames = uint32_t(std::stoul(std::filesystem::path(argv[3]).string()));
@@ -176,7 +208,16 @@ X360N_PROBE_MAIN {
     Require(runtime.Setup(std::move(config)) == X_STATUS_SUCCESS, "runtime setup");
     auto gpu = rex::system::LoadGpuPlugin("native", api == X360N_PROBE_ARG("d3d12") ? "d3d12" : "vulkan");
     Require(bool(gpu), "Native plugin load");
-    for (int i = 4; i < argc; ++i) {
+    uint32_t extra_draws = 0, extra_resolves = 0;
+    int first_cvar = 4;
+    while (first_cvar + 1 < argc) {
+      const auto flag = std::filesystem::path(argv[first_cvar]).string();
+      if (flag != "--draws" && flag != "--resolves") break;
+      (flag == "--draws" ? extra_draws : extra_resolves) = uint32_t(std::stoul(std::filesystem::path(argv[first_cvar + 1]).string()));
+      first_cvar += 2;
+    }
+    Require(extra_draws <= 4096 && extra_resolves <= 64 && (extra_draws == 0) == (extra_resolves == 0), "invalid --draws/--resolves");
+    for (int i = first_cvar; i < argc; ++i) {
       const auto assignment = std::filesystem::path(argv[i]).string();
       const auto equals = assignment.find('=');
       Require(equals != std::string::npos && rex::cvar::SetFlagByName(assignment.substr(0, equals), assignment.substr(equals + 1)),
@@ -185,7 +226,7 @@ X360N_PROBE_MAIN {
     Require(gpu->SetupPresentation(nullptr) == X_STATUS_SUCCESS, "presentation setup");
     Require(gpu->SetupGuestGpu(runtime.function_dispatcher(), runtime.kernel_state()) == X_STATUS_SUCCESS, "guest GPU setup");
     struct Shutdown { rex::system::IGraphicsSystem* gpu; ~Shutdown() { if (gpu) gpu->Shutdown(); } } shutdown{gpu.get()};
-    Run(*gpu, *runtime.memory(), frames);
+    Run(*gpu, *runtime.memory(), frames, extra_draws, extra_resolves);
     gpu->Shutdown(); shutdown.gpu = nullptr; gpu.reset(); runtime.Shutdown(); rex::FlushLogging();
     std::cout << "PASS frames=" << frames << '\n';
     return 0;
