@@ -94,8 +94,7 @@ jobs:
         run: |
           # The debug layer (Graphics Tools) states why a D3D12 call is invalid;
           # Native appends its messages to the error and checks them after every
-          # submission. One frame on the runner's WARP, which did not complete
-          # the first submission of Native ROV color draws in earlier runs.
+          # submission. One frame on the runner's WARP.
           Add-WindowsCapability -Online -Name 'Tools.Graphics.DirectX~~~~0.0.1.0' | Out-String
           $bin = Split-Path (Get-ChildItem -Recurse -Filter x360n_native_frame_probe.exe .local/build/win-amd64 | Select-Object -First 1).FullName
           $out = '.local/build/win-amd64/src/native/warp-diagnosis/debug-layer'
@@ -108,6 +107,7 @@ jobs:
           $ErrorActionPreference = 'Stop'
           $replay = Split-Path (Get-ChildItem -Recurse -Filter x360n_native_replay.exe .local/build/win-amd64 | Select-Object -First 1).FullName
           $out = '.local/build/win-amd64/src/native/capture-replay-d3d12'
+          if (-not (Test-Path "$out/heavy/frames.x360nfc")) { 'No D3D12 capture (contract skipped on WARP): no A/B.'; exit 0 }
           python scripts/performance/native_replay_ab.py --capture "$out/heavy/frames.x360nfc" --output "$out/ab-eager-submit.json" --backend d3d12 --rounds 5 --repeat 5 --cvar d3d12_adapter=-2 --cvar native_gpu_timeout_ms=120000 --arm off $replay native_eager_submit=0 --arm idle64 $replay native_eager_submit=64 --arm queued64 $replay native_eager_submit=64 native_eager_submit_depth=1
           if ($LASTEXITCODE -ne 0) { throw 'A/B replay failed or differed from the capture' }
           python scripts/performance/native_replay_ab.py --capture "$out/heavy/frames.x360nfc" --output "$out/ab-state-filter.json" --backend d3d12 --rounds 5 --repeat 5 --cvar d3d12_adapter=-2 --cvar native_gpu_timeout_ms=120000 --arm unfiltered $replay native_redundant_state_filter=false --arm filtered $replay native_redundant_state_filter=true

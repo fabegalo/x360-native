@@ -238,8 +238,29 @@ informa os valores da fence; o CI Windows usa 120 s.
 | Mesmo teste, workload pesado com submissão desligada, ociosa e enfileirada (7 → 8 → 9 submissões/frame) | Linux lavapipe | equivalentes, repetíveis |
 | `native.d3d12-commands`: estado efetivo de 13 draws idêntico com e sem filtro (regras de invalidação estritas, PSO diferido, compute, reset); mutação sem invalidação por root signature falha | Linux (DirectX-Headers + shim, ASan/UBSan) e Windows CI | aprovado no Linux; Windows: ver PR |
 | `native.pipeline-recording`, `native.pipeline-cold-vulkan`, `native.vulkan-components`, `sdkcheck.Native-MEMEXPORT-vulkan`, `sdkcheck.Native-FSI-sample-counts`, `sdkcheck.Native-FrameTiming` | Linux lavapipe | aprovados |
-| `native.capture-replay-d3d12` (inclui replay com filtro de estado desligado), `native.capture-format`, `native.pipeline-recording`, `native.d3d12-commands` | Windows WARP (CI) | ver PR |
+| Build Windows x64 Release do plugin D3D12, replay, workloads e testes (toolchain fixado, sem checagem de sintaxe) | Windows CI | aprovado |
+| `native.capture-format`, `native.pipeline-recording`, `native.d3d12-commands` | Windows CI | ver PR |
+| `native.capture-replay-d3d12` | Windows WARP (CI) | **não executável no WARP: pulado com motivo** (abaixo) |
 | Sessão de captura (`native_capture_session.py`) com título simulado: gatilho, detecção do arquivo completo, replay equivalente e A/B de 5 braços | Linux | aprovado (sem jogo real) |
+
+**Native D3D12 no WARP dos runners hospedados (investigado, sem solução nesta
+entrega).** O WARP do Windows Server 2022 aceita as listas de comando do
+Native, a camada de debug (Graphics Tools instalada no CI) não reporta nenhum
+erro, e a primeira fence nunca completa quando a submissão contém um draw ROV
+com pixel shader de cor do guest (`fence 0 of 1` após 120 s; com e sem
+contagem de amostras). Draws sem pixel shader do guest (sonda de pipelines)
+completam. O WARP redistribuível 1.0.22 (NuGet, SHA-256 fixado) com o runtime
+D3D12 do sistema expõe um dispositivo sem faixas de descritores ilimitadas
+(camada de debug: "unbounded array size … not supported … on a SRV level
+device") e recusa a root signature, válida em hardware de tier 3; usá-lo
+exigiria também o runtime Agility SDK correspondente. O mesmo caminho roda no
+lavapipe e rodou na RTX 4070 (RENDER-FINAL). Hipótese: limitação do WARP na
+execução do pixel shader ROV traduzido; não comprovada (sem validação da GPU).
+Por isso `native.capture-replay-d3d12` é marcado **pulado** apenas com essa
+evidência exata (adaptador WARP + primeira fence não concluída); qualquer
+outra falha continua falhando, e em adaptador de hardware o contrato roda
+completo. Erros D3D12 do Native agora trazem o HRESULT em hexadecimal e as
+mensagens da camada de debug (`d3d12_debug=true`).
 
 O job Windows compila de verdade o plugin D3D12, o replay e os testes com o
 toolchain fixado (não é checagem de sintaxe) e executa os mesmos contratos com

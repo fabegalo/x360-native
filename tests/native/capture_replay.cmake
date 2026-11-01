@@ -15,6 +15,21 @@ function(run expected name)
   execute_process(COMMAND ${ARGN} RESULT_VARIABLE result OUTPUT_VARIABLE out ERROR_VARIABLE err TIMEOUT 300)
   message("[${name}] exit ${result}\n${out}${err}")
   if(NOT result EQUAL expected)
+    # WARP (the software D3D12 adapter of hosted Windows runners) accepts
+    # Native's command lists, the debug layer reports nothing, and its first
+    # fence never completes once a ROV color draw is submitted. Only that exact
+    # evidence is reported as a skip (SKIP_REGULAR_EXPRESSION): the contract
+    # needs a hardware D3D12 adapter; every other failure fails.
+    if(API STREQUAL "d3d12" AND EXISTS "${OUTPUT}/none/run/runtime.log")
+      file(READ "${OUTPUT}/none/run/runtime.log" runtime)
+      string(FIND "${runtime}" "Microsoft Basic Render Driver" warp)
+      string(FIND "${out}${err}" "render GPU timeout" hang)
+      string(FIND "${out}${err}" "fence 0 of" first)
+      if(NOT warp EQUAL -1 AND NOT hang EQUAL -1 AND NOT first EQUAL -1)
+        message(FATAL_ERROR "${name}: requires a hardware D3D12 adapter: WARP did not complete the first "
+                "submission with a ROV color draw (docs/reports/performance/render-core-2026-11-01.md)")
+      endif()
+    endif()
     # The runtime logs say why (CI keeps only this output on failure).
     file(GLOB_RECURSE logs "${OUTPUT}/*.log")
     foreach(log IN LISTS logs)

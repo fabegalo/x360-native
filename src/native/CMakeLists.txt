@@ -89,6 +89,10 @@ function(x360n_native_capture_replay api)
       -DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/capture-replay-${api} -DAPI=${api}
       -P ${CMAKE_CURRENT_SOURCE_DIR}/../../tests/native/capture_replay.cmake)
   set_tests_properties(native.capture-replay-${api} PROPERTIES LABELS project TIMEOUT 600)
+  if(api STREQUAL "d3d12")
+    # Software adapters that cannot run the contract (see capture_replay.cmake).
+    set_tests_properties(native.capture-replay-${api} PROPERTIES SKIP_REGULAR_EXPRESSION "requires a hardware D3D12 adapter")
+  endif()
 endfunction()
 if(WIN32)
   x360n_native_capture_replay(d3d12)
