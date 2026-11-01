@@ -880,8 +880,8 @@ void Driver::SharedSdk() {
     }
   };
   if (reuse()) return;
-  const auto generation = options.paths.build() / "shared-sdk" /
-                          HostPlatform() / (key.substr(0, 16) + "-" + run);
+  const auto generation = SharedSdkGenerationPath(
+      options.paths, HostPlatform() + "-" + key.substr(0, 16) + "-" + run);
   fs::create_directories(generation);
   FileLease owner(generation / ".x360n-build.lock", true);
   Configure(options.paths.root / "cmake/sdk/shared", generation, true, true);
