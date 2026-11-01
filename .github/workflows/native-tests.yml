@@ -49,11 +49,6 @@ jobs:
       # limit is raised so a slow first frame is not reported as a hang (a
       # real hang still fails, after 120 s).
       X360N_NATIVE_TEST_CVARS: d3d12_adapter=-2;native_gpu_timeout_ms=120000
-      # Redistributable WARP placed next to the test executables (D3D12 loads
-      # d3d10warp.dll from the application directory first): the WARP of the
-      # runner's OS never completed Native's ROV color draws (step below).
-      WARP_VERSION: 1.0.22
-      WARP_SHA256: afc058f4d1066edc4231a38f3ab3592b1930f7287d4ac700e6a056e0874bb0be
     steps:
       - name: Check out the exact event commit
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -84,31 +79,6 @@ jobs:
         run: |
           & scripts/devshell.cmd cmake --build --preset win-amd64-release --target rexgpu-native x360n_native_replay x360n_native_frame_probe x360n_native_pipeline_probe x360n_native_pipeline_tests
           if ($LASTEXITCODE -ne 0) { throw 'Build failed' }
-      - name: Record one frame on the OS WARP (informative)
-        timeout-minutes: 3
-        run: |
-          # The runner's built-in WARP (Windows Server 2022) does not complete
-          # the first submission of Native ROV color draws; kept as evidence.
-          $bin = Split-Path (Get-ChildItem -Recurse -Filter x360n_native_frame_probe.exe .local/build/win-amd64 | Select-Object -First 1).FullName
-          $out = '.local/build/win-amd64/src/native/warp-diagnosis/os-warp'
-          & "$bin/x360n_native_frame_probe.exe" $out d3d12 1 d3d12_adapter=-2 native_gpu_timeout_ms=20000 native_stats=true native_pipeline_threads=0
-          "OS WARP: exit $LASTEXITCODE"
-          Get-Content "$out/runtime.log" -Tail 12
-          exit 0
-      - name: Install the pinned redistributable WARP next to the tests
-        run: |
-          $ErrorActionPreference = 'Stop'
-          # A .nupkg is a zip; Expand-Archive accepts only the .zip extension.
-          $package = "$env:RUNNER_TEMP/warp.zip"
-          Invoke-WebRequest "https://api.nuget.org/v3-flatcontainer/microsoft.direct3d.warp/$env:WARP_VERSION/microsoft.direct3d.warp.$env:WARP_VERSION.nupkg" -OutFile $package
-          $hash = (Get-FileHash $package -Algorithm SHA256).Hash.ToLower()
-          if ($hash -ne $env:WARP_SHA256) { throw "WARP package hash $hash differs from the pinned $env:WARP_SHA256" }
-          Expand-Archive $package "$env:RUNNER_TEMP/warp" -Force
-          $dll = "$env:RUNNER_TEMP/warp/build/native/bin/x64/d3d10warp.dll"
-          foreach ($exe in Get-ChildItem -Recurse .local/build/win-amd64 -Include x360n_native_frame_probe.exe, x360n_native_replay.exe, x360n_native_pipeline_probe.exe) {
-            Copy-Item $dll $exe.DirectoryName -Force
-            "WARP $env:WARP_VERSION -> $($exe.DirectoryName)"
-          }
       - name: Run capture/replay and pipeline contracts on D3D12 WARP
         run: |
           # devshell.cmd passes arguments through cmd, where '|' is a pipe: one
@@ -123,7 +93,9 @@ jobs:
         timeout-minutes: 20
         run: |
           # The debug layer (Graphics Tools) states why a D3D12 call is invalid;
-          # Native appends its messages to the error. One frame on the pinned WARP.
+          # Native appends its messages to the error and checks them after every
+          # submission. One frame on the runner's WARP, which did not complete
+          # the first submission of Native ROV color draws in earlier runs.
           Add-WindowsCapability -Online -Name 'Tools.Graphics.DirectX~~~~0.0.1.0' | Out-String
           $bin = Split-Path (Get-ChildItem -Recurse -Filter x360n_native_frame_probe.exe .local/build/win-amd64 | Select-Object -First 1).FullName
           $out = '.local/build/win-amd64/src/native/warp-diagnosis/debug-layer'

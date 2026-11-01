@@ -497,8 +497,8 @@ void D3D12Render::Wait(uint64_t serial) {
   Check(fence_->SetEventOnCompletion(serial, event_), "fence completion");
   const DWORD limit = std::max<DWORD>(1000, REXCVAR_GET(native_gpu_timeout_ms));
   if (WaitForSingleObject(event_, limit) != WAIT_OBJECT_0)
-    throw std::runtime_error(fmt::format("Native: render GPU timeout ({} ms, fence {} of {})", limit,
-                                         fence_->GetCompletedValue(), serial));
+    throw std::runtime_error(fmt::format("Native: render GPU timeout ({} ms, fence {} of {}){}", limit,
+                                         fence_->GetCompletedValue(), serial, DebugLayerMessages()));
 }
 void D3D12Render::RecycleBatch() {
   auto& retired = batches_[batch_index_];
