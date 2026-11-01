@@ -10,6 +10,7 @@ on:
       - 'src/native/**'
       - 'tests/native/**'
       - 'tests/cmake/**'
+      - 'scripts/performance/native_replay_ab.py'
       - 'CMakeLists.txt'
       - 'CMakePresets.json'
       - 'cmake/**'
@@ -78,6 +79,13 @@ jobs:
         run: |
           & scripts/devshell.cmd ctest --preset win-amd64-release -R "native[.]capture|native[.]pipeline-recording" --output-on-failure --timeout 900
           if ($LASTEXITCODE -ne 0) { throw 'Native tests failed' }
+      - name: A/B early submission on the same recorded frames (WARP, informative timing)
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $replay = Split-Path (Get-ChildItem -Recurse -Filter x360n_native_replay.exe .local/build/win-amd64 | Select-Object -First 1).FullName
+          $out = '.local/build/win-amd64/src/native/capture-replay-d3d12'
+          python scripts/performance/native_replay_ab.py --baseline $replay --candidate $replay --capture "$out/heavy/frames.x360nfc" --output "$out/ab-eager-submit.json" --backend d3d12 --rounds 5 --repeat 5 --cvar d3d12_adapter=-2 --baseline-cvar native_eager_submit=0 --candidate-cvar native_eager_submit=64
+          if ($LASTEXITCODE -ne 0) { throw 'A/B replay failed or differed from the capture' }
       - name: Upload logs and replay reports
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -124,6 +132,13 @@ jobs:
           .local/toolchains/posix-linux-x64/cmake/bin/ctest --preset linux-amd64-release \
             -R "native[.]capture|native[.]pipeline|native[.]vulkan-components|Native-MEMEXPORT-vulkan|Native-FSI" \
             --output-on-failure --timeout 900
+      - name: A/B early submission on the same recorded frames (lavapipe, informative timing)
+        run: |
+          out=.local/build/linux-amd64/src/native/capture-replay-vulkan
+          replay=.local/build/linux-amd64/src/native/Release
+          python3 scripts/performance/native_replay_ab.py --baseline $replay --candidate $replay \
+            --capture $out/heavy/frames.x360nfc --output $out/ab-eager-submit.json --backend vulkan \
+            --rounds 5 --repeat 5 --baseline-cvar native_eager_submit=0 --candidate-cvar native_eager_submit=64
       - name: Upload logs and replay reports
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

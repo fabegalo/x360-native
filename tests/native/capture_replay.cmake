@@ -45,3 +45,26 @@ math(EXPR truncated "${size} - 7")
 file(COPY_FILE "${capture}" "${OUTPUT}/truncated.x360nfc")
 run(0 "truncate copy" "${PROBE}" --truncate "${OUTPUT}/truncated.x360nfc" ${truncated})
 run(2 "control with a truncated file" "${REPLAY}" "${OUTPUT}/truncated.x360nfc" "${OUTPUT}/truncated" --backend ${API} ${extra})
+# Early submission (native_eager_submit) must not change any frame: a heavy
+# capture (groups of draws, each followed by a resolve) replays equivalent and
+# repeatable with it off and at its most aggressive setting, and the
+# aggressive arm must really submit more often (the change is exercised).
+set(heavy "${OUTPUT}/heavy")
+run(0 "workload heavy" "${PROBE}" "${heavy}/run" ${API} 6 --draws 256 --resolves 4
+    native_capture=${heavy}/frames.x360nfc native_capture_skip=3 native_capture_frames=3 ${extra})
+foreach(eager 0 1)
+  run(0 "replay heavy eager=${eager}" "${REPLAY}" "${heavy}/frames.x360nfc" "${heavy}/eager-${eager}"
+      --backend ${API} --repeat 3 --stats native_eager_submit=${eager} ${extra})
+  file(READ "${heavy}/eager-${eager}/replay.json" report)
+  foreach(key equivalent repeatable)
+    string(JSON value GET "${report}" ${key})
+    if(NOT value)
+      message(FATAL_ERROR "heavy replay eager=${eager}: ${key} is ${value}")
+    endif()
+  endforeach()
+  string(JSON submissions_${eager} GET "${report}" per_frame submissions)
+endforeach()
+message("heavy replay submissions per warm frame: eager off ${submissions_0}, eager 1 ${submissions_1}")
+if(NOT submissions_1 GREATER submissions_0)
+  message(FATAL_ERROR "native_eager_submit=1 did not submit more often (${submissions_1} <= ${submissions_0})")
+endif()
