@@ -101,6 +101,65 @@ fs::path CanonicalPath(const fs::path& path) {
   return fs::canonical(path);
 #endif
 }
+namespace {
+// FNV-1a over the UTF-8 installation path, independent of std::hash's
+// implementation/CRT and stable across processes and updates.
+std::string ShortProjectId(const fs::path& path) {
+  uint64_t hash = 14695981039346656037ull;
+  for (unsigned char byte : PathUtf8(fs::absolute(path).lexically_normal())) {
+    hash ^= byte;
+    hash *= 1099511628211ull;
+  }
+  constexpr char digits[] = "0123456789abcdef";
+  std::string id(16, '0');
+  for (int i = 15; i >= 0; --i) {
+    id[size_t(i)] = digits[hash & 15];
+    hash >>= 4;
+  }
+  return id;
+}
+}  // namespace
+
+fs::path SharedSdkBuildRoot(const ProjectPaths& paths) {
+#ifdef _WIN32
+  // Use the current user's persistent local application data, not TEMP (which
+  // may be deleted automatically) and not the install folder (which can be
+  // arbitrarily deep). Avoid choosing a different drive via filesystem root.
+  std::wstring local;
+  if (const wchar_t* value = _wgetenv(L"LOCALAPPDATA"); value && *value)
+    local = value;
+  else
+    local = fs::temp_directory_path().wstring();
+  const auto root = fs::path(local) / "x360n" / "s" / ShortProjectId(paths.root);
+  // SDL3's nested try_compile adds 113+ characters to the CMake binary dir.
+  // Fail before making a broken cache if the OS profile itself is too deep.
+  if (root.wstring().size() > 80)
+    throw std::runtime_error("Windows user-local application-data path too deep "
+                             "for CMake/Ninja shared SDK; select a shorter build "
+                             "cache location");
+  return root;
+#else
+  return paths.build() / "shared-sdk";
+#endif
+}
+
+fs::path SharedSdkGenerationPath(const ProjectPaths& paths,
+                                 const std::string& generation_id) {
+  if (generation_id.empty() || generation_id.find_first_not_of(
+          "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_") !=
+          std::string::npos)
+    throw std::invalid_argument("Invalid shared SDK generation identity");
+#ifdef _WIN32
+  const auto path = SharedSdkBuildRoot(paths) / generation_id;
+  if (path.wstring().size() > 104)
+    throw std::runtime_error("Windows shared SDK generation path exceeds "
+                             "the safe CMake/Ninja depth");
+  return path;
+#else
+  return SharedSdkBuildRoot(paths) / generation_id;
+#endif
+}
+
 fs::path UserDataRoot(const ProjectPaths& paths, const fs::path& default_root) {
   const auto setting = paths.local() / "user-data-root.txt";
   if (!fs::exists(setting)) return default_root;

@@ -31,6 +31,15 @@ struct ProjectPaths {
   std::filesystem::path sdk_out() const { return sdk() / "out"; }
 };
 
+// User-local, persistent, per-installation build owner. Windows uses a short
+// path outside the installation to avoid SDL3's nested CMake try_compile limit.
+// Linux/macOS keep their existing project-local shared-SDK build owner.
+std::filesystem::path SharedSdkBuildRoot(const ProjectPaths& paths);
+// A unique, short generation inside the shared SDK owner. Source, game data,
+// title outputs, and verified receipts retain their established locations.
+std::filesystem::path SharedSdkGenerationPath(const ProjectPaths& paths,
+                                              const std::string& generation_id);
+
 // Walks up from `start` looking for deps.lock.json.
 std::optional<ProjectPaths> FindProjectRoot(const std::filesystem::path& start);
 

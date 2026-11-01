@@ -880,8 +880,13 @@ void Driver::SharedSdk() {
     }
   };
   if (reuse()) return;
+#ifdef _WIN32
+  const auto generation = SharedSdkGenerationPath(
+      options.paths, "g" + key.substr(0, 12) + "-" + Hash(run).substr(0, 8));
+#else
   const auto generation = options.paths.build() / "shared-sdk" /
                           HostPlatform() / (key.substr(0, 16) + "-" + run);
+#endif
   fs::create_directories(generation);
   FileLease owner(generation / ".x360n-build.lock", true);
   Configure(options.paths.root / "cmake/sdk/shared", generation, true, true);
@@ -1265,7 +1270,11 @@ int GuardNinja(const fs::path& configuration,
              build = PathFromUtf8(config.at("build"));
   const auto ninja = PathFromUtf8(config.at("ninja"));
   const auto title = config.at("title").get<std::string>();
-  if (!IsWithin(build, root / ".local/build") ||
+  const ProjectPaths project_paths{root};
+  const bool title_build = IsWithin(build, project_paths.build());
+  const auto sdk_root = SharedSdkBuildRoot(project_paths);
+  const bool sdk_build = title.empty() && IsWithin(build, sdk_root);
+  if ((!title_build && !sdk_build) ||
       (!title.empty() && !IsSafeLabel(title)))
     throw std::runtime_error("Unsafe Ninja build owner");
   const auto inherited = NativeEnvironmentValue("X360N_OWNED_BUILD");
