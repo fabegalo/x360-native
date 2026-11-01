@@ -60,3 +60,30 @@ TEST_CASE("sha256 of a file matches the in-memory digest", "[sha256]") {
   std::filesystem::remove(path);
   CHECK_FALSE(DigestFile(path));
 }
+
+TEST_CASE("sha256 of a file beyond the Windows MAX_PATH limit", "[sha256]") {
+  namespace fs = std::filesystem;
+  const auto root = UniqueTempPath("sha256_long");
+  // Built with the \\?\ form so the fixture itself is not limited to 260.
+  const auto extended = [](const fs::path& p) {
+#ifdef _WIN32
+    return fs::path(L"\\\\?\\" + fs::absolute(p).native());
+#else
+    return p;
+#endif
+  };
+  fs::remove_all(extended(root));
+  auto directory = root;
+  fs::create_directory(extended(directory));
+  while (directory.native().size() < 300) {
+    directory /= std::string(40, 'd');
+    fs::create_directory(extended(directory));
+  }
+  const auto file = directory / "clusterfuzz-testcase";
+  { std::ofstream(extended(file), std::ios::binary) << "abc"; }
+  const auto d = DigestFile(file);
+  REQUIRE(d);
+  CHECK(d->size == 3);
+  CHECK(d->sha256 == "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
+  fs::remove_all(extended(root));
+}

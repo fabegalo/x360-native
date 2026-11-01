@@ -50,7 +50,7 @@ std::string Digest(const fs::path& file) {
   return value->sha256;
 }
 void Record(Files& files, const fs::path& path) {
-  const auto absolute = Path(fs::canonical(path));
+  const auto absolute = Path(CanonicalPath(path));
   if (!files.contains(absolute)) files[absolute] = Digest(path);
 }
 bool Verify(const Files& files) {
@@ -437,7 +437,7 @@ class Driver {
           continue;
         }
         Record(snapshot, input);
-        const auto key = Path(fs::canonical(input));
+        const auto key = Path(CanonicalPath(input));
         entries[key] = snapshot.at(key);
       }
       products.push_back({{"path", Path(file)},

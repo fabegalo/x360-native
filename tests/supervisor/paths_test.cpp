@@ -88,6 +88,27 @@ TEST_CASE("package entry names cannot escape or alias devices", "[paths]") {
   CHECK_FALSE(IsSafePackageEntryName(std::string(256, 'a')));
 }
 
+TEST_CASE("canonical paths resolve beyond the Windows MAX_PATH limit", "[paths]") {
+  // Packaged environments sit under user folders; SDK test data then exceeds 260.
+  const auto root = UniqueTempPath("paths_long");
+  fs::remove_all(LongPath(root));
+  auto directory = root;
+  fs::create_directory(LongPath(directory));
+  while (directory.native().size() < 300) {
+    directory /= std::string(40, 'd');
+    fs::create_directory(LongPath(directory));
+  }
+  const auto file = directory / "clusterfuzz-testcase";
+  std::ofstream(LongPath(file)) << "x";
+
+  const auto resolved = CanonicalPath(file);
+  CHECK(resolved == fs::canonical(root) / file.lexically_relative(root));
+  CHECK(resolved.native().size() > 260);
+  CHECK(CanonicalPath(directory / "." / "clusterfuzz-testcase") == resolved);
+  CHECK_THROWS_AS(CanonicalPath(directory / "missing"), fs::filesystem_error);
+  fs::remove_all(LongPath(root));
+}
+
 TEST_CASE("run labels are restricted to safe directory-name characters", "[paths]") {
   CHECK(IsSafeLabel("ppc-smoke_1.0"));
   CHECK_FALSE(IsSafeLabel(""));

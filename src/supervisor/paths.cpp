@@ -64,6 +64,43 @@ std::string PathUtf8(const fs::path& path) {
 fs::path PathFromUtf8(const std::string& value) {
   return fs::path(std::u8string(value.begin(), value.end()));
 }
+fs::path LongPath(const fs::path& path) {
+#ifdef _WIN32
+  // The prefix disables Win32 normalization; GetFullPathNameW already applied it.
+  auto name = fs::absolute(path).make_preferred().native();
+  if (name.starts_with(L"\\\\?\\")) return name;
+  return name.starts_with(L"\\\\") ? L"\\\\?\\UNC\\" + name.substr(2) : L"\\\\?\\" + name;
+#else
+  return path;
+#endif
+}
+fs::path CanonicalPath(const fs::path& path) {
+#ifdef _WIN32
+  // Same resolution as the MSVC STL: open following links, ask for the final name.
+  const auto name = LongPath(path);
+  const auto file = CreateFileW(name.c_str(), FILE_READ_ATTRIBUTES,
+      FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING,
+      FILE_FLAG_BACKUP_SEMANTICS, nullptr);
+  if (file == INVALID_HANDLE_VALUE)
+    throw fs::filesystem_error("canonical", path, std::error_code(int(GetLastError()), std::system_category()));
+  std::wstring final(512, L'\0');
+  auto count = GetFinalPathNameByHandleW(file, final.data(), DWORD(final.size()), FILE_NAME_NORMALIZED | VOLUME_NAME_DOS);
+  if (count >= final.size()) {
+    final.resize(size_t(count) + 1);
+    count = GetFinalPathNameByHandleW(file, final.data(), DWORD(final.size()), FILE_NAME_NORMALIZED | VOLUME_NAME_DOS);
+  }
+  const auto error = GetLastError();
+  CloseHandle(file);
+  if (!count || count >= final.size())
+    throw fs::filesystem_error("canonical", path, std::error_code(int(error), std::system_category()));
+  final.resize(count);
+  if (final.starts_with(L"\\\\?\\UNC\\")) return fs::path(L"\\\\" + final.substr(8));
+  if (final.starts_with(L"\\\\?\\") && final.size() > 6 && final[5] == L':') return fs::path(final.substr(4));
+  return final;
+#else
+  return fs::canonical(path);
+#endif
+}
 fs::path UserDataRoot(const ProjectPaths& paths, const fs::path& default_root) {
   const auto setting = paths.local() / "user-data-root.txt";
   if (!fs::exists(setting)) return default_root;
