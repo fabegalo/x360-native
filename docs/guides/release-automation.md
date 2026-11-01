@@ -60,10 +60,13 @@ Tag creation/publication is not part of manual validation.
 
 Only a tag on `main` whose six package jobs all succeeded can start
 publication. A separate Ubuntu job downloads the artifacts from that same run,
-requires exactly the twelve assets of the six platforms, checks their complete
+requires all twelve CI deliverables (six archives and six `.sha256` sidecars), checks their complete
 inventories, SHA-256, file modes, PE/ELF/Mach-O architectures, source/SDK/patch/tool identities and run metadata, then
-creates a draft release using the committed notes and `--verify-tag`. It
-downloads and compares all uploaded assets before publishing the draft.
+creates a draft release using the committed notes and `--verify-tag`.
+**Only the six verified installation archives are attached to the public GitHub Release.**
+The checksum sidecars remain CI artifacts for internal verification, not public release assets.
+The publisher downloads and byte-compares all six public archives against the locally verified copies
+before publishing the draft. GitHub displays the SHA-256 digest of each uploaded asset.
 Versions with a prerelease suffix (including `preview`) become pre-releases
 and are not marked Latest. Stable versions become regular releases.
 
