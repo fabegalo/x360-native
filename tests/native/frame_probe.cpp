@@ -7,7 +7,7 @@
 //   x360n_native_frame_probe OUTPUT d3d12|vulkan FRAMES [--draws N --resolves K]
 //       [--no-sample-counts] [cvar=value...]
 // --no-sample-counts leaves out the ZPD query and the visibility-tested draw
-// (no ROV sample counting), for hosts that cannot run it.
+// (no ROV sample counting), to isolate that path when diagnosing a host.
 // Prints each frame's scanout hash; no title data is involved.
 #include "probe_main.h"
 #include "../../src/native/capture/capture_format.h"

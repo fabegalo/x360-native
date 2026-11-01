@@ -5,9 +5,8 @@
 # with identical results across passes. Negative controls must be detected.
 #   -DPROBE=... -DREPLAY=... -DOUTPUT=... -DAPI=d3d12|vulkan
 #   Extra cvars for both programs (e.g. d3d12_adapter=-2 for WARP on CI):
-#   environment X360N_NATIVE_TEST_CVARS, separated by ';'. Workload flags
-#   (e.g. --no-sample-counts where the host cannot run ROV sample counting):
-#   X360N_NATIVE_TEST_WORKLOAD_FLAGS.
+#   environment X360N_NATIVE_TEST_CVARS, separated by ';'. Extra workload
+#   flags (diagnosis, e.g. --no-sample-counts): X360N_NATIVE_TEST_WORKLOAD_FLAGS.
 file(REMOVE_RECURSE "${OUTPUT}")
 file(MAKE_DIRECTORY "${OUTPUT}")
 set(extra "$ENV{X360N_NATIVE_TEST_CVARS}")
