@@ -234,43 +234,49 @@ forçados) falha em "identical draw constants allocated another upload".
 Fontes conferidas como anteriores ao binário testado. Evidência:
 `.local/render-final/d3d12-constant-{green,inline,red,plugin-pair}/`.
 
-Gameplay: somente o **controle** foi medido (`render-final-constant-control-d12-1`,
-mesmas condições e PresentMon): 1.140 frames, 19,02 FPS, 1% low 8,62 FPS,
-P95 66,921 ms, P99 68,644 ms, CPU agregado 169,96 ms/frame, primeiro swap
-1.262,75 ms.
+Gameplay em dois pares ABBA (controle 1, candidata 1, candidata 2,
+controle 2; `render-final-constant-{control,candidate}-d12-{1,2}`): mesmos
+binários exceto o plugin Native (`f40f4010…` candidata contra `63ce79f8…`
+controle), mesmo seed e cenário, janela 210+60 s, limite de 275 s, PresentMon
+autorizado pelo mantenedor e restrito ao PID do jogo. O usuário jogou no mesmo
+trecho de árvores/parque e o agente só observou:
 
-Candidata (`render-final-constant-candidate-d12-1`), mesmos binários exceto o
-plugin Native (`f40f4010…` contra `63ce79f8…`), mesmo seed, cenário, limite
-de 275 s e PresentMon autorizado pelo mantenedor; o usuário jogou e o agente
-só observou:
+| Medida | Controle 1 | Candidata 1 | Candidata 2 | Controle 2 |
+|---|---:|---:|---:|---:|
+| Frames completos na janela | 1.140 | 926 | 1.247 | 1.182 |
+| FPS médio | 19,02 | 15,46 | 20,81 | 19,72 |
+| 1% low (FPS) | 8,62 | 13,91 | 9,74 | 14,64 |
+| P95 / P99 (ms) | 66,921 / 68,644 | 69,079 / 70,155 | 51,711 / 52,530 | 52,652 / 67,565 |
+| CPU agregado (ms/frame) | 169,96 | 189,91 | 146,06 | 153,25 |
+| Primeiro swap (ms) | 1.262,75 | 1.205,44 | 732,88 | 754,75 |
+| Working set / commit privado máximos (MB) | 1.456,8 / 2.362,1 | 1.416,2 / 2.291,6 | 1.362,5 / 2.229,7 | 1.304,7 / 2.176,0 |
+| Draws por frame | 2.911 | 3.007 | 2.681 | 2.810 |
+| Draw total na CPU (ms/frame) | 21,73 | 18,97 | 15,90 | 19,88 |
+| Draw na CPU por draw (µs) | 7,46 | 6,31 | 5,93 | 7,08 |
+| Constantes enviadas (MB/frame); reuso | 5,78; 0% | 2,43; 80,5% | 2,18; 80,8% | 5,40; 0% |
+| Fila GPU ocupada (ms/frame) | 14,80 | 25,31 | 12,56 | 13,68 |
+| Fila GPU ocupada por draw (µs) | 5,09 | 8,42 | 4,68 | 4,87 |
+| Esperas de fence (ms/frame) | 13,85 | 25,95 | 11,84 | 12,85 |
+| Criação de PSO na janela (ms/frame) | 1,00 | 0 | 0,93 | 0 |
+| PresentMon: apresentações host/s; GPU ocupada (ms/s) | 267,1; 382,5 | 240,7; 570,3 | 278,0; 365,1 | 272,6; 368,9 |
 
-| Medida | Controle | Candidata |
-|---|---:|---:|
-| Frames completos na janela | 1.140 | 926 |
-| FPS médio | 19,02 | 15,46 |
-| 1% low (FPS) | 8,62 | 13,91 |
-| P95 / P99 (ms) | 66,921 / 68,644 | 69,079 / 70,155 |
-| CPU agregado (ms/frame) | 169,96 | 189,91 |
-| Primeiro swap (ms) | 1.262,75 | 1.205,44 |
-| Working set / commit privado máximos (bytes) | 1.456.803.840 / 2.362.064.896 | 1.416.196.096 / 2.291.589.120 |
-| Draws por frame | 2.911 | 3.007 |
-| Draw total na CPU (ms/frame) | 21,73 | 18,97 |
-| Fila GPU ocupada (ms/frame) | 14,80 | 25,31 |
-| Esperas de fence (ms/frame) | 13,85 | 25,95 |
-| Criação de PSO na janela (ms/frame) | 1,00 | 0 |
-| PresentMon: apresentações host/s; GPU ocupada (ms/s) | 267,1; 382,5 | 240,7; 570,3 |
-
-Reuso por root na candidata: sistema 97,3%, floats VS 87,4%, floats PS 91,2%,
-bool 99,8%, fetch 30,1%. O custo de draw na CPU caiu 12,7% com 3,3% mais
-draws, mas o tempo de GPU por frame subiu cerca de 71% e determinou a queda
-de FPS; o 1% low melhorou. Para separar cena e mudança, três pares
-alternados headless (`batch`, 4.096 draws idênticos, mesmos binários dos
-contratos): GPU controle 18,90/19,61/18,06 ms, candidata 16,55/15,42/16,11 ms;
-wall 52,1/57,0/52,1 contra 45,9/45,5/45,0 ms. **Não houve aumento de GPU
-atribuível ao cache no microbenchmark**; a hipótese é diferença de cena
-(câmera/tráfego sem replay determinístico), não comprovada. Com uma rodada
-manual por lado, **nenhum ganho ou perda de gameplay é atribuído a este
-commit**. Evidência: `.local/render-final/constant-{control,candidate}-costs.json`,
+Reuso por root na candidata 1: sistema 97,3%, floats VS 87,4%, floats PS
+91,2%, bool 99,8%, fetch 30,1%; a candidata 2 repete a proporção (80,8% no
+total). O alto custo de GPU da candidata 1 (8,42 µs/draw, 570 ms/s no
+PresentMon) **não se repetiu**: a candidata 2 ficou em 4,68 µs/draw e
+365 ms/s, abaixo dos dois controles (4,87–5,09 µs/draw; 369–383 ms/s). Isso
+é coerente com os três pares headless alternados (`batch`, 4.096 draws
+idênticos, mesmos binários dos contratos), sem aumento de GPU atribuível ao
+cache: GPU controle 18,90/19,61/18,06 ms, candidata 16,55/15,42/16,11 ms;
+wall 52,1/57,0/52,1 contra 45,9/45,5/45,0 ms. A causa da candidata 1 continua
+**hipótese de cena** (câmera/tráfego sem replay determinístico), não
+comprovada. O efeito que se repetiu nos dois pares foi o custo de draw na CPU
+por draw: −15,4% no par 1 e −16,2% no par 2, com 58–60% menos bytes de
+constantes por frame. FPS e 1% low não acompanharam esse custo de forma
+consistente (par 1: −18,7% FPS e +61% 1% low; par 2: +5,5% FPS e −33% 1% low),
+então, com duas rodadas manuais por lado, **nenhum ganho ou perda de FPS é
+atribuído a este commit**. Evidência:
+`.local/render-final/constant-{control,candidate}{,-2}-costs.json`,
 `.local/render-final/constant-gpu-pairs/`, `.local/render-final/presentmon/`.
 
 ### Native Vulkan: índices residentes
@@ -339,8 +345,9 @@ executadas. Saídas em `.local/render-final/official-runs/`.
 
 ## Pendências de aceite
 
-- Pares repetidos e alternados controle/candidata das constantes D3D12, para
-  separar cena e mudança no tempo de GPU por frame.
+- Replay determinístico (ou cena fixa) para medir FPS das constantes D3D12:
+  dois pares manuais ABBA repetiram a redução de CPU por draw, mas não um
+  efeito de FPS.
 - Par controle/candidata com 0248: exige reconstruir o executável AOT de Skate 3,
   porque `rex_app.cpp` é compilado em cada título e o layout de
   `AchievementToastDialog`/`VulkanDevice` mudou; trocar só `rexruntime.dll`

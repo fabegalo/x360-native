@@ -9,8 +9,10 @@ de forçar redesenho contínuo da UI (0248). Cada mudança tem contrato com
 controle negativo, aprovado em Release na RTX 4070; lock com 235 patches.
 Skate 3 D3D12, rodadas manuais de 60 s: 15,65 FPS na `main` e 19,34 FPS com
 índices residentes (1% low 9,72 → 14,59); trajetos sem replay determinístico,
-**sem aceite de fluidez**. Constantes D3D12 e 0248 sem medição de gameplay;
-Vulkan, Xenos e demais títulos sem gameplay nesta etapa.
+**sem aceite de fluidez**. Constantes D3D12, dois pares ABBA: draw na CPU
+−15/−16% por draw nos dois pares, sem efeito consistente em FPS nem na GPU.
+0248 sem medição de gameplay; Vulkan, Xenos e demais títulos sem gameplay
+nesta etapa.
 [Medições, condições e limites](docs/reports/performance/render-final-2026-10-31.md).
 
 31/10 — **PERF-GPU-02, continuação Windows sobre o PR #9**: integrada a main
