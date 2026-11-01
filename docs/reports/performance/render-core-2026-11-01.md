@@ -232,17 +232,20 @@ informa os valores da fence; o CI Windows usa 120 s.
 
 | Teste | Plataforma | Resultado |
 |---|---|---|
-| `native.capture-format`: 6 casos / 75 asserções — ordem, deduplicação, present, payloads malformados por decodificador, inconsistências do present, estrutura do arquivo, todo truncamento e byte corrompido; ASan/UBSan limpos | Linux | aprovado |
-| `native.capture-replay-vulkan`: efeitos `none` e `fxaa`, 8 frames, captura 4, replay 3 passes = 12/12 scanouts, 12/12 faixas GPU, 48/48 contadores, 12/12 saídas do presenter, repetível | Linux lavapipe | aprovado |
-| Mesmo teste, controles: sem EDRAM → 4/4 frames diferentes (3); 16 bytes de vértices alterados → frame diferente (3); arquivo truncado → recusado (2) | Linux lavapipe | detectados |
-| Mesmo teste, workload pesado com `native_eager_submit` 0 e 1 | Linux lavapipe | equivalentes, repetíveis |
+| `native.capture-format`: 7 casos / 95 asserções — ordem, deduplicação, present, payloads malformados, present sem imagem composta (0×0, meia, >16384) e versão 2 recusados, contrato do hash de imagem (vazia/truncada/stride inválido recusados, X ignorado), estrutura, todo truncamento e byte corrompido; ASan/UBSan limpos | Linux | aprovado |
+| `native.capture-replay-vulkan`: efeitos `none` e `fxaa`, replay 3 passes = 12/12 scanouts, 12/12 faixas GPU, 48/48 contadores, 12/12 imagens compostas, `visual_checked`, repetível | Linux lavapipe | aprovado |
+| Mesmo teste, controles: sem EDRAM (3), vértices alterados (3), presenter sem imagem `--drop-output` → "presenter returned no composed image" em 4/4 frames (3), arquivo truncado (2) | Linux lavapipe | detectados |
+| Mesmo teste, workload pesado com submissão desligada, ociosa e enfileirada (7 → 8 → 9 submissões/frame) | Linux lavapipe | equivalentes, repetíveis |
+| `native.d3d12-commands`: estado efetivo de 13 draws idêntico com e sem filtro (regras de invalidação estritas, PSO diferido, compute, reset); mutação sem invalidação por root signature falha | Linux (DirectX-Headers + shim, ASan/UBSan) e Windows CI | aprovado no Linux; Windows: ver PR |
 | `native.pipeline-recording`, `native.pipeline-cold-vulkan`, `native.vulkan-components`, `sdkcheck.Native-MEMEXPORT-vulkan`, `sdkcheck.Native-FSI-sample-counts`, `sdkcheck.Native-FrameTiming` | Linux lavapipe | aprovados |
-| `native.capture-replay-d3d12`, `native.capture-format`, `native.pipeline-recording` (workflow `native-tests.yml`) | Windows WARP | ver PR |
+| `native.capture-replay-d3d12` (inclui replay com filtro de estado desligado), `native.capture-format`, `native.pipeline-recording`, `native.d3d12-commands` | Windows WARP (CI) | ver PR |
+| Sessão de captura (`native_capture_session.py`) com título simulado: gatilho, detecção do arquivo completo, replay equivalente e A/B de 5 braços | Linux | aprovado (sem jogo real) |
 
 O job Windows compila de verdade o plugin D3D12, o replay e os testes com o
 toolchain fixado (não é checagem de sintaxe) e executa os mesmos contratos com
-`d3d12_adapter=-2` (WARP). Os dois jobs também rodam um A/B informativo de
-`native_eager_submit` 0/64 sobre a captura pesada e publicam o JSON.
+`d3d12_adapter=-2` (WARP) e `native_gpu_timeout_ms=120000`. Os dois jobs
+também rodam A/Bs informativos sobre a captura pesada (estratégias de
+submissão; no WARP também o filtro de estado) e publicam os JSONs.
 
 Limites conhecidos: MEMEXPORT com endereço dinâmico não entra na verificação;
 texturas são gravadas pelos bindings (conservador); a decisão de visibilidade
