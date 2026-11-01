@@ -109,6 +109,28 @@ TEST_CASE("canonical paths resolve beyond the Windows MAX_PATH limit", "[paths]"
   fs::remove_all(LongPath(root));
 }
 
+TEST_CASE("shared SDK uses a short isolated build root", "[paths][preparation]") {
+  TempProject first;
+  TempProject second;
+  const ProjectPaths a{first.root}, b{second.root};
+  const auto one = SharedSdkGenerationPath(a, "windows-x64-0123456789abcdef-123");
+  const auto again = SharedSdkGenerationPath(a, "windows-x64-0123456789abcdef-123");
+  const auto next = SharedSdkGenerationPath(a, "windows-x64-0123456789abcdef-456");
+  CHECK(one == again);
+  CHECK(one != next);
+#ifdef _WIN32
+  // The original failure added 113 characters of SDL3/CMakeTmp nesting to
+  // a 153-character build root. Keep a safe margin below CMake's 250 limit.
+  CHECK(one.native().size() <= 105);
+  CHECK((one.native().size() + 113) < 250);
+  CHECK(one != SharedSdkGenerationPath(b, "windows-x64-0123456789abcdef-123"));
+  CHECK_FALSE(IsWithin(one, a.inputs()));
+#else
+  CHECK(one == a.build() / "shared-sdk" / "windows-x64-0123456789abcdef-123");
+#endif
+  CHECK_THROWS_AS(SharedSdkGenerationPath(a, "../escape"), std::invalid_argument);
+}
+
 TEST_CASE("run labels are restricted to safe directory-name characters", "[paths]") {
   CHECK(IsSafeLabel("ppc-smoke_1.0"));
   CHECK_FALSE(IsSafeLabel(""));
