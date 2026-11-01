@@ -34,8 +34,9 @@ struct FrameStats {
 // Shared by the live profile and replay: the CSV columns of one frame.
 std::string FrameStatsCsvHeader();
 std::string FrameStatsCsvRow(const FrameStats&);
-// The presenter's composed output: rows only (stride padding excluded) and size.
-capture::Hash HashImage(const rex::ui::RawImage&);
+// The presenter's composed output (RGB of each row and the size); false for an
+// empty or truncated image, which no check may accept.
+bool HashImage(const rex::ui::RawImage&, capture::Hash&);
 BackendCounters operator-(const BackendCounters& later, const BackendCounters& earlier);
 
 class CaptureBackend final : public ScanoutBackend {
@@ -90,6 +91,8 @@ class CaptureBackend final : public ScanoutBackend {
   bool recording() const { return writer_ != nullptr; }
   void StartRecording();
   void FinishRecording();
+  // Stops recording and deletes the incomplete file (never a partial capture).
+  void AbortRecording(const std::string& reason);
   void EmitRegisters(const rex::graphics::RegisterFile&);
   uint32_t EmitShader(rex::graphics::Shader*);
   // Records guest bytes a call reads, except pages that hold GPU results.

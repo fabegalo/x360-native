@@ -2,7 +2,7 @@
 // captures (native_capture), without the title.
 //
 //   x360n_native_replay CAPTURE OUTPUT_DIR [--backend d3d12|vulkan] [--repeat N]
-//       [--stats] [--no-present] [--skip-edram | --tamper-memory N] [cvar=value...]
+//       [--stats] [--no-present] [--skip-edram | --tamper-memory N | --drop-output] [cvar=value...]
 //
 // Writes OUTPUT_DIR/frames.csv (one row per replayed frame and pass, same
 // columns as native_frame_profile) and OUTPUT_DIR/replay.json. Frames are
@@ -10,7 +10,9 @@
 // frame matched the capture (scanout, GPU-written guest memory, sample
 // counters, presenter output) and every pass produced identical results;
 // 3 on a mismatch, 2 for an invalid capture file, 1 on other errors.
-// --skip-edram and --tamper-memory are negative controls that must yield 3.
+// --skip-edram, --tamper-memory and --drop-output are negative controls that
+// must yield 3. --no-present skips the visual check: replay.json then reports
+// "visual_checked":false and the run is not a full equivalence proof.
 #include "../capture/frame_replay.h"
 #include "../commands/scanout_backend.h"
 #include "../../../tests/native/probe_main.h"
@@ -43,13 +45,13 @@ X360N_PROBE_MAIN {
   try {
     if (argc < 3) {
       std::cerr << "usage: x360n_native_replay CAPTURE OUTPUT_DIR [--backend d3d12|vulkan] [--repeat N] [--stats] [--no-present]\n"
-                   "       [--skip-edram | --tamper-memory N] [cvar=value...]\n";
+                   "       [--skip-edram | --tamper-memory N | --drop-output] [cvar=value...]\n";
       return 1;
     }
     const std::filesystem::path capture_path(argv[1]), output(argv[2]);
     std::string backend_name;
     uint32_t repeat = 1;
-    bool stats = false, skip_edram = false, present = true;
+    bool stats = false, skip_edram = false, drop_output = false, present = true;
     int64_t tamper_memory = -1;
     std::vector<std::pair<std::string, std::string>> cvars;
     for (int i = 3; i < argc; ++i) {
@@ -59,6 +61,7 @@ X360N_PROBE_MAIN {
       else if (arg == "--stats") stats = true;
       else if (arg == "--no-present") present = false;     // CompleteFrame only: no presenter output check.
       else if (arg == "--skip-edram") skip_edram = true;  // Negative control of the EDRAM snapshot.
+      else if (arg == "--drop-output") drop_output = true;  // Negative control: presenter yields no image.
       else if (arg == "--tamper-memory" && i + 1 < argc) tamper_memory = std::stoll(Narrow(argv[++i]));  // Negative control.
       else if (const auto equals = arg.find('='); equals != std::string::npos) cvars.emplace_back(arg.substr(0, equals), arg.substr(equals + 1));
       else throw std::invalid_argument("unknown argument: " + arg);
@@ -114,6 +117,9 @@ X360N_PROBE_MAIN {
     ReplayOptions options;
     options.repeat = repeat;
     options.skip_edram = skip_edram;
+    options.drop_output = drop_output;
+    if (drop_output && !present) throw std::invalid_argument("--drop-output needs the presenter");
+    if (!present) std::cerr << "warning: --no-present: the composed image is not checked\n";
     options.tamper_memory_record = tamper_memory;
     options.presenter = presenter.get();
     std::vector<double> warm_frame_ms;
@@ -169,12 +175,12 @@ X360N_PROBE_MAIN {
     std::string mismatches;
     for (const auto& text : result.mismatches) mismatches += fmt::format("{}\"{}\"", mismatches.empty() ? "" : ",", text);
     const auto json = fmt::format(
-        "{{\"capture\":\"{}\",\"backend\":\"{}\",\"passes\":{},\"frames\":{},\"total_ms\":{:.3f},"
+        "{{\"capture\":\"{}\",\"backend\":\"{}\",\"passes\":{},\"frames\":{},\"visual_checked\":{},\"total_ms\":{:.3f},"
         "\"warm_frame_ms_p50\":{:.3f},\"warm_frame_ms_p95\":{:.3f},\"equivalent\":{},\"repeatable\":{},"
         "\"frontbuffer_checks\":{},\"frontbuffer_mismatches\":{},\"written_checks\":{},\"written_mismatches\":{},"
         "\"sample_checks\":{},\"sample_mismatches\":{},\"output_checks\":{},\"output_mismatches\":{},"
         "\"memory_records\":{},\"memory_pages_written\":{},\"per_frame\":{},\"mismatches\":[{}]}}\n",
-        capture_path.filename().string(), backend_name, result.passes, result.frames, total_ms, percentile(0.5),
+        capture_path.filename().string(), backend_name, result.passes, result.frames, result.visual_checked, total_ms, percentile(0.5),
         percentile(0.95), result.equivalent(), result.repeatable(), result.frontbuffer_checks, result.frontbuffer_mismatches,
         result.written_checks, result.written_mismatches, result.sample_checks, result.sample_mismatches,
         result.output_checks, result.output_mismatches, result.memory_records, result.memory_pages_written, summary, mismatches);

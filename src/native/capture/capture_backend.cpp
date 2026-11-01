@@ -8,6 +8,7 @@
 #include <rex/system/xmemory.h>
 #include <rex/chrono/frame_layout.h>
 #include <rex/ui/presenter.h>
+#include <fmt/format.h>
 #include <xxhash.h>
 #include <fmt/format.h>
 #include <algorithm>
@@ -104,17 +105,8 @@ CaptureBackend::~CaptureBackend() {
   }
   if (profile_) std::fclose(profile_);
 }
-capture::Hash HashImage(const rex::ui::RawImage& image) {
-  XXH3_state_t* state = XXH3_createState();
-  XXH3_128bits_reset(state);
-  const uint32_t size[2]{image.width, image.height};
-  XXH3_128bits_update(state, size, sizeof(size));
-  const size_t row = size_t(image.width) * 4;
-  for (uint32_t y = 0; y < image.height && image.stride * y + row <= image.data.size(); ++y)
-    XXH3_128bits_update(state, image.data.data() + image.stride * y, row);
-  const auto hash = XXH3_128bits_digest(state);
-  XXH3_freeState(state);
-  return {hash.low64, hash.high64};
+bool HashImage(const rex::ui::RawImage& image, capture::Hash& out) {
+  return capture::HashRgbxImage(image.data.data(), image.data.size(), image.width, image.height, image.stride, out);
 }
 CaptureBackend::CaptureWork::~CaptureWork() {
   if (--self.capture_depth_ == 0) self.frame_.capture_ms += Ms(Clock::now() - start);
@@ -148,6 +140,16 @@ void CaptureBackend::StartRecording() {
   written_ranges_.clear();
   recorded_frames_ = 0;
   REXLOG_INFO("Native frame capture: recording after present {}", presents_);
+}
+void CaptureBackend::AbortRecording(const std::string& reason) {
+  writer_.reset();
+  registers_.reset();
+  emitted_ranges_.clear();
+  capture_done_ = true;
+  std::error_code error;
+  std::filesystem::remove(options_.capture, error);
+  REXLOG_ERROR("Native frame capture rejected after {} frame(s): {}; {} was not kept", recorded_frames_, reason,
+               options_.capture.string());
 }
 void CaptureBackend::FinishRecording() {
   CaptureWork work(*this);
@@ -291,17 +293,22 @@ void CaptureBackend::Present(rex::ui::Presenter& presenter, const ScanoutTexture
       if (Accessible(memory_, page * capture::kPageSize, capture::kPageSize))
         state = {true, capture::HashBytes(memory_.TranslatePhysical(page * capture::kPageSize), capture::kPageSize)};
     // The composed output (gamma, overlay, post effect) of this present.
+    // A frame without it cannot be checked visually: the capture is rejected.
     rex::ui::RawImage image;
-    if (presenter.CaptureGuestOutput(image)) {
+    if (!presenter.CaptureGuestOutput(image)) {
+      AbortRecording("the presenter returned no composed image for the frame");
+    } else if (!HashImage(image, record.output)) {
+      AbortRecording(fmt::format("the presenter returned an invalid {}x{} image (stride {}, {} bytes)", image.width,
+                                 image.height, image.stride, image.data.size()));
+    } else {
       record.output_width = image.width;
       record.output_height = image.height;
-      record.output = HashImage(image);
+      const auto aspect = rex::chrono::FrameLayout::DisplayAspect();
+      record.aspect_x = aspect.x;
+      record.aspect_y = aspect.y;
+      writer_->Present(record);
+      if (++recorded_frames_ == options_.frames) FinishRecording();
     }
-    const auto aspect = rex::chrono::FrameLayout::DisplayAspect();
-    record.aspect_x = aspect.x;
-    record.aspect_y = aspect.y;
-    writer_->Present(record);
-    if (++recorded_frames_ == options_.frames) FinishRecording();
   }
   ++presents_;
   EndProfileFrame();

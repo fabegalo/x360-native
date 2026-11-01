@@ -26,7 +26,8 @@
 namespace x360n::native::capture {
 inline constexpr char kMagic[8] = {'X', '3', '6', '0', 'N', 'F', 'C', '1'};
 // 2: present records carry the presenter's final output (LUT, overlay, post effect).
-inline constexpr uint32_t kVersion = 2;
+// 3: that output is mandatory; a present without a composed image is invalid.
+inline constexpr uint32_t kVersion = 3;
 inline constexpr uint32_t kPhysicalSize = 0x20000000;
 inline constexpr uint32_t kPageSize = 4096;
 inline constexpr uint32_t kMaxShaderDwords = 65536;
@@ -59,6 +60,12 @@ static_assert(sizeof(Header) == 80);
 using Hash = std::array<uint64_t, 2>;
 Hash HashBytes(const void* data, size_t size);
 inline bool Recorded(const Hash& hash) { return hash[0] || hash[1]; }
+inline constexpr uint32_t kMaxOutputSide = 16384;
+// Hash of a presenter image (R8 G8 B8 X8 rows, `stride` bytes apart, the last
+// row possibly unpadded) and its size. X is undefined and not hashed. Returns
+// false, without hashing, for an empty, oversized or truncated image: a check
+// against a missing image must fail, never compare fewer rows.
+bool HashRgbxImage(const uint8_t* data, size_t size, uint32_t width, uint32_t height, size_t stride, Hash& out);
 
 // Guest-visible results checked after a frame: the scanout image, every range
 // resolves and memory exports wrote during the frame (after publication), and
@@ -71,7 +78,7 @@ struct PresentRecord {
   std::vector<uint32_t> lut;
   Hash frontbuffer;
   std::vector<WrittenRange> written;
-  uint32_t output_width = 0, output_height = 0;  // 0: the presenter output was not captured.
+  uint32_t output_width = 0, output_height = 0;  // Composed output size, never 0 in a valid file.
   Hash output{};
   uint32_t aspect_x = 0, aspect_y = 0;  // FrameLayout display aspect the host declared ({0,0}: guest).
 };

@@ -43,6 +43,7 @@ ReplayResult ReplayCapture(capture::Reader& reader, ScanoutBackend& backend, rex
   // Every record is decoded and range-checked before the renderer sees one.
   capture::ValidateFile(reader, RegisterFile::kRegisterCount);
   ReplayResult result;
+  result.visual_checked = options.presenter != nullptr;
   auto regs = std::make_unique<RegisterFile>();
   std::vector<Shader*> shaders;
   auto mismatch = [&](std::string text) { if (result.mismatches.size() < 32) result.mismatches.push_back(std::move(text)); };
@@ -203,13 +204,21 @@ ReplayResult ReplayCapture(capture::Reader& reader, ScanoutBackend& backend, rex
               mismatch(fmt::format("pass {} frame {}: GPU-written {:08X}+{} differs", pass, frame_index, range.address, range.length));
             }
           }
-          if (options.presenter && record.output_width) {
+          if (options.presenter) {
+            // Every frame of a valid capture has its composed image: a replay
+            // presenter that yields none (or an invalid one) is a difference.
             ++result.output_checks;
             rex::ui::RawImage image;
-            const bool captured = options.presenter->CaptureGuestOutput(image);
-            const auto output = captured ? HashImage(image) : capture::Hash{};
+            capture::Hash output{};
+            const bool captured = !options.drop_output && options.presenter->CaptureGuestOutput(image);
+            const bool valid = captured && HashImage(image, output);
             XXH3_128bits_update(digest, output.data(), sizeof(output));
-            if (!captured || image.width != record.output_width || image.height != record.output_height || output != record.output) {
+            if (!valid) {
+              ++result.output_mismatches;
+              mismatch(captured ? fmt::format("pass {} frame {}: presenter returned an invalid {}x{} image", pass,
+                                              frame_index, image.width, image.height)
+                                : fmt::format("pass {} frame {}: presenter returned no composed image", pass, frame_index));
+            } else if (image.width != record.output_width || image.height != record.output_height || output != record.output) {
               ++result.output_mismatches;
               mismatch(fmt::format("pass {} frame {}: presenter output {}x{} differs from the captured {}x{}", pass,
                                    frame_index, image.width, image.height, record.output_width, record.output_height));

@@ -31,6 +31,26 @@ Hash HashBytes(const void* data, size_t size) {
   const auto hash = XXH3_128bits(data, size);
   return {hash.low64, hash.high64};
 }
+bool HashRgbxImage(const uint8_t* data, size_t size, uint32_t width, uint32_t height, size_t stride, Hash& out) {
+  if (!data || !width || !height || width > kMaxOutputSide || height > kMaxOutputSide) return false;
+  const size_t row = size_t(width) * 4;
+  if (stride < row || size < stride * (height - 1) + row) return false;
+  XXH3_state_t* state = XXH3_createState();
+  if (!state) return false;
+  XXH3_128bits_reset(state);
+  const uint32_t extent[2]{width, height};
+  XXH3_128bits_update(state, extent, sizeof(extent));
+  std::vector<uint8_t> rgb(size_t(width) * 3);
+  for (uint32_t y = 0; y < height; ++y) {
+    const uint8_t* source = data + stride * y;
+    for (uint32_t x = 0; x < width; ++x) std::memcpy(&rgb[x * 3], source + x * 4, 3);
+    XXH3_128bits_update(state, rgb.data(), rgb.size());
+  }
+  const auto hash = XXH3_128bits_digest(state);
+  XXH3_freeState(state);
+  out = {hash.low64, hash.high64};
+  return true;
+}
 Writer::Writer(const std::filesystem::path& path, const Header& header) : path_(path) {
   if (path.has_parent_path()) std::filesystem::create_directories(path.parent_path());
   out_.open(path, std::ios::binary | std::ios::trunc);
@@ -69,6 +89,8 @@ void Writer::Simple(Record type, std::initializer_list<uint32_t> words) {
   for (uint32_t word : words) Put(word);
 }
 void Writer::Present(const PresentRecord& p) {
+  if (!p.output_width || !p.output_height)
+    throw std::runtime_error("Native capture: present without the composed image (not recordable)");
   const uint64_t size = 4 * (9 + 2 + 17 + 1 + p.lut.size() + 1) + 16 + p.written.size() * (8 + 16) + 8 + 16 + 8;
   Begin(Record::kPresent, size);
   Put(p.texture);
@@ -246,8 +268,8 @@ PresentRecord DecodePresent(const uint8_t* payload, uint64_t size) {
     Range(p.overlay[0], p.overlay[7], "overlay");
     Flag(p.overlay[8], "overlay format flag");
   }
-  Require(p.output_width <= 16384 && p.output_height <= 16384 && (p.output_width == 0) == (p.output_height == 0),
-          "presenter output size");
+  Require(p.output_width && p.output_height, "presenter output missing (the frame has no composed image)");
+  Require(p.output_width <= kMaxOutputSide && p.output_height <= kMaxOutputSide, "presenter output size");
   return p;
 }
 void DecodeEmpty(Record type, uint64_t size) {

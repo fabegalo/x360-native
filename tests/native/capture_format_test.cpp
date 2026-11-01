@@ -199,11 +199,53 @@ TEST_CASE("present records with inconsistent fields are rejected", "[native-capt
   p = MakePresent(); p.post_effect = 3; CHECK(rejects(p));
   p = MakePresent(); p.has_overlay = 1; CHECK(rejects(p));                     // Overlay without a surface.
   p = MakePresent(); p.written.push_back({0x1FFFFF00, 0x200, {}}); CHECK(rejects(p));
-  p = MakePresent(); p.output_height = 0; CHECK(rejects(p));                   // Half an output size.
+  p = MakePresent(); p.output_height = 0; CHECK(Throws([&] { encoded(p); }));  // The writer refuses it too.
+  // A present without the composed image (as a damaged or older capture would
+  // hold it) is invalid: the visual check could not run.
+  auto missing_output = [&](uint32_t width, uint32_t height) {
+    auto bytes = encoded(MakePresent());
+    const size_t at = bytes.size() - 32;  // output width, height, hash[16], aspect[8]
+    std::memcpy(bytes.data() + at, &width, 4);
+    std::memcpy(bytes.data() + at + 4, &height, 4);
+    return Throws([&] { DecodePresent(bytes.data(), bytes.size()); });
+  };
+  CHECK_FALSE(missing_output(32, 32));
+  CHECK(missing_output(0, 0));
+  CHECK(missing_output(32, 0));
+  CHECK(missing_output(0, 32));
+  CHECK(missing_output(16385, 32));
   p = MakePresent(); p.aspect_y = 0; CHECK(rejects(p));
   auto bytes = encoded(MakePresent());
   bytes.pop_back();
   CHECK(Throws([&] { DecodePresent(bytes.data(), bytes.size()); }));
+}
+TEST_CASE("presenter images are hashed only when complete", "[native-capture]") {
+  const uint32_t width = 4, height = 3;
+  const size_t stride = 20;  // Row padding is not part of the image.
+  std::vector<uint8_t> image(stride * (height - 1) + width * 4);
+  for (size_t i = 0; i < image.size(); ++i) image[i] = uint8_t(i * 7);
+  Hash reference{}, other{};
+  REQUIRE(HashRgbxImage(image.data(), image.size(), width, height, stride, reference));
+  // Undefined X bytes and padding do not change the hash; colours and size do.
+  auto changed = image;
+  changed[3] ^= 0xFF; changed[17] ^= 0xFF;
+  REQUIRE(HashRgbxImage(changed.data(), changed.size(), width, height, stride, other));
+  CHECK(other == reference);
+  changed[stride + 1] ^= 1;
+  REQUIRE(HashRgbxImage(changed.data(), changed.size(), width, height, stride, other));
+  CHECK(other != reference);
+  REQUIRE(HashRgbxImage(image.data(), image.size(), width, height - 1, stride, other));
+  CHECK(other != reference);
+  // Missing, empty, truncated or oversized images are refused, not compared
+  // on fewer rows.
+  Hash untouched{};
+  CHECK_FALSE(HashRgbxImage(nullptr, 0, width, height, stride, untouched));
+  CHECK_FALSE(HashRgbxImage(image.data(), image.size(), 0, height, stride, untouched));
+  CHECK_FALSE(HashRgbxImage(image.data(), image.size(), width, 0, stride, untouched));
+  CHECK_FALSE(HashRgbxImage(image.data(), image.size() - 1, width, height, stride, untouched));
+  CHECK_FALSE(HashRgbxImage(image.data(), image.size(), width, height, width * 4 - 1, untouched));
+  CHECK_FALSE(HashRgbxImage(image.data(), image.size(), kMaxOutputSide + 1, 1, stride, untouched));
+  CHECK_FALSE(Recorded(untouched));
 }
 TEST_CASE("files with inconsistent structure are rejected", "[native-capture]") {
   const auto valid = MakeCapture();
@@ -212,6 +254,7 @@ TEST_CASE("files with inconsistent structure are rejected", "[native-capture]") 
   };
   CHECK_FALSE(validate(valid));
   auto old = valid; reinterpret_cast<Header*>(old.data())->version = 1; CHECK(validate(old));
+  old = valid; reinterpret_cast<Header*>(old.data())->version = 2; CHECK(validate(old));  // Output was optional.
   auto magic = valid; magic[0] = 'Y'; CHECK(validate(magic));
   auto frames = valid; reinterpret_cast<Header*>(frames.data())->frames = 2; CHECK(validate(frames));
   auto scale = valid; reinterpret_cast<Header*>(scale.data())->scale_x = 0; CHECK(validate(scale));

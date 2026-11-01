@@ -24,6 +24,8 @@ struct ReplayOptions {
   // Negative controls only: skip restoring EDRAM, or alter the first 16 bytes
   // of the Nth memory record when it is applied (0 = first).
   bool skip_edram = false;
+  // Negative control: behave as if the presenter produced no composed image.
+  bool drop_output = false;
   int64_t tamper_memory_record = -1;
   std::function<void(uint32_t pass, const FrameStats&)> on_frame;
 };
@@ -38,8 +40,12 @@ struct ReplayResult {
   // passes produced identical output (repeatability, not only equivalence).
   std::vector<capture::Hash> pass_digests;
   std::vector<std::string> mismatches;  // First few, for the report.
+  // True only if every check passed; with a presenter, every frame's composed
+  // image was compared (visual_checked), never skipped.
+  bool visual_checked = false;
   bool equivalent() const {
-    return !frontbuffer_mismatches && !written_mismatches && !sample_mismatches && !output_mismatches;
+    return frames && !frontbuffer_mismatches && !written_mismatches && !sample_mismatches && !output_mismatches &&
+           (!visual_checked || output_checks == frames);
   }
   bool repeatable() const {
     for (const auto& digest : pass_digests) if (digest != pass_digests.front()) return false;
