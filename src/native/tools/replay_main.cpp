@@ -117,9 +117,22 @@ X360N_PROBE_MAIN {
     options.tamper_memory_record = tamper_memory;
     options.presenter = presenter.get();
     std::vector<double> warm_frame_ms;
+    // Means over warm passes (all passes when there is only one): the
+    // renderer's cost per frame by phase, for bottleneck attribution.
+    struct Means { double n = 0, frame, backend, draw, resolve, sync, sample, present, shader, draws, resolves, syncs,
+                   submissions, fence_waits, fence_ms, gpu_ms; bool gpu = true, measured = true; } warm{}, all{};
+    auto add = [](Means& m, const FrameStats& f) {
+      ++m.n; m.frame += f.frame_ms; m.backend += f.backend_ms; m.draw += f.draw_ms; m.resolve += f.resolve_ms;
+      m.sync += f.sync_ms; m.sample += f.sample_ms; m.present += f.present_ms; m.shader += f.shader_ms;
+      m.draws += double(f.draws); m.resolves += double(f.resolves); m.syncs += double(f.guest_syncs);
+      m.submissions += double(f.counters.submissions); m.fence_waits += double(f.counters.fence_waits);
+      m.fence_ms += double(f.counters.fence_wait_ns) / 1e6; m.gpu_ms += double(f.counters.gpu_busy_ns) / 1e6;
+      m.gpu = m.gpu && f.counters.gpu_timed; m.measured = m.measured && f.counters.measured;
+    };
     options.on_frame = [&](uint32_t pass, const FrameStats& frame) {
       csv << pass << ',' << FrameStatsCsvRow(frame) << '\n';
-      if (pass) warm_frame_ms.push_back(frame.frame_ms);
+      if (pass) { warm_frame_ms.push_back(frame.frame_ms); add(warm, frame); }
+      add(all, frame);
     };
     const auto start = std::chrono::steady_clock::now();
     const auto result = ReplayCapture(reader, *backend, *runtime.memory(), options);
@@ -132,6 +145,27 @@ X360N_PROBE_MAIN {
     auto percentile = [&](double q) {
       return warm_frame_ms.empty() ? 0.0 : warm_frame_ms[std::min(warm_frame_ms.size() - 1, size_t(q * warm_frame_ms.size()))];
     };
+    const Means& m = warm.n ? warm : all;
+    auto mean = [&](double total) { return m.n ? total / m.n : 0.0; };
+    // Dominant phase of the replayed frame: GPU-bound when the GPU was busy
+    // for most of it; otherwise where the renderer's thread spent its time.
+    std::string bottleneck = "unmeasured";
+    if (m.n) {
+      const std::pair<double, const char*> phases[]{{mean(m.draw), "draw_recording"}, {mean(m.resolve), "resolves"},
+          {mean(m.sync) + mean(m.sample), "guest_syncs_and_counters"}, {mean(m.present), "present"}, {mean(m.shader), "shader_loading"}};
+      bottleneck = std::max_element(std::begin(phases), std::end(phases))->second;
+      if (m.gpu && mean(m.gpu_ms) >= 0.8 * mean(m.frame)) bottleneck = "gpu";
+    }
+    auto optional = [](bool valid, double value) { return valid ? fmt::format("{:.3f}", value) : std::string("null"); };
+    const auto summary = fmt::format(
+        "{{\"frames\":{},\"frame_ms\":{:.3f},\"renderer_ms\":{:.3f},\"draw_ms\":{:.3f},\"resolve_ms\":{:.3f},"
+        "\"sync_ms\":{:.3f},\"sample_ms\":{:.3f},\"present_ms\":{:.3f},\"shader_ms\":{:.3f},\"draws\":{:.1f},"
+        "\"resolves\":{:.1f},\"guest_syncs\":{:.1f},\"submissions\":{:.2f},\"fence_waits\":{},\"fence_wait_ms\":{},"
+        "\"gpu_busy_ms\":{},\"gpu_idle_ms\":{},\"bottleneck\":\"{}\"}}",
+        uint64_t(m.n), mean(m.frame), mean(m.backend), mean(m.draw), mean(m.resolve), mean(m.sync), mean(m.sample),
+        mean(m.present), mean(m.shader), mean(m.draws), mean(m.resolves), mean(m.syncs), mean(m.submissions),
+        optional(m.measured, mean(m.fence_waits)), optional(m.measured, mean(m.fence_ms)), optional(m.gpu, mean(m.gpu_ms)),
+        optional(m.gpu, mean(m.frame) - mean(m.gpu_ms)), bottleneck);
     std::string mismatches;
     for (const auto& text : result.mismatches) mismatches += fmt::format("{}\"{}\"", mismatches.empty() ? "" : ",", text);
     const auto json = fmt::format(
@@ -139,11 +173,11 @@ X360N_PROBE_MAIN {
         "\"warm_frame_ms_p50\":{:.3f},\"warm_frame_ms_p95\":{:.3f},\"equivalent\":{},\"repeatable\":{},"
         "\"frontbuffer_checks\":{},\"frontbuffer_mismatches\":{},\"written_checks\":{},\"written_mismatches\":{},"
         "\"sample_checks\":{},\"sample_mismatches\":{},\"output_checks\":{},\"output_mismatches\":{},"
-        "\"memory_records\":{},\"memory_pages_written\":{},\"mismatches\":[{}]}}\n",
+        "\"memory_records\":{},\"memory_pages_written\":{},\"per_frame\":{},\"mismatches\":[{}]}}\n",
         capture_path.filename().string(), backend_name, result.passes, result.frames, total_ms, percentile(0.5),
         percentile(0.95), result.equivalent(), result.repeatable(), result.frontbuffer_checks, result.frontbuffer_mismatches,
         result.written_checks, result.written_mismatches, result.sample_checks, result.sample_mismatches,
-        result.output_checks, result.output_mismatches, result.memory_records, result.memory_pages_written, mismatches);
+        result.output_checks, result.output_mismatches, result.memory_records, result.memory_pages_written, summary, mismatches);
     std::ofstream(output / "replay.json") << json;
     std::cout << json;
     runtime.Shutdown();
