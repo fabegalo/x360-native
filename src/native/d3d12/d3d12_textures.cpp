@@ -355,7 +355,7 @@ void D3D12Render::LoadTextureGpu(const TextureLoadPlan& plan, ID3D12Resource* te
   uav.Buffer.NumElements = UINT(scratch->size >> plan.dest_bpe_log2);
   device_->CreateUnorderedAccessView(scratch->buffer.Get(), nullptr, &uav, Cpu(v + 1));
   ID3D12DescriptorHeap* heaps[]{views_.Get(), samplers_.Get()}; cmd_.SetDescriptorHeaps(2, heaps);
-  cmd_.SetComputeRootSignature(load_root_.Get()); cmd_.SetPipelineState(pipeline);
+  cmd_.SetComputeRootSignature(load_root_.Get()); cmd_.SetPipelineState(pipeline, &pipeline);
   cmd_.SetComputeRootDescriptorTable(1, Gpu(v)); cmd_.SetComputeRootDescriptorTable(2, Gpu(v + 1));
   RecordTextureLoad(cmd_, plan, offset, scratch->buffer.Get(), texture);
   scratch->state = D3D12_RESOURCE_STATE_COPY_SOURCE;

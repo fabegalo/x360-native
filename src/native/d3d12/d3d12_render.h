@@ -15,6 +15,7 @@
 #include <rex/graphics/util/draw.h>
 #include <rex/ui/d3d12/d3d12_provider.h>
 #include <wrl/client.h>
+#include <xxhash.h>
 #include <map>
 #include <unordered_map>
 #include <unordered_set>
@@ -215,7 +216,18 @@ class D3D12Render {
   // Graphics pipelines by exact description bytes. A pipeline is created by
   // pipeline_workers_ and bound through cmd_ while it may still be compiling;
   // the submission waits for the pipelines of its commands (Flush).
-  std::map<std::string, std::shared_future<Ptr<ID3D12PipelineState>>> pipelines_;
+  // Graphics pipelines by their whole description (zeroed, so padding is
+  // fixed). A fixed-size key and a hash: no allocation or ordered string
+  // compares on each draw's lookup. Entries are never erased: their address
+  // identifies the bound pipeline (D3D12Commands).
+  struct PipelineKey {
+    std::array<uint8_t, sizeof(D3D12_GRAPHICS_PIPELINE_STATE_DESC)> bytes;
+    bool operator==(const PipelineKey&) const = default;
+  };
+  struct PipelineKeyHash {
+    size_t operator()(const PipelineKey& key) const noexcept { return size_t(XXH3_64bits(key.bytes.data(), key.bytes.size())); }
+  };
+  std::unordered_map<PipelineKey, std::shared_future<Ptr<ID3D12PipelineState>>, PipelineKeyHash> pipelines_;
   Ptr<ID3D12PipelineState> CreatePipeline(D3D12_GRAPHICS_PIPELINE_STATE_DESC, uint64_t vs_hash, uint64_t ps_hash,
       uint64_t vm, uint64_t pm, uint32_t primitive, uint32_t msaa, unsigned planes, uint32_t mask, size_t id);
   void ReplayCommands();

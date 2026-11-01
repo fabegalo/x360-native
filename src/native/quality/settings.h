@@ -16,5 +16,7 @@ unsigned NativeEagerSubmitWork();
 // 0 waits for an idle queue, 1 keeps one batch queued behind the running one.
 // Never more: with three recording arenas a deeper queue would block the CPU.
 unsigned NativeEagerSubmitDepth();
+// Redundant graphics state is not recorded again (native_redundant_state_filter).
+bool NativeRedundantStateFilter();
 rex::graphics::xenos::AnisoFilter NativeAnisotropy(rex::graphics::xenos::AnisoFilter guest);
 }

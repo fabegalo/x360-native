@@ -120,3 +120,9 @@ add_test(NAME native.pipeline-recording COMMAND x360n_native_pipeline_tests [nat
 set_tests_properties(native.pipeline-recording PROPERTIES LABELS project TIMEOUT 60)
 add_test(NAME native.capture-format COMMAND x360n_native_pipeline_tests [native-capture])
 set_tests_properties(native.capture-format PROPERTIES LABELS project TIMEOUT 60)
+if(WIN32)
+  # Redundant D3D12 state filtering against a fake list (d3d12.h types only).
+  target_sources(x360n_native_pipeline_tests PRIVATE native/d3d12_commands_test.cpp)
+  add_test(NAME native.d3d12-commands COMMAND x360n_native_pipeline_tests [native-d3d12])
+  set_tests_properties(native.d3d12-commands PROPERTIES LABELS project TIMEOUT 60)
+endif()

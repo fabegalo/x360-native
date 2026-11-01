@@ -127,6 +127,7 @@ D3D12Render::D3D12Render(rex::ui::d3d12::D3D12Provider& provider) : provider_(pr
   Check(device_->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&allocator_)), "allocator");
   Check(device_->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, allocator_.Get(), nullptr, IID_PPV_ARGS(&list_)), "command list");
   cmd_.Attach(list_.Get());
+  cmd_.SetStateFilter(NativeRedundantStateFilter());
   Check(device_->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&fence_)), "fence");
   event_ = CreateEventW(nullptr, FALSE, FALSE, nullptr); Require(event_ != nullptr, "fence event");
   memory_ = Buffer(0x20000000, D3D12_HEAP_TYPE_DEFAULT, memory_state_, D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS);
@@ -284,8 +285,8 @@ void D3D12Render::CountPresent() {
       pipeline_waits_, draw_ns_ / 1000000, texture_ns_ / 1000000,
       guest_upload_ns_ / 1000000, resolve_ns_ / 1000000, flush_wait_ns_ / 1000000);
   REXLOG_INFO("Native pipeline disk hits={} rejects={}", pipeline_disk_hits_.load(), pipeline_disk_rejects_.load());
-  REXLOG_INFO("Native flush causes guest_sync={} (event={} packet={} wait={} buffer_end={} present={}) present={} overlap={} capacity={} drain={} eager={} wait_ms={}",
-      flush_causes_[kFlushGuestSync], sync_sources_[kGuestSyncEvent], sync_sources_[kGuestSyncPacket], sync_sources_[kGuestSyncWait], sync_sources_[kGuestSyncBufferEnd], sync_sources_[kGuestSyncPresent], flush_causes_[kFlushPresent], flush_causes_[kFlushOverlap], flush_causes_[kFlushCapacity], flush_causes_[kFlushDrain], flush_causes_[kFlushEager], flush_wait_ns_ / 1000000);
+  REXLOG_INFO("Native flush causes guest_sync={} (event={} packet={} wait={} buffer_end={} present={}) present={} overlap={} capacity={} drain={} eager={} wait_ms={} redundant_state_skipped={}",
+      flush_causes_[kFlushGuestSync], sync_sources_[kGuestSyncEvent], sync_sources_[kGuestSyncPacket], sync_sources_[kGuestSyncWait], sync_sources_[kGuestSyncBufferEnd], sync_sources_[kGuestSyncPresent], flush_causes_[kFlushPresent], flush_causes_[kFlushOverlap], flush_causes_[kFlushCapacity], flush_causes_[kFlushDrain], flush_causes_[kFlushEager], flush_wait_ns_ / 1000000, cmd_.filtered());
   std::string opcodes;
   for (unsigned i = 0; i < 256; ++i) if (sync_opcodes_[i]) opcodes += fmt::format(" {:02X}:{}", i, sync_opcodes_[i]);
   REXLOG_INFO("Native guest sync opcodes{}", opcodes);

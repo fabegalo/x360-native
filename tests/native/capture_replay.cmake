@@ -91,3 +91,9 @@ message("heavy replay submissions per warm frame: off ${submissions_0_0}, idle $
 if(NOT submissions_1_0 GREATER submissions_0_0 OR submissions_1_1 LESS submissions_1_0)
   message(FATAL_ERROR "early submission was not exercised (${submissions_0_0}, ${submissions_1_0}, ${submissions_1_1})")
 endif()
+# D3D12 skips redundant graphics state by default: recording every call must
+# produce the same frames (the filter only removes repeated state).
+if(API STREQUAL "d3d12")
+  run(0 "replay without the state filter" "${REPLAY}" "${heavy}/frames.x360nfc" "${heavy}/no-state-filter"
+      --backend ${API} --repeat 2 native_redundant_state_filter=false ${extra})
+endif()
