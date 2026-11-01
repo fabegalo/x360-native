@@ -1,0 +1,159 @@
+{
+  "description": "A/B of native_eager_submit (0 vs 64) on the same recorded synthetic frames, x360n_native_replay --backend vulkan, Mesa lavapipe, alternating order, warm passes. No title data.",
+  "workloads": {
+    "256 draws, 4 resolves per frame": {
+      "cpus": 4,
+      "rounds": 9,
+      "repeat": 6,
+      "backend": "vulkan",
+      "cvars": [],
+      "baseline_cvars": [
+        "native_eager_submit=0"
+      ],
+      "candidate_cvars": [],
+      "captures": {
+        "frames.x360nfc": {
+          "baseline": {
+            "median": {
+              "frame_ms": 49.265,
+              "renderer_ms": 46.689,
+              "draw_ms": 4.411,
+              "resolve_ms": 4.29,
+              "sync_ms": 14.781,
+              "sample_ms": 16.359,
+              "present_ms": 7.323,
+              "submissions": 7.0,
+              "fence_waits": 5.0,
+              "fence_wait_ms": 37.962,
+              "gpu_busy_ms": 37.475,
+              "gpu_idle_ms": 12.816
+            },
+            "bottleneck": [
+              "guest_syncs_and_counters",
+              "guest_syncs_and_counters",
+              "guest_syncs_and_counters",
+              "guest_syncs_and_counters",
+              "guest_syncs_and_counters",
+              "guest_syncs_and_counters",
+              "guest_syncs_and_counters",
+              "guest_syncs_and_counters",
+              "guest_syncs_and_counters"
+            ],
+            "equivalent_runs": 9
+          },
+          "candidate": {
+            "median": {
+              "frame_ms": 56.45,
+              "renderer_ms": 53.44,
+              "draw_ms": 5.631,
+              "resolve_ms": 3.607,
+              "sync_ms": 18.772,
+              "sample_ms": 17.349,
+              "present_ms": 8.067,
+              "submissions": 8.0,
+              "fence_waits": 5.0,
+              "fence_wait_ms": 43.905,
+              "gpu_busy_ms": 45.926,
+              "gpu_idle_ms": 10.524
+            },
+            "bottleneck": [
+              "guest_syncs_and_counters",
+              "gpu",
+              "guest_syncs_and_counters",
+              "gpu",
+              "gpu",
+              "guest_syncs_and_counters",
+              "gpu",
+              "gpu",
+              "gpu"
+            ],
+            "equivalent_runs": 9
+          },
+          "paired_frame_ratio": {
+            "median": 1.0636,
+            "min": 1.0169,
+            "max": 1.213
+          }
+        }
+      },
+      "workload": "x360n_native_frame_probe OUT vulkan 6 --draws 256 --resolves 4, capture of frames 3-5",
+      "host": "Linux x86-64 container, 4 CPUs, Mesa lavapipe"
+    },
+    "1024 draws, 8 resolves per frame": {
+      "cpus": 4,
+      "rounds": 7,
+      "repeat": 5,
+      "backend": "vulkan",
+      "cvars": [],
+      "baseline_cvars": [
+        "native_eager_submit=0"
+      ],
+      "candidate_cvars": [
+        "native_eager_submit=64"
+      ],
+      "captures": {
+        "frames.x360nfc": {
+          "baseline": {
+            "median": {
+              "frame_ms": 90.811,
+              "renderer_ms": 87.322,
+              "draw_ms": 15.471,
+              "resolve_ms": 16.6,
+              "sync_ms": 30.165,
+              "sample_ms": 16.861,
+              "present_ms": 7.976,
+              "submissions": 7.0,
+              "fence_waits": 5.0,
+              "fence_wait_ms": 53.837,
+              "gpu_busy_ms": 53.192,
+              "gpu_idle_ms": 37.627
+            },
+            "bottleneck": [
+              "guest_syncs_and_counters",
+              "guest_syncs_and_counters",
+              "guest_syncs_and_counters",
+              "guest_syncs_and_counters",
+              "guest_syncs_and_counters",
+              "guest_syncs_and_counters",
+              "guest_syncs_and_counters"
+            ],
+            "equivalent_runs": 7
+          },
+          "candidate": {
+            "median": {
+              "frame_ms": 89.044,
+              "renderer_ms": 85.097,
+              "draw_ms": 24.859,
+              "resolve_ms": 6.192,
+              "sync_ms": 29.62,
+              "sample_ms": 18.167,
+              "present_ms": 6.897,
+              "submissions": 9.0,
+              "fence_waits": 5.0,
+              "fence_wait_ms": 52.864,
+              "gpu_busy_ms": 66.297,
+              "gpu_idle_ms": 23.453
+            },
+            "bottleneck": [
+              "guest_syncs_and_counters",
+              "guest_syncs_and_counters",
+              "guest_syncs_and_counters",
+              "guest_syncs_and_counters",
+              "guest_syncs_and_counters",
+              "guest_syncs_and_counters",
+              "guest_syncs_and_counters"
+            ],
+            "equivalent_runs": 7
+          },
+          "paired_frame_ratio": {
+            "median": 0.9805,
+            "min": 0.884,
+            "max": 1.1366
+          }
+        }
+      },
+      "workload": "x360n_native_frame_probe OUT vulkan 6 --draws 1024 --resolves 8, capture of frames 3-5",
+      "host": "Linux x86-64 container, 4 CPUs, Mesa lavapipe"
+    }
+  }
+}
