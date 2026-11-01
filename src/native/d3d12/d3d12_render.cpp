@@ -1,4 +1,5 @@
 #include "d3d12_render.h"
+#include <atomic>
 #include <rex/graphics/pipeline/render_target/cache.h>
 #include <rex/logging.h>
 #include <rex/graphics/flags.h>
@@ -19,8 +20,27 @@ namespace x360n::native {
 using namespace rex::graphics;
 using namespace rex::graphics::xenos;
 namespace {
+// The renderer's debug info queue (d3d12_debug=true), so that a failed call
+// reports the debug layer's reason instead of only its HRESULT.
+std::atomic<ID3D12InfoQueue*> g_info_queue{nullptr};
+std::string DebugLayerMessages() {
+  auto* queue = g_info_queue.load();
+  if (!queue) return {};
+  std::string text;
+  const UINT64 count = queue->GetNumStoredMessagesAllowedByRetrievalFilter();
+  for (UINT64 i = count > 6 ? count - 6 : 0; i < count; ++i) {
+    SIZE_T bytes = 0;
+    if (FAILED(queue->GetMessage(i, nullptr, &bytes)) || !bytes) continue;
+    std::vector<uint8_t> storage(bytes);
+    auto* message = reinterpret_cast<D3D12_MESSAGE*>(storage.data());
+    if (SUCCEEDED(queue->GetMessage(i, message, &bytes)) && message->Severity <= D3D12_MESSAGE_SEVERITY_WARNING)
+      text += std::string("; debug layer: ") + message->pDescription;
+  }
+  return text;
+}
 void Check(HRESULT hr, const char* what) {
-  if (FAILED(hr)) throw std::runtime_error(std::string("Native render: ") + what + " HRESULT=" + std::to_string(uint32_t(hr)));
+  if (FAILED(hr))
+    throw std::runtime_error(fmt::format("Native render: {} HRESULT={:08X}{}", what, uint32_t(hr), DebugLayerMessages()));
 }
 void Require(bool v, const char* what) { if (!v) throw std::runtime_error(std::string("Native: ") + what); }
 }
@@ -120,6 +140,7 @@ D3D12Render::D3D12Render(rex::ui::d3d12::D3D12Provider& provider) : provider_(pr
   texture_cpu_ = REXCVAR_GET(native_texture_cpu);
   pipeline_workers_ = std::make_unique<PipelineWorkers>(NativePipelineThreads());
   device_->QueryInterface(IID_PPV_ARGS(&debug_));
+  g_info_queue = debug_.Get();
   D3D12_FEATURE_DATA_D3D12_OPTIONS options{};
   Check(device_->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS, &options, sizeof(options)), "feature query");
   Require(options.ROVsSupported, "D3D12 rasterizer ordered views required");
@@ -189,6 +210,7 @@ D3D12Render::~D3D12Render() {
     REXLOG_WARN("Native final submission stats unavailable: {}", e.what());
   }
   scaled_.Clear();
+  if (g_info_queue == debug_.Get()) g_info_queue = nullptr;
   mirror_.reset(); if (event_) CloseHandle(event_);
 }
 void D3D12Render::BeginGpuTimestamp() {

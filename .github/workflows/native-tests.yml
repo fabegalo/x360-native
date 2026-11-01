@@ -118,6 +118,19 @@ jobs:
             & scripts/devshell.cmd ctest --preset win-amd64-release -R $tests --output-on-failure --timeout 900
             if ($LASTEXITCODE -ne 0) { throw "Native tests $tests failed" }
           }
+      - name: Explain a D3D12 failure with the debug layer
+        if: failure()
+        timeout-minutes: 20
+        run: |
+          # The debug layer (Graphics Tools) states why a D3D12 call is invalid;
+          # Native appends its messages to the error. One frame on the pinned WARP.
+          Add-WindowsCapability -Online -Name 'Tools.Graphics.DirectX~~~~0.0.1.0' | Out-String
+          $bin = Split-Path (Get-ChildItem -Recurse -Filter x360n_native_frame_probe.exe .local/build/win-amd64 | Select-Object -First 1).FullName
+          $out = '.local/build/win-amd64/src/native/warp-diagnosis/debug-layer'
+          & "$bin/x360n_native_frame_probe.exe" $out d3d12 1 d3d12_adapter=-2 d3d12_debug=true native_gpu_timeout_ms=30000 native_stats=true native_pipeline_threads=0
+          "debug layer run: exit $LASTEXITCODE"
+          Get-Content "$out/runtime.log" -Tail 40
+          exit 0
       - name: A/B submission strategies and state filter on the same recorded frames (WARP, informative timing)
         run: |
           $ErrorActionPreference = 'Stop'
