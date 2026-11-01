@@ -5,10 +5,13 @@
 # with identical results across passes. Negative controls must be detected.
 #   -DPROBE=... -DREPLAY=... -DOUTPUT=... -DAPI=d3d12|vulkan
 #   Extra cvars for both programs (e.g. d3d12_adapter=-2 for WARP on CI):
-#   environment X360N_NATIVE_TEST_CVARS, separated by ';'.
+#   environment X360N_NATIVE_TEST_CVARS, separated by ';'. Workload flags
+#   (e.g. --no-sample-counts where the host cannot run ROV sample counting):
+#   X360N_NATIVE_TEST_WORKLOAD_FLAGS.
 file(REMOVE_RECURSE "${OUTPUT}")
 file(MAKE_DIRECTORY "${OUTPUT}")
 set(extra "$ENV{X360N_NATIVE_TEST_CVARS}")
+set(workload_flags "$ENV{X360N_NATIVE_TEST_WORKLOAD_FLAGS}")
 function(run expected name)
   execute_process(COMMAND ${ARGN} RESULT_VARIABLE result OUTPUT_VARIABLE out ERROR_VARIABLE err TIMEOUT 300)
   message("[${name}] exit ${result}\n${out}${err}")
@@ -32,7 +35,7 @@ function(run expected name)
 endfunction()
 foreach(effect none fxaa)
   set(dir "${OUTPUT}/${effect}")
-  run(0 "workload ${effect}" "${PROBE}" "${dir}/run" ${API} 8
+  run(0 "workload ${effect}" "${PROBE}" "${dir}/run" ${API} 8 ${workload_flags}
       native_capture=${dir}/frames.x360nfc native_capture_skip=3 native_capture_frames=4
       native_frame_profile=${dir}/live-frames.csv swap_post_effect=${effect} ${extra})
   file(STRINGS "${dir}/live-frames.csv" rows)
@@ -69,7 +72,7 @@ run(2 "control with a truncated file" "${REPLAY}" "${OUTPUT}/truncated.x360nfc" 
 # resolve) replays equivalent and repeatable with it off and at its most
 # aggressive settings, and those arms must really submit more often.
 set(heavy "${OUTPUT}/heavy")
-run(0 "workload heavy" "${PROBE}" "${heavy}/run" ${API} 6 --draws 256 --resolves 4
+run(0 "workload heavy" "${PROBE}" "${heavy}/run" ${API} 6 --draws 256 --resolves 4 ${workload_flags}
     native_capture=${heavy}/frames.x360nfc native_capture_skip=3 native_capture_frames=3 ${extra})
 # Arms: off, at 1 when the queue is idle, and at 1 keeping one batch queued.
 foreach(arm "0;0" "1;0" "1;1")

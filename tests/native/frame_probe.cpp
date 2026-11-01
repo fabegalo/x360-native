@@ -4,7 +4,10 @@
 // frame comes only from EDRAM persisted from frames 0-1), a ZPD query reads sample counters, a
 // resolve copies EDRAM to guest memory, a visibility-tested draw follows while
 // that result is unpublished, and XE_SWAP presents the resolve offscreen.
-//   x360n_native_frame_probe OUTPUT d3d12|vulkan FRAMES [cvar=value...]
+//   x360n_native_frame_probe OUTPUT d3d12|vulkan FRAMES [--draws N --resolves K]
+//       [--no-sample-counts] [cvar=value...]
+// --no-sample-counts leaves out the ZPD query and the visibility-tested draw
+// (no ROV sample counting), for hosts that cannot run it.
 // Prints each frame's scanout hash; no title data is involved.
 #include "probe_main.h"
 #include "../../src/native/capture/capture_format.h"
@@ -51,7 +54,7 @@ constexpr uint32_t kSide = 32;
 // extra_resolves groups, each group followed by a resolve into its own guest
 // buffer (results the next guest sync publishes), before the ZPD/scanout part.
 void Run(rex::system::IGraphicsSystem& gpu, rex::memory::Memory& memory, uint32_t frames,
-         uint32_t extra_draws, uint32_t extra_resolves) {
+         uint32_t extra_draws, uint32_t extra_resolves, bool sample_counts) {
   const auto ring = memory.SystemHeapAlloc(2u << 20, 4096, rex::memory::kSystemHeapPhysical);
   const auto vertices = memory.SystemHeapAlloc(4096, 4096, rex::memory::kSystemHeapPhysical);
   const auto rect = memory.SystemHeapAlloc(4096, 4096, rex::memory::kSystemHeapPhysical);
@@ -138,11 +141,15 @@ void Run(rex::system::IGraphicsSystem& gpu, rex::memory::Memory& memory, uint32_
     const uint32_t report = memory.GetPhysicalAddress(reports) + (frame % 32) * 64;
     auto* end = memory.TranslatePhysical<uint32_t*>(report + 32);
     std::memset(end, 0, 32); end[4] = 0xEDFEFFFF;
-    set(XE_GPU_REG_RB_SAMPLE_COUNT_ADDR, report);
-    words.insert(words.end(), {Packet(PM4_EVENT_WRITE_ZPD, 1), ZPASS_DONE});
+    if (sample_counts) {
+      set(XE_GPU_REG_RB_SAMPLE_COUNT_ADDR, report);
+      words.insert(words.end(), {Packet(PM4_EVENT_WRITE_ZPD, 1), ZPASS_DONE});
+    }
     words.insert(words.end(), {Packet(PM4_DRAW_INDX_2, 1), draw.value});
-    set(XE_GPU_REG_RB_SAMPLE_COUNT_ADDR, report + 32);
-    words.insert(words.end(), {Packet(PM4_EVENT_WRITE_ZPD, 1), ZPASS_DONE});
+    if (sample_counts) {
+      set(XE_GPU_REG_RB_SAMPLE_COUNT_ADDR, report + 32);
+      words.insert(words.end(), {Packet(PM4_EVENT_WRITE_ZPD, 1), ZPASS_DONE});
+    }
     // Resolve EDRAM (no clear) to the guest scanout image.
     vertex_fetch(memory.GetPhysicalAddress(rect), 6);
     set(XE_GPU_REG_RB_MODECONTROL, uint32_t(EdramMode::kCopy));
@@ -157,12 +164,14 @@ void Run(rex::system::IGraphicsSystem& gpu, rex::memory::Memory& memory, uint32_
     // unpublished: the renderer reads sample counters before and after it.
     set(XE_GPU_REG_RB_MODECONTROL, uint32_t(EdramMode::kColorDepth));
     vertex_fetch(memory.GetPhysicalAddress(vertices), 12);
-    words.insert(words.end(), {Packet(PM4_VIZ_QUERY, 1), 5});
-    reg::PA_SC_VIZ_QUERY viz{}; viz.viz_query_ena = 1; viz.viz_query_id = 5;
-    set(XE_GPU_REG_PA_SC_VIZ_QUERY, viz.value);
-    words.insert(words.end(), {Packet(PM4_DRAW_INDX_2, 1), draw.value});
-    set(XE_GPU_REG_PA_SC_VIZ_QUERY, 0);
-    words.insert(words.end(), {Packet(PM4_VIZ_QUERY, 1), 0x100u | 5});
+    if (sample_counts) {
+      words.insert(words.end(), {Packet(PM4_VIZ_QUERY, 1), 5});
+      reg::PA_SC_VIZ_QUERY viz{}; viz.viz_query_ena = 1; viz.viz_query_id = 5;
+      set(XE_GPU_REG_PA_SC_VIZ_QUERY, viz.value);
+      words.insert(words.end(), {Packet(PM4_DRAW_INDX_2, 1), draw.value});
+      set(XE_GPU_REG_PA_SC_VIZ_QUERY, 0);
+      words.insert(words.end(), {Packet(PM4_VIZ_QUERY, 1), 0x100u | 5});
+    }
     xe_gpu_texture_fetch_t fetch{}; fetch.type = FetchConstantType::kTexture;
     fetch.dimension = DataDimension::k2DOrStacked; fetch.format = TextureFormat::k_8_8_8_8;
     fetch.base_address = memory.GetPhysicalAddress(image) >> 12; fetch.pitch = kSide / 32;
@@ -196,7 +205,7 @@ X360N_PROBE_MAIN {
       std::filesystem::resize_file(argv[2], std::stoull(std::filesystem::path(argv[3]).string()));
       return 0;
     }
-    Require(argc >= 4, "usage: x360n_native_frame_probe OUTPUT d3d12|vulkan FRAMES [--draws N --resolves K] [cvar=value...]");
+    Require(argc >= 4, "usage: x360n_native_frame_probe OUTPUT d3d12|vulkan FRAMES [--draws N --resolves K] [--no-sample-counts] [cvar=value...]");
     const ProbeArg api = argv[2];
     Require(api == X360N_PROBE_ARG("d3d12") || api == X360N_PROBE_ARG("vulkan"), "invalid graphics API");
     const uint32_t frames = uint32_t(std::stoul(std::filesystem::path(argv[3]).string()));
@@ -209,10 +218,12 @@ X360N_PROBE_MAIN {
     auto gpu = rex::system::LoadGpuPlugin("native", api == X360N_PROBE_ARG("d3d12") ? "d3d12" : "vulkan");
     Require(bool(gpu), "Native plugin load");
     uint32_t extra_draws = 0, extra_resolves = 0;
+    bool sample_counts = true;
     int first_cvar = 4;
-    while (first_cvar + 1 < argc) {
+    while (first_cvar < argc) {
       const auto flag = std::filesystem::path(argv[first_cvar]).string();
-      if (flag != "--draws" && flag != "--resolves") break;
+      if (flag == "--no-sample-counts") { sample_counts = false; ++first_cvar; continue; }
+      if ((flag != "--draws" && flag != "--resolves") || first_cvar + 1 >= argc) break;
       (flag == "--draws" ? extra_draws : extra_resolves) = uint32_t(std::stoul(std::filesystem::path(argv[first_cvar + 1]).string()));
       first_cvar += 2;
     }
@@ -226,7 +237,7 @@ X360N_PROBE_MAIN {
     Require(gpu->SetupPresentation(nullptr) == X_STATUS_SUCCESS, "presentation setup");
     Require(gpu->SetupGuestGpu(runtime.function_dispatcher(), runtime.kernel_state()) == X_STATUS_SUCCESS, "guest GPU setup");
     struct Shutdown { rex::system::IGraphicsSystem* gpu; ~Shutdown() { if (gpu) gpu->Shutdown(); } } shutdown{gpu.get()};
-    Run(*gpu, *runtime.memory(), frames, extra_draws, extra_resolves);
+    Run(*gpu, *runtime.memory(), frames, extra_draws, extra_resolves, sample_counts);
     gpu->Shutdown(); shutdown.gpu = nullptr; gpu.reset(); runtime.Shutdown(); rex::FlushLogging();
     std::cout << "PASS frames=" << frames << '\n';
     return 0;

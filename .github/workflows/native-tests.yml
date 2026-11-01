@@ -49,6 +49,11 @@ jobs:
       # limit is raised so a slow first frame is not reported as a hang (a
       # real hang still fails, after 120 s).
       X360N_NATIVE_TEST_CVARS: d3d12_adapter=-2;native_gpu_timeout_ms=120000
+      # WARP never completes ROV pixel shaders that count samples (ZPD and
+      # visibility queries: atomics on the counters after EDRAM, inside the
+      # ROV-ordered region); the step below records it on every run. Sample
+      # counting is covered by the Linux job (lavapipe) and real GPUs.
+      X360N_NATIVE_TEST_WORKLOAD_FLAGS: --no-sample-counts
     steps:
       - name: Check out the exact event commit
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -88,23 +93,20 @@ jobs:
             & scripts/devshell.cmd ctest --preset win-amd64-release -R $tests --output-on-failure --timeout 900
             if ($LASTEXITCODE -ne 0) { throw "Native tests $tests failed" }
           }
-      - name: Diagnose Native D3D12 on WARP after a failure
-        if: failure()
-        timeout-minutes: 10
+      - name: Record ROV sample counting on WARP
+        if: always()
+        timeout-minutes: 5
         run: |
-          # Which part of the first submission does not complete on WARP:
-          # a minimal pipeline workload, then one frame of the capture
-          # workload with stats (PSO begin/end, flush causes) and the debug layer.
+          # One frame of the capture workload with and without ROV sample
+          # counting, 30 s fence limit: evidence for the workload flag above.
           $bin = Split-Path (Get-ChildItem -Recurse -Filter x360n_native_frame_probe.exe .local/build/win-amd64 | Select-Object -First 1).FullName
           $out = '.local/build/win-amd64/src/native/warp-diagnosis'
           $cvars = @('d3d12_adapter=-2', 'native_gpu_timeout_ms=30000', 'native_stats=true', 'native_pipeline_threads=0')
-          & "$bin/x360n_native_pipeline_probe.exe" "$out/pipeline" d3d12 4 @cvars
-          "pipeline probe exit $LASTEXITCODE"
-          & "$bin/x360n_native_frame_probe.exe" "$out/frame" d3d12 1 @cvars
-          "frame probe exit $LASTEXITCODE"
-          & "$bin/x360n_native_frame_probe.exe" "$out/frame-debug" d3d12 1 @cvars d3d12_debug=true
-          "frame probe with the debug layer exit $LASTEXITCODE"
-          Get-ChildItem -Recurse -Filter *.log $out | ForEach-Object { "--- $($_.FullName)"; Get-Content $_.FullName -Tail 80 }
+          & "$bin/x360n_native_frame_probe.exe" "$out/with-sample-counts" d3d12 1 @cvars
+          "with sample counts: exit $LASTEXITCODE"
+          & "$bin/x360n_native_frame_probe.exe" "$out/without-sample-counts" d3d12 1 --no-sample-counts @cvars
+          "without sample counts: exit $LASTEXITCODE"
+          Get-ChildItem -Recurse -Filter *.log $out | ForEach-Object { "--- $($_.FullName)"; Get-Content $_.FullName -Tail 25 }
           exit 0
       - name: A/B submission strategies and state filter on the same recorded frames (WARP, informative timing)
         run: |
