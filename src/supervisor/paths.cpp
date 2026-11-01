@@ -139,7 +139,7 @@ fs::path SharedSdkBuildRoot(const ProjectPaths& paths) {
                              "cache location");
   return root;
 #else
-  return paths.build() / "shared-sdk" / HostPlatform();
+  return paths.build() / "shared-sdk";
 #endif
 }
 
