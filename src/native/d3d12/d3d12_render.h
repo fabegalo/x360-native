@@ -15,6 +15,7 @@
 #include <rex/graphics/util/draw.h>
 #include <rex/ui/d3d12/d3d12_provider.h>
 #include <wrl/client.h>
+#include <xxhash.h>
 #include <map>
 #include <unordered_map>
 #include <unordered_set>
@@ -42,8 +43,12 @@ class D3D12Render {
   SampleCounts ReadSampleCounts(bool counting_after);
   void SetSampleCounts(const SampleCounts&, bool visibility_only);
   // Diagnostic accounting only (native_stats): why a submission waited.
-  enum FlushCause : unsigned { kFlushGuestSync, kFlushPresent, kFlushOverlap, kFlushCapacity, kFlushDrain, kFlushCauses };
+  enum FlushCause : unsigned { kFlushGuestSync, kFlushPresent, kFlushOverlap, kFlushCapacity, kFlushDrain, kFlushEager, kFlushCauses };
   void Flush(FlushCause);
+  // Frame capture/replay: EDRAM + sample counter tail after all submitted work.
+  EdramSnapshot ReadEdram();
+  void WriteEdram(const EdramSnapshot&);
+  bool stats_enabled() const { return stats_enabled_; }
   void CountPresent();
   void EndFrame();
   struct Performance {
@@ -208,13 +213,33 @@ class D3D12Render {
   void EndGpuTimestamp();
   void CollectGpuTimestamps();
   void LogSubmissionStats();
-  // Graphics pipelines by exact description bytes. A pipeline is created by
-  // pipeline_workers_ and bound through cmd_ while it may still be compiling;
-  // the submission waits for the pipelines of its commands (Flush).
-  std::map<std::string, std::shared_future<Ptr<ID3D12PipelineState>>> pipelines_;
+  // Graphics pipelines by their whole description (zeroed, so padding is
+  // fixed). A pipeline is created by pipeline_workers_ and bound through cmd_
+  // while it may still be compiling; the submission waits for the pipelines
+  // of its commands (Flush). A fixed-size key and a hash: no allocation or
+  // ordered string compares per draw, and consecutive draws with the same
+  // description reuse the previous entry without hashing. Entries are never
+  // erased: their address identifies the bound pipeline (D3D12Commands) and
+  // stays valid across rehashing.
+  struct PipelineKey {
+    std::array<uint8_t, sizeof(D3D12_GRAPHICS_PIPELINE_STATE_DESC)> bytes;
+    bool operator==(const PipelineKey&) const = default;
+  };
+  struct PipelineKeyHash {
+    size_t operator()(const PipelineKey& key) const noexcept { return size_t(XXH3_64bits(key.bytes.data(), key.bytes.size())); }
+  };
+  std::unordered_map<PipelineKey, std::shared_future<Ptr<ID3D12PipelineState>>, PipelineKeyHash> pipelines_;
+  PipelineKey last_pipeline_key_{};
+  std::shared_future<Ptr<ID3D12PipelineState>>* last_pipeline_ = nullptr;
   Ptr<ID3D12PipelineState> CreatePipeline(D3D12_GRAPHICS_PIPELINE_STATE_DESC, uint64_t vs_hash, uint64_t ps_hash,
       uint64_t vm, uint64_t pm, uint32_t primitive, uint32_t msaa, unsigned planes, uint32_t mask, size_t id);
   void ReplayCommands();
+  // Early submission: work recorded since the last submission and the
+  // threshold (draws; a resolve counts as the whole threshold).
+  const uint32_t eager_threshold_ = NativeEagerSubmitWork();
+  const uint32_t eager_depth_ = NativeEagerSubmitDepth();
+  uint32_t recorded_work_ = 0;
+  void SubmitEarly();
   uint64_t pipeline_wait_ns_ = 0, pipeline_waits_ = 0;
   std::map<unsigned, std::vector<uint8_t>> rectangles_, polygon_points_;
   std::map<unsigned, std::vector<uint32_t>> points_;

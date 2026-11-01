@@ -1,0 +1,96 @@
+{
+  "report": "RENDER-CORE",
+  "date": "2026-11-01",
+  "host": "Linux x86-64 container, 4 logical CPUs, lavapipe (llvmpipe, LLVM 20.1.2), Release, LLVM 22.1.8",
+  "workload": "x360n_native_frame_probe (vulkan): capture of 5 frames after 4 presents; replay with --repeat 11 --stats; warm passes 1-10 (50 frames) per run",
+  "arms": {
+    "base": "main Vulkan ReadSampleCounts (publishes pending resolves, then reads)",
+    "cand": "dedicated sample counter readback buffer"
+  },
+  "pairs": [
+    {
+      "pair": 1,
+      "cand": {
+        "warm_frame_ms_mean": 26.325,
+        "fence_waits_per_frame": 4.0
+      },
+      "base": {
+        "warm_frame_ms_mean": 24.352,
+        "fence_waits_per_frame": 5.0
+      }
+    },
+    {
+      "pair": 2,
+      "base": {
+        "warm_frame_ms_mean": 29.831,
+        "fence_waits_per_frame": 5.0
+      },
+      "cand": {
+        "warm_frame_ms_mean": 22.991,
+        "fence_waits_per_frame": 4.0
+      }
+    },
+    {
+      "pair": 3,
+      "cand": {
+        "warm_frame_ms_mean": 30.09,
+        "fence_waits_per_frame": 4.0
+      },
+      "base": {
+        "warm_frame_ms_mean": 28.144,
+        "fence_waits_per_frame": 5.0
+      }
+    },
+    {
+      "pair": 4,
+      "base": {
+        "warm_frame_ms_mean": 27.03,
+        "fence_waits_per_frame": 5.0
+      },
+      "cand": {
+        "warm_frame_ms_mean": 25.802,
+        "fence_waits_per_frame": 4.0
+      }
+    },
+    {
+      "pair": 5,
+      "cand": {
+        "warm_frame_ms_mean": 24.221,
+        "fence_waits_per_frame": 4.0
+      },
+      "base": {
+        "warm_frame_ms_mean": 23.926,
+        "fence_waits_per_frame": 5.0
+      }
+    },
+    {
+      "pair": 6,
+      "base": {
+        "warm_frame_ms_mean": 30.37,
+        "fence_waits_per_frame": 5.0
+      },
+      "cand": {
+        "warm_frame_ms_mean": 24.848,
+        "fence_waits_per_frame": 4.0
+      }
+    },
+    {
+      "pair": 7,
+      "cand": {
+        "warm_frame_ms_mean": 27.574,
+        "fence_waits_per_frame": 4.0
+      },
+      "base": {
+        "warm_frame_ms_mean": 29.05,
+        "fence_waits_per_frame": 5.0
+      }
+    }
+  ],
+  "paired_frame_ratio": {
+    "median": 0.9546,
+    "min": 0.7707,
+    "max": 1.081
+  },
+  "equivalence": "every replay of both arms: 55 scanout checks, 55 GPU-written checks, 220 sample counter checks, 0 mismatches",
+  "note": "Frame time ratio range includes 1: no time gain claimed. Fence waits per frame are deterministic: 5 -> 4."
+}

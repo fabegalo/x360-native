@@ -1,4 +1,5 @@
 #include "d3d12_render.h"
+#include <atomic>
 #include <rex/graphics/pipeline/render_target/cache.h>
 #include <rex/logging.h>
 #include <rex/graphics/flags.h>
@@ -13,12 +14,33 @@ REXCVAR_DEFINE_BOOL(native_stats, false, "GPU/Native", "Log cumulative Native CP
 REXCVAR_DEFINE_BOOL(native_texture_cache, true, "GPU/Native", "Reuse textures only while every guest source byte matches; disable for diagnostics");
 REXCVAR_DEFINE_BOOL(native_texture_cpu, false, "GPU/Native", "Diagnose texture loads with CPU conversion and synchronized guest bytes");
 REXCVAR_DECLARE(std::string, native_pso_dump);
+REXCVAR_DEFINE_UINT32(native_gpu_timeout_ms, 5000, "GPU/Native",
+    "Limit of one D3D12 fence wait before the renderer reports a GPU timeout (minimum 1000; software adapters such as WARP compile shaders at first use and may need more)");
 namespace x360n::native {
 using namespace rex::graphics;
 using namespace rex::graphics::xenos;
 namespace {
+// The renderer's debug info queue (d3d12_debug=true), so that a failed call
+// reports the debug layer's reason instead of only its HRESULT.
+std::atomic<ID3D12InfoQueue*> g_info_queue{nullptr};
+std::string DebugLayerMessages() {
+  auto* queue = g_info_queue.load();
+  if (!queue) return {};
+  std::string text;
+  const UINT64 count = queue->GetNumStoredMessagesAllowedByRetrievalFilter();
+  for (UINT64 i = count > 6 ? count - 6 : 0; i < count; ++i) {
+    SIZE_T bytes = 0;
+    if (FAILED(queue->GetMessage(i, nullptr, &bytes)) || !bytes) continue;
+    std::vector<uint8_t> storage(bytes);
+    auto* message = reinterpret_cast<D3D12_MESSAGE*>(storage.data());
+    if (SUCCEEDED(queue->GetMessage(i, message, &bytes)) && message->Severity <= D3D12_MESSAGE_SEVERITY_WARNING)
+      text += std::string("; debug layer: ") + message->pDescription;
+  }
+  return text;
+}
 void Check(HRESULT hr, const char* what) {
-  if (FAILED(hr)) throw std::runtime_error(std::string("Native render: ") + what + " HRESULT=" + std::to_string(uint32_t(hr)));
+  if (FAILED(hr))
+    throw std::runtime_error(fmt::format("Native render: {} HRESULT={:08X}{}", what, uint32_t(hr), DebugLayerMessages()));
 }
 void Require(bool v, const char* what) { if (!v) throw std::runtime_error(std::string("Native: ") + what); }
 }
@@ -118,6 +140,7 @@ D3D12Render::D3D12Render(rex::ui::d3d12::D3D12Provider& provider) : provider_(pr
   texture_cpu_ = REXCVAR_GET(native_texture_cpu);
   pipeline_workers_ = std::make_unique<PipelineWorkers>(NativePipelineThreads());
   device_->QueryInterface(IID_PPV_ARGS(&debug_));
+  g_info_queue = debug_.Get();
   D3D12_FEATURE_DATA_D3D12_OPTIONS options{};
   Check(device_->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS, &options, sizeof(options)), "feature query");
   Require(options.ROVsSupported, "D3D12 rasterizer ordered views required");
@@ -125,6 +148,7 @@ D3D12Render::D3D12Render(rex::ui::d3d12::D3D12Provider& provider) : provider_(pr
   Check(device_->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&allocator_)), "allocator");
   Check(device_->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, allocator_.Get(), nullptr, IID_PPV_ARGS(&list_)), "command list");
   cmd_.Attach(list_.Get());
+  cmd_.SetStateFilter(NativeRedundantStateFilter());
   Check(device_->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&fence_)), "fence");
   event_ = CreateEventW(nullptr, FALSE, FALSE, nullptr); Require(event_ != nullptr, "fence event");
   memory_ = Buffer(0x20000000, D3D12_HEAP_TYPE_DEFAULT, memory_state_, D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS);
@@ -186,6 +210,7 @@ D3D12Render::~D3D12Render() {
     REXLOG_WARN("Native final submission stats unavailable: {}", e.what());
   }
   scaled_.Clear();
+  if (g_info_queue == debug_.Get()) g_info_queue = nullptr;
   mirror_.reset(); if (event_) CloseHandle(event_);
 }
 void D3D12Render::BeginGpuTimestamp() {
@@ -282,8 +307,8 @@ void D3D12Render::CountPresent() {
       pipeline_waits_, draw_ns_ / 1000000, texture_ns_ / 1000000,
       guest_upload_ns_ / 1000000, resolve_ns_ / 1000000, flush_wait_ns_ / 1000000);
   REXLOG_INFO("Native pipeline disk hits={} rejects={}", pipeline_disk_hits_.load(), pipeline_disk_rejects_.load());
-  REXLOG_INFO("Native flush causes guest_sync={} (event={} packet={} wait={} buffer_end={} present={}) present={} overlap={} capacity={} drain={} wait_ms={}",
-      flush_causes_[kFlushGuestSync], sync_sources_[kGuestSyncEvent], sync_sources_[kGuestSyncPacket], sync_sources_[kGuestSyncWait], sync_sources_[kGuestSyncBufferEnd], sync_sources_[kGuestSyncPresent], flush_causes_[kFlushPresent], flush_causes_[kFlushOverlap], flush_causes_[kFlushCapacity], flush_causes_[kFlushDrain], flush_wait_ns_ / 1000000);
+  REXLOG_INFO("Native flush causes guest_sync={} (event={} packet={} wait={} buffer_end={} present={}) present={} overlap={} capacity={} drain={} eager={} wait_ms={} redundant_state_skipped={}",
+      flush_causes_[kFlushGuestSync], sync_sources_[kGuestSyncEvent], sync_sources_[kGuestSyncPacket], sync_sources_[kGuestSyncWait], sync_sources_[kGuestSyncBufferEnd], sync_sources_[kGuestSyncPresent], flush_causes_[kFlushPresent], flush_causes_[kFlushOverlap], flush_causes_[kFlushCapacity], flush_causes_[kFlushDrain], flush_causes_[kFlushEager], flush_wait_ns_ / 1000000, cmd_.filtered());
   std::string opcodes;
   for (unsigned i = 0; i < 256; ++i) if (sync_opcodes_[i]) opcodes += fmt::format(" {:02X}:{}", i, sync_opcodes_[i]);
   REXLOG_INFO("Native guest sync opcodes{}", opcodes);
@@ -299,7 +324,23 @@ void D3D12Render::ReplayCommands() {
   ++pipeline_waits_;
   pipeline_wait_ns_ += std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - start).count();
 }
+// The GPU would otherwise wait for the next guest sync to receive work the
+// CPU recorded long before (replay: GPU idle for most of the frame while
+// recording). Submitting adds only a queue boundary: order, barriers and
+// guest-visible syncs are unchanged, nothing waits here, and pipelines still
+// being created are never forced (deferred commands keep the list open).
+void D3D12Render::SubmitEarly() {
+  if (!eager_threshold_ || recorded_work_ < eager_threshold_ || cmd_.deferred() || cmd_.empty()) return;
+  // Submissions still executing; with depth 1 the next batch is queued behind
+  // the running one, so the GPU does not run dry. Arena reuse never blocks:
+  // the recycled arena belongs to the submission before the running one.
+  const uint64_t completed = fence_->GetCompletedValue();
+  Require(completed != UINT64_MAX, "render device removed");
+  if (serial_ - std::min(completed, serial_) > eager_depth_) return;
+  Flush(kFlushEager);
+}
 void D3D12Render::Flush(FlushCause cause) {
+  recorded_work_ = 0;
   if (cmd_.empty()) {
     // A guest resolve may have already submitted this frame. Do not submit
     // another list just for presentation, but a drain must still wait for
@@ -402,6 +443,41 @@ SampleCounts D3D12Render::ReadSampleCounts(bool counting_after) {
   sample_counting_ = counting_after;
   return sample_counts_;
 }
+EdramSnapshot D3D12Render::ReadEdram() {
+  // The tail holds sample counters only once ReadSampleCounts initialized it;
+  // until then counting is off and sample_counts_ is the authoritative copy.
+  if (!sample_counts_readback_) ReadSampleCounts(false);
+  const uint64_t bytes = edram_size_ + sizeof(SampleCounts);
+  auto readback = Buffer(bytes, D3D12_HEAP_TYPE_READBACK, D3D12_RESOURCE_STATE_COPY_DEST);
+  // The transition orders every recorded ROV write before the copy.
+  Transition(edram_.Get(), edram_state_, D3D12_RESOURCE_STATE_COPY_SOURCE);
+  cmd_.CopyBufferRegion(readback.Get(), 0, edram_.Get(), 0, bytes);
+  Transition(edram_.Get(), edram_state_, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+  edram_rov_layout_.reset();
+  Flush(kFlushDrain);
+  EdramSnapshot snapshot;
+  snapshot.bytes.resize(size_t(bytes));
+  void* mapped = nullptr;
+  const D3D12_RANGE range{0, size_t(bytes)}, none{};
+  Check(readback->Map(0, &range, &mapped), "map EDRAM snapshot");
+  std::memcpy(snapshot.bytes.data(), mapped, size_t(bytes));
+  readback->Unmap(0, &none);
+  snapshot.sample_counting = sample_counting_;
+  return snapshot;
+}
+void D3D12Render::WriteEdram(const EdramSnapshot& snapshot) {
+  const uint64_t bytes = edram_size_ + sizeof(SampleCounts);
+  Require(snapshot.bytes.size() == bytes, "EDRAM snapshot size differs (resolution scale?)");
+  if (!sample_counts_readback_)
+    sample_counts_readback_ = Buffer(sizeof(SampleCounts), D3D12_HEAP_TYPE_READBACK, D3D12_RESOURCE_STATE_COPY_DEST);
+  const auto upload = Upload(snapshot.bytes.data(), size_t(bytes));
+  Transition(edram_.Get(), edram_state_, D3D12_RESOURCE_STATE_COPY_DEST);
+  cmd_.CopyBufferRegion(edram_.Get(), 0, upload.resource.Get(), upload.offset, bytes);
+  Transition(edram_.Get(), edram_state_, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+  edram_rov_layout_.reset();
+  std::memcpy(sample_counts_.data(), snapshot.bytes.data() + edram_size_, sizeof(SampleCounts));
+  sample_counting_ = snapshot.sample_counting;
+}
 void D3D12Render::SetSampleCounts(const SampleCounts& counts, bool visibility_only) {
   if (!sample_counts_readback_) ReadSampleCounts(false);
   const auto upload = Upload(counts.data(), sizeof(counts));
@@ -419,7 +495,10 @@ void D3D12Render::Wait(uint64_t serial) {
   Timer wait(stats_enabled_, flush_wait_ns_);
   if (stats_enabled_) ++fence_waits_;
   Check(fence_->SetEventOnCompletion(serial, event_), "fence completion");
-  Require(WaitForSingleObject(event_, 5000) == WAIT_OBJECT_0, "render GPU timeout");
+  const DWORD limit = std::max<DWORD>(1000, REXCVAR_GET(native_gpu_timeout_ms));
+  if (WaitForSingleObject(event_, limit) != WAIT_OBJECT_0)
+    throw std::runtime_error(fmt::format("Native: render GPU timeout ({} ms, fence {} of {}){}", limit,
+                                         fence_->GetCompletedValue(), serial, DebugLayerMessages()));
 }
 void D3D12Render::RecycleBatch() {
   auto& retired = batches_[batch_index_];

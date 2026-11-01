@@ -3,9 +3,12 @@
 #include <rex/ui/d3d12/d3d12_presenter.h>
 #include <rex/chrono/frame_layout.h>
 #include <d3dcompiler.h>
+#include <rex/cvar.h>
+#include <algorithm>
 #include <cstring>
 #include <stdexcept>
 #include <string>
+REXCVAR_DECLARE(uint32_t, native_gpu_timeout_ms);
 namespace x360n::native {
 std::unique_ptr<ScanoutBackend> CreateD3D12Scanout(rex::ui::GraphicsProvider& provider) {
   return std::make_unique<D3D12Scanout>(static_cast<rex::ui::d3d12::D3D12Provider&>(provider));
@@ -71,8 +74,9 @@ void D3D12Scanout::Wait(uint64_t serial) {
   if (completed == UINT64_MAX) throw std::runtime_error("Native: D3D12 device removed");
   if (completed >= serial) return;
   Check(fence_->SetEventOnCompletion(serial, event_), "fence notification");
-  if (WaitForSingleObject(event_, 5000) != WAIT_OBJECT_0)
-    throw std::runtime_error("Native: GPU fence exceeded 5 seconds");
+  const DWORD limit = std::max<DWORD>(1000, REXCVAR_GET(native_gpu_timeout_ms));
+  if (WaitForSingleObject(event_, limit) != WAIT_OBJECT_0)
+    throw std::runtime_error("Native: scanout GPU fence exceeded " + std::to_string(limit) + " ms");
   Check(provider_.GetDevice()->GetDeviceRemovedReason(), "device status");
 }
 void D3D12Scanout::Drain() { if (render_) render_->Flush(D3D12Render::kFlushDrain); Wait(serial_); }
@@ -103,19 +107,40 @@ void D3D12Scanout::SetSampleCounts(const SampleCounts& counts, bool visibility_o
 void D3D12Scanout::Resolve(const rex::graphics::RegisterFile& regs, rex::memory::Memory& memory) {
   Render().Resolve(regs, memory);
 }
+void D3D12Scanout::FinishGuestFrame(const ScanoutTexture& input_texture, const void* input_pixels,
+    ScanoutTexture& t, const void*& pixels, std::vector<uint8_t>& scaled_pixels) {
+  if (!render_) return;
+  render_->CountPresent();
+  render_->CompleteGuestWrites(kGuestSyncPresent, 0xFF);
+  render_->Flush(D3D12Render::kFlushPresent);
+  if (render_->PrepareScanout(input_texture, input_pixels, t, scaled_pixels)) pixels = scaled_pixels.data();
+  render_->EndFrame();
+}
+void D3D12Scanout::CompleteFrame(const ScanoutTexture& texture, const void* pixels) {
+  ScanoutTexture output = texture;
+  std::vector<uint8_t> scaled;
+  FinishGuestFrame(texture, pixels, output, pixels, scaled);
+}
+BackendCounters D3D12Scanout::Counters() {
+  if (!render_) return {};
+  const auto p = render_->performance();
+  BackendCounters c;
+  c.submissions = p.submissions;
+  // Fence waits and GPU timestamps are measured only with native_stats.
+  c.measured = render_->stats_enabled();
+  c.fence_waits = p.waits;
+  c.fence_wait_ns = p.wait_ns;
+  c.gpu_timed = c.measured && p.gpu_frequency;
+  c.gpu_busy_ns = c.gpu_timed ? uint64_t(double(p.gpu_ticks) * 1e9 / double(p.gpu_frequency)) : 0;
+  return c;
+}
 void D3D12Scanout::Present(rex::ui::Presenter& presenter, const ScanoutTexture& input_texture,
                          const void* input_pixels, const uint32_t* lut, const ScanoutOverlay* overlay,
                          const void* overlay_pixels, ScanoutPostEffect post_effect) {
   ScanoutTexture t = input_texture;
   const void* pixels = input_pixels;
   std::vector<uint8_t> scaled_pixels;
-  if (render_) {
-    render_->CountPresent();
-    render_->CompleteGuestWrites(kGuestSyncPresent, 0xFF);
-    render_->Flush(D3D12Render::kFlushPresent);
-    if (render_->PrepareScanout(input_texture, input_pixels, t, scaled_pixels)) pixels = scaled_pixels.data();
-    render_->EndFrame();
-  }
+  FinishGuestFrame(input_texture, input_pixels, t, pixels, scaled_pixels);
   const auto display_aspect = rex::chrono::FrameLayout::DisplayAspect();
   const uint32_t aspect_x = display_aspect.x ? display_aspect.x : input_texture.width;
   const uint32_t aspect_y = display_aspect.y ? display_aspect.y : input_texture.height;

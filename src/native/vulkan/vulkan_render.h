@@ -44,6 +44,9 @@ class VulkanRender {
   void CompleteGuestWrites(GuestSync, uint32_t);
   void SyncGuestRead(uint32_t address, uint32_t length, uint32_t);
   void Flush(bool wait);
+  // Frame capture/replay: EDRAM + sample counter tail after all submitted work.
+  EdramSnapshot ReadEdram();
+  void WriteEdram(const EdramSnapshot&);
   void EndFrame();
  private:
   using Device = rex::ui::vulkan::VulkanDevice;
@@ -163,9 +166,25 @@ class VulkanRender {
   VkExtent2D draw_extent_{};
   std::array<VkShaderModule, 3> depth_only_{};
   bool counting_samples_ = false;
+  // Early submission: work recorded since the last submission and the
+  // threshold (draws; a resolve counts as the whole threshold).
+  const uint32_t eager_threshold_ = NativeEagerSubmitWork();
+  const uint32_t eager_depth_ = NativeEagerSubmitDepth();
+  uint32_t recorded_work_ = 0;
+  void SubmitEarly();
+  // Host copy of the sample counter tail (ReadSampleCounts), never shared.
+  std::unique_ptr<VulkanBuffer> sample_counts_readback_;
   bool visibility_only_ = false;
   std::unordered_map<std::string, DrawPipeline> draw_pipelines_;
   std::map<uint32_t, VkShaderModule> tessellation_modules_;
   std::optional<std::array<uint32_t, 22>> edram_draw_layout_;
+  // Per-draw constant buffers of the current arena, as D3D12Render's
+  // DrawConstants: a buffer whose final packed bytes equal the previous
+  // draw's reuses that upload, and when all of them do, the descriptor set is
+  // reused too (no upload, allocation or descriptor write). Cleared with the
+  // arena (Begin), which recycles both the upload pages and the descriptor pool.
+  struct DrawConstant { std::vector<uint8_t> bytes; VkDescriptorBufferInfo info{}; bool valid = false; };
+  std::array<DrawConstant, 5> draw_constants_;
+  VkDescriptorSet draw_constants_set_ = VK_NULL_HANDLE;
 };
 }

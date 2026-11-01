@@ -65,6 +65,8 @@ D3D12Render::PendingPipeline D3D12Render::ComputePSO(ID3D12RootSignature* root, 
   });
 }
 void D3D12Render::Resolve(const RegisterFile& r, rex::memory::Memory& memory) {
+  SubmitEarly();
+  recorded_work_ += eager_threshold_;
   Timer timer(stats_enabled_, resolve_ns_);
   guest_memory_ = &memory;
   const auto fetch = r.GetVertexFetch(0);
@@ -168,7 +170,7 @@ void D3D12Render::Resolve(const RegisterFile& r, rex::memory::Memory& memory) {
     s.Buffer.NumElements = edram_size_ >> (si.source_is_raw ? 2 : si.source_bpe_log2);
     s.Buffer.Flags = si.source_is_raw ? D3D12_BUFFER_SRV_FLAG_RAW : D3D12_BUFFER_SRV_FLAG_NONE;
     device_->CreateShaderResourceView(edram_.Get(), &s, Cpu(v + 1));
-    cmd_.SetComputeRootSignature(copy_root_.Get()); cmd_.SetPipelineState(copy_pipelines_[size_t(index)]);
+    cmd_.SetComputeRootSignature(copy_root_.Get()); cmd_.SetPipelineState(copy_pipelines_[size_t(index)], &copy_pipelines_[size_t(index)]);
     cmd_.SetComputeRoot32BitConstants(0, sizeof(constants) / 4, &constants, 0);
     cmd_.SetComputeRootDescriptorTable(1, Gpu(v)); cmd_.SetComputeRootDescriptorTable(2, Gpu(v + 1));
     cmd_.Dispatch(gx, gy, 1);
@@ -193,7 +195,7 @@ void D3D12Render::Resolve(const RegisterFile& r, rex::memory::Memory& memory) {
       source.Buffer.NumElements=UINT(range*area/4); source.Buffer.Flags=D3D12_BUFFER_SRV_FLAG_RAW;
       device_->CreateShaderResourceView(scaled_buffer.Get(),&source,Cpu(views+1));
       const uint32_t downsample[]{length,pixel_log2,scale_x_,scale_y_,(info.copy_dest_extent_start-info.copy_dest_base)*area,info.copy_dest_extent_start};
-      cmd_.SetComputeRootSignature(downscale_root_.Get()); cmd_.SetPipelineState(downscale_pipeline_);
+      cmd_.SetComputeRootSignature(downscale_root_.Get()); cmd_.SetPipelineState(downscale_pipeline_, &downscale_pipeline_);
       cmd_.SetComputeRoot32BitConstants(0,6,downsample,0); cmd_.SetComputeRootDescriptorTable(1,Gpu(views));
       cmd_.SetComputeRootDescriptorTable(2,Gpu(views+1)); cmd_.Dispatch((length+255)/256,1,1);
       Transition(scaled_buffer.Get(),scaled_state,D3D12_RESOURCE_STATE_COPY_SOURCE);
@@ -220,7 +222,7 @@ void D3D12Render::Resolve(const RegisterFile& r, rex::memory::Memory& memory) {
       if (!clear_pipelines_[i].valid()) clear_pipelines_[i] = scaled ? (i ? ComputePSO(clear_root_.Get(), kernels::resolve_clear_64bpp_scaled_cs, sizeof(kernels::resolve_clear_64bpp_scaled_cs))
           : ComputePSO(clear_root_.Get(), kernels::resolve_clear_32bpp_scaled_cs, sizeof(kernels::resolve_clear_32bpp_scaled_cs))) : i ? ComputePSO(clear_root_.Get(), kernels::resolve_clear_64bpp_cs, sizeof(kernels::resolve_clear_64bpp_cs))
           : ComputePSO(clear_root_.Get(), kernels::resolve_clear_32bpp_cs, sizeof(kernels::resolve_clear_32bpp_cs));
-      cmd_.SetPipelineState(clear_pipelines_[i]); cmd_.SetComputeRoot32BitConstants(0, sizeof(c) / 4, &c, 0);
+      cmd_.SetPipelineState(clear_pipelines_[i], &clear_pipelines_[i]); cmd_.SetComputeRoot32BitConstants(0, sizeof(c) / 4, &c, 0);
       cmd_.Dispatch(groups.first, groups.second, 1); Barrier();
     };
     if (info.IsClearingDepth()) clear(true); if (info.IsClearingColor()) clear(false);

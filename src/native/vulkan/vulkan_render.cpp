@@ -116,6 +116,7 @@ void VulkanRender::Destroy() {
   storage_layout_ = VK_NULL_HANDLE;
   readback_ = nullptr;
   edram_buffer_.reset();
+  sample_counts_readback_.reset();
   guest_buffer_.reset();
 }
 void VulkanRender::Begin() {
@@ -143,13 +144,27 @@ void VulkanRender::Begin() {
   arena.guest_load_set = VK_NULL_HANDLE;
   arena.load_range_sets.clear();
   arena.draw_memory_set = VK_NULL_HANDLE;
+  for (auto& constant : draw_constants_) constant.valid = false;
+  draw_constants_set_ = VK_NULL_HANDLE;
 }
 void VulkanRender::EndRendering() {
   if (!rendering_) return;
   cmd_.EndRenderPass();
   rendering_ = false;
 }
+// The GPU would otherwise wait for the next guest sync to receive work the
+// CPU recorded long before. Submitting only adds a queue boundary: order,
+// barriers and guest-visible syncs are unchanged, nothing waits here, and
+// pending pipeline creations are never forced (deferred commands stay open).
+void VulkanRender::SubmitEarly() {
+  if (!eager_threshold_ || !commands_ || recorded_work_ < eager_threshold_ || cmd_.deferred()) return;
+  submissions_.Poll();
+  // Depth 1 queues the next batch behind the running one (see D3D12Render).
+  if (submissions_.last_submitted() - submissions_.completed() > eager_depth_) return;
+  Flush(false);
+}
 void VulkanRender::Flush(bool wait) {
+  recorded_work_ = 0;
   if (commands_) {
     EndRendering();
     // Bind pipelines that were still compiling and emit the commands kept
@@ -396,28 +411,67 @@ void VulkanRender::SavePipelineCache() {
 SampleCounts VulkanRender::ReadSampleCounts(bool counting_after) {
   Begin();
   EndRendering();
-  // Resolve readbacks occupy the same staging buffer. Publish them before
-  // reusing its first 32 bytes for this independently observable snapshot.
-  if (HasGuestWrites()) Flush(true);
-  Begin();
+  // A dedicated host buffer: the counters no longer share the resolve staging
+  // buffer, so pending resolve results need not be published (one more full
+  // GPU drain) before this snapshot. The single wait below completes them too.
+  if (!sample_counts_readback_)
+    sample_counts_readback_ = std::make_unique<VulkanBuffer>(device_, sizeof(SampleCounts),
+        VK_BUFFER_USAGE_TRANSFER_DST_BIT, VulkanBuffer::Access::kReadback);
   UseBuffer(edram_buffer_->handle(), edram_access_, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_TRANSFER_READ_BIT);
   const VkBufferCopy copy{edram_size_, 0, sizeof(SampleCounts)};
-  const auto& fn = device_.functions();
-  cmd_.CopyBuffer(edram_buffer_->handle(), readback_->handle(), 1, &copy);
+  cmd_.CopyBuffer(edram_buffer_->handle(), sample_counts_readback_->handle(), 1, &copy);
   VkBufferMemoryBarrier host{VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER};
   host.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
   host.dstAccessMask = VK_ACCESS_HOST_READ_BIT;
   host.srcQueueFamilyIndex = host.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-  host.buffer = readback_->handle();
+  host.buffer = sample_counts_readback_->handle();
   host.size = sizeof(SampleCounts);
   cmd_.PipelineBarrier(VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_HOST_BIT,
       0, 0, nullptr, 1, &host, 0, nullptr);
   Flush(true);
-  readback_->Invalidate(0, sizeof(SampleCounts));
+  sample_counts_readback_->Invalidate(0, sizeof(SampleCounts));
   SampleCounts result;
-  std::memcpy(result.data(), readback_->mapped(), sizeof(result));
+  std::memcpy(result.data(), sample_counts_readback_->mapped(), sizeof(result));
   counting_samples_ = counting_after;
   return result;
+}
+EdramSnapshot VulkanRender::ReadEdram() {
+  const VkDeviceSize bytes = edram_size_ + sizeof(SampleCounts);
+  auto readback = std::make_shared<VulkanBuffer>(device_, bytes, VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+                                                 VulkanBuffer::Access::kReadback);
+  Begin();
+  EndRendering();
+  UseBuffer(edram_buffer_->handle(), edram_access_, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_TRANSFER_READ_BIT);
+  const VkBufferCopy copy{0, 0, bytes};
+  cmd_.CopyBuffer(edram_buffer_->handle(), readback->handle(), 1, &copy);
+  VkBufferMemoryBarrier host{VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER};
+  host.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+  host.dstAccessMask = VK_ACCESS_HOST_READ_BIT;
+  host.srcQueueFamilyIndex = host.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+  host.buffer = readback->handle();
+  host.size = VK_WHOLE_SIZE;
+  cmd_.PipelineBarrier(VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_HOST_BIT, 0, 0, nullptr, 1, &host, 0, nullptr);
+  submissions_.Retain(readback);
+  Flush(true);
+  readback->Invalidate(0, bytes);
+  EdramSnapshot snapshot;
+  snapshot.bytes.resize(size_t(bytes));
+  std::memcpy(snapshot.bytes.data(), readback->mapped(), size_t(bytes));
+  snapshot.sample_counting = counting_samples_;
+  return snapshot;
+}
+void VulkanRender::WriteEdram(const EdramSnapshot& snapshot) {
+  const VkDeviceSize bytes = edram_size_ + sizeof(SampleCounts);
+  if (snapshot.bytes.size() != bytes)
+    throw std::runtime_error("Native Vulkan: EDRAM snapshot size differs (resolution scale?)");
+  Begin();
+  const auto upload = Upload(snapshot.bytes.data(), bytes, 4);
+  EndRendering();
+  UseBuffer(edram_buffer_->handle(), edram_access_, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_TRANSFER_WRITE_BIT);
+  const VkBufferCopy copy{upload.offset, 0, bytes};
+  cmd_.CopyBuffer(upload.buffer, edram_buffer_->handle(), 1, &copy);
+  if (edram_buffer_) edram_draw_layout_.reset();
+  counting_samples_ = snapshot.sample_counting;
 }
 void VulkanRender::SetSampleCounts(const SampleCounts& counts, bool visibility_only) {
   Begin();

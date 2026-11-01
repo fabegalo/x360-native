@@ -1,0 +1,449 @@
+{
+  "host": "Linux x86-64 container, 4 CPUs, Mesa lavapipe (llvmpipe)",
+  "cpus": 4,
+  "rounds": 6,
+  "repeat": 5,
+  "backend": "vulkan",
+  "cvars": [],
+  "arms": [
+    {
+      "name": "off",
+      "directory": ".local/build/linux-amd64/src/native/Release",
+      "cvars": [
+        "native_eager_submit=0"
+      ]
+    },
+    {
+      "name": "off-aa",
+      "directory": ".local/build/linux-amd64/src/native/Release",
+      "cvars": [
+        "native_eager_submit=0"
+      ]
+    },
+    {
+      "name": "idle64",
+      "directory": ".local/build/linux-amd64/src/native/Release",
+      "cvars": [
+        "native_eager_submit=64"
+      ]
+    },
+    {
+      "name": "queued64",
+      "directory": ".local/build/linux-amd64/src/native/Release",
+      "cvars": [
+        "native_eager_submit=64",
+        "native_eager_submit_depth=1"
+      ]
+    }
+  ],
+  "captures": {
+    "frames.x360nfc": {
+      "off": {
+        "warm_frames": 72,
+        "metrics": {
+          "frame_ms": {
+            "mean": 92.6325,
+            "p50": 91.38,
+            "p95": 117.552,
+            "p99": 123.536
+          },
+          "renderer_ms": {
+            "mean": 90.5547,
+            "p50": 88.31,
+            "p95": 110.136,
+            "p99": 118.624
+          },
+          "renderer_cpu_ms": {
+            "mean": 33.8283,
+            "p50": 31.088,
+            "p95": 48.695,
+            "p99": 57.166
+          },
+          "fence_wait_ms": {
+            "mean": 56.7264,
+            "p50": 56.503,
+            "p95": 67.133,
+            "p99": 69.417
+          },
+          "gpu_busy_ms": {
+            "mean": 56.0131,
+            "p50": 56.211,
+            "p95": 65.536,
+            "p99": 72.182
+          },
+          "gpu_idle_ms": {
+            "mean": 36.6195,
+            "p50": 33.826,
+            "p95": 51.684,
+            "p99": 61.88
+          },
+          "draw_ms": {
+            "mean": 16.0275,
+            "p50": 14.089,
+            "p95": 25.311,
+            "p99": 27.276
+          },
+          "resolve_ms": {
+            "mean": 16.9849,
+            "p50": 15.752,
+            "p95": 24.893,
+            "p99": 29.459
+          },
+          "sync_ms": {
+            "mean": 31.7442,
+            "p50": 31.337,
+            "p95": 38.537,
+            "p99": 45.871
+          },
+          "sample_ms": {
+            "mean": 17.8693,
+            "p50": 17.907,
+            "p95": 21.708,
+            "p99": 22.855
+          },
+          "present_ms": {
+            "mean": 7.9289,
+            "p50": 8.07,
+            "p95": 10.094,
+            "p99": 10.673
+          },
+          "submissions": {
+            "mean": 7.0,
+            "p50": 7.0,
+            "p95": 7.0,
+            "p99": 7.0
+          },
+          "fence_waits": {
+            "mean": 5.0,
+            "p50": 5.0,
+            "p95": 5.0,
+            "p99": 5.0
+          },
+          "draws": {
+            "mean": 1027.0,
+            "p50": 1027.0,
+            "p95": 1027.0,
+            "p99": 1027.0
+          }
+        }
+      },
+      "off-aa": {
+        "warm_frames": 72,
+        "metrics": {
+          "frame_ms": {
+            "mean": 93.3997,
+            "p50": 89.65,
+            "p95": 115.229,
+            "p99": 137.285
+          },
+          "renderer_ms": {
+            "mean": 91.312,
+            "p50": 88.648,
+            "p95": 111.173,
+            "p99": 136.901
+          },
+          "renderer_cpu_ms": {
+            "mean": 34.127,
+            "p50": 31.703,
+            "p95": 44.236,
+            "p99": 57.297
+          },
+          "fence_wait_ms": {
+            "mean": 57.185,
+            "p50": 55.502,
+            "p95": 71.141,
+            "p99": 79.604
+          },
+          "gpu_busy_ms": {
+            "mean": 56.4387,
+            "p50": 55.138,
+            "p95": 70.173,
+            "p99": 79.043
+          },
+          "gpu_idle_ms": {
+            "mean": 36.961,
+            "p50": 34.809,
+            "p95": 50.595,
+            "p99": 58.242
+          },
+          "draw_ms": {
+            "mean": 16.0765,
+            "p50": 14.11,
+            "p95": 23.018,
+            "p99": 27.652
+          },
+          "resolve_ms": {
+            "mean": 17.2838,
+            "p50": 16.106,
+            "p95": 25.181,
+            "p99": 28.491
+          },
+          "sync_ms": {
+            "mean": 32.0677,
+            "p50": 31.322,
+            "p95": 38.895,
+            "p99": 46.097
+          },
+          "sample_ms": {
+            "mean": 18.0621,
+            "p50": 17.369,
+            "p95": 24.329,
+            "p99": 26.812
+          },
+          "present_ms": {
+            "mean": 7.8219,
+            "p50": 7.454,
+            "p95": 10.923,
+            "p99": 12.706
+          },
+          "submissions": {
+            "mean": 7.0,
+            "p50": 7.0,
+            "p95": 7.0,
+            "p99": 7.0
+          },
+          "fence_waits": {
+            "mean": 5.0,
+            "p50": 5.0,
+            "p95": 5.0,
+            "p99": 5.0
+          },
+          "draws": {
+            "mean": 1027.0,
+            "p50": 1027.0,
+            "p95": 1027.0,
+            "p99": 1027.0
+          }
+        },
+        "paired_frame_ratio": {
+          "median": 1.004,
+          "ci95": [
+            0.9253,
+            1.1074
+          ],
+          "rounds": [
+            1.0167,
+            0.8852,
+            1.1783,
+            0.9913,
+            0.9653,
+            1.0364
+          ],
+          "verdict": "inconclusive"
+        }
+      },
+      "idle64": {
+        "warm_frames": 72,
+        "metrics": {
+          "frame_ms": {
+            "mean": 95.5018,
+            "p50": 94.659,
+            "p95": 111.42,
+            "p99": 129.54
+          },
+          "renderer_ms": {
+            "mean": 92.5935,
+            "p50": 91.202,
+            "p95": 107.813,
+            "p99": 114.189
+          },
+          "renderer_cpu_ms": {
+            "mean": 34.7496,
+            "p50": 33.335,
+            "p95": 44.3,
+            "p99": 50.392
+          },
+          "fence_wait_ms": {
+            "mean": 57.8439,
+            "p50": 57.577,
+            "p95": 69.601,
+            "p99": 77.707
+          },
+          "gpu_busy_ms": {
+            "mean": 73.0147,
+            "p50": 72.665,
+            "p95": 86.171,
+            "p99": 90.254
+          },
+          "gpu_idle_ms": {
+            "mean": 22.4871,
+            "p50": 21.636,
+            "p95": 29.474,
+            "p99": 39.286
+          },
+          "draw_ms": {
+            "mean": 26.8751,
+            "p50": 26.243,
+            "p95": 37.263,
+            "p99": 40.944
+          },
+          "resolve_ms": {
+            "mean": 6.0641,
+            "p50": 6.181,
+            "p95": 12.048,
+            "p99": 14.743
+          },
+          "sync_ms": {
+            "mean": 31.3554,
+            "p50": 31.311,
+            "p95": 39.974,
+            "p99": 46.82
+          },
+          "sample_ms": {
+            "mean": 20.0726,
+            "p50": 20.186,
+            "p95": 24.025,
+            "p99": 24.625
+          },
+          "present_ms": {
+            "mean": 8.2264,
+            "p50": 8.097,
+            "p95": 10.855,
+            "p99": 10.989
+          },
+          "submissions": {
+            "mean": 9.0,
+            "p50": 9.0,
+            "p95": 9.0,
+            "p99": 10.0
+          },
+          "fence_waits": {
+            "mean": 5.0,
+            "p50": 5.0,
+            "p95": 5.0,
+            "p99": 5.0
+          },
+          "draws": {
+            "mean": 1027.0,
+            "p50": 1027.0,
+            "p95": 1027.0,
+            "p99": 1027.0
+          }
+        },
+        "paired_frame_ratio": {
+          "median": 1.0293,
+          "ci95": [
+            0.9544,
+            1.1256
+          ],
+          "rounds": [
+            1.1725,
+            0.9143,
+            1.0498,
+            1.0087,
+            0.9945,
+            1.0787
+          ],
+          "verdict": "inconclusive"
+        }
+      },
+      "queued64": {
+        "warm_frames": 72,
+        "metrics": {
+          "frame_ms": {
+            "mean": 150.5433,
+            "p50": 149.481,
+            "p95": 187.065,
+            "p99": 201.736
+          },
+          "renderer_ms": {
+            "mean": 147.2464,
+            "p50": 144.995,
+            "p95": 178.429,
+            "p99": 189.25
+          },
+          "renderer_cpu_ms": {
+            "mean": 109.422,
+            "p50": 105.157,
+            "p95": 137.999,
+            "p99": 157.065
+          },
+          "fence_wait_ms": {
+            "mean": 37.8244,
+            "p50": 37.044,
+            "p95": 55.33,
+            "p99": 60.358
+          },
+          "gpu_busy_ms": {
+            "mean": 127.5351,
+            "p50": 127.932,
+            "p95": 161.6,
+            "p99": 165.616
+          },
+          "gpu_idle_ms": {
+            "mean": 23.0082,
+            "p50": 21.743,
+            "p95": 32.804,
+            "p99": 44.902
+          },
+          "draw_ms": {
+            "mean": 100.3234,
+            "p50": 99.537,
+            "p95": 131.951,
+            "p99": 138.073
+          },
+          "resolve_ms": {
+            "mean": 7.0727,
+            "p50": 6.323,
+            "p95": 17.19,
+            "p99": 19.204
+          },
+          "sync_ms": {
+            "mean": 12.6519,
+            "p50": 10.641,
+            "p95": 27.695,
+            "p99": 33.372
+          },
+          "sample_ms": {
+            "mean": 19.2663,
+            "p50": 19.013,
+            "p95": 24.841,
+            "p99": 38.325
+          },
+          "present_ms": {
+            "mean": 7.9321,
+            "p50": 8.12,
+            "p95": 10.116,
+            "p99": 10.72
+          },
+          "submissions": {
+            "mean": 16.4306,
+            "p50": 16.0,
+            "p95": 22.0,
+            "p99": 23.0
+          },
+          "fence_waits": {
+            "mean": 5.0,
+            "p50": 5.0,
+            "p95": 5.0,
+            "p99": 5.0
+          },
+          "draws": {
+            "mean": 1027.0,
+            "p50": 1027.0,
+            "p95": 1027.0,
+            "p99": 1027.0
+          }
+        },
+        "paired_frame_ratio": {
+          "median": 1.6567,
+          "ci95": [
+            1.4907,
+            1.755
+          ],
+          "rounds": [
+            1.833,
+            1.4092,
+            1.6751,
+            1.5722,
+            1.677,
+            1.6382
+          ],
+          "verdict": "slower"
+        }
+      }
+    }
+  },
+  "workload": "x360n_native_frame_probe OUT vulkan 6 --draws 1024 --resolves 8, capture of frames 3-5 (synthetic, no title data)",
+  "description": "native_replay_ab.py, 4 arms on the same recorded frames, rotating order; every run equivalent, repeatable and visually checked"
+}

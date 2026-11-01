@@ -1,0 +1,181 @@
+name: Native renderer tests
+
+# Builds the Native plugin, frame capture/replay tools and their tests from the
+# pinned SDK, and runs the headless contracts on hosted runners without a GPU:
+# Windows with D3D12 WARP (software rasterizer with ROV support) and Linux with
+# Mesa lavapipe (Vulkan). No title or console content is involved.
+on:
+  pull_request:
+    paths:
+      - 'src/native/**'
+      - 'tests/native/**'
+      - 'tests/cmake/**'
+      - 'scripts/performance/native_replay_ab.py'
+      - 'scripts/performance/native_capture_session.py'
+      - 'CMakeLists.txt'
+      - 'CMakePresets.json'
+      - 'cmake/**'
+      - 'patches/**'
+      - 'deps.lock.json'
+      - 'scripts/bootstrap.sh'
+      - 'scripts/setup/**'
+      - '.github/workflows/native-tests.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'src/native/**'
+      - 'tests/native/**'
+      - '.github/workflows/native-tests.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: native-tests-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows-d3d12:
+    name: Windows x64 D3D12 (WARP)
+    runs-on: windows-2022
+    timeout-minutes: 150
+    defaults:
+      run:
+        shell: powershell
+    env:
+      # D3D12 software adapter for both the workload and the replay. WARP
+      # compiles the translated shaders at first use on the CPU: the fence
+      # limit is raised so a slow first frame is not reported as a hang (a
+      # real hang still fails, after 120 s).
+      X360N_NATIVE_TEST_CVARS: d3d12_adapter=-2;native_gpu_timeout_ms=120000
+    steps:
+      - name: Check out the exact event commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          submodules: false
+          persist-credentials: false
+          lfs: false
+      - name: Prepare pinned tools, SDK, patches and LLVM
+        run: |
+          $ErrorActionPreference = 'Stop'
+          & scripts/prepare-tools.ps1 -AllowDownloads -ToolsOnly
+          if ($LASTEXITCODE -ne 0) { throw 'Pinned Git/CMake/Ninja/Python preparation failed' }
+          git -c core.symlinks=false submodule update --init --recursive --depth 1 --jobs 8
+          if ($LASTEXITCODE -ne 0) { throw 'SDK submodules unavailable' }
+          & scripts/setup/materialize-symlinks.ps1
+          & scripts/setup/apply-sdk-patches.ps1
+          if ($LASTEXITCODE -ne 0) { throw 'SDK patch application failed' }
+          & scripts/setup/apply-sdk-patches.ps1 -Check
+          if ($LASTEXITCODE -ne 0) { throw 'SDK patch verification failed' }
+          & scripts/setup/bootstrap-llvm.ps1 -AllowDownloads -Extractor 7zip
+          if ($LASTEXITCODE -ne 0) { throw 'Pinned LLVM preparation failed' }
+      - name: Configure
+        run: |
+          & scripts/devshell.cmd cmake --preset win-amd64
+          if ($LASTEXITCODE -ne 0) { throw 'Configure failed' }
+      - name: Build the Native plugin, replay, workloads and tests
+        run: |
+          & scripts/devshell.cmd cmake --build --preset win-amd64-release --target rexgpu-native x360n_native_replay x360n_native_frame_probe x360n_native_pipeline_probe x360n_native_pipeline_tests
+          if ($LASTEXITCODE -ne 0) { throw 'Build failed' }
+      - name: Run capture/replay and pipeline contracts on D3D12 WARP
+        run: |
+          # devshell.cmd passes arguments through cmd, where '|' is a pipe: one
+          # regex per call. Hosted Windows runners have no Vulkan driver: the
+          # Vulkan contracts run in the Linux job.
+          foreach ($tests in 'native[.]capture-replay-d3d12', 'native[.]capture-format', 'native[.]pipeline-recording', 'native[.]d3d12-commands') {
+            & scripts/devshell.cmd ctest --preset win-amd64-release -R $tests --output-on-failure --timeout 900
+            if ($LASTEXITCODE -ne 0) { throw "Native tests $tests failed" }
+          }
+      - name: Explain a D3D12 failure with the debug layer
+        if: failure()
+        timeout-minutes: 20
+        run: |
+          # The debug layer (Graphics Tools) states why a D3D12 call is invalid;
+          # Native appends its messages to the error and checks them after every
+          # submission. One frame on the runner's WARP.
+          Add-WindowsCapability -Online -Name 'Tools.Graphics.DirectX~~~~0.0.1.0' | Out-String
+          $bin = Split-Path (Get-ChildItem -Recurse -Filter x360n_native_frame_probe.exe .local/build/win-amd64 | Select-Object -First 1).FullName
+          $out = '.local/build/win-amd64/src/native/warp-diagnosis/debug-layer'
+          & "$bin/x360n_native_frame_probe.exe" $out d3d12 1 d3d12_adapter=-2 d3d12_debug=true native_gpu_timeout_ms=30000 native_stats=true native_pipeline_threads=0
+          "debug layer run: exit $LASTEXITCODE"
+          Get-Content "$out/runtime.log" -Tail 40
+          exit 0
+      - name: A/B submission strategies and state filter on the same recorded frames (WARP, informative timing)
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $replay = Split-Path (Get-ChildItem -Recurse -Filter x360n_native_replay.exe .local/build/win-amd64 | Select-Object -First 1).FullName
+          $out = '.local/build/win-amd64/src/native/capture-replay-d3d12'
+          if (-not (Test-Path "$out/heavy/frames.x360nfc")) { 'No D3D12 capture (contract skipped on WARP): no A/B.'; exit 0 }
+          python scripts/performance/native_replay_ab.py --capture "$out/heavy/frames.x360nfc" --output "$out/ab-eager-submit.json" --backend d3d12 --rounds 5 --repeat 5 --cvar d3d12_adapter=-2 --cvar native_gpu_timeout_ms=120000 --arm off $replay native_eager_submit=0 --arm idle64 $replay native_eager_submit=64 --arm queued64 $replay native_eager_submit=64 native_eager_submit_depth=1
+          if ($LASTEXITCODE -ne 0) { throw 'A/B replay failed or differed from the capture' }
+          python scripts/performance/native_replay_ab.py --capture "$out/heavy/frames.x360nfc" --output "$out/ab-state-filter.json" --backend d3d12 --rounds 5 --repeat 5 --cvar d3d12_adapter=-2 --cvar native_gpu_timeout_ms=120000 --arm unfiltered $replay native_redundant_state_filter=false --arm filtered $replay native_redundant_state_filter=true
+          if ($LASTEXITCODE -ne 0) { throw 'A/B replay failed or differed from the capture' }
+      - name: Upload logs and replay reports
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: native-tests-windows-d3d12
+          path: |
+            .local/build/win-amd64/src/native/capture-replay-d3d12/**/*.json
+            .local/build/win-amd64/src/native/capture-replay-d3d12/**/*.csv
+            .local/build/win-amd64/src/native/capture-replay-d3d12/**/*.log
+            .local/build/win-amd64/src/native/pipeline-cold-d3d12/**/*.log
+            .local/build/win-amd64/src/native/warp-diagnosis/**/*.log
+            .local/build/win-amd64/Testing/Temporary/LastTest*.log
+          if-no-files-found: ignore
+          retention-days: 7
+
+  linux-vulkan:
+    name: Linux x64 Vulkan (lavapipe)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - name: Check out the exact event commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          submodules: false
+          persist-credentials: false
+          lfs: false
+      - name: Install build dependencies and Mesa lavapipe
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends mesa-vulkan-drivers libvulkan1 \
+            libgtk-3-dev libx11-xcb-dev libxss-dev libwayland-dev libwayland-bin wayland-protocols \
+            libxkbcommon-dev libdecor-0-dev libasound2-dev libpulse-dev libpipewire-0.3-dev
+      - name: Prepare pinned SDK, tools and patches
+        run: sh scripts/bootstrap.sh
+      - name: Configure and build
+        run: |
+          cmake=.local/toolchains/posix-linux-x64/cmake/bin/cmake
+          $cmake --preset linux-amd64
+          $cmake --build --preset linux-amd64-release --target rexgpu-native x360n_native_replay x360n_native_frame_probe \
+            x360n_native_pipeline_probe x360n_native_pipeline_tests x360n_native_memexport_probe x360n_native_occlusion_probe \
+            x360n_native_vulkan_probe
+      - name: Run Native contracts on lavapipe
+        run: |
+          .local/toolchains/posix-linux-x64/cmake/bin/ctest --preset linux-amd64-release \
+            -R "native[.]capture|native[.]pipeline|native[.]vulkan-components|Native-MEMEXPORT-vulkan|Native-FSI" \
+            --output-on-failure --timeout 900
+      - name: A/B early submission on the same recorded frames (lavapipe, informative timing)
+        run: |
+          out=.local/build/linux-amd64/src/native/capture-replay-vulkan
+          replay=.local/build/linux-amd64/src/native/Release
+          python3 scripts/performance/native_replay_ab.py --capture $out/heavy/frames.x360nfc \
+            --output $out/ab-eager-submit.json --backend vulkan --rounds 5 --repeat 5 \
+            --arm off $replay native_eager_submit=0 --arm idle64 $replay native_eager_submit=64 \
+            --arm queued64 $replay native_eager_submit=64 native_eager_submit_depth=1
+      - name: Upload logs and replay reports
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: native-tests-linux-vulkan
+          path: |
+            .local/build/linux-amd64/src/native/capture-replay-vulkan/**/*.json
+            .local/build/linux-amd64/src/native/capture-replay-vulkan/**/*.csv
+            .local/build/linux-amd64/src/native/capture-replay-vulkan/**/*.log
+            .local/build/linux-amd64/Testing/Temporary/LastTest*.log
+          if-no-files-found: ignore
+          retention-days: 7

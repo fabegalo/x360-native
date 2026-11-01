@@ -1,5 +1,23 @@
 # STATUS
 
+01/11 — **RENDER-CORE: captura, replay e perfil por frame do Native**: o
+decorador opt-in de `ScanoutBackend` grava frames no formato validado
+`X360NFC1` v3 (imagem composta obrigatória: captura sem saída válida do
+presenter é rejeitada e apagada) e `x360n_native_replay` os reproduz sem o
+título em D3D12 ou Vulkan, conferindo scanout, memória escrita pela GPU,
+contadores e a imagem composta (LUT, overlay, efeito pós), com repetição por
+digest e P50/P95/P99. `native_replay_ab.py` compara builds/configurações nos
+mesmos frames com equivalência obrigatória e IC 95%;
+`native_capture_session.py` captura, valida e faz A/B de um título real num
+comando. Otimizações: D3D12 sem estado gráfico redundante e PSO sem alocação,
+Vulkan com constantes/descriptor sets reutilizados (CPU do renderer −5% no
+lavapipe, frame sem ganho comprovado). Submissão antecipada (ociosa ou
+enfileirada) preserva os frames, mas fica desligada: no lavapipe a enfileirada
+foi 1,66× mais lenta. CI: Linux lavapipe aprovado; Windows WARP no workflow
+`native-tests.yml`. Sem GPU real e sem Skate 3 nesta nuvem: nenhum FPS
+aprovado; comandos para a RTX 4070 no relatório.
+[Relatório e comandos](docs/reports/performance/render-core-2026-11-01.md).
+
 31/10 — **RENDER-FINAL, Windows x64**: Native D3D12 reutiliza SRVs por arena,
 lê índices compatíveis da memória GPU residente e reaproveita uploads de
 constantes idênticas; Native Vulkan também lê índices residentes. Xenos

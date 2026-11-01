@@ -90,6 +90,8 @@ D3D12Render::Ptr<ID3D12PipelineState> D3D12Render::CreatePipeline(D3D12_GRAPHICS
 
 void D3D12Render::Draw(const RegisterFile& r, rex::memory::Memory& memory, Shader* vertex, Shader* pixel,
     PrimitiveType primitive, uint32_t count, const DrawIndices* indices, DrawPurpose purpose) {
+  SubmitEarly();
+  ++recorded_work_;
   Timer timer(stats_enabled_, draw_ns_);
   auto phase_start = stats_enabled_ ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
   auto finish_phase = [&](uint64_t& elapsed) {
@@ -272,8 +274,13 @@ void D3D12Render::Draw(const RegisterFile& r, rex::memory::Memory& memory, Shade
   pd.RasterizerState.DepthClipEnable = !clip.clip_disable;
   pd.RasterizerState.ForcedSampleCount = msaa == MsaaSamples::k1X ? 1 : 4;
   // Pointer identity is stable in the shader cache. The zeroed descriptor also includes every pipeline state.
-  std::string key(reinterpret_cast<const char*>(&pd), sizeof(pd));
-  auto& pipeline = pipelines_[key];
+  PipelineKey key;
+  std::memcpy(key.bytes.data(), &pd, sizeof(pd));
+  if (!last_pipeline_ || !(key == last_pipeline_key_)) {
+    last_pipeline_ = &pipelines_[key];
+    last_pipeline_key_ = key;
+  }
+  auto& pipeline = *last_pipeline_;
   if (!pipeline.valid()) {
     static const auto pso_dump = REXCVAR_GET(native_pso_dump);
     if (!pso_dump.empty()) {
@@ -412,7 +419,7 @@ void D3D12Render::Draw(const RegisterFile& r, rex::memory::Memory& memory, Shade
   if (edram_state_ != D3D12_RESOURCE_STATE_UNORDERED_ACCESS) edram_rov_layout_.reset();
   Transition(edram_.Get(), edram_state_, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
   ID3D12DescriptorHeap* heaps[]{views_.Get(), samplers_.Get()}; cmd_.SetDescriptorHeaps(2, heaps);
-  cmd_.SetGraphicsRootSignature(pd.pRootSignature); cmd_.SetPipelineState(pipeline);
+  cmd_.SetGraphicsRootSignature(pd.pRootSignature); cmd_.SetPipelineState(pipeline, &pipeline);
   cmd_.SetGraphicsRootDescriptorTable(5, MemoryTable(memexport));
   auto depth = draw_util::GetNormalizedDepthControl(r);
   draw_util::ViewportInfo viewport{{0, 0}, {1, 1}, 0, 1, {1, 1, 1}, {0, 0, 0}};

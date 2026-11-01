@@ -233,6 +233,8 @@ VulkanRender::DrawPipeline& VulkanRender::Pipeline(SpirvShader* vs, SpirvShader*
 }
 void VulkanRender::Draw(const RegisterFile& regs, rex::memory::Memory& memory, Shader* vertex, Shader* pixel,
     PrimitiveType primitive, uint32_t count, const DrawIndices* indices, DrawPurpose purpose) {
+  SubmitEarly();
+  ++recorded_work_;
   auto& perf = NativeVulkanPerformance();
   VulkanPerformanceTimer draw_timer(perf.draw_ns);
   Require(vertex, "missing vertex shader");
@@ -584,11 +586,23 @@ void VulkanRender::Draw(const RegisterFile& regs, rex::memory::Memory& memory, S
     memory_writes[1].pBufferInfo = &edram_info;
     fn.vkUpdateDescriptorSets(device_.device(), 2, memory_writes, 0, nullptr);
   }
-  const auto constants_set = AllocateDescriptors(constants_layout_);
+  static_assert(T::kConstantBufferCount == std::tuple_size_v<decltype(draw_constants_)>);
   VkDescriptorBufferInfo constant_infos[T::kConstantBufferCount]{};
+  bool constants_reused = true;
   auto constant = [&](unsigned index, const void* data, size_t bytes) {
+    // Compare the final packed bytes: shader maps, float banks, system state
+    // and registers matter exactly when they change these bytes.
+    auto& cached = draw_constants_[index];
+    if (cached.valid && cached.bytes.size() == bytes && !std::memcmp(cached.bytes.data(), data, bytes)) {
+      constant_infos[index] = cached.info;
+      return;
+    }
     const auto upload = Upload(data, bytes, device_.properties().minUniformBufferOffsetAlignment);
     constant_infos[index] = {upload.buffer, upload.offset, bytes};
+    cached.bytes.assign(static_cast<const uint8_t*>(data), static_cast<const uint8_t*>(data) + bytes);
+    cached.info = constant_infos[index];
+    cached.valid = true;
+    constants_reused = false;
   };
   constant(T::kConstantBufferSystem, &constants, sizeof(constants));
   auto floats = [&](SpirvShader* shader, unsigned start, unsigned slot) {
@@ -607,17 +621,22 @@ void VulkanRender::Draw(const RegisterFile& regs, rex::memory::Memory& memory, S
   floats(ps, XE_GPU_REG_SHADER_CONSTANT_000_X + ps_constants * 4, T::kConstantBufferFloatPixel);
   constant(T::kConstantBufferBoolLoop, &regs[XE_GPU_REG_SHADER_CONSTANT_BOOL_000_031], 40 * 4);
   constant(T::kConstantBufferFetch, &regs[XE_GPU_REG_SHADER_CONSTANT_FETCH_00_0], 192 * 4);
-  VkWriteDescriptorSet constant_writes[T::kConstantBufferCount]{};
-  for (unsigned i = 0; i < T::kConstantBufferCount; ++i) {
-    auto& write = constant_writes[i];
-    write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-    write.dstSet = constants_set;
-    write.dstBinding = i;
-    write.descriptorCount = 1;
-    write.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-    write.pBufferInfo = &constant_infos[i];
+  // Every buffer reused: the previous draw's set already names exactly them.
+  if (!constants_reused || !draw_constants_set_) {
+    draw_constants_set_ = AllocateDescriptors(constants_layout_);
+    VkWriteDescriptorSet constant_writes[T::kConstantBufferCount]{};
+    for (unsigned i = 0; i < T::kConstantBufferCount; ++i) {
+      auto& write = constant_writes[i];
+      write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+      write.dstSet = draw_constants_set_;
+      write.dstBinding = i;
+      write.descriptorCount = 1;
+      write.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+      write.pBufferInfo = &constant_infos[i];
+    }
+    fn.vkUpdateDescriptorSets(device_.device(), T::kConstantBufferCount, constant_writes, 0, nullptr);
   }
-  fn.vkUpdateDescriptorSets(device_.device(), T::kConstantBufferCount, constant_writes, 0, nullptr);
+  const auto constants_set = draw_constants_set_;
   const auto cull = !polygon ? VK_CULL_MODE_NONE :
       VkCullModeFlags((mode.cull_front ? VK_CULL_MODE_FRONT_BIT : 0) | (mode.cull_back ? VK_CULL_MODE_BACK_BIT : 0));
   const uint32_t point_key = std::popcount(mask) |

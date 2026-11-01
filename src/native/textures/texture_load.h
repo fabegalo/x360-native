@@ -9,7 +9,8 @@
 #include <vector>
 namespace x360n::native {
 class ScaledResolveCache;
-class D3D12Commands;
+template <class List> class BasicD3D12Commands;
+using D3D12Commands = BasicD3D12Commands<struct ID3D12GraphicsCommandList>;
 // Guest texture storage selected by a fetch constant, in the terms both the
 // CPU conversion and the GPU load use. Base/mip are byte addresses.
 struct TextureLoadInput {
