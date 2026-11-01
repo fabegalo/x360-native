@@ -16,12 +16,7 @@ class VulkanBackend final : public ScanoutBackend {
       const uint32_t* lut, const ScanoutOverlay* overlay, const void* overlay_pixels, ScanoutPostEffect post_effect) override {
     ScanoutTexture output = texture;
     std::vector<uint8_t> scaled_pixels;
-    if (render_) {
-      render_->CompleteGuestWrites(kGuestSyncPresent, 0xFF);
-      render_->Flush(false);
-      if (render_->PrepareScanout(texture, pixels, output, scaled_pixels)) pixels = scaled_pixels.data();
-      render_->EndFrame();
-    }
+    FinishGuestFrame(texture, pixels, output, scaled_pixels);
     scanout_.Present(presenter, output, pixels, lut, overlay, overlay_pixels, post_effect,
                      texture.width, texture.height);
   }
@@ -57,7 +52,34 @@ class VulkanBackend final : public ScanoutBackend {
   void SetSampleCounts(const SampleCounts& counts, bool visibility_only) override {
     Render().SetSampleCounts(counts, visibility_only);
   }
+  void CompleteFrame(const ScanoutTexture& texture, const void* pixels) override {
+    ScanoutTexture output = texture;
+    std::vector<uint8_t> scaled_pixels;
+    FinishGuestFrame(texture, pixels, output, scaled_pixels);
+  }
+  EdramSnapshot ReadEdram() override { return Render().ReadEdram(); }
+  void WriteEdram(const EdramSnapshot& snapshot) override { Render().WriteEdram(snapshot); }
+  BackendCounters Counters() override {
+    // Counted on this (command) thread only while native_vulkan_perf is on.
+    const auto& perf = NativeVulkanPerformance();
+    BackendCounters c;
+    c.measured = perf.enabled;
+    c.submissions = perf.submissions;
+    c.fence_waits = perf.blocked_waits;
+    c.fence_wait_ns = perf.wait_ns;
+    c.gpu_timed = perf.enabled && perf.gpu_samples;
+    c.gpu_busy_ns = perf.gpu_ns;
+    return c;
+  }
  private:
+  void FinishGuestFrame(const ScanoutTexture& texture, const void*& pixels, ScanoutTexture& output,
+                        std::vector<uint8_t>& scaled_pixels) {
+    if (!render_) return;
+    render_->CompleteGuestWrites(kGuestSyncPresent, 0xFF);
+    render_->Flush(false);
+    if (render_->PrepareScanout(texture, pixels, output, scaled_pixels)) pixels = scaled_pixels.data();
+    render_->EndFrame();
+  }
   VulkanRender& Render() {
     if (!render_) {
       render_ = std::make_unique<VulkanRender>(provider_);

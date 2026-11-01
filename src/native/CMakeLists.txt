@@ -5,6 +5,7 @@
 set(_gpu ${X360_REXGLUE_DIR}/src/graphics)
 add_library(rexgpu-native SHARED quality/settings.cpp commands/plugin.cpp commands/command_processor.cpp commands/packet_guard.cpp textures/texture.cpp textures/texture_load.cpp memory/guest_memory_mirror.cpp memory/scaled_resolve.cpp
     pipeline/pipeline_workers.cpp
+    capture/capture_format.cpp capture/capture_backend.cpp
     # EDRAM format semantics shared by both backends (despite its directory).
     d3d12/edram_format.cpp
     ${_gpu}/graphics_system.cpp ${_gpu}/command_processor.cpp
@@ -67,6 +68,33 @@ function(x360n_native_pipeline_probe api)
 endfunction()
 if(X360N_NATIVE_PLUGIN_ONLY)
   return()
+endif()
+# Frame capture replay and profiling without the title (see capture/frame_replay.h),
+# linked with the plugin's sources like the perf probes.
+get_target_property(_native_replay_sources rexgpu-native SOURCES)
+get_target_property(_native_replay_includes rexgpu-native INCLUDE_DIRECTORIES)
+get_target_property(_native_replay_defines rexgpu-native COMPILE_DEFINITIONS)
+get_target_property(_native_replay_libraries rexgpu-native LINK_LIBRARIES)
+add_executable(x360n_native_replay tools/replay_main.cpp capture/frame_replay.cpp ${_native_replay_sources})
+target_include_directories(x360n_native_replay PRIVATE ${_native_replay_includes})
+target_compile_definitions(x360n_native_replay PRIVATE ${_native_replay_defines})
+target_link_libraries(x360n_native_replay PRIVATE ${_native_replay_libraries})
+x360n_stage_runtime_dlls(x360n_native_replay)
+add_executable(x360n_native_frame_probe ../../tests/native/frame_probe.cpp capture/capture_format.cpp)
+target_link_libraries(x360n_native_frame_probe PRIVATE rexruntime xxHash::xxhash)
+x360n_stage_runtime_dlls(x360n_native_frame_probe PLUGIN_TARGETS rexgpu-native)
+function(x360n_native_capture_replay api)
+  add_test(NAME native.capture-replay-${api} COMMAND ${CMAKE_COMMAND}
+      -DPROBE=$<TARGET_FILE:x360n_native_frame_probe> -DREPLAY=$<TARGET_FILE:x360n_native_replay>
+      -DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/capture-replay-${api} -DAPI=${api}
+      -P ${CMAKE_CURRENT_SOURCE_DIR}/../../tests/native/capture_replay.cmake)
+  set_tests_properties(native.capture-replay-${api} PROPERTIES LABELS project TIMEOUT 600)
+endfunction()
+if(WIN32)
+  x360n_native_capture_replay(d3d12)
+endif()
+if(REXGLUE_USE_VULKAN)
+  x360n_native_capture_replay(vulkan)
 endif()
 if(NOT WIN32)
   # Headless Vulkan components; the remaining probes use D3D12/DXGI and Win32.

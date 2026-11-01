@@ -419,6 +419,44 @@ SampleCounts VulkanRender::ReadSampleCounts(bool counting_after) {
   counting_samples_ = counting_after;
   return result;
 }
+EdramSnapshot VulkanRender::ReadEdram() {
+  const VkDeviceSize bytes = edram_size_ + sizeof(SampleCounts);
+  auto readback = std::make_shared<VulkanBuffer>(device_, bytes, VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+                                                 VulkanBuffer::Access::kReadback);
+  Begin();
+  EndRendering();
+  UseBuffer(edram_buffer_->handle(), edram_access_, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_TRANSFER_READ_BIT);
+  const VkBufferCopy copy{0, 0, bytes};
+  cmd_.CopyBuffer(edram_buffer_->handle(), readback->handle(), 1, &copy);
+  VkBufferMemoryBarrier host{VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER};
+  host.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+  host.dstAccessMask = VK_ACCESS_HOST_READ_BIT;
+  host.srcQueueFamilyIndex = host.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+  host.buffer = readback->handle();
+  host.size = VK_WHOLE_SIZE;
+  cmd_.PipelineBarrier(VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_HOST_BIT, 0, 0, nullptr, 1, &host, 0, nullptr);
+  submissions_.Retain(readback);
+  Flush(true);
+  readback->Invalidate(0, bytes);
+  EdramSnapshot snapshot;
+  snapshot.bytes.resize(size_t(bytes));
+  std::memcpy(snapshot.bytes.data(), readback->mapped(), size_t(bytes));
+  snapshot.sample_counting = counting_samples_;
+  return snapshot;
+}
+void VulkanRender::WriteEdram(const EdramSnapshot& snapshot) {
+  const VkDeviceSize bytes = edram_size_ + sizeof(SampleCounts);
+  if (snapshot.bytes.size() != bytes)
+    throw std::runtime_error("Native Vulkan: EDRAM snapshot size differs (resolution scale?)");
+  Begin();
+  const auto upload = Upload(snapshot.bytes.data(), bytes, 4);
+  EndRendering();
+  UseBuffer(edram_buffer_->handle(), edram_access_, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_TRANSFER_WRITE_BIT);
+  const VkBufferCopy copy{upload.offset, 0, bytes};
+  cmd_.CopyBuffer(upload.buffer, edram_buffer_->handle(), 1, &copy);
+  if (edram_buffer_) edram_draw_layout_.reset();
+  counting_samples_ = snapshot.sample_counting;
+}
 void VulkanRender::SetSampleCounts(const SampleCounts& counts, bool visibility_only) {
   Begin();
   const auto upload = Upload(counts.data(), sizeof(counts), 4);

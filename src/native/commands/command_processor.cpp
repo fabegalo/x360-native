@@ -13,8 +13,18 @@
 #include <rex/memory/ring_buffer.h>
 #include <rex/thread/mutex.h>
 #include "../memory/physical_write.h"
+#include "../capture/capture_backend.h"
+#include "../quality/settings.h"
 #include <cstring>
 REXCVAR_DEFINE_STRING(native_trace, "", "GPU/Native", "Optional Native diagnostic directory");
+REXCVAR_DEFINE_STRING(native_frame_profile, "", "GPU/Native",
+    "Per-frame renderer profile CSV (draws, resolves, syncs, time inside/outside the renderer, submissions, fences, GPU); empty disables it");
+REXCVAR_DEFINE_STRING(native_capture, "", "GPU/Native",
+    "Record renderer frames for x360n_native_replay to this file (contains title data: keep it under .local); empty disables it");
+REXCVAR_DEFINE_UINT32(native_capture_skip, 300, "GPU/Native", "Presents to skip before native_capture starts recording");
+REXCVAR_DEFINE_UINT32(native_capture_frames, 1, "GPU/Native", "Frames native_capture records");
+REXCVAR_DEFINE_STRING(native_capture_trigger, "", "GPU/Native",
+    "Start native_capture at the first present after this file exists (instead of native_capture_skip)");
 namespace x360n::native {
 [[noreturn]] void Unsupported(const char* message) {
   // The interface has no asynchronous failure return. Terminate this experimental
@@ -47,7 +57,11 @@ void CommandProcessor::CompleteGuestWrites(GuestSync source, uint32_t opcode) {
 bool CommandProcessor::SetupContext() {
   try {
     active_processor = this;
-    scanout_ = factory_(*graphics_system_->provider());
+    const auto quality = GetNativeQualitySettings();
+    scanout_ = CaptureBackend::Wrap(factory_(*graphics_system_->provider()), *memory_, {
+        std::filesystem::path(REXCVAR_GET(native_capture)), std::filesystem::path(REXCVAR_GET(native_frame_profile)),
+        std::filesystem::path(REXCVAR_GET(native_capture_trigger)), REXCVAR_GET(native_capture_skip), REXCVAR_GET(native_capture_frames), quality.scale_x, quality.scale_y,
+        graphics_system_->name().find("Vulkan") != std::string::npos ? "vulkan" : "d3d12"});
     REXLOG_INFO("{}: independent scanout and guest renderer ready", graphics_system_->name());
     return true;
   } catch (const std::exception& e) { Unsupported(e.what()); }

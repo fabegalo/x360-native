@@ -402,6 +402,41 @@ SampleCounts D3D12Render::ReadSampleCounts(bool counting_after) {
   sample_counting_ = counting_after;
   return sample_counts_;
 }
+EdramSnapshot D3D12Render::ReadEdram() {
+  // The tail holds sample counters only once ReadSampleCounts initialized it;
+  // until then counting is off and sample_counts_ is the authoritative copy.
+  if (!sample_counts_readback_) ReadSampleCounts(false);
+  const uint64_t bytes = edram_size_ + sizeof(SampleCounts);
+  auto readback = Buffer(bytes, D3D12_HEAP_TYPE_READBACK, D3D12_RESOURCE_STATE_COPY_DEST);
+  // The transition orders every recorded ROV write before the copy.
+  Transition(edram_.Get(), edram_state_, D3D12_RESOURCE_STATE_COPY_SOURCE);
+  cmd_.CopyBufferRegion(readback.Get(), 0, edram_.Get(), 0, bytes);
+  Transition(edram_.Get(), edram_state_, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+  edram_rov_layout_.reset();
+  Flush(kFlushDrain);
+  EdramSnapshot snapshot;
+  snapshot.bytes.resize(size_t(bytes));
+  void* mapped = nullptr;
+  const D3D12_RANGE range{0, size_t(bytes)}, none{};
+  Check(readback->Map(0, &range, &mapped), "map EDRAM snapshot");
+  std::memcpy(snapshot.bytes.data(), mapped, size_t(bytes));
+  readback->Unmap(0, &none);
+  snapshot.sample_counting = sample_counting_;
+  return snapshot;
+}
+void D3D12Render::WriteEdram(const EdramSnapshot& snapshot) {
+  const uint64_t bytes = edram_size_ + sizeof(SampleCounts);
+  Require(snapshot.bytes.size() == bytes, "EDRAM snapshot size differs (resolution scale?)");
+  if (!sample_counts_readback_)
+    sample_counts_readback_ = Buffer(sizeof(SampleCounts), D3D12_HEAP_TYPE_READBACK, D3D12_RESOURCE_STATE_COPY_DEST);
+  const auto upload = Upload(snapshot.bytes.data(), size_t(bytes));
+  Transition(edram_.Get(), edram_state_, D3D12_RESOURCE_STATE_COPY_DEST);
+  cmd_.CopyBufferRegion(edram_.Get(), 0, upload.resource.Get(), upload.offset, bytes);
+  Transition(edram_.Get(), edram_state_, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+  edram_rov_layout_.reset();
+  std::memcpy(sample_counts_.data(), snapshot.bytes.data() + edram_size_, sizeof(SampleCounts));
+  sample_counting_ = snapshot.sample_counting;
+}
 void D3D12Render::SetSampleCounts(const SampleCounts& counts, bool visibility_only) {
   if (!sample_counts_readback_) ReadSampleCounts(false);
   const auto upload = Upload(counts.data(), sizeof(counts));

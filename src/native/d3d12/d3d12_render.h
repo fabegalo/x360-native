@@ -44,6 +44,10 @@ class D3D12Render {
   // Diagnostic accounting only (native_stats): why a submission waited.
   enum FlushCause : unsigned { kFlushGuestSync, kFlushPresent, kFlushOverlap, kFlushCapacity, kFlushDrain, kFlushCauses };
   void Flush(FlushCause);
+  // Frame capture/replay: EDRAM + sample counter tail after all submitted work.
+  EdramSnapshot ReadEdram();
+  void WriteEdram(const EdramSnapshot&);
+  bool stats_enabled() const { return stats_enabled_; }
   void CountPresent();
   void EndFrame();
   struct Performance {

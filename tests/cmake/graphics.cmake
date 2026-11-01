@@ -112,8 +112,11 @@ x360n_stage_runtime_dlls(x360n_memexport_readback_probe PLUGIN_TARGETS rexgpu-xe
 # Native asynchronous pipeline creation: worker pool and deferred command
 # order. Platform-neutral (no GPU, no D3D12/Vulkan), built on every host.
 add_executable(x360n_native_pipeline_tests native/pipeline_recording_test.cpp
-    ${CMAKE_SOURCE_DIR}/src/native/pipeline/pipeline_workers.cpp)
-target_link_libraries(x360n_native_pipeline_tests PRIVATE Catch2::Catch2WithMain)
+    ${CMAKE_SOURCE_DIR}/src/native/pipeline/pipeline_workers.cpp
+    native/capture_format_test.cpp ${CMAKE_SOURCE_DIR}/src/native/capture/capture_format.cpp)
+target_link_libraries(x360n_native_pipeline_tests PRIVATE Catch2::Catch2WithMain xxHash::xxhash)
 x360n_stage_runtime_dlls(x360n_native_pipeline_tests)
 add_test(NAME native.pipeline-recording COMMAND x360n_native_pipeline_tests [native-pipeline])
 set_tests_properties(native.pipeline-recording PROPERTIES LABELS project TIMEOUT 60)
+add_test(NAME native.capture-format COMMAND x360n_native_pipeline_tests [native-capture])
+set_tests_properties(native.capture-format PROPERTIES LABELS project TIMEOUT 60)

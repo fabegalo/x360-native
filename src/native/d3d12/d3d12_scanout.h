@@ -24,7 +24,14 @@ class D3D12Scanout final : public ScanoutBackend {
   void Resolve(const rex::graphics::RegisterFile& regs, rex::memory::Memory& memory) override;
   SampleCounts ReadSampleCounts(bool counting_after) override;
   void SetSampleCounts(const SampleCounts&, bool visibility_only) override;
+  void CompleteFrame(const ScanoutTexture&, const void* pixels) override;
+  EdramSnapshot ReadEdram() override { return Render().ReadEdram(); }
+  void WriteEdram(const EdramSnapshot& snapshot) override { Render().WriteEdram(snapshot); }
+  BackendCounters Counters() override;
  private:
+  // CompleteFrame plus the scaled pixels to present (empty when unscaled).
+  void FinishGuestFrame(const ScanoutTexture& input, const void* input_pixels, ScanoutTexture& output,
+                        const void*& pixels, std::vector<uint8_t>& scaled_pixels);
   template<class T> using Ptr = Microsoft::WRL::ComPtr<T>;
   struct Slot {
     Ptr<ID3D12CommandAllocator> allocator;

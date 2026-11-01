@@ -103,19 +103,40 @@ void D3D12Scanout::SetSampleCounts(const SampleCounts& counts, bool visibility_o
 void D3D12Scanout::Resolve(const rex::graphics::RegisterFile& regs, rex::memory::Memory& memory) {
   Render().Resolve(regs, memory);
 }
+void D3D12Scanout::FinishGuestFrame(const ScanoutTexture& input_texture, const void* input_pixels,
+    ScanoutTexture& t, const void*& pixels, std::vector<uint8_t>& scaled_pixels) {
+  if (!render_) return;
+  render_->CountPresent();
+  render_->CompleteGuestWrites(kGuestSyncPresent, 0xFF);
+  render_->Flush(D3D12Render::kFlushPresent);
+  if (render_->PrepareScanout(input_texture, input_pixels, t, scaled_pixels)) pixels = scaled_pixels.data();
+  render_->EndFrame();
+}
+void D3D12Scanout::CompleteFrame(const ScanoutTexture& texture, const void* pixels) {
+  ScanoutTexture output = texture;
+  std::vector<uint8_t> scaled;
+  FinishGuestFrame(texture, pixels, output, pixels, scaled);
+}
+BackendCounters D3D12Scanout::Counters() {
+  if (!render_) return {};
+  const auto p = render_->performance();
+  BackendCounters c;
+  c.submissions = p.submissions;
+  // Fence waits and GPU timestamps are measured only with native_stats.
+  c.measured = render_->stats_enabled();
+  c.fence_waits = p.waits;
+  c.fence_wait_ns = p.wait_ns;
+  c.gpu_timed = c.measured && p.gpu_frequency;
+  c.gpu_busy_ns = c.gpu_timed ? uint64_t(double(p.gpu_ticks) * 1e9 / double(p.gpu_frequency)) : 0;
+  return c;
+}
 void D3D12Scanout::Present(rex::ui::Presenter& presenter, const ScanoutTexture& input_texture,
                          const void* input_pixels, const uint32_t* lut, const ScanoutOverlay* overlay,
                          const void* overlay_pixels, ScanoutPostEffect post_effect) {
   ScanoutTexture t = input_texture;
   const void* pixels = input_pixels;
   std::vector<uint8_t> scaled_pixels;
-  if (render_) {
-    render_->CountPresent();
-    render_->CompleteGuestWrites(kGuestSyncPresent, 0xFF);
-    render_->Flush(D3D12Render::kFlushPresent);
-    if (render_->PrepareScanout(input_texture, input_pixels, t, scaled_pixels)) pixels = scaled_pixels.data();
-    render_->EndFrame();
-  }
+  FinishGuestFrame(input_texture, input_pixels, t, pixels, scaled_pixels);
   const auto display_aspect = rex::chrono::FrameLayout::DisplayAspect();
   const uint32_t aspect_x = display_aspect.x ? display_aspect.x : input_texture.width;
   const uint32_t aspect_y = display_aspect.y ? display_aspect.y : input_texture.height;

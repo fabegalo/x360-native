@@ -8,7 +8,9 @@
 // are declared here with identical layout and values (DXGI enumeration and
 // D3D12 structure definitions, as published in Microsoft's DirectX-Headers).
 // The format is carried as data on that path, never interpreted.
-#if defined(_WIN32)
+// X360N_HOST_LAYOUT_D3D12 selects d3d12.h elsewhere too: syntax checks of the
+// D3D12 backend off Windows with Microsoft's DirectX-Headers.
+#if defined(_WIN32) || defined(X360N_HOST_LAYOUT_D3D12)
 #include <d3d12.h>
 #else
 #include <cstdint>

@@ -3,6 +3,8 @@
 #include "draw_types.h"
 #include "occlusion_query.h"
 #include <memory>
+#include <span>
+#include <vector>
 #include <rex/graphics/command_processor.h>
 namespace rex::ui { class GraphicsProvider; class Presenter; }
 namespace x360n::native {
@@ -14,6 +16,18 @@ enum class ScanoutPostEffect { kNone, kFxaa, kFxaaExtreme };
 struct ScanoutOverlay {
   ScanoutTexture surface;
   uint32_t x, y, right, bottom, offset_x, offset_y, display_width, display_height;
+};
+// Renderer-side work counters for frame profiling, capture and replay. Fields a
+// backend does not measure stay zero with measured = false (never a reading).
+struct BackendCounters {
+  bool measured = false, gpu_timed = false;
+  uint64_t submissions = 0, fence_waits = 0, fence_wait_ns = 0, gpu_busy_ns = 0;
+};
+// EDRAM bytes then the 32-byte sample counter tail, and whether sample
+// counting (an open ZPD query) is active for the following draws.
+struct EdramSnapshot {
+  std::vector<uint8_t> bytes;
+  bool sample_counting = false;
 };
 // Commands and guest formats do not depend on a host API. A Vulkan backend
 // implements this boundary with its own queues, pipelines and resources.
@@ -44,6 +58,15 @@ class ScanoutBackend {
   // snapshot. Visibility accumulation is boolean OR, so heavy overdraw cannot
   // wrap back to "not visible". This mode is never enabled for ordinary draws.
   virtual void SetSampleCounts(const SampleCounts&, bool visibility_only) = 0;
+  // The guest-visible part of Present without a presenter: publish recorded
+  // results, submit, end the frame (CPU page epochs). Headless frame replay.
+  virtual void CompleteFrame(const ScanoutTexture&, const void* pixels) = 0;
+  // EDRAM followed by the sample counter tail, as the GPU holds it after all
+  // submitted work. Frame capture records it; replay restores it.
+  virtual EdramSnapshot ReadEdram() = 0;
+  virtual void WriteEdram(const EdramSnapshot&) = 0;
+  // Cumulative counters (native_stats / native_vulkan_perf enable timing).
+  virtual BackendCounters Counters() { return {}; }
 };
 using ScanoutFactory = std::unique_ptr<ScanoutBackend> (*)(rex::ui::GraphicsProvider&);
 std::unique_ptr<ScanoutBackend> CreateD3D12Scanout(rex::ui::GraphicsProvider& provider);

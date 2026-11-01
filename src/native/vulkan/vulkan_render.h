@@ -44,6 +44,9 @@ class VulkanRender {
   void CompleteGuestWrites(GuestSync, uint32_t);
   void SyncGuestRead(uint32_t address, uint32_t length, uint32_t);
   void Flush(bool wait);
+  // Frame capture/replay: EDRAM + sample counter tail after all submitted work.
+  EdramSnapshot ReadEdram();
+  void WriteEdram(const EdramSnapshot&);
   void EndFrame();
  private:
   using Device = rex::ui::vulkan::VulkanDevice;
