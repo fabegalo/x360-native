@@ -1,4 +1,5 @@
 #include "extraction_manifest.h"
+#include "paths.h"
 
 #include <stdexcept>
 #include <system_error>
@@ -21,14 +22,14 @@ ExtractionManifest::ExtractionManifest(const fs::path& destination)
   temporary_ += ".partial";
   // noreplace rejects an existing file, directory or dangling symlink. A stale
   // partial file is preserved for inspection, never silently reused/truncated.
-  stream_.open(temporary_, std::ios::binary | std::ios::out | std::ios::noreplace);
+  stream_.open(x360n::LongPath(temporary_), std::ios::binary | std::ios::out | std::ios::noreplace);
   if (!stream_) throw std::runtime_error("cannot create exclusive temporary manifest");
 }
 
 ExtractionManifest::~ExtractionManifest() {
   stream_.close();
   std::error_code ignored;
-  if (!temporary_.empty()) fs::remove(temporary_, ignored);
+  if (!temporary_.empty()) fs::remove(x360n::LongPath(temporary_), ignored);
 }
 
 void ExtractionManifest::Publish() {
@@ -38,14 +39,14 @@ void ExtractionManifest::Publish() {
   stream_.close();
   if (!stream_) throw std::runtime_error("cannot close manifest; not published");
 #ifdef _WIN32
-  if (!MoveFileExW(temporary_.c_str(), destination_.c_str(), MOVEFILE_WRITE_THROUGH))
+  if (!MoveFileExW(x360n::LongPath(temporary_).c_str(), x360n::LongPath(destination_).c_str(), MOVEFILE_WRITE_THROUGH))
     throw std::system_error(GetLastError(), std::system_category(), "cannot publish manifest without replacement");
 #else
   // rename() may replace a concurrent destination on POSIX. Linking a closed
   // file exposes complete bytes atomically and fails if the final name exists.
-  fs::create_hard_link(temporary_, destination_);
+  fs::create_hard_link(x360n::LongPath(temporary_), x360n::LongPath(destination_));
   std::error_code cleanup;
-  fs::remove(temporary_, cleanup);
+  fs::remove(x360n::LongPath(temporary_), cleanup);
 #endif
   // Publication released the staging name. Never remove a subsequent writer's
   // staging file when this object is destroyed.
