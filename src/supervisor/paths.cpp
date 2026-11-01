@@ -8,8 +8,6 @@
 #include <stdexcept>
 #include <vector>
 #include <cerrno>
-#include <functional>
-#include <sstream>
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
@@ -103,6 +101,48 @@ fs::path CanonicalPath(const fs::path& path) {
   return fs::canonical(path);
 #endif
 }
+namespace {
+// FNV-1a over the UTF-8 installation path, independent of std::hash's
+// implementation/CRT and stable across processes and updates.
+std::string ShortProjectId(const fs::path& path) {
+  uint64_t hash = 14695981039346656037ull;
+  for (unsigned char byte : PathUtf8(fs::absolute(path).lexically_normal())) {
+    hash ^= byte;
+    hash *= 1099511628211ull;
+  }
+  constexpr char digits[] = "0123456789abcdef";
+  std::string id(16, '0');
+  for (int i = 15; i >= 0; --i) {
+    id[size_t(i)] = digits[hash & 15];
+    hash >>= 4;
+  }
+  return id;
+}
+}  // namespace
+
+fs::path SharedSdkBuildRoot(const ProjectPaths& paths) {
+#ifdef _WIN32
+  // Use the current user's persistent local application data, not TEMP (which
+  // may be deleted automatically) and not the install folder (which can be
+  // arbitrarily deep). Avoid choosing a different drive via filesystem root.
+  std::wstring local;
+  if (const wchar_t* value = _wgetenv(L"LOCALAPPDATA"); value && *value)
+    local = value;
+  else
+    local = fs::temp_directory_path().wstring();
+  const auto root = fs::path(local) / "x360n" / "s" / ShortProjectId(paths.root);
+  // SDL3's nested try_compile adds 113+ characters to the CMake binary dir.
+  // Fail before making a broken cache if the OS profile itself is too deep.
+  if (root.wstring().size() > 95)
+    throw std::runtime_error("Windows user-local application-data path too deep "
+                             "for CMake/Ninja shared SDK; select a shorter build "
+                             "cache location");
+  return root;
+#else
+  return paths.build() / "shared-sdk" / HostPlatform();
+#endif
+}
+
 fs::path SharedSdkGenerationPath(const ProjectPaths& paths,
                                  const std::string& generation_id) {
   if (generation_id.empty() || generation_id.find_first_not_of(
@@ -110,26 +150,13 @@ fs::path SharedSdkGenerationPath(const ProjectPaths& paths,
           std::string::npos)
     throw std::invalid_argument("Invalid shared SDK generation identity");
 #ifdef _WIN32
-  // SDL3 nests multiple CMakeTmp/try_compile trees, adding over 110
-  // characters after the build root. The installation directory must never
-  // determine whether Ninja can configure the SDK.
-  const auto root_id = std::hash<std::wstring>{}(
-      fs::absolute(paths.root).lexically_normal().native());
-  const auto build_id = std::hash<std::string>{}(generation_id);
-  std::ostringstream project_name, generation_name;
-  project_name << "x360n-sdk-" << std::hex << root_id;
-  generation_name << "g" << std::hex << build_id;
-  const auto path = fs::temp_directory_path() / project_name.str() /
-                    generation_name.str();
-  // Reserve room for SDL3 nested try_compile, Ninja and object filenames.
-  // An unusually deep TEMP must fail clearly rather than create a broken build.
-  if (path.native().size() > 105)
-    throw std::runtime_error(
-        "Windows temporary directory is too deep for the shared SDK build; "
-        "choose a shorter user TEMP directory");
+  const auto path = SharedSdkBuildRoot(paths) / generation_id;
+  if (path.wstring().size() > 125)
+    throw std::runtime_error("Windows shared SDK generation path exceeds "
+                             "the safe CMake/Ninja depth");
   return path;
 #else
-  return paths.build() / "shared-sdk" / generation_id;
+  return SharedSdkBuildRoot(paths) / generation_id;
 #endif
 }
 
