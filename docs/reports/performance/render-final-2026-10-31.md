@@ -237,8 +237,41 @@ Fontes conferidas como anteriores ao binário testado. Evidência:
 Gameplay: somente o **controle** foi medido (`render-final-constant-control-d12-1`,
 mesmas condições e PresentMon): 1.140 frames, 19,02 FPS, 1% low 8,62 FPS,
 P95 66,921 ms, P99 68,644 ms, CPU agregado 169,96 ms/frame, primeiro swap
-1.262,75 ms. A rodada da candidata não foi executada: o agente anterior
-encerrou por limite de uso. **Não há ganho de gameplay atribuído a este commit.**
+1.262,75 ms.
+
+Candidata (`render-final-constant-candidate-d12-1`), mesmos binários exceto o
+plugin Native (`f40f4010…` contra `63ce79f8…`), mesmo seed, cenário, limite
+de 275 s e PresentMon autorizado pelo mantenedor; o usuário jogou e o agente
+só observou:
+
+| Medida | Controle | Candidata |
+|---|---:|---:|
+| Frames completos na janela | 1.140 | 926 |
+| FPS médio | 19,02 | 15,46 |
+| 1% low (FPS) | 8,62 | 13,91 |
+| P95 / P99 (ms) | 66,921 / 68,644 | 69,079 / 70,155 |
+| CPU agregado (ms/frame) | 169,96 | 189,91 |
+| Primeiro swap (ms) | 1.262,75 | 1.205,44 |
+| Working set / commit privado máximos (bytes) | 1.456.803.840 / 2.362.064.896 | 1.416.196.096 / 2.291.589.120 |
+| Draws por frame | 2.911 | 3.007 |
+| Draw total na CPU (ms/frame) | 21,73 | 18,97 |
+| Fila GPU ocupada (ms/frame) | 14,80 | 25,31 |
+| Esperas de fence (ms/frame) | 13,85 | 25,95 |
+| Criação de PSO na janela (ms/frame) | 1,00 | 0 |
+| PresentMon: apresentações host/s; GPU ocupada (ms/s) | 267,1; 382,5 | 240,7; 570,3 |
+
+Reuso por root na candidata: sistema 97,3%, floats VS 87,4%, floats PS 91,2%,
+bool 99,8%, fetch 30,1%. O custo de draw na CPU caiu 12,7% com 3,3% mais
+draws, mas o tempo de GPU por frame subiu cerca de 71% e determinou a queda
+de FPS; o 1% low melhorou. Para separar cena e mudança, três pares
+alternados headless (`batch`, 4.096 draws idênticos, mesmos binários dos
+contratos): GPU controle 18,90/19,61/18,06 ms, candidata 16,55/15,42/16,11 ms;
+wall 52,1/57,0/52,1 contra 45,9/45,5/45,0 ms. **Não houve aumento de GPU
+atribuível ao cache no microbenchmark**; a hipótese é diferença de cena
+(câmera/tráfego sem replay determinístico), não comprovada. Com uma rodada
+manual por lado, **nenhum ganho ou perda de gameplay é atribuído a este
+commit**. Evidência: `.local/render-final/constant-{control,candidate}-costs.json`,
+`.local/render-final/constant-gpu-pairs/`, `.local/render-final/presentmon/`.
 
 ### Native Vulkan: índices residentes
 
@@ -306,8 +339,12 @@ executadas. Saídas em `.local/render-final/official-runs/`.
 
 ## Pendências de aceite
 
-- Rodada de gameplay da candidata D3D12 de constantes, e um par controle/
-  candidata com 0248, ambos com PresentMon e o mesmo ponto de Skate 3.
+- Pares repetidos e alternados controle/candidata das constantes D3D12, para
+  separar cena e mudança no tempo de GPU por frame.
+- Par controle/candidata com 0248: exige reconstruir o executável AOT de Skate 3,
+  porque `rex_app.cpp` é compilado em cada título e o layout de
+  `AchievementToastDialog`/`VulkanDevice` mudou; trocar só `rexruntime.dll`
+  não é seguro.
 - Continuar investigando estado/constantes (9,27 ms) e esperas de fence
   (13,62 ms) do Native D3D12 conforme os resultados.
 - Validar as próximas candidatas Release e registrar os demais commits.
