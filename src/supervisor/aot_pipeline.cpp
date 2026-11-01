@@ -880,8 +880,13 @@ void Driver::SharedSdk() {
     }
   };
   if (reuse()) return;
+#ifdef _WIN32
+  const auto generation = SharedSdkGenerationPath(
+      options.paths, "g" + key.substr(0, 12) + "-" + Hash(run).substr(0, 8));
+#else
   const auto generation = SharedSdkGenerationPath(
       options.paths, HostPlatform() + "-" + key.substr(0, 16) + "-" + run);
+#endif
   fs::create_directories(generation);
   FileLease owner(generation / ".x360n-build.lock", true);
   Configure(options.paths.root / "cmake/sdk/shared", generation, true, true);
