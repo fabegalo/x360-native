@@ -116,6 +116,7 @@ void VulkanRender::Destroy() {
   storage_layout_ = VK_NULL_HANDLE;
   readback_ = nullptr;
   edram_buffer_.reset();
+  sample_counts_readback_.reset();
   guest_buffer_.reset();
 }
 void VulkanRender::Begin() {
@@ -396,26 +397,27 @@ void VulkanRender::SavePipelineCache() {
 SampleCounts VulkanRender::ReadSampleCounts(bool counting_after) {
   Begin();
   EndRendering();
-  // Resolve readbacks occupy the same staging buffer. Publish them before
-  // reusing its first 32 bytes for this independently observable snapshot.
-  if (HasGuestWrites()) Flush(true);
-  Begin();
+  // A dedicated host buffer: the counters no longer share the resolve staging
+  // buffer, so pending resolve results need not be published (one more full
+  // GPU drain) before this snapshot. The single wait below completes them too.
+  if (!sample_counts_readback_)
+    sample_counts_readback_ = std::make_unique<VulkanBuffer>(device_, sizeof(SampleCounts),
+        VK_BUFFER_USAGE_TRANSFER_DST_BIT, VulkanBuffer::Access::kReadback);
   UseBuffer(edram_buffer_->handle(), edram_access_, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_TRANSFER_READ_BIT);
   const VkBufferCopy copy{edram_size_, 0, sizeof(SampleCounts)};
-  const auto& fn = device_.functions();
-  cmd_.CopyBuffer(edram_buffer_->handle(), readback_->handle(), 1, &copy);
+  cmd_.CopyBuffer(edram_buffer_->handle(), sample_counts_readback_->handle(), 1, &copy);
   VkBufferMemoryBarrier host{VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER};
   host.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
   host.dstAccessMask = VK_ACCESS_HOST_READ_BIT;
   host.srcQueueFamilyIndex = host.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-  host.buffer = readback_->handle();
+  host.buffer = sample_counts_readback_->handle();
   host.size = sizeof(SampleCounts);
   cmd_.PipelineBarrier(VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_HOST_BIT,
       0, 0, nullptr, 1, &host, 0, nullptr);
   Flush(true);
-  readback_->Invalidate(0, sizeof(SampleCounts));
+  sample_counts_readback_->Invalidate(0, sizeof(SampleCounts));
   SampleCounts result;
-  std::memcpy(result.data(), readback_->mapped(), sizeof(result));
+  std::memcpy(result.data(), sample_counts_readback_->mapped(), sizeof(result));
   counting_samples_ = counting_after;
   return result;
 }

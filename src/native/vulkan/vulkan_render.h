@@ -166,6 +166,8 @@ class VulkanRender {
   VkExtent2D draw_extent_{};
   std::array<VkShaderModule, 3> depth_only_{};
   bool counting_samples_ = false;
+  // Host copy of the sample counter tail (ReadSampleCounts), never shared.
+  std::unique_ptr<VulkanBuffer> sample_counts_readback_;
   bool visibility_only_ = false;
   std::unordered_map<std::string, DrawPipeline> draw_pipelines_;
   std::map<uint32_t, VkShaderModule> tessellation_modules_;
