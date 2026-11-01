@@ -3,9 +3,12 @@
 #include <rex/ui/d3d12/d3d12_presenter.h>
 #include <rex/chrono/frame_layout.h>
 #include <d3dcompiler.h>
+#include <rex/cvar.h>
+#include <algorithm>
 #include <cstring>
 #include <stdexcept>
 #include <string>
+REXCVAR_DECLARE(uint32_t, native_gpu_timeout_ms);
 namespace x360n::native {
 std::unique_ptr<ScanoutBackend> CreateD3D12Scanout(rex::ui::GraphicsProvider& provider) {
   return std::make_unique<D3D12Scanout>(static_cast<rex::ui::d3d12::D3D12Provider&>(provider));
@@ -71,8 +74,9 @@ void D3D12Scanout::Wait(uint64_t serial) {
   if (completed == UINT64_MAX) throw std::runtime_error("Native: D3D12 device removed");
   if (completed >= serial) return;
   Check(fence_->SetEventOnCompletion(serial, event_), "fence notification");
-  if (WaitForSingleObject(event_, 5000) != WAIT_OBJECT_0)
-    throw std::runtime_error("Native: GPU fence exceeded 5 seconds");
+  const DWORD limit = std::max<DWORD>(1000, REXCVAR_GET(native_gpu_timeout_ms));
+  if (WaitForSingleObject(event_, limit) != WAIT_OBJECT_0)
+    throw std::runtime_error("Native: scanout GPU fence exceeded " + std::to_string(limit) + " ms");
   Check(provider_.GetDevice()->GetDeviceRemovedReason(), "device status");
 }
 void D3D12Scanout::Drain() { if (render_) render_->Flush(D3D12Render::kFlushDrain); Wait(serial_); }

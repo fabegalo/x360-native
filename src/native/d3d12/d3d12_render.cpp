@@ -13,6 +13,8 @@ REXCVAR_DEFINE_BOOL(native_stats, false, "GPU/Native", "Log cumulative Native CP
 REXCVAR_DEFINE_BOOL(native_texture_cache, true, "GPU/Native", "Reuse textures only while every guest source byte matches; disable for diagnostics");
 REXCVAR_DEFINE_BOOL(native_texture_cpu, false, "GPU/Native", "Diagnose texture loads with CPU conversion and synchronized guest bytes");
 REXCVAR_DECLARE(std::string, native_pso_dump);
+REXCVAR_DEFINE_UINT32(native_gpu_timeout_ms, 5000, "GPU/Native",
+    "Limit of one D3D12 fence wait before the renderer reports a GPU timeout (minimum 1000; software adapters such as WARP compile shaders at first use and may need more)");
 namespace x360n::native {
 using namespace rex::graphics;
 using namespace rex::graphics::xenos;
@@ -470,7 +472,10 @@ void D3D12Render::Wait(uint64_t serial) {
   Timer wait(stats_enabled_, flush_wait_ns_);
   if (stats_enabled_) ++fence_waits_;
   Check(fence_->SetEventOnCompletion(serial, event_), "fence completion");
-  Require(WaitForSingleObject(event_, 5000) == WAIT_OBJECT_0, "render GPU timeout");
+  const DWORD limit = std::max<DWORD>(1000, REXCVAR_GET(native_gpu_timeout_ms));
+  if (WaitForSingleObject(event_, limit) != WAIT_OBJECT_0)
+    throw std::runtime_error(fmt::format("Native: render GPU timeout ({} ms, fence {} of {})", limit,
+                                         fence_->GetCompletedValue(), serial));
 }
 void D3D12Render::RecycleBatch() {
   auto& retired = batches_[batch_index_];

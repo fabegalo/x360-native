@@ -11,6 +11,7 @@ on:
       - 'tests/native/**'
       - 'tests/cmake/**'
       - 'scripts/performance/native_replay_ab.py'
+      - 'scripts/performance/native_capture_session.py'
       - 'CMakeLists.txt'
       - 'CMakePresets.json'
       - 'cmake/**'
@@ -43,8 +44,11 @@ jobs:
       run:
         shell: powershell
     env:
-      # D3D12 software adapter for both the workload and the replay.
-      X360N_NATIVE_TEST_CVARS: d3d12_adapter=-2
+      # D3D12 software adapter for both the workload and the replay. WARP
+      # compiles the translated shaders at first use on the CPU: the fence
+      # limit is raised so a slow first frame is not reported as a hang (a
+      # real hang still fails, after 120 s).
+      X360N_NATIVE_TEST_CVARS: d3d12_adapter=-2;native_gpu_timeout_ms=120000
     steps:
       - name: Check out the exact event commit
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -89,7 +93,7 @@ jobs:
           $ErrorActionPreference = 'Stop'
           $replay = Split-Path (Get-ChildItem -Recurse -Filter x360n_native_replay.exe .local/build/win-amd64 | Select-Object -First 1).FullName
           $out = '.local/build/win-amd64/src/native/capture-replay-d3d12'
-          python scripts/performance/native_replay_ab.py --baseline $replay --candidate $replay --capture "$out/heavy/frames.x360nfc" --output "$out/ab-eager-submit.json" --backend d3d12 --rounds 5 --repeat 5 --cvar d3d12_adapter=-2 --baseline-cvar native_eager_submit=0 --candidate-cvar native_eager_submit=64
+          python scripts/performance/native_replay_ab.py --capture "$out/heavy/frames.x360nfc" --output "$out/ab-eager-submit.json" --backend d3d12 --rounds 5 --repeat 5 --cvar d3d12_adapter=-2 --cvar native_gpu_timeout_ms=120000 --arm off $replay native_eager_submit=0 --arm idle64 $replay native_eager_submit=64 --arm queued64 $replay native_eager_submit=64 native_eager_submit_depth=1
           if ($LASTEXITCODE -ne 0) { throw 'A/B replay failed or differed from the capture' }
       - name: Upload logs and replay reports
         if: always()
@@ -141,9 +145,10 @@ jobs:
         run: |
           out=.local/build/linux-amd64/src/native/capture-replay-vulkan
           replay=.local/build/linux-amd64/src/native/Release
-          python3 scripts/performance/native_replay_ab.py --baseline $replay --candidate $replay \
-            --capture $out/heavy/frames.x360nfc --output $out/ab-eager-submit.json --backend vulkan \
-            --rounds 5 --repeat 5 --baseline-cvar native_eager_submit=0 --candidate-cvar native_eager_submit=64
+          python3 scripts/performance/native_replay_ab.py --capture $out/heavy/frames.x360nfc \
+            --output $out/ab-eager-submit.json --backend vulkan --rounds 5 --repeat 5 \
+            --arm off $replay native_eager_submit=0 --arm idle64 $replay native_eager_submit=64 \
+            --arm queued64 $replay native_eager_submit=64 native_eager_submit_depth=1
       - name: Upload logs and replay reports
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
