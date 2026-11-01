@@ -77,8 +77,12 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Build failed' }
       - name: Run capture/replay and pipeline contracts on D3D12 WARP
         run: |
-          & scripts/devshell.cmd ctest --preset win-amd64-release -R "native[.]capture|native[.]pipeline-recording" --output-on-failure --timeout 900
-          if ($LASTEXITCODE -ne 0) { throw 'Native tests failed' }
+          # devshell.cmd passes arguments through cmd, where '|' is a pipe: one
+          # regex per call.
+          foreach ($tests in 'native[.]capture', 'native[.]pipeline-recording') {
+            & scripts/devshell.cmd ctest --preset win-amd64-release -R $tests --output-on-failure --timeout 900
+            if ($LASTEXITCODE -ne 0) { throw "Native tests $tests failed" }
+          }
       - name: A/B early submission on the same recorded frames (WARP, informative timing)
         run: |
           $ErrorActionPreference = 'Stop'
