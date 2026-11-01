@@ -133,7 +133,7 @@ fs::path SharedSdkBuildRoot(const ProjectPaths& paths) {
   const auto root = fs::path(local) / "x360n" / "s" / ShortProjectId(paths.root);
   // SDL3's nested try_compile adds 113+ characters to the CMake binary dir.
   // Fail before making a broken cache if the OS profile itself is too deep.
-  if (root.wstring().size() > 95)
+  if (root.wstring().size() > 80)
     throw std::runtime_error("Windows user-local application-data path too deep "
                              "for CMake/Ninja shared SDK; select a shorter build "
                              "cache location");
@@ -151,7 +151,7 @@ fs::path SharedSdkGenerationPath(const ProjectPaths& paths,
     throw std::invalid_argument("Invalid shared SDK generation identity");
 #ifdef _WIN32
   const auto path = SharedSdkBuildRoot(paths) / generation_id;
-  if (path.wstring().size() > 125)
+  if (path.wstring().size() > 104)
     throw std::runtime_error("Windows shared SDK generation path exceeds "
                              "the safe CMake/Ninja depth");
   return path;
