@@ -178,5 +178,13 @@ class VulkanRender {
   std::unordered_map<std::string, DrawPipeline> draw_pipelines_;
   std::map<uint32_t, VkShaderModule> tessellation_modules_;
   std::optional<std::array<uint32_t, 22>> edram_draw_layout_;
+  // Per-draw constant buffers of the current arena, as D3D12Render's
+  // DrawConstants: a buffer whose final packed bytes equal the previous
+  // draw's reuses that upload, and when all of them do, the descriptor set is
+  // reused too (no upload, allocation or descriptor write). Cleared with the
+  // arena (Begin), which recycles both the upload pages and the descriptor pool.
+  struct DrawConstant { std::vector<uint8_t> bytes; VkDescriptorBufferInfo info{}; bool valid = false; };
+  std::array<DrawConstant, 5> draw_constants_;
+  VkDescriptorSet draw_constants_set_ = VK_NULL_HANDLE;
 };
 }

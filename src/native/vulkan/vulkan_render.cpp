@@ -144,6 +144,8 @@ void VulkanRender::Begin() {
   arena.guest_load_set = VK_NULL_HANDLE;
   arena.load_range_sets.clear();
   arena.draw_memory_set = VK_NULL_HANDLE;
+  for (auto& constant : draw_constants_) constant.valid = false;
+  draw_constants_set_ = VK_NULL_HANDLE;
 }
 void VulkanRender::EndRendering() {
   if (!rendering_) return;
