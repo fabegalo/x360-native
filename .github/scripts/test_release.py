@@ -417,8 +417,11 @@ class PublicationTests(unittest.TestCase):
             self.publish(command)
         self.assertFalse(any(call[:3] == ("gh", "release", "edit") for call in self.calls))
 
-    def test_verified_preview_draft_publishes_all_platforms_after_download(self):
-        assets = sorted(p for p in self.directory.iterdir())
+    def test_verified_preview_draft_publishes_only_six_archives_after_download(self):
+        assets = sorted(self.directory / release.archive_name(self.version, platform)
+                        for platform in release.PLATFORMS)
+        self.assertEqual(len(assets), 6)
+        self.assertTrue(all(not a.name.endswith(".sha256") for a in assets))
 
         def command(*args):
             if args[0] == "git":
@@ -436,7 +439,9 @@ class PublicationTests(unittest.TestCase):
         self.assertEqual(sorted(verified), sorted(release.PLATFORMS))
         mutations = [args for args in self.calls if args[:2] == ("gh", "release")]
         self.assertEqual([args[2] for args in mutations], ["create", "view", "download", "edit"])
-        self.assertEqual(len([a for a in mutations[0] if Path(a).parent == self.directory]), 12)
+        self.assertEqual(len([a for a in mutations[0] if Path(a).parent == self.directory]), 6)
+        self.assertTrue(all(not Path(a).name.endswith(".sha256") for a in mutations[0]
+                            if Path(a).parent == self.directory))
         self.assertIn("--draft", mutations[0])
         self.assertIn("--verify-tag", mutations[0])
         self.assertIn("--prerelease=true", mutations[-1])

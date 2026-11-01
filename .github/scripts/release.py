@@ -65,8 +65,13 @@ def package_name(version, platform):
     return f"x360-native-{version}-{platform}"
 
 
+def archive_name(version, platform):
+    return package_name(version, platform) + PLATFORMS[platform]["archive"]
+
+
 def asset_names(version, platform):
-    archive = package_name(version, platform) + PLATFORMS[platform]["archive"]
+    # The CI artifacts still contain checksums; both are required for verification.
+    archive = archive_name(version, platform)
     return {archive, archive + ".sha256"}
 
 
@@ -360,7 +365,9 @@ def publish(directory=Path(".local/packages")):
         require(metadata["provenance"]["repository"] == repository and metadata["provenance"]["event"] == event,
                 "Release repository/event provenance differs")
     require(remote_tag_commit(repository, tag) == commit, "Remote tag moved since the build event")
-    assets = sorted(directory / name for name in expected)
+    # Keep all twelve verified CI inputs, but expose only installation archives
+    # on the public Release page. GitHub calculates each public asset's SHA-256.
+    assets = sorted(directory / archive_name(version, platform) for platform in PLATFORMS)
     require(all(p.is_file() for p in assets), "Unexpected artifact directory")
     # gh refuses an existing release; never replace published or partial assets.
     command("gh", "release", "create", tag, *(str(p) for p in assets), "--repo", repository,
