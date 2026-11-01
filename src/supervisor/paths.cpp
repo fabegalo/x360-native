@@ -8,6 +8,8 @@
 #include <stdexcept>
 #include <vector>
 #include <cerrno>
+#include <functional>
+#include <sstream>
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
@@ -101,6 +103,36 @@ fs::path CanonicalPath(const fs::path& path) {
   return fs::canonical(path);
 #endif
 }
+fs::path SharedSdkGenerationPath(const ProjectPaths& paths,
+                                 const std::string& generation_id) {
+  if (generation_id.empty() || generation_id.find_first_not_of(
+          "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_") !=
+          std::string::npos)
+    throw std::invalid_argument("Invalid shared SDK generation identity");
+#ifdef _WIN32
+  // SDL3 nests multiple CMakeTmp/try_compile trees, adding over 110
+  // characters after the build root. The installation directory must never
+  // determine whether Ninja can configure the SDK.
+  const auto root_id = std::hash<std::wstring>{}(
+      fs::absolute(paths.root).lexically_normal().native());
+  const auto build_id = std::hash<std::string>{}(generation_id);
+  std::ostringstream project_name, generation_name;
+  project_name << "x360n-sdk-" << std::hex << root_id;
+  generation_name << "g" << std::hex << build_id;
+  const auto path = fs::temp_directory_path() / project_name.str() /
+                    generation_name.str();
+  // Reserve room for SDL3 nested try_compile, Ninja and object filenames.
+  // An unusually deep TEMP must fail clearly rather than create a broken build.
+  if (path.native().size() > 105)
+    throw std::runtime_error(
+        "Windows temporary directory is too deep for the shared SDK build; "
+        "choose a shorter user TEMP directory");
+  return path;
+#else
+  return paths.build() / "shared-sdk" / generation_id;
+#endif
+}
+
 fs::path UserDataRoot(const ProjectPaths& paths, const fs::path& default_root) {
   const auto setting = paths.local() / "user-data-root.txt";
   if (!fs::exists(setting)) return default_root;
