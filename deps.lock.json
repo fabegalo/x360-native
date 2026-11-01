@@ -12,7 +12,7 @@
       "file": "patches/rexglue-sdk/0001-function-table-xex-heap.patch",
       "sha256": "8a1c4a81611e3c733e5e9697dc501e8acbab24efaf26d68a7df80fc10cc4cb8c",
       "files": {
-        "src/system/xmemory.cpp": "9edc41885c779338a141c5fe7ef34b7da450ba8146077a21735387a8aa2b8342"
+        "src/system/xmemory.cpp": "f879f4c8ef395e7fd6b1922cbabd5f005c3137f961d084268e1c4c492e6703e1"
       },
       "base_files": {
         "src/system/xmemory.cpp": "97d19808714c2cb656c8d3c053cfd29a42d9b399bae47c9b3652ae21807fbf48"
@@ -1123,7 +1123,7 @@
         "include/rex/system/xmemory.h": "21d05c176449d6dd12cfb4134bcad615565f4255458fde5e0a70915f1e05062b"
       },
       "files": {
-        "src/system/xmemory.cpp": "9edc41885c779338a141c5fe7ef34b7da450ba8146077a21735387a8aa2b8342",
+        "src/system/xmemory.cpp": "f879f4c8ef395e7fd6b1922cbabd5f005c3137f961d084268e1c4c492e6703e1",
         "include/rex/system/xmemory.h": "54b31fd4db2729a5aa1567f4b3ff57c84aee733e1a377740fcefebf3a12022e3"
       },
       "test": "tests/sdkcheck/physical_heap_transaction_test.cpp"
@@ -3394,7 +3394,7 @@
     "include/rex/system/xmemory.h": "a99190619ec6d0748977a579b811da31504a8d21081e13fce29f6de745766ae2"
   },
   "files": {
-    "src/system/xmemory.cpp": "9edc41885c779338a141c5fe7ef34b7da450ba8146077a21735387a8aa2b8342",
+    "src/system/xmemory.cpp": "f879f4c8ef395e7fd6b1922cbabd5f005c3137f961d084268e1c4c492e6703e1",
     "include/rex/system/xmemory.h": "54b31fd4db2729a5aa1567f4b3ff57c84aee733e1a377740fcefebf3a12022e3"
   },
   "test": "tests/sdkcheck/system_heap_layout_test.cpp: shared first-fit holes, committed/protected metadata, zeroed reuse, free page accounting, unchanged physical allocation and retained system capacity after ordinary-range exhaustion; refined private runtime passes 357 assertions in 14 allocator/import/dispatch cases."
@@ -3504,6 +3504,17 @@
     "src/ui/rex_app.cpp": "8f11e7c95c057c42852ec4b2a1d5bca13af71d22b146b3371fbe8264d0a938c7"
   },
   "test": "sdkcheck achievement toast cases in x360n_sdk_runtime_checks: 227 assertions in 5 cases passed Release three consecutive runs (idle drawer list empty, one coalesced wake for four concurrent producers with full 4.5 s display per event, shutdown cancels queued wakes, push during detachment, UI-thread callback ownership). Baseline control fails: the idle toast keeps the ImGui dialog list non-empty. Patched rex_app.cpp compiled. All five applied files match the staged tested bytes."
+},
+{
+  "file": "patches/rexglue-sdk/0249-keep-inclusive-heap-allocation-limit.patch",
+  "sha256": "8dffa3309ff58a7c53f8502305947c28e44588637cf07a3bc71a7770dfe5e761",
+  "base_files": {
+    "src/system/xmemory.cpp": "9edc41885c779338a141c5fe7ef34b7da450ba8146077a21735387a8aa2b8342"
+  },
+  "files": {
+    "src/system/xmemory.cpp": "f879f4c8ef395e7fd6b1922cbabd5f005c3137f961d084268e1c4c492e6703e1"
+  },
+  "test": "tests/sdkcheck/system_heap_layout_test.cpp: top-down 4 KiB and 64 KiB allocations end exactly at 0x30000000/0x70000000, 64 KiB-aligned, page above free; baseline fails with 2FD01000 and 70000000 (5 assertions). Patched Release: 55 assertions in 4 system-heap-layout cases, 594 assertions in 20 focused allocator/import/dispatch cases, SDK unit_tests [heap],[memory] 173 assertions in 24 cases. Rebuilt dash_17559 session passed the boot intro (export 1 returned 0) without the 30001002 access violation."
 }
 ]
 },

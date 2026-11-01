@@ -94,3 +94,30 @@ TEST_CASE("System objects retain their reserve when the ordinary virtual range i
   CHECK(heap->Release(ordinary));
   CHECK(heap->GetUnreservedPageCount() == free_before);
 }
+
+TEST_CASE("Ordinary top-down allocations end at the inclusive range limit",
+          "[sdk][system-heap-layout]") {
+  // The ordinary limit is inclusive (0x2FFFFFFF, 0x6FFFFFFF). Rounding it up
+  // admitted the first page above it: 17559 bootanim reserved 0x300000 bytes
+  // at 2FD01000-30001000 and its 64 KiB heap arithmetic wrote at 30001002.
+  Memory memory;
+  REQUIRE(memory.Initialize());
+  constexpr uint32_t allocation = kMemoryAllocationReserve | kMemoryAllocationCommit;
+  constexpr uint32_t protect = kMemoryProtectRead | kMemoryProtectWrite;
+  struct Case {
+    uint32_t page_size, size, limit;
+  };
+  for (const auto& c : {Case{4096, 0x300000, 0x30000000}, Case{0x10000, 0x10000, 0x70000000}}) {
+    auto* heap = memory.LookupHeapByType(false, c.page_size);
+    const auto free_before = heap->GetUnreservedPageCount();
+    uint32_t address = 0;
+    REQUIRE(heap->Alloc(c.size, c.page_size, allocation, protect, true, &address));
+    CHECK(address == c.limit - c.size);
+    CHECK(address % 0x10000 == 0);
+    HeapAllocationInfo above{};
+    REQUIRE(heap->QueryRegionInfo(c.limit, &above));
+    CHECK(above.state == 0);
+    CHECK(heap->Release(address));
+    CHECK(heap->GetUnreservedPageCount() == free_before);
+  }
+}
