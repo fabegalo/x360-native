@@ -111,24 +111,21 @@ TEST_CASE("canonical paths resolve beyond the Windows MAX_PATH limit", "[paths]"
 
 TEST_CASE("shared SDK uses a short isolated build root", "[paths][preparation]") {
   TempProject first;
-  TempProject second;
-  const ProjectPaths a{first.root}, b{second.root};
-  const auto one = SharedSdkGenerationPath(a, "windows-x64-0123456789abcdef-123");
-  const auto again = SharedSdkGenerationPath(a, "windows-x64-0123456789abcdef-123");
-  const auto next = SharedSdkGenerationPath(a, "windows-x64-0123456789abcdef-456");
+  const ProjectPaths p{first.root};
+  const auto one = SharedSdkGenerationPath(p, "g0123456789ab-12345678");
+  const auto again = SharedSdkGenerationPath(p, "g0123456789ab-12345678");
+  const auto other = SharedSdkGenerationPath(p, "g0123456789ab-87654321");
   CHECK(one == again);
-  CHECK(one != next);
+  CHECK(one != other);
 #ifdef _WIN32
-  // The original failure added 113 characters of SDL3/CMakeTmp nesting to
-  // a 153-character build root. Keep a safe margin below CMake's 250 limit.
-  CHECK(one.native().size() <= 105);
-  CHECK((one.native().size() + 113) < 250);
-  CHECK(one != SharedSdkGenerationPath(b, "windows-x64-0123456789abcdef-123"));
-  CHECK_FALSE(IsWithin(one, a.inputs()));
+  CHECK(one.native().size() <= 104);
+  // The SDL3 fixture nested 113 characters below its CMake binary dir.
+  CHECK(one.native().size() + 113 + 23 < 250);
+  CHECK_FALSE(IsWithin(one, p.inputs()));
 #else
-  CHECK(one == a.build() / "shared-sdk" / "windows-x64-0123456789abcdef-123");
+  CHECK(one == p.build() / "shared-sdk" / "g0123456789ab-12345678");
 #endif
-  CHECK_THROWS_AS(SharedSdkGenerationPath(a, "../escape"), std::invalid_argument);
+  CHECK_THROWS_AS(SharedSdkGenerationPath(p, "../escape"), std::invalid_argument);
 }
 
 TEST_CASE("run labels are restricted to safe directory-name characters", "[paths]") {
