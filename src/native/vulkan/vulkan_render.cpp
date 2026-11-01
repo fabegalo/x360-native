@@ -150,7 +150,18 @@ void VulkanRender::EndRendering() {
   cmd_.EndRenderPass();
   rendering_ = false;
 }
+// The GPU would otherwise wait for the next guest sync to receive work the
+// CPU recorded long before. Submitting only adds a queue boundary: order,
+// barriers and guest-visible syncs are unchanged, nothing waits here, and
+// pending pipeline creations are never forced (deferred commands stay open).
+void VulkanRender::SubmitIfGpuIdle() {
+  if (!eager_threshold_ || !commands_ || recorded_work_ < eager_threshold_ || cmd_.deferred()) return;
+  submissions_.Poll();
+  if (submissions_.completed() != submissions_.last_submitted()) return;
+  Flush(false);
+}
 void VulkanRender::Flush(bool wait) {
+  recorded_work_ = 0;
   if (commands_) {
     EndRendering();
     // Bind pipelines that were still compiling and emit the commands kept

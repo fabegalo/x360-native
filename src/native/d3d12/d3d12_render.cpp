@@ -282,8 +282,8 @@ void D3D12Render::CountPresent() {
       pipeline_waits_, draw_ns_ / 1000000, texture_ns_ / 1000000,
       guest_upload_ns_ / 1000000, resolve_ns_ / 1000000, flush_wait_ns_ / 1000000);
   REXLOG_INFO("Native pipeline disk hits={} rejects={}", pipeline_disk_hits_.load(), pipeline_disk_rejects_.load());
-  REXLOG_INFO("Native flush causes guest_sync={} (event={} packet={} wait={} buffer_end={} present={}) present={} overlap={} capacity={} drain={} wait_ms={}",
-      flush_causes_[kFlushGuestSync], sync_sources_[kGuestSyncEvent], sync_sources_[kGuestSyncPacket], sync_sources_[kGuestSyncWait], sync_sources_[kGuestSyncBufferEnd], sync_sources_[kGuestSyncPresent], flush_causes_[kFlushPresent], flush_causes_[kFlushOverlap], flush_causes_[kFlushCapacity], flush_causes_[kFlushDrain], flush_wait_ns_ / 1000000);
+  REXLOG_INFO("Native flush causes guest_sync={} (event={} packet={} wait={} buffer_end={} present={}) present={} overlap={} capacity={} drain={} eager={} wait_ms={}",
+      flush_causes_[kFlushGuestSync], sync_sources_[kGuestSyncEvent], sync_sources_[kGuestSyncPacket], sync_sources_[kGuestSyncWait], sync_sources_[kGuestSyncBufferEnd], sync_sources_[kGuestSyncPresent], flush_causes_[kFlushPresent], flush_causes_[kFlushOverlap], flush_causes_[kFlushCapacity], flush_causes_[kFlushDrain], flush_causes_[kFlushEager], flush_wait_ns_ / 1000000);
   std::string opcodes;
   for (unsigned i = 0; i < 256; ++i) if (sync_opcodes_[i]) opcodes += fmt::format(" {:02X}:{}", i, sync_opcodes_[i]);
   REXLOG_INFO("Native guest sync opcodes{}", opcodes);
@@ -299,7 +299,18 @@ void D3D12Render::ReplayCommands() {
   ++pipeline_waits_;
   pipeline_wait_ns_ += std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - start).count();
 }
+// The GPU would otherwise wait for the next guest sync to receive work the
+// CPU recorded long before (replay: GPU idle for most of the frame while
+// recording). Submitting adds only a queue boundary: order, barriers and
+// guest-visible syncs are unchanged, nothing waits here, and pipelines still
+// being created are never forced (deferred commands keep the list open).
+void D3D12Render::SubmitIfGpuIdle() {
+  if (!eager_threshold_ || recorded_work_ < eager_threshold_ || cmd_.deferred() || cmd_.empty()) return;
+  if (fence_->GetCompletedValue() < serial_) return;
+  Flush(kFlushEager);
+}
 void D3D12Render::Flush(FlushCause cause) {
+  recorded_work_ = 0;
   if (cmd_.empty()) {
     // A guest resolve may have already submitted this frame. Do not submit
     // another list just for presentation, but a drain must still wait for

@@ -65,6 +65,8 @@ D3D12Render::PendingPipeline D3D12Render::ComputePSO(ID3D12RootSignature* root, 
   });
 }
 void D3D12Render::Resolve(const RegisterFile& r, rex::memory::Memory& memory) {
+  SubmitIfGpuIdle();
+  recorded_work_ += eager_threshold_;
   Timer timer(stats_enabled_, resolve_ns_);
   guest_memory_ = &memory;
   const auto fetch = r.GetVertexFetch(0);

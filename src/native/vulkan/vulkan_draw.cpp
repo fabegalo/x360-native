@@ -233,6 +233,8 @@ VulkanRender::DrawPipeline& VulkanRender::Pipeline(SpirvShader* vs, SpirvShader*
 }
 void VulkanRender::Draw(const RegisterFile& regs, rex::memory::Memory& memory, Shader* vertex, Shader* pixel,
     PrimitiveType primitive, uint32_t count, const DrawIndices* indices, DrawPurpose purpose) {
+  SubmitIfGpuIdle();
+  ++recorded_work_;
   auto& perf = NativeVulkanPerformance();
   VulkanPerformanceTimer draw_timer(perf.draw_ns);
   Require(vertex, "missing vertex shader");

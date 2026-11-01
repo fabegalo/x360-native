@@ -9,5 +9,8 @@ struct NativeQualitySettings {
 NativeQualitySettings GetNativeQualitySettings();
 // Pipeline creation workers (native_pipeline_threads); 0 is synchronous.
 unsigned NativePipelineThreads();
+// Recorded draws (a resolve counts as this many) after which the open command
+// list is submitted early when the GPU queue is idle (native_eager_submit, 0 off).
+unsigned NativeEagerSubmitWork();
 rex::graphics::xenos::AnisoFilter NativeAnisotropy(rex::graphics::xenos::AnisoFilter guest);
 }

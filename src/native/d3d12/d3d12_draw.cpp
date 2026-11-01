@@ -90,6 +90,8 @@ D3D12Render::Ptr<ID3D12PipelineState> D3D12Render::CreatePipeline(D3D12_GRAPHICS
 
 void D3D12Render::Draw(const RegisterFile& r, rex::memory::Memory& memory, Shader* vertex, Shader* pixel,
     PrimitiveType primitive, uint32_t count, const DrawIndices* indices, DrawPurpose purpose) {
+  SubmitIfGpuIdle();
+  ++recorded_work_;
   Timer timer(stats_enabled_, draw_ns_);
   auto phase_start = stats_enabled_ ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
   auto finish_phase = [&](uint64_t& elapsed) {

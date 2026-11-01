@@ -42,7 +42,7 @@ class D3D12Render {
   SampleCounts ReadSampleCounts(bool counting_after);
   void SetSampleCounts(const SampleCounts&, bool visibility_only);
   // Diagnostic accounting only (native_stats): why a submission waited.
-  enum FlushCause : unsigned { kFlushGuestSync, kFlushPresent, kFlushOverlap, kFlushCapacity, kFlushDrain, kFlushCauses };
+  enum FlushCause : unsigned { kFlushGuestSync, kFlushPresent, kFlushOverlap, kFlushCapacity, kFlushDrain, kFlushEager, kFlushCauses };
   void Flush(FlushCause);
   // Frame capture/replay: EDRAM + sample counter tail after all submitted work.
   EdramSnapshot ReadEdram();
@@ -219,6 +219,11 @@ class D3D12Render {
   Ptr<ID3D12PipelineState> CreatePipeline(D3D12_GRAPHICS_PIPELINE_STATE_DESC, uint64_t vs_hash, uint64_t ps_hash,
       uint64_t vm, uint64_t pm, uint32_t primitive, uint32_t msaa, unsigned planes, uint32_t mask, size_t id);
   void ReplayCommands();
+  // Early submission: work recorded since the last submission and the
+  // threshold (draws; a resolve counts as the whole threshold).
+  const uint32_t eager_threshold_ = NativeEagerSubmitWork();
+  uint32_t recorded_work_ = 0;
+  void SubmitIfGpuIdle();
   uint64_t pipeline_wait_ns_ = 0, pipeline_waits_ = 0;
   std::map<unsigned, std::vector<uint8_t>> rectangles_, polygon_points_;
   std::map<unsigned, std::vector<uint32_t>> points_;

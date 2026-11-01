@@ -166,6 +166,11 @@ class VulkanRender {
   VkExtent2D draw_extent_{};
   std::array<VkShaderModule, 3> depth_only_{};
   bool counting_samples_ = false;
+  // Early submission: work recorded since the last submission and the
+  // threshold (draws; a resolve counts as the whole threshold).
+  const uint32_t eager_threshold_ = NativeEagerSubmitWork();
+  uint32_t recorded_work_ = 0;
+  void SubmitIfGpuIdle();
   // Host copy of the sample counter tail (ReadSampleCounts), never shared.
   std::unique_ptr<VulkanBuffer> sample_counts_readback_;
   bool visibility_only_ = false;

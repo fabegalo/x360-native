@@ -32,6 +32,8 @@ namespace kernels {
 #include "src/graphics/shaders/vulkan_spirv/resolve_clear_64bpp_scaled_cs.h"
 }
 void VulkanRender::Resolve(const RegisterFile& regs, rex::memory::Memory& memory) {
+  SubmitIfGpuIdle();
+  recorded_work_ += eager_threshold_;
   auto& mirror = Mirror(memory);
   const auto fetch = regs.GetVertexFetch(0);
   if (fetch.type == xenos::FetchConstantType::kVertex && fetch.size == 6 &&
