@@ -75,6 +75,18 @@ focadas e 173 do SDK. Sessão reconstruída chegou à entrada da dashboard;
 navegação e lançamento de títulos não foram revalidados. Relação com o
 `C0000374` do Skate 3 não verificada.
 
+01/11 — **Skate 3: entrada referenciada `8246CED8` voltou a ser emitida (0250)**:
+após minutos de jogo, uma chamada indireta via tabela em `.rdata` caía num
+endereço não registrado. Dois ajustadores de contagem sem PDATA (`mfmsr`/
+`mtmsrd` + `lwarx`/`stwcx.`, cauda `bctr`) eram rejeitados porque a validação
+do prefixo parava em `kUnknown` e no fim da região decodificada, que termina
+em dois `kUnknown` seguidos. Agora o limite é a seção, parando em padding e em
+palavras que o disassembler também recusa. Teste sintético e 27 casos de
+codegen passam; Skate e dashboard repreparados (módulo `xam_ui` da dashboard
+regenerado, diferença não inspecionada). Sessão pela dashboard 17559 com perfil:
+Skate rodou 188 s e 642 s, voltando à dashboard a pedido do título nas duas
+vezes, sem crítico; resultado do jogo relatado pelo usuário como correto.
+
 31/10 — **Skate 3, AOT genérico em validação**: Skate e EAWebkit importados e
 preparados em Windows x64, com recibo final emitido. Correções compartilhadas
 de emissão/fronteiras indiretas e MSR (0237–0240); 0241 reutiliza lacunas baixas

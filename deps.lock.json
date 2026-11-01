@@ -916,7 +916,7 @@
       "file": "patches/rexglue-sdk/0068-gapfill-pdata-end-boundaries.patch",
       "sha256": "9632659ad82cf7da44c026ce7e61d7f3b6071e16976dea3a7c29041d0483dc30",
       "files": {
-        "src/codegen/phase_gapfill.cpp": "78ff568e4623a44f6d39c8ae466b88bee5cd0202612629fc0f2430aad389594a"
+        "src/codegen/phase_gapfill.cpp": "49f148fce87ae19883db793f9db4f77550a5c7c6f9d597066c9bf9bf16301722"
       },
       "base_files": {
         "src/codegen/phase_gapfill.cpp": "878a120c08c772e005f92ec44ed5121c65b5b5764c4725896dfe2d7d5e7d20e3"
@@ -1189,7 +1189,7 @@
         "src/codegen/phase_gapfill.cpp": "3b89f9a207f52ae832403a84aa52b9683fbdb32800c9ab3423096dbb16c4c457"
       },
       "files": {
-        "src/codegen/phase_gapfill.cpp": "78ff568e4623a44f6d39c8ae466b88bee5cd0202612629fc0f2430aad389594a"
+        "src/codegen/phase_gapfill.cpp": "49f148fce87ae19883db793f9db4f77550a5c7c6f9d597066c9bf9bf16301722"
       },
       "test": "tests/sdkcheck/virtual_thunk_discovery_test.cpp"
     },
@@ -2883,7 +2883,7 @@
         "src/codegen/phase_gapfill.cpp": "b64c94daa2639315f6ec4b15243c5d608d04a25a4156f5625e5ea229d7adb813"
       },
       "files": {
-        "src/codegen/phase_gapfill.cpp": "78ff568e4623a44f6d39c8ae466b88bee5cd0202612629fc0f2430aad389594a"
+        "src/codegen/phase_gapfill.cpp": "49f148fce87ae19883db793f9db4f77550a5c7c6f9d597066c9bf9bf16301722"
       },
       "test": "sdkcheck GapFill direct-tail discovery: adjacent wrappers/getters, transitive targets, protected metadata holes, data targets, existing callable ownership; synthetic XEX without title-specific hints."
     },
@@ -2894,7 +2894,7 @@
         "src/codegen/phase_gapfill.cpp": "3eaf3ec3fc437519f8a5a035d41106877aa632fc8a6cdc4bc306098a9527d96a"
       },
       "files": {
-        "src/codegen/phase_gapfill.cpp": "78ff568e4623a44f6d39c8ae466b88bee5cd0202612629fc0f2430aad389594a"
+        "src/codegen/phase_gapfill.cpp": "49f148fce87ae19883db793f9db4f77550a5c7c6f9d597066c9bf9bf16301722"
       },
       "test": "sdkcheck direct tail entries take precedence over speculative gap fallthrough; synthetic XEX preserves the gap prefix and creates the referenced entry before linear gap discovery."
     },
@@ -2905,7 +2905,7 @@
         "src/codegen/phase_gapfill.cpp": "a742d8486085686fbfefd0c94c224211eb119fc78847afb81b7c6bf088259bd1"
       },
       "files": {
-        "src/codegen/phase_gapfill.cpp": "78ff568e4623a44f6d39c8ae466b88bee5cd0202612629fc0f2430aad389594a"
+        "src/codegen/phase_gapfill.cpp": "49f148fce87ae19883db793f9db4f77550a5c7c6f9d597066c9bf9bf16301722"
       },
       "test": "sdkcheck data-entry: synthetic RTTI-free callbacks in rdata/data, alignment, original metadata interiors, ordinary fallthrough and non-executable references. Real Minecraft/Forza startup missing indirect entries motivate shared discovery only; no title addresses or hashes in compiler."
     },
@@ -2950,7 +2950,7 @@
         "src/codegen/phase_gapfill.cpp": "569dfde0b28560ad4ed73a8622e98a51ee9485fb5372d7a245b9bb33fe47fc28"
       },
       "files": {
-        "src/codegen/phase_gapfill.cpp": "78ff568e4623a44f6d39c8ae466b88bee5cd0202612629fc0f2430aad389594a"
+        "src/codegen/phase_gapfill.cpp": "49f148fce87ae19883db793f9db4f77550a5c7c6f9d597066c9bf9bf16301722"
       },
       "test": "sdkcheck [code-address-entry]: synthetic lis/addi and lis/ori callbacks, signed low half, different destination register, clobbers, block boundary, original metadata, ordinary fallthrough and non-code target. Reuses conservative 0205 candidate validation; broad disabled scanner remains off. No title addresses or runtime changes."
     },
@@ -2965,7 +2965,7 @@
       "files": {
         "include/rex/codegen/function_types.h": "fc597f4c33c3ec730fb0c7d9af0a1216e24057cac9c8f5e4a7b2ad75e030ad05",
         "src/codegen/function_scanner.cpp": "ed3a78f48db5a74507a8efdba9feb653e34aaab94fae4daee6b999f1b5d0d861",
-        "src/codegen/phase_gapfill.cpp": "78ff568e4623a44f6d39c8ae466b88bee5cd0202612629fc0f2430aad389594a"
+        "src/codegen/phase_gapfill.cpp": "49f148fce87ae19883db793f9db4f77550a5c7c6f9d597066c9bf9bf16301722"
       },
       "test": "sdkcheck [embedded-table]: inferred absolute inline switch table whose words decode as instructions, materialized table address, out-of-line cases and actual code/data boundary. Preserve byte/short/computed table widths as metadata. Real Minecraft 0208 codegen emitted new unresolved branches because table data became entries; 0209 rejects those data spans, without weakening validation."
     },
@@ -3360,7 +3360,7 @@
     "src/codegen/phase_gapfill.cpp": "6be4cb31baad2f41b0a9d22375fa850d1aa9027b2a8df4021af2c5773daa188d"
   },
   "files": {
-    "src/codegen/phase_gapfill.cpp": "78ff568e4623a44f6d39c8ae466b88bee5cd0202612629fc0f2430aad389594a"
+    "src/codegen/phase_gapfill.cpp": "49f148fce87ae19883db793f9db4f77550a5c7c6f9d597066c9bf9bf16301722"
   },
   "test": "tests/sdkcheck/virtual_tail_registers_test.cpp: distinct r10-r12 vtable/callable registers, adjacent leaf registration and complete AOT emission; focused metadata/ambiguous-CTR controls preserved."
 },
@@ -3371,7 +3371,7 @@
     "src/codegen/phase_gapfill.cpp": "f32a388425be18e7325f902d2aaaf7b658bab5261d19d47e313b1fb58095114d"
   },
   "files": {
-    "src/codegen/phase_gapfill.cpp": "78ff568e4623a44f6d39c8ae466b88bee5cd0202612629fc0f2430aad389594a"
+    "src/codegen/phase_gapfill.cpp": "49f148fce87ae19883db793f9db4f77550a5c7c6f9d597066c9bf9bf16301722"
   },
   "test": "tests/sdkcheck/descriptor_tail_test.cpp: descriptor data flow, alternate scratch registers, mismatched fields/registers, conditional transfers, metadata/config extents and adjacent callable emission."
 },
@@ -3406,7 +3406,7 @@
     "src/codegen/phase_gapfill.cpp": "0ec9e3b5db6f7e00e10d7a1169b5bc57642b391365e8532d605e1631038c6111"
   },
   "files": {
-    "src/codegen/phase_gapfill.cpp": "78ff568e4623a44f6d39c8ae466b88bee5cd0202612629fc0f2430aad389594a"
+    "src/codegen/phase_gapfill.cpp": "49f148fce87ae19883db793f9db4f77550a5c7c6f9d597066c9bf9bf16301722"
   },
   "test": "tests/sdkcheck/late_callback_discovery_test.cpp: rescan constructors found by gap fill, promote referenced speculative entries, verify generated registration, reject source clobber, conditional predecessors and metadata/config ownership; focused gap/CTR/emission controls."
 },
@@ -3417,7 +3417,7 @@
     "src/codegen/phase_gapfill.cpp": "621516e2c99f07cc001b5856286116fafb6932d38fafd6d93d7d32bdbdfbce8f"
   },
   "files": {
-    "src/codegen/phase_gapfill.cpp": "78ff568e4623a44f6d39c8ae466b88bee5cd0202612629fc0f2430aad389594a"
+    "src/codegen/phase_gapfill.cpp": "49f148fce87ae19883db793f9db4f77550a5c7c6f9d597066c9bf9bf16301722"
   },
   "test": "tests/sdkcheck/shared_tail_entry_test.cpp: long/short shared tails inside speculative or inferred wrappers, generated registration and tail-call emission, invalid predecessors/targets, source clobber and declared extent controls; 108 assertions plus focused discovery/emission controls."
 },
@@ -3515,6 +3515,17 @@
     "src/system/xmemory.cpp": "f879f4c8ef395e7fd6b1922cbabd5f005c3137f961d084268e1c4c492e6703e1"
   },
   "test": "tests/sdkcheck/system_heap_layout_test.cpp: top-down 4 KiB and 64 KiB allocations end exactly at 0x30000000/0x70000000, 64 KiB-aligned, page above free; baseline fails with 2FD01000 and 70000000 (5 assertions). Patched Release: 55 assertions in 4 system-heap-layout cases, 594 assertions in 20 focused allocator/import/dispatch cases, SDK unit_tests [heap],[memory] 173 assertions in 24 cases. Rebuilt dash_17559 session passed the boot intro (export 1 returned 0) without the 30001002 access violation."
+},
+{
+  "file": "patches/rexglue-sdk/0250-accept-unmodeled-referenced-entry-instructions.patch",
+  "sha256": "c6d4906e933b83fbabbcf7476c0e8e9bcefbd385a804ac32492e74c1a953a527",
+  "base_files": {
+    "src/codegen/phase_gapfill.cpp": "78ff568e4623a44f6d39c8ae466b88bee5cd0202612629fc0f2430aad389594a"
+  },
+  "files": {
+    "src/codegen/phase_gapfill.cpp": "49f148fce87ae19883db793f9db4f77550a5c7c6f9d597066c9bf9bf16301722"
+  },
+  "test": "tests/sdkcheck/adjacent_referenced_entry_test.cpp: two PDATA-less mfmsr/mtmsrd + lwarx/stwcx. adjusters ending in bctr, named only from .rdata; the second (0x82010078) is an entry and registered, controls with an undecodable word or PDATA-owned bytes stay unregistered. Skate 3 default.xex analysis registers 8246CED8 (0x38 bytes) after GapFill; the region-bounded baseline did not."
 }
 ]
 },

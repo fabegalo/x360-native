@@ -1,0 +1,36 @@
+--- a/src/codegen/phase_gapfill.cpp
++++ b/src/codegen/phase_gapfill.cpp
+@@ -10,6 +10,7 @@
+  */
+ 
+ #include "ppc/instruction.h"
++#include "ppc/disasm.h"
+ #include "decoded_binary.h"
+ #include "codegen_flags.h"
+ 
+@@ -419,14 +420,23 @@ void discoverReferencedEntries(CodegenContext& ctx) {
+       }
+     }
+     if (containing && containing->authority() != FunctionAuthority::GAP_FILL) return;
++    // The analysis table omits non-control opcodes such as lwarx/stwcx. and
++    // mfmsr/mtmsrd, and two in a row end a decoded region. Bound the prefix by
++    // its section instead; stop on padding and words the emitter cannot decode.
+     bool bounded = false;
+     for (uint32_t word = 0; word < 64; ++word) {
+       const uint64_t address = uint64_t(target) + word * 4;
+-      if (address >= region->end || (word && graph.isEntryPoint(uint32_t(address))) ||
++      if (address >= imageEnd || (word && graph.isEntryPoint(uint32_t(address))) ||
+           ctx.binary().isInImportExportRange(uint32_t(address))) break;
+       const auto* instruction = decoded.get(uint32_t(address));
+-      if (!instruction || instruction->opcode == Opcode::kUnknown) break;
++      if (!instruction) break;
+       const uint32_t code = instruction->code;
++      if (code == 0 || code == 0xFFFFFFFF) break;
++      if (instruction->opcode == Opcode::kUnknown) {
++        ppc_insn insn;
++        ppc::Disassemble(&instruction->code, 4, address, insn);
++        if (!insn.opcode) break;
++      }
+       if (terminates(code)) { bounded = true; break; }
+     }
+     if (bounded) targets.insert(target);

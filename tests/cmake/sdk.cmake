@@ -63,6 +63,7 @@ target_sources(x360n_sdk_checks PRIVATE sdkcheck/virtual_tail_registers_test.cpp
 target_sources(x360n_sdk_checks PRIVATE sdkcheck/descriptor_tail_test.cpp)
 
 target_sources(x360n_sdk_checks PRIVATE sdkcheck/late_callback_discovery_test.cpp)
+target_sources(x360n_sdk_checks PRIVATE sdkcheck/adjacent_referenced_entry_test.cpp)
 
 target_sources(x360n_sdk_checks PRIVATE sdkcheck/shared_tail_entry_test.cpp)
 

@@ -2618,3 +2618,34 @@ matched.
 `tests/sdkcheck/system_heap_layout_test.cpp` checks that top-down allocations
 end exactly at both limits, 64 KiB-aligned, with the page above left free. The
 baseline fails with `2FD01000` and `70000000`.
+
+### 0250 — accept unmodeled instructions in data-referenced entries
+
+`discoverReferencedEntries` (0205/0208) validates a data-referenced frameless
+entry by reading a bounded prefix up to an unconditional terminator. It stopped
+at any `Opcode::kUnknown`, but the analysis table models only a subset of the
+ISA: `lwarx`/`stwcx.`, `mfmsr`/`mtmsrd`, cache and other non-control
+instructions are `kUnknown` there while the emitter decodes and emits them.
+Skate 3 holds two adjacent reference-count adjusters without PDATA, each an
+atomic loop ending in a virtual `bctr`, named only by an `.rdata` descriptor
+table. Both were rejected; gap fill then owned them as one linear segment and
+emitted only the first, so the indirect call to `8246CED8` reached an
+unregistered address after six minutes of gameplay.
+
+The prefix was also bounded by the decoded code region, and
+`computeCodeRegions` ends a region at any two consecutive `kUnknown` words.
+The adjusters disable interrupts (`mfmsr`; `mtmsrd`) around the atomic loop,
+so the region of `8246CED8` ended 8 bytes after the entry, before its `bctr`.
+
+The target must still start inside a decoded region. The prefix is now bounded
+by the image and its section (`decoded.get`), and stops at `0`/`FFFFFFFF`
+padding and at any `kUnknown` word the emitter's disassembler rejects too.
+Terminator, entry, import, ownership and declared-extent checks are unchanged;
+CFG discovery still decides the blocks. `discoverUnownedTailTargets` keeps its
+first-instruction `kUnknown` guard (not demonstrated here).
+
+`tests/sdkcheck/adjacent_referenced_entry_test.cpp` builds two such adjusters
+from instructions written for the test, with no title bytes. The baseline fails to
+register the second entry; controls with an undecodable word or PDATA-owned
+bytes stay unregistered. On Skate 3 `default.xex`, the GapFill phase now
+registers `8246CEA0` and `8246CED8` as separate 0x38-byte entries.
