@@ -51,7 +51,7 @@ bool StartDetached(const fs::path& exe) {
 Command PreparationCommand(const fs::path& root, const fs::path& supervisor, const std::vector<std::string>& supervisor_args) {
   // cmd keeps the quotes of every argument because the command after /c does
   // not start with one ("call"). Characters cmd would expand stay refused.
-  Command command{SystemTool("cmd"), {"/d", "/c", "call", Utf8(root / "scripts/devshell.cmd"), Utf8(supervisor)}};
+  Command command{SystemTool("cmd"), {"/d", "/c", "call", Utf8(ToolPath(root / "scripts/devshell.cmd")), Utf8(supervisor)}};
   command.args.insert(command.args.end(), supervisor_args.begin(), supervisor_args.end());
   for (size_t i = 3; i < command.args.size(); ++i)
     if (command.args[i].find_first_of("%^\"!\r\n") != std::string::npos)

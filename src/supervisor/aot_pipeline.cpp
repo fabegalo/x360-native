@@ -111,8 +111,9 @@ void Publish(const fs::path& file, const std::string& text) {
     if (!out) throw std::runtime_error("Cannot write preparation checkpoint");
   }
 #ifdef _WIN32
-  if (!MoveFileExW(io::Host(temporary).c_str(), io::Host(file).c_str(),
-                   MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH))
+  std::error_code published;
+  io::rename(temporary, file, published);
+  if (published)
     throw std::runtime_error(
         "Cannot atomically publish preparation checkpoint");
 #else
@@ -655,13 +656,15 @@ void Driver::Init() {
       options.title.find_first_not_of(
           "abcdefghijklmnopqrstuvwxyz0123456789_") != std::string::npos)
     throw std::runtime_error("Invalid title identity");
-  options.paths.root = io::canonical(options.paths.root);
+  // Tools see a long installation through its alias (ToolPath); every path
+  // below is derived from this one spelling.
+  options.paths.root = ToolPath(io::canonical(options.paths.root));
   const auto keys_override = NativeEnvironmentValue("X360N_XEX_KEYS");
   const auto keys = keys_override.empty()
                         ? options.paths.local() / "keys/xex-keys.txt"
                         : fs::absolute(PathFromUtf8(keys_override));
   if (io::is_regular_file(keys))
-    xex_keys = io::canonical(keys);
+    xex_keys = ToolPath(io::canonical(keys));
   else if (!keys_override.empty())
     throw std::runtime_error("Configured local XEX key file is missing");
   project = options.paths.root / "titles" / options.title;
@@ -697,7 +700,7 @@ void Driver::Init() {
   if (NativeEnvironmentValue("X360N_SHARED_SDK") == "0")
     options.shared_sdk = false;
   if (options.sdk.empty()) options.sdk = options.paths.sdk();
-  options.sdk = io::canonical(options.sdk);
+  options.sdk = ToolPath(io::canonical(options.sdk));
   if (options.cmake.empty()) options.cmake = FindHostTool("cmake");
   if (options.ninja.empty()) options.ninja = FindHostTool("ninja");
   if (options.cc.empty()) options.cc = FindHostTool("clang");
@@ -1050,8 +1053,9 @@ AotResult Driver::Run() {
       throw std::runtime_error(
           "Interrupted application update; no preparation allowed");
   const auto owner_file = published / ".x360n-aot-owner";
-  const auto owner =
-      options.title + "\n" + Path(project) + "\n" + HostPlatform() + "\n";
+  // The real folder: tools may name the installation by its alias.
+  const auto owner = options.title + "\n" + Path(CanonicalPath(project)) +
+                     "\n" + HostPlatform() + "\n";
   if (io::exists(owner_file) && Read(owner_file) != owner) {
     const auto previous_owner = Read(owner_file);
     const auto game =

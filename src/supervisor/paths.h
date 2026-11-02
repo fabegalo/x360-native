@@ -65,6 +65,39 @@ std::optional<ProjectPaths> FindProjectRoot(const std::filesystem::path& start);
 // differing case on Windows are handled by weakly_canonical + case folding.
 bool IsWithin(const std::filesystem::path& path, const std::filesystem::path& base);
 
+// The spelling a child process can start in for `directory`. Windows caps a
+// process working directory at MAX_PATH - 2 characters unless the machine
+// opts in to long paths, and 8.3 aliases may not exist. A deeper folder inside
+// an installation is reached through <local>\x360n\r\<id>, a verified
+// junction to that installation's root (no privilege, no registry), so
+// relative paths, ".." included, still resolve inside the installation. Throws
+// for a deeper folder outside an installation or on a network share. Elsewhere
+// the directory is returned unchanged.
+std::filesystem::path ChildWorkingDirectory(const std::filesystem::path& directory);
+
+// The spelling a child process is started by for the executable `exe`: the
+// ordinary name where it fits MAX_PATH (.NET Framework hosts such as Windows
+// PowerShell 5.1 fail to start from an extended one), else the installation
+// alias as for the working directory, else the extended name.
+std::filesystem::path ChildExecutable(const std::filesystem::path& exe);
+
+// The spelling of `path` that preparation tools get. Windows PowerShell 5.1,
+// cmd, Ninja and the compilers cannot open a name beyond MAX_PATH unless the
+// machine opts in to long paths, and they reach names up to ~180 characters
+// below the installation root (the SDK's third-party trees). Paths inside an
+// installation whose root leaves less room go through the same verified
+// alias; everything else (POSIX included) keeps its spelling. Throws for an
+// installation whose root is longer than PreparationRootLimit().
+std::filesystem::path ToolPath(const std::filesystem::path& path);
+
+// The longest installation root, in UTF-8 bytes of its canonical name, that
+// can prepare games. Windows: both resolve the alias to the real name. Ninja
+// refuses names over MAX_PATH bytes, and CMake names its own modules up to 119
+// characters below the root. Git opens the SDK repository's metadata, up to
+// 102 characters below it, before it applies core.longpaths. Elsewhere
+// unlimited.
+size_t PreparationRootLimit();
+
 // Decides whether the supervisor may launch `exe`: an existing native executable
 // (.exe on Windows, executable permission on POSIX),
 // produced by a build (under .local/build or the SDK's out/), and never

@@ -401,13 +401,8 @@ void VulkanRender::SavePipelineCache() {
   stream.close();
   // Cache contents are optional and device-specific; a failed replacement must
   // never interfere with guest execution or discard the preceding valid file.
-#if defined(_WIN32)
-  const bool replaced = MoveFileExW(x360n::io::Host(temporary).c_str(), x360n::io::Host(pipeline_file_).c_str(), MOVEFILE_REPLACE_EXISTING);
-#else
-  x360n::io::rename(temporary, pipeline_file_, error);  // rename(2) replaces atomically.
-  const bool replaced = !error;
-#endif
-  if (!replaced) REXLOG_WARN("Native Vulkan: unable to persist pipeline cache");
+  x360n::io::rename(temporary, pipeline_file_, error);  // Replaces atomically.
+  if (error) REXLOG_WARN("Native Vulkan: unable to persist pipeline cache");
 }
 SampleCounts VulkanRender::ReadSampleCounts(bool counting_after) {
   Begin();

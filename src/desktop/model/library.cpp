@@ -13,15 +13,10 @@
 namespace fs = std::filesystem;
 namespace x360n::desktop {
 namespace {
-fs::path LibraryPath(const fs::path& path) {
-  // Content IDs and temporary-copy suffixes exceed MAX_PATH even under an
-  // ordinary extracted ZIP. Do not require a machine-wide Windows setting.
-  return host_path::Extended(path);
-}
 bool WithinNew(const fs::path& file, const fs::path& root) {
   auto relative = CatalogLaunchVerificationActive()
       ? CatalogVerificationPath(file).lexically_relative(CatalogVerificationPath(root))
-      : io::weakly_canonical(LibraryPath(file)).lexically_relative(io::weakly_canonical(LibraryPath(root)));
+      : io::weakly_canonical(file).lexically_relative(io::weakly_canonical(root));
   return !relative.empty() && !relative.is_absolute() && *relative.begin() != "..";
 }
 const Target& Dependency(const std::vector<Target>& catalog, const std::string& id) {
@@ -54,7 +49,7 @@ Entry Describe(const Target& session, const Target& game) {
     bytes[8 + 2 * i] = char(name[i] >> 8); bytes[9 + 2 * i] = char(name[i]);
   }
   bytes.replace(0x108, c.file_name.size(), c.file_name);
-  auto base = LibraryPath(session.user_root) / "0000000000000000" / c.title_id;
+  auto base = session.user_root / "0000000000000000" / c.title_id;
   return {base / c.content_type / c.file_name,
           base / "Headers" / c.content_type / (c.file_name + ".header"), bytes};
 }
@@ -112,7 +107,7 @@ void ArchiveLibraryCaches(const Target& session) {
   // header alone leaves the retired item visible until CDIs is regenerated.
   // Preserve each cache byte-for-byte, only in this dashboard's own storage.
   std::vector<fs::path> caches;
-  for (const auto& account : io::directory_iterator(LibraryPath(session.user_root))) {
+  for (const auto& account : io::directory_iterator(session.user_root)) {
     const auto name = Utf8(account.path().filename());
     if (name.size() != 16 || name.find_first_not_of("0123456789ABCDEF") != std::string::npos) continue;
     // Extended-length Windows paths do not normalize forward slashes.
@@ -122,16 +117,16 @@ void ArchiveLibraryCaches(const Target& session) {
       throw std::runtime_error("Redirected or invalid dashboard library cache; preserved: " + Utf8(cache));
     caches.push_back(cache);
   }
-  const auto archive = LibraryPath(session.user_root) / ".x360n-library-cache-archive" /
+  const auto archive = session.user_root / ".x360n-library-cache-archive" /
       std::to_string(std::chrono::steady_clock::now().time_since_epoch().count());
   for (const auto& cache : caches) {
-    const auto saved = archive / cache.lexically_relative(LibraryPath(session.user_root));
+    const auto saved = archive / cache.lexically_relative(session.user_root);
     if (!WithinNew(saved, session.user_root)) throw std::runtime_error("Redirected library cache archive");
     io::create_directories(saved.parent_path()); io::rename(cache, saved);
   }
 }
 void ArchiveHeader(const Target& session, const Target& game, const Entry& entry) {
-  const auto saved = LibraryPath(session.user_root) / ".x360n-inactive-headers" /
+  const auto saved = session.user_root / ".x360n-inactive-headers" /
       (game.id + "-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()) + ".header");
   if (!WithinNew(saved, session.user_root)) throw std::runtime_error("Redirected library archive");
   ArchiveLibraryCaches(session);
@@ -224,7 +219,7 @@ std::vector<std::string> InspectLibrary(const ProjectPaths& paths, const Target&
 }
 void WithdrawLibrary(const Target& session, const Target& game, const std::vector<Target>& catalog) {
   if (!session.session || session.user_root.empty() || game.library.title_id.empty() || game.inputs.empty() ||
-      !io::is_directory(LibraryPath(session.user_root))) return;
+      !io::is_directory(session.user_root)) return;
   auto entries = OtherRegistrations(session, game, catalog);
   entries.insert(entries.begin(), Describe(session, game));
   std::set<fs::path> expected;
@@ -309,7 +304,7 @@ void PrepareLibrary(const ProjectPaths& paths, const Target& session, const std:
       io::create_directories(dest.parent_path());
       auto tmp = dest; tmp += ".x360n-library-tmp";
       if (io::exists(tmp) && !Same(tmp, input.sha256)) {
-        if (!IsWithin(tmp, LibraryPath(session.user_root)) || io::is_redirect(tmp)) throw std::runtime_error("Cópia temporária redirecionada; preservada.");
+        if (!IsWithin(tmp, session.user_root) || io::is_redirect(tmp)) throw std::runtime_error("Cópia temporária redirecionada; preservada.");
         auto interrupted = tmp; interrupted += ".interrupted-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count());
         io::rename(tmp, interrupted);
       }
@@ -336,7 +331,7 @@ void PrepareLibrary(const ProjectPaths& paths, const Target& session, const std:
       CheckObsoleteRegistration(session, game, legacy);
       // The SDK also enumerates extracted folders without a header, displaying
       // their package ID. Retain the complete obsolete copy outside that tree.
-      const auto saved = LibraryPath(session.user_root) / ".x360n-inactive-content" /
+      const auto saved = session.user_root / ".x360n-inactive-content" /
           (game.id + "-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
       if (!WithinNew(saved, session.user_root)) throw std::runtime_error("Redirected content archive");
       ArchiveLibraryCaches(session);

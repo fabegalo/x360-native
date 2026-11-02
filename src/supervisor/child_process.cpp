@@ -6,6 +6,7 @@
 #include <unordered_set>
 #include <map>
 #include "action_trace.h"
+#include "paths.h"
 
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
@@ -293,26 +294,18 @@ ProcessResult RunProcess(const ProcessSpec& spec) {
   si.hStdOutput = out.h;
   si.hStdError = err.h;
   PROCESS_INFORMATION pi{};
-  std::wstring cmd = BuildCommandLine(spec.exe, spec.args);
-  // The application name may be extended; the command line keeps the ordinary
-  // one as argv[0]. A working directory cannot be extended and Windows caps it
-  // at MAX_PATH - 2 unless the machine opts in, so a deeper one uses its 8.3
-  // alias where the volume keeps them, and otherwise the launch is refused.
-  const auto application = io::Host(spec.exe).native();
-  std::wstring cwd = spec.working_dir.empty() ? std::wstring() : io::Logical(io::Host(spec.working_dir)).native();
-  if (cwd.size() > MAX_PATH - 2) {
-    const auto host = io::Host(spec.working_dir).native();
-    std::wstring alias(host.size() + 1, L'\0');
-    const auto size = GetShortPathNameW(host.c_str(), alias.data(), DWORD(alias.size()));
-    alias.resize(size < alias.size() ? size : 0);
-    alias = io::Logical(alias).native();
-    if (alias.empty() || alias.size() > MAX_PATH - 2) {
-      const auto name = spec.working_dir.u8string();
-      r.launch_error = fmt::format("Working directory exceeds the Windows limit of {} characters: {}", MAX_PATH - 2,
-                                   std::string(name.begin(), name.end()));
-      return r;
-    }
-    cwd = alias;
+  // The child sees the name it is started by (GetModuleFileName, argv[0]), so
+  // both use one spelling; see ChildExecutable and ChildWorkingDirectory for
+  // names deeper than Windows allows.
+  std::wstring application, cmd, cwd;
+  try {
+    const auto program = ChildExecutable(spec.exe);
+    application = program.native();
+    cmd = BuildCommandLine(program, spec.args);
+    if (!spec.working_dir.empty()) cwd = ChildWorkingDirectory(spec.working_dir).native();
+  } catch (const std::exception& error) {
+    r.launch_error = error.what();
+    return r;
   }
   std::vector<wchar_t> environment;
   if (!spec.environment.empty()) {

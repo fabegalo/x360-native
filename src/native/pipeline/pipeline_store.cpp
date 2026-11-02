@@ -61,7 +61,7 @@ void PipelineStore::Save(const Entry& e, ID3D12PipelineState* pso) const {
   out.write(reinterpret_cast<const char*>(&h), sizeof(h)); out.write(e.key.data(), e.key.size());
   out.write(static_cast<const char*>(blob->GetBufferPointer()), blob->GetBufferSize());
   out.close();
-  if (out) MoveFileExW(x360n::io::Host(temporary).c_str(), x360n::io::Host(e.path).c_str(), MOVEFILE_REPLACE_EXISTING);
+  if (out) x360n::io::rename(temporary, e.path, ec);
   x360n::io::remove(temporary, ec);
 }
 }

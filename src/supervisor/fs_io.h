@@ -17,7 +17,12 @@
 #include "host_path.h"
 
 #ifdef _WIN32
+#include <cstddef>
+#include <cstring>
+#include <string>
+#include <vector>
 struct _SECURITY_ATTRIBUTES;
+struct HINSTANCE__;
 #endif
 
 namespace x360n::io {
@@ -65,7 +70,9 @@ X360N_IO_ONE_PATH(remove_all)
 X360N_IO_ONE_PATH(resize_file)
 X360N_IO_ONE_PATH(space)
 X360N_IO_ONE_PATH(permissions)
+#ifndef _WIN32
 X360N_IO_TWO_PATHS(rename)
+#endif
 X360N_IO_TWO_PATHS(copy)
 X360N_IO_TWO_PATHS(copy_file)
 X360N_IO_TWO_PATHS(equivalent)
@@ -169,7 +176,91 @@ inline fs::path OpenedFinalName(const fs::path& host, std::error_code& ec) {
   ec.clear();
   return name;
 }
+
+extern "C" {
+__declspec(dllimport) int __stdcall MoveFileExW(const wchar_t*, const wchar_t*, unsigned long);
+__declspec(dllimport) ::HINSTANCE__* __stdcall GetModuleHandleW(const wchar_t*);
+__declspec(dllimport) long long(__stdcall* __stdcall GetProcAddress(::HINSTANCE__*, const char*))();
+}
+// Renames `host` to `leaf` in its own folder with FileRenameInformation and
+// a simple name, the documented in-place form (MoveFileExW sends the whole
+// target instead, which Windows' SMB client refuses with ERROR_ACCESS_DENIED
+// once the share-relative name passes about 500 characters). The name itself
+// is renamed when it is a link, as with MoveFileExW.
+inline void RenameInFolder(const fs::path& host, const std::wstring& leaf, bool replace, std::error_code& ec) {
+  using SetInformation = long(__stdcall*)(void*, void*, void*, unsigned long, int);
+  using StatusToError = unsigned long(__stdcall*)(long);
+  static const auto ntdll = GetModuleHandleW(L"ntdll.dll");
+  static const auto set_information = reinterpret_cast<SetInformation>(GetProcAddress(ntdll, "NtSetInformationFile"));
+  static const auto status_to_error = reinterpret_cast<StatusToError>(GetProcAddress(ntdll, "RtlNtStatusToDosError"));
+  if (!set_information || !status_to_error) {
+    ec = std::make_error_code(std::errc::function_not_supported);
+    return;
+  }
+  constexpr unsigned long kDelete = 0x00010000, kSynchronize = 0x00100000, kShareAll = 7, kOpenExisting = 3,
+                          kBackupSemantics = 0x02000000, kOpenReparsePoint = 0x00200000;
+  constexpr int kFileRenameInformation = 10;
+  void* const file = CreateFileW(host.c_str(), kDelete | kSynchronize, kShareAll, nullptr, kOpenExisting,
+                                 kBackupSemantics | kOpenReparsePoint, nullptr);
+  if (file == reinterpret_cast<void*>(-1)) {
+    ec.assign(int(GetLastError()), std::system_category());
+    return;
+  }
+  struct RenameInformation {  // FILE_RENAME_INFORMATION
+    unsigned char replace_if_exists;
+    void* root_directory;
+    unsigned long name_length;
+    wchar_t name[1];
+  };
+  std::vector<unsigned char> buffer(offsetof(RenameInformation, name) + (leaf.size() + 1) * sizeof(wchar_t));
+  auto* information = reinterpret_cast<RenameInformation*>(buffer.data());
+  information->replace_if_exists = replace;
+  information->root_directory = nullptr;
+  information->name_length = static_cast<unsigned long>(leaf.size() * sizeof(wchar_t));
+  std::memcpy(information->name, leaf.c_str(), (leaf.size() + 1) * sizeof(wchar_t));
+  struct { void* status; unsigned long long information; } io_status{};  // IO_STATUS_BLOCK
+  const long status = set_information(file, &io_status, buffer.data(), static_cast<unsigned long>(buffer.size()),
+                                      kFileRenameInformation);
+  CloseHandle(file);
+  if (status < 0) ec.assign(int(status_to_error(status)), std::system_category());
+  else ec.clear();
+}
 }  // namespace detail
+
+// What rename does when the target exists (Windows; on POSIX, rename(2)
+// always replaces and callers that must not replace publish with a hard link).
+enum class if_exists { fail, replace };
+// Same volume only, like MoveFileExW without MOVEFILE_COPY_ALLOWED, so nothing
+// is ever copied. Inside one folder (a staged file published under its final
+// name) the rename names only the new leaf, which works on UNC shares at any
+// depth; between folders it is MoveFileExW.
+inline void rename(const fs::path& from, const fs::path& to, if_exists mode, std::error_code& ec) noexcept {
+  try {
+    const auto source = Host(from), target = Host(to);
+    if (source.parent_path() == target.parent_path() && !target.filename().empty()) {
+      detail::RenameInFolder(source, target.filename().native(), mode == if_exists::replace, ec);
+      return;
+    }
+    constexpr unsigned long kReplaceExisting = 0x1, kWriteThrough = 0x8;
+    if (detail::MoveFileExW(source.c_str(), target.c_str(),
+                            kWriteThrough | (mode == if_exists::replace ? kReplaceExisting : 0)))
+      ec.clear();
+    else
+      ec.assign(int(detail::GetLastError()), std::system_category());
+  } catch (const std::bad_alloc&) {
+    ec = std::make_error_code(std::errc::not_enough_memory);
+  }
+}
+inline void rename(const fs::path& from, const fs::path& to, if_exists mode) {
+  std::error_code ec;
+  rename(from, to, mode, ec);
+  if (ec) throw fs::filesystem_error("rename", Logical(Host(from)), Logical(Host(to)), ec);
+}
+// std::filesystem::rename's contract: an existing file is replaced.
+inline void rename(const fs::path& from, const fs::path& to, std::error_code& ec) noexcept {
+  rename(from, to, if_exists::replace, ec);
+}
+inline void rename(const fs::path& from, const fs::path& to) { rename(from, to, if_exists::replace); }
 #endif
 
 // fs::canonical through the host name; the result is ordinary.
