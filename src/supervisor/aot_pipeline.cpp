@@ -733,15 +733,8 @@ void Driver::Init() {
         throw std::runtime_error(
             "Preparation requires an explicit Ninja preset");
       for (const auto& [key, value] : selected->at("cacheVariables").items()) {
-        auto text = value.is_string() ? value.get<std::string>() : value.dump();
-        for (const auto& [token, replacement] :
-             std::map<std::string, std::string>{
-                 {"${sourceDir}", Path(project)},
-                 {"${sourceParentDir}", Path(project.parent_path())}})
-          for (size_t pos = 0;
-               (pos = text.find(token, pos)) != std::string::npos;
-               pos += replacement.size())
-            text.replace(pos, token.size(), replacement);
+        const auto text = ExpandPresetValue(
+            value.is_string() ? value.get<std::string>() : value.dump(), project);
         if (text.find("${") != std::string::npos)
           throw std::runtime_error("Unsupported preset macro: " + key);
         options.variables[key] = text;
@@ -1040,6 +1033,8 @@ void Driver::SharedSdk() {
   static_inputs.insert(inputs.begin(), inputs.end());
   static_inputs.insert(artifacts.begin(), artifacts.end());
   Record(static_inputs, file);
+  for (const auto& name : RetireSharedSdkGenerations(cache, generation))
+    Stage("retired-shared-sdk " + name);
 }
 AotResult Driver::Run() {
   Init();
@@ -1448,5 +1443,66 @@ int GuardNinja(const fs::path& configuration,
     }
   }
   return int(result.exit_code);
+}
+std::string ExpandPresetValue(std::string text, const fs::path& project) {
+  const bool directory = text.starts_with("${sourceDir}") || text.starts_with("${sourceParentDir}");
+  for (const auto& [token, replacement] :
+       std::map<std::string, std::string>{
+           {"${sourceDir}", Path(project)},
+           {"${sourceParentDir}", Path(project.parent_path())}})
+    for (size_t pos = 0; (pos = text.find(token, pos)) != std::string::npos;
+         pos += replacement.size())
+      text.replace(pos, token.size(), replacement);
+  // Spelled from each title's folder, the same tool ("titles/<t>/../..")
+  // would give every title its own shared SDK identity and generation.
+  if (directory && text.find(';') == std::string::npos && text.find("${") == std::string::npos)
+    text = PathUtf8(PathFromUtf8(text).lexically_normal());
+  return text;
+}
+// The caller holds the publisher lease and has just published `current`. Each
+// generation is a full SDK build (about 500 MB), and every SDK, patch, lock or
+// compiler change makes a new one. Removes the generations beside `current`
+// that no preparation can use again: an interrupted or failed build no
+// pointer names, or one whose receipt's inputs changed, so that neither reuse
+// nor a title receipt built on it verifies (such titles prepare again against
+// the new export). A generation in use keeps its lease and stays.
+std::vector<std::string> RetireSharedSdkGenerations(const fs::path& cache, const fs::path& current) {
+  const auto owner = current.parent_path();
+  const auto same = [](const fs::path& a, const fs::path& b) {
+    std::error_code ec;
+    return io::equivalent(a, b, ec);
+  };
+  std::vector<fs::path> live{current};
+  std::vector<std::string> retired;
+  for (const auto& entry : io::directory_iterator(cache)) {
+    if (!entry.is_regular_file() || entry.path().extension() != ".json") continue;
+    try {
+      const auto receipt = PathFromUtf8(Json(entry.path()).at("receipt"));
+      const auto generation = receipt.parent_path();
+      if (!same(generation.parent_path(), owner)) continue;  // another owner's
+      if (same(generation, current)) continue;
+      if (io::is_regular_file(receipt) && Verify(Entries(Json(receipt).at("inputs")))) {
+        live.push_back(generation);
+        continue;
+      }
+      io::remove(entry.path());
+    } catch (const std::exception&) {
+      // Unreadable pointers are left for reuse() to reject.
+    }
+  }
+  for (const auto& entry : io::directory_iterator(owner)) {
+    if (!entry.is_directory() || entry.is_redirect()) continue;
+    if (std::any_of(live.begin(), live.end(), [&](const auto& kept) { return same(entry.path(), kept); }))
+      continue;
+    try {
+      FileLease idle(entry.path() / ".x360n-build.lock", true, false);
+    } catch (const std::exception&) {
+      continue;  // in use, or not a generation
+    }
+    std::error_code ec;
+    io::remove_all(entry.path(), ec);
+    if (!ec) retired.push_back(PathUtf8(entry.path().filename()));
+  }
+  return retired;
 }
 }  // namespace x360n

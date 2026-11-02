@@ -4,7 +4,11 @@
 #include "workspace_lease.h"
 #include "scratch.h"
 #include "digest_batch.h"
+#include "aot_pipeline.h"
+#include "host_platform.h"
+#include "sha256.h"
 #include <nlohmann/json.hpp>
+#include <algorithm>
 #include <chrono>
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
@@ -238,4 +242,67 @@ TEST_CASE("a same-time replacement keeps the hint but fails the receipt check", 
   ReceiptHints hints{f.paths};
   CHECK(hints.Check("sample",f.manifest,f.exe)==ReceiptHint::Current);
   CHECK(f.Check());
+}
+// A title's preset names the shared tools from its own folder; spelled as
+// written, each title gave the shared SDK its own identity and rebuilt it.
+TEST_CASE("title presets name a shared tool alike from every title folder", "[preparation][shared-sdk]") {
+  const auto root = fs::absolute(UniqueTempPath("preset")).lexically_normal();
+  const std::string python = "${sourceDir}/../../.local/toolchains/python/python.exe";
+  const auto a = ExpandPresetValue(python, root / "titles/a");
+  CHECK(a == ExpandPresetValue(python, root / "titles/b"));
+  CHECK(PathFromUtf8(a) == (root / ".local/toolchains/python/python.exe").lexically_normal());
+  CHECK(PathFromUtf8(ExpandPresetValue("${sourceParentDir}/x", root / "titles")) == root / "x");
+  // Not a single path: expanded, otherwise kept as written.
+  CHECK(ExpandPresetValue("ON", root) == "ON");
+  CHECK(ExpandPresetValue("-DX=${sourceDir}/..", root) == "-DX=" + PathUtf8(root) + "/..");
+  CHECK(ExpandPresetValue("${sourceDir}/a/..;b", root) == PathUtf8(root) + "/a/..;b");
+  CHECK(ExpandPresetValue("${sourceDir}/${env:X}", root).find("${env:X}") != std::string::npos);
+}
+TEST_CASE("retiring shared SDK generations keeps those a preparation can still use", "[preparation][shared-sdk]") {
+  const auto root = UniqueTempPath("shared-sdk-retire");
+  const auto cache = root / "cache", owner = root / "owner", other = root / "other";
+  const auto generation = [&](const fs::path& folder, const std::string& name, bool lock = true) {
+    const auto dir = folder / name;
+    fs::create_directories(dir);
+    if (lock) std::ofstream(dir / ".x360n-build.lock");
+    return dir;
+  };
+  // A receipt over one input, and the pointer that names it.
+  const auto publish = [&](const fs::path& dir, const std::string& pointer) {
+    const auto input = dir / "input.txt";
+    std::ofstream(input) << "sdk input";
+    const auto receipt = dir / "sdk.preparation.json";
+    std::ofstream(receipt) << nlohmann::json{{"inputs", nlohmann::json::array({
+        {{"path", PathUtf8(fs::absolute(input))}, {"sha256", DigestFile(input)->sha256}}})}}.dump();
+    fs::create_directories(cache);
+    std::ofstream(cache / (pointer + ".json")) << nlohmann::json{{"receipt", PathUtf8(fs::absolute(receipt))}}.dump();
+    return input;
+  };
+  const auto current = generation(owner, "current");
+  publish(current, "current");
+  const auto verified = generation(owner, "verified");
+  publish(verified, "verified");
+  const auto changed = generation(owner, "changed");
+  std::ofstream(publish(changed, "changed")) << "another SDK revision";
+  const auto orphan = generation(owner, "orphan");
+  const auto busy = generation(owner, "busy");
+  const auto unrelated = generation(owner, "unrelated", false);
+  const auto foreign = generation(other, "foreign");
+  std::ofstream(publish(foreign, "foreign")) << "another owner's change";
+  std::vector<std::string> retired;
+  {
+    FileLease in_use(busy / ".x360n-build.lock", true);
+    retired = RetireSharedSdkGenerations(cache, current);
+  }
+  std::sort(retired.begin(), retired.end());
+  CHECK(retired == std::vector<std::string>{"changed", "orphan"});
+  CHECK_FALSE(fs::exists(changed));
+  CHECK_FALSE(fs::exists(cache / "changed.json"));
+  CHECK_FALSE(fs::exists(orphan));
+  for (const auto& kept : {current, verified, busy, unrelated, foreign}) CHECK(fs::exists(kept));
+  for (const auto& kept : {"current.json", "verified.json", "foreign.json"}) CHECK(fs::exists(cache / kept));
+  // Released, the idle generation goes on the next publication.
+  CHECK(RetireSharedSdkGenerations(cache, current) == std::vector<std::string>{"busy"});
+  std::error_code ec;
+  fs::remove_all(root, ec);
 }
