@@ -224,6 +224,17 @@ bool IsWithin(const fs::path& path, const fs::path& base) {
   if (ec) return false;
   fs::path b = fs::canonical(LongPath(base), ec);
   if (ec) return false;
+#ifdef _WIN32
+  // fs::canonical retains the extended-length prefix. Normalise both paths
+  // before comparing containment and respect UNC roots.
+  auto ordinary = [](const fs::path& value) -> fs::path {
+    const auto name = value.native();
+    if (name.starts_with(L"\\\\?\\UNC\\")) return fs::path(L"\\\\" + name.substr(8));
+    if (name.starts_with(L"\\\\?\\")) return fs::path(name.substr(4));
+    return value;
+  };
+  p = ordinary(p); b = ordinary(b);
+#endif
   const auto ps = Folded(p), bs = Folded(b);
   if (ps.size() < bs.size() || ps.compare(0, bs.size(), bs) != 0) return false;
   // On POSIX, a backslash is a filename character, not a directory boundary.
