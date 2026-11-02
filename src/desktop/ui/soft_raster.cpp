@@ -3,6 +3,7 @@
 #include <array>
 #include <cmath>
 #include <fstream>
+#include "fs_io.h"
 
 namespace x360n::ui {
 // The texture data itself is the identifier: its CPU pixels stay alive with it.
@@ -112,7 +113,7 @@ uint32_t Crc(const unsigned char* data, size_t size, uint32_t crc = 0xFFFFFFFFu)
   return crc;
 }
 void Be32(std::vector<unsigned char>& out, uint32_t v) { for (int s = 24; s >= 0; s -= 8) out.push_back(static_cast<unsigned char>(v >> s)); }
-void Chunk(std::ofstream& out, const char* type, const std::vector<unsigned char>& data) {
+void Chunk(io::ofstream& out, const char* type, const std::vector<unsigned char>& data) {
   std::vector<unsigned char> head; Be32(head, uint32_t(data.size()));
   std::vector<unsigned char> body(type, type + 4); body.insert(body.end(), data.begin(), data.end());
   std::vector<unsigned char> tail; Be32(tail, Crc(body.data(), body.size()) ^ 0xFFFFFFFFu);
@@ -123,7 +124,7 @@ void Chunk(std::ofstream& out, const char* type, const std::vector<unsigned char
 }  // namespace
 // Uncompressed (stored) deflate: captures only, no compressor dependency.
 bool WritePng(const std::filesystem::path& file, const Canvas& c) {
-  std::ofstream out(file, std::ios::binary);
+  io::ofstream out(file, std::ios::binary);
   if (!out) return false;
   const unsigned char signature[8] = {137, 80, 78, 71, 13, 10, 26, 10};
   out.write(reinterpret_cast<const char*>(signature), 8);

@@ -5,6 +5,7 @@
 #include <fstream>
 #include <string>
 #include <vector>
+#include "../../src/supervisor/fs_io.h"
 
 namespace x360n {
 // Host-only handoff. Paths identify data, never commands to execute.
@@ -28,7 +29,7 @@ inline uint32_t ReadU32(std::istream& in) {
   return n;
 }
 inline bool ReadLaunchRequest(const std::filesystem::path& file, LaunchRequest& out) {
-  std::ifstream in(file, std::ios::binary);
+  x360n::io::ifstream in(file, std::ios::binary);
   char magic[8]{};
   in.read(magic, 8);
   if (std::string(magic, 8) != "X360NH01") return false;
@@ -55,7 +56,7 @@ inline bool ReadLaunchRequest(const std::filesystem::path& file, LaunchRequest& 
 inline bool WriteLaunchRequest(const std::filesystem::path& file, const LaunchRequest& r) {
   if (r.path.size() > 32768 || r.data.size() > 65536) return false;
   auto temp = file; temp += ".tmp";
-  std::ofstream out(temp, std::ios::binary | std::ios::trunc);
+  x360n::io::ofstream out(temp, std::ios::binary | std::ios::trunc);
   out.write("X360NH01", 8);
   WriteU32(out, r.kind); WriteU32(out, r.flags); WriteU32(out, r.data_present);
   WriteU32(out, uint32_t(r.path.size())); WriteU32(out, uint32_t(r.data.size()));
@@ -64,7 +65,7 @@ inline bool WriteLaunchRequest(const std::filesystem::path& file, const LaunchRe
   out.close();
   if (!out) return false;
   std::error_code ec;
-  std::filesystem::rename(temp, file, ec);
+  x360n::io::rename(temp, file, ec);
   return !ec;
 }
 }  // namespace x360n

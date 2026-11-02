@@ -15,12 +15,12 @@ ImportSource::ImportSource(const fs::path& original, const fs::path& extractor,
     const std::function<void(const std::string&)>& progress) : source_(original) {
   ActionTrace trace("import.source");
   if (cancelled && cancelled()) throw std::runtime_error("Importação cancelada. Seus originais foram preservados.");
-  system_update_ = fs::is_directory(original)
+  system_update_ = io::is_directory(original)
       ? !content::FindSystemUpdatePackage(original).empty()
       : content::HasZipSignature(original) || content::IsSystemUpdatePackage(original);
-  if (!fs::is_regular_file(original) && !system_update_) return;
+  if (!io::is_regular_file(original) && !system_update_) return;
   char header[4]{};
-  std::ifstream input(original, std::ios::binary); input.read(header, sizeof(header));
+  io::ifstream input(original, std::ios::binary); input.read(header, sizeof(header));
   const std::string magic(header, sizeof(header));
   const bool package = magic == "CON " || magic == "LIVE" || magic == "PIRS";
   auto extension = original.extension().wstring();
@@ -33,11 +33,11 @@ ImportSource::ImportSource(const fs::path& original, const fs::path& extractor,
     if (std::string_view(signature, 20) == std::string_view("MICROSOFT*XBOX*MEDIA", 20)) disc = true;
   }
   if (!package && !disc && !system_update_) return;
-  if (!fs::is_regular_file(extractor))
+  if (!io::is_regular_file(extractor))
     throw std::runtime_error("Falta o componente de extração. Extraia novamente o ZIP completo do aplicativo; seus jogos e dados serão preservados.");
-  fs::create_directories(logs);
+  io::create_directories(logs);
   const auto temporary = logs / "extraction";
-  if (!fs::create_directory(temporary))
+  if (!io::create_directory(temporary))
     throw std::runtime_error("Esta extração foi interrompida. Tente importar novamente para iniciar uma nova tentativa segura.");
   temporary_ = temporary;
   try {
@@ -55,17 +55,17 @@ ImportSource::ImportSource(const fs::path& original, const fs::path& extractor,
       const auto now=std::chrono::steady_clock::now();
       if (now<next_sample) return;
       next_sample=now+std::chrono::milliseconds(250);
-      std::ifstream in(spec.stdout_file,std::ios::binary | std::ios::ate);
+      io::ifstream in(spec.stdout_file,std::ios::binary | std::ios::ate);
       if (!in) return;
       in.seekg(std::max<std::streamoff>(0,std::streamoff(in.tellg())-16384));
       std::string last;
       for (std::string line;std::getline(in,line);) if (line.starts_with("X360N_STAGE ")) last=line.substr(12);
       if (!last.empty() && last!=previous_stage) { previous_stage=last; progress(last); }
     };
-    std::ofstream(logs / "source.txt", std::ios::binary) << Utf8(original) << '\n';
+    io::ofstream(logs / "source.txt", std::ios::binary) << Utf8(original) << '\n';
     const auto result = RunProcess(spec);
     if (spec.collect_metrics) {
-      std::ofstream metrics(logs / "extraction-metrics.tsv", std::ios::app);
+      io::ofstream metrics(logs / "extraction-metrics.tsv", std::ios::app);
       metrics << "extract\t" << result.duration.count() << '\t' << result.exit_code
               << '\t' << result.cancelled << '\t' << result.timed_out;
       if (result.metrics) {
@@ -77,11 +77,11 @@ ImportSource::ImportSource(const fs::path& original, const fs::path& extractor,
     }
     if (result.cancelled || (cancelled && cancelled()))
       throw std::runtime_error("Importação cancelada. O arquivo original e seus dados foram preservados.");
-    if (!result.launched || result.exit_code != 0 || !fs::is_directory(source_) ||
-        !fs::is_regular_file(temporary_ / "content.sha256")) {
+    if (!result.launched || result.exit_code != 0 || !io::is_directory(source_) ||
+        !io::is_regular_file(temporary_ / "content.sha256")) {
       std::string detail;
       if (system_update_) {
-        std::ifstream error(spec.stderr_file,std::ios::binary);
+        io::ifstream error(spec.stderr_file,std::ios::binary);
         detail.resize(4096); error.read(detail.data(),detail.size()); detail.resize(size_t(error.gcount()));
       }
       throw std::runtime_error(system_update_
@@ -89,21 +89,21 @@ ImportSource::ImportSource(const fs::path& original, const fs::path& extractor,
         : "Não foi possível extrair o jogo. Confira se a imagem ISO ou o pacote Xbox 360 está completo e se há espaço livre. Nada foi importado; o original foi preservado. Consulte Detalhes para o diagnóstico.");
     }
     if (system_update_) {
-      std::ifstream report(temporary_/"content.report.txt",std::ios::binary);
+      io::ifstream report(temporary_/"content.report.txt",std::ios::binary);
       report_.resize(65536); report.read(report_.data(),report_.size()); report_.resize(size_t(report.gcount()));
       if (report_.empty()) throw std::runtime_error("System Update: falta o registro de procedência.");
-      fs::copy_file(temporary_/"content.report.txt",logs/"system-update-17559.tsv",fs::copy_options::none);
+      io::copy_file(temporary_/"content.report.txt",logs/"system-update-17559.tsv",fs::copy_options::none);
     }
   } catch (...) {
-    std::error_code ec; fs::remove_all(temporary_, ec); throw;
+    std::error_code ec; io::remove_all(temporary_, ec); throw;
   }
 }
 ImportSource::~ImportSource() {
-  if (!temporary_.empty()) { std::error_code ec; fs::remove_all(temporary_, ec); }
+  if (!temporary_.empty()) { std::error_code ec; io::remove_all(temporary_, ec); }
 }
 fs::path ImportSource::identity_path() const {
   // Disc update partitions and auxiliary XEX modules are not the selected game.
-  if (extracted() && fs::is_regular_file(source_ / "default.xex")) return source_ / "default.xex";
+  if (extracted() && io::is_regular_file(source_ / "default.xex")) return source_ / "default.xex";
   return source_;
 }
 }

@@ -4,18 +4,19 @@
 #include <sstream>
 
 #include <fmt/format.h>
+#include "fs_io.h"
 
 namespace x360n {
 
 std::filesystem::path CreateRunDirectory(const std::filesystem::path& runs,
     const std::string& stamp, const std::string& label, std::error_code& error) {
   namespace fs = std::filesystem;
-  fs::create_directories(runs, error);
+  io::create_directories(runs, error);
   if (error) return {};
   for (unsigned attempt = 0; attempt < 1024; ++attempt) {
     const auto dir = runs / (stamp + "-" +
         (attempt ? std::to_string(attempt) + "-" : "") + label);
-    if (fs::create_directory(dir, error)) return dir;
+    if (io::create_directory(dir, error)) return dir;
     if (error) return {};
   }
   error = std::make_error_code(std::errc::file_exists);
@@ -225,7 +226,7 @@ LogScan ScanLogText(std::string_view text) {
 }
 
 LogScan ScanLog(const std::filesystem::path& log) {
-  std::ifstream in(log, std::ios::binary);
+  io::ifstream in(log, std::ios::binary);
   std::stringstream ss;
   ss << in.rdbuf();
   return ScanLogText(ss.str());

@@ -12,6 +12,7 @@
 #include <xxhash.h>
 #include <fmt/format.h>
 #include <algorithm>
+#include "../../supervisor/fs_io.h"
 namespace x360n::native {
 using namespace rex::graphics;
 using namespace rex::graphics::xenos;
@@ -81,8 +82,8 @@ std::unique_ptr<ScanoutBackend> CaptureBackend::Wrap(std::unique_ptr<ScanoutBack
 CaptureBackend::CaptureBackend(std::unique_ptr<ScanoutBackend> inner, rex::memory::Memory& memory, Options options)
     : inner_(std::move(inner)), memory_(memory), options_(std::move(options)) {
   if (!options_.profile.empty()) {
-    if (options_.profile.has_parent_path()) std::filesystem::create_directories(options_.profile.parent_path());
-    profile_ = std::fopen(options_.profile.string().c_str(), "w");
+    if (options_.profile.has_parent_path()) x360n::io::create_directories(options_.profile.parent_path());
+    profile_ = std::fopen(x360n::io::Host(options_.profile).string().c_str(), "w");
     if (!profile_) throw std::runtime_error("Native frame profile: cannot create " + options_.profile.string());
     std::fprintf(profile_, "%s\n", FrameStatsCsvHeader().c_str());
   }
@@ -147,7 +148,7 @@ void CaptureBackend::AbortRecording(const std::string& reason) {
   emitted_ranges_.clear();
   capture_done_ = true;
   std::error_code error;
-  std::filesystem::remove(options_.capture, error);
+  x360n::io::remove(options_.capture, error);
   REXLOG_ERROR("Native frame capture rejected after {} frame(s): {}; {} was not kept", recorded_frames_, reason,
                options_.capture.string());
 }
@@ -314,7 +315,7 @@ void CaptureBackend::Present(rex::ui::Presenter& presenter, const ScanoutTexture
   EndProfileFrame();
   if (!capture_done_ && !recording() && !options_.capture.empty()) {
     std::error_code error;
-    if (options_.trigger.empty() ? presents_ == options_.skip_frames : std::filesystem::exists(options_.trigger, error))
+    if (options_.trigger.empty() ? presents_ == options_.skip_frames : x360n::io::exists(options_.trigger, error))
       StartRecording();
   }
 }

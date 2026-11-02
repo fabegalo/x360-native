@@ -2,6 +2,7 @@
 #include <xxhash.h>
 #include <algorithm>
 #include <string>
+#include "../../supervisor/fs_io.h"
 namespace x360n::native::capture {
 namespace {
 constexpr uint32_t kMaxPrimitiveType = 0x16;   // xenos::PrimitiveType::k2DTriStrip
@@ -52,7 +53,7 @@ bool HashRgbxImage(const uint8_t* data, size_t size, uint32_t width, uint32_t he
   return true;
 }
 Writer::Writer(const std::filesystem::path& path, const Header& header) : path_(path) {
-  if (path.has_parent_path()) std::filesystem::create_directories(path.parent_path());
+  if (path.has_parent_path()) x360n::io::create_directories(path.parent_path());
   out_.open(path, std::ios::binary | std::ios::trunc);
   if (!out_) throw std::runtime_error("Native capture: cannot create " + path.string());
   out_.write(reinterpret_cast<const char*>(&header), sizeof(header));
@@ -117,7 +118,7 @@ void Writer::Finish(uint32_t frames) {
 }
 
 Reader::Reader(const std::filesystem::path& path) {
-  std::ifstream in(path, std::ios::binary | std::ios::ate);
+  x360n::io::ifstream in(path, std::ios::binary | std::ios::ate);
   if (!in) throw std::runtime_error("Native capture: cannot open " + path.string());
   // One read of the whole file (captures reach hundreds of MiB).
   const auto size = in.tellg();

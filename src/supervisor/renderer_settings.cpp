@@ -2,6 +2,7 @@
 #include "child_process.h"
 #include "host_platform.h"
 #include <toml++/toml.hpp>
+#include "toml_file.h"
 #include <fstream>
 #include <stdexcept>
 #include <algorithm>
@@ -40,8 +41,8 @@ void Validate(RendererSettings s) {
 }
 RendererSettings LoadRendererSettings(const ProjectPaths& paths) {
   const auto file = paths.local() / "graphics.toml";
-  if (!std::filesystem::exists(file)) return {};
-  const auto table = toml::parse_file(PathUtf8(file));
+  if (!io::exists(file)) return {};
+  const auto table = ParseTomlFile(file);
   const auto renderer = table["renderer"].value<std::string>();
   const auto experimental = table["experimental"].value<bool>();
   if (!renderer || !experimental || (*renderer != "xenos" && *renderer != "native"))
@@ -88,9 +89,9 @@ void SaveRendererSettings(const ProjectPaths& paths, RendererSettings settings) 
   Validate(settings);
   const auto file = paths.local() / "graphics.toml";
   const auto temp = paths.local() / "graphics.toml.tmp";
-  std::filesystem::create_directories(file.parent_path());
+  io::create_directories(file.parent_path());
   {
-    std::ofstream out(temp, std::ios::binary | std::ios::trunc);
+    io::ofstream out(temp, std::ios::binary | std::ios::trunc);
     out << "renderer = '" << (settings.renderer == Renderer::Native ? "native" : "xenos")
         << "'\nexperimental = " << (settings.experimental ? "true" : "false")
         << "\nfullscreen = " << (settings.fullscreen ? "true" : "false")
@@ -108,10 +109,10 @@ void SaveRendererSettings(const ProjectPaths& paths, RendererSettings settings) 
     if (!out) throw std::runtime_error("Cannot persist global graphics settings");
   }
 #ifdef _WIN32
-  if (!MoveFileExW(temp.c_str(), file.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH))
+  if (!MoveFileExW(io::Host(temp).c_str(), io::Host(file).c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH))
     throw std::runtime_error("Cannot replace global graphics settings: Windows error " + std::to_string(GetLastError()));
 #else
-  std::filesystem::rename(temp, file);
+  io::rename(temp, file);
 #endif
 }
 std::vector<std::string> SessionRendererArguments(const std::vector<std::string>& args,
@@ -175,14 +176,14 @@ void CheckSessionRenderer(const std::filesystem::path& exe, RendererSettings set
   // The runtime loader is authoritative for the executable's build config and
   // ABI. This preflight only detects an absent plugin before creating a window.
   if (settings.renderer == Renderer::Native &&
-      !std::filesystem::is_regular_file(exe.parent_path() / "rexgpu-native.dll") &&
-      !std::filesystem::is_regular_file(exe.parent_path() / "rexgpu-natived.dll") &&
-      !std::filesystem::is_regular_file(exe.parent_path() / "rexgpu-nativerd.dll"))
+      !io::is_regular_file(exe.parent_path() / "rexgpu-native.dll") &&
+      !io::is_regular_file(exe.parent_path() / "rexgpu-natived.dll") &&
+      !io::is_regular_file(exe.parent_path() / "rexgpu-nativerd.dll"))
     throw std::runtime_error("Native (Experimental) unavailable: rexgpu-native.dll missing beside " +
                              PathUtf8(exe) + "; no fallback to Xenos.");
   if (settings.api == GraphicsApi::Vulkan) {
     const auto probe = exe.parent_path() / ("x360n_gpu_preflight" + ExecutableSuffix());
-    if (!std::filesystem::is_regular_file(probe))
+    if (!io::is_regular_file(probe))
       throw std::runtime_error("Vulkan unavailable: x360n_gpu_preflight" + ExecutableSuffix() + " missing beside " + PathUtf8(exe) + "; rebuild/stage this title. No API fallback.");
     const auto log = std::filesystem::temp_directory_path() /
         ("x360n-gpu-preflight-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()) + ".log");
@@ -191,11 +192,11 @@ void CheckSessionRenderer(const std::filesystem::path& exe, RendererSettings set
     spec.stdout_file = log; spec.stderr_file = log.string() + ".err";
     spec.timeout = std::chrono::seconds(20); spec.no_console = true;
     const auto result = RunProcess(spec);
-    std::ifstream in(spec.stderr_file);
+    io::ifstream in(spec.stderr_file);
     std::string reason{std::istreambuf_iterator<char>(in), {}};
     std::error_code ignored;
-    std::filesystem::remove(spec.stdout_file, ignored);
-    std::filesystem::remove(spec.stderr_file, ignored);
+    io::remove(spec.stdout_file, ignored);
+    io::remove(spec.stderr_file, ignored);
     if (!result.launched || result.timed_out || result.exit_code != 0)
       throw std::runtime_error("Vulkan preflight failed (no fallback): " +
           (result.timed_out ? "driver probe exceeded 20 seconds" :

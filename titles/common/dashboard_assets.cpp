@@ -1,36 +1,22 @@
 #include "dashboard_assets.h"
+#include "../../src/supervisor/fs_io.h"
 #include "../../src/supervisor/sha256.h"
 
 namespace x360n {
-namespace {
-// Also built without the SDK; same \\?\ form as rex::filesystem::HostPath, so
-// verification works in installations deeper than MAX_PATH.
-std::filesystem::path LongForm(const std::filesystem::path& path) {
-#ifdef _WIN32
-  std::error_code ec;
-  const auto name = std::filesystem::absolute(path, ec).lexically_normal().make_preferred().native();
-  if (ec || name.empty()) return path;
-  if (name.starts_with(L"\\\\?\\")) return name;
-  return name.starts_with(L"\\\\") ? L"\\\\?\\UNC\\" + name.substr(2) : L"\\\\?\\" + name;
-#else
-  return path;
-#endif
-}
-}  // namespace
 std::string VerifyDashboardAssets(const std::filesystem::path& root,
                                  std::string_view version,
                                  std::span<const DashboardAsset> assets) {
   namespace fs = std::filesystem;
   const auto prefix = "Dashboard Retail " + std::string(version) + ": ";
   std::error_code ec;
-  const auto base = fs::canonical(LongForm(root), ec);
-  if (ec || !fs::is_directory(base)) return prefix + "original content directory is missing: " + root.string();
+  const auto base = io::canonical(root, ec);
+  if (ec || !io::is_directory(base)) return prefix + "original content directory is missing: " + root.string();
   if (assets.empty()) return prefix + "no original dependencies registered";
   for (const auto& asset : assets) {
     const auto label = prefix + "required original dependency " + std::string(asset.path);
     if (asset.sha256.size() != 64) return label + " has no verified version/hash; supply the matching version (no fallback)";
     // Registered names use '/'; extended paths need native separators.
-    const auto path = fs::canonical(base / fs::path(asset.path).make_preferred(), ec);
+    const auto path = io::canonical(base / fs::path(asset.path).make_preferred(), ec);
     if (ec) return label + " is missing or inaccessible; expected SHA-256 " + std::string(asset.sha256);
     const auto relative = path.lexically_relative(base);
     if (relative.empty() || relative.is_absolute() || *relative.begin() == "..")

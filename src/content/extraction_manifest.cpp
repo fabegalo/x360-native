@@ -29,7 +29,7 @@ ExtractionManifest::ExtractionManifest(const fs::path& destination)
 ExtractionManifest::~ExtractionManifest() {
   stream_.close();
   std::error_code ignored;
-  if (!temporary_.empty()) fs::remove(x360n::LongPath(temporary_), ignored);
+  if (!temporary_.empty()) io::remove(x360n::LongPath(temporary_), ignored);
 }
 
 void ExtractionManifest::Publish() {
@@ -44,9 +44,9 @@ void ExtractionManifest::Publish() {
 #else
   // rename() may replace a concurrent destination on POSIX. Linking a closed
   // file exposes complete bytes atomically and fails if the final name exists.
-  fs::create_hard_link(x360n::LongPath(temporary_), x360n::LongPath(destination_));
+  io::create_hard_link(x360n::LongPath(temporary_), x360n::LongPath(destination_));
   std::error_code cleanup;
-  fs::remove(x360n::LongPath(temporary_), cleanup);
+  io::remove(x360n::LongPath(temporary_), cleanup);
 #endif
   // Publication released the staging name. Never remove a subsequent writer's
   // staging file when this object is destroyed.

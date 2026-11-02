@@ -7,6 +7,7 @@
 #include <rex/logging.h>
 #include <iostream>
 #include <chrono>
+#include "supervisor/fs_io.h"
 
 #ifdef _WIN32
 int wmain(int argc, wchar_t** argv) try {
@@ -21,7 +22,7 @@ int main(int argc, char** argv) try {
   // image is loaded and tool mode does not execute dashboard/game code.
   const auto scratch = std::filesystem::temp_directory_path() /
       ("x360n-gpu-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
-  std::filesystem::create_directories(scratch);
+  x360n::io::create_directories(scratch);
   rex::Runtime runtime(scratch, scratch / "user");
   rex::RuntimeConfig config; config.tool_mode = true; config.kernel_init = rex::kernel::InitializeKernel;
   if (runtime.Setup(std::move(config)) != 0) {

@@ -29,7 +29,7 @@ std::string Utf8(const fs::path& path) {
 namespace {
 thread_local bool launch_verification = false;
 toml::table Read(const fs::path& path) {
-  std::ifstream stream(path, std::ios::binary);
+  io::ifstream stream(path, std::ios::binary);
   if (!stream) throw std::runtime_error("Não foi possível ler: " + Utf8(path));
   return toml::parse(stream, Utf8(path));
 }
@@ -58,16 +58,9 @@ std::string FileKey(const fs::path& path) {
   return key;
 }
 fs::path ImportIoPath(const fs::path& path) {
-#ifdef _WIN32
   // The final game filename can fit MAX_PATH while its verified staging path
   // does not. Extended paths work without registry or process-manifest changes.
-  auto value = fs::absolute(path).lexically_normal().make_preferred().native();
-  if (value.starts_with(L"\\\\?\\")) return fs::path(value);
-  if (value.starts_with(L"\\\\")) return fs::path(L"\\\\?\\UNC\\" + value.substr(2));
-  return fs::path(L"\\\\?\\" + value);
-#else
-  return path;
-#endif
+  return host_path::Extended(path);
 }
 }
 CatalogLaunchVerification::CatalogLaunchVerification() : previous_(launch_verification) { launch_verification = true; }
@@ -76,18 +69,18 @@ bool CatalogLaunchVerificationActive() { return launch_verification; }
 fs::path CatalogVerificationPath(const fs::path& path) {
   if (launch_verification) return VerificationPath(path);
 #ifdef _WIN32
-  return OrdinaryPath(fs::weakly_canonical(LongPath(path)));
+  return OrdinaryPath(io::weakly_canonical(LongPath(path)));
 #else
-  return fs::weakly_canonical(path);
+  return io::weakly_canonical(path);
 #endif
 }
 std::vector<Target> ReadCatalog(const ProjectPaths& paths) {
   ActionTrace trace("catalog.read");
   std::vector<Target> result;
-  if (fs::is_directory(paths.root / "titles")) for (const auto& dir : fs::directory_iterator(paths.root / "titles")) {
+  if (io::is_directory(paths.root / "titles")) for (const auto& dir : io::directory_iterator(paths.root / "titles")) {
     CheckVerificationCancellation();
     auto setup = dir.path() / "preparation.toml";
-    if (!fs::is_regular_file(setup)) continue;
+    if (!io::is_regular_file(setup)) continue;
     auto info = Read(setup);
     Target t;
     t.id = Utf8(dir.path().filename());
@@ -118,7 +111,7 @@ std::vector<Target> ReadCatalog(const ProjectPaths& paths) {
     // A codegen VFS root wider than the content (embedded system modules).
     if (profile["x360n"]["game_data_root"]) t.game_root = Resolve(dir.path(), Text(profile["x360n"]["game_data_root"]));
     Inside(t.game_root, paths.inputs());
-    const bool absent_content = !fs::exists(t.game_root);
+    const bool absent_content = !io::exists(t.game_root);
     CatalogPaths content_paths(t.game_root);
     t.exe = NativeTitleExecutable(paths,t.id);
     if (auto value = profile["x360n"]["native_exe"].value<std::string>())
@@ -154,7 +147,7 @@ std::vector<Target> ReadCatalog(const ProjectPaths& paths) {
     if (auto inventory = info["inventory"].value<std::string>()) {
       auto list = Resolve(dir.path(), *inventory);
       Inside(list, dir.path());
-      std::ifstream stream(list, std::ios::binary);
+      io::ifstream stream(list, std::ios::binary);
       if (!stream) throw std::runtime_error("Inventário de componentes ausente: " + Utf8(list));
       for (std::string line; std::getline(stream, line);) {
         CheckVerificationCancellation();
@@ -190,11 +183,11 @@ std::vector<Target> ReadCatalog(const ProjectPaths& paths) {
 }
 std::vector<std::string> DetectImportTargets(const std::vector<Target>& targets, const fs::path& source,
                                             const std::function<bool()>& cancelled) {
-  if (!fs::is_directory(source)) throw std::runtime_error("Selecione uma pasta de conteúdo extraído.");
+  if (!io::is_directory(source)) throw std::runtime_error("Selecione uma pasta de conteúdo extraído.");
   std::vector<std::string> matches;
-  for (auto it = fs::recursive_directory_iterator(source); it != fs::recursive_directory_iterator(); ++it) {
+  for (auto it = io::recursive_directory_iterator(source); it != io::recursive_directory_iterator(); ++it) {
     if (cancelled && cancelled()) throw std::runtime_error("Importação cancelada.");
-    if (it->is_symlink() || !IsWithin(it->path(), source)) { it.disable_recursion_pending(); continue; }
+    if (it->is_redirect() || !IsWithin(it->path(), source)) { it.disable_recursion_pending(); continue; }
     if (!it->is_regular_file()) continue;
     for (const auto& t : targets) {
       if (t.inputs.empty() || std::find(matches.begin(), matches.end(), t.id) != matches.end()) continue;
@@ -227,18 +220,18 @@ Inspection Inspect(const ProjectPaths& paths, const Target& t, InspectionMode mo
     const auto& anchor = t.inputs.front();
     const auto file = t.preparation_source.empty() ? anchor.destination :
         t.preparation_source / anchor.destination.lexically_relative(t.game_root);
-    r.verification_pending = fs::is_regular_file(file);
+    r.verification_pending = io::is_regular_file(file);
     r.interrupted = false;
     // Both markers are small; their first lines name the failed step and log.
     for (const auto& marker : {PreparationMarker(paths, t), paths.local() / "preparation" / (t.id + ".runtime-error")}) {
-      if (!fs::exists(marker)) continue;
+      if (!io::exists(marker)) continue;
       r.interrupted = true;
-      std::ifstream log(marker); std::string line;
+      io::ifstream log(marker); std::string line;
       for (unsigned n = 0; n < 30 && std::getline(log, line); ++n) r.issues.push_back(line);
     }
     r.launch_candidate = r.verification_pending && t.aot && !r.interrupted &&
-        fs::is_regular_file(t.exe) && fs::is_regular_file(PreparationReceipt(t.exe));
-    for (const auto& runtime : t.runtime_files) r.launch_candidate &= fs::is_regular_file(runtime);
+        io::is_regular_file(t.exe) && io::is_regular_file(PreparationReceipt(t.exe));
+    for (const auto& runtime : t.runtime_files) r.launch_candidate &= io::is_regular_file(runtime);
     if (r.launch_candidate && hints) ApplyReceiptHint(r, hints->Check(t.id, t.manifest, t.exe));
     if (!r.verification_pending) r.issues.push_back("Falta componente: " + Utf8(anchor.destination));
     return r;
@@ -246,7 +239,7 @@ Inspection Inspect(const ProjectPaths& paths, const Target& t, InspectionMode mo
   for (const auto& i : t.inputs) {
     CheckVerificationCancellation();
     auto file = t.preparation_source.empty() ? i.destination : t.preparation_source / i.destination.lexically_relative(t.game_root);
-    if (!fs::is_regular_file(LongPath(file))) {
+    if (!io::is_regular_file(LongPath(file))) {
       // Absent optional components are checked by whoever needs them.
       if (i.optional) continue;
       r.inputs_ok = false;
@@ -267,23 +260,23 @@ Inspection Inspect(const ProjectPaths& paths, const Target& t, InspectionMode mo
     }
   }
   for (const auto& file : t.runtime_files) {
-    if (!fs::is_regular_file(file)) {
+    if (!io::is_regular_file(file)) {
       r.prepared = false;
       r.issues.push_back("Falta dependência da preparação; prepare novamente: " + Utf8(file));
     }
   }
-  if (fs::exists(PreparationMarker(paths, t))) {
+  if (io::exists(PreparationMarker(paths, t))) {
     r.prepared = false;
     r.interrupted = true;
     r.issues.push_back("Preparação anterior incompleta. Clique em Preparar para retomar; o executável antigo não valida essa tentativa.");
-    std::ifstream log(PreparationMarker(paths, t));
+    io::ifstream log(PreparationMarker(paths, t));
     std::string line;
     for (unsigned n = 0; n < 30 && std::getline(log, line); ++n) r.issues.push_back(line);
   }
   const auto runtime_error = paths.local() / "preparation" / (t.id + ".runtime-error");
-  if (fs::is_regular_file(runtime_error)) {
+  if (io::is_regular_file(runtime_error)) {
     r.prepared = false; r.interrupted = true;
-    std::ifstream in(runtime_error); std::string line;
+    io::ifstream in(runtime_error); std::string line;
     for (unsigned n = 0; n < 30 && std::getline(in, line); ++n) r.issues.push_back(line);
   }
   return r;
@@ -300,7 +293,7 @@ Target VerifyCatalogLaunch(const ProjectPaths& paths, const std::vector<Target>&
   const auto& selected = find(id);
   if (selected.kind == "game" && !InGameLibrary(selected))
     throw std::runtime_error("Adicione o jogo à biblioteca antes de iniciar: " + id);
-  if (!selected.aot || fs::weakly_canonical(selected.manifest) != fs::weakly_canonical(manifest))
+  if (!selected.aot || io::weakly_canonical(selected.manifest) != io::weakly_canonical(manifest))
     throw std::runtime_error("O manifesto de lançamento não corresponde ao título selecionado.");
   const auto check = [&](const Target& t) {
     CheckVerificationCancellation();
@@ -322,8 +315,8 @@ size_t Import(const ProjectPaths& paths, const Target& t, const fs::path& source
   Inside(t.game_root, paths.inputs());
   if (!t.importable) throw std::runtime_error("Importação guiada ainda não disponível para este alvo.");
   auto stop = [&] { if (cancelled && cancelled()) throw std::runtime_error("Importação cancelada; arquivos já verificados foram preservados."); };
-  const bool single = fs::is_regular_file(source);
-  if (!single && !fs::is_directory(source)) throw std::runtime_error("Selecione um arquivo ou uma pasta de conteúdo extraído.");
+  const bool single = io::is_regular_file(source);
+  if (!single && !io::is_directory(source)) throw std::runtime_error("Selecione um arquivo ou uma pasta de conteúdo extraído.");
   std::map<fs::path, fs::path> copies;
   // A renamed standalone file is compared against the whole inventory. Hash it
   // once, not once per asset; the staged copy is independently verified below.
@@ -346,80 +339,80 @@ size_t Import(const ProjectPaths& paths, const Target& t, const fs::path& source
   };
   if (single) { stop(); consider(source); }
   // Search only the user-selected folder, never follow directory symlinks.
-  for (auto it = single ? fs::recursive_directory_iterator{} : fs::recursive_directory_iterator(LongPath(source)); it != fs::recursive_directory_iterator(); ++it) {
+  for (auto it = single ? io::recursive_directory_iterator{} : io::recursive_directory_iterator(LongPath(source)); it != io::recursive_directory_iterator(); ++it) {
     stop();
     const auto& entry = *it;
-    if (entry.is_symlink() || !IsWithin(entry.path(), source)) { it.disable_recursion_pending(); continue; }
+    if (entry.is_redirect() || !IsWithin(entry.path(), source)) { it.disable_recursion_pending(); continue; }
     if (!entry.is_regular_file()) continue;
     consider(entry.path());
   }
   uintmax_t needed = 0;
   for (const auto& i : t.inputs) {
     Inside(i.destination, t.game_root);
-    if (fs::exists(LongPath(i.destination))) {
+    if (io::exists(LongPath(i.destination))) {
       if (!Matches(i.destination, i.sha256))
         throw std::runtime_error("Destino já contém outro arquivo; nada será sobrescrito: " + Utf8(i.destination));
       copies.erase(i.destination);
     } else if (!copies.contains(i.destination)) {
       if (allow_partial || i.optional) continue;
       throw std::runtime_error("Conjunto incompleto. Falta o arquivo verificado: " + i.source_name);
-    } else needed += fs::file_size(LongPath(copies.at(i.destination)));
+    } else needed += io::file_size(LongPath(copies.at(i.destination)));
   }
   WorkspaceLease lease(paths);
-  fs::create_directories(paths.inputs());
-  if (fs::space(paths.inputs()).available < needed)
+  io::create_directories(paths.inputs());
+  if (io::space(paths.inputs()).available < needed)
     throw std::runtime_error("Espaço insuficiente. Libere espaço na pasta de conteúdo e tente novamente.");
   size_t count = 0;
   auto records = paths.local() / "logs/imports";
-  fs::create_directories(records);
+  io::create_directories(records);
   if (!IsSafeLabel(t.id)) throw std::runtime_error("Identificador inválido.");
-  std::ofstream log(records / (t.id + ".tsv"), std::ios::binary | std::ios::app);
+  io::ofstream log(records / (t.id + ".tsv"), std::ios::binary | std::ios::app);
   if (!log) throw std::runtime_error("Não foi possível registrar a procedência local da importação.");
   std::map<fs::path, const Input*> expected_files;
   for (const auto& i : t.inputs) expected_files.emplace(i.destination, &i);
   for (const auto& [destination, input] : copies) {
     stop();
     Inside(destination, paths.inputs());
-    fs::create_directories(LongPath(destination.parent_path()));
+    io::create_directories(LongPath(destination.parent_path()));
     // Unique temporary name; never truncate an existing original or destination.
     const auto staging = ImportIoPath(destination.parent_path() / (".x360n-import-" + Utf8(destination.filename())));
     const auto temporary = staging / "verified.tmp";
     const auto expected = expected_files.at(destination);
-    if (fs::exists(staging)) {
-      if (!fs::is_directory(staging) || fs::is_symlink(staging) || !IsWithin(staging, ImportIoPath(destination.parent_path())))
+    if (io::exists(staging)) {
+      if (!io::is_directory(staging) || io::is_redirect(staging) || !IsWithin(staging, ImportIoPath(destination.parent_path())))
         throw std::runtime_error("Pasta temporária inválida; conteúdo preservado.");
-      for (const auto& entry : fs::directory_iterator(staging))
-        if (entry.path() != temporary || entry.is_symlink() || !entry.is_regular_file())
+      for (const auto& entry : io::directory_iterator(staging))
+        if (entry.path() != temporary || entry.is_redirect() || !entry.is_regular_file())
           throw std::runtime_error("Pasta temporária contém arquivos desconhecidos; conteúdo preservado.");
-      if (fs::exists(temporary) && !Matches(temporary, expected->sha256)) {
+      if (io::exists(temporary) && !Matches(temporary, expected->sha256)) {
         auto saved = staging; saved += ".interrupted-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count());
         // Same verified parent; retain interrupted bytes rather than deleting them.
-        fs::rename(staging, saved);
+        io::rename(staging, saved);
       }
     }
-    fs::create_directory(staging);
+    io::create_directory(staging);
     try {
-      if (!fs::exists(temporary)) fs::copy_file(ImportIoPath(input), temporary, fs::copy_options::none);
+      if (!io::exists(temporary)) io::copy_file(ImportIoPath(input), temporary, fs::copy_options::none);
       if (!Matches(temporary, expected->sha256))
         throw std::runtime_error("O conteúdo mudou durante a cópia. Tente novamente.");
       // Publish complete bytes atomically and never replace a concurrent file.
 #ifdef _WIN32
-      if (!MoveFileExW(temporary.c_str(), ImportIoPath(destination).c_str(), MOVEFILE_WRITE_THROUGH))
+      if (!MoveFileExW(ImportIoPath(temporary).c_str(), ImportIoPath(destination).c_str(), MOVEFILE_WRITE_THROUGH))
         throw std::runtime_error("Não foi possível publicar o componente; erro Windows " + std::to_string(GetLastError()));
 #else
-      fs::create_hard_link(temporary, destination);
-      fs::remove(temporary);
+      io::create_hard_link(temporary, destination);
+      io::remove(temporary);
 #endif
       // Antivirus/indexing may keep the now-empty directory briefly busy after
       // publication. Cleanup failure cannot invalidate an already verified file.
       std::error_code cleanup;
-      fs::remove(staging, cleanup);
+      io::remove(staging, cleanup);
       log << expected->sha256 << '\t' << Utf8(input) << '\t' << Utf8(destination) << '\n';
       log.flush();
       if (!log) throw std::runtime_error("Componente copiado, mas falhou o registro local da procedência.");
       ++count;
     } catch (...) {
-      std::error_code ec; fs::remove(temporary, ec); fs::remove(staging, ec); throw;
+      std::error_code ec; io::remove(temporary, ec); io::remove(staging, ec); throw;
     }
   }
   return count;

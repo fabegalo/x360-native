@@ -8,6 +8,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include "../../src/supervisor/fs_io.h"
 
 namespace x360n {
 // Whether starting a title joins the signed-in account's Games Played.
@@ -65,7 +66,7 @@ inline std::optional<LaunchedContent> ReadLaunchedContent(const std::filesystem:
   LaunchedContent content{type, 0};
   const auto header = title_dir / "Headers" / type_dir.filename() /
                       (package.filename().string() + ".header");
-  std::ifstream in(header, std::ios::binary);
+  x360n::io::ifstream in(header, std::ios::binary);
   if (!in) return content;
   std::array<unsigned char, 0x14C> bytes{};
   in.read(reinterpret_cast<char*>(bytes.data()), bytes.size());

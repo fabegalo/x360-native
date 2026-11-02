@@ -48,7 +48,7 @@ struct Extractor {
       fs::path child_rel = rel / Utf8Path(name);
       fs::path out = dest / child_rel;
       if (child->attributes() & rex::filesystem::kFileAttributeDirectory) {
-        if (!fs::create_directory(x360n::LongPath(out)))
+        if (!io::create_directory(x360n::LongPath(out)))
           throw std::runtime_error("duplicate/conflicting container directory");
         Walk(child.get(), child_rel, depth+1);
         continue;
@@ -60,7 +60,7 @@ struct Extractor {
   void Copy(rex::filesystem::Entry* entry, const fs::path& rel, const fs::path& out) {
     std::error_code ec;
     const auto output = x360n::LongPath(out);
-    if (fs::exists(output, ec)) {
+    if (io::exists(output, ec)) {
       fmt::print(stderr, "extract: refusing to overwrite {}\n", PathText(rel));
       ++errors;
       return;
@@ -90,7 +90,7 @@ struct Extractor {
     // Windows' default MAX_PATH policy can reject a nested output file even
     // though the source entry is readable. Never label an output-open failure
     // as a corrupt source or "short read".
-    std::ofstream o(output, std::ios::binary);
+    io::ofstream o(output, std::ios::binary);
     if (!o) {
       in->Destroy();
       fmt::print(stderr, "extract: cannot create output {} (destination path {} characters)\n",
@@ -157,11 +157,11 @@ int ExtractTree(rex::filesystem::Entry* root, const fs::path& dest, uint64_t dis
     return 1;
   }
   try {
-    fs::create_directories(x360n::LongPath(dest.parent_path()));
+    io::create_directories(x360n::LongPath(dest.parent_path()));
     auto manifest_path = dest;
     manifest_path += ".sha256";
     x360n::content::ExtractionManifest manifest(manifest_path);
-    if (!fs::create_directory(x360n::LongPath(dest)))
+    if (!io::create_directory(x360n::LongPath(dest)))
       throw std::runtime_error("destination already exists; not extracting");
     Extractor x{dest, manifest.stream()};
     x.disc_size = disc_size;
@@ -185,8 +185,8 @@ bool DestinationFree(const fs::path& dest) {
   manifest += ".sha256";
   for (const auto& path : {dest, manifest}) {
     std::error_code ec;
-    const auto status = fs::symlink_status(x360n::LongPath(path), ec);
-    if ((ec && ec != std::errc::no_such_file_or_directory) || fs::exists(status)) {
+    const auto status = io::symlink_status(x360n::LongPath(path), ec);
+    if ((ec && ec != std::errc::no_such_file_or_directory) || io::exists(status)) {
       fmt::print(stderr, "extract: destination exists or cannot be inspected: {}\n", PathText(path));
       return false;
     }
@@ -218,7 +218,7 @@ int ExtractDisc(const fs::path& image, const fs::path& dest_in) {
   fs::path dest = ExtractionDestination(dest_in);
   if (!DestinationFree(dest)) return 3;
   std::error_code ec;
-  const uint64_t size = fs::file_size(image, ec);
+  const uint64_t size = io::file_size(image, ec);
   if (ec || size == 0) {
     fmt::print(stderr, "extract-disc: cannot read the size of {}\n", PathText(image));
     return 1;

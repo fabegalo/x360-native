@@ -151,6 +151,29 @@ TEST_CASE("shared SDK uses a short isolated build root", "[paths][preparation]")
   CHECK_THROWS_AS(SharedSdkGenerationPath(p, "../escape"), std::invalid_argument);
 }
 
+TEST_CASE("title builds use a short isolated directory however deep the installation", "[paths][preparation]") {
+  TempProject project;
+  const ProjectPaths p{project.root};
+  auto published = p.build() / "aot" / "g0123456789abcdef";
+  while (published.native().size() < 400) published /= std::string(60, 'i');
+  const auto tree = NativeBuildDirectory(p, published);
+  CHECK(tree == NativeBuildDirectory(p, published));
+  CHECK(tree != NativeBuildDirectory(p, p.build() / "aot" / "g0123456789abcdee"));
+  // The same directory however it is spelled.
+  CHECK(tree == NativeBuildDirectory(p, published / "x" / ".."));
+#ifdef _WIN32
+  // A generic title's deepest object is ~190 characters below its build tree;
+  // Ninja fails once the whole path passes MAX_PATH.
+  CHECK(tree.native().size() <= 69);
+  CHECK(tree.native().size() + 190 < 260);
+  CHECK_FALSE(IsWithin(tree, p.root));
+  CHECK(tree.parent_path() == SharedSdkBuildRoot(p).parent_path().parent_path() / "b");
+  CHECK(tree.parent_path() == NativeBuildRoot(p));
+#else
+  CHECK(tree == published);
+#endif
+}
+
 TEST_CASE("run labels are restricted to safe directory-name characters", "[paths]") {
   CHECK(IsSafeLabel("ppc-smoke_1.0"));
   CHECK_FALSE(IsSafeLabel(""));

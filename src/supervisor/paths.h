@@ -7,6 +7,8 @@
 #include <string>
 #include <cstdint>
 
+#include "fs_io.h"
+
 namespace x360n {
 
 // Actual native process identity; independent of the caller's working directory.
@@ -39,6 +41,17 @@ struct ProjectPaths {
 // path outside the installation to avoid SDL3's nested CMake try_compile limit.
 // Linux/macOS keep their existing project-local shared-SDK build owner.
 std::filesystem::path SharedSdkBuildRoot(const ProjectPaths& paths);
+// Parent of every NativeBuildDirectory (Windows: <local>\x360n\b; elsewhere
+// the project build directory).
+std::filesystem::path NativeBuildRoot(const ProjectPaths& paths);
+// CMake/Ninja binary directory of the native build whose products are
+// published in `published` (a title executable's directory). Windows: a short
+// directory beside the shared SDK generations, named by `published`, because
+// Ninja and CMake fail once their working directory plus an object path pass
+// MAX_PATH and a title's own objects add about 190 characters. Elsewhere the
+// build stays in `published`.
+std::filesystem::path NativeBuildDirectory(const ProjectPaths& paths,
+                                           const std::filesystem::path& published);
 // A unique, short generation inside the shared SDK owner. Source, game data,
 // title outputs, and verified receipts retain their established locations.
 std::filesystem::path SharedSdkGenerationPath(const ProjectPaths& paths,

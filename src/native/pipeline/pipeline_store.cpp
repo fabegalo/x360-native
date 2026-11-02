@@ -5,6 +5,7 @@
 #include <fstream>
 #include <cstdio>
 #include <cstring>
+#include "../../supervisor/fs_io.h"
 namespace x360n::native {
 namespace {
 constexpr uint64_t kMagic = 0x31534F504E303633; // 360NPSO1; native Windows ABI.
@@ -39,7 +40,7 @@ PipelineStore::Entry PipelineStore::Load(const D3D12_GRAPHICS_PIPELINE_STATE_DES
   auto hash = XXH3_128bits(e.key.data(), e.key.size());
   char name[40]; std::snprintf(name, sizeof(name), "%016llx%016llx.pso", hash.high64, hash.low64);
   e.path = directory_ / name;
-  std::ifstream in(e.path, std::ios::binary);
+  x360n::io::ifstream in(e.path, std::ios::binary);
   Header h{};
   if (!in.read(reinterpret_cast<char*>(&h), sizeof(h)) || h.magic != kMagic ||
       h.key_bytes != e.key.size() || !h.blob_bytes || h.blob_bytes > kLimit) return e;
@@ -53,14 +54,14 @@ void PipelineStore::Save(const Entry& e, ID3D12PipelineState* pso) const {
   if (e.path.empty() || e.key.size() > kLimit) return;
   Microsoft::WRL::ComPtr<ID3DBlob> blob;
   if (FAILED(pso->GetCachedBlob(&blob)) || !blob->GetBufferSize() || blob->GetBufferSize() > kLimit) return;
-  std::error_code ec; std::filesystem::create_directories(directory_, ec); if (ec) return;
+  std::error_code ec; x360n::io::create_directories(directory_, ec); if (ec) return;
   auto temporary = e.path; temporary += "." + std::to_string(GetCurrentProcessId()) + ".tmp";
   Header h{kMagic, e.key.size(), blob->GetBufferSize()};
-  std::ofstream out(temporary, std::ios::binary | std::ios::trunc);
+  x360n::io::ofstream out(temporary, std::ios::binary | std::ios::trunc);
   out.write(reinterpret_cast<const char*>(&h), sizeof(h)); out.write(e.key.data(), e.key.size());
   out.write(static_cast<const char*>(blob->GetBufferPointer()), blob->GetBufferSize());
   out.close();
-  if (out) MoveFileExW(temporary.c_str(), e.path.c_str(), MOVEFILE_REPLACE_EXISTING);
-  std::filesystem::remove(temporary, ec);
+  if (out) MoveFileExW(x360n::io::Host(temporary).c_str(), x360n::io::Host(e.path).c_str(), MOVEFILE_REPLACE_EXISTING);
+  x360n::io::remove(temporary, ec);
 }
 }

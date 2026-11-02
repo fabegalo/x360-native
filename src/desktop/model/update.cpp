@@ -27,7 +27,7 @@ std::vector<std::string> Split(const std::string& s) {
   parts.push_back(s.substr(start)); return parts;
 }
 std::string ReadText(const fs::path& file) {
-  std::ifstream in(file, std::ios::binary);
+  io::ifstream in(file, std::ios::binary);
   if (!in) throw std::runtime_error("Arquivo da atualização ausente: " + Utf8(file.filename()));
   return {std::istreambuf_iterator<char>(in), {}};
 }

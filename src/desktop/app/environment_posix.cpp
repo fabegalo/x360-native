@@ -18,7 +18,7 @@ namespace fs = std::filesystem;
 namespace x360n::desktop {
 fs::path SystemTool(const std::string& name) {
   for (const char* dir : {"/usr/bin", "/bin"})
-    if (fs::is_regular_file(fs::path(dir) / name)) return fs::path(dir) / name;
+    if (io::is_regular_file(fs::path(dir) / name)) return fs::path(dir) / name;
   return fs::path("/usr/bin") / name;
 }
 fs::path SelfExecutable() {
@@ -26,7 +26,7 @@ fs::path SelfExecutable() {
   uint32_t size = 0; _NSGetExecutablePath(nullptr, &size);
   std::string path(size, '\0');
   if (_NSGetExecutablePath(path.data(), &size) != 0) return {};
-  return fs::weakly_canonical(path.c_str());
+  return io::weakly_canonical(path.c_str());
 #else
   std::error_code ec;
   return fs::read_symlink("/proc/self/exe", ec);
@@ -70,7 +70,7 @@ Environment CheckEnvironment(const fs::path& root) {
   r.description = std::string("macOS ") + machine + "\r\n";
 #else
   r.architecture = machine == "x86_64" || machine == "aarch64";
-  std::ifstream cpuinfo("/proc/cpuinfo");
+  io::ifstream cpuinfo("/proc/cpuinfo");
   for (std::string line; std::getline(cpuinfo, line);)
     if (line.starts_with("model name")) { const auto colon = line.find(':'); if (colon != std::string::npos) r.cpu = line.substr(colon + 2); break; }
   struct sysinfo info{};

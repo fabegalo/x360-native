@@ -21,8 +21,8 @@ std::vector<std::string> SessionProfileArguments(const SessionProfile& profile, 
 }
 SessionProfile LoadSessionProfile(const ProjectPaths& paths, const std::filesystem::path& file, bool validate_execution) {
   CheckVerificationCancellation();
-  const auto manifest = std::filesystem::canonical(file);
-  std::ifstream input(manifest, std::ios::binary);
+  const auto manifest = io::canonical(file);
+  io::ifstream input(manifest, std::ios::binary);
   if (!input) throw std::runtime_error("cannot open session profile: " + PathUtf8(manifest));
   auto table = toml::parse(input, PathUtf8(manifest));
   auto text = [&](const auto& node) {
@@ -30,7 +30,7 @@ SessionProfile LoadSessionProfile(const ProjectPaths& paths, const std::filesyst
     if (!value || value->empty()) throw std::runtime_error("missing session profile field: " + PathUtf8(manifest));
     return *value;
   };
-  auto resolve = [&](const std::string& path) { return std::filesystem::weakly_canonical(manifest.parent_path() / PathFromUtf8(path)); };
+  auto resolve = [&](const std::string& path) { return io::weakly_canonical(manifest.parent_path() / PathFromUtf8(path)); };
   SessionProfile p;
   p.manifest = manifest;
   p.name = text(table["project"]["name"]);
@@ -47,7 +47,7 @@ SessionProfile LoadSessionProfile(const ProjectPaths& paths, const std::filesyst
     if (relative_host.empty() || relative_host.has_parent_path() || relative_host.is_absolute())
       throw std::runtime_error("system UI host must belong to this dashboard build");
     p.system_ui_host = p.exe.parent_path() / NativeRuntimeFilename(relative_host);
-    if (validate_execution && !std::filesystem::is_regular_file(p.system_ui_host))
+    if (validate_execution && !io::is_regular_file(p.system_ui_host))
       throw std::runtime_error("missing dashboard system UI host: " + PathUtf8(p.system_ui_host));
   }
   if (!IsSafeLabel(p.name)) throw std::runtime_error("invalid profile name");
@@ -65,8 +65,8 @@ SessionProfile LoadSessionProfile(const ProjectPaths& paths, const std::filesyst
   // Do not duplicate it in the AOT manifest or accept a hash at any arbitrary path.
   toml::table preparation;
   const auto setup = manifest.parent_path() / "preparation.toml";
-  if (std::filesystem::is_regular_file(setup)) {
-    std::ifstream registration(setup, std::ios::binary);
+  if (io::is_regular_file(setup)) {
+    io::ifstream registration(setup, std::ios::binary);
     preparation = toml::parse(registration, PathUtf8(setup));
   }
   if (!p.system_ui_host.empty()) {
@@ -94,7 +94,7 @@ SessionProfile LoadSessionProfile(const ProjectPaths& paths, const std::filesyst
       const auto normal = PathFromUtf8(relative).lexically_normal();
       if (normal.empty() || normal.has_root_path() || *normal.begin() == "..")
         throw std::runtime_error("avatar service file outside the dashboard game root: " + relative);
-      file.path = std::filesystem::weakly_canonical(p.game_root / normal);
+      file.path = io::weakly_canonical(p.game_root / normal);
       if (auto registered = preparation["files"].as_array())
         for (const auto& entry : *registered)
           if (entry.as_table() && (*entry.as_table())["path"].value<std::string>() == relative)
@@ -152,13 +152,13 @@ SessionProfile LoadSessionProfile(const ProjectPaths& paths, const std::filesyst
     // Optional compatibility profiles and automatically generated local projects
     // share the same receipt-verified launch path. Metadata alone never launches.
     for (const auto& root : {paths.root / "titles", paths.local() / "aot"}) {
-    if (!std::filesystem::is_directory(root)) continue;
-    for (const auto& dir : std::filesystem::directory_iterator(root)) {
+    if (!io::is_directory(root)) continue;
+    for (const auto& dir : io::directory_iterator(root)) {
       CheckVerificationCancellation();
       try {
       const auto setup_file = dir.path() / "preparation.toml";
-      if (!std::filesystem::is_regular_file(setup_file)) continue;
-      std::ifstream in(setup_file); const auto recipe = toml::parse(in, PathUtf8(setup_file));
+      if (!io::is_regular_file(setup_file)) continue;
+      io::ifstream in(setup_file); const auto recipe = toml::parse(in, PathUtf8(setup_file));
       if (!recipe["library"].is_table() || recipe["kind"].value_or(std::string("game")) != "game") continue;
       const auto id = PathUtf8(dir.path().filename());
       const auto candidate = dir.path() / PathFromUtf8(id + "_manifest.toml");
@@ -166,16 +166,16 @@ SessionProfile LoadSessionProfile(const ProjectPaths& paths, const std::filesyst
       // build directory while retaining the complete catalog/title identity.
       auto native = NativeTitleExecutable(paths, id);
       if (root == paths.local() / "aot") {
-        std::ifstream manifest_input(candidate, std::ios::binary);
+        io::ifstream manifest_input(candidate, std::ios::binary);
         const auto registration = toml::parse(manifest_input, PathUtf8(candidate));
         const auto configured = registration["x360n"]["native_exe"].value<std::string>();
         if (!configured || configured->empty()) continue;
-        native = ResolveNativeExecutable(paths, id, std::filesystem::weakly_canonical(dir.path() / PathFromUtf8(*configured)));
+        native = ResolveNativeExecutable(paths, id, io::weakly_canonical(dir.path() / PathFromUtf8(*configured)));
       }
       if (root == paths.local() / "aot" &&
-          (std::filesystem::exists(paths.local() / "preparation" / (id + ".runtime-error")) ||
+          (io::exists(paths.local() / "preparation" / (id + ".runtime-error")) ||
            CheckPreparation(paths, id, candidate, native))) continue;
-      if (std::filesystem::weakly_canonical(candidate) != manifest)
+      if (io::weakly_canonical(candidate) != manifest)
         p.launch_targets.push_back(candidate);
       } catch (const VerificationCancelled&) { throw; }
         catch (const std::exception&) {
@@ -200,24 +200,15 @@ SessionProfile LoadSessionProfile(const ProjectPaths& paths, const std::filesyst
 bool MatchesLaunch(const SessionProfile& p, const LaunchRequest& request,
                    const std::filesystem::path& dashboard_user_root) {
   if (request.kind != LaunchRequest::Image || request.flags != 0) return false;
-  auto native = [](const std::filesystem::path& file) -> std::filesystem::path {
-#ifdef _WIN32
-    auto name = std::filesystem::absolute(file).lexically_normal().make_preferred().native();
-    if (name.starts_with(L"\\\\?\\")) return name;
-    if (name.starts_with(L"\\\\")) return L"\\\\?\\UNC\\" + name.substr(2);
-    return L"\\\\?\\" + name;
-#else
-    return file;
-#endif
-  };
+  auto native = [](const std::filesystem::path& file) { return host_path::Extended(file); };
   std::error_code ec;
   const auto path = native(PathFromUtf8(request.path));
-  bool matches = std::filesystem::equivalent(native(p.xex), path, ec) && !ec;
+  bool matches = io::equivalent(native(p.xex), path, ec) && !ec;
   // Normal library installs are verified copies, not junctions to the import.
   // Permit only this profile's registered content address in this dashboard.
   if (!matches && !dashboard_user_root.empty() && !p.library_relative_xex.empty()) {
     ec.clear();
-    matches = std::filesystem::equivalent(native(dashboard_user_root / p.library_relative_xex), path, ec) && !ec;
+    matches = io::equivalent(native(dashboard_user_root / p.library_relative_xex), path, ec) && !ec;
   }
   if (!matches) return false;
   auto digest = DigestFile(path);
@@ -259,7 +250,7 @@ std::vector<std::string> AvatarServiceArguments(const SessionProfile& dashboard,
   for (const auto* file : {&files.xam, &files.catalog}) {
     const auto identity = PathUtf8(file->path.filename()) + " " + version + " (SHA-256 " + file->sha256 +
                           "; " + file->provenance + ")";
-    if (!std::filesystem::is_regular_file(file->path))
+    if (!io::is_regular_file(file->path))
       throw std::runtime_error(service + "missing " + identity + ". Import it into the dashboard " + version +
                                ": " + PathUtf8(file->path));
     if (!IsWithin(file->path, dashboard.game_root))

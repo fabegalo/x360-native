@@ -14,7 +14,7 @@ fs::path Payload(const App& a) { return a.self.parent_path() / "app/workspace"; 
 fs::path Supervisor(const App& a) {
   const auto name = PathFromUtf8("x360n" + ExecutableSuffix());
   const auto packaged = a.self.parent_path() / "app" / name;
-  return fs::is_regular_file(packaged) ? packaged : a.self.parent_path() / name;
+  return io::is_regular_file(packaged) ? packaged : a.self.parent_path() / name;
 }
 fs::path Extractor(const App& a) { return Supervisor(a).parent_path() / PathFromUtf8("x360n-extract" + ExecutableSuffix()); }
 fs::path Updates(const App& a) { return a.preferences.parent_path() / "updates"; }
@@ -443,7 +443,7 @@ void Load(App& a, const fs::path& root, InspectionMode mode) {
         a.pending_environment = CheckEnvironment(root);
         a.pending_renderer = root.empty() ? RendererSettings{} : LoadRendererSettings(ProjectPaths{root});
         a.pending_console = root.empty() ? ConsoleSettings{} : LoadConsoleSettings(ProjectPaths{root});
-        a.pending_supervisor_available = fs::is_regular_file(Supervisor(a));
+        a.pending_supervisor_available = io::is_regular_file(Supervisor(a));
         a.pending_targets = root.empty() ? std::vector<Target>{} : ReadCatalog(ProjectPaths{root});
         a.pending_checked = CheckContents(root, a.pending_targets, mode);
         a.pending_snapshot = true;
@@ -467,8 +467,8 @@ void Load(App& a, const fs::path& root, InspectionMode mode) {
 }
 void SavePreferences(const App& a) {
   if (a.preferences.empty()) return;
-  fs::create_directories(a.preferences.parent_path());
-  std::ofstream out(a.preferences, std::ios::binary);
+  io::create_directories(a.preferences.parent_path());
+  io::ofstream out(a.preferences, std::ios::binary);
   const bool portable = a.root == a.preferences.parent_path() / "environment";
   out << (english ? "en" : "pt") << '\n' << (portable ? "." : Utf8(a.root)) << '\n';
 }
@@ -537,7 +537,7 @@ void OnEnvironmentChecked(App& a, const std::string& error) {
     a.targets.clear(); a.checked.clear(); a.catalog_loaded = false;
     Load(a, root, a.pending_full_check ? InspectionMode::Full : InspectionMode::Preview); SavePreferences(a); return;
   }
-  if (fs::exists(root / "deps.lock.json")) {
+  if (io::exists(root / "deps.lock.json")) {
     std::string message = Tr("Esta instalação precisa ser atualizada. Jogos, perfis e saves serão preservados.\n\nComponentes:", "This installation needs an update. Games, profiles and saves will be preserved.\n\nComponents:");
     for (const auto& item : a.pending_payload.components) message += "\n" + item;
     a.prompt = Prompt{"x360-native", message + Tr("\n\nAtualizar agora?", "\n\nUpdate now?"), {Tr("Atualizar", "Update"), Tr("Agora não", "Not now")}, false,
@@ -641,19 +641,19 @@ void OnUpdateFinished(App& a, std::string error) {
 
 // ---------- Startup ----------
 void ConfigureFromPreferences(App& a) {
-  if (!fs::is_directory(Payload(a))) {
+  if (!io::is_directory(Payload(a))) {
     if (a.root.empty()) if (auto root = FindProjectRoot(a.self)) a.root = root->root;
     return;
   }
   a.preferences = a.self.parent_path() / "data/preferences.txt";
   {
-    std::ifstream in(a.preferences); std::string language, root;
+    io::ifstream in(a.preferences); std::string language, root;
     std::getline(in, language); std::getline(in, root);
     if (!language.empty()) english = language == "en";
     auto saved = root == "." ? a.preferences.parent_path() / "environment" : PathFromUtf8(root);
-    if (a.root.empty() && !root.empty() && fs::is_regular_file(saved / "deps.lock.json")) a.root = saved;
+    if (a.root.empty() && !root.empty() && io::is_regular_file(saved / "deps.lock.json")) a.root = saved;
   }
-  std::ifstream channel(a.preferences.parent_path() / "update-channel.txt");
+  io::ifstream channel(a.preferences.parent_path() / "update-channel.txt");
   std::string selected; std::getline(channel, selected);
   if (selected == "preview") a.update_channel = UpdateChannel::Preview;
   // A first-time user shouldn't need to choose a source repository. The package
@@ -883,8 +883,8 @@ void Command(App& a, int id) {
       return;
     }
     if ((id == kData || id == kOpenLogs) && !a.root.empty()) {
-      auto p = id == kOpenLogs && !a.logs.empty() && fs::is_directory(a.logs) ? a.logs : a.root / ".local";
-      fs::create_directories(p);
+      auto p = id == kOpenLogs && !a.logs.empty() && io::is_directory(a.logs) ? a.logs : a.root / ".local";
+      io::create_directories(p);
       if (a.open_path) a.open_path(p);
       return;
     }

@@ -41,7 +41,10 @@ function Invoke-PicturePhase([string]$root,[string]$phase,[int]$expected=0,[int]
 }
 function Package-Path([string]$root) {
  $root=Assert-Owned $root
- $package=[IO.Path]::GetFullPath([IO.File]::ReadAllText((Join-Path $root 'package-path.txt')))
+ # The runtime reports its host (\\?\) spelling; compare the ordinary one.
+ $text=[IO.File]::ReadAllText((Join-Path $root 'package-path.txt'))
+ if($text.StartsWith('\\?\UNC\')) {$text='\\'+$text.Substring(8)} elseif($text.StartsWith('\\?\')) {$text=$text.Substring(4)}
+ $package=[IO.Path]::GetFullPath($text)
  if(-not $package.StartsWith($root+[IO.Path]::DirectorySeparatorChar,[StringComparison]::OrdinalIgnoreCase)) {throw 'Unexpected profile package'}
  return $package
 }

@@ -14,21 +14,14 @@ namespace fs = std::filesystem;
 namespace x360n::desktop {
 namespace {
 fs::path LibraryPath(const fs::path& path) {
-#ifdef _WIN32
   // Content IDs and temporary-copy suffixes exceed MAX_PATH even under an
   // ordinary extracted ZIP. Do not require a machine-wide Windows setting.
-  auto name = fs::absolute(path).lexically_normal().make_preferred().native();
-  if (name.starts_with(L"\\\\?\\")) return name;
-  if (name.starts_with(L"\\\\")) return L"\\\\?\\UNC\\" + name.substr(2);
-  return L"\\\\?\\" + name;
-#else
-  return path;
-#endif
+  return host_path::Extended(path);
 }
 bool WithinNew(const fs::path& file, const fs::path& root) {
   auto relative = CatalogLaunchVerificationActive()
       ? CatalogVerificationPath(file).lexically_relative(CatalogVerificationPath(root))
-      : fs::weakly_canonical(LibraryPath(file)).lexically_relative(fs::weakly_canonical(LibraryPath(root)));
+      : io::weakly_canonical(LibraryPath(file)).lexically_relative(io::weakly_canonical(LibraryPath(root)));
   return !relative.empty() && !relative.is_absolute() && *relative.begin() != "..";
 }
 const Target& Dependency(const std::vector<Target>& catalog, const std::string& id) {
@@ -78,8 +71,8 @@ std::vector<Entry> OtherRegistrations(const Target& session, const Target& game,
                                       const std::vector<Target>& catalog) {
   std::vector<Entry> entries;
   const auto headers = Describe(session, game).header.parent_path().parent_path();
-  if (!fs::is_directory(headers)) return entries;
-  for (const auto& dir : fs::directory_iterator(headers)) {
+  if (!io::is_directory(headers)) return entries;
+  for (const auto& dir : io::directory_iterator(headers)) {
     const auto type = Utf8(dir.path().filename());
     if (!dir.is_directory() || type == game.library.content_type || type.size() != 8 ||
         type.find_first_not_of("0123456789ABCDEF") != std::string::npos) continue;
@@ -91,7 +84,7 @@ std::vector<Entry> OtherRegistrations(const Target& session, const Target& game,
     auto legacy = game;
     legacy.library.content_type = type;
     auto entry = Describe(session, legacy);
-    if (fs::exists(entry.header)) entries.push_back(std::move(entry));
+    if (io::exists(entry.header)) entries.push_back(std::move(entry));
   }
   return entries;
 }
@@ -99,7 +92,7 @@ void CheckObsoleteRegistration(const Target& session, const Target& game, const 
   if (!WithinNew(entry.header, session.user_root) || !Same(entry.header, Hash(entry.bytes)))
     throw std::runtime_error("Conflicting library metadata differs; preserved: " + Utf8(entry.header));
   std::set<fs::path> expected;
-  if (!WithinNew(entry.folder, session.user_root) || fs::is_symlink(entry.folder))
+  if (!WithinNew(entry.folder, session.user_root) || io::is_redirect(entry.folder))
     throw std::runtime_error("Redirected obsolete library content; preserved: " + Utf8(entry.folder));
   for (const auto& input : game.inputs) {
     const auto file = entry.folder / input.destination.lexically_relative(game.game_root);
@@ -107,8 +100,8 @@ void CheckObsoleteRegistration(const Target& session, const Target& game, const 
       throw std::runtime_error("Conflicting library content differs or is incomplete; preserved: " + Utf8(file));
     expected.insert(file.lexically_normal());
   }
-  for (const auto& file : fs::recursive_directory_iterator(entry.folder)) {
-    if (file.is_symlink() || !WithinNew(file.path(), session.user_root) ||
+  for (const auto& file : io::recursive_directory_iterator(entry.folder)) {
+    if (file.is_redirect() || !WithinNew(file.path(), session.user_root) ||
         (file.is_regular_file() && !expected.contains(file.path().lexically_normal())))
       throw std::runtime_error("Unidentified obsolete library data; preserved: " + Utf8(file.path()));
   }
@@ -119,13 +112,13 @@ void ArchiveLibraryCaches(const Target& session) {
   // header alone leaves the retired item visible until CDIs is regenerated.
   // Preserve each cache byte-for-byte, only in this dashboard's own storage.
   std::vector<fs::path> caches;
-  for (const auto& account : fs::directory_iterator(LibraryPath(session.user_root))) {
+  for (const auto& account : io::directory_iterator(LibraryPath(session.user_root))) {
     const auto name = Utf8(account.path().filename());
     if (name.size() != 16 || name.find_first_not_of("0123456789ABCDEF") != std::string::npos) continue;
     // Extended-length Windows paths do not normalize forward slashes.
     const auto cache = (account.path() / "FFFE07DF/00040000/ContentCache.pkg/CDIs.bin").make_preferred();
-    if (!fs::exists(cache)) continue;
-    if (!WithinNew(cache, session.user_root) || fs::is_symlink(cache) || !fs::is_regular_file(cache))
+    if (!io::exists(cache)) continue;
+    if (!WithinNew(cache, session.user_root) || io::is_redirect(cache) || !io::is_regular_file(cache))
       throw std::runtime_error("Redirected or invalid dashboard library cache; preserved: " + Utf8(cache));
     caches.push_back(cache);
   }
@@ -134,7 +127,7 @@ void ArchiveLibraryCaches(const Target& session) {
   for (const auto& cache : caches) {
     const auto saved = archive / cache.lexically_relative(LibraryPath(session.user_root));
     if (!WithinNew(saved, session.user_root)) throw std::runtime_error("Redirected library cache archive");
-    fs::create_directories(saved.parent_path()); fs::rename(cache, saved);
+    io::create_directories(saved.parent_path()); io::rename(cache, saved);
   }
 }
 void ArchiveHeader(const Target& session, const Target& game, const Entry& entry) {
@@ -142,7 +135,7 @@ void ArchiveHeader(const Target& session, const Target& game, const Entry& entry
       (game.id + "-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()) + ".header");
   if (!WithinNew(saved, session.user_root)) throw std::runtime_error("Redirected library archive");
   ArchiveLibraryCaches(session);
-  fs::create_directories(saved.parent_path()); fs::rename(entry.header, saved);
+  io::create_directories(saved.parent_path()); io::rename(entry.header, saved);
 }
 void CheckSource(const Target& game) {
   if (game.inputs.empty()) throw std::runtime_error("Conteúdo sem inventário verificado.");
@@ -156,7 +149,7 @@ std::vector<std::string> InstalledGames(const ProjectPaths& paths, const std::ve
     if (!InGameLibrary(game) || !game.aot || game.library.title_id.empty() || game.inputs.empty()) continue;
     // Most imported games have never been built. Do not rehash their multi-GB
     // inventories for each dashboard while discovering executable entries.
-    if (!fs::is_regular_file(game.exe) || fs::exists(PreparationMarker(paths, game))) continue;
+    if (!io::is_regular_file(game.exe) || io::exists(PreparationMarker(paths, game))) continue;
     if (Inspect(paths, game).prepared) ids.push_back(game.id);
   }
   return ids;
@@ -183,7 +176,7 @@ bool CompleteLibraryPreparation(const ProjectPaths& paths, const Target& target,
     } else {
       for (const auto& dashboard : catalog) {
         if (!dashboard.session || !dashboard.launch_library || dashboard.inputs.empty() ||
-            !fs::is_regular_file(dashboard.inputs.front().destination)) continue;
+            !io::is_regular_file(dashboard.inputs.front().destination)) continue;
         if (!InspectLibrary(paths, dashboard, {target}).empty())
           pending.push_back(dashboard);
       }
@@ -203,12 +196,12 @@ std::vector<std::string> InspectLibrary(const ProjectPaths& paths, const Target&
   if (session.session && !session.launch_library) return issues;
   if (!session.session) {
     if (!InGameLibrary(session)) return issues;
-    if (!fs::is_regular_file(session.exe) || fs::exists(PreparationMarker(paths, session))) return issues;
+    if (!io::is_regular_file(session.exe) || io::exists(PreparationMarker(paths, session))) return issues;
     // A compiled game can still have an interrupted registration. Check only
     // this game in dashboards already imported, without making unrelated games
     // dependencies of its ready state.
     for (const auto& dashboard : catalog) {
-      if (!dashboard.session || !dashboard.launch_library || dashboard.inputs.empty() || !fs::is_regular_file(dashboard.inputs.front().destination)) continue;
+      if (!dashboard.session || !dashboard.launch_library || dashboard.inputs.empty() || !io::is_regular_file(dashboard.inputs.front().destination)) continue;
       auto missing = InspectLibrary(paths, dashboard, {session});
       issues.insert(issues.end(), missing.begin(), missing.end());
     }
@@ -231,7 +224,7 @@ std::vector<std::string> InspectLibrary(const ProjectPaths& paths, const Target&
 }
 void WithdrawLibrary(const Target& session, const Target& game, const std::vector<Target>& catalog) {
   if (!session.session || session.user_root.empty() || game.library.title_id.empty() || game.inputs.empty() ||
-      !fs::is_directory(LibraryPath(session.user_root))) return;
+      !io::is_directory(LibraryPath(session.user_root))) return;
   auto entries = OtherRegistrations(session, game, catalog);
   entries.insert(entries.begin(), Describe(session, game));
   std::set<fs::path> expected;
@@ -240,14 +233,14 @@ void WithdrawLibrary(const Target& session, const Target& game, const std::vecto
   const auto staged = [](fs::path header) { header += ".x360n-library-tmp"; return header; };
   for (const auto& entry : entries) {
     for (const auto& header : {entry.header, staged(entry.header)}) {
-      if (!fs::exists(header)) continue;
-      if (!WithinNew(header, session.user_root) || fs::is_symlink(header) || !Same(header, Hash(entry.bytes)))
+      if (!io::exists(header)) continue;
+      if (!WithinNew(header, session.user_root) || io::is_redirect(header) || !Same(header, Hash(entry.bytes)))
         throw std::runtime_error("Registro da biblioteca diferente; preservado: " + Utf8(header));
     }
-    if (!fs::exists(entry.folder)) continue;
-    if (!WithinNew(entry.folder, session.user_root) || fs::is_symlink(entry.folder) || !fs::is_directory(entry.folder))
+    if (!io::exists(entry.folder)) continue;
+    if (!WithinNew(entry.folder, session.user_root) || io::is_redirect(entry.folder) || !io::is_directory(entry.folder))
       throw std::runtime_error("Conteúdo da biblioteca redirecionado; preservado: " + Utf8(entry.folder));
-    for (const auto& file : fs::recursive_directory_iterator(entry.folder)) {
+    for (const auto& file : io::recursive_directory_iterator(entry.folder)) {
       const auto type = file.symlink_status().type();
       if (type == fs::file_type::directory) continue;
       // PrepareLibrary leaves interrupted copies beside their destination.
@@ -259,10 +252,10 @@ void WithdrawLibrary(const Target& session, const Target& game, const std::vecto
   }
   for (const auto& entry : entries) {
     // Enumeration goes first: the dashboard never lists a partially removed copy.
-    if (fs::exists(entry.header)) ArchiveHeader(session, game, entry);
-    else if (fs::exists(entry.folder)) ArchiveLibraryCaches(session);
-    fs::remove(staged(entry.header));
-    fs::remove_all(entry.folder);
+    if (io::exists(entry.header)) ArchiveHeader(session, game, entry);
+    else if (io::exists(entry.folder)) ArchiveLibraryCaches(session);
+    io::remove(staged(entry.header));
+    io::remove_all(entry.folder);
   }
 }
 void PrepareLibrary(const ProjectPaths& paths, const Target& session, const std::vector<Target>& catalog,
@@ -278,7 +271,7 @@ void PrepareLibrary(const ProjectPaths& paths, const Target& session, const std:
     if (!InGameLibrary(game) || !game.aot || game.library.title_id.empty() ||
         std::find(installed.begin(), installed.end(), game.id) != installed.end()) continue;
     const auto entry = Describe(session, game);
-    if (!fs::exists(entry.header)) continue;
+    if (!io::exists(entry.header)) continue;
     if (!Same(entry.header, Hash(entry.bytes)) || !WithinNew(entry.header, session.user_root))
       throw std::runtime_error("Existing library header differs; preserved. Repair the registration before launching.");
     ArchiveHeader(session, game, entry);
@@ -296,45 +289,45 @@ void PrepareLibrary(const ProjectPaths& paths, const Target& session, const std:
     // never write through it. New installs use ordinary files, without elevation.
     uintmax_t required = entry.bytes.size();
     if (!WithinNew(entry.header, session.user_root)) throw std::runtime_error("Catálogo fora da pasta de dados selecionada.");
-    if (fs::exists(entry.header) && !Same(entry.header, Hash(entry.bytes)))
+    if (io::exists(entry.header) && !Same(entry.header, Hash(entry.bytes)))
       throw std::runtime_error("Registro existente diferente; preservado: " + Utf8(entry.header));
     for (const auto& input : game.inputs) {
       auto dest = entry.folder / input.destination.lexically_relative(game.game_root);
-      if (fs::exists(dest)) {
+      if (io::exists(dest)) {
         if (!Same(dest, input.sha256)) throw std::runtime_error("Conteúdo instalado diferente; preservado: " + Utf8(dest));
       } else {
         if (!WithinNew(dest, session.user_root)) throw std::runtime_error("Destino redirecionado; importação preservada.");
-        required += fs::file_size(input.destination);
+        required += io::file_size(input.destination);
       }
     }
-    fs::create_directories(session.user_root);
-    if (fs::space(session.user_root).available < required) throw std::runtime_error("Espaço insuficiente na pasta de dados para a biblioteca.");
+    io::create_directories(session.user_root);
+    if (io::space(session.user_root).available < required) throw std::runtime_error("Espaço insuficiente na pasta de dados para a biblioteca.");
     for (const auto& input : game.inputs) {
       stop();
       auto dest = entry.folder / input.destination.lexically_relative(game.game_root);
-      if (fs::exists(dest)) continue;
-      fs::create_directories(dest.parent_path());
+      if (io::exists(dest)) continue;
+      io::create_directories(dest.parent_path());
       auto tmp = dest; tmp += ".x360n-library-tmp";
-      if (fs::exists(tmp) && !Same(tmp, input.sha256)) {
-        if (!IsWithin(tmp, LibraryPath(session.user_root)) || fs::is_symlink(tmp)) throw std::runtime_error("Cópia temporária redirecionada; preservada.");
+      if (io::exists(tmp) && !Same(tmp, input.sha256)) {
+        if (!IsWithin(tmp, LibraryPath(session.user_root)) || io::is_redirect(tmp)) throw std::runtime_error("Cópia temporária redirecionada; preservada.");
         auto interrupted = tmp; interrupted += ".interrupted-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count());
-        fs::rename(tmp, interrupted);
+        io::rename(tmp, interrupted);
       }
-      if (!fs::exists(tmp)) fs::copy_file(input.destination, tmp, fs::copy_options::none);
+      if (!io::exists(tmp)) io::copy_file(input.destination, tmp, fs::copy_options::none);
       if (!Same(tmp, input.sha256)) throw std::runtime_error("Falha na verificação da cópia da biblioteca.");
-      fs::rename(tmp, dest);
+      io::rename(tmp, dest);
     }
     stop();
     // Publish the enumeration header last: interrupted copies aren't advertised.
-    if (!fs::exists(entry.header)) {
-      fs::create_directories(entry.header.parent_path());
+    if (!io::exists(entry.header)) {
+      io::create_directories(entry.header.parent_path());
       auto tmp = entry.header; tmp += ".x360n-library-tmp";
-      if (fs::exists(tmp) && !Same(tmp, Hash(entry.bytes))) throw std::runtime_error("Registro temporário diferente; preservado.");
-      if (!fs::exists(tmp)) {
-        std::ofstream out(tmp, std::ios::binary); out.write(entry.bytes.data(), entry.bytes.size());
+      if (io::exists(tmp) && !Same(tmp, Hash(entry.bytes))) throw std::runtime_error("Registro temporário diferente; preservado.");
+      if (!io::exists(tmp)) {
+        io::ofstream out(tmp, std::ios::binary); out.write(entry.bytes.data(), entry.bytes.size());
         out.close(); if (!out) throw std::runtime_error("Não foi possível gravar o catálogo.");
       }
-      fs::rename(tmp, entry.header);
+      io::rename(tmp, entry.header);
     }
     for (const auto& legacy : obsolete) {
       stop();
@@ -347,10 +340,10 @@ void PrepareLibrary(const ProjectPaths& paths, const Target& session, const std:
           (game.id + "-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
       if (!WithinNew(saved, session.user_root)) throw std::runtime_error("Redirected content archive");
       ArchiveLibraryCaches(session);
-      fs::create_directories(saved.parent_path());
-      fs::rename(legacy.folder, saved);
+      io::create_directories(saved.parent_path());
+      io::rename(legacy.folder, saved);
       try { ArchiveHeader(session, game, legacy); }
-      catch (...) { fs::rename(saved, legacy.folder); throw; }
+      catch (...) { io::rename(saved, legacy.folder); throw; }
     }
   }
 }

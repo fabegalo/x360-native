@@ -109,7 +109,7 @@ std::string LastError(const char* what) {
 HANDLE OpenForChild(const std::filesystem::path& p, bool write) {
   SECURITY_ATTRIBUTES sa{sizeof(sa), nullptr, TRUE};
   if (write) {
-    return CreateFileW(p.c_str(), GENERIC_WRITE, FILE_SHARE_READ, &sa, CREATE_ALWAYS,
+    return CreateFileW(io::Host(p).c_str(), GENERIC_WRITE, FILE_SHARE_READ, &sa, CREATE_ALWAYS,
                        FILE_ATTRIBUTE_NORMAL, nullptr);
   }
   return CreateFileW(L"NUL", GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, &sa, OPEN_EXISTING,
@@ -294,7 +294,26 @@ ProcessResult RunProcess(const ProcessSpec& spec) {
   si.hStdError = err.h;
   PROCESS_INFORMATION pi{};
   std::wstring cmd = BuildCommandLine(spec.exe, spec.args);
-  std::wstring cwd = spec.working_dir.empty() ? std::wstring() : spec.working_dir.wstring();
+  // The application name may be extended; the command line keeps the ordinary
+  // one as argv[0]. A working directory cannot be extended and Windows caps it
+  // at MAX_PATH - 2 unless the machine opts in, so a deeper one uses its 8.3
+  // alias where the volume keeps them, and otherwise the launch is refused.
+  const auto application = io::Host(spec.exe).native();
+  std::wstring cwd = spec.working_dir.empty() ? std::wstring() : io::Logical(io::Host(spec.working_dir)).native();
+  if (cwd.size() > MAX_PATH - 2) {
+    const auto host = io::Host(spec.working_dir).native();
+    std::wstring alias(host.size() + 1, L'\0');
+    const auto size = GetShortPathNameW(host.c_str(), alias.data(), DWORD(alias.size()));
+    alias.resize(size < alias.size() ? size : 0);
+    alias = io::Logical(alias).native();
+    if (alias.empty() || alias.size() > MAX_PATH - 2) {
+      const auto name = spec.working_dir.u8string();
+      r.launch_error = fmt::format("Working directory exceeds the Windows limit of {} characters: {}", MAX_PATH - 2,
+                                   std::string(name.begin(), name.end()));
+      return r;
+    }
+    cwd = alias;
+  }
   std::vector<wchar_t> environment;
   if (!spec.environment.empty()) {
     struct Less { bool operator()(const std::wstring& a, const std::wstring& b) const { return _wcsicmp(a.c_str(), b.c_str()) < 0; } };
@@ -325,7 +344,7 @@ ProcessResult RunProcess(const ProcessSpec& spec) {
   DWORD flags = CREATE_SUSPENDED | CREATE_UNICODE_ENVIRONMENT;
   if (spec.no_console) flags |= CREATE_NO_WINDOW;
   if (spec.capture_crash) flags |= DEBUG_ONLY_THIS_PROCESS;
-  BOOL ok = CreateProcessW(spec.exe.c_str(), cmd.data(), nullptr, nullptr, TRUE, flags, environment.empty() ? nullptr : environment.data(),
+  BOOL ok = CreateProcessW(application.c_str(), cmd.data(), nullptr, nullptr, TRUE, flags, environment.empty() ? nullptr : environment.data(),
                            cwd.empty() ? nullptr : cwd.c_str(), &si, &pi);
   SetErrorMode(old_mode);
   if (!ok) {

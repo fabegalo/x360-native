@@ -33,6 +33,7 @@
 #include "../launch_handoff.h"
 #include "avatar_aot_catalog.h"
 #include "xam17559_static_init.h"
+#include "../../../src/supervisor/fs_io.h"
 
 REXCVAR_DEFINE_BOOL(x360n_avatar_service, true, "x360n",
                     "Use the original 17559 avatar catalog and AOT algorithms");
@@ -161,7 +162,7 @@ uint32_t Initialize(uint32_t version, uint32_t coord, uint32_t processor,
   auto* entry = shared.empty() ? nullptr
       : dynamic_cast<rex::filesystem::HostPathEntry*>(fs->ResolvePath(shared));
   std::error_code same_error;
-  if (!entry || !std::filesystem::equivalent(entry->host_path(), xam, same_error)) {
+  if (!entry || !x360n::io::equivalent(entry->host_path(), xam, same_error)) {
     REXLOG_ERROR(
         "avatar-service: the session dashboard 17559 system UI host provides no "
         "XAM image matching {} ('{}')",
@@ -185,7 +186,7 @@ uint32_t Initialize(uint32_t version, uint32_t coord, uint32_t processor,
   for (uint32_t i = 0; i < 5; ++i)
     if (!Runtime()->function_dispatcher()->GetFunction(Read(callbacks + 4 * i)))
       return kAssetsInvalid;
-  std::ifstream in(path, std::ios::binary);
+  x360n::io::ifstream in(path, std::ios::binary);
   std::string error;
   auto toc = AvatarToc::Parse({std::istreambuf_iterator<char>(in), {}}, &error);
   if (!toc) {

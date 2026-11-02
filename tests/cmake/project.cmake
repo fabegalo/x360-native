@@ -8,6 +8,7 @@ add_executable(x360n_tests
     supervisor/sha256_test.cpp
     supervisor/xex_identity_test.cpp
     supervisor/paths_test.cpp
+    supervisor/fs_io_test.cpp
     supervisor/report_test.cpp
     supervisor/process_test.cpp
     supervisor/session_test.cpp

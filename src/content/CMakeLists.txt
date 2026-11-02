@@ -86,6 +86,12 @@ if(X360_DESKTOP_ONLY)
     set_target_properties(x360n-extract PROPERTIES BUILD_RPATH "@loader_path" INSTALL_RPATH "@loader_path")
   elseif(UNIX)
     set_target_properties(x360n-extract PROPERTIES BUILD_RPATH "\$ORIGIN" INSTALL_RPATH "\$ORIGIN")
+  else()
+    # UTF-8 process code page (Windows 10 1903+), the manifest the full build
+    # gets from x360n_stage_runtime_dlls: narrow paths and messages carry any
+    # Unicode folder name without changing the system locale.
+    target_link_options(x360n-extract PRIVATE "LINKER:/MANIFESTINPUT:${PROJECT_SOURCE_DIR}/cmake/runtime/x360n_runtime.manifest")
+    set_property(TARGET x360n-extract APPEND PROPERTY LINK_DEPENDS "${PROJECT_SOURCE_DIR}/cmake/runtime/x360n_runtime.manifest")
   endif()
 else()
   target_link_libraries(x360n-extract PRIVATE rexruntime)

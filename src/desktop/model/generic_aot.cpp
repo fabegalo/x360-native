@@ -6,6 +6,7 @@
 #include "host_platform.h"
 #include <nlohmann/json.hpp>
 #include <toml++/toml.hpp>
+#include "toml_file.h"
 #include <fstream>
 #include <sstream>
 #include <regex>
@@ -16,7 +17,7 @@ namespace fs = std::filesystem;
 namespace x360n::desktop {
 namespace {
 std::string ReadText(const fs::path& file) {
-  std::ifstream in(file, std::ios::binary);
+  io::ifstream in(file, std::ios::binary);
   if (!in) throw std::runtime_error("Missing AOT infrastructure: " + Utf8(file));
   return {std::istreambuf_iterator<char>(in), {}};
 }
@@ -35,20 +36,20 @@ std::string CMakeLiteral(const fs::path& p) {
 }
 void Write(const fs::path& file, const std::string& text, const fs::path& root,
            const std::function<void()>& before_write = {}) {
-  auto rel = fs::weakly_canonical(file).lexically_relative(fs::weakly_canonical(root));
+  auto rel = io::weakly_canonical(file).lexically_relative(io::weakly_canonical(root));
   if (rel.empty() || rel.is_absolute() || *rel.begin() == "..") throw std::runtime_error("AOT project path escaped workspace");
   for (auto p = file; p != root && !p.empty(); p = p.parent_path())
-    if (fs::is_symlink(p)) throw std::runtime_error("AOT project contains a redirected path");
-  if (fs::exists(file) && ReadText(file) == text) return; // preserve stamps for unchanged configuration
+    if (io::is_redirect(p)) throw std::runtime_error("AOT project contains a redirected path");
+  if (io::exists(file) && ReadText(file) == text) return; // preserve stamps for unchanged configuration
   if (before_write) before_write();
-  fs::create_directories(file.parent_path());
+  io::create_directories(file.parent_path());
   auto temp = file; temp += ".tmp";
-  if (fs::is_symlink(temp)) throw std::runtime_error("AOT staging file redirected");
-  std::ofstream out(temp, std::ios::binary); out << text; out.close();
+  if (io::is_redirect(temp)) throw std::runtime_error("AOT staging file redirected");
+  io::ofstream out(temp, std::ios::binary); out << text; out.close();
   if (!out) throw std::runtime_error("Cannot write AOT project");
   // The incomplete marker and absent final receipt make partial project writes
   // non-executable. A retry deterministically repairs every generated file.
-  fs::copy_file(temp, file, fs::copy_options::overwrite_existing); fs::remove(temp);
+  io::copy_file(temp, file, fs::copy_options::overwrite_existing); io::remove(temp);
 }
 std::string Toml(const toml::table& t) { std::ostringstream out; out << t; return out.str() + "\n"; }
 }
@@ -69,7 +70,7 @@ void GenerateAotProject(const ProjectPaths& paths, const Target& t) {
   std::sort(inputs.begin(), inputs.end(), [](const auto& a, const auto& b) { return a.destination < b.destination; });
   for (const auto& input : inputs) {
     const auto relative = input.destination.lexically_relative(t.game_root);
-    const auto resolved = fs::weakly_canonical(input.destination).lexically_relative(fs::weakly_canonical(t.game_root));
+    const auto resolved = io::weakly_canonical(input.destination).lexically_relative(io::weakly_canonical(t.game_root));
     if (relative.empty() || relative.is_absolute() || *relative.begin() == ".." ||
         resolved.empty() || resolved.is_absolute() || *resolved.begin() == "..")
       throw std::runtime_error("Invalid AOT module path");
@@ -81,7 +82,7 @@ void GenerateAotProject(const ProjectPaths& paths, const Target& t) {
     // dependencies. Keep every byte in the authenticated input inventory, but
     // never register firmware modules in the game's native module registry.
     if (guest.starts_with("$systemupdate/")) continue;
-    std::ifstream in(input.destination, std::ios::binary);
+    io::ifstream in(input.destination, std::ios::binary);
     char magic[4]{}; in.read(magic, 4);
     if (std::string_view(magic, 3) != "XEX") continue;
     auto found = IdentifyContent({}, input.destination);
@@ -109,21 +110,22 @@ void GenerateAotProject(const ProjectPaths& paths, const Target& t) {
   validation.reset();
   WorkspaceLease lease(paths);
   const auto dir = paths.local() / "aot" / t.id;
-  const auto generated = t.exe.parent_path() / "generated/default";
+  // Codegen output belongs to the CMake/Ninja tree, whose paths must stay short.
+  const auto generated = NativeBuildDirectory(paths, t.exe.parent_path()) / "generated/default";
   const auto owner_file = t.exe.parent_path() / ".x360n-aot-owner";
   const auto owner = t.id + "\n" + Utf8(t.game_root.filename()) + "\n" +
       (HostPlatform()=="windows-x64" ? "" : HostPlatform()+"\n");
-  if (fs::exists(owner_file) && ReadText(owner_file) != owner)
+  if (io::exists(owner_file) && ReadText(owner_file) != owner)
     throw std::runtime_error("AOT build directory belongs to another content identity; existing files were preserved.");
-  if (!fs::exists(owner_file) && fs::is_directory(t.exe.parent_path()) &&
-      fs::directory_iterator(t.exe.parent_path()) != fs::directory_iterator())
+  if (!io::exists(owner_file) && io::is_directory(t.exe.parent_path()) &&
+      io::directory_iterator(t.exe.parent_path()) != io::directory_iterator())
     throw std::runtime_error("AOT build directory has no verified owner; existing files were preserved.");
   bool invalidated = false;
   auto publish = [&](const fs::path& file, const std::string& text) {
     Write(file, text, paths.local(), [&] {
       if (invalidated) return;
       const auto marker = PreparationMarker(paths, t);
-      fs::create_directories(marker.parent_path());
+      io::create_directories(marker.parent_path());
       Write(marker, "project-generation\n", paths.local());
       invalidated = true;
     });
@@ -146,7 +148,7 @@ void GenerateAotProject(const ProjectPaths& paths, const Target& t) {
   std::string module_cmake = "set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS " +
       CMakeLiteral(t.game_root / "default.xex") + ")\n";
   const auto analysis_file = paths.root / "titles/common/module_analysis.toml";
-  const auto analysis = fs::is_regular_file(analysis_file) ? toml::parse_file(analysis_file.string()) : toml::table{};
+  const auto analysis = io::is_regular_file(analysis_file) ? ParseTomlFile(analysis_file) : toml::table{};
   for (size_t i = 0; i < modules.size(); ++i) {
     const auto& module = modules[i];
     auto name = Utf8(module.file.stem());

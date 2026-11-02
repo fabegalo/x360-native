@@ -74,7 +74,7 @@ std::optional<fs::path> FindOnPath(const std::wstring& name) {
 }
 
 std::string ReadText(const fs::path& p) {
-  std::ifstream in(p, std::ios::binary);
+  io::ifstream in(p, std::ios::binary);
   std::stringstream ss;
   ss << in.rdbuf();
   return ss.str();
@@ -106,7 +106,7 @@ uint32_t ProcessId() {
 Captured Capture(const ProjectPaths& p, const fs::path& exe, std::vector<std::string> args) {
   fs::path tmp = p.local() / "tmp" / fmt::format("capture-{}", ProcessId());
   std::error_code ec;
-  fs::create_directories(tmp, ec);
+  io::create_directories(tmp, ec);
   ProcessSpec spec{exe, std::move(args), {}, tmp / "out.txt", tmp / "err.txt",
                    std::chrono::seconds(60)};
   spec.no_console = true;  // Helper output is captured; no auxiliary console.
@@ -121,7 +121,7 @@ Captured Capture(const ProjectPaths& p, const fs::path& exe, std::vector<std::st
   c.out = ReadText(spec.stdout_file);
   c.err = ReadText(spec.stderr_file);
   if (r.timed_out) c.error = "timed out";
-  fs::remove_all(tmp, ec);
+  io::remove_all(tmp, ec);
   return c;
 }
 
@@ -210,10 +210,10 @@ int Doctor(const ProjectPaths& p, const std::string& config, const fs::path& sdk
                                                                 : "llvm-" X360N_LLVM_VERSION_LOCKED "-"+HostPlatform())/"bin/clang++.exe";
 #else
     clang=p.local()/"toolchains"/("llvm-" X360N_LLVM_VERSION_LOCKED "-"+HostPlatform())/"bin/clang++";
-    if (!fs::is_regular_file(clang)) { try { clang=FindHostTool("clang++"); } catch (...) {} }
+    if (!io::is_regular_file(clang)) { try { clang=FindHostTool("clang++"); } catch (...) {} }
 #endif
   }
-  if (!fs::exists(clang)) {
+  if (!io::exists(clang)) {
     fail("pinned native clang++ missing at " + PathUtf8(clang) + " (provide --cxx or install the pinned toolchain)");
   } else {
     auto c = Capture(p, clang, {"--version"});
@@ -231,7 +231,7 @@ int Doctor(const ProjectPaths& p, const std::string& config, const fs::path& sdk
   if (pf_len > 0 && pf_len < MAX_PATH) {
     vswhere = fs::path(pf) / "Microsoft Visual Studio" / "Installer" / "vswhere.exe";
   }
-  if (!fs::exists(vswhere)) {
+  if (!io::exists(vswhere)) {
     fail("vswhere.exe not found: install Visual Studio 2022 Build Tools with the C++ workload");
   } else {
     // The same native MSVC component as scripts/devshell.cmd.
@@ -251,7 +251,7 @@ int Doctor(const ProjectPaths& p, const std::string& config, const fs::path& sdk
 
   // SDK tools built from the pinned revision.
   fs::path rexglue = tool_override.empty() ? RexglueExe(p, config) : tool_override;
-  if (!fs::exists(rexglue)) {
+  if (!io::exists(rexglue)) {
     fail("rexglue CLI not built: " + PathUtf8(rexglue) + "; provide --rexglue for a verified SDK preparation generation");
   } else {
     auto c = Capture(p, rexglue, {"--version"});
@@ -267,7 +267,7 @@ int Doctor(const ProjectPaths& p, const std::string& config, const fs::path& sdk
     }
   }
   fs::path as = sdk / "tools" / "binutils" / ("powerpc-none-elf-as"+ExecutableSuffix());
-  if (!fs::exists(as)) {
+  if (!io::exists(as)) {
     fail("PowerPC assembler missing: " + PathUtf8(as));
   } else {
     auto c = Capture(p, as, {"--version"});
@@ -279,24 +279,24 @@ int Doctor(const ProjectPaths& p, const std::string& config, const fs::path& sdk
   // Symlink capability decides whether submodule symlinks need materializing.
   fs::path probe_dir = p.local() / "tmp" / fmt::format("symlink-probe-{}", ProcessId());
   std::error_code ec;
-  fs::create_directories(probe_dir, ec);
+  io::create_directories(probe_dir, ec);
   fs::path link = probe_dir / "link";
   fs::path target = probe_dir / "target";
-  { std::ofstream(target) << "x"; }
-  fs::remove(link, ec);
+  { io::ofstream(target) << "x"; }
+  io::remove(link, ec);
   if (CreateSymbolicLinkW(link.c_str(), target.c_str(), SYMBOLIC_LINK_FLAG_ALLOW_UNPRIVILEGED_CREATE)) {
     ok("this account can create symlinks");
-    fs::remove(link, ec);
+    io::remove(link, ec);
   } else {
     warn("this account cannot create symlinks (Developer Mode off, not elevated): git checks "
          "symlinks out as text files");
   }
-  fs::remove_all(probe_dir, ec);
+  io::remove_all(probe_dir, ec);
 #endif
 
   // Local directories.
   for (auto& [name, dir] : {std::pair{"inputs", p.inputs()}, std::pair{"runs", p.runs()}}) {
-    if (fs::is_directory(dir)) ok(fmt::format(".local/{} exists", name));
+    if (io::is_directory(dir)) ok(fmt::format(".local/{} exists", name));
     else warn(fmt::format(".local/{} does not exist yet ({})", name, PathUtf8(dir)));
   }
 
@@ -310,7 +310,7 @@ int Doctor(const ProjectPaths& p, const std::string& config, const fs::path& sdk
 
 int Identify(const fs::path& file, bool json) {
   std::error_code ec;
-  if (!fs::is_regular_file(file, ec)) {
+  if (!io::is_regular_file(file, ec)) {
     fmt::print(stderr, "identify: not a regular file: {}\n", PathUtf8(file));
     return kExitUsage;
   }
@@ -322,7 +322,7 @@ int Identify(const fs::path& file, bool json) {
 
   // Read just the header block. 64 MiB is far above any real XEX header.
   constexpr uint64_t kMaxHeader = 64ull << 20;
-  std::ifstream in(file, std::ios::binary);
+  io::ifstream in(file, std::ios::binary);
   std::vector<uint8_t> head(size_t(std::min<uint64_t>(digest->size, 0x18)));
   in.read(reinterpret_cast<char*>(head.data()), std::streamsize(head.size()));
   bool is_xex = head.size() >= 4 && head[0] == 'X' && head[1] == 'E' && head[2] == 'X' && head[3] == '2';
@@ -489,7 +489,7 @@ int Run(const ProjectPaths& p, const fs::path& exe_in, std::vector<std::string> 
   if (handoff) {
     *handoff = dir / "handoff.bin";
     // Refuse stale records, including a same-second reused run label.
-    if (fs::exists(*handoff)) return kExitUsage;
+    if (io::exists(*handoff)) return kExitUsage;
     args.push_back("--x360n_handoff_out=" + PathUtf8(*handoff));
   }
   if (window) args.push_back("--parent_window=" + std::to_string(window->handle()));
@@ -497,7 +497,7 @@ int Run(const ProjectPaths& p, const fs::path& exe_in, std::vector<std::string> 
   // Use the same explicit local file as apply-patch; never embed its contents.
   const char* selected_keys = std::getenv("X360N_XEX_KEYS");
   if ((!selected_keys || !*selected_keys) &&
-      fs::is_regular_file(p.root / ".local/keys/xex-keys.txt") &&
+      io::is_regular_file(p.root / ".local/keys/xex-keys.txt") &&
       std::none_of(args.begin(), args.end(), [](const auto& arg) { return arg.starts_with("--xex_keys_file"); }))
     args.push_back("--xex_keys_file=" + PathUtf8(p.root / ".local/keys/xex-keys.txt"));
 
@@ -505,7 +505,7 @@ int Run(const ProjectPaths& p, const fs::path& exe_in, std::vector<std::string> 
   std::vector<std::pair<fs::path, std::optional<FileDigest>>> dll_digests;
   {
     std::error_code ec;
-    for (const auto& file : fs::directory_iterator(exe.parent_path(), ec)) {
+    for (const auto& file : io::directory_iterator(exe.parent_path(), ec)) {
       if (file.is_regular_file() && IsNativeModule(file.path())) dll_digests.emplace_back(file.path(), DigestFile(file.path()));
     }
     std::sort(dll_digests.begin(), dll_digests.end(), [](const auto& a, const auto& b) { return a.first < b.first; });
@@ -644,9 +644,9 @@ int Run(const ProjectPaths& p, const fs::path& exe_in, std::vector<std::string> 
     w.Null("crash");
   }
   w.EndObject();
-  std::ofstream(dir / "report.json", std::ios::binary) << w.Take();
+  io::ofstream(dir / "report.json", std::ios::binary) << w.Take();
   if (r.crash.captured) {
-    std::ofstream txt(dir / "crash.txt", std::ios::binary);
+    io::ofstream txt(dir / "crash.txt", std::ios::binary);
     txt << fmt::format("exception 0x{:08X} ({}) at 0x{:016X}, thread {}\n", r.crash.code,
                        DescribeExitCode(r.crash.code), r.crash.address, r.crash.thread_id);
     if (!r.crash.access.empty()) txt << "access: " << r.crash.access << "\n";
@@ -686,10 +686,10 @@ int Session(const ProjectPaths& paths, const fs::path& manifest, int timeout, bo
   try {
     WorkspaceLease lease(paths);
     if (!user_data_root.empty()) {
-      if (!user_data_root.is_absolute() || !fs::is_directory(user_data_root))
+      if (!user_data_root.is_absolute() || !io::is_directory(user_data_root))
         throw std::runtime_error("Session user data root must be an existing absolute directory.");
       for (const auto& protected_root : {paths.inputs(), paths.build(), paths.root / "titles", paths.sdk()})
-        if (fs::exists(protected_root) && IsWithin(user_data_root, protected_root))
+        if (io::exists(protected_root) && IsWithin(user_data_root, protected_root))
           throw std::runtime_error("Session user data cannot share content, source or build directories.");
     }
     auto load_profile = [&](const fs::path& file, bool validate_execution = true) {
@@ -785,8 +785,8 @@ int Session(const ProjectPaths& paths, const fs::path& manifest, int timeout, bo
         // A successful compilation is not a compatibility verdict. Preserve a
         // real failed run for the imported game's next desktop inspection.
         if (result != kExitTimeout && IsWithin(active.manifest, paths.local() / "aot")) {
-          fs::create_directories(paths.local() / "preparation");
-          std::ofstream(paths.local() / "preparation" / (active.name + ".runtime-error"))
+          io::create_directories(paths.local() / "preparation");
+          io::ofstream(paths.local() / "preparation" / (active.name + ".runtime-error"))
               << "Runtime failed; supervisor result " << result << "\nReport: " << PathUtf8(handoff.parent_path() / "report.json") << '\n';
         }
         return result;  // never relaunch after timeout/crash
@@ -994,7 +994,7 @@ int main(int argc, char** argv) {
       // need the same exclusion, through validation and child lifetime.
       const auto native = fs::absolute(PathFromUtf8(exe));
       std::optional<WorkspaceLease> lease;
-      if (fs::exists(PreparationReceipt(native)) || IsWithin(native, paths->build() / "titles"))
+      if (io::exists(PreparationReceipt(native)) || IsWithin(native, paths->build() / "titles"))
         lease.emplace(*paths);
       return Run(*paths, PathFromUtf8(exe), child_args, label, timeout_s, rex_log, crash_stack);
     } catch (const std::exception& e) {

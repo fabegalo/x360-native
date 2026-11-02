@@ -11,11 +11,11 @@ namespace x360n::desktop {
 std::vector<ContentIdentity> IdentifyContent(const std::vector<Target>& targets,
     const fs::path& source, const std::function<bool()>& cancelled) {
   std::vector<ContentIdentity> result;
-  const bool single = fs::is_regular_file(source);
+  const bool single = io::is_regular_file(source);
   auto inspect = [&](const fs::path& file) {
     if (cancelled && cancelled()) throw std::runtime_error("Identificação cancelada.");
     // Ignore unrelated assets in a folder, while still accepting any single file.
-    std::ifstream signature(file, std::ios::binary);
+    io::ifstream signature(file, std::ios::binary);
     char magic[4]{}; signature.read(magic, 4);
     bool candidate = single || file.extension() == ".xex" ||
         std::string_view(magic, 3) == "XEX";
@@ -35,7 +35,7 @@ std::vector<ContentIdentity> IdentifyContent(const std::vector<Target>& targets,
       }
     }
     // Bound header allocation, exactly as the supervisor's identity reader does.
-    std::ifstream in(file, std::ios::binary);
+    io::ifstream in(file, std::ios::binary);
     std::vector<uint8_t> header(24); in.read(reinterpret_cast<char*>(header.data()), header.size());
     header.resize(size_t(in.gcount()));
     if (header.size() >= 12 && header[0] == 'X' && header[1] == 'E' && header[2] == 'X' && header[3] == '2') {
@@ -83,10 +83,10 @@ std::vector<ContentIdentity> IdentifyContent(const std::vector<Target>& targets,
     result.push_back(std::move(item));
   };
   if (single) inspect(source);
-  else if (fs::is_directory(source)) {
-    for (auto it = fs::recursive_directory_iterator(source); it != fs::recursive_directory_iterator(); ++it) {
+  else if (io::is_directory(source)) {
+    for (auto it = io::recursive_directory_iterator(source); it != io::recursive_directory_iterator(); ++it) {
       if (cancelled && cancelled()) throw std::runtime_error("Identificação cancelada.");
-      if (it->is_symlink() || !IsWithin(it->path(), source)) { it.disable_recursion_pending(); continue; }
+      if (it->is_redirect() || !IsWithin(it->path(), source)) { it.disable_recursion_pending(); continue; }
       if (it->is_regular_file()) inspect(it->path());
     }
   } else throw std::runtime_error("O arquivo ou a pasta selecionada não está disponível.");

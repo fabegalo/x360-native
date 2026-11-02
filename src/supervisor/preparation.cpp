@@ -26,18 +26,18 @@ std::string Key(const fs::path& p) {
 }
 std::string ReadHead(const fs::path& sdk) {
   auto git = sdk / ".git";
-  if (fs::is_regular_file(git)) {
-    std::ifstream in(git); std::string line; std::getline(in, line);
+  if (io::is_regular_file(git)) {
+    io::ifstream in(git); std::string line; std::getline(in, line);
     if (!line.starts_with("gitdir: ")) return {};
     git = sdk / PathFromUtf8(line.substr(8));
   }
-  std::ifstream in(git / "HEAD"); std::string head; std::getline(in, head);
+  io::ifstream in(git / "HEAD"); std::string head; std::getline(in, head);
   if (head.starts_with("ref: ")) {
     const auto ref = head.substr(5);
-    std::ifstream branch(git / PathFromUtf8(ref));
+    io::ifstream branch(git / PathFromUtf8(ref));
     if (branch) std::getline(branch, head);
     else {
-      std::ifstream packed(git / "packed-refs"); head.clear(); std::string line;
+      io::ifstream packed(git / "packed-refs"); head.clear(); std::string line;
       while (std::getline(packed, line))
         if (line.size() > 41 && line.substr(41) == ref) { head = line.substr(0, 40); break; }
     }
@@ -53,25 +53,25 @@ std::optional<std::string> CheckPreparation(const ProjectPaths& paths,
     return "Preparação inválida; prepare novamente. " + reason;
   };
   try {
-    if (fs::exists(paths.local() / "payload-update/pending") || fs::exists(paths.local() / "dependency-update.pending"))
+    if (io::exists(paths.local() / "payload-update/pending") || io::exists(paths.local() / "dependency-update.pending"))
       return fail("A atualização do aplicativo foi interrompida. Reabra o aplicativo para concluí-la; seus dados foram preservados.");
     if (!IsSafeLabel(title) || manifest.empty()) return fail("Identidade do título ausente.");
     // On Windows the preparation/Ninja producer owns this file with no sharing.
     // Keep a reader open for the entire inspection, excluding replacement while
     // hashes are collected. Legacy receipts still follow all C2 validations.
     const auto lease_path = paths.local() / "preparation" / (title + ".lock");
-    std::ifstream build_lease;
+    io::ifstream build_lease;
     std::unique_ptr<FileLease> native_lease;
-    if (fs::exists(lease_path)) {
+    if (io::exists(lease_path)) {
 #ifndef _WIN32
       native_lease = std::make_unique<FileLease>(lease_path, false, false);
 #endif
       build_lease.open(lease_path, std::ios::binary);
       if (!build_lease) return fail("O título está sendo compilado; aguarde a preparação.");
     }
-    if (fs::exists(paths.local() / "preparation" / (title + ".incomplete")))
+    if (io::exists(paths.local() / "preparation" / (title + ".incomplete")))
       return fail("A preparação anterior não terminou.");
-    std::ifstream input(PreparationReceipt(exe), std::ios::binary);
+    io::ifstream input(PreparationReceipt(exe), std::ios::binary);
     if (!input) return fail("Recibo de preparação ausente.");
     const auto receipt = nlohmann::json::parse(input);
     if (receipt.at("schema") != 1 || receipt.at("title") != title ||
@@ -131,7 +131,7 @@ std::optional<std::string> CheckPreparation(const ProjectPaths& paths,
     // templates; hashes of previously existing files alone cannot do that.
     {
     ActionTrace globs_trace("receipt.globs");
-    std::map<std::pair<fs::path, bool>, std::vector<fs::directory_entry>> inventories;
+    std::map<std::pair<fs::path, bool>, std::vector<io::directory_entry>> inventories;
     for (const auto& glob : receipt.at("globs")) {
       CheckVerificationCancellation();
       const auto glob_pattern = glob.at("pattern").get<std::string>();
@@ -174,10 +174,10 @@ std::optional<std::string> CheckPreparation(const ProjectPaths& paths,
       const auto inventory_key = std::make_pair(directory, recursive);
       auto [inventory, inserted] = inventories.try_emplace(inventory_key);
       if (inserted) {
-        if (recursive) for (const auto& file : fs::recursive_directory_iterator(directory)) {
+        if (recursive) for (const auto& file : io::recursive_directory_iterator(directory)) {
           CheckVerificationCancellation(); inventory->second.push_back(file);
         }
-        else for (const auto& file : fs::directory_iterator(directory)) {
+        else for (const auto& file : io::directory_iterator(directory)) {
           CheckVerificationCancellation(); inventory->second.push_back(file);
         }
       }
@@ -191,7 +191,7 @@ std::optional<std::string> CheckPreparation(const ProjectPaths& paths,
     }
     }
     // Required anchors prevent an empty/partial receipt from blessing an exe.
-    std::ifstream profile_file(manifest, std::ios::binary);
+    io::ifstream profile_file(manifest, std::ios::binary);
     const auto profile = toml::parse(profile_file, PathUtf8(manifest));
     auto xex = profile["entrypoint"]["file_path"].value<std::string>();
     if (!xex || !inputs.contains(Key(manifest)) || !inputs.contains(Key(paths.root / "deps.lock.json")) ||
@@ -206,23 +206,23 @@ std::optional<std::string> CheckPreparation(const ProjectPaths& paths,
       }
     }
     const auto registration = manifest.parent_path() / "preparation.toml";
-    if (fs::is_regular_file(registration) && !inputs.contains(Key(registration)))
+    if (io::is_regular_file(registration) && !inputs.contains(Key(registration)))
       return fail("O registro do título mudou.");
     if (IsWithin(exe, paths.build() / "aot") || IsWithin(exe, paths.build()/HostPlatform()/"aot")) {
       const auto owner = exe.parent_path() / ".x360n-aot-owner";
       if (!inputs.contains(Key(owner))) return fail("Propriedade do build AOT ausente do recibo.");
-      std::ifstream owner_input(owner); std::string owner_title;
+      io::ifstream owner_input(owner); std::string owner_title;
       std::getline(owner_input, owner_title);
       if (owner_title != title) return fail("O build AOT pertence a outro título.");
     }
-    for (const auto& file : fs::directory_iterator(exe.parent_path())) {
+    for (const auto& file : io::directory_iterator(exe.parent_path())) {
       if (IsNativeModule(file.path()) && !artifacts.contains(Key(file.path())))
         return fail("Módulo nativo sem identidade verificada: " + PathUtf8(file.path()));
       // The supervisor runs the Vulkan preflight from this directory.
       if (Key(file.path()) == Key(exe.parent_path() / ("x360n_gpu_preflight" + ExecutableSuffix())) && !artifacts.contains(Key(file.path())))
         return fail("Preflight Vulkan sem identidade verificada: " + PathUtf8(file.path()));
     }
-    if (fs::exists(paths.local() / "preparation" / (title + ".incomplete")))
+    if (io::exists(paths.local() / "preparation" / (title + ".incomplete")))
       return fail("A preparação ainda não terminou.");
     return std::nullopt;
   } catch (const VerificationCancelled&) { throw; }
@@ -243,9 +243,9 @@ ReceiptHint ReceiptHints::Check(const std::string& title, const fs::path& manife
   try {
     std::error_code ec;
     const auto receipt_file = PreparationReceipt(exe);
-    const auto written = fs::last_write_time(receipt_file, ec);
+    const auto written = io::last_write_time(receipt_file, ec);
     if (ec) return ReceiptHint::Stale;
-    std::ifstream input(receipt_file, std::ios::binary);
+    io::ifstream input(receipt_file, std::ios::binary);
     const auto receipt = nlohmann::json::parse(input);
     if (receipt.at("schema") != 1 || receipt.at("title") != title ||
         key(PathFromUtf8(receipt.at("manifest").get<std::string>())) != key(manifest) ||
@@ -263,7 +263,7 @@ ReceiptHint ReceiptHints::Check(const std::string& title, const fs::path& manife
           const auto directory = file.parent_path();
           if (listed_.insert(key(directory)).second) {
             std::error_code list;
-            for (fs::directory_iterator it(directory, list), end; !list && it != end; it.increment(list)) {
+            for (io::directory_iterator it(directory, list), end; !list && it != end; it.increment(list)) {
               std::error_code stat;
               const auto modified = it->last_write_time(stat);
               if (!stat) times_.emplace(key(it->path()), modified);
@@ -281,13 +281,13 @@ std::optional<std::string> CheckPreparedLaunch(const ProjectPaths& paths, const 
   try {
     const auto titles = paths.root / "titles";
     for (const auto& profiles : {titles, paths.local() / "aot"}) {
-    if (fs::is_directory(profiles)) for (const auto& dir : fs::directory_iterator(profiles)) {
+    if (io::is_directory(profiles)) for (const auto& dir : io::directory_iterator(profiles)) {
       if (!dir.is_directory()) continue;
       const auto id = PathUtf8(dir.path().filename());
       const auto manifest = dir.path() / PathFromUtf8(id + "_manifest.toml");
-      if (!fs::is_regular_file(manifest)) continue;
+      if (!io::is_regular_file(manifest)) continue;
       try {
-        std::ifstream in(manifest, std::ios::binary); auto table = toml::parse(in, PathUtf8(manifest));
+        io::ifstream in(manifest, std::ios::binary); auto table = toml::parse(in, PathUtf8(manifest));
         auto configured = table["x360n"]["native_exe"].value<std::string>();
         auto target = configured ? ResolveNativeExecutable(paths, id, dir.path() / PathFromUtf8(*configured)) : NativeTitleExecutable(paths, id);
         if (Key(target) == Key(exe)) return CheckPreparation(paths, id, manifest, exe);
@@ -298,18 +298,18 @@ std::optional<std::string> CheckPreparedLaunch(const ProjectPaths& paths, const 
       }
     }
     }
-    if (fs::exists(PreparationReceipt(exe))) {
+    if (io::exists(PreparationReceipt(exe))) {
       // build-title -BuildDir may produce an explicitly selected diagnostic
       // build elsewhere under .local/build, still bound to an existing title.
-      std::ifstream in(PreparationReceipt(exe), std::ios::binary);
+      io::ifstream in(PreparationReceipt(exe), std::ios::binary);
       const auto receipt = nlohmann::json::parse(in);
       const auto id = receipt.at("title").get<std::string>();
       if (IsSafeLabel(id)) {
         const auto manifest = titles / PathFromUtf8(id) / PathFromUtf8(id + "_manifest.toml");
-        if (fs::is_regular_file(manifest)) return CheckPreparation(paths, id, manifest, exe);
+        if (io::is_regular_file(manifest)) return CheckPreparation(paths, id, manifest, exe);
       }
     }
-    if (fs::exists(PreparationReceipt(exe)) || IsWithin(exe, paths.build() / "titles") ||
+    if (io::exists(PreparationReceipt(exe)) || IsWithin(exe, paths.build() / "titles") ||
         IsWithin(exe, paths.build() / "aot"))
       return "Preparação inválida; prepare novamente. Executável sem título correspondente.";
     return std::nullopt;

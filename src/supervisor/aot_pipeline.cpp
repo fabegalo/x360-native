@@ -9,6 +9,7 @@
 #include <sstream>
 #include <thread>
 #include <toml++/toml.hpp>
+#include "toml_file.h"
 
 #include "child_process.h"
 #include "host_platform.h"
@@ -28,7 +29,7 @@ namespace {
 using J = nlohmann::json;
 using Files = std::map<std::string, std::string>;
 std::string Read(const fs::path& file) {
-  std::ifstream in(file, std::ios::binary);
+  io::ifstream in(file, std::ios::binary);
   if (!in)
     throw std::runtime_error("Cannot read preparation input: " +
                              PathUtf8(file));
@@ -72,16 +73,16 @@ bool VerifyProducts(const J& state) {
   return true;
 }
 void Tree(Files& files, const fs::path& root) {
-  if (!fs::is_directory(root)) return;
-  for (auto it = fs::recursive_directory_iterator(root);
-       it != fs::recursive_directory_iterator(); ++it) {
+  if (!io::is_directory(root)) return;
+  for (auto it = io::recursive_directory_iterator(root);
+       it != io::recursive_directory_iterator(); ++it) {
     const auto name = it->path().filename();
     if (it->is_directory() && (name == ".git" || name == "out" ||
                                name == ".local" || name == "generated")) {
       it.disable_recursion_pending();
       continue;
     }
-    if (it->is_symlink()) {
+    if (it->is_redirect()) {
       // SDK uses file symlinks in vendored sources; directory links could
       // silently import another SDK/version and are never traversed.
       if (it->is_directory())
@@ -92,7 +93,7 @@ void Tree(Files& files, const fs::path& root) {
   }
 }
 void Publish(const fs::path& file, const std::string& text) {
-  fs::create_directories(file.parent_path());
+  io::create_directories(file.parent_path());
   const auto temporary =
       file.parent_path() /
       (PathUtf8(file.filename()) + "." + std::to_string(CurrentProcessId()) +
@@ -100,17 +101,17 @@ void Publish(const fs::path& file, const std::string& text) {
        std::to_string(
            std::chrono::steady_clock::now().time_since_epoch().count()) +
        ".new");
-  if (fs::exists(temporary))
+  if (io::exists(temporary))
     throw std::runtime_error("Unfinished publication preserved: " +
                              Path(temporary));
   {
-    std::ofstream out(temporary, std::ios::binary);
+    io::ofstream out(temporary, std::ios::binary);
     out.write(text.data(), std::streamsize(text.size()));
     out.flush();
     if (!out) throw std::runtime_error("Cannot write preparation checkpoint");
   }
 #ifdef _WIN32
-  if (!MoveFileExW(temporary.c_str(), file.c_str(),
+  if (!MoveFileExW(io::Host(temporary).c_str(), io::Host(file).c_str(),
                    MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH))
     throw std::runtime_error(
         "Cannot atomically publish preparation checkpoint");
@@ -121,7 +122,7 @@ void Publish(const fs::path& file, const std::string& text) {
     throw std::runtime_error("Cannot flush preparation checkpoint");
   }
   close(fd);
-  fs::rename(temporary, file);
+  io::rename(temporary, file);
   fd = open(file.parent_path().c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC);
   if (fd < 0 || fsync(fd) != 0) {
     if (fd >= 0) close(fd);
@@ -200,8 +201,10 @@ class Driver {
  public:
   AotOptions options;
   AotResult result;
-  fs::path project, manifest, build, marker, tool, sdk_export, xex_keys,
-      symbol_tool;
+  // `published` holds the executable, its native modules and the receipt;
+  // `build` is the CMake/Ninja binary directory (NativeBuildDirectory).
+  fs::path project, manifest, published, build, marker, tool, sdk_export,
+      xex_keys, symbol_tool;
   J locked, identity;
   Files static_inputs, sdk_inputs;
   unsigned serial = 0;
@@ -219,10 +222,61 @@ class Driver {
     if (options.progress)
       options.progress("X360N_STAGE " + options.title + " " + name);
   }
+  static bool LaunchProduct(const fs::path& file, const fs::path& executable) {
+    return file.filename() == executable.filename() || IsNativeModule(file) ||
+           file.filename() == "x360n_gpu_preflight" + ExecutableSuffix();
+  }
+  // Copies the launch products (executable, native modules, Vulkan preflight)
+  // from the build directory beside the receipt. A module left by an earlier
+  // build is removed: launch verification refuses unrecorded modules there.
+  void PublishNative() {
+    if (published == build) return;
+    std::set<fs::path> names;
+    for (const auto& file : io::directory_iterator(build))
+      if (file.is_regular_file() && LaunchProduct(file.path(), result.executable))
+        names.insert(file.path().filename());
+    for (const auto& name : names) {
+      const auto from = build / name, to = published / name;
+      if (io::is_regular_file(to) && Digest(to) == Digest(from)) continue;
+      auto temporary = to;
+      temporary += ".x360n-publish";
+      io::remove(temporary);
+      io::copy_file(from, temporary);
+      io::rename(temporary, to);
+    }
+    std::vector<fs::path> stale;
+    for (const auto& file : io::directory_iterator(published))
+      if (file.is_regular_file() && LaunchProduct(file.path(), result.executable) &&
+          file.path().filename() != result.executable.filename() &&
+          !names.contains(file.path().filename()))
+        stale.push_back(file.path());
+    for (const auto& file : stale) io::remove(file);
+  }
+  // Before 1.28.18 `published` was itself the CMake/Ninja tree. Its cache,
+  // objects, guard and logs are never used again and still name that tree;
+  // retire them, leaving products, receipt, owner and runtime folders. The
+  // cache goes last, so an interrupted cleanup is retried.
+  void RetireLegacyTree() {
+    if (published == build || !io::is_regular_file(published / "CMakeCache.txt"))
+      return;
+    std::vector<fs::path> legacy;
+    for (const auto& entry : io::directory_iterator(published)) {
+      const auto name = PathUtf8(entry.path().filename());
+      if (entry.is_redirect() || name == "CMakeCache.txt") continue;
+      if (name == "CMakeFiles" || name == ".preparation" || name == "generated" ||
+          name == "build.ninja" || name == ".ninja_deps" || name == ".ninja_log" ||
+          name == "cmake_install.cmake" || name == "x360n-title-rexglue.cmake" ||
+          name.starts_with("x360n-ninja") || name.starts_with("x360n-build-") ||
+          name.starts_with("x360n-stage-"))
+        legacy.push_back(entry.path());
+    }
+    for (const auto& path : legacy) io::remove_all(path);
+    io::remove(published / "CMakeCache.txt");
+  }
   std::string Command(const fs::path& exe, std::vector<std::string> args,
                       const fs::path& directory, const std::string& phase) {
     Cancel();
-    fs::create_directories(build);
+    io::create_directories(build);
     const auto log = build / ("x360n-build-" + phase + "." + run + "-" +
                               std::to_string(serial++) + ".log");
     ProcessSpec spec{exe,
@@ -285,10 +339,10 @@ class Driver {
     // path. Relinking the launcher/version must not invalidate a shared SDK.
     const auto guard =
         output / ".preparation/supervisor" / ("x360n" + ExecutableSuffix());
-    fs::create_directories(guard.parent_path());
-    if (!fs::is_regular_file(guard) ||
+    io::create_directories(guard.parent_path());
+    if (!io::is_regular_file(guard) ||
         Digest(guard) != Digest(CurrentExecutablePath()))
-      fs::copy_file(CurrentExecutablePath(), guard,
+      io::copy_file(CurrentExecutablePath(), guard,
                     fs::copy_options::overwrite_existing);
     args.push_back("-DX360N_PROCESS_SUPERVISOR=" + Path(guard));
     if (sdk)
@@ -301,30 +355,28 @@ class Driver {
       else
         args.push_back("-UX360N_SHARED_SDK_EXPORT");
     }
-    fs::create_directories(output);
+    io::create_directories(output);
     Command(options.cmake, args, output, "configure");
     if (Cache(output)["CMAKE_BUILD_TYPE"] != "Release")
       throw std::runtime_error("Preparation requires Release");
 #ifdef _WIN32
     const auto directories = output / "CMakeFiles/TargetDirectories.txt";
-    if (fs::is_regular_file(directories)) {
+    if (io::is_regular_file(directories)) {
       std::istringstream lines(Read(directories));
       std::string line;
       while (std::getline(lines, line)) {
         if (!line.empty() && line.back() == '\r') line.pop_back();
         const auto list = PathFromUtf8(line) / "exports.def.objs";
-        if (!fs::is_regular_file(list)) continue;
+        if (!io::is_regular_file(list)) continue;
         std::istringstream objects(Read(list));
         std::string entry, text;
         bool changed = false;
         while (std::getline(objects, entry)) {
           if (!entry.empty() && entry.back() == '\r') entry.pop_back();
           auto absolute = fs::absolute(output / PathFromUtf8(entry));
-          if (!entry.empty() && !entry.starts_with("\\\\?\\") &&
+          if (!entry.empty() && !host_path::IsExtended(PathFromUtf8(entry)) &&
               absolute.native().size() >= 260) {
-            auto path = PathUtf8(absolute.make_preferred());
-            entry = path.starts_with("\\\\") ? "\\\\?\\UNC\\" + path.substr(2)
-                                             : "\\\\?\\" + path;
+            entry = PathUtf8(host_path::Extended(absolute));
             changed = true;
           }
           text += entry + '\n';
@@ -355,7 +407,7 @@ class Driver {
     Files inputs;
     auto graph = GraphFor(dir, targets);
     for (const auto& [id, file] : graph.nodes)
-      if (fs::is_regular_file(file) && !NativeProduct(file))
+      if (io::is_regular_file(file) && !NativeProduct(file))
         Record(inputs, file);
     if (targets == std::vector<std::string>{"build.ninja"}) {
       Record(inputs, dir / "CMakeCache.txt");
@@ -368,11 +420,11 @@ class Driver {
     while (std::getline(deps, line))
       if (line.starts_with("    ")) unique.insert(line.substr(4));
     for (const auto& file : unique)
-      if (fs::is_regular_file(dir / PathFromUtf8(file)))
+      if (io::is_regular_file(dir / PathFromUtf8(file)))
         Record(inputs, dir / PathFromUtf8(file));
     auto configure = GraphFor(dir, {"build.ninja"});
     for (const auto& [id, file] : configure.nodes)
-      if (fs::is_regular_file(file)) Record(inputs, file);
+      if (io::is_regular_file(file)) Record(inputs, file);
     Record(inputs, dir / "CMakeCache.txt");
     return inputs;
   }
@@ -409,7 +461,7 @@ class Driver {
     Files snapshot;
     for (const auto& [id, file] : graph.nodes) {
       if (!NativeProduct(file) || !command_by_path.contains(Path(file)) ||
-          !fs::is_regular_file(file))
+          !io::is_regular_file(file))
         continue;
       if (!IsWithin(file, dir))
         throw std::runtime_error("Native product escaped its build owner: " +
@@ -424,7 +476,7 @@ class Driver {
                            : std::vector<std::string>{parent};
         for (const auto& input : parents)
           if (graph.nodes.contains(input) &&
-              fs::is_regular_file(graph.nodes[input]))
+              io::is_regular_file(graph.nodes[input]))
             inputs.insert(graph.nodes[input]);
       }
       if ((file.extension() == ".o" || file.extension() == ".obj") &&
@@ -432,7 +484,7 @@ class Driver {
         throw std::runtime_error("Compiler dependency record missing");
       Files entries;
       for (const auto& input : inputs) {
-        if (!fs::is_regular_file(input)) {
+        if (!io::is_regular_file(input)) {
           entries[Path(input)] = "missing";
           continue;
         }
@@ -459,9 +511,9 @@ class Driver {
       if (!old.contains(path) || old[path] != product) {
         const auto file = PathFromUtf8(path);
         if (!NativeProduct(file) || !IsWithin(file, build) ||
-            fs::is_symlink(file))
+            io::is_redirect(file))
           throw std::runtime_error("Unsafe incremental product");
-        fs::remove(file);
+        io::remove(file);
       }
     }
   }
@@ -551,10 +603,10 @@ bool VerifyInventory(const J& globs) {
       };
       if (glob.at("recursive").get<bool>() ||
           pattern.find('/') != std::string::npos)
-        for (const auto& file : fs::recursive_directory_iterator(directory))
+        for (const auto& file : io::recursive_directory_iterator(directory))
           append(file);
       else
-        for (const auto& file : fs::directory_iterator(directory)) append(file);
+        for (const auto& file : io::directory_iterator(directory)) append(file);
       std::sort(actual.begin(), actual.end());
       if (J(actual) != glob.at("files")) return false;
     }
@@ -566,7 +618,7 @@ bool VerifyInventory(const J& globs) {
 J CMakeGlobs(const fs::path& build) {
   const auto file = build / "CMakeFiles/VerifyGlobs.cmake";
   J result = J::array();
-  if (!fs::is_regular_file(file)) return result;
+  if (!io::is_regular_file(file)) return result;
   const std::regex begin(
       R"g(^file\(GLOB(_RECURSE)? NEW_GLOB LIST_DIRECTORIES (true|false) "([^"]+)"\)$)g");
   const std::regex entry(R"g(^  "([^"]+)"$)g");
@@ -603,23 +655,23 @@ void Driver::Init() {
       options.title.find_first_not_of(
           "abcdefghijklmnopqrstuvwxyz0123456789_") != std::string::npos)
     throw std::runtime_error("Invalid title identity");
-  options.paths.root = fs::canonical(options.paths.root);
+  options.paths.root = io::canonical(options.paths.root);
   const auto keys_override = NativeEnvironmentValue("X360N_XEX_KEYS");
   const auto keys = keys_override.empty()
                         ? options.paths.local() / "keys/xex-keys.txt"
                         : fs::absolute(PathFromUtf8(keys_override));
-  if (fs::is_regular_file(keys))
-    xex_keys = fs::canonical(keys);
+  if (io::is_regular_file(keys))
+    xex_keys = io::canonical(keys);
   else if (!keys_override.empty())
     throw std::runtime_error("Configured local XEX key file is missing");
   project = options.paths.root / "titles" / options.title;
-  if (!fs::is_regular_file(project / "CMakeLists.txt"))
+  if (!io::is_regular_file(project / "CMakeLists.txt"))
     project = options.paths.local() / "aot" / options.title;
   manifest = project / (options.title + "_manifest.toml");
-  if (!fs::is_regular_file(manifest) ||
-      !fs::is_regular_file(project / "CMakeLists.txt"))
+  if (!io::is_regular_file(manifest) ||
+      !io::is_regular_file(project / "CMakeLists.txt"))
     throw std::runtime_error("Title project missing: " + Path(project));
-  const auto profile = toml::parse_file(Path(manifest));
+  const auto profile = ParseTomlFile(manifest);
   if (profile["project"]["name"].value_or(std::string{}) != options.title)
     throw std::runtime_error("Manifest title identity mismatch");
   auto configured = profile["x360n"]["native_exe"].value<std::string>();
@@ -627,22 +679,25 @@ void Driver::Init() {
       configured ? ResolveNativeExecutable(options.paths, options.title,
                                            project / PathFromUtf8(*configured))
                  : NativeTitleExecutable(options.paths, options.title);
-  build = options.build.empty()         ? executable.parent_path()
-          : options.build.is_absolute() ? options.build
-                                        : options.paths.root / options.build;
-  fs::create_directories(build);
-  build = fs::canonical(build);
-  if (!IsWithin(build, options.paths.build()) ||
-      IsWithin(build, options.paths.inputs()))
+  published = options.build.empty()         ? executable.parent_path()
+              : options.build.is_absolute() ? options.build
+                                            : options.paths.root / options.build;
+  io::create_directories(published);
+  published = io::canonical(published);
+  if (!IsWithin(published, options.paths.build()) ||
+      IsWithin(published, options.paths.inputs()))
     throw std::runtime_error("Build directory escaped the environment");
-  result.executable = build / executable.filename();
+  build = NativeBuildDirectory(options.paths, published);
+  io::create_directories(build);
+  build = io::canonical(build);
+  result.executable = published / executable.filename();
   result.receipt = PreparationReceipt(result.executable);
   marker =
       options.paths.local() / "preparation" / (options.title + ".incomplete");
   if (NativeEnvironmentValue("X360N_SHARED_SDK") == "0")
     options.shared_sdk = false;
   if (options.sdk.empty()) options.sdk = options.paths.sdk();
-  options.sdk = fs::canonical(options.sdk);
+  options.sdk = io::canonical(options.sdk);
   if (options.cmake.empty()) options.cmake = FindHostTool("cmake");
   if (options.ninja.empty()) options.ninja = FindHostTool("ninja");
   if (options.cc.empty()) options.cc = FindHostTool("clang");
@@ -653,7 +708,7 @@ void Driver::Init() {
   symbol_tool = options.cxx.parent_path() / "llvm-nm";
 #endif
   const auto variables_override = options.variables;
-  if (fs::is_regular_file(project / "CMakePresets.json")) {
+  if (io::is_regular_file(project / "CMakePresets.json")) {
     const auto presets = Json(project / "CMakePresets.json");
     const J* selected = nullptr;
     for (const auto& preset : presets.at("configurePresets")) {
@@ -809,7 +864,7 @@ void Driver::Init() {
   for (const auto* name : {"aot_pipeline.cpp", "aot_pipeline.h",
                            "host_platform.cpp", "child_process.cpp"}) {
     const auto file = options.paths.root / "src/supervisor" / name;
-    if (fs::is_regular_file(file)) Record(sdk_inputs, file);
+    if (io::is_regular_file(file)) Record(sdk_inputs, file);
   }
   static_inputs = sdk_inputs;
   Record(static_inputs, CurrentExecutablePath());
@@ -824,9 +879,9 @@ void Driver::Init() {
   if (const auto* modules = profile["modules"].as_array())
     for (const auto& module : *modules)
       if (module.is_table()) originals(*module.as_table());
-  if (fs::is_regular_file(project / "preparation.toml")) {
+  if (io::is_regular_file(project / "preparation.toml")) {
     const auto registration =
-        toml::parse_file(Path(project / "preparation.toml"));
+        ParseTomlFile(project / "preparation.toml");
     const auto game =
         project /
         PathFromUtf8(profile["project"]["game_root"].value_or(std::string{}));
@@ -838,7 +893,7 @@ void Driver::Init() {
         const auto file =
             game / PathFromUtf8(record["path"].value_or(std::string{}));
         const bool optional = record["optional"].value_or(false);
-        if (!fs::is_regular_file(file) && optional) continue;
+        if (!io::is_regular_file(file) && optional) continue;
         if (Digest(file) != record["sha256"].value_or(std::string{}))
           throw std::runtime_error("Original resource hash/version mismatch: " +
                                    Path(file));
@@ -854,7 +909,7 @@ void Driver::SharedSdk() {
   FileLease publisher(cache / "publisher.lock", true);
   const auto pointer = cache / (key + ".json");
   auto reuse = [&]() {
-    if (!fs::is_regular_file(pointer)) return false;
+    if (!io::is_regular_file(pointer)) return false;
     try {
       const auto binding = Json(pointer);
       const auto file = PathFromUtf8(binding.at("receipt"));
@@ -887,7 +942,7 @@ void Driver::SharedSdk() {
   const auto generation = options.paths.build() / "shared-sdk" /
                           HostPlatform() / (key.substr(0, 16) + "-" + run);
 #endif
-  fs::create_directories(generation);
+  io::create_directories(generation);
   FileLease owner(generation / ".x360n-build.lock", true);
   Configure(options.paths.root / "cmake/sdk/shared", generation, true, true);
   // Authenticate translation units before compiling the generic generation.
@@ -919,7 +974,7 @@ void Driver::SharedSdk() {
                            *relative.begin() != "..";
     if ((!IsWithin(source, options.sdk) && !generated) ||
         (IsWithin(source, options.sdk) && !owned.contains(Path(source))) ||
-        fs::is_symlink(source))
+        io::is_redirect(source))
       throw std::runtime_error(
           "Unidentified/title-specific translation unit cannot enter shared "
           "SDK: " +
@@ -931,7 +986,7 @@ void Driver::SharedSdk() {
   const auto graph = GraphFor(generation, {"rexglue", "rexgpu-xenos"});
   Files artifacts;
   for (const auto& [id, path] : graph.nodes)
-    if (fs::is_regular_file(path) && IsWithin(path, generation) &&
+    if (io::is_regular_file(path) && IsWithin(path, generation) &&
         NativeProduct(path)) {
       Record(artifacts, path);
       if (path.filename() == "rexglue" + ExecutableSuffix()) tool = path;
@@ -947,15 +1002,15 @@ void Driver::SharedSdk() {
       if (PathUtf8(file.filename()).find("rexgpu-xenos") != std::string::npos)
         ModuleSymbols(file, {"rex_gpu_create", "rex_gpu_abi_version"});
     }
-  for (const auto& entry : fs::recursive_directory_iterator(generation))
+  for (const auto& entry : io::recursive_directory_iterator(generation))
     if (entry.is_regular_file() && entry.path().extension() == ".cmake")
       Record(artifacts, entry.path());
   for (const auto& name :
        {"x360n-ninja" + ExecutableSuffix(), std::string("x360n-ninja.json")})
-    if (fs::is_regular_file(generation / name))
+    if (io::is_regular_file(generation / name))
       Record(artifacts, generation / name);
   sdk_export = generation / "sdk.cmake";
-  if (!fs::is_regular_file(sdk_export))
+  if (!io::is_regular_file(sdk_export))
     throw std::runtime_error("Shared SDK export missing");
   auto inputs = Closure(generation, {"rexglue", "rexgpu-xenos"});
   for (const auto& file :
@@ -987,18 +1042,20 @@ AotResult Driver::Run() {
   FileLease title(
       options.paths.local() / "preparation" / (options.title + ".lock"), true);
   FileLease directory(build / ".x360n-build.lock", true);
+  std::optional<FileLease> publication;
+  if (published != build) publication.emplace(published / ".x360n-build.lock", true);
   for (const auto* path :
        {"payload-update/pending", "dependency-update.pending"})
-    if (fs::exists(options.paths.local() / path))
+    if (io::exists(options.paths.local() / path))
       throw std::runtime_error(
           "Interrupted application update; no preparation allowed");
-  const auto owner_file = build / ".x360n-aot-owner";
+  const auto owner_file = published / ".x360n-aot-owner";
   const auto owner =
       options.title + "\n" + Path(project) + "\n" + HostPlatform() + "\n";
-  if (fs::exists(owner_file) && Read(owner_file) != owner) {
+  if (io::exists(owner_file) && Read(owner_file) != owner) {
     const auto previous_owner = Read(owner_file);
     const auto game =
-        toml::parse_file(Path(manifest))["project"]["game_root"].value_or(
+        ParseTomlFile(manifest)["project"]["game_root"].value_or(
             std::string{});
     const auto imported_owner =
         options.title + "\n" + PathUtf8(PathFromUtf8(game).filename()) + "\n";
@@ -1009,7 +1066,7 @@ AotResult Driver::Run() {
           "AOT build belongs to another title/platform; select its isolated "
           "native build directory");
   }
-  if (!fs::exists(owner_file)) Publish(owner_file, owner);
+  if (!io::exists(owner_file)) Publish(owner_file, owner);
   Record(static_inputs, owner_file);
   const auto root_inputs = static_inputs;
   const auto state_file = build / ".preparation/native-state.json";
@@ -1019,9 +1076,9 @@ AotResult Driver::Run() {
   } catch (...) {
   }
   const auto preflight_commands = result.commands;
-  const bool interrupted = fs::exists(marker);
+  const bool interrupted = io::exists(marker);
   try {
-    if (!interrupted && fs::is_regular_file(result.receipt)) {
+    if (!interrupted && io::is_regular_file(result.receipt)) {
       const auto receipt = Json(result.receipt);
       const bool products_valid = VerifyProducts(previous);
       if (receipt.at("native_identity") == identity &&
@@ -1042,7 +1099,7 @@ AotResult Driver::Run() {
     const bool incremental =
         !interrupted && !previous.is_null() &&
         previous.value("identity", J{}) == identity &&
-        fs::is_regular_file(build / "CMakeCache.txt") &&
+        io::is_regular_file(build / "CMakeCache.txt") &&
         PathFromUtf8(Cache(build)["CMAKE_HOME_DIRECTORY"]).lexically_normal() ==
             project.lexically_normal();
     bool configuration =
@@ -1063,37 +1120,37 @@ AotResult Driver::Run() {
       Build(build, {"rexglue"});
       for (const auto& [id, path] : GraphFor(build, {"rexglue"}).nodes)
         if (path.filename() == "rexglue" + ExecutableSuffix() &&
-            fs::is_regular_file(path))
+            io::is_regular_file(path))
           tool = path;
       if (tool.empty()) throw std::runtime_error("Codegen producer missing");
     }
     const auto producer_dir = build / ".preparation/codegen";
-    fs::create_directories(producer_dir);
+    io::create_directories(producer_dir);
     const auto original_tool = tool;
-    for (const auto& file : fs::directory_iterator(original_tool.parent_path()))
+    for (const auto& file : io::directory_iterator(original_tool.parent_path()))
       if (file.is_regular_file() &&
           (file.path() == original_tool || IsNativeModule(file.path()))) {
         const auto copy = producer_dir / file.path().filename();
-        if (!fs::is_regular_file(copy) || Digest(copy) != Digest(file.path()))
-          fs::copy_file(file.path(), copy,
+        if (!io::is_regular_file(copy) || Digest(copy) != Digest(file.path()))
+          io::copy_file(file.path(), copy,
                         fs::copy_options::overwrite_existing);
       }
     tool = producer_dir / original_tool.filename();
     Files producer;
     Record(producer, tool);
-    for (const auto& file : fs::directory_iterator(tool.parent_path()))
+    for (const auto& file : io::directory_iterator(tool.parent_path()))
       if (file.is_regular_file() && IsNativeModule(file.path()))
         Record(producer, file.path());
     std::vector<fs::path> manifests{manifest};
     const auto extra = build / "x360n-codegen-manifests.txt";
-    if (fs::is_regular_file(extra)) {
+    if (io::is_regular_file(extra)) {
       std::istringstream lines(Read(extra));
       std::string line;
       while (std::getline(lines, line)) {
         if (!line.empty() && line.back() == '\r') line.pop_back();
         if (line.empty()) continue;
         const auto file = PathFromUtf8(line);
-        if (!fs::is_regular_file(file) || !IsWithin(file, project) ||
+        if (!io::is_regular_file(file) || !IsWithin(file, project) ||
             !line.ends_with("_manifest.toml"))
           throw std::runtime_error("Additional manifest escaped title project");
         manifests.push_back(file);
@@ -1101,8 +1158,8 @@ AotResult Driver::Run() {
     }
     Files codegen_inputs, generated;
     if (!xex_keys.empty()) Record(codegen_inputs, xex_keys);
-    for (auto it = fs::recursive_directory_iterator(project);
-         it != fs::recursive_directory_iterator(); ++it) {
+    for (auto it = io::recursive_directory_iterator(project);
+         it != io::recursive_directory_iterator(); ++it) {
       if (it->is_directory() && it->path().filename() == "generated") {
         it.disable_recursion_pending();
         continue;
@@ -1112,7 +1169,7 @@ AotResult Driver::Run() {
     }
     for (const auto& file : manifests) {
       Record(codegen_inputs, file);
-      const auto table = toml::parse_file(Path(file));
+      const auto table = ParseTomlFile(file);
       for (const auto* node : {"entrypoint"})
         if (auto path = table[node]["file_path"].value<std::string>())
           Record(codegen_inputs, file.parent_path() / PathFromUtf8(*path));
@@ -1150,27 +1207,29 @@ AotResult Driver::Run() {
     Stage("4-build");
     Build(build, {options.title});
     Commands(build);
-    if (!fs::is_regular_file(result.executable))
+    PublishNative();
+    RetireLegacyTree();
+    if (!io::is_regular_file(result.executable))
       throw std::runtime_error("Expected native executable missing: " +
                                Path(result.executable));
     ValidateNativeImage(result.executable);
     Files artifacts;
     Record(artifacts, result.executable);
-    for (const auto& file : fs::directory_iterator(build))
+    for (const auto& file : io::directory_iterator(published))
       if (file.is_regular_file() &&
           (IsNativeModule(file.path()) ||
            file.path().filename() ==
                "x360n_gpu_preflight" + ExecutableSuffix()))
         Record(artifacts, file.path());
-    if (fs::is_regular_file(project / "preparation.toml")) {
+    if (io::is_regular_file(project / "preparation.toml")) {
       const auto registration =
-          toml::parse_file(Path(project / "preparation.toml"));
+          ParseTomlFile(project / "preparation.toml");
       if (const auto* files = registration["runtime_files"].as_array())
         for (const auto& item : *files) {
           const auto name = item.value<std::string>();
           if (!name || PathFromUtf8(*name).has_parent_path())
             throw std::runtime_error("Invalid required runtime module");
-          const auto file = build / NativeRuntimeFilename(PathFromUtf8(*name));
+          const auto file = published / NativeRuntimeFilename(PathFromUtf8(*name));
           Record(artifacts, file);
           const auto stem = PathUtf8(PathFromUtf8(*name).stem());
           if (stem == "rexgpu-xenos" || stem == "rexgpu-native")
@@ -1191,7 +1250,7 @@ AotResult Driver::Run() {
     inputs.insert(codegen_inputs.begin(), codegen_inputs.end());
     for (const auto& name :
          {"x360n-ninja" + ExecutableSuffix(), std::string("x360n-ninja.json")})
-      if (fs::is_regular_file(build / name)) Record(inputs, build / name);
+      if (io::is_regular_file(build / name)) Record(inputs, build / name);
     // Keep launch receipts tied to the actual build closure. The complete SDK
     // source/tool inventory selects a preparation generation, not every launch.
     for (const auto& [path, hash] : static_inputs) {
@@ -1247,8 +1306,8 @@ AotResult Driver::Run() {
     if (!Verify(inputs) || !Verify(artifacts) || !VerifyInventory(globs))
       throw std::runtime_error("Preparation changed during publication");
     Publish(result.receipt, receipt.dump(2));
-    if (!options.keep_incomplete) fs::remove(marker);
-    fs::remove(options.paths.local() / "preparation" /
+    if (!options.keep_incomplete) io::remove(marker);
+    io::remove(options.paths.local() / "preparation" /
                (options.title + ".runtime-error"));
     Stage("prepared");
     (void)preflight_commands;
@@ -1271,7 +1330,9 @@ int GuardNinja(const fs::path& configuration,
   const auto ninja = PathFromUtf8(config.at("ninja"));
   const auto title = config.at("title").get<std::string>();
   const ProjectPaths project_paths{root};
-  const bool title_build = IsWithin(build, project_paths.build());
+  const bool title_build =
+      IsWithin(build, project_paths.build()) ||
+      (!title.empty() && IsWithin(build, NativeBuildRoot(project_paths)));
   const auto sdk_root = SharedSdkBuildRoot(project_paths);
   const bool sdk_build = title.empty() && IsWithin(build, sdk_root);
   if ((!title_build && !sdk_build) ||
@@ -1320,9 +1381,9 @@ int GuardNinja(const fs::path& configuration,
   const auto receipt_file =
       PreparationReceipt(build / (title + ExecutableSuffix()));
   const bool invalidate = !owned && !query && !title.empty();
-  const bool restore_noop = invalidate && !fs::exists(marker);
+  const bool restore_noop = invalidate && !io::exists(marker);
   std::string previous_receipt;
-  if (restore_noop && fs::is_regular_file(receipt_file))
+  if (restore_noop && io::is_regular_file(receipt_file))
     previous_receipt = Read(receipt_file);
   if (invalidate)
     Publish(marker, "Direct native build; prepare to verify its products\n");
@@ -1340,7 +1401,7 @@ int GuardNinja(const fs::path& configuration,
   spec.should_cancel = std::move(cancelled);
   uint64_t out_offset = 0, err_offset = 0;
   const auto relay = [&](const fs::path& path, FILE* stream, uint64_t& offset) {
-    std::ifstream in(path, std::ios::binary);
+    io::ifstream in(path, std::ios::binary);
     if (!in) return;
     in.seekg(std::streamoff(offset));
     char buffer[8192];
@@ -1358,8 +1419,8 @@ int GuardNinja(const fs::path& configuration,
   const auto result = RunProcess(spec);
   spec.on_tick();
   std::error_code ignored;
-  fs::remove(spec.stdout_file, ignored);
-  fs::remove(spec.stderr_file, ignored);
+  io::remove(spec.stdout_file, ignored);
+  io::remove(spec.stderr_file, ignored);
   if (!result.launched || result.timed_out || result.cancelled ||
       !result.launch_error.empty())
     throw std::runtime_error("Ninja supervision failed: " +
@@ -1375,7 +1436,7 @@ int GuardNinja(const fs::path& configuration,
           Verify(Entries(receipt.at("artifacts"))) &&
           VerifyInventory(receipt.at("globs")) &&
           VerifyProducts(Json(build / ".preparation/native-state.json")))
-        fs::remove(marker);
+        io::remove(marker);
     } catch (...) { /* Preserve the marker unless the complete prior receipt
                        still authenticates. */
     }

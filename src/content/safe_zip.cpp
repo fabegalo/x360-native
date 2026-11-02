@@ -30,10 +30,10 @@ namespace x360n::content {
 namespace {
 constexpr uint64_t kMaxFile = 512ull << 20, kMaxTotal = 2ull << 30;
 struct Zip {
-  std::ifstream input;
+  io::ifstream input;
   mz_zip_archive archive{};
   explicit Zip(const fs::path& path) : input(path, std::ios::binary) {
-    const auto size = fs::file_size(path);
+    const auto size = io::file_size(path);
     if (!input || size > kMaxTotal) throw std::runtime_error("ZIP: archive exceeds size limit or cannot be read");
     // Bound central-directory allocation before entering miniz. Only ordinary,
     // single-volume ZIP is needed by the USB update (ZIP64 fails closed).
@@ -64,7 +64,7 @@ struct Zip {
   ~Zip() { mz_zip_reader_end(&archive); }
 };
 struct Output {
-  std::ofstream stream;
+  io::ofstream stream;
   uint64_t size = 0, limit;
 };
 }
@@ -156,13 +156,13 @@ void ExtractUpdateZip(const fs::path& source, const fs::path& dest) {
       if (auto it = names.find(name.substr(0,p)); it != names.end() && !it->second)
         throw std::runtime_error("ZIP: file/directory collision");
   }
-  if (!fs::create_directory(dest)) throw std::runtime_error("ZIP: destination already exists");
+  if (!io::create_directory(dest)) throw std::runtime_error("ZIP: destination already exists");
   uint64_t done = 0;
   for (const auto& item : items) {
     const auto path = dest / item.path;
-    if (item.directory) { fs::create_directories(path); continue; }
-    fs::create_directories(path.parent_path());
-    Output out{std::ofstream(path, std::ios::binary | std::ios::out | std::ios::noreplace), 0, item.size};
+    if (item.directory) { io::create_directories(path); continue; }
+    io::create_directories(path.parent_path());
+    Output out{io::ofstream(path, std::ios::binary | std::ios::out | std::ios::noreplace), 0, item.size};
     if (!out.stream) throw std::runtime_error("ZIP: cannot create exclusive output");
     const auto write = [](void* p, mz_uint64 offset, const void* data, size_t size) -> size_t {
       auto& o = *static_cast<Output*>(p);

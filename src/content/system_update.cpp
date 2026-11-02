@@ -24,22 +24,12 @@ std::string Lower(std::string s) {
   std::transform(s.begin(),s.end(),s.begin(),[](unsigned char c){return char(std::tolower(c));}); return s;
 }
 void NoLinks(const fs::path& path) {
-  fs::path parent;
-  for (const auto& part : fs::absolute(path)) {
-    parent /= part;
-#ifdef _WIN32
-    const auto attributes = GetFileAttributesW(parent.c_str());
-    if (attributes != INVALID_FILE_ATTRIBUTES && (attributes & FILE_ATTRIBUTE_REPARSE_POINT))
-#else
-    std::error_code ec;
-    if (fs::is_symlink(fs::symlink_status(parent, ec)))
-#endif
-      throw std::runtime_error("System Update: refusing reparse point/link: " + Text(parent));
-  }
+  if (const auto link = io::redirected_component(path); !link.empty())
+    throw std::runtime_error("System Update: refusing reparse point/link: " + Text(link));
 }
 struct Stage {
   fs::path path;
-  ~Stage() { std::error_code ec; fs::remove_all(path,ec); }
+  ~Stage() { std::error_code ec; io::remove_all(path,ec); }
 };
 }
 int ExtractSystemUpdate(const fs::path& source, const fs::path& destination) {
@@ -48,15 +38,15 @@ int ExtractSystemUpdate(const fs::path& source, const fs::path& destination) {
     auto manifest_path=dest; manifest_path += ".sha256";
     auto report_path=dest; report_path += ".report.txt";
     NoLinks(source); NoLinks(dest);
-    if (fs::exists(dest) || fs::exists(manifest_path))
+    if (io::exists(dest) || io::exists(manifest_path))
       throw std::runtime_error("System Update: destination already exists; nothing overwritten");
-    fs::create_directories(dest.parent_path());
+    io::create_directories(dest.parent_path());
     auto staging = dest; staging += ".staging";
-    if (!fs::create_directory(staging)) throw std::runtime_error("System Update: interrupted staging exists; retry with a new operation directory");
+    if (!io::create_directory(staging)) throw std::runtime_error("System Update: interrupted staging exists; retry with a new operation directory");
     Stage cleanup{staging};
     auto folder = source;
     fs::path package;
-    if (fs::is_regular_file(source)) {
+    if (io::is_regular_file(source)) {
       if (HasZipSignature(source)) {
         folder = staging / "zip";
         ExtractUpdateZip(source,folder);
@@ -76,9 +66,9 @@ int ExtractSystemUpdate(const fs::path& source, const fs::path& destination) {
     if (!anchor || anchor->sha256 != dash17559::kOriginalAssets[0].sha256)
       throw std::runtime_error("System Update: $flash_dash.xex does not match Retail 17559 SHA-256; no components imported");
     const auto output = staging/"verified";
-    fs::create_directory(output);
+    io::create_directory(output);
     ExtractionManifest manifest(manifest_path);
-    std::ofstream report(report_path,std::ios::binary | std::ios::out | std::ios::noreplace);
+    io::ofstream report(report_path,std::ios::binary | std::ios::out | std::ios::noreplace);
     if (!report) throw std::runtime_error("System Update: cannot create provenance report");
     report << "dashboard-version\t2.0.17559.0\n";
     auto record = [&](const fs::path& path, const std::string& origin) {
@@ -86,12 +76,12 @@ int ExtractSystemUpdate(const fs::path& source, const fs::path& destination) {
       if (!digest) throw std::runtime_error("System Update: cannot hash source");
       report << "source\t" << digest->sha256 << '\t' << origin << '\n';
     };
-    if (fs::is_regular_file(source)) record(source,Text(source));
+    if (io::is_regular_file(source)) record(source,Text(source));
     record(package,Text(package.lexically_relative(staging)));
     std::map<std::string,fs::path> inputs;
     auto index = [&](const fs::path& root, bool strict) {
       size_t count = 0;
-      for (const auto& entry:fs::directory_iterator(root)) {
+      for (const auto& entry:io::directory_iterator(root)) {
         if (++count > 4096) throw std::runtime_error("System Update: directory limit exceeded");
         NoLinks(entry.path());
         if (!entry.is_regular_file()) continue;
@@ -108,7 +98,7 @@ int ExtractSystemUpdate(const fs::path& source, const fs::path& destination) {
       if (!digest || digest->sha256 != expected)
         throw std::runtime_error("System Update: incorrect/corrupt Retail 17559 component: " + Text(from.filename()));
       const auto out=output/PathFromUtf8(std::string(relative));
-      fs::create_directories(out.parent_path()); fs::copy_file(from,out,fs::copy_options::none);
+      io::create_directories(out.parent_path()); io::copy_file(from,out,fs::copy_options::none);
       const auto copied=DigestFile(out);
       if (!copied || copied->sha256 != expected) throw std::runtime_error("System Update: component changed during copy");
       manifest.stream() << expected << " *" << relative << '\n';
@@ -133,7 +123,7 @@ int ExtractSystemUpdate(const fs::path& source, const fs::path& destination) {
         auto bytes=ReadUnencryptedXexResource(original->second,"shrdres");
         if (Sha256Hex(bytes)!=asset.sha256) throw std::runtime_error("System Update: embedded shrdres SHA-256 mismatch");
         const auto recovered=staging/"shrdres.xzp";
-        std::ofstream file(recovered,std::ios::binary); file.write(reinterpret_cast<const char*>(bytes.data()),bytes.size());
+        io::ofstream file(recovered,std::ios::binary); file.write(reinterpret_cast<const char*>(bytes.data()),bytes.size());
         file.close(); if (!file) throw std::runtime_error("System Update: cannot write embedded resource");
         copy(recovered,asset.path,asset.sha256);
       } else {
@@ -166,7 +156,7 @@ int ExtractSystemUpdate(const fs::path& source, const fs::path& destination) {
     }
     report << "required-missing\t" << missing << '\n'; report.close();
     if (!report) throw std::runtime_error("System Update: cannot flush provenance report");
-    fs::rename(output,dest); // exclusive destination in this operation's staging
+    io::rename(output,dest); // exclusive destination in this operation's staging
     manifest.Publish();
     std::cout << "X360N_STAGE Dashboard Xbox 360 — Retail 17559; faltam " << missing << " componente(s) obrigatório(s)\n" << std::flush;
     return 0;

@@ -43,3 +43,9 @@ target_compile_definitions(x360n_core PUBLIC
 
 add_executable(x360n main.cpp)
 target_link_libraries(x360n PRIVATE x360n_core)
+# UTF-8 process code page (Windows 10 1903+), as the titles: narrow paths and
+# messages carry any Unicode folder name without changing the system locale.
+if(WIN32)
+  target_link_options(x360n PRIVATE "LINKER:/MANIFESTINPUT:${PROJECT_SOURCE_DIR}/cmake/runtime/x360n_runtime.manifest")
+  set_property(TARGET x360n APPEND PROPERTY LINK_DEPENDS "${PROJECT_SOURCE_DIR}/cmake/runtime/x360n_runtime.manifest")
+endif()

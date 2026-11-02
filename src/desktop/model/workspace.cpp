@@ -18,7 +18,7 @@ namespace x360n::desktop {
 namespace {
 using Index = std::map<fs::path, std::string>;
 Index ReadIndex(const fs::path& file, bool payload = true) {
-  std::ifstream in(file, std::ios::binary);
+  io::ifstream in(file, std::ios::binary);
   if (!in) throw std::runtime_error("Pacote incompleto. Extraia novamente o ZIP completo em outra pasta.");
   Index result;
   std::set<std::string> names;
@@ -38,13 +38,13 @@ Index ReadIndex(const fs::path& file, bool payload = true) {
   return result;
 }
 void Safe(const fs::path& root, const fs::path& rel) {
-  const auto relative = fs::weakly_canonical(root / rel).lexically_relative(fs::weakly_canonical(root));
+  const auto relative = io::weakly_canonical(root / rel).lexically_relative(io::weakly_canonical(root));
   if (relative.empty() || relative.is_absolute() || *relative.begin() == "..")
     throw std::runtime_error("Pasta redirecionada para fora do ambiente. Arquivos preservados.");
   auto part = root;
   for (const auto& segment : rel) {
     part /= segment;
-    if (fs::is_symlink(part)) throw std::runtime_error("Arquivo redirecionado. Arquivos preservados.");
+    if (io::is_redirect(part)) throw std::runtime_error("Arquivo redirecionado. Arquivos preservados.");
   }
 }
 bool Matches(const fs::path& path, const std::string& hash) {
@@ -60,10 +60,10 @@ Index Payload(const fs::path& payload) {
 }
 void Publish(const fs::path& source, const fs::path& dest) {
 #ifdef _WIN32
-  if (!MoveFileExW(source.c_str(), dest.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH))
+  if (!MoveFileExW(io::Host(source).c_str(), io::Host(dest).c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH))
     throw std::runtime_error("Não foi possível concluir a atualização. Feche outros aplicativos e tente novamente; seus dados foram preservados.");
 #else
-  fs::rename(source, dest);
+  io::rename(source, dest);
 #endif
 }
 std::string Component(const fs::path& rel) {
@@ -76,14 +76,14 @@ Index Retired(const fs::path& destination, const Index& index) {
   Index old;
   const auto previous = destination / ".local/payload.sha256";
   Safe(destination, ".local/payload.sha256");
-  if (fs::exists(previous)) old = ReadIndex(previous);
+  if (io::exists(previous)) old = ReadIndex(previous);
   // Legacy installations did not retain an index. Archive obsolete build inputs
   // in managed source directories, but retain AOT outputs and all user content.
   const std::set<std::string> extensions{".cpp", ".c", ".h", ".hpp", ".cmake", ".toml", ".json", ".ps1", ".cmd", ".py"};
   for (auto top : {"cmake", "src", "scripts", "titles", "tests", "patches"}) {
     Safe(destination, top);
-    if (!fs::is_directory(destination / top)) continue;
-    for (auto it = fs::recursive_directory_iterator(destination / top); it != fs::recursive_directory_iterator(); ++it) {
+    if (!io::is_directory(destination / top)) continue;
+    for (auto it = io::recursive_directory_iterator(destination / top); it != io::recursive_directory_iterator(); ++it) {
       const auto rel = it->path().lexically_relative(destination);
       Safe(destination, rel);
       if (it->is_directory() && it->path().filename() == "generated") { it.disable_recursion_pending(); continue; }
@@ -106,7 +106,7 @@ void VerifyPackage(const fs::path& directory, const std::string& expected_payloa
     Safe(directory, rel);
     if (!Matches(directory / rel, hash)) throw std::runtime_error("Esta cópia do aplicativo está incompleta ou foi alterada. Extraia novamente o ZIP completo; seus jogos e dados serão preservados. Arquivo: " + Utf8(rel));
   }
-  for (auto it = fs::recursive_directory_iterator(directory); it != fs::recursive_directory_iterator(); ++it) {
+  for (auto it = io::recursive_directory_iterator(directory); it != io::recursive_directory_iterator(); ++it) {
     const auto rel = it->path().lexically_relative(directory);
     if (*rel.begin() == "data") { it.disable_recursion_pending(); continue; }
     auto ext = Utf8(it->path().extension()); for (auto& c : ext) c = char(std::tolower(static_cast<unsigned char>(c)));
@@ -122,7 +122,7 @@ PayloadStatus InspectEnvironment(const fs::path& payload, const fs::path& destin
   const auto index = Payload(payload);
   PayloadStatus status;
   Safe(destination, ".local/payload-update");
-  status.interrupted = fs::exists(destination / ".local/payload-update/pending");
+  status.interrupted = io::exists(destination / ".local/payload-update/pending");
   std::set<std::string> components;
   for (const auto& [rel, hash] : index) {
     Safe(destination, rel);
@@ -130,7 +130,7 @@ PayloadStatus InspectEnvironment(const fs::path& payload, const fs::path& destin
   }
   for (const auto& [rel, hash] : Retired(destination, index)) {
     Safe(destination, rel);
-    if (!index.contains(rel) && fs::exists(destination / rel)) components.insert(Component(rel));
+    if (!index.contains(rel) && io::exists(destination / rel)) components.insert(Component(rel));
   }
   status.components.assign(components.begin(), components.end());
   status.current = components.empty() && !status.interrupted;
@@ -140,7 +140,7 @@ void InitializeEnvironment(const fs::path& payload, const fs::path& destination,
                            bool allow_update, const std::function<void()>& checkpoint) {
   const auto index = Payload(payload); // Validate before creating any directory.
   const auto status = InspectEnvironment(payload, destination);
-  if (!allow_update && !status.current && fs::exists(destination / "deps.lock.json"))
+  if (!allow_update && !status.current && io::exists(destination / "deps.lock.json"))
     throw std::runtime_error("Esta instalação precisa ser atualizada para continuar. Seus jogos e dados serão preservados.");
   WorkspaceLease lease(ProjectPaths{destination});
   Safe(destination, ".local/payload.sha256");
@@ -148,28 +148,28 @@ void InitializeEnvironment(const fs::path& payload, const fs::path& destination,
   Safe(destination, ".local/payload-backups");
   const auto txn = destination / ".local/payload-update";
   const auto identity = DigestFile(payload / "payload.sha256")->sha256;
-  if (fs::exists(txn / "pending")) {
-    std::ifstream in(txn / "pending"); std::string pending; std::getline(in, pending);
+  if (io::exists(txn / "pending")) {
+    io::ifstream in(txn / "pending"); std::string pending; std::getline(in, pending);
     if (pending != identity) throw std::runtime_error("Uma atualização foi interrompida. Reabra a versão que iniciou a atualização para concluí-la. Seus dados foram preservados.");
   } else {
-    if (fs::exists(txn)) {
-      fs::create_directories(destination / ".local/payload-backups");
-      fs::rename(txn, destination / ".local/payload-backups" / std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+    if (io::exists(txn)) {
+      io::create_directories(destination / ".local/payload-backups");
+      io::rename(txn, destination / ".local/payload-backups" / std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
     }
-    fs::create_directories(txn);
-    std::ofstream(txn / "pending.tmp", std::ios::binary) << identity << '\n';
+    io::create_directories(txn);
+    io::ofstream(txn / "pending.tmp", std::ios::binary) << identity << '\n';
     Publish(txn / "pending.tmp", txn / "pending");
   }
   // Durable marker before managed file changes. Retry is idempotent and the
   // original backup is never overwritten. User directories are not in the index.
   auto backup = [&](const fs::path& rel) {
     Safe(destination, rel); Safe(txn, fs::path("backup") / rel);
-    if (fs::exists(destination / rel) && !fs::exists(txn / "backup" / rel)) {
-      fs::create_directories((txn / "backup" / rel).parent_path());
+    if (io::exists(destination / rel) && !io::exists(txn / "backup" / rel)) {
+      io::create_directories((txn / "backup" / rel).parent_path());
       const auto staged = txn / "backup-stage" / rel;
       Safe(txn, fs::path("backup-stage") / rel);
-      fs::create_directories(staged.parent_path());
-      fs::copy_file(destination / rel, staged, fs::copy_options::overwrite_existing);
+      io::create_directories(staged.parent_path());
+      io::copy_file(destination / rel, staged, fs::copy_options::overwrite_existing);
       if (DigestFile(destination / rel)->sha256 != DigestFile(staged)->sha256)
         throw std::runtime_error("Não foi possível preservar os arquivos anteriores. Atualização interrompida com segurança.");
       Publish(staged, txn / "backup" / rel);
@@ -180,19 +180,19 @@ void InitializeEnvironment(const fs::path& payload, const fs::path& destination,
     backup(rel);
     const auto stage = txn / "stage" / rel;
     Safe(txn, fs::path("stage") / rel);
-    fs::create_directories(stage.parent_path());
-    fs::copy_file(payload / rel, stage, fs::copy_options::overwrite_existing);
+    io::create_directories(stage.parent_path());
+    io::copy_file(payload / rel, stage, fs::copy_options::overwrite_existing);
     if (!Matches(stage, hash)) throw std::runtime_error("Falha ao verificar a cópia do pacote.");
-    fs::create_directories((destination / rel).parent_path());
+    io::create_directories((destination / rel).parent_path());
     Publish(stage, destination / rel);
     if (checkpoint) checkpoint();
   }
   for (const auto& [rel, hash] : Retired(destination, index)) {
-    if (fs::exists(destination / rel)) { backup(rel); fs::remove(destination / rel); if (checkpoint) checkpoint(); }
+    if (io::exists(destination / rel)) { backup(rel); io::remove(destination / rel); if (checkpoint) checkpoint(); }
   }
   for (const auto& [rel, hash] : index) if (!Matches(destination / rel, hash)) throw std::runtime_error("A atualização ainda não foi validada. Tente novamente.");
-  fs::copy_file(payload / "payload.sha256", txn / "identity", fs::copy_options::overwrite_existing);
+  io::copy_file(payload / "payload.sha256", txn / "identity", fs::copy_options::overwrite_existing);
   Publish(txn / "identity", destination / ".local/payload.sha256");
-  fs::remove(txn / "pending"); // Last: only verified environments are ready.
+  io::remove(txn / "pending"); // Last: only verified environments are ready.
 }
 }

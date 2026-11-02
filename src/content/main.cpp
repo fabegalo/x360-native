@@ -56,6 +56,8 @@
 #include "xex_patch.h"
 #include "sha256.h"
 #include "extraction.h"
+#include "fs_io.h"
+namespace io = x360n::io;
 
 namespace fs = std::filesystem;
 using rex::X_STATUS;  // X_STATUS_SUCCESS expands to a cast to it
@@ -160,7 +162,7 @@ std::unique_ptr<rex::Runtime> LoadXex(const char* cmd, const fs::path& game_root
 // Variable import slots in it are already patched by the loader. Diagnostic only.
 int DumpImage(const fs::path& game_root, const std::string& xex_rel, const fs::path& out) {
   std::error_code ec;
-  if (fs::exists(out, ec)) {
+  if (io::exists(out, ec)) {
     fmt::print(stderr, "dump-image: output already exists: {}\n", out.string());
     return 3;
   }
@@ -169,7 +171,7 @@ int DumpImage(const fs::path& game_root, const std::string& xex_rel, const fs::p
   if (!runtime) return 1;
   uint32_t base = xex->base_address(), size = xex->image_size();
   auto* data = runtime->memory()->TranslateVirtual<const uint8_t*>(base);
-  std::ofstream(out, std::ios::binary).write(reinterpret_cast<const char*>(data), std::streamsize(size));
+  io::ofstream(out, std::ios::binary).write(reinterpret_cast<const char*>(data), std::streamsize(size));
   fmt::print("image base 0x{:08X} size 0x{:X} sha256 {} -> {}\n", base, size,
              x360n::Sha256Hex({data, size}), out.string());
   return 0;

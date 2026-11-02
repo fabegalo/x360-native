@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <fstream>
 #include <utility>
+#include "../../supervisor/fs_io.h"
 REXCVAR_DEFINE_BOOL(native_stats, false, "GPU/Native", "Log cumulative Native CPU submission costs for bounded diagnostics");
 REXCVAR_DEFINE_BOOL(native_texture_cache, true, "GPU/Native", "Reuse textures only while every guest source byte matches; disable for diagnostics");
 REXCVAR_DEFINE_BOOL(native_texture_cpu, false, "GPU/Native", "Diagnose texture loads with CPU conversion and synchronized guest bytes");
@@ -185,8 +186,8 @@ D3D12Render::D3D12Render(rex::ui::d3d12::D3D12Provider& provider) : provider_(pr
   Check(D3D12SerializeRootSignature(&rd, D3D_ROOT_SIGNATURE_VERSION_1, &blob, &errors), "draw root serialization");
   const auto pso_dump = REXCVAR_GET(native_pso_dump);
   if (!pso_dump.empty()) {
-    std::filesystem::create_directories(pso_dump);
-    std::ofstream out(std::filesystem::path(pso_dump) / "root.bin", std::ios::binary);
+    x360n::io::create_directories(pso_dump);
+    x360n::io::ofstream out(std::filesystem::path(pso_dump) / "root.bin", std::ios::binary);
     out.write(static_cast<const char*>(blob->GetBufferPointer()), blob->GetBufferSize());
     Require(bool(out), "PSO root diagnostic write failed");
   }
