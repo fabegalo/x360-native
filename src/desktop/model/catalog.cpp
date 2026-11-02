@@ -250,7 +250,7 @@ Inspection Inspect(const ProjectPaths& paths, const Target& t, InspectionMode mo
   for (const auto& i : t.inputs) {
     CheckVerificationCancellation();
     auto file = t.preparation_source.empty() ? i.destination : t.preparation_source / i.destination.lexically_relative(t.game_root);
-    if (!fs::is_regular_file(file)) {
+    if (!fs::is_regular_file(LongPath(file))) {
       // Absent optional components are checked by whoever needs them.
       if (i.optional) continue;
       r.inputs_ok = false;
