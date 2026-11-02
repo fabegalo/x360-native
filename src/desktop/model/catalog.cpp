@@ -13,6 +13,8 @@
 #include <map>
 #include <stdexcept>
 #include <sstream>
+#include <vector>
+#include <system_error>
 #include <toml++/toml.hpp>
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
@@ -76,11 +78,26 @@ bool CatalogLaunchVerificationActive() { return launch_verification; }
 fs::path CatalogVerificationPath(const fs::path& path) {
   if (launch_verification) return VerificationPath(path);
 #ifdef _WIN32
-  const auto resolved = fs::weakly_canonical(LongPath(path));
-  const auto name = resolved.native();
-  if (name.starts_with(L"\\\\?\\UNC\\")) return fs::path(L"\\\\" + name.substr(8));
-  if (name.starts_with(L"\\\\?\\")) return fs::path(name.substr(4));
-  return resolved;
+  // Resolve existing ancestors via the Windows handle API. Feeding a \\?\
+  // path into weakly_canonical makes MSVC inspect the invalid \\?\C:
+  // intermediate component and breaks even ordinary imports.
+  auto cursor = fs::absolute(path).lexically_normal();
+  std::vector<fs::path> missing;
+  std::error_code ec;
+  while (!fs::exists(LongPath(cursor), ec)) {
+    if (ec && ec != std::errc::no_such_file_or_directory)
+      throw fs::filesystem_error("verify import path", cursor, ec);
+    const auto parent = cursor.parent_path();
+    if (parent == cursor || parent.empty())
+      throw fs::filesystem_error("verify import path", cursor,
+                                 std::make_error_code(std::errc::no_such_file_or_directory));
+    missing.push_back(cursor.filename());
+    cursor = parent;
+    ec.clear();
+  }
+  auto resolved = CanonicalPath(cursor);
+  for (auto it = missing.rbegin(); it != missing.rend(); ++it) resolved /= *it;
+  return resolved.lexically_normal();
 #else
   return fs::weakly_canonical(path);
 #endif
