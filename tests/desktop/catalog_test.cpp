@@ -48,6 +48,26 @@ struct Fixture {
 };
 }
 
+TEST_CASE("Windows catalog resolves existing and missing paths without invalid extended roots", "[catalog][paths]") {
+#ifdef _WIN32
+  Fixture f;
+  const auto ordinary = f.source / "dash.xex";
+  CHECK(CatalogVerificationPath(ordinary) == CanonicalPath(ordinary));
+  const auto missing = f.source / "nested" / "not-created.loc";
+  CHECK(CatalogVerificationPath(missing) == CanonicalPath(f.source) / "nested" / "not-created.loc");
+  auto deep = f.source;
+  while ((deep / "locator.loc").native().size() <= 270) {
+    deep /= std::string(38, 'd');
+    fs::create_directory(LongPath(deep));
+  }
+  const auto locator = deep / "locator.loc";
+  std::ofstream(LongPath(locator)) << "locator bytes";
+  CHECK(CatalogVerificationPath(locator) == CanonicalPath(locator));
+  CHECK(CatalogVerificationPath(deep / "missing.loc") == CanonicalPath(deep) / "missing.loc");
+  fs::remove_all(LongPath(f.source / std::string(38, 'd')));
+#endif
+}
+
 TEST_CASE("asset inventory rejects missing data and same-name files in the wrong folder") {
   Fixture f;
   f.target.inputs.push_back({f.target.game_root / "art/texture.bin", "texture.bin", Hash("texture"), "art/texture.bin"});
