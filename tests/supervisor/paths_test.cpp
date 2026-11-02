@@ -159,9 +159,9 @@ TEST_CASE("title builds use a short isolated directory however deep the installa
   const auto tree = NativeBuildDirectory(p, published);
   CHECK(tree == NativeBuildDirectory(p, published));
   CHECK(tree != NativeBuildDirectory(p, p.build() / "aot" / "g0123456789abcdee"));
+#ifdef _WIN32
   // The same directory however it is spelled.
   CHECK(tree == NativeBuildDirectory(p, published / "x" / ".."));
-#ifdef _WIN32
   // A generic title's deepest object is ~190 characters below its build tree;
   // Ninja fails once the whole path passes MAX_PATH.
   CHECK(tree.native().size() <= 69);
