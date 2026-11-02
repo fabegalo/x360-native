@@ -15,7 +15,7 @@ concluídos. [Relatório e testes](reports/audit-closure-2026-10-18.md).
 com retorno automático antes do aceite XNA. Corrigidos metadados divergentes da
 biblioteca; renderização, entrada, Guide/Xbox Home, gameplay e saves continuam
 pendentes. Os itens XNA da seção 20 permanecem abertos. [Evidências](reports/charlie-functional-2026-10-18.md).
-A release pública atual é [v1.28.17](https://github.com/fabegalo/x360-native/releases/tag/v1.28.17);
+A release pública atual é [v1.28.18](https://github.com/fabegalo/x360-native/releases/tag/v1.28.18);
 as releases anteriores à v1.28.16 foram removidas e a referência à `.19` acima é histórica.
 
 **Objetivo:** escolher uma dashboard original → executar a intro correspondente → entrar em um perfil → listar e selecionar um jogo pela interface original → atender ao pedido original de lançamento → jogar → salvar → atender ao pedido original de retorno → voltar à mesma dashboard, sem repetir a intro.

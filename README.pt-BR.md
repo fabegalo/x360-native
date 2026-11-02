@@ -15,7 +15,7 @@
   [English](README.md) · [Português (Brasil)](README.pt-BR.md) · [Documentação](docs/README.md) · [Como contribuir](CONTRIBUTING.md)
 </div>
 
-> **Software experimental.** Windows x64 é a única plataforma com evidências de ponta a ponta, os resultados dependem da versão exata da dashboard e do jogo, e nenhum jogo está certificado como plenamente funcional. A versão 1.28.17 é a atual do canal estável; estável designa o canal de distribuição, não uma afirmação de compatibilidade.
+> **Software experimental.** Windows x64 é a única plataforma com evidências de ponta a ponta, os resultados dependem da versão exata da dashboard e do jogo, e nenhum jogo está certificado como plenamente funcional. A versão 1.28.18 é a atual do canal estável; estável designa o canal de distribuição, não uma afirmação de compatibilidade.
 
 ## Veja funcionando
 
@@ -39,7 +39,7 @@ A **dashboard original do Xbox 360** é um alvo próprio: inicialização, naveg
 
 ## Estado atual
 
-Configuração principal: **Windows x64 com o backend Xenos D3D12.** A versão 1.28.17 também traz pacotes para Windows ARM64, Linux x64 (incluindo Steam Deck), Linux ARM64 e macOS (Apple Silicon e Intel), cada um compilado e conferido num runner do GitHub correspondente. Um pacote não é evidência de execução: nenhum fluxo de dashboard ou de jogo foi demonstrado nesses alvos.
+Configuração principal: **Windows x64 com o backend Xenos D3D12.** A versão 1.28.18 também traz pacotes para Windows ARM64, Linux x64 (incluindo Steam Deck), Linux ARM64 e macOS (Apple Silicon e Intel), cada um compilado e conferido num runner do GitHub correspondente. Um pacote não é evidência de execução: nenhum fluxo de dashboard ou de jogo foi demonstrado nesses alvos.
 
 | Alvo | Alcançado | Ainda não certificado |
 |---|---|---|
@@ -71,16 +71,16 @@ Configuração principal: **Windows x64 com o backend Xenos D3D12.** A versão 1
 
 ## Download
 
-**[Baixe o x360-native 1.28.17](https://github.com/fabegalo/x360-native/releases/tag/v1.28.17)** · [notas da versão](docs/releases/1.28.17.md)
+**[Baixe o x360-native 1.28.18](https://github.com/fabegalo/x360-native/releases/tag/v1.28.18)** · [notas da versão](docs/releases/1.28.18.md)
 
 | Sistema | Arquitetura | Pacote |
 |---|---|---|
-| Windows | x64 | `x360-native-1.28.17-windows-x64.zip` |
-| Windows | ARM64 | `x360-native-1.28.17-windows-arm64.zip` |
-| Linux / Steam Deck | x64 | `x360-native-1.28.17-linux-x64.tar.gz` |
-| Linux | ARM64 | `x360-native-1.28.17-linux-arm64.tar.gz` |
-| macOS | Apple Silicon / ARM64 | `x360-native-1.28.17-macos-arm64.zip` |
-| macOS | Intel / x64 | `x360-native-1.28.17-macos-x64.zip` |
+| Windows | x64 | `x360-native-1.28.18-windows-x64.zip` |
+| Windows | ARM64 | `x360-native-1.28.18-windows-arm64.zip` |
+| Linux / Steam Deck | x64 | `x360-native-1.28.18-linux-x64.tar.gz` |
+| Linux | ARM64 | `x360-native-1.28.18-linux-arm64.tar.gz` |
+| macOS | Apple Silicon / ARM64 | `x360-native-1.28.18-macos-arm64.zip` |
+| macOS | Intel / x64 | `x360-native-1.28.18-macos-x64.zip` |
 
 1. Baixe o pacote do seu sistema e o arquivo `.sha256` correspondente na página da Release (não o arquivo "Source code" do GitHub).
 2. Extraia o pacote inteiro numa pasta vazia e abra o aplicativo: `x360-native.exe` no Windows, `./x360-native` no Linux (X11 ou Wayland) e no macOS (pelo Terminal; o pacote não é notarizado). Mantenha a pasta `data/` ao lado dele: ela guarda biblioteca, preparações e configurações.
@@ -130,7 +130,7 @@ Não. Use arquivos obtidos legalmente e mantenha os módulos originais de cada d
 </details>
 
 <details><summary><strong>Funciona em Linux, macOS ou ARM?</strong></summary>
-A versão 1.28.17 tem pacotes para Windows ARM64, Linux x64/ARM64 e macOS ARM64/x64, mas as evidências de ponta a ponta continuam sendo só do Windows x64. Um pacote que compila e passa nas verificações em outra plataforma não comprova suporte em execução, e a jogabilidade no Steam Deck não está certificada.
+A versão 1.28.18 tem pacotes para Windows ARM64, Linux x64/ARM64 e macOS ARM64/x64, mas as evidências de ponta a ponta continuam sendo só do Windows x64. Um pacote que compila e passa nas verificações em outra plataforma não comprova suporte em execução, e a jogabilidade no Steam Deck não está certificada.
 </details>
 
 <details><summary><strong>Saves, Xbox Live, multiplayer e periféricos são suportados?</strong></summary>
