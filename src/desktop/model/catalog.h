@@ -84,7 +84,7 @@ void ReadImportedGames(const ProjectPaths& paths, std::vector<Target>& targets);
 void GenerateAotProject(const ProjectPaths& paths, const Target& target);
 std::string ImportGame(const ProjectPaths& paths, const std::vector<Target>& targets,
     const std::filesystem::path& source, const std::filesystem::path& original,
-    const std::function<bool()>& cancelled = {});
+    const std::function<bool()>& cancelled = {}, bool consume_source = false);
 // Presentation only: the recorded icon bytes, or empty when absent or changed.
 std::vector<uint8_t> ReadThumbnail(const Target& target);
 std::vector<std::string> DetectImportTargets(const std::vector<Target>& targets,
@@ -123,9 +123,13 @@ std::filesystem::path PreparationMarker(const ProjectPaths& paths, const Target&
 // Validates the entire selected set before any write. Copies only verified missing
 // files; existing different bytes are an error. Cancellation leaves valid copies
 // reusable, never changes sources or user data. No arbitrary XEX execution.
+// `consume_source`: `source` is this import's own extraction (ImportSource),
+// deleted afterwards; its verified files become the imported ones by hard link
+// where the volume allows, never by a second copy. Never for user originals.
 size_t Import(const ProjectPaths& paths, const Target& target,
               const std::filesystem::path& source,
-              const std::function<bool()>& cancelled = {}, bool allow_partial = false);
+              const std::function<bool()>& cancelled = {}, bool allow_partial = false,
+              bool consume_source = false);
 struct PayloadStatus {
   bool current = false, interrupted = false;
   std::vector<std::string> components;

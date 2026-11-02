@@ -302,7 +302,7 @@ Target VerifyCatalogLaunch(const ProjectPaths& paths, const std::vector<Target>&
   return selected;
 }
 size_t Import(const ProjectPaths& paths, const Target& t, const fs::path& source,
-              const std::function<bool()>& cancelled, bool allow_partial) {
+              const std::function<bool()>& cancelled, bool allow_partial, bool consume_source) {
   Inside(t.game_root, paths.inputs());
   if (!t.importable) throw std::runtime_error("Importação guiada ainda não disponível para este alvo.");
   auto stop = [&] { if (cancelled && cancelled()) throw std::runtime_error("Importação cancelada; arquivos já verificados foram preservados."); };
@@ -383,7 +383,12 @@ size_t Import(const ProjectPaths& paths, const Target& t, const fs::path& source
     }
     io::create_directory(staging);
     try {
-      if (!io::exists(temporary)) io::copy_file(input, temporary, fs::copy_options::none);
+      if (!io::exists(temporary)) {
+        // A private extraction gives up its bytes: no second copy of them.
+        std::error_code linked;
+        if (consume_source) io::create_hard_link(input, temporary, linked);
+        if (!consume_source || linked) io::copy_file(input, temporary, fs::copy_options::none);
+      }
       if (!Matches(temporary, expected->sha256))
         throw std::runtime_error("O conteúdo mudou durante a cópia. Tente novamente.");
       // Publish complete bytes atomically and never replace a concurrent file.

@@ -98,7 +98,14 @@ int ExtractSystemUpdate(const fs::path& source, const fs::path& destination) {
       if (!digest || digest->sha256 != expected)
         throw std::runtime_error("System Update: incorrect/corrupt Retail 17559 component: " + Text(from.filename()));
       const auto out=output/PathFromUtf8(std::string(relative));
-      io::create_directories(out.parent_path()); io::copy_file(from,out,fs::copy_options::none);
+      io::create_directories(out.parent_path());
+      // Files extracted into the staging folder (deleted below) are given up by
+      // hard link; files of the user's own folder are only read.
+      const auto staged_relative = from.lexically_relative(staging);
+      const bool staged = !staged_relative.empty() && *staged_relative.begin() != "..";
+      std::error_code linked;
+      if (staged) io::create_hard_link(from,out,linked);
+      if (!staged || linked) io::copy_file(from,out,fs::copy_options::none);
       const auto copied=DigestFile(out);
       if (!copied || copied->sha256 != expected) throw std::runtime_error("System Update: component changed during copy");
       manifest.stream() << expected << " *" << relative << '\n';

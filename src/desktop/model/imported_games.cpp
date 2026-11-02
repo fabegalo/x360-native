@@ -184,7 +184,8 @@ void DiscArt(const fs::path& root, Json& r, std::vector<uint8_t>& thumbnail) {
 }
 
 std::string ImportGame(const ProjectPaths& paths, const std::vector<Target>& targets,
-    const fs::path& source, const fs::path& original, const std::function<bool()>& cancelled) {
+    const fs::path& source, const fs::path& original, const std::function<bool()>& cancelled,
+    bool consume_source) {
   ActionTrace trace("import.game");
   const auto stop = [&] { if (cancelled && cancelled()) throw std::runtime_error("Import cancelled; retry with the same content to resume."); };
   stop();
@@ -284,7 +285,7 @@ std::string ImportGame(const ProjectPaths& paths, const std::vector<Target>& tar
   record["content_root"] = Utf8(target.game_root.lexically_normal().lexically_relative(paths.inputs().lexically_normal()));
   if (!previously_complete) Save(paths, id, record); // durable interruption marker before copying
   try {
-    Import(paths, target, source, cancelled);
+    Import(paths, target, source, cancelled, false, consume_source);
     stop(); record["complete"] = true; record.erase("error"); Save(paths, id, record);
   } catch (const fs::filesystem_error& e) {
     // MSVC's what() contains local-code-page Windows diagnostics. JSON and the

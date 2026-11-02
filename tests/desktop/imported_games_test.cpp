@@ -80,6 +80,34 @@ TEST_CASE("universal library persists unsupported titles and exact duplicates", 
   CHECK(ImportGame(f.paths,games,f.source,f.source)!=id);
   CHECK(ReadCatalog(f.paths).size()==2);
 }
+TEST_CASE("an extraction becomes the imported content without a second copy", "[universal][storage]") {
+  Fixture f;
+  // The user's own folder is copied: its files stay theirs.
+  const auto copied = ImportGame(f.paths, {}, f.source, f.source);
+  auto games = ReadCatalog(f.paths); REQUIRE(games.size() == 1);
+  for (const auto& input : games[0].inputs) {
+    INFO(Utf8(input.destination));
+    CHECK_FALSE(fs::equivalent(input.destination, f.source / input.source_relative));
+    CHECK(fs::hard_link_count(input.destination) == 1);
+  }
+  // An extraction of this import (ImportSource) gives its files up.
+  const auto extraction = f.root / ".local/logs/import/extraction/content";
+  Write(extraction / "default.xex", Xex(2)); Write(extraction / "assets/data", "asset");
+  const auto linked = ImportGame(f.paths, games, extraction, f.root / "game.iso", {}, true);
+  CHECK(linked != copied);
+  games = ReadCatalog(f.paths);
+  const auto game = std::find_if(games.begin(), games.end(), [&](const auto& t) { return t.id == linked; });
+  REQUIRE(game != games.end());
+  CHECK(Inspect(f.paths, *game).inputs_ok);
+  for (const auto& input : game->inputs) {
+    INFO(Utf8(input.destination));
+    CHECK(fs::equivalent(input.destination, extraction / input.source_relative));
+  }
+  // Once the extraction is deleted the import holds the only copy.
+  fs::remove_all(extraction.parent_path());
+  for (const auto& input : game->inputs) CHECK(fs::hard_link_count(input.destination) == 1);
+  CHECK(Inspect(f.paths, *game).inputs_ok);
+}
 TEST_CASE("folder import terminates for equivalent ancestor spellings", "[universal][import-path-termination]") {
   Fixture f;
   auto source = f.source;

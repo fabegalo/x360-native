@@ -311,7 +311,7 @@ void Start(App& a, int action, fs::path source) {
           if (it == a.targets.end()) throw std::runtime_error("Falta o perfil de preparação Retail 17559 nesta instalação.");
           a.stage = 2; a.imported_id = it->id;
           progress(Tr("Dashboard Xbox 360 — Retail 17559: adicionando componentes verificados...", "Xbox 360 Dashboard — Retail 17559: adding verified components..."));
-          Import(ProjectPaths{a.root}, *it, content.path(), [&] { return a.cancel.load(); }, true);
+          Import(ProjectPaths{a.root}, *it, content.path(), [&] { return a.cancel.load(); }, true, content.extracted());
           a.import_recognized = true;
           const auto state = Inspect(ProjectPaths{a.root}, *it);
           std::string message = Tr("Dashboard Xbox 360 — Retail 17559\n", "Xbox 360 Dashboard — Retail 17559\n");
@@ -330,7 +330,7 @@ void Start(App& a, int action, fs::path source) {
         progress(Tr("Identificando o conteúdo...\nConferindo os arquivos antes de adicionar.", "Identifying the content...\nChecking the files before adding."));
         if (io::is_directory(content.path()) && io::is_regular_file(content.path() / "default.xex")) {
           a.stage = 2;
-          a.imported_id = ImportGame(ProjectPaths{a.root}, a.targets, content.path(), source, [&] { return a.cancel.load(); });
+          a.imported_id = ImportGame(ProjectPaths{a.root}, a.targets, content.path(), source, [&] { return a.cancel.load(); }, content.extracted());
           a.import_recognized = true;
           finish(Tr("Jogo adicionado à Biblioteca.", "Game added to Library.")); return;
         }
@@ -345,7 +345,7 @@ void Start(App& a, int action, fs::path source) {
         }
         auto selected = *std::find_if(a.targets.begin(), a.targets.end(), [&](const auto& t) { return t.id == ids.front(); });
         if (selected.kind == "game") {
-          a.imported_id = ImportGame(ProjectPaths{a.root}, a.targets, content.path(), source, [&] { return a.cancel.load(); });
+          a.imported_id = ImportGame(ProjectPaths{a.root}, a.targets, content.path(), source, [&] { return a.cancel.load(); }, content.extracted());
           a.import_recognized = true;
           finish(Tr("Jogo adicionado à Biblioteca.", "Game added to Library.")); return;
         }
@@ -353,7 +353,7 @@ void Start(App& a, int action, fs::path source) {
         if (!selected.importable) { finish((english ? selected.label_en : selected.label) + "\n" + Tr("Esta versão foi reconhecida. Preparação ainda indisponível; consulte o Diagnóstico.", "This version was recognized. Preparation is not yet available; see Diagnostics.")); return; }
         a.stage = 2;
         progress(Tr("Conferindo e adicionando o conteúdo extraído...", "Checking and adding the extracted content..."));
-        Import(ProjectPaths{a.root}, selected, content.path(), [&] { return a.cancel.load(); }, !content.extracted());
+        Import(ProjectPaths{a.root}, selected, content.path(), [&] { return a.cancel.load(); }, !content.extracted(), content.extracted());
         a.import_recognized = true;
         finish((english ? selected.label_en : selected.label) + "\n" + Tr("Conteúdo verificado e adicionado. Seus originais foram preservados.", "Content verified and added. Your originals are preserved.")); return;
       }
