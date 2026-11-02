@@ -2713,3 +2713,79 @@ and a `HostPathDevice` entry for that file. The baseline returns
 the host needs it` covers the spellings. The aggregate-content and title-return
 checks compare root-derived paths with their host form. No upstream equivalent
 was identified.
+
+### 0253 — read codegen inputs through the reaching path
+
+A Windows installation deeper than the build tools allow reaches its title
+projects through a short junction (`%LOCALAPPDATA%\x360n\r\<id>`), and the
+preparation hands the codegen only names below that junction. The codegen
+resolved them with `std::filesystem::canonical`, which follows the junction
+back to the real folder. It then opened that real name through the C runtime,
+which fails beyond `MAX_PATH` without the `LongPathsEnabled` policy. In an
+installation 363 bytes deep, Castle Crashers' preparation stopped with
+`Failed to parse config file '<real path>\titles\castle_crashers\analysis\castle_crashers.toml':
+File could not be opened for reading`.
+
+`LoadRecursive` (`src/codegen/config.cpp`) still uses the canonical name as the
+identity for the include-cycle check. It reads the file, records it in
+`loadedFiles` and resolves its includes by the absolute, lexically normalized
+spelling that reached it. A linked file itself keeps the old base, its target's
+folder, so includes beside a symlink's target resolve as before.
+`ProjectRecompiler::Run` (`src/codegen/project_recompiler.cpp`) still checks
+containment of the entry XEX and the DLLs between canonical names. It does this
+with `lexically_relative`, which equals `fs::relative` for canonical names but
+does no I/O on the real long names. The tool runtime is rooted at the game root
+by the spelling that reached it; the relative path between the real names
+reaches the same file below either spelling. `CodegenPipeline` in `codegen.cpp`
+is unused by the `rexglue codegen <manifest>` path and is unchanged.
+
+`sdkcheck.Config includes are read through a short junction to a deep folder`
+(`tests/sdkcheck/junction_config_path_test.cpp`, Windows) loads a config and its
+include through a junction whose real folder is beyond 300 characters. It
+expects both files under the junction spelling in `loadedFiles` and a cycle
+still refused. The baseline returns `false` from `RecompilerConfig::Load`. The
+`ProjectRecompiler` half is covered by that installation's end-to-end
+preparation (`docs/reports/paths-storage-2026-11-02.md`). No upstream equivalent
+was identified.
+
+### 0254 — open log files in the host form
+
+A title launched from an installation 363 bytes deep receives a `--log_file`
+beyond `MAX_PATH` (its run folder lives in the installation). `InitLogging`
+handed that ordinary name to spdlog's `rotating_file_sink_mt`, whose C-runtime
+open failed. The sink constructor threw `Failed opening file ... for writing`,
+and the 17559 dashboard ended with `0xC0000409` after 957 ms, before its first
+frame and without a `rex.log`.
+
+The file sink now opens `rex::filesystem::HostPath` of the resolved name, the
+form patch 0252 already gives the runtime roots. Titles run with the UTF-8
+active code page (`cmake/runtime/x360n_runtime.manifest`), so the narrow
+spdlog name round-trips. spdlog creates the missing parent folders component
+by component and stops at the `\?` root name of that form, so `InitLogging`
+creates the folder first. The ordinary name and the sequential `logs/` naming
+are otherwise unchanged, and other hosts are unchanged.
+
+`sdkcheck.A log file beyond MAX_PATH opens in the host form`
+(`tests/sdkcheck/long_content_path_test.cpp`) initializes logging with a file
+beyond 300 characters in a folder that does not exist yet and reads the
+message back. The baseline throws from the sink constructor. No upstream
+equivalent was identified.
+
+### 0255 — check app roots in the host form
+
+`ReXApp::ConstructRuntime` (`src/ui/rex_app.cpp`) checks `--game_data_root`
+with `std::filesystem::is_directory` and the entry XEX with
+`is_regular_file`, by their ordinary names, before `Runtime` (patch 0252)
+takes the host form of its roots. From an installation 363 bytes deep the
+17559 dashboard's game root is beyond `MAX_PATH`, so the check reported
+`--game_data_root does not exist` and the app waited behind a modal message
+box with a black window. Both checks now use `rex::filesystem::HostPath`; the
+messages still show the ordinary names.
+
+`sdkcheck.ReXApp starts a guest whose game root is beyond MAX_PATH`
+(`tests/sdkcheck/app_shutdown_test.cpp`) runs the shutdown probe, a real
+`ReXApp`, with a synthetic XEX in a game root beyond 300 characters and
+expects its entry point to return with exit code 0. The baseline stays behind
+the message box until the probe's 60-second timeout. `src/ui/rex_app.cpp` is
+compiled into each executable: titles pick this up when rebuilt. No upstream
+equivalent was identified.

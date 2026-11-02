@@ -78,6 +78,7 @@ target_sources(x360n_sdk_checks PRIVATE sdkcheck/msr_codegen_test.cpp)
 target_sources(x360n_sdk_checks PRIVATE sdkcheck/crt_fiber_discovery_test.cpp)
 target_sources(x360n_sdk_checks PRIVATE sdkcheck/ppc_md_decode_test.cpp)
 target_sources(x360n_sdk_checks PRIVATE sdkcheck/ctr_dispatch_test.cpp)
+target_sources(x360n_sdk_checks PRIVATE sdkcheck/junction_config_path_test.cpp)
 target_link_libraries(x360n_sdk_checks PRIVATE rexcodegen Catch2::Catch2WithMain)
 target_compile_options(x360n_sdk_checks PRIVATE
     -UTRACY_ENABLE -UREXGLUE_ENABLE_PROFILING -UREXGLUE_ENABLE_PERF_COUNTERS)

@@ -1,0 +1,27 @@
+--- a/src/core/logging.cpp
++++ b/src/core/logging.cpp
+@@ -23,6 +23,7 @@
+ #include <toml++/toml.hpp>
+ 
+ #include <rex/cvar.h>
++#include <rex/filesystem.h>
+ #include <rex/logging.h>
+ #include <rex/platform.h>
+ #include <rex/platform/env.h>
+@@ -226,8 +227,15 @@
+     resolved_path = NextSequentialLogPath(log_dir, config.app_name).string();
+   }
+   if (!resolved_path.empty()) {
++    // Opened in the host form, as the runtime roots are: beside a deep
++    // installation the log is beyond MAX_PATH, where spdlog's C runtime open
++    // fails and throws. The folder is made here because spdlog's own walk
++    // stops at the "\\?" component of that form.
++    const auto file = rex::filesystem::HostPath(std::filesystem::path(resolved_path));
++    std::error_code ec;
++    std::filesystem::create_directories(file.parent_path(), ec);
+     auto sink = std::make_shared<spdlog::sinks::rotating_file_sink_mt>(
+-        resolved_path, static_cast<size_t>(REXCVAR_GET(log_max_file_size_mb)) * 1024 * 1024,
++        file.string(), static_cast<size_t>(REXCVAR_GET(log_max_file_size_mb)) * 1024 * 1024,
+         static_cast<size_t>(REXCVAR_GET(log_max_files)), false);
+     sink->set_level(spdlog::level::trace);
+     sink->set_pattern(config.file_pattern);

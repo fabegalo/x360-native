@@ -39,7 +39,7 @@ struct ProbeResult {
   std::string log;
 };
 
-ProbeResult RunProbe(const Workdir& w, const std::wstring& extra_args) {
+ProbeResult RunProbe(const Workdir& w, const std::wstring& extra_args, const fs::path& game = {}) {
   const fs::path probe = fs::path(X360N_SHUTDOWN_PROBE).make_preferred();
   REQUIRE(fs::is_regular_file(probe));
   const fs::path log = w.dir / "probe.log";
@@ -48,7 +48,7 @@ ProbeResult RunProbe(const Workdir& w, const std::wstring& extra_args) {
   spec.exe = probe; spec.working_dir = w.dir;
   spec.stdout_file = w.dir / "stdout.log"; spec.stderr_file = w.dir / "stderr.log";
   spec.timeout = std::chrono::seconds(60); spec.capture_crash = extra_args.find(L"--parent_window=") != std::wstring::npos;
-  spec.args = {"--game_data_root=" + (w.dir / "game").string(),
+  spec.args = {"--game_data_root=" + (game.empty() ? w.dir / "game" : game).string(),
                "--user_data_root=" + (w.dir / "user").string(),
                "--log_file=" + log.string(), "--log_level=debug"};
   std::wistringstream extras(extra_args);
@@ -149,4 +149,29 @@ TEST_CASE("embedded SDL surface recognizes actual keyboard focus and releases it
   CHECK(Contains(r.log, "child-focus gain: native=true, sdk=true"));
   CHECK(Contains(r.log, "child-focus loss: native=true, sdk=true"));
   CHECK(Contains(r.log, "child-focus regain: native=true, sdk=true"));
+}
+
+// Patch 0255: ReXApp checked --game_data_root and the entry XEX by their
+// ordinary names before the runtime (patch 0252) took the host form. From an
+// installation deep enough for x360n's alias, the 17559 dashboard stopped at
+// "--game_data_root does not exist" behind a modal message box.
+TEST_CASE("ReXApp starts a guest whose game root is beyond MAX_PATH", "[sdk][app][long-path]") {
+  Workdir w("x360n_app_shutdown_test", "long_game_root");
+  const auto host = [](const fs::path& path) { return fs::path(L"\\\\?\\" + fs::absolute(path).native()); };
+  auto game = w.dir;
+  while (game.native().size() < 300) REQUIRE(fs::create_directory(host(game /= std::string(40, 'g'))));
+  fs::create_directories(w.dir / "user");
+  std::vector<Placed> placed;
+  const auto xex = BuildXex({}, &placed, 0, Entry::kReturnZero);
+  std::ofstream(host(game / "default.xex"), std::ios::binary)
+      .write(reinterpret_cast<const char*>(xex.data()), std::streamsize(xex.size()));
+  const auto r = RunProbe(w, L"", game);
+  std::error_code ec;
+  fs::remove_all(host(w.dir / std::string(40, 'g')), ec);
+  INFO(r.log);
+  REQUIRE(r.finished);
+  CHECK_FALSE(Contains(r.log, "--game_data_root does not exist"));
+  CHECK_FALSE(Contains(r.log, "Entrypoint XEX not found"));
+  CHECK(Contains(r.log, "Execution complete"));
+  CHECK(r.exit_code == 0);
 }

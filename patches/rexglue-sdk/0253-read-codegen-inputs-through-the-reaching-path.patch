@@ -1,0 +1,80 @@
+--- a/src/codegen/config.cpp
++++ b/src/codegen/config.cpp
+@@ -407,18 +407,29 @@
+     return false;
+   }
+   visited.insert(canonicalStr);
+-  cfg.loadedFiles.push_back(canonicalStr);
++
++  // The canonical name only identifies the file for the cycle check. It is
++  // read and recorded by the spelling that reached it: a short junction to a
++  // deep folder resolves to a real name beyond MAX_PATH, which the C runtime
++  // cannot open. Only a linked file itself takes its includes from its target.
++  const auto file = std::filesystem::absolute(filePath, ec).lexically_normal();
++  if (ec) {
++    REXCODEGEN_ERROR("[config] cannot resolve path '{}': {}", filePath.string(), ec.message());
++    return false;
++  }
++  const auto base = std::filesystem::is_symlink(file, ec) ? canonical.parent_path()
++                                                          : file.parent_path();
++  cfg.loadedFiles.push_back(file.string());
+ 
+   toml::table toml;
+   try {
+-    toml = toml::parse_file(canonicalStr);
++    toml = toml::parse_file(file.string());
+   } catch (const toml::parse_error& e) {
+-    REXCODEGEN_ERROR("Failed to parse config file '{}': {}", canonicalStr, e.what());
++    REXCODEGEN_ERROR("Failed to parse config file '{}': {}", file.string(), e.what());
+     return false;
+   }
+   REXCODEGEN_DEBUG("[config] loaded: {}", filePath.filename().string());
+-  return ApplyTableWithIncludes(toml, canonical.parent_path(), cfg, visited, depth,
+-                                filePath.filename().string());
++  return ApplyTableWithIncludes(toml, base, cfg, visited, depth, filePath.filename().string());
+ }
+ 
+ bool ApplyTableWithIncludes(const toml::table& tbl, const std::filesystem::path& base_dir,
+--- a/src/codegen/project_recompiler.cpp
++++ b/src/codegen/project_recompiler.cpp
+@@ -214,6 +214,14 @@
+     return Err<void>(ErrorCategory::IO,
+                      fmt::format("Entrypoint XEX not found: {}", entryXexPath.string()));
+   }
++  // Canonical names decide containment, purely lexically. The runtime opens
++  // the game root by the spelling that reached it: a short junction to a deep
++  // folder resolves to a real name beyond MAX_PATH, and the relative path
++  // between the real names reaches the same file below either spelling.
++  const fs::path gameRootPath = fs::absolute(manifest_.gameRoot && !manifest_.gameRoot->empty()
++                                                   ? configDir / *manifest_.gameRoot
++                                                   : entryXexPath.parent_path())
++                                    .lexically_normal();
+   entryXexPath = fs::canonical(entryXexPath);
+ 
+   // gameRoot anchors VFS root and DLL guest_path derivation. Honor the
+@@ -231,14 +239,14 @@
+     gameRoot = fs::canonical(entryXexPath.parent_path());
+   }
+ 
+-  fs::path entryRel = fs::relative(entryXexPath, gameRoot);
++  fs::path entryRel = entryXexPath.lexically_relative(gameRoot);
+   if (entryRel.empty() || *entryRel.begin() == "..") {
+     return Err<void>(ErrorCategory::Validation,
+                      fmt::format("Entrypoint XEX '{}' resolves outside game root '{}'",
+                                  entryXexPath.string(), gameRoot.string()));
+   }
+ 
+-  auto runtime = std::make_unique<Runtime>(gameRoot.string());
++  auto runtime = std::make_unique<Runtime>(gameRootPath.string());
+   auto rtStatus = runtime->Setup(rex::RuntimeConfig{
+       .kernel_init = rex::kernel::InitializeKernel,
+       .tool_mode = true,
+@@ -271,7 +279,7 @@
+     }
+     dllXexPath = fs::canonical(dllXexPath);
+ 
+-    auto relPath = fs::relative(dllXexPath, gameRoot);
++    auto relPath = dllXexPath.lexically_relative(gameRoot);
+     if (relPath.empty() || *relPath.begin() == "..") {
+       return Err<void>(ErrorCategory::Validation,
+                        fmt::format("DLL '{}' resolves outside game root '{}': {}",

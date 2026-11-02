@@ -51,7 +51,7 @@
       "file": "patches/rexglue-sdk/0004-app-teardown-order.patch",
       "sha256": "f68d6d6e4e2cc4c7c218eac15cc7c29723c1fb357a735657bed68d312ade4ff1",
       "files": {
-        "src/ui/rex_app.cpp": "8f11e7c95c057c42852ec4b2a1d5bca13af71d22b146b3371fbe8264d0a938c7"
+        "src/ui/rex_app.cpp": "c27725d25261269920a389afca30162c2eca79ba20796285fa8613e9eeecc506"
       },
       "base_files": {
         "src/ui/rex_app.cpp": "0ebbd4c0e484eb865f94de37cc71a70e3f25068b78d072cd7f577cdb811020b7"
@@ -1206,7 +1206,7 @@
         "include/rex/runtime.h": "8827c5fd2d3e42656fe1266a0d33af0d3181ef9145990f2bd538b0b78d822d20",
         "src/system/runtime.cpp": "dcfc367c82186fcb53179c7d898ec919622de45d5bbc21e25f3e88c60245e2dc",
         "include/rex/rex_app.h": "769ea2f312400d6be8359071bbc03fc854ccf626bbc115ff9ba3dbfdb102c55d",
-        "src/ui/rex_app.cpp": "8f11e7c95c057c42852ec4b2a1d5bca13af71d22b146b3371fbe8264d0a938c7"
+        "src/ui/rex_app.cpp": "c27725d25261269920a389afca30162c2eca79ba20796285fa8613e9eeecc506"
       },
       "test": "tests/sdkcheck/entrypoint_dispatch_test.cpp"
     },
@@ -1738,7 +1738,7 @@
       "sha256": "117097d188442e603694943db816242963d6aa7935f036bc89cf370ddbff8938",
       "files": {
         "include/rex/runtime.h": "8827c5fd2d3e42656fe1266a0d33af0d3181ef9145990f2bd538b0b78d822d20",
-        "src/ui/rex_app.cpp": "8f11e7c95c057c42852ec4b2a1d5bca13af71d22b146b3371fbe8264d0a938c7"
+        "src/ui/rex_app.cpp": "c27725d25261269920a389afca30162c2eca79ba20796285fa8613e9eeecc506"
       },
       "base_files": {
         "include/rex/runtime.h": "8cc304b2dd3fe9045cfffd9f71c985963ab049b381b509b4e52d44bfc53353ac",
@@ -1930,7 +1930,7 @@
       "files": {
         "include/rex/ui/keybinds.h": "c91a000e7101e9853cca487b3606d8b7943518fcfd2f2af5cb864a72ed7152e0",
         "src/ui/keybinds.cpp": "b094d7db885078a72c6dda265ef2ea3e8f191da904317871345c85838a55e6cd",
-        "src/ui/rex_app.cpp": "8f11e7c95c057c42852ec4b2a1d5bca13af71d22b146b3371fbe8264d0a938c7"
+        "src/ui/rex_app.cpp": "c27725d25261269920a389afca30162c2eca79ba20796285fa8613e9eeecc506"
       },
       "test": "sdkcheck: [fullscreen-toggle] Alt+Enter/F11 toggle fullscreen"
     },
@@ -3501,7 +3501,7 @@
     "include/rex/ui/overlay/achievement_notification.h": "80e168b7cbde328edc2672e8f6a05294f30f2769a3e040610b85f2f48e64bd60",
     "include/rex/ui/overlay/achievement_toast.h": "48cbc99e55feaa5de38ec1547bf7585c8e402cbbe868255db8c93247dc4dcf3a",
     "src/ui/overlay/achievement_toast.cpp": "579e66e3503e1effe90876eaf02bcede36039ad98ce174510504f4c2d61c4062",
-    "src/ui/rex_app.cpp": "8f11e7c95c057c42852ec4b2a1d5bca13af71d22b146b3371fbe8264d0a938c7"
+    "src/ui/rex_app.cpp": "c27725d25261269920a389afca30162c2eca79ba20796285fa8613e9eeecc506"
   },
   "test": "sdkcheck achievement toast cases in x360n_sdk_runtime_checks: 227 assertions in 5 cases passed Release three consecutive runs (idle drawer list empty, one coalesced wake for four concurrent producers with full 4.5 s display per event, shutdown cancels queued wakes, push during detachment, UI-thread callback ownership). Baseline control fails: the idle toast keeps the ImGui dialog list non-empty. Patched rex_app.cpp compiled. All five applied files match the staged tested bytes."
 },
@@ -3560,6 +3560,41 @@
     "src/system/xam/user_profile.cpp": "33b27578fba1c82d6b7454100697bfc61b5bd08066993e1ac2773fa5c96ee79d"
   },
   "test": "sdkcheck.Content beyond MAX_PATH keeps its attributes and device entries (tests/sdkcheck/long_content_path_test.cpp): a runtime rooted at an ordinary path whose content package holds a file beyond 300 characters reports the package size through GetContentAttributes, and a HostPathDevice mounted on the ordinary spelling resolves that file. The baseline returns X_ERROR_ACCESS_DENIED from the attribute walk, which made the 17559 dashboard drop Skate 3 from My Games in the packaged install. sdkcheck.Host paths use the extended form only where the host needs it covers the HostPath/OrdinaryPath spellings; profile-picture-write covers the settings-v1/4064000F.dat join under a host root (ERROR_INVALID_NAME before PictureFile); aggregate-content, local-profile and title-return compare root-derived paths with their host form."
+},
+{
+  "file": "patches/rexglue-sdk/0253-read-codegen-inputs-through-the-reaching-path.patch",
+  "sha256": "25f41448b1a620ae4c0e5b255e528b681e5f9064b250a895d0edb94e3d40b0f1",
+  "base_files": {
+    "src/codegen/config.cpp": "15579d537681c6c4aad600528aa2547661967c904bca441993483ef122a05695",
+    "src/codegen/project_recompiler.cpp": "41e38add35929b8be1105997de45b2f39c3c3f715925ca1d6f89ac68e1b81d14"
+  },
+  "files": {
+    "src/codegen/config.cpp": "632596f4dab7c7d4e17bb8fd841417c0c23d1b3f6637aa94f6e7ed2406ababe0",
+    "src/codegen/project_recompiler.cpp": "e7e667fdc19024cf61fb84f34fb5ae8025f5c1ef75c1b1380258e131ef8ab546"
+  },
+  "test": "sdkcheck.Config includes are read through a short junction to a deep folder (tests/sdkcheck/junction_config_path_test.cpp): a title config reached through a short junction whose real folder is beyond MAX_PATH loads with its include, records both files by the junction spelling, and still detects a cycle. The baseline canonicalizes the name and fails to open it (RecompilerConfig::Load false), as Castle Crashers' codegen did in an installation 363 bytes deep: 'Failed to parse config file ... File could not be opened for reading'. The ProjectRecompiler half (lexical containment between canonical names, runtime on the reaching game root) is covered by that installation's end-to-end preparation."
+},
+{
+  "file": "patches/rexglue-sdk/0254-open-log-files-in-the-host-form.patch",
+  "sha256": "8840c61f726c085ceaa16380d6b7ef7aa260b8d13ebcaac009a2c117c182e3c0",
+  "base_files": {
+    "src/core/logging.cpp": "305cfcd5013f34ee27ac6785e83c29f59ade617f8bfbca24efb13faa973468ea"
+  },
+  "files": {
+    "src/core/logging.cpp": "8bf69e09145e8e0831c96aaa352364a2f8219a6830b67a5a9ffda84686ef6daa"
+  },
+  "test": "sdkcheck.A log file beyond MAX_PATH opens in the host form (tests/sdkcheck/long_content_path_test.cpp): InitLogging with a log file beyond 300 characters in a folder that does not exist yet creates it, opens the sink and writes the message. The baseline throws 'Failed opening file ... for writing: no such file or directory' from the spdlog sink constructor, as the 17559 dashboard did (0xC0000409 after 957 ms) when launched from an installation 363 bytes deep."
+},
+{
+  "file": "patches/rexglue-sdk/0255-check-app-roots-in-the-host-form.patch",
+  "sha256": "133e8dd50821943e212e2ff77b1ee8fbf37436c2825f1578ea5347689224fc62",
+  "base_files": {
+    "src/ui/rex_app.cpp": "8f11e7c95c057c42852ec4b2a1d5bca13af71d22b146b3371fbe8264d0a938c7"
+  },
+  "files": {
+    "src/ui/rex_app.cpp": "c27725d25261269920a389afca30162c2eca79ba20796285fa8613e9eeecc506"
+  },
+  "test": "sdkcheck.ReXApp starts a guest whose game root is beyond MAX_PATH (tests/sdkcheck/app_shutdown_test.cpp): the shutdown probe, a real ReXApp, runs a synthetic XEX from a game root beyond 300 characters and its entry point returns with exit code 0. The baseline stops at '--game_data_root does not exist' behind a modal message box and the probe times out, as the 17559 dashboard did when launched from an installation 363 bytes deep."
 }
 ]
 },

@@ -1,0 +1,22 @@
+--- a/src/ui/rex_app.cpp
++++ b/src/ui/rex_app.cpp
+@@ -232,7 +232,9 @@
+     rex::ShowSimpleMessageBox(rex::SimpleMessageBoxType::Error, msg);
+     return false;
+   }
+-  if (!std::filesystem::is_directory(paths.game_data_root)) {
++  // The host form, as the runtime opens its roots (patch 0252): from a deep
++  // installation the ordinary name is beyond MAX_PATH and never exists.
++  if (!std::filesystem::is_directory(rex::filesystem::HostPath(paths.game_data_root))) {
+     auto msg = fmt::format("--game_data_root does not exist: {}", paths.game_data_root.string());
+     REXLOG_ERROR("{}", msg);
+     rex::ShowSimpleMessageBox(rex::SimpleMessageBoxType::Error, msg);
+@@ -302,7 +304,7 @@
+     std::string host_tail{tail};
+     std::replace(host_tail.begin(), host_tail.end(), '\\', '/');
+     auto xex_host = paths.game_data_root / host_tail;
+-    if (!std::filesystem::is_regular_file(xex_host)) {
++    if (!std::filesystem::is_regular_file(rex::filesystem::HostPath(xex_host))) {
+       auto msg = fmt::format("Entrypoint XEX not found: {}", xex_host.string());
+       REXLOG_ERROR("{}", msg);
+       rex::ShowSimpleMessageBox(rex::SimpleMessageBoxType::Error, msg);

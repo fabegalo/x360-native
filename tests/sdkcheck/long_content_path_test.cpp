@@ -2,10 +2,13 @@
 #include <chrono>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
+#include <string>
 #include <vector>
 #include <rex/filesystem.h>
 #include <rex/filesystem/devices/host_path_device.h>
 #include <rex/kernel/init.h>
+#include <rex/logging.h>
 #include <rex/memory/utils.h>
 #include <rex/runtime.h>
 #include <rex/system/kernel_state.h>
@@ -107,4 +110,24 @@ TEST_CASE("Launcher and runtime agree on host and ordinary paths", "[sdkcheck][l
     CHECK(host == rex::filesystem::HostPath(input));
     CHECK(x360n::host_path::Ordinary(host) == rex::filesystem::OrdinaryPath(host));
   }
+}
+
+// Patch 0254: a title launched from an installation deep enough to need the
+// x360n alias got its --log_file beyond MAX_PATH. spdlog's C runtime open
+// failed, the sink constructor threw and the dashboard aborted (0xC0000409)
+// before its first frame.
+TEST_CASE("A log file beyond MAX_PATH opens in the host form", "[sdk][long-path]") {
+  DeepRoot root;
+  auto deep = root.path;
+  while (deep.native().size() < 300) deep /= std::string(30, 'l');
+  const auto log = deep / "runs" / "rex.log";
+  REQUIRE(log.native().size() > 300);
+  REQUIRE_NOTHROW(rex::InitLogging(log.string().c_str(), spdlog::level::info));
+  REXLOG_INFO("long log path check");
+  rex::FlushLogging();
+  // Drops the file sink, so the deep folder can be removed.
+  rex::InitLogging(nullptr, spdlog::level::err);
+  std::ifstream written(Long(log), std::ios::binary);
+  const std::string text((std::istreambuf_iterator<char>(written)), std::istreambuf_iterator<char>());
+  CHECK(text.find("long log path check") != std::string::npos);
 }
