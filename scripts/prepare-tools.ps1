@@ -182,5 +182,23 @@ Stage 'prepare LLVM'
 if ($LASTEXITCODE -ne 0) { throw 'LLVM preparation failed.' }
 $pending = Join-Path $root '.local/dependency-update.pending'
 if (Test-Path -LiteralPath $pending) { Remove-Item -LiteralPath $pending }
+# Every tool now runs from its verified extraction, and reuse checks that
+# extraction (its archive receipt, or clang++ for LLVM), never the download.
+# Kept, the archives are a second copy of each tool, about 1 GB; a change of a
+# pinned tool downloads its new archive, with consent, as before.
+foreach ($tool in $lockedTools) {
+    $receipt = Join-Path (Join-Path $tools $tool.directory) '.x360n-archive-sha256'
+    $archive = Join-Path $cache $tool.asset
+    if ((Test-Path -LiteralPath $archive) -and (Test-Path -LiteralPath $receipt) -and
+        (Get-Content -Raw -LiteralPath $receipt).Trim() -eq $tool.sha256) {
+        Remove-Item -LiteralPath $archive
+        Stage "released archive $($tool.asset)"
+    }
+}
+$llvmArchive = Join-Path $cache $llvm.asset
+if ((Test-Path -LiteralPath $llvmArchive) -and (Test-Path -LiteralPath (Join-Path (Join-Path $root $llvm.install_dir) 'bin/clang++.exe'))) {
+    Remove-Item -LiteralPath $llvmArchive
+    Stage "released archive $($llvm.asset)"
+}
 Stage 'tools-ready'
 } finally { $lease.Dispose() }

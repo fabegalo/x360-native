@@ -32,4 +32,7 @@ finalidade incerta. Consultar [reorganização](../docs/reorganization.md).
 Jornais novos ficam em `.local/evidence/maintenance/<timestamp>/`. A limpeza
 protege as entradas de todos os recibos de preparação e conserva executáveis,
 DLLs e metadados ativos. Objetos/PCH descartados serão recompilados quando
-necessários. Downloads futuros usam `.local/cache/downloads/`.
+necessários. Downloads futuros usam `.local/cache/downloads/`; `prepare-tools.ps1`
+remove cada arquivo baixado depois que a extração correspondente foi verificada
+(recibo `.x360n-archive-sha256` igual ao hash fixado, ou `clang++.exe` presente para
+o LLVM). Uma reinstalação da ferramenta baixa o arquivo outra vez.
