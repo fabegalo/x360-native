@@ -220,9 +220,9 @@ std::optional<ProjectPaths> FindProjectRoot(const fs::path& start) {
 
 bool IsWithin(const fs::path& path, const fs::path& base) {
   std::error_code ec;
-  fs::path p = fs::canonical(path, ec);
+  fs::path p = fs::canonical(LongPath(path), ec);
   if (ec) return false;
-  fs::path b = fs::canonical(base, ec);
+  fs::path b = fs::canonical(LongPath(base), ec);
   if (ec) return false;
   const auto ps = Folded(p), bs = Folded(b);
   if (ps.size() < bs.size() || ps.compare(0, bs.size(), bs) != 0) return false;
