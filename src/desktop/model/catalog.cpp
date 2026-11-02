@@ -74,7 +74,16 @@ CatalogLaunchVerification::CatalogLaunchVerification() : previous_(launch_verifi
 CatalogLaunchVerification::~CatalogLaunchVerification() { launch_verification = previous_; }
 bool CatalogLaunchVerificationActive() { return launch_verification; }
 fs::path CatalogVerificationPath(const fs::path& path) {
-  return launch_verification ? VerificationPath(path) : fs::weakly_canonical(path);
+  if (launch_verification) return VerificationPath(path);
+#ifdef _WIN32
+  const auto resolved = fs::weakly_canonical(LongPath(path));
+  const auto name = resolved.native();
+  if (name.starts_with(L"\\\\?\\UNC\\")) return fs::path(L"\\\\" + name.substr(8));
+  if (name.starts_with(L"\\\\?\\")) return fs::path(name.substr(4));
+  return resolved;
+#else
+  return fs::weakly_canonical(path);
+#endif
 }
 std::vector<Target> ReadCatalog(const ProjectPaths& paths) {
   ActionTrace trace("catalog.read");
