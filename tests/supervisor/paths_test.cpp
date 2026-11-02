@@ -109,6 +109,29 @@ TEST_CASE("canonical paths resolve beyond the Windows MAX_PATH limit", "[paths]"
   fs::remove_all(LongPath(root));
 }
 
+TEST_CASE("ordinary paths drop the extended prefix so ancestor walks stay valid", "[paths]") {
+#ifdef _WIN32
+  CHECK(OrdinaryPath(LR"(\\?\C:\a\b)") == fs::path(LR"(C:\a\b)"));
+  CHECK(OrdinaryPath(LR"(\\?\UNC\server\share\x)") == fs::path(LR"(\\server\share\x)"));
+  CHECK(OrdinaryPath(LR"(\\?\Volume{0}\x)") == fs::path(LR"(\\?\Volume{0}\x)"));
+  CHECK(OrdinaryPath(LR"(C:\a)") == fs::path(LR"(C:\a)"));
+  // Every ancestor of an enumerated long path can be inspected without error;
+  // the raw parents would reach "\\?\C:" and symlink_status would throw.
+  const auto root = UniqueTempPath("paths_ordinary");
+  fs::create_directories(root / "a");
+  for (auto p = OrdinaryPath(LongPath(root / "a")); !p.empty();) {
+    std::error_code ec;
+    fs::symlink_status(LongPath(p), ec);
+    CHECK_FALSE(ec);
+    if (p.parent_path() == p) break;
+    p = p.parent_path();
+  }
+  fs::remove_all(root);
+#else
+  CHECK(OrdinaryPath("/a/b") == fs::path("/a/b"));
+#endif
+}
+
 TEST_CASE("shared SDK uses a short isolated build root", "[paths][preparation]") {
   TempProject first;
   const ProjectPaths p{first.root};

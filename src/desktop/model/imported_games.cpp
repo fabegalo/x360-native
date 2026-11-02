@@ -42,8 +42,11 @@ void Safe(const fs::path& file, const fs::path& root) {
   auto rel = CatalogVerificationPath(file).lexically_relative(CatalogVerificationPath(root));
   if (rel.empty() || rel.is_absolute() || *rel.begin() == "..") throw std::runtime_error("Catalog destination redirected outside its root");
   if (CatalogLaunchVerificationActive() && HasProtectedVerificationPath(file)) return;
-  for (auto p = file; p != root && !p.empty();) {
-    if (fs::is_symlink(p)) throw std::runtime_error("Catalog path contains a link");
+  // Walk the ordinary spelling (sources are enumerated as \\?\ paths, whose
+  // parents end at the invalid "\\?\C:"); inspect each ancestor in long form.
+  const auto stop = OrdinaryPath(root);
+  for (auto p = OrdinaryPath(file); p != stop && !p.empty();) {
+    if (fs::is_symlink(LongPath(p))) throw std::runtime_error("Catalog path contains a link");
     const auto parent = p.parent_path();
     // Equivalent roots can have different spellings (case, separators, '.').
     // A filesystem root is its own parent; never spin there if the lexical

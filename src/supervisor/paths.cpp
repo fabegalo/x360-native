@@ -74,6 +74,14 @@ fs::path LongPath(const fs::path& path) {
   return path;
 #endif
 }
+fs::path OrdinaryPath(const fs::path& path) {
+#ifdef _WIN32
+  const auto& name = path.native();
+  if (name.starts_with(L"\\\\?\\UNC\\")) return fs::path(L"\\\\" + name.substr(8));
+  if (name.starts_with(L"\\\\?\\") && name.size() > 5 && name[5] == L':') return fs::path(name.substr(4));
+#endif
+  return path;
+}
 fs::path CanonicalPath(const fs::path& path) {
 #ifdef _WIN32
   // Same resolution as the MSVC STL: open following links, ask for the final name.
@@ -94,9 +102,7 @@ fs::path CanonicalPath(const fs::path& path) {
   if (!count || count >= final.size())
     throw fs::filesystem_error("canonical", path, std::error_code(int(error), std::system_category()));
   final.resize(count);
-  if (final.starts_with(L"\\\\?\\UNC\\")) return fs::path(L"\\\\" + final.substr(8));
-  if (final.starts_with(L"\\\\?\\") && final.size() > 6 && final[5] == L':') return fs::path(final.substr(4));
-  return final;
+  return OrdinaryPath(final);
 #else
   return fs::canonical(path);
 #endif
@@ -224,17 +230,8 @@ bool IsWithin(const fs::path& path, const fs::path& base) {
   if (ec) return false;
   fs::path b = fs::canonical(LongPath(base), ec);
   if (ec) return false;
-#ifdef _WIN32
-  // fs::canonical retains the extended-length prefix. Normalise both paths
-  // before comparing containment and respect UNC roots.
-  auto ordinary = [](const fs::path& value) -> fs::path {
-    const auto name = value.native();
-    if (name.starts_with(L"\\\\?\\UNC\\")) return fs::path(L"\\\\" + name.substr(8));
-    if (name.starts_with(L"\\\\?\\")) return fs::path(name.substr(4));
-    return value;
-  };
-  p = ordinary(p); b = ordinary(b);
-#endif
+  // fs::canonical retains the extended-length prefix; compare ordinary spellings.
+  p = OrdinaryPath(p); b = OrdinaryPath(b);
   const auto ps = Folded(p), bs = Folded(b);
   if (ps.size() < bs.size() || ps.compare(0, bs.size(), bs) != 0) return false;
   // On POSIX, a backslash is a filename character, not a directory boundary.
