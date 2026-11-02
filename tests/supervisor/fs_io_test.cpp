@@ -457,9 +457,12 @@ TEST_CASE("processes start from deep Unicode folders and keep relative paths", "
 
 TEST_CASE("preparation tools reach long installations through their alias", "[paths][fs-io][process]") {
   Root root("fs_io_tools");
+  // Lengths below are of canonical names; a temporary folder may be spelled
+  // with short (8.3) names.
+  const auto base = io::canonical(root.path);
   // Too long for the ~180 characters the tools need below it, though itself
   // well inside MAX_PATH; cmd cannot even start a script this deep.
-  const auto install = Installation(Exact(root.path, 120, u8"Ferramentas-ゲーム-🎮"));
+  const auto install = Installation(Exact(base, 120, u8"Ferramentas-ゲーム-🎮"));
   const auto script = install / "scripts" / "devshell.cmd";
   io::create_directories(script.parent_path());
   { io::ofstream(script, std::ios::binary) << "@type \"%~dp0..\\marker.txt\"\r\n"; }
@@ -494,7 +497,7 @@ TEST_CASE("preparation tools reach long installations through their alias", "[pa
   // Short installations and paths outside any installation keep their spelling.
   const auto outside = root.path / "outside.txt";
   CHECK(x360n::ToolPath(outside) == outside);
-  const auto short_install = Installation(root.path / "s");
+  const auto short_install = Installation(base / "s");
   if (Length(short_install) + 180 < MAX_PATH)
     CHECK(x360n::ToolPath(short_install / "scripts") == short_install / "scripts");
   else
@@ -505,9 +508,9 @@ TEST_CASE("preparation tools reach long installations through their alias", "[pa
   CHECK(x360n::PreparationRootLimit() == MAX_PATH - 119);
   const auto utf8 = [](const fs::path& path) { return x360n::PathUtf8(path).size(); };
   const auto with_bytes = [&](size_t bytes, const fs::path& leaf) {
-    const auto pad = bytes - utf8(root.path) - 2 - utf8(leaf);
+    const auto pad = bytes - utf8(base) - 2 - utf8(leaf);
     REQUIRE(pad < 200);
-    return root.path / std::string(pad, 'p') / leaf;
+    return base / std::string(pad, 'p') / leaf;
   };
   const auto limit = Installation(with_bytes(x360n::PreparationRootLimit(), u8"Limite-ゲーム-🎮"));
   REQUIRE(utf8(io::canonical(limit)) == x360n::PreparationRootLimit());
