@@ -121,15 +121,29 @@ if (Test-Path -LiteralPath $sdk) {
             if ($LASTEXITCODE -ne 0 -or ($sdkState | Where-Object { $_ -match '^[+U]' })) { $sdkMatches = $false }
         }
         # An old patch set cannot be overlaid on an incompatible patched tree.
-        # Pristine or already matching files are safe for the existing applicator.
+        # The applicator continues any complete prefix of the patch stack,
+        # reconstructed backwards from base_files as it does
+        # (setup/apply-sdk-patches.ps1). An update that appends patches, even
+        # to files patched before, is applied in place: no new SDK download
+        # and no preserved copy of the previous one.
         if ($sdkMatches) {
-            $changed = @(& $git -C $sdk diff --name-only HEAD)
-            foreach ($patch in $sdkLock.patches) { foreach ($file in $patch.files.PSObject.Properties) {
-                if ($changed -contains $file.Name) {
-                    $path = Join-Path $sdk $file.Name
-                    if (-not (Test-Path -LiteralPath $path) -or (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant() -ne $file.Value) { $sdkMatches = $false }
-                }
-            } }
+            $patches = @($sdkLock.patches)
+            $snapshot = @{}
+            foreach ($patch in $patches) { foreach ($file in $patch.files.PSObject.Properties) { $snapshot[$file.Name] = $file.Value } }
+            $actual = @{}
+            foreach ($name in $snapshot.Keys) {
+                $path = Join-Path $sdk $name
+                $actual[$name] = if (Test-Path -LiteralPath $path) { (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant() } else { '' }
+            }
+            $sdkMatches = $false
+            for ($count = $patches.Count; $count -ge 0; --$count) {
+                if (-not @($snapshot.Keys | Where-Object { $actual[$_] -ne $snapshot[$_] }).Count) { $sdkMatches = $true; break }
+                if ($count -eq 0) { break }
+                $patch = $patches[$count - 1]
+                $base = @{}
+                foreach ($file in $patch.base_files.PSObject.Properties) { $base[$file.Name] = $file.Value }
+                foreach ($file in $patch.files.PSObject.Properties) { $snapshot[$file.Name] = if ($base.ContainsKey($file.Name)) { $base[$file.Name] } else { '' } }
+            }
         }
     }
     if (-not $sdkMatches) {

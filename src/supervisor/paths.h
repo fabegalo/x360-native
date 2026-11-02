@@ -86,17 +86,29 @@ std::filesystem::path ChildExecutable(const std::filesystem::path& exe);
 // machine opts in to long paths, and they reach names up to ~180 characters
 // below the installation root (the SDK's third-party trees). Paths inside an
 // installation whose root leaves less room go through the same verified
-// alias; everything else (POSIX included) keeps its spelling. Throws for an
-// installation whose root is longer than PreparationRootLimit().
+// alias, and a path through a dependency folder's junction gets that folder's
+// short real name; everything else (POSIX included) keeps its spelling. Throws
+// for a dependency folder too deep for its tools (see PlaceDependencyFolders).
 std::filesystem::path ToolPath(const std::filesystem::path& path);
 
-// The longest installation root, in UTF-8 bytes of its canonical name, that
-// can prepare games. Windows: both resolve the alias to the real name. Ninja
-// refuses names over MAX_PATH bytes, and CMake names its own modules up to 119
-// characters below the root. Git opens the SDK repository's metadata, up to
-// 102 characters below it, before it applies core.longpaths. Elsewhere
-// unlimited.
-size_t PreparationRootLimit();
+// Windows: Git, CMake and Ninja resolve junctions, the installation alias
+// included, and open the build tools and the SDK by their real names, which
+// they cannot do beyond MAX_PATH (DependencyFolderDepth). Where
+// <root>\.local\toolchains or <root>\external would be too deep for that, it
+// becomes a junction to a short folder of this user, <local>\x360n\t\<id> or
+// <local>\x360n\e\<id> (no privilege, no registry, no 8.3 names), made before
+// preparation fills it; every path relative to the installation still
+// resolves. A folder that fits stays where it is. One made in place earlier
+// (the installation moved) is moved there on the same volume, else set aside
+// as <name>.previous-<n> for preparation to refill. Developer checkouts are
+// left as they are. Throws where no junction can help: a network share, or a
+// file system without junctions. Elsewhere does nothing.
+void PlaceDependencyFolders(const ProjectPaths& paths);
+
+// The deepest name, in characters, those tools open by its real path below
+// the installation folder `name` (".local/toolchains", "external", or a
+// developer checkout's ".git"); 0 for any other folder or host.
+size_t DependencyFolderDepth(const std::filesystem::path& name);
 
 // Decides whether the supervisor may launch `exe`: an existing native executable
 // (.exe on Windows, executable permission on POSIX),

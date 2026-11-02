@@ -437,6 +437,9 @@ void Start(App& a, int action, fs::path source) {
       }
 #ifdef _WIN32
       const auto powershell = SystemTool("WindowsPowerShell/v1.0/powershell");
+      // Before any tool names them: Git, CMake and Ninja need short real
+      // folders for the build tools and the SDK.
+      PlaceDependencyFolders(ProjectPaths{a.root});
       if (action == kInstall) {
         run(powershell, {"-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", Utf8(ToolPath(a.root / "scripts/setup/install-build-tools.ps1")), "-AllowInstallation"}, "msvc");
         finish(Tr("Instalador encerrado. Verifique as dependências novamente antes de preparar.", "Installer closed. Recheck dependencies before preparing.")); return;

@@ -657,7 +657,9 @@ void Driver::Init() {
           "abcdefghijklmnopqrstuvwxyz0123456789_") != std::string::npos)
     throw std::runtime_error("Invalid title identity");
   // Tools see a long installation through its alias (ToolPath); every path
-  // below is derived from this one spelling.
+  // below is derived from this one spelling. Git, CMake and Ninja need short
+  // real folders for the tools and the SDK under it.
+  PlaceDependencyFolders(options.paths);
   options.paths.root = ToolPath(io::canonical(options.paths.root));
   const auto keys_override = NativeEnvironmentValue("X360N_XEX_KEYS");
   const auto keys = keys_override.empty()

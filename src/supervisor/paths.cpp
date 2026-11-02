@@ -321,46 +321,139 @@ fs::path InstallationAlias(const ProjectPaths& project, const fs::path& root) {
 // The deepest name the preparation tools open below an installation root:
 // 177 characters, in the SDK's third-party test data.
 constexpr size_t kToolDepth = 180;
-// Git and CMake resolve the alias to the real installation folder:
-// - Git opens repository metadata before it applies core.longpaths, so beyond
-//   MAX_PATH UTF-16 units it fails even with it. The deepest, 102 characters
-//   below the root, is a submodule checkout's
-//   \.git\modules\external\rexglue-sdk\modules\thirdparty\vulkan-memory-allocator\objects\info\alternates
-//   (93 for the SDK cloned on its own by prepare-tools).
-// - CMake names its own modules by its real folder, and Ninja refuses to stat
-//   a name over MAX_PATH bytes of UTF-8 (unless Windows opts in to long
-//   paths). The deepest module is 119 characters below the root:
-//   \.local\toolchains\cmake-3.31.6\share\cmake-3.31\Modules\CMakeExtraGeneratorDetermineCompilerMacrosAndIncludeDirs.cmake.
-// UTF-8 never takes fewer bytes than UTF-16 units, so Ninja's bound holds both.
-constexpr size_t kCMakeDepth = 119;
+
+// Folders below an installation that Git, CMake and Ninja name by their real
+// path: they resolve junctions, the installation alias included. Git opens
+// repository metadata before it applies core.longpaths, and Ninja refuses to
+// stat a name over MAX_PATH bytes of UTF-8 unless Windows opts in to long
+// paths. `depth` is the deepest name each opens below its folder:
+// - .local\toolchains, CMake's own modules:
+//   \cmake-3.31.6\share\cmake-3.31\Modules\CMakeExtraGeneratorDetermineCompilerMacrosAndIncludeDirs.cmake
+// - external, the SDK as prepare-tools clones it:
+//   \rexglue-sdk\.git\modules\thirdparty\vulkan-memory-allocator\objects\info\alternates
+// - .git, a developer checkout's metadata, which stays where its developer put it:
+//   \modules\external\rexglue-sdk\modules\thirdparty\vulkan-memory-allocator\objects\info\alternates
+struct DependencyFolder {
+  const wchar_t* name;
+  size_t depth;
+  const wchar_t* store;  // <local>\x360n\<store>\<id> when it must move
+};
+constexpr DependencyFolder kDependencyFolders[] = {
+    {L".local\\toolchains", 101, L"t"}, {L"external", 84, L"e"}, {L".git", 96, nullptr}};
+
+// Ninja counts UTF-8 bytes; Win32 opens fewer than MAX_PATH UTF-16 units.
+bool Fits(const fs::path& folder, size_t depth) {
+  return PathUtf8(folder).size() + depth <= MAX_PATH && folder.native().size() + depth < MAX_PATH;
+}
+
+bool OnNetwork(const fs::path& root) {
+  return root.native().starts_with(L"\\\\") ||
+         GetDriveTypeW((root.root_name().native() + L"\\").c_str()) == DRIVE_REMOTE;
+}
+
+// Throws for a dependency folder of `root` (canonical) whose real name leaves
+// its tools too little room.
+void RequireDependencyFolders(const fs::path& root) {
+  std::error_code ec;
+  const bool checkout = io::exists(root / ".git", ec);
+  for (const auto& folder : kDependencyFolders) {
+    const auto link = root / folder.name;
+    const bool present = folder.store ? io::exists(link, ec) : io::is_directory(link, ec);
+    if (!present && !folder.store) continue;
+    const auto real = present ? io::canonical(link) : link;
+    if (Fits(real, folder.depth)) continue;
+    throw std::runtime_error(
+        "The folder " + PathUtf8(real) + " takes " + std::to_string(PathUtf8(real).size()) +
+        " bytes of UTF-8, and Git, CMake and Ninja need " + std::to_string(folder.depth) +
+        " more below it within the Windows limit of " + std::to_string(MAX_PATH) + ". " +
+        (checkout ? "Move this developer checkout to a shorter folder."
+                  : "Prepare from the application, which moves it to a short folder of this user."));
+  }
+}
 }  // namespace
 #endif
 
-size_t PreparationRootLimit() {
+size_t DependencyFolderDepth(const fs::path& name) {
 #ifdef _WIN32
-  return MAX_PATH - kCMakeDepth;
+  for (const auto& folder : kDependencyFolders)
+    if (name.lexically_normal() == fs::path(folder.name)) return folder.depth;
 #else
-  return std::numeric_limits<size_t>::max();
+  (void)name;
+#endif
+  return 0;
+}
+
+void PlaceDependencyFolders(const ProjectPaths& paths) {
+#ifdef _WIN32
+  const auto root = io::canonical(paths.root);
+  // A developer checkout's submodules name their metadata relative to it.
+  if (io::exists(root / ".git")) return;
+  for (const auto& folder : kDependencyFolders) {
+    if (!folder.store) continue;
+    const auto link = root / folder.name;
+    std::error_code ec;
+    const auto status = fs::symlink_status(io::Host(link), ec);
+    if (ec && ec != std::errc::no_such_file_or_directory) throw fs::filesystem_error("symlink_status", link, ec);
+    const bool present = !ec && status.type() != fs::file_type::not_found;
+    if (Fits(present ? io::canonical(link) : link, folder.depth)) continue;
+    const auto refuse = [&](const std::string& reason) {
+      return std::runtime_error("The folder " + PathUtf8(link) + " is too deep for Git, CMake and Ninja, and " +
+                                reason + ". Move the installation to a shorter folder.");
+    };
+    if (OnNetwork(root)) throw refuse("the installation is on a network share, which cannot name a local folder");
+    const auto store = NativeBuildRoot(paths).parent_path() / folder.store / ShortProjectId(root);
+    if (!Fits(store, folder.depth)) throw refuse("so is this user's application data folder " + PathUtf8(store));
+    io::create_directories(store.parent_path());
+    if (present) {
+      if (status.type() == fs::file_type::junction) {
+        // To an earlier store: the link itself, never its target.
+        if (!RemoveDirectoryW(io::Host(link).c_str()))
+          throw std::system_error(int(GetLastError()), std::system_category(), "RemoveDirectoryW " + PathUtf8(link));
+      } else if (status.type() != fs::file_type::directory) {
+        throw refuse("an unexpected file occupies it");
+      } else if (io::exists(store) ||
+                 !MoveFileExW(io::Host(link).c_str(), io::Host(store).c_str(), MOVEFILE_WRITE_THROUGH)) {
+        // Made in place before (the installation moved here). Another volume or
+        // an existing store: set it aside; preparation refills the new folder.
+        auto previous = link;
+        previous += L".previous-" + std::to_wstring(GetTickCount64());
+        io::rename(link, previous);
+      }
+    }
+    io::create_directories(store);
+    io::create_directories(link.parent_path());
+    try {
+      CreateJunction(link, store);
+    } catch (const std::system_error& error) {
+      throw refuse(std::string("its file system cannot hold a junction (") + error.what() + ")");
+    }
+    if (Folded(io::canonical(link)) != Folded(io::canonical(store))) throw refuse("it resolves elsewhere");
+  }
+#else
+  (void)paths;
 #endif
 }
 
 fs::path ToolPath(const fs::path& path) {
 #ifdef _WIN32
   const auto name = io::Logical(io::Host(path));
-  const auto project = FindProjectRoot(name);
-  if (!project) return name;
+  // By its spelling: a path through a dependency folder's junction resolves
+  // outside the installation, yet belongs to it.
+  std::optional<ProjectPaths> project;
+  std::error_code ec;
+  for (auto dir = name.lexically_normal(); !project; dir = dir.parent_path()) {
+    if (io::exists(dir / "deps.lock.json", ec)) project = ProjectPaths{dir};
+    else if (dir.parent_path() == dir) return name;
+  }
   const auto root = io::canonical(project->root);
   // Git and CMake resolve the alias, so it cannot help here.
-  if (const auto bytes = PathUtf8(root).size(); bytes > PreparationRootLimit())
-    throw std::runtime_error(
-        "The installation folder takes " + std::to_string(bytes) +
-        " bytes of UTF-8; preparing games on Windows allows at most " + std::to_string(PreparationRootLimit()) +
-        " (an accented letter takes 2 bytes, an Asian character 3, an emoji 4), because Ninja and Git open the "
-        "build tools' and the SDK's files below it only within the Windows limit of " +
-        std::to_string(MAX_PATH) + ". Move the installation to a shorter folder: " + PathUtf8(root));
+  RequireDependencyFolders(root);
   if (root.native().size() + kToolDepth < MAX_PATH) return name;
-  const auto relative = io::weakly_canonical(name).lexically_relative(root);
-  if (relative.empty() || *relative.begin() == "..") return name;
+  const auto real = io::weakly_canonical(name);
+  const auto relative = real.lexically_relative(root);
+  if (relative.empty()) return name;
+  // Through a dependency folder's junction: its short real name.
+  if (*relative.begin() == "..") return real;
   fs::path alias;
   try {
     alias = InstallationAlias(*project, root);
@@ -406,6 +499,9 @@ fs::path ChildWorkingDirectory(const fs::path& directory) {
     return std::runtime_error("Working directory exceeds the Windows limit of " + std::to_string(MAX_PATH - 2) +
                               " characters and " + reason + ": " + PathUtf8(folder));
   };
+  // Inside a dependency folder kept in a short folder (PlaceDependencyFolders).
+  std::error_code ec;
+  if (const auto real = io::canonical(folder, ec); !ec && real.native().size() <= MAX_PATH - 2) return real;
   const auto project = FindProjectRoot(folder);
   if (!project) throw refuse("is outside an x360-native installation");
   const auto root = io::canonical(project->root), target = io::canonical(folder);

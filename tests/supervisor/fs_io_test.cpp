@@ -503,48 +503,118 @@ TEST_CASE("preparation tools reach long installations through their alias", "[pa
   else
     WARN("temporary folder too deep for a short installation");
 
-  // Git and CMake resolve the alias, so a root they cannot work below is
-  // refused by name before any tool starts. Ninja counts UTF-8 bytes.
-  CHECK(x360n::PreparationRootLimit() == MAX_PATH - 119);
-  const auto utf8 = [](const fs::path& path) { return x360n::PathUtf8(path).size(); };
-  const auto with_bytes = [&](size_t bytes, const fs::path& leaf) {
-    const auto pad = bytes - utf8(base) - 2 - utf8(leaf);
-    REQUIRE(pad < 200);
-    return base / std::string(pad, 'p') / leaf;
-  };
-  const auto limit = Installation(with_bytes(x360n::PreparationRootLimit(), u8"Limite-ゲーム-🎮"));
-  REQUIRE(utf8(io::canonical(limit)) == x360n::PreparationRootLimit());
-  AliasCleanup limit_cleanup{x360n::ToolPath(limit)};
-  CHECK(fs::symlink_status(io::Host(limit_cleanup.alias)).type() == fs::file_type::junction);
-  CHECK(io::equivalent(limit_cleanup.alias, limit));
-  const auto too_long = Installation(with_bytes(x360n::PreparationRootLimit() + 1, u8"Longa-ゲーム-🎮"));
-  // Fewer characters than the limit, but more bytes.
-  CHECK(Length(too_long) < x360n::PreparationRootLimit());
-  CHECK_THROWS_WITH(x360n::ToolPath(too_long / "scripts" / "devshell.cmd"),
-                    Catch::Matchers::ContainsSubstring("Move the installation to a shorter folder"));
 }
 
-// PreparationRootLimit() leaves room for CMake's own modules, which CMake
-// names by its real folder and Ninja stats as build dependencies.
-TEST_CASE("the preparation root limit covers this checkout's CMake modules", "[paths]") {
-  const auto root = x360n::CanonicalPath(x360n::PathFromUtf8(X360N_SOURCE_ROOT));
+namespace {
+// Removes the short folders PlaceDependencyFolders made for `install` (the
+// junctions go with the installation's own folder).
+struct StoreCleanup {
+  fs::path install;
+  ~StoreCleanup() {
+    std::error_code ec;
+    for (const auto* name : {L".local\\toolchains", L"external"}) {
+      const auto link = install / name;
+      if (fs::symlink_status(io::Host(link), ec).type() != fs::file_type::junction) continue;
+      const auto store = io::canonical(link, ec);
+      RemoveDirectoryW(io::Host(link).c_str());
+      if (!ec) io::remove_all(store, ec);
+    }
+  }
+};
+}  // namespace
+
+// Git and CMake resolve every junction, the alias included, so no spelling
+// helps them below a deep installation; its tools and SDK live in short real
+// folders instead, reached by the installation's own relative paths.
+TEST_CASE("preparation keeps the tools and the SDK of deep installations in short folders", "[paths][fs-io][process]") {
+  Root root("fs_io_store");
+  const auto base = io::canonical(root.path);
+  // Beyond MAX_PATH itself, in Unicode, on a volume with or without 8.3 names.
+  const auto install = Installation(Exact(base, 300, u8"Instalação-測試-ゲーム-🎮"));
+  StoreCleanup cleanup{install};
+  // Nothing placed yet: refused by name before any tool starts.
+  CHECK_THROWS_WITH(x360n::ToolPath(install / "scripts" / "prepare-tools.ps1"),
+                    Catch::Matchers::ContainsSubstring("Prepare from the application"));
+  // A folder made in place before the installation moved here.
+  const auto sdk = install / "external" / "rexglue-sdk";
+  io::create_directories(sdk / ".git");
+  { io::ofstream(sdk / ".git" / "HEAD", std::ios::binary) << "pinned"; }
+  x360n::PlaceDependencyFolders(x360n::ProjectPaths{install});
+  for (const auto* name : {".local/toolchains", "external"}) {
+    INFO(name);
+    const auto link = install / fs::path(name);
+    CHECK(fs::symlink_status(io::Host(link)).type() == fs::file_type::junction);
+    const auto store = io::canonical(link);
+    CHECK_FALSE(x360n::IsWithin(store, install));
+    CHECK(x360n::PathUtf8(store).size() + x360n::DependencyFolderDepth(name) <= MAX_PATH);
+    // Named through the installation, the files are the store's.
+    CHECK(x360n::ToolPath(link) == store);
+  }
+  // Moved on this volume, nothing copied or left behind.
+  CHECK(Slurp(sdk / ".git" / "HEAD") == "pinned");
+  bool set_aside = false;
+  for (const auto& entry : io::directory_iterator(install))
+    set_aside = set_aside || entry.path().filename().native().find(L".previous-") != std::wstring::npos;
+  CHECK_FALSE(set_aside);
+  // Preparation fills them through the installation; an existing layout is kept.
+  const auto cmake = install / ".local" / "toolchains" / "cmake-3.31.6" / "bin";
+  io::create_directories(cmake);
+  { io::ofstream(cmake / "cmake.txt", std::ios::binary) << "tool"; }
+  const auto store = io::canonical(install / ".local" / "toolchains");
+  x360n::PlaceDependencyFolders(x360n::ProjectPaths{install});
+  CHECK(io::canonical(install / ".local" / "toolchains") == store);
+  CHECK(Slurp(store / "cmake-3.31.6" / "bin" / "cmake.txt") == "tool");
+  const auto tool = x360n::ToolPath(cmake / "cmake.txt");
+  CHECK(Length(tool) < MAX_PATH);
+  CHECK(io::equivalent(tool, cmake / "cmake.txt"));
+  // Other paths of the installation go through its alias, as before.
+  const auto script = x360n::ToolPath(install / "deps.lock.json");
+  AliasCleanup alias{script.parent_path()};
+  CHECK(io::equivalent(script, install / "deps.lock.json"));
+  // A process started inside the moved SDK runs from its short real folder.
+  x360n::ProcessSpec spec{X360N_TEST_CHILD, {"read", "HEAD"}, sdk / ".git", root.path / "out.log",
+                          root.path / "err.log", std::chrono::seconds(30)};
+  const auto result = x360n::RunProcess(spec);
+  INFO(result.launch_error);
+  REQUIRE(result.launched);
+  CHECK(Output(root.path / "out.log") == "pinned");
+
+  // Folders that already fit stay where they are.
+  const auto short_install = Installation(base / "s");
+  if (Length(short_install) + 18 + x360n::DependencyFolderDepth(".local/toolchains") < MAX_PATH) {
+    x360n::PlaceDependencyFolders(x360n::ProjectPaths{short_install});
+    CHECK_FALSE(io::exists(short_install / ".local" / "toolchains"));
+    CHECK_FALSE(io::exists(short_install / "external"));
+  }
+  // A developer checkout keeps its layout and is refused by name.
+  const auto checkout = Installation(Exact(base / "checkout", 200, "x360-native"));
+  io::create_directories(checkout / ".git" / "modules");
+  x360n::PlaceDependencyFolders(x360n::ProjectPaths{checkout});
+  CHECK_FALSE(io::exists(checkout / "external"));
+  CHECK_THROWS_WITH(x360n::ToolPath(checkout / "scripts"), Catch::Matchers::ContainsSubstring("developer checkout"));
+}
+
+// DependencyFolderDepth() covers CMake's own modules, which CMake names by its
+// real folder and Ninja stats as build dependencies.
+TEST_CASE("the dependency folder depth covers this checkout's CMake modules", "[paths]") {
+  const auto tools = x360n::CanonicalPath(x360n::PathFromUtf8(X360N_SOURCE_ROOT) / ".local" / "toolchains");
   size_t deepest = 0;
   std::error_code ec;
-  for (const auto& tool : io::directory_iterator(root / ".local" / "toolchains", ec)) {
+  for (const auto& tool : io::directory_iterator(tools, ec)) {
     if (!tool.is_directory() || !tool.path().filename().native().starts_with(L"cmake-")) continue;
     for (const auto& entry : io::recursive_directory_iterator(tool.path() / "share"))
       if (entry.is_regular_file() && entry.path().native().find(L"\\Modules\\") != std::wstring::npos)
-        deepest = std::max(deepest, x360n::PathUtf8(entry.path()).size() - x360n::PathUtf8(root).size());
+        deepest = std::max(deepest, entry.path().native().size() - tools.native().size());
   }
   if (!deepest) SKIP("no pinned CMake in this checkout");
-  INFO("deepest CMake module " << deepest << " bytes below " << x360n::PathUtf8(root));
-  CHECK(x360n::PreparationRootLimit() + deepest <= MAX_PATH);
+  INFO("deepest CMake module " << deepest << " characters below " << x360n::PathUtf8(tools));
+  CHECK(deepest <= x360n::DependencyFolderDepth(".local/toolchains"));
 }
 
-// PreparationRootLimit() leaves room for every repository metadata directory
-// of this checkout below its root, submodules of submodules included: Git
-// opens their HEAD and objects/info/alternates before core.longpaths applies.
-TEST_CASE("the preparation root limit covers this checkout's git metadata", "[paths]") {
+// DependencyFolderDepth() covers every repository metadata directory of this
+// checkout, submodules of submodules included: Git opens their HEAD and
+// objects/info/alternates before core.longpaths applies.
+TEST_CASE("the dependency folder depth covers this checkout's git metadata", "[paths]") {
   const auto root = x360n::CanonicalPath(x360n::PathFromUtf8(X360N_SOURCE_ROOT));
   const auto git_dir = [](const fs::path& worktree) -> std::optional<fs::path> {
     const auto dot = worktree / ".git";
@@ -564,9 +634,16 @@ TEST_CASE("the preparation root limit covers this checkout's git metadata", "[pa
     const auto dir = pending.back();
     pending.pop_back();
     if (io::is_regular_file(dir / "HEAD")) {
+      // Below the dependency folder holding it: a checkout's .git, or external
+      // for an SDK cloned on its own.
       const auto name = x360n::CanonicalPath(dir).native();
-      if (name.size() > root.native().size() && name.starts_with(root.native() + L"\\")) {
-        deepest = std::max(deepest, name.size() - root.native().size() + kAlternates.size());
+      for (const auto* folder : {L".git", L"external"}) {
+        const auto base = root.native() + L"\\" + folder;
+        if (!name.starts_with(base + L"\\")) continue;
+        const auto below = name.size() - base.size() + kAlternates.size();
+        INFO(x360n::PathUtf8(dir) << ": " << below << " characters below " << x360n::PathUtf8(fs::path(base)));
+        CHECK(below <= x360n::DependencyFolderDepth(folder));
+        deepest = std::max(deepest, below);
         ++inside;
       }
       if (io::is_directory(dir / "modules")) pending.push_back(dir / "modules");
@@ -576,8 +653,7 @@ TEST_CASE("the preparation root limit covers this checkout's git metadata", "[pa
       if (entry.is_directory()) pending.push_back(entry.path());
   }
   if (inside < 2) SKIP("no SDK repository metadata inside this checkout");
-  INFO("deepest metadata " << deepest << " characters below " << x360n::PathUtf8(root));
-  CHECK(x360n::PreparationRootLimit() + deepest < MAX_PATH);
+  WARN("deepest metadata " << deepest << " characters below its dependency folder in " << x360n::PathUtf8(root));
 }
 
 // The administrative share of the temporary folder's drive. UNC installations
@@ -635,5 +711,11 @@ TEST_CASE("processes start from UNC folders and deep UNC folders are refused by 
   // Nor can preparation tools reach a long installation there.
   const auto long_install = Installation(Exact(unc / "tools", 120, "x360-native"));
   CHECK_THROWS_WITH(x360n::ToolPath(long_install / "scripts"), Catch::Matchers::ContainsSubstring("network share"));
+  // Nor keep a deep one's tools in a local folder: its junctions would be
+  // resolved by the server.
+  const auto deep_install = Installation(Exact(unc / "store", 220, "x360-native"));
+  CHECK_THROWS_WITH(x360n::PlaceDependencyFolders(x360n::ProjectPaths{deep_install}),
+                    Catch::Matchers::ContainsSubstring("network share"));
+  CHECK_FALSE(io::exists(deep_install / "external"));
 }
 #endif
