@@ -18,6 +18,10 @@ std::filesystem::path PathFromUtf8(const std::string& value);
 // path); unchanged on other hosts. Packaged environments live under arbitrary
 // user folders, where SDK test data alone exceeds 260 characters.
 std::filesystem::path LongPath(const std::filesystem::path& path);
+// Drive/UNC spelling without the \\?\ (or \\?\UNC\) prefix; anything else is
+// unchanged. MSVC parses "\\?" as the root name, so walking the parents of an
+// extended path reaches "\\?\C:", which Win32 rejects (ERROR_INVALID_PARAMETER).
+std::filesystem::path OrdinaryPath(const std::filesystem::path& path);
 // fs::canonical, also beyond MAX_PATH; the result never carries the \\?\ prefix.
 std::filesystem::path CanonicalPath(const std::filesystem::path& path);
 

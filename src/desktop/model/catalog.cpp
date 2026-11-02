@@ -76,11 +76,7 @@ bool CatalogLaunchVerificationActive() { return launch_verification; }
 fs::path CatalogVerificationPath(const fs::path& path) {
   if (launch_verification) return VerificationPath(path);
 #ifdef _WIN32
-  const auto resolved = fs::weakly_canonical(LongPath(path));
-  const auto name = resolved.native();
-  if (name.starts_with(L"\\\\?\\UNC\\")) return fs::path(L"\\\\" + name.substr(8));
-  if (name.starts_with(L"\\\\?\\")) return fs::path(name.substr(4));
-  return resolved;
+  return OrdinaryPath(fs::weakly_canonical(LongPath(path)));
 #else
   return fs::weakly_canonical(path);
 #endif
