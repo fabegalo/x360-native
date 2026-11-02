@@ -341,7 +341,7 @@ size_t Import(const ProjectPaths& paths, const Target& t, const fs::path& source
   };
   if (single) { stop(); consider(source); }
   // Search only the user-selected folder, never follow directory symlinks.
-  for (auto it = single ? fs::recursive_directory_iterator{} : fs::recursive_directory_iterator(source); it != fs::recursive_directory_iterator(); ++it) {
+  for (auto it = single ? fs::recursive_directory_iterator{} : fs::recursive_directory_iterator(LongPath(source)); it != fs::recursive_directory_iterator(); ++it) {
     stop();
     const auto& entry = *it;
     if (entry.is_symlink() || !IsWithin(entry.path(), source)) { it.disable_recursion_pending(); continue; }
@@ -351,14 +351,14 @@ size_t Import(const ProjectPaths& paths, const Target& t, const fs::path& source
   uintmax_t needed = 0;
   for (const auto& i : t.inputs) {
     Inside(i.destination, t.game_root);
-    if (fs::exists(i.destination)) {
+    if (fs::exists(LongPath(i.destination))) {
       if (!Matches(i.destination, i.sha256))
         throw std::runtime_error("Destino já contém outro arquivo; nada será sobrescrito: " + Utf8(i.destination));
       copies.erase(i.destination);
     } else if (!copies.contains(i.destination)) {
       if (allow_partial || i.optional) continue;
       throw std::runtime_error("Conjunto incompleto. Falta o arquivo verificado: " + i.source_name);
-    } else needed += fs::file_size(copies.at(i.destination));
+    } else needed += fs::file_size(LongPath(copies.at(i.destination)));
   }
   WorkspaceLease lease(paths);
   fs::create_directories(paths.inputs());
@@ -375,7 +375,7 @@ size_t Import(const ProjectPaths& paths, const Target& t, const fs::path& source
   for (const auto& [destination, input] : copies) {
     stop();
     Inside(destination, paths.inputs());
-    fs::create_directories(destination.parent_path());
+    fs::create_directories(LongPath(destination.parent_path()));
     // Unique temporary name; never truncate an existing original or destination.
     const auto staging = ImportIoPath(destination.parent_path() / (".x360n-import-" + Utf8(destination.filename())));
     const auto temporary = staging / "verified.tmp";
