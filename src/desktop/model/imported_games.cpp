@@ -213,10 +213,12 @@ std::string ImportGame(const ProjectPaths& paths, const std::vector<Target>& tar
   std::map<std::string, std::string> inventory;
   Json modules = Json::array();
   std::set<std::string> names;
-  for (const auto& f : fs::recursive_directory_iterator(source)) {
+  // Preserve the entire imported file inventory, including guest assets in
+  // deep folders; the extracted source is not necessarily short on Windows.
+  for (const auto& f : fs::recursive_directory_iterator(LongPath(source))) {
     stop(); Safe(f.path(), source);
     if (!f.is_regular_file()) continue;
-    const auto rel = f.path().lexically_relative(source).generic_u8string();
+    const auto rel = f.path().lexically_relative(LongPath(source)).generic_u8string();
     const std::string name(rel.begin(), rel.end()); Relative(name);
     auto folded = name; for (auto& c : folded) if (c >= 'A' && c <= 'Z') c += 'a' - 'A';
     if (!names.insert(folded).second) throw std::runtime_error("Duplicate case-insensitive game path");
