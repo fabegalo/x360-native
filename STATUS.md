@@ -1,5 +1,22 @@
 # STATUS
 
+02/11 — **Caminhos profundos sem limite de 141 bytes; menos duplicação**: no
+Windows, `.local\toolchains` e `external` de uma instalação profunda viram
+junctions para `%LOCALAPPDATA%\x360n\t|e\<id>` antes de qualquer ferramenta,
+pois Git, CMake e Ninja abrem esses arquivos pelo nome real. Sem Registro,
+admin ou nomes 8.3; rede e sistemas sem junction são recusados com a causa.
+Patches 0253 (codegen pelo caminho de acesso), 0254 (`rex.log` longo) e 0255
+(`--game_data_root` longo), cada um com `sdkcheck` que falha sem ele; lock com
+242 entradas. Instalação limpa a 337 caracteres/363 bytes, com Unicode e emoji,
+em NTFS sem 8.3: importou a 17559 e o Castle Crashers, preparou os dois e a
+dashboard chegou a "sign in or out". **Gameplay pela My Games nesse ambiente
+não exercitado.** Importação de pacote por hardlink da extração (escrita de
+144,9 MB → 1,1 MB). Arquivos baixados das ferramentas liberados após a
+extração verificada (961 MB). Gerações inúteis do SDK compartilhado removidas,
+e os títulos passam a compartilhar uma única geração. Reabrir e preparar de
+novo só verifica.
+[Relatório, medições e limites](docs/reports/paths-storage-2026-11-02.md).
+
 01/11 — **RENDER-CORE: captura, replay e perfil por frame do Native**: o
 decorador opt-in de `ScanoutBackend` grava frames no formato validado
 `X360NFC1` v3 (imagem composta obrigatória: captura sem saída válida do
