@@ -99,21 +99,21 @@ Environment CheckEnvironment(const fs::path& root) {
     if (RegGetValueW(HKEY_LOCAL_MACHINE, L"SOFTWARE\\Microsoft\\Windows Kits\\Installed Roots", L"KitsRoot10",
                     RRF_RT_REG_SZ | RRF_SUBKEY_WOW6432KEY, nullptr, registered, &length) == ERROR_SUCCESS)
       kits = registered;
-    if (fs::is_directory(kits / "Include")) {
-      for (const auto& version : fs::directory_iterator(kits / "Include")) {
+    if (io::is_directory(kits / "Include")) {
+      for (const auto& version : io::directory_iterator(kits / "Include")) {
         auto id = version.path().filename();
-        if (fs::is_regular_file(version.path() / "um/Windows.h") &&
-            fs::is_regular_file(version.path() / "um/d3d12.h") &&
-            fs::is_regular_file(kits / "Lib" / id / "um" / kSdkArchitecture / "kernel32.lib") &&
-            fs::is_regular_file(kits / "Lib" / id / "ucrt" / kSdkArchitecture / "ucrt.lib") &&
-            fs::is_regular_file(kits / "bin" / id / kSdkArchitecture / "rc.exe")) { windows_sdk = true; break; }
+        if (io::is_regular_file(version.path() / "um/Windows.h") &&
+            io::is_regular_file(version.path() / "um/d3d12.h") &&
+            io::is_regular_file(kits / "Lib" / id / "um" / kSdkArchitecture / "kernel32.lib") &&
+            io::is_regular_file(kits / "Lib" / id / "ucrt" / kSdkArchitecture / "ucrt.lib") &&
+            io::is_regular_file(kits / "bin" / id / kSdkArchitecture / "rc.exe")) { windows_sdk = true; break; }
       }
     }
     r.description += windows_sdk ? "Windows SDK: OK\r\n" : "Windows SDK: installation required / instalação necessária\r\n";
     if (!windows_sdk) r.missing_tools.push_back("Windows SDK");
     auto vswhere = fs::path(program_files) / "Microsoft Visual Studio/Installer/vswhere.exe";
     CoTaskMemFree(program_files);
-    if (fs::is_regular_file(vswhere) && r.writable) {
+    if (io::is_regular_file(vswhere) && r.writable) {
       std::error_code ec;
       auto out = temp / ("vswhere-" + std::to_string(GetCurrentProcessId()) + ".txt");
       ProcessSpec spec; spec.exe = vswhere;
@@ -121,9 +121,9 @@ Environment CheckEnvironment(const fs::path& root) {
       spec.stdout_file = out; spec.stderr_file = out; spec.stderr_file += ".err";
       spec.no_console = true; spec.timeout = std::chrono::seconds(10);
       auto result = RunProcess(spec);
-      std::ifstream text(out); std::string first; std::getline(text, first);
+      io::ifstream text(out); std::string first; std::getline(text, first);
       msvc = windows_sdk && result.launched && result.exit_code == 0 && !first.empty();
-      text.close(); fs::remove(out, ec); fs::remove(spec.stderr_file, ec);
+      text.close(); io::remove(out, ec); io::remove(spec.stderr_file, ec);
     }
   }
   if (!msvc) r.missing_tools.push_back("MSVC 2022");

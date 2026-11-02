@@ -46,7 +46,7 @@ void Safe(const fs::path& file, const fs::path& root) {
   // parents end at the invalid "\\?\C:"); inspect each ancestor in long form.
   const auto stop = OrdinaryPath(root);
   for (auto p = OrdinaryPath(file); p != stop && !p.empty();) {
-    if (fs::is_symlink(LongPath(p))) throw std::runtime_error("Catalog path contains a link");
+    if (io::is_redirect(LongPath(p))) throw std::runtime_error("Catalog path contains a link");
     const auto parent = p.parent_path();
     // Equivalent roots can have different spellings (case, separators, '.').
     // A filesystem root is its own parent; never spin there if the lexical
@@ -74,17 +74,17 @@ void Save(const ProjectPaths& paths, const std::string& id, const Json& record) 
   WorkspaceLease lease(paths);
   const auto root = paths.local() / "catalog";
   const auto file = root / (id + ".json");
-  Safe(file, paths.local()); fs::create_directories(root);
+  Safe(file, paths.local()); io::create_directories(root);
   const auto tmp = root / (id + ".tmp"); Safe(tmp, paths.local());
   // Validate serialization before opening/truncating a recoverable staging file.
   const auto text = record.dump(2);
-  std::ofstream out(tmp, std::ios::binary); out << text << '\n'; out.close();
+  io::ofstream out(tmp, std::ios::binary); out << text << '\n'; out.close();
   if (!out) throw std::runtime_error("Could not persist the game catalog");
 #ifdef _WIN32
-  if (!MoveFileExW(tmp.c_str(), file.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH))
+  if (!MoveFileExW(io::Host(tmp).c_str(), io::Host(file).c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH))
     throw std::runtime_error("Could not publish the game catalog");
 #else
-  fs::rename(tmp, file);
+  io::rename(tmp, file);
 #endif
 }
 // Match the exact executable AND all recipe assets, never just a Title ID/name.
@@ -112,14 +112,7 @@ const Target* Recipe(const std::vector<Target>& targets, const Json& record) {
 }
 // Content-install discs nest deeper than MAX_PATH; walk and delete without it.
 fs::path Extended(const fs::path& path) {
-#ifdef _WIN32
-  auto name = fs::absolute(path).lexically_normal().make_preferred().native();
-  if (name.starts_with(L"\\\\?\\")) return name;
-  if (name.starts_with(L"\\\\")) return L"\\\\?\\UNC\\" + name.substr(2);
-  return L"\\\\?\\" + name;
-#else
-  return path;
-#endif
+  return host_path::Extended(path);
 }
 template<class Units> std::string Name(const Units& units) {
   std::u16string s;
@@ -127,8 +120,8 @@ template<class Units> std::string Name(const Units& units) {
   return s.empty() ? "" : Utf8(fs::path(s));
 }
 bool ReadPackageHeader(const fs::path& file, rex::filesystem::StfsHeader& header) {
-  if (!fs::is_regular_file(file)) return false;
-  std::ifstream in(file, std::ios::binary);
+  if (!io::is_regular_file(file)) return false;
+  io::ifstream in(file, std::ios::binary);
   in.read(reinterpret_cast<char*>(&header), sizeof(header));
   if (in.gcount() != sizeof(header)) return false;
   const auto magic = header.header.magic.get();
@@ -155,16 +148,16 @@ std::string SaveThumbnail(const ProjectPaths& paths, const std::vector<uint8_t>&
   const auto file = root / (sha + ".png");
   Safe(file, paths.local());
   if (const auto existing = DigestFile(file); existing && existing->sha256 == sha) return sha;
-  fs::create_directories(root);
+  io::create_directories(root);
   const auto tmp = root / (sha + ".tmp"); Safe(tmp, paths.local());
-  std::ofstream out(tmp, std::ios::binary);
+  io::ofstream out(tmp, std::ios::binary);
   out.write(reinterpret_cast<const char*>(png.data()), std::streamsize(png.size())); out.close();
   if (!out) throw std::runtime_error("Could not persist the game thumbnail");
 #ifdef _WIN32
-  if (!MoveFileExW(tmp.c_str(), file.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH))
+  if (!MoveFileExW(io::Host(tmp).c_str(), io::Host(file).c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH))
     throw std::runtime_error("Could not publish the game thumbnail");
 #else
-  fs::rename(tmp, file);
+  io::rename(tmp, file);
 #endif
   return sha;
 }
@@ -187,8 +180,8 @@ void PackageMetadata(const fs::path& original, Json& r, std::vector<uint8_t>& th
 // not the game, and a package from another title is ignored.
 void DiscArt(const fs::path& root, Json& r, std::vector<uint8_t>& thumbnail) {
   if ((r["name"] != "" && !thumbnail.empty()) || r["title_id"] == "") return;
-  for (const auto& entry : fs::directory_iterator(root)) {
-    if (entry.is_symlink() || !entry.is_regular_file() || Key(Utf8(entry.path().filename())) != "nxeart") continue;
+  for (const auto& entry : io::directory_iterator(root)) {
+    if (entry.is_redirect() || !entry.is_regular_file() || Key(Utf8(entry.path().filename())) != "nxeart") continue;
     auto header = std::make_unique<rex::filesystem::StfsHeader>();
     if (!ReadPackageHeader(entry.path(), *header)) return;
     const auto& md = header->metadata;
@@ -205,7 +198,7 @@ std::string ImportGame(const ProjectPaths& paths, const std::vector<Target>& tar
   ActionTrace trace("import.game");
   const auto stop = [&] { if (cancelled && cancelled()) throw std::runtime_error("Import cancelled; retry with the same content to resume."); };
   stop();
-  if (!fs::is_directory(source)) throw std::runtime_error("Select an extracted game folder, ISO or STFS package.");
+  if (!io::is_directory(source)) throw std::runtime_error("Select an extracted game folder, ISO or STFS package.");
   // Only a game root is accepted. Update partitions/auxiliary modules never
   // turn into separate games merely because they contain an XEX.
   const auto anchor = source / "default.xex";
@@ -218,7 +211,7 @@ std::string ImportGame(const ProjectPaths& paths, const std::vector<Target>& tar
   std::set<std::string> names;
   // Preserve the entire imported file inventory, including guest assets in
   // deep folders; the extracted source is not necessarily short on Windows.
-  for (const auto& f : fs::recursive_directory_iterator(LongPath(source))) {
+  for (const auto& f : io::recursive_directory_iterator(LongPath(source))) {
     stop(); Safe(f.path(), source);
     if (!f.is_regular_file()) continue;
     const auto rel = f.path().lexically_relative(LongPath(source)).generic_u8string();
@@ -227,7 +220,7 @@ std::string ImportGame(const ProjectPaths& paths, const std::vector<Target>& tar
     if (!names.insert(folded).second) throw std::runtime_error("Duplicate case-insensitive game path");
     auto digest = DigestFile(f.path()); if (!digest) throw std::runtime_error("Could not read game content");
     inventory.emplace(name, digest->sha256);
-    std::ifstream signature(f.path(), std::ios::binary);
+    io::ifstream signature(f.path(), std::ios::binary);
     char magic[4]{}; signature.read(magic, 4);
     if (std::string_view(magic, 3) == "XEX") {
       auto found = IdentifyContent({}, f.path(), cancelled);
@@ -269,9 +262,9 @@ std::string ImportGame(const ProjectPaths& paths, const std::vector<Target>& tar
   // to a different inventory. Changed revisions keep the isolated import path.
   if (IsWithin(source, paths.inputs() / "games")) {
     Safe(source, paths.inputs());
-    const auto canonical_source = fs::weakly_canonical(source);
+    const auto canonical_source = io::weakly_canonical(source);
     const auto occupied = std::any_of(targets.begin(), targets.end(), [&](const auto& existing) {
-      return existing.catalogued && fs::weakly_canonical(existing.game_root) == canonical_source &&
+      return existing.catalogued && io::weakly_canonical(existing.game_root) == canonical_source &&
           existing.id != "g" + id.substr(0, 63) && existing.id != target.id;
     });
     if (!occupied) target.game_root = source;
@@ -285,9 +278,9 @@ std::string ImportGame(const ProjectPaths& paths, const std::vector<Target>& tar
   // An existing successful duplicate stays successful even if a retry is cancelled.
   const auto previous = paths.local() / "catalog" / (id + ".json");
   bool previously_complete = false;
-  if (fs::is_regular_file(previous)) {
+  if (io::is_regular_file(previous)) {
     Safe(previous, paths.local());
-    std::ifstream in(previous); auto old = Json::parse(in);
+    io::ifstream in(previous); auto old = Json::parse(in);
     if (old.at("files") != files) throw std::runtime_error("Catalog identity conflict; existing record preserved");
     // Existing catalogs, including interrupted imports in the old layout, keep
     // their exact location. Reimport must not duplicate or relocate local data.
@@ -323,9 +316,9 @@ std::string ImportGame(const ProjectPaths& paths, const std::vector<Target>& tar
 
 void ReadImportedGames(const ProjectPaths& paths, std::vector<Target>& targets) {
   const auto root = paths.local() / "catalog";
-  if (!fs::is_directory(root)) return;
+  if (!io::is_directory(root)) return;
   CatalogPaths content_paths(paths.inputs());
-  for (const auto& file : fs::directory_iterator(root)) {
+  for (const auto& file : io::directory_iterator(root)) {
     CheckVerificationCancellation();
     if (file.path().extension() != ".json") continue;
     Target t; t.id = Utf8(file.path().stem()); t.aot = false; t.catalogued = true; t.importable = false;
@@ -334,8 +327,8 @@ void ReadImportedGames(const ProjectPaths& paths, std::vector<Target>& targets) 
     t.label = t.label_en = t.id;
     try {
       Safe(file.path(), paths.local());
-      if (fs::file_size(file.path()) > 64 * 1024 * 1024) throw std::runtime_error("Catalog record too large");
-      std::ifstream in(file.path()); const auto r = Json::parse(in);
+      if (io::file_size(file.path()) > 64 * 1024 * 1024) throw std::runtime_error("Catalog record too large");
+      io::ifstream in(file.path()); const auto r = Json::parse(in);
       if (r.at("schema") != 1 || r.at("id") != t.id || !r.at("files").is_array() || r.at("files").empty() ||
           t.id != Fingerprint(r.at("files"))) throw std::runtime_error("Invalid catalog identity");
       t.game_root = paths.inputs() / Relative(r.at("content_root")); Safe(t.game_root, paths.inputs());
@@ -390,12 +383,12 @@ void ReadImportedGames(const ProjectPaths& paths, std::vector<Target>& targets) 
       t.user_root = UserDataRoot(paths, paths.local() / "user" / t.id);
       if (!t.title_id.empty())
         t.library = {t.title_id, r.value("content_type", std::string("00004000")), content_id.substr(0, 40), name, content_id};
-      if (fs::is_regular_file(t.manifest) && !t.library.title_id.empty()) {
+      if (io::is_regular_file(t.manifest) && !t.library.title_id.empty()) {
         // Folder imports have no container content type. Reuse the generated
         // profile's source-bound routing metadata instead of inventing a second
         // registration under the folder default. Execution still checks its receipt.
         const auto setup_file = t.manifest.parent_path() / "preparation.toml";
-        std::ifstream recipe(setup_file, std::ios::binary);
+        io::ifstream recipe(setup_file, std::ios::binary);
         if (!recipe) throw std::runtime_error("Generated AOT library metadata is missing; regenerate the project.");
         const auto setup = toml::parse(recipe, Utf8(setup_file));
         const auto library = setup["library"];
@@ -430,9 +423,9 @@ void RemoveGame(const ProjectPaths& paths, const std::vector<Target>& catalog, c
   // An unreadable record identifies no content; only the record itself goes.
   std::optional<fs::path> content;
   std::string source;
-  if (fs::is_regular_file(record)) {
+  if (io::is_regular_file(record)) {
     Json r;
-    try { std::ifstream in(record); r = Json::parse(in); } catch (const std::exception&) {}
+    try { io::ifstream in(record); r = Json::parse(in); } catch (const std::exception&) {}
     if (r.is_object() && r.value("id", std::string{}) == game.catalog_id && r.contains("content_root")) {
       content = paths.inputs() / Relative(r.at("content_root"));
       Safe(*content, paths.inputs());
@@ -441,7 +434,7 @@ void RemoveGame(const ProjectPaths& paths, const std::vector<Target>& catalog, c
   }
   // Only whole trees this environment created: no links/junctions inside.
   const auto own_tree = [](const fs::path& root) {
-    for (const auto& entry : fs::recursive_directory_iterator(Extended(root))) {
+    for (const auto& entry : io::recursive_directory_iterator(Extended(root))) {
       const auto type = entry.symlink_status().type();
       if (type != fs::file_type::regular && type != fs::file_type::directory)
         throw std::runtime_error("Link ou arquivo especial encontrado; nada foi apagado: " + Utf8(entry.path()));
@@ -449,11 +442,11 @@ void RemoveGame(const ProjectPaths& paths, const std::vector<Target>& catalog, c
   };
   // Identify every deletion before the first write.
   const auto games = paths.inputs() / "games";
-  bool delete_content = content && fs::is_directory(*content);
+  bool delete_content = content && io::is_directory(*content);
   if (delete_content) {
     const auto relative = content->lexically_normal().lexically_relative(games.lexically_normal());
     // games/<title>/<root>; never the shared inputs or a title directory itself.
-    if (relative.empty() || *relative.begin() == ".." || std::distance(relative.begin(), relative.end()) < 2 || fs::is_symlink(*content))
+    if (relative.empty() || *relative.begin() == ".." || std::distance(relative.begin(), relative.end()) < 2 || io::is_redirect(*content))
       throw std::runtime_error("Conteúdo importado fora da pasta de jogos; preservado: " + Utf8(*content));
     // A folder imported in place holds the user's own files; another record may share a root.
     if (!source.empty() && IsWithin(PathFromUtf8(source), *content)) delete_content = false;
@@ -462,42 +455,51 @@ void RemoveGame(const ProjectPaths& paths, const std::vector<Target>& catalog, c
           (!other.preparation_source.empty() && IsWithin(other.preparation_source, *content)))) delete_content = false;
     if (delete_content) own_tree(*content);
   }
-  fs::path project, build;
+  fs::path project, build, native_build;
   if (game.generic_aot) {
     project = paths.local() / "aot" / game.id;
     build = game.exe.parent_path();
     Safe(project, paths.local()); Safe(build, paths.local());
-    if (fs::exists(build)) {
-      std::ifstream owner_input(build / ".x360n-aot-owner"); std::string owner;
+    if (io::exists(build)) {
+      io::ifstream owner_input(build / ".x360n-aot-owner"); std::string owner;
       std::getline(owner_input, owner);
       if (!owner.empty() && owner.back() == '\r') owner.pop_back();
       if (owner != game.id) throw std::runtime_error("O build AOT pertence a outro título; preservado: " + Utf8(build));
       own_tree(build);
+      // Its CMake/Ninja tree, named after this published directory. Where no
+      // such tree can be placed (profile folder too deep), none was built.
+      fs::path tree;
+      try { tree = NativeBuildDirectory(paths, build); } catch (const std::runtime_error&) {}
+      if (!tree.empty() && tree != build && io::exists(tree)) {
+        own_tree(tree);
+        native_build = tree;
+      }
     }
-    if (fs::exists(project)) own_tree(project);
+    if (io::exists(project)) own_tree(project);
   }
   // Enumeration first: no dashboard keeps listing content that is about to go.
   for (const auto& dashboard : catalog) WithdrawLibrary(dashboard, game, catalog);
-  if (!build.empty()) fs::remove_all(Extended(build));
-  if (!project.empty()) fs::remove_all(Extended(project));
+  if (!build.empty()) io::remove_all(Extended(build));
+  if (!native_build.empty()) io::remove_all(native_build);
+  if (!project.empty()) io::remove_all(Extended(project));
   if (game.generic_aot)
     for (const auto* suffix : {".incomplete", ".runtime-error", ".lock"})
-      fs::remove(paths.local() / "preparation" / (game.id + suffix));
+      io::remove(paths.local() / "preparation" / (game.id + suffix));
   if (delete_content) {
-    fs::remove_all(Extended(*content));
-    if (const auto title = content->parent_path(); fs::is_directory(title) && fs::is_empty(title)) fs::remove(title);
+    io::remove_all(Extended(*content));
+    if (const auto title = content->parent_path(); io::is_directory(title) && io::is_empty(title)) io::remove(title);
   }
-  fs::remove(record);
+  io::remove(record);
 }
 
 std::vector<uint8_t> ReadThumbnail(const Target& target) {
   if (target.thumbnail_sha256.empty()) return {};
   std::error_code ec;
-  if (fs::is_symlink(target.thumbnail, ec) || !fs::is_regular_file(target.thumbnail, ec)) return {};
-  const auto size = fs::file_size(target.thumbnail, ec);
+  if (io::is_redirect(target.thumbnail, ec) || !io::is_regular_file(target.thumbnail, ec)) return {};
+  const auto size = io::file_size(target.thumbnail, ec);
   if (ec || size > kThumbnailLimit) return {};
   std::vector<uint8_t> png(size);
-  std::ifstream in(target.thumbnail, std::ios::binary);
+  io::ifstream in(target.thumbnail, std::ios::binary);
   in.read(reinterpret_cast<char*>(png.data()), std::streamsize(size));
   if (size_t(in.gcount()) != size || Sha256Hex(png) != target.thumbnail_sha256) return {};
   return png;

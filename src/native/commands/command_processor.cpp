@@ -16,6 +16,7 @@
 #include "../capture/capture_backend.h"
 #include "../quality/settings.h"
 #include <cstring>
+#include "../../supervisor/fs_io.h"
 REXCVAR_DEFINE_STRING(native_trace, "", "GPU/Native", "Optional Native diagnostic directory");
 REXCVAR_DEFINE_STRING(native_frame_profile, "", "GPU/Native",
     "Per-frame renderer profile CSV (draws, resolves, syncs, time inside/outside the renderer, submissions, fences, GPU); empty disables it");
@@ -150,8 +151,8 @@ bool CommandProcessor::ShouldIssueDraw(uint32_t condition) const {
 bool CommandProcessor::IssueDraw(rex::graphics::xenos::PrimitiveType primitive, uint32_t count, IndexBufferInfo* indices, bool) {
   try {
     if (!REXCVAR_GET(native_trace).empty()) {
-      std::filesystem::create_directories(REXCVAR_GET(native_trace));
-      std::ofstream out(std::filesystem::path(REXCVAR_GET(native_trace)) / "last-draw-registers.bin", std::ios::binary);
+      x360n::io::create_directories(REXCVAR_GET(native_trace));
+      x360n::io::ofstream out(std::filesystem::path(REXCVAR_GET(native_trace)) / "last-draw-registers.bin", std::ios::binary);
       out.write(reinterpret_cast<const char*>(register_file_->values), sizeof(register_file_->values));
       REXLOG_INFO("Native draw primitive={} count={} indexed={} mode={}", uint32_t(primitive), count, indices != nullptr,
           uint32_t(register_file_->Get<rex::graphics::reg::RB_MODECONTROL>().edram_mode));

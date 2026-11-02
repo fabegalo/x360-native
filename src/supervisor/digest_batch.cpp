@@ -11,6 +11,7 @@
 #ifdef _WIN32
 #include <bcrypt.h>
 #endif
+#include "fs_io.h"
 
 namespace x360n {
 namespace {
@@ -21,11 +22,7 @@ struct File {
   explicit File(HANDLE value) : handle(value) {}
   ~File() { if (handle != INVALID_HANDLE_VALUE) CloseHandle(handle); }
 };
-std::wstring Extended(std::filesystem::path path) {
-  auto name = path.make_preferred().native();
-  if (name.starts_with(L"\\\\?\\")) return name;
-  return name.starts_with(L"\\\\") ? L"\\\\?\\UNC\\" + name.substr(2) : L"\\\\?\\" + name;
-}
+std::wstring Extended(const std::filesystem::path& path) { return host_path::Extended(path).native(); }
 std::filesystem::path CanonicalName(HANDLE file, const std::filesystem::path& path) {
   std::wstring name(512, L'\0');
   auto count = GetFinalPathNameByHandleW(file, name.data(), static_cast<DWORD>(name.size()), FILE_NAME_NORMALIZED | VOLUME_NAME_DOS);
@@ -35,11 +32,10 @@ std::filesystem::path CanonicalName(HANDLE file, const std::filesystem::path& pa
   }
   if (count && count < name.size()) {
       name.resize(count);
-      if (name.starts_with(L"\\\\?\\UNC\\")) return std::filesystem::path(L"\\\\" + name.substr(8)).lexically_normal();
-      if (name.starts_with(L"\\\\?\\") && name.size() > 6 && name[5] == L':')
-        return std::filesystem::path(name.substr(4)).lexically_normal();
+      const auto ordinary = host_path::Ordinary(name);
+      if (!host_path::IsExtended(ordinary)) return ordinary.lexically_normal();
   }
-  return std::filesystem::weakly_canonical(path);
+  return io::weakly_canonical(path);
 }
 std::optional<FileDigest> HashHeldFile(HANDLE file, std::vector<uint8_t>& buffer,
                                      const std::function<bool()>& keep_reading) {
@@ -152,7 +148,7 @@ std::filesystem::path VerificationPath(const std::filesystem::path& path) {
     }
   }
 #endif
-  return std::filesystem::weakly_canonical(path);
+  return io::weakly_canonical(path);
 }
 bool HasProtectedVerificationPath(const std::filesystem::path& path) {
 #ifdef _WIN32
@@ -175,9 +171,10 @@ std::optional<FileDigest> TryBatchDigest(const std::filesystem::path& path, bool
     ++current->owner->hits;
     return current->entries.at(found->second).digest;
   }
-  std::error_code path_error;
-  const auto absolute = std::filesystem::absolute(path, path_error).lexically_normal();
-  if (path_error) return std::nullopt;
+  // Ordinary absolute spelling: its ancestors can be pinned (an extended
+  // name's parents end at the invalid "\\?\C:").
+  const auto absolute = host_path::Ordinary(host_path::Extended(path));
+  if (!absolute.is_absolute()) return std::nullopt;
   if (const auto found = current->paths.find(absolute); found != current->paths.end()) {
     ++current->owner->hits;
     return current->entries.at(found->second).digest;

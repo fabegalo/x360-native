@@ -12,6 +12,7 @@
 #include <mutex>
 #include <stdexcept>
 #include <string>
+#include "../../supervisor/fs_io.h"
 REXCVAR_DEFINE_BOOL(native_vulkan_perf, false, "GPU/Native", "Measure Native Vulkan submission, fence, buffer and publication costs");
 
 namespace x360n::native {
@@ -348,9 +349,9 @@ VkShaderModule CreateNativeShaderModule(const rex::ui::vulkan::VulkanDevice& dev
     static std::atomic<uint64_t> sequence{0};
     diagnostic_id = sequence.fetch_add(1, std::memory_order_relaxed) + 1;
     const auto directory = std::filesystem::path(dump_directory);
-    std::filesystem::create_directories(directory);
+    x360n::io::create_directories(directory);
     const auto path = directory / ("native-module-" + std::to_string(diagnostic_id) + ".spv");
-    std::ofstream out(path, std::ios::binary | std::ios::trunc);
+    x360n::io::ofstream out(path, std::ios::binary | std::ios::trunc);
     out.write(reinterpret_cast<const char*>(spirv.data()), spirv.size_bytes());
     out.close();
     if (!out) throw std::runtime_error("Native Vulkan: could not write requested shader diagnostic");

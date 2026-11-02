@@ -29,7 +29,7 @@ std::vector<App::CheckedTarget> CheckContents(const fs::path& root, const std::v
       const auto& first = target.inputs.front();
       const auto file = target.preparation_source.empty() ? first.destination :
           target.preparation_source / first.destination.lexically_relative(target.game_root);
-      if (mode == InspectionMode::Preview) item.added = fs::is_regular_file(file);
+      if (mode == InspectionMode::Preview) item.added = io::is_regular_file(file);
       else { const auto anchor = DigestFile(file); item.added = anchor && anchor->sha256 == first.sha256; }
     }
     item.added = item.added || InGameLibrary(target);
@@ -115,10 +115,10 @@ void CheckForUpdate(App& a) {
   a.update_check = std::thread([&a] {
     std::optional<AvailableUpdate> found;
     try {
-      fs::create_directories(Updates(a));
+      io::create_directories(Updates(a));
       const auto list = Updates(a) / "releases.json";
       Download(a, kReleasesApi, list, 30, a.closing);
-      std::ifstream in(list, std::ios::binary);
+      io::ifstream in(list, std::ios::binary);
       found = SelectUpdate({std::istreambuf_iterator<char>(in), {}}, X360N_VERSION, a.update_channel);
     } catch (const std::exception&) { found.reset(); }  // offline or rate limited: try again next start
     if (!a.closing) Post(a, [found](App& app) { OnUpdateChecked(app, found); });
@@ -137,8 +137,8 @@ void StartUpdate(App& a) {
     std::string error;
     try {
       const auto dir = Updates(a) / update.version;
-      fs::remove_all(dir);
-      fs::create_directories(dir / "extract");
+      io::remove_all(dir);
+      io::create_directories(dir / "extract");
       const auto archive = dir / (update.package + PackageArchiveExtension()), checksum = dir / (update.package + PackageArchiveExtension() + ".sha256");
       if (update.archive_sha256.empty()) {
         if (update.checksum_url.empty())
@@ -164,7 +164,7 @@ void StartUpdate(App& a) {
       Post(a, [](App& app) { OnProgress(app, Tr("Instalando a atualização...", "Installing the update...")); });
       const auto transaction = Updates(a) / ("txn-" + std::to_string(CurrentProcess()) + "-" + std::to_string(Stamp()));
       ApplyUpdate(a.self.parent_path(), dir / "extract" / update.package, update.version, transaction);
-      std::error_code ec; fs::remove_all(dir, ec);  // only this download
+      std::error_code ec; io::remove_all(dir, ec);  // only this download
     } catch (const std::exception& e) { error = e.what(); }
     Post(a, [error](App& app) { OnUpdateFinished(app, error); });
   });
@@ -257,11 +257,11 @@ void Start(App& a, int action, fs::path source) {
         if (action == kPrepare && !a.failed) verify_target();
       } }
       catch (const std::exception& error) { a.failed = true; Post(a, [text = std::string(error.what())](App& app) { OnFinished(app, text); }); return; }
-      std::ofstream(a.logs / "result.txt", std::ios::binary) << message << '\n';
+      io::ofstream(a.logs / "result.txt", std::ios::binary) << message << '\n';
       Post(a, [message](App& app) { OnFinished(app, message); });
     };
     try {
-      fs::create_directories(a.logs);
+      io::create_directories(a.logs);
       if (!a.preferences.empty()) {
         ActionTrace trace("environment.preflight");
         VerifyDistribution(a.self.parent_path());
@@ -328,7 +328,7 @@ void Start(App& a, int action, fs::path source) {
         }
         a.stage = 1;
         progress(Tr("Identificando o conteúdo...\nConferindo os arquivos antes de adicionar.", "Identifying the content...\nChecking the files before adding."));
-        if (fs::is_directory(content.path()) && fs::is_regular_file(content.path() / "default.xex")) {
+        if (io::is_directory(content.path()) && io::is_regular_file(content.path() / "default.xex")) {
           a.stage = 2;
           a.imported_id = ImportGame(ProjectPaths{a.root}, a.targets, content.path(), source, [&] { return a.cancel.load(); });
           a.import_recognized = true;
@@ -375,7 +375,7 @@ void Start(App& a, int action, fs::path source) {
           next_sample = now + std::chrono::milliseconds(500);
           // Read only the current step's bounded log tail, on the process
           // worker. Never rescan whole logs or extraction trees on the UI thread.
-          std::ifstream in(spec.stdout_file, std::ios::binary | std::ios::ate);
+          io::ifstream in(spec.stdout_file, std::ios::binary | std::ios::ate);
           if (!in) return;
           const auto size = in.tellg();
           in.seekg(std::max<std::streamoff>(0, static_cast<std::streamoff>(size) - 65536));
@@ -393,7 +393,7 @@ void Start(App& a, int action, fs::path source) {
         };
         auto result = RunProcess(spec);
         if (spec.collect_metrics) {
-          std::ofstream metrics(a.logs / "preparation-metrics.tsv", std::ios::app);
+          io::ofstream metrics(a.logs / "preparation-metrics.tsv", std::ios::app);
           // Whole process-tree totals, including every compiler worker.
           metrics << label << '\t' << result.duration.count() << '\t' << result.exit_code
                   << '\t' << result.cancelled << '\t' << result.timed_out;
@@ -408,14 +408,14 @@ void Start(App& a, int action, fs::path source) {
         if (action == kLaunch) {
           // The supervisor performs the complete preflight. Consume its bounded
           // status record only after exit; never rehash the launch closure here.
-          std::ifstream verified(spec.stdout_file, std::ios::binary);
+          io::ifstream verified(spec.stdout_file, std::ios::binary);
           std::string prefix(65536, '\0');
           verified.read(prefix.data(), std::streamsize(prefix.size()));
           prefix.resize(size_t(verified.gcount()));
           a.launch_verified = prefix.find("X360N_LAUNCH_VERIFIED\n") != std::string::npos ||
                               prefix.find("X360N_LAUNCH_VERIFIED\r\n") != std::string::npos;
           if (result.exit_code != 0 || !result.launched) {
-            std::ifstream error(spec.stderr_file, std::ios::binary);
+            io::ifstream error(spec.stderr_file, std::ios::binary);
             launch_detail.resize(4096); error.read(launch_detail.data(), std::streamsize(launch_detail.size()));
             launch_detail.resize(size_t(error.gcount()));
           }
@@ -467,16 +467,16 @@ void Start(App& a, int action, fs::path source) {
         // The supervisor's shared AOT pipeline owns SDK, codegen, build, cache and receipts.
         const auto command = PreparationCommand(a.root, Supervisor(a), {"--root", Utf8(a.root), "prepare", id, "--keep-incomplete"});
         run(command.exe, command.args, id);
-        if (id != target.id) fs::remove(marker);
+        if (id != target.id) io::remove(marker);
       };
       for (const auto& dep : target.dependencies) prepare(dep);
       prepare(target.id);
       a.stage = 6;
       progress(Tr("Registrando conteúdo verificado na biblioteca original...", "Registering verified content in the original library..."));
-      fs::remove(PreparationMarker(ProjectPaths{a.root}, target));
+      io::remove(PreparationMarker(ProjectPaths{a.root}, target));
       if (!CompleteLibraryPreparation(ProjectPaths{a.root}, target, a.targets, [&] { return a.cancel.load(); }))
         throw std::runtime_error(Tr("A preparação não produziu componentes válidos. Consulte o Diagnóstico.", "Preparation did not produce valid components. See Diagnostics."));
-      fs::remove(PreparationMarker(ProjectPaths{a.root}, target));
+      io::remove(PreparationMarker(ProjectPaths{a.root}, target));
       a.stage = 7;
       finish(Tr("Preparação concluída. Os componentes serão conferidos antes de habilitar a sessão.", "Preparation finished. Components will be checked before enabling the session."));
     } catch (const std::exception& error) {

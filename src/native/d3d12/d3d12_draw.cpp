@@ -13,6 +13,7 @@
 #include <rex/graphics/flags.h>
 #include <fstream>
 #include <stdexcept>
+#include "../../supervisor/fs_io.h"
 REXCVAR_DEFINE_STRING(native_draw_dump, "", "GPU/Native", "Diagnostic draw snapshot directory");
 REXCVAR_DEFINE_STRING(native_draw_dump_ps, "", "GPU/Native", "Diagnostic pixel shader hash to snapshot");
 REXCVAR_DEFINE_STRING(native_pso_dump, "", "GPU/Native", "Diagnostic directory for the latest graphics PSO inputs");
@@ -74,11 +75,11 @@ D3D12Render::Ptr<ID3D12PipelineState> D3D12Render::CreatePipeline(D3D12_GRAPHICS
       D3D12_SHADER_BYTECODE stages[]{pd.VS, pd.PS, pd.GS};
       for (unsigned i = 0; i < 3; ++i) if (stages[i].BytecodeLength) {
         auto path = std::filesystem::path(REXCVAR_GET(dump_shaders)) / names[i];
-        std::ofstream binary(path.string() + ".dxbc", std::ios::binary);
+        x360n::io::ofstream binary(path.string() + ".dxbc", std::ios::binary);
         binary.write(static_cast<const char*>(stages[i].pShaderBytecode), stages[i].BytecodeLength);
         Ptr<ID3DBlob> disassembly;
         if (SUCCEEDED(D3DDisassemble(stages[i].pShaderBytecode, stages[i].BytecodeLength, 0, nullptr, &disassembly))) {
-          std::ofstream text(path.string() + ".txt");
+          x360n::io::ofstream text(path.string() + ".txt");
           text.write(static_cast<const char*>(disassembly->GetBufferPointer()), disassembly->GetBufferSize());
         }
       }
@@ -110,14 +111,14 @@ void D3D12Render::Draw(const RegisterFile& r, rex::memory::Memory& memory, Shade
   if (!dump_dir.empty() && !draw_dumped && ps && ps->ucode_data_hash() == dump_hash) {
     Flush(kFlushDrain);
     const auto dir = std::filesystem::path(dump_dir);
-    std::filesystem::create_directories(dir);
+    x360n::io::create_directories(dir);
     auto save = [&](const std::string& name, const void* p, size_t n) {
-      std::ofstream(dir / name, std::ios::binary).write(static_cast<const char*>(p), n);
+      x360n::io::ofstream(dir / name, std::ios::binary).write(static_cast<const char*>(p), n);
     };
     save("registers.bin", r.values, sizeof(r.values));
     save("vs.bin", vs.ucode_dwords(), vs.ucode_dword_count() * 4);
     save("ps.bin", ps->ucode_dwords(), ps->ucode_dword_count() * 4);
-    std::ofstream(dir / "draw.txt") << uint32_t(primitive) << ' ' << count << ' ' << bool(indices);
+    x360n::io::ofstream(dir / "draw.txt") << uint32_t(primitive) << ' ' << count << ' ' << bool(indices);
     if (indices) save("indices.bin", indices, sizeof(*indices));
     auto range = [&](uint32_t address, uint32_t bytes) {
       if (address && bytes && uint64_t(address) + bytes <= 0x20000000)
@@ -285,9 +286,9 @@ void D3D12Render::Draw(const RegisterFile& r, rex::memory::Memory& memory, Shade
     static const auto pso_dump = REXCVAR_GET(native_pso_dump);
     if (!pso_dump.empty()) {
       const auto dir = std::filesystem::path(pso_dump);
-      std::filesystem::create_directories(dir);
+      x360n::io::create_directories(dir);
       auto save = [&](const char* name, const void* bytes, size_t size) {
-        std::ofstream out(dir / name, std::ios::binary);
+        x360n::io::ofstream out(dir / name, std::ios::binary);
         out.write(static_cast<const char*>(bytes), size);
         Require(bool(out), "PSO diagnostic write failed");
       };

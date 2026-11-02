@@ -9,6 +9,7 @@
 #include <cstring>
 #include <fstream>
 #include <stdexcept>
+#include "../../supervisor/fs_io.h"
 
 namespace x360n::native {
 VulkanRender::VulkanRender(rex::ui::vulkan::VulkanProvider& provider)
@@ -347,7 +348,7 @@ void VulkanRender::SetPipelineDirectory(const std::filesystem::path& directory) 
   SavePipelineCache();
   pipeline_file_ = file;
   if (file.empty()) return;
-  std::ifstream stream(file, std::ios::binary | std::ios::ate);
+  x360n::io::ifstream stream(file, std::ios::binary | std::ios::ate);
   if (!stream) return;
   const auto length = stream.tellg();
   if (length < 32 || length > (64 << 20)) return;
@@ -391,19 +392,19 @@ void VulkanRender::SavePipelineCache() {
   std::vector<uint8_t> bytes(size);
   if (get_data(device_.device(), pipeline_cache_, &size, bytes.data()) != VK_SUCCESS) return;
   std::error_code error;
-  std::filesystem::create_directories(pipeline_file_.parent_path(), error);
+  x360n::io::create_directories(pipeline_file_.parent_path(), error);
   if (error) return;
   auto temporary = pipeline_file_;
   temporary += ".tmp";
-  std::ofstream stream(temporary, std::ios::binary | std::ios::trunc);
+  x360n::io::ofstream stream(temporary, std::ios::binary | std::ios::trunc);
   if (!stream.write(reinterpret_cast<const char*>(bytes.data()), size)) return;
   stream.close();
   // Cache contents are optional and device-specific; a failed replacement must
   // never interfere with guest execution or discard the preceding valid file.
 #if defined(_WIN32)
-  const bool replaced = MoveFileExW(temporary.c_str(), pipeline_file_.c_str(), MOVEFILE_REPLACE_EXISTING);
+  const bool replaced = MoveFileExW(x360n::io::Host(temporary).c_str(), x360n::io::Host(pipeline_file_).c_str(), MOVEFILE_REPLACE_EXISTING);
 #else
-  std::filesystem::rename(temporary, pipeline_file_, error);  // rename(2) replaces atomically.
+  x360n::io::rename(temporary, pipeline_file_, error);  // rename(2) replaces atomically.
   const bool replaced = !error;
 #endif
   if (!replaced) REXLOG_WARN("Native Vulkan: unable to persist pipeline cache");

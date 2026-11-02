@@ -15,7 +15,7 @@ namespace x360n::content {
 void ValidateUpdateContainer(const fs::path& path) {
   using namespace rex::filesystem;
   const auto header=StfsContainerDevice::ReadPackageHeader(path);
-  const auto size=fs::file_size(path);
+  const auto size=io::file_size(path);
   if (!header || header->header.magic!=XContentPackageType::kPirs ||
       header->metadata.volume_type!=XContentVolumeType::kStfs || header->metadata.data_file_count!=0 ||
       !header->metadata.volume_descriptor.stfs.flags.bits.read_only_format || size>(512ull<<20))
@@ -25,7 +25,7 @@ void ValidateUpdateContainer(const fs::path& path) {
   const uint32_t blocks=desc.total_block_count, tables=desc.file_table_block_count;
   if (start<sizeof(StfsHeader) || start>=size || !blocks || blocks>size/4096 || !tables || tables>64)
     throw std::runtime_error("PIRS: invalid/excessive allocation or file table");
-  std::ifstream input(path,std::ios::binary);
+  io::ifstream input(path,std::ios::binary);
   auto read=[&](uint64_t offset,void* buffer,size_t count) {
     if (offset>size || count>size-offset) throw std::runtime_error("PIRS: block outside package");
     input.clear();input.seekg(offset);input.read(static_cast<char*>(buffer),count);

@@ -2,6 +2,7 @@
 
 #include <filesystem>
 #include <fstream>
+#include "fs_io.h"
 
 namespace x360n::content {
 
@@ -18,7 +19,7 @@ class ExtractionManifest {
 
  private:
   std::filesystem::path destination_, temporary_;
-  std::ofstream stream_;
+  io::ofstream stream_;
 };
 
 }  // namespace x360n::content

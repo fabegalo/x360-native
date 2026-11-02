@@ -3,6 +3,7 @@
 #include <fstream>
 #include <stdexcept>
 #include <toml++/toml.hpp>
+#include "toml_file.h"
 #ifdef _WIN32
 #include <windows.h>
 #endif
@@ -40,8 +41,8 @@ std::span<const ConsoleLanguage> ConsoleLanguages() { return languages; }
 std::span<const ConsoleLocale> ConsoleLocales() { return locales; }
 ConsoleSettings LoadConsoleSettings(const ProjectPaths& paths) {
   const auto file = paths.local() / "console.toml";
-  if (!std::filesystem::exists(file)) return {};
-  const auto table = toml::parse_file(PathUtf8(file));
+  if (!io::exists(file)) return {};
+  const auto table = ParseTomlFile(file);
   const auto version = table["version"].value<int>();
   const auto language = table["language"].value<uint32_t>();
   const auto country = table["country"].value<uint32_t>();
@@ -55,18 +56,18 @@ void SaveConsoleSettings(const ProjectPaths& paths, ConsoleSettings settings) {
   Validate(settings);
   const auto file = paths.local() / "console.toml";
   auto temp = file; temp += ".tmp";
-  std::filesystem::create_directories(file.parent_path());
+  io::create_directories(file.parent_path());
   {
-    std::ofstream out(temp, std::ios::binary | std::ios::trunc);
+    io::ofstream out(temp, std::ios::binary | std::ios::trunc);
     out << "version = 1\nlanguage = " << settings.language << "\ncountry = " << settings.country << '\n';
     out.close();
     if (!out) throw std::runtime_error("Cannot persist console preferences");
   }
 #ifdef _WIN32
-  if (!MoveFileExW(temp.c_str(), file.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH))
+  if (!MoveFileExW(io::Host(temp).c_str(), io::Host(file).c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH))
     throw std::runtime_error("Cannot replace console preferences: Windows error " + std::to_string(GetLastError()));
 #else
-  std::filesystem::rename(temp, file);
+  io::rename(temp, file);
 #endif
 }
 std::vector<std::string> SessionConsoleArguments(const std::vector<std::string>& args,

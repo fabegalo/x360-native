@@ -2,6 +2,7 @@
 #include <chrono>
 #include <filesystem>
 #include <fstream>
+#include <vector>
 #include <rex/filesystem.h>
 #include <rex/filesystem/devices/host_path_device.h>
 #include <rex/kernel/init.h>
@@ -9,6 +10,7 @@
 #include <rex/runtime.h>
 #include <rex/system/kernel_state.h>
 #include <rex/system/xam/content_manager.h>
+#include "../../src/supervisor/host_path.h"
 using rex::X_STATUS;
 
 namespace {
@@ -86,4 +88,23 @@ TEST_CASE("Content beyond MAX_PATH keeps its attributes and device entries", "[s
   auto* entry = device.ResolvePath(guest + "asset.bin");
   REQUIRE(entry);
   CHECK(entry->size() == 10);
+}
+
+// The launcher (x360n::host_path, built without the SDK) and the runtime
+// (rex::filesystem::HostPath, patch 0252) must name the same host file, or a
+// handoff written by one is not found by the other.
+TEST_CASE("Launcher and runtime agree on host and ordinary paths", "[sdkcheck][long-path]") {
+  std::vector<fs::path> inputs{fs::temp_directory_path() / "a" / "." / "b" / ".." / "c", fs::path("relative") / "x"};
+#ifdef _WIN32
+  inputs.push_back(fs::path(L"C:/a/b"));
+  inputs.push_back(fs::path(LR"(\\server\share\x)"));
+  inputs.push_back(fs::path(LR"(\\?\C:\already)"));
+  inputs.push_back(fs::path(LR"(\\?\UNC\server\share\y)"));
+#endif
+  for (const auto& input : inputs) {
+    INFO(input.u8string().size());
+    const auto host = x360n::host_path::Extended(input);
+    CHECK(host == rex::filesystem::HostPath(input));
+    CHECK(x360n::host_path::Ordinary(host) == rex::filesystem::OrdinaryPath(host));
+  }
 }

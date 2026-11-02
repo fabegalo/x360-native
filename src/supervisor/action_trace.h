@@ -17,6 +17,7 @@
 #include <windows.h>
 #include <psapi.h>
 #endif
+#include "fs_io.h"
 
 namespace x360n {
 // Opt-in, process-local files avoid contention between launcher and supervisor.
@@ -73,7 +74,7 @@ class ActionTrace {
 #else
     const unsigned pid = 0, tid = 0;
 #endif
-    std::ofstream out(directory / ("actions-" + std::to_string(pid) + ".tsv"), std::ios::app);
+    io::ofstream out(directory / ("actions-" + std::to_string(pid) + ".tsv"), std::ios::app);
     out << std::fixed << std::setprecision(3) << std::chrono::duration<double, std::milli>(now.time_since_epoch()).count()
         << '\t' << tid << '\t' << name << '\t'
         << std::chrono::duration<double, std::milli>(now - start).count() << '\n';
@@ -81,7 +82,7 @@ class ActionTrace {
     // Process-local deltas include concurrent UI threads, not child processes.
     // Nested scopes overlap; peak commit is the process lifetime high-water mark.
     if (baseline && resources.valid) {
-      std::ofstream usage(directory / ("resources-" + std::to_string(pid) + ".tsv"), std::ios::app);
+      io::ofstream usage(directory / ("resources-" + std::to_string(pid) + ".tsv"), std::ios::app);
       usage << std::fixed << std::setprecision(3)
             << std::chrono::duration<double, std::milli>(now.time_since_epoch()).count()
             << '\t' << tid << '\t' << name << '\t' << std::chrono::duration<double, std::milli>(now - start).count()

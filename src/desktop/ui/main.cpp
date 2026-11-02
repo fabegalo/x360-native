@@ -38,7 +38,7 @@ float UiScale(SDL_Window* window) {
 // never injects input into this or any other window.
 struct ReviewFlow {
   std::string target;
-  std::ofstream log;
+  io::ofstream log;
   int stage = 0;  // 0 wait for listing, 1 preparing, 2 session, 3 ended, 4 done
   std::string last_text;
   bool was_session = false, was_finishing = false, prepared = false;
@@ -274,7 +274,7 @@ int main(int argc, char** argv) {
     if (!smoke.empty() && a.busy) frames = 0;
     if (!smoke.empty() && ++frames == 60) {
       int w = 0, h = 0; SDL_GetWindowSizeInPixels(window, &w, &h);
-      std::ofstream(smoke) << "renderer=" << presenter->Name() << "\nwindow=" << w << "x" << h << "\nscale=" << scale
+      io::ofstream(smoke) << "renderer=" << presenter->Name() << "\nwindow=" << w << "x" << h << "\nscale=" << scale
                            << "\npage=" << int(PageOf(a)) << "\nroot=" << Utf8(a.root) << "\nchip=" << a.chip_text
                            << "\nprimary=" << a.primary_label << "\nresult=" << a.result << "\n";
       running = false;

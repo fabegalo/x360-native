@@ -1,6 +1,7 @@
 #include "handheld.h"
 #include <cstdlib>
 #include <fstream>
+#include "fs_io.h"
 
 namespace x360n::desktop {
 namespace {
@@ -10,7 +11,7 @@ std::string Trim(std::string text) {
   return text.substr(first, text.find_last_not_of(" \t\r\n") - first + 1);
 }
 [[maybe_unused]] std::string ReadFirstLine(const char* path) {
-  std::ifstream file(path);
+  io::ifstream file(path);
   std::string line;
   std::getline(file, line);
   return line;

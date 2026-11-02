@@ -23,6 +23,7 @@
 #include <string>
 #include <unordered_map>
 #include <vector>
+#include "../../supervisor/fs_io.h"
 namespace x360n::native::capture {
 inline constexpr char kMagic[8] = {'X', '3', '6', '0', 'N', 'F', 'C', '1'};
 // 2: present records carry the presenter's final output (LUT, overlay, post effect).
@@ -99,7 +100,7 @@ class Writer {
   uint64_t bytes() const { return bytes_; }
   uint64_t blob_bytes() const { return blob_bytes_; }
  private:
-  std::ofstream out_;
+  x360n::io::ofstream out_;
   std::filesystem::path path_;
   struct HashKey { size_t operator()(const Hash& h) const { return size_t(h[0] ^ (h[1] * 0x9E3779B97F4A7C15ull)); } };
   std::unordered_map<Hash, uint64_t, HashKey> blobs_;

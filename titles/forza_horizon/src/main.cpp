@@ -9,6 +9,7 @@
 #include "launch_handoff.h"
 #include "guest_capture.h"
 #include "enhanced_timing.h"
+#include "../../../src/supervisor/fs_io.h"
 
 REXCVAR_DEFINE_STRING(x360n_guest_capture, "", "Diagnostics", "Capture actual GPU output every two seconds (thirty seconds by default)");
 REXCVAR_DEFINE_UINT32(x360n_guest_capture_seconds, 30, "Diagnostics", "GPU capture duration, limited to 300 seconds");
@@ -50,7 +51,7 @@ class ImportedGameApp : public rex::ReXApp {
   // that mishandle a present device, so this stays specific to this title.
   bool MountUtilityDrive() {
     std::error_code error;
-    std::filesystem::create_directories(utility_root_, error);
+    x360n::io::create_directories(utility_root_, error);
     auto device = std::make_unique<rex::filesystem::HostPathDevice>("\\CACHE", utility_root_, false);
     auto* fs = runtime()->file_system();
     if (error || !device->Initialize() || !fs->RegisterDevice(std::move(device)) ||

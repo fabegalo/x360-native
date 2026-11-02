@@ -46,6 +46,8 @@
 #include <rex/system/util/xex2_info.h>
 
 #include "sha256.h"
+#include "fs_io.h"
+namespace io = x360n::io;
 
 namespace fs = std::filesystem;
 
@@ -71,7 +73,7 @@ constexpr const char* kKeyNames[] = {"xex2-retail", "xex2-devkit", "xex1-retail"
 // per line as "<name> <32 hex digits>", '#' starting a comment. Anything else in it is
 // an error, so that a typo cannot silently drop a key.
 std::vector<MasterKey> LoadKeys(const fs::path& path) {
-  std::ifstream in(path);
+  io::ifstream in(path);
   if (!in)
     throw Error{fmt::format(
         "key file '{}' not found. It is local and ignored by Git: create it with one line "
@@ -138,7 +140,7 @@ std::string Version(uint32_t v) {
 }
 
 Bytes ReadFile(const fs::path& p) {
-  std::ifstream in(p, std::ios::binary);
+  io::ifstream in(p, std::ios::binary);
   if (!in) throw Error{"cannot read " + p.string()};
   return Bytes((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
 }
@@ -361,7 +363,7 @@ void WriteNew(const fs::path& p, const uint8_t* data, size_t n) {
   if (!ok) throw Error{"cannot write " + p.string()};
 #else
   // CREATE_NEW keeps the no-overwrite contract atomic, including concurrent runs.
-  HANDLE file = CreateFileW(p.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_NEW,
+  HANDLE file = CreateFileW(io::Host(p).c_str(), GENERIC_WRITE, 0, nullptr, CREATE_NEW,
                             FILE_ATTRIBUTE_NORMAL, nullptr);
   if (file == INVALID_HANDLE_VALUE)
     throw Error{"cannot create new output (refusing to overwrite) " + p.string()};
@@ -383,7 +385,7 @@ void WriteNew(const fs::path& p, const uint8_t* data, size_t n) {
 
 std::vector<uint8_t> ReadUnencryptedXexResource(const fs::path& path, std::string_view name) {
   try {
-    if (fs::file_size(path) > (64u << 20)) throw Error{"resource XEX exceeds size limit"};
+    if (io::file_size(path) > (64u << 20)) throw Error{"resource XEX exceeds size limit"};
     const auto bytes = ReadFile(path);
     const auto hd = ParseHeader(bytes);
     if (ImageSize(hd) > (128u << 20)) throw Error{"resource image exceeds size limit"};
@@ -560,7 +562,7 @@ int ApplyXexPatch(const fs::path& base_path, const fs::path& patch_path, const f
                     x360n::Sha256Hex({image.data(), image.size()})));
     if (!target_ok) throw Error{"result does not match the page digests of the patched header"};
 
-    fs::create_directories(out_dir);
+    io::create_directories(out_dir);
     const std::string stem = base_path.stem().string() + "." + Version(target_ver);
     WriteNew(out_dir / (stem + ".header.bin"), header.data(), header.size());
     WriteNew(out_dir / (stem + ".image.bin"), image.data(), image.size());

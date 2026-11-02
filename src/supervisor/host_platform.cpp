@@ -84,7 +84,7 @@ fs::path NativeRuntimeFilename(const fs::path& path) {
   return path;
 }
 void ValidateNativeImage(const fs::path& path) {
-  std::ifstream file(path, std::ios::binary);
+  io::ifstream file(path, std::ios::binary);
   std::array<unsigned char, 64> bytes{};
   file.read(reinterpret_cast<char*>(bytes.data()), bytes.size());
   const auto count = file.gcount();
@@ -151,7 +151,7 @@ fs::path FindHostTool(const std::string& name) {
     // Do not implicitly search cwd for preparation tools.
     if (!directory.empty() && fs::path(directory).is_absolute()) {
       const auto candidate = fs::path(directory) / name;
-      if (fs::is_regular_file(candidate) &&
+      if (io::is_regular_file(candidate) &&
           access(candidate.c_str(), X_OK) == 0)
         return fs::absolute(candidate).lexically_normal();
     }
@@ -176,10 +176,10 @@ fs::path ResolveNativeExecutable(const ProjectPaths& paths,
   return configured;
 }
 FileLease::FileLease(const fs::path& path, bool exclusive, bool create) {
-  if (create) fs::create_directories(path.parent_path());
+  if (create) io::create_directories(path.parent_path());
 #ifdef _WIN32
   const auto handle = CreateFileW(
-      path.c_str(), GENERIC_READ | (create ? GENERIC_WRITE : 0),
+      io::Host(path).c_str(), GENERIC_READ | (create ? GENERIC_WRITE : 0),
       exclusive ? 0 : FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr,
       create ? OPEN_ALWAYS : OPEN_EXISTING,
       FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OPEN_REPARSE_POINT, nullptr);

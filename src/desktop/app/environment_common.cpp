@@ -12,6 +12,8 @@
 #endif
 #include "environment.h"
 #include "sha256.h"
+#include "fs_io.h"
+namespace io = x360n::io;
 namespace fs = std::filesystem;
 namespace x360n::desktop {
 namespace {
@@ -107,20 +109,20 @@ std::string ProbeVulkanDevice() {
 void DescribeStorage(Environment& r, const fs::path& root) {
   if (root.empty()) return;
   std::error_code ec;
-  r.available = fs::space(root, ec).available;
+  r.available = io::space(root, ec).available;
   if (ec) r.available = 0;
   r.description += "Free / livre: " + std::to_string(r.available / (1024ull * 1024 * 1024)) + " GiB\r\n";
   const auto temp = root / ".local/tmp";
-  fs::create_directories(temp, ec);
+  io::create_directories(temp, ec);
   if (!ec) {
     const auto file = temp / ("permission-" + std::to_string(CurrentProcess()));
 #ifdef _WIN32
-    FILE* handle = _wfopen(file.c_str(), L"wbx");
+    FILE* handle = _wfopen(io::Host(file).c_str(), L"wbx");
 #else
     FILE* handle = std::fopen(file.c_str(), "wbx");
 #endif
     r.writable = handle != nullptr;
-    if (handle) { std::fclose(handle); fs::remove(file, ec); }
+    if (handle) { std::fclose(handle); io::remove(file, ec); }
   }
   r.description += r.writable ? "Write / gravação: OK\r\n" : "Write / gravação: denied / negada\r\n";
 }

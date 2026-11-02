@@ -1,4 +1,5 @@
 #include "sha256.h"
+#include "fs_io.h"
 
 #include <fstream>
 #include <vector>
@@ -26,18 +27,8 @@ constexpr std::array<uint32_t, 64> kK = {
 
 constexpr uint32_t Rotr(uint32_t x, int n) { return (x >> n) | (x << (32 - n)); }
 
-// Titles compile this file without paths.cpp; same \\?\ form as LongPath().
-std::filesystem::path StreamPath(const std::filesystem::path& path) {
-#ifdef _WIN32
-  std::error_code ec;
-  auto name = std::filesystem::absolute(path, ec).make_preferred().native();
-  if (ec || name.empty()) return path;
-  if (name.starts_with(L"\\\\?\\")) return name;
-  return name.starts_with(L"\\\\") ? L"\\\\?\\UNC\\" + name.substr(2) : L"\\\\?\\" + name;
-#else
-  return path;
-#endif
-}
+// Titles compile this file without paths.cpp; host_path.h is header-only.
+std::filesystem::path StreamPath(const std::filesystem::path& path) { return host_path::Extended(path); }
 
 }  // namespace
 
@@ -154,7 +145,7 @@ std::optional<FileDigest> DigestFile(const std::filesystem::path& path) {
   auto batched = TryBatchDigest(path, handled);
   if (handled) return batched;
   ActionTrace trace("hash.stream");
-  std::ifstream in(StreamPath(path), std::ios::binary);
+  io::ifstream in(StreamPath(path), std::ios::binary);
   if (!in) return std::nullopt;
 #ifdef _WIN32
   // Preparation checks stream the compiler and full build dependency closure.

@@ -9,13 +9,13 @@ void BindLibraryLaunchTargets(SessionProfile& profile,
   namespace fs = std::filesystem;
   const auto dashboard = std::find_if(catalog.begin(), catalog.end(), [&](const auto& target) {
     return target.session && target.launch_library &&
-        fs::weakly_canonical(target.manifest) == fs::weakly_canonical(profile.manifest);
+        io::weakly_canonical(target.manifest) == io::weakly_canonical(profile.manifest);
   });
   if (dashboard == catalog.end()) return; // Explicit non-library session profiles.
   std::erase_if(profile.launch_targets, [&](const auto& manifest) {
     return std::none_of(catalog.begin(), catalog.end(), [&](const auto& game) {
       return desktop::InGameLibrary(game) && game.aot && game.import_error.empty() &&
-          fs::weakly_canonical(game.manifest) == fs::weakly_canonical(manifest);
+          io::weakly_canonical(game.manifest) == io::weakly_canonical(manifest);
     });
   });
 }
@@ -33,7 +33,7 @@ void PrimeLaunchVerification(const ProjectPaths& paths,
   };
   auto installed = [&](const desktop::Target& game) {
     return desktop::InGameLibrary(game) && game.aot && !game.library.title_id.empty() && !game.inputs.empty() &&
-        fs::is_regular_file(game.exe) && !fs::exists(desktop::PreparationMarker(paths, game));
+        io::is_regular_file(game.exe) && !io::exists(desktop::PreparationMarker(paths, game));
   };
   auto copies = [&](const desktop::Target& dashboard, const desktop::Target& game) {
     if (dashboard.user_root.empty()) return;
@@ -48,7 +48,7 @@ void PrimeLaunchVerification(const ProjectPaths& paths,
         for (const auto& game : catalog) if (installed(game)) { inputs(game); copies(target, game); }
     } else if (installed(target)) {
       for (const auto& dashboard : catalog)
-        if (dashboard.session && dashboard.launch_library && !dashboard.inputs.empty() && fs::is_regular_file(dashboard.inputs.front().destination))
+        if (dashboard.session && dashboard.launch_library && !dashboard.inputs.empty() && io::is_regular_file(dashboard.inputs.front().destination))
           copies(dashboard, target);
     }
   };

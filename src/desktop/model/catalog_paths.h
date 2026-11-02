@@ -19,7 +19,7 @@ namespace x360n::desktop {
 // Links, missing parents and unsupported hosts retain the original full checks.
 class CatalogPaths {
  public:
-  explicit CatalogPaths(std::filesystem::path root) : root_(std::filesystem::weakly_canonical(root)) {}
+  explicit CatalogPaths(std::filesystem::path root) : root_(io::weakly_canonical(root)) {}
   std::optional<std::filesystem::path> Resolve(const std::filesystem::path& file) {
 #ifdef _WIN32
     auto absolute = std::filesystem::absolute(file).lexically_normal();
@@ -45,11 +45,7 @@ class CatalogPaths {
     ~Directory() { if (handle != INVALID_HANDLE_VALUE) CloseHandle(handle); }
   };
   std::map<std::filesystem::path, std::unique_ptr<Directory>> directories_;
-  static std::wstring Extended(std::filesystem::path path) {
-    auto name = path.make_preferred().native();
-    if (name.starts_with(L"\\\\?\\")) return name;
-    return name.starts_with(L"\\\\") ? L"\\\\?\\UNC\\" + name.substr(2) : L"\\\\?\\" + name;
-  }
+  static std::wstring Extended(const std::filesystem::path& path) { return host_path::Extended(path).native(); }
   bool Pin(const std::filesystem::path& directory) {
     if (directories_.contains(directory)) return true;
     // Pin the ancestors of the root as well: renaming a parent must not move

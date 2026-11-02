@@ -10,10 +10,10 @@
 #endif
 namespace x360n {
 WorkspaceLease::WorkspaceLease(const ProjectPaths& paths) {
-  std::filesystem::create_directories(paths.local());
+  io::create_directories(paths.local());
   auto file = paths.local() / "environment.lock";
 #ifdef _WIN32
-  auto handle = CreateFileW(file.c_str(), GENERIC_READ | GENERIC_WRITE, 0, nullptr, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+  auto handle = CreateFileW(io::Host(file).c_str(), GENERIC_READ | GENERIC_WRITE, 0, nullptr, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
   if (handle != INVALID_HANDLE_VALUE) handle_ = reinterpret_cast<intptr_t>(handle);
 #else
   auto fd = open(file.c_str(), O_CREAT | O_RDWR | O_CLOEXEC, 0600);

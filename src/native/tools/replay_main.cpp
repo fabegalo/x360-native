@@ -37,6 +37,7 @@
 #include <fstream>
 #include <iostream>
 #include <string>
+#include "../../supervisor/fs_io.h"
 using namespace x360n::native;
 using rex::X_STATUS;
 namespace {
@@ -77,7 +78,7 @@ X360N_PROBE_MAIN {
     }
     capture::Reader& reader = *loaded;
     if (backend_name.empty()) backend_name = reader.header().backend;
-    std::filesystem::create_directories(output);
+    x360n::io::create_directories(output);
     rex::InitLogging((output / "replay.log").string().c_str());
     rex::Runtime runtime(output, output / "user");
     rex::RuntimeConfig config; config.tool_mode = true; config.kernel_init = rex::kernel::InitializeKernel;
@@ -113,7 +114,7 @@ X360N_PROBE_MAIN {
       presenter = provider->CreatePresenter();
       if (!presenter) throw std::runtime_error("offscreen presenter unavailable");
     }
-    std::ofstream csv(output / "frames.csv");
+    x360n::io::ofstream csv(output / "frames.csv");
     csv << "pass," << FrameStatsCsvHeader() << '\n';
     ReplayOptions options;
     options.repeat = repeat;
@@ -188,7 +189,7 @@ X360N_PROBE_MAIN {
         percentile(0.95), percentile(0.99), result.equivalent(), result.repeatable(), result.frontbuffer_checks, result.frontbuffer_mismatches,
         result.written_checks, result.written_mismatches, result.sample_checks, result.sample_mismatches,
         result.output_checks, result.output_mismatches, result.memory_records, result.memory_pages_written, summary, mismatches);
-    std::ofstream(output / "replay.json") << json;
+    x360n::io::ofstream(output / "replay.json") << json;
     std::cout << json;
     runtime.Shutdown();
     rex::FlushLogging();

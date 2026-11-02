@@ -12,6 +12,7 @@
 #define NOMINMAX
 #endif
 #include <windows.h>
+#include "../../src/supervisor/fs_io.h"
 #endif
 
 namespace x360n {
@@ -20,7 +21,7 @@ bool GuestFaultContext::Start(rex::memory::Memory& memory, const std::filesystem
 #if defined(_WIN32)
   // Never truncate an earlier diagnostic. No handles, buffers or directories
   // are created from the exception callback itself.
-  auto file = CreateFileW(path.c_str(), GENERIC_WRITE, FILE_SHARE_READ, nullptr,
+  auto file = CreateFileW(x360n::io::Host(path).c_str(), GENERIC_WRITE, FILE_SHARE_READ, nullptr,
                           CREATE_NEW, FILE_ATTRIBUTE_NORMAL, nullptr);
   if (file == INVALID_HANDLE_VALUE) return false;
   file_ = file;
