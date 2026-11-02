@@ -60,6 +60,26 @@ TEST_CASE("asset inventory rejects missing data and same-name files in the wrong
   CHECK_FALSE(Inspect(f.paths, f.target).inputs_ok);
 }
 
+TEST_CASE("import preserves deeply nested locator assets beyond MAX_PATH", "[catalog][import]") {
+#ifdef _WIN32
+  Fixture f;
+  const auto rel = fs::path("data/content/global_locators/DYRDEK_FANTASY_PLAZA_PACK/DLC_Rob_Fantasy_Plaza")
+                 / "DLC_Rob_Fant_[0x2a2c7864e22311ee].loc";
+  const auto source_file = f.source / rel;
+  const auto destination = f.target.game_root / rel;
+  fs::create_directories(LongPath(source_file.parent_path()));
+  std::ofstream(LongPath(source_file), std::ios::binary) << "verified locator";
+  // Build a second arbitrary nesting level to model packaged Desktop installs.
+  REQUIRE(source_file.native().size() > 190);
+  f.target.inputs.push_back({destination, "DLC_Rob_Fant_[0x2a2c7864e22311ee].loc",
+                             Hash("verified locator"), rel});
+  REQUIRE_NOTHROW(Import(f.paths, f.target, f.source));
+  REQUIRE(DigestFile(LongPath(destination)));
+  CHECK(DigestFile(LongPath(destination))->sha256 == Hash("verified locator"));
+  CHECK_FALSE(Inspect(f.paths, f.target).issues.size());
+#endif
+}
+
 TEST_CASE("absent catalog inventory is metadata and never authorizes unverified copying", "[catalog-missing-root]") {
   Fixture f;
   const auto recipe = f.root / "titles/sample";
