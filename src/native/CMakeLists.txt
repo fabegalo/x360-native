@@ -148,6 +148,8 @@ if(REXGLUE_USE_VULKAN)
   x360n_stage_runtime_dlls(x360n_native_perf_probe)
 endif()
 add_executable(x360n_native_probe ../../tests/native/probe.cpp)
+# The probe includes the SDK's Vulkan provider, whose headers include renderdoc_app.h.
+target_include_directories(x360n_native_probe PRIVATE ${X360_REXGLUE_DIR}/thirdparty/renderdoc)
 target_link_libraries(x360n_native_probe PRIVATE rexruntime windowscodecs ole32 d3d12)
 x360n_stage_runtime_dlls(x360n_native_probe PLUGIN_TARGETS rexgpu-native rexgpu-xenos)
 add_executable(x360n_native_occlusion_probe ../../tests/native/occlusion_probe.cpp)
