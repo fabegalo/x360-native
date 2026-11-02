@@ -108,12 +108,9 @@ void SaveRendererSettings(const ProjectPaths& paths, RendererSettings settings) 
     out.close();
     if (!out) throw std::runtime_error("Cannot persist global graphics settings");
   }
-#ifdef _WIN32
-  if (!MoveFileExW(io::Host(temp).c_str(), io::Host(file).c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH))
-    throw std::runtime_error("Cannot replace global graphics settings: Windows error " + std::to_string(GetLastError()));
-#else
-  io::rename(temp, file);
-#endif
+  std::error_code replaced;
+  io::rename(temp, file, replaced);
+  if (replaced) throw std::runtime_error("Cannot replace global graphics settings: " + replaced.message());
 }
 std::vector<std::string> SessionRendererArguments(const std::vector<std::string>& args,
                                                 RendererSettings settings) {

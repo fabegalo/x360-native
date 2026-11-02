@@ -59,8 +59,9 @@ void DurableMove(const fs::path& from, const fs::path& to) {
   io::create_directories(to.parent_path());
   if (io::exists(to)) throw std::runtime_error("Destino de recuperação já existe: " + Utf8(to));
 #ifdef _WIN32
-  if (!MoveFileExW(io::Host(from).c_str(), io::Host(to).c_str(), MOVEFILE_WRITE_THROUGH))
-    throw std::runtime_error("Falha ao mover arquivo da atualização (Windows " + std::to_string(GetLastError()) + "): " + Utf8(from));
+  std::error_code moved;
+  io::rename(from, to, io::if_exists::fail, moved);
+  if (moved) throw std::runtime_error("Falha ao mover arquivo da atualização (Windows " + std::to_string(moved.value()) + "): " + Utf8(from));
 #else
   io::rename(from, to);
   for (const auto& dir : {from.parent_path(), to.parent_path()}) {
@@ -78,7 +79,9 @@ void DurableWrite(const fs::path& path, const std::string& data) {
   DWORD written = 0;
   const bool ok = WriteFile(file, data.data(), DWORD(data.size()), &written, nullptr) && written == data.size() && FlushFileBuffers(file);
   CloseHandle(file);
-  if (!ok || !MoveFileExW(io::Host(temp).c_str(), io::Host(path).c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH))
+  std::error_code published;
+  if (ok) io::rename(temp, path, published);
+  if (!ok || published)
     throw std::runtime_error("Não foi possível persistir o diário de atualização");
 #else
   int fd = open(temp.c_str(), O_CREAT | O_WRONLY | O_TRUNC, 0600);

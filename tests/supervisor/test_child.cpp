@@ -5,6 +5,7 @@
 //   crash        write through a null pointer (access violation)
 //   stub-log     print lines in the format REX_STUB logs, exit 0
 //   cwd          print the working directory, exit 0
+//   read <file>  print a file named relative to the working directory
 // A leading --log_file=<path> (as passed by `x360n run --rex-log`) sends the
 // stub-log lines to that file instead of stdout, like a ReXGlue GUI app.
 #include <chrono>
@@ -167,6 +168,13 @@ int main(int argc, char** argv) {
   if (!std::strcmp(argv[1], "cwd")) {
     const auto path = std::filesystem::current_path().u8string();
     std::cout << "cwd " << std::string(path.begin(), path.end()) << "\n";
+    return 0;
+  }
+  if (!std::strcmp(argv[1], "read") && argc >= 3) {
+    // Relative names resolve against the working directory, as a title's would.
+    std::ifstream in(argv[2], std::ios::binary);
+    if (!in) return 66;
+    std::cout << in.rdbuf();
     return 0;
   }
   return 64;

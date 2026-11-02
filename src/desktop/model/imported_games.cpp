@@ -42,11 +42,11 @@ void Safe(const fs::path& file, const fs::path& root) {
   auto rel = CatalogVerificationPath(file).lexically_relative(CatalogVerificationPath(root));
   if (rel.empty() || rel.is_absolute() || *rel.begin() == "..") throw std::runtime_error("Catalog destination redirected outside its root");
   if (CatalogLaunchVerificationActive() && HasProtectedVerificationPath(file)) return;
-  // Walk the ordinary spelling (sources are enumerated as \\?\ paths, whose
-  // parents end at the invalid "\\?\C:"); inspect each ancestor in long form.
+  // Walk the ordinary spelling (an extended name's parents end at the invalid
+  // "\\?\C:"); io:: inspects each ancestor through its host name.
   const auto stop = OrdinaryPath(root);
   for (auto p = OrdinaryPath(file); p != stop && !p.empty();) {
-    if (io::is_redirect(LongPath(p))) throw std::runtime_error("Catalog path contains a link");
+    if (io::is_redirect(p)) throw std::runtime_error("Catalog path contains a link");
     const auto parent = p.parent_path();
     // Equivalent roots can have different spellings (case, separators, '.').
     // A filesystem root is its own parent; never spin there if the lexical
@@ -80,12 +80,9 @@ void Save(const ProjectPaths& paths, const std::string& id, const Json& record) 
   const auto text = record.dump(2);
   io::ofstream out(tmp, std::ios::binary); out << text << '\n'; out.close();
   if (!out) throw std::runtime_error("Could not persist the game catalog");
-#ifdef _WIN32
-  if (!MoveFileExW(io::Host(tmp).c_str(), io::Host(file).c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH))
-    throw std::runtime_error("Could not publish the game catalog");
-#else
-  io::rename(tmp, file);
-#endif
+  std::error_code published;
+  io::rename(tmp, file, published);
+  if (published) throw std::runtime_error("Could not publish the game catalog");
 }
 // Match the exact executable AND all recipe assets, never just a Title ID/name.
 const Target* Recipe(const std::vector<Target>& targets, const Json& record) {
@@ -109,10 +106,6 @@ const Target* Recipe(const std::vector<Target>& targets, const Json& record) {
     if (match) return &t;
   }
   return nullptr;
-}
-// Content-install discs nest deeper than MAX_PATH; walk and delete without it.
-fs::path Extended(const fs::path& path) {
-  return host_path::Extended(path);
 }
 template<class Units> std::string Name(const Units& units) {
   std::u16string s;
@@ -153,12 +146,9 @@ std::string SaveThumbnail(const ProjectPaths& paths, const std::vector<uint8_t>&
   io::ofstream out(tmp, std::ios::binary);
   out.write(reinterpret_cast<const char*>(png.data()), std::streamsize(png.size())); out.close();
   if (!out) throw std::runtime_error("Could not persist the game thumbnail");
-#ifdef _WIN32
-  if (!MoveFileExW(io::Host(tmp).c_str(), io::Host(file).c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH))
-    throw std::runtime_error("Could not publish the game thumbnail");
-#else
-  io::rename(tmp, file);
-#endif
+  std::error_code published;
+  io::rename(tmp, file, published);
+  if (published) throw std::runtime_error("Could not publish the game thumbnail");
   return sha;
 }
 void PackageMetadata(const fs::path& original, Json& r, std::vector<uint8_t>& thumbnail) {
@@ -211,10 +201,10 @@ std::string ImportGame(const ProjectPaths& paths, const std::vector<Target>& tar
   std::set<std::string> names;
   // Preserve the entire imported file inventory, including guest assets in
   // deep folders; the extracted source is not necessarily short on Windows.
-  for (const auto& f : io::recursive_directory_iterator(LongPath(source))) {
+  for (const auto& f : io::recursive_directory_iterator(source)) {
     stop(); Safe(f.path(), source);
     if (!f.is_regular_file()) continue;
-    const auto rel = f.path().lexically_relative(LongPath(source)).generic_u8string();
+    const auto rel = f.path().lexically_relative(source).generic_u8string();
     const std::string name(rel.begin(), rel.end()); Relative(name);
     auto folded = name; for (auto& c : folded) if (c >= 'A' && c <= 'Z') c += 'a' - 'A';
     if (!names.insert(folded).second) throw std::runtime_error("Duplicate case-insensitive game path");
@@ -434,7 +424,7 @@ void RemoveGame(const ProjectPaths& paths, const std::vector<Target>& catalog, c
   }
   // Only whole trees this environment created: no links/junctions inside.
   const auto own_tree = [](const fs::path& root) {
-    for (const auto& entry : io::recursive_directory_iterator(Extended(root))) {
+    for (const auto& entry : io::recursive_directory_iterator(root)) {
       const auto type = entry.symlink_status().type();
       if (type != fs::file_type::regular && type != fs::file_type::directory)
         throw std::runtime_error("Link ou arquivo especial encontrado; nada foi apagado: " + Utf8(entry.path()));
@@ -479,14 +469,14 @@ void RemoveGame(const ProjectPaths& paths, const std::vector<Target>& catalog, c
   }
   // Enumeration first: no dashboard keeps listing content that is about to go.
   for (const auto& dashboard : catalog) WithdrawLibrary(dashboard, game, catalog);
-  if (!build.empty()) io::remove_all(Extended(build));
+  if (!build.empty()) io::remove_all(build);
   if (!native_build.empty()) io::remove_all(native_build);
-  if (!project.empty()) io::remove_all(Extended(project));
+  if (!project.empty()) io::remove_all(project);
   if (game.generic_aot)
     for (const auto* suffix : {".incomplete", ".runtime-error", ".lock"})
       io::remove(paths.local() / "preparation" / (game.id + suffix));
   if (delete_content) {
-    io::remove_all(Extended(*content));
+    io::remove_all(*content);
     if (const auto title = content->parent_path(); io::is_directory(title) && io::is_empty(title)) io::remove(title);
   }
   io::remove(record);

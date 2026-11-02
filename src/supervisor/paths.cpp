@@ -5,12 +5,14 @@
 #include <cwctype>
 #include <system_error>
 #include <fstream>
+#include <limits>
 #include <stdexcept>
 #include <vector>
 #include <cerrno>
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
+#include <winioctl.h>
 #else
 #include <unistd.h>
 #ifdef __APPLE__
@@ -175,11 +177,9 @@ void SetUserDataRoot(const ProjectPaths& paths, const fs::path& directory) {
   auto staging = setting; staging += ".tmp";
   if (io::exists(staging)) throw std::runtime_error("Unfinished storage setting found. Existing data was preserved.");
   { io::ofstream out(staging, std::ios::binary); out << PathUtf8(directory) << '\n'; out.flush(); if (!out) throw std::runtime_error("Cannot save storage selection."); }
-#ifdef _WIN32
-  if (!MoveFileExW(io::Host(staging).c_str(), io::Host(setting).c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) throw std::runtime_error("Cannot commit storage selection.");
-#else
-  io::rename(staging, setting);
-#endif
+  std::error_code committed;
+  io::rename(staging, setting, committed);
+  if (committed) throw std::runtime_error("Cannot commit storage selection.");
 }
 namespace {
 
@@ -210,18 +210,218 @@ std::optional<ProjectPaths> FindProjectRoot(const fs::path& start) {
 
 bool IsWithin(const fs::path& path, const fs::path& base) {
   std::error_code ec;
-  fs::path p = io::canonical(LongPath(path), ec);
+  const auto p = io::canonical(path, ec);
   if (ec) return false;
-  fs::path b = io::canonical(LongPath(base), ec);
+  const auto b = io::canonical(base, ec);
   if (ec) return false;
-  // fs::canonical retains the extended-length prefix; compare ordinary spellings.
-  p = OrdinaryPath(p); b = OrdinaryPath(b);
+  // io::canonical answers ordinary spellings, comparable across both forms.
   const auto ps = Folded(p), bs = Folded(b);
   if (ps.size() < bs.size() || ps.compare(0, bs.size(), bs) != 0) return false;
   // On POSIX, a backslash is a filename character, not a directory boundary.
   // A filesystem root already ends in its separator ("/" on POSIX).
   return ps.size() == bs.size() || bs.back() == fs::path::preferred_separator ||
          ps[bs.size()] == fs::path::preferred_separator;
+}
+
+#ifdef _WIN32
+namespace {
+// Mount-point reparse data; its declaration lives in the kernel-mode ntifs.h.
+struct MountPointHeader {
+  ULONG tag;
+  USHORT length, reserved, substitute_offset, substitute_length, print_offset, print_length;
+};
+
+// The ordinary target of the junction `link`, or nothing for anything else.
+std::optional<std::wstring> JunctionTarget(const fs::path& link) {
+  const auto handle = CreateFileW(io::Host(link).c_str(), 0, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                                  nullptr, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT,
+                                  nullptr);
+  if (handle == INVALID_HANDLE_VALUE) return std::nullopt;
+  std::vector<char> buffer(MAXIMUM_REPARSE_DATA_BUFFER_SIZE);
+  DWORD bytes = 0;
+  const bool read = DeviceIoControl(handle, FSCTL_GET_REPARSE_POINT, nullptr, 0, buffer.data(), DWORD(buffer.size()),
+                                    &bytes, nullptr);
+  CloseHandle(handle);
+  if (!read || bytes < sizeof(MountPointHeader)) return std::nullopt;
+  const auto* header = reinterpret_cast<const MountPointHeader*>(buffer.data());
+  if (header->tag != IO_REPARSE_TAG_MOUNT_POINT ||
+      sizeof(MountPointHeader) + size_t(header->substitute_offset) + header->substitute_length > bytes)
+    return std::nullopt;
+  std::wstring name(reinterpret_cast<const wchar_t*>(buffer.data() + sizeof(MountPointHeader) + header->substitute_offset),
+                    header->substitute_length / sizeof(wchar_t));
+  if (!name.starts_with(L"\\??\\")) return std::nullopt;
+  return name.substr(4);
+}
+
+// Creates `link` as a new junction to the local directory `target`; false if
+// `link` already exists (another process won the race).
+bool CreateJunction(const fs::path& link, const fs::path& target) {
+  const auto host = io::Host(link);
+  if (!CreateDirectoryW(host.c_str(), nullptr)) {
+    if (GetLastError() == ERROR_ALREADY_EXISTS) return false;
+    throw std::system_error(int(GetLastError()), std::system_category(), "CreateDirectoryW " + PathUtf8(link));
+  }
+  const auto print = target.native();
+  const auto substitute = L"\\??\\" + print;
+  std::vector<char> buffer(sizeof(MountPointHeader) + (substitute.size() + print.size() + 2) * sizeof(wchar_t));
+  auto* header = reinterpret_cast<MountPointHeader*>(buffer.data());
+  header->tag = IO_REPARSE_TAG_MOUNT_POINT;
+  header->length = USHORT(buffer.size() - 8);
+  header->substitute_length = USHORT(substitute.size() * sizeof(wchar_t));
+  header->print_offset = USHORT(header->substitute_length + sizeof(wchar_t));
+  header->print_length = USHORT(print.size() * sizeof(wchar_t));
+  auto* names = reinterpret_cast<wchar_t*>(buffer.data() + sizeof(MountPointHeader));
+  std::copy(substitute.c_str(), substitute.c_str() + substitute.size() + 1, names);
+  std::copy(print.c_str(), print.c_str() + print.size() + 1, names + substitute.size() + 1);
+  const auto handle = CreateFileW(host.c_str(), GENERIC_WRITE, 0, nullptr, OPEN_EXISTING,
+                                  FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT, nullptr);
+  DWORD bytes = 0, error = 0;
+  if (handle == INVALID_HANDLE_VALUE) error = GetLastError();
+  else {
+    if (!DeviceIoControl(handle, FSCTL_SET_REPARSE_POINT, buffer.data(), DWORD(buffer.size()), nullptr, 0, &bytes,
+                         nullptr))
+      error = GetLastError();
+    CloseHandle(handle);
+  }
+  if (error) {
+    RemoveDirectoryW(host.c_str());
+    throw std::system_error(int(error), std::system_category(), "FSCTL_SET_REPARSE_POINT " + PathUtf8(link));
+  }
+  return true;
+}
+
+// <local>\x360n\r\<id>: a verified junction to the local installation `root`
+// (canonical). Throws the reason it cannot be made.
+fs::path InstallationAlias(const ProjectPaths& project, const fs::path& root) {
+  // A junction can only name a local volume.
+  if (root.native().starts_with(L"\\\\")) throw std::runtime_error("the installation is on a network share");
+  const auto alias = NativeBuildRoot(project).parent_path() / "r" / ShortProjectId(root);
+  for (int attempt = 0;; ++attempt) {
+    if (attempt == 3) throw std::runtime_error("its installation alias could not be created");
+    std::error_code ec;
+    const auto status = fs::symlink_status(io::Host(alias), ec);
+    if (ec && ec != std::errc::no_such_file_or_directory)
+      throw fs::filesystem_error("symlink_status", alias, ec);
+    if (!ec && status.type() != fs::file_type::not_found) {
+      if (status.type() != fs::file_type::junction)
+        throw std::runtime_error("an unexpected file occupies its installation alias " + PathUtf8(alias));
+      if (const auto current = JunctionTarget(alias); current && Folded(*current) == Folded(root)) break;
+      // A stale alias (another target): remove the link itself, never its target.
+      if (!RemoveDirectoryW(io::Host(alias).c_str()))
+        throw std::system_error(int(GetLastError()), std::system_category(), "RemoveDirectoryW " + PathUtf8(alias));
+      continue;
+    }
+    io::create_directories(alias.parent_path());
+    if (CreateJunction(alias, root)) break;
+  }
+  if (Folded(io::canonical(alias)) != Folded(root)) throw std::runtime_error("its installation alias resolves elsewhere");
+  return alias;
+}
+
+// The deepest name the preparation tools open below an installation root:
+// 177 characters, in the SDK's third-party test data.
+constexpr size_t kToolDepth = 180;
+// Git and CMake resolve the alias to the real installation folder:
+// - Git opens repository metadata before it applies core.longpaths, so beyond
+//   MAX_PATH UTF-16 units it fails even with it. The deepest, 102 characters
+//   below the root, is a submodule checkout's
+//   \.git\modules\external\rexglue-sdk\modules\thirdparty\vulkan-memory-allocator\objects\info\alternates
+//   (93 for the SDK cloned on its own by prepare-tools).
+// - CMake names its own modules by its real folder, and Ninja refuses to stat
+//   a name over MAX_PATH bytes of UTF-8 (unless Windows opts in to long
+//   paths). The deepest module is 119 characters below the root:
+//   \.local\toolchains\cmake-3.31.6\share\cmake-3.31\Modules\CMakeExtraGeneratorDetermineCompilerMacrosAndIncludeDirs.cmake.
+// UTF-8 never takes fewer bytes than UTF-16 units, so Ninja's bound holds both.
+constexpr size_t kCMakeDepth = 119;
+}  // namespace
+#endif
+
+size_t PreparationRootLimit() {
+#ifdef _WIN32
+  return MAX_PATH - kCMakeDepth;
+#else
+  return std::numeric_limits<size_t>::max();
+#endif
+}
+
+fs::path ToolPath(const fs::path& path) {
+#ifdef _WIN32
+  const auto name = io::Logical(io::Host(path));
+  const auto project = FindProjectRoot(name);
+  if (!project) return name;
+  const auto root = io::canonical(project->root);
+  // Git and CMake resolve the alias, so it cannot help here.
+  if (const auto bytes = PathUtf8(root).size(); bytes > PreparationRootLimit())
+    throw std::runtime_error(
+        "The installation folder takes " + std::to_string(bytes) +
+        " bytes of UTF-8; preparing games on Windows allows at most " + std::to_string(PreparationRootLimit()) +
+        " (an accented letter takes 2 bytes, an Asian character 3, an emoji 4), because Ninja and Git open the "
+        "build tools' and the SDK's files below it only within the Windows limit of " +
+        std::to_string(MAX_PATH) + ". Move the installation to a shorter folder: " + PathUtf8(root));
+  if (root.native().size() + kToolDepth < MAX_PATH) return name;
+  const auto relative = io::weakly_canonical(name).lexically_relative(root);
+  if (relative.empty() || *relative.begin() == "..") return name;
+  fs::path alias;
+  try {
+    alias = InstallationAlias(*project, root);
+  } catch (const std::runtime_error& error) {
+    throw std::runtime_error("The installation folder leaves the preparation tools less than the " +
+                             std::to_string(kToolDepth) + " characters they need under the Windows limit of " +
+                             std::to_string(MAX_PATH) + ", and " + error.what() + ": " + PathUtf8(root));
+  }
+  return relative == "." ? alias : alias / relative;
+#else
+  return path;
+#endif
+}
+
+fs::path ChildExecutable(const fs::path& exe) {
+#ifdef _WIN32
+  const auto name = io::Logical(io::Host(exe));
+  if (name.native().size() < MAX_PATH) return name;
+  if (const auto project = FindProjectRoot(name.parent_path())) {
+    try {
+      const auto root = io::canonical(project->root);
+      const auto relative = io::weakly_canonical(name).lexically_relative(root);
+      if (!relative.empty() && *relative.begin() != "..") {
+        const auto spelling = InstallationAlias(*project, root) / relative;
+        if (spelling.native().size() < MAX_PATH) return spelling;
+      }
+    } catch (const std::runtime_error&) {
+      // No alias (a network share, an occupied alias): native programs still
+      // start from the extended name.
+    }
+  }
+  return io::Host(exe);
+#else
+  return exe;
+#endif
+}
+
+fs::path ChildWorkingDirectory(const fs::path& directory) {
+#ifdef _WIN32
+  const auto folder = io::Logical(io::Host(directory));
+  if (folder.native().size() <= MAX_PATH - 2) return folder;
+  const auto refuse = [&](const std::string& reason) {
+    return std::runtime_error("Working directory exceeds the Windows limit of " + std::to_string(MAX_PATH - 2) +
+                              " characters and " + reason + ": " + PathUtf8(folder));
+  };
+  const auto project = FindProjectRoot(folder);
+  if (!project) throw refuse("is outside an x360-native installation");
+  const auto root = io::canonical(project->root), target = io::canonical(folder);
+  if (!IsWithin(target, root)) throw refuse("is outside its installation");
+  fs::path alias;
+  try {
+    alias = InstallationAlias(*project, root);
+  } catch (const std::runtime_error& error) {
+    throw refuse(error.what());
+  }
+  const auto spelling = alias / target.lexically_relative(root);
+  if (spelling.native().size() > MAX_PATH - 2) throw refuse("is too deep inside its installation");
+  return spelling;
+#else
+  return directory;
+#endif
 }
 
 std::optional<std::string> CheckLaunchable(const ProjectPaths& p, const fs::path& exe) {

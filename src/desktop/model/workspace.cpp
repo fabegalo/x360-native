@@ -59,12 +59,9 @@ Index Payload(const fs::path& payload) {
   return index;
 }
 void Publish(const fs::path& source, const fs::path& dest) {
-#ifdef _WIN32
-  if (!MoveFileExW(io::Host(source).c_str(), io::Host(dest).c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH))
-    throw std::runtime_error("Não foi possível concluir a atualização. Feche outros aplicativos e tente novamente; seus dados foram preservados.");
-#else
-  io::rename(source, dest);
-#endif
+  std::error_code ec;
+  io::rename(source, dest, ec);
+  if (ec) throw std::runtime_error("Não foi possível concluir a atualização. Feche outros aplicativos e tente novamente; seus dados foram preservados.");
 }
 std::string Component(const fs::path& rel) {
   if (rel == "deps.lock.json" || *rel.begin() == "patches") return "SDK e correções";

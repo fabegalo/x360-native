@@ -438,11 +438,11 @@ void Start(App& a, int action, fs::path source) {
 #ifdef _WIN32
       const auto powershell = SystemTool("WindowsPowerShell/v1.0/powershell");
       if (action == kInstall) {
-        run(powershell, {"-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", Utf8(a.root / "scripts/setup/install-build-tools.ps1"), "-AllowInstallation"}, "msvc");
+        run(powershell, {"-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", Utf8(ToolPath(a.root / "scripts/setup/install-build-tools.ps1")), "-AllowInstallation"}, "msvc");
         finish(Tr("Instalador encerrado. Verifique as dependências novamente antes de preparar.", "Installer closed. Recheck dependencies before preparing.")); return;
       }
       // Pinned Git/CMake/Ninja/LLVM; the shared preparation then runs natively.
-      auto tool_args = std::vector<std::string>{"-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", Utf8(a.root / "scripts/prepare-tools.ps1"), "-UpdateDependencies"};
+      auto tool_args = std::vector<std::string>{"-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", Utf8(ToolPath(a.root / "scripts/prepare-tools.ps1")), "-UpdateDependencies"};
       if (a.allow_downloads) tool_args.push_back("-AllowDownloads");
       progress(Tr("Verificando os componentes necessários...", "Checking required components..."));
       run(powershell, tool_args, "tools");

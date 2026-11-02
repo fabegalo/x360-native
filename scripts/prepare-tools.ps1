@@ -97,6 +97,16 @@ foreach ($tool in $lockedTools) {
 }
 } finally { foreach ($handle in $downloads.leases) { $handle.Dispose() } }
 $git = Join-Path $tools 'mingit-2.56.0.2/cmd/git.exe'
+# Below a long installation the SDK's files and its submodules' objects pass
+# MAX_PATH; Git resolves the installation alias to that real path. The
+# environment form also reaches the git processes started for submodules.
+$env:GIT_CONFIG_COUNT = '1'; $env:GIT_CONFIG_KEY_0 = 'core.longpaths'; $env:GIT_CONFIG_VALUE_0 = 'true'
+# Reached through that alias (x360n ToolPath), MinGit's cmd\git.exe launcher
+# starts git from the real path, where git cannot run its script commands
+# (git submodule); git itself keeps the alias spelling.
+if ((Get-Item -LiteralPath $root -Force).Attributes -band [IO.FileAttributes]::ReparsePoint) {
+    $git = Join-Path $tools 'mingit-2.56.0.2/ucrt64/bin/git.exe'
+}
 $env:PATH = (Split-Path $git) + ';' + $env:PATH
 if ($ToolsOnly) { Stage 'tools-ready'; exit 0 } # Cannot certify SDK/LLVM or clear a pending full update.
 $sdkLock = (Get-Content -Raw (Join-Path $root 'deps.lock.json') | ConvertFrom-Json).rexglue_sdk

@@ -57,22 +57,13 @@ std::string FileKey(const fs::path& path) {
   for (auto& c : key) if (c >= 'A' && c <= 'Z') c += 'a' - 'A';
   return key;
 }
-fs::path ImportIoPath(const fs::path& path) {
-  // The final game filename can fit MAX_PATH while its verified staging path
-  // does not. Extended paths work without registry or process-manifest changes.
-  return host_path::Extended(path);
-}
 }
 CatalogLaunchVerification::CatalogLaunchVerification() : previous_(launch_verification) { launch_verification = true; }
 CatalogLaunchVerification::~CatalogLaunchVerification() { launch_verification = previous_; }
 bool CatalogLaunchVerificationActive() { return launch_verification; }
 fs::path CatalogVerificationPath(const fs::path& path) {
   if (launch_verification) return VerificationPath(path);
-#ifdef _WIN32
-  return OrdinaryPath(io::weakly_canonical(LongPath(path)));
-#else
   return io::weakly_canonical(path);
-#endif
 }
 std::vector<Target> ReadCatalog(const ProjectPaths& paths) {
   ActionTrace trace("catalog.read");
@@ -239,7 +230,7 @@ Inspection Inspect(const ProjectPaths& paths, const Target& t, InspectionMode mo
   for (const auto& i : t.inputs) {
     CheckVerificationCancellation();
     auto file = t.preparation_source.empty() ? i.destination : t.preparation_source / i.destination.lexically_relative(t.game_root);
-    if (!io::is_regular_file(LongPath(file))) {
+    if (!io::is_regular_file(file)) {
       // Absent optional components are checked by whoever needs them.
       if (i.optional) continue;
       r.inputs_ok = false;
@@ -331,7 +322,7 @@ size_t Import(const ProjectPaths& paths, const Target& t, const fs::path& source
     const auto digest = single ? single_digest : DigestFile(file);
     if (!digest) throw std::runtime_error("Could not read import source: " + Utf8(file));
     auto check = [&](const Input& i) {
-      if (!single && !i.source_relative.empty() && FileKey(file.lexically_relative(LongPath(source))) != FileKey(i.source_relative)) return;
+      if (!single && !i.source_relative.empty() && FileKey(file.lexically_relative(source)) != FileKey(i.source_relative)) return;
       if (digest->sha256 == i.sha256) copies[i.destination] = file;
     };
     if (single) for (const auto& i : t.inputs) check(i);
@@ -339,7 +330,7 @@ size_t Import(const ProjectPaths& paths, const Target& t, const fs::path& source
   };
   if (single) { stop(); consider(source); }
   // Search only the user-selected folder, never follow directory symlinks.
-  for (auto it = single ? io::recursive_directory_iterator{} : io::recursive_directory_iterator(LongPath(source)); it != io::recursive_directory_iterator(); ++it) {
+  for (auto it = single ? io::recursive_directory_iterator{} : io::recursive_directory_iterator(source); it != io::recursive_directory_iterator(); ++it) {
     stop();
     const auto& entry = *it;
     if (entry.is_redirect() || !IsWithin(entry.path(), source)) { it.disable_recursion_pending(); continue; }
@@ -349,14 +340,14 @@ size_t Import(const ProjectPaths& paths, const Target& t, const fs::path& source
   uintmax_t needed = 0;
   for (const auto& i : t.inputs) {
     Inside(i.destination, t.game_root);
-    if (io::exists(LongPath(i.destination))) {
+    if (io::exists(i.destination)) {
       if (!Matches(i.destination, i.sha256))
         throw std::runtime_error("Destino já contém outro arquivo; nada será sobrescrito: " + Utf8(i.destination));
       copies.erase(i.destination);
     } else if (!copies.contains(i.destination)) {
       if (allow_partial || i.optional) continue;
       throw std::runtime_error("Conjunto incompleto. Falta o arquivo verificado: " + i.source_name);
-    } else needed += io::file_size(LongPath(copies.at(i.destination)));
+    } else needed += io::file_size(copies.at(i.destination));
   }
   WorkspaceLease lease(paths);
   io::create_directories(paths.inputs());
@@ -373,13 +364,13 @@ size_t Import(const ProjectPaths& paths, const Target& t, const fs::path& source
   for (const auto& [destination, input] : copies) {
     stop();
     Inside(destination, paths.inputs());
-    io::create_directories(LongPath(destination.parent_path()));
+    io::create_directories(destination.parent_path());
     // Unique temporary name; never truncate an existing original or destination.
-    const auto staging = ImportIoPath(destination.parent_path() / (".x360n-import-" + Utf8(destination.filename())));
+    const auto staging = destination.parent_path() / (".x360n-import-" + Utf8(destination.filename()));
     const auto temporary = staging / "verified.tmp";
     const auto expected = expected_files.at(destination);
     if (io::exists(staging)) {
-      if (!io::is_directory(staging) || io::is_redirect(staging) || !IsWithin(staging, ImportIoPath(destination.parent_path())))
+      if (!io::is_directory(staging) || io::is_redirect(staging) || !IsWithin(staging, destination.parent_path()))
         throw std::runtime_error("Pasta temporária inválida; conteúdo preservado.");
       for (const auto& entry : io::directory_iterator(staging))
         if (entry.path() != temporary || entry.is_redirect() || !entry.is_regular_file())
@@ -392,13 +383,14 @@ size_t Import(const ProjectPaths& paths, const Target& t, const fs::path& source
     }
     io::create_directory(staging);
     try {
-      if (!io::exists(temporary)) io::copy_file(ImportIoPath(input), temporary, fs::copy_options::none);
+      if (!io::exists(temporary)) io::copy_file(input, temporary, fs::copy_options::none);
       if (!Matches(temporary, expected->sha256))
         throw std::runtime_error("O conteúdo mudou durante a cópia. Tente novamente.");
       // Publish complete bytes atomically and never replace a concurrent file.
 #ifdef _WIN32
-      if (!MoveFileExW(ImportIoPath(temporary).c_str(), ImportIoPath(destination).c_str(), MOVEFILE_WRITE_THROUGH))
-        throw std::runtime_error("Não foi possível publicar o componente; erro Windows " + std::to_string(GetLastError()));
+      std::error_code published;
+      io::rename(temporary, destination, io::if_exists::fail, published);
+      if (published) throw std::runtime_error("Não foi possível publicar o componente; erro Windows " + std::to_string(published.value()));
 #else
       io::create_hard_link(temporary, destination);
       io::remove(temporary);

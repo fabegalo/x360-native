@@ -69,7 +69,19 @@ if not exist "%VCToolsInstallDir%include\vcruntime.h" (
   echo [devshell] Native MSVC headers missing. 1>&2
   exit /b 3
 )
-set "PATH=%X360_LLVM%\bin;%X360_ROOT%\.local\toolchains\mingit-2.56.0.2\cmd;%X360_ROOT%\.local\toolchains\cmake-3.31.6\bin;%X360_ROOT%\.local\toolchains\ninja-1.13.1;%PATH%"
+rem Below a long installation the SDK's files and its submodules' objects pass
+rem MAX_PATH; Git resolves the installation alias to that real path. The
+rem environment form also reaches the git processes started for submodules.
+set "GIT_CONFIG_COUNT=1"
+set "GIT_CONFIG_KEY_0=core.longpaths"
+set "GIT_CONFIG_VALUE_0=true"
+rem Reached through that alias (x360n ToolPath), MinGit's cmd\git.exe launcher
+rem starts git from the real path, where git cannot run its script commands
+rem (git submodule); git itself keeps the alias spelling.
+set "X360_GIT=%X360_ROOT%\.local\toolchains\mingit-2.56.0.2\cmd"
+for %%I in ("%X360_ROOT%") do set "X360_ROOT_ATTRIBUTES=%%~aI"
+if /i "%X360_ROOT_ATTRIBUTES:~8,1%"=="l" set "X360_GIT=%X360_ROOT%\.local\toolchains\mingit-2.56.0.2\ucrt64\bin"
+set "PATH=%X360_LLVM%\bin;%X360_GIT%;%X360_ROOT%\.local\toolchains\cmake-3.31.6\bin;%X360_ROOT%\.local\toolchains\ninja-1.13.1;%PATH%"
 
 %*
 exit /b %ERRORLEVEL%
