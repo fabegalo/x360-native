@@ -80,13 +80,13 @@ TEST_CASE("Raw gamer picture writes persist distinct public and personal files p
       CHECK(ReadPictureBytes(first_package / "pp_64.png") == B64);
       CHECK(ReadPictureBytes(first_package / "pp_32.png") == B32);
       CHECK(ReadPictureBytes(first_package / "tile_64.png") == A64);
-      const auto key = ReadPictureBytes(first_package / "settings-v1/4064000F.dat");
+      const auto key = ReadPictureBytes(first_package / "settings-v1" / "4064000F.dat");
       CHECK(key.size() == 50);
       const auto* selected = static_cast<rex::system::xam::UserProfile::UnicodeSetting*>(profiles->GetSetting(0x4064000F));
       REQUIRE(selected); CHECK_FALSE(selected->load_failed);
       CHECK(selected->value == u"123456780000001100000021");
       CHECK(write(0xB2, A64, A32) == 0); // Both pictures; preserve the selected key.
-      CHECK(ReadPictureBytes(first_package / "settings-v1/4064000F.dat") == key);
+      CHECK(ReadPictureBytes(first_package / "settings-v1" / "4064000F.dat") == key);
       CHECK(ReadPictureBytes(first_package / "pp_64.png") == A64);
       const auto overlap = block + 4096;
       std::memset(base + overlap, 0, sizeof(rex::system::XAM_OVERLAPPED));
@@ -209,7 +209,7 @@ TEST_CASE("Picture publication rolls back after a real locked second destination
   REQUIRE(profile->CreateLocal("PictureLock", &xuid) == 0); REQUIRE(profile->SetLocalSession(xuid) == 0);
   REQUIRE(profile->WritePictures(xuid, PictureSet(false)) == 0);
   const auto package = profile->PackagePath(xuid);
-  const auto key = ReadPictureBytes(package / "settings-v1/4064000F.dat");
+  const auto key = ReadPictureBytes(package / "settings-v1" / "4064000F.dat");
   HANDLE locked = INVALID_HANDLE_VALUE; bool committed = true;
   const auto result = profile->WritePictures(xuid, PictureSet(true), &committed, [&](uint32_t phase) {
     if (!phase) {
@@ -222,7 +222,7 @@ TEST_CASE("Picture publication rolls back after a real locked second destination
   CHECK(ReadPictureBytes(package / "tile_64.png") == A64);
   CHECK(ReadPictureBytes(package / "tile_32.png") == A32);
   CHECK(ReadPictureBytes(package / "pp_64.png") == A64);
-  CHECK(ReadPictureBytes(package / "settings-v1/4064000F.dat") == key);
+  CHECK(ReadPictureBytes(package / "settings-v1" / "4064000F.dat") == key);
   CHECK_FALSE(std::filesystem::exists(package / ".x360n-picture-update"));
   if (locked != INVALID_HANDLE_VALUE) CloseHandle(locked);
   CHECK(profile->WritePictures(xuid, PictureSet(true)) == 0);
@@ -240,7 +240,7 @@ TEST_CASE("Committed picture cleanup preserves newer public bytes and retries pr
   HANDLE locked = INVALID_HANDLE_VALUE; bool committed = false;
   const auto result = profile->WritePictures(xuid, PictureSet(true), &committed, [&](uint32_t phase) {
     if (phase == 6) {
-      locked = CreateFileW((package / ".x360n-picture-update/old0").c_str(), GENERIC_READ, FILE_SHARE_READ,
+      locked = CreateFileW((package / ".x360n-picture-update" / "old0").c_str(), GENERIC_READ, FILE_SHARE_READ,
                            nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
       CHECK(locked != INVALID_HANDLE_VALUE);
     }
@@ -289,7 +289,7 @@ TEST_CASE("Picture update independent process fixture", "[sdk][profile-picture-p
   }
   if (phase == L"corrupt" || phase == L"conflict") {
     CHECK(profile->RecoverPictures(identity.xuid) == (phase == L"corrupt" ? 13u : 183u));
-    CHECK(std::filesystem::exists(package / ".x360n-picture-update/ready"));
+    CHECK(std::filesystem::exists(package / ".x360n-picture-update" / "ready"));
     return;
   }
   REQUIRE((phase == L"old" || phase == L"new"));

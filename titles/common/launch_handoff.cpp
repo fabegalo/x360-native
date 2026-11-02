@@ -8,6 +8,7 @@
 #include <rex/logging/assert.h>
 #include <rex/kernel/xam/module.h>
 #include <rex/system/user_module.h>
+#include <rex/filesystem.h>
 #include <rex/filesystem/vfs.h>
 #include <rex/filesystem/devices/host_path_entry.h>
 #include <rex/platform/dynlib.h>
@@ -31,12 +32,16 @@ std::string system_xam_path;
 std::filesystem::path Utf8Path(const std::string& value) {
   return std::filesystem::path(std::u8string(value.begin(), value.end()));
 }
+// Supervisor records carry ordinary paths; host I/O goes through the long form.
+std::filesystem::path HostFile(const std::string& value) {
+  return rex::filesystem::HostPath(Utf8Path(value));
+}
 void Publish(const std::string& output, const LaunchRequest& request) {
   // Guest exit and the user's close request can arrive on different threads.
   // Preserve the first completed event, without racing on the temporary file.
   std::lock_guard lock(handoff_mutex);
-  if (std::filesystem::exists(Utf8Path(output))) return;
-  if (!WriteLaunchRequest(Utf8Path(output), request))
+  if (std::filesystem::exists(HostFile(output))) return;
+  if (!WriteLaunchRequest(HostFile(output), request))
     REXLOG_ERROR("[supervisor] could not write handoff {}", output);
   else REXLOG_INFO("[supervisor] handoff kind={}, path={}", uint32_t(request.kind), request.path);
 }
@@ -65,7 +70,7 @@ void ImportLaunchData(rex::Runtime& runtime) {
   auto input = REXCVAR_GET(x360n_handoff_in);
   LaunchRequest request;
   if (!input.empty() &&
-      (!ReadLaunchRequest(Utf8Path(input), request) || request.kind == LaunchRequest::WindowClose))
+      (!ReadLaunchRequest(HostFile(input), request) || request.kind == LaunchRequest::WindowClose))
     REX_FATAL("Invalid supervisor launch-data record: {}", input);
   const auto profile_root = REXCVAR_GET(x360n_profile_root);
   if (!profile_root.empty()) {
@@ -86,7 +91,7 @@ void ImportLaunchData(rex::Runtime& runtime) {
       // The package the dashboard launched, when this title came from one.
       std::optional<LaunchedContent> content;
       if (!input.empty() && request.kind == LaunchRequest::Image && !request.path.empty())
-        content = ReadLaunchedContent(Utf8Path(request.path), title_id);
+        content = ReadLaunchedContent(HostFile(request.path), title_id);
       // Use the same active unlock mask exposed to the game by XAM. Reading it
       // does not grant a license or change the installed package.
       switch (DecideGamesPlayed(version, content, REXCVAR_GET(license_mask))) {
@@ -143,7 +148,7 @@ void ExportLaunchRequest(rex::Runtime& runtime) {
       REXLOG_ERROR("[supervisor] launch path has no host file: {}", data.launch_path);
       return;
     }
-    auto path = host->host_path().u8string();
+    auto path = rex::filesystem::OrdinaryPath(host->host_path()).u8string();
     request.path.assign(path.begin(), path.end());
   }
   Publish(output, request);

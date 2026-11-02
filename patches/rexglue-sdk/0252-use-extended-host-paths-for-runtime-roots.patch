@@ -1,0 +1,205 @@
+--- a/include/rex/filesystem.h
++++ b/include/rex/filesystem.h
+@@ -39,6 +39,18 @@
+ // Get user folder.
+ std::filesystem::path GetUserFolder();
+ 
++// Absolute host path for operating-system calls. On Windows it is the
++// extended-length (\\?\ or \\?\UNC\) spelling, which Win32 accepts beyond
++// MAX_PATH without the LongPathsEnabled system policy; everything joined to
++// it with operator/ inherits that. Idempotent; unchanged on other hosts.
++// Extended paths are not normalized by Windows: join components, never "/".
++std::filesystem::path HostPath(const std::filesystem::path& path);
++
++// The same location without the \\?\ prefix, for display, child processes,
++// and ancestor walks: MSVC parses "\\?" as the root name, so the parents of an
++// extended path reach "\\?\C:", which Win32 rejects. Unchanged otherwise.
++std::filesystem::path OrdinaryPath(const std::filesystem::path& path);
++
+ // Creates the parent folder of the specified path if needed.
+ // This can be used to ensure the destination path for a new file exists before
+ // attempting to create it.
+--- a/src/core/filesystem.cpp
++++ b/src/core/filesystem.cpp
+@@ -16,6 +16,30 @@
+ namespace rex {
+ namespace filesystem {
+ 
++std::filesystem::path HostPath(const std::filesystem::path& path) {
++#ifdef _WIN32
++  if (path.empty()) return path;
++  std::error_code ec;
++  // GetFullPathNameW resolves '.', '..' and '/' before the prefix disables it.
++  const auto name =
++      std::filesystem::absolute(path, ec).lexically_normal().make_preferred().native();
++  if (ec) return path;
++  if (name.starts_with(L"\\\\?\\") || name.starts_with(L"\\\\.\\")) return name;
++  return name.starts_with(L"\\\\") ? L"\\\\?\\UNC\\" + name.substr(2) : L"\\\\?\\" + name;
++#else
++  return path;
++#endif
++}
++
++std::filesystem::path OrdinaryPath(const std::filesystem::path& path) {
++#ifdef _WIN32
++  const auto& name = path.native();
++  if (name.starts_with(L"\\\\?\\UNC\\")) return L"\\\\" + name.substr(8);
++  if (name.starts_with(L"\\\\?\\") && name.size() > 5 && name[5] == L':') return name.substr(4);
++#endif
++  return path;
++}
++
+ bool CreateParentFolder(const std::filesystem::path& path) {
+   if (path.has_parent_path()) {
+     auto parent_path = path.parent_path();
+--- a/src/filesystem/devices/host_path_device.cpp
++++ b/src/filesystem/devices/host_path_device.cpp
+@@ -43,7 +43,7 @@
+                                bool allow_share_delete)
+     : Device(mount_path),
+       name_("STFS"),
+-      host_path_(host_path),
++      host_path_(rex::filesystem::HostPath(host_path)),
+       read_only_(read_only),
+       allow_share_delete_(allow_share_delete) {}
+ 
+--- a/src/system/kernel_state.cpp
++++ b/src/system/kernel_state.cpp
+@@ -82,7 +82,7 @@
+   // (saves, DLC, installs) on it, while caches stay in each title's own root.
+   auto content_root = user_data_root;
+   if (const auto configured = REXCVAR_GET(content_data_root); !configured.empty())
+-    content_root = std::filesystem::absolute(rex::to_path(configured));
++    content_root = rex::filesystem::HostPath(rex::to_path(configured));
+   content_manager_ = std::make_unique<xam::ContentManager>(this, content_root);
+   if (!user_profile_->InitializeLocal(user_data_root)) {
+     REXSYS_ERROR("Local profile store unavailable or invalid; keeping user signed out");
+--- a/src/system/runtime.cpp
++++ b/src/system/runtime.cpp
+@@ -11,6 +11,7 @@
+ 
+ #include <rex/chrono/clock.h>
+ #include <rex/cvar.h>
++#include <rex/filesystem.h>
+ #include <rex/filesystem/devices/host_path_device.h>
+ #include <rex/filesystem/devices/null_device.h>
+ #include <rex/filesystem/vfs.h>
+@@ -48,11 +49,15 @@
+                  const std::filesystem::path& update_data_root,
+                  const std::filesystem::path& cache_root,
+                  const std::filesystem::path& metadata_root)
+-    : game_data_root_(game_data_root),
+-      user_data_root_(user_data_root.empty() ? game_data_root : user_data_root),
+-      update_data_root_(update_data_root),
+-      cache_root_(cache_root),
+-      metadata_root_(metadata_root) {}
++    // Every host path of the session descends from these roots. Holding them in
++    // host (extended-length) form lifts MAX_PATH for all derived file access,
++    // wherever the installation lives, instead of at individual call sites.
++    : game_data_root_(rex::filesystem::HostPath(game_data_root)),
++      user_data_root_(rex::filesystem::HostPath(user_data_root.empty() ? game_data_root
++                                                                       : user_data_root)),
++      update_data_root_(rex::filesystem::HostPath(update_data_root)),
++      cache_root_(rex::filesystem::HostPath(cache_root)),
++      metadata_root_(rex::filesystem::HostPath(metadata_root)) {}
+ 
+ Runtime::~Runtime() {
+   Shutdown();
+--- a/src/system/xam/content_manager.cpp
++++ b/src/system/xam/content_manager.cpp
+@@ -53,11 +53,14 @@
+ // particular, Windows junctions are reparse points even when is_symlink is false.
+ bool IsUnlinkedStoragePath(const std::filesystem::path& path) {
+   if (path.empty()) return false;
+-  for (auto p = std::filesystem::absolute(path).lexically_normal(); !p.empty();) {
++  // Walk the ordinary spelling (the parents of an extended path end at the
++  // invalid "\\?\C:") and query each ancestor in host form, beyond MAX_PATH.
++  for (auto p = rex::filesystem::OrdinaryPath(std::filesystem::absolute(path).lexically_normal());
++       !p.empty();) {
+ #ifdef _WIN32
+     // This attribute query covers every kind of reparse point, including
+     // junctions. Avoid querying the same ancestor again through symlink_status.
+-    const auto attrs = GetFileAttributesW(p.c_str());
++    const auto attrs = GetFileAttributesW(rex::filesystem::HostPath(p).c_str());
+     if (attrs == INVALID_FILE_ATTRIBUTES) {
+       const auto error = GetLastError();
+       // Missing components are valid when preparing a new content path.
+--- a/src/system/xam/user_profile.cpp
++++ b/src/system/xam/user_profile.cpp
+@@ -371,7 +371,10 @@
+   return found;
+ }
+ 
+-bool UserProfile::InitializeLocal(const std::filesystem::path& root) {
++bool UserProfile::InitializeLocal(const std::filesystem::path& requested_root) {
++  // The profile store and offline achievements descend from this root; keep
++  // it in host form so profile packages work beyond MAX_PATH.
++  const auto root = rex::filesystem::HostPath(requested_root);
+   {
+     std::lock_guard lock(identity_mutex_);
+     identity_ = {};
+@@ -770,6 +773,10 @@
+ std::mutex picture_store_mutex;
+ constexpr std::array<const char*, 5> kPictureNames{
+     "tile_64.png", "tile_32.png", "pp_64.png", "pp_32.png", "settings-v1/4064000F.dat"};
++// Names use '/'; extended (\\?\) package paths need native separators.
++fs::path PictureFile(const fs::path& package, unsigned index) {
++  return package / fs::path(kPictureNames[index]).make_preferred();
++}
+ constexpr size_t kPictureLimit = 16 * 1024 * 1024;
+ constexpr size_t kPictureIntentSize = 144;
+ uint64_t PictureHash(std::span<const uint8_t> bytes) {
+@@ -923,7 +930,7 @@
+       if (const auto error = check(stage / ("old" + std::to_string(i)), old[i], true)) return error;
+     }
+     std::vector<uint8_t> current;
+-    const auto error = PictureRead(package / kPictureNames[i], current, kPictureLimit);
++    const auto error = PictureRead(PictureFile(package, i), current, kPictureLimit);
+     if (error != 0 && error != 2) return error;
+     if (!error && current != next[i] && (!(old_mask & bit) || current != old[i])) return 183;
+     restore[i] = old_mask & bit ? error == 2 || current != old[i] : error == 0;
+@@ -931,7 +938,7 @@
+   for (unsigned i = 0; i < 5; ++i) {
+     if (!(mask & (1u << i))) continue;
+     if (!restore[i]) continue;
+-    const auto destination = package / kPictureNames[i];
++    const auto destination = PictureFile(package, i);
+     if (old_mask & (1u << i)) {
+       if (const auto error = PicturePublish(stage, destination, old[i])) return error;
+     } else {
+@@ -962,7 +969,7 @@
+   if (const auto error = PictureRecover(package, changed)) return error;
+   if (changed) if (const auto it = settings_.find(0x4064000F); it != settings_.end()) it->second->loaded_xuid = 0;
+   std::vector<uint8_t> result;
+-  const auto error = PictureRead(package / kPictureNames[(personal ? 2 : 0) + unsigned(small_picture)], result, kPictureLimit);
++  const auto error = PictureRead(PictureFile(package, (personal ? 2 : 0) + unsigned(small_picture)), result, kPictureLimit);
+   if (error) return error == 2 ? X_ERROR_NOT_FOUND : error;
+   if (result.empty()) return 13;
+   bytes = std::move(result);
+@@ -979,7 +986,7 @@
+   std::lock_guard lock(picture_store_mutex);
+   auto device = kernel_state_->content_manager()->GetDevice(profile.device_id);
+   if (!device) return 1167;
+-  const auto package = device->root / XuidName(xuid) / "FFFE07D1/00010000" / XuidName(xuid);
++  const auto package = device->root / XuidName(xuid) / "FFFE07D1" / "00010000" / XuidName(xuid);
+   if (!IsUnlinkedStoragePath(package) || !fs::is_directory(package)) return 5;
+   bool changed = false;
+   if (const auto error = PictureRecover(package, changed)) return error;
+@@ -1008,7 +1015,7 @@
+   for (unsigned i = 0; i < 5; ++i) {
+     if (next[i].empty()) continue;
+     mask |= 1u << i;
+-    const auto error = PictureRead(package / kPictureNames[i], previous[i], kPictureLimit);
++    const auto error = PictureRead(PictureFile(package, i), previous[i], kPictureLimit);
+     if (error && error != 2) return error;
+     if (!error) old_mask |= 1u << i;
+     auto* row = intent.data() + 16 + i * 24;
+@@ -1047,7 +1054,7 @@
+   if (checkpoint) checkpoint(0);
+   for (unsigned i = 0; i < 5; ++i) {
+     if (!(mask & (1u << i))) continue;
+-    if (const auto error = PicturePublish(stage, package / kPictureNames[i], next[i])) return fail(error);
++    if (const auto error = PicturePublish(stage, PictureFile(package, i), next[i])) return fail(error);
+     if (checkpoint) checkpoint(i + 1);
+   }
+   if (const auto error = PictureRename(stage / "ready", stage / "committed")) return fail(error);

@@ -1,5 +1,6 @@
 #include <catch2/catch_test_macros.hpp>
 #include <rex/cvar.h>
+#include <rex/filesystem.h>
 #include <rex/kernel/init.h>
 #include <rex/kernel/xam/module.h>
 #include <rex/runtime.h>
@@ -151,7 +152,7 @@ TEST_CASE("session identity follows the dashboard hard drive and its session", "
   x360n::ImportLaunchData(rt);
   CHECK(rt.kernel_state()->user_profile()->identity().xuid == owner_id);
   CHECK(rt.kernel_state()->user_profile()->identity().signin_state == 1);
-  CHECK(rt.user_data_root() == game);
+  CHECK(rt.user_data_root() == rex::filesystem::HostPath(game));
   REQUIRE(rt.kernel_state()->user_profile()->SetLocalSession(0) == 0);
   REQUIRE(owner.InitializeLocal(platform));
   CHECK(owner.identity().signin_state == 0);

@@ -7,6 +7,7 @@
 #include <optional>
 #include <cstdlib>
 #include "paths.h"
+#include <rex/filesystem.h>
 #include <rex/kernel/init.h>
 #include <rex/logging.h>
 #include <rex/runtime.h>
@@ -780,7 +781,7 @@ TEST_CASE("Profiles are storage content listed refreshed and locked while signed
   CHECK(profile->local_profiles().size() == 1);
   CHECK(profile->xuid() == alpha); CHECK(profile->signin_state() == 1);
   // Profile-wide data lives inside the package.
-  CHECK(profile->PackagePath(alpha) == ProfilePackage(store.path, alpha));
+  CHECK(profile->PackagePath(alpha) == rex::filesystem::HostPath(ProfilePackage(store.path, alpha)));
   CHECK(profile->PackagePath(bravo).empty());
 }
 

@@ -2670,3 +2670,46 @@ evaluates the call exactly as written in the SDK `CMakeLists.txt`, from a
 consumer repository tagged above the floor with a commit after the tag. It
 expects the SDK tag, and the fallback for an untagged SDK repository. The
 baseline aborts with the floor error.
+
+### 0252 — use extended host paths for runtime roots
+
+On Windows the runtime opened content through ordinary paths, so every file
+below `MAX_PATH` (260) worked and every file beyond it failed, unless the
+`LongPathsEnabled` system policy and a `longPathAware` manifest were both in
+place; the project can require neither. The packaged release placed Skate 3's
+installed files at 270+ characters. `ContentManager::GetContentAttributes`
+then returned `X_ERROR_ACCESS_DENIED`, the 17559 dashboard never asked for the
+package metadata, and My Games dropped the game. The development checkout,
+about 125 characters shallower, stayed below the limit.
+
+The fix is at the roots, not at call sites. `rex::filesystem::HostPath` returns
+the absolute, normalized extended-length spelling (`\?\C:\…`, `\?\UNC\…`),
+which Win32 accepts up to 32,767 characters with no system setting; it is
+idempotent and does nothing on other hosts. `Runtime` holds its game, user,
+update, cache and metadata roots in that form, as do the configured
+`content_data_root`, `UserProfile::InitializeLocal` and `HostPathDevice`. Every
+path joined to them with `operator/` inherits the form. Windows does not
+normalize extended paths, so `.`/`..` and `/` are resolved once in `HostPath`
+and joins use separate components: the `"FFFE07D1/00010000"` literal under a
+root is now split, and the profile picture names, which include
+`settings-v1/4064000F.dat`, are joined through `PictureFile` with native
+separators (the picture write failed with `ERROR_INVALID_NAME` otherwise).
+Guest paths reach devices already canonicalized.
+
+MSVC parses `\?` as the root name, so walking the parents of an extended path
+ends at `\?\C:`, which Win32 rejects with `ERROR_INVALID_PARAMETER`.
+`rex::filesystem::OrdinaryPath` drops the prefix. `IsUnlinkedStoragePath` walks
+that spelling and queries each ancestor in host form. Records read by other
+processes keep the ordinary spelling: `titles/common/launch_handoff.cpp`
+publishes the launched image path through `OrdinaryPath`, as before, and opens
+handoff and profile files through `HostPath`.
+
+Root accessors now return the host spelling. `sdkcheck.Content beyond MAX_PATH
+keeps its attributes and device entries` (`tests/sdkcheck/long_content_path_test.cpp`)
+roots a runtime at an ordinary path and gives its content package a file beyond
+300 characters. It expects the attributes and size from `GetContentAttributes`
+and a `HostPathDevice` entry for that file. The baseline returns
+`X_ERROR_ACCESS_DENIED`. `sdkcheck.Host paths use the extended form only where
+the host needs it` covers the spellings. The aggregate-content and title-return
+checks compare root-derived paths with their host form. No upstream equivalent
+was identified.

@@ -5,6 +5,7 @@
 #include <set>
 #include <vector>
 #include <array>
+#include <rex/filesystem.h>
 #include <rex/system/function_dispatcher.h>
 #include <rex/kernel/init.h>
 #include <rex/kernel/xam/module.h>
@@ -328,7 +329,7 @@ TEST_CASE("Aggregate all-types query enumerates installed titles with their real
   uint64_t open_timeout = uint64_t(-50'000'000ll);
   REQUIRE(open_thread->Wait(0, 0, 0, &open_timeout) == X_STATUS_SUCCESS);
   CHECK(open_result == 0);
-  CHECK(rt.kernel_state()->content_manager()->GetOpenPackagePath("shared-test") == package);
+  CHECK(rt.kernel_state()->content_manager()->GetOpenPackagePath("shared-test") == rex::filesystem::HostPath(package));
   rt.kernel_state()->content_manager()->CloseContent("shared-test");
   data->set_file_name("missing");
   CHECK(attributes(false) == X_ERROR_FILE_NOT_FOUND);
@@ -405,6 +406,6 @@ TEST_CASE("Aggregate all-types query enumerates installed titles with their real
   CHECK(xam->launch_request_internal_flags.load() == 0x200);
   CHECK(xam->loader_data().launch_flags == 0); // internal 0x200 is not a caller flag
   CHECK(xam->loader_data().launch_path == "XSYSLAUNCH:\\default.xex");
-  CHECK(rt.kernel_state()->content_manager()->GetOpenPackagePath("XSYSLAUNCH") == package);
+  CHECK(rt.kernel_state()->content_manager()->GetOpenPackagePath("XSYSLAUNCH") == rex::filesystem::HostPath(package));
 
 }

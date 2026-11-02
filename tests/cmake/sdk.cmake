@@ -257,6 +257,7 @@ target_sources(x360n_sdk_runtime_checks PRIVATE sdkcheck/xam_common_string_test.
 target_sources(x360n_sdk_runtime_checks PRIVATE sdkcheck/xam_user_preference_test.cpp)
 target_sources(x360n_sdk_runtime_checks PRIVATE sdkcheck/storage_notification_test.cpp)
 target_sources(x360n_sdk_runtime_checks PRIVATE sdkcheck/aggregate_content_test.cpp)
+target_sources(x360n_sdk_runtime_checks PRIVATE sdkcheck/long_content_path_test.cpp)
 target_sources(x360n_sdk_runtime_checks PRIVATE sdkcheck/title_return_test.cpp
     ../titles/common/launch_handoff.cpp)
 target_sources(x360n_sdk_runtime_checks PRIVATE sdkcheck/persist_display_test.cpp)
