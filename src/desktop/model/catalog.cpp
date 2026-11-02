@@ -333,7 +333,7 @@ size_t Import(const ProjectPaths& paths, const Target& t, const fs::path& source
     const auto digest = single ? single_digest : DigestFile(file);
     if (!digest) throw std::runtime_error("Could not read import source: " + Utf8(file));
     auto check = [&](const Input& i) {
-      if (!single && !i.source_relative.empty() && FileKey(file.lexically_relative(source)) != FileKey(i.source_relative)) return;
+      if (!single && !i.source_relative.empty() && FileKey(file.lexically_relative(LongPath(source))) != FileKey(i.source_relative)) return;
       if (digest->sha256 == i.sha256) copies[i.destination] = file;
     };
     if (single) for (const auto& i : t.inputs) check(i);
