@@ -9,7 +9,9 @@ repositório.
 Uma instalação limpa a 337 caracteres (363 bytes em UTF-8), com Unicode e emoji,
 numa unidade NTFS sem nomes 8.3, importou a dashboard 17559 e o Castle Crashers,
 preparou os dois e iniciou a dashboard até a tela "sign in or out".
-O gameplay a partir da My Games nesse ambiente **não foi exercitado** nesta etapa.
+Depois da correção do host de UI (§7), o Castle Crashers iniciou pela My Games
+nesse ambiente e chegou à Guide e à seleção de personagem, conduzido pelo
+mantenedor; a partida em si não foi confirmada.
 A importação de um pacote STFS deixou de copiar os arquivos uma segunda vez:
 a escrita caiu de 144,9 MB para 1,1 MB. As ferramentas deixaram de manter os
 arquivos baixados depois da extração verificada (961 MB). Gerações sem uso do
@@ -183,6 +185,36 @@ O controle negativo dos testes de SDK (0253–0255) falha sem o patch.
   (bases de fonte), igual na `main` anterior.
 - **SDK local.** Nesta validação o SDK foi semeado de um checkout local, não
   baixado. Arquivos baixados de ferramentas também vieram de cópia local.
-- **Gameplay e CI.** O gameplay do Castle Crashers pela My Games no ambiente
-  profundo não foi exercitado nesta etapa. A CI das seis plataformas é conferida
-  após o push.
+- **Gameplay.** No ambiente profundo o Castle Crashers chegou à Guide e à
+  seleção de personagem; a partida em si não foi confirmada.
+
+## 7. Problemas encontrados no uso pelo launcher
+
+- **Host de UI da sessão (`982f30c`).** No ambiente profundo o Castle Crashers
+  parava com "Missing verified dashboard system UI host" (0xC0000409): o título
+  abre o host com `LoadLibrary`, que não aceita nome além de `MAX_PATH`. O
+  supervisor passa agora o nome pelo alias da instalação. Teste
+  `titles load the session UI host of a deep installation`: falha sem a
+  correção (337 caracteres, carga recusada) e passa com ela.
+- **Entrar perfil pela Guide (patch 0256, `e62a801`).** Não depende do caminho
+  profundo: os logs do checkout curto de 31/10 a 02/11 mostram a mesma falha.
+  O `signin.xex` original pede `XamAllocEx` com a classe 0x24400000, recusada
+  pelo adaptador com 80004001 ("signin original initialize -> 80004001",
+  "queued request 00021001 -> 80004001"). No `xam_ui.xex` 17559, 816E67E8 só
+  separa o bit físico 0x40000000; as demais classes seguem o caminho virtual
+  (816E5F10, 816E5E40 pool 6, 816E5D58 zera o bloco). O sdkcheck
+  `[signin-allocation]` falha sem o patch e passa com ele. O Sign In na tela
+  **não foi exercitado** depois da correção.
+- **F3 fechava o título (patch 0257, `4125f87`).** Reproduzido numa sessão da
+  dashboard com captura de crash e F3 enviado por script, com autorização do
+  mantenedor: `STATUS_HEAP_CORRUPTION` no primeiro F3, detectado num free dentro
+  do driver D3D12; com apresentação só pela thread de UI, no 8º F3, dentro do
+  DXGI. F4 (configurações) sobreviveu a 30 alternâncias. Causa:
+  `DebugOverlayDialog` declarava o histórico de frames só com
+  `REXGLUE_ENABLE_PERF_COUNTERS`, definido apenas no diretório do SDK; os
+  títulos compilam `rex_app.cpp`, que aloca o overlay, sem a macro, e o
+  construtor do runtime escrevia cerca de 488 bytes além da alocação. Com os
+  membros declarados em todo build, a mesma sessão sobreviveu a 40 F3, com o
+  overlay aberto na captura. O sdkcheck `[debug-overlay]` falha sem o patch
+  (3 falhas) e passa com ele.
+- CI de `982f30c` e `e62a801` aprovada nas seis plataformas.

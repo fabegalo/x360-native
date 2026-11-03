@@ -1,5 +1,15 @@
 # STATUS
 
+02/11 — **Sign In da Guide e F3 corrigidos; Castle no caminho profundo**:
+patch 0256 aceita as classes virtuais originais de `XamAllocEx` (o
+`signin.xex` 17559 pede 0x24400000 e recebia 80004001, em qualquer
+instalação); Sign In na tela ainda não exercitado. Patch 0257 iguala o layout
+do `DebugOverlayDialog` entre títulos e runtime: F3 corrompia o heap
+(0xC0000374) e a dashboard passou a sobreviver a 40 F3. O host de UI da sessão
+passa pelo alias da instalação, e o Castle Crashers chegou à Guide e à seleção
+de personagem a 363 bytes. Cada correção com teste que falha sem ela.
+[Relatório §7](docs/reports/paths-storage-2026-11-02.md).
+
 02/11 — **Caminhos profundos sem limite de 141 bytes; menos duplicação**: no
 Windows, `.local\toolchains` e `external` de uma instalação profunda viram
 junctions para `%LOCALAPPDATA%\x360n\t|e\<id>` antes de qualquer ferramenta,
