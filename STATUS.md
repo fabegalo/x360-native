@@ -1,5 +1,13 @@
 # STATUS
 
+03/11 — **Importação de discos com arquivos acima de 2 GiB (1.28.32)**: os
+limites de extração da System Update (28/10) recusavam qualquer arquivo acima
+de 2 GiB, e o disco 1 do Forza Horizon parava em "container extraction limit
+exceeded" (`colorado/bin.zip`, 2.942.369.996 bytes). Um arquivo agora pode usar
+os 32 bits de tamanho de XDVDFS/STFS; 65.536 entradas e 8 GiB declarados no
+total seguem valendo. Teste com os tamanhos reais falha sem a correção;
+importação completa não refeita. [Notas](docs/releases/1.28.32.md).
+
 03/11 — **Motocross Madness prepara numa instalação (1.28.31)**: o módulo XAM
 2.0.17559.0 apontava para `retail_system_assets/extracted/xam.xex`, pasta que
 só o checkout de desenvolvimento tinha. Agora usa o `runtime/system/xam_ui.xex`
