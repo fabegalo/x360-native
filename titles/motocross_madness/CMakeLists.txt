@@ -47,10 +47,10 @@ x360n_add_avatar_service_17559(motocross_madness)
 # loaded by src/xam_aot_probe.cpp only. Its guest dispatch table would start at
 # 0x81C00000 and cover 0x8242D510, over the game image at 0x82000000; patch 0031
 # keeps it on the host.
-if(TARGET motocross_madness_xam)
-    target_compile_definitions(motocross_madness_xam PRIVATE REX_HOST_FUNCTION_TABLE=1)
+if(TARGET motocross_madness_xam_ui)
+    target_compile_definitions(motocross_madness_xam_ui PRIVATE REX_HOST_FUNCTION_TABLE=1)
     # Read-only diagnostic hooks of analysis/xam17559_avatar_trace.toml.
-    target_sources(motocross_madness_xam PRIVATE src/xam_avatar_trace.cpp src/xam_avatar_memory.cpp)
+    target_sources(motocross_madness_xam_ui PRIVATE src/xam_avatar_trace.cpp src/xam_avatar_memory.cpp)
 endif()
 
 # x360-native: copy rexruntime and the GPU plugin next to the executable on every

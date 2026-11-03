@@ -1,5 +1,5 @@
 // motocross_madness: diagnostic hooks inside the recompiled original XAM 2.0.17559.0
-// (analysis/xam17559_avatar_trace.toml), compiled into motocross_madness_xam. They only
+// (analysis/xam17559_avatar_trace.toml), compiled into motocross_madness_xam_ui. They only
 // log r3; no register or memory is changed.
 #include <cstdint>
 

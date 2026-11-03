@@ -18,10 +18,13 @@ includes = ["analysis/motocross_madness.toml", "analysis/motocross_madness_point
 # Loaded on demand only by the diagnostic src/xam_aot_probe.cpp (the avatar service
 # uses the session dashboard's XAM image instead); its entry point is never called and
 # the SDK's XAM services stay authoritative. Analysis hints for this binary live with
-# the dashboard profile that first needed them.
+# the dashboard profile that first needed them. The copy is the one the Retail 17559
+# dashboard import places (titles/dash_17559/preparation.toml system/xam_ui.xex), so
+# the dashboard must be imported first; the file name makes the target
+# motocross_madness_xam_ui.
 [[modules]]
 guest_path = 'x360nsys:\xam.xex'
-file_path = "../../.local/inputs/dashboards/17559/retail_system_assets/extracted/xam.xex"
+file_path = "../../.local/inputs/dashboards/17559/runtime/system/xam_ui.xex"
 out_directory_path = "generated/xam"
 includes = ["../dash_17559/analysis/xam_ui_17559.toml", "analysis/xam17559_avatar_trace.toml"]
 [x360n]

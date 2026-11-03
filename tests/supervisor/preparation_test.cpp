@@ -7,9 +7,12 @@
 #include "aot_pipeline.h"
 #include "host_platform.h"
 #include "sha256.h"
+#include "toml_file.h"
 #include <nlohmann/json.hpp>
 #include <algorithm>
+#include <cctype>
 #include <chrono>
+#include <set>
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
@@ -277,6 +280,50 @@ TEST_CASE("registered originals resolve against the title's content root", "[pre
   CHECK(RegisteredContentRoot(manifest).lexically_normal() ==
         (root / ".local/inputs/games/sample").lexically_normal());
   std::error_code ec; fs::remove_all(root, ec);
+}
+// An installed package has only what imports placed: Motocross Madness named
+// the dashboard's xam.xex by a folder that only a development checkout had.
+TEST_CASE("every original a title compiles is placed by an import", "[preparation]") {
+  const auto key = [](const fs::path& path) {
+    auto s = PathUtf8(path.lexically_normal());
+    for (auto& c : s) c = char(std::tolower(static_cast<unsigned char>(c)));
+    return s;
+  };
+  std::set<std::string> placed;
+  std::vector<fs::path> manifests;
+  for (const auto& dir : fs::directory_iterator(fs::path(X360N_SOURCE_ROOT) / "titles")) {
+    const auto manifest = dir.path() / (PathUtf8(dir.path().filename()) + "_manifest.toml");
+    const auto registration = dir.path() / "preparation.toml";
+    // Without a registration the launcher cannot import or prepare it.
+    if (!fs::is_regular_file(manifest) || !fs::is_regular_file(registration)) continue;
+    manifests.push_back(manifest);
+    const auto content = RegisteredContentRoot(manifest);
+    const auto setup = ParseTomlFile(registration);
+    if (const auto* files = setup["files"].as_array())
+      for (const auto& file : *files) {
+        REQUIRE(file.is_table());
+        placed.insert(key(content / PathFromUtf8((*file.as_table())["path"].value_or(std::string{}))));
+      }
+    if (const auto inventory = setup["inventory"].value<std::string>()) {
+      std::ifstream in(dir.path() / PathFromUtf8(*inventory));
+      for (std::string line; std::getline(in, line);) {
+        if (!line.empty() && line.back() == '\r') line.pop_back();
+        if (const auto tab = line.find('\t'); !line.starts_with('#') && tab != std::string::npos)
+          placed.insert(key(content / PathFromUtf8(line.substr(tab + 1))));
+      }
+    }
+  }
+  REQUIRE_FALSE(manifests.empty());
+  for (const auto& manifest : manifests) {
+    const auto profile = ParseTomlFile(manifest);
+    std::vector<std::string> originals{profile["entrypoint"]["file_path"].value_or(std::string{})};
+    if (const auto* modules = profile["modules"].as_array())
+      for (const auto& module : *modules) originals.push_back((*module.as_table())["file_path"].value_or(std::string{}));
+    for (const auto& original : originals) {
+      INFO(PathUtf8(manifest) << ": " << original);
+      CHECK(placed.contains(key(manifest.parent_path() / PathFromUtf8(original))));
+    }
+  }
 }
 // A title's preset names the shared tools from its own folder; spelled as
 // written, each title gave the shared SDK its own identity and rebuilt it.

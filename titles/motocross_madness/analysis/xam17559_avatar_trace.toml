@@ -1,6 +1,6 @@
 # Diagnostic mid-asm hooks in the original XAM 2.0.17559.0 (module x360nsys:\xam.xex),
 # read-only: each logs r3 after one step of the avatar app's Initialize handler
-# 0x8196B9A8 (src/xam_avatar_trace.cpp, compiled into motocross_madness_xam).
+# 0x8196B9A8 (src/xam_avatar_trace.cpp, compiled into motocross_madness_xam_ui).
 
 [[midasm_hook]]
 name = "x360n_xam_avatar_init_ready"   # after bl 0x8196D5D0 (bool)
