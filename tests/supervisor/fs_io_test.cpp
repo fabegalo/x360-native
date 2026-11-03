@@ -28,6 +28,7 @@
 #include "child_process.h"
 #include "fs_io.h"
 #include "paths.h"
+#include "session_profile.h"
 #include "scratch.h"
 #include "sha256.h"
 #include "toml_file.h"
@@ -453,6 +454,41 @@ TEST_CASE("processes start from deep Unicode folders and keep relative paths", "
   result = x360n::RunProcess(spec);
   CHECK_FALSE(result.launched);
   CHECK(result.launch_error.find("outside an x360-native installation") != std::string::npos);
+}
+
+// A title started from the dashboard loads the dashboard's session UI host
+// with LoadLibrary. From a deep installation its real name failed ("Missing
+// verified dashboard system UI host"), stopping Castle Crashers at start.
+TEST_CASE("titles load the session UI host of a deep installation", "[paths][fs-io][session-platform]") {
+  Root root("fs_io_ui_host");
+  const auto install = Installation(Exact(root.path, 280, u8"Instalação-ゲーム-🎮"));
+  const auto folder = install / ".local" / "build" / "titles" / "dash_17559";
+  io::create_directories(folder);
+  const auto dll = folder / "dash_17559_session_ui.dll";
+  io::copy_file(X360N_TEST_CHILD, dll);  // any PE image; mapped, never run
+  REQUIRE(Length(dll) > MAX_PATH);
+  const auto load = [](const fs::path& path) {
+    const auto module = LoadLibraryExW(path.c_str(), nullptr, LOAD_LIBRARY_AS_IMAGE_RESOURCE);
+    if (module) FreeLibrary(module);
+    return module != nullptr;
+  };
+  REQUIRE_FALSE(load(io::Logical(io::Host(dll))));
+
+  x360n::SessionProfile dashboard, title;
+  dashboard.manifest = install / "titles/dash_17559/dash_17559_manifest.toml";
+  dashboard.user_root = install / ".local" / "user" / "dash17559";
+  dashboard.game_root = install / ".local" / "inputs" / "dashboards" / "17559";
+  dashboard.system_ui_host = dll;
+  title.manifest = install / "titles/castle_crashers/castle_crashers_manifest.toml";
+  const auto args = x360n::SessionPlatformArguments(dashboard, title);
+  const std::string option = "--x360n_system_ui_host=";
+  const auto arg = std::find_if(args.begin(), args.end(), [&](const auto& a) { return a.starts_with(option); });
+  REQUIRE(arg != args.end());
+  const auto spelling = x360n::PathFromUtf8(arg->substr(option.size()));
+  AliasCleanup cleanup{AliasOf(spelling, dll, install)};
+  CHECK(Length(spelling) < MAX_PATH);
+  CHECK(io::equivalent(spelling, dll));
+  CHECK(load(spelling));
 }
 
 TEST_CASE("preparation tools reach long installations through their alias", "[paths][fs-io][process]") {

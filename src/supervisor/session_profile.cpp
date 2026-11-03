@@ -221,7 +221,11 @@ std::vector<std::string> SessionPlatformArguments(const SessionProfile& dashboar
   if (!dashboard.dashboard_version.empty())
     args.push_back("--x360n_dashboard_version=" + dashboard.dashboard_version);
   if (active.manifest != dashboard.manifest && !dashboard.system_ui_host.empty()) {
-    args.push_back("--x360n_system_ui_host=" + PathUtf8(dashboard.system_ui_host));
+    // The title loads the host with LoadLibrary, which opens no name beyond
+    // MAX_PATH: from a deep installation it gets the name a child process
+    // would be started by, through the installation alias.
+    const auto& host = dashboard.system_ui_host;
+    args.push_back("--x360n_system_ui_host=" + PathUtf8(host.is_absolute() ? ChildExecutable(host) : host));
     args.push_back("--x360n_system_ui_root=" + PathUtf8(dashboard.game_root));
   }
   for (auto& arg : AvatarServiceArguments(dashboard, active)) args.push_back(std::move(arg));
