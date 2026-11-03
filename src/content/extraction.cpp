@@ -35,7 +35,7 @@ struct Extractor {
   void Walk(rex::filesystem::Entry* entry, const fs::path& rel, size_t depth = 0) {
     if (depth > 64) throw std::runtime_error("container directory depth limit exceeded");
     for (auto& child : entry->children()) {
-      if (++entries > 65536 || child->size() > (2ull << 30) || child->size() > (8ull << 30)-declared_bytes)
+      if (!WithinExtractionLimits(++entries, child->size(), declared_bytes))
         throw std::runtime_error("container extraction limit exceeded");
       if (!(child->attributes() & rex::filesystem::kFileAttributeDirectory)) declared_bytes += child->size();
       const std::string& name = child->name();

@@ -5,6 +5,7 @@
 #include <iterator>
 #include <string>
 
+#include "../../src/content/extraction.h"
 #include "../../src/content/extraction_manifest.h"
 #include "../supervisor/scratch.h"
 
@@ -77,4 +78,15 @@ TEST_CASE("extraction manifest preserves occupied temporary files and links", "[
     CHECK(Read(s.dir / "original") == "sentinel");
   }
   CHECK_FALSE(fs::exists(final));
+}
+// Forza Horizon disc 1 (2432 files, 7,320,461,527 bytes) holds a 2,942,369,996
+// byte file; a 2 GiB limit per file refused its import.
+TEST_CASE("extraction limits accept retail disc files beyond 2 GiB", "[content]") {
+  using x360n::content::WithinExtractionLimits;
+  CHECK(WithinExtractionLimits(2432, 2942369996ull, 7320461527ull - 2942369996ull));
+  CHECK(WithinExtractionLimits(1, 0xFFFFFFFFull, 0));
+  CHECK_FALSE(WithinExtractionLimits(1, 0x100000000ull, 0));
+  CHECK_FALSE(WithinExtractionLimits(65537, 1, 0));
+  CHECK_FALSE(WithinExtractionLimits(3, 3000000000ull, 6000000000ull));
+  CHECK(WithinExtractionLimits(3, (8ull << 30) - 6000000000ull, 6000000000ull));
 }
