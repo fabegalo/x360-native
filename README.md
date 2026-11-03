@@ -15,7 +15,7 @@
   [English](README.md) · [Português (Brasil)](README.pt-BR.md) · [Documentation](docs/README.md) · [Contributing](CONTRIBUTING.md)
 </div>
 
-> **Experimental software.** Windows x64 is the only platform with end-to-end evidence, results depend on the exact dashboard and game version, and no game is certified as fully functional. Version 1.28.18 is the current release on the stable channel; stable names the release channel, not a compatibility claim.
+> **Experimental software.** Windows x64 is the only platform with end-to-end evidence, results depend on the exact dashboard and game version, and no game is certified as fully functional. Version 1.28.28 is the current release on the stable channel; stable names the release channel, not a compatibility claim.
 
 ## See it running
 
@@ -39,7 +39,7 @@ The **original Xbox 360 dashboard** is a target in its own right: boot, navigati
 
 ## Current status
 
-Primary configuration: **Windows x64 with the Xenos D3D12 backend.** Release 1.28.18 also ships packages for Windows ARM64, Linux x64 (including Steam Deck), Linux ARM64 and macOS (Apple Silicon and Intel), each built and checked on a matching GitHub-hosted runner. A package is not runtime evidence: no dashboard or game flow has been demonstrated on those targets.
+Primary configuration: **Windows x64 with the Xenos D3D12 backend.** Release 1.28.28 also ships packages for Windows ARM64, Linux x64 (including Steam Deck), Linux ARM64 and macOS (Apple Silicon and Intel), each built and checked on a matching GitHub-hosted runner. A package is not runtime evidence: no dashboard or game flow has been demonstrated on those targets.
 
 | Target | Reached | Not yet certified |
 |---|---|---|
@@ -71,22 +71,24 @@ Primary configuration: **Windows x64 with the Xenos D3D12 backend.** Release 1.2
 
 ## Download
 
-**[Download x360-native 1.28.18](https://github.com/fabegalo/x360-native/releases/tag/v1.28.18)** · [release notes](docs/releases/1.28.18.md)
+**[Download x360-native 1.28.28](https://github.com/fabegalo/x360-native/releases/tag/v1.28.28)** · [release notes](docs/releases/1.28.28.md)
 
 | System | Architecture | Package |
 |---|---|---|
-| Windows | x64 | `x360-native-1.28.18-windows-x64.zip` |
-| Windows | ARM64 | `x360-native-1.28.18-windows-arm64.zip` |
-| Linux / Steam Deck | x64 | `x360-native-1.28.18-linux-x64.tar.gz` |
-| Linux | ARM64 | `x360-native-1.28.18-linux-arm64.tar.gz` |
-| macOS | Apple Silicon / ARM64 | `x360-native-1.28.18-macos-arm64.zip` |
-| macOS | Intel / x64 | `x360-native-1.28.18-macos-x64.zip` |
+| Windows | x64 | `x360-native-1.28.28-windows-x64.zip` |
+| Windows | ARM64 | `x360-native-1.28.28-windows-arm64.zip` |
+| Linux / Steam Deck | x64 | `x360-native-1.28.28-linux-x64.tar.gz` |
+| Linux | ARM64 | `x360-native-1.28.28-linux-arm64.tar.gz` |
+| macOS | Apple Silicon / ARM64 | `x360-native-1.28.28-macos-arm64.zip` |
+| macOS | Intel / x64 | `x360-native-1.28.28-macos-x64.zip` |
 
 1. Download the archive for your system and its `.sha256` file from the Release page (not GitHub's "Source code" archive).
 2. Extract the whole archive into an empty folder and start the launcher: `x360-native.exe` on Windows, `./x360-native` on Linux (X11 or Wayland) and on macOS (from Terminal; the package is not notarized). Keep the `data/` folder next to it: it holds your library, preparations and settings.
 3. Import the dashboard files and games you are authorized to use. The app identifies them and reports what is missing or unsupported.
 4. Prepare the dashboard and the games you want to try. Pinned tools are downloaded with your consent and the code is compiled locally; some Microsoft C++ build components may need their official installer.
 5. Start the original dashboard, open **My Games** and launch a prepared game.
+
+On Windows the installation folder can be deep and use Unicode names (checked at 337 characters, 363 bytes); a network share or a file system without junctions can import but not prepare titles.
 
 The package contains no Xbox content. Imported or prepared does not mean a game will run, and first use on a clean Windows install is not yet verified. More in the [preparation guide](docs/guides/desktop-preparation.md).
 
@@ -130,7 +132,7 @@ No. Use legally obtained files, and keep each dashboard's original modules with 
 </details>
 
 <details><summary><strong>Does it support Linux, macOS or ARM?</strong></summary>
-Release 1.28.18 has packages for Windows ARM64, Linux x64/ARM64 and macOS ARM64/x64, but current end-to-end evidence is for Windows x64 only. A package that builds and passes its checks on another platform does not establish runtime support there, and Steam Deck gameplay is not certified.
+Release 1.28.28 has packages for Windows ARM64, Linux x64/ARM64 and macOS ARM64/x64, but current end-to-end evidence is for Windows x64 only. A package that builds and passes its checks on another platform does not establish runtime support there, and Steam Deck gameplay is not certified.
 </details>
 
 <details><summary><strong>Are saves, Xbox Live, multiplayer and peripherals supported?</strong></summary>
