@@ -1,5 +1,14 @@
 # STATUS
 
+03/11 — **Motocross Madness prepara numa instalação (1.28.31)**: o módulo XAM
+2.0.17559.0 apontava para `retail_system_assets/extracted/xam.xex`, pasta que
+só o checkout de desenvolvimento tinha. Agora usa o `runtime/system/xam_ui.xex`
+que a importação da dashboard 17559 coloca (mesmo SHA-256, já usado pelo
+serviço de avatar); a DLL passa a `motocross_madness_xam_ui.dll`. Teste exige
+que todo original compilado por um título registrado seja colocado por uma
+importação. Preparo completo no dev (exit 0); jogo não iniciado depois.
+[Notas](docs/releases/1.28.31.md).
+
 03/11 — **Preparo do Motocross Madness restaurado (1.28.30)**: desde o
 pipeline AOT nativo (29/10), os `[[files]]` do `preparation.toml` eram
 procurados em `[project] game_root`; o Motocross usa `.local/inputs` como raiz
