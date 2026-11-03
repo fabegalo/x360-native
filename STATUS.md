@@ -1,5 +1,13 @@
 # STATUS
 
+03/11 — **Preparo do Motocross Madness restaurado (1.28.30)**: desde o
+pipeline AOT nativo (29/10), os `[[files]]` do `preparation.toml` eram
+procurados em `[project] game_root`; o Motocross usa `.local/inputs` como raiz
+do codegen e parava em `Missing/unreadable preparation input: …\.local\inputs\default.xex`.
+O pipeline usa `[x360n] game_data_root` quando existe, como catálogo e
+importador; teste falha sem a correção. Preparo completo não exercitado.
+[Notas](docs/releases/1.28.30.md).
+
 03/11 — **Status "Precisa preparar de novo" falso corrigido (1.28.29)**: numa
 instalação que prepara pela junction `%LOCALAPPDATA%\x360n\r\<id>`, o recibo
 grava o manifesto por esse nome, e a dica rápida da listagem o comparava como
