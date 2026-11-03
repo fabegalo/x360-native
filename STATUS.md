@@ -1,5 +1,13 @@
 # STATUS
 
+03/11 — **Status "Precisa preparar de novo" falso corrigido (1.28.29)**: numa
+instalação que prepara pela junction `%LOCALAPPDATA%\x360n\r\<id>`, o recibo
+grava o manifesto por esse nome, e a dica rápida da listagem o comparava como
+escrito com o nome da instalação. Toda listagem após um preparo marcava os
+títulos para preparar de novo, e a verificação completa (que resolve os nomes)
+os devolvia a PRONTO. A dica agora resolve os dois nomes; teste com junction
+real falha sem a correção. [Notas](docs/releases/1.28.29.md).
+
 02/11 — **Sign In da Guide e F3 corrigidos; Castle no caminho profundo**:
 patch 0256 aceita as classes virtuais originais de `XamAllocEx` (o
 `signin.xex` 17559 pede 0x24400000 e recebia 80004001, em qualquer
