@@ -2812,3 +2812,26 @@ original class` (`tests/sdkcheck/xam_allocation_test.cpp`,
 writes, sizes and frees it, and checks that 0x64400000 and 0x244000F2 still
 return 80004001 with a cleared output. The baseline returns 80004001. No
 upstream equivalent was identified.
+
+### 0257 — debug overlay layout in every build
+
+`DebugOverlayDialog` (`include/rex/ui/overlay/debug_overlay.h`) declared its
+frame-time history (120 floats and an index) only under
+`#ifdef REXGLUE_ENABLE_PERF_COUNTERS`. The SDK sets that macro with
+`add_compile_definitions` for its own directory, so `rexruntime`, where the
+constructor lives, has it. Titles compile `rex_app.cpp`, which allocates the
+overlay on F3 (`std::make_unique`), with their own flags and without it. The
+title allocated the smaller object and the runtime constructor zeroed the
+history past its end: the 17559 dashboard and Castle Crashers ended with
+`STATUS_HEAP_CORRUPTION`, detected in the next free inside the D3D12 driver or
+DXGI, on the first F3 or within a few presses. The members are now declared in
+every build, so both sides agree on the layout; behavior with and without perf
+counters is unchanged. F4 (settings), which has no such member, survived 30
+toggles in the same session.
+
+`sdkcheck.The debug overlay stays within the storage a title allocates for it`
+(`tests/sdkcheck/debug_overlay_layout_test.cpp`, `[debug-overlay]`) compiles
+like a title (`#undef REXGLUE_ENABLE_PERF_COUNTERS` before the include),
+constructs, draws and destroys the overlay three times in storage of its own
+`sizeof` followed by 1 KiB of canaries, and checks the canaries. The baseline
+fails all three checks. No upstream equivalent was identified.

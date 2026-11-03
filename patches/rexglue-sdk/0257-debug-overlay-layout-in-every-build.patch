@@ -1,0 +1,18 @@
+--- a/include/rex/ui/overlay/debug_overlay.h
++++ b/include/rex/ui/overlay/debug_overlay.h
+@@ -37,11 +37,13 @@
+ 
+  private:
+   FrameStatsProvider stats_provider_;
+-#ifdef REXGLUE_ENABLE_PERF_COUNTERS
++  // Declared in every build: titles compile rex_app.cpp, which allocates this
++  // dialog, without REXGLUE_ENABLE_PERF_COUNTERS, while the runtime constructs
++  // it with the SDK's flags. A layout that depends on the macro makes the
++  // constructor write past the title's allocation.
+   static constexpr size_t kFrameHistorySize = 120;
+   std::array<float, kFrameHistorySize> frame_time_history_{};
+   size_t frame_history_idx_ = 0;
+-#endif
+ };
+ 
+ }  // namespace rex::ui

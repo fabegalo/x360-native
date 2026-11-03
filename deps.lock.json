@@ -3606,6 +3606,17 @@
     "src/kernel/xam/xam_info.cpp": "ab465380499e226de517829eee24b894ea9187e3e3fab44fefa1c400025ee660"
   },
   "test": "sdkcheck.Sign-in initialization receives a virtual allocation for its original class (tests/sdkcheck/xam_allocation_test.cpp [signin-allocation]): XamAllocEx with the original signin.xex class 0x24400000 returns 0 and a zeroed guest allocation that can be written, sized and freed; the physical class 0x64400000 and a guest caller byte (0x244000F2) still return 80004001 and clear the output. The baseline returns 80004001, as the Guide's Sign In did on the 17559 dashboard ('XamAllocEx: unsupported flags 24400000' -> signin original initialize -> 80004001 -> queued request 00021001 -> 80004001)."
+},
+{
+  "file": "patches/rexglue-sdk/0257-debug-overlay-layout-in-every-build.patch",
+  "sha256": "cb5baabd4b7b51d1847233bebfd099e4f695fcca6de27207e51a039a924e7916",
+  "base_files": {
+    "include/rex/ui/overlay/debug_overlay.h": "cff6ace7211dc0a4454aaafa11e12bd313fa770cea04eab90c5780ee1f8e5d33"
+  },
+  "files": {
+    "include/rex/ui/overlay/debug_overlay.h": "29bd04782d05e552b6c1cbd9b03d961291cd2cb6972d2ba829deb7657b37c6cf"
+  },
+  "test": "sdkcheck.The debug overlay stays within the storage a title allocates for it (tests/sdkcheck/debug_overlay_layout_test.cpp [debug-overlay]): a translation unit compiled like a title's rex_app.cpp (without REXGLUE_ENABLE_PERF_COUNTERS) constructs, draws and destroys DebugOverlayDialog three times in storage of its own sizeof followed by 1 KiB of canaries; the canaries stay intact. The baseline's runtime constructor zeroes the frame history beyond that storage (3 failures), as F3 did to the 17559 dashboard: STATUS_HEAP_CORRUPTION detected in the next free inside the D3D12 driver or DXGI, on the first press or within 8 presses."
 }
 ]
 },

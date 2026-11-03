@@ -282,6 +282,7 @@ target_sources(x360n_sdk_runtime_checks PRIVATE sdkcheck/xctd_query_test.cpp)
 target_sources(x360n_sdk_runtime_checks PRIVATE sdkcheck/mic_array_idle_test.cpp)
 target_sources(x360n_sdk_runtime_checks PRIVATE sdkcheck/xex_heap_ownership_test.cpp)
 target_sources(x360n_sdk_runtime_checks PRIVATE sdkcheck/xam_allocation_test.cpp)
+target_sources(x360n_sdk_runtime_checks PRIVATE sdkcheck/debug_overlay_layout_test.cpp) # 0257
 if(WIN32)
   target_sources(x360n_sdk_runtime_checks PRIVATE sdkcheck/xex_key_test.cpp)
   target_link_libraries(x360n_sdk_runtime_checks PRIVATE bcrypt)
