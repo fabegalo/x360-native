@@ -2789,3 +2789,26 @@ expects its entry point to return with exit code 0. The baseline stays behind
 the message box until the probe's 60-second timeout. `src/ui/rex_app.cpp` is
 compiled into each executable: titles pick this up when rebuilt. No upstream
 equivalent was identified.
+
+### 0256 — XAM virtual allocation classes
+
+`XamAllocEx` (`src/kernel/xam/xam_info.cpp`) accepted only the classes 0,
+0x01000000, 0x08000000 and 0x20000000. The original 17559 `signin.xex`
+initializes with class 0x24400000, so the adapter returned 80004001, sign-in
+cleaned up its failed initialization, and the Guide's Sign In request 00021001
+failed with 80004001 on every installation. In the original `xam_ui.xex`
+816E67E8 checks only the physical bit 0x40000000; every other class takes the
+virtual path: 816E5F10 fills a zero caller byte with the caller's id,
+816E5E40 selects a pool (pool 6 for bit 0x00400000), and 816E5D58 zeroes the
+block when bit 0x00100000 is clear. The adapter now accepts every class
+without the physical bit and with a zero caller byte, still as owned guest
+virtual storage without pools or quotas. The physical classes and a caller
+byte chosen by the guest (816E5E40 treats 242 specially) remain unsupported
+with 80004001.
+
+`sdkcheck.Sign-in initialization receives a virtual allocation for its
+original class` (`tests/sdkcheck/xam_allocation_test.cpp`,
+`[signin-allocation]`) allocates with 0x24400000, checks the block is zeroed,
+writes, sizes and frees it, and checks that 0x64400000 and 0x244000F2 still
+return 80004001 with a cleared output. The baseline returns 80004001. No
+upstream equivalent was identified.

@@ -112,7 +112,7 @@
       "file": "patches/rexglue-sdk/0009-dashboard-datetime-abi.patch",
       "sha256": "a5a71909fbbada4061bf228c09557f276f762dfc203efe71c41d61e1ad637a81",
       "files": {
-        "src/kernel/xam/xam_info.cpp": "0d083763bcbc950113fe3d38fda0d6042855965f843caff156c9ed8417ad3ed6"
+        "src/kernel/xam/xam_info.cpp": "ab465380499e226de517829eee24b894ea9187e3e3fab44fefa1c400025ee660"
       },
       "base_files": {
         "src/kernel/xam/xam_info.cpp": "c847210dcec0d2a3ad07e459bd59a7b4acc38d8706187e597f398153a3d31981"
@@ -231,7 +231,7 @@
       "sha256": "eefb975605b2cbcf0337ddb716f0c53c2e327cf93a754394522ef2594600dc87",
       "files": {
         "include/rex/kernel/xam/module.h": "0f41fa8a703fb94f07ae510fe4ba42c35491c71e153048ee5036d8695825ff62",
-        "src/kernel/xam/xam_info.cpp": "0d083763bcbc950113fe3d38fda0d6042855965f843caff156c9ed8417ad3ed6"
+        "src/kernel/xam/xam_info.cpp": "ab465380499e226de517829eee24b894ea9187e3e3fab44fefa1c400025ee660"
       },
       "base_files": {
         "include/rex/kernel/xam/module.h": "37218241915e9a13a467b7e8de867dc6ae50300f486b4bbff31c24009ba3a208",
@@ -372,7 +372,7 @@
         "src/kernel/xam/xam_misc.cpp": "5db9a56430f343d1379088f58e3585c4d938ff616b795d9b710cfcef40d5d0fa"
       },
       "files": {
-        "src/kernel/xam/xam_info.cpp": "0d083763bcbc950113fe3d38fda0d6042855965f843caff156c9ed8417ad3ed6",
+        "src/kernel/xam/xam_info.cpp": "ab465380499e226de517829eee24b894ea9187e3e3fab44fefa1c400025ee660",
         "src/kernel/xam/xam_misc.cpp": "cdfb3b4582c6a86edfeb96ae0f39c5ee7341903da080af6ec6022074c4c91163"
       },
       "test": "tests/sdkcheck/profile_ui_request_test.cpp"
@@ -429,7 +429,7 @@
       },
       "files": {
         "src/kernel/xam/xam_misc.cpp": "cdfb3b4582c6a86edfeb96ae0f39c5ee7341903da080af6ec6022074c4c91163",
-        "src/kernel/xam/xam_info.cpp": "0d083763bcbc950113fe3d38fda0d6042855965f843caff156c9ed8417ad3ed6"
+        "src/kernel/xam/xam_info.cpp": "ab465380499e226de517829eee24b894ea9187e3e3fab44fefa1c400025ee660"
       },
       "test": "sdkcheck XMem virtual allocations return aligned writable memory, honor zero initialization, and release storage; physical classes fail explicitly"
     },
@@ -451,7 +451,7 @@
         "src/kernel/xam/xam_info.cpp": "ec043775700e6f2f910baa90a5bdd10200e5121ac0d7e85ffc37c748f8156b19"
       },
       "files": {
-        "src/kernel/xam/xam_info.cpp": "0d083763bcbc950113fe3d38fda0d6042855965f843caff156c9ed8417ad3ed6"
+        "src/kernel/xam/xam_info.cpp": "ab465380499e226de517829eee24b894ea9187e3e3fab44fefa1c400025ee660"
       },
       "test": "sdkcheck.HUD allocation uses the system pool and remains owned until XamFree"
     },
@@ -972,7 +972,7 @@
         "src/system/xthread.cpp": "065605de5137129ce2c0f9ff4ede028219e35d5ec1f3f2e2d38226ef94d6ac61"
       },
       "files": {
-        "src/kernel/xam/xam_info.cpp": "0d083763bcbc950113fe3d38fda0d6042855965f843caff156c9ed8417ad3ed6",
+        "src/kernel/xam/xam_info.cpp": "ab465380499e226de517829eee24b894ea9187e3e3fab44fefa1c400025ee660",
         "src/kernel/xam/xam_misc.cpp": "cdfb3b4582c6a86edfeb96ae0f39c5ee7341903da080af6ec6022074c4c91163",
         "include/rex/audio/audio_system.h": "71cc56c9cac14a44784e7f8b3beb11191d262d1dd451fa2f3d6ce5684d95960c",
         "include/rex/system/interfaces/audio.h": "ac584d917f4ab0d74d17138a95baf28ef2412656e8da4da36928f7eee54095a8",
@@ -1091,7 +1091,7 @@
       "file": "patches/rexglue-sdk/0081-console-language-abis.patch",
       "sha256": "2827e9904d6d11246f19755bc44fe8ca0c48ba1fcbcf81cc8e9a0493264d7487",
       "files": {
-        "src/kernel/xam/xam_info.cpp": "0d083763bcbc950113fe3d38fda0d6042855965f843caff156c9ed8417ad3ed6",
+        "src/kernel/xam/xam_info.cpp": "ab465380499e226de517829eee24b894ea9187e3e3fab44fefa1c400025ee660",
         "src/kernel/xam/xam_locale.cpp": "590b60dca7c96d1520ada135e92f72c69fc7e5e933ba25134c53530b7a6c8c6b",
         "src/kernel/xam/xam_misc.cpp": "cdfb3b4582c6a86edfeb96ae0f39c5ee7341903da080af6ec6022074c4c91163",
         "src/kernel/xboxkrnl/xboxkrnl_xconfig.cpp": "1a81a0e9350c28b890f8bc765c2c81005aaed03d243d4e31e8e7207a469a9d8f"
@@ -1317,7 +1317,7 @@
         "src/kernel/xam/xam_misc.cpp": "ae7571f0ab56f0c795f63fda8a69a0a56f5cdd39b99bb432ed139477eb16c473"
       },
       "files": {
-        "src/kernel/xam/xam_info.cpp": "0d083763bcbc950113fe3d38fda0d6042855965f843caff156c9ed8417ad3ed6",
+        "src/kernel/xam/xam_info.cpp": "ab465380499e226de517829eee24b894ea9187e3e3fab44fefa1c400025ee660",
         "src/kernel/xam/xam_misc.cpp": "cdfb3b4582c6a86edfeb96ae0f39c5ee7341903da080af6ec6022074c4c91163"
       },
       "test": "tests/sdkcheck/xam_allocation_test.cpp"
@@ -3105,7 +3105,7 @@
         "src/kernel/xam/xam_info.cpp": "a5515568aa827efb10f978c2fc6056ead1bd5f162f2c627e7aa8d8d23394eff0"
       },
       "files": {
-        "src/kernel/xam/xam_info.cpp": "0d083763bcbc950113fe3d38fda0d6042855965f843caff156c9ed8417ad3ed6"
+        "src/kernel/xam/xam_info.cpp": "ab465380499e226de517829eee24b894ea9187e3e3fab44fefa1c400025ee660"
       },
       "test": "sdkcheck [xam-allocation]: red 1/27 assertions fails (80004001) for the original image-cache virtual class 20000000. Original 17559 816E67E8 -> 816E5F10 -> 816E5E40 selects virtual pool 3; retain owned guest virtual allocations and real free/size. XamAlloc forwards tag zero as 816E67A0, including error propagation. Physical classes remain explicitly unsupported in shared HLE. Real Guide failure captured in 20261030T002006Z-dash-os-images."
     },
@@ -3202,7 +3202,7 @@
         "src/kernel/xam/xam_info.cpp": "bfa84da22de9a5e507994e1f7aad5ea3626a17aaf0e2a28eea3d2ff143749e0c"
       },
       "files": {
-        "src/kernel/xam/xam_info.cpp": "0d083763bcbc950113fe3d38fda0d6042855965f843caff156c9ed8417ad3ed6"
+        "src/kernel/xam/xam_info.cpp": "ab465380499e226de517829eee24b894ea9187e3e3fab44fefa1c400025ee660"
       },
       "test": "tests/sdkcheck/xam_allocation_test.cpp [storage-message-allocation] and storage_device_test.cpp [storage-change]: allocate/write/size/free the original 528-byte queue message; preserve canaries and unsupported physical/unknown flags; callbacks now exercise the original allocation class."
     },
@@ -3595,6 +3595,17 @@
     "src/ui/rex_app.cpp": "c27725d25261269920a389afca30162c2eca79ba20796285fa8613e9eeecc506"
   },
   "test": "sdkcheck.ReXApp starts a guest whose game root is beyond MAX_PATH (tests/sdkcheck/app_shutdown_test.cpp): the shutdown probe, a real ReXApp, runs a synthetic XEX from a game root beyond 300 characters and its entry point returns with exit code 0. The baseline stops at '--game_data_root does not exist' behind a modal message box and the probe times out, as the 17559 dashboard did when launched from an installation 363 bytes deep."
+},
+{
+  "file": "patches/rexglue-sdk/0256-xam-virtual-allocation-classes.patch",
+  "sha256": "f566f1734a5cbc473f446e7f201fd797bb33b309cc45e65c644932e47b6747eb",
+  "base_files": {
+    "src/kernel/xam/xam_info.cpp": "0d083763bcbc950113fe3d38fda0d6042855965f843caff156c9ed8417ad3ed6"
+  },
+  "files": {
+    "src/kernel/xam/xam_info.cpp": "ab465380499e226de517829eee24b894ea9187e3e3fab44fefa1c400025ee660"
+  },
+  "test": "sdkcheck.Sign-in initialization receives a virtual allocation for its original class (tests/sdkcheck/xam_allocation_test.cpp [signin-allocation]): XamAllocEx with the original signin.xex class 0x24400000 returns 0 and a zeroed guest allocation that can be written, sized and freed; the physical class 0x64400000 and a guest caller byte (0x244000F2) still return 80004001 and clear the output. The baseline returns 80004001, as the Guide's Sign In did on the 17559 dashboard ('XamAllocEx: unsupported flags 24400000' -> signin original initialize -> 80004001 -> queued request 00021001 -> 80004001)."
 }
 ]
 },

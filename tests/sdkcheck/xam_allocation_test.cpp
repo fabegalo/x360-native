@@ -119,3 +119,44 @@ TEST_CASE("Content cache messages receive real process virtual allocations", "[s
   }
   memory->SystemHeapFree(output);
 }
+
+
+TEST_CASE("Sign-in initialization receives a virtual allocation for its original class",
+          "[sdk][xam-allocation][signin-allocation]") {
+  x360n::test::Workdir work("x360n_xam_alloc", "signin");
+  rex::Runtime rt(work.dir);
+  rex::RuntimeConfig config{};
+  config.tool_mode = true; config.kernel_init = rex::kernel::InitializeKernel;
+  REQUIRE(rt.Setup(std::move(config)) == X_STATUS_SUCCESS);
+  auto* memory = rt.memory(); auto* base = memory->virtual_membase();
+  const auto output = memory->SystemHeapAlloc(4);
+  REQUIRE(output);
+  PPCContext ctx{};
+  // The original 17559 signin.xex initializer requests class 0x24400000. It has
+  // no physical bit, so 816E67E8 takes the virtual path (816E5F10 -> 816E63D8);
+  // 816E5E40 selects pool 6 from bit 0x00400000, and 816E5D58 zeroes it,
+  // since 0x00100000 is clear. Without it the Guide's Sign In got 80004001.
+  for (const auto size : {64u, 4097u}) {
+    rex::memory::store_and_swap<uint32_t>(base + output, 0xFFFFFFFF);
+    ctx.r3.u64 = 0; ctx.r4.u64 = 0x24400000; ctx.r5.u64 = size; ctx.r6.u64 = output;
+    __imp__XamAllocEx(ctx, base);
+    REQUIRE(ctx.r3.u32 == 0);
+    const auto pointer = rex::memory::load_and_swap<uint32_t>(base + output);
+    REQUIRE(pointer);
+    CHECK(base[pointer] == 0); CHECK(base[pointer + size - 1] == 0);
+    std::memset(base + pointer, 0x5A, size);
+    CHECK(base[pointer + size - 1] == 0x5A);
+    ctx.r3.u64 = pointer; __imp__XamAllocSize(ctx, base); CHECK(ctx.r3.u32 >= size);
+    ctx.r3.u64 = pointer; __imp__XamFree(ctx, base); CHECK(ctx.r3.u32 == 0);
+    ctx.r3.u64 = pointer; __imp__XamAllocSize(ctx, base); CHECK(ctx.r3.u32 == 0);
+  }
+  // The physical path and a caller byte chosen by the guest stay unsupported.
+  for (const auto flags : {0x64400000u, 0x244000F2u}) {
+    rex::memory::store_and_swap<uint32_t>(base + output, 0xFFFFFFFF);
+    ctx.r3.u64 = 0; ctx.r4.u64 = flags; ctx.r5.u64 = 64; ctx.r6.u64 = output;
+    __imp__XamAllocEx(ctx, base);
+    CHECK(ctx.r3.u32 == 0x80004001);
+    CHECK(rex::memory::load_and_swap<uint32_t>(base + output) == 0);
+  }
+  memory->SystemHeapFree(output);
+}

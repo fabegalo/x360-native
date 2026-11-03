@@ -1,0 +1,17 @@
+--- a/src/kernel/xam/xam_info.cpp
++++ b/src/kernel/xam/xam_info.cpp
+@@ -352,8 +352,12 @@
+   // The original content cache (92263398) allocates its 528-byte queue
+   // message with 0x08000000. 816E67E8 sends this through the virtual path
+   // (816E5F10), just like the supported classes, never the physical path.
+-  // Physical/special classes such as 0x40000000 remain unsupported here.
+-  if (flags != 0 && flags != 0x01000000u && flags != 0x08000000u && flags != 0x20000000u) {
++  // Sign-in (signin.xex) initializes with 0x24400000. 816E67E8 checks only
++  // the physical bit 0x40000000; every other class goes the virtual way, and
++  // 816E5F10 fills a zero caller byte with the caller's id. Pools and quotas
++  // are not modeled, so a caller byte chosen by the guest (816E5E40 treats
++  // 242 specially) and the physical classes remain unsupported here.
++  if ((flags & 0x40000000u) || (flags & 0xFFu)) {
+     REXKRNL_WARN("XamAllocEx: unsupported flags {:08X}, tag {:08X}", uint32_t(flags), uint32_t(tag));
+     return 0x80004001u;
+   }
