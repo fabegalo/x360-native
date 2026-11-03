@@ -597,9 +597,12 @@ TEST_CASE("preparation keeps the tools and the SDK of deep installations in shor
 // DependencyFolderDepth() covers CMake's own modules, which CMake names by its
 // real folder and Ninja stats as build dependencies.
 TEST_CASE("the dependency folder depth covers this checkout's CMake modules", "[paths]") {
-  const auto tools = x360n::CanonicalPath(x360n::PathFromUtf8(X360N_SOURCE_ROOT) / ".local" / "toolchains");
-  size_t deepest = 0;
+  const auto pinned = x360n::PathFromUtf8(X360N_SOURCE_ROOT) / ".local" / "toolchains";
   std::error_code ec;
+  // A distribution's source tree has no toolchains of its own.
+  if (!io::is_directory(pinned, ec)) SKIP("no pinned CMake in this checkout");
+  const auto tools = x360n::CanonicalPath(pinned);
+  size_t deepest = 0;
   for (const auto& tool : io::directory_iterator(tools, ec)) {
     if (!tool.is_directory() || !tool.path().filename().native().starts_with(L"cmake-")) continue;
     for (const auto& entry : io::recursive_directory_iterator(tool.path() / "share"))
