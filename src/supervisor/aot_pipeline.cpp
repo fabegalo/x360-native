@@ -880,9 +880,7 @@ void Driver::Init() {
   if (io::is_regular_file(project / "preparation.toml")) {
     const auto registration =
         ParseTomlFile(project / "preparation.toml");
-    const auto game =
-        project /
-        PathFromUtf8(profile["project"]["game_root"].value_or(std::string{}));
+    const auto game = RegisteredContentRoot(manifest);
     if (const auto* files = registration["files"].as_array())
       for (const auto& item : *files) {
         if (!item.is_table())
@@ -1443,6 +1441,12 @@ int GuardNinja(const fs::path& configuration,
     }
   }
   return int(result.exit_code);
+}
+fs::path RegisteredContentRoot(const fs::path& manifest) {
+  const auto profile = ParseTomlFile(manifest);
+  return manifest.parent_path() /
+         PathFromUtf8(profile["x360n"]["game_data_root"].value_or(
+             profile["project"]["game_root"].value_or(std::string{})));
 }
 std::string ExpandPresetValue(std::string text, const fs::path& project) {
   const bool directory = text.starts_with("${sourceDir}") || text.starts_with("${sourceParentDir}");

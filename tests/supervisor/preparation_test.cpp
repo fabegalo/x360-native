@@ -263,6 +263,21 @@ TEST_CASE("a same-time replacement keeps the hint but fails the receipt check", 
   CHECK(hints.Check("sample",f.manifest,f.exe)==ReceiptHint::Current);
   CHECK(f.Check());
 }
+// Motocross Madness builds from a codegen root (.local/inputs) wider than its
+// content; its registered default.xex was looked up in the codegen root.
+TEST_CASE("registered originals resolve against the title's content root", "[preparation]") {
+  const auto root = UniqueTempPath("content-root");
+  const auto manifest = root / "titles/sample/sample_manifest.toml";
+  fs::create_directories(manifest.parent_path());
+  std::ofstream(manifest) << "[project]\ngame_root='../../.local/inputs'\n"
+                             "[x360n]\ngame_data_root='../../.local/inputs/games/sample/content'\n";
+  CHECK(RegisteredContentRoot(manifest).lexically_normal() ==
+        (root / ".local/inputs/games/sample/content").lexically_normal());
+  std::ofstream(manifest) << "[project]\ngame_root='../../.local/inputs/games/sample'\n";
+  CHECK(RegisteredContentRoot(manifest).lexically_normal() ==
+        (root / ".local/inputs/games/sample").lexically_normal());
+  std::error_code ec; fs::remove_all(root, ec);
+}
 // A title's preset names the shared tools from its own folder; spelled as
 // written, each title gave the shared SDK its own identity and rebuilt it.
 TEST_CASE("title presets name a shared tool alike from every title folder", "[preparation][shared-sdk]") {

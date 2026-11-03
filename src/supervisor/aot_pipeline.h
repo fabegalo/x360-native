@@ -27,6 +27,10 @@ AotResult PrepareAot(AotOptions options);
 int GuardNinja(const std::filesystem::path& configuration,
                const std::vector<std::string>& arguments,
                std::function<bool()> cancelled = {});
+// The folder that preparation.toml [[files]] paths are relative to, as in the
+// catalog: [x360n] game_data_root, else [project] game_root (a title whose
+// codegen root is wider than its content names both).
+std::filesystem::path RegisteredContentRoot(const std::filesystem::path& manifest);
 // A title preset's cache value with ${sourceDir} and ${sourceParentDir} of
 // `project` expanded. A value that starts with one of them and is a single
 // path is normalized, so every title names a shared tool alike. Other macros
