@@ -240,6 +240,9 @@ ReceiptHint ReceiptHints::Check(const std::string& title, const fs::path& manife
 #endif
     return s;
   };
+  // The identity is resolved, as in CheckPreparation: a preparation from a
+  // deep installation records it through the installation's junction.
+  const auto identity = [&](const fs::path& path) { return key(io::weakly_canonical(path)); };
   try {
     std::error_code ec;
     const auto receipt_file = PreparationReceipt(exe);
@@ -248,8 +251,8 @@ ReceiptHint ReceiptHints::Check(const std::string& title, const fs::path& manife
     io::ifstream input(receipt_file, std::ios::binary);
     const auto receipt = nlohmann::json::parse(input);
     if (receipt.at("schema") != 1 || receipt.at("title") != title ||
-        key(PathFromUtf8(receipt.at("manifest").get<std::string>())) != key(manifest) ||
-        key(PathFromUtf8(receipt.at("exe").get<std::string>())) != key(exe)) return ReceiptHint::Stale;
+        identity(PathFromUtf8(receipt.at("manifest").get<std::string>())) != identity(manifest) ||
+        identity(PathFromUtf8(receipt.at("exe").get<std::string>())) != identity(exe)) return ReceiptHint::Stale;
     if (!head_) head_ = ReadHead(paths_.sdk());
     if (receipt.at("sdk_commit").get<std::string>() != *head_) return ReceiptHint::Stale;
     for (auto group : {"inputs", "artifacts"}) {

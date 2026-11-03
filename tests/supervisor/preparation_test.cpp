@@ -234,6 +234,26 @@ TEST_CASE("listing hints follow receipt file times and never replace the byte ch
   ReceiptHints hints{f.paths};
   CHECK(hints.Check("sample",f.manifest,f.exe)!=ReceiptHint::Current);
 }
+#ifdef _WIN32
+// A deep installation prepares through its junction (%LOCALAPPDATA%\x360n\r),
+// so the receipt names the manifest by that spelling and the listing by the
+// installation's own; spelled as written, every such title read as stale.
+TEST_CASE("listing hints accept a receipt written through the installation junction", "[preparation]") {
+  Fixture f;
+  const auto alias = f.root.parent_path() / "alias";
+  wchar_t system[MAX_PATH]{}; GetSystemDirectoryW(system, MAX_PATH);
+  ProcessSpec spec{fs::path(system) / "cmd.exe", {"/c", "mklink", "/J", PathUtf8(alias), PathUtf8(f.root)},
+      f.root.parent_path(), f.root.parent_path() / "out", f.root.parent_path() / "err", std::chrono::seconds(3)};
+  spec.no_console = true; REQUIRE(RunProcess(spec).exit_code == 0);
+  WriteTestReceipt(f.paths, "sample", alias / f.manifest.lexically_relative(f.root), f.exe, f.inputs);
+  {
+    ReceiptHints hints{f.paths};
+    CHECK(hints.Check("sample", f.manifest, f.exe) == ReceiptHint::Current);
+  }
+  CHECK_FALSE(f.Check());
+  std::error_code ec; fs::remove(alias, ec);
+}
+#endif
 TEST_CASE("a same-time replacement keeps the hint but fails the receipt check", "[preparation]") {
   Fixture f;
   const auto time = fs::last_write_time(f.inputs[0]);
