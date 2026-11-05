@@ -28,6 +28,14 @@ P1/P2/P3 preservados.
 
 ## Renderizadores — PERF-GPU-01 (31/10)
 
+Análise documental em 04/11: o Native do skate3recomp é um renderer específico
+da engine, enquanto o nosso preserva a execução genérica de comandos Xenos.
+Foram mapeadas oportunidades em perfil GPU por operação, reutilização de
+texturas Vulkan, evicção de caches, subalocação e conversão de texturas, com
+pontos de encaixe e contratos de validação. Workers de PSO, arenas e replay já
+existentes são preservados. Sem implementação ou novo ganho medido.
+[Estudo e prioridades](reports/graphics/skate3recomp-native-review-2026-11-04.md).
+
 Pedidos residentes Xenos evitam o lock global; Native/D3D12 conserva readbacks
 até a fence e espera somente onde seus bytes são observáveis. Corrigidos
 aliases de escrita física Native e saturação inteira MEMEXPORT Vulkan.

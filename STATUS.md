@@ -1,5 +1,13 @@
 # STATUS
 
+04/11 — **Estudo do Native do skate3recomp**: comparação com revisões fixadas
+do projeto e de seu fork ReXGlue. Documentados encaixes genéricos em perfil
+GPU, reutilização de texturas Vulkan, evicção, subalocação e conversão de
+texturas; separados os mecanismos já existentes e os hooks/heurísticas de
+engine que não cabem no Native compartilhado. Somente documentação, sem
+implementação, execução de jogos ou novo aceite de performance.
+[Análise e condições de validação](docs/reports/graphics/skate3recomp-native-review-2026-11-04.md).
+
 03/11 — **Importação de discos com arquivos acima de 2 GiB (1.28.32)**: os
 limites de extração da System Update (28/10) recusavam qualquer arquivo acima
 de 2 GiB, e o disco 1 do Forza Horizon parava em "container extraction limit
