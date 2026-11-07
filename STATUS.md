@@ -1,5 +1,14 @@
 # STATUS
 
+07/11 — **Quadrado preto do Kinect na Home 17559 corrigido**: a consulta
+`XamNuiIsDeviceReady` preservava r3 e tratava um ponteiro de cena como sensor
+pronto. Patch 0258 retorna falso enquanto não há backend de sensor, coerente
+com o status desconectado existente. Controle negativo com três falhas;
+dois testes focados Release e preparação oficial passaram. Home na
+RTX 4070/Xenos/D3D12 observada sem o quadrado e sem aviso novo, em janela
+separada. Kinect real, outros backends/hosts e jogos não testados nesta etapa.
+[Evidência e limites](docs/dashboard.md#033-kinect-ausente-e-preview-indevido-2026-11-07).
+
 04/11 — **Estudo do Native do skate3recomp**: comparação com revisões fixadas
 do projeto e de seu fork ReXGlue. Documentados encaixes genéricos em perfil
 GPU, reutilização de texturas Vulkan, evicção, subalocação e conversão de

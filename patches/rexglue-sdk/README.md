@@ -2835,3 +2835,18 @@ like a title (`#undef REXGLUE_ENABLE_PERF_COUNTERS` before the include),
 constructs, draws and destroys the overlay three times in storage of its own
 `sizeof` followed by 1 KiB of canaries, and checks the canaries. The baseline
 fails all three checks. No upstream equivalent was identified.
+
+### 0258 — absent Kinect readiness
+
+`XamNuiIsDeviceReady` was an uninitialized-return stub. The original 17559
+dashboard calls this parameterless Boolean query with a scene pointer still in
+r3 (for example, `9278AF44`) and takes its Kinect preview path for a nonzero
+result. This conflicts with `XamNuiGetDeviceStatus`, which already reports a
+disconnected sensor. Return false explicitly while no sensor backend is
+connected, without changing original dashboard resources or hiding guest draws.
+This does not implement Kinect hardware support or add a replacement UI.
+
+`sdkcheck.An absent Kinect is never reported ready from the caller register`
+(`tests/sdkcheck/local_profile_test.cpp`, `[nui-contract]`) checks zero, one,
+a guest scene pointer and all-set incoming r3, plus guest-memory sentinels.
+No upstream equivalent was identified.

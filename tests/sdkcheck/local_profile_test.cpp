@@ -54,6 +54,7 @@ extern "C" void __imp__GetSystemTimeAsFileTime(PPCContext&, uint8_t*);
 extern "C" void __imp__ExGetXConfigSetting(PPCContext&, uint8_t*);
 extern "C" void __imp__ExReadModifyWriteXConfigSettingUlong(PPCContext&, uint8_t*);
 extern "C" void __imp__XamNuiGetDeviceStatus(PPCContext&, uint8_t*);
+extern "C" void __imp__XamNuiIsDeviceReady(PPCContext&, uint8_t*);
 extern "C" void __imp__XCustomGetBannerImage(PPCContext&, uint8_t*);
 extern "C" void __imp__XamInputGetDeviceStats(PPCContext&, uint8_t*);
 
@@ -97,6 +98,21 @@ TEST_CASE("Guide device status preserves the caller stack after its 16-byte outp
   __imp__XamNuiGetDeviceStatus(ctx, bytes.data());
   for (unsigned i = 0; i < bytes.size(); ++i)
     CHECK(bytes[i] == (i >= 16 && i < 32 ? 0 : 0xA5));
+}
+
+TEST_CASE("An absent Kinect is never reported ready from the caller register",
+          "[sdk][nui-contract]") {
+  std::array<uint8_t, 48> bytes;
+  bytes.fill(0xA5);
+  PPCContext ctx{};
+  // The dashboard calls this parameterless query with r3 still holding its
+  // scene pointer. A stub leaks that pointer into the original ready branch.
+  for (uint64_t previous : {0ull, 1ull, 0x92A00000ull, 0xFFFFFFFFFFFFFFFFull}) {
+    ctx.r3.u64 = previous;
+    __imp__XamNuiIsDeviceReady(ctx, bytes.data());
+    CHECK(ctx.r3.u64 == 0);
+    for (auto byte : bytes) CHECK(byte == 0xA5);
+  }
 }
 
 TEST_CASE("Local profile passcode comparison returns matching bytes in guest order",

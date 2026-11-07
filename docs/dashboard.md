@@ -2056,3 +2056,42 @@ Os diretórios sob `.local/evidence/runs/` contêm PNGs, log guest, teclas, snap
 hashes dos binários. Não houve escrita direta no backend para produzir esses
 perfis. Os limites de C7.7 permanecem: offline, um usuário ativo no slot 0,
 sem aprovação de saves, Xbox Live, Guide completo ou usuários simultâneos.
+
+### 0.33 Kinect ausente e preview indevido (2026-11-07)
+
+O quadrado preto no canto inferior direito da Home foi reproduzido na Retail
+17559 em Release, Xenos/D3D12, por Computer Use, em janela separada do
+supervisor (`20261107T091550Z-session-0-dash_17559`). A tentativa anterior
+de capturar a janela incorporada ficou preta e não serve de evidência visual.
+
+`XamNuiGetDeviceStatus` já informava sensor desconectado, mas a consulta
+booleana sem argumentos `XamNuiIsDeviceReady` era stub e preservava r3. A
+dashboard original chama a consulta com um ponteiro de cena ainda nesse
+registrador; em `9278AF44`, o resultado não nulo libera o caminho do preview.
+O patch 0258 retorna falso explicitamente enquanto não há backend de sensor,
+sem alterar recursos originais, descartar draws ou acrescentar interface do host.
+Conectar e operar um Kinect real no PC permanece trabalho futuro.
+
+O controle negativo `[nui-contract]` falhou em três retornos não nulos
+(1, ponteiro guest e todos os bits ativos; 193/196 asserções passaram).
+Após aplicar o patch pelo aplicador oficial, o build Release de
+`x360n_sdk_runtime_checks` e os dois testes CTest focados de prontidão e
+buffer de status passaram. Os verificadores PowerShell e Python da cadeia
+de patches também passaram. Registros locais: `.local/tmp/kinect-before.log`,
+`kinect-build-after.log`, `kinect-ctest-after.log`, `kinect-patches-check.log`
+e `kinect-posix-patches-check.log`.
+
+Preparação oficial completa da 17559 com SDK/módulos/runtime correspondentes:
+exit 0 (`.local/tmp/kinect-dashboard-prepare.log`). O primeiro preparo no sandbox
+recusou o caminho longo do cache; o preparo no ambiente normal usou o cache
+curto gerenciado. O primeiro build dos testes deixou seu wrapper preso após o
+link; o wrapper da tarefa foi encerrado e o build foi repetido com saída em
+arquivo, terminando com exit 0.
+
+Na sessão posterior `20261107T093835Z-session-0-dash_17559`, Home observada por
+Computer Use **sem o quadrado preto e sem aviso novo de Kinect**, na mesma
+RTX 4070/Xenos/D3D12 e janela separada do baseline. Fechamento normal após
+23,946 s, exit 0. Os logs ainda contêm outros stubs, mensagens XLIVEBASE não
+implementadas e falhas de resolução de DASHUSER; não é um log limpo nem aceite
+de todos os serviços. Sem nova validação de jogos, áudio, Native/Vulkan, outras
+dashboards, outros hosts ou Kinect real; sem nova execução de CI.

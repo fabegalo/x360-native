@@ -839,7 +839,7 @@
         "src/kernel/xam/xam_nui.cpp": "1a3dfbb490b9e569b5e1591d66465df590a19f46312f5792463c46cacb2f2ef6"
       },
       "files": {
-        "src/kernel/xam/xam_nui.cpp": "8c5c15f4a5a9075c5ebf7e601f243f7d73145f56211b7606f9d1adef87c97f74"
+        "src/kernel/xam/xam_nui.cpp": "37c00b2761d8f997ac465d43154b37f4830c57b2945c3dd932d59b314a1eb4cc"
       },
       "test": "sdkcheck.Guide device status preserves the caller stack after its 16-byte output"
     },
@@ -3617,6 +3617,17 @@
     "include/rex/ui/overlay/debug_overlay.h": "29bd04782d05e552b6c1cbd9b03d961291cd2cb6972d2ba829deb7657b37c6cf"
   },
   "test": "sdkcheck.The debug overlay stays within the storage a title allocates for it (tests/sdkcheck/debug_overlay_layout_test.cpp [debug-overlay]): a translation unit compiled like a title's rex_app.cpp (without REXGLUE_ENABLE_PERF_COUNTERS) constructs, draws and destroys DebugOverlayDialog three times in storage of its own sizeof followed by 1 KiB of canaries; the canaries stay intact. The baseline's runtime constructor zeroes the frame history beyond that storage (3 failures), as F3 did to the 17559 dashboard: STATUS_HEAP_CORRUPTION detected in the next free inside the D3D12 driver or DXGI, on the first press or within 8 presses."
+},
+{
+  "file": "patches/rexglue-sdk/0258-nui-absent-device-readiness.patch",
+  "sha256": "8c915ee983ea0374d2b01bcd4cc8de1360a8a4be4dc7747a588cf4af6cc65ff2",
+  "base_files": {
+    "src/kernel/xam/xam_nui.cpp": "8c5c15f4a5a9075c5ebf7e601f243f7d73145f56211b7606f9d1adef87c97f74"
+  },
+  "files": {
+    "src/kernel/xam/xam_nui.cpp": "37c00b2761d8f997ac465d43154b37f4830c57b2945c3dd932d59b314a1eb4cc"
+  },
+  "test": "sdkcheck.An absent Kinect is never reported ready from the caller register (tests/sdkcheck/local_profile_test.cpp [nui-contract]): the parameterless query must return false for zero, one, a guest scene pointer and all-set incoming r3, without writing guest memory. Baseline leaks the three nonzero values. The original 17559 dashboard uses the Boolean at 9278AF44 to gate the Kinect preview; its existing device-status query already reports disconnected. No sensor backend is implemented."
 }
 ]
 },
