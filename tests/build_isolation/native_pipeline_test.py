@@ -103,6 +103,8 @@ run([args.git, "-C", sdk, "add", "."])
 run([args.git, "-C", sdk, "-c", "user.name=Fixture", "-c", "user.email=fixture@x360-native.invalid", "commit", "-qm", "test(fixture): snapshot generic producer"])
 head = run([args.git, "-C", sdk, "rev-parse", "HEAD"]).strip()
 write(root / "deps.lock.json", json.dumps({"rexglue_sdk":{"commit":head,"patches":[]}, "llvm":{"version":"22.1.8"}}))
+process_source = root / "src/platform/child_process.cpp"
+write(process_source, "// process adapter identity\n")
 for name in ("x360n_verify_sdk_patches.cmake", "x360n_sdk_backports.cmake"):
     target = root / "cmake/sdk" / name
     target.parent.mkdir(parents=True, exist_ok=True)
@@ -167,18 +169,19 @@ print("fixture:", root, flush=True)
 # must clear it while still respecting an explicitly supplied --define.
 write(build / "CMakeCache.txt", "X360N_NATIVE_RENDERER:BOOL=OFF\n")
 run(command, log="first")
+native_build = Path(json.loads(receipt.read_text())["roles"]["build_config"]).parent
 if os.name == "nt":
     native = build / "rexgpu-native.dll"
     assert native.is_file(), "default preparation omitted Native from the executable directory"
     artifacts = json.loads(receipt.read_text(encoding="utf-8"))["artifacts"]
     assert any(Path(item["path"]).resolve() == native.resolve() and item["sha256"] == digest(native) for item in artifacts)
     run(command + ["--define", "X360N_NATIVE_RENDERER=OFF"], log="explicit-native-off")
-    assert "X360N_NATIVE_RENDERER:BOOL=OFF" in (build / "CMakeCache.txt").read_text()
+    assert "X360N_NATIVE_RENDERER:BOOL=OFF" in (native_build / "CMakeCache.txt").read_text()
     native.unlink()
     run(command, log="restore-native-default")
     assert native.is_file(), "default preparation retained the previous OFF cache"
 else:
-    assert "X360N_NATIVE_RENDERER:BOOL=OFF" in (build / "CMakeCache.txt").read_text()
+    assert "X360N_NATIVE_RENDERER:BOOL=OFF" in (native_build / "CMakeCache.txt").read_text()
 if args.native_staging_only:
     print("PASS: Native staging, authenticated receipt, cached OFF recovery and explicit override", flush=True)
     raise SystemExit(0)
@@ -201,9 +204,18 @@ old_receipt, old_exe = digest(receipt), digest(exe)
 stamp = exe.stat().st_mtime_ns
 assert "reused verified preparation" in run(command, log="reuse")
 assert digest(receipt) == old_receipt and digest(exe) == old_exe and exe.stat().st_mtime_ns == stamp
-run([args.cmake, "--build", build, "--target", "fixture"], log="guarded-noop")
+run([args.cmake, "--build", native_build, "--target", "fixture"], log="guarded-noop")
+# A relocated build has no adjacent public receipt; prepare must recertify it.
+assert (root / ".local/preparation/fixture.incomplete").exists() == (native_build != build)
+after_guard = run(command, log="reuse-after-guard")
 assert not (root / ".local/preparation/fixture.incomplete").exists()
-assert "reused verified preparation" in run(command, log="reuse-after-guard")
+assert ("reused-shared-sdk" if native_build != build else "reused verified preparation") in after_guard
+process_times = process_source.stat()
+write(process_source, "// changed process adapter identity\n")
+os.utime(process_source, ns=(process_times.st_atime_ns, process_times.st_mtime_ns))
+assert "reused-shared-sdk" not in run(command, log="process-adapter-change")
+assert "reused verified preparation" in run(command, log="reuse-after-process-adapter")
+old_exe, stamp = digest(exe), exe.stat().st_mtime_ns
 replacement_driver=root / ".local/tools" / ("x360n-updated" + suffix)
 replacement_driver.parent.mkdir(parents=True, exist_ok=True)
 shutil.copy2(args.supervisor, replacement_driver)
@@ -224,7 +236,7 @@ write(payload, "int fixture_value() { return 8; }\n")
 os.utime(payload, ns=(old.st_atime_ns, old.st_mtime_ns))
 run(command, log="content-change")
 run([exe], expected=8)
-obj = next(build.rglob("main.cpp.obj" if os.name == "nt" else "main.cpp.o"))
+obj = next(native_build.rglob("main.cpp.obj" if os.name == "nt" else "main.cpp.o"))
 old = obj.stat()
 with obj.open("r+b") as stream:
     stream.write(b"BAD!")
@@ -249,4 +261,4 @@ assert (root / ".local/preparation/fixture.incomplete").exists()
 write(gpu, original_gpu)
 run(command, log="abi-recovery")
 assert not (root / ".local/preparation/fixture.incomplete").exists()
-print("PASS: first build, verified launch/no-op, host-only/codegen reuse, preserved-mtime change, object tamper, timeout/recovery, ABI rejection/recovery", flush=True)
+print("PASS: first build, verified launch/no-op, process-adapter invalidation, host-only/codegen reuse, preserved-mtime change, object tamper, timeout/recovery, ABI rejection/recovery", flush=True)

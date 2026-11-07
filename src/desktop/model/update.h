@@ -1,12 +1,28 @@
 #pragma once
-// Application self-update from the project's GitHub Releases. Platform-neutral:
+// Launcher installation and self-update from the project's GitHub Releases. Platform-neutral:
 // downloading and extraction run as separate processes chosen by the frontend.
 #include <filesystem>
 #include <optional>
 #include <string>
 #include <functional>
+#include <vector>
 
 namespace x360n::desktop {
+struct PayloadStatus {
+  bool current = false, interrupted = false;
+  std::vector<std::string> components;
+};
+PayloadStatus InspectEnvironment(const std::filesystem::path& payload,
+                                const std::filesystem::path& destination);
+// Name of a packaged program on this system: x360-native(.exe), app/x360n(.exe), ...
+std::string PackageExecutable(const std::string& name);
+void VerifyPackage(const std::filesystem::path& directory, const std::string& expected_payload = {});
+// Replacement requires explicit consent; originals remain in local backups.
+void InitializeEnvironment(const std::filesystem::path& payload,
+                           const std::filesystem::path& destination,
+                           bool allow_update = false,
+                           const std::function<void()>& checkpoint = {});
+
 inline constexpr const char* kReleasesApi = "https://api.github.com/repos/fabegalo/x360-native/releases?per_page=30";
 // Negative, zero or positive by Semantic Versioning precedence; nullopt if either is invalid.
 std::optional<int> CompareVersions(const std::string& left, const std::string& right);

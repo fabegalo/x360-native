@@ -64,8 +64,9 @@ x360/
 ├── external/rexglue-sdk/   submódulo ReXGlue fixado + patches reproduzíveis
 ├── scripts/                bootstrap (LLVM, submódulos, symlinks), devshell
 ├── src/supervisor/         x360n: doctor, identify, run, session
-├── src/content/            inspeção e extração de conteúdo
-├── src/desktop/            model/, win32/, resources/
+├── src/content/            catálogo, identidade, projetos AOT, inspeção e extração
+├── src/desktop/            app/, model/ (instalação/updates), ui/, resources/
+├── src/platform/           processos compartilhados e adaptador POSIX
 ├── src/native/             commands/, d3d12/, memory/, pipeline/, textures/, shaders/
 ├── cmake/                  sdk/, build/, runtime/, distribution/
 ├── tests/                  testes do projeto (ver README)
@@ -78,6 +79,24 @@ x360/
 [reorganização](reorganization.md). [Conteúdo local](guides/content-layout.md)
 descreve dashboards por versão, discos e DLCs. Esses agrupamentos físicos não
 alteram as fronteiras funcionais D1–D7.
+
+**Realinhamento validado pelo mantenedor em 07/11/2026:** o catálogo e a geração
+de projetos saem de `desktop/model` para `content` (`x360n_catalog`), sem ligar o
+runtime. O launcher conserva instalação/atualização; suas declarações ficam em
+`desktop/model/update.h`, fora do contrato de conteúdo. O pipeline AOT e os
+recibos continuam no supervisor. O adaptador compartilhado de processos e seu
+contrato passam de `supervisor` para `platform`, com atualização do fingerprint
+de preparação. As APIs existentes, inclusive o namespace `x360n::desktop` do
+catálogo, permanecem para evitar uma migração nominal sem efeito funcional.
+
+O supervisor ainda consome o modelo de atualização para recuperação de pacotes;
+o preflight de sessão permanece em `supervisor`, compilado no modelo compartilhado
+do launcher. Isso não transfere kernel/XAM ao frontend. A ligação do serviço de
+avatares 17559 em `titles/common/avatar` continua acoplada ao runtime e requer
+decisão própria antes de migrar. Xenos e Native seguem a mesma ABI de plugin,
+`KernelState`/memória e handoff de sessão, sem trocar HLE, AOT ou o modelo de
+processos. Stubs HLE, suporte incompleto da Guide/avatares e validação de títulos
+e plataformas continuam lacunas; a reorganização não comprova boot ou gameplay.
 
 ### 2.1 ReXGlue (dependência)
 

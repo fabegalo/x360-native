@@ -11,7 +11,7 @@
 #include <string>
 #include <thread>
 #include <vector>
-#include "../model/catalog.h"
+#include "catalog.h"
 #include "console_settings.h"
 #include "environment.h"
 #include "renderer_settings.h"

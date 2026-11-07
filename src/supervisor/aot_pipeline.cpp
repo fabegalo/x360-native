@@ -859,9 +859,10 @@ void Driver::Init() {
         begin = end + 1;
       }
     }
-  for (const auto* name : {"aot_pipeline.cpp", "aot_pipeline.h",
-                           "host_platform.cpp", "child_process.cpp"}) {
-    const auto file = options.paths.root / "src/supervisor" / name;
+  for (const auto* name : {"src/supervisor/aot_pipeline.cpp", "src/supervisor/aot_pipeline.h",
+                           "src/supervisor/host_platform.cpp", "src/platform/child_process.cpp",
+                           "src/platform/child_process.h", "src/platform/posix/process.cpp"}) {
+    const auto file = options.paths.root / name;
     if (io::is_regular_file(file)) Record(sdk_inputs, file);
   }
   static_inputs = sdk_inputs;

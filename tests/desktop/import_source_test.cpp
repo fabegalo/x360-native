@@ -1,6 +1,6 @@
 #include <catch2/catch_test_macros.hpp>
-#include "../../src/desktop/model/import_source.h"
-#include "../../src/desktop/model/catalog.h"
+#include "../../src/content/import_source.h"
+#include "../../src/content/catalog.h"
 #include "sha256.h"
 #include "../supervisor/scratch.h"
 #include <rex/filesystem/devices/stfs_xbox.h>

@@ -1,9 +1,8 @@
-# The preparation model is independent of the frontend and title runtime.
-add_library(x360n_desktop_model STATIC model/catalog.cpp model/workspace.cpp model/library.cpp model/identify.cpp model/import_source.cpp model/imported_games.cpp model/generic_aot.cpp model/update.cpp model/update_transaction.cpp model/handheld.cpp)
+# Launcher installation, updates and host presentation settings.
+add_library(x360n_desktop_model STATIC model/workspace.cpp model/update.cpp model/update_transaction.cpp model/handheld.cpp)
 target_sources(x360n_desktop_model PRIVATE ../supervisor/launch_preflight.cpp)
-target_sources(x360n_desktop_model PRIVATE ../content/system_update_probe.cpp)
 target_include_directories(x360n_desktop_model PRIVATE ${X360_REXGLUE_DIR}/thirdparty/inja/third_party/include)
-target_link_libraries(x360n_desktop_model PUBLIC x360n_core PRIVATE tomlplusplus)
+target_link_libraries(x360n_desktop_model PUBLIC x360n_catalog PRIVATE tomlplusplus)
 target_include_directories(x360n_desktop_model PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/model)
 # The supervisor owns launch preflight so one protected digest transaction can
 # cover catalog, original library, receipts and process identity reporting.

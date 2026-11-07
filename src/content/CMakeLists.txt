@@ -1,3 +1,13 @@
+# Content identity, catalog and AOT project generation are shared by the launcher
+# and supervisor without linking the title runtime.
+add_library(x360n_catalog STATIC catalog.cpp library.cpp identify.cpp import_source.cpp imported_games.cpp generic_aot.cpp system_update_probe.cpp)
+target_include_directories(x360n_catalog PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+target_include_directories(x360n_catalog PRIVATE ${X360_REXGLUE_DIR}/thirdparty/inja/third_party/include)
+target_link_libraries(x360n_catalog PUBLIC x360n_core PRIVATE tomlplusplus)
+if(X360_SUPERVISOR_ONLY)
+  return()
+endif()
+
 # x360n-content: STFS package and disc image info/extraction on top of the SDK's
 # StfsContainerDevice and DiscImageDevice (compiled into rexruntime). Separate from x360n so the
 # supervisor keeps not linking the runtime (docs/architecture.md, D6).

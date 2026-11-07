@@ -130,18 +130,5 @@ size_t Import(const ProjectPaths& paths, const Target& target,
               const std::filesystem::path& source,
               const std::function<bool()>& cancelled = {}, bool allow_partial = false,
               bool consume_source = false);
-struct PayloadStatus {
-  bool current = false, interrupted = false;
-  std::vector<std::string> components;
-};
-PayloadStatus InspectEnvironment(const std::filesystem::path& payload,
-                                const std::filesystem::path& destination);
-// Name of a packaged program on this system: x360-native(.exe), app/x360n(.exe), ...
-std::string PackageExecutable(const std::string& name);
-void VerifyPackage(const std::filesystem::path& directory, const std::string& expected_payload = {});
-// Replacement requires explicit consent; originals remain in local backups.
-void InitializeEnvironment(const std::filesystem::path& payload,
-                           const std::filesystem::path& destination,
-                           bool allow_update = false,
-                           const std::function<void()>& checkpoint = {});
+
 }

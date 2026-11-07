@@ -1,3 +1,4 @@
+#include "update.h"
 #include "catalog.h"
 #include "sha256.h"
 #include "workspace_lease.h"

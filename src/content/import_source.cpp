@@ -2,7 +2,7 @@
 #include "catalog.h"
 #include "action_trace.h"
 #include "child_process.h"
-#include "../../content/system_update.h"
+#include "system_update.h"
 #include <algorithm>
 #include <cwctype>
 #include <fstream>

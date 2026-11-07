@@ -1,7 +1,7 @@
 #include "../../src/content/system_update.h"
 #include "../../src/content/safe_zip.h"
-#include "../../src/desktop/model/import_source.h"
-#include "../../src/desktop/model/catalog.h"
+#include "../../src/content/import_source.h"
+#include "../../src/content/catalog.h"
 #include "../supervisor/scratch.h"
 #include "sha256.h"
 #include <catch2/catch_test_macros.hpp>

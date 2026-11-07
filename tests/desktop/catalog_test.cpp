@@ -1,5 +1,6 @@
+#include "update.h"
 #include <catch2/catch_test_macros.hpp>
-#include "../../src/desktop/model/catalog.h"
+#include "../../src/content/catalog.h"
 #include "sha256.h"
 #include "digest_batch.h"
 #include "launch_preflight.h"

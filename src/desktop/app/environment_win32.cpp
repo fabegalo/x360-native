@@ -8,7 +8,7 @@
 #include <wrl/client.h>
 #include <fstream>
 #include "environment.h"
-#include "../model/catalog.h"
+#include "catalog.h"
 #include "child_process.h"
 using Microsoft::WRL::ComPtr;
 namespace fs = std::filesystem;

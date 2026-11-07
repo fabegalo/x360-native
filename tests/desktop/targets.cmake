@@ -71,7 +71,7 @@ if(TARGET Catch2::Catch2WithMain)
       ../../tests/supervisor/preparation_test.cpp ../../tests/supervisor/process_test.cpp
       ../../tests/supervisor/session_process_test.cpp)
     # The shared controller and the one frontend, driven without a window.
-    target_link_libraries(x360n_launcher_tests PRIVATE x360n_launcher_ui Catch2::Catch2WithMain)
+    target_link_libraries(x360n_launcher_tests PRIVATE x360n_launcher_ui Catch2::Catch2WithMain tomlplusplus)
     target_compile_definitions(x360n_launcher_tests PRIVATE UNICODE _UNICODE
       X360N_SOURCE_ROOT="${PROJECT_SOURCE_DIR}"
       X360N_TEST_CHILD="$<TARGET_FILE:x360n_launcher_test_child>"
