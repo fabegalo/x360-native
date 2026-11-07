@@ -106,8 +106,6 @@ x360-native/  (tracked source + additions from this reorganization)
 |-- docs/
 |   |-- assets/
 |   |   |-- screenshots/
-|   |   |   |-- dashboard-17559-games.png
-|   |   |   `-- dashboard-17559-home.png
 |   |   |-- architecture.svg
 |   |   |-- dashboard-isolation.svg
 |   |   `-- x360-native-banner.png

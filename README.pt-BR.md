@@ -21,7 +21,7 @@
 
 | Dashboard original 17559 · Início | Dashboard 17559 · Aba Games |
 |---|---|
-| ![Tela inicial da Dashboard 17559](docs/assets/screenshots/dashboard-17559-home.png) | ![Aba Games da Dashboard 17559 com o bloco My Games](docs/assets/screenshots/dashboard-17559-games.png) |
+| ![Tela inicial da Dashboard 17559](docs/evidence/native-n2-2026-10-14/xenos-home.png) | ![Aba Games da Dashboard 17559 com o bloco My Games](docs/evidence/native-n2-2026-10-14/native-games.png) |
 | **Castle Crashers** · menu principal | **Forza Horizon** · estrada com HUD |
 | ![Menu principal do Castle Crashers](docs/assets/screenshots/castle-crashers-menu.jpg) | ![Carro do Forza Horizon numa estrada de montanha com HUD e minimapa](docs/assets/screenshots/forza-horizon-driving.jpg) |
 | **Forza Horizon 2** · tela de título (AOT genérico) | **Minecraft** · mundo do tutorial (AOT genérico) |

@@ -21,7 +21,7 @@
 
 | Original Dashboard 17559 · Home | Dashboard 17559 · Games tab |
 |---|---|
-| ![Dashboard 17559 home screen](docs/assets/screenshots/dashboard-17559-home.png) | ![Dashboard 17559 games tab with the My Games tile](docs/assets/screenshots/dashboard-17559-games.png) |
+| ![Dashboard 17559 home screen](docs/evidence/native-n2-2026-10-14/xenos-home.png) | ![Dashboard 17559 games tab with the My Games tile](docs/evidence/native-n2-2026-10-14/native-games.png) |
 | **Castle Crashers** · main menu | **Forza Horizon** · open road with HUD |
 | ![Castle Crashers main menu](docs/assets/screenshots/castle-crashers-menu.jpg) | ![Forza Horizon car on a mountain road with HUD and minimap](docs/assets/screenshots/forza-horizon-driving.jpg) |
 | **Forza Horizon 2** · title screen (Generic AOT) | **Minecraft** · tutorial world (Generic AOT) |
