@@ -1,45 +1,114 @@
-# Trabalho dos agentes
+# Guide for AI maintainers
 
-## Performance-first, correctness-preserving — regra permanente
+This is the shared working policy for every agent contributing to x360-native. `CLAUDE.md` points here rather than maintaining a second policy. Read the current request and `STATUS.md`; consult `docs/architecture.md`, `docs/CHECKLIST_FUNCIONAL_x360-native.md`, `docs/compatibility.md` and the affected subsystem reports. Check the actual revision, lock and implementation when a historical report is stale.
 
-Performance é objetivo central do x360-native. Toda otimização deve preservar
-correção, compatibilidade, fidelidade gráfica, semântica PowerPC e contratos XAM.
-Medir antes/depois com cenários e condições equivalentes; registrar também
-resultados sem ganho. Evitar overhead desnecessário no runtime; instrumentação
-opcional, desligada normalmente. Melhorias compartilhadas devem beneficiar jogos
-genericamente, sem hacks por título. Avaliar continuamente compilador/AOT, CPU,
-memória, GPU e carregamento conforme gargalos medidos. Preservar C7/C8, perfis,
-saves, biblioteca, isolamento de versões e SDK pinado com patches reproduzíveis.
-Metodologia e roadmap: `docs/performance.md`.
+The maintainer selected [ps2-native's maintainer guide](https://github.com/fabegalo/ps2-native/blob/63740c2d6dc8f455dc8027ecb785bebda7ecbcd6/AGENTS.md) as the workflow reference. This guide adapts its applicable practices to this repository. PS2 hardware semantics, its repository-owned runtime, reference interpreter, BIOS policies and toolchain choices are not x360-native contracts.
 
-Leia e siga `CLAUDE.md`, especialmente a seção **Trabalho dos agentes — regras
-permanentes**, e `STATUS.md` antes de atuar neste repositório. Essas regras se
-aplicam a todos os agentes: Computer Use exige autorização explícita; testes
-visuais e sessões longas de jogos exigem necessidade e autorização prévia;
-não repetir regressões aprovadas sem mudança relevante nem executar suítes
-completas automaticamente. Priorizar testes unitários/focados e evidências
-existentes. Processos em segundo plano exigem acompanhamento e duração limitada.
-Interação não autorizada exige interrupção e comunicação imediata do bloqueio;
-não esperar horas por aprovação. Concluir o escopo atual antes de ampliá-lo ou
-começar outra funcionalidade.
+## Ponytail workflow
 
-## Fidelidade ao console — regra permanente
+For coding tasks, use the [Ponytail skill](https://github.com/DietrichGebert/ponytail), `skills/ponytail/SKILL.md`, in `full` mode when available. Otherwise apply the same essentials: trace the affected implementation and callers, reuse existing helpers, and complete the smallest change that solves the requested problem. Keep investigation and output focused. Do not add dependencies or speculative frameworks just to follow a workflow, or claim to have run an unavailable skill.
 
-Ser o mais fiel possível ao console original, idealmente idêntico (telas, fluxos,
-HDD único com saves/perfis como conteúdo, códigos de erro e contratos XAM da
-versão correspondente). Divergências de projeto são corrigidas em direção ao
-original, sem sistemas de migração (dados locais de teste são descartáveis);
-o não comprovado fica como hipótese.
+Implement, run the relevant checks, correct failures, and validate the affected user path within the authorized scope. Preserve error handling, accessibility and required correctness checks; saving tokens is not a reason to omit them. Report checks actually performed and remaining limitations, not unmeasured productivity claims. A new blocker changes the next diagnostic step; it is not by itself a reason to end with another plan when independent authorized work remains possible.
 
-## Regra arquitetural permanente — isolamento de versões
+## What the system is
 
-Uma dashboard usa exclusivamente seus módulos e recursos originais correspondentes.
-17559 → 17559; 13604 → 13604; 6717 → 6717; o mesmo vale para versões futuras.
-Inclui vk.xex, signin.xex, gamerprofile.xex, XUI, skins, fontes e demais recursos.
-Nomes, ordinais e exports iguais não comprovam compatibilidade. O vk.xex 13604
-é incompatível e não pode substituir o Retail 17559 já identificado.
-Registrar versão/procedência e SHA-256 por perfil; verificar antes do carregamento,
-sem fallback silencioso, busca por basename em outras versões ou cache global de
-módulos originais. Dependência ausente ou sem identificação deve gerar erro claro.
-Preservar os testes de isolamento. Infraestrutura genérica ReXGlue pode ser
-compartilhada; módulos originais específicos de uma versão, não.
+x360-native is a **generic Xbox 360 static AOT recompilation platform built on the pinned ReXGlue SDK**, not a port restricted to one game or a frontend for an existing emulator. Original PowerPC/XEX code is translated to C++ and compiled for the host; the compatibility runtime supplies the console services and translates Xenos graphics work. AOT is the main execution path. Do not introduce an instruction interpreter, JIT, Xenia as the executor, or a replacement SDK/runtime without a separate maintainer decision. Xenia Canary is a behavioral and performance reference, not an interchangeable runtime or a source of automatically inherited fixes.
+
+The original dashboard is a target in its own right: boot and audio, Home, My Games, Guide, profiles, storage, launching a game and returning to the dashboard. Support for all original dashboard revisions, including older and beta versions, is a permanent goal; 17559 is the initial reference, not the only permitted version. The desktop launcher imports, prepares and starts content; it must not fabricate or replace the original Xbox interface.
+
+One shared C++ core serves the Windows x64/ARM64, Linux x64/ARM64 and macOS Intel/Apple Silicon targets. Isolate genuine platform differences; do not fork the project per OS. Steam Deck follows the Linux path. A preset, package or successful build is not functional certification for that platform. Xenos is the fidelity/default path; Native is the separate experimental PC-enhanced path. Preserve their shared runtime and original UI contracts, and report results per backend/API rather than transferring one backend's evidence to another.
+
+| Area | Existing ownership |
+| --- | --- |
+| ReXGlue codegen, PPC semantics, kernel/XAM and Xenos | `external/rexglue-sdk/`, pinned through `deps.lock.json`; changes follow the SDK policy below |
+| Reproducible SDK integration | `patches/rexglue-sdk/`, `cmake/sdk/`, `scripts/setup/` |
+| Supervisor, preparation, sessions and host paths | `src/supervisor/`, `src/platform/` |
+| Content inspection and extraction | `src/content/` |
+| Desktop, catalog, import, library and updates | `src/desktop/` |
+| Native renderer, capture and replay | `src/native/` |
+| Dashboard/title manifests and shared title integration | `titles/`, `titles/common/`; generated generic projects remain local |
+| Build, packaging, tests and evidence | `CMakePresets.json`, `cmake/`, `scripts/`, `tests/`, `.github/workflows/`, `docs/reports/` |
+| User content, generated output and caches | ignored `.local/` and the managed per-user stores; never source-distribution content |
+
+Keep title/revision-specific evidence, original modules, addresses and overrides in validated manifests/profiles and title integration, not hard-coded branches in shared runtime code. A generic fix needs a regression that does not depend solely on the game that exposed it. Reuse existing preparation, verification, session and renderer interfaces instead of adding parallel implementations.
+
+## Performance target and acceptance
+
+**Performance-first, correctness-preserving** is permanent policy. Compatibility and performance at or above Xenia Canary are goals, not current claims. Target original-speed gameplay with working input and sound on each explicitly validated host tier. Preserve each title's original simulation/video timing: a higher host presentation rate must not accelerate physics, audio or game logic, and repeated presentation of an old image is not additional guest progress. See `docs/performance.md`.
+
+Use the executable, Release configuration, manifest, scene and input path the maintainer actually runs. Verify the effective AOT modules, runtime DLLs, renderer/API, GPU and settings. An AOT percentage, backend name, CI pass, isolated replay or synthetic speedup is not evidence of a faster playable session. For launcher/preparation work, measure the actual import, preparation, verification, launch and first-image boundary affected, not an unrelated microbenchmark.
+
+Measure before and after on the same machine/settings, preserving samples and negative or inconclusive results. Record throughput, frame pacing, 1% lows or appropriate percentiles, stalls, CPU/GPU cost, RAM/VRAM and audio starvation where relevant. Distinguish guest progress, game updates when a valid probe exists, swaps and host presentation; do not invent a universal guest-frame counter or turn a game's address into a generic runtime rule. Keep optional per-call timers and expensive diagnostic hashes out of gameplay timing windows, without removing mandatory identity checks. Obtain a separate profile, preferably sampling the Release executable with matching symbols, and re-profile after structural changes.
+
+Select the next optimization from the current bottleneck, not the most interesting subsystem. Reuse existing capture/replay and A/B tools; retain reference/slow paths for differential tests. Optional tracing, dispatch history and intrusive profiling must not burden the production path when disabled. Required validation may be specialized, cached or moved only with correct invalidation and equivalent observable behavior. Preserving a contract does not require preserving every internal call or representation. Never skip guest effects, draws, audio or necessary synchronization to manufacture a gain.
+
+Validate visible gameplay, sound and the affected session flow before declaring a playable build or hardware tier. If the user's session did not improve, do not describe an isolated benchmark as delivery of that performance goal. Shader warmup, cold caches, preparation time and steady-state gameplay are different measurements; state which one was tested.
+
+## Contracts to preserve
+
+- **Original content and dashboard isolation:** one dashboard uses only its corresponding original modules and resources. 17559 uses 17559, 13604 uses 13604, 6717 uses 6717; the rule applies to every revision. It includes `vk.xex`, `signin.xex`, `gamerprofile.xex`, XAM, XUI, skins, fonts and avatar assets. Equal names, ordinals or exports do not prove compatibility; the identified 13604 keyboard is not a substitute for Retail 17559. Bind version, provenance and SHA-256 to the profile; reject missing or mismatched dependencies before loading. No basename search across versions, silent fallback or global original-module cache. Generic ReXGlue infrastructure may be shared. Preserve the isolation tests and `titles/dash_*/preparation.toml` contracts.
+- **Original behavior:** preserve the real boot/dashboard/Guide UI, error codes, PPC semantics, exceptions, memory ordering, clocks, input, sound, graphics and physics. Fidelity includes one logical HDD per emulated console, with saves and profiles as console content, not independent incompatible storage schemes. Correct divergences toward original behavior and document necessary exceptions. Missing behavior must produce a useful failure, never a fake successful import/syscall, invented register value or silently ignored draw. `REX_STUB` does not initialize a valid return value. Separate established behavior, a selected hypothesis and unverified behavior.
+- **AOT and code identity:** discover functions, indirect targets and module relationships from evidence, not guessed executable addresses or speculative table lengths. Preserve registration, imports/thunks, TLS, ABI and revision ownership. Changed executable bytes, codegen, inline semantics or headers must invalidate every affected native translation. Compiling a title or registering all discovered functions does not establish whole-game correctness.
+- **One guest memory and graphics contract:** preserve endian behavior, guest virtual/physical aliases, CPU/GPU coherency, fences, EDRAM, resolves, formats, MSAA, depth/stencil, blending, MEMEXPORT and presentation order. GPU residency or an optimized representation does not authorize dropping guest-visible writes or synchronization. Keep host caches/handles distinct from console state, with correct lifetime and invalidation. Xenos fidelity and Native enhancements must preserve the same gameplay and system-service contracts.
+- **Profiles, storage and services:** preserve C7/C8, user/title identity, ownership, saves, achievements, library enumeration, cancellation, asynchronous completion and recovery. Validate the original UI-to-service-to-storage path, not only a backend unit test. Xbox Live, online multiplayer and special peripherals stay outside scope unless explicitly requested; never pretend an unavailable service is connected or a content entitlement exists.
+- **Launcher-to-runtime wiring:** every exposed setting needs a real consumer. Verify executable ownership, preparation receipts, effective AOT modules, matching runtime DLLs, selected renderer/API and fallback reasons. A dummy child process validates supervision, not the dashboard. Preserve focus/input routing, BACK+START/Guide behavior, controller reconnect, shutdown/reopen, title handoff and return to the dashboard. Unsupported capabilities must be visible, not presented as a working accelerated session.
+- **User data and paths:** keep user-provided originals read-only and preserve real profiles, saves, settings, catalogs and recoverable data. Destructive replacement/restoration requires appropriate permission and recovery. Do not add speculative migration systems for disposable test layouts; discard only explicitly identified, authorized test data, never genuine user data. Use common Unicode/long-path I/O and keep logical names separate from host I/O names. Do not replace deep-path support with a hard-coded installation folder, Registry change, administrator requirement or dependence on 8.3 names. Validate the affected local/UNC and junction cases; state actual unsupported cases.
+- **Storage without needless copies:** audit extraction, import, dashboard library, SDK generations, tool downloads, codegen and publication. Reuse verified content and unchanged artifacts; a private disposable extraction may transfer ownership through a hardlink when safe. Do not hardlink writable imported data to the user's original files. Same-volume constraints, cross-volume copies, immutable published binaries, save isolation and rollback require explicit handling. Retire only proven task-owned or unusable data while respecting leases and live receipts; do not erase `.previous-*` or archives merely because their names look old. Measure logical files, actual copied bytes and allocated storage separately where possible. Reimport, rebuild, restart and update must not accumulate unnecessary copies.
+
+## How to change things
+
+Inspect `git status`, the current revision, relevant callers, helpers and tests before editing. Preserve concurrent work; do not reset, clean, overwrite or force-push somebody else's changes. Keep each change focused and complete the requested user-facing path before starting another milestone. Consult the pinned implementation and primary references for the affected behavior. Do not invent commands, targets, flags, imports, addresses, hashes or test results, or adopt a reference port's engine hooks as generic Xbox 360 semantics.
+
+Extend the existing preparation, tracing, benchmark, renderer and launcher interfaces only where the task needs it. Do not build another profiler, launcher, renderer abstraction or runtime to avoid integrating the current ones. Preserve error handling and source/version verification; no `--force` or fabricated receipt to turn an invalid preparation into a launchable title.
+
+Computer Use requires explicit authorization. Visual tests and long game sessions require a demonstrated need and prior authorization; respect outstanding stop requests. Ordinary scoped checks already authorized by the task need no repeated request for the same permission. Do not repeat approved regressions without a relevant change or run full suites automatically. Supervise bounded runs and clean up only the task's processes. Stop and report an unauthorized interactive prompt immediately; do not leave it waiting unattended. Complete independent authorized work when permissions or local inputs are unavailable, and identify what could not be tested.
+
+## How to test
+
+1. Build the affected targets in the existing pinned compiler environment. Inspect effective flags, source root and dependencies. Production launcher, supervisor, title preparation and runtime products use Release; Debug/RelWithDebInfo are explicit diagnostics. If a build fails, old binaries cannot validate the change.
+2. Run focused regressions for the changed contract and the relevant integration path. A bug fix should have a negative control that reproduces the failure without it when feasible. Preserve independent expected-result tests as well as reference comparisons; do not weaken assertions or turn skips into passes.
+3. For runtime/codegen changes, compare PPC state, memory, return codes, events and relevant image/audio output at matched observable boundaries. Exercise invalidation and module/DLL ABI consistency when affected. For GPU work, use the existing replay/readback contracts and the correct backend. Agreement with a reference implementation is not proof of undocumented console behavior.
+4. Reproduce the affected dashboard/game flow when authorized inputs and permissions exist. For relevant session changes, cover original boot/audio, My Games, game entry, Guide, return, persistence and reopen; do not automatically replay unrelated titles. Identify human interaction, scripted UI, headless execution or synthetic fixtures. Test hardware-dependent work on available devices and label untested vendors/platforms honestly.
+5. For import/build/cache changes, test clean preparation, repeated import/preparation, changed inputs, interruption/recovery, ownership and concurrent access as relevant. Check same-volume and cross-volume behavior, long Unicode paths and data preservation. A development checkout seeded with local dependencies does not certify a fresh end-user download/install.
+6. Check CI for the exact code revision being reported on the six targets. Separate compilation, CPU execution, software GPU, physical GPU and skipped tests. CI without original content cannot certify gameplay. An instructions-only edit needs document/diff/reference checks, not a full build, game session or manually rerun platform matrix.
+
+Use the existing presets and commands in `docs/guides/BUILDING.md` and the preparation guides. The following is a template: replace the target/test placeholders with existing affected entries, not invented targets, and use the actual build configuration.
+
+```powershell
+scripts\devshell.cmd cmake --preset win-amd64
+scripts\devshell.cmd cmake --build --preset win-amd64-release --target <existing-affected-target>
+scripts\devshell.cmd ctest --preset win-amd64-release -N
+scripts\devshell.cmd ctest --preset win-amd64-release -R "<existing-affected-test-pattern>" --output-on-failure
+```
+
+On Windows, use `scripts/devshell.cmd` and the locked toolchain rather than a global compiler. `cmd` treats `|` as a pipe and consumes `^`; use safe patterns such as `x360n[.]ppc` and the existing single `project` label where appropriate. On Linux/macOS, follow `scripts/bootstrap.sh`, the locked POSIX tools and the matching `linux-amd64`, `linux-arm64`, `mac-amd64` or `mac-arm64` preset. Select the same configuration for build and CTest with multi-config generators. Bootstrap, SDK install, global installation and privilege elevation are not implicitly authorized by these examples; obtain permission when required.
+
+## Pinned SDK and reproducible backports
+
+`deps.lock.json` is the authority for SDK/tool revisions and the active patch order; never infer it from a dated patch count or filename prefix. Do not edit `external/rexglue-sdk` ad hoc or silently upgrade it. Use the established patch applicators and checks in `scripts/setup/` and `cmake/sdk/`. Preserve documented symlink materialization, attribution and withdrawn-patch history.
+
+A pinned upstream build backport belongs in the existing SDK/CMake integration with its upstream reference and revision guard. Other SDK fixes require a reproducible patch under `patches/rexglue-sdk/`, before/after file hashes and patch SHA-256 in the lock, a focused `sdkcheck.*` regression and documentation of the source/behavior. Do not invent an upstream equivalent. Keep Windows and POSIX application/checking paths consistent and prove the baseline failure when feasible.
+
+A runtime/header/ABI fix must reach every dependent title and module, including title-compiled `rex_app.cpp`; a green SDK build alone is insufficient. Use `x360n_stage_runtime_dlls()` where required so stale adjacent DLLs are not mistaken for the new runtime. Codegen producer changes must invalidate generated products; when manually regenerating with the pinned CLI, verify and use `--ignore-stamp`, not a force bypass. Preserve receipts, module registration and the distinction between original code identity and the prepared host executable.
+
+## Build foundation and diagnostics
+
+Generated output and caches must be owned by the correct source checkout, title/revision, compiler/ABI, configuration, SDK/patch stack and input hashes. Preserve unchanged timestamps, reusable objects, shared SDK identities and safe incremental dependencies. Publish transactionally; interruption must not destroy the last valid output or unrelated files. Serialize writers, hold the appropriate lease throughout protected work, and reserve RAM/threads for the host. Do not benchmark while compiling.
+
+Keep the managed short build/dependency stores and central path layer. Junction aliases must resolve to the verified owner, not bypass containment; aliases are not additional copies of content. Reuse verified tools and SDK generations, preserve in-use or valid generations, and account for migration/rollback remnants rather than leaving their disk cost hidden. Do not remove all publication copies indiscriminately: writable build products and published runtime artifacts may need isolation.
+
+Inspect effective application, SDK and title flags before changing CPU requirements. Do not impose another project's compiler, SIMD baseline, PGO/LTO or fast-math settings, or raise AVX/AVX2 requirements globally without a maintainer decision and demonstrated need. Optional optimized SIMD needs capability checks and a supported fallback. Evaluate LTO/PGO with measured build time, memory, disk and user-path performance, with profile identity preventing stale reuse.
+
+Reuse bounded local diagnostics. Keep exit codes and actionable failures, mark truncation and collect only the task's processes. Export only an explicit reviewed allowlist with path/private-data redaction; no full environment dumps or automatic upload. Original XEX/system resources, saves, game-derived traces and generated proprietary translations are not public diagnostic attachments. Basic counters and intrusive timing are separate modes.
+
+## Documentation, language and publication
+
+`README.md` and `README.pt-BR.md` are equivalent, stable public introductions. This file and the `CLAUDE.md` pointer contain durable policy, not a daily changelog, hardware inventory, patch counts or per-task results. Update them only for an actual policy/architecture/public-use change. Record evidence and limits in the existing subsystem report and `STATUS.md`; advance `docs/compatibility.md` and the functional checklist only for demonstrated behavior. Keep the next concrete action with the current task/report rather than inventing a parallel roadmap. Do not churn unrelated documents or copy entire reports into the guides.
+
+Use English for new code identifiers, comments and Conventional Commit messages. New technical guidance may use English; preserve existing Portuguese reports and English/Portuguese UI/README content instead of translating unrelated files. User-facing replies stay in the user's language. Check translation placeholders and accessibility when changing the UI.
+
+Preserve BSD-3-Clause, `THIRD_PARTY_NOTICES.md`, human credits and upstream notices. Review each reference/dependency license before copying, adapting, translating or linking code; do not import incompatible GPL implementation code into this repository without a compatible, explicit maintainer decision. Reference availability does not authorize redistribution of Microsoft firmware, games or assets. Do not commit XEX, dashboard resources, keys, real profiles/saves, dumps or generated proprietary code, obtain leaked SDKs, or execute scripts embedded in user content. Originals stay in the established ignored content layout; executable launch guards must not run untrusted inputs as host programs.
+
+Work directly on `main` unless the maintainer says otherwise. Commit and push only the authorized scope, using Conventional Commits without assistant co-author signatures or generated-by trailers; preserve human authorship and technical references. No PR, ZIP, tag, Release, visibility change, history rewrite or force-push unless separately requested. Do not reopen the completed pre-publication history cleanup. Do not modify ps2-native, xboxone-native or another reference repository as part of an x360-native task.
+
+Finish with the actual commits, implemented behavior, checks/CI, measured user-path result when applicable and remaining limits. Distinguish code inspection, recorded third-party/local evidence and independently executed tests. A green build, package or instructions update is not proof of dashboard functionality, gameplay or a performance fix.
