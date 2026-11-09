@@ -79,6 +79,9 @@ int ExtractSystemUpdate(const fs::path& source, const fs::path& destination) {
     if (io::is_regular_file(source)) record(source,Text(source));
     record(package,Text(package.lexically_relative(staging)));
     std::map<std::string,fs::path> inputs;
+    // SystemExtPartition packages share names with flash images (dash.xex) but
+    // are other builds; they come only from the update folder itself.
+    std::map<std::string,fs::path> packages;
     auto index = [&](const fs::path& root, bool strict) {
       size_t count = 0;
       for (const auto& entry:io::directory_iterator(root)) {
@@ -87,6 +90,7 @@ int ExtractSystemUpdate(const fs::path& source, const fs::path& destination) {
         if (!entry.is_regular_file()) continue;
         auto name=Lower(Text(entry.path().filename()));
         if (strict && name.starts_with("$flash_")) name.erase(0,7);
+        if (!strict) packages.emplace(name,entry.path());
         // Flash images have precedence over the uncompressed USB variants.
         if (!strict && inputs.contains(name)) continue;
         if (!inputs.emplace(name,entry.path()).second) throw std::runtime_error("System Update: conflicting component names");
@@ -114,9 +118,12 @@ int ExtractSystemUpdate(const fs::path& source, const fs::path& destination) {
     };
     size_t missing=0;
     for (const auto& asset:dash17559::kOriginalAssets) {
+      // The avatar catalog comes from the separate version-bound storage pack below.
+      if (asset.path == "avatar/AvatarAssetPack.toc") continue;
       auto name=Lower(Text(PathFromUtf8(std::string(asset.path)).filename()));
       if (name=="xam_ui.xex") name="xam.xex";
-      if (const auto it=inputs.find(name);it!=inputs.end()) copy(it->second,asset.path,asset.sha256);
+      const auto& from=asset.path.starts_with("systemext/") ? packages : inputs;
+      if (const auto it=from.find(name);it!=from.end()) copy(it->second,asset.path,asset.sha256);
       else if (name=="shrdres.xzp") {
         // The inventory orders shrdres before XAM. Authenticate the original
         // flash XAM explicitly before decoding its embedded XUIZ section.
@@ -154,7 +161,10 @@ int ExtractSystemUpdate(const fs::path& source, const fs::path& destination) {
       if (Extract(it->second,staging/"avatar")) throw std::runtime_error("System Update: invalid avatar PIRS");
       copy(staging/"avatar/AvatarAssetPack.toc","avatar/AvatarAssetPack.toc",
            "a8c90b3db5c6349a55fcb72eda47e08e4940f88fabda4ff73025d9728832daa8");
-    } else report << "optional-missing\tavatar/AvatarAssetPack.toc\n";
+    } else {
+      ++missing;
+      report << "missing\tavatar/AvatarAssetPack.toc\tFFFE07DF00000002 (Retail 17559)\n";
+    }
     // Report all patch-only content. ApplyXexPatch's outputs are decoded
     // header/image pairs, not the byte-exact XEX files required by this profile.
     for (const auto& [name,path]:inputs) if (name.ends_with(".xexp") || name.ends_with(".xttp")) {

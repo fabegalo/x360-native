@@ -48,7 +48,8 @@ void Publish(const std::string& output, const LaunchRequest& request) {
 }
 bool IsDashboardReturn() { return dashboard_return; }
 const std::string& SystemXamModulePath() { return system_xam_path; }
-void ImportLaunchData(rex::Runtime& runtime) {
+void ImportLaunchData(rex::Runtime& runtime, std::string bound_xam_path) {
+  system_xam_path = std::move(bound_xam_path);
   dashboard_return = false;
   const auto ui_host = REXCVAR_GET(x360n_system_ui_host);
   if (!ui_host.empty()) {

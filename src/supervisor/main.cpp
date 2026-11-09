@@ -500,6 +500,12 @@ int Run(const ProjectPaths& p, const fs::path& exe_in, std::vector<std::string> 
       io::is_regular_file(p.root / ".local/keys/xex-keys.txt") &&
       std::none_of(args.begin(), args.end(), [](const auto& arg) { return arg.starts_with("--xex_keys_file"); }))
     args.push_back("--xex_keys_file=" + PathUtf8(p.root / ".local/keys/xex-keys.txt"));
+  // Kernel RSA public keys (XeKeysVerifyRSASignature) are local user material too.
+  const char* selected_rsa = std::getenv("X360N_RSA_KEYS");
+  if ((!selected_rsa || !*selected_rsa) &&
+      io::is_regular_file(p.root / ".local/keys/rsa-public-keys.txt") &&
+      std::none_of(args.begin(), args.end(), [](const auto& arg) { return arg.starts_with("--xekeys_rsa_public_file"); }))
+    args.push_back("--xekeys_rsa_public_file=" + PathUtf8(p.root / ".local/keys/rsa-public-keys.txt"));
 
   auto exe_digest = DigestFile(exe);
   std::vector<std::pair<fs::path, std::optional<FileDigest>>> dll_digests;

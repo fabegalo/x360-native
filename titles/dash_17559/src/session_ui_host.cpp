@@ -1,6 +1,7 @@
 #include "system_ui.h"
 #include "original_assets.h"
 #include "experimental_region.h"
+#include "system_ext_partition.h"
 #include <rex/runtime.h>
 #include <rex/logging.h>
 #include <rex/filesystem/devices/host_path_device.h>
@@ -38,6 +39,7 @@ SESSION_UI_EXPORT bool X360nSystemUiInstall(rex::Runtime* runtime, const char* r
   if (!device->Initialize() || !runtime->file_system()->RegisterDevice(std::move(device))) return false;
   runtime->file_system()->RegisterSymbolicLink("sys17559:", "\\SystemRoot");
   runtime->file_system()->RegisterSymbolicLink("media:", "\\SystemRoot");
+  if (!dash17559::MountSystemExtPartition(*runtime->file_system(), root)) return false;
   dash17559::InstallSystemUi(*runtime, "sys17559:", native_utf8);
   REXLOG_INFO("17559 system UI: session host installed with verified original assets at {}", root_utf8);
   return true;

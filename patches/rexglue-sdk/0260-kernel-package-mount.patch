@@ -1,0 +1,142 @@
+--- a/src/kernel/xboxkrnl/xboxkrnl_crypt.cpp
++++ b/src/kernel/xboxkrnl/xboxkrnl_crypt.cpp
+@@ -169,6 +169,31 @@ void XeCryptSha_entry(mapped_void input_1, u32 input_1_size, mapped_void input_2
+   std::copy_n(digest, std::min<size_t>(rex::countof(digest), output_size), output.as<uint8_t*>());
+ }
+ 
++void XeCryptMd5_entry(mapped_void input_1, u32 input_1_size, mapped_void input_2, u32 input_2_size,
++                      mapped_void input_3, u32 input_3_size, mapped_void output, u32 output_size) {
++  uint8_t digest[16] = {};
++#if !REX_PLATFORM_WIN32
++  bool ok = false;
++#else
++  BCRYPT_HASH_HANDLE hash = nullptr;
++  bool ok = BCRYPT_SUCCESS(BCryptCreateHash(BCRYPT_MD5_ALG_HANDLE, &hash, nullptr, 0, nullptr, 0, 0));
++  for (auto [input, size] : {std::pair{input_1, input_1_size}, std::pair{input_2, input_2_size},
++                             std::pair{input_3, input_3_size}}) {
++    if (ok && input && size) {
++      ok = BCRYPT_SUCCESS(BCryptHashData(hash, input.as<uint8_t*>(), size, 0));
++    }
++  }
++  ok = ok && BCRYPT_SUCCESS(BCryptFinishHash(hash, digest, sizeof(digest), 0));
++  if (hash) {
++    BCryptDestroyHash(hash);
++  }
++#endif
++  if (!ok) {
++    REXKRNL_ERROR("XeCryptMd5: BCrypt MD5 failed");
++  }
++  std::copy_n(digest, std::min<size_t>(sizeof(digest), output_size), output.as<uint8_t*>());
++}
++
+ // TODO: Size of this struct hasn't been confirmed yet.
+ typedef struct {
+   rex::be<uint32_t> count;     // 0x0
+@@ -948,7 +973,6 @@ REX_EXPORT_STUB(__imp__XeCryptHmacShaVerify);
+ REX_EXPORT_STUB(__imp__XeCryptMd5Init);
+ REX_EXPORT_STUB(__imp__XeCryptMd5Update);
+ REX_EXPORT_STUB(__imp__XeCryptMd5Final);
+-REX_EXPORT_STUB(__imp__XeCryptMd5);
+ REX_EXPORT_STUB(__imp__XeCryptParveEcb);
+ REX_EXPORT_STUB(__imp__XeCryptParveCbcMac);
+ REX_EXPORT_STUB(__imp__XeCryptSha256);
+@@ -1047,6 +1071,7 @@ REX_EXPORT(__imp__XeCryptShaInit, rex::kernel::xboxkrnl::XeCryptShaInit_entry)
+ REX_EXPORT(__imp__XeCryptShaUpdate, rex::kernel::xboxkrnl::XeCryptShaUpdate_entry)
+ REX_EXPORT(__imp__XeCryptShaFinal, rex::kernel::xboxkrnl::XeCryptShaFinal_entry)
+ REX_EXPORT(__imp__XeCryptSha, rex::kernel::xboxkrnl::XeCryptSha_entry)
++REX_EXPORT(__imp__XeCryptMd5, rex::kernel::xboxkrnl::XeCryptMd5_entry)
+ REX_EXPORT(__imp__XeCryptSha256Init, rex::kernel::xboxkrnl::XeCryptSha256Init_entry)
+ REX_EXPORT(__imp__XeCryptSha256Update, rex::kernel::xboxkrnl::XeCryptSha256Update_entry)
+ REX_EXPORT(__imp__XeCryptSha256Final, rex::kernel::xboxkrnl::XeCryptSha256Final_entry)
+--- a/src/kernel/xboxkrnl/xboxkrnl_ob.cpp
++++ b/src/kernel/xboxkrnl/xboxkrnl_ob.cpp
+@@ -12,6 +12,8 @@
+ // Disable warnings about unused parameters for kernel functions
+ #pragma GCC diagnostic ignored "-Wunused-parameter"
+ 
++#include <cstring>
++
+ #include <rex/assert.h>
+ #include <rex/kernel/xboxkrnl/private.h>
+ #include <rex/logging.h>
+@@ -197,6 +199,34 @@ u32 ObDeleteSymbolicLink_entry(ppc_ptr_t<X_ANSI_STRING> path_ptr) {
+   return X_STATUS_SUCCESS;
+ }
+ 
++// ObTranslateSymbolicLink(OBJECT_ATTRIBUTES* name, ANSI_STRING* target): follows every symbolic
++// link in the name and writes the final object path. XAM 17559 (8167FCD8) passes root -3 (\??)
++// for names without a leading backslash.
++u32 ObTranslateSymbolicLink_entry(ppc_ptr_t<X_OBJECT_ATTRIBUTES> attributes,
++                                  ppc_ptr_t<X_ANSI_STRING> target) {
++  auto* memory = REX_KERNEL_MEMORY();
++  auto name = rex::string::utf8_canonicalize_guest_path(util::TranslateAnsiPath(
++      memory, memory->TranslateVirtual<X_ANSI_STRING*>(attributes->name_ptr)));
++  if (rex::string::utf8_starts_with(name, u8"\\??\\")) {
++    name = name.substr(4);
++  }
++  std::string resolved;
++  if (!REX_KERNEL_FS()->ResolveSymbolicLink(name, resolved)) {
++    if (name.empty() || name[0] != '\\') {
++      REXKRNL_WARN("ObTranslateSymbolicLink({}) - not found", name);
++      return X_STATUS_OBJECT_NAME_NOT_FOUND;
++    }
++    resolved = name;  // already an object path
++  }
++  REXKRNL_DEBUG("ObTranslateSymbolicLink({}) -> {}", name, resolved);
++  if (resolved.size() > target->maximum_length) {
++    return X_STATUS_BUFFER_TOO_SMALL;
++  }
++  std::memcpy(memory->TranslateVirtual(target->pointer), resolved.data(), resolved.size());
++  target->length = static_cast<uint16_t>(resolved.size());
++  return X_STATUS_SUCCESS;
++}
++
+ u32 NtDuplicateObject_entry(u32 handle, mapped_u32 new_handle_ptr, u32 options) {
+   // NOTE: new_handle_ptr can be zero to just close a handle.
+   // NOTE: this function seems to be used to get the current thread handle
+@@ -252,6 +282,7 @@ REX_EXPORT(__imp__ObReferenceObjectByName, rex::kernel::xboxkrnl::ObReferenceObj
+ REX_EXPORT(__imp__ObDereferenceObject, rex::kernel::xboxkrnl::ObDereferenceObject_entry)
+ REX_EXPORT(__imp__ObCreateSymbolicLink, rex::kernel::xboxkrnl::ObCreateSymbolicLink_entry)
+ REX_EXPORT(__imp__ObDeleteSymbolicLink, rex::kernel::xboxkrnl::ObDeleteSymbolicLink_entry)
++REX_EXPORT(__imp__ObTranslateSymbolicLink, rex::kernel::xboxkrnl::ObTranslateSymbolicLink_entry)
+ REX_EXPORT(__imp__NtDuplicateObject, rex::kernel::xboxkrnl::NtDuplicateObject_entry)
+ REX_EXPORT(__imp__NtClose, rex::kernel::xboxkrnl::NtClose_entry)
+ REX_EXPORT(__imp__NtQueryEvent, rex::kernel::xboxkrnl::NtQueryEvent_entry)
+@@ -263,7 +294,6 @@ REX_EXPORT_STUB(__imp__ObIsTitleObject);
+ REX_EXPORT_STUB(__imp__ObLookupAnyThreadByThreadId);
+ REX_EXPORT_STUB(__imp__ObMakeTemporaryObject);
+ REX_EXPORT_STUB(__imp__ObReferenceObject);
+-REX_EXPORT_STUB(__imp__ObTranslateSymbolicLink);
+ REX_EXPORT_STUB(__imp__NtCreateDirectoryObject);
+ REX_EXPORT_STUB(__imp__NtCreateSymbolicLinkObject);
+ REX_EXPORT_STUB(__imp__NtMakeTemporaryObject);
+--- a/include/rex/filesystem/vfs.h
++++ b/include/rex/filesystem/vfs.h
+@@ -37,6 +37,8 @@ class VirtualFileSystem {
+   bool RegisterSymbolicLink(const std::string_view path, const std::string_view target);
+   bool UnregisterSymbolicLink(const std::string_view path);
+   bool FindSymbolicLink(const std::string_view path, std::string& target);
++  // Follows every link prefix of path; false when none matched (result is then path).
++  bool ResolveSymbolicLink(const std::string_view path, std::string& result);
+ 
+   Entry* ResolvePath(const std::string_view path);
+ 
+@@ -52,8 +54,6 @@ class VirtualFileSystem {
+   rex::thread::global_critical_region global_critical_region_;
+   std::vector<std::shared_ptr<Device>> devices_;
+   std::unordered_map<std::string, std::string> symlinks_;
+-
+-  bool ResolveSymbolicLink(const std::string_view path, std::string& result);
+ };
+ 
+ }  // namespace rex::filesystem
+--- a/src/filesystem/virtual_file_system.cpp
++++ b/src/filesystem/virtual_file_system.cpp
+@@ -84,6 +84,7 @@ bool VirtualFileSystem::FindSymbolicLink(const std::string_view path, std::strin
+ }
+ 
+ bool VirtualFileSystem::ResolveSymbolicLink(const std::string_view path, std::string& result) {
++  auto global_lock = global_critical_region_.Acquire();
+   result = path;
+   bool was_resolved = false;
+   while (true) {

@@ -4,6 +4,7 @@
 // they are absent. No title or dashboard process is started.
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <filesystem>
 #include <stdexcept>
 #include <string>
@@ -20,6 +21,21 @@ SessionProfile Load(const std::string& title) {
                             false);
 }
 }  // namespace
+
+TEST_CASE("dashboard 17559 receives its own verified avatar service files", "[local][avatar]") {
+  const auto dashboard = Load("dash_17559");
+  REQUIRE(dashboard.avatar_service == "2.0.17559.0");
+  REQUIRE(dashboard.avatar_files);
+  REQUIRE(dashboard.avatar_xam_sha256 == dashboard.avatar_files->xam.sha256);
+  for (const auto* file : {&dashboard.avatar_files->xam, &dashboard.avatar_files->catalog})
+    if (!fs::exists(file->path)) SKIP("not present: " + file->path.string());
+  const auto args = SessionPlatformArguments(dashboard, dashboard);
+  for (const auto& expected : AvatarServiceArguments(dashboard, dashboard))
+    CHECK(std::find(args.begin(), args.end(), expected) != args.end());
+  auto wrong = dashboard;
+  wrong.dashboard_version = "2.0.13604.0";
+  CHECK_THROWS(AvatarServiceArguments(wrong, dashboard));
+}
 
 TEST_CASE("Motocross Madness receives the 17559 dashboard avatar files", "[local][avatar]") {
   const auto dashboard = Load("dash_17559");

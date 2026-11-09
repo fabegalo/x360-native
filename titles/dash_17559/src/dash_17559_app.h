@@ -18,6 +18,7 @@
 #include "launch_context.h"
 #include "display_transition.h"
 #include "system_ui.h"
+#include "system_ext_partition.h"
 #include "../../common/launch_handoff.h"
 #include "../../common/dashboard_paths.h"
 #include "../../common/guest_capture.h"
@@ -55,7 +56,7 @@ class Dash17559App : public rex::ReXApp {
     guest_capture_.Start(*runtime(), REXCVAR_GET(x360n_guest_capture), REXCVAR_GET(x360n_guest_capture_seconds));
     dash17559::InstallDisplayTransition(*runtime());
     dash17559::InstallSystemUi(*runtime());
-    x360n::ImportLaunchData(*runtime());
+    x360n::ImportLaunchData(*runtime(), dash17559::SystemXamPath());
     if (x360n::IsDashboardReturn() && !dash17559::PrepareReturnContext(*runtime()))
       REX_FATAL("17559: unsupported dashboard return flags");
     if (REXCVAR_GET(dash17559_boot_intro) && !x360n::IsDashboardReturn())
@@ -102,6 +103,7 @@ class Dash17559App : public rex::ReXApp {
     if (!device->Initialize() || !runtime()->file_system()->RegisterDevice(std::move(device))) {
       REXLOG_ERROR("dash_17559: could not mount {} at \\SystemRoot", game_data_root().string());
     }
+    dash17559::MountSystemExtPartition(*runtime()->file_system(), game_data_root());
   }
 
  private:

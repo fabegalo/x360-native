@@ -7,7 +7,7 @@ Estado atual: [STATUS](../STATUS.md). Cobertura demonstrada e pendências:
 |---|---|
 | Estrutura, migração local, validação | [Reorganização](reorganization.md) |
 | Originais, dashboards, discos e DLCs | [Layout de conteúdo](guides/content-layout.md) |
-| Compilar e desenvolver | [Building](guides/BUILDING.md) |
+| Compilar e desenvolver | [Building](guides/BUILDING.md), [chaves locais](guides/BUILDING.md#chaves-locais) |
 | Arquitetura e decisões | [Arquitetura](architecture.md) |
 | Dashboard e isolamento de versões | [Dashboard](dashboard.md) |
 | Biblioteca e AOT | [Biblioteca](guides/universal-library.md) |

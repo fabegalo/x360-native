@@ -930,3 +930,248 @@ manuais. Fatos desta mudança; o que não foi executado está marcado no fim.
 - **Não verificado:** `GetAssets`, mipmaps e o piloto não foram exercitados nessa
   execução curta (tela de título, sem gameplay); dependem de jogar até a pista.
   Títulos AOT genéricos importados ainda não recebem o serviço.
+
+## 18. Ligação da dashboard 17559 ao serviço compartilhado (2026-11-07)
+
+A própria dashboard não compilava o serviço de `titles/common/avatar/` nem
+declarava `avatar_service` no manifesto; suas chamadas de inicialização ainda
+resolviam para a falha do SDK. Agora usa o mesmo serviço dos títulos. O supervisor
+entrega os arquivos verificados de seu próprio `[avatar]`, com versão e SHA-256,
+e o catálogo deixa de ser opcional na preparação. `ImportLaunchData` recebe a
+associação do XAM já registrada pelo host da dashboard, preservando uma imagem
+original compartilhada com a Guide, sem carregar uma segunda cópia.
+
+Regressão local nova: o perfil real da dashboard declara a dependência, recebe
+os próprios dois caminhos e recusa outra versão (6 asserções). Os testes Release
+`local.dashboard 17559 receives its own verified avatar service files`,
+`avatar.AssetsRequest` e `avatar.ModifierCounts` passaram. Isso valida a ligação
+e os contratos dos assets, não a exibição de um avatar pela interface.
+
+O controle negativo sem `avatar_service`/`avatar_xam_sha256` no manifesto real
+falhou na primeira asserção (exit 42); os bytes e o timestamp foram restaurados.
+Onze casos de contratos `[dashboard-assets],[avatar]` passaram com 356 asserções.
+Após sincronizar catálogo obrigatório e inventário de recursos, quatro CTests
+Release passaram, incluindo os hashes do pacote original. Logs privados em
+`.local/tmp/avatars-{negative,contracts,ctest,tests-build}.log`.
+
+Preparação oficial concluída (exit 0, `.local/tmp/avatars-dashboard-prepare.log`).
+O primeiro preparo no sandbox recusou o caminho do cache; o primeiro preparo
+fora dele compilou, mas recusou publicar porque os fontes foram alterados durante
+a execução. O segundo reutilizou o SDK, recompilou os módulos e publicou o recibo
+com os fontes finais. Nenhuma verificação foi desativada.
+
+Execução independente Windows x64/RTX 4070/Xenos/D3D12:
+`20261107T202625Z-session-0-dash_17559` chegou a Home, inicializou o serviço com
+`00000000`, produziu READY após montar um avatar completo e decodificou 13
+animações originais. A solicitação da Guide criou e compôs sua cena; em seguida
+o guest pediu retorno à dashboard (handoff 4), abrindo
+`20261107T202728Z-session-1-dash_17559`. A causa desse retorno não foi isolada.
+Essa segunda execução terminou no limite de 180 s, sem crítico. Nova execução
+autorizada de 90 s, `20261107T203055Z-session-0-dash_17559`, navegou Home →
+Configurações → Sistema → voltar, terminando também no limite, sem crítico.
+Permanecem stubs, mensagens XLIVEBASE e erros DASHUSER nos logs. **Nenhum avatar
+foi observado na tela, nem chamadas GetManifestLocalUser/GetAssets nesses fluxos;
+não há aceite de exibição de avatar, edição ou persistência.** Sem jogos, nova
+validação de áudio, Native/Vulkan, outros hosts ou execução de CI.
+
+Os limites de metadata de perfil e de `SetCustomAsset` descritos acima continuam
+aplicáveis. Não se cria nem persiste um avatar artificial para substituir dados
+ausentes do perfil. Criação/edição original, persistência e outras revisões ainda
+precisam de implementação e validação próprias.
+
+Próxima fronteira concreta: integrar o MiniCreator original e a leitura/escrita
+da metadata real do perfil, antes de aprovar um avatar visível. O ZIP 17559 já
+fornecido contém `Guide.AvatarMiniCreator.xex`, versão/base `2.0.17559.0`, SHA-256
+`1b93032f2cec407d75e6718204624675ef4886bac576a87c60b1f0dcfb81960d`.
+Análise privada isolada (`.local/evidence/avatar-dashboard-20261107/`, sem
+execução) identificou DLL em `90100000`, entry point `90104BB0`, registro de
+recurso 22 e chamada `XamAvatarSetManifest(user, metadata, 0)` após ler 1000
+bytes com XuiResourceRead. O original faz essa gravação; não cabe escolher e
+persistir um avatar artificial no backend para substituir o fluxo. O módulo
+ainda não foi adicionado ao manifesto/preparação nem compilado para produção.
+
+## 19. Avatar do perfil e MiniCreator original (2026-11-09)
+
+**Decisão aprovada pelo mantenedor (opção A + MiniCreator):** a metadata do avatar
+do perfil é HLE sobre o armazenamento de perfil do SDK, sem executar o app 0xF3
+do XAM. O MiniCreator original roda em AOT, como `hud.xex`/`deviceselector.xex`.
+
+- Fatos do XAM 17559 (desmontagem, sem execução): `XamAvatarGetManifestLocalUser`
+  (`81674950`) e `XamAvatarSetManifest` (`81674DE0`) enviam ao app `0xF3` as
+  mensagens `0x600003` e `0x600009` (1004 bytes: usuário + 1000). Os tratadores
+  (`819823C0`, `81982768`) leem e gravam a configuração `0x63E80044` (binária,
+  1000 bytes, título `FFFE07D1`). É a única constante `0x63E8xxxx` do avatar no XAM.
+- `titles/common/avatar/avatar_profile_manifest.cpp` implementa as duas funções
+  sobre essa configuração (pacote do perfil, `settings-v1/63E80044.dat`, gravação
+  atômica do SDK). Só o usuário 0 com login (`80070525` nos demais casos). Sem
+  avatar salvo, retorna `80070490` e o título decide; nada é inventado. A gravação
+  difunde a notificação `0xE`, a mesma de `XamUserWriteProfileSettings`. O arquivo
+  entra no serviço e na DLL do MiniCreator (os módulos resolvem os próprios imports).
+- `Guide.AvatarMiniCreator.xex` (`$SystemUpdate/`, SHA-256 `1b93032f…81960d`) é
+  dependência obrigatória da 17559 e módulo `dash_17559_avatarminicreator`. O XAM o
+  carrega pelo FE/`21018` (`816C45F8` → `816C7A58`: 8 bytes, usuário em +0); o
+  DllMain `90104BB0` registra slot FF, recurso 22, callback `90102000`.
+- Teste novo `sdkcheck.Profile avatar metadata persists in the signed-in profile`
+  (17 asserções): ausência, usuários inválidos, ida e volta de 1000 bytes, arquivo
+  no pacote e leitura após reabrir o runtime. `[profile-settings]` (278),
+  `[dashboard-assets],[avatar]` do supervisor (365) e `[dashboard-assets]` local
+  (9) passaram. Preparo Release da 17559 concluído (exit 0; o supervisor criou uma
+  nova geração de SDK). `local.Motocross … avatar files` falha porque o preparo do
+  jogo aponta para a geração de SDK `g1322f113fadb`, que não existe mais; é preciso
+  prepará-lo de novo.
+- **Ainda não funciona de ponta a ponta:** o CreateProfile consulta
+  `XamPackageManagerGetFileSize` (registro original `81AAC110`), que segue vazio e
+  informa ausência do MiniCreator; por isso o código original continua indo para
+  Save Profile. Popular esse registro (inicialização original por
+  `system.manifest` ou HLE) é uma decisão de arquitetura pendente. Nenhuma sessão
+  da dashboard foi executada após esta mudança; exibição, edição e persistência pela
+  interface não foram observadas.
+
+## 20. Registro original de pacotes do sistema (2026-11-09)
+
+**Decisão aprovada pelo mantenedor:** caminho original. O registro de pacotes do
+XAM (`81AAC110`) é preenchido pelo próprio código do XAM 17559, a partir do
+`system.manifest` original na partição de extensão do HD; sem HLE de
+`XamPackageManagerGetFileSize`.
+
+- Fatos (desmontagem): o gerenciador de armazenamento original (`8167ACF8`), ao
+  montar o HD (tipo 1, estado 3), chama `816E9A58(id, tipo, dispositivo)` →
+  `816E91B8`, que ocupa um dos 8 slots `{caminho, id, tipo, flag}`. O tipo 1 usa o
+  caminho fixo `\Device\Harddisk0\SystemExtPartition\` (`816E8180`) e não lê o
+  objeto do dispositivo. O boot do XAM (`81696558`) chama `816EBDE0`, que varre os
+  slots (`816EB760`), lê cada `system.manifest` (`816ED9C0`) e mantém o de revisão
+  válida. `GetFileSize` responde só desse manifesto em memória (`816E9DC0`).
+  `FE/25007` apenas consulta um slot existente.
+- O SDK é dono dos dispositivos, então o host da dashboard e o host de UI dos
+  títulos fazem as duas chamadas originais (HD id 1, tipo 1, dispositivo nulo) logo
+  após o construtor do registro, e registram em log o manifesto carregado.
+- `$SystemUpdate/system.manifest` (SHA-256 `54bba6d3…682bf7`, `XMNP`, 32 228 bytes,
+  lista `Guide.AvatarMiniCreator.xex`) é dependência obrigatória em
+  `systemext/system.manifest`, montada somente leitura em
+  `\Device\Harddisk0\SystemExtPartition` (`src/system_ext_partition.h`). O VFS
+  resolve na ordem de registro e o `NullDevice` do SDK cobre `\Device\Harddisk0`;
+  ele é registrado de novo, com os mesmos caminhos, depois da partição.
+- `XamShowAvatarMiniCreatorUI` dos módulos (CreateProfile, Sign-in) chama o
+  original `816C45F8` (FE/21018), como `XamShowMessageBox`.
+- Preparo Release concluído (SDK reutilizado). Testes focados repetidos: hashes
+  locais (9), contratos `[dashboard-assets],[avatar]` (368) e `[avatar-profile]`
+  (17) passaram; a falha do Motocross de §19 persiste pelo mesmo motivo.
+- Sessões limitadas autorizadas (Guide pedido por cvar, sem entrada):
+  `20261109T044334Z-dash-registry-crash`: falha de acesso em `KeReleaseSemaphore`.
+  O agendador interno de tarefas do XAM (`816BA440`, export `1AF`) usava a fila em
+  `81AA08A8`, que só o boot do XAM inicializa. Agora ele é ligado ao
+  `XamTaskSchedule` do runtime (`system_ui_memory.cpp`), com a mesma assinatura
+  (callback, contexto, atributos, handle).
+  `20261109T045421Z-dash-registry-flush`: sem falha. O manifesto é lido, as duas
+  tarefas originais (`816EB630`, `816EB690`) são agendadas, mas
+  `XeKeysVerifyRSASignature` é STUB do SDK e rejeita a assinatura. Sem manifesto
+  válido, a varredura original espera sem prazo o evento `81A9E0F4` de novo
+  dispositivo (`816EB9F0`), e a thread da UI do sistema para ali.
+  **Bloqueio:** verificar a assinatura exige decisão do mantenedor. Sucesso fixo
+  não é permitido, e chave não pode ser versionada.
+- **Decisão do mantenedor:** verificação RSA real com chave local. O patch 0259
+  do SDK implementa `XeKeysVerifyRSASignature(chave, digest, assinatura)`. A chave
+  vem de `.local/keys/rsa-public-keys.txt` (passado pelo supervisor), na linha
+  `rsa-pub-0 <hex>`: o blob `XECRYPT_RSAPUB_2048` de 0x110 bytes, fornecido pelo
+  usuário. Decodificado com a chave 0, o manifesto original mostrou o formato:
+  assinatura em inteiro little-endian (bytes 56..311), imagem PKCS#1 v1.5 com
+  DigestInfo SHA-1. O digest é SHA-1 de 312 pelo comprimento be32 em 316 e é igual
+  ao gravado em 36. `[xekeys-rsa]` passa: 24 asserções, incluindo o manifesto
+  original e a rejeição de digest alterado.
+- `20261109T054714Z-dash-registry-rsa`: `XeKeysVerifyRSASignature(key 0) -> true`;
+  as duas tarefas originais são agendadas, mas `816EBDE0` não retorna e o Guide
+  não abre. `20261109T060401Z-dash-registry-watch` (leitura temporária do
+  registro em memória, já removida do código): `+0` (inicializado) = 0, `+0xA4`
+  (manifesto escolhido) = 0, seção crítica `+0x88` livre. A varredura rejeitou o
+  manifesto depois da assinatura, em `816E9FE8`/`816EDAA0`, e está na espera
+  original por novo dispositivo. O log não mostra nenhuma busca de arquivo na
+  SystemExtPartition, então a causa não é arquivo ausente. **Causa ainda não
+  identificada.**
+- **Causa da rejeição (identificada):** a varredura compara o campo de versão do
+  manifesto (`+332` = `20449700`, isto é 2.0.17559.0) com `816CECD8`, que monta o
+  valor a partir de `XboxKrnlVersion`. O SDK publica uma versão fictícia,
+  2.65535.65535 ("we just fake something here"). Experimento temporário (já
+  removido), com o host escrevendo 2.0.17559.0:
+  `20261109T062625Z-dash-version-layout`. Nele a varredura aceita a
+  versão e procura cada arquivo em `\SystemExtPartition\20449700\<nome>`. Com os
+  146 originais do zip de atualização (86 MB, cópia temporária já apagada) não falta
+  nenhum, mas o conteúdo é validado por `XexLoadImageHeaders`, `XeCryptRotSumSha`,
+  `XeKeysGetKey` e `XeCryptBnQwBeSigVerify`, todos STUB no SDK. A varredura volta a
+  esperar.
+- **Caminho fiel (implementado):** o host publica `XboxKrnlVersion` 2.0.17559.0;
+  a preparação traz os 146 originais, cada um na pasta de versão do seu registro
+  (`20449700`, exceto PlayReady `2506fd00`, Zune `20417f00` e o launcher XNA
+  `32000100`). O patch 0259 implementa as quatro funções. Sessão
+  `20261109T080415Z-dash-registry-check`: manifesto aceito, 30 cabeçalhos
+  XEX/LEX lidos e nenhum arquivo ausente. Falta só o XTT: `XeKeysGetKey(0x39)` não
+  tem chave local, então `XeCryptBnQwBeSigVerify` retorna FALSE. O carregador de
+  fontes tenta de novo a cada quadro (14 mil chamadas em 40 s). Antes, o stub
+  devolvia r3 ≠ 0 e "aprovava" a fonte.
+- **XTT confirmado:** a chave 0x39 do usuário é igual à chave 0. O formato BnQwBe
+  está certo, mas a exponenciação do console deixa o resultado em forma de
+  Montgomery: bloco = sig^e · R^−(e−1) mod n, com R = 2^2048. Desmascarado, o
+  bloco do `XenonSCLatin.xtt` dá zeros, `01`, o salt `XBOX360XTT`,
+  H' = SHA1(8 zeros, hash, salt) e `BC`. O teste local passa, e o loop de fontes
+  sumiu (4 chamadas, todas TRUE).
+- **Evento de boot:** a varredura agenda suas tarefas e espera o KEVENT
+  `81A9E0F4`, criado pelo init do XAM (`816968A8`) e sinalizado pela thread
+  `816964A8` depois de `UsbdBootEnumerationDoneEvent` e do IOCTL a
+  `\Device\BuiltInMuSfc`. O host publica esse evento já sinalizado. Com isso a
+  varredura retorna e o Guide original é composto
+  (`20261109T080415Z-dash-registry-check`).
+- **Pacotes de conteúdo (implementado, patch 0260):** o manifest também lista 4
+  pacotes PIRS (`FFFE07DF00000001/2/6/8`, entre eles o de avatares). `816EDAA0 →
+  816EC760 → 816EF870 → 81680128` traduz o caminho com `ObTranslateSymbolicLink`
+  e nomeia a montagem com `XeCryptMd5`; os dois eram STUB e o XAM abria um caminho
+  vazio. Esse caminho só abre o arquivo, verifica o cabeçalho (chave 0) e o SHA,
+  sem criar dispositivo STFS. O caminho real é
+  `SystemExtPartition\Content\0000000000000000\FFFE07DF\00008000\<nome>`, e a
+  preparação agora traz os 4 ali (150 arquivos). Sessão
+  `20261109T133435Z-dash-package-files`: as 5 assinaturas com chave 0 são TRUE e
+  o registro escolhe `manifest=001E1000`.
+- **Consultas do registro:** `GetFeatureRequiresUpdateStrings`, `GetFilePathW`,
+  `FindPackageContainingIndexedXEX` e `GetAuthoritativeManifestVersion` usam o XAM
+  original nos módulos de UI. `GetExperienceMode` (816E9AC0) envia 0x25005 ao app
+  0xFE, que este host não registra; o import chama direto o despachante original
+  816EBC58 (atalho marcado no código). 8169D088 lê o gerenciador de títulos do XAM,
+  que não é construído aqui; sem ele, retorna "sem lançamento e sem erro". O item
+  Avatar do Guide passa da checagem e chama `XamLaunchAvatarEditor`, ainda STUB:
+  `AvatarEditor.xex` não é compilado.
+- **MiniCreator na criação de perfil (patch 0261):** depois do nome, o createprofile
+  original (90106688) chama `XamShowAvatarMiniCreatorUI(user, 1)`. O import ia
+  para o XAM 816C45F8, que envia FE/21018 pela tabela de apps do guest (816BC968)
+  e recebia 1627: a tela de espera AddXboxLive ficava branca. O SDK agora envia
+  FE/21018 `{user, flags}` pelo app 0xFE, como já faz com o Guide. Antes do
+  `SetManifest`, o MiniCreator lê o manifesto do avatar escolhido com
+  `XuiResourceOpen/Read/Close`, que eram STUB e gravavam memória não iniciada; agora
+  vão ao XAM original (39F/3A0/3A1). Sessão `20261109T160052Z-dash-minicreator`
+  (entrada por script em cópia dos perfis): perfil criado, MiniCreator mostra os
+  12 avatares e o 3D, `SetManifest(0) -> 0` grava 1000 bytes com entradas de
+  assets, e a página original "Salvar Perfil" aparece.
+- **Gamerpic padrão (patch 0262):** o createprofile (9010B370) chama
+  `XamWriteGamerTile(0, FFFE07D1, 0002000N, 0001000N, 0)`. No XAM original, o XGI
+  B0033 (8191DA68) lê as duas imagens pelo ReadTile, que usa o cache que 8191BCB8
+  carrega do shrdres (`64_/32_fffe07d10002%04x0001%04x.png`, índices 0 a 12). O
+  export sempre falhava; agora lê o par de `media:\shrdres.xzp` e grava como
+  imagem pública com a chave `{title}{large}{small}`. Pacotes de gamerpic de títulos
+  e enumerações ainda falham. Sessão `20261109T173239Z-dash-default-picture`
+  (entrada por script em cópia dos perfis): `tile_64.png` do perfil novo é idêntico
+  a `64_fffe07d10002000100010001.png`, e a imagem aparece em "Salvar Perfil" e no
+  painel Perfil.
+- **Troca de gamerpic (patch 0263):** o gamerprofile adiciona as 12 imagens padrão
+  (901231D8, ids `0002000N/0001000N`, N 1 a 12) e pede a cada uma o locator do
+  shrdres (901223E0). Os exports de locator trocavam os bytes do nome do guest duas
+  vezes, e o XUI recebia um nome ilegível. Sessão
+  `20261109T180058Z-dash-change-picture-2`: as 12 imagens aparecem; escolher a 3ª
+  grava `tile_64/32.png` idênticos a `64_/32_fffe07d10002000300010003.png` com a
+  chave correspondente, e o cartão mostra a nova imagem.
+- **Sem chaves RSA (patch 0264):** o XAM verifica com a chave 0 os pacotes PIRS
+  `FFFE07DF/00008000/FFFE07DF0000000{1,2,6,8}` (8167C370) ao iniciar o host XUI.
+  Esses pacotes, o manifesto e as fontes têm as assinaturas originais fixadas por
+  hash ([chaves locais](guides/BUILDING.md#chaves-locais)). Sessão
+  `20261109T235454Z-dash-no-rsa-key-2`, sem arquivo de chaves: nenhum erro de chave,
+  e o Guide abre.
+- **Ainda não funciona:** o painel Perfil original mostra a gamerpic, não o corpo do
+  avatar; `XamGetDefaultSystemImage` continua STUB (a imagem `defaultsystemimage.png`
+  vem do recurso `xam` do XAM, que não é preparado); o item "Personalizar" (Y)
+  depende de `XamLaunchAvatarEditor`.

@@ -1,0 +1,12 @@
+# Original Retail 17559 module, extracted unchanged from
+# SystemUpdate_17559_USB.zip / $SystemUpdate/Guide.AvatarMiniCreator.xex. SHA-256:
+# 1b93032f2cec407d75e6718204624675ef4886bac576a87c60b1f0dcfb81960d.
+[project]
+name = "dash_17559"
+sdk_version = "0.10.0"
+game_root = "../../../.local/inputs/dashboards/17559/runtime"
+
+[entrypoint]
+file_path = "../../../.local/inputs/dashboards/17559/runtime/system/Guide.AvatarMiniCreator.xex"
+out_directory_path = "../generated/avatarminicreator"
+is_dll = true

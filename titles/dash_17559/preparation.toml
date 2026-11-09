@@ -5,7 +5,7 @@ label_en = "Retail dashboard 17559"
 limitations_en = "Menu, Castle Crashers cycle and local profile creation/switching through the original UI validated locally. One active local profile in slot 0; Xbox Live, full Guide coverage and game saves remain pending. Original content is never downloaded."
 session = true
 limitations = "Menu, ciclo com Castle Crashers e criação/troca de perfis locais pela interface original validados. Um perfil local ativo no slot 0; Xbox Live, cobertura completa do Guide e saves de jogos seguem pendentes. Nenhum download de conteúdo original."
-runtime_files = ["rexruntime.dll", "rexgpu-xenos.dll", "dash_17559_bootanim.dll", "dash_17559_gamerprofile.dll", "dash_17559_xam_ui.dll", "dash_17559_signin.dll", "dash_17559_createprofile.dll", "dash_17559_vk.dll", "dash_17559_hud.dll", "dash_17559_session_ui.dll", "dash_17559_deviceselector.dll"]
+runtime_files = ["rexruntime.dll", "rexgpu-xenos.dll", "dash_17559_bootanim.dll", "dash_17559_gamerprofile.dll", "dash_17559_xam_ui.dll", "dash_17559_signin.dll", "dash_17559_createprofile.dll", "dash_17559_vk.dll", "dash_17559_hud.dll", "dash_17559_session_ui.dll", "dash_17559_deviceselector.dll", "dash_17559_avatarminicreator.dll"]
 
 [[files]]
 path = "dash.xex"
@@ -67,16 +67,15 @@ sha256 = "876ddbb333d83f408ab7c69267703e623daef6da5b1eb3302bd94d246155724e"
 path = "system/hud.xex"
 source_name = "hud.xex"
 sha256 = "37e10612afde211e1d349838704f7cc2648ad5a4d1f8ca459f18ecd2c1f31ac7"
-# Avatar catalog of this dashboard, optional for the dashboard itself. From the
+# Avatar catalog used by this dashboard and its titles. From the
 # official SystemUpdate_17559_USB.zip: $SystemUpdate/FFFE07DF00000002 (PIRS storage
 # pack "AvatarAsset", title FFFE07DF, version 0x20449700), extracted unchanged.
 [[files]]
 path = "avatar/AvatarAssetPack.toc"
 source_name = "AvatarAssetPack.toc"
 sha256 = "a8c90b3db5c6349a55fcb72eda47e08e4940f88fabda4ff73025d9728832daa8"
-optional = true
 
-# Original avatar service of titles started from this dashboard (manifest
+# Original avatar service of this dashboard and titles started from it (manifest
 # avatar_service = "2.0.17559.0", titles/common/avatar, docs/avatar-system.md §17).
 # Hashes are the [[files]] entries above. The supervisor verifies both files at every
 # launch and refuses the title, naming version and file, when one is missing or
@@ -93,3 +92,623 @@ catalog.provenance = "SystemUpdate_17559_USB.zip, $SystemUpdate/FFFE07DF00000002
 path = "system/deviceselector.xex"
 source_name = "deviceselector.xex"
 sha256 = "2334c6772fd54201e60792c70a54e4714aaf74d45f657013ebe5da3737e06c0c"
+
+# Original avatar mini creator of CreateProfile and the Guide, from the same
+# official update: $SystemUpdate/Guide.AvatarMiniCreator.xex (FE/21018).
+[[files]]
+path = "system/Guide.AvatarMiniCreator.xex"
+source_name = "Guide.AvatarMiniCreator.xex"
+sha256 = "1b93032f2cec407d75e6718204624675ef4886bac576a87c60b1f0dcfb81960d"
+
+# Original system package manifest, installed on the console's hard drive
+# system extension partition: $SystemUpdate/system.manifest. Mounted read-only as
+# \Device\Harddisk0\SystemExtPartition for the original XAM package registry.
+[[files]]
+path = "systemext/system.manifest"
+source_name = "system.manifest"
+sha256 = "54bba6d3c7f1c48ef6419dbc3f556abc250ae9a8550a9bbf690d0e3f68682bf7"
+# The 146 files system.manifest lists for 2.0.17559.0, each in its record's version
+# folder (20449700 = manifest +332, except PlayReady, Zune and the XNA launcher);
+# XAM 816EDAA0 discards the whole registry when any one is missing or invalid.
+[[files]]
+path = "systemext/20449700/AvatarEditor.xex"
+source_name = "AvatarEditor.xex"
+sha256 = "4f322fe7b9956cf1faa74345b0c723b0ec92541d7b83655a3c823a3bdf4e2598"
+[[files]]
+path = "systemext/20449700/BiometricSetup.xex"
+source_name = "BiometricSetup.xex"
+sha256 = "c3e71f1f1340652f3980c5f219ec703cb72236738941b1afbed6bf227820312c"
+[[files]]
+path = "systemext/20449700/dash.ClosedCaptionDll.xex"
+source_name = "dash.ClosedCaptionDll.xex"
+sha256 = "d2eac198aba838e9507ce6a74cdca5b1005971578a8a4095fbd007bda8d0154c"
+[[files]]
+path = "systemext/20449700/dash.ExtraAVCodecs.xex"
+source_name = "dash.ExtraAVCodecs.xex"
+sha256 = "0b14919ab753784f95658b7bee388a1c75fc5d1d430f18090246bdb514acdec1"
+[[files]]
+path = "systemext/20449700/dash.ExtraAVCodecs2.xex"
+source_name = "dash.ExtraAVCodecs2.xex"
+sha256 = "cd39ead58a5fe9943b2d0d73d06996cd258cf31a205cf3fa906e5e712a95ec05"
+[[files]]
+path = "systemext/20449700/Dash.FieldCalibration.lex"
+source_name = "Dash.FieldCalibration.lex"
+sha256 = "7f8f98b7eda7191edf5588fe2befa7ec5d3ab396b59532e7be1b1ccec57989ce"
+[[files]]
+path = "systemext/20449700/Dash.Kiosk.lex"
+source_name = "Dash.Kiosk.lex"
+sha256 = "2805674d055d1cca7523b2ff4a330e7568762cd1d2e43f6ca6c1a42515af9dc2"
+[[files]]
+path = "systemext/20449700/dash.natalpregame.xex"
+source_name = "dash.natalpregame.xex"
+sha256 = "b23af6c3f645a38e52dd6c8faac2b391e3c666837a3e03ffbcc0323aa6b2b0dc"
+[[files]]
+path = "systemext/20449700/Dash.NetworkStorage.lex"
+source_name = "Dash.NetworkStorage.lex"
+sha256 = "e27cb7863f55981ecb83cb02d2d88d24467dbe0d851a024c35abe58550c3cc48"
+[[files]]
+path = "systemext/20449700/Dash.NuiTroubleshooter.lex"
+source_name = "Dash.NuiTroubleshooter.lex"
+sha256 = "606ab5233dedbaa5f23b4799b0c2a70c85734fcee3f81e8c2cbbe1301c3ea16f"
+[[files]]
+path = "systemext/20449700/Dash.Search.xex"
+source_name = "Dash.Search.xex"
+sha256 = "39a08db2f55947634a25edf800c1acb8743639d0a51fdca5a3721e92cb7f1611"
+[[files]]
+path = "systemext/20449700/dash.xex"
+source_name = "dash.xex"
+sha256 = "fc4ad90638a8fff7759734dee364a48964e164d567699ca7e7aca2dc06ebc8c2"
+[[files]]
+path = "systemext/20449700/dashnui.xex"
+source_name = "dashnui.xex"
+sha256 = "5cbccc32723f460d0c6009af8d3611576926bcecf51381e00de7ca0cb6273c0b"
+[[files]]
+path = "systemext/20449700/Guide.AccountRecovery.xex"
+source_name = "Guide.AccountRecovery.xex"
+sha256 = "2eafe1d121dd3b8d9a4cc7fd3c3c72087c9d12ddbf032b2c511001c1af3e7afe"
+[[files]]
+path = "systemext/20449700/Guide.AvatarMiniCreator.xex"
+source_name = "Guide.AvatarMiniCreator.xex"
+sha256 = "1b93032f2cec407d75e6718204624675ef4886bac576a87c60b1f0dcfb81960d"
+[[files]]
+path = "systemext/20449700/Guide.CSVTrans.xex"
+source_name = "Guide.CSVTrans.xex"
+sha256 = "732467a8e1a7a1a68d607c012342d147c3eb4d4971dd6e63db305f205cdb1fbe"
+[[files]]
+path = "systemext/20449700/Guide.Fitness.xex"
+source_name = "Guide.Fitness.xex"
+sha256 = "feb3aae424cbb31ba85b871659895a447e9ff69ee6b444b4a453128751abb355"
+[[files]]
+path = "systemext/20449700/Guide.NuiTroubleshooter.xex"
+source_name = "Guide.NuiTroubleshooter.xex"
+sha256 = "40e69641c83e9499604972a50d09bdcb23d51b3c24b08a67857033fe528190d5"
+[[files]]
+path = "systemext/20449700/Guide.TFA.xex"
+source_name = "Guide.TFA.xex"
+sha256 = "37ab4391015c23f044719c806959be5fc87659d61cd5cec4c75ce288ede5a9e5"
+[[files]]
+path = "systemext/20449700/L.AvatarEditor.xex.common.xzp"
+source_name = "L.AvatarEditor.xex.common.xzp"
+sha256 = "814fbd2aed7ccaf1b18e67d4dbc4d0eaf3980a0370532f0ebebdfd5d023019a3"
+[[files]]
+path = "systemext/20449700/L.AvatarEditor.xex.controlp.xzp"
+source_name = "L.AvatarEditor.xex.controlp.xzp"
+sha256 = "14c11de95d47e2c5693e10cfc34c302715ea26c15fa2afcd57a191861ce84ee6"
+[[files]]
+path = "systemext/20449700/L.AvatarEditor.xex.MEDIA.xzp"
+source_name = "L.AvatarEditor.xex.MEDIA.xzp"
+sha256 = "c220a5c3143b3ce269943c139cffb9d49e21d1a02c7261e46024ab75a48a4a32"
+[[files]]
+path = "systemext/20449700/L.BiometricSetup.xex.biometri.xzp"
+source_name = "L.BiometricSetup.xex.biometri.xzp"
+sha256 = "f5ba7e270e294617197d48d1ea4e4d86c85c2b7381da483d7a8da94a371dd833"
+[[files]]
+path = "systemext/20449700/L.BiometricSetup.xex.controlp.xzp"
+source_name = "L.BiometricSetup.xex.controlp.xzp"
+sha256 = "14c11de95d47e2c5693e10cfc34c302715ea26c15fa2afcd57a191861ce84ee6"
+[[files]]
+path = "systemext/20449700/L.CreateProfile.xex.cp.xzp"
+source_name = "L.CreateProfile.xex.cp.xzp"
+sha256 = "4d638c5612c0b5eb99435f5a3108b01dbf30e516db8a3e66299728c464a68b5a"
+[[files]]
+path = "systemext/20449700/L.Dash.FamilyCenter.xex.familyce.xzp"
+source_name = "L.Dash.FamilyCenter.xex.familyce.xzp"
+sha256 = "c8a3e14d0c280d111627bc775fe12563472e2002fd1583fc6a8217634b79bf84"
+[[files]]
+path = "systemext/20449700/L.Dash.FamilyCenter.xex.familyco.xzp"
+source_name = "L.Dash.FamilyCenter.xex.familyco.xzp"
+sha256 = "d33d0605721fdea15e68d0cff1ca22adfa736758a92ef3cee34bb000c4cdb7e9"
+[[files]]
+path = "systemext/20449700/L.Dash.FamilyWizard.lex.familyco.xzp"
+source_name = "L.Dash.FamilyWizard.lex.familyco.xzp"
+sha256 = "d33d0605721fdea15e68d0cff1ca22adfa736758a92ef3cee34bb000c4cdb7e9"
+[[files]]
+path = "systemext/20449700/L.Dash.FamilyWizard.lex.xzp.xzp"
+source_name = "L.Dash.FamilyWizard.lex.xzp.xzp"
+sha256 = "25d5dda3c6d43b3ecdde03b0a8106e00532d598559aa2da4556a7b2f9589f221"
+[[files]]
+path = "systemext/20449700/L.Dash.FieldCalibration.lex.fieldxzp.xzp"
+source_name = "L.Dash.FieldCalibration.lex.fieldxzp.xzp"
+sha256 = "6682b63087948897b39b735ee69b704d3c577249e58cb237046b46021cdae28b"
+[[files]]
+path = "systemext/20449700/L.Dash.LF.GamerTagChange.lex.DashUI.xzp"
+source_name = "L.Dash.LF.GamerTagChange.lex.DashUI.xzp"
+sha256 = "79d20e1a3b442f1e28718b268423886444e419587240952c7994346b25ecdbdc"
+[[files]]
+path = "systemext/20449700/L.Dash.MP.AccountMgmt.lex.DashUI.xzp"
+source_name = "L.Dash.MP.AccountMgmt.lex.DashUI.xzp"
+sha256 = "888b96a828b88f3c8a0d3796f3040e8bd9b2d42af8f97fbbbe0fea378a12ffc0"
+[[files]]
+path = "systemext/20449700/L.Dash.MP.ContentExplorer.lex.DashUI.xzp"
+source_name = "L.Dash.MP.ContentExplorer.lex.DashUI.xzp"
+sha256 = "5a38b1cce474c963e2e8d6e7fab2a45c4291ba76729b7966a5840eb9b1319b38"
+[[files]]
+path = "systemext/20449700/L.Dash.MP.Core.xex.SharedUI.xzp"
+source_name = "L.Dash.MP.Core.xex.SharedUI.xzp"
+sha256 = "a7abf5477d0509e31b0f37999be508677271b165855911739d7e82d924ba2c5c"
+[[files]]
+path = "systemext/20449700/L.Dash.MP.LiveSignup.lex.DashUI.xzp"
+source_name = "L.Dash.MP.LiveSignup.lex.DashUI.xzp"
+sha256 = "f1cc8752d28b90490d252835f119ecd1ab5d9b902f0100a4f00f448b8a4f8165"
+[[files]]
+path = "systemext/20449700/L.Dash.MP.LiveSignup.lex.media.xzp"
+source_name = "L.Dash.MP.LiveSignup.lex.media.xzp"
+sha256 = "df68006195c03a66f2b19ae77a828e04644551d512cfe9010c349db34fb7ec9d"
+[[files]]
+path = "systemext/20449700/L.Dash.MP.MicrosoftStore.lex.CntryUI.xzp"
+source_name = "L.Dash.MP.MicrosoftStore.lex.CntryUI.xzp"
+sha256 = "de0748073ca22a4fefb563b468a75f914ad5f73dd87136e3713f910b251c806f"
+[[files]]
+path = "systemext/20449700/L.Dash.MP.MicrosoftStore.lex.DashUI.xzp"
+source_name = "L.Dash.MP.MicrosoftStore.lex.DashUI.xzp"
+sha256 = "67a72c525f330635f447c7e63cccd0044eededc04a5162798f18e815fde3fe65"
+[[files]]
+path = "systemext/20449700/L.Dash.MP.MicrosoftStore.lex.media.xzp"
+source_name = "L.Dash.MP.MicrosoftStore.lex.media.xzp"
+sha256 = "df68006195c03a66f2b19ae77a828e04644551d512cfe9010c349db34fb7ec9d"
+[[files]]
+path = "systemext/20449700/L.Dash.MP.Purchase.lex.DashUI.xzp"
+source_name = "L.Dash.MP.Purchase.lex.DashUI.xzp"
+sha256 = "d9748e2cea0851d606b086897ff1299940a2f7fd9051c24e76dcff86d2fd8a4d"
+[[files]]
+path = "systemext/20449700/L.dash.natalpregame.xex.natalpre.xzp"
+source_name = "L.dash.natalpregame.xex.natalpre.xzp"
+sha256 = "d1bb1fd1edaca2f8b62451375238e7b1fdce98ea546ec422e2cdf47ed4730636"
+[[files]]
+path = "systemext/20449700/L.Dash.NetworkStorage.lex.xzp.xzp"
+source_name = "L.Dash.NetworkStorage.lex.xzp.xzp"
+sha256 = "817021b0e6d80574d7376b9eb273320de57a847d7916865313cabaeea1090399"
+[[files]]
+path = "systemext/20449700/L.Dash.NuiTroubleshooter.lex.nuitsxzp.xzp"
+source_name = "L.Dash.NuiTroubleshooter.lex.nuitsxzp.xzp"
+sha256 = "55fcb8c50b74281e75272aa625b56535e8e8914921c9fee4edc87a76ad8bbe00"
+[[files]]
+path = "systemext/20449700/L.Dash.OnlineCommon.lex.ekmedia.xzp"
+source_name = "L.Dash.OnlineCommon.lex.ekmedia.xzp"
+sha256 = "cd358d1fe210ff83e05f85234148627e5f4668181c3922744f2b5ca232295fa3"
+[[files]]
+path = "systemext/20449700/L.Dash.OnlineCommon.lex.vkmedia.xzp"
+source_name = "L.Dash.OnlineCommon.lex.vkmedia.xzp"
+sha256 = "ad941f38269a9b5c83064ea24d44a1f69c5dbffdf7b5f2f7c448bd1017ec2991"
+[[files]]
+path = "systemext/20449700/L.Dash.PrivacyUI.xex.familyco.xzp"
+source_name = "L.Dash.PrivacyUI.xex.familyco.xzp"
+sha256 = "d33d0605721fdea15e68d0cff1ca22adfa736758a92ef3cee34bb000c4cdb7e9"
+[[files]]
+path = "systemext/20449700/L.Dash.PrivacyUI.xex.privacyu.xzp"
+source_name = "L.Dash.PrivacyUI.xex.privacyu.xzp"
+sha256 = "1a14d56cf57557017ed3d10c6f69bc4282602b0ec586f814a0c0869b8542499e"
+[[files]]
+path = "systemext/20449700/L.Dash.Search.lex.dashsear.xzp"
+source_name = "L.Dash.Search.lex.dashsear.xzp"
+sha256 = "70007914ca27dea095953e251d703a001d8ab4b8ddfe8f8e554d9ca8430e0f26"
+[[files]]
+path = "systemext/20449700/L.Dash.Search.lex.vkmedia.xzp"
+source_name = "L.Dash.Search.lex.vkmedia.xzp"
+sha256 = "ad941f38269a9b5c83064ea24d44a1f69c5dbffdf7b5f2f7c448bd1017ec2991"
+[[files]]
+path = "systemext/20449700/L.Dash.Search.xex.dashsear.xzp"
+source_name = "L.Dash.Search.xex.dashsear.xzp"
+sha256 = "1c295d7682907e8e09d76c8a023c4949b726c4b19072cd42fbe912afe0310994"
+[[files]]
+path = "systemext/20449700/L.Dash.Search.xex.vkmedia.xzp"
+source_name = "L.Dash.Search.xex.vkmedia.xzp"
+sha256 = "ad941f38269a9b5c83064ea24d44a1f69c5dbffdf7b5f2f7c448bd1017ec2991"
+[[files]]
+path = "systemext/20449700/L.Dash.Social.lex.xzp.xzp"
+source_name = "L.Dash.Social.lex.xzp.xzp"
+sha256 = "ea0c30a097ab3f77af33da89be8c0eee0de2110f3de4dad72b818f4f24a71f6c"
+[[files]]
+path = "systemext/20449700/L.dash.xex.arcade.xzp"
+source_name = "L.dash.xex.arcade.xzp"
+sha256 = "a7c779abbb8e8979537795ab4038d400a78ee2dc771877252b2b7b1161b456ec"
+[[files]]
+path = "systemext/20449700/L.dash.xex.consoles.xzp"
+source_name = "L.dash.xex.consoles.xzp"
+sha256 = "819a77f998c1a46e71c980e3d3e6f8b761114faf839d7522cc44c62ce474c4d9"
+[[files]]
+path = "systemext/20449700/L.dash.xex.controlp.xzp"
+source_name = "L.dash.xex.controlp.xzp"
+sha256 = "14c11de95d47e2c5693e10cfc34c302715ea26c15fa2afcd57a191861ce84ee6"
+[[files]]
+path = "systemext/20449700/L.dash.xex.contui.xzp"
+source_name = "L.dash.xex.contui.xzp"
+sha256 = "da130a53291ab7e7774ead933bdb5e36a51c85e66d25b44883be30cc2c49e50a"
+[[files]]
+path = "systemext/20449700/L.dash.xex.dashcomm.xzp"
+source_name = "L.dash.xex.dashcomm.xzp"
+sha256 = "814fbd2aed7ccaf1b18e67d4dbc4d0eaf3980a0370532f0ebebdfd5d023019a3"
+[[files]]
+path = "systemext/20449700/L.dash.xex.dashmain.xzp"
+source_name = "L.dash.xex.dashmain.xzp"
+sha256 = "b4c9bda0075a9630d9e9805b0c9c6207731612baaad1217e1bda4ce9ac59f2a7"
+[[files]]
+path = "systemext/20449700/L.dash.xex.download.xzp"
+source_name = "L.dash.xex.download.xzp"
+sha256 = "425e6a46cb868f191c50b6cc9c7e5b5264b4b8d52c9dc9406a1ebf9ea88365bb"
+[[files]]
+path = "systemext/20449700/L.dash.xex.dvd.xzp"
+source_name = "L.dash.xex.dvd.xzp"
+sha256 = "9c4a15e793d06aadbb95659de119bd598f16123a3a4335d43a3c0c4aaed0c447"
+[[files]]
+path = "systemext/20449700/L.dash.xex.epix.xzp"
+source_name = "L.dash.xex.epix.xzp"
+sha256 = "cab7730ce0b6d744c3603d6dcd03c7eabe4eb5cb1250467048ba73d5d562037d"
+[[files]]
+path = "systemext/20449700/L.dash.xex.gamer.xzp"
+source_name = "L.dash.xex.gamer.xzp"
+sha256 = "185e391d09a6dd3ea1bf4706dab132fbcd483c203fd6fe83de3ba90818bf1072"
+[[files]]
+path = "systemext/20449700/L.dash.xex.gamercar.xzp"
+source_name = "L.dash.xex.gamercar.xzp"
+sha256 = "d64a41932c513c285f7e5127b54c1261c7a250d40c02fa7a745e6796cc9ed857"
+[[files]]
+path = "systemext/20449700/L.dash.xex.hubui.xzp"
+source_name = "L.dash.xex.hubui.xzp"
+sha256 = "1a2fcc79db8eaeb69e86610902ad389fc257bdb1433392a86a94443f065cb8e0"
+[[files]]
+path = "systemext/20449700/L.dash.xex.iptv.xzp"
+source_name = "L.dash.xex.iptv.xzp"
+sha256 = "e6b1f22891cc65c4d02db22ede3cb8939ece3b7eae7e7e49466614340b9c3473"
+[[files]]
+path = "systemext/20449700/L.dash.xex.memory.xzp"
+source_name = "L.dash.xex.memory.xzp"
+sha256 = "ce02ef4f41dc03f02bb059b295289aeb5686131fc40c6a8f8eb2bdbc716dcd67"
+[[files]]
+path = "systemext/20449700/L.dash.xex.music.xzp"
+source_name = "L.dash.xex.music.xzp"
+sha256 = "e7bbbcb5c4b636ec30fd8340f279446a0cfee3dce98f06a6b19a9efca9248d11"
+[[files]]
+path = "systemext/20449700/L.dash.xex.network.xzp"
+source_name = "L.dash.xex.network.xzp"
+sha256 = "28bbefa602b53c0e7c98eb2600b41554251ea85cb055397c8dde262dfb656c89"
+[[files]]
+path = "systemext/20449700/L.dash.xex.oobe.xzp"
+source_name = "L.dash.xex.oobe.xzp"
+sha256 = "770efeedd47d7c057da47a69289a485037dd82158129de40dec0bfc70d9e8aa9"
+[[files]]
+path = "systemext/20449700/L.dash.xex.parental.xzp"
+source_name = "L.dash.xex.parental.xzp"
+sha256 = "fe3da8df5be7f59ec28f9cfcbda0e44ef809cb56755b91fff96a556eb265b3f3"
+[[files]]
+path = "systemext/20449700/L.dash.xex.pictures.xzp"
+source_name = "L.dash.xex.pictures.xzp"
+sha256 = "509f3339ec6c28e67b1c2bdf9963589c5d63d39f131d1acfd4f8b7fd33719b07"
+[[files]]
+path = "systemext/20449700/L.dash.xex.SharedUI.xzp"
+source_name = "L.dash.xex.SharedUI.xzp"
+sha256 = "a7abf5477d0509e31b0f37999be508677271b165855911739d7e82d924ba2c5c"
+[[files]]
+path = "systemext/20449700/L.dash.xex.signinpr.xzp"
+source_name = "L.dash.xex.signinpr.xzp"
+sha256 = "fba2c0c42521de0371cd289acb68b891c58d3a0cf23e3c8d1c8d85395a52fef8"
+[[files]]
+path = "systemext/20449700/L.dash.xex.signupbo.xzp"
+source_name = "L.dash.xex.signupbo.xzp"
+sha256 = "47040cd438de8fa2e2e2528c74538b7bbd5d3bce8392403979fae9f40ef9721c"
+[[files]]
+path = "systemext/20449700/L.dash.xex.slots.xzp"
+source_name = "L.dash.xex.slots.xzp"
+sha256 = "acb0c04c2c8558702d616083120e023f9708b96428c60157e32e084c106342fc"
+[[files]]
+path = "systemext/20449700/L.dash.xex.socxzp.xzp"
+source_name = "L.dash.xex.socxzp.xzp"
+sha256 = "64c1fc63850a88c0a43df5d11d427433965ba49e80402508e8f038fe3c0eb2f9"
+[[files]]
+path = "systemext/20449700/L.dash.xex.thermal.xzp"
+source_name = "L.dash.xex.thermal.xzp"
+sha256 = "503899038e454cd68bdd509607a8a30dc841cc5230868d7456ad4c1b5c5df763"
+[[files]]
+path = "systemext/20449700/L.dash.xex.videos.xzp"
+source_name = "L.dash.xex.videos.xzp"
+sha256 = "8de4727a2085128045b54137c64d5216785bb5a5d09f4f48848ed2cbf3d458a6"
+[[files]]
+path = "systemext/20449700/L.dashnui.xex.speechpa.xzp"
+source_name = "L.dashnui.xex.speechpa.xzp"
+sha256 = "9fe13a7ab98724e33fbd37dbf8ffad552719ca2923c2cc7451cfafb058722b5e"
+[[files]]
+path = "systemext/20449700/L.deviceselector.xex.media.xzp"
+source_name = "L.deviceselector.xex.media.xzp"
+sha256 = "abbab82927eb6840f36a83533789c7ca39018d622d11ca9cb78d678452d1de71"
+[[files]]
+path = "systemext/20449700/L.DvdXPlayer.xex.dashcomm.xzp"
+source_name = "L.DvdXPlayer.xex.dashcomm.xzp"
+sha256 = "814fbd2aed7ccaf1b18e67d4dbc4d0eaf3980a0370532f0ebebdfd5d023019a3"
+[[files]]
+path = "systemext/20449700/L.DvdXPlayer.xex.dvd.xzp"
+source_name = "L.DvdXPlayer.xex.dvd.xzp"
+sha256 = "9c4a15e793d06aadbb95659de119bd598f16123a3a4335d43a3c0c4aaed0c447"
+[[files]]
+path = "systemext/20449700/L.GamerProfile.xex.gp.xzp"
+source_name = "L.GamerProfile.xex.gp.xzp"
+sha256 = "082091432aaac380ce7b36b81bcef9b5618433586caeaad74425c26ba098efda"
+[[files]]
+path = "systemext/20449700/L.Guide.AccountRecovery.xex.media.xzp"
+source_name = "L.Guide.AccountRecovery.xex.media.xzp"
+sha256 = "330e65030e701367aaee23b3a94683ffad2451134bffd677377c3b6c066c7f1f"
+[[files]]
+path = "systemext/20449700/L.Guide.AccountRecovery.xex.shdmedia.xzp"
+source_name = "L.Guide.AccountRecovery.xex.shdmedia.xzp"
+sha256 = "4c69a73e71c3113cb02e3a59892d6c4e2c459b5dfa50bb453b57a0608627cf69"
+[[files]]
+path = "systemext/20449700/L.Guide.AvatarMiniCreator.xex.avatarmc.xzp"
+source_name = "L.Guide.AvatarMiniCreator.xex.avatarmc.xzp"
+sha256 = "ef8b97733dd0579a94a0fa14b17bd3d88baaeefdf36ccfed25c5cafe886d6c14"
+[[files]]
+path = "systemext/20449700/L.Guide.Beacons.xex.media.xzp"
+source_name = "L.Guide.Beacons.xex.media.xzp"
+sha256 = "65377c3300814edce63413ebfa73d69bdba021c52a3dcc03be0758af91fed49f"
+[[files]]
+path = "systemext/20449700/L.Guide.ChatAndMessenger.xex.media.xzp"
+source_name = "L.Guide.ChatAndMessenger.xex.media.xzp"
+sha256 = "39bd0f74a6ebe1c52f24f1e0e867df8fdca9191af45349a20342f1a99afe1734"
+[[files]]
+path = "systemext/20449700/L.Guide.CSVTrans.xex.CSVTrans.xzp"
+source_name = "L.Guide.CSVTrans.xex.CSVTrans.xzp"
+sha256 = "829e54e2fe2551892b96596d8b19d5fc1075498edc76e442687abef43332b115"
+[[files]]
+path = "systemext/20449700/L.Guide.Fitness.xex.fitness.xzp"
+source_name = "L.Guide.Fitness.xex.fitness.xzp"
+sha256 = "5d7cd35327dadd13476d1619c3de2a4f4f78a9f382be6445b71672cfbcd69494"
+[[files]]
+path = "systemext/20449700/L.Guide.Friends.xex.friends.xzp"
+source_name = "L.Guide.Friends.xex.friends.xzp"
+sha256 = "8203fe6f5a2e58e33b1d8929c190c17aa90f8f154f7ac08a26cd96f7d89dca02"
+[[files]]
+path = "systemext/20449700/L.Guide.MP.Download.xex.HudDLUI.xzp"
+source_name = "L.Guide.MP.Download.xex.HudDLUI.xzp"
+sha256 = "9fb1e589ca4e12d2fb0319e940810a2a700ca23ce850ed303c0823f6b8bc1672"
+[[files]]
+path = "systemext/20449700/L.Guide.MP.Download.xex.SharedUI.xzp"
+source_name = "L.Guide.MP.Download.xex.SharedUI.xzp"
+sha256 = "030c2e573a627195073f5515b2852e01b13e9461abe40ed1b0fc3802f0500b33"
+[[files]]
+path = "systemext/20449700/L.Guide.MP.LiveAccount.xex.HudLAUI.xzp"
+source_name = "L.Guide.MP.LiveAccount.xex.HudLAUI.xzp"
+sha256 = "bd4411a9b5324efe1b99fb7b5345c32241d4d65f144aaa3f9fc7adfb6610eadd"
+[[files]]
+path = "systemext/20449700/L.Guide.MP.LiveAccount.xex.SharedUI.xzp"
+source_name = "L.Guide.MP.LiveAccount.xex.SharedUI.xzp"
+sha256 = "030c2e573a627195073f5515b2852e01b13e9461abe40ed1b0fc3802f0500b33"
+[[files]]
+path = "systemext/20449700/L.Guide.MP.NuiPurchase.xex.HudPurUI.xzp"
+source_name = "L.Guide.MP.NuiPurchase.xex.HudPurUI.xzp"
+sha256 = "740c0f0903a28847d23e91c724632c8fc225448b622625c6b4c4551d9dc6bf4d"
+[[files]]
+path = "systemext/20449700/L.Guide.MP.NuiPurchase.xex.SharedUI.xzp"
+source_name = "L.Guide.MP.NuiPurchase.xex.SharedUI.xzp"
+sha256 = "030c2e573a627195073f5515b2852e01b13e9461abe40ed1b0fc3802f0500b33"
+[[files]]
+path = "systemext/20449700/L.Guide.MP.Payment.xex.HudPayUI.xzp"
+source_name = "L.Guide.MP.Payment.xex.HudPayUI.xzp"
+sha256 = "5a0de69a6a46f5b3e7f6eae50415c60b7c8f3991ca60134c73dedd5b1b6e4fa5"
+[[files]]
+path = "systemext/20449700/L.Guide.MP.Payment.xex.SharedUI.xzp"
+source_name = "L.Guide.MP.Payment.xex.SharedUI.xzp"
+sha256 = "030c2e573a627195073f5515b2852e01b13e9461abe40ed1b0fc3802f0500b33"
+[[files]]
+path = "systemext/20449700/L.Guide.MP.PaymentInst.xex.HudPiUI.xzp"
+source_name = "L.Guide.MP.PaymentInst.xex.HudPiUI.xzp"
+sha256 = "c7589dae80b6a7f3f69c253c89d6846c19bf9880c899311ec6a8da16f742fb02"
+[[files]]
+path = "systemext/20449700/L.Guide.MP.PaymentInst.xex.SharedUI.xzp"
+source_name = "L.Guide.MP.PaymentInst.xex.SharedUI.xzp"
+sha256 = "331a11e505c3a8872862efb4ae1ffd1408a77ffc0082200629b0ea9429f077f9"
+[[files]]
+path = "systemext/20449700/L.Guide.MP.Purchase.xex.HudPurUI.xzp"
+source_name = "L.Guide.MP.Purchase.xex.HudPurUI.xzp"
+sha256 = "243849d17733ffab7e6b1259c8aa3f60557514dfbf1a937ffee09505a8fa2888"
+[[files]]
+path = "systemext/20449700/L.Guide.MP.Purchase.xex.SharedUI.xzp"
+source_name = "L.Guide.MP.Purchase.xex.SharedUI.xzp"
+sha256 = "030c2e573a627195073f5515b2852e01b13e9461abe40ed1b0fc3802f0500b33"
+[[files]]
+path = "systemext/20449700/L.Guide.MP.Subscriptions.xex.HudSubUI.xzp"
+source_name = "L.Guide.MP.Subscriptions.xex.HudSubUI.xzp"
+sha256 = "d76246c245a704461a1446b6271267ee53f8d7d9d149c4b8d79217a47b27a300"
+[[files]]
+path = "systemext/20449700/L.Guide.MP.Subscriptions.xex.SharedUI.xzp"
+source_name = "L.Guide.MP.Subscriptions.xex.SharedUI.xzp"
+sha256 = "030c2e573a627195073f5515b2852e01b13e9461abe40ed1b0fc3802f0500b33"
+[[files]]
+path = "systemext/20449700/L.Guide.NetworkStorage.xex.media.xzp"
+source_name = "L.Guide.NetworkStorage.xex.media.xzp"
+sha256 = "c6eb95d386577e40e43a09edb9a6f8007cf64cbe71d3098d97475dea84e17176"
+[[files]]
+path = "systemext/20449700/L.Guide.NuiCommunity.xex.media.xzp"
+source_name = "L.Guide.NuiCommunity.xex.media.xzp"
+sha256 = "e579faefb1f3899d16cb3a1fd13ce82bcfd1d2ad89df1738cb76fe6666b9a013"
+[[files]]
+path = "systemext/20449700/L.Guide.NuiTroubleshooter.xex.media.xzp"
+source_name = "L.Guide.NuiTroubleshooter.xex.media.xzp"
+sha256 = "6be5de0fb09c85ec2b1129805f939814f2bd0f3000fdbc693e3268824c98781f"
+[[files]]
+path = "systemext/20449700/L.Guide.PlayerFeedback.xex.Feedback.xzp"
+source_name = "L.Guide.PlayerFeedback.xex.Feedback.xzp"
+sha256 = "1eb66fbb8d9cbba4a453fecc66cecacd21b36621b7377294e535c1cb9ab11977"
+[[files]]
+path = "systemext/20449700/L.Guide.SocialPost.xex.media.xzp"
+source_name = "L.Guide.SocialPost.xex.media.xzp"
+sha256 = "0274260dc446d6d9a78d2f2dfcfa086564347a44e0043e5df41cffe61234a8aa"
+[[files]]
+path = "systemext/20449700/L.Guide.TFA.xex.media.xzp"
+source_name = "L.Guide.TFA.xex.media.xzp"
+sha256 = "92c8e962305109d24da29f79b79c6292b9e8800658ec4269b1425fcf145be9ee"
+[[files]]
+path = "systemext/20449700/L.Guide.Voicemail.xex.media.xzp"
+source_name = "L.Guide.Voicemail.xex.media.xzp"
+sha256 = "940bc54bae90cfca925bbe31a3f4fe461009957978cce2d2684b94ff33805a31"
+[[files]]
+path = "systemext/20449700/L.hud.xex.hud.xzp"
+source_name = "L.hud.xex.hud.xzp"
+sha256 = "1a85a0c1b1d392ad3494bc5fc31226fddb33eb93fa807f1951f949fd8e406c6d"
+[[files]]
+path = "systemext/20449700/L.huduiskin.xex.xam.xzp"
+source_name = "L.huduiskin.xex.xam.xzp"
+sha256 = "ae48ef7ca55717dfc7d4deb5c42c97a4a0fca770e45792eafbba5f34fb3426c3"
+[[files]]
+path = "systemext/20449700/L.LiveSignup.xex.controlp.xzp"
+source_name = "L.LiveSignup.xex.controlp.xzp"
+sha256 = "14c11de95d47e2c5693e10cfc34c302715ea26c15fa2afcd57a191861ce84ee6"
+[[files]]
+path = "systemext/20449700/L.LiveSignup.xex.media1.xzp"
+source_name = "L.LiveSignup.xex.media1.xzp"
+sha256 = "1351ad95ab6e0b61b6f8d9d35c227feee2ba7e7fcc18a6fa0b5edff74ff3cd4b"
+[[files]]
+path = "systemext/20449700/L.LiveSignup.xex.media2.xzp"
+source_name = "L.LiveSignup.xex.media2.xzp"
+sha256 = "de0748073ca22a4fefb563b468a75f914ad5f73dd87136e3713f910b251c806f"
+[[files]]
+path = "systemext/20449700/L.MiniMediaPlayer.xex.media.xzp"
+source_name = "L.MiniMediaPlayer.xex.media.xzp"
+sha256 = "1f3aba578387a3c59d6276a47185297291888446d93adb9d3b65e487ca1b6f56"
+[[files]]
+path = "systemext/20449700/L.nuihud.xex.media.xzp"
+source_name = "L.nuihud.xex.media.xzp"
+sha256 = "8360521679206cfff509c134053f5a3b02e492464767f745bf73f64fd4597554"
+[[files]]
+path = "systemext/20449700/L.signin.xex.signin.xzp"
+source_name = "L.signin.xex.signin.xzp"
+sha256 = "9604dc78ab014827141384549c3700c3f5fb4e107b0acbdb36e573111c96f664"
+[[files]]
+path = "systemext/20449700/L.Title.NewLiveSignup.xex.app.xzp"
+source_name = "L.Title.NewLiveSignup.xex.app.xzp"
+sha256 = "ea1cb8907a77ea1a2dda9c8e7261a10db240ead0fe1662dca435c46ddfbbaedf"
+[[files]]
+path = "systemext/20449700/L.Title.NewLiveSignup.xex.ccapp.xzp"
+source_name = "L.Title.NewLiveSignup.xex.ccapp.xzp"
+sha256 = "df68006195c03a66f2b19ae77a828e04644551d512cfe9010c349db34fb7ec9d"
+[[files]]
+path = "systemext/20449700/L.Title.NewLiveSignup.xex.controlp.xzp"
+source_name = "L.Title.NewLiveSignup.xex.controlp.xzp"
+sha256 = "14c11de95d47e2c5693e10cfc34c302715ea26c15fa2afcd57a191861ce84ee6"
+[[files]]
+path = "systemext/20449700/L.Title.NewLiveSignup.xex.embedded.xzp"
+source_name = "L.Title.NewLiveSignup.xex.embedded.xzp"
+sha256 = "cd358d1fe210ff83e05f85234148627e5f4668181c3922744f2b5ca232295fa3"
+[[files]]
+path = "systemext/20449700/L.Title.NewLiveSignup.xex.media.xzp"
+source_name = "L.Title.NewLiveSignup.xex.media.xzp"
+sha256 = "4c69a73e71c3113cb02e3a59892d6c4e2c459b5dfa50bb453b57a0608627cf69"
+[[files]]
+path = "systemext/20449700/L.Title.NewLiveSignup.xex.media2.xzp"
+source_name = "L.Title.NewLiveSignup.xex.media2.xzp"
+sha256 = "de0748073ca22a4fefb563b468a75f914ad5f73dd87136e3713f910b251c806f"
+[[files]]
+path = "systemext/20449700/L.Title.NewLiveSignup.xex.vkmedia.xzp"
+source_name = "L.Title.NewLiveSignup.xex.vkmedia.xzp"
+sha256 = "ad941f38269a9b5c83064ea24d44a1f69c5dbffdf7b5f2f7c448bd1017ec2991"
+[[files]]
+path = "systemext/20449700/L.updater.xex.updater.xzp"
+source_name = "L.updater.xex.updater.xzp"
+sha256 = "59142ab2cf6575c2db0efba8b4c1c78d3cb3fb0341ff3d2af8849dc84d4c8d6f"
+[[files]]
+path = "systemext/20449700/L.vk.xex.vk.xzp"
+source_name = "L.vk.xex.vk.xzp"
+sha256 = "ad941f38269a9b5c83064ea24d44a1f69c5dbffdf7b5f2f7c448bd1017ec2991"
+[[files]]
+path = "systemext/20449700/L.xam.xex.controlp.xzp"
+source_name = "L.xam.xex.controlp.xzp"
+sha256 = "a243722f890266d0d5555ac0e3388eabea31b453e2bf11a919e40c38e3d5f64f"
+[[files]]
+path = "systemext/20449700/L.xam.xex.gamercrd.xzp"
+source_name = "L.xam.xex.gamercrd.xzp"
+sha256 = "36566151deb7d133dfc12663d9a69cc2dc1784cf1034fc77994a9ed6eab9f675"
+[[files]]
+path = "systemext/20449700/L.xam.xex.mplayer.xzp"
+source_name = "L.xam.xex.mplayer.xzp"
+sha256 = "f2c4570ca2cbfe86f1399bfc5189fde3008248afdc21d90d7ef9d53bcec18521"
+[[files]]
+path = "systemext/20449700/L.xam.xex.shrdres.xzp"
+source_name = "L.xam.xex.shrdres.xzp"
+sha256 = "a0ceeef262ce622f6131b163568a495472455e6933d5093165e36744c07d2a95"
+[[files]]
+path = "systemext/20449700/L.xam.xex.xam.xzp"
+source_name = "L.xam.xex.xam.xzp"
+sha256 = "1b026e3bff940fbca70aec3c89dce6ea6375fa08ad8cd55a7c5eef8be63924f9"
+[[files]]
+path = "systemext/20449700/natalsu.xex"
+source_name = "natalsu.xex"
+sha256 = "8bd00683c34a30fc67e2070e7615f4ef10d770667ab7535c556c93b19b7fea42"
+[[files]]
+path = "systemext/20449700/nuihud.xex"
+source_name = "nuihud.xex"
+sha256 = "489ba9bb2f04eea28f32e7381813a1040953fe479967e53b8704b05da0038dfe"
+[[files]]
+path = "systemext/2506fd00/PlayReady.xex"
+source_name = "PlayReady.xex"
+sha256 = "ea015b792e96fa17b2d3ac2f7c0360893fc98d92b23d2181dbe90d1069aca9b2"
+[[files]]
+path = "systemext/20417f00/Title.Zune.xex"
+source_name = "Title.Zune.xex"
+sha256 = "d9486bb8654b9b660e7ac61bca150efadfe577feb87d04758ae91782453adea9"
+[[files]]
+path = "systemext/20449700/Xam.Community.xex"
+source_name = "Xam.Community.xex"
+sha256 = "a5228c5628dc4eb86b02c16865abe1206ab8e4d596d6279402a8186f9ebe28ef"
+[[files]]
+path = "systemext/20449700/Xam.WordRegister.xex"
+source_name = "Xam.WordRegister.xex"
+sha256 = "6d72651756d2ab01d271c8161c2b96ddec58cce6e752b7b13443975b145a7757"
+[[files]]
+path = "systemext/20449700/XenonSCLatin.xtt"
+source_name = "XenonSCLatin.xtt"
+sha256 = "6d44d6b65605bee7acfc96bb1d11bafdc3cc3abd57544eca560cd02c84abc590"
+[[files]]
+path = "systemext/20449700/XimeDic.xex"
+source_name = "XimeDic.xex"
+sha256 = "f18a93cc097e3fa0f7e3f24c7adf96b686adbcb4c969c38521921c4708b22e0f"
+[[files]]
+path = "systemext/20449700/XimeDic_CHS.xex"
+source_name = "XimeDic_CHS.xex"
+sha256 = "89b8fbbb476261be9631ef838a2976a1fa28373949b8f9e8dbedcb94db9e1940"
+[[files]]
+path = "systemext/20449700/XimeDicCh.xex"
+source_name = "XimeDicCh.xex"
+sha256 = "39b739418d7c28b940ff372c147b4a0f12ed4624437a5c0d1fd32464d930cb3f"
+[[files]]
+path = "systemext/20449700/ximedicex.xex"
+source_name = "ximedicex.xex"
+sha256 = "1c235f2a97445175b389823125bf670e228ed5ee746c92d730e4ca101e49fddb"
+[[files]]
+path = "systemext/32000100/Xna_TitleLauncher.xex"
+source_name = "Xna_TitleLauncher.xex"
+sha256 = "5da55eaa1c9512094cc48711d14796fe2d258e0e5cf7b7a423c02e3c6de38ceb"
+# The 4 system content packages (PIRS) system.manifest also lists; XAM 81680128 opens them at
+# SystemExtPartition/Content/0000000000000000/FFFE07DF/00008000 and checks header and hashes.
+[[files]]
+path = "systemext/Content/0000000000000000/FFFE07DF/00008000/FFFE07DF00000001"
+source_name = "FFFE07DF00000001"
+sha256 = "81d5fb97ec81fa421b6c25e442a08ef3479112128bf945b8a7f3b270bfa8c0bb"
+[[files]]
+path = "systemext/Content/0000000000000000/FFFE07DF/00008000/FFFE07DF00000002"
+source_name = "FFFE07DF00000002"
+sha256 = "9dcef5b4cc309eafee50c8ec2b0453e2d835d776f667269ecb2c4d11d93cd8d6"
+[[files]]
+path = "systemext/Content/0000000000000000/FFFE07DF/00008000/FFFE07DF00000006"
+source_name = "FFFE07DF00000006"
+sha256 = "edbf716de85276323509425e9f671c627fd4ab203ce5cf08a69c3c5661c1f8db"
+[[files]]
+path = "systemext/Content/0000000000000000/FFFE07DF/00008000/FFFE07DF00000008"
+source_name = "FFFE07DF00000008"
+sha256 = "0113cf332515866a8af06cfdbacfbbda5ac4669da9d1a295e20bacdf152e7989"

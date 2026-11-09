@@ -74,7 +74,7 @@ TEST_CASE("Dashboard assets match preparation and every AOT module stays inside 
       CHECK(hash.find_first_not_of("0123456789abcdef") == std::string::npos);
     }
     if (const auto catalog = info["avatar"]["catalog"]["path"].value<std::string>()) {
-      REQUIRE(optional.contains(*catalog));
+      REQUIRE(expected.contains(*catalog));
       CHECK(info["avatar"]["version"].value_or(std::string{}) == info["dashboard_version"].value_or(std::string{}));
     }
     for (const auto& asset : assets) {

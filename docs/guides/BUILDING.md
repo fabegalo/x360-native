@@ -99,6 +99,42 @@ O SDK procura DLC extraída em
 `<user_data_root>/0000000000000000/<TitleID>/00000002/<pacote>/`.
 **Esse caminho ainda não foi validado com uma DLC real.**
 
+### Chaves locais
+
+Nenhuma chave é versionada, embutida em patch ou distribuída no pacote. Chaves
+são material do usuário: ficam em `.local/keys/` (no pacote, em
+`data/environment/.local/keys/` ou no ambiente selecionado), e valores nunca
+aparecem em logs, relatórios ou testes. Os dois arquivos aceitam uma chave por
+linha, `<nome> <hex>`, e `#` inicia comentário. Nome desconhecido, repetido ou
+com tamanho errado invalida o arquivo inteiro, para que um erro de digitação não
+descarte uma chave em silêncio.
+
+| Arquivo | Nomes e tamanho | Usado por | Sem ele |
+|---|---|---|---|
+| `xex-keys.txt` | `xex1-retail`, `xex1-devkit` (e `xex2-*` aceitos), 32 dígitos hex | Imagens XEX legadas (XEX1) no runtime; `x360n-content apply-patch` (`.xexp`); a preparação AOT recebe o arquivo por `X360N_XEX_KEYS` | O XEX legado não carrega e `apply-patch` para com a mensagem do formato. XEX2 não depende do arquivo. |
+| `rsa-public-keys.txt` | `rsa-pub-<n>` e `xekey-0x<índice>`, 544 dígitos hex (blob de 0x110 bytes) | `XeKeysVerifyRSASignature`, `XeKeysGetKey` e `XeCryptBnQwBeSigVerify` (patch 0259) | Opcional na 17559: as assinaturas originais são reconhecidas pelo hash (patch 0264). Qualquer outra assinatura é recusada, com erro no log. |
+
+**Como os arquivos chegam ao processo:** o supervisor passa
+`--xex_keys_file` e `--xekeys_rsa_public_file` quando os arquivos existem em
+`.local/keys/`. As variáveis `X360N_XEX_KEYS` e `X360N_RSA_KEYS` indicam outro
+caminho e têm prioridade. Uma variável apontando para um arquivo ausente é erro
+na preparação AOT; no runtime, a chave fica indisponível.
+
+**Assinaturas originais sem chave (patch 0264):** na 17559, o XAM confere com a
+chave RSA 0 o `system.manifest` e os quatro pacotes PIRS de
+`systemext/Content/0000000000000000/FFFE07DF/00008000/`. As fontes XTT ele
+confere com `XeKeysGetKey(0x39)`. Sem a chave, o Guide esperaria para sempre por
+um novo dispositivo. O SDK guarda o SHA-256 do que é verificado: o índice da
+chave, o digest e a assinatura (para XTT: hash, salt e assinatura). Isso vale
+para esses nove arquivos originais. Um hash de assinatura pública não é uma chave. O resultado é o mesmo
+do console para esses arquivos, e qualquer alteração deixa de corresponder.
+`[xekeys-rsa][local]` confirma, com as chaves reais do mantenedor, que cada hash
+fixado corresponde a uma assinatura válida. Sem as chaves, o teste confere apenas
+os hashes. Assinatura sem hash fixado aparece no log como
+`Kernel signature <sha256> is not pinned`, seguida do resultado da verificação.
+Nova versão ou novo arquivo assinado exige um novo hash, confirmado da mesma
+forma.
+
 ## Compilar e executar a sessão 17559
 
 Os arquivos locais precisam corresponder aos manifestos da

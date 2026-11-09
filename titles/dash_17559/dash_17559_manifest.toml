@@ -63,5 +63,7 @@ args = ["--gpu_plugin=xenos", "--mnk_mode=true", "--dash17559_boot_intro=true"]
 skip_boot_intro_args = ["--dash17559_boot_intro=false"]
 launch_library = true
 system_ui_host = "dash_17559_session_ui.dll"
+avatar_service = "2.0.17559.0"
+avatar_xam_sha256 = "78b3dbd8ae866f4258f5444205486ea9f8451afaa30f469c875dcf345f828467"
 # Original XAM 17559 maps XLNI_DASH_ARCADE (0x100) to packed reason 23.
 dashboard_return_flags = [0, 0x100]

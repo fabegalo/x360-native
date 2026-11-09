@@ -1,0 +1,85 @@
+--- a/src/kernel/xam/xam_user.cpp
++++ b/src/kernel/xam/xam_user.cpp
+@@ -19,6 +19,7 @@
+ #include <fstream>
+ #include <span>
+ #include <rex/system/xam/content_manager.h>
++#include <rex/filesystem/file.h>
+ 
+ #include <rex/cvar.h>
+ #include <rex/kernel/xam/private.h>
+@@ -1269,12 +1270,71 @@ u32 XamWriteGamerTileEx_entry(uint32_t user, uint32_t flags, uint32_t title,
+   return CompletePictureWrite(result, overlapped);
+ }
+ 
++// XAM 17559 XGI 8191BCB8 caches the 13 dashboard default pictures from its
++// shrdres resource as 64_/32_fffe07d10002%04x0001%04x.png; ReadTile 8191C098
++// serves them from that cache. The SDK locates XAM's shrdres at
++// media:\shrdres.xzp (keXamBuildResourceLocator). XUIZ v3: entries
++// {size, offset, name length, name} after a 22-byte header; data follows.
++static bool ReadDefaultGamerPicture(const std::string& name, std::vector<uint8_t>& out) {
++  auto* entry = REX_KERNEL_FS()->ResolvePath("media:\\shrdres.xzp");
++  if (!entry || (entry->attributes() & filesystem::kFileAttributeDirectory) ||
++      entry->size() < 22 || entry->size() > 16 * 1024 * 1024) return false;
++  filesystem::File* file = nullptr;
++  if (XFAILED(entry->Open(filesystem::FileAccess::kFileReadData, &file))) return false;
++  std::vector<uint8_t> bytes(size_t(entry->size()));
++  size_t count = 0;
++  const bool read = XSUCCEEDED(file->ReadSync(bytes, 0, &count)) && count == bytes.size();
++  file->Destroy();
++  if (!read || std::memcmp(bytes.data(), "XUIZ", 4) ||
++      memory::load_and_swap<uint32_t>(bytes.data() + 4) != 3) return false;
++  const size_t directory = memory::load_and_swap<uint32_t>(bytes.data() + 16);
++  if (directory > bytes.size() - 22) return false;
++  const size_t data = 22 + directory;
++  size_t at = 22;
++  for (uint32_t i = memory::load_and_swap<uint16_t>(bytes.data() + 20); i; --i) {
++    if (data - at < 9 || data - at - 9 < bytes[at + 8]) return false;
++    const size_t size = memory::load_and_swap<uint32_t>(bytes.data() + at);
++    const size_t offset = memory::load_and_swap<uint32_t>(bytes.data() + at + 4);
++    const std::string_view entry_name(reinterpret_cast<const char*>(bytes.data() + at + 9), bytes[at + 8]);
++    at += 9 + bytes[at + 8];
++    if (entry_name != name) continue;
++    if (offset > bytes.size() - data || size > bytes.size() - data - offset) return false;
++    out.assign(bytes.begin() + data + offset, bytes.begin() + data + offset + size);
++    return true;
++  }
++  return false;
++}
++
++// Original 17559 export 2F0/81670E08 sends XGI B0033 (24 bytes): enumeration,
++// user, title, large/small IDs, flags 1 | (enumeration ? 0 : 0x10). Its handler
++// 8191DA68 reads both pictures through ReadTile and writes them as 8191C4D8.
+ u32 XamWriteGamerTile_entry(u32 user, u32 title, u32 large, u32 small_id, u32 enumeration, u32 overlapped) {
+   if (overlapped && !AchievementGuestSpan(REX_KERNEL_MEMORY(), overlapped, sizeof(XAM_OVERLAPPED),
+       memory::kMemoryProtectRead | memory::kMemoryProtectWrite)) return X_ERROR_INVALID_PARAMETER;
+-  // Picture awards need the original title catalog and enumeration contract.
+-  // The previous implementation completed success without writing any bytes.
+-  return CompletePictureWrite(50, overlapped);
++  auto lock = rex::thread::global_critical_region::AcquireDirect();
++  auto* profile = REX_KERNEL_STATE()->user_profile();
++  const auto identity = profile->identity();
++  if (user >= 4) return CompletePictureWrite(X_ERROR_INVALID_PARAMETER, overlapped);
++  if (user || !identity.signin_state) return CompletePictureWrite(X_ERROR_NO_SUCH_USER, overlapped);
++  // shortcut: only the dashboard defaults cached from shrdres are served; title
++  // gamer-picture packages (content type 0x20000) and enumerations are not read yet.
++  const uint32_t index = large & 0xFFFF;
++  if (enumeration || title != 0xFFFE07D1 || index >= 13 ||
++      large != (0x20000 | index) || small_id != (0x10000 | index))
++    return CompletePictureWrite(50, overlapped);
++  const auto suffix = fmt::format("_{:08x}{:08x}{:08x}.png", title, large, small_id);
++  rex::system::xam::UserProfile::PictureUpdate update;
++  if (!ReadDefaultGamerPicture("64" + suffix, update.large_png) ||
++      !ReadDefaultGamerPicture("32" + suffix, update.small_png))
++    return CompletePictureWrite(2, overlapped);  // 8191C098 returns 80070002
++  if (!ValidProfilePng(update.large_png, 64) || !ValidProfilePng(update.small_png, 32))
++    return CompletePictureWrite(13, overlapped);
++  update.public_picture = true;
++  update.key = rex::string::to_utf16(fmt::format("{:08x}{:08x}{:08x}", title, large, small_id));
++  bool committed = false;
++  const auto result = profile->WritePictures(identity.xuid, update, &committed);
++  if (committed) REX_KERNEL_STATE()->BroadcastNotification(0xE, 1u << user);
++  return CompletePictureWrite(result, overlapped);
+ }
+ 
+ struct XMSGSTARTIOREQUEST_UNKNOWNARG;

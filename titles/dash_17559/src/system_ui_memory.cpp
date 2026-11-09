@@ -52,6 +52,11 @@ BRIDGE_XAM_SERVICE(81670C00, XamReadTileEx)
 BRIDGE_XAM_SERVICE(81670B68, XamReadTile)
 BRIDGE_XAM_SERVICE(81670740, XamWriteGamerTileEx)
 BRIDGE_XAM_SERVICE(81670E08, XamWriteGamerTile)
+// XamTaskSchedule (export 1AF): the package registry schedules its work
+// internally. XAM's own task queue (81AA08A8) belongs to the XAM boot this host
+// never runs; its uninitialized semaphore faulted (docs/avatar-system.md §20).
+// Runtime tasks already own close/attributes above.
+BRIDGE_XAM_SERVICE(816BA440, XamTaskSchedule)
 #undef BRIDGE_XAM_SERVICE
 
 // The original HUD polls the system input queue, rather than the suspended
@@ -189,6 +194,21 @@ extern "C" REX_FUNC(sub_8169CE70) {
   const auto manager = rex::memory::load_and_swap<uint32_t>(base + 0x81A9F850);
   if (manager) __imp__sub_8169CE70(ctx, base);
   else ctx.r3.u64 = REX_KERNEL_STATE()->title_id();
+}
+
+// Same manager: 8169D088 returns its launch-in-progress word (+0x27C) and the
+// last launch error (+0x280), both written only by XAM's own title launch
+// (8169D238, from 816C2758/816C6470). Titles are launched by the SDK here, so
+// without a manager XAM has no launch pending and no error to report. The
+// package experience mode (816E97B0) reads it for the Guide's Avatar item.
+extern "C" REX_FUNC(__imp__sub_8169D088);
+extern "C" REX_FUNC(sub_8169D088) {
+  if (rex::memory::load_and_swap<uint32_t>(base + 0x81A9F850)) {
+    __imp__sub_8169D088(ctx, base);
+    return;
+  }
+  if (ctx.r3.u32) rex::memory::store_and_swap<uint32_t>(base + ctx.r3.u32, 0);
+  ctx.r3.u64 = 0;
 }
 
 extern "C" REX_FUNC(__imp__sub_817DA648);

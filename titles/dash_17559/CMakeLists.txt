@@ -49,6 +49,9 @@ endif()
 # stage it next to the executable so --gpu_plugin=xenos can load it.
 rexglue_setup_target(dash_17559 GPU_PLUGINS xenos)
 
+include(../common/avatar/avatar_service_17559.cmake)
+x360n_add_avatar_service_17559(dash_17559)
+
 add_library(dash_17559_session_ui SHARED src/session_ui_host.cpp src/system_ui.cpp
     ../common/dashboard_assets.cpp ../../src/supervisor/sha256.cpp
     ../../src/supervisor/digest_batch.cpp)
@@ -74,7 +77,7 @@ endif()
 # configures the producer first, then generates every module before reconfigure.
 option(X360N_CODEGEN_BOOTSTRAP "Configure the producer before guest generation" OFF)
 set(X360N_CODEGEN_MANIFESTS "")
-foreach(module signin createprofile vk hud deviceselector)
+foreach(module signin createprofile vk hud deviceselector avatarminicreator)
     set(manifest "${CMAKE_CURRENT_SOURCE_DIR}/${module}/${module}_17559_manifest.toml")
     string(APPEND X360N_CODEGEN_MANIFESTS "${manifest}\n")
     set(generated_dir "${CMAKE_CURRENT_SOURCE_DIR}/generated/${module}")
@@ -95,6 +98,10 @@ foreach(module signin createprofile vk hud deviceselector)
     add_library(${module_target} SHARED ${GENERATED_SOURCES} src/system_ui_imports.cpp src/system_ui_images.cpp)
     if(module STREQUAL "createprofile")
         target_sources(${module_target} PRIVATE src/createprofile_imports.cpp)
+    endif()
+    if(module STREQUAL "avatarminicreator")
+        # Its XamAvatarSetManifest writes the signed-in profile (docs/avatar-system.md §19).
+        target_sources(${module_target} PRIVATE ../common/avatar/avatar_profile_manifest.cpp)
     endif()
     if(module STREQUAL "signin" OR module STREQUAL "vk")
         target_sources(${module_target} PRIVATE "src/${module}_imports.cpp")

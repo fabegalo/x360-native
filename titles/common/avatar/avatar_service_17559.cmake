@@ -8,6 +8,7 @@ function(x360n_add_avatar_service_17559 target)
     set(dir "${X360N_AVATAR_SERVICE_17559_DIR}")
     target_sources(${target} PRIVATE
         ${dir}/avatar_service_17559.cpp
+        ${dir}/avatar_profile_manifest.cpp
         ${dir}/avatar_toc.cpp
         ${dir}/avatar_metadata.cpp
         ${dir}/avatar_assets_request.cpp

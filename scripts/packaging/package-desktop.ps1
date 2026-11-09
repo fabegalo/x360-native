@@ -330,6 +330,7 @@ crie data/update-channel.txt contendo somente preview; remova o arquivo para sai
 Chaves legadas de XEX não são distribuídas. Forneça seu arquivo local em
 data/environment/.local/keys/xex-keys.txt (ou no ambiente selecionado), no formato
 <nome> <32 dígitos hexadecimais>, com nomes xex1-retail e xex1-devkit necessários.
+Chaves RSA do kernel não são necessárias para os arquivos originais da dashboard 17559.
 A versão vem dos Conventional Commits do projeto (feat: minor; fix/perf: patch).
 Para atualizar manualmente, extraia em outra pasta e selecione seu ambiente anterior em
 Configurações > Selecionar ambiente. Não misture arquivos de pacotes diferentes.
@@ -378,6 +379,7 @@ crie data/update-channel.txt contendo somente preview; remova o arquivo para sai
 Chaves legadas de XEX não são distribuídas. Forneça seu arquivo local em
 data/environment/.local/keys/xex-keys.txt (ou no ambiente selecionado), no formato
 <nome> <32 dígitos hexadecimais>, com nomes xex1-retail e xex1-devkit necessários.
+Chaves RSA do kernel não são necessárias para os arquivos originais da dashboard 17559.
 A versão vem dos Conventional Commits do projeto (feat: minor; fix/perf: patch).
 Para atualizar manualmente, extraia em outra pasta e selecione seu ambiente anterior em
 Configurações > Selecionar ambiente. Não misture arquivos de pacotes diferentes.
@@ -422,6 +424,7 @@ crie data\update-channel.txt contendo somente preview; remova o arquivo para sai
 Chaves legadas de XEX não são distribuídas. Forneça seu arquivo local em
 data\environment\.local\keys\xex-keys.txt (ou no ambiente selecionado), no formato
 <nome> <32 dígitos hexadecimais>, com nomes xex1-retail e xex1-devkit necessários.
+Chaves RSA do kernel não são necessárias para os arquivos originais da dashboard 17559.
 A versão vem dos Conventional Commits do projeto (feat: minor; fix/perf: patch).
 Para atualizar manualmente, extraia em outra pasta e selecione seu ambiente anterior em
 Configurações > Selecionar ambiente. Confirme a atualização apresentada.

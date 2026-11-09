@@ -182,9 +182,9 @@ TEST_CASE("real official 17559 import preserves source and refuses readiness wit
   {
     ImportSource imported(source,X360N_CONTENT_EXE,s.root/"logs");REQUIRE(imported.system_update());
     std::cerr<<"official source extracted\n"<<std::flush;
-    CHECK(imported.report().find(usb?"required-missing\t2":"required-missing\t3")!=std::string::npos);
+    CHECK(imported.report().find(usb?"required-missing\t2":"required-missing\t156")!=std::string::npos);
     CHECK(imported.report().find("xenonjklatin.xttp")!=std::string::npos);
-    CHECK(Import(ProjectPaths{s.root},target,imported.path(),{},true)==(usb?14:12));
+    CHECK(Import(ProjectPaths{s.root},target,imported.path(),{},true)==(usb?166:12));
     CHECK(Import(ProjectPaths{s.root},target,imported.path(),{},true)==0);
     const auto state=Inspect(ProjectPaths{s.root},target);CHECK_FALSE(state.inputs_ok);CHECK_FALSE(state.prepared);
     CHECK(DigestFile(target.game_root/"shrdres.xzp")->sha256=="179c5be167402297c6e137c08fefe3146f6f497964dc2bda94812596fc9aefe0");

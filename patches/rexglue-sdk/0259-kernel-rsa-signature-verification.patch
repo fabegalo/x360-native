@@ -1,0 +1,379 @@
+--- a/src/kernel/xboxkrnl/xboxkrnl_crypt.cpp
++++ b/src/kernel/xboxkrnl/xboxkrnl_crypt.cpp
+@@ -13,6 +13,17 @@
+ #pragma GCC diagnostic ignored "-Wunused-parameter"
+ 
+ #include <algorithm>
++#include <bit>
++#include <array>
++#include <cstdlib>
++#include <cstring>
++#include <filesystem>
++#include <fstream>
++#include <set>
++#include <sstream>
++
++#include <fmt/format.h>
++#include <rex/cvar.h>
+ 
+ #include <rex/kernel/xboxkrnl/private.h>
+ #include <rex/logging.h>
+@@ -649,6 +660,259 @@ u32 XeKeysConsoleSignatureVerification_entry(mapped_void hash, mapped_void signa
+   return 0;  // Success (signature valid)
+ }
+ 
++// XeKeysVerifyRSASignature(key, digest[20], signature[256]) -> BOOL. XAM 17559
++// passes key 0 for system.manifest (816EBF64) and PIRS packages (8167C3F8), and
++// keys 1/3 elsewhere (816E29AC). The kernel's public keys are never embedded:
++// each one is a local XECRYPT_RSAPUB_2048 blob (0x110 bytes: be32 qword count,
++// be32 exponent, reserved, 32 modulus qwords least significant first).
++// XeKeysGetKey keys live in the same file as xekey-0x<index> lines.
++REXCVAR_DEFINE_STRING(xekeys_rsa_public_file, "", "Kernel",
++                      "Local kernel keys (rsa-pub-<key> / xekey-0x<index> <hex>); defaults to X360N_RSA_KEYS");
++
++// One 0x110-byte key by name. `quiet` only silences a missing file or name.
++bool LoadLocalKey(const std::string& wanted, std::array<uint8_t, 0x110>& key, bool quiet = false) {
++  auto path = REXCVAR_GET(xekeys_rsa_public_file);
++  if (path.empty()) if (const char* env = std::getenv("X360N_RSA_KEYS")) path = env;
++  std::ifstream in(std::filesystem::u8path(path));
++  if (path.empty() || !in) {
++    if (!quiet) REXKRNL_ERROR("Kernel key {} unavailable: supply --xekeys_rsa_public_file or X360N_RSA_KEYS", wanted);
++    return false;
++  }
++  std::set<std::string> seen;
++  bool found = false;
++  for (std::string line; std::getline(in, line);) {
++    if (auto comment = line.find('#'); comment != std::string::npos) line.resize(comment);
++    std::istringstream fields(line);
++    std::string name, hex, extra;
++    if (!(fields >> name)) continue;
++    if (!(fields >> hex) || (fields >> extra) || !seen.insert(name).second ||
++        !(name.starts_with("rsa-pub-") || name.starts_with("xekey-0x")) || hex.size() != 2 * key.size() ||
++        hex.find_first_not_of("0123456789abcdefABCDEF") != std::string::npos) {
++      REXKRNL_ERROR("Invalid local kernel key file (expected unique rsa-pub-<key>/xekey-0x<index> names and {} hex digits)",
++                    2 * key.size());
++      return false;
++    }
++    if (name != wanted) continue;
++    for (size_t i = 0; i < key.size(); ++i) key[i] = uint8_t(std::stoul(hex.substr(2 * i, 2), nullptr, 16));
++    found = true;
++  }
++  if (!found && !quiet) REXKRNL_ERROR("Local kernel key file is missing {}", wanted);
++  return found;
++}
++
++bool IsRsaPub2048(const uint8_t* key) { return !key[0] && !key[1] && !key[2] && key[3] == 0x20; }
++
++bool LoadRsaPublicKey(uint32_t index, std::array<uint8_t, 0x110>& key) {
++  const auto wanted = fmt::format("rsa-pub-{}", index);
++  if (!LoadLocalKey(wanted, key)) return false;
++  if (IsRsaPub2048(key.data())) return true;
++  REXKRNL_ERROR("{} is not an XECRYPT_RSAPUB_2048 blob", wanted);
++  return false;
++}
++
++// Raw 2048-bit public operation; input and output are big-endian 256-byte strings.
++bool RsaPublic2048(const uint8_t* key, const uint8_t* input, uint8_t* output) {
++#if !REX_PLATFORM_WIN32
++  REXKRNL_ERROR("Kernel RSA: no implementation on this platform");
++  return false;
++#else
++  constexpr ULONG kSize = 0x100;
++  std::array<uint8_t, sizeof(BCRYPT_RSAKEY_BLOB) + 4 + kSize> blob{};
++  auto* header = reinterpret_cast<BCRYPT_RSAKEY_BLOB*>(blob.data());
++  header->Magic = BCRYPT_RSAPUBLIC_MAGIC;
++  header->BitLength = kSize * 8;
++  header->cbPublicExp = 4;
++  header->cbModulus = kSize;
++  std::memcpy(&blob[sizeof(*header)], key + 4, 4);
++  for (size_t i = 0; i < 32; ++i) std::memcpy(&blob[sizeof(*header) + 4 + (31 - i) * 8], key + 0x10 + i * 8, 8);
++  BCRYPT_ALG_HANDLE algorithm = nullptr;
++  BCRYPT_KEY_HANDLE handle = nullptr;
++  std::array<uint8_t, kSize> in{};
++  std::memcpy(in.data(), input, kSize);
++  ULONG written = 0;
++  bool ok = BCRYPT_SUCCESS(BCryptOpenAlgorithmProvider(&algorithm, BCRYPT_RSA_ALGORITHM, MS_PRIMITIVE_PROVIDER, 0)) &&
++            BCRYPT_SUCCESS(BCryptImportKeyPair(algorithm, nullptr, BCRYPT_RSAPUBLIC_BLOB, &handle, blob.data(),
++                                               ULONG(blob.size()), 0)) &&
++            BCRYPT_SUCCESS(BCryptEncrypt(handle, in.data(), kSize, nullptr, nullptr, 0, output, kSize, &written,
++                                         BCRYPT_PAD_NONE)) &&
++            written == kSize;
++  if (handle) BCryptDestroyKey(handle);
++  if (algorithm) BCryptCloseAlgorithmProvider(algorithm, 0);
++  if (!ok) REXKRNL_ERROR("Kernel RSA: public operation failed");
++  return ok;
++#endif
++}
++
++// The signature is a little-endian integer whose RSA image is PKCS#1 v1.5 with a
++// SHA-1 DigestInfo (observed on the original 17559 system.manifest with key 0).
++bool VerifyRsaSignature(const uint8_t* key, const uint8_t* digest, const uint8_t* signature) {
++  constexpr size_t kSize = 0x100;
++  std::array<uint8_t, kSize> m{}, be{};
++  std::reverse_copy(signature, signature + kSize, be.begin());
++  if (!RsaPublic2048(key, be.data(), m.data())) return false;
++  static constexpr uint8_t kSha1Info[] = {0x00, 0x30, 0x21, 0x30, 0x09, 0x06, 0x05, 0x2B, 0x0E,
++                                         0x03, 0x02, 0x1A, 0x05, 0x00, 0x04, 0x14};
++  std::array<uint8_t, kSize> expected{};
++  expected[1] = 1;
++  std::fill(expected.begin() + 2, expected.end() - 20 - sizeof(kSha1Info), uint8_t(0xFF));
++  std::memcpy(&expected[kSize - 20 - sizeof(kSha1Info)], kSha1Info, sizeof(kSha1Info));
++  std::memcpy(&expected[kSize - 20], digest, 20);
++  return expected == m;
++}
++
++u32 XeKeysVerifyRSASignature_entry(u32 key, mapped_void digest, mapped_void signature) {
++  std::array<uint8_t, 0x110> public_key{};
++  if (!digest || !signature || !LoadRsaPublicKey(key, public_key)) return 0;
++  const bool valid = VerifyRsaSignature(public_key.data(), digest.as<uint8_t*>(), signature.as<uint8_t*>());
++  REXKRNL_DEBUG("XeKeysVerifyRSASignature(key {}) -> {}", key, valid);
++  return valid ? 1 : 0;
++}
++
++// XeCryptBnQwBeSigFormat as published by console homebrew RE: zero pad, 0x01,
++// 10-byte salt, H' = SHA1(8 zero bytes, hash, salt), 0xBC; the first 0xEB bytes
++// are RC4-masked with H' and the top bit cleared so the block stays below n.
++// Not yet confirmed on an original signature (XTT needs the user's xekey-0x39).
++std::array<uint8_t, 0x100> BeSigFormat(const uint8_t* hash, const uint8_t* salt) {
++  std::array<uint8_t, 0x100> block{};
++  block[0xE0] = 1;
++  std::memcpy(&block[0xE1], salt, 10);
++  const uint8_t zero[8] = {};
++  sha1::SHA1 sha;
++  sha.processBytes(zero, sizeof(zero));
++  sha.processBytes(hash, 20);
++  sha.processBytes(salt, 10);
++  sha.finalize(&block[0xEB]);
++  block[0xFF] = 0xBC;
++  // RC4 keyed with all 20 bytes of H' (XeCryptRc4Key above keeps only 16).
++  uint8_t box[256], j = 0;
++  for (int i = 0; i < 256; ++i) box[i] = uint8_t(i);
++  for (int i = 0; i < 256; ++i) {
++    j = uint8_t(j + box[i] + block[0xEB + i % 20]);
++    std::swap(box[i], box[j]);
++  }
++  uint8_t x = 0, y = 0;
++  for (size_t i = 0; i < 0xEB; ++i) {
++    y = uint8_t(y + box[++x]);
++    std::swap(box[x], box[y]);
++    block[i] ^= box[uint8_t(box[x] + box[y])];
++  }
++  block[0] &= 0x7F;
++  return block;
++}
++
++// XeCryptBnQwBeSigVerify(sig, hash[20], salt[10], XECRYPT_RSAPUB_2048*) -> BOOL.
++// XAM 17559 81795B68 checks XTT fonts with XeKeysGetKey(0x39) and salt
++// "XBOX360XTT". The signature is a BnQw number: big-endian qwords, least
++// significant first.
++// The console's exponentiation leaves its result in Montgomery form: the formatted
++// block is sig^e * R^-(e-1) mod n, R = 2^2048 (verified on the original
++// XenonSCLatin.xtt with key 0x39). So sig^e is compared with block * R^(e-1) mod n,
++// computed by modular doubling.
++bool VerifyBeSignature(const uint8_t* key, const uint8_t* hash, const uint8_t* salt, const uint8_t* signature) {
++  if (!IsRsaPub2048(key)) return false;
++  std::array<uint8_t, 0x100> be{}, image{};
++  for (size_t i = 0; i < 32; ++i) std::memcpy(&be[(31 - i) * 8], signature + i * 8, 8);
++  if (!RsaPublic2048(key, be.data(), image.data())) return false;
++  // 64-bit limbs, least significant first.
++  std::array<uint64_t, 32> n{}, v{};
++  const auto block = BeSigFormat(hash, salt);
++  for (size_t i = 0; i < 32; ++i) {
++    n[i] = memory::load_and_swap<uint64_t>(key + 0x10 + i * 8);
++    v[i] = memory::load_and_swap<uint64_t>(&block[(31 - i) * 8]);
++  }
++  auto not_below_n = [&] {
++    for (size_t i = 32; i-- > 0;) if (v[i] != n[i]) return v[i] > n[i];
++    return true;
++  };
++  const uint32_t exponent = memory::load_and_swap<uint32_t>(key + 4);
++  if (!exponent || not_below_n()) return false;
++  for (uint64_t step = 0; step < uint64_t(exponent - 1) * 2048; ++step) {
++    const bool carry = v[31] >> 63;
++    for (size_t i = 32; i-- > 1;) v[i] = v[i] << 1 | v[i - 1] >> 63;
++    v[0] <<= 1;
++    if (carry || not_below_n()) {
++      uint64_t borrow = 0;
++      for (size_t i = 0; i < 32; ++i) {
++        const uint64_t d = v[i] - n[i] - borrow;
++        borrow = (v[i] < n[i]) || (v[i] - n[i] < borrow);
++        v[i] = d;
++      }
++    }
++  }
++  std::array<uint8_t, 0x100> expected{};
++  for (size_t i = 0; i < 32; ++i) memory::store_and_swap<uint64_t>(&expected[(31 - i) * 8], v[i]);
++  return image == expected;
++}
++
++u32 XeCryptBnQwBeSigVerify_entry(mapped_void signature, mapped_void hash, mapped_void salt, mapped_void key) {
++  if (!signature || !hash || !salt || !key) return 0;
++  const bool valid =
++      VerifyBeSignature(key.as<uint8_t*>(), hash.as<uint8_t*>(), salt.as<uint8_t*>(), signature.as<uint8_t*>());
++  REXKRNL_DEBUG("XeCryptBnQwBeSigVerify -> {}", valid);
++  return valid ? 1 : 0;
++}
++
++// XeCryptRotSumSha(in1, size1, in2, size2, digest, digest_size). Checked on the
++// original 17559 XenonSCLatin.xtt digest in system.manifest: the rotating sum
++// covers whole big-endian qwords; SHA-1 covers sum, sum, data, ~sum, ~sum.
++void RotSumSha(const uint8_t* in1, size_t size1, const uint8_t* in2, size_t size2, uint8_t* digest,
++               size_t digest_size) {
++  uint64_t sum[4] = {};
++  auto add = [&](const uint8_t* data, size_t size) {
++    for (size_t i = 0; i + 8 <= size; i += 8) {
++      const auto v = memory::load_and_swap<uint64_t>(data + i);
++      uint64_t t = sum[1] + v;
++      if (t < v) ++sum[0];
++      sum[1] = std::rotl(t, 29);
++      t = sum[3] - v;
++      if (t > v) --sum[2];  // The original comparison, not the true borrow.
++      sum[3] = std::rotl(t, 31);
++    }
++  };
++  add(in1, size1);
++  add(in2, size2);
++  uint8_t bytes[32], inverted[32];
++  for (int i = 0; i < 4; ++i) memory::store_and_swap<uint64_t>(bytes + i * 8, sum[i]);
++  for (int i = 0; i < 32; ++i) inverted[i] = uint8_t(~bytes[i]);
++  sha1::SHA1 sha;
++  sha.processBytes(bytes, 32);
++  sha.processBytes(bytes, 32);
++  sha.processBytes(in1, size1);
++  sha.processBytes(in2, size2);
++  sha.processBytes(inverted, 32);
++  sha.processBytes(inverted, 32);
++  uint8_t full[20];
++  sha.finalize(full);
++  std::memcpy(digest, full, std::min<size_t>(digest_size, 20));
++}
++
++void XeCryptRotSumSha_entry(mapped_void in1, u32 size1, mapped_void in2, u32 size2, mapped_void digest,
++                            u32 digest_size) {
++  if (!digest) return;
++  RotSumSha(in1.as<uint8_t*>(), in1 ? size1 : 0, in2.as<uint8_t*>(), in2 ? size2 : 0, digest.as<uint8_t*>(),
++            digest_size);
++}
++
++// XeKeysGetKey(index, buffer, size*) -> NTSTATUS. Keys are never embedded: a local
++// xekey-0x<index> line (0x110 bytes, as XAM 17559 requests for 0x39) is copied.
++// Other keys keep the runtime's previous stub result (the index, buffer
++// untouched) until each caller is traced.
++u32 XeKeysGetKey_entry(u32 index, mapped_void buffer, mapped_u32 size) {
++  std::array<uint8_t, 0x110> key{};
++  if (!LoadLocalKey(fmt::format("xekey-0x{:x}", index), key, true)) {
++    REXKRNL_WARN("XeKeysGetKey({:#x}) - no local key, buffer untouched", index);
++    return index;
++  }
++  if (!buffer || !size) return X_STATUS_INVALID_PARAMETER;
++  if (*size < key.size()) {
++    *size = uint32_t(key.size());
++    return X_STATUS_BUFFER_TOO_SMALL;
++  }
++  std::memcpy(buffer.as<uint8_t*>(), key.data(), key.size());
++  *size = uint32_t(key.size());
++  return X_STATUS_SUCCESS;
++}
++
+ REX_EXPORT_STUB(__imp__XeKeysGetConsoleCertificate);
+ REX_EXPORT_STUB(__imp__XeCryptBnDwLeDhEqualBase);
+ REX_EXPORT_STUB(__imp__XeCryptBnDwLeDhInvalBase);
+@@ -659,7 +923,6 @@ REX_EXPORT_STUB(__imp__XeCryptBnDw_Zero);
+ REX_EXPORT_STUB(__imp__XeCryptBnDwLePkcs1Format);
+ REX_EXPORT_STUB(__imp__XeCryptBnQwBeSigCreate);
+ REX_EXPORT_STUB(__imp__XeCryptBnQwBeSigFormat);
+-REX_EXPORT_STUB(__imp__XeCryptBnQwBeSigVerify);
+ REX_EXPORT_STUB(__imp__XeCryptBnQwNeModExp);
+ REX_EXPORT_STUB(__imp__XeCryptBnQwNeModExpRoot);
+ REX_EXPORT_STUB(__imp__XeCryptBnQwNeModInv);
+@@ -688,7 +951,6 @@ REX_EXPORT_STUB(__imp__XeCryptMd5Final);
+ REX_EXPORT_STUB(__imp__XeCryptMd5);
+ REX_EXPORT_STUB(__imp__XeCryptParveEcb);
+ REX_EXPORT_STUB(__imp__XeCryptParveCbcMac);
+-REX_EXPORT_STUB(__imp__XeCryptRotSumSha);
+ REX_EXPORT_STUB(__imp__XeCryptSha256);
+ REX_EXPORT_STUB(__imp__XeCryptSha384Init);
+ REX_EXPORT_STUB(__imp__XeCryptSha384Update);
+@@ -709,7 +971,6 @@ REX_EXPORT_STUB(__imp__XeKeysGeneratePrivateKey);
+ REX_EXPORT_STUB(__imp__XeKeysGetKeyProperties);
+ REX_EXPORT_STUB(__imp__XeKeysSetKey);
+ REX_EXPORT_STUB(__imp__XeKeysGenerateRandomKey);
+-REX_EXPORT_STUB(__imp__XeKeysGetKey);
+ REX_EXPORT_STUB(__imp__XeKeysGetDigest);
+ REX_EXPORT_STUB(__imp__XeKeysGetConsoleID);
+ REX_EXPORT_STUB(__imp__XeKeysGetConsoleType);
+@@ -722,7 +983,7 @@ REX_EXPORT_STUB(__imp__XeKeysDes2CbcUsingKey);
+ REX_EXPORT_STUB(__imp__XeKeysDesCbcUsingKey);
+ REX_EXPORT_STUB(__imp__XeKeysObfuscate);
+ REX_EXPORT_STUB(__imp__XeKeysUnObfuscate);
+-REX_EXPORT_STUB(__imp__XeKeysVerifyRSASignature);
++
+ REX_EXPORT_STUB(__imp__XeKeysSaveSystemUpdate);
+ REX_EXPORT_STUB(__imp__XeKeysLockSystemUpdate);
+ REX_EXPORT_STUB(__imp__XeKeysExecute);
+@@ -809,6 +1070,10 @@ REX_EXPORT(__imp__XeKeysConsolePrivateKeySign,
+            rex::kernel::xboxkrnl::XeKeysConsolePrivateKeySign_entry)
+ REX_EXPORT(__imp__XeKeysConsoleSignatureVerification,
+            rex::kernel::xboxkrnl::XeKeysConsoleSignatureVerification_entry)
++REX_EXPORT(__imp__XeKeysVerifyRSASignature, rex::kernel::xboxkrnl::XeKeysVerifyRSASignature_entry)
++REX_EXPORT(__imp__XeCryptBnQwBeSigVerify, rex::kernel::xboxkrnl::XeCryptBnQwBeSigVerify_entry)
++REX_EXPORT(__imp__XeCryptRotSumSha, rex::kernel::xboxkrnl::XeCryptRotSumSha_entry)
++REX_EXPORT(__imp__XeKeysGetKey, rex::kernel::xboxkrnl::XeKeysGetKey_entry)
+ 
+ REX_EXPORT_STUB(__imp__DevAuthGetStatistics);
+ REX_EXPORT_STUB(__imp__DevAuthShouldAlwaysEnforce);
+--- a/src/kernel/xboxkrnl/xboxkrnl_modules.cpp
++++ b/src/kernel/xboxkrnl/xboxkrnl_modules.cpp
+@@ -18,6 +18,11 @@
+ #include <rex/types.h>
+ #include <rex/system/kernel_state.h>
+ #include <rex/system/user_module.h>
++#include <rex/system/util/string_utils.h>
++#include <rex/filesystem/file.h>
++#include <rex/filesystem/vfs.h>
++#include <cstring>
++#include <span>
+ #include <rex/system/xexception.h>
+ #include <rex/system/xthread.h>
+ #include <rex/system/xtypes.h>
+@@ -211,9 +216,37 @@ void ExRegisterTitleTerminateNotification_entry(ppc_ptr_t<X_EX_TITLE_TERMINATE_R
+   }
+ }
+ 
+-u32 XexLoadImageHeaders_entry(mapped_string path, mapped_void headers) {
+-  REXKRNL_DEBUG("XexLoadImageHeaders({}) - stub", path.value());
+-  return X_STATUS_NOT_IMPLEMENTED;
++// XexLoadImageHeaders(ANSI_STRING* path, header buffer, size). XAM 17559 8168CB20
++// validates system packages with it: the XEX2 header (up to the PE data offset at
++// +8) is copied and +0x10 becomes a pointer to the copied security info, whose
++// 256-byte header signature (+8) XAM hashes; on BUFFER_TOO_SMALL it retries larger.
++// shortcut: the header's RSA signature is not verified here; add it with the kernel XEX key.
++u32 XexLoadImageHeaders_entry(ppc_ptr_t<X_ANSI_STRING> path, mapped_void headers, u32 size) {
++  constexpr X_STATUS kInvalidImageFormat = 0xC000007B;
++  if (!path || !headers) return X_STATUS_INVALID_PARAMETER;
++  const auto target = util::TranslateAnsiPath(REX_KERNEL_MEMORY(), path);
++  auto entry = REX_KERNEL_FS()->ResolvePath(target);
++  if (!entry) return X_STATUS_OBJECT_NAME_NOT_FOUND;
++  filesystem::File* file = nullptr;
++  if (XFAILED(entry->Open(filesystem::FileAccess::kFileReadData, &file))) return X_STATUS_ACCESS_DENIED;
++  struct FileGuard { filesystem::File* file; ~FileGuard() { file->Destroy(); } } guard{file};
++  auto read = [&](std::span<uint8_t> bytes) {
++    size_t count = 0;
++    return bytes.size() <= entry->size() && XSUCCEEDED(file->ReadSync(bytes, 0, &count)) && count == bytes.size();
++  };
++  std::array<uint8_t, 24> header{};
++  if (!read(header) || std::memcmp(header.data(), "XEX2", 4) != 0) return kInvalidImageFormat;
++  const auto header_size = memory::load_and_swap<uint32_t>(header.data() + 8);
++  const auto security = memory::load_and_swap<uint32_t>(header.data() + 0x10);
++  if (header_size < header.size() || header_size > entry->size() || security < header.size() ||
++      security > header_size - 0x108)
++    return kInvalidImageFormat;
++  if (header_size > size) return X_STATUS_BUFFER_TOO_SMALL;
++  auto* out = headers.as<uint8_t*>();
++  if (!read({out, header_size})) return kInvalidImageFormat;
++  memory::store_and_swap<uint32_t>(out + 0x10, headers.guest_address() + security);
++  REXKRNL_DEBUG("XexLoadImageHeaders({}) -> {} bytes", target, header_size);
++  return X_STATUS_SUCCESS;
+ }
+ 
+ // LDI caller-owned workspace profile used by XAM 17559's avatar stream.

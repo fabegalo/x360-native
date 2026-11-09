@@ -1,0 +1,45 @@
+--- a/src/kernel/xam/apps/xam_app.cpp
++++ b/src/kernel/xam/apps/xam_app.cpp
+@@ -42,7 +42,8 @@ X_HRESULT XamApp::DispatchMessageSync(uint32_t message, uint32_t buffer_ptr,
+     case 0x00021015:
+     case 0x0002100E:
+     case 0x00021013:
+-    case 0x00021008: {
++    case 0x00021008:
++    case 0x00021018: {  // XamShowAvatarMiniCreatorUI (XAM 17559 816C45F8)
+       auto xam = kernel_state_->GetKernelModule<rex::kernel::xam::XamModule>("xam.xex");
+       if (xam && xam->system_ui_request)
+         return xam->system_ui_request(message, buffer_ptr, buffer_length);
+--- a/src/kernel/xam/xam_user.cpp
++++ b/src/kernel/xam/xam_user.cpp
+@@ -716,6 +716,12 @@ u32 XamShowGuideUI_entry(u32 user) {
+   return DispatchProfileUi(0x21015, request, 3);
+ }
+ 
++// Original 17559 816C45F8: avatar mini creator request {user, flags} to FE/21018.
++u32 XamShowAvatarMiniCreatorUI_entry(u32 user, u32 flags) {
++  const uint32_t request[] = {user, flags};
++  return DispatchProfileUi(0x21018, request, 2);
++}
++
+ // Private wrapper 816C19C8 preserves the requesting controller.
+ u32 XamShowSigninUIp_entry(u32 user, u32 count, u32 flags) {
+   if (user >= 4 && user != 0xFF) return X_ERROR_INVALID_PARAMETER;
+@@ -1498,6 +1504,7 @@ REX_EXPORT(__imp__XamShowCreateProfileUI, rex::kernel::xam::XamShowCreateProfile
+ REX_EXPORT(__imp__XamShowCreateProfileUIEx, rex::kernel::xam::XamShowCreateProfileUIEx_entry)
+ 
+ REX_EXPORT(__imp__XamShowGuideUI, rex::kernel::xam::XamShowGuideUI_entry)
++REX_EXPORT(__imp__XamShowAvatarMiniCreatorUI, rex::kernel::xam::XamShowAvatarMiniCreatorUI_entry)
+ 
+ REX_EXPORT(__imp__XamShowSigninUIp, rex::kernel::xam::XamShowSigninUIp_entry)
+ REX_EXPORT(__imp__XamHudGetUserIndex, rex::kernel::xam::XamHudGetUserIndex_entry)
+--- a/src/kernel/xam/xam_ui.cpp
++++ b/src/kernel/xam/xam_ui.cpp
+@@ -609,7 +609,6 @@ static rex::ppc::detail::PPCFuncRegistrar show_achievement_details_ui_reg(
+     "__imp__XamShowAchievementDetailsUI", &__imp__XamShowAchievementDetailsUI);
+ REX_EXPORT_STUB(__imp__XamShowAndWaitForMessageBoxEx);
+ REX_EXPORT_STUB(__imp__XamShowAvatarAwardsUI);
+-REX_EXPORT_STUB(__imp__XamShowAvatarMiniCreatorUI);
+ REX_EXPORT_STUB(__imp__XamShowBadDiscErrorUI);
+ REX_EXPORT_STUB(__imp__XamShowBeaconsUI);
+ REX_EXPORT(__imp__XamShowBrandedKeyboardUI, rex::kernel::xam::XamShowBrandedKeyboardUI_entry)

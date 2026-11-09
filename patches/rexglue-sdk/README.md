@@ -2850,3 +2850,120 @@ This does not implement Kinect hardware support or add a replacement UI.
 (`tests/sdkcheck/local_profile_test.cpp`, `[nui-contract]`) checks zero, one,
 a guest scene pointer and all-set incoming r3, plus guest-memory sentinels.
 No upstream equivalent was identified.
+
+### 0259 — kernel RSA signature verification
+
+`XeKeysVerifyRSASignature` was a stub that returned FALSE for every signature.
+XAM 17559 checks `system.manifest` with key 0 (`816EBF64`). With no valid
+manifest, its package scan waits forever for a new storage device (`816EB9F0`).
+The export now performs the RSA public operation with a local
+`XECRYPT_RSAPUB_2048` blob, `rsa-pub-<key> <0x110-byte hex>` in
+`--xekeys_rsa_public_file` or `X360N_RSA_KEYS` (the supervisor passes
+`.local/keys/rsa-public-keys.txt`). The signature is a little-endian integer. Its
+RSA image must equal PKCS#1 v1.5 with a SHA-1 DigestInfo and the caller's digest;
+that layout was decoded from the original manifest. With no key it logs the
+error and returns FALSE. No key is embedded.
+
+The same patch implements the rest of XAM's system package checks (`816ED670`):
+
+- `XexLoadImageHeaders` copies the XEX2 header and turns +0x10 into a pointer to
+  the copied security info (BUFFER_TOO_SMALL when it does not fit). Shortcut: the
+  header's own RSA signature is not verified.
+- `XeCryptRotSumSha` matches the original `XenonSCLatin.xtt` digest in
+  `system.manifest`.
+- `XeKeysGetKey` returns a local `xekey-0x<index>` line from the same file.
+  Other indexes keep the previous stub result (the index, buffer untouched).
+- `XeCryptBnQwBeSigVerify` (XTT fonts, key 0x39, salt `XBOX360XTT`) uses the
+  published BnQwBe signature format. The console leaves the RSA result in
+  Montgomery form, so the check is sig^e = block · R^(e−1) mod n, with
+  R = 2^2048. Confirmed on the original `XenonSCLatin.xtt` with the user's key 0x39.
+
+`sdkcheck.[xekeys-rsa]` (`tests/sdkcheck/xekeys_rsa_signature_test.cpp`) signs
+with a generated key and checks valid, big-endian, changed-digest and
+changed-signature cases plus the key-file rules. A local case verifies the
+original manifest with the user key 0 and skips without it. Another verifies
+RotSumSha and the XTT signature of the original `XenonSCLatin.xtt`. No upstream
+equivalent was identified.
+
+### 0260 — kernel package mount helpers
+
+XAM 17559 checks the four system content packages that `system.manifest` lists
+(`FFFE07DF00000001/2/6/8`, PIRS) through `81680128`. It translates
+`\Device\Harddisk0\SystemExtPartition\Content\0000000000000000\FFFE07DF\00008000\<name>`
+with `ObTranslateSymbolicLink` (`8167FCD8`) and names the mount with
+`XeCryptMd5` (`8167BF50`). Both were stubs, so XAM opened an empty path, rejected
+the packages and the registry selected no manifest.
+
+- `ObTranslateSymbolicLink` follows every registered link prefix (VFS
+  `ResolveSymbolicLink`, now public and locked). An object path with no link is
+  returned unchanged; an unknown relative name gives OBJECT_NAME_NOT_FOUND and a
+  short target BUFFER_TOO_SMALL. It writes no terminator; XAM adds its own.
+- `XeCryptMd5` hashes up to three pieces with BCrypt. `XeCryptMd5Init/Update/Final`
+  stay stubs: no caller in this path.
+
+`sdkcheck.[package-mount]` (`tests/sdkcheck/package_mount_test.cpp`) calls both
+exports with the XAM argument shapes. With the packages prepared, the bounded
+17559 registry probe reports `manifest=001E1000`. No upstream equivalent was
+identified.
+
+### 0261 — avatar mini creator UI request
+
+XAM 17559 `XamShowAvatarMiniCreatorUI` (`816C45F8`) sends FE/21018 with the 8-byte
+request `{user, flags}`; `816C16C8` maps a failed dispatch to 1627. The export was a
+stub, so original CreateProfile (`90106688`) stayed on its blank wait page after a
+new profile. The export now builds that request and sends it through the XAM app
+0xFE, like `XamShowGuideUI`, and the app forwards 21018 to the selected system UI.
+
+`sdkcheck.[minicreator-request]` (`tests/sdkcheck/avatar_minicreator_request_test.cpp`)
+calls the export by the PPC ABI and checks the delivered request, 0 on acceptance
+and 1627 on failure. No upstream equivalent was identified.
+
+### 0262 — dashboard default gamer picture
+
+XAM 17559 `XamWriteGamerTile` (`81670E08`) sends XGI B0033 `{enumeration, user,
+title, large, small, flags}`. Its handler (`8191DA68`) reads both pictures with
+ReadTile, which serves the dashboard defaults from a cache that `8191BCB8` fills
+from XAM's shrdres (`64_/32_fffe07d10002%04x0001%04x.png`, 13 indices). The export
+always failed, so original CreateProfile (`9010B370`) left new profiles without a
+picture. The export now reads the selected pair from `media:\shrdres.xzp` (the SDK
+locator for XAM's shrdres) and stores it as the public picture with key
+`{title}{large}{small}`. Title gamer-picture packages and enumerations still fail.
+
+`sdkcheck.[default-gamer-picture]` (`tests/sdkcheck/default_gamer_picture_test.cpp`)
+uses a synthetic XUIZ with test PNGs and checks the stored files and key, and the
+failures for absent, corrupt, foreign-title and out-of-range pictures. No upstream
+equivalent was identified.
+
+### 0263 — resource locator guest strings
+
+`XamBuildResourceLocator`, `XamBuildGamercardResourceLocator`,
+`XamBuildSharedSystemResourceLocator` and `XamBuildXamResourceLocator` formatted the
+guest's big-endian names as host strings and then swapped the whole locator, so
+the guest part reached XUI byte-swapped. Original gamerprofile (`901223E0`) names
+each default picture `64_fffe07d1%08x%08x.png` and asks for its shrdres locator;
+"Alterar Imagem do Jogador" stayed empty. The names are now read with
+`load_and_swap` first.
+
+`sdkcheck.[default-gamer-picture]` (`tests/sdkcheck/default_gamer_picture_test.cpp`)
+checks the exact locator for a big-endian guest name. No upstream equivalent was
+identified.
+
+### 0264 — original signatures without local kernel keys
+
+With patch 0259 a release user had to supply `rsa-pub-0`: without it XAM 17559
+rejected `system.manifest` and its package scan waited forever (`816EB9F0`), so
+the Guide did not open. `XeKeysVerifyRSASignature` and `XeCryptBnQwBeSigVerify` now
+first compare SHA-256 of what they verify (be32 key, digest and signature; for XTT
+hash, salt and signature) with pins of the original 17559 `system.manifest`, the
+four systemext PIRS packages `FFFE07DF/00008000/FFFE07DF0000000{1,2,6,8}` (key 0,
+SHA-1 of header 0x22C..0x344, XAM `8167C370`) and the four original XTT fonts. A pin is a hash of a public signature, not a key. A
+matching input verifies without a key file; anything else still needs the local
+key, and a changed digest or key index never matches. When `xekey-0x39` is
+absent, `XeKeysGetKey` leaves the buffer untouched as before, and the font
+signature still matches its pin. An unpinned signature logs
+`Kernel signature <sha256> is not pinned` and, with a local key, its result, so a
+new original can be pinned once the real key confirms it.
+
+`sdkcheck.[xekeys-rsa][local]` (`tests/sdkcheck/xekeys_rsa_signature_test.cpp`)
+checks that every pin is a signature that the user's real key verifies, and that a
+changed digest or key index does not match. No upstream equivalent was identified.

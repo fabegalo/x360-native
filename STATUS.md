@@ -1,5 +1,38 @@
 # STATUS
 
+09/11 — **Avatar do perfil persistente e MiniCreator AOT na 17559**: Get/SetManifest
+usam a configuração original `0x63E80044` no perfil do SDK; `Guide.AvatarMiniCreator.xex`
+é módulo AOT verificado. O registro original de pacotes é populado pelo próprio
+XAM a partir do `system.manifest` original na SystemExtPartition. Sessão limitada:
+o patch 0259 verifica a assinatura RSA do manifesto com a chave 0 local, e ela é
+aceita. Agora a versão de kernel é 2.0.17559.0, os 146 arquivos estão nas pastas
+de versão e as quatro funções de cripto estão implementadas, inclusive o XTT com a
+chave 0x39 local. O patch 0260 implementa `ObTranslateSymbolicLink` e `XeCryptMd5`,
+e a preparação traz os 4 pacotes `FFFE07DF*` no caminho de conteúdo da partição.
+Sessão `20261109T133435Z-dash-package-files`: a varredura retorna, o registro
+seleciona `manifest=001E1000` e o Guide original é composto. O patch 0261 envia
+o MiniCreator (FE/21018) pelo app 0xFE, e `XuiResourceOpen/Read/Close` vão ao XAM
+original. Sessão `20261109T160052Z-dash-minicreator` (entrada por script): após
+criar o perfil, o MiniCreator original abre e o avatar escolhido é gravado. O
+patch 0262 grava a gamerpic padrão do shrdres em `XamWriteGamerTile`; sessão
+`20261109T173239Z-dash-default-picture`: a imagem aparece no painel Perfil. O
+patch 0263 corrige o nome nos locators de recurso; sessão
+`20261109T180058Z-dash-change-picture-2`: a troca lista as 12 imagens e grava a
+escolhida. O patch 0264 reconhece pelo hash as assinaturas originais
+(manifesto, 4 pacotes PIRS, 4 fontes); sessão `20261109T235454Z-dash-no-rsa-key-2`:
+sem arquivo de chaves RSA, a dash inicia e o Guide abre, sem nenhum erro de chave.
+O AvatarEditor ainda não é compilado. [Detalhes](docs/avatar-system.md#19-avatar-do-perfil-e-minicreator-original-2026-11-09),
+[registro](docs/avatar-system.md#20-registro-original-de-pacotes-do-sistema-2026-11-09).
+
+07/11 — **Serviço de avatares ligado à dashboard 17559 (parcial)**: a dashboard
+compila o serviço compartilhado e recebe seu próprio XAM/catálogo verificados;
+o catálogo passa a ser obrigatório. Build/preparo Release concluídos, controle
+negativo reproduzido, 356 asserções de contratos e quatro CTests focados passaram.
+Na RTX 4070/Xenos/D3D12, serviço READY e 13 animações originais decodificadas;
+**avatar visível do perfil ainda não demonstrado**. MiniCreator AOT e metadata
+persistente continuam pendentes; original 17559 disponível foi identificado.
+[Evidência, retorno inesperado e limites](docs/avatar-system.md#18-ligação-da-dashboard-17559-ao-serviço-compartilhado-2026-11-07).
+
 07/11 — **Quadrado preto do Kinect na Home 17559 corrigido**: a consulta
 `XamNuiIsDeviceReady` preservava r3 e tratava um ponteiro de cena como sensor
 pronto. Patch 0258 retorna falso enquanto não há backend de sensor, coerente

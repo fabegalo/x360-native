@@ -251,6 +251,19 @@ void ReleaseSystemUiHost() {
 void InstallSystemUi(rex::Runtime& runtime, std::string drive, std::string native_directory) {
   system_drive = std::move(drive);
   bound_xam_path = UiPath("game:\\system\\xam_ui.xex");
+  // The hosted system is 2.0.17559.0. XAM compares XboxKrnlVersion (816CECD8:
+  // major, minor, build, byte 7) with system.manifest +332 (20449700); the
+  // runtime default 2.65535.65535 made the original registry discard it.
+  // Byte 6 keeps the runtime's value: its console meaning is not known here.
+  if (const auto* version = runtime.export_resolver()->GetExportByOrdinal("xboxkrnl.exe", 0x158);
+      version && version->variable_ptr) {
+    auto* bytes = runtime.memory()->TranslateVirtual<uint8_t*>(version->variable_ptr);
+    const uint8_t kernel[] = {0x00, 0x02, 0x00, 0x00, 0x44, 0x97};
+    std::memcpy(bytes, kernel, sizeof(kernel));
+    bytes[7] = 0;
+  } else {
+    REXLOG_ERROR("17559 system UI: XboxKrnlVersion is not exported");
+  }
   // XAM normally handles the physical Guide button outside the foreground
   // title. Poll its edge here because the original XAM scheduler is not run.
   x360n::ConfigureGuideButton();
@@ -284,7 +297,9 @@ void InstallSystemUi(rex::Runtime& runtime, std::string drive, std::string nativ
       auto* ctx = rex::system::XThread::GetCurrentThread()->thread_state()->context();
       ctx->r3.u64 = 0;
       __imp__XamShowGuideUI(*ctx, runtime.memory()->virtual_membase());
-      REXLOG_INFO("17559 diagnostic: original Guide service requested, result={:08X}", ctx->r3.u32);
+      REXLOG_INFO("17559 diagnostic: original Guide service requested, result={:08X}, package registry "
+                  "scanned={} manifest={:08X}",
+                  ctx->r3.u32, Read32(*runtime.memory(), 0x81AAC110 + 4), Read32(*runtime.memory(), 0x81AAC110 + 164));
     };
   }
   poll_guide = WithStorageSelectorDiagnostic(runtime, std::move(poll_guide));
@@ -303,6 +318,8 @@ void InstallSystemUi(rex::Runtime& runtime, std::string drive, std::string nativ
   bind("signin.xex", "game:\\system\\signin.xex", "dash_17559_signin");
   bind("createprofile.xex", "game:\\system\\createprofile.xex", "dash_17559_createprofile");
   bind("deviceselector.xex", "game:\\system\\deviceselector.xex", "dash_17559_deviceselector");
+  bind("Guide.AvatarMiniCreator.xex", "game:\\system\\Guide.AvatarMiniCreator.xex",
+       "dash_17559_avatarminicreator");
   if (!native_directory.empty()) {
     bind("xam.xex", "game:\\system\\xam_ui.xex", "dash_17559_xam_ui");
     bind("gamerprofile.xex", "game:\\system\\gamerprofile.xex", "dash_17559_gamerprofile");
@@ -471,10 +488,30 @@ void InstallSystemUi(rex::Runtime& runtime, std::string drive, std::string nativ
       uint64_t play_timer[] = {0x81B52130};
       dispatcher->ExecuteTrap(thread, 0x819951A0, play_timer, 1);
       // CRT 81A6FF90 constructs the package registry queried by CreateProfile.
-      // This host has no installed system package; the original query reports
-      // absence and the app selects its own completion flow.
       uint64_t packages[] = {0x81AAC110};
       dispatcher->ExecuteTrap(thread, 0x816EA660, packages, 1);
+      // The original storage manager (8167ACF8) registers the mounted hard
+      // drive (device 1, kind 1) through 816E9A58; kind 1 never reads the device
+      // object. XAM boot (81696558) then scans system.manifest via 816EBDE0.
+      // The SDK owns storage devices, so this host makes those two original
+      // calls once the drive's system extension partition is mounted.
+      uint64_t hard_drive[] = {1, 1, 0};
+      dispatcher->ExecuteTrap(thread, 0x816E9A58, hard_drive, 3);
+      // The scan schedules its tasks, then waits for KEVENT 81A9E0F4 (816EB9F0)
+      // and rescans. Original XAM init 816968A8 creates it as a notification
+      // event, and its boot thread 816964A8 sets it after
+      // UsbdBootEnumerationDoneEvent and the \Device\BuiltInMuSfc IOCTL. This
+      // host enumerates storage itself (the drive above), so it publishes the
+      // event already set, in the same layout (wait list pointing to itself).
+      // shortcut: no USB/MU boot enumeration; signal from real device arrival once the SDK has it.
+      constexpr uint32_t kBootDevicesEnumerated = 0x81A9E0F4;
+      std::memset(memory->TranslateVirtual(kBootDevicesEnumerated), 0, 16);
+      Write32(*memory, kBootDevicesEnumerated + 4, 1);
+      Write32(*memory, kBootDevicesEnumerated + 8, kBootDevicesEnumerated + 8);
+      Write32(*memory, kBootDevicesEnumerated + 12, kBootDevicesEnumerated + 8);
+      dispatcher->ExecuteTrap(thread, 0x816EBDE0, nullptr, 0);
+      REXLOG_INFO("17559 system UI: original package registry manifest={:08X}",
+                  Read32(*memory, 0x81AAC110 + 164));
       // Original visual host from 816CE9BC-816CE9E4. Reuse the active DC.
       const auto hud = memory->SystemHeapAlloc(72);
       if (!hud) return static_cast<X_HRESULT>(0x8007000Eu);

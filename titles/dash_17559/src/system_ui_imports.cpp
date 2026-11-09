@@ -21,6 +21,11 @@ extern "C" REX_FUNC(__imp__XamBuildDynamicResourceLocator) { CallUi(ctx, base, 0
 extern "C" REX_FUNC(__imp__XuiAnimRun) { CallUi(ctx, base, 0x817AB6D0); }
 extern "C" REX_FUNC(__imp__XuiBubbleMessage) { CallUi(ctx, base, 0x817B3D98); }
 extern "C" REX_FUNC(__imp__XuiCreateObject) { CallUi(ctx, base, 0x817B8B58); }
+// Exports 39F/3A0/3A1. The MiniCreator reads the chosen avatar's manifest with
+// them before XamAvatarSetManifest; the stubs saved uninitialized memory.
+extern "C" REX_FUNC(__imp__XuiResourceOpen) { CallUi(ctx, base, 0x817DB560); }
+extern "C" REX_FUNC(__imp__XuiResourceRead) { CallUi(ctx, base, 0x817DA808); }
+extern "C" REX_FUNC(__imp__XuiResourceClose) { CallUi(ctx, base, 0x817DA8C8); }
 extern "C" REX_FUNC(__imp__XuiDestroyObject) { CallUi(ctx, base, 0x817B40D0); }
 extern "C" REX_FUNC(__imp__XuiDynamicCast) { CallUi(ctx, base, 0x817AEFE8); }
 extern "C" REX_FUNC(__imp__XuiElementAddChild) { CallUi(ctx, base, 0x817BCB90); }
@@ -123,6 +128,25 @@ extern "C" REX_FUNC(__imp__XuiElementInsertChild) { CallUi(ctx, base, 0x817BCF30
 // Query the original package registry. An absent AvatarMiniCreator package
 // takes CreateProfile's original completion page instead of a stub's stale r3.
 extern "C" REX_FUNC(__imp__XamPackageManagerGetFileSize) { CallUi(ctx, base, 0x816EA4A0); }
+// The other read-only registry queries, also original. GamerProfile's Avatar item
+// asks 646/647 and showed "feature requires update" with empty strings on stubs.
+// 816E9AC0 sends message 0x25005 to XAM app 0xFE with a 4-byte buffer holding its
+// argument; this host never registers app 0xFE (816BC968 finds no slot, 80070057),
+// so the original package dispatcher 816EBC58 is called with the same message.
+// shortcut: app 0xFE itself is not registered, upgrade once its procedure is located.
+extern "C" REX_FUNC(__imp__XamPackageManagerGetExperienceMode) {
+  const uint32_t stack = ctx.r1.u32, buffer = stack - 16;
+  rex::memory::store_and_swap<uint32_t>(base + buffer, ctx.r3.u32);
+  ctx.r1.u64 = stack - 64;  // the buffer stays above the callee's frame
+  ctx.r3.u64 = 0x25005; ctx.r4.u64 = buffer; ctx.r5.u64 = 0;
+  CallUi(ctx, base, 0x816EBC58);
+  ctx.r1.u64 = stack;
+  REXLOG_INFO("17559 package manager: GetExperienceMode -> {:08X}", ctx.r3.u32);
+}
+extern "C" REX_FUNC(__imp__XamPackageManagerGetFeatureRequiresUpdateStrings) { CallUi(ctx, base, 0x816E8F28); }
+extern "C" REX_FUNC(__imp__XamPackageManagerGetFilePathW) { CallUi(ctx, base, 0x816EA588); }
+extern "C" REX_FUNC(__imp__XamPackageManagerFindPackageContainingIndexedXEX) { CallUi(ctx, base, 0x816E8D40); }
+extern "C" REX_FUNC(__imp__XamPackageManagerGetAuthoritativeManifestVersion) { CallUi(ctx, base, 0x816E8EC8); }
 extern "C" REX_FUNC(__imp__XamIsGuideDisabled) { CallUi(ctx, base, 0x816E16F0); }
 // Original title/privilege/context decision; the HUD keeps its own confirmation.
 extern "C" REX_FUNC(__imp__XamLoaderShouldConfirmReboot) { CallUi(ctx, base, 0x8169D250); }

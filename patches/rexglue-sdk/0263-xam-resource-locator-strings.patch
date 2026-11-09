@@ -1,0 +1,43 @@
+--- a/src/kernel/xam/xam_info.cpp
++++ b/src/kernel/xam/xam_info.cpp
+@@ -111,9 +111,14 @@ u32 keXamBuildResourceLocator(uint64_t module, std::u16string_view container,
+   return 0;
+ }
+ 
++// Guest wide strings are big-endian; the locator is swapped once when copied out.
++static std::u16string GuestWide(mapped_wstring text) {
++  return text ? memory::load_and_swap<std::u16string>(text.host_address()) : std::u16string();
++}
++
+ u32 XamBuildResourceLocator_entry(u64 module, mapped_wstring container, mapped_wstring resource,
+                                   mapped_void buffer_ptr, u32 buffer_count) {
+-  return keXamBuildResourceLocator(module, container.value(), resource.value(), buffer_ptr,
++  return keXamBuildResourceLocator(module, GuestWide(container), GuestWide(resource), buffer_ptr,
+                                    buffer_count);
+ }
+ 
+@@ -127,13 +132,13 @@ u32 XamBuildGamercardResourceLocator_entry(mapped_wstring filename, mapped_void
+   // If you're running an app that'll need them, make sure to extract xam.xex
+   // resources with xextool ("xextool -d . xam.xex") and add a .xzp extension.
+ 
+-  return keXamBuildResourceLocator(0, u"gamercrd", filename.value(), buffer_ptr, buffer_count);
++  return keXamBuildResourceLocator(0, u"gamercrd", GuestWide(filename), buffer_ptr, buffer_count);
+ }
+ 
+ u32 XamBuildSharedSystemResourceLocator_entry(mapped_wstring filename, mapped_void buffer_ptr,
+                                               u32 buffer_count) {
+   // see notes inside XamBuildGamercardResourceLocator above
+-  return keXamBuildResourceLocator(0, u"shrdres", filename.value(), buffer_ptr, buffer_count);
++  return keXamBuildResourceLocator(0, u"shrdres", GuestWide(filename), buffer_ptr, buffer_count);
+ }
+ 
+ u32 XamBuildLegacySystemResourceLocator_entry(mapped_wstring filename, mapped_void buffer_ptr,
+@@ -143,7 +148,7 @@ u32 XamBuildLegacySystemResourceLocator_entry(mapped_wstring filename, mapped_vo
+ 
+ u32 XamBuildXamResourceLocator_entry(mapped_wstring filename, mapped_void buffer_ptr,
+                                      u32 buffer_count) {
+-  return keXamBuildResourceLocator(0, u"xam", filename.value(), buffer_ptr, buffer_count);
++  return keXamBuildResourceLocator(0, u"xam", GuestWide(filename), buffer_ptr, buffer_count);
+ }
+ 
+ u32 XamGetSystemVersion_entry() {

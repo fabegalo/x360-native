@@ -319,14 +319,8 @@ extern "C" REX_FUNC(__imp__XamAvatarGetMetadataRandom) {
     return Complete(overlap, hr);
   });
 }
-extern "C" REX_FUNC(__imp__XamAvatarGetManifestLocalUser) {
-  const auto overlap = ctx.r5.u32;
-  // SDK profiles do not yet provide original avatar metadata. A title's own
-  // fallback (Motocross Madness: random metadata) decides; never manufacture a
-  // profile avatar.
-  Invoke(ctx, "GetManifestLocalUser",
-         [&] { return Complete(overlap, 0x80070490); });
-}
+// GetManifestLocalUser/SetManifest: avatar_profile_manifest.cpp (shared with the MiniCreator).
+
 extern "C" REX_FUNC(__imp__XamAvatarManifestGetBodyType) {
   const auto metadata = ctx.r3.u32;
   Invoke(ctx, "ManifestGetBodyType", [&] {

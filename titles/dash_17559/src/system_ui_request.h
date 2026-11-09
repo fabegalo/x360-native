@@ -35,6 +35,11 @@ inline constexpr SystemUiApplication kKeyboard{
     "game:\\vk.xex", "vk", 32, 0, 11};
 inline constexpr SystemUiApplication kBrandedKeyboard{
     "game:\\vk.xex", "vk branded", 36, 0, 11};
+// XAM XamShowAvatarMiniCreatorUI 816C45F8 -> FE/21018, 8 bytes (user, +4);
+// 816C7A58 loads Guide.AvatarMiniCreator.xex with user at +0. Its DllMain
+// 90104BB0 registers resource 22.
+inline constexpr SystemUiApplication kAvatarMiniCreator{
+    "game:\\system\\Guide.AvatarMiniCreator.xex", "avatarminicreator", 8, 0, 22};
 // XamAppLoad by module name (XAM 816CDD58). The Guide's direct Create Profile
 // (hud 913EA808) loads createprofile.xex with no request buffer; the original
 // app copies its 136-byte request only when one exists (90107850).
@@ -57,6 +62,7 @@ inline constexpr const SystemUiApplication* SystemUiApplicationFor(uint32_t mess
     case 0x21015: return &kGuide;
     case 0x2100D: return &kMessageBox;
     case 0x2100B: return &kDeviceSelector;
+    case 0x21018: return &kAvatarMiniCreator;
     default: return nullptr;
   }
 }
