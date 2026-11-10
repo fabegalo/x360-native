@@ -1,0 +1,64 @@
+--- a/src/ui/overlay/debug_overlay.cpp
++++ b/src/ui/overlay/debug_overlay.cpp
+@@ -13,10 +13,15 @@
+ #include <rex/version.h>
+ #include <imgui.h>
+ #ifdef REXGLUE_ENABLE_PERF_COUNTERS
++#include <rex/cvar.h>
+ #include <rex/perf/counter.h>
+ #include <cinttypes>
+ #endif
+ 
++#ifdef REXGLUE_ENABLE_PERF_COUNTERS
++REXCVAR_DECLARE(std::string, perf_log_csv);
++#endif
++
+ namespace rex::ui {
+ 
+ DebugOverlayDialog::DebugOverlayDialog(ImGuiDrawer* imgui_drawer, FrameStatsProvider stats_provider)
+@@ -42,9 +47,11 @@ void DebugOverlayDialog::OnDraw(ImGuiIO& io) {
+ #ifdef REXGLUE_ENABLE_PERF_COUNTERS
+     ImGui::Separator();
+ 
+-    if (!rex::perf::IsEnabled()) {
+-      ImGui::TextUnformatted("Counters disabled (--perf_counters=true)");
+-    } else {
++    // A CSV capture (benchmarks) owns the counters for the whole run.
++    bool enabled = rex::perf::IsEnabled();
++    if (REXCVAR_GET(perf_log_csv).empty() && ImGui::Checkbox("Perf counters", &enabled))
++      rex::perf::SetEnabled(enabled);
++    if (enabled) {
+       // Frame time graph
+       auto ft_us = rex::perf::GetSnapshotCounter(rex::perf::CounterId::kFrameTimeUs);
+       float ft_ms = static_cast<float>(ft_us) / 1000.0f;
+@@ -53,6 +60,13 @@ void DebugOverlayDialog::OnDraw(ImGuiIO& io) {
+       ImGui::PlotLines("##ft", frame_time_history_.data(), kFrameHistorySize,
+                        static_cast<int>(frame_history_idx_), "Frame (ms)", 0.0f, 50.0f,
+                        ImVec2(200, 40));
++      // Average over the history: the per-swap kFps is an integer and jitters.
++      float sum = 0.0f;
++      int samples = 0;
++      for (float ms : frame_time_history_)
++        if (ms > 0.0f) sum += ms, ++samples;
++      if (samples)
++        ImGui::Text("FPS: %.1f  Frame: %.2f ms", 1000.0f * samples / sum, sum / samples);
+       // GPU
+       ImGui::Text("Draw: %" PRId64 "  Stalls: %" PRId64 "  Verts: %" PRId64,
+                   rex::perf::GetSnapshotCounter(rex::perf::CounterId::kDrawCalls),
+@@ -81,6 +95,16 @@ void DebugOverlayDialog::OnDraw(ImGuiIO& io) {
+       auto pip_m = rex::perf::GetSnapshotCounter(rex::perf::CounterId::kPipelineCacheMisses);
+       ImGui::Text("TexCache: %" PRId64 "/%" PRId64 "  PipeCache: %" PRId64 "/%" PRId64, tex_h,
+                   tex_h + tex_m, pip_h, pip_h + pip_m);
++      // Per-frame work behind hitches (D3D12 records shader/pipeline creation).
++      ImGui::Text("Shaders: %" PRId64 " (%.1fms)  Pipes: %" PRId64 " (%.1fms)",
++                  rex::perf::GetSnapshotCounter(rex::perf::CounterId::kShaderTranslations),
++                  static_cast<float>(rex::perf::GetSnapshotCounter(
++                      rex::perf::CounterId::kShaderTranslationUs)) / 1000.0f,
++                  rex::perf::GetSnapshotCounter(rex::perf::CounterId::kPipelineCreations),
++                  static_cast<float>(rex::perf::GetSnapshotCounter(
++                      rex::perf::CounterId::kPipelineCreationUs)) / 1000.0f);
++      ImGui::Text("Swap failures: %" PRId64,
++                  rex::perf::GetSnapshotCounter(rex::perf::CounterId::kSwapFailures));
+     }
+ #endif
+   }

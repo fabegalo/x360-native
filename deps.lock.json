@@ -990,7 +990,7 @@
       },
       "files": {
         "src/core/perf/counter.cpp": "df95e01382113fcd10e5698b8f6985f7d14486a834e542be95dfc1e59b611268",
-        "src/ui/overlay/debug_overlay.cpp": "22728612119fd3a63cb10dd890a77b86cca25f019d7b0f6bf38a90b0df2033dc"
+        "src/ui/overlay/debug_overlay.cpp": "e0495864e65073747e2a6eea194553e7673f86b09f5e1f2ccacc93b5388059ec"
       },
       "file": "patches/rexglue-sdk/0072-isolate-performance-counter-cache-lines.patch",
       "test": "sdkcheck.Performance counters; sdkcheck.Performance snapshots"
@@ -3717,6 +3717,17 @@
     "src/kernel/xboxkrnl/xboxkrnl_hal.cpp": "ce21dccad5e02e960fb149fd633eed0d9f776bde23f411df4a4422821d08ccd4"
   },
   "test": "sdkcheck.firmware-exit (tests/sdkcheck/firmware_exit_probe.cpp): HalPowerDownToBackgroundMode, which the Guide power menu (XAM 17559 816F0410) calls for Desligar o console, runs title terminate notifications and publishes FirmwareExit routine 5 without returning, the same power down as HalReturnToFirmware(5). It was a stub, so the dash kept running after the user chose to turn the console off."
+},
+{
+  "file": "patches/rexglue-sdk/0266-overlay-perf-counters-toggle.patch",
+  "sha256": "0b25890294af5f70b9cc28866b44312aa1d7a8944bc9da1799613a99c13c6ff6",
+  "base_files": {
+    "src/ui/overlay/debug_overlay.cpp": "22728612119fd3a63cb10dd890a77b86cca25f019d7b0f6bf38a90b0df2033dc"
+  },
+  "files": {
+    "src/ui/overlay/debug_overlay.cpp": "e0495864e65073747e2a6eea194553e7673f86b09f5e1f2ccacc93b5388059ec"
+  },
+  "test": "sdkcheck.[debug-overlay] (tests/sdkcheck/debug_overlay_layout_test.cpp) draws the overlay with the toggle. Manual: F3 overlay shows a \"Perf counters\" checkbox that calls rex::perf::SetEnabled during the session; with --perf_log_csv the capture owns the counters and the checkbox is hidden. With counters on it shows FPS and frame time averaged over the plotted history, since the guest FPS provider is not wired. It also shows the per-frame shader translations, pipeline creations (D3D12) and swap failures that were recorded but never displayed. The overlay only told the user to restart with --perf_counters=true."
 }
 ]
 },

@@ -2979,3 +2979,18 @@ same orderly title termination as `HalReturnToFirmware(5)` and publishes
 `sdkcheck.firmware-exit` (`tests/sdkcheck/firmware_exit_probe.cpp`) calls it
 through the guest import and checks that it does not return, runs the terminate
 notification and hands off routine 5. No upstream equivalent was identified.
+
+### 0266 — perf counters toggle in the debug overlay
+
+The F3 overlay only said `Counters disabled (--perf_counters=true)`, so turning
+counters on needed a relaunch with that flag. It now has a `Perf counters`
+checkbox that calls `rex::perf::SetEnabled` during the session; it starts from
+`--perf_counters` and is not persisted. With `--perf_log_csv` the capture owns the
+counters for the whole run and the checkbox is hidden. With counters on it
+also shows FPS and frame time averaged over the plotted history: the guest FPS
+line needs `SetGuestFrameStats`, which no title calls.
+Per-frame shader translations, pipeline creations (both recorded by D3D12 only)
+and swap failures, recorded but never displayed before, get their own lines.
+
+`sdkcheck.[debug-overlay]` (`tests/sdkcheck/debug_overlay_layout_test.cpp`) still
+draws the overlay. No upstream equivalent was identified.

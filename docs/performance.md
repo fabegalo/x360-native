@@ -134,7 +134,8 @@ inválido exige rebuild seguro. Metodologia, contagens, tempos e limites:
 
 O patch 0070 reutiliza `rex::perf` e seu CSV. `perf_log_csv` passa a ser conectado
 à inicialização. Sem `--perf_log_csv=<arquivo>` ou `--perf_counters=true`, os
-contadores ficam desligados. O suporte funciona também em Release;
+contadores ficam desligados; o checkbox `Perf counters` do overlay (F3) os liga
+durante a sessão (sem CSV). O suporte funciona também em Release;
 `REXGLUE_ENABLE_PERF_COUNTERS=OFF` remove os callsites existentes. O snapshot é
 feito no XE_SWAP, depois de IssueSwap. Não há polling de UI para inferir FPS.
 
