@@ -24,6 +24,15 @@ std::string Key(const fs::path& p) {
 #endif
   return s;
 }
+// Without filesystem resolution: keys of closure entries a session transition
+// does not re-hash. A differing resolved spelling only fails an anchor lookup.
+static std::string LexicalKey(const fs::path& p) {
+  auto s = PathUtf8(p.lexically_normal().make_preferred());
+#ifdef _WIN32
+  for (auto& c : s) if (c >= 'A' && c <= 'Z') c += 'a' - 'A';
+#endif
+  return s;
+}
 std::string ReadHead(const fs::path& sdk) {
   auto git = sdk / ".git";
   if (io::is_regular_file(git)) {
@@ -47,7 +56,7 @@ std::string ReadHead(const fs::path& sdk) {
 }
 fs::path PreparationReceipt(const fs::path& exe) { auto p = exe; p += ".preparation.json"; return p; }
 std::optional<std::string> CheckPreparation(const ProjectPaths& paths,
-    const std::string& title, const fs::path& manifest, const fs::path& exe) {
+    const std::string& title, const fs::path& manifest, const fs::path& exe, ReceiptScope scope) {
   ActionTrace trace("receipt.verify." + title);
   const auto fail = [](const std::string& reason) -> std::optional<std::string> {
     return "Preparação inválida; prepare novamente. " + reason;
@@ -100,6 +109,9 @@ std::optional<std::string> CheckPreparation(const ProjectPaths& paths,
     if (sdk_commit.size() != 40 || sdk_commit != ReadHead(sdk_source))
       return fail("A revisão do ReXGlue mudou.");
     std::unordered_set<std::string> inputs, artifacts;
+    const auto recorded = [&](const fs::path& file) {
+      return inputs.contains(Key(file)) || (scope == ReceiptScope::Artifacts && inputs.contains(LexicalKey(file)));
+    };
     for (auto group : {"inputs", "artifacts"}) {
       const auto& entries = receipt.at(group);
       if (!entries.is_array() || entries.empty()) return fail("Recibo incompleto.");
@@ -110,12 +122,21 @@ std::optional<std::string> CheckPreparation(const ProjectPaths& paths,
       std::vector<std::string> hashes;
       files.reserve(entries.size());
       hashes.reserve(entries.size());
+      // Within a running session the build closure cannot change what runs:
+      // only the artifacts and the profile's own registration are re-hashed.
+      const bool closure = scope == ReceiptScope::Artifacts && std::string(group) == "inputs";
+      // Resolving ~5,000 closure paths costs ~1.7 s; unhashed ones use LexicalKey.
+      const auto& lexical = LexicalKey;
+      const auto own = closure ? std::unordered_set<std::string>{
+          lexical(manifest), lexical(manifest.parent_path() / "preparation.toml")} : std::unordered_set<std::string>{};
       for (const auto& entry : entries) {
         CheckVerificationCancellation();
         const auto file = PathFromUtf8(entry.at("path").get<std::string>());
         const auto hash = entry.at("sha256").get<std::string>();
+        const bool skipped = closure && !own.contains(lexical(file));
         if (!file.is_absolute() || hash.size() != 64 || hash.find_first_not_of("0123456789abcdef") != std::string::npos ||
-            !seen.insert(Key(file)).second) return fail("Registro de arquivo inválido.");
+            !seen.insert(skipped ? lexical(file) : Key(file)).second) return fail("Registro de arquivo inválido.");
+        if (skipped) continue;
         files.push_back(file); hashes.push_back(hash);
       }
       PrimeVerificationDigests(files);
@@ -125,11 +146,11 @@ std::optional<std::string> CheckPreparation(const ProjectPaths& paths,
       }
     }
     for (auto role : {"compiler", "codegen", "build_config"})
-      if (!inputs.contains(Key(PathFromUtf8(receipt.at("roles").at(role).get<std::string>()))))
+      if (!recorded(PathFromUtf8(receipt.at("roles").at(role).get<std::string>())))
         return fail("Identidade das ferramentas e configuração incompleta.");
     // CMake's CONFIGURE_DEPENDS inventory also detects newly added sources or
     // templates; hashes of previously existing files alone cannot do that.
-    {
+    if (scope == ReceiptScope::Full) {
     ActionTrace globs_trace("receipt.globs");
     std::map<std::pair<fs::path, bool>, std::vector<io::directory_entry>> inventories;
     for (const auto& glob : receipt.at("globs")) {
@@ -194,23 +215,23 @@ std::optional<std::string> CheckPreparation(const ProjectPaths& paths,
     io::ifstream profile_file(manifest, std::ios::binary);
     const auto profile = toml::parse(profile_file, PathUtf8(manifest));
     auto xex = profile["entrypoint"]["file_path"].value<std::string>();
-    if (!xex || !inputs.contains(Key(manifest)) || !inputs.contains(Key(paths.root / "deps.lock.json")) ||
-        !inputs.contains(Key(manifest.parent_path() / PathFromUtf8(*xex))) || !artifacts.contains(Key(exe)))
+    if (!xex || !recorded(manifest) || !recorded(paths.root / "deps.lock.json") ||
+        !recorded(manifest.parent_path() / PathFromUtf8(*xex)) || !artifacts.contains(Key(exe)))
       return fail("Entradas obrigatórias ausentes do recibo.");
     if (auto modules = profile["modules"].as_array()) {
       for (const auto& module : *modules) {
         const auto* table = module.as_table();
         auto file = table ? (*table)["file_path"].value<std::string>() : std::nullopt;
-        if (!file || !inputs.contains(Key(manifest.parent_path() / PathFromUtf8(*file))))
+        if (!file || !recorded(manifest.parent_path() / PathFromUtf8(*file)))
           return fail("Dependência AOT ausente do recibo.");
       }
     }
     const auto registration = manifest.parent_path() / "preparation.toml";
-    if (io::is_regular_file(registration) && !inputs.contains(Key(registration)))
+    if (io::is_regular_file(registration) && !recorded(registration))
       return fail("O registro do título mudou.");
     if (IsWithin(exe, paths.build() / "aot") || IsWithin(exe, paths.build()/HostPlatform()/"aot")) {
       const auto owner = exe.parent_path() / ".x360n-aot-owner";
-      if (!inputs.contains(Key(owner))) return fail("Propriedade do build AOT ausente do recibo.");
+      if (!recorded(owner)) return fail("Propriedade do build AOT ausente do recibo.");
       io::ifstream owner_input(owner); std::string owner_title;
       std::getline(owner_input, owner_title);
       if (owner_title != title) return fail("O build AOT pertence a outro título.");
@@ -280,7 +301,7 @@ ReceiptHint ReceiptHints::Check(const std::string& title, const fs::path& manife
     return ReceiptHint::Current;
   } catch (const std::exception&) { return ReceiptHint::Unknown; }
 }
-std::optional<std::string> CheckPreparedLaunch(const ProjectPaths& paths, const fs::path& exe) {
+std::optional<std::string> CheckPreparedLaunch(const ProjectPaths& paths, const fs::path& exe, ReceiptScope scope) {
   try {
     const auto titles = paths.root / "titles";
     for (const auto& profiles : {titles, paths.local() / "aot"}) {
@@ -293,7 +314,7 @@ std::optional<std::string> CheckPreparedLaunch(const ProjectPaths& paths, const 
         io::ifstream in(manifest, std::ios::binary); auto table = toml::parse(in, PathUtf8(manifest));
         auto configured = table["x360n"]["native_exe"].value<std::string>();
         auto target = configured ? ResolveNativeExecutable(paths, id, dir.path() / PathFromUtf8(*configured)) : NativeTitleExecutable(paths, id);
-        if (Key(target) == Key(exe)) return CheckPreparation(paths, id, manifest, exe);
+        if (Key(target) == Key(exe)) return CheckPreparation(paths, id, manifest, exe, scope);
       } catch (const toml::parse_error&) {
         // An unrelated broken registration cannot invalidate this title. A title
         // with no matching valid registration is still rejected below.
@@ -309,7 +330,7 @@ std::optional<std::string> CheckPreparedLaunch(const ProjectPaths& paths, const 
       const auto id = receipt.at("title").get<std::string>();
       if (IsSafeLabel(id)) {
         const auto manifest = titles / PathFromUtf8(id) / PathFromUtf8(id + "_manifest.toml");
-        if (io::is_regular_file(manifest)) return CheckPreparation(paths, id, manifest, exe);
+        if (io::is_regular_file(manifest)) return CheckPreparation(paths, id, manifest, exe, scope);
       }
     }
     if (io::exists(PreparationReceipt(exe)) || IsWithin(exe, paths.build() / "titles") ||

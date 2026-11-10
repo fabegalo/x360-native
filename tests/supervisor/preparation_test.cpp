@@ -72,6 +72,28 @@ TEST_CASE("missing partial wrong-title and incomplete receipts never qualify a n
   SECTION("unrecorded Vulkan preflight") { std::ofstream(f.exe.parent_path() / "x360n_gpu_preflight.exe") << "preflight"; }
   CHECK(f.Check());
 }
+// Session transitions re-hash what runs, not the build closure (main.cpp).
+TEST_CASE("artifact scope re-hashes native artifacts and the manifest, not build inputs", "[preparation]") {
+  Fixture f;
+  auto artifacts = [&] { return CheckPreparation(f.paths, "sample", f.manifest, f.exe, ReceiptScope::Artifacts); };
+  REQUIRE_FALSE(artifacts());
+  std::ofstream(f.root / "compiler.exe") << "rebuilt compiler";
+  CHECK(f.Check());
+  CHECK_FALSE(artifacts());
+  CHECK(CheckPreparedLaunch(f.paths, f.exe));
+  CHECK_FALSE(CheckPreparedLaunch(f.paths, f.exe, ReceiptScope::Artifacts));
+  f.Sign();
+  for (const auto& file : {f.exe, f.exe.parent_path() / "runtime.dll", f.manifest}) {
+    INFO(PathUtf8(file));
+    std::ifstream in(file, std::ios::binary); std::string original{std::istreambuf_iterator<char>(in), {}}; in.close();
+    std::ofstream(file, std::ios::binary) << original << " changed";
+    CHECK(artifacts());
+    std::ofstream(file, std::ios::binary) << original;
+    REQUIRE_FALSE(artifacts());
+  }
+  std::ofstream(f.exe.parent_path() / "extra.dll") << "unrecorded";
+  CHECK(artifacts());
+}
 TEST_CASE("analysis invalidation follows the affected title dependency closure", "[preparation]") {
   Fixture f;
   auto other = f.root / "titles/other/other_manifest.toml";

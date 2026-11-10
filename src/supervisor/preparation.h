@@ -24,11 +24,15 @@ class ReceiptHints {
 // A receipt binds one native build to its content and build dependency closure.
 // No timestamp cache: replacement with preserved size/mtime must be detected.
 std::filesystem::path PreparationReceipt(const std::filesystem::path& exe);
+// Full re-hashes the build closure. Artifacts is for title transitions inside a
+// running session: native artifacts, manifest and registration are re-hashed,
+// the build closure is not; every structural check is unchanged.
+enum class ReceiptScope { Full, Artifacts };
 std::optional<std::string> CheckPreparation(const ProjectPaths& paths,
     const std::string& title, const std::filesystem::path& manifest,
-    const std::filesystem::path& exe);
+    const std::filesystem::path& exe, ReceiptScope scope = ReceiptScope::Full);
 // Title launches use the same check even through the diagnostic `run` command.
 // Non-title diagnostic tools retain their existing launch policy.
 std::optional<std::string> CheckPreparedLaunch(const ProjectPaths& paths,
-    const std::filesystem::path& exe);
+    const std::filesystem::path& exe, ReceiptScope scope = ReceiptScope::Full);
 }

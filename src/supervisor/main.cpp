@@ -443,11 +443,12 @@ int Run(const ProjectPaths& p, const fs::path& exe_in, std::vector<std::string> 
         std::string label, int timeout_s, bool rex_log, bool crash_stack,
         fs::path* handoff = nullptr, SessionWindow* window = nullptr,
         std::chrono::milliseconds* child_lifetime = nullptr,
-        std::unique_ptr<DigestBatch> verification = {}) {
+        std::unique_ptr<DigestBatch> verification = {},
+        ReceiptScope receipt = ReceiptScope::Full) {
   ActionTrace trace("supervisor.run");
   if (!verification) verification = std::make_unique<DigestBatch>();
   fs::path exe = fs::absolute(exe_in);
-  if (auto why = CheckPreparedLaunch(p, exe)) {
+  if (auto why = CheckPreparedLaunch(p, exe, receipt)) {
     fmt::print(stderr, "run: {}\n", *why);
     return kExitUsage;
   }
@@ -698,8 +699,9 @@ int Session(const ProjectPaths& paths, const fs::path& manifest, int timeout, bo
         if (io::exists(protected_root) && IsWithin(user_data_root, protected_root))
           throw std::runtime_error("Session user data cannot share content, source or build directories.");
     }
-    auto load_profile = [&](const fs::path& file, bool validate_execution = true) {
-      auto profile = LoadSessionProfile(paths, file, validate_execution);
+    auto load_profile = [&](const fs::path& file, bool validate_execution = true,
+                            ReceiptScope receipt = ReceiptScope::Full) {
+      auto profile = LoadSessionProfile(paths, file, validate_execution, receipt);
       if (!user_data_root.empty()) profile.user_root = user_data_root / profile.user_root.filename();
       return profile;
     };
@@ -753,12 +755,14 @@ int Session(const ProjectPaths& paths, const fs::path& manifest, int timeout, bo
       if ((window && window->closed()) || stop_requested) return kExitOk;
       if (!verification) verification = std::make_unique<DigestBatch>([&] { return window && window->closed(); });
       // Step zero already authenticated the dashboard in this same protected
-      // transaction. Every later title transition gets a fresh verification.
-      if (step != 0) active = load_profile(active.manifest);
+      // transaction. Every later title transition re-hashes what runs (XEX,
+      // native artifacts, manifest, registration); the build closure, ~1.3 GB
+      // and 4 s per receipt, cannot change the running product.
+      if (step != 0) active = load_profile(active.manifest, true, ReceiptScope::Artifacts);
       // The Vulkan preflight runs from the title's directory before Run checks
       // the receipt, so the receipt (which binds the preflight) comes first.
       if (step != 0 && renderer_settings.api == GraphicsApi::Vulkan)
-        if (auto why = CheckPreparedLaunch(paths, active.exe)) throw std::runtime_error(*why);
+        if (auto why = CheckPreparedLaunch(paths, active.exe, ReceiptScope::Artifacts)) throw std::runtime_error(*why);
       CheckSessionRenderer(active.exe, renderer_settings);
       auto args = SessionConsoleArguments(SessionRendererArguments(
           SessionProfileArguments(active, skip_boot_intro && active.manifest == dashboard.manifest),
@@ -772,7 +776,7 @@ int Session(const ProjectPaths& paths, const fs::path& manifest, int timeout, bo
       // offers no Guide; its titles never receive another version's modules.
       if (active.manifest != dashboard.manifest && !dashboard.system_ui_host.empty()) {
         // Recheck the dashboard receipt that owns this native host and modules.
-        load_profile(dashboard.manifest);
+        load_profile(dashboard.manifest, true, ReceiptScope::Artifacts);
       }
       // A title's original avatar service uses only the session dashboard's own
       // verified files; a missing or different one refuses the title here.
@@ -785,7 +789,8 @@ int Session(const ProjectPaths& paths, const fs::path& manifest, int timeout, bo
       // budget. Shorten only the diagnostic label, never the routed identity.
       const auto run_label = run_prefix + active.name.substr(0, 64 - run_prefix.size());
       const auto result = Run(paths, active.exe, args,
-          run_label, timeout, true, crash_stack, &handoff, window.get(), &child_lifetime, std::move(verification));
+          run_label, timeout, true, crash_stack, &handoff, window.get(), &child_lifetime, std::move(verification),
+          step == 0 ? ReceiptScope::Full : ReceiptScope::Artifacts);
       if (window && window->closed()) return kExitOk;
       if (result != kExitOk) {
         // A successful compilation is not a compatibility verdict. Preserve a

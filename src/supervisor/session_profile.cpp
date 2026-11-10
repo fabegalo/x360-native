@@ -19,7 +19,8 @@ std::vector<std::string> SessionProfileArguments(const SessionProfile& profile, 
   }
   return args;
 }
-SessionProfile LoadSessionProfile(const ProjectPaths& paths, const std::filesystem::path& file, bool validate_execution) {
+SessionProfile LoadSessionProfile(const ProjectPaths& paths, const std::filesystem::path& file, bool validate_execution,
+                                  ReceiptScope receipt) {
   CheckVerificationCancellation();
   const auto manifest = io::canonical(file);
   io::ifstream input(manifest, std::ios::binary);
@@ -55,7 +56,7 @@ SessionProfile LoadSessionProfile(const ProjectPaths& paths, const std::filesyst
     if (auto error = CheckLaunchable(paths, p.exe)) throw std::runtime_error(*error);
     auto digest = DigestFile(p.xex);
     if (!digest || digest->sha256 != p.sha256) throw std::runtime_error("XEX hash mismatch: " + PathUtf8(p.xex));
-    if (auto error = CheckPreparation(paths, p.name, manifest, p.exe)) throw std::runtime_error(*error);
+    if (auto error = CheckPreparation(paths, p.name, manifest, p.exe, receipt)) throw std::runtime_error(*error);
   }
   const auto relative = p.xex.lexically_relative(p.game_root);
   if (relative.empty() || relative.is_absolute() || *relative.begin() == ".." ||
@@ -174,7 +175,7 @@ SessionProfile LoadSessionProfile(const ProjectPaths& paths, const std::filesyst
       }
       if (root == paths.local() / "aot" &&
           (io::exists(paths.local() / "preparation" / (id + ".runtime-error")) ||
-           CheckPreparation(paths, id, candidate, native))) continue;
+           CheckPreparation(paths, id, candidate, native, receipt))) continue;
       if (io::weakly_canonical(candidate) != manifest)
         p.launch_targets.push_back(candidate);
       } catch (const VerificationCancelled&) { throw; }

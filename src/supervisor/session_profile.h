@@ -1,5 +1,6 @@
 #pragma once
 #include "paths.h"
+#include "preparation.h"
 #include "../../titles/common/launch_request.h"
 #include <optional>
 #include <vector>
@@ -31,7 +32,8 @@ struct SessionProfile {
 };
 // Catalog reads retain routing metadata; execution always validates the files.
 SessionProfile LoadSessionProfile(const ProjectPaths& paths, const std::filesystem::path& manifest,
-                                  bool validate_execution = true);
+                                  bool validate_execution = true,
+                                  ReceiptScope receipt = ReceiptScope::Full);
 std::vector<std::string> SessionProfileArguments(const SessionProfile& profile, bool skip_boot_intro);
 // The selected console owns identity, storage and original system services.
 // Callers authenticate both profiles before using these arguments.

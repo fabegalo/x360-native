@@ -1,5 +1,16 @@
 # STATUS
 
+09/11 — **Trocas dash↔jogo sem refazer o hash do build**: cada troca da sessão
+verificava por completo os recibos (~5.100 arquivos, ~1,3 GB, ~4 s cada) da dash,
+do título, do Skate 3 gerado (lista de jogos da dash) e de novo no `Run()`. A
+abertura da sessão continua completa; as trocas verificam XEX, artefatos nativos,
+manifesto e registro (`ReceiptScope::Artifacts`), com chave lexical para o resto
+do recibo (resolver ~5.000 caminhos custava ~1,7 s). Sessões pelo app, fim do
+processo anterior até o próximo iniciar: dash→Motocross 9,2 s → 2,2 s
+(`20261110T001656Z` × `20261110T005709Z`), volta à dash → 1,5 s
+(`20261110T005720Z`). Teste `[preparation]` cobre o escopo; a falha de símbolos em
+`process_test` é anterior. A abertura da sessão segue em ~14 s de verificação.
+
 09/11 — **Avatar do perfil persistente e MiniCreator AOT na 17559**: Get/SetManifest
 usam a configuração original `0x63E80044` no perfil do SDK; `Guide.AvatarMiniCreator.xex`
 é módulo AOT verificado. O registro original de pacotes é populado pelo próprio
