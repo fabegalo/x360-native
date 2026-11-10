@@ -1,6 +1,7 @@
 #include "../../src/native/textures/texture_load.h"
 #include "../../src/native/d3d12/d3d12_commands.h"
 #include <rex/graphics/pipeline/texture/info.h>
+#include <rex/graphics/flags.h>
 #include <catch2/catch_test_macros.hpp>
 #include <d3d12.h>
 #include <wrl/client.h>
@@ -12,6 +13,22 @@ using Microsoft::WRL::ComPtr;
 using namespace x360n::native;
 using namespace rex::graphics;
 using namespace rex::graphics::xenos;
+TEST_CASE("Native samples type 0 texture fetches only under gpu_allow_invalid_fetch_constants") {
+  // Motocross Madness binds its terrain color sources as type 0; the pinned
+  // Xenos texture cache samples them under this flag (title manifest).
+  xe_gpu_texture_fetch_t f{}; f.type = FetchConstantType::kInvalidTexture;
+  f.dimension = DataDimension::k2DOrStacked; f.format = TextureFormat::k_8_8_8_8; f.swizzle = 0x688;
+  const bool saved = REXCVAR_GET(gpu_allow_invalid_fetch_constants);
+  REXCVAR_SET(gpu_allow_invalid_fetch_constants, false);
+  CHECK_FALSE(TextureFetchSampled(f));
+  CHECK_FALSE(TextureViewActive(f, FetchOpDimension::k2D, false));
+  REXCVAR_SET(gpu_allow_invalid_fetch_constants, true);
+  CHECK(TextureFetchSampled(f));
+  CHECK(TextureViewActive(f, FetchOpDimension::k2D, false));
+  f.type = FetchConstantType::kVertex;  // Never a texture.
+  CHECK_FALSE(TextureFetchSampled(f));
+  REXCVAR_SET(gpu_allow_invalid_fetch_constants, saved);
+}
 TEST_CASE("Native inactive texture alternatives do not require guest memory") {
   xe_gpu_texture_fetch_t f{}; f.type = FetchConstantType::kTexture;
   f.dimension = DataDimension::k2DOrStacked; f.format = TextureFormat::k_2_10_10_10; f.swizzle = 0x688;

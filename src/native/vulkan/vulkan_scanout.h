@@ -17,7 +17,8 @@ class VulkanScanout {
   void Present(rex::ui::Presenter&, const ScanoutTexture&, const void* pixels,
                const uint32_t* lut, const ScanoutOverlay*, const void* overlay_pixels,
                ScanoutPostEffect = ScanoutPostEffect::kNone,
-               uint32_t display_width = 0, uint32_t display_height = 0);
+               uint32_t display_width = 0, uint32_t display_height = 0,
+               VkBuffer scaled = VK_NULL_HANDLE);
   void Drain() { submissions_.Drain(); }
  private:
   void Initialize();

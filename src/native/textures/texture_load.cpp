@@ -1,8 +1,8 @@
 #include "texture_load.h"
-#include "../memory/scaled_resolve.h"
 #include "texture.h"
 #include "texture_block.h"
 #include <rex/graphics/pipeline/texture/info.h>
+#include <rex/graphics/flags.h>
 #include <algorithm>
 #include <bit>
 #include <stdexcept>
@@ -22,6 +22,13 @@ namespace bytecode {
 #include "src/graphics/shaders/bytecode/d3d12_5_1/texture_load_128bpb_cs.h"
 #include "src/graphics/shaders/bytecode/d3d12_5_1/texture_load_depth_unorm_cs.h"
 #include "src/graphics/shaders/bytecode/d3d12_5_1/texture_load_depth_float_cs.h"
+#include "src/graphics/shaders/bytecode/d3d12_5_1/texture_load_8bpb_scaled_cs.h"
+#include "src/graphics/shaders/bytecode/d3d12_5_1/texture_load_16bpb_scaled_cs.h"
+#include "src/graphics/shaders/bytecode/d3d12_5_1/texture_load_32bpb_scaled_cs.h"
+#include "src/graphics/shaders/bytecode/d3d12_5_1/texture_load_64bpb_scaled_cs.h"
+#include "src/graphics/shaders/bytecode/d3d12_5_1/texture_load_128bpb_scaled_cs.h"
+#include "src/graphics/shaders/bytecode/d3d12_5_1/texture_load_depth_unorm_scaled_cs.h"
+#include "src/graphics/shaders/bytecode/d3d12_5_1/texture_load_depth_float_scaled_cs.h"
 #endif
 }
 namespace {
@@ -57,8 +64,12 @@ bool NeedsCpuConversion(TextureFormat format, bool is_signed, bool num_format) {
       (GetBaseFormat(format) == TextureFormat::k_2_10_10_10 && is_signed) ||
       (num_format && format == TextureFormat::k_16);
 }
+bool TextureFetchSampled(const xe_gpu_texture_fetch_t& f) {
+  return f.type == FetchConstantType::kTexture ||
+      (f.type == FetchConstantType::kInvalidTexture && REXCVAR_GET(gpu_allow_invalid_fetch_constants));
+}
 bool TextureViewActive(const xe_gpu_texture_fetch_t& f, FetchOpDimension dimension, bool is_signed) {
-  if (f.type != FetchConstantType::kTexture) return false;
+  if (!TextureFetchSampled(f)) return false;
   const bool compatible = dimension == FetchOpDimension::kCube ? f.dimension == DataDimension::kCube :
       dimension == FetchOpDimension::k3DOrStacked ? f.dimension == DataDimension::k3D : f.dimension != DataDimension::kCube;
   const uint8_t signs = texture_util::SwizzleSigns(f);
@@ -79,7 +90,10 @@ LoadShader GpuLoadShader(const TextureLoadInput& t) {
 }
 TextureLoadPlan PlanGpuTextureLoad(const TextureLoadInput& t, LoadShader shader) {
   // Mirrors D3D12TextureCache::LoadTextureDataFromResidentMemoryImpl of the
-  // pinned SDK (unscaled, no decompression), loading base and mips together.
+  // pinned SDK (no decompression), loading base and mips together. Scaled
+  // (scale_x/y > 1): sources are views starting at the scaled base or mip page.
+  const uint32_t sx = t.scale_x, sy = t.scale_y, area = sx * sy;
+  const bool scaled = area > 1;
   TextureLoadPlan plan;
   plan.shader = shader;
   const Info info = LoadInfo(shader);
@@ -120,8 +134,8 @@ TextureLoadPlan PlanGpuTextureLoad(const TextureLoadInput& t, LoadShader shader)
       fp.Footprint.Height = std::max(t.height >> level, 1u);
       fp.Footprint.Depth = std::max(depth >> level, 1u);
     }
-    fp.Footprint.Width = (fp.Footprint.Width + host_block_width - 1) / host_block_width * host_block_width;
-    fp.Footprint.Height = (fp.Footprint.Height + host_block_height - 1) / host_block_height * host_block_height;
+    fp.Footprint.Width = (fp.Footprint.Width * sx + host_block_width - 1) / host_block_width * host_block_width;
+    fp.Footprint.Height = (fp.Footprint.Height * sy + host_block_height - 1) / host_block_height * host_block_height;
     const uint32_t row_blocks = (fp.Footprint.Width / host_block_width + host_x_blocks_per_thread - 1) /
         host_x_blocks_per_thread * host_x_blocks_per_thread;
     fp.Footprint.RowPitch = (row_blocks * info.bytes_per_host_block + D3D12_TEXTURE_DATA_PITCH_ALIGNMENT - 1) &
@@ -133,12 +147,13 @@ TextureLoadPlan PlanGpuTextureLoad(const TextureLoadInput& t, LoadShader shader)
   }
   plan.scratch_bytes = offset;
   LoadConstants c{};
-  c.is_tiled_3d_endian_scale = uint32_t(t.tiled) | (uint32_t(is_3d) << 1) | (uint32_t(t.endian) << 2) | (1u << 4) | (1u << 7);
+  c.is_tiled_3d_endian_scale = uint32_t(t.tiled) | (uint32_t(is_3d) << 1) | (uint32_t(t.endian) << 2) | (sx << 4) | (sy << 7);
   const uint32_t x_per_group_log2 = kLoadGuestXThreadsPerGroupLog2 + info.x_blocks_log2;
   for (uint32_t loop_level = loop_level_first; loop_level <= loop_level_last; ++loop_level) {
     const bool is_base = loop_level == 0;
     const uint32_t level = level_packed == 0 ? 0 : loop_level;
-    c.guest_offset = is_base ? t.base : t.mip + layout.mip_offsets_bytes[level];
+    c.guest_offset = scaled ? (is_base ? 0 : layout.mip_offsets_bytes[level] * area)
+                            : is_base ? t.base : t.mip + layout.mip_offsets_bytes[level];
     const auto& gl = is_base ? layout.base : layout.mips[level];
     uint32_t pitch = gl.row_pitch_bytes;
     if (t.tiled) pitch /= bytes_per_block;
@@ -149,8 +164,8 @@ TextureLoadPlan PlanGpuTextureLoad(const TextureLoadInput& t, LoadShader shader)
     else { w = std::max(t.width >> level, 1u); h = std::max(t.height >> level, 1u); d = std::max((is_3d ? t.depth_or_slices : 1u) >> level, 1u); }
     // A 2D view of volume storage loads its first slice only.
     if (!t.host_volume) d = 1;
-    c.size_blocks[0] = (w + block_width - 1) / block_width;
-    c.size_blocks[1] = (h + block_height - 1) / block_height;
+    c.size_blocks[0] = (w + block_width - 1) / block_width * sx;
+    c.size_blocks[1] = (h + block_height - 1) / block_height * sy;
     c.size_blocks[2] = d;
     c.height_texels = h;
     const auto& fp = is_base ? slice_base : slice_mips[level];
@@ -160,8 +175,8 @@ TextureLoadPlan PlanGpuTextureLoad(const TextureLoadInput& t, LoadShader shader)
     const uint32_t gx = (c.size_blocks[0] + (1u << x_per_group_log2) - 1) >> x_per_group_log2;
     const uint32_t gy = (c.size_blocks[1] + (1u << kLoadGuestYBlocksPerGroupLog2) - 1) >> kLoadGuestYBlocksPerGroupLog2;
     for (uint32_t slice = 0; slice < array_size; ++slice) {
-      plan.dispatches.push_back({c, {gx, gy, c.size_blocks[2]}});
-      c.guest_offset += gl.array_slice_stride_bytes;
+      plan.dispatches.push_back({c, {gx, gy, c.size_blocks[2]}, !is_base});
+      c.guest_offset += gl.array_slice_stride_bytes * area;
       c.host_offset += uint32_t(slice_size);
     }
   }
@@ -175,9 +190,9 @@ TextureLoadPlan PlanGpuTextureLoad(const TextureLoadInput& t, LoadShader shader)
     if (copy.boxed) {
       uint32_t ox, oy, oz;
       texture_util::GetPackedMipOffset(t.width, t.height, t.host_volume ? t.depth_or_slices : 1, t.format, level, ox, oy, oz);
-      copy.box.left = ox * block_width; copy.box.top = oy * block_height; copy.box.front = oz;
-      copy.box.right = copy.box.left + (std::max(t.width >> level, 1u) + host_block_width - 1) / host_block_width * host_block_width;
-      copy.box.bottom = copy.box.top + (std::max(t.height >> level, 1u) + host_block_height - 1) / host_block_height * host_block_height;
+      copy.box.left = ox * block_width * sx; copy.box.top = oy * block_height * sy; copy.box.front = oz;
+      copy.box.right = copy.box.left + (std::max(t.width >> level, 1u) * sx + host_block_width - 1) / host_block_width * host_block_width;
+      copy.box.bottom = copy.box.top + (std::max(t.height >> level, 1u) * sy + host_block_height - 1) / host_block_height * host_block_height;
       copy.box.back = copy.box.front + std::max(depth >> level, 1u);
     }
     for (uint32_t slice = 0; slice < array_size; ++slice) {
@@ -191,8 +206,8 @@ TextureLoadPlan PlanGpuTextureLoad(const TextureLoadInput& t, LoadShader shader)
 }
 void ConvertTextureCpu(const TextureLoadInput& t, std::span<const uint8_t> base_source, std::span<const uint8_t> mip_source,
     std::span<const D3D12_PLACED_SUBRESOURCE_FOOTPRINT> footprints, uint8_t* linear) {
-  std::unique_lock<std::recursive_mutex> scaled_lock;
-  if (t.scaled) scaled_lock = GuestMemoryMirror::Lock();
+  // Always 1x: resolution-scaled textures load on the GPU (scaled memory).
+  if (t.scale_x * t.scale_y != 1) throw std::logic_error("Native: CPU texture conversion is unscaled");
   const auto layout = t.Layout();
   const FormatInfo* fi = FormatInfo::Get(t.format);
   const unsigned block = fi->bytes_per_block();
@@ -221,22 +236,18 @@ void ConvertTextureCpu(const TextureLoadInput& t, std::span<const uint8_t> base_
     for (unsigned slice = 0; slice < t.array_size; ++slice) {
     const size_t level_offset = size_t(address - (level ? mip_page : base_page)) + size_t(slice) * gl.array_slice_stride_bytes;
     const auto& footprint = footprints[level + slice * levels];
-    const unsigned host_bx = t.scaled ? footprint.Footprint.Width : bx;
-    const unsigned host_by = t.scaled ? footprint.Footprint.Height : by;
     for (unsigned z = 0; z < (t.host_volume ? std::max(1u, t.depth_or_slices >> level) : 1u); ++z)
-    for (unsigned host_y = 0; host_y < host_by; ++host_y) {
-      const unsigned y = t.scaled ? uint64_t(host_y)*by/host_by : host_y;
-      const unsigned sample_y = t.scaled ? ((uint64_t(host_y)*by)%host_by)*t.scale_y/host_by : 0;
-      const unsigned host_rows = t.scaled ? host_by : expanded_block ? std::max(1u,t.height>>level) : by;
-      uint8_t* row = linear + footprint.Offset + (uint64_t(z) * host_rows + host_y * (expanded_block ? fi->block_height : 1)) * footprint.Footprint.RowPitch;
+    for (unsigned y = 0; y < by; ++y) {
+      const unsigned host_rows = expanded_block ? std::max(1u,t.height>>level) : by;
+      uint8_t* row = linear + footprint.Offset + (uint64_t(z) * host_rows + y * (expanded_block ? fi->block_height : 1)) * footprint.Footprint.RowPitch;
       const uint32_t linear_row = ((z + oz) * gl.z_slice_stride_block_rows + y + oy) * gl.row_pitch_bytes + ox * block;
       // Whole linear rows of 32/64/128-bit blocks are word aligned; the
       // per-word endian swap equals the per-byte address XOR below.
-      if (!t.scaled && raw && !t.tiled && block >= 4 && !((level_offset + linear_row) & 3)) {
+      if (raw && !t.tiled && block >= 4 && !((level_offset + linear_row) & 3)) {
         ReadTextureBlock(source, level_offset + linear_row, bx * block, endian, row);
         continue;
       }
-      if (!t.scaled && raw && t.tiled && !volume) {
+      if (raw && t.tiled && !volume) {
         const unsigned run = TiledContiguousBlocks(block_log2);
         for (unsigned x = 0; x < bx;) {
           const unsigned n = std::min(run - ((x + ox) & (run - 1)), bx - x);
@@ -246,23 +257,13 @@ void ConvertTextureCpu(const TextureLoadInput& t, std::span<const uint8_t> base_
         }
         continue;
       }
-      for (unsigned host_x = 0; host_x < host_bx; ++host_x) {
-      const unsigned x = t.scaled ? uint64_t(host_x)*bx/host_bx : host_x;
-      const unsigned sample_x = t.scaled ? ((uint64_t(host_x)*bx)%host_bx)*t.scale_x/host_bx : 0;
+      for (unsigned x = 0; x < bx; ++x) {
       uint32_t offset = t.tiled ? (volume ? uint32_t(texture_util::GetTiledOffset3D(x + ox, y + oy, z + oz,
           pitch_blocks, gl.z_slice_stride_block_rows, block_log2)) :
           texture_util::GetTiledOffset2D(x + ox, y + oy, pitch_blocks, block_log2)) :
           linear_row + x * block;
-      uint8_t* dest = row + size_t(host_x) * host_block;
-      auto read = [&](uint8_t* out) {
-        if (!t.scaled) { ReadTextureBlock(source, level_offset + offset, block, endian, out); return; }
-        const unsigned mask = endian == Endian::k8in16 ? 1 : endian == Endian::k8in32 ? 3 : endian == Endian::k16in32 ? 2 : 0;
-        for (unsigned b=0; b<block; ++b) {
-          const size_t relative=(level_offset+offset+b)^mask;
-          if (relative>=source.size()) throw std::runtime_error("Native scaled texture extent overflow");
-          out[b]=t.scaled->Read((level ? mip_page : base_page)+uint32_t(relative), sample_x+sample_y*t.scale_x, source[relative]);
-        }
-      };
+      uint8_t* dest = row + size_t(x) * host_block;
+      auto read = [&](uint8_t* out) { ReadTextureBlock(source, level_offset + offset, block, endian, out); };
       if (raw) { read(dest); continue; }
       uint8_t texel[16];
       read(texel);
@@ -325,9 +326,21 @@ Microsoft::WRL::ComPtr<ID3D12RootSignature> CreateTextureLoadRoot(ID3D12Device* 
   Check(device->CreateRootSignature(0, blob->GetBufferPointer(), blob->GetBufferSize(), IID_PPV_ARGS(&root)), "root");
   return root;
 }
-D3D12_SHADER_BYTECODE TextureLoadBytecode(LoadShader shader) {
+D3D12_SHADER_BYTECODE TextureLoadBytecode(LoadShader shader, bool scaled) {
   using namespace bytecode;
   D3D12_SHADER_BYTECODE code{};
+  if (scaled) {
+    switch (shader) {
+      case LoadShader::k8bpb: return {texture_load_8bpb_scaled_cs, sizeof(texture_load_8bpb_scaled_cs)};
+      case LoadShader::k16bpb: return {texture_load_16bpb_scaled_cs, sizeof(texture_load_16bpb_scaled_cs)};
+      case LoadShader::k32bpb: return {texture_load_32bpb_scaled_cs, sizeof(texture_load_32bpb_scaled_cs)};
+      case LoadShader::k64bpb: return {texture_load_64bpb_scaled_cs, sizeof(texture_load_64bpb_scaled_cs)};
+      case LoadShader::k128bpb: return {texture_load_128bpb_scaled_cs, sizeof(texture_load_128bpb_scaled_cs)};
+      case LoadShader::kDepthUnorm: return {texture_load_depth_unorm_scaled_cs, sizeof(texture_load_depth_unorm_scaled_cs)};
+      case LoadShader::kDepthFloat: return {texture_load_depth_float_scaled_cs, sizeof(texture_load_depth_float_scaled_cs)};
+      default: throw std::runtime_error("Native texture load: no scaled pipeline for shader");
+    }
+  }
   switch (shader) {
     case LoadShader::k8bpb: code = {texture_load_8bpb_cs, sizeof(texture_load_8bpb_cs)}; break;
     case LoadShader::k16bpb: code = {texture_load_16bpb_cs, sizeof(texture_load_16bpb_cs)}; break;
@@ -376,8 +389,10 @@ std::vector<BufferImageRegion> PlanBufferImageRegions(const TextureLoadPlan& pla
 }
 #if defined(_WIN32)
 void RecordTextureLoad(D3D12Commands& list, const TextureLoadPlan& plan, uint64_t scratch_offset,
-    ID3D12Resource* scratch, ID3D12Resource* texture) {
+    ID3D12Resource* scratch, ID3D12Resource* texture, D3D12_GPU_DESCRIPTOR_HANDLE base_source,
+    D3D12_GPU_DESCRIPTOR_HANDLE mip_source) {
   for (const auto& d : plan.dispatches) {
+    if (base_source.ptr || mip_source.ptr) list.SetComputeRootDescriptorTable(1, d.mips ? mip_source : base_source);
     auto c = d.constants;
     c.host_offset += uint32_t(scratch_offset);
     list.SetComputeRoot32BitConstants(0, sizeof(c) / 4, &c, 0);

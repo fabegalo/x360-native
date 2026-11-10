@@ -35,8 +35,11 @@ class VulkanRender {
   rex::graphics::Shader* LoadShader(rex::graphics::xenos::ShaderType, const uint32_t*, uint32_t);
   void Draw(const rex::graphics::RegisterFile&, rex::memory::Memory&, rex::graphics::Shader*,
       rex::graphics::Shader*, rex::graphics::xenos::PrimitiveType, uint32_t, const DrawIndices*, DrawPurpose = DrawPurpose::kGuest);
-  bool PrepareScanout(const ScanoutTexture& input, const void* pixels, ScanoutTexture& output,
-                       std::vector<uint8_t>& storage) const { return scaled_.Scanout(input, pixels, output, storage); }
+  // With resolution scale, a front buffer holding scaled resolve data is
+  // recorded as a linear scaled surface (output describes it, readable by
+  // later fragment shaders on the queue); otherwise VK_NULL_HANDLE and the 1x
+  // guest bytes are presented. Call before the presenting submission (Flush).
+  VkBuffer PrepareScanout(const ScanoutTexture& input, ScanoutTexture& output);
   void Resolve(const rex::graphics::RegisterFile&, rex::memory::Memory&);
   SampleCounts ReadSampleCounts(bool counting_after);
   void SetSampleCounts(const SampleCounts&, bool visibility_only);
@@ -99,8 +102,6 @@ class VulkanRender {
   std::unique_ptr<PipelineWorkers> pipeline_workers_;
   bool rendering_ = false;
   struct UploadPage { std::unique_ptr<VulkanBuffer> buffer; VkDeviceSize used = 0; VkDescriptorSet load_set = VK_NULL_HANDLE; };
-  struct ScaledReadback { ScaledResolveCache::Ticket ticket; std::shared_ptr<VulkanBuffer> buffer;
-                          unsigned pixel_log2; uint64_t offset; };
   struct Arena {
     VkDescriptorPool descriptors = VK_NULL_HANDLE;
     std::vector<VkDescriptorPool> extra_descriptor_pools;
@@ -125,14 +126,35 @@ class VulkanRender {
     uint64_t serial = 0, readback_used = 0;
     std::unique_ptr<VulkanBuffer> readback;
     GuestWriteback writeback;
-    std::vector<ScaledReadback> scaled_readbacks;
   };
   // Records the shared SDK load shader into scratch, then copies every level
   // and slice into image (TRANSFER_DST layout), as Native D3D12 does.
+  // scaled: guest base/mip ranges read from GPU-resident scaled memory.
+  struct ScaledSource { uint32_t base, base_bytes, mip, mip_bytes; };
   void LoadTextureGpu(const TextureLoadPlan&, VkImage, uint32_t levels, uint32_t block_bytes,
-                      uint32_t block_width, VkExtent3D extent);
+                      uint32_t block_width, VkExtent3D extent, const ScaledSource* scaled = nullptr);
   VkPipelineLayout load_layout_ = VK_NULL_HANDLE;
-  std::array<PendingPipeline, 7> load_pipelines_{};
+  std::array<PendingPipeline, 7> load_pipelines_{}, load_pipelines_scaled_{};
+  // GPU-resident scaled resolve memory (vulkan_scaled.cpp): guest address *
+  // scale area in one buffer, sparse-bound on first use as in the pinned
+  // VulkanTextureCache, or fully allocated without sparse residency.
+  // Returns the descriptor range of [start, start + length) after ordering
+  // earlier accesses before (stage, access).
+  VkDescriptorBufferInfo UseScaled(uint32_t start, uint64_t length, VkPipelineStageFlags, VkAccessFlags);
+  // As D3D12Render::ReplicateScaled.
+  void ReplicateScaled(uint32_t start, uint32_t length, unsigned pixel_log2, bool mark);
+  VkDescriptorSet StorageSet(const VkDescriptorBufferInfo&);
+  void DestroyScaled();
+  VkBuffer scaled_buffer_ = VK_NULL_HANDLE;
+  std::vector<VkDeviceMemory> scaled_memory_;
+  std::vector<bool> scaled_bound_;
+  uint32_t scaled_granularity_log2_ = 0, scaled_memory_type_ = 0;
+  bool scaled_sparse_ = false;
+  BufferAccess scaled_access_;
+  PendingPipeline replicate_pipeline_, scaled_scanout_pipeline_;
+  std::shared_ptr<VulkanBuffer> scanout_buffer_;
+  std::vector<std::shared_ptr<VulkanBuffer>> retired_scanout_buffers_;
+  BufferAccess scanout_access_;
   std::array<Arena, VulkanSubmissionRing::kSlots> arenas_;
   std::unique_ptr<VulkanBuffer> guest_buffer_, edram_buffer_;
   VulkanBuffer* readback_ = nullptr; // Borrowed from the current arena.
@@ -149,7 +171,6 @@ class VulkanRender {
   VkPipelineCache pipeline_cache_ = VK_NULL_HANDLE;
   std::filesystem::path pipeline_file_;
   std::array<PendingPipeline, size_t(rex::graphics::draw_util::ResolveCopyShaderIndex::kCount)> copy_pipelines_{};
-  std::vector<ScaledReadback> scaled_readbacks_;
   VkPipelineLayout downscale_layout_ = VK_NULL_HANDLE;
   PendingPipeline downscale_pipeline_;
   std::array<PendingPipeline, 2> clear_pipelines_{};

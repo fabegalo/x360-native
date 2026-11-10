@@ -387,7 +387,7 @@ void D3D12Render::PublishCompleted() {
   for (;;) {
     RetiredBatch* batch = nullptr;
     for (auto& candidate : batches_)
-      if ((!candidate.writeback.empty() || !candidate.scaled_readbacks.empty()) &&
+      if (!candidate.writeback.empty() &&
           (!batch || candidate.serial < batch->serial)) batch = &candidate;
     if (!batch || batch->serial > completed) return;
     if (!batch->writeback.empty()) {
@@ -399,15 +399,6 @@ void D3D12Render::PublishCompleted() {
       });
       D3D12_RANGE none{}; batch->readback->Unmap(0, &none);
     }
-    for (const auto& scaled : batch->scaled_readbacks) {
-      const size_t bytes = size_t(scaled.ticket.length)*scale_x_*scale_y_;
-      void* mapped; D3D12_RANGE range{size_t(scaled.offset), size_t(scaled.offset)+bytes};
-      Check(scaled.buffer->Map(0, &range, &mapped), "map scaled resolve readback");
-      scaled_.Complete(scaled.ticket, {static_cast<const uint8_t*>(mapped)+scaled.offset, bytes},
-                        scaled.pixel_log2, *guest_memory_);
-      D3D12_RANGE none{}; scaled.buffer->Unmap(0, &none);
-    }
-    batch->scaled_readbacks.clear();
     batch->readback_used = 0;
     --pending_readback_batches_;
   }
@@ -503,14 +494,13 @@ void D3D12Render::Wait(uint64_t serial) {
 }
 void D3D12Render::RecycleBatch() {
   auto& retired = batches_[batch_index_];
-  Require(retired.writeback.empty() && retired.scaled_readbacks.empty(), "overwriting pending readback batch");
+  Require(retired.writeback.empty(), "overwriting pending readback batch");
   retired.serial = serial_;
   retired.readback = std::move(readback_);
   retired.readback_size = std::exchange(readback_size_, 0);
   retired.readback_used = std::exchange(readback_used_, 0);
   std::swap(retired.writeback, writeback_);
-  retired.scaled_readbacks.swap(scaled_readbacks_);
-  if (!retired.writeback.empty() || !retired.scaled_readbacks.empty()) ++pending_readback_batches_;
+  if (!retired.writeback.empty()) ++pending_readback_batches_;
   retired.allocator = std::move(allocator_);
   retired.views = std::move(views_); retired.samplers = std::move(samplers_);
   retired.transient = std::move(transient_);
@@ -524,7 +514,7 @@ void D3D12Render::RecycleBatch() {
   views_ = std::move(next.views); samplers_ = std::move(next.samplers);
   transient_ = std::move(next.transient);
   upload_pages_ = std::move(next.uploads); scratch_ = std::move(next.scratch);
-  Require(next.writeback.empty() && next.scaled_readbacks.empty(), "reusing pending readback batch");
+  Require(next.writeback.empty(), "reusing pending readback batch");
   readback_ = std::move(next.readback);
   readback_size_ = std::exchange(next.readback_size, 0);
   next.serial = 0;

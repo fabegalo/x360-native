@@ -86,7 +86,11 @@ void D3D12Render::Resolve(const RegisterFile& r, rex::memory::Memory& memory) {
     }
   }
   draw_util::ResolveInfo info;
-  if (!draw_util::GetResolveInfo(r, memory, scale_x_, scale_y_, false, false, info)) {
+  // Native's EDRAM (ROV/FSI, SDK patch 0185) keeps k_16_16[_16_16] as exact
+  // s5.10 integers, so a same-format signed-integer copy with exponent bias 10
+  // is bitwise (patch 0087), not a full resolve without integer destinations.
+  if (!draw_util::GetResolveInfo(r, memory, scale_x_, scale_y_, false, false, info,
+      /*fixed16_s5_10_storage=*/true)) {
     const auto f = r.GetVertexFetch(0);
     REXLOG_ERROR("Native resolve fetch address={:08X} size={} endian={} surface={:08X} scissor TL={:08X} BR={:08X}",
         f.address << 2, f.size, uint32_t(f.endian), r[XE_GPU_REG_RB_SURFACE_INFO],
@@ -145,26 +149,26 @@ void D3D12Render::Resolve(const RegisterFile& r, rex::memory::Memory& memory) {
     // the mirror is made current (CPU-written pages only) before the copy.
     auto& mirror = Mirror(memory);
     mirror.RequestRange(info.copy_dest_extent_start, length);
-    auto ticket=scaled ? scaled_.Capture(info.copy_dest_extent_start,length) : ScaledResolveCache::Ticket{};
     const unsigned pixel_log2 = info.IsCopyingDepth() ? 2u : std::countr_zero(unsigned(FormatInfo::Get(xenos::TextureFormat(info.copy_dest_info.copy_dest_format))->bits_per_pixel / 8));
-    Ptr<ID3D12Resource> scaled_buffer, scaled_readback;
-    D3D12_RESOURCE_STATES scaled_state=D3D12_RESOURCE_STATE_COPY_DEST;
+    // Scaled: the shader writes GPU-resident scaled memory through a view
+    // starting at the base, as the pinned executor. Bytes of the extent's pages
+    // outside the rectangle keep their subpixels; stale pages first receive
+    // the 1x bytes, so nothing outside the rectangle changes.
+    const uint32_t page_start=info.copy_dest_extent_start&~(ScaledResolveCache::kPage-1);
+    const uint32_t page_length=uint32_t(((uint64_t(info.copy_dest_extent_start)+length+ScaledResolveCache::kPage-1)&~uint64_t(ScaledResolveCache::kPage-1))-page_start);
+    ScaledWindow window{};
     if (scaled) {
       if (range*area > (uint64_t(1)<<29)) throw std::runtime_error("Native scaled resolve exceeds D3D12 buffer view limit");
-      auto initial=scaled_.Hydrate(info.copy_dest_base,uint32_t(range),pixel_log2,memory);
-      scaled_buffer=Buffer(initial.size(),D3D12_HEAP_TYPE_DEFAULT,scaled_state,D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS);
-      scaled_readback=Buffer(initial.size(),D3D12_HEAP_TYPE_READBACK,D3D12_RESOURCE_STATE_COPY_DEST);
-      auto upload=Upload(initial.data(),initial.size());
-      cmd_.CopyBufferRegion(scaled_buffer.Get(),0,upload.resource.Get(),upload.offset,initial.size());
-      Transition(scaled_buffer.Get(),scaled_state,D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
-      transient_.push_back(scaled_buffer);
+      ReplicateScaled(page_start,page_length,pixel_log2,false);
+      window=UseScaled(info.copy_dest_base,range,D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
     }
     Transition(memory_.Get(), memory_state_, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
     Barrier(); Transition(edram_.Get(), edram_state_, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
     unsigned v = Views(2);
     D3D12_UNORDERED_ACCESS_VIEW_DESC u{}; u.Format = UintFormat(si.dest_bpe_log2); u.ViewDimension = D3D12_UAV_DIMENSION_BUFFER;
     u.Buffer.NumElements = UINT((scaled ? range*area : 0x20000000ull) >> si.dest_bpe_log2);
-    device_->CreateUnorderedAccessView(scaled ? scaled_buffer.Get() : memory_.Get(), nullptr, &u, Cpu(v));
+    u.Buffer.FirstElement = scaled ? window.offset >> si.dest_bpe_log2 : 0;
+    device_->CreateUnorderedAccessView(scaled ? window.resource : memory_.Get(), nullptr, &u, Cpu(v));
     D3D12_SHADER_RESOURCE_VIEW_DESC s{}; s.Format = si.source_is_raw ? DXGI_FORMAT_R32_TYPELESS : UintFormat(si.source_bpe_log2);
     s.ViewDimension = D3D12_SRV_DIMENSION_BUFFER; s.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
     s.Buffer.NumElements = edram_size_ >> (si.source_is_raw ? 2 : si.source_bpe_log2);
@@ -177,7 +181,7 @@ void D3D12Render::Resolve(const RegisterFile& r, rex::memory::Memory& memory) {
     // The mirror now holds these bytes: later fetches read them on the GPU;
     // cached textures over the range reload from the mirror.
     if (scaled) {
-      Transition(scaled_buffer.Get(),scaled_state,D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+      window=UseScaled(info.copy_dest_base,range,D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
       if (!downscale_root_) downscale_root_=ComputeRoot(6,true);
       if (!downscale_pipeline_.valid()) {
         Ptr<ID3DBlob> code,errors;
@@ -192,21 +196,17 @@ void D3D12Render::Resolve(const RegisterFile& r, rex::memory::Memory& memory) {
       device_->CreateUnorderedAccessView(memory_.Get(),nullptr,&destination,Cpu(views));
       D3D12_SHADER_RESOURCE_VIEW_DESC source{}; source.Format=DXGI_FORMAT_R32_TYPELESS;
       source.ViewDimension=D3D12_SRV_DIMENSION_BUFFER; source.Shader4ComponentMapping=D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+      source.Buffer.FirstElement=window.offset/4;
       source.Buffer.NumElements=UINT(range*area/4); source.Buffer.Flags=D3D12_BUFFER_SRV_FLAG_RAW;
-      device_->CreateShaderResourceView(scaled_buffer.Get(),&source,Cpu(views+1));
+      device_->CreateShaderResourceView(window.resource,&source,Cpu(views+1));
       const uint32_t downsample[]{length,pixel_log2,scale_x_,scale_y_,(info.copy_dest_extent_start-info.copy_dest_base)*area,info.copy_dest_extent_start};
       cmd_.SetComputeRootSignature(downscale_root_.Get()); cmd_.SetPipelineState(downscale_pipeline_, &downscale_pipeline_);
       cmd_.SetComputeRoot32BitConstants(0,6,downsample,0); cmd_.SetComputeRootDescriptorTable(1,Gpu(views));
       cmd_.SetComputeRootDescriptorTable(2,Gpu(views+1)); cmd_.Dispatch((length+255)/256,1,1);
-      Transition(scaled_buffer.Get(),scaled_state,D3D12_RESOURCE_STATE_COPY_SOURCE);
-      cmd_.CopyBufferRegion(scaled_readback.Get(),0,scaled_buffer.Get(),0,range*area);
     }
-    QueueGuestWrite(info.copy_dest_extent_start, length, scaled ? &ticket.cpu_generations : nullptr);
-    if (scaled) {
-      scaled_.Begin(ticket);
-      scaled_readbacks_.push_back({std::move(ticket),scaled_readback,pixel_log2,
-          uint64_t(info.copy_dest_extent_start-info.copy_dest_base)*area});
-    }
+    QueueGuestWrite(info.copy_dest_extent_start, length);
+    // After RangeWrittenByGpu retired the range's watches: re-arm as current.
+    if (scaled) scaled_.MarkCurrent(page_start,page_length);
   }
   if (info.IsClearingColor() || info.IsClearingDepth()) {
     Transition(edram_.Get(), edram_state_, D3D12_RESOURCE_STATE_UNORDERED_ACCESS); Barrier();

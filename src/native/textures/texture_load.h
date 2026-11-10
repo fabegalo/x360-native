@@ -8,7 +8,6 @@
 #include <span>
 #include <vector>
 namespace x360n::native {
-class ScaledResolveCache;
 template <class List> class BasicD3D12Commands;
 using D3D12Commands = BasicD3D12Commands<struct ID3D12GraphicsCommandList>;
 // Guest texture storage selected by a fetch constant, in the terms both the
@@ -26,7 +25,6 @@ struct TextureLoadInput {
   DXGI_FORMAT host_format;
   bool is_signed, num_format;
   uint32_t scale_x = 1, scale_y = 1;
-  const ScaledResolveCache* scaled = nullptr;
   rex::graphics::texture_util::TextureGuestLayout Layout() const;
 };
 // Pinned SDK texture_load_* compute shaders Native dispatches (indices are
@@ -42,6 +40,10 @@ static_assert(sizeof(LoadConstants) == 40);
 constexpr uint32_t kLoadGuestXThreadsPerGroupLog2 = 2, kLoadGuestYBlocksPerGroupLog2 = 5;
 // RGBA4, signed RGB10A2 and integer 16-bit textures keep Native's CPU conversion.
 bool NeedsCpuConversion(rex::graphics::xenos::TextureFormat, bool is_signed, bool num_format);
+// A texture fetch constant whose data the GPU samples: type kTexture, or type 0
+// (kInvalidTexture) under --gpu_allow_invalid_fetch_constants, as in the pinned
+// Xenos texture cache (Motocross Madness binds terrain sources as type 0).
+bool TextureFetchSampled(const rex::graphics::xenos::xe_gpu_texture_fetch_t&);
 // The translator declares alternative signed and dimensional views. Null
 // alternatives do not read guest bytes and must not trigger CPU synchronization.
 bool TextureViewActive(const rex::graphics::xenos::xe_gpu_texture_fetch_t&,
@@ -56,7 +58,7 @@ LoadShader GpuLoadShader(const TextureLoadInput&);
 struct TextureLoadPlan {
   LoadShader shader = LoadShader::kUnknown;
   uint32_t source_bpe_log2 = 0, dest_bpe_log2 = 0;
-  struct Dispatch { LoadConstants constants; uint32_t groups[3]; };
+  struct Dispatch { LoadConstants constants; uint32_t groups[3]; bool mips = false; };
   std::vector<Dispatch> dispatches;
   struct Copy {
     uint32_t subresource;
@@ -83,14 +85,16 @@ void ConvertTextureCpu(const TextureLoadInput&, std::span<const uint8_t> base,
 // Root signature and pipelines of the shared load shaders (constants, source
 // SRV table, destination UAV table).
 Microsoft::WRL::ComPtr<ID3D12RootSignature> CreateTextureLoadRoot(ID3D12Device*);
-D3D12_SHADER_BYTECODE TextureLoadBytecode(LoadShader);
+D3D12_SHADER_BYTECODE TextureLoadBytecode(LoadShader, bool scaled = false);
 Microsoft::WRL::ComPtr<ID3D12PipelineState> CreateTextureLoadPipeline(ID3D12Device*, ID3D12RootSignature*, LoadShader);
 DXGI_FORMAT UintPow2Format(uint32_t log2);
 // Records the dispatches into scratch (UAV state, bound by the caller at
 // scratch_offset), then the copies into texture (COPY_DEST state). Leaves the
 // scratch buffer in COPY_SOURCE. Recorded through D3D12Commands, so the
 // commands keep their order when a pipeline is still being created.
+// With scaled sources, each dispatch reads the base or mip view (table 1).
 void RecordTextureLoad(D3D12Commands&, const TextureLoadPlan&, uint64_t scratch_offset,
-    ID3D12Resource* scratch, ID3D12Resource* texture);
+    ID3D12Resource* scratch, ID3D12Resource* texture, D3D12_GPU_DESCRIPTOR_HANDLE base_source = {},
+    D3D12_GPU_DESCRIPTOR_HANDLE mip_source = {});
 #endif
 }

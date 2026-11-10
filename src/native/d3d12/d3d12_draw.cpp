@@ -131,7 +131,7 @@ void D3D12Render::Draw(const RegisterFile& r, rex::memory::Memory& memory, Shade
     }
     for (unsigned i = 0; i < 32; ++i) {
       auto f = r.GetTextureFetch(i);
-      if (f.type != FetchConstantType::kTexture) continue;
+      if (!TextureFetchSampled(f)) continue;
       uint32_t w, h, d, base, mip, lo, hi;
       texture_util::GetSubresourcesFromFetchConstant(f, &w, &h, &d, &base, &mip, &lo, &hi);
       auto layout = texture_util::GetGuestTextureLayout(f.dimension, f.pitch, w + 1, h + 1, d + 1, f.tiled, f.format, f.packed_mips, true, hi);
@@ -320,7 +320,7 @@ void D3D12Render::Draw(const RegisterFile& r, rex::memory::Memory& memory, Shade
     for (auto* shader : {&vs, ps}) if (shader)
       for (const auto& t : shader->GetTextureBindingsAfterTranslation()) {
         auto f = r.GetTextureFetch(t.fetch_constant);
-        if (!TextureViewActive(f, t.dimension, t.is_signed) || (!texture_cpu_ && !scaled_.enabled() && !NeedsCpuConversion(f.format, t.is_signed, f.num_format))) continue;
+        if (!TextureViewActive(f, t.dimension, t.is_signed) || (!texture_cpu_ && !NeedsCpuConversion(f.format, t.is_signed, f.num_format))) continue;
         uint32_t wm, hm, dm, base, mip, lo, hi;
         texture_util::GetSubresourcesFromFetchConstant(f, &wm, &hm, &dm, &base, &mip, &lo, &hi);
         // Same extents BindTextures reads (all levels, conservatively).

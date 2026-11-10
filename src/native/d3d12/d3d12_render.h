@@ -37,8 +37,11 @@ class D3D12Render {
   void Draw(const rex::graphics::RegisterFile&, rex::memory::Memory&,
       rex::graphics::Shader*, rex::graphics::Shader*, rex::graphics::xenos::PrimitiveType,
       uint32_t count, const DrawIndices*, DrawPurpose = DrawPurpose::kGuest);
-  bool PrepareScanout(const ScanoutTexture& input, const void* pixels, ScanoutTexture& output,
-                       std::vector<uint8_t>& storage) const { return scaled_.Scanout(input, pixels, output, storage); }
+  // With resolution scale, a front buffer holding scaled resolve data is
+  // recorded as a linear scaled surface (output describes it) and its GPU
+  // address is returned; otherwise 0 and the 1x guest bytes are presented.
+  // Call before the presenting submission (Flush).
+  D3D12_GPU_VIRTUAL_ADDRESS PrepareScanout(const ScanoutTexture& input, ScanoutTexture& output);
   void Resolve(const rex::graphics::RegisterFile&, rex::memory::Memory&);
   SampleCounts ReadSampleCounts(bool counting_after);
   void SetSampleCounts(const SampleCounts&, bool visibility_only);
@@ -135,11 +138,31 @@ class D3D12Render {
   TextureTables BindTextures(const rex::graphics::RegisterFile&, rex::memory::Memory&, rex::graphics::DxbcShader&);
   void SetTextureTables(const TextureTables&, unsigned root);
   // Records a GPU load of guest bytes from memory_ into texture (COPY_DEST).
-  void LoadTextureGpu(const TextureLoadPlan&, ID3D12Resource* texture);
+  // scaled: guest base/mip ranges read from GPU-resident scaled memory.
+  struct ScaledSource { uint32_t base, base_bytes, mip, mip_bytes; };
+  void LoadTextureGpu(const TextureLoadPlan&, ID3D12Resource* texture, const ScaledSource* scaled = nullptr);
   struct Scratch { Ptr<ID3D12Resource> buffer; uint64_t size, used; D3D12_RESOURCE_STATES state; };
   std::vector<Scratch> scratch_;
   Ptr<ID3D12RootSignature> load_root_;
-  std::array<PendingPipeline, size_t(LoadShader::kCount)> load_pipelines_;
+  std::array<PendingPipeline, size_t(LoadShader::kCount)> load_pipelines_, load_pipelines_scaled_;
+  // GPU-resident scaled resolve memory (d3d12_scaled.cpp): guest address *
+  // scale area, as in the pinned D3D12TextureCache: reserved 2 GB buffers
+  // starting every 1 GB share 16 MB heaps committed on first use.
+  struct ScaledWindow { ID3D12Resource* resource; uint64_t offset; };
+  ScaledWindow UseScaled(uint32_t start, uint64_t length, D3D12_RESOURCE_STATES);
+  // Replicates 1x bytes into stale scaled pages of the range (pixel layout of
+  // pixel_log2); mark: those pages are current once recorded (not for a
+  // resolve, whose RangeWrittenByGpu retires them: it marks after that).
+  void ReplicateScaled(uint32_t start, uint32_t length, unsigned pixel_log2, bool mark);
+  struct ScaledBuffer { Ptr<ID3D12Resource> resource; D3D12_RESOURCE_STATES state; };
+  std::vector<ScaledBuffer> scaled_buffers_;
+  std::vector<Ptr<ID3D12Heap>> scaled_heaps_;
+  std::vector<uint8_t> scaled_gigabytes_;  // Buffer currently accessing each GB.
+  Ptr<ID3D12RootSignature> scaled_root_;
+  PendingPipeline replicate_pipeline_, scaled_scanout_pipeline_;
+  Ptr<ID3D12Resource> scanout_buffer_;
+  uint64_t scanout_size_ = 0;
+  D3D12_RESOURCE_STATES scanout_state_ = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
   static void TextureWatch(void* context, void* data, uint64_t argument, bool by_gpu);
   Ptr<ID3D12RootSignature> ComputeRoot(unsigned constants, bool source);
   PendingPipeline ComputePSO(ID3D12RootSignature*, const void*, size_t);
@@ -186,8 +209,6 @@ class D3D12Render {
   // Three independent recording arenas. Queue ordering protects persistent
   // memory/EDRAM/textures; a fence protects each arena's mutable descriptors,
   // uploads, scratch regions and command allocator from premature reuse.
-  struct ScaledReadback { ScaledResolveCache::Ticket ticket; Ptr<ID3D12Resource> buffer;
-                          unsigned pixel_log2; uint64_t offset; };
   struct RetiredBatch {
     uint64_t serial = 0;
     Ptr<ID3D12CommandAllocator> allocator;
@@ -198,7 +219,6 @@ class D3D12Render {
     Ptr<ID3D12Resource> readback;
     uint64_t readback_size = 0, readback_used = 0;
     GuestWriteback writeback;
-    std::vector<ScaledReadback> scaled_readbacks;
   };
   std::array<RetiredBatch, 3> batches_;
   unsigned batch_index_ = 0;
@@ -268,7 +288,6 @@ class D3D12Render {
   bool sample_counting_ = false;
   bool visibility_only_ = false;
   const std::vector<uint8_t>& RectangleShader(unsigned interpolators, unsigned clip_planes);
-  std::vector<ScaledReadback> scaled_readbacks_;
   Ptr<ID3D12RootSignature> downscale_root_;
   PendingPipeline downscale_pipeline_;
   std::array<PendingPipeline, 9> copy_pipelines_;

@@ -2,6 +2,7 @@
 #include <rex/graphics/graphics_system.h>
 #include <rex/graphics/pipeline/shader/shader.h>
 #include <rex/chrono/frame_timing.h>
+#include <rex/chrono/clock.h>
 #include <rex/graphics/display_overlay.h>
 #include <rex/kernel/xboxkrnl/video.h>
 #include <rex/logging.h>
@@ -64,6 +65,14 @@ bool CommandProcessor::SetupContext() {
         std::filesystem::path(REXCVAR_GET(native_capture_trigger)), REXCVAR_GET(native_capture_skip), REXCVAR_GET(native_capture_frames), quality.scale_x, quality.scale_y,
         graphics_system_->name().find("Vulkan") != std::string::npos ? "vulkan" : "d3d12"});
     REXLOG_INFO("{}: independent scanout and guest renderer ready", graphics_system_->name());
+    // Without a title timing profile (which selects its own cadence before
+    // the GPU starts), Native Enhanced above 30 FPS measures how many vblanks
+    // the title waits per present and runs guest vblank at target * that.
+    using Timing = rex::chrono::FrameTiming;
+    generic_cadence_ = Timing::Enhanced() && REXCVAR_GET(native_framerate) > 30 && !Timing::GuestVblankRate();
+    if (generic_cadence_)
+      REXLOG_INFO("Native Enhanced: generic target {} FPS; guest vblank follows the title's measured present interval; system/audio time unchanged",
+                  REXCVAR_GET(native_framerate));
     return true;
   } catch (const std::exception& e) { Unsupported(e.what()); }
 }
@@ -131,7 +140,35 @@ void CommandProcessor::IssueSwap(uint32_t, uint32_t width, uint32_t height) {
                       plane.valid ? memory_->TranslatePhysical(overlay.surface.address) : nullptr, post_effect);
     last_swap_succeeded_ = true;
     rex::chrono::FrameTiming::NotifySourceFrame();
+    UpdateGenericCadence();
   } catch (const std::exception& e) { Unsupported(e.what()); }
+}
+void CommandProcessor::UpdateGenericCadence() {
+  using Timing = rex::chrono::FrameTiming;
+  using Clock = rex::chrono::Clock;
+  if (!generic_cadence_) return;
+  const uint32_t current = Timing::GuestVblankRate();
+  if (current != cadence_rate_) {  // A title profile selected its own cadence.
+    generic_cadence_ = false;
+    REXLOG_INFO("Native Enhanced: guest vblank {} Hz selected by the title profile; generic cadence off", current);
+    return;
+  }
+  uint32_t hz = current;
+  if (!hz) {
+    rex::system::X_VIDEO_MODE mode;
+    rex::kernel::xboxkrnl::VdQueryVideoMode(&mode);
+    hz = std::max(1u, uint32_t(std::lround(float(mode.refresh_rate))));
+  }
+  const uint64_t now = Clock::QueryGuestTickCount();
+  const uint64_t interval = last_present_tick_ && now > last_present_tick_ ? now - last_present_tick_ : 0;
+  last_present_tick_ = now;
+  const uint32_t fps = REXCVAR_GET(native_framerate);
+  const uint32_t next = cadence_.OnPresent(interval, Clock::guest_tick_frequency(), hz, fps);
+  if (next == cadence_rate_) return;
+  Timing::SetGuestVblankRate(next);
+  cadence_rate_ = next;
+  REXLOG_INFO("Native Enhanced: title presents every {} vblank(s); guest vblank {} Hz for {} FPS",
+              cadence_.interval(), next, fps);
 }
 rex::graphics::Shader* CommandProcessor::LoadShader(rex::graphics::xenos::ShaderType type,
     uint32_t address, const uint32_t* data, uint32_t count) {

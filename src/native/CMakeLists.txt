@@ -3,7 +3,7 @@
 # common; D3D12 is built on Windows and Vulkan wherever the SDK enables it, so
 # the Vulkan backend can be developed on Linux and macOS too.
 set(_gpu ${X360_REXGLUE_DIR}/src/graphics)
-add_library(rexgpu-native SHARED quality/settings.cpp commands/plugin.cpp commands/command_processor.cpp commands/packet_guard.cpp textures/texture.cpp textures/texture_load.cpp memory/guest_memory_mirror.cpp memory/scaled_resolve.cpp
+add_library(rexgpu-native SHARED quality/settings.cpp quality/cadence.cpp commands/plugin.cpp commands/command_processor.cpp commands/packet_guard.cpp textures/texture.cpp textures/texture_load.cpp memory/guest_memory_mirror.cpp memory/scaled_resolve.cpp
     pipeline/pipeline_workers.cpp
     capture/capture_format.cpp capture/capture_backend.cpp
     # EDRAM format semantics shared by both backends (despite its directory).
@@ -14,7 +14,7 @@ add_library(rexgpu-native SHARED quality/settings.cpp commands/plugin.cpp comman
     ${_gpu}/pipeline/shader/translator.cpp ${_gpu}/pipeline/shader/translator_disasm.cpp)
 if(WIN32)
   target_sources(rexgpu-native PRIVATE d3d12/d3d12_scanout.cpp
-      pipeline/shader_cache.cpp pipeline/pipeline_store.cpp d3d12/d3d12_render.cpp d3d12/d3d12_draw.cpp shaders/rectangle_shader.cpp shaders/point_shader.cpp d3d12/d3d12_resolve.cpp d3d12/d3d12_textures.cpp
+      pipeline/shader_cache.cpp pipeline/pipeline_store.cpp d3d12/d3d12_render.cpp d3d12/d3d12_draw.cpp shaders/rectangle_shader.cpp shaders/point_shader.cpp d3d12/d3d12_resolve.cpp d3d12/d3d12_textures.cpp d3d12/d3d12_scaled.cpp
       ${_gpu}/pipeline/shader/dxbc.cpp ${_gpu}/pipeline/shader/dxbc_translator.cpp
       ${_gpu}/pipeline/shader/dxbc_translator_alu.cpp ${_gpu}/pipeline/shader/dxbc_translator_fetch.cpp
       ${_gpu}/pipeline/shader/dxbc_translator_memexport.cpp ${_gpu}/pipeline/shader/dxbc_translator_om.cpp
@@ -47,7 +47,7 @@ if(REXGLUE_USE_VULKAN)
       MachineIndependent GenericCodeGen OSDependent OGLCompiler)
   target_sources(rexgpu-native PRIVATE vulkan/vulkan_core.cpp vulkan/vulkan_scanout.cpp
       vulkan/vulkan_shader_cache.cpp vulkan/vulkan_render.cpp vulkan/vulkan_draw.cpp
-      vulkan/vulkan_resolve.cpp vulkan/vulkan_textures.cpp vulkan/vulkan_backend.cpp
+      vulkan/vulkan_resolve.cpp vulkan/vulkan_textures.cpp vulkan/vulkan_scaled.cpp vulkan/vulkan_backend.cpp
       ${_gpu}/pipeline/shader/spirv_builder.cpp ${_gpu}/pipeline/shader/spirv.cpp
       ${_gpu}/pipeline/shader/spirv_translator.cpp ${_gpu}/pipeline/shader/spirv_translator_alu.cpp
       ${_gpu}/pipeline/shader/spirv_translator_fetch.cpp ${_gpu}/pipeline/shader/spirv_translator_memexport.cpp
@@ -186,7 +186,7 @@ if(REXGLUE_USE_VULKAN)
   set_tests_properties(native.vulkan-components PROPERTIES LABELS project TIMEOUT 60)
 endif()
 if(TARGET Catch2::Catch2WithMain)
-  add_executable(x360n_native_tests ../../tests/native/texture_test.cpp ../../tests/native/packet_test.cpp ../../tests/native/rectangle_test.cpp ../../tests/native/point_test.cpp ../../tests/native/texture_load_test.cpp textures/texture.cpp textures/texture_load.cpp memory/guest_memory_mirror.cpp memory/scaled_resolve.cpp commands/packet_guard.cpp shaders/rectangle_shader.cpp shaders/point_shader.cpp ${_gpu}/util/draw.cpp ${_gpu}/register_file.cpp ${_gpu}/registers.cpp ${_gpu}/flags.cpp ${X360_REXGLUE_DIR}/thirdparty/dxbc/DXBCChecksum.cpp)
+  add_executable(x360n_native_tests ../../tests/native/texture_test.cpp ../../tests/native/cadence_test.cpp quality/cadence.cpp ../../tests/native/packet_test.cpp ../../tests/native/rectangle_test.cpp ../../tests/native/point_test.cpp ../../tests/native/texture_load_test.cpp textures/texture.cpp textures/texture_load.cpp ../../tests/native/scaled_resolve_test.cpp memory/guest_memory_mirror.cpp memory/scaled_resolve.cpp commands/packet_guard.cpp shaders/rectangle_shader.cpp shaders/point_shader.cpp ${_gpu}/util/draw.cpp ${_gpu}/register_file.cpp ${_gpu}/registers.cpp ${_gpu}/flags.cpp ${X360_REXGLUE_DIR}/thirdparty/dxbc/DXBCChecksum.cpp)
   target_include_directories(x360n_native_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${X360_REXGLUE_DIR} ${X360_REXGLUE_DIR}/thirdparty/renderdoc)
   target_link_libraries(x360n_native_tests PRIVATE rexruntime Catch2::Catch2WithMain d3d12 d3dcompiler)
   target_sources(x360n_native_tests PRIVATE ../../tests/native/pipeline_store_test.cpp pipeline/pipeline_store.cpp)

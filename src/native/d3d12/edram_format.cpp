@@ -71,7 +71,8 @@ void RenderTargetCache::GetPSIColorFormatInfo(xenos::ColorRenderTargetFormat for
       // (NaN should be 0, not the lowest negative number), and that needs to be
       // handled separately.
       clamp_rgb_low = clamp_alpha_low = -32.0f;
-      clamp_rgb_high = clamp_alpha_high = 32.0f;
+      // s5.10 maximum, as the SDK copy since patch 0185.
+      clamp_rgb_high = clamp_alpha_high = 32767.0f / 1024.0f;
       if (!(write_mask & 0b0001)) {
         keep_mask_low |= 0xFFFFu;
       }

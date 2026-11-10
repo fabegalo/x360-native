@@ -71,10 +71,11 @@ D3D12Render::TextureTables D3D12Render::BindTextures(const RegisterFile& r, rex:
   if (!textures.empty()) {
     for (unsigned i = 0; i < textures.size(); ++i) {
       const auto& binding = textures[i]; auto f = r.GetTextureFetch(binding.fetch_constant);
-      // As the pinned texture cache, a fetch constant that is not a texture,
-      // or has no data, gives an invalid binding: its view is null (zeros)
-      // and the draw still runs. Rate-limited, never silent.
-      bool valid = f.type == FetchConstantType::kTexture;
+      // As the pinned texture cache, a fetch constant that is not a texture
+      // (type 0 is one only under --gpu_allow_invalid_fetch_constants), or has
+      // no data, gives an invalid binding: its view is null (zeros) and the
+      // draw still runs. Rate-limited, never silent.
+      bool valid = TextureFetchSampled(f);
       if (!valid && invalid_texture_fetches_++ < 8)
         REXLOG_WARN("Native: texture fetch {} has type {} ({:08X} {:08X} {:08X} {:08X} {:08X} {:08X}); view is null as in the pinned texture cache",
             binding.fetch_constant, uint32_t(f.type), f.dword_0, f.dword_1, f.dword_2, f.dword_3, f.dword_4, f.dword_5);
@@ -143,10 +144,14 @@ D3D12Render::TextureTables D3D12Render::BindTextures(const RegisterFile& r, rex:
       auto component = [&](unsigned channel) { unsigned s = (f.swizzle >> (channel * 3)) & 7; Require(s <= 5, "reserved swizzle component"); return s < 4 ? std::min(s, components - 1) : s; };
       view.Shader4ComponentMapping = D3D12_ENCODE_SHADER_4_COMPONENT_MAPPING(component(0), component(1), component(2), component(3));
       const auto* scale_format = FormatInfo::Get(input.format);
-      const bool scaled_texture = scaled_.enabled() && !input.host_volume &&
+      // Resolved data at resolution scale is GPU resident: texels the pinned
+      // texture_load_*_scaled kernels read. Formats Native converts on the CPU
+      // are loaded from the canonical 1x bytes instead.
+      const bool scaled_texture = scaled_.enabled() && !input.host_volume && !texture_cpu_ &&
           scale_format->block_width == 1 && scale_format->block_height == 1 &&
+          GpuLoadShader(input) != LoadShader::kUnknown &&
           (scaled_.Overlaps(input.base, base_bytes) || scaled_.Overlaps(input.mip, mip_bytes));
-      if (scaled_texture) { input.scale_x=scale_x_; input.scale_y=scale_y_; input.scaled=&scaled_;
+      if (scaled_texture) { input.scale_x=scale_x_; input.scale_y=scale_y_;
         textures_resolution_scaled_ |= uint32_t(1) << binding.fetch_constant; }
       // Content identity: every field that selects or converts guest bytes.
       // Sampler-only fetch fields (filters, clamps, LOD, swizzle) share it.
@@ -211,8 +216,15 @@ D3D12Render::TextureTables D3D12Render::BindTextures(const RegisterFile& r, rex:
       // Pages the CPU wrote are uploaded; resolve results are already resident.
       mirror_->RequestRange(base << 12, base_bytes);
       if (mip_bytes) mirror_->RequestRange(mip << 12, mip_bytes);
-      const auto shader_index = (texture_cpu_ || scaled_texture) ? LoadShader::kUnknown : GpuLoadShader(input);
-      if (shader_index != LoadShader::kUnknown) {
+      const auto shader_index = texture_cpu_ ? LoadShader::kUnknown : GpuLoadShader(input);
+      if (scaled_texture) {
+        const unsigned pixel_log2 = std::countr_zero(scale_format->bytes_per_block());
+        if (base_bytes) ReplicateScaled(base << 12, base_bytes, pixel_log2, true);
+        if (mip_bytes) ReplicateScaled(mip << 12, mip_bytes, pixel_log2, true);
+        const ScaledSource source{base << 12, base_bytes, mip << 12, mip_bytes};
+        LoadTextureGpu(PlanGpuTextureLoad(input, shader_index), texture.Get(), &source);
+        if (stats_enabled_) { ++gpu_texture_loads_; ++texture_uploads_; }
+      } else if (shader_index != LoadShader::kUnknown) {
         LoadTextureGpu(PlanGpuTextureLoad(input, shader_index), texture.Get());
         if (stats_enabled_) { ++gpu_texture_loads_; ++texture_uploads_; }
       } else {
@@ -326,11 +338,11 @@ void D3D12Render::Unwatch(CachedTexture& entry) {
   auto lock = GuestMemoryMirror::Lock();
   for (auto& watch : entry.watches) { mirror_->Unwatch(watch); watch = nullptr; }
 }
-void D3D12Render::LoadTextureGpu(const TextureLoadPlan& plan, ID3D12Resource* texture) {
+void D3D12Render::LoadTextureGpu(const TextureLoadPlan& plan, ID3D12Resource* texture, const ScaledSource* scaled) {
   if (!load_root_) load_root_ = CreateTextureLoadRoot(device_);
-  auto& pipeline = load_pipelines_[size_t(plan.shader)];
+  auto& pipeline = (scaled ? load_pipelines_scaled_ : load_pipelines_)[size_t(plan.shader)];
   if (!pipeline.valid()) {
-    const auto code = TextureLoadBytecode(plan.shader);
+    const auto code = TextureLoadBytecode(plan.shader, scaled != nullptr);
     pipeline = ComputePSO(load_root_.Get(), code.pShaderBytecode, code.BytecodeLength);
   }
   // Scratch regions live until the submission's fence (reset in Flush).
@@ -345,19 +357,36 @@ void D3D12Render::LoadTextureGpu(const TextureLoadPlan& plan, ID3D12Resource* te
   }
   const uint64_t offset = scratch->used; scratch->used += need;
   Transition(scratch->buffer.Get(), scratch->state, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
-  Transition(memory_.Get(), memory_state_, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
-  const unsigned v = Views(2);
+  const unsigned v = Views(4);
   D3D12_SHADER_RESOURCE_VIEW_DESC srv{}; srv.Format = UintPow2Format(plan.source_bpe_log2);
   srv.ViewDimension = D3D12_SRV_DIMENSION_BUFFER; srv.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-  srv.Buffer.NumElements = UINT(0x20000000u >> plan.source_bpe_log2);
-  device_->CreateShaderResourceView(memory_.Get(), &srv, Cpu(v));
+  D3D12_GPU_DESCRIPTOR_HANDLE base_source{}, mip_source{};
+  if (scaled) {
+    // Scaled kernels address from the view start (guest_offset 0 is the base
+    // or mip page), as in the pinned D3D12TextureCache.
+    const uint32_t area = scale_x_ * scale_y_;
+    auto view = [&](uint32_t address, uint32_t bytes, unsigned slot) {
+      const auto window = UseScaled(address, bytes, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+      srv.Buffer.FirstElement = window.offset >> plan.source_bpe_log2;
+      srv.Buffer.NumElements = UINT((uint64_t(bytes) * area) >> plan.source_bpe_log2);
+      device_->CreateShaderResourceView(window.resource, &srv, Cpu(v + slot));
+      return Gpu(v + slot);
+    };
+    if (scaled->base_bytes) base_source = view(scaled->base, scaled->base_bytes, 2);
+    if (scaled->mip_bytes) mip_source = view(scaled->mip, scaled->mip_bytes, 3);
+  } else {
+    Transition(memory_.Get(), memory_state_, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+    srv.Buffer.NumElements = UINT(0x20000000u >> plan.source_bpe_log2);
+    device_->CreateShaderResourceView(memory_.Get(), &srv, Cpu(v));
+  }
   D3D12_UNORDERED_ACCESS_VIEW_DESC uav{}; uav.Format = UintPow2Format(plan.dest_bpe_log2); uav.ViewDimension = D3D12_UAV_DIMENSION_BUFFER;
   uav.Buffer.NumElements = UINT(scratch->size >> plan.dest_bpe_log2);
   device_->CreateUnorderedAccessView(scratch->buffer.Get(), nullptr, &uav, Cpu(v + 1));
   ID3D12DescriptorHeap* heaps[]{views_.Get(), samplers_.Get()}; cmd_.SetDescriptorHeaps(2, heaps);
   cmd_.SetComputeRootSignature(load_root_.Get()); cmd_.SetPipelineState(pipeline, &pipeline);
   cmd_.SetComputeRootDescriptorTable(1, Gpu(v)); cmd_.SetComputeRootDescriptorTable(2, Gpu(v + 1));
-  RecordTextureLoad(cmd_, plan, offset, scratch->buffer.Get(), texture);
+  if (scaled) RecordTextureLoad(cmd_, plan, offset, scratch->buffer.Get(), texture, base_source, mip_source);
+  else RecordTextureLoad(cmd_, plan, offset, scratch->buffer.Get(), texture);
   scratch->state = D3D12_RESOURCE_STATE_COPY_SOURCE;
 }
 }

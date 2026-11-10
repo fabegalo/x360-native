@@ -153,8 +153,11 @@ void VulkanScanout::Initialize() {
 
 void VulkanScanout::Present(rex::ui::Presenter& presenter, const ScanoutTexture& texture,
                            const void* pixels, const uint32_t* lut, const ScanoutOverlay* overlay,
-                           const void* overlay_pixels, ScanoutPostEffect post_effect, uint32_t display_width, uint32_t display_height) {
-  if (!pixels || !lut || !texture.width || !texture.height || !texture.bytes ||
+                           const void* overlay_pixels, ScanoutPostEffect post_effect, uint32_t display_width, uint32_t display_height,
+                           VkBuffer scaled) {
+  // scaled: a device buffer already holding the front buffer (its writes are
+  // ordered by a barrier in an earlier submission on this queue).
+  if ((!pixels && !scaled) || !lut || !texture.width || !texture.height || !texture.bytes ||
       (overlay && (!overlay_pixels || !overlay->surface.bytes ||
                    !overlay->display_width || !overlay->display_height)))
     throw std::invalid_argument("Native Vulkan: invalid scanout input");
@@ -178,12 +181,12 @@ void VulkanScanout::Present(rex::ui::Presenter& presenter, const ScanoutTexture&
   if (!slot.upload || slot.upload->size() < required)
     slot.upload = std::make_unique<VulkanBuffer>(device_, required, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
                                                VulkanBuffer::Access::kUpload);
-  std::memcpy(slot.upload->mapped(), pixels, texture.bytes);
+  if (!scaled) std::memcpy(slot.upload->mapped(), pixels, texture.bytes);
   std::memcpy(slot.upload->mapped() + lut_offset, lut, lut_bytes);
   if (overlay) std::memcpy(slot.upload->mapped() + overlay_offset, overlay_pixels, overlay->surface.bytes);
   slot.upload->Flush(0, required);
   const VkDescriptorBufferInfo buffers[]{
-      {slot.upload->handle(), 0, texture.bytes},
+      {scaled ? scaled : slot.upload->handle(), 0, texture.bytes},
       {slot.upload->handle(), lut_offset, lut_bytes},
       {slot.upload->handle(), overlay ? overlay_offset : 0, overlay ? overlay->surface.bytes : texture.bytes}};
   VkWriteDescriptorSet writes[3]{};

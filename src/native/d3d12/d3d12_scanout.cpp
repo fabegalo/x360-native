@@ -107,19 +107,19 @@ void D3D12Scanout::SetSampleCounts(const SampleCounts& counts, bool visibility_o
 void D3D12Scanout::Resolve(const rex::graphics::RegisterFile& regs, rex::memory::Memory& memory) {
   Render().Resolve(regs, memory);
 }
-void D3D12Scanout::FinishGuestFrame(const ScanoutTexture& input_texture, const void* input_pixels,
-    ScanoutTexture& t, const void*& pixels, std::vector<uint8_t>& scaled_pixels) {
-  if (!render_) return;
+D3D12_GPU_VIRTUAL_ADDRESS D3D12Scanout::FinishGuestFrame(const ScanoutTexture& input_texture, ScanoutTexture& t) {
+  if (!render_) return 0;
   render_->CountPresent();
   render_->CompleteGuestWrites(kGuestSyncPresent, 0xFF);
+  // Recorded before the presenting submission: the scanout list reads it next on this queue.
+  const auto scaled = render_->PrepareScanout(input_texture, t);
   render_->Flush(D3D12Render::kFlushPresent);
-  if (render_->PrepareScanout(input_texture, input_pixels, t, scaled_pixels)) pixels = scaled_pixels.data();
   render_->EndFrame();
+  return scaled;
 }
-void D3D12Scanout::CompleteFrame(const ScanoutTexture& texture, const void* pixels) {
+void D3D12Scanout::CompleteFrame(const ScanoutTexture& texture, const void*) {
   ScanoutTexture output = texture;
-  std::vector<uint8_t> scaled;
-  FinishGuestFrame(texture, pixels, output, pixels, scaled);
+  FinishGuestFrame(texture, output);
 }
 BackendCounters D3D12Scanout::Counters() {
   if (!render_) return {};
@@ -138,9 +138,7 @@ void D3D12Scanout::Present(rex::ui::Presenter& presenter, const ScanoutTexture& 
                          const void* input_pixels, const uint32_t* lut, const ScanoutOverlay* overlay,
                          const void* overlay_pixels, ScanoutPostEffect post_effect) {
   ScanoutTexture t = input_texture;
-  const void* pixels = input_pixels;
-  std::vector<uint8_t> scaled_pixels;
-  FinishGuestFrame(input_texture, input_pixels, t, pixels, scaled_pixels);
+  const D3D12_GPU_VIRTUAL_ADDRESS scaled = FinishGuestFrame(input_texture, t);
   const auto display_aspect = rex::chrono::FrameLayout::DisplayAspect();
   const uint32_t aspect_x = display_aspect.x ? display_aspect.x : input_texture.width;
   const uint32_t aspect_y = display_aspect.y ? display_aspect.y : input_texture.height;
@@ -167,7 +165,7 @@ void D3D12Scanout::Present(rex::ui::Presenter& presenter, const ScanoutTexture& 
   }
   void* mapped = nullptr; D3D12_RANGE read_range{};
   Check(slot.upload->Map(0, &read_range, &mapped), "map upload");
-  std::memcpy(mapped, pixels, t.bytes);
+  if (!scaled) std::memcpy(mapped, input_pixels, t.bytes);
   std::memcpy(static_cast<uint8_t*>(mapped) + lut_offset, lut, lut_bytes);
   if (overlay) std::memcpy(static_cast<uint8_t*>(mapped) + overlay_offset, overlay_pixels, overlay->surface.bytes);
   slot.upload->Unmap(0, nullptr);
@@ -191,7 +189,7 @@ void D3D12Scanout::Present(rex::ui::Presenter& presenter, const ScanoutTexture& 
     ID3D12DescriptorHeap* heaps[] = {descriptors_.Get()};
     slot.list->SetDescriptorHeaps(1, heaps);
     slot.list->SetComputeRootSignature(root_.Get());
-    slot.list->SetComputeRootShaderResourceView(0, slot.upload->GetGPUVirtualAddress());
+    slot.list->SetComputeRootShaderResourceView(0, scaled ? scaled : slot.upload->GetGPUVirtualAddress());
     slot.list->SetComputeRootShaderResourceView(1, slot.upload->GetGPUVirtualAddress() + lut_offset);
     slot.list->SetComputeRootDescriptorTable(2, gpu);
     // Without a plane the overlay view aliases the title bytes and is never read.

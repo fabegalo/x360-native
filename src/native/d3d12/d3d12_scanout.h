@@ -29,9 +29,9 @@ class D3D12Scanout final : public ScanoutBackend {
   void WriteEdram(const EdramSnapshot& snapshot) override { Render().WriteEdram(snapshot); }
   BackendCounters Counters() override;
  private:
-  // CompleteFrame plus the scaled pixels to present (empty when unscaled).
-  void FinishGuestFrame(const ScanoutTexture& input, const void* input_pixels, ScanoutTexture& output,
-                        const void*& pixels, std::vector<uint8_t>& scaled_pixels);
+  // CompleteFrame; with resolution scale, the GPU address of the scaled
+  // front buffer that output describes (0: present the 1x guest bytes).
+  D3D12_GPU_VIRTUAL_ADDRESS FinishGuestFrame(const ScanoutTexture& input, ScanoutTexture& output);
   template<class T> using Ptr = Microsoft::WRL::ComPtr<T>;
   struct Slot {
     Ptr<ID3D12CommandAllocator> allocator;

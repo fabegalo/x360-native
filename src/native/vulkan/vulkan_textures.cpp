@@ -11,6 +11,13 @@
 #include "src/graphics/shaders/vulkan_spirv/texture_load_128bpb_cs.h"
 #include "src/graphics/shaders/vulkan_spirv/texture_load_depth_unorm_cs.h"
 #include "src/graphics/shaders/vulkan_spirv/texture_load_depth_float_cs.h"
+#include "src/graphics/shaders/vulkan_spirv/texture_load_8bpb_scaled_cs.h"
+#include "src/graphics/shaders/vulkan_spirv/texture_load_16bpb_scaled_cs.h"
+#include "src/graphics/shaders/vulkan_spirv/texture_load_32bpb_scaled_cs.h"
+#include "src/graphics/shaders/vulkan_spirv/texture_load_64bpb_scaled_cs.h"
+#include "src/graphics/shaders/vulkan_spirv/texture_load_128bpb_scaled_cs.h"
+#include "src/graphics/shaders/vulkan_spirv/texture_load_depth_unorm_scaled_cs.h"
+#include "src/graphics/shaders/vulkan_spirv/texture_load_depth_float_scaled_cs.h"
 #include <algorithm>
 #include <bit>
 #include <cstring>
@@ -154,7 +161,8 @@ void VulkanRender::Unwatch(TextureEntry& entry) {
   }
 }
 void VulkanRender::LoadTextureGpu(const TextureLoadPlan& plan, VkImage image, uint32_t levels,
-                                  uint32_t block_bytes, uint32_t block_width, VkExtent3D extent) {
+                                  uint32_t block_bytes, uint32_t block_width, VkExtent3D extent,
+                                  const ScaledSource* scaled) {
   static_assert(std::tuple_size_v<decltype(load_pipelines_)> == size_t(LoadShader::kCount));
   const auto& fn = device_.functions();
   const auto vk = device_.device();
@@ -168,10 +176,19 @@ void VulkanRender::LoadTextureGpu(const TextureLoadPlan& plan, VkImage image, ui
     layout.pPushConstantRanges = &constants;
     CheckVulkan(fn.vkCreatePipelineLayout(vk, &layout, nullptr, &load_layout_), "create texture load layout");
   }
-  auto& pipeline = load_pipelines_[size_t(plan.shader)];
+  auto& pipeline = (scaled ? load_pipelines_scaled_ : load_pipelines_)[size_t(plan.shader)];
   if (!pipeline.valid()) {
     std::span<const uint32_t> code;
-    switch (plan.shader) {
+    if (scaled) switch (plan.shader) {
+      case LoadShader::k8bpb: code = texture_load_8bpb_scaled_cs; break;
+      case LoadShader::k16bpb: code = texture_load_16bpb_scaled_cs; break;
+      case LoadShader::k32bpb: code = texture_load_32bpb_scaled_cs; break;
+      case LoadShader::k64bpb: code = texture_load_64bpb_scaled_cs; break;
+      case LoadShader::k128bpb: code = texture_load_128bpb_scaled_cs; break;
+      case LoadShader::kDepthUnorm: code = texture_load_depth_unorm_scaled_cs; break;
+      case LoadShader::kDepthFloat: code = texture_load_depth_float_scaled_cs; break;
+      default: throw std::logic_error("Native Vulkan: scaled texture load shader without SPIR-V");
+    } else switch (plan.shader) {
       case LoadShader::k8bpb: code = texture_load_8bpb_cs; break;
       case LoadShader::k16bpb: code = texture_load_16bpb_cs; break;
       case LoadShader::k32bpb: code = texture_load_32bpb_cs; break;
@@ -221,9 +238,18 @@ void VulkanRender::LoadTextureGpu(const TextureLoadPlan& plan, VkImage image, ui
     return set;
   };
   EndRendering();
+  // Scaled kernels address from the view start (guest_offset 0 is the base or
+  // mip page), as in the pinned VulkanTextureCache.
+  VkDescriptorSet scaled_base = VK_NULL_HANDLE, scaled_mip = VK_NULL_HANDLE;
+  if (scaled) {
+    if (scaled->base_bytes) scaled_base = StorageSet(UseScaled(scaled->base, scaled->base_bytes,
+        VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_ACCESS_SHADER_READ_BIT));
+    if (scaled->mip_bytes) scaled_mip = StorageSet(UseScaled(scaled->mip, scaled->mip_bytes,
+        VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_ACCESS_SHADER_READ_BIT));
+  }
   // Resolve results are resident in the guest buffer; CPU-written pages were
   // uploaded by RequestRange before this load.
-  UseBuffer(guest_buffer_->handle(), guest_access_, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_ACCESS_SHADER_READ_BIT);
+  if (!scaled) UseBuffer(guest_buffer_->handle(), guest_access_, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_ACCESS_SHADER_READ_BIT);
   // Earlier copies of this command buffer may still read the reused scratch.
   VkMemoryBarrier barrier{VK_STRUCTURE_TYPE_MEMORY_BARRIER};
   barrier.srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
@@ -236,7 +262,8 @@ void VulkanRender::LoadTextureGpu(const TextureLoadPlan& plan, VkImage image, ui
     auto constants = dispatch.constants;
     constants.host_offset += uint32_t(offset);
     VkDescriptorSet sets[]{page->load_set, arena.guest_load_set};
-    if (!full_source) {
+    if (scaled) sets[1] = dispatch.mips ? scaled_mip : scaled_base;
+    else if (!full_source) {
       const auto range = TextureStorageBufferRange(guest_buffer_->size(), constants.guest_offset,
           LoadSourceExtent(constants, block_bytes, plan.source_bpe_log2), storage_limit, alignment);
       sets[1] = window_set(*guest_buffer_, range);
@@ -314,7 +341,7 @@ void VulkanRender::SyncTextureReads(const RegisterFile& regs, SpirvShader* shade
     // resolve to CPU memory here would submit and wait in the middle of an
     // otherwise GPU-only dependency. CPU conversions (including scaled resolve
     // snapshots) still need their bytes before any draw bindings are allocated.
-    if (!scaled_.enabled() && !NeedsCpuConversion(fetch.format, binding.is_signed, fetch.num_format)) continue;
+    if (!NeedsCpuConversion(fetch.format, binding.is_signed, fetch.num_format)) continue;
     uint32_t w, h, d, base, mip, low, high;
     texture_util::GetSubresourcesFromFetchConstant(fetch, &w, &h, &d, &base, &mip, &low, &high);
     const auto layout = texture_util::GetGuestTextureLayout(fetch.dimension, fetch.pitch,
@@ -402,10 +429,15 @@ VkDescriptorSet VulkanRender::BindTextures(const RegisterFile& regs, rex::memory
           uint64_t(input.mip) + mip_bytes > GuestMemoryMirror::kSize)
         throw std::runtime_error("Native Vulkan: texture outside physical memory");
       const auto* scale_format = FormatInfo::Get(input.format);
+      // Resolved data at resolution scale is GPU resident: texels the pinned
+      // texture_load_*_scaled kernels read. Formats Native converts on the CPU
+      // are loaded from the canonical 1x bytes instead.
       const bool scaled_texture = scaled_.enabled() && !input.host_volume &&
           scale_format->block_width == 1 && scale_format->block_height == 1 &&
+          format.bytes == scale_format->bytes_per_block() && format.block == 1 &&
+          GpuLoadShader(input) != LoadShader::kUnknown &&
           (scaled_.Overlaps(input.base, base_bytes) || scaled_.Overlaps(input.mip, mip_bytes));
-      if (scaled_texture) { input.scale_x=scale_x_; input.scale_y=scale_y_; input.scaled=&scaled_;
+      if (scaled_texture) { input.scale_x=scale_x_; input.scale_y=scale_y_;
         textures_resolution_scaled_ |= uint32_t(1) << binding.fetch_constant; }
       const uint32_t key_data[]{input.scale_x, input.scale_y, base, mip, w, h, d, levels, fetch.pitch, uint32_t(fetch.format), fetch.swizzle,
           uint32_t(fetch.tiled) | uint32_t(fetch.packed_mips) << 1 | uint32_t(fetch.endianness) << 2 |
@@ -470,9 +502,18 @@ VkDescriptorSet VulkanRender::BindTextures(const RegisterFile& regs, rex::memory
         // The shared load shaders write the guest block layout, which equals the
         // CPU conversion output whenever GpuLoadShader selects one.
         const auto* guest_format = FormatInfo::Get(input.format);
-        const auto shader_index = input.scaled || format.bytes != guest_format->bytes_per_block() ||
+        const auto shader_index = format.bytes != guest_format->bytes_per_block() ||
             format.block != guest_format->block_width ? LoadShader::kUnknown : GpuLoadShader(input);
-        if (shader_index != LoadShader::kUnknown) {
+        if (scaled_texture) {
+          const unsigned pixel_log2 = std::countr_zero(guest_format->bytes_per_block());
+          if (base_bytes) ReplicateScaled(input.base, base_bytes, pixel_log2, true);
+          if (mip_bytes) ReplicateScaled(input.mip, mip_bytes, pixel_log2, true);
+          const ScaledSource source{input.base, base_bytes, input.mip, mip_bytes};
+          transition(resource->image, levels, layers, false);
+          LoadTextureGpu(PlanGpuTextureLoad(input, shader_index), resource->image, levels, format.bytes,
+                         format.block, image.extent, &source);
+          transition(resource->image, levels, layers, true);
+        } else if (shader_index != LoadShader::kUnknown) {
           transition(resource->image, levels, layers, false);
           LoadTextureGpu(PlanGpuTextureLoad(input, shader_index), resource->image, levels, format.bytes,
                          format.block, image.extent);

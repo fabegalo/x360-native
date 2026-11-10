@@ -1,5 +1,6 @@
 #pragma once
 #include "scanout_backend.h"
+#include "../quality/cadence.h"
 #include <rex/graphics/command_processor.h>
 namespace x360n::native {
 class CommandProcessor final : public rex::graphics::CommandProcessor {
@@ -41,6 +42,12 @@ class CommandProcessor final : public rex::graphics::CommandProcessor {
   OcclusionQueries occlusion_queries_;
   VisibilityQueries visibility_queries_;
   mutable bool draw_visibility_failed_ = false;
+  // Generic Native Enhanced frame rate (no title timing profile).
+  void UpdateGenericCadence();
+  GenericCadence cadence_;
+  bool generic_cadence_ = false;
+  uint32_t cadence_rate_ = 0;
+  uint64_t last_present_tick_ = 0;
 };
 [[noreturn]] void Unsupported(const char* message);
 // Single command processor thread per process; no-op before setup.

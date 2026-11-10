@@ -45,7 +45,11 @@ void VulkanRender::Resolve(const RegisterFile& regs, rex::memory::Memory& memory
     if (ResolveCoverageEmpty(regs, vertices)) return;
   }
   draw_util::ResolveInfo info;
-  if (!draw_util::GetResolveInfo(regs, memory, scale_x_, scale_y_, false, false, info))
+  // Native's EDRAM (ROV/FSI, SDK patch 0185) keeps k_16_16[_16_16] as exact
+  // s5.10 integers, so a same-format signed-integer copy with exponent bias 10
+  // is bitwise (patch 0087), not a full resolve without integer destinations.
+  if (!draw_util::GetResolveInfo(regs, memory, scale_x_, scale_y_, false, false, info,
+      /*fixed16_s5_10_storage=*/true))
     throw std::runtime_error("Native Vulkan: invalid resolve registers or vertices");
   const auto length = info.copy_dest_extent_length;
   const bool scaled=scaled_.enabled(); const uint32_t area=scale_x_*scale_y_;
@@ -58,6 +62,14 @@ void VulkanRender::Resolve(const RegisterFile& regs, rex::memory::Memory& memory
     const uint64_t end=(uint64_t(info.copy_dest_extent_start)+length+4095)&~uint64_t(4095);
     SyncGuestRead(begin,uint32_t(end-begin),0xFF);
   }
+  // Scaled: the shader writes GPU-resident scaled memory through a view
+  // starting at the base, as the pinned executor. Stale pages of the extent
+  // first receive the 1x bytes, so nothing outside the rectangle changes.
+  // Recorded before this resolve's descriptor sets are allocated.
+  const unsigned pixel_log2=info.IsCopyingDepth()?2u:std::countr_zero(unsigned(FormatInfo::Get(xenos::TextureFormat(info.copy_dest_info.copy_dest_format))->bits_per_pixel/8));
+  const uint32_t page_start=info.copy_dest_extent_start&~(ScaledResolveCache::kPage-1);
+  const uint32_t page_length=uint32_t(((uint64_t(info.copy_dest_extent_start)+length+ScaledResolveCache::kPage-1)&~uint64_t(ScaledResolveCache::kPage-1))-page_start);
+  if (scaled && length) ReplicateScaled(page_start,page_length,pixel_log2,false);
   Begin();
   if (arenas_[submissions_.current_slot()].descriptor_count > 4000 ||
       readback_used_ + length > readback_->size()) Flush(false);
@@ -99,25 +111,9 @@ void VulkanRender::Resolve(const RegisterFile& regs, rex::memory::Memory& memory
     const uint64_t range = uint64_t(info.copy_dest_extent_start) + length - base;
     if (range > device_.properties().maxStorageBufferRange)
       throw std::runtime_error("Native Vulkan: resolve destination exceeds storage buffer range");
-    auto ticket=scaled?scaled_.Capture(info.copy_dest_extent_start,length):ScaledResolveCache::Ticket{};
-    const unsigned pixel_log2=info.IsCopyingDepth()?2u:std::countr_zero(unsigned(FormatInfo::Get(xenos::TextureFormat(info.copy_dest_info.copy_dest_format))->bits_per_pixel/8));
-    std::shared_ptr<VulkanBuffer> scaled_buffer,scaled_readback;
-    BufferAccess scaled_access;
-    if (scaled) {
-      if (scaled_range*area>device_.properties().maxStorageBufferRange || scaled_range*area>UINT32_MAX)
-        throw std::runtime_error("Native scaled resolve exceeds Vulkan storage buffer range");
-      auto initial=scaled_.Hydrate(info.copy_dest_base,uint32_t(scaled_range),pixel_log2,memory);
-      scaled_buffer=std::make_shared<VulkanBuffer>(device_,initial.size(),VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
-          VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,VulkanBuffer::Access::kDevice);
-      scaled_readback=std::make_shared<VulkanBuffer>(device_,initial.size(),VK_BUFFER_USAGE_TRANSFER_DST_BIT,VulkanBuffer::Access::kReadback);
-      const auto upload=Upload(initial.data(),initial.size(),4);
-      UseBuffer(scaled_buffer->handle(),scaled_access,VK_PIPELINE_STAGE_TRANSFER_BIT,VK_ACCESS_TRANSFER_WRITE_BIT);
-      const VkBufferCopy initial_copy{upload.offset,0,initial.size()};
-      cmd_.CopyBuffer(upload.buffer,scaled_buffer->handle(),1,&initial_copy);
-      UseBuffer(scaled_buffer->handle(),scaled_access,VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,VK_ACCESS_SHADER_WRITE_BIT);
-      submissions_.Retain(scaled_buffer); submissions_.Retain(scaled_readback);
-    }
-    const VkDescriptorBufferInfo destination{scaled ? scaled_buffer->handle() : guest_buffer_->handle(), scaled ? 0 : base, scaled ? scaled_range*area : range};
+    const VkDescriptorBufferInfo destination=scaled
+        ? UseScaled(info.copy_dest_base,scaled_range,VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,VK_ACCESS_SHADER_WRITE_BIT)
+        : VkDescriptorBufferInfo{guest_buffer_->handle(), base, range};
     const auto dest_set = AllocateDescriptors(storage_layout_);
     auto dest_write = edram_write;
     dest_write.dstSet = dest_set;
@@ -133,9 +129,9 @@ void VulkanRender::Resolve(const RegisterFile& regs, rex::memory::Memory& memory
     cmd_.Dispatch(groups_x, groups_y, 1);
     if (scaled) {
       if (!downscale_pipeline_.valid()) downscale_pipeline_=ComputePipeline(downscale_layout_,CompileNativeGlsl(VK_SHADER_STAGE_COMPUTE_BIT,kResolveDownsampleGlsl));
-      UseBuffer(scaled_buffer->handle(),scaled_access,VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,VK_ACCESS_SHADER_READ_BIT);
+      const auto source=UseScaled(info.copy_dest_base,scaled_range,VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,VK_ACCESS_SHADER_READ_BIT);
       const auto source_set=AllocateDescriptors(storage_layout_), canonical_set=AllocateDescriptors(storage_layout_);
-      const VkDescriptorBufferInfo source{scaled_buffer->handle(),0,scaled_range*area}, canonical{guest_buffer_->handle(),base,range};
+      const VkDescriptorBufferInfo canonical{guest_buffer_->handle(),base,range};
       VkWriteDescriptorSet writes[]{edram_write,edram_write}; writes[0].dstSet=source_set; writes[0].pBufferInfo=&source;
       writes[1].dstSet=canonical_set; writes[1].pBufferInfo=&canonical;
       fn.vkUpdateDescriptorSets(device_.device(),2,writes,0,nullptr);
@@ -146,21 +142,11 @@ void VulkanRender::Resolve(const RegisterFile& regs, rex::memory::Memory& memory
       cmd_.BindDescriptorSets(VK_PIPELINE_BIND_POINT_COMPUTE,downscale_layout_,0,2,downscale_sets,0,nullptr);
       cmd_.PushConstants(downscale_layout_,VK_SHADER_STAGE_COMPUTE_BIT,0,sizeof(downsample),downsample);
       cmd_.Dispatch((length+255)/256,1,1);
-      UseBuffer(scaled_buffer->handle(),scaled_access,VK_PIPELINE_STAGE_TRANSFER_BIT,VK_ACCESS_TRANSFER_READ_BIT);
-      const VkBufferCopy scaled_copy{0,0,scaled_range*area};
-      cmd_.CopyBuffer(scaled_buffer->handle(),scaled_readback->handle(),1,&scaled_copy);
-      VkBufferMemoryBarrier ready{VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER};
-      ready.srcAccessMask=VK_ACCESS_TRANSFER_WRITE_BIT; ready.dstAccessMask=VK_ACCESS_HOST_READ_BIT;
-      ready.srcQueueFamilyIndex=ready.dstQueueFamilyIndex=VK_QUEUE_FAMILY_IGNORED;
-      ready.buffer=scaled_readback->handle(); ready.size=VK_WHOLE_SIZE;
-      cmd_.PipelineBarrier(VK_PIPELINE_STAGE_TRANSFER_BIT,VK_PIPELINE_STAGE_HOST_BIT,0,0,nullptr,1,&ready,0,nullptr);
     }
     std::vector<uint64_t> cpu_generations;
-    mirror.RangeWrittenByGpu(info.copy_dest_extent_start, length, &cpu_generations, ticket.cpu_generations);
-    if (scaled) {
-      scaled_.Begin(ticket);
-      scaled_readbacks_.push_back({std::move(ticket),scaled_readback,pixel_log2,uint64_t(info.copy_dest_extent_start-info.copy_dest_base)*area});
-    }
+    mirror.RangeWrittenByGpu(info.copy_dest_extent_start, length, &cpu_generations);
+    // After RangeWrittenByGpu retired the range's watches: re-arm as current.
+    if (scaled) scaled_.MarkCurrent(page_start,page_length);
     UseBuffer(guest_buffer_->handle(), guest_access_, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_TRANSFER_READ_BIT);
     const VkBufferCopy copy{info.copy_dest_extent_start, readback_used_, length};
     cmd_.CopyBuffer(guest_buffer_->handle(), readback_->handle(), 1, &copy);

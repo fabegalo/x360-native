@@ -15,10 +15,9 @@ class VulkanBackend final : public ScanoutBackend {
   void Present(rex::ui::Presenter& presenter, const ScanoutTexture& texture, const void* pixels,
       const uint32_t* lut, const ScanoutOverlay* overlay, const void* overlay_pixels, ScanoutPostEffect post_effect) override {
     ScanoutTexture output = texture;
-    std::vector<uint8_t> scaled_pixels;
-    FinishGuestFrame(texture, pixels, output, scaled_pixels);
+    const VkBuffer scaled = FinishGuestFrame(texture, output);
     scanout_.Present(presenter, output, pixels, lut, overlay, overlay_pixels, post_effect,
-                     texture.width, texture.height);
+                     texture.width, texture.height, scaled);
   }
   void Drain() override {
     if (render_) render_->Flush(true);
@@ -54,8 +53,7 @@ class VulkanBackend final : public ScanoutBackend {
   }
   void CompleteFrame(const ScanoutTexture& texture, const void* pixels) override {
     ScanoutTexture output = texture;
-    std::vector<uint8_t> scaled_pixels;
-    FinishGuestFrame(texture, pixels, output, scaled_pixels);
+    FinishGuestFrame(texture, output);
   }
   EdramSnapshot ReadEdram() override { return Render().ReadEdram(); }
   void WriteEdram(const EdramSnapshot& snapshot) override { Render().WriteEdram(snapshot); }
@@ -72,13 +70,15 @@ class VulkanBackend final : public ScanoutBackend {
     return c;
   }
  private:
-  void FinishGuestFrame(const ScanoutTexture& texture, const void*& pixels, ScanoutTexture& output,
-                        std::vector<uint8_t>& scaled_pixels) {
-    if (!render_) return;
+  // Scaled front buffers are gathered on the GPU into a buffer the scanout
+  // reads; the render work is submitted first on the same queue.
+  VkBuffer FinishGuestFrame(const ScanoutTexture& texture, ScanoutTexture& output) {
+    if (!render_) return VK_NULL_HANDLE;
     render_->CompleteGuestWrites(kGuestSyncPresent, 0xFF);
+    const VkBuffer scaled = render_->PrepareScanout(texture, output);
     render_->Flush(false);
-    if (render_->PrepareScanout(texture, pixels, output, scaled_pixels)) pixels = scaled_pixels.data();
     render_->EndFrame();
+    return scaled;
   }
   VulkanRender& Render() {
     if (!render_) {

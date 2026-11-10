@@ -46,7 +46,8 @@ VulkanRender::VulkanRender(rex::ui::vulkan::VulkanProvider& provider)
     layout.pushConstantRangeCount = 1;
     layout.pPushConstantRanges = &constants;
     CheckVulkan(fn.vkCreatePipelineLayout(vk, &layout, nullptr, &copy_layout_), "create resolve copy layout");
-    constants.size = 6 * sizeof(uint32_t);
+    // Scaled memory kernels (downscale, replicate: 6 words; scanout: 8).
+    constants.size = 8 * sizeof(uint32_t);
     CheckVulkan(fn.vkCreatePipelineLayout(vk, &layout, nullptr, &downscale_layout_), "create scaled resolve publication layout");
     layout.setLayoutCount = 1;
     constants.size = sizeof(rex::graphics::draw_util::ResolveClearShaderConstants);
@@ -75,6 +76,7 @@ void VulkanRender::Destroy() {
   DestroyDraw();
   DestroyTextures();
   scaled_.Clear();
+  DestroyScaled();
   mirror_.reset();
   const auto& fn = device_.functions();
   const auto vk = device_.device();
@@ -100,6 +102,9 @@ void VulkanRender::Destroy() {
   if (copy_layout_) fn.vkDestroyPipelineLayout(vk, copy_layout_, nullptr);
   if (clear_layout_) fn.vkDestroyPipelineLayout(vk, clear_layout_, nullptr);
   destroy_pipeline(downscale_pipeline_);
+  destroy_pipeline(replicate_pipeline_);
+  destroy_pipeline(scaled_scanout_pipeline_);
+  for (auto& pipeline : load_pipelines_scaled_) destroy_pipeline(pipeline);
   if (downscale_layout_) fn.vkDestroyPipelineLayout(vk, downscale_layout_, nullptr);
   downscale_layout_=VK_NULL_HANDLE;
   if (storage_layout_) fn.vkDestroyDescriptorSetLayout(vk, storage_layout_, nullptr);
@@ -111,7 +116,6 @@ void VulkanRender::Destroy() {
     arena.uploads.clear();
     arena.load_scratch.clear();
     arena.readback.reset();
-    arena.scaled_readbacks.clear();
   }
   copy_layout_ = clear_layout_ = VK_NULL_HANDLE;
   storage_layout_ = VK_NULL_HANDLE;
@@ -175,10 +179,9 @@ void VulkanRender::Flush(bool wait) {
     if (arena.serial) throw std::logic_error("Native Vulkan: overwriting pending publication");
     const auto serial = submissions_.Submit();
     commands_ = VK_NULL_HANDLE;
-    if (!writeback_.empty() || !scaled_readbacks_.empty()) {
+    if (!writeback_.empty()) {
       arena.serial = serial;
       std::swap(writeback_, arena.writeback);
-      scaled_readbacks_.swap(arena.scaled_readbacks);
       arena.readback_used = std::exchange(readback_used_, 0);
       ++pending_readback_batches_;
     }
@@ -203,20 +206,13 @@ void VulkanRender::PublishCompleted() {
             reinterpret_cast<const uint8_t*>(arena->readback->mapped() + write.offset), write.length, write.cpu_generations);
       });
     }
-    for (const auto& scaled : arena->scaled_readbacks) {
-      const size_t bytes=size_t(scaled.ticket.length)*scale_x_*scale_y_;
-      scaled.buffer->Invalidate(scaled.offset, bytes);
-      scaled_.Complete(scaled.ticket, {reinterpret_cast<const uint8_t*>(scaled.buffer->mapped()+scaled.offset), bytes},
-                       scaled.pixel_log2, *memory_);
-    }
-    arena->scaled_readbacks.clear();
     arena->readback_used = 0;
     arena->serial = 0;
     --pending_readback_batches_;
   }
 }
 bool VulkanRender::HasGuestWrites() const {
-  return pending_readback_batches_ || !writeback_.empty() || !scaled_readbacks_.empty();
+  return pending_readback_batches_ || !writeback_.empty();
 }
 bool VulkanRender::GuestWritesOverlap(uint32_t address, uint32_t length) const {
   if (!length) return false;

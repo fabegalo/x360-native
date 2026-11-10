@@ -142,18 +142,14 @@ void CheckResolveContracts(VulkanRender& render, RegisterFile& regs,
     Require(memory.TranslatePhysical<const uint32_t*>(physical+8192)[i]==b,"colored resolve B bytes");
   }
   ScanoutTexture input{physical+4096,32,32,32,1,0,0|(1<<3)|(2<<6)|(3<<9),4096,false},scaled;
-  std::vector<uint8_t> bytes;
-  const bool enhanced=render.PrepareScanout(input,memory.TranslatePhysical(input.address),scaled,bytes);
+  // Scaled front buffers stay GPU resident (gathered for the scanout).
+  const bool enhanced=render.PrepareScanout(input,scaled)!=0;
   if(GetNativeQualitySettings().scale_x>1) {
-    Require(enhanced,"scaled resolve cache missing completed ticket");
-    for(unsigned y=0;y<scaled.height;++y) for(unsigned x=0;x<scaled.width;++x) {
-      uint32_t actual; std::memcpy(&actual,bytes.data()+(size_t(y)*scaled.pitch+x)*4,4);
-      Require(actual==a,"scaled ticket/scanout bytes");
-    }
+    Require(enhanced&&scaled.width==input.width*GetNativeQualitySettings().scale_x,"scaled resolve pages not current");
     *memory.TranslateVirtual<uint32_t*>(output+65536+4096)=0x89ABCDEF;
-    Require(!render.PrepareScanout(input,memory.TranslatePhysical(input.address),scaled,bytes),"CPU write kept stale scaled cache");
+    Require(!render.PrepareScanout(input,scaled),"CPU write kept stale scaled pages");
   }
-  std::cout<<"PASS colored resolves and scaled snapshots byte-for-byte\n";
+  std::cout<<"PASS colored resolves and scaled pages\n";
 }
 void CheckTextureResolveDependency(VulkanRender& render, const RegisterFile& draw_template,
     const RegisterFile& resolve_template, rex::memory::Memory& memory, uint32_t output) {
