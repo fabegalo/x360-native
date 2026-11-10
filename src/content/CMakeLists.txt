@@ -20,6 +20,21 @@ string(REPLACE "#define MINIZ_NO_ARCHIVE_APIS\n" "" _update_miniz "${_update_min
 string(REPLACE "#define MINIZ_NO_ZLIB_APIS\n" "" _update_miniz "${_update_miniz}")
 set(X360N_UPDATE_ZIP_INCLUDE "${CMAKE_CURRENT_BINARY_DIR}/system-update" CACHE INTERNAL "Private configured miniz header")
 file(GENERATE OUTPUT "${X360N_UPDATE_ZIP_INCLUDE}/miniz.h" CONTENT "${_update_miniz}")
+# XEX2 keys come from the pinned SDK loader, never from this repository, so the
+# extractor can read a title's own name and icon as the runtime would.
+file(READ "${X360_REXGLUE_DIR}/src/system/xex_module.cpp" _xex_loader)
+set(_xex_keys "#pragma once\n#include <array>\n#include <cstdint>\nnamespace x360n::content {\n")
+foreach(_kind Retail Devkit)
+  string(TOLOWER "${_kind}" _lower)
+  if(NOT _xex_loader MATCHES "xe_xex2_${_lower}_key\\[16\\] = \\{([^}]*)\\}")
+    message(FATAL_ERROR "XEX2 ${_lower} key not found in the pinned SDK loader")
+  endif()
+  string(REGEX REPLACE "[ \t\r\n]+" " " _key "${CMAKE_MATCH_1}")
+  string(APPEND _xex_keys "inline constexpr std::array<uint8_t, 16> kSdkXex2${_kind}Key{${_key}};\n")
+endforeach()
+string(APPEND _xex_keys "}\n")
+file(GENERATE OUTPUT "${X360N_UPDATE_ZIP_INCLUDE}/xex_sdk_keys.h" CONTENT "${_xex_keys}")
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${X360_REXGLUE_DIR}/src/system/xex_module.cpp")
 if(NOT X360_DESKTOP_ONLY)
 add_executable(x360n-content main.cpp xex_patch.cpp xex_crypto.cpp extraction.cpp extraction_manifest.cpp system_update.cpp system_update_probe.cpp update_container.cpp safe_zip.cpp)
 target_include_directories(x360n-content PRIVATE "${X360N_UPDATE_ZIP_INCLUDE}")
@@ -66,7 +81,7 @@ if(X360_DESKTOP_ONLY)
     filesystem/devices/disc_image_device.cpp filesystem/devices/disc_image_entry.cpp filesystem/devices/disc_image_file.cpp
     filesystem/devices/stfs_container_device.cpp filesystem/devices/stfs_container_entry.cpp filesystem/devices/stfs_container_file.cpp
     core/mutex.cpp core/utf8.cpp core/string_buffer.cpp core/filesystem.cpp core/filesystem_wildcard.cpp
-    core/logging.cpp core/cvar.cpp core/memory.cpp system/lzx.cpp ${_host_sources})
+    core/logging.cpp core/cvar.cpp core/memory.cpp system/lzx.cpp system/util/xdbf_utils.cpp ${_host_sources})
   list(TRANSFORM _sdk_sources PREPEND "${X360_REXGLUE_DIR}/src/")
   target_sources(x360n-extract PRIVATE ${_sdk_sources})
   target_include_directories(x360n-extract PRIVATE

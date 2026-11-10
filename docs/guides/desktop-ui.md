@@ -143,6 +143,11 @@ não foi medida neste incremento.
 - O extrator `x360n-extract` (ISO/GDFX, STFS/PIRS, System Update) compila e
   passa nos testes no Windows e no Linux; no Linux uma importação STFS real pelo
   launcher foi validada. No macOS não foi compilado.
+- Nome e ícone de jogos de disco sem `nxeart` vêm da SPA do próprio
+  `default.xex` (`x360n-extract title-art`). Decisão do mantenedor
+  (2026-11-10): o extrator decifra com as chaves XEX2 que o loader do SDK
+  fixado já embute, geradas no configure a partir dele, nunca do repositório.
+  Registros importados antes disso ganham nome e ícone ao reimportar a pasta.
 - DPI foi exercitado por escala nos testes e no Windows real a 100 %; troca
   real entre monitores e Wayland fracionário não foram observados.
 - Sem modo de alto contraste, sem tema claro; PT-BR e inglês somente.

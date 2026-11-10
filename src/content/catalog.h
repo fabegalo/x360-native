@@ -84,7 +84,8 @@ void ReadImportedGames(const ProjectPaths& paths, std::vector<Target>& targets);
 void GenerateAotProject(const ProjectPaths& paths, const Target& target);
 std::string ImportGame(const ProjectPaths& paths, const std::vector<Target>& targets,
     const std::filesystem::path& source, const std::filesystem::path& original,
-    const std::function<bool()>& cancelled = {}, bool consume_source = false);
+    const std::function<bool()>& cancelled = {}, bool consume_source = false,
+    const std::filesystem::path& extractor = {});
 // Presentation only: the recorded icon bytes, or empty when absent or changed.
 std::vector<uint8_t> ReadThumbnail(const Target& target);
 std::vector<std::string> DetectImportTargets(const std::vector<Target>& targets,

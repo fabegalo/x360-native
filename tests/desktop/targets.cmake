@@ -108,7 +108,7 @@ if(TARGET Catch2::Catch2WithMain)
   if(TARGET x360n-extract)
     target_sources(x360n_desktop_tests PRIVATE ../../tests/content/extract_disc_test.cpp ../../tests/desktop/import_source_test.cpp
       ../../tests/content/system_update_test.cpp ../content/safe_zip.cpp
-      ../../tests/content/xex_crypto_test.cpp ../content/xex_crypto.cpp)
+      ../../tests/content/xex_crypto_test.cpp ../../tests/content/title_art_test.cpp ../content/xex_crypto.cpp)
     target_link_libraries(x360n_desktop_tests PRIVATE x360n_content_crypto)
     target_include_directories(x360n_desktop_tests PRIVATE ${X360N_UPDATE_ZIP_INCLUDE})
     target_compile_definitions(x360n_desktop_tests PRIVATE X360N_CONTENT_EXE="$<TARGET_FILE:x360n-extract>")

@@ -30,4 +30,8 @@ std::filesystem::path DefaultXexKeyFile();
 std::vector<uint8_t> ReadUnencryptedXexResource(const std::filesystem::path& xex,
                                                std::string_view resource);
 
+// The title's own XDBF (SPA) resource, named by its execution-info Title ID,
+// decoded with the XEX2 keys the pinned SDK loader embeds. Empty when absent.
+std::vector<uint8_t> ReadXexTitleResource(const std::filesystem::path& xex);
+
 }  // namespace x360n::content

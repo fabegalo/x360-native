@@ -5,6 +5,7 @@
 #include "sha256.h"
 #include "workspace_lease.h"
 #include "host_platform.h"
+#include "child_process.h"
 #include <nlohmann/json.hpp>
 #include <toml++/toml.hpp>
 #include <rex/filesystem/devices/stfs_xbox.h>
@@ -123,13 +124,15 @@ bool ReadPackageHeader(const fs::path& file, rex::filesystem::StfsHeader& header
 }
 // Bounded by the field shared by both metadata versions; larger v1 icons are skipped.
 constexpr size_t kThumbnailLimit = rex::filesystem::XContentMetadata::kThumbLengthV2;
+bool IsThumbnail(const uint8_t* data, size_t size) {
+  static constexpr uint8_t kPng[] = {0x89, 'P', 'N', 'G', '\r', '\n', 0x1A, '\n'};
+  return size >= sizeof(kPng) && size <= kThumbnailLimit && std::equal(std::begin(kPng), std::end(kPng), data);
+}
 // The package's own icon, else its title icon; only PNG data is kept.
 std::vector<uint8_t> Thumbnail(const rex::filesystem::XContentMetadata& md) {
-  static constexpr uint8_t kPng[] = {0x89, 'P', 'N', 'G', '\r', '\n', 0x1A, '\n'};
   for (const auto& [data, size] : {std::pair{md.thumbnail, uint32_t(md.thumbnail_size)},
                                    std::pair{md.title_thumbnail, uint32_t(md.title_thumbnail_size)}}) {
-    if (size < sizeof(kPng) || size > kThumbnailLimit || !std::equal(std::begin(kPng), std::end(kPng), data)) continue;
-    return {data, data + size};
+    if (IsThumbnail(data, size)) return {data, data + size};
   }
   return {};
 }
@@ -181,11 +184,36 @@ void DiscArt(const fs::path& root, Json& r, std::vector<uint8_t>& thumbnail) {
     return;
   }
 }
+// Titles with neither (e.g. discs from before the art packages) still carry
+// their SPA in default.xex, as the console reads it. The extractor decodes it;
+// a failure leaves the record unnamed and never blocks the import.
+void XexArt(const ProjectPaths& paths, const fs::path& extractor, const fs::path& xex,
+    const std::function<bool()>& cancelled, Json& r, std::vector<uint8_t>& thumbnail) {
+  if ((r["name"] != "" && !thumbnail.empty()) || extractor.empty() || !io::is_regular_file(extractor)) return;
+  const auto work = paths.local() / "title-art";
+  std::error_code ec; io::remove_all(work, ec);
+  io::create_directories(work);
+  ProcessSpec spec;
+  spec.exe = extractor; spec.args = {"title-art", Utf8(fs::absolute(xex)), Utf8(fs::absolute(work / "out"))};
+  spec.working_dir = work; spec.stdout_file = work / "stdout.log"; spec.stderr_file = work / "stderr.log";
+  spec.no_console = true; spec.should_cancel = cancelled; spec.timeout = std::chrono::minutes(2);
+  if (const auto result = RunProcess(spec); result.launched && !result.cancelled && result.exit_code == 0) {
+    io::ifstream name(work / "out/title.txt", std::ios::binary);
+    std::string text(256, '\0'); name.read(text.data(), text.size()); text.resize(size_t(name.gcount()));
+    // XDBF strings are UTF-8; anything else would make the record unwritable.
+    try { if (r["name"] == "" && !text.empty() && !Json(text).dump().empty()) r["name"] = text; } catch (const Json::exception&) {}
+    io::ifstream icon(work / "out/title.png", std::ios::binary);
+    std::vector<uint8_t> png(kThumbnailLimit + 1);
+    icon.read(reinterpret_cast<char*>(png.data()), png.size()); png.resize(size_t(icon.gcount()));
+    if (thumbnail.empty() && IsThumbnail(png.data(), png.size())) thumbnail = std::move(png);
+  }
+  io::remove_all(work, ec);
+}
 }
 
 std::string ImportGame(const ProjectPaths& paths, const std::vector<Target>& targets,
     const fs::path& source, const fs::path& original, const std::function<bool()>& cancelled,
-    bool consume_source) {
+    bool consume_source, const fs::path& extractor) {
   ActionTrace trace("import.game");
   const auto stop = [&] { if (cancelled && cancelled()) throw std::runtime_error("Import cancelled; retry with the same content to resume."); };
   stop();
@@ -234,6 +262,7 @@ std::string ImportGame(const ProjectPaths& paths, const std::vector<Target>& tar
   std::vector<uint8_t> thumbnail;
   PackageMetadata(original, record, thumbnail);
   DiscArt(source, record, thumbnail);
+  XexArt(paths, extractor, anchor, cancelled, record, thumbnail);
   if (!thumbnail.empty()) record["thumbnail_sha256"] = SaveThumbnail(paths, thumbnail);
   Target target; target.id = id; target.aot = false;
   // Discs and content revisions share a title directory, never a writable root.

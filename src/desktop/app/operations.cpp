@@ -330,7 +330,7 @@ void Start(App& a, int action, fs::path source) {
         progress(Tr("Identificando o conteúdo...\nConferindo os arquivos antes de adicionar.", "Identifying the content...\nChecking the files before adding."));
         if (io::is_directory(content.path()) && io::is_regular_file(content.path() / "default.xex")) {
           a.stage = 2;
-          a.imported_id = ImportGame(ProjectPaths{a.root}, a.targets, content.path(), source, [&] { return a.cancel.load(); }, content.extracted());
+          a.imported_id = ImportGame(ProjectPaths{a.root}, a.targets, content.path(), source, [&] { return a.cancel.load(); }, content.extracted(), Extractor(a));
           a.import_recognized = true;
           finish(Tr("Jogo adicionado à Biblioteca.", "Game added to Library.")); return;
         }
@@ -345,7 +345,7 @@ void Start(App& a, int action, fs::path source) {
         }
         auto selected = *std::find_if(a.targets.begin(), a.targets.end(), [&](const auto& t) { return t.id == ids.front(); });
         if (selected.kind == "game") {
-          a.imported_id = ImportGame(ProjectPaths{a.root}, a.targets, content.path(), source, [&] { return a.cancel.load(); }, content.extracted());
+          a.imported_id = ImportGame(ProjectPaths{a.root}, a.targets, content.path(), source, [&] { return a.cancel.load(); }, content.extracted(), Extractor(a));
           a.import_recognized = true;
           finish(Tr("Jogo adicionado à Biblioteca.", "Game added to Library.")); return;
         }
