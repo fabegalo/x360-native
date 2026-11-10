@@ -772,6 +772,30 @@ void Driver::Init() {
   if (!head.starts_with(
           locked.at("rexglue_sdk").at("commit").get<std::string>()))
     throw std::runtime_error("SDK commit differs from deps.lock.json");
+  // AMD FidelityFX SDK: presenter CAS/FSR (and D3D12 FSR2/3) need its headers
+  // and runtime. The SDK would fetch it during configure; instead the commit
+  // pinned in deps.lock.json is checked out once under .local/deps and handed
+  // to FetchContent, so configure never downloads or follows a branch.
+  if (locked.contains("fidelityfx")) {
+    const auto& ffx = locked.at("fidelityfx");
+    const auto commit = ffx.at("commit").get<std::string>();
+    const auto source = options.paths.local() / PathFromUtf8(ffx.at("path").get<std::string>());
+    const auto git = FindHostTool("git");
+    if (!io::exists(source / ".git")) {
+      io::create_directories(source);
+      Command(git, {"-C", Path(source), "init", "-q"}, build, "fidelityfx-init");
+      Command(git, {"-C", Path(source), "fetch", "--depth", "1", ffx.at("url").get<std::string>(), commit},
+              build, "fidelityfx-fetch");
+      Command(git, {"-C", Path(source), "checkout", "-q", "--detach", "FETCH_HEAD"}, build, "fidelityfx-checkout");
+    }
+    if (!Command(git, {"-C", Path(source), "rev-parse", "HEAD"}, build, "fidelityfx-pin").starts_with(commit))
+      throw std::runtime_error("FidelityFX SDK commit differs from deps.lock.json: " + Path(source));
+    if (!Command(git, {"-C", Path(source), "status", "--porcelain", "--untracked-files=no"}, build,
+                 "fidelityfx-clean").empty())
+      throw std::runtime_error("FidelityFX SDK checkout has local changes: " + Path(source));
+    options.variables["REXGLUE_ENABLE_FIDELITYFX"] = "ON";
+    options.variables["FETCHCONTENT_SOURCE_DIR_FIDELITYFX"] = Path(source);
+  }
   Command(
       options.cmake,
       {"-DSDK_DIR=" + Path(options.sdk),
@@ -956,6 +980,16 @@ void Driver::SharedSdk() {
   for (const auto& patch : locked.at("rexglue_sdk").at("patches"))
     for (const auto& [file, hash] : patch.at("files").items())
       owned.insert(Path(options.sdk / PathFromUtf8(file)));
+  // The pinned FidelityFX checkout (verified clean at its locked commit) is
+  // the other identified source tree of the generation.
+  fs::path fidelityfx;
+  if (locked.contains("fidelityfx")) {
+    fidelityfx = options.paths.local() / PathFromUtf8(locked.at("fidelityfx").at("path").get<std::string>());
+    std::istringstream ffx_tracked(Command(FindHostTool("git"),
+        {"-c", "core.quotepath=false", "-C", Path(fidelityfx), "ls-files"}, generation, "fidelityfx-owned-sources"));
+    while (std::getline(ffx_tracked, tracked_file))
+      if (!tracked_file.empty()) owned.insert(Path(fidelityfx / PathFromUtf8(tracked_file)));
+  }
   for (const auto& command : Commands(generation)) {
     const auto extension =
         PathFromUtf8(command.value("file", std::string{})).extension();
@@ -969,8 +1003,10 @@ void Driver::SharedSdk() {
     const auto relative = source.lexically_relative(generation);
     const bool generated = !relative.empty() && !relative.is_absolute() &&
                            *relative.begin() != "..";
-    if ((!IsWithin(source, options.sdk) && !generated) ||
-        (IsWithin(source, options.sdk) && !owned.contains(Path(source))) ||
+    const bool identified_tree = IsWithin(source, options.sdk) ||
+                                 (!fidelityfx.empty() && IsWithin(source, fidelityfx));
+    if ((!identified_tree && !generated) ||
+        (identified_tree && !owned.contains(Path(source))) ||
         io::is_redirect(source))
       throw std::runtime_error(
           "Unidentified/title-specific translation unit cannot enter shared "

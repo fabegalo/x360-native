@@ -19,6 +19,38 @@ add_subdirectory("${REXSDK_DIR}" rexglue-sdk)
 include("${X360N_ROOT}/cmake/sdk/x360n_sdk_backports.cmake")
 x360n_apply_sdk_backports("${REXSDK_DIR}")
 
+# FidelityFX's own CMake writes its libraries to ${CMAKE_HOME_DIRECTORY}/bin,
+# which is this source directory, shared by every generation. Keep them in the
+# generation: the DLLs next to rexruntime (the codegen producer and title
+# staging take native modules from there), import/static libraries apart.
+function(x360n_fidelityfx_outputs directory runtime archive)
+    get_property(_targets DIRECTORY "${directory}" PROPERTY BUILDSYSTEM_TARGETS)
+    foreach(_target IN LISTS _targets)
+        get_target_property(_type "${_target}" TYPE)
+        if(_type STREQUAL "UTILITY" OR _type STREQUAL "INTERFACE_LIBRARY")
+            continue()
+        endif()
+        foreach(_suffix "" _DEBUG _RELEASE _RELWITHDEBINFO _MINSIZEREL)
+            set_target_properties("${_target}" PROPERTIES
+                RUNTIME_OUTPUT_DIRECTORY${_suffix} "${runtime}"
+                LIBRARY_OUTPUT_DIRECTORY${_suffix} "${runtime}"
+                ARCHIVE_OUTPUT_DIRECTORY${_suffix} "${archive}")
+        endforeach()
+    endforeach()
+    get_property(_children DIRECTORY "${directory}" PROPERTY SUBDIRECTORIES)
+    foreach(_child IN LISTS _children)
+        x360n_fidelityfx_outputs("${_child}" "${runtime}" "${archive}")
+    endforeach()
+endfunction()
+if(REXGLUE_FIDELITYFX_SOURCE_DIR AND EXISTS "${REXGLUE_FIDELITYFX_SOURCE_DIR}/ffx-api")
+    get_target_property(_x360n_runtime_dir rexruntime RUNTIME_OUTPUT_DIRECTORY)
+    if(NOT _x360n_runtime_dir)
+        message(FATAL_ERROR "rexruntime has no runtime output directory for FidelityFX")
+    endif()
+    x360n_fidelityfx_outputs("${REXGLUE_FIDELITYFX_SOURCE_DIR}/ffx-api"
+        "${_x360n_runtime_dir}" "${CMAKE_CURRENT_BINARY_DIR}/fidelityfx/$<CONFIG>")
+endif()
+
 function(x360n_sdk_targets directory)
     get_property(_targets DIRECTORY "${directory}" PROPERTY BUILDSYSTEM_TARGETS)
     foreach(_target IN LISTS _targets)

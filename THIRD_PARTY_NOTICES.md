@@ -88,6 +88,9 @@ os arquivos legais dos arquivos baixados. Esses componentes têm termos próprio
 - LLVM/Clang: [Apache-2.0 WITH LLVM-exception e avisos adicionais](licenses/llvm.txt).
 - CMake: [BSD-3-Clause e terceiros incluídos](licenses/cmake.txt).
 - Ninja: [Apache-2.0](licenses/ninja.txt).
+- AMD FidelityFX SDK (commit `eee08db`, efeitos CAS/FSR do presenter):
+  [MIT](licenses/fidelityfx.txt). Compilado no runtime do SDK; a cópia fica em
+  `.local/deps` e não entra no pacote do launcher.
 - Python 3.14.8 (pacote embeddable, só durante a compilação do SDK com Vulkan):
   [PSF-2.0 e componentes incluídos](licenses/python.txt).
 - MinGit/Git for Windows: [GPL-2.0-only para Git](licenses/mingit.txt), além das

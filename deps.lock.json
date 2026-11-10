@@ -3731,6 +3731,13 @@
 }
 ]
 },
+    "fidelityfx":  {
+        "path":  "deps/fidelityfx-sdk-eee08db",
+        "url":  "https://github.com/rexglue/FidelityFX-SDK.git",
+        "commit":  "eee08db1688ac3d1275a70b728f4a8ba22914213",
+        "license":  "MIT (AMD FidelityFX SDK)",
+        "why":  "Presenter CAS/FSR and D3D12 FSR2/3 (REXGLUE_ENABLE_FIDELITYFX). Same commit rexglue_fidelityfx.cmake pins; the supervisor checks it out under .local/deps and passes it as FETCHCONTENT_SOURCE_DIR_FIDELITYFX."
+    },
     "llvm":  {
                  "version":  "22.1.8",
                  "asset":  "clang+llvm-22.1.8-x86_64-pc-windows-msvc.tar.xz",
