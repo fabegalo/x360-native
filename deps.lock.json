@@ -1276,7 +1276,7 @@
       },
       "files": {
         "include/rex/kernel/xam/module.h": "0f41fa8a703fb94f07ae510fe4ba42c35491c71e153048ee5036d8695825ff62",
-        "src/kernel/xboxkrnl/xboxkrnl_hal.cpp": "f3e83cbe3bc899bc60bb81ad8e9431102a663a7de7993b93004a80c77e0d969d",
+        "src/kernel/xboxkrnl/xboxkrnl_hal.cpp": "ce21dccad5e02e960fb149fd633eed0d9f776bde23f411df4a4422821d08ccd4",
         "src/kernel/xam/xam_user.cpp": "fed19992fa3a988ee70c811d4e7e9bbe9fc3c53bfde16d3712bfe233abd0910b"
       },
       "test": "tests/sdkcheck/firmware_exit_test.ps1"
@@ -3706,6 +3706,17 @@
     "src/kernel/xboxkrnl/xboxkrnl_crypt.cpp": "c91c8d092f14ece0277da0a84f8bba94e5d30a13e671b336150468329ddc17a0"
   },
   "test": "sdkcheck.[xekeys-rsa][local] (tests/sdkcheck/xekeys_rsa_signature_test.cpp): XeKeysVerifyRSASignature and XeCryptBnQwBeSigVerify accept, without the user's kernel keys, only the original 17559 system.manifest and four systemext PIRS packages (key 0) and the four original XTT fonts, pinned as SHA-256 of key, digest and signature (hash, salt and signature for XTT). Each pin is the one the real key verifies; a changed digest or key index does not match, and any other input still needs the local key. Release users had to supply rsa-pub-0 or the Guide waited forever in 816EB9F0."
+},
+{
+  "file": "patches/rexglue-sdk/0265-hal-guide-power-down.patch",
+  "sha256": "f8f2982e4ff7e1f44930ebc3efbae4e1f3d1d0b9294b92d39ef34522d88be582",
+  "base_files": {
+    "src/kernel/xboxkrnl/xboxkrnl_hal.cpp": "f3e83cbe3bc899bc60bb81ad8e9431102a663a7de7993b93004a80c77e0d969d"
+  },
+  "files": {
+    "src/kernel/xboxkrnl/xboxkrnl_hal.cpp": "ce21dccad5e02e960fb149fd633eed0d9f776bde23f411df4a4422821d08ccd4"
+  },
+  "test": "sdkcheck.firmware-exit (tests/sdkcheck/firmware_exit_probe.cpp): HalPowerDownToBackgroundMode, which the Guide power menu (XAM 17559 816F0410) calls for Desligar o console, runs title terminate notifications and publishes FirmwareExit routine 5 without returning, the same power down as HalReturnToFirmware(5). It was a stub, so the dash kept running after the user chose to turn the console off."
 }
 ]
 },

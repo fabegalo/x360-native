@@ -1,5 +1,12 @@
 # STATUS
 
+09/11 — **Desligar o console pelo Guide encerra a sessão**: o menu de energia da
+XAM 17559 (`816F0410`) chama `HalPowerDownToBackgroundMode`, que era stub, e a
+dash continuava. O patch 0265 o trata como desligamento (rotina 5 de
+`HalReturnToFirmware`), com notificações de término do título. Sessão
+`20261110T013840Z-session-0-dash_17559` (clique manual): `requested firmware exit
+(routine 5); closing platform`. `sdkcheck.firmware-exit` cobre a chamada.
+
 09/11 — **Trocas dash↔jogo sem refazer o hash do build**: cada troca da sessão
 verificava por completo os recibos (~5.100 arquivos, ~1,3 GB, ~4 s cada) da dash,
 do título, do Skate 3 gerado (lista de jogos da dash) e de novo no `Run()`. A

@@ -4,7 +4,9 @@ $root = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../../.local/evidence/f
 $run = Join-Path $root ('firmware-' + [Guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $run | Out-Null
 # 1 and 5 are the observed routines; 2 stands for one that is not modeled separately.
-foreach ($routine in @(1, 5, 2)) {
+# background is HalPowerDownToBackgroundMode, the Guide power-off, which ends as 5.
+foreach ($routine in @(1, 5, 2, 'background')) {
+    $expected = if ($routine -eq 'background') { 5 } else { $routine }
     $case = Join-Path $run $routine
     New-Item -ItemType Directory -Path $case | Out-Null
     $stdout = Join-Path $case 'stdout.txt'
@@ -30,7 +32,7 @@ foreach ($routine in @(1, 5, 2)) {
         $text = $outTask.Result
         [IO.File]::WriteAllText($stdout, $text)
         [IO.File]::WriteAllText($stderr, $errTask.Result)
-        if ($process.ExitCode -ne 0 -or $text -notmatch "firmware request completed: $routine; callbacks=1; handoff=6" -or -not (Test-Path -LiteralPath "$case/handoff.bin")) {
+        if ($process.ExitCode -ne 0 -or $text -notmatch "firmware request completed: $expected; callbacks=1; handoff=6" -or -not (Test-Path -LiteralPath "$case/handoff.bin")) {
             throw "Firmware probe $routine failed (exit $($process.ExitCode)); evidence: $case"
         }
     } finally { $process.Dispose() }

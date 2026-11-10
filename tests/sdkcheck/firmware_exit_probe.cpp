@@ -15,6 +15,7 @@
 #include "../../titles/common/launch_request.h"
 using rex::X_STATUS;
 extern "C" REX_FUNC(__imp__HalReturnToFirmware);
+extern "C" REX_FUNC(__imp__HalPowerDownToBackgroundMode);
 extern "C" REX_FUNC(__imp__ExRegisterTitleTerminateNotification);
 REXCVAR_DECLARE(std::string, x360n_handoff_out);
 namespace {
@@ -27,7 +28,9 @@ void Notify(PPCContext&, uint8_t*) {
 }
 int main(int argc, char** argv) {
   if (argc != 3) return 2;
-  const uint32_t routine = std::stoul(argv[1]);
+  // "background" is the Guide power-off path, which must end as routine 5.
+  const bool background = std::string(argv[1]) == "background";
+  const uint32_t routine = background ? 5 : std::stoul(argv[1]);
   const std::filesystem::path root(argv[2]);
   rex::Runtime runtime(root, root);
   rex::RuntimeConfig config{};
@@ -51,7 +54,8 @@ int main(int argc, char** argv) {
     ctx.r3.u64 = registration; ctx.r4.u64 = 1;
     __imp__ExRegisterTitleTerminateNotification(ctx, runtime.memory()->virtual_membase());
     ctx.r3.u64 = routine;
-    __imp__HalReturnToFirmware(ctx, runtime.memory()->virtual_membase());
+    if (background) __imp__HalPowerDownToBackgroundMode(ctx, runtime.memory()->virtual_membase());
+    else __imp__HalReturnToFirmware(ctx, runtime.memory()->virtual_membase());
     returned = true;
     return 0;
   }));

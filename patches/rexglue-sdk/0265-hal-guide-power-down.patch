@@ -1,0 +1,29 @@
+--- a/src/kernel/xboxkrnl/xboxkrnl_hal.cpp
++++ b/src/kernel/xboxkrnl/xboxkrnl_hal.cpp
+@@ -49,9 +49,18 @@ void HalReturnToFirmware_entry(u32 routine) {
+   REX_KERNEL_STATE()->TerminateTitle();
+ }
+ 
++void HalPowerDownToBackgroundMode_entry() {
++  // The Guide's power menu (XAM 17559 816F0410) calls this to turn the console
++  // off. Without a modeled background mode, that is a power down: routine 5.
++  REXKRNL_INFO("Guest requested power down to background mode");
++  HalReturnToFirmware_entry(5);
++}
++
+ }  // namespace rex::kernel::xboxkrnl
+ 
+ REX_EXPORT(__imp__HalReturnToFirmware, rex::kernel::xboxkrnl::HalReturnToFirmware_entry)
++REX_EXPORT(__imp__HalPowerDownToBackgroundMode,
++           rex::kernel::xboxkrnl::HalPowerDownToBackgroundMode_entry)
+ 
+ REX_EXPORT_STUB(__imp__HalGetCurrentAVPack);
+ REX_EXPORT_STUB(__imp__HalGpioControl);
+@@ -66,7 +75,6 @@ REX_EXPORT_STUB(__imp__HalGetPowerUpCause);
+ REX_EXPORT_STUB(__imp__HalRegisterPowerDownCallback);
+ REX_EXPORT_STUB(__imp__HalRegisterBackgroundModeTransitionCallback);
+ REX_EXPORT_STUB(__imp__HalClampUnclampOutputDACs);
+-REX_EXPORT_STUB(__imp__HalPowerDownToBackgroundMode);
+ REX_EXPORT_STUB(__imp__HalNotifyAddRemoveBackgroundTask);
+ REX_EXPORT_STUB(__imp__HalCallBackgroundModeNotificationRoutines);
+ REX_EXPORT_STUB(__imp__HalGetMemoryInformation);

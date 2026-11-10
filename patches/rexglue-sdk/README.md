@@ -2967,3 +2967,15 @@ new original can be pinned once the real key confirms it.
 `sdkcheck.[xekeys-rsa][local]` (`tests/sdkcheck/xekeys_rsa_signature_test.cpp`)
 checks that every pin is a signature that the user's real key verifies, and that a
 changed digest or key index does not match. No upstream equivalent was identified.
+
+### 0265 — Guide power off ends the session
+
+"Desligar o console" in the Guide (XAM 17559 `816F0410`, after its confirmation
+`816C5508`) calls `HalPowerDownToBackgroundMode`. It was a stub, so the dash kept
+running. Without a modeled background mode it is now a power down: it runs the
+same orderly title termination as `HalReturnToFirmware(5)` and publishes
+`FirmwareExit` routine 5, which closes the session.
+
+`sdkcheck.firmware-exit` (`tests/sdkcheck/firmware_exit_probe.cpp`) calls it
+through the guest import and checks that it does not return, runs the terminate
+notification and hands off routine 5. No upstream equivalent was identified.
