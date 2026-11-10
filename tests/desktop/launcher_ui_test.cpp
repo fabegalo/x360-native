@@ -112,6 +112,10 @@ TEST_CASE("launcher offers only the graphics APIs of this system and never swaps
   CHECK(Enabled(f.app, kRendererNative));
   Command(f.app, kApiVulkan);
   CHECK(LoadRendererSettings(f.paths).api == GraphicsApi::Vulkan);
+  Command(f.app, kRendererNative);
+  CHECK(Enabled(f.app, kApiVulkan));  // Native/Vulkan is selectable
+  CHECK(LoadRendererSettings(f.paths).renderer == Renderer::Native);
+  CHECK(LoadRendererSettings(f.paths).api == GraphicsApi::Vulkan);
 #else
   CHECK(initial.api == GraphicsApi::Vulkan);
   CHECK_FALSE(Enabled(f.app, kApiD3D12));

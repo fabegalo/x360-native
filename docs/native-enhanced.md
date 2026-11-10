@@ -3,8 +3,8 @@
 The original setting is the default. Native Enhanced is opt-in, remains
 experimental, and does not establish title compatibility or a measured FPS gain.
 Execution tests and visual comparisons were deferred by the maintainer during
-this implementation. The Native/Vulkan launcher gate remains in place until
-validation with a real title.
+this implementation. Native/Vulkan is selectable in the launcher under
+development access.
 
 ## Independent timelines
 

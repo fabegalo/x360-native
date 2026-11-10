@@ -2,6 +2,7 @@
 #include "scratch.h"
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers.hpp>
+#include <catch2/matchers/catch_matchers_string.hpp>
 #include <fstream>
 #include <algorithm>
 using namespace x360n;
@@ -72,8 +73,8 @@ TEST_CASE("graphics API migrates old files and strips every conflicting manifest
   CHECK_THROWS(SessionRendererArguments({"--gpu_backend", "--foo"}, session));
   CHECK_THROWS(CheckSessionRenderer(root / "game.exe", session)); // Missing preflight.
   selected.renderer = Renderer::Native;
-  CHECK_THROWS_WITH(CheckSessionRenderer(root / "game.exe", selected),
-      "Native/Vulkan is implemented experimentally; launcher access awaits validation with a real title. No fallback to Xenos or D3D12.");
+  CHECK_THROWS_WITH(CheckSessionRenderer(root / "game.exe", selected),  // Native/Vulkan allowed; plugin absent here.
+      Catch::Matchers::ContainsSubstring("rexgpu-native.dll missing"));
   selected.experimental = false;
   CHECK_THROWS(SaveRendererSettings(paths, selected));
   std::ofstream(paths.local() / "graphics.toml") << "renderer = 'xenos'\nexperimental = false\n";

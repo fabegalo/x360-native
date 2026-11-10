@@ -168,8 +168,6 @@ std::vector<std::string> SessionRendererArguments(const std::vector<std::string>
 }
 void CheckSessionRenderer(const std::filesystem::path& exe, RendererSettings settings) {
   Validate(settings);
-  if (settings.renderer == Renderer::Native && settings.api == GraphicsApi::Vulkan)
-    throw std::runtime_error("Native/Vulkan is implemented experimentally; launcher access awaits validation with a real title. No fallback to Xenos or D3D12.");
   // The runtime loader is authoritative for the executable's build config and
   // ABI. This preflight only detects an absent plugin before creating a window.
   if (settings.renderer == Renderer::Native &&

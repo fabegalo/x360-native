@@ -699,8 +699,8 @@ bool Enabled(const App& a, int id) {
     case kStorage: case kRenderer: case kNativeDevelopment: case kFullscreen: case kConsoleLanguage: case kConsoleCountry: return configured;
     case kRendererNative: return configured && native && windows;
     case kApiD3D12: return configured && windows;
-    // Windows: Vulkan is an experimental Xenos API; Linux/macOS: the default.
-    case kApiVulkan: return configured && (!windows || (native && a.renderer_settings.renderer == Renderer::Xenos));
+    // Windows: Vulkan is an experimental API (Xenos or Native); Linux/macOS: the default.
+    case kApiVulkan: return configured && (!windows || native);
     case kRemove: return !a.busy && !a.initializing && Removable(a);
     case kPrimary: {
       const bool preparable = has && (a.targets[a.selected].importable || a.targets[a.selected].generic_aot);
