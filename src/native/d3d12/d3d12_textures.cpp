@@ -147,10 +147,12 @@ D3D12Render::TextureTables D3D12Render::BindTextures(const RegisterFile& r, rex:
       // Resolved data at resolution scale is GPU resident: texels the pinned
       // texture_load_*_scaled kernels read. Formats Native converts on the CPU
       // are loaded from the canonical 1x bytes instead.
-      const bool scaled_texture = scaled_.enabled() && !input.host_volume && !texture_cpu_ &&
-          scale_format->block_width == 1 && scale_format->block_height == 1 &&
-          GpuLoadShader(input) != LoadShader::kUnknown &&
+      const bool scaled_data = scaled_.enabled() &&
           (scaled_.Overlaps(input.base, base_bytes) || scaled_.Overlaps(input.mip, mip_bytes));
+      const char* unscaled = !scaled_data ? nullptr : input.host_volume ? "volume view" : texture_cpu_ ? "CPU textures" :
+          scale_format->block_width != 1 || scale_format->block_height != 1 ? "compressed format" :
+          GpuLoadShader(input) == LoadShader::kUnknown ? "CPU-converted format" : nullptr;
+      const bool scaled_texture = scaled_data && !unscaled;
       if (scaled_texture) { input.scale_x=scale_x_; input.scale_y=scale_y_;
         textures_resolution_scaled_ |= uint32_t(1) << binding.fetch_constant; }
       // Content identity: every field that selects or converts guest bytes.

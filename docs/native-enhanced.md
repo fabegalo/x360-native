@@ -96,6 +96,10 @@ tracks only which 4 KB pages hold current subpixels; CPU or memexport writes
 retire a page, and a shader replicates the 1× bytes into retired pages before
 use. Textures load through the SDK `texture_load_*_scaled` shaders and the
 scanout gathers the scaled front buffer on the GPU; there is no scaled readback.
+Only pages a scaled resolve wrote make a texture scaled; replicated pages do not.
+Fetch offsets stay in guest texels (`draw_resolution_scaled_texture_offsets`
+off, both translators via SDK patch 0267), as on the console, so GPU texture
+encoders such as Motocross Madness's DXT1 terrain keep their footprint.
 
 Native Original explicitly selects the baseline values. Session settings remove
 conflicting manifest flags, including hyphen and underscore aliases. Xenos keeps

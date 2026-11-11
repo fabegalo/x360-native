@@ -2994,3 +2994,14 @@ and swap failures, recorded but never displayed before, get their own lines.
 
 `sdkcheck.[debug-overlay]` (`tests/sdkcheck/debug_overlay_layout_test.cpp`) still
 draws the overlay. No upstream equivalent was identified.
+
+### 0267 — SPIR-V honours draw_resolution_scaled_texture_offsets
+
+`SpirvShaderTranslator::ProcessTextureFetchInstruction` always used host-texel
+fetch offsets (and scaled sizes) for resolution-scaled textures; the DXBC
+translator gates the same behaviour on `draw_resolution_scaled_texture_offsets`.
+Both now read the option. Native sets it off (guest-texel offsets, as on the
+console): with host-texel offsets the GPU DXT1 encoder of Motocross Madness
+covered one guest texel per block at scale and the terrain became flat 4x4
+blocks. Validated by hand on Native D3D12 at 4x; no sdkcheck. No upstream
+equivalent was identified.

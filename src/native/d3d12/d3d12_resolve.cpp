@@ -110,11 +110,6 @@ void D3D12Render::Resolve(const RegisterFile& r, rex::memory::Memory& memory) {
   const uint64_t range=uint64_t(info.copy_dest_extent_start)-info.copy_dest_base+length;
   if (uint64_t(info.copy_dest_base)+range>GuestMemoryMirror::kSize)
     throw std::runtime_error("Native scaled resolve outside physical memory");
-  if (scaled && length) {
-    const uint32_t begin=info.copy_dest_base&~4095u;
-    const uint64_t end=(uint64_t(info.copy_dest_extent_start)+length+4095)&~uint64_t(4095);
-    SyncGuestRead(begin,end-begin,kReadResolveRect);
-  }
   const uint64_t slot = (uint64_t(length) + 255) & ~uint64_t(255);
   if (view_count_ > 65000) Flush(kFlushCapacity);
   ReserveReadback(slot);
@@ -206,7 +201,7 @@ void D3D12Render::Resolve(const RegisterFile& r, rex::memory::Memory& memory) {
     }
     QueueGuestWrite(info.copy_dest_extent_start, length);
     // After RangeWrittenByGpu retired the range's watches: re-arm as current.
-    if (scaled) scaled_.MarkCurrent(page_start,page_length);
+    if (scaled) scaled_.MarkCurrent(page_start,page_length,true);
   }
   if (info.IsClearingColor() || info.IsClearingDepth()) {
     Transition(edram_.Get(), edram_state_, D3D12_RESOURCE_STATE_UNORDERED_ACCESS); Barrier();

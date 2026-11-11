@@ -1965,7 +1965,7 @@
         "src/graphics/pipeline/shader/spirv_translator_fetch.cpp": "b4cba3533cb7f5bdf92206493b49ded9e4e781194a23d363ffabd06ebda77e39"
       },
       "files": {
-        "src/graphics/pipeline/shader/spirv_translator_fetch.cpp": "1457d62823f174d7938eabb77d741275596778beffba7b266ae05c7537d7463c"
+        "src/graphics/pipeline/shader/spirv_translator_fetch.cpp": "05fea1695c99f994b661f397992e1e5e751319d2bd0e210357d4ac262d76cf98"
       },
       "test": "sdkcheck.Vulkan-texture-exp-adjust: the retained draw (textures with fetch exp_adjust +2) captures identically on Xenos/Vulkan and Xenos/D3D12; 4x darker on Vulkan before the patch"
     },
@@ -2481,7 +2481,7 @@
       },
       "files": {
         "include/rex/graphics/pipeline/shader/spirv_translator.h": "af3605a5b254681bb865ffe0e90ab8e8e4fa19616c336e07f49053c793dae6e6",
-        "src/graphics/pipeline/shader/spirv_translator_fetch.cpp": "1457d62823f174d7938eabb77d741275596778beffba7b266ae05c7537d7463c",
+        "src/graphics/pipeline/shader/spirv_translator_fetch.cpp": "05fea1695c99f994b661f397992e1e5e751319d2bd0e210357d4ac262d76cf98",
         "src/graphics/pipeline/shader/spirv_translator_rb.cpp": "3c5afd0814326809d557da19c9b7b9c28ea29d0eff5a52fe7ccf3eaa41f5b628",
         "src/graphics/vulkan/command_processor.cpp": "ab31157debc89156b62c22f37dec6f2140c44f38917462ad3321fc9eeae0c3e9"
       },
@@ -2544,7 +2544,7 @@
       "files": {
         "include/rex/graphics/pipeline/shader/spirv_translator.h": "af3605a5b254681bb865ffe0e90ab8e8e4fa19616c336e07f49053c793dae6e6",
         "src/graphics/pipeline/shader/dxbc_translator_fetch.cpp": "489264b8218238a4ec16cf1cd022139d14ce17488552c9066653cf31bb5546e3",
-        "src/graphics/pipeline/shader/spirv_translator_fetch.cpp": "1457d62823f174d7938eabb77d741275596778beffba7b266ae05c7537d7463c"
+        "src/graphics/pipeline/shader/spirv_translator_fetch.cpp": "05fea1695c99f994b661f397992e1e5e751319d2bd0e210357d4ac262d76cf98"
       },
       "test": "sdkcheck.canary-spirv and sdkcheck.canary-dxbc: an unnormalized tfetch2D translated offline selects max(size >> mip_min, 1) when mip_min equals mip_max (fetch constant word 4), and normalized fetches are unchanged (Xenia Canary 8486e97a0, cited for 555308B6/5553080B). No GPU run."
     },
@@ -2561,7 +2561,7 @@
         "include/rex/graphics/pipeline/shader/spirv_translator.h": "af3605a5b254681bb865ffe0e90ab8e8e4fa19616c336e07f49053c793dae6e6",
         "src/graphics/pipeline/shader/dxbc_translator_fetch.cpp": "489264b8218238a4ec16cf1cd022139d14ce17488552c9066653cf31bb5546e3",
         "src/graphics/pipeline/shader/spirv_translator.cpp": "d9a4bdfe126a747fde2bbcc3197c330ea6eb4ace3ea3962734e92a3f9d4f46b6",
-        "src/graphics/pipeline/shader/spirv_translator_fetch.cpp": "1457d62823f174d7938eabb77d741275596778beffba7b266ae05c7537d7463c"
+        "src/graphics/pipeline/shader/spirv_translator_fetch.cpp": "05fea1695c99f994b661f397992e1e5e751319d2bd0e210357d4ac262d76cf98"
       },
       "test": "sdkcheck.canary-spirv and sdkcheck.canary-dxbc: a vfetch_full of k_32_32_32_32_FLOAT translated offline masks every word at or past base + size (fetch constant word 1 bits 2:25) to 0 in SPIR-V (select per word) and DXBC (ubfe/and/umad/iadd/ult mask) (Xenia Canary 9e9d3cdd3). No GPU run."
     },
@@ -3728,6 +3728,17 @@
     "src/ui/overlay/debug_overlay.cpp": "e0495864e65073747e2a6eea194553e7673f86b09f5e1f2ccacc93b5388059ec"
   },
   "test": "sdkcheck.[debug-overlay] (tests/sdkcheck/debug_overlay_layout_test.cpp) draws the overlay with the toggle. Manual: F3 overlay shows a \"Perf counters\" checkbox that calls rex::perf::SetEnabled during the session; with --perf_log_csv the capture owns the counters and the checkbox is hidden. With counters on it shows FPS and frame time averaged over the plotted history, since the guest FPS provider is not wired. It also shows the per-frame shader translations, pipeline creations (D3D12) and swap failures that were recorded but never displayed. The overlay only told the user to restart with --perf_counters=true."
+},
+{
+  "file": "patches/rexglue-sdk/0267-spirv-scaled-texture-offsets-option.patch",
+  "sha256": "2533cdd2594a379b129b8bd5427ff5c4061d10c7cd5a53a978b336fb4474345e",
+  "base_files": {
+    "src/graphics/pipeline/shader/spirv_translator_fetch.cpp": "1457d62823f174d7938eabb77d741275596778beffba7b266ae05c7537d7463c"
+  },
+  "files": {
+    "src/graphics/pipeline/shader/spirv_translator_fetch.cpp": "05fea1695c99f994b661f397992e1e5e751319d2bd0e210357d4ac262d76cf98"
+  },
+  "test": "Manual (Native Vulkan, resolution scale 4): Motocross Madness compresses its terrain color to DXT1 on the GPU, reading each block's 4x4 texels with fetch offsets; with guest-texel offsets the terrain keeps its detail instead of 4x4 flat blocks. The SPIR-V translator always scaled offsets of resolution-scaled textures, while the DXBC one honours draw_resolution_scaled_texture_offsets; both now do."
 }
 ]
 },

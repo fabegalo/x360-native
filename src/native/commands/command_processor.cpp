@@ -1,5 +1,6 @@
 #include "command_processor.h"
 #include <rex/graphics/graphics_system.h>
+#include <rex/graphics/flags.h>
 #include <rex/graphics/pipeline/shader/shader.h>
 #include <rex/chrono/frame_timing.h>
 #include <rex/chrono/clock.h>
@@ -60,6 +61,11 @@ bool CommandProcessor::SetupContext() {
   try {
     active_processor = this;
     const auto quality = GetNativeQualitySettings();
+    // Fetch offsets of resolution-scaled textures stay in guest texels, as on
+    // the console. Host-texel offsets (the SDK default) give GPU-side texture
+    // encoders a fraction of their footprint: Motocross Madness's GPU DXT1
+    // terrain became 4x4 flat blocks. Read by both translators (patch 0267).
+    REXCVAR_SET(draw_resolution_scaled_texture_offsets, false);
     scanout_ = CaptureBackend::Wrap(factory_(*graphics_system_->provider()), *memory_, {
         std::filesystem::path(REXCVAR_GET(native_capture)), std::filesystem::path(REXCVAR_GET(native_frame_profile)),
         std::filesystem::path(REXCVAR_GET(native_capture_trigger)), REXCVAR_GET(native_capture_skip), REXCVAR_GET(native_capture_frames), quality.scale_x, quality.scale_y,

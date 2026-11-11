@@ -432,11 +432,13 @@ VkDescriptorSet VulkanRender::BindTextures(const RegisterFile& regs, rex::memory
       // Resolved data at resolution scale is GPU resident: texels the pinned
       // texture_load_*_scaled kernels read. Formats Native converts on the CPU
       // are loaded from the canonical 1x bytes instead.
-      const bool scaled_texture = scaled_.enabled() && !input.host_volume &&
-          scale_format->block_width == 1 && scale_format->block_height == 1 &&
-          format.bytes == scale_format->bytes_per_block() && format.block == 1 &&
-          GpuLoadShader(input) != LoadShader::kUnknown &&
+      const bool scaled_data = scaled_.enabled() &&
           (scaled_.Overlaps(input.base, base_bytes) || scaled_.Overlaps(input.mip, mip_bytes));
+      const char* unscaled = !scaled_data ? nullptr : input.host_volume ? "volume view" :
+          scale_format->block_width != 1 || scale_format->block_height != 1 ? "compressed format" :
+          format.bytes != scale_format->bytes_per_block() || format.block != 1 ||
+          GpuLoadShader(input) == LoadShader::kUnknown ? "CPU-converted format" : nullptr;
+      const bool scaled_texture = scaled_data && !unscaled;
       if (scaled_texture) { input.scale_x=scale_x_; input.scale_y=scale_y_;
         textures_resolution_scaled_ |= uint32_t(1) << binding.fetch_constant; }
       const uint32_t key_data[]{input.scale_x, input.scale_y, base, mip, w, h, d, levels, fetch.pitch, uint32_t(fetch.format), fetch.swizzle,

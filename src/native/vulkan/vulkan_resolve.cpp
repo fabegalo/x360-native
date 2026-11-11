@@ -57,11 +57,6 @@ void VulkanRender::Resolve(const RegisterFile& regs, rex::memory::Memory& memory
 
   if (uint64_t(info.copy_dest_extent_start) + length > GuestMemoryMirror::kSize)
     throw std::runtime_error("Native Vulkan: resolve outside guest physical memory");
-  if (scaled && length) {
-    const uint32_t begin=info.copy_dest_base&~4095u;
-    const uint64_t end=(uint64_t(info.copy_dest_extent_start)+length+4095)&~uint64_t(4095);
-    SyncGuestRead(begin,uint32_t(end-begin),0xFF);
-  }
   // Scaled: the shader writes GPU-resident scaled memory through a view
   // starting at the base, as the pinned executor. Stale pages of the extent
   // first receive the 1x bytes, so nothing outside the rectangle changes.
@@ -146,7 +141,7 @@ void VulkanRender::Resolve(const RegisterFile& regs, rex::memory::Memory& memory
     std::vector<uint64_t> cpu_generations;
     mirror.RangeWrittenByGpu(info.copy_dest_extent_start, length, &cpu_generations);
     // After RangeWrittenByGpu retired the range's watches: re-arm as current.
-    if (scaled) scaled_.MarkCurrent(page_start,page_length);
+    if (scaled) scaled_.MarkCurrent(page_start,page_length,true);
     UseBuffer(guest_buffer_->handle(), guest_access_, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_TRANSFER_READ_BIT);
     const VkBufferCopy copy{info.copy_dest_extent_start, readback_used_, length};
     cmd_.CopyBuffer(guest_buffer_->handle(), readback_->handle(), 1, &copy);

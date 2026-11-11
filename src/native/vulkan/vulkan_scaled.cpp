@@ -114,7 +114,7 @@ void VulkanRender::ReplicateScaled(uint32_t start, uint32_t length, unsigned pix
       cmd_.PushConstants(downscale_layout_, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(constants), constants);
       cmd_.Dispatch((chunk * area / 4 + 63) / 64, 1, 1);
     }
-    if (mark) scaled_.MarkCurrent(run_start, run_length);
+    if (mark) scaled_.MarkCurrent(run_start, run_length, false);
   }
 }
 VkBuffer VulkanRender::PrepareScanout(const ScanoutTexture& input, ScanoutTexture& output) {

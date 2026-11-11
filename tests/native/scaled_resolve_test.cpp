@@ -39,10 +39,16 @@ TEST_CASE("Native scaled resolve pages: stale runs, current pages and retirement
   // A resolve covering page 1 (partially) makes the whole page current.
   mirror.RequestRange(base, 4 * 4096);
   mirror.RangeWrittenByGpu(base + 4096 + 256, 512);
-  cache.MarkCurrent(base + 4096 + 256, 512);
+  cache.MarkCurrent(base + 4096 + 256, 512, true);
   CHECK(cache.Overlaps(base + 4096, 1));
   CHECK_FALSE(cache.Overlaps(base, 4096));
   CHECK(cache.Stale(base, 4 * 4096) == Runs{{base, 4096}, {base + 2 * 4096, 2 * 4096}});
+  // Replicated 1x pages are current but not resolution scaled: a CPU texture
+  // next to a resolve target stays a 1x texture.
+  cache.MarkCurrent(base + 2 * 4096, 4096, false);
+  CHECK(cache.Stale(base + 2 * 4096, 4096).empty());
+  CHECK_FALSE(cache.Overlaps(base + 2 * 4096, 4096));
+  CHECK(cache.Overlaps(base + 4096, 2 * 4096));
   // A CPU write to the page retires its subpixels.
   mirror.RequestRange(base + 4096, 4096);
   *memory.TranslatePhysical<uint32_t*>(base + 4096) = 0x12345678;
@@ -50,7 +56,7 @@ TEST_CASE("Native scaled resolve pages: stale runs, current pages and retirement
   CHECK_FALSE(cache.Overlaps(base + 4096, 4096));
   CHECK(cache.Stale(base + 4096, 4096) == Runs{{base + 4096, 4096}});
   // Current again, then a non-scaled GPU write (memexport) retires it too.
-  cache.MarkCurrent(base + 4096, 4096);
+  cache.MarkCurrent(base + 4096, 4096, true);
   CHECK(cache.Stale(base + 4096, 4096).empty());
   mirror.RangeWrittenByGpu(base + 4096 + 8, 4);
   CHECK(cache.Stale(base + 4096, 4096) == Runs{{base + 4096, 4096}});

@@ -106,7 +106,7 @@ void D3D12Render::ReplicateScaled(uint32_t start, uint32_t length, unsigned pixe
       cmd_.SetComputeRoot32BitConstants(0, 6, constants, 0);
       cmd_.Dispatch((chunk * area / 4 + 63) / 64, 1, 1);
     }
-    if (mark) scaled_.MarkCurrent(run_start, run_length);
+    if (mark) scaled_.MarkCurrent(run_start, run_length, false);
   }
 }
 D3D12_GPU_VIRTUAL_ADDRESS D3D12Render::PrepareScanout(const ScanoutTexture& input, ScanoutTexture& output) {
