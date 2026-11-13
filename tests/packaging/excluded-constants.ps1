@@ -2,6 +2,16 @@ param([string]$PackageDirectory = '')
 $ErrorActionPreference = 'Stop'
 $root = (Resolve-Path (Join-Path $PSScriptRoot '../..')).Path
 . (Join-Path $root 'scripts/packaging/excluded-constants.ps1')
+$policy = Get-Content (Join-Path $root 'licenses/excluded-loader-constants.json') -Raw | ConvertFrom-Json
+if (@('xe_xex1_retail_key','xe_xex1_devkit_key' | Where-Object { $_ -notin @($policy.rules.id) }).Count) {
+    throw 'An unapproved key exclusion was removed'
+}
+if ('xe_xex2_retail_key' -in @($policy.rules.id) -or
+    @($policy.permitted_public_constants).Count -ne 1 -or
+    $policy.permitted_public_constants[0].id -ne 'xe_xex2_retail_key' -or
+    $policy.permitted_public_constants[0].sha256 -ne 'a0bd3f5f56adf2b0238a2702c0c0cd8548fb34b3dc19345943dc011010723fe4') {
+    throw 'The approved public-constant exception changed scope'
+}
 $value = [byte[]](101..116)
 $sha = [Security.Cryptography.SHA256]::Create()
 try { $hash = [BitConverter]::ToString($sha.ComputeHash($value)).Replace('-', '').ToLowerInvariant() } finally { $sha.Dispose() }

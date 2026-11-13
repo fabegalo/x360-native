@@ -1,5 +1,13 @@
 # Local patches to ReXGlue SDK
 
+## 0268 — shared scaled texture offset option
+
+Moves the existing `draw_resolution_scaled_texture_offsets` definition from the
+DXBC fetch translator to `graphics/flags.cpp`, matching its shared declaration
+and SPIR-V use. Default and behavior are unchanged. The focused
+`sdkcheck.scaled-texture-offsets-flag` links without DXBC sources; before the
+patch it fails with the same missing storage symbol as Linux Native replay.
+
 ## 0070 — optional runtime benchmarks
 
 Connects the existing `perf_log_csv` setting to Runtime::Setup, makes counters

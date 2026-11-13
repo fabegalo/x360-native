@@ -2494,7 +2494,7 @@
         "src/graphics/pipeline/shader/dxbc_translator_fetch.cpp": "9bbd02d52432fe55ec95d1b6f03a0cba46ad98a1ee4b974fe1fcaac4f6c47530"
       },
       "files": {
-        "src/graphics/pipeline/shader/dxbc_translator_fetch.cpp": "489264b8218238a4ec16cf1cd022139d14ce17488552c9066653cf31bb5546e3"
+        "src/graphics/pipeline/shader/dxbc_translator_fetch.cpp": "1e2c3c834114f616b22098bf14f859f7b74fa5ccfa7048a8da2754dd90c9f012"
       },
       "test": "sdkcheck.canary-dxbc: real tfetch3D microcode (normalized/unnormalized, with/without Z offset) translated offline to DXBC; each emits the stacked layer clamp max(z, 0.5), min(z, size - 0.5) (Xenia Canary 04085efaa). No GPU run."
     },
@@ -2543,7 +2543,7 @@
       },
       "files": {
         "include/rex/graphics/pipeline/shader/spirv_translator.h": "af3605a5b254681bb865ffe0e90ab8e8e4fa19616c336e07f49053c793dae6e6",
-        "src/graphics/pipeline/shader/dxbc_translator_fetch.cpp": "489264b8218238a4ec16cf1cd022139d14ce17488552c9066653cf31bb5546e3",
+        "src/graphics/pipeline/shader/dxbc_translator_fetch.cpp": "1e2c3c834114f616b22098bf14f859f7b74fa5ccfa7048a8da2754dd90c9f012",
         "src/graphics/pipeline/shader/spirv_translator_fetch.cpp": "05fea1695c99f994b661f397992e1e5e751319d2bd0e210357d4ac262d76cf98"
       },
       "test": "sdkcheck.canary-spirv and sdkcheck.canary-dxbc: an unnormalized tfetch2D translated offline selects max(size >> mip_min, 1) when mip_min equals mip_max (fetch constant word 4), and normalized fetches are unchanged (Xenia Canary 8486e97a0, cited for 555308B6/5553080B). No GPU run."
@@ -2559,7 +2559,7 @@
       },
       "files": {
         "include/rex/graphics/pipeline/shader/spirv_translator.h": "af3605a5b254681bb865ffe0e90ab8e8e4fa19616c336e07f49053c793dae6e6",
-        "src/graphics/pipeline/shader/dxbc_translator_fetch.cpp": "489264b8218238a4ec16cf1cd022139d14ce17488552c9066653cf31bb5546e3",
+        "src/graphics/pipeline/shader/dxbc_translator_fetch.cpp": "1e2c3c834114f616b22098bf14f859f7b74fa5ccfa7048a8da2754dd90c9f012",
         "src/graphics/pipeline/shader/spirv_translator.cpp": "d9a4bdfe126a747fde2bbcc3197c330ea6eb4ace3ea3962734e92a3f9d4f46b6",
         "src/graphics/pipeline/shader/spirv_translator_fetch.cpp": "05fea1695c99f994b661f397992e1e5e751319d2bd0e210357d4ac262d76cf98"
       },
@@ -2636,7 +2636,7 @@
         "src/graphics/d3d12/deferred_command_list.cpp": "e73c5ff6d4ed679681c93247c2ffa2381da6af9e6e8df79ac09cf319c1d5e932",
         "src/graphics/d3d12/pipeline_cache.cpp": "7112d5d15e154825df9a5389e475a4862524fc51d98368a7a2f2b8d7737660f2",
         "src/graphics/d3d12/render_target_cache.cpp": "a3f5e7ff82919f979656af927ce80f1df0404b5ed8273d9e11e9c86a90b1b950",
-        "src/graphics/flags.cpp": "43ab5109396bd15972ae820f1fcaca396db4527bb0499701be76f4db39d232a1",
+        "src/graphics/flags.cpp": "66d474c2cba75e3cb296570d4d146615edd6c421dc25a21c35ed0a8048715fb4",
         "src/graphics/pipeline/shader/dxbc_translator_om.cpp": "a5f50732a1a0fa557189f26ddc926bb96c723c1d22057f8d07dddb956d5c939a",
         "src/graphics/pipeline/shader/spirv_translator_rb.cpp": "3c5afd0814326809d557da19c9b7b9c28ea29d0eff5a52fe7ccf3eaa41f5b628",
         "src/graphics/util/draw.cpp": "3f7dde8e3bd36ce76008fc3350045d5f6cff2825c0505ca09ecfd1a139c35f0b",
@@ -3739,6 +3739,19 @@
     "src/graphics/pipeline/shader/spirv_translator_fetch.cpp": "05fea1695c99f994b661f397992e1e5e751319d2bd0e210357d4ac262d76cf98"
   },
   "test": "Manual (Native Vulkan, resolution scale 4): Motocross Madness compresses its terrain color to DXT1 on the GPU, reading each block's 4x4 texels with fetch offsets; with guest-texel offsets the terrain keeps its detail instead of 4x4 flat blocks. The SPIR-V translator always scaled offsets of resolution-scaled textures, while the DXBC one honours draw_resolution_scaled_texture_offsets; both now do."
+},
+{
+  "file": "patches/rexglue-sdk/0268-shared-scaled-texture-offsets-option.patch",
+  "sha256": "fad99ead58dfb5635679887a2dde3b5cd235112242e64c76cc20a71a73b48b92",
+  "base_files": {
+    "src/graphics/flags.cpp": "43ab5109396bd15972ae820f1fcaca396db4527bb0499701be76f4db39d232a1",
+    "src/graphics/pipeline/shader/dxbc_translator_fetch.cpp": "489264b8218238a4ec16cf1cd022139d14ce17488552c9066653cf31bb5546e3"
+  },
+  "files": {
+    "src/graphics/flags.cpp": "66d474c2cba75e3cb296570d4d146615edd6c421dc25a21c35ed0a8048715fb4",
+    "src/graphics/pipeline/shader/dxbc_translator_fetch.cpp": "1e2c3c834114f616b22098bf14f859f7b74fa5ccfa7048a8da2754dd90c9f012"
+  },
+  "test": "sdkcheck.scaled-texture-offsets-flag links graphics/flags.cpp without any DXBC translator, checks the true default and both setting values. Negative control: undefined FLAGS_draw_resolution_scaled_texture_offsets_storage_ before the patch. Native Linux Vulkan replay must link and preserve capture equivalence."
 }
 ]
 },

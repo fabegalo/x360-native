@@ -2,11 +2,6 @@
   "schema": 1,
   "rules": [
     {
-      "id": "xe_xex2_retail_key",
-      "first_byte": 32,
-      "sha256": "a0bd3f5f56adf2b0238a2702c0c0cd8548fb34b3dc19345943dc011010723fe4"
-    },
-    {
       "id": "xe_xex1_retail_key",
       "first_byte": 162,
       "sha256": "0319110bc9489692b500dc9c4cf7ff1c858118f79e76253a645b98e27d5d7279"
@@ -15,6 +10,16 @@
       "id": "xe_xex1_devkit_key",
       "first_byte": 168,
       "sha256": "fc5ee3cfbc513db746715ee70e6b3401283cb52eaca9798c0aa7357447eab3f2"
+    }
+  ],
+  "permitted_public_constants": [
+    {
+      "id": "xe_xex2_retail_key",
+      "first_byte": 32,
+      "sha256": "a0bd3f5f56adf2b0238a2702c0c0cd8548fb34b3dc19345943dc011010723fe4",
+      "origin": "https://github.com/xenia-project/xenia/commit/bcd575f9b0266789d82bc3fa48665211590b7b3b",
+      "license": "BSD-3-Clause source; preserve original Xenia/ReXGlue notices",
+      "approval": "Maintainer explicitly approved this single public loader constant for distribution on 2026-11-12; no other keys or original content are permitted."
     }
   ]
 }

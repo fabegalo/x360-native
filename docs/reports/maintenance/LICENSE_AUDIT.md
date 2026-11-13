@@ -103,11 +103,16 @@ Não examinou objetos inalcançáveis nem histórico dos submódulos. Não é um
 garantia geral de ausência de segredos ou de direitos sobre todo material textual.
 Não houve remoção nem reescrita do histórico. Log: `.local/evidence/audit/c10-history.log`.
 
-O extrator desktop não compila `src/system/xex_module.cpp`: as constantes de
-decriptação desse loader permanecem no SDK obtido separadamente, não no extrator
-nem no payload. O gate procura a constante não nula em binários e texto sem
-imprimir seu valor; zeros de devkit são indistinguíveis de preenchimento comum.
-`xex_patch.cpp` lê chaves locais fornecidas pelo usuário e não as exporta.
+O extrator desktop não compila `src/system/xex_module.cpp`, mas a leitura de
+metadados SPA passou a incorporar a constante pública XEX2 retail daquele loader.
+Em 12/11/2026, o mantenedor autorizou explicitamente essa única exceção à política
+local, preservando os avisos BSD de Xenia/ReXGlue. A identidade foi conferida por
+fingerprint contra o [commit público de 13/01/2013](https://github.com/xenia-project/xenia/commit/bcd575f9b0266789d82bc3fa48665211590b7b3b),
+cujo arquivo declara BSD. Isso documenta proveniência e licença declarada do código,
+não uma autorização separada da Microsoft nem uma conclusão jurídica geral.
+`licenses/excluded-loader-constants.json` registra a exceção sem os bytes da chave;
+as duas exclusões XEX1 e os bloqueios de originais, chaves privadas e estado pessoal
+continuam ativos. Não se introduz fornecimento manual de chaves para nomes/ícones.
 Os testes usam dados sintéticos, não arquivos Xbox originais.
 
 ## Correção e validação do empacotamento

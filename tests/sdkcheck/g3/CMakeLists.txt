@@ -1,3 +1,12 @@
+# 0268: the texture offset option is shared, including Vulkan-only hosts.
+add_executable(x360n_scaled_texture_offsets_flag_checks ../scaled_texture_offsets_flag.cpp
+    ${X360_REXGLUE_DIR}/src/graphics/flags.cpp)
+target_link_libraries(x360n_scaled_texture_offsets_flag_checks PRIVATE rexruntime)
+target_include_directories(x360n_scaled_texture_offsets_flag_checks PRIVATE ${X360_REXGLUE_DIR}/thirdparty/renderdoc)
+x360n_stage_runtime_dlls(x360n_scaled_texture_offsets_flag_checks)
+add_test(NAME sdkcheck.scaled-texture-offsets-flag COMMAND x360n_scaled_texture_offsets_flag_checks)
+set_tests_properties(sdkcheck.scaled-texture-offsets-flag PROPERTIES LABELS project TIMEOUT 30)
+
 # Real PM4/shared-memory services, without a GPU, window or game.
 add_executable(x360n_register_memory_checks ../register_memory_coherence_probe.cpp
     ${X360_REXGLUE_DIR}/src/graphics/command_processor.cpp

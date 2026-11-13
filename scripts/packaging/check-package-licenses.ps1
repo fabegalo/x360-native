@@ -131,7 +131,10 @@ foreach($dependencyInput in $dependencyInputs) {
 }
 . (Join-Path $PSScriptRoot 'excluded-constants.ps1')
 $policy = Get-Content (Join-Path $PSScriptRoot '../../licenses/excluded-loader-constants.json') -Raw | ConvertFrom-Json
-if ($policy.schema -ne 1 -or $policy.rules.Count -lt 3) { throw 'SDK constant exclusion evidence missing' }
+if ($policy.schema -ne 1 -or
+    @('xe_xex1_retail_key','xe_xex1_devkit_key' | Where-Object { $_ -notin @($policy.rules.id) }).Count) {
+    throw 'SDK constant exclusion evidence missing'
+}
 foreach($file in Get-ChildItem -LiteralPath $package -Recurse -File -Force) {
     $rel=$file.FullName.Substring($package.Length+1).Replace('\','/')
     if($file.Attributes -band [IO.FileAttributes]::ReparsePoint) { throw 'Reparse point in package' }
