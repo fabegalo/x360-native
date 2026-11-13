@@ -241,7 +241,7 @@ TEST_CASE("x360n run --crash-stack records the stack of an unhandled exception",
   CHECK(json.find("\"access\": \"write 0x0000000000000000\"") != std::string::npos);
   std::string crash = Slurp(report.parent_path() / "crash.txt");
   INFO(crash);
-  CHECK(crash.find("x360n_test_child!main+") != std::string::npos);
+  CHECK(crash.find(fs::path(X360N_TEST_CHILD).stem().string() + "!main+") != std::string::npos);
   CHECK(crash.find("test_child.cpp:") != std::string::npos);
 
   CHECK(run({"run", X360N_TEST_CHILD, "--label", "selftest-crashstack-ok", "--crash-stack", "--", "exit", "0"}) == 0);

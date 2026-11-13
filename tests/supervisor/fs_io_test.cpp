@@ -394,6 +394,7 @@ TEST_CASE("processes start from deep Unicode folders and keep relative paths", "
   io::create_directories(deep);
   { io::ofstream(deep / "relative.txt", std::ios::binary) << "inside"; }
   { io::ofstream(deep.parent_path() / "sibling.txt", std::ios::binary) << "parent"; }
+  REQUIRE(Slurp(deep.parent_path() / "sibling.txt") == "parent");
   const auto exe = deep / fs::path(X360N_TEST_CHILD).filename();
   io::copy_file(X360N_TEST_CHILD, exe);
   REQUIRE(Length(deep) > MAX_PATH);
@@ -402,6 +403,7 @@ TEST_CASE("processes start from deep Unicode folders and keep relative paths", "
   AliasCleanup cleanup{AliasOf(spelling, deep, install)};
   CHECK(Length(spelling) <= MAX_PATH - 2);
   CHECK(io::equivalent(spelling, deep));
+  REQUIRE(Slurp(spelling.parent_path() / "sibling.txt") == "parent");
   // Short names play no part: the alias is a junction, whatever the volume keeps.
   CHECK(fs::symlink_status(io::Host(cleanup.alias)).type() == fs::file_type::junction);
   CHECK(io::equivalent(cleanup.alias, install));
@@ -426,6 +428,7 @@ TEST_CASE("processes start from deep Unicode folders and keep relative paths", "
     INFO(name);
     spec.args = {"read", name};
     result = x360n::RunProcess(spec);
+    INFO(Output(root.path / "err.log"));
     REQUIRE(result.launched);
     CHECK(result.exit_code == 0);
     CHECK(Output(root.path / "out.log") == expected);

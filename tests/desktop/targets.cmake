@@ -64,6 +64,8 @@ if(TARGET Catch2::Catch2WithMain)
   endif()
   if(WIN32)
     add_executable(x360n_launcher_test_child ../../tests/supervisor/test_child.cpp)
+    target_compile_options(x360n_launcher_test_child PRIVATE -g -gcodeview)
+    target_link_options(x360n_launcher_test_child PRIVATE "LINKER:/DEBUG")
     add_executable(x360n_launcher_session_child ../../tests/supervisor/session_child.cpp)
     target_link_libraries(x360n_launcher_session_child PRIVATE x360n_core)
     add_executable(x360n_launcher_tests ../../tests/desktop/launcher_ui_test.cpp

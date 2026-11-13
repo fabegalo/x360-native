@@ -1,6 +1,11 @@
 # Included from tests/CMakeLists.txt; paths and target outputs stay rooted there.
 # Helper child process for supervisor tests (test fixture, not a title).
 add_executable(x360n_test_child supervisor/test_child.cpp)
+if(WIN32)
+  # Crash-stack contracts require symbols even in an optimized Release fixture.
+  target_compile_options(x360n_test_child PRIVATE -g -gcodeview)
+  target_link_options(x360n_test_child PRIVATE "LINKER:/DEBUG")
+endif()
 add_executable(x360n_session_child supervisor/session_child.cpp)
 target_link_libraries(x360n_session_child PRIVATE x360n_core)
 

@@ -1888,6 +1888,7 @@
       "link_libraries": [
         "desktop-deps/fmt/fmt.lib",
         "src/content/spdlog/spdlog.lib",
+        "src/content/x360n_catalog.lib",
         "src/content/x360n-mspack.lib",
         "src/desktop/desktop-deps/sdl3/SDL3-static.lib",
         "src/desktop/x360n_desktop_app.lib",
@@ -3294,6 +3295,7 @@
       "link_libraries": [
         "desktop-deps/fmt/libfmt.a",
         "src/content/libx360n-mspack.so",
+        "src/content/libx360n_catalog.a",
         "src/content/libx360n_content_aes.a",
         "src/content/spdlog/libspdlog.a",
         "src/desktop/desktop-deps/sdl3/libSDL3.a",
@@ -4685,6 +4687,7 @@
       "link_libraries": [
         "desktop-deps/fmt/libfmt.a",
         "src/content/libx360n-mspack.dylib",
+        "src/content/libx360n_catalog.a",
         "src/content/libx360n_content_aes.a",
         "src/content/spdlog/libspdlog.a",
         "src/desktop/desktop-deps/sdl3/libSDL3.a",
@@ -6071,6 +6074,7 @@
       "link_libraries": [
         "desktop-deps/fmt/libfmt.a",
         "src/content/libx360n-mspack.so",
+        "src/content/libx360n_catalog.a",
         "src/content/libx360n_content_aes.a",
         "src/content/spdlog/libspdlog.a",
         "src/desktop/desktop-deps/sdl3/libSDL3.a",
@@ -7461,6 +7465,7 @@
       "link_libraries": [
         "desktop-deps/fmt/libfmt.a",
         "src/content/libx360n-mspack.dylib",
+        "src/content/libx360n_catalog.a",
         "src/content/libx360n_content_aes.a",
         "src/content/spdlog/libspdlog.a",
         "src/desktop/desktop-deps/sdl3/libSDL3.a",
@@ -8801,6 +8806,7 @@
       "link_libraries": [
         "desktop-deps/fmt/fmt.lib",
         "src/content/spdlog/spdlog.lib",
+        "src/content/x360n_catalog.lib",
         "src/content/x360n-mspack.lib",
         "src/desktop/desktop-deps/sdl3/SDL3-static.lib",
         "src/desktop/x360n_desktop_app.lib",
