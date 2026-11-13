@@ -18,6 +18,18 @@
   "attributions_sha256": "2f9a75cc1bc1f881dd2db55a2ee3b1c11606a14fda4f3263e9dd9d99a627ed90",
   "components": [
     {
+      "id": "fidelityfx",
+      "origin": "https://github.com/rexglue/FidelityFX-SDK.git",
+      "revision": "eee08db1688ac3d1275a70b728f4a8ba22914213",
+      "spdx": "MIT",
+      "scope": "download",
+      "integration": "Optional pinned runtime dependency fetched during native preparation; not linked into the desktop-only distribution.",
+      "obligations": "Preserve AMD copyright and MIT permission notice.",
+      "license_file": "licenses/fidelityfx.txt",
+      "license_sha256": "82cf74fc23885107c7f69249ac3f1dac55898ff68320eb2c753984cae6b2d78a",
+      "original": "https://raw.githubusercontent.com/rexglue/FidelityFX-SDK/eee08db1688ac3d1275a70b728f4a8ba22914213/LICENSE.txt"
+    },
+    {
       "id": "forza-reimagined",
       "origin": "https://github.com/Dyotson/ForzaHorizon1-ReImagined",
       "revision": "cb676f7e07149b4cc964dc53d49147dd268939b3",
