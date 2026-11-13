@@ -22,10 +22,12 @@ Steam Deck LCD/OLED uses the `linux-x64` package; see
 [steam-deck.md](steam-deck.md) for what is automated and what still needs
 real hardware.
 
-Pull requests, pushes to `main` and manual runs upload each verified archive and
-its `.sha256` as an Actions artifact for 7 days, with version
+Pull requests and pushes to `main` build `windows-x64`, `linux-x64` and
+`macos-arm64`; manual and tag runs build all six platforms above. Each non-tag
+run uploads its verified archives and `.sha256` files as Actions artifacts for 7 days, with version
 `<computed>-ci.<run number>`. They never publish. Documentation-only changes skip
-the build; the fast `PR checks` workflow (required "Contribution checks") is
+the build, as do changes limited to issue forms, CODEOWNERS or the contribution
+check script/workflow; the fast `PR checks` workflow ("Contribution checks") is
 separate. A newer commit cancels the run of an older one on the same ref.
 
 The POSIX toolchains (`scripts/packaging/posix-toolchain.lock`, and the sysroots of
@@ -34,6 +36,13 @@ against its lock receipt when restored. Tag builds bypass the cache and download
 and verify every archive. Locally, `sh scripts/packaging/prepare-posix-toolchain.sh
 <platform> <dir>` prepares the same tools (WSL default:
 `~/.cache/x360n-posix-toolchain/linux-x64`).
+
+Non-tag Windows builds cache only downloaded ZIP/XZ tool archives, keyed by
+architecture, locks and preparation scripts; preparation still checks their
+SHA-256 before extraction. Native tests reuse the same Windows archive and
+Linux toolchain cache keys. Compiled objects and installed Windows tools are
+not cached. A WARP capture/replay skip is reported in the job summary and as a
+warning; it does not establish GPU equivalence.
 
 ## Manual validation
 

@@ -9,6 +9,7 @@ on:
     paths:
       - 'src/native/**'
       - 'tests/native/**'
+      - 'tests/CMakeLists.txt'
       - 'tests/cmake/**'
       - 'scripts/performance/native_replay_ab.py'
       - 'scripts/performance/native_capture_session.py'
@@ -18,13 +19,40 @@ on:
       - 'patches/**'
       - 'deps.lock.json'
       - 'scripts/bootstrap.sh'
+      - 'scripts/prepare-tools.ps1'
+      - 'scripts/devshell.cmd'
+      - 'scripts/packaging/prepare-posix-toolchain.sh'
+      - 'scripts/packaging/posix-toolchain.lock'
+      - 'scripts/packaging/prepare-linux-sysroot.sh'
+      - 'scripts/packaging/linux-sysroot-jammy.lock'
+      - 'scripts/packaging/linux-sysroot-jammy-arm64.lock'
       - 'scripts/setup/**'
+      - 'external/rexglue-sdk'
       - '.github/workflows/native-tests.yml'
   push:
     branches: [main]
     paths:
       - 'src/native/**'
       - 'tests/native/**'
+      - 'tests/CMakeLists.txt'
+      - 'tests/cmake/**'
+      - 'scripts/performance/native_replay_ab.py'
+      - 'scripts/performance/native_capture_session.py'
+      - 'CMakeLists.txt'
+      - 'CMakePresets.json'
+      - 'cmake/**'
+      - 'patches/**'
+      - 'deps.lock.json'
+      - 'scripts/bootstrap.sh'
+      - 'scripts/prepare-tools.ps1'
+      - 'scripts/devshell.cmd'
+      - 'scripts/packaging/prepare-posix-toolchain.sh'
+      - 'scripts/packaging/posix-toolchain.lock'
+      - 'scripts/packaging/prepare-linux-sysroot.sh'
+      - 'scripts/packaging/linux-sysroot-jammy.lock'
+      - 'scripts/packaging/linux-sysroot-jammy-arm64.lock'
+      - 'scripts/setup/**'
+      - 'external/rexglue-sdk'
       - '.github/workflows/native-tests.yml'
   workflow_dispatch:
 
@@ -57,6 +85,13 @@ jobs:
           submodules: false
           persist-credentials: false
           lfs: false
+      - name: Restore locked Windows tool archives
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            .local/cache/downloads/*.zip
+            .local/cache/downloads/*.tar.xz
+          key: windows-tool-archives-${{ runner.arch }}-${{ hashFiles('deps.lock.json', 'scripts/setup/desktop-tools.lock.json', 'scripts/prepare-tools.ps1', 'scripts/setup/bootstrap-llvm.ps1', 'scripts/setup/download-tools.ps1', 'scripts/setup/host-platform.ps1') }}
       - name: Prepare pinned tools, SDK, patches and LLVM
         run: |
           $ErrorActionPreference = 'Stop'
@@ -107,7 +142,11 @@ jobs:
           $ErrorActionPreference = 'Stop'
           $replay = Split-Path (Get-ChildItem -Recurse -Filter x360n_native_replay.exe .local/build/win-amd64 | Select-Object -First 1).FullName
           $out = '.local/build/win-amd64/src/native/capture-replay-d3d12'
-          if (-not (Test-Path "$out/heavy/frames.x360nfc")) { 'No D3D12 capture (contract skipped on WARP): no A/B.'; exit 0 }
+          if (-not (Test-Path "$out/heavy/frames.x360nfc")) {
+            Write-Output '::warning::D3D12 capture/replay was skipped on WARP; GPU equivalence and A/B remain unverified.'
+            'D3D12 capture/replay was skipped on WARP. GPU equivalence and A/B remain unverified; a hardware D3D12 adapter is required.' >> $env:GITHUB_STEP_SUMMARY
+            exit 0
+          }
           python scripts/performance/native_replay_ab.py --capture "$out/heavy/frames.x360nfc" --output "$out/ab-eager-submit.json" --backend d3d12 --rounds 5 --repeat 5 --cvar d3d12_adapter=-2 --cvar native_gpu_timeout_ms=120000 --arm off $replay native_eager_submit=0 --arm idle64 $replay native_eager_submit=64 --arm queued64 $replay native_eager_submit=64 native_eager_submit_depth=1
           if ($LASTEXITCODE -ne 0) { throw 'A/B replay failed or differed from the capture' }
           python scripts/performance/native_replay_ab.py --capture "$out/heavy/frames.x360nfc" --output "$out/ab-state-filter.json" --backend d3d12 --rounds 5 --repeat 5 --cvar d3d12_adapter=-2 --cvar native_gpu_timeout_ms=120000 --arm unfiltered $replay native_redundant_state_filter=false --arm filtered $replay native_redundant_state_filter=true
@@ -145,6 +184,11 @@ jobs:
           sudo apt-get install -y --no-install-recommends mesa-vulkan-drivers libvulkan1 \
             libgtk-3-dev libx11-xcb-dev libxss-dev libwayland-dev libwayland-bin wayland-protocols \
             libxkbcommon-dev libdecor-0-dev libasound2-dev libpulse-dev libpipewire-0.3-dev
+      - name: Restore the verified POSIX toolchain
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .local/toolchains/posix-linux-x64
+          key: posix-linux-x64-${{ hashFiles('scripts/packaging/posix-toolchain.lock', 'scripts/packaging/linux-sysroot-jammy.lock', 'scripts/packaging/linux-sysroot-jammy-arm64.lock', 'scripts/packaging/prepare-posix-toolchain.sh', 'scripts/packaging/prepare-linux-sysroot.sh') }}
       - name: Prepare pinned SDK, tools and patches
         run: sh scripts/bootstrap.sh
       - name: Configure and build
