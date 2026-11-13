@@ -15,7 +15,7 @@
     "utfcpp",
     "libmspack"
   ],
-  "attributions_sha256": "8bc7e522f3ebe7b554a266dc34bbf5a2195609f851bb0de38a145dc3d1e6a627",
+  "attributions_sha256": "2f9a75cc1bc1f881dd2db55a2ee3b1c11606a14fda4f3263e9dd9d99a627ed90",
   "components": [
     {
       "id": "forza-reimagined",
@@ -1540,7 +1540,7 @@
       ]
     }
   ],
-  "header_attributions_sha256": "2665566ff7188440d4b6455e560c6d1d52e5dd703573464d8e8659746c69aa9e",
+  "header_attributions_sha256": "c102274ace3a008ab149f01d81a74e8fbd807aefa006a45e5c838cbc82e4cfa8",
   "lgpl_sources": [
     {
       "sdk_path": "thirdparty/libmspack/libmspack/mspack/lzxd.c",
@@ -1608,7 +1608,8 @@
         "src/filesystem/devices/stfs_container_file.cpp",
         "src/filesystem/entry.cpp",
         "src/system/lzx.cpp",
-        "src/core/math_msvc.cpp"
+        "src/core/math_msvc.cpp",
+        "src/system/util/xdbf_utils.cpp"
       ],
       "thirdparty_translation_units": [
         "thirdparty/imgui/backends/imgui_impl_sdl3.cpp",
@@ -2928,7 +2929,9 @@
         "thirdparty/vulkan-headers/include/vk_video/vulkan_video_codecs_common.h",
         "thirdparty/vulkan-headers/include/vulkan/vk_platform.h",
         "thirdparty/vulkan-headers/include/vulkan/vulkan.h",
-        "thirdparty/vulkan-headers/include/vulkan/vulkan_core.h"
+        "thirdparty/vulkan-headers/include/vulkan/vulkan_core.h",
+        "include/rex/system/util/xdbf_utils.h",
+        "src/system/util/xdbf_utils.cpp"
       ],
       "sdk_private_headers": [
         "src/core/platform_win.h"
@@ -2968,7 +2971,8 @@
         "src/filesystem/devices/stfs_container_entry.cpp",
         "src/filesystem/devices/stfs_container_file.cpp",
         "src/filesystem/entry.cpp",
-        "src/system/lzx.cpp"
+        "src/system/lzx.cpp",
+        "src/system/util/xdbf_utils.cpp"
       ],
       "sdk_private_headers": [],
       "runtime_components": [
@@ -4385,7 +4389,9 @@
         "thirdparty/vulkan-headers/include/vk_video/vulkan_video_codecs_common.h",
         "thirdparty/vulkan-headers/include/vulkan/vk_platform.h",
         "thirdparty/vulkan-headers/include/vulkan/vulkan.h",
-        "thirdparty/vulkan-headers/include/vulkan/vulkan_core.h"
+        "thirdparty/vulkan-headers/include/vulkan/vulkan_core.h",
+        "include/rex/system/util/xdbf_utils.h",
+        "src/system/util/xdbf_utils.cpp"
       ],
       "vendored_dependencies": {
         "aes_128": "aes_128",
@@ -4421,7 +4427,8 @@
         "src/filesystem/devices/stfs_container_entry.cpp",
         "src/filesystem/devices/stfs_container_file.cpp",
         "src/filesystem/entry.cpp",
-        "src/system/lzx.cpp"
+        "src/system/lzx.cpp",
+        "src/system/util/xdbf_utils.cpp"
       ],
       "sdk_private_headers": [],
       "runtime_components": [],
@@ -5711,7 +5718,9 @@
         "thirdparty/vulkan-headers/include/vk_video/vulkan_video_codecs_common.h",
         "thirdparty/vulkan-headers/include/vulkan/vk_platform.h",
         "thirdparty/vulkan-headers/include/vulkan/vulkan.h",
-        "thirdparty/vulkan-headers/include/vulkan/vulkan_core.h"
+        "thirdparty/vulkan-headers/include/vulkan/vulkan_core.h",
+        "include/rex/system/util/xdbf_utils.h",
+        "src/system/util/xdbf_utils.cpp"
       ],
       "vendored_dependencies": {
         "aes_128": "aes_128",
@@ -5747,7 +5756,8 @@
         "src/filesystem/devices/stfs_container_entry.cpp",
         "src/filesystem/devices/stfs_container_file.cpp",
         "src/filesystem/entry.cpp",
-        "src/system/lzx.cpp"
+        "src/system/lzx.cpp",
+        "src/system/util/xdbf_utils.cpp"
       ],
       "sdk_private_headers": [],
       "runtime_components": [
@@ -7163,7 +7173,9 @@
         "thirdparty/vulkan-headers/include/vk_video/vulkan_video_codecs_common.h",
         "thirdparty/vulkan-headers/include/vulkan/vk_platform.h",
         "thirdparty/vulkan-headers/include/vulkan/vulkan.h",
-        "thirdparty/vulkan-headers/include/vulkan/vulkan_core.h"
+        "thirdparty/vulkan-headers/include/vulkan/vulkan_core.h",
+        "include/rex/system/util/xdbf_utils.h",
+        "src/system/util/xdbf_utils.cpp"
       ],
       "vendored_dependencies": {
         "aes_128": "aes_128",
@@ -7199,7 +7211,8 @@
         "src/filesystem/devices/stfs_container_entry.cpp",
         "src/filesystem/devices/stfs_container_file.cpp",
         "src/filesystem/entry.cpp",
-        "src/system/lzx.cpp"
+        "src/system/lzx.cpp",
+        "src/system/util/xdbf_utils.cpp"
       ],
       "sdk_private_headers": [],
       "runtime_components": [],
@@ -8490,7 +8503,9 @@
         "thirdparty/vulkan-headers/include/vk_video/vulkan_video_codecs_common.h",
         "thirdparty/vulkan-headers/include/vulkan/vk_platform.h",
         "thirdparty/vulkan-headers/include/vulkan/vulkan.h",
-        "thirdparty/vulkan-headers/include/vulkan/vulkan_core.h"
+        "thirdparty/vulkan-headers/include/vulkan/vulkan_core.h",
+        "include/rex/system/util/xdbf_utils.h",
+        "src/system/util/xdbf_utils.cpp"
       ],
       "vendored_dependencies": {
         "aes_128": "aes_128",
@@ -8526,7 +8541,8 @@
         "src/filesystem/devices/stfs_container_entry.cpp",
         "src/filesystem/devices/stfs_container_file.cpp",
         "src/filesystem/entry.cpp",
-        "src/system/lzx.cpp"
+        "src/system/lzx.cpp",
+        "src/system/util/xdbf_utils.cpp"
       ],
       "thirdparty_translation_units": [
         "thirdparty/imgui/backends/imgui_impl_sdl3.cpp",
@@ -9845,7 +9861,9 @@
         "thirdparty/vulkan-headers/include/vk_video/vulkan_video_codecs_common.h",
         "thirdparty/vulkan-headers/include/vulkan/vk_platform.h",
         "thirdparty/vulkan-headers/include/vulkan/vulkan.h",
-        "thirdparty/vulkan-headers/include/vulkan/vulkan_core.h"
+        "thirdparty/vulkan-headers/include/vulkan/vulkan_core.h",
+        "include/rex/system/util/xdbf_utils.h",
+        "src/system/util/xdbf_utils.cpp"
       ],
       "sdk_private_headers": [
         "src/core/platform_win.h"

@@ -1422,3 +1422,15 @@ No file-level copyright header; covered by the pinned ReXGlue BSD-3-Clause licen
 
 --- src/core/math_gcc.cpp ---
 No file-level copyright header; covered by the pinned ReXGlue BSD-3-Clause license.
+
+--- src/system/util/xdbf_utils.cpp ---
+/**
+ ******************************************************************************
+ * Xenia : Xbox 360 Emulator Research Project                                 *
+ ******************************************************************************
+ * Copyright 2016 Ben Vanik. All rights reserved.                             *
+ * Released under the BSD license - see LICENSE in the root for more details. *
+ ******************************************************************************
+ *
+ * @modified    Tom Clay, 2026 - Adapted for ReXGlue runtime
+ */

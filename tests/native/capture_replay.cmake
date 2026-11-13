@@ -88,8 +88,8 @@ run(2 "control with a truncated file" "${REPLAY}" "${OUTPUT}/truncated.x360nfc" 
 set(heavy "${OUTPUT}/heavy")
 run(0 "workload heavy" "${PROBE}" "${heavy}/run" ${API} 6 --draws 256 --resolves 4 ${workload_flags}
     native_capture=${heavy}/frames.x360nfc native_capture_skip=3 native_capture_frames=3 ${extra})
-# Arms: off, at 1 when the queue is idle, and at 1 keeping one batch queued.
-foreach(arm "0;0" "1;0" "1;1")
+# Arms: off, idle/queued at 1, and the backend's automatic default.
+foreach(arm "0;0" "1;0" "1;1" "-1;0")
   list(GET arm 0 eager)
   list(GET arm 1 depth)
   set(name "eager-${eager}-depth-${depth}")
@@ -108,9 +108,31 @@ message("heavy replay submissions per warm frame: off ${submissions_0_0}, idle $
 if(NOT submissions_1_0 GREATER submissions_0_0 OR submissions_1_1 LESS submissions_1_0)
   message(FATAL_ERROR "early submission was not exercised (${submissions_0_0}, ${submissions_1_0}, ${submissions_1_1})")
 endif()
+set(automatic_disabled FALSE)
+if(API STREQUAL "vulkan")
+  set(automatic_disabled TRUE)
+elseif(API STREQUAL "d3d12")
+  file(READ "${OUTPUT}/none/run/runtime.log" runtime)
+  string(FIND "${runtime}" "Microsoft Basic Render Driver" microsoft_adapter)
+  if(NOT microsoft_adapter EQUAL -1)
+    set(automatic_disabled TRUE)
+  endif()
+endif()
+if(automatic_disabled AND NOT submissions_-1_0 EQUAL submissions_0_0)
+  message(FATAL_ERROR "Automatic submission must preserve the disabled Vulkan/software-adapter default")
+elseif(NOT automatic_disabled AND API STREQUAL "d3d12" AND NOT submissions_-1_0 GREATER submissions_0_0)
+  message(FATAL_ERROR "D3D12 automatic submission was not exercised")
+endif()
 # D3D12 skips redundant graphics state by default: recording every call must
 # produce the same frames (the filter only removes repeated state).
 if(API STREQUAL "d3d12")
   run(0 "replay without the state filter" "${REPLAY}" "${heavy}/frames.x360nfc" "${heavy}/no-state-filter"
       --backend ${API} --repeat 2 native_redundant_state_filter=false ${extra})
+  # Adding the -1 automatic mode preserves the old positive uint32 range.
+  run(0 "explicit uint32 maximum" "${REPLAY}" "${heavy}/frames.x360nfc" "${heavy}/uint32-max"
+      --backend ${API} --repeat 2 native_eager_submit=4294967295 ${extra})
+  run(1 "reject negative threshold" "${REPLAY}" "${capture}" "${OUTPUT}/negative-threshold"
+      --backend ${API} native_eager_submit=-2 ${extra})
+  run(1 "reject threshold overflow" "${REPLAY}" "${capture}" "${OUTPUT}/threshold-overflow"
+      --backend ${API} native_eager_submit=4294967296 ${extra})
 endif()

@@ -5,6 +5,7 @@
 #include "scratch.h"
 #include "digest_batch.h"
 #include "aot_pipeline.h"
+#include "fidelityfx_checkout.h"
 #include "host_platform.h"
 #include "sha256.h"
 #include "toml_file.h"
@@ -42,6 +43,55 @@ struct Fixture {
   auto Check() { return CheckPreparation(paths, "sample", manifest, exe); }
   ~Fixture() { std::error_code ec; fs::remove_all(root.parent_path(), ec); }
 };
+}
+TEST_CASE("FidelityFX checkout resumes failed fetch and checkout without replacing existing state", "[fidelityfx]") {
+  Fixture f;
+  const auto git = FindHostTool("git");
+  const auto origin = f.root / "origin", source = f.root / "fidelityfx";
+  fs::create_directories(origin);
+  unsigned fetches = 0;
+  std::string fail_phase;
+  auto command = [&](std::vector<std::string> args, const std::string& phase) {
+    if (phase == "fidelityfx-fetch") ++fetches;
+    if (phase == fail_phase) throw std::runtime_error("simulated interruption");
+    ProcessSpec spec;
+    spec.exe = git; spec.args = std::move(args); spec.working_dir = f.root;
+    spec.stdout_file = f.root / "git.out"; spec.stderr_file = f.root / "git.err";
+    spec.timeout = std::chrono::seconds(10); spec.no_console = true;
+    const auto result = RunProcess(spec);
+    if (!result.launched || result.timed_out || result.exit_code) {
+      std::ifstream error(spec.stderr_file, std::ios::binary);
+      throw std::runtime_error("fixture git failed: " + phase + ": " +
+          std::string(std::istreambuf_iterator<char>(error), {}));
+    }
+    std::ifstream in(spec.stdout_file, std::ios::binary);
+    return std::string(std::istreambuf_iterator<char>(in), {});
+  };
+  command({"-C", PathUtf8(origin), "init", "-q"}, "init");
+  std::ofstream(origin / "tracked.txt") << "original";
+  command({"-C", PathUtf8(origin), "add", "tracked.txt"}, "add");
+  command({"-C", PathUtf8(origin), "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
+      "-c", "commit.gpgsign=false", "commit", "-qm", "fixture"}, "commit");
+  auto commit = command({"-C", PathUtf8(origin), "rev-parse", "HEAD"}, "head");
+  commit.erase(commit.find_last_not_of("\r\n") + 1);
+  auto prepare = [&] { detail::PrepareFidelityFxCheckout(source, PathUtf8(origin), commit, command); };
+  SECTION("fetch interrupted after init") { fail_phase = "fidelityfx-fetch"; }
+  SECTION("checkout interrupted after fetch") { fail_phase = "fidelityfx-checkout"; }
+  REQUIRE_THROWS(prepare());
+  REQUIRE(fs::is_directory(source / ".git"));
+  fail_phase.clear();
+  REQUIRE_NOTHROW(prepare());
+  CHECK(fs::is_regular_file(source / "tracked.txt"));
+  const auto completed_fetches = fetches;
+  REQUIRE_NOTHROW(prepare());  // A detached clean checkout needs no download.
+  CHECK(fetches == completed_fetches);
+  std::ofstream(source / "tracked.txt") << "local edit";
+  CHECK_THROWS(prepare());
+  CHECK(fetches == completed_fetches);
+  std::ofstream(source / "tracked.txt") << "original";
+  auto wrong_commit = commit; wrong_commit[0] = commit[0] == 'a' ? 'b' : 'a';
+  CHECK_THROWS(detail::PrepareFidelityFxCheckout(source, PathUtf8(origin), wrong_commit, command));
+  CHECK(fetches == completed_fetches);
 }
 TEST_CASE("preparation binds content tools configuration and native artifacts by bytes", "[preparation]") {
   Fixture f; REQUIRE_FALSE(f.Check());

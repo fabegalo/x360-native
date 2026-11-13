@@ -99,9 +99,8 @@ void D3D12Render::ReplicateScaled(uint32_t start, uint32_t length, unsigned pixe
     cmd_.SetDescriptorHeaps(2, heaps);
     cmd_.SetComputeRootSignature(scaled_root_.Get()); cmd_.SetPipelineState(replicate_pipeline_, &replicate_pipeline_);
     cmd_.SetComputeRootDescriptorTable(1, Gpu(v)); cmd_.SetComputeRootDescriptorTable(2, Gpu(v + 1));
-    // 1 MB guest chunks keep each dispatch within the 65535 group limit.
-    for (uint32_t done = 0; done < run_length; done += 1u << 20) {
-      const uint32_t chunk = std::min(run_length - done, 1u << 20);
+    for (uint32_t done = 0; done < run_length; done += kScaledReplicateChunkBytes) {
+      const uint32_t chunk = std::min(run_length - done, kScaledReplicateChunkBytes);
       const uint32_t constants[]{chunk * area, pixel_log2, scale_x_, scale_y_, run_start + done, done * area};
       cmd_.SetComputeRoot32BitConstants(0, 6, constants, 0);
       cmd_.Dispatch((chunk * area / 4 + 63) / 64, 1, 1);

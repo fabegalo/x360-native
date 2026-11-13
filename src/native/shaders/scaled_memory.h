@@ -1,5 +1,8 @@
 #pragma once
+#include <cstdint>
 namespace x360n::native {
+// At 4x4, 512 KiB uses 32768 groups of 64 dwords (limit: 65535).
+inline constexpr uint32_t kScaledReplicateChunkBytes = 1u << 19;
 // GPU-resident scaled resolve memory (guest address * scale area, the layout
 // of ScaledResolveByteOffset).
 //

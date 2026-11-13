@@ -136,6 +136,7 @@ D3D12_GPU_DESCRIPTOR_HANDLE D3D12Render::MemoryTable(bool memexport) {
   return Gpu(base);
 }
 D3D12Render::D3D12Render(rex::ui::d3d12::D3D12Provider& provider) : provider_(provider), device_(provider.GetDevice()) {
+  REXLOG_INFO("Native D3D12 early submission: threshold={} queued_depth={}", eager_threshold_, eager_depth_);
   stats_enabled_ = REXCVAR_GET(native_stats);
   texture_cache_enabled_ = REXCVAR_GET(native_texture_cache);
   texture_cpu_ = REXCVAR_GET(native_texture_cpu);

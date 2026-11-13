@@ -1,4 +1,5 @@
 #include "aot_pipeline.h"
+#include "fidelityfx_checkout.h"
 
 #include <cstdio>
 #include <cstdlib>
@@ -781,18 +782,10 @@ void Driver::Init() {
     const auto commit = ffx.at("commit").get<std::string>();
     const auto source = options.paths.local() / PathFromUtf8(ffx.at("path").get<std::string>());
     const auto git = FindHostTool("git");
-    if (!io::exists(source / ".git")) {
-      io::create_directories(source);
-      Command(git, {"-C", Path(source), "init", "-q"}, build, "fidelityfx-init");
-      Command(git, {"-C", Path(source), "fetch", "--depth", "1", ffx.at("url").get<std::string>(), commit},
-              build, "fidelityfx-fetch");
-      Command(git, {"-C", Path(source), "checkout", "-q", "--detach", "FETCH_HEAD"}, build, "fidelityfx-checkout");
-    }
-    if (!Command(git, {"-C", Path(source), "rev-parse", "HEAD"}, build, "fidelityfx-pin").starts_with(commit))
-      throw std::runtime_error("FidelityFX SDK commit differs from deps.lock.json: " + Path(source));
-    if (!Command(git, {"-C", Path(source), "status", "--porcelain", "--untracked-files=no"}, build,
-                 "fidelityfx-clean").empty())
-      throw std::runtime_error("FidelityFX SDK checkout has local changes: " + Path(source));
+    detail::PrepareFidelityFxCheckout(source, ffx.at("url").get<std::string>(), commit,
+        [&](std::vector<std::string> args, const std::string& phase) {
+          return Command(git, std::move(args), build, phase);
+        });
     options.variables["REXGLUE_ENABLE_FIDELITYFX"] = "ON";
     options.variables["FETCHCONTENT_SOURCE_DIR_FIDELITYFX"] = Path(source);
   }

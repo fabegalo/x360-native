@@ -256,7 +256,9 @@ class D3D12Render {
   void ReplayCommands();
   // Early submission: work recorded since the last submission and the
   // threshold (draws; a resolve counts as the whole threshold).
-  const uint32_t eager_threshold_ = NativeEagerSubmitWork();
+  // Hardware default measured with scene replay; Microsoft software adapters stay off.
+  const uint32_t eager_threshold_ = NativeEagerSubmitWork(
+      provider_.GetAdapterVendorID() == rex::ui::GraphicsProvider::GpuVendorID::kMicrosoft ? 0 : 512);
   const uint32_t eager_depth_ = NativeEagerSubmitDepth();
   uint32_t recorded_work_ = 0;
   void SubmitEarly();

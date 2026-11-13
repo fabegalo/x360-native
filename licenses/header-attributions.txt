@@ -152,3 +152,15 @@ thirdparty/tomlplusplus/include/toml++/impl/version.hpp //# Copyright (c) Mark G
 thirdparty/tomlplusplus/include/toml++/impl/yaml_formatter.hpp //# Copyright (c) Mark Gillard <mark.gillard@outlook.com.au>
 thirdparty/tomlplusplus/include/toml++/impl/yaml_formatter.inl //# Copyright (c) Mark Gillard <mark.gillard@outlook.com.au>
 thirdparty/tomlplusplus/include/toml++/toml.hpp //# Copyright (c) Mark Gillard <mark.gillard@outlook.com.au>
+
+--- include/rex/system/util/xdbf_utils.h ---
+/**
+ ******************************************************************************
+ * Xenia : Xbox 360 Emulator Research Project                                 *
+ ******************************************************************************
+ * Copyright 2016 Ben Vanik. All rights reserved.                             *
+ * Released under the BSD license - see LICENSE in the root for more details. *
+ ******************************************************************************
+ *
+ * @modified    Tom Clay, 2026 - Adapted for ReXGlue runtime
+ */

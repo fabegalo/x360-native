@@ -107,9 +107,8 @@ void VulkanRender::ReplicateScaled(uint32_t start, uint32_t length, unsigned pix
     const VkDescriptorSet sets[]{StorageSet({guest_buffer_->handle(), run_start, run_length}), StorageSet(destination)};
     cmd_.BindPipeline(VK_PIPELINE_BIND_POINT_COMPUTE, replicate_pipeline_);
     cmd_.BindDescriptorSets(VK_PIPELINE_BIND_POINT_COMPUTE, downscale_layout_, 0, 2, sets, 0, nullptr);
-    // 1 MB guest chunks bound each dispatch's group count.
-    for (uint32_t done = 0; done < run_length; done += 1u << 20) {
-      const uint32_t chunk = std::min(run_length - done, 1u << 20);
+    for (uint32_t done = 0; done < run_length; done += kScaledReplicateChunkBytes) {
+      const uint32_t chunk = std::min(run_length - done, kScaledReplicateChunkBytes);
       const uint32_t constants[]{chunk * area, pixel_log2, scale_x_, scale_y_, done, done * area};
       cmd_.PushConstants(downscale_layout_, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(constants), constants);
       cmd_.Dispatch((chunk * area / 4 + 63) / 64, 1, 1);

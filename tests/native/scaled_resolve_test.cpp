@@ -1,9 +1,27 @@
 #include "../../src/native/memory/scaled_resolve.h"
 #include "../../src/native/memory/physical_write.h"
+#include "../../src/native/shaders/scaled_memory.h"
 #include <catch2/catch_test_macros.hpp>
+#include <algorithm>
 #include <vector>
 
 using namespace x360n::native;
+
+TEST_CASE("Native scaled replication dispatch stays within GPU limits", "[native-memory]") {
+  for (uint32_t sx = 1; sx <= 4; ++sx)
+    for (uint32_t sy = 1; sy <= 4; ++sy) {
+      const uint32_t area = sx * sy;
+      uint32_t covered = 0;
+      const uint32_t length = (1u << 20) + 4096;
+      while (covered < length) {
+        const auto chunk = std::min(length - covered, kScaledReplicateChunkBytes);
+        CHECK((chunk * area / 4 + 63) / 64 <= 65535);
+        CHECK(chunk % 16 == 0);  // Preserve the scaled layout's block alignment.
+        covered += chunk;
+      }
+      CHECK(covered == length);
+    }
+}
 
 TEST_CASE("Native scaled resolve mapping: the replication inverse matches the pinned layout", "[native-memory]") {
   for (auto [sx, sy] : {std::pair{2u, 2u}, std::pair{3u, 3u}, std::pair{3u, 2u}, std::pair{1u, 2u}})

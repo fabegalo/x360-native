@@ -28,6 +28,23 @@ P1/P2/P3 preservados.
 
 ## Renderizadores — PERF-GPU-01 (31/10)
 
+12/11 — Native D3D12, Windows x64/RTX 4070: gravados três frames de gameplay
+do Skate 3 0.0.0.3 em escala 1, reutilizados nos A/Bs sem reabrir o jogo.
+O modo automático (`native_eager_submit=-1`) passa a submeter após 512 unidades
+de trabalho quando a fila está ociosa; `0` desativa, e valores positivos
+continuam explícitos. Vulkan e adaptadores Microsoft mantêm o automático desligado.
+Com os contadores opcionais desligados, sete rodadas alternadas de 19 passes
+quentes deram P50/P95/P99 de 39,61/119,89/460,33 → 26,28/45,48/55,95 ms;
+razão pareada 0,7655, IC 95% [0,6536; 0,8052]. Houve variabilidade significativa:
+o A/A deu 0,9817 [0,8712; 1,0814]. Na coleta anterior com contadores, 512 deu
+0,8208 [0,7875; 0,8787], também com P95/P99 menores. Todos os replays exigiram
+imagem composta e memória equivalentes. A tentativa de empacotar constantes
+não comprovou ganho e foi retirada; a primeira coleta, concorrendo com outro
+build, não fundamenta o padrão. Captura e JSONs locais:
+`.local/evidence/native-skate-replay-20261112/`. Contratos D3D12/Vulkan incluem
+o automático e a desativação explícita. **Não é aceite de FPS ao vivo, de outras
+cenas, GPUs ou plataformas.**
+
 Análise documental em 04/11: o Native do skate3recomp é um renderer específico
 da engine, enquanto o nosso preserva a execução genérica de comandos Xenos.
 Foram mapeadas oportunidades em perfil GPU por operação, reutilização de
