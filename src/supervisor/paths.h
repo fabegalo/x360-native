@@ -94,9 +94,9 @@ std::filesystem::path ToolPath(const std::filesystem::path& path);
 // Windows: Git, CMake and Ninja resolve junctions, the installation alias
 // included, and open the build tools and the SDK by their real names, which
 // they cannot do beyond MAX_PATH (DependencyFolderDepth). Where
-// <root>\.local\toolchains or <root>\external would be too deep for that, it
-// becomes a junction to a short folder of this user, <local>\x360n\t\<id> or
-// <local>\x360n\e\<id> (no privilege, no registry, no 8.3 names), made before
+// <root>\.local\toolchains, <root>\external or <root>\.local\deps is too deep,
+// it becomes a junction to this user's <local>\x360n\{t,e,d}\<id> respectively
+// (no privilege, no registry, no 8.3 names), made before
 // preparation fills it; every path relative to the installation still
 // resolves. A folder that fits stays where it is. One made in place earlier
 // (the installation moved) is moved there on the same volume, else set aside
@@ -106,7 +106,7 @@ std::filesystem::path ToolPath(const std::filesystem::path& path);
 void PlaceDependencyFolders(const ProjectPaths& paths);
 
 // The deepest name, in characters, those tools open by its real path below
-// the installation folder `name` (".local/toolchains", "external", or a
+// the installation folder `name` (".local/toolchains", "external", ".local/deps", or a
 // developer checkout's ".git"); 0 for any other folder or host.
 size_t DependencyFolderDepth(const std::filesystem::path& name);
 

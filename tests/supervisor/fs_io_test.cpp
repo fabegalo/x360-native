@@ -494,6 +494,23 @@ TEST_CASE("titles load the session UI host of a deep installation", "[paths][fs-
   CHECK(load(spelling));
 }
 
+namespace {
+// Removes only stores made for this synthetic installation.
+struct StoreCleanup {
+  fs::path install;
+  ~StoreCleanup() {
+    std::error_code ec;
+    for (const auto* name : {L".local\\toolchains", L"external", L".local\\deps"}) {
+      const auto link = install / name;
+      if (fs::symlink_status(io::Host(link), ec).type() != fs::file_type::junction) continue;
+      const auto store = io::canonical(link, ec);
+      RemoveDirectoryW(io::Host(link).c_str());
+      if (!ec) io::remove_all(store, ec);
+    }
+  }
+};
+}  // namespace
+
 TEST_CASE("preparation tools reach long installations through their alias", "[paths][fs-io][process]") {
   Root root("fs_io_tools");
   // Lengths below are of canonical names; a temporary folder may be spelled
@@ -502,6 +519,8 @@ TEST_CASE("preparation tools reach long installations through their alias", "[pa
   // Too long for the ~180 characters the tools need below it, though itself
   // well inside MAX_PATH; cmd cannot even start a script this deep.
   const auto install = Installation(Exact(base, 120, u8"Ferramentas-ゲーム-🎮"));
+  StoreCleanup stores{install};
+  x360n::PlaceDependencyFolders(x360n::ProjectPaths{install});
   const auto script = install / "scripts" / "devshell.cmd";
   io::create_directories(script.parent_path());
   { io::ofstream(script, std::ios::binary) << "@type \"%~dp0..\\marker.txt\"\r\n"; }
@@ -537,30 +556,12 @@ TEST_CASE("preparation tools reach long installations through their alias", "[pa
   const auto outside = root.path / "outside.txt";
   CHECK(x360n::ToolPath(outside) == outside);
   const auto short_install = Installation(base / "s");
-  if (Length(short_install) + 180 < MAX_PATH)
+  if (Length(short_install) + 12 + 180 < MAX_PATH)
     CHECK(x360n::ToolPath(short_install / "scripts") == short_install / "scripts");
   else
     WARN("temporary folder too deep for a short installation");
 
 }
-
-namespace {
-// Removes the short folders PlaceDependencyFolders made for `install` (the
-// junctions go with the installation's own folder).
-struct StoreCleanup {
-  fs::path install;
-  ~StoreCleanup() {
-    std::error_code ec;
-    for (const auto* name : {L".local\\toolchains", L"external"}) {
-      const auto link = install / name;
-      if (fs::symlink_status(io::Host(link), ec).type() != fs::file_type::junction) continue;
-      const auto store = io::canonical(link, ec);
-      RemoveDirectoryW(io::Host(link).c_str());
-      if (!ec) io::remove_all(store, ec);
-    }
-  }
-};
-}  // namespace
 
 // Git and CMake resolve every junction, the alias included, so no spelling
 // helps them below a deep installation; its tools and SDK live in short real
@@ -578,8 +579,11 @@ TEST_CASE("preparation keeps the tools and the SDK of deep installations in shor
   const auto sdk = install / "external" / "rexglue-sdk";
   io::create_directories(sdk / ".git");
   { io::ofstream(sdk / ".git" / "HEAD", std::ios::binary) << "pinned"; }
+  const auto ffx = install / ".local/deps/fidelityfx-sdk/sdk/include/FidelityFX/gpu/fsr2";
+  io::create_directories(ffx);
+  { io::ofstream(ffx / "shader.h", std::ios::binary) << "shader"; }
   x360n::PlaceDependencyFolders(x360n::ProjectPaths{install});
-  for (const auto* name : {".local/toolchains", "external"}) {
+  for (const auto* name : {".local/toolchains", "external", ".local/deps"}) {
     INFO(name);
     const auto link = install / fs::path(name);
     CHECK(fs::symlink_status(io::Host(link)).type() == fs::file_type::junction);
@@ -591,6 +595,7 @@ TEST_CASE("preparation keeps the tools and the SDK of deep installations in shor
   }
   // Moved on this volume, nothing copied or left behind.
   CHECK(Slurp(sdk / ".git" / "HEAD") == "pinned");
+  CHECK(Slurp(ffx / "shader.h") == "shader");
   bool set_aside = false;
   for (const auto& entry : io::directory_iterator(install))
     set_aside = set_aside || entry.path().filename().native().find(L".previous-") != std::wstring::npos;
@@ -603,6 +608,7 @@ TEST_CASE("preparation keeps the tools and the SDK of deep installations in shor
   x360n::PlaceDependencyFolders(x360n::ProjectPaths{install});
   CHECK(io::canonical(install / ".local" / "toolchains") == store);
   CHECK(Slurp(store / "cmake-3.31.6" / "bin" / "cmake.txt") == "tool");
+  CHECK(Slurp(ffx / "shader.h") == "shader");
   const auto tool = x360n::ToolPath(cmake / "cmake.txt");
   CHECK(Length(tool) < MAX_PATH);
   CHECK(io::equivalent(tool, cmake / "cmake.txt"));
@@ -620,6 +626,7 @@ TEST_CASE("preparation keeps the tools and the SDK of deep installations in shor
 
   // Folders that already fit stay where they are.
   const auto short_install = Installation(base / "s");
+  StoreCleanup short_cleanup{short_install};
   if (Length(short_install) + 18 + x360n::DependencyFolderDepth(".local/toolchains") < MAX_PATH) {
     x360n::PlaceDependencyFolders(x360n::ProjectPaths{short_install});
     CHECK_FALSE(io::exists(short_install / ".local" / "toolchains"));
@@ -752,7 +759,7 @@ TEST_CASE("processes start from UNC folders and deep UNC folders are refused by 
   CHECK(result.launch_error.find("network share") != std::string::npos);
   // Nor can preparation tools reach a long installation there.
   const auto long_install = Installation(Exact(unc / "tools", 120, "x360-native"));
-  CHECK_THROWS_WITH(x360n::ToolPath(long_install / "scripts"), Catch::Matchers::ContainsSubstring("network share"));
+  CHECK_THROWS_WITH(x360n::ToolPath(long_install / "scripts"), Catch::Matchers::ContainsSubstring("Prepare from the application"));
   // Nor keep a deep one's tools in a local folder: its junctions would be
   // resolved by the server.
   const auto deep_install = Installation(Exact(unc / "store", 220, "x360-native"));

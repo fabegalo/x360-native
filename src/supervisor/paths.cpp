@@ -339,7 +339,9 @@ struct DependencyFolder {
   const wchar_t* store;  // <local>\x360n\<store>\<id> when it must move
 };
 constexpr DependencyFolder kDependencyFolders[] = {
-    {L".local\\toolchains", 101, L"t"}, {L"external", 84, L"e"}, {L".git", 96, nullptr}};
+    {L".local\\toolchains", 101, L"t"}, {L"external", 84, L"e"},
+    // FidelityFX's shader include handler also probes relative paths below its source.
+    {L".local\\deps", 180, L"d"}, {L".git", 96, nullptr}};
 
 // Ninja counts UTF-8 bytes; Win32 opens fewer than MAX_PATH UTF-16 units.
 bool Fits(const fs::path& folder, size_t depth) {
