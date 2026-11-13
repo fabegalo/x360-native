@@ -147,6 +147,24 @@ reais do Ninja. Configuração, codegen e compilação têm decisões separadas;
 inválido exige rebuild seguro. Metodologia, contagens, tempos e limites:
 [builds incrementais de 18/10/2026](reports/incremental-builds-2026-10-18.md).
 
+13/11 — Na 17559 Windows x64, `Products` passou a reutilizar nomes somente
+enquanto o `DigestBatch` existente protege os arquivos e seus ancestrais. O
+escopo termina antes de invalidar/recompilar; caminhos por junction continuam
+resolvidos a cada uso. Sobre `7361a8a` com a remoção local da resolução duplicada
+já aplicada, duas medições por variante no mesmo build real, sem builds
+simultâneos, deram média de 43,1 → 27,8 s (−35,4%). Os 357 produtos mantiveram
+caminhos, hashes e assinaturas idênticos, comparados por caminho: a ordem dos
+nós do Ninja varia. Esse ganho é da etapa isolada de fingerprints.
+
+Preparação oficial completa da 17559 em 13/11, com o mesmo supervisor otimizado:
+788,451 s (**13min08,45s**), 8,45 s acima da meta de 13 minutos. A execução
+Windows x64 Release fez uma nova geração do SDK (830 compilações nativas),
+`safe-rebuild`, codegen e 344 compilações do título; concluiu com recibo e os
+16 artefatos publicados conferidos. Ferramentas/originais já estavam presentes;
+não inclui download, importação ou execução da dashboard. Medição única, sem
+workers externos nas amostras; três processos antigos do CMake permaneceram
+ociosos. Resumo local em `.local/evidence/performance/dashboard-full-20261113/`.
+
 ## Instrumentação
 
 O patch 0070 reutiliza `rex::perf` e seu CSV. `perf_log_csv` passa a ser conectado

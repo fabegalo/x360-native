@@ -13,6 +13,7 @@
 #include "toml_file.h"
 
 #include "child_process.h"
+#include "digest_batch.h"
 #include "host_platform.h"
 #include "preparation.h"
 #include "sha256.h"
@@ -51,9 +52,10 @@ std::string Digest(const fs::path& file) {
                              Path(file));
   return value->sha256;
 }
-void Record(Files& files, const fs::path& path) {
+std::string Record(Files& files, const fs::path& path) {
   const auto absolute = Path(CanonicalPath(path));
   if (!files.contains(absolute)) files[absolute] = Digest(path);
+  return absolute;
 }
 bool Verify(const Files& files) {
   for (const auto& [path, hash] : files) {
@@ -461,6 +463,9 @@ class Driver {
     }
     J products = J::array();
     Files snapshot;
+    std::map<fs::path, std::string> protected_names;
+    // No build runs in this scope; protected paths expire before invalidation.
+    DigestBatch verification(options.cancelled);
     for (const auto& [id, file] : graph.nodes) {
       if (!NativeProduct(file) || !command_by_path.contains(Path(file)) ||
           !io::is_regular_file(file))
@@ -490,8 +495,12 @@ class Driver {
           entries[Path(input)] = "missing";
           continue;
         }
-        Record(snapshot, input);
-        const auto key = Path(CanonicalPath(input));
+        const auto found = protected_names.find(input);
+        const auto key = found != protected_names.end()
+                             ? found->second
+                             : Record(snapshot, input);
+        if (found == protected_names.end() && HasProtectedVerificationPath(input))
+          protected_names.emplace(input, key);
         entries[key] = snapshot.at(key);
       }
       products.push_back({{"path", Path(file)},
