@@ -1,0 +1,1073 @@
+diff --git a/include/rex/graphics/d3d12/command_processor.h b/include/rex/graphics/d3d12/command_processor.h
+--- a/include/rex/graphics/d3d12/command_processor.h
++++ b/include/rex/graphics/d3d12/command_processor.h
+@@ -378,11 +378,11 @@
+                                 const draw_util::Scissor& scissor, bool primitive_polygonal,
+                                 reg::RB_DEPTHCONTROL normalized_depth_control);
+   void UpdateSystemConstantValues(
+-      bool shared_memory_is_uav, bool primitive_polygonal,
+-      uint32_t line_loop_closing_index, xenos::Endian index_endian,
+-      const draw_util::ViewportInfo &viewport_info, uint32_t used_texture_mask,
+-      reg::RB_DEPTHCONTROL normalized_depth_control,
+-      uint32_t normalized_color_mask, int32_t window_offset_tiles);
++      bool shared_memory_is_uav, bool primitive_polygonal, uint32_t line_loop_closing_index,
++      xenos::Endian index_endian, const draw_util::ViewportInfo& viewport_info,
++      uint32_t used_texture_mask, reg::RB_DEPTHCONTROL normalized_depth_control,
++      uint32_t normalized_color_mask, int32_t window_offset_tiles,
++      const draw_util::HostDepthPolygonOffset* host_depth_polygon_offset);
+   bool UpdateBindings(const D3D12Shader* vertex_shader, const D3D12Shader* pixel_shader,
+                       ID3D12RootSignature* root_signature, bool shared_memory_is_uav);
+   bool IssueCopy_ReadbackResolvePath();
+diff --git a/include/rex/graphics/d3d12/pipeline_cache.h b/include/rex/graphics/d3d12/pipeline_cache.h
+--- a/include/rex/graphics/d3d12/pipeline_cache.h
++++ b/include/rex/graphics/d3d12/pipeline_cache.h
+@@ -79,7 +79,7 @@
+       uint32_t interpolator_mask) const;
+   DxbcShaderTranslator::Modification GetCurrentPixelShaderModification(
+       const Shader& shader, uint32_t interpolator_mask, uint32_t param_gen_pos,
+-      reg::RB_DEPTHCONTROL normalized_depth_control) const;
++      reg::RB_DEPTHCONTROL normalized_depth_control, bool depth_bias_in_pixel_shader) const;
+ 
+   // If draw_util::IsRasterizationPotentiallyDone is false, the pixel shader
+   // MUST be made nullptr BEFORE calling this!
+diff --git a/include/rex/graphics/pipeline/shader/dxbc_translator.h b/include/rex/graphics/pipeline/shader/dxbc_translator.h
+--- a/include/rex/graphics/pipeline/shader/dxbc_translator.h
++++ b/include/rex/graphics/pipeline/shader/dxbc_translator.h
+@@ -108,8 +108,7 @@
+     // If anything in this is structure is changed in a way not compatible with
+     // the previous layout, invalidate the pipeline storages by increasing this
+     // version number (0xYYYYMMDD)!
+-    static constexpr uint32_t kVersion = 0x20261122;
+-
++    static constexpr uint32_t kVersion = 0x20261123;
+ 
+     // Opt-in for backends that make every possible destination resident and
+     // synchronize writes when eA is computed rather than a known stream MAD.
+@@ -157,6 +156,13 @@
+       // however, always using SV_Depth rather than SV_DepthLessEqual because
+       // rounding up results in a bigger value. Same viewport usage rules apply.
+       kFloat24Rounding,
++      // Host RT shader polygon offset for suspected coplanar redraws with tiny
++      // biases. Writes the biased depth from the pixel shader and zeroes fixed
++      // function depth bias to avoid host slope/quantization quirks. This path
++      // is controlled by depth_bias_shader_offset.
++      kPolygonOffset,
++      kFloat24TruncatingPolygonOffset,
++      kFloat24RoundingPolygonOffset,
+     };
+ 
+     ShaderModificationKey value;
+@@ -752,6 +758,12 @@
+       // With ROV, need to store it to write later.
+       return true;
+     }
++    if (DSV_IsApplyingPolygonOffset()) {
++      // Shader polygon offset for needs raster depth derivatives, so we have to
++      // stash the system-temp depth/stencil before guest control flow starts
++      // branching or killing fragments.
++      return true;
++    }
+     return false;
+   }
+   // Whether the current non-ROV pixel shader should convert the depth to 20e4.
+@@ -762,7 +774,19 @@
+     Modification::DepthStencilMode depth_stencil_mode =
+         GetDxbcShaderModification().pixel.depth_stencil_mode;
+     return depth_stencil_mode == Modification::DepthStencilMode::kFloat24Truncating ||
+-           depth_stencil_mode == Modification::DepthStencilMode::kFloat24Rounding;
++           depth_stencil_mode == Modification::DepthStencilMode::kFloat24TruncatingPolygonOffset ||
++           depth_stencil_mode == Modification::DepthStencilMode::kFloat24Rounding ||
++           depth_stencil_mode == Modification::DepthStencilMode::kFloat24RoundingPolygonOffset;
++  }
++  bool DSV_IsApplyingPolygonOffset() const {
++    if (edram_rov_used_) {
++      return false;
++    }
++    Modification::DepthStencilMode depth_stencil_mode =
++        GetDxbcShaderModification().pixel.depth_stencil_mode;
++    return depth_stencil_mode == Modification::DepthStencilMode::kPolygonOffset ||
++           depth_stencil_mode == Modification::DepthStencilMode::kFloat24TruncatingPolygonOffset ||
++           depth_stencil_mode == Modification::DepthStencilMode::kFloat24RoundingPolygonOffset;
+   }
+   // Whether it's possible and worth skipping running the translated shader for
+   // 2x2 quads.
+diff --git a/include/rex/graphics/pipeline/shader/spirv_translator.h b/include/rex/graphics/pipeline/shader/spirv_translator.h
+--- a/include/rex/graphics/pipeline/shader/spirv_translator.h
++++ b/include/rex/graphics/pipeline/shader/spirv_translator.h
+@@ -34,8 +34,7 @@
+     // prototyping stage (easier to do small granular updates with an
+     // incremental counter).
+     // Also invalidate stored translations when emitted control-flow changes.
+-    static constexpr uint32_t kVersion = 0x20261122;
+-
++    static constexpr uint32_t kVersion = 0x20261123;
+ 
+     // Opt-in for backends that make every possible destination resident and
+     // synchronize writes when eA is computed rather than a known stream MAD.
+@@ -58,10 +57,24 @@
+       // Early fragment tests - enable if alpha test and alpha to coverage are
+       // disabled; ignored if anything in the shader blocks early Z writing.
+       kEarlyHint,
+-      // Similar to DXBC float24 conversion modes, remapping the guest [0, 1]
+-      // range to the host [0, 0.5] range.
++      // Converting the depth to the closest 32-bit float representable exactly
++      // as a 20e4 float, truncating towards zero, so SV_DepthLessEqual-style
++      // conservative depth output (ExecutionModeDepthLess) can still allow
++      // coarse early Z culling. MSAA depth must be per-sample, so the shader
++      // runs at sample frequency.
++      // Fixed-function viewport depth bounds must be snapped to float24 too.
+       kFloat24Truncating,
++      // Similar to kFloat24Truncating, but rounding to the nearest even, so
++      // plain ExecutionModeDepthReplacing is used rather than DepthLess.
+       kFloat24Rounding,
++      // Host RT shader polygon offset for suspected coplanar redraws with tiny
++      // biases. Writes the biased depth from the pixel shader and zeroes fixed
++      // function depth bias to avoid host slope/quantization quirks. This path
++      // is controlled by depth_bias_shader_offset.
++      kPolygonOffset,
++      kFloat24TruncatingPolygonOffset,
++      kFloat24RoundingPolygonOffset,
++      // TODO(Triang3l): Unorm24 (rounding) output mode.
+     };
+ 
+     struct {
+@@ -599,14 +612,25 @@
+            current_shader().implicit_early_z_write_allowed();
+   }
+   bool IsWritingFloat24Depth() const {
+-    assert_true(is_pixel_shader());
+     if (edram_fragment_shader_interlock_) {
+       return false;
+     }
+     Modification::DepthStencilMode depth_stencil_mode =
+         GetSpirvShaderModification().pixel.depth_stencil_mode;
+     return depth_stencil_mode == Modification::DepthStencilMode::kFloat24Truncating ||
+-           depth_stencil_mode == Modification::DepthStencilMode::kFloat24Rounding;
++           depth_stencil_mode == Modification::DepthStencilMode::kFloat24TruncatingPolygonOffset ||
++           depth_stencil_mode == Modification::DepthStencilMode::kFloat24Rounding ||
++           depth_stencil_mode == Modification::DepthStencilMode::kFloat24RoundingPolygonOffset;
++  }
++  bool DSV_IsApplyingPolygonOffset() const {
++    if (edram_fragment_shader_interlock_) {
++      return false;
++    }
++    Modification::DepthStencilMode depth_stencil_mode =
++        GetSpirvShaderModification().pixel.depth_stencil_mode;
++    return depth_stencil_mode == Modification::DepthStencilMode::kPolygonOffset ||
++           depth_stencil_mode == Modification::DepthStencilMode::kFloat24TruncatingPolygonOffset ||
++           depth_stencil_mode == Modification::DepthStencilMode::kFloat24RoundingPolygonOffset;
+   }
+   bool IsSampleRate() const {
+     assert_true(is_pixel_shader());
+@@ -635,6 +659,7 @@
+   void StartFragmentShaderBeforeMain();
+   void StartFragmentShaderInMain();
+   void CompleteFragmentShaderInMain();
++  void CompleteFragmentShader_DSV_DepthTo24Bit();
+ 
+   // Updates the current flow control condition (to be called in the beginning
+   // of exec and in jumps), closing the previous conditionals if needed.
+@@ -1017,6 +1042,8 @@
+   std::array<spv::Id, xenos::kMaxColorRenderTargets> output_or_var_fragment_data_;
+   // For host render targets and only when needed - float.
+   spv::Id output_fragment_depth_;
++  spv::Id main_fbo_depth_unbiased_;
++  std::array<spv::Id, 2> main_fbo_depth_derivatives_;
+   // For host render targets and only when needed - int[1].
+   spv::Id output_fragment_sample_mask_;
+ 
+diff --git a/include/rex/graphics/util/draw.h b/include/rex/graphics/util/draw.h
+--- a/include/rex/graphics/util/draw.h
++++ b/include/rex/graphics/util/draw.h
+@@ -676,3 +676,16 @@
+                            bool fixed16_as_full_range_snorm);
+ 
+ }  // namespace rex::graphics::draw_util
++
++namespace rex::graphics::draw_util {
++struct HostDepthPolygonOffset {
++  float front_scale = 0.0f;
++  float front_offset = 0.0f;
++  float back_scale = 0.0f;
++  float back_offset = 0.0f;
++};
++bool GetHostDepthPolygonOffsetIfNeeded(const RegisterFile& regs, bool primitive_polygonal,
++                                       reg::RB_DEPTHCONTROL normalized_depth_control,
++                                       uint32_t normalized_color_mask,
++                                       HostDepthPolygonOffset& polygon_offset_out);
++}  // namespace rex::graphics::draw_util
+diff --git a/include/rex/graphics/vulkan/command_processor.h b/include/rex/graphics/vulkan/command_processor.h
+--- a/include/rex/graphics/vulkan/command_processor.h
++++ b/include/rex/graphics/vulkan/command_processor.h
+@@ -582,17 +582,17 @@
+   bool EnsureSwapFxaaSourceImage(uint32_t width, uint32_t height);
+   void DestroySwapFxaaSourceImage();
+ 
+-  void UpdateDynamicState(const draw_util::ViewportInfo &viewport_info,
+-                          bool primitive_polygonal,
++  void UpdateDynamicState(const draw_util::ViewportInfo& viewport_info, bool primitive_polygonal,
+                           reg::RB_DEPTHCONTROL normalized_depth_control,
+-                          bool window_offset_in_edram);
++                          bool window_offset_in_edram, bool depth_bias_in_pixel_shader);
+   void UpdateSystemConstantValues(
+       bool primitive_polygonal,
+-      const PrimitiveProcessor::ProcessingResult &primitive_processing_result,
++      const PrimitiveProcessor::ProcessingResult& primitive_processing_result,
+       bool shader_32bit_index_dma, uint32_t compute_memexport_vertex_count,
+-      const draw_util::ViewportInfo &viewport_info, uint32_t used_texture_mask,
+-      reg::RB_DEPTHCONTROL normalized_depth_control,
+-      uint32_t normalized_color_mask, int32_t window_offset_tiles);
++      const draw_util::ViewportInfo& viewport_info, uint32_t used_texture_mask,
++      reg::RB_DEPTHCONTROL normalized_depth_control, uint32_t normalized_color_mask,
++      int32_t window_offset_tiles,
++      const draw_util::HostDepthPolygonOffset* host_depth_polygon_offset);
+   bool UpdateBindings(const VulkanShader* vertex_shader, const VulkanShader* pixel_shader);
+   // Allocates a descriptor set and fills one or two VkWriteDescriptorSet
+   // structure instances (for images and samplers).
+diff --git a/include/rex/graphics/vulkan/pipeline_cache.h b/include/rex/graphics/vulkan/pipeline_cache.h
+--- a/include/rex/graphics/vulkan/pipeline_cache.h
++++ b/include/rex/graphics/vulkan/pipeline_cache.h
+@@ -85,7 +85,7 @@
+       uint32_t interpolator_mask, bool ps_param_gen_used) const;
+   SpirvShaderTranslator::Modification GetCurrentPixelShaderModification(
+       const Shader& shader, uint32_t interpolator_mask, uint32_t param_gen_pos,
+-      reg::RB_DEPTHCONTROL normalized_depth_control) const;
++      reg::RB_DEPTHCONTROL normalized_depth_control, bool depth_bias_in_pixel_shader) const;
+ 
+   bool EnsureShadersTranslated(VulkanShader::VulkanTranslation* vertex_shader,
+                                VulkanShader::VulkanTranslation* pixel_shader);
+diff --git a/src/graphics/d3d12/command_processor.cpp b/src/graphics/d3d12/command_processor.cpp
+--- a/src/graphics/d3d12/command_processor.cpp
++++ b/src/graphics/d3d12/command_processor.cpp
+@@ -2456,6 +2456,16 @@
+   }
+ 
+   reg::RB_DEPTHCONTROL normalized_depth_control = draw_util::GetNormalizedDepthControl(regs);
++  uint32_t normalized_color_mask =
++      pixel_shader ? draw_util::GetNormalizedColorMask(regs, pixel_shader->writes_color_targets())
++                   : 0;
++  draw_util::HostDepthPolygonOffset host_depth_polygon_offset;
++  const bool depth_bias_in_pixel_shader =
++      render_target_cache_->GetPath() == RenderTargetCache::Path::kHostRenderTargets &&
++      pixel_shader && !pixel_shader->writes_depth() &&
++      draw_util::GetHostDepthPolygonOffsetIfNeeded(regs, primitive_polygonal,
++                                                   normalized_depth_control, normalized_color_mask,
++                                                   host_depth_polygon_offset);
+ 
+   // Shader modifications.
+   uint32_t ps_param_gen_pos = UINT32_MAX;
+@@ -2469,10 +2479,10 @@
+       pipeline_cache_->GetCurrentVertexShaderModification(
+           *vertex_shader, primitive_processing_result.host_vertex_shader_type, interpolator_mask);
+   DxbcShaderTranslator::Modification pixel_shader_modification =
+-      pixel_shader
+-          ? pipeline_cache_->GetCurrentPixelShaderModification(
+-                *pixel_shader, interpolator_mask, ps_param_gen_pos, normalized_depth_control)
+-          : DxbcShaderTranslator::Modification(0);
++      pixel_shader ? pipeline_cache_->GetCurrentPixelShaderModification(
++                         *pixel_shader, interpolator_mask, ps_param_gen_pos,
++                         normalized_depth_control, depth_bias_in_pixel_shader)
++                   : DxbcShaderTranslator::Modification(0);
+ 
+   const bool zpd_hybrid = zpd_hybrid_supported_ && active_segment_.report_measuring() &&
+       !viz_survey && !normalized_depth_control.z_write_enable &&
+@@ -2501,9 +2511,6 @@
+   }
+ 
+   // Set up the render targets - this may perform dispatches and draws.
+-  uint32_t normalized_color_mask =
+-      pixel_shader ? draw_util::GetNormalizedColorMask(regs, pixel_shader->writes_color_targets())
+-                   : 0;
+ 
+   // Put the window offset into the EDRAM bases when possible.
+   int32_t window_offset_tiles = render_target_cache_->GetWindowOffsetTiles(
+@@ -2640,11 +2647,10 @@
+   // Update system constants before uploading them.
+   // TODO(Triang3l): With ROV, pass the disabled render target mask for safety.
+   UpdateSystemConstantValues(
+-      memexport_used, primitive_polygonal,
+-      primitive_processing_result.line_loop_closing_index,
+-      primitive_processing_result.host_shader_index_endian, viewport_info,
+-      used_texture_mask, normalized_depth_control, normalized_color_mask,
+-      window_offset_tiles);
++      memexport_used, primitive_polygonal, primitive_processing_result.line_loop_closing_index,
++      primitive_processing_result.host_shader_index_endian, viewport_info, used_texture_mask,
++      normalized_depth_control, normalized_color_mask, window_offset_tiles,
++      depth_bias_in_pixel_shader ? &host_depth_polygon_offset : nullptr);
+ 
+   // Update constant buffers, descriptors and root parameters.
+   if (!UpdateBindings(vertex_shader, pixel_shader, root_signature, memexport_used)) {
+@@ -3798,11 +3804,11 @@
+ }
+ 
+ void D3D12CommandProcessor::UpdateSystemConstantValues(
+-    bool shared_memory_is_uav, bool primitive_polygonal,
+-    uint32_t line_loop_closing_index, xenos::Endian index_endian,
+-    const draw_util::ViewportInfo &viewport_info, uint32_t used_texture_mask,
+-    reg::RB_DEPTHCONTROL normalized_depth_control,
+-    uint32_t normalized_color_mask, int32_t window_offset_tiles) {
++    bool shared_memory_is_uav, bool primitive_polygonal, uint32_t line_loop_closing_index,
++    xenos::Endian index_endian, const draw_util::ViewportInfo& viewport_info,
++    uint32_t used_texture_mask, reg::RB_DEPTHCONTROL normalized_depth_control,
++    uint32_t normalized_color_mask, int32_t window_offset_tiles,
++    const draw_util::HostDepthPolygonOffset* host_depth_polygon_offset) {
+ #if XE_GPU_FINE_GRAINED_DRAW_SCOPES
+   SCOPE_profile_cpu_f("gpu");
+ #endif  // XE_GPU_FINE_GRAINED_DRAW_SCOPES
+@@ -4152,6 +4158,23 @@
+         system_constants_.edram_rt_blend_factors_ops[i] = blend_factors_ops;
+       }
+     }
++  }
++
++  if (!edram_rov_used && host_depth_polygon_offset) {
++    const float front_scale = host_depth_polygon_offset->front_scale *
++                              std::max(draw_resolution_scale_x, draw_resolution_scale_y);
++    dirty |= system_constants_.edram_poly_offset_front_scale != front_scale;
++    system_constants_.edram_poly_offset_front_scale = front_scale;
++    const float front_offset = host_depth_polygon_offset->front_offset;
++    dirty |= system_constants_.edram_poly_offset_front_offset != front_offset;
++    system_constants_.edram_poly_offset_front_offset = front_offset;
++    const float back_scale = host_depth_polygon_offset->back_scale *
++                             std::max(draw_resolution_scale_x, draw_resolution_scale_y);
++    dirty |= system_constants_.edram_poly_offset_back_scale != back_scale;
++    system_constants_.edram_poly_offset_back_scale = back_scale;
++    const float back_offset = host_depth_polygon_offset->back_offset;
++    dirty |= system_constants_.edram_poly_offset_back_offset != back_offset;
++    system_constants_.edram_poly_offset_back_offset = back_offset;
+   }
+ 
+   if (edram_rov_used) {
+diff --git a/src/graphics/d3d12/pipeline_cache.cpp b/src/graphics/d3d12/pipeline_cache.cpp
+--- a/src/graphics/d3d12/pipeline_cache.cpp
++++ b/src/graphics/d3d12/pipeline_cache.cpp
+@@ -867,7 +867,7 @@
+ 
+ DxbcShaderTranslator::Modification PipelineCache::GetCurrentPixelShaderModification(
+     const Shader& shader, uint32_t interpolator_mask, uint32_t param_gen_pos,
+-    reg::RB_DEPTHCONTROL normalized_depth_control) const {
++    reg::RB_DEPTHCONTROL normalized_depth_control, bool depth_bias_in_pixel_shader) const {
+   assert_true(shader.type() == xenos::ShaderType::kPixel);
+   assert_true(shader.is_ucode_analyzed());
+   const auto& regs = register_file_;
+@@ -899,9 +899,14 @@
+     if (render_target_cache_.depth_float24_convert_in_pixel_shader() &&
+         normalized_depth_control.z_enable &&
+         regs.Get<reg::RB_DEPTH_INFO>().depth_format == xenos::DepthRenderTargetFormat::kD24FS8) {
+-      modification.pixel.depth_stencil_mode = render_target_cache_.depth_float24_round()
+-                                                  ? DepthStencilMode::kFloat24Rounding
+-                                                  : DepthStencilMode::kFloat24Truncating;
++      modification.pixel.depth_stencil_mode =
++          render_target_cache_.depth_float24_round()
++              ? (depth_bias_in_pixel_shader ? DepthStencilMode::kFloat24RoundingPolygonOffset
++                                            : DepthStencilMode::kFloat24Rounding)
++              : (depth_bias_in_pixel_shader ? DepthStencilMode::kFloat24TruncatingPolygonOffset
++                                            : DepthStencilMode::kFloat24Truncating);
++    } else if (depth_bias_in_pixel_shader) {
++      modification.pixel.depth_stencil_mode = DepthStencilMode::kPolygonOffset;
+     } else {
+       if (shader.implicit_early_z_write_allowed() &&
+           (!shader.writes_color_target(0) ||
+@@ -1467,7 +1472,11 @@
+     cull_front = false;
+     cull_back = false;
+   }
+-  if (!edram_rov_used) {
++  if (!edram_rov_used &&
++      !(pixel_shader &&
++        uint32_t(DxbcShaderTranslator::Modification(pixel_shader->modification())
++                     .pixel.depth_stencil_mode) >=
++            uint32_t(DxbcShaderTranslator::Modification::DepthStencilMode::kPolygonOffset))) {
+     float polygon_offset, polygon_offset_scale;
+     draw_util::GetPreferredFacePolygonOffset(regs, primitive_polygonal, polygon_offset_scale,
+                                              polygon_offset);
+diff --git a/src/graphics/pipeline/shader/dxbc_translator.cpp b/src/graphics/pipeline/shader/dxbc_translator.cpp
+--- a/src/graphics/pipeline/shader/dxbc_translator.cpp
++++ b/src/graphics/pipeline/shader/dxbc_translator.cpp
+@@ -627,6 +627,14 @@
+         a_.OpDerivRTYCoarse(dxbc::Dest::R(system_temp_depth_stencil_, 0b0010), in_position_z);
+       }
+     }
++  } else if (DSV_IsApplyingPolygonOffset() && !current_shader().writes_depth()) {
++    // The decal path uses the original triangle depth slope. Take it before
++    // guest control flow or kill changes which pixels are still active.
++    assert_true(system_temp_depth_stencil_ != UINT32_MAX);
++    dxbc::Src in_position_z(dxbc::Src::V1D(in_reg_ps_position_, dxbc::Src::kZZZZ));
++    in_position_used_ |= 0b0100;
++    a_.OpDerivRTXCoarse(dxbc::Dest::R(system_temp_depth_stencil_, 0b0001), in_position_z);
++    a_.OpDerivRTYCoarse(dxbc::Dest::R(system_temp_depth_stencil_, 0b0010), in_position_z);
+   }
+ 
+   // If not translating anything, we only need the depth.
+@@ -865,6 +873,8 @@
+         // X holds the guest oDepth - make sure it's always initialized because
+         // assumptions can't be made about the integrity of the guest code.
+         depth_stencil_temp_zero_mask = 0b0001;
++      } else if (DSV_IsApplyingPolygonOffset()) {
++        depth_stencil_temp_zero_mask = 0b0000;
+       } else {
+         assert_true(edram_rov_used_);
+         if (ROV_IsDepthStencilEarly()) {
+@@ -3072,7 +3082,8 @@
+ 
+       // Depth (SV_Depth or SV_DepthLessEqual).
+       size_t depth_position = SIZE_MAX;
+-      if (!edram_rov_used_ && (current_shader().writes_depth() || DSV_IsWritingFloat24Depth())) {
++      if (!edram_rov_used_ && (current_shader().writes_depth() || DSV_IsWritingFloat24Depth() ||
++                               DSV_IsApplyingPolygonOffset())) {
+         depth_position = shader_object_.size();
+         shader_object_.resize(shader_object_.size() + kParameterDwords);
+         ++parameter_count;
+@@ -3453,7 +3464,8 @@
+         ao_.OpDclOutput(dxbc::Dest::OMask());
+       }
+       // Depth output.
+-      if (!edram_rov_used_ && (is_writing_float24_depth || shader_writes_depth)) {
++      if (!edram_rov_used_ &&
++          (is_writing_float24_depth || DSV_IsApplyingPolygonOffset() || shader_writes_depth)) {
+         if (!shader_writes_depth && GetDxbcShaderModification().pixel.depth_stencil_mode ==
+                                         Modification::DepthStencilMode::kFloat24Truncating) {
+           ao_.OpDclOutput(dxbc::Dest::ODepthLE());
+diff --git a/src/graphics/pipeline/shader/dxbc_translator_om.cpp b/src/graphics/pipeline/shader/dxbc_translator_om.cpp
+--- a/src/graphics/pipeline/shader/dxbc_translator_om.cpp
++++ b/src/graphics/pipeline/shader/dxbc_translator_om.cpp
+@@ -1919,6 +1919,34 @@
+ 
+ void DxbcShaderTranslator::CompletePixelShader_DSV_DepthTo24Bit() {
+   bool shader_writes_depth = current_shader().writes_depth();
++  bool apply_polygon_offset = DSV_IsApplyingPolygonOffset();
++  auto write_polygon_offset_depth = [&](dxbc::Dest depth_dest, uint32_t temp,
++                                        dxbc::Src unbiased_depth) {
++    dxbc::Dest temp_x_dest(dxbc::Dest::R(temp, 0b0001));
++    dxbc::Src temp_x_src(dxbc::Src::R(temp, dxbc::Src::kXXXX));
++    in_front_face_used_ = true;
++    assert_true(system_temp_depth_stencil_ != UINT32_MAX);
++    a_.OpMax(temp_x_dest, dxbc::Src::R(system_temp_depth_stencil_, dxbc::Src::kXXXX).Abs(),
++             dxbc::Src::R(system_temp_depth_stencil_, dxbc::Src::kYYYY).Abs());
++    a_.OpIf(true, dxbc::Src::V1D(in_reg_ps_front_face_sample_index_, dxbc::Src::kXXXX));
++    a_.OpMAd(temp_x_dest, temp_x_src,
++             LoadSystemConstant(SystemConstants::Index::kEdramPolyOffsetFront,
++                                offsetof(SystemConstants, edram_poly_offset_front_scale),
++                                dxbc::Src::kXXXX),
++             LoadSystemConstant(SystemConstants::Index::kEdramPolyOffsetFront,
++                                offsetof(SystemConstants, edram_poly_offset_front_scale),
++                                dxbc::Src::kYYYY));
++    a_.OpElse();
++    a_.OpMAd(temp_x_dest, temp_x_src,
++             LoadSystemConstant(SystemConstants::Index::kEdramPolyOffsetBack,
++                                offsetof(SystemConstants, edram_poly_offset_back_scale),
++                                dxbc::Src::kXXXX),
++             LoadSystemConstant(SystemConstants::Index::kEdramPolyOffsetBack,
++                                offsetof(SystemConstants, edram_poly_offset_back_scale),
++                                dxbc::Src::kYYYY));
++    a_.OpEndIf();
++    a_.OpAdd(depth_dest, temp_x_src, unbiased_depth);
++  };
+ 
+   if (!DSV_IsWritingFloat24Depth()) {
+     if (shader_writes_depth) {
+@@ -1934,6 +1962,15 @@
+       a_.OpEndIf();
+       // Write the depth from the temporary to the system depth output.
+       a_.OpMov(dxbc::Dest::ODepth(), dxbc::Src::R(system_temp_depth_stencil_, dxbc::Src::kXXXX));
++    } else if (apply_polygon_offset) {
++      // Some decal draws use bias values too small for host RT depth bias to
++      // stay stable. Writing the biased depth here keeps those redraws stable
++      // against the receiver without forcing larger bias on unrelated draws.
++      uint32_t temp = PushSystemTemp();
++      dxbc::Src in_position_z(dxbc::Src::V1D(in_reg_ps_position_, dxbc::Src::kZZZZ));
++      in_position_used_ |= 0b0100;
++      write_polygon_offset_depth(dxbc::Dest::ODepth(), temp, in_position_z);
++      PopSystemTemp();
+     }
+     return;
+   }
+@@ -1953,8 +1990,17 @@
+     // assumption of it being clamped while working with the bit representation.
+     temp = PushSystemTemp();
+     in_position_used_ |= 0b0100;
+-    a_.OpMul(dxbc::Dest::R(temp, 0b0001), dxbc::Src::V1D(in_reg_ps_position_, dxbc::Src::kZZZZ),
+-             dxbc::Src::LF(2.0f), true);
++    dxbc::Dest temp_x_dest(dxbc::Dest::R(temp, 0b0001));
++    dxbc::Src temp_x_src(dxbc::Src::R(temp, dxbc::Src::kXXXX));
++    dxbc::Src in_position_z(dxbc::Src::V1D(in_reg_ps_position_, dxbc::Src::kZZZZ));
++    if (apply_polygon_offset) {
++      // Bias host depth first, then reuse the normal float24 conversion. D24FS
++      // scaling was handled when the polygon offset constants were uploaded.
++      write_polygon_offset_depth(temp_x_dest, temp, in_position_z);
++      a_.OpMul(temp_x_dest, temp_x_src, dxbc::Src::LF(2.0f), true);
++    } else {
++      a_.OpMul(temp_x_dest, in_position_z, dxbc::Src::LF(2.0f), true);
++    }
+   }
+ 
+   dxbc::Dest temp_x_dest(dxbc::Dest::R(temp, 0b0001));
+@@ -1962,8 +2008,12 @@
+   dxbc::Dest temp_y_dest(dxbc::Dest::R(temp, 0b0010));
+   dxbc::Src temp_y_src(dxbc::Src::R(temp, dxbc::Src::kYYYY));
+ 
+-  if (GetDxbcShaderModification().pixel.depth_stencil_mode ==
+-      Modification::DepthStencilMode::kFloat24Truncating) {
++  Modification::DepthStencilMode depth_stencil_mode =
++      GetDxbcShaderModification().pixel.depth_stencil_mode;
++  bool depth_float24_truncating =
++      depth_stencil_mode == Modification::DepthStencilMode::kFloat24Truncating ||
++      depth_stencil_mode == Modification::DepthStencilMode::kFloat24TruncatingPolygonOffset;
++  if (depth_float24_truncating) {
+     // Simplified conversion, always less than or equal to the original value -
+     // just drop the lower bits.
+     // The float32 exponent bias is 127.
+@@ -1973,7 +2023,9 @@
+     // The smallest denormalized 20e4 number is -34 - should drop 23 mantissa
+     // bits at -34.
+     // Anything smaller than 2^-34 becomes 0.
+-    dxbc::Dest truncate_dest(shader_writes_depth ? dxbc::Dest::ODepth() : dxbc::Dest::ODepthLE());
++    dxbc::Dest truncate_dest((shader_writes_depth || apply_polygon_offset)
++                                 ? dxbc::Dest::ODepth()
++                                 : dxbc::Dest::ODepthLE());
+     // Check if the number is representable as a float24 after truncation - the
+     // exponent is at least -34.
+     a_.OpUGE(temp_y_dest, temp_x_src, dxbc::Src::LU(0x2E800000));
+diff --git a/src/graphics/pipeline/shader/spirv_translator.cpp b/src/graphics/pipeline/shader/spirv_translator.cpp
+--- a/src/graphics/pipeline/shader/spirv_translator.cpp
++++ b/src/graphics/pipeline/shader/spirv_translator.cpp
+@@ -137,6 +137,8 @@
+   type_output_per_vertex_ = spv::NoResult;
+   output_per_vertex_ = spv::NoResult;
+   output_fragment_depth_ = spv::NoResult;
++  main_fbo_depth_unbiased_ = spv::NoResult;
++  main_fbo_depth_derivatives_.fill(spv::NoResult);
+   output_fragment_sample_mask_ = spv::NoResult;
+ 
+   sampler_bindings_.clear();
+@@ -3005,7 +3007,8 @@
+   bool memexport_resolution_scaled = current_shader().memexport_eM_written() &&
+                                      (draw_resolution_scale_x_ > 1 || draw_resolution_scale_y_ > 1);
+   if (edram_fragment_shader_interlock_ || param_gen_needed || memexport_resolution_scaled ||
+-      float24_depth_from_fragment_coordinates || alpha_to_coverage_possible) {
++      float24_depth_from_fragment_coordinates || DSV_IsApplyingPolygonOffset() ||
++      alpha_to_coverage_possible) {
+     input_fragment_coordinates_ = builder_->createVariable(spv::NoPrecision, spv::StorageClassInput,
+                                                            type_float4_, "gl_FragCoord");
+     builder_->addDecoration(input_fragment_coordinates_, spv::DecorationBuiltIn,
+@@ -3014,7 +3017,7 @@
+   }
+ 
+   // Is front facing.
+-  if (edram_fragment_shader_interlock_ ||
++  if (edram_fragment_shader_interlock_ || DSV_IsApplyingPolygonOffset() ||
+       (param_gen_needed && !GetSpirvShaderModification().pixel.param_gen_point)) {
+     input_front_facing_ = builder_->createVariable(spv::NoPrecision, spv::StorageClassInput,
+                                                    type_bool_, "gl_FrontFacing");
+@@ -3073,7 +3076,8 @@
+     }
+     output_fragment_depth_ = spv::NoResult;
+     output_fragment_sample_mask_ = spv::NoResult;
+-    if (current_shader().writes_depth() || float24_depth_conversion) {
++    if (current_shader().writes_depth() || float24_depth_conversion ||
++        DSV_IsApplyingPolygonOffset()) {
+       output_fragment_depth_ = builder_->createVariable(spv::NoPrecision, spv::StorageClassOutput,
+                                                         type_float_, "gl_FragDepth");
+       builder_->addDecoration(output_fragment_depth_, spv::DecorationBuiltIn,
+@@ -3166,6 +3170,23 @@
+           builder_->createVariable(spv::NoPrecision, spv::StorageClassFunction, type_uint_,
+                                    "xe_var_fsi_color_written", const_uint_0_);
+     }
++  }
++
++  if (DSV_IsApplyingPolygonOffset()) {
++    // The decal path needs the original triangle depth slope, not the slope of
++    // whichever lanes survive guest control flow or kill.
++    assert_true(input_fragment_coordinates_ != spv::NoResult);
++    id_vector_temp_.clear();
++    id_vector_temp_.push_back(builder_->makeIntConstant(2));
++    main_fbo_depth_unbiased_ = builder_->createLoad(
++        builder_->createAccessChain(spv::StorageClassInput, input_fragment_coordinates_,
++                                    id_vector_temp_),
++        spv::NoPrecision);
++    builder_->addCapability(spv::CapabilityDerivativeControl);
++    main_fbo_depth_derivatives_[0] =
++        builder_->createUnaryOp(spv::OpDPdxCoarse, type_float_, main_fbo_depth_unbiased_);
++    main_fbo_depth_derivatives_[1] =
++        builder_->createUnaryOp(spv::OpDPdyCoarse, type_float_, main_fbo_depth_unbiased_);
+   }
+ 
+   if (edram_fragment_shader_interlock_ && FSI_IsDepthStencilEarly()) {
+diff --git a/src/graphics/pipeline/shader/spirv_translator_rb.cpp b/src/graphics/pipeline/shader/spirv_translator_rb.cpp
+--- a/src/graphics/pipeline/shader/spirv_translator_rb.cpp
++++ b/src/graphics/pipeline/shader/spirv_translator_rb.cpp
+@@ -1566,45 +1566,7 @@
+     }
+   }
+ 
+-  if (!edram_fragment_shader_interlock_ && output_fragment_depth_ != spv::NoResult) {
+-    Modification::DepthStencilMode depth_stencil_mode =
+-        GetSpirvShaderModification().pixel.depth_stencil_mode;
+-    if (depth_stencil_mode == Modification::DepthStencilMode::kFloat24Truncating ||
+-        depth_stencil_mode == Modification::DepthStencilMode::kFloat24Rounding) {
+-      // For oDepth, depth is already in guest [0, 1].
+-      // Without oDepth, reconstruct guest [0, 1] from host [0, 0.5] by
+-      // doubling gl_FragCoord.z and saturating.
+-      spv::Id depth;
+-      if (current_shader().writes_depth()) {
+-        depth = builder_->createLoad(output_fragment_depth_, spv::NoPrecision);
+-      } else {
+-        assert_true(input_fragment_coordinates_ != spv::NoResult);
+-        id_vector_temp_.clear();
+-        id_vector_temp_.push_back(builder_->makeIntConstant(2));
+-        depth = builder_->createLoad(
+-            builder_->createAccessChain(spv::StorageClassInput, input_fragment_coordinates_,
+-                                        id_vector_temp_),
+-            spv::NoPrecision);
+-        if (IsSampleRate()) {
+-          // Statically use gl_SampleID to keep this path at sample frequency.
+-          assert_true(input_sample_id_ != spv::NoResult);
+-          builder_->createLoad(input_sample_id_, spv::NoPrecision);
+-        }
+-        depth = builder_->createTriBuiltinCall(
+-            type_float_, ext_inst_glsl_std_450_, GLSLstd450NClamp,
+-            builder_->createNoContractionBinOp(spv::OpFMul, type_float_, depth,
+-                                               builder_->makeFloatConstant(2.0f)),
+-            const_float_0_, const_float_1_);
+-      }
+-      // Convert guest [0, 1] float32 to float24 and back to host [0, 0.5].
+-      spv::Id depth_float24 = SpirvShaderTranslator::PreClampedDepthTo20e4(
+-          *builder_, depth, depth_stencil_mode == Modification::DepthStencilMode::kFloat24Rounding,
+-          false, ext_inst_glsl_std_450_);
+-      depth = SpirvShaderTranslator::Depth20e4To32(*builder_, depth_float24, 0, true, false,
+-                                                   ext_inst_glsl_std_450_);
+-      builder_->createStore(depth, output_fragment_depth_);
+-    }
+-  }
++  CompleteFragmentShader_DSV_DepthTo24Bit();
+ 
+   if (edram_fragment_shader_interlock_) {
+     if (block_fsi_if_after_depth_stencil_merge) {
+@@ -1773,6 +1735,154 @@
+     }
+   }
+   if (scale_guard) scale_guard->makeEndIf();
++}
++
++void SpirvShaderTranslator::CompleteFragmentShader_DSV_DepthTo24Bit() {
++  // FSI manages its own depth via the EDRAM buffer - this hook is FBO-only.
++  // Likewise, if no Output FragDepth was declared, there is nothing to write.
++  if (edram_fragment_shader_interlock_ || output_fragment_depth_ == spv::NoResult) {
++    return;
++  }
++  if (IsSampleRate()) {
++    assert_true(input_sample_id_ != spv::NoResult);
++    builder_->createLoad(input_sample_id_, spv::NoPrecision);
++  }
++  bool shader_writes_depth = current_shader().writes_depth();
++  bool is_float24 = IsWritingFloat24Depth();
++  bool apply_polygon_offset = DSV_IsApplyingPolygonOffset() && !shader_writes_depth;
++  assert_true(shader_writes_depth || is_float24 || apply_polygon_offset);
++
++  // Source depth from guest oDepth, or from raster depth for float24 conversion
++  // and the host RT decal path.
++  spv::Id depth_value;
++  if (shader_writes_depth) {
++    depth_value = builder_->createLoad(output_fragment_depth_, spv::NoPrecision);
++  } else {
++    spv::Id host_depth;
++    if (apply_polygon_offset) {
++      assert_true(input_front_facing_ != spv::NoResult);
++      assert_true(main_fbo_depth_unbiased_ != spv::NoResult);
++      assert_true(main_fbo_depth_derivatives_[0] != spv::NoResult);
++      assert_true(main_fbo_depth_derivatives_[1] != spv::NoResult);
++      auto load_system_constant_float = [&](SystemConstantIndex index) {
++        id_vector_temp_.clear();
++        id_vector_temp_.push_back(builder_->makeIntConstant(index));
++        return builder_->createLoad(
++            builder_->createAccessChain(spv::StorageClassUniform, uniform_system_constants_,
++                                        id_vector_temp_),
++            spv::NoPrecision);
++      };
++      spv::Id depth_dx = builder_->createUnaryBuiltinCall(
++          type_float_, ext_inst_glsl_std_450_, GLSLstd450FAbs, main_fbo_depth_derivatives_[0]);
++      spv::Id depth_dy = builder_->createUnaryBuiltinCall(
++          type_float_, ext_inst_glsl_std_450_, GLSLstd450FAbs, main_fbo_depth_derivatives_[1]);
++      spv::Id depth_max_slope = builder_->createBinBuiltinCall(type_float_, ext_inst_glsl_std_450_,
++                                                               GLSLstd450FMax, depth_dx, depth_dy);
++      spv::Id front_facing = builder_->createLoad(input_front_facing_, spv::NoPrecision);
++      spv::Id poly_offset_scale = builder_->createTriOp(
++          spv::OpSelect, type_float_, front_facing,
++          load_system_constant_float(kSystemConstantEdramPolyOffsetFrontScale),
++          load_system_constant_float(kSystemConstantEdramPolyOffsetBackScale));
++      spv::Id poly_offset_offset = builder_->createTriOp(
++          spv::OpSelect, type_float_, front_facing,
++          load_system_constant_float(kSystemConstantEdramPolyOffsetFrontOffset),
++          load_system_constant_float(kSystemConstantEdramPolyOffsetBackOffset));
++      spv::Id poly_offset = builder_->createNoContractionBinOp(
++          spv::OpFAdd, type_float_,
++          builder_->createNoContractionBinOp(spv::OpFMul, type_float_, depth_max_slope,
++                                             poly_offset_scale),
++          poly_offset_offset);
++      host_depth = builder_->createNoContractionBinOp(spv::OpFAdd, type_float_,
++                                                      main_fbo_depth_unbiased_, poly_offset);
++    } else {
++      assert_true(input_fragment_coordinates_ != spv::NoResult);
++      id_vector_temp_.clear();
++      id_vector_temp_.push_back(builder_->makeIntConstant(2));
++      host_depth = builder_->createLoad(
++          builder_->createAccessChain(spv::StorageClassInput, input_fragment_coordinates_,
++                                      id_vector_temp_),
++          spv::NoPrecision);
++    }
++    if (is_float24) {
++      depth_value = builder_->createBinOp(spv::OpFMul, type_float_, host_depth,
++                                          builder_->makeFloatConstant(2.0f));
++      depth_value =
++          builder_->createTriBuiltinCall(type_float_, ext_inst_glsl_std_450_, GLSLstd450NClamp,
++                                         depth_value, const_float_0_, const_float_1_);
++    } else {
++      depth_value = host_depth;
++    }
++  }
++
++  if (!is_float24) {
++    if (!shader_writes_depth) {
++      builder_->createStore(depth_value, output_fragment_depth_);
++      return;
++    }
++    // Legacy path: shader writes oDepth, but the modification is not in float24
++    // mode (the host buffer may still be float24 if depth_float24_convert_in_
++    // pixel_shader is off - check dynamically via the system flag).
++    spv::Id depth_float24_flag = builder_->createBinOp(
++        spv::OpINotEqual, type_bool_,
++        builder_->createBinOp(spv::OpBitwiseAnd, type_uint_, main_system_constant_flags_,
++                              builder_->makeUintConstant(kSysFlag_DepthFloat24)),
++        const_uint_0_);
++    spv::Id depth_scaled = builder_->createBinOp(spv::OpFMul, type_float_, depth_value,
++                                                 builder_->makeFloatConstant(0.5f));
++    spv::Id depth_remapped = builder_->createTriOp(spv::OpSelect, type_float_, depth_float24_flag,
++                                                   depth_scaled, depth_value);
++    builder_->createStore(depth_remapped, output_fragment_depth_);
++    return;
++  }
++  // Float24 mode: statically known float24 host buffer; perform the conversion.
++  Modification::DepthStencilMode mode = GetSpirvShaderModification().pixel.depth_stencil_mode;
++  if (mode == Modification::DepthStencilMode::kFloat24Truncating ||
++      mode == Modification::DepthStencilMode::kFloat24TruncatingPolygonOffset) {
++    // Mantissa bit-truncation, then guest 0...1 -> host 0...0.5.
++    spv::Id depth_uint = builder_->createUnaryOp(spv::OpBitcast, type_uint_, depth_value);
++    // Representable as float24 (exponent >= -34): bit pattern >= 0x2E800000.
++    spv::Id representable = builder_->createBinOp(spv::OpUGreaterThanEqual, type_bool_, depth_uint,
++                                                  builder_->makeUintConstant(0x2E800000));
++    SpirvBuilder::IfBuilder representable_if(representable, spv::SelectionControlDontFlattenMask,
++                                             *builder_);
++    {
++      // Biased exponent: 113+ at exp -14+; 93 at exp -34.
++      spv::Id exponent =
++          builder_->createTriOp(spv::OpBitFieldUExtract, type_uint_, depth_uint,
++                                builder_->makeUintConstant(23), builder_->makeUintConstant(8));
++      // trunc_bits = max(116 - exponent, 3), in signed - drops 3 mantissa bits
++      // at exp -14+ and 23 at exp -34. Must be signed: exponent > 116 (i.e.
++      // values larger than ~2^-11) makes 116 - exponent negative; an unsigned
++      // underflow would feed OpBitFieldInsert a Count > 32 (undefined).
++      spv::Id trunc_bits_signed =
++          builder_->createBinOp(spv::OpISub, type_int_, builder_->makeIntConstant(116),
++                                builder_->createUnaryOp(spv::OpBitcast, type_int_, exponent));
++      trunc_bits_signed =
++          builder_->createBinBuiltinCall(type_int_, ext_inst_glsl_std_450_, GLSLstd450SMax,
++                                         trunc_bits_signed, builder_->makeIntConstant(3));
++      spv::Id trunc_bits = builder_->createUnaryOp(spv::OpBitcast, type_uint_, trunc_bits_signed);
++      spv::Id truncated_uint = builder_->createQuadOp(spv::OpBitFieldInsert, type_uint_, depth_uint,
++                                                      builder_->makeUintConstant(0),
++                                                      builder_->makeUintConstant(0), trunc_bits);
++      spv::Id truncated_f32 = builder_->createUnaryOp(spv::OpBitcast, type_float_, truncated_uint);
++      spv::Id remapped = builder_->createBinOp(spv::OpFMul, type_float_, truncated_f32,
++                                               builder_->makeFloatConstant(0.5f));
++      builder_->createStore(remapped, output_fragment_depth_);
++    }
++    representable_if.makeBeginElse();
++    {
++      // Not representable - zero.
++      builder_->createStore(const_float_0_, output_fragment_depth_);
++    }
++    representable_if.makeEndIf();
++  } else {
++    // kFloat24Rounding: round-trip through 20e4 (round to nearest even), with
++    // the 0...0.5 host remap baked in via remap_to_0_to_0_5 on Depth20e4To32.
++    spv::Id f24_uint =
++        PreClampedDepthTo20e4(*builder_, depth_value, true, false, ext_inst_glsl_std_450_);
++    spv::Id depth_f32 = Depth20e4To32(*builder_, f24_uint, 0, true, false, ext_inst_glsl_std_450_);
++    builder_->createStore(depth_f32, output_fragment_depth_);
++  }
+ }
+ 
+ void SpirvShaderTranslator::FSI_LoadSampleMask(spv::Id msaa_samples) {
+diff --git a/src/graphics/util/draw.cpp b/src/graphics/util/draw.cpp
+--- a/src/graphics/util/draw.cpp
++++ b/src/graphics/util/draw.cpp
+@@ -1456,3 +1456,53 @@
+ }
+ 
+ }  // namespace rex::graphics::draw_util
++
++REXCVAR_DEFINE_BOOL(
++    depth_bias_shader_offset, false, "GPU",
++    "Apply host decal polygon offsets through shader depth instead of fixed-function bias");
++namespace rex::graphics::draw_util {
++bool GetHostDepthPolygonOffsetIfNeeded(const RegisterFile& regs, bool primitive_polygonal,
++                                       reg::RB_DEPTHCONTROL normalized_depth_control,
++                                       uint32_t normalized_color_mask,
++                                       HostDepthPolygonOffset& polygon_offset_out) {
++  polygon_offset_out = {};
++  if (!REXCVAR_GET(depth_bias_shader_offset)) {
++    return false;
++  }
++
++  const xenos::CompareFunction zfunc = normalized_depth_control.zfunc;
++  // Keep this on the decal-style redraws that need it. Larger use of shader
++  // depth changes early-Z and coverage behavior in places like hair, foliage,
++  // and stencil masked effects.
++  if (!primitive_polygonal || !normalized_depth_control.z_enable ||
++      !(zfunc == xenos::CompareFunction::kLessEqual ||
++        zfunc == xenos::CompareFunction::kGreaterEqual) ||
++      !normalized_color_mask || normalized_depth_control.stencil_enable ||
++      regs.Get<reg::RB_COLORCONTROL>().alpha_to_mask_enable) {
++    return false;
++  }
++
++  auto pa_su_sc_mode_cntl = regs.Get<reg::PA_SU_SC_MODE_CNTL>();
++  if (pa_su_sc_mode_cntl.poly_offset_front_enable) {
++    polygon_offset_out.front_scale = regs.Get<float>(XE_GPU_REG_PA_SU_POLY_OFFSET_FRONT_SCALE);
++    polygon_offset_out.front_offset = regs.Get<float>(XE_GPU_REG_PA_SU_POLY_OFFSET_FRONT_OFFSET);
++  }
++  if (pa_su_sc_mode_cntl.poly_offset_back_enable) {
++    polygon_offset_out.back_scale = regs.Get<float>(XE_GPU_REG_PA_SU_POLY_OFFSET_BACK_SCALE);
++    polygon_offset_out.back_offset = regs.Get<float>(XE_GPU_REG_PA_SU_POLY_OFFSET_BACK_OFFSET);
++  }
++
++  if (!polygon_offset_out.front_scale && !polygon_offset_out.front_offset &&
++      !polygon_offset_out.back_scale && !polygon_offset_out.back_offset) {
++    return false;
++  }
++
++  polygon_offset_out.front_scale *= xenos::kPolygonOffsetScaleSubpixelUnit;
++  polygon_offset_out.back_scale *= xenos::kPolygonOffsetScaleSubpixelUnit;
++  if (regs.Get<reg::RB_DEPTH_INFO>().depth_format == xenos::DepthRenderTargetFormat::kD24FS8) {
++    polygon_offset_out.front_offset *= 0.5f;
++    polygon_offset_out.back_offset *= 0.5f;
++  }
++  return true;
++}
++}  // namespace rex::graphics::draw_util
+diff --git a/src/graphics/vulkan/command_processor.cpp b/src/graphics/vulkan/command_processor.cpp
+--- a/src/graphics/vulkan/command_processor.cpp
++++ b/src/graphics/vulkan/command_processor.cpp
+@@ -4058,6 +4058,16 @@
+     draw_util::AddMemExportRanges(regs, *pixel_shader, memexport_ranges_);
+   }
+   reg::RB_DEPTHCONTROL normalized_depth_control = draw_util::GetNormalizedDepthControl(regs);
++  uint32_t normalized_color_mask =
++      pixel_shader ? draw_util::GetNormalizedColorMask(regs, pixel_shader->writes_color_targets())
++                   : 0;
++  draw_util::HostDepthPolygonOffset host_depth_polygon_offset;
++  const bool depth_bias_in_pixel_shader =
++      render_target_cache_->GetPath() == RenderTargetCache::Path::kHostRenderTargets &&
++      pixel_shader && !pixel_shader->writes_depth() &&
++      draw_util::GetHostDepthPolygonOffsetIfNeeded(regs, primitive_polygonal,
++                                                   normalized_depth_control, normalized_color_mask,
++                                                   host_depth_polygon_offset);
+ 
+   uint32_t ps_param_gen_pos = UINT32_MAX;
+   uint32_t interpolator_mask =
+@@ -4136,10 +4146,11 @@
+     vertex_shader_modification = pipeline_cache_->GetCurrentVertexShaderModification(
+         *vertex_shader, primitive_processing_result.host_vertex_shader_type, interpolator_mask,
+         ps_param_gen_pos != UINT32_MAX);
+-    pixel_shader_modification = pixel_shader ? pipeline_cache_->GetCurrentPixelShaderModification(
+-                                                   *pixel_shader, interpolator_mask,
+-                                                   ps_param_gen_pos, normalized_depth_control)
+-                                             : SpirvShaderTranslator::Modification(0);
++    pixel_shader_modification = pixel_shader
++                                    ? pipeline_cache_->GetCurrentPixelShaderModification(
++                                          *pixel_shader, interpolator_mask, ps_param_gen_pos,
++                                          normalized_depth_control, depth_bias_in_pixel_shader)
++                                    : SpirvShaderTranslator::Modification(0);
+ 
+     if (query_fsi) {
+       pixel_shader_modification.value |= T::Modification::kXenosZPD;
+@@ -4238,10 +4249,6 @@
+     assert_true(sampler_overflow_await_submission <= GetCurrentSubmission());
+     CheckSubmissionFenceAndDeviceLoss(sampler_overflow_await_submission);
+   }
+-
+-  uint32_t normalized_color_mask =
+-      pixel_shader ? draw_util::GetNormalizedColorMask(regs, pixel_shader->writes_color_targets())
+-                   : 0;
+ 
+   // Update the textures before most other work in the submission because
+   // samplers depend on this (and in case of sampler overflow in a submission,
+@@ -4364,8 +4371,8 @@
+       window_offset_tiles != 0);
+ 
+   // Update dynamic graphics pipeline state.
+-  UpdateDynamicState(viewport_info, primitive_polygonal,
+-                     normalized_depth_control, window_offset_tiles != 0);
++  UpdateDynamicState(viewport_info, primitive_polygonal, normalized_depth_control,
++                     window_offset_tiles != 0, depth_bias_in_pixel_shader);
+ 
+   auto vgt_draw_initiator = regs.Get<reg::VGT_DRAW_INITIATOR>();
+ 
+@@ -4400,9 +4407,9 @@
+ 
+   // Update system constants before uploading them.
+   UpdateSystemConstantValues(primitive_polygonal, primitive_processing_result,
+-                             shader_32bit_index_dma, 0, viewport_info,
+-                             used_texture_mask, normalized_depth_control,
+-                             normalized_color_mask, window_offset_tiles);
++                             shader_32bit_index_dma, 0, viewport_info, used_texture_mask,
++                             normalized_depth_control, normalized_color_mask, window_offset_tiles,
++                             depth_bias_in_pixel_shader ? &host_depth_polygon_offset : nullptr);
+ 
+   // Update uniform buffers and descriptor sets after binding the pipeline with
+   // the new layout.
+@@ -4575,10 +4582,10 @@
+   }
+ 
+   if (zpd_counter_index_force_update_) {
+-  UpdateSystemConstantValues(primitive_polygonal, primitive_processing_result,
+-                             shader_32bit_index_dma, 0, viewport_info,
+-                             used_texture_mask, normalized_depth_control,
+-                             normalized_color_mask, window_offset_tiles);
++    UpdateSystemConstantValues(primitive_polygonal, primitive_processing_result,
++                               shader_32bit_index_dma, 0, viewport_info, used_texture_mask,
++                               normalized_depth_control, normalized_color_mask, window_offset_tiles,
++                               depth_bias_in_pixel_shader ? &host_depth_polygon_offset : nullptr);
+     if (!UpdateBindings(vertex_shader, pixel_shader)) return draw_fail("query_bindings");
+   }
+ 
+@@ -5994,10 +6001,11 @@
+   swap_fxaa_source_layout_ = VK_IMAGE_LAYOUT_UNDEFINED;
+ }
+ 
+-void VulkanCommandProcessor::UpdateDynamicState(
+-    const draw_util::ViewportInfo &viewport_info, bool primitive_polygonal,
+-    reg::RB_DEPTHCONTROL normalized_depth_control,
+-    bool window_offset_in_edram) {
++void VulkanCommandProcessor::UpdateDynamicState(const draw_util::ViewportInfo& viewport_info,
++                                                bool primitive_polygonal,
++                                                reg::RB_DEPTHCONTROL normalized_depth_control,
++                                                bool window_offset_in_edram,
++                                                bool depth_bias_in_pixel_shader) {
+ #if XE_GPU_FINE_GRAINED_DRAW_SCOPES
+   SCOPE_profile_cpu_f("gpu");
+ #endif  // XE_GPU_FINE_GRAINED_DRAW_SCOPES
+@@ -6049,9 +6057,13 @@
+ 
+   if (render_target_cache_->GetPath() == RenderTargetCache::Path::kHostRenderTargets) {
+     // Absolute guest bias must not shrink with the host float depth exponent.
+-    const auto bias = GetHostDepthBias(regs, primitive_polygonal,
+-        draw_resolution_scale_x, draw_resolution_scale_y, GetVulkanDevice()->properties(),
+-        REXCVAR_GET(vulkan_depth_bias_force_unorm));
++    auto bias = GetHostDepthBias(regs, primitive_polygonal, draw_resolution_scale_x,
++                                 draw_resolution_scale_y, GetVulkanDevice()->properties(),
++                                 REXCVAR_GET(vulkan_depth_bias_force_unorm));
++    if (depth_bias_in_pixel_shader) {
++      bias.constant_factor = 0.0f;
++      bias.slope_factor = 0.0f;
++    }
+     const float depth_bias_constant_factor = bias.constant_factor;
+     const float depth_bias_slope_factor = bias.slope_factor;
+     dynamic_depth_bias_update_needed_ |= dynamic_depth_bias_force_unorm_ != bias.force_unorm;
+@@ -6201,11 +6213,12 @@
+ 
+ void VulkanCommandProcessor::UpdateSystemConstantValues(
+     bool primitive_polygonal,
+-    const PrimitiveProcessor::ProcessingResult &primitive_processing_result,
++    const PrimitiveProcessor::ProcessingResult& primitive_processing_result,
+     bool shader_32bit_index_dma, uint32_t compute_memexport_vertex_count,
+-    const draw_util::ViewportInfo &viewport_info, uint32_t used_texture_mask,
+-    reg::RB_DEPTHCONTROL normalized_depth_control,
+-    uint32_t normalized_color_mask, int32_t window_offset_tiles) {
++    const draw_util::ViewportInfo& viewport_info, uint32_t used_texture_mask,
++    reg::RB_DEPTHCONTROL normalized_depth_control, uint32_t normalized_color_mask,
++    int32_t window_offset_tiles,
++    const draw_util::HostDepthPolygonOffset* host_depth_polygon_offset) {
+ #if XE_GPU_FINE_GRAINED_DRAW_SCOPES
+   SCOPE_profile_cpu_f("gpu");
+ #endif  // XE_GPU_FINE_GRAINED_DRAW_SCOPES
+@@ -6644,6 +6657,23 @@
+     }
+   }
+ 
++  if (!edram_fragment_shader_interlock && host_depth_polygon_offset) {
++    const float front_scale = host_depth_polygon_offset->front_scale *
++                              std::max(draw_resolution_scale_x, draw_resolution_scale_y);
++    dirty |= system_constants_.edram_poly_offset_front_scale != front_scale;
++    system_constants_.edram_poly_offset_front_scale = front_scale;
++    const float front_offset = host_depth_polygon_offset->front_offset;
++    dirty |= system_constants_.edram_poly_offset_front_offset != front_offset;
++    system_constants_.edram_poly_offset_front_offset = front_offset;
++    const float back_scale = host_depth_polygon_offset->back_scale *
++                             std::max(draw_resolution_scale_x, draw_resolution_scale_y);
++    dirty |= system_constants_.edram_poly_offset_back_scale != back_scale;
++    system_constants_.edram_poly_offset_back_scale = back_scale;
++    const float back_offset = host_depth_polygon_offset->back_offset;
++    dirty |= system_constants_.edram_poly_offset_back_offset != back_offset;
++    system_constants_.edram_poly_offset_back_offset = back_offset;
++  }
++
+   if (edram_fragment_shader_interlock) {
+     uint32_t depth_base_dwords_scaled =
+         draw_util::AddWindowOffsetToEdramBase(rb_depth_info.depth_base,
+diff --git a/src/graphics/vulkan/pipeline_cache.cpp b/src/graphics/vulkan/pipeline_cache.cpp
+--- a/src/graphics/vulkan/pipeline_cache.cpp
++++ b/src/graphics/vulkan/pipeline_cache.cpp
+@@ -1013,7 +1013,7 @@
+ 
+ SpirvShaderTranslator::Modification VulkanPipelineCache::GetCurrentPixelShaderModification(
+     const Shader& shader, uint32_t interpolator_mask, uint32_t param_gen_pos,
+-    reg::RB_DEPTHCONTROL normalized_depth_control) const {
++    reg::RB_DEPTHCONTROL normalized_depth_control, bool depth_bias_in_pixel_shader) const {
+   assert_true(shader.type() == xenos::ShaderType::kPixel);
+   assert_true(shader.is_ucode_analyzed());
+   const auto& regs = register_file_;
+@@ -1046,9 +1046,14 @@
+         normalized_depth_control.z_enable &&
+         regs.Get<reg::RB_DEPTH_INFO>().depth_format == xenos::DepthRenderTargetFormat::kD24FS8) {
+       // For host D32 depth, emulate guest D24FS8 float24 depth behavior.
+-      modification.pixel.depth_stencil_mode = render_target_cache_.depth_float24_round()
+-                                                  ? DepthStencilMode::kFloat24Rounding
+-                                                  : DepthStencilMode::kFloat24Truncating;
++      modification.pixel.depth_stencil_mode =
++          render_target_cache_.depth_float24_round()
++              ? (depth_bias_in_pixel_shader ? DepthStencilMode::kFloat24RoundingPolygonOffset
++                                            : DepthStencilMode::kFloat24Rounding)
++              : (depth_bias_in_pixel_shader ? DepthStencilMode::kFloat24TruncatingPolygonOffset
++                                            : DepthStencilMode::kFloat24Truncating);
++    } else if (depth_bias_in_pixel_shader) {
++      modification.pixel.depth_stencil_mode = DepthStencilMode::kPolygonOffset;
+     } else {
+       if (shader.implicit_early_z_write_allowed() &&
+           (!shader.writes_color_target(0) ||
+@@ -1488,7 +1493,11 @@
+         !pixel_shader->shader().writes_depth() &&
+         (pixel_shader_modification.pixel.depth_stencil_mode ==
+              DepthStencilMode::kFloat24Truncating ||
+-         pixel_shader_modification.pixel.depth_stencil_mode == DepthStencilMode::kFloat24Rounding);
++         pixel_shader_modification.pixel.depth_stencil_mode == DepthStencilMode::kFloat24Rounding ||
++         pixel_shader_modification.pixel.depth_stencil_mode ==
++             DepthStencilMode::kFloat24TruncatingPolygonOffset ||
++         pixel_shader_modification.pixel.depth_stencil_mode ==
++             DepthStencilMode::kFloat24RoundingPolygonOffset);
+   }
+   description_out.render_pass_key = render_pass_key;
+ 
+@@ -3362,7 +3371,11 @@
+   // used (the guest shader can't access Z), enabling only when there's a
+   // depth / stencil attachment for correctness.
+   rasterization_state.depthBiasEnable =
+-      (!edram_fragment_shader_interlock && (description.render_pass_key.depth_and_color_used & 0b1))
++      (!edram_fragment_shader_interlock &&
++       (description.render_pass_key.depth_and_color_used & 0b1) &&
++       uint32_t(SpirvShaderTranslator::Modification(description.pixel_shader_modification)
++                    .pixel.depth_stencil_mode) <
++           uint32_t(SpirvShaderTranslator::Modification::DepthStencilMode::kPolygonOffset))
+           ? VK_TRUE
+           : VK_FALSE;
+   // TODO(Triang3l): Wide lines.

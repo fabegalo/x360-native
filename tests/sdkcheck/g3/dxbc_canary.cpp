@@ -271,6 +271,28 @@ int main(int argc, char** argv) {
   }
   if (HMODULE compiler = LoadLibraryW(L"D3DCompiler_47.dll")) {
     auto disassemble = reinterpret_cast<pD3DDisassemble>(GetProcAddress(compiler, "D3DDisassemble"));
+    for (auto mode : {DxbcShaderTranslator::Modification::DepthStencilMode::kPolygonOffset,
+                     DxbcShaderTranslator::Modification::DepthStencilMode::kFloat24TruncatingPolygonOffset,
+                     DxbcShaderTranslator::Modification::DepthStencilMode::kFloat24RoundingPolygonOffset}) {
+      DxbcShaderTranslator::Modification modification(0);
+      modification.pixel.depth_stencil_mode = mode;
+      const auto binary = Translate(Microcode(false, false), xenos::ShaderType::kPixel,
+                                    false, false, modification.value);
+      ID3DBlob* assembly = nullptr;
+      const bool valid = disassemble && !binary.empty() && SUCCEEDED(disassemble(
+          binary.data(), binary.size(), 0, nullptr, &assembly));
+      check(valid, "host shader polygon offset DXBC disassembles");
+      if (assembly) {
+        const std::string text(static_cast<const char*>(assembly->GetBufferPointer()), assembly->GetBufferSize());
+        check(text.find("dcl_output oDepth") != std::string::npos &&
+              text.find("deriv_rtx_coarse") != std::string::npos &&
+              text.find("deriv_rty_coarse") != std::string::npos,
+              "shader polygon offset writes depth from coarse raster derivatives");
+        check(text.find("oDepthLE") == std::string::npos,
+              "signed polygon bias cannot claim conservative less-equal depth");
+        assembly->Release();
+      }
+    }
     {
       const auto point = Microcode(false, false, xenos::FetchOpDimension::k2D, true);
       const auto baseline = Translate(point);

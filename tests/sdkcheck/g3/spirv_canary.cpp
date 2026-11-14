@@ -117,7 +117,7 @@ std::vector<uint32_t> VertexFetchMicrocode() {
 
 std::vector<uint8_t> Translate(SpirvShaderTranslator& translator, const std::vector<uint32_t>& code,
                                xenos::ShaderType type = xenos::ShaderType::kPixel,
-                               bool param_gen = false) {
+                               bool param_gen = false, ShaderModificationKey extra = 0) {
   Shader shader(type, 1, code.data(), code.size(), std::endian::native);
   rex::string::StringBuffer disassembly;
   shader.AnalyzeUcode(disassembly);
@@ -129,7 +129,7 @@ std::vector<uint8_t> Translate(SpirvShaderTranslator& translator, const std::vec
     m.pixel.param_gen_interpolator = 0;
     modification = m.value;
   }
-  auto& translation = *shader.GetOrCreateTranslation(modification);
+  auto& translation = *shader.GetOrCreateTranslation(modification | extra);
   if (!translator.TranslateAnalyzedShader(translation) || !translation.is_valid()) return {};
   return translation.translated_binary();
 }
@@ -156,6 +156,31 @@ int main() {
       std::cerr << "FAIL " << name << '\n';
     }
   };
+  for (auto mode : {SpirvShaderTranslator::Modification::DepthStencilMode::kPolygonOffset,
+                   SpirvShaderTranslator::Modification::DepthStencilMode::kFloat24TruncatingPolygonOffset,
+                   SpirvShaderTranslator::Modification::DepthStencilMode::kFloat24RoundingPolygonOffset}) {
+    SpirvShaderTranslator translator(SpirvShaderTranslator::Features(true), true, true, false);
+    SpirvShaderTranslator::Modification modification(0);
+    modification.pixel.depth_stencil_mode = mode;
+    const auto binary = Translate(translator, Microcode(false), xenos::ShaderType::kPixel,
+                                  false, modification.value);
+    check(!binary.empty(), "host polygon offset SPIR-V translation");
+    const Module module(binary);
+    bool dx = false, dy = false, depth = false, front = false, sample = false;
+    for (const auto& instruction : module.instructions) {
+      dx |= instruction.op == spv::OpDPdxCoarse;
+      dy |= instruction.op == spv::OpDPdyCoarse;
+      if (instruction.op == spv::OpDecorate && instruction.args.size() >= 3 &&
+          instruction.args[1] == spv::DecorationBuiltIn) {
+        depth |= instruction.args[2] == spv::BuiltInFragDepth;
+        front |= instruction.args[2] == spv::BuiltInFrontFacing;
+        sample |= instruction.args[2] == spv::BuiltInSampleId;
+      }
+    }
+    check(dx && dy && depth && front, "host polygon offset retains derivatives, face and depth interface");
+    check(sample == (mode != SpirvShaderTranslator::Modification::DepthStencilMode::kPolygonOffset),
+          "float24 polygon offset preserves sample-frequency depth conversion");
+  }
   {
     using M = SpirvShaderTranslator::Modification;
     M m;

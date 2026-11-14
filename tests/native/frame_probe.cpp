@@ -15,6 +15,7 @@
 // shader variants and persistent pipeline restoration; prints CPU wall times.
 // --minmax-blend checks source factors for MIN/MAX and subsequent blend reset.
 // --vertex-aliases exercises upper address bits of draw and resolve fetches.
+// --depth-bias checks a tiny absolute float24 decal offset at 1x/2x/4x MSAA.
 // --no-sample-counts leaves out the ZPD query and the visibility-tested draw
 // (no ROV sample counting), to isolate that path when diagnosing a host.
 // Prints each frame's scanout hash; no title data is involved.
@@ -66,15 +67,18 @@ constexpr uint32_t kSide = 32;
 // buffer (results the next guest sync publishes), before the ZPD/scanout part.
 void Run(rex::system::IGraphicsSystem& gpu, rex::memory::Memory& memory, uint32_t frames,
          uint32_t extra_draws, uint32_t extra_resolves, bool sample_counts, uint32_t edram_base,
-         bool clear_after_resolve, bool pipeline_cache, bool minmax_blend, bool vertex_aliases) {
+         bool clear_after_resolve, bool pipeline_cache, bool minmax_blend, bool vertex_aliases,
+         bool depth_bias, bool depth_unorm) {
   const auto ring = memory.SystemHeapAlloc(2u << 20, 4096, rex::memory::kSystemHeapPhysical);
   const auto vertices = memory.SystemHeapAlloc(4096, 4096, rex::memory::kSystemHeapPhysical);
+  const auto decal = depth_bias ? memory.SystemHeapAlloc(4096, 4096, rex::memory::kSystemHeapPhysical) : 0;
   const auto rect = memory.SystemHeapAlloc(4096, 4096, rex::memory::kSystemHeapPhysical);
   const auto image = memory.SystemHeapAlloc(kSide * kSide * 4, 4096, rex::memory::kSystemHeapPhysical);
   const auto reports = memory.SystemHeapAlloc(4096, 4096, rex::memory::kSystemHeapPhysical);
   const auto done = memory.SystemHeapAlloc(4096, 4096, rex::memory::kSystemHeapPhysical);
   const auto targets = memory.SystemHeapAlloc(std::max(1u, extra_resolves) * kSide * kSide * 4, 4096, rex::memory::kSystemHeapPhysical);
   Require(ring && vertices && rect && image && reports && done && targets, "frame probe allocations");
+  Require(!depth_bias || decal, "decal fixture allocation");
   std::memset(memory.TranslateVirtual(done), 0, 4);
   const float xy[]{0, 0, float(kSide), 0, 0, float(kSide)};
   std::memcpy(memory.TranslateVirtual(rect), xy, sizeof(xy));
@@ -95,6 +99,14 @@ void Run(rex::system::IGraphicsSystem& gpu, rex::memory::Memory& memory, uint32_
     const float triangle_late[]{1, 1 - shift, .5f, 1, -1 + shift, 1, .5f, 1, 1, -1, .5f, 1};
     const float* triangle = frame < 2 ? triangle_early : triangle_late;
     std::memcpy(memory.TranslateVirtual(vertices), triangle, sizeof(triangle_early));
+    if (depth_bias) {
+      std::array<float, 12> base;
+      std::memcpy(base.data(), triangle, sizeof(triangle_early));
+      for (unsigned i : {2u, 6u, 10u}) base[i] = 0x1p-7f;
+      std::memcpy(memory.TranslateVirtual(vertices), base.data(), sizeof(base));
+      for (unsigned i : {2u, 6u, 10u}) base[i] += depth_unorm ? 0x1p-14f : 0x1p-26f;
+      std::memcpy(memory.TranslateVirtual(decal), base.data(), sizeof(base));
+    }
     std::vector<uint32_t> words;
     auto set = [&](uint32_t index, uint32_t value) { words.insert(words.end(), {index, value}); };
     auto fp = [&](uint32_t index, float value) { set(index, std::bit_cast<uint32_t>(value)); };
@@ -114,6 +126,17 @@ void Run(rex::system::IGraphicsSystem& gpu, rex::memory::Memory& memory, uint32_
     set(XE_GPU_REG_RB_MODECONTROL, uint32_t(EdramMode::kColorDepth));
     set(XE_GPU_REG_RB_SURFACE_INFO, 80); set(XE_GPU_REG_RB_COLOR_MASK, 15); set(XE_GPU_REG_RB_COLOR_INFO, edram_base);
     set(XE_GPU_REG_RB_DEPTHCONTROL, 0); set(XE_GPU_REG_RB_DEPTH_INFO, 0);
+    if (depth_bias) {
+      reg::RB_SURFACE_INFO surface{}; surface.surface_pitch = 80;
+      surface.msaa_samples = MsaaSamples(frame % 3);
+      set(XE_GPU_REG_RB_SURFACE_INFO, surface.value);
+      reg::RB_DEPTH_INFO depth{}; depth.depth_base = 64;
+      depth.depth_format = depth_unorm ? DepthRenderTargetFormat::kD24S8 : DepthRenderTargetFormat::kD24FS8;
+      set(XE_GPU_REG_RB_DEPTH_INFO, depth.value);
+      reg::PA_CL_CLIP_CNTL clip{}; clip.dx_clip_space_def = 1;
+      set(XE_GPU_REG_PA_CL_CLIP_CNTL, clip.value);
+      set(XE_GPU_REG_PA_SU_SC_MODE_CNTL, 0);
+    }
     reg::RB_BLENDCONTROL blend{};
     // Accumulate: the scanout depends on every earlier frame's EDRAM contents.
     blend.color_srcblend = blend.alpha_srcblend = BlendFactor::kOne;
@@ -130,6 +153,7 @@ void Run(rex::system::IGraphicsSystem& gpu, rex::memory::Memory& memory, uint32_
     if (minmax_blend) color = (frame % 4) >= 2 ?
         std::array<float, 4>{.75f, .25f, .25f, .25f} :
         std::array<float, 4>{.75f, .5f, .25f, .5f};
+    if (depth_bias) color = {.75f,.25f,.25f,1};
     for (unsigned c = 0; c < 4; ++c) fp(XE_GPU_REG_SHADER_CONSTANT_000_X + 256 * 4 + c, color[c]);
     if (pipeline_cache) for (unsigned i = 1; i < 32; ++i)
       for (unsigned c = 0; c < 4; ++c) fp(XE_GPU_REG_SHADER_CONSTANT_000_X + (256 + i) * 4 + c, color[c]);
@@ -160,6 +184,24 @@ void Run(rex::system::IGraphicsSystem& gpu, rex::memory::Memory& memory, uint32_
       resolve_to(memory.GetPhysicalAddress(targets) + group * kSide * kSide * 4);
     }
     if (pipeline_cache) load(false);
+    if (depth_bias) {
+      reg::RB_DEPTHCONTROL depth{};
+      depth.z_enable = depth.z_write_enable = 1; depth.zfunc = CompareFunction::kAlways;
+      set(XE_GPU_REG_RB_DEPTHCONTROL, depth.value);
+      const float base_color[]{.25f,.25f,.75f,1};
+      for (unsigned c = 0; c < 4; ++c) fp(XE_GPU_REG_SHADER_CONSTANT_000_X + 256 * 4 + c, base_color[c]);
+      words.insert(words.end(), {Packet(PM4_DRAW_INDX_2, 1), draw.value});
+      depth.zfunc = CompareFunction::kLessEqual;
+      set(XE_GPU_REG_RB_DEPTHCONTROL, depth.value);
+      reg::PA_SU_SC_MODE_CNTL mode{};
+      mode.poly_offset_front_enable = mode.poly_offset_back_enable = 1;
+      set(XE_GPU_REG_PA_SU_SC_MODE_CNTL, mode.value);
+      fp(XE_GPU_REG_PA_SU_POLY_OFFSET_FRONT_SCALE, 0);
+      fp(XE_GPU_REG_PA_SU_POLY_OFFSET_BACK_SCALE, 0);
+      fp(XE_GPU_REG_PA_SU_POLY_OFFSET_FRONT_OFFSET, depth_unorm ? -0x1p-13f : -0x1p-26f);
+      fp(XE_GPU_REG_PA_SU_POLY_OFFSET_BACK_OFFSET, depth_unorm ? -0x1p-13f : -0x1p-26f);
+      vertex_fetch(memory.GetPhysicalAddress(decal), 12);
+    }
     if (minmax_blend) {
       // MIN against one / MAX against zero must both yield source * alpha.
       // Seed the destination explicitly, independently of EDRAM allocation.
@@ -233,6 +275,13 @@ void Run(rex::system::IGraphicsSystem& gpu, rex::memory::Memory& memory, uint32_
     while (*marker != frame + 1 && std::chrono::steady_clock::now() < deadline)
       std::this_thread::sleep_for(std::chrono::microseconds(200));
     Require(*marker == frame + 1, "frame probe completion timeout");
+    if (depth_bias) {
+      const auto offset = texture_util::GetTiledOffset2D(frame < 2 ? 2 : 24, frame < 2 ? 24 : 16, kSide, 2);
+      uint32_t pixel;
+      std::memcpy(&pixel, memory.TranslateVirtual(image + uint32_t(offset)), sizeof(pixel));
+      if (pixel != 0xFF4040BF) std::cerr << "depth bias pixel got=" << std::hex << pixel << std::dec << '\n';
+      Require(pixel == 0xFF4040BF, "shader polygon offset must preserve coplanar decal depth");
+    }
     if (minmax_blend) {
       const uint32_t x = frame < 2 ? 2 : 24, y = frame < 2 ? 24 : 16;
       const auto offset = texture_util::GetTiledOffset2D(x, y, kSide, 2);
@@ -278,7 +327,7 @@ X360N_PROBE_MAIN {
     auto gpu = rex::system::LoadGpuPlugin(xenos ? "xenos" : "native", api == X360N_PROBE_ARG("d3d12") ? "d3d12" : "vulkan");
     Require(bool(gpu), "GPU plugin load");
     uint32_t extra_draws = 0, extra_resolves = 0, edram_base = 0;
-    bool sample_counts = true, clear_after_resolve = false, pipeline_cache = false, minmax_blend = false, vertex_aliases = false;
+    bool sample_counts = true, clear_after_resolve = false, pipeline_cache = false, minmax_blend = false, vertex_aliases = false, depth_bias = false, depth_unorm = false;
     int first_cvar = xenos ? 5 : 4;
     while (first_cvar < argc) {
       const auto flag = std::filesystem::path(argv[first_cvar]).string();
@@ -287,6 +336,8 @@ X360N_PROBE_MAIN {
       if (flag == "--pipeline-cache") { pipeline_cache = true; ++first_cvar; continue; }
       if (flag == "--minmax-blend") { minmax_blend = true; ++first_cvar; continue; }
       if (flag == "--vertex-aliases") { vertex_aliases = true; ++first_cvar; continue; }
+      if (flag == "--depth-bias") { depth_bias = true; sample_counts = false; ++first_cvar; continue; }
+      if (flag == "--depth-bias-unorm") { depth_bias = depth_unorm = true; sample_counts = false; ++first_cvar; continue; }
       if (flag == "--edram-base" && first_cvar + 1 < argc) {
         const auto base = std::stoull(std::filesystem::path(argv[first_cvar + 1]).string());
         Require(base < 8192, "EDRAM base must fit its guest register");
@@ -299,6 +350,7 @@ X360N_PROBE_MAIN {
     }
     Require(extra_draws <= 4096 && extra_resolves <= 64 && (extra_draws == 0) == (extra_resolves == 0), "invalid --draws/--resolves");
     Require(!minmax_blend || (!pipeline_cache && !extra_draws), "MIN/MAX fixture uses its own two draws per frame");
+    Require(!depth_bias || (!minmax_blend && !pipeline_cache && !vertex_aliases && !extra_draws), "depth fixture uses its own draws");
     for (int i = first_cvar; i < argc; ++i) {
       const auto assignment = std::filesystem::path(argv[i]).string();
       const auto equals = assignment.find('=');
@@ -315,7 +367,7 @@ X360N_PROBE_MAIN {
       std::cout << "pipeline storage setup us=" << std::chrono::duration_cast<std::chrono::microseconds>(
           std::chrono::steady_clock::now() - start).count() << '\n';
     }
-    Run(*gpu, *runtime.memory(), frames, extra_draws, extra_resolves, sample_counts, edram_base, clear_after_resolve, pipeline_cache, minmax_blend, vertex_aliases);
+    Run(*gpu, *runtime.memory(), frames, extra_draws, extra_resolves, sample_counts, edram_base, clear_after_resolve, pipeline_cache, minmax_blend, vertex_aliases, depth_bias, depth_unorm);
     gpu->Shutdown(); shutdown.gpu = nullptr; gpu.reset(); runtime.Shutdown(); rex::FlushLogging();
     std::cout << "PASS frames=" << frames << '\n';
     return 0;

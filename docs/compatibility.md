@@ -52,6 +52,14 @@ com texels residentes, swizzles constantes e texturas 1D largas; isso não
 certifica jogos nem ganho de FPS. A precisão de alguns formatos pequenos ainda
 é uma hipótese upstream; os testes verificam o modelo da revisão fixada.
 
+`depth_bias_shader_offset=false` preserva o padrão do Canary. A opção aplica o
+offset de decals no shader dos caminhos host RTV/FBO, com profundidade float24
+ou UNORM, quando há cor e teste LE/GE, sem stencil, alpha-to-mask ou oDepth do
+jogo. O caminho Vulkan mantém seu viés absoluto anterior quando a opção está
+desligada. O porte deriva de `cde5d85` (bomabomabomaboma), incluído na referência
+`4f04bc7`; não altera os caminhos ROV/FSI nem certifica efeitos ou desempenho em
+jogos.
+
 ## Native D3D12/Vulkan
 
 Backend experimental separado, retomado na G3 de 22–23/10. Retail 17559 em
