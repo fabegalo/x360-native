@@ -1,3 +1,20 @@
+# 0274: compile the unmodified pinned Canary report alongside the SDK port.
+file(SHA256 ${CMAKE_CURRENT_SOURCE_DIR}/../fixtures/canary_zpd_report.h _zpd_reference_sha)
+if(NOT _zpd_reference_sha STREQUAL "41085f3de5fa14c9834b7ea94e9cf48b0ad4f5c28ce12bf339ea9f7fd5fedc62")
+  message(FATAL_ERROR "Pinned Canary ZPD report fixture changed")
+endif()
+set(_zpd_reference_include ${CMAKE_CURRENT_BINARY_DIR}/canary-zpd-reference)
+file(MAKE_DIRECTORY ${_zpd_reference_include}/xenia/gpu)
+file(CONFIGURE OUTPUT ${_zpd_reference_include}/xenia/gpu/xenos.h
+    CONTENT "#include <rex/graphics/xenos.h>\n" @ONLY)
+add_executable(x360n_zpd_report_checks ../zpd_report_test.cpp)
+target_link_libraries(x360n_zpd_report_checks PRIVATE rexruntime)
+target_include_directories(x360n_zpd_report_checks PRIVATE
+    ${X360_REXGLUE_DIR}/include ${_zpd_reference_include})
+x360n_stage_runtime_dlls(x360n_zpd_report_checks)
+add_test(NAME sdkcheck.canary-zpd-report COMMAND x360n_zpd_report_checks)
+set_tests_properties(sdkcheck.canary-zpd-report PROPERTIES LABELS project TIMEOUT 30)
+
 # 0268: the texture offset option is shared, including Vulkan-only hosts.
 add_executable(x360n_scaled_texture_offsets_flag_checks ../scaled_texture_offsets_flag.cpp
     ${X360_REXGLUE_DIR}/src/graphics/flags.cpp)

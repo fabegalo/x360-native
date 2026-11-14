@@ -1,6 +1,17 @@
 # Local patches to ReXGlue SDK
 
-## 0273 â€” Canary register reset defaults
+## 0274 — Canary ZPD report conversion
+
+Ports `xenos_zpd_report.h` from Canary `4f04bc7`, preserving its BSD notice.
+D3D12 and Vulkan host-query writeback now split counts evenly across A/B lanes,
+wrap to 32 bits rather than saturating, and retain at least one sample when a
+nonzero host count is normalized for resolution scaling. The differential
+`sdkcheck.canary-zpd-report` compiles the unmodified, hash-pinned upstream header
+alongside the SDK port and compares counters and all 32 guest bytes. Existing
+query scheduling, fallback behavior and VIZ are unchanged and still need migration;
+this patch alone does not provide Canary query parity or validate GPU results.
+
+## 0273 — Canary register reset defaults
 
 Ports all 16 nonzero reset values from Canary `4f04bc7cc76b89bfcf7327b597d9770eaaddf935`
 (`register_file.cc`, blob `c697852e4775c1982c18a7e17a6d24bbc827a0e1`).

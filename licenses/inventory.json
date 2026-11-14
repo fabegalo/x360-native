@@ -18,6 +18,18 @@
   "attributions_sha256": "2f9a75cc1bc1f881dd2db55a2ee3b1c11606a14fda4f3263e9dd9d99a627ed90",
   "components": [
     {
+      "id": "xenia-canary-gpu",
+      "origin": "https://github.com/xenia-canary/xenia-canary",
+      "revision": "4f04bc7cc76b89bfcf7327b597d9770eaaddf935",
+      "spdx": "BSD-3-Clause",
+      "scope": "source",
+      "integration": "GPU register reset and ZPD report adaptations in SDK patches 0273/0274; unmodified ZPD report header used as a differential test reference.",
+      "obligations": "Preserve original notices and source/binary BSD license conditions.",
+      "license_file": "licenses/xenia-canary.txt",
+      "license_sha256": "369ea6b0f7ba57544067e9d470ca82a927da787fb0a749b11cb55f1fd0ba47ae",
+      "original": "https://raw.githubusercontent.com/xenia-canary/xenia-canary/4f04bc7cc76b89bfcf7327b597d9770eaaddf935/LICENSE"
+    },
+    {
       "id": "fidelityfx",
       "origin": "https://github.com/rexglue/FidelityFX-SDK.git",
       "revision": "eee08db1688ac3d1275a70b728f4a8ba22914213",
