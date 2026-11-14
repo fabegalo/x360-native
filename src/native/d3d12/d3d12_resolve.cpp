@@ -70,7 +70,8 @@ void D3D12Render::Resolve(const RegisterFile& r, rex::memory::Memory& memory) {
   recorded_work_ += eager_threshold_;
   Timer timer(stats_enabled_, resolve_ns_);
   guest_memory_ = &memory;
-  const auto fetch = r.GetVertexFetch(0);
+  auto fetch = r.GetVertexFetch(0);
+  fetch.address &= 0x07FFFFFF;
   if (fetch.type == xenos::FetchConstantType::kVertex && fetch.size == 6 &&
       uint64_t(fetch.address) * 4 + 24 <= 0x20000000) {
     SyncGuestRead(fetch.address << 2, 24, kReadResolveRect); // Rectangle read by the CPU below.

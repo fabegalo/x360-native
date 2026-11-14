@@ -128,6 +128,7 @@ void D3D12Render::Draw(const RegisterFile& r, rex::memory::Memory& memory, Shade
     if (indices) range(indices->guest_base, indices->length);
     for (const auto& b : vs.vertex_bindings()) {
       auto f = r.GetVertexFetch(b.fetch_constant);
+      f.address &= 0x07FFFFFF;
       if (f.type == FetchConstantType::kVertex) range(f.address << 2, f.size << 2);
     }
     for (unsigned i = 0; i < 32; ++i) {
@@ -359,6 +360,7 @@ void D3D12Render::Draw(const RegisterFile& r, rex::memory::Memory& memory, Shade
   for (const auto& range : memexport_ranges) mirror.RequestRange(range.address, range.length);
   for (const auto& b : vs.vertex_bindings()) {
     auto f = r.GetVertexFetch(b.fetch_constant);
+    f.address &= 0x07FFFFFF;
     if (f.type == FetchConstantType::kInvalidVertex) {
       // D3D marks unset streams invalid; guest shaders may reference them
       // only under a predicate (4E1DA281CC3D7EDB: vf5 behind c127.x). The

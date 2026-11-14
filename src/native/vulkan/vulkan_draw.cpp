@@ -380,7 +380,8 @@ void VulkanRender::Draw(const RegisterFile& regs, rex::memory::Memory& memory, S
   if (gpu_indices) mirror.RequestRange(indices->guest_base, count * index_bytes);
   for (const auto& range : exports) mirror.RequestRange(range.address, range.length);
   for (const auto& binding : vs.vertex_bindings()) {
-    const auto fetch = regs.GetVertexFetch(binding.fetch_constant);
+    auto fetch = regs.GetVertexFetch(binding.fetch_constant);
+    fetch.address &= 0x07FFFFFF;
     // Invalid/predicated streams are executed by the translated shader. They
     // do not describe a valid memory upload, as in Native D3D12.
     if (fetch.type == FetchConstantType::kInvalidVertex) continue;

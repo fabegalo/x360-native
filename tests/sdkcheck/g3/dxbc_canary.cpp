@@ -46,6 +46,7 @@ struct Op {
   uint32_t opcode;
   bool half, minus_half;
   bool scalar_zero = false, scalar_255 = false;
+  bool physical_mask = false;
 };
 
 std::vector<Op> ProgramOps(const std::vector<uint8_t>& blob) {
@@ -67,6 +68,7 @@ std::vector<Op> ProgramOps(const std::vector<uint8_t>& blob) {
       for (uint32_t w = at + 1; w < at + length && w < end; ++w) {
         op.half |= words[w] == std::bit_cast<uint32_t>(0.5f);
         op.minus_half |= words[w] == std::bit_cast<uint32_t>(-0.5f);
+        op.physical_mask |= words[w] == 0x1FFFFFFC;
         if (words[w] == 0x4001 && w + 1 < at + length) {
           op.scalar_zero |= words[w + 1] == 0;
           op.scalar_255 |= words[w + 1] == std::bit_cast<uint32_t>(255.0f);
@@ -262,6 +264,10 @@ int main(int argc, char** argv) {
     const auto blob = Translate(VertexFetchMicrocode(), xenos::ShaderType::kVertex);
     check(!blob.empty(), "vfetch DXBC translation");
     check(CountVertexFetchBounds(blob) >= 1, "out-of-bounds vertex fetch words read 0");
+    const auto ops = ProgramOps(blob);
+    check(std::count_if(ops.begin(), ops.end(), [](const Op& op) {
+      return op.opcode == 1 && op.physical_mask;
+    }) == 2, "vertex fetch address and bounds normalize physical aliases");
   }
   if (HMODULE compiler = LoadLibraryW(L"D3DCompiler_47.dll")) {
     auto disassemble = reinterpret_cast<pD3DDisassemble>(GetProcAddress(compiler, "D3DDisassemble"));

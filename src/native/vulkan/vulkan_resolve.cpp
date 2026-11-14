@@ -35,7 +35,8 @@ void VulkanRender::Resolve(const RegisterFile& regs, rex::memory::Memory& memory
   SubmitEarly();
   recorded_work_ += eager_threshold_;
   auto& mirror = Mirror(memory);
-  const auto fetch = regs.GetVertexFetch(0);
+  auto fetch = regs.GetVertexFetch(0);
+  fetch.address &= 0x07FFFFFF;
   if (fetch.type == xenos::FetchConstantType::kVertex && fetch.size == 6 &&
       uint64_t(fetch.address) * 4 + 24 <= GuestMemoryMirror::kSize) {
     SyncGuestRead(fetch.address << 2, 24, 0xFF);

@@ -14,6 +14,7 @@
 // --pipeline-cache with --xenos and >=32 extra draws exercises 32 equivalent
 // shader variants and persistent pipeline restoration; prints CPU wall times.
 // --minmax-blend checks source factors for MIN/MAX and subsequent blend reset.
+// --vertex-aliases exercises upper address bits of draw and resolve fetches.
 // --no-sample-counts leaves out the ZPD query and the visibility-tested draw
 // (no ROV sample counting), to isolate that path when diagnosing a host.
 // Prints each frame's scanout hash; no title data is involved.
@@ -65,7 +66,7 @@ constexpr uint32_t kSide = 32;
 // buffer (results the next guest sync publishes), before the ZPD/scanout part.
 void Run(rex::system::IGraphicsSystem& gpu, rex::memory::Memory& memory, uint32_t frames,
          uint32_t extra_draws, uint32_t extra_resolves, bool sample_counts, uint32_t edram_base,
-         bool clear_after_resolve, bool pipeline_cache, bool minmax_blend) {
+         bool clear_after_resolve, bool pipeline_cache, bool minmax_blend, bool vertex_aliases) {
   const auto ring = memory.SystemHeapAlloc(2u << 20, 4096, rex::memory::kSystemHeapPhysical);
   const auto vertices = memory.SystemHeapAlloc(4096, 4096, rex::memory::kSystemHeapPhysical);
   const auto rect = memory.SystemHeapAlloc(4096, 4096, rex::memory::kSystemHeapPhysical);
@@ -103,7 +104,9 @@ void Run(rex::system::IGraphicsSystem& gpu, rex::memory::Memory& memory, uint32_
       words.insert(words.end(), shader.begin(), shader.end());
     };
     auto vertex_fetch = [&](uint32_t address, uint32_t dwords) {
-      xe_gpu_vertex_fetch_t fetch{}; fetch.type = FetchConstantType::kVertex; fetch.address = address >> 2; fetch.size = dwords;
+      xe_gpu_vertex_fetch_t fetch{}; fetch.type = FetchConstantType::kVertex;
+      const uint32_t alias = vertex_aliases ? uint32_t(frame % 7 + 1) << 29 : 0;
+      fetch.address = (address | alias) >> 2; fetch.size = dwords;
       set(XE_GPU_REG_SHADER_CONSTANT_FETCH_00_0, fetch.dword_0); set(XE_GPU_REG_SHADER_CONSTANT_FETCH_00_1, fetch.dword_1);
     };
     reg::SQ_PROGRAM_CNTL program{}; program.vs_num_reg = 1; set(XE_GPU_REG_SQ_PROGRAM_CNTL, program.value);
@@ -275,7 +278,7 @@ X360N_PROBE_MAIN {
     auto gpu = rex::system::LoadGpuPlugin(xenos ? "xenos" : "native", api == X360N_PROBE_ARG("d3d12") ? "d3d12" : "vulkan");
     Require(bool(gpu), "GPU plugin load");
     uint32_t extra_draws = 0, extra_resolves = 0, edram_base = 0;
-    bool sample_counts = true, clear_after_resolve = false, pipeline_cache = false, minmax_blend = false;
+    bool sample_counts = true, clear_after_resolve = false, pipeline_cache = false, minmax_blend = false, vertex_aliases = false;
     int first_cvar = xenos ? 5 : 4;
     while (first_cvar < argc) {
       const auto flag = std::filesystem::path(argv[first_cvar]).string();
@@ -283,6 +286,7 @@ X360N_PROBE_MAIN {
       if (flag == "--clear-after-resolve") { clear_after_resolve = true; ++first_cvar; continue; }
       if (flag == "--pipeline-cache") { pipeline_cache = true; ++first_cvar; continue; }
       if (flag == "--minmax-blend") { minmax_blend = true; ++first_cvar; continue; }
+      if (flag == "--vertex-aliases") { vertex_aliases = true; ++first_cvar; continue; }
       if (flag == "--edram-base" && first_cvar + 1 < argc) {
         const auto base = std::stoull(std::filesystem::path(argv[first_cvar + 1]).string());
         Require(base < 8192, "EDRAM base must fit its guest register");
@@ -311,7 +315,7 @@ X360N_PROBE_MAIN {
       std::cout << "pipeline storage setup us=" << std::chrono::duration_cast<std::chrono::microseconds>(
           std::chrono::steady_clock::now() - start).count() << '\n';
     }
-    Run(*gpu, *runtime.memory(), frames, extra_draws, extra_resolves, sample_counts, edram_base, clear_after_resolve, pipeline_cache, minmax_blend);
+    Run(*gpu, *runtime.memory(), frames, extra_draws, extra_resolves, sample_counts, edram_base, clear_after_resolve, pipeline_cache, minmax_blend, vertex_aliases);
     gpu->Shutdown(); shutdown.gpu = nullptr; gpu.reset(); runtime.Shutdown(); rex::FlushLogging();
     std::cout << "PASS frames=" << frames << '\n';
     return 0;

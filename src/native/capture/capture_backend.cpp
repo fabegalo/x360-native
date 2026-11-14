@@ -231,7 +231,8 @@ void CaptureBackend::EmitDrawInputs(const RegisterFile& regs, Shader* vs, Shader
   std::vector<std::pair<uint32_t, uint32_t>> ranges;
   if (indices) ranges.emplace_back(indices->guest_base, indices->length);
   if (vs) for (const auto& binding : vs->vertex_bindings()) {
-    const auto fetch = regs.GetVertexFetch(binding.fetch_constant);
+    auto fetch = regs.GetVertexFetch(binding.fetch_constant);
+    fetch.address &= 0x07FFFFFF;
     if (fetch.type == FetchConstantType::kVertex) ranges.emplace_back(fetch.address << 2, fetch.size << 2);
   }
   TextureRanges(regs, vs, ranges);
@@ -383,7 +384,8 @@ void CaptureBackend::Resolve(const RegisterFile& regs, rex::memory::Memory& memo
   if (recording()) {
     CaptureWork work(*this);
     EmitRegisters(regs);
-    const auto rect = regs.GetVertexFetch(0);
+    auto rect = regs.GetVertexFetch(0);
+    rect.address &= 0x07FFFFFF;
     if (rect.type == FetchConstantType::kVertex) EmitRange(rect.address << 2, std::max<uint32_t>(rect.size << 2, 24u));
     draw_util::ResolveInfo info;
     if (draw_util::GetResolveInfo(regs, memory, 1, 1, false, false, info, false, GetConfiguredEdramTileCount()) && info.copy_dest_extent_length) {

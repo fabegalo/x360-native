@@ -285,6 +285,14 @@ int main() {
                        module.IsConstant(instruction.args[4], 0);
     }
     check(bounded_words >= 4, "out-of-bounds vertex fetch words read 0");
+    bool physical_alias = false;
+    for (const auto& instruction : module.instructions) {
+      if (instruction.op != spv::OpBitwiseAnd || instruction.args.size() != 4 ||
+          !module.IsConstant(instruction.args[3], 0x07FFFFFF)) continue;
+      const auto* shift = module.Def(instruction.args[2], spv::OpShiftRightLogical);
+      physical_alias |= shift && module.IsConstant(shift->args[3], 2);
+    }
+    check(physical_alias, "vertex fetch base normalizes physical aliases before bounds");
   }
 
   for (bool native2 : {false, true}) for (unsigned scale : {1u, 2u}) {

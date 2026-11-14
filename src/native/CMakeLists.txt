@@ -141,11 +141,22 @@ function(x360n_minmax_blend api)
   set_tests_properties(${name} PROPERTIES LABELS project TIMEOUT 240 RUN_SERIAL TRUE
       SKIP_REGULAR_EXPRESSION "requires a hardware D3D12 adapter")
 endfunction()
+function(x360n_vertex_aliases api)
+  set(name native.vertex-aliases-${api})
+  add_test(NAME ${name} COMMAND ${CMAKE_COMMAND}
+      -DPROBE=$<TARGET_FILE:x360n_native_frame_probe>
+      -DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/vertex-aliases-${api}
+      -DAPI=${api} -DXENOS=$<TARGET_EXISTS:rexgpu-xenos> -DVERTEX_ALIASES=ON
+      -P ${CMAKE_SOURCE_DIR}/tests/native/edram_capacity.cmake)
+  set_tests_properties(${name} PROPERTIES LABELS project TIMEOUT 240 RUN_SERIAL TRUE
+      SKIP_REGULAR_EXPRESSION "requires a hardware D3D12 adapter")
+endfunction()
 if(WIN32)
   x360n_native_capture_replay(d3d12)
   x360n_edram_capacity(d3d12)
   x360n_scalar_precision(d3d12)
   x360n_minmax_blend(d3d12)
+  x360n_vertex_aliases(d3d12)
   if(TARGET rexgpu-xenos)
     foreach(capacity standard extended)
       set(cache_test native.pipeline-cache-d3d12)
@@ -168,6 +179,7 @@ if(REXGLUE_USE_VULKAN)
   x360n_edram_capacity(vulkan)
   x360n_scalar_precision(vulkan)
   x360n_minmax_blend(vulkan)
+  x360n_vertex_aliases(vulkan)
 endif()
 if(NOT WIN32)
   # Headless Vulkan components; the remaining probes use D3D12/DXGI and Win32.
