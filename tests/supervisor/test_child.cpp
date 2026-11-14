@@ -108,6 +108,19 @@ int main(int argc, char** argv) {
   }
 #endif
 #ifdef _WIN32
+  if (!std::strcmp(argv[1], "image") || (!std::strcmp(argv[1], "module") && argc >= 3)) {
+    const bool load = !std::strcmp(argv[1], "module");
+    HMODULE module = load ? LoadLibraryW(std::filesystem::path(argv[2]).c_str()) : nullptr;
+    if (load && !module) return 65;
+    std::wstring name(32768, L'\0');
+    const auto count = GetModuleFileNameW(module, name.data(), DWORD(name.size()));
+    if (load) FreeLibrary(module);
+    if (!count || count >= name.size()) return 65;
+    name.resize(count);
+    const auto path = std::filesystem::path(name).u8string();
+    std::cout << std::string(path.begin(), path.end());
+    return 0;
+  }
   if (!std::strcmp(argv[1], "crash-memory")) {
     constexpr uintptr_t arena = 0x100000000ull;
     auto* bytes = static_cast<uint8_t*>(VirtualAlloc(reinterpret_cast<void*>(arena),0x10000,
@@ -176,6 +189,11 @@ int main(int argc, char** argv) {
     if (!in) return 66;
     std::cout << in.rdbuf();
     return 0;
+  }
+  if (!std::strcmp(argv[1], "write") && argc >= 4) {
+    std::ofstream out(argv[2], std::ios::binary);
+    out << argv[3];
+    return out ? 0 : 66;
   }
   return 64;
 }

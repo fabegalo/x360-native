@@ -9,7 +9,9 @@
 #include <stdexcept>
 #include <vector>
 #include <cerrno>
+#include <atomic>
 #ifdef _WIN32
+#include "digest_batch.h"
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <winioctl.h>
@@ -519,6 +521,96 @@ fs::path ChildWorkingDirectory(const fs::path& directory) {
   return spelling;
 #else
   return directory;
+#endif
+}
+
+struct ChildImage::State {
+  fs::path executable;
+#ifdef _WIN32
+  fs::path directory;
+  std::vector<fs::path> links;
+  std::unique_ptr<DigestBatch> verification;
+  ~State() {
+    verification.reset();
+    if (directory.empty()) return;
+    // Remove junctions themselves, never their original resource directories.
+    for (const auto& link : links) RemoveDirectoryW(io::Host(link).c_str());
+    std::error_code error;
+    for (int attempt = 0; attempt != 20; ++attempt) {
+      io::remove_all(directory, error);
+      if (!error) break;
+      Sleep(10);
+    }
+  }
+#endif
+};
+
+ChildImage::ChildImage(const fs::path& exe, const fs::path& stdout_file,
+                       const fs::path& stderr_file) : state_(std::make_unique<State>()) {
+  state_->executable = ChildExecutable(exe);
+#ifdef _WIN32
+  const auto source = io::canonical(exe);
+  if (source.native().size() < MAX_PATH) return;
+  // A junction shortens the DOS spelling, not the image's physical location.
+  // Windows can still return STATUS_BUFFER_OVERFLOW opening sibling files.
+  // Keep the original namespace/CWD and stage only the host image directory.
+  const auto base = NativeBuildRoot(ProjectPaths{source.parent_path()}).parent_path() / "x";
+  io::create_directories(base);
+  static std::atomic<uint64_t> sequence{0};
+  for (int attempt = 0; attempt != 8; ++attempt) {
+    const auto directory = base / (std::to_string(GetCurrentProcessId()) + "-" +
+        std::to_string(GetTickCount64()) + "-" + std::to_string(sequence.fetch_add(1)));
+    if ((directory / source.filename()).native().size() >= MAX_PATH)
+      throw std::runtime_error("Native execution directory exceeds the Windows path limit");
+    if (io::create_directory(directory)) { state_->directory = directory; break; }
+  }
+  if (state_->directory.empty()) throw std::runtime_error("Cannot create native execution directory");
+  state_->verification = std::make_unique<DigestBatch>();
+  const auto output = stdout_file.empty() ? fs::path{} : io::weakly_canonical(stdout_file);
+  const auto errors = stderr_file.empty() ? fs::path{} : io::weakly_canonical(stderr_file);
+  struct Product { fs::path source; FileDigest digest; };
+  std::vector<Product> products;
+  uint64_t bytes = 0;
+  for (const auto& item : io::directory_iterator(source.parent_path())) {
+    const auto path = item.path();
+    if (item.is_directory()) {
+      const auto link = state_->directory / path.filename();
+      if (!CreateJunction(link, io::canonical(path)))
+        throw std::runtime_error("Native execution resource link already exists");
+      state_->links.push_back(link);
+    } else if (item.is_regular_file()) {
+      if (path.extension() == ".lock" || path.filename().native().starts_with(L".x360n-")) continue;
+      const auto real = io::canonical(path);
+      if (real == output || real == errors) continue;
+      const auto digest = DigestFile(path);
+      if (!digest || digest->size > (std::numeric_limits<uint64_t>::max)() - bytes)
+        throw std::runtime_error("Cannot authenticate native execution product: " + PathUtf8(path));
+      bytes += digest->size;
+      products.push_back({path, *digest});
+    }
+  }
+  ULARGE_INTEGER available{};
+  if (!GetDiskFreeSpaceExW(io::Host(base).c_str(), &available, nullptr, nullptr) || bytes > available.QuadPart)
+    throw std::runtime_error("Insufficient space for the verified native execution products");
+  for (const auto& product : products) {
+    const auto target = state_->directory / product.source.filename();
+    io::copy_file(product.source, target);
+    const auto copied = DigestFile(target);
+    if (!copied || copied->size != product.digest.size || copied->sha256 != product.digest.sha256)
+      throw std::runtime_error("Native execution product verification failed: " + PathUtf8(target));
+  }
+  state_->executable = state_->directory / source.filename();
+  if (!io::is_regular_file(state_->executable)) throw std::runtime_error("Native execution image missing");
+#else
+  (void)stdout_file;
+  (void)stderr_file;
+#endif
+}
+ChildImage::~ChildImage() = default;
+const fs::path& ChildImage::executable() const { return state_->executable; }
+void ChildImage::ReleaseVerification() {
+#ifdef _WIN32
+  state_->verification.reset();
 #endif
 }
 

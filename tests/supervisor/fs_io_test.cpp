@@ -459,6 +459,89 @@ TEST_CASE("processes start from deep Unicode folders and keep relative paths", "
   CHECK(result.launch_error.find("outside an x360-native installation") != std::string::npos);
 }
 
+TEST_CASE("deep child image views verify products, refresh sidecars and clean only derived files", "[paths][fs-io][process]") {
+  Root root("fs_io_image");
+  const auto install = Installation(Exact(root.path, 280, u8"Instalação-ゲーム-🎮"));
+  const auto folder = install / ".local/build/titles/fixture";
+  io::create_directories(folder / "resources");
+  AliasCleanup alias{AliasOf(x360n::ChildWorkingDirectory(folder), folder, install)};
+  const auto exe = folder / fs::path(X360N_TEST_CHILD).filename();
+  io::copy_file(X360N_TEST_CHILD, exe);
+  const auto original = x360n::DigestFile(exe)->sha256;
+  const auto sidecar = folder / "config.json";
+  { io::ofstream(folder / "resources/asset.txt") << "resource"; }
+  fs::path staged;
+  fs::file_time_type time{};
+  for (const auto* value : {"before", "after!"}) {
+    { io::ofstream(sidecar) << value; }
+    if (time == fs::file_time_type{}) time = io::last_write_time(sidecar);
+    else io::last_write_time(sidecar, time);
+    {
+      x360n::ChildImage image(exe);
+      staged = image.executable();
+      CHECK(Length(io::canonical(staged)) < MAX_PATH);
+      CHECK(x360n::DigestFile(staged)->sha256 == original);
+      CHECK(Slurp(staged.parent_path() / "config.json") == value);
+      CHECK(io::equivalent(staged.parent_path() / "resources", folder / "resources"));
+      const auto writer = CreateFileW(io::Host(staged).c_str(), GENERIC_WRITE, 7, nullptr, OPEN_EXISTING, 0, nullptr);
+      CHECK(writer == INVALID_HANDLE_VALUE);
+      if (writer != INVALID_HANDLE_VALUE) CloseHandle(writer);
+    }
+    CHECK_FALSE(io::exists(staged.parent_path()));
+    CHECK(Slurp(sidecar) == value);
+    CHECK(Slurp(folder / "resources/asset.txt") == "resource");
+    CHECK(x360n::DigestFile(exe)->sha256 == original);
+  }
+  wchar_t system[MAX_PATH]{};
+  REQUIRE(GetSystemDirectoryW(system, MAX_PATH));
+  io::copy_file(fs::path(system) / "version.dll", folder / "neighbor.dll");
+  x360n::ProcessSpec spec{exe, {"image"}, folder, root.path / "out", root.path / "err", std::chrono::seconds(30)};
+  auto result = x360n::RunProcess(spec);
+  INFO(result.launch_error);
+  REQUIRE(result.launched);
+  REQUIRE(result.exit_code == 0);
+  const auto image = x360n::PathFromUtf8(Output(root.path / "out"));
+  CHECK(Length(image) < MAX_PATH);
+  CHECK_FALSE(io::exists(image.parent_path()));
+  spec.args = {"module", "neighbor.dll"};
+  result = x360n::RunProcess(spec);
+  INFO(result.launch_error);
+  REQUIRE(result.launched);
+  REQUIRE(result.exit_code == 0);
+  const auto module = x360n::PathFromUtf8(Output(root.path / "out"));
+  CHECK(module.filename() == "neighbor.dll");
+  CHECK(Length(module) < MAX_PATH);
+  CHECK_FALSE(io::exists(module.parent_path()));
+  CHECK(io::exists(folder / "neighbor.dll"));
+  spec.args = {"write", "config.json", "saved"};
+  result = x360n::RunProcess(spec);
+  REQUIRE(result.exit_code == 0);
+  CHECK(Slurp(sidecar) == "saved");
+  const auto cache = x360n::NativeBuildRoot(x360n::ProjectPaths{install}).parent_path() / "x";
+  const auto owned = [&] {
+    std::vector<fs::path> entries;
+    for (const auto& entry : io::directory_iterator(cache))
+      if (entry.path().filename().native().starts_with(std::to_wstring(x360n::CurrentProcessId()) + L"-"))
+        entries.push_back(entry.path());
+    std::sort(entries.begin(), entries.end());
+    return entries;
+  };
+  const auto before = owned();
+  const auto locked = CreateFileW(io::Host(sidecar).c_str(), GENERIC_READ, 0, nullptr, OPEN_EXISTING, 0, nullptr);
+  REQUIRE(locked != INVALID_HANDLE_VALUE);
+  CHECK_THROWS_AS(x360n::ChildImage(exe), std::runtime_error);
+  CloseHandle(locked);
+  CHECK(owned() == before);
+  spec.args = {"sleep", "2000"};
+  spec.timeout = std::chrono::milliseconds(30);
+  result = x360n::RunProcess(spec);
+  CHECK(result.timed_out);
+  CHECK(owned() == before);
+  CHECK(Slurp(sidecar) == "saved");
+  x360n::ChildImage short_image(X360N_TEST_CHILD);
+  CHECK(short_image.executable() == x360n::ChildExecutable(X360N_TEST_CHILD));
+}
+
 // A title started from the dashboard loads the dashboard's session UI host
 // with LoadLibrary. From a deep installation its real name failed ("Missing
 // verified dashboard system UI host"), stopping Castle Crashers at start.

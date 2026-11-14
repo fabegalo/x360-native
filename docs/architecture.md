@@ -89,6 +89,15 @@ contrato passam de `supervisor` para `platform`, com atualização do fingerprin
 de preparação. As APIs existentes, inclusive o namespace `x360n::desktop` do
 catálogo, permanecem para evitar uma migração nominal sem efeito funcional.
 
+No adaptador Windows, instalações curtas e longas mantêm os mesmos caminhos
+lógicos e diretório de trabalho. Quando o executável físico excede `MAX_PATH`,
+uma visão temporária curta dos produtos nativos e arquivos auxiliares é copiada
+e verificada por SHA-256 contra a origem protegida antes de `CreateProcess`;
+subdiretórios de recursos permanecem referências à origem. O encerramento da
+árvore supervisionada remove apenas essa visão derivada. Catálogo, recibos,
+originais e armazenamento do console continuam nas fronteiras existentes;
+nenhum requisito de instalação curta ou alteração do registro é introduzido.
+
 O supervisor ainda consome o modelo de atualização para recuperação de pacotes;
 o preflight de sessão permanece em `supervisor`, compilado no modelo compartilhado
 do launcher. Isso não transfere kernel/XAM ao frontend. A ligação do serviço de

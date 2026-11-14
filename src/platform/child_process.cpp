@@ -275,6 +275,8 @@ ProcessResult RunProcess(const ProcessSpec& spec) {
     return r;
   }
 
+  // Declared before the job: descendants must stop before image cleanup.
+  std::unique_ptr<ChildImage> image;
   Handle job(CreateJobObjectW(nullptr, nullptr));
   if (!job) {
     r.launch_error = LastError("CreateJobObjectW");
@@ -294,13 +296,13 @@ ProcessResult RunProcess(const ProcessSpec& spec) {
   si.hStdOutput = out.h;
   si.hStdError = err.h;
   PROCESS_INFORMATION pi{};
-  // The child sees the name it is started by (GetModuleFileName, argv[0]), so
-  // both use one spelling; see ChildExecutable and ChildWorkingDirectory for
-  // names deeper than Windows allows.
+  // argv retains the logical identity. Deep physical images use a verified
+  // short execution view; content, relative paths and console state keep CWD.
   std::wstring application, cmd, cwd;
   try {
     const auto program = ChildExecutable(spec.exe);
-    application = program.native();
+    image = std::make_unique<ChildImage>(spec.exe, spec.stdout_file, spec.stderr_file);
+    application = image->executable().native();
     cmd = BuildCommandLine(program, spec.args);
     if (!spec.working_dir.empty()) cwd = ChildWorkingDirectory(spec.working_dir).native();
   } catch (const std::exception& error) {
@@ -351,6 +353,8 @@ ProcessResult RunProcess(const ProcessSpec& spec) {
     TerminateProcess(process.h, 1);
     return r;
   }
+  // As with launch preflight, runtime may write its logical state after start.
+  image->ReleaseVerification();
   ResumeThread(thread.h);
   r.launched = true;
   ActionTrace::Event("process.created", start);

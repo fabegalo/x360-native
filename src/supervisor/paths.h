@@ -6,6 +6,7 @@
 #include <optional>
 #include <string>
 #include <cstdint>
+#include <memory>
 
 #include "fs_io.h"
 
@@ -80,6 +81,22 @@ std::filesystem::path ChildWorkingDirectory(const std::filesystem::path& directo
 // PowerShell 5.1 fail to start from an extended one), else the installation
 // alias as for the working directory, else the extended name.
 std::filesystem::path ChildExecutable(const std::filesystem::path& exe);
+
+// Owns a verified short physical image view when Windows cannot execute from
+// the source directory reliably. argv and the working directory stay logical;
+// derived files are removed after the supervised process tree has stopped.
+class ChildImage {
+ public:
+  ChildImage(const std::filesystem::path& exe,
+             const std::filesystem::path& stdout_file = {},
+             const std::filesystem::path& stderr_file = {});
+  ~ChildImage();
+  const std::filesystem::path& executable() const;
+  void ReleaseVerification();
+ private:
+  struct State;
+  std::unique_ptr<State> state_;
+};
 
 // The spelling of `path` that preparation tools get. Windows PowerShell 5.1,
 // cmd, Ninja and the compilers cannot open a name beyond MAX_PATH unless the
