@@ -61,6 +61,16 @@ int main() {
   }
 
   const auto code = ColorPixelMicrocode();
+  for (auto format : {xenos::ColorRenderTargetFormat::k_16_16_FLOAT,
+                      xenos::ColorRenderTargetFormat::k_16_16_16_16_FLOAT}) {
+    float rgb_low, alpha_low, rgb_high, alpha_high;
+    uint32_t keep_low, keep_high;
+    RenderTargetCache::GetPSIColorFormatInfo(format, 15, rgb_low, alpha_low, rgb_high,
+                                            alpha_high, keep_low, keep_high);
+    check(rgb_low == -131008.0f && alpha_low == -131008.0f &&
+          rgb_high == 131008.0f && alpha_high == 131008.0f,
+          "PSI FP16 preserves exponent 31 finite range");
+  }
   {
     Shader shader(xenos::ShaderType::kPixel, 1, code.data(), code.size(), std::endian::native);
     rex::string::StringBuffer disassembly;
@@ -72,6 +82,8 @@ int main() {
     check(translator.TranslateAnalyzedShader(translation) && translation.is_valid(),
           "DXBC ROV translation");
     const auto& binary = translation.translated_binary();
+    check(HasFloat(binary, 131008.0f) && HasFloat(binary, -131008.0f) &&
+          !HasFloat(binary, 65504.0f), "DXBC ROV extended FP16 packing range");
     check(!HasFloat(binary, 32767.0f / 32.0f), "DXBC ROV pack has no 32767/32 scale");
     check(!HasFloat(binary, 32.0f / 32767.0f), "DXBC ROV unpack has no 32/32767 scale");
     check(HasFloat(binary, 1024.0f) && HasFloat(binary, 1.0f / 1024.0f),
@@ -88,6 +100,8 @@ int main() {
     check(translator.TranslateAnalyzedShader(translation) && translation.is_valid(),
           "SPIR-V FSI translation");
     const auto& binary = translation.translated_binary();
+    check(HasFloat(binary, 131008.0f) && HasFloat(binary, -131008.0f) &&
+          !HasFloat(binary, 65504.0f), "SPIR-V FSI extended FP16 packing range");
     check(!HasFloat(binary, 32767.0f / 32.0f), "SPIR-V FSI pack has no 32767/32 scale");
     check(!HasFloat(binary, 32.0f / 32767.0f), "SPIR-V FSI unpack has no 32/32767 scale");
     check(HasFloat(binary, 32767.0f / 1024.0f), "SPIR-V FSI clamps to 32767/1024");

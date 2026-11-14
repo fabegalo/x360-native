@@ -148,7 +148,8 @@ void Run(rex::system::IGraphicsSystem& gpu, rex::memory::Memory& memory,
       fp(constants + 4 + c, c == 1 ? 1.0f : 0.0f); fp(constants + 8 + c, value[c]); fp(constants + 12 + c, mulsc_operand);
       if (precision) fp(constants + 16 + c, 0.0f);
     }
-    load(vertex, precision ? ScalarExportShader(scalar) : ExportShader(vertex, dynamic, fetch));
+    load(vertex, precision && scalar != ucode::AluScalarOpcode::kRetainPrev ?
+        ScalarExportShader(scalar) : ExportShader(vertex, dynamic, fetch));
     reg::VGT_DRAW_INITIATOR draw{}; draw.prim_type = PrimitiveType::kTriangleList;
     draw.source_select = SourceSelect::kAutoIndex; draw.num_indices = vertex ? count : 3;
     words.insert(words.end(), {Packet(PM4_DRAW_INDX_2, 1), draw.value});
@@ -247,6 +248,32 @@ void Run(rex::system::IGraphicsSystem& gpu, rex::memory::Memory& memory,
       issue(name.c_str(), ColorFormat::k_32_32_32_32_FLOAT, SurfaceNumberFormat::kFloat,
             input, 1, 16, raw(output), false, false, false, Endian128::kNone, AluScalarOpcode::kMulsc0, b);
     }
+    // Fixed guest encodings, independent of the translator's host FP16 intrinsics.
+    const std::pair<float, uint16_t> halves[]{
+        {0.0f, 0}, {-0.0f, 0x8000}, {1.0f, 0x3C00}, {-2.0f, 0xC000},
+        {65504.0f, 0x7BFF}, {65519.0f, 0x7BFF}, {65520.0f, 0x7C00},
+        {65536.0f, 0x7C00}, {70000.0f, 0x7C46}, {-65520.0f, 0xFC00},
+        {-70000.0f, 0xFC46}, {131008.0f, 0x7FFF},
+        {-131008.0f, 0xFFFF}, {200000.0f, 0x7FFF}, {INFINITY, 0x7FFF},
+        {-INFINITY, 0xFFFF}, {NAN, 0}, {0x1p-24f, 1}, {0x1p-25f, 0},
+        {0x3p-25f, 2}, {0x1p-14f, 0x0400}};
+    for (unsigned components : {1u, 2u, 4u}) {
+      const auto format = components == 1 ? ColorFormat::k_16_FLOAT : components == 2 ?
+          ColorFormat::k_16_16_FLOAT : ColorFormat::k_16_16_16_16_FLOAT;
+      for (size_t h = 0; h < std::size(halves); ++h) {
+        std::array<float, 4> input;
+        for (unsigned i = 0; i < 4; ++i) input[i] = halves[(h + i) % std::size(halves)].first;
+        std::vector<uint8_t> bytes(components * 2);
+        for (unsigned i = 0; i < components; ++i) {
+          const uint16_t packed = halves[(h + i) % std::size(halves)].second;
+          bytes[i * 2] = uint8_t(packed); bytes[i * 2 + 1] = uint8_t(packed >> 8);
+        }
+        const auto name = "extended FP16x" + std::to_string(components) + " input=" +
+            std::to_string(std::bit_cast<uint32_t>(input[0]));
+        issue(name.c_str(), format, SurfaceNumberFormat::kFloat,
+              input, 1, components * 2, bytes, false);
+      }
+    }
   } else {
   issue("pixel MEMEXPORT without color", ColorFormat::k_32_32_32_32_FLOAT, SurfaceNumberFormat::kFloat, data, 1, 16, raw(data), false);
   set(XE_GPU_REG_RB_MODECONTROL, uint32_t(EdramMode::kNoOperation));
@@ -266,7 +293,7 @@ void Run(rex::system::IGraphicsSystem& gpu, rex::memory::Memory& memory,
   for (const auto& result : expected) {
     bool equal = true;
     const auto* actual = memory.TranslatePhysical<const uint8_t*>(result.address);
-    if (precision) {
+    if (precision && result.scalar != ucode::AluScalarOpcode::kRetainPrev) {
       for (unsigned i = 0; i < 4; ++i) {
         float want, got;
         std::memcpy(&want, result.bytes.data() + i * 4, 4);
@@ -292,7 +319,15 @@ void Run(rex::system::IGraphicsSystem& gpu, rex::memory::Memory& memory,
         equal &= same;
       }
       equal &= std::memcmp(actual + 16, result.bytes.data() + 16, result.bytes.size() - 16) == 0;
-    } else equal = std::memcmp(actual, result.bytes.data(), result.bytes.size()) == 0;
+    } else {
+      equal = std::memcmp(actual, result.bytes.data(), result.bytes.size()) == 0;
+      if (!equal) {
+        uint16_t got, want;
+        std::memcpy(&got, actual, 2); std::memcpy(&want, result.bytes.data(), 2);
+        std::cerr << result.name << " first half got=" << std::hex << got
+                  << " expected=" << want << std::dec << '\n';
+      }
+    }
     std::cout << result.name << ' ' << (equal ? "PASS" : "FAIL") << '\n'; passed &= equal;
   }
   Require(passed, "GPU MEMEXPORT bytes differ from contract");
