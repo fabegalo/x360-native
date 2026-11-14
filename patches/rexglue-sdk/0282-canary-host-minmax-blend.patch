@@ -1,0 +1,1103 @@
+diff --git a/include/rex/graphics/pipeline/shader/dxbc_translator.h b/include/rex/graphics/pipeline/shader/dxbc_translator.h
+--- a/include/rex/graphics/pipeline/shader/dxbc_translator.h
++++ b/include/rex/graphics/pipeline/shader/dxbc_translator.h
+@@ -108,7 +108,7 @@
+     // If anything in this is structure is changed in a way not compatible with
+     // the previous layout, invalidate the pipeline storages by increasing this
+     // version number (0xYYYYMMDD)!
+-    static constexpr uint32_t kVersion = 0x20261119;
++    static constexpr uint32_t kVersion = 0x20261120;
+ 
+ 
+     // Opt-in for backends that make every possible destination resident and
+@@ -173,11 +173,15 @@
+       uint32_t output_point_size : 1;
+       // Dynamically indexable register count from SQ_PROGRAM_CNTL.
+       uint32_t dynamic_addressable_register_count : 8;
+-      // PA_CL_CLIP_CNTL::ps_ucp_mode for point primitives.
+-      uint32_t point_ps_ucp_mode : 2;
++      uint32_t : 2;
+       // uint32_t 1.
+       // Pipeline stage and input configuration.
+-      Shader::HostVertexShaderType host_vertex_shader_type : Shader::kHostVertexShaderTypeBitCount;
++      Shader::HostVertexShaderType host_vertex_shader_type
++          : Shader::kHostVertexShaderTypeBitCount;
++      uint32_t : 32 - Shader::kHostVertexShaderTypeBitCount;
++      // Local point clip mode occupies high-word bits 10:11.
++      uint32_t : 10;
++      uint32_t point_ps_ucp_mode : 2;
+     } vertex;
+     struct PixelShaderModification {
+       // uint32_t 0.
+@@ -195,10 +199,24 @@
+       uint32_t param_gen_point : 1;
+       uint32_t dynamic_addressable_register_count : 8;
+       // Non-ROV - depth / stencil output mode.
+-      DepthStencilMode depth_stencil_mode : 2;
++      DepthStencilMode depth_stencil_mode : 3;
++      // For host render targets with MIN/MAX blend op - the source blend factor
++      // to pre-multiply the shader output by (since D3D12 MIN/MAX ignores blend
++      // factors, but Xbox 360 applies them). kOne means no pre-multiply.
++      // Only RT0 is supported for now.
++      xenos::BlendFactor rt0_blend_rgb_factor_for_premult : 5;
++      xenos::BlendFactor rt0_blend_a_factor_for_premult : 5;
++      // PsParamGen and the memexport dedup must act like there's no resolution
++      // scaling. Doesn't affect fetch offsets, those follow texture scale, not
++      // from the draw. This is only set when the draw is native because of a
++      // set scale threshold (RTV only).
++      uint32_t resolution_scale_native : 1;
++      // For draws inside a hybrid occlusion query
++      // (RTV + occlusion_query_full_counters)
++      // Count coverage before the depth/stencil test in the ZPD counter.
+       uint32_t zpd_total : 1;
+-      uint32_t : 15;
+-      // Local counters occupy high-word bit 16, independently of Canary fields.
++      uint32_t : 3;
++      // Local counters are independent of the complete Canary low word.
+       uint32_t : 16;
+       uint32_t rov_sample_counts : 1;
+     } pixel;
+diff --git a/include/rex/graphics/pipeline/shader/spirv_translator.h b/include/rex/graphics/pipeline/shader/spirv_translator.h
+--- a/include/rex/graphics/pipeline/shader/spirv_translator.h
++++ b/include/rex/graphics/pipeline/shader/spirv_translator.h
+@@ -34,7 +34,7 @@
+     // prototyping stage (easier to do small granular updates with an
+     // incremental counter).
+     // Also invalidate stored translations when emitted control-flow changes.
+-    static constexpr uint32_t kVersion = 0x20261119;
++    static constexpr uint32_t kVersion = 0x20261120;
+ 
+ 
+     // Opt-in for backends that make every possible destination resident and
+@@ -76,18 +76,28 @@
+       uint32_t output_point_parameters : 1;
+       // Dynamically indexable register count from SQ_PROGRAM_CNTL.
+       uint32_t dynamic_addressable_register_count : 8;
++      // Pipeline stage and input configuration.
++      Shader::HostVertexShaderType host_vertex_shader_type
++          : Shader::kHostVertexShaderTypeBitCount;
++      // User clip plane count, number of clip planes enabled (0-6).
+       uint32_t user_clip_plane_count : 3;
++      // If user_clip_plane_count is non-zero, whether they should be cull
++      // distances instead of clip distances.
+       uint32_t user_clip_plane_cull : 1;
+-      // Whether vertex killing with the "and" operator is used, and one more
+-      // cull distance needs to be written.
++      // Vertex kill (oPts.z) with the "and" operator - the primitive is culled
++      // only when all of its vertices request the kill, emulated with an extra
++      // cull distance written after the user clip plane cull distances. The
++      // "or" operator sets the position to NaN instead and needs no bit here.
+       uint32_t vertex_kill_and : 1;
+-      // PA_CL_CLIP_CNTL::ps_ucp_mode for point primitives.
++      // The tessellation mode for domain shaders, selecting the tessellation
++      // evaluation shader spacing (Direct3D 12 sets it in the hull shaders, but
++      // in SPIR-V the spacing lives in the domain shader). Discrete uses equal
++      // spacing, continuous and adaptive use fractional even.
++      uint32_t tessellation_mode : 2;
++      uint32_t : 28;
++      // Local point clip mode occupies high-word bits 10:11.
++      uint32_t : 10;
+       uint32_t point_ps_ucp_mode : 2;
+-      // uint32_t 1.
+-      // Pipeline stage and input configuration.
+-      Shader::HostVertexShaderType host_vertex_shader_type : Shader::kHostVertexShaderTypeBitCount;
+-      // For domain host vertex shader types only, xenos::TessellationMode.
+-      uint32_t tessellation_mode : 2;
+     } vertex;
+     struct PixelShaderModification {
+       // uint32_t 0.
+@@ -106,9 +116,23 @@
+       uint32_t param_gen_point : 1;
+       // For host render targets - depth / stencil output mode.
+       DepthStencilMode depth_stencil_mode : 3;
++      // For host render targets with MIN/MAX blend op - the source blend factor
++      // to pre-multiply the shader output by (since Vulkan/D3D12 MIN/MAX
++      // ignores blend factors, but Xbox 360 applies them). kOne means no
++      // pre-multiply. Only RT0 is supported for now.
++      xenos::BlendFactor rt0_blend_rgb_factor_for_premult : 5;
++      xenos::BlendFactor rt0_blend_a_factor_for_premult : 5;
++      // PsParamGen and the memexport dedup must act like there's no resolution
++      // scaling. Doesn't affect fetch offsets, those follow texture scale, not
++      // from the draw. This is only set when the draw is native because of a
++      // set scale threshold (FBO only).
++      uint32_t resolution_scale_native : 1;
++      // For draws inside a hybrid occlusion query
++      // (FBO + occlusion_query_full_counters)
++      // Count coverage before the depth/stencil test in the ZPD counter.
+       uint32_t zpd_total : 1;
+-      uint32_t : 14;
+-      // Local counters occupy high-word bit 16, independently of Canary fields.
++      uint32_t : 3;
++      // Local counters are independent of the complete Canary low word.
+       uint32_t : 16;
+       uint32_t fsi_sample_counts : 1;
+     } pixel;
+diff --git a/src/graphics/d3d12/pipeline_cache.cpp b/src/graphics/d3d12/pipeline_cache.cpp
+--- a/src/graphics/d3d12/pipeline_cache.cpp
++++ b/src/graphics/d3d12/pipeline_cache.cpp
+@@ -909,6 +909,32 @@
+         modification.pixel.depth_stencil_mode = DepthStencilMode::kEarlyHint;
+       } else {
+         modification.pixel.depth_stencil_mode = DepthStencilMode::kNoModifiers;
++      }
++    }
++    modification.pixel.rt0_blend_rgb_factor_for_premult =
++        xenos::BlendFactor::kOne;
++    modification.pixel.rt0_blend_a_factor_for_premult =
++        xenos::BlendFactor::kOne;
++
++    if (shader.writes_color_target(0)) {
++      auto blend_control = regs.Get<reg::RB_BLENDCONTROL>(
++          reg::RB_BLENDCONTROL::rt_register_indices[0]);
++
++      // Pre-multiply by kSrcAlpha for MIN/MAX blend ops when dstFactor is ONE.
++      if ((blend_control.color_comb_fcn == xenos::BlendOp::kMin ||
++           blend_control.color_comb_fcn == xenos::BlendOp::kMax) &&
++          blend_control.color_srcblend == xenos::BlendFactor::kSrcAlpha &&
++          blend_control.color_destblend == xenos::BlendFactor::kOne) {
++        modification.pixel.rt0_blend_rgb_factor_for_premult =
++            xenos::BlendFactor::kSrcAlpha;
++      }
++
++      if ((blend_control.alpha_comb_fcn == xenos::BlendOp::kMin ||
++           blend_control.alpha_comb_fcn == xenos::BlendOp::kMax) &&
++          blend_control.alpha_srcblend == xenos::BlendFactor::kSrcAlpha &&
++          blend_control.alpha_destblend == xenos::BlendFactor::kOne) {
++        modification.pixel.rt0_blend_a_factor_for_premult =
++            xenos::BlendFactor::kSrcAlpha;
+       }
+     }
+   }
+diff --git a/src/graphics/pipeline/shader/dxbc_translator.cpp b/src/graphics/pipeline/shader/dxbc_translator.cpp
+--- a/src/graphics/pipeline/shader/dxbc_translator.cpp
++++ b/src/graphics/pipeline/shader/dxbc_translator.cpp
+@@ -121,6 +121,8 @@
+   shader_modification.pixel.depth_stencil_mode = Modification::DepthStencilMode::kNoModifiers;
+   if (REXCVAR_GET(dxbc_unorm8_fixed16))
+     shader_modification.value |= Modification::kUnorm8Fixed16;
++  shader_modification.pixel.rt0_blend_rgb_factor_for_premult = xenos::BlendFactor::kOne;
++  shader_modification.pixel.rt0_blend_a_factor_for_premult = xenos::BlendFactor::kOne;
+   return shader_modification.value;
+ }
+ 
+diff --git a/src/graphics/pipeline/shader/dxbc_translator_om.cpp b/src/graphics/pipeline/shader/dxbc_translator_om.cpp
+--- a/src/graphics/pipeline/shader/dxbc_translator_om.cpp
++++ b/src/graphics/pipeline/shader/dxbc_translator_om.cpp
+@@ -1737,7 +1737,8 @@
+ }
+ 
+ void DxbcShaderTranslator::CompletePixelShader_WriteToRTVs() {
+-  uint32_t shader_writes_color_targets = current_shader().writes_color_targets();
++  uint32_t shader_writes_color_targets =
++      current_shader().writes_color_targets();
+   if (!shader_writes_color_targets) {
+     return;
+   }
+@@ -1751,9 +1752,10 @@
+     // Apply the exponent bias after alpha to coverage because it needs the
+     // unbiased alpha from the shader.
+     a_.OpMul(dxbc::Dest::R(system_temp_color), dxbc::Src::R(system_temp_color),
+-             LoadSystemConstant(SystemConstants::Index::kColorExpBias,
+-                                offsetof(SystemConstants, color_exp_bias) + sizeof(float) * i,
+-                                dxbc::Src::kXXXX));
++             LoadSystemConstant(
++                 SystemConstants::Index::kColorExpBias,
++                 offsetof(SystemConstants, color_exp_bias) + sizeof(float) * i,
++                 dxbc::Src::kXXXX));
+     if (gamma_render_target_as_unorm8_) {
+       // Convert to gamma space - this is incorrect, since it must be done after
+       // blending on the Xbox 360, but this is just one of many blending issues
+@@ -1762,12 +1764,151 @@
+                dxbc::Src::LU(kSysFlag_ConvertColor0ToGamma << i));
+       a_.OpIf(true, dxbc::Src::R(gamma_temp, dxbc::Src::kXXXX));
+       // Saturate before the gamma conversion.
+-      a_.OpMov(dxbc::Dest::R(system_temp_color, 0b0111), dxbc::Src::R(system_temp_color), true);
++      a_.OpMov(dxbc::Dest::R(system_temp_color, 0b0111),
++               dxbc::Src::R(system_temp_color), true);
+       for (uint32_t j = 0; j < 3; ++j) {
+-        PreSaturatedLinearToPWLGamma(a_, system_temp_color, j, system_temp_color, j, gamma_temp, 0,
++        PreSaturatedLinearToPWLGamma(a_, system_temp_color, j,
++                                     system_temp_color, j, gamma_temp, 0,
+                                      gamma_temp, 1);
+       }
+       a_.OpEndIf();
++    }
++    // For RT0 with MIN/MAX blend op, pre-multiply by the source blend factor
++    // (since D3D12 MIN/MAX ignores blend factors, but Xbox 360 applies them).
++    if (i == 0 && !edram_rov_used_) {
++      xenos::BlendFactor rgb_factor_for_premult =
++          GetDxbcShaderModification().pixel.rt0_blend_rgb_factor_for_premult;
++      xenos::BlendFactor a_factor_for_premult =
++          GetDxbcShaderModification().pixel.rt0_blend_a_factor_for_premult;
++      bool premult_rgb = rgb_factor_for_premult != xenos::BlendFactor::kOne;
++      bool premult_a = a_factor_for_premult != xenos::BlendFactor::kOne;
++      if (premult_rgb || premult_a) {
++        uint32_t premult_temp = PushSystemTemp();
++        // Compute and apply RGB factor.
++        if (premult_rgb) {
++          switch (rgb_factor_for_premult) {
++            case xenos::BlendFactor::kZero:
++              a_.OpMov(dxbc::Dest::R(system_temp_color, 0b0111),
++                       dxbc::Src::LF(0.0f));
++              break;
++            case xenos::BlendFactor::kSrcColor:
++              // Multiply by itself (square).
++              a_.OpMul(dxbc::Dest::R(system_temp_color, 0b0111),
++                       dxbc::Src::R(system_temp_color),
++                       dxbc::Src::R(system_temp_color));
++              break;
++            case xenos::BlendFactor::kOneMinusSrcColor:
++              a_.OpAdd(dxbc::Dest::R(premult_temp, 0b0111), dxbc::Src::LF(1.0f),
++                       -dxbc::Src::R(system_temp_color));
++              a_.OpMul(dxbc::Dest::R(system_temp_color, 0b0111),
++                       dxbc::Src::R(system_temp_color),
++                       dxbc::Src::R(premult_temp));
++              break;
++            case xenos::BlendFactor::kSrcAlpha:
++              a_.OpMul(dxbc::Dest::R(system_temp_color, 0b0111),
++                       dxbc::Src::R(system_temp_color),
++                       dxbc::Src::R(system_temp_color, dxbc::Src::kWWWW));
++              break;
++            case xenos::BlendFactor::kOneMinusSrcAlpha:
++              a_.OpAdd(dxbc::Dest::R(premult_temp, 0b0001), dxbc::Src::LF(1.0f),
++                       -dxbc::Src::R(system_temp_color, dxbc::Src::kWWWW));
++              a_.OpMul(dxbc::Dest::R(system_temp_color, 0b0111),
++                       dxbc::Src::R(system_temp_color),
++                       dxbc::Src::R(premult_temp, dxbc::Src::kXXXX));
++              break;
++            case xenos::BlendFactor::kConstantColor:
++              a_.OpMul(dxbc::Dest::R(system_temp_color, 0b0111),
++                       dxbc::Src::R(system_temp_color),
++                       LoadSystemConstant(
++                           SystemConstants::Index::kEdramBlendConstant,
++                           offsetof(SystemConstants, edram_blend_constant),
++                           dxbc::Src::kXYZW));
++              break;
++            case xenos::BlendFactor::kOneMinusConstantColor:
++              a_.OpAdd(dxbc::Dest::R(premult_temp, 0b0111), dxbc::Src::LF(1.0f),
++                       -LoadSystemConstant(
++                           SystemConstants::Index::kEdramBlendConstant,
++                           offsetof(SystemConstants, edram_blend_constant),
++                           dxbc::Src::kXYZW));
++              a_.OpMul(dxbc::Dest::R(system_temp_color, 0b0111),
++                       dxbc::Src::R(system_temp_color),
++                       dxbc::Src::R(premult_temp));
++              break;
++            case xenos::BlendFactor::kConstantAlpha:
++              a_.OpMul(dxbc::Dest::R(system_temp_color, 0b0111),
++                       dxbc::Src::R(system_temp_color),
++                       LoadSystemConstant(
++                           SystemConstants::Index::kEdramBlendConstant,
++                           offsetof(SystemConstants, edram_blend_constant),
++                           dxbc::Src::kWWWW));
++              break;
++            case xenos::BlendFactor::kOneMinusConstantAlpha:
++              a_.OpAdd(dxbc::Dest::R(premult_temp, 0b0001), dxbc::Src::LF(1.0f),
++                       -LoadSystemConstant(
++                           SystemConstants::Index::kEdramBlendConstant,
++                           offsetof(SystemConstants, edram_blend_constant),
++                           dxbc::Src::kWWWW));
++              a_.OpMul(dxbc::Dest::R(system_temp_color, 0b0111),
++                       dxbc::Src::R(system_temp_color),
++                       dxbc::Src::R(premult_temp, dxbc::Src::kXXXX));
++              break;
++            default:
++              // kOne or unsupported - no pre-multiply.
++              break;
++          }
++        }
++        // Compute and apply alpha factor.
++        if (premult_a) {
++          switch (a_factor_for_premult) {
++            case xenos::BlendFactor::kZero:
++              a_.OpMov(dxbc::Dest::R(system_temp_color, 0b1000),
++                       dxbc::Src::LF(0.0f));
++              break;
++            case xenos::BlendFactor::kSrcColor:
++            case xenos::BlendFactor::kSrcAlpha:
++              // Alpha * Alpha.
++              a_.OpMul(dxbc::Dest::R(system_temp_color, 0b1000),
++                       dxbc::Src::R(system_temp_color, dxbc::Src::kWWWW),
++                       dxbc::Src::R(system_temp_color, dxbc::Src::kWWWW));
++              break;
++            case xenos::BlendFactor::kOneMinusSrcColor:
++            case xenos::BlendFactor::kOneMinusSrcAlpha:
++              a_.OpAdd(dxbc::Dest::R(premult_temp, 0b0001), dxbc::Src::LF(1.0f),
++                       -dxbc::Src::R(system_temp_color, dxbc::Src::kWWWW));
++              a_.OpMul(dxbc::Dest::R(system_temp_color, 0b1000),
++                       dxbc::Src::R(system_temp_color, dxbc::Src::kWWWW),
++                       dxbc::Src::R(premult_temp, dxbc::Src::kXXXX));
++              break;
++            case xenos::BlendFactor::kConstantColor:
++            case xenos::BlendFactor::kConstantAlpha:
++              a_.OpMul(dxbc::Dest::R(system_temp_color, 0b1000),
++                       dxbc::Src::R(system_temp_color, dxbc::Src::kWWWW),
++                       LoadSystemConstant(
++                           SystemConstants::Index::kEdramBlendConstant,
++                           offsetof(SystemConstants, edram_blend_constant),
++                           dxbc::Src::kWWWW));
++              break;
++            case xenos::BlendFactor::kOneMinusConstantColor:
++            case xenos::BlendFactor::kOneMinusConstantAlpha:
++              a_.OpAdd(dxbc::Dest::R(premult_temp, 0b0001), dxbc::Src::LF(1.0f),
++                       -LoadSystemConstant(
++                           SystemConstants::Index::kEdramBlendConstant,
++                           offsetof(SystemConstants, edram_blend_constant),
++                           dxbc::Src::kWWWW));
++              a_.OpMul(dxbc::Dest::R(system_temp_color, 0b1000),
++                       dxbc::Src::R(system_temp_color, dxbc::Src::kWWWW),
++                       dxbc::Src::R(premult_temp, dxbc::Src::kXXXX));
++              break;
++            case xenos::BlendFactor::kSrcAlphaSaturate:
++              // For alpha, SrcAlphaSaturate is 1.0, so no pre-multiply needed.
++              break;
++            default:
++              // kOne or unsupported - no pre-multiply.
++              break;
++          }
++        }
++        PopSystemTemp();  // premult_temp
++      }
+     }
+     // Copy the color from a readable temp register to an output register.
+     a_.OpMov(dxbc::Dest::O(i), dxbc::Src::R(system_temp_color));
+@@ -2591,28 +2732,121 @@
+           // Need to do min/max for color.
+           a_.OpElse();
+           {
+-            // Extract the color min (0) or max (1) bit to temp.x
+-            // temp.x = whether min or max should be used for color.
+-            a_.OpAnd(temp_x_dest, rt_blend_factors_ops_src, dxbc::Src::LU(1 << 5));
+-            // Check if need to do min or max for color.
+-            // temp.x = free.
++            uint32_t blend_src_temp = PushSystemTemp();
++            dxbc::Dest blend_src_temp_rgb_dest(
++                dxbc::Dest::R(blend_src_temp, 0b0111));
++            dxbc::Src blend_src_temp_src(dxbc::Src::R(blend_src_temp));
++
++            // Apply source color factor for min/max.
++            // Extract the source color factor to temp.x.
++            a_.OpAnd(temp_x_dest, rt_blend_factors_ops_src,
++                     dxbc::Src::LU((1 << 5) - 1));
+             a_.OpIf(true, temp_x_src);
+             {
+-              // Choose max of the colors without applying the factors to
+-              // color_temp.xyz.
+-              // color_temp.xyz = blended color.
+-              a_.OpMax(color_temp_rgb_dest, dxbc::Src::R(system_temps_color_[i]), color_temp_src);
++              a_.OpSwitch(temp_x_src);
++              ROV_HandleColorBlendFactorCases(system_temps_color_[i],
++                                              color_temp, blend_src_temp);
++              a_.OpEndSwitch();
++              // Check if fixed-point and needs clamping.
++              a_.OpAnd(
++                  temp_x_dest, rt_format_flags_src,
++                  dxbc::Src::LU(
++                      RenderTargetCache::kPSIColorFormatFlag_FixedPointColor));
++              a_.OpIf(true, temp_x_src);
++              {
++                a_.OpMax(blend_src_temp_rgb_dest, blend_src_temp_src,
++                         rt_clamp_vec_src.Select(0));
++                a_.OpMin(blend_src_temp_rgb_dest, blend_src_temp_src,
++                         rt_clamp_vec_src.Select(2));
++              }
++              a_.OpEndIf();
++              // Multiply source by factor.
++              a_.OpMul(blend_src_temp_rgb_dest,
++                       dxbc::Src::R(system_temps_color_[i]),
++                       blend_src_temp_src);
++              // Clamp result if fixed-point.
++              a_.OpIf(true, temp_x_src);
++              {
++                a_.OpMax(blend_src_temp_rgb_dest, blend_src_temp_src,
++                         rt_clamp_vec_src.Select(0));
++                a_.OpMin(blend_src_temp_rgb_dest, blend_src_temp_src,
++                         rt_clamp_vec_src.Select(2));
++              }
++              a_.OpEndIf();
+             }
+-            // Need to do min.
+             a_.OpElse();
+             {
+-              // Choose min of the colors without applying the factors to
+-              // color_temp.xyz.
+-              // color_temp.xyz = blended color.
+-              a_.OpMin(color_temp_rgb_dest, dxbc::Src::R(system_temps_color_[i]), color_temp_src);
++              a_.OpMov(blend_src_temp_rgb_dest, dxbc::Src::LF(0.0f));
+             }
+-            // Close the min or max check.
+             a_.OpEndIf();
++
++            // Apply destination color factor for min/max.
++            uint32_t blend_dest_temp = PushSystemTemp();
++            dxbc::Dest blend_dest_temp_rgb_dest(
++                dxbc::Dest::R(blend_dest_temp, 0b0111));
++            dxbc::Src blend_dest_temp_src(dxbc::Src::R(blend_dest_temp));
++
++            // Extract the destination color factor to temp.x.
++            a_.OpUBFE(temp_x_dest, dxbc::Src::LU(5), dxbc::Src::LU(8),
++                      rt_blend_factors_ops_src);
++            a_.OpIf(true, temp_x_src);
++            {
++              a_.OpSwitch(temp_x_src);
++              ROV_HandleColorBlendFactorCases(system_temps_color_[i],
++                                              color_temp, blend_dest_temp);
++              a_.OpEndSwitch();
++              // Check if fixed-point and needs clamping.
++              a_.OpAnd(
++                  temp_x_dest, rt_format_flags_src,
++                  dxbc::Src::LU(
++                      RenderTargetCache::kPSIColorFormatFlag_FixedPointColor));
++              a_.OpIf(true, temp_x_src);
++              {
++                a_.OpMax(blend_dest_temp_rgb_dest, blend_dest_temp_src,
++                         rt_clamp_vec_src.Select(0));
++                a_.OpMin(blend_dest_temp_rgb_dest, blend_dest_temp_src,
++                         rt_clamp_vec_src.Select(2));
++              }
++              a_.OpEndIf();
++              // Multiply destination by factor.
++              a_.OpMul(blend_dest_temp_rgb_dest, color_temp_src,
++                       blend_dest_temp_src);
++              // Clamp result if fixed-point.
++              a_.OpIf(true, temp_x_src);
++              {
++                a_.OpMax(blend_dest_temp_rgb_dest, blend_dest_temp_src,
++                         rt_clamp_vec_src.Select(0));
++                a_.OpMin(blend_dest_temp_rgb_dest, blend_dest_temp_src,
++                         rt_clamp_vec_src.Select(2));
++              }
++              a_.OpEndIf();
++            }
++            a_.OpElse();
++            {
++              a_.OpMov(blend_dest_temp_rgb_dest, dxbc::Src::LF(0.0f));
++            }
++            a_.OpEndIf();
++
++            // Now do min or max on the factored values.
++            // Extract the color min (0) or max (1) bit to temp.x.
++            a_.OpAnd(temp_x_dest, rt_blend_factors_ops_src,
++                     dxbc::Src::LU(1 << 5));
++            a_.OpIf(true, temp_x_src);
++            {
++              // MAX: color_temp.xyz = max(src * srcFactor, dst * dstFactor)
++              a_.OpMax(color_temp_rgb_dest, blend_src_temp_src,
++                       blend_dest_temp_src);
++            }
++            a_.OpElse();
++            {
++              // MIN: color_temp.xyz = min(src * srcFactor, dst * dstFactor)
++              a_.OpMin(color_temp_rgb_dest, blend_src_temp_src,
++                       blend_dest_temp_src);
++            }
++            a_.OpEndIf();
++
++            PopSystemTemp();  // blend_dest_temp
++            PopSystemTemp();  // blend_src_temp
+           }
+           // Close the color factor blending or min/max check.
+           a_.OpEndIf();
+@@ -2772,29 +3006,109 @@
+           // Need to do min/max for alpha.
+           a_.OpElse();
+           {
+-            // Extract the alpha min (0) or max (1) bit to temp.x.
+-            // temp.x = whether min or max should be used for alpha.
+-            a_.OpAnd(temp_x_dest, rt_blend_factors_ops_src, dxbc::Src::LU(1 << 21));
+-            // Check if need to do min or max for alpha.
+-            // temp.x = free.
++            // We'll use temp.x for source alpha (factored) and temp.y for
++            // destination alpha (factored).
++
++            // Apply source alpha factor for min/max.
++            // Extract the source alpha factor to temp.x (bits 16-20).
++            a_.OpUBFE(temp_x_dest, dxbc::Src::LU(5), dxbc::Src::LU(16),
++                      rt_blend_factors_ops_src);
+             a_.OpIf(true, temp_x_src);
+             {
+-              // Choose max of the alphas without applying the factors to
+-              // color_temp.w.
+-              // color_temp.w = blended alpha.
+-              a_.OpMax(color_temp_a_dest, dxbc::Src::R(system_temps_color_[i], dxbc::Src::kWWWW),
+-                       color_temp_a_src);
++              a_.OpSwitch(temp_x_src);
++              ROV_HandleAlphaBlendFactorCases(system_temps_color_[i],
++                                              color_temp, temp, 0);
++              a_.OpEndSwitch();
++              // Check if fixed-point and needs clamping.
++              uint32_t alpha_is_fixed_temp = PushSystemTemp();
++              a_.OpAnd(
++                  dxbc::Dest::R(alpha_is_fixed_temp, 0b0001),
++                  rt_format_flags_src,
++                  dxbc::Src::LU(
++                      RenderTargetCache::kPSIColorFormatFlag_FixedPointAlpha));
++              a_.OpIf(true,
++                      dxbc::Src::R(alpha_is_fixed_temp, dxbc::Src::kXXXX));
++              {
++                a_.OpMax(temp_x_dest, temp_x_src, rt_clamp_vec_src.Select(1));
++                a_.OpMin(temp_x_dest, temp_x_src, rt_clamp_vec_src.Select(3));
++              }
++              a_.OpEndIf();
++              // Multiply source alpha by factor.
++              a_.OpMul(temp_x_dest,
++                       dxbc::Src::R(system_temps_color_[i], dxbc::Src::kWWWW),
++                       temp_x_src);
++              // Clamp result if fixed-point.
++              a_.OpIf(true,
++                      dxbc::Src::R(alpha_is_fixed_temp, dxbc::Src::kXXXX));
++              PopSystemTemp();  // alpha_is_fixed_temp
++              {
++                a_.OpMax(temp_x_dest, temp_x_src, rt_clamp_vec_src.Select(1));
++                a_.OpMin(temp_x_dest, temp_x_src, rt_clamp_vec_src.Select(3));
++              }
++              a_.OpEndIf();
+             }
+-            // Need to do min.
+             a_.OpElse();
+             {
+-              // Choose min of the alphas without applying the factors to
+-              // color_temp.w.
+-              // color_temp.w = blended alpha.
+-              a_.OpMin(color_temp_a_dest, dxbc::Src::R(system_temps_color_[i], dxbc::Src::kWWWW),
+-                       color_temp_a_src);
++              a_.OpMov(temp_x_dest, dxbc::Src::LF(0.0f));
+             }
+-            // Close the min or max check.
++            a_.OpEndIf();
++
++            // Apply destination alpha factor for min/max.
++            // Extract the destination alpha factor to temp.y (bits 24-28).
++            a_.OpUBFE(temp_y_dest, dxbc::Src::LU(5), dxbc::Src::LU(24),
++                      rt_blend_factors_ops_src);
++            a_.OpIf(true, temp_y_src);
++            {
++              a_.OpSwitch(temp_y_src);
++              ROV_HandleAlphaBlendFactorCases(system_temps_color_[i],
++                                              color_temp, temp, 1);
++              a_.OpEndSwitch();
++              // Check if fixed-point and needs clamping.
++              uint32_t alpha_is_fixed_temp2 = PushSystemTemp();
++              a_.OpAnd(
++                  dxbc::Dest::R(alpha_is_fixed_temp2, 0b0001),
++                  rt_format_flags_src,
++                  dxbc::Src::LU(
++                      RenderTargetCache::kPSIColorFormatFlag_FixedPointAlpha));
++              a_.OpIf(true,
++                      dxbc::Src::R(alpha_is_fixed_temp2, dxbc::Src::kXXXX));
++              {
++                a_.OpMax(temp_y_dest, temp_y_src, rt_clamp_vec_src.Select(1));
++                a_.OpMin(temp_y_dest, temp_y_src, rt_clamp_vec_src.Select(3));
++              }
++              a_.OpEndIf();
++              // Multiply destination alpha by factor.
++              a_.OpMul(temp_y_dest, color_temp_a_src, temp_y_src);
++              // Clamp result if fixed-point.
++              a_.OpIf(true,
++                      dxbc::Src::R(alpha_is_fixed_temp2, dxbc::Src::kXXXX));
++              PopSystemTemp();  // alpha_is_fixed_temp2
++              {
++                a_.OpMax(temp_y_dest, temp_y_src, rt_clamp_vec_src.Select(1));
++                a_.OpMin(temp_y_dest, temp_y_src, rt_clamp_vec_src.Select(3));
++              }
++              a_.OpEndIf();
++            }
++            a_.OpElse();
++            {
++              a_.OpMov(temp_y_dest, dxbc::Src::LF(0.0f));
++            }
++            a_.OpEndIf();
++
++            // Now do min or max on the factored alpha values.
++            // Extract the alpha min (0) or max (1) bit to color_temp.w.
++            a_.OpAnd(color_temp_a_dest, rt_blend_factors_ops_src,
++                     dxbc::Src::LU(1 << 21));
++            a_.OpIf(true, color_temp_a_src);
++            {
++              // MAX: color_temp.w = max(src * srcFactor, dst * dstFactor)
++              a_.OpMax(color_temp_a_dest, temp_x_src, temp_y_src);
++            }
++            a_.OpElse();
++            {
++              // MIN: color_temp.w = min(src * srcFactor, dst * dstFactor)
++              a_.OpMin(color_temp_a_dest, temp_x_src, temp_y_src);
++            }
+             a_.OpEndIf();
+           }
+           // Close the alpha factor blending or min/max check.
+diff --git a/src/graphics/pipeline/shader/spirv_translator.cpp b/src/graphics/pipeline/shader/spirv_translator.cpp
+--- a/src/graphics/pipeline/shader/spirv_translator.cpp
++++ b/src/graphics/pipeline/shader/spirv_translator.cpp
+@@ -87,6 +87,8 @@
+     uint32_t dynamic_addressable_register_count) const {
+   Modification shader_modification;
+   shader_modification.pixel.dynamic_addressable_register_count = dynamic_addressable_register_count;
++  shader_modification.pixel.rt0_blend_rgb_factor_for_premult = xenos::BlendFactor::kOne;
++  shader_modification.pixel.rt0_blend_a_factor_for_premult = xenos::BlendFactor::kOne;
+   return shader_modification.value;
+ }
+ 
+diff --git a/src/graphics/pipeline/shader/spirv_translator_rb.cpp b/src/graphics/pipeline/shader/spirv_translator_rb.cpp
+--- a/src/graphics/pipeline/shader/spirv_translator_rb.cpp
++++ b/src/graphics/pipeline/shader/spirv_translator_rb.cpp
+@@ -1393,6 +1393,174 @@
+           builder_->getBuildPoint()->addInstruction(std::move(color_rgba_shuffle_op));
+         }
+ 
++        Modification shader_modification = GetSpirvShaderModification();
++        xenos::BlendFactor rt0_rgb_premult_factor =
++            shader_modification.pixel.rt0_blend_rgb_factor_for_premult;
++        xenos::BlendFactor rt0_a_premult_factor =
++            shader_modification.pixel.rt0_blend_a_factor_for_premult;
++
++        if (color_target_index == 0 &&
++            (rt0_rgb_premult_factor != xenos::BlendFactor::kOne ||
++             rt0_a_premult_factor != xenos::BlendFactor::kOne)) {
++          // Helper to extract RGB (xyz) from a float4.
++          auto extract_rgb = [&](spv::Id vec4) -> spv::Id {
++            uint_vector_temp_.clear();
++            uint_vector_temp_.push_back(0);
++            uint_vector_temp_.push_back(1);
++            uint_vector_temp_.push_back(2);
++            return builder_->createRvalueSwizzle(spv::NoPrecision, type_float3_,
++                                                 vec4, uint_vector_temp_);
++          };
++
++          // Get blend factor values.
++          auto get_factor_value = [&](xenos::BlendFactor factor,
++                                      bool for_alpha) -> spv::Id {
++            spv::Id src_color = color;
++            switch (factor) {
++              case xenos::BlendFactor::kZero:
++                return for_alpha ? const_float_0_ : const_float3_0_;
++              case xenos::BlendFactor::kOne:
++                return for_alpha ? const_float_1_ : const_float3_1_;
++              case xenos::BlendFactor::kSrcColor:
++                return for_alpha ? builder_->createCompositeExtract(
++                                       src_color, type_float_, 3)
++                                 : extract_rgb(src_color);
++              case xenos::BlendFactor::kOneMinusSrcColor: {
++                spv::Id src = for_alpha ? builder_->createCompositeExtract(
++                                              src_color, type_float_, 3)
++                                        : extract_rgb(src_color);
++                spv::Id one = for_alpha ? const_float_1_ : const_float3_1_;
++                return builder_->createBinOp(
++                    spv::OpFSub, for_alpha ? type_float_ : type_float3_, one,
++                    src);
++              }
++              case xenos::BlendFactor::kSrcAlpha: {
++                spv::Id alpha =
++                    builder_->createCompositeExtract(src_color, type_float_, 3);
++                if (for_alpha) {
++                  return alpha;
++                }
++                return builder_->smearScalar(spv::NoPrecision, alpha,
++                                             type_float3_);
++              }
++              case xenos::BlendFactor::kOneMinusSrcAlpha: {
++                spv::Id alpha =
++                    builder_->createCompositeExtract(src_color, type_float_, 3);
++                spv::Id one_minus_alpha = builder_->createBinOp(
++                    spv::OpFSub, type_float_, const_float_1_, alpha);
++                if (for_alpha) {
++                  return one_minus_alpha;
++                }
++                return builder_->smearScalar(spv::NoPrecision, one_minus_alpha,
++                                             type_float3_);
++              }
++              case xenos::BlendFactor::kConstantColor:
++              case xenos::BlendFactor::kConstantAlpha: {
++                // Load blend constant from system constants.
++                id_vector_temp_.clear();
++                id_vector_temp_.push_back(builder_->makeIntConstant(
++                    kSystemConstantEdramBlendConstant));
++                spv::Id blend_constant = builder_->createLoad(
++                    builder_->createAccessChain(spv::StorageClassUniform,
++                                                uniform_system_constants_,
++                                                id_vector_temp_),
++                    spv::NoPrecision);
++                if (factor == xenos::BlendFactor::kConstantAlpha) {
++                  spv::Id alpha = builder_->createCompositeExtract(
++                      blend_constant, type_float_, 3);
++                  if (for_alpha) {
++                    return alpha;
++                  }
++                  return builder_->smearScalar(spv::NoPrecision, alpha,
++                                               type_float3_);
++                }
++                if (for_alpha) {
++                  return builder_->createCompositeExtract(blend_constant,
++                                                          type_float_, 3);
++                }
++                return extract_rgb(blend_constant);
++              }
++              case xenos::BlendFactor::kOneMinusConstantColor:
++              case xenos::BlendFactor::kOneMinusConstantAlpha: {
++                id_vector_temp_.clear();
++                id_vector_temp_.push_back(builder_->makeIntConstant(
++                    kSystemConstantEdramBlendConstant));
++                spv::Id blend_constant = builder_->createLoad(
++                    builder_->createAccessChain(spv::StorageClassUniform,
++                                                uniform_system_constants_,
++                                                id_vector_temp_),
++                    spv::NoPrecision);
++                spv::Id constant_value;
++                if (factor == xenos::BlendFactor::kOneMinusConstantAlpha) {
++                  spv::Id alpha = builder_->createCompositeExtract(
++                      blend_constant, type_float_, 3);
++                  if (for_alpha) {
++                    constant_value = alpha;
++                  } else {
++                    constant_value = builder_->smearScalar(spv::NoPrecision,
++                                                           alpha, type_float3_);
++                  }
++                } else {
++                  if (for_alpha) {
++                    constant_value = builder_->createCompositeExtract(
++                        blend_constant, type_float_, 3);
++                  } else {
++                    constant_value = extract_rgb(blend_constant);
++                  }
++                }
++                spv::Id one = for_alpha ? const_float_1_ : const_float3_1_;
++                return builder_->createBinOp(
++                    spv::OpFSub, for_alpha ? type_float_ : type_float3_, one,
++                    constant_value);
++              }
++              default:
++                // Unsupported factors - return 1 (no multiply).
++                return for_alpha ? const_float_1_ : const_float3_1_;
++            }
++          };
++
++          // Apply RGB pre-multiply.
++          if (rt0_rgb_premult_factor != xenos::BlendFactor::kOne) {
++            spv::Id rgb_factor =
++                get_factor_value(rt0_rgb_premult_factor, false);
++            spv::Id rgb = extract_rgb(color);
++            rgb = builder_->createBinOp(spv::OpFMul, type_float3_, rgb,
++                                        rgb_factor);
++            // Reconstruct float4 with new RGB and original alpha.
++            spv::Id alpha =
++                builder_->createCompositeExtract(color, type_float_, 3);
++            id_vector_temp_.clear();
++            id_vector_temp_.push_back(
++                builder_->createCompositeExtract(rgb, type_float_, 0));
++            id_vector_temp_.push_back(
++                builder_->createCompositeExtract(rgb, type_float_, 1));
++            id_vector_temp_.push_back(
++                builder_->createCompositeExtract(rgb, type_float_, 2));
++            id_vector_temp_.push_back(alpha);
++            color = builder_->createCompositeConstruct(type_float4_,
++                                                       id_vector_temp_);
++          }
++
++          // Apply alpha pre-multiply.
++          if (rt0_a_premult_factor != xenos::BlendFactor::kOne) {
++            spv::Id a_factor = get_factor_value(rt0_a_premult_factor, true);
++            spv::Id alpha =
++                builder_->createCompositeExtract(color, type_float_, 3);
++            alpha = builder_->createBinOp(spv::OpFMul, type_float_, alpha,
++                                          a_factor);
++            // Replace alpha in color (extract RGB, reconstruct with new alpha).
++            id_vector_temp_.clear();
++            id_vector_temp_.push_back(
++                builder_->createCompositeExtract(color, type_float_, 0));
++            id_vector_temp_.push_back(
++                builder_->createCompositeExtract(color, type_float_, 1));
++            id_vector_temp_.push_back(
++                builder_->createCompositeExtract(color, type_float_, 2));
++            id_vector_temp_.push_back(alpha);
++            color = builder_->createCompositeConstruct(type_float4_,
++                                                       id_vector_temp_);
++          }
++        }
+         builder_->createStore(color, color_variable);
+       }
+     }
+@@ -3564,143 +3732,124 @@
+ 
+ spv::Id SpirvShaderTranslator::FSI_BlendColorOrAlphaWithUnclampedResult(
+     spv::Id is_fixed_point, spv::Id clamp_min_value, spv::Id clamp_max_value,
+-    spv::Id source_color_clamped, spv::Id source_alpha_clamped, spv::Id dest_color,
+-    spv::Id dest_alpha, spv::Id constant_color_clamped, spv::Id constant_alpha_clamped,
+-    spv::Id equation, spv::Id source_factor, spv::Id dest_factor) {
++    spv::Id source_color_clamped, spv::Id source_alpha_clamped,
++    spv::Id dest_color, spv::Id dest_alpha, spv::Id constant_color_clamped,
++    spv::Id constant_alpha_clamped, spv::Id equation, spv::Id source_factor,
++    spv::Id dest_factor) {
+   bool is_alpha = source_color_clamped == spv::NoResult;
+-  assert_false(!is_alpha &&
+-               (dest_color == spv::NoResult || constant_color_clamped == spv::NoResult));
+-  assert_false(is_alpha &&
+-               (dest_color != spv::NoResult || constant_color_clamped != spv::NoResult));
++  assert_false(!is_alpha && (dest_color == spv::NoResult ||
++                             constant_color_clamped == spv::NoResult));
++  assert_false(is_alpha && (dest_color != spv::NoResult ||
++                            constant_color_clamped != spv::NoResult));
+   spv::Id value_type = is_alpha ? type_float_ : type_float3_;
+ 
+-  // Handle min and max blend operations, which don't involve the factors.
+-  spv::Block& block_min_max_head = *builder_->getBuildPoint();
+-  spv::Block& block_min_max_min = builder_->makeNewBlock();
+-  spv::Block& block_min_max_max = builder_->makeNewBlock();
+-  spv::Block& block_min_max_default = builder_->makeNewBlock();
+-  spv::Block& block_min_max_merge = builder_->makeNewBlock();
+-  builder_->createSelectionMerge(&block_min_max_merge, spv::SelectionControlDontFlattenMask);
++  // Apply blend factors to source and destination first.
++  // Note: Unlike Vulkan's VK_BLEND_OP_MIN/MAX which ignore blend factors,
++  // the Xbox 360 applies blend factors before the min/max operation.
++  // So we apply factors unconditionally, then switch on the equation.
++  spv::Id term_source, term_dest;
++  if (is_alpha) {
++    term_source = FSI_ApplyAlphaBlendFactor(
++        source_alpha_clamped, is_fixed_point, clamp_min_value, clamp_max_value,
++        source_factor, source_alpha_clamped, dest_alpha,
++        constant_alpha_clamped);
++    term_dest = FSI_ApplyAlphaBlendFactor(
++        dest_alpha, is_fixed_point, clamp_min_value, clamp_max_value,
++        dest_factor, source_alpha_clamped, dest_alpha, constant_alpha_clamped);
++  } else {
++    term_source = FSI_ApplyColorBlendFactor(
++        source_color_clamped, is_fixed_point, clamp_min_value, clamp_max_value,
++        source_factor, source_color_clamped, source_alpha_clamped, dest_color,
++        dest_alpha, constant_color_clamped, constant_alpha_clamped);
++    term_dest = FSI_ApplyColorBlendFactor(
++        dest_color, is_fixed_point, clamp_min_value, clamp_max_value,
++        dest_factor, source_color_clamped, source_alpha_clamped, dest_color,
++        dest_alpha, constant_color_clamped, constant_alpha_clamped);
++  }
++
++  // Now switch on the blend equation to combine the factored terms.
++  spv::Block& block_equation_head = *builder_->getBuildPoint();
++  spv::Block& block_equation_add = builder_->makeNewBlock();
++  spv::Block& block_equation_subtract = builder_->makeNewBlock();
++  spv::Block& block_equation_rev_subtract = builder_->makeNewBlock();
++  spv::Block& block_equation_min = builder_->makeNewBlock();
++  spv::Block& block_equation_max = builder_->makeNewBlock();
++  spv::Block& block_equation_merge = builder_->makeNewBlock();
++  builder_->createSelectionMerge(&block_equation_merge,
++                                 spv::SelectionControlDontFlattenMask);
+   {
+-    std::unique_ptr<spv::Instruction> min_max_switch_op =
++    std::unique_ptr<spv::Instruction> equation_switch_op =
+         std::make_unique<spv::Instruction>(spv::OpSwitch);
+-    min_max_switch_op->addIdOperand(equation);
+-    min_max_switch_op->addIdOperand(block_min_max_default.getId());
+-    min_max_switch_op->addImmediateOperand(int32_t(xenos::BlendOp::kMin));
+-    min_max_switch_op->addIdOperand(block_min_max_min.getId());
+-    min_max_switch_op->addImmediateOperand(int32_t(xenos::BlendOp::kMax));
+-    min_max_switch_op->addIdOperand(block_min_max_max.getId());
+-    builder_->getBuildPoint()->addInstruction(std::move(min_max_switch_op));
+-  }
+-  block_min_max_default.addPredecessor(&block_min_max_head);
+-  block_min_max_min.addPredecessor(&block_min_max_head);
+-  block_min_max_max.addPredecessor(&block_min_max_head);
++    equation_switch_op->addIdOperand(equation);
++    // Make addition the default.
++    equation_switch_op->addIdOperand(block_equation_add.getId());
++    equation_switch_op->addImmediateOperand(int32_t(xenos::BlendOp::kSubtract));
++    equation_switch_op->addIdOperand(block_equation_subtract.getId());
++    equation_switch_op->addImmediateOperand(
++        int32_t(xenos::BlendOp::kRevSubtract));
++    equation_switch_op->addIdOperand(block_equation_rev_subtract.getId());
++    equation_switch_op->addImmediateOperand(int32_t(xenos::BlendOp::kMin));
++    equation_switch_op->addIdOperand(block_equation_min.getId());
++    equation_switch_op->addImmediateOperand(int32_t(xenos::BlendOp::kMax));
++    equation_switch_op->addIdOperand(block_equation_max.getId());
++    builder_->getBuildPoint()->addInstruction(std::move(equation_switch_op));
++  }
++  block_equation_add.addPredecessor(&block_equation_head);
++  block_equation_subtract.addPredecessor(&block_equation_head);
++  block_equation_rev_subtract.addPredecessor(&block_equation_head);
++  block_equation_min.addPredecessor(&block_equation_head);
++  block_equation_max.addPredecessor(&block_equation_head);
++
++  // Addition case (default).
++  builder_->setBuildPoint(&block_equation_add);
++  spv::Id result_add = builder_->createNoContractionBinOp(
++      spv::OpFAdd, value_type, term_source, term_dest);
++  builder_->createBranch(&block_equation_merge);
++
++  // Subtraction case.
++  builder_->setBuildPoint(&block_equation_subtract);
++  spv::Id result_subtract = builder_->createNoContractionBinOp(
++      spv::OpFSub, value_type, term_source, term_dest);
++  builder_->createBranch(&block_equation_merge);
++
++  // Reverse subtraction case.
++  builder_->setBuildPoint(&block_equation_rev_subtract);
++  spv::Id result_rev_subtract = builder_->createNoContractionBinOp(
++      spv::OpFSub, value_type, term_dest, term_source);
++  builder_->createBranch(&block_equation_merge);
+ 
+   // Min case.
+-  builder_->setBuildPoint(&block_min_max_min);
+-  spv::Id result_min = builder_->createBinBuiltinCall(
+-      value_type, ext_inst_glsl_std_450_, GLSLstd450FMin,
+-      is_alpha ? source_alpha_clamped : source_color_clamped, is_alpha ? dest_alpha : dest_color);
+-  builder_->createBranch(&block_min_max_merge);
++  builder_->setBuildPoint(&block_equation_min);
++  spv::Id result_min =
++      builder_->createBinBuiltinCall(value_type, ext_inst_glsl_std_450_,
++                                     GLSLstd450FMin, term_source, term_dest);
++  builder_->createBranch(&block_equation_merge);
+ 
+   // Max case.
+-  builder_->setBuildPoint(&block_min_max_max);
+-  spv::Id result_max = builder_->createBinBuiltinCall(
+-      value_type, ext_inst_glsl_std_450_, GLSLstd450FMax,
+-      is_alpha ? source_alpha_clamped : source_color_clamped, is_alpha ? dest_alpha : dest_color);
+-  builder_->createBranch(&block_min_max_merge);
+-
+-  // Blending with factors.
+-  spv::Id result_factors;
+-  {
+-    builder_->setBuildPoint(&block_min_max_default);
+-
+-    spv::Id term_source, term_dest;
+-    if (is_alpha) {
+-      term_source = FSI_ApplyAlphaBlendFactor(source_alpha_clamped, is_fixed_point, clamp_min_value,
+-                                              clamp_max_value, source_factor, source_alpha_clamped,
+-                                              dest_alpha, constant_alpha_clamped);
+-      term_dest = FSI_ApplyAlphaBlendFactor(dest_alpha, is_fixed_point, clamp_min_value,
+-                                            clamp_max_value, dest_factor, source_alpha_clamped,
+-                                            dest_alpha, constant_alpha_clamped);
+-    } else {
+-      term_source = FSI_ApplyColorBlendFactor(source_color_clamped, is_fixed_point, clamp_min_value,
+-                                              clamp_max_value, source_factor, source_color_clamped,
+-                                              source_alpha_clamped, dest_color, dest_alpha,
+-                                              constant_color_clamped, constant_alpha_clamped);
+-      term_dest = FSI_ApplyColorBlendFactor(dest_color, is_fixed_point, clamp_min_value,
+-                                            clamp_max_value, dest_factor, source_color_clamped,
+-                                            source_alpha_clamped, dest_color, dest_alpha,
+-                                            constant_color_clamped, constant_alpha_clamped);
+-    }
+-
+-    spv::Block& block_signs_head = *builder_->getBuildPoint();
+-    spv::Block& block_signs_add = builder_->makeNewBlock();
+-    spv::Block& block_signs_subtract = builder_->makeNewBlock();
+-    spv::Block& block_signs_reverse_subtract = builder_->makeNewBlock();
+-    spv::Block& block_signs_merge = builder_->makeNewBlock();
+-    builder_->createSelectionMerge(&block_signs_merge, spv::SelectionControlDontFlattenMask);
+-    {
+-      std::unique_ptr<spv::Instruction> signs_switch_op =
+-          std::make_unique<spv::Instruction>(spv::OpSwitch);
+-      signs_switch_op->addIdOperand(equation);
+-      // Make addition the default.
+-      signs_switch_op->addIdOperand(block_signs_add.getId());
+-      signs_switch_op->addImmediateOperand(int32_t(xenos::BlendOp::kSubtract));
+-      signs_switch_op->addIdOperand(block_signs_subtract.getId());
+-      signs_switch_op->addImmediateOperand(int32_t(xenos::BlendOp::kRevSubtract));
+-      signs_switch_op->addIdOperand(block_signs_reverse_subtract.getId());
+-      builder_->getBuildPoint()->addInstruction(std::move(signs_switch_op));
+-    }
+-    block_signs_add.addPredecessor(&block_signs_head);
+-    block_signs_subtract.addPredecessor(&block_signs_head);
+-    block_signs_reverse_subtract.addPredecessor(&block_signs_head);
+-
+-    // Addition case.
+-    builder_->setBuildPoint(&block_signs_add);
+-    spv::Id result_add =
+-        builder_->createNoContractionBinOp(spv::OpFAdd, value_type, term_source, term_dest);
+-    builder_->createBranch(&block_signs_merge);
+-
+-    // Subtraction case.
+-    builder_->setBuildPoint(&block_signs_subtract);
+-    spv::Id result_subtract =
+-        builder_->createNoContractionBinOp(spv::OpFSub, value_type, term_source, term_dest);
+-    builder_->createBranch(&block_signs_merge);
+-
+-    // Reverse subtraction case.
+-    builder_->setBuildPoint(&block_signs_reverse_subtract);
+-    spv::Id result_reverse_subtract =
+-        builder_->createNoContractionBinOp(spv::OpFSub, value_type, term_dest, term_source);
+-    builder_->createBranch(&block_signs_merge);
+-
+-    // Selection between the signs involved in the addition.
+-    builder_->setBuildPoint(&block_signs_merge);
+-    id_vector_temp_.clear();
+-    id_vector_temp_.reserve(2 * 3);
+-    id_vector_temp_.push_back(result_add);
+-    id_vector_temp_.push_back(block_signs_add.getId());
+-    id_vector_temp_.push_back(result_subtract);
+-    id_vector_temp_.push_back(block_signs_subtract.getId());
+-    id_vector_temp_.push_back(result_reverse_subtract);
+-    id_vector_temp_.push_back(block_signs_reverse_subtract.getId());
+-    result_factors = builder_->createOp(spv::OpPhi, value_type, id_vector_temp_);
+-    builder_->createBranch(&block_min_max_merge);
+-  }
+-  // Get the latest block for blending with factors after all the control flow.
+-  spv::Block& block_min_max_default_end = *builder_->getBuildPoint();
+-
+-  builder_->setBuildPoint(&block_min_max_merge);
+-  // Choose out of min, max, and blending with factors.
++  builder_->setBuildPoint(&block_equation_max);
++  spv::Id result_max =
++      builder_->createBinBuiltinCall(value_type, ext_inst_glsl_std_450_,
++                                     GLSLstd450FMax, term_source, term_dest);
++  builder_->createBranch(&block_equation_merge);
++
++  // Merge and create phi for the result.
++  builder_->setBuildPoint(&block_equation_merge);
+   id_vector_temp_.clear();
+-  id_vector_temp_.reserve(2 * 3);
++  id_vector_temp_.push_back(result_add);
++  id_vector_temp_.push_back(block_equation_add.getId());
++  id_vector_temp_.push_back(result_subtract);
++  id_vector_temp_.push_back(block_equation_subtract.getId());
++  id_vector_temp_.push_back(result_rev_subtract);
++  id_vector_temp_.push_back(block_equation_rev_subtract.getId());
+   id_vector_temp_.push_back(result_min);
+-  id_vector_temp_.push_back(block_min_max_min.getId());
++  id_vector_temp_.push_back(block_equation_min.getId());
+   id_vector_temp_.push_back(result_max);
+-  id_vector_temp_.push_back(block_min_max_max.getId());
+-  id_vector_temp_.push_back(result_factors);
+-  id_vector_temp_.push_back(block_min_max_default_end.getId());
+-  return builder_->createOp(spv::OpPhi, value_type, id_vector_temp_);
++  id_vector_temp_.push_back(block_equation_max.getId());
++  spv::Id result_unclamped =
++      builder_->createOp(spv::OpPhi, value_type, id_vector_temp_);
++
++  return FSI_FlushNaNClampAndInBlending(result_unclamped, is_fixed_point,
++                                        clamp_min_value, clamp_max_value);
+ }
+ 
+ }  // namespace rex::graphics
+diff --git a/src/graphics/vulkan/pipeline_cache.cpp b/src/graphics/vulkan/pipeline_cache.cpp
+--- a/src/graphics/vulkan/pipeline_cache.cpp
++++ b/src/graphics/vulkan/pipeline_cache.cpp
+@@ -1056,6 +1056,32 @@
+         modification.pixel.depth_stencil_mode = DepthStencilMode::kEarlyHint;
+       } else {
+         modification.pixel.depth_stencil_mode = DepthStencilMode::kNoModifiers;
++      }
++    }
++    modification.pixel.rt0_blend_rgb_factor_for_premult =
++        xenos::BlendFactor::kOne;
++    modification.pixel.rt0_blend_a_factor_for_premult =
++        xenos::BlendFactor::kOne;
++
++    if (shader.writes_color_target(0)) {
++      auto blend_control = regs.Get<reg::RB_BLENDCONTROL>(
++          reg::RB_BLENDCONTROL::rt_register_indices[0]);
++
++      // Pre-multiply by kSrcAlpha for MIN/MAX blend ops when dstFactor is ONE.
++      if ((blend_control.color_comb_fcn == xenos::BlendOp::kMin ||
++           blend_control.color_comb_fcn == xenos::BlendOp::kMax) &&
++          blend_control.color_srcblend == xenos::BlendFactor::kSrcAlpha &&
++          blend_control.color_destblend == xenos::BlendFactor::kOne) {
++        modification.pixel.rt0_blend_rgb_factor_for_premult =
++            xenos::BlendFactor::kSrcAlpha;
++      }
++
++      if ((blend_control.alpha_comb_fcn == xenos::BlendOp::kMin ||
++           blend_control.alpha_comb_fcn == xenos::BlendOp::kMax) &&
++          blend_control.alpha_srcblend == xenos::BlendFactor::kSrcAlpha &&
++          blend_control.alpha_destblend == xenos::BlendFactor::kOne) {
++        modification.pixel.rt0_blend_a_factor_for_premult =
++            xenos::BlendFactor::kSrcAlpha;
+       }
+     }
+   }

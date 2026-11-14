@@ -13,6 +13,7 @@
 // in later frames instead of persistence at that pixel.
 // --pipeline-cache with --xenos and >=32 extra draws exercises 32 equivalent
 // shader variants and persistent pipeline restoration; prints CPU wall times.
+// --minmax-blend checks source factors for MIN/MAX and subsequent blend reset.
 // --no-sample-counts leaves out the ZPD query and the visibility-tested draw
 // (no ROV sample counting), to isolate that path when diagnosing a host.
 // Prints each frame's scanout hash; no title data is involved.
@@ -64,7 +65,7 @@ constexpr uint32_t kSide = 32;
 // buffer (results the next guest sync publishes), before the ZPD/scanout part.
 void Run(rex::system::IGraphicsSystem& gpu, rex::memory::Memory& memory, uint32_t frames,
          uint32_t extra_draws, uint32_t extra_resolves, bool sample_counts, uint32_t edram_base,
-         bool clear_after_resolve, bool pipeline_cache) {
+         bool clear_after_resolve, bool pipeline_cache, bool minmax_blend) {
   const auto ring = memory.SystemHeapAlloc(2u << 20, 4096, rex::memory::kSystemHeapPhysical);
   const auto vertices = memory.SystemHeapAlloc(4096, 4096, rex::memory::kSystemHeapPhysical);
   const auto rect = memory.SystemHeapAlloc(4096, 4096, rex::memory::kSystemHeapPhysical);
@@ -122,7 +123,10 @@ void Run(rex::system::IGraphicsSystem& gpu, rex::memory::Memory& memory, uint32_
     set(XE_GPU_REG_PA_SC_SCREEN_SCISSOR_TL, 0); set(XE_GPU_REG_PA_SC_SCREEN_SCISSOR_BR, kSide | (kSide << 16));
     set(XE_GPU_REG_PA_SC_WINDOW_SCISSOR_TL, 0x80000000); set(XE_GPU_REG_PA_SC_WINDOW_SCISSOR_BR, kSide | (kSide << 16));
     set(XE_GPU_REG_PA_SU_VTX_CNTL, 1);
-    const float color[]{float(frame % 7 + 1) / 8, float(frame % 3) / 4, frame < 2 ? 1.0f : 0.25f, 1};
+    std::array<float, 4> color{float(frame % 7 + 1) / 8, float(frame % 3) / 4, frame < 2 ? 1.0f : 0.25f, 1};
+    if (minmax_blend) color = (frame % 4) >= 2 ?
+        std::array<float, 4>{.75f, .25f, .25f, .25f} :
+        std::array<float, 4>{.75f, .5f, .25f, .5f};
     for (unsigned c = 0; c < 4; ++c) fp(XE_GPU_REG_SHADER_CONSTANT_000_X + 256 * 4 + c, color[c]);
     if (pipeline_cache) for (unsigned i = 1; i < 32; ++i)
       for (unsigned c = 0; c < 4; ++c) fp(XE_GPU_REG_SHADER_CONSTANT_000_X + (256 + i) * 4 + c, color[c]);
@@ -153,6 +157,19 @@ void Run(rex::system::IGraphicsSystem& gpu, rex::memory::Memory& memory, uint32_
       resolve_to(memory.GetPhysicalAddress(targets) + group * kSide * kSide * 4);
     }
     if (pipeline_cache) load(false);
+    if (minmax_blend) {
+      // MIN against one / MAX against zero must both yield source * alpha.
+      // Seed the destination explicitly, independently of EDRAM allocation.
+      for (unsigned c = 0; c < 4; ++c)
+        fp(XE_GPU_REG_SHADER_CONSTANT_000_X + 256 * 4 + c, frame & 1 ? 1.0f : 0.0f);
+      words.insert(words.end(), {Packet(PM4_DRAW_INDX_2, 1), draw.value});
+      if ((frame % 4) < 2) {
+        blend.color_srcblend = blend.alpha_srcblend = BlendFactor::kSrcAlpha;
+        blend.color_destblend = blend.alpha_destblend = BlendFactor::kOne;
+        blend.color_comb_fcn = blend.alpha_comb_fcn = frame & 1 ? BlendOp::kMin : BlendOp::kMax;
+      }
+      set(XE_GPU_REG_RB_BLENDCONTROL0, blend.value);
+    }
     for (unsigned c = 0; c < 4; ++c) fp(XE_GPU_REG_SHADER_CONSTANT_000_X + 256 * 4 + c, color[c]);
     // ZPD around the draw: BEGIN, END with the big-endian pending token.
     const uint32_t report = memory.GetPhysicalAddress(reports) + (frame % 32) * 64;
@@ -213,6 +230,15 @@ void Run(rex::system::IGraphicsSystem& gpu, rex::memory::Memory& memory, uint32_
     while (*marker != frame + 1 && std::chrono::steady_clock::now() < deadline)
       std::this_thread::sleep_for(std::chrono::microseconds(200));
     Require(*marker == frame + 1, "frame probe completion timeout");
+    if (minmax_blend) {
+      const uint32_t x = frame < 2 ? 2 : 24, y = frame < 2 ? 24 : 16;
+      const auto offset = texture_util::GetTiledOffset2D(x, y, kSide, 2);
+      uint32_t pixel;
+      std::memcpy(&pixel, memory.TranslateVirtual(image + uint32_t(offset)), sizeof(pixel));
+      const uint32_t expected = (frame % 4) >= 2 ? 0x404040BF : 0x40204060;
+      if (pixel != expected) std::cerr << "MIN/MAX pixel got=" << std::hex << pixel << std::dec << '\n';
+      Require(pixel == expected, "MIN/MAX source factors and blend reset must match guest pixels");
+    }
     if (clear_after_resolve && !sample_counts) {
       const auto offset = texture_util::GetTiledOffset2D(2, 24, kSide, 2);
       uint32_t pixel;
@@ -249,13 +275,14 @@ X360N_PROBE_MAIN {
     auto gpu = rex::system::LoadGpuPlugin(xenos ? "xenos" : "native", api == X360N_PROBE_ARG("d3d12") ? "d3d12" : "vulkan");
     Require(bool(gpu), "GPU plugin load");
     uint32_t extra_draws = 0, extra_resolves = 0, edram_base = 0;
-    bool sample_counts = true, clear_after_resolve = false, pipeline_cache = false;
+    bool sample_counts = true, clear_after_resolve = false, pipeline_cache = false, minmax_blend = false;
     int first_cvar = xenos ? 5 : 4;
     while (first_cvar < argc) {
       const auto flag = std::filesystem::path(argv[first_cvar]).string();
       if (flag == "--no-sample-counts") { sample_counts = false; ++first_cvar; continue; }
       if (flag == "--clear-after-resolve") { clear_after_resolve = true; ++first_cvar; continue; }
       if (flag == "--pipeline-cache") { pipeline_cache = true; ++first_cvar; continue; }
+      if (flag == "--minmax-blend") { minmax_blend = true; ++first_cvar; continue; }
       if (flag == "--edram-base" && first_cvar + 1 < argc) {
         const auto base = std::stoull(std::filesystem::path(argv[first_cvar + 1]).string());
         Require(base < 8192, "EDRAM base must fit its guest register");
@@ -267,6 +294,7 @@ X360N_PROBE_MAIN {
       first_cvar += 2;
     }
     Require(extra_draws <= 4096 && extra_resolves <= 64 && (extra_draws == 0) == (extra_resolves == 0), "invalid --draws/--resolves");
+    Require(!minmax_blend || (!pipeline_cache && !extra_draws), "MIN/MAX fixture uses its own two draws per frame");
     for (int i = first_cvar; i < argc; ++i) {
       const auto assignment = std::filesystem::path(argv[i]).string();
       const auto equals = assignment.find('=');
@@ -283,7 +311,7 @@ X360N_PROBE_MAIN {
       std::cout << "pipeline storage setup us=" << std::chrono::duration_cast<std::chrono::microseconds>(
           std::chrono::steady_clock::now() - start).count() << '\n';
     }
-    Run(*gpu, *runtime.memory(), frames, extra_draws, extra_resolves, sample_counts, edram_base, clear_after_resolve, pipeline_cache);
+    Run(*gpu, *runtime.memory(), frames, extra_draws, extra_resolves, sample_counts, edram_base, clear_after_resolve, pipeline_cache, minmax_blend);
     gpu->Shutdown(); shutdown.gpu = nullptr; gpu.reset(); runtime.Shutdown(); rex::FlushLogging();
     std::cout << "PASS frames=" << frames << '\n';
     return 0;

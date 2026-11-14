@@ -156,6 +156,24 @@ int main() {
       std::cerr << "FAIL " << name << '\n';
     }
   };
+  {
+    using M = SpirvShaderTranslator::Modification;
+    M m;
+    m.pixel.rt0_blend_rgb_factor_for_premult = xenos::BlendFactor::kSrcAlpha;
+    m.pixel.rt0_blend_a_factor_for_premult = xenos::BlendFactor::kOne;
+    m.pixel.resolution_scale_native = m.pixel.zpd_total = m.pixel.fsi_sample_counts = 1;
+    check(m.value == ShaderModificationKey((uint64_t(xenos::BlendFactor::kSrcAlpha) << 49) |
+        (uint64_t(xenos::BlendFactor::kOne) << 54) | (UINT64_C(1) << 59) | (UINT64_C(1) << 60),
+        UINT64_C(1) << 16), "SPIR-V Canary fields remain separate from local counters");
+    M vertex;
+    vertex.vertex.point_ps_ucp_mode = 3;
+    check(vertex.value == ShaderModificationKey(0, UINT64_C(3) << 10),
+          "SPIR-V local point clip mode occupies only the high word");
+    M clip;
+    clip.vertex.user_clip_plane_count = 6;
+    check(clip.value == ShaderModificationKey(UINT64_C(6) << 29, 0),
+          "SPIR-V vertex fields use the Canary low-word layout");
+  }
   for (auto opcode : {ucode::AluScalarOpcode::kMaxAs, ucode::AluScalarOpcode::kMaxAsf}) {
     SpirvShaderTranslator translator(SpirvShaderTranslator::Features(true), true, true, false);
     const Module module(Translate(translator, ScalarMicrocode(opcode)));

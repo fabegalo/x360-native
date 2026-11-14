@@ -131,10 +131,21 @@ function(x360n_scalar_precision api)
     endforeach()
   endforeach()
 endfunction()
+function(x360n_minmax_blend api)
+  set(name native.minmax-blend-${api})
+  add_test(NAME ${name} COMMAND ${CMAKE_COMMAND}
+      -DPROBE=$<TARGET_FILE:x360n_native_frame_probe>
+      -DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/minmax-blend-${api}
+      -DAPI=${api} -DXENOS=$<TARGET_EXISTS:rexgpu-xenos> -DMINMAX_BLEND=ON
+      -P ${CMAKE_SOURCE_DIR}/tests/native/edram_capacity.cmake)
+  set_tests_properties(${name} PROPERTIES LABELS project TIMEOUT 240 RUN_SERIAL TRUE
+      SKIP_REGULAR_EXPRESSION "requires a hardware D3D12 adapter")
+endfunction()
 if(WIN32)
   x360n_native_capture_replay(d3d12)
   x360n_edram_capacity(d3d12)
   x360n_scalar_precision(d3d12)
+  x360n_minmax_blend(d3d12)
   if(TARGET rexgpu-xenos)
     add_test(NAME native.pipeline-cache-d3d12 COMMAND ${CMAKE_COMMAND}
         -DPROBE=$<TARGET_FILE:x360n_native_frame_probe>
@@ -149,6 +160,7 @@ if(REXGLUE_USE_VULKAN)
   x360n_native_capture_replay(vulkan)
   x360n_edram_capacity(vulkan)
   x360n_scalar_precision(vulkan)
+  x360n_minmax_blend(vulkan)
 endif()
 if(NOT WIN32)
   # Headless Vulkan components; the remaining probes use D3D12/DXGI and Win32.
