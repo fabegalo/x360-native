@@ -28,7 +28,7 @@ DxbcShader* ShaderCache::Load(xenos::ShaderType type, const uint32_t* data, uint
   shaders_.emplace(hash, std::move(shader));
   return result;
 }
-Shader::Translation* ShaderCache::Translate(DxbcShader& shader, uint64_t modification) {
+Shader::Translation* ShaderCache::Translate(DxbcShader& shader, rex::graphics::ShaderModificationKey modification) {
   bool created = false;
   auto* result = shader.GetOrCreateTranslation(modification, &created);
   if (created && !translator.TranslateAnalyzedShader(*result))

@@ -22,6 +22,11 @@ using namespace rex::graphics;
 using namespace rex::graphics::xenos;
 using rex::X_STATUS;
 namespace {
+#if defined(X360N_QUERY_XENOS)
+constexpr bool kXenos = true;
+#else
+constexpr bool kXenos = false;
+#endif
 void Require(bool result, const char* what) { if (!result) throw std::runtime_error(what); }
 uint32_t Packet(uint32_t opcode, uint32_t count) { return 0xC0000000 | ((count - 1) << 16) | (opcode << 8); }
 std::vector<uint32_t> Shader(bool vertex, bool depth = false, bool kill = false) {
@@ -65,7 +70,7 @@ void Run(rex::system::IGraphicsSystem& gpu, rex::memory::Memory& memory) {
   set(XE_GPU_REG_VGT_MAX_VTX_INDX, 0xFFFFFF);
   set(XE_GPU_REG_PA_CL_VTE_CNTL, 0x3F);
   fp(XE_GPU_REG_PA_CL_VPORT_XSCALE, side / 2.0f); fp(XE_GPU_REG_PA_CL_VPORT_XOFFSET, side / 2.0f);
-  fp(XE_GPU_REG_PA_CL_VPORT_YSCALE, -side / 2.0f); fp(XE_GPU_REG_PA_CL_VPORT_YOFFSET, side / 2.0f);
+  fp(XE_GPU_REG_PA_CL_VPORT_YSCALE, -float(side) / 2.0f); fp(XE_GPU_REG_PA_CL_VPORT_YOFFSET, side / 2.0f);
   fp(XE_GPU_REG_PA_CL_VPORT_ZSCALE, 1.0f); fp(XE_GPU_REG_PA_CL_VPORT_ZOFFSET, 0.0f);
   set(XE_GPU_REG_PA_SC_SCREEN_SCISSOR_TL, 0);
   set(XE_GPU_REG_PA_SC_SCREEN_SCISSOR_BR, side | (side << 16));
@@ -129,10 +134,29 @@ void Run(rex::system::IGraphicsSystem& gpu, rex::memory::Memory& memory) {
     query("two draws accumulate", (pixels << samples) * 2, 0, 0, 2);
   }
   for (unsigned id : {0u, 31u, 32u, 63u}) {
+    auto survey = [&](bool visible) {
+      if constexpr (!kXenos) return;
+      draw_condition = 0;
+      words.insert(words.end(), {Packet(PM4_VIZ_QUERY, 1), id});
+      reg::PA_SC_VIZ_QUERY viz{}; viz.viz_query_ena = 1; viz.kill_pix_post_hi_z = 1; viz.viz_query_id = id;
+      set(XE_GPU_REG_PA_SC_VIZ_QUERY, viz.value);
+      reg::RB_HIZCONTROL hiz{}; hiz.hiz_enable = 1;
+      set(XE_GPU_REG_RB_HIZCONTROL, hiz.value);
+      reg::RB_DEPTHCONTROL depth{}; depth.z_enable = 1;
+      depth.zfunc = visible ? CompareFunction::kAlways : CompareFunction::kNever;
+      set(XE_GPU_REG_RB_DEPTHCONTROL, depth.value);
+      issue_draw();
+      words.insert(words.end(), {Packet(PM4_VIZ_QUERY, 1), id | 0x100});
+      set(XE_GPU_REG_PA_SC_VIZ_QUERY, 0);
+      set(XE_GPU_REG_RB_DEPTHCONTROL, 0);
+    };
+    survey(false);
     draw_condition = 0x100 | id;
     set(XE_GPU_REG_PA_SC_VIZ_QUERY_STATUS_0, 0);
     set(XE_GPU_REG_PA_SC_VIZ_QUERY_STATUS_1, 0);
     query("predicate false", 0, 0, 0);
+    survey(true);
+    draw_condition = 0x100 | id;
     set(id < 32 ? XE_GPU_REG_PA_SC_VIZ_QUERY_STATUS_0 : XE_GPU_REG_PA_SC_VIZ_QUERY_STATUS_1, 1u << (id & 31));
     query("predicate true", pixels * 4, 0, 0);
   }
@@ -170,6 +194,16 @@ void Run(rex::system::IGraphicsSystem& gpu, rex::memory::Memory& memory) {
   auto* marker = memory.TranslateVirtual<volatile uint32_t*>(done);
   while (*marker != 1 && std::chrono::steady_clock::now() < deadline) std::this_thread::sleep_for(std::chrono::milliseconds(1));
   Require(*marker == 1, "probe GPU completion timeout");
+  if constexpr (kXenos) {
+    // Strict reports may retire after the CPU command marker. Wait for all
+    // sentinels rather than treating command consumption as GPU completion.
+    for (size_t i = 0; i < cases.size(); ++i) {
+      auto* end = memory.TranslateVirtual<volatile uint32_t*>(reports + uint32_t(i * 64) + 32);
+      while (end[4] == 0xEDFEFFFF && std::chrono::steady_clock::now() < deadline)
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+      Require(end[4] != 0xEDFEFFFF, "strict ZPD report completion timeout");
+    }
+  }
   Require(report_watch.invalidations.load() != 0, "ZPD physical publication did not invalidate guest aliases");
   bool passed = true;
   for (size_t i = 0; i < cases.size(); ++i) {
@@ -179,10 +213,13 @@ void Run(rex::system::IGraphicsSystem& gpu, rex::memory::Memory& memory) {
     for (unsigned c = 0; c < 8; ++c) {
       const uint32_t delta = end[c] - begin[c];
       std::cout << ' ' << delta;
-      passed &= delta == cases[i].expected[c];
+      if constexpr (kXenos) {
+        if (!(c & 1)) passed &= delta + (end[c + 1] - begin[c + 1]) == cases[i].expected[c];
+      } else passed &= delta == cases[i].expected[c];
       // Draws outside a query must neither instrument shaders nor advance the
       // counters. Counter snapshots remain cumulative between query intervals.
-      if (i && i < consecutive_cases) passed &= begin[c] == (begin - 8)[c];
+      // Canary snapshots free-running counters, including draws between queries.
+      if (!kXenos && i && i < consecutive_cases) passed &= begin[c] == (begin - 8)[c];
     }
     std::cout << '\n';
   }
@@ -201,7 +238,16 @@ X360N_PROBE_MAIN {
     rex::RuntimeConfig config; config.tool_mode = true; config.kernel_init = rex::kernel::InitializeKernel;
     Require(rt.Setup(std::move(config)) == X_STATUS_SUCCESS, "runtime setup");
     if (requested == X360N_PROBE_ARG("d3d12")) rex::cvar::SetFlagByName("d3d12_debug", "true");
-    auto gpu = rex::system::LoadGpuPlugin("native", backend); Require(bool(gpu), "Native plugin load");
+    auto gpu = rex::system::LoadGpuPlugin(kXenos ? "xenos" : "native", backend); Require(bool(gpu), "GPU plugin load");
+    if constexpr (kXenos) {
+      if (requested == X360N_PROBE_ARG("d3d12"))
+        Require(rex::cvar::SetFlagByName("d3d12_debug", "true"), "D3D12 validation flag");
+      Require(rex::cvar::SetFlagByName("occlusion_query", "strict"), "strict query flag");
+      Require(rex::cvar::SetFlagByName("occlusion_query_full_counters", "true"), "full query counter flag");
+      Require(rex::cvar::SetFlagByName("async_shader_compilation", "false"), "synchronous probe pipelines");
+      Require(rex::cvar::SetFlagByName(requested == X360N_PROBE_ARG("d3d12") ? "render_target_path_d3d12" : "render_target_path_vulkan",
+          requested == X360N_PROBE_ARG("d3d12") ? "rov" : "fsi"), "interlock query path flag");
+    }
     if(argc==4) {
       const auto variant=ProbeArg(argv[3]);
       Require(requested==X360N_PROBE_ARG("d3d12") &&
@@ -213,7 +259,8 @@ X360N_PROBE_MAIN {
     struct Shutdown { rex::system::IGraphicsSystem* gpu; ~Shutdown() { if (gpu) gpu->Shutdown(); } } shutdown{gpu.get()};
     Run(*gpu, *rt.memory());
     gpu->Shutdown(); shutdown.gpu = nullptr; gpu.reset(); rt.Shutdown(); rex::FlushLogging();
-    std::cout << "PASS Native/" << backend << " ZPD real samples, early/late depth, stencil, alpha, kill, 1x/2x/4x\n";
+    std::cout << "PASS " << (kXenos ? "Xenos/" : "Native/") << backend
+              << " ZPD real samples, early/late depth, stencil, alpha, kill, 1x/2x/4x\n";
     return 0;
   } catch (const std::exception& e) { std::cerr << e.what() << '\n'; return 1; }
 }

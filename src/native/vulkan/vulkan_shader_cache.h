@@ -18,7 +18,7 @@ class VulkanShaderCache {
     rex::graphics::Shader::Translation* guest;
     VkShaderModule module;
   };
-  Translation Translate(rex::graphics::SpirvShader&, uint64_t modification);
+  Translation Translate(rex::graphics::SpirvShader&, rex::graphics::ShaderModificationKey modification);
   rex::graphics::SpirvShaderTranslator translator;
  private:
   const rex::ui::vulkan::VulkanDevice& device_;

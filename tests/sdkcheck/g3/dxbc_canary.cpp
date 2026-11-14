@@ -125,12 +125,12 @@ uint32_t CountVertexFetchBounds(const std::vector<uint8_t>& blob) {
 
 std::vector<uint8_t> Translate(const std::vector<uint32_t>& code,
                                 xenos::ShaderType type = xenos::ShaderType::kPixel,
-                                bool rov = false, bool param_gen = false, uint64_t extra = 0) {
+                                bool rov = false, bool param_gen = false, rex::graphics::ShaderModificationKey extra = 0) {
   Shader shader(type, 1, code.data(), code.size(), std::endian::native);
   rex::string::StringBuffer disassembly;
   shader.AnalyzeUcode(disassembly);
   DxbcShaderTranslator translator(rex::ui::GraphicsProvider::GpuVendorID::kNvidia, false, rov);
-  uint64_t modification = type == xenos::ShaderType::kPixel
+  rex::graphics::ShaderModificationKey modification = type == xenos::ShaderType::kPixel
       ? translator.GetDefaultPixelShaderModification(2) : translator.GetDefaultVertexShaderModification(2);
   if (param_gen && type == xenos::ShaderType::kPixel) {
     DxbcShaderTranslator::Modification m(modification);
@@ -165,6 +165,33 @@ int main(int argc, char** argv) {
       std::cerr << "FAIL " << name << '\n';
     }
   };
+  {
+    const auto code = Microcode(false, false);
+    Shader shader(xenos::ShaderType::kPixel, 1, code.data(), code.size(), std::endian::native);
+    DxbcShaderTranslator::Modification counter;
+    counter.pixel.rov_sample_counts = 1;
+    check(counter.value.low == 0 && counter.value.high == (uint64_t(1) << 16),
+          "Native sample counter occupies only its local word");
+    const ShaderModificationKey upstream{uint64_t(1) << 63, 0};
+    const auto local = DxbcShaderTranslator::Modification::kMemExportDynamicAddress;
+    auto* a = shader.GetOrCreateTranslation(upstream);
+    auto* b = shader.GetOrCreateTranslation(local);
+    auto* both = shader.GetOrCreateTranslation(upstream | local);
+    check(a != b && a != both && b != both && shader.translations().size() == 3,
+          "both words distinguish cached translations");
+    check(shader.GetTranslation(upstream) == a && shader.GetTranslation(local) == b,
+          "both words survive cache lookup");
+    ShaderModificationKey restored;
+    const auto original = upstream | local;
+    std::memcpy(&restored, &original, sizeof(restored));
+    check(restored == original && restored.low == upstream.low && restored.high == local.high,
+          "portable two-word cache storage round trip");
+    check(fmt::format("{:016X}", original) == "00000000000000018000000000000000",
+          "diagnostic identity includes both words");
+    shader.DestroyTranslation(local);
+    check(!shader.GetTranslation(local) && shader.GetTranslation(upstream) == a,
+          "destroying a local variant preserves its upstream counterpart");
+  }
   for (bool unnormalized : {false, true}) {
     for (bool offset_z : {false, true}) {
       const auto code = Microcode(unnormalized, offset_z);
@@ -244,7 +271,7 @@ int main(int argc, char** argv) {
     // quantized color target and coverage output for the host render target.
     {
       const auto ordinary = Translate(Microcode(false, false), xenos::ShaderType::kPixel, true);
-      const auto hybrid = Translate(Microcode(false, false), xenos::ShaderType::kPixel, true, false, uint64_t(1) << 59);
+      const auto hybrid = Translate(Microcode(false, false), xenos::ShaderType::kPixel, true, false, DxbcShaderTranslator::Modification::kNativeHardwareColor);
       ID3DBlob* assembly = nullptr;
       const bool valid = disassemble && !hybrid.empty() && SUCCEEDED(disassemble(hybrid.data(), hybrid.size(), 0, nullptr, &assembly));
       check(valid, "hybrid color DXBC disassembles");

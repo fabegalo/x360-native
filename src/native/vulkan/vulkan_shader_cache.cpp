@@ -45,7 +45,7 @@ SpirvShader* VulkanShaderCache::Load(xenos::ShaderType type, const uint32_t* wor
   shaders_.emplace(hash, std::move(shader));
   return result;
 }
-VulkanShaderCache::Translation VulkanShaderCache::Translate(SpirvShader& shader, uint64_t modification) {
+VulkanShaderCache::Translation VulkanShaderCache::Translate(SpirvShader& shader, rex::graphics::ShaderModificationKey modification) {
   bool created = false;
   auto* translated = shader.GetOrCreateTranslation(modification, &created);
   if (created && !translator.TranslateAnalyzedShader(*translated))

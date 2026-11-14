@@ -1,4 +1,17 @@
 # 0274: compile the unmodified pinned Canary report alongside the SDK port.
+add_executable(x360n_query_state_checks ../query_state_test.cpp
+    ${X360_REXGLUE_DIR}/src/graphics/command_processor.cpp
+    ${X360_REXGLUE_DIR}/src/graphics/graphics_system.cpp
+    ${X360_REXGLUE_DIR}/src/graphics/shared_memory.cpp
+    ${X360_REXGLUE_DIR}/src/graphics/register_file.cpp
+    ${X360_REXGLUE_DIR}/src/graphics/registers.cpp
+    ${X360_REXGLUE_DIR}/src/graphics/flags.cpp)
+target_link_libraries(x360n_query_state_checks PRIVATE rexruntime)
+target_include_directories(x360n_query_state_checks PRIVATE ${X360_REXGLUE_DIR}/thirdparty/renderdoc)
+x360n_stage_runtime_dlls(x360n_query_state_checks)
+add_test(NAME sdkcheck.canary-query-state COMMAND x360n_query_state_checks)
+set_tests_properties(sdkcheck.canary-query-state PROPERTIES LABELS project TIMEOUT 30)
+
 file(SHA256 ${CMAKE_CURRENT_SOURCE_DIR}/../fixtures/canary_zpd_report.h _zpd_reference_sha)
 if(NOT _zpd_reference_sha STREQUAL "41085f3de5fa14c9834b7ea94e9cf48b0ad4f5c28ce12bf339ea9f7fd5fedc62")
   message(FATAL_ERROR "Pinned Canary ZPD report fixture changed")

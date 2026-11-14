@@ -98,6 +98,12 @@ add_test(NAME sdkcheck.canary-viewport COMMAND x360n_canary_viewport_checks)
 set_tests_properties(sdkcheck.canary-viewport PROPERTIES LABELS project TIMEOUT 30)
 
 # 0246: preserve CPU-owned bytes surrounding partial shader memory exports.
+# The same raster/query fixture also exercises the real Xenos plugin explicitly.
+add_executable(x360n_xenos_occlusion_probe EXCLUDE_FROM_ALL native/occlusion_probe.cpp)
+target_compile_definitions(x360n_xenos_occlusion_probe PRIVATE X360N_QUERY_XENOS=1)
+target_link_libraries(x360n_xenos_occlusion_probe PRIVATE rexruntime)
+x360n_stage_runtime_dlls(x360n_xenos_occlusion_probe PLUGIN_TARGETS rexgpu-xenos)
+
 # The CPU contract is portable; actual GPU probes are explicit opt-in targets.
 add_executable(x360n_memexport_readback_tests sdkcheck/memexport_readback_test.cpp)
 target_link_libraries(x360n_memexport_readback_tests PRIVATE rexruntime Catch2::Catch2WithMain)

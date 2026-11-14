@@ -121,7 +121,7 @@ std::vector<uint8_t> Translate(SpirvShaderTranslator& translator, const std::vec
   Shader shader(type, 1, code.data(), code.size(), std::endian::native);
   rex::string::StringBuffer disassembly;
   shader.AnalyzeUcode(disassembly);
-  uint64_t modification = type == xenos::ShaderType::kPixel
+  rex::graphics::ShaderModificationKey modification = type == xenos::ShaderType::kPixel
       ? translator.GetDefaultPixelShaderModification(2) : translator.GetDefaultVertexShaderModification(2);
   if (param_gen && type == xenos::ShaderType::kPixel) {
     SpirvShaderTranslator::Modification m(modification);
@@ -145,6 +145,12 @@ int main() {
       std::cerr << "FAIL " << name << '\n';
     }
   };
+  {
+    SpirvShaderTranslator::Modification counter;
+    counter.pixel.fsi_sample_counts = 1;
+    check(counter.value.low == 0 && counter.value.high == (uint64_t(1) << 16),
+          "Native FSI counter occupies only its local word");
+  }
   const uint32_t float_0 = std::bit_cast<uint32_t>(0.0f);
   const uint32_t float_1 = std::bit_cast<uint32_t>(1.0f);
 

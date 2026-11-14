@@ -117,6 +117,17 @@ std::vector<uint32_t> VertexMicrocode(unsigned jump) {
         (uint32_t(AluVectorOpcode::kMax) << 24) | (3u << 30)});
   return words;
 }
+rex::graphics::ShaderModificationKey CaptureModification(const std::string& text) {
+  Require(text.size() == 16 || text.size() == 32, "capture modification width");
+  if (text.size() == 32)
+    return {std::stoull(text.substr(16), nullptr, 16), std::stoull(text.substr(0, 16), nullptr, 16)};
+  const auto legacy = std::stoull(text, nullptr, 16);
+  rex::graphics::ShaderModificationKey result{legacy & ((uint64_t(1) << 49) - 1),
+                                            ((legacy >> 49) & 1) << 16};
+  for (uint32_t bit = 60; bit < 64; ++bit)
+    result.high |= ((legacy >> bit) & 1) << (63 - bit);
+  return result;
+}
 void Dump(const std::filesystem::path& directory, const std::string& name,
           const std::vector<uint8_t>& binary) {
   if (directory.empty()) return;
@@ -128,6 +139,11 @@ void Dump(const std::filesystem::path& directory, const std::string& name,
 }
 
 int CheckRectangleControlFlow(const char* dump_directory, const char* capture_directory) {
+  Require(CaptureModification("F002000000000001") == rex::graphics::ShaderModificationKey{1, 0x1000F},
+          "legacy capture flags migrate to the local word");
+  Require(CaptureModification("800000000001000F8000000000000001") ==
+              rex::graphics::ShaderModificationKey{0x8000000000000001, 0x800000000001000F},
+          "128-bit capture identity preserves both words");
   const std::filesystem::path output = dump_directory ? dump_directory : "";
   SpirvShaderTranslator::Features features(true);
   SpirvShaderTranslator translator(features, true, true, true);
@@ -160,7 +176,7 @@ int CheckRectangleControlFlow(const char* dump_directory, const char* capture_di
   if (capture_directory) for (const auto& file : std::filesystem::directory_iterator(capture_directory)) {
     const auto name = file.path().filename().string();
     const auto marker = name.find(".native-vulkan.bin.");
-    if (!name.starts_with("shader_") || marker != 40) continue;
+    if (!name.starts_with("shader_") || (marker != 40 && marker != 56)) continue;
     try {
     const auto hash_text = name.substr(7, 16);
     const auto type_text = name.substr(marker + 19);
@@ -175,7 +191,7 @@ int CheckRectangleControlFlow(const char* dump_directory, const char* capture_di
         std::stoull(hash_text, nullptr, 16), code.data(), code.size(), std::endian::native);
     rex::string::StringBuffer disassembly;
     shader.AnalyzeUcode(disassembly);
-    const uint64_t modification = std::stoull(name.substr(24, 16), nullptr, 16);
+    const auto modification = CaptureModification(name.substr(24, marker - 24));
     auto& translation = *shader.GetOrCreateTranslation(modification);
     Require(translator.TranslateAnalyzedShader(translation) && translation.is_valid(), "capture retranslation failed");
     const auto& binary = translation.translated_binary();

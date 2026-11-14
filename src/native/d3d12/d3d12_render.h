@@ -266,7 +266,7 @@ class D3D12Render {
   PipelineKey last_pipeline_key_{};
   std::shared_future<Ptr<ID3D12PipelineState>>* last_pipeline_ = nullptr;
   Ptr<ID3D12PipelineState> CreatePipeline(D3D12_GRAPHICS_PIPELINE_STATE_DESC, uint64_t vs_hash, uint64_t ps_hash,
-      uint64_t vm, uint64_t pm, uint32_t primitive, uint32_t msaa, unsigned planes, uint32_t mask, size_t id);
+      rex::graphics::ShaderModificationKey vm, rex::graphics::ShaderModificationKey pm, uint32_t primitive, uint32_t msaa, unsigned planes, uint32_t mask, size_t id);
   void ReplayCommands();
   // Early submission: work recorded since the last submission and the
   // threshold (draws; a resolve counts as the whole threshold).

@@ -40,7 +40,7 @@ const std::vector<uint8_t>& D3D12Render::RectangleShader(unsigned interpolators,
 }
 
 D3D12Render::Ptr<ID3D12PipelineState> D3D12Render::CreatePipeline(D3D12_GRAPHICS_PIPELINE_STATE_DESC pd,
-    uint64_t vs_hash, uint64_t ps_hash, uint64_t vm, uint64_t pm, uint32_t primitive, uint32_t msaa,
+    uint64_t vs_hash, uint64_t ps_hash, rex::graphics::ShaderModificationKey vm, rex::graphics::ShaderModificationKey pm, uint32_t primitive, uint32_t msaa,
     unsigned planes, uint32_t mask, size_t id) {
   // Runs on a pipeline worker (or inline with native_pipeline_threads=0).
   // Uses only immutable renderer state, the thread-safe device and atomics.

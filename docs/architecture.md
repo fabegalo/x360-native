@@ -123,6 +123,13 @@ validação de imagem, memória, contadores e sincronização nas transições. 
 de 60+ FPS no Forza não é certificação nem garantia de desempenho. Float24,
 HDR, MSAA e aliasing continuam no ROV enquanto não houver uma rota equivalente.
 
+**Chave de variantes de shader de 128 bits validada pelo mantenedor em 14/11/2026:**
+usar dois campos `uint64_t` portáveis no contrato compartilhado de tradução e
+cache de Xenos/Native. Os campos do Canary ocupam a palavra baixa; as extensões
+locais ocupam a alta. Hashes, comparação e persistência incluem ambas; versões
+de cache invalidam os formatos anteriores. A decisão preserva AOT, runtime,
+launcher, supervisor e as fronteiras dos dois caminhos GPU.
+
 ### 2.1 ReXGlue (dependência)
 
 **[fato]** Alvos usados (`src/*/CMakeLists.txt`): `rexglue` (CLI), `rexcodegen`

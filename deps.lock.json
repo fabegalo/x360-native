@@ -284,8 +284,8 @@
       "file": "patches/rexglue-sdk/0023-synchronize-ring-reinitialization.patch",
       "sha256": "60f4dd12ada95717e385d3edf449b5bb3abae69bbc8c7ff05f0bec07bdfa04fb",
       "files": {
-        "include/rex/graphics/command_processor.h": "d5fecaf9e36c803dc89e1e20442ad745f247c770c0f4b4a87a1d0704a5585265",
-        "src/graphics/command_processor.cpp": "e2b42d5012046917f5383f8d0c0eefa9885419246d0c8f085ea178c30cc34792"
+        "include/rex/graphics/command_processor.h": "afa6a42ef8c7ba6c0933157319448062b426690da2931cb820b8b711a2842729",
+        "src/graphics/command_processor.cpp": "c419c26f29455714f77497d15d3d499204799fc619dc36d84981c7a47efcad92"
       },
       "base_files": {
         "include/rex/graphics/command_processor.h": "eb02162883373a0d2ce5d93bd6c12d9931ff26dc27df473249bec85a186c7cfe",
@@ -303,9 +303,9 @@
         "include/rex/system/interfaces/graphics.h": "491dffd35d938f9fde908ff693a383364d7255133722affe17b0a53cf813f9c3",
         "include/rex/graphics/graphics_system.h": "259d7acc4e6d6dc01eb546cf101389bf4cf352b54c78c392cb4a2a595531c53f",
         "src/graphics/graphics_system.cpp": "7462130450b5eae5069a9b461115eadfa516102ba22ecea0429fd0f419cf5228",
-        "include/rex/graphics/command_processor.h": "d5fecaf9e36c803dc89e1e20442ad745f247c770c0f4b4a87a1d0704a5585265",
-        "src/graphics/command_processor.cpp": "e2b42d5012046917f5383f8d0c0eefa9885419246d0c8f085ea178c30cc34792",
-        "src/graphics/d3d12/command_processor.cpp": "faa433679f3ebac4d7747ed4ef23589cd8e5f30218e24ef58549244bf42212fd",
+        "include/rex/graphics/command_processor.h": "afa6a42ef8c7ba6c0933157319448062b426690da2931cb820b8b711a2842729",
+        "src/graphics/command_processor.cpp": "c419c26f29455714f77497d15d3d499204799fc619dc36d84981c7a47efcad92",
+        "src/graphics/d3d12/command_processor.cpp": "0e8edc3b5e27786db6fbbebb7934bfb9127f520356446bd85acd77f2af4b6259",
         "src/graphics/vulkan/command_processor.cpp": "681cd92d4998121a4835f4e8a1f18528329b5da134c87b0d3f9726627d143059",
         "src/audio/sdl/sdl_audio_driver.cpp": "b563c3686247199c274e55531429f3657a4426a76536c1ebe048910c13eef690"
       },
@@ -944,8 +944,8 @@
         "CMakeLists.txt": "6e1f7b52bc060f521ff69385cd49026c33ff170c91c99101146829961c5324c6",
         "include/rex/perf/counter.h": "c8820222ffe4c5c639269d949c8be9326a78ab046ad2abf6405ab891835716fc",
         "src/core/perf/counter.cpp": "df95e01382113fcd10e5698b8f6985f7d14486a834e542be95dfc1e59b611268",
-        "src/graphics/command_processor.cpp": "e2b42d5012046917f5383f8d0c0eefa9885419246d0c8f085ea178c30cc34792",
-        "src/graphics/d3d12/pipeline_cache.cpp": "7112d5d15e154825df9a5389e475a4862524fc51d98368a7a2f2b8d7737660f2",
+        "src/graphics/command_processor.cpp": "c419c26f29455714f77497d15d3d499204799fc619dc36d84981c7a47efcad92",
+        "src/graphics/d3d12/pipeline_cache.cpp": "9bcebcf9680155d426fb2ffd181bebb05abc3657399a40b75f70867dc1b3202f",
         "src/system/runtime.cpp": "d4d219ee1e8bd563e3cac90018d961eb635fb29b85f19391b86d246a29d49729"
       },
       "base_files": {
@@ -1002,7 +1002,7 @@
         "src/graphics/command_processor.cpp": "98014a045bc4a9403827d0c4de044d7b79b052921f485e0dd8719577d5d0bc91"
       },
       "files": {
-        "src/graphics/command_processor.cpp": "e2b42d5012046917f5383f8d0c0eefa9885419246d0c8f085ea178c30cc34792"
+        "src/graphics/command_processor.cpp": "c419c26f29455714f77497d15d3d499204799fc619dc36d84981c7a47efcad92"
       },
       "test": "sdkcheck.Native-packet-guard"
     },
@@ -1013,7 +1013,7 @@
         "src/graphics/command_processor.cpp": "79658b4f25a195a8f1e7e29bda143d75551e0b2127596eac50babb2538c78c9a"
       },
       "files": {
-        "src/graphics/command_processor.cpp": "e2b42d5012046917f5383f8d0c0eefa9885419246d0c8f085ea178c30cc34792"
+        "src/graphics/command_processor.cpp": "c419c26f29455714f77497d15d3d499204799fc619dc36d84981c7a47efcad92"
       },
       "test": "sdkcheck.Native-packet-guard; native.packet-payload"
     },
@@ -1024,7 +1024,7 @@
         "src/graphics/util/draw.cpp": "a3215a0de2f42d9e2235dd062b4cd2c3c0a27effd033c27ab6b6ca1f7673a25b"
       },
       "files": {
-        "src/graphics/util/draw.cpp": "3f7dde8e3bd36ce76008fc3350045d5f6cff2825c0505ca09ecfd1a139c35f0b"
+        "src/graphics/util/draw.cpp": "0a55c0471434fffb2b8304d19c51b197dc6315ee24efc83e3cdee7bacaa33ce8"
       },
       "test": "sdkcheck.empty-resolve"
     },
@@ -1036,7 +1036,7 @@
       },
       "files": {
         "include/rex/graphics/d3d12/inactive_vertex_fetch.h": "ea3e630caf192ae27eacd4c2178d06bb19e405d5c1ca06aa915ba5174a98a393",
-        "src/graphics/d3d12/command_processor.cpp": "faa433679f3ebac4d7747ed4ef23589cd8e5f30218e24ef58549244bf42212fd"
+        "src/graphics/d3d12/command_processor.cpp": "0e8edc3b5e27786db6fbbebb7934bfb9127f520356446bd85acd77f2af4b6259"
       },
       "test": "sdkcheck.inactive-vertex-fetch"
     },
@@ -1051,10 +1051,10 @@
         "src/kernel/xboxkrnl/xboxkrnl_video.cpp": "969ba88d7b17cd9fe500cebdd5a53602ebae0df3d7b01b3477a3b65e66c56729"
       },
       "files": {
-        "include/rex/graphics/command_processor.h": "d5fecaf9e36c803dc89e1e20442ad745f247c770c0f4b4a87a1d0704a5585265",
+        "include/rex/graphics/command_processor.h": "afa6a42ef8c7ba6c0933157319448062b426690da2931cb820b8b711a2842729",
         "include/rex/graphics/xenos.h": "e146b2e41f3c3e7a380a80546309847ac71d02610d414038ec63f1f1e2b5c3a5",
         "include/rex/kernel/xboxkrnl/video.h": "bf901c7557ea5090c89fda079432a22e374a753b3a16224f8dc3e87369906d38",
-        "src/graphics/command_processor.cpp": "e2b42d5012046917f5383f8d0c0eefa9885419246d0c8f085ea178c30cc34792",
+        "src/graphics/command_processor.cpp": "c419c26f29455714f77497d15d3d499204799fc619dc36d84981c7a47efcad92",
         "src/kernel/xboxkrnl/xboxkrnl_video.cpp": "276d4ba7897095494ddd1de6182b3327617273ab29943ec520a5ebf6afb9936c"
       },
       "test": "tests/sdkcheck/system_command_buffer_test.cpp"
@@ -1175,9 +1175,9 @@
         "src/graphics/d3d12/render_target_cache.cpp": "7bc68f0891b9ec0a108a3e1b34e980619245d28ab86f201846b40230760b1dd0"
       },
       "files": {
-        "include/rex/graphics/util/draw.h": "415174fe3ae2bb5d1acd8a438cbd190a38ff55a823ad3227af06b2a6e4e82c0d",
-        "src/graphics/util/draw.cpp": "3f7dde8e3bd36ce76008fc3350045d5f6cff2825c0505ca09ecfd1a139c35f0b",
-        "src/graphics/d3d12/command_processor.cpp": "faa433679f3ebac4d7747ed4ef23589cd8e5f30218e24ef58549244bf42212fd",
+        "include/rex/graphics/util/draw.h": "1c1f67f420782d2a95556d8c38f575c3a5232dd529422ddb1ba5e7587ca23b83",
+        "src/graphics/util/draw.cpp": "0a55c0471434fffb2b8304d19c51b197dc6315ee24efc83e3cdee7bacaa33ce8",
+        "src/graphics/d3d12/command_processor.cpp": "0e8edc3b5e27786db6fbbebb7934bfb9127f520356446bd85acd77f2af4b6259",
         "src/graphics/d3d12/render_target_cache.cpp": "a3f5e7ff82919f979656af927ce80f1df0404b5ed8273d9e11e9c86a90b1b950"
       },
       "test": "tests/sdkcheck/fixed16_resolve_probe.cpp"
@@ -1559,11 +1559,11 @@
         "src/kernel/xboxkrnl/xboxkrnl_video.cpp": "ea0e09814eedb327c49395eccadc6d6cc55d51844734cd6f53dbeafb56c5efc4"
       },
       "files": {
-        "include/rex/graphics/d3d12/command_processor.h": "a73c767e214609b31c999625defad743aec8c7185098555b7aeb4d2787c40969",
+        "include/rex/graphics/d3d12/command_processor.h": "e6638233381906d0d661593a676d4bf6fc41220cbb9e669fc0024104301d34bd",
         "include/rex/graphics/d3d12/texture_cache.h": "0c88603fa7088d42fea41b00e4db547087adbb849c74d60fdb923bf3ff75a3d4",
         "include/rex/graphics/display_overlay.h": "2841fdc05e4e7c248e9dcfdded2c0edd6503435b22bb1d5af0c8f113a9494cda",
-        "src/graphics/command_processor.cpp": "e2b42d5012046917f5383f8d0c0eefa9885419246d0c8f085ea178c30cc34792",
-        "src/graphics/d3d12/command_processor.cpp": "faa433679f3ebac4d7747ed4ef23589cd8e5f30218e24ef58549244bf42212fd",
+        "src/graphics/command_processor.cpp": "c419c26f29455714f77497d15d3d499204799fc619dc36d84981c7a47efcad92",
+        "src/graphics/d3d12/command_processor.cpp": "0e8edc3b5e27786db6fbbebb7934bfb9127f520356446bd85acd77f2af4b6259",
         "src/graphics/d3d12/texture_cache.cpp": "6a6669e3e486bd40eb01253d9d6068e4c31d11e669a527de990f38d2c866d8c9",
         "src/graphics/shaders/bytecode/d3d12_5_1/display_overlay_cs.h": "878b1ca19d0b44a2f730a6d8b312f9180f496651c1c3730e8668cace274f2f40",
         "src/graphics/shaders/display_overlay.hlsl": "82f2758310438dc43db3fa7b73d25192d52512007830f9d3c2665e64ba99859f",
@@ -1977,8 +1977,8 @@
         "src/graphics/command_processor.cpp": "db782a5c854eb4d0fa6f29d37a9a51894a1a444038516433beaccd2d3f0a6fd0"
       },
       "files": {
-        "include/rex/graphics/command_processor.h": "d5fecaf9e36c803dc89e1e20442ad745f247c770c0f4b4a87a1d0704a5585265",
-        "src/graphics/command_processor.cpp": "e2b42d5012046917f5383f8d0c0eefa9885419246d0c8f085ea178c30cc34792"
+        "include/rex/graphics/command_processor.h": "afa6a42ef8c7ba6c0933157319448062b426690da2931cb820b8b711a2842729",
+        "src/graphics/command_processor.cpp": "c419c26f29455714f77497d15d3d499204799fc619dc36d84981c7a47efcad92"
       },
       "test": "sdkcheck.Native-system-commands: a resolve recorded inside a system command buffer is in guest memory when its completion fence becomes visible; fails before the patch"
     },
@@ -2006,10 +2006,10 @@
         "src/graphics/pipeline/shader/dxbc_translator_om.cpp": "d8704c6bcc04da97a7250f768e65c9f0b25e8ecbce378142722c28a07a046677"
       },
       "files": {
-        "include/rex/graphics/format/dxbc.h": "3b10292edcbc33915a2d7f9e3f6d9ae4c7d15d76f9fc0f89915bcc9b3083f3af",
-        "include/rex/graphics/pipeline/shader/dxbc_translator.h": "bb3d875c5268c392262473c0b3603a0cffbe6ca0910b4d35c235cb06647ab67a",
-        "src/graphics/pipeline/shader/dxbc_translator.cpp": "7eeb97e01b2e345e8e43ad622651f8fbbdcdd607c4d55e1d8ab792b203ddc515",
-        "src/graphics/pipeline/shader/dxbc_translator_om.cpp": "96ab3b9b66c769e49cccb31093ece734048633217a071c72abea44182b3d9aa4"
+        "include/rex/graphics/format/dxbc.h": "98020395b7e3fa61953937d66365b3c101346568373227cbec11e75482a008cf",
+        "include/rex/graphics/pipeline/shader/dxbc_translator.h": "3c48605500c7dd955cdda0a09aa01022ec5d39529aa8cad48bd86067c81f79fb",
+        "src/graphics/pipeline/shader/dxbc_translator.cpp": "f0f03145ead5dbb165e0a4e94bcbe5de43221f3ce7b4e373cf1937e02df88b53",
+        "src/graphics/pipeline/shader/dxbc_translator_om.cpp": "25ecd84ba5b279a6856c82cdd4ce3fc3236bba93c24662674bb61b381cc79b70"
       },
       "test": "native.occlusion: translated DXBC ROV atomic sample counters and real GPU begin/end query, passing/depth/stencil/kill/alpha samples; no fixed query success"
     },
@@ -2027,14 +2027,14 @@
         "include/rex/graphics/d3d12/command_processor.h": "dcacfe0cee3cf0e21b3684bd3e54cb263f0cc588b5ec36abb4ac5ea912591d46"
       },
       "files": {
-        "src/graphics/command_processor.cpp": "e2b42d5012046917f5383f8d0c0eefa9885419246d0c8f085ea178c30cc34792",
+        "src/graphics/command_processor.cpp": "c419c26f29455714f77497d15d3d499204799fc619dc36d84981c7a47efcad92",
         "include/rex/graphics/register_file.h": "446196d919b7830f700ae931a15132e6edc1b843a7bca450d9991442c4c3e3fc",
         "include/rex/graphics/shared_memory.h": "1f65f9daf5cb21a77b1de54aff182e08a3b538fb5a315510b230e02e8f843f9f",
         "src/graphics/shared_memory.cpp": "1fae10e526df9b9798d2e644a318c2e25404c49323966fee339c4c3f312d0a2e",
         "src/graphics/vulkan/command_processor.cpp": "681cd92d4998121a4835f4e8a1f18528329b5da134c87b0d3f9726627d143059",
         "include/rex/graphics/vulkan/command_processor.h": "61c1c0677eaae0d8adef5ce51e6362ff99404c776180434659015503243676b8",
-        "src/graphics/d3d12/command_processor.cpp": "faa433679f3ebac4d7747ed4ef23589cd8e5f30218e24ef58549244bf42212fd",
-        "include/rex/graphics/d3d12/command_processor.h": "a73c767e214609b31c999625defad743aec8c7185098555b7aeb4d2787c40969"
+        "src/graphics/d3d12/command_processor.cpp": "0e8edc3b5e27786db6fbbebb7934bfb9127f520356446bd85acd77f2af4b6259",
+        "include/rex/graphics/d3d12/command_processor.h": "e6638233381906d0d661593a676d4bf6fc41220cbb9e669fc0024104301d34bd"
       },
       "test": "sdkcheck.register-memory-coherence: real PM4 Type0 normal/wrapped batches and scratch/COHER/gamma effects; unchanged/partial fetch descriptors; CPU/GPU/frame reset residency invalidation; baseline adapters fail before patch"
     },
@@ -2048,8 +2048,8 @@
         "src/graphics/vulkan/command_processor.cpp": "5ac4a105ed319a2053cf997ea71c49e3d6a2d7531b6d96c5c13e5a4b0b65b0ad"
       },
       "files": {
-        "include/rex/graphics/d3d12/command_processor.h": "a73c767e214609b31c999625defad743aec8c7185098555b7aeb4d2787c40969",
-        "src/graphics/d3d12/command_processor.cpp": "faa433679f3ebac4d7747ed4ef23589cd8e5f30218e24ef58549244bf42212fd",
+        "include/rex/graphics/d3d12/command_processor.h": "e6638233381906d0d661593a676d4bf6fc41220cbb9e669fc0024104301d34bd",
+        "src/graphics/d3d12/command_processor.cpp": "0e8edc3b5e27786db6fbbebb7934bfb9127f520356446bd85acd77f2af4b6259",
         "include/rex/graphics/vulkan/command_processor.h": "61c1c0677eaae0d8adef5ce51e6362ff99404c776180434659015503243676b8",
         "src/graphics/vulkan/command_processor.cpp": "681cd92d4998121a4835f4e8a1f18528329b5da134c87b0d3f9726627d143059",
         "include/rex/graphics/readback_resolve_key.h": "97d30346a545d96a371d41b30c157213511a69fd2abbaa91a1b80ffd1d8ed42c"
@@ -2064,8 +2064,8 @@
         "src/graphics/command_processor.cpp": "a6aa05b173d945d87f8e934ee7d789d0395fed88aec2e980e7399a0ed6c1947c"
       },
       "files": {
-        "include/rex/graphics/command_processor.h": "d5fecaf9e36c803dc89e1e20442ad745f247c770c0f4b4a87a1d0704a5585265",
-        "src/graphics/command_processor.cpp": "e2b42d5012046917f5383f8d0c0eefa9885419246d0c8f085ea178c30cc34792"
+        "include/rex/graphics/command_processor.h": "afa6a42ef8c7ba6c0933157319448062b426690da2931cb820b8b711a2842729",
+        "src/graphics/command_processor.cpp": "c419c26f29455714f77497d15d3d499204799fc619dc36d84981c7a47efcad92"
       },
       "test": "native.occlusion: real PM4 VIZ_QUERY and draw predicates consult completed query state, with original Xenos behavior preserved by default hooks"
     },
@@ -2089,8 +2089,8 @@
         "src/graphics/pipeline/shader/spirv_translator_rb.cpp": "a4aaf9e6b8ab5fdce92ab19e1aa228cd439375f302739bc61c89d481d5699a24"
       },
       "files": {
-        "include/rex/graphics/pipeline/shader/spirv_translator.h": "af3605a5b254681bb865ffe0e90ab8e8e4fa19616c336e07f49053c793dae6e6",
-        "src/graphics/pipeline/shader/spirv_translator.cpp": "d9a4bdfe126a747fde2bbcc3197c330ea6eb4ace3ea3962734e92a3f9d4f46b6",
+        "include/rex/graphics/pipeline/shader/spirv_translator.h": "7a80891d0a8dfd2d62b3936418fe3498571e8e15f86f4bce30d03f7cff19ef6b",
+        "src/graphics/pipeline/shader/spirv_translator.cpp": "9ee26561579540c4e46e411161c95f7e97f6438bef963137bb8bd44632c1926c",
         "src/graphics/pipeline/shader/spirv_translator_rb.cpp": "3c5afd0814326809d557da19c9b7b9c28ea29d0eff5a52fe7ccf3eaa41f5b628"
       },
       "test": "sdkcheck.Native-FSI-sample-counts: shared PM4 occlusion probe with Native Vulkan FSI sample counters; execution deferred by user"
@@ -2116,8 +2116,8 @@
         "src/graphics/command_processor.cpp": "bef5f338ba47314f28ccba360aa23c1f38d55c5870feebf422cbf876224503e8"
       },
       "files": {
-        "include/rex/graphics/command_processor.h": "d5fecaf9e36c803dc89e1e20442ad745f247c770c0f4b4a87a1d0704a5585265",
-        "src/graphics/command_processor.cpp": "e2b42d5012046917f5383f8d0c0eefa9885419246d0c8f085ea178c30cc34792"
+        "include/rex/graphics/command_processor.h": "afa6a42ef8c7ba6c0933157319448062b426690da2931cb820b8b711a2842729",
+        "src/graphics/command_processor.cpp": "c419c26f29455714f77497d15d3d499204799fc619dc36d84981c7a47efcad92"
       },
       "test": "sdkcheck.Native-MEMEXPORT-d3d12 and sdkcheck.Native-MEMEXPORT-vulkan: PM4 CPU-side stores invalidate resident memory aliases after publication; execution deferred by user"
     },
@@ -2131,10 +2131,10 @@
         "src/graphics/pipeline/shader/spirv_translator.cpp": "ceae1e47029dbdd4fe514cb00f562ad2619a091da14675ef7d087fc5e23590a0"
       },
       "files": {
-        "include/rex/graphics/pipeline/shader/dxbc_translator.h": "bb3d875c5268c392262473c0b3603a0cffbe6ca0910b4d35c235cb06647ab67a",
-        "src/graphics/pipeline/shader/dxbc_translator.cpp": "7eeb97e01b2e345e8e43ad622651f8fbbdcdd607c4d55e1d8ab792b203ddc515",
-        "include/rex/graphics/pipeline/shader/spirv_translator.h": "af3605a5b254681bb865ffe0e90ab8e8e4fa19616c336e07f49053c793dae6e6",
-        "src/graphics/pipeline/shader/spirv_translator.cpp": "d9a4bdfe126a747fde2bbcc3197c330ea6eb4ace3ea3962734e92a3f9d4f46b6"
+        "include/rex/graphics/pipeline/shader/dxbc_translator.h": "3c48605500c7dd955cdda0a09aa01022ec5d39529aa8cad48bd86067c81f79fb",
+        "src/graphics/pipeline/shader/dxbc_translator.cpp": "f0f03145ead5dbb165e0a4e94bcbe5de43221f3ce7b4e373cf1937e02df88b53",
+        "include/rex/graphics/pipeline/shader/spirv_translator.h": "7a80891d0a8dfd2d62b3936418fe3498571e8e15f86f4bce30d03f7cff19ef6b",
+        "src/graphics/pipeline/shader/spirv_translator.cpp": "9ee26561579540c4e46e411161c95f7e97f6438bef963137bb8bd44632c1926c"
       },
       "test": "sdkcheck.Native-MEMEXPORT-d3d12 and sdkcheck.Native-MEMEXPORT-vulkan: dynamic export addresses retain shader stores with complete residency and readback; execution deferred by user"
     },
@@ -2165,12 +2165,12 @@
       "files": {
         "include/rex/graphics/primitive_processor.h": "8dc4e6e4b29429e80231f6d6e66179a53e22d56efc0b642af828c4b614c5e0a0",
         "include/rex/graphics/vulkan/command_processor.h": "61c1c0677eaae0d8adef5ce51e6362ff99404c776180434659015503243676b8",
-        "include/rex/graphics/vulkan/deferred_command_buffer.h": "da74dcbcbe4e337901620a95a208a6b448c7d0e2201a243a3627bce10e6abfe5",
+        "include/rex/graphics/vulkan/deferred_command_buffer.h": "68a7fda4a8876879fc5c1ef917c6d4aee214304948584f7566e1e173bceaee47",
         "include/rex/graphics/vulkan/shared_memory.h": "2d0052cfd9aff59b586e6fbd00e37e660f176d077c35af5a657abf4a8785d504",
         "include/rex/graphics/vulkan/upload_hazard_tracker.h": "ecb2a8db57970f59e4a62e8af8f20d185245976c035f07f8997f76250ee3d106",
         "src/graphics/primitive_processor.cpp": "47cf42d176358b5a6b82b8d351eab8ba881f916b8f656ec39a20b0819b761118",
         "src/graphics/vulkan/command_processor.cpp": "681cd92d4998121a4835f4e8a1f18528329b5da134c87b0d3f9726627d143059",
-        "src/graphics/vulkan/deferred_command_buffer.cpp": "6d8d7bac191ea573423ae1af5951737cc41c195ef61bc3669912865c46de0afb",
+        "src/graphics/vulkan/deferred_command_buffer.cpp": "eecdf48d29e7cc8da0d5fdf1accfb27083cffaf0d8c8b6e04de1245f52411aa5",
         "src/graphics/vulkan/shared_memory.cpp": "80acfe0e04e2eab60bd58bd8c2a5b241827f73a51c772bd159356b7feae0bf0b"
       },
       "test": "sdkcheck.Vulkan-upload-ordering: actual runtime page hazard tracker covers disjoint/overlapping uploads, boundary pages, generation resets and invalid ranges; execution deferred by user"
@@ -2186,9 +2186,9 @@
       },
       "files": {
         "include/rex/graphics/vulkan/command_processor.h": "61c1c0677eaae0d8adef5ce51e6362ff99404c776180434659015503243676b8",
-        "include/rex/graphics/vulkan/deferred_command_buffer.h": "da74dcbcbe4e337901620a95a208a6b448c7d0e2201a243a3627bce10e6abfe5",
+        "include/rex/graphics/vulkan/deferred_command_buffer.h": "68a7fda4a8876879fc5c1ef917c6d4aee214304948584f7566e1e173bceaee47",
         "src/graphics/vulkan/command_processor.cpp": "681cd92d4998121a4835f4e8a1f18528329b5da134c87b0d3f9726627d143059",
-        "src/graphics/vulkan/deferred_command_buffer.cpp": "6d8d7bac191ea573423ae1af5951737cc41c195ef61bc3669912865c46de0afb"
+        "src/graphics/vulkan/deferred_command_buffer.cpp": "eecdf48d29e7cc8da0d5fdf1accfb27083cffaf0d8c8b6e04de1245f52411aa5"
       },
       "test": "Build coverage: immutable queued streams, semaphore lifetimes, fence ownership and worker failure paths; manual Xenos Vulkan rendering validation deferred by user (no standalone submission-ordering test target)"
     },
@@ -2204,12 +2204,12 @@
         "src/graphics/vulkan/pipeline_cache.cpp": "a3dbb1a52cf6a0d6b4ce9dfb278e94e5c9fa3b93e753ad78e8a7bb2a9b6e9ca2"
       },
       "files": {
-        "include/rex/graphics/d3d12/pipeline_cache.h": "acb80ebcf3b923202a437fe89922e828aea73b38c565ba11439f53a63852ca5b",
-        "include/rex/graphics/vulkan/pipeline_cache.h": "e36e596f03f03b78841d70d2faf59bb9ea7494aab3bb2c8e07c8f6dcf9ef9d7f",
-        "src/graphics/d3d12/command_processor.cpp": "faa433679f3ebac4d7747ed4ef23589cd8e5f30218e24ef58549244bf42212fd",
-        "src/graphics/d3d12/pipeline_cache.cpp": "7112d5d15e154825df9a5389e475a4862524fc51d98368a7a2f2b8d7737660f2",
+        "include/rex/graphics/d3d12/pipeline_cache.h": "94e34e91b4eae2b6b0bb89abbd3d9adc3f600433886618f16be62afb953080c5",
+        "include/rex/graphics/vulkan/pipeline_cache.h": "37e3a32e7b0df1e5839c240e3a52399daa0a36528aaeda024095856d0c865620",
+        "src/graphics/d3d12/command_processor.cpp": "0e8edc3b5e27786db6fbbebb7934bfb9127f520356446bd85acd77f2af4b6259",
+        "src/graphics/d3d12/pipeline_cache.cpp": "9bcebcf9680155d426fb2ffd181bebb05abc3657399a40b75f70867dc1b3202f",
         "src/graphics/vulkan/command_processor.cpp": "681cd92d4998121a4835f4e8a1f18528329b5da134c87b0d3f9726627d143059",
-        "src/graphics/vulkan/pipeline_cache.cpp": "088c717b82555c78cedea61188764b8aca8d7512fee1e734d46a40ee87f7dc4e"
+        "src/graphics/vulkan/pipeline_cache.cpp": "f281b15cfb00803b50bc74408e1f28e7c118ca85f48ae518c3bce7c42767f2e4"
       },
       "test": "Build coverage of D3D12/Vulkan pipeline completion and error propagation; manual one-shot draw and first-use shader validation deferred by user (no standalone pipeline-completion test target)"
     },
@@ -2236,10 +2236,10 @@
         "src/graphics/pipeline/shader/spirv_translator.cpp": "b08e95a619407046d44265a78c7383d9127448cae59e2be090ca7c16a9ce13d2"
       },
       "files": {
-        "include/rex/graphics/pipeline/shader/dxbc_translator.h": "bb3d875c5268c392262473c0b3603a0cffbe6ca0910b4d35c235cb06647ab67a",
-        "src/graphics/pipeline/shader/dxbc_translator.cpp": "7eeb97e01b2e345e8e43ad622651f8fbbdcdd607c4d55e1d8ab792b203ddc515",
-        "include/rex/graphics/pipeline/shader/spirv_translator.h": "af3605a5b254681bb865ffe0e90ab8e8e4fa19616c336e07f49053c793dae6e6",
-        "src/graphics/pipeline/shader/spirv_translator.cpp": "d9a4bdfe126a747fde2bbcc3197c330ea6eb4ace3ea3962734e92a3f9d4f46b6"
+        "include/rex/graphics/pipeline/shader/dxbc_translator.h": "3c48605500c7dd955cdda0a09aa01022ec5d39529aa8cad48bd86067c81f79fb",
+        "src/graphics/pipeline/shader/dxbc_translator.cpp": "f0f03145ead5dbb165e0a4e94bcbe5de43221f3ce7b4e373cf1937e02df88b53",
+        "include/rex/graphics/pipeline/shader/spirv_translator.h": "7a80891d0a8dfd2d62b3936418fe3498571e8e15f86f4bce30d03f7cff19ef6b",
+        "src/graphics/pipeline/shader/spirv_translator.cpp": "9ee26561579540c4e46e411161c95f7e97f6438bef963137bb8bd44632c1926c"
       },
       "test": "sdkcheck.Native-raster-state: NoPerspective bit62 opt-in in translated DXBC/SPIRV; execution deferred by user"
     },
@@ -2264,7 +2264,7 @@
         "include/rex/graphics/command_processor.h": "a58dfaed2565d4a3f8cbefcc1afe9712d32618f8513970d5dc5caf88af7aff58"
       },
       "files": {
-        "include/rex/graphics/command_processor.h": "d5fecaf9e36c803dc89e1e20442ad745f247c770c0f4b4a87a1d0704a5585265"
+        "include/rex/graphics/command_processor.h": "afa6a42ef8c7ba6c0933157319448062b426690da2931cb820b8b711a2842729"
       },
       "test": "sdkcheck.Native-VIZ_QUERY: backend override reads original PM4 fields and executes visibility prepass; execution deferred by user"
     },
@@ -2282,13 +2282,13 @@
         "src/graphics/pipeline/shader/spirv_translator_rb.cpp": "abfbade70c303a8ea94d7c2c7739216e0e119c9936ca102c0479f8d9b1de7cba"
       },
       "files": {
-        "include/rex/graphics/pipeline/shader/dxbc_translator.h": "bb3d875c5268c392262473c0b3603a0cffbe6ca0910b4d35c235cb06647ab67a",
-        "include/rex/graphics/pipeline/shader/spirv_translator.h": "af3605a5b254681bb865ffe0e90ab8e8e4fa19616c336e07f49053c793dae6e6",
-        "src/graphics/pipeline/shader/dxbc_translator.cpp": "7eeb97e01b2e345e8e43ad622651f8fbbdcdd607c4d55e1d8ab792b203ddc515",
-        "src/graphics/pipeline/shader/spirv_translator.cpp": "d9a4bdfe126a747fde2bbcc3197c330ea6eb4ace3ea3962734e92a3f9d4f46b6",
+        "include/rex/graphics/pipeline/shader/dxbc_translator.h": "3c48605500c7dd955cdda0a09aa01022ec5d39529aa8cad48bd86067c81f79fb",
+        "include/rex/graphics/pipeline/shader/spirv_translator.h": "7a80891d0a8dfd2d62b3936418fe3498571e8e15f86f4bce30d03f7cff19ef6b",
+        "src/graphics/pipeline/shader/dxbc_translator.cpp": "f0f03145ead5dbb165e0a4e94bcbe5de43221f3ce7b4e373cf1937e02df88b53",
+        "src/graphics/pipeline/shader/spirv_translator.cpp": "9ee26561579540c4e46e411161c95f7e97f6438bef963137bb8bd44632c1926c",
         "src/graphics/pipeline/shader/dxbc_translator_memexport.cpp": "1701313eebf0e3b6dcc0c4e129763c189c68d960f99d15fbcda0887f351fab6a",
         "src/graphics/pipeline/shader/spirv_translator_memexport.cpp": "7d87b758263f99f8cf05e9dc91c5e6ca3448d8ef19fd17dfc18129427fd0c8d3",
-        "src/graphics/pipeline/shader/dxbc_translator_om.cpp": "96ab3b9b66c769e49cccb31093ece734048633217a071c72abea44182b3d9aa4",
+        "src/graphics/pipeline/shader/dxbc_translator_om.cpp": "25ecd84ba5b279a6856c82cdd4ce3fc3236bba93c24662674bb61b381cc79b70",
         "src/graphics/pipeline/shader/spirv_translator_rb.cpp": "3c5afd0814326809d557da19c9b7b9c28ea29d0eff5a52fe7ccf3eaa41f5b628"
       },
       "test": "Native VIZ_QUERY uses read-only depth prepass, boolean atomics, and suppresses duplicated vertex memory stores; normal shaders unchanged. Runtime validation deferred by maintainer."
@@ -2300,7 +2300,7 @@
         "include/rex/ui/vulkan/functions/device_1_0.inc": "31c79dc340bd82560ba184312fb43f2a66ef66588e0606b8df76b4d273d3c921"
       },
       "files": {
-        "include/rex/ui/vulkan/functions/device_1_0.inc": "bd04c1ce998ac34b917be18cdfb820513dea6efc21b16619e6943a64868e61da"
+        "include/rex/ui/vulkan/functions/device_1_0.inc": "2f63b983e5a58d62225746b64dc71ab0ccf421adc87b7737b4500ec373cea00e"
       },
       "test": "Build coverage of Vulkan submission failure cleanup; vkQueueWaitIdle is mandatory Vulkan 1.0 entry point loaded with the device dispatch table"
     },
@@ -2325,8 +2325,8 @@
         "src/graphics/pipeline/shader/spirv_translator_rb.cpp": "513511ad2fab65243b331f886f45d7e7e6d0fadf76b711422212a2a783b212ae"
       },
       "files": {
-        "include/rex/graphics/pipeline/shader/dxbc_translator.h": "bb3d875c5268c392262473c0b3603a0cffbe6ca0910b4d35c235cb06647ab67a",
-        "src/graphics/pipeline/shader/dxbc_translator_om.cpp": "96ab3b9b66c769e49cccb31093ece734048633217a071c72abea44182b3d9aa4",
+        "include/rex/graphics/pipeline/shader/dxbc_translator.h": "3c48605500c7dd955cdda0a09aa01022ec5d39529aa8cad48bd86067c81f79fb",
+        "src/graphics/pipeline/shader/dxbc_translator_om.cpp": "25ecd84ba5b279a6856c82cdd4ce3fc3236bba93c24662674bb61b381cc79b70",
         "src/graphics/pipeline/shader/spirv_translator_rb.cpp": "3c5afd0814326809d557da19c9b7b9c28ea29d0eff5a52fe7ccf3eaa41f5b628"
       },
       "test": "ZPD uses canonical subpixel (0,0) with scaled EDRAM; visibility OR sees all host subpixels; 1x emits the original instructions. Runtime validation deferred by maintainer."
@@ -2340,7 +2340,7 @@
       },
       "files": {
         "src/graphics/pipeline/shader/spirv_translator_rb.cpp": "3c5afd0814326809d557da19c9b7b9c28ea29d0eff5a52fe7ccf3eaa41f5b628",
-        "include/rex/graphics/pipeline/shader/spirv_translator.h": "af3605a5b254681bb865ffe0e90ab8e8e4fa19616c336e07f49053c793dae6e6"
+        "include/rex/graphics/pipeline/shader/spirv_translator.h": "7a80891d0a8dfd2d62b3936418fe3498571e8e15f86f4bce30d03f7cff19ef6b"
       },
       "test": "sdkcheck.SPIRV-interlock-control-flow: real translated early/late-depth, kill/alpha, helper-demotion, ZPD/visibility and scaled variants; all reachable CFG paths enter and leave exactly once. Offline only; no crash attribution."
     },
@@ -2352,8 +2352,8 @@
         "include/rex/graphics/pipeline/shader/spirv_translator.h": "c5b036f9651167e5a4dfa815a539c5d69ce177ccd712ba4373fa62138faeced3"
       },
       "files": {
-        "src/graphics/pipeline/shader/spirv_translator.cpp": "d9a4bdfe126a747fde2bbcc3197c330ea6eb4ace3ea3962734e92a3f9d4f46b6",
-        "include/rex/graphics/pipeline/shader/spirv_translator.h": "af3605a5b254681bb865ffe0e90ab8e8e4fa19616c336e07f49053c793dae6e6"
+        "src/graphics/pipeline/shader/spirv_translator.cpp": "9ee26561579540c4e46e411161c95f7e97f6438bef963137bb8bd44632c1926c",
+        "include/rex/graphics/pipeline/shader/spirv_translator.h": "7a80891d0a8dfd2d62b3936418fe3498571e8e15f86f4bce30d03f7cff19ef6b"
       },
       "test": "sdkcheck.SPIRV-rectangle-replay-phi: synthetic conditional/unconditional jumps with rectangle replay and interpolator masks; every OpPhi covers all CFG predecessors and replay resets PC to zero. Captured shader retranslation also passes SPIRV-Tools offline validation."
     },
@@ -2366,7 +2366,7 @@
       },
       "files": {
         "src/graphics/pipeline/shader/spirv_translator_rb.cpp": "3c5afd0814326809d557da19c9b7b9c28ea29d0eff5a52fe7ccf3eaa41f5b628",
-        "include/rex/graphics/pipeline/shader/spirv_translator.h": "af3605a5b254681bb865ffe0e90ab8e8e4fa19616c336e07f49053c793dae6e6"
+        "include/rex/graphics/pipeline/shader/spirv_translator.h": "7a80891d0a8dfd2d62b3936418fe3498571e8e15f86f4bce30d03f7cff19ef6b"
       },
       "test": "sdkcheck.SPIRV-interlock-control-flow (60 real translated variants) plus SPIRV-Tools Vulkan 1.4 validation: all mask definitions dominate uses across alpha ALWAYS/A2C disabled; A2C result retained for demote OFF and ON."
     },
@@ -2380,8 +2380,8 @@
         "src/graphics/pipeline/shader/spirv_builder.cpp": "12a34b805048beee5162de9cdca7f6f4dc3e915eb2dc9ac5849db8ead122526a"
       },
       "files": {
-        "src/graphics/pipeline/shader/spirv_translator.cpp": "d9a4bdfe126a747fde2bbcc3197c330ea6eb4ace3ea3962734e92a3f9d4f46b6",
-        "include/rex/graphics/pipeline/shader/spirv_translator.h": "af3605a5b254681bb865ffe0e90ab8e8e4fa19616c336e07f49053c793dae6e6",
+        "src/graphics/pipeline/shader/spirv_translator.cpp": "9ee26561579540c4e46e411161c95f7e97f6438bef963137bb8bd44632c1926c",
+        "include/rex/graphics/pipeline/shader/spirv_translator.h": "7a80891d0a8dfd2d62b3936418fe3498571e8e15f86f4bce30d03f7cff19ef6b",
         "include/rex/graphics/pipeline/shader/spirv_builder.h": "717f044744ece6bee5f48a9e356e6d69629188538799b61271d7abcf0efa1583",
         "src/graphics/pipeline/shader/spirv_builder.cpp": "610d63e4082066a2f74449576ab2dff7453e90f47e752c23baa9d972a0f9c3ac"
       },
@@ -2418,7 +2418,7 @@
       "files": {
         "include/rex/graphics/pipeline/texture/info.h": "bfbeec5361746f55b1e739ea632b9658c8d5e7ff2a44ac2a02730fb496f73d25",
         "src/graphics/d3d12/texture_cache.cpp": "6a6669e3e486bd40eb01253d9d6068e4c31d11e669a527de990f38d2c866d8c9",
-        "src/graphics/util/draw.cpp": "3f7dde8e3bd36ce76008fc3350045d5f6cff2825c0505ca09ecfd1a139c35f0b",
+        "src/graphics/util/draw.cpp": "0a55c0471434fffb2b8304d19c51b197dc6315ee24efc83e3cdee7bacaa33ce8",
         "src/graphics/vulkan/texture_cache.cpp": "5bd658c580a6eb4b0afa493fff269e8c1fa211d4c34661c244efcd7efecd36dc"
       },
       "test": "sdkcheck.canary-format-alias: k_8_A/k_8_B/k_8_8_8_8_A textures use k_8/k_8_8_8_8 (GetBaseFormat) and resolves to them write the aliased destination format (Xenia Canary 8322658). Host format table entries are review-only; no GPU run."
@@ -2436,10 +2436,10 @@
         "src/graphics/vulkan/render_target_cache.cpp": "47c8471aae7342701745a095e2ec288ea1fdc6158e4b286f9b60ab7dcf34ac13"
       },
       "files": {
-        "include/rex/graphics/pipeline/shader/dxbc_translator.h": "bb3d875c5268c392262473c0b3603a0cffbe6ca0910b4d35c235cb06647ab67a",
-        "include/rex/graphics/pipeline/shader/spirv_translator.h": "af3605a5b254681bb865ffe0e90ab8e8e4fa19616c336e07f49053c793dae6e6",
+        "include/rex/graphics/pipeline/shader/dxbc_translator.h": "3c48605500c7dd955cdda0a09aa01022ec5d39529aa8cad48bd86067c81f79fb",
+        "include/rex/graphics/pipeline/shader/spirv_translator.h": "7a80891d0a8dfd2d62b3936418fe3498571e8e15f86f4bce30d03f7cff19ef6b",
         "src/graphics/pipeline/render_target/cache.cpp": "83ec2739c9c343964abf186375fa2e7bfe78d0874b41c20bade8f2090a9f1a0e",
-        "src/graphics/pipeline/shader/dxbc_translator_om.cpp": "96ab3b9b66c769e49cccb31093ece734048633217a071c72abea44182b3d9aa4",
+        "src/graphics/pipeline/shader/dxbc_translator_om.cpp": "25ecd84ba5b279a6856c82cdd4ce3fc3236bba93c24662674bb61b381cc79b70",
         "src/graphics/pipeline/shader/spirv_translator_rb.cpp": "3c5afd0814326809d557da19c9b7b9c28ea29d0eff5a52fe7ccf3eaa41f5b628",
         "src/graphics/vulkan/command_processor.cpp": "681cd92d4998121a4835f4e8a1f18528329b5da134c87b0d3f9726627d143059",
         "src/graphics/vulkan/render_target_cache.cpp": "fb3d2210c665fba33ba465d96ece33f91a202fbe5690712955bcf82047ae1f1f"
@@ -2466,7 +2466,7 @@
         "src/graphics/util/draw.cpp": "a5238c8147d2dc12afbcfd80809f742e2eaa109480708939ce9ce9e203417a66"
       },
       "files": {
-        "src/graphics/util/draw.cpp": "3f7dde8e3bd36ce76008fc3350045d5f6cff2825c0505ca09ecfd1a139c35f0b"
+        "src/graphics/util/draw.cpp": "0a55c0471434fffb2b8304d19c51b197dc6315ee24efc83e3cdee7bacaa33ce8"
       },
       "test": "sdkcheck.canary-resolve-dest: a 2D tiled resolve whose RB_COPY_DEST_BASE is advanced by N 8bpp/16bpp macro tiles yields the same destination base, offsets and extents as the copy N*32 pixels right of the 4 KB-aligned base (Xenia Canary 89609297c). No GPU run."
     },
@@ -2480,7 +2480,7 @@
         "src/graphics/vulkan/command_processor.cpp": "2877a19aea1f2d30ed97a1e3e76a96c6a9803c54c15b5f658d5a84bf546f0389"
       },
       "files": {
-        "include/rex/graphics/pipeline/shader/spirv_translator.h": "af3605a5b254681bb865ffe0e90ab8e8e4fa19616c336e07f49053c793dae6e6",
+        "include/rex/graphics/pipeline/shader/spirv_translator.h": "7a80891d0a8dfd2d62b3936418fe3498571e8e15f86f4bce30d03f7cff19ef6b",
         "src/graphics/pipeline/shader/spirv_translator_fetch.cpp": "05fea1695c99f994b661f397992e1e5e751319d2bd0e210357d4ac262d76cf98",
         "src/graphics/pipeline/shader/spirv_translator_rb.cpp": "3c5afd0814326809d557da19c9b7b9c28ea29d0eff5a52fe7ccf3eaa41f5b628",
         "src/graphics/vulkan/command_processor.cpp": "681cd92d4998121a4835f4e8a1f18528329b5da134c87b0d3f9726627d143059"
@@ -2505,7 +2505,7 @@
         "src/graphics/command_processor.cpp": "3e1f453f4f4c86510486907ce06fc0530852ca3e68ea67edb1cbf0b6b0a44fd7"
       },
       "files": {
-        "src/graphics/command_processor.cpp": "e2b42d5012046917f5383f8d0c0eefa9885419246d0c8f085ea178c30cc34792"
+        "src/graphics/command_processor.cpp": "c419c26f29455714f77497d15d3d499204799fc619dc36d84981c7a47efcad92"
       },
       "test": "sdkcheck.canary-pm4: a register write after PM4_WAIT_IB_PFD_COMPLETE in the same command buffer is executed by the real command processor (Xenia Canary 3e9d62ffc). No GPU run."
     },
@@ -2517,8 +2517,8 @@
         "src/graphics/util/draw.cpp": "3c1a3323e30e2cc5dcc39311d5baa120a800c43be0a29b42f220997ff23c1454"
       },
       "files": {
-        "include/rex/graphics/util/draw.h": "415174fe3ae2bb5d1acd8a438cbd190a38ff55a823ad3227af06b2a6e4e82c0d",
-        "src/graphics/util/draw.cpp": "3f7dde8e3bd36ce76008fc3350045d5f6cff2825c0505ca09ecfd1a139c35f0b"
+        "include/rex/graphics/util/draw.h": "1c1f67f420782d2a95556d8c38f575c3a5232dd529422ddb1ba5e7587ca23b83",
+        "src/graphics/util/draw.cpp": "0a55c0471434fffb2b8304d19c51b197dc6315ee24efc83e3cdee7bacaa33ce8"
       },
       "test": "sdkcheck.canary-viewport: a 1280-wide viewport drawn with window offset x -608 (4D5307DF's right tile in Canary) starts at -608 with the full extent and the same NDC transform as the unoffset tile (Xenia Canary 6579cc2a4). No GPU run."
     },
@@ -2529,7 +2529,7 @@
         "src/graphics/util/draw.cpp": "3e9569abdfd1c424ab6870a3af51f46e0fe9cb3e03d4be1676df0a498975bd94"
       },
       "files": {
-        "src/graphics/util/draw.cpp": "3f7dde8e3bd36ce76008fc3350045d5f6cff2825c0505ca09ecfd1a139c35f0b"
+        "src/graphics/util/draw.cpp": "0a55c0471434fffb2b8304d19c51b197dc6315ee24efc83e3cdee7bacaa33ce8"
       },
       "test": "sdkcheck.canary-resolve-dest: a volume resolve with copy_dest_height 192 and RB_COPY_SURFACE_SLICE = pitch * 256 uses a 256-row slice (same base and extents as copy_dest_height 256), while 2D resolves keep copy_dest_height (Xenia Canary d8731edc9). No GPU run."
     },
@@ -2542,7 +2542,7 @@
         "src/graphics/pipeline/shader/spirv_translator_fetch.cpp": "140772902577feb395e1347cdbde3c9d6c3e1f8d2248aa35c7329470679aafc3"
       },
       "files": {
-        "include/rex/graphics/pipeline/shader/spirv_translator.h": "af3605a5b254681bb865ffe0e90ab8e8e4fa19616c336e07f49053c793dae6e6",
+        "include/rex/graphics/pipeline/shader/spirv_translator.h": "7a80891d0a8dfd2d62b3936418fe3498571e8e15f86f4bce30d03f7cff19ef6b",
         "src/graphics/pipeline/shader/dxbc_translator_fetch.cpp": "5b32a8b922e390ee02c573aabdd0e9d684f7569dfc17909a4e7ba13c709ab897",
         "src/graphics/pipeline/shader/spirv_translator_fetch.cpp": "05fea1695c99f994b661f397992e1e5e751319d2bd0e210357d4ac262d76cf98"
       },
@@ -2558,9 +2558,9 @@
         "src/graphics/pipeline/shader/spirv_translator_fetch.cpp": "bd4dce6f6c3e2491e499ce537b0e84efa842af31d59ff44fda5975f4aa788b01"
       },
       "files": {
-        "include/rex/graphics/pipeline/shader/spirv_translator.h": "af3605a5b254681bb865ffe0e90ab8e8e4fa19616c336e07f49053c793dae6e6",
+        "include/rex/graphics/pipeline/shader/spirv_translator.h": "7a80891d0a8dfd2d62b3936418fe3498571e8e15f86f4bce30d03f7cff19ef6b",
         "src/graphics/pipeline/shader/dxbc_translator_fetch.cpp": "5b32a8b922e390ee02c573aabdd0e9d684f7569dfc17909a4e7ba13c709ab897",
-        "src/graphics/pipeline/shader/spirv_translator.cpp": "d9a4bdfe126a747fde2bbcc3197c330ea6eb4ace3ea3962734e92a3f9d4f46b6",
+        "src/graphics/pipeline/shader/spirv_translator.cpp": "9ee26561579540c4e46e411161c95f7e97f6438bef963137bb8bd44632c1926c",
         "src/graphics/pipeline/shader/spirv_translator_fetch.cpp": "05fea1695c99f994b661f397992e1e5e751319d2bd0e210357d4ac262d76cf98"
       },
       "test": "sdkcheck.canary-spirv and sdkcheck.canary-dxbc: a vfetch_full of k_32_32_32_32_FLOAT translated offline masks every word at or past base + size (fetch constant word 1 bits 2:25) to 0 in SPIR-V (select per word) and DXBC (ubfe/and/umad/iadd/ult mask) (Xenia Canary 9e9d3cdd3). No GPU run."
@@ -2576,7 +2576,7 @@
       },
       "files": {
         "include/rex/graphics/pipeline/render_target/cache.h": "0fd60bee3afcaf87cd15798e960076c4de37c655073bd1cee685d5f6546d81ec",
-        "src/graphics/d3d12/command_processor.cpp": "faa433679f3ebac4d7747ed4ef23589cd8e5f30218e24ef58549244bf42212fd",
+        "src/graphics/d3d12/command_processor.cpp": "0e8edc3b5e27786db6fbbebb7934bfb9127f520356446bd85acd77f2af4b6259",
         "src/graphics/pipeline/render_target/cache.cpp": "83ec2739c9c343964abf186375fa2e7bfe78d0874b41c20bade8f2090a9f1a0e",
         "src/graphics/vulkan/command_processor.cpp": "681cd92d4998121a4835f4e8a1f18528329b5da134c87b0d3f9726627d143059"
       },
@@ -2622,29 +2622,29 @@
         "src/ui/vulkan/vulkan_device.cpp": "c90486459896caec42c6221c8c7ad287f2c4ce84e63ada5766389ab360cc83d6"
       },
       "files": {
-        "include/rex/graphics/d3d12/command_processor.h": "a73c767e214609b31c999625defad743aec8c7185098555b7aeb4d2787c40969",
-        "include/rex/graphics/d3d12/deferred_command_list.h": "c82906295496396812a4b85a60e2cff59702d361d5dda43653796c59cdd17919",
-        "include/rex/graphics/d3d12/pipeline_cache.h": "acb80ebcf3b923202a437fe89922e828aea73b38c565ba11439f53a63852ca5b",
+        "include/rex/graphics/d3d12/command_processor.h": "e6638233381906d0d661593a676d4bf6fc41220cbb9e669fc0024104301d34bd",
+        "include/rex/graphics/d3d12/deferred_command_list.h": "d91ee18352657f0b7c71a8d3eeee13702323e35bea8cb38902400d77f366aa71",
+        "include/rex/graphics/d3d12/pipeline_cache.h": "94e34e91b4eae2b6b0bb89abbd3d9adc3f600433886618f16be62afb953080c5",
         "include/rex/graphics/d3d12/render_target_cache.h": "6706e94ae09b43b08ba41e976098d48dc7358e7a53c9c9bb48e40f536b69c34b",
-        "include/rex/graphics/flags.h": "b61697bb7828bc2a0d829c4131044be5991878b1178ae50c0fb45b50ad33de8f",
-        "include/rex/graphics/util/draw.h": "415174fe3ae2bb5d1acd8a438cbd190a38ff55a823ad3227af06b2a6e4e82c0d",
+        "include/rex/graphics/flags.h": "4924ca36f7abcc3d19f887aa77f1a296c7bb6f72ed9d99b6bbc1a47822f3cfc4",
+        "include/rex/graphics/util/draw.h": "1c1f67f420782d2a95556d8c38f575c3a5232dd529422ddb1ba5e7587ca23b83",
         "include/rex/graphics/vulkan/command_processor.h": "61c1c0677eaae0d8adef5ce51e6362ff99404c776180434659015503243676b8",
-        "include/rex/graphics/vulkan/deferred_command_buffer.h": "da74dcbcbe4e337901620a95a208a6b448c7d0e2201a243a3627bce10e6abfe5",
+        "include/rex/graphics/vulkan/deferred_command_buffer.h": "68a7fda4a8876879fc5c1ef917c6d4aee214304948584f7566e1e173bceaee47",
         "include/rex/graphics/vulkan/render_target_cache.h": "1bd8b4978ce7103a7c90205865e2d8562cce9514041e715cc1133299f2f79240",
-        "include/rex/ui/vulkan/device.h": "28ec4f07b8a88865154307cf6d5e7f4a7e3cb2f5816d3c54b261f86150536705",
-        "src/graphics/d3d12/command_processor.cpp": "faa433679f3ebac4d7747ed4ef23589cd8e5f30218e24ef58549244bf42212fd",
-        "src/graphics/d3d12/deferred_command_list.cpp": "e73c5ff6d4ed679681c93247c2ffa2381da6af9e6e8df79ac09cf319c1d5e932",
-        "src/graphics/d3d12/pipeline_cache.cpp": "7112d5d15e154825df9a5389e475a4862524fc51d98368a7a2f2b8d7737660f2",
+        "include/rex/ui/vulkan/device.h": "f7024d901ba6c4422fbdc02c004c08dc0ee24920293b3b9a08513db5ddfcb0c4",
+        "src/graphics/d3d12/command_processor.cpp": "0e8edc3b5e27786db6fbbebb7934bfb9127f520356446bd85acd77f2af4b6259",
+        "src/graphics/d3d12/deferred_command_list.cpp": "a281ba47ad42413ce8029486acef8a12656df483991860c26b5a154139665344",
+        "src/graphics/d3d12/pipeline_cache.cpp": "9bcebcf9680155d426fb2ffd181bebb05abc3657399a40b75f70867dc1b3202f",
         "src/graphics/d3d12/render_target_cache.cpp": "a3f5e7ff82919f979656af927ce80f1df0404b5ed8273d9e11e9c86a90b1b950",
-        "src/graphics/flags.cpp": "66d474c2cba75e3cb296570d4d146615edd6c421dc25a21c35ed0a8048715fb4",
-        "src/graphics/pipeline/shader/dxbc_translator_om.cpp": "96ab3b9b66c769e49cccb31093ece734048633217a071c72abea44182b3d9aa4",
+        "src/graphics/flags.cpp": "93e1223db69fe8003d97d4d7da75cff4da67a895fcc0be4fbf435b9218d3f74b",
+        "src/graphics/pipeline/shader/dxbc_translator_om.cpp": "25ecd84ba5b279a6856c82cdd4ce3fc3236bba93c24662674bb61b381cc79b70",
         "src/graphics/pipeline/shader/spirv_translator_rb.cpp": "3c5afd0814326809d557da19c9b7b9c28ea29d0eff5a52fe7ccf3eaa41f5b628",
-        "src/graphics/util/draw.cpp": "3f7dde8e3bd36ce76008fc3350045d5f6cff2825c0505ca09ecfd1a139c35f0b",
+        "src/graphics/util/draw.cpp": "0a55c0471434fffb2b8304d19c51b197dc6315ee24efc83e3cdee7bacaa33ce8",
         "src/graphics/vulkan/command_processor.cpp": "681cd92d4998121a4835f4e8a1f18528329b5da134c87b0d3f9726627d143059",
-        "src/graphics/vulkan/deferred_command_buffer.cpp": "6d8d7bac191ea573423ae1af5951737cc41c195ef61bc3669912865c46de0afb",
-        "src/graphics/vulkan/pipeline_cache.cpp": "088c717b82555c78cedea61188764b8aca8d7512fee1e734d46a40ee87f7dc4e",
+        "src/graphics/vulkan/deferred_command_buffer.cpp": "eecdf48d29e7cc8da0d5fdf1accfb27083cffaf0d8c8b6e04de1245f52411aa5",
+        "src/graphics/vulkan/pipeline_cache.cpp": "f281b15cfb00803b50bc74408e1f28e7c118ca85f48ae518c3bce7c42767f2e4",
         "src/graphics/vulkan/render_target_cache.cpp": "fb3d2210c665fba33ba465d96ece33f91a202fbe5690712955bcf82047ae1f1f",
-        "src/ui/vulkan/vulkan_device.cpp": "2d94beb1dfd246330011f50cfea38a972e09b791a97a0667b7ae967533c37d7a"
+        "src/ui/vulkan/vulkan_device.cpp": "80cb31c4df0288aeefed9f790487de8dd4db1ba4013bdf1432957aad89747e53"
       },
       "test": "MSAA sample positions and host/guest mappings, 1x/2x/4x viewport contracts, offline DXBC/SPIR-V coverage/depth and deferred sample-location capture. Canary cc4981a4659086acb1c25a485adebefc3f432ae1. SPIR-V red before port: 2 failures. GPU/gameplay acceptance recorded separately in the focused report."
     },
@@ -2672,21 +2672,21 @@
         "src/graphics/vulkan/render_target_cache.cpp": "378a7378a1321a270dc6b79f3fb8a4f55f2d986e78b28532f33cb3cca651899d"
       },
       "files": {
-        "include/rex/graphics/d3d12/command_processor.h": "a73c767e214609b31c999625defad743aec8c7185098555b7aeb4d2787c40969",
+        "include/rex/graphics/d3d12/command_processor.h": "e6638233381906d0d661593a676d4bf6fc41220cbb9e669fc0024104301d34bd",
         "include/rex/graphics/d3d12/render_target_cache.h": "6706e94ae09b43b08ba41e976098d48dc7358e7a53c9c9bb48e40f536b69c34b",
         "include/rex/graphics/pipeline/render_target/cache.h": "0fd60bee3afcaf87cd15798e960076c4de37c655073bd1cee685d5f6546d81ec",
-        "include/rex/graphics/pipeline/shader/dxbc_translator.h": "bb3d875c5268c392262473c0b3603a0cffbe6ca0910b4d35c235cb06647ab67a",
-        "include/rex/graphics/pipeline/shader/spirv_translator.h": "af3605a5b254681bb865ffe0e90ab8e8e4fa19616c336e07f49053c793dae6e6",
-        "include/rex/graphics/util/draw.h": "415174fe3ae2bb5d1acd8a438cbd190a38ff55a823ad3227af06b2a6e4e82c0d",
+        "include/rex/graphics/pipeline/shader/dxbc_translator.h": "3c48605500c7dd955cdda0a09aa01022ec5d39529aa8cad48bd86067c81f79fb",
+        "include/rex/graphics/pipeline/shader/spirv_translator.h": "7a80891d0a8dfd2d62b3936418fe3498571e8e15f86f4bce30d03f7cff19ef6b",
+        "include/rex/graphics/util/draw.h": "1c1f67f420782d2a95556d8c38f575c3a5232dd529422ddb1ba5e7587ca23b83",
         "include/rex/graphics/util/draw_extent_estimator.h": "968cb742a60fae5cad5f8111010099f9b778032acfe78bd45b3ad676265f0ad0",
         "include/rex/graphics/vulkan/command_processor.h": "61c1c0677eaae0d8adef5ce51e6362ff99404c776180434659015503243676b8",
         "include/rex/graphics/vulkan/render_target_cache.h": "1bd8b4978ce7103a7c90205865e2d8562cce9514041e715cc1133299f2f79240",
-        "src/graphics/d3d12/command_processor.cpp": "faa433679f3ebac4d7747ed4ef23589cd8e5f30218e24ef58549244bf42212fd",
+        "src/graphics/d3d12/command_processor.cpp": "0e8edc3b5e27786db6fbbebb7934bfb9127f520356446bd85acd77f2af4b6259",
         "src/graphics/d3d12/render_target_cache.cpp": "a3f5e7ff82919f979656af927ce80f1df0404b5ed8273d9e11e9c86a90b1b950",
         "src/graphics/pipeline/render_target/cache.cpp": "83ec2739c9c343964abf186375fa2e7bfe78d0874b41c20bade8f2090a9f1a0e",
-        "src/graphics/pipeline/shader/dxbc_translator.cpp": "7eeb97e01b2e345e8e43ad622651f8fbbdcdd607c4d55e1d8ab792b203ddc515",
-        "src/graphics/pipeline/shader/spirv_translator.cpp": "d9a4bdfe126a747fde2bbcc3197c330ea6eb4ace3ea3962734e92a3f9d4f46b6",
-        "src/graphics/util/draw.cpp": "3f7dde8e3bd36ce76008fc3350045d5f6cff2825c0505ca09ecfd1a139c35f0b",
+        "src/graphics/pipeline/shader/dxbc_translator.cpp": "f0f03145ead5dbb165e0a4e94bcbe5de43221f3ce7b4e373cf1937e02df88b53",
+        "src/graphics/pipeline/shader/spirv_translator.cpp": "9ee26561579540c4e46e411161c95f7e97f6438bef963137bb8bd44632c1926c",
+        "src/graphics/util/draw.cpp": "0a55c0471434fffb2b8304d19c51b197dc6315ee24efc83e3cdee7bacaa33ce8",
         "src/graphics/util/draw_extent_estimator.cpp": "2a3047c17a116896d6074fc7aad475dc79e25b089c6067dc9c27c0957dcd233a",
         "src/graphics/vulkan/command_processor.cpp": "681cd92d4998121a4835f4e8a1f18528329b5da134c87b0d3f9726627d143059",
         "src/graphics/vulkan/render_target_cache.cpp": "fb3d2210c665fba33ba465d96ece33f91a202fbe5690712955bcf82047ae1f1f"
@@ -2706,7 +2706,7 @@
       },
       "files": {
         "include/rex/graphics/d3d12/render_target_cache.h": "6706e94ae09b43b08ba41e976098d48dc7358e7a53c9c9bb48e40f536b69c34b",
-        "include/rex/graphics/util/draw.h": "415174fe3ae2bb5d1acd8a438cbd190a38ff55a823ad3227af06b2a6e4e82c0d",
+        "include/rex/graphics/util/draw.h": "1c1f67f420782d2a95556d8c38f575c3a5232dd529422ddb1ba5e7587ca23b83",
         "include/rex/graphics/vulkan/render_target_cache.h": "1bd8b4978ce7103a7c90205865e2d8562cce9514041e715cc1133299f2f79240",
         "src/graphics/d3d12/render_target_cache.cpp": "a3f5e7ff82919f979656af927ce80f1df0404b5ed8273d9e11e9c86a90b1b950",
         "src/graphics/shaders/bytecode/d3d12_5_1/resolve_gamma_128bpp_cs.h": "f2d394d35cb557da0bf50be7286a99aebc7355115dd13d1b5dd66d08916b9594",
@@ -2752,7 +2752,7 @@
         "src/graphics/shaders/vulkan_spirv/resolve_gamma_64bpp_scaled_cs.h": "3b5530f49a02e3a784b03afefe3044d4aa3f306880aaccd440e409f42bb6b8b3",
         "src/graphics/shaders/vulkan_spirv/resolve_gamma_8bpp_cs.h": "7130a6330e1d601cf8417e99e570062fd93abbf733af2f64c66c3d518b5f1180",
         "src/graphics/shaders/vulkan_spirv/resolve_gamma_8bpp_scaled_cs.h": "12dfecc0c4c06b5c4c6d5adecc63390d1f939842c8848eb077643743e877462d",
-        "src/graphics/util/draw.cpp": "3f7dde8e3bd36ce76008fc3350045d5f6cff2825c0505ca09ecfd1a139c35f0b",
+        "src/graphics/util/draw.cpp": "0a55c0471434fffb2b8304d19c51b197dc6315ee24efc83e3cdee7bacaa33ce8",
         "src/graphics/vulkan/render_target_cache.cpp": "fb3d2210c665fba33ba465d96ece33f91a202fbe5690712955bcf82047ae1f1f"
       },
       "test": "Gamma-only Xenos resolve pipelines: decode 10-bit PWL codes, average, requantize before exp_bias, preserve fixed alpha and original SDK EDRAM/scaled destination layouts. Twenty reproducibly generated DXBC/SPIR-V resources; non-gamma resources and shared push-constant ABI unchanged. Canary 534aeb64; focused independent CPU oracle and D3D12/Vulkan compute readback regression."
@@ -3440,8 +3440,8 @@
     "include/rex/graphics/vulkan/pipeline_cache.h": "be04596efac46ecdbc6d1a85f89d49ae275570b022104314eb17e9ee8e48ac56"
   },
   "files": {
-    "src/graphics/vulkan/pipeline_cache.cpp": "088c717b82555c78cedea61188764b8aca8d7512fee1e734d46a40ee87f7dc4e",
-    "include/rex/graphics/vulkan/pipeline_cache.h": "e36e596f03f03b78841d70d2faf59bb9ea7494aab3bb2c8e07c8f6dcf9ef9d7f"
+    "src/graphics/vulkan/pipeline_cache.cpp": "f281b15cfb00803b50bc74408e1f28e7c118ca85f48ae518c3bce7c42767f2e4",
+    "include/rex/graphics/vulkan/pipeline_cache.h": "37e3a32e7b0df1e5839c240e3a52399daa0a36528aaeda024095856d0c865620"
   },
   "test": "sdkcheck.Vulkan-driver-pipeline-cache: real Vulkan depth-only guest draw; base rejects uncached creation, patched driver cache used. Existing predicated fetch acceptance/rejection remains checked."
 },
@@ -3455,8 +3455,8 @@
     "src/graphics/vulkan/command_processor.cpp": "fdbc0459f34cfd343bc1f8097ed5ac1298d6ab5741c60ec885e7c438bf7ea7eb"
   },
   "files": {
-    "include/rex/graphics/d3d12/command_processor.h": "a73c767e214609b31c999625defad743aec8c7185098555b7aeb4d2787c40969",
-    "src/graphics/d3d12/command_processor.cpp": "faa433679f3ebac4d7747ed4ef23589cd8e5f30218e24ef58549244bf42212fd",
+    "include/rex/graphics/d3d12/command_processor.h": "e6638233381906d0d661593a676d4bf6fc41220cbb9e669fc0024104301d34bd",
+    "src/graphics/d3d12/command_processor.cpp": "0e8edc3b5e27786db6fbbebb7934bfb9127f520356446bd85acd77f2af4b6259",
     "include/rex/graphics/vulkan/command_processor.h": "61c1c0677eaae0d8adef5ce51e6362ff99404c776180434659015503243676b8",
     "src/graphics/vulkan/command_processor.cpp": "681cd92d4998121a4835f4e8a1f18528329b5da134c87b0d3f9726627d143059",
     "include/rex/graphics/memexport_readback.h": "3bb4cda28f0add344757c103e85e44bf8fbed51bcb7fd9050bb8bc0c1307db4d"
@@ -3476,11 +3476,11 @@
   },
   "files": {
     "include/rex/graphics/vulkan/depth_bias.h": "6fa3f4ebfae626d73d2e598a2dbf22c02cbe4caa07eb98a4c479d61a4aaaee7a",
-    "include/rex/ui/vulkan/device.h": "28ec4f07b8a88865154307cf6d5e7f4a7e3cb2f5816d3c54b261f86150536705",
+    "include/rex/ui/vulkan/device.h": "f7024d901ba6c4422fbdc02c004c08dc0ee24920293b3b9a08513db5ddfcb0c4",
     "include/rex/ui/vulkan/functions/device_ext_depth_bias_control.inc": "24f091a8e6128299c3c62a4e3ea96c0b8be42d2b1551bd3f113b34c3b4ada2cd",
-    "src/ui/vulkan/vulkan_device.cpp": "2d94beb1dfd246330011f50cfea38a972e09b791a97a0667b7ae967533c37d7a",
-    "include/rex/graphics/vulkan/deferred_command_buffer.h": "da74dcbcbe4e337901620a95a208a6b448c7d0e2201a243a3627bce10e6abfe5",
-    "src/graphics/vulkan/deferred_command_buffer.cpp": "6d8d7bac191ea573423ae1af5951737cc41c195ef61bc3669912865c46de0afb",
+    "src/ui/vulkan/vulkan_device.cpp": "80cb31c4df0288aeefed9f790487de8dd4db1ba4013bdf1432957aad89747e53",
+    "include/rex/graphics/vulkan/deferred_command_buffer.h": "68a7fda4a8876879fc5c1ef917c6d4aee214304948584f7566e1e173bceaee47",
+    "src/graphics/vulkan/deferred_command_buffer.cpp": "eecdf48d29e7cc8da0d5fdf1accfb27083cffaf0d8c8b6e04de1245f52411aa5",
     "include/rex/graphics/vulkan/command_processor.h": "61c1c0677eaae0d8adef5ce51e6362ff99404c776180434659015503243676b8",
     "src/graphics/vulkan/command_processor.cpp": "681cd92d4998121a4835f4e8a1f18528329b5da134c87b0d3f9726627d143059"
   },
@@ -3748,7 +3748,7 @@
     "src/graphics/pipeline/shader/dxbc_translator_fetch.cpp": "489264b8218238a4ec16cf1cd022139d14ce17488552c9066653cf31bb5546e3"
   },
   "files": {
-    "src/graphics/flags.cpp": "66d474c2cba75e3cb296570d4d146615edd6c421dc25a21c35ed0a8048715fb4",
+    "src/graphics/flags.cpp": "93e1223db69fe8003d97d4d7da75cff4da67a895fcc0be4fbf435b9218d3f74b",
     "src/graphics/pipeline/shader/dxbc_translator_fetch.cpp": "5b32a8b922e390ee02c573aabdd0e9d684f7569dfc17909a4e7ba13c709ab897"
   },
   "test": "sdkcheck.scaled-texture-offsets-flag links graphics/flags.cpp without any DXBC translator, checks the true default and both setting values. Negative control: undefined FLAGS_draw_resolution_scaled_texture_offsets_storage_ before the patch. Native Linux Vulkan replay must link and preserve capture equivalence."
@@ -3762,9 +3762,9 @@
     "src/graphics/pipeline/shader/dxbc_translator_om.cpp": "a5f50732a1a0fa557189f26ddc926bb96c723c1d22057f8d07dddb956d5c939a"
   },
   "files": {
-    "include/rex/graphics/pipeline/shader/dxbc_translator.h": "bb3d875c5268c392262473c0b3603a0cffbe6ca0910b4d35c235cb06647ab67a",
-    "src/graphics/pipeline/shader/dxbc_translator.cpp": "7eeb97e01b2e345e8e43ad622651f8fbbdcdd607c4d55e1d8ab792b203ddc515",
-    "src/graphics/pipeline/shader/dxbc_translator_om.cpp": "96ab3b9b66c769e49cccb31093ece734048633217a071c72abea44182b3d9aa4"
+    "include/rex/graphics/pipeline/shader/dxbc_translator.h": "3c48605500c7dd955cdda0a09aa01022ec5d39529aa8cad48bd86067c81f79fb",
+    "src/graphics/pipeline/shader/dxbc_translator.cpp": "f0f03145ead5dbb165e0a4e94bcbe5de43221f3ce7b4e373cf1937e02df88b53",
+    "src/graphics/pipeline/shader/dxbc_translator_om.cpp": "25ecd84ba5b279a6856c82cdd4ce3fc3236bba93c24662674bb61b381cc79b70"
   },
   "test": "sdkcheck.canary-dxbc: opt-in Native hybrid color declares RT0 and sample coverage, initializes early-return coverage to zero, preserves ROV depth/stencil and bypasses ROV color stores. Negative control: four failed DXBC checks before patch 0269. Native hybrid surfaces require separate GPU pixel/memory/counter/coherence contracts."
 },
@@ -3777,9 +3777,9 @@
     "src/graphics/pipeline/shader/dxbc_translator_om.cpp": "0f85a31f98a51f0eb8b0ec0703e67a2f78df672e641b040154fecaba5ade3b99"
   },
   "files": {
-    "include/rex/graphics/pipeline/shader/dxbc_translator.h": "bb3d875c5268c392262473c0b3603a0cffbe6ca0910b4d35c235cb06647ab67a",
-    "src/graphics/pipeline/shader/dxbc_translator.cpp": "7eeb97e01b2e345e8e43ad622651f8fbbdcdd607c4d55e1d8ab792b203ddc515",
-    "src/graphics/pipeline/shader/dxbc_translator_om.cpp": "96ab3b9b66c769e49cccb31093ece734048633217a071c72abea44182b3d9aa4"
+    "include/rex/graphics/pipeline/shader/dxbc_translator.h": "3c48605500c7dd955cdda0a09aa01022ec5d39529aa8cad48bd86067c81f79fb",
+    "src/graphics/pipeline/shader/dxbc_translator.cpp": "f0f03145ead5dbb165e0a4e94bcbe5de43221f3ce7b4e373cf1937e02df88b53",
+    "src/graphics/pipeline/shader/dxbc_translator_om.cpp": "25ecd84ba5b279a6856c82cdd4ce3fc3236bba93c24662674bb61b381cc79b70"
   },
   "test": "sdkcheck.canary-dxbc validates explicit scalar/striped shader variants; Native-ROV-sample-counts and hybrid contracts check exact pass/fail, nested/visibility, alpha/kill, early/late depth, MSAA, overflow, reset and canonical snapshots. Recorded Forza/Skate pixels, writes and sample counters must match."
 },
@@ -3792,8 +3792,8 @@
     "src/graphics/pipeline/shader/dxbc_translator_fetch.cpp": "1e2c3c834114f616b22098bf14f859f7b74fa5ccfa7048a8da2754dd90c9f012"
   },
   "files": {
-    "include/rex/graphics/pipeline/shader/dxbc_translator.h": "bb3d875c5268c392262473c0b3603a0cffbe6ca0910b4d35c235cb06647ab67a",
-    "src/graphics/pipeline/shader/dxbc_translator.cpp": "7eeb97e01b2e345e8e43ad622651f8fbbdcdd607c4d55e1d8ab792b203ddc515",
+    "include/rex/graphics/pipeline/shader/dxbc_translator.h": "3c48605500c7dd955cdda0a09aa01022ec5d39529aa8cad48bd86067c81f79fb",
+    "src/graphics/pipeline/shader/dxbc_translator.cpp": "f0f03145ead5dbb165e0a4e94bcbe5de43221f3ce7b4e373cf1937e02df88b53",
     "src/graphics/pipeline/shader/dxbc_translator_fetch.cpp": "5b32a8b922e390ee02c573aabdd0e9d684f7569dfc17909a4e7ba13c709ab897"
   },
   "test": "Experimental and default-on, maintainer-authorized on 2026-11-13: explicit point UNORM8 fetches only; unsigned fractional R8/RG8/RGBA8 format guards; distinct persistent VS/PS variants. sdkcheck.canary-dxbc covers the enabled default, explicit off and unaffected filtering; console precision remains unverified."
@@ -3829,10 +3829,101 @@
   },
   "files": {
     "include/rex/graphics/xenos_zpd_report.h": "e2e8ad7f6643e23e803df54b98688b665d5f2921bb8b4b3c5b076ff7eb5bc0be",
-    "src/graphics/d3d12/command_processor.cpp": "faa433679f3ebac4d7747ed4ef23589cd8e5f30218e24ef58549244bf42212fd",
+    "src/graphics/d3d12/command_processor.cpp": "0e8edc3b5e27786db6fbbebb7934bfb9127f520356446bd85acd77f2af4b6259",
     "src/graphics/vulkan/command_processor.cpp": "681cd92d4998121a4835f4e8a1f18528329b5da134c87b0d3f9726627d143059"
   },
   "test": "tests/sdkcheck/zpd_report_test.cpp: differential against unmodified Canary 4f04bc7 xenos_zpd_report.h; report bytes, A/B lanes, 32-bit wrap, scaled nonzero counts, full counter conversion and accumulation. GPU query scheduling not covered."
+},
+{
+  "file": "patches/rexglue-sdk/0275-canary-occlusion-queries.patch",
+  "sha256": "7895ae2655cd7acf4839e79244482783596112ae787da7faa0c09b2e7f72dc97",
+  "base_files": {
+    "include/rex/graphics/command_processor.h": "d5fecaf9e36c803dc89e1e20442ad745f247c770c0f4b4a87a1d0704a5585265",
+    "include/rex/graphics/d3d12/command_processor.h": "a73c767e214609b31c999625defad743aec8c7185098555b7aeb4d2787c40969",
+    "include/rex/graphics/d3d12/deferred_command_list.h": "c82906295496396812a4b85a60e2cff59702d361d5dda43653796c59cdd17919",
+    "include/rex/graphics/d3d12/pipeline_cache.h": "acb80ebcf3b923202a437fe89922e828aea73b38c565ba11439f53a63852ca5b",
+    "include/rex/graphics/d3d12/shader.h": "3481827d9f8311721784c48e31dcdf18bf3f9330c416b1216d5ce581b0d7c830",
+    "include/rex/graphics/flags.h": "b61697bb7828bc2a0d829c4131044be5991878b1178ae50c0fb45b50ad33de8f",
+    "include/rex/graphics/format/dxbc.h": "3b10292edcbc33915a2d7f9e3f6d9ae4c7d15d76f9fc0f89915bcc9b3083f3af",
+    "include/rex/graphics/pipeline/shader/dxbc.h": "93f5ac7bf3f214918e3f2e16d2aec86699d3bfe059d2749374d61ab195b4972b",
+    "include/rex/graphics/pipeline/shader/dxbc_translator.h": "bb3d875c5268c392262473c0b3603a0cffbe6ca0910b4d35c235cb06647ab67a",
+    "include/rex/graphics/pipeline/shader/shader.h": "7d57dd98c96077693eff0cabc969e5ccd8d7fcbb6587f9d37bac9192ddfba621",
+    "include/rex/graphics/pipeline/shader/spirv.h": "2cdf47e197005ac01ab320bd1f3e6685a360812896b20b441efd36ccb39db111",
+    "include/rex/graphics/pipeline/shader/spirv_translator.h": "af3605a5b254681bb865ffe0e90ab8e8e4fa19616c336e07f49053c793dae6e6",
+    "include/rex/graphics/pipeline/shader/translator.h": "821c3955ad43cb5c73df9a2206549f196a0955c7ef0d3571233f08a83924a54b",
+    "include/rex/graphics/registers.h": "2ccf7732db706133acfec34f7d70659e3d12b0533bc51e8b95ca8137cc4d1c40",
+    "include/rex/graphics/util/draw.h": "415174fe3ae2bb5d1acd8a438cbd190a38ff55a823ad3227af06b2a6e4e82c0d",
+    "include/rex/graphics/vulkan/deferred_command_buffer.h": "da74dcbcbe4e337901620a95a208a6b448c7d0e2201a243a3627bce10e6abfe5",
+    "include/rex/graphics/vulkan/pipeline_cache.h": "e36e596f03f03b78841d70d2faf59bb9ea7494aab3bb2c8e07c8f6dcf9ef9d7f",
+    "include/rex/graphics/vulkan/shader.h": "996afd3502010c5d673fb0925fe65912e66d6c56d0c469fd9cd9cc2d5741b4c1",
+    "include/rex/ui/vulkan/device.h": "28ec4f07b8a88865154307cf6d5e7f4a7e3cb2f5816d3c54b261f86150536705",
+    "include/rex/ui/vulkan/functions/device_1_0.inc": "bd04c1ce998ac34b917be18cdfb820513dea6efc21b16619e6943a64868e61da",
+    "src/graphics/CMakeLists.txt": "1fe4de1dee7386f19cffa743aed8fc564e861b8bd91333522922f7bf1137d1ae",
+    "src/graphics/command_processor.cpp": "e2b42d5012046917f5383f8d0c0eefa9885419246d0c8f085ea178c30cc34792",
+    "src/graphics/d3d12/command_processor.cpp": "faa433679f3ebac4d7747ed4ef23589cd8e5f30218e24ef58549244bf42212fd",
+    "src/graphics/d3d12/deferred_command_list.cpp": "e73c5ff6d4ed679681c93247c2ffa2381da6af9e6e8df79ac09cf319c1d5e932",
+    "src/graphics/d3d12/pipeline_cache.cpp": "7112d5d15e154825df9a5389e475a4862524fc51d98368a7a2f2b8d7737660f2",
+    "src/graphics/d3d12/shader.cpp": "2b0d13dad51a1f4280b5b0469d0c4663d0923e752cb9f29a1089b0ca2d3399ff",
+    "src/graphics/flags.cpp": "66d474c2cba75e3cb296570d4d146615edd6c421dc25a21c35ed0a8048715fb4",
+    "src/graphics/pipeline/shader/dxbc.cpp": "0c7a39904c0442ffd136e0a9ea2774d9ab960b40694bdb88072781b5db961dc9",
+    "src/graphics/pipeline/shader/dxbc_translator.cpp": "7eeb97e01b2e345e8e43ad622651f8fbbdcdd607c4d55e1d8ab792b203ddc515",
+    "src/graphics/pipeline/shader/dxbc_translator_om.cpp": "96ab3b9b66c769e49cccb31093ece734048633217a071c72abea44182b3d9aa4",
+    "src/graphics/pipeline/shader/shader.cpp": "6c7fda9bc2d163fc961157164b4498638a2d924b207fe2cb1622ab4d1201ff2f",
+    "src/graphics/pipeline/shader/spirv.cpp": "7f709d0cb700c3b1de0d4dbb8ee75c43d3f7410de11189dbe5205af0764de6c3",
+    "src/graphics/pipeline/shader/spirv_translator.cpp": "d9a4bdfe126a747fde2bbcc3197c330ea6eb4ace3ea3962734e92a3f9d4f46b6",
+    "src/graphics/util/draw.cpp": "3f7dde8e3bd36ce76008fc3350045d5f6cff2825c0505ca09ecfd1a139c35f0b",
+    "src/graphics/vulkan/deferred_command_buffer.cpp": "6d8d7bac191ea573423ae1af5951737cc41c195ef61bc3669912865c46de0afb",
+    "src/graphics/vulkan/pipeline_cache.cpp": "088c717b82555c78cedea61188764b8aca8d7512fee1e734d46a40ee87f7dc4e",
+    "src/graphics/vulkan/shader.cpp": "d4e4f6b25137beb8cc229e732c7cdbacf6b0d024bb92ce3ada245cdd5f30ffeb",
+    "src/ui/vulkan/vulkan_device.cpp": "2d94beb1dfd246330011f50cfea38a972e09b791a97a0667b7ae967533c37d7a"
+  },
+  "files": {
+    "include/rex/graphics/command_processor.h": "afa6a42ef8c7ba6c0933157319448062b426690da2931cb820b8b711a2842729",
+    "include/rex/graphics/d3d12/command_processor.h": "e6638233381906d0d661593a676d4bf6fc41220cbb9e669fc0024104301d34bd",
+    "include/rex/graphics/d3d12/deferred_command_list.h": "d91ee18352657f0b7c71a8d3eeee13702323e35bea8cb38902400d77f366aa71",
+    "include/rex/graphics/d3d12/pipeline_cache.h": "94e34e91b4eae2b6b0bb89abbd3d9adc3f600433886618f16be62afb953080c5",
+    "include/rex/graphics/d3d12/query_pool.h": "b775b79cecc15e981ba3d73ce6a801a50ab9046437091540cecf784929d860ce",
+    "include/rex/graphics/d3d12/shader.h": "592dc5076b9f34ce106c24c291deda561d7ce08903025801fb3e7953072946b3",
+    "include/rex/graphics/flags.h": "4924ca36f7abcc3d19f887aa77f1a296c7bb6f72ed9d99b6bbc1a47822f3cfc4",
+    "include/rex/graphics/format/dxbc.h": "98020395b7e3fa61953937d66365b3c101346568373227cbec11e75482a008cf",
+    "include/rex/graphics/pipeline/shader/dxbc.h": "444fe2c1f789070ded564ee9e1f8c9663a06112ccea242c6985be352eb745641",
+    "include/rex/graphics/pipeline/shader/dxbc_translator.h": "3c48605500c7dd955cdda0a09aa01022ec5d39529aa8cad48bd86067c81f79fb",
+    "include/rex/graphics/pipeline/shader/shader.h": "c67de7c5dac350324fd9e30c5801747b0c7bd14310a3c42b47cb05f6d446aa16",
+    "include/rex/graphics/pipeline/shader/spirv.h": "94ce31cad1d17387db1cd8f5a309817221c9ccde3ae4f0fa47d4d27e0cc7cd08",
+    "include/rex/graphics/pipeline/shader/spirv_translator.h": "7a80891d0a8dfd2d62b3936418fe3498571e8e15f86f4bce30d03f7cff19ef6b",
+    "include/rex/graphics/pipeline/shader/translator.h": "3367c98429963cef739d2b305ba09d8a9528d9ee9de08feca6770251abcca27b",
+    "include/rex/graphics/registers.h": "e0f3af923fa23160774e2c43108af10daf71094c756d89ea0516fb5da8ba0680",
+    "include/rex/graphics/util/draw.h": "1c1f67f420782d2a95556d8c38f575c3a5232dd529422ddb1ba5e7587ca23b83",
+    "include/rex/graphics/vulkan/deferred_command_buffer.h": "68a7fda4a8876879fc5c1ef917c6d4aee214304948584f7566e1e173bceaee47",
+    "include/rex/graphics/vulkan/pipeline_cache.h": "37e3a32e7b0df1e5839c240e3a52399daa0a36528aaeda024095856d0c865620",
+    "include/rex/graphics/vulkan/query_pool.h": "dfb61f09fb4e98c98f0531d8ff6f93f68d7e52849383c3c31663edc2be25786b",
+    "include/rex/graphics/vulkan/shader.h": "6ee8eff5c46ea44da37de5fac04ca9a39fa6f74a3828abe9e15aa30818272a74",
+    "include/rex/ui/vulkan/device.h": "f7024d901ba6c4422fbdc02c004c08dc0ee24920293b3b9a08513db5ddfcb0c4",
+    "include/rex/ui/vulkan/functions/device_1_0.inc": "2f63b983e5a58d62225746b64dc71ab0ccf421adc87b7737b4500ec373cea00e",
+    "include/rex/ui/vulkan/functions/device_1_2_ext_host_query_reset.inc": "fe6124d76f696e7a91d090f074f3630aa7776ba0c20fd357a12d91b1b3c17870",
+    "include/rex/ui/vulkan/functions/device_ext_conditional_rendering.inc": "d20c6b374725341864a51e4d52d70041d8b6c53e14d72a7d742108fb458b3e44",
+    "src/graphics/CMakeLists.txt": "13d0aa2c1f1842f2ca545a1f9f8ca70b62b5ecd33a1520d658fd66d01313aac5",
+    "src/graphics/command_processor.cpp": "c419c26f29455714f77497d15d3d499204799fc619dc36d84981c7a47efcad92",
+    "src/graphics/d3d12/command_processor.cpp": "0e8edc3b5e27786db6fbbebb7934bfb9127f520356446bd85acd77f2af4b6259",
+    "src/graphics/d3d12/deferred_command_list.cpp": "a281ba47ad42413ce8029486acef8a12656df483991860c26b5a154139665344",
+    "src/graphics/d3d12/pipeline_cache.cpp": "9bcebcf9680155d426fb2ffd181bebb05abc3657399a40b75f70867dc1b3202f",
+    "src/graphics/d3d12/query_pool.cpp": "1e0885fc1429ed676b51ff385abce45902bf28e2936172972557af32f7894d1c",
+    "src/graphics/d3d12/shader.cpp": "308af1fce122ede86d52fa7745068ea3d924df7b328ae6bfa563ada720797d56",
+    "src/graphics/flags.cpp": "93e1223db69fe8003d97d4d7da75cff4da67a895fcc0be4fbf435b9218d3f74b",
+    "src/graphics/pipeline/shader/dxbc.cpp": "488b4a5a2d79261da4c2dd3a46b6cc5b039566ac34500cff558c4b84fdbe7463",
+    "src/graphics/pipeline/shader/dxbc_translator.cpp": "f0f03145ead5dbb165e0a4e94bcbe5de43221f3ce7b4e373cf1937e02df88b53",
+    "src/graphics/pipeline/shader/dxbc_translator_om.cpp": "25ecd84ba5b279a6856c82cdd4ce3fc3236bba93c24662674bb61b381cc79b70",
+    "src/graphics/pipeline/shader/shader.cpp": "76e86f347ab0611f37763e6f7054d1addc4ae7885c5ec297afea0deab36a78c7",
+    "src/graphics/pipeline/shader/spirv.cpp": "03afa3a37f08a78c312c0d548ddf9e8310f85e51f7e6c5edb8d74310b4bbb37f",
+    "src/graphics/pipeline/shader/spirv_translator.cpp": "9ee26561579540c4e46e411161c95f7e97f6438bef963137bb8bd44632c1926c",
+    "src/graphics/util/draw.cpp": "0a55c0471434fffb2b8304d19c51b197dc6315ee24efc83e3cdee7bacaa33ce8",
+    "src/graphics/vulkan/deferred_command_buffer.cpp": "eecdf48d29e7cc8da0d5fdf1accfb27083cffaf0d8c8b6e04de1245f52411aa5",
+    "src/graphics/vulkan/pipeline_cache.cpp": "f281b15cfb00803b50bc74408e1f28e7c118ca85f48ae518c3bce7c42767f2e4",
+    "src/graphics/vulkan/query_pool.cpp": "f16112cfbff840d399b43a0e7ac5c18f7a6bc8ab03b06031ec7fb3ea4846bd01",
+    "src/graphics/vulkan/shader.cpp": "7bb50601954c18294d788da33407215781cb2bdb341a18d25f1db47b49461779",
+    "src/ui/vulkan/vulkan_device.cpp": "80cb31c4df0288aeefed9f790487de8dd4db1ba4013bdf1432957aad89747e53"
+  },
+  "test": "Canary 4f04bc7 query state and pools; 128-bit shader keys; D3D12 real ZPD/VIZ sample-count fixtures and Native shader regressions."
 }
 ]
 },

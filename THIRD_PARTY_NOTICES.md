@@ -44,7 +44,7 @@ Patches em `app/workspace/patches/rexglue-sdk` identificam
 modificações locais; seus hashes e a base estão no lock e em `package.json`.
 O código adaptado em `src/content/xex_patch.cpp` deriva do ReXGlue/Xenia e conserva
 esses avisos; a leitura autenticada de recursos também é compilada no extrator.
-Os patches GPU 0273/0274 e o fixture diferencial ZPD derivam do Xenia Canary
+Os patches GPU 0273–0275 e o fixture diferencial ZPD derivam do Xenia Canary
 `4f04bc7cc76b89bfcf7327b597d9770eaaddf935` (Copyright 2014/2026 Ben Vanik).
 Conservam os avisos por arquivo e os termos BSD em [Xenia Canary](licenses/xenia-canary.txt).
 O pacote inclui as fontes correspondentes do decoder libmspack em
