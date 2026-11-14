@@ -239,7 +239,8 @@ void GenerateAotProject(const ProjectPaths& paths, const Target& t) {
       {"REXSDK_DIR", Path(paths.root / "external/rexglue-sdk")},
       // Vulkan is built beside D3D12; Python only runs the SDK's build-time generators.
       {"REXGLUE_USE_VULKAN", "ON"},
-      {"PYTHON_EXECUTABLE", Path(python)}}}
+      // Match expanded native presets so slash spelling does not split the SDK cache.
+      {"PYTHON_EXECUTABLE", PathUtf8(python.lexically_normal())}}}
   }})}};
   publish(dir / "CMakePresets.json", preset.dump(2) + "\n");
 }

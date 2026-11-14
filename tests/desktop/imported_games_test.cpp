@@ -484,6 +484,8 @@ TEST_CASE("automatic AOT generates a stable project without a manual recipe", "[
   std::ifstream preset_input(t.manifest.parent_path()/"CMakePresets.json");
   nlohmann::json release_preset; preset_input >> release_preset;
   CHECK(release_preset["configurePresets"][0]["cacheVariables"]["CMAKE_BUILD_TYPE"] == "Release");
+  const auto python = release_preset["configurePresets"][0]["cacheVariables"]["PYTHON_EXECUTABLE"].get<std::string>();
+  CHECK(python == PathUtf8(PathFromUtf8(python).lexically_normal()));
   auto profile=LoadSessionProfile(f.paths,t.manifest,false);
   CHECK(profile.name==t.id);
   // Session paths are canonicalized; Windows TEMP may use an 8.3 alias.
