@@ -1,0 +1,328 @@
+diff --git a/include/rex/graphics/command_processor.h b/include/rex/graphics/command_processor.h
+--- a/include/rex/graphics/command_processor.h
++++ b/include/rex/graphics/command_processor.h
+@@ -55,11 +55,6 @@
+   uint32_t start;
+   uint32_t count;
+ };
+-
+-// Clock backstop for strict retire, triggered on the first failed guest wait.
+-constexpr uint64_t kStrictZPDRetireDeadlineMs = 2;
+-// The fast modes only need to keep queue growth in check.
+-constexpr uint64_t kFastZPDRetireDeadlineMs = 250;
+ 
+ // Cap for the fast-mode cached delta map.  Games reuse a small set of report
+ // addresses so this should never be hit, but prevents unbounded growth if a
+@@ -347,6 +342,7 @@
+   // Queues the current interval at report_address and starts the next one.
+   void QueueZPDReport(uint32_t report_address);
+   // Opens a new host query segment when CanOpenQuery is true.
++  void FailQuery(const char* reason);
+   void OpenQuerySegment(bool can_close_submission);
+   // Closes the current segment at a submission or render pass boundary.
+   // The report and VIZ ID stay open and a new segment will open at the next
+@@ -373,8 +369,7 @@
+   // Handles a strict report the guest is waiting on while the ring is empty.
+   void PrepareZPDForWait();
+   // Called from PrepareForWait and submission boundaries so retired reports
+-  // reach the guest before it loops again. Fast modes give up on a stuck front
+-  // report after kFastZPDRetireDeadlineMs.
++  // reach the guest before it loops again. Unresolved GPU segments stay pending.
+   void PumpPendingRetire();
+   // Guest writeback.
+   void WriteZPDReport(uint32_t report_address, const XenosZPDReport& value);
+@@ -389,8 +384,7 @@
+     zpd_sample_counter_ = {};
+     zpd_speculative_sample_counter_ = {};
+     fake_zpd_sample_count_ = 0;
+-    zpd_pending_retire_start_ms_ = 0;
+-    zpd_force_fake_fallback_ = false;
++    query_backend_failed_ = false;
+   }
+ 
+   // VIZ_QUERY has the scan converter track 64 query IDs. An ID is visible when
+@@ -488,7 +482,7 @@
+   // Shared memexport readback enable state with backend legacy-flag override support.
+   bool IsReadbackMemexportEnabled(bool legacy_backend_flag) const;
+ 
+-  ZPDMode zpd_mode_ = ZPDMode::kFast;
++  ZPDMode zpd_mode_ = ZPDMode::kStrict;
+ 
+   ReportHandle zpd_next_report_handle_ = 1;
+   // The report the next event will end. No handle means nothing is measuring.
+@@ -508,11 +502,10 @@
+   XenosZPDReport zpd_speculative_sample_counter_;
+   std::unordered_map<uint32_t, XenosZPDReport> fast_zpd_report_cached_deltas_;
+ 
+-  bool zpd_force_fake_fallback_ = false;
++  bool query_backend_failed_ = false;
+   uint32_t fake_zpd_sample_count_ = 0;
+ 
+   // Uptime in ms when the current retire backstop was armed.
+-  uint64_t zpd_pending_retire_start_ms_ = 0;
+ 
+   // Set by the backend when resolution scale changes.
+   uint32_t zpd_draw_resolution_scale_x_ = 1;
+diff --git a/src/graphics/command_processor.cpp b/src/graphics/command_processor.cpp
+--- a/src/graphics/command_processor.cpp
++++ b/src/graphics/command_processor.cpp
+@@ -93,7 +93,8 @@
+   if (mode == "fake") return ZPDMode::kFake;
+   if (mode == "strict") return ZPDMode::kStrict;
+   if (mode == "fast-alt") return ZPDMode::kFastAlt;
+-  return ZPDMode::kFast;
++  if (mode == "fast") return ZPDMode::kFast;
++  return ZPDMode::kStrict;
+ }
+ void SetZPDMode(const std::string& mode) { cvar::SetFlagByName("occlusion_query", mode); }
+ 
+@@ -1424,7 +1425,8 @@
+     return true;
+   }
+ 
+-  if (zpd_mode_ != ZPDMode::kFake && !zpd_force_fake_fallback_) {
++  if (zpd_mode_ != ZPDMode::kFake) {
++    if (query_backend_failed_) return false;
+     // Z-Pass Done (ZPD) facilitates all D3D occlusion queries.
+     // D3D fills the counters (usually ZPass_A + ZPass_B, but some 2005-2006 D3D
+     // versions use ZFail_A + ZFail_B, and sometimes even both counters' B
+@@ -1433,10 +1435,10 @@
+     // processor treats each event as a free-running sample counter snapshot.
+     // VIZ_QUERY is a coarse hi-Z visibility test, not strictly an OQ.
+     QueueZPDReport(report_address);
+-    return true;
+-  }
+-
+-  // Fake / fallback mode.
++    return !query_backend_failed_;
++  }
++
++  // Explicitly selected fake mode only.
+   if (REXCVAR_GET(occlusion_query_fake_lower_threshold) < 0) {
+     return true;
+   }
+@@ -1848,7 +1850,7 @@
+       active_segment_.viz.generation == query.generation) {
+     return;
+   }
+-  query.fallback = true;
++  FailQuery("VIZ survey was not measured");
+ }
+ 
+ void CommandProcessor::OnVIZQueryResolved(uint32_t id, uint64_t generation,
+@@ -1948,6 +1950,7 @@
+     CloseQuerySegment();
+   }
+ 
++  if (query_backend_failed_) return;
+   ZPDReport& report = zpd_current_report_;
+   report.address = report_address;
+   if (zpd_mode_ == ZPDMode::kStrict) {
+@@ -1987,6 +1990,12 @@
+   active_segment_.segment_pending_begin = true;
+ }
+ 
++void CommandProcessor::FailQuery(const char* reason) {
++  if (!query_backend_failed_)
++    REXGPU_ERROR("Real GPU query failed: {}. No synthetic completion will be published.", reason);
++  query_backend_failed_ = true;
++}
++
+ void CommandProcessor::OpenQuerySegment(bool can_close_submission) {
+   ActiveQuerySegment& segment = active_segment_;
+   if (segment.segment_active || query_segment_opening_ || !CanOpenQuery()) {
+@@ -2001,17 +2010,7 @@
+ 
+   EnsureQueryResources();
+   if (!IsQueryPoolReady()) {
+-    if (viz) {
+-      viz_queries_[segment.viz.id].fallback = true;
+-    }
+-    if (report) {
+-      // Fall back to fake results for the rest of the session.
+-      zpd_force_fake_fallback_ = true;
+-      zpd_current_report_ = {};
+-      segment = {};
+-    } else {
+-      segment.viz = {};
+-    }
++    FailQuery("real query resources unavailable");
+     return;
+   }
+ 
+@@ -2022,29 +2021,10 @@
+   query_segment_opening_ = true;
+   QueryOpenResult result = OpenQuery(can_close_submission);
+   query_segment_opening_ = false;
+-  if (result == QueryOpenResult::kPoolExhausted &&
+-      zpd_mode_ != ZPDMode::kStrict) {
+-    // Fast modes favor forward progress over accuracy. Report at least one
+-    // passing sample instead of waiting for a slot to become available.
+-    if (report) {
+-      zpd_current_report_.delta.z_pass =
+-          std::max<uint64_t>(zpd_current_report_.delta.z_pass, 1);
+-      segment.segment_pending_begin = false;
+-    }
+-    if (viz) {
+-      viz_queries_[segment.viz.id].fallback = true;
+-    }
+-    segment.report = false;
+-    segment.viz = {};
+-    return;
+-  }
+   if (result != QueryOpenResult::kOpened) {
+     segment.report = false;
+-    // A deferred segment opens at the next opportunity with these consumers.
+-    if (result != QueryOpenResult::kDeferred && viz) {
+-      viz_queries_[segment.viz.id].fallback = true;
+-      segment.viz = {};
+-    }
++    if (result != QueryOpenResult::kDeferred)
++      FailQuery(result == QueryOpenResult::kPoolExhausted ? "query pool exhausted" : "query open failed");
+     return;
+   }
+   segment.segment_active = true;
+@@ -2062,6 +2042,7 @@
+   const bool closed = CloseQuery(
+       segment.report ? zpd_current_report_.handle : kInvalidReportHandle,
+       segment.viz, submission);
++  if (!closed) FailQuery("query close failed");
+   if (segment.report && closed) {
+     zpd_current_report_.pending_segments++;
+     zpd_current_report_.last_segment_end_submission = submission;
+@@ -2073,8 +2054,8 @@
+       query.last_segment_end_submission = submission;
+       ++viz_pending_resolves_;
+     } else {
+-      // The segment is lost but its draws ran, so the query stays visible.
+-      query.fallback = true;
++      // Retain the unresolved result; failure never establishes visibility.
++      query.resolved = false;
+     }
+   }
+   // The report resumes at the next opportunity if this segment counted for
+@@ -2159,6 +2140,7 @@
+ }
+ 
+ void CommandProcessor::PrepareZPDForWait() {
++  if (query_backend_failed_) return;
+   ReportHandle awaited_handle = kInvalidReportHandle;
+   for (const ZPDReport& report : zpd_reports_) {
+     if (report.awaited) {
+@@ -2188,43 +2170,15 @@
+     return;
+   }
+ 
+-  uint64_t now_ms = chrono::Clock::QueryHostUptimeMillis();
+-  if (!zpd_pending_retire_start_ms_) {
+-    zpd_pending_retire_start_ms_ = now_ms;
+-    return;
+-  }
+-  if (now_ms - zpd_pending_retire_start_ms_ < kStrictZPDRetireDeadlineMs) {
+-    return;
+-  }
+-
+-  ZPDReport& front = zpd_reports_.front();
+-  // Keep what resolved, with a floor of one so culling doesn't flash occluded.
+-  front.delta.z_pass = std::max<uint64_t>(front.delta.z_pass, 1);
+-  front.pending_segments = 0;
+-  PumpPendingRetire();
++  // A failed wait is not a sample count. Keep the report pending.
+ }
+ 
+ void CommandProcessor::PumpPendingRetire() {
++  if (query_backend_failed_) return;
+   bool rebase_needed = false;
+   while (!zpd_reports_.empty()) {
+     ZPDReport& front = zpd_reports_.front();
+-    if (front.pending_segments) {
+-      if (zpd_mode_ == ZPDMode::kStrict) {
+-        break;
+-      }
+-      // A stuck front report would block everything behind it.
+-      uint64_t now_ms = chrono::Clock::QueryHostUptimeMillis();
+-      if (!zpd_pending_retire_start_ms_) {
+-        zpd_pending_retire_start_ms_ = now_ms;
+-        break;
+-      }
+-      if (now_ms - zpd_pending_retire_start_ms_ < kFastZPDRetireDeadlineMs) {
+-        break;
+-      }
+-      front.delta.z_pass = std::max<uint64_t>(front.delta.z_pass, 1);
+-      front.pending_segments = 0;
+-    }
+-    zpd_pending_retire_start_ms_ = 0;
++    if (front.pending_segments) break;
+ 
+     zpd_sample_counter_ += front.delta;
+     if (front.speculative) {
+diff --git a/src/graphics/d3d12/command_processor.cpp b/src/graphics/d3d12/command_processor.cpp
+--- a/src/graphics/d3d12/command_processor.cpp
++++ b/src/graphics/d3d12/command_processor.cpp
+@@ -2360,6 +2360,7 @@
+ #endif  // XE_GPU_FINE_GRAINED_DRAW_SCOPES
+ 
+   ID3D12Device* device = GetD3D12Provider().GetDevice();
++  if (query_backend_failed_) return false;
+   const RegisterFile& regs = *register_file_;
+   const bool viz_survey = draw_util::IsVIZSurveyDraw(regs);
+ 
+@@ -2629,6 +2630,12 @@
+   zpd_draw_resolution_scale_y_ = texture_cache_->draw_resolution_scale_y();
+   UpdateQuerySegment(zpd_draw_resolution_scale_x_ * zpd_draw_resolution_scale_y_,
+                      zpd_hybrid, viz_survey);
++  if (query_backend_failed_) return false;
++  if (!active_segment_.segment_active && (active_segment_.report_measuring() ||
++      active_segment_.viz.generation != kInvalidVIZGeneration)) {
++    FailQuery("report segment could not open before draw");
++    return false;
++  }
+ 
+   // Update system constants before uploading them.
+   // TODO(Triang3l): With ROV, pass the disabled render target mask for safety.
+diff --git a/src/graphics/flags.cpp b/src/graphics/flags.cpp
+--- a/src/graphics/flags.cpp
++++ b/src/graphics/flags.cpp
+@@ -57,8 +57,8 @@
+ 
+ REXCVAR_DEFINE_BOOL(xenos_sample_positions, false, "GPU", "Use Xenos MSAA sample positions for host render targets when supported; ROV/FSI always use Xenos depth positions");
+ 
+-REXCVAR_DEFINE_STRING(occlusion_query, "fast", "GPU",
+-    "ZPD reports: fake, fast, fast-alt or strict; real queries in all but fake mode")
++REXCVAR_DEFINE_STRING(occlusion_query, "strict", "GPU",
++    "ZPD: strict waits for real samples (default); fast/fast-alt speculate until resolve; fake is explicit")
+     .allowed({"fake", "fast", "fast-alt", "strict"}).lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
+ REXCVAR_DEFINE_BOOL(occlusion_query_viz, true, "GPU", "Enable real VIZ surveys and draw predication")
+     .lifecycle(rex::cvar::Lifecycle::kRequiresRestart);
+diff --git a/src/graphics/vulkan/command_processor.cpp b/src/graphics/vulkan/command_processor.cpp
+--- a/src/graphics/vulkan/command_processor.cpp
++++ b/src/graphics/vulkan/command_processor.cpp
+@@ -3965,6 +3965,7 @@
+   SCOPE_profile_cpu_f("gpu");
+ #endif  // XE_GPU_FINE_GRAINED_DRAW_SCOPES
+ 
++  if (query_backend_failed_) return false;
+   const RegisterFile& regs = *register_file_;
+   const bool viz_survey = draw_util::IsVIZSurveyDraw(regs);
+   const bool query_fsi = render_target_cache_->GetPath() == RenderTargetCache::Path::kPixelShaderInterlock &&
+@@ -4326,6 +4327,7 @@
+   VkDeviceSize predicate_offset = 0;
+   const VkBuffer predicate_buffer = BindVIZPredicate(predicate_offset);
+   UpdateQuerySegment(draw_resolution_scale_x * draw_resolution_scale_y, zpd_hybrid, viz_survey);
++  if (query_backend_failed_) return false;
+ 
+   // Get dynamic rasterizer state.
+   draw_util::ViewportInfo viewport_info;
+@@ -4564,6 +4566,12 @@
+   SubmitBarriersAndEnterRenderTargetCacheRenderPass(
+       render_target_cache_->last_update_render_pass(),
+       render_target_cache_->last_update_framebuffer());
++  if (query_backend_failed_) return false;
++  if (!active_segment_.segment_active && (active_segment_.report_measuring() ||
++      active_segment_.viz.generation != kInvalidVIZGeneration)) {
++    FailQuery("report segment could not open inside render pass");
++    return false;
++  }
+ 
+   if (zpd_counter_index_force_update_) {
+   UpdateSystemConstantValues(primitive_polygonal, primitive_processing_result,

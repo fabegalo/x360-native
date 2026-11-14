@@ -26,16 +26,25 @@ Linux, dashboard/retorno e pacote permanecem sem aceite. Os resultados Windows
 acima mantêm seus próprios limites.
 [Evidências locais e alcance](reports/linux-wslg-iruka-2026-10-29.md).
 
+## Consultas Xenos D3D12/Vulkan
+
+`occlusion_query=strict` é o padrão: relatórios aguardam amostras reais.
+`fast` e `fast-alt` são opções explícitas com escrita especulativa até o resolve;
+`fake` também exige seleção explícita. Falhas de recursos ou fechamento são
+erros de execução, e tempo decorrido não conclui relatórios pendentes.
+Os probes sintéticos exercitam contadores e VIZ nos caminhos ROV/FSI; não
+certificam pixels, jogos, desempenho ou o caminho de render targets do host.
+
 ## Native D3D12/Vulkan
 
 Backend experimental separado, retomado na G3 de 22–23/10. Retail 17559 em
 boot direto → Castle trial → retorno demonstrado em [N3](reports/graphics/native-renderer-n3.md).
 Forza passou do bloqueio PointList; [N4.1](reports/graphics/native-renderer-n4-1.md) corrigiu cores
 e [N4.2](reports/graphics/native-renderer-n4-2.md) chegou à condução, com entrada confirmada.
-Desempenho de gameplay não aprovado. A G3 implementou ZPD e Vulkan, mas os
-probes de oclusão ainda falham na invalidação dos aliases guest; MEMEXPORT
-mantém falhas em triângulos incompletos, aliases e quatro conversões inteiras
-Vulkan. O baseline reproduz essas falhas; não estão corrigidas.
+Desempenho de gameplay não aprovado. Os probes sintéticos de oclusão e
+publicação em aliases guest passam em D3D12/Vulkan. As falhas de MEMEXPORT
+registradas na G3 (triângulos incompletos, aliases e conversões inteiras Vulkan)
+não foram reavaliadas por esses probes.
 [N-PERF-01](../tests/native/PERF-01.md) mede writebacks Vulkan em cenários
 sintéticos, sem certificar FPS ou gameplay. Compatibilidade Xenos não é herdada.
 

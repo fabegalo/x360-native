@@ -5,6 +5,8 @@
 #include <rex/system/xmemory.h>
 #include <iostream>
 #include <stdexcept>
+#include <chrono>
+#include <thread>
 
 using namespace rex::graphics;
 namespace {
@@ -24,6 +26,7 @@ class Processor final : public CommandProcessor {
     SetZPDMode(mode);
     ResetVIZState(); ResetZPDState();
     pending.clear(); raw = {}; opens = 0;
+    resources_ready = true; close_succeeds = true; wait_completes = true;
   }
   void Report(uint32_t address) {
     register_file_->values[XE_GPU_REG_RB_SAMPLE_COUNT_ADDR] = address;
@@ -48,6 +51,10 @@ class Processor final : public CommandProcessor {
   void Retire() { PumpPendingRetire(); }
   bool Consumer(uint32_t id) { return PrepareVIZDraw(0x100 | id); }
   void Wait() { PrepareForWait(); }
+  void UnmeasuredSurvey() { OnVIZSurveyDraw(false); }
+  bool TryDraw() { UpdateQuerySegment(1, false, false); return active_segment_.segment_active; }
+  bool Failed() const { return query_backend_failed_; }
+  bool resources_ready = true, close_succeeds = true, wait_completes = true;
   unsigned opens = 0, waits = 0;
  private:
   struct Pending { ReportHandle handle; VIZQueryHandle viz; XenosZPDReport counts; uint32_t scale; };
@@ -62,12 +69,13 @@ class Processor final : public CommandProcessor {
         : ExecutePacketType3_VIZ_QUERY(&reader, xenos::MakePacketType3(opcode, 1), 1);
     if (!ok || reader.read_count()) throw std::runtime_error("query PM4 packet failed");
   }
-  bool IsQueryPoolReady() const override { return true; }
+  bool IsQueryPoolReady() const override { return resources_ready; }
   QueryOpenResult OpenQuery(bool) override { ++opens; raw = {}; return QueryOpenResult::kOpened; }
   bool CloseQuery(ReportHandle handle, const VIZQueryHandle& viz, uint64_t& submission) override {
+    if (!close_succeeds) return false;
     pending.push_back({handle, viz, raw, GetZPDScaleArea()}); submission = 1; return true;
   }
-  bool AwaitQueryResolve(ReportHandle, uint64_t) override { ++waits; Resolve(); return true; }
+  bool AwaitQueryResolve(ReportHandle, uint64_t) override { ++waits; if (!wait_completes) return false; Resolve(); return true; }
   void AwaitVIZQueryResolve(uint64_t) override { ++waits; Resolve(); }
   bool SetupContext() override { return true; }
   void ShutdownContext() override {}
@@ -94,6 +102,7 @@ int main() {
     auto guest = [&](uint32_t address) { return memory.TranslatePhysical<xenos::xe_gpu_depth_sample_counts*>(address); };
     auto passed = [&](uint32_t address) { return uint32_t(guest(address)->ZPass_A) + uint32_t(guest(address)->ZPass_B); };
     const uint32_t sentinel = rex::byte_swap(0xFFFFFEEDu);
+    check(GetZPDMode() == ZPDMode::kStrict, "real strict queries must be the default");
     cp.Reset("strict");
     cp.Report(first); cp.Retire();
     check(passed(first) == 0 && cp.opens == 0, "initial report must be zero without allocating a query");
@@ -123,6 +132,31 @@ int main() {
     check(cp.Consumer(7), "reused VIZ ID retained an old invisible result");
     cp.Survey(7, false); cp.Survey(7, true);
     check(!cp.Consumer(7), "empty VIZ survey fabricated visibility");
+    (*graphics.register_file())[XE_GPU_REG_PA_SC_VIZ_QUERY] = 0;
+    cp.Reset("strict"); cp.Report(first); cp.Retire();
+    cp.Draw(7); guest(second)->ZPass_A = sentinel; cp.Report(second);
+    cp.wait_completes = false; cp.Wait();
+    std::this_thread::sleep_for(std::chrono::milliseconds(5)); cp.Wait();
+    check(uint32_t(guest(second)->ZPass_A) == sentinel, "strict timeout fabricated completion");
+    cp.wait_completes = true; cp.Wait();
+    check(passed(second) == 7, "late strict completion lost the real samples");
+    cp.Reset("fast"); cp.Report(first); cp.Retire(); cp.Draw(0); cp.Report(second);
+    std::this_thread::sleep_for(std::chrono::milliseconds(260)); cp.Retire(); cp.Resolve();
+    check(passed(second) == 0, "fast deadline fabricated a final visible result");
+    for (bool close_failure : {false, true}) {
+      cp.Reset("strict"); cp.Report(first); cp.Retire();
+      guest(second)->ZPass_A = sentinel;
+      if (close_failure) { cp.Draw(9); cp.close_succeeds = false; }
+      else { cp.resources_ready = false; check(!cp.TryDraw(), "unavailable pool opened a query"); }
+      bool rejected = false;
+      try { cp.Report(second); } catch (const std::runtime_error&) { rejected = true; }
+      check(rejected && cp.Failed() && uint32_t(guest(second)->ZPass_A) == sentinel,
+            "query failure silently published a fake report");
+    }
+    cp.Reset("strict");
+    (*graphics.register_file())[XE_GPU_REG_PA_SC_VIZ_QUERY] = viz.value;
+    cp.Survey(7, false); cp.UnmeasuredSurvey();
+    check(cp.Failed(), "unmeasured VIZ survey fabricated visibility");
     std::cout << checks << '/' << checks << " synthetic query-state checks passed\n";
     return 0;
   } catch (const std::exception& e) { std::cerr << e.what() << '\n'; return 1; }
