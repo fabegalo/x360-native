@@ -3030,3 +3030,23 @@ console): with host-texel offsets the GPU DXT1 encoder of Motocross Madness
 covered one guest texel per block at scale and the terrain became flat 4x4
 blocks. Validated by hand on Native D3D12 at 4x; no sdkcheck. No upstream
 equivalent was identified.
+
+### 0271 — Experimental point UNORM8 normalization
+
+The maintainer authorized this experiment on 2026-11-13 without a console
+precision measurement. `dxbc_unorm8_fixed16` defaults off. It tests upward
+16-fraction-bit normalization for explicit point R8/RG8/RGBA8 unsigned fractional
+fetches in the shared DXBC translator. Signed, gamma, integer, other formats
+and filtering remain unchanged. The option has distinct persistent VS/PS keys;
+it uses no title ID, shader hash or game constant patch. Console equivalence
+remains unverified. The focused DXBC checks pass
+(33), and the explicit `--unorm8-gpu` probe passes 6144 channel checks on a
+Windows x64 RTX 4070, including the failing baseline stencil boundary and
+unchanged signed, integer-mode and floating-point controls. This synthetic GPU
+result does not establish gameplay or console rounding. A three-frame Native
+capture replay reproduces the original pixels with the option off; with it on,
+the hard ground boundary disappears and motion blur remains. Both modes are
+repeatable over two passes and retain all 96 sample checks. The separate live
+Xenos D3D12 session loaded rexgpu-xenos.dll; the maintainer reported the ground
+appeared corrected. This is not a matched live Xenos comparison or a performance
+measurement.

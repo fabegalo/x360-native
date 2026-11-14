@@ -17,12 +17,14 @@
 #include <windows.h>
 
 using namespace rex::graphics;
+void CheckUnorm8Gpu(const std::vector<uint8_t>& baseline, const std::vector<uint8_t>& candidate);
 
 namespace {
 
 std::vector<uint32_t> Microcode(bool unnormalized, bool offset_z,
                                 xenos::FetchOpDimension dimension =
-                                    xenos::FetchOpDimension::k3DOrStacked) {
+                                    xenos::FetchOpDimension::k3DOrStacked,
+                                bool point = false) {
   using namespace rex::graphics::ucode;
   const uint64_t alloc = (uint64_t(AllocType::kPsColors) << 41) |
                          (uint64_t(ControlFlowOpcode::kAlloc) << 44);
@@ -31,11 +33,13 @@ std::vector<uint32_t> Microcode(bool unnormalized, bool offset_z,
   return {uint32_t(alloc), uint32_t(alloc >> 32) | uint32_t(exec << 16), uint32_t(exec >> 16),
           // tfetch3D r0.xyzw, r0.xyz, tf0, all filters from the fetch constant.
           uint32_t(FetchOpcode::kTextureFetch) | (uint32_t(unnormalized) << 25) | (0x24u << 26),
-          0x688u | (3u << 12) | (3u << 14) | (3u << 16) | (7u << 18) | (3u << 24) | (3u << 26),
+          0x688u | (point ? 0u : (3u << 12) | (3u << 14) | (3u << 16)) |
+              (7u << 18) | (3u << 24) | (3u << 26),
           (uint32_t(dimension) << 14) |
               (uint32_t(offset_z ? 2 : 0) << 26),
           // oC0 = max(r0, r0).
-          (1u << 15) | (15u << 16), 0, uint32_t(AluVectorOpcode::kMax) << 24};
+          (1u << 15) | (15u << 16), 0,
+          (uint32_t(AluVectorOpcode::kMax) << 24) | (1u << 30) | (1u << 31)};
 }
 
 struct Op {
@@ -141,7 +145,16 @@ std::vector<uint8_t> Translate(const std::vector<uint32_t>& code,
 
 }  // namespace
 
-int main() {
+int main(int argc, char** argv) {
+  if (argc == 2 && std::string(argv[1]) == "--unorm8-gpu") {
+    try {
+      const auto point = Microcode(false, false, xenos::FetchOpDimension::k2D, true);
+      CheckUnorm8Gpu(Translate(point), Translate(point, xenos::ShaderType::kPixel, false, false,
+          DxbcShaderTranslator::Modification::kUnorm8Fixed16));
+      return 0;
+    } catch (const std::exception& error) { std::cerr << error.what() << '\n'; return 1; }
+  }
+  if (argc != 1) return 2;
   int failures = 0, checks = 0;
   auto check = [&](bool ok, const char* name) {
     ++checks;
@@ -185,6 +198,33 @@ int main() {
   }
   if (HMODULE compiler = LoadLibraryW(L"D3DCompiler_47.dll")) {
     auto disassemble = reinterpret_cast<pD3DDisassemble>(GetProcAddress(compiler, "D3DDisassemble"));
+    {
+      const auto point = Microcode(false, false, xenos::FetchOpDimension::k2D, true);
+      const auto baseline = Translate(point);
+      const auto option = DxbcShaderTranslator::Modification::kUnorm8Fixed16;
+      const auto candidate = Translate(point, xenos::ShaderType::kPixel, false, false, option);
+      const auto filtered = Microcode(false, false, xenos::FetchOpDimension::k2D);
+      check(Translate(filtered) == Translate(filtered, xenos::ShaderType::kPixel, false, false, option),
+            "fixed16 experiment leaves fetch-constant filtering byte-identical");
+      ID3DBlob* assembly = nullptr;
+      const bool valid = disassemble && !candidate.empty() &&
+          SUCCEEDED(disassemble(candidate.data(), candidate.size(), 0, nullptr, &assembly));
+      check(valid, "fixed16 experimental DXBC accepted by disassembler");
+      const std::string text = assembly ? static_cast<const char*>(assembly->GetBufferPointer()) : "";
+      check(baseline != candidate && text.find("round_ni") != std::string::npos,
+            "point UNORM8 experiment emits upward rounding only in its variant");
+      check(text.find("l(2, 10, 6, 0)") != std::string::npos,
+            "fixed16 rounding is guarded by R8/RG8/RGBA8 resource formats");
+      if (assembly) assembly->Release();
+      rex::cvar::SetFlagByName("dxbc_unorm8_fixed16", "true");
+      DxbcShaderTranslator translator(rex::ui::GraphicsProvider::GpuVendorID::kNvidia, false, false);
+      check((translator.GetDefaultPixelShaderModification(2) & option) &&
+            (translator.GetDefaultVertexShaderModification(2) & option),
+            "fixed16 VS/PS persistent keys include the experimental mode");
+      rex::cvar::SetFlagByName("dxbc_unorm8_fixed16", "false");
+      check(!(translator.GetDefaultPixelShaderModification(2) & option),
+            "fixed16 disabled restores the baseline persistent key");
+    }
     {
       DxbcShaderTranslator::Modification counted(0);
       counted.pixel.rov_sample_counts=1;

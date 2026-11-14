@@ -157,7 +157,7 @@ endif()
 # patch 0189: Canary DXBC stacked texture layer clamp.
 if(WIN32)
   set(_dxbc_gpu ${X360_REXGLUE_DIR}/src/graphics)
-  add_executable(x360n_dxbc_canary_checks dxbc_canary.cpp
+  add_executable(x360n_dxbc_canary_checks dxbc_canary.cpp unorm8_gpu.cpp
       ${_dxbc_gpu}/util/draw.cpp ${_dxbc_gpu}/register_file.cpp ${_dxbc_gpu}/registers.cpp
       ${_dxbc_gpu}/flags.cpp ${_dxbc_gpu}/format/ucode.cpp
       ${_dxbc_gpu}/pipeline/render_target/cache.cpp ${_dxbc_gpu}/util/draw_extent_estimator.cpp
@@ -172,7 +172,7 @@ if(WIN32)
       ${_dxbc_gpu}/pipeline/shader/dxbc_translator_memexport.cpp
       ${_dxbc_gpu}/pipeline/shader/dxbc_translator_om.cpp
       ${X360_REXGLUE_DIR}/thirdparty/dxbc/DXBCChecksum.cpp)
-  target_link_libraries(x360n_dxbc_canary_checks PRIVATE rexruntime xxHash::xxhash)
+  target_link_libraries(x360n_dxbc_canary_checks PRIVATE rexruntime xxHash::xxhash d3d12 dxgi)
   target_include_directories(x360n_dxbc_canary_checks PRIVATE
       ${X360_REXGLUE_DIR} ${X360_REXGLUE_DIR}/thirdparty/renderdoc)
   x360n_stage_runtime_dlls(x360n_dxbc_canary_checks)

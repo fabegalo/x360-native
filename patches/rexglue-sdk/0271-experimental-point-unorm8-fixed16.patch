@@ -1,0 +1,98 @@
+--- a/include/rex/graphics/pipeline/shader/dxbc_translator.h
++++ b/include/rex/graphics/pipeline/shader/dxbc_translator.h
+@@ -123,6 +123,8 @@
+     // and surviving sample coverage to a host render target (opaque only).
+     static constexpr uint64_t kNativeHardwareColor = uint64_t(1) << 59;
+     static constexpr uint64_t kNativeStripedSampleCounts = uint64_t(1) << 58;
++    // Experimental texture normalization; separate persistent shader variant.
++    static constexpr uint64_t kUnorm8Fixed16 = uint64_t(1) << 57;
+     static constexpr uint32_t kNativeSampleCountBuckets = 256;
+     // Native opt-in for PA_SU_SC_MODE_CNTL.persp_corr_dis.
+     static constexpr uint64_t kInterpolatorNoPerspective = uint64_t(1) << 62;
+--- a/src/graphics/pipeline/shader/dxbc_translator.cpp
++++ b/src/graphics/pipeline/shader/dxbc_translator.cpp
+@@ -27,6 +27,8 @@
+ REXCVAR_DEFINE_BOOL(dxbc_switch, true, "GPU/Shader", "Use switch statements in DXBC");
+ 
+ REXCVAR_DEFINE_BOOL(dxbc_source_map, false, "GPU/Shader", "Generate source maps for DXBC");
++REXCVAR_DEFINE_BOOL(dxbc_unorm8_fixed16, false, "GPU/Shader",
++                    "Experimental upward fixed16 normalization for explicit point UNORM8 fetches");
+ 
+ namespace rex::graphics {
+ using namespace ucode;
+@@ -104,6 +106,8 @@
+       dynamic_addressable_register_count;
+   shader_modification.vertex.host_vertex_shader_type = host_vertex_shader_type;
+   shader_modification.vertex.interpolator_mask = (UINT32_C(1) << xenos::kMaxInterpolators) - 1;
++  if (REXCVAR_GET(dxbc_unorm8_fixed16))
++    shader_modification.value |= Modification::kUnorm8Fixed16;
+   return shader_modification.value;
+ }
+ 
+@@ -113,6 +117,8 @@
+   shader_modification.pixel.dynamic_addressable_register_count = dynamic_addressable_register_count;
+   shader_modification.pixel.interpolator_mask = (UINT32_C(1) << xenos::kMaxInterpolators) - 1;
+   shader_modification.pixel.depth_stencil_mode = Modification::DepthStencilMode::kNoModifiers;
++  if (REXCVAR_GET(dxbc_unorm8_fixed16))
++    shader_modification.value |= Modification::kUnorm8Fixed16;
+   return shader_modification.value;
+ }
+ 
+--- a/src/graphics/pipeline/shader/dxbc_translator_fetch.cpp
++++ b/src/graphics/pipeline/shader/dxbc_translator_fetch.cpp
+@@ -2023,6 +2023,30 @@
+     // sampler filtering).
+     if (instr.opcode == FetchOpcode::kTextureFetch) {
+       assert_true(signs_temp != UINT32_MAX);
++      uint32_t unorm8_temp = UINT32_MAX;
++      if ((GetDxbcShaderModification().value & Modification::kUnorm8Fixed16) &&
++          instr.attributes.mag_filter == xenos::TextureFilter::kPoint &&
++          instr.attributes.min_filter == xenos::TextureFilter::kPoint &&
++          instr.attributes.mip_filter == xenos::TextureFilter::kPoint) {
++        unorm8_temp = PushSystemTemp();
++        a_.OpAnd(dxbc::Dest::R(unorm8_temp, 0b0001),
++                 RequestTextureFetchConstantWord(tfetch_index, 1), dxbc::Src::LU(63));
++        a_.OpIEq(dxbc::Dest::R(unorm8_temp, 0b0111),
++                 dxbc::Src::R(unorm8_temp, dxbc::Src::kXXXX),
++                 dxbc::Src::LU(uint32_t(xenos::TextureFormat::k_8),
++                               uint32_t(xenos::TextureFormat::k_8_8),
++                               uint32_t(xenos::TextureFormat::k_8_8_8_8), 0));
++        a_.OpOr(dxbc::Dest::R(unorm8_temp, 0b0001),
++                dxbc::Src::R(unorm8_temp).Select(0), dxbc::Src::R(unorm8_temp).Select(1));
++        a_.OpOr(dxbc::Dest::R(unorm8_temp, 0b0001),
++                dxbc::Src::R(unorm8_temp).Select(0), dxbc::Src::R(unorm8_temp).Select(2));
++        a_.OpAnd(dxbc::Dest::R(unorm8_temp, 0b0010),
++                 RequestTextureFetchConstantWord(tfetch_index, 3), dxbc::Src::LU(1));
++        a_.OpIEq(dxbc::Dest::R(unorm8_temp, 0b0010),
++                 dxbc::Src::R(unorm8_temp).Select(1), dxbc::Src::LU(0));
++        a_.OpAnd(dxbc::Dest::R(unorm8_temp, 0b0001),
++                 dxbc::Src::R(unorm8_temp).Select(0), dxbc::Src::R(unorm8_temp).Select(1));
++      }
+       for (uint32_t i = 0; i < 4; ++i) {
+         if (!(used_result_nonzero_components & (1 << i))) {
+           continue;
+@@ -2030,6 +2054,16 @@
+         dxbc::Dest component_dest(dxbc::Dest::R(system_temp_result_, 1 << i));
+         dxbc::Src component_src(dxbc::Src::R(system_temp_result_).Select(i));
+         a_.OpSwitch(dxbc::Src::R(signs_temp).Select(i));
++        if (unorm8_temp != UINT32_MAX) {
++          a_.OpCase(dxbc::Src::LU(uint32_t(xenos::TextureSign::kUnsigned)));
++          a_.OpIf(true, dxbc::Src::R(unorm8_temp).Select(0));
++          // Hypothesis under test, not a claim of measured console precision.
++          a_.OpMul(component_dest, component_src, dxbc::Src::LF(-65536.0f));
++          a_.OpRoundNI(component_dest, component_src);
++          a_.OpMul(component_dest, component_src, dxbc::Src::LF(-1.0f / 65536.0f));
++          a_.OpEndIf();
++          a_.OpBreak();
++        }
+         a_.OpCase(dxbc::Src::LU(uint32_t(xenos::TextureSign::kUnsignedBiased)));
+         a_.OpMAd(component_dest, component_src, dxbc::Src::LF(2.0f), dxbc::Src::LF(-1.0f));
+         a_.OpBreak();
+@@ -2043,6 +2077,7 @@
+         a_.OpBreak();
+         a_.OpEndSwitch();
+       }
++      if (unorm8_temp != UINT32_MAX) PopSystemTemp();
+     }
+     if (signs_temp != UINT32_MAX) {
+       PopSystemTemp();
