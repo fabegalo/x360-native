@@ -114,12 +114,16 @@ int main(int argc, char** argv) {
     const std::filesystem::path directory = argc >= 2 ? argv[1] : "";
     unsigned passed = 0, failed = 0;
     for (bool demote : {false, true}) for (unsigned scale : {1u, 2u})
-      for (unsigned query = 0; query < 3; ++query) {
+      for (unsigned query = 0; query < 6; ++query) {
         SpirvShaderTranslator::Features features(true);
         features.demote_to_helper_invocation = demote;
         SpirvShaderTranslator translator(features, true, true, true, scale, scale);
         const std::string suffix = "-demote" + std::to_string(demote) + "-scale" +
                                    std::to_string(scale) + "-query" + std::to_string(query);
+        ShaderModificationKey query_flags;
+        if (query >= 3) query_flags |= SpirvShaderTranslator::Modification::kXenosZPD;
+        if (query == 4) query_flags |= SpirvShaderTranslator::Modification::kXenosZPDFullCounters;
+        if (query == 5) query_flags |= SpirvShaderTranslator::Modification::kXenosVIZSurvey;
         auto check = [&](const std::string& name, const std::vector<uint8_t>& binary) {
           Dump(directory, name, binary);
           try { CheckInterlock(binary); ++passed; }
@@ -136,6 +140,7 @@ int main(int argc, char** argv) {
                       shader.writes_color_targets() == 1, "microcode did not activate intended path");
           SpirvShaderTranslator::Modification modification(translator.GetDefaultPixelShaderModification(1));
           modification.pixel.fsi_sample_counts = query == 1;
+          modification.value |= query_flags;
           if (query == 2) modification.value |= SpirvShaderTranslator::Modification::kNativeVisibilityQuery;
           auto& translation = *shader.GetOrCreateTranslation(modification.value);
           Require(translator.TranslateAnalyzedShader(translation) && translation.is_valid(), "shader translation failed");
@@ -143,7 +148,7 @@ int main(int argc, char** argv) {
                 translation.translated_binary());
         }
         check("depth-only" + suffix, translator.CreateDepthOnlyFragmentShader(
-            SpirvShaderTranslator::Modification::DepthStencilMode::kNoModifiers, query == 1, query == 2));
+            SpirvShaderTranslator::Modification::DepthStencilMode::kNoModifiers, query == 1, query == 2, query_flags));
       }
     std::cout << "SPIR-V interlock CFG: " << passed << " passed, " << failed << " failed\n";
     const int rectangle_result = CheckRectangleControlFlow(argc >= 2 ? argv[1] : nullptr,

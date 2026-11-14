@@ -242,6 +242,8 @@ X360N_PROBE_MAIN {
     if constexpr (kXenos) {
       if (requested == X360N_PROBE_ARG("d3d12"))
         Require(rex::cvar::SetFlagByName("d3d12_debug", "true"), "D3D12 validation flag");
+      else
+        Require(rex::cvar::SetFlagByName("vulkan_validation_enabled", "true"), "Vulkan validation flag");
       Require(rex::cvar::SetFlagByName("occlusion_query", "strict"), "strict query flag");
       Require(rex::cvar::SetFlagByName("occlusion_query_full_counters", "true"), "full query counter flag");
       Require(rex::cvar::SetFlagByName("async_shader_compilation", "false"), "synchronous probe pipelines");

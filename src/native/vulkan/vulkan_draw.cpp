@@ -64,7 +64,7 @@ void VulkanRender::InitializeDraw() {
   const uint32_t guest_bindings = 1u << shaders_->translator.GetSharedMemoryStorageBufferCountLog2();
   const VkDescriptorSetLayoutBinding memory_bindings[]{
       {0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, guest_bindings, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT | VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT | VK_SHADER_STAGE_GEOMETRY_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, nullptr},
-      {1, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_FRAGMENT_BIT, nullptr}};
+      {2, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_FRAGMENT_BIT, nullptr}};
   VkDescriptorSetLayoutCreateInfo info{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO};
   info.bindingCount = 2;
   info.pBindings = memory_bindings;
@@ -571,7 +571,7 @@ void VulkanRender::Draw(const RegisterFile& regs, rex::memory::Memory& memory, S
     }
     memory_writes[0].descriptorCount = chunks;
     memory_writes[0].pBufferInfo = guest_infos.data();
-    memory_writes[1].dstBinding = 1;
+    memory_writes[1].dstBinding = 2;
     memory_writes[1].descriptorCount = 1;
     memory_writes[1].pBufferInfo = &edram_info;
     fn.vkUpdateDescriptorSets(device_.device(), 2, memory_writes, 0, nullptr);

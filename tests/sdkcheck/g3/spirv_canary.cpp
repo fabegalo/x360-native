@@ -151,6 +151,30 @@ int main() {
     check(counter.value.low == 0 && counter.value.high == (uint64_t(1) << 16),
           "Native FSI counter occupies only its local word");
   }
+  for (bool demote : {false, true}) {
+    auto features = SpirvShaderTranslator::Features(true);
+    features.demote_to_helper_invocation = demote;
+    SpirvShaderTranslator translator(features, true, true, false);
+    SpirvShaderTranslator::Modification modification;
+    modification.pixel.zpd_total = 1;
+    for (auto depth : {SpirvShaderTranslator::Modification::DepthStencilMode::kNoModifiers,
+                       SpirvShaderTranslator::Modification::DepthStencilMode::kEarlyHint,
+                       SpirvShaderTranslator::Modification::DepthStencilMode::kFloat24Truncating,
+                       SpirvShaderTranslator::Modification::DepthStencilMode::kFloat24Rounding}) {
+      const auto binary = translator.CreateDepthOnlyFragmentShader(depth, false, false, modification.value);
+      check(!binary.empty(), "host query depth-only translation");
+      const Module module(binary);
+      bool atomic = false, early = false, coverage = false;
+      for (const auto& op : module.instructions) {
+        atomic |= op.op == spv::OpAtomicIAdd;
+        early |= op.op == spv::OpExecutionMode && op.args.size() >= 2 &&
+                 op.args[1] == spv::ExecutionModeEarlyFragmentTests;
+        coverage |= op.op == spv::OpDecorate && op.args.size() >= 3 &&
+                    op.args[1] == spv::DecorationBuiltIn && op.args[2] == spv::BuiltInSampleMask;
+      }
+      check(atomic && coverage && !early, "Total counts coverage before host depth/stencil");
+    }
+  }
   const uint32_t float_0 = std::bit_cast<uint32_t>(0.0f);
   const uint32_t float_1 = std::bit_cast<uint32_t>(1.0f);
 
