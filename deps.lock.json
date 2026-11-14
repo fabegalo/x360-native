@@ -2008,7 +2008,7 @@
       "files": {
         "include/rex/graphics/format/dxbc.h": "3b10292edcbc33915a2d7f9e3f6d9ae4c7d15d76f9fc0f89915bcc9b3083f3af",
         "include/rex/graphics/pipeline/shader/dxbc_translator.h": "bb3d875c5268c392262473c0b3603a0cffbe6ca0910b4d35c235cb06647ab67a",
-        "src/graphics/pipeline/shader/dxbc_translator.cpp": "73010d5dbe99d655c0f54aa2b92d0eb2060a24ce5a534d18eb7590bd9806cd3b",
+        "src/graphics/pipeline/shader/dxbc_translator.cpp": "7eeb97e01b2e345e8e43ad622651f8fbbdcdd607c4d55e1d8ab792b203ddc515",
         "src/graphics/pipeline/shader/dxbc_translator_om.cpp": "96ab3b9b66c769e49cccb31093ece734048633217a071c72abea44182b3d9aa4"
       },
       "test": "native.occlusion: translated DXBC ROV atomic sample counters and real GPU begin/end query, passing/depth/stencil/kill/alpha samples; no fixed query success"
@@ -2132,7 +2132,7 @@
       },
       "files": {
         "include/rex/graphics/pipeline/shader/dxbc_translator.h": "bb3d875c5268c392262473c0b3603a0cffbe6ca0910b4d35c235cb06647ab67a",
-        "src/graphics/pipeline/shader/dxbc_translator.cpp": "73010d5dbe99d655c0f54aa2b92d0eb2060a24ce5a534d18eb7590bd9806cd3b",
+        "src/graphics/pipeline/shader/dxbc_translator.cpp": "7eeb97e01b2e345e8e43ad622651f8fbbdcdd607c4d55e1d8ab792b203ddc515",
         "include/rex/graphics/pipeline/shader/spirv_translator.h": "af3605a5b254681bb865ffe0e90ab8e8e4fa19616c336e07f49053c793dae6e6",
         "src/graphics/pipeline/shader/spirv_translator.cpp": "d9a4bdfe126a747fde2bbcc3197c330ea6eb4ace3ea3962734e92a3f9d4f46b6"
       },
@@ -2237,7 +2237,7 @@
       },
       "files": {
         "include/rex/graphics/pipeline/shader/dxbc_translator.h": "bb3d875c5268c392262473c0b3603a0cffbe6ca0910b4d35c235cb06647ab67a",
-        "src/graphics/pipeline/shader/dxbc_translator.cpp": "73010d5dbe99d655c0f54aa2b92d0eb2060a24ce5a534d18eb7590bd9806cd3b",
+        "src/graphics/pipeline/shader/dxbc_translator.cpp": "7eeb97e01b2e345e8e43ad622651f8fbbdcdd607c4d55e1d8ab792b203ddc515",
         "include/rex/graphics/pipeline/shader/spirv_translator.h": "af3605a5b254681bb865ffe0e90ab8e8e4fa19616c336e07f49053c793dae6e6",
         "src/graphics/pipeline/shader/spirv_translator.cpp": "d9a4bdfe126a747fde2bbcc3197c330ea6eb4ace3ea3962734e92a3f9d4f46b6"
       },
@@ -2284,7 +2284,7 @@
       "files": {
         "include/rex/graphics/pipeline/shader/dxbc_translator.h": "bb3d875c5268c392262473c0b3603a0cffbe6ca0910b4d35c235cb06647ab67a",
         "include/rex/graphics/pipeline/shader/spirv_translator.h": "af3605a5b254681bb865ffe0e90ab8e8e4fa19616c336e07f49053c793dae6e6",
-        "src/graphics/pipeline/shader/dxbc_translator.cpp": "73010d5dbe99d655c0f54aa2b92d0eb2060a24ce5a534d18eb7590bd9806cd3b",
+        "src/graphics/pipeline/shader/dxbc_translator.cpp": "7eeb97e01b2e345e8e43ad622651f8fbbdcdd607c4d55e1d8ab792b203ddc515",
         "src/graphics/pipeline/shader/spirv_translator.cpp": "d9a4bdfe126a747fde2bbcc3197c330ea6eb4ace3ea3962734e92a3f9d4f46b6",
         "src/graphics/pipeline/shader/dxbc_translator_memexport.cpp": "1701313eebf0e3b6dcc0c4e129763c189c68d960f99d15fbcda0887f351fab6a",
         "src/graphics/pipeline/shader/spirv_translator_memexport.cpp": "7d87b758263f99f8cf05e9dc91c5e6ca3448d8ef19fd17dfc18129427fd0c8d3",
@@ -2684,7 +2684,7 @@
         "src/graphics/d3d12/command_processor.cpp": "cff6aead6e853654d31f341e5436c412a7c7bab45d3c371638024d9f522fca71",
         "src/graphics/d3d12/render_target_cache.cpp": "a3f5e7ff82919f979656af927ce80f1df0404b5ed8273d9e11e9c86a90b1b950",
         "src/graphics/pipeline/render_target/cache.cpp": "83ec2739c9c343964abf186375fa2e7bfe78d0874b41c20bade8f2090a9f1a0e",
-        "src/graphics/pipeline/shader/dxbc_translator.cpp": "73010d5dbe99d655c0f54aa2b92d0eb2060a24ce5a534d18eb7590bd9806cd3b",
+        "src/graphics/pipeline/shader/dxbc_translator.cpp": "7eeb97e01b2e345e8e43ad622651f8fbbdcdd607c4d55e1d8ab792b203ddc515",
         "src/graphics/pipeline/shader/spirv_translator.cpp": "d9a4bdfe126a747fde2bbcc3197c330ea6eb4ace3ea3962734e92a3f9d4f46b6",
         "src/graphics/util/draw.cpp": "3f7dde8e3bd36ce76008fc3350045d5f6cff2825c0505ca09ecfd1a139c35f0b",
         "src/graphics/util/draw_extent_estimator.cpp": "2a3047c17a116896d6074fc7aad475dc79e25b089c6067dc9c27c0957dcd233a",
@@ -3763,7 +3763,7 @@
   },
   "files": {
     "include/rex/graphics/pipeline/shader/dxbc_translator.h": "bb3d875c5268c392262473c0b3603a0cffbe6ca0910b4d35c235cb06647ab67a",
-    "src/graphics/pipeline/shader/dxbc_translator.cpp": "73010d5dbe99d655c0f54aa2b92d0eb2060a24ce5a534d18eb7590bd9806cd3b",
+    "src/graphics/pipeline/shader/dxbc_translator.cpp": "7eeb97e01b2e345e8e43ad622651f8fbbdcdd607c4d55e1d8ab792b203ddc515",
     "src/graphics/pipeline/shader/dxbc_translator_om.cpp": "96ab3b9b66c769e49cccb31093ece734048633217a071c72abea44182b3d9aa4"
   },
   "test": "sdkcheck.canary-dxbc: opt-in Native hybrid color declares RT0 and sample coverage, initializes early-return coverage to zero, preserves ROV depth/stencil and bypasses ROV color stores. Negative control: four failed DXBC checks before patch 0269. Native hybrid surfaces require separate GPU pixel/memory/counter/coherence contracts."
@@ -3778,14 +3778,14 @@
   },
   "files": {
     "include/rex/graphics/pipeline/shader/dxbc_translator.h": "bb3d875c5268c392262473c0b3603a0cffbe6ca0910b4d35c235cb06647ab67a",
-    "src/graphics/pipeline/shader/dxbc_translator.cpp": "73010d5dbe99d655c0f54aa2b92d0eb2060a24ce5a534d18eb7590bd9806cd3b",
+    "src/graphics/pipeline/shader/dxbc_translator.cpp": "7eeb97e01b2e345e8e43ad622651f8fbbdcdd607c4d55e1d8ab792b203ddc515",
     "src/graphics/pipeline/shader/dxbc_translator_om.cpp": "96ab3b9b66c769e49cccb31093ece734048633217a071c72abea44182b3d9aa4"
   },
   "test": "sdkcheck.canary-dxbc validates explicit scalar/striped shader variants; Native-ROV-sample-counts and hybrid contracts check exact pass/fail, nested/visibility, alpha/kill, early/late depth, MSAA, overflow, reset and canonical snapshots. Recorded Forza/Skate pixels, writes and sample counters must match."
 },
 {
   "file": "patches/rexglue-sdk/0271-experimental-point-unorm8-fixed16.patch",
-  "sha256": "cc44f813624ab5144862ab59d0f0c038b438361ea9f46fdd1ec4460664e8bc32",
+  "sha256": "28a96e4b016340f9744dd908b6d9e831154932f62e1b88f8f0e4b16fff6f8208",
   "base_files": {
     "include/rex/graphics/pipeline/shader/dxbc_translator.h": "456d95a33f450505ad7d4be12308ab1ecadd820944447578906815c147e5a20b",
     "src/graphics/pipeline/shader/dxbc_translator.cpp": "354733afddd4d9fa8d00eee037451b537d781fae4d15e74d9524f6f19a25ecbb",
@@ -3793,10 +3793,10 @@
   },
   "files": {
     "include/rex/graphics/pipeline/shader/dxbc_translator.h": "bb3d875c5268c392262473c0b3603a0cffbe6ca0910b4d35c235cb06647ab67a",
-    "src/graphics/pipeline/shader/dxbc_translator.cpp": "73010d5dbe99d655c0f54aa2b92d0eb2060a24ce5a534d18eb7590bd9806cd3b",
+    "src/graphics/pipeline/shader/dxbc_translator.cpp": "7eeb97e01b2e345e8e43ad622651f8fbbdcdd607c4d55e1d8ab792b203ddc515",
     "src/graphics/pipeline/shader/dxbc_translator_fetch.cpp": "5b32a8b922e390ee02c573aabdd0e9d684f7569dfc17909a4e7ba13c709ab897"
   },
-  "test": "Experimental and default-off, maintainer-authorized on 2026-11-13: explicit point UNORM8 fetches only; unsigned fractional R8/RG8/RGBA8 format guards; distinct persistent VS/PS variants. sdkcheck.canary-dxbc covers opt-in/off and unaffected filtering; console precision remains unverified."
+  "test": "Experimental and default-on, maintainer-authorized on 2026-11-13: explicit point UNORM8 fetches only; unsigned fractional R8/RG8/RGBA8 format guards; distinct persistent VS/PS variants. sdkcheck.canary-dxbc covers the enabled default, explicit off and unaffected filtering; console precision remains unverified."
 }
 ]
 },

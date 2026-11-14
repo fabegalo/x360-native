@@ -138,6 +138,8 @@ std::vector<uint8_t> Translate(const std::vector<uint32_t>& code,
     m.pixel.param_gen_interpolator = 0;
     modification = m.value;
   }
+  // Keep baseline/candidate comparisons independent of the configured default.
+  modification &= ~DxbcShaderTranslator::Modification::kUnorm8Fixed16;
   auto& translation = *shader.GetOrCreateTranslation(modification | extra);
   if (!translator.TranslateAnalyzedShader(translation) || !translation.is_valid()) return {};
   return translation.translated_binary();
@@ -216,14 +218,15 @@ int main(int argc, char** argv) {
       check(text.find("l(2, 10, 6, 0)") != std::string::npos,
             "fixed16 rounding is guarded by R8/RG8/RGBA8 resource formats");
       if (assembly) assembly->Release();
-      rex::cvar::SetFlagByName("dxbc_unorm8_fixed16", "true");
       DxbcShaderTranslator translator(rex::ui::GraphicsProvider::GpuVendorID::kNvidia, false, false);
       check((translator.GetDefaultPixelShaderModification(2) & option) &&
             (translator.GetDefaultVertexShaderModification(2) & option),
-            "fixed16 VS/PS persistent keys include the experimental mode");
+            "fixed16 is enabled by default in both VS/PS persistent keys");
       rex::cvar::SetFlagByName("dxbc_unorm8_fixed16", "false");
-      check(!(translator.GetDefaultPixelShaderModification(2) & option),
+      check(!(translator.GetDefaultPixelShaderModification(2) & option) &&
+            !(translator.GetDefaultVertexShaderModification(2) & option),
             "fixed16 disabled restores the baseline persistent key");
+      rex::cvar::SetFlagByName("dxbc_unorm8_fixed16", "true");
     }
     {
       DxbcShaderTranslator::Modification counted(0);

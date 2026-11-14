@@ -3034,7 +3034,8 @@ equivalent was identified.
 ### 0271 — Experimental point UNORM8 normalization
 
 The maintainer authorized this experiment on 2026-11-13 without a console
-precision measurement. `dxbc_unorm8_fixed16` defaults off. It tests upward
+precision measurement. `dxbc_unorm8_fixed16` defaults on by maintainer request;
+false restores the baseline. It tests upward
 16-fraction-bit normalization for explicit point R8/RG8/RGBA8 unsigned fractional
 fetches in the shared DXBC translator. Signed, gamma, integer, other formats
 and filtering remain unchanged. The option has distinct persistent VS/PS keys;

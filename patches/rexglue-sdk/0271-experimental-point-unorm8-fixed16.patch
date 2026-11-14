@@ -15,7 +15,7 @@
  REXCVAR_DEFINE_BOOL(dxbc_switch, true, "GPU/Shader", "Use switch statements in DXBC");
  
  REXCVAR_DEFINE_BOOL(dxbc_source_map, false, "GPU/Shader", "Generate source maps for DXBC");
-+REXCVAR_DEFINE_BOOL(dxbc_unorm8_fixed16, false, "GPU/Shader",
++REXCVAR_DEFINE_BOOL(dxbc_unorm8_fixed16, true, "GPU/Shader",
 +                    "Experimental upward fixed16 normalization for explicit point UNORM8 fetches");
  
  namespace rex::graphics {
