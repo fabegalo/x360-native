@@ -68,6 +68,9 @@ class BasicD3D12Commands {
   void SetComputeRootDescriptorTable(UINT i, D3D12_GPU_DESCRIPTOR_HANDLE h) {
     Rec([=](L* l) { l->SetComputeRootDescriptorTable(i, h); });
   }
+  void SetComputeRootConstantBufferView(UINT i, D3D12_GPU_VIRTUAL_ADDRESS a) {
+    Rec([=](L* l) { l->SetComputeRootConstantBufferView(i, a); });
+  }
   void SetGraphicsRootConstantBufferView(UINT i, D3D12_GPU_VIRTUAL_ADDRESS a) {
     if (Argument(bound_.views, i, a)) return;
     Rec([=](L* l) { l->SetGraphicsRootConstantBufferView(i, a); });

@@ -22,6 +22,11 @@ registram as correções e o estado consolidado. Marcadores usados:
 Referências de código são relativas a `external/rexglue-sdk` (ReXGlue v0.10.0,
 commit `f5337cdc947ff6d4c4196737e2c807a48f2a1fc2`) salvo indicação contrária.
 
+Definição reafirmada pelo mantenedor em 13/11/2026: **Xenos é o caminho de
+fidelidade ao Xbox 360; Native é o caminho Enhanced.** Ambos podem receber
+otimizações, inclusive compartilhadas. No Xenos, preservam o comportamento
+original; no Native, mantêm os contratos do guest e as opções Enhanced explícitas.
+
 ## 1. O que a recompilação estática resolve e o que não resolve
 
 ReXGlue traduz o código PowerPC de um XEX para C++ antes da execução; o C++ é
@@ -106,6 +111,17 @@ decisão própria antes de migrar. Xenos e Native seguem a mesma ABI de plugin,
 `KernelState`/memória e handoff de sessão, sem trocar HLE, AOT ou o modelo de
 processos. Stubs HLE, suporte incompleto da Guide/avatares e validação de títulos
 e plataformas continuam lacunas; a reorganização não comprova boot ou gameplay.
+
+**Native GPU híbrido validado pelo mantenedor em 13/11/2026:** acelerar por
+render targets e operações fixas do host somente os casos com equivalência
+comprovada; conservar o ROV explícito para os demais. A seleção dos caminhos,
+suas superfícies, resolves e invalidação pertencem ao Native GPU, com uma única
+EDRAM/coerência e o mesmo contrato do guest. Não há outro runtime ou estado de
+console; AOT, HLE, launcher e supervisor mantêm suas fronteiras comuns. A
+implementação deve ser genérica, com disponibilidade por backend explícita e
+validação de imagem, memória, contadores e sincronização nas transições. O alvo
+de 60+ FPS no Forza não é certificação nem garantia de desempenho. Float24,
+HDR, MSAA e aliasing continuam no ROV enquanto não houver uma rota equivalente.
 
 ### 2.1 ReXGlue (dependência)
 

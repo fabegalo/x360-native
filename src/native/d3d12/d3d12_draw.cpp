@@ -1,4 +1,5 @@
 #include "d3d12_render.h"
+#include "d3d12_hybrid.h"
 #include "d3d12_tessellation.h"
 #include "../shaders/rectangle_shader.h"
 #include "../shaders/point_shader.h"
@@ -195,13 +196,23 @@ void D3D12Render::Draw(const RegisterFile& r, rex::memory::Memory& memory, Shade
   // mirror, as Xenos does, without CPU normalization or another upload. R16
   // zero-extension followed by 8-in-16 swaps only its low two bytes. The other
   // R16 endian modes swap adjacent indices as well and stay on the CPU path.
-  // Restart/conversion/tessellation retain the existing normalized topology.
+  // R16's maximum restart marker is also D3D12's fixed strip cut, unchanged
+  // by the accepted endian modes. Other restart values retain normalization.
   // MEMEXPORT also stays there: a UAV cannot simultaneously be an IA buffer.
   const bool index_restart = face_mode.multi_prim_ib_ena &&
       (primitive == PrimitiveType::kTriangleStrip || primitive == PrimitiveType::k2DTriStrip);
-  const bool gpu_indices = indices && !tess && !convert && !memexport && !index_restart &&
+  const bool fixed_strip_cut = index_restart && indices && indices->format == IndexFormat::kInt16 &&
+      r.Get<reg::VGT_MULTI_PRIM_IB_RESET_INDX>().reset_indx == 0xFFFF;
+  const bool gpu_indices = indices && !tess && !convert && !memexport && (!index_restart || fixed_strip_cut) &&
       !(indices->guest_base & (index_bytes - 1)) &&
       (index_bytes == 4 || indices->endianness == Endian::kNone || indices->endianness == Endian::k8in16);
+  std::optional<HybridColorKey> hybrid_key;
+  if (hybrid_color_ && ps && !memexport && !tess && !visibility_only_ &&
+      fill == PolygonType::kTriangles && r.Get<reg::RB_MODECONTROL>().edram_mode == EdramMode::kColorDepth &&
+      (purpose == DrawPurpose::kGuest || purpose == DrawPurpose::kGuestWithoutVertexExports) &&
+      (primitive == PrimitiveType::kTriangleList || primitive == PrimitiveType::kTriangleStrip || primitive == PrimitiveType::k2DTriStrip))
+    hybrid_key = hybrid_color_->Classify(r, draw_util::GetNormalizedColorMask(r, ps->writes_color_targets()));
+  if (!hybrid_key) EndHybridColor();
   if (rasterization && !tess && primitive != PrimitiveType::kTriangleList && primitive != PrimitiveType::kTriangleStrip &&
       primitive != PrimitiveType::kRectangleList && !convert && !line && !point && primitive != PrimitiveType::k2DTriStrip)
     throw std::runtime_error("Native draw: primitive conversion not implemented (primitive=" +
@@ -216,6 +227,8 @@ void D3D12Render::Draw(const RegisterFile& r, rex::memory::Memory& memory, Shade
   if (ps && ps->memexport_eM_written() && !memexport_addresses_known_.at(ps)) pm.value |= T::Modification::kMemExportDynamicAddress;
   if ((purpose == DrawPurpose::kVisibility || purpose == DrawPurpose::kGuestWithoutVertexExports)) vm.value |= T::Modification::kMemExportDisabled;
   pm.pixel.rov_sample_counts = sample_counting_;
+  if(striped_counts_ && sample_counting_ && !visibility_only_) pm.value |= T::Modification::kNativeStripedSampleCounts;
+  if (hybrid_key) pm.value |= T::Modification::kNativeHardwareColor;
   if (r.Get<reg::PA_SU_SC_MODE_CNTL>().persp_corr_dis) pm.value |= T::Modification::kInterpolatorNoPerspective;
   vm.vertex.interpolator_mask = pm.pixel.interpolator_mask = mask;
   pm.pixel.interpolators_centroid = mask & ~GetInterpolatorSamplingPattern(msaa, r.Get<reg::SQ_CONTEXT_MISC>().sc_sample_cntl, r.Get<reg::SQ_INTERPOLATOR_CNTL>().sampling_pattern);
@@ -233,12 +246,13 @@ void D3D12Render::Draw(const RegisterFile& r, rex::memory::Memory& memory, Shade
   }
   if (param < kMaxInterpolators) { pm.pixel.param_gen_enable = 1; pm.pixel.param_gen_interpolator = param; }
   D3D12_GRAPHICS_PIPELINE_STATE_DESC pd{}; pd.pRootSignature = tess ? root_tess_.Get() : root_.Get();
+  if (gpu_indices && fixed_strip_cut) pd.IBStripCutValue = D3D12_INDEX_BUFFER_STRIP_CUT_VALUE_0xFFFF;
   {
   Timer shader_timer(stats_enabled_, shader_ns_);
   auto* vt = shaders.Translate(vs, vm.value);
   pd.VS = {vt->translated_binary().data(), vt->translated_binary().size()};
   if (ps) { auto* pt = shaders.Translate(*ps, pm.value); pd.PS = {pt->translated_binary().data(), pt->translated_binary().size()}; }
-  else if (rasterization) { auto& depth_shader = depth_shaders_[visibility_only_ ? 2 : sample_counting_]; if (depth_shader.empty()) depth_shader = shaders.translator.CreateDepthOnlyPixelShader(sample_counting_, visibility_only_); pd.PS = {depth_shader.data(), depth_shader.size()}; }
+  else if (rasterization) { auto& depth_shader = depth_shaders_[visibility_only_ ? 2 : sample_counting_]; if (depth_shader.empty()) depth_shader = shaders.translator.CreateDepthOnlyPixelShader(sample_counting_, visibility_only_, striped_counts_); pd.PS = {depth_shader.data(), depth_shader.size()}; }
   if (point || (rasterization && primitive == PrimitiveType::kRectangleList)) {
     GeometryShaderKey key;
     key.type = point ? PipelineGeometryShader::kPointList : PipelineGeometryShader::kRectangleList;
@@ -264,6 +278,11 @@ void D3D12Render::Draw(const RegisterFile& r, rex::memory::Memory& memory, Shade
   }
   if (tess) SetTessellationStages(pd, tess);
   pd.SampleMask = UINT_MAX; pd.SampleDesc.Count = 1;
+  if (hybrid_key) {
+    pd.NumRenderTargets = 1; pd.RTVFormats[0] = DXGI_FORMAT_R16G16B16A16_FLOAT;
+    pd.SampleDesc.Count = hybrid_key->msaa ? 4 : 1;
+    pd.BlendState.RenderTarget[0].RenderTargetWriteMask = uint8_t(draw_util::GetNormalizedColorMask(r, ps->writes_color_targets()) & 15);
+  }
   pd.PrimitiveTopologyType = tess ? D3D12_PRIMITIVE_TOPOLOGY_TYPE_PATCH : !rasterization || point ? D3D12_PRIMITIVE_TOPOLOGY_TYPE_POINT : line ? D3D12_PRIMITIVE_TOPOLOGY_TYPE_LINE : D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
   auto mode = r.Get<reg::PA_SU_SC_MODE_CNTL>();
   // Restart is applied to CPU-normalized indices below.
@@ -273,7 +292,7 @@ void D3D12Render::Draw(const RegisterFile& r, rex::memory::Memory& memory, Shade
   pd.RasterizerState.CullMode = !rasterization || !polygon ? D3D12_CULL_MODE_NONE : mode.cull_front ? D3D12_CULL_MODE_FRONT : mode.cull_back ? D3D12_CULL_MODE_BACK : D3D12_CULL_MODE_NONE;
   pd.RasterizerState.FrontCounterClockwise = !mode.face;
   pd.RasterizerState.DepthClipEnable = !clip.clip_disable;
-  pd.RasterizerState.ForcedSampleCount = msaa == MsaaSamples::k1X ? 1 : 4;
+  pd.RasterizerState.ForcedSampleCount = hybrid_key ? 0 : msaa == MsaaSamples::k1X ? 1 : 4;
   // Pointer identity is stable in the shader cache. The zeroed descriptor also includes every pipeline state.
   PipelineKey key;
   std::memcpy(key.bytes.data(), &pd, sizeof(pd));
@@ -334,6 +353,7 @@ void D3D12Render::Draw(const RegisterFile& r, rex::memory::Memory& memory, Shade
   uint64_t readback_bytes = 0;
   for (const auto& range : memexport_ranges) readback_bytes += (uint64_t(range.length) + 255) & ~uint64_t(255);
   ReserveReadback(readback_bytes);
+  if (hybrid_key) hybrid_color_->Begin(*hybrid_key);
   auto& mirror = Mirror(memory);
   if (gpu_indices) mirror.RequestRange(indices->guest_base, count * index_bytes);
   for (const auto& range : memexport_ranges) mirror.RequestRange(range.address, range.length);
@@ -489,6 +509,9 @@ void D3D12Render::Draw(const RegisterFile& r, rex::memory::Memory& memory, Shade
     c.flags |= uint32_t(depth.z_enable ? depth.zfunc : CompareFunction::kAlways) << T::kSysFlag_ROVDepthPassIfLess_Shift;
     if (depth.z_enable && depth.z_write_enable) c.flags |= T::kSysFlag_ROVDepthWrite;
     if (depth.stencil_enable) c.flags |= T::kSysFlag_ROVStencilTest;
+    // The translator applies this hint only to shaders safe for early writes.
+    if (alpha == CompareFunction::kAlways && !color.alpha_to_mask_enable)
+      c.flags |= T::kSysFlag_ROVDepthStencilEarlyWrite;
     for (unsigned side = 0; side < 2; ++side) {
       const bool back = side && polygon && depth.backface_enable;
       auto stencil = r.Get<reg::RB_STENCILREFMASK>(back ? XE_GPU_REG_RB_STENCILREFMASK_BF : XE_GPU_REG_RB_STENCILREFMASK);
@@ -529,11 +552,15 @@ void D3D12Render::Draw(const RegisterFile& r, rex::memory::Memory& memory, Shade
   SetTextureTables(pixel_tables, 6); SetTextureTables(vertex_tables, 8);
   cmd_.SetGraphicsRootDescriptorTable(7, Gpu(0, true));
   cmd_.SetGraphicsRootDescriptorTable(9, Gpu(0));
-  cmd_.OMSetRenderTargets(0, nullptr, FALSE, nullptr);
+  if (hybrid_key) {
+    auto target = hybrid_color_->target();
+    cmd_.OMSetRenderTargets(1, &target, FALSE, nullptr);
+  } else cmd_.OMSetRenderTargets(0, nullptr, FALSE, nullptr);
   cmd_.IASetPrimitiveTopology(tess ? D3D_PRIMITIVE_TOPOLOGY(D3D_PRIMITIVE_TOPOLOGY_1_CONTROL_POINT_PATCHLIST + tess.control_points - 1) : !rasterization || point ? D3D_PRIMITIVE_TOPOLOGY_POINTLIST : line ? D3D_PRIMITIVE_TOPOLOGY_LINELIST : (primitive == PrimitiveType::kTriangleStrip || primitive == PrimitiveType::k2DTriStrip) ? D3D_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP : D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
   finish_phase(draw_bind_ns_);
   if (indices || convert) { cmd_.IASetIndexBuffer(&ib); for (const auto& range : index_ranges) cmd_.DrawIndexedInstanced(range.count, 1, range.offset, 0, 0); }
   else cmd_.DrawInstanced(count, 1, 0, 0);
+  if (hybrid_key) hybrid_color_->Drawn();
   for (const auto& range : memexport_ranges) QueueGuestWrite(range.address, range.length);
   if (stats_enabled_ && gpu_indices) { ++gpu_index_draws_; gpu_index_bytes_ += uint64_t(count) * index_bytes; }
   finish_phase(draw_issue_ns_);

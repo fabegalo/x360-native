@@ -191,8 +191,8 @@ void Run(rex::system::IGraphicsSystem& gpu, rex::memory::Memory& memory) {
 }
 X360N_PROBE_MAIN {
   try {
-    Require(argc == 2 || argc == 3, "usage: x360n_native_occlusion_probe OUTPUT [d3d12|vulkan]");
-    const ProbeArg requested = argc == 3 ? argv[2] : X360N_PROBE_ARG("d3d12");
+    Require(argc >= 2 && argc <= 4, "usage: x360n_native_occlusion_probe OUTPUT [d3d12|vulkan] [striped|scalar]");
+    const ProbeArg requested = argc >= 3 ? argv[2] : X360N_PROBE_ARG("d3d12");
     Require(requested == X360N_PROBE_ARG("d3d12") || requested == X360N_PROBE_ARG("vulkan"), "invalid probe graphics API");
     const char* backend = requested == X360N_PROBE_ARG("vulkan") ? "vulkan" : "d3d12";
     const std::filesystem::path output(argv[1]); std::filesystem::create_directories(output);
@@ -202,6 +202,12 @@ X360N_PROBE_MAIN {
     Require(rt.Setup(std::move(config)) == X_STATUS_SUCCESS, "runtime setup");
     if (requested == X360N_PROBE_ARG("d3d12")) rex::cvar::SetFlagByName("d3d12_debug", "true");
     auto gpu = rex::system::LoadGpuPlugin("native", backend); Require(bool(gpu), "Native plugin load");
+    if(argc==4) {
+      const auto variant=ProbeArg(argv[3]);
+      Require(requested==X360N_PROBE_ARG("d3d12") &&
+          (variant==X360N_PROBE_ARG("striped") || variant==X360N_PROBE_ARG("scalar")),"invalid counter variant");
+      Require(rex::cvar::SetFlagByName("native_d3d12_striped_sample_counts",variant==X360N_PROBE_ARG("striped")?"true":"false"),"counter variant flag not registered");
+    }
     Require(gpu->SetupPresentation(nullptr) == X_STATUS_SUCCESS, "presentation setup");
     Require(gpu->SetupGuestGpu(rt.function_dispatcher(), rt.kernel_state()) == X_STATUS_SUCCESS, "guest GPU setup");
     struct Shutdown { rex::system::IGraphicsSystem* gpu; ~Shutdown() { if (gpu) gpu->Shutdown(); } } shutdown{gpu.get()};

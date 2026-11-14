@@ -65,6 +65,7 @@ D3D12Render::PendingPipeline D3D12Render::ComputePSO(ID3D12RootSignature* root, 
   });
 }
 void D3D12Render::Resolve(const RegisterFile& r, rex::memory::Memory& memory) {
+  EndHybridColor();
   SubmitEarly();
   recorded_work_ += eager_threshold_;
   Timer timer(stats_enabled_, resolve_ns_);

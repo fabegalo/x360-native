@@ -1,0 +1,106 @@
+diff --git a/include/rex/graphics/pipeline/shader/dxbc_translator.h b/include/rex/graphics/pipeline/shader/dxbc_translator.h
+--- a/include/rex/graphics/pipeline/shader/dxbc_translator.h
++++ b/include/rex/graphics/pipeline/shader/dxbc_translator.h
+@@ -122,6 +122,8 @@
+     // Native hybrid: retain ROV depth/stencil and export quantized color 0
+     // and surviving sample coverage to a host render target (opaque only).
+     static constexpr uint64_t kNativeHardwareColor = uint64_t(1) << 59;
++    static constexpr uint64_t kNativeStripedSampleCounts = uint64_t(1) << 58;
++    static constexpr uint32_t kNativeSampleCountBuckets = 256;
+     // Native opt-in for PA_SU_SC_MODE_CNTL.persp_corr_dis.
+     static constexpr uint64_t kInterpolatorNoPerspective = uint64_t(1) << 62;
+ 
+@@ -532,7 +534,8 @@
+   // Creates a special pixel shader without color outputs - this resets the
+   // state of the translator.
+   std::vector<uint8_t> CreateDepthOnlyPixelShader(bool rov_sample_counts = false,
+-                                                 bool visibility_only = false);
++                                                 bool visibility_only = false,
++                                                 bool striped_sample_counts = false);
+ 
+   // Common functions useful not only for the translator, but also for render
+   // target reinterpretation.
+diff --git a/src/graphics/pipeline/shader/dxbc_translator.cpp b/src/graphics/pipeline/shader/dxbc_translator.cpp
+--- a/src/graphics/pipeline/shader/dxbc_translator.cpp
++++ b/src/graphics/pipeline/shader/dxbc_translator.cpp
+@@ -80,7 +80,7 @@
+ DxbcShaderTranslator::~DxbcShaderTranslator() = default;
+ 
+ std::vector<uint8_t> DxbcShaderTranslator::CreateDepthOnlyPixelShader(
+-    bool rov_sample_counts, bool visibility_only) {
++    bool rov_sample_counts, bool visibility_only, bool striped_sample_counts) {
+   is_depth_only_pixel_shader_ = true;
+   // TODO(Triang3l): Handle in a nicer way (is_depth_only_pixel_shader_ is a
+   // leftover from when a Shader object wasn't used during translation).
+@@ -89,6 +89,7 @@
+   Modification modification;
+   modification.pixel.rov_sample_counts = rov_sample_counts;
+   if (visibility_only) modification.value |= Modification::kNativeVisibilityQuery;
++  else if (striped_sample_counts) modification.value |= Modification::kNativeStripedSampleCounts;
+   Shader::Translation& translation = *shader.GetOrCreateTranslation(modification.value);
+   TranslateAnalyzedShader(translation);
+   is_depth_only_pixel_shader_ = false;
+diff --git a/src/graphics/pipeline/shader/dxbc_translator_om.cpp b/src/graphics/pipeline/shader/dxbc_translator_om.cpp
+--- a/src/graphics/pipeline/shader/dxbc_translator_om.cpp
++++ b/src/graphics/pipeline/shader/dxbc_translator_om.cpp
+@@ -1086,11 +1086,25 @@
+       const bool scale_guard = ROV_BeginSampleCountScaleGuard();
+       const auto counter = dxbc::Dest::U(uav_index_edram_, uint32_t(UAVRegister::kEdram));
+       a_.OpIf(true, dxbc::Src::R(count_temp, dxbc::Src::kXXXX));
++      const bool striped = GetDxbcShaderModification().value & Modification::kNativeStripedSampleCounts;
++      if (striped) {
++        // Private Native counters are reduced to the original eight values
++        // at every read/snapshot boundary. Spread pixel contention, not state.
++        a_.OpUShR(dxbc::Dest::R(count_temp, 0b0010),
++                  dxbc::Src::R(system_temp_rov_params_, dxbc::Src::kYYYY), dxbc::Src::LU(1));
++        a_.OpAnd(dxbc::Dest::R(count_temp, 0b0010), dxbc::Src::R(count_temp, dxbc::Src::kYYYY),
++                 dxbc::Src::LU(Modification::kNativeSampleCountBuckets - 1));
++        a_.OpIShL(dxbc::Dest::R(count_temp, 0b0010), dxbc::Src::R(count_temp, dxbc::Src::kYYYY), dxbc::Src::LU(3));
++        a_.OpIAdd(dxbc::Dest::R(count_temp, 0b0001), dxbc::Src::R(count_temp, dxbc::Src::kXXXX),
++                  dxbc::Src::R(count_temp, dxbc::Src::kYYYY));
++        a_.OpIAdd(dxbc::Dest::R(count_temp, 0b0010), dxbc::Src::R(count_temp, dxbc::Src::kYYYY), dxbc::Src::LU(
++            (xenos::kEdramSizeBytes / 4) * draw_resolution_scale_x_ * draw_resolution_scale_y_));
++      }
+       a_.OpIAdd(dxbc::Dest::R(count_temp, 0b0001),
+                 dxbc::Src::R(count_temp, dxbc::Src::kXXXX), dxbc::Src::LU(
+                     (xenos::kEdramSizeBytes / 4) * draw_resolution_scale_x_ * draw_resolution_scale_y_));
+       a_.OpAtomicIAdd(counter, dxbc::Src::R(count_temp, dxbc::Src::kXXXX), 1, dxbc::Src::LU(1));
+-      a_.OpAtomicIAdd(counter, dxbc::Src::LU(
++      a_.OpAtomicIAdd(counter, striped ? dxbc::Src::R(count_temp, dxbc::Src::kYYYY) : dxbc::Src::LU(
+           (xenos::kEdramSizeBytes / 4) * draw_resolution_scale_x_ * draw_resolution_scale_y_),
+           1, dxbc::Src::LU(1));
+       a_.OpEndIf();
+@@ -1967,6 +1981,18 @@
+     // coverage and depth/stencil. Host occlusion queries cannot see ROV depth.
+     if (uav_index_edram_ == kBindingIndexUnallocated) uav_index_edram_ = uav_count_++;
+     const auto counter = dxbc::Dest::U(uav_index_edram_, uint32_t(UAVRegister::kEdram));
++    const bool striped = GetDxbcShaderModification().value & Modification::kNativeStripedSampleCounts;
++    const uint32_t bucket_temp = striped ? PushSystemTemp() : UINT32_MAX;
++    if (striped) {
++      a_.OpUShR(dxbc::Dest::R(bucket_temp, 0b0001),
++                dxbc::Src::R(system_temp_rov_params_, dxbc::Src::kYYYY), dxbc::Src::LU(1));
++      a_.OpAnd(dxbc::Dest::R(bucket_temp, 0b0001), dxbc::Src::R(bucket_temp, dxbc::Src::kXXXX),
++               dxbc::Src::LU(Modification::kNativeSampleCountBuckets - 1));
++      a_.OpIShL(dxbc::Dest::R(bucket_temp, 0b0001), dxbc::Src::R(bucket_temp, dxbc::Src::kXXXX), dxbc::Src::LU(3));
++      a_.OpIAdd(dxbc::Dest::R(bucket_temp, 0b0001), dxbc::Src::R(bucket_temp, dxbc::Src::kXXXX), dxbc::Src::LU(
++          (xenos::kEdramSizeBytes / 4) * draw_resolution_scale_x_ * draw_resolution_scale_y_));
++      a_.OpIAdd(dxbc::Dest::R(bucket_temp, 0b0010), dxbc::Src::R(bucket_temp, dxbc::Src::kXXXX), dxbc::Src::LU(4));
++    }
+     for (uint32_t i = 0; i < 4; ++i) {
+       a_.OpAnd(temp_x_dest, dxbc::Src::R(system_temp_rov_params_, dxbc::Src::kXXXX), dxbc::Src::LU(1u << i));
+       a_.OpIf(true, temp_x_src);
+@@ -1975,11 +2001,12 @@
+       if (GetDxbcShaderModification().value & Modification::kNativeVisibilityQuery) {
+         a_.OpAtomicOr(counter, dxbc::Src::LU(counter_base + 4), 1, dxbc::Src::LU(1));
+       } else {
+-        a_.OpAtomicIAdd(counter, dxbc::Src::LU(counter_base + 4), 1, dxbc::Src::LU(1));
+-        a_.OpAtomicIAdd(counter, dxbc::Src::LU(counter_base), 1, dxbc::Src::LU(1));
++        a_.OpAtomicIAdd(counter, striped ? dxbc::Src::R(bucket_temp, dxbc::Src::kYYYY) : dxbc::Src::LU(counter_base + 4), 1, dxbc::Src::LU(1));
++        a_.OpAtomicIAdd(counter, striped ? dxbc::Src::R(bucket_temp, dxbc::Src::kXXXX) : dxbc::Src::LU(counter_base), 1, dxbc::Src::LU(1));
+       }
+       a_.OpEndIf();
+     }
++    if (striped) PopSystemTemp();
+     if (scale_guard) a_.OpEndIf();
+   }
+ 

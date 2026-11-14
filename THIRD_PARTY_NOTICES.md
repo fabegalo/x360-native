@@ -54,6 +54,11 @@ Copyright 2022 Ben Vanik, adaptação ReXGlue por Tom Clay (2026), BSD-3-Clause.
 Os avisos Xenia/ReXGlue e seus termos permanecem aplicáveis. O plugin Native
 é um alvo de desenvolvimento separado; esta alteração não publica novo ZIP.
 
+A ponte EDRAM/HDR em `src/native/d3d12/d3d12_hybrid.cpp` adapta o layout e as
+conversões 7e3 do ReXGlue/Xenia pinado (Copyright 2021, 2022 Ben Vanik,
+adaptação ReXGlue por Tom Clay, 2026), sob os mesmos termos BSD-3-Clause em
+[ReXGlue](licenses/rexglue-sdk.txt).
+
 O espelho residente `src/native/guest_memory_mirror.{h,cpp}` adapta o
 `SharedMemory` do ReXGlue/Xenia pinado (Copyright 2020 Ben Vanik, adaptação
 ReXGlue por Tom Clay, 2026) e alterações do ShiftGlue `1e8968f7` (Copyright

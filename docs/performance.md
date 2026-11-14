@@ -44,6 +44,39 @@ evidência local. Não transplantar presets que retiram efeitos ou o cache VR
 ReImagined, não uma substituição aprovada do Xenos. Mantidas as licenças BSD
 das adaptações; nenhum código GPL do ReImagined atual foi incorporado.
 
+13/11 — Native D3D12 distribui os contadores de amostras em 256 grupos privados
+e soma os oito valores canônicos nas leituras/snapshots, preservando resets,
+overflow uint32, visibilidade e o formato da gravação (SDK 0270). Padrão ligado;
+`native_d3d12_striped_sample_counts=false` conserva o caminho escalar. Forza,
+mesma cena/RTX 4070, cinco pares de 11 passes quentes sem contadores opcionais:
+razão de frame 0,7900, IC 95% [0,7625; 0,9253] (~26,6% mais frames/s no replay),
+P50/P95 57,60/86,75 → 45,85/70,47 ms. P99 variou para pior nesta coleta
+(102,12 → 115,80 ms); o A/A seguinte também variou muito: razão 0,9746
+[0,9242; 1,1507], P99 117,99/90,42 ms. Não há ganho comprovado de cauda.
+Combinar a cor híbrida foi inconclusivo (0,9481 [0,9215; 1,1037]); permanece
+desligada. Somar amostras antes do atomic piorou 8,4% com extração de bits;
+`countbits` foi inconclusivo e ambas as tentativas foram retiradas. Limites de
+submissão 32/64 e profundidade de fila 1 também não comprovaram ganho; 128/0
+mantidos. JSONs `striped-forza-ab.json`, `striped-hybrid-forza-ab.json` e
+`hybrid-final-checks.json` na evidência local. Testes de contadores escalares e
+distribuídos, resets/snapshots, filas, índices e os replays finais de Forza e
+Skate passaram; Skate exercita o fallback ROV da cor. Sem novo aceite de FPS
+ao vivo, de 60+ FPS, de outras cenas/GPUs/hosts ou de Vulkan.
+
+13/11 — primeira etapa do Native híbrido aprovado: D3D12 oferece
+`native_d3d12_hybrid_color=true` (experimental, padrão desligado). Cores HDR
+7e3 opacas dos formatos 3/12 usam RGBA16F com quantização guest; profundidade,
+stencil e contadores permanecem ROV, com importação/exportação para a mesma
+EDRAM. Patch SDK 0269, sem trocar a revisão. Forza: 6.357 desenhos híbridos
+em nove frames, imagens, 765 regiões escritas e 144 contadores equivalentes;
+Skate também equivalente (fallback ROV). Dez transferências integrais e 24 pares de desenhos
+ROV/híbridos cobrem MSAA 1/2/4, alfa, profundidade, transições e evicção. **Sem ganho
+comprovado**: cinco pares de 11 passes quentes sem contadores opcionais deram
+razão 1,0238, IC 95% [0,9649; 1,0587]. JSON `hybrid-forza-ab.json` na evidência
+local. Índices R16 com reinício 0xFFFF residentes e a dica de escrita antecipada
+de profundidade preservam equivalência, mas seus A/Bs também foram inconclusivos.
+60+ FPS ainda não atingidos; somente replay Windows x64/RTX 4070 foi verificado.
+
 13/11 — continuação FPS do Forza Horizon, mesma gravação/RTX 4070: Native
 D3D12 espera apenas os lotes anteriores com writeback quando o lote atual
 contém somente trabalho de EDRAM, e o limite automático de submissão passa

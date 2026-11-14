@@ -1,6 +1,7 @@
 // Headless production D3D12Render workloads. Synthetic throughput is not FPS.
 #include "../../src/native/d3d12/d3d12_render.h"
 #include "../../src/native/d3d12/d3d12_scanout.h"
+#include "../../src/native/d3d12/d3d12_hybrid.h"
 #include "../../src/native/commands/primitive_indices.h"
 #include <rex/runtime.h>
 #include <rex/kernel/init.h>
@@ -332,7 +333,8 @@ void CheckResidentIndices(Render& render, RegisterFile draw, RegisterFile resolv
   };
   unsigned comparisons = 0;
   auto compare = [&](std::span<const uint32_t> indices, IndexFormat format, Endian endian,
-                     PrimitiveType primitive, bool restart, int32_t offset, uint32_t minimum, uint32_t maximum) {
+                     PrimitiveType primitive, bool restart, int32_t offset, uint32_t minimum, uint32_t maximum,
+                     uint32_t reset = 0xFFFFFF) {
     std::memset(memory.TranslateVirtual(vertices), 0, 4096);
     std::memcpy(memory.TranslateVirtual<uint8_t*>(vertices) + minimum * 16, triangle, sizeof(triangle));
     draw[XE_GPU_REG_VGT_INDX_OFFSET] = uint32_t(offset);
@@ -341,7 +343,7 @@ void CheckResidentIndices(Render& render, RegisterFile draw, RegisterFile resolv
     draw[XE_GPU_REG_VGT_DRAW_INITIATOR] = initiator.value;
     reg::PA_SU_SC_MODE_CNTL mode{}; mode.multi_prim_ib_ena = restart;
     draw[XE_GPU_REG_PA_SU_SC_MODE_CNTL] = mode.value;
-    draw[XE_GPU_REG_VGT_MULTI_PRIM_IB_RESET_INDX] = 0xFFFFFF;
+    draw[XE_GPU_REG_VGT_MULTI_PRIM_IB_RESET_INDX] = reset;
     // An unaligned copy intentionally selects the existing CPU-normalized
     // path. It is the byte-for-byte reference for the identical guest indices.
     auto cpu = encode(indices, format, endian, true);
@@ -355,7 +357,8 @@ void CheckResidentIndices(Render& render, RegisterFile draw, RegisterFile resolv
     const auto after = render.performance();
     const auto actual = capture();
     Require(actual == expected, "resident and normalized index pixels differ");
-    const bool direct = !restart && !NeedsPrimitiveConversion(primitive) &&
+    const bool strip_restart = restart && (primitive == PrimitiveType::kTriangleStrip || primitive == PrimitiveType::k2DTriStrip);
+    const bool direct = (!strip_restart || (format == IndexFormat::kInt16 && reset == 0xFFFF)) && !NeedsPrimitiveConversion(primitive) &&
         (format == IndexFormat::kInt32 || endian == Endian::kNone || endian == Endian::k8in16);
     Require(after.gpu_index_draws - before.gpu_index_draws == unsigned(direct),
         "resident index path/fallback selection changed");
@@ -382,6 +385,15 @@ void CheckResidentIndices(Render& render, RegisterFile draw, RegisterFile resolv
   compare(strip, IndexFormat::kInt32, Endian::k8in32, PrimitiveType::kTriangleFan, false, 0, 0, 0xFFFFFF);
   const std::array<uint32_t, 7> restarted{0, 1, 2, 0xFFFFFF, 0, 1, 2};
   compare(restarted, IndexFormat::kInt32, Endian::k8in32, PrimitiveType::kTriangleStrip, true, 0, 0, 0xFFFFFF);
+  const std::array<uint32_t, 10> restarted16{0xFFFF, 0, 1, 2, 0xFFFF, 0xFFFF, 0, 1, 2, 0xFFFF};
+  for (auto endian : {Endian::kNone, Endian::k8in16, Endian::k8in32, Endian::k16in32}) {
+    compare(restarted16, IndexFormat::kInt16, endian, PrimitiveType::kTriangleStrip, true, 0, 0, 0xFFFFFF, 0xFFFF);
+    const std::array<uint32_t, 3> high16{65533, 65534, 65535};
+    compare(high16, IndexFormat::kInt16, endian, PrimitiveType::kTriangleStrip, false, -65533, 0, 0xFFFFFF, 0xFFFF);
+    compare(high16, IndexFormat::kInt16, endian, PrimitiveType::kTriangleList, true, -65533, 0, 0xFFFFFF, 0xFFFF);
+  }
+  const std::array<uint32_t, 7> custom_reset{0, 1, 2, 7, 0, 1, 2};
+  compare(custom_reset, IndexFormat::kInt16, Endian::k8in16, PrimitiveType::kTriangleStrip, true, 0, 0, 0xFFFFFF, 7);
 
   // A GPU producer updates the index bytes in the resident mirror. The draw
   // must consume them without waiting for their guest readback publication.
@@ -456,6 +468,143 @@ void CheckResolveContracts(Render& render, RegisterFile& regs,
     Require(!render.PrepareScanout(input,scaled),"CPU write kept stale scaled pages");
   }
   std::cout<<"PASS colored resolves and scaled pages\n";
+}
+void CheckHybridTransfers(Render& render) {
+  render.Flush(true);
+  auto original = render.ReadEdram();
+  for (uint32_t i = 0; i < xenos::kEdramSizeBytes / 4; ++i) {
+    const uint32_t word = i * 1664525u + 1013904223u;
+    std::memcpy(original.bytes.data() + i * 4, &word, 4);
+  }
+  render.WriteEdram(original);
+  D3D12HybridColor hybrid(render);
+  unsigned comparisons = 0;
+  for (unsigned msaa = 0; msaa < 3; ++msaa) for (unsigned base : {0u, xenos::kEdramTileCount-4}) {
+    HybridColorKey key{base, (160u << (msaa == 2)) / 80, 160, 32, msaa, 3, 5, 157, 29};
+    hybrid.Begin(key);
+    hybrid.End();
+    const auto actual = render.ReadEdram();
+    Require(actual.bytes == original.bytes, "hybrid color import/export changed EDRAM or counter bytes");
+    Require(actual.sample_counting == original.sample_counting, "hybrid color changed sample counting state");
+    ++comparisons;
+  }
+  // Tall tiled windows exceed the host-cache budget after three surfaces.
+  // Keep every pixel outside the window unchanged while eviction drains work.
+  for(unsigned base:{0u,256u,512u,768u}) {
+    hybrid.Begin(HybridColorKey{base,40,1600,1536,2,3,1500,157,1530});
+    hybrid.End();
+    Require(render.ReadEdram().bytes==original.bytes,"hybrid cache eviction changed EDRAM/counters");
+    ++comparisons;
+  }
+  hybrid.LogStats();
+  std::cout << "PASS hybrid HDR transfers: " << comparisons
+            << " whole-EDRAM byte comparisons, 7e3/alpha, MSAA, wrap, windows and cache eviction\n";
+}
+void CheckHybridDraws(rex::ui::d3d12::D3D12Provider& provider, rex::memory::Memory& memory) {
+  const auto vertices=memory.SystemHeapAlloc(4096,4096,rex::memory::kSystemHeapPhysical);
+  Require(vertices!=0,"hybrid vertices");
+  const float triangle[]{-1,-1,.5f,1, -1,3,.5f,1, 3,-1,.5f,1};
+  std::memcpy(memory.TranslateVirtual(vertices),triangle,sizeof(triangle));
+  std::vector<EdramSnapshot> expected;
+  for (bool enabled:{false,true}) {
+    rex::cvar::SetFlagByName("native_d3d12_hybrid_color",enabled?"true":"false");
+    Render render(provider);
+    D3D12HybridColor classifier(render);
+    auto load=[&](bool vertex) {
+      auto code=RasterShader(vertex); for(auto& word:code) word=rex::byte_swap(word);
+      return render.LoadShader(vertex?ShaderType::kVertex:ShaderType::kPixel,code.data(),uint32_t(code.size()));
+    };
+    auto* vs=load(true); auto* ps=load(false);
+    RegisterFile regs;
+    reg::SQ_PROGRAM_CNTL program{}; program.vs_num_reg=2; program.ps_num_reg=1;
+    regs[XE_GPU_REG_SQ_PROGRAM_CNTL]=program.value;
+    regs[XE_GPU_REG_SQ_VS_CONST]=0x000FF000; regs[XE_GPU_REG_SQ_PS_CONST]=0x000FF100;
+    regs[XE_GPU_REG_VGT_MAX_VTX_INDX]=0xFFFFFF;
+    regs[XE_GPU_REG_RB_MODECONTROL]=uint32_t(EdramMode::kColorDepth);
+    regs[XE_GPU_REG_RB_COLOR_MASK]=15;
+    xe_gpu_vertex_fetch_t fetch{}; fetch.type=FetchConstantType::kVertex;
+    fetch.address=memory.GetPhysicalAddress(vertices)>>2; fetch.size=12;
+    regs[XE_GPU_REG_SHADER_CONSTANT_FETCH_00_0]=fetch.dword_0;
+    regs[XE_GPU_REG_SHADER_CONSTANT_FETCH_00_1]=fetch.dword_1;
+    regs[XE_GPU_REG_PA_CL_VTE_CNTL]=0x3F;
+    auto fp=[&](unsigned reg,float value){regs[reg]=std::bit_cast<uint32_t>(value);};
+    fp(XE_GPU_REG_PA_CL_VPORT_XSCALE,16); fp(XE_GPU_REG_PA_CL_VPORT_XOFFSET,16);
+    fp(XE_GPU_REG_PA_CL_VPORT_YSCALE,-16); fp(XE_GPU_REG_PA_CL_VPORT_YOFFSET,16);
+    fp(XE_GPU_REG_PA_CL_VPORT_ZSCALE,1);
+    regs[XE_GPU_REG_PA_SC_SCREEN_SCISSOR_BR]=32|(32<<16);
+    regs[XE_GPU_REG_PA_SC_WINDOW_SCISSOR_TL]=0x80000000|3|(5<<16);
+    regs[XE_GPU_REG_PA_SC_WINDOW_SCISSOR_BR]=29|(27<<16);
+    regs[XE_GPU_REG_PA_SU_VTX_CNTL]=1;
+    reg::VGT_DRAW_INITIATOR initiator{}; initiator.prim_type=PrimitiveType::kTriangleList;
+    regs[XE_GPU_REG_VGT_DRAW_INITIATOR]=initiator.value;
+    reg::RB_BLENDCONTROL blend{}; blend.color_srcblend=blend.alpha_srcblend=BlendFactor::kOne;
+    regs[XE_GPU_REG_RB_BLENDCONTROL0]=blend.value;
+    unsigned comparison=0;
+    for(unsigned msaa=0;msaa<3;++msaa) for(unsigned format:{3u,12u}) for(unsigned mode=0;mode<4;++mode) {
+      auto initial=render.ReadEdram(); std::fill(initial.bytes.begin(),initial.bytes.end(),0);
+      initial.sample_counting=true;
+      SampleCounts seed{}; seed.fill(0xFFFFFFF0u);
+      render.WriteEdram(initial); render.SetSampleCounts(seed,false);
+      reg::RB_SURFACE_INFO surface{}; surface.surface_pitch=80; surface.msaa_samples=MsaaSamples(msaa);
+      regs[XE_GPU_REG_RB_SURFACE_INFO]=surface.value;
+      reg::RB_COLOR_INFO color{}; color.color_format=ColorRenderTargetFormat(format);
+      regs[XE_GPU_REG_RB_COLOR_INFO]=color.value;
+      reg::RB_DEPTH_INFO depth{}; depth.depth_base=1024; depth.depth_format=DepthRenderTargetFormat::kD24FS8;
+      regs[XE_GPU_REG_RB_DEPTH_INFO]=depth.value;
+      reg::RB_DEPTHCONTROL dc{}; dc.z_enable=mode==1; dc.z_write_enable=mode==1; dc.zfunc=CompareFunction::kGreater;
+      regs[XE_GPU_REG_RB_DEPTHCONTROL]=dc.value;
+      reg::RB_COLORCONTROL cc{}; cc.alpha_func=mode==2?CompareFunction::kLess:CompareFunction::kAlways;
+      cc.alpha_test_enable=mode==2; cc.alpha_to_mask_enable=mode==3;
+      regs[XE_GPU_REG_RB_COLORCONTROL]=cc.value;
+      fp(XE_GPU_REG_RB_ALPHA_REF,.5f);
+      // A retained span, a ROV route change, then a fresh import with a partial mask.
+      for(unsigned draw=0;draw<3;++draw) {
+        regs[XE_GPU_REG_RB_COLOR_MASK]=draw==2?5:15;
+        auto b=blend; if(draw==1) b.color_srcblend=BlendFactor::kZero;
+        regs[XE_GPU_REG_RB_BLENDCONTROL0]=b.value;
+        if(!draw) {
+          Require(classifier.Classify(regs,15).has_value(),"hybrid fixture is ineligible");
+          Require(!classifier.Classify(regs,0) && !classifier.Classify(regs,255),"hybrid accepted disabled or multiple targets");
+          auto unsupported=regs;
+          unsupported[XE_GPU_REG_RB_COLOR_INFO]=0;
+          Require(!classifier.Classify(unsupported,15),"hybrid accepted a format without a bridge");
+          unsupported=regs; unsupported[XE_GPU_REG_RB_BLENDCONTROL0]=0;
+          Require(!classifier.Classify(unsupported,15),"hybrid accepted unsupported blending");
+          unsupported=regs;
+          auto overlap=depth; overlap.depth_base=1;
+          auto active=dc; active.z_enable=1;
+          unsupported[XE_GPU_REG_RB_DEPTH_INFO]=overlap.value;
+          unsupported[XE_GPU_REG_RB_DEPTHCONTROL]=active.value;
+          Require(!classifier.Classify(unsupported,15),"hybrid accepted overlapping depth/color tiles");
+        }
+        const std::array<float,4> value{draw?31.8f:.251f,.003f,1.234f,draw?.75f:.25f};
+        std::memcpy(&regs[XE_GPU_REG_SHADER_CONSTANT_000_X+256*4],value.data(),sizeof(value));
+        render.Draw(regs,memory,vs,ps,PrimitiveType::kTriangleList,3,nullptr);
+        if(!draw) {
+          render.Draw(regs,memory,vs,ps,PrimitiveType::kTriangleList,3,nullptr);
+          render.Flush(false); // Retain the host surface across recording arenas.
+        }
+      }
+      auto actual=render.ReadEdram();
+      if(!enabled) {
+        if(!mode) {
+          Require(std::any_of(actual.bytes.begin(),actual.bytes.begin()+xenos::kEdramSizeBytes,
+              [](uint8_t value){return value!=0;}),"hybrid reference draw produced no pixels");
+          SampleCounts counts{};
+          std::memcpy(counts.data(),actual.bytes.data()+xenos::kEdramSizeBytes,sizeof(counts));
+          const uint32_t total=seed[0]+4u*26u*22u*(1u<<msaa);
+          Require(counts[0]==total && counts[4]==total,"MSAA passing counter overflow differs");
+        }
+        expected.push_back(std::move(actual));
+      }
+      else Require(actual.bytes==expected.at(comparison).bytes && actual.sample_counting==expected.at(comparison).sample_counting,
+          "hybrid and ROV draw EDRAM/counters differ");
+      ++comparison;
+    }
+  }
+  rex::cvar::SetFlagByName("native_d3d12_hybrid_color","false");
+  memory.SystemHeapFree(vertices);
+  std::cout<<"PASS hybrid/ROV draws: 24 whole-EDRAM/counter pairs, HDR formats, MSAA, alpha, depth, retained spans and route changes\n";
 }
 void CheckPendingContracts(Render& render, RegisterFile& regs,
     rex::memory::Memory& memory, rex::graphics::Shader* vs, uint32_t output,
@@ -545,6 +694,7 @@ int main(int argc, char** argv) {
     Require(mode=="export"||mode=="resolve"||mode=="sync"||mode=="none"||mode=="batch","unknown workload");
     rex::InitLogging((out/"runtime.log").string().c_str());
     if (argc > 7) rex::cvar::SetFlagByName("native_pipeline_threads", argv[7]);
+    if (argc > 8) rex::cvar::SetFlagByName("native_d3d12_striped_sample_counts", argv[8]);
     rex::cvar::SetFlagByName("native_stats", measured?"true":"false");
     if (scale>1) {
       rex::chrono::FrameTiming::ActivateNative();
@@ -677,11 +827,14 @@ int main(int argc, char** argv) {
         CheckTextureViews(render,draw,memory,output);
       if(argc>6 && std::string(argv[6])=="index-contracts")
         CheckResidentIndices(render,draw,resolve,memory,output);
+      if(argc>6 && std::string(argv[6])=="hybrid-contracts")
+        CheckHybridTransfers(render);
       if(argc>6 && std::string(argv[6])=="constant-contracts") {
         CheckConstantUploads(render,draw,memory,output);
         CheckResidentIndices(render,draw,resolve,memory,output,true);
       }
     }
+    if(argc>6 && std::string(argv[6])=="hybrid-contracts") CheckHybridDraws(*provider,memory);
     if(argc>6) for(unsigned i=0;i<3;++i) {
       Render recreated(*provider); recreated.SetSampleCounts({},false); recreated.Flush(false);
     }

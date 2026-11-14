@@ -1,0 +1,136 @@
+diff --git a/include/rex/graphics/pipeline/shader/dxbc_translator.h b/include/rex/graphics/pipeline/shader/dxbc_translator.h
+--- a/include/rex/graphics/pipeline/shader/dxbc_translator.h
++++ b/include/rex/graphics/pipeline/shader/dxbc_translator.h
+@@ -119,6 +119,9 @@
+     static constexpr uint64_t kMemExportDisabled = uint64_t(1) << 61;
+     // Boolean accumulation cannot wrap back to invisible after 2^32 samples.
+     static constexpr uint64_t kNativeVisibilityQuery = uint64_t(1) << 60;
++    // Native hybrid: retain ROV depth/stencil and export quantized color 0
++    // and surviving sample coverage to a host render target (opaque only).
++    static constexpr uint64_t kNativeHardwareColor = uint64_t(1) << 59;
+     // Native opt-in for PA_SU_SC_MODE_CNTL.persp_corr_dis.
+     static constexpr uint64_t kInterpolatorNoPerspective = uint64_t(1) << 62;
+ 
+@@ -661,6 +664,11 @@
+   bool IsDxbcDomainShader() const {
+     return is_vertex_shader() && Shader::IsHostVertexShaderTypeDomain(
+                                      GetDxbcShaderModification().vertex.host_vertex_shader_type);
++  }
++
++  bool IsNativeHardwareColor() const {
++    return edram_rov_used_ && is_pixel_shader() &&
++           (GetDxbcShaderModification().value & Modification::kNativeHardwareColor);
+   }
+ 
+   bool IsForceEarlyDepthStencilGlobalFlagEnabled() const {
+diff --git a/src/graphics/pipeline/shader/dxbc_translator.cpp b/src/graphics/pipeline/shader/dxbc_translator.cpp
+--- a/src/graphics/pipeline/shader/dxbc_translator.cpp
++++ b/src/graphics/pipeline/shader/dxbc_translator.cpp
+@@ -587,6 +587,11 @@
+ }
+ 
+ void DxbcShaderTranslator::StartPixelShader() {
++  if (IsNativeHardwareColor()) {
++    // Every early return, including depth rejection, must suppress RT writes.
++    a_.OpMov(dxbc::Dest::OMask(), dxbc::Src::LU(0));
++    a_.OpMov(dxbc::Dest::O(0), dxbc::Src::LF(0.0f));
++  }
+   if (edram_rov_used_) {
+     // Load the EDRAM addresses and the coverage.
+     StartPixelShader_LoadROVParameters();
+@@ -3001,8 +3006,8 @@
+       semantic_offset += dxbc::AppendAlignedString(shader_object_, "XEPSIZE");
+     }
+   } else if (is_pixel_shader()) {
+-    if (!edram_rov_used_) {
+-      uint32_t color_targets_written = current_shader().writes_color_targets();
++    if (!edram_rov_used_ || IsNativeHardwareColor()) {
++      uint32_t color_targets_written = IsNativeHardwareColor() ? 1 : current_shader().writes_color_targets();
+ 
+       // Color render targets (SV_Target#).
+       size_t target_position = SIZE_MAX;
+@@ -3043,7 +3048,7 @@
+ 
+       // Depth (SV_Depth or SV_DepthLessEqual).
+       size_t depth_position = SIZE_MAX;
+-      if (current_shader().writes_depth() || DSV_IsWritingFloat24Depth()) {
++      if (!edram_rov_used_ && (current_shader().writes_depth() || DSV_IsWritingFloat24Depth())) {
+         depth_position = shader_object_.size();
+         shader_object_.resize(shader_object_.size() + kParameterDwords);
+         ++parameter_count;
+@@ -3400,13 +3405,14 @@
+     if (edram_rov_used_) {
+       // Sample coverage input.
+       ao_.OpDclInput(dxbc::Dest::VCoverage());
+-    } else {
+-      if (sample_rate_memexport) {
++    }
++    if (!edram_rov_used_ || IsNativeHardwareColor()) {
++      if (!edram_rov_used_ && sample_rate_memexport) {
+         // Sample coverage input.
+         ao_.OpDclInput(dxbc::Dest::VCoverage());
+       }
+       // Color output.
+-      uint32_t color_targets_written = current_shader().writes_color_targets();
++      uint32_t color_targets_written = IsNativeHardwareColor() ? 1 : current_shader().writes_color_targets();
+       for (uint32_t i = 0; i < xenos::kMaxColorRenderTargets; ++i) {
+         if (color_targets_written & (uint32_t(1) << i)) {
+           ao_.OpDclOutput(dxbc::Dest::O(i));
+@@ -3417,7 +3423,7 @@
+         ao_.OpDclOutput(dxbc::Dest::OMask());
+       }
+       // Depth output.
+-      if (is_writing_float24_depth || shader_writes_depth) {
++      if (!edram_rov_used_ && (is_writing_float24_depth || shader_writes_depth)) {
+         if (!shader_writes_depth && GetDxbcShaderModification().pixel.depth_stencil_mode ==
+                                         Modification::DepthStencilMode::kFloat24Truncating) {
+           ao_.OpDclOutput(dxbc::Dest::ODepthLE());
+diff --git a/src/graphics/pipeline/shader/dxbc_translator_om.cpp b/src/graphics/pipeline/shader/dxbc_translator_om.cpp
+--- a/src/graphics/pipeline/shader/dxbc_translator_om.cpp
++++ b/src/graphics/pipeline/shader/dxbc_translator_om.cpp
+@@ -1996,6 +1996,45 @@
+     a_.OpRetC(false, temp_x_src);
+   }
+ 
++  if (IsNativeHardwareColor()) {
++    // The backend permits opaque, quantization-preserving RT0 surfaces only.
++    a_.OpAnd(temp_x_dest, dxbc::Src::R(system_temp_rov_params_, dxbc::Src::kXXXX),
++             dxbc::Src::LU(1 << 8));
++    a_.OpIf(true, temp_x_src);
++    a_.OpMul(dxbc::Dest::R(system_temps_color_[0]), dxbc::Src::R(system_temps_color_[0]),
++             LoadSystemConstant(SystemConstants::Index::kColorExpBias,
++                                offsetof(SystemConstants, color_exp_bias), dxbc::Src::kXXXX));
++    auto clamp = LoadSystemConstant(SystemConstants::Index::kEdramRTClamp,
++        offsetof(SystemConstants, edram_rt_clamp), dxbc::Src::kXYZW);
++    a_.OpMax(dxbc::Dest::R(system_temps_color_[0]), dxbc::Src::R(system_temps_color_[0]), clamp.Swizzle(0b01000000));
++    a_.OpMin(dxbc::Dest::R(system_temps_color_[0]), dxbc::Src::R(system_temps_color_[0]), clamp.Swizzle(0b11101010));
++    // Round through the guest's packed representation before host storage.
++    ROV_PackPreClampedColor(0, system_temps_color_[0], temp, 0, temp, 2, temp, 3);
++    ROV_UnpackColor(0, temp, 0, system_temps_color_[0], temp, 2, temp, 3);
++    a_.OpMov(dxbc::Dest::O(0), dxbc::Src::R(system_temps_color_[0]));
++    a_.OpAnd(temp_x_dest, dxbc::Src::R(system_temp_rov_params_, dxbc::Src::kXXXX), dxbc::Src::LU(15));
++    // Inverse of the guest coverage mapping in StartPixelShader_LoadROVParameters.
++    a_.OpIf(true, LoadSystemConstant(SystemConstants::Index::kSampleCountLog2,
++        offsetof(SystemConstants, sample_count_log2), dxbc::Src::kXXXX));
++    a_.OpUBFE(temp_y_dest, dxbc::Src::LU(1), dxbc::Src::LU(1), temp_x_src);
++    a_.OpUBFE(temp_z_dest, dxbc::Src::LU(1), dxbc::Src::LU(3), temp_x_src);
++    a_.OpBFI(temp_x_dest, dxbc::Src::LU(1), dxbc::Src::LU(3), temp_y_src, temp_x_src);
++    a_.OpBFI(temp_x_dest, dxbc::Src::LU(1), dxbc::Src::LU(1), temp_z_src, temp_x_src);
++    a_.OpElse();
++    a_.OpIf(true, LoadSystemConstant(SystemConstants::Index::kSampleCountLog2,
++        offsetof(SystemConstants, sample_count_log2), dxbc::Src::kYYYY));
++    a_.OpAnd(temp_y_dest, temp_x_src, dxbc::Src::LU(1));
++    a_.OpIShL(temp_y_dest, temp_y_src, dxbc::Src::LU(2));
++    a_.OpAnd(temp_x_dest, temp_x_src, dxbc::Src::LU(2));
++    a_.OpOr(temp_x_dest, temp_x_src, temp_y_src);
++    a_.OpEndIf();
++    a_.OpEndIf();
++    a_.OpMov(dxbc::Dest::OMask(), temp_x_src);
++    a_.OpEndIf();
++    PopSystemTemp();
++    return;
++  }
++
+   // Write color values.
+   uint32_t shader_writes_color_targets = current_shader().writes_color_targets();
+   uint32_t edram_size_32bpp_samples = (xenos::kEdramTileHeightSamples * draw_resolution_scale_y_) *

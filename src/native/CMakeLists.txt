@@ -14,7 +14,7 @@ add_library(rexgpu-native SHARED quality/settings.cpp quality/cadence.cpp comman
     ${_gpu}/pipeline/shader/translator.cpp ${_gpu}/pipeline/shader/translator_disasm.cpp)
 if(WIN32)
   target_sources(rexgpu-native PRIVATE d3d12/d3d12_scanout.cpp
-      pipeline/shader_cache.cpp pipeline/pipeline_store.cpp d3d12/d3d12_render.cpp d3d12/d3d12_draw.cpp shaders/rectangle_shader.cpp shaders/point_shader.cpp d3d12/d3d12_resolve.cpp d3d12/d3d12_textures.cpp d3d12/d3d12_scaled.cpp
+      pipeline/shader_cache.cpp pipeline/pipeline_store.cpp d3d12/d3d12_render.cpp d3d12/d3d12_draw.cpp d3d12/d3d12_hybrid.cpp shaders/rectangle_shader.cpp shaders/point_shader.cpp d3d12/d3d12_resolve.cpp d3d12/d3d12_textures.cpp d3d12/d3d12_scaled.cpp
       ${_gpu}/pipeline/shader/dxbc.cpp ${_gpu}/pipeline/shader/dxbc_translator.cpp
       ${_gpu}/pipeline/shader/dxbc_translator_alu.cpp ${_gpu}/pipeline/shader/dxbc_translator_fetch.cpp
       ${_gpu}/pipeline/shader/dxbc_translator_memexport.cpp ${_gpu}/pipeline/shader/dxbc_translator_om.cpp

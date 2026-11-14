@@ -25,7 +25,9 @@
 #include <chrono>
 #include <future>
 namespace x360n::native {
+class D3D12HybridColor;
 class D3D12Render {
+  friend class D3D12HybridColor;
   const NativeQualitySettings quality_ = GetNativeQualitySettings();
   const uint32_t scale_x_ = quality_.scale_x, scale_y_ = quality_.scale_y;
   const uint64_t edram_size_ = uint64_t(rex::graphics::xenos::kEdramSizeBytes) * scale_x_ * scale_y_;
@@ -111,6 +113,8 @@ class D3D12Render {
   D3D12_GPU_VIRTUAL_ADDRESS DrawConstants(unsigned root, const void*, size_t);
   void Transition(ID3D12Resource*, D3D12_RESOURCE_STATES&, D3D12_RESOURCE_STATES);
   void Barrier();
+  std::unique_ptr<D3D12HybridColor> hybrid_color_;
+  void EndHybridColor();
   void Wait(uint64_t serial);
   void RecycleBatch();
   void PublishCompleted();
@@ -297,6 +301,10 @@ class D3D12Render {
   // addressing or resolves. Only the query variant of a shader accesses it.
   Ptr<ID3D12Resource> sample_counts_readback_;
   SampleCounts sample_counts_{};
+  bool striped_counts_ = false;
+  uint32_t SampleStorageBytes() const { return sizeof(SampleCounts)*(striped_counts_?256u:1u); }
+  SampleCounts FoldSampleCounts(const void*) const;
+  void ResetSampleCounts(const SampleCounts&);
   bool sample_counting_ = false;
   bool visibility_only_ = false;
   const std::vector<uint8_t>& RectangleShader(unsigned interpolators, unsigned clip_planes);

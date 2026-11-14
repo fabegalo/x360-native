@@ -1,5 +1,22 @@
 # Local patches to ReXGlue SDK
 
+## 0270 — Native striped sample counters
+
+An explicit DXBC variant distributes sample atomics over 256 private Native
+counter buckets. The backend resets them on writes and reduces them at every
+canonical read/snapshot boundary. Ordinary and visibility variants are unchanged.
+Native occlusion and hybrid GPU contracts check exact counts, depth/stencil,
+alpha/kill, MSAA, overflow and snapshots; recorded Forza/Skate checks also
+require matching pixels, memory and counters. SDK revision unchanged.
+
+## 0269 — Native hybrid color output
+
+Adds an opt-in DXBC variant exporting guest-quantized RT0 color and surviving
+coverage while keeping ROV depth/stencil and counters. Early returns start with
+zero output coverage. Existing variants are unchanged. `sdkcheck.canary-dxbc`
+checks the declarations and emitted program; all four new checks fail before
+the patch. Native must validate surface conversions and eligibility separately.
+
 ## 0268 — shared scaled texture offset option
 
 Moves the existing `draw_resolution_scaled_texture_offsets` definition from the

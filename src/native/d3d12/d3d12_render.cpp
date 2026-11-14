@@ -1,4 +1,5 @@
 #include "d3d12_render.h"
+#include "d3d12_hybrid.h"
 #include <atomic>
 #include <rex/graphics/pipeline/render_target/cache.h>
 #include <rex/logging.h>
@@ -14,6 +15,8 @@
 REXCVAR_DEFINE_BOOL(native_stats, false, "GPU/Native", "Log cumulative Native CPU submission costs for bounded diagnostics");
 REXCVAR_DEFINE_BOOL(native_texture_cache, true, "GPU/Native", "Reuse textures only while every guest source byte matches; disable for diagnostics");
 REXCVAR_DEFINE_BOOL(native_texture_cpu, false, "GPU/Native", "Diagnose texture loads with CPU conversion and synchronized guest bytes");
+REXCVAR_DEFINE_BOOL(native_d3d12_striped_sample_counts, true, "GPU/Native",
+    "Distributed GPU sample counters with exact reduction at guest read/snapshot boundaries (false selects scalar counters)");
 REXCVAR_DECLARE(std::string, native_pso_dump);
 REXCVAR_DEFINE_UINT32(native_gpu_timeout_ms, 5000, "GPU/Native",
     "Limit of one D3D12 fence wait before the renderer reports a GPU timeout (minimum 1000; software adapters such as WARP compile shaders at first use and may need more)");
@@ -131,7 +134,7 @@ D3D12_GPU_DESCRIPTOR_HANDLE D3D12Render::MemoryTable(bool memexport) {
   uav.ViewDimension=D3D12_UAV_DIMENSION_BUFFER; uav.Buffer.NumElements=GuestMemoryMirror::kSize/4;
   uav.Buffer.Flags=D3D12_BUFFER_UAV_FLAG_RAW;
   device_->CreateUnorderedAccessView(memexport ? memory_.Get() : nullptr,nullptr,&uav,Cpu(base+1));
-  uav.Format=DXGI_FORMAT_R32_UINT; uav.Buffer.NumElements=UINT(edram_size_/4)+8; uav.Buffer.Flags=D3D12_BUFFER_UAV_FLAG_NONE;
+  uav.Format=DXGI_FORMAT_R32_UINT; uav.Buffer.NumElements=UINT(edram_size_/4)+SampleStorageBytes()/4; uav.Buffer.Flags=D3D12_BUFFER_UAV_FLAG_NONE;
   device_->CreateUnorderedAccessView(edram_.Get(),nullptr,&uav,Cpu(base+2));
   return Gpu(base);
 }
@@ -140,6 +143,9 @@ D3D12Render::D3D12Render(rex::ui::d3d12::D3D12Provider& provider) : provider_(pr
   stats_enabled_ = REXCVAR_GET(native_stats);
   texture_cache_enabled_ = REXCVAR_GET(native_texture_cache);
   texture_cpu_ = REXCVAR_GET(native_texture_cpu);
+  striped_counts_ = REXCVAR_GET(native_d3d12_striped_sample_counts);
+  static_assert(DxbcShaderTranslator::Modification::kNativeSampleCountBuckets==256);
+  REXLOG_INFO("Native D3D12 sample counter buckets={}",striped_counts_?256:1);
   pipeline_workers_ = std::make_unique<PipelineWorkers>(NativePipelineThreads());
   device_->QueryInterface(IID_PPV_ARGS(&debug_));
   g_info_queue = debug_.Get();
@@ -154,7 +160,7 @@ D3D12Render::D3D12Render(rex::ui::d3d12::D3D12Provider& provider) : provider_(pr
   Check(device_->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&fence_)), "fence");
   event_ = CreateEventW(nullptr, FALSE, FALSE, nullptr); Require(event_ != nullptr, "fence event");
   memory_ = Buffer(0x20000000, D3D12_HEAP_TYPE_DEFAULT, memory_state_, D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS);
-  edram_ = Buffer(edram_size_ + sizeof(SampleCounts), D3D12_HEAP_TYPE_DEFAULT, edram_state_, D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS);
+  edram_ = Buffer(edram_size_ + SampleStorageBytes(), D3D12_HEAP_TYPE_DEFAULT, edram_state_, D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS);
   D3D12_DESCRIPTOR_HEAP_DESC hd{D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, 65536, D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE, 0};
   Check(device_->CreateDescriptorHeap(&hd, IID_PPV_ARGS(&views_)), "views");
   hd.Type = D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER; hd.NumDescriptors = 2048;
@@ -201,6 +207,7 @@ D3D12Render::D3D12Render(rex::ui::d3d12::D3D12Provider& provider) : provider_(pr
   pipeline_store_.SetRoot(blob->GetBufferPointer(), blob->GetBufferSize(), root_tess_.Get());
   BeginGpuTimestamp();
   cmd_.ResetWorkTracking();
+  if (NativeHybridColorEnabled()) hybrid_color_ = std::make_unique<D3D12HybridColor>(*this);
 }
 // Watches reference cache entries: retire them before the cache is destroyed.
 D3D12Render::~D3D12Render() {
@@ -254,6 +261,7 @@ void D3D12Render::CollectGpuTimestamps() {
   }
 }
 void D3D12Render::LogSubmissionStats() {
+  if (hybrid_color_) hybrid_color_->LogStats();
   auto ms = [&](uint64_t ticks) { return timestamp_frequency_ ? double(ticks) * 1000.0 / double(timestamp_frequency_) : 0.0; };
   REXLOG_INFO("Native queue submissions={} asynchronous={} fence_waits={} fence_ms={} gpu_timed={} gpu_busy_ms={:.3f} gpu_idle_between_ms={:.3f} sampler_reuses={}",
       serial_, async_submissions_, fence_waits_, flush_wait_ns_ / 1000000, gpu_timed_, ms(gpu_busy_ticks_), ms(gpu_idle_ticks_), sampler_reuses_);
@@ -342,6 +350,7 @@ void D3D12Render::SubmitEarly() {
   Flush(kFlushEager);
 }
 void D3D12Render::Flush(FlushCause cause) {
+  if (cause == kFlushDrain) EndHybridColor();
   recorded_work_ = 0;
   if (cmd_.empty()) {
     // A guest resolve may have already submitted this frame. Do not submit
@@ -410,37 +419,52 @@ bool D3D12Render::GuestWritesOverlap(uint32_t address, uint32_t length) const {
   for (const auto& batch : batches_) if (batch.writeback.Overlaps(address, length)) return true;
   return false;
 }
+SampleCounts D3D12Render::FoldSampleCounts(const void* data) const {
+  SampleCounts result{};
+  const auto* words=static_cast<const uint32_t*>(data);
+  for(unsigned i=0;i<SampleStorageBytes()/4;++i) result[i%result.size()]+=words[i];
+  return result;
+}
+void D3D12Render::ResetSampleCounts(const SampleCounts& counts) {
+  std::vector<uint32_t> words;
+  if(striped_counts_) {
+    words.resize(SampleStorageBytes()/4);
+    std::copy(counts.begin(),counts.end(),words.begin());
+  }
+  const auto upload=Upload(striped_counts_?words.data():counts.data(),SampleStorageBytes());
+  Transition(edram_.Get(),edram_state_,D3D12_RESOURCE_STATE_COPY_DEST);
+  cmd_.CopyBufferRegion(edram_.Get(),edram_size_,upload.resource.Get(),upload.offset,SampleStorageBytes());
+  Transition(edram_.Get(),edram_state_,D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+  edram_rov_layout_.reset();
+}
 SampleCounts D3D12Render::ReadSampleCounts(bool counting_after) {
   if (!sample_counts_readback_) {
-    sample_counts_readback_ = Buffer(sizeof(SampleCounts), D3D12_HEAP_TYPE_READBACK, D3D12_RESOURCE_STATE_COPY_DEST);
-    const auto initial = Upload(sample_counts_.data(), sizeof(sample_counts_));
-    Transition(edram_.Get(), edram_state_, D3D12_RESOURCE_STATE_COPY_DEST);
-    cmd_.CopyBufferRegion(edram_.Get(), edram_size_, initial.resource.Get(), initial.offset, sizeof(SampleCounts));
-    Transition(edram_.Get(), edram_state_, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
-    edram_rov_layout_.reset();
+    sample_counts_readback_ = Buffer(SampleStorageBytes(), D3D12_HEAP_TYPE_READBACK, D3D12_RESOURCE_STATE_COPY_DEST);
+    ResetSampleCounts(sample_counts_);
   }
   if (sample_counting_) {
     // The transition orders all preceding ROV atomics, including draws in
     // earlier recording arenas. The fence retires the copy before publication.
     Transition(edram_.Get(), edram_state_, D3D12_RESOURCE_STATE_COPY_SOURCE);
-    cmd_.CopyBufferRegion(sample_counts_readback_.Get(), 0, edram_.Get(), edram_size_, sizeof(SampleCounts));
+    cmd_.CopyBufferRegion(sample_counts_readback_.Get(), 0, edram_.Get(), edram_size_, SampleStorageBytes());
     Transition(edram_.Get(), edram_state_, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
     edram_rov_layout_.reset();
     Flush(kFlushGuestSync);
     void* mapped = nullptr;
-    const D3D12_RANGE range{0, sizeof(SampleCounts)}, none{};
+    const D3D12_RANGE range{0, SampleStorageBytes()}, none{};
     Check(sample_counts_readback_->Map(0, &range, &mapped), "map sample counts");
-    std::memcpy(sample_counts_.data(), mapped, sizeof(sample_counts_));
+    sample_counts_=FoldSampleCounts(mapped);
     sample_counts_readback_->Unmap(0, &none);
   }
   sample_counting_ = counting_after;
   return sample_counts_;
 }
 EdramSnapshot D3D12Render::ReadEdram() {
+  EndHybridColor();
   // The tail holds sample counters only once ReadSampleCounts initialized it;
   // until then counting is off and sample_counts_ is the authoritative copy.
   if (!sample_counts_readback_) ReadSampleCounts(false);
-  const uint64_t bytes = edram_size_ + sizeof(SampleCounts);
+  const uint64_t bytes = edram_size_ + SampleStorageBytes();
   auto readback = Buffer(bytes, D3D12_HEAP_TYPE_READBACK, D3D12_RESOURCE_STATE_COPY_DEST);
   // The transition orders every recorded ROV write before the copy.
   Transition(edram_.Get(), edram_state_, D3D12_RESOURCE_STATE_COPY_SOURCE);
@@ -449,35 +473,35 @@ EdramSnapshot D3D12Render::ReadEdram() {
   edram_rov_layout_.reset();
   Flush(kFlushDrain);
   EdramSnapshot snapshot;
-  snapshot.bytes.resize(size_t(bytes));
+  snapshot.bytes.resize(size_t(edram_size_+sizeof(SampleCounts)));
   void* mapped = nullptr;
   const D3D12_RANGE range{0, size_t(bytes)}, none{};
   Check(readback->Map(0, &range, &mapped), "map EDRAM snapshot");
-  std::memcpy(snapshot.bytes.data(), mapped, size_t(bytes));
+  std::memcpy(snapshot.bytes.data(), mapped, size_t(edram_size_));
+  const auto counts=FoldSampleCounts(static_cast<const uint8_t*>(mapped)+edram_size_);
+  std::memcpy(snapshot.bytes.data()+edram_size_,counts.data(),sizeof(counts));
   readback->Unmap(0, &none);
   snapshot.sample_counting = sample_counting_;
   return snapshot;
 }
 void D3D12Render::WriteEdram(const EdramSnapshot& snapshot) {
+  EndHybridColor();
   const uint64_t bytes = edram_size_ + sizeof(SampleCounts);
   Require(snapshot.bytes.size() == bytes, "EDRAM snapshot size differs (resolution scale?)");
   if (!sample_counts_readback_)
-    sample_counts_readback_ = Buffer(sizeof(SampleCounts), D3D12_HEAP_TYPE_READBACK, D3D12_RESOURCE_STATE_COPY_DEST);
+    sample_counts_readback_ = Buffer(SampleStorageBytes(), D3D12_HEAP_TYPE_READBACK, D3D12_RESOURCE_STATE_COPY_DEST);
   const auto upload = Upload(snapshot.bytes.data(), size_t(bytes));
   Transition(edram_.Get(), edram_state_, D3D12_RESOURCE_STATE_COPY_DEST);
   cmd_.CopyBufferRegion(edram_.Get(), 0, upload.resource.Get(), upload.offset, bytes);
   Transition(edram_.Get(), edram_state_, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
   edram_rov_layout_.reset();
   std::memcpy(sample_counts_.data(), snapshot.bytes.data() + edram_size_, sizeof(SampleCounts));
+  if(striped_counts_) ResetSampleCounts(sample_counts_);
   sample_counting_ = snapshot.sample_counting;
 }
 void D3D12Render::SetSampleCounts(const SampleCounts& counts, bool visibility_only) {
   if (!sample_counts_readback_) ReadSampleCounts(false);
-  const auto upload = Upload(counts.data(), sizeof(counts));
-  Transition(edram_.Get(), edram_state_, D3D12_RESOURCE_STATE_COPY_DEST);
-  cmd_.CopyBufferRegion(edram_.Get(), edram_size_, upload.resource.Get(), upload.offset, sizeof(counts));
-  Transition(edram_.Get(), edram_state_, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
-  edram_rov_layout_.reset();
+  ResetSampleCounts(counts);
   sample_counts_ = counts;
   visibility_only_ = visibility_only;
 }

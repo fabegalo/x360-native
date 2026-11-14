@@ -121,7 +121,7 @@ uint32_t CountVertexFetchBounds(const std::vector<uint8_t>& blob) {
 
 std::vector<uint8_t> Translate(const std::vector<uint32_t>& code,
                                 xenos::ShaderType type = xenos::ShaderType::kPixel,
-                                bool rov = false, bool param_gen = false) {
+                                bool rov = false, bool param_gen = false, uint64_t extra = 0) {
   Shader shader(type, 1, code.data(), code.size(), std::endian::native);
   rex::string::StringBuffer disassembly;
   shader.AnalyzeUcode(disassembly);
@@ -134,7 +134,7 @@ std::vector<uint8_t> Translate(const std::vector<uint32_t>& code,
     m.pixel.param_gen_interpolator = 0;
     modification = m.value;
   }
-  auto& translation = *shader.GetOrCreateTranslation(modification);
+  auto& translation = *shader.GetOrCreateTranslation(modification | extra);
   if (!translator.TranslateAnalyzedShader(translation) || !translation.is_valid()) return {};
   return translation.translated_binary();
 }
@@ -185,6 +185,35 @@ int main() {
   }
   if (HMODULE compiler = LoadLibraryW(L"D3DCompiler_47.dll")) {
     auto disassemble = reinterpret_cast<pD3DDisassemble>(GetProcAddress(compiler, "D3DDisassemble"));
+    {
+      DxbcShaderTranslator::Modification counted(0);
+      counted.pixel.rov_sample_counts=1;
+      const auto scalar=Translate(Microcode(false,false),xenos::ShaderType::kPixel,true,false,counted.value);
+      const auto striped=Translate(Microcode(false,false),xenos::ShaderType::kPixel,true,false,
+          counted.value | DxbcShaderTranslator::Modification::kNativeStripedSampleCounts);
+      ID3DBlob* assembly=nullptr;
+      const bool valid=disassemble&&!striped.empty()&&SUCCEEDED(disassemble(striped.data(),striped.size(),0,nullptr,&assembly));
+      check(valid,"striped sample counter DXBC disassembles");
+      check(striped.size()>scalar.size(),"striped counter routing is an explicit shader variant");
+      if(assembly) assembly->Release();
+    }
+    // Native hybrid-color ABI: guest depth/stencil remains ROV, with a
+    // quantized color target and coverage output for the host render target.
+    {
+      const auto ordinary = Translate(Microcode(false, false), xenos::ShaderType::kPixel, true);
+      const auto hybrid = Translate(Microcode(false, false), xenos::ShaderType::kPixel, true, false, uint64_t(1) << 59);
+      ID3DBlob* assembly = nullptr;
+      const bool valid = disassemble && !hybrid.empty() && SUCCEEDED(disassemble(hybrid.data(), hybrid.size(), 0, nullptr, &assembly));
+      check(valid, "hybrid color DXBC disassembles");
+      if (assembly) {
+        const std::string text(static_cast<const char*>(assembly->GetBufferPointer()), assembly->GetBufferSize());
+        check(text.find("dcl_output o0") != std::string::npos, "hybrid color declares render-target output");
+        check(text.find("dcl_output oMask") != std::string::npos, "hybrid color declares sample coverage output");
+        check(text.find("mov oMask, l(0)") != std::string::npos, "hybrid early returns start with zero target coverage");
+        check(hybrid.size() < ordinary.size(), "hybrid bypasses the ROV color store program");
+        assembly->Release();
+      }
+    }
     for (bool rov : {false, true}) {
       const auto blob = Translate(Microcode(false, false), xenos::ShaderType::kPixel, rov);
       ID3DBlob* assembly = nullptr;
