@@ -24,7 +24,7 @@ void Require(bool condition, const char* message) {
 }
 }
 Shader* VulkanRender::LoadShader(ShaderType type, const uint32_t* data, uint32_t count) {
-  if (!shaders_) shaders_ = std::make_unique<VulkanShaderCache>(device_, true, scale_x_, scale_y_);
+  if (!shaders_) shaders_ = std::make_unique<VulkanShaderCache>(device_, true, scale_x_, scale_y_, edram_tile_count_);
   return shaders_->Load(type, data, count);
 }
 void VulkanRender::DestroyDraw() {
@@ -57,7 +57,7 @@ void VulkanRender::DestroyDraw() {
 }
 void VulkanRender::InitializeDraw() {
   if (draw_framebuffer_) return;
-  if (!shaders_) shaders_ = std::make_unique<VulkanShaderCache>(device_, true, scale_x_, scale_y_);
+  if (!shaders_) shaders_ = std::make_unique<VulkanShaderCache>(device_, true, scale_x_, scale_y_, edram_tile_count_);
   Require(device_.properties().imageViewFormatSwizzle, "host texture swizzle support is required");
   const auto& fn = device_.functions();
   const auto vk = device_.device();
@@ -495,7 +495,7 @@ void VulkanRender::Draw(const RegisterFile& regs, rex::memory::Memory& memory, S
   for (unsigned i = 0; i < 4; ++i) {
     const auto info = regs.Get<reg::RB_COLOR_INFO>(reg::RB_COLOR_INFO::rt_register_indices[i]);
     constants.color_exp_bias[i] = std::ldexp(1.0f, info.color_exp_bias);
-    constants.edram_rt_base_dwords_scaled[i] = info.color_base * 1280 * scale_x_ * scale_y_;
+    constants.edram_rt_base_dwords_scaled[i] = (info.color_base & (edram_tile_count_ - 1)) * 1280 * scale_x_ * scale_y_;
     constants.edram_rt_format_flags[i] = RenderTargetCache::AddPSIColorFormatFlags(info.color_format);
     RenderTargetCache::GetPSIColorFormatInfo(info.color_format, (color_mask >> (i * 4)) & 15,
         constants.edram_rt_clamp[i][0], constants.edram_rt_clamp[i][1], constants.edram_rt_clamp[i][2],
@@ -505,11 +505,11 @@ void VulkanRender::Draw(const RegisterFile& regs, rex::memory::Memory& memory, S
     if (info.color_format == ColorRenderTargetFormat::k_8_8_8_8_GAMMA) constants.flags |= T::kSysFlag_ConvertColor0ToGamma << i;
   }
   const auto depth_info = regs.Get<reg::RB_DEPTH_INFO>();
-  constants.edram_depth_base_dwords_scaled = depth_info.depth_base * 1280 * scale_x_ * scale_y_;
+  constants.edram_depth_base_dwords_scaled = (depth_info.depth_base & (edram_tile_count_ - 1)) * 1280 * scale_x_ * scale_y_;
   if (depth_info.depth_format == DepthRenderTargetFormat::kD24FS8) constants.flags |= T::kSysFlag_DepthFloat24;
   bool depth_stencil = depth.z_enable || depth.stencil_enable;
   for (unsigned i = 0; i < 4 && depth_stencil; ++i)
-    if (depth_info.depth_base == regs.Get<reg::RB_COLOR_INFO>(reg::RB_COLOR_INFO::rt_register_indices[i]).color_base &&
+    if (((depth_info.depth_base ^ regs.Get<reg::RB_COLOR_INFO>(reg::RB_COLOR_INFO::rt_register_indices[i]).color_base) & (edram_tile_count_ - 1)) == 0 &&
         (constants.edram_rt_keep_mask[i][0] != UINT32_MAX || constants.edram_rt_keep_mask[i][1] != UINT32_MAX)) depth_stencil = false;
   const bool para = !polygon && mode.poly_offset_para_enable;
   if ((polygon && mode.poly_offset_front_enable) || para) {

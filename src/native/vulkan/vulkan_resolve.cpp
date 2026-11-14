@@ -49,7 +49,7 @@ void VulkanRender::Resolve(const RegisterFile& regs, rex::memory::Memory& memory
   // s5.10 integers, so a same-format signed-integer copy with exponent bias 10
   // is bitwise (patch 0087), not a full resolve without integer destinations.
   if (!draw_util::GetResolveInfo(regs, memory, scale_x_, scale_y_, false, false, info,
-      /*fixed16_s5_10_storage=*/true))
+      /*fixed16_s5_10_storage=*/true, edram_tile_count_))
     throw std::runtime_error("Native Vulkan: invalid resolve registers or vertices");
   const auto length = info.copy_dest_extent_length;
   const bool scaled=scaled_.enabled(); const uint32_t area=scale_x_*scale_y_;

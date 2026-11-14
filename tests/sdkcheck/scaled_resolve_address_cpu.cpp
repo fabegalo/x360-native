@@ -9,7 +9,7 @@ uint32_t Reference(const XeResolveInfo& i, unsigned x, unsigned y, unsigned s) {
   uint64_t px=((hx/sx)*(i.edram_msaa_samples==2?2:1)+(s>>1))*sx+hx%sx;
   uint64_t py=((hy/sy)*(i.edram_msaa_samples?2:1)+(s&1))*sy+hy%sy;
   uint64_t tw=(80*sx)>>i.edram_format_ints_log2, th=16*sy;
-  uint64_t tile=(i.edram_base_tiles+(py/th)*i.edram_pitch_tiles+px/tw)%2048;
+  uint64_t tile=(i.edram_base_tiles+(py/th)*i.edram_pitch_tiles+px/tw)%i.edram_tile_count;
   return uint32_t((tile*1280*sx*sy+((py%th)*tw+px%tw)*(1u<<i.edram_format_ints_log2))*4);
 }
 int main() {
@@ -45,10 +45,12 @@ int main() {
   for(unsigned sx=1;sx<=4;++sx) for(unsigned sy=1;sy<=4;++sy)
   for(unsigned wide=0;wide<2;++wide) for(unsigned msaa=0;msaa<3;++msaa)
   for(unsigned sample=0;sample<(1u<<msaa);++sample)
-  for(unsigned pitch:{1u,2u,7u,1023u}) for(unsigned base:{0u,2047u})
+  for(unsigned tiles:{2048u,8192u})
+  for(unsigned pitch:{1u,2u,7u,1023u}) for(unsigned base:{0u,2047u,4096u,8191u})
   for(bool offset:{false,true}) {
     XeResolveInfo i{}; i.resolution_scale={sx,sy};i.edram_format_ints_log2=wide;
     i.edram_msaa_samples=msaa;i.edram_pitch_tiles=pitch;i.edram_base_tiles=base;
+    i.edram_tile_count=tiles;
     i.edram_offset_scaled={offset?8*sx:0,offset?8*sy:0};
     i.half_pixel_offset_fill_source={sx/2,sy/2};
     for(auto x:xs) for(auto y:ys) {

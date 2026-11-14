@@ -15,6 +15,21 @@ shaders = args.sdk_root / 'src/graphics/shaders'
 sources = shaders / 'resolve_sources'
 manifest = json.loads((sources / 'fixed16_generated.json').read_text())
 sha = lambda data: hashlib.sha256(data).hexdigest()
+for filename, count in [('standard_generated.json', 44), ('generated.json', 20)]:
+    other = json.loads((sources / filename).read_text())
+    assert len(other['resources']) == count, filename
+    for name, expected in other['sources'].items():
+        assert sha((sources / name).read_bytes()) == expected, name
+    for name, record in other['resources'].items():
+        text = (shaders / name).read_text()
+        body = re.search(r'\[\]\s*=\s*\{(.*?)\};', text, re.S)[1]
+        values = [int(t, 16) for t in re.findall(r'0x[0-9a-fA-F]+', body)]
+        binary = (struct.pack('<' + 'I' * len(values), *values)
+                  if name.startswith('vulkan_spirv/') else bytes(values))
+        assert len(binary) == record['bytes'], name
+        assert sha(binary) == record['binary_sha256'], name
+    assert other['tools']['generator_source_sha256'] == sha(
+        (root / 'scripts/shaders/generate_resolves.py').read_bytes().replace(b'\r\n', b'\n'))
 assert len(manifest['resources']) == 20
 for name, expected in manifest['sources'].items():
     assert sha((sources / name).read_bytes()) == expected, name

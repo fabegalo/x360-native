@@ -25,7 +25,7 @@ inline uint4_xe uint_x4_xe(uint n) {return uint4_xe(n);}
 constexpr uint kXenosMsaaSamples_2X=1,kXenosMsaaSamples_4X=2;
 struct XeResolveInfo {
  uint2_xe resolution_scale,edram_offset_scaled,half_pixel_offset_fill_source;
- uint edram_format_ints_log2,edram_msaa_samples,edram_base_tiles,edram_pitch_tiles;
+ uint edram_format_ints_log2,edram_msaa_samples,edram_base_tiles,edram_pitch_tiles,edram_tile_count;
 };
 """
 Path(sys.argv[2]).write_text(prefix+source,newline='\n')

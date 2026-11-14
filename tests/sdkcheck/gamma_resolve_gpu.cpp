@@ -94,12 +94,29 @@ bool bench_gamma = true;
 bool bench_fixed16 = false, bench_source64 = false;
 bool fixed16_only = false;
 bool extended_fixed16 = false;
+bool edram_capacity = false;
 bool rgb565_only = false;
 bool legacy_only = false;
 bool extended_rgb565 = false;
 bool bench_rgb565 = false;
 bool reference_check = false;
 std::vector<Case> TestCases() {
+  if (edram_capacity) {
+    std::vector<Case> cases;
+    for (unsigned tiles : {2048u, 8192u, 2048u})
+      for (unsigned base : {0u, 2047u, 4096u, 8191u})
+        for (unsigned msaa : {0u, 1u, 2u})
+          for (unsigned scale : {1u, 2u})
+            for (bool fixed : {false, true}) {
+              Case c;
+              c.edram_tiles = tiles; c.edram_base = base;
+              c.msaa = msaa; c.select = msaa == 0 ? 0 : msaa == 1 ? 4 : 6;
+              c.scale = scale; c.fixed16 = fixed; c.gamma = !fixed;
+              c.source64 = fixed; c.partial = true;
+              cases.push_back(c);
+            }
+    return cases;
+  }
   auto cases = Cases();
   if (extended_fixed16) {
     auto extra = Fixed16ExtendedCases();
@@ -363,7 +380,7 @@ public:
     if (refill)
       Fill(c, upload_);
     auto upload_end = Clock::now();
-    auto constants = c.Constants();
+    auto constants = c.Constants(!baseline_directory.empty() && resources_ == baseline_directory);
     unsigned scaled = c.scale > 1;
     auto &pso = pipelines_[scaled][OptimizedCase(c) ? 15 : c.log + (c.gamma ? 5 : c.fixed16 ? 10 : 0)];
     if (!pso) {
@@ -657,7 +674,7 @@ public:
     if (refill)
       Fill(c, staging_.mapped);
     auto upload_end = Clock::now();
-    auto constants = c.Constants();
+    auto constants = c.Constants(!baseline_directory.empty() && resources_ == baseline_directory);
     unsigned scaled = c.scale > 1;
     const auto &f = device_->functions();
     auto vk = device_->device();
@@ -826,7 +843,7 @@ unsigned Check(const Case &c, const std::vector<unsigned char> &got,
 template <class Backend> void Validate(const char *name) {
   Backend backend;
   std::unique_ptr<Backend> original;
-  unsigned passed = 0, gamma = 0, fixed = 0, controls = 0, legacy_differences = 0;
+  unsigned passed = 0, gamma = 0, fixed = 0, controls = 0, legacy_differences = 0, corrections = 0;
   for (const auto &c : TestCases()) {
     auto result = backend.Run(c);
     if (c.gamma || c.fixed16) {
@@ -840,8 +857,15 @@ template <class Backend> void Validate(const char *name) {
       if (!original)
         original = std::make_unique<Backend>(baseline_directory);
       auto before = original->Run(c);
-      if (!OptimizedCase(c))
-        Need(result.data == before.data, "non-gamma baseline regression");
+      if (result.data != before.data) {
+        if (!OptimizedCase(c)) {
+          Need(c.format == xenos::ColorFormat::k_8 &&
+                   Check(c, result.data, std::is_same_v<Backend, Dx>) == 0 &&
+                   before.data != Expected(c, std::is_same_v<Backend, Dx>),
+               "changed R8 baseline must demonstrate an old numerical error");
+        }
+        ++corrections;
+      }
       if (rgb565_only || legacy_only || c.format == xenos::ColorFormat::k_5_6_5)
         Need(Check(c, result.data, std::is_same_v<Backend, Dx>) == 0,
              "focused independent oracle");
@@ -852,10 +876,11 @@ template <class Backend> void Validate(const char *name) {
     ++passed;
   }
   std::cout << name << " compute resolve: " << passed << " cases, " << gamma
-            << " gamma exact to independent oracle, " << controls
+            << " gamma exact to independent oracle, " << controls - corrections
             << " non-gamma exact to original GPU baseline ("
             << legacy_differences << " pre-existing oracle differences)\n";
   std::cout << fixed << " fixed16 cases exact to independent oracle\n";
+  std::cout << corrections << " scalar/scaled corrections checked against the independent oracle\n";
 }
 void ValidateBoth() {
   Dx dx;
@@ -868,7 +893,7 @@ void ValidateBoth() {
   unsigned fixed = 0, fixed_bad_dx = 0, fixed_bad_vk = 0,
            fixed_identical = 0, fixed_half = 0, fixed_half_different = 0;
   unsigned rgb_bad_dx = 0, rgb_bad_vk = 0;
-  unsigned corrected = 0;
+  unsigned corrected = 0, corrected_r8 = 0;
   for (const auto &c : TestCases()) {
     auto a = dx.Run(c), b = vk.Run(c);
     if (c.fixed16) {
@@ -905,7 +930,20 @@ void ValidateBoth() {
       auto old_dx = original_dx->Run(c), old_vk = original_vk->Run(c);
       if (OptimizedCase(c)) {
         corrected += a.data != old_dx.data || b.data != old_vk.data;
+      } else if (c.format == xenos::ColorFormat::k_8 &&
+                 (a.data != old_dx.data || b.data != old_vk.data)) {
+        // Canary corrects scalar sample addressing and A8's LOW_BLUE selection.
+        Need(Check(c, a.data, true) == 0 && Check(c, b.data, false) == 0,
+             "Canary R8 resolves must match the independent oracle");
+        Need((a.data == old_dx.data || old_dx.data != Expected(c, true)) &&
+                 (b.data == old_vk.data || old_vk.data != Expected(c, false)),
+             "changed R8 baseline must demonstrate an old numerical error");
+        ++corrected_r8;
       } else {
+        if (a.data != old_dx.data || b.data != old_vk.data)
+          std::cerr << "Baseline mismatch " << c.Name() << " D3D12="
+                    << (a.data != old_dx.data) << " Vulkan="
+                    << (b.data != old_vk.data) << '\n';
         Need(a.data == old_dx.data && b.data == old_vk.data,
              "non-gamma baseline regression");
       }
@@ -936,7 +974,7 @@ void ValidateBoth() {
             << " gamma byte-identical non-FP16 cases, " << half
             << " gamma FP16 cases (" << half_different
             << " differ: DXBC RTZ / SPIR-V RTE)\n";
-  std::cout << controls << " non-gamma cases/API checked; " << controls - corrected
+  std::cout << controls << " non-gamma cases/API checked; " << controls - corrected - corrected_r8
             << " exact to original GPU baseline; " << corrected << " corrected scaled; "
                "pre-existing oracle differences D3D12="
             << legacy_dx << " Vulkan=" << legacy_vk << "\n";
@@ -950,6 +988,7 @@ void ValidateBoth() {
   Need(!fixed_bad_dx && !fixed_bad_vk, "fixed16 independent oracle");
   Need(!rgb_bad_dx && !rgb_bad_vk, "RGB565 independent rational oracle");
   Need(!legacy_only || (!legacy_dx && !legacy_vk), "R8 independent oracle");
+  std::cout << corrected_r8 << " Canary R8 corrections verified against old GPU results and the independent oracle\n";
 }
 void ValidateReference() {
   Need(rgb565_only || legacy_only, "reference check requires a focused format");
@@ -1036,7 +1075,9 @@ int main(int argc, char **argv) {
     std::string api = "both";
     for (int i = 1; i < argc; ++i) {
       std::string_view a = argv[i];
-      if (a == "--bench")
+      if (a == "--edram-capacity")
+        edram_capacity = true;
+      else if (a == "--bench")
         bench = true;
       else if (a == "--fixed16-only")
         fixed16_only = true;

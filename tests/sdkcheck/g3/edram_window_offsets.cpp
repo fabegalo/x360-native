@@ -54,7 +54,7 @@ struct Cache final : RenderTargetCache {
   }
 #ifndef X360N_EDRAM_WINDOW_LEGACY
   static uint32_t Rectangles(unsigned a, unsigned z, Key k, Rect *r) {
-    return Transfer::GetRangeRectangles(a, z, k, r);
+    return Transfer::GetRangeRectangles(a, z, k, xenos::kEdramTileCount, r);
   }
 #endif
 };
@@ -294,6 +294,45 @@ int main(int argc, char **) {
           "depth-only prepass supports the same 32bpp span");
   }
 #endif
+  {
+    const auto original_capacity = REXCVAR_GET(edram_tile_count);
+    reg::RB_COLOR_INFO high_color{};
+    high_color.value = 8191;
+    reg::RB_DEPTH_INFO high_depth{};
+    high_depth.value = 8191;
+    check(high_color.color_base == 8191 && high_depth.depth_base == 8191,
+          "guest color and depth base registers preserve all 13 bits");
+    check(GetConfiguredEdramTileCount() == 2048, "standard EDRAM is the default");
+    for (const auto* mode : {"standard", "extended", "standard"}) {
+      REXCVAR_SET(edram_tile_count, std::string(mode));
+      const unsigned tiles = mode == std::string_view("extended") ? 8192 : 2048;
+      RegisterFile r;
+      Setup(r, xenos::MsaaSamples::k1X, 0, 0);
+      Cache cache(r, memory, Cache::Path::kHostRenderTargets);
+      check(cache.edram_tile_count() == tiles &&
+                cache.edram_size_bytes() == tiles * 5120,
+            "capacity is captured when creating the render target cache");
+      check(draw_util::AddWindowOffsetToEdramBase(0, -1, false, tiles) == tiles - 1 &&
+                draw_util::AddWindowOffsetToEdramBase(tiles - 1, 1, false, tiles) == 0 &&
+                draw_util::AddWindowOffsetToEdramBase(4096, 0, false, tiles) == (4096 & (tiles - 1)),
+            "EDRAM wrapping uses the selected capacity");
+      Cache::Key key;
+      key.base_tiles = tiles - 1;
+      check(key.GetNonWrappedTileIndex(0, tiles) == tiles,
+            "transfer coordinates cross the selected wrap boundary");
+      key.next_period = 1;
+      check(key.GetNonWrappedTileIndex(0, tiles) == 2 * tiles,
+            "64bpp transfers retain the extra addressing period");
+      reg::RB_COLOR_INFO color{};
+      color.color_base = 4096;
+      color.color_format = xenos::ColorRenderTargetFormat::k_8_8_8_8;
+      Set(r, color);
+      check(cache.Update(true, depth, 15, shader, 0) &&
+                cache.Bound(1).base_tiles == (4096 & (tiles - 1)),
+            "ownership keys wrap high guest bases at the configured boundary");
+    }
+    REXCVAR_SET(edram_tile_count, original_capacity);
+  }
   if (argc > 1) {
     // Identical input for the legacy control and the current benchmark,
     // independent of the depth/stencil combinations exercised above.

@@ -1,4 +1,5 @@
 #pragma once
+#include <rex/graphics/flags.h>
 #include "../quality/settings.h"
 #include "../memory/scaled_resolve.h"
 #include "../pipeline/shader_cache.h"
@@ -30,11 +31,12 @@ class D3D12Render {
   friend class D3D12HybridColor;
   const NativeQualitySettings quality_ = GetNativeQualitySettings();
   const uint32_t scale_x_ = quality_.scale_x, scale_y_ = quality_.scale_y;
-  const uint64_t edram_size_ = uint64_t(rex::graphics::xenos::kEdramSizeBytes) * scale_x_ * scale_y_;
+  const uint32_t edram_tile_count_ = rex::graphics::GetConfiguredEdramTileCount();
+  const uint64_t edram_size_ = uint64_t(edram_tile_count_) * rex::graphics::xenos::kEdramTileSizeBytes * scale_x_ * scale_y_;
  public:
   explicit D3D12Render(rex::ui::d3d12::D3D12Provider&);
   ~D3D12Render();
-  ShaderCache shaders{scale_x_, scale_y_};
+  ShaderCache shaders{scale_x_, scale_y_, edram_tile_count_};
   void SetPipelineDirectory(const std::filesystem::path& path) { pipeline_store_.SetDirectory(path); }
   void Draw(const rex::graphics::RegisterFile&, rex::memory::Memory&,
       rex::graphics::Shader*, rex::graphics::Shader*, rex::graphics::xenos::PrimitiveType,

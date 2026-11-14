@@ -475,7 +475,7 @@ void D3D12Render::Draw(const RegisterFile& r, rex::memory::Memory& memory, Shade
   for (unsigned i = 0; i < 4; ++i) {
     auto info = r.Get<reg::RB_COLOR_INFO>(reg::RB_COLOR_INFO::rt_register_indices[i]);
     c.color_exp_bias[i] = std::ldexp(1.0f, info.color_exp_bias);
-    c.edram_rt_base_dwords_scaled[i] = info.color_base * 1280 * scale_x_ * scale_y_;
+    c.edram_rt_base_dwords_scaled[i] = (info.color_base & (edram_tile_count_ - 1)) * 1280 * scale_x_ * scale_y_;
     c.edram_rt_format_flags[i] = RenderTargetCache::AddPSIColorFormatFlags(info.color_format);
     RenderTargetCache::GetPSIColorFormatInfo(info.color_format, (color_mask >> (i * 4)) & 15,
         c.edram_rt_clamp[i][0], c.edram_rt_clamp[i][1], c.edram_rt_clamp[i][2], c.edram_rt_clamp[i][3], c.edram_rt_keep_mask[i][0], c.edram_rt_keep_mask[i][1]);
@@ -483,13 +483,13 @@ void D3D12Render::Draw(const RegisterFile& r, rex::memory::Memory& memory, Shade
     c.edram_blend_constant[i] = r.Get<float>(XE_GPU_REG_RB_BLEND_RED + i);
     if (info.color_format == ColorRenderTargetFormat::k_8_8_8_8_GAMMA) c.flags |= T::kSysFlag_ConvertColor0ToGamma << i;
   }
-  auto di = r.Get<reg::RB_DEPTH_INFO>(); c.edram_depth_base_dwords_scaled = di.depth_base * 1280 * scale_x_ * scale_y_;
+  auto di = r.Get<reg::RB_DEPTH_INFO>(); c.edram_depth_base_dwords_scaled = (di.depth_base & (edram_tile_count_ - 1)) * 1280 * scale_x_ * scale_y_;
   if (di.depth_format == DepthRenderTargetFormat::kD24FS8) c.flags |= T::kSysFlag_DepthFloat24;
   // As in the pinned ROV path: depth/stencil aliasing a written color target
   // is disabled rather than corrupting that target.
   bool depth_stencil = depth.z_enable || depth.stencil_enable;
   for (unsigned i = 0; i < 4 && depth_stencil; ++i)
-    if (di.depth_base == r.Get<reg::RB_COLOR_INFO>(reg::RB_COLOR_INFO::rt_register_indices[i]).color_base &&
+    if (((di.depth_base ^ r.Get<reg::RB_COLOR_INFO>(reg::RB_COLOR_INFO::rt_register_indices[i]).color_base) & (edram_tile_count_ - 1)) == 0 &&
         (c.edram_rt_keep_mask[i][0] != UINT32_MAX || c.edram_rt_keep_mask[i][1] != UINT32_MAX)) depth_stencil = false;
   // Front offset applies to non-polygons only with POLY_OFFSET_PARA_ENABLE.
   const bool para = !polygon && mode.poly_offset_para_enable;

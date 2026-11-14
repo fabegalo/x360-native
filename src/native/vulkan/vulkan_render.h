@@ -1,4 +1,5 @@
 #pragma once
+#include <rex/graphics/flags.h>
 #include "../quality/settings.h"
 #include "../memory/scaled_resolve.h"
 #include "vulkan_core.h"
@@ -26,7 +27,8 @@ struct TextureLoadPlan;
 class VulkanRender {
   const NativeQualitySettings quality_ = GetNativeQualitySettings();
   const uint32_t scale_x_ = quality_.scale_x, scale_y_ = quality_.scale_y;
-  const uint64_t edram_size_ = uint64_t(rex::graphics::xenos::kEdramSizeBytes) * scale_x_ * scale_y_;
+  const uint32_t edram_tile_count_ = rex::graphics::GetConfiguredEdramTileCount();
+  const uint64_t edram_size_ = uint64_t(edram_tile_count_) * rex::graphics::xenos::kEdramTileSizeBytes * scale_x_ * scale_y_;
  public:
   explicit VulkanRender(rex::ui::vulkan::VulkanProvider&);
   ~VulkanRender();

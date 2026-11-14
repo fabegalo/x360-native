@@ -92,6 +92,7 @@ struct Case {
        partial = false, array = false, uniform_fixed16 = false;
   bool uniform_rgb565 = false;
   unsigned slice = 0, endian = 0;
+  unsigned edram_tiles = 2048, edram_base = 2047;
   std::string Name() const {
     return "msaa=" + std::to_string(1u << msaa) +
            " select=" + std::to_string(select) +
@@ -102,7 +103,9 @@ struct Case {
            " fixed16=" + std::to_string(fixed16) + " endian=" + std::to_string(endian) +
            " swap=" + std::to_string(swap) +
            " partial=" + std::to_string(partial) +
-           " slice=" + std::to_string(slice);
+           " slice=" + std::to_string(slice) +
+           " edram_tiles=" + std::to_string(edram_tiles) +
+           " edram_base=" + std::to_string(edram_base);
   }
   unsigned Pitch() const {
     return (((std::max(160u, width) << unsigned(msaa == 2)) + 79) / 80)
@@ -114,12 +117,12 @@ struct Case {
   unsigned DestHeight() const {
     return std::max(64u, (height + (partial ? 8 : 0) + 31) & ~31u);
   }
-  draw_util::ResolveCopyShaderConstants Constants() const {
+  draw_util::ResolveCopyShaderConstants Constants(bool legacy_abi = false) const {
     draw_util::ResolveCopyShaderConstants c{};
     auto &e = c.dest_relative.edram_info;
     e.pitch_tiles = Pitch();
     e.msaa_samples = xenos::MsaaSamples(msaa);
-    e.base_tiles = 2047;
+    e.base_tiles = edram_base & (edram_tiles - 1);
     e.format = unsigned(
         fixed16    ? (source64 ? xenos::ColorRenderTargetFormat::k_16_16_16_16
                                : xenos::ColorRenderTargetFormat::k_16_16)
@@ -128,6 +131,7 @@ struct Case {
                    : xenos::ColorRenderTargetFormat::k_8_8_8_8);
     e.format_is_64bpp = source64;
     auto &xy = c.dest_relative.coordinate_info;
+    xy.edram_tile_count_log2 = edram_tiles == 8192 ? 13 : 11;
     xy.width_div_8 = width / 8;
     xy.edram_offset_x_div_8 = partial;
     xy.edram_offset_y_div_8 = partial;
@@ -145,6 +149,13 @@ struct Case {
     dc.copy_sample_select = xenos::CopySampleSelect(select);
     dc.offset_x_div_8 = dc.offset_y_div_8 = partial;
     c.dest_base = scale == 1 ? 4096 : 0;
+    if (legacy_abi) {
+      if (edram_tiles != 2048) throw std::runtime_error("legacy ABI supports 10 MiB only");
+      e.packed = (e.pitch_tiles & 1023u) | (unsigned(e.msaa_samples) << 10u) |
+                 (e.is_depth << 12u) | ((edram_base & 2047u) << 13u) |
+                 (e.format << 24u) | (e.format_is_64bpp << 28u) |
+                 (e.fill_half_pixel_offset << 29u);
+    }
     return c;
   }
   unsigned Kernel() const { return log; }
@@ -187,7 +198,7 @@ inline unsigned EdramAddress(const Case &c, unsigned x, unsigned y,
   sx = sx * c.scale + x % c.scale;
   sy = sy * c.scale + y % c.scale;
   unsigned tw = (c.source64 ? 40 : 80) * c.scale, th = 16 * c.scale;
-  unsigned tile = (2047 + (sy / th) * c.Pitch() + sx / tw) & 2047;
+  unsigned tile = (c.edram_base + (sy / th) * c.Pitch() + sx / tw) & (c.edram_tiles - 1);
   return (tile * 1280 * c.scale * c.scale +
           ((sy % th) * tw + sx % tw) * (c.source64 ? 2 : 1)) *
          4;

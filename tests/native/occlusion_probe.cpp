@@ -45,7 +45,7 @@ std::vector<uint32_t> Shader(bool vertex, bool depth = false, bool kill = false)
       (uint32_t(AluVectorOpcode::kMax) << 24) | (vertex ? (1u << 16) | (1u << 8) | (3u << 30) : 0)});
   return code;
 }
-void Run(rex::system::IGraphicsSystem& gpu, rex::memory::Memory& memory) {
+void Run(rex::system::IGraphicsSystem& gpu, rex::memory::Memory& memory, bool extended_edram) {
   constexpr uint32_t side = 16, pixels = side * side;
   const auto ring = memory.SystemHeapAlloc(65536, 4096, rex::memory::kSystemHeapPhysical);
   const auto reports = memory.SystemHeapAlloc(16384, 4096, rex::memory::kSystemHeapPhysical);
@@ -65,7 +65,7 @@ void Run(rex::system::IGraphicsSystem& gpu, rex::memory::Memory& memory) {
   };
   set(XE_GPU_REG_RB_MODECONTROL, uint32_t(EdramMode::kColorDepth));
   set(XE_GPU_REG_RB_COLOR_MASK, 0);
-  set(XE_GPU_REG_RB_DEPTH_INFO, 0);
+  set(XE_GPU_REG_RB_DEPTH_INFO, extended_edram ? 4096 : 0);
   reg::SQ_PROGRAM_CNTL program{}; program.vs_num_reg = 1; set(XE_GPU_REG_SQ_PROGRAM_CNTL, program.value);
   set(XE_GPU_REG_VGT_MAX_VTX_INDX, 0xFFFFFF);
   set(XE_GPU_REG_PA_CL_VTE_CNTL, 0x3F);
@@ -250,7 +250,11 @@ X360N_PROBE_MAIN {
       Require(rex::cvar::SetFlagByName(requested == X360N_PROBE_ARG("d3d12") ? "render_target_path_d3d12" : "render_target_path_vulkan",
           requested == X360N_PROBE_ARG("d3d12") ? "rov" : "fsi"), "interlock query path flag");
     }
-    if(argc==4) {
+    bool extended_edram = false;
+    if(argc==4 && ProbeArg(argv[3]) == X360N_PROBE_ARG("extended")) {
+      extended_edram = true;
+      Require(rex::cvar::SetFlagByName("edram_tile_count", "extended"), "extended EDRAM flag");
+    } else if(argc==4) {
       const auto variant=ProbeArg(argv[3]);
       Require(requested==X360N_PROBE_ARG("d3d12") &&
           (variant==X360N_PROBE_ARG("striped") || variant==X360N_PROBE_ARG("scalar")),"invalid counter variant");
@@ -259,7 +263,7 @@ X360N_PROBE_MAIN {
     Require(gpu->SetupPresentation(nullptr) == X_STATUS_SUCCESS, "presentation setup");
     Require(gpu->SetupGuestGpu(rt.function_dispatcher(), rt.kernel_state()) == X_STATUS_SUCCESS, "guest GPU setup");
     struct Shutdown { rex::system::IGraphicsSystem* gpu; ~Shutdown() { if (gpu) gpu->Shutdown(); } } shutdown{gpu.get()};
-    Run(*gpu, *rt.memory());
+    Run(*gpu, *rt.memory(), extended_edram);
     gpu->Shutdown(); shutdown.gpu = nullptr; gpu.reset(); rt.Shutdown(); rex::FlushLogging();
     std::cout << "PASS " << (kXenos ? "Xenos/" : "Native/") << backend
               << " ZPD real samples, early/late depth, stencil, alpha, kill, 1x/2x/4x\n";

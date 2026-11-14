@@ -35,6 +35,12 @@ erros de execução, e tempo decorrido não conclui relatórios pendentes.
 Os probes sintéticos exercitam contadores e VIZ nos caminhos ROV/FSI; não
 certificam pixels, jogos, desempenho ou o caminho de render targets do host.
 
+`edram_tile_count=standard` mantém os 10 MiB do hardware; `extended` habilita
+explicitamente 40 MiB e exige reinicialização. Xenos e Native usam a mesma
+capacidade para registradores, shaders, aliases, resolve e clear. Probes em GPU
+real cobrem bases altas, wrap e persistência em D3D12/ROV e Vulkan/FSI; isso não
+certifica jogos nem equivalência completa com o Canary.
+
 ## Native D3D12/Vulkan
 
 Backend experimental separado, retomado na G3 de 22–23/10. Retail 17559 em

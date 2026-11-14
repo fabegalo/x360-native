@@ -41,7 +41,7 @@ uint address(uint2 pixel, uint sample) {
   uint2 sample_xy = (pixel << uint2(msaa == 2, msaa != 0)) + uint2(sample >> 1, sample & 1);
   uint2 tile = sample_xy / uint2(80,16);
   uint2 local = sample_xy - tile * uint2(80,16);
-  return (((base_tiles + tile.y * pitch_tiles + tile.x) * 1280) + local.y * 80 + local.x) % (2048 * 1280);
+  return (((base_tiles + tile.y * pitch_tiles + tile.x) * 1280) + local.y * 80 + local.x) % (EDRAM_TILE_COUNT * 1280);
 }
 float unpack7(uint v) {
   uint m = v & 127, e = v >> 7;
@@ -80,9 +80,10 @@ void StoreCS(uint3 id : SV_DispatchThreadID) {
   }
 }
 )hlsl";
-Microsoft::WRL::ComPtr<ID3DBlob> Compile(const char* entry, const char* profile, bool multisampled) {
+Microsoft::WRL::ComPtr<ID3DBlob> Compile(const char* entry, const char* profile, bool multisampled, uint32_t edram_tile_count) {
   Microsoft::WRL::ComPtr<ID3DBlob> code, errors;
-  D3D_SHADER_MACRO macros[]{{"MULTISAMPLED", multisampled ? "1" : "0"}, {nullptr,nullptr}};
+  const auto tile_count = std::to_string(edram_tile_count);
+  D3D_SHADER_MACRO macros[]{{"MULTISAMPLED", multisampled ? "1" : "0"}, {"EDRAM_TILE_COUNT", tile_count.c_str()}, {nullptr,nullptr}};
   auto result = D3DCompile(kBridge, sizeof(kBridge)-1, "native-hybrid-color", macros, nullptr,
       entry, profile, D3DCOMPILE_OPTIMIZATION_LEVEL3 | D3DCOMPILE_WARNINGS_ARE_ERRORS, 0, &code, &errors);
   if (FAILED(result) && errors)
@@ -120,16 +121,16 @@ std::optional<HybridColorKey> D3D12HybridColor::Classify(const RegisterFile& reg
   const unsigned width = (pitch * 80) >> x;
   const uint64_t tiles = uint64_t(pitch) * (((bottom + tile_height - 1) / tile_height) - scissor.offset[1]/tile_height);
   if (!height || height > D3D12_REQ_TEXTURE2D_U_OR_V_DIMENSION || width > D3D12_REQ_TEXTURE2D_U_OR_V_DIMENSION ||
-      right > width || !scissor.extent[0] || !scissor.extent[1] || !tiles || tiles > kEdramTileCount ||
+      right > width || !scissor.extent[0] || !scissor.extent[1] || !tiles || tiles > render_.edram_tile_count_ ||
       uint64_t(width)*height*8*(msaa?4:1) > (256ull<<20)) return {};
   auto depth = draw_util::GetNormalizedDepthControl(regs);
-  const unsigned depth_base = regs.Get<reg::RB_DEPTH_INFO>().depth_base;
-  const unsigned base = info.color_base;
+  const unsigned depth_base = regs.Get<reg::RB_DEPTH_INFO>().depth_base & (render_.edram_tile_count_ - 1);
+  const unsigned base = info.color_base & (render_.edram_tile_count_ - 1);
   // Equal bases have depth disabled by the existing Native ROV contract.
   // Reject every other overlapping periodic depth/color footprint.
   if ((depth.z_enable || depth.stencil_enable) && depth_base != base &&
-      (((depth_base + kEdramTileCount - base) % kEdramTileCount) < tiles ||
-       ((base + kEdramTileCount - depth_base) % kEdramTileCount) < tiles)) return {};
+      (((depth_base + render_.edram_tile_count_ - base) % render_.edram_tile_count_) < tiles ||
+       ((base + render_.edram_tile_count_ - depth_base) % render_.edram_tile_count_) < tiles)) return {};
   return HybridColorKey{base,pitch,width,uint32_t(height),msaa,
       scissor.offset[0],scissor.offset[1],uint32_t(right),uint32_t(bottom)};
 }
@@ -148,7 +149,7 @@ void D3D12HybridColor::Initialize() {
   Ptr<ID3DBlob> blob, errors;
   Check(D3D12SerializeRootSignature(&desc,D3D_ROOT_SIGNATURE_VERSION_1,&blob,&errors), "serialize bridge root");
   Check(render_.device_->CreateRootSignature(0,blob->GetBufferPointer(),blob->GetBufferSize(),IID_PPV_ARGS(&root_)), "create bridge root");
-  auto vs=Compile("LoadVS","vs_5_1",false), ps=Compile("LoadPS","ps_5_1",false);
+  auto vs=Compile("LoadVS","vs_5_1",false,render_.edram_tile_count_), ps=Compile("LoadPS","ps_5_1",false,render_.edram_tile_count_);
   for (unsigned i=0;i<2;++i) {
     D3D12_GRAPHICS_PIPELINE_STATE_DESC pd{}; pd.pRootSignature=root_.Get();
     pd.VS={vs->GetBufferPointer(),vs->GetBufferSize()}; pd.PS={ps->GetBufferPointer(),ps->GetBufferSize()};
@@ -158,7 +159,7 @@ void D3D12HybridColor::Initialize() {
     pd.PrimitiveTopologyType=D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
     pd.NumRenderTargets=1; pd.RTVFormats[0]=DXGI_FORMAT_R16G16B16A16_FLOAT; pd.SampleDesc.Count=i?4:1;
     if (!i || msaa4_) Check(render_.device_->CreateGraphicsPipelineState(&pd,IID_PPV_ARGS(&load_[i])), "create bridge load pipeline");
-    auto cs=Compile("StoreCS","cs_5_1",i!=0);
+    auto cs=Compile("StoreCS","cs_5_1",i!=0,render_.edram_tile_count_);
     D3D12_COMPUTE_PIPELINE_STATE_DESC cd{}; cd.pRootSignature=root_.Get(); cd.CS={cs->GetBufferPointer(),cs->GetBufferSize()};
     Check(render_.device_->CreateComputePipelineState(&cd,IID_PPV_ARGS(&store_[i])), "create bridge store pipeline");
   }

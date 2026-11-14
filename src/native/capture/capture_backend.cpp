@@ -4,6 +4,7 @@
 #include <rex/graphics/pipeline/texture/util.h>
 #include <rex/graphics/register_file.h>
 #include <rex/graphics/util/draw.h>
+#include <rex/graphics/flags.h>
 #include <rex/logging.h>
 #include <rex/system/xmemory.h>
 #include <rex/chrono/frame_layout.h>
@@ -385,7 +386,7 @@ void CaptureBackend::Resolve(const RegisterFile& regs, rex::memory::Memory& memo
     const auto rect = regs.GetVertexFetch(0);
     if (rect.type == FetchConstantType::kVertex) EmitRange(rect.address << 2, std::max<uint32_t>(rect.size << 2, 24u));
     draw_util::ResolveInfo info;
-    if (draw_util::GetResolveInfo(regs, memory, 1, 1, false, false, info) && info.copy_dest_extent_length) {
+    if (draw_util::GetResolveInfo(regs, memory, 1, 1, false, false, info, false, GetConfiguredEdramTileCount()) && info.copy_dest_extent_length) {
       const uint32_t begin = info.copy_dest_base & ~4095u;
       const uint64_t end = (uint64_t(info.copy_dest_extent_start) + info.copy_dest_extent_length + 4095) & ~uint64_t(4095);
       // Bytes of the destination pages the resolve does not write still reach the mirror.

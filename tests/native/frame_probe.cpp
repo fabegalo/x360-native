@@ -1,4 +1,4 @@
-// Synthetic multi-frame workload of the real Native plugin, for frame capture
+// Synthetic multi-frame workload of the real Native or Xenos plugin, for frame capture
 // and replay contracts on any host: per frame the CPU rewrites the vertex
 // buffer, a rasterized draw writes EDRAM (never cleared: half of every later
 // frame comes only from EDRAM persisted from frames 0-1), a ZPD query reads sample counters, a
@@ -6,6 +6,11 @@
 // that result is unpublished, and XE_SWAP presents the resolve offscreen.
 //   x360n_native_frame_probe OUTPUT d3d12|vulkan FRAMES [--draws N --resolves K]
 //       [--no-sample-counts] [cvar=value...]
+// --xenos before other options selects Xenos; use readback_resolve=full for
+// CPU-visible pixels at the same boundary as Native. --edram-base N selects
+// the guest render target base, including high and wrapping 40 MiB addresses.
+// --clear-after-resolve with --no-sample-counts checks a cleared, undrawn pixel
+// in later frames instead of persistence at that pixel.
 // --no-sample-counts leaves out the ZPD query and the visibility-tested draw
 // (no ROV sample counting), to isolate that path when diagnosing a host.
 // Prints each frame's scanout hash; no title data is involved.
@@ -18,6 +23,7 @@
 #include <rex/system/mmio_handler.h>
 #include <rex/graphics/registers.h>
 #include <rex/graphics/format/ucode.h>
+#include <rex/graphics/pipeline/texture/util.h>
 #include <rex/cvar.h>
 #include <algorithm>
 #include <array>
@@ -54,7 +60,8 @@ constexpr uint32_t kSide = 32;
 // extra_resolves groups, each group followed by a resolve into its own guest
 // buffer (results the next guest sync publishes), before the ZPD/scanout part.
 void Run(rex::system::IGraphicsSystem& gpu, rex::memory::Memory& memory, uint32_t frames,
-         uint32_t extra_draws, uint32_t extra_resolves, bool sample_counts) {
+         uint32_t extra_draws, uint32_t extra_resolves, bool sample_counts, uint32_t edram_base,
+         bool clear_after_resolve) {
   const auto ring = memory.SystemHeapAlloc(2u << 20, 4096, rex::memory::kSystemHeapPhysical);
   const auto vertices = memory.SystemHeapAlloc(4096, 4096, rex::memory::kSystemHeapPhysical);
   const auto rect = memory.SystemHeapAlloc(4096, 4096, rex::memory::kSystemHeapPhysical);
@@ -96,7 +103,7 @@ void Run(rex::system::IGraphicsSystem& gpu, rex::memory::Memory& memory, uint32_
     reg::SQ_PROGRAM_CNTL program{}; program.vs_num_reg = 1; set(XE_GPU_REG_SQ_PROGRAM_CNTL, program.value);
     set(XE_GPU_REG_VGT_MAX_VTX_INDX, 0xFFFFFF);
     set(XE_GPU_REG_RB_MODECONTROL, uint32_t(EdramMode::kColorDepth));
-    set(XE_GPU_REG_RB_SURFACE_INFO, 80); set(XE_GPU_REG_RB_COLOR_MASK, 15); set(XE_GPU_REG_RB_COLOR_INFO, 0);
+    set(XE_GPU_REG_RB_SURFACE_INFO, 80); set(XE_GPU_REG_RB_COLOR_MASK, 15); set(XE_GPU_REG_RB_COLOR_INFO, edram_base);
     set(XE_GPU_REG_RB_DEPTHCONTROL, 0); set(XE_GPU_REG_RB_DEPTH_INFO, 0);
     reg::RB_BLENDCONTROL blend{};
     // Accumulate: the scanout depends on every earlier frame's EDRAM contents.
@@ -157,6 +164,9 @@ void Run(rex::system::IGraphicsSystem& gpu, rex::memory::Memory& memory, uint32_
     set(XE_GPU_REG_RB_COPY_DEST_PITCH, kSide | (kSide << 16));
     set(XE_GPU_REG_RB_COPY_DEST_INFO, uint32_t(TextureFormat::k_8_8_8_8) << 7);
     reg::RB_COPY_CONTROL copy{}; copy.copy_command = CopyCommand(1);
+    copy.color_clear_enable = clear_after_resolve;
+    set(XE_GPU_REG_RB_COLOR_CLEAR, 0);
+    set(XE_GPU_REG_RB_COLOR_CLEAR_LO, 0);
     set(XE_GPU_REG_RB_COPY_CONTROL, copy.value);
     reg::VGT_DRAW_INITIATOR rect_draw = draw; rect_draw.prim_type = PrimitiveType::kRectangleList;
     words.insert(words.end(), {Packet(PM4_DRAW_INDX_2, 1), rect_draw.value});
@@ -193,6 +203,13 @@ void Run(rex::system::IGraphicsSystem& gpu, rex::memory::Memory& memory, uint32_
     while (*marker != frame + 1 && std::chrono::steady_clock::now() < deadline)
       std::this_thread::sleep_for(std::chrono::microseconds(200));
     Require(*marker == frame + 1, "frame probe completion timeout");
+    if (clear_after_resolve && !sample_counts) {
+      const auto offset = texture_util::GetTiledOffset2D(2, 24, kSide, 2);
+      uint32_t pixel;
+      std::memcpy(&pixel, memory.TranslateVirtual(image + uint32_t(offset)), sizeof(pixel));
+      Require(frame < 2 ? pixel != 0 : pixel == 0,
+              "resolve clear must erase the old triangle before later undrawn pixels are copied");
+    }
     const auto hash = x360n::native::capture::HashBytes(memory.TranslateVirtual(image), kSide * kSide * 4);
     std::cout << "frame " << frame << " scanout " << std::hex << hash[0] << hash[1] << std::dec << '\n';
   }
@@ -215,14 +232,22 @@ X360N_PROBE_MAIN {
     rex::Runtime runtime(output, output / "user");
     rex::RuntimeConfig config; config.tool_mode = true; config.kernel_init = rex::kernel::InitializeKernel;
     Require(runtime.Setup(std::move(config)) == X_STATUS_SUCCESS, "runtime setup");
-    auto gpu = rex::system::LoadGpuPlugin("native", api == X360N_PROBE_ARG("d3d12") ? "d3d12" : "vulkan");
-    Require(bool(gpu), "Native plugin load");
-    uint32_t extra_draws = 0, extra_resolves = 0;
-    bool sample_counts = true;
-    int first_cvar = 4;
+    const bool xenos = argc >= 5 && ProbeArg(argv[4]) == X360N_PROBE_ARG("--xenos");
+    auto gpu = rex::system::LoadGpuPlugin(xenos ? "xenos" : "native", api == X360N_PROBE_ARG("d3d12") ? "d3d12" : "vulkan");
+    Require(bool(gpu), "GPU plugin load");
+    uint32_t extra_draws = 0, extra_resolves = 0, edram_base = 0;
+    bool sample_counts = true, clear_after_resolve = false;
+    int first_cvar = xenos ? 5 : 4;
     while (first_cvar < argc) {
       const auto flag = std::filesystem::path(argv[first_cvar]).string();
       if (flag == "--no-sample-counts") { sample_counts = false; ++first_cvar; continue; }
+      if (flag == "--clear-after-resolve") { clear_after_resolve = true; ++first_cvar; continue; }
+      if (flag == "--edram-base" && first_cvar + 1 < argc) {
+        const auto base = std::stoull(std::filesystem::path(argv[first_cvar + 1]).string());
+        Require(base < 8192, "EDRAM base must fit its guest register");
+        edram_base = uint32_t(base);
+        first_cvar += 2; continue;
+      }
       if ((flag != "--draws" && flag != "--resolves") || first_cvar + 1 >= argc) break;
       (flag == "--draws" ? extra_draws : extra_resolves) = uint32_t(std::stoul(std::filesystem::path(argv[first_cvar + 1]).string()));
       first_cvar += 2;
@@ -237,7 +262,7 @@ X360N_PROBE_MAIN {
     Require(gpu->SetupPresentation(nullptr) == X_STATUS_SUCCESS, "presentation setup");
     Require(gpu->SetupGuestGpu(runtime.function_dispatcher(), runtime.kernel_state()) == X_STATUS_SUCCESS, "guest GPU setup");
     struct Shutdown { rex::system::IGraphicsSystem* gpu; ~Shutdown() { if (gpu) gpu->Shutdown(); } } shutdown{gpu.get()};
-    Run(*gpu, *runtime.memory(), frames, extra_draws, extra_resolves, sample_counts);
+    Run(*gpu, *runtime.memory(), frames, extra_draws, extra_resolves, sample_counts, edram_base, clear_after_resolve);
     gpu->Shutdown(); shutdown.gpu = nullptr; gpu.reset(); runtime.Shutdown(); rex::FlushLogging();
     std::cout << "PASS frames=" << frames << '\n';
     return 0;

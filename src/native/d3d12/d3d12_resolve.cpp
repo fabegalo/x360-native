@@ -91,7 +91,7 @@ void D3D12Render::Resolve(const RegisterFile& r, rex::memory::Memory& memory) {
   // s5.10 integers, so a same-format signed-integer copy with exponent bias 10
   // is bitwise (patch 0087), not a full resolve without integer destinations.
   if (!draw_util::GetResolveInfo(r, memory, scale_x_, scale_y_, false, false, info,
-      /*fixed16_s5_10_storage=*/true)) {
+      /*fixed16_s5_10_storage=*/true, edram_tile_count_)) {
     const auto f = r.GetVertexFetch(0);
     REXLOG_ERROR("Native resolve fetch address={:08X} size={} endian={} surface={:08X} scissor TL={:08X} BR={:08X}",
         f.address << 2, f.size, uint32_t(f.endian), r[XE_GPU_REG_RB_SURFACE_INFO],

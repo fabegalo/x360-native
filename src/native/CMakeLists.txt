@@ -82,7 +82,11 @@ target_link_libraries(x360n_native_replay PRIVATE ${_native_replay_libraries})
 x360n_stage_runtime_dlls(x360n_native_replay)
 add_executable(x360n_native_frame_probe ../../tests/native/frame_probe.cpp capture/capture_format.cpp)
 target_link_libraries(x360n_native_frame_probe PRIVATE rexruntime xxHash::xxhash)
-x360n_stage_runtime_dlls(x360n_native_frame_probe PLUGIN_TARGETS rexgpu-native)
+if(TARGET rexgpu-xenos)
+  x360n_stage_runtime_dlls(x360n_native_frame_probe PLUGIN_TARGETS rexgpu-native rexgpu-xenos)
+else()
+  x360n_stage_runtime_dlls(x360n_native_frame_probe PLUGIN_TARGETS rexgpu-native)
+endif()
 function(x360n_native_capture_replay api)
   add_test(NAME native.capture-replay-${api} COMMAND ${CMAKE_COMMAND}
       -DPROBE=$<TARGET_FILE:x360n_native_frame_probe> -DREPLAY=$<TARGET_FILE:x360n_native_replay>
@@ -94,11 +98,25 @@ function(x360n_native_capture_replay api)
     set_tests_properties(native.capture-replay-${api} PROPERTIES SKIP_REGULAR_EXPRESSION "requires a hardware D3D12 adapter")
   endif()
 endfunction()
+function(x360n_edram_capacity api)
+  add_test(NAME native.edram-capacity-${api} COMMAND ${CMAKE_COMMAND}
+      -DPROBE=$<TARGET_FILE:x360n_native_frame_probe>
+      -DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/edram-capacity
+      -DAPI=${api} -DXENOS=$<TARGET_EXISTS:rexgpu-xenos>
+      -P ${CMAKE_CURRENT_SOURCE_DIR}/../../tests/native/edram_capacity.cmake)
+  set_tests_properties(native.edram-capacity-${api} PROPERTIES LABELS project TIMEOUT 600 RUN_SERIAL TRUE)
+  if(api STREQUAL "d3d12")
+    set_tests_properties(native.edram-capacity-${api} PROPERTIES
+        SKIP_REGULAR_EXPRESSION "requires a hardware D3D12 adapter")
+  endif()
+endfunction()
 if(WIN32)
   x360n_native_capture_replay(d3d12)
+  x360n_edram_capacity(d3d12)
 endif()
 if(REXGLUE_USE_VULKAN)
   x360n_native_capture_replay(vulkan)
+  x360n_edram_capacity(vulkan)
 endif()
 if(NOT WIN32)
   # Headless Vulkan components; the remaining probes use D3D12/DXGI and Win32.
