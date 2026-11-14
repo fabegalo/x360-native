@@ -28,6 +28,15 @@ P1/P2/P3 preservados.
 
 ## Renderizadores — PERF-GPU-01 (31/10)
 
+14/11 — restaurar 32 pipelines Xenos/D3D12 sintéticos, Windows x64/RTX 4070:
+a expansão temporária de workers do Canary `4f04bc7` não melhorou carregamento
+mais primeiro frame. Três execuções por variante: mediana automática
+5,125 → 5,309 s (inconclusivo); com dois workers explícitos, 4,374 → 5,296 s
+(piora de 21%). Pixels e bytes do cache foram idênticos. Mantido o comportamento
+local de workers; o teste `native.pipeline-cache-d3d12` cobre restauração de
+32 pipelines e seis frames. Ensaio sintético de cache, sem conclusão de FPS
+ou desempenho de jogos.
+
 13/11 — revisão de Pinyon/ShiftGlue `3274f788` e ReImagined/ReIGlue
 `d253875b`: Native reúne constantes por bits ativos do Xenos pinado, com cópia
 de blocos completos inspirada no ShiftGlue. Teste CPU sintético, 32.768 chamadas:

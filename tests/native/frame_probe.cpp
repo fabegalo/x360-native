@@ -11,6 +11,8 @@
 // the guest render target base, including high and wrapping 40 MiB addresses.
 // --clear-after-resolve with --no-sample-counts checks a cleared, undrawn pixel
 // in later frames instead of persistence at that pixel.
+// --pipeline-cache with --xenos and >=32 extra draws exercises 32 equivalent
+// shader variants and persistent pipeline restoration; prints CPU wall times.
 // --no-sample-counts leaves out the ZPD query and the visibility-tested draw
 // (no ROV sample counting), to isolate that path when diagnosing a host.
 // Prints each frame's scanout hash; no title data is involved.
@@ -42,7 +44,7 @@ namespace {
 void Require(bool ok, const char* what) { if (!ok) throw std::runtime_error(what); }
 uint32_t Packet(uint32_t opcode, uint32_t count) { return 0xC0000000 | ((count - 1) << 16) | (opcode << 8); }
 // VS: vfetch r0 from fetch constant 0, oPos = r0. PS: oC0 = c0.
-std::vector<uint32_t> RasterShader(bool vertex) {
+std::vector<uint32_t> RasterShader(bool vertex, uint32_t constant = 0) {
   using namespace ucode;
   const uint64_t alloc = (uint64_t(vertex ? AllocType::kVsPosition : AllocType::kPsColors) << 41) |
       (uint64_t(ControlFlowOpcode::kAlloc) << 44);
@@ -52,7 +54,8 @@ std::vector<uint32_t> RasterShader(bool vertex) {
   if (vertex) code.insert(code.end(), {(1u << 12) | (1u << 19),
       0x688u | (1u << 13) | (uint32_t(VertexFormat::k_32_32_32_32_FLOAT) << 16), 4});
   code.insert(code.end(), {(vertex ? 62u : 0u) | (1u << 15) | (15u << 16), 0,
-      (uint32_t(AluVectorOpcode::kMax) << 24) | (vertex ? (1u << 16) | (1u << 8) | (3u << 30) : 0)});
+      (uint32_t(AluVectorOpcode::kMax) << 24) | (vertex ? (1u << 16) | (1u << 8) | (3u << 30) :
+          (constant << 16) | (constant << 8))});
   return code;
 }
 constexpr uint32_t kSide = 32;
@@ -61,7 +64,7 @@ constexpr uint32_t kSide = 32;
 // buffer (results the next guest sync publishes), before the ZPD/scanout part.
 void Run(rex::system::IGraphicsSystem& gpu, rex::memory::Memory& memory, uint32_t frames,
          uint32_t extra_draws, uint32_t extra_resolves, bool sample_counts, uint32_t edram_base,
-         bool clear_after_resolve) {
+         bool clear_after_resolve, bool pipeline_cache) {
   const auto ring = memory.SystemHeapAlloc(2u << 20, 4096, rex::memory::kSystemHeapPhysical);
   const auto vertices = memory.SystemHeapAlloc(4096, 4096, rex::memory::kSystemHeapPhysical);
   const auto rect = memory.SystemHeapAlloc(4096, 4096, rex::memory::kSystemHeapPhysical);
@@ -79,6 +82,8 @@ void Run(rex::system::IGraphicsSystem& gpu, rex::memory::Memory& memory, uint32_
   auto* marker = memory.TranslateVirtual<volatile uint32_t*>(done);
   uint32_t write = 0;
   for (uint32_t frame = 0; frame < frames; ++frame) {
+    const auto frame_start = pipeline_cache ? std::chrono::steady_clock::now() :
+        std::chrono::steady_clock::time_point{};
     // CPU-written vertex data that changes every frame.
     // Frames 0-1 draw only the upper-left half, later frames only the
     // lower-right half (varying with the frame): the upper-left half of every
@@ -91,8 +96,8 @@ void Run(rex::system::IGraphicsSystem& gpu, rex::memory::Memory& memory, uint32_
     std::vector<uint32_t> words;
     auto set = [&](uint32_t index, uint32_t value) { words.insert(words.end(), {index, value}); };
     auto fp = [&](uint32_t index, float value) { set(index, std::bit_cast<uint32_t>(value)); };
-    auto load = [&](bool vertex) {
-      const auto shader = RasterShader(vertex);
+    auto load = [&](bool vertex, uint32_t constant = 0) {
+      const auto shader = RasterShader(vertex, constant);
       words.insert(words.end(), {Packet(PM4_IM_LOAD_IMMEDIATE, uint32_t(shader.size() + 2)), uint32_t(!vertex), uint32_t(shader.size())});
       words.insert(words.end(), shader.begin(), shader.end());
     };
@@ -119,6 +124,8 @@ void Run(rex::system::IGraphicsSystem& gpu, rex::memory::Memory& memory, uint32_
     set(XE_GPU_REG_PA_SU_VTX_CNTL, 1);
     const float color[]{float(frame % 7 + 1) / 8, float(frame % 3) / 4, frame < 2 ? 1.0f : 0.25f, 1};
     for (unsigned c = 0; c < 4; ++c) fp(XE_GPU_REG_SHADER_CONSTANT_000_X + 256 * 4 + c, color[c]);
+    if (pipeline_cache) for (unsigned i = 1; i < 32; ++i)
+      for (unsigned c = 0; c < 4; ++c) fp(XE_GPU_REG_SHADER_CONSTANT_000_X + (256 + i) * 4 + c, color[c]);
     vertex_fetch(memory.GetPhysicalAddress(vertices), 12);
     load(true); load(false);
     reg::VGT_DRAW_INITIATOR draw{}; draw.prim_type = PrimitiveType::kTriangleList;
@@ -138,11 +145,14 @@ void Run(rex::system::IGraphicsSystem& gpu, rex::memory::Memory& memory, uint32_
     };
     for (uint32_t group = 0; group < extra_resolves; ++group) {
       for (uint32_t i = group * extra_draws / extra_resolves; i < (group + 1) * extra_draws / extra_resolves; ++i) {
-        fp(XE_GPU_REG_SHADER_CONSTANT_000_X + 256 * 4, float((frame + i) % 8) / 8);
+        const uint32_t constant = pipeline_cache ? i % 32 : 0;
+        if (pipeline_cache) load(false, constant);
+        fp(XE_GPU_REG_SHADER_CONSTANT_000_X + (256 + constant) * 4, float((frame + i) % 8) / 8);
         words.insert(words.end(), {Packet(PM4_DRAW_INDX_2, 1), draw.value});
       }
       resolve_to(memory.GetPhysicalAddress(targets) + group * kSide * kSide * 4);
     }
+    if (pipeline_cache) load(false);
     for (unsigned c = 0; c < 4; ++c) fp(XE_GPU_REG_SHADER_CONSTANT_000_X + 256 * 4 + c, color[c]);
     // ZPD around the draw: BEGIN, END with the big-endian pending token.
     const uint32_t report = memory.GetPhysicalAddress(reports) + (frame % 32) * 64;
@@ -212,6 +222,9 @@ void Run(rex::system::IGraphicsSystem& gpu, rex::memory::Memory& memory, uint32_
     }
     const auto hash = x360n::native::capture::HashBytes(memory.TranslateVirtual(image), kSide * kSide * 4);
     std::cout << "frame " << frame << " scanout " << std::hex << hash[0] << hash[1] << std::dec << '\n';
+    if (pipeline_cache) std::cout << "pipeline frame " << frame << " us=" <<
+        std::chrono::duration_cast<std::chrono::microseconds>(
+            std::chrono::steady_clock::now() - frame_start).count() << '\n';
   }
 }
 }
@@ -236,12 +249,13 @@ X360N_PROBE_MAIN {
     auto gpu = rex::system::LoadGpuPlugin(xenos ? "xenos" : "native", api == X360N_PROBE_ARG("d3d12") ? "d3d12" : "vulkan");
     Require(bool(gpu), "GPU plugin load");
     uint32_t extra_draws = 0, extra_resolves = 0, edram_base = 0;
-    bool sample_counts = true, clear_after_resolve = false;
+    bool sample_counts = true, clear_after_resolve = false, pipeline_cache = false;
     int first_cvar = xenos ? 5 : 4;
     while (first_cvar < argc) {
       const auto flag = std::filesystem::path(argv[first_cvar]).string();
       if (flag == "--no-sample-counts") { sample_counts = false; ++first_cvar; continue; }
       if (flag == "--clear-after-resolve") { clear_after_resolve = true; ++first_cvar; continue; }
+      if (flag == "--pipeline-cache") { pipeline_cache = true; ++first_cvar; continue; }
       if (flag == "--edram-base" && first_cvar + 1 < argc) {
         const auto base = std::stoull(std::filesystem::path(argv[first_cvar + 1]).string());
         Require(base < 8192, "EDRAM base must fit its guest register");
@@ -262,7 +276,14 @@ X360N_PROBE_MAIN {
     Require(gpu->SetupPresentation(nullptr) == X_STATUS_SUCCESS, "presentation setup");
     Require(gpu->SetupGuestGpu(runtime.function_dispatcher(), runtime.kernel_state()) == X_STATUS_SUCCESS, "guest GPU setup");
     struct Shutdown { rex::system::IGraphicsSystem* gpu; ~Shutdown() { if (gpu) gpu->Shutdown(); } } shutdown{gpu.get()};
-    Run(*gpu, *runtime.memory(), frames, extra_draws, extra_resolves, sample_counts, edram_base, clear_after_resolve);
+    if (pipeline_cache) {
+      Require(xenos && extra_draws >= 32, "--pipeline-cache requires --xenos and at least 32 extra draws");
+      const auto start = std::chrono::steady_clock::now();
+      gpu->InitializeShaderStorage(output / "pipeline-cache", 0x0000F00D, true);
+      std::cout << "pipeline storage setup us=" << std::chrono::duration_cast<std::chrono::microseconds>(
+          std::chrono::steady_clock::now() - start).count() << '\n';
+    }
+    Run(*gpu, *runtime.memory(), frames, extra_draws, extra_resolves, sample_counts, edram_base, clear_after_resolve, pipeline_cache);
     gpu->Shutdown(); shutdown.gpu = nullptr; gpu.reset(); runtime.Shutdown(); rex::FlushLogging();
     std::cout << "PASS frames=" << frames << '\n';
     return 0;

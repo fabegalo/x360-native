@@ -135,6 +135,15 @@ if(WIN32)
   x360n_native_capture_replay(d3d12)
   x360n_edram_capacity(d3d12)
   x360n_scalar_precision(d3d12)
+  if(TARGET rexgpu-xenos)
+    add_test(NAME native.pipeline-cache-d3d12 COMMAND ${CMAKE_COMMAND}
+        -DPROBE=$<TARGET_FILE:x360n_native_frame_probe>
+        -DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/pipeline-cache-regression
+        -P ${CMAKE_SOURCE_DIR}/tests/native/pipeline_cache.cmake)
+    set_tests_properties(native.pipeline-cache-d3d12 PROPERTIES LABELS project
+        TIMEOUT 180 RUN_SERIAL TRUE
+        SKIP_REGULAR_EXPRESSION "requires a hardware D3D12 adapter")
+  endif()
 endif()
 if(REXGLUE_USE_VULKAN)
   x360n_native_capture_replay(vulkan)

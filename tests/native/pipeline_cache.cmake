@@ -1,0 +1,47 @@
+# Synthetic Xenos cache population/restoration; timings are not gameplay FPS.
+get_filename_component(probe_directory "${PROBE}" DIRECTORY)
+file(MAKE_DIRECTORY "${OUTPUT}")
+foreach(run RANGE 0 1)
+  set(runtime_start 0)
+  if(EXISTS "${OUTPUT}/runtime.log")
+    file(SIZE "${OUTPUT}/runtime.log" runtime_start)
+  endif()
+  execute_process(COMMAND "${PROBE}" "${OUTPUT}" d3d12 6 --xenos
+      --pipeline-cache --no-sample-counts --draws 64 --resolves 1
+      render_target_path_d3d12=rov async_shader_compilation=false
+      readback_resolve=full d3d12_pipeline_creation_threads=2
+      WORKING_DIRECTORY "${probe_directory}" TIMEOUT 75
+      RESULT_VARIABLE result OUTPUT_VARIABLE out ERROR_VARIABLE err)
+  file(WRITE "${OUTPUT}/current.log" "${out}${err}")
+  file(READ "${OUTPUT}/runtime.log" runtime OFFSET ${runtime_start})
+  if(NOT result EQUAL 0 OR NOT out MATCHES "PASS frames=6")
+    if(runtime MATCHES "Microsoft Basic Render Driver" AND
+        "${out}${err}" MATCHES "render GPU timeout|fence 0 of")
+      message(FATAL_ERROR "requires a hardware D3D12 adapter: WARP did not complete a ROV draw")
+    endif()
+    message(FATAL_ERROR "Xenos pipeline cache run ${run}: ${result}\n${out}${err}")
+  endif()
+  string(REGEX MATCHALL "frame [0-9]+ scanout [0-9a-f]+" hashes "${out}")
+  list(LENGTH hashes count)
+  string(REGEX MATCHALL "scanout [0-9a-f]+" unique_hashes "${out}")
+  list(REMOVE_DUPLICATES unique_hashes)
+  list(LENGTH unique_hashes unique_count)
+  if(NOT count EQUAL 6 OR unique_count LESS 3)
+    message(FATAL_ERROR "pipeline fixture did not render six changing frames: ${out}")
+  endif()
+  file(GLOB cache_files "${OUTPUT}/pipeline-cache/shaders/shareable/*")
+  list(SORT cache_files)
+  set(cache_hashes)
+  foreach(path IN LISTS cache_files)
+    file(SHA256 "${path}" sha)
+    list(APPEND cache_hashes "${path}:${sha}")
+  endforeach()
+  if(run EQUAL 0)
+    set(expected_hashes "${hashes}")
+    set(expected_cache "${cache_hashes}")
+  elseif(NOT hashes STREQUAL expected_hashes OR NOT cache_hashes STREQUAL expected_cache OR
+      NOT runtime MATCHES "Created 32 graphics pipelines .*from the storage")
+    message(FATAL_ERROR "restored cache changed pixels/bytes or did not restore all 32 pipelines")
+  endif()
+endforeach()
+message("Xenos D3D12: 32 restored pipelines, identical cache bytes and six matching frame hashes")
