@@ -368,25 +368,13 @@ void D3D12Render::Draw(const RegisterFile& r, rex::memory::Memory& memory, Shade
   } else if (indices || convert) {
     if (stats_enabled_) normalized_indices_ += count;
     std::vector<uint32_t> expanded;
-    expanded.reserve(count);
-    auto index = [&](uint32_t i) {
-      if (!indices) return i;
-      uint32_t value = 0;
-      unsigned bytes = indices->format == IndexFormat::kInt16 ? 2 : 4;
-      for (unsigned b = 0; b < bytes; ++b) {
-        uint32_t offset = i * bytes + b;
-        switch(indices->endianness) {
-          case Endian::k8in16: offset ^= 1; break;
-          case Endian::k8in32: offset ^= 3; break;
-          case Endian::k16in32: offset ^= 2; break;
-          default: break;
-        }
-        Require(offset < indices->length, "fan index extent overflow");
-        value |= uint32_t(*memory.TranslatePhysical<uint8_t*>(indices->guest_base + offset)) << (b * 8);
-      }
-      return value;
-    };
-    for (uint32_t i = 0; i < count; ++i) expanded.push_back(index(i));
+    if (indices) {
+      expanded = ExpandIndices({memory.TranslatePhysical<const uint8_t*>(indices->guest_base), indices->length},
+          count, indices->format, indices->endianness);
+    } else {
+      expanded.reserve(count);
+      for (uint32_t i = 0; i < count; ++i) expanded.push_back(i);
+    }
     // With no rasterization, the VS still runs for every submitted vertex,
     // including incomplete polygons. Point draws preserve those invocations
     // without assembling/culling guest triangles or creating pixel work.
@@ -528,12 +516,9 @@ void D3D12Render::Draw(const RegisterFile& r, rex::memory::Memory& memory, Shade
   edram_rov_layout_ = layout;
   cmd_.SetGraphicsRootConstantBufferView(0, DrawConstants(0, &c, sizeof(c)));
   auto floats = [&](Shader& shader, unsigned start, unsigned root) {
-    uint32_t packed[1024]{}; unsigned n = 0;
-    const auto& map = shader.constant_register_map();
-    for (unsigned i = 0; i < 256; ++i) if ((map.float_bitmap[i / 64] >> (i % 64)) & 1) {
-      std::memcpy(packed + n, &r[start + i * 4], 16); n += 4;
-    }
-    cmd_.SetGraphicsRootConstantBufferView(root, DrawConstants(root, packed, std::max(n * 4, 16u)));
+    uint32_t packed[1024];
+    const auto bytes = GatherFloatConstants(packed, shader.constant_register_map().float_bitmap, &r[start]);
+    cmd_.SetGraphicsRootConstantBufferView(root, DrawConstants(root, packed, bytes));
   };
   const uint32_t vs_constants = FloatConstantBase(r, true), ps_constants = FloatConstantBase(r, false);
   Require(vs_constants + 256 <= 512 && (!ps || ps_constants + 256 <= 512), "float constant bank outside register file");

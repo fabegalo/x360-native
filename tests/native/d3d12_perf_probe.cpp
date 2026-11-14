@@ -483,8 +483,16 @@ void CheckPendingContracts(Render& render, RegisterFile& regs,
   // Three recording arenas allow two queued batches and one active arena.
   // A disjoint guest read must leave both gated submissions in flight.
   render.SyncGuestRead(physical+4096,4,0xFF);
+  render.SetSampleCounts({},false); // Current EDRAM work has no guest writeback.
+  const auto submitted = render.performance().submissions;
   { std::lock_guard lock(mutex); release=true; } cv.notify_all(); watchdog.join();
   Require(!timed_out,"Flush(false) or disjoint read waited for pending GPU writebacks");
+  render.CompleteGuestWrites(kGuestSyncEvent,0);
+  Require(render.performance().submissions == submitted,
+      "guest publication submitted unrelated current EDRAM work");
+  const std::array<float,4> pending{.875f,.875f,.875f,.875f};
+  Require(!std::memcmp(memory.TranslatePhysical(physical+16),pending.data(),16),
+      "guest publication did not retire earlier writeback batches");
   draw(physical+16,0.125f); // Later overlapping submission must win.
   // Reuse all three slots; the gate guarantees real pending resource lifetimes.
   render.SetSampleCounts({},false); render.Flush(false);

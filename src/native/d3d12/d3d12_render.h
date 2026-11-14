@@ -70,7 +70,17 @@ class D3D12Render {
   void CompleteGuestWrites(GuestSync source, uint32_t opcode) {
     if (writeback_.empty() && !pending_readback_batches_) return;
     if (stats_enabled_) { ++sync_sources_[source]; ++sync_opcodes_[opcode & 0xFF]; }
-    Flush(kFlushGuestSync);
+    if (!writeback_.empty()) {
+      Flush(kFlushGuestSync);
+      return;
+    }
+    // Only retired batches hold guest writes. Current EDRAM-only work need
+    // not be submitted or waited on to publish those earlier results.
+    uint64_t serial = 0;
+    for (const auto& batch : batches_)
+      if (!batch.writeback.empty()) serial = std::max(serial, batch.serial);
+    if (serial) Wait(serial);
+    PublishCompleted();
   }
   void SyncPacketRead(uint32_t address, uint32_t length, uint32_t opcode) {
     if (!GuestWritesOverlap(address, length)) return;
@@ -258,7 +268,7 @@ class D3D12Render {
   // threshold (draws; a resolve counts as the whole threshold).
   // Hardware default measured with scene replay; Microsoft software adapters stay off.
   const uint32_t eager_threshold_ = NativeEagerSubmitWork(
-      provider_.GetAdapterVendorID() == rex::ui::GraphicsProvider::GpuVendorID::kMicrosoft ? 0 : 512);
+      provider_.GetAdapterVendorID() == rex::ui::GraphicsProvider::GpuVendorID::kMicrosoft ? 0 : 128);
   const uint32_t eager_depth_ = NativeEagerSubmitDepth();
   uint32_t recorded_work_ = 0;
   void SubmitEarly();

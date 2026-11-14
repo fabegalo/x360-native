@@ -1,5 +1,7 @@
 #include "../../src/native/shaders/point_shader.h"
 #include "../../src/native/commands/resolve_coverage.h"
+#include "../../src/native/commands/memexport.h"
+#include <array>
 #include <catch2/catch_test_macros.hpp>
 #include <d3d12.h>
 #include <d3dcompiler.h>
@@ -7,6 +9,43 @@
 using namespace x360n::native;
 using namespace rex::graphics;
 using Microsoft::WRL::ComPtr;
+TEST_CASE("Native float constant runs preserve packed bytes, banks and empty bindings", "[native-constant-runs]") {
+  std::array<uint32_t,2048> registers;
+  for(unsigned i=0;i<registers.size();++i) registers[i]=i*0x9E3779B9u+0x7FC00001u;
+  auto compare=[&](const std::array<uint64_t,4>& bits) {
+    uint64_t bitmap[4]; std::copy(bits.begin(),bits.end(),bitmap);
+    for(unsigned base:{0u,1024u}) {
+      struct Guarded { uint32_t before=0x12345678; uint32_t data[1024]; uint32_t after=0x87654321; } actual;
+      std::fill_n(actual.data,1024,0xCCCCCCCCu);
+      std::array<uint32_t,1024> expected; expected.fill(0xCCCCCCCCu);
+      unsigned words=0;
+      for(unsigned i=0;i<256;++i) if((bits[i/64]>>(i%64))&1) {
+        std::copy_n(registers.data()+base+i*4,4,expected.data()+words); words+=4;
+      }
+      if(!words) std::fill_n(expected.data(),4,0u);
+      CHECK(GatherFloatConstants(actual.data,bitmap,registers.data()+base)==std::max(words*4,16u));
+      CHECK(std::equal(expected.begin(),expected.end(),actual.data));
+      CHECK(actual.before==0x12345678);
+      CHECK(actual.after==0x87654321);
+    }
+  };
+  compare({}); compare({~0ull,~0ull,~0ull,~0ull});
+  for(unsigned start=0;start<256;++start) {
+    std::array<uint64_t,4> bits{}; bits[start/64]|=1ull<<(start%64); compare(bits);
+  }
+  for(unsigned start:{0u,1u,62u,63u,64u,65u,126u,127u,128u,191u,192u,254u,255u})
+    for(unsigned length:{1u,2u,63u,64u,65u,128u,256u}) {
+      std::array<uint64_t,4> bits{};
+      for(unsigned i=start;i<std::min(start+length,256u);++i) bits[i/64]|=1ull<<(i%64);
+      compare(bits);
+    }
+  uint64_t random=0xF0E1D2C3B4A59687ull;
+  for(unsigned sample=0;sample<64;++sample) {
+    std::array<uint64_t,4> bits;
+    for(auto& word:bits) { random^=random<<13; random^=random>>7; random^=random<<17; word=random; }
+    compare(bits);
+  }
+}
 TEST_CASE("Native point constants preserve independent size and vertex limits") {
   RegisterFile r;
   r[XE_GPU_REG_PA_SU_POINT_SIZE] = 0x00080008;
@@ -87,6 +126,30 @@ TEST_CASE("Native point geometry links constant and exported size with sprite co
 
 
 #include "../../src/native/commands/primitive_indices.h"
+TEST_CASE("Native bulk index expansion preserves byte addressing and rejects truncated pairs", "[native-indices]") {
+  std::vector<uint8_t> storage(100);
+  for (unsigned i = 0; i < storage.size(); ++i) storage[i] = uint8_t(i * 73 + 19);
+  for (unsigned alignment = 0; alignment < 4; ++alignment)
+    for (auto format : {xenos::IndexFormat::kInt16, xenos::IndexFormat::kInt32})
+      for (unsigned endian = 0; endian < 4; ++endian)
+        for (unsigned count = 0; count < 24; ++count) {
+          const unsigned bytes = format == xenos::IndexFormat::kInt16 ? 2 : 4;
+          const unsigned masks[]{0, 1, 3, 2};
+          auto source = std::span<const uint8_t>(storage).subspan(alignment);
+          std::vector<uint32_t> expected(count);
+          for (unsigned i = 0; i < count; ++i)
+            for (unsigned b = 0; b < bytes; ++b)
+              expected[i] |= uint32_t(source[(i * bytes + b) ^ masks[endian]]) << (b * 8);
+          CHECK(ExpandIndices(source, count, format, xenos::Endian(endian)) == expected);
+        }
+  auto source = std::span<const uint8_t>(storage);
+  CHECK_THROWS(ExpandIndices(source.first(2), 1, xenos::IndexFormat::kInt16, xenos::Endian::k8in32));
+  CHECK_THROWS(ExpandIndices(source.first(2), 1, xenos::IndexFormat::kInt16, xenos::Endian::k16in32));
+  CHECK_THROWS(ExpandIndices(source.first(3), 1, xenos::IndexFormat::kInt32, xenos::Endian::kNone));
+  CHECK_THROWS(ExpandIndices(source.first(1), 1, xenos::IndexFormat::kInt16, xenos::Endian::kNone));
+  CHECK(ExpandIndices(source.first(2), 1, xenos::IndexFormat::kInt16, xenos::Endian::k8in16).size() == 1);
+  CHECK(ExpandIndices({}, 0, xenos::IndexFormat::kInt32, xenos::Endian::kNone).empty());
+}
 TEST_CASE("Native primitive restart splits strips and fans without bridging segments") {
   using P = xenos::PrimitiveType;
   const uint32_t indices[]{0,1,2,0xFFFFFFFFu,3,4,5};

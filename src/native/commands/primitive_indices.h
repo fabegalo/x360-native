@@ -2,7 +2,31 @@
 #include <rex/graphics/xenos.h>
 #include <span>
 #include <vector>
+#include "../textures/texture_block.h"
 namespace x360n::native {
+inline std::vector<uint32_t> ExpandIndices(std::span<const uint8_t> source, uint32_t count,
+    rex::graphics::xenos::IndexFormat format, rex::graphics::xenos::Endian endian) {
+  using namespace rex::graphics::xenos;
+  if (!count) return {};
+  const unsigned bytes = format == IndexFormat::kInt16 ? 2 : 4;
+  // R16 word endian modes also exchange adjacent indices, including the
+  // unused partner of an odd final index. Check that extent before reading.
+  const unsigned pair_xor = endian == Endian::k8in32 || endian == Endian::k16in32 ? 2 : 0;
+  const uint64_t needed = uint64_t(count) * bytes + (bytes == 2 && pair_xor && (count & 1) ? 2 : 0);
+  if (needed > source.size()) throw std::runtime_error("Native index endianness crosses buffer extent");
+  std::vector<uint32_t> result(count);
+  if (bytes == 4) {
+    ReadTextureBlock(source, 0, count * 4, endian, reinterpret_cast<uint8_t*>(result.data()));
+  } else {
+    const bool swap = endian == Endian::k8in16 || endian == Endian::k8in32;
+    for (uint32_t i = 0; i < count; ++i) {
+      uint16_t value;
+      std::memcpy(&value, source.data() + ((size_t(i) * 2) ^ pair_xor), 2);
+      result[i] = swap ? GpuSwap(value, Endian::k8in16) : value;
+    }
+  }
+  return result;
+}
 struct IndexRange { uint32_t offset, count; };
 struct ConvertedIndices { std::vector<uint32_t> values; std::vector<IndexRange> ranges; };
 inline bool IsLinePrimitive(rex::graphics::xenos::PrimitiveType type) {

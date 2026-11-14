@@ -411,22 +411,12 @@ void VulkanRender::Draw(const RegisterFile& regs, rex::memory::Memory& memory, S
     ranges.push_back({0, uint32_t(normalized.size())});
   } else if (!gpu_indices && (indices || convert)) {
     if (perf.enabled) perf.normalized_indices += count;
-    normalized.reserve(count);
-    for (uint32_t i = 0; i < count; ++i) {
-      uint32_t value = i;
-      if (indices) {
-        value = 0;
-        const unsigned bytes = indices->format == IndexFormat::kInt16 ? 2 : 4;
-        for (unsigned b = 0; b < bytes; ++b) {
-          uint32_t offset = i * bytes + b;
-          if (indices->endianness == Endian::k8in16) offset ^= 1;
-          if (indices->endianness == Endian::k8in32) offset ^= 3;
-          if (indices->endianness == Endian::k16in32) offset ^= 2;
-          Require(offset < indices->length, "index endianness crosses buffer extent");
-          value |= uint32_t(*memory.TranslatePhysical<const uint8_t*>(indices->guest_base + offset)) << (b * 8);
-        }
-      }
-      normalized.push_back(value);
+    if (indices) {
+      normalized = ExpandIndices({memory.TranslatePhysical<const uint8_t*>(indices->guest_base), indices->length},
+          count, indices->format, indices->endianness);
+    } else {
+      normalized.reserve(count);
+      for (uint32_t i = 0; i < count; ++i) normalized.push_back(i);
     }
     // Even without rasterization, strip/fan restart tokens do not denote
     // guest vertices. Keep the surviving indices once for memory exports.
@@ -606,14 +596,10 @@ void VulkanRender::Draw(const RegisterFile& regs, rex::memory::Memory& memory, S
   };
   constant(T::kConstantBufferSystem, &constants, sizeof(constants));
   auto floats = [&](SpirvShader* shader, unsigned start, unsigned slot) {
-    uint32_t packed[1024]{};
-    unsigned n = 0;
-    if (shader) for (unsigned i = 0; i < 256; ++i)
-      if ((shader->constant_register_map().float_bitmap[i / 64] >> (i % 64)) & 1) {
-        std::memcpy(packed + n, &regs[start + i * 4], 16);
-        n += 4;
-      }
-    constant(slot, packed, std::max(n * 4, 16u));
+    uint32_t packed[1024];
+    const auto bytes = shader ? GatherFloatConstants(packed, shader->constant_register_map().float_bitmap, &regs[start]) : 16u;
+    if (!shader) std::fill_n(packed, 4, 0u);
+    constant(slot, packed, bytes);
   };
   const uint32_t vs_constants = FloatConstantBase(regs, true), ps_constants = FloatConstantBase(regs, false);
   Require(vs_constants + 256 <= 512 && (!ps || ps_constants + 256 <= 512), "float constant bank outside register file");

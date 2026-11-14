@@ -63,6 +63,11 @@ avisos ReXGlue/Xenia existentes. `texture_load.{h,cpp}` adapta o planejamento
 de carga do cache D3D12 do SDK pinado e usa seus shaders, sob os mesmos avisos
 ReXGlue/Xenia. Nenhum módulo original de dashboard é compartilhado por isso.
 
+`GatherFloatConstants` em `src/native/commands/memexport.h` adapta a iteração
+de bits do Xenos pinado e a cópia contígua do ShiftGlue `3274f788`, limitada
+a blocos completos, sob os mesmos créditos e termos BSD-3-Clause de
+[ReXGlue](licenses/rexglue-sdk.txt) e [ShiftGlue](licenses/shiftglue.txt).
+
 Os patches SDK 0146, 0147, 0152, 0156 e 0157 adaptam os patches 0029/0032, 0048,
 parte do 0031, 0036 e 0038 do
 [Forza Horizon 1: ReImagined](https://github.com/Dyotson/ForzaHorizon1-ReImagined),

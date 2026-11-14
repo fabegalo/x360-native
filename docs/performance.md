@@ -28,6 +28,53 @@ P1/P2/P3 preservados.
 
 ## Renderizadores — PERF-GPU-01 (31/10)
 
+13/11 — revisão de Pinyon/ShiftGlue `3274f788` e ReImagined/ReIGlue
+`d253875b`: Native reúne constantes por bits ativos do Xenos pinado, com cópia
+de blocos completos inspirada no ShiftGlue. Teste CPU sintético, 32.768 chamadas:
+7,14 → 0,56 ms (esparso), 7,24 → 1,46 ms (completo); 3.304 asserts de bytes,
+bancos e limites passaram. **Sem ganho de FPS comprovado** no Forza: cinco
+pares de 11 passes quentes, razão 1,0690 [0,8677; 1,0922], saídas equivalentes;
+P50/P95/P99 46,48/87,84/93,45 → 48,41/76,50/125,67 ms. A primeira variante
+por trechos também foi inconclusiva (0,9398 [0,8523; 1,0200]) e foi substituída.
+Não alterar o upload Xenos: trechos variáveis pioraram o teste esparso em memória
+write-combined (0,66 → 8,14 ms); a variante final ficou equivalente nesse custo.
+JSONs `constant-*-forza-ab.json` e `constant-gather-cost*-summary.json` na mesma
+evidência local. Não transplantar presets que retiram efeitos ou o cache VR
+`fh1_keep_uploaded` do ReIGlue para o caminho geral. ReGPU é plugin opcional do
+ReImagined, não uma substituição aprovada do Xenos. Mantidas as licenças BSD
+das adaptações; nenhum código GPL do ReImagined atual foi incorporado.
+
+13/11 — continuação FPS do Forza Horizon, mesma gravação/RTX 4070: Native
+D3D12 espera apenas os lotes anteriores com writeback quando o lote atual
+contém somente trabalho de EDRAM, e o limite automático de submissão passa
+de 512 a 128 (fila ociosa). Escritas atuais continuam submetidas e concluídas;
+as opções explícitas e o automático desligado de Vulkan/Microsoft permanecem.
+Cinco pares de 11 passes quentes, contadores opcionais desligados, deram
+razão de frame 0,9065, IC 95% [0,8555; 0,9717] (~10,3% mais frames/s no
+replay); P50 85,81 → 77,98 ms. A coleta anterior confirmou a combinação
+(0,8724 [0,6748; 0,9187]); sincronização ou limite 128 isolados não mostraram
+ganho consistente. A/A anterior: 0,9770 [0,7911; 1,1156]. Skate 3 manteve
+equivalência, desempenho inconclusivo: 0,9060 [0,7792; 1,2307]. O contrato
+de filas bloqueadas falha antes da alteração e verifica a publicação exata
+sem submeter o trabalho atual. JSONs `ab-fps-*.json` na mesma evidência local.
+Tempos variáveis; ganho restrito ao replay do Forza, sem novo aceite de FPS
+ao vivo, Vulkan, outros hosts ou outras cenas.
+
+13/11 — Native D3D12, Windows x64/RTX 4070: três frames do Forza Horizon
+0.0.0.10 gravados em escala 1 e reutilizados sem reabrir o jogo. D3D12/Vulkan
+compartilham a expansão de índices por palavras, com os mesmos limites,
+endian e reinício de primitivas. No replay D3D12, cinco pares de 12 passes
+reduziram a fase acumulada de índices em 21,6% (razão 0,7841, IC 95%
+[0,6440; 0,9066], incluindo o passe frio e alocações). Os 782 checks de
+índices/reinício passaram. **Sem ganho comprovado no frame nessa mudança**: sete rodadas
+de 11 passes quentes, contadores opcionais desligados, deram razão 1,0326
+[0,8932; 1,1286]; A/A 1,0171 [0,8911; 1,3100]. Desligar a submissão
+antecipada ou elevá-la a 2048 também foi inconclusivo; padrão mantido.
+Todos os replays exigiram imagem composta, memória GPU e contadores
+equivalentes. Captura e medições em
+`.local/evidence/native-forza-replay-20261113/`. Vulkan compilado, sem
+certificação de execução; sem novo aceite de FPS ao vivo ou de outros hosts.
+
 12/11 — Native D3D12, Windows x64/RTX 4070: gravados três frames de gameplay
 do Skate 3 0.0.0.3 em escala 1, reutilizados nos A/Bs sem reabrir o jogo.
 O modo automático (`native_eager_submit=-1`) passa a submeter após 512 unidades

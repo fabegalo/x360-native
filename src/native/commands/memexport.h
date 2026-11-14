@@ -2,6 +2,7 @@
 #include <rex/graphics/pipeline/shader/shader.h>
 #include <rex/graphics/register_file.h>
 #include <algorithm>
+#include <bit>
 #include <cstring>
 #include <stdexcept>
 #include <vector>
@@ -15,6 +16,31 @@ inline uint32_t FloatConstantBase(const rex::graphics::RegisterFile& regs, bool 
   const uint32_t value = regs[vertex ? XE_GPU_REG_SQ_VS_CONST : XE_GPU_REG_SQ_PS_CONST];
   return value ? (vertex ? regs.Get<reg::SQ_VS_CONST>().base : regs.Get<reg::SQ_PS_CONST>().base)
                : vertex ? 0u : 256u;
+}
+
+// Set-bit gathering from Xenos, with ShiftGlue 3274f788's contiguous-copy idea
+// limited to full bitmap words (BSD-3-Clause).
+// Copyright 2026 Tom Clay; portions Copyright 2022 Ben Vanik and Xenia contributors.
+// See licenses/shiftglue.txt. Keep packed register order and the empty CBV's zero vec4.
+inline uint32_t GatherFloatConstants(uint32_t (&out)[1024], const uint64_t (&bitmap)[4],
+                                     const uint32_t* first) {
+  unsigned words = 0;
+  for (unsigned block = 0; block < 4; ++block) {
+    uint64_t remaining = bitmap[block];
+    if (remaining == UINT64_MAX) {
+      std::memcpy(out + words, first + block * 256, 1024);
+      words += 256;
+      continue;
+    }
+    while (remaining) {
+      const unsigned start = std::countr_zero(remaining);
+      std::memcpy(out + words, first + block * 256 + start * 4, 16);
+      words += 4;
+      remaining &= remaining - 1;
+    }
+  }
+  if (!words) std::fill_n(out, 4, 0u);
+  return std::max(words * 4, 16u);
 }
 
 // Run once per analyzed shader. The SDK's set contains recognized constants
