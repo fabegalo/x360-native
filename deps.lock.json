@@ -2163,12 +2163,12 @@
         "src/graphics/vulkan/shared_memory.cpp": "c14c6b491904119218562e7d70b74b153282ccc6e8caddaeb10fc595bebc96f0"
       },
       "files": {
-        "include/rex/graphics/primitive_processor.h": "8dc4e6e4b29429e80231f6d6e66179a53e22d56efc0b642af828c4b614c5e0a0",
+        "include/rex/graphics/primitive_processor.h": "1227a915ca81cd3b94f0795ae332eacd797399e799fdfcdc43966c3d4ab15d22",
         "include/rex/graphics/vulkan/command_processor.h": "9beafa45438ee0bb27a4b24443dcc78a913a8e9338ef928a825f59ce91d111c6",
         "include/rex/graphics/vulkan/deferred_command_buffer.h": "68a7fda4a8876879fc5c1ef917c6d4aee214304948584f7566e1e173bceaee47",
         "include/rex/graphics/vulkan/shared_memory.h": "2d0052cfd9aff59b586e6fbd00e37e660f176d077c35af5a657abf4a8785d504",
         "include/rex/graphics/vulkan/upload_hazard_tracker.h": "ecb2a8db57970f59e4a62e8af8f20d185245976c035f07f8997f76250ee3d106",
-        "src/graphics/primitive_processor.cpp": "47cf42d176358b5a6b82b8d351eab8ba881f916b8f656ec39a20b0819b761118",
+        "src/graphics/primitive_processor.cpp": "433895910df62e154fff0c0ed4f8fc3f3daa41007c98a9047d73e2ef13919c83",
         "src/graphics/vulkan/command_processor.cpp": "cd0da330870dcad9060355dc8b1251de6404e7efce7012d4456e4f2d918eeead",
         "src/graphics/vulkan/deferred_command_buffer.cpp": "eecdf48d29e7cc8da0d5fdf1accfb27083cffaf0d8c8b6e04de1245f52411aa5",
         "src/graphics/vulkan/shared_memory.cpp": "80acfe0e04e2eab60bd58bd8c2a5b241827f73a51c772bd159356b7feae0bf0b"
@@ -4304,6 +4304,19 @@
     "src/graphics/pipeline/shader/spirv_translator_rb.cpp": "7fad58277e772401db3963c06aa98189503cdebb65de5c6e651c2fc456f2c130"
   },
   "test": "Canary 4f04bc7 extended-range FP16 pack/unpack and MEMEXPORT in both interlock backends."
+},
+{
+  "file": "patches/rexglue-sdk/0281-canary-tessellated-fans-strips.patch",
+  "sha256": "1582ca289eb29bc113a0ae9bb876ec659c2ec9bbc06de28d70101b95024c31cf",
+  "base_files": {
+    "include/rex/graphics/primitive_processor.h": "8dc4e6e4b29429e80231f6d6e66179a53e22d56efc0b642af828c4b614c5e0a0",
+    "src/graphics/primitive_processor.cpp": "47cf42d176358b5a6b82b8d351eab8ba881f916b8f656ec39a20b0819b761118"
+  },
+  "files": {
+    "include/rex/graphics/primitive_processor.h": "1227a915ca81cd3b94f0795ae332eacd797399e799fdfcdc43966c3d4ab15d22",
+    "src/graphics/primitive_processor.cpp": "433895910df62e154fff0c0ed4f8fc3f3daa41007c98a9047d73e2ef13919c83"
+  },
+  "test": "Canary 4f04bc7 triangle fan/strip tessellation conversion, preserving local index masking and residency tracking."
 }
 ]
 },
