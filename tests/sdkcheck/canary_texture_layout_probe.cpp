@@ -96,6 +96,47 @@ int main() {
     check(x == 0 && y == 16, "4x1 level 0 offset is (0, 16)");
   }
 
+  {
+    auto fetch = Fetch2D(1, 1, false, 0x100, 0, 0, 0);
+    fetch.mag_filter = fetch.min_filter = fetch.mip_filter = xenos::TextureFilter::kPoint;
+    fetch.aniso_filter = xenos::AnisoFilter::kDisabled;
+    fetch.swizzle = 0x688;
+    const uint32_t normalized_point = (1u << 24) | (1u << 26);
+    check(texture_util::GetTextureIntegerScaleBits(fetch, 0) == normalized_point,
+          "UNORM8 metadata requests Q16 conversion without a width override");
+    fetch.format = xenos::TextureFormat::k_4_4_4_4;
+    check(texture_util::GetTextureIntegerScaleBits(fetch, 0) ==
+        (normalized_point | 3u | (3u << 6) | (3u << 12) | (3u << 18)),
+        "RGBA4 metadata carries all four component widths");
+    fetch.format = xenos::TextureFormat::k_5_6_5;
+    check(texture_util::GetTextureIntegerScaleBits(fetch, 0) ==
+        (normalized_point | 4u | (5u << 6) | (4u << 12) | (4u << 18)),
+        "RGB565 metadata replicates the last stored component");
+    fetch.format = xenos::TextureFormat::k_8_8_8_8;
+    fetch.num_format = 1;
+    check(texture_util::GetTextureIntegerScaleBits(fetch, 0xE4) ==
+        ((1u << 26) | 7u | (23u << 6) | (39u << 12)),
+        "integer metadata carries mixed signs and excludes gamma components");
+    fetch.format = xenos::TextureFormat::k_32_FLOAT;
+    check(texture_util::GetTextureIntegerScaleBits(fetch, 0) == (1u << 26),
+          "float textures retain only point-coordinate metadata");
+    fetch.min_filter = xenos::TextureFilter::kLinear;
+    check(texture_util::GetTextureIntegerScaleBits(fetch, 0) == 0,
+          "linear floating textures request no conversion or coordinate snap");
+  }
+  for (uint32_t size : {8192u, 8193u, 24576u, 786432u, 16777216u}) {
+    uint32_t width = size - 1, height = 0, pitch = 2, max_level = 4;
+    texture_util::RemapWide1DTexture(width, height, pitch, max_level);
+    const bool wide = size > 8192;
+    check(width == 8191 && height == (wide ? std::min((size + 8191) / 8192, 128u) - 1 : 0),
+          "wide 1D rows preserve boundaries and the 128-row materialization bound");
+    check(pitch == (wide ? 256u : 2u) && max_level == (wide ? 0u : 4u),
+          "wide 1D pitch and mip range match its host backing");
+  }
+  const auto wide = texture_util::GetGuestTextureLayout(xenos::DataDimension::k1D,
+      256, 8192, 3, 1, false, xenos::TextureFormat::k_32_FLOAT, false, true, 0);
+  check(wide.base.level_data_extent_bytes == 8192 * 3 * 4,
+        "wide 1D guest layout includes every materialized row");
   std::cout << (checks - failures) << '/' << checks << " checks passed\n";
   return failures ? 1 : 0;
 }

@@ -1,4 +1,5 @@
 #include "vulkan_render.h"
+#include "../textures/texture_load.h"
 #include "vulkan_tessellation.h"
 #include "vulkan_polygon_points.h"
 #include "../commands/primitive_indices.h"
@@ -488,8 +489,13 @@ void VulkanRender::Draw(const RegisterFile& regs, rex::memory::Memory& memory, S
     constants.point_screen_diameter_to_ndc_radius[0] = float(scale_x_) / std::max(1u, viewport.xy_extent[0]);
     constants.point_screen_diameter_to_ndc_radius[1] = float(scale_y_) / std::max(1u, viewport.xy_extent[1]);
   }
-  for (unsigned i = 0; i < 32; ++i)
-    constants.texture_swizzled_signs[i / 4] |= uint32_t(texture_util::SwizzleSigns(regs.GetTextureFetch(i))) << ((i % 4) * 8);
+  for (unsigned i = 0; i < 32; ++i) {
+    const auto fetch = regs.GetTextureFetch(i);
+    const auto signs = texture_util::SwizzleSigns(fetch);
+    constants.texture_swizzled_signs[i / 4] |= uint32_t(signs) << ((i % 4) * 8);
+    constants.texture_integer_scale_bits[i] = TextureFetchSampled(fetch) ?
+        texture_util::GetTextureIntegerScaleBits(fetch, signs) : 0;
+  }
   constants.edram_32bpp_tile_pitch_dwords_scaled =
       ((regs.Get<reg::RB_SURFACE_INFO>().surface_pitch * (msaa >= MsaaSamples::k4X ? 2 : 1) + 79) / 80) * 1280 * scale_x_ * scale_y_;
   const auto color_mask = draw_util::GetNormalizedColorMask(regs, ps ? ps->writes_color_targets() : 0);

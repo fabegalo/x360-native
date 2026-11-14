@@ -290,14 +290,17 @@ int main(int argc, char** argv) {
             "fixed16 rounding is guarded by R8/RG8/RGBA8 resource formats");
       if (assembly) assembly->Release();
       DxbcShaderTranslator translator(rex::ui::GraphicsProvider::GpuVendorID::kNvidia, false, false);
+      check(!(translator.GetDefaultPixelShaderModification(2) & option) &&
+            !(translator.GetDefaultVertexShaderModification(2) & option),
+            "Canary rounding is the default in both VS/PS persistent keys");
+      rex::cvar::SetFlagByName("dxbc_unorm8_fixed16", "true");
       check((translator.GetDefaultPixelShaderModification(2) & option) &&
             (translator.GetDefaultVertexShaderModification(2) & option),
-            "fixed16 is enabled by default in both VS/PS persistent keys");
+            "fixed16 experiment has independent VS/PS persistent keys");
       rex::cvar::SetFlagByName("dxbc_unorm8_fixed16", "false");
       check(!(translator.GetDefaultPixelShaderModification(2) & option) &&
             !(translator.GetDefaultVertexShaderModification(2) & option),
-            "fixed16 disabled restores the baseline persistent key");
-      rex::cvar::SetFlagByName("dxbc_unorm8_fixed16", "true");
+            "disabling the experiment restores canonical persistent keys");
     }
     {
       DxbcShaderTranslator::Modification counted(0);

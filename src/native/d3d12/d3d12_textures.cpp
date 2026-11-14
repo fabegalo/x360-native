@@ -80,15 +80,18 @@ D3D12Render::TextureTables D3D12Render::BindTextures(const RegisterFile& r, rex:
         REXLOG_WARN("Native: texture fetch {} has type {} ({:08X} {:08X} {:08X} {:08X} {:08X} {:08X}); view is null as in the pinned texture cache",
             binding.fetch_constant, uint32_t(f.type), f.dword_0, f.dword_1, f.dword_2, f.dword_3, f.dword_4, f.dword_5);
       uint32_t wm = 0, hm = 0, dm = 0, base = 0, mip = 0, min_level = 0, max_level = 0;
+      uint32_t guest_pitch = f.pitch;
       if (valid) {
         texture_util::GetSubresourcesFromFetchConstant(f, &wm, &hm, &dm, &base, &mip, &min_level, &max_level);
-        valid = base || mip;
-        if (valid && f.dimension == DataDimension::k1D && (wm >= kTexture2DCubeMaxWidthHeight || f.tiled || f.packed_mips)) {
+        valid = base || mip || (f.swizzle & 0b110110110110) == 0b100100100100;
+        if (valid && f.dimension == DataDimension::k1D && (f.tiled || f.packed_mips)) {
           REXLOG_ERROR("Native: invalid 1D texture fetch {} (width {}, tiled {}, packed mips {}); view is null as in the pinned texture cache",
               binding.fetch_constant, wm + 1, uint32_t(f.tiled), uint32_t(f.packed_mips));
           valid = false;
         }
       }
+      if (valid && f.dimension == DataDimension::k1D)
+        texture_util::RemapWide1DTexture(wm, hm, guest_pitch, max_level);
       if (valid && f.dimension == DataDimension::k3D && f.stacked) throw std::runtime_error("Native texture dimension=" + std::to_string(uint32_t(f.dimension)) + " stacked=" + std::to_string(f.stacked) + " type=" + std::to_string(uint32_t(f.type)) + " format=" + std::to_string(uint32_t(f.format)) + " binding=" + std::to_string(binding.fetch_constant));
       Require(!valid || !f.border_size, "border texture storage not implemented");
       // Pinned D3D12 compatibility: 2D views accept 1D/2D/3D storage (3D as
@@ -113,14 +116,15 @@ D3D12Render::TextureTables D3D12Render::BindTextures(const RegisterFile& r, rex:
       // The translator also declares a 2D alternative for stacked fetches.
       // A 2D fetch of volume storage views its first base-level slice.
       if (volume && !host_volume) max_level = base ? 0 : min_level;
-      auto format = (ExpandedTextureBlock(f.format) || ExpandedTextureComponents(f.format, f.num_format)) ? DXGI_FORMAT_R32G32B32A32_FLOAT : Format(f.format, binding.is_signed);
+      // Host texels stay normalized; the shared shader restores guest integer units.
+      auto format = (ExpandedTextureBlock(f.format) || ExpandedTextureComponents(f.format, false)) ? DXGI_FORMAT_R32G32B32A32_FLOAT : Format(f.format, binding.is_signed);
       const bool depth_texture = f.format == TextureFormat::k_24_8 || f.format == TextureFormat::k_24_8_FLOAT;
       // Cube faces and stacked 2D slices are array slices of every level.
       const bool cube = f.dimension == DataDimension::kCube;
       const unsigned array_size = cube || (f.dimension == DataDimension::k2DOrStacked && f.stacked) ? dm + 1 : 1;
       const unsigned levels = max_level + 1;
       TextureLoadInput input{f.format, f.dimension, f.endianness, bool(f.tiled), bool(f.packed_mips), wm + 1, hm + 1, dm + 1,
-          f.pitch, base << 12, mip << 12, max_level, host_volume, array_size, format, bool(binding.is_signed), bool(f.num_format)};
+          guest_pitch, base << 12, mip << 12, max_level, host_volume, array_size, format, bool(binding.is_signed), false};
       const auto layout = input.Layout();
       const uint32_t base_bytes = (layout.base.level_data_extent_bytes + 3u) & ~3u;
       const uint32_t mip_bytes = max_level ? (layout.mips_total_extent_bytes + 3u) & ~3u : 0;
@@ -219,7 +223,9 @@ D3D12Render::TextureTables D3D12Render::BindTextures(const RegisterFile& r, rex:
       mirror_->RequestRange(base << 12, base_bytes);
       if (mip_bytes) mirror_->RequestRange(mip << 12, mip_bytes);
       const auto shader_index = texture_cpu_ ? LoadShader::kUnknown : GpuLoadShader(input);
-      if (scaled_texture) {
+      if (!base_bytes && !mip_bytes) {
+        // A constant-only swizzle needs a valid view, with no guest data upload.
+      } else if (scaled_texture) {
         const unsigned pixel_log2 = std::countr_zero(scale_format->bytes_per_block());
         if (base_bytes) ReplicateScaled(base << 12, base_bytes, pixel_log2, true);
         if (mip_bytes) ReplicateScaled(mip << 12, mip_bytes, pixel_log2, true);

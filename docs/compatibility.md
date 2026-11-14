@@ -41,6 +41,17 @@ capacidade para registradores, shaders, aliases, resolve e clear. Probes em GPU
 real cobrem bases altas, wrap e persistência em D3D12/ROV e Vulkan/FSI; isso não
 certifica jogos nem equivalência completa com o Canary.
 
+## Amostragem de texturas Xenos/Native
+
+As conversões de formatos fixos/inteiros e o arredondamento Q16 seguem o Canary
+`4f04bc7`. O experimento local `dxbc_unorm8_fixed16` continua disponível, mas
+desativado por padrão; valores já salvos não são alterados. `texture_point_snap`
+também é opt-in, exige reinicialização e pode afetar outros títulos. Os probes
+verificam valores GPU, canais de larguras diferentes, trocas do modo numérico
+com texels residentes, swizzles constantes e texturas 1D largas; isso não
+certifica jogos nem ganho de FPS. A precisão de alguns formatos pequenos ainda
+é uma hipótese upstream; os testes verificam o modelo da revisão fixada.
+
 ## Native D3D12/Vulkan
 
 Backend experimental separado, retomado na G3 de 22–23/10. Retail 17559 em

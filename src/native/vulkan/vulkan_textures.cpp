@@ -31,7 +31,8 @@ struct Format { VkFormat vk; DXGI_FORMAT conversion; uint32_t bytes, block, comp
 Format TextureFormatFor(const xe_gpu_texture_fetch_t& fetch, bool sign) {
   const auto format = GetBaseFormat(fetch.format);
   if (ExpandedTextureBlock(format)) return {VK_FORMAT_R32G32B32A32_SFLOAT, DXGI_FORMAT_R32G32B32A32_FLOAT, 16, 1, 4};
-  if (const auto components = ExpandedTextureComponents(format, fetch.num_format))
+  // Host texels stay normalized; the shared shader restores guest integer units.
+  if (const auto components = ExpandedTextureComponents(format, false))
     return {VK_FORMAT_R32G32B32A32_SFLOAT, DXGI_FORMAT_R32G32B32A32_FLOAT, 16, 1, components};
   switch (format) {
     case TextureFormat::k_2_10_10_10: return sign
@@ -341,10 +342,12 @@ void VulkanRender::SyncTextureReads(const RegisterFile& regs, SpirvShader* shade
     // resolve to CPU memory here would submit and wait in the middle of an
     // otherwise GPU-only dependency. CPU conversions (including scaled resolve
     // snapshots) still need their bytes before any draw bindings are allocated.
-    if (!NeedsCpuConversion(fetch.format, binding.is_signed, fetch.num_format)) continue;
+    if (!NeedsCpuConversion(fetch.format, binding.is_signed, false)) continue;
     uint32_t w, h, d, base, mip, low, high;
     texture_util::GetSubresourcesFromFetchConstant(fetch, &w, &h, &d, &base, &mip, &low, &high);
-    const auto layout = texture_util::GetGuestTextureLayout(fetch.dimension, fetch.pitch,
+    uint32_t guest_pitch = fetch.pitch;
+    if (fetch.dimension == DataDimension::k1D) texture_util::RemapWide1DTexture(w, h, guest_pitch, high);
+    const auto layout = texture_util::GetGuestTextureLayout(fetch.dimension, guest_pitch,
         w + 1, h + 1, d + 1, fetch.tiled, fetch.format, fetch.packed_mips, base != 0, high);
     if (base) SyncGuestRead(base << 12, (layout.base.level_data_extent_bytes + 3) & ~3u, 0xFF);
     if (mip && high) SyncGuestRead(mip << 12, (layout.mips_total_extent_bytes + 3) & ~3u, 0xFF);
@@ -381,10 +384,13 @@ VkDescriptorSet VulkanRender::BindTextures(const RegisterFile& regs, rex::memory
     uint32_t w = 0, h = 0, d = 0, base = 0, mip = 0, low = 0, high = 0;
     bool active = TextureViewActive(fetch, binding.dimension, binding.is_signed);
     if (active) texture_util::GetSubresourcesFromFetchConstant(fetch, &w, &h, &d, &base, &mip, &low, &high);
-    active &= base || mip;
+    active &= base || mip || (fetch.swizzle & 0b110110110110) == 0b100100100100;
+    uint32_t guest_pitch = fetch.pitch;
+    if (active && fetch.dimension == DataDimension::k1D)
+      texture_util::RemapWide1DTexture(w, h, guest_pitch, high);
     // The console's 1D encoding is linear and unpacked. Invalid 1D fetches
     // produce the same zero view used by the shared Native texture contract.
-    if (fetch.dimension == DataDimension::k1D && (w >= kTexture2DCubeMaxWidthHeight || fetch.tiled || fetch.packed_mips))
+    if (fetch.dimension == DataDimension::k1D && (fetch.tiled || fetch.packed_mips))
       active = false;
     std::shared_ptr<TextureResource> resource;
     if (!active) {
@@ -420,8 +426,8 @@ VkDescriptorSet VulkanRender::BindTextures(const RegisterFile& regs, rex::memory
       const unsigned levels = high + 1;
       const auto format = TextureFormatFor(fetch, binding.is_signed);
       TextureLoadInput input{fetch.format, fetch.dimension, fetch.endianness, bool(fetch.tiled), bool(fetch.packed_mips),
-          w + 1, h + 1, d + 1, fetch.pitch, base << 12, mip << 12, high, volume, layers,
-          format.conversion, bool(binding.is_signed), bool(fetch.num_format)};
+          w + 1, h + 1, d + 1, guest_pitch, base << 12, mip << 12, high, volume, layers,
+          format.conversion, bool(binding.is_signed), false};
       const auto layout = input.Layout();
       const uint32_t base_bytes = base ? (layout.base.level_data_extent_bytes + 3) & ~3u : 0;
       const uint32_t mip_bytes = mip && high ? (layout.mips_total_extent_bytes + 3) & ~3u : 0;
@@ -506,7 +512,11 @@ VkDescriptorSet VulkanRender::BindTextures(const RegisterFile& regs, rex::memory
         const auto* guest_format = FormatInfo::Get(input.format);
         const auto shader_index = format.bytes != guest_format->bytes_per_block() ||
             format.block != guest_format->block_width ? LoadShader::kUnknown : GpuLoadShader(input);
-        if (scaled_texture) {
+        if (!base_bytes && !mip_bytes) {
+          // Only ZERO/ONE view components are sampled; no guest bytes are read.
+          transition(resource->image, levels, layers, false);
+          transition(resource->image, levels, layers, true);
+        } else if (scaled_texture) {
           const unsigned pixel_log2 = std::countr_zero(guest_format->bytes_per_block());
           if (base_bytes) ReplicateScaled(input.base, base_bytes, pixel_log2, true);
           if (mip_bytes) ReplicateScaled(input.mip, mip_bytes, pixel_log2, true);

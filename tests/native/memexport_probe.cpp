@@ -78,6 +78,23 @@ std::vector<uint32_t> ScalarExportShader(ucode::AluScalarOpcode opcode) {
   code[code.size() - 1] = 2 | (uint32_t(AluVectorOpcode::kMax) << 24);
   return code;
 }
+std::vector<uint32_t> TextureExportShader(FetchOpDimension dimension, bool unnormalized,
+                                         bool two_coordinates, uint32_t texture_index) {
+  using namespace ucode;
+  auto code = ExportShader(false);
+  const uint64_t exec = 1 | (uint64_t(4) << 12) | (uint64_t(1) << 18) |
+                        (uint64_t(ControlFlowOpcode::kExecEnd) << 44);
+  code[1] = (code[1] & 0xFFFFu) | uint32_t(exec << 16);
+  code[2] = uint32_t(exec >> 16);
+  code.insert(code.begin() + 3, {
+      15u << 16, 0, (uint32_t(AluVectorOpcode::kMax) << 24) | (2u << 16) | (2u << 8),
+      uint32_t(FetchOpcode::kTextureFetch) | (texture_index << 20) | (uint32_t(unnormalized) << 25) |
+          ((dimension == FetchOpDimension::k1D && !two_coordinates ? 0u : 0x24u) << 26),
+      0x688u | (7u << 18) | (3u << 24) | (3u << 26), uint32_t(dimension) << 14});
+  // eM0 = sampled r0, while eA still uses the independently zero c3.
+  code.back() = (uint32_t(AluVectorOpcode::kMax) << 24) | (3u << 30);
+  return code;
+}
 void CheckReadbackEpoch(rex::memory::Memory& memory) {
   const auto page = memory.SystemHeapAlloc(4096, 4096, rex::memory::kSystemHeapPhysical);
   Require(page != 0, "epoch probe allocation");
@@ -96,7 +113,7 @@ void CheckReadbackEpoch(rex::memory::Memory& memory) {
   Require(*memory.TranslateVirtual<uint32_t*>(page + 16) == new_result, "current GPU snapshot was lost");
 }
 void Run(rex::system::IGraphicsSystem& gpu, rex::memory::Memory& memory,
-         bool precision, bool mulsc_rtz) {
+         bool precision, bool mulsc_rtz, bool textures, bool snap, bool legacy_unorm8) {
   CheckReadbackEpoch(memory);
   constexpr uint32_t allocation = 1 << 20;
   const auto ring = memory.SystemHeapAlloc(65536, 4096, rex::memory::kSystemHeapPhysical);
@@ -131,6 +148,9 @@ void Run(rex::system::IGraphicsSystem& gpu, rex::memory::Memory& memory,
     float input = 0;
   };
   std::vector<Result> expected;
+  FetchOpDimension texture_dimension = FetchOpDimension::k2D;
+  uint32_t texture_index = 1;
+  bool texture_unnormalized = false, texture_two_coordinates = false, texture_sample = true;
   auto issue = [&](const char* name, ColorFormat format, SurfaceNumberFormat numeric, const std::array<float, 4>& value,
                    uint32_t count, unsigned element_bytes, const std::vector<uint8_t>& bytes,
                    bool vertex = true, bool dynamic = false, bool fetch = false, Endian128 endian = Endian128::kNone,
@@ -148,7 +168,8 @@ void Run(rex::system::IGraphicsSystem& gpu, rex::memory::Memory& memory,
       fp(constants + 4 + c, c == 1 ? 1.0f : 0.0f); fp(constants + 8 + c, value[c]); fp(constants + 12 + c, mulsc_operand);
       if (precision) fp(constants + 16 + c, 0.0f);
     }
-    load(vertex, precision && scalar != ucode::AluScalarOpcode::kRetainPrev ?
+    load(vertex, textures && texture_sample ? TextureExportShader(texture_dimension, texture_unnormalized, texture_two_coordinates, texture_index) :
+        precision && scalar != ucode::AluScalarOpcode::kRetainPrev ?
         ScalarExportShader(scalar) : ExportShader(vertex, dynamic, fetch));
     reg::VGT_DRAW_INITIATOR draw{}; draw.prim_type = PrimitiveType::kTriangleList;
     draw.source_select = SourceSelect::kAutoIndex; draw.num_indices = vertex ? count : 3;
@@ -165,7 +186,7 @@ void Run(rex::system::IGraphicsSystem& gpu, rex::memory::Memory& memory,
     return bytes;
   };
   const std::array<float, 4> data{1.25f, -2.5f, 4.0f, .75f}, changed{9, 8, 7, 6};
-  if (!precision) {
+  if (!precision && !textures) {
   const auto source = issue("VS-only incomplete triangle", ColorFormat::k_32_32_32_32_FLOAT, SurfaceNumberFormat::kFloat, data, 2, 16, raw(data, 2));
   // A cache-register poll between a GPU store and its vertex-fetch consumer
   // does not publish memory to the CPU. GPU ordering must preserve the alias.
@@ -274,6 +295,156 @@ void Run(rex::system::IGraphicsSystem& gpu, rex::memory::Memory& memory,
               input, 1, components * 2, bytes, false);
       }
     }
+  } else if (textures) {
+    const auto texels = memory.SystemHeapAlloc(2u << 20, 4096, rex::memory::kSystemHeapPhysical);
+    Require(texels != 0, "texture fixture allocation");
+    std::memset(memory.TranslateVirtual(texels), 0, 2u << 20);
+    uint32_t cursor = 0;
+    xe_gpu_texture_fetch_t last_texture{};
+    auto bind = [&](TextureFormat format, uint32_t width, uint32_t height, bool integer,
+                    TextureSign sign, DataDimension dimension, uint32_t swizzle = 0x688,
+                    bool no_data = false, uint32_t gpu_source = 0) {
+      cursor = (cursor + 4095) & ~4095u;
+      Require(cursor + uint64_t(width) * height * 16 <= 2u << 20, "texture fixture budget");
+      const auto address = texels + cursor;
+      cursor += ((width * height * 16 + 4095) & ~4095u);
+      xe_gpu_texture_fetch_t fetch{};
+      fetch.type = FetchConstantType::kTexture; fetch.dimension = dimension;
+      fetch.format = format; fetch.base_address = no_data ? 0 :
+          (gpu_source ? gpu_source : memory.GetPhysicalAddress(address)) >> 12;
+      fetch.pitch = dimension == DataDimension::k1D && width > 8192 ? 256 : std::max(2u, (width + 31) / 32);
+      if (dimension == DataDimension::k1D) fetch.size_1d.width = width - 1;
+      else { fetch.size_2d.width = width - 1; fetch.size_2d.height = height - 1; }
+      fetch.swizzle = swizzle; fetch.num_format = integer;
+      fetch.sign_x = fetch.sign_y = fetch.sign_z = fetch.sign_w = sign;
+      fetch.mag_filter = fetch.min_filter = fetch.mip_filter = TextureFilter::kPoint;
+      fetch.aniso_filter = AnisoFilter::kDisabled;
+      fetch.clamp_x = fetch.clamp_y = fetch.clamp_z = ClampMode::kClampToEdge;
+      const auto* words_fetch = reinterpret_cast<const uint32_t*>(&fetch);
+      for (unsigned c = 0; c < 6; ++c) set(XE_GPU_REG_SHADER_CONSTANT_FETCH_00_0 + texture_index * 6 + c, words_fetch[c]);
+      last_texture = fetch;
+      return memory.TranslateVirtual<uint8_t*>(address);
+    };
+    struct FixedFormat { TextureFormat format; unsigned bits, components; };
+    for (const auto& f : {FixedFormat{TextureFormat::k_8, 8, 1},
+                         {TextureFormat::k_8_8, 8, 2}, {TextureFormat::k_8_8_8_8, 8, 4},
+                         {TextureFormat::k_4_4_4_4, 4, 4},
+                         {TextureFormat::k_16, 16, 1}, {TextureFormat::k_16_16, 16, 2},
+                         {TextureFormat::k_16_16_16_16, 16, 4}}) {
+      const unsigned maximum = (1u << f.bits) - 1;
+      for (bool integer : {false, true}) for (unsigned value : {0u, 1u, maximum / 4, maximum}) {
+        auto* bytes = bind(f.format, 1, 1, integer, TextureSign::kUnsigned, DataDimension::k2DOrStacked);
+        if (f.bits == 4) { const uint16_t packed = uint16_t(value * 0x1111u); std::memcpy(bytes, &packed, 2); }
+        else for (unsigned c = 0; c < f.components; ++c) {
+          if (f.bits == 8) bytes[c] = uint8_t(value);
+          else { const uint16_t packed = uint16_t(value); std::memcpy(bytes + c * 2, &packed, 2); }
+        }
+        float result = float(value);
+        if (!integer) {
+          const float sample = f.bits == 4 ? float(value * 17) / 256.0f : float(value) / float(maximum);
+          result = float(f.bits == 8 && legacy_unorm8 ? std::ceil(sample * 65536.0f) :
+                         std::nearbyint(sample * 65536.0f)) / 65536.0f;
+        }
+        const auto name = "tfetch fixed format=" + std::to_string(unsigned(f.format)) +
+            " integer=" + std::to_string(integer) + " value=" + std::to_string(value);
+        issue(name.c_str(), ColorFormat::k_32_32_32_32_FLOAT, SurfaceNumberFormat::kFloat,
+              {.25f,.25f,0,0}, 1, 16, raw({result,result,result,result}), false);
+      }
+    }
+    auto* reused = bind(TextureFormat::k_8, 1, 1, false, TextureSign::kUnsigned, DataDimension::k2DOrStacked);
+    reused[0] = 63;
+    const float normalized = float(legacy_unorm8 ? std::ceil((63.0f / 255.0f) * 65536.0f) :
+                                    std::nearbyint((63.0f / 255.0f) * 65536.0f)) / 65536.0f;
+    for (bool integer : {false, true, false}) {
+      last_texture.num_format = integer;
+      set(XE_GPU_REG_SHADER_CONSTANT_FETCH_00_0 + texture_index * 6 + 3, last_texture.dword_3);
+      const float value = integer ? 63.0f : normalized;
+      issue(integer ? "resident texture changes to integer units" : "resident texture restores normalized units",
+            ColorFormat::k_32_32_32_32_FLOAT, SurfaceNumberFormat::kFloat,
+            {.25f,.25f,0,0}, 1, 16, raw({value,value,value,value}), false);
+    }
+    for (auto format : {TextureFormat::k_5_6_5, TextureFormat::k_1_5_5_5}) {
+      const bool alpha = format == TextureFormat::k_1_5_5_5;
+      const unsigned widths[]{5, alpha ? 5u : 6u, 5, alpha ? 1u : 5u};
+      for (bool integer : {false, true}) for (unsigned pattern = 0; pattern < 4; ++pattern) {
+        auto* bytes = bind(format, 1, 1, integer, TextureSign::kUnsigned, DataDimension::k2DOrStacked);
+        uint16_t packed = 0; unsigned shift = 0;
+        std::array<float, 4> result;
+        for (unsigned c = 0; c < 4; ++c) {
+          const unsigned maximum = (1u << widths[c]) - 1;
+          const unsigned value = pattern == 0 ? 0 : pattern == 1 ? 1 : pattern == 2 ? maximum / 4 : maximum;
+          result[c] = integer ? float(value) : widths[c] == 1 ? float(value) :
+              float(value * ((1u << widths[c]) + 1)) / float(1u << (2 * widths[c]));
+          if (c < (alpha ? 4u : 3u)) { packed |= uint16_t(value << shift); shift += widths[c]; }
+        }
+        std::memcpy(bytes, &packed, 2);
+        const auto name = "tfetch packed format=" + std::to_string(unsigned(format)) +
+            " integer=" + std::to_string(integer) + " pattern=" + std::to_string(pattern);
+        issue(name.c_str(), ColorFormat::k_32_32_32_32_FLOAT, SurfaceNumberFormat::kFloat,
+              {.25f,.25f,0,0}, 1, 16, raw(result), false);
+      }
+    }
+    for (auto format : {TextureFormat::k_8, TextureFormat::k_16})
+      for (auto sign : {TextureSign::kSigned, TextureSign::kUnsignedBiased}) {
+      const unsigned bits = format == TextureFormat::k_8 ? 8 : 16;
+      for (int value : {0, 1, -1, -(1 << (bits - 1))}) {
+        auto* bytes = bind(format, 1, 1, true, sign, DataDimension::k2DOrStacked);
+        const uint16_t packed = uint16_t(value); std::memcpy(bytes, &packed, bits / 8);
+        const unsigned stored = unsigned(value) & ((1u << bits) - 1);
+        // Unsigned-biased is offset binary, including its negative endpoint.
+        const float result = sign == TextureSign::kSigned ? float(std::max(value, -((1 << (bits - 1)) - 1))) :
+            float(int(stored) - (1 << (bits - 1)));
+        const auto name = "tfetch integer sign=" + std::to_string(unsigned(sign)) +
+            " bits=" + std::to_string(bits) + " value=" + std::to_string(value);
+        issue(name.c_str(), ColorFormat::k_32_32_32_32_FLOAT, SurfaceNumberFormat::kFloat,
+              {.25f,.25f,0,0}, 1, 16, raw({result,result,result,result}), false);
+      }
+    }
+    texture_dimension = FetchOpDimension::k1D; texture_unnormalized = true;
+    for (unsigned width : {8193u, 24576u}) {
+      auto* wide = bind(TextureFormat::k_32_FLOAT, width, 1, false, TextureSign::kUnsigned, DataDimension::k1D);
+      for (unsigned i = 0; i < width; ++i) { const float value = float(i) * .25f + 1; std::memcpy(wide + i * 4, &value, 4); }
+      for (unsigned index : {0u, 8191u, 8192u, 16383u, 16384u, 24575u}) {
+        if (index >= width) continue;
+        const float value = float(index) * .25f + 1;
+        const auto name = "tfetch wide 1D width=" + std::to_string(width) + " index=" + std::to_string(index);
+        issue(name.c_str(), ColorFormat::k_32_32_32_32_FLOAT, SurfaceNumberFormat::kFloat,
+              {float(index)+.25f,0,0,0}, 1, 16, raw({value,value,value,value}), false);
+      }
+    }
+    texture_two_coordinates = true; texture_unnormalized = false;
+    auto* grid = bind(TextureFormat::k_32_FLOAT, 2, 2, false, TextureSign::kUnsigned, DataDimension::k2DOrStacked);
+    for (unsigned y = 0; y < 2; ++y) for (unsigned x = 0; x < 2; ++x) {
+      const float value = float(y * 2 + x + 1); std::memcpy(grid + y * 256 + x * 4, &value, 4);
+    }
+    issue("tfetch1D uses XY with 2D storage", ColorFormat::k_32_32_32_32_FLOAT, SurfaceNumberFormat::kFloat,
+          {.25f,.75f,0,0}, 1, 16, raw({3,3,3,3}), false);
+    texture_dimension = FetchOpDimension::k2D;
+    const float edge = snap ? 3 : 4;
+    issue("point coordinate near texel edge", ColorFormat::k_32_32_32_32_FLOAT, SurfaceNumberFormat::kFloat,
+          {.4999f,.75f,0,0}, 1, 16, raw({edge,edge,edge,edge}), false);
+    for (bool mixed : {false, true}) {
+      const uint32_t swizzle = mixed ? 4u | (5u << 3) | (4u << 6) | (5u << 9) :
+                                      5u | (5u << 3) | (5u << 6) | (5u << 9);
+      bind(TextureFormat::k_32_FLOAT, 1, 1, false, TextureSign::kUnsigned,
+           DataDimension::k2DOrStacked, swizzle, true);
+      issue(mixed ? "constant-only texture 0101" : "constant-only texture 1111",
+            ColorFormat::k_32_32_32_32_FLOAT, SurfaceNumberFormat::kFloat,
+            {.25f,.25f,0,0}, 1, 16, raw({mixed ? 0.0f : 1.0f,1,mixed ? 0.0f : 1.0f,1}), false);
+    }
+    texture_index = 31;
+    auto* last = bind(TextureFormat::k_8, 1, 1, true, TextureSign::kUnsigned, DataDimension::k2DOrStacked);
+    last[0] = 63;
+    issue("last fetch constant uses its own conversion metadata", ColorFormat::k_32_32_32_32_FLOAT,
+          SurfaceNumberFormat::kFloat, {.25f,.25f,0,0}, 1, 16, raw({63,63,63,63}), false);
+    texture_sample = false;
+    const auto gpu_texel = issue("GPU writes integer texture backing", ColorFormat::k_16,
+        SurfaceNumberFormat::kUnsignedInteger, {1234,1234,1234,1234}, 1, 2, {0xD2,0x04}, false);
+    texture_sample = true;
+    bind(TextureFormat::k_16, 1, 1, true, TextureSign::kUnsigned, DataDimension::k2DOrStacked,
+         0x688, false, gpu_texel);
+    issue("GPU-written integer texel is sampled", ColorFormat::k_32_32_32_32_FLOAT,
+          SurfaceNumberFormat::kFloat, {.25f,.25f,0,0}, 1, 16, raw({1234,1234,1234,1234}), false);
   } else {
   issue("pixel MEMEXPORT without color", ColorFormat::k_32_32_32_32_FLOAT, SurfaceNumberFormat::kFloat, data, 1, 16, raw(data), false);
   set(XE_GPU_REG_RB_MODECONTROL, uint32_t(EdramMode::kNoOperation));
@@ -322,6 +493,10 @@ void Run(rex::system::IGraphicsSystem& gpu, rex::memory::Memory& memory,
     } else {
       equal = std::memcmp(actual, result.bytes.data(), result.bytes.size()) == 0;
       if (!equal) {
+        if (textures) for (unsigned c = 0; c < 4; ++c) {
+          float got, want; std::memcpy(&got, actual + c * 4, 4); std::memcpy(&want, result.bytes.data() + c * 4, 4);
+          std::cerr << "channel " << c << " got=" << got << " expected=" << want << '\n';
+        }
         uint16_t got, want;
         std::memcpy(&got, actual, 2); std::memcpy(&want, result.bytes.data(), 2);
         std::cerr << result.name << " first half got=" << std::hex << got
@@ -336,18 +511,24 @@ void Run(rex::system::IGraphicsSystem& gpu, rex::memory::Memory& memory,
 }
 X360N_PROBE_MAIN {
   try {
-    Require(argc >= 2 && argc <= 6, "usage: x360n_native_memexport_probe OUTPUT [d3d12|vulkan] [--precision] [--xenos] [--mulsc-rtz]");
+    Require(argc >= 2 && argc <= 8, "usage: x360n_native_memexport_probe OUTPUT [d3d12|vulkan] [--precision|--textures] [--xenos] [--mulsc-rtz] [--point-snap] [--legacy-unorm8]");
     const ProbeArg api = argc >= 3 ? argv[2] : X360N_PROBE_ARG("d3d12");
     Require(api == X360N_PROBE_ARG("d3d12") || api == X360N_PROBE_ARG("vulkan"), "invalid graphics API");
     bool precision = false, xenos = false, mulsc_rtz = false;
+    bool textures = false, snap = false, legacy_unorm8 = false;
     for (int i = 3; i < argc; ++i) {
       const ProbeArg arg = argv[i];
       if (arg == X360N_PROBE_ARG("--precision")) precision = true;
       else if (arg == X360N_PROBE_ARG("--xenos")) xenos = true;
       else if (arg == X360N_PROBE_ARG("--mulsc-rtz")) mulsc_rtz = true;
+      else if (arg == X360N_PROBE_ARG("--textures")) textures = true;
+      else if (arg == X360N_PROBE_ARG("--point-snap")) snap = true;
+      else if (arg == X360N_PROBE_ARG("--legacy-unorm8")) legacy_unorm8 = true;
       else throw std::runtime_error("unknown MEMEXPORT probe option");
     }
     Require(!mulsc_rtz || precision, "--mulsc-rtz requires --precision");
+    Require(!textures || !precision, "texture and scalar precision fixtures are separate");
+    Require(!(snap || legacy_unorm8) || textures, "texture options require --textures");
     const std::filesystem::path output(argv[1]); std::filesystem::create_directories(output);
     rex::InitLogging((output / "runtime.log").string().c_str());
     rex::Runtime runtime(output, output / "user");
@@ -358,6 +539,12 @@ X360N_PROBE_MAIN {
     auto gpu = rex::system::LoadGpuPlugin(xenos ? "xenos" : "native", backend); Require(bool(gpu), "GPU plugin load");
     const bool rounding_flag = rex::cvar::SetFlagByName("mulsc_round_toward_zero", mulsc_rtz ? "true" : "false");
     Require(rounding_flag || !mulsc_rtz, "mulsc rounding flag");
+    if (textures) {
+      Require(rex::cvar::SetFlagByName("texture_point_snap", snap ? "true" : "false") || !snap, "point snap flag");
+      Require(rex::cvar::SetFlagByName("dxbc_unorm8_fixed16", legacy_unorm8 ? "true" : "false") || !legacy_unorm8, "legacy normalization flag");
+      if (!xenos && api == X360N_PROBE_ARG("d3d12"))
+        Require(rex::cvar::SetFlagByName("native_texture_cpu", "false"), "GPU texture load path");
+    }
     if (xenos) {
       Require(rex::cvar::SetFlagByName("readback_memexport", "true"), "synchronous MEMEXPORT readback flag");
       Require(rex::cvar::SetFlagByName("readback_memexport_fast", "false"), "MEMEXPORT readback mode");
@@ -368,7 +555,7 @@ X360N_PROBE_MAIN {
     Require(gpu->SetupPresentation(nullptr) == X_STATUS_SUCCESS, "presentation setup");
     Require(gpu->SetupGuestGpu(runtime.function_dispatcher(), runtime.kernel_state()) == X_STATUS_SUCCESS, "guest GPU setup");
     struct Shutdown { rex::system::IGraphicsSystem* gpu; ~Shutdown() { if (gpu) gpu->Shutdown(); } } shutdown{gpu.get()};
-    Run(*gpu, *runtime.memory(), precision, mulsc_rtz); gpu->Shutdown(); shutdown.gpu = nullptr; gpu.reset(); runtime.Shutdown(); rex::FlushLogging();
+    Run(*gpu, *runtime.memory(), precision, mulsc_rtz, textures, snap, legacy_unorm8); gpu->Shutdown(); shutdown.gpu = nullptr; gpu.reset(); runtime.Shutdown(); rex::FlushLogging();
     return 0;
   } catch (const std::exception& error) { std::cerr << error.what() << '\n'; return 1; }
 }

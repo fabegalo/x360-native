@@ -136,7 +136,9 @@ void D3D12Render::Draw(const RegisterFile& r, rex::memory::Memory& memory, Shade
       if (!TextureFetchSampled(f)) continue;
       uint32_t w, h, d, base, mip, lo, hi;
       texture_util::GetSubresourcesFromFetchConstant(f, &w, &h, &d, &base, &mip, &lo, &hi);
-      auto layout = texture_util::GetGuestTextureLayout(f.dimension, f.pitch, w + 1, h + 1, d + 1, f.tiled, f.format, f.packed_mips, true, hi);
+      uint32_t guest_pitch = f.pitch;
+      if (f.dimension == DataDimension::k1D) texture_util::RemapWide1DTexture(w, h, guest_pitch, hi);
+      auto layout = texture_util::GetGuestTextureLayout(f.dimension, guest_pitch, w + 1, h + 1, d + 1, f.tiled, f.format, f.packed_mips, true, hi);
       range(base << 12, layout.base.level_data_extent_bytes);
       if (hi) range(mip << 12, layout.mips_total_extent_bytes);
     }
@@ -340,11 +342,13 @@ void D3D12Render::Draw(const RegisterFile& r, rex::memory::Memory& memory, Shade
     for (auto* shader : {&vs, ps}) if (shader)
       for (const auto& t : shader->GetTextureBindingsAfterTranslation()) {
         auto f = r.GetTextureFetch(t.fetch_constant);
-        if (!TextureViewActive(f, t.dimension, t.is_signed) || (!texture_cpu_ && !NeedsCpuConversion(f.format, t.is_signed, f.num_format))) continue;
+        if (!TextureViewActive(f, t.dimension, t.is_signed) || (!texture_cpu_ && !NeedsCpuConversion(f.format, t.is_signed, false))) continue;
         uint32_t wm, hm, dm, base, mip, lo, hi;
         texture_util::GetSubresourcesFromFetchConstant(f, &wm, &hm, &dm, &base, &mip, &lo, &hi);
+        uint32_t guest_pitch = f.pitch;
+        if (f.dimension == DataDimension::k1D) texture_util::RemapWide1DTexture(wm, hm, guest_pitch, hi);
         // Same extents BindTextures reads (all levels, conservatively).
-        auto layout = texture_util::GetGuestTextureLayout(f.dimension, f.pitch, wm + 1, hm + 1, dm + 1, f.tiled, f.format, f.packed_mips, true, hi);
+        auto layout = texture_util::GetGuestTextureLayout(f.dimension, guest_pitch, wm + 1, hm + 1, dm + 1, f.tiled, f.format, f.packed_mips, true, hi);
         if (base) SyncGuestRead(base << 12, (layout.base.level_data_extent_bytes + 3u) & ~3u, kReadCpuTexture);
         if (mip && hi) SyncGuestRead(mip << 12, (layout.mips_total_extent_bytes + 3u) & ~3u, kReadCpuTexture);
       }
@@ -453,8 +457,13 @@ void D3D12Render::Draw(const RegisterFile& r, rex::memory::Memory& memory, Shade
   for (unsigned i = 0, packed = 0; i < 6; ++i) if (planes & (1u << i)) {
     std::memcpy(c.user_clip_planes[packed++], &r[XE_GPU_REG_PA_CL_UCP_0_X + i * 4], 16);
   }
-  for (unsigned i = 0; i < 32; ++i)
-    c.texture_swizzled_signs[i / 4] |= uint32_t(texture_util::SwizzleSigns(r.GetTextureFetch(i))) << ((i % 4) * 8);
+  for (unsigned i = 0; i < 32; ++i) {
+    const auto fetch = r.GetTextureFetch(i);
+    const auto signs = texture_util::SwizzleSigns(fetch);
+    c.texture_swizzled_signs[i / 4] |= uint32_t(signs) << ((i % 4) * 8);
+    c.texture_integer_scale_bits[i] = TextureFetchSampled(fetch) ?
+        texture_util::GetTextureIntegerScaleBits(fetch, signs) : 0;
+  }
   auto vte = r.Get<reg::PA_CL_VTE_CNTL>(); auto color = r.Get<reg::RB_COLORCONTROL>();
   c.flags = (vte.vtx_xy_fmt ? T::kSysFlag_XYDividedByW : 0) | (vte.vtx_z_fmt ? T::kSysFlag_ZDividedByW : 0) |
       (vte.vtx_w0_fmt ? T::kSysFlag_WNotReciprocal : 0) | (polygon ? T::kSysFlag_PrimitivePolygonal : 0) |

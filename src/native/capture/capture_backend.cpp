@@ -44,7 +44,10 @@ void TextureRanges(const RegisterFile& regs, const Shader* shader, std::vector<s
     if (fetch.type != FetchConstantType::kTexture) continue;
     uint32_t width, height, depth, base, mip, low, high;
     texture_util::GetSubresourcesFromFetchConstant(fetch, &width, &height, &depth, &base, &mip, &low, &high);
-    const auto layout = texture_util::GetGuestTextureLayout(fetch.dimension, fetch.pitch, width + 1, height + 1,
+    uint32_t guest_pitch = fetch.pitch;
+    if (fetch.dimension == DataDimension::k1D)
+      texture_util::RemapWide1DTexture(width, height, guest_pitch, high);
+    const auto layout = texture_util::GetGuestTextureLayout(fetch.dimension, guest_pitch, width + 1, height + 1,
         depth + 1, fetch.tiled, fetch.format, fetch.packed_mips, true, high);
     if (base) out.emplace_back(base << 12, layout.base.level_data_extent_bytes);
     if (mip && high) out.emplace_back(mip << 12, layout.mips_total_extent_bytes);
