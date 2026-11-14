@@ -23,7 +23,7 @@
       "file": "patches/rexglue-sdk/0002-setup-failure-teardown.patch",
       "sha256": "73480fa9b0645d7532f6bfbb471dc964a87590c1fcd5c20946ad38340f769a93",
       "files": {
-        "src/system/runtime.cpp": "dcfc367c82186fcb53179c7d898ec919622de45d5bbc21e25f3e88c60245e2dc"
+        "src/system/runtime.cpp": "d4d219ee1e8bd563e3cac90018d961eb635fb29b85f19391b86d246a29d49729"
       },
       "base_files": {
         "src/system/runtime.cpp": "f55bd64cf055f7ad288c282883e94feec8fb53631a6807654f7a516ec7ab4af7"
@@ -946,7 +946,7 @@
         "src/core/perf/counter.cpp": "df95e01382113fcd10e5698b8f6985f7d14486a834e542be95dfc1e59b611268",
         "src/graphics/command_processor.cpp": "e2b42d5012046917f5383f8d0c0eefa9885419246d0c8f085ea178c30cc34792",
         "src/graphics/d3d12/pipeline_cache.cpp": "7112d5d15e154825df9a5389e475a4862524fc51d98368a7a2f2b8d7737660f2",
-        "src/system/runtime.cpp": "dcfc367c82186fcb53179c7d898ec919622de45d5bbc21e25f3e88c60245e2dc"
+        "src/system/runtime.cpp": "d4d219ee1e8bd563e3cac90018d961eb635fb29b85f19391b86d246a29d49729"
       },
       "base_files": {
         "CMakeLists.txt": "32728b0c02bfd06d6bcddec55fd08f05c013cea1ea7e5dc1e777b195e85b589e",
@@ -1204,7 +1204,7 @@
       },
       "files": {
         "include/rex/runtime.h": "8827c5fd2d3e42656fe1266a0d33af0d3181ef9145990f2bd538b0b78d822d20",
-        "src/system/runtime.cpp": "dcfc367c82186fcb53179c7d898ec919622de45d5bbc21e25f3e88c60245e2dc",
+        "src/system/runtime.cpp": "d4d219ee1e8bd563e3cac90018d961eb635fb29b85f19391b86d246a29d49729",
         "include/rex/rex_app.h": "769ea2f312400d6be8359071bbc03fc854ccf626bbc115ff9ba3dbfdb102c55d",
         "src/ui/rex_app.cpp": "c27725d25261269920a389afca30162c2eca79ba20796285fa8613e9eeecc506"
       },
@@ -3555,7 +3555,7 @@
     "src/core/filesystem.cpp": "86f96be74c7581d196710b2268ca5e55535962c709bfbd613d98cd440da66eb1",
     "src/filesystem/devices/host_path_device.cpp": "afc646c741298621ff8adc32d5c9a209d62ff610195a44d9bd767accddbac561",
     "src/system/kernel_state.cpp": "ad6bfe43e2b2978dd2749c8643a8e9523c7a6e4adaf05ba0a1fe30949f4138dc",
-    "src/system/runtime.cpp": "dcfc367c82186fcb53179c7d898ec919622de45d5bbc21e25f3e88c60245e2dc",
+    "src/system/runtime.cpp": "d4d219ee1e8bd563e3cac90018d961eb635fb29b85f19391b86d246a29d49729",
     "src/system/xam/content_manager.cpp": "bcb055b2581528bd1505908ba439b2ffbd8949684aadb8bdac368e43f4078da7",
     "src/system/xam/user_profile.cpp": "33b27578fba1c82d6b7454100697bfc61b5bd08066993e1ac2773fa5c96ee79d"
   },
@@ -3797,6 +3797,28 @@
     "src/graphics/pipeline/shader/dxbc_translator_fetch.cpp": "5b32a8b922e390ee02c573aabdd0e9d684f7569dfc17909a4e7ba13c709ab897"
   },
   "test": "Experimental and default-on, maintainer-authorized on 2026-11-13: explicit point UNORM8 fetches only; unsigned fractional R8/RG8/RGBA8 format guards; distinct persistent VS/PS variants. sdkcheck.canary-dxbc covers the enabled default, explicit off and unaffected filtering; console precision remains unverified."
+},
+{
+  "file": "patches/rexglue-sdk/0272-shared-utility-drive.patch",
+  "sha256": "6689f7443c244f44850d27dc542b83d49bd81768bb01e69a36ee45e9f749713d",
+  "base_files": {
+    "src/system/runtime.cpp": "dcfc367c82186fcb53179c7d898ec919622de45d5bbc21e25f3e88c60245e2dc"
+  },
+  "files": {
+    "src/system/runtime.cpp": "d4d219ee1e8bd563e3cac90018d961eb635fb29b85f19391b86d246a29d49729"
+  },
+  "test": "tests/sdkcheck/utility_drive_test.cpp ([utility-drive]): persistent streams, isolated title roots, legacy cache_root, storage errors and read-only analysis."
+},
+{
+  "file": "patches/rexglue-sdk/0273-canary-register-reset-defaults.patch",
+  "sha256": "77a5f268bb4905ce158c71affadc6f9ec50656716ca4b26efd2c0d5f9630edf3",
+  "base_files": {
+    "src/graphics/register_file.cpp": "cc88114b73b98f7eecbd3af37b9f6a0b206b82fbb941bef236192916923bc5e0"
+  },
+  "files": {
+    "src/graphics/register_file.cpp": "b9049a192398361507898b8dbfca589c15296c27f71025a6195679ce6bdefdf1"
+  },
+  "test": "tests/sdkcheck/canary_pm4_probe.cpp: full reset bank from Canary 4f04bc7; negative control fails on exactly 16 nonzero defaults; PM4 command order preserved."
 }
 ]
 },

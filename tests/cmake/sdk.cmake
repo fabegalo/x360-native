@@ -329,6 +329,7 @@ target_sources(x360n_sdk_runtime_checks PRIVATE sdkcheck/package_mount_test.cpp)
 target_sources(x360n_sdk_runtime_checks PRIVATE sdkcheck/avatar_minicreator_request_test.cpp)
 target_sources(x360n_sdk_runtime_checks PRIVATE sdkcheck/profile_tile_key_test.cpp)
 target_sources(x360n_sdk_runtime_checks PRIVATE sdkcheck/save_storage_test.cpp)
+target_sources(x360n_sdk_runtime_checks PRIVATE sdkcheck/utility_drive_test.cpp)
 target_sources(x360n_sdk_runtime_checks PRIVATE sdkcheck/storage_device_test.cpp)
 target_sources(x360n_sdk_runtime_checks PRIVATE sdkcheck/signin_task_test.cpp)
 target_sources(x360n_sdk_runtime_checks PRIVATE sdkcheck/dashboard_uri_test.cpp

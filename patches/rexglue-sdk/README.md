@@ -1,5 +1,15 @@
 # Local patches to ReXGlue SDK
 
+## 0273 — Canary register reset defaults
+
+Ports all 16 nonzero reset values from Canary `4f04bc7cc76b89bfcf7327b597d9770eaaddf935`
+(`register_file.cc`, blob `c697852e4775c1982c18a7e17a6d24bbc827a0e1`).
+Both Xenos backends and Native share this register bank; tessellation reset levels
+remain zero as upstream because the backends add 1.0. `sdkcheck.canary-pm4`
+checks the full reset bank and the existing command-order regression. Before
+this patch exactly the 16 nonzero defaults fail. This is a reset-state port,
+not certification of GPU pixels, query support or game behavior.
+
 ## 0270 — Native striped sample counters
 
 An explicit DXBC variant distributes sample atomics over 256 private Native
@@ -3051,3 +3061,15 @@ repeatable over two passes and retain all 96 sample checks. The separate live
 Xenos D3D12 session loaded rexgpu-xenos.dll; the maintainer reported the ground
 appeared corrected. This is not a matched live Xenos comparison or a performance
 measurement.
+
+### 0272 — Shared utility drive
+
+Moves the former FH1 utility-drive workaround (e85b408) into `Runtime::SetupVfs`,
+as approved by the maintainer on 2026-11-13. Every execution host, including
+generic AOT, mounts writable `cache:` at `<cache_root>/utility`, falling back to
+`<user_data_root>/cache/utility`. Existing files are reused; storage failures
+fail setup. Analysis/tool mode does not create or mount the drive. Guest FATX
+formatting of the raw HDD cache partitions remains unimplemented.
+`tests/sdkcheck/utility_drive_test.cpp` covers persistence, separate title roots,
+the former explicit cache path, storage errors and analysis without input writes.
+This moves the existing repository implementation; no new upstream code is used.

@@ -6,6 +6,22 @@ Implementação e testes no commit local `d95fe15`.
 
 ## Contratos implementados
 
+Decisão aprovada pelo mantenedor em 13/11/2026: o drive utilitário `cache:`
+pertence ao VFS do runtime compartilhado, inclusive para títulos AOT genéricos.
+Usa arquivos reais em `<cache_root>/utility` (ou `<user_data_root>/cache/utility`),
+preservando o layout da correção anterior do FH1; o chamador mantém raízes
+isoladas por título/revisão. A análise em `tool_mode` não monta nem cria esse
+drive. Isso não implementa a formatação FATX guest das partições raw.
+
+Validado em `860a1ac` + patch 0272: os três testes de utility drive falham sem
+a correção e passam com ela (43 asserções); os contratos C8/dispositivos passam,
+com os dois testes de junction executados fora do sandbox (40 asserções).
+FH1 0.0.0.10 pelo AOT genérico, Windows x64/RTX 4070/Xenos D3D12, run
+`20261114T021027Z-fh1-generic-utility-fixed`: condução e Classificatórias do
+Horizon, replay de 231.811 bytes e escrita em ghost/main-side stream; 268,596 s,
+fechamento da janela com saída 0, sem falha guest registrada. Mantenedor confirmou
+o resultado. Outros títulos, backends, hosts e campanha/save-load não certificados.
+
 - `XamContentCreate` / `XamContentCreateEx`: criar novo, abrir existente,
   abrir/criar, substituir e truncar. O XUID vem da identidade conectada no
   `UserProfile` do C7; o Title ID vem do cabeçalho de execução carregado por
