@@ -3808,6 +3808,17 @@
     "src/system/runtime.cpp": "d4d219ee1e8bd563e3cac90018d961eb635fb29b85f19391b86d246a29d49729"
   },
   "test": "tests/sdkcheck/utility_drive_test.cpp ([utility-drive]): persistent streams, isolated title roots, legacy cache_root, storage errors and read-only analysis."
+},
+{
+  "file": "patches/rexglue-sdk/0273-canary-register-reset-defaults.patch",
+  "sha256": "77a5f268bb4905ce158c71affadc6f9ec50656716ca4b26efd2c0d5f9630edf3",
+  "base_files": {
+    "src/graphics/register_file.cpp": "cc88114b73b98f7eecbd3af37b9f6a0b206b82fbb941bef236192916923bc5e0"
+  },
+  "files": {
+    "src/graphics/register_file.cpp": "b9049a192398361507898b8dbfca589c15296c27f71025a6195679ce6bdefdf1"
+  },
+  "test": "tests/sdkcheck/canary_pm4_probe.cpp: full reset bank from Canary 4f04bc7; negative control fails on exactly 16 nonzero defaults; PM4 command order preserved."
 }
 ]
 },

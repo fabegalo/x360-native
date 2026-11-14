@@ -1,5 +1,15 @@
 # Local patches to ReXGlue SDK
 
+## 0273 â€” Canary register reset defaults
+
+Ports all 16 nonzero reset values from Canary `4f04bc7cc76b89bfcf7327b597d9770eaaddf935`
+(`register_file.cc`, blob `c697852e4775c1982c18a7e17a6d24bbc827a0e1`).
+Both Xenos backends and Native share this register bank; tessellation reset levels
+remain zero as upstream because the backends add 1.0. `sdkcheck.canary-pm4`
+checks the full reset bank and the existing command-order regression. Before
+this patch exactly the 16 nonzero defaults fail. This is a reset-state port,
+not certification of GPU pixels, query support or game behavior.
+
 ## 0270 — Native striped sample counters
 
 An explicit DXBC variant distributes sample atomics over 256 private Native
