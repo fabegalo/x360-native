@@ -1,6 +1,8 @@
 // Real guest microcode -> Native GPU stores -> aliases -> guest readback.
 // Prepared for focused validation; synthetic coverage is not gameplay acceptance.
 #include "probe_main.h"
+#include "../sdkcheck/scalar_precision_oracle.h"
+using x360n::test::ScalarExpected;
 #include <rex/runtime.h>
 #include <rex/logging.h>
 #include <rex/kernel/init.h>
@@ -17,6 +19,7 @@
 #include <cmath>
 #include <cstring>
 #include <iostream>
+#include <limits>
 #include <string_view>
 #include <thread>
 #include <vector>
@@ -53,6 +56,28 @@ std::vector<uint32_t> PositionShader() {
       62 | (1u << 15) | (15u << 16), 0,
       (uint32_t(AluVectorOpcode::kMax) << 24) | (1u << 16) | (1u << 8) | (3u << 30)};
 }
+std::vector<uint32_t> ScalarExportShader(ucode::AluScalarOpcode opcode) {
+  using namespace ucode;
+  auto code = ExportShader(false);
+  const bool mulsc = opcode == AluScalarOpcode::kMulsc0;
+  if (mulsc) {
+    const uint64_t exec = 1 | (uint64_t(3) << 12) |
+                          (uint64_t(ControlFlowOpcode::kExecEnd) << 44);
+    code[1] = (code[1] & 0xFFFFu) | uint32_t(exec << 16);
+    code[2] = uint32_t(exec >> 16);
+    // r0 = c3 supplies mulsc's temporary operand.
+    code.insert(code.begin() + 3, {15u << 16, 0,
+        (uint32_t(AluVectorOpcode::kMax) << 24) | (3u << 16) | (3u << 8)});
+  }
+  const size_t address = mulsc ? 6 : 3;
+  // c4 is zero, independently of c3's mulsc operand.
+  code[address + 2] = (4u << 16) | (1u << 8) | (uint32_t(AluVectorOpcode::kMad) << 24);
+  // eM0.xyzw = scalar(c2.w[, r0.x]).
+  code[code.size() - 3] = 33 | (1u << 15) | (15u << 20) | (uint32_t(opcode) << 26);
+  code[code.size() - 2] = 0;
+  code[code.size() - 1] = 2 | (uint32_t(AluVectorOpcode::kMax) << 24);
+  return code;
+}
 void CheckReadbackEpoch(rex::memory::Memory& memory) {
   const auto page = memory.SystemHeapAlloc(4096, 4096, rex::memory::kSystemHeapPhysical);
   Require(page != 0, "epoch probe allocation");
@@ -70,7 +95,8 @@ void CheckReadbackEpoch(rex::memory::Memory& memory) {
   Require(*memory.TranslateVirtual<uint32_t*>(page) == 0x12345678, "old GPU snapshot overwrote newer CPU bytes");
   Require(*memory.TranslateVirtual<uint32_t*>(page + 16) == new_result, "current GPU snapshot was lost");
 }
-void Run(rex::system::IGraphicsSystem& gpu, rex::memory::Memory& memory) {
+void Run(rex::system::IGraphicsSystem& gpu, rex::memory::Memory& memory,
+         bool precision, bool mulsc_rtz) {
   CheckReadbackEpoch(memory);
   constexpr uint32_t allocation = 1 << 20;
   const auto ring = memory.SystemHeapAlloc(65536, 4096, rex::memory::kSystemHeapPhysical);
@@ -97,12 +123,20 @@ void Run(rex::system::IGraphicsSystem& gpu, rex::memory::Memory& memory) {
   set(XE_GPU_REG_SQ_PROGRAM_CNTL, program.value); set(XE_GPU_REG_VGT_MAX_VTX_INDX, 0xFFFFFF);
   set(XE_GPU_REG_RB_MODECONTROL, uint32_t(EdramMode::kNoOperation));
   set(XE_GPU_REG_SQ_VS_CONST, 0x000FF000); set(XE_GPU_REG_SQ_PS_CONST, 0x000FF100);
-  struct Result { const char* name; uint32_t address; std::array<uint8_t, 64> bytes; };
+  struct Result {
+    std::string name;
+    uint32_t address;
+    std::array<uint8_t, 64> bytes;
+    ucode::AluScalarOpcode scalar = ucode::AluScalarOpcode::kRetainPrev;
+    float input = 0;
+  };
   std::vector<Result> expected;
   auto issue = [&](const char* name, ColorFormat format, SurfaceNumberFormat numeric, const std::array<float, 4>& value,
                    uint32_t count, unsigned element_bytes, const std::vector<uint8_t>& bytes,
-                   bool vertex = true, bool dynamic = false, bool fetch = false, Endian128 endian = Endian128::kNone) {
+                   bool vertex = true, bool dynamic = false, bool fetch = false, Endian128 endian = Endian128::kNone,
+                   ucode::AluScalarOpcode scalar = ucode::AluScalarOpcode::kRetainPrev, float mulsc_operand = 0.0f) {
     Result result{name, memory.GetPhysicalAddress(outputs) + uint32_t(expected.size()) * 4096, {}};
+    result.scalar = scalar; result.input = value[3];
     result.bytes.fill(0xCD); Require(bytes.size() == count * element_bytes && bytes.size() <= result.bytes.size(), "probe expectation extent");
     std::copy(bytes.begin(), bytes.end(), result.bytes.begin());
     xe_gpu_memexport_stream_t stream{}; stream.base_address = result.address >> 2; stream.const_0x1 = 1;
@@ -111,9 +145,10 @@ void Run(rex::system::IGraphicsSystem& gpu, rex::memory::Memory& memory) {
     const uint32_t constants = XE_GPU_REG_SHADER_CONSTANT_000_X + (vertex ? 0 : 256 * 4);
     for (unsigned c = 0; c < 4; ++c) {
       set(constants + c, reinterpret_cast<const uint32_t*>(&stream)[c]);
-      fp(constants + 4 + c, c == 1 ? 1.0f : 0.0f); fp(constants + 8 + c, value[c]); fp(constants + 12 + c, 0.0f);
+      fp(constants + 4 + c, c == 1 ? 1.0f : 0.0f); fp(constants + 8 + c, value[c]); fp(constants + 12 + c, mulsc_operand);
+      if (precision) fp(constants + 16 + c, 0.0f);
     }
-    load(vertex, ExportShader(vertex, dynamic, fetch));
+    load(vertex, precision ? ScalarExportShader(scalar) : ExportShader(vertex, dynamic, fetch));
     reg::VGT_DRAW_INITIATOR draw{}; draw.prim_type = PrimitiveType::kTriangleList;
     draw.source_select = SourceSelect::kAutoIndex; draw.num_indices = vertex ? count : 3;
     words.insert(words.end(), {Packet(PM4_DRAW_INDX_2, 1), draw.value});
@@ -129,6 +164,7 @@ void Run(rex::system::IGraphicsSystem& gpu, rex::memory::Memory& memory) {
     return bytes;
   };
   const std::array<float, 4> data{1.25f, -2.5f, 4.0f, .75f}, changed{9, 8, 7, 6};
+  if (!precision) {
   const auto source = issue("VS-only incomplete triangle", ColorFormat::k_32_32_32_32_FLOAT, SurfaceNumberFormat::kFloat, data, 2, 16, raw(data, 2));
   // A cache-register poll between a GPU store and its vertex-fetch consumer
   // does not publish memory to the CPU. GPU ordering must preserve the alias.
@@ -178,6 +214,7 @@ void Run(rex::system::IGraphicsSystem& gpu, rex::memory::Memory& memory) {
         value, 1, 8, bytes);
   }
   // Pixel side effects remain live without any color writes.
+  }
   set(XE_GPU_REG_RB_MODECONTROL, uint32_t(EdramMode::kColorDepth)); set(XE_GPU_REG_RB_SURFACE_INFO, 80);
   set(XE_GPU_REG_RB_COLOR_MASK, 0); set(XE_GPU_REG_RB_DEPTHCONTROL, 0); set(XE_GPU_REG_PA_CL_VTE_CNTL, 0x3F);
   fp(XE_GPU_REG_PA_CL_VPORT_XSCALE, 8); fp(XE_GPU_REG_PA_CL_VPORT_XOFFSET, 8);
@@ -186,9 +223,35 @@ void Run(rex::system::IGraphicsSystem& gpu, rex::memory::Memory& memory) {
   set(XE_GPU_REG_PA_SC_SCREEN_SCISSOR_TL, 0); set(XE_GPU_REG_PA_SC_SCREEN_SCISSOR_BR, 16 | (16 << 16));
   set(XE_GPU_REG_PA_SC_WINDOW_SCISSOR_TL, 0x80000000); set(XE_GPU_REG_PA_SC_WINDOW_SCISSOR_BR, 16 | (16 << 16));
   vertex_fetch(memory.GetPhysicalAddress(vertices), 12); load(true, PositionShader());
+  if (precision) {
+    using namespace ucode;
+    const AluScalarOpcode ops[]{AluScalarOpcode::kExp, AluScalarOpcode::kLog, AluScalarOpcode::kLogc,
+        AluScalarOpcode::kRcp, AluScalarOpcode::kRcpc, AluScalarOpcode::kRcpf,
+        AluScalarOpcode::kRsq, AluScalarOpcode::kRsqc, AluScalarOpcode::kRsqf, AluScalarOpcode::kSqrt};
+    const float values[]{0.0f, -0.0f, .125f, .75f, 1.0f, 2.0f, 3.0f, 16.0f,
+        -2.0f, -INFINITY, INFINITY, std::numeric_limits<float>::quiet_NaN()};
+    for (auto opcode : ops) for (float value : values) {
+      const float result = ScalarExpected(opcode, value);
+      const std::array<float, 4> input{value, value, value, value}, output{result, result, result, result};
+      const auto name = "scalar opcode=" + std::to_string(unsigned(opcode)) + " input=" +
+                        std::to_string(std::bit_cast<uint32_t>(value));
+      issue(name.c_str(), ColorFormat::k_32_32_32_32_FLOAT, SurfaceNumberFormat::kFloat,
+            input, 1, 16, raw(output), false, false, false, Endian128::kNone, opcode);
+    }
+    for (float a : {.1f, -.1f, .3f, 1.3f}) for (float b : {.1f, .3f, -1.1f, 9.876543f}) {
+      const double exact = double(a) * double(b);
+      float result = float(exact);
+      if (mulsc_rtz && std::fabs(double(result)) > std::fabs(exact)) result = std::nextafter(result, 0.0f);
+      const std::array<float, 4> input{a,a,a,a}, output{result,result,result,result};
+      const auto name = "mulsc " + std::to_string(a) + " * " + std::to_string(b);
+      issue(name.c_str(), ColorFormat::k_32_32_32_32_FLOAT, SurfaceNumberFormat::kFloat,
+            input, 1, 16, raw(output), false, false, false, Endian128::kNone, AluScalarOpcode::kMulsc0, b);
+    }
+  } else {
   issue("pixel MEMEXPORT without color", ColorFormat::k_32_32_32_32_FLOAT, SurfaceNumberFormat::kFloat, data, 1, 16, raw(data), false);
   set(XE_GPU_REG_RB_MODECONTROL, uint32_t(EdramMode::kNoOperation));
   issue("computed export address", ColorFormat::k_32_32_32_32_FLOAT, SurfaceNumberFormat::kFloat, data, 1, 16, raw(data), true, true);
+  }
   words.insert(words.end(), {Packet(PM4_MEM_WRITE, 2), memory.GetPhysicalAddress(done), 1});
   Require(words.size() * 4 < 65536, "probe command capacity");
   for (size_t i = 0; i < words.size(); ++i) rex::memory::store_and_swap<uint32_t>(memory.TranslateVirtual(ring + uint32_t(i * 4)), words[i]);
@@ -201,28 +264,76 @@ void Run(rex::system::IGraphicsSystem& gpu, rex::memory::Memory& memory) {
   Require(*marker == 1, "MEMEXPORT completion timeout");
   bool passed = true;
   for (const auto& result : expected) {
-    const bool equal = std::memcmp(memory.TranslatePhysical(result.address), result.bytes.data(), result.bytes.size()) == 0;
+    bool equal = true;
+    const auto* actual = memory.TranslatePhysical<const uint8_t*>(result.address);
+    if (precision) {
+      for (unsigned i = 0; i < 4; ++i) {
+        float want, got;
+        std::memcpy(&want, result.bytes.data() + i * 4, 4);
+        std::memcpy(&got, actual + i * 4, 4);
+        bool same = std::isnan(want) ? std::isnan(got) : std::bit_cast<uint32_t>(want) == std::bit_cast<uint32_t>(got);
+        if ((result.scalar == ucode::AluScalarOpcode::kLog || result.scalar == ucode::AluScalarOpcode::kLogc) &&
+            result.input > 0 && std::isfinite(result.input)) {
+          int exponent;
+          if (std::frexp(result.input, &exponent) != .5f) {
+            // Native log is approximate: https://learn.microsoft.com/en-us/windows/win32/direct3dhlsl/log--sm4---asm-
+            // Require its documented error bound plus half a reduced ULP,
+            // and independently require exactly 21 stored mantissa bits.
+            const double exact = std::log2(double(result.input));
+            const double host_bound = std::ldexp(result.input >= .5f && result.input <= 2 ? 1.0 : std::fabs(exact), -21);
+            const double rounding_bound = !std::isfinite(got) || got == 0 ? 0 :
+                std::ldexp(1.0, std::ilogb(std::fabs(got)) - 22);
+            same = std::isfinite(got) && (std::bit_cast<uint32_t>(got) & 3) == 0 &&
+                   std::fabs(double(got) - exact) <= host_bound + rounding_bound;
+          }
+        }
+        if (!same) std::cerr << result.name << " lane=" << i << " got=" << std::hex
+                            << std::bit_cast<uint32_t>(got) << " expected=" << std::bit_cast<uint32_t>(want) << std::dec << '\n';
+        equal &= same;
+      }
+      equal &= std::memcmp(actual + 16, result.bytes.data() + 16, result.bytes.size() - 16) == 0;
+    } else equal = std::memcmp(actual, result.bytes.data(), result.bytes.size()) == 0;
     std::cout << result.name << ' ' << (equal ? "PASS" : "FAIL") << '\n'; passed &= equal;
   }
   Require(passed, "GPU MEMEXPORT bytes differ from contract");
+  std::cout << expected.size() << " GPU MEMEXPORT cases passed\n";
 }
 }
 X360N_PROBE_MAIN {
   try {
-    Require(argc == 2 || argc == 3, "usage: x360n_native_memexport_probe OUTPUT [d3d12|vulkan]");
-    const ProbeArg api = argc == 3 ? argv[2] : X360N_PROBE_ARG("d3d12");
+    Require(argc >= 2 && argc <= 6, "usage: x360n_native_memexport_probe OUTPUT [d3d12|vulkan] [--precision] [--xenos] [--mulsc-rtz]");
+    const ProbeArg api = argc >= 3 ? argv[2] : X360N_PROBE_ARG("d3d12");
     Require(api == X360N_PROBE_ARG("d3d12") || api == X360N_PROBE_ARG("vulkan"), "invalid graphics API");
+    bool precision = false, xenos = false, mulsc_rtz = false;
+    for (int i = 3; i < argc; ++i) {
+      const ProbeArg arg = argv[i];
+      if (arg == X360N_PROBE_ARG("--precision")) precision = true;
+      else if (arg == X360N_PROBE_ARG("--xenos")) xenos = true;
+      else if (arg == X360N_PROBE_ARG("--mulsc-rtz")) mulsc_rtz = true;
+      else throw std::runtime_error("unknown MEMEXPORT probe option");
+    }
+    Require(!mulsc_rtz || precision, "--mulsc-rtz requires --precision");
     const std::filesystem::path output(argv[1]); std::filesystem::create_directories(output);
     rex::InitLogging((output / "runtime.log").string().c_str());
     rex::Runtime runtime(output, output / "user");
     rex::RuntimeConfig config; config.tool_mode = true; config.kernel_init = rex::kernel::InitializeKernel;
     Require(runtime.Setup(std::move(config)) == X_STATUS_SUCCESS, "runtime setup");
     if (api == X360N_PROBE_ARG("d3d12")) rex::cvar::SetFlagByName("d3d12_debug", "true");
-    auto gpu = rex::system::LoadGpuPlugin("native", api == X360N_PROBE_ARG("d3d12") ? "d3d12" : "vulkan"); Require(bool(gpu), "Native plugin load");
+    const char* backend = api == X360N_PROBE_ARG("d3d12") ? "d3d12" : "vulkan";
+    auto gpu = rex::system::LoadGpuPlugin(xenos ? "xenos" : "native", backend); Require(bool(gpu), "GPU plugin load");
+    const bool rounding_flag = rex::cvar::SetFlagByName("mulsc_round_toward_zero", mulsc_rtz ? "true" : "false");
+    Require(rounding_flag || !mulsc_rtz, "mulsc rounding flag");
+    if (xenos) {
+      Require(rex::cvar::SetFlagByName("readback_memexport", "true"), "synchronous MEMEXPORT readback flag");
+      Require(rex::cvar::SetFlagByName("readback_memexport_fast", "false"), "MEMEXPORT readback mode");
+      Require(rex::cvar::SetFlagByName("async_shader_compilation", "false"), "synchronous shader compilation");
+      Require(rex::cvar::SetFlagByName(api == X360N_PROBE_ARG("d3d12") ? "render_target_path_d3d12" : "render_target_path_vulkan",
+          api == X360N_PROBE_ARG("d3d12") ? "rov" : "fsi"), "interlock shader path");
+    }
     Require(gpu->SetupPresentation(nullptr) == X_STATUS_SUCCESS, "presentation setup");
     Require(gpu->SetupGuestGpu(runtime.function_dispatcher(), runtime.kernel_state()) == X_STATUS_SUCCESS, "guest GPU setup");
     struct Shutdown { rex::system::IGraphicsSystem* gpu; ~Shutdown() { if (gpu) gpu->Shutdown(); } } shutdown{gpu.get()};
-    Run(*gpu, *runtime.memory()); gpu->Shutdown(); shutdown.gpu = nullptr; gpu.reset(); runtime.Shutdown(); rex::FlushLogging();
+    Run(*gpu, *runtime.memory(), precision, mulsc_rtz); gpu->Shutdown(); shutdown.gpu = nullptr; gpu.reset(); runtime.Shutdown(); rex::FlushLogging();
     return 0;
   } catch (const std::exception& error) { std::cerr << error.what() << '\n'; return 1; }
 }

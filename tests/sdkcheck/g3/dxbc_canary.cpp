@@ -45,6 +45,7 @@ std::vector<uint32_t> Microcode(bool unnormalized, bool offset_z,
 struct Op {
   uint32_t opcode;
   bool half, minus_half;
+  bool scalar_zero = false, scalar_255 = false;
 };
 
 std::vector<Op> ProgramOps(const std::vector<uint8_t>& blob) {
@@ -66,6 +67,10 @@ std::vector<Op> ProgramOps(const std::vector<uint8_t>& blob) {
       for (uint32_t w = at + 1; w < at + length && w < end; ++w) {
         op.half |= words[w] == std::bit_cast<uint32_t>(0.5f);
         op.minus_half |= words[w] == std::bit_cast<uint32_t>(-0.5f);
+        if (words[w] == 0x4001 && w + 1 < at + length) {
+          op.scalar_zero |= words[w + 1] == 0;
+          op.scalar_255 |= words[w + 1] == std::bit_cast<uint32_t>(255.0f);
+        }
       }
       ops.push_back(op);
       at += length;
@@ -144,6 +149,17 @@ std::vector<uint8_t> Translate(const std::vector<uint32_t>& code,
   if (!translator.TranslateAnalyzedShader(translation) || !translation.is_valid()) return {};
   return translation.translated_binary();
 }
+std::vector<uint32_t> ScalarMicrocode(ucode::AluScalarOpcode opcode) {
+  using namespace ucode;
+  const uint64_t alloc = (uint64_t(AllocType::kPsColors) << 41) |
+                         (uint64_t(ControlFlowOpcode::kAlloc) << 44);
+  const uint64_t exec = 1 | (uint64_t(2) << 12) |
+                        (uint64_t(ControlFlowOpcode::kExecEnd) << 44);
+  return {uint32_t(alloc), uint32_t(alloc >> 32) | uint32_t(exec << 16), uint32_t(exec >> 16),
+      (1u << 15) | (1u << 20) | (uint32_t(opcode) << 26), 0, uint32_t(AluVectorOpcode::kMax) << 24,
+      (1u << 15) | (1u << 16) | (uint32_t(AluScalarOpcode::kRetainPrev) << 26),
+      (1u << 29) | (1u << 30) | (1u << 31), uint32_t(AluVectorOpcode::kMax) << 24};
+}
 
 }  // namespace
 
@@ -165,6 +181,14 @@ int main(int argc, char** argv) {
       std::cerr << "FAIL " << name << '\n';
     }
   };
+  for (auto opcode : {ucode::AluScalarOpcode::kMaxAs, ucode::AluScalarOpcode::kMaxAsf}) {
+    const auto ops = ProgramOps(Translate(ScalarMicrocode(opcode)));
+    unsigned clamps = 0;
+    for (size_t i = 0; i + 1 < ops.size(); ++i)
+      clamps += ops[i].opcode == 0x34 && ops[i].scalar_zero &&
+                ops[i + 1].opcode == 0x33 && ops[i + 1].scalar_255;
+    check(clamps == 1, "scalar address register clamps to [0,255]");
+  }
   {
     const auto code = Microcode(false, false);
     Shader shader(xenos::ShaderType::kPixel, 1, code.data(), code.size(), std::endian::native);

@@ -133,6 +133,17 @@ std::vector<uint8_t> Translate(SpirvShaderTranslator& translator, const std::vec
   if (!translator.TranslateAnalyzedShader(translation) || !translation.is_valid()) return {};
   return translation.translated_binary();
 }
+std::vector<uint32_t> ScalarMicrocode(ucode::AluScalarOpcode opcode) {
+  using namespace ucode;
+  const uint64_t alloc = (uint64_t(AllocType::kPsColors) << 41) |
+                         (uint64_t(ControlFlowOpcode::kAlloc) << 44);
+  const uint64_t exec = 1 | (uint64_t(2) << 12) |
+                        (uint64_t(ControlFlowOpcode::kExecEnd) << 44);
+  return {uint32_t(alloc), uint32_t(alloc >> 32) | uint32_t(exec << 16), uint32_t(exec >> 16),
+      (1u << 15) | (1u << 20) | (uint32_t(opcode) << 26), 0, uint32_t(AluVectorOpcode::kMax) << 24,
+      (1u << 15) | (1u << 16) | (uint32_t(AluScalarOpcode::kRetainPrev) << 26),
+      (1u << 29) | (1u << 30) | (1u << 31), uint32_t(AluVectorOpcode::kMax) << 24};
+}
 
 }  // namespace
 
@@ -145,6 +156,20 @@ int main() {
       std::cerr << "FAIL " << name << '\n';
     }
   };
+  for (auto opcode : {ucode::AluScalarOpcode::kMaxAs, ucode::AluScalarOpcode::kMaxAsf}) {
+    SpirvShaderTranslator translator(SpirvShaderTranslator::Features(true), true, true, false);
+    const Module module(Translate(translator, ScalarMicrocode(opcode)));
+    unsigned clamps = 0;
+    for (const auto& instruction : module.instructions) {
+      const auto& a = instruction.args;
+      if (instruction.op == spv::OpExtInst && a.size() == 7 && a[3] == GLSLstd450NClamp &&
+          module.IsConstant(a[6], std::bit_cast<uint32_t>(255.0f))) {
+        check(module.IsConstant(a[5], 0), "scalar address clamp lower bound is zero");
+        ++clamps;
+      }
+    }
+    check(clamps == 1, "scalar address register clamps to [0,255]");
+  }
   {
     SpirvShaderTranslator::Modification counter;
     counter.pixel.fsi_sample_counts = 1;

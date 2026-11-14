@@ -311,6 +311,17 @@ if(REXGLUE_USE_VULKAN)
       glslang::SPIRV glslang MachineIndependent GenericCodeGen OSDependent OGLCompiler)
 endif()
 # 0198: execute common renderer ownership and coordinate transforms.
+add_executable(x360n_scalar_precision_cpu ../scalar_precision_cpu.cpp
+    ${_alias_gpu}/register_file.cpp ${_alias_gpu}/registers.cpp ${_alias_gpu}/flags.cpp
+    ${_alias_gpu}/format/ucode.cpp ${_alias_gpu}/pipeline/shader/interpreter.cpp
+    ${_alias_gpu}/pipeline/shader/shader.cpp ${_alias_gpu}/pipeline/shader/translator.cpp
+    ${_alias_gpu}/pipeline/shader/translator_disasm.cpp)
+target_link_libraries(x360n_scalar_precision_cpu PRIVATE rexruntime xxHash::xxhash)
+target_include_directories(x360n_scalar_precision_cpu PRIVATE ${X360_REXGLUE_DIR}/thirdparty/renderdoc)
+x360n_stage_runtime_dlls(x360n_scalar_precision_cpu)
+add_test(NAME sdkcheck.scalar-precision-cpu COMMAND x360n_scalar_precision_cpu)
+set_tests_properties(sdkcheck.scalar-precision-cpu PROPERTIES LABELS project TIMEOUT 30)
+
 add_executable(x360n_edram_window_checks edram_window_offsets.cpp
     ${_alias_gpu}/util/draw.cpp ${_alias_gpu}/register_file.cpp ${_alias_gpu}/registers.cpp
     ${_alias_gpu}/flags.cpp ${_alias_gpu}/format/ucode.cpp
