@@ -1,0 +1,12 @@
+diff --git a/src/graphics/d3d12/pipeline_cache.cpp b/src/graphics/d3d12/pipeline_cache.cpp
+--- a/src/graphics/d3d12/pipeline_cache.cpp
++++ b/src/graphics/d3d12/pipeline_cache.cpp
+@@ -394,7 +394,7 @@
+           !render_target_cache_.gamma_render_target_as_unorm16(),
+           render_target_cache_.msaa_2x_supported(), render_target_cache_.draw_resolution_scale_x(),
+           render_target_cache_.draw_resolution_scale_y(),
+-          provider.GetGraphicsAnalysis() != nullptr);
++          provider.GetGraphicsAnalysis() != nullptr, render_target_cache_.edram_tile_count());
+       // If needed and possible, create objects needed for DXIL conversion and
+       // disassembly on this thread.
+       IDxbcConverter* dxbc_converter = nullptr;

@@ -945,7 +945,7 @@
         "include/rex/perf/counter.h": "c8820222ffe4c5c639269d949c8be9326a78ab046ad2abf6405ab891835716fc",
         "src/core/perf/counter.cpp": "df95e01382113fcd10e5698b8f6985f7d14486a834e542be95dfc1e59b611268",
         "src/graphics/command_processor.cpp": "bdf542f05be8776deb176551a4160975f4e73fdd6c06c1a576f085a843a45205",
-        "src/graphics/d3d12/pipeline_cache.cpp": "f698421f305cbc302cc5ae037f6312ed385a6eff87998ad2a79e0c52dbcef865",
+        "src/graphics/d3d12/pipeline_cache.cpp": "09af7672d1db5b0c83dec2457ede87d84770e6870db4b7a0237943af1cf6b12d",
         "src/system/runtime.cpp": "d4d219ee1e8bd563e3cac90018d961eb635fb29b85f19391b86d246a29d49729"
       },
       "base_files": {
@@ -2207,7 +2207,7 @@
         "include/rex/graphics/d3d12/pipeline_cache.h": "94e34e91b4eae2b6b0bb89abbd3d9adc3f600433886618f16be62afb953080c5",
         "include/rex/graphics/vulkan/pipeline_cache.h": "f1fe95f5893718e864117b31f5ed23fcbb33c6a2c18e0abb6e5b1377934318e8",
         "src/graphics/d3d12/command_processor.cpp": "ca293657670a1337b9afead743b483a28c2982a52e99dcbef2db1440e5bd227c",
-        "src/graphics/d3d12/pipeline_cache.cpp": "f698421f305cbc302cc5ae037f6312ed385a6eff87998ad2a79e0c52dbcef865",
+        "src/graphics/d3d12/pipeline_cache.cpp": "09af7672d1db5b0c83dec2457ede87d84770e6870db4b7a0237943af1cf6b12d",
         "src/graphics/vulkan/command_processor.cpp": "cd0da330870dcad9060355dc8b1251de6404e7efce7012d4456e4f2d918eeead",
         "src/graphics/vulkan/pipeline_cache.cpp": "5c6ffc6aecf84953b42ce8a1e56c4122efffcf3bd09930e2bf347bb4e21c42a8"
       },
@@ -2634,7 +2634,7 @@
         "include/rex/ui/vulkan/device.h": "f7024d901ba6c4422fbdc02c004c08dc0ee24920293b3b9a08513db5ddfcb0c4",
         "src/graphics/d3d12/command_processor.cpp": "ca293657670a1337b9afead743b483a28c2982a52e99dcbef2db1440e5bd227c",
         "src/graphics/d3d12/deferred_command_list.cpp": "a281ba47ad42413ce8029486acef8a12656df483991860c26b5a154139665344",
-        "src/graphics/d3d12/pipeline_cache.cpp": "f698421f305cbc302cc5ae037f6312ed385a6eff87998ad2a79e0c52dbcef865",
+        "src/graphics/d3d12/pipeline_cache.cpp": "09af7672d1db5b0c83dec2457ede87d84770e6870db4b7a0237943af1cf6b12d",
         "src/graphics/d3d12/render_target_cache.cpp": "23f82931e5b3ea8958a76770eaa88a6c0f0a033c859674753f21fb1ac62c513c",
         "src/graphics/flags.cpp": "3d0bd5d29f223f428ca82579cb83b1e362971fb7a6381e46d259709372742658",
         "src/graphics/pipeline/shader/dxbc_translator_om.cpp": "a4365abc869de73bc4feb29c45d97da6b2b5409cc20f4f357da8632197959458",
@@ -3906,7 +3906,7 @@
     "src/graphics/command_processor.cpp": "bdf542f05be8776deb176551a4160975f4e73fdd6c06c1a576f085a843a45205",
     "src/graphics/d3d12/command_processor.cpp": "ca293657670a1337b9afead743b483a28c2982a52e99dcbef2db1440e5bd227c",
     "src/graphics/d3d12/deferred_command_list.cpp": "a281ba47ad42413ce8029486acef8a12656df483991860c26b5a154139665344",
-    "src/graphics/d3d12/pipeline_cache.cpp": "f698421f305cbc302cc5ae037f6312ed385a6eff87998ad2a79e0c52dbcef865",
+    "src/graphics/d3d12/pipeline_cache.cpp": "09af7672d1db5b0c83dec2457ede87d84770e6870db4b7a0237943af1cf6b12d",
     "src/graphics/d3d12/query_pool.cpp": "1e0885fc1429ed676b51ff385abce45902bf28e2936172972557af32f7894d1c",
     "src/graphics/d3d12/shader.cpp": "308af1fce122ede86d52fa7745068ea3d924df7b328ae6bfa563ada720797d56",
     "src/graphics/flags.cpp": "3d0bd5d29f223f428ca82579cb83b1e362971fb7a6381e46d259709372742658",
@@ -4111,7 +4111,7 @@
     "include/rex/graphics/vulkan/render_target_cache.h": "5f552b8017e8bbde694ceaa5ab823d2944607a8cad2d500d1f6ccf35d8f2a310",
     "include/rex/graphics/xenos.h": "0dca8c668545d26c9d7938e10f4a27bee23ce59783fc9f84f1f93dd82169b5be",
     "src/graphics/d3d12/command_processor.cpp": "ca293657670a1337b9afead743b483a28c2982a52e99dcbef2db1440e5bd227c",
-    "src/graphics/d3d12/pipeline_cache.cpp": "f698421f305cbc302cc5ae037f6312ed385a6eff87998ad2a79e0c52dbcef865",
+    "src/graphics/d3d12/pipeline_cache.cpp": "09af7672d1db5b0c83dec2457ede87d84770e6870db4b7a0237943af1cf6b12d",
     "src/graphics/d3d12/render_target_cache.cpp": "23f82931e5b3ea8958a76770eaa88a6c0f0a033c859674753f21fb1ac62c513c",
     "src/graphics/flags.cpp": "3d0bd5d29f223f428ca82579cb83b1e362971fb7a6381e46d259709372742658",
     "src/graphics/pipeline/render_target/cache.cpp": "88a53ab7c6d399abd9121ec251a68106cd2b347862301db49d1d3b804d8ddee5",
@@ -4334,7 +4334,7 @@
   "files": {
     "include/rex/graphics/pipeline/shader/dxbc_translator.h": "861596dc0dbb6e8f7633c1c6cc2d2104d2d8c5f0dafd3b93f4fe4dba3f05c954",
     "include/rex/graphics/pipeline/shader/spirv_translator.h": "42b3d9904b9ad12c0075fdbff97df636308a8ed300352de82d3af60a13ce4943",
-    "src/graphics/d3d12/pipeline_cache.cpp": "f698421f305cbc302cc5ae037f6312ed385a6eff87998ad2a79e0c52dbcef865",
+    "src/graphics/d3d12/pipeline_cache.cpp": "09af7672d1db5b0c83dec2457ede87d84770e6870db4b7a0237943af1cf6b12d",
     "src/graphics/pipeline/shader/dxbc_translator.cpp": "aed7f3139065f4e2e9c35e208451a97c4ac9c335bff2a0021e13986ed126b99f",
     "src/graphics/pipeline/shader/dxbc_translator_om.cpp": "a4365abc869de73bc4feb29c45d97da6b2b5409cc20f4f357da8632197959458",
     "src/graphics/pipeline/shader/spirv_translator.cpp": "4acf0ebc005d524a1ee32e50c1b61a9767f0564680dd0cca697377659d5d52ea",
@@ -4342,6 +4342,17 @@
     "src/graphics/vulkan/pipeline_cache.cpp": "5c6ffc6aecf84953b42ce8a1e56c4122efffcf3bd09930e2bf347bb4e21c42a8"
   },
   "test": "Canary 4f04bc7 MIN/MAX factors in ROV/FSI and RT0 host premultiplication, complete low-word variant fields and isolated local point/counter bits."
+},
+{
+  "file": "patches/rexglue-sdk/0283-edram-capacity-shader-storage.patch",
+  "sha256": "778580182b9a57142b1f3aa308463ada53d72d01a13b98ba9cfb3ba11a7a968b",
+  "base_files": {
+    "src/graphics/d3d12/pipeline_cache.cpp": "f698421f305cbc302cc5ae037f6312ed385a6eff87998ad2a79e0c52dbcef865"
+  },
+  "files": {
+    "src/graphics/d3d12/pipeline_cache.cpp": "09af7672d1db5b0c83dec2457ede87d84770e6870db4b7a0237943af1cf6b12d"
+  },
+  "test": "Use the immutable active EDRAM capacity when translating restored D3D12 shaders; standard and extended persistent-cache pixel regressions."
 }
 ]
 },

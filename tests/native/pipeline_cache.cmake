@@ -1,6 +1,14 @@
 # Synthetic Xenos cache population/restoration; timings are not gameplay FPS.
 get_filename_component(probe_directory "${PROBE}" DIRECTORY)
 file(MAKE_DIRECTORY "${OUTPUT}")
+if(NOT DEFINED CAPACITY)
+  set(CAPACITY standard)
+endif()
+if(CAPACITY STREQUAL "extended")
+  set(edram_base 4096)
+else()
+  set(edram_base 0)
+endif()
 foreach(run RANGE 0 1)
   set(runtime_start 0)
   if(EXISTS "${OUTPUT}/runtime.log")
@@ -8,6 +16,7 @@ foreach(run RANGE 0 1)
   endif()
   execute_process(COMMAND "${PROBE}" "${OUTPUT}" d3d12 6 --xenos
       --pipeline-cache --no-sample-counts --draws 64 --resolves 1
+      --edram-base "${edram_base}" "edram_tile_count=${CAPACITY}"
       render_target_path_d3d12=rov async_shader_compilation=false
       readback_resolve=full d3d12_pipeline_creation_threads=2
       WORKING_DIRECTORY "${probe_directory}" TIMEOUT 75
