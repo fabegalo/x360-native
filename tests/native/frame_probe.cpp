@@ -16,6 +16,7 @@
 // --minmax-blend checks source factors for MIN/MAX and subsequent blend reset.
 // --vertex-aliases exercises upper address bits of draw and resolve fetches.
 // --depth-bias checks a tiny absolute float24 decal offset at 1x/2x/4x MSAA.
+// --depth-alias checks color writes to stencil bits with read-only aliased depth.
 // --no-sample-counts leaves out the ZPD query and the visibility-tested draw
 // (no ROV sample counting), to isolate that path when diagnosing a host.
 // Prints each frame's scanout hash; no title data is involved.
@@ -68,17 +69,17 @@ constexpr uint32_t kSide = 32;
 void Run(rex::system::IGraphicsSystem& gpu, rex::memory::Memory& memory, uint32_t frames,
          uint32_t extra_draws, uint32_t extra_resolves, bool sample_counts, uint32_t edram_base,
          bool clear_after_resolve, bool pipeline_cache, bool minmax_blend, bool vertex_aliases,
-         bool depth_bias, bool depth_unorm, bool color64) {
+         bool depth_bias, bool depth_unorm, bool color64, bool depth_alias) {
   const auto ring = memory.SystemHeapAlloc(2u << 20, 4096, rex::memory::kSystemHeapPhysical);
   const auto vertices = memory.SystemHeapAlloc(4096, 4096, rex::memory::kSystemHeapPhysical);
-  const auto decal = depth_bias ? memory.SystemHeapAlloc(4096, 4096, rex::memory::kSystemHeapPhysical) : 0;
+  const auto decal = (depth_bias || depth_alias) ? memory.SystemHeapAlloc(4096, 4096, rex::memory::kSystemHeapPhysical) : 0;
   const auto rect = memory.SystemHeapAlloc(4096, 4096, rex::memory::kSystemHeapPhysical);
   const auto image = memory.SystemHeapAlloc(kSide * kSide * 4, 4096, rex::memory::kSystemHeapPhysical);
   const auto reports = memory.SystemHeapAlloc(4096, 4096, rex::memory::kSystemHeapPhysical);
   const auto done = memory.SystemHeapAlloc(4096, 4096, rex::memory::kSystemHeapPhysical);
   const auto targets = memory.SystemHeapAlloc(std::max(1u, extra_resolves) * kSide * kSide * 4, 4096, rex::memory::kSystemHeapPhysical);
   Require(ring && vertices && rect && image && reports && done && targets, "frame probe allocations");
-  Require(!depth_bias || decal, "decal fixture allocation");
+  Require(!(depth_bias || depth_alias) || decal, "decal fixture allocation");
   std::memset(memory.TranslateVirtual(done), 0, 4);
   const float xy[]{0, 0, float(kSide), 0, 0, float(kSide)};
   std::memcpy(memory.TranslateVirtual(rect), xy, sizeof(xy));
@@ -107,6 +108,12 @@ void Run(rex::system::IGraphicsSystem& gpu, rex::memory::Memory& memory, uint32_
       for (unsigned i : {2u, 6u, 10u}) base[i] += depth_unorm ? 0x1p-14f : 0x1p-26f;
       std::memcpy(memory.TranslateVirtual(decal), base.data(), sizeof(base));
     }
+    if (depth_alias) {
+      std::array<float, 12> base{-1,-1,.25f,1, 3,-1,.25f,1, -1,3,.25f,1};
+      std::memcpy(memory.TranslateVirtual(vertices), base.data(), sizeof(base));
+      for (unsigned i : {2u, 6u, 10u}) base[i] = frame & 1 ? .125f : .75f;
+      std::memcpy(memory.TranslateVirtual(decal), base.data(), sizeof(base));
+    }
     std::vector<uint32_t> words;
     auto set = [&](uint32_t index, uint32_t value) { words.insert(words.end(), {index, value}); };
     auto fp = [&](uint32_t index, float value) { set(index, std::bit_cast<uint32_t>(value)); };
@@ -132,14 +139,14 @@ void Run(rex::system::IGraphicsSystem& gpu, rex::memory::Memory& memory, uint32_
       set(XE_GPU_REG_RB_COLOR_INFO, info.value);
     }
     set(XE_GPU_REG_RB_DEPTHCONTROL, 0); set(XE_GPU_REG_RB_DEPTH_INFO, 0);
-    if (depth_bias) {
+    if (depth_bias || depth_alias) {
       reg::RB_SURFACE_INFO surface{}; surface.surface_pitch = 80;
       // Exercise all six directed changes between 1x, 2x and 4x views.
       constexpr MsaaSamples samples[]{MsaaSamples::k1X, MsaaSamples::k2X, MsaaSamples::k1X,
           MsaaSamples::k4X, MsaaSamples::k2X, MsaaSamples::k4X, MsaaSamples::k1X};
       surface.msaa_samples = samples[frame % std::size(samples)];
       set(XE_GPU_REG_RB_SURFACE_INFO, surface.value);
-      reg::RB_DEPTH_INFO depth{}; depth.depth_base = 64;
+      reg::RB_DEPTH_INFO depth{}; depth.depth_base = depth_alias ? edram_base : 64;
       depth.depth_format = depth_unorm ? DepthRenderTargetFormat::kD24S8 : DepthRenderTargetFormat::kD24FS8;
       set(XE_GPU_REG_RB_DEPTH_INFO, depth.value);
       reg::PA_CL_CLIP_CNTL clip{}; clip.dx_clip_space_def = 1;
@@ -211,6 +218,36 @@ void Run(rex::system::IGraphicsSystem& gpu, rex::memory::Memory& memory, uint32_
       fp(XE_GPU_REG_PA_SU_POLY_OFFSET_BACK_OFFSET, depth_unorm ? -0x1p-13f : -0x1p-26f);
       vertex_fetch(memory.GetPhysicalAddress(decal), 12);
     }
+    if (depth_alias) {
+      vertex_fetch(memory.GetPhysicalAddress(rect), 6);
+      set(XE_GPU_REG_RB_MODECONTROL, uint32_t(EdramMode::kCopy));
+      set(XE_GPU_REG_RB_COPY_DEST_BASE, memory.GetPhysicalAddress(image));
+      set(XE_GPU_REG_RB_COPY_DEST_PITCH, kSide | (kSide << 16));
+      set(XE_GPU_REG_RB_COPY_DEST_INFO, uint32_t(TextureFormat::k_8_8_8_8) << 7);
+      reg::RB_COPY_CONTROL clear{}; clear.copy_command = CopyCommand(1);
+      clear.color_clear_enable = 1;
+      set(XE_GPU_REG_RB_COLOR_CLEAR, 0); set(XE_GPU_REG_RB_COLOR_CLEAR_LO, 0);
+      set(XE_GPU_REG_RB_DEPTH_CLEAR, 0); set(XE_GPU_REG_RB_COPY_CONTROL, clear.value);
+      reg::VGT_DRAW_INITIATOR rectangle = draw; rectangle.prim_type = PrimitiveType::kRectangleList;
+      words.insert(words.end(), {Packet(PM4_DRAW_INDX_2, 1), rectangle.value});
+      // Separate clears avoid the ambiguous simultaneous color/depth overlap.
+      clear.color_clear_enable = 0; clear.depth_clear_enable = 1;
+      set(XE_GPU_REG_RB_COPY_CONTROL, clear.value);
+      words.insert(words.end(), {Packet(PM4_DRAW_INDX_2, 1), rectangle.value});
+      set(XE_GPU_REG_RB_MODECONTROL, uint32_t(EdramMode::kColorDepth));
+      vertex_fetch(memory.GetPhysicalAddress(vertices), 12);
+      set(XE_GPU_REG_RB_COLOR_MASK, 0);
+      reg::RB_DEPTHCONTROL depth{}; depth.z_enable = depth.z_write_enable = 1;
+      depth.zfunc = CompareFunction::kAlways;
+      set(XE_GPU_REG_RB_DEPTHCONTROL, depth.value);
+      words.insert(words.end(), {Packet(PM4_DRAW_INDX_2, 1), draw.value});
+      // Red occupies bits 0:7, disjoint from depth in bits 8:31.
+      set(XE_GPU_REG_RB_COLOR_MASK, 1);
+      depth.z_write_enable = 0; depth.zfunc = CompareFunction::kLessEqual;
+      set(XE_GPU_REG_RB_DEPTHCONTROL, depth.value);
+      color[0] = .75f;
+      vertex_fetch(memory.GetPhysicalAddress(decal), 12);
+    }
     if (minmax_blend) {
       // MIN against one / MAX against zero must both yield source * alpha.
       // Seed the destination explicitly, independently of EDRAM allocation.
@@ -234,6 +271,14 @@ void Run(rex::system::IGraphicsSystem& gpu, rex::memory::Memory& memory, uint32_
       words.insert(words.end(), {Packet(PM4_EVENT_WRITE_ZPD, 1), ZPASS_DONE});
     }
     words.insert(words.end(), {Packet(PM4_DRAW_INDX_2, 1), draw.value});
+    if (depth_alias) {
+      // A second read must still see the seeded depth after the color alias write.
+      vertex_fetch(memory.GetPhysicalAddress(vertices), 12);
+      reg::RB_DEPTHCONTROL depth{}; depth.z_enable = 1; depth.zfunc = CompareFunction::kGreater;
+      set(XE_GPU_REG_RB_DEPTHCONTROL, depth.value);
+      fp(XE_GPU_REG_SHADER_CONSTANT_000_X + 256 * 4, 1);
+      words.insert(words.end(), {Packet(PM4_DRAW_INDX_2, 1), draw.value});
+    }
     if (sample_counts) {
       set(XE_GPU_REG_RB_SAMPLE_COUNT_ADDR, report + 32);
       words.insert(words.end(), {Packet(PM4_EVENT_WRITE_ZPD, 1), ZPASS_DONE});
@@ -284,6 +329,20 @@ void Run(rex::system::IGraphicsSystem& gpu, rex::memory::Memory& memory, uint32_
     while (*marker != frame + 1 && std::chrono::steady_clock::now() < deadline)
       std::this_thread::sleep_for(std::chrono::microseconds(200));
     Require(*marker == frame + 1, "frame probe completion timeout");
+    if (depth_alias) {
+      for (unsigned y = 0; y < kSide; ++y) for (unsigned x = 0; x < kSide; ++x) {
+        const auto offset = texture_util::GetTiledOffset2D(x, y, kSide, 2);
+        uint32_t pixel;
+        std::memcpy(&pixel, memory.TranslateVirtual(image + uint32_t(offset)), sizeof(pixel));
+        // Depth swaps 40-sample half-tiles. At 4x this is 20 guest pixels;
+        // paired pixels inside the rectangle contain the seeded 0.25 depth.
+        const bool msaa4 = frame % 7 == 3 || frame % 7 == 5;
+        const uint32_t expected = ((frame & 1) ? 0xBF : 0) |
+            (msaa4 && (x < 12 || x >= 20) ? 0x40000000 : 0);
+        if (pixel != expected) std::cerr << "aliased depth pixel " << x << ',' << y << " got=" << std::hex << pixel << " expected=" << expected << std::dec << '\n';
+        Require(pixel == expected, "read-only depth must test disjoint color writes and preserve depth bits");
+      }
+    }
     if (depth_bias) {
       const auto offset = texture_util::GetTiledOffset2D(frame < 2 ? 2 : 24, frame < 2 ? 24 : 16, kSide, 2);
       uint32_t pixel;
@@ -336,7 +395,7 @@ X360N_PROBE_MAIN {
     auto gpu = rex::system::LoadGpuPlugin(xenos ? "xenos" : "native", api == X360N_PROBE_ARG("d3d12") ? "d3d12" : "vulkan");
     Require(bool(gpu), "GPU plugin load");
     uint32_t extra_draws = 0, extra_resolves = 0, edram_base = 0;
-    bool sample_counts = true, clear_after_resolve = false, pipeline_cache = false, minmax_blend = false, vertex_aliases = false, depth_bias = false, depth_unorm = false, color64 = false;
+    bool sample_counts = true, clear_after_resolve = false, pipeline_cache = false, minmax_blend = false, vertex_aliases = false, depth_bias = false, depth_unorm = false, color64 = false, depth_alias = false;
     int first_cvar = xenos ? 5 : 4;
     while (first_cvar < argc) {
       const auto flag = std::filesystem::path(argv[first_cvar]).string();
@@ -347,6 +406,7 @@ X360N_PROBE_MAIN {
       if (flag == "--vertex-aliases") { vertex_aliases = true; ++first_cvar; continue; }
       if (flag == "--depth-bias") { depth_bias = true; sample_counts = false; ++first_cvar; continue; }
       if (flag == "--depth-bias-unorm") { depth_bias = depth_unorm = true; sample_counts = false; ++first_cvar; continue; }
+      if (flag == "--depth-alias") { depth_alias = depth_unorm = true; sample_counts = false; ++first_cvar; continue; }
       if (flag == "--color64") { color64 = true; ++first_cvar; continue; }
       if (flag == "--edram-base" && first_cvar + 1 < argc) {
         const auto base = std::stoull(std::filesystem::path(argv[first_cvar + 1]).string());
@@ -362,6 +422,7 @@ X360N_PROBE_MAIN {
     Require(!minmax_blend || (!pipeline_cache && !extra_draws), "MIN/MAX fixture uses its own two draws per frame");
     Require(!depth_bias || (!minmax_blend && !pipeline_cache && !vertex_aliases && !extra_draws), "depth fixture uses its own draws");
     Require(!color64 || depth_bias, "64bpp color requires the MSAA depth fixture");
+    Require(!depth_alias || (xenos && !depth_bias && !minmax_blend && !pipeline_cache && !vertex_aliases && !extra_draws && !clear_after_resolve), "aliased depth fixture requires only --xenos");
     for (int i = first_cvar; i < argc; ++i) {
       const auto assignment = std::filesystem::path(argv[i]).string();
       const auto equals = assignment.find('=');
@@ -378,7 +439,7 @@ X360N_PROBE_MAIN {
       std::cout << "pipeline storage setup us=" << std::chrono::duration_cast<std::chrono::microseconds>(
           std::chrono::steady_clock::now() - start).count() << '\n';
     }
-    Run(*gpu, *runtime.memory(), frames, extra_draws, extra_resolves, sample_counts, edram_base, clear_after_resolve, pipeline_cache, minmax_blend, vertex_aliases, depth_bias, depth_unorm, color64);
+    Run(*gpu, *runtime.memory(), frames, extra_draws, extra_resolves, sample_counts, edram_base, clear_after_resolve, pipeline_cache, minmax_blend, vertex_aliases, depth_bias, depth_unorm, color64, depth_alias);
     gpu->Shutdown(); shutdown.gpu = nullptr; gpu.reset(); runtime.Shutdown(); rex::FlushLogging();
     std::cout << "PASS frames=" << frames << '\n';
     return 0;

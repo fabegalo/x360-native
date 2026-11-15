@@ -2438,7 +2438,7 @@
       "files": {
         "include/rex/graphics/pipeline/shader/dxbc_translator.h": "e7e9f8273abd1607d3694d6e62e7bd0b1bd6d6c130116ad153ee9e9982bd9eda",
         "include/rex/graphics/pipeline/shader/spirv_translator.h": "6508575d4ac08072bb761866e1fc55f04915685f7a77b2b54065bc1179c7a585",
-        "src/graphics/pipeline/render_target/cache.cpp": "88a53ab7c6d399abd9121ec251a68106cd2b347862301db49d1d3b804d8ddee5",
+        "src/graphics/pipeline/render_target/cache.cpp": "1e00db9254492f568fa0ef91ca73a3c15e461bc6fc4a6041548b0bbbfaa67bea",
         "src/graphics/pipeline/shader/dxbc_translator_om.cpp": "0c636b5ca4894a52b684d3359e6ff4528211bcda107c5861e9e8b008b7e1b08f",
         "src/graphics/pipeline/shader/spirv_translator_rb.cpp": "243b91bb57231249a88beb566d2addd691345dc98a0f95a55881b1b5d50dc099",
         "src/graphics/vulkan/command_processor.cpp": "3f1a10217a6eacf07210d78ff9e36afccf8b18858db2463faefc9cfd8d9cdb3e",
@@ -2575,9 +2575,9 @@
         "src/graphics/vulkan/command_processor.cpp": "ecd1c8b00b26e15212ea5a6158b124ec5d85a652406a62118e42665213051509"
       },
       "files": {
-        "include/rex/graphics/pipeline/render_target/cache.h": "b2a32f7cd35a568980806024aa8746f20ba437c2571625ea4037b7ae737649b4",
+        "include/rex/graphics/pipeline/render_target/cache.h": "28032f58ebcbca25dc141861f04701c823c33c66be936733efa0d72062a51ce3",
         "src/graphics/d3d12/command_processor.cpp": "f7eb6c553b295aeab2279057543fc9b0ebd4fbfaa050b3034277af72878805a4",
-        "src/graphics/pipeline/render_target/cache.cpp": "88a53ab7c6d399abd9121ec251a68106cd2b347862301db49d1d3b804d8ddee5",
+        "src/graphics/pipeline/render_target/cache.cpp": "1e00db9254492f568fa0ef91ca73a3c15e461bc6fc4a6041548b0bbbfaa67bea",
         "src/graphics/vulkan/command_processor.cpp": "3f1a10217a6eacf07210d78ff9e36afccf8b18858db2463faefc9cfd8d9cdb3e"
       },
       "test": "sdkcheck.canary-edram-alias: RenderTargetCache::ColorOverlapsDepthStencil with real PSI keep masks; a stencil-byte-only 8_8_8_8 write keeps depth testing but conflicts with stencil, other channels overlap depth, 64bpp is conservative (Xenia Canary 9da693480, ROV/FSI part only). D3D12/Vulkan wiring is review-only; the host render target (RTV/FBO) part is not ported. No GPU run."
@@ -2674,7 +2674,7 @@
       "files": {
         "include/rex/graphics/d3d12/command_processor.h": "8e4905bd3445ea61751979600e259429db3e504b74e0e23f3dd5c47777fd2cb0",
         "include/rex/graphics/d3d12/render_target_cache.h": "5cf766cfb6c93852ed9dca82c298633644d9a2ee9c6392ae0190aa3085f35e50",
-        "include/rex/graphics/pipeline/render_target/cache.h": "b2a32f7cd35a568980806024aa8746f20ba437c2571625ea4037b7ae737649b4",
+        "include/rex/graphics/pipeline/render_target/cache.h": "28032f58ebcbca25dc141861f04701c823c33c66be936733efa0d72062a51ce3",
         "include/rex/graphics/pipeline/shader/dxbc_translator.h": "e7e9f8273abd1607d3694d6e62e7bd0b1bd6d6c130116ad153ee9e9982bd9eda",
         "include/rex/graphics/pipeline/shader/spirv_translator.h": "6508575d4ac08072bb761866e1fc55f04915685f7a77b2b54065bc1179c7a585",
         "include/rex/graphics/util/draw.h": "929a0c27c7f592a8a425d176dfc74d7e1ef0264de2cccd0cd32bed88e6bb7f22",
@@ -2683,7 +2683,7 @@
         "include/rex/graphics/vulkan/render_target_cache.h": "5f552b8017e8bbde694ceaa5ab823d2944607a8cad2d500d1f6ccf35d8f2a310",
         "src/graphics/d3d12/command_processor.cpp": "f7eb6c553b295aeab2279057543fc9b0ebd4fbfaa050b3034277af72878805a4",
         "src/graphics/d3d12/render_target_cache.cpp": "80b71cf72065b479473d6aa1812d2dec0c7ec7bcaa1817c8d71bb5fef4242976",
-        "src/graphics/pipeline/render_target/cache.cpp": "88a53ab7c6d399abd9121ec251a68106cd2b347862301db49d1d3b804d8ddee5",
+        "src/graphics/pipeline/render_target/cache.cpp": "1e00db9254492f568fa0ef91ca73a3c15e461bc6fc4a6041548b0bbbfaa67bea",
         "src/graphics/pipeline/shader/dxbc_translator.cpp": "4cdb38823f10501f5d76547fbdc35a8492199c88f737de326e347ba92c12b283",
         "src/graphics/pipeline/shader/spirv_translator.cpp": "ead1b15e3478a3bc00ddda0a596edfffc18932b13d762574d10717df573a73a3",
         "src/graphics/util/draw.cpp": "47fbf4233bfeebbfe8058a7a1e7fea45386b623581362b255ea5b0407eb90f25",
@@ -4103,7 +4103,7 @@
   "files": {
     "include/rex/graphics/d3d12/render_target_cache.h": "5cf766cfb6c93852ed9dca82c298633644d9a2ee9c6392ae0190aa3085f35e50",
     "include/rex/graphics/flags.h": "b462736df796e3cc02f7b2bc7ef145093ca4b819d9c5d1e834c3ff77adc69764",
-    "include/rex/graphics/pipeline/render_target/cache.h": "b2a32f7cd35a568980806024aa8746f20ba437c2571625ea4037b7ae737649b4",
+    "include/rex/graphics/pipeline/render_target/cache.h": "28032f58ebcbca25dc141861f04701c823c33c66be936733efa0d72062a51ce3",
     "include/rex/graphics/pipeline/shader/dxbc_translator.h": "e7e9f8273abd1607d3694d6e62e7bd0b1bd6d6c130116ad153ee9e9982bd9eda",
     "include/rex/graphics/pipeline/shader/spirv_translator.h": "6508575d4ac08072bb761866e1fc55f04915685f7a77b2b54065bc1179c7a585",
     "include/rex/graphics/registers.h": "4636b5cc9e851c116d3d339ddc98b190bd7dcf6ea8e6343ec96def31c2e44e91",
@@ -4114,7 +4114,7 @@
     "src/graphics/d3d12/pipeline_cache.cpp": "fd1bea043c69c7b5247e6ebcf56629c83bd32cb3fbd99fe13958532a3c5fade2",
     "src/graphics/d3d12/render_target_cache.cpp": "80b71cf72065b479473d6aa1812d2dec0c7ec7bcaa1817c8d71bb5fef4242976",
     "src/graphics/flags.cpp": "b65d306c9d2ac570dd22e1cdcf4ee5f02fcd867843a12e6dc677eaf535c05bec",
-    "src/graphics/pipeline/render_target/cache.cpp": "88a53ab7c6d399abd9121ec251a68106cd2b347862301db49d1d3b804d8ddee5",
+    "src/graphics/pipeline/render_target/cache.cpp": "1e00db9254492f568fa0ef91ca73a3c15e461bc6fc4a6041548b0bbbfaa67bea",
     "src/graphics/pipeline/shader/dxbc_translator.cpp": "4cdb38823f10501f5d76547fbdc35a8492199c88f737de326e347ba92c12b283",
     "src/graphics/pipeline/shader/dxbc_translator_om.cpp": "0c636b5ca4894a52b684d3359e6ff4528211bcda107c5861e9e8b008b7e1b08f",
     "src/graphics/pipeline/shader/spirv_translator_rb.cpp": "243b91bb57231249a88beb566d2addd691345dc98a0f95a55881b1b5d50dc099",
@@ -4297,7 +4297,7 @@
   "files": {
     "include/rex/graphics/pipeline/shader/dxbc_translator.h": "e7e9f8273abd1607d3694d6e62e7bd0b1bd6d6c130116ad153ee9e9982bd9eda",
     "include/rex/graphics/pipeline/shader/spirv_translator.h": "6508575d4ac08072bb761866e1fc55f04915685f7a77b2b54065bc1179c7a585",
-    "src/graphics/pipeline/render_target/cache.cpp": "88a53ab7c6d399abd9121ec251a68106cd2b347862301db49d1d3b804d8ddee5",
+    "src/graphics/pipeline/render_target/cache.cpp": "1e00db9254492f568fa0ef91ca73a3c15e461bc6fc4a6041548b0bbbfaa67bea",
     "src/graphics/pipeline/shader/dxbc_translator_memexport.cpp": "b17a94880dc456955b4a95bfa3280a4b1866363b34979ec8cc6d6d8bcbe63702",
     "src/graphics/pipeline/shader/dxbc_translator_om.cpp": "0c636b5ca4894a52b684d3359e6ff4528211bcda107c5861e9e8b008b7e1b08f",
     "src/graphics/pipeline/shader/spirv_translator_memexport.cpp": "60e7d3019975875a1c5c323da34856a85b2d5515796888e52ad39674805da4ad",
@@ -4702,6 +4702,19 @@
     "src/graphics/vulkan/texture_cache.cpp": "f69fef09368029762f329bbe698c477378dc151b66d3de39996b044b27a31dc8"
   },
   "test": "Canary 4f04bc7 scaled 3D-as-2D resource extents; focused D3D12/Vulkan PM4 resolve and tfetch regressions."
+},
+{
+  "file": "patches/rexglue-sdk/0291-canary-read-only-depth-alias.patch",
+  "sha256": "f408d24eb58bb7aeca55d7259106882ac4eac4defbb853f95b6f4a0028e376ea",
+  "base_files": {
+    "include/rex/graphics/pipeline/render_target/cache.h": "b2a32f7cd35a568980806024aa8746f20ba437c2571625ea4037b7ae737649b4",
+    "src/graphics/pipeline/render_target/cache.cpp": "88a53ab7c6d399abd9121ec251a68106cd2b347862301db49d1d3b804d8ddee5"
+  },
+  "files": {
+    "include/rex/graphics/pipeline/render_target/cache.h": "28032f58ebcbca25dc141861f04701c823c33c66be936733efa0d72062a51ce3",
+    "src/graphics/pipeline/render_target/cache.cpp": "1e00db9254492f568fa0ef91ca73a3c15e461bc6fc4a6041548b0bbbfaa67bea"
+  },
+  "test": "Canary 4f04bc7 read-only host depth and disjoint stencil-byte color aliases; 242 CPU checks and full-frame D3D12 RTV/ROV and Vulkan FBO/FSI pixel controls across 1x/2x/4x MSAA."
 }
 ]
 },

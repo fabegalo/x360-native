@@ -333,6 +333,42 @@ int main(int argc, char **) {
     }
     REXCVAR_SET(edram_tile_count, original_capacity);
   }
+#ifndef X360N_EDRAM_WINDOW_LEGACY
+  // Read-only depth may share tiles with color writing only stencil bits.
+  for (auto msaa : {xenos::MsaaSamples::k1X, xenos::MsaaSamples::k2X,
+                    xenos::MsaaSamples::k4X}) {
+    RegisterFile r;
+    Setup(r, msaa, 0, 0);
+    reg::RB_COLOR_INFO color{};
+    color.color_format = xenos::ColorRenderTargetFormat::k_8_8_8_8;
+    Set(r, color);
+    Cache cache(r, memory, Cache::Path::kHostRenderTargets);
+    reg::RB_DEPTHCONTROL state{};
+    state.z_enable = state.z_write_enable = 1;
+    check(cache.Update(true, state, 0, shader, 0), "seed aliased depth ownership");
+    state.z_write_enable = 0;
+    check(cache.Update(true, state, 1, shader, 0) && cache.Bound(0).is_depth &&
+              !cache.Bound(1).IsEmpty(),
+          "stencil-byte color alias retains read-only depth");
+    check(cache.Update(true, state, 1, shader, 0) && cache.Bound(0).is_depth,
+          "subsequent stencil-byte write retains current depth bits");
+    const auto resources = cache.creates;
+    cache.ClearCache();
+    check(cache.Update(true, state, 1, shader, 0) && cache.Bound(0).is_depth &&
+              cache.creates == resources,
+          "cache trimming retains the current aliased depth resource");
+    cache.BeginFrame();
+    check(cache.Update(true, state, 15, shader, 0) && cache.Bound(0).IsEmpty(),
+          "color writes overlapping depth cannot use aliased depth");
+    check(cache.Update(true, state, 1, shader, 0) && cache.Bound(0).IsEmpty(),
+          "stale depth is not reused after overlapping color writes");
+    state.z_write_enable = 1;
+    check(cache.Update(true, state, 0, shader, 0), "rewrite invalidated depth ownership");
+    state.z_write_enable = 0;
+    check(cache.Update(true, state, 1, shader, 0) && cache.Bound(0).is_depth,
+          "rewritten depth becomes eligible for disjoint color aliases");
+  }
+#endif
   if (argc > 1) {
     // Identical input for the legacy control and the current benchmark,
     // independent of the depth/stencil combinations exercised above.

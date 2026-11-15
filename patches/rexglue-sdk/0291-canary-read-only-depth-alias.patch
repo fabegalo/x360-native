@@ -1,0 +1,476 @@
+diff --git a/include/rex/graphics/pipeline/render_target/cache.h b/include/rex/graphics/pipeline/render_target/cache.h
+--- a/include/rex/graphics/pipeline/render_target/cache.h
++++ b/include/rex/graphics/pipeline/render_target/cache.h
+@@ -599,6 +599,9 @@
+     // render targets.
+     // Render target this range is last used by.
+     RenderTargetKey render_target;
++    // Host target containing the current depth bits (8:31).
++    // Stencil-only color writes leave it current.
++    RenderTargetKey depth_bits_target;
+     // Last host-side depth render targets that used this range even if it has
+     // been used by a different render target since then, only used if the
+     // respective format has a different encoding on the host. They are tracked
+@@ -621,22 +624,27 @@
+                    RenderTargetKey host_depth_render_target_float24)
+         : end_tiles(end_tiles),
+           render_target(render_target),
++          depth_bits_target(render_target),
+           host_depth_render_target_unorm24(host_depth_render_target_unorm24),
+           host_depth_render_target_float24(host_depth_render_target_float24) {}
+     const RenderTargetKey& GetHostDepthRenderTarget(
+         xenos::DepthRenderTargetFormat resource_format) const {
+-      assert_true(resource_format == xenos::DepthRenderTargetFormat::kD24S8 ||
+-                      resource_format == xenos::DepthRenderTargetFormat::kD24FS8,
+-                  "Illegal resource format");
++      assert_true(
++          resource_format == xenos::DepthRenderTargetFormat::kD24S8 ||
++              resource_format == xenos::DepthRenderTargetFormat::kD24FS8,
++          "Illegal resource format");
+       return resource_format == xenos::DepthRenderTargetFormat::kD24S8
+                  ? host_depth_render_target_unorm24
+                  : host_depth_render_target_float24;
+     }
+-    RenderTargetKey& GetHostDepthRenderTarget(xenos::DepthRenderTargetFormat resource_format) {
++    RenderTargetKey& GetHostDepthRenderTarget(
++        xenos::DepthRenderTargetFormat resource_format) {
+       return const_cast<RenderTargetKey&>(
+-          const_cast<const OwnershipRange*>(this)->GetHostDepthRenderTarget(resource_format));
+-    }
+-    bool IsOwnedBy(RenderTargetKey key, bool host_depth_encoding_different) const {
++          const_cast<const OwnershipRange*>(this)->GetHostDepthRenderTarget(
++              resource_format));
++    }
++    bool IsOwnedBy(RenderTargetKey key,
++                   bool host_depth_encoding_different) const {
+       if (render_target != key) {
+         // Last time used for something else. If it's a depth render target with
+         // different host depth encoding, might have been overwritten by color,
+@@ -652,8 +660,11 @@
+     }
+     bool AreOwnersSame(const OwnershipRange& other_range) const {
+       return render_target == other_range.render_target &&
+-             host_depth_render_target_unorm24 == other_range.host_depth_render_target_unorm24 &&
+-             host_depth_render_target_float24 == other_range.host_depth_render_target_float24;
++             depth_bits_target == other_range.depth_bits_target &&
++             host_depth_render_target_unorm24 ==
++                 other_range.host_depth_render_target_unorm24 &&
++             host_depth_render_target_float24 ==
++                 other_range.host_depth_render_target_float24;
+     }
+   };
+ 
+@@ -679,9 +690,13 @@
+                                             uint32_t length_tiles) const;
+   // Updates ownership_ranges_, adds the transfers needed for the ownership
+   // change to transfers_append_out if it's not null.
++  bool IsHostDepthCurrent(RenderTargetKey depth_target, uint32_t start_tiles_base_relative,
++                          uint32_t length_tiles) const;
++
+   void ChangeOwnership(RenderTargetKey dest, uint32_t start_tiles_base_relative,
+                        uint32_t length_tiles, std::vector<Transfer>* transfers_append_out,
+-                       const Transfer::Rectangle* resolve_clear_cutout = nullptr);
++                       const Transfer::Rectangle* resolve_clear_cutout = nullptr,
++                       bool keep_depth_bits = false);
+ 
+   // If failed to create, may contain nullptr to prevent attempting to create a
+   // render target twice.
+diff --git a/src/graphics/pipeline/render_target/cache.cpp b/src/graphics/pipeline/render_target/cache.cpp
+--- a/src/graphics/pipeline/render_target/cache.cpp
++++ b/src/graphics/pipeline/render_target/cache.cpp
+@@ -39,6 +39,10 @@
+ 
+ REXCVAR_DEFINE_BOOL(direct_host_resolve, true, "GPU",
+                     "Resolve from host render targets directly to shared memory when possible")
++    .lifecycle(rex::cvar::Lifecycle::kHotReload);
++
++REXCVAR_DEFINE_BOOL(aliased_depth_read_only, true, "GPU",
++    "Keep read-only host depth bound when aliased color writes only unused stencil bits")
+     .lifecycle(rex::cvar::Lifecycle::kHotReload);
+ 
+ namespace rex::graphics {
+@@ -383,28 +387,36 @@
+ void RenderTargetCache::ClearCache() {
+   // Keep only render targets currently owning any EDRAM data.
+   if (!render_targets_.empty()) {
+-    std::unordered_set<RenderTargetKey, RenderTargetKey::Hasher> used_render_targets;
++    std::unordered_set<RenderTargetKey, RenderTargetKey::Hasher>
++        used_render_targets;
+     for (const auto& ownership_range_pair : ownership_ranges_) {
+       const OwnershipRange& ownership_range = ownership_range_pair.second;
+       if (!ownership_range.render_target.IsEmpty()) {
+         used_render_targets.emplace(ownership_range.render_target);
+       }
++      if (!ownership_range.depth_bits_target.IsEmpty()) {
++        used_render_targets.emplace(ownership_range.depth_bits_target);
++      }
+       if (!ownership_range.host_depth_render_target_unorm24.IsEmpty()) {
+-        used_render_targets.emplace(ownership_range.host_depth_render_target_unorm24);
++        used_render_targets.emplace(
++            ownership_range.host_depth_render_target_unorm24);
+       }
+       if (!ownership_range.host_depth_render_target_float24.IsEmpty()) {
+-        used_render_targets.emplace(ownership_range.host_depth_render_target_float24);
++        used_render_targets.emplace(
++            ownership_range.host_depth_render_target_float24);
+       }
+     }
+     if (render_targets_.size() != used_render_targets.size()) {
+       typename decltype(render_targets_)::iterator it_next;
+-      for (auto it = render_targets_.begin(); it != render_targets_.end(); it = it_next) {
++      for (auto it = render_targets_.begin(); it != render_targets_.end();
++           it = it_next) {
+         it_next = std::next(it);
+         if (!it->second) {
+           render_targets_.erase(it);
+           continue;
+         }
+-        if (used_render_targets.find(it->second->key()) == used_render_targets.end()) {
++        if (used_render_targets.find(it->second->key()) ==
++            used_render_targets.end()) {
+           delete it->second;
+           render_targets_.erase(it);
+         }
+@@ -532,6 +544,7 @@
+   uint32_t guest_bases[1 + xenos::kMaxColorRenderTargets];
+   uint32_t resource_formats[1 + xenos::kMaxColorRenderTargets];
+   uint32_t rts_are_64bpp = 0;
++  bool rts_keep_depth_bits[1 + xenos::kMaxColorRenderTargets] = {};
+   // Color targets that leave the depth bits untouched.
+   if (is_rasterization_done) {
+     if (normalized_depth_control.z_enable ||
+@@ -574,11 +587,52 @@
+         color_resource_format = GetColorResourceFormat(xenos::GetStorageColorFormat(color_format));
+       }
+       resource_formats[rt_bit_index] = uint32_t(color_resource_format);
++      if (!interlock_barrier_only && !is_64bpp) {
++        float unused_clamp[4];
++        uint32_t keep_mask_low, keep_mask_high;
++        GetPSIColorFormatInfo(color_format,
++                              (normalized_color_mask >> (i * 4)) & 0b1111,
++                              unused_clamp[0], unused_clamp[1], unused_clamp[2],
++                              unused_clamp[3], keep_mask_low, keep_mask_high);
++        rts_keep_depth_bits[rt_bit_index] = !(~keep_mask_low & 0xFFFFFF00u);
++      }
+     }
+   }
+ 
+   uint32_t rts_remaining;
+   uint32_t rt_index;
++
++  bool keep_aliased_depth = false;
++  if (!interlock_barrier_only && REXCVAR_GET(aliased_depth_read_only) &&
++      (depth_and_color_rts_used_bits & 1) &&
++      normalized_depth_control.z_enable &&
++      !normalized_depth_control.z_write_enable &&
++      !normalized_depth_control.stencil_enable) {
++    uint32_t depth_base = guest_bases[0];
++    for (uint32_t i = 1; i < 1 + xenos::kMaxColorRenderTargets; ++i) {
++      if (!(depth_and_color_rts_used_bits & (uint32_t(1) << i)) ||
++          guest_bases[i] != depth_base) {
++        continue;
++      }
++      if (!rts_keep_depth_bits[i]) {
++        keep_aliased_depth = false;
++        break;
++      }
++      keep_aliased_depth = true;
++    }
++  }
++
++  // The color owner can't preserve depth if this draw also writes it.
++  if (!interlock_barrier_only && (depth_and_color_rts_used_bits & 1) &&
++      normalized_depth_control.z_write_enable) {
++    uint32_t depth_base = guest_bases[0];
++    for (uint32_t i = 1; i < 1 + xenos::kMaxColorRenderTargets; ++i) {
++      if ((depth_and_color_rts_used_bits & (uint32_t(1) << i)) &&
++          guest_bases[i] == depth_base) {
++        rts_keep_depth_bits[i] = false;
++      }
++    }
++  }
+ 
+   // Eliminate other bound render targets if their EDRAM base conflicts with
+   // another render target - it's an error in most host implementations to bind
+@@ -610,6 +664,9 @@
+     while (rex::bit_scan_forward(rts_other_remaining, &rt_other_index)) {
+       rts_other_remaining &= ~(uint32_t(1) << rt_other_index);
+       if (guest_bases[rt_other_index] == guest_base) {
++        if (rt_other_index == 0 && keep_aliased_depth) {
++          continue;
++        }
+         depth_and_color_rts_used_bits &= ~(uint32_t(1) << rt_other_index);
+       }
+     }
+@@ -663,6 +720,21 @@
+         height_used, GetRenderTargetHeight(pitch_tiles_at_32bpp, msaa_samples));
+   }
+ 
++  RenderTargetKey rt_keys[1 + xenos::kMaxColorRenderTargets] = {};
++  RenderTarget* rts[1 + xenos::kMaxColorRenderTargets] = {};
++
++  // Read-only aliased depth doesn't participate in the ownership layout.
++  uint32_t ownership_rts_used_bits = depth_and_color_rts_used_bits;
++  if (keep_aliased_depth) {
++    ownership_rts_used_bits &= ~uint32_t(1);
++    RenderTargetKey& depth_key = rt_keys[0];
++    depth_key.base_tiles = edram_bases[0];
++    depth_key.pitch_tiles_at_32bpp = pitch_tiles_at_32bpp;
++    depth_key.msaa_samples = msaa_samples;
++    depth_key.is_depth = 1;
++    depth_key.resource_format = resource_formats[0];
++  }
++
+   // Sorted by EDRAM base and then by index in the pipeline - for simplicity,
+   // treat render targets placed closer to the end of the EDRAM as truncating
+   // the previous one (and in case multiple render targets are placed at the
+@@ -676,7 +748,7 @@
+   // multiple render targets are bound.
+   std::pair<uint32_t, uint32_t> edram_bases_sorted[1 + xenos::kMaxColorRenderTargets];
+   uint32_t edram_bases_sorted_count = 0;
+-  rts_remaining = depth_and_color_rts_used_bits;
++  rts_remaining = ownership_rts_used_bits;
+   while (rex::bit_scan_forward(rts_remaining, &rt_index)) {
+     rts_remaining &= ~(uint32_t(1) << rt_index);
+     edram_bases_sorted[edram_bases_sorted_count++] =
+@@ -713,8 +785,6 @@
+ 
+   // Make sure all the needed render targets are created, and gather lengths of
+   // ranges used by each render target.
+-  RenderTargetKey rt_keys[1 + xenos::kMaxColorRenderTargets];
+-  RenderTarget* rts[1 + xenos::kMaxColorRenderTargets];
+   // Make sure all the needed render targets are created, and gather lengths of
+   // ranges used by each render target.
+   uint32_t rt_lengths_tiles[1 + xenos::kMaxColorRenderTargets];
+@@ -805,6 +875,30 @@
+     }
+   }
+ 
++  if (keep_aliased_depth) {
++    // The host depth must be current for the color owner's whole range.
++    uint32_t alias_start_tiles = 0;
++    uint32_t alias_length_tiles = 0;
++    for (uint32_t i = 0; i < edram_bases_sorted_count; ++i) {
++      if (edram_bases_sorted[i].first == edram_bases[0]) {
++        alias_start_tiles = rt_starts_tiles[i];
++        alias_length_tiles = rt_lengths_tiles[i];
++        break;
++      }
++    }
++    if (IsHostDepthCurrent(rt_keys[0], alias_start_tiles, alias_length_tiles)) {
++      rts[0] = GetOrCreateRenderTarget(rt_keys[0]);
++      if (!rts[0]) {
++        return false;
++      }
++    } else {
++      keep_aliased_depth = false;
++      depth_and_color_rts_used_bits &= ~uint32_t(1);
++      // Don't leave stale accumulated depth bound.
++      are_accumulated_render_targets_valid_ = false;
++    }
++  }
++
+   if (interlock_barrier_only) {
+     // Because a full pixel shader interlock barrier may clear the ownership map
+     // (since it flushes all previous writes, and there's no need for another
+@@ -849,7 +943,8 @@
+     ChangeOwnership(
+         rt_keys[rt_bit_index], rt_starts_tiles[i], rt_lengths_tiles[i],
+         interlock_barrier_only ? nullptr
+-                               : &last_update_transfers_[rt_bit_index]);
++                               : &last_update_transfers_[rt_bit_index], nullptr,
++        rts_keep_depth_bits[rt_bit_index]);
+   }
+ 
+   if (interlock_barrier_only) {
+@@ -1400,23 +1495,71 @@
+   return false;
+ }
+ 
+-void RenderTargetCache::ChangeOwnership(RenderTargetKey dest, uint32_t start_tiles_base_relative,
+-                                        uint32_t length_tiles,
+-                                        std::vector<Transfer>* transfers_append_out,
+-                                        const Transfer::Rectangle* resolve_clear_cutout) {
++bool RenderTargetCache::IsHostDepthCurrent(RenderTargetKey depth_target,
++                                           uint32_t start_tiles_base_relative,
++                                           uint32_t length_tiles) const {
++  assert_true(GetPath() == Path::kHostRenderTargets);
++  assert_true(depth_target.is_depth);
++  assert_true(length_tiles <= edram_tile_count_);
++  if (!length_tiles) {
++    return true;
++  }
++  auto is_current_in_extent = [&](uint32_t extent_start,
++                                  uint32_t extent_end) -> bool {
++    auto it = ownership_ranges_.lower_bound(extent_start);
++    if (it != ownership_ranges_.cbegin()) {
++      auto it_pre = std::prev(it);
++      if (it_pre->second.end_tiles > extent_start) {
++        it = it_pre;
++      }
++    }
++    for (; it != ownership_ranges_.cend() && it->first < extent_end; ++it) {
++      // Empty and invalidated ranges are stale too.
++      if (it->second.depth_bits_target != depth_target) {
++        return false;
++      }
++    }
++    return true;
++  };
++  uint32_t start_tiles = (depth_target.base_tiles + start_tiles_base_relative) &
++                         (edram_tile_count_ - 1);
++  uint32_t end_tiles = start_tiles + length_tiles;
++  if (!is_current_in_extent(start_tiles,
++                            std::min(end_tiles, edram_tile_count_))) {
++    return false;
++  }
++  return end_tiles <= edram_tile_count_ ||
++         is_current_in_extent(0, end_tiles & (edram_tile_count_ - 1));
++}
++
++void RenderTargetCache::ChangeOwnership(
++    RenderTargetKey dest, uint32_t start_tiles_base_relative,
++    uint32_t length_tiles, std::vector<Transfer>* transfers_append_out,
++    const Transfer::Rectangle* resolve_clear_cutout, bool keep_depth_bits) {
+   // edram_tile_count_ with length 0 is fine if both the start and the end
+   // are clamped to edram_tile_count_.
+-  assert_true(start_tiles_base_relative <= (edram_tile_count_ - uint32_t(length_tiles != 0)));
++  assert_true(start_tiles_base_relative <=
++              (edram_tile_count_ - uint32_t(length_tiles != 0)));
+   assert_true(length_tiles <= edram_tile_count_);
+   if (length_tiles == 0) {
+     return;
+   }
+-  // Native scale render targets are kept out of host depth tracking entirely
+-  // so the host depth buffer region only ever holds data at the global scale
+-  // and transfers never read host depth across scale classes. Ranges keep
+-  bool host_depth_encoding_different = dest.is_depth && GetPath() == Path::kHostRenderTargets &&
+-                                       IsHostDepthEncodingDifferent(dest.GetDepthFormat());
+-  auto change_ownership_in_extent = [&](uint32_t extent_start, uint32_t extent_end) {
++  bool host_depth_encoding_different =
++      dest.is_depth &&
++      GetPath() == Path::kHostRenderTargets &&
++      IsHostDepthEncodingDifferent(dest.GetDepthFormat());
++  // Depth targets and ordinary color writes replace the tracked depth bits.
++  bool dest_writes_depth_bits = GetPath() == Path::kHostRenderTargets &&
++                                (dest.is_depth || !keep_depth_bits);
++  // Split even an already-owned range if its depth bits must be refreshed.
++  auto is_claim_needed = [&](const OwnershipRange& range) -> bool {
++    if (!range.IsOwnedBy(dest, host_depth_encoding_different)) {
++      return true;
++    }
++    return dest_writes_depth_bits && range.depth_bits_target != dest;
++  };
++  auto change_ownership_in_extent = [&](uint32_t extent_start,
++                                        uint32_t extent_end) {
+     // The map contains consecutive ranges, merged if the adjacent ones are the
+     // same. Find the range starting at >= the start. A portion of the range
+     // preceding it may be intersecting the render target's range (or even fully
+@@ -1426,9 +1569,9 @@
+     if (it != ownership_ranges_.begin()) {
+       auto it_pre = std::prev(it);
+       if (it_pre->second.end_tiles > extent_start &&
+-          !it_pre->second.IsOwnedBy(dest, host_depth_encoding_different)) {
++          is_claim_needed(it_pre->second)) {
+         // Different render target overlapping the range - split the head.
+-        ownership_ranges_.emplace(extent_start, it_pre->second);
++        ownership_ranges_.emplace_hint(it, extent_start, it_pre->second);
+         it_pre->second.end_tiles = extent_start;
+         // Let the next loop do the transfer and needed merging and splitting
+         // starting from the added tail.
+@@ -1440,7 +1583,7 @@
+         // Outside the touched extent already.
+         break;
+       }
+-      if (it->second.IsOwnedBy(dest, host_depth_encoding_different)) {
++      if (!is_claim_needed(it->second)) {
+         // Already owned by the needed render target - no need to transfer
+         // anything.
+         ++it;
+@@ -1450,7 +1593,7 @@
+       // (split in this case) or within it.
+       if (it->second.end_tiles > extent_end) {
+         // Split the tail.
+-        ownership_ranges_.emplace(extent_end, it->second);
++        ownership_ranges_.emplace_hint(std::next(it), extent_end, it->second);
+         it->second.end_tiles = extent_end;
+       }
+       if (transfers_append_out) {
+@@ -1462,8 +1605,9 @@
+           uint32_t transfer_end_tiles =
+               std::min(it->second.end_tiles, extent_end);
+           if (!resolve_clear_cutout ||
+-              Transfer::GetRangeRectangles(it->first, transfer_end_tiles, dest, edram_tile_count_,
+-                                           nullptr, resolve_clear_cutout)) {
++              Transfer::GetRangeRectangles(it->first, transfer_end_tiles, dest,
++                                           edram_tile_count_, nullptr,
++                                           resolve_clear_cutout)) {
+             RenderTargetKey transfer_host_depth_source =
+                 host_depth_encoding_different
+                     ? it->second.GetHostDepthRenderTarget(dest.GetDepthFormat())
+@@ -1484,7 +1628,8 @@
+               // but host depth is different.
+               transfers_append_out->back().end_tiles = transfer_end_tiles;
+             } else {
+-              auto transfer_source_rt_it = render_targets_.find(transfer_source);
++              auto transfer_source_rt_it =
++                  render_targets_.find(transfer_source);
+               if (transfer_source_rt_it != render_targets_.end()) {
+                 assert_not_null(transfer_source_rt_it->second);
+                 auto transfer_host_depth_source_rt_it =
+@@ -1493,10 +1638,12 @@
+                         : render_targets_.end();
+                 if (transfer_host_depth_source.IsEmpty() ||
+                     transfer_host_depth_source_rt_it != render_targets_.end()) {
+-                  assert_false(transfer_host_depth_source_rt_it != render_targets_.end() &&
++                  assert_false(transfer_host_depth_source_rt_it !=
++                                   render_targets_.end() &&
+                                !transfer_host_depth_source_rt_it->second);
+                   transfers_append_out->emplace_back(
+-                      it->first, transfer_end_tiles, transfer_source_rt_it->second,
++                      it->first, transfer_end_tiles,
++                      transfer_source_rt_it->second,
+                       transfer_host_depth_source_rt_it != render_targets_.end()
+                           ? transfer_host_depth_source_rt_it->second
+                           : nullptr);
+@@ -1508,6 +1655,9 @@
+       }
+       // Claim the current range.
+       it->second.render_target = dest;
++      if (dest_writes_depth_bits) {
++        it->second.depth_bits_target = dest;
++      }
+       if (host_depth_encoding_different) {
+         it->second.GetHostDepthRenderTarget(dest.GetDepthFormat()) = dest;
+       }
+@@ -1515,7 +1665,8 @@
+       std::map<uint32_t, OwnershipRange>::iterator it_next;
+       if (it != ownership_ranges_.end()) {
+         it_next = std::next(it);
+-        if (it_next != ownership_ranges_.end() && it_next->second.AreOwnersSame(it->second)) {
++        if (it_next != ownership_ranges_.end() &&
++            it_next->second.AreOwnersSame(it->second)) {
+           // Merge with the next range.
+           it->second.end_tiles = it_next->second.end_tiles;
+           auto it_after = std::next(it_next);
+@@ -1537,15 +1688,17 @@
+       it = it_next;
+     }
+   };
+-  // start_tiles_base_relative may already be in the next 11 bits - wrap the
++  // start_tiles_base_relative may already be in the next period - wrap the
+   // start tile index to use the same code as if that was not the case.
+   uint32_t start_tiles =
+       (dest.base_tiles + start_tiles_base_relative) & (edram_tile_count_ - 1);
+   uint32_t end_tiles = start_tiles + length_tiles;
+-  change_ownership_in_extent(start_tiles, std::min(end_tiles, edram_tile_count_));
++  change_ownership_in_extent(start_tiles,
++                             std::min(end_tiles, edram_tile_count_));
+   if (end_tiles > edram_tile_count_) {
+     // The ownership change extent goes to the next EDRAM addressing period.
+-    change_ownership_in_extent(0, std::min(end_tiles & (edram_tile_count_ - 1), start_tiles));
++    change_ownership_in_extent(
++        0, std::min(end_tiles & (edram_tile_count_ - 1), start_tiles));
+   }
+ }
+ 
