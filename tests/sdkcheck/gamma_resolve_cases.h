@@ -190,11 +190,22 @@ inline int16_t FixedCode(const Case& c, unsigned p, unsigned sample, unsigned ch
   return c.uniform_fixed16 ? uniform[channel] : FixedSource(p, sample, channel);
 }
 inline unsigned EdramAddress(const Case &c, unsigned x, unsigned y,
-                             unsigned sample) {
+                             unsigned sample, bool legacy_layout = false) {
   unsigned gx = x / c.scale + (c.partial ? 8 : 0),
            gy = y / c.scale + (c.partial ? 8 : 0);
-  unsigned sx = (gx << unsigned(c.msaa == 2)) + (sample >> 1),
-           sy = (gy << unsigned(c.msaa >= 1)) + (sample & 1);
+  // Canary 437a7280: one physical sample layout shared by all MSAA views.
+  unsigned sx = gx, sy = gy;
+  if (legacy_layout) {
+    // Frozen pre-port shader binaries consume the earlier physical layout.
+    sx = (gx << unsigned(c.msaa == 2)) + (sample >> 1);
+    sy = (gy << unsigned(c.msaa >= 1)) + (sample & 1);
+  } else if (c.msaa == 2) {
+    sx = ((gx & ~1u) << 1) | (gx & 1u) | ((sample & 1u) << 1);
+    sy = ((gy & ~1u) << 1) | (gy & 1u) | (sample & 2u);
+  } else if (c.msaa == 1) {
+    sx = (gx & ~2u) | (sample << 1);
+    sy = ((gy & ~1u) << 1) | (gy & 1u) | (gx & 2u);
+  }
   sx = sx * c.scale + x % c.scale;
   sy = sy * c.scale + y % c.scale;
   unsigned tw = (c.source64 ? 40 : 80) * c.scale, th = 16 * c.scale;
@@ -203,7 +214,7 @@ inline unsigned EdramAddress(const Case &c, unsigned x, unsigned y,
           ((sy % th) * tw + sx % tw) * (c.source64 ? 2 : 1)) *
          4;
 }
-inline void Fill(const Case &c, void *input) {
+inline void Fill(const Case &c, void *input, bool legacy_layout = false) {
   auto *bytes = static_cast<unsigned char *>(input);
   for (unsigned y = 0; y < c.height * c.scale; ++y)
     for (unsigned x = 0; x < c.width * c.scale; ++x)
@@ -212,7 +223,7 @@ inline void Fill(const Case &c, void *input) {
         unsigned channels[4];
         for (unsigned ch = 0; ch < 4; ++ch)
           channels[ch] = FixtureChannel(c, p, sample, ch, x % c.scale, y % c.scale);
-        auto address = EdramAddress(c, x, y, sample);
+        auto address = EdramAddress(c, x, y, sample, legacy_layout);
         if (address + (c.source64 ? 8u : 4u) > kEdramBytes)
           throw std::runtime_error("fixed16 fixture EDRAM capacity");
         if (c.fixed16) {

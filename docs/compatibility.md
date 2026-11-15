@@ -41,6 +41,12 @@ capacidade para registradores, shaders, aliases, resolve e clear. Probes em GPU
 real cobrem bases altas, wrap e persistência em D3D12/ROV e Vulkan/FSI; isso não
 certifica jogos nem equivalência completa com o Canary.
 
+O endereçamento MSAA usa a disposição canônica em blocos 4×4 do Canary `4f04bc7`,
+com transferências entre views 1×/2×/4×, dumps e resolves correspondentes. As
+posições programáveis das amostras e as otimizações locais são preservadas.
+Capturas Native usam a versão 4: a EDRAM bruta de versões anteriores exige nova
+captura; os arquivos antigos permanecem intactos.
+
 ## Amostragem de texturas Xenos/Native
 
 As conversões de formatos fixos/inteiros e o arredondamento Q16 seguem o Canary

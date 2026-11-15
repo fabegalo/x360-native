@@ -68,7 +68,7 @@ constexpr uint32_t kSide = 32;
 void Run(rex::system::IGraphicsSystem& gpu, rex::memory::Memory& memory, uint32_t frames,
          uint32_t extra_draws, uint32_t extra_resolves, bool sample_counts, uint32_t edram_base,
          bool clear_after_resolve, bool pipeline_cache, bool minmax_blend, bool vertex_aliases,
-         bool depth_bias, bool depth_unorm) {
+         bool depth_bias, bool depth_unorm, bool color64) {
   const auto ring = memory.SystemHeapAlloc(2u << 20, 4096, rex::memory::kSystemHeapPhysical);
   const auto vertices = memory.SystemHeapAlloc(4096, 4096, rex::memory::kSystemHeapPhysical);
   const auto decal = depth_bias ? memory.SystemHeapAlloc(4096, 4096, rex::memory::kSystemHeapPhysical) : 0;
@@ -125,10 +125,19 @@ void Run(rex::system::IGraphicsSystem& gpu, rex::memory::Memory& memory, uint32_
     set(XE_GPU_REG_VGT_MAX_VTX_INDX, 0xFFFFFF);
     set(XE_GPU_REG_RB_MODECONTROL, uint32_t(EdramMode::kColorDepth));
     set(XE_GPU_REG_RB_SURFACE_INFO, 80); set(XE_GPU_REG_RB_COLOR_MASK, 15); set(XE_GPU_REG_RB_COLOR_INFO, edram_base);
+    if (color64) {
+      reg::RB_COLOR_INFO info{};
+      info.color_base = edram_base;
+      info.color_format = ColorRenderTargetFormat::k_16_16_16_16_FLOAT;
+      set(XE_GPU_REG_RB_COLOR_INFO, info.value);
+    }
     set(XE_GPU_REG_RB_DEPTHCONTROL, 0); set(XE_GPU_REG_RB_DEPTH_INFO, 0);
     if (depth_bias) {
       reg::RB_SURFACE_INFO surface{}; surface.surface_pitch = 80;
-      surface.msaa_samples = MsaaSamples(frame % 3);
+      // Exercise all six directed changes between 1x, 2x and 4x views.
+      constexpr MsaaSamples samples[]{MsaaSamples::k1X, MsaaSamples::k2X, MsaaSamples::k1X,
+          MsaaSamples::k4X, MsaaSamples::k2X, MsaaSamples::k4X, MsaaSamples::k1X};
+      surface.msaa_samples = samples[frame % std::size(samples)];
       set(XE_GPU_REG_RB_SURFACE_INFO, surface.value);
       reg::RB_DEPTH_INFO depth{}; depth.depth_base = 64;
       depth.depth_format = depth_unorm ? DepthRenderTargetFormat::kD24S8 : DepthRenderTargetFormat::kD24FS8;
@@ -327,7 +336,7 @@ X360N_PROBE_MAIN {
     auto gpu = rex::system::LoadGpuPlugin(xenos ? "xenos" : "native", api == X360N_PROBE_ARG("d3d12") ? "d3d12" : "vulkan");
     Require(bool(gpu), "GPU plugin load");
     uint32_t extra_draws = 0, extra_resolves = 0, edram_base = 0;
-    bool sample_counts = true, clear_after_resolve = false, pipeline_cache = false, minmax_blend = false, vertex_aliases = false, depth_bias = false, depth_unorm = false;
+    bool sample_counts = true, clear_after_resolve = false, pipeline_cache = false, minmax_blend = false, vertex_aliases = false, depth_bias = false, depth_unorm = false, color64 = false;
     int first_cvar = xenos ? 5 : 4;
     while (first_cvar < argc) {
       const auto flag = std::filesystem::path(argv[first_cvar]).string();
@@ -338,6 +347,7 @@ X360N_PROBE_MAIN {
       if (flag == "--vertex-aliases") { vertex_aliases = true; ++first_cvar; continue; }
       if (flag == "--depth-bias") { depth_bias = true; sample_counts = false; ++first_cvar; continue; }
       if (flag == "--depth-bias-unorm") { depth_bias = depth_unorm = true; sample_counts = false; ++first_cvar; continue; }
+      if (flag == "--color64") { color64 = true; ++first_cvar; continue; }
       if (flag == "--edram-base" && first_cvar + 1 < argc) {
         const auto base = std::stoull(std::filesystem::path(argv[first_cvar + 1]).string());
         Require(base < 8192, "EDRAM base must fit its guest register");
@@ -351,6 +361,7 @@ X360N_PROBE_MAIN {
     Require(extra_draws <= 4096 && extra_resolves <= 64 && (extra_draws == 0) == (extra_resolves == 0), "invalid --draws/--resolves");
     Require(!minmax_blend || (!pipeline_cache && !extra_draws), "MIN/MAX fixture uses its own two draws per frame");
     Require(!depth_bias || (!minmax_blend && !pipeline_cache && !vertex_aliases && !extra_draws), "depth fixture uses its own draws");
+    Require(!color64 || depth_bias, "64bpp color requires the MSAA depth fixture");
     for (int i = first_cvar; i < argc; ++i) {
       const auto assignment = std::filesystem::path(argv[i]).string();
       const auto equals = assignment.find('=');
@@ -367,7 +378,7 @@ X360N_PROBE_MAIN {
       std::cout << "pipeline storage setup us=" << std::chrono::duration_cast<std::chrono::microseconds>(
           std::chrono::steady_clock::now() - start).count() << '\n';
     }
-    Run(*gpu, *runtime.memory(), frames, extra_draws, extra_resolves, sample_counts, edram_base, clear_after_resolve, pipeline_cache, minmax_blend, vertex_aliases, depth_bias, depth_unorm);
+    Run(*gpu, *runtime.memory(), frames, extra_draws, extra_resolves, sample_counts, edram_base, clear_after_resolve, pipeline_cache, minmax_blend, vertex_aliases, depth_bias, depth_unorm, color64);
     gpu->Shutdown(); shutdown.gpu = nullptr; gpu.reset(); runtime.Shutdown(); rex::FlushLogging();
     std::cout << "PASS frames=" << frames << '\n';
     return 0;

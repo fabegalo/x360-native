@@ -38,7 +38,13 @@ uint host_sample(uint guest) {
   return msaa == 2 ? (guest == 1 ? 3 : guest == 3 ? 1 : guest) : msaa == 1 ? (guest == 0 ? 2 : 1) : 0;
 }
 uint address(uint2 pixel, uint sample) {
-  uint2 sample_xy = (pixel << uint2(msaa == 2, msaa != 0)) + uint2(sample >> 1, sample & 1);
+  uint2 sample_xy = pixel;
+  if (msaa == 2) {
+    sample_xy = ((pixel & ~1u) << 1) | (pixel & 1u) | (uint2(sample & 1, sample >> 1) << 1);
+  } else if (msaa == 1) {
+    sample_xy.x = (pixel.x & ~2u) | ((sample & 1) << 1);
+    sample_xy.y = ((pixel.y & ~1u) << 1) | (pixel.y & 1u) | (pixel.x & 2u);
+  }
   uint2 tile = sample_xy / uint2(80,16);
   uint2 local = sample_xy - tile * uint2(80,16);
   return (((base_tiles + tile.y * pitch_tiles + tile.x) * 1280) + local.y * 80 + local.x) % (EDRAM_TILE_COUNT * 1280);

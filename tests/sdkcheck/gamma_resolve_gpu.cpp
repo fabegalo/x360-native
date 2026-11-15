@@ -377,10 +377,11 @@ public:
   }
   Result Run(const Case &c, bool refill = true, unsigned repeats = 1) {
     auto upload_begin = Clock::now();
+    const bool legacy_layout = !baseline_directory.empty() && resources_ == baseline_directory;
     if (refill)
-      Fill(c, upload_);
+      Fill(c, upload_, legacy_layout);
     auto upload_end = Clock::now();
-    auto constants = c.Constants(!baseline_directory.empty() && resources_ == baseline_directory);
+    auto constants = c.Constants(legacy_layout);
     unsigned scaled = c.scale > 1;
     auto &pso = pipelines_[scaled][OptimizedCase(c) ? 15 : c.log + (c.gamma ? 5 : c.fixed16 ? 10 : 0)];
     if (!pso) {
@@ -671,10 +672,11 @@ public:
   }
   Result Run(const Case &c, bool refill = true, unsigned repeats = 1) {
     auto upload_begin = Clock::now();
+    const bool legacy_layout = !baseline_directory.empty() && resources_ == baseline_directory;
     if (refill)
-      Fill(c, staging_.mapped);
+      Fill(c, staging_.mapped, legacy_layout);
     auto upload_end = Clock::now();
-    auto constants = c.Constants(!baseline_directory.empty() && resources_ == baseline_directory);
+    auto constants = c.Constants(legacy_layout);
     unsigned scaled = c.scale > 1;
     const auto &f = device_->functions();
     auto vk = device_->device();

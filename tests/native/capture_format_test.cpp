@@ -255,6 +255,7 @@ TEST_CASE("files with inconsistent structure are rejected", "[native-capture]") 
   CHECK_FALSE(validate(valid));
   auto old = valid; reinterpret_cast<Header*>(old.data())->version = 1; CHECK(validate(old));
   old = valid; reinterpret_cast<Header*>(old.data())->version = 2; CHECK(validate(old));  // Output was optional.
+  old = valid; reinterpret_cast<Header*>(old.data())->version = 3; CHECK(validate(old));  // Legacy EDRAM sample layout.
   auto magic = valid; magic[0] = 'Y'; CHECK(validate(magic));
   auto frames = valid; reinterpret_cast<Header*>(frames.data())->frames = 2; CHECK(validate(frames));
   auto scale = valid; reinterpret_cast<Header*>(scale.data())->scale_x = 0; CHECK(validate(scale));

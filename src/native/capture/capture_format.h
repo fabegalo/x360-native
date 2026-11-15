@@ -28,7 +28,8 @@ namespace x360n::native::capture {
 inline constexpr char kMagic[8] = {'X', '3', '6', '0', 'N', 'F', 'C', '1'};
 // 2: present records carry the presenter's final output (LUT, overlay, post effect).
 // 3: that output is mandatory; a present without a composed image is invalid.
-inline constexpr uint32_t kVersion = 3;
+// 4: raw EDRAM uses the canonical 4x4 MSAA sample layout.
+inline constexpr uint32_t kVersion = 4;
 inline constexpr uint32_t kPhysicalSize = 0x20000000;
 inline constexpr uint32_t kPageSize = 4096;
 inline constexpr uint32_t kMaxShaderDwords = 65536;

@@ -1,4 +1,4 @@
-# Real-plugin coplanar decals: exact interior pixels, D24/float24 and 1x/2x/4x MSAA.
+# Decals in 32/64bpp color, D24/float24, and all six 1x/2x/4x view transitions.
 file(MAKE_DIRECTORY "${OUTPUT}")
 get_filename_component(probe_directory "${PROBE}" DIRECTORY)
 set(backends native)
@@ -13,10 +13,14 @@ else()
   set(interlock fsi)
 endif()
 foreach(backend IN LISTS backends)
+  foreach(format rgba8 rgba16f)
   foreach(mode truncate round unorm)
     set(flags --depth-bias)
     if(mode STREQUAL "unorm")
       set(flags --depth-bias-unorm)
+    endif()
+    if(format STREQUAL "rgba16f")
+      list(APPEND flags --color64)
     endif()
     list(APPEND flags depth_bias_shader_offset=true depth_float24_convert_in_pixel_shader=true)
     if(mode STREQUAL "round")
@@ -33,18 +37,19 @@ foreach(backend IN LISTS backends)
       list(APPEND flags render_target_path_${API}=${path}
           async_shader_compilation=false readback_resolve=full)
     endif()
-    execute_process(COMMAND "${PROBE}" "${OUTPUT}" "${API}" 6 ${flags}
+    execute_process(COMMAND "${PROBE}" "${OUTPUT}" "${API}" 7 ${flags}
         WORKING_DIRECTORY "${probe_directory}" TIMEOUT 75
         RESULT_VARIABLE result OUTPUT_VARIABLE out ERROR_VARIABLE err)
     file(WRITE "${OUTPUT}/current.log" "${out}${err}")
-    if(NOT result EQUAL 0 OR NOT out MATCHES "PASS frames=6")
-      message(FATAL_ERROR "${backend}/${API}/${mode}: ${result}\n${out}${err}")
+    if(NOT result EQUAL 0 OR NOT out MATCHES "PASS frames=7")
+      message(FATAL_ERROR "${backend}/${API}/${format}/${mode}: ${result}\n${out}${err}")
     endif()
-    message("${backend}/${API}/${mode}: six decal frames passed")
+    message("${backend}/${API}/${format}/${mode}: seven decal frames passed")
+  endforeach()
   endforeach()
 endforeach()
 if(XENOS)
-  execute_process(COMMAND "${PROBE}" "${OUTPUT}" "${API}" 6 --xenos --depth-bias
+  execute_process(COMMAND "${PROBE}" "${OUTPUT}" "${API}" 7 --xenos --depth-bias
       render_target_path_${API}=${host} depth_bias_shader_offset=false
       depth_float24_convert_in_pixel_shader=true depth_float24_round=false
       async_shader_compilation=false readback_resolve=full
@@ -55,7 +60,7 @@ if(XENOS)
       message(FATAL_ERROR "fixed-function negative control did not reproduce: ${result}\n${out}${err}")
     endif()
     message("D3D12 fixed-function negative control reproduced the missing decal")
-  elseif(NOT result EQUAL 0 OR NOT out MATCHES "PASS frames=6")
+  elseif(NOT result EQUAL 0 OR NOT out MATCHES "PASS frames=7")
     message(FATAL_ERROR "existing Vulkan absolute bias regressed: ${result}\n${out}${err}")
   endif()
 endif()
