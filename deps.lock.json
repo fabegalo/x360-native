@@ -3836,7 +3836,7 @@
 },
 {
   "file": "patches/rexglue-sdk/0275-canary-occlusion-queries.patch",
-  "sha256": "7895ae2655cd7acf4839e79244482783596112ae787da7faa0c09b2e7f72dc97",
+  "sha256": "75dbb5b41da275104a19dba06e2225afeccde88dc67f97d17aad3d1c50152a78",
   "base_files": {
     "include/rex/graphics/command_processor.h": "d5fecaf9e36c803dc89e1e20442ad745f247c770c0f4b4a87a1d0704a5585265",
     "include/rex/graphics/d3d12/command_processor.h": "a73c767e214609b31c999625defad743aec8c7185098555b7aeb4d2787c40969",
@@ -3973,7 +3973,7 @@
 },
 {
   "file": "patches/rexglue-sdk/0278-configurable-edram-capacity.patch",
-  "sha256": "a985ffd43302b4fa557fb477be6de0e1738b3877bc7a599164ead5f7243db0fa",
+  "sha256": "95d24fed8a8bbe40caf3dd54c4cc22c13579b9c612278223e713740cc497995e",
   "base_files": {
     "include/rex/graphics/d3d12/render_target_cache.h": "6706e94ae09b43b08ba41e976098d48dc7358e7a53c9c9bb48e40f536b69c34b",
     "include/rex/graphics/flags.h": "4924ca36f7abcc3d19f887aa77f1a296c7bb6f72ed9d99b6bbc1a47822f3cfc4",

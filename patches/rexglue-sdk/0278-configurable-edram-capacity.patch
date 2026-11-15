@@ -185266,11 +185266,13 @@ diff --git a/src/graphics/shaders/resolve_sources/resolve.xesli b/src/graphics/s
          resolve_info.edram_format_ints_log2, sample_index,
          resolve_info.resolution_scale);
 diff --git a/src/graphics/shaders/resolve_sources/resolve_clear_32bpp.cs.xesl b/src/graphics/shaders/resolve_sources/resolve_clear_32bpp.cs.xesl
+new file mode 100644
 --- /dev/null
 +++ b/src/graphics/shaders/resolve_sources/resolve_clear_32bpp.cs.xesl
 @@ -0,0 +1 @@
 +#include "resolve_clear_32bpp.xesli"
 diff --git a/src/graphics/shaders/resolve_sources/resolve_clear_32bpp.xesli b/src/graphics/shaders/resolve_sources/resolve_clear_32bpp.xesli
+new file mode 100644
 --- /dev/null
 +++ b/src/graphics/shaders/resolve_sources/resolve_clear_32bpp.xesli
 @@ -0,0 +1,49 @@
@@ -185324,17 +185326,20 @@ diff --git a/src/graphics/shaders/resolve_sources/resolve_clear_32bpp.xesli b/sr
 +}
 +entry_code_end_compute_xe
 diff --git a/src/graphics/shaders/resolve_sources/resolve_clear_32bpp_scaled.cs.xesl b/src/graphics/shaders/resolve_sources/resolve_clear_32bpp_scaled.cs.xesl
+new file mode 100644
 --- /dev/null
 +++ b/src/graphics/shaders/resolve_sources/resolve_clear_32bpp_scaled.cs.xesl
 @@ -0,0 +1,2 @@
 +#define XE_RESOLVE_RESOLUTION_SCALED
 +#include "resolve_clear_32bpp.xesli"
 diff --git a/src/graphics/shaders/resolve_sources/resolve_clear_64bpp.cs.xesl b/src/graphics/shaders/resolve_sources/resolve_clear_64bpp.cs.xesl
+new file mode 100644
 --- /dev/null
 +++ b/src/graphics/shaders/resolve_sources/resolve_clear_64bpp.cs.xesl
 @@ -0,0 +1 @@
 +#include "resolve_clear_64bpp.xesli"
 diff --git a/src/graphics/shaders/resolve_sources/resolve_clear_64bpp.xesli b/src/graphics/shaders/resolve_sources/resolve_clear_64bpp.xesli
+new file mode 100644
 --- /dev/null
 +++ b/src/graphics/shaders/resolve_sources/resolve_clear_64bpp.xesli
 @@ -0,0 +1,49 @@
@@ -185388,17 +185393,20 @@ diff --git a/src/graphics/shaders/resolve_sources/resolve_clear_64bpp.xesli b/sr
 +}
 +entry_code_end_compute_xe
 diff --git a/src/graphics/shaders/resolve_sources/resolve_clear_64bpp_scaled.cs.xesl b/src/graphics/shaders/resolve_sources/resolve_clear_64bpp_scaled.cs.xesl
+new file mode 100644
 --- /dev/null
 +++ b/src/graphics/shaders/resolve_sources/resolve_clear_64bpp_scaled.cs.xesl
 @@ -0,0 +1,2 @@
 +#define XE_RESOLVE_RESOLUTION_SCALED
 +#include "resolve_clear_64bpp.xesli"
 diff --git a/src/graphics/shaders/resolve_sources/resolve_fast_32bpp_1x2xmsaa.cs.xesl b/src/graphics/shaders/resolve_sources/resolve_fast_32bpp_1x2xmsaa.cs.xesl
+new file mode 100644
 --- /dev/null
 +++ b/src/graphics/shaders/resolve_sources/resolve_fast_32bpp_1x2xmsaa.cs.xesl
 @@ -0,0 +1 @@
 +#include "resolve_fast_32bpp_1x2xmsaa.xesli"
 diff --git a/src/graphics/shaders/resolve_sources/resolve_fast_32bpp_1x2xmsaa.xesli b/src/graphics/shaders/resolve_sources/resolve_fast_32bpp_1x2xmsaa.xesli
+new file mode 100644
 --- /dev/null
 +++ b/src/graphics/shaders/resolve_sources/resolve_fast_32bpp_1x2xmsaa.xesli
 @@ -0,0 +1,103 @@
@@ -185506,17 +185514,20 @@ diff --git a/src/graphics/shaders/resolve_sources/resolve_fast_32bpp_1x2xmsaa.xe
 +}
 +entry_code_end_compute_xe
 diff --git a/src/graphics/shaders/resolve_sources/resolve_fast_32bpp_1x2xmsaa_scaled.cs.xesl b/src/graphics/shaders/resolve_sources/resolve_fast_32bpp_1x2xmsaa_scaled.cs.xesl
+new file mode 100644
 --- /dev/null
 +++ b/src/graphics/shaders/resolve_sources/resolve_fast_32bpp_1x2xmsaa_scaled.cs.xesl
 @@ -0,0 +1,2 @@
 +#define XE_RESOLVE_RESOLUTION_SCALED
 +#include "resolve_fast_32bpp_1x2xmsaa.xesli"
 diff --git a/src/graphics/shaders/resolve_sources/resolve_fast_32bpp_4xmsaa.cs.xesl b/src/graphics/shaders/resolve_sources/resolve_fast_32bpp_4xmsaa.cs.xesl
+new file mode 100644
 --- /dev/null
 +++ b/src/graphics/shaders/resolve_sources/resolve_fast_32bpp_4xmsaa.cs.xesl
 @@ -0,0 +1 @@
 +#include "resolve_fast_32bpp_4xmsaa.xesli"
 diff --git a/src/graphics/shaders/resolve_sources/resolve_fast_32bpp_4xmsaa.xesli b/src/graphics/shaders/resolve_sources/resolve_fast_32bpp_4xmsaa.xesli
+new file mode 100644
 --- /dev/null
 +++ b/src/graphics/shaders/resolve_sources/resolve_fast_32bpp_4xmsaa.xesli
 @@ -0,0 +1,91 @@
@@ -185612,17 +185623,20 @@ diff --git a/src/graphics/shaders/resolve_sources/resolve_fast_32bpp_4xmsaa.xesl
 +}
 +entry_code_end_compute_xe
 diff --git a/src/graphics/shaders/resolve_sources/resolve_fast_32bpp_4xmsaa_scaled.cs.xesl b/src/graphics/shaders/resolve_sources/resolve_fast_32bpp_4xmsaa_scaled.cs.xesl
+new file mode 100644
 --- /dev/null
 +++ b/src/graphics/shaders/resolve_sources/resolve_fast_32bpp_4xmsaa_scaled.cs.xesl
 @@ -0,0 +1,2 @@
 +#define XE_RESOLVE_RESOLUTION_SCALED
 +#include "resolve_fast_32bpp_4xmsaa.xesli"
 diff --git a/src/graphics/shaders/resolve_sources/resolve_fast_64bpp_1x2xmsaa.cs.xesl b/src/graphics/shaders/resolve_sources/resolve_fast_64bpp_1x2xmsaa.cs.xesl
+new file mode 100644
 --- /dev/null
 +++ b/src/graphics/shaders/resolve_sources/resolve_fast_64bpp_1x2xmsaa.cs.xesl
 @@ -0,0 +1 @@
 +#include "resolve_fast_64bpp_1x2xmsaa.xesli"
 diff --git a/src/graphics/shaders/resolve_sources/resolve_fast_64bpp_1x2xmsaa.xesli b/src/graphics/shaders/resolve_sources/resolve_fast_64bpp_1x2xmsaa.xesli
+new file mode 100644
 --- /dev/null
 +++ b/src/graphics/shaders/resolve_sources/resolve_fast_64bpp_1x2xmsaa.xesli
 @@ -0,0 +1,87 @@
@@ -185714,17 +185728,20 @@ diff --git a/src/graphics/shaders/resolve_sources/resolve_fast_64bpp_1x2xmsaa.xe
 +}
 +entry_code_end_compute_xe
 diff --git a/src/graphics/shaders/resolve_sources/resolve_fast_64bpp_1x2xmsaa_scaled.cs.xesl b/src/graphics/shaders/resolve_sources/resolve_fast_64bpp_1x2xmsaa_scaled.cs.xesl
+new file mode 100644
 --- /dev/null
 +++ b/src/graphics/shaders/resolve_sources/resolve_fast_64bpp_1x2xmsaa_scaled.cs.xesl
 @@ -0,0 +1,2 @@
 +#define XE_RESOLVE_RESOLUTION_SCALED
 +#include "resolve_fast_64bpp_1x2xmsaa.xesli"
 diff --git a/src/graphics/shaders/resolve_sources/resolve_fast_64bpp_4xmsaa.cs.xesl b/src/graphics/shaders/resolve_sources/resolve_fast_64bpp_4xmsaa.cs.xesl
+new file mode 100644
 --- /dev/null
 +++ b/src/graphics/shaders/resolve_sources/resolve_fast_64bpp_4xmsaa.cs.xesl
 @@ -0,0 +1 @@
 +#include "resolve_fast_64bpp_4xmsaa.xesli"
 diff --git a/src/graphics/shaders/resolve_sources/resolve_fast_64bpp_4xmsaa.xesli b/src/graphics/shaders/resolve_sources/resolve_fast_64bpp_4xmsaa.xesli
+new file mode 100644
 --- /dev/null
 +++ b/src/graphics/shaders/resolve_sources/resolve_fast_64bpp_4xmsaa.xesli
 @@ -0,0 +1,75 @@
@@ -185804,61 +185821,72 @@ diff --git a/src/graphics/shaders/resolve_sources/resolve_fast_64bpp_4xmsaa.xesl
 +}
 +entry_code_end_compute_xe
 diff --git a/src/graphics/shaders/resolve_sources/resolve_fast_64bpp_4xmsaa_scaled.cs.xesl b/src/graphics/shaders/resolve_sources/resolve_fast_64bpp_4xmsaa_scaled.cs.xesl
+new file mode 100644
 --- /dev/null
 +++ b/src/graphics/shaders/resolve_sources/resolve_fast_64bpp_4xmsaa_scaled.cs.xesl
 @@ -0,0 +1,2 @@
 +#define XE_RESOLVE_RESOLUTION_SCALED
 +#include "resolve_fast_64bpp_4xmsaa.xesli"
 diff --git a/src/graphics/shaders/resolve_sources/resolve_full_128bpp.cs.xesl b/src/graphics/shaders/resolve_sources/resolve_full_128bpp.cs.xesl
+new file mode 100644
 --- /dev/null
 +++ b/src/graphics/shaders/resolve_sources/resolve_full_128bpp.cs.xesl
 @@ -0,0 +1 @@
 +#include "resolve_full_128bpp.xesli"
 diff --git a/src/graphics/shaders/resolve_sources/resolve_full_128bpp_scaled.cs.xesl b/src/graphics/shaders/resolve_sources/resolve_full_128bpp_scaled.cs.xesl
+new file mode 100644
 --- /dev/null
 +++ b/src/graphics/shaders/resolve_sources/resolve_full_128bpp_scaled.cs.xesl
 @@ -0,0 +1,2 @@
 +#define XE_RESOLVE_RESOLUTION_SCALED
 +#include "resolve_full_128bpp.xesli"
 diff --git a/src/graphics/shaders/resolve_sources/resolve_full_16bpp.cs.xesl b/src/graphics/shaders/resolve_sources/resolve_full_16bpp.cs.xesl
+new file mode 100644
 --- /dev/null
 +++ b/src/graphics/shaders/resolve_sources/resolve_full_16bpp.cs.xesl
 @@ -0,0 +1 @@
 +#include "resolve_full_16bpp.xesli"
 diff --git a/src/graphics/shaders/resolve_sources/resolve_full_16bpp_scaled.cs.xesl b/src/graphics/shaders/resolve_sources/resolve_full_16bpp_scaled.cs.xesl
+new file mode 100644
 --- /dev/null
 +++ b/src/graphics/shaders/resolve_sources/resolve_full_16bpp_scaled.cs.xesl
 @@ -0,0 +1,2 @@
 +#define XE_RESOLVE_RESOLUTION_SCALED
 +#include "resolve_full_16bpp.xesli"
 diff --git a/src/graphics/shaders/resolve_sources/resolve_full_32bpp.cs.xesl b/src/graphics/shaders/resolve_sources/resolve_full_32bpp.cs.xesl
+new file mode 100644
 --- /dev/null
 +++ b/src/graphics/shaders/resolve_sources/resolve_full_32bpp.cs.xesl
 @@ -0,0 +1 @@
 +#include "resolve_full_32bpp.xesli"
 diff --git a/src/graphics/shaders/resolve_sources/resolve_full_32bpp_scaled.cs.xesl b/src/graphics/shaders/resolve_sources/resolve_full_32bpp_scaled.cs.xesl
+new file mode 100644
 --- /dev/null
 +++ b/src/graphics/shaders/resolve_sources/resolve_full_32bpp_scaled.cs.xesl
 @@ -0,0 +1,2 @@
 +#define XE_RESOLVE_RESOLUTION_SCALED
 +#include "resolve_full_32bpp.xesli"
 diff --git a/src/graphics/shaders/resolve_sources/resolve_full_64bpp.cs.xesl b/src/graphics/shaders/resolve_sources/resolve_full_64bpp.cs.xesl
+new file mode 100644
 --- /dev/null
 +++ b/src/graphics/shaders/resolve_sources/resolve_full_64bpp.cs.xesl
 @@ -0,0 +1 @@
 +#include "resolve_full_64bpp.xesli"
 diff --git a/src/graphics/shaders/resolve_sources/resolve_full_64bpp_scaled.cs.xesl b/src/graphics/shaders/resolve_sources/resolve_full_64bpp_scaled.cs.xesl
+new file mode 100644
 --- /dev/null
 +++ b/src/graphics/shaders/resolve_sources/resolve_full_64bpp_scaled.cs.xesl
 @@ -0,0 +1,2 @@
 +#define XE_RESOLVE_RESOLUTION_SCALED
 +#include "resolve_full_64bpp.xesli"
 diff --git a/src/graphics/shaders/resolve_sources/resolve_full_8bpp.cs.xesl b/src/graphics/shaders/resolve_sources/resolve_full_8bpp.cs.xesl
+new file mode 100644
 --- /dev/null
 +++ b/src/graphics/shaders/resolve_sources/resolve_full_8bpp.cs.xesl
 @@ -0,0 +1 @@
 +#include "resolve_full_8bpp.xesli"
 diff --git a/src/graphics/shaders/resolve_sources/resolve_full_8bpp_scaled.cs.xesl b/src/graphics/shaders/resolve_sources/resolve_full_8bpp_scaled.cs.xesl
+new file mode 100644
 --- /dev/null
 +++ b/src/graphics/shaders/resolve_sources/resolve_full_8bpp_scaled.cs.xesl
 @@ -0,0 +1,2 @@
@@ -185942,6 +185970,7 @@ diff --git a/src/graphics/shaders/resolve_sources/resolve_msaa_scaled_address.xe
                           uint_x4_xe(((sample_index >> 1u) * sx) << bpp);
        return (tile * (1280u * sx * sy) + uint_x4_xe(row * 80u * sx) + local_x) << 2u;
 diff --git a/src/graphics/shaders/resolve_sources/standard_generated.json b/src/graphics/shaders/resolve_sources/standard_generated.json
+new file mode 100644
 --- /dev/null
 +++ b/src/graphics/shaders/resolve_sources/standard_generated.json
 @@ -0,0 +1,342 @@

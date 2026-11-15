@@ -114,6 +114,16 @@ jobs:
         run: |
           & scripts/devshell.cmd cmake --build --preset win-amd64-release --target rexgpu-native x360n_native_replay x360n_native_frame_probe x360n_native_pipeline_probe x360n_native_pipeline_tests x360n_scaled_texture_offsets_flag_checks
           if ($LASTEXITCODE -ne 0) { throw 'Build failed' }
+          & scripts/devshell.cmd cmake --build --preset win-amd64-release --target x360n_query_state_checks x360n_zpd_report_checks x360n_dxbc_canary_checks x360n_canary_texture_layout_checks x360n_canary_texture_bounds_checks x360n_canary_resolve_dest_checks x360n_gamma_resolve_checks x360n_register_memory_checks
+          if ($LASTEXITCODE -ne 0) { throw 'Canary GPU contract build failed' }
+      - name: Run Canary shader, texture, resolve and query contracts
+        run: |
+          # These checks do not require a hardware adapter. Pixel execution on
+          # hardware is validated separately; WARP is not a fidelity certificate.
+          foreach ($tests in 'sdkcheck[.]canary-query-state', 'sdkcheck[.]canary-zpd-report', 'sdkcheck[.]canary-dxbc', 'sdkcheck[.]canary-texture-layout', 'sdkcheck[.]canary-texture-bounds', 'sdkcheck[.]canary-resolve-dest', 'sdkcheck[.]canary-gamma-resolve', 'sdkcheck[.]register-memory-coherence') {
+            & scripts/devshell.cmd ctest --preset win-amd64-release -R $tests --output-on-failure --no-tests=error
+            if ($LASTEXITCODE -ne 0) { throw "Canary GPU contract $tests failed" }
+          }
       - name: Run capture/replay and pipeline contracts on D3D12 WARP
         run: |
           # devshell.cmd passes arguments through cmd, where '|' is a pipe: one
@@ -198,6 +208,14 @@ jobs:
           $cmake --build --preset linux-amd64-release --target rexgpu-native x360n_native_replay x360n_native_frame_probe \
             x360n_native_pipeline_probe x360n_native_pipeline_tests x360n_native_memexport_probe x360n_native_occlusion_probe \
             x360n_native_vulkan_probe x360n_scaled_texture_offsets_flag_checks
+          $cmake --build --preset linux-amd64-release --target x360n_query_state_checks x360n_zpd_report_checks \
+            x360n_spirv_canary_checks x360n_canary_texture_layout_checks x360n_canary_texture_bounds_checks \
+            x360n_canary_resolve_dest_checks x360n_gamma_resolve_checks x360n_register_memory_checks
+      - name: Run Canary shared contracts and translated shaders on lavapipe
+        run: |
+          .local/toolchains/posix-linux-x64/cmake/bin/ctest --preset linux-amd64-release \
+            -R 'sdkcheck[.]canary-(query-state|zpd-report|spirv|texture-layout|texture-bounds|resolve-dest|gamma-resolve)$|sdkcheck[.]register-memory-coherence$|native[.](scalar-precision|texture-fetch)-.*-vulkan-|native[.]scaled-3d-texture-vulkan$' \
+            --output-on-failure --timeout 180 --no-tests=error
       - name: Run Native contracts on lavapipe
         run: |
           .local/toolchains/posix-linux-x64/cmake/bin/ctest --preset linux-amd64-release \
