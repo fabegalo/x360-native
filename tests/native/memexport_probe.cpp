@@ -423,6 +423,24 @@ void Run(rex::system::IGraphicsSystem& gpu, rex::memory::Memory& memory,
     const float edge = snap ? 3 : 4;
     issue("point coordinate near texel edge", ColorFormat::k_32_32_32_32_FLOAT, SurfaceNumberFormat::kFloat,
           {.4999f,.75f,0,0}, 1, 16, raw({edge,edge,edge,edge}), false);
+    for (bool white : {false, true}) {
+      auto* border_texel = bind(TextureFormat::k_8_8_8_8, 1, 1, false, TextureSign::kUnsigned,
+                                DataDimension::k2DOrStacked);
+      const uint8_t rgba[]{64,128,192,32};
+      std::memcpy(border_texel, rgba, sizeof(rgba));
+      last_texture.clamp_x = ClampMode::kClampToBorder;
+      last_texture.border_color = white ? BorderColor::k_ABGR_White : BorderColor::k_ABGR_Black;
+      for (bool force_w : {false, true, false}) {
+        last_texture.force_bc_w_to_max = force_w;
+        const auto* fetch_words = reinterpret_cast<const uint32_t*>(&last_texture);
+        for (unsigned c = 0; c < 6; ++c)
+          set(XE_GPU_REG_SHADER_CONSTANT_FETCH_00_0 + texture_index * 6 + c, fetch_words[c]);
+        const float rgb = white ? 1.0f : 0.0f;
+        issue(white ? "white border alpha" : force_w ? "forced black border alpha" : "black border alpha",
+              ColorFormat::k_32_32_32_32_FLOAT, SurfaceNumberFormat::kFloat,
+              {-2,.25f,0,0}, 1, 16, raw({rgb,rgb,rgb,white || force_w ? 1.0f : 0.0f}), false);
+      }
+    }
     for (bool mixed : {false, true}) {
       const uint32_t swizzle = mixed ? 4u | (5u << 3) | (4u << 6) | (5u << 9) :
                                       5u | (5u << 3) | (5u << 6) | (5u << 9);

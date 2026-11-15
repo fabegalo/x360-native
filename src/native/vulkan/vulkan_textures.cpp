@@ -604,7 +604,8 @@ VkDescriptorSet VulkanRender::BindTextures(const RegisterFile& regs, rex::memory
     const bool border = info.addressModeU == VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER ||
         info.addressModeV == VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER || info.addressModeW == VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER;
     info.borderColor = border && fetch.border_color == BorderColor::k_ABGR_White
-        ? VK_BORDER_COLOR_FLOAT_OPAQUE_WHITE : VK_BORDER_COLOR_FLOAT_TRANSPARENT_BLACK;
+        ? VK_BORDER_COLOR_FLOAT_OPAQUE_WHITE : border && fetch.force_bc_w_to_max
+        ? VK_BORDER_COLOR_FLOAT_OPAQUE_BLACK : VK_BORDER_COLOR_FLOAT_TRANSPARENT_BLACK;
     if (border && (fetch.border_color == BorderColor::k_ACBYCR_Black || fetch.border_color == BorderColor::k_ACBCRY_Black))
       throw std::runtime_error("Native Vulkan: YCbCr sampler border color is not implemented");
     const std::string key(reinterpret_cast<const char*>(&info), sizeof(info));

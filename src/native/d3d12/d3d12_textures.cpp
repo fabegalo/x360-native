@@ -293,6 +293,7 @@ D3D12Render::TextureTables D3D12Render::BindTextures(const RegisterFile& r, rex:
         case BorderColor::k_ACBCRY_Black: s.BorderColor[1] = s.BorderColor[2] = 0.5f; break;
         default: break;
       }
+      if (border && f.force_bc_w_to_max) s.BorderColor[3] = 1.0f;
       indices.at(b.bindless_descriptor_index) = Sampler(s);
     }
   }

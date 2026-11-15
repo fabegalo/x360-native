@@ -1560,11 +1560,11 @@
       },
       "files": {
         "include/rex/graphics/d3d12/command_processor.h": "8e4905bd3445ea61751979600e259429db3e504b74e0e23f3dd5c47777fd2cb0",
-        "include/rex/graphics/d3d12/texture_cache.h": "0c88603fa7088d42fea41b00e4db547087adbb849c74d60fdb923bf3ff75a3d4",
+        "include/rex/graphics/d3d12/texture_cache.h": "0c6a0e8d223e1ffd566f42df6e8ff5cf69f4333cf6a4b7c9f91ab0991053123a",
         "include/rex/graphics/display_overlay.h": "2841fdc05e4e7c248e9dcfdded2c0edd6503435b22bb1d5af0c8f113a9494cda",
         "src/graphics/command_processor.cpp": "bdf542f05be8776deb176551a4160975f4e73fdd6c06c1a576f085a843a45205",
         "src/graphics/d3d12/command_processor.cpp": "f7eb6c553b295aeab2279057543fc9b0ebd4fbfaa050b3034277af72878805a4",
-        "src/graphics/d3d12/texture_cache.cpp": "6a6669e3e486bd40eb01253d9d6068e4c31d11e669a527de990f38d2c866d8c9",
+        "src/graphics/d3d12/texture_cache.cpp": "f07826a21bfa77ac8bbe4eeb6afd2e622c1de55ec9a06c5219764a1647cabb58",
         "src/graphics/shaders/bytecode/d3d12_5_1/display_overlay_cs.h": "878b1ca19d0b44a2f730a6d8b312f9180f496651c1c3730e8668cace274f2f40",
         "src/graphics/shaders/display_overlay.hlsl": "82f2758310438dc43db3fa7b73d25192d52512007830f9d3c2665e64ba99859f",
         "src/kernel/xboxkrnl/xboxkrnl_video.cpp": "276d4ba7897095494ddd1de6182b3327617273ab29943ec520a5ebf6afb9936c"
@@ -1772,8 +1772,8 @@
       "file": "patches/rexglue-sdk/0140-vulkan-display-overlay.patch",
       "sha256": "3e371c4e562e2678d4ab750c5e26b729219d3fb50f9023905cd5c05698e9fc3e",
       "files": {
-        "include/rex/graphics/vulkan/texture_cache.h": "56a61a90b0afd99d10d3f3405ec141292a2e4f568d7907abdabbbb0382274d04",
-        "src/graphics/vulkan/texture_cache.cpp": "5bd658c580a6eb4b0afa493fff269e8c1fa211d4c34661c244efcd7efecd36dc",
+        "include/rex/graphics/vulkan/texture_cache.h": "fd549503113483ace1efaa07346cca7d7587d15b754f8596e42cdffd344bf129",
+        "src/graphics/vulkan/texture_cache.cpp": "ee7ac23c6f90f834f7e204e8d0ab1fe0e907cc06dd9130624e333b8175f36f40",
         "include/rex/graphics/vulkan/command_processor.h": "d49819109eb333ef9a4ab9795d1e27b06791f57d8fd28a1ded0b2a0e6fcd294e",
         "src/graphics/vulkan/command_processor.cpp": "3f1a10217a6eacf07210d78ff9e36afccf8b18858db2463faefc9cfd8d9cdb3e"
       },
@@ -2400,9 +2400,9 @@
       "files": {
         "include/rex/graphics/pipeline/texture/cache.h": "75b355ee5552f5820cf185c0f61cde8cbb52c3453f8e8cd854d5f9d087f73844",
         "include/rex/graphics/pipeline/texture/util.h": "2d14558199aa513338a8362e99f05baa6aefba5966776c0b451ebcf0f2393bbc",
-        "src/graphics/d3d12/texture_cache.cpp": "6a6669e3e486bd40eb01253d9d6068e4c31d11e669a527de990f38d2c866d8c9",
+        "src/graphics/d3d12/texture_cache.cpp": "f07826a21bfa77ac8bbe4eeb6afd2e622c1de55ec9a06c5219764a1647cabb58",
         "src/graphics/pipeline/texture/util.cpp": "590902f135edf79ae6f31c8762cba02f6a403a7981cb11daa5d640723bac6ded",
-        "src/graphics/vulkan/texture_cache.cpp": "5bd658c580a6eb4b0afa493fff269e8c1fa211d4c34661c244efcd7efecd36dc"
+        "src/graphics/vulkan/texture_cache.cpp": "ee7ac23c6f90f834f7e204e8d0ab1fe0e907cc06dd9130624e333b8175f36f40"
       },
       "test": "sdkcheck.canary-texture-layout: synthetic fetch constants; packed level-0 tails use base_address even with a separate mip_address (Canary 344fca7/ace153cb8), a separate base survives nonzero mip_min_level while an aliased one is dropped (4a863a0e1), 2x1 tails pack along X (344fca7). Sampler base-map level 0 (4a863a0e1) is covered by review only; no GPU run."
     },
@@ -2417,9 +2417,9 @@
       },
       "files": {
         "include/rex/graphics/pipeline/texture/info.h": "63e968581ac4f868f7a718c994a84a46b9cda6964fc51d688ad7ff7259412176",
-        "src/graphics/d3d12/texture_cache.cpp": "6a6669e3e486bd40eb01253d9d6068e4c31d11e669a527de990f38d2c866d8c9",
+        "src/graphics/d3d12/texture_cache.cpp": "f07826a21bfa77ac8bbe4eeb6afd2e622c1de55ec9a06c5219764a1647cabb58",
         "src/graphics/util/draw.cpp": "47fbf4233bfeebbfe8058a7a1e7fea45386b623581362b255ea5b0407eb90f25",
-        "src/graphics/vulkan/texture_cache.cpp": "5bd658c580a6eb4b0afa493fff269e8c1fa211d4c34661c244efcd7efecd36dc"
+        "src/graphics/vulkan/texture_cache.cpp": "ee7ac23c6f90f834f7e204e8d0ab1fe0e907cc06dd9130624e333b8175f36f40"
       },
       "test": "sdkcheck.canary-format-alias: k_8_A/k_8_B/k_8_8_8_8_A textures use k_8/k_8_8_8_8 (GetBaseFormat) and resolves to them write the aliased destination format (Xenia Canary 8322658). Host format table entries are review-only; no GPU run."
     },
@@ -2589,7 +2589,7 @@
         "src/graphics/vulkan/texture_cache.cpp": "d0b0b111dd3abe9f70bd8933f51ece1d904f6a4a793d1febe4385b5821304fee"
       },
       "files": {
-        "src/graphics/vulkan/texture_cache.cpp": "5bd658c580a6eb4b0afa493fff269e8c1fa211d4c34661c244efcd7efecd36dc"
+        "src/graphics/vulkan/texture_cache.cpp": "ee7ac23c6f90f834f7e204e8d0ab1fe0e907cc06dd9130624e333b8175f36f40"
       },
       "test": "sdkcheck.Vulkan-repeat-upload: CPU capture compiles production upload barrier branch, PushImageMemoryBarrier, SubmitBarriers and real DeferredCommandBuffer replay; successive copies of one image retain TRANSFER_WRITE -> TRANSFER_WRITE before the second copy, real layout transitions and default elision remain, and hoisted commands keep order. Red: 2 failures; no Vulkan device/gameplay validation. Xenia Canary c8f214e2a9b0209ca8a0ad6cb3dfb155fe545ae2."
     },
@@ -4672,6 +4672,23 @@
     "src/graphics/util/draw.cpp": "47fbf4233bfeebbfe8058a7a1e7fea45386b623581362b255ea5b0407eb90f25"
   },
   "test": "Canary 4f04bc7 signed 64-bit tiled 3D addresses and bounds; preserve aligned portable callers and explicit guest 32-bit resolve/layout boundaries. Differential large/signed-address negative controls."
+},
+{
+  "file": "patches/rexglue-sdk/0289-canary-forced-border-alpha.patch",
+  "sha256": "fa74aa5aadef63eee7c9ce55ba6fcb3be10c123aeadbbf65acbed0e5036c102b",
+  "base_files": {
+    "include/rex/graphics/d3d12/texture_cache.h": "0c88603fa7088d42fea41b00e4db547087adbb849c74d60fdb923bf3ff75a3d4",
+    "include/rex/graphics/vulkan/texture_cache.h": "56a61a90b0afd99d10d3f3405ec141292a2e4f568d7907abdabbbb0382274d04",
+    "src/graphics/d3d12/texture_cache.cpp": "6a6669e3e486bd40eb01253d9d6068e4c31d11e669a527de990f38d2c866d8c9",
+    "src/graphics/vulkan/texture_cache.cpp": "5bd658c580a6eb4b0afa493fff269e8c1fa211d4c34661c244efcd7efecd36dc"
+  },
+  "files": {
+    "include/rex/graphics/d3d12/texture_cache.h": "0c6a0e8d223e1ffd566f42df6e8ff5cf69f4333cf6a4b7c9f91ab0991053123a",
+    "include/rex/graphics/vulkan/texture_cache.h": "fd549503113483ace1efaa07346cca7d7587d15b754f8596e42cdffd344bf129",
+    "src/graphics/d3d12/texture_cache.cpp": "f07826a21bfa77ac8bbe4eeb6afd2e622c1de55ec9a06c5219764a1647cabb58",
+    "src/graphics/vulkan/texture_cache.cpp": "ee7ac23c6f90f834f7e204e8d0ab1fe0e907cc06dd9130624e333b8175f36f40"
+  },
+  "test": "Canary 4f04bc7 force_bc_w_to_max in D3D12/Vulkan sampler descriptors and independent live sampler keys; retain local Vulkan custom-border feature/quota handling. Native and Xenos GPU border transitions."
 }
 ]
 },
