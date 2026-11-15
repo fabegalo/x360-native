@@ -180,6 +180,9 @@ jobs:
     name: Linux x64 Vulkan (lavapipe)
     runs-on: ubuntu-24.04
     timeout-minutes: 120
+    env:
+      # lavapipe compiles translated shaders on the CPU at first submission.
+      REX_NATIVE_GPU_TIMEOUT_MS: 120000
     steps:
       - name: Check out the exact event commit
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

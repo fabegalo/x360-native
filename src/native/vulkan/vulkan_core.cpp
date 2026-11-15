@@ -14,6 +14,12 @@
 #include <string>
 #include "../../supervisor/fs_io.h"
 REXCVAR_DEFINE_BOOL(native_vulkan_perf, false, "GPU/Native", "Measure Native Vulkan submission, fence, buffer and publication costs");
+#if defined(X360N_NATIVE_D3D12)
+REXCVAR_DECLARE(uint32_t, native_gpu_timeout_ms);
+#else
+REXCVAR_DEFINE_UINT32(native_gpu_timeout_ms, 5000, "GPU/Native",
+    "Limit of one Native GPU fence wait before reporting a timeout (minimum 1000; software adapters may need more)");
+#endif
 
 namespace x360n::native {
 VulkanPerformance& NativeVulkanPerformance() {
@@ -232,9 +238,13 @@ void VulkanSubmissionRing::Wait(uint64_t serial) {
     if (status == VK_NOT_READY) ++perf.blocked_waits;
     else CheckVulkan(status, "measure submission fence");
   }
-  CheckVulkan(device_.functions().vkWaitForFences(device_.device(), 1, &slot.fence,
-                                                VK_TRUE, 5'000'000'000ull),
-              "GPU fence (5 second limit)");
+  const uint32_t limit_ms = std::max(1000u, REXCVAR_GET(native_gpu_timeout_ms));
+  const auto result = device_.functions().vkWaitForFences(
+      device_.device(), 1, &slot.fence, VK_TRUE, uint64_t(limit_ms) * 1'000'000);
+  if (result != VK_SUCCESS) {
+    const auto operation = "GPU fence (" + std::to_string(limit_ms) + " ms limit)";
+    CheckVulkan(result, operation.c_str());
+  }
   completed_ = serial;
   MeasureCompleted();
 }

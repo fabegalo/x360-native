@@ -19,7 +19,7 @@ REXCVAR_DEFINE_BOOL(native_d3d12_striped_sample_counts, true, "GPU/Native",
     "Distributed GPU sample counters with exact reduction at guest read/snapshot boundaries (false selects scalar counters)");
 REXCVAR_DECLARE(std::string, native_pso_dump);
 REXCVAR_DEFINE_UINT32(native_gpu_timeout_ms, 5000, "GPU/Native",
-    "Limit of one D3D12 fence wait before the renderer reports a GPU timeout (minimum 1000; software adapters such as WARP compile shaders at first use and may need more)");
+    "Limit of one Native GPU fence wait before reporting a timeout (minimum 1000; software adapters may need more)");
 namespace x360n::native {
 using namespace rex::graphics;
 using namespace rex::graphics::xenos;
