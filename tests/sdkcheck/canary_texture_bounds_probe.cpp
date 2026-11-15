@@ -52,6 +52,43 @@ int main() {
   }
 
   // c332733af / c9c8e483b: tiled 3D bounds are exact.
+  // Large subresources and signed coordinates keep the Canary 64-bit address.
+  {
+    bool wide = true, signed_offsets = true;
+    for (uint32_t bpb = 0; bpb <= 4; ++bpb) {
+      for (int32_t z : {31, 255, 511, 1023})
+        for (int32_t y : {0, 31, 2047})
+          for (int32_t x : {0, 31, 16383})
+            wide &= texture_util::GetTiledOffset3D(x, y, z, 16384, 2048, bpb) ==
+                    CanaryTiled3D(x, y, z, 16384, 2048, bpb);
+      for (int32_t z : {-5, -1, 0})
+        for (int32_t y : {-33, -1, 0})
+          for (int32_t x : {-65, -1, 0})
+            signed_offsets &= texture_util::GetTiledOffset3D(x, y, z, 16384, 2048, bpb) ==
+                              CanaryTiled3D(x, y, z, 16384, 2048, bpb);
+    }
+    check(wide, "large tiled 3D offsets retain all address bits");
+    check(signed_offsets, "negative tiled 3D offsets retain their signed address");
+    bool bounds = true;
+    for (uint32_t bpb = 0; bpb <= 4; ++bpb)
+      for (uint32_t back : {256u, 512u, 1024u}) {
+        int64_t high = -1, low = INT64_MAX;
+        const uint32_t first = back - 4;
+        for (uint32_t z = first; z < back; ++z)
+          for (uint32_t y = 0; y < 32; ++y)
+            for (uint32_t x = 0; x < 32; ++x) {
+              const auto address = CanaryTiled3D(x, y, z, 16384, 2048, bpb);
+              high = std::max(high, address); low = std::min(low, address);
+            }
+        bounds &= texture_util::GetTiledAddressUpperBound3D(32, 32, back, 16384, 2048, bpb) ==
+                  uint64_t(high + (int64_t(1) << bpb));
+        bounds &= texture_util::GetTiledAddressLowerBound3D(0, 0, first, 16384, 2048, bpb) ==
+                  uint64_t(low);
+      }
+    check(bounds, "large tiled 3D bounds do not wrap at 32 bits");
+  }
+
+  // c332733af / c9c8e483b: tiled 3D bounds are exact.
   {
     bool upper_exact = true, lower_exact = true;
     for (uint32_t bpb = 0; bpb <= 4; ++bpb)

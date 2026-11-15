@@ -1024,7 +1024,7 @@
         "src/graphics/util/draw.cpp": "a3215a0de2f42d9e2235dd062b4cd2c3c0a27effd033c27ab6b6ca1f7673a25b"
       },
       "files": {
-        "src/graphics/util/draw.cpp": "dd72d9ae83073e167da753f61f7a296c68c4f634d1e5723855fa8c34fc309934"
+        "src/graphics/util/draw.cpp": "47fbf4233bfeebbfe8058a7a1e7fea45386b623581362b255ea5b0407eb90f25"
       },
       "test": "sdkcheck.empty-resolve"
     },
@@ -1176,7 +1176,7 @@
       },
       "files": {
         "include/rex/graphics/util/draw.h": "929a0c27c7f592a8a425d176dfc74d7e1ef0264de2cccd0cd32bed88e6bb7f22",
-        "src/graphics/util/draw.cpp": "dd72d9ae83073e167da753f61f7a296c68c4f634d1e5723855fa8c34fc309934",
+        "src/graphics/util/draw.cpp": "47fbf4233bfeebbfe8058a7a1e7fea45386b623581362b255ea5b0407eb90f25",
         "src/graphics/d3d12/command_processor.cpp": "f7eb6c553b295aeab2279057543fc9b0ebd4fbfaa050b3034277af72878805a4",
         "src/graphics/d3d12/render_target_cache.cpp": "80b71cf72065b479473d6aa1812d2dec0c7ec7bcaa1817c8d71bb5fef4242976"
       },
@@ -2399,9 +2399,9 @@
       },
       "files": {
         "include/rex/graphics/pipeline/texture/cache.h": "75b355ee5552f5820cf185c0f61cde8cbb52c3453f8e8cd854d5f9d087f73844",
-        "include/rex/graphics/pipeline/texture/util.h": "343377e8c9dd153967df9cccd32816e4ae37f186ee1062ea15c12e939d2d018e",
+        "include/rex/graphics/pipeline/texture/util.h": "2d14558199aa513338a8362e99f05baa6aefba5966776c0b451ebcf0f2393bbc",
         "src/graphics/d3d12/texture_cache.cpp": "6a6669e3e486bd40eb01253d9d6068e4c31d11e669a527de990f38d2c866d8c9",
-        "src/graphics/pipeline/texture/util.cpp": "3a39452bf8cd28d164fc7ee35d72d2c82da972219f0fb62fad6d88d719fb9226",
+        "src/graphics/pipeline/texture/util.cpp": "590902f135edf79ae6f31c8762cba02f6a403a7981cb11daa5d640723bac6ded",
         "src/graphics/vulkan/texture_cache.cpp": "5bd658c580a6eb4b0afa493fff269e8c1fa211d4c34661c244efcd7efecd36dc"
       },
       "test": "sdkcheck.canary-texture-layout: synthetic fetch constants; packed level-0 tails use base_address even with a separate mip_address (Canary 344fca7/ace153cb8), a separate base survives nonzero mip_min_level while an aliased one is dropped (4a863a0e1), 2x1 tails pack along X (344fca7). Sampler base-map level 0 (4a863a0e1) is covered by review only; no GPU run."
@@ -2418,7 +2418,7 @@
       "files": {
         "include/rex/graphics/pipeline/texture/info.h": "63e968581ac4f868f7a718c994a84a46b9cda6964fc51d688ad7ff7259412176",
         "src/graphics/d3d12/texture_cache.cpp": "6a6669e3e486bd40eb01253d9d6068e4c31d11e669a527de990f38d2c866d8c9",
-        "src/graphics/util/draw.cpp": "dd72d9ae83073e167da753f61f7a296c68c4f634d1e5723855fa8c34fc309934",
+        "src/graphics/util/draw.cpp": "47fbf4233bfeebbfe8058a7a1e7fea45386b623581362b255ea5b0407eb90f25",
         "src/graphics/vulkan/texture_cache.cpp": "5bd658c580a6eb4b0afa493fff269e8c1fa211d4c34661c244efcd7efecd36dc"
       },
       "test": "sdkcheck.canary-format-alias: k_8_A/k_8_B/k_8_8_8_8_A textures use k_8/k_8_8_8_8 (GetBaseFormat) and resolves to them write the aliased destination format (Xenia Canary 8322658). Host format table entries are review-only; no GPU run."
@@ -2454,8 +2454,8 @@
         "src/graphics/pipeline/texture/util.cpp": "781d84584a576e0b2ae6edd5b1a01fac274a247b4406a6fa4741295eb0aaa939"
       },
       "files": {
-        "include/rex/graphics/pipeline/texture/util.h": "343377e8c9dd153967df9cccd32816e4ae37f186ee1062ea15c12e939d2d018e",
-        "src/graphics/pipeline/texture/util.cpp": "3a39452bf8cd28d164fc7ee35d72d2c82da972219f0fb62fad6d88d719fb9226"
+        "include/rex/graphics/pipeline/texture/util.h": "2d14558199aa513338a8362e99f05baa6aefba5966776c0b451ebcf0f2393bbc",
+        "src/graphics/pipeline/texture/util.cpp": "590902f135edf79ae6f31c8762cba02f6a403a7981cb11daa5d640723bac6ded"
       },
       "test": "sdkcheck.canary-texture-bounds: SDK 3D tiling equals Canary Tiled3D; tiled 3D upper/lower bounds equal exhaustive max/min (c332733af, c9c8e483b); 2D array mips align to 4 slices and volume mips halve depth (bc6b7a020); packed level-0 volume base uses power-of-two depth (81e3deaee); linear 96bpp mip rows are 32 blocks (19da17403); packed 1x1 Z mips count the tail base (bc6b7a020). No GPU run."
     },
@@ -2466,7 +2466,7 @@
         "src/graphics/util/draw.cpp": "a5238c8147d2dc12afbcfd80809f742e2eaa109480708939ce9ce9e203417a66"
       },
       "files": {
-        "src/graphics/util/draw.cpp": "dd72d9ae83073e167da753f61f7a296c68c4f634d1e5723855fa8c34fc309934"
+        "src/graphics/util/draw.cpp": "47fbf4233bfeebbfe8058a7a1e7fea45386b623581362b255ea5b0407eb90f25"
       },
       "test": "sdkcheck.canary-resolve-dest: a 2D tiled resolve whose RB_COPY_DEST_BASE is advanced by N 8bpp/16bpp macro tiles yields the same destination base, offsets and extents as the copy N*32 pixels right of the 4 KB-aligned base (Xenia Canary 89609297c). No GPU run."
     },
@@ -2518,7 +2518,7 @@
       },
       "files": {
         "include/rex/graphics/util/draw.h": "929a0c27c7f592a8a425d176dfc74d7e1ef0264de2cccd0cd32bed88e6bb7f22",
-        "src/graphics/util/draw.cpp": "dd72d9ae83073e167da753f61f7a296c68c4f634d1e5723855fa8c34fc309934"
+        "src/graphics/util/draw.cpp": "47fbf4233bfeebbfe8058a7a1e7fea45386b623581362b255ea5b0407eb90f25"
       },
       "test": "sdkcheck.canary-viewport: a 1280-wide viewport drawn with window offset x -608 (4D5307DF's right tile in Canary) starts at -608 with the full extent and the same NDC transform as the unoffset tile (Xenia Canary 6579cc2a4). No GPU run."
     },
@@ -2529,7 +2529,7 @@
         "src/graphics/util/draw.cpp": "3e9569abdfd1c424ab6870a3af51f46e0fe9cb3e03d4be1676df0a498975bd94"
       },
       "files": {
-        "src/graphics/util/draw.cpp": "dd72d9ae83073e167da753f61f7a296c68c4f634d1e5723855fa8c34fc309934"
+        "src/graphics/util/draw.cpp": "47fbf4233bfeebbfe8058a7a1e7fea45386b623581362b255ea5b0407eb90f25"
       },
       "test": "sdkcheck.canary-resolve-dest: a volume resolve with copy_dest_height 192 and RB_COPY_SURFACE_SLICE = pitch * 256 uses a 256-row slice (same base and extents as copy_dest_height 256), while 2D resolves keep copy_dest_height (Xenia Canary d8731edc9). No GPU run."
     },
@@ -2639,7 +2639,7 @@
         "src/graphics/flags.cpp": "b65d306c9d2ac570dd22e1cdcf4ee5f02fcd867843a12e6dc677eaf535c05bec",
         "src/graphics/pipeline/shader/dxbc_translator_om.cpp": "0c636b5ca4894a52b684d3359e6ff4528211bcda107c5861e9e8b008b7e1b08f",
         "src/graphics/pipeline/shader/spirv_translator_rb.cpp": "243b91bb57231249a88beb566d2addd691345dc98a0f95a55881b1b5d50dc099",
-        "src/graphics/util/draw.cpp": "dd72d9ae83073e167da753f61f7a296c68c4f634d1e5723855fa8c34fc309934",
+        "src/graphics/util/draw.cpp": "47fbf4233bfeebbfe8058a7a1e7fea45386b623581362b255ea5b0407eb90f25",
         "src/graphics/vulkan/command_processor.cpp": "3f1a10217a6eacf07210d78ff9e36afccf8b18858db2463faefc9cfd8d9cdb3e",
         "src/graphics/vulkan/deferred_command_buffer.cpp": "eecdf48d29e7cc8da0d5fdf1accfb27083cffaf0d8c8b6e04de1245f52411aa5",
         "src/graphics/vulkan/pipeline_cache.cpp": "95a981f02ee038ef082225f5f6f768db28a866ea1670a67b2ce4feb08057354d",
@@ -2686,7 +2686,7 @@
         "src/graphics/pipeline/render_target/cache.cpp": "88a53ab7c6d399abd9121ec251a68106cd2b347862301db49d1d3b804d8ddee5",
         "src/graphics/pipeline/shader/dxbc_translator.cpp": "4cdb38823f10501f5d76547fbdc35a8492199c88f737de326e347ba92c12b283",
         "src/graphics/pipeline/shader/spirv_translator.cpp": "ead1b15e3478a3bc00ddda0a596edfffc18932b13d762574d10717df573a73a3",
-        "src/graphics/util/draw.cpp": "dd72d9ae83073e167da753f61f7a296c68c4f634d1e5723855fa8c34fc309934",
+        "src/graphics/util/draw.cpp": "47fbf4233bfeebbfe8058a7a1e7fea45386b623581362b255ea5b0407eb90f25",
         "src/graphics/util/draw_extent_estimator.cpp": "2a3047c17a116896d6074fc7aad475dc79e25b089c6067dc9c27c0957dcd233a",
         "src/graphics/vulkan/command_processor.cpp": "3f1a10217a6eacf07210d78ff9e36afccf8b18858db2463faefc9cfd8d9cdb3e",
         "src/graphics/vulkan/render_target_cache.cpp": "f8c3bd275c826e24d8d90e2dd4f23e3424fe2364542f156e837afce9250e1e71"
@@ -2752,7 +2752,7 @@
         "src/graphics/shaders/vulkan_spirv/resolve_gamma_64bpp_scaled_cs.h": "e0be892a0b17d601aa2adba5742d884769dd47af7763ee0424f5bc570c3d104a",
         "src/graphics/shaders/vulkan_spirv/resolve_gamma_8bpp_cs.h": "e493bfa039e1dfe35ca71c8caf954a7371ca7b54c660ec0d7a4fadcdbded3339",
         "src/graphics/shaders/vulkan_spirv/resolve_gamma_8bpp_scaled_cs.h": "c71a75fed7602a9b9e751887112369e9d47230bba86ca9ecb5907a0b237bb099",
-        "src/graphics/util/draw.cpp": "dd72d9ae83073e167da753f61f7a296c68c4f634d1e5723855fa8c34fc309934",
+        "src/graphics/util/draw.cpp": "47fbf4233bfeebbfe8058a7a1e7fea45386b623581362b255ea5b0407eb90f25",
         "src/graphics/vulkan/render_target_cache.cpp": "f8c3bd275c826e24d8d90e2dd4f23e3424fe2364542f156e837afce9250e1e71"
       },
       "test": "Gamma-only Xenos resolve pipelines: decode 10-bit PWL codes, average, requantize before exp_bias, preserve fixed alpha and original SDK EDRAM/scaled destination layouts. Twenty reproducibly generated DXBC/SPIR-V resources; non-gamma resources and shared push-constant ABI unchanged. Canary 534aeb64; focused independent CPU oracle and D3D12/Vulkan compute readback regression."
@@ -3916,7 +3916,7 @@
     "src/graphics/pipeline/shader/shader.cpp": "76e86f347ab0611f37763e6f7054d1addc4ae7885c5ec297afea0deab36a78c7",
     "src/graphics/pipeline/shader/spirv.cpp": "03afa3a37f08a78c312c0d548ddf9e8310f85e51f7e6c5edb8d74310b4bbb37f",
     "src/graphics/pipeline/shader/spirv_translator.cpp": "ead1b15e3478a3bc00ddda0a596edfffc18932b13d762574d10717df573a73a3",
-    "src/graphics/util/draw.cpp": "dd72d9ae83073e167da753f61f7a296c68c4f634d1e5723855fa8c34fc309934",
+    "src/graphics/util/draw.cpp": "47fbf4233bfeebbfe8058a7a1e7fea45386b623581362b255ea5b0407eb90f25",
     "src/graphics/vulkan/deferred_command_buffer.cpp": "eecdf48d29e7cc8da0d5fdf1accfb27083cffaf0d8c8b6e04de1245f52411aa5",
     "src/graphics/vulkan/pipeline_cache.cpp": "95a981f02ee038ef082225f5f6f768db28a866ea1670a67b2ce4feb08057354d",
     "src/graphics/vulkan/query_pool.cpp": "db445986cb99dfecd00eefcc45a81c226c0dc4d4c838a669d095370b067147fe",
@@ -4250,7 +4250,7 @@
     "src/graphics/shaders/vulkan_spirv/resolve_gamma_8bpp_cs.h": "e493bfa039e1dfe35ca71c8caf954a7371ca7b54c660ec0d7a4fadcdbded3339",
     "src/graphics/shaders/vulkan_spirv/resolve_gamma_8bpp_scaled_cs.h": "c71a75fed7602a9b9e751887112369e9d47230bba86ca9ecb5907a0b237bb099",
     "src/graphics/shaders/vulkan_spirv/resolve_msaa_scaled_16bpp_cs.h": "a79e223502cbc78077533cb66ac50d8ffcfa1e6d537420cde8f9894e88582bf6",
-    "src/graphics/util/draw.cpp": "dd72d9ae83073e167da753f61f7a296c68c4f634d1e5723855fa8c34fc309934",
+    "src/graphics/util/draw.cpp": "47fbf4233bfeebbfe8058a7a1e7fea45386b623581362b255ea5b0407eb90f25",
     "src/graphics/vulkan/command_processor.cpp": "3f1a10217a6eacf07210d78ff9e36afccf8b18858db2463faefc9cfd8d9cdb3e",
     "src/graphics/vulkan/pipeline_cache.cpp": "95a981f02ee038ef082225f5f6f768db28a866ea1670a67b2ce4feb08057354d",
     "src/graphics/vulkan/render_target_cache.cpp": "f8c3bd275c826e24d8d90e2dd4f23e3424fe2364542f156e837afce9250e1e71"
@@ -4410,7 +4410,7 @@
     "include/rex/graphics/pipeline/shader/spirv_translator.h": "6508575d4ac08072bb761866e1fc55f04915685f7a77b2b54065bc1179c7a585",
     "include/rex/graphics/pipeline/texture/cache.h": "75b355ee5552f5820cf185c0f61cde8cbb52c3453f8e8cd854d5f9d087f73844",
     "include/rex/graphics/pipeline/texture/info.h": "63e968581ac4f868f7a718c994a84a46b9cda6964fc51d688ad7ff7259412176",
-    "include/rex/graphics/pipeline/texture/util.h": "343377e8c9dd153967df9cccd32816e4ae37f186ee1062ea15c12e939d2d018e",
+    "include/rex/graphics/pipeline/texture/util.h": "2d14558199aa513338a8362e99f05baa6aefba5966776c0b451ebcf0f2393bbc",
     "include/rex/graphics/xenos.h": "45f5e32ba29341ef2c8057abfceb3871368080a4cab028e5ce263329fc20fe2f",
     "src/graphics/d3d12/command_processor.cpp": "f7eb6c553b295aeab2279057543fc9b0ebd4fbfaa050b3034277af72878805a4",
     "src/graphics/flags.cpp": "b65d306c9d2ac570dd22e1cdcf4ee5f02fcd867843a12e6dc677eaf535c05bec",
@@ -4421,7 +4421,7 @@
     "src/graphics/pipeline/shader/translator.cpp": "4e6b758b80fe98cd427a96afd408c9077676025bf1a02e9b603a26f2aeb8ac3e",
     "src/graphics/pipeline/texture/cache.cpp": "9f4a292e21ef512b8b3462cc11f572803f5afb7a21c1055ff2b6703da44030d5",
     "src/graphics/pipeline/texture/info_formats.cpp": "25227ee866b23eecf904d6f46d1d64f8c25a13e21bd448786efc21e1dfafd781",
-    "src/graphics/pipeline/texture/util.cpp": "3a39452bf8cd28d164fc7ee35d72d2c82da972219f0fb62fad6d88d719fb9226",
+    "src/graphics/pipeline/texture/util.cpp": "590902f135edf79ae6f31c8762cba02f6a403a7981cb11daa5d640723bac6ded",
     "src/graphics/vulkan/command_processor.cpp": "3f1a10217a6eacf07210d78ff9e36afccf8b18858db2463faefc9cfd8d9cdb3e"
   },
   "test": "Canary 4f04bc7 fixed texture conversion, point-coordinate snapping and wide 1D mapping; preserve local UNORM8 and scaled-offset options."
@@ -4461,7 +4461,7 @@
     "src/graphics/pipeline/shader/dxbc_translator_om.cpp": "0c636b5ca4894a52b684d3359e6ff4528211bcda107c5861e9e8b008b7e1b08f",
     "src/graphics/pipeline/shader/spirv_translator.cpp": "ead1b15e3478a3bc00ddda0a596edfffc18932b13d762574d10717df573a73a3",
     "src/graphics/pipeline/shader/spirv_translator_rb.cpp": "243b91bb57231249a88beb566d2addd691345dc98a0f95a55881b1b5d50dc099",
-    "src/graphics/util/draw.cpp": "dd72d9ae83073e167da753f61f7a296c68c4f634d1e5723855fa8c34fc309934",
+    "src/graphics/util/draw.cpp": "47fbf4233bfeebbfe8058a7a1e7fea45386b623581362b255ea5b0407eb90f25",
     "src/graphics/vulkan/command_processor.cpp": "3f1a10217a6eacf07210d78ff9e36afccf8b18858db2463faefc9cfd8d9cdb3e",
     "src/graphics/vulkan/pipeline_cache.cpp": "95a981f02ee038ef082225f5f6f768db28a866ea1670a67b2ce4feb08057354d"
   },
@@ -4657,6 +4657,21 @@
     "src/graphics/vulkan/render_target_cache.cpp": "f8c3bd275c826e24d8d90e2dd4f23e3424fe2364542f156e837afce9250e1e71"
   },
   "test": "Canary 4f04bc7 canonical EDRAM sample coordinates across resolves, clears, interlock and host transfers/dumps; preserve final programmable sample positions and local 10/40 MiB wrapping."
+},
+{
+  "file": "patches/rexglue-sdk/0288-canary-wide-tiled-3d-addresses.patch",
+  "sha256": "f8ad93230f606b682b282888173d1043ee0b725934a0dfa57a180e897eecfd35",
+  "base_files": {
+    "include/rex/graphics/pipeline/texture/util.h": "343377e8c9dd153967df9cccd32816e4ae37f186ee1062ea15c12e939d2d018e",
+    "src/graphics/pipeline/texture/util.cpp": "3a39452bf8cd28d164fc7ee35d72d2c82da972219f0fb62fad6d88d719fb9226",
+    "src/graphics/util/draw.cpp": "dd72d9ae83073e167da753f61f7a296c68c4f634d1e5723855fa8c34fc309934"
+  },
+  "files": {
+    "include/rex/graphics/pipeline/texture/util.h": "2d14558199aa513338a8362e99f05baa6aefba5966776c0b451ebcf0f2393bbc",
+    "src/graphics/pipeline/texture/util.cpp": "590902f135edf79ae6f31c8762cba02f6a403a7981cb11daa5d640723bac6ded",
+    "src/graphics/util/draw.cpp": "47fbf4233bfeebbfe8058a7a1e7fea45386b623581362b255ea5b0407eb90f25"
+  },
+  "test": "Canary 4f04bc7 signed 64-bit tiled 3D addresses and bounds; preserve aligned portable callers and explicit guest 32-bit resolve/layout boundaries. Differential large/signed-address negative controls."
 }
 ]
 },
