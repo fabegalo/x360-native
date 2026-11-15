@@ -4,7 +4,7 @@ Single policy for Claude, Codex and other agents. `CLAUDE.md` is only a pointer 
 
 ## 1. Shared architecture — mandatory
 
-**x360-native is the reference architecture for x360-native, ps2-native and xboxone-native. All three must use the same modules, boundaries and lifecycle, not merely similar goals.**
+**x360-native is the reference architecture for x360-native, ps2-native, xone-native and ps3-native. All four share the same seven logical boundaries, contracts and original-system -> game -> original-system lifecycle, not identical CPU or platform implementations.**
 
 | Module | Common responsibility |
 | --- | --- |
@@ -15,6 +15,8 @@ Single policy for Claude, Codex and other agents. `CLAUDE.md` is only a pointer 
 | Original GPU / Native GPU | Fidelity path and PC-enhanced path, sharing guest contracts; neither may drop effects or change game logic. |
 | Original system and games | Authentic dashboard/Browser, local state and generic game support, not individual game ports or a mock shell. |
 | Session supervisor / host adapters | Original system <-> game lifecycle, each console's real menu/return behavior, shutdown and recovery; OS-specific implementation behind shared interfaces. |
+
+**Universal compatibility rule:** A newly tested title is evidence about shared CPU/AOT, GPU, kernel/HLE, devices and session behavior, not a separate game port. Fix the demonstrated root cause in the shared component and add a reusable regression; use title/revision-specific metadata or behavior only where an original difference is verified. Never treat an imported or compiled title as playable without end-to-end evidence.
 
 Instruction sets, firmware and API implementations differ inside these boundaries; that is not permission to omit HLE, invent another architecture or duplicate runtimes. One logical console state serves both GPU paths. Windows x64/ARM64, Linux x64/ARM64 and macOS Intel/Apple Silicon are targets; Steam Deck uses Linux. Builds/packages are not runtime certification. Missing modules remain explicit implementation gaps, not claims of existing functionality.
 
@@ -34,6 +36,10 @@ The common architecture above is already requested. Its unvalidated internal cho
 - Use existing presets, `scripts/devshell.cmd` on Windows and `scripts/bootstrap.sh` on POSIX as applicable; preserve shared SDK generations and verified path/junction ownership. These commands do not authorize installations. Consult only relevant sections of `STATUS.md`, `docs/architecture.md`, `docs/compatibility.md`, `docs/performance.md` or build guides; preserve `THIRD_PARTY_NOTICES.md`.
 
 ## 4. Implementation, correctness and validation
+
+**Ponytail `full` means the smallest complete outcome, not the smallest isolated diff.** Establish the requested functional acceptance path before editing. Fix the first proven shared blocker, inspect affected callers and tests, then continue through related blockers in that same authorized scope until the behavior works or a real limit stops progress (missing authorized inputs, permissions, architecture approval, environment or budget). Do not repeatedly replan, ask again about settled decisions or end a functional task with only a diagnosis, a successful build or a synthetic fixture. Do not expand into unrelated features. If blocked, commit only independently correct, tested progress and report the precise remaining boundary; never invent evidence.
+
+**Validation cadence:** During investigation use the cheapest focused compile, negative control or regression that can falsify the hypothesis, reusing incremental builds and existing artifacts. Validate the affected integration path after coherent fixes when real inputs and permissions are available; reserve broad test matrices and CI for affected integration or publication boundaries, not every small edit. Never rerun builds or game sessions for instructions-only changes. Keep guest-visible state, timing, output and renderer fidelity intact.
 
 Inspect the actual revision, working tree and affected callers before editing; with API-only edits, verify current file SHAs and reconcile conflicts. Preserve concurrent changes. Reuse existing helpers and build/test interfaces; no speculative frameworks, second launcher, profiler or runtime. Implement and validate the requested path instead of repeatedly producing plans; change the diagnostic method when a hypothesis fails.
 
