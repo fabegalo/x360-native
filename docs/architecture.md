@@ -271,6 +271,7 @@ diferentes têm executáveis diferentes. Pinyon Shift faz o mesmo
 | D5 | Materializar 15 symlinks do libmspack como cópias verificadas (`scripts/setup/materialize-symlinks.ps1`) | sem Developer Mode a conta não cria symlinks; o git os grava como texto e `lzxd.c` não compila | `git -C external/rexglue-sdk/thirdparty/libmspack checkout -- .` |
 | D6 | O supervisor não liga o runtime | identificar e supervisionar não precisa de memória de guest; a DLL do runtime acoplaria o supervisor a cada título | ligar quando houver necessidade demonstrada |
 | D7 | Teste PowerPC próprio pelo pipeline oficial `recompile-tests` | único caminho do SDK que recompila e executa código PPC sem XEX | — |
+| D8 | Migração para as interfaces oficiais do ReXGlue v0.11.0 aprovada pelo mantenedor em 2026-11-15: `App/TitleApp`, interfaces de runtime, tabela de handles e módulos oficiais | Preservar os sete módulos lógicos, um único runtime, Xenos/Native e as adaptações locais durante o porte; o pin v0.10.0 permanece vigente até a publicação da candidata verificada | Reavaliar com o mantenedor antes de mudar essas fronteiras |
 
 ## 7. Problemas conhecidos no SDK v0.10.0 (observados aqui)
 
