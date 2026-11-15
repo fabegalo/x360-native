@@ -113,7 +113,8 @@ void CheckReadbackEpoch(rex::memory::Memory& memory) {
   Require(*memory.TranslateVirtual<uint32_t*>(page + 16) == new_result, "current GPU snapshot was lost");
 }
 void Run(rex::system::IGraphicsSystem& gpu, rex::memory::Memory& memory,
-         bool precision, bool mulsc_rtz, bool textures, bool snap, bool legacy_unorm8) {
+         bool precision, bool mulsc_rtz, bool textures, bool snap, bool legacy_unorm8,
+         bool scaled_3d) {
   CheckReadbackEpoch(memory);
   constexpr uint32_t allocation = 1 << 20;
   const auto ring = memory.SystemHeapAlloc(65536, 4096, rex::memory::kSystemHeapPhysical);
@@ -168,7 +169,7 @@ void Run(rex::system::IGraphicsSystem& gpu, rex::memory::Memory& memory,
       fp(constants + 4 + c, c == 1 ? 1.0f : 0.0f); fp(constants + 8 + c, value[c]); fp(constants + 12 + c, mulsc_operand);
       if (precision) fp(constants + 16 + c, 0.0f);
     }
-    load(vertex, textures && texture_sample ? TextureExportShader(texture_dimension, texture_unnormalized, texture_two_coordinates, texture_index) :
+    load(vertex, (textures || scaled_3d) && texture_sample ? TextureExportShader(texture_dimension, texture_unnormalized, texture_two_coordinates, texture_index) :
         precision && scalar != ucode::AluScalarOpcode::kRetainPrev ?
         ScalarExportShader(scalar) : ExportShader(vertex, dynamic, fetch));
     reg::VGT_DRAW_INITIATOR draw{}; draw.prim_type = PrimitiveType::kTriangleList;
@@ -186,7 +187,7 @@ void Run(rex::system::IGraphicsSystem& gpu, rex::memory::Memory& memory,
     return bytes;
   };
   const std::array<float, 4> data{1.25f, -2.5f, 4.0f, .75f}, changed{9, 8, 7, 6};
-  if (!precision && !textures) {
+  if (!precision && !textures && !scaled_3d) {
   const auto source = issue("VS-only incomplete triangle", ColorFormat::k_32_32_32_32_FLOAT, SurfaceNumberFormat::kFloat, data, 2, 16, raw(data, 2));
   // A cache-register poll between a GPU store and its vertex-fetch consumer
   // does not publish memory to the CPU. GPU ordering must preserve the alias.
@@ -245,7 +246,84 @@ void Run(rex::system::IGraphicsSystem& gpu, rex::memory::Memory& memory,
   set(XE_GPU_REG_PA_SC_SCREEN_SCISSOR_TL, 0); set(XE_GPU_REG_PA_SC_SCREEN_SCISSOR_BR, 16 | (16 << 16));
   set(XE_GPU_REG_PA_SC_WINDOW_SCISSOR_TL, 0x80000000); set(XE_GPU_REG_PA_SC_WINDOW_SCISSOR_BR, 16 | (16 << 16));
   vertex_fetch(memory.GetPhysicalAddress(vertices), 12); load(true, PositionShader());
-  if (precision) {
+  if (scaled_3d) {
+    texture_sample = false;
+    issue("scaled pixel MEMEXPORT control", ColorFormat::k_32_32_32_32_FLOAT,
+          SurfaceNumberFormat::kFloat, {1,1,1,1}, 1, 16, raw({1,1,1,1}), false);
+    texture_sample = true;
+    const auto render_vertices = memory.SystemHeapAlloc(4096, 4096, rex::memory::kSystemHeapPhysical);
+    const auto rect = memory.SystemHeapAlloc(4096, 4096, rex::memory::kSystemHeapPhysical);
+    const auto volume = memory.SystemHeapAlloc(16384, 4096, rex::memory::kSystemHeapPhysical);
+    Require(render_vertices && rect && volume, "scaled 3D fixture allocations");
+    const float shifted[]{-.75f,-1,.5f,1, 1.25f,-1,.5f,1, -.75f,1,.5f,1};
+    const float rectangle[]{0,0,32,0,0,32};
+    std::memcpy(memory.TranslateVirtual(render_vertices), shifted, sizeof(shifted));
+    std::memcpy(memory.TranslateVirtual(rect), rectangle, sizeof(rectangle));
+    std::memset(memory.TranslateVirtual(volume), 0, 16384);
+    fp(XE_GPU_REG_PA_CL_VPORT_XSCALE, 16); fp(XE_GPU_REG_PA_CL_VPORT_XOFFSET, 16);
+    fp(XE_GPU_REG_PA_CL_VPORT_YSCALE, -16); fp(XE_GPU_REG_PA_CL_VPORT_YOFFSET, 16);
+    set(XE_GPU_REG_PA_SC_SCREEN_SCISSOR_BR, 32 | (32 << 16));
+    set(XE_GPU_REG_PA_SC_WINDOW_SCISSOR_BR, 32 | (32 << 16));
+    set(XE_GPU_REG_PA_SU_VTX_CNTL, 1); set(XE_GPU_REG_RB_COLOR_INFO, 0);
+    reg::RB_BLENDCONTROL blend{};
+    blend.color_srcblend = blend.alpha_srcblend = BlendFactor::kOne;
+    blend.color_destblend = blend.alpha_destblend = BlendFactor::kZero;
+    set(XE_GPU_REG_RB_BLENDCONTROL0, blend.value);
+    reg::VGT_DRAW_INITIATOR draw{}; draw.source_select = SourceSelect::kAutoIndex;
+    draw.num_indices = 3;
+    auto resolve = [&](bool clear) {
+      vertex_fetch(memory.GetPhysicalAddress(rect), 6);
+      set(XE_GPU_REG_RB_MODECONTROL, uint32_t(EdramMode::kCopy));
+      set(XE_GPU_REG_RB_COPY_DEST_BASE, memory.GetPhysicalAddress(volume));
+      set(XE_GPU_REG_RB_COPY_DEST_PITCH, 32 | (32 << 16));
+      reg::RB_COPY_DEST_INFO dest{}; dest.copy_dest_array = 1;
+      dest.copy_dest_format = ColorFormat::k_8_8_8_8;
+      set(XE_GPU_REG_RB_COPY_DEST_INFO, dest.value);
+      reg::RB_COPY_CONTROL copy{}; copy.copy_command = CopyCommand(1);
+      copy.color_clear_enable = clear;
+      set(XE_GPU_REG_RB_COLOR_CLEAR, 0); set(XE_GPU_REG_RB_COLOR_CLEAR_LO, 0);
+      set(XE_GPU_REG_RB_COPY_CONTROL, copy.value);
+      draw.prim_type = PrimitiveType::kRectangleList;
+      words.insert(words.end(), {Packet(PM4_DRAW_INDX_2, 1), draw.value});
+    };
+    resolve(true);
+    vertex_fetch(memory.GetPhysicalAddress(render_vertices), 12);
+    set(XE_GPU_REG_RB_MODECONTROL, uint32_t(EdramMode::kColorDepth));
+    set(XE_GPU_REG_RB_COLOR_MASK, 15);
+    using namespace ucode;
+    const uint64_t alloc = (uint64_t(AllocType::kPsColors) << 41) | (uint64_t(ControlFlowOpcode::kAlloc) << 44);
+    const uint64_t exec = 1 | (uint64_t(1) << 12) | (uint64_t(ControlFlowOpcode::kExecEnd) << 44);
+    load(false, {uint32_t(alloc), uint32_t(alloc >> 32) | uint32_t(exec << 16), uint32_t(exec >> 16),
+        (1u << 15) | (15u << 16), 0, uint32_t(AluVectorOpcode::kMax) << 24});
+    const float color[]{.75f,.25f,.5f,1};
+    for (unsigned c = 0; c < 4; ++c) fp(XE_GPU_REG_SHADER_CONSTANT_000_X + 256 * 4 + c, color[c]);
+    draw.prim_type = PrimitiveType::kTriangleList;
+    words.insert(words.end(), {Packet(PM4_DRAW_INDX_2, 1), draw.value});
+    resolve(false);
+    set(XE_GPU_REG_RB_MODECONTROL, uint32_t(EdramMode::kColorDepth));
+    set(XE_GPU_REG_RB_COLOR_MASK, 0);
+    vertex_fetch(memory.GetPhysicalAddress(vertices), 12);
+    texture_sample = false;
+    issue("scaled pixel MEMEXPORT after resolve", ColorFormat::k_32_32_32_32_FLOAT,
+          SurfaceNumberFormat::kFloat, {1,1,1,1}, 1, 16, raw({1,1,1,1}), false);
+    texture_sample = true;
+    xe_gpu_texture_fetch_t fetch{}; fetch.type = FetchConstantType::kTexture;
+    fetch.dimension = DataDimension::k3D; fetch.format = TextureFormat::k_8_8_8_8;
+    fetch.base_address = memory.GetPhysicalAddress(volume) >> 12; fetch.pitch = 1; fetch.tiled = 1;
+    fetch.size_3d.width = fetch.size_3d.height = 31; fetch.size_3d.depth = 3;
+    fetch.swizzle = 0x688;
+    fetch.mag_filter = fetch.min_filter = fetch.mip_filter = TextureFilter::kPoint;
+    fetch.aniso_filter = AnisoFilter::kDisabled;
+    fetch.clamp_x = fetch.clamp_y = fetch.clamp_z = ClampMode::kClampToEdge;
+    for (unsigned c = 0; c < 6; ++c)
+      set(XE_GPU_REG_SHADER_CONSTANT_FETCH_00_0 + texture_index * 6 + c, reinterpret_cast<const uint32_t*>(&fetch)[c]);
+    // Check both sides of the triangle so an empty or incorrectly sized wrapper cannot pass.
+    issue("scaled 3D sampled as 2D", ColorFormat::k_32_32_32_32_FLOAT, SurfaceNumberFormat::kFloat,
+          {23.5f/32,16.5f/32,0,0}, 1, 16, raw({0,0,0,0}), false);
+    const auto unorm = [](uint32_t v) { return std::nearbyint((float(v)/255.0f)*65536.0f)/65536.0f; };
+    issue("scaled 3D painted texel", ColorFormat::k_32_32_32_32_FLOAT, SurfaceNumberFormat::kFloat,
+          {8.5f/32,16.5f/32,0,0}, 1, 16, raw({unorm(191),unorm(64),unorm(128),1}), false);
+  } else if (precision) {
     using namespace ucode;
     const AluScalarOpcode ops[]{AluScalarOpcode::kExp, AluScalarOpcode::kLog, AluScalarOpcode::kLogc,
         AluScalarOpcode::kRcp, AluScalarOpcode::kRcpc, AluScalarOpcode::kRcpf,
@@ -529,23 +607,25 @@ void Run(rex::system::IGraphicsSystem& gpu, rex::memory::Memory& memory,
 }
 X360N_PROBE_MAIN {
   try {
-    Require(argc >= 2 && argc <= 8, "usage: x360n_native_memexport_probe OUTPUT [d3d12|vulkan] [--precision|--textures] [--xenos] [--mulsc-rtz] [--point-snap] [--legacy-unorm8]");
+    Require(argc >= 2 && argc <= 8, "usage: x360n_native_memexport_probe OUTPUT [d3d12|vulkan] [--precision|--textures|--scaled-3d] [--xenos] [--mulsc-rtz] [--point-snap] [--legacy-unorm8]");
     const ProbeArg api = argc >= 3 ? argv[2] : X360N_PROBE_ARG("d3d12");
     Require(api == X360N_PROBE_ARG("d3d12") || api == X360N_PROBE_ARG("vulkan"), "invalid graphics API");
     bool precision = false, xenos = false, mulsc_rtz = false;
-    bool textures = false, snap = false, legacy_unorm8 = false;
+    bool textures = false, snap = false, legacy_unorm8 = false, scaled_3d = false;
     for (int i = 3; i < argc; ++i) {
       const ProbeArg arg = argv[i];
       if (arg == X360N_PROBE_ARG("--precision")) precision = true;
       else if (arg == X360N_PROBE_ARG("--xenos")) xenos = true;
       else if (arg == X360N_PROBE_ARG("--mulsc-rtz")) mulsc_rtz = true;
       else if (arg == X360N_PROBE_ARG("--textures")) textures = true;
+      else if (arg == X360N_PROBE_ARG("--scaled-3d")) scaled_3d = true;
       else if (arg == X360N_PROBE_ARG("--point-snap")) snap = true;
       else if (arg == X360N_PROBE_ARG("--legacy-unorm8")) legacy_unorm8 = true;
       else throw std::runtime_error("unknown MEMEXPORT probe option");
     }
     Require(!mulsc_rtz || precision, "--mulsc-rtz requires --precision");
     Require(!textures || !precision, "texture and scalar precision fixtures are separate");
+    Require(!scaled_3d || (xenos && !textures && !precision && !snap && !legacy_unorm8), "scaled 3D fixture requires only --xenos");
     Require(!(snap || legacy_unorm8) || textures, "texture options require --textures");
     const std::filesystem::path output(argv[1]); std::filesystem::create_directories(output);
     rex::InitLogging((output / "runtime.log").string().c_str());
@@ -564,6 +644,11 @@ X360N_PROBE_MAIN {
         Require(rex::cvar::SetFlagByName("native_texture_cpu", "false"), "GPU texture load path");
     }
     if (xenos) {
+      if (scaled_3d) {
+        Require(rex::cvar::SetFlagByName("resolution_scale", "2"), "scaled 3D resolution");
+        Require(rex::cvar::SetFlagByName("draw_resolution_scale_x", "2"), "scaled 3D X resolution");
+        Require(rex::cvar::SetFlagByName("draw_resolution_scale_y", "2"), "scaled 3D Y resolution");
+      }
       Require(rex::cvar::SetFlagByName("readback_memexport", "true"), "synchronous MEMEXPORT readback flag");
       Require(rex::cvar::SetFlagByName("readback_memexport_fast", "false"), "MEMEXPORT readback mode");
       Require(rex::cvar::SetFlagByName("async_shader_compilation", "false"), "synchronous shader compilation");
@@ -573,7 +658,7 @@ X360N_PROBE_MAIN {
     Require(gpu->SetupPresentation(nullptr) == X_STATUS_SUCCESS, "presentation setup");
     Require(gpu->SetupGuestGpu(runtime.function_dispatcher(), runtime.kernel_state()) == X_STATUS_SUCCESS, "guest GPU setup");
     struct Shutdown { rex::system::IGraphicsSystem* gpu; ~Shutdown() { if (gpu) gpu->Shutdown(); } } shutdown{gpu.get()};
-    Run(*gpu, *runtime.memory(), precision, mulsc_rtz, textures, snap, legacy_unorm8); gpu->Shutdown(); shutdown.gpu = nullptr; gpu.reset(); runtime.Shutdown(); rex::FlushLogging();
+    Run(*gpu, *runtime.memory(), precision, mulsc_rtz, textures, snap, legacy_unorm8, scaled_3d); gpu->Shutdown(); shutdown.gpu = nullptr; gpu.reset(); runtime.Shutdown(); rex::FlushLogging();
     return 0;
   } catch (const std::exception& error) { std::cerr << error.what() << '\n'; return 1; }
 }
