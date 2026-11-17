@@ -110,12 +110,12 @@ foreach($command in $compileCommands) {
     elseif($f -match '^<source>/external/rexglue-sdk/thirdparty/([^/]+)/') {
         if ($f.Substring('<source>/external/rexglue-sdk/'.Length) -in $scope.thirdparty_translation_units) {
             $thirdpartyUnits += $f.Substring('<source>/external/rexglue-sdk/'.Length)
-        } elseif($Matches[1] -notin @('fmt','spdlog','catch2')) { throw 'Unreviewed third-party translation unit' }
+        } elseif($Matches[1] -notin @('fmt','spdlog','catch2')) { throw "Unreviewed third-party translation unit: $f" }
     } elseif($f -match '^<build>/(.+)$') {
         # Build-generated units: SDL's precompiled header and the launcher's embedded fonts.
         if($Matches[1] -notin $scope.generated_translation_units) { throw 'Unreviewed generated translation unit' }
         $generatedUnits += $Matches[1]
-    } elseif($f -ne '<source>/tests/sdkcheck/excrypt_multiply_test.cpp' -and
+    } elseif($f -ne '<source>/tests/sdkcheck/sdk_portability_test.cpp' -and
              $f -notmatch '^<source>/(src/(desktop|supervisor|content|platform)/|tests/(supervisor|content|desktop)/)') { throw 'Unreviewed distribution translation unit' }
 }
 if(Compare-Object @($scope.sdk_translation_units | Sort-Object) @($units | Sort-Object -Unique)) { throw 'SDK extraction source scope changed' }

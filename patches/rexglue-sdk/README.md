@@ -4,7 +4,7 @@ The active chain targets stable **v0.11.0**, commit
 `a3e1d82678ca20d68d4837a8e9ee4652ff073745`. All 279 original patches are
 accounted for: 271 are ported into 253 ordered rebased entries, and eight are
 superseded by verified upstream implementations (0002, 0004, 0007, 0029,
-0126, 0127, 0212, 0251). The lock contains 280 entries, including 27 migration
+0126, 0127, 0212, 0251). The lock contains 281 entries, including 28 migration
 patches alongside the shared regressions and combined ports. Each entry records original patch hashes,
 its own hash, per-step input hashes and final source hashes. Upstream
 replacement proofs are recorded in `rexglue_sdk.upstream_equivalents`.

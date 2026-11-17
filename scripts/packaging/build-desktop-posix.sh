@@ -102,10 +102,21 @@ case "$platform" in linux-*) cxxflags="$cxxflags -stdlib=libc++" ;; esac
   -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
 "$cmake" --build "$build" --target x360-native x360n_desktop_tests -- -k 0
 # This isolated tree registers only distribution tests, never SDK/game suites.
-"$ctest" --test-dir "$build" -R desktop.catalog --no-tests=error --output-on-failure
+cp "$build/compile_commands.json" "$evidence/"
+if "$ctest" --test-dir "$build" -R desktop.catalog --no-tests=error --output-on-failure; then
+  :
+else
+  test_status=$?
+  case "$platform" in linux-*)
+    if command -v gdb >/dev/null 2>&1; then
+      timeout 30 gdb --batch -ex run -ex 'bt 16' --args \
+        "$build/src/desktop/x360n_desktop_tests" '~[update-crash]' --reporter compact || true
+    fi ;;
+  esac
+  exit "$test_status"
+fi
 "$ctest" --test-dir "$build" -R desktop.update-recovery --no-tests=error --output-on-failure
-cp "$build/$launcher" "$build/src/supervisor/x360n" "$build/src/content/x360n-extract" "$build/$mspack" \
-  "$build/compile_commands.json" "$evidence/"
+cp "$build/$launcher" "$build/src/supervisor/x360n" "$build/src/content/x360n-extract" "$build/$mspack" "$evidence/"
 "$ninja" -C "$build" -t deps > "$evidence/ninja-deps.txt"
 "$ninja" -C "$build" -t query "$launcher" src/supervisor/x360n src/content/x360n-extract "$mspack" > "$evidence/ninja-query.txt"
 {

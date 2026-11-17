@@ -1211,9 +1211,9 @@ pela My Games e gameplay continuam pendentes. [Evidência histórica](docs/repor
 ## Plataforma e dependências
 
 Windows x64/D3D12 é o ambiente demonstrado. Linux, macOS, ARM64 e Windows limpo
-continuam sem aceite funcional completo. ReXGlue v0.10.0 permanece fixado em
-`f5337cdc947ff6d4c4196737e2c807a48f2a1fc2`, LLVM 22.1.8, **201 patches ativos**
-no [lock](deps.lock.json); numeração até 0214, com retirados fora da cadeia ativa.
+continuam sem aceite funcional completo. As revisões fixadas de ReXGlue/LLVM e
+a cadeia ativa de patches estão no [lock](deps.lock.json); a migração para as
+interfaces oficiais da v0.11.0 está registrada em [D8](docs/architecture.md#6-decisões).
 O submódulo modificado pelos patches/materialização do libmspack é esperado.
 Nunca substituir módulos ou fontes originais entre versões de dashboard.
 

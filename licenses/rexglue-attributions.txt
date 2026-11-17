@@ -3200,3 +3200,42 @@ Original file headers from ReXGlue v0.11.0 a3e1d82678ca20d68d4837a8e9ee4652ff073
 
 --- src/filesystem/host_file_posix.cpp ---
 
+
+--- src/base/memory_posix.h ---
+/**
+ * @file        base/memory_posix.h
+ *
+ * @copyright   Copyright (c) 2026 Tom Clay <tomc@tctechstuff.com>
+ *              All rights reserved.
+ *
+ * @license     BSD 3-Clause License
+ *              See LICENSE file in the project root for full license text.
+ */
+
+--- src/base/proc_map.h ---
+/**
+ * @file        base/proc_map.h
+ *
+ * @copyright   Copyright (c) 2026 Tom Clay <tomc@tctechstuff.com>
+ *              All rights reserved.
+ *
+ * @license     BSD 3-Clause License
+ *              See LICENSE file in the project root for full license text.
+ */
+
+--- src/base/signal_context.h ---
+/**
+ * @file        base/signal_context.h
+ *
+ * @copyright   Copyright (c) 2026 Tom Clay <tomc@tctechstuff.com>
+ *              All rights reserved.
+ *
+ * @license     BSD 3-Clause License
+ *              See LICENSE file in the project root for full license text.
+ */
+
+--- src/base/exception_context_win.h ---
+// Copyright 2015 Ben Vanik. All rights reserved.
+// Released under the BSD license; see LICENSE in the SDK root.
+// Adapted for ReXGlue and x360-native: shared Windows native context mapping.
+

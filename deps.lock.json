@@ -6619,7 +6619,7 @@
         },
         "original_patches": {},
         "note": "Restricts the x64-only MSVC _umul128 intrinsic to x64. ARM64 uses the existing exact unsigned __int128 or 32-bit limb implementation; cryptographic arithmetic is unchanged.",
-        "test": "tests/sdkcheck/excrypt_multiply_test.cpp; Windows ARM64 native CI and focused ARM64 cross-compile negative control"
+        "test": "tests/sdkcheck/sdk_portability_test.cpp; Windows ARM64 native CI and focused ARM64 cross-compile negative control"
       },
       {
         "file": "patches/rexglue-sdk/0327-preserve-existing-simde-windows-macros.patch",
@@ -6632,7 +6632,24 @@
         },
         "original_patches": {},
         "note": "The non-SSE Windows SIMDe path preserves an existing NOMINMAX definition. Fixes the official SDK Windows ARM64 -Werror build without suppressing warnings or changing SIMD operations.",
-        "test": "tests/sdkcheck/excrypt_multiply_test.cpp [content-crypto]; Windows ARM64 byte_swap.cpp build and focused ARM64 preprocessor negative control"
+        "test": "tests/sdkcheck/sdk_portability_test.cpp [content-crypto]; Windows ARM64 byte_swap.cpp build and focused ARM64 preprocessor negative control"
+      },
+      {
+        "file": "patches/rexglue-sdk/0328-map-native-windows-exception-contexts.patch",
+        "sha256": "c5857f32e81b13dcb4bffa6a2fb3de8722c17efc0d4de9750c4e8d5ec41ebd0c",
+        "base_files": {
+          "src/base/exception_handler_win.cpp": "8d9ed7fa6660d84dd3e5a1be8e1912eb30fe834f36bc2fecc46b103003bbc04b",
+          "src/base/crash_win.cpp": "6041325d1f830e26f5aca9f70ac5b2a7412ea372542092ca5c1b3ce3e904ac6e",
+          "src/base/exception_context_win.h": ""
+        },
+        "files": {
+          "src/base/exception_handler_win.cpp": "6d8859ae3d352b34a7ae9f715a059c3331b6cc764290638a66fb411a71f75de8",
+          "src/base/crash_win.cpp": "0794e2d7a6b076e0bb8462a199debc137fafb11fd21beef42dcde18525dbd6f6",
+          "src/base/exception_context_win.h": "fd42f6458bb3c282de07e46bd404ca405ec2a9ba220a441702e6ca46be46ce95"
+        },
+        "original_patches": {},
+        "note": "Shares canonical Windows context mapping between vectored exceptions and fatal reports. Preserves x64 register ordering and sparse writeback; adds ARM64 X0-X30, SP/PC, PSTATE, FPSR/FPCR and all 32 V registers without a second runtime.",
+        "test": "tests/sdkcheck/sdk_portability_test.cpp [windows-context]; native Windows x64/ARM64 distribution CI and focused cross-compile negative control"
       }
     ],
     "upstream_equivalents": [

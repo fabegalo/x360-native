@@ -1,0 +1,154 @@
+diff --git a/src/base/exception_handler_win.cpp b/src/base/exception_handler_win.cpp
+--- a/src/base/exception_handler_win.cpp
++++ b/src/base/exception_handler_win.cpp
+@@ -14,6 +14,7 @@
+ #if REX_PLATFORM_WIN32
+ 
+ #include "platform_win.h"
++#include "exception_context_win.h"
+ 
+ #include <algorithm>
+ #include <iterator>
+@@ -43,13 +44,7 @@
+     return EXCEPTION_CONTINUE_SEARCH;
+   }
+ 
+-  HostThreadContext thread_context;
+-  thread_context.rip = ex_info->ContextRecord->Rip;
+-  thread_context.eflags = ex_info->ContextRecord->EFlags;
+-  std::memcpy(thread_context.int_registers, &ex_info->ContextRecord->Rax,
+-              sizeof(thread_context.int_registers));
+-  std::memcpy(thread_context.xmm_registers, &ex_info->ContextRecord->Xmm0,
+-              sizeof(thread_context.xmm_registers));
++  auto thread_context = detail::CaptureWindowsContext(*ex_info->ContextRecord);
+ 
+   Exception ex;
+   switch (ex_info->ExceptionRecord->ExceptionCode) {
+@@ -79,21 +74,7 @@
+ 
+   for (size_t i = 0; i < rex::CountOf(g_handlers) && g_handlers[i].fn; ++i) {
+     if (g_handlers[i].fn(&ex, g_handlers[i].data)) {
+-      ex_info->ContextRecord->Rip = thread_context.rip;
+-      ex_info->ContextRecord->EFlags = thread_context.eflags;
+-      u32 modified_register_index;
+-      u16 modified_int_registers_remaining = ex.GetModifiedIntRegisters();
+-      while (rex::bit_scan_forward(modified_int_registers_remaining, &modified_register_index)) {
+-        modified_int_registers_remaining &= ~(UINT16_C(1) << modified_register_index);
+-        (&ex_info->ContextRecord->Rax)[modified_register_index] =
+-            thread_context.int_registers[modified_register_index];
+-      }
+-      u16 modified_xmm_registers_remaining = ex.GetModifiedXMMRegisters();
+-      while (rex::bit_scan_forward(modified_xmm_registers_remaining, &modified_register_index)) {
+-        modified_xmm_registers_remaining &= ~(UINT16_C(1) << modified_register_index);
+-        std::memcpy(&ex_info->ContextRecord->Xmm0 + modified_register_index,
+-                    &thread_context.xmm_registers[modified_register_index], sizeof(VectorRegister));
+-      }
++      detail::ApplyWindowsContext(*ex_info->ContextRecord, ex);
+       return EXCEPTION_CONTINUE_EXECUTION;
+     }
+   }
+diff --git a/src/base/crash_win.cpp b/src/base/crash_win.cpp
+--- a/src/base/crash_win.cpp
++++ b/src/base/crash_win.cpp
+@@ -12,6 +12,7 @@
+ 
+ #include "base/crash_report.h"
+ #include "platform_win.h"
++#include "exception_context_win.h"
+ 
+ namespace rex::platform {
+ 
+@@ -74,16 +75,16 @@
+     detail::WaitForOtherReport();
+     return EXCEPTION_CONTINUE_SEARCH;
+   }
+-  HostThreadContext context{};
+-  context.rip = info->ContextRecord->Rip;
+-  context.eflags = info->ContextRecord->EFlags;
+-  std::memcpy(context.int_registers, &info->ContextRecord->Rax, sizeof(context.int_registers));
+-  std::memcpy(context.xmm_registers, &info->ContextRecord->Xmm0, sizeof(context.xmm_registers));
++  auto context = detail::CaptureWindowsContext(*info->ContextRecord);
+ 
+   detail::FaultReport fault;
+   fault.kind = ExceptionName(code);
+   fault.code = code;
++#if REX_ARCH_ARM64
++  fault.pc = context.pc;
++#else
+   fault.pc = context.rip;
++#endif
+   fault.context = &context;
+   if ((code == EXCEPTION_ACCESS_VIOLATION || code == EXCEPTION_IN_PAGE_ERROR) &&
+       info->ExceptionRecord->NumberParameters >= 2) {
+diff --git a/src/base/exception_context_win.h b/src/base/exception_context_win.h
+new file mode 100644
+--- /dev/null
++++ b/src/base/exception_context_win.h
+@@ -0,0 +1,67 @@
++// Copyright 2015 Ben Vanik. All rights reserved.
++// Released under the BSD license; see LICENSE in the SDK root.
++// Adapted for ReXGlue and x360-native: shared Windows native context mapping.
++#pragma once
++
++#include <cstring>
++#include <rex/bit.h>
++#include <rex/platform/exception_handler.h>
++#include "platform_win.h"
++
++namespace rex::platform::detail {
++inline HostThreadContext CaptureWindowsContext(const CONTEXT& native) {
++  HostThreadContext context{};
++#if REX_ARCH_AMD64
++  context.rip = native.Rip;
++  context.eflags = native.EFlags;
++  std::memcpy(context.int_registers, &native.Rax, sizeof(context.int_registers));
++  std::memcpy(context.xmm_registers, &native.Xmm0, sizeof(context.xmm_registers));
++#elif REX_ARCH_ARM64
++  static_assert(sizeof(context.x) == sizeof(native.X));
++  static_assert(sizeof(context.v) == sizeof(native.V));
++  std::memcpy(context.x, native.X, sizeof(context.x));
++  context.sp = native.Sp;
++  context.pc = native.Pc;
++  context.pstate = native.Cpsr;
++  context.fpsr = native.Fpsr;
++  context.fpcr = native.Fpcr;
++  std::memcpy(context.v, native.V, sizeof(context.v));
++#endif
++  return context;
++}
++
++inline void ApplyWindowsContext(CONTEXT& native, const Exception& exception) {
++  const auto& context = *exception.GetThreadContext();
++  u32 index;
++#if REX_ARCH_AMD64
++  native.Rip = context.rip;
++  native.EFlags = context.eflags;
++  u16 integers = exception.GetModifiedIntRegisters();
++  while (rex::bit_scan_forward(integers, &index)) {
++    integers &= ~(UINT16_C(1) << index);
++    (&native.Rax)[index] = context.int_registers[index];
++  }
++  u16 vectors = exception.GetModifiedXMMRegisters();
++  while (rex::bit_scan_forward(vectors, &index)) {
++    vectors &= ~(UINT16_C(1) << index);
++    std::memcpy(&native.Xmm0 + index, &context.xmm_registers[index], sizeof(VectorRegister));
++  }
++#elif REX_ARCH_ARM64
++  native.Pc = context.pc;
++  native.Sp = context.sp;
++  native.Cpsr = static_cast<DWORD>(context.pstate);
++  native.Fpsr = context.fpsr;
++  native.Fpcr = context.fpcr;
++  u32 integers = exception.GetModifiedXRegisters();
++  while (rex::bit_scan_forward(integers, &index)) {
++    integers &= ~(UINT32_C(1) << index);
++    native.X[index] = context.x[index];
++  }
++  u32 vectors = exception.GetModifiedVRegisters();
++  while (rex::bit_scan_forward(vectors, &index)) {
++    vectors &= ~(UINT32_C(1) << index);
++    std::memcpy(&native.V[index], &context.v[index], sizeof(VectorRegister));
++  }
++#endif
++}
++}  // namespace rex::platform::detail
