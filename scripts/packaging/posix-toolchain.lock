@@ -14,3 +14,7 @@ linux-arm64 cmake 3.31.6 b4cc788d63112b2749b40627e719eb5d3b8ed8f00c36d77189f4019
 linux-arm64 ninja 1.13.1 740f1b9f9d8ae68438240a6a2f3f7a27fc8b1946d2024a6a6b25857ee877987b . https://github.com/ninja-build/ninja/releases/download/v1.13.1/ninja-linux-aarch64.zip
 macos-x64 cmake 3.31.6 330b9514f5112e5ed4fb08b8b05803b776fd9b539a6ae12927d14dcc0ee2ba8d cmake-3.31.6-macos-universal/CMake.app/Contents https://github.com/Kitware/CMake/releases/download/v3.31.6/cmake-3.31.6-macos-universal.tar.gz
 macos-x64 ninja 1.13.1 da7797794153629aca5570ef7c813342d0be214ba84632af886856e8f0063dd9 . https://github.com/ninja-build/ninja/releases/download/v1.13.1/ninja-mac.zip
+
+# The official v0.11 SDK requires Vulkan 1.4.313 headers on x64. Loader stays system-provided.
+linux-x64 vulkan-headers 1.4.313 b8ecff98de9039824d24353a7bfc1cea0751c2e356420ebee10ce2fd2895fb6d Vulkan-Headers-e5323cdea4ed92dfe825397f6047b8604a40423c https://github.com/KhronosGroup/Vulkan-Headers/archive/e5323cdea4ed92dfe825397f6047b8604a40423c.tar.gz
+linux-arm64 vulkan-headers 1.4.313 b8ecff98de9039824d24353a7bfc1cea0751c2e356420ebee10ce2fd2895fb6d Vulkan-Headers-e5323cdea4ed92dfe825397f6047b8604a40423c https://github.com/KhronosGroup/Vulkan-Headers/archive/e5323cdea4ed92dfe825397f6047b8604a40423c.tar.gz

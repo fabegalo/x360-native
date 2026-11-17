@@ -1,5 +1,26 @@
 # Load the verified SDK and its official project/codegen contract.
+function(x360n_configure_sdk_toolchain)
+    if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64" AND
+       CMAKE_CXX_COMPILER_ID STREQUAL "Clang" AND NOT REXGLUE_LLD)
+        get_filename_component(_compiler_bin "${CMAKE_CXX_COMPILER}" DIRECTORY)
+        if(EXISTS "${_compiler_bin}/ld.lld")
+            # The pinned portable LLVM need not be installed in the host PATH.
+            set(REXGLUE_LLD "${_compiler_bin}/ld.lld" PARENT_SCOPE)
+        endif()
+    endif()
+    if(CMAKE_SYSTEM_NAME STREQUAL "Windows")
+        get_filename_component(_root "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/../.." ABSOLUTE)
+        file(READ "${_root}/deps.lock.json" _lock)
+        string(JSON _vulkan_version GET "${_lock}" vulkan_headers version)
+        set(_vulkan_config "${_root}/.local/toolchains/vulkan-${_vulkan_version}/vulkan.cmake")
+        if(EXISTS "${_vulkan_config}")
+            include("${_vulkan_config}")
+        endif()
+    endif()
+endfunction()
+
 macro(x360n_setup_rexglue name)
+    x360n_configure_sdk_toolchain()
     if(X360N_SHARED_SDK_EXPORT)
         enable_language(C)
         foreach(_property COMPILE_OPTIONS COMPILE_DEFINITIONS INCLUDE_DIRECTORIES LINK_OPTIONS)

@@ -6607,6 +6607,19 @@
         "test": "tests/sdkcheck/vmsum/main.cpp; official ppc_tests exact hardware reference cases",
         "file": "patches/rexglue-sdk/0325-select-fast-vector-math-for-recompiler-regressions.patch",
         "original_patches": {}
+      },
+      {
+        "file": "patches/rexglue-sdk/0326-select-portable-wide-multiply-on-arm64.patch",
+        "sha256": "1dea20ccb6a85786a1aa46fa4294be911886a988622a2e402d055a3fd0dd44f8",
+        "base_files": {
+          "thirdparty/excrypt/src/fp61.hpp": "f28e9e1a536423b1020abc9234f2944e3c2069c32bb434986479b32f02f144cc"
+        },
+        "files": {
+          "thirdparty/excrypt/src/fp61.hpp": "cb0fbe3261c2fd3ce175790b5a82a6014383bcbfd15f26daa154cb27697cb1de"
+        },
+        "original_patches": {},
+        "note": "Restricts the x64-only MSVC _umul128 intrinsic to x64. ARM64 uses the existing exact unsigned __int128 or 32-bit limb implementation; cryptographic arithmetic is unchanged.",
+        "test": "tests/sdkcheck/excrypt_multiply_test.cpp; Windows ARM64 native CI and focused ARM64 cross-compile negative control"
       }
     ],
     "upstream_equivalents": [
@@ -6742,5 +6755,29 @@
   "msvc": {
     "note": "Not downloaded. Clang targets x86_64-pc-windows-msvc and uses the installed MSVC STL/CRT and Windows SDK through vcvars64.bat.",
     "tested_with": "VS 2022 BuildTools 17.14.41, MSVC 14.44.35207, Windows SDK 10.0.26100.0"
+  },
+  "vulkan_headers": {
+    "id": "vulkan_headers",
+    "version": "1.4.313",
+    "commit": "e5323cdea4ed92dfe825397f6047b8604a40423c",
+    "asset": "Vulkan-Headers-e5323cdea4ed92dfe825397f6047b8604a40423c.tar.gz",
+    "url": "https://github.com/KhronosGroup/Vulkan-Headers/archive/e5323cdea4ed92dfe825397f6047b8604a40423c.tar.gz",
+    "sha256": "b8ecff98de9039824d24353a7bfc1cea0751c2e356420ebee10ce2fd2895fb6d",
+    "size": 2636127,
+    "prefix": "Vulkan-Headers-e5323cdea4ed92dfe825397f6047b8604a40423c",
+    "license": "Apache-2.0",
+    "note": "Official stable source; private build prerequisite, never a replacement GPU renderer or driver."
+  },
+  "vulkan_loader": {
+    "id": "vulkan_loader",
+    "version": "1.4.313",
+    "commit": "fb78607414e154c7a5c01b23177ba719c8a44909",
+    "asset": "Vulkan-Loader-fb78607414e154c7a5c01b23177ba719c8a44909.tar.gz",
+    "url": "https://github.com/KhronosGroup/Vulkan-Loader/archive/fb78607414e154c7a5c01b23177ba719c8a44909.tar.gz",
+    "sha256": "efd889311dc3022358b83b2452aea9b181e9484deea3ec33befc343d8074077a",
+    "size": 1758839,
+    "prefix": "Vulkan-Loader-fb78607414e154c7a5c01b23177ba719c8a44909",
+    "license": "Apache-2.0",
+    "note": "Official stable source; private build prerequisite, never a replacement GPU renderer or driver."
   }
 }

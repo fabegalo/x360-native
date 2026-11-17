@@ -92,6 +92,8 @@ endif()
 # Pinned revision: deps.lock.json / .gitmodules. We do not run the SDK install
 # target: it writes HKCU\Software\Kitware\CMake\Packages\rexglue.
 set(X360_REXGLUE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/external/rexglue-sdk")
+include(cmake/sdk/x360n_title_sdk.cmake)
+x360n_configure_sdk_toolchain()
 if(NOT EXISTS "${X360_REXGLUE_DIR}/CMakeLists.txt")
     message(FATAL_ERROR "ReXGlue SDK missing at ${X360_REXGLUE_DIR}. Run: git submodule update --init --recursive")
 endif()

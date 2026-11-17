@@ -147,3 +147,5 @@ Veja `app/workspace/docs/reports/maintenance/LICENSE_AUDIT.md` (ou `docs/reports
 para evidências, obrigações e limites da auditoria. O mantenedor autorizou a
 primeira pre-release pública; essa decisão não modifica as licenças aplicáveis
 nem concede direitos sobre arquivos originais Xbox ou componentes Microsoft.
+
+Linux distribution builds use the C++23 libc++ and libc++abi from the same pinned LLVM 22.1.8 archive. Their Apache-2.0 WITH LLVM-exception and legacy notices are preserved in `licenses/libcxx.txt` and `licenses/libcxxabi.txt`; the glibc 2.35 floor remains checked during packaging.

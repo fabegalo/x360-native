@@ -180,6 +180,9 @@ if ($LASTEXITCODE -ne 0) { throw 'SDK patch verification failed.' }
 Stage 'prepare LLVM'
 & (Join-Path $PSScriptRoot 'setup/bootstrap-llvm.ps1') -AllowDownloads:$AllowDownloads
 if ($LASTEXITCODE -ne 0) { throw 'LLVM preparation failed.' }
+Stage 'prepare Vulkan build prerequisites'
+& (Join-Path $PSScriptRoot 'setup/bootstrap-vulkan.ps1') -AllowDownloads:$AllowDownloads
+if ($LASTEXITCODE -ne 0) { throw 'Vulkan build prerequisite preparation failed.' }
 $pending = Join-Path $root '.local/dependency-update.pending'
 if (Test-Path -LiteralPath $pending) { Remove-Item -LiteralPath $pending }
 # Every tool now runs from its verified extraction, and reuse checks that

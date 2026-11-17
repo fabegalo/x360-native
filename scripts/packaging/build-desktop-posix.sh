@@ -64,7 +64,7 @@ linux-x64 | linux-arm64)
   export PKG_CONFIG_SYSROOT_DIR="$sysroot"
   export PKG_CONFIG_LIBDIR="$sysroot/usr/lib/$triplet/pkgconfig:$sysroot/usr/share/pkgconfig:$sysroot/usr/lib/pkgconfig"
   # The C++ runtime is linked statically, like the static CRT on Windows; glibc stays the system's.
-  links="-fuse-ld=lld -static-libstdc++ -static-libgcc"
+  links="-fuse-ld=lld -stdlib=libc++ -static-libstdc++ -static-libgcc"
   set -- "-DCMAKE_SYSROOT=$sysroot" "-DCMAKE_AR=$llvm/bin/llvm-ar" "-DCMAKE_RANLIB=$llvm/bin/llvm-ranlib" \
     "-DPKG_CONFIG_EXECUTABLE=$pkgconfig" "-DWAYLAND_SCANNER=$scanner"
   launcher=src/desktop/x360-native mspack=src/content/libx360n-mspack.so ;;
@@ -92,10 +92,12 @@ fi
 export PATH="$(dirname "$cxx"):$tools/cmake/bin:$tools/ninja:/usr/bin:/bin"
 unset CPATH LIBRARY_PATH C_INCLUDE_PATH CPLUS_INCLUDE_PATH LD_LIBRARY_PATH
 flags="$flags -ffile-prefix-map=$source=/x360-source"
+cxxflags="$flags"
+case "$platform" in linux-*) cxxflags="$cxxflags -stdlib=libc++" ;; esac
 "$cmake" -S "$source" -B "$build" -G Ninja -DX360_DESKTOP_ONLY=ON -DX360_DISTRIBUTION=ON \
   "-DX360_PACKAGE_PAYLOAD_SHA256=$payload" "-DX360_VERSION=$version" -DCMAKE_BUILD_TYPE=Release \
   "-DCMAKE_C_COMPILER=$cc" "-DCMAKE_CXX_COMPILER=$cxx" "-DCMAKE_MAKE_PROGRAM=$ninja" "$@" \
-  "-DCMAKE_C_FLAGS=$flags" "-DCMAKE_CXX_FLAGS=$flags" "-DCMAKE_EXE_LINKER_FLAGS=$links" "-DCMAKE_SHARED_LINKER_FLAGS=$links" \
+  "-DCMAKE_C_FLAGS=$flags" "-DCMAKE_CXX_FLAGS=$cxxflags" "-DCMAKE_EXE_LINKER_FLAGS=$links" "-DCMAKE_SHARED_LINKER_FLAGS=$links" \
   -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
 "$cmake" --build "$build" --target x360-native x360n_desktop_tests -- -k 0
 # This isolated tree registers only distribution tests, never SDK/game suites.

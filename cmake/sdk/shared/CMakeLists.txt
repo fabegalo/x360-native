@@ -23,6 +23,8 @@ if(X360N_PARALLEL_PROBES AND WIN32 AND CMAKE_GENERATOR STREQUAL "Ninja" AND
    NOT CMAKE_TOOLCHAIN_FILE AND NOT CMAKE_TRY_COMPILE_PLATFORM_VARIABLES AND NOT CMAKE_PROJECT_SDL3_INCLUDE)
     set(CMAKE_PROJECT_SDL3_INCLUDE "${X360N_ROOT}/cmake/build/x360n_parallel_probes.cmake")
 endif()
+include("${X360N_ROOT}/cmake/sdk/x360n_title_sdk.cmake")
+x360n_configure_sdk_toolchain()
 add_subdirectory("${REXSDK_DIR}" rexglue-sdk)
 include("${X360N_ROOT}/cmake/sdk/x360n_sdk_backports.cmake")
 x360n_apply_sdk_backports("${REXSDK_DIR}")

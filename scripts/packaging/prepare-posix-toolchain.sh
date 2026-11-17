@@ -16,7 +16,12 @@ dest=$(cd "$dest" && pwd)
 sha256() { if command -v sha256sum >/dev/null 2>&1; then sha256sum "$1" | cut -d' ' -f1; else shasum -a 256 "$1" | cut -d' ' -f1; fi; }
 tr -d '\r' < "$lock" | grep -v '^#' | awk -v p="$platform" '$1 == p && NF == 6' | while read -r _ id version sha root url; do
   receipt="$dest/$id/.x360n-sha256"
-  if [ -f "$receipt" ] && [ "$(cat "$receipt")" = "$sha" ]; then echo "$id $version: cached"; continue; fi
+  if [ -f "$receipt" ] && [ "$(cat "$receipt")" = "$sha" ]; then
+    if [ "$id" != llvm ] || { [ -f "$dest/llvm/include/c++/v1/format" ] &&
+         [ -f "$dest/llvm/include/c++/v1/print" ] && find "$dest/llvm/lib" -name 'libc++.a' | grep -q .; }; then
+      echo "$id $version: cached"; continue
+    fi
+  fi
   rm -rf "$dest/$id" "$dest/.work"
   mkdir -p "$dest/.work/x"
   archive="$dest/.work/$(basename "$url")"
@@ -29,14 +34,19 @@ tr -d '\r' < "$lock" | grep -v '^#' | awk -v p="$platform" '$1 == p && NF == 6' 
       # full LLVM tree is several GB. Missing members are caught by the checks below.
       xz -dc "$archive" | tar -x -C "$dest/.work/x" --wildcards --no-anchored -f - \
         'bin/clang' 'bin/clang++' 'bin/clang-[0-9]*' 'bin/lld' 'bin/ld.lld' 'bin/llvm-ar' 'bin/llvm-ranlib' \
-        'bin/llvm-nm' 'bin/llvm-readobj' 'bin/llvm-readelf' 'bin/llvm-objcopy' 'bin/llvm-strip' 'lib/clang/*' || true ;;
+        'bin/llvm-nm' 'bin/llvm-readobj' 'bin/llvm-readelf' 'bin/llvm-objcopy' 'bin/llvm-strip' 'lib/clang/*' \
+        'include/c++/*' 'include/*/c++/*' 'lib/libc++*' 'lib/*/libc++*' || true ;;
     *) tar -xzf "$archive" -C "$dest/.work/x" ;;
   esac
   if [ "$root" = . ]; then mv "$dest/.work/x" "$dest/$id"; else mv "$dest/.work/x/$root" "$dest/$id"; fi
   rm -rf "$dest/.work"
   case "$id" in
     llvm) for tool in clang clang++ ld.lld llvm-ar llvm-ranlib llvm-readobj; do "$dest/llvm/bin/$tool" --version >/dev/null; done
+          [ -f "$dest/llvm/include/c++/v1/format" ] && [ -f "$dest/llvm/include/c++/v1/print" ] ||
+            { echo 'Pinned LLVM C++23 runtime headers missing' >&2; exit 4; }
+          find "$dest/llvm/lib" -name 'libc++.a' | grep -q . || { echo 'Pinned static libc++ missing' >&2; exit 4; }
           "$dest/llvm/bin/clang++" --version | head -n 1 | grep -q " $version" || { echo "LLVM version differs from the lock" >&2; exit 4; } ;;
+    vulkan-headers) [ -f "$dest/vulkan-headers/include/vulkan/vulkan_core.h" ] || { echo 'Pinned Vulkan headers missing' >&2; exit 4; } ;;
     cmake) "$dest/cmake/bin/cmake" --version | head -n 1 | grep -q " $version$" || { echo "CMake version differs from the lock" >&2; exit 4; } ;;
     ninja) [ "$("$dest/ninja/ninja" --version)" = "$version" ] || { echo "Ninja version differs from the lock" >&2; exit 4; } ;;
   esac

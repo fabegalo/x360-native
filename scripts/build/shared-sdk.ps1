@@ -145,6 +145,13 @@ function Get-SharedSdk([string]$Root, [string]$Project, [string]$TitleBuild) {
         foreach ($tool in @('cmake-3.31.6','ninja-1.13.1','python-3.14.8','mingit-2.56.0.2')) {
             $files += @(Get-SharedSdkFiles (Join-Path $Root ".local/toolchains/$tool"))
         }
+        $vulkanLock = ([IO.File]::ReadAllText((Join-Path $Root 'deps.lock.json')) | ConvertFrom-Json).vulkan_headers
+        $vulkan = Join-Path $Root ('.local/toolchains/vulkan-' + $vulkanLock.version)
+        if (Test-BuildFile (Join-Path $vulkan 'vulkan.cmake')) {
+            $files += @(Get-SharedSdkFiles (Join-Path $vulkan 'source'))
+            $files += @((Join-Path $vulkan 'vulkan.cmake'), (Join-Path $Root 'scripts/setup/bootstrap-vulkan.ps1'))
+            $files += @(Get-ChildItem -LiteralPath $vulkan -Filter vulkan-1.lib -Recurse -File | ForEach-Object FullName)
+        }
         $sdkHead = (& git -C $sdk rev-parse HEAD).Trim()
         $lockedHead = ([IO.File]::ReadAllText((Join-Path $Root 'deps.lock.json')) | ConvertFrom-Json).rexglue_sdk.commit
         if ($LASTEXITCODE -or $sdkHead -ne $lockedHead) { throw 'Shared SDK revision differs from the lock' }

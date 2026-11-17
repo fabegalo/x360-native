@@ -56,7 +56,8 @@
                 "CMAKE_CXX_COMPILER": "${sourceDir}/.local/toolchains/posix-linux-x64/llvm/bin/clang++",
                 "CMAKE_MAKE_PROGRAM": "${sourceDir}/.local/toolchains/posix-linux-x64/ninja/ninja",
                 "CMAKE_C_FLAGS": "-march=x86-64-v2",
-                "CMAKE_CXX_FLAGS": "-march=x86-64-v2"
+                "CMAKE_CXX_FLAGS": "-march=x86-64-v2",
+                "Vulkan_INCLUDE_DIR": "${sourceDir}/.local/toolchains/posix-linux-x64/vulkan-headers/include"
             },
             "condition": {
                 "type": "equals",
@@ -74,7 +75,8 @@
                 "CMAKE_CXX_COMPILER": "${sourceDir}/.local/toolchains/posix-linux-arm64/llvm/bin/clang++",
                 "CMAKE_MAKE_PROGRAM": "${sourceDir}/.local/toolchains/posix-linux-arm64/ninja/ninja",
                 "CMAKE_C_FLAGS": "-march=armv8-a",
-                "CMAKE_CXX_FLAGS": "-march=armv8-a"
+                "CMAKE_CXX_FLAGS": "-march=armv8-a",
+                "Vulkan_INCLUDE_DIR": "${sourceDir}/.local/toolchains/posix-linux-arm64/vulkan-headers/include"
             },
             "condition": {
                 "type": "equals",

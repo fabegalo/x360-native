@@ -461,7 +461,7 @@ $metadata = [ordered]@{
 }
 if ($linux) {
     $metadata.configuration = 'Release'; $metadata.desktop_only = $true; $metadata.relative_source_paths = $true
-    $metadata.compiler_flags = "-march=$isa -ffile-prefix-map=<source>=/x360-source"; $metadata.linker_flags = '-fuse-ld=lld -static-libstdc++ -static-libgcc'
+    $metadata.compiler_flags = "-march=$isa -ffile-prefix-map=<source>=/x360-source -stdlib=libc++"; $metadata.linker_flags = '-fuse-ld=lld -stdlib=libc++ -static-libstdc++ -static-libgcc'
     $metadata.glibc_minimum = $glibc.ToString(); $metadata.sysroot = [ordered]@{ distribution = 'ubuntu-22.04'; lock_sha256 = $sysrootLock }
     $metadata.publication = $Publication; $metadata.clean_linux = 'pending'
 } elseif ($mac) {

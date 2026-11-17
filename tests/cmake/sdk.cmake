@@ -4,6 +4,13 @@ add_test(NAME sdkcheck.sdk-version-source COMMAND ${CMAKE_COMMAND}
   -DWORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/sdk-version-source
   -P ${CMAKE_CURRENT_SOURCE_DIR}/sdkcheck/sdk_version_source_test.cmake)
 set_tests_properties(sdkcheck.sdk-version-source PROPERTIES LABELS project TIMEOUT 60)
+add_test(NAME sdkcheck.sdk-linker COMMAND ${CMAKE_COMMAND}
+  -DROOT=${PROJECT_SOURCE_DIR} -DWORK=${CMAKE_CURRENT_BINARY_DIR}/sdk-linker
+  -P ${CMAKE_CURRENT_SOURCE_DIR}/sdkcheck/sdk_linker_test.cmake)
+set_tests_properties(sdkcheck.sdk-linker PROPERTIES LABELS project TIMEOUT 10)
+add_test(NAME sdkcheck.patch-line-endings COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/sdkcheck/patch_line_endings_test.py)
+set_tests_properties(sdkcheck.patch-line-endings PROPERTIES LABELS project TIMEOUT 10)
 if(WIN32)
   add_executable(x360n_display_overlay_shader_check tools/display_overlay_shader_check.cpp)
   target_link_libraries(x360n_display_overlay_shader_check PRIVATE d3dcompiler)

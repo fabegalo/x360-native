@@ -3054,3 +3054,149 @@ Original file headers from ReXGlue v0.11.0 a3e1d82678ca20d68d4837a8e9ee4652ff073
 
 --- src/ui/overlay/image_decode.cpp ---
 
+
+--- src/base/clock_posix.cpp ---
+
+
+--- src/base/crash_posix.cpp ---
+/**
+ * @file        base/crash_posix.cpp
+ *
+ * @copyright   Copyright (c) 2026 Tom Clay <tomc@tctechstuff.com>
+ *              All rights reserved.
+ *
+ * @license     BSD 3-Clause License
+ *              See LICENSE file in the project root for full license text.
+ */
+
+--- src/base/dbg_posix.cpp ---
+/**
+ ******************************************************************************
+ * Xenia : Xbox 360 Emulator Research Project                                 *
+ ******************************************************************************
+ * Copyright 2017 Ben Vanik. All rights reserved.                             *
+ * Released under the BSD license - see LICENSE in the root for more details. *
+ ******************************************************************************
+ *
+ * @modified    Tom Clay & Rien Gupta, 2026 - Adapted for ReXGlue runtime (POSIX + macOS)
+ */
+
+--- src/base/dynlib_posix.cpp ---
+
+
+--- src/base/exception_handler_posix.cpp ---
+/**
+ ******************************************************************************
+ * Xenia : Xbox 360 Emulator Research Project                                 *
+ ******************************************************************************
+ * Copyright 2022 Ben Vanik. All rights reserved.                             *
+ * Released under the BSD license - see LICENSE in the root for more details. *
+ ******************************************************************************
+ *
+ * @modified    Tom Clay & Rien Gupta, 2026 - Adapted for ReXGlue runtime (POSIX + macOS)
+ */
+
+--- src/base/fiber_posix.cpp ---
+
+
+--- src/base/instance_lock_posix.cpp ---
+/**
+ * @file        base/instance_lock_posix.cpp
+ *
+ * @copyright   Copyright (c) 2026 Tom Clay <tomc@tctechstuff.com>
+ *              All rights reserved.
+ *
+ * @license     BSD 3-Clause License
+ *              See LICENSE file in the project root for full license text.
+ */
+
+--- src/base/log_sink_posix.cpp ---
+/**
+ * @file        base/log_sink_posix.cpp
+ *
+ * @copyright   Copyright (c) 2026 Tom Clay <tomc@tctechstuff.com>
+ *              All rights reserved.
+ *
+ * @license     BSD 3-Clause License
+ *              See LICENSE file in the project root for full license text.
+ */
+
+--- src/base/mapped_memory_posix.cpp ---
+/**
+ ******************************************************************************
+ * Xenia : Xbox 360 Emulator Research Project                                 *
+ ******************************************************************************
+ * Copyright 2020 Ben Vanik. All rights reserved.                             *
+ * Released under the BSD license - see LICENSE in the root for more details. *
+ ******************************************************************************
+ *
+ * @modified    Tom Clay & Rien Gupta, 2026 - Adapted for ReXGlue runtime (POSIX + macOS)
+ */
+
+--- src/base/memory_posix.cpp ---
+/**
+ ******************************************************************************
+ * Xenia : Xbox 360 Emulator Research Project                                 *
+ ******************************************************************************
+ * Copyright 2020 Ben Vanik. All rights reserved.                             *
+ * Released under the BSD license - see LICENSE in the root for more details. *
+ ******************************************************************************
+ *
+ * @modified    Tom Clay & Rien Gupta, 2026 - Adapted for ReXGlue runtime (POSIX + macOS)
+ *
+ * @modified    Tom Clay, 2026 - Adapted for ReXGlue runtime
+ */
+
+--- src/base/platform/console_posix.cpp ---
+
+
+--- src/base/platform/env_posix.cpp ---
+
+
+--- src/base/platform/file_posix.cpp ---
+
+
+--- src/base/process_resources_posix.cpp ---
+/**
+ * @file        base/process_resources_posix.cpp
+ *
+ * @copyright   Copyright (c) 2026 Tom Clay <tomc@tctechstuff.com>
+ *              All rights reserved.
+ *
+ * @license     BSD 3-Clause License
+ *              See LICENSE file in the project root for full license text.
+ */
+
+--- src/base/relaunch_posix.cpp ---
+/**
+ * @file        base/relaunch_posix.cpp
+ *
+ * @copyright   Copyright (c) 2026 Tom Clay <tomc@tctechstuff.com>
+ *              All rights reserved.
+ *
+ * @license     BSD 3-Clause License
+ *              See LICENSE file in the project root for full license text.
+ */
+
+--- src/base/socket_posix.cpp ---
+
+
+--- src/base/system_posix.cpp ---
+
+
+--- src/base/threading_posix.cpp ---
+/**
+ * @file        base/threading_posix.cpp
+ *
+ * @copyright   Copyright (c) 2026 Tom Clay <tomc@tctechstuff.com>
+ *              All rights reserved.
+ *
+ * @license     BSD 3-Clause License
+ *              See LICENSE file in the project root for full license text.
+ */
+
+--- src/base/utf8_posix.cpp ---
+
+
+--- src/filesystem/host_file_posix.cpp ---
+

@@ -1,0 +1,12 @@
+diff --git a/thirdparty/excrypt/src/fp61.hpp b/thirdparty/excrypt/src/fp61.hpp
+--- a/thirdparty/excrypt/src/fp61.hpp
++++ b/thirdparty/excrypt/src/fp61.hpp
+@@ -73,7 +73,7 @@
+   return (middle << 32) | static_cast<uint32_t>(p00);
+ }
+ 
+-#if defined(_MSC_VER) && defined(_WIN64)
++#if defined(_MSC_VER) && defined(_M_X64)
+ // Visual Studio 64-bit
+ 
+ # include <intrin.h>

@@ -1,5 +1,6 @@
 param([string]$Root = (Resolve-Path "$PSScriptRoot/../..").Path)
 $ErrorActionPreference = 'Stop'
+$env:PSModulePath = Join-Path $PSHOME 'Modules'
 # VsDevCmd otherwise starts an asynchronous telemetry process inheriting each
 # redirected log. Keep this short fixture synchronous without changing the host.
 $env:VSCMD_SKIP_SENDTELEMETRY = '1'

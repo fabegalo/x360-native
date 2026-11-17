@@ -41,6 +41,23 @@ def git(*args: str, quiet: bool = False) -> int:
     return result.returncode
 
 
+def normalize_line_endings(patches: list) -> None:
+    """Canonicalize CRLF only when the exact LF bytes match a locked boundary."""
+    known = {}
+    for patch in patches:
+        for field in ("base_files", "files"):
+            for name, digest in patch.get(field, {}).items():
+                known.setdefault(name, set()).add(digest)
+    for name, digests in known.items():
+        path = SDK / name
+        if not path.is_file():
+            continue
+        data = path.read_bytes()
+        normalized = data.replace(b"\r\n", b"\n")
+        if normalized != data and hashlib.sha256(normalized).hexdigest() in digests:
+            path.write_bytes(normalized)
+
+
 def applied_prefix(patches: list) -> int:
     """Largest n such that the tracked files equal the state after patch n."""
     snapshot = {}
@@ -92,6 +109,10 @@ def main() -> int:
         files = patch["files"]
         return bool(files) and all(sha256(SDK / name) == digest for name, digest in files.items())
 
+    if not options.check and not options.revert:
+        for patch in patches:
+            patch_path(patch)
+        normalize_line_endings(patches)
     prefix = 0 if options.revert else applied_prefix(patches)
     bad = 0
     ordered = list(reversed(patches)) if options.revert else patches

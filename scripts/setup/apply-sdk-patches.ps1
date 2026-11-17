@@ -53,6 +53,32 @@ function GitSdk([string[]]$gitArgs, [switch]$Quiet) {
 }
 function IsApplied([string]$path) { (GitSdk @('apply', '--reverse', '--check', $path) -Quiet) -eq 0 }
 
+if (-not $Check -and -not $Revert) {
+    foreach ($p in $patches) { [void](PatchPath $p) }
+    $known = @{}
+    foreach ($p in $patches) {
+        foreach ($field in @('base_files','files')) {
+            foreach ($f in $p.$field.PSObject.Properties) {
+                if (-not $known.ContainsKey($f.Name)) { $known[$f.Name] = [Collections.Generic.HashSet[string]]::new() }
+                [void]$known[$f.Name].Add($f.Value)
+            }
+        }
+    }
+    $sha = [Security.Cryptography.SHA256]::Create()
+    try {
+        foreach ($name in $known.Keys) {
+            $path = Join-Path $sdk $name
+            if (-not [IO.File]::Exists($path)) { continue }
+            $text = [Text.Encoding]::UTF8.GetString([IO.File]::ReadAllBytes($path))
+            if (-not $text.Contains("`r`n")) { continue }
+            $bytes = [Text.Encoding]::UTF8.GetBytes($text.Replace("`r`n","`n"))
+            $digest = ([BitConverter]::ToString($sha.ComputeHash($bytes))).Replace('-','').ToLowerInvariant()
+            # Preserve every edit whose exact bytes are not a locked boundary.
+            if ($known[$name].Contains($digest)) { [IO.File]::WriteAllBytes($path,$bytes) }
+        }
+    } finally { $sha.Dispose() }
+}
+
 # The lock records the final hashes after every patch, including patches not yet
 # applied to this checkout. When extending the chain, earlier reverse-checks can
 # fail because their context was changed by another already-applied patch. Match
