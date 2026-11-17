@@ -6620,6 +6620,19 @@
         "original_patches": {},
         "note": "Restricts the x64-only MSVC _umul128 intrinsic to x64. ARM64 uses the existing exact unsigned __int128 or 32-bit limb implementation; cryptographic arithmetic is unchanged.",
         "test": "tests/sdkcheck/excrypt_multiply_test.cpp; Windows ARM64 native CI and focused ARM64 cross-compile negative control"
+      },
+      {
+        "file": "patches/rexglue-sdk/0327-preserve-existing-simde-windows-macros.patch",
+        "sha256": "fd5db55e3e4f2357f8207e8122ca3f615aecd42216fd574cca662f8eb6047dd5",
+        "base_files": {
+          "thirdparty/simde/simde/x86/sse.h": "885b6fc1fbcafc00e87d1e1eee190039b5a71c7ab48c048802b67b9fb8850fa8"
+        },
+        "files": {
+          "thirdparty/simde/simde/x86/sse.h": "d23b1a45d6ab31711166501fb00af14667bb934902da4c582957324b4cbe4ffe"
+        },
+        "original_patches": {},
+        "note": "The non-SSE Windows SIMDe path preserves an existing NOMINMAX definition. Fixes the official SDK Windows ARM64 -Werror build without suppressing warnings or changing SIMD operations.",
+        "test": "tests/sdkcheck/excrypt_multiply_test.cpp [content-crypto]; Windows ARM64 byte_swap.cpp build and focused ARM64 preprocessor negative control"
       }
     ],
     "upstream_equivalents": [

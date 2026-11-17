@@ -2,6 +2,17 @@
 #include <array>
 #include <cstdint>
 #include "../../external/rexglue-sdk/thirdparty/excrypt/src/fp61.hpp"
+#include "../../external/rexglue-sdk/thirdparty/simde/simde/x86/ssse3.h"
+
+TEST_CASE("portable byte shuffle preserves guest big-endian words", "[content-crypto]") {
+  constexpr std::array<uint8_t,16> input{0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15};
+  constexpr std::array<uint8_t,16> expected{3,2,1,0,7,6,5,4,11,10,9,8,15,14,13,12};
+  const auto value=simde_mm_loadu_si128(reinterpret_cast<const simde__m128i*>(input.data()));
+  const auto mask=simde_mm_loadu_si128(reinterpret_cast<const simde__m128i*>(expected.data()));
+  std::array<uint8_t,16> actual{};
+  simde_mm_storeu_si128(reinterpret_cast<simde__m128i*>(actual.data()),simde_mm_shuffle_epi8(value,mask));
+  CHECK(actual==expected);
+}
 
 TEST_CASE("wide crypto multiplication preserves carries and full-width products", "[content-crypto]") {
   struct Product { uint64_t a, b, high, low; };

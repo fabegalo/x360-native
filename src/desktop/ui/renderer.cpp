@@ -1,4 +1,5 @@
 #include "renderer.h"
+#include <algorithm>
 #include <imgui_impl_sdlgpu3.h>
 #include "soft_raster.h"
 

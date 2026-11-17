@@ -1,0 +1,14 @@
+diff --git a/thirdparty/simde/simde/x86/sse.h b/thirdparty/simde/simde/x86/sse.h
+--- a/thirdparty/simde/simde/x86/sse.h
++++ b/thirdparty/simde/simde/x86/sse.h
+@@ -34,7 +34,9 @@
+ #include "../simde-f16.h"
+ 
+ #if defined(_WIN32) && !defined(SIMDE_X86_SSE_NATIVE) && defined(_MSC_VER)
+-  #define NOMINMAX
++  #if !defined(NOMINMAX)
++    #define NOMINMAX
++  #endif
+   #include <windows.h>
+ #endif
+ 
