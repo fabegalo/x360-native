@@ -242,24 +242,24 @@ X360N_PROBE_MAIN {
     };
     if constexpr (kXenos) {
       if (requested == X360N_PROBE_ARG("d3d12"))
-        setting("d3d12_debug", "true");
+        setting("gpu.d3d12.debug", "true");
       else
-        setting("vulkan_validation_enabled", "true");
-      setting("occlusion_query", "strict");
-      setting("occlusion_query_full_counters", "true");
-      setting("async_shader_compilation", "false");
-      setting(requested == X360N_PROBE_ARG("d3d12") ? "render_target_path_d3d12" : "render_target_path_vulkan",
+        setting("gpu.vulkan.validation", "true");
+      setting("gpu.xenos.occlusion_query", "strict");
+      setting("gpu.xenos.occlusion_query_full_counters", "true");
+      setting("gpu.xenos.async_shader_compilation", "false");
+      setting(requested == X360N_PROBE_ARG("d3d12") ? "gpu.d3d12.render_target_path" : "gpu.vulkan.render_target_path",
           requested == X360N_PROBE_ARG("d3d12") ? "rov" : "fsi");
     }
     bool extended_edram = false;
     if(argc==4 && ProbeArg(argv[3]) == X360N_PROBE_ARG("extended")) {
       extended_edram = true;
-      setting("edram_tile_count", "extended");
+      setting("gpu.xenos.edram_tile_count", "extended");
     } else if(argc==4) {
       const auto variant=ProbeArg(argv[3]);
       Require(requested==X360N_PROBE_ARG("d3d12") &&
           (variant==X360N_PROBE_ARG("striped") || variant==X360N_PROBE_ARG("scalar")),"invalid counter variant");
-      setting("native_d3d12_striped_sample_counts",variant==X360N_PROBE_ARG("striped")?"true":"false");
+      setting("gpu.native.d3d12_striped_sample_counts",variant==X360N_PROBE_ARG("striped")?"true":"false");
     }
     x360n::GPUProbeApp app(output, kXenos ? "rexgpu-xenos-"+std::string(backend) : "rexgpu-native",
         kXenos ? std::string(backend) : "native-"+std::string(backend));

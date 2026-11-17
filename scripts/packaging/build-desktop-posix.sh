@@ -66,6 +66,7 @@ linux-x64 | linux-arm64)
   # The C++ runtime is linked statically, like the static CRT on Windows; glibc stays the system's.
   links="-fuse-ld=lld -stdlib=libc++ -static-libstdc++ -static-libgcc"
   set -- "-DCMAKE_SYSROOT=$sysroot" "-DCMAKE_AR=$llvm/bin/llvm-ar" "-DCMAKE_RANLIB=$llvm/bin/llvm-ranlib" \
+    '-DCMAKE_CXX_STANDARD_LIBRARIES=-Wl,-Bstatic -lc++abi -Wl,-Bdynamic' \
     "-DPKG_CONFIG_EXECUTABLE=$pkgconfig" "-DWAYLAND_SCANNER=$scanner"
   launcher=src/desktop/x360-native mspack=src/content/libx360n-mspack.so ;;
 macos-arm64 | macos-x64)

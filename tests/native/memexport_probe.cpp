@@ -638,23 +638,24 @@ X360N_PROBE_MAIN {
     auto setting=[&](std::string_view name,std::string_view value) {
       options.emplace_back("--"+std::string(name)+"="+std::string(value));
     };
-    setting("mulsc_round_toward_zero", mulsc_rtz ? "true" : "false");
+    setting("gpu.xenos.mulsc_round_toward_zero", mulsc_rtz ? "true" : "false");
     if (textures) {
-      setting("texture_point_snap", snap ? "true" : "false");
-      setting("dxbc_unorm8_fixed16", legacy_unorm8 ? "true" : "false");
+      setting("gpu.xenos.texture_point_snap", snap ? "true" : "false");
+      Require(!legacy_unorm8 || api == X360N_PROBE_ARG("d3d12"), "legacy UNORM8 is a DXBC option");
+      if (api == X360N_PROBE_ARG("d3d12"))
+        setting("gpu.d3d12.dxbc_unorm8_fixed16", legacy_unorm8 ? "true" : "false");
       if (!xenos && api == X360N_PROBE_ARG("d3d12"))
-        setting("native_texture_cpu", "false");
+        setting("gpu.native.texture_cpu", "false");
     }
     if (xenos) {
       if (scaled_3d) {
-        setting("resolution_scale", "2");
-        setting("draw_resolution_scale_x", "2");
-        setting("draw_resolution_scale_y", "2");
+        setting("gpu.resolution_scale_x", "2");
+        setting("gpu.resolution_scale_y", "2");
       }
-      setting("readback_memexport", "true");
-      setting("readback_memexport_fast", "false");
-      setting("async_shader_compilation", "false");
-      setting(api == X360N_PROBE_ARG("d3d12") ? "render_target_path_d3d12" : "render_target_path_vulkan",
+      setting("gpu.xenos.readback_memexport", "true");
+      setting("gpu.xenos.readback_memexport_fast", "false");
+      setting("gpu.xenos.async_shader_compilation", "false");
+      setting(api == X360N_PROBE_ARG("d3d12") ? "gpu.d3d12.render_target_path" : "gpu.vulkan.render_target_path",
           api == X360N_PROBE_ARG("d3d12") ? "rov" : "fsi");
     }
     x360n::GPUProbeApp app(output, xenos ? "rexgpu-xenos-"+std::string(backend) : "rexgpu-native",

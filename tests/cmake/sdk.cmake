@@ -8,6 +8,10 @@ add_test(NAME sdkcheck.sdk-linker COMMAND ${CMAKE_COMMAND}
   -DROOT=${PROJECT_SOURCE_DIR} -DWORK=${CMAKE_CURRENT_BINARY_DIR}/sdk-linker
   -P ${CMAKE_CURRENT_SOURCE_DIR}/sdkcheck/sdk_linker_test.cmake)
 set_tests_properties(sdkcheck.sdk-linker PROPERTIES LABELS project TIMEOUT 10)
+if(PYTHON_EXECUTABLE)
+  set(Python3_EXECUTABLE "${PYTHON_EXECUTABLE}")
+endif()
+find_package(Python3 REQUIRED COMPONENTS Interpreter)
 add_test(NAME sdkcheck.patch-line-endings COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/sdkcheck/patch_line_endings_test.py)
 set_tests_properties(sdkcheck.patch-line-endings PROPERTIES LABELS project TIMEOUT 10)

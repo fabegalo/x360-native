@@ -1584,7 +1584,7 @@
       "original": "https://raw.githubusercontent.com/llvm/llvm-project/llvmorg-22.1.8/libcxx/LICENSE.TXT",
       "license_file": "licenses/libcxx.txt",
       "scope": "binary (Linux)",
-      "integration": "Pinned LLVM C++23 headers and static libc++ with its statically incorporated libc++abi, built against the existing glibc 2.35 sysroot.",
+      "integration": "Pinned LLVM C++23 headers, static libc++ and explicitly linked static libc++abi; Linux distributions use the existing glibc 2.35 sysroot.",
       "obligations": "Preserve the complete upstream license, LLVM exceptions and legacy notices.",
       "license_sha256": "539dd7aed86e8a4f12cbdd0e6c50c189c7d74847e4fecc64ce2c6ee3a01da38b"
     },
@@ -1596,7 +1596,7 @@
       "original": "https://raw.githubusercontent.com/llvm/llvm-project/llvmorg-22.1.8/libcxxabi/LICENSE.TXT",
       "license_file": "licenses/libcxxabi.txt",
       "scope": "binary (Linux)",
-      "integration": "Pinned LLVM C++23 headers and static libc++ with its statically incorporated libc++abi, built against the existing glibc 2.35 sysroot.",
+      "integration": "Pinned LLVM C++23 headers, static libc++ and explicitly linked static libc++abi; Linux distributions use the existing glibc 2.35 sysroot.",
       "obligations": "Preserve the complete upstream license, LLVM exceptions and legacy notices.",
       "license_sha256": "e2b35be49f7284a45b7baca8fc7b3ab7440e7902392b2528a457816b5bb2a15c"
     },

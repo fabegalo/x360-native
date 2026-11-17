@@ -16,9 +16,9 @@ foreach(run RANGE 0 1)
   endif()
   execute_process(COMMAND "${PROBE}" "${OUTPUT}" d3d12 6 --xenos
       --pipeline-cache --no-sample-counts --draws 64 --resolves 1
-      --edram-base "${edram_base}" "edram_tile_count=${CAPACITY}"
-      render_target_path_d3d12=rov async_shader_compilation=false
-      readback_resolve=full d3d12_pipeline_creation_threads=2
+      --edram-base "${edram_base}" "gpu.xenos.edram_tile_count=${CAPACITY}"
+      gpu.d3d12.render_target_path=rov gpu.xenos.async_shader_compilation=false
+      gpu.xenos.readback_resolve=full gpu.d3d12.pipeline_creation_threads=2
       WORKING_DIRECTORY "${probe_directory}" TIMEOUT 75
       RESULT_VARIABLE result OUTPUT_VARIABLE out ERROR_VARIABLE err)
   file(WRITE "${OUTPUT}/current.log" "${out}${err}")

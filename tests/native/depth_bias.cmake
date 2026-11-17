@@ -22,11 +22,11 @@ foreach(backend IN LISTS backends)
     if(format STREQUAL "rgba16f")
       list(APPEND flags --color64)
     endif()
-    list(APPEND flags depth_bias_shader_offset=true depth_float24_convert_in_pixel_shader=true)
+    list(APPEND flags gpu.xenos.depth_bias_shader_offset=true gpu.xenos.depth_float24_convert_in_pixel_shader=true)
     if(mode STREQUAL "round")
-      list(APPEND flags depth_float24_round=true)
+      list(APPEND flags gpu.xenos.depth_float24_round=true)
     else()
-      list(APPEND flags depth_float24_round=false)
+      list(APPEND flags gpu.xenos.depth_float24_round=false)
     endif()
     if(backend MATCHES "^xenos")
       list(PREPEND flags --xenos)
@@ -34,8 +34,8 @@ foreach(backend IN LISTS backends)
       if(backend STREQUAL "xenos-host")
         set(path ${host})
       endif()
-      list(APPEND flags render_target_path_${API}=${path}
-          async_shader_compilation=false readback_resolve=full)
+      list(APPEND flags gpu.${API}.render_target_path=${path}
+          gpu.xenos.async_shader_compilation=false gpu.xenos.readback_resolve=full)
     endif()
     execute_process(COMMAND "${PROBE}" "${OUTPUT}" "${API}" 7 ${flags}
         WORKING_DIRECTORY "${probe_directory}" TIMEOUT 75
@@ -50,9 +50,9 @@ foreach(backend IN LISTS backends)
 endforeach()
 if(XENOS)
   execute_process(COMMAND "${PROBE}" "${OUTPUT}" "${API}" 7 --xenos --depth-bias
-      render_target_path_${API}=${host} depth_bias_shader_offset=false
-      depth_float24_convert_in_pixel_shader=true depth_float24_round=false
-      async_shader_compilation=false readback_resolve=full
+      gpu.${API}.render_target_path=${host} gpu.xenos.depth_bias_shader_offset=false
+      gpu.xenos.depth_float24_convert_in_pixel_shader=true gpu.xenos.depth_float24_round=false
+      gpu.xenos.async_shader_compilation=false gpu.xenos.readback_resolve=full
       WORKING_DIRECTORY "${probe_directory}" TIMEOUT 75
       RESULT_VARIABLE result OUTPUT_VARIABLE out ERROR_VARIABLE err)
   if(API STREQUAL "d3d12")

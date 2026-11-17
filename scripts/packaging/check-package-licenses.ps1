@@ -115,7 +115,8 @@ foreach($command in $compileCommands) {
         # Build-generated units: SDL's precompiled header and the launcher's embedded fonts.
         if($Matches[1] -notin $scope.generated_translation_units) { throw 'Unreviewed generated translation unit' }
         $generatedUnits += $Matches[1]
-    } elseif($f -notmatch '^<source>/(src/(desktop|supervisor|content|platform)/|tests/(supervisor|content|desktop)/)') { throw 'Unreviewed distribution translation unit' }
+    } elseif($f -ne '<source>/tests/sdkcheck/excrypt_multiply_test.cpp' -and
+             $f -notmatch '^<source>/(src/(desktop|supervisor|content|platform)/|tests/(supervisor|content|desktop)/)') { throw 'Unreviewed distribution translation unit' }
 }
 if(Compare-Object @($scope.sdk_translation_units | Sort-Object) @($units | Sort-Object -Unique)) { throw 'SDK extraction source scope changed' }
 if(Compare-Object @($scope.thirdparty_translation_units | Sort-Object) @($thirdpartyUnits | Sort-Object -Unique)) { throw 'Third-party source scope changed' }

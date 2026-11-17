@@ -235,7 +235,7 @@ function(x360n_depth_alias api)
     set(name native.depth-alias-${api}-${path})
     add_test(NAME ${name} COMMAND x360n_native_frame_probe
         ${CMAKE_CURRENT_BINARY_DIR}/depth-alias ${api} 7 --xenos --depth-alias
-        readback_resolve=full async_shader_compilation=false render_target_path_${api}=${path})
+        gpu.xenos.readback_resolve=full gpu.xenos.async_shader_compilation=false gpu.${api}.render_target_path=${path})
     set_tests_properties(${name} PROPERTIES LABELS project TIMEOUT 90 RUN_SERIAL TRUE)
   endforeach()
 endfunction()
