@@ -20,7 +20,8 @@ namespace crypto {
 #if !defined(_WIN32) || defined(X360N_CONTENT_TEST_EXCRYPT)
 std::vector<uint8_t> AesCbcDecrypt(const uint8_t* key16, const uint8_t* data, size_t len) {
   std::vector<uint8_t> out(data, data + len);
-  EXCRYPT_AES_STATE state;
+  // ExCrypt's AES-NI key schedule uses aligned SIMD loads and stores.
+  alignas(16) EXCRYPT_AES_STATE state;
   ExCryptAesKey(&state, key16);
   uint8_t previous[16] = {};
   for (size_t at = 0; at + 16 <= len; at += 16) {
