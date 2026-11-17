@@ -109,8 +109,10 @@ else
   test_status=$?
   case "$platform" in linux-*)
     if command -v gdb >/dev/null 2>&1; then
-      timeout 30 gdb --batch -ex run -ex 'bt 16' --args \
+      timeout 30 gdb -nx --batch -ex run -ex 'bt 16' --args \
         "$build/src/desktop/x360n_desktop_tests" '~[update-crash]' --reporter compact || true
+    else
+      echo 'GDB unavailable: no native failure backtrace collected' >&2
     fi ;;
   esac
   exit "$test_status"

@@ -129,6 +129,13 @@ jobs:
           key: windows-tool-archives-${{ runner.arch }}-${{ hashFiles('deps.lock.json', 'scripts/setup/desktop-tools.lock.json', 'scripts/prepare-tools.ps1', 'scripts/setup/bootstrap-llvm.ps1', 'scripts/setup/download-tools.ps1', 'scripts/setup/host-platform.ps1') }}
       - name: Prepare pinned distribution dependencies
         run: .github/scripts/prepare-release.ps1
+      - name: Prepare Linux failure backtraces
+        if: matrix.platform == 'linux-x64'
+        shell: bash
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends gdb
+          gdb --version | head -n 1
       - name: Record toolchain versions
         run: |
           if ($env:PACKAGE_PLATFORM -like 'windows-*') {
